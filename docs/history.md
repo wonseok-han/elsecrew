@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (시안의 이동 가능한 채팅 탐색 패널 연결)
+
+- 직전ee76401은 시각 대조/시작 화면 수정 진척이다. 실제 HEAD/사용자 dirty를 확인하고 상단 가로 채팅 strip을 독립 chats dock panel로 옮겼다. 기본3열은 왼쪽 채팅·파일·변경 탭/가운데 편집기/오른쪽 팀 대화이며 채팅도 기존 drag/drop·키보드 이동·크기/접기/집중 기능을 공유한다. 제목은2줄/상태는별도줄, 새 채팅은 패널 하단이다. 데이터·권한·대화 수명은 바꾸지 않았다.
+- 저장 배치 payload를 version2로 확장하되 기존 storage key를 유지한다. version1의 split 비율/선택 탭/순서를 보존하고 files 그룹에 chats만 추가하며 flat 구형도 기존4열을 유지한다. 집중 보기 중에는 새 탭을 숨겨 방해하지 않고 복귀 때 복원한다. 새 채팅 modal 종료 시 숨겨진 채팅 패널을 먼저 열고 버튼 포커스를 복구한다.
+- Karpathy/React 지침으로 기존 dock·stable panel parent를 재사용했다. tsc/diff PASS, dock17 PASS(구형→신형 재저장/최소 폭/집중 복원/모든 이동 partition 포함). Chrome의 제목 레이아웃 검사는 새 세로 배치에 맞췄으나 전체 UI/drag·focus 실제 검사는 후속 묶음에 남긴다. 제품/시안 전체 합격은 아니다.
+- 다음은 프로젝트 rail·설정 배치 시안 반영과 묶음 UI 검증, 비계측 성능/Claude 실연결/G6·Windows/출시다. 사용자 archive21줄 보존, 계정·원본 실행/main·push 없음. 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (시안 시각 대조·시작 화면 행동 가시성)
 
 - 직전49088d7은 새 채팅/역할 설정 왕복과 실제 화면 검증 진척이다. HEAD/dirty를 확인하고 기존 smoke preload와 production renderer를 사용하는 외부 통신 차단/숨김 창 캡처 도구 tests/m5-ui-capture.cjs를 추가했다. sidecar/계정/공급자 실행 없이 시작·작업대·설정·두 로컬 시안을 PNG로 남긴다. 최초 렌더 대기 null 오류와 sandbox iframe paint/허용 경로를 고쳤고 비교 이미지를 직접 확인했다.

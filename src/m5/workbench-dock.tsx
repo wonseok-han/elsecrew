@@ -5,9 +5,9 @@ import { defaultDockLayout, DOCK_STORAGE_KEY, dockGeometry, focusDockPanel, PANE
 const dragType = "application/x-hello-agent-panel";
 const position = (rect: DockRect): CSSProperties => ({ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` });
 
-export function WorkbenchDock({ children, conversation, reveal }: { children: ReactNode[]; conversation?: ReactNode; reveal?: { panel: DockPanel } | null }) {
+export function WorkbenchDock({ children, conversation, chats, reveal }: { children: ReactNode[]; conversation?: ReactNode; chats?: ReactNode; reveal?: { panel: DockPanel } | null }) {
   const { t } = useI18n();
-  const labels: Record<DockPanel, string> = { files: t("m5.dock.files"), editor: t("m5.dock.editor"), changes: t("m5.dock.changes"), conversation: t("m5.dock.conversation") };
+  const labels: Record<DockPanel, string> = { files: t("m5.dock.files"), editor: t("m5.dock.editor"), changes: t("m5.dock.changes"), conversation: t("m5.dock.conversation"), chats: t("m5.navigation.chatTitle") };
   const placements: Record<DockPlacement, string> = { left: t("m5.dock.left"), right: t("m5.dock.right"), top: t("m5.dock.top"), bottom: t("m5.dock.bottom"), tab: t("m5.dock.tab") };
   const [layout, setLayout] = useState(() => { try { return parseDockLayout(localStorage.getItem(DOCK_STORAGE_KEY)); } catch { return defaultDockLayout(); } });
   const [drop, setDrop] = useState<{ target: DockPanel; placement: DockPlacement } | null>(null);
@@ -20,7 +20,7 @@ export function WorkbenchDock({ children, conversation, reveal }: { children: Re
   const resizing = useRef<{ coordinate: number; size: number; ratio: number; path: string; axis: string; layout: DockLayout } | null>(null);
   useEffect(() => { try { localStorage.setItem(DOCK_STORAGE_KEY, JSON.stringify(layout)); } catch { /* In-memory layout remains usable. */ } }, [layout]);
   useEffect(() => { if (reveal) { resizing.current = null; setLayout(current => revealDockPanel(current, reveal.panel)); } }, [reveal]);
-  const panels: Record<DockPanel, ReactNode> = { files: children[0], editor: children[1], changes: children[2], conversation };
+  const panels: Record<DockPanel, ReactNode> = { files: children[0], editor: children[1], changes: children[2], conversation, chats };
   const available = PANEL_IDS.filter(id => Boolean(panels[id]));
   const eligible = visibleDockPanels(layout, available);
   const { groups, separators } = dockGeometry(layout, available);

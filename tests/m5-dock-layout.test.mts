@@ -3,6 +3,23 @@ import test from "node:test";
 import { revealDockPanel, restoreDockPanels } from "../src/m5/dock-layout.ts";
 import { activeDockTab, defaultDockLayout, dockGeometry, focusDockPanel, moveDockPanel, PANEL_IDS, parseDockLayout, placeDockPanel, resizeDockPanels, resizeDockSplit, selectDockTab, toggleDockPanel, visibleDockPanels, type DockPlacement } from "../src/m5/dock-layout.ts";
 
+test("four-panel saved layouts gain chats without resetting split geometry or focus", () => {
+  const legacy = { version: 1, order: ["files", "editor", "changes", "conversation"], widths: { files: .08, editor: .5, changes: .16, conversation: .26 },
+    tree: { type: "split", axis: "vertical", ratio: .37, first: { type: "tabs", panels: ["files", "changes"], active: "changes" }, second: { type: "tabs", panels: ["editor", "conversation"], active: "editor" } } };
+  const migrated = parseDockLayout(JSON.stringify(legacy));
+  assert.equal(migrated.version, 2);
+  assert.deepEqual(migrated.tree, { ...legacy.tree, first: { ...legacy.tree.first, panels: ["files", "changes", "chats"] } });
+  assert.deepEqual(parseDockLayout(JSON.stringify(migrated)), migrated);
+  assert.ok(Object.values(migrated.widths).every(width => width >= .08));
+  const focused = parseDockLayout(JSON.stringify({ ...legacy, hidden: ["files", "changes", "conversation"], hiddenBeforeFocus: [] }));
+  assert.deepEqual(visibleDockPanels(focused, PANEL_IDS), ["editor"]);
+  assert.ok(visibleDockPanels(restoreDockPanels(focused), PANEL_IDS).includes("chats"));
+  const { tree: _tree, ...flat } = legacy;
+  const migratedFlat = parseDockLayout(JSON.stringify(flat));
+  assert.equal(dockGeometry(migratedFlat, PANEL_IDS).groups.length, 4);
+  assert.deepEqual(parseDockLayout(JSON.stringify(migratedFlat)), migratedFlat);
+});
+
 test("focus preserves previous visibility across reload and repeated focus", () => {
   const initial = toggleDockPanel(defaultDockLayout(), "changes", PANEL_IDS);
   const focused = focusDockPanel(focusDockPanel(initial, "editor"), "conversation");
@@ -21,12 +38,12 @@ test("new workspaces start with three columns and a shared files/changes group",
   const initial = defaultDockLayout();
   const geometry = dockGeometry(initial, PANEL_IDS);
   assert.equal(geometry.groups.length, 3);
-  assert.deepEqual(geometry.groups[0].panels, ["files", "changes"]);
-  assert.equal(geometry.groups[0].active, "files");
+  assert.deepEqual(geometry.groups[0].panels, ["chats", "files", "changes"]);
+  assert.equal(geometry.groups[0].active, "chats");
   assert.equal(dockGeometry(revealDockPanel(initial, "changes"), PANEL_IDS).groups[0].active, "changes");
   const { tree: _tree, ...legacy } = initial;
   assert.deepEqual(parseDockLayout(JSON.stringify(legacy)), legacy);
-  assert.equal(dockGeometry(legacy, PANEL_IDS).groups.length, 4);
+  assert.equal(dockGeometry(legacy, PANEL_IDS).groups.length, 5);
 });
 
 test("nested split and tab groups preserve all panels and round-trip", () => {
@@ -47,7 +64,7 @@ test("explicit navigation reveals a hidden panel and selects its existing tab wi
   const revealed = revealDockPanel(focused, "editor");
   assert.deepEqual(revealed.order, focused.order);
   assert.deepEqual(revealed.widths, focused.widths);
-  assert.deepEqual(revealed.hidden, ["changes", "conversation"]);
+  assert.deepEqual(revealed.hidden, ["changes", "conversation", "chats"]);
   assert.equal(dockGeometry(revealed, PANEL_IDS).groups[0].active, "editor");
   assert.deepEqual(parseDockLayout(JSON.stringify(revealed)), revealed);
   const legacy = revealDockPanel({ ...defaultDockLayout(), tree: undefined, tabbed: true, activeTab: "files" }, "editor");
@@ -153,10 +170,10 @@ test("vertical layout round-trips with resizing, movement and visibility intact"
 test("panel movement in either direction preserves widths and all identities", () => {
   const initial = defaultDockLayout();
   const moved = moveDockPanel(initial, "files", "changes");
-  assert.deepEqual(moved.order, ["editor", "changes", "files", "conversation"]);
+  assert.deepEqual(moved.order, ["editor", "changes", "files", "conversation", "chats"]);
   assert.deepEqual(moveDockPanel(moved, "files", "editor").order, initial.order);
   assert.deepEqual(moved.widths, initial.widths);
-  assert.deepEqual(initial.order, ["files", "editor", "changes", "conversation"]);
+  assert.deepEqual(initial.order, ["files", "editor", "changes", "conversation", "chats"]);
 });
 test("resize clamps both neighbours without changing total or other panels", () => {
   const initial = defaultDockLayout();

@@ -1,15 +1,15 @@
-export const PANEL_IDS = ["files", "editor", "changes", "conversation"] as const;
+export const PANEL_IDS = ["files", "editor", "changes", "conversation", "chats"] as const;
 export type DockPanel = typeof PANEL_IDS[number];
 export type DockNode = { type: "tabs"; panels: DockPanel[]; active: DockPanel } | { type: "split"; axis: "horizontal" | "vertical"; ratio: number; first: DockNode; second: DockNode };
-export interface DockLayout { version: 1; order: DockPanel[]; widths: Record<DockPanel, number>; hidden?: DockPanel[]; hiddenBeforeFocus?: DockPanel[]; direction?: "horizontal" | "vertical"; tabbed?: boolean; activeTab?: DockPanel; tree?: DockNode }
+export interface DockLayout { version: 2; order: DockPanel[]; widths: Record<DockPanel, number>; hidden?: DockPanel[]; hiddenBeforeFocus?: DockPanel[]; direction?: "horizontal" | "vertical"; tabbed?: boolean; activeTab?: DockPanel; tree?: DockNode }
 export const DOCK_STORAGE_KEY = "hello-agent.m5.dock.v1";
 export function defaultDockLayout(): DockLayout {
   return {
-    version: 1, order: [...PANEL_IDS],
-    widths: { files: .17, editor: .36, changes: .21, conversation: .26 },
+    version: 2, order: [...PANEL_IDS],
+    widths: { files: .14, editor: .32, changes: .18, conversation: .24, chats: .12 },
     tree: {
       type: "split", axis: "horizontal", ratio: .22,
-      first: { type: "tabs", panels: ["files", "changes"], active: "files" },
+      first: { type: "tabs", panels: ["chats", "files", "changes"], active: "chats" },
       second: {
         type: "split", axis: "horizontal", ratio: .6,
         first: { type: "tabs", panels: ["editor"], active: "editor" },
@@ -21,27 +21,39 @@ export function defaultDockLayout(): DockLayout {
 export function parseDockLayout(raw: string | null): DockLayout {
   try {
     const value = JSON.parse(raw ?? "null");
-    if (value?.version !== 1 || !Array.isArray(value.order) || value.order.length !== 4 || new Set(value.order).size !== 4 || value.order.some((id: unknown) => !PANEL_IDS.includes(id as DockPanel))) return defaultDockLayout();
-    if (!value.widths || PANEL_IDS.some(id => !Number.isFinite(value.widths[id]) || value.widths[id] < .08 || value.widths[id] > .76)) return defaultDockLayout();
-    if (Math.abs(PANEL_IDS.reduce((sum, id) => sum + value.widths[id], 0) - 1) > .000001) return defaultDockLayout();
-    if (value.hidden !== undefined && (!Array.isArray(value.hidden) || value.hidden.length >= PANEL_IDS.length || new Set(value.hidden).size !== value.hidden.length || value.hidden.some((id: unknown) => !PANEL_IDS.includes(id as DockPanel)))) return defaultDockLayout();
+    const idsForVersion: readonly DockPanel[] = value?.version === 1 ? PANEL_IDS.filter(id => id !== "chats") : PANEL_IDS;
+    if (![1, 2].includes(value?.version) || !Array.isArray(value.order) || value.order.length !== idsForVersion.length || new Set(value.order).size !== idsForVersion.length || value.order.some((id: unknown) => !idsForVersion.includes(id as DockPanel))) return defaultDockLayout();
+    if (!value.widths || idsForVersion.some(id => !Number.isFinite(value.widths[id]) || value.widths[id] < .08 || value.widths[id] > .76)) return defaultDockLayout();
+    if (Math.abs(idsForVersion.reduce((sum, id) => sum + value.widths[id], 0) - 1) > .000001) return defaultDockLayout();
+    if (value.hidden !== undefined && (!Array.isArray(value.hidden) || value.hidden.length >= idsForVersion.length || new Set(value.hidden).size !== value.hidden.length || value.hidden.some((id: unknown) => !idsForVersion.includes(id as DockPanel)))) return defaultDockLayout();
     if (value.direction !== undefined && value.direction !== "horizontal" && value.direction !== "vertical") return defaultDockLayout();
-    if (value.hiddenBeforeFocus !== undefined && (!Array.isArray(value.hiddenBeforeFocus) || value.hiddenBeforeFocus.length >= PANEL_IDS.length || new Set(value.hiddenBeforeFocus).size !== value.hiddenBeforeFocus.length || value.hiddenBeforeFocus.some((id: unknown) => !PANEL_IDS.includes(id as DockPanel)))) return defaultDockLayout();
+    if (value.hiddenBeforeFocus !== undefined && (!Array.isArray(value.hiddenBeforeFocus) || value.hiddenBeforeFocus.length >= idsForVersion.length || new Set(value.hiddenBeforeFocus).size !== value.hiddenBeforeFocus.length || value.hiddenBeforeFocus.some((id: unknown) => !idsForVersion.includes(id as DockPanel)))) return defaultDockLayout();
     if (value.tabbed !== undefined && typeof value.tabbed !== "boolean") return defaultDockLayout();
-    if (value.activeTab !== undefined && !PANEL_IDS.includes(value.activeTab)) return defaultDockLayout();
+    if (value.activeTab !== undefined && !idsForVersion.includes(value.activeTab)) return defaultDockLayout();
     if (value.tree !== undefined) {
       const ids: DockPanel[] = [];
       const valid = (node: DockNode, depth = 0): boolean => {
         if (!node || depth > 6) return false;
         if (node.type === "tabs") {
-          if (!Array.isArray(node.panels) || !node.panels.length || node.panels.length > 4 || !node.panels.includes(node.active) || node.panels.some(id => !PANEL_IDS.includes(id))) return false;
+          if (!Array.isArray(node.panels) || !node.panels.length || node.panels.length > idsForVersion.length || !node.panels.includes(node.active) || node.panels.some(id => !idsForVersion.includes(id))) return false;
           ids.push(...node.panels); return true;
         }
         return node.type === "split" && ["horizontal", "vertical"].includes(node.axis) && Number.isFinite(node.ratio) && node.ratio >= .08 && node.ratio <= .92 && valid(node.first, depth + 1) && valid(node.second, depth + 1);
       };
-      if (!valid(value.tree) || ids.length !== 4 || new Set(ids).size !== 4) return defaultDockLayout();
+      if (!valid(value.tree) || ids.length !== idsForVersion.length || new Set(ids).size !== idsForVersion.length) return defaultDockLayout();
     }
-    return { version: 1, order: [...value.order], widths: Object.fromEntries(PANEL_IDS.map(id => [id, value.widths[id]])) as Record<DockPanel, number>, ...(value.hidden ? { hidden: [...value.hidden] } : {}), ...(value.hiddenBeforeFocus ? { hiddenBeforeFocus: [...value.hiddenBeforeFocus] } : {}), ...(value.direction ? { direction: value.direction } : {}), ...(value.tabbed !== undefined ? { tabbed: value.tabbed } : {}), ...(value.activeTab ? { activeTab: value.activeTab } : {}), ...(value.tree ? { tree: value.tree } : {}) };
+    const result: DockLayout = { version: 2, order: [...value.order], widths: Object.fromEntries(PANEL_IDS.map(id => [id, value.widths[id]])) as Record<DockPanel, number>, ...(value.hidden ? { hidden: [...value.hidden] } : {}), ...(value.hiddenBeforeFocus ? { hiddenBeforeFocus: [...value.hiddenBeforeFocus] } : {}), ...(value.direction ? { direction: value.direction } : {}), ...(value.tabbed !== undefined ? { tabbed: value.tabbed } : {}), ...(value.activeTab ? { activeTab: value.activeTab } : {}), ...(value.tree ? { tree: value.tree } : {}) };
+    if (value.version === 1) {
+      // Preserve existing split geometry and selected tabs; add only the new tab.
+      const append = (node: DockNode): DockNode => node.type === "split" ? { ...node, first: append(node.first), second: append(node.second) }
+        : node.panels.includes("files") ? { ...node, panels: [...node.panels, "chats"] } : node;
+      result.tree = append(dockTree(result));
+      result.order.push("chats");
+      for (const id of idsForVersion) result.widths[id] = .08 + (value.widths[id] - .08) * (.6 / .68);
+      result.widths.chats = .08;
+      if (result.hiddenBeforeFocus) result.hidden = [...(result.hidden ?? []), "chats"];
+    }
+    return result;
   } catch { return defaultDockLayout(); }
 }
 

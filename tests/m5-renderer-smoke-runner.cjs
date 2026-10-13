@@ -529,7 +529,7 @@ app.whenReady().then(async () => {
       const chip = selectedChat.getBoundingClientRect();
       const goal = goalLabel.getBoundingClientRect();
       const status = selectedChat.querySelector('.m5-chat-status, .m5-chat-update').getBoundingClientRect();
-      if (goal.width <= 0 || status.width <= 0 || goal.right > status.left + 1 || status.right > chip.right + 1) throw new Error('long chat title obscures status');
+      if (goal.width <= 0 || status.width <= 0 || goal.bottom > status.top + 1 || goal.right > chip.right + 1 || status.right > chip.right + 1) throw new Error('long chat title obscures status');
       selectedChat.focus();
       if (document.activeElement !== selectedChat) throw new Error('chat chip cannot receive keyboard focus');
     } finally { goalLabel.textContent = savedLabel; }

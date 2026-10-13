@@ -45,7 +45,7 @@ export interface EditorSnapshot {
   tabs: readonly EditorTab[];
   activePath: string | null;
   panel: WorkbenchPanel;
-  panelRequest: { panel: WorkbenchPanel | "conversation" } | null;
+  panelRequest: { panel: WorkbenchPanel | "conversation" | "chats" } | null;
   diffSummary: DiffSummaryV1 | null;
   diffFile: DiffFileDescriptorV1 | null;
   diffText: string;
@@ -731,6 +731,10 @@ export class ProjectEditorController {
 
   revealConversation(): void {
     this.#set({ panelRequest: { panel: "conversation" } });
+  }
+
+  revealChatList(): void {
+    this.#set({ panelRequest: { panel: "chats" } });
   }
 
   canLeaveProject(): boolean {
