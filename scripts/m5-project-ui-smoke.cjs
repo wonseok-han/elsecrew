@@ -12,14 +12,15 @@ const largeDiff = process.env.HELLO_AGENT_SMOKE_LARGE_DIFF === '1';
 if (largeDiff && (measureMemory || largeFile || largeTree || process.env.HELLO_AGENT_SMOKE_APPLY === '1')) throw new Error('Large diff is a separate diagnostic scenario');
 let largeDiffReport;
 const diffRequests = [];
-if (largeDiff) {
+const treeRequests = [];
+if (largeDiff || largeTree) {
   // Handler time includes sidecar queueing, not only backend processing.
   // Preserve the actual handler, arguments, result and rejection.
   const handle = ipcMain.handle.bind(ipcMain);
   ipcMain.handle = (channel, listener) => handle(channel, async (...args) => {
-    if (!/diff/i.test(channel)) return listener(...args);
+    if (!largeTree && !/diff/i.test(channel)) return listener(...args);
     const sample = { channel, startedMs: performance.now(), status: 'pending' };
-    diffRequests.push(sample);
+    (largeTree ? treeRequests : diffRequests).push(sample);
     try {
       const result = await listener(...args);
       sample.status = 'resolved';
@@ -102,6 +103,7 @@ function finish(error, details) {
   // after the app has accepted quitting. process.exitCode alone is ignored here.
   const result = {root,error:error?.message,...details,confirmation:confirmationReport,...(largeDiff ? {largeDiff:largeDiffReport} : {}),...(largeFile ? {largeFile:largeFileReport} : {}),...(largeTree ? {largeTree:largeTreeReport} : {}),...(measureMemory ? {memoryEvidence:path.join(root, 'memory.json'), memory:memoryReport} : {}),shutdown:'pending',status:'PENDING'};
   if (largeDiff) result.diffRequests = diffRequests;
+  if (largeTree) result.treeRequests = treeRequests;
   const persist = () => fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify(result, null, 2));
   persist();
   console.log(JSON.stringify(result));
@@ -179,6 +181,7 @@ app.on('browser-window-created', (_event, window) => {
       }
       if (largeTree) {
         app.focus({steal:true}); window.show(); window.focus(); window.webContents.focus();
+        const startedMs = performance.now();
         largeTreeReport = await run(`(async()=>{
           const observe=async(label,ready)=>{
             const start=performance.now();
@@ -200,6 +203,8 @@ app.on('browser-window-created', (_event, window) => {
         })()`);
         await wait(`Array.from(document.querySelectorAll('.m5-files button')).some(b=>b.textContent.includes('hello.txt'))`);
         largeTreeReport.snapshotReadyMs = snapshotReadyMs;
+        largeTreeReport.startedMs = startedMs;
+        largeTreeReport.finishedMs = performance.now();
         console.log(JSON.stringify({stage:'NATIVE_LARGE_TREE',...largeTreeReport}));
       }
       if (largeFile) {

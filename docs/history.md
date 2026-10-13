@@ -1,5 +1,37 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (첫 트리 지연의 초기 IPC 대기 확인)
+
+- 직전은 캐시/합성 데이터 정리 진척이다. 6f2c2de의 현재 checkout에서 직접 조사했다. Karpathy 지침에 따라 안전 검사를 추정으로 제거하지 않고 native runner의 대형 트리 시나리오에 채널·시작 시각·응답 소요만 기록했다. 요청 인자/응답과 제품 코드는 변경하지 않았다.
+- 재빌드/반복 수집 없이 격리된 합성 native 시험1회(session75814/XJh89D)를 실행했다. 전체 편집·저장·diff·반영 확인 취소·두 채팅 흐름 완료, shutdown accepted/exit1이다. treeRoot1314.1ms 기준 초과, expand142.6ms/file453ms/confirmation19581ms. 결과 JSON/스크린샷은 임시 root에 보존했다. 정식 gate 합격 아님.
+- IPC 관측: 최초 tree133ms와 동시에 diff1185ms/watch1374ms가 시작됐고, 그 뒤 첫 하위폴더 요청1246ms가 이들 종료까지 겹쳐 대기했다. 후속 tree126/86ms, 채팅 바인딩 tree85~128ms다. 단일 스레드 sidecar 처리와 대조해 초기 diff/watch가 첫 탐색을 막는 대기 구간을 확인했다. 폴더 순회 자체 또는 무결성 검사만을1314ms 원인으로 단정하지 않는다.
+- 다음 구현 대상은 초기 비대화형 조회와 사용자 탐색 요청의 처리 순서/응답성이다. 무결성 검사·감시 실패/재스캔 통지는 보존해야 한다. 이번 시험의 project45MiB/userdata143MiB는 정상 종료 뒤 정리하고 작은 증거만 남긴다. JS 구문·diff 검사를 수행했으며 새 Rust 캐시는 만들지 않았다. 기존 dirty/활성화 승인 경계 유지, 전체 목표 미완료/main/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (사용자 요청에 따른 개발 저장공간 정리)
+
+- 사용자 요청으로 개발 캐시/종료된 합성 시험 데이터만 정리했다. Rust 빌드와 시험 프로세스 부재를 확인한 뒤 target/debug/incremental 및 target/debug/deps를 삭제했다. target은 약33GiB에서1.1GiB로 감소했고 실행용 debug sidecar31MiB와 release/out, 소스·인증정보·기존 미커밋 변경은 보존했다. 다음 Rust 빌드는 캐시 재생성이 필요하다.
+- result.json의 PASS/FAIL 및 shutdown=accepted를 확인한 project-ui 시험51개에서 project/userdata102개 하위 폴더(du 합계3,079,856KiB)를 삭제 완료했다. 51개 result.json 보존과 종료 코드0을 확인했다. 로그·스크린샷·집계 폴더도 보존했다. 재생성 가능한 fixture/캐시의 영구 삭제이며 사용자 프로젝트나 제품 백업 삭제 기능 활성화가 아니다. 최종 target1.1GiB, 디스크 여유521GiB, git diff --check 통과.
+- session45168은10회차까지 종료하고 FAIL/exit1을 반환했다. 2kfyV1의 treeRoot p95는1536.1ms로 기준 초과이며 혼합 runner 수집이므로 정식 gate 증거가 아니다. 실패 결과를 삭제/합격 처리하지 않았다. 새 대형 시험/빌드는 시작하지 않았다.
+- 이후 작업은 필요한 빌드·시험만 실행하고 종료 확인 후 작은 결과 증거를 남겨 합성 fixture를 정리한다. 재현에 필요한 실패 데이터만 명시적으로 한정 보관하고 개발 Rust 실행에는 CARGO_INCREMENTAL=0을 우선 적용한다. 전체 목표 미완료, 트리 성능/실연결/Windows·출시 검증 및 별도 활성화 승인 경계 유지. main 병합/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (대형 반복4 종료·5 진행 확인)
+
+- 직전은 live 수집 확인과3회차 증거 회수였다. session45168을30초씩 poll해4/TI7Rmf의 PROJECT_FLOW_COMPLETE·shutdown accepted를 확인했다. treeRoot1088.6ms 초과로FAIL/exit1, expand104ms/DOM362/file425.4ms/confirmation15726ms/snapshot30573ms다.
+- 현재 측정5/PID89147이 시작됐으며 같은 수집은 live다. 경로 hello-agent-native-metrics-2kfyV1. 새 실행/제품·runner 변경/강제 종료 없음. 다음은 반드시 동일 session을 이어 회수하며 미완료 관측을 완료로 바꾸지 않는다. 기존 mixed-run/diagnostic 경계와 dirty 파일 보존, 전체 목표 미완료/main/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (대형 반복3 종료·4 진행 확인)
+
+- 직전 턴은 수정 후 전체 흐름 관측의 진척이다. 같은 live session45168을 최대30초씩 poll해 측정3/rbOVWS의 PROJECT_FLOW_COMPLETE·shutdown accepted를 회수했다. treeRoot1510.3ms로 FAIL/exit1이며 expand99.9ms/DOM362/file425.2ms/confirmation15190ms/snapshot31998ms다. 2회차와 같이 null.click 오류 없이 사용자 흐름을 완료했다.
+- 수집기는 측정4/PID84475를 시작해 live다. 제품/runner/빌드 변경·중복 heavy run·강제 종료는 하지 않았다. 이미 확정된 트리 성능 실패를 반복 전체 합격으로 덮지 않는다.
+- 다음: session45168과 hello-agent-native-metrics-2kfyV1 회수 계속. 종료 뒤 트리 handler 대기/처리와 renderer 표시 분리 계측. 현재 혼합 runner 수집은 정식 성능 gate 자료가 아니며 전체 목표 미완료. 기존 dirty 파일/승인 경계 유지, main/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (수정된 대형 흐름 완료·트리 지연 유지)
+
+- 직전6f2c2de는 시험 준비 조건 수정으로 진척했다. live session45168을 계속 poll하여 수정 후 첫 측정2/V8fbU8의 PROJECT_FLOW_COMPLETE와 shutdown accepted를 확인했다. 편집/저장/diff·반영 확인 취소·두 채팅 흐름은 끝까지 도달했고 이전 null.click 시험 오류는 발생하지 않았다.
+- 전체 판정은 treeRoot1151ms(기준1000)로 FAIL/exit1이다. snapshot30453ms/expand108.2ms/DOM362/fileEditable442.3ms/confirmation15795ms를 보존한다. 같은 수집은 측정3/PID79306을 시작해 아직 live다. 새 시험/강제 종료/제품 변경 없음.
+- read-only 코드 대조: get_tree_from_active는 직접 자식 분류/정렬/페이지를 수행하고 G4 응답 직전 poll_watchers가 추가된다. 어느 구간이 이번 지연 원인인지는 아직 계측하지 않았으므로 원인으로 단정하거나 안전 검사를 줄이지 않는다.
+- 다음: session45168과 hello-agent-native-metrics-2kfyV1을 먼저 회수한다. 수정 전0·1/수정 후2이상은 혼합 조건이므로 정식 p95 합격 자료가 아니다. 수집 종료 후 트리 응답 구간 계측/개선과 남은 RSS·Claude·Windows/출시를 진행한다. 기존 미커밋 변경 보존·main/push 없음, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (진행 중 native 시험의 diff 준비 대기 수정)
 
 - 직전 턴은 live session45168을 확인한 verified wait/첫 실패 관측이다. 같은 handle을 이어 poll했고 준비0에 이어 측정1도FAIL/정상 종료, 측정2/PID74587이 시작됐다. 결과 폴더는 계속 hello-agent-native-metrics-2kfyV1이며 중복 실행하지 않았다.
@@ -124,6 +156,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **개발 저장공간 관리(2026-10-13 사용자 지시)**: 시험마다 큰 합성 프로젝트와 userdata를 무기한 남기지 않는다. 프로세스 종료 확인 뒤 JSON/로그/스크린샷을 남기고 재생성 가능한 fixture를 정리한다. 실패 재현 데이터는 필요한 것만 한정 보관한다. Rust 개발 빌드는 CARGO_INCREMENTAL=0 우선, 빌드 중 캐시 삭제 금지. 사용자 프로젝트·인증·제품 복구 백업은 이 정리 대상이 아니다.
 
 - **2026-10-13 native 대형 diff 최신 결과**: 초기46Z4Lw의 목록9892ms·첫 파일9983ms 초과 이후 요청 단위 Git batch 재사용을 적용했다. b6a68d1의 수동 조회 공유는 반복 시험에서236/500개 stale 목록을 만들어 철회했다. 매번 새 조회＋summary generation 적용 후 SOlVal은 준비1회/측정10회 전부 정상 종료, p95 목록1155.3ms·첫 파일816.6ms로 기준 이내다. 개발 빌드 diagnostic/NOT_READY이며 packaged G6 합격은 아니다.
 
