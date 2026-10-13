@@ -247,6 +247,8 @@ export const en: Record<MessageKey, string> = {
   "m5.editor.preserved": "Preserved edits",
   "m5.editor.details": "Technical details",
   "m5.diff.title": "Selected change details",
+  "m5.diff.openEditor": "Open file in editor",
+  "m5.diff.viewSaved": "View saved changes",
   "m5.diff.old": " · Previously: {path}",
   "m5.diff.binaryHelp": "Binary changes show that the file changed, not its contents.",
   "m5.diff.empty": "No text changes to display.",

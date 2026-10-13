@@ -333,6 +333,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           </div>
           <div className="m5-editor-head">
             <span title={activeTab?.path}>{activeTab?.path ?? t("m5.editor.select")}</span>
+            {activeTab && snapshot.diffSummary?.entries.some(entry => entry.path === activeTab.path) && <button type="button" className="m5-secondary" disabled={!admissionReady || snapshot.actionBlocked} onClick={() => void controller.openDiff(activeTab.path)}>{t("m5.diff.viewSaved")}</button>}
             {activeTab?.mode === "text" && (activeTab.saveState === "dirty" || activeTab.saveState === "conflicted") && <button type="button" className="m5-secondary" disabled={!admissionReady || snapshot.actionBlocked || reloadingDraft} onClick={() => setReloadDraft(activeTab)}>{t("m5.editor.reload")}</button>}
             {activeTab?.mode === "text" && (
               <button type="button" title={t("m5.editor.shortcut")} onClick={() => void controller.saveActive()} disabled={!admissionReady || activeTab.saveState !== "dirty"}>
@@ -370,7 +371,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
                 ))}
                 {snapshot.diffSummary?.entries.length === 0 && <Empty text={t("m5.editor.noChanges")} />}
               </div>
-              {snapshot.diffFile && <DiffDetails descriptor={snapshot.diffFile} text={snapshot.diffText} />}
+              {snapshot.diffFile && <DiffDetails descriptor={snapshot.diffFile} text={snapshot.diffText} canOpen={admissionReady && !snapshot.actionBlocked} onOpen={path => { void controller.openFile(path); }} />}
             </>
           ) : <Empty text={t("m5.editor.chooseProject")} />}
         </aside>
@@ -706,7 +707,7 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
   return <>{failed && <section className="m5-error" role="alert"><strong>{t("m5.feedback.failed")}</strong><p>{t("m5.feedback.help")}</p><textarea aria-label={t("m5.editor.preserved")} readOnly value={tab.text} style={{ width: "100%", minHeight: 240, boxSizing: "border-box" }} /><button type="button" onClick={() => setAttempt(value => value + 1)}>{t("m5.feedback.retry")}</button></section>}<div className="m5-monaco" ref={host} style={failed ? { display: "none" } : undefined} /></>;
 }
 
-function DiffDetails({ descriptor, text }: { descriptor: NonNullable<ReturnType<ProjectEditorController["snapshot"]>["diffFile"]>; text: string }) {
+function DiffDetails({ descriptor, text, canOpen, onOpen }: { descriptor: NonNullable<ReturnType<ProjectEditorController["snapshot"]>["diffFile"]>; text: string; canOpen: boolean; onOpen: (path: string) => void }) {
   const { t } = useI18n();
   const indexed = useMemo(() => diffPages(text), [text]);
   const [page, setPage] = useState(0);
@@ -718,6 +719,7 @@ function DiffDetails({ descriptor, text }: { descriptor: NonNullable<ReturnType<
   return (
     <section className="m5-diff-details" aria-label={t("m5.diff.title")}>
       <strong>{descriptor.path}</strong>
+      {descriptor.kind !== "deleted" && descriptor.worktreeVersion !== null && <button type="button" className="m5-secondary" disabled={!canOpen} onClick={() => onOpen(descriptor.path)}>{t("m5.diff.openEditor")}</button>}
       <p>{t(`m5.diff.${descriptor.kind}`)}{descriptor.oldPath ? t("m5.diff.old", { path: descriptor.oldPath }) : ""}</p>
       {descriptor.kind === "binary" ? <Empty text={t("m5.diff.binaryHelp")} /> : !text ? <Empty text={t("m5.diff.empty")} /> : <>
         <p>{t("m5.diff.help")}</p>

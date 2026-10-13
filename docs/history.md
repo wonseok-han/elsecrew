@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (변경 검토·편집 화면 왕복 연결)
+
+- 직전eb287f6는 native 반복 실패 수정과10회 관측으로 진척했다. 성능 검사만 반복하지 않고 제안서 M5.2의 편집 탭↔diff 연결을 실제 코드와 대조했다. 변경 상세에 편집 진입, 편집 헤더에 저장된 변경 보기 버튼이 없던 부분을 연결했다.
+- 기존 controller의 openFile/openDiff 및 dock reveal을 재사용한다. 변경 목록에 있는 활성 파일만 저장된 diff로 진입하며 삭제/현재 버전 없는 파일은 편집 진입을 표시하지 않는다. admission/actionBlocked를 유지하고 자동 저장·재읽기·원본 쓰기를 추가하지 않았다. 한국어/영어 문구를 함께 추가했다.
+- 미저장 초안→diff→같은 편집 탭 복귀의 focused 상태 회귀1/1 PASS, TypeScript/diff PASS. 전체 renderer/native UI 버튼 조작은 이번 턴 미실행이며 이후 통합 UI 검증에 포함한다. Karpathy 지침에 따라 별도 상태/IPC 없이 기존 경로만 연결했다.
+- 다음: 남은 시안 충실도/통합 사용자 흐름, native 대형 트리/파일·RSS/packaged 계측. Claude 실제 작업·Windows·출시와 백업 정리 활성화 승인 경계는 그대로다. 기존 미커밋 정리 UI/문서 및9월 archive 보존, main/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (반복 native diff에서 stale 조회 발견·수정)
 
 - 직전b6a68d1은 구현/단일 관측 진척이었지만 공유 최적화의 정확성이 충분히 검증되지 않았다. native 반복 수집기에 --diff(준비1회＋측정10회)를 연결했다. 기존 source-write/실제 provider 없이 각 앱 정상 종료 뒤 다음을 시작하고 fixture 크기/원시 IPC 시간/실패를 보존한다.

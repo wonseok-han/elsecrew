@@ -246,6 +246,8 @@ export const ko = {
   "m5.editor.preserved": "보존된 편집 내용",
   "m5.editor.details": "기술 정보",
   "m5.diff.title": "선택한 변경 상세",
+  "m5.diff.openEditor": "이 파일 편집하기",
+  "m5.diff.viewSaved": "저장된 변경 보기",
   "m5.diff.old": " · 이전: {path}",
   "m5.diff.binaryHelp": "이진 변경은 내용 대신 파일 변경 사실만 보여요.",
   "m5.diff.empty": "표시할 텍스트 변경이 없어요.",

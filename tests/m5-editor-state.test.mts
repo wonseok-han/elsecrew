@@ -876,6 +876,28 @@ test("diff refresh requests fresh data and only the latest summary can publish",
   } finally { controller.dispose(); }
 });
 
+test("opening a reviewed file returns to its existing unsaved draft without rereading or saving", async () => {
+  const bridge = new FakeBridge();
+  const controller = new ProjectEditorController(bridge);
+  controller.start();
+  try {
+    await controller.chooseProject();
+    await controller.openFile("src/new.ts");
+    controller.updateText("src/new.ts", "unsaved review correction\n");
+    await controller.openDiff("src/new.ts");
+    assert.equal(controller.snapshot().panel, "changes");
+    const calls = [...bridge.calls];
+    await controller.openFile(controller.snapshot().diffFile!.path);
+    assert.deepEqual(bridge.calls, calls, "existing draft must not trigger file IO");
+    assert.equal(controller.snapshot().panel, "editor");
+    assert.equal(controller.snapshot().activePath, "src/new.ts");
+    assert.equal(controller.snapshot().tabs.length, 1);
+    assert.equal(controller.snapshot().tabs[0].text, "unsaved review correction\n");
+    assert.equal(controller.snapshot().tabs[0].saveState, "dirty");
+    assert.equal(controller.snapshot().diffFile?.path, "src/new.ts");
+  } finally { controller.dispose(); }
+});
+
 test("refreshing changes clears stale diff content and invalidates an in-flight selection", async () => {
   const bridge = new FakeBridge();
   const controller = new ProjectEditorController(bridge);
