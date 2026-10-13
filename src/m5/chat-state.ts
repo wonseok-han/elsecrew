@@ -130,6 +130,7 @@ export class ChatUiController {
   subscribe(listener: () => void): () => void { this.#listeners.add(listener); return () => this.#listeners.delete(listener); }
   start(): void {
     if (this.#unsubscribe) return;
+    this.#disposed = false;
     this.#unsubscribe = this.#bridge.onChatEvent((event) => this.#onEvent(event));
     const bridge = this.#agentBridge();
     if (bridge) this.#agentUnsubscribe = bridge.onAgentPublicEvent((event) => this.#onAgentPublicEvent(event));

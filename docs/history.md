@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (개발 모드 채팅 controller 재연결 수정)
+
+- 기준2f0b6f9에서 초기 로딩/자원 해제를 직접 조사하고 상시 승인된 읽기 전용 검토자1명에게 같은 범위를 검토받았다. bootstrap의 React StrictMode effect 재설치에서 ChatUiController.dispose 이후 start가 disposed를 복원하지 않아 채팅 projection이 정지하는 결함을 확인했다. editor controller와 동일하게 start에서 복원하는 한 줄만 추가했다.
+- 회귀를 먼저 실행해 settings revision undefined로 실패 재현 후 수정했다. 구독 중복 방지·종료 시 해제·재연결 뒤 목록 로드·이전 수명의 늦은 응답 차단을 검증했다. chat-ui-state22/22 PASS, TypeScript noEmit PASS. Karpathy 최소 변경 원칙 적용. 실제 개발 창 관측이나 RSS 개선 증거로 확대하지 않는다.
+- 검토자의 followup draft 잔류 제안은 기존 프로젝트 이탈/재진입 보존 회귀에 명시된 의도와 충돌해 삭제하지 않았다. editor save 경로별 bookkeeping 정리와 전송 중 controller 재사용의 late completion 정책은 후속 확인 대상으로 남긴다. Monaco cleanup은 기존에 구현돼 있어 RSS만으로 누수라 단정하지 않는다.
+- 최신 실제 실행 승인은 앞선974Ab5에서 사용된 기록을 확인해 중복 호출하지 않았다. 기존9월 archive 변경 보존, main/push 없음. 다음: G6 collector·유휴 RSS 초과, Claude 실제 로그인/작업·Windows·출시 검증. 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (외부 RSS 원시 표본 보존 도구)
 
 - 직전 턴은 프런트/계약467건 통과로 진척했다. packaged 측정이 터미널 출력에만 남던 누락을 줄이기 위해 m5-observe-process-memory.cjs를 추가했다. 명시 PID·최대240표본·단계 라벨만 받아 ps를 읽으며 앱 실행/종료/설정 변경은 하지 않는다. 새 임시 폴더에 원시 표본/오류를 보존하며 기존 파일을 덮지 않는다.

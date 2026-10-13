@@ -59,6 +59,33 @@ async function followupFixture() {
   } };
 }
 
+test("effect restart restores chat loading without duplicate subscriptions or stale project results", async () => {
+  const bridge = new FakeBridge();
+  const list = bridge.listChats.bind(bridge);
+  let finishOld!: (page: Awaited<ReturnType<typeof list>>) => void;
+  bridge.listChats = () => new Promise(resolve => { finishOld = resolve; });
+  const controller = new ChatUiController(bridge as unknown as M5BridgeV3);
+  controller.start();
+  const oldLoad = controller.openProject("project_a");
+  controller.dispose();
+  assert.equal(bridge.listeners.size, 0);
+  bridge.listChats = list;
+  bridge.revision = 2;
+  controller.start();
+  controller.start();
+  try {
+    assert.equal(bridge.listeners.size, 1);
+    await controller.openProject("project_a");
+    assert.equal(controller.snapshot().settings?.revision, 2);
+    assert.equal(controller.snapshot().chats.length, 2);
+    finishOld({ projectId: "project_a", items: [], nextCursor: null });
+    await oldLoad;
+    assert.equal(controller.snapshot().settings?.revision, 2);
+    assert.equal(controller.snapshot().chats.length, 2);
+  } finally { controller.dispose(); }
+  assert.equal(bridge.listeners.size, 0);
+});
+
 test("leaving the project view clears visible chat but preserves its follow-up draft", async () => {
   const f = await followupFixture();
   try {
