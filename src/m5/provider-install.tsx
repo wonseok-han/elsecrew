@@ -6,15 +6,16 @@ const running = (status: InstallStatus | null) => status !== null &&
   ["starting", "downloading", "installing", "verifying", "stopping"].includes(status.state);
 
 /** One installation manager is shared by both providers. Never replay a start on transport failure. */
-export function ProviderInstall({ disabled, providers, onBlockChange, onCheck }: {
+export function ProviderInstall({ disabled, providers, onBlockChange, onCheck, compact = false }: {
   disabled: boolean; providers: InstallProvider[]; onBlockChange: (blocked: boolean) => void;
-  onCheck: (provider: InstallProvider) => void;
+  onCheck: (provider: InstallProvider) => void; compact?: boolean;
 }) {
   const { t } = useI18n();
   const [status, setStatus] = useState<InstallStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [consent, setConsent] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const mounted = useRef(false);
   const inFlight = useRef(false);
   const request = useCallback(async (input: InstallRequest) => {
@@ -51,14 +52,20 @@ export function ProviderInstall({ disabled, providers, onBlockChange, onCheck }:
   }, [poll, request]);
   if (!window.m5Install) return null;
   const plan = status?.plan;
+  // Presentation only: keep the manager mounted and important actions visible.
+  const needsAttention = busy || uncertain || active || Boolean(plan) || Boolean(status?.error) || status?.state === "recoveryRequired" || status?.state === "installed";
+  const showDetails = !compact || expanded || needsAttention;
   const canPrepare = !disabled && !busy && !uncertain && status !== null && !active &&
     !["unsupported", "recoveryRequired"].includes(status.state);
-  return <section className="m5-provider-install" aria-label={t("m5.install.title")}>
+  return <section className={`m5-provider-install${compact ? " m5-provider-install-compact" : ""}`} aria-label={t("m5.install.title")}>
     <header><strong>{t("m5.install.title")}</strong>
-      <button type="button" disabled={busy} onClick={() => void request({ action: "status" })}>{t("m5.install.refresh")}</button>
+      {compact && <button type="button" aria-expanded={showDetails} aria-controls="m5-install-details" disabled={needsAttention}
+        onClick={() => setExpanded(value => !value)}>{t(showDetails ? "m5.install.hideDetails" : "m5.install.showDetails")}</button>}
     </header>
     <p role="status">{status?.provider && <strong>{status.provider === "codex" ? "Codex" : "Claude Code"} · </strong>}
       {status ? t(`m5.install.state.${status.state}`) : t("m5.install.checking")}</p>
+    <div id="m5-install-details" hidden={!showDetails}>
+    <button type="button" disabled={busy} onClick={() => void request({ action: "status" })}>{t("m5.install.refresh")}</button>
     {uncertain && <p role="alert">{t("m5.install.uncertain")}</p>}
     <div className="m5-install-actions">{providers.map(provider => <button key={provider} type="button" disabled={!canPrepare}
       onClick={() => void request({ action: "prepare", provider })}>{t("m5.install.prepare", { name: provider === "codex" ? "Codex" : "Claude Code" })}</button>)}</div>
@@ -85,5 +92,6 @@ export function ProviderInstall({ disabled, providers, onBlockChange, onCheck }:
       <p>{t("m5.install.recoveryScope")}</p>
     </div>}
     {status?.error && <details><summary>{t("m5.install.details")}</summary><code>{status.error}</code></details>}
+    </div>
   </section>;
 }

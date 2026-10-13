@@ -63,6 +63,9 @@ async function probeInstallConsent() {
     await wait(() => !button('동의하고 설치').disabled);
     button('동의하고 설치').click(); button('동의하고 설치').click();
     await wait(() => panel.querySelector('[role=alert]'));
+    if (panel.querySelector('#m5-install-details').hidden) throw new Error('uncertain installation hidden');
+    const compactToggle = panel.querySelector('header button[aria-expanded]');
+    if (compactToggle && (!compactToggle.disabled || compactToggle.getAttribute('aria-expanded') !== 'true')) throw new Error('active installation can be hidden');
     await wait(() => button('설치 중단 요청') && !button('설치 중단 요청').disabled);
     if (starts !== 1 || !button('Codex 설치 내용 확인').disabled) throw new Error('uncertain start repeated or parallel install allowed');
     button('설치 중단 요청').click();

@@ -42,7 +42,7 @@ export function ProviderLogin({ disabled, compact = false }: {disabled: boolean;
       {saveFailed && <p role="status">{t("m5.setup.agents.saveFailed")}</p>}
     </details>
     {!selectionExpanded && saveFailed && <p className="m5-notice" role="status">{t("m5.setup.agents.saveFailed")}</p>}
-    <ProviderInstall disabled={disabled} providers={selected} onBlockChange={setInstallBlocked}
+    <ProviderInstall disabled={disabled} providers={selected} compact={compact} onBlockChange={setInstallBlocked}
       onCheck={provider => setChecks(current => ({ ...current, [provider]: current[provider] + 1 }))}/>
     {LOGIN_PROVIDERS.filter(provider => selected.includes(provider)).map(provider => <ProviderConnection key={`${provider}:${checks[provider]}`} disabled={disabled || installBlocked} provider={provider}/>)}
   </>;

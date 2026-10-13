@@ -486,6 +486,8 @@ export const en: Record<MessageKey, string> = {
   "m5.login.state.idle": "Not connected yet",
   "m5.setup.agents.title": "Choose your agents",
   "m5.setup.agents.help": "You can start with just one. We will check installation and sign-in for your selection. Choose roles and models for each project later.",
+  "m5.install.showDetails": "Manage installation & updates",
+  "m5.install.hideDetails": "Hide installation settings",
   "m5.login.showDetails": "Manage connection",
   "m5.login.hideDetails": "Hide connection settings",
   "m5.setup.agents.choose": "Choose the agents you want to use",

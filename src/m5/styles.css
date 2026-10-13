@@ -38,6 +38,10 @@ button, input, textarea, select {
 .m5-provider-install code { overflow-wrap: anywhere; white-space: pre-wrap; }
 .m5-provider-install details { margin-top: 12px; color: #b8c2ce; }
 .m5-provider-install summary { cursor: pointer; }
+.m5-provider-install-compact { margin: 4px 0; padding: 8px 12px; border-radius: 7px; }
+.m5-provider-install-compact > p { margin: 4px 0 0; font-size: 12px; color: #b8c2ce; }
+.m5-provider-install-compact header button { padding: 4px 8px; font-size: 12px; }
+.m5-provider-install-compact #m5-install-details:not([hidden]) { margin-top: 12px; padding-top: 12px; border-top: 1px solid #3a414d; }
 
 .m5-workbench {
   min-height: 100vh;

@@ -485,6 +485,8 @@ export const ko = {
   "m5.login.state.idle": "아직 연결하지 않았어요",
   "m5.setup.agents.title": "함께할 에이전트 선택",
   "m5.setup.agents.help": "하나만 골라도 시작할 수 있어요. 선택한 프로그램의 설치와 로그인을 확인하고, 프로젝트별 역할과 모델은 나중에 정해요.",
+  "m5.install.showDetails": "설치·업데이트 관리",
+  "m5.install.hideDetails": "설치 관리 접기",
   "m5.login.showDetails": "연결 관리",
   "m5.login.hideDetails": "연결 관리 접기",
   "m5.setup.agents.choose": "사용할 에이전트를 골라 주세요",

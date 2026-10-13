@@ -161,6 +161,14 @@ app.whenReady().then(async () => {
     if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/smoke') throw new Error('catalog path missing');
     document.querySelector('.m5-project-catalog-list li button').click();
     await ${waitFor("document.querySelector('.m5-file-row')", "project tree")};
+    await ${waitFor("document.getElementById('m5-install-details')?.hidden", "installation controls compact in workbench")};
+    const installToggle = document.querySelector('.m5-provider-install header button');
+    if (installToggle.getAttribute('aria-expanded') !== 'false') throw new Error('installation toggle state incorrect');
+    installToggle.click();
+    await ${waitFor("!document.getElementById('m5-install-details').hidden", "installation controls expanded explicitly")};
+    await (${probeInstallConsent.toString()})();
+    installToggle.click();
+    await ${waitFor("document.getElementById('m5-install-details').hidden", "installation controls collapsed after recovery")};
     document.querySelector('.m5-file-row').click();
     await ${waitFor("document.querySelector('.m5-breadcrumbs [aria-current=location]')?.textContent === '/ src'", "folder breadcrumb")};
     document.querySelector('.m5-breadcrumbs .m5-root').click();
