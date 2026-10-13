@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (승인된 Claude 시험 전 로그인 재확인 실패)
+
+- 직전ad3e505는 작은 프로젝트 UI 파동 검증 진척이다. 최신 actual-provider 결과974Ab5와 provider_claude_login::run/account를 대조했다. check의 idle/error null은 로그인 확인에서 자격증명이 관측되지 않은 결과이며 코드 호환 오류나 로그인 만료의 구체 원인으로 단정할 수 없다.
+- 사용자에게 앱 전용 로그인 확인 및 Claude1회 시험을 요청했고 승인을 받았다. 앱/sidecar 프로세스 부재 확인 후 기존 userData /Users/wonseok-han/Library/Application Support/hello-agent를 사용해 Claude만 선택한 기존 live runner를1회 실행했다(session6024). 최신 renderer와 기존 native 바이너리이며 eb1ee0a Rust 변경은 재빌드되지 않았다.
+- hello-agent-live-G5cuDY 결과는 자기 check attemptId에 결속된 Claude idle/error null, outcomes=[]/RUN_ACCEPTED 없음/모델 실행0회, 원본 불변, shutdown accepted/FAIL/exit1이다. 사용자 인증정보를 삭제·교체하거나 복구 작업을 호출하지 않았고 모델1회 승인은 아직 모델 실행에 사용되지 않았다. 작은 result.json과 생성 fixture는 해당 임시 root에 남겼다. 대형 캐시 없음.
+- 다음 실제 실행의 선행 조건은 사용자가 앱의 Claude 연결에서 로그인을 마치고 알려주는 것이다. 미연결을 우회하지 않고 같은 상태의 자동 반복 시험도 하지 않는다. 독립 개발(설치/기기 진단 연결의 범위 재확인, UI/성능/Windows·출시)은 계속 가능하므로 전체 목표를 blocked/complete로 바꾸지 않았다. main/push 없음, 기존 dirty 보존.
+
 ### 2026-10-13 · by GPT-6 Astra (후속 요청 연결 UI 파동 통합 확인)
 
 - 직전738f24f까지의 파일·줄 후속 요청 구현을 묶어 확인했다. TypeScript와 editor/chat/diff 상태 테스트86/86 PASS, renderer build·새 probe JS 구문·diff 검사 PASS. Rust 빈 diff 최적화는 이번 빌드에 포함하지 않았고 검증 대기다.
@@ -183,6 +190,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Claude 실제 시험 선행 조건(2026-10-13 재확인)**: 새 사용자 로그인 확인/Claude1회 승인 뒤 G5cuDY에서도 자기 check의 idle/error null로 종료했다. 모델 실행0회/원본 불변/정상 종료이며 실제 모델1회 승인은 미사용이다. 앱 전용 Claude 재로그인 완료 통지 전 동일 자동 시험을 반복하지 않는다. 자격증명 부재의 근본 원인은 미확정이며 오류 검증을 우회하지 않는다.
 
 - **개발 저장공간 관리(2026-10-13 사용자 지시)**: 시험마다 큰 합성 프로젝트와 userdata를 무기한 남기지 않는다. 프로세스 종료 확인 뒤 JSON/로그/스크린샷을 남기고 재생성 가능한 fixture를 정리한다. 실패 재현 데이터는 필요한 것만 한정 보관한다. Rust 개발 빌드는 CARGO_INCREMENTAL=0 우선, 빌드 중 캐시 삭제 금지. 사용자 프로젝트·인증·제품 복구 백업은 이 정리 대상이 아니다.
 
