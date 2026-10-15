@@ -46,6 +46,43 @@ fn runtime_storage_owner_excludes_external_transaction_until_drop() {
     external.execute_batch("BEGIN IMMEDIATE; ROLLBACK;").unwrap();
 }
 
+#[test]
+fn aggregate_payload_reader_preserves_namespace_order_and_errors() {
+    let (_root, path) = database();
+    let storage = Storage::open(&path).unwrap();
+    // Reader-only fixture: deliberately interleave namespaces and non-sorted
+    // event IDs. Admission/replay integrity remains covered by its own tests.
+    for (id, kind, aggregate, sequence, payload) in [
+        ("evt_z", "chat", "same", 1, r#"{"value":1}"#),
+        ("evt_y", "run", "same", 1, r#"{"value":99}"#),
+        ("evt_x", "chat", "other", 1, r#"{"value":98}"#),
+        ("evt_a", "chat", "same", 2, r#"{"value":2}"#),
+    ] {
+        storage.connection.execute(
+            "INSERT INTO events(event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,event_type,payload_schema_version,canonical_json_payload,timestamp) \
+             VALUES (?1,?1,?2,?3,?4,'fixture',1,?5,'2026-10-15T00:00:00Z')",
+            params![id, kind, aggregate, sequence, payload],
+        ).unwrap();
+    }
+    let expected = load_events(&storage.connection).unwrap().into_iter()
+        .filter(|event| event.aggregate_type == "chat" && event.aggregate_id == "same")
+        .map(|event| serde_json::from_str::<Map<String, Value>>(&event.canonical_json_payload).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(storage.aggregate_event_payloads("chat", "same").unwrap(), expected);
+    assert_eq!(expected[0]["value"], 1);
+    assert_eq!(expected[1]["value"], 2);
+    assert!(storage.aggregate_event_payloads("chat", "missing").unwrap().is_empty());
+    assert!(storage.aggregate_event_payloads("chat", "same' OR 1=1 --").unwrap().is_empty());
+    for (id, invalid) in [("bad_json", "not json"), ("bad_object", "[]")] {
+        storage.connection.execute(
+            "INSERT INTO events(event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,event_type,payload_schema_version,canonical_json_payload,timestamp) \
+             VALUES (?1,?1,'chat',?1,1,'fixture',1,?2,'2026-10-15T00:00:00Z')",
+            params![id, invalid],
+        ).unwrap();
+        assert!(storage.aggregate_event_payloads("chat", id).is_err());
+    }
+}
+
 fn event(
     event_id: &str,
     operation_id: &str,

@@ -2,6 +2,12 @@
 
 ### 2026-10-15 · by GPT-6 Astra
 
+- 기준b9106da에서 aggregate_event_payloads가 모든 프로젝트/채팅의 원장을 load_events로 읽고 뒤늦게 필터함을 확인했다. 요청 aggregate_type/id를 bound SQL로 먼저 선택하도록 변경하고 기존10개 열 디코더와 rowid 순서를 공유했다. getChat 페이지와 actual resolve_prompt의 불필요한 타 채팅 행 할당을 줄이는 변경이며 Git 작업공간 검사·쓰기 transaction·시작 전체 원장 무결성 검사는 그대로다. append 지연 해소나 정식 성능 합격으로 주장하지 않는다.
+- reader 회귀는 교차 type/id·삽입 순서·없는 대상/SQL 문구 입력·잘못된 JSON/비객체 거절을 검증한다. 첫 회귀의 UPDATE 손상 주입은 기존 append-only trigger에 거부됐고, 테스트만 별도 malformed 행 INSERT로 수정했다. 최신 release reader/actual foreign-input·stale-evidence 거절/chat durable page3건 PASS, diff 검사 통과. 전체 누적 테스트·패키지 재빌드는 반복하지 않았으며 현행 패키지에는 아직 이 변경이 없다.
+- 동일 읽기 전용 startup_memory_review가 입력 구성 경로까지 검토해 차단 결함 없음으로 회신했다. 선택 행의 디코딩/순서/오류 및 시작 전체 검증 보존을 확인한 정적 결과다. 자체 TempDir 시험만 사용했고 release 캐시357MB/실제 계정·모델·사용자 프로젝트 사용 없음. Karpathy 최소 변경으로 읽기 경로에 한정했으며 이후 Git/IPC 비용·전체G6·메모리·실계정/Windows·출시 검증은 미완료다. main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra
+
 - 기준67f466b에서 공개 follow-up 경로를 추적했다. 매 append는 verify_workspace의 detached HEAD/index/fsck/remotes/metadata 검사와 저장 transaction의 전체 원장 재생을 수행한다. 둘의 비용을 추정으로 제거하지 않고 test-only ignored followup_cost_attribution을 추가했다. 자체 TempDir의64건에 실제 append·독립 workspace 검사·동일 ID 재시도를 측정하며 본문/경로/인증정보는 출력하지 않는다. Karpathy 최소 변경에 따라 제품 경로/안전 검사/프로토콜은 변경하지 않았다.
 - CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 cargo test --release -p hello-agent-sidecar followup_cost_attribution -- --ignored --nocapture: 1 PASS/0 FAIL, 실행8.95초(기존 release 캐시 재사용 빌드40.32초). append60.48~85.29ms, 별도 workspace60.17~88.12ms, retry0.042~0.098ms. 서로 다른 실행의 시간이라 차감해 저장 비용으로 해석하지 않는다. 작은 원장/단일 채팅/직접 Rust 진단이며 패키지 IPC·4채팅·장기 원장 성능 합격은 아니다.
 - 후속 우선순위는 Git 작업공간 검사의 세부 호출 비용과 패키지 추가 지연 분리다. 원장 재생 확장 비용도 미해결이며 안전 검증 캐시/생략은 승인하거나 구현하지 않았다. 임시 fixture는 TempDir 종료로 회수, 사용자 인증/프로젝트·실제 모델 사용 없음. 전체G6·메모리·실계정/Windows/출시는 미완료이며 main 병합/push 없음.

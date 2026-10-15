@@ -854,11 +854,21 @@ impl Storage {
         aggregate_type: &str,
         aggregate_id: &str,
     ) -> Result<Vec<Map<String, Value>>, SidecarError> {
-        load_events(&self.connection)?
+        // Select before materializing: reopening one chat must not allocate
+        // every other chat's ledger. Keep row decoding and rowid order identical
+        // to the full-ledger reader used by admission/replay verification.
+        let mut statement = self.connection.prepare(
+            "SELECT event_id, operation_id, request_id, aggregate_type, aggregate_id, \
+             aggregate_sequence, event_type, payload_schema_version, canonical_json_payload, timestamp \
+             FROM events WHERE aggregate_type=?1 AND aggregate_id=?2 ORDER BY rowid;",
+        ).map_err(sqlite_error)?;
+        let events = statement
+            .query_map(params![aggregate_type, aggregate_id], ledger_event_row)
+            .map_err(sqlite_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sqlite_error)?;
+        events
             .into_iter()
-            .filter(|event| {
-                event.aggregate_type == aggregate_type && event.aggregate_id == aggregate_id
-            })
             .map(|event| {
                 let value: Value =
                     serde_json::from_str(&event.canonical_json_payload).map_err(|error| {
@@ -4426,22 +4436,24 @@ pub(crate) fn load_events(connection: &Connection) -> Result<Vec<LedgerEventV1>,
         )
         .map_err(sqlite_error)?;
     let rows = statement
-        .query_map([], |row| {
-            Ok(LedgerEventV1 {
-                event_id: row.get(0)?,
-                operation_id: row.get(1)?,
-                request_id: row.get(2)?,
-                aggregate_type: row.get(3)?,
-                aggregate_id: row.get(4)?,
-                aggregate_sequence: row_u64(row, 5)?,
-                event_type: row.get(6)?,
-                payload_schema_version: row.get(7)?,
-                canonical_json_payload: row.get(8)?,
-                timestamp: row.get(9)?,
-            })
-        })
+        .query_map([], ledger_event_row)
         .map_err(sqlite_error)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)
+}
+
+fn ledger_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<LedgerEventV1> {
+    Ok(LedgerEventV1 {
+        event_id: row.get(0)?,
+        operation_id: row.get(1)?,
+        request_id: row.get(2)?,
+        aggregate_type: row.get(3)?,
+        aggregate_id: row.get(4)?,
+        aggregate_sequence: row_u64(row, 5)?,
+        event_type: row.get(6)?,
+        payload_schema_version: row.get(7)?,
+        canonical_json_payload: row.get(8)?,
+        timestamp: row.get(9)?,
+    })
 }
 
 pub(crate) fn load_projection(connection: &Connection) -> Result<ProjectionStateV1, SidecarError> {
