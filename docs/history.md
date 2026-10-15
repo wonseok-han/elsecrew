@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-15 · by GPT-6 Astra (초기 메모리·남은 구현 경계 재확인)
+
+- 기준247c19f의 시작 경로를 읽었다. Monaco는 loadMonaco의 동적 import로 편집기 사용 때 로드되며 serveAppAsset은 net.fetch 응답 body를 streaming 전달한다. 이 경로에서 시작 시 Monaco 선로딩이나 전체 파일 별도 버퍼 복사를 발견하지 못했다. 기존 프로세스별RSS/작은 renderer heap만으로 특정 코드의 메모리 결함을 확정할 수 없어 기능·보안 설정·기준을 임의로 낮추지 않았다.
+- 상시 승인된 읽기 전용 remaining_completion_audit1명을 호출했다. 검토자의 core/provider.rs 버전 고정 지적은 main이 실제 호출 경로를 대조해 fake_executable 기반 observe_provider 및 fixture/recovery 경로임을 확인했고 검토자가 철회했다. 실제 Claude discovery/status의 parse_cli_version은 bounded SemVer, 실행은 서명된 PinnedExecutable 경로다. 고정 버전 상수를 근거 없이 제거하지 않는다. 기존 AGENTS의 오래된 제품 요약을 실제 Claude 미구현 증거로 쓰지 않으며 actual 연결 성공은 별도 실계정 검증 대상이다.
+- RSS 본10회 중8회 초과·2회 기준 이하로 정정 확인, 최대454.31MiB FAIL 유지. 추가 앱/계정 실행·fixture 생성·제품 코드 변경 없음. 기존 로그인 재사용 방식은 비차단 사용자 선택 질문으로 남겼으며 답변 전 인증 정책을 바꾸지 않는다. 다음은 원인이 입증된 성능 수정과 누락G6 계측/외부 검증이며 전체 미완료. 사용자9월 archive 보존, main 병합/push 없음.
+
 ### 2026-10-15 · by GPT-6 Astra (최신 패키지 시작·메모리 반복 실측)
 
 - 기준15ac96a에서 CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4로 pnpm m5:package 완료. 저장소 out의 기존 시험 패키지만 갱신했고 시스템 설치/실제 인증/모델 호출은 하지 않았다. 최신 --startup으로 새 프로필 첫 실행+준비1회+본10회 관측을 끝냈다. 모든 회차 정상 종료/DB 종료 표식 확인, 마지막 관측PID 부재 후 자체 userdata 정리 완료다.
