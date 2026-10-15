@@ -47,6 +47,8 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 ### 패키징 앱 외부 관측
 
+`--native-chat-stream`은 자체 작은 프로젝트에서 공개 prepare/create API로 격리 채팅4개를 만들고, `appendChatMessage`를 채팅별20ms 예정 간격·3000개씩 호출한다. 실제 preload/main/sidecar/DB를 통과한 `onChatEvent`의 ID·순서·채팅 구분과 bounded `getChat` 페이지의3000개 영속 기록을 대조한다. CAS 계약 때문에 채팅 안에서는 순차 호출하며 지연을 재시도로 숨기지 않고 실제 dispatch duration/최대 지연을 기록한다. 예정50회/초는 달성률 보장이 아니다. 유료 모델·agent.publicEvent는 사용하지 않으며256개 실행 이벤트 상한을 변경하지 않는다. 현재는 전달/저장 진단으로 active-chat paint·전체 수명 RSS·분리 자손·반복10회가 없어 전체G6 합격에 사용하지 않는다. 기존 정상 종료/DB 표식 확인 경로를 사용하고 실패 시 부분 결과를 보존한다.
+
 `--deferred-cdp`는 디버깅 client 연결 전48개 RSS 표본(250ms 간격)을 별도로 수집한 뒤 기존 관측/정상 종료를 수행하는 원인 분리 진단이다. CDP server 자체는 처음부터 켜져 있으므로 완전한 무계측 비교가 아니다. `preAttachmentMemory`는 UI 준비 상태를 확인하지 않은 시작 표본이며, 연결 후 지연된 idle 값으로 기존 초기 peak나 실패를 대체하지 않는다. 전체G6 합격에 사용하지 않는다.
 
 프로젝트 시나리오는 측정 전에 CDP로 시험 창을 앞으로 가져오고 `visibilityState=visible`을 확인한다. 측정 중 숨김 전환은 관측 실패로 남기며 같은 표본을 재시도하지 않는다. 제품 background throttling이나 프레임 deadline은 변경하지 않는다. 시험 창이 앞으로 표시되므로 사용 중인 다른 창과 포커스가 경쟁하면 실패할 수 있다.

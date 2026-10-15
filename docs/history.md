@@ -2,6 +2,12 @@
 
 ### 2026-10-15 · by GPT-6 Astra
 
+- startup_memory_review의 읽기 전용 결과를 회수했다. 시작 main/preload/renderer에서 제거 근거가 있는 retained allocation은 발견하지 못했으며 Claude fallback 오류도 권한 처리 누락 근거가 아니었다. 실제 네 채팅 workload 부재와 m5:test:performance 미등록이G6 차단으로 재확인됐다. reviewer 권고의 공개 appendChatMessage 경로를 현행 계약/sidecar와 대조했다.
+- 기준57a8750에서 --native-chat-stream 및 독립 renderer probe를 구현했다. 자체 프로젝트의4개 격리 채팅에20ms 예정 간격·3000개씩 전송하며, optimistic sequence를 위해 채팅별 순차/채팅간 병렬 호출한다. 실제 onChatEvent의 ID·순서·본문·채팅 결속과 getChat의50개 페이지를 끝까지 검증한다. 실제 dispatch duration/최대 지연을 기록하고 API 실패는 재시도하지 않는다. 실제 모델·agent.publicEvent256 상한을 건드리지 않는다.
+- Karpathy 지침으로 기존 패키지 seed/공개 bridge/정상 종료를 재사용했다. JS 문법/diff 통과, 실행 검증 전 구현 체크포인트다. 동일 검토자에게 변경 범위의 읽기 전용 정적 재검토를 요청했고 아직 결과 대기다. source는 실제 user-message IPC이며 provider 출력·active-chat paint·전체 수명RSS·분리 자손·반복10회/전체G6로 주장하지 않는다. 후속은 정적 지적 수정과 이 workload의 화면 관측 연결/묶음 실행이다. 새 빌드·계정·프로젝트 시험/저장공간 소비 없음, main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra
+
 - clean1c65ba9에서 pnpm m5:test:security를 실행해23건과 main 문법 검사 PASS/exit0를 확인했다. origin/frame·popup/webview/navigation·로컬 asset·설치/승인 IPC·CSP·sidecar staging의 자동 회귀 범위이며 전체 보안 감사나G6 완료로 확대하지 않는다. 같은 코드에서 이 검사를 추가 반복하지 않는다.
 - 상시 승인된 읽기 전용 startup_memory_review1명을 호출해 초기 메모리 비용과 전체G6 수집기의 다음 구현 경계를 검토 중이다. 실제 도구 상태running을 확인했으며 결과는 아직 없다. 메인은 native poll 및 Claude 권한 요청 경로를 대조했고, preparation/claude.rs가 Permission/RequiresHandling을 먼저 처리하므로 native/owner.rs fallback 오류 문자열만으로 도구 승인 미연결이라고 단정하지 않는다. 실행별256 public event 상한과12000 stream fixture의 관계는 실제 영속/전송 경로를 더 추적해야 하며 계약을 변경하지 않았다.
 - 새 패키지/실제 계정/모델 실행 없음, 제품 코드 변경 없음. 후속은 검토 결과 회수 후 근거 있는 성능/계측 구현, 메모리 초과·실계정/Windows·출시 검증은 계속 미완료다. main 병합/push 없음.

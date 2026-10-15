@@ -15,6 +15,7 @@ import { seedPackagedProject } from './m5-packaged-project-seed.mjs';
 import { probePackagedApplication } from './m5-packaged-application-probe.mjs';
 import { probeLargeProject } from './m5-packaged-large-project-probe.mjs';
 import { probePackagedInput } from './m5-packaged-input-probe.mjs';
+import { startPackagedChatStream } from './m5-packaged-chat-stream-probe.mjs';
 import { beginLongTaskProbe, endLongTaskProbe } from './m5-packaged-long-task-probe.mjs';
 import { probeLargeDiff } from './m5-packaged-diff-probe.mjs';
 import diffFixture from '../tests/m5-native-diff-fixture.cjs';
@@ -27,11 +28,12 @@ const largeProject = process.argv.length === 3 && process.argv[2] === '--large-p
 const memoryDiff = process.argv.length === 3 && process.argv[2] === '--memory-diff';
 const startupSeries = process.argv.length === 3 && process.argv[2] === '--startup';
 const deferredCdp = process.argv.length === 3 && process.argv[2] === '--deferred-cdp';
+const nativeChatStream = process.argv.length === 3 && process.argv[2] === '--native-chat-stream';
 const largeDiff = memoryDiff || (process.argv.length === 3 && process.argv[2] === '--large-diff');
 const diagnosticLanguage = process.argv.length === 3
   ? (process.argv[2] === '--english' ? 'en' : process.argv[2] === '--korean' ? 'ko' : undefined)
   : undefined;
-const projectFlow = largeDiff || largeProject || (process.argv.length === 3 && process.argv[2] === '--project');
+const projectFlow = nativeChatStream || largeDiff || largeProject || (process.argv.length === 3 && process.argv[2] === '--project');
 assert.ok(process.argv.length === 2 || projectFlow || diagnosticLanguage || startupSeries || deferredCdp, 'Only fixed diagnostic scenarios are accepted');
 const bundle = path.join(repo, 'out/hello-agent-darwin-arm64/hello-agent.app/Contents');
 const executable = path.join(bundle, 'MacOS/hello-agent');
@@ -241,7 +243,11 @@ try {
     await until(() => evaluate(`!![...document.querySelectorAll('.m5-files button')]
       .find(button => button.textContent.includes('hello.txt') && !button.disabled)`), largeProject ? 65000 : 15000);
     report.project.snapshotObservedMs = performance.now() - projectOpenedAt;
-    if (largeDiff) {
+    if (nativeChatStream) {
+      await evaluate(`(${startPackagedChatStream.toString()})(${JSON.stringify(report.project.projectId)})`);
+      report.nativeChatStream = await until(() => evaluate(`globalThis.__m5NativeChatStream?.status !== 'RUNNING' ? globalThis.__m5NativeChatStream : null`), 180000);
+      if (report.nativeChatStream.status === 'FAIL') report.error = report.nativeChatStream.error;
+    } else if (largeDiff) {
       const worktrees = path.join(userData, 'com.wonseokhan.helloagent/m5/worktrees-v1');
       const matches = fs.readdirSync(worktrees, {withFileTypes:true})
         .filter(entry => entry.isDirectory() && fs.existsSync(path.join(worktrees, entry.name, 'native-diff-fixture')))
@@ -359,6 +365,10 @@ try {
 } catch (error) { report.error = String(error); }
 finally {
   clearInterval(memoryTimer);
+  if (nativeChatStream && sessionId && !termination) {
+    try { report.nativeChatStream = await evaluate('globalThis.__m5NativeChatStream ?? null'); }
+    catch (error) { report.error ??= String(error); }
+  }
   if (projectFlow && sessionId && !termination) {
     try {
       report.projectVisibility = await evaluate(`(() => {
