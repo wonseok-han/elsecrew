@@ -178,7 +178,7 @@ app.whenReady().then(async () => {
       result.treeDomNodes = document.querySelector('.m5-file-list').querySelectorAll('*').length;
       // The default dock now groups Files and Changes. A hidden list reaching
       // the right row count is not evidence that the user has seen it paint.
-      [...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent === '변경' && b.getClientRects().length)?.click();
+      [...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent.startsWith('변경') && b.getClientRects().length)?.click();
       await wait(() => document.querySelector('.m5-change-row')?.getClientRects().length > 0);
       await wait(() => document.querySelectorAll('.m5-change-row').length === 100); await paint();
       result.diffSummaryMs = performance.now() - start;

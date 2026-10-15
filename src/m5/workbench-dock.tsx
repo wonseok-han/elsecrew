@@ -5,7 +5,7 @@ import { defaultDockLayout, DOCK_STORAGE_KEY, dockGeometry, focusDockPanel, PANE
 const dragType = "application/x-hello-agent-panel";
 const position = (rect: DockRect): CSSProperties => ({ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` });
 
-export function WorkbenchDock({ children, conversation, chats, reveal }: { children: ReactNode[]; conversation?: ReactNode; chats?: ReactNode; reveal?: { panel: DockPanel } | null }) {
+export function WorkbenchDock({ children, conversation, chats, reveal, changeCount }: { children: ReactNode[]; conversation?: ReactNode; chats?: ReactNode; reveal?: { panel: DockPanel } | null; changeCount?: number }) {
   const { t } = useI18n();
   const labels: Record<DockPanel, string> = { files: t("m5.dock.files"), editor: t("m5.dock.editor"), changes: t("m5.dock.changes"), conversation: t("m5.dock.conversation"), chats: t("m5.navigation.chatTitle") };
   const placements: Record<DockPlacement, string> = { left: t("m5.dock.left"), right: t("m5.dock.right"), top: t("m5.dock.top"), bottom: t("m5.dock.bottom"), tab: t("m5.dock.tab") };
@@ -64,7 +64,7 @@ export function WorkbenchDock({ children, conversation, chats, reveal }: { child
                   const next = event.key === "Home" ? 0 : event.key === "End" ? group.panels.length - 1 : event.key === "ArrowRight" ? (index + 1) % group.panels.length : event.key === "ArrowLeft" ? (index + group.panels.length - 1) % group.panels.length : -1;
                   if (next < 0) return; event.preventDefault(); const target = group.panels[next];
                   activateTab(target);
-                }} aria-label={t("m5.dock.drag", { panel: labels[tab] })}>{labels[tab]}</button>)}
+                }} aria-label={t("m5.dock.drag", { panel: tab === "changes" && changeCount !== undefined ? `${labels[tab]} (${changeCount})` : labels[tab] })}>{labels[tab]}{tab === "changes" && changeCount !== undefined && <span className="m5-dock-count" aria-hidden="true">{changeCount}</span>}</button>)}
             </div>
             <details className="m5-dock-options" onKeyDown={event => {
               if (event.key === "Escape") {

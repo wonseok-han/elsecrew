@@ -288,7 +288,7 @@ app.whenReady().then(async () => {
     await ${waitFor("!document.querySelector('[data-panel=files]').hidden", "reopen files")};
     [...document.querySelectorAll('.m5-dock-visibility button')].find(button => button.textContent === '변경').click();
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    [...document.querySelectorAll('.m5-dock-group-tabs button')].find(button => button.textContent === '변경' && button.getClientRects().length)?.click();
+    [...document.querySelectorAll('.m5-dock-group-tabs button')].find(button => button.textContent.startsWith('변경') && button.getClientRects().length)?.click();
     await ${waitFor("!document.querySelector('[data-panel=changes]').hidden", "reopen changes")};
     editorOptions.querySelector('summary').click();
     [...editorOptions.querySelectorAll('button')].find(button => button.textContent === '편집기 패널 접기').click();
@@ -482,6 +482,8 @@ app.whenReady().then(async () => {
     const changesToggle = [...document.querySelectorAll('.m5-dock-visibility button')].find(button => button.textContent === '변경');
     if (changesToggle.getAttribute('aria-pressed') === 'false') changesToggle.click();
     await ${waitFor("!document.querySelector('[data-panel=changes]').hidden", "changes visible for wrap geometry")};
+    const changeBadge = document.querySelector('[data-panel=changes] .m5-dock-count');
+    if (!changeBadge || !document.querySelector('.m5-changes').textContent.includes('변경 (' + changeBadge.textContent + ')')) throw new Error('change tab count differs from loaded summary');
     if (!wrapToggle?.checked) throw new Error('diff should wrap by default');
     const wrapText = diffBox.textContent;
     const originalDiffStyle = diffBox.getAttribute('style');
