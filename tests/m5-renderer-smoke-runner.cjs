@@ -654,6 +654,12 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-settings [role=alertdialog]')", "explicit role discard confirmation")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '설정 변경 버리고 닫기').click();
     await ${waitFor("!document.querySelector('.m5-settings')", "role settings closed")};
+    const guide = document.querySelector('.m5-project-guide');
+    if (!guide.open) guide.querySelector('summary').click();
+    await ${waitFor("document.querySelector('.m5-guide-next strong')?.textContent === '진행 확인'", "guide follows actual draft chat")};
+    if (JSON.parse(localStorage.getItem('hello-agent.m5.guide.v1:smoke_project')).chatId !== 'smoke_chat') throw new Error('guide did not pin first chat');
+    [...guide.querySelectorAll('button')].find(button => button.textContent === '안내 접고 직접 진행').click();
+    await ${waitFor("!document.querySelector('.m5-project-guide').open && JSON.parse(localStorage.getItem('hello-agent.m5.guide.v1:smoke_project')).dismissed", "guide dismissal persisted")};
     leave.click();
     await ${waitFor("!document.querySelector('#m5-followup-text') && document.querySelector('h1').textContent === '프로젝트를 선택해 시작하세요'", "project and chat view cleared")};
     [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '처음부터 다시 확인').click();
@@ -662,8 +668,12 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-project-catalog-list li span')?.textContent === '/work/smoke'", "saved project available again")};
     document.querySelector('.m5-project-catalog-list li button').click();
     await ${waitFor("document.querySelector('.m5-chat-chip')", "saved chat available again")};
-    document.querySelector('.m5-chat-chip').click();
+    if (document.querySelector('.m5-project-guide').open) throw new Error('dismissed guide reopened automatically');
+    document.querySelector('.m5-project-guide > summary').click();
+    await ${waitFor("document.querySelector('.m5-guide-next strong')?.textContent === '이전 첫 작업 이어가기'", "guide offers persisted task on reentry")};
+    [...document.querySelectorAll('.m5-guide-next button')].find(button => button.textContent === '이전 첫 작업 열기').click();
     await ${waitFor("[...document.querySelectorAll('.m5-message p')].some(node => node.textContent === '설명을 추가해 주세요.')", "chat history preserved after reopening")};
+    await ${waitFor("document.querySelector('.m5-guide-next strong')?.textContent === '진행 확인'", "resumed guide follows chat state")};
     window.m5SmokeAppendMessages(450);
     await ${waitFor("document.querySelectorAll('.m5-message').length === 200 && [...document.querySelectorAll('.m5-message p')].at(-1)?.textContent === 'history message 450'", "bounded latest conversation page")};
     const historyButton = label => [...document.querySelectorAll('.m5-timeline nav button')].find(button => button.textContent === label);
