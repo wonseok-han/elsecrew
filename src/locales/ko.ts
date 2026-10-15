@@ -352,6 +352,7 @@ export const ko = {
   "m5.navigation.page": "{page}페이지",
   "m5.navigation.next": "다음 목록",
   "m5.navigation.empty": "프로젝트를 고르면 파일을 표시해요.",
+  "m5.editor.loadingChanges": "변경된 파일을 확인하고 있어요…",
   "m5.run.title": "실제 에이전트 실행",
   "m5.run.label": "실제 에이전트 실행 상태",
   "m5.run.preparing": "준비 중",

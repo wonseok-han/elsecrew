@@ -353,6 +353,7 @@ export const en: Record<MessageKey, string> = {
   "m5.navigation.page": "Page {page}",
   "m5.navigation.next": "Next page",
   "m5.navigation.empty": "Choose a project to see its files.",
+  "m5.editor.loadingChanges": "Checking changed files…",
   "m5.run.title": "Real agent runs",
   "m5.run.label": "Real agent run status",
   "m5.run.preparing": "Preparing",

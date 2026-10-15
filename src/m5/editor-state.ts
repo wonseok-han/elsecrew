@@ -47,6 +47,7 @@ export interface EditorSnapshot {
   panel: WorkbenchPanel;
   panelRequest: { panel: WorkbenchPanel | "conversation" | "chats" } | null;
   diffSummary: DiffSummaryV1 | null;
+  diffLoading: boolean;
   diffFile: DiffFileDescriptorV1 | null;
   diffText: string;
   rescanRequired: boolean;
@@ -148,7 +149,7 @@ export class ProjectEditorController {
     activePath: null,
     panel: "files",
     panelRequest: null,
-    diffSummary: null,
+    diffLoading: false, diffSummary: null,
     diffFile: null,
     diffText: "",
     rescanRequired: false,
@@ -292,7 +293,7 @@ export class ProjectEditorController {
     const epoch = ++this.#projectEpoch;
     this.#saveGenerations.clear();
     this.#saveWatchPending.clear();
-    this.#set({ workspace, tree: [], treeParent: "", treeNextCursor: null, treePage: 1, treeLoading: false, tabs: [], activePath: null, diffSummary: null, diffFile: null, diffText: "", rescanRequired: false, error: null, ...editorNotice("m5.editorNotice.opened") });
+    this.#set({ workspace, tree: [], treeParent: "", treeNextCursor: null, treePage: 1, treeLoading: false, tabs: [], activePath: null, diffLoading: false, diffSummary: null, diffFile: null, diffText: "", rescanRequired: false, error: null, ...editorNotice("m5.editorNotice.opened") });
     try {
       // Bind in order. A failed tree must not start later diff/watch operations for B.
       await this.#loadTree(project.id, epoch, "", true);
@@ -377,7 +378,7 @@ export class ProjectEditorController {
         treeLoading: false,
         tabs: [],
         activePath: null,
-        diffSummary: null,
+        diffLoading: false, diffSummary: null,
         diffFile: null,
         diffText: "",
         rescanRequired: false,
@@ -654,7 +655,7 @@ export class ProjectEditorController {
         treeLoading: false,
         tabs: [],
         activePath: null,
-        diffSummary: null,
+        diffLoading: false, diffSummary: null,
         diffFile: null,
         diffText: "",
         rescanRequired: false,
@@ -674,7 +675,7 @@ export class ProjectEditorController {
     this.#saveGenerations.clear();
     this.#saveWatchPending.clear();
     this.#set({ project: null, workspace: null, tree: [], treeParent: "", treeNextCursor: null,
-      treePage: 1, treeLoading: false, tabs: [], activePath: null, diffSummary: null,
+      treePage: 1, treeLoading: false, tabs: [], activePath: null, diffLoading: false, diffSummary: null,
       diffFile: null, diffText: "", rescanRequired: false, error: null,
       ...editorNotice("m5.editorNotice.left") });
     return true;
@@ -691,14 +692,15 @@ export class ProjectEditorController {
     const summaryGeneration = ++this.#diffSummaryGeneration;
     // A refreshed summary cannot certify the previously fetched file content.
     this.#diffGeneration++;
-    this.#set({ diffSummary: null, diffFile: null, diffText: "" });
+    this.#set({ diffLoading: true, diffSummary: null, diffFile: null, diffText: "" });
     try {
       const workspace = this.#state.workspace;
       const diffSummary = workspace ? await this.#workspaceMethods()!.getWorkspaceDiffSummary(workspace) : await this.#bridge.getDiffSummary({ projectId });
       if (!this.#isCurrent(projectId, epoch) || !sameWorkspace(this.#state.workspace, workspace) || summaryGeneration !== this.#diffSummaryGeneration) return;
-      this.#set({ diffSummary, rescanRequired: false });
+      this.#set({ diffSummary, diffLoading: false, rescanRequired: false });
     } catch (error) {
       if (!this.#isCurrent(projectId, epoch) || summaryGeneration !== this.#diffSummaryGeneration) return;
+      this.#set({ diffLoading: false });
       this.#setError("m5.editorError.changes", error);
       if (propagate) throw error;
     }

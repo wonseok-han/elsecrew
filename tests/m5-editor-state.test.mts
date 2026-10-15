@@ -845,6 +845,7 @@ test("diff refresh requests fresh data and only the latest summary can publish",
       return request.promise;
     };
     const first = controller.refreshChanges();
+    assert.equal(controller.snapshot().diffLoading, true);
     await nextTurn();
     const latest = controller.refreshChanges();
     await nextTurn();
@@ -853,9 +854,11 @@ test("diff refresh requests fresh data and only the latest summary can publish",
     requests[0].resolve(summary);
     await first;
     assert.equal(controller.snapshot().diffSummary, null, "an older partial scan is not the requested fresh list");
+    assert.equal(controller.snapshot().diffLoading, true, "older completion must not hide the current loading state");
     requests[1].resolve(summary);
     await latest;
     assert.equal(controller.snapshot().diffSummary, summary);
+    assert.equal(controller.snapshot().diffLoading, false);
     const beforeWatch = controller.refreshChanges();
     await nextTurn();
     bridge.emitProject({ projectId: "project_01", event: "diff.changed", paths: ["src/new.ts"], rescanRequired: false });
@@ -866,6 +869,7 @@ test("diff refresh requests fresh data and only the latest summary can publish",
     requests[2].reject(new Error("late outdated failure"));
     await beforeWatch;
     assert.equal(controller.snapshot().diffSummary, summary);
+    assert.equal(controller.snapshot().diffLoading, false, "old failure must not alter the latest completion");
     assert.equal(controller.snapshot().error, null);
     const failed = controller.refreshChanges();
     await nextTurn();
@@ -873,6 +877,7 @@ test("diff refresh requests fresh data and only the latest summary can publish",
     requests[4].reject(new Error("summary unavailable"));
     await failed;
     assert.ok(controller.snapshot().error);
+    assert.equal(controller.snapshot().diffLoading, false, "failed refresh must allow retry");
   } finally { controller.dispose(); }
 });
 
