@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-15 · by GPT-6 Astra (입력 관측 시작 지연 수정)
+
+- 기준39523eb에서 packaged input probe가 CDP 입력 완료 뒤 별도 evaluate로 DOM 감시를 시작함을 확인했다. Karpathy 최소 변경으로 입력 전 MutationObserver와 trusted beforeinput 감시를 설치하고 같은 두 RAF 완료 promise를 나중에 회수한다. 5초 timeout/실패 cleanup·50ms 기준·warmup1+측정10·diagnostic 경계는 유지한다. 제품 편집/저장 코드는 변경하지 않았다.
+- 단위3 PASS: 사전 감시·untrusted 입력 제외·두 frame, dispatch 실패/timeout 정리,61ms 초과 FAIL 유지. 실제 패키지2MQtWQ에서 p95 inputPaint24.7ms, DOM7.8~8.9ms, 관측 frame14.7~16.1ms로 기준 이내. 이전51.1ms는 사후 감시 방식의 결과로 보존하며 제품이2배 빨라졌다는 주장으로 사용하지 않는다. 물리 compositor/IME/독립10세션/전체G6 증거가 아니다.
+- idle435781632B(약416MiB) 초과로 전체FAIL, 정상exit0/shutdown confirmed. /private/tmp/hello-agent-input-preinstalled-observer.log 및 root result.json/PNG 보존, 관측PID 전부 부재 후 생성3디렉터리 정리. syntax/diff PASS. 다음은 초기 메모리와 전체 성능 수집·실계정/Windows 검증이다. 사용자9월 archive 보존, main 병합/push 없음.
+
 ### 2026-10-15 · by GPT-6 Astra (네 채팅 stdio 실행·메시지 격리 회귀)
 
 - 기준00e22b5의 미커밋 회귀를 이어 마감했다. 즉시 종료 clean 시험은4건 순차 성공했지만 peak_active=1이라 중첩 검증에 실패했다. 기존 FinalDelayed는 내부 fixture에만 연결돼 stdio 인자에서 unknown으로 거절됐으므로 테스트 전용 --stdio-agent-fixture 매핑 한 줄을 추가했다. 일반 --stdio capability/실제 provider/제품 안전 제한은 변경하지 않았다.
