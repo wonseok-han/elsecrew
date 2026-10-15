@@ -66,6 +66,12 @@ async function probeInstallConsent() {
     if (panel.querySelector('#m5-install-details').hidden) throw new Error('uncertain installation hidden');
     const compactToggle = panel.querySelector('header button[aria-expanded]');
     if (compactToggle && (!compactToggle.disabled || compactToggle.getAttribute('aria-expanded') !== 'true')) throw new Error('active installation can be hidden');
+    const managementToggle = document.querySelector('.m5-management-toggle');
+    if (managementToggle) {
+      await wait(() => managementToggle.disabled && managementToggle.getAttribute('aria-expanded') === 'true');
+      managementToggle.click();
+      if (document.getElementById('m5-agent-management-content').hidden) throw new Error('uncertain installation hidden by management wrapper');
+    }
     await wait(() => button('설치 중단 요청') && !button('설치 중단 요청').disabled);
     if (starts !== 1 || !button('Codex 설치 내용 확인').disabled) throw new Error('uncertain start repeated or parallel install allowed');
     button('설치 중단 요청').click();
@@ -73,6 +79,15 @@ async function probeInstallConsent() {
     button('종료 확인된 설치 기록 정리').click();
     await wait(() => !button('Codex 설치 내용 확인').disabled);
     if (starts !== 1 || cancels !== 1 || recoveries !== 1) throw new Error('installation lifecycle call counts differ');
+    if (managementToggle) {
+      status = {...idle, state:'installed', operationId, provider:'codex'};
+      button('상태 다시 확인').click();
+      await wait(() => !managementToggle.disabled);
+      managementToggle.click();
+      await wait(() => document.getElementById('m5-agent-management-content').hidden);
+      managementToggle.click();
+      await wait(() => !document.getElementById('m5-agent-management-content').hidden);
+    }
   } finally {
     window.m5Install.request = original;
     button('상태 다시 확인').click();

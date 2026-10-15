@@ -6,9 +6,10 @@ const running = (status: InstallStatus | null) => status !== null &&
   ["starting", "downloading", "installing", "verifying", "stopping"].includes(status.state);
 
 /** One installation manager is shared by both providers. Never replay a start on transport failure. */
-export function ProviderInstall({ disabled, providers, onBlockChange, onCheck, compact = false }: {
+export function ProviderInstall({ disabled, providers, onBlockChange, onCheck, onAttention, compact = false }: {
   disabled: boolean; providers: InstallProvider[]; onBlockChange: (blocked: boolean) => void;
   onCheck: (provider: InstallProvider) => void; compact?: boolean;
+  onAttention?: (attention: boolean) => void;
 }) {
   const { t } = useI18n();
   const [status, setStatus] = useState<InstallStatus | null>(null);
@@ -55,10 +56,12 @@ export function ProviderInstall({ disabled, providers, onBlockChange, onCheck, c
     const timer = window.setInterval(() => void request({ action: "status" }), 1500);
     return () => window.clearInterval(timer);
   }, [poll, request]);
-  if (!window.m5Install) return null;
   const plan = status?.plan;
   // Presentation only: keep the manager mounted and important actions visible.
-  const needsAttention = busy || uncertain || active || Boolean(plan) || Boolean(status?.error) || status?.state === "recoveryRequired" || status?.state === "installed";
+  const actionRequired = busy || uncertain || active || Boolean(plan) || Boolean(status?.error) || status?.state === "recoveryRequired";
+  const needsAttention = actionRequired || status?.state === "installed";
+  useEffect(() => { onAttention?.(actionRequired); }, [actionRequired, onAttention]);
+  if (!window.m5Install) return null;
   const showDetails = !compact || expanded || needsAttention;
   const canPrepare = !disabled && !busy && !uncertain && status !== null && !active &&
     !["unsupported", "recoveryRequired"].includes(status.state);

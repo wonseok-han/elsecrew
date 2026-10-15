@@ -15,6 +15,8 @@ export function ProviderLogin({ disabled, compact = false }: {disabled: boolean;
   const [draft, setDraft] = useState<LoginProvider[]>([]);
   const [saveFailed, setSaveFailed] = useState(false);
   const [installBlocked, setInstallBlocked] = useState(Boolean(window.m5Install));
+  const [installAttention, setInstallAttention] = useState(false);
+  const [managementExpanded, setManagementExpanded] = useState(false);
   const [checks, setChecks] = useState({ codex: 0, claude: 0 });
   const [step, setStep] = useState<"agents" | "install" | "login">("agents");
   const [loginAttention, setLoginAttention] = useState({ codex: false, claude: false });
@@ -22,6 +24,8 @@ export function ProviderLogin({ disabled, compact = false }: {disabled: boolean;
     setLoginAttention(current => current[provider] === attention ? current : { ...current, [provider]: attention });
   }, []);
   const loginNeedsAttention = selected.some(provider => loginAttention[provider]);
+  const needsAttention = installBlocked || installAttention || loginNeedsAttention || saveFailed;
+  const showManagement = !compact || managementExpanded || needsAttention;
   const navigate = (next: typeof step) => { if (!installBlocked) setStep(next); };
   const select = (providers: LoginProvider[]) => {
     if (disabled) return;
@@ -30,7 +34,11 @@ export function ProviderLogin({ disabled, compact = false }: {disabled: boolean;
     setSelectionExpanded(false);
     setStep("install");
   };
-  return <>
+  return <section className={compact ? "m5-agent-management m5-agent-management-compact" : "m5-agent-management"}>
+    {compact && <button className="m5-management-toggle" type="button" aria-expanded={showManagement} aria-controls="m5-agent-management-content" disabled={needsAttention} onClick={() => setManagementExpanded(value => !value)}>
+      {t("m5.setup.management")}<span>{t(needsAttention ? "m5.setup.managementAttention" : showManagement ? "m5.setup.managementHide" : "m5.setup.managementShow")}</span>
+    </button>}
+    <div id="m5-agent-management-content" hidden={!showManagement}>
     {!compact && <nav className="m5-setup-navigation" aria-label={t("m5.setup.steps.label")}>
       {(["agents", "install", "login"] as const).map((item, index) => <button type="button" key={item}
         aria-current={step === item ? "step" : undefined}
@@ -61,7 +69,7 @@ export function ProviderLogin({ disabled, compact = false }: {disabled: boolean;
     </div>
     {!selectionExpanded && saveFailed && <p className="m5-notice" role="status">{t("m5.setup.agents.saveFailed")}</p>}
     <div hidden={!compact && step !== "install" && !installBlocked}>
-    <ProviderInstall disabled={disabled} providers={selected} compact={compact} onBlockChange={setInstallBlocked}
+    <ProviderInstall disabled={disabled} providers={selected} compact={compact} onBlockChange={setInstallBlocked} onAttention={setInstallAttention}
       onCheck={provider => { setChecks(current => ({ ...current, [provider]: current[provider] + 1 })); setStep("login"); }}/>
     {!compact && <div className="m5-setup-next"><p>{t("m5.setup.steps.installHelp")}</p><button type="button" disabled={installBlocked || selected.length === 0} onClick={() => navigate("login")}>{t("m5.setup.steps.toLogin")}</button></div>}
     </div>
@@ -69,7 +77,8 @@ export function ProviderLogin({ disabled, compact = false }: {disabled: boolean;
     {LOGIN_PROVIDERS.filter(provider => selected.includes(provider)).map(provider => <ProviderConnection key={`${provider}:${checks[provider]}`} disabled={disabled || installBlocked} provider={provider} onAttention={reportLoginAttention}/>)}
     {!compact && <p className="m5-setup-next">{t("m5.setup.steps.projectHelp")}</p>}
     </div>
-  </>;
+    </div>
+  </section>;
 }
 function DeviceCheck({ compact }: { compact: boolean }) {
   const { lang, t } = useI18n();

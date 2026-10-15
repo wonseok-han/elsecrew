@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-15 · by GPT-6 Astra (작업대 설정 영역 접기·완료 격차 검토)
+
+- 기준f26dde4에서 상시 승인된 읽기 전용 ui_completion_audit 검토자1명을 호출했다. 제품 제안/시안 대비 첫 실제 작업의 단계별 진행·재진입 안내와 좁은 창의 편집/대화 탭 전환이 구현 격차로 지적됐다. 현재 정적 시작/프로젝트 안내나 수동 dock 배치가 해당 흐름 전체를 충족한다고 주장하지 않는다. 후속 구현은 이 두 항목을 우선하며 임의 기능 추가로 범위를 늘리지 않는다.
+- 프로젝트 작업대의 기기/선택/설치/로그인 카드를 한 줄 연결·관리 영역으로 접고 명시적으로 다시 열도록 연결했다. DOM/컴포넌트는 계속 유지한다. 설치 plan/실행/불확실/오류/복구·로그인 attention·선택 저장 실패는 강제 펼침/접기 금지로 전달한다. 첫 설정 화면은 종전 단계 흐름을 유지한다. Karpathy/React 지침으로 backend·동의·실행 로직은 변경하지 않았다.
+- 검토자가 terminal installed까지 바깥 접기를 막는 결함을 지적해 actionRequired와 내부 needsAttention을 분리했다. 설치 성공은 내부 로그인 확인 안내를 유지하지만 바깥 접기는 허용한다. TypeScript/빌드 통과 및 최신 Chromium2 PASS로 기본 접힘/재열기·설치 응답 유실 시 접기 금지·installed 후 접기/펼치기 회귀를 확인했다. ui_completion_audit 수정 재검토는 정적 APPROVE이며 자체 실행 검증과 구분한다. 실제 계정/설치 미사용, 사용자9월 archive 보존, 전체 UI·G6·실계정/Windows 미완료, main 병합/push 없음.
+
 ### 2026-10-15 · by GPT-6 Astra (변경 패널 통합 회귀)
 
 - 기준0aaa2c8의 TypeScript 검사와 renderer Vite 빌드 통과. editor-state57 PASS로 최신/과거 diff 응답의 loading 상태·실패 후 재시도 상태와 기존 프로젝트/저장/stream 회귀를 확인했다. Chromium 작업대 묶음2 PASS/13.9초로 탭 수량과 실제 패널 수량 일치, 기존 편집/패널 이동 흐름을 확인했다. 같은 검사 추가 반복 없음.

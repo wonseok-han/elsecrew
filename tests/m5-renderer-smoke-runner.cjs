@@ -196,6 +196,9 @@ app.whenReady().then(async () => {
     if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/smoke') throw new Error('catalog path missing');
     document.querySelector('.m5-project-catalog-list li button').click();
     await ${waitFor("document.querySelector('.m5-file-row')", "project tree")};
+    await ${waitFor("document.getElementById('m5-agent-management-content')?.hidden", "setup management collapsed in workbench")};
+    document.querySelector('.m5-management-toggle').click();
+    await ${waitFor("!document.getElementById('m5-agent-management-content').hidden", "setup management explicitly reopened")};
     await ${waitFor("document.querySelector('.m5-project-guide')?.open === true", "guide initially open before work")};
     [...document.querySelectorAll('.m5-dock-group-tabs button')].find(button => button.textContent === '파일' && button.getClientRects().length).click();
     await ${waitFor("document.getElementById('m5-install-details')?.hidden", "installation controls compact in workbench")};
