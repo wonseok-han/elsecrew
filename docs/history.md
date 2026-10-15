@@ -2,6 +2,12 @@
 
 ### 2026-10-15 · by GPT-6 Astra
 
+- 사용자 승인 후 기존9월 archive의21줄 추가를 검토해57f8e3b에 해당 파일만 원문 그대로 커밋했다. 당시 로그인 복구·정책 승인 대기 기록이며 현재 미완료 상태로 재해석하지 않는다. claude-md-improver의 앞선 품질 보고/승인에 따라 AGENTS.md·CLAUDE.md 제품 상태와 코드 지도4개 항목만 동기화했다. 실제 공급자 경로 구현과 Claude 실작업 미검증을 구분하고 운영·안전·승인 규칙은 유지한다.
+- 3369973의 긴 작업 관측 순수 회귀4건 PASS. 기존 패키지로 tree-file 반복 진단을 실행해 준비1회+본5회를 수집했다. 본6회차는 aaa-tree의 frames 대기에서 visibility:hidden/frames0으로 renderer 표현식 실패, 앱은 종료0/DB 종료 확인 뒤 collector가 중단됐다. 본10회 미완료이므로 p95/합격을 만들지 않았다. 앞선 정상 관측에서도 idle RSS 초과 FAIL은 유지한다.
+- 증거는 OS 임시 hello-agent-packaged-performance-NseA5f 및 각 trial의 JSON/로그다. 완료6개 회차 자체 fixture는 종료 후 정리됐고 실패한 hello-agent-packaged-ui-Z77Zsm은 재현용 보존했다. 새 빌드/실제 계정/모델/사용자 프로젝트 사용 없음. 다음은 hidden-window 관측 실패 진단과 남은G6·메모리·실계정/Windows 검증이며 전체 미완료, main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra
+
 - 기준0e8ff59의 패키지 반복 측정기가 기존 rendererLongTasks를 집계하지 않음을 확인해 원시 entry/최대값/200ms 초과 개수 대조를 연결했다. 미지원·관측 미완료·overflow·요약 불일치는0으로 만들지 않고 중단한다. 완전 관측한 기준 초과는 회차를 버리지 않고 FAIL로 보존하며 본10회 최대값을 기록한다. 시작/main 구간의 누락은 그대로 명시했다.
 - 요약 불일치·미완료·빈 정상 관측·기준 초과의 순수 회귀를 추가했다. 구현 우선 방침에 따라 이번에는 JS 문법·diff 검사만 수행했고 새 회귀 실행과 실제 반복 관측은 후속 묶음 검증 대상이다. 제품 코드·기준·인증 정책 변경 없음. 기존 사용자9월 archive 보존, main 병합/push 없음. 전체G6·메모리 초과·실계정/Windows·출시 검증은 미완료다.
 

@@ -62,9 +62,9 @@
 - 플랫폼: macOS + Windows
 - UI: 한국어·영어 전환. 현재 구현 이름은 `Hello, Agent`, M5 새 이름은 개발과 분리해 보류
 - 현행 구조: 재방문용 홈베이스 + 6단계 위저드(에이전트 → 진단 → 설치 → 로그인 → 프로젝트 → 첫 대화) + macOS M4 `HandoffPilot`
-- M5 현행 골격: Electron + React/TypeScript + Monaco 셸과 Rust sidecar에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·채팅별 standalone snapshot·코드 편집/diff·기존 G5 fixture 실행/복구를 구현했다. 테스트 전용 `--stdio-agent-fixture`에서만 fake actual-agent provider가 exact G5A를 협상하며, G5B의 normalized public/terminal event·자원 예산과 G5C의 provider 발견/실행 전 검증·restart-atomic recovery까지 Electron V5와 renderer에 연결한다. 제품 `--stdio`는 G5D 저장 수명 및 후속 메시지 확장에 고정 `provider.login`을 추가한다. macOS Codex 0.153.4의 앱 전용 로그인 UI/실행을 연결했으며 실제 계정 인증은 사용자 검증 대상이다. Claude 로그인과 실제 모델 작업/출력은 아직 연결되지 않았다
+- M5 현행 구현: Electron + React/TypeScript + Monaco와 Rust sidecar에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·채팅별 standalone snapshot·편집/diff·명시 반영/복원 흐름을 연결했다. macOS Codex·Claude Code의 앱 전용 로그인·모델 조회·실제 실행 adapter와 설치/업데이트 경로가 있으며 기존 터미널 인증을 자동 재사용하지 않는다. fixture 실행과 실제 공급자 실행은 분리한다. 구현 존재와 실제 계정/플랫폼 검증 완료는 구분하며 최신 증거는 `docs/history.md`에서 확인한다.
 - 홈베이스: 프로젝트 폴더 스캔, 에이전트 설치·로그인 상태, 업데이트 확인
-- 상태: M0~M3와 주요 오류 복구, M4 파일럿 완료. M5 G1~G5 macOS fixture gate `G5_READY`, G5A `G5A_READY`, G5B `G5B_READY`, G5C provider discovery·launch attestation/recovery 최종 gate `G5C_READY`를 완료했다. 실제 Claude Code/Codex adapter, G6 보안/패키징/성능, Windows 안전 게이트, 출시 후보 검증과 서명/배포 결정이 남음
+- 상태: M0~M3와 주요 오류 복구, M4 파일럿 완료. M5 G1~G5 macOS fixture gate `G5_READY`, G5A `G5A_READY`, G5B `G5B_READY`, G5C `G5C_READY` 기록은 유지한다. macOS Codex의 작은 planning 응답은 확인했으나 Claude 실제 작업 성공·두 공급자의 도구 쓰기/중단/복구 전체는 미검증이다. G6 성능 수집 누락·메모리 기준 초과, Windows 안전/패키지 검증, 출시 후보 검증과 서명/배포 결정이 남는다. Windows 실제 에이전트 실행은 비활성이다.
 
 ## 코드 지도
 
@@ -74,9 +74,9 @@
 - `src/store.ts`: 기준 폴더와 프로젝트 최근 사용 시각 저장
 - `src-tauri/src/agent.rs`: 에이전트별 설치·감지·로그인 레시피
 - `src-tauri/src/{detect,install,login,project,status,editor,error}.rs`: 시스템 기능
-- `crates/hello-agent-{core,protocol,sidecar}`: 공용 Rust 안전 코어, 언어 중립 계약, SQLite·snapshot·채팅·fixture와 G5A~G5C fake actual-agent 실행·terminal·예산·provider 검증·원자 복구 sidecar
+- `crates/hello-agent-{core,protocol,sidecar}`: 공용 Rust 안전 코어·계약, SQLite·snapshot·채팅·fixture 및 실제 공급자 adapter, 로그인/설치·실행/종료·반영/복원·백업 관리 sidecar
 - `electron/`: Electron main/preload, 고정 typed IPC와 sidecar 수명주기·패키징
-- `src/m5/`, `src/m5/contracts/`: Monaco 채팅 작업대와 V1~V5 bridge·프로젝트/채팅/실행/복구·정규화 공개/terminal event·자원 예산 계약
+- `src/m5/`, `src/m5/contracts/`: Monaco 채팅 작업대와 V1~V7 bridge·프로젝트/채팅/실행/복구·저장 수명·정규화 event·실제 공급자 및 변경 반영 계약
 - `website/`: 별도 Vinext/OpenAI Sites 소개 웹사이트
 - `docs/README.md`: 문서 색인과 분류 규칙. 어느 문서를 언제 여는지
 - `.codex/config.toml`, `.codex/agents/`: 프로젝트 전용 서브에이전트 동시 실행 상한과 M5 역할·모델·권한 설정
