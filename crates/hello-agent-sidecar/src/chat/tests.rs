@@ -12,6 +12,31 @@ use tempfile::TempDir;
 mod claude_native;
 
 #[test]
+fn workspace_watchers_progress_fairly_one_per_poll() {
+    let mut fixture = Fixture::new();
+    let mut chats = Vec::new();
+    for index in 0..4 {
+        let snapshot = fixture.snapshot(&format!("req_fair_snapshot_{index}"));
+        let chat = fixture.create_chat(&snapshot, "watch fairness", &format!("req_fair_chat_{index}"));
+        fixture.projects.workspace_watch(&fixture.storage, &address_from_chat(&chat).unwrap()).unwrap();
+        let root = std::path::Path::new(snapshot["worktreePath"].as_str().unwrap());
+        fs::write(root.join("src/value.txt"), b"changed value").unwrap();
+        chats.push(chat["chatId"].as_str().unwrap().to_string());
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for _ in 0..4 {
+        let events = fixture.projects.poll_watchers(&fixture.storage);
+        assert_eq!(events.len(), 1, "one watcher must not monopolize the next turn");
+        let id = events[0].payload["chatId"].as_str().unwrap().to_string();
+        assert!(seen.insert(id), "a watcher was repeated before its peers");
+    }
+    assert_eq!(seen, chats.into_iter().collect());
+    for _ in 0..4 {
+        assert!(fixture.projects.poll_watchers(&fixture.storage).is_empty());
+    }
+}
+
+#[test]
 fn oversized_workspace_watch_preserves_address_and_requests_rescan() {
     let mut f = Fixture::new();
     let snapshot = f.snapshot("req_watch_large_snapshot");

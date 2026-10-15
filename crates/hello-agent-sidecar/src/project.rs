@@ -356,6 +356,7 @@ pub struct ProjectManager {
     save_staging_dir: Dir,
     pending_saves: HashMap<String, PendingSave>,
     watchers: HashMap<String, WatchState>,
+    last_polled_watcher: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -863,6 +864,7 @@ impl ProjectManager {
             save_staging_dir,
             pending_saves: HashMap::new(),
             watchers: HashMap::new(),
+            last_polled_watcher: None,
         })
     }
 
@@ -2421,9 +2423,18 @@ impl ProjectManager {
     }
 
     pub fn poll_watchers(&mut self, storage: &Storage) -> Vec<WatchEmission> {
-        let project_ids = self.watchers.keys().cloned().collect::<Vec<_>>();
+        // One fully revalidated watcher per dispatcher turn. A per-watcher
+        // scan budget alone lets many chats monopolize the request loop.
+        // Sort keys so HashMap iteration order cannot starve a watcher; a
+        // removed cursor still advances to its successor, then wraps.
+        let mut project_ids = self.watchers.keys().cloned().collect::<Vec<_>>();
+        project_ids.sort();
+        let next = project_ids.iter().find(|key| {
+            self.last_polled_watcher.as_ref().is_none_or(|last| *key > last)
+        }).or_else(|| project_ids.first()).cloned();
+        self.last_polled_watcher = next.clone();
         let mut emitted = Vec::new();
-        for project_id in project_ids {
+        for project_id in next.into_iter() {
             let workspace = self
                 .watchers
                 .get(&project_id)
@@ -2528,6 +2539,7 @@ impl ProjectManager {
 
     pub fn stop_watchers(&mut self) {
         self.watchers.clear();
+        self.last_polled_watcher = None;
     }
 
     pub fn diff_summary(

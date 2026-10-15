@@ -2,6 +2,12 @@
 
 ### 2026-10-15 · by GPT-6 Astra
 
+- 기준ba0e92d에서 stdio 응답 뒤 poll_watchers가 등록된 모든 watcher에 validate_workspace_address(Git HEAD/index/fsck/remotes 포함)를 연속 실행함을 확인했다. 앞선60ms대 검사 비용이 채팅 수만큼 한 dispatcher 회차에 누적되는 경로다. 마지막 정렬 키 다음의 watcher 한 개씩 순환하도록 수정했으며 삭제된 커서의 successor/wrap·전체 중지 커서 초기화를 포함한다. 각 선택의 기존 신원/lock/Git/held-path 재검증은 유지하고 안전 결과를 캐시하지 않는다.
+- 네 실제 fixture 채팅의 변경이4회 poll 안에 각각 한 번 도착하고 다음 순환은 조용함을 회귀로 추가했다. 최신 release watcher 관련10건 PASS/0 FAIL(8.06초), diff 검사 통과. 초기 Option-loop 경고는 명시 into_iter로 제거했다. 단일 watcher 검증의 벽시계 비용은 남으며 전체 패키지 전달 지연 개선/200 events/sec/G6 합격은 아직 측정하지 않았다.
+- Karpathy 최소 변경으로 watcher scheduling만 수정하고 현행 구조 문서에 개별 알림 주기가 watcher 수에 따라 늘어나는 한계를 명시했다. 기존 읽기 전용 startup_memory_review가 순환/삭제/중지와 선택 회차의 검증·실패 경계를 확인해 차단 결함 없음으로 회신했다. 자체 TempDir·기존 release 캐시만 사용, 실제 계정/모델·사용자 프로젝트·main 병합/push 없음. 다음은 최신 패키지 묶음 검증이며 메모리/G6·실계정/Windows·출시는 계속 미완료다.
+
+### 2026-10-15 · by GPT-6 Astra
+
 - 기준b9106da에서 aggregate_event_payloads가 모든 프로젝트/채팅의 원장을 load_events로 읽고 뒤늦게 필터함을 확인했다. 요청 aggregate_type/id를 bound SQL로 먼저 선택하도록 변경하고 기존10개 열 디코더와 rowid 순서를 공유했다. getChat 페이지와 actual resolve_prompt의 불필요한 타 채팅 행 할당을 줄이는 변경이며 Git 작업공간 검사·쓰기 transaction·시작 전체 원장 무결성 검사는 그대로다. append 지연 해소나 정식 성능 합격으로 주장하지 않는다.
 - reader 회귀는 교차 type/id·삽입 순서·없는 대상/SQL 문구 입력·잘못된 JSON/비객체 거절을 검증한다. 첫 회귀의 UPDATE 손상 주입은 기존 append-only trigger에 거부됐고, 테스트만 별도 malformed 행 INSERT로 수정했다. 최신 release reader/actual foreign-input·stale-evidence 거절/chat durable page3건 PASS, diff 검사 통과. 전체 누적 테스트·패키지 재빌드는 반복하지 않았으며 현행 패키지에는 아직 이 변경이 없다.
 - 동일 읽기 전용 startup_memory_review가 입력 구성 경로까지 검토해 차단 결함 없음으로 회신했다. 선택 행의 디코딩/순서/오류 및 시작 전체 검증 보존을 확인한 정적 결과다. 자체 TempDir 시험만 사용했고 release 캐시357MB/실제 계정·모델·사용자 프로젝트 사용 없음. Karpathy 최소 변경으로 읽기 경로에 한정했으며 이후 Git/IPC 비용·전체G6·메모리·실계정/Windows·출시 검증은 미완료다. main 병합/push 없음.
