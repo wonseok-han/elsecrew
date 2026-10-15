@@ -25,12 +25,13 @@ assert.equal(process.platform, 'darwin');
 assert.equal(process.arch, 'arm64');
 const largeProject = process.argv.length === 3 && process.argv[2] === '--large-project';
 const memoryDiff = process.argv.length === 3 && process.argv[2] === '--memory-diff';
+const startupSeries = process.argv.length === 3 && process.argv[2] === '--startup';
 const largeDiff = memoryDiff || (process.argv.length === 3 && process.argv[2] === '--large-diff');
 const diagnosticLanguage = process.argv.length === 3
   ? (process.argv[2] === '--english' ? 'en' : process.argv[2] === '--korean' ? 'ko' : undefined)
   : undefined;
 const projectFlow = largeDiff || largeProject || (process.argv.length === 3 && process.argv[2] === '--project');
-assert.ok(process.argv.length === 2 || projectFlow || diagnosticLanguage, 'Only fixed diagnostic scenarios are accepted');
+assert.ok(process.argv.length === 2 || projectFlow || diagnosticLanguage || startupSeries, 'Only fixed diagnostic scenarios are accepted');
 const bundle = path.join(repo, 'out/hello-agent-darwin-arm64/hello-agent.app/Contents');
 const executable = path.join(bundle, 'MacOS/hello-agent');
 const resources = path.join(bundle, 'Resources');
@@ -68,8 +69,8 @@ if (projectFlow) {
     throw error; // Do not start an app after an uncertain seed shutdown.
   }
 }
-async function observe(report, resume = false) {
-const persist = () => fs.writeFileSync(path.join(root, resume ? 'restart.json' : 'result.json'), JSON.stringify(report, null, 2));
+async function observe(report, resume = false, resultFile = resume ? 'restart.json' : 'result.json') {
+const persist = () => fs.writeFileSync(path.join(root, resultFile), JSON.stringify(report, null, 2));
 const started = performance.now();
 const child = spawn(executable, [`--user-data-dir=${userData}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], {
   cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'],
@@ -376,6 +377,65 @@ finally {
 }
 }
 await observe(report);
+let startup;
+if (startupSeries) {
+  startup = {schemaVersion:1, diagnostic:true, gateEligible:false, status:'RUNNING',
+    root, head:report.head, cold:report, warmupRuns:1, measuredRuns:10, trials:[],
+    limitations:['CDP polling includes observer attachment and query latency; not exact application readiness timestamps.',
+      'First launch includes migration; subsequent launches reuse this generated empty project database.',
+      'Warm labels distinguish repeated launches, not a guarantee about operating-system caches.',
+      'This is a startup-only diagnostic, not the complete G6 gate.']};
+  const saveStartup = () => fs.writeFileSync(path.join(root, 'startup-series.json'), JSON.stringify(startup, null, 2));
+  saveStartup();
+  try {
+    let previous = report;
+    for (let index = 0; index <= startup.measuredRuns; index++) {
+      assert.equal(previous.shutdown, 'confirmed', 'Previous app shutdown not confirmed');
+      assert.deepEqual(previous.termination, {code:0, signal:null});
+      assert.ok(!previous.error, 'Previous startup observation incomplete');
+      assert.equal(git('rev-parse', 'HEAD'), report.head);
+      assert.equal(git('status', '--porcelain'), report.gitStatusBefore);
+      assert.equal(createHash('sha256').update(fs.readFileSync(path.join(resources, 'app.asar'))).digest('hex'), report.asarSha256);
+      assert.equal(createHash('sha256').update(fs.readFileSync(path.join(resources, 'sidecar/hello-agent-sidecar'))).digest('hex'), report.sidecarSha256);
+      const live = new Set(execFileSync('/bin/ps', ['-axo', 'pid='], {encoding:'utf8'}).trim().split(/\s+/).map(Number));
+      assert.ok([previous.pid, ...previous.memory.flatMap(row => row.processes.map(process => process.pid))].every(pid => !live.has(pid)), 'Previous observed process still live');
+      const current = {...report, status:'RUNNING', measuredAt:new Date().toISOString(), memory:[], shutdown:'pending',
+        previousSidecarInstanceId:previous.sidecarInstanceId,
+        limitations:[...startup.limitations], error:undefined, termination:undefined};
+      for (const key of ['pid', 'sidecarInstanceId', 'storageObservedMs', 'uiObservedMs', 'ui', 'idleRssBytes', 'idleRssWithinLimit', 'quitReplyError', 'shutdownError']) delete current[key];
+      startup.trials.push({index, warmup:index === 0, result:current});
+      saveStartup();
+      await observe(current, true, `startup-${index}.json`);
+      saveStartup();
+      previous = current;
+      assert.equal(current.shutdown, 'confirmed');
+      assert.deepEqual(current.termination, {code:0, signal:null});
+      assert.ok(!current.error, 'Startup observation incomplete');
+    }
+    const measured = startup.trials.filter(trial => !trial.warmup);
+    startup.metrics = {};
+    for (const metric of ['storageObservedMs', 'uiObservedMs', 'idleRssBytes']) {
+      const values = measured.map(trial => trial.result[metric]);
+      assert.equal(values.length, 10);
+      assert.ok(values.every(value => Number.isFinite(value) && value >= 0));
+      startup.metrics[metric] = metric === 'idleRssBytes' ? {values, maximum:Math.max(...values)} : {values, p95:Math.max(...values)};
+    }
+    // Observer overhead can prove an upper bound, not the exact time a UI
+    // became ready. Keep the raw names; never relabel these as G6 timings.
+    startup.status = [report, ...startup.trials.map(trial => trial.result)].some(result => result.status === 'FAIL') ? 'FAIL' : 'NOT_READY';
+    const live = new Set(execFileSync('/bin/ps', ['-axo', 'pid='], {encoding:'utf8'}).trim().split(/\s+/).map(Number));
+    const observations = [report, ...startup.trials.map(trial => trial.result)];
+    assert.ok(observations.flatMap(result => [result.pid, ...result.memory.flatMap(row => row.processes.map(process => process.pid))]).every(pid => !live.has(pid)), 'Observed process still live; profile retained');
+    // This profile was created in this invocation, never supplied by a caller.
+    // Keep all JSON/PNG evidence, including known memory failures.
+    assert.ok(fs.lstatSync(userData).isDirectory() && !fs.lstatSync(userData).isSymbolicLink());
+    assert.equal(fs.realpathSync(userData), path.join(fs.realpathSync(root), 'userdata'));
+    fs.rmSync(userData, {recursive:true});
+    startup.fixtureCleaned = true;
+  } catch (error) { startup.status = 'FAIL'; startup.error = String(error); }
+  finally { startup.headAfter = git('rev-parse', 'HEAD'); saveStartup(); }
+  console.log(JSON.stringify({stage:'STARTUP_SERIES_FINISHED', root, status:startup.status, metrics:startup.metrics, error:startup.error}));
+}
 let restart;
 if (projectFlow && report.shutdown === 'confirmed' && !report.error && report.project.savedDiffVisible) {
   restart = {
@@ -389,4 +449,4 @@ if (projectFlow && report.shutdown === 'confirmed' && !report.error && report.pr
   };
   await observe(restart, true);
 }
-process.exitCode = report.status === 'FAIL' || restart?.status === 'FAIL' ? 1 : 2;
+process.exitCode = report.status === 'FAIL' || restart?.status === 'FAIL' || startup?.status === 'FAIL' ? 1 : 2;

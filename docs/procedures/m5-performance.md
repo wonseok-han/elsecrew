@@ -47,6 +47,10 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 ### 패키징 앱 외부 관측
 
+`pnpm m5:smoke:packaged-ui --startup`은 새 임시 프로필의 최초 실행을 `result.json`에 남기고, 동일 프로필에서 준비1회+측정10회를 `startup-0.json`~`startup-10.json`에 기록한다. 합계는 `startup-series.json`이다. 각 앱은 종료0·DB 종료 표식·관측 PID 부재를 확인한 뒤 다음 앱을 시작한다. HEAD/워킹 트리 상태와 실제 패키지 산출물이 도중에 바뀌면 중단한다. 완전 관측 후 종료가 확인된 자체 userdata만 정리하며 JSON/PNG를 보존한다. 앱당 idle RSS 관측10초가 있어 총2분 이상 필요하다.
+
+`storageObservedMs`/`uiObservedMs`의 본10회p95와 idle RSS 최대값을 기록한다. CDP 연결·poll 지연을 포함한 관측 시각이므로 `sidecarReadyMs`/`appInteractiveMs`로 이름을 바꾸거나 정확한 제품 준비 시간으로 사용하지 않는다. 최초 실행은 migration을 포함하고 반복 실행의 warm 명칭은 OS 캐시 상태를 보장하지 않는다. 한도 초과는 FAIL로 보존하며 이 시작 전용 진단만으로G6 PASS를 내지 않는다.
+
 `node scripts/m5-packaged-performance.mjs --diff` 또는 `--tree-file`는 같은 packaged 관측기를 순차11회 실행한다(준비1회+본10회). HEAD와 실제 asar/sidecar 지문을 대조하고 본 측정10값의 nearest-rank p95(최대값)를 기록한다. 정상 종료와 관측 PID 부재를 확인한 trial만 자체 project/other-project/userdata를 정리하며 JSON/PNG/로그는 보존한다. 불완전 관측·불확실 종료는 중단하고 다음 앱을 시작하지 않는다. 확인된 개별 지연/메모리 초과는 전체 FAIL로 유지하며, 모든 수치가 기준 이내여도 이 부분 수집기는 NOT_READY다. migration·CDP 등 기존 한계와 누락 G6 항목은 그대로다.
 
 `node scripts/m5-packaged-performance.mjs --memory-diff`는 같은 순차11회 방식으로 대형 diff 열기→프로젝트 닫기→60초 대기 후 메모리를 수집한다. 각 trial의 원시 RSS 표본에서 idle/peak/retained를 다시 계산해 보고값과 대조하고, 본 측정10회의 **maximum**을 기록한다(p95 아님). 각 trial의 수명 전체에서 관측한 PID가 모두 종료됐는지 확인한 뒤 자체 fixture를 정리한다. 60초 대기만 총11분 이상 필요하므로 다른 무거운 시험과 동시에 실행하지 않는다. 현재 자손의250ms 표본이며 탈출 프로세스·표본 사이 peak·다른 대형 fixture 동시 부하는 포함하지 않는다. 전체 G6 collector나 합격 증거로 취급하지 않는다.

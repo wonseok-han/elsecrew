@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-15 · by GPT-6 Astra (패키지 시작 반복 관측 연결)
+
+- 기준79b1824에서 패키지 단발 시작 관측에 --startup을 연결했다. 새 프로필 최초 실행과 동일 프로필의 준비1회+본10회를 분리하며, 기존 실제 bridge 준비 조회·활성 프로젝트 선택 버튼·RSS·정상 종료와 DB 종료 표식을 재사용한다. 각 실행 전 HEAD/dirty 상태·패키지 산출물 동일성과 이전 관측 PID 부재를 확인한다. 불완전 관측/종료면 다음 실행을 시작하지 않는다.
+- Karpathy 지침으로 새 제품 IPC나 준비 완료 추정을 추가하지 않았다. CDP overhead를 포함한 storageObservedMs/uiObservedMs 이름을 유지해 정식G6 준비 시간으로 둔갑시키지 않으며 cold/warm OS 캐시 한계를 명시했다. 완전 관측 뒤 자체 userdata만 정리하고JSON/PNG/FAIL 증거는 보존한다. 문법/diff 검사만 수행하고 실제 반복 실행은 최신 패키지 준비 후 묶음 검증 대상으로 남겼다.
+- 사용자9월 archive·실제 인증/프로젝트 보존, 큰 fixture나 새 설치본 생성 없음. 메모리 초과·전체G6 collector·실계정/Windows/출시 검증은 여전히 미완료이며 main 병합/push 없음.
+
 ### 2026-10-15 · by GPT-6 Astra (반복 패키지 메모리 수집 연결)
 
 - 기준ff4102f에서 남은 성능 경로를 확인했다. 전체G6 수집기는 여전히 없으며 기존 반복 collector는 diff/tree-file만 지원한다. 단발 memory-diff 관측을 순차 준비1회+본10회에 연결하고60초 retention 대기·원시 표본 재계산/요약 일치·기존400/800/120MiB 한도와 diagnostic/NOT_READY 경계를 유지했다. 메모리는p95가 아닌 본 측정 maximum으로 기록한다.
