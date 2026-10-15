@@ -211,6 +211,12 @@
 - 검증: chat UI state·번역 Node 21 PASS, TypeScript noEmit·renderer build PASS, Chromium 2 PASS(4.42초). 언어 전환 후 동일 textarea/한국어 초안·기존 본문 보존과 영어 화면에서 한국어 후속 메시지 단일 저장을 확인했다. 중단 전 session99895의 정상 종료 결과를 회수했으며 중복 실행하지 않았다. diff check PASS, 기존 Monaco chunk 경고 유지.
 - 직접 diff 검토 후 해당 구현과 기록만 선택 커밋한다. 미승인 원본 정책과 별도 로그인 상태 기록은 보존한다. 다음은 채팅 목록/실행 상세/승인 카드와 파일·변경 화면의 번역, 원본 반영 정책 결정이다. 실제 계정/모델·main 병합/push 없음. 앱 전체 완료 아님.
 
+### 2026-09-30 · by GPT-6 Astra (사용자 요청 로그인 복구 상태 확인)
+
+- 개발 앱 종료·복구 요청에 따라 프로세스를 다시 조회했다. 개발 Electron·Vite·제품 sidecar는 실행 중이 아니며 VS Code/Cursor crash handler만 검색돼 종료하지 않았다. 최초 sandbox ps 거절 뒤 권한 있는 읽기 전용 조회로 확인했다.
+- 활성 codex-login.pending은 없고 보존 pending inode168613811·helper inode166226396이 기존 기록과 일치한다. auth.json 내용은 읽지 않았으며 권한0600을 확인했다. 이미 보존 복구된 상태여서 추가 이동·삭제·인증 초기화·재부팅은 하지 않았다. 실제 재로그인 성공은 미검증이며 다음은 앱 재실행 후 연결 확인이다.
+- 기존 UI 번역·정책 문서 미커밋 변경은 그대로 유지했다. 이번 요청에서 개발 작업이나 커밋/main 병합/push는 수행하지 않았다.
+
 ### 2026-09-30 · by GPT-6 Astra (역할·모델 설정 다국어 연결)
 
 - 9ca8fef 기준 프로젝트 역할 설정 화면의 입력명/권한 안내/검증/저장/재읽기/폐기 확인을 ko/en 25개 키로 옮겼다. 모델 ID·역할 ID·권한값·revision·저장/폐기 로직은 유지한다. Karpathy 지침으로 표시 문구만 변경했으며 번역 범위 안내를 갱신했다.
@@ -228,6 +234,15 @@
 - 원본 정책 승인 대기는 유지하되 전체 목표의 독립 필수 항목인 한국어/영어 UI를 진행했다. 88dc28e의 Electron 작업대에 없던 기존 I18nProvider와 언어 선택을 연결하고 ko/en 16개 키로 도구막대·프로젝트 진입·admission 안내를 전환한다. 저장 설정 읽기 실패는 시스템 언어로 대체한다. 부분 번역 범위를 선택기 설명에 명시했고 나머지 화면 번역 완료로 주장하지 않는다.
 - 검증: 언어 재초기화/설정 우선/저장 접근 거절·양쪽 리소스 및 기존 Monaco 집중 Node 9 PASS, TypeScript noEmit PASS, 최종 renderer build·Chromium 2 PASS. 실제 화면에서 ko/en 문구·localStorage 저장과 미저장 초안/동일 Monaco DOM 유지, 기존 저장/로그인 합성 흐름을 확인했다. diff check PASS, 기존 Monaco chunk 경고 유지.
 - Karpathy 지침으로 별도 번역 시스템 없이 기존 리소스를 재사용했다. 첫 patch의 잘못된 문맥은 적용 없이 거절돼 정확한 문구로 다시 적용했다. 다음은 로그인·채팅·설정·파일/변경 안내의 번역 확대와 핵심 원본 정책 결정이다. 원본 보호 계약·계정/모델·main/push 변경 없음. 앱 전체 완료 아님.
+
+### 2026-09-30 · by GPT-6 Astra (원본 반영 정책 승인 대기 재검증)
+
+- 자동 후속 요청에서 HEAD88dc28e와 미커밋 정책 문서를 재확인했다. 명시적인 정책 선택은 추가되지 않았고 제안 A/B 및 복원 예산은 여전히 미승인이다. 이번 확인은 구현 진전이 아니며 원본 writer를 열거나 계약을 변경하지 않았다. 사용자에게 제안 A와 5GiB 예산의 승인 또는 다른 정책을 요청한다.
+
+### 2026-09-30 · by GPT-6 Astra (핵심 원본 반영 정책 재확인 요청)
+
+- 88dc28e와 현재 intent 공개 함수·architecture·변경 반영 제안서를 대조했다. 실제 원본 writer/restore·공개 반영 UI는 여전히 없고 원본 관측/백업/첫 항목 기록만 구현돼 있다. 작은 편집기 개선이나 회귀 통과를 제품 핵심 흐름 완료로 대체하지 않는다.
+- 자동 진행 메시지는 기존 원본 보호 계약 변경의 명시 승인으로 해석하지 않았다. 외부 편집 중지 조건 아래 보존형 반영/충돌 중단을 지원할지와 앱 전체 복원 예산 5GiB·자동 삭제 없음 제안에 대해 사용자 결정을 요청한다. 승인 전 writer 활성화나 계약 변경은 하지 않으며 미승인 문서를 미커밋으로 유지한다. 검사 프로세스 대기가 아닌 정책 결정 경계이며 전체 목표는 미완료다.
 
 ### 2026-09-30 · by GPT-6 Astra (코드 편집기 초기화 실패 복구)
 
@@ -285,6 +300,12 @@
 - 원본 반영 정책은 미승인으로 유지하고 독립적인 IDE 편집 기능을 진행했다. Monaco의 Cmd/Ctrl+S와 context menu 저장을 기존 saveActive에 연결했다. 최신 tab/path·readOnly·dirty 조건과 현재 active path/admission을 확인하며 controller의 기존 충돌/작업 차단 검증은 유지한다. 편집기 밖 전역 키 이벤트는 등록하지 않는다.
 - 검증: 저장 진입 24조합을 포함한 editor actions/state 43 PASS, TypeScript noEmit·M5 renderer build PASS(기존 Monaco chunk 크기 경고 유지), 숨김 Electron/Chromium 2 PASS(실제 단축키 입력→save commit 1회→dirty 해제). 실제 사용자 파일/모델/계정을 사용하지 않았고 시험 창은 종료됐다. diff 검사 PASS.
 - Karpathy 지침으로 기존 저장 경로와 회귀 도구를 재사용했다. 원본 적용/복원 안전 정책과 5GiB 제안은 승인하지 않았으며 앞선 검토 문서 변경은 미커밋으로 보존한다. main 병합/push 없음. 전체 앱 완료는 아니다.
+
+### 2026-09-30 · by GPT-6 Astra (제품 원본 반영의 정책 결정 경계 확인)
+
+- 99d52f2 clean 상태에서 실제 source writer 부재와 제안서의 미확정 동일 UID 외부 작성자 보호·백업 보존 정책을 재확인했다. 로컬 rename 매뉴얼 및 Apple 공식 XNU/flock 자료를 확인했다. 일반 rename/SWAP/협조적 flock은 현재 검사와 원본 쓰기를 expected-inode CAS로 묶는다는 증거가 아니다. 모든 OS 전략이 불가능하다고 단정하지 않는다.
+- `proposals/m5-change-application.md` 열린 결정에 미승인 대안을 기록했다. 외부 편집 중지 조건·보존형 교체/충돌 중단을 지원 계약으로 삼을지, 기존 절대 보호 경계 입증 전 writer 비활성을 유지할지 사용자 판단이 필요하다. 복원 데이터 기본 5GiB·자동 삭제 없음·한도 초과 시 반영 차단도 제안일 뿐이다. 기존 안전 계약은 변경하지 않았다.
+- 이번 증거는 내부 helper를 계속 추가하는 것으로 해결할 수 없는 제품 정책 경계를 명시한다. 앱 전체 완료/blocked/paused 판정은 하지 않았다. 코드·원본·인증·Git branch/main/push 변경 없음. 문서 diff 검사 후 검토용 미커밋으로 남긴다. 승인 후 선택한 정책의 writer/journal/복원·UI 연결과 경계 시험을 수행해야 한다.
 
 ### 2026-09-30 · by GPT-6 Astra (pending 파일의 읽기 전용 원본 분류)
 
