@@ -2,6 +2,11 @@
 
 ### 2026-10-15 · by GPT-6 Astra
 
+- 기준bede328에서 EJ6wB8 원시 RSS를 실제 rssBytes 필드로 재계산하고 Chromium PID/type 자료와 대조했다. peak428.28125MiB는 시작1047.37ms, 구성은 browser152.66/GPU88.02/network39.72/renderer131.34/미분류 자손16.55MiB다. 마지막 표본358.41MiB, renderer JS used heap2.83MiB다. 단발 자료이며 누수 부재나400MiB 기준 통과로 해석하지 않는다.
+- 초기 화면 코드를 재확인해 Monaco는 사용 시 동적 import이고, 보이는 기본 화면에는 backdrop blur가 적용되지 않음을 확인했다(blur는 modal backdrop). 현재 증거로 특정 React 데이터/편집기 선로딩을 원인으로 단정할 수 없어 기능 축소·GC 강제·GPU 비활성화·기준 변경은 하지 않았다. 다음 분석은 시작 구간의 main/GPU/renderer native 비용과 측정 도구 부착 비용을 분리하는 것이며, 전체G6·실계정/Windows·출시 검증은 계속 남는다. 새 실행/빌드/저장공간 소비 없이 기존 증거만 분석했고 main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra
+
 - clean HEAD a6d25ca에서 CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4로 pnpm m5:test:package를 완료했다. 관련27 tests PASS, 최신 Forge package→sidecar smoke→ZIP→크기 검사 PASS/exit0. release 캐시 재사용0.44초, 압축124076526B/비압축322262577B로 각각200/350MiB 기준 이내다. 증거 `.artifacts/m5-g6-package/darwin-arm64-2026-10-15T08-20-44-682Z.json`. 서명/Windows/GUI/전체G6 합격은 아니다.
 - 최신 패키지 large-project 단발 EJ6wB8에서 visible→visible/hiddenTransitions0, 트리257ms·하위133.2ms·DOM362·큰 파일473.5ms·입력10개 최대25ms·renderer 긴 작업67ms를 관측했다. 해당 부분 수치는 기준 이내지만 idle RSS449085440B로400MiB 초과, 전체FAIL/exit1 유지. 반복10회나 물리 키보드/IME 증거는 아니다. 앱 종료0·DB 종료 확인 뒤 관측PID 부재를 대조해 자체 project/other-project/userdata3개만 삭제했고 JSON/PNG는 보존했다. 합성 fixture는 재생성 가능하다.
 - 새 실제 인증/모델·사용자 프로젝트 사용 없음, 시스템 앱 설치 없음. 저장소 out 최신 패키지/ZIP만 갱신했으며 main 병합/push 없음. 다음은 메모리 초과 원인 수정·전체G6 수집·실계정/Windows·출시 검증이며 목표 미완료다.
