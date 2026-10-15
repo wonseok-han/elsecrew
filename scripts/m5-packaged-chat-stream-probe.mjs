@@ -50,8 +50,10 @@ export function startPackagedChatStream(projectId) {
         check(matches.length === 1, 'Created chat identity is ambiguous');
         const chat = matches[0];
         const detail = await bridge.getChat({chatId:chat.chatId, afterEventSequence:0, cursor:null, limit:50});
-        check(detail.messages.length === 1 && detail.messages[0].eventSequence === 1 && detail.nextEventSequence === null,
+        check(detail.messages.length === 1 && detail.messages[0].eventSequence === 1 && detail.nextEventSequence === 1,
           'New chat must have exactly its initial goal');
+        const tail = await bridge.getChat({chatId:chat.chatId, afterEventSequence:1, cursor:null, limit:50});
+        check(tail.messages.length === 0 && tail.nextEventSequence === null, 'New chat has unexpected history');
         initialMessages.set(detail.messages[0].messageId, detail.messages[0]);
         result.chats.push({...chat, sent:0, received:0, persisted:0});
         sequences.set(chat.chatId, 1);

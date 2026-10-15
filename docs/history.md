@@ -2,6 +2,12 @@
 
 ### 2026-10-15 · by GPT-6 Astra
 
+- 1949c57 native-chat-stream 첫 실행ypcV7n은 최초 getChat의 nextEventSequence를null로 가정한 시험 오류로 전송0건에서 종료했다. 실제 계약은 비어 있지 않은 마지막 페이지도 마지막sequence를 반환한다. 초기1/추가after1 빈페이지null을 확인하도록 수정했다. 앱 종료0/DB표식·관측PID 부재 확인 후 자체 project/other-project/userdata만 정리했고 결과는 보존했다.
+- 수정 재실행mcy4lx은180초 관측 deadline에서 중단됐다. 종료 직전 공개 bridge 전송/수신659개(채팅별165/165/165/164), 관측 중복/cross-chat/순서 오류0, 최대 전달2105.4ms·예정시각 대비최대지연171970.3ms·화면표본43개였다. 아직RUNNING이었던 부분 자료이며12,000개/저장페이지/paint 완료를 주장하지 않는다. wrapper FAIL/앱 종료0/DB종료 confirmed. 실패 재현자료 한 건을 보존했으며 timeout 연장으로 속도 실패를 숨기지 않는다.
+- startup_memory_review는 최신 페이지 수정·초기 ID 구분·CAS·화면 관측에 정적 차단 지적 없음으로 회신했다. 이는 실행 합격이 아니다. 다음은 공개 append 경로의 낮은 처리량 원인을 조사·수정한 뒤 영향 영역 검증이다. 메모리/G6/실계정/Windows/출시는 미완료, 실제 모델·인증·사용자 프로젝트·main 병합/push 사용 없음.
+
+### 2026-10-15 · by GPT-6 Astra
+
 - 기준4f9bcc4에서 native 채팅 workload 준비를 실제 새 대화 UI로 연결하고 첫 채팅을 선택해3000개 본문의 DOM 표시+두RAF 관측을 추가했다. event→paint와 dispatch→paint를 분리하고 첫 채팅의 최대100ms·누락표본을 검사한다. 네 채팅 모두 전환 후 최신200개 본문을 대조한다. 나머지 채팅의 background paint나 실제 compositor 증거는 아니다.
 - startup_memory_review가 seq1 생성 이벤트의 지연 도착을 unknown/cross-chat으로 오탐할 가능성을 지적했다. getChat에서 읽은 초기4개 exact message ID와 결속/본문/순서/kind가 맞는 이벤트만 workload 전 이벤트로 구분하도록 수정했다. 일반 seq1 허용이나12,000개 검증 완화는 하지 않았다. 같은 검토자에게 수정 및 화면 관측의 정적 재검토를 요청했고 결과 대기다.
 - Karpathy 최소 변경으로 제품 API/안전 상한 변경 없이 시험 helper만 확장했다. JS 문법/diff 통과, 실제 실행·지연 초기 이벤트 회귀는 묶음 검증 대상이며 합격 주장은 없다. 전체 수명RSS·분리 자손·반복10회/G6·메모리 초과·실계정/Windows·출시는 계속 미완료. 새 빌드/모델/임시 데이터 생성·main 병합/push 없음.
