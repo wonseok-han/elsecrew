@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-15 · by GPT-6 Astra (최신 누적 자동 회귀 완료·디버그 캐시 정리)
+
+- 기준e13ecdf에서 Node 전체 tests/*.test.mts 및 tests/*.test.cjs를 한 번 실행해521 PASS/0 FAIL(25.2초), TypeScript noEmit/diff 검사 통과. 최신 sidecar bin을 먼저 빌드한 뒤 CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4로 cargo test --workspace --locked를 완료했다(exit0). Tauri105/core198/protocol58/sidecar628/stdio14/doc3 총1006 PASS,52 ignored,0 FAIL. sidecar664개 중628통과/36제외 구간은844.43초가 걸렸으며 같은 코드의 이 누적 검사를 반복하지 않는다.
+- 제외52건은 실제 계정·네트워크 설치·별도OS sandbox/진단 등으로 PASS가 아니다. 자동 회귀 통과는 실제 Claude 작업/전체G6 성능·Windows·출시 증거를 대체하지 않는다. 기존 초기RSS 최대454.31MiB 실패와 전체 성능 수집 누락은 유지한다.
+- 검사 종료와 관련 실행 프로세스 부재, 대상 디렉터리 실체를 확인한 뒤 재생성 가능한 저장소 target/debug 약3.1GB를 제거했다. target/release 약357MB와 out 시험 패키지·소스·사용자9월 archive·인증정보·프로젝트는 보존했다. 디버그 실행/다음Rust검사에는 재빌드가 필요하다. 삭제는 캐시이므로 빌드로 재생성할 수 있다. main 병합/push 없음, 전체 목표 미완료.
+
 ### 2026-10-15 · by GPT-6 Astra (초기 메모리·남은 구현 경계 재확인)
 
 - 기준247c19f의 시작 경로를 읽었다. Monaco는 loadMonaco의 동적 import로 편집기 사용 때 로드되며 serveAppAsset은 net.fetch 응답 body를 streaming 전달한다. 이 경로에서 시작 시 Monaco 선로딩이나 전체 파일 별도 버퍼 복사를 발견하지 못했다. 기존 프로세스별RSS/작은 renderer heap만으로 특정 코드의 메모리 결함을 확정할 수 없어 기능·보안 설정·기준을 임의로 낮추지 않았다.
