@@ -2,6 +2,12 @@
 
 ### 2026-10-15 · by GPT-6 Astra
 
+- clean1c65ba9에서 pnpm m5:test:security를 실행해23건과 main 문법 검사 PASS/exit0를 확인했다. origin/frame·popup/webview/navigation·로컬 asset·설치/승인 IPC·CSP·sidecar staging의 자동 회귀 범위이며 전체 보안 감사나G6 완료로 확대하지 않는다. 같은 코드에서 이 검사를 추가 반복하지 않는다.
+- 상시 승인된 읽기 전용 startup_memory_review1명을 호출해 초기 메모리 비용과 전체G6 수집기의 다음 구현 경계를 검토 중이다. 실제 도구 상태running을 확인했으며 결과는 아직 없다. 메인은 native poll 및 Claude 권한 요청 경로를 대조했고, preparation/claude.rs가 Permission/RequiresHandling을 먼저 처리하므로 native/owner.rs fallback 오류 문자열만으로 도구 승인 미연결이라고 단정하지 않는다. 실행별256 public event 상한과12000 stream fixture의 관계는 실제 영속/전송 경로를 더 추적해야 하며 계약을 변경하지 않았다.
+- 새 패키지/실제 계정/모델 실행 없음, 제품 코드 변경 없음. 후속은 검토 결과 회수 후 근거 있는 성능/계측 구현, 메모리 초과·실계정/Windows·출시 검증은 계속 미완료다. main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra
+
 - 기준540ac14에서 Karpathy 최소 변경으로 패키지 관측기에 --deferred-cdp를 추가했다. client 연결 전48개 프로세스 RSS 표본과 실제 연결 시각을 별도 저장하며 제품·기준·기존 idle 측정을 변경하지 않는다. CDP server는 처음부터 활성화돼 있어 무계측 비교는 아니다. JS 문법/diff 통과.
 - 기존 패키지 자체 프로필6PFoOz 단발에서 연결 전 최대415.828MiB(시작2307ms), 마지막344.234MiB, 연결 시작13501.9ms 이후 최대356.375MiB를 관측했다. 초기 초과는 client 연결 없이도 나타나므로 연결만을 원인으로 단정할 수 없다. 지연된 idle 기준 이내로 기존 초기FAIL을 덮지 않으며 결과NOT_READY/exit2다. 실제 startup 준비 시각/원인 확정·제품 개선 증거가 아니다.
 - 앱 정상 종료0/DB 표식과 연결 전후 모든 관측PID 부재 확인 뒤 이번 userdata만 제거, JSON/PNG 보존. 새 빌드/계정/모델/사용자 프로젝트 사용 없음. 다음은 초기 native 비용 분리와 전체G6/실계정/Windows/출시 미완료 항목이며 main 병합/push 없음.
