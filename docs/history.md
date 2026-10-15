@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-15 · by GPT-6 Astra (정식 검증·인계 문서 승인 경계 확인)
+
+- 기준af5d297에서 package gate가 clean checkout을 요구함을 코드로 확인했다. 기존부터 남은 docs/archive/history-2026-09.md를 임의로 커밋/되돌리지 않고, 내용 검토 뒤 해당 파일만 별도 커밋해도 되는지 비차단 질문을 보냈다. 정식 게이트를 우회하거나 새 package PASS를 주장하지 않는다.
+- claude-md-improver 스킬과 품질 기준을 읽고 저장소 CLAUDE.md1개 및 AGENTS.md byte 일치를 확인했다.80/100(B): 명령15/20·구조15/20·주의15/15·간결10/15·최신10/15·실행15/15. 실제 공급자 경로가 연결됐는데 Claude 미연결/V1~V5까지만 설명하는 제품 요약이 오래됐다. 상태·코드 지도만 양쪽 동기화하는 변경안을 보고했으며 스킬의 보고 후 확인 절차에 따라 적용 전 사용자 확인을 요청했다. 운영·안전·승인 규칙은 수정하지 않는다.
+- 이번에는 새 무거운 검사/빌드/계정 실행을 하지 않았다. 앞선 Node521/Rust1006 PASS 증거를 재사용하며52 ignored·메모리FAIL·G6/실계정/Windows/출시 미완료는 그대로다. 사용자 기존 변경 보존, main 병합/push 없음.
+
 ### 2026-10-15 · by GPT-6 Astra (최신 누적 자동 회귀 완료·디버그 캐시 정리)
 
 - 기준e13ecdf에서 Node 전체 tests/*.test.mts 및 tests/*.test.cjs를 한 번 실행해521 PASS/0 FAIL(25.2초), TypeScript noEmit/diff 검사 통과. 최신 sidecar bin을 먼저 빌드한 뒤 CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4로 cargo test --workspace --locked를 완료했다(exit0). Tauri105/core198/protocol58/sidecar628/stdio14/doc3 총1006 PASS,52 ignored,0 FAIL. sidecar664개 중628통과/36제외 구간은844.43초가 걸렸으며 같은 코드의 이 누적 검사를 반복하지 않는다.
