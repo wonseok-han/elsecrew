@@ -203,6 +203,17 @@ try {
     sample();
   }
   if (projectFlow) {
+    // Focus only before the measured scenario; never retry a hidden sample
+    // or disable the product's background throttling to manufacture a pass.
+    await send('Page.bringToFront', {}, sessionId);
+    await until(() => evaluate('document.visibilityState === "visible"'));
+    report.projectVisibilityStart = await evaluate(`(() => {
+      const state = {initial:document.visibilityState, hiddenTransitions:0};
+      const listener = () => { if (document.visibilityState !== 'visible') state.hiddenTransitions++; };
+      document.addEventListener('visibilitychange', listener);
+      globalThis.__m5ProjectVisibility = {state, listener};
+      return state.initial;
+    })()`);
     report.rendererLongTaskStart = await evaluate(`(${beginLongTaskProbe.toString()})()`);
     longTaskProbeStarted = true;
     const projectOpenedAt = performance.now();
@@ -334,6 +345,19 @@ try {
 } catch (error) { report.error = String(error); }
 finally {
   clearInterval(memoryTimer);
+  if (projectFlow && sessionId && !termination) {
+    try {
+      report.projectVisibility = await evaluate(`(() => {
+        const active = globalThis.__m5ProjectVisibility;
+        if (!active) return null;
+        document.removeEventListener('visibilitychange', active.listener);
+        delete globalThis.__m5ProjectVisibility;
+        return {...active.state, final:document.visibilityState};
+      })()`);
+      if (!report.projectVisibility || report.projectVisibility.hiddenTransitions > 0 ||
+          report.projectVisibility.final !== 'visible') report.error ??= 'Project observation window became hidden';
+    } catch (error) { report.error ??= String(error); }
+  }
   if (largeProject && sessionId && !termination) {
     try { report.largeProjectProgress = await evaluate('globalThis.__m5LargeProjectProgress ?? null'); }
     catch (error) { report.largeProjectProgressError = String(error); }

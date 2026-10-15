@@ -2,6 +2,10 @@
 
 ### 2026-10-15 · by GPT-6 Astra
 
+- 기준fdc11a5에서 앞선 hidden/frame0 실패와 패키지 관측 코드를 대조했다. 프로젝트 측정 전에 창 활성화가 없어 Page.bringToFront와 visible 확인을 추가했다. 측정 구간의 visibilitychange를 기록하고 hidden 전환 또는 종료 시 hidden이면 관측 실패로 남긴다. 중간 재활성화/실패 표본 재시도·프레임 deadline 연장·제품 background throttling 변경은 하지 않는다.
+- Karpathy 지침으로 시험 스크립트와 절차만 최소 변경했다. JS 문법/diff 검사 통과, 실제 반복 재실행은 아직 수행하지 않았다. 이는 관측 전제 보강이지 이전 메모리FAIL이나 제품 성능 결함 해소 증거가 아니다. 새 빌드/계정/시험 데이터 생성 없음, 전체G6·실계정/Windows·출시 미완료, main 병합/push 없음.
+### 2026-10-15 · by GPT-6 Astra
+
 - 사용자 승인 후 기존9월 archive의21줄 추가를 검토해57f8e3b에 해당 파일만 원문 그대로 커밋했다. 당시 로그인 복구·정책 승인 대기 기록이며 현재 미완료 상태로 재해석하지 않는다. claude-md-improver의 앞선 품질 보고/승인에 따라 AGENTS.md·CLAUDE.md 제품 상태와 코드 지도4개 항목만 동기화했다. 실제 공급자 경로 구현과 Claude 실작업 미검증을 구분하고 운영·안전·승인 규칙은 유지한다.
 - 3369973의 긴 작업 관측 순수 회귀4건 PASS. 기존 패키지로 tree-file 반복 진단을 실행해 준비1회+본5회를 수집했다. 본6회차는 aaa-tree의 frames 대기에서 visibility:hidden/frames0으로 renderer 표현식 실패, 앱은 종료0/DB 종료 확인 뒤 collector가 중단됐다. 본10회 미완료이므로 p95/합격을 만들지 않았다. 앞선 정상 관측에서도 idle RSS 초과 FAIL은 유지한다.
 - 증거는 OS 임시 hello-agent-packaged-performance-NseA5f 및 각 trial의 JSON/로그다. 완료6개 회차 자체 fixture는 종료 후 정리됐고 실패한 hello-agent-packaged-ui-Z77Zsm은 재현용 보존했다. 새 빌드/실제 계정/모델/사용자 프로젝트 사용 없음. 다음은 hidden-window 관측 실패 진단과 남은G6·메모리·실계정/Windows 검증이며 전체 미완료, main 병합/push 없음.

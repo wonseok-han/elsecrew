@@ -47,6 +47,8 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 ### 패키징 앱 외부 관측
 
+프로젝트 시나리오는 측정 전에 CDP로 시험 창을 앞으로 가져오고 `visibilityState=visible`을 확인한다. 측정 중 숨김 전환은 관측 실패로 남기며 같은 표본을 재시도하지 않는다. 제품 background throttling이나 프레임 deadline은 변경하지 않는다. 시험 창이 앞으로 표시되므로 사용 중인 다른 창과 포커스가 경쟁하면 실패할 수 있다.
+
 반복 패키지 수집기는 각 trial의 `rendererLongTasks` 원시 기록과 최대값·200ms 초과 개수를 대조하고, 본10회의 `rendererLongTaskMs` 최대값을 집계한다. 관측 미지원·미완료·overflow·요약 불일치는0으로 대체하지 않고 중단한다. 완전 관측한 기준 초과는 실패 표본으로 유지한다. 이 관측은 프로젝트 시나리오 구간만 포함하며 앱 시작·main process long task나 전체G6 증거를 대신하지 않는다.
 
 `pnpm m5:smoke:packaged-ui --startup`은 새 임시 프로필의 최초 실행을 `result.json`에 남기고, 동일 프로필에서 준비1회+측정10회를 `startup-0.json`~`startup-10.json`에 기록한다. 합계는 `startup-series.json`이다. 각 앱은 종료0·DB 종료 표식·관측 PID 부재를 확인한 뒤 다음 앱을 시작한다. HEAD/워킹 트리 상태와 실제 패키지 산출물이 도중에 바뀌면 중단한다. 완전 관측 후 종료가 확인된 자체 userdata만 정리하며 JSON/PNG를 보존한다. 앱당 idle RSS 관측10초가 있어 총2분 이상 필요하다.
