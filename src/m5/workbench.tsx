@@ -260,6 +260,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         {chat.error?.messageKey === "m5.chatError.project" ? <><span>{t("m5.shell.projectRetryHelp")}</span><button type="button" className="m5-secondary" disabled={!admissionReady || settingsOpen} onClick={() => { if (snapshot.project && !chat.activeChat && !chat.settings) void chatController.openProject(snapshot.project.id); }}>{t("m5.feedback.retry")}</button></> : <span>{t("m5.shell.projectLoading")}</span>}
       </section>}
       {snapshot.project && <ProjectGuide key={snapshot.project.id} hasChat={Boolean(chat.activeChat)}
+        hasOpenFile={snapshot.tabs.length > 0}
         disabled={!admissionReady || !projectDataReady || settingsOpen || snapshot.actionBlocked || chat.preparing || chat.switching}
         onGoal={() => setNewChatOpen(true)} onTeam={() => openRoleSettings()}
         onConversation={() => controller.revealConversation()}
@@ -439,12 +440,13 @@ function VirtualFileList({ entries, activePath, disabled, onOpen }: { entries: r
   </div>;
 }
 
-function ProjectGuide({ hasChat, disabled, onGoal, onTeam, onConversation, onChanges }: {
-  hasChat: boolean; disabled: boolean; onGoal: () => void; onTeam: () => void; onConversation: () => void; onChanges: () => void;
+function ProjectGuide({ hasChat, hasOpenFile, disabled, onGoal, onTeam, onConversation, onChanges }: {
+  hasChat: boolean; hasOpenFile: boolean; disabled: boolean; onGoal: () => void; onTeam: () => void; onConversation: () => void; onChanges: () => void;
 }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(!hasChat);
-  useEffect(() => { if (hasChat) setOpen(false); }, [hasChat]);
+  const workStarted = hasChat || hasOpenFile;
+  const [open, setOpen] = useState(!workStarted);
+  useEffect(() => { if (workStarted) setOpen(false); }, [workStarted]);
   return <details className="m5-project-guide" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>{t("m5.guide.title")}</summary>
     <ol>

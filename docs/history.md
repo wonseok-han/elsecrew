@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-15 · by GPT-6 Astra (편집 시작 시 안내 접기)
+
+- 기준0a0c43f, m5/coding-agent-ide에서 직접 수정했다. 기존 Claude 인증 질문은 현재 별도 CLAUDE_CONFIG_DIR 동작을 다시 확인한 설명이며 인증 재사용 승인이나 구현 완료가 아니다. 인증정보·실제 계정 호출은 건드리지 않았다.
+- ProjectGuide가 채팅이 없어도 파일 탭을 열면 접히도록 연결했다. 작업 시작 여부의 boolean 전환에만 반응하므로 사용자가 다시 펼친 안내는 파일 이동/편집마다 강제로 접지 않는다. 채팅 없는 상태의 대화·검토 버튼 제한과 프로젝트별 재설정은 유지한다. Karpathy 최소 변경으로 UI 한 컴포넌트만 수정했다.
+- renderer smoke에 첫 안내 열림→파일 열기 후 접힘→수동 펼침→파일 재선택 후 유지 회귀를 추가했다. node --check 및 git diff --check 통과. 사용자 구현 우선 지시에 따라 빌드/실제 renderer 회귀는 후속 통합 검증에서 실행하며 이번 변경을 UI 합격으로 표시하지 않는다. 전체 시안·메모리/G6·실계정/Windows 검증은 남아 있다. 사용자9월 archive 보존, main 병합/push 없음.
+
 ### 2026-10-15 · by GPT-6 Astra (로그인 시험 데이터 경로 대조)
 
 - 기준8b14019에서 패키지 이름hello-agent, main의 userData/com.wonseokhan.helloagent/m5, Claude의 그 아래 claude-profile-v1 결속을 확인했다. 10월 archive의 G5cuDY 실행도 /Users/wonseok-han/Library/Application Support/hello-agent를 명시 사용했으므로 현재 근거로 데이터 폴더 불일치를 원인으로 확정하지 않는다. 실제 사용자가 어느 앱/터미널에서 로그인했는지와 당시 런타임 경로는 별도 확인 대상이다. 인증 파일·키체인 내용은 읽지 않았다.

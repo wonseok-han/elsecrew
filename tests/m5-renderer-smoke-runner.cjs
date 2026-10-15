@@ -196,6 +196,7 @@ app.whenReady().then(async () => {
     if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/smoke') throw new Error('catalog path missing');
     document.querySelector('.m5-project-catalog-list li button').click();
     await ${waitFor("document.querySelector('.m5-file-row')", "project tree")};
+    await ${waitFor("document.querySelector('.m5-project-guide')?.open === true", "guide initially open before work")};
     [...document.querySelectorAll('.m5-dock-group-tabs button')].find(button => button.textContent === '파일' && button.getClientRects().length).click();
     await ${waitFor("document.getElementById('m5-install-details')?.hidden", "installation controls compact in workbench")};
     const installToggle = document.querySelector('.m5-provider-install header button');
@@ -227,6 +228,9 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-file-search input')?.getAttribute('aria-label') === '파일 이름 또는 경로 찾기'", "Korean search restored")};
     document.querySelector('.m5-search-results button').click();
     await ${waitFor("!document.querySelector('[data-panel=editor]').hidden && document.querySelector('.monaco-editor') && Object.hasOwn(globalThis, 'MonacoEnvironment') && typeof globalThis.MonacoEnvironment.getWorker === 'function'", "Monaco mount and reveal")};
+    await ${waitFor("document.querySelector('.m5-project-guide')?.open === false", "guide collapses when file work starts")};
+    document.querySelector('.m5-project-guide summary').click();
+    await ${waitFor("document.querySelector('.m5-project-guide')?.open === true", "guide can be reopened during work")};
     const localWorker = globalThis.MonacoEnvironment.getWorker("smoke", "editor");
     localWorker.terminate();
     const editorNode = document.querySelector('.monaco-editor');
@@ -236,6 +240,8 @@ app.whenReady().then(async () => {
     document.querySelector('.m5-search-results button').click();
     await ${waitFor("!document.querySelector('[data-panel=editor]').hidden", "reveal already-open file")};
     if (document.querySelector('.monaco-editor') !== editorNode) throw new Error('file navigation remounted Monaco');
+    if (!document.querySelector('.m5-project-guide').open) throw new Error('file navigation closed explicitly reopened guide');
+    document.querySelector('.m5-project-guide summary').click();
     [...document.querySelectorAll('button')].find(button => button.textContent === '역할과 모델').click();
     await ${waitFor("document.querySelectorAll('.m5-role-card').length === 3", "role settings")};
     const modelField = document.querySelector('.m5-role-card input');
