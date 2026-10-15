@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-15 · by GPT-6 Astra (로그인 시험 데이터 경로 대조)
+
+- 기준8b14019에서 패키지 이름hello-agent, main의 userData/com.wonseokhan.helloagent/m5, Claude의 그 아래 claude-profile-v1 결속을 확인했다. 10월 archive의 G5cuDY 실행도 /Users/wonseok-han/Library/Application Support/hello-agent를 명시 사용했으므로 현재 근거로 데이터 폴더 불일치를 원인으로 확정하지 않는다. 실제 사용자가 어느 앱/터미널에서 로그인했는지와 당시 런타임 경로는 별도 확인 대상이다. 인증 파일·키체인 내용은 읽지 않았다.
+- live-provider smoke 결과에 실제 app.setPath에 전달한 canonical appUserData 경로를 추가했다. 인증 내용/설정 승계/새 로그인/실제 모델 호출은 없다. VM mock11 PASS, symlink 해석 후 경로와 기록 일치 확인, diff PASS. 이후 사용자 로그인 확인 뒤 기존 승인된 Claude1회 시험에서 이 경로를 함께 확인한다. 전체G6·메모리·반복 성능·실계정·Windows 미완료, 사용자9월 archive 보존, main 병합/push 없음.
+
 ### 2026-10-15 · by GPT-6 Astra (반복 수집 마감·프레임 대기 경계)
 
 - 이전 Voojda는 종료된 FAIL이며 재실행/진행 중으로 취급하지 않았다. 코드에서 대형 프로젝트 DOM 대기 뒤 두 RAF 대기에 제한이 없어 화면 갱신 중단이 외부 Runtime.evaluate timeout으로만 나타날 수 있음을 확인했다. 2초 presentation deadline과 현재 단계/대기종류/visibility/frame 수 보존을 추가했다. RoeKJG의 실제 원인이 프레임 중단이었다고 확정하지 않으며 제품 background 정책/성능 기준/통신 timeout은 변경하지 않는다.

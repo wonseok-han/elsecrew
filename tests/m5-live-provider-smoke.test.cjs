@@ -11,13 +11,14 @@ function harness(catalogOnly = false, autoFinish = true, projectUi = false, sele
   const exits = [];
   let evidence;
   const spawned = [];
+  const paths = new Map();
   const childProcess = {execFileSync: () => '', spawn(...args) {
     const child = {stderr: new (require('node:events').EventEmitter)()};
     spawned.push({args, child});
     return child;
   }};
   const app = {
-    setPath() {}, on(name, callback) { events.set(name, callback); }, quit() {},
+    setPath(name, value) { paths.set(name, value); }, on(name, callback) { events.set(name, callback); }, quit() {},
     once(name, callback) { events.set(name, callback); },
     exit(code) { exits.push(code); },
   };
@@ -32,7 +33,7 @@ function harness(catalogOnly = false, autoFinish = true, projectUi = false, sele
       if (name === 'electron') return {app,dialog:{}};
       if (name === 'node:fs') return {
         statSync: () => ({isDirectory: () => true}),
-        mkdtempSync: () => '/synthetic/run', mkdirSync() {}, realpathSync: value => value,
+        mkdtempSync: () => '/synthetic/run', mkdirSync() {}, realpathSync: value => value === '/synthetic/userdata' ? '/synthetic/resolved-userdata' : value,
         writeFileSync(file, value) { if (file.endsWith('result.json')) evidence = JSON.parse(value); },
       };
       if (name === 'node:child_process') return childProcess;
@@ -46,7 +47,7 @@ function harness(catalogOnly = false, autoFinish = true, projectUi = false, sele
   if (autoFinish && !projectUi) vm.runInContext(catalogOnly
     ? `outcomes.push({provider:'codex',state:'catalogObserved',models:[]});finish();`
     : `outcomes.push(...providers.map(provider=>({provider,state:'succeeded',terminationOutcome:'cleanExit',responseObserved:true})));finish();`, context);
-  return {events,timers,exits,evidence: () => evidence, childProcess, spawned};
+  return {events,timers,exits,evidence: () => evidence, childProcess, spawned, paths};
 }
 
 test('login evidence is correlated to its own completed check', () => {
@@ -168,6 +169,8 @@ test('a page loaded after watchdog shutdown sends no UI requests', async () => {
 
 test('live smoke cannot pass before normal shutdown is accepted', () => {
   const h = harness();
+  assert.equal(h.evidence().appUserData, '/synthetic/resolved-userdata');
+  assert.equal(h.evidence().appUserData, h.paths.get('userData'));
   assert.equal(h.evidence().status, 'PENDING');
   assert.deepEqual(h.exits, []);
   h.events.get('will-quit')();

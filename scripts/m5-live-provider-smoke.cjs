@@ -14,7 +14,8 @@ const source = path.join(root, 'project');
 fs.mkdirSync(source);
 fs.writeFileSync(path.join(source, 'hello.txt'), 'original\n');
 for (const args of [['init','-q','--template='],['add','.'],['-c','core.hooksPath=/dev/null','-c','user.name=Smoke','-c','user.email=smoke@example.invalid','commit','-qm','fixture']]) execFileSync('/usr/bin/git', args, {cwd:source, env:{...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_COUNT:'0'}});
-app.setPath('userData', fs.realpathSync(userData));
+const appUserData = fs.realpathSync(userData);
+app.setPath('userData', appUserData);
 dialog.showOpenDialog = async () => ({canceled:false,filePaths:[source]});
 const outcomes = [];
 function checkedLoginResult(status, attemptId) {
@@ -56,7 +57,7 @@ function finish(error) {
   const runsPassed = !error && unchanged && (catalogOnly
     ? outcomes.length===1 && outcomes[0].state==='catalogObserved'
     : outcomes.length===providers.length && providers.every(p=>outcomes.some(o=>o.provider===p&&o.state==='succeeded'&&o.terminationOutcome==='cleanExit'&&o.responseObserved)));
-  const result = {root, verificationKind:catalogOnly?'modelChoicesOnly':'actualProviderRuns', providers, outcomes, transportCheckpoints:[...transportCheckpoints], sourceUnchanged:unchanged, error, shutdown:'pending', status:'PENDING'};
+  const result = {root, appUserData, verificationKind:catalogOnly?'modelChoicesOnly':'actualProviderRuns', providers, outcomes, transportCheckpoints:[...transportCheckpoints], sourceUnchanged:unchanged, error, shutdown:'pending', status:'PENDING'};
   const persist = () => fs.writeFileSync(path.join(root,'result.json'), JSON.stringify(result,null,2));
   persist();
   console.log(JSON.stringify({stage:'RUNS_FINISHED',root,outcomes,sourceUnchanged:unchanged,error}));
