@@ -49,6 +49,8 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 `node scripts/m5-packaged-performance.mjs --diff` 또는 `--tree-file`는 같은 packaged 관측기를 순차11회 실행한다(준비1회+본10회). HEAD와 실제 asar/sidecar 지문을 대조하고 본 측정10값의 nearest-rank p95(최대값)를 기록한다. 정상 종료와 관측 PID 부재를 확인한 trial만 자체 project/other-project/userdata를 정리하며 JSON/PNG/로그는 보존한다. 불완전 관측·불확실 종료는 중단하고 다음 앱을 시작하지 않는다. 확인된 개별 지연/메모리 초과는 전체 FAIL로 유지하며, 모든 수치가 기준 이내여도 이 부분 수집기는 NOT_READY다. migration·CDP 등 기존 한계와 누락 G6 항목은 그대로다.
 
+`node scripts/m5-packaged-performance.mjs --memory-diff`는 같은 순차11회 방식으로 대형 diff 열기→프로젝트 닫기→60초 대기 후 메모리를 수집한다. 각 trial의 원시 RSS 표본에서 idle/peak/retained를 다시 계산해 보고값과 대조하고, 본 측정10회의 **maximum**을 기록한다(p95 아님). 각 trial의 수명 전체에서 관측한 PID가 모두 종료됐는지 확인한 뒤 자체 fixture를 정리한다. 60초 대기만 총11분 이상 필요하므로 다른 무거운 시험과 동시에 실행하지 않는다. 현재 자손의250ms 표본이며 탈출 프로세스·표본 사이 peak·다른 대형 fixture 동시 부하는 포함하지 않는다. 전체 G6 collector나 합격 증거로 취급하지 않는다.
+
 `--tree-file`의 `inputPaintMs`는 각 앱에서 예열 입력1개를 제외한10개 입력의 최대값을 사용한다. 본10앱의 최대값 배열을 다시 집계하며 누락/비정상 표본이나 요약 불일치는 거절한다. 입력 전 DOM 감시를 설치하고 trusted beforeinput·실제 표시 텍스트 이후 두 RAF를 관측한다. 물리 compositor/키보드/IME 증거는 아니며, 입력 후 감시를 시작하던 과거 측정과 직접 제품 속도 개선으로 비교하지 않는다. 50ms 초과도 정상 종료했다면 실패 표본을 보존하고 다음 회차를 진행한다.
 
 `pnpm m5:smoke:packaged-ui --large-diff`는 기존 native diff fixture의500파일/20,000변경 줄/10MiB patch를 자체 생성 프로젝트의 격리 작업 사본에만 만든다. 실제 변경 패널의 새로 고침→500개 요약→첫 파일 표시를 renderer 시계로 측정한다. 기준2000/1500ms, 실제 Git patch 크기/줄수와 원본 Git 상태 불변도 확인한다. 단일 진단이며 warm-up/10회p95를 대체하지 않는다.

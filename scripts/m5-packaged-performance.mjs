@@ -8,7 +8,8 @@ import { spawn, execFileSync } from 'node:child_process';
 import { packagedInputMaximum } from './m5-packaged-input-probe.mjs';
 
 const mode = process.argv[2];
-assert.ok(process.argv.length === 3 && ['--diff', '--tree-file'].includes(mode));
+assert.ok(process.argv.length === 3 && ['--diff', '--tree-file', '--memory-diff'].includes(mode));
+const memoryMode = mode === '--memory-diff';
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const output = fs.mkdtempSync(path.join(os.tmpdir(), 'hello-agent-packaged-performance-'));
 const git = (...args) => execFileSync('/usr/bin/git', args, {cwd:repo, encoding:'utf8'}).trim();
@@ -19,7 +20,7 @@ const persist = () => fs.writeFileSync(path.join(output, 'measurement.json'), JS
 persist(); console.log(JSON.stringify({stage:'COLLECTION_STARTED', output}));
 
 async function trial(index) {
-  const child = spawn(process.execPath, ['--experimental-strip-types', 'scripts/m5-packaged-ui-smoke.mjs', mode === '--diff' ? '--large-diff' : '--large-project'], {cwd:repo, stdio:['ignore','pipe','pipe']});
+  const child = spawn(process.execPath, ['--experimental-strip-types', 'scripts/m5-packaged-ui-smoke.mjs', memoryMode ? '--memory-diff' : mode === '--diff' ? '--large-diff' : '--large-project'], {cwd:repo, stdio:['ignore','pipe','pipe']});
   const log = fs.createWriteStream(path.join(output, `trial-${index}.log`));
   let pending = '', root;
   child.stdout.setEncoding('utf8');
@@ -52,15 +53,26 @@ async function trial(index) {
     assert.equal(result.asarSha256, report.trials[0].result.asarSha256);
     assert.equal(result.sidecarSha256, report.trials[0].result.sidecarSha256);
   }
-  const metric = mode === '--diff' ? result.largeDiff : result.largeProject;
+  const metric = mode === '--diff' || memoryMode ? result.largeDiff : result.largeProject;
   assert.ok(metric?.values, 'Incomplete measurement; fixture retained');
   sample.values = {...metric.values};
+  if (memoryMode) {
+    const lifecycle = result.memoryLifecycle;
+    assert.ok(lifecycle && !lifecycle.error && lifecycle.samples?.length, 'Incomplete memory lifecycle; fixture retained');
+    assert.ok(lifecycle.retainedStartedAtMs - lifecycle.closedAtMs >= 60000, 'Retention wait incomplete');
+    const { summarizeMemory } = await import('./m5-process-memory.cjs');
+    const observed = summarizeMemory(lifecycle.samples);
+    assert.deepEqual(lifecycle.maxima, observed.maxima);
+    assert.deepEqual(lifecycle.failedMetrics, observed.failedMetrics);
+    sample.values = observed.maxima;
+  }
   if (mode === '--tree-file') sample.values.inputPaintMs = packagedInputMaximum(result.largeProjectInput);
-  const limitError = `Large ${mode === '--diff' ? 'diff' : 'project'} limits exceeded: ${metric.failedMetrics?.join(', ')}`;
+  const limitError = `Large ${mode === '--diff' || memoryMode ? 'diff' : 'project'} limits exceeded: ${metric.failedMetrics?.join(', ')}`;
   const inputLimitError = mode === '--tree-file' && sample.values.inputPaintMs > 50
     && result.error === 'Large project input paint limit exceeded';
-  if (result.error && result.error !== limitError && !inputLimitError) throw new Error('Observation failed; fixture retained');
-  if (mode === '--diff') {
+  const memoryLimitError = memoryMode && result.memoryLifecycle.failedMetrics.length > 0 && result.error === 'Memory lifecycle limits exceeded';
+  if (result.error && result.error !== limitError && !inputLimitError && !memoryLimitError) throw new Error('Observation failed; fixture retained');
+  if (mode === '--diff' || memoryMode) {
     assert.equal(metric.diffFiles, 500); assert.equal(metric.diffChangedLines, 20000);
     assert.equal(metric.diffBytes, 10485760); assert.equal(metric.originalUnchanged, true);
   } else {
@@ -68,7 +80,7 @@ async function trial(index) {
   }
   // Cleanup only these newly generated fixture children, never evidence/root.
   const live = new Set(execFileSync('/bin/ps', ['-axo','pid='], {encoding:'utf8'}).trim().split(/\s+/).map(Number));
-  const identities = [result.pid, result.project.seedPid, ...result.memory.flatMap(row => row.processes.map(process => process.pid))];
+  const identities = [result.pid, result.project.seedPid, ...[...result.memory, ...(result.memoryLifecycle?.samples ?? [])].flatMap(row => row.processes.map(process => process.pid))];
   assert.ok(identities.every(pid => !live.has(pid)), 'Observed process still live; fixture retained');
   for (const name of ['project','other-project','userdata']) {
     const target = path.join(root, name), stat = fs.lstatSync(target);
@@ -85,7 +97,7 @@ try {
   for (const key of Object.keys(measured[0].values)) {
     const values = measured.map(row => row.values[key]);
     assert.ok(values.every(value => Number.isFinite(value) && value >= 0));
-    report.metrics[key] = {values, p95:Math.max(...values)};
+    report.metrics[key] = memoryMode ? {values, maximum:Math.max(...values)} : {values, p95:Math.max(...values)};
   }
   report.status = report.trials.some(row => row.result.status === 'FAIL') ? 'FAIL' : 'NOT_READY';
 } catch (error) { report.status = 'FAIL'; report.error = String(error); }
