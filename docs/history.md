@@ -2,6 +2,12 @@
 
 ### 2026-10-15 · by GPT-6 Astra
 
+- 기준67f466b에서 공개 follow-up 경로를 추적했다. 매 append는 verify_workspace의 detached HEAD/index/fsck/remotes/metadata 검사와 저장 transaction의 전체 원장 재생을 수행한다. 둘의 비용을 추정으로 제거하지 않고 test-only ignored followup_cost_attribution을 추가했다. 자체 TempDir의64건에 실제 append·독립 workspace 검사·동일 ID 재시도를 측정하며 본문/경로/인증정보는 출력하지 않는다. Karpathy 최소 변경에 따라 제품 경로/안전 검사/프로토콜은 변경하지 않았다.
+- CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 cargo test --release -p hello-agent-sidecar followup_cost_attribution -- --ignored --nocapture: 1 PASS/0 FAIL, 실행8.95초(기존 release 캐시 재사용 빌드40.32초). append60.48~85.29ms, 별도 workspace60.17~88.12ms, retry0.042~0.098ms. 서로 다른 실행의 시간이라 차감해 저장 비용으로 해석하지 않는다. 작은 원장/단일 채팅/직접 Rust 진단이며 패키지 IPC·4채팅·장기 원장 성능 합격은 아니다.
+- 후속 우선순위는 Git 작업공간 검사의 세부 호출 비용과 패키지 추가 지연 분리다. 원장 재생 확장 비용도 미해결이며 안전 검증 캐시/생략은 승인하거나 구현하지 않았다. 임시 fixture는 TempDir 종료로 회수, 사용자 인증/프로젝트·실제 모델 사용 없음. 전체G6·메모리·실계정/Windows/출시는 미완료이며 main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra
+
 - 1949c57 native-chat-stream 첫 실행ypcV7n은 최초 getChat의 nextEventSequence를null로 가정한 시험 오류로 전송0건에서 종료했다. 실제 계약은 비어 있지 않은 마지막 페이지도 마지막sequence를 반환한다. 초기1/추가after1 빈페이지null을 확인하도록 수정했다. 앱 종료0/DB표식·관측PID 부재 확인 후 자체 project/other-project/userdata만 정리했고 결과는 보존했다.
 - 수정 재실행mcy4lx은180초 관측 deadline에서 중단됐다. 종료 직전 공개 bridge 전송/수신659개(채팅별165/165/165/164), 관측 중복/cross-chat/순서 오류0, 최대 전달2105.4ms·예정시각 대비최대지연171970.3ms·화면표본43개였다. 아직RUNNING이었던 부분 자료이며12,000개/저장페이지/paint 완료를 주장하지 않는다. wrapper FAIL/앱 종료0/DB종료 confirmed. 실패 재현자료 한 건을 보존했으며 timeout 연장으로 속도 실패를 숨기지 않는다.
 - startup_memory_review는 최신 페이지 수정·초기 ID 구분·CAS·화면 관측에 정적 차단 지적 없음으로 회신했다. 이는 실행 합격이 아니다. 다음은 공개 append 경로의 낮은 처리량 원인을 조사·수정한 뒤 영향 영역 검증이다. 메모리/G6/실계정/Windows/출시는 미완료, 실제 모델·인증·사용자 프로젝트·main 병합/push 사용 없음.
@@ -150,6 +156,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **follow-up 비용 진단(2026-10-15)**:64건 작은 자체 fixture에서 공개 append60~85ms와 별도 workspace 검사60~88ms, idempotent retry0.1ms 미만을 관측했다. verify_workspace는 매번 Git HEAD/index/fsck/remotes/metadata를 확인한다. 공개 user-message append는 provider stream과 다른 경로이며 이 결과는12000 provider event 처리량이나 패키지 지연 원인 확정이 아니다. 안전 검사 생략/캐시 없이 Git 비용과 IPC/원장 확장 비용을 분리한다.
 
 - **동시 메시지 증거 범위(2026-10-13)**: NNe0ks의 실제 renderer 합성4채팅12000개/60초 시험은 선택 chat0 전체3000개 관측·최대35.4ms 및 네 채팅 최신200개 전환 일치를 확인했다. background3000개 전체를 화면에서 관측하거나 native 원장/공급자/패키지 G6를 검증한 것은 아니다. actual-agent 실행당256개 제한을 부하 시험 편의로 완화하지 않는다.
 

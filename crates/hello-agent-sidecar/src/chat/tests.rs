@@ -2736,6 +2736,40 @@ fn followup_request(chat: &Value, sequence: u64, id: &str) -> Value {
         "expectedEventSequence":sequence,"clientMessageId":id,"text":"후속 지시"})
 }
 
+/// Explicit local diagnostic, not a G6 benchmark or a timing assertion. Uses only
+/// disposable fixture data and never launches a provider or reads credentials.
+#[test]
+#[ignore = "local follow-up cost attribution; run release with --nocapture"]
+fn followup_cost_attribution() {
+    use std::time::Instant;
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_cost_snapshot");
+    let chat = fixture.create_chat(&snapshot, "cost diagnostic", "req_cost_chat");
+    let address = address_from_chat(&chat).unwrap();
+    for index in 0..64u64 {
+        let request = followup_request(&chat, index + 1, &format!("user_{index:032x}"));
+        // Measure the unchanged admission independently. Do not subtract this
+        // sample from append: cache/scheduling effects make that unjustified.
+        let started = Instant::now();
+        fixture.projects.verify_workspace(&fixture.storage, &address).unwrap();
+        let workspace_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let started = Instant::now();
+        let appended = fixture.chats
+            .append_user_message(&mut fixture.storage, &fixture.projects, &request).unwrap();
+        let append_ms = started.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(appended.result["eventSequence"], index + 2);
+        assert_eq!(appended.events.len(), 1);
+        let started = Instant::now();
+        let retry = fixture.chats
+            .append_user_message(&mut fixture.storage, &fixture.projects, &request).unwrap();
+        let retry_ms = started.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(retry.result, appended.result);
+        assert!(retry.events.is_empty());
+        eprintln!("{}", json!({"diagnostic":"followupCost", "sample":index,
+            "workspaceMs":workspace_ms,"appendMs":append_ms,"retryMs":retry_ms}));
+    }
+}
+
 #[test]
 fn followup_retry_survives_actual_source_compaction_and_reopen() {
     use crate::storage_lifetime::compaction_writer::{CompactionStepResult, CompactionTarget};
