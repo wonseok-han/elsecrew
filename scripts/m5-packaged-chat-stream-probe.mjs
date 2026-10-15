@@ -5,34 +5,86 @@ export function startPackagedChatStream(projectId) {
   const result = {diagnostic:true, gateEligible:false, status:'RUNNING',
     source:'public appendChatMessage', chats:[], sent:0, received:0,
     duplicateEvents:0, crossChatEvents:0, reorderedEvents:0,
-    maximumDeliveryMs:0, maximumDispatchLagMs:0,
+    maximumDeliveryMs:0, maximumDispatchLagMs:0, paintSamples:[],
     limitations:['User-message IPC and persistence workload; no provider or model calls.',
-      'Delivery is not paint. No active-chat presentation, child-reaping stress or complete G6 evidence.']};
+      'Only the selected first chat is paint-observed; two animation frames are not physical compositor timestamps.',
+      'No child-reaping stress, repeated ten-run result or complete G6 evidence.']};
   globalThis.__m5NativeChatStream = result;
   void (async () => {
     const bridge = window.m5;
-    const expected = new Map(), received = new Set(), sequences = new Map();
+    const expected = new Map(), received = new Set(), sequences = new Map(), initialMessages = new Map();
     const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
     const check = (condition, detail) => { if (!condition) throw new Error(detail); };
-    let unsubscribe, stopped = false;
+    const wait = async ready => {
+      const deadline = performance.now() + 65000;
+      while (!ready()) {
+        check(performance.now() < deadline, 'Chat UI did not become ready');
+        await sleep(25);
+      }
+    };
+    const select = async goal => {
+      const button = [...document.querySelectorAll('.m5-chat-chip')].find(node => node.textContent.includes(goal) && !node.disabled);
+      check(button, 'Chat selection missing'); button.click();
+      await wait(() => document.querySelector('.m5-timeline h2')?.textContent === goal);
+    };
+    const paintPending = new Map(), frames = new Set();
+    const frame = callback => {
+      const id = requestAnimationFrame(() => { frames.delete(id); callback(); });
+      frames.add(id);
+    };
+    let unsubscribe, observer, stopped = false;
     try {
-      const settings = await bridge.getProjectRoleSettings({projectId});
       for (let index = 0; index < 4; index++) {
-        const prepared = await bridge.prepareChatWorkspace({projectId});
-        check(prepared.bindingState === 'unbound' && prepared.manifest.projectId === projectId, 'Prepared chat identity differs');
-        const {worktreeId, workspaceIdentity} = prepared.manifest;
-        const chat = await bridge.createChat({projectId, worktreeId, workspaceIdentity,
-          preparationId:prepared.preparationId, goal:`Native stream ${index + 1}`,
-          expectedSettingsRevision:settings.revision});
+        const goal = `Native stream ${index + 1}`;
+        await wait(() => document.querySelector('.m5-new-chat-button') && !document.querySelector('.m5-new-chat-button').disabled);
+        document.querySelector('.m5-new-chat-button').click();
+        await wait(() => document.querySelector('.m5-new-chat-dialog')?.matches(':modal'));
+        const input = document.querySelector('.m5-new-chat-form input:not([type=checkbox])');
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, goal);
+        input.dispatchEvent(new Event('input', {bubbles:true}));
+        await wait(() => !document.querySelector('.m5-new-chat-form button[type=submit]').disabled);
+        document.querySelector('.m5-new-chat-form button[type=submit]').click();
+        await wait(() => document.querySelector('.m5-timeline h2')?.textContent === goal);
+        const catalog = await bridge.listChats({projectId, cursor:null, limit:100});
+        const matches = catalog.items.filter(chat => chat.goal === goal);
+        check(matches.length === 1, 'Created chat identity is ambiguous');
+        const chat = matches[0];
         const detail = await bridge.getChat({chatId:chat.chatId, afterEventSequence:0, cursor:null, limit:50});
         check(detail.messages.length === 1 && detail.messages[0].eventSequence === 1 && detail.nextEventSequence === null,
           'New chat must have exactly its initial goal');
+        initialMessages.set(detail.messages[0].messageId, detail.messages[0]);
         result.chats.push({...chat, sent:0, received:0, persisted:0});
         sequences.set(chat.chatId, 1);
       }
       check(new Set(result.chats.map(chat => chat.chatId)).size === 4 &&
         new Set(result.chats.map(chat => chat.workspaceIdentity)).size === 4, 'Chats must be isolated');
+      await select(result.chats[0].goal);
+      const observePaint = () => {
+        const visibleText = new Set([...document.querySelectorAll('.m5-message p')]
+          .filter(node => node.getClientRects().length).map(node => node.textContent));
+        for (const [id, source] of paintPending) {
+          if (!visibleText.has(source.text)) continue;
+          paintPending.delete(id);
+          frame(() => frame(() => {
+            if (stopped) return;
+            if (document.visibilityState !== 'visible') { result.paintVisibilityFailed = true; return; }
+            result.paintSamples.push({messageId:id, eventSequence:source.sequence,
+              eventPaintMs:performance.now() - source.receivedAt,
+              dispatchPaintMs:performance.now() - source.dispatchedAt});
+          }));
+        }
+      };
+      observer = new MutationObserver(observePaint);
+      observer.observe(document.querySelector('.m5-timeline'), {childList:true, subtree:true, characterData:true});
       unsubscribe = bridge.onChatEvent(event => {
+        // Creation responses need not imply their seq-1 events have drained.
+        // Only exact identities read back from these four new chats are exempt
+        // from the subsequent 12,000-message workload, never all seq-1 events.
+        const initial = initialMessages.get(event.messageId);
+        if (initial) {
+          if (['chatId', 'taskId', 'worktreeId', 'text', 'eventSequence', 'kind'].some(key => event[key] !== initial[key])) result.crossChatEvents++;
+          return;
+        }
         const source = expected.get(event.messageId);
         if (!source) { result.crossChatEvents++; return; }
         if (received.has(event.messageId)) { result.duplicateEvents++; return; }
@@ -43,6 +95,10 @@ export function startPackagedChatStream(projectId) {
         sequences.set(source.chat.chatId, event.eventSequence);
         source.chat.received++; result.received++;
         result.maximumDeliveryMs = Math.max(result.maximumDeliveryMs, performance.now() - source.dispatchedAt);
+        if (source.chat.chatId === result.chats[0].chatId) {
+          paintPending.set(event.messageId, {...source, receivedAt:performance.now()});
+          observePaint();
+        }
       });
       const startedAt = performance.now();
       result.startedAt = startedAt;
@@ -77,6 +133,11 @@ export function startPackagedChatStream(projectId) {
       result.lostEvents = result.sent - received.size;
       check(result.sent === 12000 && result.lostEvents === 0 && result.duplicateEvents === 0 &&
         result.crossChatEvents === 0 && result.reorderedEvents === 0, 'Stream delivery differs');
+      const paintDeadline = performance.now() + 10000;
+      while (result.paintSamples.length < 3000 && performance.now() < paintDeadline) await sleep(25);
+      check(!result.paintVisibilityFailed && result.paintSamples.length === 3000, 'Active chat paint observations incomplete');
+      result.maximumEventPaintMs = Math.max(...result.paintSamples.map(sample => sample.eventPaintMs));
+      result.eventPaintWithinLimit = result.maximumEventPaintMs <= 100;
       for (const chat of result.chats) {
         let after = 1;
         for (let pageIndex = 0; pageIndex < 61; pageIndex++) {
@@ -93,9 +154,19 @@ export function startPackagedChatStream(projectId) {
         }
         check(chat.persisted === 3000, 'Persisted message count differs');
       }
+      result.restoredChats = [];
+      for (const [index, chat] of result.chats.entries()) {
+        await select(chat.goal);
+        await wait(() => {
+          const texts = [...document.querySelectorAll('.m5-message p')].map(node => node.textContent);
+          return texts.length === 200 && texts.every((text, offset) => text === `native_stream_${index}_${2801 + offset}`);
+        });
+        result.restoredChats.push(chat.chatId);
+      }
+      check(result.eventPaintWithinLimit, 'Active chat event paint exceeds 100ms');
       result.status = 'NOT_READY'; // Real IPC evidence, but not a full performance gate.
     } catch (error) { result.status = 'FAIL'; result.error = String(error); }
-    finally { stopped = true; unsubscribe?.(); result.finishedAt = performance.now(); }
+    finally { stopped = true; unsubscribe?.(); observer?.disconnect(); for (const id of frames) cancelAnimationFrame(id); result.finishedAt = performance.now(); }
   })();
   return {started:true};
 }

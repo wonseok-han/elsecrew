@@ -2,6 +2,12 @@
 
 ### 2026-10-15 · by GPT-6 Astra
 
+- 기준4f9bcc4에서 native 채팅 workload 준비를 실제 새 대화 UI로 연결하고 첫 채팅을 선택해3000개 본문의 DOM 표시+두RAF 관측을 추가했다. event→paint와 dispatch→paint를 분리하고 첫 채팅의 최대100ms·누락표본을 검사한다. 네 채팅 모두 전환 후 최신200개 본문을 대조한다. 나머지 채팅의 background paint나 실제 compositor 증거는 아니다.
+- startup_memory_review가 seq1 생성 이벤트의 지연 도착을 unknown/cross-chat으로 오탐할 가능성을 지적했다. getChat에서 읽은 초기4개 exact message ID와 결속/본문/순서/kind가 맞는 이벤트만 workload 전 이벤트로 구분하도록 수정했다. 일반 seq1 허용이나12,000개 검증 완화는 하지 않았다. 같은 검토자에게 수정 및 화면 관측의 정적 재검토를 요청했고 결과 대기다.
+- Karpathy 최소 변경으로 제품 API/안전 상한 변경 없이 시험 helper만 확장했다. JS 문법/diff 통과, 실제 실행·지연 초기 이벤트 회귀는 묶음 검증 대상이며 합격 주장은 없다. 전체 수명RSS·분리 자손·반복10회/G6·메모리 초과·실계정/Windows·출시는 계속 미완료. 새 빌드/모델/임시 데이터 생성·main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra
+
 - startup_memory_review의 읽기 전용 결과를 회수했다. 시작 main/preload/renderer에서 제거 근거가 있는 retained allocation은 발견하지 못했으며 Claude fallback 오류도 권한 처리 누락 근거가 아니었다. 실제 네 채팅 workload 부재와 m5:test:performance 미등록이G6 차단으로 재확인됐다. reviewer 권고의 공개 appendChatMessage 경로를 현행 계약/sidecar와 대조했다.
 - 기준57a8750에서 --native-chat-stream 및 독립 renderer probe를 구현했다. 자체 프로젝트의4개 격리 채팅에20ms 예정 간격·3000개씩 전송하며, optimistic sequence를 위해 채팅별 순차/채팅간 병렬 호출한다. 실제 onChatEvent의 ID·순서·본문·채팅 결속과 getChat의50개 페이지를 끝까지 검증한다. 실제 dispatch duration/최대 지연을 기록하고 API 실패는 재시도하지 않는다. 실제 모델·agent.publicEvent256 상한을 건드리지 않는다.
 - Karpathy 지침으로 기존 패키지 seed/공개 bridge/정상 종료를 재사용했다. JS 문법/diff 통과, 실행 검증 전 구현 체크포인트다. 동일 검토자에게 변경 범위의 읽기 전용 정적 재검토를 요청했고 아직 결과 대기다. source는 실제 user-message IPC이며 provider 출력·active-chat paint·전체 수명RSS·분리 자손·반복10회/전체G6로 주장하지 않는다. 후속은 정적 지적 수정과 이 workload의 화면 관측 연결/묶음 실행이다. 새 빌드·계정·프로젝트 시험/저장공간 소비 없음, main 병합/push 없음.
