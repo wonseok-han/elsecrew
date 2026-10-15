@@ -86,6 +86,10 @@ button, input, textarea, select {
 .m5-project-guide h3 { font-size: 14px; margin: 8px 0; }
 .m5-project-guide p { color: #aab4c1; font-size: 12px; line-height: 1.6; }
 .m5-project-guide button { margin: 4px 8px 0 0; font-size: 12px; }
+.m5-guide-next { margin: 12px 0; padding: 12px; border-left: 2px solid #7796c6; background: #202936; border-radius: 4px; }
+.m5-guide-next strong { color: #e5edf7; font-size: 14px; }
+.m5-guide-next p { overflow-wrap: anywhere; }
+.m5-project-guide > details > summary { cursor: pointer; color: #aab4c1; font-size: 12px; }
 @media (max-width: 1000px) { .m5-project-guide ol { grid-template-columns: 1fr; gap: 8px; } }
 .m5-first-chat h2 { margin: 0 0 12px; font-size: 19px; }
 .m5-first-chat h3 { margin: 24px 0 12px; font-size: 13px; }

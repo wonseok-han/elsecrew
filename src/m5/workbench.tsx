@@ -1,4 +1,6 @@
 import { formatChatNotice } from "./chat-notice.ts";
+import { emptyProjectGuide, parseProjectGuide, projectGuideKey, projectGuideStep, type ProjectGuidePreference } from "./project-guide-state.ts";
+import type { ChatRecordV1 } from "./contracts/run-recovery-v1.ts";
 import { groupRunHistory, runOutcomeNotice } from "./work-status.ts";
 import type { ModelChoicesResult } from "./contracts/model-choices-v1.ts";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
@@ -260,6 +262,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         {chat.error?.messageKey === "m5.chatError.project" ? <><span>{t("m5.shell.projectRetryHelp")}</span><button type="button" className="m5-secondary" disabled={!admissionReady || settingsOpen} onClick={() => { if (snapshot.project && !chat.activeChat && !chat.settings) void chatController.openProject(snapshot.project.id); }}>{t("m5.feedback.retry")}</button></> : <span>{t("m5.shell.projectLoading")}</span>}
       </section>}
       {snapshot.project && <ProjectGuide key={snapshot.project.id} hasChat={Boolean(chat.activeChat)}
+        projectId={snapshot.project.id} activeChat={chat.activeChat} onResume={id => void switchChat(id)}
         hasOpenFile={snapshot.tabs.length > 0}
         disabled={!admissionReady || !projectDataReady || settingsOpen || snapshot.actionBlocked || chat.preparing || chat.switching}
         onGoal={() => setNewChatOpen(true)} onTeam={() => openRoleSettings()}
@@ -441,20 +444,47 @@ function VirtualFileList({ entries, activePath, disabled, onOpen }: { entries: r
   </div>;
 }
 
-function ProjectGuide({ hasChat, hasOpenFile, disabled, onGoal, onTeam, onConversation, onChanges }: {
+function ProjectGuide({ projectId, activeChat, onResume, hasChat, hasOpenFile, disabled, onGoal, onTeam, onConversation, onChanges }: {
+  projectId: string; activeChat: ChatRecordV1 | null; onResume: (chatId: string) => void;
   hasChat: boolean; hasOpenFile: boolean; disabled: boolean; onGoal: () => void; onTeam: () => void; onConversation: () => void; onChanges: () => void;
 }) {
   const { t } = useI18n();
-  const workStarted = hasChat || hasOpenFile;
-  const [open, setOpen] = useState(!workStarted);
-  useEffect(() => { if (workStarted) setOpen(false); }, [workStarted]);
+  const [preference, setPreference] = useState(() => { try { return parseProjectGuide(localStorage.getItem(projectGuideKey(projectId))); } catch { return emptyProjectGuide(); } });
+  const [saveFailed, setSaveFailed] = useState(false);
+  const [open, setOpen] = useState(!preference.dismissed && !hasOpenFile);
+  const savePreference = (next: ProjectGuidePreference) => {
+    setPreference(next);
+    try { localStorage.setItem(projectGuideKey(projectId), JSON.stringify(next)); setSaveFailed(false); return true; } catch { setSaveFailed(true); return false; }
+  };
+  useEffect(() => { if (hasOpenFile && !hasChat) setOpen(false); }, [hasOpenFile, hasChat]);
+  useEffect(() => {
+    if (activeChat && !preference.chatId) {
+      savePreference({ ...preference, chatId: activeChat.chatId, teamReviewed: true });
+      if (!preference.dismissed) setOpen(true);
+    }
+  }, [activeChat?.chatId, preference.chatId]);
+  const step = projectGuideStep(preference, activeChat?.chatId ?? null, activeChat?.state ?? null);
+  const beginGoal = () => { savePreference({ ...preference, teamReviewed: true }); onGoal(); };
   return <details className="m5-project-guide" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary>{t("m5.guide.title")}</summary>
-    <ol>
+    <summary>{t("m5.guide.title")} · {t(`m5.guide.step.${step}`)}</summary>
+    <section className="m5-guide-next" aria-label={t("m5.guide.next")}>
+      <strong>{t(`m5.guide.step.${step}`)}</strong>
+      {step !== "resume" && activeChat && <p>{activeChat.goal} · {t(`m5.chat.state.${activeChat.state}`)}</p>}
+      <p>{t(`m5.guide.help.${step}`)}</p>
+      {step === "team" && <button type="button" disabled={disabled} onClick={onTeam}>{t("m5.firstChat.editTeam")}</button>}
+      {(step === "team" || step === "goal") && <button type="button" disabled={disabled} onClick={beginGoal}>{t("m5.guide.writeGoal")}</button>}
+      {step === "resume" && <button type="button" disabled={disabled} onClick={() => preference.chatId && onResume(preference.chatId)}>{t("m5.guide.resume")}</button>}
+      {step === "resume" && <button type="button" className="m5-secondary" disabled={disabled} onClick={() => savePreference({ ...emptyProjectGuide(), chatId: activeChat?.chatId ?? null, teamReviewed: Boolean(activeChat) })}>{t("m5.guide.reset")}</button>}
+      {(step === "observe" || step === "recovery") && <button type="button" disabled={disabled} onClick={onConversation}>{t("m5.guide.openConversation")}</button>}
+      {step === "review" && <><button type="button" disabled={disabled} onClick={onChanges}>{t("m5.guide.openChanges")}</button><button type="button" disabled={disabled} onClick={onConversation}>{t("m5.guide.openDecision")}</button></>}
+      <button type="button" className="m5-secondary" onClick={() => { if (savePreference({ ...preference, dismissed: true })) setOpen(false); }}>{t("m5.guide.later")}</button>
+      {saveFailed && <p role="status">{t("m5.guide.saveFailed")}</p>}
+    </section>
+    <details><summary>{t("m5.guide.allSteps")}</summary><ol>
       <li><h3>{t("m5.guide.goal")}</h3><p>{t("m5.guide.goalHelp")}</p><button type="button" disabled={disabled} onClick={onGoal}>{t("m5.navigation.newChat")}</button><button type="button" className="m5-secondary" disabled={disabled} onClick={onTeam}>{t("m5.firstChat.editTeam")}</button></li>
       <li><h3>{t("m5.guide.observe")}</h3><p>{t("m5.guide.observeHelp")}</p><button type="button" className="m5-secondary" disabled={disabled || !hasChat} onClick={onConversation}>{t("m5.guide.openConversation")}</button></li>
       <li><h3>{t("m5.guide.review")}</h3><p>{t("m5.guide.reviewHelp")}</p><button type="button" className="m5-secondary" disabled={disabled || !hasChat} onClick={onChanges}>{t("m5.guide.openChanges")}</button><button type="button" className="m5-secondary" disabled={disabled || !hasChat} onClick={onConversation}>{t("m5.guide.openDecision")}</button></li>
-    </ol><p>{t("m5.guide.safety")}</p>
+    </ol></details><p>{t("m5.guide.safety")}</p>
   </details>;
 }
 
