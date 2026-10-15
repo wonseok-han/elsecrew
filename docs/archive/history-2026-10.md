@@ -1,5 +1,216 @@
 # 작업 이력 아카이브 — 2026-10
 
+### 2026-10-15 · by GPT-6 Astra (작업대 묶음 회귀 확인)
+
+- 기준e722606의 renderer를 vite build --config electron/vite.renderer.config.ts로 재생성하고 tests/m5-renderer-mount-smoke.mts를 실행했다. 2 PASS/14.2초: V7 preload 계약 및 실제 Chromium/React/Monaco 작업대 흐름. 직전 추가한 안내 초기 펼침→파일 열기 후 접힘→수동 재열기→파일 재선택 후 유지도 통과했다. 기존 설정/탭/언어/편집/복구 흐름의 합성 회귀이며 실제 provider·원본 쓰기·전체 패키지 검증으로 확대하지 않는다.
+- pnpm exec tsc --noEmit 및 diff 검사 통과. Vite의 500kB 이상 chunk 경고는 남아 있다. 로그인 도움말은 빌드와 타입 검사를 통과했으나 새 문구의 시각 검토/별도 assertion은 아직 없다. 테스트 소유 임시 폴더는 부모 시험의 정상 종료 후 정리 경로를 사용했다. 사용자 인증/프로젝트 미사용, 기존 사용자9월 archive 보존, main 병합/push 없음. 다음은 남은 UI 시안 마감과 메모리/G6·실계정/Windows 검증이며 전체 목표 미완료다.
+
+### 2026-10-15 · by GPT-6 Astra (기존 로그인 안내 연결)
+
+- 기준68b3cf4에서 ProviderConnection의 기존 짧은 별도 로그인 설명을 확인하고, 연결 상세에 펼침형 한국어/영어 도움말을 추가했다. 터미널·다른 앱 로그인 자동 재사용 없음/대화 미가져오기, 앱에서 저장한 인증의 종료 후 보관, 기존 앱 연결은 상태 재확인 우선, 실패만으로 로그아웃 판단·인증 삭제·키체인 초기화 금지를 안내한다.
+- Karpathy 최소 변경으로 화면과 번역만 수정했다. 인증 재사용 기능·설정 격리 경계·계정 호출은 변경하지 않았다. diff 검사 후 구현 체크포인트로 남기며 직전 안내 접기와 함께 실제 renderer 통합 검증은 미실행이다. 전체 UI 마감/성능/G6/실계정/Windows 미완료, 사용자9월 archive 보존, main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra (편집 시작 시 안내 접기)
+
+- 기준0a0c43f, m5/coding-agent-ide에서 직접 수정했다. 기존 Claude 인증 질문은 현재 별도 CLAUDE_CONFIG_DIR 동작을 다시 확인한 설명이며 인증 재사용 승인이나 구현 완료가 아니다. 인증정보·실제 계정 호출은 건드리지 않았다.
+- ProjectGuide가 채팅이 없어도 파일 탭을 열면 접히도록 연결했다. 작업 시작 여부의 boolean 전환에만 반응하므로 사용자가 다시 펼친 안내는 파일 이동/편집마다 강제로 접지 않는다. 채팅 없는 상태의 대화·검토 버튼 제한과 프로젝트별 재설정은 유지한다. Karpathy 최소 변경으로 UI 한 컴포넌트만 수정했다.
+- renderer smoke에 첫 안내 열림→파일 열기 후 접힘→수동 펼침→파일 재선택 후 유지 회귀를 추가했다. node --check 및 git diff --check 통과. 사용자 구현 우선 지시에 따라 빌드/실제 renderer 회귀는 후속 통합 검증에서 실행하며 이번 변경을 UI 합격으로 표시하지 않는다. 전체 시안·메모리/G6·실계정/Windows 검증은 남아 있다. 사용자9월 archive 보존, main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra (로그인 시험 데이터 경로 대조)
+
+- 기준8b14019에서 패키지 이름hello-agent, main의 userData/com.wonseokhan.helloagent/m5, Claude의 그 아래 claude-profile-v1 결속을 확인했다. 10월 archive의 G5cuDY 실행도 /Users/wonseok-han/Library/Application Support/hello-agent를 명시 사용했으므로 현재 근거로 데이터 폴더 불일치를 원인으로 확정하지 않는다. 실제 사용자가 어느 앱/터미널에서 로그인했는지와 당시 런타임 경로는 별도 확인 대상이다. 인증 파일·키체인 내용은 읽지 않았다.
+- live-provider smoke 결과에 실제 app.setPath에 전달한 canonical appUserData 경로를 추가했다. 인증 내용/설정 승계/새 로그인/실제 모델 호출은 없다. VM mock11 PASS, symlink 해석 후 경로와 기록 일치 확인, diff PASS. 이후 사용자 로그인 확인 뒤 기존 승인된 Claude1회 시험에서 이 경로를 함께 확인한다. 전체G6·메모리·반복 성능·실계정·Windows 미완료, 사용자9월 archive 보존, main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra (반복 수집 마감·프레임 대기 경계)
+
+- 이전 Voojda는 종료된 FAIL이며 재실행/진행 중으로 취급하지 않았다. 코드에서 대형 프로젝트 DOM 대기 뒤 두 RAF 대기에 제한이 없어 화면 갱신 중단이 외부 Runtime.evaluate timeout으로만 나타날 수 있음을 확인했다. 2초 presentation deadline과 현재 단계/대기종류/visibility/frame 수 보존을 추가했다. RoeKJG의 실제 원인이 프레임 중단이었다고 확정하지 않으며 제품 background 정책/성능 기준/통신 timeout은 변경하지 않는다.
+- 입력 집계 및 프레임 중단 focused5 PASS, syntax/diff PASS. 프레임0·hidden 가짜 회귀는 timeout/cancel/진단 보존을 확인하는 단위 증거이며 실제 Mac 잠금 상태 증거가 아니다. 사용자 로그인 확인을 방해할 수 있는 추가 시험 창은 지금 띄우지 않았다. 기존 반복 입력 집계 변경과 함께 커밋하며10회 실제 수집/메모리/전체G6/실계정/Windows는 미완료다. 사용자9월 archive 보존, main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra (반복 입력 집계 연결·로그인 구분 확인)
+
+- 기준e31801e에서 --tree-file 반복 수집에 앱별 입력 최대값을 포함했다. 원시11표본/index/warmup/유한값·50ms 기준·요약 일치를 검증하고 확인된 입력 초과도 정상 종료한 실패 표본으로 유지한다. 단위4 PASS/syntax/diff PASS. Voojda 실측은 예열 input24.3ms·정상 종료/fixture 정리 후 본1회 RoeKJG의 Runtime.evaluate 10초 timeout으로 중단(exit1)했다. 해당 앱은 정상exit0/shutdown confirmed지만 largeProject 측정이 없어 전체 FAIL이며10회 집계는 미완료다. 실패 fixture/JSON/로그는 보존하고 원인 미확정·timeout 미완화로 남긴다. /private/tmp/hello-agent-repeated-input-final.log 참조. 변경은 미커밋으로 유지한다.
+- 사용자가 기존 Claude 로그인을 앱이 재사용하는지 질문했다. 현재 provider_claude_profile.rs의 claude-profile-v1과 provider_claude_login.rs의 CLAUDE_CONFIG_DIR를 확인했으며 기본 CLI 인증을 자동 승계하지 않는 별도 앱 프로필 구조다. 기존 터미널 로그인과 앱 자체의 연결 복원 실패는 구분해야 한다. 사용자가 어느 쪽에서 연결을 확인했는지 아직 미확인이고 인증정보를 읽거나 복사·재로그인하지 않았다. 이전 실제 Claude 작업1회 승인 미사용 상태를 유지한다.
+- 전체 목표 미완료, 사용자9월 archive 보존, main 병합/push 없음. 다음은 로그인 위치 확인과 반복 관측 timeout 원인·메모리/G6/Windows 검증이다.
+
+### 2026-10-15 · by GPT-6 Astra (입력 관측 시작 지연 수정)
+
+- 기준39523eb에서 packaged input probe가 CDP 입력 완료 뒤 별도 evaluate로 DOM 감시를 시작함을 확인했다. Karpathy 최소 변경으로 입력 전 MutationObserver와 trusted beforeinput 감시를 설치하고 같은 두 RAF 완료 promise를 나중에 회수한다. 5초 timeout/실패 cleanup·50ms 기준·warmup1+측정10·diagnostic 경계는 유지한다. 제품 편집/저장 코드는 변경하지 않았다.
+- 단위3 PASS: 사전 감시·untrusted 입력 제외·두 frame, dispatch 실패/timeout 정리,61ms 초과 FAIL 유지. 실제 패키지2MQtWQ에서 p95 inputPaint24.7ms, DOM7.8~8.9ms, 관측 frame14.7~16.1ms로 기준 이내. 이전51.1ms는 사후 감시 방식의 결과로 보존하며 제품이2배 빨라졌다는 주장으로 사용하지 않는다. 물리 compositor/IME/독립10세션/전체G6 증거가 아니다.
+- idle435781632B(약416MiB) 초과로 전체FAIL, 정상exit0/shutdown confirmed. /private/tmp/hello-agent-input-preinstalled-observer.log 및 root result.json/PNG 보존, 관측PID 전부 부재 후 생성3디렉터리 정리. syntax/diff PASS. 다음은 초기 메모리와 전체 성능 수집·실계정/Windows 검증이다. 사용자9월 archive 보존, main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra (네 채팅 stdio 실행·메시지 격리 회귀)
+
+- 기준00e22b5의 미커밋 회귀를 이어 마감했다. 즉시 종료 clean 시험은4건 순차 성공했지만 peak_active=1이라 중첩 검증에 실패했다. 기존 FinalDelayed는 내부 fixture에만 연결돼 stdio 인자에서 unknown으로 거절됐으므로 테스트 전용 --stdio-agent-fixture 매핑 한 줄을 추가했다. 일반 --stdio capability/실제 provider/제품 안전 제한은 변경하지 않았다.
+- 새 support/parallel_agent_streams.rs는 독립4 snapshot/chat 생성 뒤 시작 요청을 함께 전송하고, 수락 전 이벤트 금지·실행별 연속 seq·공개 event ID 중복·chat/task/workspace/run 결속·실행 결과와 저장16메시지의 순서/내용/신원을 대조한다. 중첩 running을 필수로 요구하며 이번 실측 peak_active=4, accepted4/public12/terminal4/stored16, 원본 불변·prepareQuit safeToQuit·정상exit를 확인했다. release/locked 집중1 PASS(3.25초), rustfmt/diff PASS. /private/tmp/hello-agent-four-chat-stdio-connected.log 보존. 전체 테스트 반복은 하지 않았다.
+- 이는 실제 sidecar JSONL/저장 경로와 가짜 공급자의 bounded 실행 증거다. 실제 계정·12000개 native 부하·패키지 UI/재시작·전체G6 합격이 아니다. 성공 fixture xhSouz는 정상 종료 뒤 제거; 앞선 SQD3Xx/XwIwLP 실패자료 약1.7MiB 및 로그는 보존했다. 다음은 패키지 성능 수집 완성·초기RSS/입력paint 실패 해결과 실계정/Windows 검증이다. 사용자9월 archive 변경 보존, main 병합/push 없음, 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (네 채팅 합성 스트림 실제 renderer 관측)
+
+- 기준3cf0f1b에서 기존 M5_MEASURE_PARALLEL_PAINT 경로를 실행했다. renderer 소스는 마지막 빌드 기준7ddac69 이후 변경 없음(git diff src/m5 electron 확인). 숨겨진 Electron/실제 React renderer에 네 합성 채팅 각50회/초·3000개, 총12000개를 전달했고 선택 chat0의3000개를 모두 관측했다. elapsed60002.2ms, 최대 두-frame 표시 지연35.4ms, 발송 scheduling delay 최대4.8ms, 미관측0·관측 ID 중복0. 이후 네 채팅의 최신200개가 각2801~3000번과 일치했다. 정상exit0이며 실제 공급자/원장/native IPC/packaged G6 증거가 아니다.
+- /private/tmp/hello-agent-parallel-paint-final.log 및 OS 임시 hello-agent-renderer-smoke-NNe0ks/parallel-message-paint.json에 원시3000표본/한계를 보존했다. 정상 종료와 관련 프로세스 부재를 확인한 뒤 이 시험의 캐시·임시 설정만 정리한다. 실제 계정·사용자 프로젝트 미사용, 제품 코드/안전 제한 변경 없음. 다음은 native 전송·bounded run 관측과 기존 초기 RSS/입력paint/Windows/실계정 검증이며 전체 미완료다. 사용자9월 archive 보존, main 병합/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (기본 테스트 탐색 누락 수정)
+
+- 기준645c2f0에서 동시 스트림 경로를 조사하다 npm test가 tests/*.test.mts만 실행해 .test.cjs 4파일(heap-sampling/message-paint-probe/parallel-chat-fixture/live-provider-smoke)을 제외함을 확인했다. 네 파일을 읽어 실제 계정·앱 실행 없이 순수 helper/VM mock 테스트임을 확인한 후 기본 test glob에 *.test.cjs를 추가했다. Karpathy 최소 범위로 package script만 변경했고 lockfile/제품/안전 계약은 변경하지 않았다.
+- 확장된 npm test513 PASS/0FAIL/0ignored,24.46초(/private/tmp/hello-agent-complete-node-test-discovery.log), diff PASS. 기존495 결과는 당시 범위의 증거이며 이번513 결과로 기본 단위 묶음 범위를 갱신한다. 테스트명 live-provider를 실제 로그인/모델 성공으로 인용하지 않는다.
+- 기존12000메시지 검사는 FakeBridge 또는 renderer-smoke-preload의 synthetic user 메시지로, native sidecar 공개 이벤트/실제 provider 증거가 아니다. 실제 agent 공개 이벤트는 실행당256개 제한이므로 단일 run당3000개로 늘리는 시험은 현재 안전 계약과 다르다. 제한을 완화하지 않았다. 다음은 별도 synthetic 전송·renderer 성능 증거와 native bounded run 검증을 분리해 연결하는 작업이며, 기존 메모리/입력paint/Windows/실계정 미완료도 유지한다. 사용자9월 archive 보존, main 병합/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (대형 diff 최대·잔류 RSS 수집)
+
+- 기준5fc9752에서 Karpathy 최소 범위로 --memory-diff 전용 진단을 추가했다. 기존 summarizeMemory를 재사용하며250ms 현재 자손 RSS를 idle/loaded/closing/retained로 보존한다. 실제 프로젝트 닫기 UI·시작화면 복귀 확인→60초 대기→3초 표본을 수집한다. 무한 수집을 막는10000표본 한도와 샘플 오류 기록/타이머 해제, 실패 중 부분 증거 보존을 연결했다. 제품/기준/GC 동작은 변경하지 않았다.
+- 실제hpKbEE 결과: idle40/loaded11/closing238/retained12표본, 닫기 이후 retained 시작60002ms. idle457375744B(약436MiB) FAIL, 전체 관측 peak501170176B(약478MiB)와 baseline 대비 retained 증가0B는 각800/120MiB 기준 이내다. retained 절대RSS418004992B(약399MiB), 정상exit0/shutdown confirmed. 표본 간 순간 peak·escaped 자손·전체 fixture 동시 열기·반복 누수는 미측정이며 단일 diff 증거로 전체G6 합격/누수 부재를 주장하지 않는다.
+- 재사용 집계/관측 회귀6 PASS, syntax/diff PASS. /private/tmp/hello-agent-packaged-memory-lifecycle.log 및 root result.json/startup.png/loaded-diff.png 보존. 모든 lifecycle 관측PID 부재 후 생성3디렉터리 정리했다. 다음은 초기 유휴 초과 및 누락 main/stream/입력paint 증거다. 사용자9월 archive 보존, 실제 계정/사용자 프로젝트 미사용, main 병합/push 없음, 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (실제 패키지 renderer long-task 수집)
+
+- 기준cde315d에서 Karpathy 최소 범위로 project 시나리오 시작→스크린샷 완료 구간에 실제 renderer PerformanceObserver longtask 수집을 연결했다. takeRecords 후 disconnect, 최대10000개/overflow 표시, 미지원·비정상 값·overflow는 null을 유지한다. supported/valid/관측시작·끝/시나리오완료/200ms 초과 건수를 저장하며 startup·main·미관측 구간은 제외한다. 실패 중에도 가능한 부분 관측은 종료 전에 수집한다.
+- 신규 단위3 PASS: 미지원에서0생성 금지,200ms strict 경계·대기 레코드 수집·중복 시작 거절·disconnect, 빈 관측0과 overflow/잘못된 값null 구분. syntax/diff PASS. 실제500파일/20000줄/10MiB diff 패키지9Qp8Mu에서 observer supported/valid/windowCompleted=true,11381.4~14160.7ms 구간 entries0/overLimit0을 관측했다. diff summary200ms/first233.3ms·원본 불변 PASS. 단일 renderer 구간 증거이지 main/전체G6 합격이 아니다.
+- idle460521472B 초과로 전체FAIL 유지, 정상exit0/shutdown confirmed. /private/tmp/hello-agent-packaged-long-tasks.log 및 root result.json/PNG 보존; PID 부재 후 생성3디렉터리 정리. 실제 사용자자료/계정 미사용, 사용자9월 archive 보존, main 병합/push 없음. 다음은 누락 main/stream/peak·retained memory 관측 및 기존 입력 계측 한계·메모리 초과 해결이다.
+
+### 2026-10-13 · by GPT-6 Astra (입력 지연 구간 실측·계측 한계 확인)
+
+- 기준a743e61의 추가 구간 계측을 sOTu30 실제 패키지에서 실행했다. 본10회 inputDom19.5~21.4ms, paintObservation26.2~30.4ms, 전달0.2~0.6ms, 기존 요청→2 RAF p95 51.1ms로50ms 기준 초과를 유지한다. 적어도 절반 이상은 DOM 확인 뒤 계측상 프레임 대기이며,51.1ms 전체가 편집/getValue 비용이라는 해석은 배제한다. DOM 반영은 물리 paint 증명이 아니므로21.4ms로 합격값을 대체하지 않는다. 근거 없는 debounce·저장 동기화 변경을 하지 않았다.
+- /private/tmp/hello-agent-packaged-input-segments.log와 OS 임시 hello-agent-packaged-ui-sOTu30/result.json/PNG 보존. 정상exit0/shutdown confirmed·PID 부재 후 생성3디렉터리 정리. idle457588736B 초과는 유지하며 프로젝트/계정 원본 미사용. 다음은 기존 지연 수치를 더 반복하기보다 실제 paint 증거 방법 또는 누락된 long-task/stream/peak·retained RSS 계측을 완성하는 작업이다. 사용자9월 archive 보존, main 병합/push 없음, 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (패키지 대형 편집 입력 계측 연결)
+
+- 기준571c5b5에서 Karpathy 최소 범위로 --large-project 진단에 실제 Monaco textarea focus→CDP Input.insertText→trusted beforeinput→view-line 텍스트 확인→2 RAF 계측을 연결했다. 예열1+본10 입력을 같은 프로세스에서 수행하며 bridge/model 직접 변조·저장은 없다. 실제 키보드/IME 또는10개 독립 앱 세션 합격으로 주장하지 않는다. 입력 요청부터 화면 확인까지/전달/전달 후 시간을 모두 보존하고50ms 기준을 유지한다.
+- NG1IWL의 실제 패키지 p95 inputPaint51ms로50ms 초과 FAIL, 본 표본 전달0.3~0.4ms·전달 후47.2~50.7ms다. 기존 treeRoot230.5/expand116.5/file433.4/DOM362는 기준 이내, idle460161024B 초과도 유지한다. 정상exit0/shutdown confirmed·PID 부재 후 생성 project/other-project/userdata만 제거했고 result.json/PNG 및 /private/tmp/hello-agent-packaged-input.log 보존했다.
+- 이후 원인 분리용 inputDomMs/paintObservationMs 필드를 추가했으나 이 두 필드의 실제 패키지 값은 아직 수집 전이다. syntax/diff PASS이며 이전51ms 관측을 새 필드의 실행 증거로 재사용하지 않는다. 다음은 해당 구간 분리 측정 후 getValue/상태 갱신/프레임 대기 중 원인을 좁히는 작업이다. 제품 코드는 미변경, 사용자9월 archive 보존, main 병합/push 없음, 전체G6/메모리/실계정/Windows 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (메모리 언어 요인 비교)
+
+- 기준96bc719에서 Karpathy 최소 범위로 packaged UI 진단에 고정 --english/--korean 옵션을 추가했다. 최초 --lang=ko-KR 인자만 전달한 TtphrV는 실제 선택en으로 검증 실패해 비교에서 제외했다. 최종 구현은 자체 임시 프로필의 실제 언어 select change 및 두 animation frame 뒤 선택값 일치를 확인한다. UI 전환 후 표본이며 언어별 cold startup이 아니라는 한계를 report에 명시한다. 제품/사용자 설정·메모리 기준은 바꾸지 않았다.
+- 동일 패키지 단일 비교: Ald8ia observed ko/RSS457654272B, bmWUH4 observed en/RSS459898880B. 둘 다400MiB 초과 FAIL이나 정상 exit0/shutdown confirmed다. 한국어가 메모리 초과 주원인이라는 근거는 나오지 않았으며, 작은 차이를 일반적인 성능 개선/누수 부재 증명으로 해석하지 않는다. /private/tmp/hello-agent-memory-{english,korean,english-ui,korean-ui}.log 및 각 root의 result.json/PNG 보존.
+- 초기 인자 시험4tMCUd/TtphrV와 최종Ald8ia/bmWUH4 총4개 root는 정상 종료·관측 PID 전부 부재 확인 후 정확한 userdata만 제거했다. 인증정보·사용자프로젝트 미사용. syntax/diff PASS. 다음은 renderer 구성별 메모리 비용 분리 또는 잔여G6 계측이며 반복 트리 지연은 앞선 측정으로 해소됐다. 사용자9월 archive 보존, main 병합/push 없음, 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (최신 패키지 트리 반복 지연 해소 확인)
+
+- 기준806c5d9 최신 macOS arm64 package smoke PASS 후 기존 --tree-file collector를 예열1+본10회 순차 실행했다. 본10회 p95 treeRoot258.70ms/expand167.80ms/fileEditable432.70ms/DOM362로 각 지연·DOM 기준 이내다. 기존 AyEMnF의 treeRoot p95 1132.40ms 실패는 이번 최신 패키지 반복에서 해소됐다. 측정조건/지표를 바꾸거나 실패 표본을 제외하지 않았다.
+- OS 임시 hello-agent-packaged-performance-vb7yyj/measurement.json에서 head/headAfter806c5d9 동일,11회 모두 normal exit0·shutdown confirmed·fixtureCleaned=true·largeProject.failedMetrics=[]를 재확인했다. JSON/PNG/log만 보존하고 각 생성 project/other-project/userdata는 정상 종료 및 PID 부재 후 정리됐다. /private/tmp/hello-agent-final-performance-package.log, hello-agent-final-tree-repeated.log 보존.
+- 유휴 RSS457326592~460701696B(약436~439MiB)는400MiB 초과이므로 전체 FAIL/exit1을 유지한다. 이것은 트리/파일의 부분 packaged 진단이며 전체G6 collector·입력/stream·peak/retained RSS·실계정·Windows·물리 키보드 합격이 아니다. 사용자9월 archive 변경 때문에 clean-tree release gate도 주장하지 않는다. 다음은 메모리 비용 분리 및 나머지 검증이다. 실제 계정/사용자 프로젝트 미사용, main 병합/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (100회 저장 경합 실제 stdio 검증)
+
+- 기준1821395의 release/locked stdio_process에서 명시 ignored인 binary_workspace_save_races_preserve_external_bytes_across_two_chats를 실행해1 PASS/50.69초를 확인했다. 자체 임시 Git 프로젝트의 두 채팅 workspace를 번갈아 사용해 save begin 뒤/청크 뒤 외부 쓰기100회와 정상 대조 저장100회를 검증했다. 원시100 observations와 counters(silentOverwrites/unreportedConflicts/crossChatWrites 각각0), 원본 불변·다른 채팅 불변·충돌 보고·외부 바이트 보존 모두true를 /private/tmp/hello-agent-final-save-races.log에서 다시 확인했다.
+- app.prepareQuit safeToQuit 및 child 정상 exit 후 시험 루트 hello-agent-save-races-AFEp3D가 제거됐음을 확인했다. 실제 계정/모델/사용자 프로젝트 미사용. 이 증거는 native stdio의 commit 전 제어된 교차 실행이며 packaged UI·agent writer·commit 내부 임의 경합·전체G6 합격이 아니다. 기존 시험의 한계를 유지하고 미관측 값을0으로 채우지 않았다.
+- 메모리 미해결은 유지한다. 기존7s7oRo 마지막 RSS445579264B에서 main156712960/renderer135020544/GPU88932352/network47136768/sidecar17776640B, renderer JS used2962536B를 읽었다. 이전 빈 창과 조건이 달라 차이를 정확한 원인 분해로 사용하지 않으며 기능 비활성화/기준 상향은 하지 않았다. 다음은 반복 패키지 성능 및 메모리/잔여G6·실계정·Windows. 사용자9월 archive 보존, main 병합/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (종료 확인 뒤 bounded 회수·실패 회귀 해소)
+
+- 7ddac69 위 Karpathy 최소 범위로 fixture G5A finish_with_report의 단발 try_wait를 종료 confirmed일 때만 최대1초/25ms 간격 재확인으로 변경했다. unconfirmed tree는 대기하지 않고, try_wait 오류/기한 초과는 false를 유지한다. process-tree report·durable evidence·forced uncertainty·provider recovery 판정은 기존처럼 모두 필요하다. native provider의 별도 실행 경로 수정/실계정 종료 검증으로 확대하지 않는다.
+- 기존 실패 fake_agent_3 PASS(oversized/clean cancel/uncertain poison 포함), 가짜 시계 reap3 PASS(즉시·지연·timeout·오류·미확인), provider_terminal_2 PASS, stdio_process13 PASS/1ignored. 앞선 lib 실패로 미실행됐던 macos_sandbox_probe는0PASS/2ignored, doc0개로 확인했으며 ignored를 합격으로 세지 않는다. /private/tmp/hello-agent-final-reap-{fake,unit,terminal}.log, final-stdio.log, final-sandbox-tests.log, final-sidecar-doc.log 보존. 새 helper rustfmt/diff PASS. 전체 library 재실행 대신 이전621PASS와 영향 집중 검사를 구분해 재사용한다.
+- final_application_safety 최종 APPROVE. 검토 의견에 따라 unconfirmed tree의 direct child는 비차단 회수1회를 하더라도 helper 결과false를 유지하도록 엄격화하고 해당 unit을 포함해3 PASS 재확인했다. 이번/직전 테스트 및 작업 기록만 커밋하고 사용자9월 archive는 제외한다. 메모리·반복 성능·G6·실계정·Windows 미완료. main 병합/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (sidecar 전체 결과·종료 회수 경합 확인)
+
+- session16034 정상 종료(exit101): 621 PASS/4 FAIL/36 ignored, 535.85초. 라이브러리 실패로 이후 binary/integration/doc 단계는 실행되지 않았다. 실패3건(runtime_scan_reports_special_files_without_exposing_names, claude_runtime_files의 only_live_owner_mux_in_private_tmp_is_admitted/unrelated_sockets_and_links_remain_rejected)은 UnixListener::bind EPERM이었다. 제한 밖에서 해당3건 모두 PASS를 확인했다(/private/tmp/hello-agent-final-{socket-recheck,claude-sockets}.log). 실제 계정/프로젝트를 사용하지 않은 임시 자료 시험이다.
+- fake_agent_clean_cancel 실패는 poll 상태 경로 수정 뒤에도 제한 안팎에서 재현됐다. assertion에 시나리오/termination 진단을 추가해 Oversized로 한정했다. 임시 test-only 로그로 finish_with_report의 report=Confirmed/all2gone, reaped=false, evidence_failed=false를 확인했다(/private/tmp/hello-agent-final-cancel-tracker.log). 즉 OS 종료 확인 직후 Child::try_wait가 아직 회수 완료를 반환하지 않는 경합이다. 임시 runtime 로그는 제거했고 제품 코드는 변경하지 않았다. 전체 실패를 sandbox 탓이나 poll 수정으로 해결됐다고 주장하지 않는다.
+- 다음은 종료 증명과 fail-closed를 유지하면서 confirmed report 뒤의 launcher 회수를 bounded 처리하는 수정·회귀·독립 안전 검토다. fake_agent_ 집중 검사의 다른2건은 PASS, 문제1건은 미해결이다. 앞선 진행 중 기록의 session16034는 이제 종료됐으므로 재대기/전체 중복 실행하지 않는다. 모든 이번 검사 세션 종료, 변경은 chat/tests.rs와 작업 기록에 미커밋으로 남김. 사용자9월 archive 보존, main/push 없음, G6/메모리/실계정/Windows 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (sidecar 대기 조건 결함 수정 후보)
+
+- 기존 session16034를 재확인해 같은 전체 검사가 계속 진행 중임을 확인했다. 검사 중인 실행 파일은 7ddac69에서 만들어졌으며 이후 소스 편집을 포함하지 않는다. 대형 snapshot100개 초과 회귀는 완료 PASS, storage 검사는 진행 중이다. 최종 집계/실패 panic은 아직 나오지 않았다.
+- 실패한 fake_agent_clean_cancel_releases_writer_and_malformed_or_oversize_fail_closed의 poll 루프가 실제 영속 run 구조 record.state 대신 최상위 state를 읽어 null != running으로 조기 중단하는 코드 결함을 발견했다. exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_distinct에도 같은 패턴이 있어 두 곳을 record.state + 필수 문자열 확인으로 수정했다. 최종 상태/종료 증거 검증은 완화하지 않았고 제품 코드는 변경하지 않았다. 아직 수정 후 테스트 미실행이며 실패 원인 확정은 전체 검사 종료 후 panic과 집중 재현으로 검증한다.
+- 다음: 반드시 session16034 종료/최종 오류를 먼저 수집하고, 두 수정 테스트와 UnixListener 특수 파일 검사 실패 원인을 구분해 필요한 집중 검사만 실행한다. 현재 전체 검사와 Cargo를 겹쳐 실행하지 않았다. 소스 및 이번/직전 기록 미커밋, 사용자9월 archive 변경 보존. 메모리·반복 성능·전체G6·실계정·Windows 미완료, main 병합/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (최신 통합 소스 묶음 회귀 진행)
+
+- 기준 HEAD 7ddac69에서 npm test 495 PASS/0 FAIL, pnpm exec tsc --noEmit, pnpm build 및 Electron M5 renderer Vite build PASS. M5 build의 Monaco 큰 chunk 경고는 남으며 패키지 실행/메모리 합격으로 해석하지 않는다. 공용 Rust release/locked core198·protocol58·core doc3 PASS. 로그는 /private/tmp/hello-agent-final-{node-tests,frontend-build,m5-renderer,core-protocol}.log다.
+- sidecar 전체 release/locked 검사 661개는 exec session16034에서 현재 실행 중이다. /private/tmp/hello-agent-final-sidecar.log에 fake_agent_clean_cancel_releases_writer_and_malformed_or_oversize_fail_closed 및 runtime_scan_reports_special_files_without_exposing_names 실패가 먼저 관측됐다. 최종 panic/집계 전이므로 원인을 단정하지 않는다. 다음 작업은 반드시 같은 session16034의 종료를 확인한 뒤 실패 원인을 분류하고 영향 검사만 재실행한다. 관찰 timeout을 종료로 취급하거나 전체 검사를 중복 시작하지 않는다.
+- CARGO_BUILD_JOBS=4/RUST_TEST_THREADS=4/CARGO_INCREMENTAL=0 및 기존 release 캐시를 사용했다. 실제 에이전트/사용자 프로젝트/설치/삭제는 실행하지 않았다. 반복 성능 측정은 이 무거운 검사가 끝난 다음으로 미뤘다. 메모리/G6/실계정/Windows 미완료, 사용자 9월 archive 변경 보존, main 병합/push 없음. 이번 기록은 진행 중 검사와 함께 미커밋으로 남긴다.
+
+### 2026-10-13 · by GPT-6 Astra (작업 복사본 stat 초기화·첫 트리 진입 개선)
+
+- a277ce7에서 read-tree 후 raw 파일 생성으로 인덱스 stat가 비어 있는 경로를 확인했다. 자체 임시10,000파일 probe의 최초 diff652ms/후속약21ms를 관측하고, Karpathy 최소 변경으로 unpublished staging의 blob 자식 종료 뒤 고정 update-index -q --ignore-submodules --refresh를 연결했다. 경로/add/remove/assume-unchanged 없이 object ID/기준 트리를 유지하고 기존 검증·fresh diff를 생략하지 않는다. 원본 index에는 실행하지 않는다. [Git 공식 --refresh 설명](https://git-scm.com/docs/git-update-index#_using_refresh)도 read-tree 이후 stat 연결 용도를 명시한다. 전체 복사 준비 비용을 없애는 변경이 아니라 첫 사용자 요청 이전으로 초기 확인을 옮긴다.
+- materialized3·inherited filter1·executable configuration1 PASS(기존 ignored helper1), package smoke PASS, diff PASS, final_application_safety APPROVE. 원본 index 바이트 불변·snapshot stat 생성·기준 tree 불변·동일 길이 수정 감지를 추가 회귀로 확인했다. /private/tmp/hello-agent-index-refresh-{tests,package,ui}.log와 자체 probe nzdO2P/result.json 보존.
+- 실제 새 패키지7s7oRo: firstTree271.8ms(직전966.3ms), expand117.3ms/file413.9ms/DOM362, 정상 exit0/종료confirmed. 단일 측정 개선이며 반복p95 합격은 아직 아니다. idle460324864B 초과로 전체 FAIL 유지한다. OS 임시 hello-agent-packaged-ui-7s7oRo의 JSON/PNG 보존·PID 부재 확인 후 생성 fixture3디렉터리 정리, probe fixture도 정상 완료 후 정리했다. 다음은 묶음 반복 검증과 메모리/잔여G6·실계정·Windows다. 사용자9월 archive 보존, main 병합/push 없음, 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (분할 감시 요청 루프 연결·교체 방어)
+
+- 54e50bc 위 Karpathy 최소 범위로 WatchState가 진행 중 scan을 보관하고 Unix 초기 등록/poll에서128단계씩 처리하도록 연결했다. 미완료 baseline은 게시하지 않으며 초기 다회차 완료 시 rescan, 오류·overflow 시 rescan 후 폐기한다. stop/close는 iterator도 폐기한다. 감시 재등록 실패 시 기존 project watcher도 제거한다. non-Unix는 신원 대조 구현 전까지 종전 단일 호출을 유지한다.
+- 독립 검토에서 중간에 교체된 자식 디렉터리를 이전 핸들로 읽는 결함을 지적받아 매 회차 현재 worktree에서 모든 보관 경로를 재열고 dev/ino를 대조하도록 보완했다. 결정적 rename/recreate 회귀를 추가했다. workspace 기존 즉시 overflow 테스트를 지연 알림 계약으로 갱신하고 네 신원 필드 일치·화면의 다른 채팅 알림 무시를 검증했다. 최종 final_application_safety APPROVE.128은 watcher별이며 전체 watcher 시간 상한 보장은 아니다.
+- release watcher8 PASS, oversized_workspace_watch1 PASS, renderer workspace10 PASS, cargo check와 최신 package smoke PASS, diff PASS. 상세 /private/tmp/hello-agent-watch-{dispatch-tests,workspace,renderer,response-check,response-package}.log. 전체 Rust/하네스·Windows·최종G6는 아직 미실행이다.
+- 최초 패키지03Z8Co는 firstTree1038ms/후속약200ms로 악화·FAIL했고 보존했다. 응답 직전 중복 poll을 제거하고 기존 stdio의 응답 후/idle100ms poll만 유지한 ocbMpL은 첫966.3ms/expand116.6ms/file416.6ms/DOM362, 후속88.4~147ms다. 단일 기준 이내지만 기존838ms보다 개선됐다는 증거는 아니며 반복 지연 문제는 미해결로 유지한다. idle458833920B 초과로 전체 FAIL. 두 시험 정상 exit0/종료confirmed·PID 부재 뒤 자체 fixture3디렉터리씩 정리하고 JSON/PNG 및 /private/tmp/hello-agent-watch-{dispatch,response}-ui.log 보존했다. 다음은 초기 diff 작업 대기 비용 및 메모리/잔여 통합 검증이다. 사용자9월 archive/main/push 경계 유지, 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (분할 파일 감시 스캔 구현 체크포인트)
+
+- ac409b6에서 Karpathy 최소 범위로 WatchScan 상태와 advance(budget)를 구현했다. iterator·부모 capability·수집 결과를 보관하고 회차별 항목 수를 제한하며 무시 이름/디렉터리 종료도 예산을 소비한다. 모든 sibling 디렉터리를 미리 열지 않고 DFS 조상만 유지한다. nofollow metadata/자식 디렉터리 검증/10,000항목 초과 거절은 유지한다.
+- 기존 snapshot_tree는 이 구현을 끝까지 호출하므로 아직 dispatcher 양보나 제품 지연 개선은 연결되지 않았다. 다음은 WatchState에 진행 중 scan을 결속하고 초기 완료/변경/오류·overflow·종료 시 보수적인 rescan 알림과 상태 폐기를 연결하는 것이다. 분할 중 경로/원장 변경과 초기 감시 공백을 조용히 성공으로 처리하지 않아야 한다.
+- 분할 결과 일치·회차 한도·중단 후 재시작·무시 항목의 예산 소비 회귀2개를 추가했다. CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 cargo check --release -p hello-agent-sidecar --tests PASS(/private/tmp/hello-agent-watch-slices-check.log), diff PASS. 테스트 실행·독립 안전 검토·패키지 성능 확인은 실제 요청 루프 연결 뒤 묶어서 수행한다. 구현 체크포인트이며 gate/제품 완료 아님. 사용자9월 archive 보존, main 병합/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (첫 트리 진입과 후속 요청 지연 분리)
+
+- eb09719의 최신 패키지에서 기존 cold 지표를 그대로 측정한 뒤 같은 폴더 재진입3회와 실제 getProjectTree IPC3회를 추가했다. 제품 bridge를 대체하지 않으며 후속 warm 값을 cold p95로 사용하지 않는다. Karpathy 최소 진단 범위로 관측기2파일만 수정했다.
+- 31Gp7a는 첫 진입838.4ms, 재진입85.2/91.7/96.0ms, 직접 요청59.9/87.3/57.8ms다. 최초 표시 뒤에도 초기 diff/watch가 동기 dispatcher에 남는 구조와 일치해 초기 요청 대기가 유력하다. 특정 함수의740ms 비용을 직접 계측한 증거는 아니며 기존 반복 FAIL을 해소했다고 선언하지 않는다. 다음 구현은 감시 스캔의 bounded/incremental 처리로 요청 루프의 긴 점유를 줄이되 변경 감지/overflow/rescan/종료 계약을 보존하는 것이다.
+- syntax/diff PASS, 시험 정상 exit0/종료confirmed. idle 메모리 초과로 전체 FAIL 유지. /private/tmp/hello-agent-tree-segments.log와 OS 임시 hello-agent-packaged-ui-31Gp7a/result.json·PNG 보존, PID 부재 확인 후 자체 fixture3디렉터리 정리. 사용자9월 archive/main/push 경계 보존; 메모리·나머지G6/실계정/Windows 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (파일 감시 항목의 capability 재사용)
+
+- 8cdde4f 기준 직접 조사: 트리 getTree뿐 아니라 초기 watch 요청이 같은 dispatcher에서 최대10,000항목을 동기 조회한다. Karpathy 최소 변경으로 snapshot_tree의 재경로 해석 symlink_metadata 대신 iterator가 보유한 DirEntry::metadata를 사용했다. cap-primitives3.4.6 Unix 구현의 held FD/FollowSymlinks::No를 확인하고 외부 디렉터리·dangling 링크 비추적/로컬 변화 회귀를 추가했다. 안전 검사·감시 한도·정렬/페이지·동의 경계 변경 없음.
+- release watcher4 PASS 및 독립 검토자 final_application_safety APPROVE. 패키징은 제한 환경 다운로드 실패 뒤 네트워크 허용 재실행 PASS. rustfmt 전체 check는 기존 하위 모듈 포맷 차이로 실패했고 무관한 재포맷은 하지 않았다. diff check PASS. 최초 새 테스트의 Debug trait 컴파일 오류는 비교 assertion을 수정한 후 해소했다.
+- 새 패키지 mVxnyp 단일 측정은 treeRoot892.5ms/expand66.6ms/file383.4ms/DOM362, 정상 종료confirmed/exit0. 단일 값이므로 기존 반복 p95 실패 해결이나 성능 개선의 증명은 아니다. idle461455360B 초과로 전체 FAIL 유지. /private/tmp/hello-agent-watcher-{metadata,package,ui}.log와 OS 임시 hello-agent-packaged-ui-mVxnyp의 JSON/PNG 보존; PID 부재 확인 후 자체 fixture3디렉터리를 정리했다. 다음은 지연의 queue/backend/render 구간 분리 및 반복 검증, 메모리/나머지 G6다. 사용자9월 archive/main/push 경계 보존, 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (설치·백업 정리 활성화 승인 재확인)
+
+- 사용자 응답의 macOS 설치·업데이트 및 명시 동의 백업 정리 활성화 승인을 확인했다. 현재 m5/coding-agent-ide HEAD 8cdde4f는 기존 활성화 커밋944bba1을 포함하며 설치 owner와 application_cleanup_enabled의 macOS 활성화 상태를 코드로 대조했다. 중복 활성화 변경이나 실제 설치·백업 삭제는 수행하지 않았다.
+- 개별 작업의 대상/변경 확인·동의, 현재 복구점 종료 후 별도 정리 동의, 자동 삭제 없음·원본/이력 보존 경계는 유지한다. 이번 확인은 추가 실행 시험이나 전체 제품 합격이 아니다. 다음 작업은 기존 트리 지연·메모리 초과 개선과 잔여 통합 검증이다. 기존9월 archive 변경은 보존하며 main 병합/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (트리·파일 반복 수집과 지연 실패 확정)
+
+- fb5445e의 같은 수집기로 --tree-file 준비1+본10회 순차 실행을 완료했다. AyEMnF/measurement.json의 trials11 모두 정상 종료confirmed·fixtureCleaned=true다. /private/tmp/hello-agent-packaged-tree-repeated.log와 OS 임시 hello-agent-packaged-performance-AyEMnF에 원시값·로그·각 trial JSON/PNG 포인터를 보존하고 생성 fixture는 매회 제거했다. 사용자 프로젝트/모델 호출 없음.
+- 본10회 p95 treeRoot1132.40ms(1000ms 초과 FAIL), treeExpand99.90ms/fileEditable366.70ms/DOM362(각 기준 이내). 트리 진입은7·8회에1111.90/1132.40ms를 관측했고 제외하지 않았다. 기존 idle 메모리 초과도 유지한다. 부분 packaged 진단이며 전체G6/실계정/Windows 합격 아님.
+- 다음은 반복 시험 추가보다 get_tree_from_active→bridge→renderer 트리 진입 비용 분리·수정이다. 해당 함수는 capability 기반 디렉터리 전 항목 분류/정렬 후 페이지를 반환함을 읽었으나 아직 원인이나 수정안을 확정하지 않았다. 제품 코드 변경 없음, diff PASS. 사용자9월 archive/main/push 경계 보존, 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (패키지 대형 diff 반복 수집 완료)
+
+- e7541b5 위 Karpathy 최소 범위로 m5-packaged-performance.mjs를 추가했다. 고정 --diff/--tree-file 시나리오를 준비1+본10회 순차 실행하고 source HEAD/실제 asar·sidecar 지문·종료·fixture 치수를 대조한다. 불완전 관측/불확실 종료는 다음 실행을 막으며 정상 종료·PID 부재 확인 후 자체 fixture3디렉터리만 정리하고 JSON/PNG/로그는 유지한다. 원본·계정·모델 호출 없음.
+- --diff11회 완료: 본10회 p95 summary432.60ms/firstFile364.10ms로 해당 지연 기준 이내. 1SK0IZ/measurement.json의 trials11 모두 종료confirmed·fixtureCleaned=true, 원본 불변 확인. /private/tmp/hello-agent-packaged-diff-repeated.log 및 OS 임시 hello-agent-packaged-performance-1SK0IZ에 원시값 보존. 기존 idle400MiB 초과로 집계 FAIL/exit1은 유지한다. 이것은 부분 진단이며 전체G6/입력/stream/peak·retained memory/실계정/Windows 합격이 아니다.
+- 실행 후 일반 오류가 지연 초과와 함께 생겨도 임의 계속하지 않도록 허용 오류 문자열을 정확한 기준 초과로 좁혔다. 정상 trial11에는 error가 없어 위 증거에 영향 없고 오류 주입 검증은 미실행이다. syntax/diff PASS. 다음은 tree-file 반복 및 잔여 성능 항목, 사용자9월 archive/main/push 경계 보존·전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (실제 패키지 대형 diff 측정 연결)
+
+- 3c6ec7d의 트리/파일에 이어 Karpathy 최소 범위로 기존 native fixture를 재사용한 --large-diff를 연결했다. 자체 snapshot에만500파일/20,000변경 줄/10MiB patch를 만들고 실제 패키지 변경 패널의 목록/첫 파일을 renderer 시계로 관측한다. 제품 bridge/안전 경계 변경 없음.
+- q1BxKi는 diffSummary481.30ms/diffFirstFile316.60ms, 실제 fixture dimensions 일치·originalUnchanged=true, 정상 exit0/종료confirmed다. /private/tmp/hello-agent-packaged-large-diff.log 및 OS 임시 hello-agent-packaged-ui-q1BxKi/result.json/PNG 보존. idle459177984B로 전체 FAIL은 유지한다. 단일 진단이며 반복p95·입력/stream·전체메모리/실계정/Windows·G6 완료 아님. syntax/diff PASS, 다음은 실제 패키지 반복 수집과 잔여 성능 항목이다.
+- 종료/PID 부재·일반 디렉터리 확인 후 이번 generated project/other-project/userdata 약15MiB를 제거하고 증거만 남겼다. 시험으로 재생성 가능, 사용자 데이터/9월 archive/main/push 경계 보존. 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (실제 패키지 대형 트리·파일 측정 연결)
+
+- 이전 글꼴/preload 비용 분리에서 주원인 가설을 좁혔다. 이번에는 Karpathy 최소 범위로 기존 fixture를 재사용한 --large-project를 연결했다. 자체10,000파일/1,000디렉터리 subtree와5MiB/100,000줄 파일을 실제 packaged sidecar→snapshot→renderer/Monaco로 연다. 제품 main/bridge를 대체하지 않으며 단일 진단임을 유지한다.
+- UMef0s는 snapshotObserved30742.52ms, renderer treeRoot895.90ms/treeExpand66.40ms/fileEditable366.50ms/DOM362로 해당 단일 기준 이내, 정상 exit0/종료confirmed. idle442925056B로 전체 FAIL 유지한다. /private/tmp/hello-agent-packaged-large.log 및 OS 임시 hello-agent-packaged-ui-UMef0s/result.json/PNG 보존. 10회p95·대형diff·입력/stream·전체메모리/실계정/Windows·G6 완료 아님. 다음은 같은 실제 패키지의 누락 성능 수집 연결이다.
+- 종료/PID 부재·일반 디렉터리 확인 후 생성 project/other-project/userdata 약93MiB를 제거하고 작은 JSON/PNG 증거만 남겼다(시험으로 재생성 가능). 기존 사용자 데이터/9월 archive/main/push 경계 보존. diff 검사 PASS, 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (한국어 글꼴·preload 메모리 비용 분리)
+
+- 9ffba30의 최신 패키지 통합 확인은 진전이었다. 같은 Electron43.4.0/창 크기/보안·시스템 글꼴 설정의 빈 창에서 영어384483328B, 한국어386154496B, 한국어+실제 preload389824512B를40표본씩 관측했다. 모두 정상 exit0이며 /private/tmp/hello-agent-electron-baseline.rcJrU9의 result-{system-font,korean-font,korean-preload}.json·로그 보존. 한국어 차이약1.6MiB/preload차이약3.5MiB로 실제 앱439MiB 초과의 주원인이라고 볼 근거는 없다. 단일 진단이며 data URL·자체 ps약1.8MiB 포함 등 패키지와 다른 조건이므로 정확한 제품 비용 분해는 아니다.
+- Karpathy 최소 변경 원칙으로 제품 설정·안전 기능·400MiB 기준은 바꾸지 않았다. 다음 원인 분리는 실제 화면 레이아웃/렌더러·GPU 비용이며 전체 성능 collector와 실계정/Windows 검증도 미완료다. CUA 직접 조회는 여전히 Mac locked/자동 unlock 불가를 반환해 사용자에게 잠금 해제를 비차단 요청했다. 브라우저 탭 존재를 네이티브 입력 가능으로 해석하지 않는다.
+- 세 비교 창 root/Chromium PID 부재와 일반 디렉터리를 확인 후 임시 profile3개만 제거했다(재생성 가능). 코드·JSON·로그는 보존, 사용자 데이터·9월 archive/main/push 경계 유지. 제품 수정 없음, diff 검사 PASS, 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (최신 패키지 통합 흐름 확인·debug 캐시 정리)
+
+- ec0b981에서 기존 시험 프로세스 부재를 확인하고 최신 package/smoke PASS(/private/tmp/hello-agent-package-ec0b981.log). 이어 같은 최신 패키지의 전체 --project 시나리오를 실행했다. aDPxMz의 첫 실행/재시작 모두 종료confirmed/exit0이며 저장 본문·diff·반영복원 별도 동의5항목·두 프로젝트 격리4항목이true다. 직전 미검증으로 남긴 준비 완료 대기 및 첫 프로젝트 복귀 뒤 편집 내용 재확인도 이번 코드로 실행 완료했다. /private/tmp/hello-agent-packaged-final-ec0b981.log 및 OS 임시 hello-agent-packaged-ui-aDPxMz의 result/restart JSON·PNG에 보존한다.
+- restart.png를 직접 확인해 최신 좁은 프로젝트 제목과 두 프로젝트 목록·편집 내용이 표시됨을 관측했다. 재시작 idle460292096B(약439MiB)로400MiB 초과 FAIL은 유지한다. 사용자의9월 archive 변경이 있으므로 clean HEAD G6 합격 아님. CDP 입력이며 물리 키보드/실제 에이전트·중단/전체 성능 collector/Windows·서명배포 검증은 남는다.
+- 빌드/시험 프로세스 부재·일반 디렉터리·미추적을 확인 후 사용자 저장공간 정리 요청에 따라 target/debug4.0GiB만 제거했다. 소스/인증/프로젝트/복구 자료·증거는 보존했고 다음 Rust debug 빌드로 재생성 가능하다. target/release290MiB와 최신 out309MiB 한 벌은 유지한다. diff 검사 PASS, main 병합/push 없음, 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (패키지 다중 프로젝트 순차 격리)
+
+- 816b6ad 위 Karpathy 최소 변경으로 두 번째 임시 Git/고유 파일을 정상 project.open API로 등록하고 기존 UI 시나리오 뒤 첫 프로젝트 닫기→두 번째 열기→첫 채팅 복귀를 연결했다. 3UPviU restart.json의 otherFilesIsolated/otherChatsEmpty/originalChatReopened/otherSourceUnchanged와 기존 재시작·반영복원 검사가true, 두 실행 exit0/종료confirmed다. /private/tmp/hello-agent-packaged-multi-project.log 및 OS 임시 hello-agent-packaged-ui-3UPviU JSON/PNG 보존. idle460472320B로 전체 FAIL 유지한다.
+- 실행 중 추가한 프로젝트 준비 완료 대기/복귀 뒤 저장 본문 재확인은 해당 프로세스가 읽은 버전에는 없으므로 아직 미검증이다. syntax/diff PASS, 다음 최신 패키지 묶음에서 포함해 확인한다. 기존8b10ed6 패키지의 CDP 순차 전환 증거이지 최신UI/물리키보드/동시 에이전트/전체G6 합격은 아니다. 임시 profile은 재현용 유지, 사용자9월 archive/main/push 경계 보존. 다음은 최신 패키지와 잔여 성능·출시 검증이다.
+
+### 2026-10-13 · by GPT-6 Astra (패키지 반영·복원 동의와 바이트 확인)
+
+- 336ada2의 재시작 뒤 실제 UI로 확인 취소→원본 불변, 동의 전 반영 차단→검토한 바이트 반영, 별도 동의 전 복원 차단→원래 바이트 복원을 연결했다. Karpathy 최소 범위의 관측기 변경이며 제품 코드/안전 경계를 바꾸거나 bridge를 mock하지 않았다. 자체 생성 프로젝트만 사용했고 모델/계정 호출은 없다.
+- rrwOVL restart.json의 application5항목 모두true, 재시작 영속성·원본 보호·두 실행 정상 종료confirmed/exit0. /private/tmp/hello-agent-packaged-application.log와 OS 임시 hello-agent-packaged-ui-rrwOVL의 JSON/PNG를 보존한다. idle459964416B로 전체 FAIL 유지, syntax/diff PASS. CDP 입력·기존8b10ed6 패키지의 단일 성공이며 최신UI/물리키보드/다중프로젝트/실패주입/전체G6 합격은 아니다.
+- 종료/PID 부재 및 일반 디렉터리 확인 후 이번 generated project와 userdata(약3MiB)만 정리하며 증거는 유지한다. 다음은 다중 프로젝트 격리와 남은 메모리/최종 검증이다. 사용자9월 archive/main/push 경계 보존, 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (실제 패키지 재시작 영속성 확인)
+
+- 0a873e9 위 관측기를 확장해 첫 실행의 정상 종료 후에만 같은 임시 profile로 재시작한다. 최초 kvDyiD의 표시 비교 timeout은 실제 snapshot 바이트가 정상임을 확인한 뒤 Monaco NBSP 표시 공백만 정규화했다. 재시험5DDcSr은 기존 채팅·저장 본문·diff·원본 불변과 새 sidecar instance, 두 실행 exit0/종료confirmed를 확인했다. /private/tmp/hello-agent-packaged-restart{,-retry}.log 및 OS 임시 hello-agent-packaged-ui-5DDcSr/restart.json/PNG에 실패/성공 증거 보존. idle459390976B로 전체 FAIL 유지, CDP 입력·기존8b10ed6 패키지의 관측이지 전체G6/최신UI 합격 아님.
+- Karpathy 최소 변경 적용. 다음은 패키지 반영/복원·다중 프로젝트와 메모리/최종 검증이다. 기존 오늘 로그 전체를 날짜 단위로10월 archive에 원문 이동해 history를300줄 이내로 줄였다. 시험 profile은 재현용 유지, 사용자9월 archive 보존·main/push 없음.
+
+최신 검증 기록은 [10월 아카이브](archive/history-2026-10.md)에 보존한다. 실제 패키지 재시작 영속성은 확인했고 메모리 기준 초과·반영/복원 등 전체 검증은 남았다.
+
+
 ### 2026-10-13 · by GPT-6 Astra (실제 패키지의 작업 사본 편집·diff 연결)
 
 - 이전 Electron 기준선 비교에서 진전했고 이번에는 Karpathy 최소 범위로 --project 관측 경로를 추가했다. 자체 임시 Git을 packaged sidecar의 정상 project.open으로 등록/정상 종료 후 실제 패키지의 목록→채팅→Monaco 입력→저장→diff를 확인했다. TdMUBe 최초 열기 및 tTiiYV 편집 결과 savedDiffVisible/originalUnchanged=true, seed·앱 exit0/종료confirmed; 후자는 /private/tmp/hello-agent-packaged-project-edit.log 및 OS 임시 hello-agent-packaged-ui-tTiiYV/result.json/PNG에 보존한다. idle460685312B로 전체 판정 FAIL은 유지한다. CDP 입력·기존8b10ed6 패키지의 증거이며 최신 UI/물리 키보드/재시작/반영복원/전체G6 합격이 아니다. 다음은 재시작 영속성과 남은 통합 흐름이다. 두 작은 임시 profile은 후속 재현용 유지, 사용자9월 archive/main/push 경계 보존.
