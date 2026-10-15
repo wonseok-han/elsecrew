@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-15 · by GPT-6 Astra (최신 패키지 시작·메모리 반복 실측)
+
+- 기준15ac96a에서 CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4로 pnpm m5:package 완료. 저장소 out의 기존 시험 패키지만 갱신했고 시스템 설치/실제 인증/모델 호출은 하지 않았다. 최신 --startup으로 새 프로필 첫 실행+준비1회+본10회 관측을 끝냈다. 모든 회차 정상 종료/DB 종료 표식 확인, 마지막 관측PID 부재 후 자체 userdata 정리 완료다.
+- 본10회 storageObservedMs p95 726.58ms, uiObservedMs p95 1069.69ms. CDP 연결/poll을 포함한 관측치이며 정식G6 sidecarReady/appInteractive 동일값으로 주장하지 않는다. idle RSS 최대476381184B(454.31MiB)로400MiB 기준 초과, 전체FAIL/exit1 유지. 일부 회차는 기준 이내지만 실패 표본을 제외하지 않았다. 한 회차는 시작616ms의448.83MiB에서3.46초387.42MiB/11.62초386.34MiB로 낮아졌으며 시작 시점 비용 분석의 단서이지 누수 부재나 문제 해결의 증거가 아니다.
+- 증거: OS 임시 hello-agent-packaged-ui-MdohoP/startup-series.json과 result.json/startup-0~10.json/PNG. 큰 프로젝트 fixture는 생성하지 않았고 시험용 프로필은 삭제했으며 증거는 보존했다. 사용자9월 archive 보존. 다음은 초기 메모리 초과 원인 수정·누락G6/실계정/Windows 검증, 전체 미완료. main 병합/push 없음.
+
 ### 2026-10-15 · by GPT-6 Astra (패키지 시작 반복 관측 연결)
 
 - 기준79b1824에서 패키지 단발 시작 관측에 --startup을 연결했다. 새 프로필 최초 실행과 동일 프로필의 준비1회+본10회를 분리하며, 기존 실제 bridge 준비 조회·활성 프로젝트 선택 버튼·RSS·정상 종료와 DB 종료 표식을 재사용한다. 각 실행 전 HEAD/dirty 상태·패키지 산출물 동일성과 이전 관측 PID 부재를 확인한다. 불완전 관측/종료면 다음 실행을 시작하지 않는다.
