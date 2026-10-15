@@ -2,6 +2,12 @@
 
 ### 2026-10-15 · by GPT-6 Astra
 
+- clean HEAD a6d25ca에서 CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4로 pnpm m5:test:package를 완료했다. 관련27 tests PASS, 최신 Forge package→sidecar smoke→ZIP→크기 검사 PASS/exit0. release 캐시 재사용0.44초, 압축124076526B/비압축322262577B로 각각200/350MiB 기준 이내다. 증거 `.artifacts/m5-g6-package/darwin-arm64-2026-10-15T08-20-44-682Z.json`. 서명/Windows/GUI/전체G6 합격은 아니다.
+- 최신 패키지 large-project 단발 EJ6wB8에서 visible→visible/hiddenTransitions0, 트리257ms·하위133.2ms·DOM362·큰 파일473.5ms·입력10개 최대25ms·renderer 긴 작업67ms를 관측했다. 해당 부분 수치는 기준 이내지만 idle RSS449085440B로400MiB 초과, 전체FAIL/exit1 유지. 반복10회나 물리 키보드/IME 증거는 아니다. 앱 종료0·DB 종료 확인 뒤 관측PID 부재를 대조해 자체 project/other-project/userdata3개만 삭제했고 JSON/PNG는 보존했다. 합성 fixture는 재생성 가능하다.
+- 새 실제 인증/모델·사용자 프로젝트 사용 없음, 시스템 앱 설치 없음. 저장소 out 최신 패키지/ZIP만 갱신했으며 main 병합/push 없음. 다음은 메모리 초과 원인 수정·전체G6 수집·실계정/Windows·출시 검증이며 목표 미완료다.
+
+### 2026-10-15 · by GPT-6 Astra
+
 - 기준fdc11a5에서 앞선 hidden/frame0 실패와 패키지 관측 코드를 대조했다. 프로젝트 측정 전에 창 활성화가 없어 Page.bringToFront와 visible 확인을 추가했다. 측정 구간의 visibilitychange를 기록하고 hidden 전환 또는 종료 시 hidden이면 관측 실패로 남긴다. 중간 재활성화/실패 표본 재시도·프레임 deadline 연장·제품 background throttling 변경은 하지 않는다.
 - Karpathy 지침으로 시험 스크립트와 절차만 최소 변경했다. JS 문법/diff 검사 통과, 실제 반복 재실행은 아직 수행하지 않았다. 이는 관측 전제 보강이지 이전 메모리FAIL이나 제품 성능 결함 해소 증거가 아니다. 새 빌드/계정/시험 데이터 생성 없음, 전체G6·실계정/Windows·출시 미완료, main 병합/push 없음.
 ### 2026-10-15 · by GPT-6 Astra
