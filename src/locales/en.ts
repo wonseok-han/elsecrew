@@ -111,6 +111,7 @@ export const en: Record<MessageKey, string> = {
   "m5.dock.reset": "Reset layout",
   "m5.dock.visibility": "Panel visibility",
   "m5.dock.settings": "Workbench layout",
+  "m5.dock.narrow": "Use tabs in a narrow window. Widen it to return to your saved layout.",
   "m5.dock.horizontal": "Horizontal layout",
   "m5.dock.vertical": "Vertical layout",
   "m5.dock.tabs": "Tabbed layout",

@@ -110,6 +110,7 @@ export const ko = {
   "m5.dock.reset": "기본 배치로",
   "m5.dock.visibility": "패널 표시",
   "m5.dock.settings": "작업대 배치 설정",
+  "m5.dock.narrow": "좁은 창에서는 탭으로 화면을 바꿔요. 창을 넓히면 저장한 배치로 돌아가요.",
   "m5.dock.horizontal": "가로 배치",
   "m5.dock.vertical": "세로 배치",
   "m5.dock.tabs": "탭 배치",

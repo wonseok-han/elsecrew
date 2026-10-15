@@ -10,24 +10,37 @@ export function WorkbenchDock({ children, conversation, chats, reveal, changeCou
   const labels: Record<DockPanel, string> = { files: t("m5.dock.files"), editor: t("m5.dock.editor"), changes: t("m5.dock.changes"), conversation: t("m5.dock.conversation"), chats: t("m5.navigation.chatTitle") };
   const placements: Record<DockPlacement, string> = { left: t("m5.dock.left"), right: t("m5.dock.right"), top: t("m5.dock.top"), bottom: t("m5.dock.bottom"), tab: t("m5.dock.tab") };
   const [layout, setLayout] = useState(() => { try { return parseDockLayout(localStorage.getItem(DOCK_STORAGE_KEY)); } catch { return defaultDockLayout(); } });
+  const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 820px)").matches);
+  const [narrowPanel, setNarrowPanel] = useState<DockPanel>(reveal?.panel ?? "chats");
   const [drop, setDrop] = useState<{ target: DockPanel; placement: DockPlacement } | null>(null);
   const container = useRef<HTMLElement>(null);
   const tabId = useId();
   const activateTab = (target: DockPanel) => {
-    setLayout(current => selectDockTab(current, target));
+    setNarrowPanel(target);
+    if (!narrow) setLayout(current => selectDockTab(current, target));
     requestAnimationFrame(() => document.getElementById(`${tabId}-${target}-tab-${target}`)?.focus());
   };
   const resizing = useRef<{ coordinate: number; size: number; ratio: number; path: string; axis: string; layout: DockLayout } | null>(null);
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 820px)");
+    const update = () => { resizing.current = null; setDrop(null); setNarrow(query.matches); };
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
   useEffect(() => { try { localStorage.setItem(DOCK_STORAGE_KEY, JSON.stringify(layout)); } catch { /* In-memory layout remains usable. */ } }, [layout]);
-  useEffect(() => { if (reveal) { resizing.current = null; setLayout(current => revealDockPanel(current, reveal.panel)); } }, [reveal]);
+  // Resizing alone must not replay an old reveal into the saved wide layout.
+  useEffect(() => { if (reveal) { resizing.current = null; setNarrowPanel(reveal.panel); if (!narrow) setLayout(current => revealDockPanel(current, reveal.panel)); } }, [reveal]);
   const panels: Record<DockPanel, ReactNode> = { files: children[0], editor: children[1], changes: children[2], conversation, chats };
   const available = PANEL_IDS.filter(id => Boolean(panels[id]));
   const eligible = visibleDockPanels(layout, available);
-  const { groups, separators } = dockGeometry(layout, available);
+  const displayLayout: DockLayout = narrow ? { ...layout, hidden: [], hiddenBeforeFocus: undefined, tree: { type: "tabs", panels: available, active: narrowPanel } } : layout;
+  const { groups, separators } = dockGeometry(displayLayout, available);
   const preset = (kind: "horizontal" | "vertical" | "tabs") => { resizing.current = null; setLayout(current => ({ ...current, tree: undefined, tabbed: kind === "tabs", direction: kind === "vertical" ? "vertical" : "horizontal" })); };
   const move = (source: DockPanel, target: DockPanel, placement: DockPlacement) => { resizing.current = null; setDrop(null); setLayout(current => placeDockPanel(current, source, target, placement)); };
   return <>
-    <details className="m5-layout-settings">
+    {narrow && <p className="m5-dock-narrow-note">{t("m5.dock.narrow")}</p>}
+    <details className="m5-layout-settings" hidden={narrow}>
     <summary>{t("m5.dock.settings")}</summary>
     <div className="m5-dock-help"><span>{t("m5.dock.help")}</span><button type="button" onClick={() => { resizing.current = null; setLayout(defaultDockLayout()); }}>{t("m5.dock.reset")}</button></div>
     <nav className="m5-dock-visibility" aria-label={t("m5.dock.visibility")}>
@@ -37,7 +50,7 @@ export function WorkbenchDock({ children, conversation, chats, reveal, changeCou
       {available.map(id => <button key={id} type="button" aria-pressed={eligible.includes(id)} disabled={eligible.length === 1 && eligible.includes(id)} onClick={() => { resizing.current = null; setLayout(current => toggleDockPanel(current, id, available)); }}>{labels[id]}</button>)}
     </nav>
     </details>
-    {layout.hiddenBeforeFocus && <button className="m5-dock-restore" type="button" onClick={() => { resizing.current = null; setLayout(current => restoreDockPanels(current)); }}>{t("m5.dock.restore")}</button>}
+    {!narrow && layout.hiddenBeforeFocus && <button className="m5-dock-restore" type="button" onClick={() => { resizing.current = null; setLayout(current => restoreDockPanels(current)); }}>{t("m5.dock.restore")}</button>}
     <section ref={container} className="m5-panels m5-dock m5-dock-tree" aria-label={t("m5.dock.panels")} onDragEnd={() => setDrop(null)}>
       {/* Flat stable parents preserve Monaco and unsaved editor state during moves. */}
       {available.map(id => {
@@ -45,6 +58,7 @@ export function WorkbenchDock({ children, conversation, chats, reveal, changeCou
         const shown = group?.active === id;
         return <div className="m5-dock-slot" key={id} data-panel={id} hidden={!shown} style={shown && group ? position(group.rect) : { display: "none" }}
           onDragOver={event => {
+            if (narrow) return;
             if (!event.dataTransfer.types.includes(dragType)) return;
             event.preventDefault(); event.dataTransfer.dropEffect = "move";
             const bounds = event.currentTarget.getBoundingClientRect();
@@ -59,14 +73,14 @@ export function WorkbenchDock({ children, conversation, chats, reveal, changeCou
           <div className="m5-dock-heading">
             <div className="m5-dock-group-tabs" role="tablist" aria-label={t("m5.dock.group", { panel: labels[id] })}>
               {group?.panels.map((tab, index) => <button key={tab} id={`${tabId}-${id}-tab-${tab}`} role="tab" type="button" aria-selected={tab === id} tabIndex={tab === id ? 0 : -1} aria-controls={`${tabId}-content-${tab}`}
-                draggable onDragStart={event => { event.dataTransfer.setData(dragType, tab); event.dataTransfer.effectAllowed = "move"; }}
+                draggable={!narrow} onDragStart={event => { event.dataTransfer.setData(dragType, tab); event.dataTransfer.effectAllowed = "move"; }}
                 onClick={() => activateTab(tab)} onKeyDown={event => {
                   const next = event.key === "Home" ? 0 : event.key === "End" ? group.panels.length - 1 : event.key === "ArrowRight" ? (index + 1) % group.panels.length : event.key === "ArrowLeft" ? (index + group.panels.length - 1) % group.panels.length : -1;
                   if (next < 0) return; event.preventDefault(); const target = group.panels[next];
                   activateTab(target);
                 }} aria-label={t("m5.dock.drag", { panel: tab === "changes" && changeCount !== undefined ? `${labels[tab]} (${changeCount})` : labels[tab] })}>{labels[tab]}{tab === "changes" && changeCount !== undefined && <span className="m5-dock-count" aria-hidden="true">{changeCount}</span>}</button>)}
             </div>
-            <details className="m5-dock-options" onKeyDown={event => {
+            <details className="m5-dock-options" hidden={narrow} onKeyDown={event => {
               if (event.key === "Escape") {
                 event.preventDefault(); event.currentTarget.open = false;
                 event.currentTarget.querySelector("summary")?.focus();

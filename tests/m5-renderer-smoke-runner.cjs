@@ -372,6 +372,28 @@ app.whenReady().then(async () => {
     await ${waitFor("document.activeElement === document.querySelector('.monaco-editor textarea')", "focused editor input")};
   })()`);
   await window.webContents.debugger.sendCommand("Input.insertText", { text: "Z" });
+  await window.webContents.executeJavaScript(`(async () => {
+    await ${waitFor("document.querySelector('[aria-label=\"저장되지 않은 변경\"]')", "draft before responsive transition")};
+    globalThis.narrowEditor = document.querySelector('.monaco-editor');
+    globalThis.wideLayout = localStorage.getItem('hello-agent.m5.dock.v1');
+  })()`);
+  window.setSize(760, 640);
+  await window.webContents.executeJavaScript(`(async () => {
+    await ${waitFor("document.querySelector('.m5-dock-narrow-note') && document.querySelectorAll('.m5-dock-slot:not([hidden])').length === 1", "automatic narrow tabs")};
+    const tab = label => [...document.querySelectorAll('.m5-dock-slot:not([hidden]) [role=tab]')].find(button => button.textContent === label);
+    tab('팀 대화').click();
+    await ${waitFor("!document.querySelector('[data-panel=conversation]').hidden", "narrow conversation selected")};
+    tab('편집기').click();
+    await ${waitFor("!document.querySelector('[data-panel=editor]').hidden", "narrow editor selected")};
+    if (globalThis.narrowEditor !== document.querySelector('.monaco-editor') || !document.querySelector('[aria-label="저장되지 않은 변경"]')) throw new Error('responsive tabs lost draft or editor');
+    if (localStorage.getItem('hello-agent.m5.dock.v1') !== globalThis.wideLayout) throw new Error('narrow tabs overwrote wide layout');
+  })()`);
+  window.setSize(960, 640);
+  await window.webContents.executeJavaScript(`(async () => {
+    await ${waitFor("!document.querySelector('.m5-dock-narrow-note') && document.querySelectorAll('.m5-dock-separator').length === 2", "wide layout restored")};
+    if (globalThis.narrowEditor !== document.querySelector('.monaco-editor') || localStorage.getItem('hello-agent.m5.dock.v1') !== globalThis.wideLayout || !document.querySelector('[aria-label="저장되지 않은 변경"]')) throw new Error('wide restoration lost layout or draft');
+    delete globalThis.narrowEditor; delete globalThis.wideLayout;
+  })()`);
   if (window.isVisible() || window.isFocused()) throw new Error("synthetic input must not capture desktop focus");
   await window.webContents.executeJavaScript(`(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"저장되지 않은 변경\"]')", "edited draft")};
