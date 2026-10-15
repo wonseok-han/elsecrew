@@ -222,7 +222,14 @@ try {
     // Focus only before the measured scenario; never retry a hidden sample
     // or disable the product's background throttling to manufacture a pass.
     await send('Page.bringToFront', {}, sessionId);
-    await until(() => evaluate('document.visibilityState === "visible"'));
+    report.projectVisibilityPrecondition = {state:await evaluate('document.visibilityState'), satisfied:false};
+    try {
+      await until(() => evaluate('document.visibilityState === "visible"'));
+      report.projectVisibilityPrecondition = {state:'visible', satisfied:true};
+    } catch (error) {
+      report.projectVisibilityPrecondition.state = await evaluate('document.visibilityState');
+      throw new Error(`Project visibility precondition failed (${report.projectVisibilityPrecondition.state}): ${error}`);
+    }
     report.projectVisibilityStart = await evaluate(`(() => {
       const state = {initial:document.visibilityState, hiddenTransitions:0};
       const listener = () => { if (document.visibilityState !== 'visible') state.hiddenTransitions++; };

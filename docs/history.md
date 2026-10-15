@@ -2,6 +2,12 @@
 
 ### 2026-10-15 · by GPT-6 Astra
 
+- clean ab761ae의 pnpm m5:package를 갱신했다. 최초 제한 환경의 fetch failed 뒤 네트워크 허용 재시도는 PASS였다. 최신 native-chat-stream hEC8SO는 프로젝트 시작의 visible 선행 대기에서 deadline 실패했고 nativeChatStream/projectVisibility가null이라 채팅 전송 관측은 시작되지 않았다. idle RSS429129728B로400MiB 초과도 유지한다. 앱 종료0/DB 종료 confirmed, seed 및 모든 RSS 관측PID 부재 확인 후 자체 project/other-project/userdata만 제거하고 result.json은 보존했다. /var 별칭 경로 불일치로 최초 정리는 거부됐고 실제 /private/var 경로에서만 수행했다.
+- 이전 mcy4lx 원시 자료의 hiddenTransitions1/final:hidden을 새로 확인했다. 공개 append 전송 루프의 setTimeout은 숨김 창에서 제한될 수 있으므로659건/180초를 순수 제품 처리량으로 단정했던 해석은 철회한다. Git 검사60ms대 직접 진단·전체 watcher 연속 검사·전체 원장 읽기라는 코드 근거와 수정은 유효하지만, 변경 전후 패키지 속도 개선은 아직 입증되지 않았다.
+- Karpathy 최소 변경으로 진단에 visible 선행 상태/실패 원인을 기록하고, native probe가 hidden을 감지하면 추가 전송을 중지·진행 중 요청을 기다린 뒤 FAIL로 마무리하며 UI 준비 중에도 실패하도록 보강했다. listener는 finally에서 제거한다. 제품 background throttling·검증 상한·재시도 정책은 변경하지 않았다. 숨김 시작/준비 중 숨김의 순수 회귀2건·JS 문법·diff 통과. 실제 UI 재시험은 반복하지 않았으며 foreground 관측 전제가 확보된 뒤 실시한다. 실제 모델/인증/사용자 프로젝트·main 병합/push 없음, 전체G6·메모리·실계정/Windows·출시는 미완료다.
+
+### 2026-10-15 · by GPT-6 Astra
+
 - 기준ba0e92d에서 stdio 응답 뒤 poll_watchers가 등록된 모든 watcher에 validate_workspace_address(Git HEAD/index/fsck/remotes 포함)를 연속 실행함을 확인했다. 앞선60ms대 검사 비용이 채팅 수만큼 한 dispatcher 회차에 누적되는 경로다. 마지막 정렬 키 다음의 watcher 한 개씩 순환하도록 수정했으며 삭제된 커서의 successor/wrap·전체 중지 커서 초기화를 포함한다. 각 선택의 기존 신원/lock/Git/held-path 재검증은 유지하고 안전 결과를 캐시하지 않는다.
 - 네 실제 fixture 채팅의 변경이4회 poll 안에 각각 한 번 도착하고 다음 순환은 조용함을 회귀로 추가했다. 최신 release watcher 관련10건 PASS/0 FAIL(8.06초), diff 검사 통과. 초기 Option-loop 경고는 명시 into_iter로 제거했다. 단일 watcher 검증의 벽시계 비용은 남으며 전체 패키지 전달 지연 개선/200 events/sec/G6 합격은 아직 측정하지 않았다.
 - Karpathy 최소 변경으로 watcher scheduling만 수정하고 현행 구조 문서에 개별 알림 주기가 watcher 수에 따라 늘어나는 한계를 명시했다. 기존 읽기 전용 startup_memory_review가 순환/삭제/중지와 선택 회차의 검증·실패 경계를 확인해 차단 결함 없음으로 회신했다. 자체 TempDir·기존 release 캐시만 사용, 실제 계정/모델·사용자 프로젝트·main 병합/push 없음. 다음은 최신 패키지 묶음 검증이며 메모리/G6·실계정/Windows·출시는 계속 미완료다.
@@ -168,6 +174,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **native 전송 수치의 visibility 한계(2026-10-15)**: mcy4lx은 hiddenTransitions1/final:hidden이었다. 타이머 기반 부하 전송 자체가 숨김 제한을 받을 수 있으므로659건/180초를 제품 단독 처리량으로 인용하지 않는다. hEC8SO는 visible 선행 대기부터 실패해 전송 미시작이다. probe는 이제 숨김을 실패로 중단하며 제품 background throttling을 끄거나 실패 표본을 재활성화해 통과시키지 않는다.
 
 - **follow-up 비용 진단(2026-10-15)**:64건 작은 자체 fixture에서 공개 append60~85ms와 별도 workspace 검사60~88ms, idempotent retry0.1ms 미만을 관측했다. verify_workspace는 매번 Git HEAD/index/fsck/remotes/metadata를 확인한다. 공개 user-message append는 provider stream과 다른 경로이며 이 결과는12000 provider event 처리량이나 패키지 지연 원인 확정이 아니다. 안전 검사 생략/캐시 없이 Git 비용과 IPC/원장 확장 비용을 분리한다.
 

@@ -18,6 +18,7 @@ export function startPackagedChatStream(projectId) {
     const wait = async ready => {
       const deadline = performance.now() + 65000;
       while (!ready()) {
+        check(!result.visibilityFailed && document.visibilityState === 'visible', 'Chat observation window became hidden');
         check(performance.now() < deadline, 'Chat UI did not become ready');
         await sleep(25);
       }
@@ -33,7 +34,16 @@ export function startPackagedChatStream(projectId) {
       frames.add(id);
     };
     let unsubscribe, observer, stopped = false;
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') {
+        result.visibilityFailed = true;
+        stopped = true;
+      }
+    };
     try {
+      document.addEventListener('visibilitychange', onVisibility);
+      onVisibility();
+      check(!result.visibilityFailed, 'Chat observation window is not visible');
       for (let index = 0; index < 4; index++) {
         const goal = `Native stream ${index + 1}`;
         await wait(() => document.querySelector('.m5-new-chat-button') && !document.querySelector('.m5-new-chat-button').disabled);
@@ -128,6 +138,7 @@ export function startPackagedChatStream(projectId) {
         } catch (error) { stopped = true; throw error; }
       }));
       result.dispatchDurationMs = performance.now() - startedAt;
+      check(!result.visibilityFailed, 'Chat observation window became hidden; dispatch timing is invalid');
       const failure = outcomes.find(outcome => outcome.status === 'rejected');
       if (failure) throw failure.reason;
       const deadline = performance.now() + 10000;
@@ -168,7 +179,7 @@ export function startPackagedChatStream(projectId) {
       check(result.eventPaintWithinLimit, 'Active chat event paint exceeds 100ms');
       result.status = 'NOT_READY'; // Real IPC evidence, but not a full performance gate.
     } catch (error) { result.status = 'FAIL'; result.error = String(error); }
-    finally { stopped = true; unsubscribe?.(); observer?.disconnect(); for (const id of frames) cancelAnimationFrame(id); result.finishedAt = performance.now(); }
+    finally { stopped = true; document.removeEventListener('visibilitychange', onVisibility); unsubscribe?.(); observer?.disconnect(); for (const id of frames) cancelAnimationFrame(id); result.finishedAt = performance.now(); }
   })();
   return {started:true};
 }
