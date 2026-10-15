@@ -2,6 +2,12 @@
 
 ### 2026-10-15 · by GPT-6 Astra
 
+- 기준540ac14에서 Karpathy 최소 변경으로 패키지 관측기에 --deferred-cdp를 추가했다. client 연결 전48개 프로세스 RSS 표본과 실제 연결 시각을 별도 저장하며 제품·기준·기존 idle 측정을 변경하지 않는다. CDP server는 처음부터 활성화돼 있어 무계측 비교는 아니다. JS 문법/diff 통과.
+- 기존 패키지 자체 프로필6PFoOz 단발에서 연결 전 최대415.828MiB(시작2307ms), 마지막344.234MiB, 연결 시작13501.9ms 이후 최대356.375MiB를 관측했다. 초기 초과는 client 연결 없이도 나타나므로 연결만을 원인으로 단정할 수 없다. 지연된 idle 기준 이내로 기존 초기FAIL을 덮지 않으며 결과NOT_READY/exit2다. 실제 startup 준비 시각/원인 확정·제품 개선 증거가 아니다.
+- 앱 정상 종료0/DB 표식과 연결 전후 모든 관측PID 부재 확인 뒤 이번 userdata만 제거, JSON/PNG 보존. 새 빌드/계정/모델/사용자 프로젝트 사용 없음. 다음은 초기 native 비용 분리와 전체G6/실계정/Windows/출시 미완료 항목이며 main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra
+
 - 기준bede328에서 EJ6wB8 원시 RSS를 실제 rssBytes 필드로 재계산하고 Chromium PID/type 자료와 대조했다. peak428.28125MiB는 시작1047.37ms, 구성은 browser152.66/GPU88.02/network39.72/renderer131.34/미분류 자손16.55MiB다. 마지막 표본358.41MiB, renderer JS used heap2.83MiB다. 단발 자료이며 누수 부재나400MiB 기준 통과로 해석하지 않는다.
 - 초기 화면 코드를 재확인해 Monaco는 사용 시 동적 import이고, 보이는 기본 화면에는 backdrop blur가 적용되지 않음을 확인했다(blur는 modal backdrop). 현재 증거로 특정 React 데이터/편집기 선로딩을 원인으로 단정할 수 없어 기능 축소·GC 강제·GPU 비활성화·기준 변경은 하지 않았다. 다음 분석은 시작 구간의 main/GPU/renderer native 비용과 측정 도구 부착 비용을 분리하는 것이며, 전체G6·실계정/Windows·출시 검증은 계속 남는다. 새 실행/빌드/저장공간 소비 없이 기존 증거만 분석했고 main 병합/push 없음.
 

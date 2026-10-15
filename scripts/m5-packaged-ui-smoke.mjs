@@ -26,12 +26,13 @@ assert.equal(process.arch, 'arm64');
 const largeProject = process.argv.length === 3 && process.argv[2] === '--large-project';
 const memoryDiff = process.argv.length === 3 && process.argv[2] === '--memory-diff';
 const startupSeries = process.argv.length === 3 && process.argv[2] === '--startup';
+const deferredCdp = process.argv.length === 3 && process.argv[2] === '--deferred-cdp';
 const largeDiff = memoryDiff || (process.argv.length === 3 && process.argv[2] === '--large-diff');
 const diagnosticLanguage = process.argv.length === 3
   ? (process.argv[2] === '--english' ? 'en' : process.argv[2] === '--korean' ? 'ko' : undefined)
   : undefined;
 const projectFlow = largeDiff || largeProject || (process.argv.length === 3 && process.argv[2] === '--project');
-assert.ok(process.argv.length === 2 || projectFlow || diagnosticLanguage || startupSeries, 'Only fixed diagnostic scenarios are accepted');
+assert.ok(process.argv.length === 2 || projectFlow || diagnosticLanguage || startupSeries || deferredCdp, 'Only fixed diagnostic scenarios are accepted');
 const bundle = path.join(repo, 'out/hello-agent-darwin-arm64/hello-agent.app/Contents');
 const executable = path.join(bundle, 'MacOS/hello-agent');
 const resources = path.join(bundle, 'Resources');
@@ -117,6 +118,19 @@ async function evaluate(expression) {
   return reply.result?.value;
 }
 try {
+  if (deferredCdp) {
+    report.preAttachmentMemory = [];
+    report.limitations.push('CDP server is enabled at launch; only client attachment is delayed. Pre-attachment samples do not establish UI readiness.');
+    for (let index = 0; index < 48; index++) {
+      assert.ok(!termination, 'App exited before delayed CDP attachment');
+      const rows = execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,rss='], {encoding:'utf8', timeout:5000, maxBuffer:4 * 1024 * 1024});
+      report.preAttachmentMemory.push({elapsedMs:performance.now() - started, ...processTreeMemory(rows, child.pid)});
+      await sleep(250);
+    }
+    report.preAttachmentMaximumRssBytes = Math.max(...report.preAttachmentMemory.map(sample => sample.rssBytes));
+    report.cdpAttachmentStartedAtMs = performance.now() - started;
+    persist();
+  }
   const endpoint = await until(() => stderr.match(/DevTools listening on (ws:\/\/127\.0\.0\.1:\d+\/devtools\/browser\/[a-f0-9-]+)/)?.[1]);
   socket = new WebSocket(endpoint);
   await new Promise((resolve, reject) => {

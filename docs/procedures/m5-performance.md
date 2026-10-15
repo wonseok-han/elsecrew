@@ -47,6 +47,8 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 ### 패키징 앱 외부 관측
 
+`--deferred-cdp`는 디버깅 client 연결 전48개 RSS 표본(250ms 간격)을 별도로 수집한 뒤 기존 관측/정상 종료를 수행하는 원인 분리 진단이다. CDP server 자체는 처음부터 켜져 있으므로 완전한 무계측 비교가 아니다. `preAttachmentMemory`는 UI 준비 상태를 확인하지 않은 시작 표본이며, 연결 후 지연된 idle 값으로 기존 초기 peak나 실패를 대체하지 않는다. 전체G6 합격에 사용하지 않는다.
+
 프로젝트 시나리오는 측정 전에 CDP로 시험 창을 앞으로 가져오고 `visibilityState=visible`을 확인한다. 측정 중 숨김 전환은 관측 실패로 남기며 같은 표본을 재시도하지 않는다. 제품 background throttling이나 프레임 deadline은 변경하지 않는다. 시험 창이 앞으로 표시되므로 사용 중인 다른 창과 포커스가 경쟁하면 실패할 수 있다.
 
 반복 패키지 수집기는 각 trial의 `rendererLongTasks` 원시 기록과 최대값·200ms 초과 개수를 대조하고, 본10회의 `rendererLongTaskMs` 최대값을 집계한다. 관측 미지원·미완료·overflow·요약 불일치는0으로 대체하지 않고 중단한다. 완전 관측한 기준 초과는 실패 표본으로 유지한다. 이 관측은 프로젝트 시나리오 구간만 포함하며 앱 시작·main process long task나 전체G6 증거를 대신하지 않는다.
