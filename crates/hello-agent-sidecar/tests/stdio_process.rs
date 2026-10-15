@@ -29,6 +29,10 @@ use rusqlite::Connection;
 
 static ADMISSION_POLL_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
+#[cfg(target_os = "macos")]
+#[path = "support/parallel_agent_streams.rs"]
+mod parallel_agent_streams;
+
 #[test]
 fn binary_storage_failure_is_reported_after_shell_ready_and_quits_cleanly() {
     let root = tempfile::tempdir().expect("temporary directory");

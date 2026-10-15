@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-15 · by GPT-6 Astra (네 채팅 stdio 실행·메시지 격리 회귀)
+
+- 기준00e22b5의 미커밋 회귀를 이어 마감했다. 즉시 종료 clean 시험은4건 순차 성공했지만 peak_active=1이라 중첩 검증에 실패했다. 기존 FinalDelayed는 내부 fixture에만 연결돼 stdio 인자에서 unknown으로 거절됐으므로 테스트 전용 --stdio-agent-fixture 매핑 한 줄을 추가했다. 일반 --stdio capability/실제 provider/제품 안전 제한은 변경하지 않았다.
+- 새 support/parallel_agent_streams.rs는 독립4 snapshot/chat 생성 뒤 시작 요청을 함께 전송하고, 수락 전 이벤트 금지·실행별 연속 seq·공개 event ID 중복·chat/task/workspace/run 결속·실행 결과와 저장16메시지의 순서/내용/신원을 대조한다. 중첩 running을 필수로 요구하며 이번 실측 peak_active=4, accepted4/public12/terminal4/stored16, 원본 불변·prepareQuit safeToQuit·정상exit를 확인했다. release/locked 집중1 PASS(3.25초), rustfmt/diff PASS. /private/tmp/hello-agent-four-chat-stdio-connected.log 보존. 전체 테스트 반복은 하지 않았다.
+- 이는 실제 sidecar JSONL/저장 경로와 가짜 공급자의 bounded 실행 증거다. 실제 계정·12000개 native 부하·패키지 UI/재시작·전체G6 합격이 아니다. 성공 fixture xhSouz는 정상 종료 뒤 제거; 앞선 SQD3Xx/XwIwLP 실패자료 약1.7MiB 및 로그는 보존했다. 다음은 패키지 성능 수집 완성·초기RSS/입력paint 실패 해결과 실계정/Windows 검증이다. 사용자9월 archive 변경 보존, main 병합/push 없음, 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (네 채팅 합성 스트림 실제 renderer 관측)
 
 - 기준3cf0f1b에서 기존 M5_MEASURE_PARALLEL_PAINT 경로를 실행했다. renderer 소스는 마지막 빌드 기준7ddac69 이후 변경 없음(git diff src/m5 electron 확인). 숨겨진 Electron/실제 React renderer에 네 합성 채팅 각50회/초·3000개, 총12000개를 전달했고 선택 chat0의3000개를 모두 관측했다. elapsed60002.2ms, 최대 두-frame 표시 지연35.4ms, 발송 scheduling delay 최대4.8ms, 미관측0·관측 ID 중복0. 이후 네 채팅의 최신200개가 각2801~3000번과 일치했다. 정상exit0이며 실제 공급자/원장/native IPC/packaged G6 증거가 아니다.

@@ -203,6 +203,7 @@ where
         }
         let scenario = match scenario.to_string_lossy().as_ref() {
             "clean" => agent_runtime::FakeScenario::Clean,
+            "final-delayed" => agent_runtime::FakeScenario::FinalDelayed,
             "cancel-clean" => agent_runtime::FakeScenario::CancelClean,
             "cancel-uncertain" => agent_runtime::FakeScenario::CancelUncertain,
             "malformed" => agent_runtime::FakeScenario::Malformed,
