@@ -168,6 +168,11 @@ function ProviderConnection({ disabled, provider, onAttention }: {disabled: bool
     <div><strong>{t("m5.login.section", { name })}</strong><p role="status">{label}</p><small>{t("m5.login.separate")}</small></div>
     {canCollapse && <button type="button" aria-expanded={showDetails} aria-controls={`${provider}-connection-details`} onClick={()=>setExpanded(value=>!value)}>{t(showDetails ? "m5.login.hideDetails" : "m5.login.showDetails")}</button>}
     <div id={`${provider}-connection-details`} hidden={!showDetails}>
+    <details className="m5-login-account-help">
+      <summary>{t("m5.login.existing.title")}</summary>
+      <p>{t("m5.login.existing.help", { name })}</p>
+      <p>{t("m5.login.existing.saved")}</p>
+    </details>
     {provider === "claude" && status.state === "waiting" && <form onSubmit={event=>{
       event.preventDefault();
       if (inFlight.current || !status.attemptId) return;
