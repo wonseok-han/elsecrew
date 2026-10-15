@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFileSync } from 'node:child_process';
+import { packagedInputMaximum } from './m5-packaged-input-probe.mjs';
 
 const mode = process.argv[2];
 assert.ok(process.argv.length === 3 && ['--diff', '--tree-file'].includes(mode));
@@ -53,8 +54,12 @@ async function trial(index) {
   }
   const metric = mode === '--diff' ? result.largeDiff : result.largeProject;
   assert.ok(metric?.values, 'Incomplete measurement; fixture retained');
+  sample.values = {...metric.values};
+  if (mode === '--tree-file') sample.values.inputPaintMs = packagedInputMaximum(result.largeProjectInput);
   const limitError = `Large ${mode === '--diff' ? 'diff' : 'project'} limits exceeded: ${metric.failedMetrics?.join(', ')}`;
-  if (result.error && result.error !== limitError) throw new Error('Observation failed; fixture retained');
+  const inputLimitError = mode === '--tree-file' && sample.values.inputPaintMs > 50
+    && result.error === 'Large project input paint limit exceeded';
+  if (result.error && result.error !== limitError && !inputLimitError) throw new Error('Observation failed; fixture retained');
   if (mode === '--diff') {
     assert.equal(metric.diffFiles, 500); assert.equal(metric.diffChangedLines, 20000);
     assert.equal(metric.diffBytes, 10485760); assert.equal(metric.originalUnchanged, true);
@@ -71,15 +76,14 @@ async function trial(index) {
     fs.rmSync(target, {recursive:true});
   }
   sample.fixtureCleaned = true; persist();
-  console.log(JSON.stringify({stage:'TRIAL_FINISHED', index, status:result.status, values:metric.values}));
+  console.log(JSON.stringify({stage:'TRIAL_FINISHED', index, status:result.status, values:sample.values}));
 }
 try {
   for (let index = 0; index <= report.measuredRuns; index++) await trial(index);
   const measured = report.trials.filter(row => !row.warmup);
-  const group = mode === '--diff' ? 'largeDiff' : 'largeProject';
   report.metrics = {};
-  for (const key of Object.keys(measured[0].result[group].values)) {
-    const values = measured.map(row => row.result[group].values[key]);
+  for (const key of Object.keys(measured[0].values)) {
+    const values = measured.map(row => row.values[key]);
     assert.ok(values.every(value => Number.isFinite(value) && value >= 0));
     report.metrics[key] = {values, p95:Math.max(...values)};
   }

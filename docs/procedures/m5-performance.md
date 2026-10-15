@@ -49,6 +49,8 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 `node scripts/m5-packaged-performance.mjs --diff` 또는 `--tree-file`는 같은 packaged 관측기를 순차11회 실행한다(준비1회+본10회). HEAD와 실제 asar/sidecar 지문을 대조하고 본 측정10값의 nearest-rank p95(최대값)를 기록한다. 정상 종료와 관측 PID 부재를 확인한 trial만 자체 project/other-project/userdata를 정리하며 JSON/PNG/로그는 보존한다. 불완전 관측·불확실 종료는 중단하고 다음 앱을 시작하지 않는다. 확인된 개별 지연/메모리 초과는 전체 FAIL로 유지하며, 모든 수치가 기준 이내여도 이 부분 수집기는 NOT_READY다. migration·CDP 등 기존 한계와 누락 G6 항목은 그대로다.
 
+`--tree-file`의 `inputPaintMs`는 각 앱에서 예열 입력1개를 제외한10개 입력의 최대값을 사용한다. 본10앱의 최대값 배열을 다시 집계하며 누락/비정상 표본이나 요약 불일치는 거절한다. 입력 전 DOM 감시를 설치하고 trusted beforeinput·실제 표시 텍스트 이후 두 RAF를 관측한다. 물리 compositor/키보드/IME 증거는 아니며, 입력 후 감시를 시작하던 과거 측정과 직접 제품 속도 개선으로 비교하지 않는다. 50ms 초과도 정상 종료했다면 실패 표본을 보존하고 다음 회차를 진행한다.
+
 `pnpm m5:smoke:packaged-ui --large-diff`는 기존 native diff fixture의500파일/20,000변경 줄/10MiB patch를 자체 생성 프로젝트의 격리 작업 사본에만 만든다. 실제 변경 패널의 새로 고침→500개 요약→첫 파일 표시를 renderer 시계로 측정한다. 기준2000/1500ms, 실제 Git patch 크기/줄수와 원본 Git 상태 불변도 확인한다. 단일 진단이며 warm-up/10회p95를 대체하지 않는다.
 
 `pnpm m5:smoke:packaged-ui --large-project`는 같은 실제 패키지 경로에10,000파일/1,000디렉터리 subtree와 기존5MiB/100,000줄 파일 fixture를 생성한다. 두 control 파일은 별도다. 프로젝트 snapshot 준비 관측은65초로 제한하고 제품60초 제한은 변경하지 않는다. renderer performance.now로 트리 진입/하위 폴더/파일 입력 요소+본문+두 frame까지 측정하며 각각1000/250/1500ms, 트리 DOM500개 기준을 적용한다. 부모 관측기의 snapshotObservedMs는 별도 값이다. 단일 migration 포함 진단으로 warm-up/10회p95·전체 입력/stream/RSS peak/최종G6를 대체하지 않으며 기준 초과를 FAIL로 보존한다. 이 모드는 편집·반영·재시작을 반복하지 않는다.

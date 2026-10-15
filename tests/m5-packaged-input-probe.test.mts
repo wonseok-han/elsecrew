@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createContext, runInContext } from 'node:vm';
-import { probePackagedInput } from '../scripts/m5-packaged-input-probe.mjs';
+import { probePackagedInput, packagedInputMaximum } from '../scripts/m5-packaged-input-probe.mjs';
 
 function fixture(frameMs = 16) {
   let now = 0;
@@ -58,6 +58,7 @@ test('input probe observes before dispatch and retains trusted input plus two fr
   const result = await probePackagedInput(f.evaluate, f.insert);
   assert.equal(result.samples.length, 11);
   assert.equal(result.p95, 33);
+  assert.equal(packagedInputMaximum(result), 33);
   assert.equal(result.limitMs, 50);
   assert.equal(result.gateEligible, false);
   assert.equal(f.frameCount(), 22);
@@ -80,5 +81,23 @@ test('input probe still rejects an observed latency above the unchanged limit', 
   const result = await probePackagedInput(f.evaluate, f.insert);
   assert.equal(result.p95, 61);
   assert.equal(result.withinLimit, false);
+  assert.equal(packagedInputMaximum(result), 61);
   f.assertClean();
+});
+
+test('repeated input aggregation rejects incomplete or contradictory evidence', async () => {
+  const f = fixture();
+  const valid = await probePackagedInput(f.evaluate, f.insert);
+  for (const mutate of [
+    (r: any) => { r.samples.pop(); },
+    (r: any) => { r.samples[1].warmup = true; },
+    (r: any) => { r.samples[1].inputPaintMs = null; },
+    (r: any) => { r.p95 = 0; },
+    (r: any) => { r.withinLimit = false; },
+    (r: any) => { r.limitMs = 100; },
+  ]) {
+    const invalid = structuredClone(valid);
+    mutate(invalid);
+    assert.throws(() => packagedInputMaximum(invalid));
+  }
 });

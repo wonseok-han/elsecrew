@@ -1,5 +1,23 @@
 import assert from 'node:assert/strict';
 
+// Aggregate only complete raw trials; never substitute a supplied PASS flag.
+export function packagedInputMaximum(input) {
+  assert.ok(input?.diagnostic === true && input.gateEligible === false);
+  assert.equal(input.limitMs, 50);
+  assert.equal(input.samples?.length, 11);
+  for (const [index, sample] of input.samples.entries()) {
+    assert.equal(sample.index, index);
+    assert.equal(sample.warmup, index === 0);
+    for (const key of ['inputPaintMs', 'inputDeliveryMs', 'inputAfterDeliveryMs', 'inputDomMs', 'paintObservationMs']) {
+      assert.ok(Number.isFinite(sample[key]) && sample[key] >= 0, `Invalid ${key}`);
+    }
+  }
+  const maximum = Math.max(...input.samples.slice(1).map(sample => sample.inputPaintMs));
+  assert.equal(input.p95, maximum);
+  assert.equal(input.withinLimit, maximum <= 50);
+  return maximum;
+}
+
 // Uses Chromium input dispatch, not a mocked bridge or Monaco model mutation.
 // One app session, not ten independent cold launches or physical keyboard/IME.
 export async function probePackagedInput(evaluate, insertText) {

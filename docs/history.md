@@ -1,5 +1,16 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-15 · by GPT-6 Astra (반복 수집 마감·프레임 대기 경계)
+
+- 이전 Voojda는 종료된 FAIL이며 재실행/진행 중으로 취급하지 않았다. 코드에서 대형 프로젝트 DOM 대기 뒤 두 RAF 대기에 제한이 없어 화면 갱신 중단이 외부 Runtime.evaluate timeout으로만 나타날 수 있음을 확인했다. 2초 presentation deadline과 현재 단계/대기종류/visibility/frame 수 보존을 추가했다. RoeKJG의 실제 원인이 프레임 중단이었다고 확정하지 않으며 제품 background 정책/성능 기준/통신 timeout은 변경하지 않는다.
+- 입력 집계 및 프레임 중단 focused5 PASS, syntax/diff PASS. 프레임0·hidden 가짜 회귀는 timeout/cancel/진단 보존을 확인하는 단위 증거이며 실제 Mac 잠금 상태 증거가 아니다. 사용자 로그인 확인을 방해할 수 있는 추가 시험 창은 지금 띄우지 않았다. 기존 반복 입력 집계 변경과 함께 커밋하며10회 실제 수집/메모리/전체G6/실계정/Windows는 미완료다. 사용자9월 archive 보존, main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra (반복 입력 집계 연결·로그인 구분 확인)
+
+- 기준e31801e에서 --tree-file 반복 수집에 앱별 입력 최대값을 포함했다. 원시11표본/index/warmup/유한값·50ms 기준·요약 일치를 검증하고 확인된 입력 초과도 정상 종료한 실패 표본으로 유지한다. 단위4 PASS/syntax/diff PASS. Voojda 실측은 예열 input24.3ms·정상 종료/fixture 정리 후 본1회 RoeKJG의 Runtime.evaluate 10초 timeout으로 중단(exit1)했다. 해당 앱은 정상exit0/shutdown confirmed지만 largeProject 측정이 없어 전체 FAIL이며10회 집계는 미완료다. 실패 fixture/JSON/로그는 보존하고 원인 미확정·timeout 미완화로 남긴다. /private/tmp/hello-agent-repeated-input-final.log 참조. 변경은 미커밋으로 유지한다.
+- 사용자가 기존 Claude 로그인을 앱이 재사용하는지 질문했다. 현재 provider_claude_profile.rs의 claude-profile-v1과 provider_claude_login.rs의 CLAUDE_CONFIG_DIR를 확인했으며 기본 CLI 인증을 자동 승계하지 않는 별도 앱 프로필 구조다. 기존 터미널 로그인과 앱 자체의 연결 복원 실패는 구분해야 한다. 사용자가 어느 쪽에서 연결을 확인했는지 아직 미확인이고 인증정보를 읽거나 복사·재로그인하지 않았다. 이전 실제 Claude 작업1회 승인 미사용 상태를 유지한다.
+- 전체 목표 미완료, 사용자9월 archive 보존, main 병합/push 없음. 다음은 로그인 위치 확인과 반복 관측 timeout 원인·메모리/G6/Windows 검증이다.
+
 ### 2026-10-15 · by GPT-6 Astra (입력 관측 시작 지연 수정)
 
 - 기준39523eb에서 packaged input probe가 CDP 입력 완료 뒤 별도 evaluate로 DOM 감시를 시작함을 확인했다. Karpathy 최소 변경으로 입력 전 MutationObserver와 trusted beforeinput 감시를 설치하고 같은 두 RAF 완료 promise를 나중에 회수한다. 5초 timeout/실패 cleanup·50ms 기준·warmup1+측정10·diagnostic 경계는 유지한다. 제품 편집/저장 코드는 변경하지 않았다.

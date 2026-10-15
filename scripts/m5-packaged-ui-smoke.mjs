@@ -333,6 +333,10 @@ try {
 } catch (error) { report.error = String(error); }
 finally {
   clearInterval(memoryTimer);
+  if (largeProject && sessionId && !termination) {
+    try { report.largeProjectProgress = await evaluate('globalThis.__m5LargeProjectProgress ?? null'); }
+    catch (error) { report.largeProjectProgressError = String(error); }
+  }
   if (longTaskProbeStarted && sessionId && !termination) {
     try {
       report.rendererLongTasks = {...await evaluate(`(${endLongTaskProbe.toString()})()`),
