@@ -1,0 +1,45 @@
+name: M5 package diagnostic (unsigned)
+
+# Opt-in only. This does not publish a release or establish G6 readiness.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: 4
+      CARGO_INCREMENTAL: 0
+      RUST_TEST_THREADS: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pnpm install --frozen-lockfile
+      - name: TypeScript check
+        run: pnpm exec tsc --noEmit
+      - name: Build unsigned Electron ZIP with release sidecar
+        run: pnpm m5:make
+      - name: Verify packaged assets, fuses and sidecar protocol
+        run: node --experimental-strip-types scripts/m5-electron-package-smoke.mjs
+      - name: Upload unsigned diagnostic package
+        uses: actions/upload-artifact@v4
+        with:
+          name: m5-unsigned-diagnostic-${{ matrix.os }}-${{ github.sha }}
+          path: out/make/zip/**/*.zip
+          if-no-files-found: error
+          retention-days: 3

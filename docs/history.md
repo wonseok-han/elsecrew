@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-15 · by GPT-6 Astra
+
+- 기준1792e96에서 진행 중이던 M5 macOS/Windows 미서명 ZIP 진단 워크플로를 마무리했다. 수동 실행만 허용하고 contents:read, Rust 동시 작업4개/증분 캐시 비활성화, 산출물 보관3일로 제한했다. 기존 Forge make 및 패키지 자산/fuse/sidecar protocol smoke를 재사용하며 TypeScript 직접 import를 위한 실행 플래그를 명시했다. 기존 Tauri 배포는 변경하지 않는다.
+- YAML 구문/필수 job 확인과 git diff --check 통과. 원격 실행·push·새 패키지 빌드는 하지 않았으므로 Windows 실행 성공이나 G6 합격 증거는 아니다. 최신 제품 소스의 기존 누적 회귀를 반복하지 않았다. release-checklist에 이 진단의 범위와 승인 경계를 기록했다.
+- 사용자 질문에 현재 Claude 로그인·상태 확인·실행 모두 앱 전용 CLAUDE_CONFIG_DIR을 사용하는 코드를 재확인해 설명했다. 기존 터미널 로그인 재사용은 아직 제안이며 인증 정책/정보를 변경하지 않았다. 초기 메모리 초과·전체G6 수집·실계정·Windows·출시 검증은 남는다. 기존9월 archive 변경 보존, main 병합/push 없음.
+
 ### 2026-10-15 · by GPT-6 Astra (정식 검증·인계 문서 승인 경계 확인)
 
 - 기준af5d297에서 package gate가 clean checkout을 요구함을 코드로 확인했다. 기존부터 남은 docs/archive/history-2026-09.md를 임의로 커밋/되돌리지 않고, 내용 검토 뒤 해당 파일만 별도 커밋해도 되는지 비차단 질문을 보냈다. 정식 게이트를 우회하거나 새 package PASS를 주장하지 않는다.
