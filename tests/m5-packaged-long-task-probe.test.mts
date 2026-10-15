@@ -1,7 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { beginLongTaskProbe, endLongTaskProbe } from '../scripts/m5-packaged-long-task-probe.mjs';
+import { beginLongTaskProbe, endLongTaskProbe, packagedLongTaskMaximum } from '../scripts/m5-packaged-long-task-probe.mjs';
+
+test('repeated package aggregation recomputes raw long tasks and rejects incomplete evidence', () => {
+  const observation = {supported:true, valid:true, windowCompleted:true, overflow:false,
+    startedAt:100, endedAt:1000, limitMs:200,
+    entries:[{startTime:120, duration:201}], maximumMs:201, overLimitCount:1};
+  assert.equal(packagedLongTaskMaximum(observation), 201);
+  assert.equal(packagedLongTaskMaximum({...observation, entries:[], maximumMs:0, overLimitCount:0}), 0);
+  for (const patch of [{supported:false}, {valid:false}, {windowCompleted:false}, {overflow:true},
+    {maximumMs:200}, {overLimitCount:0}, {limitMs:201}, {endedAt:99},
+    {entries:[{startTime:1001, duration:201}]}, {entries:null}]) {
+    assert.throws(() => packagedLongTaskMaximum({...observation, ...patch}), /Incomplete or inconsistent/);
+  }
+});
 
 function fixture(supported = true) {
   let deliver: (entries: unknown[]) => void;
