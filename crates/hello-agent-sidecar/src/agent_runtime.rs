@@ -2575,27 +2575,25 @@ fn resolve_prompt(
     let selected: HashSet<_> = ids.iter().map(String::as_str).collect();
     let mut found = BTreeMap::new();
     let mut prompt = Vec::new();
-    for payload in storage.aggregate_event_payloads("chat", chat_id)? {
-        if let Some(message) = payload.get("last_message").filter(|value| !value.is_null()) {
-            if message["messageId"]
+    for message in storage.chat_message_history(chat_id)? {
+        if message["messageId"]
+            .as_str()
+            .is_some_and(|id| selected.contains(id))
+        {
+            let text = message["text"]
                 .as_str()
-                .is_some_and(|id| selected.contains(id))
-            {
-                let text = message["text"]
-                    .as_str()
-                    .ok_or_else(|| ProjectFailure::manifest("input message text is missing"))?;
-                let id = message["messageId"].as_str().unwrap_or_default();
-                // Projection updates can retain the same last_message. A message
-                // ID contributes once, while conflicting retained text is invalid.
-                if let Some(prior) = found.insert(id.to_owned(), text.to_owned()) {
-                    if prior != text {
-                        return Err(ProjectFailure::manifest("input message text changed"));
-                    }
-                    continue;
+                .ok_or_else(|| ProjectFailure::manifest("input message text is missing"))?;
+            let id = message["messageId"].as_str().unwrap_or_default();
+            // The reader rejects conflicting copies; retain the input-level
+            // check so a selected ID contributes only once.
+            if let Some(prior) = found.insert(id.to_owned(), text.to_owned()) {
+                if prior != text {
+                    return Err(ProjectFailure::manifest("input message text changed"));
                 }
-                prompt.extend_from_slice(text.as_bytes());
-                prompt.push(b'\n');
+                continue;
             }
+            prompt.extend_from_slice(text.as_bytes());
+            prompt.push(b'\n');
         }
     }
     if found.len() != selected.len() {

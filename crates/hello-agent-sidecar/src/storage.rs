@@ -849,6 +849,73 @@ impl Storage {
             .transpose()
     }
 
+    /// Merge retained history with the uncompacted tail, rejecting conflicts
+    /// and incomplete history before pagination or agent input selection.
+    pub fn chat_message_history(&self, chat_id: &str) -> Result<Vec<Value>, SidecarError> {
+        self.ensure_writes_admitted()?;
+        let invalid = || SidecarError::new("projectionInvalid", "chat message history differs");
+        let mut messages = BTreeMap::<u64, Value>::new();
+        let mut ids = std::collections::HashMap::<String, u64>::new();
+        let mut merge = |message: Value| -> Result<(), SidecarError> {
+            hello_agent_protocol::run_recovery_v1::validate_g5_payload_v1("teamMessage", &message)
+                .map_err(|_| invalid())?;
+            if message["chatId"].as_str() != Some(chat_id) {
+                return Err(invalid());
+            }
+            let sequence = message["eventSequence"].as_u64().ok_or_else(invalid)?;
+            let id = message["messageId"].as_str().ok_or_else(invalid)?;
+            if ids.get(id).is_some_and(|old| *old != sequence)
+                || messages.get(&sequence).is_some_and(|old| *old != message)
+            {
+                return Err(invalid());
+            }
+            ids.insert(id.to_owned(), sequence);
+            messages.insert(sequence, message);
+            Ok(())
+        };
+        let mut statement = self.connection.prepare(
+            "SELECT message_id,event_sequence,canonical_message_json FROM chat_messages WHERE chat_id=?1 ORDER BY event_sequence",
+        ).map_err(sqlite_error)?;
+        let rows = statement.query_map([chat_id], |row| {
+            Ok((row.get::<_, String>(0)?, row_u64(row, 1)?, row.get::<_, String>(2)?))
+        }).map_err(sqlite_error)?;
+        for row in rows {
+            let (id, sequence, raw) = row.map_err(sqlite_error)?;
+            let message: Value = serde_json::from_str(&raw).map_err(|_| invalid())?;
+            if message["messageId"].as_str() != Some(id.as_str())
+                || message["eventSequence"].as_u64() != Some(sequence)
+            {
+                return Err(invalid());
+            }
+            merge(message)?;
+        }
+        let mut previous = 0;
+        for payload in self.aggregate_event_payloads("chat", chat_id)? {
+            if let Some(message) = payload.get("last_message").filter(|value| !value.is_null()) {
+                let sequence = message["eventSequence"].as_u64().ok_or_else(invalid)?;
+                if sequence < previous {
+                    return Err(invalid());
+                }
+                previous = sequence;
+                merge(message.clone())?;
+            }
+        }
+        let projection = self.projection_record("chat", chat_id)?.ok_or_else(invalid)?;
+        let durable = projection.get("durable_event_sequence")
+            .and_then(Value::as_u64).ok_or_else(invalid)?;
+        let mut last = 0u64;
+        for sequence in messages.keys() {
+            if last.checked_add(1) != Some(*sequence) {
+                return Err(invalid());
+            }
+            last = *sequence;
+        }
+        if last != durable {
+            return Err(invalid());
+        }
+        Ok(messages.into_values().collect())
+    }
+
     pub fn aggregate_event_payloads(
         &self,
         aggregate_type: &str,

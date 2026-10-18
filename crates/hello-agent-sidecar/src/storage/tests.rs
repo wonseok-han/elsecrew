@@ -122,6 +122,70 @@ fn team_message(chat_id: &str, message_id: &str, sequence: u64) -> Value {
     })
 }
 
+#[test]
+fn chat_message_history_merges_exact_copies_and_rejects_conflicts() {
+    for case in ["exact", "text", "sequence", "id", "chat", "index"] {
+        let (_root, path) = database();
+        let mut storage = Storage::open(&path).unwrap();
+        storage.append_event(&event("evt_p", "op_p", "project", "project_v6", 1,
+            json!({"project_id":"project_v6","canonical_path":"/fixture"}),
+            "2026-08-28T13:20:00Z")).unwrap();
+        let original = team_message("chat_v6", "message_v6", 1);
+        storage.append_event(&event("evt_c", "op_c", "chat", "chat_v6", 1,
+            v6_chat_payload("chat_v6", "project_v6", 1, original.clone()),
+            "2026-08-28T13:20:00Z")).unwrap();
+        let mut retained = original.clone();
+        match case {
+            "text" => retained["text"] = json!("conflicting text"),
+            "sequence" => retained["eventSequence"] = json!(2),
+            "id" => retained["messageId"] = json!("other_message"),
+            "chat" => retained["chatId"] = json!("other_chat"),
+            _ => (),
+        }
+        storage.connection.execute(
+            "INSERT INTO chat_messages(message_id,chat_id,event_sequence,canonical_message_json,message_digest,created_at,materialized_at) \
+             VALUES (?1,'chat_v6',?2,?3,'fixture','2026-08-28T13:20:00Z','2026-08-28T13:20:00Z')",
+            params![retained["messageId"].as_str().unwrap(),
+                if case == "index" { 2i64 } else { retained["eventSequence"].as_i64().unwrap() },
+                canonical_json_v1(retained.clone()).unwrap()],
+        ).unwrap();
+        let result = storage.chat_message_history("chat_v6");
+        if case == "exact" { assert_eq!(result.unwrap(), vec![original]); }
+        else { assert!(result.is_err(), "accepted {case} conflict"); }
+    }
+}
+
+#[test]
+fn chat_message_history_rejects_missing_prefix_middle_and_suffix() {
+    for (case, sequences, durable) in [
+        ("prefix", vec![2u64], 2u64),
+        ("middle", vec![1, 3], 3),
+        ("suffix", vec![1], 2),
+    ] {
+        let (_root, path) = database();
+        let mut storage = Storage::open(&path).unwrap();
+        storage.append_event(&event("evt_p", "op_p", "project", "project_v6", 1,
+            json!({"project_id":"project_v6","canonical_path":"/fixture"}),
+            "2026-08-28T13:20:00Z")).unwrap();
+        // Reader-only corrupt retained-history fixture. Production append
+        // correctly disallows introducing a sequence without its message.
+        storage.connection.execute(
+            "INSERT INTO chats(chat_id,project_id,projection_json,last_event_sequence) VALUES ('chat_v6','project_v6',?1,1)",
+            params![canonical_json_v1(v6_chat_payload("chat_v6", "project_v6", durable, Value::Null)).unwrap()],
+        ).unwrap();
+        for sequence in sequences {
+            let id = format!("message_{sequence}");
+            let message = team_message("chat_v6", &id, sequence);
+            storage.connection.execute(
+                "INSERT INTO chat_messages(message_id,chat_id,event_sequence,canonical_message_json,message_digest,created_at,materialized_at) \
+                 VALUES (?1,'chat_v6',?2,?3,'fixture','2026-08-28T13:20:00Z','2026-08-28T13:20:00Z')",
+                params![id, sequence as i64, canonical_json_v1(message).unwrap()],
+            ).unwrap();
+        }
+        assert!(storage.chat_message_history("chat_v6").is_err(), "accepted missing {case}");
+    }
+}
+
 fn v6_chat_payload(
     chat_id: &str,
     project_id: &str,

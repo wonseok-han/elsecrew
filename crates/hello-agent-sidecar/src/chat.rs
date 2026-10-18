@@ -663,19 +663,13 @@ impl G5Manager {
         let offset = parse_cursor(cursor)?;
         let record = chat_projection_record(storage, chat_id)?;
         let chat = record["record"].clone();
-        let mut messages = storage
-            .aggregate_event_payloads("chat", chat_id)?
+        let messages = storage
+            .chat_message_history(chat_id)?
             .into_iter()
-            .filter_map(|payload| payload.get("last_message").cloned())
-            .filter(|message| !message.is_null())
             .filter(|message| {
                 message.get("eventSequence").and_then(Value::as_u64) > Some(after_event_sequence)
             })
             .collect::<Vec<_>>();
-        // Metadata-only ledger events retain the latest public message snapshot.
-        // Collapse only identical adjacent snapshots; conflicting duplicates or
-        // sequence gaps must still fail the public detail contract validation.
-        messages.dedup();
         let end = offset.saturating_add(limit).min(messages.len());
         if offset > messages.len() {
             return Err(ProjectFailure::manifest(

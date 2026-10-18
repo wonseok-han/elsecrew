@@ -2911,6 +2911,19 @@ fn followup_retry_survives_actual_source_compaction_and_reopen() {
     );
     let mut reopened =
         Storage::open_for_admission(&database, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+    let history = fixture.chats.get_chat(&reopened, chat_id, 0, None, 50, true).unwrap();
+    let messages = history["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0]["text"], "original");
+    assert_eq!(messages[1], first.result);
+    assert!(crate::agent_runtime::preparation::RunPreparation::resolve(
+        &reopened, &fixture.projects,
+        &hello_agent_protocol::agent_adapter_v1::AgentRunStartRequestV1 {
+            chat_id: chat_id.to_owned(), role_id: "planning".into(),
+            input_message_ids: messages.iter().map(|message| message["messageId"].as_str().unwrap().to_owned()).collect(),
+            expected_capability_fingerprint: format!("sha256:{}", "0".repeat(64)),
+        },
+    ).is_ok());
     let replay = fixture
         .chats
         .append_user_message(&mut reopened, &fixture.projects, &request)
@@ -2918,6 +2931,13 @@ fn followup_retry_survives_actual_source_compaction_and_reopen() {
     assert_eq!(replay.result, first.result);
     assert!(replay.events.is_empty());
     assert_eq!(chat_projection_record(&reopened, chat_id).unwrap(), before);
+    let tail = fixture.chats.append_user_message(&mut reopened, &fixture.projects,
+        &followup_request(&chat, 2, "user_fedcba9876543210fedcba9876543210")).unwrap();
+    let current = fixture.chats.get_chat(&reopened, chat_id, 0, None, 50, true).unwrap();
+    assert_eq!(current["messages"].as_array().unwrap().len(), 3);
+    assert_eq!(current["messages"][0], messages[0]);
+    assert_eq!(current["messages"][1], messages[1]);
+    assert_eq!(current["messages"][2], tail.result);
 }
 
 fn assert_compacted_chat_missing_row_rejected(

@@ -1,5 +1,16 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-19 · by GPT-6 Astra
+
+- 채팅 보존 수정 최종본의 release 회귀3건 PASS: reader 충돌·누락2건(0.60초), 실제1000-source 압축/재열기·보존2개 메시지의 RunPreparation 입력 구성·동일 요청 재시도·새3번째 메시지 병합1건(14.39초). 실제 공급자 실행 없이 검증했다. 누락 시험은 정상 append가 본문 없는 번호 증가를 거부하므로, 시험 전용 projection/retained 행 INSERT로 손상 상태를 구성했다. 앞선 순차 metadata fixture 시도도 생성 단계 실패였음을 정정한다.
+- 동일 startup_memory_review의 복원된7파일 정적 재검토는 차단 결함 없음이다. diff 검사 통과. 전체 sidecar/패키지 누적 검사는 반복하지 않았고 전체 제품 합격으로 확대하지 않는다. 인증/사용자 프로젝트/모델 사용·main 병합/push 없음. 남은 작업은 G6 수집/메모리·실계정/Windows·출시 검증이다.
+
+### 2026-10-16 · by GPT-6 Astra
+
+- 기준25edc9b의 미커밋 채팅 보존 수정을 이어갔다. 실제1000개 source event 압축·재열기 회귀에서 기존 chat.get은 보존된2개 메시지 대신0개를 반환했다. chat_messages와 uncompacted source를 합치는 공용 reader를 chat.get과 실제 에이전트 입력 준비에 연결했다. 동일 복사본만 합치고 ID/순서/본문 충돌, 시작·중간·마지막 메시지 누락은 오류로 거절한다. 마지막 번호는 projection의 durable_event_sequence와 대조한다.
+- 초기 수정의 실제 압축 회귀와 복사본 충돌 회귀는 통과했다. 독립 startup_memory_review가 지적한 전체 순서 누락 검사를 추가했고 최종본 검증 중이다. 누락 회귀의 최초 fixture는 durable 번호 증가 계약을 어겨 생성 단계에서 실패했으므로 순차 metadata event로 교정했다. rustfmt의 재귀 포맷 부수 변경을 제거하는 과정에서 patch 재적용이 실패해 수정5파일을 기존 도구 기록과 검토자 사본으로 복원했다. 최종본 결과로만 완료를 판단한다.
+- Karpathy 최소 변경으로 저장 형식·인증 정책·실제 공급자 실행은 변경하지 않는다. 기존 release 캐시를 재사용하며 실제 계정/모델·사용자 프로젝트·main 병합/push 없음. 전체G6·메모리·실계정/Windows·출시는 계속 미완료다.
+
 ### 2026-10-15 · by GPT-6 Astra
 
 - clean ab761ae의 pnpm m5:package를 갱신했다. 최초 제한 환경의 fetch failed 뒤 네트워크 허용 재시도는 PASS였다. 최신 native-chat-stream hEC8SO는 프로젝트 시작의 visible 선행 대기에서 deadline 실패했고 nativeChatStream/projectVisibility가null이라 채팅 전송 관측은 시작되지 않았다. idle RSS429129728B로400MiB 초과도 유지한다. 앱 종료0/DB 종료 confirmed, seed 및 모든 RSS 관측PID 부재 확인 후 자체 project/other-project/userdata만 제거하고 result.json은 보존했다. /var 별칭 경로 불일치로 최초 정리는 거부됐고 실제 /private/var 경로에서만 수행했다.
@@ -174,6 +185,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **압축 이후 채팅 읽기(2026-10-16)**: 압축은 source events를 제거해도 chat_messages에 본문을 보존한다. 화면과 실제 에이전트 입력은 보존 table+남은 source를 함께 읽어야 한다. 페이지 필터 전 전체1..durable_event_sequence 연속성과 복사본 일치를 검사하며 source만 읽으면 기존 대화가 누락된다.
 
 - **native 전송 수치의 visibility 한계(2026-10-15)**: mcy4lx은 hiddenTransitions1/final:hidden이었다. 타이머 기반 부하 전송 자체가 숨김 제한을 받을 수 있으므로659건/180초를 제품 단독 처리량으로 인용하지 않는다. hEC8SO는 visible 선행 대기부터 실패해 전송 미시작이다. probe는 이제 숨김을 실패로 중단하며 제품 background throttling을 끄거나 실패 표본을 재활성화해 통과시키지 않는다.
 
