@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 사용자가 Hello, Agent에서 Claude 수동 로그인을 완료했다고 알렸다. Windows PC/사용 가능한 CI 환경은 둘 다 없다고 확인했으므로 저장소 workflow 존재와 실제 Windows 검증 가능 여부를 구분하며 Windows 미검증을 유지한다.
+- f9422e2의 기록 재조회 버튼을 합성 preload/실제 Chromium 회귀에 연결했다. background 조회1회 실패 → 영어 재조회 버튼 → 클릭 후 오류 해제, 초안 보존·에이전트 시작0건을 확인했다. renderer build 및 Chromium2건 PASS(14.59초), 기존 chunk 크기 경고 유지. Karpathy 최소 변경으로 제품 코드는 바꾸지 않았다.
+- Claude1회 승인은 로그인 미확인 때 실행0회였으므로 아직 남아 있다. 실행 전 검사에서 packaged Hello, Agent PID89292와 sidecar89374가 실행 중인 것을 확인했다. 같은 프로필의 중복 앱을 띄우거나 사용자가 로그인한 앱을 임의 종료하지 않았고 새 모델 호출0회다. 현재 앱 정상 종료 뒤 승인된 Claude-only 임시 프로젝트 시험을 이어간다. 개발 runner는 target/debug 바이너리를 요구하지만 현재 release만 있으므로 실제 시험 전에 경로/빌드 일치를 확인해야 한다. G6·메모리·Windows·전체 실계정/출시 검증은 미완료, main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - 20e856f에서 background 채팅 갱신 실패 표시 뒤 별도 복구 행동이 없음을 확인했다. Karpathy 최소 변경으로 해당 오류에만 retryChatId를 결속하고 활성 채팅과 일치할 때 한/영 ‘채팅 기록 다시 불러오기’를 표시한다. 읽기 전용 기존 hydration을 재사용하며 실패 유지/성공 후 해당 오류만 해제한다. 다른 오류·늦은 응답·전환/종료 상태는 덮지 않고 실행/취소/원본 반영을 호출하지 않는다.
 - 관련48회귀·tsc·diff PASS. 오류 지속 뒤 수동 재시도 성공과 기록 갱신/오류 해제를 기존 회귀에 연결했다. 실제 버튼의 Chromium 시각·상호작용 검증은 다음 묶음 UI 검증에 포함하며 완료했다고 주장하지 않는다. 실제 계정/Windows 응답 대기와 G6/메모리/출시 미완료 상태는 유지한다. main 병합/push 없음.
 

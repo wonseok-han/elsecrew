@@ -76,6 +76,11 @@ const smokeChat = { schemaVersion: 1, chatId: "smoke_chat", taskId: "smoke_task"
 window.m5SmokeContextStarts = [];
 const smokeMessages = [{ schemaVersion: 1, messageId: "smoke_initial", chatId: smokeChat.chatId, taskId: smokeChat.taskId, worktreeId: smokeChat.worktreeId, eventSequence: 1, kind: "user", roleId: null, runId: null, text: "처음 요청", createdAt: smokeChat.createdAt }];
 let historyMessageIndex = 0;
+let historyReadFailures = 0;
+window.m5SmokeFailHistoryRefresh = () => {
+  historyReadFailures = 1;
+  for (const listener of agentPublicEventListeners) listener({ ...smokeChat, runId:"smoke_context_run", roleId:"planning", eventId:"smoke_refresh_event", kind:"status", text:"not durable", capabilityFingerprint:`sha256:${"0".repeat(64)}` });
+};
 let parallelPaint = null;
 window.m5SmokeEnableParallelChats = () => {
   if (parallelPaint) throw new Error("parallel paint fixture already enabled");
@@ -264,7 +269,10 @@ window.m5 = {
   updateProjectRoleSettings: unexpected("updateProjectRoleSettings"),
   createChat: unexpected("createChat"),
   listChats: async ({ projectId }) => ({ projectId, items: parallelPaint ? parallelPaint.chats : [smokeChat], nextCursor: null }),
-  getChat: async (request) => parallelPaint ? parallelPaint.detail(request) : ({ chat: smokeChat, afterEventSequence: request.afterEventSequence, messages: smokeMessages.filter(message => message.eventSequence > request.afterEventSequence), runs: [], nextEventSequence: null }),
+  getChat: async (request) => {
+    if (historyReadFailures > 0) { historyReadFailures--; throw new Error("synthetic history read failure"); }
+    return parallelPaint ? parallelPaint.detail(request) : ({ chat: smokeChat, afterEventSequence: request.afterEventSequence, messages: smokeMessages.filter(message => message.eventSequence > request.afterEventSequence), runs: [], nextEventSequence: null });
+  },
   startFixtureRun: unexpected("startFixtureRun"),
   cancelRun: unexpected("cancelRun"),
   listRecoveries: async () => ({ items: [], nextCursor: null }),
