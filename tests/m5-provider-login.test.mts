@@ -1,5 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { classifyLoginFailure, readLoginDiagnostic } from "../src/m5/provider-login-diagnostic.ts";
+test("login failure diagnostics never forward exception details", () => {
+  const cases = [
+    ["login unavailable", "providerLoginCapabilityUnavailable"],
+    ["invalidParams: private detail", "providerLoginRequestRejected"],
+    ["requestBlocked: private detail", "providerLoginRequestBlocked"],
+    ["invalid login status", "providerLoginResponseInvalid"],
+    ["https://private.example/token?secret=123", "providerLoginTransportUnavailable"],
+  ] as const;
+  for (const [message, code] of cases) {
+    assert.equal(classifyLoginFailure(new Error(message)), code);
+    assert.equal(readLoginDiagnostic(new Error(code)), code);
+    assert.equal(readLoginDiagnostic(new Error(`Error invoking remote method 'm5:login:v1': Error: ${code}`)), code);
+    assert.equal(readLoginDiagnostic(new Error(`${code}: secret`)), "providerLoginTransportUnavailable");
+  }
+  assert.equal(readLoginDiagnostic({message:"secret"}), "providerLoginTransportUnavailable");
+});
 test("explicit recovery uses fixed provider and attempt without filesystem parameters",()=>{
   for (const provider of ["codex","claude"] as const) {
     assert.deepEqual(validateLoginRequest({action:"recover",attemptId:"repair-1",provider}),{action:"recover",attemptId:"repair-1",provider});

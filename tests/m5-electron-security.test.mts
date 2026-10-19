@@ -9,6 +9,7 @@ import { M5_INTERNAL_CHANNELS_V1 } from "../src/m5/contracts/lifecycle-v1.ts";
 import * as modelChoicesContract from "../src/m5/contracts/model-choices-v1.ts";
 import * as deviceReportContract from "../src/m5/contracts/device-report-v1.ts";
 import * as sessionDiagnosticsContract from "../src/m5/contracts/session-diagnostics-v1.ts";
+import * as loginDiagnostic from "../src/m5/provider-login-diagnostic.ts";
 import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS, M5_BRIDGE_V7_CHANNELS } from "../electron/ipc-channels.ts";
 
 const require = createRequire(import.meta.url);
@@ -318,6 +319,7 @@ function moduleFor(
 ) {
   if (specifier === "electron") return fakes.electron;
   if (specifier.endsWith("provider-login-v1.ts")) return loginContract;
+  if (specifier.endsWith("provider-login-diagnostic.ts")) return loginDiagnostic;
   if (specifier.endsWith("provider-install-v1.ts")) return installContract;
   if (specifier.endsWith("device-report-v1.ts")) return deviceReportContract;
   if (specifier.endsWith("session-diagnostics-v1.ts")) return sessionDiagnosticsContract;

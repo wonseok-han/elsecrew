@@ -6,6 +6,7 @@ import { validateLoginStatus, type LoginRequest, type LoginStatus, type LoginPro
 import { validateDeviceReport, type DeviceReport } from "./contracts/device-report-v1.ts";
 import { ProviderInstall } from "./provider-install.tsx";
 import { shouldPollLogin } from "./provider-login-poll.ts";
+import { readLoginDiagnostic, type LoginDiagnostic } from "./provider-login-diagnostic.ts";
 
 export function ProviderLogin({ disabled, compact = false }: {disabled: boolean; compact?: boolean}) {
   const { t } = useI18n();
@@ -124,6 +125,7 @@ function ProviderConnection({ disabled, provider, onAttention }: {disabled: bool
   const [status,setStatus] = useState<LoginStatus>({state:"idle",attemptId:null,authUrl:null,error:null});
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState(false);
+  const [diagnostic,setDiagnostic] = useState<LoginDiagnostic | null>(null);
   const [expanded,setExpanded] = useState(false);
   const inFlight = useRef(false);
   const mounted = useRef(true);
@@ -137,8 +139,8 @@ function ProviderConnection({ disabled, provider, onAttention }: {disabled: bool
     try {
       const scoped: LoginRequest = input.action === "submitCode" ? input : {...input,provider};
       const result = validateLoginStatus(await window.m5Login.request(scoped),provider);
-      if(mounted.current) { setStatus(result); setError(false); }
-    } catch { if(mounted.current) setError(true); }
+      if(mounted.current) { setStatus(result); setError(false); setDiagnostic(null); }
+    } catch (failure) { if(mounted.current) { setError(true); setDiagnostic(readLoginDiagnostic(failure)); } }
     finally { inFlight.current=false; if(mounted.current) setBusy(false); }
   };
   useEffect(() => {
@@ -201,7 +203,7 @@ function ProviderConnection({ disabled, provider, onAttention }: {disabled: bool
     {!waiting && status.state!=="unsupported" && <button disabled={disabled||busy||recoveryRequired||!window.m5Login} onClick={()=>void request({action:"check",attemptId:crypto.randomUUID()})}>{t("m5.login.check")}</button>}
     {!waiting && status.state!=="unsupported" && <button disabled={disabled||busy||recoveryRequired||!window.m5Login} onClick={()=>void request({action:"diagnose",attemptId:crypto.randomUUID()})}>{t("m5.login.diagnose")}</button>}
     {recoveryRequired && <div><p>{t("m5.login.recovery.help")}</p><button disabled={disabled||busy||waiting||!window.m5Login} onClick={()=>void request({action:"recover",attemptId:crypto.randomUUID()})}>{t("m5.login.recovery.action")}</button></div>}
-    {(error||status.state==="failed") && <div role="alert"><p>{loginErrorMessage(provider,status.error,lang)}</p><details><summary>{t("m5.login.detail")}</summary><code>{status.error ?? "providerLoginUnavailable"}</code></details></div>}
+    {(error||status.state==="failed") && <div role="alert"><p>{loginErrorMessage(provider,status.error,lang)}</p><details><summary>{t("m5.login.detail")}</summary><code>{diagnostic ?? status.error ?? "providerLoginUnavailable"}</code></details></div>}
     </div>
   </section>;
 }

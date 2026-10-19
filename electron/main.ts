@@ -4,6 +4,7 @@ import { SESSION_DIAGNOSTICS_CHANNEL, classifySessionDiagnostics } from "../src/
 import { readDeviceReport } from "./device-report.ts";
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
 import { LOGIN_CHANNEL, validateLoginRequest, validateLoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
+import { classifyLoginFailure } from "../src/m5/provider-login-diagnostic.ts";
 import { INSTALL_CHANNEL, validateInstallRequest, validateInstallStatus } from "../src/m5/contracts/provider-install-v1.ts";
 import { APPROVAL_CHANNEL, validateApprovalRequest, validateApprovalResult } from "../src/m5/contracts/approval-v1.ts";
 import { PROJECT_CATALOG_CHANNEL, validateProjectCatalogRequest, validateProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
@@ -346,7 +347,9 @@ function registerIpcHandlers(): void {
     assertCurrentMainFrame(event);
     if (!sidecar) throw new Error("sidecar was not started");
     const request = validateLoginRequest(input);
-    const result = validateLoginStatus(await sidecar.login(request), request.provider);
+    const result = await sidecar.login(request)
+      .then(value => validateLoginStatus(value, request.provider))
+      .catch((error: unknown) => { throw new Error(classifyLoginFailure(error)); });
     if (result.authUrl && request.action !== "cancel") {
       try { await shell.openExternal(result.authUrl); }
       catch {
