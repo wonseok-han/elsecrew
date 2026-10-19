@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 누적 npm test539건·renderer build·실제 Chromium 회귀2건 PASS. clean9cce3e3의 패키지27회귀/Forge/sidecar smoke/ZIP/size PASS이며 .artifacts/m5-g6-package/darwin-arm64-2026-10-19T01-39-40-773Z.json에 보존했다. unpacked322284472B/ZIP124085294B다.
+- 사용자 화면 표시 승인 후 cipHLx packaged --project의 최초/재시작 모두 visible 유지(숨김 전환0), 편집·저장 diff·원본 불변 및 재시작 보존을 확인했다. 재시작에서 별도 동의 반영/복원 exact bytes와 두 프로젝트 격리도 통과했다. main task 최대35.655/32.781ms·200ms 초과0, renderer long task 관측0이다. 시작 mark는 최초 즉시 조회에서는 빈 배열, 재시작은 renderer 기준708.5ms로 관측됐다. 최초 mark 부재를 준비 실패로 확정하거나 앱spawn기준 시간으로 바꾸지 않는다.
+- 전체 진단은 두 회차 RSS483885056/483917824B(약461.5MiB)가400MiB를 넘어 FAIL이다. 화면 숨김 차단은 이번 시험에서 해소됐지만 메모리·전체G6 수집/실계정/Windows/출시는 남는다. 두 앱 exit0/DB confirmed와 관측PID 부재 확인 후 cipHLx의 자체 project/other-project/userdata만 삭제했다(재생성 가능); JSON/PNG 증거는 임시 루트에 보존했다. 사용자 프로젝트·인증·모델 호출·main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - Karpathy 최소 변경으로 시작 화면 준비의 renderer performance mark를 추가했다. admission ready·빈 화면·actionBlocked 해제 뒤 visible/활성 선택 버튼을 두프레임에서 확인하며 숨김전환/cleanup은 취소한다. 한 번 기록 후 listener/RAF를 제거하고 계측 예외는 UI로 전파하지 않는다. 패키지 진단은 기존 uiObservedMs와 별도로 timeOrigin/mark/visibility를 보존한다. 권한·IPC·시작 기준은 변경하지 않았다.
 - 관련4회귀(2frame/hidden reset/disabled·missing·unmount/계측예외)·tsc·JS문법·diff PASS. 두프레임은 paint opportunity이며 실화면 표시/앱spawn기준 exactinteractive/G6 합격으로 확대하지 않는다. 실제 renderer/package에서 표식 존재와 clock 결속은 다음 묶음 검증 대상이며 현재 패키지에는 아직 이 표식이 없다. 새 모델·인증·사용자 프로젝트·시스템 설치 없음; 전체G6/메모리/실계정/Windows/출시 미완료.
 
