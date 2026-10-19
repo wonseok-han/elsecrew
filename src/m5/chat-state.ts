@@ -1,5 +1,5 @@
 import { ko, type MessageKey } from "../locales/ko.ts";
-import { chatNotice, recoveryConfirmation, type ChatNoticeKey, type ChatNoticeContext } from "./chat-notice.ts";
+import { chatNotice, recoveryConfirmation, agentContextConfirmation, type ChatNoticeKey, type ChatNoticeContext } from "./chat-notice.ts";
 type ChatErrorKey = Extract<MessageKey, `m5.chatError.${string}`>;
 import type { M5BridgeV3 } from "./contracts/bridge-v3.ts";
 import type { M5BridgeV4 } from "./contracts/bridge-v4.ts";
@@ -317,7 +317,7 @@ export class ChatUiController {
     } catch (error) { this.#error("m5.chatError.termination", error); }
   }
 
-  async startAgent(roleId: RoleIdV1): Promise<void> {
+  async startAgent(roleId: RoleIdV1, lang: "ko" | "en" = "ko"): Promise<void> {
     const chat = this.#state.activeChat; const generation = this.#generation; const bridge = this.#agentBridge();
     if (!chat || !bridge || this.#state.switching || this.#state.activeRunId || this.#state.agentStartingRoleId || this.#state.agentRuns.some(isAgentActive) || this.isActionBlocked()) {
       if (chat && !bridge) this.#set({ ...chatNotice("m5.chatNotice.unavailable") });
@@ -339,11 +339,23 @@ export class ChatUiController {
       }
       await this.#hydrateChat(chat, generation);
       if (!this.#live(generation) || this.#state.activeChat?.chatId !== chat.chatId) return;
-      const inputMessageIds = this.#state.messages.map((message) => message.messageId);
+      let inputMessageIds = this.#state.messages.map((message) => message.messageId);
       if (inputMessageIds.length === 0) {
         this.#set({ ...chatNotice("m5.chatNotice.noConversation") });
         return;
       }
+      // The public request contract permits 100 IDs. Never silently truncate
+      // history or expand the execution contract to accommodate a long chat.
+      if (inputMessageIds.length > 100) {
+        if (!globalThis.confirm(agentContextConfirmation(inputMessageIds.length, lang))) {
+          this.#set({ ...chatNotice("m5.chatNotice.contextCanceled") });
+          return;
+        }
+        inputMessageIds = [inputMessageIds[0]!, ...inputMessageIds.slice(-99)];
+      }
+      if (!this.#live(generation) || this.#state.activeChat?.chatId !== chat.chatId
+          || this.#state.switching || this.isActionBlocked() || this.#state.activeRunId
+          || this.#state.agentRuns.some(isAgentActive)) return;
       const accepted = await bridge.startAgentRun({ chatId: chat.chatId, roleId, inputMessageIds, expectedCapabilityFingerprint: capability.fingerprint });
       if (!this.#live(generation) || this.#state.activeChat?.chatId !== chat.chatId) return;
       this.#set({ ...chatNotice("m5.agentNotice.ready", { roleId, runtime: profile.runtime }) });

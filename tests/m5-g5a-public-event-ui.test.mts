@@ -241,6 +241,34 @@ test("V4 bridge without the V5 state listener keeps the existing public-event fi
   controller.dispose();
 });
 
+test("long conversations require explicit bounded-context consent without deleting history", async () => {
+  for (const [count, consent] of [[100, false], [101, false], [201, true]] as const) {
+    const bridge = new AgentBridge();
+    bridge.messages = Array.from({length:count}, (_, index) => message(bridge.chatA, index + 1, `message ${index + 1}`));
+    const controller = await open(bridge);
+    const previousConfirm = globalThis.confirm;
+    let prompt = "";
+    globalThis.confirm = value => { prompt = value ?? ""; return consent; };
+    try { await controller.startAgent("coding", "en"); }
+    finally { globalThis.confirm = previousConfirm; }
+    if (count <= 100) {
+      assert.equal(prompt, "");
+      assert.equal(bridge.starts.length, 1);
+    } else {
+      assert.match(prompt, new RegExp(`has ${count} messages`));
+      assert.match(prompt, /earlier decisions may be missing/);
+      assert.equal(bridge.starts.length, consent ? 1 : 0);
+    }
+    if (consent) {
+      assert.deepEqual((bridge.starts[0] as {inputMessageIds:string[]}).inputMessageIds,
+        [bridge.messages[0]!.messageId, ...bridge.messages.slice(-99).map(item => item.messageId)]);
+    }
+    assert.equal(controller.snapshot().messages.length, count);
+    assert.equal(controller.snapshot().agentStartingRoleId, null);
+    controller.dispose();
+  }
+});
+
 test("unavailable capability는 fallback 없이 막고 start는 immutable role snapshot, durable IDs, exact fingerprint만 보낸다", async () => {
   const bridge = new AgentBridge(); const controller = await open(bridge);
   bridge.unavailable = true; await controller.startAgent("coding");

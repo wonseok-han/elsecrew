@@ -1,6 +1,8 @@
 // 한국어 문구 리소스. 이 파일의 키 집합이 다른 언어 파일의 기준이 된다.
 // 보간은 {name} 형태 — t("key", { name }) 로 치환.
 export const ko = {
+  "m5.chat.contextConfirmation": "대화가 {total}개라 이번 실행에는 처음 요청과 최근 99개만 전달할 수 있어요. 중간 {omitted}개는 전달되지 않으며 이전 결정이 빠질 수 있어요. 전체 기록은 삭제하지 않습니다. 중요한 이전 내용이 있다면 취소하고 후속 메시지로 요약해 주세요. 이 범위로 실행할까요?",
+  "m5.chatNotice.contextCanceled": "실행하지 않았어요. 필요한 이전 내용을 후속 메시지에 정리한 뒤 다시 실행할 수 있어요. 대화 기록은 그대로 남아 있어요.",
   "lang.ko": "한국어",
   "lang.en": "English",
   "m5.editor.commandSave": "작업 복사본에 저장",

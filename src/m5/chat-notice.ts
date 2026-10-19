@@ -27,3 +27,8 @@ export function chatNotice(noticeKey: ChatNoticeKey, noticeContext?: ChatNoticeC
 export function recoveryConfirmation(actual: boolean, lang: "ko" | "en"): string {
   return (lang === "ko" ? ko : en)[actual ? "m5.agentNotice.confirmAgent" : "m5.agentNotice.confirmFixture"];
 }
+
+export function agentContextConfirmation(total: number, lang: "ko" | "en"): string {
+  return (lang === "ko" ? ko : en)["m5.chat.contextConfirmation"]
+    .replace("{total}", String(total)).replace("{omitted}", String(total - 100));
+}

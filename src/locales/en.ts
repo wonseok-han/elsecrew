@@ -2,6 +2,8 @@ import type { MessageKey } from "./ko";
 
 // 영어 문구. ko와 동일한 키를 모두 가져야 한다(Record<MessageKey>로 강제).
 export const en: Record<MessageKey, string> = {
+  "m5.chat.contextConfirmation": "This conversation has {total} messages. This run can receive the first request and the latest 99 messages only. The {omitted} messages in between will be omitted, so earlier decisions may be missing. The full history will not be deleted. Cancel and summarize important earlier details in a follow-up message if needed. Run with this context?",
+  "m5.chatNotice.contextCanceled": "No run was started. You can summarize important earlier details in a follow-up message and try again. The conversation history is unchanged.",
   "lang.ko": "한국어",
   "lang.en": "English",
   "m5.editor.commandSave": "Save to working copy",
