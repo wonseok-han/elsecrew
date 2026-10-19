@@ -1,6 +1,6 @@
 # Hello, Agent 기술 설계
 
-> **Claude 내장 조직 guard(2026-10-19 승인·소스 구현)**: native 소유 연결만 단일 `name=cc-plugin-sec-default`, `path=builtin`, `source=cc-plugin-sec-default@builtin` 등록을 허용한다. 나머지 필드·다른 항목·중복·혼합은 거절하며 generic/fixture 관측은 빈 목록 조건을 유지한다. 이는 서명 확인된 공급자 부모 신뢰 모델 안의 예외이지 등록 문자열 자체의 인증이 아니다. guard를 비활성화하지 않으며 도구/MCP/cwd/권한·종료·원본 보호 조건은 유지한다. 같은 init receipt에서 확인한 guard 존재는 phased session의 `observedBuiltinPlugins`에 기록하며 기존 필드 없는 원장은 빈 목록으로 읽는다. 실제 공급자의 전체 등록 형태·실계정 성공은 별도 미검증이고 기존 실행 앱/패키지는 아직 갱신하지 않았다.
+> **Claude 내장 조직 guard(2026-10-19 승인·구현)**: native 소유 연결만 단일 `name=cc-plugin-sec-default`, `path=builtin`, `source=cc-plugin-sec-default@builtin` 등록을 허용한다. 나머지 필드·다른 항목·중복·혼합은 거절하며 generic/fixture 관측은 빈 목록 조건을 유지한다. 이는 서명 확인된 공급자 부모 신뢰 모델 안의 예외이지 등록 문자열 자체의 인증이 아니다. guard를 비활성화하지 않으며 도구/MCP/cwd/권한·종료·원본 보호 조건은 유지한다. 같은 init receipt에서 확인한 guard 존재는 phased session의 `observedBuiltinPlugins`에 기록하며 기존 필드 없는 원장은 빈 목록으로 읽는다. 1cb7843 패키지의 승인된 Claude opus 단독 시험에서 `HELLO_AGENT_SMOKE_OK` 응답·성공·종료 확인 UI와 임시 원본 불변을 확인했다(run `agent_run_8af93d90879f487590f772883880d706`). 원시 init 전체 형태를 별도 추출한 증거는 아니며 도구 쓰기/승인/중단/복구 전체 성공으로 확대하지 않는다.
 
 > **세션 연결 진단(2026-10-19 소스 구현)**: 실패한 Claude 실행의 정보 영역에서 이번 앱 세션의 알려진 연결 실패 단계명을 조회한다. 별도 입력 없는 `m5:session-diagnostics:v1`은 현재 main frame/origin만 허용하며, main이 sidecar의 bounded stderr tail에서 정확한 허용 목록과 일치하는 단계명만 최대32개 반환한다. 원문·인증정보·경로는 반환하지 않으며 실행 ID 결속·재시작 영속성·원인 확정·합격 증거가 아니다. 알 수 없는 출력/빈 목록은 정상으로 판정하지 않는다. 이 조회는 에이전트 재실행·원본 쓰기·복구 상태 변경을 하지 않는다. 기존 배포 패키지에는 재빌드 전까지 적용되지 않는다.
 

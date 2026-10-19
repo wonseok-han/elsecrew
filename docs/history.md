@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- clean764ef46에서 시작 화면 메모리 원인을 조사했다. Monaco는 이미 지연 로드이고 dock/message도 별도 대형 라이브러리를 사용하지 않았다. 직전4iVgiL의 JS heap 약3.45MB만으로 총RSS425MiB를 해결할 근거가 없어 추측성 분할은 구현하지 않았다. 조사 중 사용자가 최신 패키지 Claude 짧은 응답1회를 명시 승인해 해당 시험으로 전환했다.
+- 1cb7843 제품 패키지의 기존 앱 전용 프로필과 자체 /private/tmp/hello-agent-approved-claude.DRoGtr 채팅에서 coding/Claude/opus 실행1회를 관측했다. run agent_run_8af93d90879f487590f772883880d706이 HELLO_AGENT_SMOKE_OK를 반환했고 UI ‘성공’·‘실행 종료 확인됨’·reviewReady를 확인했다. 원본 git status clean이다. 실행 준비 클릭 뒤 AX 관측 지연/noWindowsAvailable이 있었으나 앱PID7046/sidecar7150 생존을 확인하고 같은 창을 재관측했으며 새 실행을 재요청하지 않았다.
+- 이는 Claude의 짧은 실제 응답 성공 증거이며 도구/쓰기/승인/중단/복구 전체나 G6 합격은 아니다. 현재 앱은 성공 결과 화면에 남겼다. 추가 실제 호출 승인은 소진됐고 Codex 호출·사용자 프로젝트/인증 변경 없음. 764ef46 안내 개선은 이 패키지에 아직 미포함이다. architecture의 최신 guard 검증 경계를 갱신했다. 다음은 메모리/성능 수집·두 공급자 전체 흐름·Windows/출시 검증이며 main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - 직전 채팅 시험은 종료된FAIL 증거를 얻었으며 재실행하지 않았다. clean b9bf0e1에서 사용자가 혼란스러워했던 첫 작업 안내를 조사했다. projectGuideStep이 needsAttention과 recoveryRequired를 모두 recovery로 분류해 종료 확인된 실패도 ‘문제 확인과 복구’로 안내하는 것을 확인했다.
 - Karpathy 최소 변경으로 needsAttention의 안내만 ‘실행 결과 확인’으로 분리하고 한/영 설명에 팀 대화 보기→실행 정보 확인, 로그인 실패로 단정 금지, 종료 미확인/복구 안내 시 재실행 금지를 명시했다. 실제 chat 상태·종료/복구 제한·권한·실행 API는 변경하지 않았다. 기존 복구 안내와 pinned chat/접기 의미도 유지한다.
 - 관련 순수 회귀4건/tsc --noEmit/diff PASS. 최신 패키지는 직전1cb7843 제품 기준이므로 이번 안내의 packaged UI 확인은 아직 미수행이다. 큰 빌드/모델 호출/시험 데이터 생성 없음. 다음은 남은 성능/메모리와 승인 후 실제 Claude 응답 확인이며 Windows/출시까지 완료한 상태는 아니다. main 병합/push 없음.
