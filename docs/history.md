@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- PID89292/sidecar89374가 계속 실행 중임을 확인했다. 별도 runner/앱 종료가 필수는 아니므로 기존 로그인된 앱을 CUA로 확인하고 승인된 Claude1회를 실제 UI에서 진행했다. Claude 연결됨을 관측한 뒤 자체 생성한 /private/tmp/hello-agent-approved-claude.DRoGtr의 hello.txt 한 파일 Git만 선택해 새 채팅을 만들었다. 사용자의 기존 프로젝트·인증정보는 변경하지 않았다.
+- coding/Claude Code/opus 실행 agent_run_a5d9d4bae43846ef8cc77bce1c936473은 접수→준비→failed/실행 종료 확인됨으로 끝났으며 응답은 없었다. 원본 git status는 clean이다. 승인된1회는 사용했으므로 재실행하지 않는다. UI는 상세 원인 없이 연결/모델 확인만 안내한다. 읽기 전용 SQLite 조회도 database is locked로 거절됐고 잠금 우회·실행 앱 강제 종료는 하지 않았다. stderr는 pipe라 별도 실패 checkpoint를 회수하지 못했으며 원인은 미확정이다.
+- 작은 관측 JSON은 /private/tmp/hello-agent-approved-claude.DRoGtr-observation.json에 저장했다. asar7dd71da8…/sidecaraa385256…인 기존 패키지의 결과이며 최신 source HEAD 검증이 아니다. 생성 프로젝트는 저장 목록에서 참조하므로 보존했고 새 대형 빌드/캐시 없음. 프로젝트 화면 닫기는 클릭 후 변화를 관측하지 못해 닫혔다고 주장하지 않는다. 다음은 정상 종료 후 durable 실패 기록 확인 또는 진단이 수집되는 최신 시험 환경 준비이며 추가 실제 재시험은 별도 승인 대상이다. G6·메모리·Windows·출시 미완료/main 병합·push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - 직전64e1adf의 화면 회귀는 완료된 진척이며 반복하지 않았다. Claude 시험은 사용자 앱 정상 종료 확인을 기다리되 독립적으로 가능한 G6 수집 누락을 조사했다. RIhn2Z의100723개 trace 수집 중단과 createMainTaskTrace의 전체100000개 처리 한도를 대조했다.
 - Karpathy 최소 변경으로 전체 이벤트 처리 예산만1000000개로 늘렸다. root 작업 표본10000개 보존 한도·유실/종료/불완전 형식 거절·200ms 합격선은 유지한다. 다른 프로세스200000개 이벤트에서도 작업1개만 보존하고 payload 미보존, 처리 예산 초과 거절을 추가 검증했다. 관련7회귀·diff PASS. 실제 스트림 재측정/메모리 개선/전체G6 완료는 아직 입증하지 않았으며 사용자 프로젝트·모델 호출은 하지 않았다. 다음은 앱 정상 종료 뒤 기존 승인된 Claude1회 및 남은 성능 수집이다. Windows 환경 없음·출시 미완료/main 병합·push 없음.
 
