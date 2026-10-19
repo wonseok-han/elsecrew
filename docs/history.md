@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- f2e2610/clean 기준 기존2V2uWw 메모리 표본을 프로세스 정보와 대조했다. peak486768640B는 browser182370304/renderer141639680/GPU98484224/network47136768/나머지17137664B이며 renderer JS heap3448092B다. 빈 시작 Monaco는 실제 editor mount에서만 동적 import된다. 큰 JS 누수/Monaco 선로딩으로 단정하지 않는다.
+- 상시 승인된 startup_memory_review1명의 읽기 전용 재검토도 즉시 제거할 큰 상주 할당을 찾지 못했다. 시작 shell과 workbench의 코드/컨트롤러 구독 분리는 후보지만64MiB 이상 절감을 입증하지 않으며 미구현이다. 새 앱 실행·빌드·모델 호출·메모리 기준 변경은 하지 않았다.
+- 조사 중 same-instance admission poller stop/start 경합의 수정/2회귀를 작성해 관련8건이 통과했으나, 호출부가 effect마다 새 인스턴스를 만들어 제품에서 도달하지 않음을 확인했다. 추측성 수정과 테스트는 모두 이번 작업분만 제거했고 원래 코드로 돌아왔다. 현재 제품 결함 해결/메모리 개선으로 주장하지 않는다. 다음은 시작 shell 분리의 범위 판단과 남은 G6 수집, Claude 계약 승인·Windows 환경 확인이다. diff 검사 PASS/main 병합·push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - 80377fb의 수집기를 기존 e5324bd 패키지에 실행했다. 자체 임시8Edwn0는 renderer expression failed로 표식/RSS 관측 전에 실패했으며 정확한 원인은 확정하지 않는다. Karpathy 최소 변경으로 표식 reader의 hidden/invalid 고정 오류를 구조화 반환하고 부모가 기록 후 실패하도록 연결했다(임의 provider/renderer 오류 원문 노출 없음). 관련2회귀/diff PASS다.
 - 재시험2V2uWw에서는 visible renderer mark731.3ms/timeOrigin을 수집해 빈 목록 경합 수정의 실제 패키지 증거를 얻었다. 앱spawn 기준 시간이나10회p95는 아니다. idle RSS486768640B(약464MiB)>400MiB로 전체 진단은FAIL이다. 양쪽 exit0/DB shutdown confirmed 및 관측PID 부재 확인 뒤 각 시험의 userdata만 삭제했다(재생성 가능). JSON/PNG는 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-{8Edwn0,2V2uWw}에 보존한다. 제한 환경 ps EPERM 때 삭제하지 않았고 허용된 확인 뒤 정리했다.
 - 새 빌드/설치/실계정/모델 호출 없음, 기존 로그인 앱·사용자 프로젝트 불변. 다음은 메모리 기준 초과와 G6 전체 수집이며 Claude 계약 승인·Windows 환경·출시 검증도 남는다. main 병합/push 없음.
