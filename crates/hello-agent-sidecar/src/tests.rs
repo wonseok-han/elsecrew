@@ -22,6 +22,104 @@ fn database() -> (tempfile::TempDir, std::path::PathBuf) {
 }
 
 #[test]
+fn discovery_admission_rejection_keeps_session_available() {
+    let (_root, path) = database();
+    let instance = "discovery_rejection";
+    let mut session = SidecarSession::new(instance.into(), agent_runtime::AgentRuntime::native_candidate());
+    session.start_admission(&path);
+    wait_until_admitted(&mut session);
+    for (method, runtime) in [
+        ("agent.getModelChoices", "codex"),
+        ("agent.getCapabilities", "codex"),
+        ("agent.getCapabilities", "claude-code"),
+    ] {
+        let handled = session.handle_request(request_value(instance, "rejected", method, json!({
+            "runtime":runtime,"refresh":true,"chatId":"chat_missing","roleId":"coding"
+        }))).expect("query rejection must not terminate the service");
+        let response = handled.response.expect("immediate rejection");
+        assert!(!response.ok);
+        let error = response.error.unwrap();
+        assert_eq!(error.code, "agentDiscoveryRejected");
+        assert_eq!(error.kind, "requestBlocked");
+        let status = session.handle_request(request_value(instance, "alive", "system.status", json!({}))).unwrap().response.unwrap();
+        assert!(status.ok);
+        let AdmissionState::Ready { sidecar, .. } = &session.admission else { unreachable!() };
+        assert!(sidecar.pending_agent_capabilities.is_empty());
+        assert!(sidecar.storage.projection_records("run").unwrap().is_empty());
+        assert!(sidecar.storage.projection_records("lock").unwrap().is_empty());
+    }
+}
+
+#[test]
+fn discovery_rejection_stdio_returns_error_then_status_and_clean_quit() {
+    use std::sync::mpsc;
+    struct Input(mpsc::Receiver<Vec<u8>>, Cursor<Vec<u8>>);
+    impl Read for Input {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.1.position() as usize == self.1.get_ref().len() {
+                match self.0.recv() {
+                    Ok(bytes) => self.1 = Cursor::new(bytes),
+                    Err(_) => return Ok(0),
+                }
+            }
+            self.1.read(buf)
+        }
+    }
+    struct Output(mpsc::Sender<Vec<u8>>);
+    impl Write for Output {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.send(bytes.to_vec()).map_err(|_| io::ErrorKind::BrokenPipe)?;
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> { Ok(()) }
+    }
+    let (_root, path) = database();
+    let instance = "discovery_stdio";
+    let (tx, input) = mpsc::channel();
+    let (output, rx) = mpsc::channel();
+    let worker = thread::spawn(move || serve_stdio_with_identity_and_runtime(
+        &path, Input(input, Cursor::new(Vec::new())), Output(output), instance.into(),
+        agent_runtime::AgentRuntime::native_candidate(),
+    ));
+    let mut bytes = Vec::new();
+    let mut next = || loop {
+        if let Some(end) = bytes.iter().position(|b| *b == b'\n') {
+            let line: Vec<_> = bytes.drain(..=end).collect();
+            break decode_jsonl(&line).unwrap();
+        }
+        bytes.extend(rx.recv_timeout(Duration::from_secs(10)).expect("stdio response"));
+    };
+    assert!(matches!(next(), EnvelopeV1::Event(_)));
+    let send = |id: &str, method: &str, params: Value| {
+        let request = EnvelopeV1::Request(request_value(instance, id, method, params));
+        tx.send(encode_jsonl(&request).unwrap().into_bytes()).unwrap();
+    };
+    for index in 0..100 {
+        send(&format!("admission_{index}"), "system.status", json!({}));
+        let EnvelopeV1::Response(status) = next() else { panic!("status response") };
+        if status.result.as_ref().is_some_and(|v| v["storageAdmission"]["state"] == "ready") { break; }
+        assert!(index < 99, "storage admission did not finish");
+        thread::sleep(Duration::from_millis(10));
+    }
+    send("reject", "agent.getModelChoices", json!({"runtime":"codex","refresh":true,"chatId":"chat_missing","roleId":"coding"}));
+    let EnvelopeV1::Response(rejected) = next() else { panic!("rejection response") };
+    assert_eq!(rejected.request_id, "reject");
+    let error = rejected.error.unwrap();
+    assert_eq!(error.code, "agentDiscoveryRejected");
+    assert_eq!(error.kind, "requestBlocked");
+    send("alive", "system.status", json!({}));
+    let EnvelopeV1::Response(status) = next() else { panic!("status response") };
+    assert!(status.ok);
+    assert_eq!(status.request_id, "alive");
+    send("quit", "app.prepareQuit", json!({}));
+    let EnvelopeV1::Response(quit) = next() else { panic!("quit response") };
+    assert!(quit.ok);
+    assert_eq!(quit.request_id, "quit");
+    drop(tx);
+    worker.join().unwrap().expect("clean stdio exit after rejected discovery");
+}
+
+#[test]
 fn installation_activation_never_starts_without_a_consent_plan() {
     let (root, path) = database();
     let instance = "install_activation";

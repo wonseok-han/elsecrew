@@ -1,6 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- ade7e95/clean에서 서비스 종료 경로를 조사해 defer_agent_capabilities의 discovery admission Err가 run_stdio까지 전파되는 결함을 확인했다. 저장된 역할과 다른 공급자로 모델 조회하거나 존재하지 않는 채팅을 조회할 때 요청 거절이 서비스 종료로 확대될 수 있다. 직전 실제 processExit의 정확한 stderr는 확보하지 못했으므로 동일 원인으로 확정하지 않는다.
+- Codex/Claude discovery 시작 실패만 requestBlocked 응답으로 반환하고 실패한 요청은 pending에 등록하지 않도록 최소 수정했다. worker/cleanup 소유권과 안전 검사, 원본 쓰기·로그인 계약은 유지한다. release focused 회귀는 Codex 모델/기능·Claude 기능 거절 후 status 응답/빈 pending·run·lock 확인1건과 native admission 기존1건 PASS, diff check PASS. 읽기 전용 검토자1명 검토 중이다.
+- 사용자가 시험 앱28319 강제 종료 후 최신 패키지 재개를 승인했다. 종료 직전 경로를 재확인하고 해당 PID만 종료했으며 ps에서 hello-agent 앱/sidecar 프로세스 부재를 확인했다. pnpm m5:package는 제한 환경 fetch 실패 후 허용된 재실행으로 PASS, package smoke PASS다. 같은 out 경로만 갱신했고 정식 clean commit/ZIP gate 결과로 확대하지 않는다. 새 앱의 로그인·연결 화면에서 Codex와 Claude 모두 기존 인증으로 연결됨을 확인했다. 인증/프로젝트 변경·새 모델 호출 없음.
+- 독립 검토에서 구현 소유권 문제는 없었으나 stdio 경계 테스트 부족을 지적해 실제 JSONL→거절→status→prepareQuit→EOF 회귀를 추가했다. 추가 테스트 초기 String/Vec 컴파일 오류와 shellReady/storageAdmission.ready 혼동에 의한 실패를 고쳤다. Codex 승인2회 미사용이며 다음은 회귀 마감과 실제 도구/중단 시험이다. G6/Windows/출시 미완료/main 병합·push 없음.
+- 최종 release discovery_ 회귀6건 PASS, 수정 줄 독립 재검토 추가 지적 없음. 테스트에서 실제 모델은 호출하지 않았다. 제품 패키지는 이번 lib.rs 수정과 ade7e95 진단을 포함하며 이후 추가 변경은 테스트/워크로그뿐이다.
+
+### 2026-10-19 · by GPT-6 Astra
 - 직전 턴은 실제 원인을 특정하지 못한 조사였다. 1fe36c8 기준 Karpathy 최소 변경으로 main의 로그인 요청 실패를 capability/요청 거절/요청 차단/응답 검증/기타 transport 고정 코드로 제한하고 UI 도움 정보에 전달했다. 예외 원문·경로·OAuth URL은 전달하지 않으며 기존 로그인 상태·실행 차단·원본/인증 보호는 변경하지 않았다. requestBlocked는 설치 외 반영 작업에도 사용되므로 설치 문제라고 단정하지 않는다.
 - 관련 로그인/폴링/실제 main IPC harness20건과 TypeScript·main 문법 검사 PASS. 새 import를 모르는 보안 harness10건의 초기 실패는 실제 진단 모듈을 연결해 해소했다. 기존 조사 워크로그 변경도 보존한다.
 - 패키지 갱신 전 앱 정상 종료를 요청하자 processExit로 거절됐다. ps에서 main28319와 helper3개만 남고 sidecar28342/다른 hello-agent-sidecar가 없음을 확인했다. 현재 연결 요청 실패는 내부 서비스 종료 상태에서 발생하며 Codex 인증 실패로 단정할 수 없다. Claude 연결됨도 캐시 화면일 수 있다. 서비스 종료 자체의 원인은 미확정이다. 최신 진단은 이전 실행 패키지에 미반영이며 제품 성공으로 주장하지 않는다.

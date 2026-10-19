@@ -2099,14 +2099,22 @@ impl Sidecar {
         }
         let input: hello_agent_protocol::agent_adapter_v1::AgentCapabilitiesRequestV1 = serde_json::from_value(request.params.clone())
             .map_err(|_| SidecarError::new("invalidParams", "invalid scoped discovery request"))?;
-        if input.runtime == "claude-code" {
-            self.agent_runtime.begin_claude_discovery(&self.storage, &self.projects, &request.request_id, &input)?;
+        let discovery = if input.runtime == "claude-code" {
+            self.agent_runtime.begin_claude_discovery(&self.storage, &self.projects, &request.request_id, &input)
         } else { self.agent_runtime.begin_scoped_discovery(
             &self.storage,
             &self.projects,
             &input,
             &request.request_id,
-        )?; }
+        ) };
+        // Admission rejection belongs to this query, not the stdio service.
+        // Keep cleanup ownership inside the discovery manager and do not queue
+        // a request whose discovery did not start.
+        if let Err(error) = discovery {
+            return Ok(HandledRequest::response(error_response(
+                &request, error.kind(), "requestBlocked", error.detail(),
+            )));
+        }
         self.pending_agent_capabilities
             .insert(request.request_id.clone(), request);
         Ok(HandledRequest {
