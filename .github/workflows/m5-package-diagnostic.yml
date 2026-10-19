@@ -32,6 +32,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: TypeScript check
         run: pnpm exec tsc --noEmit
+      - name: Frontend and bridge contract regressions
+        run: pnpm test
+      - name: M5 core, protocol and sidecar regressions
+        run: cargo test --locked --release -p hello-agent-core -p hello-agent-protocol -p hello-agent-sidecar
       - name: Build unsigned Electron ZIP with release sidecar
         run: pnpm m5:make
       - name: Verify packaged assets, fuses and sidecar protocol

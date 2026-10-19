@@ -1,6 +1,10 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 4c874f1에서 남은 실계정/Windows 확인을 요청했다(Hello, Agent 자체 Claude 연결 여부·사용 가능한 Windows 환경). 저장소에는 이미 workflow_dispatch 전용 macOS/Windows unsigned package 진단 CI가 있지만 M5 Rust/프런트 회귀가 빠져 있음을 확인했다. Karpathy 최소 변경으로 패키징 전에 pnpm test 및 core/protocol/sidecar release --locked 테스트를 연결했다. 기존 read-only 권한·4job/4thread 제한·수동 실행·서명 없는 산출물·3일 보존은 유지한다.
+- Ruby Psych로 YAML 파싱·수동 trigger·두 플랫폼·회귀→패키징 순서·read-only 권한과 diff 검사를 통과했다. 첫 검사 명령은 시스템 Ruby의 filter_map 미지원으로 실패했고 map.compact로 검사만 수정했다. 원격 CI 실행/push/Windows 합격/실제 에이전트 활성화는 하지 않았다. 코드 재검증을 중복 실행하지 않았으며 실제 Windows 안전/패키지·G6/메모리·실계정/출시 검증은 남는다.
+
+### 2026-10-19 · by GPT-6 Astra
 - d01fe32에서 공급자 공개 이벤트 저장 경로를 대조했다. user-message와 달리 persist_public_event_record는 run/chat 원자 저장이며 사용자 메시지당 verify_workspace 비용을 그대로 적용하지 않는다. UI 알림의 void hydration에 rejection 처리가 없어 chat.get 실패가 처리되지 않은 Promise 오류로 남는 별도 결함을 확인했다.
 - Karpathy 최소 변경으로 background 알림 hydration에만 catch를 연결했다. 현재 generation 및 활성/전환 예정 채팅이 일치할 때 기존 지역화 history 오류를 표시하며 원장 메시지·실행/복구 상태는 바꾸지 않는다. await 호출자의 기존 오류 전파는 유지한다. 실패 뒤 후속 알림 재조회, dispose 후 실패 무시, 다른 채팅으로 전환 후 늦은 실패 무시3회귀를 추가했다. 관련 두 파일48회귀·tsc·diff PASS다.
 - 실제 공급자/모델·사용자 프로젝트 미사용. 공급자 처리량/메모리·전체G6/Windows/출시는 미완료이며 본 수정은 통신 실패 표시 결함만 닫는다. main 병합/push 없음.
