@@ -17,6 +17,7 @@ import { probeLargeProject } from './m5-packaged-large-project-probe.mjs';
 import { probePackagedInput } from './m5-packaged-input-probe.mjs';
 import { startPackagedChatStream } from './m5-packaged-chat-stream-probe.mjs';
 import { beginLongTaskProbe, endLongTaskProbe } from './m5-packaged-long-task-probe.mjs';
+import { createMainTaskTrace } from './m5-main-task-trace.mjs';
 import { probeLargeDiff } from './m5-packaged-diff-probe.mjs';
 import diffFixture from '../tests/m5-native-diff-fixture.cjs';
 
@@ -28,13 +29,14 @@ const largeProject = process.argv.length === 3 && process.argv[2] === '--large-p
 const memoryDiff = process.argv.length === 3 && process.argv[2] === '--memory-diff';
 const startupSeries = process.argv.length === 3 && process.argv[2] === '--startup';
 const deferredCdp = process.argv.length === 3 && process.argv[2] === '--deferred-cdp';
+const mainTraceDiagnostic = process.argv.length === 3 && process.argv[2] === '--main-trace';
 const nativeChatStream = process.argv.length === 3 && process.argv[2] === '--native-chat-stream';
 const largeDiff = memoryDiff || (process.argv.length === 3 && process.argv[2] === '--large-diff');
 const diagnosticLanguage = process.argv.length === 3
   ? (process.argv[2] === '--english' ? 'en' : process.argv[2] === '--korean' ? 'ko' : undefined)
   : undefined;
 const projectFlow = nativeChatStream || largeDiff || largeProject || (process.argv.length === 3 && process.argv[2] === '--project');
-assert.ok(process.argv.length === 2 || projectFlow || diagnosticLanguage || startupSeries || deferredCdp, 'Only fixed diagnostic scenarios are accepted');
+assert.ok(process.argv.length === 2 || projectFlow || diagnosticLanguage || startupSeries || deferredCdp || mainTraceDiagnostic, 'Only fixed diagnostic scenarios are accepted');
 const bundle = path.join(repo, 'out/hello-agent-darwin-arm64/hello-agent.app/Contents');
 const executable = path.join(bundle, 'MacOS/hello-agent');
 const resources = path.join(bundle, 'Resources');
@@ -103,6 +105,9 @@ async function until(read, milliseconds = 15000) {
 }
 let socket, sessionId, nextId = 0;
 let longTaskProbeStarted = false, longTaskWindowCompleted = false;
+const mainTaskTrace = createMainTaskTrace(child.pid);
+let mainTaskTraceStarted = false;
+let mainTaskWindowCompleted = false;
 let memoryTimer, memoryPhase = 'loaded';
 const trackMemory = createProcessMemoryTracker(child.pid);
 const readMemory = () => trackMemory(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,rss=,lstart='],
@@ -144,6 +149,7 @@ try {
   });
   socket.addEventListener('message', event => {
     const reply = JSON.parse(event.data);
+    mainTaskTrace.accept(reply);
     const request = pending.get(reply.id);
     if (!request) return;
     pending.delete(reply.id); clearTimeout(request.timer);
@@ -184,6 +190,10 @@ try {
   report.observedLanguage = await evaluate(`document.querySelector('select:has(option[value="ko"])')?.value`);
   if (diagnosticLanguage) assert.equal(report.observedLanguage, diagnosticLanguage, 'Requested diagnostic language was not applied');
   // Attribute RSS without guessing helper roles from PID order. CDP describes
+  if (mainTraceDiagnostic) {
+    await send('Tracing.start', {categories:'toplevel', transferMode:'ReportEvents'});
+    mainTaskTraceStarted = true;
+  }
   // Chromium processes only; unmatched descendants remain explicitly unknown.
   report.chromiumProcessesBefore = (await send('SystemInfo.getProcessInfo')).processInfo;
   report.rendererHeapBefore = await send('Runtime.getHeapUsage', {}, sessionId);
@@ -196,6 +206,7 @@ try {
     await sleep(250);
   }
   report.idleRssBytes = Math.max(...report.memory.map(sample => sample.rssBytes));
+  if (mainTraceDiagnostic) mainTaskWindowCompleted = true;
   report.idleRssWithinLimit = report.idleRssBytes <= 400 * 1024 * 1024;
   report.chromiumProcessesAfter = (await send('SystemInfo.getProcessInfo')).processInfo;
   report.rendererHeapAfter = await send('Runtime.getHeapUsage', {}, sessionId);
@@ -239,6 +250,8 @@ try {
     })()`);
     report.rendererLongTaskStart = await evaluate(`(${beginLongTaskProbe.toString()})()`);
     longTaskProbeStarted = true;
+    await send('Tracing.start', {categories:'toplevel', transferMode:'ReportEvents'});
+    mainTaskTraceStarted = true;
     const projectOpenedAt = performance.now();
     const expectedPath = fs.realpathSync(report.project.source);
     await until(() => evaluate(`(() => {
@@ -400,6 +413,16 @@ finally {
         scope:'Renderer project scenario only; excludes startup, main process and unobserved windows.'};
       if (report.rendererLongTasks.overLimitCount > 0) report.error ??= 'Renderer long-task limit exceeded';
     } catch (error) { report.rendererLongTaskError = String(error); }
+  }
+  if (mainTaskTraceStarted && !termination) {
+    try {
+      await send('Tracing.end');
+      await until(() => mainTaskTrace.completed);
+      report.mainLongTasks = mainTaskTrace.finish(mainTraceDiagnostic ? mainTaskWindowCompleted : longTaskWindowCompleted);
+      report.mainLongTasks.scenario = mainTraceDiagnostic ? 'idle-trace-format-diagnostic' : 'project';
+      if (!report.mainLongTasks.valid) report.error ??= 'Main task trace incomplete';
+      else if (report.mainLongTasks.overLimitCount > 0) report.error ??= 'Main long-task limit exceeded';
+    } catch (error) { report.mainLongTaskError = String(error); report.error ??= 'Main task trace incomplete'; }
   }
   // Existing IPC invokes the normal main-owned shutdown coordinator. A lost
   // reply during exit is not success: require exit 0 and the durable DB marker.

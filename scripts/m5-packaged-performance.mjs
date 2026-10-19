@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn, execFileSync } from 'node:child_process';
 import { packagedInputMaximum } from './m5-packaged-input-probe.mjs';
 import { packagedLongTaskMaximum } from './m5-packaged-long-task-probe.mjs';
+import { mainTaskMaximum } from './m5-main-task-trace.mjs';
 
 const mode = process.argv[2];
 assert.ok(process.argv.length === 3 && ['--diff', '--tree-file', '--memory-diff'].includes(mode));
@@ -70,12 +71,16 @@ async function trial(index) {
   if (mode === '--tree-file') sample.values.inputPaintMs = packagedInputMaximum(result.largeProjectInput);
   assert.ok(!result.rendererLongTaskError, 'Long-task observation failed; fixture retained');
   sample.values.rendererLongTaskMs = packagedLongTaskMaximum(result.rendererLongTasks);
+  assert.ok(!result.mainLongTaskError, 'Main task trace failed; fixture retained');
+  assert.equal(result.mainLongTasks?.scenario, 'project', 'Idle trace cannot replace the project scenario');
+  sample.values.mainLongTaskMs = mainTaskMaximum(result.mainLongTasks);
   const limitError = `Large ${mode === '--diff' || memoryMode ? 'diff' : 'project'} limits exceeded: ${metric.failedMetrics?.join(', ')}`;
   const inputLimitError = mode === '--tree-file' && sample.values.inputPaintMs > 50
     && result.error === 'Large project input paint limit exceeded';
   const memoryLimitError = memoryMode && result.memoryLifecycle.failedMetrics.length > 0 && result.error === 'Memory lifecycle limits exceeded';
   const longTaskLimitError = sample.values.rendererLongTaskMs > 200 && result.error === 'Renderer long-task limit exceeded';
-  if (result.error && result.error !== limitError && !inputLimitError && !memoryLimitError && !longTaskLimitError) throw new Error('Observation failed; fixture retained');
+  const mainTaskLimitError = sample.values.mainLongTaskMs > 200 && result.error === 'Main long-task limit exceeded';
+  if (result.error && result.error !== limitError && !inputLimitError && !memoryLimitError && !longTaskLimitError && !mainTaskLimitError) throw new Error('Observation failed; fixture retained');
   if (mode === '--diff' || memoryMode) {
     assert.equal(metric.diffFiles, 500); assert.equal(metric.diffChangedLines, 20000);
     assert.equal(metric.diffBytes, 10485760); assert.equal(metric.originalUnchanged, true);
@@ -101,9 +106,9 @@ try {
   for (const key of Object.keys(measured[0].values)) {
     const values = measured.map(row => row.values[key]);
     assert.ok(values.every(value => Number.isFinite(value) && value >= 0));
-    report.metrics[key] = memoryMode || key === 'rendererLongTaskMs' ? {values, maximum:Math.max(...values)} : {values, p95:Math.max(...values)};
+    report.metrics[key] = memoryMode || key === 'rendererLongTaskMs' || key === 'mainLongTaskMs' ? {values, maximum:Math.max(...values)} : {values, p95:Math.max(...values)};
   }
-  report.status = report.trials.some(row => row.result.status === 'FAIL' || row.values.rendererLongTaskMs > 200) ? 'FAIL' : 'NOT_READY';
+  report.status = report.trials.some(row => row.result.status === 'FAIL' || row.values.rendererLongTaskMs > 200 || row.values.mainLongTaskMs > 200) ? 'FAIL' : 'NOT_READY';
 } catch (error) { report.status = 'FAIL'; report.error = String(error); }
 finally { report.headAfter = git('rev-parse','HEAD'); persist(); }
 console.log(JSON.stringify({output, status:report.status, metrics:report.metrics, error:report.error}));

@@ -1,5 +1,11 @@
 # M5 성능 측정
 
+## 패키지 메인 스레드 추적
+
+`m5-packaged-ui-smoke.mjs`의 프로젝트 시나리오는 가시성 전제 확인 뒤 CDP `Tracing`의 `toplevel`을 수집한다. 앱 PID와 `CrBrowserMain` metadata가 지정한 스레드의 complete duration만 μs→ms로 변환한다. 다른 스레드·순간/flow 표식은 시간값에 섞지 않으며, 메인 스레드의 미완료/알 수 없는 duration 형식·추적 유실·종료 누락·표본 초과는 불완전한 관측이다. task args와 사용자 payload는 보존하지 않는다. 반복 수집기는 원시 timing에서 최대값/200ms 초과 개수를 다시 계산하고 idle 진단을 프로젝트 증거로 받지 않는다.
+
+`node --experimental-strip-types scripts/m5-packaged-ui-smoke.mjs --main-trace`는 빈 임시 프로필에서 추적 형식만 확인한다. 가시성이 검증된 프로젝트 성능이나 정식 G6를 대신하지 않는다. 추적 자체가 메모리·시간에 영향을 주며, 시작 이전/추적 밖 작업과 JSON B/E duration 쌍의 완전한 지원은 보장하지 않는다. 메인 스레드 B/E가 관측되면 PASS 대신 불완전한 측정으로 남긴다. 프로토콜 근거: [Chromium Tracing](https://chromedevtools.github.io/devtools-protocol/tot/Tracing/).
+
 `--diagnostic --memory --heap-sampling`은 합성 renderer에만 CDP 할당 샘플러를 붙인다. 평균64KiB 간격·깊이32로 수집하고 checkpoint마다 살아 있는 할당의 상위50개 호출 위치와 전체 샘플 크기를 기록한다. [공식 HeapProfiler 계약](https://github.com/ChromeDevTools/devtools-protocol/blob/master/pdl/js_protocol.pdl)의 기본 live-object 모드이며 GC 강제·힙 스냅샷은 호출하지 않는다. 샘플 크기는 RSS나 retained size가 아니며 minified 함수명/번들 위치의 추가 분석이 필요하다. 계측 오버헤드가 있으므로 정식 성능 PASS 근거로 사용할 수 없다.
 
 합격선은 `../proposals/m5-electron-spike.md` §10이다. 다음 도구는 로컬 개발 측정용이며 전체 G6 완료를 뜻하지 않는다.
