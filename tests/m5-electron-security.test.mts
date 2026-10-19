@@ -8,6 +8,7 @@ import test from "node:test";
 import { M5_INTERNAL_CHANNELS_V1 } from "../src/m5/contracts/lifecycle-v1.ts";
 import * as modelChoicesContract from "../src/m5/contracts/model-choices-v1.ts";
 import * as deviceReportContract from "../src/m5/contracts/device-report-v1.ts";
+import * as sessionDiagnosticsContract from "../src/m5/contracts/session-diagnostics-v1.ts";
 import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS, M5_BRIDGE_V7_CHANNELS } from "../electron/ipc-channels.ts";
 
 const require = createRequire(import.meta.url);
@@ -319,6 +320,7 @@ function moduleFor(
   if (specifier.endsWith("provider-login-v1.ts")) return loginContract;
   if (specifier.endsWith("provider-install-v1.ts")) return installContract;
   if (specifier.endsWith("device-report-v1.ts")) return deviceReportContract;
+  if (specifier.endsWith("session-diagnostics-v1.ts")) return sessionDiagnosticsContract;
   if (specifier === "./device-report.ts") return { readDeviceReport: () => { throw new Error("unexpected device inspection"); } };
   if (specifier.endsWith("approval-v1.ts")) return approvalContract;
   if (specifier.endsWith("project-catalog-v1.ts")) return catalogContract;
@@ -355,6 +357,22 @@ test("catalog IPC rejects foreign frames and renderer-supplied paths", async () 
   await assertRejectedWithoutSidecar(handler, {sender: {}, senderFrame: {}}, harness);
   await assert.rejects(handler(harness.currentEvent(), {action: "reopen", projectId: "project_a", path: "/other"}));
   assert.deepEqual(harness.sidecarCalls, []);
+});
+
+test("session diagnostics accept only the current main frame and no renderer input", async () => {
+  const harness = await loadMain();
+  const handler = harness.handlers.get(sessionDiagnosticsContract.SESSION_DIAGNOSTICS_CHANNEL);
+  assert.ok(handler);
+  const result = await handler(harness.currentEvent());
+  assert.equal(sessionDiagnosticsContract.validateSessionDiagnostics(result).scope,"currentAppSession");
+  for(const event of [{sender:{},senderFrame:{}},
+    {sender:harness.window.webContents,senderFrame:{url:harness.window.webContents.mainFrame.url}}]) {
+    await assertRejectedWithoutSidecar(handler,event,harness);
+  }
+  await assert.rejects(handler(harness.currentEvent(),{path:"/private/credentials"}));
+  harness.window.webContents.mainFrame.url="https://untrusted.invalid";
+  await assertRejectedWithoutSidecar(handler,harness.currentEvent(),harness);
+  assert.deepEqual(harness.sidecarCalls,[]);
 });
 
 test("installation IPC rejects foreign frames, arbitrary paths, and recovery without an operation", async () => {

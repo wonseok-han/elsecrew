@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- e8c21a1 실제 실패를 조사해 Claude session이 고정 단계명을 stderr에 기록하지만 AgentRun UI에는 종료 결과만 전달한다는 정보 누락을 확인했다. Karpathy 최소 변경으로 실패한 Claude 실행 정보에 현재 앱 세션 진단 조회를 연결했다. main의 기존 bounded tail에서 정확한 허용 단계명만 최대32개 반환하고 preload도 strict 재검증한다. 새 입력 없는 IPC는 현재 main frame/origin 검사·추가 인자 거절을 수행한다.
+- 이 진단은 run ID에 결속되지 않고 재시작 후 남지 않으므로 다른 실행 기록일 수 있음을 한/영으로 명시했다. raw 로그·토큰·경로·자유 텍스트를 반환하지 않으며 빈 목록/조회 실패를 정상으로 해석하지 않는다. 실행/반영/복구 계약·Rust 원장·로그인 설정은 변경하지 않았다.
+- tsc 및 분류/허용목록/상한/IPC 접근 경계 관련12회귀·diff PASS. 상시 승인된 startup_memory_review1명의 읽기 전용 검토에서 차단 결함 없음(접근 제한·허용목록·원문 미전달·세션 한계 안내)을 확인했다. 실제 패키지/화면 회귀는 아직 수행하지 않았고 실행 중 앱 번들을 덮어쓰지 않았다. 추가 모델 실행0회. 이번 변경은 다음 진단 가능성을 보완한 것이며 직전 실패의 구체 원인 해결이나 G6/메모리/Windows/출시 완료가 아니다.
+
+### 2026-10-19 · by GPT-6 Astra
 - PID89292/sidecar89374가 계속 실행 중임을 확인했다. 별도 runner/앱 종료가 필수는 아니므로 기존 로그인된 앱을 CUA로 확인하고 승인된 Claude1회를 실제 UI에서 진행했다. Claude 연결됨을 관측한 뒤 자체 생성한 /private/tmp/hello-agent-approved-claude.DRoGtr의 hello.txt 한 파일 Git만 선택해 새 채팅을 만들었다. 사용자의 기존 프로젝트·인증정보는 변경하지 않았다.
 - coding/Claude Code/opus 실행 agent_run_a5d9d4bae43846ef8cc77bce1c936473은 접수→준비→failed/실행 종료 확인됨으로 끝났으며 응답은 없었다. 원본 git status는 clean이다. 승인된1회는 사용했으므로 재실행하지 않는다. UI는 상세 원인 없이 연결/모델 확인만 안내한다. 읽기 전용 SQLite 조회도 database is locked로 거절됐고 잠금 우회·실행 앱 강제 종료는 하지 않았다. stderr는 pipe라 별도 실패 checkpoint를 회수하지 못했으며 원인은 미확정이다.
 - 작은 관측 JSON은 /private/tmp/hello-agent-approved-claude.DRoGtr-observation.json에 저장했다. asar7dd71da8…/sidecaraa385256…인 기존 패키지의 결과이며 최신 source HEAD 검증이 아니다. 생성 프로젝트는 저장 목록에서 참조하므로 보존했고 새 대형 빌드/캐시 없음. 프로젝트 화면 닫기는 클릭 후 변화를 관측하지 못해 닫혔다고 주장하지 않는다. 다음은 정상 종료 후 durable 실패 기록 확인 또는 진단이 수집되는 최신 시험 환경 준비이며 추가 실제 재시험은 별도 승인 대상이다. G6·메모리·Windows·출시 미완료/main 병합·push 없음.
