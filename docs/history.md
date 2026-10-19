@@ -1,6 +1,10 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 후속 sidecar binary/integration 대상은14 PASS/3 ignored(외부 sandbox2·100race1), workspace doc-test3 PASS다. 기존629건 전체 재실행 없이 빠진 대상만 실행했다. 실제 모델/인증 미사용. 캐시는 release1.7GiB, out427MiB, .vite3.8MiB이며 다음은 clean HEAD 최신 패키지 gate다.
+- 누적 Rust session36013은 종료101: sidecar lib629 PASS/3 FAIL/37 ignored,612.81초다. 실패3건 모두 UnixListener bind의 PermissionDenied(EPERM)였다. 동일 release 코드로 제한 밖에서 runtime_scan_reports_special_files_without_exposing_names1건 및 claude_runtime_files2건만 재실행해3 PASS를 확인했다. 제품 수정 없이 환경 원인으로 구분했다. 전체 workspace 명령은 실패 중단했으므로 이후 실행 대상/문서 시험까지 완료했다고 주장하지 않는다. 다음은 미실행 후속 대상과 최신 패키지 묶음 검증이며 G6·실계정·Windows·출시는 계속 미완료다. 실제 모델·인증·사용자 프로젝트 사용 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - 누적 검증 session36013의 실제 진행 출력을 재확인했다(저장소 재열기·압축 회귀 진행 중). 종료 전에는 전체 합격으로 판단하지 않는다. 10월15~16일 기록과 과거 보관 안내를10월 archive로 원문 이동하고 고정 내용은 공백만 줄였다. Git HEAD 원문 포함·고정 섹션 공백 제외 일치·diff 검사를 통과했다. 기존 startup_memory_review의8a10396 정적 검토는 추가 기능 차단 결함 없음이며 G6/실계정/Windows/출시 합격을 의미하지 않는다.
 - 재전달된 문서 승인 두 건은 Git 기록상 이미 반영됨을 확인했다. 57f8e3b는 September archive 한 파일만 별도 커밋했고, fdc11a5는 AGENTS.md/CLAUDE.md의 상태 설명과 작업 기록을 반영했다. 현재 두 안내 문서는 cmp 일치하며 해당 세 문서에 미커밋 변경이 없어 중복 수정·커밋하지 않았다. 현재 HEAD8a10396의 누적 Rust session36013은 계속 실행 중이므로 합격으로 선언하지 않는다. 다음은 검증 종료 결과 확인이다.
 - clean8a10396에서 CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4 cargo test --workspace --release --locked 누적 검증을 시작했다(session36013). workspace에는 기존 Tauri도 포함되어 추가 의존성을 빌드 중이며 아직 합격 결과가 없다. release 캐시1.5GiB/가용503GiB를 관측했다. 무거운 실행은 하나만 유지한다. 기존 startup_memory_review1명에게 현재 코드와 제품 성공 기준의 구체적 기능 누락을 읽기 전용으로 대조하도록 요청했다. 결과 대기이며 실제 모델/인증/사용자 프로젝트·main 병합/push 없음.
