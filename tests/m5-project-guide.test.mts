@@ -17,9 +17,18 @@ test("guide resumes its pinned chat rather than adopting another chat", () => {
   assert.equal(projectGuideStep(preference, "other", "completed"), "resume");
   assert.equal(projectGuideStep(preference, "first", "running"), "observe");
   assert.equal(projectGuideStep(preference, "first", "recoveryRequired"), "recovery");
-  assert.equal(projectGuideStep(preference, "first", "needsAttention"), "recovery");
+  assert.equal(projectGuideStep(preference, "first", "needsAttention"), "attention");
   assert.equal(projectGuideStep(preference, "first", "reviewReady"), "review");
   assert.equal(projectGuideStep(preference, "first", "completed"), "review");
+});
+
+test("attention is distinct from recovery even when guidance is dismissed", () => {
+  for (const dismissed of [false, true]) {
+    const preference = { ...emptyProjectGuide(), chatId: "first", dismissed };
+    assert.equal(projectGuideStep(preference, "first", "needsAttention"), "attention");
+    assert.equal(projectGuideStep(preference, "first", "recoveryRequired"), "recovery");
+    assert.equal(projectGuideStep(preference, "other", "needsAttention"), "resume");
+  }
 });
 
 test("initial guidance can advance without claiming execution or completion", () => {

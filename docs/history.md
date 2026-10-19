@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 직전 채팅 시험은 종료된FAIL 증거를 얻었으며 재실행하지 않았다. clean b9bf0e1에서 사용자가 혼란스러워했던 첫 작업 안내를 조사했다. projectGuideStep이 needsAttention과 recoveryRequired를 모두 recovery로 분류해 종료 확인된 실패도 ‘문제 확인과 복구’로 안내하는 것을 확인했다.
+- Karpathy 최소 변경으로 needsAttention의 안내만 ‘실행 결과 확인’으로 분리하고 한/영 설명에 팀 대화 보기→실행 정보 확인, 로그인 실패로 단정 금지, 종료 미확인/복구 안내 시 재실행 금지를 명시했다. 실제 chat 상태·종료/복구 제한·권한·실행 API는 변경하지 않았다. 기존 복구 안내와 pinned chat/접기 의미도 유지한다.
+- 관련 순수 회귀4건/tsc --noEmit/diff PASS. 최신 패키지는 직전1cb7843 제품 기준이므로 이번 안내의 packaged UI 확인은 아직 미수행이다. 큰 빌드/모델 호출/시험 데이터 생성 없음. 다음은 남은 성능/메모리와 승인 후 실제 Claude 응답 확인이며 Windows/출시까지 완료한 상태는 아니다. main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - 직전 대형 프로젝트 visible 측정은 진척이었다. clean6e68548에서 같은 최신 패키지의 --native-chat-stream 진단4iVgiL을 실행했다. 실제 public appendChatMessage IPC를 사용하는 자체 채팅4개/예정12000건이며 공급자 토큰·모델 호출이 아니다. native Raise 이후 visible로 시작했지만 측정 중 hidden 전환1회로 FAIL했다. 전송553/수신553·dispatch65.55초이며 전체 저장/복원·성능 합격으로 확대하지 않는다. 마지막 visible만으로 중간 hidden을 무시하지 않는다.
 - idle RSS445857792B도400MiB 초과다. exit0/DB shutdown confirmed 및 bundle/sidecar 프로세스 부재 확인 뒤 자체 project/other-project/userdata만 삭제했다(재생성 가능). result.json 등은 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-4iVgiL에 보존했다. 새로운 빌드/모델 호출/인증정보 변경 없음.
 - Claude 최신 호환 패키지의 작은 실제 응답1회 승인을 비동기로 요청했다. 미응답 상태에서는 호출하지 않는다. 다음은 중간 숨김을 방지한 채팅 검증 환경과 메모리 초과 원인 해결, 남은 G6/공급자/Windows/출시 검증이다. 같은 시험 무조건 반복은 하지 않으며 main 병합/push 없음.

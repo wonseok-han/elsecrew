@@ -13,10 +13,11 @@ export function parseProjectGuide(raw: string | null): ProjectGuidePreference {
   } catch { return emptyProjectGuide(); }
 }
 export function projectGuideKey(projectId: string): string { return `hello-agent.m5.guide.v1:${encodeURIComponent(projectId)}`; }
-export function projectGuideStep(preference: ProjectGuidePreference, activeChatId: string | null, state: ChatStateV1 | null): "team" | "goal" | "resume" | "observe" | "review" | "recovery" {
+export function projectGuideStep(preference: ProjectGuidePreference, activeChatId: string | null, state: ChatStateV1 | null): "team" | "goal" | "resume" | "observe" | "review" | "attention" | "recovery" {
   if (preference.chatId && preference.chatId !== activeChatId) return "resume";
   if (activeChatId) {
-    if (state === "recoveryRequired" || state === "needsAttention") return "recovery";
+    if (state === "recoveryRequired") return "recovery";
+    if (state === "needsAttention") return "attention";
     if (state === "reviewReady" || state === "applying" || state === "completed" || state === "discarded") return "review";
     return "observe";
   }
