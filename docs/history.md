@@ -1,6 +1,15 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 직전 대형 프로젝트 시험은 종료된FAIL이며 진행 중인 측정으로 오인하지 않는다. 현재 변경은 그 시험 기록뿐이고 diff check를 통과했다. Claude 내장 guard 예외 승인은 여러 연속 목표 턴에 걸쳐 미응답이며, 안전하게 독립 수행한 누적 회귀·표식 수정·패키지 재측정·메모리 분석을 마쳤지만 전체 완료 조건은 닫히지 않았다.
+- 다음 실연결 수정은 안전 계약 예외 승인, 실제 화면 검증은 visible 환경, Windows 검증은 해당 실행 환경이 필요하다. 미확인 절감 가설로 큰 구조 변경을 반복하거나 같은 숨김 시험/유료 호출을 재실행하지 않는다. 자동 목표는 사용자 결정/환경 확인 대기로 blocked 처리하며 완료 선언이 아니다. 남은 G6 수집·메모리 초과·공급자 도구/중단/복구·Windows·출시 검증 범위는 축소하지 않는다. 사용자 확인 후 재개한다.
+
+### 2026-10-19 · by GPT-6 Astra
+- 46f192a/clean 기준 시작 shell 분리 범위를 확인했다. ProjectCatalog·선택/복구/닫기와 editor/chat 컨트롤러가 연결돼 있고 예상 절감량은 미확정이므로 대규모 분리를 즉시 시행하지 않았다. 기존 e5324bd 패키지로 자체1만 파일/5MiB fixture의 --large-project 진단을 실행했다.
+- Vp8weW는 seed 정상 완료 후 앱PID16862로 시작했으나 Project visibility precondition failed(hidden)로 실제 트리/파일 측정 전에FAIL했다. idle RSS474169344B, 종료0/DB shutdown confirmed다. 숨김 관측을0ms나G6 합격으로 바꾸지 않는다. 관측PID/seedPID 부재를 확인한 뒤 이 시험의 project/other-project/userdata만 삭제하고 result.json 등 증거는 임시 루트에 보존했다. 빌드·실계정·모델·사용자 프로젝트 변경 없음.
+- 다음 실제 화면 측정은 visible 전제 확보가 필요하다. Claude 내장 guard 계약 변경 승인과 Windows 환경도 미해결이다. 제품 코드 변경 없음/diff 검사 PASS/main 병합·push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - f2e2610/clean 기준 기존2V2uWw 메모리 표본을 프로세스 정보와 대조했다. peak486768640B는 browser182370304/renderer141639680/GPU98484224/network47136768/나머지17137664B이며 renderer JS heap3448092B다. 빈 시작 Monaco는 실제 editor mount에서만 동적 import된다. 큰 JS 누수/Monaco 선로딩으로 단정하지 않는다.
 - 상시 승인된 startup_memory_review1명의 읽기 전용 재검토도 즉시 제거할 큰 상주 할당을 찾지 못했다. 시작 shell과 workbench의 코드/컨트롤러 구독 분리는 후보지만64MiB 이상 절감을 입증하지 않으며 미구현이다. 새 앱 실행·빌드·모델 호출·메모리 기준 변경은 하지 않았다.
 - 조사 중 same-instance admission poller stop/start 경합의 수정/2회귀를 작성해 관련8건이 통과했으나, 호출부가 effect마다 새 인스턴스를 만들어 제품에서 도달하지 않음을 확인했다. 추측성 수정과 테스트는 모두 이번 작업분만 제거했고 원래 코드로 돌아왔다. 현재 제품 결함 해결/메모리 개선으로 주장하지 않는다. 다음은 시작 shell 분리의 범위 판단과 남은 G6 수집, Claude 계약 승인·Windows 환경 확인이다. diff 검사 PASS/main 병합·push 없음.
