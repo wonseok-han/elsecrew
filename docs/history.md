@@ -1,6 +1,7 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 반복 시작 진단 BUiMQR 완료(초기1+워밍업1+측정10):10/10 RSS400MiB 초과,최대484114432B(약462MiB),FAIL. storage 관측p95 554.21ms/UI 관측p95 982.29ms이며 정확한 제품 readiness 표식/G6 합격으로 대체하지 않는다. 최대 회차는1.53초 peak→12.15초404897792B로 감소했고 browser/GPU/network/renderer/미분류자손 모두 감소했다. 일시적 시작 메모리와 idle 경계를 구분할 근거이지 기준 변경·해결 증거가 아니다. 종료0/DB confirmed·전회차 관측PID 부재·fixtureCleaned=true 및 userdata 부재 확인. 결과/화면만 유지했다. 반복 진단으로 초과 재현을 확정했으며 전체G6 수집과 메모리 최적화·실계정/Windows/출시는 남는다.
 - 同패키지 deferred-CDP 진단4c54Ht는 연결 전 최대417267712B,13.7초 뒤 연결 후 최대394428416B, NOT_READY/종료0/DB confirmed였다. 사전 표본은 UI 준비 확인 전이며 CDP 서버는 시작부터 켜져 있다. 앞선434MiB와 실행별 편차가 있어 연결 지연의 인과 효과나 메모리 해결을 주장하지 않는다. 모든 사전/후속 관측PID 부재 뒤 해당 userdata만 제거하고 결과/화면은 보존했다. 다음 측정은 동일 readiness/시간창의 반복 증거가 필요하며 기존400MiB·peak/retained 기준과 전체G6 미완료 상태를 유지한다.
 - 최신 패키지의 빈 임시 프로필 idle 진단 tahuOq는 RSS455491584B로400MiB 초과(FAIL), 정상 종료0/DB종료 confirmed다. peak 구성은 browser163954688B·renderer137920512B·GPU94994432B·network41320448B·미분류자손17301504B, renderer JS heap3524168B다. 이 자료만으로 Monaco/대화 보존을 원인으로 단정하지 않는다. rendererAssets는 빈 배열이라 미로딩 증거가 아니다. 관측PID 모두 부재 확인 후 해당 userdata만 삭제하고 result.json/startup.png는 보존했다. 코드·안전 기준·GPU 설정은 변경하지 않았고 전체G6/실계정/Windows/출시는 미완료다.
 - clean e861681의 macOS arm64 패키지 gate PASS: 순수27건·Forge package·packaged sidecar smoke·ZIP·size 모두0,14.15초. unpacked322283728B/ZIP124085416B로 기준 이내이며 evidence는 .artifacts/m5-g6-package/darwin-arm64-2026-10-19T01-13-25-579Z.json이다. 이는 GUI/실계정/실행RSS/전체G6/Windows/서명·출시 합격이 아니다. 기존 out 갱신만 수행했고 시스템 설치·모델 호출 없음. 다음은 남은 성능 수집/메모리와 실제 작업 검증이다.
