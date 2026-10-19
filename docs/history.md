@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 직전 턴은 guard 호환 구현/회귀/독립 검토/1cb7843 커밋의 진척이었다. clean 상태에서 기존 시험 앱의 failed/종료 확인 상태를 UI로 확인하고 메뉴 Quit으로 정상 종료했다. PID59424/sidecar59456 및 bundle 프로세스 부재를 확인한 뒤 기존 out 패키지만 갱신했다. 강제 종료·인증정보·사용자 프로젝트·모델 호출 없음.
+- pnpm m5:test:package PASS: 사전27건, Forge package, packaged sidecar smoke, ZIP, 크기 기준. 증거 .artifacts/m5-g6-package/darwin-arm64-2026-10-19T02-47-47-308Z.json은 clean1cb7843 기준이다. unpacked322310786B/ZIP124090183B이며 GUI/공급자 성공/G6 전체 증거는 아니다. 별도 앱 복사본은 만들지 않았다.
+- 다음은 최신 패키지의 실제 화면/성능 검증과 별도 승인 후 Claude 실제 응답 확인이다. 기존 로그인 데이터는 보존했다. Windows 환경 없음·메모리 기준 초과·공급자 도구/중단/복구·출시 검증은 미완료다. main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - 사용자가 Claude 공식 내장 조직 guard 호환 수정을 승인하고 화면이 켜져 있다고 확인했다. 직전 blocked 사유 중 계약 결정이 해소되어 개발을 재개했다. 실제 유료 재시험 승인은 포함하지 않는다. e302686/clean·m5/coding-agent-ide 기준 Karpathy 최소 변경으로 native 전용 opt-in 관측, exact singleton guard, receipt→phased session의 observedBuiltinPlugins 저장을 구현했다. generic/fixture·기존 권한/원본/종료 검사는 유지하고 오래된 필드 없는 기록은 빈 목록으로 읽는다.
 - 상시 승인된 startup_memory_review 1명의 독립 검토에서 차단 결함 없음. 실제 전체 등록 shape는 미검증임을 명시했다. 기존 guard 진단은 path/source 분류일 뿐 name/추가 필드까지 확인한 증거가 아니며 불일치는 계속 거절한다. 실행 중 앱·패키지·인증정보·사용자 프로젝트와 모델은 건드리지 않았다.
 - 최종 추가 회귀는 core native_guard 2건, protocol phased_claude 1건, sidecar claude_native_owner 1건 PASS다. 로컬 가짜 공급자의 guard 허용·일반 채널 거절·원장 저장/재개를 검증했으며 실제 공급자 성공 증거는 아니다. 앞선 sidecar Claude 관련 검사 28 PASS/2 FAIL/3 ignored 중 실패 2건은 sandbox의 Unix socket bind EPERM이고, 해당 claude_runtime_files 2건만 허용된 환경에서 재실행해 PASS했다. git diff --check PASS.
