@@ -75,6 +75,7 @@ export const en: Record<MessageKey, string> = {
   "m5.chatError.settingsLoad": "Could not load saved settings. Your input is preserved.",
   "m5.chatError.prepare": "Could not prepare a new conversation. The original project was not changed.",
   "m5.chatError.history": "Could not load conversation history.",
+  "m5.chat.reloadHistory": "Reload conversation history",
   "m5.chatError.workspace": "Could not open the conversation's working copy.",
   "m5.chatError.run": "The selected role and model cannot run now. No automatic switch to another model was made.",
   "m5.chatError.termination": "Could not verify run termination. Check recovery status.",

@@ -151,10 +151,12 @@ test("notification hydration failure is visible without changing durable message
   assert.equal(controller.snapshot().error?.detail, "ledger read unavailable");
   assert.deepEqual(controller.snapshot().messages, before.messages);
   assert.deepEqual(controller.snapshot().agentRuns, before.agentRuns);
+  await controller.retryHistory();
+  assert.equal(controller.snapshot().error?.retryChatId, bridge.chatA.chatId);
   bridge.getChat = original;
   bridge.messages.push(message(bridge.chatA, 2, "later durable response"));
-  bridge.emitState(stateEvent(bridge.chatA));
-  await flush(); await flush();
+  await controller.retryHistory();
+  assert.equal(controller.snapshot().error, null);
   assert.equal(controller.snapshot().messages.at(-1)?.text, "later durable response");
   controller.dispose();
 });

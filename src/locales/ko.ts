@@ -74,6 +74,7 @@ export const ko = {
   "m5.chatError.settingsLoad": "저장된 설정을 불러오지 못했어요. 입력은 유지했어요.",
   "m5.chatError.prepare": "새 채팅을 준비하지 못했어요. 원본 프로젝트는 바꾸지 않았어요.",
   "m5.chatError.history": "채팅 기록을 불러오지 못했어요.",
+  "m5.chat.reloadHistory": "채팅 기록 다시 불러오기",
   "m5.chatError.workspace": "채팅 작업 복사본을 열지 못했어요.",
   "m5.chatError.run": "선택한 역할·모델을 지금 실행할 수 없어요. 다른 모델로 자동 변경하지 않았어요.",
   "m5.chatError.termination": "실행 종료를 확인하지 못했어요. 복구 상태를 확인해 주세요.",

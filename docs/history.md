@@ -1,6 +1,10 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 20e856f에서 background 채팅 갱신 실패 표시 뒤 별도 복구 행동이 없음을 확인했다. Karpathy 최소 변경으로 해당 오류에만 retryChatId를 결속하고 활성 채팅과 일치할 때 한/영 ‘채팅 기록 다시 불러오기’를 표시한다. 읽기 전용 기존 hydration을 재사용하며 실패 유지/성공 후 해당 오류만 해제한다. 다른 오류·늦은 응답·전환/종료 상태는 덮지 않고 실행/취소/원본 반영을 호출하지 않는다.
+- 관련48회귀·tsc·diff PASS. 오류 지속 뒤 수동 재시도 성공과 기록 갱신/오류 해제를 기존 회귀에 연결했다. 실제 버튼의 Chromium 시각·상호작용 검증은 다음 묶음 UI 검증에 포함하며 완료했다고 주장하지 않는다. 실제 계정/Windows 응답 대기와 G6/메모리/출시 미완료 상태는 유지한다. main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - 4c874f1에서 남은 실계정/Windows 확인을 요청했다(Hello, Agent 자체 Claude 연결 여부·사용 가능한 Windows 환경). 저장소에는 이미 workflow_dispatch 전용 macOS/Windows unsigned package 진단 CI가 있지만 M5 Rust/프런트 회귀가 빠져 있음을 확인했다. Karpathy 최소 변경으로 패키징 전에 pnpm test 및 core/protocol/sidecar release --locked 테스트를 연결했다. 기존 read-only 권한·4job/4thread 제한·수동 실행·서명 없는 산출물·3일 보존은 유지한다.
 - Ruby Psych로 YAML 파싱·수동 trigger·두 플랫폼·회귀→패키징 순서·read-only 권한과 diff 검사를 통과했다. 첫 검사 명령은 시스템 Ruby의 filter_map 미지원으로 실패했고 map.compact로 검사만 수정했다. 원격 CI 실행/push/Windows 합격/실제 에이전트 활성화는 하지 않았다. 코드 재검증을 중복 실행하지 않았으며 실제 Windows 안전/패키지·G6/메모리·실계정/출시 검증은 남는다.
 

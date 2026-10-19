@@ -43,7 +43,7 @@ export interface ChatUiSnapshot {
   notice: string | null;
   noticeKey?: ChatNoticeKey;
   noticeContext?: ChatNoticeContext;
-  error: { message: string; messageKey: ChatErrorKey; detail: string } | null;
+  error: { message: string; messageKey: ChatErrorKey; detail: string; retryChatId?: string } | null;
 }
 
 type M5ChatBridge = M5BridgeV3 | M5BridgeV4 | M5BridgeV5 | M5BridgeV6 | M5BridgeV7;
@@ -440,8 +440,18 @@ export class ChatUiController {
     void this.#hydrateChat(chat, generation).catch(error => {
       if (!this.#live(generation)) return;
       const current = this.#pending?.chat ?? this.#state.activeChat;
-      if (current && matchesChatRecord(current, chat)) this.#error("m5.chatError.history", error);
+      if (current && matchesChatRecord(current, chat)) this.#error("m5.chatError.history", error, chat.chatId);
     });
+  }
+  async retryHistory(): Promise<void> {
+    const chat = this.#state.activeChat, failure = this.#state.error, generation = this.#generation;
+    if (!chat || this.#state.switching || failure?.retryChatId !== chat.chatId || !this.#live(generation)) return;
+    try {
+      await this.#hydrateChat(chat, generation);
+      if (this.#live(generation) && this.#state.activeChat && matchesChatRecord(this.#state.activeChat, chat) && this.#state.error === failure) this.#set({ error: null });
+    } catch (error) {
+      if (this.#live(generation) && this.#state.activeChat && matchesChatRecord(this.#state.activeChat, chat) && this.#state.error === failure) this.#error("m5.chatError.history", error, chat.chatId);
+    }
   }
   async #hydrateChat(chat: ChatRecordV1, generation: number): Promise<void> {
     const key = `${generation}:${chat.chatId}`;
@@ -496,7 +506,7 @@ export class ChatUiController {
   }
   #endSwitch(message: ChatErrorKey, error?: unknown): void { this.#pending = null; this.#set({ switching: false, ...chatNotice(message), error: error ? { message: ko[message], messageKey: message, detail: error instanceof Error ? error.message : String(error) } : this.#state.error }); }
   #live(generation: number): boolean { return !this.#disposed && this.#generation === generation; }
-  #error(message: ChatErrorKey, error: unknown): void { this.#set({ error: { message: ko[message], messageKey: message, detail: error instanceof Error ? error.message.slice(0, 2048) : String(error).slice(0, 2048) } }); }
+  #error(message: ChatErrorKey, error: unknown, retryChatId?: string): void { this.#set({ error: { message: ko[message], messageKey: message, detail: error instanceof Error ? error.message.slice(0, 2048) : String(error).slice(0, 2048), ...(retryChatId ? { retryChatId } : {}) } }); }
   #set(update: Partial<ChatUiSnapshot>): void { if (this.#disposed) return; this.#state = { ...this.#state, ...update, ...("notice" in update ? { noticeKey: update.notice ? update.noticeKey : undefined, noticeContext: update.notice ? update.noticeContext : undefined } : {}) }; for (const listener of this.#listeners) listener(); }
 }
 
