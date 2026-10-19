@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- clean1ca3b5b에서 Codex 시험을 준비했으나 모델 조회/저장된 연결 조회가 providerLoginUnavailable로 실패해 실행 전 조사로 전환했다. 자체 DRoGtr의 코딩 공급자를 변경하려던 미저장 설정은 폐기했고 저장된 역할은 변경하지 않았다. 앱의 선택 에이전트에 Codex를 추가해 연결 관리만 표시했다. 로그인 시작/인증 삭제/모델 실행 없음, 승인 잔여 Codex2회 유지.
+- 고정 후보 /Applications/{Codex,ChatGPT}.app/Contents/Resources의 두 실행 파일은 현재 없고 ~/.local/bin 두 파일은 존재한다. 제한 환경 codesign은 invalid signature를 반환했지만 허용된 동일 명령 재검증은 두 파일 모두exit0이었다. 따라서 설치 손상으로 단정하거나 재설치하지 않는다. UI의 providerLoginUnavailable는 예외 fallback 문구라 구체적인 backend 원인을 증명하지 않는다. 진단/상태 재확인 UI는 상태 변화가 관측되지 않았고 추가 실행을 재요청하지 않았다.
+- 다음은 실제 app-login 요청 실패 지점 확인 뒤 Codex 수정/중단 각1회다. 기존 Claude 성공·중단 증거는 유지하며 메모리/G6/Windows/출시 미완료다. 사용자 프로젝트/인증 변경·main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - clean66266c8에서 승인된 Claude 중단1회를 자체 DRoGtr의 새 채팅으로 실행했다. run agent_run_ca483228bd44427f877b805c1ff98a02가 running 상태에서 Read(worktree_5ec88c40a72f465780c5c435e26375f9/hello.txt) 권한 요청을 표시했다. 상세를 읽고 허용하지 않은 채 앱의 실행 취소를 눌렀다.
 - UI 취소됨/실행 종료 확인됨과 입력·새 실행 버튼 복귀를 확인했다. 원본과 해당 작업 복사본 git status 모두clean이다. 이는 실제 권한 대기 중 명시 중단 성공이며 강제 종료/프로세스 크래시 복구 검증으로 확대하지 않는다. 추가 모델 호출/사용자 프로젝트·인증 변경 없음.
 - 총4회 중 Claude 수정·중단2회를 사용했고 Codex 수정1회/중단1회가 남았다. 앱과 사용 중인 시험 기록은 보존했다. 다음은 이 잔여2회 및 메모리/G6/Windows/출시 검증이다. diff check PASS/main 병합·push 없음.
