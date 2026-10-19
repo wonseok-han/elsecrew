@@ -49,3 +49,18 @@ test('unfinished worker tasks do not invalidate complete main-thread observation
   assert.equal(mainTaskMaximum(collect([metadata,task,{...task,ph:'B',tid:9}])),201);
   assert.equal(collect([metadata,task,{...task,ph:'B'}]).valid,false);
 });
+test('long cross-process streams retain only bounded root tasks and fail at the processing budget', () => {
+  const trace = createMainTaskTrace(12);
+  trace.accept({method:'Tracing.dataCollected',params:{value:[metadata,task]}});
+  const batch = Array(10000).fill({...task,pid:99,args:{privatePayload:'not retained'}});
+  for(let index=0;index<20;index++) trace.accept({method:'Tracing.dataCollected',params:{value:batch}});
+  const partial=trace.finish(true);
+  assert.equal(partial.receivedEvents,200002);
+  assert.equal(partial.tasks.length,1);
+  assert.equal(JSON.stringify(partial).includes('privatePayload'),false);
+  for(let index=0;index<80;index++) trace.accept({method:'Tracing.dataCollected',params:{value:batch}});
+  trace.accept({method:'Tracing.tracingComplete',params:{dataLossOccurred:false}});
+  assert.equal(trace.finish(true).valid,false);
+  const withinBudget=collect([metadata,task,...Array(100001).fill({...task,pid:99})]);
+  assert.equal(mainTaskMaximum(withinBudget),201);
+});

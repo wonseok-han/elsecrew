@@ -6,6 +6,8 @@ renderer는 저장소 admission ready·빈 시작 화면·선택 차단 해제 �
 
 ## 패키지 메인 스레드 추적
 
+전체 Chromium 이벤트의 처리 예산은 1,000,000개, 보존하는 root 프로세스 작업 표본은 10,000개다. 긴 스트림에서 다른 프로세스 이벤트만으로 이전 100,000개 처리 예산을 넘던 수집 중단을 줄이며, 어느 한도든 넘으면 불완전 측정으로 거절한다. 합격선이나 유실 판정은 변경하지 않는다.
+
 `m5-packaged-ui-smoke.mjs`의 프로젝트 시나리오는 가시성 전제 확인 뒤 CDP `Tracing`의 `toplevel`을 수집한다. 앱 PID와 `CrBrowserMain` metadata가 지정한 스레드의 complete duration만 μs→ms로 변환한다. 다른 스레드·순간/flow 표식은 시간값에 섞지 않으며, 메인 스레드의 미완료/알 수 없는 duration 형식·추적 유실·종료 누락·표본 초과는 불완전한 관측이다. task args와 사용자 payload는 보존하지 않는다. 반복 수집기는 원시 timing에서 최대값/200ms 초과 개수를 다시 계산하고 idle 진단을 프로젝트 증거로 받지 않는다.
 
 `node --experimental-strip-types scripts/m5-packaged-ui-smoke.mjs --main-trace`는 빈 임시 프로필에서 추적 형식만 확인한다. 가시성이 검증된 프로젝트 성능이나 정식 G6를 대신하지 않는다. 추적 자체가 메모리·시간에 영향을 주며, 시작 이전/추적 밖 작업과 JSON B/E duration 쌍의 완전한 지원은 보장하지 않는다. 메인 스레드 B/E가 관측되면 PASS 대신 불완전한 측정으로 남긴다. 프로토콜 근거: [Chromium Tracing](https://chromedevtools.github.io/devtools-protocol/tot/Tracing/).

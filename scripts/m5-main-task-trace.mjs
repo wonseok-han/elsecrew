@@ -32,7 +32,9 @@ export function createMainTaskTrace(rootPid) {
       if (message.method !== 'Tracing.dataCollected') return;
       if (completed || !Array.isArray(message.params?.value)) { invalid = true; return; }
       for (const event of message.params.value) {
-        if (++count > 100000) { invalid = true; break; }
+        // Long stream scenarios include events from every Chromium process.
+        // Bound processing separately from the 10,000 retained task samples.
+        if (++count > 1000000) { invalid = true; break; }
         if (event?.pid !== rootPid) continue;
         if (event.ph === 'M' && event.name === 'thread_name' && event.args?.name === 'CrBrowserMain') {
           if (!Number.isSafeInteger(event.tid) || event.tid < 0) invalid = true;
