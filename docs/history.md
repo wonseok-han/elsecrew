@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 80377fb의 수집기를 기존 e5324bd 패키지에 실행했다. 자체 임시8Edwn0는 renderer expression failed로 표식/RSS 관측 전에 실패했으며 정확한 원인은 확정하지 않는다. Karpathy 최소 변경으로 표식 reader의 hidden/invalid 고정 오류를 구조화 반환하고 부모가 기록 후 실패하도록 연결했다(임의 provider/renderer 오류 원문 노출 없음). 관련2회귀/diff PASS다.
+- 재시험2V2uWw에서는 visible renderer mark731.3ms/timeOrigin을 수집해 빈 목록 경합 수정의 실제 패키지 증거를 얻었다. 앱spawn 기준 시간이나10회p95는 아니다. idle RSS486768640B(약464MiB)>400MiB로 전체 진단은FAIL이다. 양쪽 exit0/DB shutdown confirmed 및 관측PID 부재 확인 뒤 각 시험의 userdata만 삭제했다(재생성 가능). JSON/PNG는 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-{8Edwn0,2V2uWw}에 보존한다. 제한 환경 ps EPERM 때 삭제하지 않았고 허용된 확인 뒤 정리했다.
+- 새 빌드/설치/실계정/모델 호출 없음, 기존 로그인 앱·사용자 프로젝트 불변. 다음은 메모리 기준 초과와 G6 전체 수집이며 Claude 계약 승인·Windows 환경·출시 검증도 남는다. main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - 9b814db/clean 기준에서 G6 수집 누락을 조사해 packaged 관측기가 버튼 활성화 직후 mark를 한 번 읽어 두-frame 표식 이전의 빈 목록을 그대로 보존하는 경합을 확인했다. Karpathy 최소 변경으로 self-contained reader를 기존15초 until에 연결했다. hidden/duplicate/invalid 표식은 거절하고 반복 시작의 이전 rendererStartupMark를 제거한다. renderer-local 의미·G6 NOT_READY·메모리 기준은 유지한다.
 - 관련 순수2회귀·collector JS 문법·diff PASS. 실제 패키지 재측정은 아직 수행하지 않아 첫 실행의 mark 회수를 해결했다고 실증하지 않는다. 기존546 누적 PASS는 직전 코드 기준이며 전체를 중복 실행하지 않았다. 추가 빌드/앱/모델 호출0건. Claude 계약 예외 승인 대기와 성능 전체수집·메모리·Windows·출시 미완료/main 병합·push 없음.
 

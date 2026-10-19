@@ -18,8 +18,8 @@ test('packaged startup waits for the two-frame mark instead of accepting an empt
     scope:'renderer-local two-frame start-screen readiness; not app spawn duration'});
 });
 test('hidden, duplicate or invalid startup observations fail rather than become timings', () => {
-  assert.throws(() => observe([], 'hidden'), /hidden/);
-  assert.throws(() => observe([{startTime:1}, {startTime:2}]), /ambiguous/);
-  for (const startTime of [-1, NaN, Infinity]) assert.throws(() => observe([{startTime}]), /invalid/);
-  for (const origin of [0, -1, NaN, Infinity]) assert.throws(() => observe([{startTime:1}], 'visible', origin), /invalid/);
+  assert.match(observe([], 'hidden').error, /hidden/);
+  assert.match(observe([{startTime:1}, {startTime:2}]).error, /ambiguous/);
+  for (const startTime of [-1, NaN, Infinity]) assert.match(observe([{startTime}]).error, /invalid/);
+  for (const origin of [0, -1, NaN, Infinity]) assert.match(observe([{startTime:1}], 'visible', origin).error, /invalid/);
 });

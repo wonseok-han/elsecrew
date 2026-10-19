@@ -180,6 +180,7 @@ try {
   })()`));
   report.uiObservedMs = performance.now() - started;
   report.rendererStartupMark = await until(() => evaluate(`(${readPackagedStartupMark.toString()})()`));
+  assert.ok(!report.rendererStartupMark.error, report.rendererStartupMark.error);
   if (diagnosticLanguage) {
     await evaluate(`(async () => {
       const select = document.querySelector('select:has(option[value="ko"])');
