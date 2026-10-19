@@ -47,6 +47,8 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 ### 패키징 앱 외부 관측
 
+패키지 RSS 관측은 PID와 `LC_ALL=C ps lstart` 시작 시각을 함께 보존한다. 이미 관측한 자손은 부모가 바뀌어도 다음 표본에 포함하고, 시작 시각이 다른 PID 재사용은 별개로 취급한다. 표본에서 사라진 신원은 추적에서 퇴역시킨다. `lstart`는 초 단위라 같은 초의 PID 재사용은 구별하지 못하며 처음 관측되기 전 분리/종료한 자손과 표본 사이 peak도 누락될 수 있다. 이 제한 때문에 여전히 전체 프로세스 수명 검증이나 G6 PASS 근거가 아니며 종료·정리의 기존 보수적 PID 부재 확인도 완화하지 않는다.
+
 `--native-chat-stream`은 자체 작은 프로젝트의 실제 새 대화 UI로 격리 채팅4개를 만들고, `appendChatMessage`를 채팅별20ms 예정 간격·3000개씩 호출한다. 실제 preload/main/sidecar/DB를 통과한 `onChatEvent`의 ID·순서·채팅 구분과 bounded `getChat` 페이지의3000개 영속 기록을 대조한다. 초기 goal 이벤트는 DB에서 읽은 exact ID/내용만 workload에서 구분한다. CAS 계약 때문에 채팅 안에서는 순차 호출하며 지연을 재시도로 숨기지 않고 실제 dispatch duration/최대 지연을 기록한다. 예정50회/초는 달성률 보장이 아니다. 유료 모델·agent.publicEvent는 사용하지 않으며256개 실행 이벤트 상한을 변경하지 않는다. 기존 정상 종료/DB 표식 확인 경로를 사용하고 실패 시 부분 결과를 보존한다.
 
 첫 채팅을 실제 선택한 상태에서 DOM 본문 확인 뒤 두 RAF를 관측해3000개 event→paint/dispatch→paint 표본을 저장하고 event→paint 최대100ms를 검사한다. 실제 compositor 타임스탬프가 아니며, 나머지 채팅은 전환 후 마지막200개 본문을 대조할 뿐 background paint를 주장하지 않는다. 전체 수명RSS·분리 자손·반복10회가 아직 없어 전체G6 합격에 사용하지 않는다.

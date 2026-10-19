@@ -20,7 +20,7 @@ import { beginLongTaskProbe, endLongTaskProbe } from './m5-packaged-long-task-pr
 import { probeLargeDiff } from './m5-packaged-diff-probe.mjs';
 import diffFixture from '../tests/m5-native-diff-fixture.cjs';
 
-const { processTreeMemory, summarizeMemory } = createRequire(import.meta.url)('./m5-process-memory.cjs');
+const { createProcessMemoryTracker, summarizeMemory } = createRequire(import.meta.url)('./m5-process-memory.cjs');
 const repo = fileURLToPath(new URL('..', import.meta.url));
 assert.equal(process.platform, 'darwin');
 assert.equal(process.arch, 'arm64');
@@ -53,7 +53,7 @@ const report = {
   sidecarSha256: createHash('sha256').update(fs.readFileSync(path.join(resources, 'sidecar/hello-agent-sidecar'))).digest('hex'),
   limitations: ['Single cold startup with migration and loopback CDP instrumentation.',
     'No native keyboard/focus, models, stress fixtures or whole G6 evidence.',
-    'RSS includes current descendants only, not escaped processes.'],
+    'RSS retains observed descendants after reparenting using second-resolution ps start times; unseen short-lived children and same-second PID reuse remain unverified.'],
   memory: [], shutdown: 'pending',
   requestedLanguage: diagnosticLanguage ?? null,
 };
@@ -104,6 +104,9 @@ async function until(read, milliseconds = 15000) {
 let socket, sessionId, nextId = 0;
 let longTaskProbeStarted = false, longTaskWindowCompleted = false;
 let memoryTimer, memoryPhase = 'loaded';
+const trackMemory = createProcessMemoryTracker(child.pid);
+const readMemory = () => trackMemory(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,rss=,lstart='],
+  {encoding:'utf8', timeout:5000, maxBuffer:4 * 1024 * 1024, env:{...process.env, LC_ALL:'C'}}));
 const pending = new Map();
 function send(method, params = {}, targetSession) {
   return new Promise((resolve, reject) => {
@@ -125,8 +128,7 @@ try {
     report.limitations.push('CDP server is enabled at launch; only client attachment is delayed. Pre-attachment samples do not establish UI readiness.');
     for (let index = 0; index < 48; index++) {
       assert.ok(!termination, 'App exited before delayed CDP attachment');
-      const rows = execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,rss='], {encoding:'utf8', timeout:5000, maxBuffer:4 * 1024 * 1024});
-      report.preAttachmentMemory.push({elapsedMs:performance.now() - started, ...processTreeMemory(rows, child.pid)});
+      report.preAttachmentMemory.push({elapsedMs:performance.now() - started, ...readMemory()});
       await sleep(250);
     }
     report.preAttachmentMaximumRssBytes = Math.max(...report.preAttachmentMemory.map(sample => sample.rssBytes));
@@ -190,8 +192,7 @@ try {
     .map(entry => ({path: new URL(entry.name).pathname, decodedBodySize: entry.decodedBodySize}))`);
   for (let index = 0; index < 40; index++) {
     assert.ok(!termination, 'App exited during RSS collection');
-    const rows = execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,rss='], {encoding: 'utf8', timeout: 5000, maxBuffer: 4 * 1024 * 1024});
-    report.memory.push({elapsedMs: performance.now() - started, ...processTreeMemory(rows, child.pid)});
+    report.memory.push({elapsedMs: performance.now() - started, ...readMemory()});
     await sleep(250);
   }
   report.idleRssBytes = Math.max(...report.memory.map(sample => sample.rssBytes));
@@ -201,15 +202,14 @@ try {
   if (memoryDiff) {
     report.memoryLifecycle = {diagnostic:true, gateEligible:false,
       intervalMs:250, samples:report.memory.map(sample => ({...sample, phase:'idle'})),
-      limitations:['Sampled current descendants only; not escaped processes or between-sample peak.',
+      limitations:['Observed descendants retained after reparenting; unseen children, same-second PID reuse and between-sample peak remain unverified.',
         'Large diff only; does not cover all large fixtures concurrently.']};
     const sample = () => {
       try {
         assert.ok(!termination, 'App exited during memory lifecycle observation');
         assert.ok(report.memoryLifecycle.samples.length < 10000, 'Memory sample budget exceeded');
-        const rows = execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,rss='], {encoding:'utf8', timeout:5000, maxBuffer:4 * 1024 * 1024});
         report.memoryLifecycle.samples.push({phase:memoryPhase, elapsedMs:performance.now() - started,
-          ...processTreeMemory(rows, child.pid)});
+          ...readMemory()});
       } catch (error) {
         report.memoryLifecycle.error = String(error);
         clearInterval(memoryTimer);

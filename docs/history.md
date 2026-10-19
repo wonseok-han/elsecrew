@@ -2,6 +2,12 @@
 
 ### 2026-10-19 · by GPT-6 Astra
 
+- 기준7f4ebd6에서 패키지 RSS 관측의 부모 이탈 누락을 보강했다. PID+ps lstart를 표본 간 보존해 관측된 자손이 reparent되어도 집계하며, 시작 시각이 다른 재사용 PID와 그 무관한 자손은 제외한다. 사라진 신원은 퇴역시키고 root 변경/누락·잘못된 표본은 오류다. deferred/idle/loaded/retained가 앱 실행별 동일 tracker를 사용한다.
+- Karpathy 지침으로 기존 합계/한도·정상 종료/정리 규칙·제품 코드는 변경하지 않았다. 기존+신규 순수 회귀7건 PASS, 패키지 관측기 문법/diff 검사 PASS. macOS 실제 ps 출력은 현재 시험 Node root와 자식2개/양수RSS로 파싱 성공했으며 명령줄·인증정보는 읽거나 출력하지 않았다. 실제 Electron 재시험은 후속 묶음 대상이다.
+- 초 단위 lstart의 같은 초 PID 재사용, 최초 관측 전 분리된 자손, 표본 사이 peak는 여전히 미검증이다. 부분 개선을 allAppProcesses/G6 합격으로 취급하지 않는다. 새 앱/빌드 캐시/대형 fixture·모델 호출 없음. 메모리 초과·전체G6·실계정/Windows·출시 미완료, main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
+
 - 채팅 보존 수정 최종본의 release 회귀3건 PASS: reader 충돌·누락2건(0.60초), 실제1000-source 압축/재열기·보존2개 메시지의 RunPreparation 입력 구성·동일 요청 재시도·새3번째 메시지 병합1건(14.39초). 실제 공급자 실행 없이 검증했다. 누락 시험은 정상 append가 본문 없는 번호 증가를 거부하므로, 시험 전용 projection/retained 행 INSERT로 손상 상태를 구성했다. 앞선 순차 metadata fixture 시도도 생성 단계 실패였음을 정정한다.
 - 동일 startup_memory_review의 복원된7파일 정적 재검토는 차단 결함 없음이다. diff 검사 통과. 전체 sidecar/패키지 누적 검사는 반복하지 않았고 전체 제품 합격으로 확대하지 않는다. 인증/사용자 프로젝트/모델 사용·main 병합/push 없음. 남은 작업은 G6 수집/메모리·실계정/Windows·출시 검증이다.
 

@@ -32,4 +32,48 @@ function summarizeMemory(samples) {
   const limits = { idleRssBytes: 400 * 1024 ** 2, peakRssBytes: 800 * 1024 ** 2, retainedRssBytes: 120 * 1024 ** 2 };
   return { maxima, failedMetrics: Object.keys(limits).filter(key => maxima[key] > limits[key]) };
 }
-module.exports = { processTreeMemory, summarizeMemory };
+// ps lstart is only second-resolution. This retains observed orphans without
+// claiming kernel-grade process identity or coverage between samples.
+function createProcessMemoryTracker(rootPid) {
+  if (!Number.isSafeInteger(rootPid) || rootPid < 1) throw new Error('invalid root PID');
+  const known = new Map();
+  let rootStart;
+  return output => {
+    const rows = output.trim().split(/\r?\n/).filter(Boolean).map(line => {
+      const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+([A-Za-z]{3}\s+[A-Za-z]{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s*$/.exec(line);
+      if (!match) throw new Error('invalid identified process memory row');
+      const [pid, parentPid, rssKiB] = match.slice(1, 4).map(Number);
+      const startedAt = match[4].replace(/\s+/g, ' ');
+      if (![pid, parentPid, rssKiB].every(Number.isSafeInteger) || pid < 1
+          || !Number.isSafeInteger(rssKiB * 1024) || !Number.isFinite(Date.parse(startedAt))) {
+        throw new Error('invalid identified process memory number');
+      }
+      return {pid, parentPid, rssKiB, startedAt};
+    });
+    if (new Set(rows.map(row => row.pid)).size !== rows.length) throw new Error('duplicate process identity');
+    const root = rows.find(row => row.pid === rootPid);
+    if (!root) throw new Error('measurement root missing');
+    if (rootStart !== undefined && root.startedAt !== rootStart) throw new Error('measurement root changed');
+    rootStart = root.startedAt;
+    const selected = new Set([rootPid]);
+    for (const row of rows) if (known.get(row.pid) === row.startedAt) selected.add(row.pid);
+    let changed;
+    do {
+      changed = false;
+      for (const row of rows) if (selected.has(row.parentPid) && !selected.has(row.pid)) {
+        selected.add(row.pid); changed = true;
+      }
+    } while (changed);
+    const retained = rows.filter(row => selected.has(row.pid));
+    // Reuse the bounded numeric/RSS validation. All retained identities are
+    // explicitly selected, including formerly observed reparented children.
+    const snapshot = processTreeMemory(retained.map(row =>
+      `${row.pid} ${row.pid === rootPid ? row.parentPid : rootPid} ${row.rssKiB}`).join('\n'), rootPid);
+    const processes = retained.map(row => ({pid:row.pid, parentPid:row.parentPid,
+      rssBytes:row.rssKiB * 1024, startedAt:row.startedAt}));
+    known.clear();
+    for (const row of retained) known.set(row.pid, row.startedAt);
+    return {rssBytes:snapshot.rssBytes, processes, identityResolution:'ps-lstart-seconds'};
+  };
+}
+module.exports = { processTreeMemory, summarizeMemory, createProcessMemoryTracker };
