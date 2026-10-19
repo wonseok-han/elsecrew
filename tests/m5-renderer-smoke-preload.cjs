@@ -68,7 +68,12 @@ const agentPublicEventListeners = new Set();
 const agentRunStateListeners = new Set();
 let snapshotCreated = false;
 let statusReads = 0;
-const smokeChat = { schemaVersion: 1, chatId: "smoke_chat", taskId: "smoke_task", projectId: "smoke_project", worktreeId: "smoke_chat_worktree", workspaceIdentity: "smoke_chat_identity", goal: "후속 대화 확인", settingsRevision: 1, roleSnapshots: [], state: "draft", createdAt: "2026-09-14T00:00:00Z", updatedAt: "2026-09-14T00:00:00Z" };
+const smokeChat = { schemaVersion: 1, chatId: "smoke_chat", taskId: "smoke_task", projectId: "smoke_project", worktreeId: "smoke_chat_worktree", workspaceIdentity: "smoke_chat_identity", goal: "후속 대화 확인", settingsRevision: 1, roleSnapshots: [
+  {roleId:"planning",runtime:"codex",modelSelector:"test-model",reasoningEffort:"medium",permission:"readOnly"},
+  {roleId:"coding",runtime:"claude-code",modelSelector:"test-model",reasoningEffort:null,permission:"workspaceWrite"},
+  {roleId:"review",runtime:"codex",modelSelector:"test-model",reasoningEffort:null,permission:"readOnly"},
+], state: "draft", createdAt: "2026-09-14T00:00:00Z", updatedAt: "2026-09-14T00:00:00Z" };
+window.m5SmokeContextStarts = [];
 const smokeMessages = [{ schemaVersion: 1, messageId: "smoke_initial", chatId: smokeChat.chatId, taskId: smokeChat.taskId, worktreeId: smokeChat.worktreeId, eventSequence: 1, kind: "user", roleId: null, runId: null, text: "처음 요청", createdAt: smokeChat.createdAt }];
 let historyMessageIndex = 0;
 let parallelPaint = null;
@@ -266,8 +271,16 @@ window.m5 = {
   inspectRecovery: unexpected("inspectRecovery"),
   markRecoveryResolved: unexpected("markRecoveryResolved"),
   onChatEvent: (listener) => unsubscribe(chatListeners, listener),
-  getAgentCapabilities: unexpected("getAgentCapabilities"),
-  startAgentRun: unexpected("startAgentRun"),
+  getAgentCapabilities: async () => ({canStart:true, blockedReason:null, fingerprint:`sha256:${"0".repeat(64)}`}),
+  startAgentRun: async (request) => {
+    const expected = [smokeMessages[0].messageId, ...smokeMessages.slice(-99).map(message => message.messageId)];
+    if (smokeMessages.length <= 100 || request.chatId !== smokeChat.chatId || request.roleId !== "planning"
+        || JSON.stringify(request.inputMessageIds) !== JSON.stringify(expected)) throw new Error("unexpected long-chat input");
+    window.m5SmokeContextStarts.push(request);
+    return {schemaVersion:1,runId:"smoke_context_run",chatId:smokeChat.chatId,taskId:smokeChat.taskId,
+      projectId:smokeChat.projectId,worktreeId:smokeChat.worktreeId,workspaceIdentity:smokeChat.workspaceIdentity,
+      roleId:request.roleId,capabilityFingerprint:request.expectedCapabilityFingerprint,state:"preparing"};
+  },
   cancelAgentRun: unexpected("cancelAgentRun"),
   inspectAgentRecovery: unexpected("inspectAgentRecovery"),
   resolveAgentRecovery: unexpected("resolveAgentRecovery"),

@@ -688,6 +688,29 @@ app.whenReady().then(async () => {
     historyButton('최신 대화').click();
     await ${waitFor("document.querySelectorAll('.m5-message').length === 200 && [...document.querySelectorAll('.m5-message p')].at(-1)?.textContent === 'history message 451' && !document.querySelector('.m5-new-messages')", "return to latest conversation page")};
     ${process.env.M5_MEASURE_MESSAGE_PAINT === "1" ? `globalThis.messagePaintReport = await (${measureMessagePaint.toString()})({ emit: () => window.m5SmokeAppendMessages(1)[0], visible: () => [...document.querySelectorAll('.m5-message p')].map(node => node.textContent) });` : ""}
+    const originalConfirm = window.confirm;
+    let contextPrompt = '';
+    window.confirm = text => { contextPrompt = text; return false; };
+    const contextLanguage = document.querySelector('.m5-toolbar-actions select');
+    contextLanguage.value = 'en'; contextLanguage.dispatchEvent(new Event('change', {bubbles:true}));
+    await ${waitFor("[...document.querySelectorAll('.m5-timeline footer button')].some(button => button.textContent === 'Prepare real run · Planning')", "English context run action")};
+    [...document.querySelectorAll('.m5-timeline footer button')].find(button => button.textContent === 'Prepare real run · Planning').click();
+    await ${waitFor("contextPrompt.includes('latest 99 messages')", "English context confirmation")};
+    await ${waitFor("document.querySelector('.m5-timeline footer button')?.disabled === false", "canceled context run settled")};
+    if (window.m5SmokeContextStarts.length !== 0) throw new Error('canceled context started an agent');
+    contextLanguage.value = 'ko'; contextLanguage.dispatchEvent(new Event('change', {bubbles:true}));
+    await ${waitFor("[...document.querySelectorAll('.m5-timeline footer button')].some(button => button.textContent === '실제 실행 준비 · 기획')", "Korean context run action")};
+    window.confirm = text => { contextPrompt = text; return true; };
+    [...document.querySelectorAll('.m5-timeline footer button')].find(button => button.textContent === '실제 실행 준비 · 기획').click();
+    await ${waitFor("window.m5SmokeContextStarts.length === 1", "approved bounded context")};
+    await ${waitFor("document.querySelector('.m5-timeline footer button')?.disabled === false", "approved context run settled")};
+    if (!contextPrompt.includes('처음 요청과 최근 99개') || window.m5SmokeContextStarts[0].inputMessageIds.length !== 100) throw new Error('context scope or language mismatch');
+    historyButton('이전 대화').click();
+    await ${waitFor("[...document.querySelectorAll('.m5-message p')].at(-1)?.textContent === 'history message 251'", "context run older history page")};
+    historyButton('이전 대화').click();
+    await ${waitFor("document.querySelector('.m5-message p')?.textContent === '처음 요청'", "full history retained after bounded run")};
+    historyButton('최신 대화').click();
+    window.confirm = originalConfirm;
     const originalRequest = window.m5Projects.request;
     ${process.env.M5_MEASURE_PARALLEL_PAINT === "1" ? `
     window.m5Projects.request = originalRequest;
