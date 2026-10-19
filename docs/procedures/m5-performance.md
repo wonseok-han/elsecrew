@@ -2,6 +2,8 @@
 
 ## 시작 화면 준비 표식
 
+패키지 수집기는 버튼 활성화 직후의 빈 mark 목록을 완료로 받지 않고 기존15초 관측 제한 안에서 표식을 기다린다. 숨김·중복·유효하지 않은 표식은 실패이며, 반복 시작 때 이전 실행의 표식은 지운다. renderer-local 시간은 앱 spawn 기준 시간으로 바꾸지 않는다.
+
 renderer는 저장소 admission ready·빈 시작 화면·선택 차단 해제 뒤 활성 프로젝트 선택 버튼과 visible 상태를 두 animation frame에서 재확인해 `m5:start-screen-ready` performance mark를 한 번 남긴다. 숨김 전환은 두 프레임을 다시 시작하고, unmount/차단 변경은 취소한다. 이 표식은 renderer time origin 기준의 paint opportunity이며 OS 화면에 실제 표시됐다는 증거나 앱 spawn→interactive 시간은 아니다. 패키지 진단은 `rendererStartupMark`에 timeOrigin/marks/visibility를 별도 기록한다. 표식이 없거나 이전 패키지라면 관측 지연값을 표식으로 대체하지 않는다. 정식 시작 시간으로의 clock 결속과 실제 패키지 표식 검증은 후속이다.
 
 ## 패키지 메인 스레드 추적

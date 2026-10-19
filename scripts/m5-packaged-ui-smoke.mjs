@@ -18,6 +18,7 @@ import { probePackagedInput } from './m5-packaged-input-probe.mjs';
 import { startPackagedChatStream } from './m5-packaged-chat-stream-probe.mjs';
 import { beginLongTaskProbe, endLongTaskProbe } from './m5-packaged-long-task-probe.mjs';
 import { createMainTaskTrace } from './m5-main-task-trace.mjs';
+import { readPackagedStartupMark } from './m5-packaged-startup-probe.mjs';
 import { probeLargeDiff } from './m5-packaged-diff-probe.mjs';
 import diffFixture from '../tests/m5-native-diff-fixture.cjs';
 
@@ -178,11 +179,7 @@ try {
       ? {enabledButtons: buttons.length, projectSelectionEnabled: true, rootChildren: root.childElementCount, origin: location.origin} : null;
   })()`));
   report.uiObservedMs = performance.now() - started;
-  report.rendererStartupMark = await evaluate(`(() => {
-    const entries = performance.getEntriesByName('m5:start-screen-ready', 'mark');
-    return {timeOrigin:performance.timeOrigin, marks:entries.map(entry => entry.startTime),
-      visibility:document.visibilityState, scope:'renderer-local two-frame start-screen readiness; not app spawn duration'};
-  })()`);
+  report.rendererStartupMark = await until(() => evaluate(`(${readPackagedStartupMark.toString()})()`));
   if (diagnosticLanguage) {
     await evaluate(`(async () => {
       const select = document.querySelector('select:has(option[value="ko"])');
@@ -485,7 +482,7 @@ if (startupSeries) {
       const current = {...report, status:'RUNNING', measuredAt:new Date().toISOString(), memory:[], shutdown:'pending',
         previousSidecarInstanceId:previous.sidecarInstanceId,
         limitations:[...startup.limitations], error:undefined, termination:undefined};
-      for (const key of ['pid', 'sidecarInstanceId', 'storageObservedMs', 'uiObservedMs', 'ui', 'idleRssBytes', 'idleRssWithinLimit', 'quitReplyError', 'shutdownError']) delete current[key];
+      for (const key of ['pid', 'sidecarInstanceId', 'storageObservedMs', 'uiObservedMs', 'ui', 'rendererStartupMark', 'idleRssBytes', 'idleRssWithinLimit', 'quitReplyError', 'shutdownError']) delete current[key];
       startup.trials.push({index, warmup:index === 0, result:current});
       saveStartup();
       await observe(current, true, `startup-${index}.json`);

@@ -1,6 +1,10 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 9b814db/clean 기준에서 G6 수집 누락을 조사해 packaged 관측기가 버튼 활성화 직후 mark를 한 번 읽어 두-frame 표식 이전의 빈 목록을 그대로 보존하는 경합을 확인했다. Karpathy 최소 변경으로 self-contained reader를 기존15초 until에 연결했다. hidden/duplicate/invalid 표식은 거절하고 반복 시작의 이전 rendererStartupMark를 제거한다. renderer-local 의미·G6 NOT_READY·메모리 기준은 유지한다.
+- 관련 순수2회귀·collector JS 문법·diff PASS. 실제 패키지 재측정은 아직 수행하지 않아 첫 실행의 mark 회수를 해결했다고 실증하지 않는다. 기존546 누적 PASS는 직전 코드 기준이며 전체를 중복 실행하지 않았다. 추가 빌드/앱/모델 호출0건. Claude 계약 예외 승인 대기와 성능 전체수집·메모리·Windows·출시 미완료/main 병합·push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - c29ea8c 제품 코드와 직전 미커밋 제안/기록을 보존한 상태에서 npm test 누적 실행을 완료했다:546 PASS/0 FAIL/0 skipped,24.56초. 앞선 preload 상수 alias 수정 뒤 남았던 전체 프런트 재실행 공백을 닫았다. 합성 계약/순수 로직 검사이며 실제 공급자 성공·packaged GUI·G6/메모리·Windows 합격으로 확대하지 않는다.
 - Claude 내장 guard 허용 후보는 여전히 사용자 승인 전이며 제품 코드는 바꾸지 않았다. 제안과 두 턴 기록을 문서 체크포인트로 보존한다. diff check PASS, 추가 모델/설치/프로젝트 변경 없음. 다음은 승인 여부와 무관하게 남은 성능 수집 구현/검증 범위를 이어 확인하는 것이다. main 병합/push 없음.
 
