@@ -1,6 +1,10 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- clean97d6037의 release followup_cost_attribution64건 진단을 완료했다(1 PASS/10.42초). append 중앙70.879ms/p95 109.785ms/최대229.896ms, 별도 workspace 검사 중앙71.123ms/p95 93.440ms/최대99.772ms, 동일 메시지 retry 중앙0.0539ms다. 원시64표본·통계는 .artifacts/m5-performance/followup-cost-97d6037.json에 보존했다. 임시 fixture는 테스트 소유 수명에서 정리되며 실제 계정/모델/사용자 프로젝트 미사용이다.
+- 작은 fixture 결과는 기존60~88ms 관측과 같은 규모이며 두 최적화의 패키지 처리량 개선을 입증하지 않는다. 별도 검사 시간을 append에서 빼면 scheduling/cache 차이를 무시하므로 그렇게 계산하지 않는다. verify_workspace의 HEAD/index/fsck/remotes 검사를 제거·캐시하는 변경은 하지 않았다. 다음 작업은 사용자 메시지당 Git 검사가 없는 공급자 이벤트 경로와 측정 fixture를 구분한 상태에서 대규모 원장 비용을 확인하는 것이다. 메모리/전체G6/실계정/Windows/출시 미완료; main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - 기존 storage 누적 session48378이225 PASS/0실패/343.12초로 종료됐다. 이 결과는 중복 원장 읽기 제거 바이너리의 증거다. 그 뒤 protocol HashMap 수정 포함 storage_v1 회귀5건(2048행 신규 회귀 포함)이 PASS했다. 같은 독립 검토자는 새 인덱스도 첫 Append 레코드 비교·validation·중복 처리 순서와 borrowed lifetime을 보존하며 차단 결함 없다고 확인했다. 프로토콜 두 파일 rustfmt/diff PASS다.
 - 새 protocol과 storage 수정의 결합 바이너리 후속 메시지 회귀(session35059)는4 PASS/비용진단1 ignored/13.64초로 종료됐다. 새 실행에서225건 전체를 중복 수행하지 않았다. 실제 패키지 처리량/메모리 개선은 아직 측정하지 않았으며 provider stream과 user-message 부하를 혼동하지 않는다. 두 최적화·2048행 회귀·기록을 체크포인트로 커밋하며 다음은 전체 replay/Git 비용의 후속 개선이다. main 병합/push 없음.
 
