@@ -585,7 +585,9 @@ G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exac
 
 **임시 자료 관측(2026-10-06, 제품 gate 아님)**: 로컬 가짜 API가 반환한 tool_use를 실제 Claude 2.1.287이 실행했을 때 Read 내부 성공/외부 거절과 Bash 내부 읽기·쓰기 성공/외부 거절을 확인했다. 후자는 Read deny 또는 blockReadsOutsideWorkingDirectories의 사전 승인 거절이므로 OS sandbox 자체 증거와 분리한다. [SDK readFile](https://code.claude.com/docs/en/agent-sdk/typescript#what-readfile-can-read)은 Read보다 좁은 범위라 대체 증거로 사용하지 않는다. 개별 도구 거절 뒤에도 최종 result success가 나왔으므로 result success만으로 앱 작업을 성공 처리하지 않는다. 실제 계정·유료 모델·사용자 프로젝트는 이 관측에 사용하지 않았다.
 
-#### Claude 내장 조직 guard 호환 후보 (2026-10-19, 승인 전)
+#### Claude 내장 조직 guard 호환 방향 (2026-10-19 사용자 승인)
+
+사용자가 공식 내장 guard만 수용하는 호환 구현을 승인했다. 조직 정책 비활성화·유료 재시험은 포함하지 않는다. 아래 후보의 구현/검토를 진행하며 실제 등록 전체 shape와 실제 계정 성공은 별도 검증한다.
 
 최신 패키지의 단일 Claude 시험에서 `init plugins organization guard`를 관측했다. 현재 `claude_init.rs`는 모든 nonempty plugins를 거절한다. 따라서 로그인 재시도나 CLI 재설치만으로 해결된다고 안내하지 않는다.
 
@@ -595,7 +597,7 @@ G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exac
 
 변경하지 않는 경계는 MCP/도구/모델/cwd/permission 검사, 관리 정책 우회 금지, snapshot과 원본 반영 분리, 종료 확인/poisoned 잠금이다. 조직 guard를 끄거나 관리 정책의 부재/불변성을 보장하지 않는다. 설치본 해시 고정으로 업데이트를 막지 않는다.
 
-이는 기존 확장 거절 계약의 예외이므로 **사용자 승인 전 제품 허용 변경을 하지 않는다**. 승인 뒤 실제 등록 shape와 저장 관측 경로를 확인하고 최소 변경·혼합/위조 형태 회귀·읽기 전용 독립 검토를 수행한다. 실제 유료 재시험은 별도 승인 대상이며 이 제안은 제품 활성화·전체 gate 합격이 아니다.
+이는 기존 확장 거절 계약의 예외이며 위 사용자 승인 범위에서만 구현한다. 실제 등록 shape와 저장 관측 경로를 확인하고 최소 변경·혼합/위조 형태 회귀·읽기 전용 독립 검토를 수행한다. 실제 유료 재시험은 별도 승인 대상이며 이 승인은 전체 gate 합격이 아니다.
 
 ## 7. 안전 경계
 

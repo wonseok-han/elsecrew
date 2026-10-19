@@ -65,6 +65,9 @@ pub struct SessionObservation {
     pub workspace_identity: String,
     pub resolved_model: String,
     pub observed_session_verification: Vec<String>,
+    /// Old records were admitted only with an empty plugin list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observed_builtin_plugins: Vec<String>,
     pub observed_at: String,
 }
 
@@ -74,6 +77,10 @@ impl SessionObservation {
         agent_run_id(&self.run_id, "runId")?;
         id(&self.connection_id, "connectionId")?;
         timestamp(&self.observed_at, "observedAt")?;
+        if !self.observed_builtin_plugins.is_empty()
+            && self.observed_builtin_plugins != ["cc-plugin-sec-default@builtin"] {
+            return fail("Claude builtin observations differ");
+        }
         if !preflight.credentials_present
             || self.preflight_digest != preflight.digest()?
             || self.workspace_identity != preflight.scope.workspace_identity
@@ -108,6 +115,7 @@ mod tests {
     fn observed_config_cannot_be_fabricated_from_a_requested_policy() {
         let preflight = preflight();
         let mut session = SessionObservation {
+            observed_builtin_plugins: Vec::new(),
             schema_version: 1,
             run_id: "agent_run_test".into(),
             connection_id: "connection_test".into(),
@@ -121,6 +129,19 @@ mod tests {
             observed_at: "2026-10-07T00:00:01Z".into(),
         };
         session.validate_against(&preflight).unwrap();
+        let legacy = serde_json::to_value(&session).unwrap();
+        assert!(legacy.get("observedBuiltinPlugins").is_none());
+        let restored: SessionObservation = serde_json::from_value(legacy).unwrap();
+        assert!(restored.observed_builtin_plugins.is_empty());
+        session.observed_builtin_plugins = vec!["cc-plugin-sec-default@builtin".into()];
+        session.validate_against(&preflight).unwrap();
+        let restored: SessionObservation = serde_json::from_value(serde_json::to_value(&session).unwrap()).unwrap();
+        assert_eq!(restored.observed_builtin_plugins, session.observed_builtin_plugins);
+        for plugins in [vec!["unknown".into()], vec!["cc-plugin-sec-default@builtin".into(); 2]] {
+            session.observed_builtin_plugins = plugins;
+            assert!(session.validate_against(&preflight).is_err());
+        }
+        session.observed_builtin_plugins.clear();
         session.observed_session_verification.push("config".into());
         assert!(session.validate_against(&preflight).is_err());
         session.observed_session_verification.pop();

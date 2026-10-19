@@ -15,6 +15,7 @@ pub struct ExpectedInit<'a> {
 
 pub struct InitObservation {
     session_id: String,
+    pub organization_guard: bool,
     pub interrupt_receipt: bool,
     pub interrupt_cancel_queued: bool,
 }
@@ -70,6 +71,15 @@ pub(super) fn observe_with_stage(
     expected: &ExpectedInit<'_>,
     stage: &mut &'static str,
 ) -> Result<InitObservation, ProviderError> {
+    observe_with_guard_policy(input, expected, stage, false)
+}
+
+pub(super) fn observe_with_guard_policy(
+    input: &BoundedObservation,
+    expected: &ExpectedInit<'_>,
+    stage: &mut &'static str,
+    allow_organization_guard: bool,
+) -> Result<InitObservation, ProviderError> {
     *stage = "init expected";
     // Local syntax only. The owner must bind the real snapshot directory identity.
     let path = std::path::Path::new(expected.cwd);
@@ -112,7 +122,16 @@ pub(super) fn observe_with_stage(
     *stage = "init skills";
     if !wire.skills.is_empty() { return Err(invalid()); }
     *stage = "init plugins";
-    if !wire.plugins.is_empty() {
+    // Only the native signed-provider owner opts in. Registration is an
+    // observation, never authentication or authority to bypass tool checks.
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Guard { name: String, path: String, source: String }
+    let organization_guard = allow_organization_guard && wire.plugins.len() == 1
+        && serde_json::from_str::<Guard>(wire.plugins[0].get()).is_ok_and(|plugin|
+            plugin.name == "cc-plugin-sec-default" && plugin.path == "builtin"
+                && plugin.source == "cc-plugin-sec-default@builtin");
+    if !wire.plugins.is_empty() && !organization_guard {
         // Classify only local labels; never log provider names or paths.
         let plugins: Vec<serde_json::Value> = wire.plugins.iter()
             .map(|raw| serde_json::from_str(raw.get()).unwrap_or(serde_json::Value::Null))
@@ -150,6 +169,7 @@ pub(super) fn observe_with_stage(
     // Capabilities are an open set. Unknown names do not enable known behavior.
     Ok(InitObservation {
         session_id: wire.session_id,
+        organization_guard,
         interrupt_receipt: wire
             .capabilities
             .iter()
@@ -181,6 +201,28 @@ mod tests {
     fn input(value: &Value) -> BoundedObservation {
         BoundedObservation::new(value.to_string().into_bytes()).unwrap()
     }
+    #[test]
+    fn native_guard_policy_is_exact_and_opt_in() {
+        let guard = json!({"name":"cc-plugin-sec-default","path":"builtin","source":"cc-plugin-sec-default@builtin"});
+        let mut wire = init();
+        wire["plugins"] = json!([guard.clone()]);
+        assert!(observe(&input(&wire), &expected()).is_err());
+        assert!(observe_with_guard_policy(&input(&wire), &expected(), &mut "", true).unwrap().organization_guard);
+        for plugins in [json!([guard.clone(),guard.clone()]), json!([guard.clone(),{"path":"builtin"}]),
+            json!([{"name":"other","path":"builtin","source":"cc-plugin-sec-default@builtin"}]),
+            json!([{"name":"cc-plugin-sec-default","path":"/tmp/plugin","source":"cc-plugin-sec-default@builtin"}]),
+            json!([{"name":"cc-plugin-sec-default","path":"builtin","source":"cc-plugin-sec-default@builtin","extra":true}]),
+            json!([{"path":"builtin","source":"cc-plugin-sec-default@builtin"}])] {
+            wire["plugins"] = plugins;
+            assert!(observe_with_guard_policy(&input(&wire), &expected(), &mut "", true).is_err());
+        }
+        wire = init();
+        assert!(!observe_with_guard_policy(&input(&wire), &expected(), &mut "", true).unwrap().organization_guard);
+        wire["plugins"] = json!([guard]);
+        wire["tools"] = json!(["Bash"]);
+        assert!(observe_with_guard_policy(&input(&wire), &expected(), &mut "", true).is_err());
+    }
+
     #[test]
     fn mismatch_stage_contains_only_fixed_labels() {
         for (key, value, stage) in [

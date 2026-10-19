@@ -14,8 +14,9 @@ pub enum Event {
 }
 
 /// Constructed only by a successful system/init observation. Not launch authority.
-pub struct InitReceipt { session_id: String, cwd: String, model: String }
+pub struct InitReceipt { session_id: String, cwd: String, model: String, organization_guard: bool }
 impl InitReceipt {
+    pub fn organization_guard(&self) -> bool { self.organization_guard }
     pub fn session_id(&self) -> &str { &self.session_id }
     pub fn matches(&self, cwd: &str, model: &str) -> bool { self.cwd == cwd && self.model == model }
 }
@@ -31,6 +32,7 @@ pub struct Session {
     bytes: usize,
     failed: bool,
     diagnostic_stage: &'static str,
+    allow_organization_guard: bool,
 }
 
 fn invalid() -> ProviderError {
@@ -65,7 +67,14 @@ impl Session {
             bytes: 0,
             failed: false,
             diagnostic_stage: "session state",
+            allow_organization_guard: false,
         }
+    }
+
+    /// For an owner that separately authenticates the native provider process.
+    /// Does not authenticate provider registration strings by itself.
+    pub fn for_native_organization_guard(expected: &claude_init::ExpectedInit<'_>) -> Self {
+        Self { allow_organization_guard: true, ..Self::new(expected) }
     }
 
     pub fn observe(&mut self, input: &BoundedObservation) -> Result<Event, ProviderError> {
@@ -104,7 +113,7 @@ impl Session {
                 return Err(invalid());
             }
             let tools: Vec<_> = self.tools.iter().map(String::as_str).collect();
-            let init = claude_init::observe_with_stage(
+            let init = claude_init::observe_with_guard_policy(
                 input,
                 &claude_init::ExpectedInit {
                     cwd: &self.cwd,
@@ -113,9 +122,10 @@ impl Session {
                     tools: &tools,
                 },
                 &mut self.diagnostic_stage,
+                self.allow_organization_guard,
             )?;
             let event = Event::Initialized {
-                receipt: InitReceipt { session_id:init.session_id().into(), cwd:self.cwd.clone(), model:self.model.clone() },
+                receipt: InitReceipt { session_id:init.session_id().into(), cwd:self.cwd.clone(), model:self.model.clone(), organization_guard:init.organization_guard },
                 interrupt_receipt: init.interrupt_receipt,
                 interrupt_cancel_queued: init.interrupt_cancel_queued,
             };
@@ -196,6 +206,21 @@ mod tests {
             json!({"type":"system","subtype":"init","uuid":"init","session_id":"s","cwd":"/snapshot","model":"model","permissionMode":"default","tools":["Read"],"mcp_servers":[],"skills":[],"plugins":[]}),
         )
     }
+    #[test]
+    fn native_guard_receipt_is_explicit_and_generic_session_still_rejects() {
+        let mut wire: serde_json::Value = serde_json::from_slice(&init().bytes).unwrap();
+        wire["plugins"] = json!([{"name":"cc-plugin-sec-default","path":"builtin","source":"cc-plugin-sec-default@builtin"}]);
+        let observation = input(wire);
+        assert!(Session::new(&expected()).observe(&observation).is_err());
+        let mut session = Session::for_native_organization_guard(&expected());
+        let Event::Initialized { receipt, .. } = session.observe(&observation).unwrap() else { panic!("expected init") };
+        assert!(receipt.organization_guard());
+        assert!(receipt.matches("/snapshot", "model"));
+        assert!(session.observe(&observation).is_err());
+        let Event::Initialized { receipt, .. } = Session::for_native_organization_guard(&expected()).observe(&init()).unwrap() else { panic!("expected init") };
+        assert!(!receipt.organization_guard());
+    }
+
     #[test]
     fn init_is_required_and_duplicate_init_stops_session() {
         let mut session = Session::new(&expected());

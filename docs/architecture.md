@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> **Claude 내장 조직 guard(2026-10-19 승인·소스 구현)**: native 소유 연결만 단일 `name=cc-plugin-sec-default`, `path=builtin`, `source=cc-plugin-sec-default@builtin` 등록을 허용한다. 나머지 필드·다른 항목·중복·혼합은 거절하며 generic/fixture 관측은 빈 목록 조건을 유지한다. 이는 서명 확인된 공급자 부모 신뢰 모델 안의 예외이지 등록 문자열 자체의 인증이 아니다. guard를 비활성화하지 않으며 도구/MCP/cwd/권한·종료·원본 보호 조건은 유지한다. 같은 init receipt에서 확인한 guard 존재는 phased session의 `observedBuiltinPlugins`에 기록하며 기존 필드 없는 원장은 빈 목록으로 읽는다. 실제 공급자의 전체 등록 형태·실계정 성공은 별도 미검증이고 기존 실행 앱/패키지는 아직 갱신하지 않았다.
+
 > **세션 연결 진단(2026-10-19 소스 구현)**: 실패한 Claude 실행의 정보 영역에서 이번 앱 세션의 알려진 연결 실패 단계명을 조회한다. 별도 입력 없는 `m5:session-diagnostics:v1`은 현재 main frame/origin만 허용하며, main이 sidecar의 bounded stderr tail에서 정확한 허용 목록과 일치하는 단계명만 최대32개 반환한다. 원문·인증정보·경로는 반환하지 않으며 실행 ID 결속·재시작 영속성·원인 확정·합격 증거가 아니다. 알 수 없는 출력/빈 목록은 정상으로 판정하지 않는다. 이 조회는 에이전트 재실행·원본 쓰기·복구 상태 변경을 하지 않는다. 기존 배포 패키지에는 재빌드 전까지 적용되지 않는다.
 
 > **명시 설치·업데이트(2026-10-13 사용자 활성화 승인)**: macOS `provider.install`은 준비→쓰기 위치 표시→180초 단발 동의→공식 스크립트 다운로드/실행→서명·경로 검증→종료 확인·원장 보관으로 연결된다. 시작/로그인·실행은 상호 배제하며 응답 유실에서 시작을 자동 재전송하지 않는다. 고정 쓰기 폴더와 임시 폴더만 허용하는 deny-default sandbox, 기존 hardlink 거절, 설정 파일 쓰기 금지, 단계별 프로세스 fence·명시 복구를 유지한다. read-only 기기 진단은 OS/CPU/RAM/앱 저장공간을 표시한다. 임시 HOME에서 Claude2.1.296/Codex0.162.1 신규·재설치를 검증했으며 사용자 HOME·다른 버전/Windows·인증 성공을 보장하는 증거는 아니다. 마지막 재검증 뒤 hostile same-UID 외부 교체까지 완전히 방어하는 모델은 아니며 Windows 설치는 비활성이다.

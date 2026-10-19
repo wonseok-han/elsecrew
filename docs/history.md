@@ -1,6 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 사용자가 Claude 공식 내장 조직 guard 호환 수정을 승인하고 화면이 켜져 있다고 확인했다. 직전 blocked 사유 중 계약 결정이 해소되어 개발을 재개했다. 실제 유료 재시험 승인은 포함하지 않는다. e302686/clean·m5/coding-agent-ide 기준 Karpathy 최소 변경으로 native 전용 opt-in 관측, exact singleton guard, receipt→phased session의 observedBuiltinPlugins 저장을 구현했다. generic/fixture·기존 권한/원본/종료 검사는 유지하고 오래된 필드 없는 기록은 빈 목록으로 읽는다.
+- 상시 승인된 startup_memory_review 1명의 독립 검토에서 차단 결함 없음. 실제 전체 등록 shape는 미검증임을 명시했다. 기존 guard 진단은 path/source 분류일 뿐 name/추가 필드까지 확인한 증거가 아니며 불일치는 계속 거절한다. 실행 중 앱·패키지·인증정보·사용자 프로젝트와 모델은 건드리지 않았다.
+- 최종 추가 회귀는 core native_guard 2건, protocol phased_claude 1건, sidecar claude_native_owner 1건 PASS다. 로컬 가짜 공급자의 guard 허용·일반 채널 거절·원장 저장/재개를 검증했으며 실제 공급자 성공 증거는 아니다. 앞선 sidecar Claude 관련 검사 28 PASS/2 FAIL/3 ignored 중 실패 2건은 sandbox의 Unix socket bind EPERM이고, 해당 claude_runtime_files 2건만 허용된 환경에서 재실행해 PASS했다. git diff --check PASS.
+- 다음은 실행 중 앱의 정상 종료 확인 후 최신 패키지 준비와 실제 guard 등록 형식/응답 검증이다. 이번 승인은 안전 계약 변경이며 새 유료 재시험 승인은 아니다. 화면 켜짐을 renderer visible 측정으로 대체하지 않는다. G6·메모리·공급자 전체 흐름·Windows·출시는 미완료이며 main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - 직전 대형 프로젝트 시험은 종료된FAIL이며 진행 중인 측정으로 오인하지 않는다. 현재 변경은 그 시험 기록뿐이고 diff check를 통과했다. Claude 내장 guard 예외 승인은 여러 연속 목표 턴에 걸쳐 미응답이며, 안전하게 독립 수행한 누적 회귀·표식 수정·패키지 재측정·메모리 분석을 마쳤지만 전체 완료 조건은 닫히지 않았다.
 - 다음 실연결 수정은 안전 계약 예외 승인, 실제 화면 검증은 visible 환경, Windows 검증은 해당 실행 환경이 필요하다. 미확인 절감 가설로 큰 구조 변경을 반복하거나 같은 숨김 시험/유료 호출을 재실행하지 않는다. 자동 목표는 사용자 결정/환경 확인 대기로 blocked 처리하며 완료 선언이 아니다. 남은 G6 수집·메모리 초과·공급자 도구/중단/복구·Windows·출시 검증 범위는 축소하지 않는다. 사용자 확인 후 재개한다.
 
@@ -189,7 +195,7 @@
 
 - **최신 실연결 차단(2026-10-13, e89bde5)**: W4SUaF는 두 로그인 유지·Codex 모델 선택 뒤 configRequirements/read 및 Claude start discovery differs에서 차단됐다. RUN_ACCEPTED 없음, 임시 원본 불변/정상 종료. 현재 Claude 링크2.1.296이며 이전2.1.293 관측을 현재 동작으로 가정하지 않는다. 10월8일 account/plugins 실패보다 앞 단계의 최신 증거다.
 
-- **Claude 내장 mod와 safe-mode(2026-10-08, 진단 2026-10-19)**: 공식 mods overview는 safe-mode/bare/disableAllHooks가 내장 mod를 끄지 않는다고 명시한다. cc-plugin-sec-default 조직 guard는 사용자가 끌 수 없으므로 무조건 plugins=[] 요구와 충돌한다. e5324bd 패키지의 승인된 Claude 단독 시험에서 init plugins organization guard를 관측했다(세션 진단이며 run-bound 원장은 아님). nonempty 거절 유지. 조직 정책을 우회하는 임의 disable 또는 builtin 표시만으로 허용 금지. 다음은 공식 guard 특성과 안전 계약의 호환 방안 검토다.
+- **Claude 내장 mod와 safe-mode(2026-10-08, 승인 2026-10-19)**: 공식 mods overview는 safe-mode/bare/disableAllHooks가 내장 mod를 끄지 않는다고 명시한다. e5324bd 패키지 시험에서 init plugins organization guard를 관측했다. 사용자 승인으로 서명 검증 native 연결의 정확한 단일 조직 guard만 수용하는 소스 구현을 진행했다. generic/fixture와 다른 plugin은 계속 거절한다. 조직 정책을 우회하는 임의 disable 또는 builtin 표시만으로 허용 금지. 실제 전체 shape·실계정 성공·최신 패키지는 미검증이다.
 
 - **Claude safe-mode 내장 플러그인(2026-10-08)**: 서명된2.1.293의 빈 임시 프로필/가짜 API/도구 없음에서도 init plugins가 cc-plugin-agents-md@builtin·cc-plugin-plugin-authoring@builtin을 보고했다. 공식 enabledPlugins에서 두 ID를 false로 지정하면 빈 배열이 된다(5ikQWQ→7D0mvz). 제품은 이를 명시 비활성화하며 알 수 없는 플러그인 거절은 유지한다. 실제 계정 성공·다른 버전 보장을 뜻하지 않는다.
 

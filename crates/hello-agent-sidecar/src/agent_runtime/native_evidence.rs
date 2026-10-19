@@ -116,6 +116,7 @@ mod tests {
             "resolvedModel":"test-model","credentialsPresent":true,"observedAt":now(),
         })).unwrap();
         let session = SessionObservation {
+            observed_builtin_plugins: Vec::new(),
             schema_version:1,run_id:"agent_run_test".into(),
             connection_id:value["native_transport"]["connectionId"].as_str().unwrap().into(),
             preflight_digest:preflight.digest().unwrap(),workspace_identity:"workspace_test".into(),

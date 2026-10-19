@@ -31,7 +31,8 @@ pub(crate) fn expected_tools(access: ToolAccess) -> &'static [&'static str] {
 fn shell_settings() -> serde_json::Value {
     // Safe mode still reports these built-in plugins in current native Claude.
     // Disable them through the documented per-plugin setting; init validation
-    // continues to reject any non-empty plugin list, including future built-ins.
+    // still rejects other plugins; the native organization guard has a separate
+    // exact observation contract and is never disabled here.
     // https://code.claude.com/docs/en/settings-reference#enabledplugins
     serde_json::json!({"enabledPlugins":{
         "cc-plugin-agents-md@builtin":false,
@@ -508,7 +509,7 @@ impl ControlInitialization {
             transmitting: false,
             deadline: Instant::now() + Duration::from_secs(10 * 60),
             permissions:
-                hello_agent_core::provider::vendor_observation::claude_session::Session::new(
+                hello_agent_core::provider::vendor_observation::claude_session::Session::for_native_organization_guard(
                     expected,
                 ),
         })

@@ -17,6 +17,7 @@ fn quoted(value: &Value) -> String {
 fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init() {
     for case in [
         "success",
+        "organization-guard",
         "default-effort",
         "allow",
         "cancel",
@@ -87,9 +88,12 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
             "request_id":format!("init_{}",process.connection_id().simple()),"response":{
                 "hooks_applied":true,"current_permission_mode":"default","models":[{
                     "value":"claude-opus-5","resolvedModel":"claude-opus-5","supportsEffort":case != "default-effort","supportedEffortLevels":if case == "default-effort" {json!([])} else {json!(["medium"])} }]}}});
-        let init = json!({"type":"system","subtype":"init","uuid":"init","session_id":"s","cwd":cwd,
+        let mut init = json!({"type":"system","subtype":"init","uuid":"init","session_id":"s","cwd":cwd,
             "model":if case == "bad-init" {"other"} else {"claude-opus-5"},"permissionMode":"default",
             "tools":["Read","Glob","Grep","Edit","Write","Bash"],"mcp_servers":[],"skills":[],"plugins":[]});
+        if case == "organization-guard" {
+            init["plugins"] = json!([{"name":"cc-plugin-sec-default","path":"builtin","source":"cc-plugin-sec-default@builtin"}]);
+        }
         let approval = json!({"type":"control_request","request_id":"write_once","request":{
             "subtype":"can_use_tool","tool_name":"Write","tool_use_id":"tool_write","input":{"file_path":format!("{cwd}/new.txt"),"content":"hello"}}});
         let assistant = json!({"type":"assistant","uuid":"answer","session_id":"s","parent_tool_use_id":null,
@@ -203,6 +207,9 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
         );
         assert_eq!(ended["native_transport"]["adapter"], "claude.stream.v2");
         assert!(ended["claude_preflight"].is_object());
+        if case == "organization-guard" {
+            assert_eq!(ended["claude_session_observation"]["observedBuiltinPlugins"], json!(["cc-plugin-sec-default@builtin"]));
+        }
         assert_eq!(
             ended
                 .get("claude_session_observation")
@@ -225,7 +232,7 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
             .collect();
         assert_eq!(
             final_text,
-            if matches!(case, "success" | "default-effort" | "allow") {
+            if matches!(case, "success" | "organization-guard" | "default-effort" | "allow") {
                 vec![json!("hello")]
             } else {
                 vec![]

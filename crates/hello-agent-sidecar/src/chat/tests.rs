@@ -560,6 +560,7 @@ fn phased_claude_restart_rejects_changed_evidence_and_preserves_valid_records() 
         "requestedLaunchPolicyDigest":digest,"resolvedModel":"claude-opus-5","credentialsPresent":true,"observedAt":record["createdAt"],
     })).unwrap();
     let session = SessionObservation {
+        observed_builtin_plugins: Vec::new(),
         schema_version:1,run_id:run_id.clone(),connection_id:connection.clone(),
         preflight_digest:preflight.digest().unwrap(),workspace_identity:preflight.scope.workspace_identity.clone(),
         resolved_model:preflight.resolved_model.clone(),observed_at:preflight.observed_at.clone(),
