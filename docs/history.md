@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 직전 최신 패키지 준비는 진척이었다. clean47e4703에서 1cb7843 제품 패키지로 대형 프로젝트 진단 Z6P6Bf를 실행했고 native Raise로 시험 창을 앞으로 표시했다. visible 전제 충족, 측정 중 hidden 전환0회로 이전 숨김 차단을 해소했다. 1만 파일/1000폴더·5MiB/10만 줄 fixture의 treeRoot230.6ms/treeExpand158.1ms/DOM362개/fileEditable558ms, 입력10회 p95 24.1ms(50ms 이내), renderer 최대 long task87ms를 관측했다. 물리 키보드/IME·전체 G6 합격 증거는 아니다.
+- renderer 시작 표식666.8ms는 renderer-local이며 snapshot 준비29.2초는 별도다. idle RSS447021056B(약426MiB)>400MiB로 전체 FAIL이다. 모델·사용자 인증/프로젝트 사용 없이 exit0/DB shutdown confirmed, 관측PID/seedPID 부재 확인 후 자체 project/other-project/userdata만 삭제했다(재생성 가능). result.json 등 증거는 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-Z6P6Bf에 보존했다.
+- 다음은 메모리 초과 및 남은 성능/공급자 검증이다. 실제 Claude 추가 호출 승인·Windows 환경은 여전히 별도이며 전체 완료를 선언하지 않는다. 추가 빌드/설치본 없음, main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - 직전 턴은 guard 호환 구현/회귀/독립 검토/1cb7843 커밋의 진척이었다. clean 상태에서 기존 시험 앱의 failed/종료 확인 상태를 UI로 확인하고 메뉴 Quit으로 정상 종료했다. PID59424/sidecar59456 및 bundle 프로세스 부재를 확인한 뒤 기존 out 패키지만 갱신했다. 강제 종료·인증정보·사용자 프로젝트·모델 호출 없음.
 - pnpm m5:test:package PASS: 사전27건, Forge package, packaged sidecar smoke, ZIP, 크기 기준. 증거 .artifacts/m5-g6-package/darwin-arm64-2026-10-19T02-47-47-308Z.json은 clean1cb7843 기준이다. unpacked322310786B/ZIP124090183B이며 GUI/공급자 성공/G6 전체 증거는 아니다. 별도 앱 복사본은 만들지 않았다.
 - 다음은 최신 패키지의 실제 화면/성능 검증과 별도 승인 후 Claude 실제 응답 확인이다. 기존 로그인 데이터는 보존했다. Windows 환경 없음·메모리 기준 초과·공급자 도구/중단/복구·출시 검증은 미완료다. main 병합/push 없음.
