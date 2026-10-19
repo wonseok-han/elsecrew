@@ -1,6 +1,10 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 383cf07/clean에서 실패 진단 표시를 조사했다. native Codex transport의 고정 단계명은 stderr에 이미 남지만 UI는 Claude failed만 노출해 Codex recoveryRequired에서 볼 수 없었다. Karpathy 최소 변경으로 Codex 전용 allowlist/32건 상한/기존 응답 호환을 추가하고 양 공급자 failed·recoveryRequired에 진단 보기를 연결했다. 원문·인증정보는 반환하지 않으며 종료/복구 제한은 변경하지 않는다.
+- 관련 진단·main IPC13건 및 TypeScript/diff PASS. 초기 배열 종료 문법 오류는 수정 후 재검사했다. UI 실검증/패키지 갱신은 아직 수행하지 않았고 현재 실행의 구체 실패 원인을 확정하지 않는다. 시험 복사본 정리 승인 대기 중으로 복구/삭제/재실행/인증 변경 없음. 다음은 승인된 복구 흐름과 최신 진단 화면 검증, 남은 Codex 중단1회 및 G6/Windows/출시다. main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - 793e6a7 패키지에서 앱 지원 모델 조회가 정상 응답해 gpt-6.1-sol 등 실제 식별자를 표시했다. 자체 DRoGtr 코딩 역할만 조회된 gpt-6.1-sol/medium으로 직접 선택·저장(v3)하고 새 시험 채팅을 만들었다. 기존 sol/Claude 채팅 snapshot은 유지했다. 자동 모델 대체/사용자 프로젝트 설정 변경은 없다.
 - 승인된 Codex 파일 수정1회가 run agent_run_b219c802fd2547659b2b452986786bde로 접수됐으나 recoveryRequired/종료 복구 필요로 끝났다. 재시도하지 않으며 승인 잔여는 Codex 중단1회뿐이다. 모델 호출 도달·비용 여부는 확인하지 못했지만 실행 요청1회로 계산한다. UI lock은 lock_worktree_fcf6388d3aec4c44b8c2ba1311868d63, 해당 복사본과 DRoGtr 원본 git status 모두clean이다.
 - 앱29646/sidecar29724는 생존하고 관측했던 Codex46916은 사라졌지만 프로세스 부재만으로 종료 계약 충족을 주장하지 않는다. 특정 run만 읽으려던 SQLite read-only 조회는 database locked로 실패했고 우회하지 않았다. 앱의 종료 증거 확인 후 해당 시험 복사본만 폐기하는 승인을 요청했다. 응답 전 복구/삭제/재실행 없음. 다음은 앱 복구 흐름과 실패 원인 확인이며 G6/Windows/출시 미완료·main 병합/push 없음.

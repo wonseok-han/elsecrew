@@ -10,8 +10,18 @@ test("session diagnostics expose fixed checkpoint names, never raw provider data
     "prefix native Claude transport failed at channel receive",
     "native Claude transport failed at session channel",
   ].join("\n"));
-  assert.deepEqual(result,{scope:"currentAppSession",claudeCheckpoints:["init model","session channel"]});
+  assert.deepEqual(result,{scope:"currentAppSession",claudeCheckpoints:["init model","session channel"],codexCheckpoints:[]});
   assert.deepEqual(validateSessionDiagnostics(result),result);
+});
+test("Codex diagnostics use a separate bounded allowlist and preserve legacy replies", () => {
+  const result = classifySessionDiagnostics("native Codex transport failed at turn stream other frame\nnative Codex transport failed at secret-token\nnative Claude transport failed at init model");
+  assert.deepEqual(result.codexCheckpoints,["turn stream other frame"]);
+  assert.deepEqual(validateSessionDiagnostics(result),result);
+  assert.deepEqual(validateSessionDiagnostics({scope:"currentAppSession",claudeCheckpoints:[]}),{scope:"currentAppSession",claudeCheckpoints:[]});
+  for (const codexCheckpoints of [null,undefined,["secret"],["turn stream other frame token"],Array(33).fill("turn start state")]) {
+    assert.throws(()=>validateSessionDiagnostics({scope:"currentAppSession",claudeCheckpoints:[],codexCheckpoints}));
+  }
+  assert.equal(classifySessionDiagnostics("native Codex transport failed at turn start state\n".repeat(1000)).codexCheckpoints?.length,32);
 });
 test("diagnostics are bounded and unknown text is not a successful diagnosis", () => {
   assert.equal(classifySessionDiagnostics(("native Claude transport failed at init shape\n").repeat(10000)).claudeCheckpoints.length,32);
