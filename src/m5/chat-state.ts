@@ -428,13 +428,20 @@ export class ChatUiController {
   }
   #hydrateForAgentRun(run: Pick<AgentRunRecordV1, "chatId" | "taskId" | "projectId" | "worktreeId" | "workspaceIdentity">): void {
     const pending = this.#pending;
-    if (pending && matchesAgentRun(run, pending.chat)) { void this.#hydrateChat(pending.chat, pending.generation); return; }
+    if (pending && matchesAgentRun(run, pending.chat)) { this.#hydrateAfterNotification(pending.chat, pending.generation); return; }
     const chat = this.#state.activeChat;
-    if (chat && matchesAgentRun(run, chat)) { void this.#hydrateChat(chat, this.#generation); return; }
+    if (chat && matchesAgentRun(run, chat)) { this.#hydrateAfterNotification(chat, this.#generation); return; }
     const inactive = this.#state.chats.find((candidate) => matchesAgentRun(run, candidate));
     if (inactive) {
       this.#set({ refreshNeededChatIds: this.#state.refreshNeededChatIds.includes(inactive.chatId) ? this.#state.refreshNeededChatIds : [...this.#state.refreshNeededChatIds, inactive.chatId], ...chatNotice("m5.chatNotice.otherChat") });
     }
+  }
+  #hydrateAfterNotification(chat: ChatRecordV1, generation: number): void {
+    void this.#hydrateChat(chat, generation).catch(error => {
+      if (!this.#live(generation)) return;
+      const current = this.#pending?.chat ?? this.#state.activeChat;
+      if (current && matchesChatRecord(current, chat)) this.#error("m5.chatError.history", error);
+    });
   }
   async #hydrateChat(chat: ChatRecordV1, generation: number): Promise<void> {
     const key = `${generation}:${chat.chatId}`;

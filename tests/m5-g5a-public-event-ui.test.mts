@@ -140,6 +140,52 @@ test("terminal notification record is ignored until the durable chat.get ledger 
   controller.dispose();
 });
 
+test("notification hydration failure is visible without changing durable messages or run state", async () => {
+  const bridge = new AgentBridge(); const controller = await open(bridge);
+  const before = controller.snapshot();
+  const original = bridge.getChat.bind(bridge);
+  bridge.getChat = async () => { throw new Error("ledger read unavailable"); };
+  bridge.emitAgent(publicEvent(bridge.chatA));
+  await flush();
+  assert.equal(controller.snapshot().error?.messageKey, "m5.chatError.history");
+  assert.equal(controller.snapshot().error?.detail, "ledger read unavailable");
+  assert.deepEqual(controller.snapshot().messages, before.messages);
+  assert.deepEqual(controller.snapshot().agentRuns, before.agentRuns);
+  bridge.getChat = original;
+  bridge.messages.push(message(bridge.chatA, 2, "later durable response"));
+  bridge.emitState(stateEvent(bridge.chatA));
+  await flush(); await flush();
+  assert.equal(controller.snapshot().messages.at(-1)?.text, "later durable response");
+  controller.dispose();
+});
+
+test("notification hydration rejection after disposal does not publish an error", async () => {
+  const bridge = new AgentBridge(); const controller = await open(bridge);
+  let rejectRead!: (error: Error) => void;
+  bridge.getChat = () => new Promise((_resolve, reject) => { rejectRead = reject; });
+  bridge.emitState(stateEvent(bridge.chatA));
+  controller.dispose();
+  rejectRead(new Error("late failure"));
+  await flush();
+  assert.equal(controller.snapshot().error, null);
+});
+
+test("late notification hydration failure cannot overwrite another chat's error state", async () => {
+  const bridge = new AgentBridge(); const controller = await open(bridge);
+  const original = bridge.getChat.bind(bridge);
+  let rejectRead!: (error: Error) => void;
+  bridge.getChat = () => new Promise((_resolve, reject) => { rejectRead = reject; });
+  bridge.emitAgent(publicEvent(bridge.chatA));
+  bridge.getChat = original;
+  await controller.prepareSwitch(bridge.chatB.chatId, true);
+  await controller.commitPrepared(bridge.chatB.chatId, true);
+  rejectRead(new Error("old chat failure"));
+  await flush();
+  assert.equal(controller.snapshot().activeChat?.chatId, bridge.chatB.chatId);
+  assert.equal(controller.snapshot().error, null);
+  controller.dispose();
+});
+
 test("public event burst는 하나의 hydration으로 합치고 durable sequence를 끝까지 연속 조회한다", async () => {
   const bridge = new AgentBridge(); const controller = await open(bridge);
   bridge.messages.push(message(bridge.chatA, 2, "second"), message(bridge.chatA, 3, "third"));

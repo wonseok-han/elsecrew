@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- d01fe32에서 공급자 공개 이벤트 저장 경로를 대조했다. user-message와 달리 persist_public_event_record는 run/chat 원자 저장이며 사용자 메시지당 verify_workspace 비용을 그대로 적용하지 않는다. UI 알림의 void hydration에 rejection 처리가 없어 chat.get 실패가 처리되지 않은 Promise 오류로 남는 별도 결함을 확인했다.
+- Karpathy 최소 변경으로 background 알림 hydration에만 catch를 연결했다. 현재 generation 및 활성/전환 예정 채팅이 일치할 때 기존 지역화 history 오류를 표시하며 원장 메시지·실행/복구 상태는 바꾸지 않는다. await 호출자의 기존 오류 전파는 유지한다. 실패 뒤 후속 알림 재조회, dispose 후 실패 무시, 다른 채팅으로 전환 후 늦은 실패 무시3회귀를 추가했다. 관련 두 파일48회귀·tsc·diff PASS다.
+- 실제 공급자/모델·사용자 프로젝트 미사용. 공급자 처리량/메모리·전체G6/Windows/출시는 미완료이며 본 수정은 통신 실패 표시 결함만 닫는다. main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - clean97d6037의 release followup_cost_attribution64건 진단을 완료했다(1 PASS/10.42초). append 중앙70.879ms/p95 109.785ms/최대229.896ms, 별도 workspace 검사 중앙71.123ms/p95 93.440ms/최대99.772ms, 동일 메시지 retry 중앙0.0539ms다. 원시64표본·통계는 .artifacts/m5-performance/followup-cost-97d6037.json에 보존했다. 임시 fixture는 테스트 소유 수명에서 정리되며 실제 계정/모델/사용자 프로젝트 미사용이다.
 - 작은 fixture 결과는 기존60~88ms 관측과 같은 규모이며 두 최적화의 패키지 처리량 개선을 입증하지 않는다. 별도 검사 시간을 append에서 빼면 scheduling/cache 차이를 무시하므로 그렇게 계산하지 않는다. verify_workspace의 HEAD/index/fsck/remotes 검사를 제거·캐시하는 변경은 하지 않았다. 다음 작업은 사용자 메시지당 Git 검사가 없는 공급자 이벤트 경로와 측정 fixture를 구분한 상태에서 대규모 원장 비용을 확인하는 것이다. 메모리/전체G6/실계정/Windows/출시 미완료; main 병합/push 없음.
 
