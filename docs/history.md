@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 1fbb9cb/clean의 최신 앱에서 자체 DRoGtr 프로젝트 코딩 역할만 Codex sol/medium으로 저장(설정v2), 새 파일 수정 시험 채팅을 만들었다. 기존 Claude 채팅은 기존 snapshot을 유지한다. 실행 준비가 requestBlocked: app-owned provider profile could not be verified로 거절됐으며 실제 run 시작/모델 호출은 하지 않았다. Codex 승인2회는 미사용이다. 서비스는 이번에 종료되지 않고 오류를 반환했다.
+- 인증 내용 없이 메타데이터를 확인해 현재 공급자가 tmp/arg0-macos/codex-arg0ReV8MA에 만든 applypatch/apply_patch 링크를 발견했다. 앱은 tmp/arg0만 허용해 새 정상 위치도 거절했다. Karpathy 최소 변경으로 exact arg0-macos 별칭만 추가하고 uid/nlink/권한/leaf/선택된 실행 파일 target equality와 generic scanner 거절은 유지했다. 임의 경로 wildcard/인증 삭제/권한 완화 없음.
+- release runtime_files 회귀2건 PASS(기존/신규/알 수 없는 parent ×7변형 포함), 읽기 전용 독립 검토 차단 없음. 앱2899는 메뉴 Quit으로 정상 종료됐고 sidecar2923 포함 프로세스 부재 확인했다. 다음은 같은 out 패키지 갱신 후 준비 재확인이다. 사용자 프로젝트/인증 변경·main 병합/push 없음, G6/Windows/출시 미완료 유지.
+
+### 2026-10-19 · by GPT-6 Astra
 - ade7e95/clean에서 서비스 종료 경로를 조사해 defer_agent_capabilities의 discovery admission Err가 run_stdio까지 전파되는 결함을 확인했다. 저장된 역할과 다른 공급자로 모델 조회하거나 존재하지 않는 채팅을 조회할 때 요청 거절이 서비스 종료로 확대될 수 있다. 직전 실제 processExit의 정확한 stderr는 확보하지 못했으므로 동일 원인으로 확정하지 않는다.
 - Codex/Claude discovery 시작 실패만 requestBlocked 응답으로 반환하고 실패한 요청은 pending에 등록하지 않도록 최소 수정했다. worker/cleanup 소유권과 안전 검사, 원본 쓰기·로그인 계약은 유지한다. release focused 회귀는 Codex 모델/기능·Claude 기능 거절 후 status 응답/빈 pending·run·lock 확인1건과 native admission 기존1건 PASS, diff check PASS. 읽기 전용 검토자1명 검토 중이다.
 - 사용자가 시험 앱28319 강제 종료 후 최신 패키지 재개를 승인했다. 종료 직전 경로를 재확인하고 해당 PID만 종료했으며 ps에서 hello-agent 앱/sidecar 프로세스 부재를 확인했다. pnpm m5:package는 제한 환경 fetch 실패 후 허용된 재실행으로 PASS, package smoke PASS다. 같은 out 경로만 갱신했고 정식 clean commit/ZIP gate 결과로 확대하지 않는다. 새 앱의 로그인·연결 화면에서 Codex와 Claude 모두 기존 인증으로 연결됨을 확인했다. 인증/프로젝트 변경·새 모델 호출 없음.

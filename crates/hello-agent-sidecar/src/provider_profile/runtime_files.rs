@@ -46,52 +46,58 @@ mod tests {
 
     #[test]
     fn helper_links_are_bound_to_location_target_and_structure() {
-        for variant in [
-            "valid",
-            "wrong-target",
-            "extra",
-            "directory-link",
-            "hardlink",
-            "outside",
-            "writable",
-        ] {
-            let temp = tempfile::tempdir().unwrap();
-            let home = temp.path().canonicalize().unwrap();
-            let target = home.join("vendor");
-            std::fs::write(&target, b"synthetic executable").unwrap();
-            let helpers = home.join("tmp/arg0/codex-arg0test123");
-            std::fs::create_dir_all(&helpers).unwrap();
-            for name in ["applypatch", "apply_patch", "codex-execve-wrapper"] {
-                symlink(&target, helpers.join(name)).unwrap();
-            }
-            match variant {
-                "wrong-target" => {
-                    std::fs::remove_file(helpers.join("apply_patch")).unwrap();
-                    symlink(home.join("missing"), helpers.join("apply_patch")).unwrap();
+        for parent in ["arg0", "arg0-macos", "arg0-other"] {
+            for variant in [
+                "valid",
+                "wrong-target",
+                "extra",
+                "directory-link",
+                "hardlink",
+                "outside",
+                "writable",
+            ] {
+                let temp = tempfile::tempdir().unwrap();
+                let home = temp.path().canonicalize().unwrap();
+                let target = home.join("vendor");
+                std::fs::write(&target, b"synthetic executable").unwrap();
+                let helpers = home.join("tmp").join(parent).join("codex-arg0test123");
+                std::fs::create_dir_all(&helpers).unwrap();
+                for name in ["applypatch", "apply_patch", "codex-execve-wrapper"] {
+                    symlink(&target, helpers.join(name)).unwrap();
                 }
-                "extra" => std::fs::write(helpers.join("unexpected"), b"x").unwrap(),
-                "directory-link" => symlink(&home, home.join("linked-dir")).unwrap(),
-                "hardlink" => std::fs::hard_link(&target, home.join("shared")).unwrap(),
-                "outside" => symlink(&target, home.join("apply_patch")).unwrap(),
-                "writable" => std::fs::set_permissions(
-                    home.join("tmp"),
-                    std::fs::Permissions::from_mode(0o777),
-                )
-                .unwrap(),
-                _ => (),
+                match variant {
+                    "wrong-target" => {
+                        std::fs::remove_file(helpers.join("apply_patch")).unwrap();
+                        symlink(home.join("missing"), helpers.join("apply_patch")).unwrap();
+                    }
+                    "extra" => std::fs::write(helpers.join("unexpected"), b"x").unwrap(),
+                    "directory-link" => symlink(&home, home.join("linked-dir")).unwrap(),
+                    "hardlink" => std::fs::hard_link(&target, home.join("shared")).unwrap(),
+                    "outside" => symlink(&target, home.join("apply_patch")).unwrap(),
+                    "writable" => std::fs::set_permissions(
+                        home.join("tmp"),
+                        std::fs::Permissions::from_mode(0o777),
+                    )
+                    .unwrap(),
+                    _ => (),
+                }
+                let result = scan(
+                    &open_absolute_directory(&home).unwrap(),
+                    Path::new(""),
+                    &target,
+                    &mut 1000,
+                    0,
+                );
+                assert_eq!(
+                    result.is_ok(),
+                    variant == "valid" && parent != "arg0-other",
+                    "{parent}/{variant}"
+                );
+                assert!(
+                    verify_runtime_files(&home).is_err(),
+                    "generic scanner must remain strict"
+                );
             }
-            let result = scan(
-                &open_absolute_directory(&home).unwrap(),
-                Path::new(""),
-                &target,
-                &mut 1000,
-                0,
-            );
-            assert_eq!(result.is_ok(), variant == "valid", "{variant}");
-            assert!(
-                verify_runtime_files(&home).is_err(),
-                "generic scanner must remain strict"
-            );
         }
     }
 }
@@ -100,7 +106,10 @@ fn helper_directory(path: &Path) -> bool {
     let parts: Vec<_> = path.iter().collect();
     parts.len() == 3
         && parts[0] == "tmp"
-        && parts[1] == "arg0"
+        // Codex uses the macOS-specific parent in current distributions.
+        // This is an exact alias, not a wildcard; target and leaf checks below
+        // remain identical for both layouts.
+        && (parts[1] == "arg0" || parts[1] == "arg0-macos")
         && parts[2].to_str().is_some_and(|name| {
             name.starts_with("codex-arg0")
                 && name.len() > 10
