@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 직전 Claude 실제 응답 성공은 진척이었다. 기존 성공 화면 앱을 메뉴로 정상 종료한 뒤 clean623ba44에서 1cb7843 패키지 --project 진단l8rlzs를 실행했다. 자체 fixture의 편집/저장/diff/원본 불변, 정상 종료 후 재시작/기록 유지, 검토 취소 원본 불변, 별도 동의 전 반영·복원 비활성, 동의 후 정확한 반영 및 원상 복원을 확인했다. 두 프로젝트 파일/채팅 격리·이전 채팅 재열기도 확인했다. 두 관측 모두 visible 유지/hidden0회다.
+- 종합 결과는 idle RSS447528960B/재시작457949184B의400MiB 초과로 FAIL이며 기능 흐름 증거와 구분한다. 양쪽exit0/DB shutdown confirmed, bundle/sidecar 프로세스 부재 확인 후 자체 project/other-project/userdata를 정리했다(재생성 가능). result/restart JSON·PNG는 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-l8rlzs에 보존한다. 모델/사용자 프로젝트·인증 변경 없음.
+- 사용자가 Codex·Claude 각각 파일 수정1회/실행 후 중단1회, 총최대4회 실제 시험을 승인했다. 자체 임시 프로젝트/복사본만 사용하고 실패 시 추가 재시도하지 않는다. 이 엔트리 시점 미사용4회이며 별도 원본/인증 변경 승인이 아니다. 다음은 이 승인 범위의 공급자 도구/중단 검증과 메모리·G6·Windows/출시 미완료 항목이다. main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - clean764ef46에서 시작 화면 메모리 원인을 조사했다. Monaco는 이미 지연 로드이고 dock/message도 별도 대형 라이브러리를 사용하지 않았다. 직전4iVgiL의 JS heap 약3.45MB만으로 총RSS425MiB를 해결할 근거가 없어 추측성 분할은 구현하지 않았다. 조사 중 사용자가 최신 패키지 Claude 짧은 응답1회를 명시 승인해 해당 시험으로 전환했다.
 - 1cb7843 제품 패키지의 기존 앱 전용 프로필과 자체 /private/tmp/hello-agent-approved-claude.DRoGtr 채팅에서 coding/Claude/opus 실행1회를 관측했다. run agent_run_8af93d90879f487590f772883880d706이 HELLO_AGENT_SMOKE_OK를 반환했고 UI ‘성공’·‘실행 종료 확인됨’·reviewReady를 확인했다. 원본 git status clean이다. 실행 준비 클릭 뒤 AX 관측 지연/noWindowsAvailable이 있었으나 앱PID7046/sidecar7150 생존을 확인하고 같은 창을 재관측했으며 새 실행을 재요청하지 않았다.
 - 이는 Claude의 짧은 실제 응답 성공 증거이며 도구/쓰기/승인/중단/복구 전체나 G6 합격은 아니다. 현재 앱은 성공 결과 화면에 남겼다. 추가 실제 호출 승인은 소진됐고 Codex 호출·사용자 프로젝트/인증 변경 없음. 764ef46 안내 개선은 이 패키지에 아직 미포함이다. architecture의 최신 guard 검증 경계를 갱신했다. 다음은 메모리/성능 수집·두 공급자 전체 흐름·Windows/출시 검증이며 main 병합/push 없음.
