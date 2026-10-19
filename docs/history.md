@@ -1,6 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 기존 시험 앱을 홈 화면에서 정상 메뉴 종료했고 PID89292/sidecar89374 부재를 확인했다. 종료 후 WAL 없는 DB의 immutable 읽기 전용 조회에서 이전 agent_run_a5d9d4bae43846ef8cc77bce1c936473은 failed/cleanExit/processesProvenGone=true/public_event_count=0, app instance clean_shutdown_at=2026-10-19T02:21:51Z임을 확인했다. 강제 종료·인증 수정은 하지 않았다.
+- clean e5324bd 최신 macOS arm64 패키지 gate PASS(27검사·Forge·sidecar smoke·ZIP·size). 최초 제한 환경 실행은 fetch failed였고 허용된 재실행이 통과했다. 증거 .artifacts/m5-g6-package/darwin-arm64-2026-10-19T02-23-16-506Z.json, unpacked322307186B/ZIP124087482B. 기존 out을 갱신했으며 추가 설치본을 만들지 않았다.
+- 사용자의 새 Claude 진단1회 승인으로 최신 패키지에서 자체 임시 프로젝트 hello-agent-approved-claude.DRoGtr의 기존 짧은 응답 채팅을 coding/Claude/opus로 정확히1회 실행했다. agent_run_660414de510b46cd99006a06b2fdb57e은 응답 없이 failed/실행 종료 확인됨이다. 진단 UI에서 init plugins organization guard → session initialization → session channel을 관측했다. 이번 앱 세션의 첫 실행이지만 이 API 자체는 run-bound가 아니므로 확정적인 run별 원장 증거와 구분한다. 시험 원본 git status clean, Codex 실행0회·추가 재시도0회, 인증정보·사용자 프로젝트 변경 없음. 앱은 진단 화면에 남겨 두었다.
+- 코드 대조상 organization guard 분류는 비어 있지 않은 plugins의 모든 항목이 path=builtin/source=cc-plugin-sec-default@builtin일 때 발생한다. 기존 plugins=[] 계약과의 충돌이 구체화됐으며 로그인 만료나 모델 오류로 오판하지 않는다. builtin 표기만으로 신뢰하거나 조직 보안 기능을 끄지 않았다. 다음은 공식 조직 guard의 권한/실행 특성과 기존 안전 계약의 호환 방안 검토이며 계약 변경 없이 허용목록만 넓히지 않는다. 추가 실제 호출 승인은 소진됐다. G6·메모리·Windows·출시는 미완료/main 병합·push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - clean93a0e49의 npm test 누적 실행은 FAIL: 새 preload 진단 상수가 기존 bridge 검사 정규식의 M5_ 접두 규칙과 달랐다. IPC 문자열/권한을 바꾸지 않고 import alias만 M5_SESSION_DIAGNOSTICS_CHANNEL로 정리했다. 영향받은 bridge/scaffold62건 PASS이며 전체 누적 재실행 결과로 확대하지 않는다. renderer build와 최종tsc/diff PASS, 기존 chunk 크기 경고는 유지한다.
 - Karpathy 최소 변경으로 기존 Chromium 회귀에 합성 Claude failed/cleanExit와 진단 조회를 연결했다. 첫 실행은 시험 응답의 필수 agentRecovery:null 누락으로 실패했으며 fixture를 수정한 최종2건 PASS/14.67초다. 단계명 표시·다른 실행일 수 있다는 설명·조회 오류 때 이전 결과 제거·빈 결과 비확정 안내·추가 agent start 없음이 실제 renderer에서 확인됐다. 공급자/IPC 응답은 합성이므로 실계정·native main 진단 종단 증거가 아니다.
 - 현재 사용자 앱/로그인·원본 프로젝트에 손대지 않았고 새 유료 실행·패키지 덮어쓰기 없음. 다음은 정상 종료 후 최신 패키지/실패 상세 확인과 남은 G6·메모리·Windows·출시 검증이다. 자동 추가 Claude 시험 승인은 없으며 main 병합/push 없음.
@@ -152,7 +158,7 @@
 
 - **최신 실연결 차단(2026-10-13, e89bde5)**: W4SUaF는 두 로그인 유지·Codex 모델 선택 뒤 configRequirements/read 및 Claude start discovery differs에서 차단됐다. RUN_ACCEPTED 없음, 임시 원본 불변/정상 종료. 현재 Claude 링크2.1.296이며 이전2.1.293 관측을 현재 동작으로 가정하지 않는다. 10월8일 account/plugins 실패보다 앞 단계의 최신 증거다.
 
-- **Claude 내장 mod와 safe-mode(2026-10-08)**: 공식 mods overview는 safe-mode/bare/disableAllHooks가 내장 mod를 끄지 않는다고 명시한다. cc-plugin-sec-default 조직 guard는 사용자가 끌 수 없으므로 무조건 plugins=[] 요구와 충돌할 수 있다. 현재 실제 항목 미확정, nonempty 거절 유지. 조직 정책을 우회하는 임의 disable 또는 builtin 표시만으로 허용 금지.
+- **Claude 내장 mod와 safe-mode(2026-10-08, 진단 2026-10-19)**: 공식 mods overview는 safe-mode/bare/disableAllHooks가 내장 mod를 끄지 않는다고 명시한다. cc-plugin-sec-default 조직 guard는 사용자가 끌 수 없으므로 무조건 plugins=[] 요구와 충돌한다. e5324bd 패키지의 승인된 Claude 단독 시험에서 init plugins organization guard를 관측했다(세션 진단이며 run-bound 원장은 아님). nonempty 거절 유지. 조직 정책을 우회하는 임의 disable 또는 builtin 표시만으로 허용 금지. 다음은 공식 guard 특성과 안전 계약의 호환 방안 검토다.
 
 - **Claude safe-mode 내장 플러그인(2026-10-08)**: 서명된2.1.293의 빈 임시 프로필/가짜 API/도구 없음에서도 init plugins가 cc-plugin-agents-md@builtin·cc-plugin-plugin-authoring@builtin을 보고했다. 공식 enabledPlugins에서 두 ID를 false로 지정하면 빈 배열이 된다(5ikQWQ→7D0mvz). 제품은 이를 명시 비활성화하며 알 수 없는 플러그인 거절은 유지한다. 실제 계정 성공·다른 버전 보장을 뜻하지 않는다.
 
