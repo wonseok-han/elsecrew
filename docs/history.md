@@ -1,9 +1,15 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 793e6a7 패키지에서 앱 지원 모델 조회가 정상 응답해 gpt-6.1-sol 등 실제 식별자를 표시했다. 자체 DRoGtr 코딩 역할만 조회된 gpt-6.1-sol/medium으로 직접 선택·저장(v3)하고 새 시험 채팅을 만들었다. 기존 sol/Claude 채팅 snapshot은 유지했다. 자동 모델 대체/사용자 프로젝트 설정 변경은 없다.
+- 승인된 Codex 파일 수정1회가 run agent_run_b219c802fd2547659b2b452986786bde로 접수됐으나 recoveryRequired/종료 복구 필요로 끝났다. 재시도하지 않으며 승인 잔여는 Codex 중단1회뿐이다. 모델 호출 도달·비용 여부는 확인하지 못했지만 실행 요청1회로 계산한다. UI lock은 lock_worktree_fcf6388d3aec4c44b8c2ba1311868d63, 해당 복사본과 DRoGtr 원본 git status 모두clean이다.
+- 앱29646/sidecar29724는 생존하고 관측했던 Codex46916은 사라졌지만 프로세스 부재만으로 종료 계약 충족을 주장하지 않는다. 특정 run만 읽으려던 SQLite read-only 조회는 database locked로 실패했고 우회하지 않았다. 앱의 종료 증거 확인 후 해당 시험 복사본만 폐기하는 승인을 요청했다. 응답 전 복구/삭제/재실행 없음. 다음은 앱 복구 흐름과 실패 원인 확인이며 G6/Windows/출시 미완료·main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - 1fbb9cb/clean의 최신 앱에서 자체 DRoGtr 프로젝트 코딩 역할만 Codex sol/medium으로 저장(설정v2), 새 파일 수정 시험 채팅을 만들었다. 기존 Claude 채팅은 기존 snapshot을 유지한다. 실행 준비가 requestBlocked: app-owned provider profile could not be verified로 거절됐으며 실제 run 시작/모델 호출은 하지 않았다. Codex 승인2회는 미사용이다. 서비스는 이번에 종료되지 않고 오류를 반환했다.
 - 인증 내용 없이 메타데이터를 확인해 현재 공급자가 tmp/arg0-macos/codex-arg0ReV8MA에 만든 applypatch/apply_patch 링크를 발견했다. 앱은 tmp/arg0만 허용해 새 정상 위치도 거절했다. Karpathy 최소 변경으로 exact arg0-macos 별칭만 추가하고 uid/nlink/권한/leaf/선택된 실행 파일 target equality와 generic scanner 거절은 유지했다. 임의 경로 wildcard/인증 삭제/권한 완화 없음.
 - release runtime_files 회귀2건 PASS(기존/신규/알 수 없는 parent ×7변형 포함), 읽기 전용 독립 검토 차단 없음. 앱2899는 메뉴 Quit으로 정상 종료됐고 sidecar2923 포함 프로세스 부재 확인했다. 다음은 같은 out 패키지 갱신 후 준비 재확인이다. 사용자 프로젝트/인증 변경·main 병합/push 없음, G6/Windows/출시 미완료 유지.
+- 793e6a7 기준 pnpm m5:package PASS 후 같은 앱을 재개했다. 새 채팅을 추가하지 않고 앞서 만든 Codex 시험 초안을 다시 열어 실행 전 준비를 재확인했다. 프로필 검증을 지나 requestBlocked: Codex preflight failed at selected model absent from catalog로 거절됐다. 따라서 sol 모델 이름과 현재 공급자 목록 불일치가 다음 차단점이다. 모델 자동 대체/실제 run/추가 비용 호출 없음, 승인2회 유지. 앱29646/sidecar29724 생존을 확인했으며 새 요청으로 중복 실행하지 않았다. 정식 ZIP/전체 G6 검증으로 확대하지 않는다. 다음은 모델 목록 조회와 명시 모델 선택 흐름 확인이다.
 
 ### 2026-10-19 · by GPT-6 Astra
 - ade7e95/clean에서 서비스 종료 경로를 조사해 defer_agent_capabilities의 discovery admission Err가 run_stdio까지 전파되는 결함을 확인했다. 저장된 역할과 다른 공급자로 모델 조회하거나 존재하지 않는 채팅을 조회할 때 요청 거절이 서비스 종료로 확대될 수 있다. 직전 실제 processExit의 정확한 stderr는 확보하지 못했으므로 동일 원인으로 확정하지 않는다.
