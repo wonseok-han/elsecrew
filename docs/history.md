@@ -1,6 +1,10 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- Karpathy 최소 변경으로 시작 화면 준비의 renderer performance mark를 추가했다. admission ready·빈 화면·actionBlocked 해제 뒤 visible/활성 선택 버튼을 두프레임에서 확인하며 숨김전환/cleanup은 취소한다. 한 번 기록 후 listener/RAF를 제거하고 계측 예외는 UI로 전파하지 않는다. 패키지 진단은 기존 uiObservedMs와 별도로 timeOrigin/mark/visibility를 보존한다. 권한·IPC·시작 기준은 변경하지 않았다.
+- 관련4회귀(2frame/hidden reset/disabled·missing·unmount/계측예외)·tsc·JS문법·diff PASS. 두프레임은 paint opportunity이며 실화면 표시/앱spawn기준 exactinteractive/G6 합격으로 확대하지 않는다. 실제 renderer/package에서 표식 존재와 clock 결속은 다음 묶음 검증 대상이며 현재 패키지에는 아직 이 표식이 없다. 새 모델·인증·사용자 프로젝트·시스템 설치 없음; 전체G6/메모리/실계정/Windows/출시 미완료.
+
+### 2026-10-19 · by GPT-6 Astra
 - clean a1ae2c8의 기존 release sidecar-startup 도구를 재사용해 migration 제외·warmup1·측정10을 완료했다. ready 수신p95 4.011ms/storage ready 관측p95 48.546ms/hardtimeout 이내,sidecar-only PASS. .artifacts/m5-performance/sidecar-startup-2026-10-19T01-33-32.835Z-8250.json이며 임시DB는 정상종료 확인 후 도구가 정리했다. 준비 이벤트 생성 순간이나 Electron renderer interactive 시각으로 재명명하지 않는다. 빈DB sidecar startup은 현재 차단 원인이 아니지만 큰DB/메모리/프로젝트 가시성/전체G6/실계정/Windows/출시는 미완료다. 실제 모델·인증·사용자 프로젝트 변경 없음.
 
 ### 2026-10-19 · by GPT-6 Astra

@@ -178,6 +178,11 @@ try {
       ? {enabledButtons: buttons.length, projectSelectionEnabled: true, rootChildren: root.childElementCount, origin: location.origin} : null;
   })()`));
   report.uiObservedMs = performance.now() - started;
+  report.rendererStartupMark = await evaluate(`(() => {
+    const entries = performance.getEntriesByName('m5:start-screen-ready', 'mark');
+    return {timeOrigin:performance.timeOrigin, marks:entries.map(entry => entry.startTime),
+      visibility:document.visibilityState, scope:'renderer-local two-frame start-screen readiness; not app spawn duration'};
+  })()`);
   if (diagnosticLanguage) {
     await evaluate(`(async () => {
       const select = document.querySelector('select:has(option[value="ko"])');

@@ -1,5 +1,9 @@
 # M5 성능 측정
 
+## 시작 화면 준비 표식
+
+renderer는 저장소 admission ready·빈 시작 화면·선택 차단 해제 뒤 활성 프로젝트 선택 버튼과 visible 상태를 두 animation frame에서 재확인해 `m5:start-screen-ready` performance mark를 한 번 남긴다. 숨김 전환은 두 프레임을 다시 시작하고, unmount/차단 변경은 취소한다. 이 표식은 renderer time origin 기준의 paint opportunity이며 OS 화면에 실제 표시됐다는 증거나 앱 spawn→interactive 시간은 아니다. 패키지 진단은 `rendererStartupMark`에 timeOrigin/marks/visibility를 별도 기록한다. 표식이 없거나 이전 패키지라면 관측 지연값을 표식으로 대체하지 않는다. 정식 시작 시간으로의 clock 결속과 실제 패키지 표식 검증은 후속이다.
+
 ## 패키지 메인 스레드 추적
 
 `m5-packaged-ui-smoke.mjs`의 프로젝트 시나리오는 가시성 전제 확인 뒤 CDP `Tracing`의 `toplevel`을 수집한다. 앱 PID와 `CrBrowserMain` metadata가 지정한 스레드의 complete duration만 μs→ms로 변환한다. 다른 스레드·순간/flow 표식은 시간값에 섞지 않으며, 메인 스레드의 미완료/알 수 없는 duration 형식·추적 유실·종료 누락·표본 초과는 불완전한 관측이다. task args와 사용자 payload는 보존하지 않는다. 반복 수집기는 원시 timing에서 최대값/200ms 초과 개수를 다시 계산하고 idle 진단을 프로젝트 증거로 받지 않는다.

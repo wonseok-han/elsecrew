@@ -1,4 +1,5 @@
 import { formatChatNotice } from "./chat-notice.ts";
+import { markStartScreenReady } from "./startup-mark.ts";
 import { emptyProjectGuide, parseProjectGuide, projectGuideKey, projectGuideStep, type ProjectGuidePreference } from "./project-guide-state.ts";
 import type { ChatRecordV1 } from "./contracts/run-recovery-v1.ts";
 import { groupRunHistory, runOutcomeNotice } from "./work-status.ts";
@@ -143,6 +144,10 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   );
   const chat = useSyncExternalStore(chatController.subscribe.bind(chatController), () => chatController.snapshot(), () => chatController.snapshot());
   const projectDataReady = Boolean(snapshot.project && chat.projectId === snapshot.project.id && chat.settings?.projectId === snapshot.project.id);
+  useEffect(() => {
+    if (!admissionReady || snapshot.actionBlocked || snapshot.project) return;
+    return markStartScreenReady();
+  }, [admissionReady, snapshot.actionBlocked, snapshot.project?.id]);
   useEffect(() => {
     // Run after the close commit and dialog cleanup, when the toolbar button
     // is enabled again. A frame callback from the click can beat that commit.
