@@ -1,6 +1,9 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- clean a1ae2c8의 기존 release sidecar-startup 도구를 재사용해 migration 제외·warmup1·측정10을 완료했다. ready 수신p95 4.011ms/storage ready 관측p95 48.546ms/hardtimeout 이내,sidecar-only PASS. .artifacts/m5-performance/sidecar-startup-2026-10-19T01-33-32.835Z-8250.json이며 임시DB는 정상종료 확인 후 도구가 정리했다. 준비 이벤트 생성 순간이나 Electron renderer interactive 시각으로 재명명하지 않는다. 빈DB sidecar startup은 현재 차단 원인이 아니지만 큰DB/메모리/프로젝트 가시성/전체G6/실계정/Windows/출시는 미완료다. 실제 모델·인증·사용자 프로젝트 변경 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - Karpathy 최소 변경으로 패키지 진단의 빠진 메인 long-task 수집을 연결했다. CDP toplevel·exact 앱PID/CrBrowserMain metadata·microsecond duration을 사용하며 유실/불완전main/표본초과를0으로 바꾸지 않는다. 순간/flow와 미완료 worker는 main시간에서 제외하고 반복 집계는 원시최대/초과수를 재계산한다. 제품 IPC/권한/성능기준은 변경하지 않았다.
 - 순수6회귀·문법·diff 통과. 실제 project wtTwUB는 hidden 선행조건에서 측정 전 실패했다. 빈프로필 형식 진단 n7bcEp/CwJU64는 다른 thread의 B duration 때문에 불완전했으며 선택 main만 판정하도록 수정한 OdhQMQ는3626이벤트/main269작업/최대40.887ms/초과0/유실없음이다. 이는 idle trace 형식 확인일 뿐 project/G6 합격이 아니며 trace 오버헤드 포함RSS500482048B로 실행 자체는FAIL이다. 전시험 종료0/DBconfirmed/관측PID부재 확인 후 자체 project/other-project/userdata만 삭제하고 결과는 보존했다. 전체G6·메모리·실계정/Windows/출시는 남는다.
 
