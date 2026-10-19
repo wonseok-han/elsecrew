@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 직전 대형 프로젝트 visible 측정은 진척이었다. clean6e68548에서 같은 최신 패키지의 --native-chat-stream 진단4iVgiL을 실행했다. 실제 public appendChatMessage IPC를 사용하는 자체 채팅4개/예정12000건이며 공급자 토큰·모델 호출이 아니다. native Raise 이후 visible로 시작했지만 측정 중 hidden 전환1회로 FAIL했다. 전송553/수신553·dispatch65.55초이며 전체 저장/복원·성능 합격으로 확대하지 않는다. 마지막 visible만으로 중간 hidden을 무시하지 않는다.
+- idle RSS445857792B도400MiB 초과다. exit0/DB shutdown confirmed 및 bundle/sidecar 프로세스 부재 확인 뒤 자체 project/other-project/userdata만 삭제했다(재생성 가능). result.json 등은 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-4iVgiL에 보존했다. 새로운 빌드/모델 호출/인증정보 변경 없음.
+- Claude 최신 호환 패키지의 작은 실제 응답1회 승인을 비동기로 요청했다. 미응답 상태에서는 호출하지 않는다. 다음은 중간 숨김을 방지한 채팅 검증 환경과 메모리 초과 원인 해결, 남은 G6/공급자/Windows/출시 검증이다. 같은 시험 무조건 반복은 하지 않으며 main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - 직전 최신 패키지 준비는 진척이었다. clean47e4703에서 1cb7843 제품 패키지로 대형 프로젝트 진단 Z6P6Bf를 실행했고 native Raise로 시험 창을 앞으로 표시했다. visible 전제 충족, 측정 중 hidden 전환0회로 이전 숨김 차단을 해소했다. 1만 파일/1000폴더·5MiB/10만 줄 fixture의 treeRoot230.6ms/treeExpand158.1ms/DOM362개/fileEditable558ms, 입력10회 p95 24.1ms(50ms 이내), renderer 최대 long task87ms를 관측했다. 물리 키보드/IME·전체 G6 합격 증거는 아니다.
 - renderer 시작 표식666.8ms는 renderer-local이며 snapshot 준비29.2초는 별도다. idle RSS447021056B(약426MiB)>400MiB로 전체 FAIL이다. 모델·사용자 인증/프로젝트 사용 없이 exit0/DB shutdown confirmed, 관측PID/seedPID 부재 확인 후 자체 project/other-project/userdata만 삭제했다(재생성 가능). result.json 등 증거는 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-Z6P6Bf에 보존했다.
 - 다음은 메모리 초과 및 남은 성능/공급자 검증이다. 실제 Claude 추가 호출 승인·Windows 환경은 여전히 별도이며 전체 완료를 선언하지 않는다. 추가 빌드/설치본 없음, main 병합/push 없음.
