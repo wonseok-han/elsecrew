@@ -1,6 +1,14 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- c29ea8c 제품 코드와 직전 미커밋 제안/기록을 보존한 상태에서 npm test 누적 실행을 완료했다:546 PASS/0 FAIL/0 skipped,24.56초. 앞선 preload 상수 alias 수정 뒤 남았던 전체 프런트 재실행 공백을 닫았다. 합성 계약/순수 로직 검사이며 실제 공급자 성공·packaged GUI·G6/메모리·Windows 합격으로 확대하지 않는다.
+- Claude 내장 guard 허용 후보는 여전히 사용자 승인 전이며 제품 코드는 바꾸지 않았다. 제안과 두 턴 기록을 문서 체크포인트로 보존한다. diff check PASS, 추가 모델/설치/프로젝트 변경 없음. 다음은 승인 여부와 무관하게 남은 성능 수집 구현/검증 범위를 이어 확인하는 것이다. main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
+- c29ea8c/clean 상태에서 공식 mods overview와 anthropics/claude-code의 sec-default README를 재확인했다. 사용자 비활성화 불가 내장 조직 guard와 일반 mod의 sandbox 밖 실행 권한을 구분했다. 현재 init 전부 거절과 기존 승인된 서명 공급자 부모 신뢰 설계를 대조해, native Claude의 정확한 내장 guard만 별도 관측으로 수용하는 후보를 m5-coding-agent-ide.md에 기록했다. 공급자 설명을 현재 설치본 코드 증명으로 과장하지 않는다.
+- 이는 확장 거절 계약의 예외이므로 사용자 승인 전 구현/허용목록 변경은 하지 않았다. 기존 도구·MCP·cwd·종료·원본 보호와 관리 정책 비우회는 유지한다. 다음은 후보 승인 후 shape/원장 관측 확인·구현·관련 회귀/독립 검토다. 실제 모델 호출0회·설치/인증/프로젝트 변경0건, 문서 diff 검사 PASS. 전체 개발/G6/Windows/출시 미완료, main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - 기존 시험 앱을 홈 화면에서 정상 메뉴 종료했고 PID89292/sidecar89374 부재를 확인했다. 종료 후 WAL 없는 DB의 immutable 읽기 전용 조회에서 이전 agent_run_a5d9d4bae43846ef8cc77bce1c936473은 failed/cleanExit/processesProvenGone=true/public_event_count=0, app instance clean_shutdown_at=2026-10-19T02:21:51Z임을 확인했다. 강제 종료·인증 수정은 하지 않았다.
 - clean e5324bd 최신 macOS arm64 패키지 gate PASS(27검사·Forge·sidecar smoke·ZIP·size). 최초 제한 환경 실행은 fetch failed였고 허용된 재실행이 통과했다. 증거 .artifacts/m5-g6-package/darwin-arm64-2026-10-19T02-23-16-506Z.json, unpacked322307186B/ZIP124087482B. 기존 out을 갱신했으며 추가 설치본을 만들지 않았다.
 - 사용자의 새 Claude 진단1회 승인으로 최신 패키지에서 자체 임시 프로젝트 hello-agent-approved-claude.DRoGtr의 기존 짧은 응답 채팅을 coding/Claude/opus로 정확히1회 실행했다. agent_run_660414de510b46cd99006a06b2fdb57e은 응답 없이 failed/실행 종료 확인됨이다. 진단 UI에서 init plugins organization guard → session initialization → session channel을 관측했다. 이번 앱 세션의 첫 실행이지만 이 API 자체는 run-bound가 아니므로 확정적인 run별 원장 증거와 구분한다. 시험 원본 git status clean, Codex 실행0회·추가 재시도0회, 인증정보·사용자 프로젝트 변경 없음. 앱은 진단 화면에 남겨 두었다.
