@@ -1,6 +1,20 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- 기존 storage 누적 session48378이225 PASS/0실패/343.12초로 종료됐다. 이 결과는 중복 원장 읽기 제거 바이너리의 증거다. 그 뒤 protocol HashMap 수정 포함 storage_v1 회귀5건(2048행 신규 회귀 포함)이 PASS했다. 같은 독립 검토자는 새 인덱스도 첫 Append 레코드 비교·validation·중복 처리 순서와 borrowed lifetime을 보존하며 차단 결함 없다고 확인했다. 프로토콜 두 파일 rustfmt/diff PASS다.
+- 새 protocol과 storage 수정의 결합 바이너리 후속 메시지 회귀(session35059)는4 PASS/비용진단1 ignored/13.64초로 종료됐다. 새 실행에서225건 전체를 중복 수행하지 않았다. 실제 패키지 처리량/메모리 개선은 아직 측정하지 않았으며 provider stream과 user-message 부하를 혼동하지 않는다. 두 최적화·2048행 회귀·기록을 체크포인트로 커밋하며 다음은 전체 replay/Git 비용의 후속 개선이다. main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
+- 동일 session48378의 계속 진행 출력을 확인했다. 종료되지 않았으므로 재실행하지 않는다. 이 바이너리는 storage 중복 읽기 제거까지 포함하며 아래 protocol 추가 수정은 포함하지 않는다. 저장 변경은 startup_memory_review의 읽기 전용 검토에서 차단 결함 없음(순서/insert side effect/rollback/compaction 동등성)을 받았다.
+- Karpathy 최소 변경으로 protocol replay_ledger_v1의 operation Vec 선형 탐색/복제를 borrowed HashMap 조회로 바꿨다. 기존 classify_operation_v1에 해당 첫 operation 단일 slice를 전달해 full validation·immutable 비교·동일 연산 중복 허용·충돌 거절과 event ID/sequence/reducer 검사는 보존한다.2048행의 먼 duplicate/conflict/invalid duplicate/event ID 재사용 회귀를 추가했다. 해당 protocol 파일 rustfmt·diff PASS, 아직 새 빌드/회귀 전이며 같은 독립 검토자에게 추가 diff를 요청했다.
+- 다음은 실행 중225회귀의 terminal 결과 확인 후 protocol 회귀/관련 저장 통합 검사와 병목 비용 재측정이다. 작은 fixture의 Git 검사60~88ms라는 기존 관측도 유지하므로 원장 최적화만으로4×50event/s 달성을 주장하지 않는다. 사용자 메시지 경로와 공급자 event 경로를 구분하며 전체 G6·메모리·실계정·Windows·출시는 여전히 미완료다.
+
+### 2026-10-19 · by GPT-6 Astra
+- 074d369에서 packaged native-chat-stream을 실행했다. fP3ZNO는 hidden 선행조건에서 전송 전 실패, RIhn2Z는 CUA로 시험 창 Raise 후 실제 화면에서 진행했으나162.565초 뒤 hidden 전환1회로 중단됐다.1167전송/1167수신·중복/교차/순서오류0,최대dispatch lag155887.6ms·paint291표본이다.12000개/60초·전체저장/paint 합격이 아니며 main trace도100723이벤트로 수집 한도를 넘어 불완전했다. 두 앱 exit0/DB confirmed·관측PID 부재 확인 뒤 자체 project/other-project/userdata를 정리하고 JSON/화면은 보존했다. 실제 공급자·인증·사용자 프로젝트는 사용하지 않았다.
+- Karpathy 최소 변경으로 storage.rs의 일반 append/후속 메시지 append에서 IMMEDIATE transaction 안의 두 번째 전체 load_events를 제거했다. 기존 atomic batch와 같이 첫 원장 벡터에 성공 삽입 event를 추가하고 같은 전체 replay/검증을 수행한다. 전체 replay와 매 메시지 Git 검증 비용은 여전히 남으며 성능 해결을 주장하지 않는다. 후속 메시지4회귀 PASS/비용진단1 ignored. 전체 cargo fmt --check는 기존 다수 파일 서식 차이로FAIL(자동 수정 없음),diff check PASS다.
+- 기존 startup_memory_review1명에게 저장/compaction/rollback 동등성 독립 검토를 요청했다. storage 누적225회귀가 session48378에서 실행 중이며 완료 전이다(필터 인자 조합으로 의도보다 넓은 storage 범위 선택). 다음은 동일 세션 종료 결과·검토 결과를 확인하고 필요 수정한 뒤 커밋/후속 병목 개선이다. G6/메모리/실계정/Windows/출시 미완료; main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - 누적 npm test539건·renderer build·실제 Chromium 회귀2건 PASS. clean9cce3e3의 패키지27회귀/Forge/sidecar smoke/ZIP/size PASS이며 .artifacts/m5-g6-package/darwin-arm64-2026-10-19T01-39-40-773Z.json에 보존했다. unpacked322284472B/ZIP124085294B다.
 - 사용자 화면 표시 승인 후 cipHLx packaged --project의 최초/재시작 모두 visible 유지(숨김 전환0), 편집·저장 diff·원본 불변 및 재시작 보존을 확인했다. 재시작에서 별도 동의 반영/복원 exact bytes와 두 프로젝트 격리도 통과했다. main task 최대35.655/32.781ms·200ms 초과0, renderer long task 관측0이다. 시작 mark는 최초 즉시 조회에서는 빈 배열, 재시작은 renderer 기준708.5ms로 관측됐다. 최초 mark 부재를 준비 실패로 확정하거나 앱spawn기준 시간으로 바꾸지 않는다.
 - 전체 진단은 두 회차 RSS483885056/483917824B(약461.5MiB)가400MiB를 넘어 FAIL이다. 화면 숨김 차단은 이번 시험에서 해소됐지만 메모리·전체G6 수집/실계정/Windows/출시는 남는다. 두 앱 exit0/DB confirmed와 관측PID 부재 확인 후 cipHLx의 자체 project/other-project/userdata만 삭제했다(재생성 가능); JSON/PNG 증거는 임시 루트에 보존했다. 사용자 프로젝트·인증·모델 호출·main 병합/push 없음.

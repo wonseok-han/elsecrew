@@ -554,7 +554,7 @@ impl Storage {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sqlite_error)?;
         verify_append_runtime_state(&transaction)?;
-        let existing_events = load_events(&transaction)?;
+        let mut existing_events = load_events(&transaction)?;
         match classify_storage_operation(&transaction, &existing_events, event)? {
             OperationDecisionV1::DuplicateNoOp => {
                 transaction.commit().map_err(sqlite_error)?;
@@ -574,8 +574,10 @@ impl Storage {
                 "failure injected after event insert before projection update",
             ));
         }
-        let events = load_events(&transaction)?;
-        let projection = replay_storage_ledger(&transaction, &events)?;
+        // The IMMEDIATE transaction excludes another writer. Reuse the exact
+        // ordered ledger read for classification, as the atomic batch path does.
+        existing_events.push(event.clone());
+        let projection = replay_storage_ledger(&transaction, &existing_events)?;
         write_projection(&transaction, event, &projection)?;
         transaction.commit().map_err(sqlite_error)?;
         self.note_maintenance_invalidation();
@@ -986,15 +988,15 @@ impl Storage {
                 .map_err(storage_contract_error)?,
             timestamp: now_utc(),
         };
-        let existing = load_events(&transaction)?;
+        let mut existing = load_events(&transaction)?;
         if classify_storage_operation(&transaction, &existing, &event)?
             != OperationDecisionV1::Append
         {
             return Ok(false);
         }
         insert_event(&transaction, &event)?;
-        let events = load_events(&transaction)?;
-        let projection = replay_storage_ledger(&transaction, &events)?;
+        existing.push(event.clone());
+        let projection = replay_storage_ledger(&transaction, &existing)?;
         write_projection(&transaction, &event, &projection)?;
         transaction.commit().map_err(sqlite_error)?;
         self.note_maintenance_invalidation();

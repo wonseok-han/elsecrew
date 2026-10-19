@@ -192,6 +192,46 @@ fn rust_unclean_recovery_matches_canonical_storage_fixtures() {
 }
 
 #[test]
+fn replay_operation_index_preserves_distant_duplicates_and_conflicts() {
+    let (root, manifest) = manifest();
+    let fixture: ReplayFixture = read_json(root.join(manifest.replay_file));
+    let template = fixture.events.first().expect("initial event");
+    let events: Vec<_> = (1..=2048)
+        .map(|sequence| {
+            let mut event = template.clone();
+            event.event_id = format!("evt_index_{sequence}");
+            event.operation_id = format!("op_index_{sequence}");
+            event.aggregate_sequence = sequence;
+            event
+        })
+        .collect();
+    let expected = replay_ledger_v1(&events).expect("unique history");
+    for index in [0, 1024, 2047] {
+        let mut repeated = events.clone();
+        repeated.push(events[index].clone());
+        assert_eq!(replay_ledger_v1(&repeated).unwrap(), expected);
+        repeated.last_mut().unwrap().canonical_json_payload = "{}".into();
+        assert!(
+            replay_ledger_v1(&repeated).is_err(),
+            "conflicting operation {index}"
+        );
+        *repeated.last_mut().unwrap() = events[index].clone();
+        repeated.last_mut().unwrap().aggregate_sequence = 0;
+        assert!(
+            replay_ledger_v1(&repeated).is_err(),
+            "invalid duplicate {index}"
+        );
+    }
+    let mut reused_event = events;
+    let mut incoming = reused_event.last().unwrap().clone();
+    incoming.operation_id = "op_new_reused_event".into();
+    incoming.event_id = reused_event[0].event_id.clone();
+    incoming.aggregate_sequence += 1;
+    reused_event.push(incoming);
+    assert!(replay_ledger_v1(&reused_event).is_err());
+}
+
+#[test]
 fn rust_transaction_rolls_back_partial_writes_and_commits_before_risky_work() {
     let (root, manifest) = manifest();
     let fixture: TransactionFixture = read_json(root.join(manifest.transaction_file));

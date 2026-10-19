@@ -165,13 +165,16 @@ pub fn replay_ledger_v1(
     events: &[LedgerEventV1],
 ) -> Result<ProjectionStateV1, StorageContractError> {
     let mut projection = ProjectionStateV1::default();
-    let mut operations = Vec::<OperationRecordV1>::new();
+    let mut operations = HashMap::<&str, &OperationRecordV1>::new();
     let mut event_ids = HashSet::new();
     let mut aggregate_sequences = HashMap::<String, u64>::new();
 
     for event in events {
         validate_ledger_event(event)?;
-        match classify_operation_v1(&operations, event)? {
+        // Preserve the classifier's full validation and immutable comparison,
+        // without rescanning/cloning the growing history for every event.
+        let previous = operations.get(event.operation_id.as_str()).copied();
+        match classify_operation_v1(previous.map(std::slice::from_ref).unwrap_or(&[]), event)? {
             OperationDecisionV1::DuplicateNoOp => continue,
             OperationDecisionV1::Conflict => {
                 return Err(StorageContractError::new(format!(
@@ -179,7 +182,9 @@ pub fn replay_ledger_v1(
                     event.operation_id
                 )))
             }
-            OperationDecisionV1::Append => operations.push(event.clone()),
+            OperationDecisionV1::Append => {
+                operations.insert(event.operation_id.as_str(), event);
+            }
         }
         if !event_ids.insert(event.event_id.clone()) {
             return Err(StorageContractError::new(format!(
