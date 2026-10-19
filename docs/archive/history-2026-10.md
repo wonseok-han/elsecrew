@@ -1,5 +1,205 @@
 # 작업 이력 아카이브 — 2026-10
 
+### 2026-10-16 · by GPT-6 Astra
+
+- 기준25edc9b의 미커밋 채팅 보존 수정을 이어갔다. 실제1000개 source event 압축·재열기 회귀에서 기존 chat.get은 보존된2개 메시지 대신0개를 반환했다. chat_messages와 uncompacted source를 합치는 공용 reader를 chat.get과 실제 에이전트 입력 준비에 연결했다. 동일 복사본만 합치고 ID/순서/본문 충돌, 시작·중간·마지막 메시지 누락은 오류로 거절한다. 마지막 번호는 projection의 durable_event_sequence와 대조한다.
+- 초기 수정의 실제 압축 회귀와 복사본 충돌 회귀는 통과했다. 독립 startup_memory_review가 지적한 전체 순서 누락 검사를 추가했고 최종본 검증 중이다. 누락 회귀의 최초 fixture는 durable 번호 증가 계약을 어겨 생성 단계에서 실패했으므로 순차 metadata event로 교정했다. rustfmt의 재귀 포맷 부수 변경을 제거하는 과정에서 patch 재적용이 실패해 수정5파일을 기존 도구 기록과 검토자 사본으로 복원했다. 최종본 결과로만 완료를 판단한다.
+- Karpathy 최소 변경으로 저장 형식·인증 정책·실제 공급자 실행은 변경하지 않는다. 기존 release 캐시를 재사용하며 실제 계정/모델·사용자 프로젝트·main 병합/push 없음. 전체G6·메모리·실계정/Windows·출시는 계속 미완료다.
+
+### 2026-10-15 · by GPT-6 Astra
+
+- clean ab761ae의 pnpm m5:package를 갱신했다. 최초 제한 환경의 fetch failed 뒤 네트워크 허용 재시도는 PASS였다. 최신 native-chat-stream hEC8SO는 프로젝트 시작의 visible 선행 대기에서 deadline 실패했고 nativeChatStream/projectVisibility가null이라 채팅 전송 관측은 시작되지 않았다. idle RSS429129728B로400MiB 초과도 유지한다. 앱 종료0/DB 종료 confirmed, seed 및 모든 RSS 관측PID 부재 확인 후 자체 project/other-project/userdata만 제거하고 result.json은 보존했다. /var 별칭 경로 불일치로 최초 정리는 거부됐고 실제 /private/var 경로에서만 수행했다.
+- 이전 mcy4lx 원시 자료의 hiddenTransitions1/final:hidden을 새로 확인했다. 공개 append 전송 루프의 setTimeout은 숨김 창에서 제한될 수 있으므로659건/180초를 순수 제품 처리량으로 단정했던 해석은 철회한다. Git 검사60ms대 직접 진단·전체 watcher 연속 검사·전체 원장 읽기라는 코드 근거와 수정은 유효하지만, 변경 전후 패키지 속도 개선은 아직 입증되지 않았다.
+- Karpathy 최소 변경으로 진단에 visible 선행 상태/실패 원인을 기록하고, native probe가 hidden을 감지하면 추가 전송을 중지·진행 중 요청을 기다린 뒤 FAIL로 마무리하며 UI 준비 중에도 실패하도록 보강했다. listener는 finally에서 제거한다. 제품 background throttling·검증 상한·재시도 정책은 변경하지 않았다. 숨김 시작/준비 중 숨김의 순수 회귀2건·JS 문법·diff 통과. 실제 UI 재시험은 반복하지 않았으며 foreground 관측 전제가 확보된 뒤 실시한다. 실제 모델/인증/사용자 프로젝트·main 병합/push 없음, 전체G6·메모리·실계정/Windows·출시는 미완료다.
+
+### 2026-10-15 · by GPT-6 Astra
+
+- 기준ba0e92d에서 stdio 응답 뒤 poll_watchers가 등록된 모든 watcher에 validate_workspace_address(Git HEAD/index/fsck/remotes 포함)를 연속 실행함을 확인했다. 앞선60ms대 검사 비용이 채팅 수만큼 한 dispatcher 회차에 누적되는 경로다. 마지막 정렬 키 다음의 watcher 한 개씩 순환하도록 수정했으며 삭제된 커서의 successor/wrap·전체 중지 커서 초기화를 포함한다. 각 선택의 기존 신원/lock/Git/held-path 재검증은 유지하고 안전 결과를 캐시하지 않는다.
+- 네 실제 fixture 채팅의 변경이4회 poll 안에 각각 한 번 도착하고 다음 순환은 조용함을 회귀로 추가했다. 최신 release watcher 관련10건 PASS/0 FAIL(8.06초), diff 검사 통과. 초기 Option-loop 경고는 명시 into_iter로 제거했다. 단일 watcher 검증의 벽시계 비용은 남으며 전체 패키지 전달 지연 개선/200 events/sec/G6 합격은 아직 측정하지 않았다.
+- Karpathy 최소 변경으로 watcher scheduling만 수정하고 현행 구조 문서에 개별 알림 주기가 watcher 수에 따라 늘어나는 한계를 명시했다. 기존 읽기 전용 startup_memory_review가 순환/삭제/중지와 선택 회차의 검증·실패 경계를 확인해 차단 결함 없음으로 회신했다. 자체 TempDir·기존 release 캐시만 사용, 실제 계정/모델·사용자 프로젝트·main 병합/push 없음. 다음은 최신 패키지 묶음 검증이며 메모리/G6·실계정/Windows·출시는 계속 미완료다.
+
+### 2026-10-15 · by GPT-6 Astra
+
+- 기준b9106da에서 aggregate_event_payloads가 모든 프로젝트/채팅의 원장을 load_events로 읽고 뒤늦게 필터함을 확인했다. 요청 aggregate_type/id를 bound SQL로 먼저 선택하도록 변경하고 기존10개 열 디코더와 rowid 순서를 공유했다. getChat 페이지와 actual resolve_prompt의 불필요한 타 채팅 행 할당을 줄이는 변경이며 Git 작업공간 검사·쓰기 transaction·시작 전체 원장 무결성 검사는 그대로다. append 지연 해소나 정식 성능 합격으로 주장하지 않는다.
+- reader 회귀는 교차 type/id·삽입 순서·없는 대상/SQL 문구 입력·잘못된 JSON/비객체 거절을 검증한다. 첫 회귀의 UPDATE 손상 주입은 기존 append-only trigger에 거부됐고, 테스트만 별도 malformed 행 INSERT로 수정했다. 최신 release reader/actual foreign-input·stale-evidence 거절/chat durable page3건 PASS, diff 검사 통과. 전체 누적 테스트·패키지 재빌드는 반복하지 않았으며 현행 패키지에는 아직 이 변경이 없다.
+- 동일 읽기 전용 startup_memory_review가 입력 구성 경로까지 검토해 차단 결함 없음으로 회신했다. 선택 행의 디코딩/순서/오류 및 시작 전체 검증 보존을 확인한 정적 결과다. 자체 TempDir 시험만 사용했고 release 캐시357MB/실제 계정·모델·사용자 프로젝트 사용 없음. Karpathy 최소 변경으로 읽기 경로에 한정했으며 이후 Git/IPC 비용·전체G6·메모리·실계정/Windows·출시 검증은 미완료다. main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra
+
+- 기준67f466b에서 공개 follow-up 경로를 추적했다. 매 append는 verify_workspace의 detached HEAD/index/fsck/remotes/metadata 검사와 저장 transaction의 전체 원장 재생을 수행한다. 둘의 비용을 추정으로 제거하지 않고 test-only ignored followup_cost_attribution을 추가했다. 자체 TempDir의64건에 실제 append·독립 workspace 검사·동일 ID 재시도를 측정하며 본문/경로/인증정보는 출력하지 않는다. Karpathy 최소 변경에 따라 제품 경로/안전 검사/프로토콜은 변경하지 않았다.
+- CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 cargo test --release -p hello-agent-sidecar followup_cost_attribution -- --ignored --nocapture: 1 PASS/0 FAIL, 실행8.95초(기존 release 캐시 재사용 빌드40.32초). append60.48~85.29ms, 별도 workspace60.17~88.12ms, retry0.042~0.098ms. 서로 다른 실행의 시간이라 차감해 저장 비용으로 해석하지 않는다. 작은 원장/단일 채팅/직접 Rust 진단이며 패키지 IPC·4채팅·장기 원장 성능 합격은 아니다.
+- 후속 우선순위는 Git 작업공간 검사의 세부 호출 비용과 패키지 추가 지연 분리다. 원장 재생 확장 비용도 미해결이며 안전 검증 캐시/생략은 승인하거나 구현하지 않았다. 임시 fixture는 TempDir 종료로 회수, 사용자 인증/프로젝트·실제 모델 사용 없음. 전체G6·메모리·실계정/Windows/출시는 미완료이며 main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra
+
+- 1949c57 native-chat-stream 첫 실행ypcV7n은 최초 getChat의 nextEventSequence를null로 가정한 시험 오류로 전송0건에서 종료했다. 실제 계약은 비어 있지 않은 마지막 페이지도 마지막sequence를 반환한다. 초기1/추가after1 빈페이지null을 확인하도록 수정했다. 앱 종료0/DB표식·관측PID 부재 확인 후 자체 project/other-project/userdata만 정리했고 결과는 보존했다.
+- 수정 재실행mcy4lx은180초 관측 deadline에서 중단됐다. 종료 직전 공개 bridge 전송/수신659개(채팅별165/165/165/164), 관측 중복/cross-chat/순서 오류0, 최대 전달2105.4ms·예정시각 대비최대지연171970.3ms·화면표본43개였다. 아직RUNNING이었던 부분 자료이며12,000개/저장페이지/paint 완료를 주장하지 않는다. wrapper FAIL/앱 종료0/DB종료 confirmed. 실패 재현자료 한 건을 보존했으며 timeout 연장으로 속도 실패를 숨기지 않는다.
+- startup_memory_review는 최신 페이지 수정·초기 ID 구분·CAS·화면 관측에 정적 차단 지적 없음으로 회신했다. 이는 실행 합격이 아니다. 다음은 공개 append 경로의 낮은 처리량 원인을 조사·수정한 뒤 영향 영역 검증이다. 메모리/G6/실계정/Windows/출시는 미완료, 실제 모델·인증·사용자 프로젝트·main 병합/push 사용 없음.
+
+### 2026-10-15 · by GPT-6 Astra
+
+- 기준4f9bcc4에서 native 채팅 workload 준비를 실제 새 대화 UI로 연결하고 첫 채팅을 선택해3000개 본문의 DOM 표시+두RAF 관측을 추가했다. event→paint와 dispatch→paint를 분리하고 첫 채팅의 최대100ms·누락표본을 검사한다. 네 채팅 모두 전환 후 최신200개 본문을 대조한다. 나머지 채팅의 background paint나 실제 compositor 증거는 아니다.
+- startup_memory_review가 seq1 생성 이벤트의 지연 도착을 unknown/cross-chat으로 오탐할 가능성을 지적했다. getChat에서 읽은 초기4개 exact message ID와 결속/본문/순서/kind가 맞는 이벤트만 workload 전 이벤트로 구분하도록 수정했다. 일반 seq1 허용이나12,000개 검증 완화는 하지 않았다. 같은 검토자에게 수정 및 화면 관측의 정적 재검토를 요청했고 결과 대기다.
+- Karpathy 최소 변경으로 제품 API/안전 상한 변경 없이 시험 helper만 확장했다. JS 문법/diff 통과, 실제 실행·지연 초기 이벤트 회귀는 묶음 검증 대상이며 합격 주장은 없다. 전체 수명RSS·분리 자손·반복10회/G6·메모리 초과·실계정/Windows·출시는 계속 미완료. 새 빌드/모델/임시 데이터 생성·main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra
+
+- startup_memory_review의 읽기 전용 결과를 회수했다. 시작 main/preload/renderer에서 제거 근거가 있는 retained allocation은 발견하지 못했으며 Claude fallback 오류도 권한 처리 누락 근거가 아니었다. 실제 네 채팅 workload 부재와 m5:test:performance 미등록이G6 차단으로 재확인됐다. reviewer 권고의 공개 appendChatMessage 경로를 현행 계약/sidecar와 대조했다.
+- 기준57a8750에서 --native-chat-stream 및 독립 renderer probe를 구현했다. 자체 프로젝트의4개 격리 채팅에20ms 예정 간격·3000개씩 전송하며, optimistic sequence를 위해 채팅별 순차/채팅간 병렬 호출한다. 실제 onChatEvent의 ID·순서·본문·채팅 결속과 getChat의50개 페이지를 끝까지 검증한다. 실제 dispatch duration/최대 지연을 기록하고 API 실패는 재시도하지 않는다. 실제 모델·agent.publicEvent256 상한을 건드리지 않는다.
+- Karpathy 지침으로 기존 패키지 seed/공개 bridge/정상 종료를 재사용했다. JS 문법/diff 통과, 실행 검증 전 구현 체크포인트다. 동일 검토자에게 변경 범위의 읽기 전용 정적 재검토를 요청했고 아직 결과 대기다. source는 실제 user-message IPC이며 provider 출력·active-chat paint·전체 수명RSS·분리 자손·반복10회/전체G6로 주장하지 않는다. 후속은 정적 지적 수정과 이 workload의 화면 관측 연결/묶음 실행이다. 새 빌드·계정·프로젝트 시험/저장공간 소비 없음, main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra
+
+- clean1c65ba9에서 pnpm m5:test:security를 실행해23건과 main 문법 검사 PASS/exit0를 확인했다. origin/frame·popup/webview/navigation·로컬 asset·설치/승인 IPC·CSP·sidecar staging의 자동 회귀 범위이며 전체 보안 감사나G6 완료로 확대하지 않는다. 같은 코드에서 이 검사를 추가 반복하지 않는다.
+- 상시 승인된 읽기 전용 startup_memory_review1명을 호출해 초기 메모리 비용과 전체G6 수집기의 다음 구현 경계를 검토 중이다. 실제 도구 상태running을 확인했으며 결과는 아직 없다. 메인은 native poll 및 Claude 권한 요청 경로를 대조했고, preparation/claude.rs가 Permission/RequiresHandling을 먼저 처리하므로 native/owner.rs fallback 오류 문자열만으로 도구 승인 미연결이라고 단정하지 않는다. 실행별256 public event 상한과12000 stream fixture의 관계는 실제 영속/전송 경로를 더 추적해야 하며 계약을 변경하지 않았다.
+- 새 패키지/실제 계정/모델 실행 없음, 제품 코드 변경 없음. 후속은 검토 결과 회수 후 근거 있는 성능/계측 구현, 메모리 초과·실계정/Windows·출시 검증은 계속 미완료다. main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra
+
+- 기준540ac14에서 Karpathy 최소 변경으로 패키지 관측기에 --deferred-cdp를 추가했다. client 연결 전48개 프로세스 RSS 표본과 실제 연결 시각을 별도 저장하며 제품·기준·기존 idle 측정을 변경하지 않는다. CDP server는 처음부터 활성화돼 있어 무계측 비교는 아니다. JS 문법/diff 통과.
+- 기존 패키지 자체 프로필6PFoOz 단발에서 연결 전 최대415.828MiB(시작2307ms), 마지막344.234MiB, 연결 시작13501.9ms 이후 최대356.375MiB를 관측했다. 초기 초과는 client 연결 없이도 나타나므로 연결만을 원인으로 단정할 수 없다. 지연된 idle 기준 이내로 기존 초기FAIL을 덮지 않으며 결과NOT_READY/exit2다. 실제 startup 준비 시각/원인 확정·제품 개선 증거가 아니다.
+- 앱 정상 종료0/DB 표식과 연결 전후 모든 관측PID 부재 확인 뒤 이번 userdata만 제거, JSON/PNG 보존. 새 빌드/계정/모델/사용자 프로젝트 사용 없음. 다음은 초기 native 비용 분리와 전체G6/실계정/Windows/출시 미완료 항목이며 main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra
+
+- 기준bede328에서 EJ6wB8 원시 RSS를 실제 rssBytes 필드로 재계산하고 Chromium PID/type 자료와 대조했다. peak428.28125MiB는 시작1047.37ms, 구성은 browser152.66/GPU88.02/network39.72/renderer131.34/미분류 자손16.55MiB다. 마지막 표본358.41MiB, renderer JS used heap2.83MiB다. 단발 자료이며 누수 부재나400MiB 기준 통과로 해석하지 않는다.
+- 초기 화면 코드를 재확인해 Monaco는 사용 시 동적 import이고, 보이는 기본 화면에는 backdrop blur가 적용되지 않음을 확인했다(blur는 modal backdrop). 현재 증거로 특정 React 데이터/편집기 선로딩을 원인으로 단정할 수 없어 기능 축소·GC 강제·GPU 비활성화·기준 변경은 하지 않았다. 다음 분석은 시작 구간의 main/GPU/renderer native 비용과 측정 도구 부착 비용을 분리하는 것이며, 전체G6·실계정/Windows·출시 검증은 계속 남는다. 새 실행/빌드/저장공간 소비 없이 기존 증거만 분석했고 main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra
+
+- clean HEAD a6d25ca에서 CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4로 pnpm m5:test:package를 완료했다. 관련27 tests PASS, 최신 Forge package→sidecar smoke→ZIP→크기 검사 PASS/exit0. release 캐시 재사용0.44초, 압축124076526B/비압축322262577B로 각각200/350MiB 기준 이내다. 증거 `.artifacts/m5-g6-package/darwin-arm64-2026-10-15T08-20-44-682Z.json`. 서명/Windows/GUI/전체G6 합격은 아니다.
+- 최신 패키지 large-project 단발 EJ6wB8에서 visible→visible/hiddenTransitions0, 트리257ms·하위133.2ms·DOM362·큰 파일473.5ms·입력10개 최대25ms·renderer 긴 작업67ms를 관측했다. 해당 부분 수치는 기준 이내지만 idle RSS449085440B로400MiB 초과, 전체FAIL/exit1 유지. 반복10회나 물리 키보드/IME 증거는 아니다. 앱 종료0·DB 종료 확인 뒤 관측PID 부재를 대조해 자체 project/other-project/userdata3개만 삭제했고 JSON/PNG는 보존했다. 합성 fixture는 재생성 가능하다.
+- 새 실제 인증/모델·사용자 프로젝트 사용 없음, 시스템 앱 설치 없음. 저장소 out 최신 패키지/ZIP만 갱신했으며 main 병합/push 없음. 다음은 메모리 초과 원인 수정·전체G6 수집·실계정/Windows·출시 검증이며 목표 미완료다.
+
+### 2026-10-15 · by GPT-6 Astra
+
+- 기준fdc11a5에서 앞선 hidden/frame0 실패와 패키지 관측 코드를 대조했다. 프로젝트 측정 전에 창 활성화가 없어 Page.bringToFront와 visible 확인을 추가했다. 측정 구간의 visibilitychange를 기록하고 hidden 전환 또는 종료 시 hidden이면 관측 실패로 남긴다. 중간 재활성화/실패 표본 재시도·프레임 deadline 연장·제품 background throttling 변경은 하지 않는다.
+- Karpathy 지침으로 시험 스크립트와 절차만 최소 변경했다. JS 문법/diff 검사 통과, 실제 반복 재실행은 아직 수행하지 않았다. 이는 관측 전제 보강이지 이전 메모리FAIL이나 제품 성능 결함 해소 증거가 아니다. 새 빌드/계정/시험 데이터 생성 없음, 전체G6·실계정/Windows·출시 미완료, main 병합/push 없음.
+### 2026-10-15 · by GPT-6 Astra
+
+- 사용자 승인 후 기존9월 archive의21줄 추가를 검토해57f8e3b에 해당 파일만 원문 그대로 커밋했다. 당시 로그인 복구·정책 승인 대기 기록이며 현재 미완료 상태로 재해석하지 않는다. claude-md-improver의 앞선 품질 보고/승인에 따라 AGENTS.md·CLAUDE.md 제품 상태와 코드 지도4개 항목만 동기화했다. 실제 공급자 경로 구현과 Claude 실작업 미검증을 구분하고 운영·안전·승인 규칙은 유지한다.
+- 3369973의 긴 작업 관측 순수 회귀4건 PASS. 기존 패키지로 tree-file 반복 진단을 실행해 준비1회+본5회를 수집했다. 본6회차는 aaa-tree의 frames 대기에서 visibility:hidden/frames0으로 renderer 표현식 실패, 앱은 종료0/DB 종료 확인 뒤 collector가 중단됐다. 본10회 미완료이므로 p95/합격을 만들지 않았다. 앞선 정상 관측에서도 idle RSS 초과 FAIL은 유지한다.
+- 증거는 OS 임시 hello-agent-packaged-performance-NseA5f 및 각 trial의 JSON/로그다. 완료6개 회차 자체 fixture는 종료 후 정리됐고 실패한 hello-agent-packaged-ui-Z77Zsm은 재현용 보존했다. 새 빌드/실제 계정/모델/사용자 프로젝트 사용 없음. 다음은 hidden-window 관측 실패 진단과 남은G6·메모리·실계정/Windows 검증이며 전체 미완료, main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra
+
+- 기준0e8ff59의 패키지 반복 측정기가 기존 rendererLongTasks를 집계하지 않음을 확인해 원시 entry/최대값/200ms 초과 개수 대조를 연결했다. 미지원·관측 미완료·overflow·요약 불일치는0으로 만들지 않고 중단한다. 완전 관측한 기준 초과는 회차를 버리지 않고 FAIL로 보존하며 본10회 최대값을 기록한다. 시작/main 구간의 누락은 그대로 명시했다.
+- 요약 불일치·미완료·빈 정상 관측·기준 초과의 순수 회귀를 추가했다. 구현 우선 방침에 따라 이번에는 JS 문법·diff 검사만 수행했고 새 회귀 실행과 실제 반복 관측은 후속 묶음 검증 대상이다. 제품 코드·기준·인증 정책 변경 없음. 기존 사용자9월 archive 보존, main 병합/push 없음. 전체G6·메모리 초과·실계정/Windows·출시 검증은 미완료다.
+
+### 2026-10-15 · by GPT-6 Astra
+
+- 기준1792e96에서 진행 중이던 M5 macOS/Windows 미서명 ZIP 진단 워크플로를 마무리했다. 수동 실행만 허용하고 contents:read, Rust 동시 작업4개/증분 캐시 비활성화, 산출물 보관3일로 제한했다. 기존 Forge make 및 패키지 자산/fuse/sidecar protocol smoke를 재사용하며 TypeScript 직접 import를 위한 실행 플래그를 명시했다. 기존 Tauri 배포는 변경하지 않는다.
+- YAML 구문/필수 job 확인과 git diff --check 통과. 원격 실행·push·새 패키지 빌드는 하지 않았으므로 Windows 실행 성공이나 G6 합격 증거는 아니다. 최신 제품 소스의 기존 누적 회귀를 반복하지 않았다. release-checklist에 이 진단의 범위와 승인 경계를 기록했다.
+- 사용자 질문에 현재 Claude 로그인·상태 확인·실행 모두 앱 전용 CLAUDE_CONFIG_DIR을 사용하는 코드를 재확인해 설명했다. 기존 터미널 로그인 재사용은 아직 제안이며 인증 정책/정보를 변경하지 않았다. 초기 메모리 초과·전체G6 수집·실계정·Windows·출시 검증은 남는다. 기존9월 archive 변경 보존, main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra (정식 검증·인계 문서 승인 경계 확인)
+
+- 기준af5d297에서 package gate가 clean checkout을 요구함을 코드로 확인했다. 기존부터 남은 docs/archive/history-2026-09.md를 임의로 커밋/되돌리지 않고, 내용 검토 뒤 해당 파일만 별도 커밋해도 되는지 비차단 질문을 보냈다. 정식 게이트를 우회하거나 새 package PASS를 주장하지 않는다.
+- claude-md-improver 스킬과 품질 기준을 읽고 저장소 CLAUDE.md1개 및 AGENTS.md byte 일치를 확인했다.80/100(B): 명령15/20·구조15/20·주의15/15·간결10/15·최신10/15·실행15/15. 실제 공급자 경로가 연결됐는데 Claude 미연결/V1~V5까지만 설명하는 제품 요약이 오래됐다. 상태·코드 지도만 양쪽 동기화하는 변경안을 보고했으며 스킬의 보고 후 확인 절차에 따라 적용 전 사용자 확인을 요청했다. 운영·안전·승인 규칙은 수정하지 않는다.
+- 이번에는 새 무거운 검사/빌드/계정 실행을 하지 않았다. 앞선 Node521/Rust1006 PASS 증거를 재사용하며52 ignored·메모리FAIL·G6/실계정/Windows/출시 미완료는 그대로다. 사용자 기존 변경 보존, main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra (최신 누적 자동 회귀 완료·디버그 캐시 정리)
+
+- 기준e13ecdf에서 Node 전체 tests/*.test.mts 및 tests/*.test.cjs를 한 번 실행해521 PASS/0 FAIL(25.2초), TypeScript noEmit/diff 검사 통과. 최신 sidecar bin을 먼저 빌드한 뒤 CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4로 cargo test --workspace --locked를 완료했다(exit0). Tauri105/core198/protocol58/sidecar628/stdio14/doc3 총1006 PASS,52 ignored,0 FAIL. sidecar664개 중628통과/36제외 구간은844.43초가 걸렸으며 같은 코드의 이 누적 검사를 반복하지 않는다.
+- 제외52건은 실제 계정·네트워크 설치·별도OS sandbox/진단 등으로 PASS가 아니다. 자동 회귀 통과는 실제 Claude 작업/전체G6 성능·Windows·출시 증거를 대체하지 않는다. 기존 초기RSS 최대454.31MiB 실패와 전체 성능 수집 누락은 유지한다.
+- 검사 종료와 관련 실행 프로세스 부재, 대상 디렉터리 실체를 확인한 뒤 재생성 가능한 저장소 target/debug 약3.1GB를 제거했다. target/release 약357MB와 out 시험 패키지·소스·사용자9월 archive·인증정보·프로젝트는 보존했다. 디버그 실행/다음Rust검사에는 재빌드가 필요하다. 삭제는 캐시이므로 빌드로 재생성할 수 있다. main 병합/push 없음, 전체 목표 미완료.
+
+### 2026-10-15 · by GPT-6 Astra (초기 메모리·남은 구현 경계 재확인)
+
+- 기준247c19f의 시작 경로를 읽었다. Monaco는 loadMonaco의 동적 import로 편집기 사용 때 로드되며 serveAppAsset은 net.fetch 응답 body를 streaming 전달한다. 이 경로에서 시작 시 Monaco 선로딩이나 전체 파일 별도 버퍼 복사를 발견하지 못했다. 기존 프로세스별RSS/작은 renderer heap만으로 특정 코드의 메모리 결함을 확정할 수 없어 기능·보안 설정·기준을 임의로 낮추지 않았다.
+- 상시 승인된 읽기 전용 remaining_completion_audit1명을 호출했다. 검토자의 core/provider.rs 버전 고정 지적은 main이 실제 호출 경로를 대조해 fake_executable 기반 observe_provider 및 fixture/recovery 경로임을 확인했고 검토자가 철회했다. 실제 Claude discovery/status의 parse_cli_version은 bounded SemVer, 실행은 서명된 PinnedExecutable 경로다. 고정 버전 상수를 근거 없이 제거하지 않는다. 기존 AGENTS의 오래된 제품 요약을 실제 Claude 미구현 증거로 쓰지 않으며 actual 연결 성공은 별도 실계정 검증 대상이다.
+- RSS 본10회 중8회 초과·2회 기준 이하로 정정 확인, 최대454.31MiB FAIL 유지. 추가 앱/계정 실행·fixture 생성·제품 코드 변경 없음. 기존 로그인 재사용 방식은 비차단 사용자 선택 질문으로 남겼으며 답변 전 인증 정책을 바꾸지 않는다. 다음은 원인이 입증된 성능 수정과 누락G6 계측/외부 검증이며 전체 미완료. 사용자9월 archive 보존, main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra (최신 패키지 시작·메모리 반복 실측)
+
+- 기준15ac96a에서 CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4로 pnpm m5:package 완료. 저장소 out의 기존 시험 패키지만 갱신했고 시스템 설치/실제 인증/모델 호출은 하지 않았다. 최신 --startup으로 새 프로필 첫 실행+준비1회+본10회 관측을 끝냈다. 모든 회차 정상 종료/DB 종료 표식 확인, 마지막 관측PID 부재 후 자체 userdata 정리 완료다.
+- 본10회 storageObservedMs p95 726.58ms, uiObservedMs p95 1069.69ms. CDP 연결/poll을 포함한 관측치이며 정식G6 sidecarReady/appInteractive 동일값으로 주장하지 않는다. idle RSS 최대476381184B(454.31MiB)로400MiB 기준 초과, 전체FAIL/exit1 유지. 일부 회차는 기준 이내지만 실패 표본을 제외하지 않았다. 한 회차는 시작616ms의448.83MiB에서3.46초387.42MiB/11.62초386.34MiB로 낮아졌으며 시작 시점 비용 분석의 단서이지 누수 부재나 문제 해결의 증거가 아니다.
+- 증거: OS 임시 hello-agent-packaged-ui-MdohoP/startup-series.json과 result.json/startup-0~10.json/PNG. 큰 프로젝트 fixture는 생성하지 않았고 시험용 프로필은 삭제했으며 증거는 보존했다. 사용자9월 archive 보존. 다음은 초기 메모리 초과 원인 수정·누락G6/실계정/Windows 검증, 전체 미완료. main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra (패키지 시작 반복 관측 연결)
+
+- 기준79b1824에서 패키지 단발 시작 관측에 --startup을 연결했다. 새 프로필 최초 실행과 동일 프로필의 준비1회+본10회를 분리하며, 기존 실제 bridge 준비 조회·활성 프로젝트 선택 버튼·RSS·정상 종료와 DB 종료 표식을 재사용한다. 각 실행 전 HEAD/dirty 상태·패키지 산출물 동일성과 이전 관측 PID 부재를 확인한다. 불완전 관측/종료면 다음 실행을 시작하지 않는다.
+- Karpathy 지침으로 새 제품 IPC나 준비 완료 추정을 추가하지 않았다. CDP overhead를 포함한 storageObservedMs/uiObservedMs 이름을 유지해 정식G6 준비 시간으로 둔갑시키지 않으며 cold/warm OS 캐시 한계를 명시했다. 완전 관측 뒤 자체 userdata만 정리하고JSON/PNG/FAIL 증거는 보존한다. 문법/diff 검사만 수행하고 실제 반복 실행은 최신 패키지 준비 후 묶음 검증 대상으로 남겼다.
+- 사용자9월 archive·실제 인증/프로젝트 보존, 큰 fixture나 새 설치본 생성 없음. 메모리 초과·전체G6 collector·실계정/Windows/출시 검증은 여전히 미완료이며 main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra (반복 패키지 메모리 수집 연결)
+
+- 기준ff4102f에서 남은 성능 경로를 확인했다. 전체G6 수집기는 여전히 없으며 기존 반복 collector는 diff/tree-file만 지원한다. 단발 memory-diff 관측을 순차 준비1회+본10회에 연결하고60초 retention 대기·원시 표본 재계산/요약 일치·기존400/800/120MiB 한도와 diagnostic/NOT_READY 경계를 유지했다. 메모리는p95가 아닌 본 측정 maximum으로 기록한다.
+- Karpathy 지침으로 기존 실제 패키지 관측기를 재사용했다. fixture 정리 전 PID 확인을 초기RSS뿐 아니라 memoryLifecycle 전체 표본으로 확대해 후반에 관측한 프로세스가 살아 있으면 정리/다음 시험을 중단한다. 절차 문서에 실행 비용과 측정 한계를 추가했다. 문법·diff 검사만 통과했으며11회 실제 실행은 아직 하지 않았다. 과거 메모리FAIL을 해결했다고 주장하지 않는다.
+- 사용자9월 archive 및 인증/원본 보존, 큰 시험 데이터 추가 생성 없음. 후속은 최신 패키지 성능 실측·메모리 원인 수정과 누락G6 측정 연결이다. main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra (첫 작업 재진입·좁은 창 묶음 검증)
+
+- 기준73c5078 renderer 빌드와 안내 순수 상태3건 PASS. Chromium2건/14.2초 PASS로960→760→960 창 크기 전환, 동일 Monaco DOM·미저장 편집·넓은 배치 저장 불변을 확인해 앞선 좁은 창 실행 검증 대기를 해소했다.500kB chunk 경고는 유지한다.
+- Karpathy 지침에 따라 기존 실제 renderer 시나리오에 안내 대상 저장·접기 저장·프로젝트 닫기/재열기·수동 안내 재열기·이전 첫 작업 버튼의 동일 채팅 복원 assertion을 추가했다. 변경된 시나리오 Chromium2건/14.3초 PASS, diff 검사 통과. 프로젝트 재진입 증거이며 OS 앱 재시작 전체 흐름이나 실제 모델 실행 증거로 확대하지 않는다.
+- 임시 합성 데이터만 사용했고 시험 프로세스 정상 종료 후 기존 부모 runner의 임시 데이터 정리 경로를 사용했다. 실제 계정/모델·사용자 프로젝트 미사용, 사용자9월 archive 보존. 후속은 전체 요구 대비 남은 UI/성능 수집·G6·실계정/Windows/출시 검증이며 전체 완료 아님. main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra (첫 작업 안내의 프로젝트별 재진입)
+
+- 기준0bf50bf의 미완료 안내 변경을 이어서 구현했다. 프로젝트별 안내 대상 chatId·안내 접기·목표 작성 진입을 화면 설정에 저장하고 실제 채팅 상태로 진행/검토/복구 안내를 선택한다. 다른 채팅을 열어도 기존 안내 대상을 유지하며 정상 채팅 전환 경로로 이어간다. 찾을 수 없는 대상은 사용자가 안내 대상만 다시 정할 수 있고 채팅/작업은 삭제하지 않는다. 전체 흐름은 보조 설명으로 접었다.
+- Karpathy 지침으로 기존 역할 설정·목표 입력·대화·diff 경로를 재사용했다. 안내는 실행 동의나 완료 판정을 저장하지 않으며 안전 확인/복구 제한을 우회하지 않는다. 저장 실패 안내와 한·영 문구, 순수 상태 회귀3건을 추가했다. TypeScript 검사와 diff 검사 통과; 새 회귀 실행·실제 renderer 재진입 및 앞선 좁은 창 회귀는 묶음 검증 대상이다. 기능 구현 체크포인트이며 전체 UI/G6 완료가 아니다.
+- Claude 로그인 경로를 재확인했다. 현재 로그인·상태 확인·실행은 앱 전용 CLAUDE_CONFIG_DIR을 사용하며 기존 터미널 로그인 자동 재사용은 구현되지 않았다. 기존 로그인 재사용 제안은 정책 변경 승인이나 구현으로 취급하지 않는다. 실제 인증/유료 실행 미수행, 사용자9월 archive 및 인증정보 보존, main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra (좁은 창 탭 배치 구현)
+
+- 기준1f6d740에서 직접 구현했다. Electron/body 최소 너비를640px로 낮추고820px 이하에서는 기존 dock 패널을 한 탭 그룹으로 표시한다. 좁은 화면의 선택은 별도 메모리 상태이며 저장된 넓은 배치·숨김·분할 비율을 덮어쓰지 않는다. 다시 넓히면 원래 배치를 표시하고, 패널 부모/key는 그대로라 Monaco와 채팅 컴포넌트를 재생성하지 않는다. 좁은 화면에서는 배치 편집·drag를 숨기고 안내를 표시한다.
+- Karpathy 최소 변경으로 기존 dockGeometry와 mount 구조를 재사용했다. media listener 해제와 크기 전환 중 resize/drop 초기화를 연결했다. 실제 BrowserWindow960→760→960 전환, 미저장 편집 보존·대화/편집 탭 전환·localStorage 배치 불변 회귀를 기존 runner에 추가했다. TypeScript·문법·diff 검사 통과, 새 실제 resize 회귀는 아직 실행 전이며 다음 첫 작업 안내 연결 후 묶어서 검증한다. 기존 사용자9월 archive 보존, 전체 UI/G6/실계정/Windows 미완료, main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra (작업대 설정 영역 접기·완료 격차 검토)
+
+- 기준f26dde4에서 상시 승인된 읽기 전용 ui_completion_audit 검토자1명을 호출했다. 제품 제안/시안 대비 첫 실제 작업의 단계별 진행·재진입 안내와 좁은 창의 편집/대화 탭 전환이 구현 격차로 지적됐다. 현재 정적 시작/프로젝트 안내나 수동 dock 배치가 해당 흐름 전체를 충족한다고 주장하지 않는다. 후속 구현은 이 두 항목을 우선하며 임의 기능 추가로 범위를 늘리지 않는다.
+- 프로젝트 작업대의 기기/선택/설치/로그인 카드를 한 줄 연결·관리 영역으로 접고 명시적으로 다시 열도록 연결했다. DOM/컴포넌트는 계속 유지한다. 설치 plan/실행/불확실/오류/복구·로그인 attention·선택 저장 실패는 강제 펼침/접기 금지로 전달한다. 첫 설정 화면은 종전 단계 흐름을 유지한다. Karpathy/React 지침으로 backend·동의·실행 로직은 변경하지 않았다.
+- 검토자가 terminal installed까지 바깥 접기를 막는 결함을 지적해 actionRequired와 내부 needsAttention을 분리했다. 설치 성공은 내부 로그인 확인 안내를 유지하지만 바깥 접기는 허용한다. TypeScript/빌드 통과 및 최신 Chromium2 PASS로 기본 접힘/재열기·설치 응답 유실 시 접기 금지·installed 후 접기/펼치기 회귀를 확인했다. ui_completion_audit 수정 재검토는 정적 APPROVE이며 자체 실행 검증과 구분한다. 실제 계정/설치 미사용, 사용자9월 archive 보존, 전체 UI·G6·실계정/Windows 미완료, main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra (변경 패널 통합 회귀)
+
+- 기준0aaa2c8의 TypeScript 검사와 renderer Vite 빌드 통과. editor-state57 PASS로 최신/과거 diff 응답의 loading 상태·실패 후 재시도 상태와 기존 프로젝트/저장/stream 회귀를 확인했다. Chromium 작업대 묶음2 PASS/13.9초로 탭 수량과 실제 패널 수량 일치, 기존 편집/패널 이동 흐름을 확인했다. 같은 검사 추가 반복 없음.
+- 테스트 전용 임시 데이터이며 실제 인증/모델/사용자 프로젝트 미사용. 실제 창 시각 비교·최종 패키지/G6 합격은 아니고500kB chunk 경고는 유지한다. 부모 시험 정상 종료 후 자체 임시 데이터 정리 경로를 사용했다. 전체 시안·메모리·실계정/Windows 미완료, 사용자9월 archive 보존, main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra (변경 조회 진행 표시)
+
+- 기준761af34에서 변경 없음/필터 결과 없음은 이미 구현됨을 확인했다. 누락된 조회 진행 상태만 EditorSnapshot.diffLoading으로 연결했다. 최신 요청만 완료/실패 시 표시를 해제하고 프로젝트·workspace 전환/닫기에서 초기화한다. 조회 중에는 한·영 진행 문구와 새로고침 비활성화를 표시한다. 기존 watcher 최신 요청 교체와 안전 계약은 유지한다.
+- Karpathy 최소 변경으로 기존 요청 세대 회귀에 오래된 성공/실패·최신 성공/실패의 loading assertion을 추가했다. 실행 검증은 후속 UI 묶음에서 수행한다. 사용자9월 archive 보존, 전체 UI·메모리/G6·실계정/Windows 미완료, main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra (변경 탭 수량 표시)
+
+- 기준125e7c7에서 제품 제안 §4.2·작업대 시안의 변경 수량 표시를 현행과 대조했다. 기존 수량은 패널 내부에만 있었으므로 dock 탭에 기존 diffSummary.entries.length 배지를 연결했다. 조회 전/다시 조회 필요 상태에는 숫자를 숨겨 미확인을0개로 표시하지 않는다. 추가 IPC·상태·레이아웃 저장 형식 변경은 없다.
+- Karpathy 최소 변경 및 React 점검으로 파생 값 직접 전달·기존 키/키보드·drag 동작 유지·접근성 이름의 수량 포함을 확인했다. smoke에 패널 수량과 배지 일치 assertion을 추가하고 두 기존 탭 선택기를 숫자 포함 텍스트에 맞췄다. 문법/diff만 확인하며 실제 renderer 회귀/시각 검토는 후속 묶음 검증 대상이다. 사용자9월 archive 보존, 전체 시안·메모리/G6·실계정/Windows 미완료, main 병합/push 없음.
+
+### 2026-10-15 · by GPT-6 Astra
+- e722606 renderer 빌드·TypeScript 및 Chromium 작업대 합성 회귀2 PASS. 안내 접기·수동 재열기 유지 확인. 실제 계정/전체 패키지/시안 전체 합격은 아니다. 로그인 도움말 시각 확인, 메모리/G6·실계정/Windows 미완료. 사용자9월 archive 보존, main 병합/push 없음.
+- 500줄 초과로 상단10월13·15일 기록 전체를 [10월 아카이브](archive/history-2026-10.md)에 원문 이동했다. 고정 결정은 유지한다.
+
+## 워크로그 (최신이 위)
+
+### 2026-09-01 기존 엔트리 → `docs/archive/history-2026-09.md`
+
+2026-09-01 엔트리를 날짜 경계로 아카이브했다. V8 provenance·append fence·제한된 재오픈과 남은 제품 활성화 게이트는 위 `핵심 결정·발견`에 유지했다.
+
+### 2026-08-28 및 그 이전 → `docs/archive/history-2026-08.md`
+
+2026-08-12 ~ 2026-08-28의 기존 엔트리를 날짜 경계로 아카이브했다. G5C recovery 원자성·G5D 저장소 계약과 Electron 시작 복구 등 재사용할 결정은 위 `핵심 결정·발견`에 반영했고, M4의 현재 결론은 `docs/proposals/m4-orchestration.md`가 기준이다.
+
+### 2026-07-23 및 그 이전 → `docs/archive/history-2026-07.md`
+
+17개 엔트리(2026-07-16 ~ 2026-07-23)를 아카이브로 옮겼다. 재사용할 결정·함정은 위 `핵심 결정·발견`에 반영돼 있으므로, 통상 아카이브를 열 필요는 없다.
+2026-09-02 워크로그 전체는 [월별 아카이브](archive/history-2026-09.md)에 보존했다.
+2026-09-03 워크로그와 2026-09-08의 오래된 일부 엔트리는 [월별 아카이브](archive/history-2026-09.md)에 보존했다.
+2026-09-08~09의 나머지 워크로그 전체도 [월별 아카이브](archive/history-2026-09.md)에 보존했다.
+2026-09-14 전체 워크로그: [월간 아카이브](archive/history-2026-09.md).
+2026-09-15·2026-09-28 전체 워크로그: [월간 아카이브](archive/history-2026-09.md). 원문 일치 확인 후 날짜 단위로 이동했다.
+2026-09-29 전체 워크로그: [월간 아카이브](archive/history-2026-09.md). 날짜 단위로 원문을 보존했다.
+2026-09-30 전체 워크로그(검색·변경 상세 다국어 검증 포함): [월간 아카이브](archive/history-2026-09.md). 날짜 단위 원문 보존; 후속 현행 요약은 핵심 결정에서 확인한다.
+2026-10-01 전체 워크로그: [10월 아카이브](archive/history-2026-10.md). 현재 판단은 위 핵심 결정 우선.
+2026-10-06 전체 원문과 남아 있던 10월 1일 기록: [10월 아카이브](archive/history-2026-10.md). 상단 최신 요약은 같은 기록의 중복 안내다.
+2026-10-07 이번 롤오버 이전 기록 및 남은10월6일 기록: [10월 아카이브](archive/history-2026-10.md). 날짜별 원문 전체 이동.
+2026-10-07 모델 목록 실측 이전 상단 기록 전체: [10월 아카이브](archive/history-2026-10.md). 고정 결정은 이 문서에 유지.
+2026-10-08 Claude 세부 진단 보강 이전 상단10월7~8일 전체 기록: [10월 아카이브](archive/history-2026-10.md). 기존 원문 보존 확인.
+2026-10-13 재캡처 시험 이전 상단10월8·13일 워크로그 전체: [10월 아카이브](archive/history-2026-10.md). 날짜 단위 원문 이동.
+2026-10-13 대형 반영 확인 계측 이전 상단 워크로그 전체: [10월 아카이브](archive/history-2026-10.md). 기존 원문 보존, 최신 요약은 이 문서에 유지.
+2026-10-13 standalone 일반 빌드 결함 수정 이전 상단 워크로그 전체: [10월 아카이브](archive/history-2026-10.md). 날짜 단위 이동과 원문 일치 확인.
+2026-10-13 시작·설정·작업대 UI 묶음 검증 이전 상단 워크로그 전체: [10월 아카이브](archive/history-2026-10.md). 날짜 단위 원문 보존 확인.
+
 ### 2026-10-15 · by GPT-6 Astra (작업대 묶음 회귀 확인)
 
 - 기준e722606의 renderer를 vite build --config electron/vite.renderer.config.ts로 재생성하고 tests/m5-renderer-mount-smoke.mts를 실행했다. 2 PASS/14.2초: V7 preload 계약 및 실제 Chromium/React/Monaco 작업대 흐름. 직전 추가한 안내 초기 펼침→파일 열기 후 접힘→수동 재열기→파일 재선택 후 유지도 통과했다. 기존 설정/탭/언어/편집/복구 흐름의 합성 회귀이며 실제 provider·원본 쓰기·전체 패키지 검증으로 확대하지 않는다.
