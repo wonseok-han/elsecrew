@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { SESSION_DIAGNOSTICS_CHANNEL, validateSessionDiagnostics } from "../src/m5/contracts/session-diagnostics-v1.ts";
+import { SESSION_DIAGNOSTICS_CHANNEL as M5_SESSION_DIAGNOSTICS_CHANNEL, validateSessionDiagnostics } from "../src/m5/contracts/session-diagnostics-v1.ts";
 import { DEVICE_REPORT_CHANNEL as M5_DEVICE_REPORT_CHANNEL, validateDeviceReport } from "../src/m5/contracts/device-report-v1.ts";
 import { MODEL_CHOICES_CHANNEL, validateModelChoicesRequest, validateModelChoicesResult, type ModelChoicesRequest } from "../src/m5/contracts/model-choices-v1.ts";
 import { APPROVAL_CHANNEL as M5_APPROVAL_CHANNEL, validateApprovalRequest, validateApprovalResult, type ApprovalRequest } from "../src/m5/contracts/approval-v1.ts";
@@ -116,7 +116,7 @@ contextBridge.exposeInMainWorld("m5Device", Object.freeze({
   inspect: async () => validateDeviceReport(await ipcRenderer.invoke(M5_DEVICE_REPORT_CHANNEL)),
 }));
 contextBridge.exposeInMainWorld("m5Diagnostics", Object.freeze({
-  inspect: async () => validateSessionDiagnostics(await ipcRenderer.invoke(SESSION_DIAGNOSTICS_CHANNEL)),
+  inspect: async () => validateSessionDiagnostics(await ipcRenderer.invoke(M5_SESSION_DIAGNOSTICS_CHANNEL)),
 }));
 contextBridge.exposeInMainWorld("m5Login", Object.freeze({
   request: async (input: LoginRequest) => {

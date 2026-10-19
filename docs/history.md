@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
 ### 2026-10-19 · by GPT-6 Astra
+- clean93a0e49의 npm test 누적 실행은 FAIL: 새 preload 진단 상수가 기존 bridge 검사 정규식의 M5_ 접두 규칙과 달랐다. IPC 문자열/권한을 바꾸지 않고 import alias만 M5_SESSION_DIAGNOSTICS_CHANNEL로 정리했다. 영향받은 bridge/scaffold62건 PASS이며 전체 누적 재실행 결과로 확대하지 않는다. renderer build와 최종tsc/diff PASS, 기존 chunk 크기 경고는 유지한다.
+- Karpathy 최소 변경으로 기존 Chromium 회귀에 합성 Claude failed/cleanExit와 진단 조회를 연결했다. 첫 실행은 시험 응답의 필수 agentRecovery:null 누락으로 실패했으며 fixture를 수정한 최종2건 PASS/14.67초다. 단계명 표시·다른 실행일 수 있다는 설명·조회 오류 때 이전 결과 제거·빈 결과 비확정 안내·추가 agent start 없음이 실제 renderer에서 확인됐다. 공급자/IPC 응답은 합성이므로 실계정·native main 진단 종단 증거가 아니다.
+- 현재 사용자 앱/로그인·원본 프로젝트에 손대지 않았고 새 유료 실행·패키지 덮어쓰기 없음. 다음은 정상 종료 후 최신 패키지/실패 상세 확인과 남은 G6·메모리·Windows·출시 검증이다. 자동 추가 Claude 시험 승인은 없으며 main 병합/push 없음.
+
+### 2026-10-19 · by GPT-6 Astra
 - e8c21a1 실제 실패를 조사해 Claude session이 고정 단계명을 stderr에 기록하지만 AgentRun UI에는 종료 결과만 전달한다는 정보 누락을 확인했다. Karpathy 최소 변경으로 실패한 Claude 실행 정보에 현재 앱 세션 진단 조회를 연결했다. main의 기존 bounded tail에서 정확한 허용 단계명만 최대32개 반환하고 preload도 strict 재검증한다. 새 입력 없는 IPC는 현재 main frame/origin 검사·추가 인자 거절을 수행한다.
 - 이 진단은 run ID에 결속되지 않고 재시작 후 남지 않으므로 다른 실행 기록일 수 있음을 한/영으로 명시했다. raw 로그·토큰·경로·자유 텍스트를 반환하지 않으며 빈 목록/조회 실패를 정상으로 해석하지 않는다. 실행/반영/복구 계약·Rust 원장·로그인 설정은 변경하지 않았다.
 - tsc 및 분류/허용목록/상한/IPC 접근 경계 관련12회귀·diff PASS. 상시 승인된 startup_memory_review1명의 읽기 전용 검토에서 차단 결함 없음(접근 제한·허용목록·원문 미전달·세션 한계 안내)을 확인했다. 실제 패키지/화면 회귀는 아직 수행하지 않았고 실행 중 앱 번들을 덮어쓰지 않았다. 추가 모델 실행0회. 이번 변경은 다음 진단 가능성을 보완한 것이며 직전 실패의 구체 원인 해결이나 G6/메모리/Windows/출시 완료가 아니다.

@@ -716,6 +716,19 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-message p')?.textContent === '처음 요청'", "full history retained after bounded run")};
     historyButton('최신 대화').click();
     window.confirm = originalConfirm;
+    window.m5SmokeFailedClaude();
+    await ${waitFor("document.querySelector('.m5-agent-runs details')", "failed Claude run details")};
+    document.querySelector('.m5-agent-runs details summary').click();
+    const diagnosticButton = () => [...document.querySelectorAll('.m5-agent-runs button')].find(button => button.textContent === '이번 앱 세션의 연결 진단 보기');
+    await ${waitFor("diagnosticButton()", "session diagnostic action")};
+    diagnosticButton().click();
+    await ${waitFor("document.querySelector('.m5-agent-runs pre')?.textContent === 'init model'", "fixed diagnostic checkpoint")};
+    if (!document.querySelector('.m5-agent-runs').textContent.includes('이 실행의 확정 원인은 아니에요')) throw new Error('session diagnostics attributed to a run');
+    diagnosticButton().click();
+    await ${waitFor("document.querySelector('.m5-agent-runs [role=alert]') && !document.querySelector('.m5-agent-runs pre')", "failed diagnostic clears old value")};
+    diagnosticButton().click();
+    await ${waitFor("document.querySelector('.m5-agent-runs').textContent.includes('문제가 없다는 뜻은 아니에요')", "empty diagnostic is inconclusive")};
+    if (window.m5SmokeContextStarts.length !== 1) throw new Error('diagnostic inspection started an agent');
     const originalRequest = window.m5Projects.request;
     ${process.env.M5_MEASURE_PARALLEL_PAINT === "1" ? `
     window.m5Projects.request = originalRequest;

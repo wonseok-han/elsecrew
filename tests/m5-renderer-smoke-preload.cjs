@@ -77,6 +77,21 @@ window.m5SmokeContextStarts = [];
 const smokeMessages = [{ schemaVersion: 1, messageId: "smoke_initial", chatId: smokeChat.chatId, taskId: smokeChat.taskId, worktreeId: smokeChat.worktreeId, eventSequence: 1, kind: "user", roleId: null, runId: null, text: "처음 요청", createdAt: smokeChat.createdAt }];
 let historyMessageIndex = 0;
 let historyReadFailures = 0;
+let diagnosticRun = null;
+let diagnosticReads = 0;
+window.m5Diagnostics = {inspect: async () => {
+  diagnosticReads++;
+  if (diagnosticReads === 2) throw new Error('synthetic diagnostic failure');
+  return {scope:'currentAppSession',claudeCheckpoints:diagnosticReads === 1 ? ['init model'] : []};
+}};
+window.m5SmokeFailedClaude = () => {
+  diagnosticRun = {schemaVersion:1,runId:'smoke_failed_claude',chatId:smokeChat.chatId,
+    taskId:smokeChat.taskId,projectId:smokeChat.projectId,worktreeId:smokeChat.worktreeId,
+    workspaceIdentity:smokeChat.workspaceIdentity,selectedProfile:smokeChat.roleSnapshots[1],
+    source:'actualAgent',capabilityFingerprint:`sha256:${'0'.repeat(64)}`,state:'failed',
+    stage:'implementing',terminationOutcome:'cleanExit',createdAt:smokeChat.createdAt,updatedAt:smokeChat.updatedAt};
+  for(const listener of agentRunStateListeners) listener({run:diagnosticRun});
+};
 window.m5SmokeFailHistoryRefresh = () => {
   historyReadFailures = 1;
   for (const listener of agentPublicEventListeners) listener({ ...smokeChat, runId:"smoke_context_run", roleId:"planning", eventId:"smoke_refresh_event", kind:"status", text:"not durable", capabilityFingerprint:`sha256:${"0".repeat(64)}` });
@@ -271,7 +286,7 @@ window.m5 = {
   listChats: async ({ projectId }) => ({ projectId, items: parallelPaint ? parallelPaint.chats : [smokeChat], nextCursor: null }),
   getChat: async (request) => {
     if (historyReadFailures > 0) { historyReadFailures--; throw new Error("synthetic history read failure"); }
-    return parallelPaint ? parallelPaint.detail(request) : ({ chat: smokeChat, afterEventSequence: request.afterEventSequence, messages: smokeMessages.filter(message => message.eventSequence > request.afterEventSequence), runs: [], nextEventSequence: null });
+    return parallelPaint ? parallelPaint.detail(request) : ({ chat: smokeChat, afterEventSequence: request.afterEventSequence, messages: smokeMessages.filter(message => message.eventSequence > request.afterEventSequence), runs: [], agentRuns:diagnosticRun ? [diagnosticRun] : [], agentRecovery:null, nextEventSequence: null });
   },
   startFixtureRun: unexpected("startFixtureRun"),
   cancelRun: unexpected("cancelRun"),
