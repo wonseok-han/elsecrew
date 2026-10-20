@@ -553,6 +553,7 @@ export const en: Record<MessageKey, string> = {
   "m5.login.error.changed": "The installed agent's publisher signature or file state could not be verified. If an update is in progress, wait for it to finish and check again. If this continues, use the error details to ask for help. This does not mean you are signed out; saved credentials have not been deleted.",
   "m5.login.error.missing": "A supported agent executable could not be found. Check the agent installation. Saved credentials have not been deleted.",
   "m5.login.error.profile": "The saved sign-in environment could not be opened safely. Sign-out has not been confirmed. Do not delete credentials; use the details below to ask for help.",
+  "m5.login.error.profileCompatibility": "A compatibility issue prevents this app from safely using the saved Codex settings, so the connection check stopped. This does not mean you are signed out. Do not sign in again or delete credentials or settings. Use the details below to ask for help with the app's compatibility issue.",
   "m5.login.error.claude": "Could not verify the Claude connection. If the code expired, start sign-in again and enter the new code. If a Keychain error appears, cancel it instead of resetting to defaults.",
   "m5.login.error.codex": "Could not verify the saved Codex connection. This message alone does not mean you are signed out. Do not delete credentials; use the details below to ask for help.",
   "m5.shell.label": "M5 coding workbench",

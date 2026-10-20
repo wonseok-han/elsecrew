@@ -24,6 +24,13 @@ test("explicit recovery uses fixed provider and attempt without filesystem param
   for (const input of [{action:"recover"},{action:"recover",attemptId:"../x"},{action:"recover",attemptId:"a",path:"/tmp/fence"},{action:"recover",attemptId:"a",force:true}]) assert.throws(()=>validateLoginRequest(input));
 });
 import { loginErrorMessage } from "../src/m5/provider-login-message.ts";
+test("profile compatibility guidance does not send users through sign-in or credential deletion", () => {
+  assert.match(loginErrorMessage("codex", "providerProfileIsolationRequired"), /호환 문제/);
+  assert.match(loginErrorMessage("codex", "providerProfileIsolationRequired"), /다시 로그인하거나 인증·설정 파일을 삭제하지 말고/);
+  assert.match(loginErrorMessage("codex", "providerProfileIsolationRequired", "en"), /Do not sign in again or delete credentials or settings/);
+  const status = {state:"failed",attemptId:"compatibility-1",authUrl:null,error:"providerProfileIsolationRequired"};
+  assert.deepEqual(validateLoginStatus(status), status);
+});
 test("English login guidance preserves credential and recovery cautions", () => {
   assert.match(loginErrorMessage("codex", "providerExecutableChanged", "en"), /does not mean you are signed out/);
   assert.match(loginErrorMessage("codex", "providerExecutableMissing", "en"), /credentials have not been deleted/);

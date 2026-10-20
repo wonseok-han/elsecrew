@@ -169,6 +169,7 @@ function ProviderConnection({ disabled, provider, onAttention }: {disabled: bool
   useEffect(()=>{ if (status.state === "connected") setExpanded(false); },[status.state]);
   const waiting=status.state === "diagnosing" || status.state === "starting" || status.state === "waiting" || status.state === "verifying";
   const recoveryRequired=status.error === "providerLoginRecoveryRequired";
+  const profileCompatibilityRequired=status.error === "providerProfileIsolationRequired";
   useEffect(() => {
     onAttention(provider, waiting || recoveryRequired || error || status.state === "failed");
   }, [provider, waiting, recoveryRequired, error, status.state, onAttention]);
@@ -199,7 +200,7 @@ function ProviderConnection({ disabled, provider, onAttention }: {disabled: bool
       {codeError && <p role="alert">{t("m5.login.code.invalid")}</p>}
     </form>}
     {waiting ? <button disabled={disabled||busy||!status.attemptId} onClick={()=>void request({action:"cancel",attemptId:status.attemptId!})}>{t("m5.login.cancel")}</button>
-      : <button disabled={disabled||busy||recoveryRequired||status.state==="connected"||status.state==="unsupported"||!window.m5Login} onClick={()=>void request({action:"start",attemptId:crypto.randomUUID()})}>{t(status.state==="connected"?"m5.login.connected":"m5.login.start", { name })}</button>}
+      : <button disabled={disabled||busy||recoveryRequired||profileCompatibilityRequired||status.state==="connected"||status.state==="unsupported"||!window.m5Login} onClick={()=>void request({action:"start",attemptId:crypto.randomUUID()})}>{t(status.state==="connected"?"m5.login.connected":"m5.login.start", { name })}</button>}
     {!waiting && status.state!=="unsupported" && <button disabled={disabled||busy||recoveryRequired||!window.m5Login} onClick={()=>void request({action:"check",attemptId:crypto.randomUUID()})}>{t("m5.login.check")}</button>}
     {!waiting && status.state!=="unsupported" && <button disabled={disabled||busy||recoveryRequired||!window.m5Login} onClick={()=>void request({action:"diagnose",attemptId:crypto.randomUUID()})}>{t("m5.login.diagnose")}</button>}
     {recoveryRequired && <div><p>{t("m5.login.recovery.help")}</p><button disabled={disabled||busy||waiting||!window.m5Login} onClick={()=>void request({action:"recover",attemptId:crypto.randomUUID()})}>{t("m5.login.recovery.action")}</button></div>}

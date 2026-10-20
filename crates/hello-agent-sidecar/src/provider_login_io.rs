@@ -12,6 +12,13 @@ use std::process::{Child, ChildStdin, ChildStdout};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+pub(crate) enum HookProbeRequest<'a> {
+    Start(&'a std::path::Path),
+    Inventory(&'a std::path::Path),
+    OfflineTurn(&'a str),
+}
+
 fn failure() -> SidecarError {
     SidecarError::new(
         "providerLoginTransportFailed",
@@ -318,27 +325,31 @@ impl LoginIo {
         result
     }
 
-    /// Native opt-in test only. No turn, prompt, credential, or arbitrary RPC.
+    /// Native opt-in test only. Offline turn needs additional approval and the
+    /// caller's outer OS network-denying sandbox; never a real login profile.
     #[cfg(test)]
     pub(crate) fn send_hook_probe(
         &mut self,
-        cwd: &std::path::Path,
-        inventory: bool,
+        request: HookProbeRequest<'_>,
         cancel: &AtomicBool,
         observe: &mut impl FnMut() -> Result<(), SidecarError>,
     ) -> Result<(), SidecarError> {
-        if !cwd.is_absolute() {
-            return Err(failure());
-        }
-        let request = if inventory {
-            serde_json::json!({"id":100,"method":"hooks/list","params":{"cwds":[cwd]}})
-        } else {
-            serde_json::json!({
+        let request = match request {
+            HookProbeRequest::Inventory(cwd) if cwd.is_absolute() =>
+                serde_json::json!({"id":100,"method":"hooks/list","params":{"cwds":[cwd]}}),
+            HookProbeRequest::Start(cwd) if cwd.is_absolute() => serde_json::json!({
                 "id":99, "method":"thread/start",
                 "params":{"cwd":cwd,"model":"test-model","approvalPolicy":"never",
                     "sandbox":"read-only","ephemeral":true,
                     "config":{"bypass_hook_trust":true}}
-            })
+            }),
+            HookProbeRequest::OfflineTurn(id) if !id.is_empty() && id.len() <= 128
+                && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+                && std::env::var("HELLO_AGENT_APPROVED_OFFLINE_HOOK_TURN").as_deref() == Ok("1") =>
+                serde_json::json!({"id":101,"method":"turn/start","params":{
+                    "threadId":id,"input":[{"type":"text","text":"Do not use tools. Reply OK."}]
+                }}),
+            _ => return Err(failure()),
         };
         let frame = format!("{request}\n");
         let result = self.send_inner(frame.as_bytes(), Duration::from_secs(15), cancel, observe);

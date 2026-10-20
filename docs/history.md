@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-20 · by GPT-6 Astra
+- 246e8c4/clean 기준 직접 구현을 재개했다. 기존 안내도 로그아웃을 단정하지 않음을 확인했고, 정상 파싱된 project trust 설정 때문에 막힌 경우를 providerProfileIsolationRequired로 분리했다. 한/영 안내는 앱 설정 호환 문제와 인증 만료를 구분하고 인증/설정 삭제·재로그인을 권하지 않는다. 해당 오류에서는 로그인 시작 버튼을 비활성화하되 상태 재확인/설치 진단을 유지하며 backend 차단은 그대로다. 프런트 관련10건 PASS, Rust 오류 분류 변경은 후속 native 시험 빌드에 포함됐다.
+- 사용자가 OS 네트워크 차단·무인증 임시 프로필의 첫 작업 요청 시험을 명시 승인했다. 테스트 전용 고정 Start/Inventory/OfflineTurn 요청만 허용하고 첫 작업은 별도 승인 환경 gate와 bounded thread ID를 요구한다. 실제 사용자 프로필·proxy·외부 통신 허용 없이 기존 owner/종료 확인을 유지했다. readonly config_layers_review는 입증된 범위/종료 차단 결함 없음이며 요청 발신을 turn 완료로 표현하지 말 것을 확인했다.
+- 승인된 native hook 대조1건 PASS: 비교군은 첫 작업 요청 뒤 hook/started·hook/completed 및 표시 파일 생성, 격리군은 config sentinel 미로드·hooks 목록 비어 있음·표시 파일 없음이었다. 두 프로세스 모두 종료 확인 후 임시 폴더를 정리했고 config 불변/auth 부재를 확인했다. 네트워크 차단 환경의 모델 단계 error는 정상 응답/turn 완료 증거가 아니며 실제 모델 성공으로 인용하지 않는다. 이 증거는 untrusted override+hooks=false 결합 효과이며 각 옵션 단독 효과나 모든 버전 호환 보장은 아니다.
+- 앞선 세션 생성만의 FAIL은 이번 첫 작업 요청 포함 대조로 보완됐다. 반복되는 무효 비교를 막도록 opt-in hook 시험은 추가 offline-turn 승인 표시도 시작 전에 요구한다. 다음은 이 근거에 맞는 제품의 제한된 경고/disabled layer 처리와 trust-bearing 프로필 입장 연결이다. 아직 제품 차단을 풀거나 패키지를 갱신하지 않았으므로 Codex 연결 복구는 미완료다. G6/메모리/Windows/출시도 남는다. diff check PASS, main 병합/push 없음.
+
+### 2026-10-20 · by GPT-6 Astra
 - 직전 턴은 hook 등록·효과 설정 진단을 추가한 진행으로 분류하고 244f399/clean에서 재개했다. 공식 app-server 문서의 hook/started·hook/completed를 확인해 고정 이벤트명만 관측하는 진단과 미지 문자열/중복 키 회귀를 추가했다. 기존 thread_started 로그는 응답 수신과 실제 알림을 혼동하지 않도록 thread_response_received로 바꿨다.
 - 제한 환경 실행은 공급자 서명 입장에서 중단됐다. 허용 환경에서 같은 네트워크 차단 임시 시험을 재개했고, thread/start 응답 뒤 실제 thread/started를 확인했으나 4초 bounded drain에도 hook 시작/완료 알림은 없었다. 임시 자료만 사용하는 opt-in 경고 진단(본문2KiB 상한·임시 루트 마스킹)을 추가해 configWarning과 warning이 모두 hook trust 우회 활성 안내임을 확인했다. 즉 bypass_hook_trust 미지원/거절로 단정했던 가능성은 제외하며, trustStatus=untrusted 목록만으로 이번 invocation의 우회 미적용을 주장하지 않는다.
 - native 비교군 표시 파일은 여전히 없어 hook 대조 FAIL이며, 이를 격리 합격이나 Codex 연결 복구로 표현하지 않는다. 종료 확인과 임시 폴더 정리를 완료했고 인증/사용자 프로젝트·모델 호출은 없었다. 제품 경고 처리·프로필 차단은 그대로다. 상시 승인된 readonly config_layers_review는 이벤트 부재만으로 첫 turn 필요를 단정하지 말 것을 확인했다.
@@ -85,6 +91,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Codex hook 대조 보완(2026-10-20)**: 세션 생성만으로는 비교군 hook이 실행되지 않았다. 별도 승인된 무인증·OS 네트워크 차단 첫 작업 요청 뒤 비교군의 hook 시작/완료·표시 파일 생성과 격리군의 hooks 빈 목록·표시 파일 부재를 대조 확인했다. 종료 확인·임시 정리까지 PASS이며 실제 모델 응답 성공은 아니다. 제품 trust 입장/경고 처리 활성화는 별도 미완료다.
 
 - **Codex 격리 시험과 연결 입장의 구분(2026-10-20)**: named config/read는 cwd를 명시해야 해당 프로젝트 설정을 관측한다. 임시 trusted 프로젝트에서 invocation-only untrusted override의 sentinel 미로드를 대조 확인했지만 configWarning도 발생한다. 시험 전용 경고 후 관측을 제품 경고 무시 권한으로 재사용하지 않는다. 실제 trust-bearing 프로필 차단은 유지 중이며 인증 삭제/재로그인 문제가 아니라 설정 호환 후속이다.
 

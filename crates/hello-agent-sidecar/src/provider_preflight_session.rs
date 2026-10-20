@@ -911,9 +911,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires explicit approval for temporary command-hook isolation control"]
+    #[ignore = "requires explicit approval for temporary offline first-turn hook isolation control"]
     fn installed_codex_project_hook_isolation_control() {
         assert_eq!(std::env::var("HELLO_AGENT_APPROVED_HOOK_PROBE").as_deref(), Ok("1"));
+        assert_eq!(std::env::var("HELLO_AGENT_APPROVED_OFFLINE_HOOK_TURN").as_deref(), Ok("1"));
         inspect_project_trust_isolation(true);
     }
 
@@ -1012,7 +1013,7 @@ mod tests {
                 process.begin_preflight()?;
                 // Named configuration explicitly scopes config/read to cwd.
                 // This phase sends only initialize/config. The optional hook
-                // probe below starts an ephemeral thread, never a model turn.
+                // probe below separately gates an ephemeral offline turn.
                 let mut flow = PreflightExchange::with_named_permission(
                     &expected, home.to_str().unwrap(), &workspace, ExpectedPermission::ReadOnly,
                 ).map_err(|_| failure())?;
@@ -1060,8 +1061,9 @@ mod tests {
                         }
                     };
                     eprintln!("hook_probe isolated={isolated} marker_before_thread={}", marker.exists());
-                    process.send_hook_probe(&workspace, false, &cancel)?;
-                    let mut started = false;
+                    use crate::provider_login_io::HookProbeRequest;
+                    process.send_hook_probe(HookProbeRequest::Start(&workspace), &cancel)?;
+                    let mut thread_id = None;
                     let deadline = Instant::now() + Duration::from_secs(20);
                     for _ in 0..64 {
                         let remaining = deadline.checked_duration_since(Instant::now())
@@ -1073,15 +1075,13 @@ mod tests {
                         eprintln!("hook_probe event={}", hello_agent_core::provider::vendor_observation::codex_profile_config::hook_probe_notification(&reply));
                         if hello_agent_core::provider::vendor_observation::codex_profile_config::hook_probe_started(&reply)
                             .map_err(|reason| SidecarError::new("hookProbeFailed", reason))? {
-                            started = true;
+                            thread_id = value["result"]["thread"]["id"].as_str().map(str::to_owned);
                             break;
                         }
                     }
-                    if !started {
-                        return Err(SidecarError::new("hookProbeFailed", "thread response missing"));
-                    }
+                    let thread_id = thread_id.ok_or_else(|| SidecarError::new("hookProbeFailed", "thread response missing"))?;
                     eprintln!("hook_probe isolated={isolated} thread_response_received=true");
-                    process.send_hook_probe(&workspace, true, &cancel)?;
+                    process.send_hook_probe(HookProbeRequest::Inventory(&workspace), &cancel)?;
                     let inventory_deadline = Instant::now() + Duration::from_secs(15);
                     let mut inventory = None;
                     for _ in 0..64 {
@@ -1111,9 +1111,12 @@ mod tests {
                         }
                     }
                     eprintln!("hook_probe isolated={isolated} inventory_shape={}", shape(&inventory.ok_or_else(failure)?, 0));
-                    // thread/start may return before lifecycle work settles.
-                    // Keep the process owner alive for the hook's 3s timeout
-                    // plus a small margin; never send a model turn.
+                    if std::env::var("HELLO_AGENT_APPROVED_OFFLINE_HOOK_TURN").as_deref() == Ok("1") {
+                        // Separate approval; no account, proxy or network permission.
+                        process.send_hook_probe(HookProbeRequest::OfflineTurn(&thread_id), &cancel)?;
+                        eprintln!("hook_probe isolated={isolated} offline_turn_sent=true");
+                    }
+                    // Keep the owner alive for the hook timeout plus a margin.
                     let settle = Instant::now() + Duration::from_secs(4);
                     let mut frames = 0;
                     while Instant::now() < settle {

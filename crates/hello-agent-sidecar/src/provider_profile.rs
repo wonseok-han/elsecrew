@@ -159,7 +159,7 @@ fn profile_directory(app_data: &Dir, create_missing: bool) -> Result<Dir, Sideca
     let config = read_profile_config(&profile)?;
     if !config.is_auth_only() {
         return Err(SidecarError::new(
-            "providerProfileUnavailable",
+            "providerProfileIsolationRequired",
             "provider profile project settings require isolated startup",
         ));
     }
@@ -556,7 +556,7 @@ mod tests {
             Ok(_) => panic!("project configuration requires startup isolation"),
             Err(error) => error,
         };
-        assert_eq!(error.kind(), "providerProfileUnavailable");
+        assert_eq!(error.kind(), "providerProfileIsolationRequired");
         assert_eq!(error.detail, "provider profile project settings require isolated startup");
         assert_eq!(profile.read("config.toml").unwrap(), trusted);
     }

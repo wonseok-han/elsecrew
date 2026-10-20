@@ -8,5 +8,6 @@ export function loginErrorMessage(provider: LoginProvider, error: string | null,
   if (error === "providerExecutableChanged") return messages["m5.login.error.changed"];
   if (error === "providerExecutableMissing") return messages["m5.login.error.missing"];
   if (error === "providerProfileUnavailable") return messages["m5.login.error.profile"];
+  if (error === "providerProfileIsolationRequired") return messages["m5.login.error.profileCompatibility"];
   return messages[provider === "claude" ? "m5.login.error.claude" : "m5.login.error.codex"];
 }
