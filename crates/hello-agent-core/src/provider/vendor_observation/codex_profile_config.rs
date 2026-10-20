@@ -74,6 +74,7 @@ pub fn matches_project_config_probe(
     home: &Path,
     workspace: &Path,
     isolated: bool,
+    hooks_enabled: bool,
 ) -> Result<(), &'static str> {
     let value = input.json().map_err(|_| "invalid config probe JSON")?;
     if is_probe_configuration_warning(input) {
@@ -89,6 +90,9 @@ pub fn matches_project_config_probe(
         return Err("config probe response mismatch");
     }
     let result = &value["result"];
+    if result["config"]["features"]["hooks"] != hooks_enabled {
+        return Err("hook probe effective feature mismatch");
+    }
     let layers = result["layers"]
         .as_array()
         .ok_or("config probe layers missing")?;

@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-20 · by GPT-6 Astra
+- 4ea3cc8 이후 승인된 무계정·무과금 hook 시험을 이어갔다. hooks/list 관측을 추가해 비교군의 project hook 등록·enabled=true·trustStatus=untrusted를 확인했다. 프로젝트 신뢰와 개별 hook 신뢰는 별개이며 등록만으로 실행을 주장하지 않는다.
+- 시험의 bypass_hook_trust를 startup override에서 test-only thread/start.config로 옮겼다. 이때 초기 configWarning은 1개에서 0개로 바뀌었지만 실행 성공 증거는 아니다. 실제 features.hooks=true를 검사하고 matcher를 제거한 비교군도 ephemeral thread/start 성공 후 표시 파일을 생성하지 못했다. 최신 opt-in native hook 대조는 FAIL(1건)이며 격리군까지 통과한 시험이 아니다. 같은 비교군 반복이나 turn/model 호출로 범위를 확대하지 않았다.
+- 제품 launcher·프로필 입장·configWarning 거절은 변경하지 않았다. Codex 연결 복구는 여전히 미완료다. 다음은 SessionStart 실행 시점/신뢰·sandbox 실패를 구분하는 관측이며, 현재 증거로 프로젝트 설정 차단을 해제하지 않는다. 사용자 인증·프로젝트는 접근/변경하지 않았고 임시 시험 자식 종료 확인 뒤 임시 폴더를 정리했다. release 캐시만 재사용하고 새 패키지를 만들지 않았다.
+- core codex_profile_config 7건 PASS, 해당 core 모듈 rustfmt check 및 git diff --check PASS. 전체 제품 검증/합격이 아닌 실패 진단 체크포인트로 남긴다. main 병합·push 없음.
+
+### 2026-10-20 · by GPT-6 Astra
 - 4106171/clean 기준 후속 격리 검증을 진행했다. 공식 app-server/hooks/config 문서를 다시 확인했다(https://learn.chatgpt.com/docs/hooks, https://learn.chatgpt.com/docs/app-server). untrusted는 project hook을 건너뛰지만 user/system hook과 구분해야 하며 SessionStart는 세션 시작 이벤트다. readonly config_layers_review는 기존 config sentinel 대조만으로 hook 실행 차단을 실측했다고 주장하지 말 것을 지적했다.
 - 사용자가 임시 자동 명령 비교 시험을 승인했다. 기존 소유자/네트워크 차단 sandbox에 test-only ephemeral read-only thread/start를 추가하고 turn/model/OAuth 없이 임시 profile 안의 touch 표시 파일을 대조하도록 작성했다. hook 신뢰 우회는 시험 전용 -c bypass_hook_trust=true이며 제품 launcher에는 없다. trusted+hooks=true와 untrusted+hooks=false의 결합 효과를 비교하며 각 옵션 단독 효과로 인용하지 않는다.
 - 첫 시험은 app-server가 CLI 모드의 --dangerously-bypass-hook-trust 인자를 받지 않아 초기 전송 종료됐다. 임시 HOME의 도움말과 설치 실행 파일 문자열을 확인해 app-server override 형식으로 교정했다. 후속 알림은 configWarning이지만 예상 영문 summary와 달랐다. 추측한 문구 분류 코드는 제거하고 임시 진단만 bounded warning을 최대8개/20초 관측한 뒤 실제 설정/표시 파일을 검사한다. 제품의 경고 거절·trust-bearing profile 거절은 유지한다.

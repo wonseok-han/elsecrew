@@ -323,17 +323,24 @@ impl LoginIo {
     pub(crate) fn send_hook_probe(
         &mut self,
         cwd: &std::path::Path,
+        inventory: bool,
         cancel: &AtomicBool,
         observe: &mut impl FnMut() -> Result<(), SidecarError>,
     ) -> Result<(), SidecarError> {
         if !cwd.is_absolute() {
             return Err(failure());
         }
-        let frame = format!("{}\n", serde_json::json!({
-            "id":99, "method":"thread/start",
-            "params":{"cwd":cwd,"model":"test-model","approvalPolicy":"never",
-                "sandbox":"read-only","ephemeral":true}
-        }));
+        let request = if inventory {
+            serde_json::json!({"id":100,"method":"hooks/list","params":{"cwds":[cwd]}})
+        } else {
+            serde_json::json!({
+                "id":99, "method":"thread/start",
+                "params":{"cwd":cwd,"model":"test-model","approvalPolicy":"never",
+                    "sandbox":"read-only","ephemeral":true,
+                    "config":{"bypass_hook_trust":true}}
+            })
+        };
+        let frame = format!("{request}\n");
         let result = self.send_inner(frame.as_bytes(), Duration::from_secs(15), cancel, observe);
         if result.is_err() {
             self.failed = true;

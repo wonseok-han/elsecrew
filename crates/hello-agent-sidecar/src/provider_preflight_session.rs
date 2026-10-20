@@ -963,7 +963,7 @@ mod tests {
                 assert!(!marker_path.contains('\''));
                 let command = serde_json::to_string(&format!("/usr/bin/touch '{marker_path}'")).unwrap();
                 project_config.push_str(&format!(
-                    "[[hooks.SessionStart]]\nmatcher='^startup$'\n[[hooks.SessionStart.hooks]]\ntype='command'\ncommand={command}\ntimeout=3\n"
+                    "[[hooks.SessionStart]]\n[[hooks.SessionStart.hooks]]\ntype='command'\ncommand={command}\ntimeout=3\n"
                 ));
             }
             std::fs::write(workspace.join(".codex/config.toml"), &project_config).unwrap();
@@ -975,11 +975,11 @@ mod tests {
             let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium" };
             let mut args = discovery_arguments(&home, &expected, ExpectedPermission::ReadOnly).unwrap();
             if hook_probe {
-                // Test-only bypass permits our one known touch command without
-                // persisted vendor hook trust. Never passed by a product launcher.
-                args.extend(["-c".into(), "bypass_hook_trust=true".into()]);
+                // The fixed test-only thread request carries hook trust bypass.
+                // It is a request override, not an app-server startup setting.
                 if !isolated {
-                    args.extend(["-c".into(), "features.hooks=true".into()]);
+                    let flag = args.iter_mut().find(|arg| *arg == "features.hooks=false").unwrap();
+                    *flag = "features.hooks=true".into();
                 }
             }
             if isolated {
@@ -1011,7 +1011,8 @@ mod tests {
             let observation = launch.and_then(|()| {
                 process.begin_preflight()?;
                 // Named configuration explicitly scopes config/read to cwd.
-                // Only initialize/config are sent; no account/model/thread RPC.
+                // This phase sends only initialize/config. The optional hook
+                // probe below starts an ephemeral thread, never a model turn.
                 let mut flow = PreflightExchange::with_named_permission(
                     &expected, home.to_str().unwrap(), &workspace, ExpectedPermission::ReadOnly,
                 ).map_err(|_| failure())?;
@@ -1040,12 +1041,12 @@ mod tests {
                 }
                 eprintln!("project_trust_control isolated={isolated} diagnostic_warning_count={warning_count}");
                 hello_agent_core::provider::vendor_observation::codex_profile_config::matches_project_config_probe(
-                    &reply, &home, &workspace, isolated,
+                    &reply, &home, &workspace, isolated, hook_probe && !isolated,
                 ).map_err(|reason| SidecarError::new("configProbeFailed", reason))?;
                 eprintln!("project_trust_control isolated={isolated} matched=true");
                 if hook_probe {
                     eprintln!("hook_probe isolated={isolated} marker_before_thread={}", marker.exists());
-                    process.send_hook_probe(&workspace, &cancel)?;
+                    process.send_hook_probe(&workspace, false, &cancel)?;
                     let mut started = false;
                     let deadline = Instant::now() + Duration::from_secs(20);
                     for _ in 0..64 {
@@ -1062,6 +1063,32 @@ mod tests {
                         return Err(SidecarError::new("hookProbeFailed", "thread response missing"));
                     }
                     eprintln!("hook_probe isolated={isolated} thread_started=true");
+                    process.send_hook_probe(&workspace, true, &cancel)?;
+                    let inventory_deadline = Instant::now() + Duration::from_secs(15);
+                    let mut inventory = None;
+                    for _ in 0..64 {
+                        let remaining = inventory_deadline.checked_duration_since(Instant::now()).ok_or_else(failure)?;
+                        let reply = process.receive_permission_probe(remaining, &cancel)?;
+                        if reply["id"] == 100 {
+                            if !reply["error"].is_null() { return Err(SidecarError::new("hookProbeFailed", "hook inventory rejected")); }
+                            inventory = Some(reply["result"].clone());
+                            break;
+                        }
+                        if reply.get("id").is_some() { return Err(failure()); }
+                    }
+                    fn shape(value: &serde_json::Value, depth: usize) -> serde_json::Value {
+                        if depth > 6 { return json!("depth-limit"); }
+                        match value {
+                            serde_json::Value::Object(map) => map.iter().map(|(key, value)| (key.clone(), shape(value, depth + 1))).collect(),
+                            serde_json::Value::Array(items) => items.iter().take(8).map(|item| shape(item, depth + 1)).collect(),
+                            serde_json::Value::String(text) => {
+                                if ["SessionStart", "command", "trusted", "untrusted", "project", "user", "enabled", "disabled"].contains(&text.as_str()) { json!(text) }
+                                else { json!({"textLength":text.len()}) }
+                            }
+                            value => value.clone(),
+                        }
+                    }
+                    eprintln!("hook_probe isolated={isolated} inventory_shape={}", shape(&inventory.ok_or_else(failure)?, 0));
                     // thread/start may return before lifecycle work settles.
                     // Keep the process owner alive for the hook's 3s timeout
                     // plus a small margin; never send a model turn.

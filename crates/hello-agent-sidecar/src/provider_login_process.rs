@@ -838,6 +838,7 @@ impl<'a> LoginProcess<'a> {
     pub(crate) fn send_hook_probe(
         &mut self,
         cwd: &std::path::Path,
+        inventory: bool,
         cancel: &AtomicBool,
     ) -> Result<(), SidecarError> {
         if self.failed || self.finished || !self.preflight_claimed || self.claude_preflight {
@@ -845,7 +846,7 @@ impl<'a> LoginProcess<'a> {
         }
         self.transport_used = true;
         let mut io = self.io.take().ok_or_else(failure)?;
-        let result = io.send_hook_probe(cwd, cancel, &mut || self.tick());
+        let result = io.send_hook_probe(cwd, inventory, cancel, &mut || self.tick());
         self.io = Some(io);
         if result.is_err() {
             self.failed = true;
