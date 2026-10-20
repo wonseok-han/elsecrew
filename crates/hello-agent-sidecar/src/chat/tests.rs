@@ -4606,11 +4606,63 @@ fn provider_terminal_recovery_required_poisons_even_after_clean_exit_until_aband
     assert_eq!(resolved_detail["agentRecovery"], Value::Null);
     assert_eq!(resolved_detail["agentRuns"][0]["state"], "canceled");
     assert_eq!(resolved_detail["chat"]["state"], "discarded");
+    fixture
+        .projects
+        .reopen_project(
+            &mut fixture.storage,
+            chat["projectId"].as_str().unwrap(),
+            "req_reopen_after_actual_abandon",
+        )
+        .expect("resolved recovery must not strand the project catalog");
     hello_agent_protocol::agent_adapter_v1::validate_agent_adapter_payload_v1(
         "agentChatDetailPage",
         &resolved_detail,
     )
     .unwrap();
+}
+
+#[test]
+fn recovery_finalize_preserves_other_catalog_snapshot_and_rejects_identity_drift() {
+    for other_snapshot in [true, false] {
+        let (mut fixture, chat, run_id) =
+            durable_provider_recovery_fixture("req_catalog_recovery_guard");
+        let project_id = chat["projectId"].as_str().unwrap();
+        let mut project = fixture.storage.projection_record("project", project_id)
+            .unwrap().unwrap();
+        project.remove("last_event_sequence");
+        if other_snapshot {
+            project.insert("worktree_id".into(), json!("worktree_other_catalog"));
+        }
+        project.insert("workspace_identity".into(), json!("workspace_other_catalog"));
+        fixture.storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "project",
+            aggregate_id: project_id.into(),
+            operation_id: "op_test_catalog_identity_drift".into(),
+            request_id: None,
+            payload: project,
+        }]).unwrap();
+        let before = fixture.storage.projection_record("project", project_id).unwrap();
+        let run = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+        let request = json!({
+            "recoveryId":run["recovery"]["recoveryId"],"chatId":chat["chatId"],
+            "taskId":chat["taskId"],"projectId":chat["projectId"],
+            "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+            "runId":run_id,"expectedRevision":1,"resolution":"abandon"
+        });
+        let result = AgentRuntime::blocked().resolve_recovery(
+            &mut fixture.storage, &mut fixture.projects, &request,
+            "req_catalog_recovery_resolve",
+        );
+        if other_snapshot {
+            assert_eq!(result.unwrap()["outcome"], "resolvedAbandoned");
+        } else {
+            assert_eq!(result.unwrap_err().kind, "manifestMismatch");
+            let run = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+            assert_eq!(run["recovery"]["state"], "unresolved");
+            assert!(!fixture.storage.blocker_ids().unwrap().is_empty());
+        }
+        assert_eq!(fixture.storage.projection_record("project", project_id).unwrap(), before);
+    }
 }
 
 #[test]
@@ -5036,6 +5088,14 @@ fn recovery_abandon_saga_reconciles_each_crash_boundary_and_mismatch_stays_poiso
         assert_eq!(finalized["record"]["state"], "canceled");
         assert_eq!(finalized["recovery"]["state"], "resolvedAbandoned");
         assert!(finalized.get("recovery_resolution_intent").is_none());
+        fixture
+            .projects
+            .reopen_project(
+                &mut fixture.storage,
+                chat["projectId"].as_str().unwrap(),
+                "req_reopen_after_recovery_saga",
+            )
+            .expect("reconciled recovery must also retire the catalog snapshot");
         let lock = fixture
             .storage
             .projection_record(

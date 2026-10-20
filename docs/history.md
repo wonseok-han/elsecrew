@@ -1,5 +1,26 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-20 · by GPT-6 Astra
+- c6ecd56에서 actual recovery 후 프로젝트 재열기 회귀를 추가해 수정 전 manifestMismatch를 재현했다. finalize_recovery_intent의 run/chat/lock 원자 갱신에 같은 worktree/workspace identity를 가리키는 project lifecycle=abandoned 갱신을 포함했다. 다른 worktree는 보존하고 동일 worktree의 identity 불일치는 fail-closed한다. 기존 미커밋 조사 기록은 보존했다.
+- 수정 후 release recovery_ 단위28건 및 stdio1건 PASS. 읽기 전용 config_layers_review는 입증된 차단 결함 없음이며 교차 연결 경합 잠정 지적은 Storage EXCLUSIVE 단일 writer 확인 뒤 철회했다. 다른 catalog snapshot 보존/동일 ID identity 불일치의 추가 회귀를 작성해 실행 중이다. 실제 계정/사용자 프로젝트/인증 변경 없음.
+- 이는 향후 정상 복구/중단 후 saga 재개 경로의 수정이다. 이미 resolvedAbandoned로 끝난 과거 stale project projection을 조정하는 마이그레이션은 아직 없으므로 현재 앱 프로젝트가 복구됐다고 주장하지 않는다. 다음은 추가 회귀 마감, 기존 기록의 검증 기반 복구, Codex 설정 격리 호환이며 G6/메모리/Windows/출시 미완료다.
+- 추가 catalog 보존/identity 불일치 회귀1건(두 분기)도 release PASS, diff check PASS다. Rust 캐시는1.7G로 유지했다. 전체 sidecar/제품 gate를 반복하지 않았고 최신 패키지에는 아직 이 Rust 수정이 없다.
+
+### 2026-10-20 · by GPT-6 Astra
+- Codex 설정 호환 조사와 읽기 전용 config_layers_review1명 검토를 수행했다. 실제 설정의 추가 항목은 projects 섹션/trust_level=trusted이며 경로·인증 내용은 출력하지 않았다. 공식 설정 문서 https://learn.chatgpt.com/docs/config-file/config-reference 는 trusted 프로젝트별 설정 로드를 설명한다. 이전 단순 byte 비교 완화 구상만으로 안전한 복구를 주장하지 않는다.
+- profile_directory 외에도 legacy layers.rs UserConfig와 named_config.rs의 user layer가 고정 auth-only 설정을 요구하므로 한 곳만 수정하면 다음 단계에서 다시 거절된다. 검토자는 프로젝트 cwd에서 공급자 시작이 사후 config/read 검사보다 앞선다는 경계를 지적했다. 로그인 호환/실제 실행 admission을 분리하고 공급자 시작 전 프로젝트 설정 격리가 입증돼야 한다. 설정 삭제·trust 자동 변경·unknown config 무조건 허용은 하지 않는다.
+- 실제 실행 안전 계약 변경은 명시 결정 대상이며 아직 활성화하지 않았다. 다음은 비계정/비모델 방식의 격리 가능성 조사 및 별개 manifestMismatch 수정이다. actual recovery finalize가 manifest와 chat/run/lock은 갱신하지만 project projection은 갱신하지 않는 경로를 확인했다. 원장 수동 변경 없이 재열기 회귀로 확인할 예정이다. 새 모델 호출/재로그인/사용자 프로젝트 변경 없음.
+
+### 2026-10-20 · by GPT-6 Astra
+- 사용자 Codex 연결 불가 보고를 현재 UI와 소스로 대조했다. 앱은 provider profile 오류 안내를 표시하며 로그아웃 여부 확인 전 단계에서 막힌다. 인증 본문은 읽지 않고 metadata만 확인해 auth.json은 단일 일반 파일/0600/uid501, 프로필0700·부모0755였음을 확인했다.
+- 앱 관리 config.toml의 내용 비교만 수행한 결과 기대97바이트와 실제278바이트가 불일치했다. 값·섹션명은 출력하지 않고 추가 trust_level 키/섹션 존재만 확인했다. profile_directory가 파일 길이와 전체 bytes를 고정 CONFIG와 비교하므로 이 불일치 자체가 연결 거절 조건임을 확인했다. 누가 언제 추가했는지는 미확정이며 인증 만료/토큰 삭제라고 단정하지 않는다.
+- 설정/인증을 덮어쓰거나 검사 완화·재로그인·모델 호출은 하지 않았다. 다음은 공급자 trust 설정 변화와 앱 소유 설정 검증을 분리하는 호환 설계/회귀이며, 기존 프로젝트 재열기 manifestMismatch 조사도 남는다.
+
+### 2026-10-20 · by GPT-6 Astra
+- c6ecd56/clean에서 기존 앱을 메뉴 Quit으로 정상 종료하고 hello-agent/sidecar 프로세스 부재를 확인했다. pnpm m5:package는 제한 환경 fetch 실패 후 허용된 재실행으로 PASS했고 release 캐시를 재사용했다. 같은 out 경로만 갱신했으며 target1.7G/out309M, 중복 설치/ZIP 생성 없음.
+- 최신 앱11259/sidecar11302가 살아 있음을 확인했다. 초기 클릭 무반응 뒤 사용자 전면 표시 확인을 받아 다시 관측한 결과, 실제 프로젝트 열기 오류 상세는 m5:project:catalog의 manifestMismatch: persisted manifest differs from the canonical snapshot identity였다. 단순 입력 장애로 확정하지 않는다. validate_active_project가 원장 active와 manifest active의 완전 일치를 요구하는 위치를 확인했으며 폐기 후 프로젝트 연결 상태를 추가 조사해야 한다. 검사 우회/원장 수동 수정 없음.
+- Claude 기존 연결은 확인되지만 Codex는 저장된 로그인 환경을 안전하게 열지 못함 안내다. 인증 만료로 단정하지 않는다. 폐기 안내 화면 실검증/새 모델 실행은 하지 못했고 승인 잔여 Codex 중단1회는 그대로다. 다음은 프로젝트 재열기 불일치와 Codex 프로필 진단이며 G6/메모리/Windows/출시 미완료다.
+
+### 2026-10-20 · by GPT-6 Astra
 - 직전 턴은 재생성 가능한 산출물5.90GiB를 실제 정리한 진척이다. 011a9dc와 기존 문서2파일 미커밋 상태에서 직접 구현을 재개했다. 폐기 후에도 복구 안내가 남는 원인은 Timeline이 isActionBlocked(폐기 포함)를 복구 경고 표시 조건으로 재사용한 것이었다.
 - Karpathy 최소 변경으로 복구 경고는 isRecoveryBlocked에만 표시하고, discarded이며 미해결 복구가 없는 경우 한/영 폐기 안내와 새 채팅 안내를 표시한다. 실행/편집 차단 조건은 그대로다. TypeScript 및 기존 actual event/recovery25건과 diff check PASS. 새 문구의 실제 패키지 화면 검증은 아직이며 전체 완료로 확대하지 않는다.
 - 다음은 최신 진단 포함 패키지에서 Codex 실패 단계 확인과 승인 잔여 중단1회, G6/메모리 및 Windows/출시 검증이다. 새 실제 호출·인증 변경·main 병합/push 없음. 직전 복구/저장공간 정리 기록과 날짜별 아카이브 이동도 보존한다.

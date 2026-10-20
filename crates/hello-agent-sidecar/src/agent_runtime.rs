@@ -3332,6 +3332,32 @@ fn finalize_recovery_intent(
             payload: chat_projection_with_record(&chat_projection, &discarded_chat, None)?,
         },
     ];
+    // The project catalog may still point to this chat's latest snapshot.
+    // Commit its lifecycle alongside the resolved run, chat and writer lock;
+    // never retire a newer snapshot belonging to another chat.
+    let mut project = storage
+        .projection_record("project", &address.project_id)?
+        .ok_or_else(|| ProjectFailure::manifest("recovery project projection is missing"))?;
+    if project.get("worktree_id").and_then(Value::as_str)
+        == Some(address.worktree_id.as_str())
+    {
+        if project.get("workspace_identity").and_then(Value::as_str)
+            != Some(address.workspace_identity.as_str())
+        {
+            return Err(ProjectFailure::manifest(
+                "recovery project workspace identity differs",
+            ));
+        }
+        project.remove("last_event_sequence");
+        project.insert("lifecycle".into(), Value::String("abandoned".into()));
+        upserts.push(ProjectionUpsert {
+            aggregate_type: "project",
+            aggregate_id: address.project_id.clone(),
+            operation_id: format!("op_agent_recovery_project_finalize_{recovery_id}"),
+            request_id: None,
+            payload: project,
+        });
+    }
     if profile.permission == "workspaceWrite" {
         upserts.push(release_writer_lock(
             storage,
