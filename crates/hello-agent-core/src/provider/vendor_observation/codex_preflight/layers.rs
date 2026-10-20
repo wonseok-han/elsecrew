@@ -55,11 +55,6 @@ pub(super) fn match_layers(
     }
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
-    struct UserConfig {
-        cli_auth_credentials_store: String,
-    }
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
     struct Flags {
         model: String,
         model_provider: String,
@@ -81,6 +76,9 @@ pub(super) fn match_layers(
         return Err(invalid());
     }
     let mut seen = [false; 3];
+    // Preserve recursive duplicate-key rejection before normalizing the new
+    // isolation flag. Value deserialization alone would retain the last key.
+    let effective = input.json()?;
     for layer in response.layers {
         if layer.disabled_reason.is_some() {
             return Err(invalid());
@@ -96,8 +94,12 @@ pub(super) fn match_layers(
                 {
                     return Err(invalid());
                 }
-                let config: Flags =
+                let mut flags: serde_json::Value =
                     serde_json::from_str(layer.config.get()).map_err(|_| invalid())?;
+                super::super::codex_profile_config::strip_isolation_flag(
+                    &mut flags, &effective["config"], &[std::path::Path::new(home)],
+                ).map_err(|_| invalid())?;
+                let config: Flags = serde_json::from_value(flags).map_err(|_| invalid())?;
                 if config.model != profile.model
                     || config.model_provider != "openai"
                     || config.model_reasoning_effort != profile.reasoning_effort
@@ -122,9 +124,12 @@ pub(super) fn match_layers(
                 if file != format!("{home}/config.toml") || profile.is_some() {
                     return Err(invalid());
                 }
-                let config: UserConfig =
-                    serde_json::from_str(layer.config.get()).map_err(|_| invalid())?;
-                if config.cli_auth_credentials_store != "file" {
+                let flags = effective["layers"].as_array().ok_or_else(invalid)?.iter()
+                    .find(|candidate| candidate["name"]["type"] == "sessionFlags")
+                    .ok_or_else(invalid)?;
+                if !super::super::codex_profile_config::ProfileConfig::matches_observed_bytes(
+                    layer.config.get().as_bytes(), &flags["config"], &effective["config"], std::path::Path::new(home),
+                ) {
                     return Err(invalid());
                 }
                 1
@@ -152,6 +157,34 @@ mod tests {
     fn only_exact_reported_profile_layers_match() {
         let config = json!({"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only","features":{"hooks":false,"apps":false,"plugins":false}});
         let base = json!({"config":config,"layers":[{"name":{"type":"sessionFlags"},"config":config},{"name":{"type":"user","file":"/app/profile/config.toml"},"config":{"cli_auth_credentials_store":"file"}},{"name":{"type":"system","file":"/etc/codex/config.toml"},"config":{}}]});
+        for (key, value, other) in [
+            ("model", "\"test-model\"", "\"other\""),
+            ("hooks", "false", "true"),
+        ] {
+            for wrong_first in [true, false] {
+                let original = format!("\"{key}\":{value}");
+                let duplicate = if wrong_first {
+                    format!("\"{key}\":{other},{original}")
+                } else {
+                    format!("{original},\"{key}\":{other}")
+                };
+                let raw = base.to_string().replace(&original, &duplicate);
+                let input = BoundedObservation::new(raw.into_bytes()).unwrap();
+                assert!(match_layers(&input, &ExpectedProfile {
+                    model: "test-model", reasoning_effort: "medium",
+                }, "/app/profile", ExpectedPermission::ReadOnly).is_err());
+            }
+        }
+        for raw_projects in [
+            "\"projects\":{},\"projects\":null,",
+            "\"projects\":null,\"projects\":{},",
+        ] {
+            let raw = base.to_string().replace("\"model\":", &format!("{raw_projects}\"model\":"));
+            let input = BoundedObservation::new(raw.into_bytes()).unwrap();
+            assert!(match_layers(&input, &ExpectedProfile {
+                model: "test-model", reasoning_effort: "medium",
+            }, "/app/profile", ExpectedPermission::ReadOnly).is_err());
+        }
         for case in [
             "valid",
             "missing",

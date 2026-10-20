@@ -52,6 +52,8 @@ impl CodexCommand {
         let mut args = super::named_discovery_arguments(home, workspace, expected, permission)
             .map_err(|_| failure())?;
         args.push("--strict-config".into());
+        args.extend(["-c".into(), crate::provider_profile::codex_isolation_argument(home, workspace)
+            .map_err(|_| failure())?]);
         let borrowed: Vec<_> = args.iter().map(|arg| arg.as_os_str()).collect();
         let mut command =
             crate::provider_login_gate::command(executable.revalidate()?, &borrowed, workspace)

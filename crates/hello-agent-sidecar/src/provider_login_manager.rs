@@ -521,12 +521,21 @@ fn run(
             helper
                 .revalidate()
                 .map_err(|_| std::io::Error::other("helper changed"))?;
+            let isolation = crate::provider_profile::codex_isolation_argument(&home, &home)?;
             let mut command = provider_login_gate::command(
                 path,
                 &[
                     "app-server".as_ref(),
                     "--listen".as_ref(),
                     "stdio://".as_ref(),
+                    "-c".as_ref(),
+                    isolation.as_os_str(),
+                    "-c".as_ref(),
+                    "features.hooks=false".as_ref(),
+                    "-c".as_ref(),
+                    "features.apps=false".as_ref(),
+                    "-c".as_ref(),
+                    "features.plugins=false".as_ref(),
                 ],
                 &home,
             )?;

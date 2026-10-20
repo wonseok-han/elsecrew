@@ -156,6 +156,17 @@ fn profile_directory(app_data: &Dir, create_missing: bool) -> Result<Dir, Sideca
             Err(_) => return Err(failure()),
         }
     }
+    let config = read_profile_config(&profile)?;
+    if !config.is_auth_only() {
+        return Err(SidecarError::new(
+            "providerProfileUnavailable",
+            "provider profile project settings require isolated startup",
+        ));
+    }
+    Ok(profile)
+}
+
+fn read_profile_config(profile: &Dir) -> Result<ProfileConfig, SidecarError> {
     let mut read = OpenOptions::new();
     read.read(true)
         .follow(FollowSymlinks::No)
@@ -177,14 +188,16 @@ fn profile_directory(app_data: &Dir, create_missing: bool) -> Result<Dir, Sideca
         .take(MAX_CONFIG_BYTES as u64 + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| failure())?;
-    let config = ProfileConfig::parse(&bytes).map_err(|_| failure())?;
-    if !config.is_auth_only() {
-        return Err(SidecarError::new(
-            "providerProfileUnavailable",
-            "provider profile project settings require isolated startup",
-        ));
-    }
-    Ok(profile)
+    ProfileConfig::parse(&bytes).map_err(|_| failure())
+}
+
+/// Additional startup restriction, never profile or runtime admission.
+/// All real app-server entry points use this without rewriting stored config.
+pub(crate) fn codex_isolation_argument(home: &Path, cwd: &Path) -> std::io::Result<std::ffi::OsString> {
+    let invalid = || std::io::Error::other("Codex startup isolation configuration unavailable");
+    let directory = open_absolute_directory(home).map_err(|_| invalid())?;
+    read_profile_config(&directory).map_err(|_| invalid())?
+        .isolation_argument(&[home, cwd]).map(std::ffi::OsString::from).map_err(|_| invalid())
 }
 
 /// Retains the app-data and login directory identities for the owning sidecar.

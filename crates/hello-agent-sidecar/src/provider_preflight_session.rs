@@ -216,6 +216,7 @@ pub(crate) fn inspect_named_preflight_candidate(
         permission,
     )
     .map_err(|_| failure())?;
+    flow.require_startup_isolation(workspace).map_err(|_| failure())?;
     if cancel.load(Ordering::Acquire) {
         return Err(failure());
     }
@@ -326,6 +327,7 @@ fn inspect_preflight_candidate<'a>(
     let home = profile.revalidate()?;
     let mut flow = PreflightExchange::new(expected, home.to_str().ok_or_else(failure)?)
         .map_err(|_| failure())?;
+    flow.require_startup_isolation(workspace.unwrap_or(&home)).map_err(|_| failure())?;
     if cancel.load(Ordering::Acquire) {
         return Err(failure());
     }
@@ -353,7 +355,8 @@ fn inspect_preflight_candidate<'a>(
     };
     let launch = if let Some(workspace) = workspace {
         let command = (|| {
-            let args = discovery_arguments(&home, expected, ExpectedPermission::ReadOnly)?;
+            let mut args = discovery_arguments(&home, expected, ExpectedPermission::ReadOnly)?;
+            args.extend(["-c".into(), crate::provider_profile::codex_isolation_argument(&home, workspace)?]);
             crate::provider_runtime_sandbox::command_with_model_proxy(
                 executable.revalidate().map_err(std::io::Error::other)?,
                 helper.revalidate().map_err(std::io::Error::other)?,
@@ -388,7 +391,8 @@ pub(crate) fn discovery_command(
     home: &std::path::Path,
     expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,
 ) -> std::io::Result<std::process::Command> {
-    let args = discovery_arguments(home, expected, ExpectedPermission::ReadOnly)?;
+    let mut args = discovery_arguments(home, expected, ExpectedPermission::ReadOnly)?;
+    args.extend(["-c".into(), crate::provider_profile::codex_isolation_argument(home, home)?]);
     let references: Vec<_> = args.iter().map(std::ffi::OsString::as_os_str).collect();
     let mut command = crate::provider_login_gate::command(executable, &references, home)?;
     discovery_environment(&mut command, home);
@@ -404,7 +408,8 @@ pub(crate) fn offline_discovery_command(
     expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,
     permission: ExpectedPermission,
 ) -> std::io::Result<std::process::Command> {
-    let args = discovery_arguments(home, expected, permission)?;
+    let mut args = discovery_arguments(home, expected, permission)?;
+    args.extend(["-c".into(), crate::provider_profile::codex_isolation_argument(home, workspace)?]);
     let mut command = crate::provider_runtime_sandbox::command(
         executable,
         helper,
@@ -899,6 +904,127 @@ mod tests {
         inspect_installed_codex_offline(false);
     }
 
+    #[test]
+    #[ignore = "requires explicit approval for installed CLI temporary configuration inspection"]
+    fn installed_codex_project_trust_isolation_control() {
+        use crate::provider_profile::LoginProfile;
+        use std::os::unix::fs::PermissionsExt;
+        use std::path::PathBuf;
+        assert_eq!(std::env::var("HELLO_AGENT_APPROVED_OFFLINE_CONFIG").as_deref(), Ok("1"));
+        // Test-only owner: no product profile admission is bypassed. All paths
+        // and configuration below are freshly created, without credentials.
+        struct InspectionProfile {
+            root: PathBuf,
+            home: PathBuf,
+            config: Vec<u8>,
+        }
+        impl LoginProfile for InspectionProfile {
+            fn revalidate(&self) -> Result<PathBuf, SidecarError> {
+                if std::fs::read(self.home.join("config.toml")).map_err(|_| failure())? != self.config
+                    || self.home.join("auth.json").exists()
+                {
+                    return Err(failure());
+                }
+                Ok(self.home.clone())
+            }
+            fn login_lease_directory(&self) -> Result<cap_std::fs::Dir, SidecarError> {
+                crate::provider_profile::open_absolute_directory(&self.root)
+            }
+            fn pending_name(&self) -> &'static str { "codex-login.pending" }
+        }
+        let (cli, helper) = crate::provider_login_manager::select_installed_codex_pair().unwrap();
+        for isolated in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().canonicalize().unwrap();
+            let home = root.join("profile");
+            let workspace = root.join("workspace");
+            std::fs::create_dir(&home).unwrap();
+            std::fs::create_dir(&workspace).unwrap();
+            assert!(Command::new("/usr/bin/git")
+                .args(["-c", "init.templateDir=", "init", "--quiet"])
+                .current_dir(&workspace).env_clear().env("HOME", &home)
+                .status().unwrap().success());
+            std::fs::create_dir(workspace.join(".codex")).unwrap();
+            let project_config = b"developer_instructions='HELLO_AGENT_PROJECT_CONFIG_SENTINEL'\n";
+            std::fs::write(workspace.join(".codex/config.toml"), project_config).unwrap();
+            let config = format!("cli_auth_credentials_store='file'\n[projects.{}]\ntrust_level='trusted'\n",
+                serde_json::to_string(workspace.to_str().unwrap()).unwrap()).into_bytes();
+            std::fs::write(home.join("config.toml"), &config).unwrap();
+            std::fs::set_permissions(home.join("config.toml"), std::fs::Permissions::from_mode(0o600)).unwrap();
+            let profile = InspectionProfile { root, home: home.clone(), config };
+            let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium" };
+            let mut args = discovery_arguments(&home, &expected, ExpectedPermission::ReadOnly).unwrap();
+            if isolated {
+                args.extend(["-c".into(), crate::provider_profile::codex_isolation_argument(&home, &workspace).unwrap()]);
+            }
+            let mut process = LoginProcess::reserve(&profile).unwrap();
+            let cancel = AtomicBool::new(false);
+            let launch = process.launch_with_barrier(
+                || {
+                    let mut command = crate::provider_runtime_sandbox::command(
+                        cli.revalidate().map_err(std::io::Error::other)?,
+                        helper.revalidate().map_err(std::io::Error::other)?,
+                        &args, &home, &workspace,
+                        crate::provider_runtime_sandbox::WorkspaceAccess::ReadOnly,
+                    )?;
+                    discovery_environment(&mut command, &home);
+                    // Exercise named-launch cwd semantics while retaining the
+                    // probe's outer OS network/file restrictions.
+                    command.current_dir(&workspace);
+                    command.spawn()
+                },
+                |child| {
+                    cli.revalidate().map_err(std::io::Error::other)?;
+                    helper.revalidate().map_err(std::io::Error::other)?;
+                    profile.revalidate().map_err(std::io::Error::other)?;
+                    crate::provider_login_gate::release(child)
+                },
+            );
+            let observation = launch.and_then(|()| {
+                process.begin_preflight()?;
+                // Named configuration explicitly scopes config/read to cwd.
+                // Only initialize/config are sent; no account/model/thread RPC.
+                let mut flow = PreflightExchange::with_named_permission(
+                    &expected, home.to_str().unwrap(), &workspace, ExpectedPermission::ReadOnly,
+                ).map_err(|_| failure())?;
+                for frame in flow.next_frames().map_err(|_| failure())? {
+                    process.send_preflight(frame, Duration::from_secs(15), &cancel)?;
+                }
+                let reply = process.receive_preflight(Duration::from_secs(15), &cancel)?;
+                flow.accept(&reply).map_err(|_| failure())?;
+                eprintln!("project_trust_control isolated={isolated} initialized=true");
+                for frame in flow.next_frames().map_err(|_| failure())? {
+                    process.send_preflight(frame, Duration::from_secs(15), &cancel)?;
+                }
+                let mut reply = process.receive_preflight(Duration::from_secs(15), &cancel)?;
+                // Probe only: capture the following config result after one
+                // warning, without granting product admission or a model turn.
+                // Production preflight continues to reject configWarning.
+                if isolated && hello_agent_core::provider::vendor_observation::codex_profile_config::matches_project_config_probe(
+                    &reply, &home, &workspace, isolated,
+                ) == Err("config probe configuration warning") {
+                    eprintln!("project_trust_control isolated=true configuration_warning=true");
+                    reply = process.receive_preflight(Duration::from_secs(15), &cancel)?;
+                }
+                hello_agent_core::provider::vendor_observation::codex_profile_config::matches_project_config_probe(
+                    &reply, &home, &workspace, isolated,
+                ).map_err(|reason| SidecarError::new("configProbeFailed", reason))?;
+                eprintln!("project_trust_control isolated={isolated} matched=true");
+                Ok(())
+            });
+            let cleanup = process.finish();
+            let confirmed = process.closure_evidence().is_some_and(|evidence| evidence.confirmed());
+            if cleanup.is_err() || !confirmed {
+                let retained = temp.keep();
+                panic!("inspection termination unconfirmed; retained {}", retained.display());
+            }
+            profile.revalidate().unwrap();
+            assert_eq!(std::fs::read(workspace.join(".codex/config.toml")).unwrap(), project_config);
+            assert!(observation.is_ok(), "project trust control failed: isolated={isolated}, fixed_error={:?}",
+                observation.as_ref().err().map(|error| &error.detail));
+        }
+    }
+
     /// Reproduce a vendor-update leftover in a disposable profile only. This
     /// probe does not authorize bypassing runtime admission for a real profile.
     #[test]
@@ -908,26 +1034,12 @@ mod tests {
     }
 
     fn inspect_installed_codex_offline(stale_helper: bool) {
-        use crate::provider_executable::PinnedExecutable;
-        use std::path::Path;
         assert_eq!(
             std::env::var("HELLO_AGENT_APPROVED_OFFLINE_CONFIG").as_deref(),
             Ok("1"),
             "explicit config-only inspection approval is required"
         );
-        let cli = PinnedExecutable::open(
-            Path::new("/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"),
-            crate::provider_login_manager::digest("3e11ccc743e8198a5ef84fb57c89941d845b0ea0302485ed1fbac2f0821aca5a"),
-        ).unwrap();
-        let helper = PinnedExecutable::open(
-            Path::new(
-                "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex-code-mode-host",
-            ),
-            crate::provider_login_manager::digest(
-                "4c39893666a166addd217df78f158c5975f69b598404a9f86ff0df0f3da43f6d",
-            ),
-        )
-        .unwrap();
+        let (cli, helper) = crate::provider_login_manager::select_installed_codex_pair().unwrap();
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().canonicalize().unwrap();
         let workspace = root.join("empty-workspace");
@@ -953,6 +1065,7 @@ mod tests {
         };
         let mut flow =
             PreflightExchange::configuration_only(&expected, home.to_str().unwrap()).unwrap();
+        flow.require_startup_isolation(&workspace).unwrap();
         let cancel = AtomicBool::new(false);
         let mut process = LoginProcess::reserve(&profile).unwrap();
         let launch = process.launch_with_barrier(
@@ -1043,6 +1156,10 @@ mod tests {
             confirmed,
             flow.state()
         );
+        if cleanup.is_err() || !confirmed {
+            let retained = temp.keep();
+            panic!("offline inspection termination unconfirmed; retained {}", retained.display());
+        }
         assert_eq!(
             std::fs::read(home.join("config.toml")).unwrap(),
             original_config
@@ -1226,6 +1343,7 @@ IFS= read -r hold
             "changed-cli",
             "changed-helper",
             "eof",
+            "missing-isolation",
         ] {
             let temp = tempfile::tempdir().unwrap();
             let root = temp.path().canonicalize().unwrap();
@@ -1234,13 +1352,17 @@ IFS= read -r hold
             let home = profile.revalidate().unwrap();
             let original = std::fs::read(home.join("config.toml")).unwrap();
             let script = if case == "eof" {
-                "#!/bin/sh\nexit 0\n"
+                "#!/bin/sh\nexit 0\n".to_owned()
+            } else if case == "missing-isolation" {
+                PEER.to_owned()
             } else {
-                PEER
+                let config = hello_agent_core::provider::vendor_observation::codex_profile_config::ProfileConfig::parse(&original).unwrap();
+                let projects = config.isolated_projects(&[&home]).unwrap();
+                PEER.replace("\"features\":", &format!("\"projects\":{projects},\"features\":"))
             };
             let cli_path = root.join("toy-cli");
             let helper_path = root.join("toy-helper");
-            for (path, source) in [(&cli_path, script), (&helper_path, "#!/bin/sh\nexit 0\n")] {
+            for (path, source) in [(&cli_path, script.as_str()), (&helper_path, "#!/bin/sh\nexit 0\n")] {
                 std::fs::write(path, source).unwrap();
                 std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
             }
@@ -1282,13 +1404,18 @@ IFS= read -r hold
 
     #[test]
     fn discovery_uses_invocation_only_settings_and_rejects_injected_values() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().canonicalize().unwrap();
+        std::fs::write(home.join("config.toml"), b"cli_auth_credentials_store='file'").unwrap();
+        std::fs::set_permissions(home.join("config.toml"), std::fs::Permissions::from_mode(0o600)).unwrap();
         let profile = ExpectedProfile {
             model: "test-model",
             reasoning_effort: "medium",
         };
         let command = discovery_command(
             std::path::Path::new("/verified/codex"),
-            std::path::Path::new("/private/profile"),
+            &home,
             &profile,
         )
         .unwrap();
@@ -1297,7 +1424,7 @@ IFS= read -r hold
             .map(|arg| arg.to_str().unwrap())
             .collect();
         assert_eq!(
-            &args[4..],
+            &args[4..args.len() - 2],
             &[
                 "app-server",
                 "--listen",
@@ -1320,18 +1447,21 @@ IFS= read -r hold
                 "features.plugins=false"
             ]
         );
+        assert_eq!(args[args.len() - 2], "-c");
+        assert_eq!(args[args.len() - 1],
+            crate::provider_profile::codex_isolation_argument(&home, &home).unwrap().to_str().unwrap());
         assert_eq!(
             command.get_current_dir(),
-            Some(std::path::Path::new("/private/profile"))
+            Some(home.as_path())
         );
         let env: std::collections::BTreeMap<_, _> = command
             .get_envs()
             .map(|(key, value)| (key.to_str().unwrap(), value.unwrap().to_str().unwrap()))
             .collect();
         assert_eq!(env.len(), 4);
-        assert_eq!(env["HOME"], "/private/profile");
-        assert_eq!(env["CODEX_HOME"], "/private/profile");
-        assert_eq!(env["TMPDIR"], "/private/profile/tmp");
+        assert_eq!(env["HOME"], home.to_str().unwrap());
+        assert_eq!(env["CODEX_HOME"], home.to_str().unwrap());
+        assert_eq!(env["TMPDIR"], home.join("tmp").to_str().unwrap());
         for model in ["", "x\"\nmalicious=true", "x y", "$(touch x)"] {
             assert!(discovery_command(
                 std::path::Path::new("/verified/codex"),

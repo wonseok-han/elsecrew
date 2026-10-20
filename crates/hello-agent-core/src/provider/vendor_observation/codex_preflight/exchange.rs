@@ -43,6 +43,7 @@ pub struct PreflightExchange {
     configuration_only: bool,
     account_note_seen: bool,
     named_cwd: Option<std::path::PathBuf>,
+    isolation_cwd: Option<std::path::PathBuf>,
     configuration_failure: Option<&'static str>,
     display_models: Option<Vec<super::CatalogModel>>,
 }
@@ -52,6 +53,17 @@ fn invalid() -> ProviderError {
 }
 
 impl PreflightExchange {
+    /// Native launchers bind the required startup overrides to their actual cwd.
+    /// Must be set before exchanging any frames; absence remains fixture/legacy
+    /// observation compatibility, never an assertion of isolated startup.
+    pub fn require_startup_isolation(&mut self, cwd: &std::path::Path) -> Result<(), ProviderError> {
+        Self::validate_thread_cwd(cwd)?;
+        if self.started || self.state != PreflightState::Checking {
+            return Err(invalid());
+        }
+        self.isolation_cwd = Some(cwd.into());
+        Ok(())
+    }
     /// Inspect initialization and configuration only. This cannot establish
     /// account/model readiness or be upgraded to thread/turn authority.
     pub fn configuration_only(
@@ -97,6 +109,7 @@ impl PreflightExchange {
             configuration_only: false,
             account_note_seen: false,
             named_cwd: None,
+            isolation_cwd: None,
             configuration_failure: None,
             display_models: None,
         })
@@ -453,6 +466,19 @@ impl PreflightExchange {
                 }
             }
             ObservationKind::Config => {
+                if let Some(cwd) = &self.isolation_cwd {
+                    let value = observation.json()?;
+                    let flags = value["layers"].as_array().ok_or_else(invalid)?.iter()
+                        .find(|layer| layer["name"]["type"] == "sessionFlags")
+                        .ok_or_else(invalid)?;
+                    if flags["config"].get("projects").is_none() {
+                        return Err(invalid());
+                    }
+                    super::super::codex_profile_config::strip_isolation_flag(
+                        &mut flags["config"].clone(), &value["config"],
+                        &[std::path::Path::new(&self.expected_home), cwd],
+                    ).map_err(|_| invalid())?;
+                }
                 if let Some(cwd) = &self.named_cwd {
                     super::named_config::match_configuration(
                         &observation,

@@ -127,7 +127,23 @@ fn check_configuration_layers(
         if name != expected_name {
             return Err("layer identity");
         }
-        if layer["config"] != expected_config {
+        let mut layer_config = layer["config"].clone();
+        if index == 0 {
+            super::super::codex_profile_config::strip_isolation_flag(
+                &mut layer_config, &result["config"], &[Path::new(home)],
+            )?;
+        }
+        let matches = if index == 1 {
+            let reported_flags = layers.iter()
+                .find(|candidate| candidate["name"]["type"] == "sessionFlags")
+                .map(|candidate| &candidate["config"]).ok_or("session flags missing")?;
+            super::super::codex_profile_config::ProfileConfig::matches_observed_layer(
+                &layer_config, reported_flags, &result["config"], Path::new(home),
+            )
+        } else {
+            layer_config == expected_config
+        };
+        if !matches {
             return Err(match index {
                 0 => "session flags",
                 1 => "user layer",
@@ -173,6 +189,15 @@ pub(super) fn match_configuration(
         policy["filesystem"][workspace.to_str().ok_or("workspace path")?]["."] = json!("read");
     }
     let result = input.json().map_err(|_| "configuration JSON")?;
+    if let Some(layers) = result["layers"].as_array() {
+        for layer in layers {
+            if layer["name"]["type"] == "sessionFlags" {
+                super::super::codex_profile_config::strip_isolation_flag(
+                    &mut layer["config"].clone(), &result["config"], &[home, workspace],
+                )?;
+            }
+        }
+    }
     check_configuration_layers(&result, home, expected, &policy, "on-request")?;
     if !matches_policy(
         &result["config"]["permissions"]["hello-agent-snapshot"],

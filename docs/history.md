@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-20 · by GPT-6 Astra
+- d36099b 기준 Codex 시작 전 설정 격리 후보를 직접 연결했다. 로그인/상태 조회·discovery·named/legacy 실행에 저장된 trust 키와 home/cwd 조상 경로의 invocation-only untrusted override를 추가한다. 원본 config/auth는 변경하지 않으며 profile_directory의 nonempty projects 차단은 계속 유지한다. 관측 검사에는 override/effective 일치·경로 포함·typed user layer·재귀 중복 키 거절을 연결하고 native flow는 격리 플래그 누락을 거절한다.
+- 상시 승인된 config_layers_review가 중복 JSON 키 정규화 회귀를 찾아 수정 후 재검토했다. named config/read가 실제로 cwd를 보내지 않던 누락도 찾아 고치고 요청 id2 exact 회귀를 추가했다. reviewer는 이 작은 변경에서 입증된 차단 결함 없음이며 일반 layered 경로의 cwd 관측까지 확대하지 말 것을 확인했다.
+- 사용자가 승인한 무계정·무과금 임시 프로필 시험에서 기본 config-only 조회와 종료 확인을 통과했다. trusted 프로젝트 대조 시험은 cwd 누락 수정 후 일반 실행의 sentinel 로드를 확인했고, isolated 실행은 configWarning 1개 다음 config 응답에서 sentinel 미로드·override 일치를 확인해 최종 PASS했다. 시험만 경고 뒤 응답을 관측하며 제품의 configWarning 거절은 그대로다. 초기 실패들을 격리 성공 증거로 사용하지 않는다.
+- 모든 실제 시험은 새 임시 HOME/CODEX_HOME·네트워크 차단·config-only RPC이며 account/model/thread/turn 호출이 없다. 종료 증거 확인 후 임시 폴더 자동 정리, 설정 파일 불변·auth.json 부재를 확인했다. target1.8G/out309M으로 release 캐시를 재사용했고 새 패키지나 debug 캐시를 만들지 않았다.
+- sidecar preflight 단위12건 PASS/opt-in3건 제외, 실제 임시 비교1건 PASS, 최신 core Codex 회귀102건 PASS를 확보했다. 새 파서 모듈 rustfmt 및 diff check를 수행했다. 아직 실제 프로필 입장/앱 연결을 복구하지 않았으며 startup hook 전체 미실행·경고의 안전한 분류·실제 패키지 연결 검증은 남는다. 기존 인증·사용자 프로젝트·main/push 변경 없음.
+
+### 2026-10-20 · by GPT-6 Astra
 - d06d048에서 Codex 설정 호환의 구조 검사 단계를 구현했다. core의 bounded TOML parser는 auth=file·최대64KiB/128개 project 항목·경로/신뢰 값·unknown 필드를 검사한다. profile_directory는 고정 byte 비교 대신 의미상 auth-only를 허용하고 프로젝트 항목이 있으면 별도 내부 진단으로 계속 거절한다. 파일 권한/단일 링크/no-follow 검사는 유지하며 설정/인증을 수정하지 않는다. toml은 기존 lock의0.9.12 버전을 재사용했다.
 - 현재 실제 config의 trust 대상은 앱 데이터 아래 작업 복사본 경로임을 경로 원문 없이 확인했다. 자동 추가 주체는 확정하지 않는다. 로그인/상태 조회도 app-server를 직접 띄우므로 named 작업 실행만 고쳐서는 부족하다. 읽기 전용 config_layers_review가 이 누락과 시작 후 config/read만으로 startup hook 미실행을 증명할 수 없음을 확인했다. 현재 trust 차단 유지 상태의 신규 실행 취약점은 발견되지 않았다.
 - core profile9건 및 sidecar profile31건 PASS, 실계정/플랫폼 opt-in8건 제외. 최초 sandbox 내 합성 Unix socket2건 EPERM은 같은 검사를 허용 환경에서 재실행해 통과했다. 파서 alias 회귀도 포함했다. 사용자 인증·모델 호출·설치 변경 없음. Karpathy 원칙에 따라 파서/기존 입장 검사 범위만 수정하고 격리 미입증 trust를 활성화하지 않았다.
@@ -57,6 +64,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Codex 격리 시험과 연결 입장의 구분(2026-10-20)**: named config/read는 cwd를 명시해야 해당 프로젝트 설정을 관측한다. 임시 trusted 프로젝트에서 invocation-only untrusted override의 sentinel 미로드를 대조 확인했지만 configWarning도 발생한다. 시험 전용 경고 후 관측을 제품 경고 무시 권한으로 재사용하지 않는다. 실제 trust-bearing 프로필 차단은 유지 중이며 인증 삭제/재로그인 문제가 아니라 설정 호환 후속이다.
 
 - **실제 공급자 최신 상태(2026-10-19)**: Claude 작은 응답·도구 수정·권한 대기 중 취소는 확인했다. Codex gpt-6.1-sol 파일 수정은 recoveryRequired로 끝났으며 사용자 승인 뒤 앱이 종료 확인→취소됨/복사본 abandoned로 복구했다. 해당 복사본108K는 물리적으로 남아 있으며 자동 삭제 완료가 아니다. Codex 수정 재시험은 새 승인 필요, 기존 중단1회 승인은 미사용이다. G6/400MiB 메모리/Windows/출시는 미완료다. 상세 최신 워크로그는 [10월 아카이브](archive/history-2026-10.md)에 같은 날짜 전체를 보존했다.
 

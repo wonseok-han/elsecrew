@@ -112,6 +112,11 @@ impl ModelFreeExchange {
             ),
             _ => return Ok(None),
         };
+        if self.next == 1 {
+            if let Some(cwd) = &self.permission_cwd {
+                params["cwd"] = serde_json::json!(cwd);
+            }
+        }
         if self.next == 0 && self.include_config_layers {
             // The pinned native CLI emits this unrelated startup notification.
             // Suppress only this method; unexpected frames still fail closed.
@@ -228,6 +233,12 @@ mod tests {
                 serde_json::from_str(request.lines().last().unwrap()).unwrap();
             assert_eq!(wire["id"], id);
             assert_eq!(wire["method"], exchange.diagnostic_stage());
+            if id == 2 {
+                assert_eq!(
+                    wire["params"],
+                    serde_json::json!({"cwd":"/snapshot","includeLayers":true})
+                );
+            }
             if id == 51 {
                 assert_eq!(wire["method"], "permissionProfile/list");
                 assert_eq!(

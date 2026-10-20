@@ -505,10 +505,12 @@ impl RunReservation {
             })?;
             self.record_released_or_invalidate(storage, process)
         } else if mode == CodexLaunchMode::ProxiedOuter {
-            let args = crate::provider_preflight_session::discovery_arguments(
+            let mut args = crate::provider_preflight_session::discovery_arguments(
                 &home, &expected, permission,
             )
             .map_err(|_| failure())?;
+            args.extend(["-c".into(), crate::provider_profile::codex_isolation_argument(&home, workspace)
+                .map_err(|_| failure())?]);
             let command = crate::provider_runtime_sandbox::command_with_model_proxy(
                 executable.revalidate()?,
                 helper.revalidate()?,
@@ -674,7 +676,7 @@ impl RunReservation {
         }]).map_err(|_| failure())?;
         let workspace =
             crate::provider_preflight_session::TextWorkspace::new(projects, storage, &address)?;
-        let flow = if process.uses_named_scope() {
+        let mut flow = if process.uses_named_scope() {
             if !process.matches_named_scope(workspace.cwd(), permission) {
                 return Err(failure());
             }
@@ -692,6 +694,7 @@ impl RunReservation {
             )
         }
         .map_err(|_| failure())?;
+        flow.require_startup_isolation(workspace.cwd()).map_err(|_| failure())?;
         if !process.retains_run_fence() {
             process.retain_fence_until_terminal()?;
         }
