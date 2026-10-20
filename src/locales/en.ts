@@ -440,6 +440,7 @@ export const en: Record<MessageKey, string> = {
   "m5.chat.cancelDemo": "Cancel demo run",
   "m5.chat.cancelActual": "Cancel real run",
   "m5.chat.recovery": "This working copy needs recovery.",
+  "m5.chat.discardedHelp": "This working copy has been discarded and cannot be run or edited again. The conversation history remains available. Create a new chat to continue working.",
   "m5.chat.identityUnavailable": "This working copy is protected because process termination could not be verified safely. Running, saving and closing are currently blocked.",
   "m5.chat.blocked": "Running, saving and closing are blocked. You can discard this copy after termination evidence is verified.",
   "m5.chat.discard": "Verify and discard working copy",

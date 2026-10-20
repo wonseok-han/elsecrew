@@ -439,6 +439,7 @@ export const ko = {
   "m5.chat.cancelDemo": "데모 실행 취소",
   "m5.chat.cancelActual": "실제 실행 취소",
   "m5.chat.recovery": "복구가 필요한 작업 복사본이에요.",
+  "m5.chat.discardedHelp": "이 작업 복사본은 버림 처리되어 다시 실행하거나 편집할 수 없어요. 대화 기록은 남아 있어요. 계속 작업하려면 새 채팅을 만들어 주세요.",
   "m5.chat.identityUnavailable": "종료 상태를 안전하게 확인할 수 없어 이 작업 복사본을 보호하고 있어요. 지금은 실행·저장·닫기 같은 동작을 할 수 없어요.",
   "m5.chat.blocked": "실행·저장·닫기 같은 위험한 동작을 막았어요. 종료 증거를 확인한 뒤 이 복사본을 버릴 수 있습니다.",
   "m5.chat.discard": "확인 후 작업 복사본 버리기",
