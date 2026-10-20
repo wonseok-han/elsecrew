@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-20 · by GPT-6 Astra
+- d06d048에서 Codex 설정 호환의 구조 검사 단계를 구현했다. core의 bounded TOML parser는 auth=file·최대64KiB/128개 project 항목·경로/신뢰 값·unknown 필드를 검사한다. profile_directory는 고정 byte 비교 대신 의미상 auth-only를 허용하고 프로젝트 항목이 있으면 별도 내부 진단으로 계속 거절한다. 파일 권한/단일 링크/no-follow 검사는 유지하며 설정/인증을 수정하지 않는다. toml은 기존 lock의0.9.12 버전을 재사용했다.
+- 현재 실제 config의 trust 대상은 앱 데이터 아래 작업 복사본 경로임을 경로 원문 없이 확인했다. 자동 추가 주체는 확정하지 않는다. 로그인/상태 조회도 app-server를 직접 띄우므로 named 작업 실행만 고쳐서는 부족하다. 읽기 전용 config_layers_review가 이 누락과 시작 후 config/read만으로 startup hook 미실행을 증명할 수 없음을 확인했다. 현재 trust 차단 유지 상태의 신규 실행 취약점은 발견되지 않았다.
+- core profile9건 및 sidecar profile31건 PASS, 실계정/플랫폼 opt-in8건 제외. 최초 sandbox 내 합성 Unix socket2건 EPERM은 같은 검사를 허용 환경에서 재실행해 통과했다. 파서 alias 회귀도 포함했다. 사용자 인증·모델 호출·설치 변경 없음. Karpathy 원칙에 따라 파서/기존 입장 검사 범위만 수정하고 격리 미입증 trust를 활성화하지 않았다.
+- 다음은 모든 Codex 시작 경로의 invocation-only untrusted 설정과 실제 CLI의 startup/자동 trust 저장 호환 검증이다. 이 커밋은 준비 단계이며 현재 연결 실패를 해결했다고 주장하지 않는다. 복구 보정 패키지 반영 및 G6/메모리/Windows/출시 검증도 남는다.
+
+### 2026-10-20 · by GPT-6 Astra
 - 9f789cb 기준 미완료 historical catalog 보정을 완료했다. startup에서 actual run 원장 검증 후 이미 resolvedAbandoned인 기록의 동일 active catalog pointer만 검사한다. run/recovery/chat 식별자, cleanExit·자손 소멸, 잠금 해제, catalog snapshot identity 및 실제 abandoned manifest가 모두 맞을 때 project lifecycle만 보정한다. run/chat/lock/파일은 변경하지 않는다.
 - 과거 stale catalog를 재현한 회귀에 보정 후 재열기·멱등성·다른 snapshot 보존·identity/lock/manifest 불일치 거절 및 원장/파일 불변을 포함했다. release recovery_ 단위30건+stdio1건 PASS. 수정한 함수만 rustfmt 적용, diff check 수행. release 캐시를 재사용하며 새 debug 캐시·패키지는 만들지 않았다.
 - 상시 승인된 config_layers_review1명의 읽기 전용 독립 검토에서 입증된 차단 결함 없음. 함수 회귀 외 실제 startup/패키지 재시작 검증은 후속 통합 검증으로 남긴다. 실행 중인 앱이나 사용자 원장을 직접 변경하지 않았으므로 현재 화면 문제가 해결됐다고 주장하지 않는다.

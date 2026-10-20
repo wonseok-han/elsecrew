@@ -7,6 +7,9 @@ use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt, OpenOptionsMaybeDirExt};
 use cap_std::fs::{
     Dir, DirBuilder, DirBuilderExt, MetadataExt, OpenOptions, OpenOptionsExt, PermissionsExt,
 };
+use hello_agent_core::provider::vendor_observation::codex_profile_config::{
+    ProfileConfig, MAX_CONFIG_BYTES,
+};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
@@ -165,17 +168,21 @@ fn profile_directory(app_data: &Dir, create_missing: bool) -> Result<Dir, Sideca
         || metadata.uid() != unsafe { libc::geteuid() }
         || metadata.nlink() != 1
         || metadata.permissions().mode() & 0o777 != 0o600
-        || metadata.len() != CONFIG.len() as u64
+        || metadata.len() > MAX_CONFIG_BYTES as u64
     {
         return Err(failure());
     }
     let mut bytes = Vec::new();
     (&mut file)
-        .take(CONFIG.len() as u64 + 1)
+        .take(MAX_CONFIG_BYTES as u64 + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| failure())?;
-    if bytes != CONFIG {
-        return Err(failure());
+    let config = ProfileConfig::parse(&bytes).map_err(|_| failure())?;
+    if !config.is_auth_only() {
+        return Err(SidecarError::new(
+            "providerProfileUnavailable",
+            "provider profile project settings require isolated startup",
+        ));
     }
     Ok(profile)
 }
@@ -520,6 +527,25 @@ mod tests {
             b"synthetic credential sentinel"
         );
         assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn equivalent_config_is_preserved_and_project_trust_remains_blocked() {
+        let temp = tempfile::tempdir().unwrap();
+        let profile = prepare_codex_profile(&root(&temp)).unwrap();
+        let equivalent = b"# changed formatting\ncli_auth_credentials_store='file'\n";
+        profile.write("config.toml", equivalent).unwrap();
+        prepare_codex_profile(&root(&temp)).unwrap();
+        assert_eq!(profile.read("config.toml").unwrap(), equivalent);
+        let trusted = b"cli_auth_credentials_store='file'\n[projects.'/snapshot']\ntrust_level='trusted'\n";
+        profile.write("config.toml", trusted).unwrap();
+        let error = match prepare_codex_profile(&root(&temp)) {
+            Ok(_) => panic!("project configuration requires startup isolation"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), "providerProfileUnavailable");
+        assert_eq!(error.detail, "provider profile project settings require isolated startup");
+        assert_eq!(profile.read("config.toml").unwrap(), trusted);
     }
 
     #[test]

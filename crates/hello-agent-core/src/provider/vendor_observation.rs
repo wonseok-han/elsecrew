@@ -12,6 +12,7 @@ pub mod claude_init;
 pub mod claude_control;
 pub mod codex_events;
 pub mod codex_login;
+pub mod codex_profile_config;
 pub mod codex_preflight;
 pub mod codex_rpc;
 pub mod codex_turn;
