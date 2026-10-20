@@ -318,6 +318,29 @@ impl LoginIo {
         result
     }
 
+    /// Native opt-in test only. No turn, prompt, credential, or arbitrary RPC.
+    #[cfg(test)]
+    pub(crate) fn send_hook_probe(
+        &mut self,
+        cwd: &std::path::Path,
+        cancel: &AtomicBool,
+        observe: &mut impl FnMut() -> Result<(), SidecarError>,
+    ) -> Result<(), SidecarError> {
+        if !cwd.is_absolute() {
+            return Err(failure());
+        }
+        let frame = format!("{}\n", serde_json::json!({
+            "id":99, "method":"thread/start",
+            "params":{"cwd":cwd,"model":"test-model","approvalPolicy":"never",
+                "sandbox":"read-only","ephemeral":true}
+        }));
+        let result = self.send_inner(frame.as_bytes(), Duration::from_secs(15), cancel, observe);
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
     fn send_inner(
         &mut self,
         frame: &[u8],

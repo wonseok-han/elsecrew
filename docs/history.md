@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-20 · by GPT-6 Astra
+- 4106171/clean 기준 후속 격리 검증을 진행했다. 공식 app-server/hooks/config 문서를 다시 확인했다(https://learn.chatgpt.com/docs/hooks, https://learn.chatgpt.com/docs/app-server). untrusted는 project hook을 건너뛰지만 user/system hook과 구분해야 하며 SessionStart는 세션 시작 이벤트다. readonly config_layers_review는 기존 config sentinel 대조만으로 hook 실행 차단을 실측했다고 주장하지 말 것을 지적했다.
+- 사용자가 임시 자동 명령 비교 시험을 승인했다. 기존 소유자/네트워크 차단 sandbox에 test-only ephemeral read-only thread/start를 추가하고 turn/model/OAuth 없이 임시 profile 안의 touch 표시 파일을 대조하도록 작성했다. hook 신뢰 우회는 시험 전용 -c bypass_hook_trust=true이며 제품 launcher에는 없다. trusted+hooks=true와 untrusted+hooks=false의 결합 효과를 비교하며 각 옵션 단독 효과로 인용하지 않는다.
+- 첫 시험은 app-server가 CLI 모드의 --dangerously-bypass-hook-trust 인자를 받지 않아 초기 전송 종료됐다. 임시 HOME의 도움말과 설치 실행 파일 문자열을 확인해 app-server override 형식으로 교정했다. 후속 알림은 configWarning이지만 예상 영문 summary와 달랐다. 추측한 문구 분류 코드는 제거하고 임시 진단만 bounded warning을 최대8개/20초 관측한 뒤 실제 설정/표시 파일을 검사한다. 제품의 경고 거절·trust-bearing profile 거절은 유지한다.
+- 읽기 전용 독립 검토에서 test-only 송신·임시 경로·외부 네트워크 차단·종료 미확인 시 temp 보존 구조에 입증된 차단 결함 없음. 초기 실패 시험들은 종료 확인 뒤 정리했고 도움말 전용 임시 폴더도 미사용 확인 후 제거했다(재생성 가능). release 캐시1.8G/out309M을 유지했다.
+- 최종 native hook 대조는 FAIL이다. trusted 설정 sentinel 로드와 ephemeral thread/start 성공은 확인했지만, 4초 초기화 대기 및 종료 후에도 비교군의 표시 파일이 없었다. 따라서 격리군 미실행을 합격으로 간주하지 않으며 실패하는 opt-in 회귀를 그대로 보존한다. 모델/turn 요청으로 시험 범위를 확대하지 않았다. 다음은 hooks/list 등 무과금 관측으로 hook 등록/실행 시점을 구분하는 조사이며 제품 프로필 차단 해제·실제 연결 복구는 아직 미완료다.
+- 신규 진단 envelope 회귀를 포함한 core profile7건 PASS, 새 모듈 rustfmt 및 git diff --check PASS. 변경은 진단/시험 체크포인트이며 제품 입장 조건은 바뀌지 않았다. 실제 계정·사용자 프로젝트·main 병합/push 없음.
+
+### 2026-10-20 · by GPT-6 Astra
 - d36099b 기준 Codex 시작 전 설정 격리 후보를 직접 연결했다. 로그인/상태 조회·discovery·named/legacy 실행에 저장된 trust 키와 home/cwd 조상 경로의 invocation-only untrusted override를 추가한다. 원본 config/auth는 변경하지 않으며 profile_directory의 nonempty projects 차단은 계속 유지한다. 관측 검사에는 override/effective 일치·경로 포함·typed user layer·재귀 중복 키 거절을 연결하고 native flow는 격리 플래그 누락을 거절한다.
 - 상시 승인된 config_layers_review가 중복 JSON 키 정규화 회귀를 찾아 수정 후 재검토했다. named config/read가 실제로 cwd를 보내지 않던 누락도 찾아 고치고 요청 id2 exact 회귀를 추가했다. reviewer는 이 작은 변경에서 입증된 차단 결함 없음이며 일반 layered 경로의 cwd 관측까지 확대하지 말 것을 확인했다.
 - 사용자가 승인한 무계정·무과금 임시 프로필 시험에서 기본 config-only 조회와 종료 확인을 통과했다. trusted 프로젝트 대조 시험은 cwd 누락 수정 후 일반 실행의 sentinel 로드를 확인했고, isolated 실행은 configWarning 1개 다음 config 응답에서 sentinel 미로드·override 일치를 확인해 최종 PASS했다. 시험만 경고 뒤 응답을 관측하며 제품의 configWarning 거절은 그대로다. 초기 실패들을 격리 성공 증거로 사용하지 않는다.

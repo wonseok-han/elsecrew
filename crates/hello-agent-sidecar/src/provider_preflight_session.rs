@@ -907,6 +907,17 @@ mod tests {
     #[test]
     #[ignore = "requires explicit approval for installed CLI temporary configuration inspection"]
     fn installed_codex_project_trust_isolation_control() {
+        inspect_project_trust_isolation(false);
+    }
+
+    #[test]
+    #[ignore = "requires explicit approval for temporary command-hook isolation control"]
+    fn installed_codex_project_hook_isolation_control() {
+        assert_eq!(std::env::var("HELLO_AGENT_APPROVED_HOOK_PROBE").as_deref(), Ok("1"));
+        inspect_project_trust_isolation(true);
+    }
+
+    fn inspect_project_trust_isolation(hook_probe: bool) {
         use crate::provider_profile::LoginProfile;
         use std::os::unix::fs::PermissionsExt;
         use std::path::PathBuf;
@@ -945,8 +956,17 @@ mod tests {
                 .current_dir(&workspace).env_clear().env("HOME", &home)
                 .status().unwrap().success());
             std::fs::create_dir(workspace.join(".codex")).unwrap();
-            let project_config = b"developer_instructions='HELLO_AGENT_PROJECT_CONFIG_SENTINEL'\n";
-            std::fs::write(workspace.join(".codex/config.toml"), project_config).unwrap();
+            let marker = home.join("hook-probe-marker");
+            let mut project_config = "developer_instructions='HELLO_AGENT_PROJECT_CONFIG_SENTINEL'\n".to_owned();
+            if hook_probe {
+                let marker_path = marker.to_str().unwrap();
+                assert!(!marker_path.contains('\''));
+                let command = serde_json::to_string(&format!("/usr/bin/touch '{marker_path}'")).unwrap();
+                project_config.push_str(&format!(
+                    "[[hooks.SessionStart]]\nmatcher='^startup$'\n[[hooks.SessionStart.hooks]]\ntype='command'\ncommand={command}\ntimeout=3\n"
+                ));
+            }
+            std::fs::write(workspace.join(".codex/config.toml"), &project_config).unwrap();
             let config = format!("cli_auth_credentials_store='file'\n[projects.{}]\ntrust_level='trusted'\n",
                 serde_json::to_string(workspace.to_str().unwrap()).unwrap()).into_bytes();
             std::fs::write(home.join("config.toml"), &config).unwrap();
@@ -954,6 +974,14 @@ mod tests {
             let profile = InspectionProfile { root, home: home.clone(), config };
             let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium" };
             let mut args = discovery_arguments(&home, &expected, ExpectedPermission::ReadOnly).unwrap();
+            if hook_probe {
+                // Test-only bypass permits our one known touch command without
+                // persisted vendor hook trust. Never passed by a product launcher.
+                args.extend(["-c".into(), "bypass_hook_trust=true".into()]);
+                if !isolated {
+                    args.extend(["-c".into(), "features.hooks=true".into()]);
+                }
+            }
             if isolated {
                 args.extend(["-c".into(), crate::provider_profile::codex_isolation_argument(&home, &workspace).unwrap()]);
             }
@@ -997,19 +1025,52 @@ mod tests {
                     process.send_preflight(frame, Duration::from_secs(15), &cancel)?;
                 }
                 let mut reply = process.receive_preflight(Duration::from_secs(15), &cancel)?;
-                // Probe only: capture the following config result after one
-                // warning, without granting product admission or a model turn.
-                // Production preflight continues to reject configWarning.
-                if isolated && hello_agent_core::provider::vendor_observation::codex_profile_config::matches_project_config_probe(
-                    &reply, &home, &workspace, isolated,
-                ) == Err("config probe configuration warning") {
-                    eprintln!("project_trust_control isolated=true configuration_warning=true");
-                    reply = process.receive_preflight(Duration::from_secs(15), &cancel)?;
+                // Diagnostic only: count bounded warning frames and then
+                // inspect settings/marker evidence. This is NOT product
+                // acceptance, and does not assert what any warning means.
+                let mut warning_count = 0;
+                let config_deadline = Instant::now() + Duration::from_secs(20);
+                for _ in 0..8 {
+                    if !hello_agent_core::provider::vendor_observation::codex_profile_config::is_probe_configuration_warning(&reply) {
+                        break;
+                    }
+                    warning_count += 1;
+                    let remaining = config_deadline.checked_duration_since(Instant::now()).ok_or_else(failure)?;
+                    reply = process.receive_preflight(remaining, &cancel)?;
                 }
+                eprintln!("project_trust_control isolated={isolated} diagnostic_warning_count={warning_count}");
                 hello_agent_core::provider::vendor_observation::codex_profile_config::matches_project_config_probe(
                     &reply, &home, &workspace, isolated,
                 ).map_err(|reason| SidecarError::new("configProbeFailed", reason))?;
                 eprintln!("project_trust_control isolated={isolated} matched=true");
+                if hook_probe {
+                    eprintln!("hook_probe isolated={isolated} marker_before_thread={}", marker.exists());
+                    process.send_hook_probe(&workspace, &cancel)?;
+                    let mut started = false;
+                    let deadline = Instant::now() + Duration::from_secs(20);
+                    for _ in 0..64 {
+                        let remaining = deadline.checked_duration_since(Instant::now())
+                            .ok_or_else(|| SidecarError::new("hookProbeFailed", "thread response timed out"))?;
+                        let reply = process.receive_preflight(remaining, &cancel)?;
+                        if hello_agent_core::provider::vendor_observation::codex_profile_config::hook_probe_started(&reply)
+                            .map_err(|reason| SidecarError::new("hookProbeFailed", reason))? {
+                            started = true;
+                            break;
+                        }
+                    }
+                    if !started {
+                        return Err(SidecarError::new("hookProbeFailed", "thread response missing"));
+                    }
+                    eprintln!("hook_probe isolated={isolated} thread_started=true");
+                    // thread/start may return before lifecycle work settles.
+                    // Keep the process owner alive for the hook's 3s timeout
+                    // plus a small margin; never send a model turn.
+                    let settle = Instant::now() + Duration::from_secs(4);
+                    while Instant::now() < settle {
+                        process.tick()?;
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                }
                 Ok(())
             });
             let cleanup = process.finish();
@@ -1019,9 +1080,13 @@ mod tests {
                 panic!("inspection termination unconfirmed; retained {}", retained.display());
             }
             profile.revalidate().unwrap();
-            assert_eq!(std::fs::read(workspace.join(".codex/config.toml")).unwrap(), project_config);
+            assert_eq!(std::fs::read(workspace.join(".codex/config.toml")).unwrap(), project_config.as_bytes());
             assert!(observation.is_ok(), "project trust control failed: isolated={isolated}, fixed_error={:?}",
                 observation.as_ref().err().map(|error| &error.detail));
+            if hook_probe {
+                assert_eq!(marker.exists(), !isolated, "hook execution control isolated={isolated}");
+                eprintln!("hook_probe isolated={isolated} marker_present={} cleanup_confirmed=true", marker.exists());
+            }
         }
     }
 

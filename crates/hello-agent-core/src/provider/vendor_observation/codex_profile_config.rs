@@ -8,6 +8,65 @@ use std::path::{Component, Path};
 pub const MAX_CONFIG_BYTES: usize = 64 * 1024;
 const MAX_PROJECTS: usize = 128;
 
+/// Disposable diagnostic probes may count bounded warnings while collecting
+/// the following settings and marker evidence. Not product warning admission:
+/// callers must not infer safety from a warning or its English wording.
+pub fn is_probe_configuration_warning(input: &super::super::BoundedObservation) -> bool {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Note {
+        method: String,
+        params: Params,
+        #[serde(default, rename = "emittedAtMs")]
+        emitted_at_ms: u64,
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Params {
+        summary: String,
+        details: Option<String>,
+        path: Option<String>,
+        range: Option<serde_json::Value>,
+    }
+    let Ok(value) = input.json() else {
+        return false;
+    };
+    let Ok(note) = serde_json::from_value::<Note>(value) else {
+        return false;
+    };
+    note.method == "configWarning"
+        && note.emitted_at_ms <= 9_007_199_254_740_991
+        && !note.params.summary.is_empty()
+        && note.params.summary.len() <= 16 * 1024
+        && note.params.path.is_none()
+        && note.params.range.is_none()
+        && note.params.details.as_ref().is_none_or(|details| {
+            details.len() <= 16 * 1024
+                && !details
+                    .chars()
+                    .any(|c| c.is_control() && c != '\n' && c != '\t')
+        })
+}
+
+/// Fixed outcome for the model-free native hook probe. No raw transcript,
+/// session handle, or authority to submit a turn leaves this function.
+pub fn hook_probe_started(input: &super::super::BoundedObservation) -> Result<bool, &'static str> {
+    let value = input.json().map_err(|_| "invalid hook probe JSON")?;
+    if value.get("id").is_none() && value["method"].is_string() {
+        return Ok(false);
+    }
+    if value["id"] != 99 || !value["error"].is_null() {
+        return Err("hook probe thread response rejected");
+    }
+    if value["result"]["thread"]["id"]
+        .as_str()
+        .is_none_or(str::is_empty)
+    {
+        return Err("hook probe thread missing");
+    }
+    Ok(true)
+}
+
 /// Model-free native probe only; exposes a fixed outcome, never raw settings.
 /// The caller owns process isolation/termination. This is not launch admission.
 pub fn matches_project_config_probe(
@@ -17,7 +76,7 @@ pub fn matches_project_config_probe(
     isolated: bool,
 ) -> Result<(), &'static str> {
     let value = input.json().map_err(|_| "invalid config probe JSON")?;
-    if value["method"] == "configWarning" {
+    if is_probe_configuration_warning(input) {
         return Err("config probe configuration warning");
     }
     if value["method"].is_string() {
@@ -277,6 +336,42 @@ impl ProfileConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diagnostic_warning_rejects_requests_duplicates_and_malformed_envelopes() {
+        let base = serde_json::json!({"method":"configWarning","params":{
+            "summary":"Project-local config, hooks, and exec policies are disabled in the following folders until the project is trusted, but skills still load.",
+            "details":"1. /temporary/project/.codex\n", "path":null,"range":null
+        }});
+        for case in [
+            "valid", "summary", "method", "id", "extra", "path", "range", "budget", "control",
+        ] {
+            let mut note = base.clone();
+            match case {
+                "summary" => note["params"]["summary"] = "".into(),
+                "method" => note["method"] = "warning".into(),
+                "id" => note["id"] = 2.into(),
+                "extra" => note["params"]["extra"] = true.into(),
+                "path" => note["params"]["path"] = "/other".into(),
+                "range" => note["params"]["range"] = serde_json::json!({}),
+                "budget" => note["params"]["details"] = "x".repeat(16385).into(),
+                "control" => note["params"]["details"] = "\u{1b}secret".into(),
+                _ => {}
+            }
+            let input = super::super::super::BoundedObservation::new(note.to_string().into_bytes())
+                .unwrap();
+            assert_eq!(
+                is_probe_configuration_warning(&input),
+                case == "valid",
+                "{case}"
+            );
+        }
+        let duplicate = base
+            .to_string()
+            .replace("\"method\":", "\"method\":\"other\",\"method\":");
+        let input = super::super::super::BoundedObservation::new(duplicate.into_bytes()).unwrap();
+        assert!(!is_probe_configuration_warning(&input));
+    }
 
     #[test]
     fn observed_trust_requires_matching_override_and_rejects_unknown_user_settings() {

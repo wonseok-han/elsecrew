@@ -833,6 +833,26 @@ impl<'a> LoginProcess<'a> {
         result
     }
 
+    /// Compiled out of the product; retains the normal process/IO owner.
+    #[cfg(test)]
+    pub(crate) fn send_hook_probe(
+        &mut self,
+        cwd: &std::path::Path,
+        cancel: &AtomicBool,
+    ) -> Result<(), SidecarError> {
+        if self.failed || self.finished || !self.preflight_claimed || self.claude_preflight {
+            return Err(failure());
+        }
+        self.transport_used = true;
+        let mut io = self.io.take().ok_or_else(failure)?;
+        let result = io.send_hook_probe(cwd, cancel, &mut || self.tick());
+        self.io = Some(io);
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
     pub(crate) fn send_preflight(
         &mut self,
         request: hello_agent_core::provider::vendor_observation::codex_preflight::exchange::PreflightRequest,
