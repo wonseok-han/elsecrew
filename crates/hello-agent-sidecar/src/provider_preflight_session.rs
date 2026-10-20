@@ -1045,6 +1045,20 @@ mod tests {
                 ).map_err(|reason| SidecarError::new("configProbeFailed", reason))?;
                 eprintln!("project_trust_control isolated={isolated} matched=true");
                 if hook_probe {
+                    // This native opt-in probe has no credentials or user data.
+                    // Inspect only bounded warning text, redact its disposable
+                    // root, and never expose this diagnostic through product IPC.
+                    let log_warning = |reply: &serde_json::Value| {
+                        if !matches!(reply["method"].as_str(), Some("configWarning" | "warning")) {
+                            return;
+                        }
+                        for key in ["summary", "details", "message"] {
+                            if let Some(text) = reply["params"][key].as_str().filter(|text| text.len() <= 2048) {
+                                let text = text.replace(profile.root.to_str().unwrap(), "<probe>");
+                                eprintln!("hook_probe warning_{key}={}", json!(text));
+                            }
+                        }
+                    };
                     eprintln!("hook_probe isolated={isolated} marker_before_thread={}", marker.exists());
                     process.send_hook_probe(&workspace, false, &cancel)?;
                     let mut started = false;
@@ -1052,7 +1066,11 @@ mod tests {
                     for _ in 0..64 {
                         let remaining = deadline.checked_duration_since(Instant::now())
                             .ok_or_else(|| SidecarError::new("hookProbeFailed", "thread response timed out"))?;
-                        let reply = process.receive_preflight(remaining, &cancel)?;
+                        let value = process.receive_permission_probe(remaining, &cancel)?;
+                        log_warning(&value);
+                        let reply = hello_agent_core::provider::BoundedObservation::new(serde_json::to_vec(&value).map_err(|_| failure())?)
+                            .map_err(|_| failure())?;
+                        eprintln!("hook_probe event={}", hello_agent_core::provider::vendor_observation::codex_profile_config::hook_probe_notification(&reply));
                         if hello_agent_core::provider::vendor_observation::codex_profile_config::hook_probe_started(&reply)
                             .map_err(|reason| SidecarError::new("hookProbeFailed", reason))? {
                             started = true;
@@ -1062,19 +1080,23 @@ mod tests {
                     if !started {
                         return Err(SidecarError::new("hookProbeFailed", "thread response missing"));
                     }
-                    eprintln!("hook_probe isolated={isolated} thread_started=true");
+                    eprintln!("hook_probe isolated={isolated} thread_response_received=true");
                     process.send_hook_probe(&workspace, true, &cancel)?;
                     let inventory_deadline = Instant::now() + Duration::from_secs(15);
                     let mut inventory = None;
                     for _ in 0..64 {
                         let remaining = inventory_deadline.checked_duration_since(Instant::now()).ok_or_else(failure)?;
                         let reply = process.receive_permission_probe(remaining, &cancel)?;
+                        log_warning(&reply);
                         if reply["id"] == 100 {
                             if !reply["error"].is_null() { return Err(SidecarError::new("hookProbeFailed", "hook inventory rejected")); }
                             inventory = Some(reply["result"].clone());
                             break;
                         }
                         if reply.get("id").is_some() { return Err(failure()); }
+                        let bounded = hello_agent_core::provider::BoundedObservation::new(serde_json::to_vec(&reply).map_err(|_| failure())?)
+                            .map_err(|_| failure())?;
+                        eprintln!("hook_probe inventory_event={}", hello_agent_core::provider::vendor_observation::codex_profile_config::hook_probe_notification(&bounded));
                     }
                     fn shape(value: &serde_json::Value, depth: usize) -> serde_json::Value {
                         if depth > 6 { return json!("depth-limit"); }
@@ -1093,8 +1115,13 @@ mod tests {
                     // Keep the process owner alive for the hook's 3s timeout
                     // plus a small margin; never send a model turn.
                     let settle = Instant::now() + Duration::from_secs(4);
+                    let mut frames = 0;
                     while Instant::now() < settle {
-                        process.tick()?;
+                        if let Some(reply) = process.poll_preflight_observed(&cancel, &mut |_| Ok(()))? {
+                            frames += 1;
+                            if frames > 64 { return Err(failure()); }
+                            eprintln!("hook_probe settled_event={}", hello_agent_core::provider::vendor_observation::codex_profile_config::hook_probe_notification(&reply));
+                        }
                         std::thread::sleep(Duration::from_millis(20));
                     }
                 }

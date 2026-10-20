@@ -50,6 +50,26 @@ pub fn is_probe_configuration_warning(input: &super::super::BoundedObservation) 
 
 /// Fixed outcome for the model-free native hook probe. No raw transcript,
 /// session handle, or authority to submit a turn leaves this function.
+pub fn hook_probe_notification(input: &super::super::BoundedObservation) -> &'static str {
+    let Ok(value) = input.json() else {
+        return "invalid";
+    };
+    if value.get("id").is_some() {
+        return "response";
+    }
+    match value["method"].as_str() {
+        Some("hook/started") => "hook/started",
+        Some("hook/completed") => "hook/completed",
+        Some("thread/started") => "thread/started",
+        Some("warning") => "warning",
+        Some("error") => "error",
+        Some("configWarning") => "configWarning",
+        Some(_) => "other-notification",
+        None => "invalid",
+    }
+}
+
+/// A successful thread response does not prove that a lifecycle hook ran.
 pub fn hook_probe_started(input: &super::super::BoundedObservation) -> Result<bool, &'static str> {
     let value = input.json().map_err(|_| "invalid hook probe JSON")?;
     if value.get("id").is_none() && value["method"].is_string() {
@@ -340,6 +360,41 @@ impl ProfileConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hook_diagnostic_emits_only_fixed_labels_not_vendor_content() {
+        for (input, expected) in [
+            (
+                r#"{"method":"hook/started","params":{"secret":"private"}}"#,
+                "hook/started",
+            ),
+            (
+                r#"{"method":"hook/completed","params":{}}"#,
+                "hook/completed",
+            ),
+            (
+                r#"{"method":"thread/started","params":{}}"#,
+                "thread/started",
+            ),
+            (
+                r#"{"method":"private-unrecognized-method"}"#,
+                "other-notification",
+            ),
+            (
+                r#"{"id":99,"result":{"thread":{"id":"private"}}}"#,
+                "response",
+            ),
+            (
+                r#"{"method":"hook/started","method":"thread/started"}"#,
+                "invalid",
+            ),
+            ("not json", "invalid"),
+        ] {
+            let observation =
+                super::super::super::BoundedObservation::new(input.as_bytes().to_vec()).unwrap();
+            assert_eq!(hook_probe_notification(&observation), expected);
+        }
+    }
 
     #[test]
     fn diagnostic_warning_rejects_requests_duplicates_and_malformed_envelopes() {

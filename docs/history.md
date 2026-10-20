@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-20 · by GPT-6 Astra
+- 직전 턴은 hook 등록·효과 설정 진단을 추가한 진행으로 분류하고 244f399/clean에서 재개했다. 공식 app-server 문서의 hook/started·hook/completed를 확인해 고정 이벤트명만 관측하는 진단과 미지 문자열/중복 키 회귀를 추가했다. 기존 thread_started 로그는 응답 수신과 실제 알림을 혼동하지 않도록 thread_response_received로 바꿨다.
+- 제한 환경 실행은 공급자 서명 입장에서 중단됐다. 허용 환경에서 같은 네트워크 차단 임시 시험을 재개했고, thread/start 응답 뒤 실제 thread/started를 확인했으나 4초 bounded drain에도 hook 시작/완료 알림은 없었다. 임시 자료만 사용하는 opt-in 경고 진단(본문2KiB 상한·임시 루트 마스킹)을 추가해 configWarning과 warning이 모두 hook trust 우회 활성 안내임을 확인했다. 즉 bypass_hook_trust 미지원/거절로 단정했던 가능성은 제외하며, trustStatus=untrusted 목록만으로 이번 invocation의 우회 미적용을 주장하지 않는다.
+- native 비교군 표시 파일은 여전히 없어 hook 대조 FAIL이며, 이를 격리 합격이나 Codex 연결 복구로 표현하지 않는다. 종료 확인과 임시 폴더 정리를 완료했고 인증/사용자 프로젝트·모델 호출은 없었다. 제품 경고 처리·프로필 차단은 그대로다. 상시 승인된 readonly config_layers_review는 이벤트 부재만으로 첫 turn 필요를 단정하지 말 것을 확인했다.
+- 다음 원인 분리를 위해 OS 네트워크 차단·인증 없는 임시 프로필에서 첫 작업 요청까지 관측할 별도 승인을 요청했다. 아직 turn을 전송하지 않았다. target1.8G/out309M 유지, 패키지 재생성/설치/main 병합/push 없음. G6/메모리/Windows/출시와 실제 Codex 연결 검증은 미완료다.
+- core codex_profile_config 회귀8건 PASS, 해당 모듈 rustfmt check·git diff --check PASS. native hook 대조 FAIL은 별도로 보존한다.
+
+### 2026-10-20 · by GPT-6 Astra
 - 4ea3cc8 이후 승인된 무계정·무과금 hook 시험을 이어갔다. hooks/list 관측을 추가해 비교군의 project hook 등록·enabled=true·trustStatus=untrusted를 확인했다. 프로젝트 신뢰와 개별 hook 신뢰는 별개이며 등록만으로 실행을 주장하지 않는다.
 - 시험의 bypass_hook_trust를 startup override에서 test-only thread/start.config로 옮겼다. 이때 초기 configWarning은 1개에서 0개로 바뀌었지만 실행 성공 증거는 아니다. 실제 features.hooks=true를 검사하고 matcher를 제거한 비교군도 ephemeral thread/start 성공 후 표시 파일을 생성하지 못했다. 최신 opt-in native hook 대조는 FAIL(1건)이며 격리군까지 통과한 시험이 아니다. 같은 비교군 반복이나 turn/model 호출로 범위를 확대하지 않았다.
 - 제품 launcher·프로필 입장·configWarning 거절은 변경하지 않았다. Codex 연결 복구는 여전히 미완료다. 다음은 SessionStart 실행 시점/신뢰·sandbox 실패를 구분하는 관측이며, 현재 증거로 프로젝트 설정 차단을 해제하지 않는다. 사용자 인증·프로젝트는 접근/변경하지 않았고 임시 시험 자식 종료 확인 뒤 임시 폴더를 정리했다. release 캐시만 재사용하고 새 패키지를 만들지 않았다.
