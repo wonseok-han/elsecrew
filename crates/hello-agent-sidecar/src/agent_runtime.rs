@@ -2146,6 +2146,136 @@ impl AgentRuntime {
             },
         )
     }
+
+    /// Repair catalog pointers left active by older completed abandon resolutions.
+    /// This never resolves recovery or changes a lock, manifest, chat, or run.
+    pub(crate) fn reconcile_resolved_catalogs(
+        &self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+    ) -> Result<(), SidecarError> {
+        self.validate_persisted_runs(storage)?;
+        for projection in storage.projection_records("run")? {
+            if projection.get("source_kind").and_then(Value::as_str) != Some(SOURCE_KIND)
+                || projection["recovery"]["state"] != "resolvedAbandoned"
+            {
+                continue;
+            }
+            reconcile_resolved_catalog(storage, projects, &projection)
+                .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
+        }
+        Ok(())
+    }
+}
+
+fn reconcile_resolved_catalog(
+    storage: &mut Storage,
+    projects: &ProjectManager,
+    projection: &Map<String, Value>,
+) -> Result<(), ProjectFailure> {
+    let run = &projection["record"];
+    let recovery = &projection["recovery"];
+    let address = address_from_chat(run)?;
+    let mut project = storage
+        .projection_record("project", &address.project_id)?
+        .ok_or_else(|| ProjectFailure::manifest("resolved recovery project is missing"))?;
+    if project.get("lifecycle").and_then(Value::as_str) != Some("active")
+        || project.get("worktree_id").and_then(Value::as_str) != Some(&address.worktree_id)
+    {
+        return Ok(());
+    }
+    let chat = actual_chat_projection(storage, &address.chat_id)?;
+    for field in [
+        "chatId",
+        "taskId",
+        "projectId",
+        "worktreeId",
+        "workspaceIdentity",
+    ] {
+        if run[field].is_null()
+            || run[field] != recovery[field]
+            || run[field] != chat["record"][field]
+        {
+            return Err(ProjectFailure::manifest(
+                "resolved catalog identity differs",
+            ));
+        }
+    }
+    let termination = &projection["termination"];
+    if run["state"] != "canceled"
+        || chat["record"]["state"] != "discarded"
+        || recovery["runId"] != run["runId"]
+        || recovery["poisoned"] != false
+        || termination["runId"] != run["runId"]
+        || termination["outcome"] != "cleanExit"
+        || termination["processesProvenGone"] != true
+        || termination["poisoned"] != false
+        || project.get("workspace_identity") != Some(&run["workspaceIdentity"])
+    {
+        return Err(ProjectFailure::manifest(
+            "resolved catalog lacks completion evidence",
+        ));
+    }
+    let lock_id = format!("lock_{}", address.worktree_id);
+    let lock = storage
+        .projection_record("lock", &lock_id)?
+        .ok_or_else(|| ProjectFailure::manifest("resolved catalog lock is missing"))?;
+    if lock.get("poisoned") != Some(&Value::Bool(false))
+        || lock.get("recovery_required") != Some(&Value::Bool(false))
+        || lock
+            .get("writer_run_id")
+            .is_some_and(|value| !value.is_null())
+        || project.get("lock_id").and_then(Value::as_str) != Some(lock_id.as_str())
+    {
+        return Err(ProjectFailure::recovery(
+            "resolved catalog still has a protected lock",
+        ));
+    }
+    let mut manifest = projection["workspace_manifest"].clone();
+    for (field, expected) in [
+        ("projectId", address.project_id.as_str()),
+        ("worktreeId", address.worktree_id.as_str()),
+        ("workspaceIdentity", address.workspace_identity.as_str()),
+    ] {
+        if manifest[field].as_str() != Some(expected) {
+            return Err(ProjectFailure::manifest(
+                "resolved catalog manifest identity differs",
+            ));
+        }
+    }
+    for (field, manifest_field) in [
+        ("canonical_path", "canonicalGitRoot"),
+        ("base_commit", "baseCommit"),
+        ("base_tree", "baseTree"),
+        ("object_format", "objectFormat"),
+        ("source_identity", "sourceIdentity"),
+        ("worktree_path", "worktreePath"),
+    ] {
+        if project.get(field) != manifest.get(manifest_field) {
+            return Err(ProjectFailure::manifest(
+                "resolved catalog snapshot identity differs",
+            ));
+        }
+    }
+    manifest["lifecycle"] = json!("recoveryRequired");
+    projects.workspace_verify_recovery_abandoned(
+        &address,
+        &manifest,
+        &recovery_manifest_digest(&manifest)?,
+    )?;
+    project.remove("last_event_sequence");
+    project.insert("lifecycle".into(), json!("abandoned"));
+    storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+        aggregate_type: "project",
+        aggregate_id: address.project_id,
+        operation_id: format!(
+            "op_reconcile_resolved_catalog_{}",
+            identity_string(recovery, "recoveryId")?
+        ),
+        request_id: None,
+        payload: project,
+    }])?;
+    Ok(())
 }
 
 fn persist_tracker_snapshot(

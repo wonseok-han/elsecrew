@@ -1,5 +1,16 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-20 · by GPT-6 Astra
+- 9f789cb 기준 미완료 historical catalog 보정을 완료했다. startup에서 actual run 원장 검증 후 이미 resolvedAbandoned인 기록의 동일 active catalog pointer만 검사한다. run/recovery/chat 식별자, cleanExit·자손 소멸, 잠금 해제, catalog snapshot identity 및 실제 abandoned manifest가 모두 맞을 때 project lifecycle만 보정한다. run/chat/lock/파일은 변경하지 않는다.
+- 과거 stale catalog를 재현한 회귀에 보정 후 재열기·멱등성·다른 snapshot 보존·identity/lock/manifest 불일치 거절 및 원장/파일 불변을 포함했다. release recovery_ 단위30건+stdio1건 PASS. 수정한 함수만 rustfmt 적용, diff check 수행. release 캐시를 재사용하며 새 debug 캐시·패키지는 만들지 않았다.
+- 상시 승인된 config_layers_review1명의 읽기 전용 독립 검토에서 입증된 차단 결함 없음. 함수 회귀 외 실제 startup/패키지 재시작 검증은 후속 통합 검증으로 남긴다. 실행 중인 앱이나 사용자 원장을 직접 변경하지 않았으므로 현재 화면 문제가 해결됐다고 주장하지 않는다.
+- OpenAI Docs의 현재 config-reference/app-server를 확인했다. 공식 설정 참조 https://learn.chatgpt.com/docs/config-file/config-reference 는 untrusted 프로젝트에서 project-local config/hooks/rules를 건너뜀을 명시한다. 실제 launcher 적용 전의 격리 검증 없이 trust 항목을 단순 허용하지 않는다. Codex 연결 호환 수정, 패키지 검증, G6/메모리/Windows/출시는 계속 미완료이며 실제 모델 호출·인증 변경·main 병합/push 없음.
+
+### 2026-10-20 · by GPT-6 Astra
+- 사용자 Codex 연결 불가 재보고에 대해 현재 파일과 profile_directory 조건을 읽기 전용으로 재확인했다. config.toml은278바이트로 고정 기대97바이트와 다르고 projects/trust_level=trusted 항목이 존재한다. 현재 검사에서 로그인 조회 이전에 거절되는 조건이 여전히 남아 있다.
+- auth.json은 일반 파일/0600/단일 링크로 존재한다. 인증 본문은 읽지 않았으며 파일 존재를 세션 유효성으로 해석하지 않는다. 재로그인이나 인증 삭제를 사용자에게 요구하지 않고 앱의 설정 호환 문제로 구분해 안내한다.
+- 기존 agent_runtime.rs/lib.rs의 미완료 catalog 보정 변경을 보존했다. 이번에는 구현·빌드·모델 호출·설정 변경·커밋/push를 하지 않았다. 다음은 로그인 상태 조회와 실제 실행의 설정 안전 경계를 분리하는 호환 수정 및 기존 catalog 보정 검증이다.
+
+### 2026-10-20 · by GPT-6 Astra
 - c6ecd56에서 actual recovery 후 프로젝트 재열기 회귀를 추가해 수정 전 manifestMismatch를 재현했다. finalize_recovery_intent의 run/chat/lock 원자 갱신에 같은 worktree/workspace identity를 가리키는 project lifecycle=abandoned 갱신을 포함했다. 다른 worktree는 보존하고 동일 worktree의 identity 불일치는 fail-closed한다. 기존 미커밋 조사 기록은 보존했다.
 - 수정 후 release recovery_ 단위28건 및 stdio1건 PASS. 읽기 전용 config_layers_review는 입증된 차단 결함 없음이며 교차 연결 경합 잠정 지적은 Storage EXCLUSIVE 단일 writer 확인 뒤 철회했다. 다른 catalog snapshot 보존/동일 ID identity 불일치의 추가 회귀를 작성해 실행 중이다. 실제 계정/사용자 프로젝트/인증 변경 없음.
 - 이는 향후 정상 복구/중단 후 saga 재개 경로의 수정이다. 이미 resolvedAbandoned로 끝난 과거 stale project projection을 조정하는 마이그레이션은 아직 없으므로 현재 앱 프로젝트가 복구됐다고 주장하지 않는다. 다음은 추가 회귀 마감, 기존 기록의 검증 기반 복구, Codex 설정 격리 호환이며 G6/메모리/Windows/출시 미완료다.

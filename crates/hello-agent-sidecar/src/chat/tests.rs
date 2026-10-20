@@ -4666,6 +4666,159 @@ fn recovery_finalize_preserves_other_catalog_snapshot_and_rejects_identity_drift
 }
 
 #[test]
+fn recovery_reconciles_historical_catalog_only_with_matching_completion_evidence() {
+    for variant in [
+        "matching",
+        "otherSnapshot",
+        "identityDrift",
+        "protectedLock",
+        "manifestDrift",
+    ] {
+        let (mut fixture, chat, run_id) =
+            durable_provider_recovery_fixture("req_historical_catalog");
+        let project_id = chat["projectId"].as_str().unwrap();
+        let mut old_project = fixture
+            .storage
+            .projection_record("project", project_id)
+            .unwrap()
+            .unwrap();
+        old_project.remove("last_event_sequence");
+        let run = fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap();
+        let request = json!({
+            "recoveryId":run["recovery"]["recoveryId"],"chatId":chat["chatId"],
+            "taskId":chat["taskId"],"projectId":chat["projectId"],
+            "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+            "runId":run_id,"expectedRevision":1,"resolution":"abandon"
+        });
+        let mut runtime = AgentRuntime::blocked();
+        assert_eq!(
+            runtime
+                .resolve_recovery(
+                    &mut fixture.storage,
+                    &mut fixture.projects,
+                    &request,
+                    "req_historical_catalog_resolve",
+                )
+                .unwrap()["outcome"],
+            "resolvedAbandoned"
+        );
+        // Reproduce the older resolver: all completion evidence persisted, but
+        // the catalog still points at the snapshot as active.
+        if variant == "otherSnapshot" {
+            old_project.insert("worktree_id".into(), json!("worktree_newer"));
+        } else if variant == "identityDrift" {
+            old_project.insert("workspace_identity".into(), json!("workspace_wrong"));
+        }
+        fixture
+            .storage
+            .upsert_projection_records_atomic(vec![ProjectionUpsert {
+                aggregate_type: "project",
+                aggregate_id: project_id.into(),
+                operation_id: "op_test_restore_historical_catalog".into(),
+                request_id: None,
+                payload: old_project,
+            }])
+            .unwrap();
+        if variant == "protectedLock" {
+            let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
+            let mut lock = fixture
+                .storage
+                .projection_record("lock", &lock_id)
+                .unwrap()
+                .unwrap();
+            lock.remove("last_event_sequence");
+            lock.insert("poisoned".into(), json!(true));
+            fixture
+                .storage
+                .upsert_projection_records_atomic(vec![ProjectionUpsert {
+                    aggregate_type: "lock",
+                    aggregate_id: lock_id,
+                    operation_id: "op_test_protect_historical_lock".into(),
+                    request_id: None,
+                    payload: lock,
+                }])
+                .unwrap();
+        }
+        let manifest_path = fixture
+            ._root
+            .path()
+            .join("data/worktree-manifests-v1")
+            .join(format!("{}.json", chat["worktreeId"].as_str().unwrap()));
+        if variant == "manifestDrift" {
+            let mut manifest: Value =
+                serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+            manifest["lifecycle"] = json!("active");
+            fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        }
+        let before_manifest = fs::read(&manifest_path).unwrap();
+        let before_project = fixture
+            .storage
+            .projection_record("project", project_id)
+            .unwrap();
+        let before_run = fixture.storage.projection_records("run").unwrap();
+        let before_chat = fixture.storage.projection_records("chat").unwrap();
+        let before_lock = fixture.storage.projection_records("lock").unwrap();
+        let result = runtime.reconcile_resolved_catalogs(&mut fixture.storage, &fixture.projects);
+        if variant == "matching" {
+            result.unwrap();
+            let after = fixture
+                .storage
+                .projection_record("project", project_id)
+                .unwrap();
+            assert_eq!(after.as_ref().unwrap()["lifecycle"], "abandoned");
+            runtime
+                .reconcile_resolved_catalogs(&mut fixture.storage, &fixture.projects)
+                .unwrap();
+            assert_eq!(
+                fixture
+                    .storage
+                    .projection_record("project", project_id)
+                    .unwrap(),
+                after
+            );
+            fixture
+                .projects
+                .reopen_project(
+                    &mut fixture.storage,
+                    project_id,
+                    "req_reopen_historical_catalog",
+                )
+                .unwrap();
+        } else {
+            if variant == "otherSnapshot" {
+                result.unwrap();
+            } else {
+                assert_eq!(result.unwrap_err().kind, "recoveryInvalid");
+            }
+            assert_eq!(
+                fixture
+                    .storage
+                    .projection_record("project", project_id)
+                    .unwrap(),
+                before_project
+            );
+        }
+        assert_eq!(
+            fixture.storage.projection_records("run").unwrap(),
+            before_run
+        );
+        assert_eq!(
+            fixture.storage.projection_records("chat").unwrap(),
+            before_chat
+        );
+        assert_eq!(
+            fixture.storage.projection_records("lock").unwrap(),
+            before_lock
+        );
+        assert_eq!(fs::read(&manifest_path).unwrap(), before_manifest);
+    }
+}
+
+#[test]
 fn recovery_reservations_are_random_per_run_and_identityless_restart_is_immutable() {
     let (mut fixture, mut runtime, chat, run_id) =
         identityless_recovery_fixture("req_identityless_a");

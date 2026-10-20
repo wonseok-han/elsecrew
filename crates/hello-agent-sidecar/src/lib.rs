@@ -903,7 +903,7 @@ impl Sidecar {
         storage.recover_unclean_shutdown()?;
         let g5 = chat::G5Manager::default();
         agent_runtime.recover_unclean_runs(&mut storage, &mut projects)?;
-        agent_runtime.validate_persisted_runs(&storage)?;
+        agent_runtime.reconcile_resolved_catalogs(&mut storage, &projects)?;
         g5.recover_unclean_runs(&mut storage, &mut projects)?;
         admission_not_cancelled(cancellation)?;
         storage.register_app_instance(&ready)?;
