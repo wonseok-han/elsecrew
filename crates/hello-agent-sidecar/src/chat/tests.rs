@@ -5894,8 +5894,65 @@ fn fake_agent_cancel_uncertain_poison_survives_and_is_abandon_only() {
             .unwrap()["recovery"],
         recovery
     );
+    // A provider fence is a separate durable resource. Bind this fake run's
+    // observed identities without launching a real provider or using an account.
+    let profile = crate::provider_claude_profile::ClaudeProfileBinding::from_storage(&fixture.storage).unwrap();
+    let mut owner = crate::provider_login_process::LoginProcess::reserve_claude_owned(profile).unwrap();
+    owner.retain_fence_before_launch(&run_id).unwrap();
+    let binding = owner.bind_run_fence(&run_id).unwrap();
+    let fence_path = fixture.storage.path().parent().unwrap().join("claude-login.pending");
+    let mut projection = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    {
+        use std::io::Write;
+        let mut fence = fs::OpenOptions::new().append(true).open(&fence_path).unwrap();
+        for process in projection["process_identity_internal"].as_array().unwrap() {
+            writeln!(fence, "{} {}", process["pid"], process["start_us"]).unwrap();
+        }
+        fence.sync_all().unwrap();
+    }
+    projection.remove("last_event_sequence");
+    projection.insert("provider_run_fence".into(), binding.to_value());
+    fixture.storage.upsert_projection_records_atomic(vec![crate::storage::ProjectionUpsert {
+        aggregate_type:"run", aggregate_id:run_id.clone(), operation_id:"test_bind_recovery_fence".into(), request_id:None, payload:projection,
+    }]).unwrap();
+    owner.finish().unwrap();
+    let mut login = crate::provider_login_manager::LoginManager::claude();
+    let recover_request = json!({"provider":"claude","action":"recover","attemptId":"bound-fence-repair"});
+    let fence_bytes = fs::read(&fence_path).unwrap();
+    // A live lock owner and an unresolved run each independently block release.
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover_request, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired");
+    drop(owner);
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover_request, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired");
+    assert_eq!(fs::read(&fence_path).unwrap(), fence_bytes);
     let resolved = runtime.resolve_recovery(&mut fixture.storage,&mut fixture.projects,&json!({"recoveryId":recovery["recoveryId"],"chatId":identity.chat_id,"taskId":identity.task_id,"projectId":identity.project_id,"worktreeId":identity.worktree_id,"workspaceIdentity":identity.workspace_identity,"runId":identity.run_id,"expectedRevision":1,"resolution":"abandon"}),"req_agent_resolve").unwrap();
     assert_eq!(resolved["outcome"], "resolvedAbandoned");
+    let terminal = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    assert_eq!(terminal["provider_run_fence"], binding.to_value());
+    for case in ["nonce", "state", "gone", "identities"] {
+        let mut invalid = terminal.clone();
+        invalid.remove("last_event_sequence");
+        match case {
+            "nonce" => invalid.get_mut("provider_run_fence").unwrap()["nonce"] = uuid::Uuid::new_v4().to_string().into(),
+            "state" => invalid.get_mut("record").unwrap()["state"] = "running".into(),
+            "gone" => invalid.get_mut("termination").unwrap()["processesProvenGone"] = false.into(),
+            "identities" => { invalid.insert("process_identity_internal".into(), json!([])); },
+            _ => unreachable!(),
+        }
+        fixture.storage.upsert_projection_records_atomic(vec![crate::storage::ProjectionUpsert {
+            aggregate_type:"run", aggregate_id:run_id.clone(), operation_id:format!("test_bad_fence_{case}"), request_id:None, payload:invalid,
+        }]).unwrap();
+        assert_eq!(login.request_with_projects(&fixture.storage, &recover_request, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired", "{case}");
+        assert_eq!(fs::read(&fence_path).unwrap(), fence_bytes, "{case}");
+    }
+    let mut restored = terminal.clone();
+    restored.remove("last_event_sequence");
+    fixture.storage.upsert_projection_records_atomic(vec![crate::storage::ProjectionUpsert {
+        aggregate_type:"run", aggregate_id:run_id.clone(), operation_id:"test_restore_fence_record".into(), request_id:None, payload:restored,
+    }]).unwrap();
+    let terminal = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover_request, &fixture.projects).unwrap()["state"], "idle");
+    assert!(!fence_path.exists());
+    assert_eq!(fixture.storage.projection_record("run", &run_id).unwrap().unwrap(), terminal);
     let lock = fixture
         .storage
         .projection_record(

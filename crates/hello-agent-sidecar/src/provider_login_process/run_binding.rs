@@ -15,6 +15,10 @@ pub(crate) struct RunFenceBinding {
 }
 
 impl RunFenceBinding {
+    pub(crate) fn run_id(&self) -> &str {
+        &self.run_id
+    }
+
     pub(crate) fn from_value(value: &Value) -> Result<Self, SidecarError> {
         let object = crate::require_exact_params(
             value,
@@ -69,6 +73,115 @@ impl RunFenceBinding {
         }
         Ok(())
     }
+}
+
+/// Explicit recovery only. The verifier must prove the exact durable run is
+/// terminal before unlink; disappearance of processes alone is insufficient.
+pub(crate) fn recover_bound_run(
+    profile: &dyn LoginProfile,
+    verify_terminal: impl FnOnce(&RunFenceBinding, &BTreeSet<ProcIdentity>) -> Result<(), SidecarError>,
+) -> Result<(), SidecarError> {
+    use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+    use std::io::Read;
+    let home = profile.revalidate()?;
+    let directory = profile.login_lease_directory()?;
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .follow(FollowSymlinks::No)
+        .custom_flags(libc::O_NONBLOCK);
+    let mut file = directory
+        .open_with(profile.pending_name(), &options)
+        .map_err(|_| failure())?;
+    let meta = file.metadata().map_err(|_| failure())?;
+    if !meta.is_file() || meta.len() > 16 * 1024 {
+        return Err(failure());
+    }
+    lock_exclusive(&file)?;
+    let mut bytes = Vec::new();
+    (&mut file)
+        .take(16 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| failure())?;
+    if bytes.len() as u64 != meta.len() || !bytes.ends_with(b"\n") || bytes.contains(&b'\r') {
+        return Err(failure());
+    }
+    let mut lines = std::str::from_utf8(&bytes).map_err(|_| failure())?.lines();
+    if lines.next() != Some("hello-agent provider login pending v1") {
+        return Err(failure());
+    }
+    let encoded = lines
+        .next()
+        .and_then(|line| line.strip_prefix("run-binding-v1 "))
+        .ok_or_else(failure)?;
+    let value: Value = serde_json::from_str(encoded).map_err(|_| failure())?;
+    let binding = RunFenceBinding::from_value(&value)?;
+    if serde_json::to_string(&binding.to_value()).map_err(|_| failure())? != encoded {
+        return Err(failure());
+    }
+    let runtime = match profile.pending_name() {
+        "codex-login.pending" => "codex",
+        "claude-login.pending" => "claude-code",
+        _ => return Err(failure()),
+    };
+    binding.validate(&binding.run_id, runtime)?;
+    let dir_meta = directory.dir_metadata().map_err(|_| failure())?;
+    if (meta.dev(), meta.ino(), dir_meta.dev(), dir_meta.ino())
+        != (
+            binding.device,
+            binding.inode,
+            binding.directory_device,
+            binding.directory_inode,
+        )
+    {
+        return Err(failure());
+    }
+    let mut recorded = BTreeSet::new();
+    for line in lines {
+        let (pid, start) = line.split_once(' ').ok_or_else(failure)?;
+        let identity = ProcIdentity {
+            pid: pid.parse().map_err(|_| failure())?,
+            start_us: start.parse().map_err(|_| failure())?,
+        };
+        if identity.pid <= 1
+            || identity.start_us <= 0
+            || line != format!("{} {}", identity.pid, identity.start_us)
+            || !recorded.insert(identity)
+            || recorded.len() > MAX_TRACKED
+        {
+            return Err(failure());
+        }
+    }
+    // Empty/unlaunched reservations need their live owner; do not infer closure.
+    if recorded.is_empty() {
+        return Err(failure());
+    }
+    let reservation = Reservation {
+        name: profile.pending_name(),
+        directory,
+        file,
+        recorded,
+        failed: false,
+    };
+    reservation.verify()?;
+    verify_terminal(&binding, &reservation.recorded)?;
+    for identity in &reservation.recorded {
+        if !matches!(
+            SystemProcTable.probe(*identity),
+            hello_agent_core::proctree::ProbeResult::Gone
+        ) {
+            return Err(failure());
+        }
+    }
+    if profile.revalidate()? != home
+        || !crate::provider_profile::same_directory(
+            &reservation.directory,
+            &profile.login_lease_directory()?,
+        )?
+    {
+        return Err(failure());
+    }
+    reservation.release()
 }
 
 impl LoginProcess<'_> {

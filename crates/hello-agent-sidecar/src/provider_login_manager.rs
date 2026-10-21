@@ -33,10 +33,23 @@ impl LoginManager {
         manager.claude = true;
         manager
     }
+    #[cfg(test)]
     pub(crate) fn request(
         &mut self,
         storage: &Storage,
         params: &Value,
+    ) -> Result<Value, SidecarError> {
+        self.request_inner(storage, params, None)
+    }
+
+    pub(crate) fn request_with_projects(
+        &mut self, storage: &Storage, params: &Value, projects: &crate::project::ProjectManager,
+    ) -> Result<Value, SidecarError> {
+        self.request_inner(storage, params, Some(projects))
+    }
+
+    fn request_inner(
+        &mut self, storage: &Storage, params: &Value, projects: Option<&crate::project::ProjectManager>,
     ) -> Result<Value, SidecarError> {
         self.reap_finished();
         let action = params
@@ -120,10 +133,12 @@ impl LoginManager {
                     crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage)
                         .and_then(|profile| {
                             crate::provider_login_process::recover_confirmed_login(&profile)
+                                .or_else(|error| recover_bound(&profile, storage, projects, error))
                         })
                 } else {
                     CodexProfileBinding::from_storage(storage).and_then(|profile| {
                         crate::provider_login_process::recover_confirmed_login(&profile)
+                            .or_else(|error| recover_bound(&profile, storage, projects, error))
                     })
                 };
                 self.attempt = id.map(str::to_owned);
@@ -306,6 +321,14 @@ impl LoginManager {
         }
     }
 }
+fn recover_bound(profile: &dyn crate::provider_profile::LoginProfile, storage: &Storage,
+    projects: Option<&crate::project::ProjectManager>, original: SidecarError) -> Result<(), SidecarError> {
+    let Some(projects) = projects else { return Err(original); };
+    crate::provider_login_process::recover_bound_run(profile, |binding, identities| {
+        crate::agent_runtime::verify_resolved_provider_fence(storage, projects, binding, identities)
+    })
+}
+
 pub(super) fn valid_code(code: &str) -> bool {
     !code.is_empty()
         && code.len() <= 4096

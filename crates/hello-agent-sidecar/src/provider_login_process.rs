@@ -27,7 +27,7 @@ const LOGIN_TERMINATED: &[u8] = b"login-processes-terminated-locked-v2\n";
 const OBSERVE_INTERVAL: Duration = Duration::from_millis(100);
 
 mod run_binding;
-pub(crate) use run_binding::RunFenceBinding;
+pub(crate) use run_binding::{recover_bound_run, RunFenceBinding};
 
 fn failure() -> SidecarError {
     SidecarError::new(
@@ -1368,6 +1368,54 @@ mod tests {
         drop(process);
         assert!(recover_confirmed_login(&profile(&temp)).is_err());
         assert_eq!(std::fs::read(temp.path().join(PENDING)).unwrap(), bytes);
+    }
+
+    #[test]
+    fn bound_run_recovery_rejects_unsafe_or_unfinished_fences() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        for case in ["live", "nonce", "inode", "directory", "provider", "run", "duplicate", "partial", "legacy", "permissions", "symlink"] {
+            let temp = tempfile::tempdir().unwrap();
+            let binding_profile = profile(&temp);
+            let mut process = LoginProcess::reserve(&binding_profile).unwrap();
+            process.retain_fence_before_launch("run-bound").unwrap();
+            let binding = process.bind_run_fence("run-bound").unwrap();
+            let own = identity_of(std::process::id()).unwrap();
+            process.reservation.record(&[own]).unwrap();
+            process.finish().unwrap();
+            drop(process);
+            let path = temp.path().join(PENDING);
+            let original = std::fs::read_to_string(&path).unwrap();
+            let mut value = binding.to_value();
+            match case {
+                "nonce" => value["nonce"] = uuid::Uuid::new_v4().to_string().into(),
+                "inode" => value["inode"] = (value["inode"].as_u64().unwrap() + 1).into(),
+                "directory" => value["directoryInode"] = (value["directoryInode"].as_u64().unwrap() + 1).into(),
+                "provider" => value["provider"] = "claude-code".into(),
+                "run" => value["runId"] = "another-run".into(),
+                _ => {},
+            }
+            let mut bytes = format!("hello-agent provider login pending v1\nrun-binding-v1 {}\n{} {}\n", serde_json::to_string(&value).unwrap(), own.pid, own.start_us);
+            match case {
+                "duplicate" => bytes.push_str(&format!("{} {}\n", own.pid, own.start_us)),
+                "partial" => { bytes.pop(); },
+                "legacy" => bytes = format!("hello-agent provider login pending v1\n{} {}\n", own.pid, own.start_us),
+                _ => {},
+            }
+            std::fs::write(&path, &bytes).unwrap();
+            if case == "permissions" { std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap(); }
+            if case == "symlink" {
+                let held = temp.path().join("held.pending");
+                std::fs::rename(&path, &held).unwrap();
+                symlink(&held, &path).unwrap();
+            }
+            let result = recover_bound_run(&binding_profile, |observed, identities| {
+                if observed != &binding || identities != &BTreeSet::from([own]) { return Err(failure()); }
+                Ok(())
+            });
+            assert!(result.is_err(), "{case}");
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), bytes, "{case}");
+            assert!(original.contains("run-binding-v1"));
+        }
     }
 
     #[test]

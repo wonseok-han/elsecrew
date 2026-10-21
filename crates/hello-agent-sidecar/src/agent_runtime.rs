@@ -47,6 +47,8 @@ const SOURCE_KIND: &str = "actualAgent";
 mod approval;
 mod native;
 mod native_evidence;
+mod provider_fence;
+pub(crate) use provider_fence::verify_resolved_provider_fence;
 mod reap;
 mod discovery;
 pub(crate) mod preparation;

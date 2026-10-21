@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-21 · by GPT-6 Astra
+- b33c0b3의 durable 결속을 사용하는 명시적 provider.login recover 경로를 연결했다. 기존 로그인 marker 복구는 유지하고, bound run 경로는 nofollow·배타 잠금·16KiB/정규 JSON/고유 PID+시작시각·파일/디렉터리 신원·원장 exact receipt를 확인한다. 실제 run canceled/cleanExit 및 resolvedAbandoned·chat discarded·해제된 lock·abandoned manifest를 검증한 뒤 모든 기록 프로세스를 다시 Gone 확인하고 기존 unlink+directory sync를 수행한다. 인증/원장 쓰기나 자동 시작 복구는 없다.
+- 독립 config_layers_review는 입증된 차단 결함 없음과 부정 회귀 필요를 확인했다. fake 실제-agent 통합 사례에서 보유 소유자/미해결 run 거절→원장 nonce/state/종료/identity 불일치 거절→resolved 후 해제 및 원장 불변 PASS. 별도11조건의 live PID/nonce/inode/dir/provider/run/duplicate/partial/legacy/mode/symlink 거절 PASS. 기존 explicit recovery5건 및 결속2건도 PASS(합계9 test 함수). 초기 테스트 helper 인자 오류와 실행 명령 패키지명 오타는 교정 후 관련 묶음을 완료했다. 새 모듈 rustfmt·diff check PASS.
+- 소스 구현 체크포인트이며 기존 계정·현재 실행 앱·과거107바이트 비결속 pending은 변경하지 않았다. 실제 패키지 연계/재시작 crash 전체 시나리오와 과거 잠금의 별도 안전 복구는 남는다. architecture에 현행 소스 경계와 패키지 미반영을 기록했다. Karpathy 원칙으로 일반 로그인/설치 및 완료 기준을 약화하지 않았다. G6/Windows/출시 미완료, main/push 없음.
+
+### 2026-10-21 · by GPT-6 Astra
 - 96cbdf5의 원인 조사 뒤 새 native run의 durable 잠금 결속을 구현했다. Codex named/Claude 시작은 retain 후 실행 전 pending 파일에 run ID·connection UUID·provider·파일/디렉터리 dev+ino를 fsync하고 같은 receipt를 run projection에 커밋한 뒤 spawn한다. 주요 projection 재생성은 receipt를 보존하고 actual_run_projection 조회는 정확 필드/신원 형태를 검증한다. 일반 로그인·설치 포맷과 기존 잠금은 변경하지 않는다.
 - Karpathy 최소 변경으로 새 의존성을 추가하지 않고 기존 JSON 계약 패턴을 사용했다. 초기 컴파일의 serde 직접 의존/Result 형식 오류는 수정했다. 최종 release test 빌드와 새 결속2건 PASS: 파일 영속값/다른 run·provider/추가 필드 거절, 재결속 무변경 거절, 원장 미커밋 상태의 파일을 일반 로그인 복구가 해제하지 않음. 새 모듈 rustfmt·diff check PASS.
 - readonly config_layers_review는 이 준비 단계에서 입증된 차단 결함 없음으로 검토했다. 파일 sync→DB commit 사이 중단은 잠금만 남기며 자동 해제하지 않는다. 직접 projection scan은 actual_run_projection 검증을 통하지 않으므로 후속 해제 경로에서 별도 exact 재검증이 필요하다. **복구 해제 구현·통합 회귀는 아직 미완료**이며 실행 중 패키지·과거 잠금·사용자 인증·실계정은 건드리지 않았다. 다음은 durable 결속 기반 명시 복구와 crash/retry 테스트다. main/push 없음.

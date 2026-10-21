@@ -1053,9 +1053,9 @@ impl Sidecar {
                 #[cfg(target_os = "macos")]
                 let result =
                     if request.params.get("provider").and_then(Value::as_str) == Some("claude") {
-                        self.claude_login.request(&self.storage, &request.params)?
+                        self.claude_login.request_with_projects(&self.storage, &request.params, &self.projects)?
                     } else {
-                        self.login.request(&self.storage, &request.params)?
+                        self.login.request_with_projects(&self.storage, &request.params, &self.projects)?
                     };
                 #[cfg(not(target_os = "macos"))]
                 let result = serde_json::json!({"state":"unsupported","attemptId":null,"authUrl":null,"error":null});
