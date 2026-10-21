@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-21 · by GPT-6 Astra
+- 직전 턴은 5b71762의 격리 경고 수정·native 설정 대조 완료로 진척했다. 이어 로그인/상태 확인 세션에 config/read(id60)를 계정 조회·OAuth보다 앞에 연결했다. 로그인용 flags/features와 home 조상 trust override/effective 일치·user/system source·disabled project layer를 검사하고 알려진 경고도 설정 응답과 대조한다. 원래 요청 목적을 보존하며 모델/thread 요청은 만들지 않는다.
+- 제품 LoginSession은 격리 검사를 필수 요청한다. 경고 대기는 기존 RPC deadline을 연장하지 않으며 취소/종료 소유권·자격 관측 후 종료 확인을 유지한다. 기존 pipe fixture를 새 설정 왕복에 맞췄다. readonly config_layers_review가 실제 user source의 profile:null 호환 누락을 찾아 수정했고 null만 정규화, 선택된 profile/추가 필드는 거절하는 회귀 후 재검토에서 추가 입증된 차단 결함 없음.
+- release sidecar 컴파일 확인, core 로그인10건 및 sidecar 로그인 pipe/취소/종료8건 PASS. 신규 모듈 rustfmt·diff check PASS. 최초 core 회귀 실패는 initialize fixture userAgent 누락으로 보완했으며 제품 거절 조건을 완화하지 않았다. 새 계정/유료 모델 실행 없이 구현·관련 검사만 묶어 진행했고 기존 release 캐시를 재사용했다(target1.8G/out309M).
+- profile_directory의 trust-bearing 프로필 차단은 유지한다. 다음은 로그인용 실제 임시 config 응답 확인과 전체 호출 경로의 입장 연결, 패키지 연결 검증이며 이번 체크포인트를 실제 Codex 로그인 복구 완료로 표현하지 않는다. G6/메모리/Windows/출시 미완료, main 병합/push 없음.
+
+### 2026-10-21 · by GPT-6 Astra
 - 8131a15에서 격리 경고 처리를 이어갔다. 승인된 무인증·OS 네트워크 차단 임시 config 대조는 PASS했으며 실제 공급자의 project dotCodexFolder/disabledReason과 configWarning summary의 관계를 확인했다. 알려진 격리 경고만 config/read 응답 대기 중 1회 보류하고 경로·사유를 실제 disabled project layer와 대조한다. 경고 자체는 계정/모델/작업 실행 권한이 아니다. 알 수 없는 경고와 미일치·활성 layer는 거절한다.
 - 독립 config_layers_review가 일반 initialized 응답 대기 조건은 account/model 조회까지 포함한다는 결함을 발견했다. config/read 전용 pending 조건으로 좁히고, 실제 후속 account/model/requirements 요청 대기 중 경고 거절 회귀를 추가했다. 재검토에서 추가 입증된 차단 결함 없음. Karpathy 최소 변경 원칙으로 기존 프로필 입장 차단과 인증/설정 보존은 유지한다.
 - core Codex 기존107건 PASS 및 추가 경고 파서/상태 회귀2건 PASS, 신규 모듈 rustfmt·diff check PASS. 임시 설정 대조1건도 PASS: isolated 경로의 named launcher/config/read가 제품 preflight의 경고·layer 검사를 통과했고 sentinel 미로드·설정 불변·종료 확인 후 정리를 확인했다. 시험 진단은 JSON 재직렬화를 거치므로 중복 키 거절 증거는 core 회귀에 한정한다. 로그인 경로 설정 관측, 실제 프로필 입장·패키지 연결은 미완료다. 새 실제 모델 호출·인증 변경·main 병합/push 없음. release 캐시를 재사용하고 패키지를 추가 생성하지 않았다.

@@ -7,6 +7,7 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 
 pub mod connection;
+mod configuration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginState {

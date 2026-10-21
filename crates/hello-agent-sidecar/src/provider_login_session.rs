@@ -55,8 +55,9 @@ impl<'a> LoginSession<'a> {
         check_only: bool,
     ) -> Result<Self, SidecarError> {
         let home = profile.revalidate()?;
-        let (flow, request) =
+        let (mut flow, request) =
             LoginConnection::begin(home.to_str().ok_or_else(failure)?).map_err(|_| failure())?;
+        flow.require_startup_isolation().map_err(|_| failure())?;
         let mut session = Self {
             process: LoginProcess::reserve(profile)?,
             flow,
@@ -135,7 +136,7 @@ impl<'a> LoginSession<'a> {
                 self.deadline = Instant::now() + BROWSER_TIMEOUT;
                 Ok(LoginProgress::Browser(browser))
             }
-            LoginAction::AccountUpdated => Ok(LoginProgress::Pending),
+            LoginAction::AccountUpdated | LoginAction::ConfigurationPending => Ok(LoginProgress::Pending),
             LoginAction::CredentialsAbsent => {
                 self.close_process()?;
                 Ok(if cancel.load(Ordering::Acquire) {
@@ -223,6 +224,18 @@ mod tests {
         CodexProfileBinding::from_storage(&storage).unwrap()
     }
 
+    fn configuration(home: &str) -> String {
+        use hello_agent_core::provider::vendor_observation::codex_profile_config::ProfileConfig;
+        let projects = ProfileConfig::parse(b"cli_auth_credentials_store='file'\n").unwrap()
+            .isolated_projects(&[std::path::Path::new(home)]).unwrap();
+        let flags = serde_json::json!({"projects":projects,"features":{"hooks":false,"apps":false,"plugins":false}});
+        serde_json::json!({"id":60,"result":{"config":flags,"layers":[
+            {"name":{"type":"sessionFlags"},"config":flags},
+            {"name":{"type":"user","file":format!("{home}/config.toml")},"config":{"cli_auth_credentials_store":"file"}},
+            {"name":{"type":"system","file":"/etc/codex/config.toml"},"config":{}}
+        ]}}).to_string()
+    }
+
     fn peer(home: &str, account_kind: &str) -> std::io::Result<Child> {
         let init = serde_json::json!({"id":1,"result":{"userAgent":"test","codexHome":home,"platformFamily":"unix","platformOs":"macos"}}).to_string();
         let account = serde_json::json!({"id":3,"result":{"account":{"type":account_kind,"email":"PRIVATE"},"requiresOpenaiAuth":true}}).to_string();
@@ -231,6 +244,8 @@ mod tests {
 IFS= read -r line; case "$line" in *'"method":"initialize"'*) ;; *) exit 2;; esac
 printf '%s\n' "$1"
 IFS= read -r line; test "$line" = '{"method":"initialized","params":{}}' || exit 3
+IFS= read -r line; case "$line" in *'"method":"config/read"'*) ;; *) exit 6;; esac
+printf '%s\n' "$3"
 IFS= read -r line; case "$line" in *'"method":"account/login/start"'*) ;; *) exit 4;; esac
 printf '%s\n' '{"id":2,"result":{"type":"chatgpt","loginId":"attempt","authUrl":"https://auth.openai.com/authorize?state=SECRET"}}'
 printf '%s\n' '{"method":"account/updated","params":{"authMode":"chatgpt","planType":"plus"}}'
@@ -241,7 +256,7 @@ IFS= read -r hold
 exec /bin/sleep 30
 "#;
         Command::new("/bin/sh")
-            .args(["-c", script, "login-peer", &init, &account])
+            .args(["-c", script, "login-peer", &init, &account, &configuration(home)])
             .env_clear()
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -264,12 +279,12 @@ exec /bin/sleep 30
             let reply =
                 serde_json::json!({"id":3,"result":{"account":account,"requiresOpenaiAuth":true}})
                     .to_string();
-            let script = "IFS= read -r line; printf '%s\\n' \"$1\"; IFS= read -r line; IFS= read -r line; test \"$line\" = '{\"id\":3,\"method\":\"account/read\",\"params\":{\"refreshToken\":false}}' || exit 2; printf '%s\\n' \"$2\"; IFS= read -r hold; exec /bin/sleep 30";
+            let script = "IFS= read -r line; printf '%s\\n' \"$1\"; IFS= read -r line; IFS= read -r line; case \"$line\" in *'\"method\":\"config/read\"'*) ;; *) exit 6;; esac; printf '%s\\n' \"$3\"; IFS= read -r line; test \"$line\" = '{\"id\":3,\"method\":\"account/read\",\"params\":{\"refreshToken\":false}}' || exit 2; printf '%s\\n' \"$2\"; IFS= read -r hold; exec /bin/sleep 30";
             let mut session = LoginSession::begin_with_barrier(
                 &binding,
                 || {
                     Command::new("/bin/sh")
-                        .args(["-c", script, "peer", &init, &reply])
+                        .args(["-c", script, "peer", &init, &reply, &configuration(home.to_str().unwrap())])
                         .env_clear()
                         .stdin(Stdio::piped())
                         .stdout(Stdio::piped())

@@ -10,6 +10,7 @@ use serde_json::value::RawValue;
 pub enum ConnectionState {
     Initializing,
     ReadyToLogin,
+    CheckingConfiguration,
     Starting,
     WaitingForBrowser,
     Verifying,
@@ -25,6 +26,7 @@ pub enum LoginAction {
     Send(LoginRequest),
     Browser(BrowserLogin),
     AccountUpdated,
+    ConfigurationPending,
     CredentialsObserved,
     CredentialsAbsent,
 }
@@ -35,6 +37,9 @@ pub struct LoginConnection {
     expected_home: String,
     state: ConnectionState,
     frames: usize,
+    require_configuration: bool,
+    pending_check_only: Option<bool>,
+    isolation_warning: Option<super::super::codex_isolation_warning::IsolationWarning>,
 }
 
 impl LoginConnection {
@@ -58,6 +63,9 @@ impl LoginConnection {
                 expected_home: expected_home.into(),
                 state: ConnectionState::Initializing,
                 frames: 0,
+                require_configuration: false,
+                pending_check_only: None,
+                isolation_warning: None,
             },
             LoginRequest(request),
         ))
@@ -67,11 +75,27 @@ impl LoginConnection {
         self.state
     }
 
+    /// Opt in before initialization; never infer isolation from login success.
+    pub fn require_startup_isolation(&mut self) -> Result<(), ProviderError> {
+        if self.state != ConnectionState::Initializing || self.frames != 0 {
+            return Err(error());
+        }
+        self.require_configuration = true;
+        Ok(())
+    }
+
+    fn configuration_request(&mut self, check_only: bool) -> LoginRequest {
+        self.pending_check_only = Some(check_only);
+        self.state = ConnectionState::CheckingConfiguration;
+        LoginRequest(format!("{}\n", serde_json::json!({"id":60,"method":"config/read","params":{"includeLayers":true,"cwd":self.expected_home}})))
+    }
+
     /// Only call after sending initialized, and after explicit user login action.
     pub fn start_login(&mut self) -> Result<LoginRequest, ProviderError> {
         if self.state != ConnectionState::ReadyToLogin {
             return Err(error());
         }
+        if self.require_configuration { return Ok(self.configuration_request(false)); }
         let (login, request) = LoginExchange::begin(2)?;
         self.login = Some(login);
         self.state = ConnectionState::Starting;
@@ -84,6 +108,7 @@ impl LoginConnection {
         if self.state != ConnectionState::ReadyToLogin {
             return Err(error());
         }
+        if self.require_configuration { return Ok(self.configuration_request(true)); }
         self.state = ConnectionState::Verifying;
         Ok(LoginRequest(
             "{\"id\":3,\"method\":\"account/read\",\"params\":{\"refreshToken\":false}}\n".into(),
@@ -104,6 +129,22 @@ impl LoginConnection {
             return Err(error());
         }
         match self.state {
+            ConnectionState::CheckingConfiguration => {
+                if input.json()?["method"] == "configWarning" {
+                    if self.isolation_warning.is_some() { return Err(error()); }
+                    let home = std::path::Path::new(&self.expected_home);
+                    self.isolation_warning = Some(super::super::codex_isolation_warning::IsolationWarning::parse(input, home, home).map_err(|_| error())?);
+                    return Ok(LoginAction::ConfigurationPending);
+                }
+                let result = super::configuration::validate(input, std::path::Path::new(&self.expected_home))?;
+                if self.isolation_warning.as_ref().is_some_and(|warning| !warning.matches_configuration(&result)) {
+                    return Err(error());
+                }
+                let check_only = self.pending_check_only.take().ok_or_else(error)?;
+                self.require_configuration = false;
+                self.state = ConnectionState::ReadyToLogin;
+                Ok(LoginAction::Send(if check_only { self.check_account()? } else { self.start_login()? }))
+            }
             ConnectionState::Initializing => {
                 let (_, result) = self.init.accept(input)?;
                 #[derive(Deserialize)]
