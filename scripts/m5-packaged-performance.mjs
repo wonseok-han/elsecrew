@@ -8,6 +8,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { packagedInputMaximum } from './m5-packaged-input-probe.mjs';
 import { packagedLongTaskMaximum } from './m5-packaged-long-task-probe.mjs';
 import { mainTaskMaximum } from './m5-main-task-trace.mjs';
+import { assertMeasurementSourceUnchanged } from './m5-measurement-source.mjs';
 
 const mode = process.argv[2];
 assert.ok(process.argv.length === 3 && ['--diff', '--tree-file', '--memory-diff'].includes(mode));
@@ -51,6 +52,10 @@ async function trial(index) {
   assert.equal(result.shutdown, 'confirmed');
   assert.deepEqual(result.termination, {code:0, signal:null});
   assert.equal(result.head, report.head); assert.equal(result.headAfter, report.head);
+  assertMeasurementSourceUnchanged(
+    {head:report.head, gitStatus:report.gitStatusBefore},
+    {head:git('rev-parse', 'HEAD'), gitStatus:git('status', '--porcelain')},
+  );
   if (index > 0) {
     assert.equal(result.asarSha256, report.trials[0].result.asarSha256);
     assert.equal(result.sidecarSha256, report.trials[0].result.sidecarSha256);
@@ -110,6 +115,19 @@ try {
   }
   report.status = report.trials.some(row => row.result.status === 'FAIL' || row.values.rendererLongTaskMs > 200 || row.values.mainLongTaskMs > 200) ? 'FAIL' : 'NOT_READY';
 } catch (error) { report.status = 'FAIL'; report.error = String(error); }
-finally { report.headAfter = git('rev-parse','HEAD'); persist(); }
-console.log(JSON.stringify({output, status:report.status, metrics:report.metrics, error:report.error}));
+finally {
+  try {
+    report.headAfter = git('rev-parse','HEAD');
+    report.gitStatusAfter = git('status', '--porcelain');
+    assertMeasurementSourceUnchanged(
+      {head:report.head, gitStatus:report.gitStatusBefore},
+      {head:report.headAfter, gitStatus:report.gitStatusAfter},
+    );
+  } catch (error) {
+    report.status = 'FAIL';
+    report.sourceError = String(error);
+  }
+  persist();
+}
+console.log(JSON.stringify({output, status:report.status, metrics:report.metrics, error:report.error, sourceError:report.sourceError}));
 process.exitCode = report.status === 'FAIL' ? 1 : 2;

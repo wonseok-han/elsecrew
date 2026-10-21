@@ -1,5 +1,9 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-21 · by GPT-6 Astra
+- 직전 턴은 최신 패키지 반영·smoke PASS·UI 관측으로 진척했다. Codex 연결 잠금 복구 승인은 대기 상태로 유지하고 독립 가능한 G6 수집기를 점검했다. 반복 packaged collector가 마지막 HEAD를 기록만 하던 누락을 보완해 각 trial 후/종료 시 HEAD·porcelain 변경 또는 조회 실패를 FAIL로 보존한다. trial에서 발견하면 fixture 정리 전 중단한다.
+- Karpathy 지침에 따라 성능 임계값·제품 안전 검사·계정 상태는 변경하지 않았다. 동일 porcelain 안의 내용 변경 검출이나 패키지 freshness 증명으로 확대하지 않으며 diagnostic/gateEligible=false를 유지한다. 순수 판정 회귀2건·수집기 문법·diff check PASS. GUI/유료 실행은 하지 않았다. 다음은 승인된 연결 복구 및 실제 패키지 성능 수집/G6 결손 보완이며 Windows·출시 미완료다.
+
+### 2026-10-21 · by GPT-6 Astra
 - 5928d8b에서 최신 macOS arm64 패키지를 기존 out 경로에 반영하고 m5:package:smoke PASS(exit0)를 확인했다. 정상 종료 후 기존 PID11259/11302가 사라졌고 최신 앱 PID7974/sidecar7992로 다시 열렸다. target1.9G/out309M이며 별도 패키지 사본·유료 모델 실행은 없다.
 - 최신 UI는 프로젝트 목록 로드 완료 및 Claude 연결됨을 표시했다. Codex는 providerProfileUnavailable 대신 providerLoginRecoveryRequired와 연결 잠금 복구 버튼을 표시한다. 로그인 프로세스 종료 확인 잠금이 남아 실제 Codex 연결 성공은 아직 아니다. 복구 버튼은 누르지 않았고 인증 삭제/강제 종료/원장 수동 수정도 하지 않았다. 다음은 앱의 종료 증거 기반 연결 잠금 복구 승인 후 상태 재확인이다. 기존 catalog manifestMismatch 오류는 이번 시작 화면에는 나타나지 않았으나 모든 프로젝트 개별 검증은 하지 않았다.
 
