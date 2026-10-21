@@ -974,7 +974,11 @@ mod tests {
             std::fs::set_permissions(home.join("config.toml"), std::fs::Permissions::from_mode(0o600)).unwrap();
             let profile = InspectionProfile { root, home: home.clone(), config };
             let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium" };
-            let mut args = discovery_arguments(&home, &expected, ExpectedPermission::ReadOnly).unwrap();
+            let mut args = if isolated && !hook_probe {
+                named_discovery_arguments(&home, &workspace, &expected, ExpectedPermission::ReadOnly).unwrap()
+            } else {
+                discovery_arguments(&home, &expected, ExpectedPermission::ReadOnly).unwrap()
+            };
             if hook_probe {
                 // The fixed test-only thread request carries hook trust bypass.
                 // It is a request override, not an app-server startup setting.
@@ -1017,6 +1021,7 @@ mod tests {
                 let mut flow = PreflightExchange::with_named_permission(
                     &expected, home.to_str().unwrap(), &workspace, ExpectedPermission::ReadOnly,
                 ).map_err(|_| failure())?;
+                if isolated && !hook_probe { flow.require_startup_isolation(&workspace).map_err(|_| failure())?; }
                 for frame in flow.next_frames().map_err(|_| failure())? {
                     process.send_preflight(frame, Duration::from_secs(15), &cancel)?;
                 }
@@ -1026,10 +1031,30 @@ mod tests {
                 for frame in flow.next_frames().map_err(|_| failure())? {
                     process.send_preflight(frame, Duration::from_secs(15), &cancel)?;
                 }
-                let mut reply = process.receive_preflight(Duration::from_secs(15), &cancel)?;
-                // Diagnostic only: count bounded warning frames and then
-                // inspect settings/marker evidence. This is NOT product
-                // acceptance, and does not assert what any warning means.
+                let receive_config = |process: &mut LoginProcess<'_>, timeout| {
+                    let value = process.receive_permission_probe(timeout, &cancel)?;
+                    if value["method"] == "configWarning" {
+                        for key in ["summary", "details"] {
+                            if let Some(text) = value["params"][key].as_str().filter(|text| text.len() <= 2048) {
+                                eprintln!("project_trust_control warning_{key}={}", json!(text.replace(profile.root.to_str().unwrap(), "<probe>")));
+                            }
+                        }
+                    }
+                    if let Some(layers) = value["result"]["layers"].as_array() {
+                        for layer in layers.iter().filter(|layer| layer["name"]["type"] == "project").take(8) {
+                            for (key, field) in [("folder", &layer["name"]["dotCodexFolder"]), ("disabledReason", &layer["disabledReason"])] {
+                                if let Some(text) = field.as_str().filter(|text| text.len() <= 2048) {
+                                    eprintln!("project_trust_control project_{key}={}", json!(text.replace(profile.root.to_str().unwrap(), "<probe>")));
+                                }
+                            }
+                        }
+                    }
+                    hello_agent_core::provider::BoundedObservation::new(serde_json::to_vec(&value).map_err(|_| failure())?).map_err(|_| failure())
+                };
+                let mut reply = receive_config(&mut process, Duration::from_secs(15))?;
+                // Count bounded warning frames for the diagnostic controls.
+                // Only the isolated config-only case also exercises product
+                // validation; hook controls retain their separate probe path.
                 let mut warning_count = 0;
                 let config_deadline = Instant::now() + Duration::from_secs(20);
                 for _ in 0..8 {
@@ -1037,10 +1062,15 @@ mod tests {
                         break;
                     }
                     warning_count += 1;
+                    if isolated && !hook_probe { flow.accept(&reply).map_err(|_| failure())?; }
                     let remaining = config_deadline.checked_duration_since(Instant::now()).ok_or_else(failure)?;
-                    reply = process.receive_preflight(remaining, &cancel)?;
+                    reply = receive_config(&mut process, remaining)?;
                 }
                 eprintln!("project_trust_control isolated={isolated} diagnostic_warning_count={warning_count}");
+                if isolated && !hook_probe {
+                    flow.accept(&reply).map_err(|_| failure())?;
+                    eprintln!("project_trust_control isolated=true product_configuration_matched=true");
+                }
                 hello_agent_core::provider::vendor_observation::codex_profile_config::matches_project_config_probe(
                     &reply, &home, &workspace, isolated, hook_probe && !isolated,
                 ).map_err(|reason| SidecarError::new("configProbeFailed", reason))?;

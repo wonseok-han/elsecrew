@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-21 · by GPT-6 Astra
+- 8131a15에서 격리 경고 처리를 이어갔다. 승인된 무인증·OS 네트워크 차단 임시 config 대조는 PASS했으며 실제 공급자의 project dotCodexFolder/disabledReason과 configWarning summary의 관계를 확인했다. 알려진 격리 경고만 config/read 응답 대기 중 1회 보류하고 경로·사유를 실제 disabled project layer와 대조한다. 경고 자체는 계정/모델/작업 실행 권한이 아니다. 알 수 없는 경고와 미일치·활성 layer는 거절한다.
+- 독립 config_layers_review가 일반 initialized 응답 대기 조건은 account/model 조회까지 포함한다는 결함을 발견했다. config/read 전용 pending 조건으로 좁히고, 실제 후속 account/model/requirements 요청 대기 중 경고 거절 회귀를 추가했다. 재검토에서 추가 입증된 차단 결함 없음. Karpathy 최소 변경 원칙으로 기존 프로필 입장 차단과 인증/설정 보존은 유지한다.
+- core Codex 기존107건 PASS 및 추가 경고 파서/상태 회귀2건 PASS, 신규 모듈 rustfmt·diff check PASS. 임시 설정 대조1건도 PASS: isolated 경로의 named launcher/config/read가 제품 preflight의 경고·layer 검사를 통과했고 sentinel 미로드·설정 불변·종료 확인 후 정리를 확인했다. 시험 진단은 JSON 재직렬화를 거치므로 중복 키 거절 증거는 core 회귀에 한정한다. 로그인 경로 설정 관측, 실제 프로필 입장·패키지 연결은 미완료다. 새 실제 모델 호출·인증 변경·main 병합/push 없음. release 캐시를 재사용하고 패키지를 추가 생성하지 않았다.
+
+### 2026-10-21 · by GPT-6 Astra
 - 직전 턴은 native hook 대조 PASS와 오류 안내 구현으로 진행했고, 17e7737/clean에서 후속 제품 preflight를 연결했다. 명시적으로 require_startup_isolation을 지정한 연결에서만 disabled project layer의 정확한 home/cwd 조상 .codex 경로·source shape·중복·상한·비활성 사유 형태를 검사한다. 유일한 sessionFlags의 필수 projects override/effective 일치와 hooks/apps/plugins=false를 먼저 요구하고, 검사한 project layer만 기존 3개 기본 layer 검증 앞에서 제외한다.
 - user/system/managed/unknown layer와 effective 모델/권한 검사는 그대로 유지한다. 활성 project·외부/alias 경로·override 불일치·중복 JSON을 거절하는 회귀를 추가했다. 사유 영문을 안전 근거로 사용하지 않으며 disabledReason 비활성 의미와 실제 공급자 응답 shape의 후속 통합 확인은 남긴다. readonly config_layers_review는 그 의미 전제에서 입증된 차단 결함 없음이며 경고/프로필 입장 승인으로 확대하지 말 것을 확인했다.
 - 신규 provenance 회귀1건 및 preflight 회귀29건 PASS, core profile 모듈 rustfmt와 diff check PASS. 전체 제품 검사나 새 native 실행/모델 호출은 하지 않았다. configWarning은 계속 거절하며 profile_directory의 trust-bearing 프로필 차단도 유지한다. 다음은 제한된 격리 경고 처리, 로그인 상태 확인 경로의 설정 관측/보존·종료 확인, 실제 프로필 입장과 패키지 연결이다. Codex 연결·G6/메모리/Windows/출시는 미완료, main 병합/push 없음.
@@ -96,6 +101,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **격리 경고의 수용 범위(2026-10-21)**: configWarning의 알려진 격리 설명은 설정 조회 대기 중에만 보류하고 실제 disabled project layer와 대조한다. initialized 이후 모든 응답 대기를 허용하면 계정/모델 조회 단계에서 대조 없이 수용하는 구멍이 생기므로 config/read 전용 pending 조건을 사용한다. 이 처리와 실제 사용자 프로필 입장 승인은 별개다.
 
 - **Codex hook 대조 보완(2026-10-20)**: 세션 생성만으로는 비교군 hook이 실행되지 않았다. 별도 승인된 무인증·OS 네트워크 차단 첫 작업 요청 뒤 비교군의 hook 시작/완료·표시 파일 생성과 격리군의 hooks 빈 목록·표시 파일 부재를 대조 확인했다. 종료 확인·임시 정리까지 PASS이며 실제 모델 응답 성공은 아니다. 제품 trust 입장/경고 처리 활성화는 별도 미완료다.
 

@@ -44,6 +44,7 @@ pub struct PreflightExchange {
     account_note_seen: bool,
     named_cwd: Option<std::path::PathBuf>,
     isolation_cwd: Option<std::path::PathBuf>,
+    isolation_warning: Option<super::super::codex_isolation_warning::IsolationWarning>,
     configuration_failure: Option<&'static str>,
     display_models: Option<Vec<super::CatalogModel>>,
 }
@@ -110,6 +111,7 @@ impl PreflightExchange {
             account_note_seen: false,
             named_cwd: None,
             isolation_cwd: None,
+            isolation_warning: None,
             configuration_failure: None,
             display_models: None,
         })
@@ -393,6 +395,16 @@ impl PreflightExchange {
             return Err(invalid());
         }
         if input.json()?.get("method").is_some() {
+            if input.json()?["method"] == "configWarning" {
+                if !self.rpc.awaiting_configuration_reply() || self.isolation_warning.is_some() {
+                    return Err(invalid());
+                }
+                let cwd = self.isolation_cwd.as_deref().ok_or_else(invalid)?;
+                self.isolation_warning = Some(super::super::codex_isolation_warning::IsolationWarning::parse(
+                    input, std::path::Path::new(&self.expected_home), cwd,
+                ).map_err(|_| invalid())?);
+                return Ok(self.state);
+            }
             self.configuration_failure = Some(match input.json()?["method"].as_str() {
                 Some("account/updated") => "account notification phase or envelope",
                 Some("configWarning") => "configuration warning notification",
@@ -471,6 +483,9 @@ impl PreflightExchange {
                     super::super::codex_profile_config::validate_disabled_project_layers(
                         &value, std::path::Path::new(&self.expected_home), cwd,
                     ).map_err(|_| invalid())?;
+                    if self.isolation_warning.as_ref().is_some_and(|warning| !warning.matches_configuration(&value)) {
+                        return Err(invalid());
+                    }
                     // Only validated, disabled launch-ancestor project layers
                     // are excluded. All remaining layers still pass the strict
                     // existing source/config checks below (including managed).
@@ -645,6 +660,58 @@ mod tests {
             } else { reply(1, &values[1]) };
             assert_eq!(flow.accept(&input).is_ok(), case == "disabled", "{case}");
             if case != "disabled" { assert_eq!(flow.state(), PreflightState::Failed); }
+        }
+    }
+
+    #[test]
+    fn isolation_warning_is_pending_evidence_not_configuration_authority() {
+        let home = std::path::Path::new("/app/profile");
+        let cwd = std::path::Path::new("/app/workspace");
+        let profile = super::super::super::codex_profile_config::ProfileConfig::parse(b"cli_auth_credentials_store='file'\n").unwrap();
+        let projects = profile.isolated_projects(&[home, cwd]).unwrap();
+        let reason = "/app/workspace is marked as untrusted in the effective configuration. To load project-local config, hooks, and exec policies, update its trust setting. If that setting is managed by your organization, contact your administrator.";
+        let summary = format!("Project-local config, hooks, and exec policies are disabled in the following folders until the project is trusted, but skills still load.\n    1. /app/workspace/.codex\n       {reason}\n");
+        for case in ["valid", "early", "late", "account", "models", "requirements", "duplicate", "unknown", "missing", "changed", "active", "legacy"] {
+            let mut flow = exchange();
+            if case != "legacy" { flow.require_startup_isolation(cwd).unwrap(); }
+            let mut values = results();
+            values[1]["config"]["projects"] = projects.clone();
+            values[1]["layers"][0]["config"]["projects"] = projects.clone();
+            if case != "missing" {
+                values[1]["layers"].as_array_mut().unwrap().push(json!({
+                    "name":{"type":"project","dotCodexFolder":"/app/workspace/.codex"},
+                    "config":{}, "disabledReason":reason
+                }));
+            }
+            if case == "changed" { values[1]["layers"][3]["disabledReason"] = json!("Other reason"); }
+            if case == "active" { values[1]["layers"][3]["disabledReason"] = Value::Null; }
+            let warning = BoundedObservation::new(json!({"method":"configWarning","params":{"summary":if case == "unknown" { "Other warning" } else { &summary }}}).to_string().into_bytes()).unwrap();
+            flow.next_frames().unwrap();
+            if case != "early" {
+                flow.accept(&reply(0, &values[0])).unwrap();
+                flow.next_frames().unwrap();
+            }
+            if case == "late" { flow.accept(&reply(1, &values[1])).unwrap(); }
+            if let Some(index) = ["account", "models", "requirements"].iter().position(|value| *value == case) {
+                for completed in 1..=index+1 {
+                    flow.accept(&reply(completed, &values[completed])).unwrap();
+                    flow.next_frames().unwrap();
+                }
+            }
+            if ["early", "late", "account", "models", "requirements", "unknown", "legacy"].contains(&case) {
+                assert!(flow.accept(&warning).is_err(), "{case}");
+                assert_eq!(flow.state(), PreflightState::Failed);
+                continue;
+            }
+            assert_eq!(flow.accept(&warning).unwrap(), PreflightState::Checking);
+            assert!(flow.display_models().is_none());
+            if case == "duplicate" {
+                assert!(flow.accept(&warning).is_err());
+            } else {
+                assert_eq!(flow.accept(&reply(1, &values[1])).is_ok(), case == "valid", "{case}");
+            }
+            assert_eq!(flow.state(), if case == "valid" { PreflightState::Checking } else { PreflightState::Failed });
+            assert!(flow.into_text_turn("must not send").is_err());
         }
     }
 

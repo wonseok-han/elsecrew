@@ -50,6 +50,10 @@ impl ModelFreeExchange {
     pub(super) fn awaiting_initialized_reply(&self) -> bool {
         self.awaiting_reply() && self.next > 0
     }
+
+    pub(super) fn awaiting_configuration_reply(&self) -> bool {
+        self.awaiting_reply() && self.next == 1
+    }
     pub fn with_config_layers() -> Self {
         Self {
             include_config_layers: true,
