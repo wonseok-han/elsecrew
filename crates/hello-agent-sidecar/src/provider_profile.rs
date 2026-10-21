@@ -550,7 +550,7 @@ mod tests {
         let trusted = b"cli_auth_credentials_store='file'\n[projects.'/snapshot']\ntrust_level='trusted'\n";
         profile.write("config.toml", trusted).unwrap();
         prepare_codex_profile(&root(&temp)).unwrap();
-        let home = temp.path().join(CODEX_PROFILE_DIRECTORY);
+        let home = temp.path().canonicalize().unwrap().join(CODEX_PROFILE_DIRECTORY);
         let argument = codex_isolation_argument(&home, &home).unwrap();
         assert!(argument.to_str().unwrap().contains("untrusted"));
         let parsed = read_profile_config(&profile).unwrap();

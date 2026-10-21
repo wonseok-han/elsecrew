@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-21 · by GPT-6 Astra
+- cc1153a 후속 관련 재검증 완료: reserved_interactions와 text_candidate_public_sink 각각 PASS. profile 영역은 새 회귀의 임시 경로 /var alias를 canonicalize하도록 시험만 보완한 뒤 16 PASS/4 opt-in ignored, runtime special-file 1 PASS(세션17807 exit0). 앞선 Unix socket 3건은 제한 밖 임시 객체 시험에서 모두 통과했다. 전체 workspace 재실행 완료로 확대하지 않는다.
+- 사용자가 기존 시험 앱 PID11259의 정상 종료 후 최신 패키지 반영을 승인했다. 앱 메뉴 Quit으로 정상 종료했으며 강제 종료·인증정보·프로젝트 변경은 하지 않았다. 다음은 최신 패키지 생성 및 smoke 검증이다. 실제 유료 모델 실행, main 병합/push는 포함하지 않는다.
+
+### 2026-10-21 · by GPT-6 Astra
+- 전체 Rust 세션43741은 exit101로 종료했다. sidecar632 PASS/5 FAIL/41 ignored, 실행523.60초다. 실패는 reserved_interactions 및 text_candidate_public_sink의 preflight/실행 단계2건과 runtime_isolation special-file 및 claude_runtime_files2건의 UnixListener bind EPERM3건이다. 앞서 중간 출력의3건을 최종5건으로 정정한다. cargo가 여기서 중단했으므로 뒤의 통합·doc test 전체 완료를 주장하지 않는다.
+- cc1153a의 fixture 격리 값 보완과 승인된 profile 입장 변경을 대상으로, 가짜 실행2건→profile 영역→special-file 검사를 순차 재실행했다(세션62387, 진행 중). 소켓은 임시 로컬 객체만 생성하는 시험으로 제한 밖 실행했으며 실제 계정·유료 모델은 사용하지 않는다. 제품 소켓/설정 검증을 약화하거나 실패를 ignored로 바꾸지 않았다.
+
+### 2026-10-21 · by GPT-6 Astra
 - 기존 전체 회귀43741의 live 출력으로 storage 검사가 진행 중임을 확인했다. 재시작이나 중복 무거운 실행 없이 유지했으며, 앞선3건의 최종 실패 상세는 아직 대기다. 직전 fixture 수정은 구현 진척이고 이번 기다림은 실제 실행 핸들을 확인한 검증 대기다.
 - 사용자가 '검토 완료 후 Codex 연결 차단 해제 승인'을 명시했다. provider_profile의 typed read/크기·소유권·권한·nofollow/공유 파일 검사는 유지하고 유효한 projects가 비어 있지 않다는 이유만의 차단을 제거했다. 원문 보존 및 저장된 /snapshot trust 키의 invocation untrusted 생성 회귀를 갱신했다. readonly config_layers_review는 실제 diff에서 추가 입증된 차단 결함 없음으로 검토했다.
 - 현재 실행 중인 전체 회귀는 이 활성화 변경 전 바이너리이므로 이번 patch의 합격 증거가 아니다. 실행 종료 뒤 fixture 실패 수정과 profile 영역을 묶어 검증한다. architecture 상단은 승인 반영 상태로 갱신했다. 실제 계정 호출/로그인 정보 변경·기존 앱 재시작·패키지 반영·main 병합/push 없음. 변경은 검증 전 구현 체크포인트이며 실제 Codex 연결 복구·제품 완료로 선언하지 않는다.
