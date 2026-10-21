@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-21 · by GPT-6 Astra
+- 직전9b05072는 결속 잠금 복구 구현 진척이었다. 같은 clean HEAD에서 최신 release sidecar를 먼저 빌드하고 CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4로 cargo test --release --workspace --locked를 완주했다(세션66074 exit0). Tauri105 PASS/13 ignored, core·protocol 통과, sidecar640 PASS/41 ignored(970.12초), stdio 통합14 PASS/1 ignored, core doc3 PASS다. macOS sandbox opt-in2건은 제외됐다. 이전 전체 실행의5개 실패는 이번 전체 실행에서 재현되지 않았으며 뒤의 통합/doc 검사까지 완료했다.
+- 이어 npm test554건 PASS/0 skipped, pnpm build의 tsc 및 기본 Vite production build PASS(세션13153 exit0). 이 빌드는 Electron 패키지 재생성이 아니다. 기존 release 캐시를 재사용했고 새 워크트리/패키지 사본·실제 계정/유료 모델 실행·과거 잠금/인증 변경은 없었다.
+- 전체 로컬 코드 회귀 파동은 통과했으나 제품 완료/G6 합격으로 확대하지 않는다. 새 복구의 packaged/crash 경계 검증, 과거 비결속 Codex 잠금의 별도 안전 복구, 성능/메모리 기준, Windows 실제 환경 및 출시 승인은 남는다. main 병합/push 없음.
+
+### 2026-10-21 · by GPT-6 Astra
 - b33c0b3의 durable 결속을 사용하는 명시적 provider.login recover 경로를 연결했다. 기존 로그인 marker 복구는 유지하고, bound run 경로는 nofollow·배타 잠금·16KiB/정규 JSON/고유 PID+시작시각·파일/디렉터리 신원·원장 exact receipt를 확인한다. 실제 run canceled/cleanExit 및 resolvedAbandoned·chat discarded·해제된 lock·abandoned manifest를 검증한 뒤 모든 기록 프로세스를 다시 Gone 확인하고 기존 unlink+directory sync를 수행한다. 인증/원장 쓰기나 자동 시작 복구는 없다.
 - 독립 config_layers_review는 입증된 차단 결함 없음과 부정 회귀 필요를 확인했다. fake 실제-agent 통합 사례에서 보유 소유자/미해결 run 거절→원장 nonce/state/종료/identity 불일치 거절→resolved 후 해제 및 원장 불변 PASS. 별도11조건의 live PID/nonce/inode/dir/provider/run/duplicate/partial/legacy/mode/symlink 거절 PASS. 기존 explicit recovery5건 및 결속2건도 PASS(합계9 test 함수). 초기 테스트 helper 인자 오류와 실행 명령 패키지명 오타는 교정 후 관련 묶음을 완료했다. 새 모듈 rustfmt·diff check PASS.
 - 소스 구현 체크포인트이며 기존 계정·현재 실행 앱·과거107바이트 비결속 pending은 변경하지 않았다. 실제 패키지 연계/재시작 crash 전체 시나리오와 과거 잠금의 별도 안전 복구는 남는다. architecture에 현행 소스 경계와 패키지 미반영을 기록했다. Karpathy 원칙으로 일반 로그인/설치 및 완료 기준을 약화하지 않았다. G6/Windows/출시 미완료, main/push 없음.
