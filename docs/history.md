@@ -1,5 +1,9 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-21 · by GPT-6 Astra
+- 5928d8b에서 최신 macOS arm64 패키지를 기존 out 경로에 반영하고 m5:package:smoke PASS(exit0)를 확인했다. 정상 종료 후 기존 PID11259/11302가 사라졌고 최신 앱 PID7974/sidecar7992로 다시 열렸다. target1.9G/out309M이며 별도 패키지 사본·유료 모델 실행은 없다.
+- 최신 UI는 프로젝트 목록 로드 완료 및 Claude 연결됨을 표시했다. Codex는 providerProfileUnavailable 대신 providerLoginRecoveryRequired와 연결 잠금 복구 버튼을 표시한다. 로그인 프로세스 종료 확인 잠금이 남아 실제 Codex 연결 성공은 아직 아니다. 복구 버튼은 누르지 않았고 인증 삭제/강제 종료/원장 수동 수정도 하지 않았다. 다음은 앱의 종료 증거 기반 연결 잠금 복구 승인 후 상태 재확인이다. 기존 catalog manifestMismatch 오류는 이번 시작 화면에는 나타나지 않았으나 모든 프로젝트 개별 검증은 하지 않았다.
+
+### 2026-10-21 · by GPT-6 Astra
 - cc1153a 후속 관련 재검증 완료: reserved_interactions와 text_candidate_public_sink 각각 PASS. profile 영역은 새 회귀의 임시 경로 /var alias를 canonicalize하도록 시험만 보완한 뒤 16 PASS/4 opt-in ignored, runtime special-file 1 PASS(세션17807 exit0). 앞선 Unix socket 3건은 제한 밖 임시 객체 시험에서 모두 통과했다. 전체 workspace 재실행 완료로 확대하지 않는다.
 - 사용자가 기존 시험 앱 PID11259의 정상 종료 후 최신 패키지 반영을 승인했다. 앱 메뉴 Quit으로 정상 종료했으며 강제 종료·인증정보·프로젝트 변경은 하지 않았다. 다음은 최신 패키지 생성 및 smoke 검증이다. 실제 유료 모델 실행, main 병합/push는 포함하지 않는다.
 
