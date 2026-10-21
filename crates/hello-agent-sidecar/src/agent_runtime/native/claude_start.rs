@@ -80,6 +80,7 @@ impl AgentRuntime {
             if !owner.matches_startup_run(&pending.run_id) {
                 owner.retain_fence_before_launch(&pending.run_id)?;
             }
+            pending.bind_provider_fence(storage, owner)?;
             pending.launch_claude_candidate(
                 storage,
                 projects,

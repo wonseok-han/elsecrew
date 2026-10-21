@@ -2778,6 +2778,12 @@ fn actual_run_projection(
     }
     stored_public_budget(&value)?;
     native_evidence::validate(&value)?;
+    if let Some(binding) = value.get("provider_run_fence") {
+        let failure = || ProjectFailure::recovery("provider run fence binding differs");
+        let binding = crate::provider_login_process::RunFenceBinding::from_value(binding).map_err(|_| failure())?;
+        binding.validate(run_id, value["record"]["selectedProfile"]["runtime"].as_str().ok_or_else(failure)?)
+            .map_err(|_| failure())?;
+    }
     Ok(value)
 }
 
@@ -2791,6 +2797,7 @@ fn preserve_provider_evidence(source: &Map<String, Value>, target: &mut Map<Stri
         "claude_preflight",
         "claude_session_observation",
         "approval_intents_internal",
+        "provider_run_fence",
     ] {
         if let Some(value) = source.get(field) {
             target.insert(field.into(), value.clone());

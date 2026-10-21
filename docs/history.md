@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-21 · by GPT-6 Astra
+- 96cbdf5의 원인 조사 뒤 새 native run의 durable 잠금 결속을 구현했다. Codex named/Claude 시작은 retain 후 실행 전 pending 파일에 run ID·connection UUID·provider·파일/디렉터리 dev+ino를 fsync하고 같은 receipt를 run projection에 커밋한 뒤 spawn한다. 주요 projection 재생성은 receipt를 보존하고 actual_run_projection 조회는 정확 필드/신원 형태를 검증한다. 일반 로그인·설치 포맷과 기존 잠금은 변경하지 않는다.
+- Karpathy 최소 변경으로 새 의존성을 추가하지 않고 기존 JSON 계약 패턴을 사용했다. 초기 컴파일의 serde 직접 의존/Result 형식 오류는 수정했다. 최종 release test 빌드와 새 결속2건 PASS: 파일 영속값/다른 run·provider/추가 필드 거절, 재결속 무변경 거절, 원장 미커밋 상태의 파일을 일반 로그인 복구가 해제하지 않음. 새 모듈 rustfmt·diff check PASS.
+- readonly config_layers_review는 이 준비 단계에서 입증된 차단 결함 없음으로 검토했다. 파일 sync→DB commit 사이 중단은 잠금만 남기며 자동 해제하지 않는다. 직접 projection scan은 actual_run_projection 검증을 통하지 않으므로 후속 해제 경로에서 별도 exact 재검증이 필요하다. **복구 해제 구현·통합 회귀는 아직 미완료**이며 실행 중 패키지·과거 잠금·사용자 인증·실계정은 건드리지 않았다. 다음은 durable 결속 기반 명시 복구와 crash/retry 테스트다. main/push 없음.
+
+### 2026-10-21 · by GPT-6 Astra
 - 직전3275f82는 수집기 수정으로 진척했다. 이번에는 실제 Codex 차단의 읽기 전용 원인 분리를 수행했다. 앱 데이터 codex-login.pending은107바이트/0600/10월19일 기록이며 종료 v2 marker 없이 PID·시작시각 줄로 끝난다. lsof 열린 소유자는 관측되지 않았지만 이를 종료·삭제 허가로 해석하지 않는다. 인증 파일·원장·잠금은 변경하지 않았다.
 - 독립 config_layers_review와 소스 대조에서 실제 run 복구 finalize는 manifest/DB run·chat·writer lock만 종결하고 공급자 pending을 해제하지 않는 간극을 확인했다. retained run은 로그인 v2 marker를 의도적으로 쓰지 않으며, 같은 inode를 보유한 live owner의 release_after_run_terminal만 해제한다. pending에는 run ID/nonce 결속이 없고 startup_run_id는 메모리 전용이다. 현재 과거 파일이 특정 resolved run 소유라고 시각/UI만으로 확정할 수 없다.
 - **직전 안내 정정**: 현재 파일에는 일반 '연결 잠금 복구' 버튼만으로 해결되지 않는다. 앞선 버튼 실행 승인 요청은 이 경로의 해결책으로 철회한다. marker 추가·수동 unlink·PID 부재만의 해제는 하지 않는다. 다음 구현은 새 run과 pending의 durable 고유 결속 및 명시 복구 연계이며, 기존 비결속 잠금은 별도 증거 수집·안전 복구 방안/사용자 승인 경계로 남긴다. 실제 모델 실행 없이 읽기 전용 조사·독립 검토만 수행했다. G6/Windows/출시 미완료, main/push 없음.

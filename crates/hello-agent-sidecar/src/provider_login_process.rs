@@ -26,6 +26,9 @@ const MAX_TRACKED: usize = 256;
 const LOGIN_TERMINATED: &[u8] = b"login-processes-terminated-locked-v2\n";
 const OBSERVE_INTERVAL: Duration = Duration::from_millis(100);
 
+mod run_binding;
+pub(crate) use run_binding::RunFenceBinding;
+
 fn failure() -> SidecarError {
     SidecarError::new(
         "providerLoginRecoveryRequired",
@@ -1342,6 +1345,41 @@ mod tests {
             .join("hello-agent.sqlite3");
         let storage = crate::Storage::open(&path).unwrap();
         CodexProfileBinding::from_storage(&storage).unwrap()
+    }
+
+    #[test]
+    fn run_fence_binding_is_durable_and_does_not_authorize_login_recovery() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut process = LoginProcess::reserve_codex_owned(profile(&temp)).unwrap();
+        process.retain_fence_before_launch("run-bound").unwrap();
+        let binding = process.bind_run_fence("run-bound").unwrap();
+        binding.validate("run-bound", "codex").unwrap();
+        assert!(binding.validate("other-run", "codex").is_err());
+        assert!(binding.validate("run-bound", "claude-code").is_err());
+        let bytes = std::fs::read(temp.path().join(PENDING)).unwrap();
+        let text = std::str::from_utf8(&bytes).unwrap();
+        let line = text.lines().nth(1).unwrap().strip_prefix("run-binding-v1 ").unwrap();
+        let value = serde_json::from_str(line).unwrap();
+        assert_eq!(RunFenceBinding::from_value(&value).unwrap(), binding);
+        let mut invalid = value;
+        invalid["extra"] = true.into();
+        assert!(RunFenceBinding::from_value(&invalid).is_err());
+        process.finish().unwrap();
+        drop(process);
+        assert!(recover_confirmed_login(&profile(&temp)).is_err());
+        assert_eq!(std::fs::read(temp.path().join(PENDING)).unwrap(), bytes);
+    }
+
+    #[test]
+    fn run_fence_binding_rejects_rebinding_without_overwriting_record() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut process = LoginProcess::reserve_codex_owned(profile(&temp)).unwrap();
+        process.retain_fence_before_launch("run-bound").unwrap();
+        process.bind_run_fence("run-bound").unwrap();
+        let bytes = std::fs::read(temp.path().join(PENDING)).unwrap();
+        assert!(process.bind_run_fence("run-bound").is_err());
+        assert_eq!(std::fs::read(temp.path().join(PENDING)).unwrap(), bytes);
+        assert!(process.release_after_run_terminal().is_err());
     }
 
     #[test]

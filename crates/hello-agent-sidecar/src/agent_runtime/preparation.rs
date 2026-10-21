@@ -221,6 +221,27 @@ impl OwnedTextRun {
 }
 
 impl RunReservation {
+    pub(super) fn bind_provider_fence(
+        &self,
+        storage: &mut Storage,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+    ) -> Result<(), SidecarError> {
+        let failure = || SidecarError::new("agentInputChanged", "provider fence binding differs");
+        let mut projection = actual_run_projection(storage, &self.run_id).map_err(|_| failure())?;
+        if !self.matches_current_record(&projection) || projection.contains_key("provider_run_fence") {
+            return Err(failure());
+        }
+        let receipt = process.bind_run_fence(&self.run_id)?;
+        receipt.validate(&self.run_id, self.run["selectedProfile"]["runtime"].as_str().ok_or_else(failure)?)?;
+        projection.remove("last_event_sequence");
+        projection.insert("provider_run_fence".into(), receipt.to_value());
+        storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run", aggregate_id: self.run_id.clone(),
+            operation_id: format!("op_agent_provider_fence_{}", self.run_id),
+            request_id: None, payload: projection,
+        }]).map(|_| ()).map_err(|_| failure())
+    }
+
     fn current_record(&self) -> &Value {
         self.running_record.get().map(|(record, _)| record).unwrap_or(&self.run)
     }
@@ -328,6 +349,7 @@ impl RunReservation {
         let pending = reservation.as_ref().ok_or_else(failure)?;
         let pending_process = process.as_mut().ok_or_else(failure)?;
         pending_process.retain_fence_before_launch(&pending.run_id)?;
+        pending.bind_provider_fence(storage, pending_process)?;
         pending.launch_named_codex_candidate(
             storage,
             projects,

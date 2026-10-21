@@ -395,6 +395,7 @@ impl RunReservation {
             resolved_model:profile.model_selector.clone(),credentials_present:true,observed_at:now(),profile:profile.clone(),
         });
         process.retain_fence_before_launch(&self.run_id)?;
+        self.bind_provider_fence(storage, process)?;
         ClaudeCommand::toy(&home, workspace, &profile.model_selector, effort, access, script)?.launch(process, |child, identities| {
             self.record_pre_release(storage, projects, identities).map_err(|_| std::io::Error::other("toy identity persistence failed"))?;
             crate::provider_login_gate::release(child)
