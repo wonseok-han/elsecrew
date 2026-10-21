@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-21 · by GPT-6 Astra
+- 직전3275f82는 수집기 수정으로 진척했다. 이번에는 실제 Codex 차단의 읽기 전용 원인 분리를 수행했다. 앱 데이터 codex-login.pending은107바이트/0600/10월19일 기록이며 종료 v2 marker 없이 PID·시작시각 줄로 끝난다. lsof 열린 소유자는 관측되지 않았지만 이를 종료·삭제 허가로 해석하지 않는다. 인증 파일·원장·잠금은 변경하지 않았다.
+- 독립 config_layers_review와 소스 대조에서 실제 run 복구 finalize는 manifest/DB run·chat·writer lock만 종결하고 공급자 pending을 해제하지 않는 간극을 확인했다. retained run은 로그인 v2 marker를 의도적으로 쓰지 않으며, 같은 inode를 보유한 live owner의 release_after_run_terminal만 해제한다. pending에는 run ID/nonce 결속이 없고 startup_run_id는 메모리 전용이다. 현재 과거 파일이 특정 resolved run 소유라고 시각/UI만으로 확정할 수 없다.
+- **직전 안내 정정**: 현재 파일에는 일반 '연결 잠금 복구' 버튼만으로 해결되지 않는다. 앞선 버튼 실행 승인 요청은 이 경로의 해결책으로 철회한다. marker 추가·수동 unlink·PID 부재만의 해제는 하지 않는다. 다음 구현은 새 run과 pending의 durable 고유 결속 및 명시 복구 연계이며, 기존 비결속 잠금은 별도 증거 수집·안전 복구 방안/사용자 승인 경계로 남긴다. 실제 모델 실행 없이 읽기 전용 조사·독립 검토만 수행했다. G6/Windows/출시 미완료, main/push 없음.
+
+### 2026-10-21 · by GPT-6 Astra
 - 직전 턴은 최신 패키지 반영·smoke PASS·UI 관측으로 진척했다. Codex 연결 잠금 복구 승인은 대기 상태로 유지하고 독립 가능한 G6 수집기를 점검했다. 반복 packaged collector가 마지막 HEAD를 기록만 하던 누락을 보완해 각 trial 후/종료 시 HEAD·porcelain 변경 또는 조회 실패를 FAIL로 보존한다. trial에서 발견하면 fixture 정리 전 중단한다.
 - Karpathy 지침에 따라 성능 임계값·제품 안전 검사·계정 상태는 변경하지 않았다. 동일 porcelain 안의 내용 변경 검출이나 패키지 freshness 증명으로 확대하지 않으며 diagnostic/gateEligible=false를 유지한다. 순수 판정 회귀2건·수집기 문법·diff check PASS. GUI/유료 실행은 하지 않았다. 다음은 승인된 연결 복구 및 실제 패키지 성능 수집/G6 결손 보완이며 Windows·출시 미완료다.
 
