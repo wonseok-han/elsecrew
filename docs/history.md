@@ -1,4 +1,9 @@
 # 작업 이력 (Hello, Agent)
+### 2026-10-21 · by GPT-6 Astra
+- 직전 턴은 native hook 대조 PASS와 오류 안내 구현으로 진행했고, 17e7737/clean에서 후속 제품 preflight를 연결했다. 명시적으로 require_startup_isolation을 지정한 연결에서만 disabled project layer의 정확한 home/cwd 조상 .codex 경로·source shape·중복·상한·비활성 사유 형태를 검사한다. 유일한 sessionFlags의 필수 projects override/effective 일치와 hooks/apps/plugins=false를 먼저 요구하고, 검사한 project layer만 기존 3개 기본 layer 검증 앞에서 제외한다.
+- user/system/managed/unknown layer와 effective 모델/권한 검사는 그대로 유지한다. 활성 project·외부/alias 경로·override 불일치·중복 JSON을 거절하는 회귀를 추가했다. 사유 영문을 안전 근거로 사용하지 않으며 disabledReason 비활성 의미와 실제 공급자 응답 shape의 후속 통합 확인은 남긴다. readonly config_layers_review는 그 의미 전제에서 입증된 차단 결함 없음이며 경고/프로필 입장 승인으로 확대하지 말 것을 확인했다.
+- 신규 provenance 회귀1건 및 preflight 회귀29건 PASS, core profile 모듈 rustfmt와 diff check PASS. 전체 제품 검사나 새 native 실행/모델 호출은 하지 않았다. configWarning은 계속 거절하며 profile_directory의 trust-bearing 프로필 차단도 유지한다. 다음은 제한된 격리 경고 처리, 로그인 상태 확인 경로의 설정 관측/보존·종료 확인, 실제 프로필 입장과 패키지 연결이다. Codex 연결·G6/메모리/Windows/출시는 미완료, main 병합/push 없음.
+
 ### 2026-10-20 · by GPT-6 Astra
 - 246e8c4/clean 기준 직접 구현을 재개했다. 기존 안내도 로그아웃을 단정하지 않음을 확인했고, 정상 파싱된 project trust 설정 때문에 막힌 경우를 providerProfileIsolationRequired로 분리했다. 한/영 안내는 앱 설정 호환 문제와 인증 만료를 구분하고 인증/설정 삭제·재로그인을 권하지 않는다. 해당 오류에서는 로그인 시작 버튼을 비활성화하되 상태 재확인/설치 진단을 유지하며 backend 차단은 그대로다. 프런트 관련10건 PASS, Rust 오류 분류 변경은 후속 native 시험 빌드에 포함됐다.
 - 사용자가 OS 네트워크 차단·무인증 임시 프로필의 첫 작업 요청 시험을 명시 승인했다. 테스트 전용 고정 Start/Inventory/OfflineTurn 요청만 허용하고 첫 작업은 별도 승인 환경 gate와 bounded thread ID를 요구한다. 실제 사용자 프로필·proxy·외부 통신 허용 없이 기존 owner/종료 확인을 유지했다. readonly config_layers_review는 입증된 범위/종료 차단 결함 없음이며 요청 발신을 turn 완료로 표현하지 말 것을 확인했다.

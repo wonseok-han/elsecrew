@@ -466,19 +466,18 @@ impl PreflightExchange {
                 }
             }
             ObservationKind::Config => {
-                if let Some(cwd) = &self.isolation_cwd {
-                    let value = observation.json()?;
-                    let flags = value["layers"].as_array().ok_or_else(invalid)?.iter()
-                        .find(|layer| layer["name"]["type"] == "sessionFlags")
-                        .ok_or_else(invalid)?;
-                    if flags["config"].get("projects").is_none() {
-                        return Err(invalid());
-                    }
-                    super::super::codex_profile_config::strip_isolation_flag(
-                        &mut flags["config"].clone(), &value["config"],
-                        &[std::path::Path::new(&self.expected_home), cwd],
+                let observation = if let Some(cwd) = &self.isolation_cwd {
+                    let mut value = observation.json()?;
+                    super::super::codex_profile_config::validate_disabled_project_layers(
+                        &value, std::path::Path::new(&self.expected_home), cwd,
                     ).map_err(|_| invalid())?;
-                }
+                    // Only validated, disabled launch-ancestor project layers
+                    // are excluded. All remaining layers still pass the strict
+                    // existing source/config checks below (including managed).
+                    value["layers"].as_array_mut().ok_or_else(invalid)?
+                        .retain(|layer| layer["name"]["type"] != "project");
+                    BoundedObservation::new(serde_json::to_vec(&value).map_err(|_| invalid())?)?
+                } else { observation };
                 if let Some(cwd) = &self.named_cwd {
                     super::named_config::match_configuration(
                         &observation,
@@ -617,6 +616,36 @@ mod tests {
     fn thread_reply(result: &Value) -> BoundedObservation {
         BoundedObservation::new(serde_json::to_vec(&json!({"id":5,"result":result})).unwrap())
             .unwrap()
+    }
+
+    #[test]
+    fn isolated_disabled_project_layers_keep_other_source_checks() {
+        let home = std::path::Path::new("/app/profile");
+        let cwd = std::path::Path::new("/app/workspace");
+        let config = super::super::super::codex_profile_config::ProfileConfig::parse(b"cli_auth_credentials_store='file'\n").unwrap();
+        let projects = config.isolated_projects(&[home, cwd]).unwrap();
+        for case in ["disabled", "enabled", "legacy", "managed", "system", "duplicate-json"] {
+            let mut flow = exchange();
+            if case != "legacy" { flow.require_startup_isolation(cwd).unwrap(); }
+            let mut values = results();
+            values[1]["config"]["projects"] = projects.clone();
+            values[1]["layers"][0]["config"]["projects"] = projects.clone();
+            values[1]["layers"].as_array_mut().unwrap().push(json!({
+                "name":{"type":"project","dotCodexFolder":"/app/workspace/.codex"},
+                "config":{"private_marker":"unused"},"disabledReason":if case == "enabled" { Value::Null } else { json!("Not trusted") }
+            }));
+            if case == "managed" { values[1]["layers"].as_array_mut().unwrap().push(json!({"name":{"type":"mdm"},"config":{},"disabledReason":"ignored"})); }
+            if case == "system" { values[1]["layers"][2]["config"] = json!({"hooks":{"private":"must reject"}}); }
+            flow.next_frames().unwrap();
+            flow.accept(&reply(0, &values[0])).unwrap();
+            flow.next_frames().unwrap();
+            let input = if case == "duplicate-json" {
+                let text = json!({"id":2,"result":values[1]}).to_string().replace("\"disabledReason\":", "\"disabledReason\":null,\"disabledReason\":");
+                BoundedObservation::new(text.into_bytes()).unwrap()
+            } else { reply(1, &values[1]) };
+            assert_eq!(flow.accept(&input).is_ok(), case == "disabled", "{case}");
+            if case != "disabled" { assert_eq!(flow.state(), PreflightState::Failed); }
+        }
     }
 
     #[test]

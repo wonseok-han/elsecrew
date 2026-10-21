@@ -8,6 +8,68 @@ use std::path::{Component, Path};
 pub const MAX_CONFIG_BYTES: usize = 64 * 1024;
 const MAX_PROJECTS: usize = 128;
 
+/// Candidate validation for reported disabled project layers. Not admission:
+/// callers still validate all other layers, effective settings and RPC order.
+/// Do not use a disabled reason alone as evidence of startup isolation.
+pub fn validate_disabled_project_layers(
+    result: &serde_json::Value,
+    home: &Path,
+    cwd: &Path,
+) -> Result<(), &'static str> {
+    let layers = result["layers"].as_array().ok_or("layers shape")?;
+    if layers.len() > 259 {
+        return Err("layers budget");
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    let flags: Vec<_> = layers
+        .iter()
+        .filter(|layer| layer["name"]["type"] == "sessionFlags")
+        .collect();
+    if flags.len() != 1 {
+        return Err("session flags identity");
+    }
+    let flags = &flags[0]["config"];
+    if flags.get("projects").is_none() {
+        return Err("isolation flags absent");
+    }
+    strip_isolation_flag(&mut flags.clone(), &result["config"], &[home, cwd])?;
+    for feature in ["hooks", "apps", "plugins"] {
+        if flags["features"][feature] != false || result["config"]["features"][feature] != false {
+            return Err("extensions enabled");
+        }
+    }
+    for layer in layers
+        .iter()
+        .filter(|layer| layer["name"]["type"] == "project")
+    {
+        let folder = layer["name"]["dotCodexFolder"]
+            .as_str()
+            .ok_or("project source path")?;
+        let expected = serde_json::json!({"type":"project","dotCodexFolder":folder});
+        if layer["name"] != expected || !layer["config"].is_object() {
+            return Err("project source shape");
+        }
+        // Exact textual paths avoid aliases such as ../, repeated separators,
+        // or a sibling project that happens to have a stored trust override.
+        if ![home, cwd].iter().any(|base| {
+            base.ancestors()
+                .any(|ancestor| ancestor.join(".codex").to_str() == Some(folder))
+        }) {
+            return Err("project source outside launch ancestry");
+        }
+        if !seen.insert(folder) {
+            return Err("duplicate project source");
+        }
+        let reason = layer["disabledReason"]
+            .as_str()
+            .ok_or("project layer enabled")?;
+        if reason.trim().is_empty() || reason.len() > 2048 || reason.chars().any(char::is_control) {
+            return Err("project disabled reason shape");
+        }
+    }
+    Ok(())
+}
+
 /// Disposable diagnostic probes may count bounded warnings while collecting
 /// the following settings and marker evidence. Not product warning admission:
 /// callers must not infer safety from a warning or its English wording.
@@ -360,6 +422,64 @@ impl ProfileConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disabled_project_provenance_requires_isolation_and_exact_launch_ancestry() {
+        let home = Path::new("/app/profile");
+        let cwd = Path::new("/app/workspace");
+        let profile = ProfileConfig::parse(b"cli_auth_credentials_store='file'\n").unwrap();
+        let projects = profile.isolated_projects(&[home, cwd]).unwrap();
+        let flags = serde_json::json!({"projects":projects,"features":{"hooks":false,"apps":false,"plugins":false}});
+        let base = serde_json::json!({"config":flags,"layers":[
+            {"name":{"type":"sessionFlags"},"config":flags},
+            {"name":{"type":"project","dotCodexFolder":"/app/workspace/.codex"},"config":{"private_marker":"disabled content"},"disabledReason":"Not trusted"}
+        ]});
+        assert!(validate_disabled_project_layers(&base, home, cwd).is_ok());
+        for case in [
+            "active",
+            "empty",
+            "outside",
+            "alias",
+            "duplicate",
+            "flags",
+            "effective",
+            "hooks",
+            "source",
+            "content",
+        ] {
+            let mut value = base.clone();
+            match case {
+                "active" => value["layers"][1]["disabledReason"] = serde_json::Value::Null,
+                "empty" => value["layers"][1]["disabledReason"] = " ".into(),
+                "outside" => value["layers"][1]["name"]["dotCodexFolder"] = "/other/.codex".into(),
+                "alias" => {
+                    value["layers"][1]["name"]["dotCodexFolder"] =
+                        "/app/workspace/../workspace/.codex".into()
+                }
+                "duplicate" => {
+                    let duplicate = value["layers"][1].clone();
+                    value["layers"].as_array_mut().unwrap().push(duplicate);
+                }
+                "flags" => {
+                    value["layers"][0]["config"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("projects");
+                }
+                "effective" => {
+                    value["config"]["projects"]["/app/workspace"]["trust_level"] = "trusted".into()
+                }
+                "hooks" => value["config"]["features"]["hooks"] = true.into(),
+                "source" => value["layers"][1]["name"]["extra"] = true.into(),
+                "content" => value["layers"][1]["config"] = serde_json::Value::Null,
+                _ => unreachable!(),
+            }
+            assert!(
+                validate_disabled_project_layers(&value, home, cwd).is_err(),
+                "{case}"
+            );
+        }
+    }
 
     #[test]
     fn hook_diagnostic_emits_only_fixed_labels_not_vendor_content() {
