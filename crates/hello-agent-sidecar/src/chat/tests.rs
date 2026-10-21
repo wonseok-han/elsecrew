@@ -880,6 +880,13 @@ fn text_candidate_cases_selected(
         let profile = CodexProfileBinding::from_storage(&fixture.storage).unwrap();
         let home = profile.revalidate().unwrap();
         let mut settings = json!({"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only","features":{"hooks":false,"apps":false,"plugins":false}});
+        // The toy provider must report the same invocation isolation evidence
+        // as the reserved product path; omitted projects is no longer valid.
+        settings["projects"] = hello_agent_core::provider::vendor_observation::codex_profile_config::ProfileConfig::parse(
+            b"cli_auth_credentials_store='file'\n",
+        ).unwrap().isolated_projects(&[
+            &home, std::path::Path::new(snapshot["worktreePath"].as_str().unwrap()),
+        ]).unwrap();
         let mut sandbox = json!({"type":"readOnly","networkAccess":false});
         if writer {
             settings["sandbox_mode"] = json!("workspace-write");

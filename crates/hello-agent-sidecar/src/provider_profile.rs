@@ -156,13 +156,10 @@ fn profile_directory(app_data: &Dir, create_missing: bool) -> Result<Dir, Sideca
             Err(_) => return Err(failure()),
         }
     }
-    let config = read_profile_config(&profile)?;
-    if !config.is_auth_only() {
-        return Err(SidecarError::new(
-            "providerProfileIsolationRequired",
-            "provider profile project settings require isolated startup",
-        ));
-    }
+    // Parsing is not launch authority. Every Codex launcher overrides stored
+    // project trust per invocation; login/runtime additionally verify config
+    // evidence before account observation or work. Preserve the source bytes.
+    read_profile_config(&profile)?;
     Ok(profile)
 }
 
@@ -543,7 +540,7 @@ mod tests {
     }
 
     #[test]
-    fn equivalent_config_is_preserved_and_project_trust_remains_blocked() {
+    fn equivalent_config_and_project_trust_are_preserved_with_invocation_isolation() {
         let temp = tempfile::tempdir().unwrap();
         let profile = prepare_codex_profile(&root(&temp)).unwrap();
         let equivalent = b"# changed formatting\ncli_auth_credentials_store='file'\n";
@@ -552,12 +549,13 @@ mod tests {
         assert_eq!(profile.read("config.toml").unwrap(), equivalent);
         let trusted = b"cli_auth_credentials_store='file'\n[projects.'/snapshot']\ntrust_level='trusted'\n";
         profile.write("config.toml", trusted).unwrap();
-        let error = match prepare_codex_profile(&root(&temp)) {
-            Ok(_) => panic!("project configuration requires startup isolation"),
-            Err(error) => error,
-        };
-        assert_eq!(error.kind(), "providerProfileIsolationRequired");
-        assert_eq!(error.detail, "provider profile project settings require isolated startup");
+        prepare_codex_profile(&root(&temp)).unwrap();
+        let home = temp.path().join(CODEX_PROFILE_DIRECTORY);
+        let argument = codex_isolation_argument(&home, &home).unwrap();
+        assert!(argument.to_str().unwrap().contains("untrusted"));
+        let parsed = read_profile_config(&profile).unwrap();
+        let projects = parsed.isolated_projects(&[&home]).unwrap();
+        assert_eq!(projects["/snapshot"]["trust_level"], "untrusted");
         assert_eq!(profile.read("config.toml").unwrap(), trusted);
     }
 

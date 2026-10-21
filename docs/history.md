@@ -1,5 +1,15 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-21 · by GPT-6 Astra
+- 기존 전체 회귀43741의 live 출력으로 storage 검사가 진행 중임을 확인했다. 재시작이나 중복 무거운 실행 없이 유지했으며, 앞선3건의 최종 실패 상세는 아직 대기다. 직전 fixture 수정은 구현 진척이고 이번 기다림은 실제 실행 핸들을 확인한 검증 대기다.
+- 사용자가 '검토 완료 후 Codex 연결 차단 해제 승인'을 명시했다. provider_profile의 typed read/크기·소유권·권한·nofollow/공유 파일 검사는 유지하고 유효한 projects가 비어 있지 않다는 이유만의 차단을 제거했다. 원문 보존 및 저장된 /snapshot trust 키의 invocation untrusted 생성 회귀를 갱신했다. readonly config_layers_review는 실제 diff에서 추가 입증된 차단 결함 없음으로 검토했다.
+- 현재 실행 중인 전체 회귀는 이 활성화 변경 전 바이너리이므로 이번 patch의 합격 증거가 아니다. 실행 종료 뒤 fixture 실패 수정과 profile 영역을 묶어 검증한다. architecture 상단은 승인 반영 상태로 갱신했다. 실제 계정 호출/로그인 정보 변경·기존 앱 재시작·패키지 반영·main 병합/push 없음. 변경은 검증 전 구현 체크포인트이며 실제 Codex 연결 복구·제품 완료로 선언하지 않는다.
+
+### 2026-10-21 · by GPT-6 Astra
+- 직전 턴의 누적 Node552건 PASS와 문서 정리는 진척이며, 기존 Rust 전체 실행 세션43741을 재시작하지 않고 이어 관측했다. sidecar 검사에서 reserved_interactions_preserve_ledger_and_reject_role_changes, text_candidate_public_sink_uses_the_same_snapshot_storage_owner, runtime_scan_reports_special_files_without_exposing_names의 실패를 확인했다. 전체 실행은 아직 storage 검사 중이며 최종 실패 상세·종료 코드는 대기다.
+- 앞의 두 사례가 공유하는 가짜 공급자 설정 응답에 필수 projects 격리 값이 없는 것을 코드에서 확인해 home/snapshot 조상 untrusted 값을 넣었다. 제품 검증을 완화하지 않고 기존 ProfileConfig 생성기를 사용했다. 실패 원인의 최종 확정과 수정 후 관련 재시험은 전체 실행 종료 뒤 수행한다. 소켓 사례는 UnixListener bind 단계의 환경 제한 가능성이 있으나 상세 오류 확인 전 환경 문제로 확정하지 않는다.
+- 변경은 chat/tests.rs의 fixture7줄이며 아직 미커밋·미재검증이다. git diff --check PASS, target1.9G/out309M 유지. 진행 중 검사를 중복 실행하지 않았고 계정/유료 호출·프로필 차단 해제·새 패키지·main 병합/push 없음. 다음은 동일 실행43741의 종료 결과 확인과 실패한 관련 사례 재시험이다.
+
+### 2026-10-21 · by GPT-6 Astra
 - 직전 3a65314는 버전 확인 격리와 native 관측을 추가한 진척이다. Codex 프로필 차단 해제 승인은 응답 대기이며 해당 차단을 그대로 유지했다. 독립적으로 가능한 누적 검증으로 npm test를 실행해552건 전부 PASS했다. synthetic/계약 회귀이며 실제 계정·패키지/G6/Windows 합격으로 확대하지 않는다.
 - CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 cargo test --release --workspace --locked를 시작했다. 빌드는 완료했고 Tauri105건 PASS/13건 ignored, core와 protocol을 지나 sidecar678건 실행에 도달했다. 전체 명령은 아직 실행 중이며 마지막 종료 결과를 이어 확인해야 한다(실행 세션43741). 실제 공급자·설치·유료 opt-in 시험은 포함하지 않는다.
 - docs/architecture.md 상단의 Codex 설정 검사 설명을 현재 로그인 config/read·경고 대조·version override 구현과 사용자 활성화 승인 대기로 갱신했다. 근거 없이 메모리 최적화를 추가하지 않았으며400MiB/G6 실측 미완료를 유지한다. release 캐시 target1.9G/out309M, 새 패키지·워크트리·인증 변경 없음. 다음은 진행 중 Rust 결과의 실패 수정과 승인 후 Codex 입장 연결이다. main 병합/push 없음.
