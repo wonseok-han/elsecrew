@@ -1,5 +1,9 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-21 · by GPT-6 Astra
+- 64860d2의 최신 소스로 기존 out/hello-agent-darwin-arm64/hello-agent.app을 갱신하고 pnpm run m5:package:smoke를 완료했다(세션47514 exit0, darwin-arm64 PASS). 별도 패키지 사본/ZIP 없이 release 캐시를 재사용했다. 앱은 원장 진단 후 종료 상태로 유지하며 실제 로그인·모델 실행은 하지 않았다.
+- 새 결속 복구 패키지 반영은 완료했으나 과거 비결속 Codex pending은 그대로다. 원장과 프로세스 집합 일치는 확인했지만 이를 자동 삭제 근거로 확대하지 않았다. 다음은 과거 잠금의 명시적 안전 복구 방안이며 G6·Windows·출시 미완료, main/push 없음.
+
+### 2026-10-21 · by GPT-6 Astra
 - 사용자 승인에 따라 시험 앱7974의 메뉴 Quit을 시도했으나 복구 경고로 거절됐다. 실행 경로와 부모 관계를 확인한 앱7974·전용 sidecar7992만 강제 종료하고 두 PID 부재를 확인했다. 인증정보·프로젝트·pending 파일은 삭제/수정하지 않았다.
 - 종료 뒤 원장을 readOnly로 조회한 결과 과거 Codex run agent_run_b219c802fd2547659b2b452986786bde는 canceled/resolvedAbandoned/cleanExit이고 pending의3개 PID+시작시각이 원장의3개 기록과 정확히 일치했다. provider_run_fence 결속은 없다. 이 일치는 추가 진단 증거이지 nonce 없는 과거 잠금 자동 해제 권한이 아니며 잠금은 보존한다.
 - 기존 fake 회귀에 모든 소유자와 DB를 닫고 재열어 durable 기록만으로 복구하는13줄을 추가했다. release focused1건 PASS(세션62560 exit0), 전체 회귀는 직전9b05072의 PASS를 재사용한다. 이는 핸들 재열기 검증이며 OS 강제 crash 검증으로 확대하지 않는다. 다음은 최신 패키지 반영·smoke와 과거 잠금의 별도 복구 방안이다. 유료 모델 호출/main 병합/push 없음.
@@ -169,6 +173,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **공급자 잠금과 원장 복구의 분리(2026-10-21)**: 새 run은 pending 파일과 원장에 run ID/nonce/파일·디렉터리 신원을 결속하고 명시 복구에서 종료 기록·프로세스 소멸·abandoned manifest를 함께 확인한다. 이 구현은64860d2 패키지에 반영됐다. 과거 Codex107바이트 pending은 canceled/resolvedAbandoned/cleanExit인 원장의3개 PID+시작시각과 일치하지만 결속이 없어 자동 해제하지 않는다. 일반 연결 잠금 복구 버튼으로 이 과거 파일이 해결된다고 안내하지 않는다.
 
 - **격리 경고의 수용 범위(2026-10-21)**: configWarning의 알려진 격리 설명은 설정 조회 대기 중에만 보류하고 실제 disabled project layer와 대조한다. initialized 이후 모든 응답 대기를 허용하면 계정/모델 조회 단계에서 대조 없이 수용하는 구멍이 생기므로 config/read 전용 pending 조건을 사용한다. 이 처리와 실제 사용자 프로필 입장 승인은 별개다.
 
