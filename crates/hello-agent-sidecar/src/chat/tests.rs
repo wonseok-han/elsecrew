@@ -5926,6 +5926,19 @@ fn fake_agent_cancel_uncertain_poison_survives_and_is_abandon_only() {
     assert_eq!(fs::read(&fence_path).unwrap(), fence_bytes);
     let resolved = runtime.resolve_recovery(&mut fixture.storage,&mut fixture.projects,&json!({"recoveryId":recovery["recoveryId"],"chatId":identity.chat_id,"taskId":identity.task_id,"projectId":identity.project_id,"worktreeId":identity.worktree_id,"workspaceIdentity":identity.workspace_identity,"runId":identity.run_id,"expectedRevision":1,"resolution":"abandon"}),"req_agent_resolve").unwrap();
     assert_eq!(resolved["outcome"], "resolvedAbandoned");
+    // Model the durable terminal-commit / fence-release restart boundary.
+    // No live owner or in-memory login result may authorize the later unlink.
+    let database = fixture.storage.path().to_path_buf();
+    drop(runtime);
+    drop(login);
+    drop(fixture.chats);
+    drop(fixture.projects);
+    drop(fixture.storage);
+    fixture.storage = Storage::open(&database).unwrap();
+    fixture.projects = ProjectManager::new(&database).unwrap();
+    fixture.chats = G5Manager::default();
+    let mut login = crate::provider_login_manager::LoginManager::claude();
+    assert_eq!(fs::read(&fence_path).unwrap(), fence_bytes);
     let terminal = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
     assert_eq!(terminal["provider_run_fence"], binding.to_value());
     for case in ["nonce", "state", "gone", "identities"] {

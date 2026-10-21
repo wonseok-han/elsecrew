@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-21 · by GPT-6 Astra
+- 사용자 승인에 따라 시험 앱7974의 메뉴 Quit을 시도했으나 복구 경고로 거절됐다. 실행 경로와 부모 관계를 확인한 앱7974·전용 sidecar7992만 강제 종료하고 두 PID 부재를 확인했다. 인증정보·프로젝트·pending 파일은 삭제/수정하지 않았다.
+- 종료 뒤 원장을 readOnly로 조회한 결과 과거 Codex run agent_run_b219c802fd2547659b2b452986786bde는 canceled/resolvedAbandoned/cleanExit이고 pending의3개 PID+시작시각이 원장의3개 기록과 정확히 일치했다. provider_run_fence 결속은 없다. 이 일치는 추가 진단 증거이지 nonce 없는 과거 잠금 자동 해제 권한이 아니며 잠금은 보존한다.
+- 기존 fake 회귀에 모든 소유자와 DB를 닫고 재열어 durable 기록만으로 복구하는13줄을 추가했다. release focused1건 PASS(세션62560 exit0), 전체 회귀는 직전9b05072의 PASS를 재사용한다. 이는 핸들 재열기 검증이며 OS 강제 crash 검증으로 확대하지 않는다. 다음은 최신 패키지 반영·smoke와 과거 잠금의 별도 복구 방안이다. 유료 모델 호출/main 병합/push 없음.
+
+### 2026-10-21 · by GPT-6 Astra
 - 직전9b05072는 결속 잠금 복구 구현 진척이었다. 같은 clean HEAD에서 최신 release sidecar를 먼저 빌드하고 CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4로 cargo test --release --workspace --locked를 완주했다(세션66074 exit0). Tauri105 PASS/13 ignored, core·protocol 통과, sidecar640 PASS/41 ignored(970.12초), stdio 통합14 PASS/1 ignored, core doc3 PASS다. macOS sandbox opt-in2건은 제외됐다. 이전 전체 실행의5개 실패는 이번 전체 실행에서 재현되지 않았으며 뒤의 통합/doc 검사까지 완료했다.
 - 이어 npm test554건 PASS/0 skipped, pnpm build의 tsc 및 기본 Vite production build PASS(세션13153 exit0). 이 빌드는 Electron 패키지 재생성이 아니다. 기존 release 캐시를 재사용했고 새 워크트리/패키지 사본·실제 계정/유료 모델 실행·과거 잠금/인증 변경은 없었다.
 - 전체 로컬 코드 회귀 파동은 통과했으나 제품 완료/G6 합격으로 확대하지 않는다. 새 복구의 packaged/crash 경계 검증, 과거 비결속 Codex 잠금의 별도 안전 복구, 성능/메모리 기준, Windows 실제 환경 및 출시 승인은 남는다. main 병합/push 없음.
