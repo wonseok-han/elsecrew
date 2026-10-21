@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-21 · by GPT-6 Astra
+- 직전 3a65314는 버전 확인 격리와 native 관측을 추가한 진척이다. Codex 프로필 차단 해제 승인은 응답 대기이며 해당 차단을 그대로 유지했다. 독립적으로 가능한 누적 검증으로 npm test를 실행해552건 전부 PASS했다. synthetic/계약 회귀이며 실제 계정·패키지/G6/Windows 합격으로 확대하지 않는다.
+- CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 cargo test --release --workspace --locked를 시작했다. 빌드는 완료했고 Tauri105건 PASS/13건 ignored, core와 protocol을 지나 sidecar678건 실행에 도달했다. 전체 명령은 아직 실행 중이며 마지막 종료 결과를 이어 확인해야 한다(실행 세션43741). 실제 공급자·설치·유료 opt-in 시험은 포함하지 않는다.
+- docs/architecture.md 상단의 Codex 설정 검사 설명을 현재 로그인 config/read·경고 대조·version override 구현과 사용자 활성화 승인 대기로 갱신했다. 근거 없이 메모리 최적화를 추가하지 않았으며400MiB/G6 실측 미완료를 유지한다. release 캐시 target1.9G/out309M, 새 패키지·워크트리·인증 변경 없음. 다음은 진행 중 Rust 결과의 실패 수정과 승인 후 Codex 입장 연결이다. main 병합/push 없음.
+
+### 2026-10-21 · by GPT-6 Astra
 - ea77315/clean에서 계속 진행했다. 기존 임시 프로필 시험 소유자를 재사용해 로그인용 config-only native 경로를 추가하고 PASS했다. 제품 LoginConnection과 동일하게 initialize→config/read를 검증하되 반환된 account/read는 전송하지 않는다. OS 네트워크 차단·임시 trust 설정·auth 부재·설정 보존·종료 확인 후 정리를 유지하며 실제 계정 성공 증거는 아니다.
 - 독립 검토에서 discovery의 --version만 격리 override 없이 앱 프로필을 사용하는 누락을 발견했다. 버전 명령에도 projects untrusted와 hooks/apps/plugins=false를 전달하도록 보완했다. 임시 git/home의 harmless project hook을 포함한 네트워크 차단 native --version 시험에서 파싱·marker 부재·설정 보존·auth 부재·종료 확인 PASS. 이 결과는 해당 설치 CLI 경로의 증거이며 모든 버전·모든 시작 부작용 부재 보장은 아니다.
 - 검토 지적에 따라 새 native 시험의 cleanup 전 assert를 오류 반환으로 바꿔 실패해도 finish/종료 확인/불확실 시 임시 폴더 보존을 거치게 했다. version 시험은 종료 코드 확인도 추가했고 해당 변경 포함 재시험 PASS했다. 로그인 요청 형식 오류 반환 변경은 기존 PASS 뒤의 소규모 시험 정리 보완으로 구분한다. 재검토에서 추가 입증된 차단 결함 없음. 첫 version 빌드는 네트워크 차단 wrapper 추가를 위해 시험 시작 전 중단했다.
