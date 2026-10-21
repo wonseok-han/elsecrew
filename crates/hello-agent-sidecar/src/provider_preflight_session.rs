@@ -63,8 +63,10 @@ pub(crate) fn inspect_codex_version(
     use hello_agent_core::provider::{BoundedObservation, ProviderId, parse_cli_version};
     let home = profile.revalidate()?;
     if cancel.load(Ordering::Acquire) { return Err(failure()); }
+    let args = codex_version_arguments(&home).map_err(|_| failure())?;
+    let references: Vec<_> = args.iter().map(std::ffi::OsString::as_os_str).collect();
     let mut command = crate::provider_login_gate::command(
-        executable.revalidate()?, &[std::ffi::OsStr::new("--version")], &home,
+        executable.revalidate()?, &references, &home,
     ).map_err(|_| failure())?;
     discovery_environment(&mut command, &home);
     let mut process = LoginProcess::reserve_codex_owned(profile)?;
@@ -115,6 +117,12 @@ pub(crate) fn inspect_codex_version(
         Ok(version)
     });
     Ok(ProviderInspection { result, process, display_models: None })
+}
+
+fn codex_version_arguments(home: &std::path::Path) -> std::io::Result<Vec<std::ffi::OsString>> {
+    Ok(vec!["-c".into(), crate::provider_profile::codex_isolation_argument(home, home)?,
+        "-c".into(), "features.hooks=false".into(), "-c".into(), "features.apps=false".into(),
+        "-c".into(), "features.plugins=false".into(), "--version".into()])
 }
 
 /// A bounded, selected-profile observation, not a global provider capability.
@@ -907,7 +915,19 @@ mod tests {
     #[test]
     #[ignore = "requires explicit approval for installed CLI temporary configuration inspection"]
     fn installed_codex_project_trust_isolation_control() {
-        inspect_project_trust_isolation(false);
+        inspect_project_trust_isolation(false, false, false);
+    }
+
+    #[test]
+    #[ignore = "requires explicit approval for installed CLI temporary configuration inspection"]
+    fn installed_codex_login_configuration_only() {
+        inspect_project_trust_isolation(false, true, false);
+    }
+
+    #[test]
+    #[ignore = "requires explicit approval for installed CLI temporary configuration inspection"]
+    fn installed_codex_version_isolated_profile() {
+        inspect_project_trust_isolation(false, false, true);
     }
 
     #[test]
@@ -915,10 +935,10 @@ mod tests {
     fn installed_codex_project_hook_isolation_control() {
         assert_eq!(std::env::var("HELLO_AGENT_APPROVED_HOOK_PROBE").as_deref(), Ok("1"));
         assert_eq!(std::env::var("HELLO_AGENT_APPROVED_OFFLINE_HOOK_TURN").as_deref(), Ok("1"));
-        inspect_project_trust_isolation(true);
+        inspect_project_trust_isolation(true, false, false);
     }
 
-    fn inspect_project_trust_isolation(hook_probe: bool) {
+    fn inspect_project_trust_isolation(hook_probe: bool, login_probe: bool, version_probe: bool) {
         use crate::provider_profile::LoginProfile;
         use std::os::unix::fs::PermissionsExt;
         use std::path::PathBuf;
@@ -946,12 +966,13 @@ mod tests {
         }
         let (cli, helper) = crate::provider_login_manager::select_installed_codex_pair().unwrap();
         for isolated in [false, true] {
+            if (login_probe || version_probe) && !isolated { continue; }
             let temp = tempfile::tempdir().unwrap();
             let root = temp.path().canonicalize().unwrap();
             let home = root.join("profile");
-            let workspace = root.join("workspace");
+            let workspace = if version_probe { home.clone() } else { root.join("workspace") };
             std::fs::create_dir(&home).unwrap();
-            std::fs::create_dir(&workspace).unwrap();
+            if workspace != home { std::fs::create_dir(&workspace).unwrap(); }
             assert!(Command::new("/usr/bin/git")
                 .args(["-c", "init.templateDir=", "init", "--quiet"])
                 .current_dir(&workspace).env_clear().env("HOME", &home)
@@ -959,7 +980,7 @@ mod tests {
             std::fs::create_dir(workspace.join(".codex")).unwrap();
             let marker = home.join("hook-probe-marker");
             let mut project_config = "developer_instructions='HELLO_AGENT_PROJECT_CONFIG_SENTINEL'\n".to_owned();
-            if hook_probe {
+            if hook_probe || version_probe {
                 let marker_path = marker.to_str().unwrap();
                 assert!(!marker_path.contains('\''));
                 let command = serde_json::to_string(&format!("/usr/bin/touch '{marker_path}'")).unwrap();
@@ -974,7 +995,11 @@ mod tests {
             std::fs::set_permissions(home.join("config.toml"), std::fs::Permissions::from_mode(0o600)).unwrap();
             let profile = InspectionProfile { root, home: home.clone(), config };
             let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium" };
-            let mut args = if isolated && !hook_probe {
+            let mut args = if version_probe {
+                codex_version_arguments(&home).unwrap()
+            } else if login_probe {
+                ["app-server", "--listen", "stdio://", "-c", "features.hooks=false", "-c", "features.apps=false", "-c", "features.plugins=false"].into_iter().map(std::ffi::OsString::from).collect()
+            } else if isolated && !hook_probe {
                 named_discovery_arguments(&home, &workspace, &expected, ExpectedPermission::ReadOnly).unwrap()
             } else {
                 discovery_arguments(&home, &expected, ExpectedPermission::ReadOnly).unwrap()
@@ -987,13 +1012,22 @@ mod tests {
                     *flag = "features.hooks=true".into();
                 }
             }
-            if isolated {
-                args.extend(["-c".into(), crate::provider_profile::codex_isolation_argument(&home, &workspace).unwrap()]);
+            if isolated && !version_probe {
+                args.extend(["-c".into(), crate::provider_profile::codex_isolation_argument(&home, if login_probe { &home } else { &workspace }).unwrap()]);
             }
             let mut process = LoginProcess::reserve(&profile).unwrap();
             let cancel = AtomicBool::new(false);
             let launch = process.launch_with_barrier(
                 || {
+                    if version_probe {
+                        let cli_path = cli.revalidate().map_err(std::io::Error::other)?;
+                        let mut sandbox_args = vec![std::ffi::OsString::from("-p"), "(version 1)(allow default)(deny network*)".into(), cli_path.as_os_str().to_owned()];
+                        sandbox_args.extend(args.iter().cloned());
+                        let references: Vec<_> = sandbox_args.iter().map(std::ffi::OsString::as_os_str).collect();
+                        let mut command = crate::provider_login_gate::command(std::path::Path::new("/usr/bin/sandbox-exec"), &references, &home)?;
+                        discovery_environment(&mut command, &home);
+                        return command.spawn();
+                    }
                     let mut command = crate::provider_runtime_sandbox::command(
                         cli.revalidate().map_err(std::io::Error::other)?,
                         helper.revalidate().map_err(std::io::Error::other)?,
@@ -1003,7 +1037,7 @@ mod tests {
                     discovery_environment(&mut command, &home);
                     // Exercise named-launch cwd semantics while retaining the
                     // probe's outer OS network/file restrictions.
-                    command.current_dir(&workspace);
+                    command.current_dir(if login_probe { &home } else { &workspace });
                     command.spawn()
                 },
                 |child| {
@@ -1014,6 +1048,60 @@ mod tests {
                 },
             );
             let observation = launch.and_then(|()| {
+                if version_probe {
+                    use crate::provider_login_io::OutputChunk;
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    let mut output = Vec::new();
+                    loop {
+                        if Instant::now() >= deadline { return Err(failure()); }
+                        match process.poll_output(&cancel)? {
+                            OutputChunk::Bytes(bytes) => { output.extend(bytes); if output.len() > 1024 { return Err(failure()); } }
+                            OutputChunk::Eof => break,
+                            OutputChunk::Pending => std::thread::sleep(Duration::from_millis(10)),
+                        }
+                    }
+                    let observation = hello_agent_core::provider::BoundedObservation::new(output).map_err(|_| failure())?;
+                    hello_agent_core::provider::parse_cli_version(hello_agent_core::provider::ProviderId::Codex, &observation).map_err(|_| failure())?;
+                    if marker.exists() { return Err(failure()); }
+                    loop {
+                        if let Some(status) = process.exit_status()? {
+                            if !status.success() { return Err(failure()); }
+                            break;
+                        }
+                        if Instant::now() >= deadline { return Err(failure()); }
+                        process.tick()?;
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    eprintln!("version_probe parsed=true hook_marker=false account_request_sent=false");
+                    return Ok(());
+                }
+                if login_probe {
+                    use hello_agent_core::provider::vendor_observation::codex_login::connection::{LoginConnection, LoginAction};
+                    let (mut flow, init) = LoginConnection::begin(home.to_str().unwrap()).map_err(|_| failure())?;
+                    flow.require_startup_isolation().map_err(|_| failure())?;
+                    process.send(init, Duration::from_secs(15), &cancel)?;
+                    let reply = process.receive(Duration::from_secs(15), &cancel)?;
+                    let LoginAction::Send(initialized) = flow.accept(&reply).map_err(|_| failure())? else { return Err(failure()); };
+                    process.send(initialized, Duration::from_secs(15), &cancel)?;
+                    let configuration = flow.check_account().map_err(|_| failure())?;
+                    if serde_json::from_str::<serde_json::Value>(configuration.as_str()).map_err(|_| failure())?["method"] != "config/read" { return Err(failure()); }
+                    process.send(configuration, Duration::from_secs(15), &cancel)?;
+                    let deadline = Instant::now() + Duration::from_secs(20);
+                    loop {
+                        let reply = process.receive(deadline.checked_duration_since(Instant::now()).ok_or_else(failure)?, &cancel)?;
+                        match flow.accept(&reply).map_err(|_| failure())? {
+                            LoginAction::ConfigurationPending => continue,
+                            LoginAction::Send(account) => {
+                                if serde_json::from_str::<serde_json::Value>(account.as_str()).map_err(|_| failure())?["method"] != "account/read" { return Err(failure()); }
+                                // Stop BEFORE sending account/read: no account,
+                                // OAuth, model or thread query in this probe.
+                                eprintln!("login_config_probe configuration_matched=true account_request_sent=false");
+                                return Ok(());
+                            }
+                            _ => return Err(failure()),
+                        }
+                    }
+                }
                 process.begin_preflight()?;
                 // Named configuration explicitly scopes config/read to cwd.
                 // This phase sends only initialize/config. The optional hook
@@ -1168,6 +1256,7 @@ mod tests {
             }
             profile.revalidate().unwrap();
             assert_eq!(std::fs::read(workspace.join(".codex/config.toml")).unwrap(), project_config.as_bytes());
+            if version_probe { assert!(!marker.exists(), "version probe hook must remain unexecuted after termination"); }
             assert!(observation.is_ok(), "project trust control failed: isolated={isolated}, fixed_error={:?}",
                 observation.as_ref().err().map(|error| &error.detail));
             if hook_probe {

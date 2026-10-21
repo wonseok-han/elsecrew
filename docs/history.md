@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-21 · by GPT-6 Astra
+- ea77315/clean에서 계속 진행했다. 기존 임시 프로필 시험 소유자를 재사용해 로그인용 config-only native 경로를 추가하고 PASS했다. 제품 LoginConnection과 동일하게 initialize→config/read를 검증하되 반환된 account/read는 전송하지 않는다. OS 네트워크 차단·임시 trust 설정·auth 부재·설정 보존·종료 확인 후 정리를 유지하며 실제 계정 성공 증거는 아니다.
+- 독립 검토에서 discovery의 --version만 격리 override 없이 앱 프로필을 사용하는 누락을 발견했다. 버전 명령에도 projects untrusted와 hooks/apps/plugins=false를 전달하도록 보완했다. 임시 git/home의 harmless project hook을 포함한 네트워크 차단 native --version 시험에서 파싱·marker 부재·설정 보존·auth 부재·종료 확인 PASS. 이 결과는 해당 설치 CLI 경로의 증거이며 모든 버전·모든 시작 부작용 부재 보장은 아니다.
+- 검토 지적에 따라 새 native 시험의 cleanup 전 assert를 오류 반환으로 바꿔 실패해도 finish/종료 확인/불확실 시 임시 폴더 보존을 거치게 했다. version 시험은 종료 코드 확인도 추가했고 해당 변경 포함 재시험 PASS했다. 로그인 요청 형식 오류 반환 변경은 기존 PASS 뒤의 소규모 시험 정리 보완으로 구분한다. 재검토에서 추가 입증된 차단 결함 없음. 첫 version 빌드는 네트워크 차단 wrapper 추가를 위해 시험 시작 전 중단했다.
+- 제품 프로필 차단은 아직 유지한다. 최종 검토 후 기존 설정을 보존하는 격리 방식으로 Codex 연결 차단을 해제할 사용자 승인을 요청했다. 승인 없이 실제 사용자 계정·유료 모델·패키지 실행으로 확대하지 않는다. 다음은 입장 연결과 패키지 통합 확인이며 G6/메모리/Windows/출시는 미완료. main 병합/push 없음.
+
+### 2026-10-21 · by GPT-6 Astra
 - 직전 턴은 5b71762의 격리 경고 수정·native 설정 대조 완료로 진척했다. 이어 로그인/상태 확인 세션에 config/read(id60)를 계정 조회·OAuth보다 앞에 연결했다. 로그인용 flags/features와 home 조상 trust override/effective 일치·user/system source·disabled project layer를 검사하고 알려진 경고도 설정 응답과 대조한다. 원래 요청 목적을 보존하며 모델/thread 요청은 만들지 않는다.
 - 제품 LoginSession은 격리 검사를 필수 요청한다. 경고 대기는 기존 RPC deadline을 연장하지 않으며 취소/종료 소유권·자격 관측 후 종료 확인을 유지한다. 기존 pipe fixture를 새 설정 왕복에 맞췄다. readonly config_layers_review가 실제 user source의 profile:null 호환 누락을 찾아 수정했고 null만 정규화, 선택된 profile/추가 필드는 거절하는 회귀 후 재검토에서 추가 입증된 차단 결함 없음.
 - release sidecar 컴파일 확인, core 로그인10건 및 sidecar 로그인 pipe/취소/종료8건 PASS. 신규 모듈 rustfmt·diff check PASS. 최초 core 회귀 실패는 initialize fixture userAgent 누락으로 보완했으며 제품 거절 조건을 완화하지 않았다. 새 계정/유료 모델 실행 없이 구현·관련 검사만 묶어 진행했고 기존 release 캐시를 재사용했다(target1.8G/out309M).
