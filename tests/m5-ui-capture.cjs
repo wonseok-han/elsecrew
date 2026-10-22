@@ -68,10 +68,12 @@ app.whenReady().then(async () => {
   await wait("document.querySelector('.m5-change-row')?.getClientRects().length");
   await window.webContents.executeJavaScript("document.querySelector('.m5-change-row').click()");
   await wait("document.querySelector('.m5-diff-details')");
+  await wait("document.querySelector('.m5-project-guide')?.open === false");
   await capture(window, 'product-active-diff');
   await window.webContents.executeJavaScript("[...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent === '채팅' && b.getClientRects().length).click()");
   await window.webContents.executeJavaScript("document.querySelector('.m5-chat-chip').click()");
   await wait("document.querySelector('.m5-timeline') && !document.querySelector('.m5-refresh').disabled");
+  await wait("document.querySelector('.m5-project-guide')?.open === false");
   await capture(window, 'product-active-conversation');
   const concept = new BrowserWindow({ width: 1440, height: 1000, show: false, webPreferences: { partition: 'm5-visual', sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
   windows.push(concept);

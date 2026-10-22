@@ -274,7 +274,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       </section>}
       {snapshot.project && <ProjectGuide key={snapshot.project.id} hasChat={Boolean(chat.activeChat)}
         projectId={snapshot.project.id} activeChat={chat.activeChat} onResume={id => void switchChat(id)}
-        hasOpenFile={snapshot.tabs.length > 0}
+        hasOpenFile={snapshot.tabs.length > 0 || snapshot.diffVisible}
         disabled={!admissionReady || !projectDataReady || settingsOpen || snapshot.actionBlocked || chat.preparing || chat.switching}
         onGoal={() => setNewChatOpen(true)} onTeam={() => openRoleSettings()}
         onConversation={() => controller.revealConversation()}
@@ -465,16 +465,18 @@ function ProjectGuide({ projectId, activeChat, onResume, hasChat, hasOpenFile, d
   const { t } = useI18n();
   const [preference, setPreference] = useState(() => { try { return parseProjectGuide(localStorage.getItem(projectGuideKey(projectId))); } catch { return emptyProjectGuide(); } });
   const [saveFailed, setSaveFailed] = useState(false);
-  const [open, setOpen] = useState(!preference.dismissed && !hasOpenFile);
+  const working = hasOpenFile || hasChat;
+  const [open, setOpen] = useState(!preference.dismissed && !working);
   const savePreference = (next: ProjectGuidePreference) => {
     setPreference(next);
     try { localStorage.setItem(projectGuideKey(projectId), JSON.stringify(next)); setSaveFailed(false); return true; } catch { setSaveFailed(true); return false; }
   };
-  useEffect(() => { if (hasOpenFile && !hasChat) setOpen(false); }, [hasOpenFile, hasChat]);
+  // Collapse only on entering work, not on each file/chat update. A manually
+  // reopened guide stays open, and safety/recovery notices live outside it.
+  useEffect(() => { if (working) setOpen(false); }, [working]);
   useEffect(() => {
     if (activeChat && !preference.chatId) {
       savePreference({ ...preference, chatId: activeChat.chatId, teamReviewed: true });
-      if (!preference.dismissed) setOpen(true);
     }
   }, [activeChat?.chatId, preference.chatId]);
   const step = projectGuideStep(preference, activeChat?.chatId ?? null, activeChat?.state ?? null);

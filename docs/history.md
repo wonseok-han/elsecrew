@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- 15bb3f6 기준 첫 작업 안내의 작업 진입 조건을 파일뿐 아니라 활성 채팅·열린 diff까지 확장했다. 첫 채팅 기록을 저장하며 안내를 강제로 다시 열던 경로는 제거했다. 작업 진입 boolean의 false→true 때만 접고, 작업 중 사용자가 수동으로 다시 펼친 상태는 파일/채팅 갱신 때 유지한다. 최초 시작 안내·프로젝트별 첫 작업 기록/명시 dismissal·별도 실행/복구 경고는 유지한다. Karpathy 최소 변경 원칙으로 표시 상태만 조정했다.
+- tsc·renderer build PASS, Chromium UI2PASS(기존 수동 재열기/안내 상태·미저장 파일·중앙diff 왕복 포함), 캡처도구의 diff/채팅 진입 자동 접힘 assertion PASS(세션63722 exit0). `.artifacts/m5-visual/capture-6oEvbv`의 active-conversation/active-diff를 직접 확인해 안내 한 줄과 확대된 작업 영역을 관측했다. 합성 renderer이며 실제 공급자/패키지 전체 합격은 아니다.
+- out 패키지는 여전히 dfaf6e3 빌드로 중앙diff/이번 안내 변경은 다음 묶음 패키지에 반영해야 한다. 시안 전체 마감·성능/G6·Codex 실제 승인·Windows/출시는 미완료이며 main/push·인증·사용자 프로젝트·모델 실행 없음.
+
+### 2026-10-22 · by GPT-6 Astra
 - f2c2830 기준 시각 대조 결함을 수정했다. 변경 목록은 기존 changes dock에 유지하고 선택한 줄 diff는 editor dock으로 요청·표시한다. 사용자 저장 배치를 초기화하지 않는다. diffVisible은 읽기 전용 표시 상태이며 clear diff/편집 복귀에서 해제한다. Monaco는 hidden wrapper로 유지해 모델·초안을 폐기하지 않고 diff 화면에서는 다른 열린 파일의 저장/재조회 버튼을 숨긴다. 파일 선택/명시 편집 복귀는 이전 diff 세대를 무효화해 늦은 결과가 다시 검토 화면을 열지 못한다.
 - Karpathy 최소 변경으로 기존 DiffDetails/데이터·쓰기 계약을 재사용했다. tsc·renderer build PASS, editor 회귀59PASS(미저장 초안/추가 IO 없음·늦은 diff 취소 포함), 실제 Chromium UI2PASS(동일 Monaco 인스턴스 왕복·기존 dock/편집 흐름 포함). 첫 UI 검사의 버튼 문구 선택자 실패를 실제 '코드 편집기'로 수정한 뒤 UI만 재실행했다. diff check PASS.
 - `.artifacts/m5-visual/capture-MpNAgF/product-active-diff.png`를 직접 확인해 가운데 넓은 diff/왼쪽 목록 분리를 검증했다(합성 renderer, sidecar/실제 공급자 없음). out 패키지는 아직 이전 dfaf6e3 빌드다. 첫 작업 안내 높이 축소·전체 시안 마감/성능/G6·Codex 실제 승인·Windows/출시는 남는다. 인증·원본·모델/main/push 변경 없음.
