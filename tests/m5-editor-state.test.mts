@@ -905,6 +905,25 @@ test("diff refresh requests fresh data and only the latest summary can publish",
   } finally { controller.dispose(); }
 });
 
+test("returning to the editor cancels a pending diff view selection", async () => {
+  const bridge = new FakeBridge();
+  const controller = new ProjectEditorController(bridge);
+  controller.start();
+  try {
+    await controller.chooseProject();
+    const original = bridge.getDiffFile.bind(bridge);
+    const pending = deferred<void>();
+    bridge.getDiffFile = async input => { await pending.promise; return original(input); };
+    const opening = controller.openDiff("src/new.ts");
+    controller.selectPanel("editor");
+    pending.resolve();
+    await opening;
+    assert.equal(controller.snapshot().diffVisible, false);
+    assert.equal(controller.snapshot().diffFile, null);
+    assert.equal(controller.snapshot().panel, "editor");
+  } finally { controller.dispose(); }
+});
+
 test("opening a reviewed file returns to its existing unsaved draft without rereading or saving", async () => {
   const bridge = new FakeBridge();
   const controller = new ProjectEditorController(bridge);
@@ -914,10 +933,14 @@ test("opening a reviewed file returns to its existing unsaved draft without rere
     await controller.openFile("src/new.ts");
     controller.updateText("src/new.ts", "unsaved review correction\n");
     await controller.openDiff("src/new.ts");
-    assert.equal(controller.snapshot().panel, "changes");
+    assert.equal(controller.snapshot().panel, "editor");
+    assert.equal(controller.snapshot().panelRequest?.panel, "editor");
+    assert.equal(controller.snapshot().diffVisible, true);
+    assert.equal(controller.snapshot().tabs[0].text, "unsaved review correction\n");
     const calls = [...bridge.calls];
     await controller.openFile(controller.snapshot().diffFile!.path);
     assert.deepEqual(bridge.calls, calls, "existing draft must not trigger file IO");
+    assert.equal(controller.snapshot().diffVisible, false);
     assert.equal(controller.snapshot().panel, "editor");
     assert.equal(controller.snapshot().activePath, "src/new.ts");
     assert.equal(controller.snapshot().tabs.length, 1);

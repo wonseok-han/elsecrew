@@ -374,10 +374,11 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
             ))}
           </div>
           <div className="m5-editor-head">
-            <span title={activeTab?.path}>{activeTab?.path ?? t("m5.editor.select")}</span>
-            {activeTab && snapshot.diffSummary?.entries.some(entry => entry.path === activeTab.path) && <button type="button" className="m5-secondary" disabled={!admissionReady || snapshot.actionBlocked} onClick={() => void controller.openDiff(activeTab.path)}>{t("m5.diff.viewSaved")}</button>}
-            {activeTab?.mode === "text" && (activeTab.saveState === "dirty" || activeTab.saveState === "conflicted") && <button type="button" className="m5-secondary" disabled={!admissionReady || snapshot.actionBlocked || reloadingDraft} onClick={() => setReloadDraft(activeTab)}>{t("m5.editor.reload")}</button>}
-            {activeTab?.mode === "text" && (
+            {snapshot.diffVisible && <button type="button" className="m5-secondary" onClick={() => controller.selectPanel("editor")}>{t("m5.editor.title")}</button>}
+            <span title={snapshot.diffVisible ? snapshot.diffFile?.path : activeTab?.path}>{(snapshot.diffVisible ? snapshot.diffFile?.path : activeTab?.path) ?? t("m5.editor.select")}</span>
+            {!snapshot.diffVisible && activeTab && snapshot.diffSummary?.entries.some(entry => entry.path === activeTab.path) && <button type="button" className="m5-secondary" disabled={!admissionReady || snapshot.actionBlocked} onClick={() => void controller.openDiff(activeTab.path)}>{t("m5.diff.viewSaved")}</button>}
+            {!snapshot.diffVisible && activeTab?.mode === "text" && (activeTab.saveState === "dirty" || activeTab.saveState === "conflicted") && <button type="button" className="m5-secondary" disabled={!admissionReady || snapshot.actionBlocked || reloadingDraft} onClick={() => setReloadDraft(activeTab)}>{t("m5.editor.reload")}</button>}
+            {!snapshot.diffVisible && activeTab?.mode === "text" && (
               <button type="button" title={t("m5.editor.shortcut")} onClick={() => void controller.saveActive()} disabled={!admissionReady || activeTab.saveState !== "dirty"}>
                 {activeTab.saveState === "saving" ? t("m5.editor.saving") : activeTab.saveState === "conflicted" ? t("m5.editor.resolve") : t("m5.editor.save")}
               </button>
@@ -392,9 +393,21 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
             }}>{reloadingDraft ? t("m5.editor.reloading") : t("m5.editor.discard")}</button>
             {!snapshot.tabs.includes(reloadDraft) && <p>{t("m5.editor.changed")}</p>}
           </section>}
+          <div className="m5-editor-surface" hidden={snapshot.diffVisible}>
           <EditorContent tab={activeTab} readOnly={!admissionReady || snapshot.actionBlocked} onChange={(text) => activeTab && controller.updateText(activeTab.path, text)} onSave={(path) => {
             if (admissionReadyRef.current && controller.snapshot().activePath === path) void controller.saveActive();
           }} />
+          </div>
+              {snapshot.diffVisible && snapshot.diffFile && <DiffDetails descriptor={snapshot.diffFile} text={snapshot.diffText} canOpen={admissionReady && !snapshot.actionBlocked} onOpen={path => { void controller.openFile(path); }}
+                canDiscuss={admissionReady && !snapshot.actionBlocked && Boolean(snapshot.workspace) && chatController.canAppendFollowup() && !chat.followups?.[chat.activeChat?.chatId ?? ""]?.request}
+                onDiscuss={(path, side, line) => {
+                  const current = controller.snapshot();
+                  if (!admissionReady || current.actionBlocked || !current.workspace || current.diffFile?.path !== path) return;
+                  const reference = side && line !== undefined
+                    ? t("m5.diff.lineReference", { path: side === "before" ? current.diffFile.oldPath ?? path : path, side: t(`m5.diff.${side}`), line })
+                    : t("m5.diff.reference", { path });
+                  if (chatController.addReviewReference(current.workspace, reference)) controller.revealConversation();
+                }} />}
         </section>
 
         <aside className="m5-panel m5-changes" aria-label={t("m5.editor.changes")}>
@@ -406,16 +419,6 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
               <button className="m5-refresh" type="button" onClick={() => void controller.refreshChanges()} disabled={!admissionReady || snapshot.diffLoading}>{t("m5.editor.refresh")}</button>
               {snapshot.diffLoading && <p className="m5-empty" role="status">{t("m5.editor.loadingChanges")}</p>}
               {snapshot.diffSummary && <ChangeFileList key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}`} entries={snapshot.diffSummary.entries} selected={snapshot.diffFile?.path} disabled={!admissionReady || snapshot.actionBlocked} onOpen={path => { void controller.openDiff(path); }} />}
-              {snapshot.diffFile && <DiffDetails descriptor={snapshot.diffFile} text={snapshot.diffText} canOpen={admissionReady && !snapshot.actionBlocked} onOpen={path => { void controller.openFile(path); }}
-                canDiscuss={admissionReady && !snapshot.actionBlocked && Boolean(snapshot.workspace) && chatController.canAppendFollowup() && !chat.followups?.[chat.activeChat?.chatId ?? ""]?.request}
-                onDiscuss={(path, side, line) => {
-                  const current = controller.snapshot();
-                  if (!admissionReady || current.actionBlocked || !current.workspace || current.diffFile?.path !== path) return;
-                  const reference = side && line !== undefined
-                    ? t("m5.diff.lineReference", { path: side === "before" ? current.diffFile.oldPath ?? path : path, side: t(`m5.diff.${side}`), line })
-                    : t("m5.diff.reference", { path });
-                  if (chatController.addReviewReference(current.workspace, reference)) controller.revealConversation();
-                }} />}
             </>
           ) : <Empty text={t("m5.editor.chooseProject")} />}
         </aside>

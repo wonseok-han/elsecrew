@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- f2c2830 기준 시각 대조 결함을 수정했다. 변경 목록은 기존 changes dock에 유지하고 선택한 줄 diff는 editor dock으로 요청·표시한다. 사용자 저장 배치를 초기화하지 않는다. diffVisible은 읽기 전용 표시 상태이며 clear diff/편집 복귀에서 해제한다. Monaco는 hidden wrapper로 유지해 모델·초안을 폐기하지 않고 diff 화면에서는 다른 열린 파일의 저장/재조회 버튼을 숨긴다. 파일 선택/명시 편집 복귀는 이전 diff 세대를 무효화해 늦은 결과가 다시 검토 화면을 열지 못한다.
+- Karpathy 최소 변경으로 기존 DiffDetails/데이터·쓰기 계약을 재사용했다. tsc·renderer build PASS, editor 회귀59PASS(미저장 초안/추가 IO 없음·늦은 diff 취소 포함), 실제 Chromium UI2PASS(동일 Monaco 인스턴스 왕복·기존 dock/편집 흐름 포함). 첫 UI 검사의 버튼 문구 선택자 실패를 실제 '코드 편집기'로 수정한 뒤 UI만 재실행했다. diff check PASS.
+- `.artifacts/m5-visual/capture-MpNAgF/product-active-diff.png`를 직접 확인해 가운데 넓은 diff/왼쪽 목록 분리를 검증했다(합성 renderer, sidecar/실제 공급자 없음). out 패키지는 아직 이전 dfaf6e3 빌드다. 첫 작업 안내 높이 축소·전체 시안 마감/성능/G6·Codex 실제 승인·Windows/출시는 남는다. 인증·원본·모델/main/push 변경 없음.
+
+### 2026-10-22 · by GPT-6 Astra
 - 5adc953/clean에서 승인 시안과 현재 production renderer의 시각 대조를 재개했다. 기존 외부 통신 차단·합성 bridge 캡처 도구로 시작/최소창/작업대/설정/로컬 시안 이미지를 직접 확인했다(HFJaTL). `tests/m5-ui-capture.cjs`에 실제 diff 선택·채팅 열기 후 캡처를 추가했다. 첫 선택자 오류와 채팅 fixture의 빈 diff 때문에 실패한 두 실행은 실제 제품 실패로 혼동하지 않고 원인을 고쳤다. 최종 세션89000 exit0, `.artifacts/m5-visual/capture-AJzbLX`의 active-diff/active-conversation을 직접 확인했다.
 - 시안 적용의 구체 누락: 시안은 가운데 넓은 영역에서 줄 diff를 읽지만 현행 DiffDetails는 변경 목록과 같은 왼쪽 패널에 있어 약280px 아래쪽으로 밀리고 가운데 편집기는 빈 상태다. 또 첫 작업 안내가 열린 채팅에서도 큰 높이를 차지한다. 다음 구현은 편집 초안을 유지한 중앙 diff 보기/편집 복귀와, 재열기 가능한 안내 축소다. 사용자 저장 dock 배치와 안전/복구 안내를 임의 초기화하거나 숨기지 않는다.
 - 캡처는 합성 프로젝트 diff와 합성 채팅 화면을 따로 관측한 것이며 실제 에이전트/원본 반영·전체 시안 합격이 아니다. 제품 코드는 아직 변경하지 않았다. Karpathy 최소 범위 원칙으로 추측성 스타일 교체 대신 확인된 배치 문제를 우선한다. 성능/G6·Codex 실제 승인·Windows/출시 잔여는 유지하며 main/push·인증·사용자 프로젝트/모델 호출 없음.

@@ -50,6 +50,7 @@ export interface EditorSnapshot {
   diffLoading: boolean;
   diffFile: DiffFileDescriptorV1 | null;
   diffText: string;
+  diffVisible: boolean;
   rescanRequired: boolean;
   selectionBlocked: boolean;
   actionBlocked: boolean;
@@ -152,6 +153,7 @@ export class ProjectEditorController {
     diffLoading: false, diffSummary: null,
     diffFile: null,
     diffText: "",
+    diffVisible: false,
     rescanRequired: false,
     selectionBlocked: false,
     actionBlocked: false,
@@ -493,6 +495,7 @@ export class ProjectEditorController {
 
   async openFile(path: string): Promise<void> {
     if (this.#actionBlocked) return;
+    ++this.#diffGeneration;
     const project = this.#state.project;
     if (!project) return;
     const epoch = this.#projectEpoch;
@@ -720,7 +723,7 @@ export class ProjectEditorController {
         ? await this.#awaitStream(diffFile.stream.streamId, diffFile.byteLength, MAX_DIFF_STREAM_BYTES)
         : "";
       if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace) || generation !== this.#diffGeneration) return;
-      this.#set({ diffFile, diffText, panel: "changes", error: null });
+      this.#set({ diffFile, diffText, diffVisible: true, panel: "editor", error: null });
     } catch (error) {
       if (!this.#isCurrent(project.id, epoch) || generation !== this.#diffGeneration) return;
       this.#setError("m5.editorError.diff", error);
@@ -728,6 +731,7 @@ export class ProjectEditorController {
   }
 
   selectPanel(panel: WorkbenchPanel): void {
+    if (panel === "editor") ++this.#diffGeneration;
     this.#set({ panel });
   }
 
@@ -1001,6 +1005,10 @@ export class ProjectEditorController {
 
   #set(update: Partial<EditorSnapshot>): void {
     if (this.#disposed) return;
+    // Clearing a diff or explicitly returning to the editor leaves drafts intact.
+    if (update.diffFile === null || (update.panel === "editor" && update.diffVisible === undefined)) {
+      update = { ...update, diffVisible: false };
+    }
     this.#state = { ...this.#state, ...update, ...("notice" in update ? { noticeKey: update.notice ? update.noticeKey : undefined } : {}), ...(update.panel ? { panelRequest: { panel: update.panel } } : {}) };
     for (const listener of this.#listeners) listener();
   }

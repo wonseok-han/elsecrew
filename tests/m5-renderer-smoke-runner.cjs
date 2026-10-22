@@ -499,8 +499,16 @@ app.whenReady().then(async () => {
     await ${waitFor("!document.querySelector('.m5-editor-tab [aria-label=\"저장되지 않은 변경\"]')", "save preserved draft")};
     const jsonWorker = globalThis.MonacoEnvironment.getWorker('smoke', 'json');
     jsonWorker.terminate();
+    const preservedEditor = document.querySelector('.monaco-editor');
     document.querySelector('.m5-change-row').click();
     await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length === 200", "bounded diff page")};
+    if (!document.querySelector('[data-panel=editor] .m5-diff-details') || document.querySelector('[data-panel=editor]').hidden) throw new Error('diff did not open in the editor dock');
+    if (!document.querySelector('.m5-editor-surface').hidden || document.querySelector('.monaco-editor') !== preservedEditor) throw new Error('review disposed the existing editor');
+    [...document.querySelectorAll('.m5-editor-head button')].find(button => button.textContent === '코드 편집기').click();
+    await ${waitFor("!document.querySelector('.m5-editor-surface').hidden && !document.querySelector('.m5-diff-details')", "return from review")};
+    if (document.querySelector('.monaco-editor') !== preservedEditor) throw new Error('return from review recreated the editor');
+    document.querySelector('.m5-change-row').click();
+    await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length === 200", "reopened diff")};
     if (!document.querySelector('.m5-diff-deleted') || !document.querySelector('.m5-diff-added')) throw new Error('missing distinct change rows');
     const wrapToggle = document.querySelector('.m5-diff-wrap input');
     const diffBox = document.querySelector('.m5-diff-lines');

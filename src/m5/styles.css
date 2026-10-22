@@ -259,6 +259,9 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-change-file small { color: #aab4c1; font-size: 10px; }
 
 .m5-editor { display: grid; grid-template-rows: auto auto minmax(0, 1fr); background: #11161d; }
+.m5-editor-surface { min-height: 0; height: 100%; }
+.m5-editor-surface[hidden] { display: none; }
+.m5-editor > .m5-diff-details { min-height: 0; overflow: auto; margin: 0; border-top: 0; }
 .m5-tab-list { display: flex; min-height: var(--m5-pane-row-height); overflow: auto; border-bottom: 1px solid #303b49; }
 .m5-editor-tab { display: flex; flex: 0 0 auto; max-width: 240px; border-right: 1px solid #303b49; }
 .m5-editor-tab > button:first-child { display: flex; align-items: center; gap: 5px; min-width: 0; border: 0; border-radius: 0; background: #1c2430; color: #d8e0eb; font-weight: 500; white-space: nowrap; }
