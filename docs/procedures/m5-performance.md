@@ -143,6 +143,8 @@ clean `m5/coding-agent-ide`에서 `pnpm run m5:measure:sidecar-startup`을 실�
 
 ### Native 저장 경합 관측
 
+`node scripts/m5-save-race-metrics.mjs`는 아래 기존 시험 하나를 release/locked로 실행하고 OS 임시 `hello-agent-save-race-metrics-*`의 `cargo.log`와 `measurement.json`에 보존한다. 전후 Git HEAD/status, Cargo 종료, 정확히 하나의 완료 관측,100개 순서·두 채팅 교대·개별 보존/충돌/대조 저장 결과를 검사한다. Rust 동시 실행은4 이하이며 다른 무거운 시험과 동시에 실행하지 않는다. 정상 관측도 partial diagnostic이므로 NOT_READY/exit2이고 실패는 exit1이다. 프로세스를 시간 초과로 강제 종료하거나 실패 fixture를 자동 삭제하지 않는다. 전체 G6용 canonical measurement.json을 생성하지 않는다.
+
 `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 CARGO_INCREMENTAL=0 cargo test -p hello-agent-sidecar --locked -j4 --test stdio_process binary_workspace_save_races_preserve_external_bytes_across_two_chats -- --ignored --nocapture`는 생성한 Git 프로젝트와 실제 `--stdio` sidecar에서 두 채팅의 `workspace.file.save` begin/chunk/commit을 실행한다. 100회 동안 두 사본을 번갈아 선택하고 begin 또는 chunk 이후 외부 내용을 써 commit 충돌을 유도한다. 각 충돌의 명시 응답·외부 바이트 보존·다른 채팅/원본 불변을 검사한 뒤, 최신 버전으로 정상 저장되는지 대조한다.
 
 정상 종료 뒤 출력하는 `native-workspace-save-races` JSON에는100개 개별 관측과 overwrite/미보고 충돌/교차 채팅 쓰기 카운터를 남긴다. 실패한 assertion은 테스트 실패로 남으며 완료 JSON을 만들지 않는다. 성공한 임시 프로젝트/DB는 종료 확인 후 정리하고 실패 데이터는 진단용으로 보존한다. 일반 검사에서는 ignored이며 명시 실행한다. 이는 commit 전 제어된 순서의 실제 프로토콜 관측이고, packaged UI·에이전트 동시 쓰기·모든 OS 스케줄링 경합의 증거는 아니므로 diagnostic=true/gateEligible=false다. 전체 G6 수집기의 대체물이 아니다.

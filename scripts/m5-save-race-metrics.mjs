@@ -1,0 +1,97 @@
+// Collect the existing native protocol diagnostic; never promote it to G6 PASS.
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawn, execFileSync } from 'node:child_process';
+import { qaEnvironment, lowerQaPriority } from './m5-qa-resources.mjs';
+import { assertMeasurementSourceUnchanged } from './m5-measurement-source.mjs';
+
+export function validateSaveRaceObservation(value) {
+  assert.equal(value?.evidence, 'native-workspace-save-races');
+  assert.equal(value.diagnostic, true);
+  assert.equal(value.gateEligible, false);
+  assert.equal(value.saveRaces, 100);
+  assert.equal(value.controlSaves, 100);
+  assert.equal(value.shutdown, 'accepted');
+  assert.equal(value.observations?.length, 100);
+  const chats = new Set();
+  for (const [index, row] of value.observations.entries()) {
+    assert.equal(row.trial, index);
+    assert.equal(typeof row.chatId, 'string');
+    assert.ok(row.chatId.length > 0);
+    chats.add(row.chatId);
+    assert.equal(row.chatId, value.observations[index % 2].chatId);
+    assert.equal(row.externalWriteStage, index % 2 === 0 ? 'afterBegin' : 'afterChunk');
+    for (const key of ['reportedConflict', 'externalBytesPreserved', 'controlSaveCommitted', 'otherChatUnchanged', 'sourceUnchanged']) {
+      assert.equal(row[key], true, `Trial ${index}: ${key}`);
+    }
+  }
+  assert.equal(chats.size, 2);
+  assert.deepEqual(value.counters, {silentOverwrites:0, unreportedConflicts:0, crossChatWrites:0});
+  return value;
+}
+
+async function main() {
+  assert.equal(process.argv.length, 2, 'No arguments supported');
+  assert.equal(process.platform, 'darwin', 'macOS native diagnostic only');
+  const repo = fileURLToPath(new URL('..', import.meta.url));
+  const git = (...args) => execFileSync('/usr/bin/git', args, {cwd:repo, encoding:'utf8'}).trim();
+  const source = () => ({head:git('rev-parse', 'HEAD'), gitStatus:git('status', '--porcelain')});
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hello-agent-save-race-metrics-'));
+  const report = {schemaVersion:1, diagnostic:true, gateEligible:false, status:'RUNNING',
+    sourceBefore:source(), measuredAt:new Date().toISOString(), priority:lowerQaPriority(),
+    limitations:['Native release sidecar protocol only, not packaged UI or agent writers.',
+      '100 controlled pre-commit interleavings, not arbitrary scheduling or descendant termination coverage.']};
+  const persist = () => fs.writeFileSync(path.join(root, 'measurement.json'), JSON.stringify(report, null, 2));
+  persist(); console.log(JSON.stringify({stage:'COLLECTION_STARTED', root}));
+  const log = fs.createWriteStream(path.join(root, 'cargo.log'));
+  let logError;
+  log.on('error', error => { logError = String(error); });
+  let pending = '', parseFailure, observations = [];
+  const args = ['test', '--release', '--locked', '-p', 'hello-agent-sidecar', '--test', 'stdio_process',
+    'binary_workspace_save_races_preserve_external_bytes_across_two_chats', '--', '--exact', '--ignored', '--nocapture'];
+  report.command = ['cargo', ...args];
+  const child = spawn('cargo', args, {cwd:repo, env:{...qaEnvironment(), CARGO_INCREMENTAL:'0'}, stdio:['ignore','pipe','pipe']});
+  report.pid = child.pid; persist();
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', chunk => {
+    log.write(chunk);
+    if (parseFailure) return;
+    pending += chunk;
+    if (pending.length > 1024 * 1024) { parseFailure = 'Diagnostic line exceeded 1 MiB'; pending = ''; return; }
+    let end;
+    while ((end = pending.indexOf('\n')) !== -1) {
+      const line = pending.slice(0, end); pending = pending.slice(end + 1);
+      try {
+        const value = JSON.parse(line);
+        if (value?.evidence === 'native-workspace-save-races') {
+          if (observations.length) parseFailure = 'Duplicate observation';
+          else observations.push(value);
+        }
+      } catch { /* Cargo output remains in the raw log. */ }
+    }
+  });
+  child.stderr.on('data', chunk => log.write(chunk));
+  report.termination = await new Promise(resolve => {
+    child.once('error', error => resolve({error:String(error)}));
+    child.once('close', (code, signal) => resolve({code, signal}));
+  });
+  // Never timeout-kill the test or remove its uncertain fixture.
+  await new Promise(resolve => { if (log.destroyed) resolve(); else log.end(resolve); });
+  report.observations = observations;
+  try {
+    assert.deepEqual(report.termination, {code:0, signal:null});
+    assert.ok(!parseFailure && !logError, parseFailure ?? logError);
+    assert.equal(observations.length, 1, 'Missing native observations');
+    validateSaveRaceObservation(observations[0]);
+    report.sourceAfter = source();
+    assertMeasurementSourceUnchanged(report.sourceBefore, report.sourceAfter);
+    report.status = 'NOT_READY';
+  } catch (error) { report.status = 'FAIL'; report.error = String(error); }
+  persist(); console.log(JSON.stringify({root, status:report.status}));
+  process.exitCode = report.status === 'FAIL' ? 1 : 2;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

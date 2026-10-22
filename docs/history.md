@@ -1,8 +1,14 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- 412022b와 기존 기록1줄 상태에서 저장 경합 증거를 조사했다. 기존 ignored stdio 시험이 이미100회 경합/100회 정상 대조를 구현한 것을 확인해 중복 구현하지 않았다. Karpathy 재사용 원칙으로 `scripts/m5-save-race-metrics.mjs`를 추가해 정확한 기존 시험의 release/locked 실행, 원시 cargo.log·JSON 보존, Git 전후 상태 및 종료·100행·두 채팅 교대·보존/충돌/대조 결과 검증을 연결했다. 미측정 종료/stream 카운터를0으로 만들지 않고 canonical G6 파일도 생성하지 않는다.
+- validator 회귀3PASS. 실제 수집 세션41365는 release 캐시 빌드2.96초 후 시험 exit0/정상 종료,100 observations와 silentOverwrites/unreportedConflicts/crossChatWrites 모두0, Git 전후 일치를 확인했다. 수집기는 부분 진단이므로 exit2/NOT_READY를 유지했다. `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-save-race-metrics-jC3LIR/`에 로그/JSON을 보존하며 시험 자체가 정상 종료 후 제거한 hello-agent-save-races-hSK4q8의 부재를 재확인했다. 계정·모델·사용자 프로젝트·강제 종료는 사용하지 않았다.
+- 현재 증거는 두 workspace의 commit 전 제어된 경합이며 packaged UI/실제 agent writer/임의 scheduling 전체 합격이 아니다. 전체 collector의 stream·종료 관측 및 화면 성능 연결, Codex 승인·Windows/출시는 남는다. diff check PASS, main/push 없음. 직전 clean412022b 성능 명령의 누락 증거 거절 기록도 함께 보존했다.
+
+### 2026-10-22 · by GPT-6 Astra
 - 7ea6107/clean 기준 G6의 누락 명령 m5:test:performance를 기존 측정 판정기와 canonical `.artifacts/m5-performance/measurement.json`에 연결했다. 판정기는 변경하지 않았고 새 실측 파일을 합성하지 않았다. Karpathy 최소 변경으로 기존 clean HEAD·bounded regular JSON·diagnostic 거절·누락 NOT_READY·known failure FAIL 정책을 재사용한다.
 - harness --list는 COMMANDS_READY로 명령 등록과 합격 상태를 분리하고 안내문을 추가했다. 관련 회귀19PASS(50551 exit0): canonical 명령, 실제 임시 clean Git의 파일 부재/불일치/오류 거절 및 하네스 exit2 전파를 확인했다. 독립 config_layers_review는 차단 결함을 찾지 못했고 전체 collector/실측/G6 합격으로 보지 않았다. 실제 pnpm wrapper도 현재 dirty checkout에서 exit2/NOT_READY를 전파했다. canonical 파일 부재도 확인했다. diff check PASS.
 - 전체 collector는 여전히 미완성이며 이 등록으로 G6를 마감하지 않는다. 현재 화면 잠금 해제·Codex 임시 파일 수정 승인 응답은 없고 새 앱/모델 시험은 실행하지 않았다. 다음은 실제 수집에서 빠진 stream·저장 경합/종료·전체 측정 연결과 잠금 해제 후 화면 성능이다. main/push·사용자 프로젝트/인증 변경 없음.
+- 커밋 후 clean412022b에서도 실제 pnpm 명령이 누락된 canonical 증거를 exit2/NOT_READY로 거절함을 확인했다. 이 기록만 후속 보완한다.
 
 ### 2026-10-22 · by GPT-6 Astra
 - a2deb80/clean에서 최근 두 변경의 묶음 검증을 수행했다. npm test561PASS/0skip(세션92727 exit0,24.3초), tsc --noEmit PASS(86293). 상시 승인된 읽기 전용 config_layers_review가0976d05..a2deb80의 준비 신호 전달/무CDP 수집과 Monaco effect 분리를 검토해 구체 차단 회귀·준비/권한/종료 경계 약화를 찾지 못했다. 검토자는 앱/시험을 실행하지 않았고 실제 GUI 증거를 대신하지 않는다.
