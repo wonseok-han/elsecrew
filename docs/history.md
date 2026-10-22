@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- a2deb80/clean에서 최근 두 변경의 묶음 검증을 수행했다. npm test561PASS/0skip(세션92727 exit0,24.3초), tsc --noEmit PASS(86293). 상시 승인된 읽기 전용 config_layers_review가0976d05..a2deb80의 준비 신호 전달/무CDP 수집과 Monaco effect 분리를 검토해 구체 차단 회귀·준비/권한/종료 경계 약화를 찾지 못했다. 검토자는 앱/시험을 실행하지 않았고 실제 GUI 증거를 대신하지 않는다.
+- Mac locked를 CUA로 다시 확인해 새 화면 시험은 시작하지 않았다. 사용자에게 잠금 해제와 별도로 Codex 임시 파일 수정1회 승인을 비동기 요청했다. 승인 응답 전 실제 모델 요청은 하지 않는다. 기존 YcnTnA result/restart JSON의 head·FAIL·idle 수치·정상 종료를 재확인했고 architecture의 현재 작업대/성능 단락을 실제 코드와 최신 증거에 맞췄다.
+- 완료 감사에서 전체 시안/가시성 기반 성능, 전체 G6 collector 및 m5:test:performance 연결, Codex 도구 작업·중단/복구 전체, Windows 패키지/UI 및 최종 안전 실패 주입·출시 결정이 남음을 확인했다. 부분 진단/기능 회귀를 G6나 제품 완료로 확대하지 않는다. out은 f168262 소스 패키지이고 a2deb80 포함 재패키징은 다음 실측 때 묶는다. main/push·인증/사용자 프로젝트 변경 없음.
+
+### 2026-10-22 · by GPT-6 Astra
 - f168262/clean에서 입력 경로를 조사해 Monaco 텍스트 동기화 effect가 매 초안 변경마다 updateOptions(readOnly)를 반복하는 것을 확인했다. 텍스트 동기화와 saveState/readOnly 옵션 effect를 분리했다. 최신 초안 전달·저장/복구 잠금·lazy 생성 시 최신 권한 확인은 유지하며 Karpathy 최소 변경으로 controller/저장 계약은 건드리지 않았다.
 - 실제 component effect 회귀7PASS: 연속 dirty 텍스트 갱신이 editor 옵션을 재설정하지 않고, admission/saving 전환·지연 로딩·오류 후 초안 보존/재시도는 유지한다. diff check PASS. 입력50ms 기준 통과나 실측 개선을 주장하지 않는다. 전체 빌드/패키지/성능을 이 작은 변경마다 반복하지 않으며 out은 직전 f168262 소스 상태다.
 - 다음은 화면 잠금 해제 후 무CDP 준비 신호·메모리 확인, 입력 지연 및 전체 시안/G6의 묶음 검증이다. Codex 실제 시험 승인·Windows 환경·출시 결정은 별도 남는다. 인증·사용자 프로젝트·모델 실행·main/push 변경 없음.
