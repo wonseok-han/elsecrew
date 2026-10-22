@@ -30,6 +30,7 @@ const largeProject = process.argv.length === 3 && process.argv[2] === '--large-p
 const memoryDiff = process.argv.length === 3 && process.argv[2] === '--memory-diff';
 const startupSeries = process.argv.length === 3 && process.argv[2] === '--startup';
 const deferredCdp = process.argv.length === 3 && process.argv[2] === '--deferred-cdp';
+const noCdp = process.argv.length === 3 && process.argv[2] === '--no-cdp';
 const mainTraceDiagnostic = process.argv.length === 3 && process.argv[2] === '--main-trace';
 const nativeChatStream = process.argv.length === 3 && process.argv[2] === '--native-chat-stream';
 const largeDiff = memoryDiff || (process.argv.length === 3 && process.argv[2] === '--large-diff');
@@ -37,7 +38,7 @@ const diagnosticLanguage = process.argv.length === 3
   ? (process.argv[2] === '--english' ? 'en' : process.argv[2] === '--korean' ? 'ko' : undefined)
   : undefined;
 const projectFlow = nativeChatStream || largeDiff || largeProject || (process.argv.length === 3 && process.argv[2] === '--project');
-assert.ok(process.argv.length === 2 || projectFlow || diagnosticLanguage || startupSeries || deferredCdp || mainTraceDiagnostic, 'Only fixed diagnostic scenarios are accepted');
+assert.ok(process.argv.length === 2 || projectFlow || diagnosticLanguage || startupSeries || deferredCdp || noCdp || mainTraceDiagnostic, 'Only fixed diagnostic scenarios are accepted');
 const bundle = path.join(repo, 'out/hello-agent-darwin-arm64/hello-agent.app/Contents');
 const executable = path.join(bundle, 'MacOS/hello-agent');
 const resources = path.join(bundle, 'Resources');
@@ -78,7 +79,7 @@ if (projectFlow) {
 async function observe(report, resume = false, resultFile = resume ? 'restart.json' : 'result.json') {
 const persist = () => fs.writeFileSync(path.join(root, resultFile), JSON.stringify(report, null, 2));
 const started = performance.now();
-const child = spawn(executable, [`--user-data-dir=${userData}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], {
+const child = spawn(executable, [`--user-data-dir=${userData}`, ...(noCdp ? [] : ['--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'])], {
   cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'],
 });
 report.pid = child.pid;
@@ -129,6 +130,30 @@ async function evaluate(expression) {
   return reply.result?.value;
 }
 try {
+  if (noCdp) {
+    report.limitations = ['No debugging server or client. Fresh temporary profile; first launch includes migration.',
+      'Samples start after a fixed 12-second settling interval, not a measured UI-ready signal.',
+      'UI readiness and visibility require separate observation; this is not G6 evidence.',
+      'Observed descendants only; ps identity resolution is seconds.'];
+    report.debuggingEnabled = false;
+    await sleep(12000);
+    for (let index = 0; index < 40; index++) {
+      assert.ok(!termination, 'App exited before uninstrumented collection completed');
+      report.memory.push({elapsedMs:performance.now() - started, ...readMemory()});
+      await sleep(250);
+    }
+    report.uninstrumentedRssBytes = Math.max(...report.memory.map(sample => sample.rssBytes));
+    if (report.uninstrumentedRssBytes > 400 * 1024 * 1024) report.error = 'Uninstrumented RSS limit exceeded';
+    assert.ok(!stderr.includes('DevTools listening on'), 'Unexpected debugging server');
+    persist();
+    console.log(JSON.stringify({stage:'MANUAL_QUIT_REQUIRED', root, pid:child.pid, rssBytes:report.uninstrumentedRssBytes}));
+    // The normal application menu must terminate the app; never force it here.
+    let timer;
+    const exit = await Promise.race([closed, new Promise(resolve => { timer = setTimeout(() => resolve(null), 60000); })]);
+    clearTimeout(timer);
+    assert.ok(exit, 'Normal quit was not observed within the diagnostic window');
+    return;
+  }
   if (deferredCdp) {
     report.preAttachmentMemory = [];
     report.limitations.push('CDP server is enabled at launch; only client attachment is delayed. Pre-attachment samples do not establish UI readiness.');
@@ -440,7 +465,14 @@ finally {
     try {
       const db = new DatabaseSync(path.join(userData, 'com.wonseokhan.helloagent/m5/hello-agent.sqlite3'), {readOnly: true});
       try {
-        assert.equal(typeof db.prepare('SELECT clean_shutdown_at FROM app_instances WHERE sidecar_instance_id = ?').get(report.sidecarInstanceId)?.clean_shutdown_at, 'string');
+        if (noCdp) {
+          const instances = db.prepare('SELECT sidecar_instance_id, clean_shutdown_at FROM app_instances').all();
+          assert.equal(instances.length, 1, 'Fresh profile must have exactly one sidecar instance');
+          assert.equal(typeof instances[0].clean_shutdown_at, 'string');
+          report.sidecarInstanceId = instances[0].sidecar_instance_id;
+        } else {
+          assert.equal(typeof db.prepare('SELECT clean_shutdown_at FROM app_instances WHERE sidecar_instance_id = ?').get(report.sidecarInstanceId)?.clean_shutdown_at, 'string');
+        }
       } finally { db.close(); }
       report.shutdown = 'confirmed';
     } catch (error) { report.shutdownError = String(error); }
@@ -453,7 +485,7 @@ finally {
   socket?.close();
   for (const item of pending.values()) { clearTimeout(item.timer); item.reject(new Error('Observation ended')); }
   pending.clear();
-  console.log(JSON.stringify({root, status: report.status, shutdown: report.shutdown, pid: child.pid, idleRssBytes: report.idleRssBytes, error: report.error}));
+  console.log(JSON.stringify({root, status: report.status, shutdown: report.shutdown, pid: child.pid, idleRssBytes: report.idleRssBytes, uninstrumentedRssBytes: report.uninstrumentedRssBytes, error: report.error}));
   // Retain failed/uncertain data. Never kill an app or remove its profile here.
 }
 }

@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- 직전 일반 실행 RSS 관측은 조건 분리 진척이다. 7b63832에서 기존 packaged 수집기에 --no-cdp를 추가했다. 새 임시 프로필·기존 패키지를 쓰며 remote-debugging 인자/클라이언트 없이12초 고정 대기→RSS40표본→메뉴 정상 종료를 관측한다. UI-ready 측정으로 이름을 바꾸지 않고 uninstrumentedRssBytes/diagnostic/gateEligible=false를 유지했다. 절차 문서에 종료 제한·근거 범위를 추가했다.
+- 실제 S0JnOa 진단은 exit1/FAIL: 최대422461440B(약403MiB)로400MiB 초과. CUA에서 빈 프로젝트 시작 화면/선택 버튼 활성 상태를 관측하고 메뉴 Quit 뒤 exit0 및 단일 sidecar clean marker를 확인했다. 임시 userdata는 관측 PID 부재 뒤 삭제하고 result.json은 보존했다. 진단 서버만 제거하면 기준을 만족한다는 가설은 지지되지 않는다. 기존315~328MiB는 데이터·실행 조건이 달랐으며 전체 G6 합격 증거가 아니다.
+- Karpathy 최소 변경 원칙으로 기존 수집기만 보완하고 제품 안전 검사·메모리 기준·앱 기능은 변경하지 않았다. node --check/diff check PASS, 전체 회귀 반복 없음. 실제 Codex 재시험 승인 대기·G6 초기 메모리 원인·Windows/출시는 미완료, 새 빌드·유료 모델·main/push 없음.
+
+### 2026-10-22 · by GPT-6 Astra
 - 직전은 로그인 상태와 정상 종료 확인으로 진척했다. Codex 수정 재시험 새 승인은 미응답이므로 실제 모델을 실행하지 않았다. CUA로 기존 패키지를 일반 실행하고 명령행이 정확한 앱 경로뿐임을 확인해 remote-debugging 플래그 없는 상태에서 OS RSS40표본/250ms를 수집했다. 기존 앱 프로필이며 프로젝트는 열지 않았다.
 - d2a069d clean, PID22315의 subtree RSS330498048~343670784B(약315~328MiB)를 관측했다. 증거는 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-normal-rss-6CpIGJ/result.json. 앞선 CDP 활성420~440MiB와 다르지만 기존 데이터·시작 후 대기·실행 시점도 다르므로 차이 전부를 CDP 탓으로 확정하지 않는다. 이번 표본만으로 cold/empty G6 또는400MiB 전체 합격을 선언하지 않는다.
 - 메뉴 Quit으로 정상 종료했고 관측한5개 PID 부재를 확인했다. 임시 프로젝트/앱 사본/빌드 캐시를 추가하지 않았고 작은 측정 JSON만 보존했다. 다음은 동일 조건의 무진단 서버 cold/idle 측정 경로와 전체 G6 수집, 승인 후 Codex 도구 실행이다. 제품 안전 검사·메모리 기준을 바꾸지 않았으며 Windows·출시 미완료, main/push 없음.
