@@ -1,5 +1,16 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 사용자가 여러 bounded run으로 부하를 나누는 대신 **장시간 단일 실행 계약부터 재설계**를 선택했다. 직전 선택 대기는 해소됐으며 준비했던 결합 메모리11회 시험은 시작하지 않았다. 기준 HEAD8ddd8ac, m5/coding-agent-ide에서 설계 문서와 색인만 변경했다.
+- `proposals/m5-long-running-agent-streams.md`에 append-only 출력 원장/작은 head, 영속 순서와 페이지 조회, bounded 전달·UI, v1 호환·R3 admission, L1~L5 구현 순서를 제안했다. runtime의 persist_public_event_record 전체 배열 복제와 protocol/전송 제한을 대조했다. 새 상한·schema/API 번호는 미확정이며 현재 제품의256개 제한·시간 제한·종료/복구 계약을 변경하지 않았다.
+- 다음은 독립 설계 검토 후 L1 계약 동결·구현이다. 실제 모델 호출·앱 실행·생성 데이터·main 병합/push 없음. 시작 메모리 기준 실패와 전체G6·실제 공급자·Windows/출시 잔여는 유지한다.
+- 독립 읽기 전용 검토에서 core/실제 공급자 observation 제한 누락과 구독/최종 출력 경주를 발견하여 초안에 반영했다. 기존 v1 경계 보존·신계약 parser 회귀, 구독 handshake 뒤 head 재조회와 reconciliation, ENOSPC 시 시작 fence 보존/재시작 복구를 추가했다. 문서 diff 검사 통과이며 실행 코드 검증이나 G6 합격은 아니다.
+- 같은 검토자의 재검토에서 세 지적은 구현 전 방향 수준에서 해소됐다. 구체 handshake·fence 구현 일치·실패 주입은 L1~L3 잔여이며 설계 검토를 구현 합격으로 표현하지 않는다.
+
+### 2026-10-23 · by Codex
+- 8ddd8ac/clean에서 남은 스트림 시험 범위를 대조했다. 기존 packaged probe는 사용자 appendChatMessage 저장 경로이며 provider output 시험이 아니다. 실제 agent 공개 이벤트의 실행당256개 상한은 Rust 입장/종료 및 TS 원장 검증에 걸려 있고, 기존 native4chat 시험은 각각 status/question/final3개와 종료를 확인한다. 이는 이미 알려진 제한의 코드 재확인이며 새 부하 성공 증거가 아니다.
+- 계획의 채팅당3000개를 단일 run에 넣으려면 계약 변경이 필요하다. 같은 채팅에서 여러 bounded fake run을 이어 부하 총량을 확인하는 방법과 장시간 단일 실행의 저장/표시 계약을 재설계하는 방법을 사용자에게 명시 선택 요청했다. 답변 전 상한을 늘리거나 사용자 메시지 결과를 provider event 결과로 바꾸지 않는다. 새 앱/모델/시험은 실행하지 않았고 전체G6·메모리·실제 공급자 승인·Windows/출시 미완료는 유지한다.
+
+### 2026-10-23 · by Codex
 - 직전 원인 검토는 제품 진척 없는 분석으로 분류하고 bd21cec에서 결합 메모리 시나리오를 기존 반복 수집기에 연결했다. --memory-file-diff가 준비1+본10회로 전달되며 기존 순차 실행·소스/패키지 동일성·정상 종료·관측PID 부재 후 회차별 임시 데이터 정리를 재사용한다. Karpathy 최소 변경으로 제품/안전 경계와400/800/120MiB 기준은 건드리지 않았다.
 - 재사용 가능한 원시 관측 검증은 공존 표식·정확 fixture 크기/원본 불변·유한60초 대기·원시 RSS 요약 일치를 요구한다. focused4PASS(기준 초과 보존, 공존/fixture/대기/표본/요약 변조 거절, 기존 diff-only 호환), 문법/diff 검사 PASS. 기존 실제 gy5icd JSON을 새 검증기로 읽어 idle457719808/peak724025344/retained0을 재계산 확인했다. 이는 과거 관측 검증이지 최신 commit의 새 실측이 아니다.
 - 최소11분 대기가 필요한 실제11회 실행은 아직 하지 않았다. 같은 idle 실패를 반복하기 전에 이 반복 수집 연결을 구현 체크포인트로 남긴다. 네 stream 결합·전체G6와 시작 메모리 원인·실제 공급자 승인·Windows/출시 잔여는 유지한다. 새 앱/모델 실행·생성 데이터·main/push 없음.
@@ -146,6 +157,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+- **2026-10-23 장시간 단일 실행 방향 승인**: 4채팅×각3,000개 공개 이벤트를 여러 짧은 run이나 사용자 메시지로 대체하지 않는다. 출력 저장·조회·전송·표시 계약부터 재설계한다. 구현 전 제안과 L1~L5 순서는 `proposals/m5-long-running-agent-streams.md`; 수치·새 버전은 아직 미확정이며 제품 활성화/성능 합격을 뜻하지 않는다.
 
 - **과거 Codex 단건 복구 완료(2026-10-22)**: 사용자 명시 위험 수용 승인 후 test-only ignored 도구로 원장 배타 잠금·완료/manifest·정확 파일 신원·기록 프로세스 Gone을 재검증해107바이트 codex-login.pending1건을 제거했다. 감사 기록은 앱 데이터에 보존한다. 일반 legacy 자동 복구나 소급 binding 생성은 아니며 실제 로그인/모델 성공은 별도 확인해야 한다.
 
