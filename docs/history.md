@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- 직전45c28d6은 승인된 과거 Codex 잠금 제거로 진척했다. 기존64860d2 소스 패키지를 CUA로 다시 열고 준비/설치 조회가 끝난 뒤 로그인·연결 패널을 확인했다. Codex·Claude Code 모두 '이 앱에 … 로그인이 연결됐어요'를 표시했다. 재로그인·인증 삭제·사용자 프로젝트 열기·모델 실행은 하지 않았다. 과거 잠금 해제 뒤 기존 인증 인식과 상태 조회까지 복구된 증거이며 실제 도구 작업 성공은 아니다.
+- 메뉴 Quit이 복구 경고 없이 정상 종료됐고 앱 PID17213/리소스 보유 PID17237 및 패키지 sidecar 부재를 확인했다. 강제 종료 없이 연결 확인과 정상 종료 루프를 마쳤다. 새 빌드/워크트리/패키지 복사본 없음.
+- 다음은 Codex 실제 파일 수정 재시험(새 실행 승인 필요) 및 승인 잔여 중단 시험, G6 메모리/전체 성능, Windows·출시 검증이다. 기존 Claude 실제 작업 증거와 이번 연결 조회를 구분한다. 전체 완료 선언/main 병합/push 없음.
+
+### 2026-10-22 · by GPT-6 Astra
 - 직전은 메모리 재현·임시 정리로 진척했다. 998f61d에서 --deferred-cdp 진단은 정상 종료/FAIL: 연결 전 최대443498496B, 연결 후 최대441155584B다. 클라이언트 연결 전에도400MiB를 넘으므로 연결만을 원인으로 볼 수 없지만 시작 시 진단 서버는 활성이라 완전 무계측 결과는 아니다. uRAz3F/result.json을 보존하고 정상 종료·PID 부재 뒤 새 userdata만 제거했다.
 - 사용자가 미관찰 자손 잔여 위험을 이해하고 과거 Codex pending1건 제거를 승인했다. 제품에는 포함되지 않는 cfg(test)/ignored 단건 도구를 추가했다. 정확한 경로/run/107바이트/3개 canonical identity, nofollow·flock·소유권/권한, 원장 replay·다른 actual run 충돌, 기존 완료/chat/lock/manifest 검사, 최신 Gone 및 profile/bytes 재검증을 수행한다. 기존 bound 복구의 완료 검증을 추출해 재사용하며 일반 recover 조건은 유지한다.
 - 독립 config_layers_review의 동시 writer 지적을 반영해 기존 DB에 EXCLUSIVE transaction을 획득한 후 query_only=ON을 적용하고 commit 없이 rollback 종료한다. 경쟁 writer와 자체 SQL 쓰기 거절 회귀 PASS. 기존 bound/reopen 회귀도 PASS. 최초 inspect는 terminal enum을 completed로 쓴 도구 오류로 거절됐고 protocol의 succeeded로 교정 후 PASS했다. 원장·인증 논리 쓰기/모델 실행 없음.
