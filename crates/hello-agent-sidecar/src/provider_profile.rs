@@ -208,6 +208,15 @@ pub(crate) struct CodexProfileBinding {
 }
 
 impl CodexProfileBinding {
+    #[cfg(test)]
+    pub(crate) fn existing_for_repair(path: &Path) -> Result<Self, SidecarError> {
+        let app_data = open_absolute_directory(path)?;
+        let profile = profile_directory(&app_data, false)?;
+        let binding = Self { app_data_path: path.to_path_buf(), app_data, profile };
+        binding.revalidate()?;
+        Ok(binding)
+    }
+
     pub(crate) fn try_clone(&self) -> Result<Self, SidecarError> {
         self.revalidate()?;
         let binding = Self {

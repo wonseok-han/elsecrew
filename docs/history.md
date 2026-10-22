@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- 직전은 메모리 재현·임시 정리로 진척했다. 998f61d에서 --deferred-cdp 진단은 정상 종료/FAIL: 연결 전 최대443498496B, 연결 후 최대441155584B다. 클라이언트 연결 전에도400MiB를 넘으므로 연결만을 원인으로 볼 수 없지만 시작 시 진단 서버는 활성이라 완전 무계측 결과는 아니다. uRAz3F/result.json을 보존하고 정상 종료·PID 부재 뒤 새 userdata만 제거했다.
+- 사용자가 미관찰 자손 잔여 위험을 이해하고 과거 Codex pending1건 제거를 승인했다. 제품에는 포함되지 않는 cfg(test)/ignored 단건 도구를 추가했다. 정확한 경로/run/107바이트/3개 canonical identity, nofollow·flock·소유권/권한, 원장 replay·다른 actual run 충돌, 기존 완료/chat/lock/manifest 검사, 최신 Gone 및 profile/bytes 재검증을 수행한다. 기존 bound 복구의 완료 검증을 추출해 재사용하며 일반 recover 조건은 유지한다.
+- 독립 config_layers_review의 동시 writer 지적을 반영해 기존 DB에 EXCLUSIVE transaction을 획득한 후 query_only=ON을 적용하고 commit 없이 rollback 종료한다. 경쟁 writer와 자체 SQL 쓰기 거절 회귀 PASS. 기존 bound/reopen 회귀도 PASS. 최초 inspect는 terminal enum을 completed로 쓴 도구 오류로 거절됐고 protocol의 succeeded로 교정 후 PASS했다. 원장·인증 논리 쓰기/모델 실행 없음.
+- 앱/sidecar 부재와 inspect의 dev16777229/inode177319704를 확인했다. 같은 식별자를 지정한 commit 실행에서 전체 재검증을 통과해 해당 pending만 제거했고 부재를 재확인했다. approved-legacy-codex-repair-20261022.json 감사 기록을 exclusive 생성·fsync하여 보존한 뒤 잠금을 삭제했으며 인증정보·프로젝트는 보존했다. 삭제한 잠금은 앱 UI로 되돌리는 대상이 아니며 임의 재생성하지 않는다. 독립 재검토 추가 입증된 차단 결함 없음; hostile same-UID·미관찰 자손의 보장은 하지 않는다.
+- 다음은 앱의 Codex 연결 상태 재확인(실제 모델 성공과 구분), 무계측 기본 메모리 원인 분리와 G6/Windows/출시 후속이다. 제품 전체 완료 아님, main/push 없음.
+
+### 2026-10-22 · by GPT-6 Astra
 - 직전 턴은 패키지 반영·원장 대조로 진척했다. 5ad7086 clean에서 기존 최신 패키지의 --memory-diff 진단1회를 임시 데이터로 실행했다(세션69388 exit1). 정상 종료/원장 clean marker 확인, 실제 공급자·인증·사용자 프로젝트 호출 없음. 결과는 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-QWD7D0/result.json에 보존했다.
 - 관측 idle461422592B(약440MiB), peak545357824B(약520MiB), retained delta0B로 idle400MiB만 초과했다. renderer JS used heap 약3.6MB, 최종 idle 표본의 main164.6MB/renderer137.4MB/GPU88.5MB/network41.7MB/sidecar17.1MB로 분해됐다. 제품 메모리 누수나 특정 모듈 원인으로 확정하지 않는다. diff500파일/20000줄/10MiB의 원본 불변과 summary182.6ms/first275.7ms를 관측했지만 hiddenTransitions1이므로 성능 합격 증거는 아니다.
 - 이번에 만든 project·other-project·userdata만 정상 종료 및 관측 PID 부재 확인 후 삭제했고 결과 JSON·이미지는 남겼다. Karpathy 원칙에 따라 근거 없는 메모리 최적화·기준 완화·안전 검사 제거는 하지 않았다. 다음은 계측 오버헤드와 기본 Electron 프로세스 메모리의 분리, G6 결손 수집이며 과거 Codex 잠금·Windows·출시는 계속 미완료다. main/push 없음.
@@ -178,6 +185,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **과거 Codex 단건 복구 완료(2026-10-22)**: 사용자 명시 위험 수용 승인 후 test-only ignored 도구로 원장 배타 잠금·완료/manifest·정확 파일 신원·기록 프로세스 Gone을 재검증해107바이트 codex-login.pending1건을 제거했다. 감사 기록은 앱 데이터에 보존한다. 일반 legacy 자동 복구나 소급 binding 생성은 아니며 실제 로그인/모델 성공은 별도 확인해야 한다.
 
 - **공급자 잠금과 원장 복구의 분리(2026-10-21)**: 새 run은 pending 파일과 원장에 run ID/nonce/파일·디렉터리 신원을 결속하고 명시 복구에서 종료 기록·프로세스 소멸·abandoned manifest를 함께 확인한다. 이 구현은64860d2 패키지에 반영됐다. 과거 Codex107바이트 pending은 canceled/resolvedAbandoned/cleanExit인 원장의3개 PID+시작시각과 일치하지만 결속이 없어 자동 해제하지 않는다. 일반 연결 잠금 복구 버튼으로 이 과거 파일이 해결된다고 안내하지 않는다.
 

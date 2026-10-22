@@ -157,6 +157,19 @@ pub enum ChatBindFailurePoint {
 }
 
 impl Storage {
+    #[cfg(test)]
+    pub(crate) fn locked_repair_snapshot(path: &Path) -> Result<Self, SidecarError> {
+        let path = safe_database_path(path)?;
+        // Acquire writer exclusion first, then prohibit all SQL mutations.
+        // No commit is performed: Connection drop rolls back this empty transaction.
+        let connection = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .map_err(|_| SidecarError::new("storageReadFailed", "repair database unavailable"))?;
+        connection.execute_batch("PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; PRAGMA query_only=ON;")
+            .map_err(|_| SidecarError::new("storageReadFailed", "repair snapshot unavailable"))?;
+        verify_projection_replay(&connection)?;
+        Ok(Self { connection, path, writes_admitted: false, maintenance_epoch: 0 })
+    }
+
     pub fn open(path: &Path) -> Result<Self, SidecarError> {
         static NEVER_CANCELLED: AtomicBool = AtomicBool::new(false);
         Self::open_inner(path, &NEVER_CANCELLED, StorageOpenMode::Legacy)

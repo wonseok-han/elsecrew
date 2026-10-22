@@ -27,6 +27,8 @@ const LOGIN_TERMINATED: &[u8] = b"login-processes-terminated-locked-v2\n";
 const OBSERVE_INTERVAL: Duration = Duration::from_millis(100);
 
 mod run_binding;
+#[cfg(test)]
+mod approved_legacy_repair;
 pub(crate) use run_binding::{recover_bound_run, RunFenceBinding};
 
 fn failure() -> SidecarError {
