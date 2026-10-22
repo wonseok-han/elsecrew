@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- e5d2f0e 기준 snapshot materialize의 파일별 scoped thread/4개 barrier를 최대4개 재사용 sync worker로 바꾸는 실험을 수행했다. 기존 materialized 회귀3건과 오류/panic/early Drop에서 지연 peer join을 기다리는 새 회귀1건 PASS, 독립 config_layers_review 재검토에서 추가 차단 결함 없음, 새 모듈 rustfmt/diff check PASS였다. Karpathy 지침에 따라 원본 검사·fsync·공개 전 완료 조건은 유지했다.
+- 그러나 같은 large_snapshot_phase_diagnostic 단회는 materialize+sync52463.3ms로 직전32539.8ms보다 느렸다(세션3057 exit0, 전체56.73초; baseline1048.8ms/recheck1055.6ms). 단회 환경 변동과 원인은 미분리지만 개선 근거가 없어 실험 코드·새 테스트 파일을 모두 철회하고 tracked Rust 파일이 HEAD와 완전 일치함을 확인했다. 추가 기능/성능 개선으로 인용하지 않는다. 임시 fixture는 TempDir로 정리됐으며 새 패키지는 만들지 않았다.
+- 재전달된 Codex 단건 잠금 복구 승인은45c28d6 및 최신 고정 기록에서 이미 처리 완료임을 확인했다. 동일 삭제·모델 실행·인증 변경은 반복하지 않았다. 다음은 materialize의 sync/파일 접근 비용을 더 분리하는 진단과 남은 G6/메모리·실제 Codex 시험 승인·Windows/출시 검증이다. main 병합/push 없음.
+
+### 2026-10-22 · by GPT-6 Astra
 - 직전309f51d의 대형 snapshot33.8초 관측에서 이어 원인 분리용 opt-in Rust 진단을 추가했다. 생성 fixture에1만 파일/1천 하위 폴더와5MiB 파일을 더해 private source open→baseline→export→baseline 재검증→init→materialize/sync를 개별 측정한다. 전체 create safety sequence/receipt 게시/UI를 대신하지 않으며 제품 동작·안전 검사·동기화는 변경하지 않았다. Karpathy 원칙에 따라 근거 없는 검사 제거보다 단계 비용을 먼저 확인했다.
 - release large_snapshot_phase_diagnostic1건 PASS(세션20181 exit0,37.02초): open40.6ms, baseline1073.7ms, export36.3ms, 재검증1064.2ms, init76.5ms, materialize+sync32539.8ms다. 전체33.8초와 fixture/시점은 다르지만 지배 비용은 materialize+sync로 좁혀졌다. sync 자체/파일 capability traversal/스레드 생성의 세부 비중은 아직 미분리다. 기본 테스트는 ignored, 임시 데이터는 TempDir로 정리했다.
 - 다음은 이 구간의 안전 계약을 유지하는 개선이며 원본 baseline 검사를 줄일 근거는 없다. 전체 G6/메모리/실제 Codex 승인·Windows·출시는 계속 미완료다. 절차 문서에 재현 명령·한계를 추가했고 diff check PASS, 사용자 프로젝트·인증·모델 호출/main/push 변경 없음.
