@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- 직전 실험 철회는 성능 회귀 근거를 확보한 진전으로 분류하고, 새 추측성 최적화 대신 남은 패키지 반복 검증을 수행했다. 기준6ed0740/clean에서 `node scripts/m5-packaged-performance.mjs --tree-file` 준비1+본10회 완료(세션24241 exit1/FAIL). 실행 중 소스/HEAD 불변과 패키지 asar/sidecar 지문 일치를 수집기가 대조했다. Karpathy 원칙에 따라 아직 원인 미확정인 제품 코드는 변경하지 않았다.
+- 본10회 p95: treeRoot290.1ms/1000, expand133.2ms/250, fileEditable416.6ms/1500, DOM362/500은 기준 이내다. 입력은 각 trial 준비1+10 edits의 최대값을 집계해 p95 52.3ms/50, 본6/10회 초과다. main long task 최대76.491ms/200, renderer0ms/200이며 모두 visible/hiddenTransitions0이다. CDP 전달·두 프레임 관측 포함 진단으로 물리 키보드/IME나 전체G6 합격은 아니다.
+- 본10회 idle RSS458014720~459571200B(약437~438MiB)는400MiB 기준 초과다. 전체 결과를 FAIL로 보존했다. 11회 모두 앱exit0/종료확인·관측PID부재 뒤 자체 project/other-project/userdata만 정리했고 JSON/스크린샷/로그는 `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-performance-pKFAeB/measurement.json`과 각 trial root에 보존했다. 현재 여유503GiB다.
+- 다음 수정 우선순위는 반복 실패한 시작 메모리와 입력 지연 원인 분리다. 이미 반복 통과한 트리/파일 열기 수치를 다시 확인하려고 전체 시험을 반복하지 않는다. 전체 스트림/메모리 수명·Codex 실제 시험 승인·Windows·출시 검증은 남으며 사용자 프로젝트/인증/모델 호출/main/push 변경 없음.
+
+### 2026-10-22 · by GPT-6 Astra
 - e5d2f0e 기준 snapshot materialize의 파일별 scoped thread/4개 barrier를 최대4개 재사용 sync worker로 바꾸는 실험을 수행했다. 기존 materialized 회귀3건과 오류/panic/early Drop에서 지연 peer join을 기다리는 새 회귀1건 PASS, 독립 config_layers_review 재검토에서 추가 차단 결함 없음, 새 모듈 rustfmt/diff check PASS였다. Karpathy 지침에 따라 원본 검사·fsync·공개 전 완료 조건은 유지했다.
 - 그러나 같은 large_snapshot_phase_diagnostic 단회는 materialize+sync52463.3ms로 직전32539.8ms보다 느렸다(세션3057 exit0, 전체56.73초; baseline1048.8ms/recheck1055.6ms). 단회 환경 변동과 원인은 미분리지만 개선 근거가 없어 실험 코드·새 테스트 파일을 모두 철회하고 tracked Rust 파일이 HEAD와 완전 일치함을 확인했다. 추가 기능/성능 개선으로 인용하지 않는다. 임시 fixture는 TempDir로 정리됐으며 새 패키지는 만들지 않았다.
 - 재전달된 Codex 단건 잠금 복구 승인은45c28d6 및 최신 고정 기록에서 이미 처리 완료임을 확인했다. 동일 삭제·모델 실행·인증 변경은 반복하지 않았다. 다음은 materialize의 sync/파일 접근 비용을 더 분리하는 진단과 남은 G6/메모리·실제 Codex 시험 승인·Windows/출시 검증이다. main 병합/push 없음.
