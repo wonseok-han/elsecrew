@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- c29fa8d/clean에서 중앙diff·안내 접기 변경 파동의 누적 프런트 검사 npm test560PASS/0skip(세션66838 exit0), darwin-arm64 m5:package:smoke PASS를 확인했다. 현재 out 패키지에 두 UI 변경이 반영되어 이전 'dfaf6e3 패키지' 상태는 해소됐다. Rust는 내용 변경이 없어 기존 회귀를 재실행하지 않고 release 캐시 빌드0.25초를 재사용했다.
+- 실제 패키지 --project 첫 실행/정상 재시작에서 savedDiffVisible·원본 불변·persistedEditorText, 검토취소 원본보존/별도 동의 반영·정확 bytes/별도 복원 동의·정확 bytes, 두 프로젝트 파일/채팅 분리·원래 채팅 재열기를 확인했다. YcnTnA/result.json·restart.json의 기능 assertion은 완료됐으나 idle458719232/459456512B로400MiB 초과여서 전체 세션20426은exit1/FAIL을 유지한다. 두 앱은exit0/shutdown confirmed다.
+- 관측 PID 부재 뒤 이번 project/other-project/userdata만 영구 정리했고 `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-YcnTnA/`의 JSON·스크린샷은 보존했다. 기능 UI 파동의 패키지 회귀는 이 범위에서 닫으며 같은 흐름을 새 변경 없이 반복하지 않는다. 전체 시안·입력/메모리/G6 수집·Codex 실제 승인·Windows/출시는 남고 인증/사용자 프로젝트/모델 호출/main/push는 변경하지 않았다.
+
+### 2026-10-22 · by GPT-6 Astra
 - 15bb3f6 기준 첫 작업 안내의 작업 진입 조건을 파일뿐 아니라 활성 채팅·열린 diff까지 확장했다. 첫 채팅 기록을 저장하며 안내를 강제로 다시 열던 경로는 제거했다. 작업 진입 boolean의 false→true 때만 접고, 작업 중 사용자가 수동으로 다시 펼친 상태는 파일/채팅 갱신 때 유지한다. 최초 시작 안내·프로젝트별 첫 작업 기록/명시 dismissal·별도 실행/복구 경고는 유지한다. Karpathy 최소 변경 원칙으로 표시 상태만 조정했다.
 - tsc·renderer build PASS, Chromium UI2PASS(기존 수동 재열기/안내 상태·미저장 파일·중앙diff 왕복 포함), 캡처도구의 diff/채팅 진입 자동 접힘 assertion PASS(세션63722 exit0). `.artifacts/m5-visual/capture-6oEvbv`의 active-conversation/active-diff를 직접 확인해 안내 한 줄과 확대된 작업 영역을 관측했다. 합성 renderer이며 실제 공급자/패키지 전체 합격은 아니다.
 - out 패키지는 여전히 dfaf6e3 빌드로 중앙diff/이번 안내 변경은 다음 묶음 패키지에 반영해야 한다. 시안 전체 마감·성능/G6·Codex 실제 승인·Windows/출시는 미완료이며 main/push·인증·사용자 프로젝트·모델 실행 없음.
