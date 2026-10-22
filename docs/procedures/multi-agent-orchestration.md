@@ -255,7 +255,7 @@ Windows agent 실행은 별도 종료 계약 전까지 비활성화 상태를 �
 [`../../scripts/m5-harness.mjs`](../../scripts/m5-harness.mjs)가 모든 작업자와 통합 담당이 공유하는 검증 진입점이다. 하위 에이전트가 임의의 축약 명령으로 합격을 주장하지 않게 다음 규칙을 적용한다.
 
 - `pnpm test:harness`: 현재 기준선의 diff check, 프런트 빌드·unit, 기존 Rust 회귀를 순서대로 실행한다.
-- `pnpm harness:list`: `baseline`, `g1-foundation`부터 `g6-release`까지 준비 상태와 아직 없는 필수 package script를 나열한다.
+- `pnpm harness:list`: `baseline`, `g1-foundation`부터 `g6-release`까지 필수 package script 등록 상태를 나열한다. COMMANDS_READY는 실행 가능 명령이 있다는 뜻일 뿐 게이트 합격이나 실측 완료가 아니다. 없는 명령은 NOT_READY다.
 - `pnpm test:m5`: G6까지 앞선 모든 게이트를 누적 실행한다.
 - 구현되지 않은 단계는 `SKIP`이나 `PASS`가 아니라 `NOT_READY`와 exit code `2`다.
 - 실제 실행 결과는 `.artifacts/m5-harness/*.json`에 schema version, branch, commit, dirty 상태, 명령, exit code, 소요 시간, stdout/stderr와 함께 남는다. artifact는 Git에 넣지 않고 QA·게이트 보고에서 정확한 경로를 인용한다.

@@ -169,10 +169,11 @@ function writeReport(report) {
 const options = parseArgs(process.argv.slice(2));
 
 if (options.list) {
+  console.log("Command registration only; no measurements or gate results are assessed by --list.");
   for (const gate of gates) {
     const missing = [...new Set([...gate.scripts, ...gate.cumulativeScripts])].filter((script) => !packageScripts[script]);
-    const state = missing.length === 0 ? "READY" : "NOT_READY";
-    console.log(`${gate.id.padEnd(19)} ${state.padEnd(9)} ${gate.description}`);
+    const state = missing.length === 0 ? "COMMANDS_READY" : "NOT_READY";
+    console.log(`${gate.id.padEnd(22)} ${state.padEnd(14)} ${gate.description}`);
     if (missing.length) console.log(`  missing: ${missing.join(", ")}`);
   }
   process.exit(0);

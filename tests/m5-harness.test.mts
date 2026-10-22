@@ -100,9 +100,10 @@ test("하네스가 M5 게이트와 canonical·cumulative 준비 상태를 기계
   const result = run("--list");
   assert.equal(result.status, 0, result.stderr);
   for (const gate of ["baseline", "g1-foundation", "g2-contracts", "g3-storage", "g4-project-editor", "g5-run-recovery", "g5d-bounded-storage", "g5d-storage-lifetime"]) {
-    assert.match(result.stdout, new RegExp(`${gate}\\s+READY`));
+    assert.match(result.stdout, new RegExp(`${gate}\\s+COMMANDS_READY`));
   }
-  assert.match(result.stdout, /g6-release\s+NOT_READY/);
+  assert.match(result.stdout, /g6-release\s+COMMANDS_READY/);
+  assert.match(result.stdout, /no measurements or gate results are assessed/);
 });
 
 test("독립 wrapper의 Rust 범위는 유지하고 cumulative alias는 정확한 Node 파일만 실행한다", () => {

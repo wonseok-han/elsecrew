@@ -18,6 +18,7 @@
     "m5:package:smoke": "pnpm run m5:package && node scripts/m5-electron-package-smoke.mjs",
     "m5:make": "electron-forge make",
     "m5:measure:performance": "node scripts/m5-performance-metrics.mjs",
+    "m5:test:performance": "node scripts/m5-performance-metrics.mjs --input .artifacts/m5-performance/measurement.json",
     "m5:measure:sidecar-startup": "node --experimental-strip-types scripts/m5-sidecar-startup-metrics.mts",
     "m5:measure:renderer": "node scripts/m5-renderer-metrics.mjs",
     "m5:measure:native-project": "node scripts/m5-native-project-metrics.mjs",

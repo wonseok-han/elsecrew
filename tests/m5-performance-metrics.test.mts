@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { mkdtempSync, mkdirSync, copyFileSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, copyFileSync, writeFileSync, rmSync, symlinkSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { assessPerformance } from "../scripts/m5-performance-metrics.mjs";
 
 const head = "a".repeat(40);
 const MiB = 1024 * 1024;
+test("G6 command assesses canonical runtime evidence rather than unit fixtures", () => {
+  const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(manifest.scripts['m5:test:performance'],
+    'node scripts/m5-performance-metrics.mjs --input .artifacts/m5-performance/measurement.json');
+});
 function measurements(): any {
   return {
     schemaVersion: 1, head, dirty: false, warmupRuns: 1,
@@ -123,6 +128,7 @@ test("CLI assesses clean matching evidence and rejects malformed, stale, oversiz
       assert.ok(result.stdout, `${result.stderr}\n${result.error ?? result.signal ?? result.status}`);
       return { exit: result.status, report: JSON.parse(result.stdout) };
     };
+    assert.equal(run().exit, 2, "missing evidence must not become a successful gate");
     writeFileSync(input, JSON.stringify(data)); assert.equal(run().exit, 0);
     data.counters.silentOverwrites = 1;
     writeFileSync(input, JSON.stringify(data)); assert.equal(run().exit, 1);

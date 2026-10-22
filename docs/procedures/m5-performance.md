@@ -173,6 +173,8 @@ clean checkout에서 `pnpm run m5:measure:renderer`를 실행한다. 현재 prod
 
 `pnpm run m5:measure:performance --input <measurement.json>`은 공급된 측정값을 검증한다. 계측기를 대신하지 않으며 unit fixture를 실측으로 사용하면 안 된다. `PASS`=0, 기준 초과 `FAIL`=1, 누락·잘못된 입력·불일치 HEAD `NOT_READY`=2이다. 알려진 기준 초과는 다른 항목 누락과 함께 있어도 FAIL로 남긴다. 최대 4 MiB regular UTF-8 JSON만 받는다. 출력 JSON은 stdout으로 전달한다.
 
+`pnpm run m5:test:performance`는 같은 판정기를 `.artifacts/m5-performance/measurement.json`에 연결한 G6 하네스 명령이다. 전체 수집기는 아직 미완성이므로 이 명령 등록 자체가 측정 완료를 뜻하지 않는다. 현재 clean HEAD에서 생성한 전체 실측 증거만 해당 경로로 전달해야 하며, 파일이 없으면 exit2/NOT_READY다. 부분 진단의 diagnostic/gateEligible 표식을 바꾸거나 미측정 값을0으로 채우지 않는다. `pnpm harness:list`의 COMMANDS_READY는 명령 등록 상태일 뿐 합격 상태가 아니다. 전체 하네스는 실제 명령의 exit code를 판정한다.
+
 입력 schemaVersion은 1이며 필수 필드는 다음과 같다.
 
 선택 필드 `diagnostic`을 제공하면 false, `gateEligible`을 제공하면 true여야 정식 판정 후보가 된다. 진단/부적격/잘못된 타입 표시가 있으면 수치가 모두 있어도 NOT_READY이며, 확인된 기준 초과는 계속 FAIL로 남긴다. 이 표시는 자료의 진위를 인증하거나 합성 측정을 실제 측정으로 바꾸지 않는다.
