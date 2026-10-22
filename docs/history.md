@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- 직전51fe511은 조회 결과 메모리 보관 개선으로 진척했다. 이번에는 실제 agent.publicEvent→ChatUiController→durable chat.get 경로를 확인했다. 알림 원문을 직접 붙이지 않고 원장을 재조회하는 구조이므로 기존 user-message append 스트림 수집기를 actual event 측정으로 이름만 바꾸지 않았다. 수집 경로 완성은 아직 남는다.
+- 원장 페이지를 합칠 때 단건만 빠른 경로를 쓰고 여러 메시지/빈 tail은 기존 전체 메시지 Map 재생성·정렬을 반복하던 부분을 개선했다. 현재 tail 다음의 연속된 페이지는 한 번 복사해 붙이며, 중복·겹침·비연속 입력은 기존 충돌/연속성 검사로 보낸다. 원문 알림·원장 권위·복구 상태·실행 권한은 변경하지 않았다. Karpathy 지침에 따라 이 병합 범위만 수정했다.
+- 151개 기록의 세 페이지 연속 병합·기존 객체 동일성, 페이지 내부 gap 거절 회귀를 추가했다. node --experimental-strip-types --test tests/m5-g5a-public-event-ui.test.mts 27건 PASS(0.15초), diff check PASS. 실제 패키지 성능 향상/전체 G6 완료 증거는 아니다. 다음은 미완료 actual-event 수집 경로와 누적 패키지 확인이며 유료 Codex 재시험 승인·Windows·출시도 남는다. 새 빌드 캐시/워크트리/모델 실행/main 병합/push 없음.
+
+### 2026-10-22 · by GPT-6 Astra
 - 직전 승인 응답 처리는 이미 완료된 복구 재확인으로 남은 개발 진척은 없었다. e4d30b4의 미커밋 storage 조회 개선을 마무리했다. 단건/종류별 조회에서 전체 projection을 보관하던 대신 요청한 결과만 유지한다. 모든 테이블의 SQL 타입·JSON·sequence 검사는 기존 순서로 계속 수행하고 전체 load/replay 경로는 유지한다. CPU/읽기 복잡도 개선이나 G6 메모리 원인 해결을 주장하지 않는다.
 - 기존 config_layers_review의 읽기 전용 검토에서 의미/안전 차단 결함 없음(전체 행 디코딩 비용은 남음)을 확인했고, 최종 형식 정리 뒤 release focused 회귀 1건 PASS(세션97543, exit0, 683 filtered out)다. 선택 결과/정렬/없는 ID/미지원 종류 및 무관 테이블 손상 거절을 고정한다. 이전 전체 회귀 결과를 이번 변경 전체 합격으로 확대하지 않으며 전체 재실행·새 패키지 생성은 하지 않았다. Karpathy 지침으로 검증 생략·캐시 도입 없이 범위를 제한했다.
 - architecture에 조회 수명과 이미 완료된 패키지/단건 잠금 복구의 현행 사실을 보완했다. 성능 수집기 조사 결과 native chat stream은 user-message append 경로여서 실제 agent event 스트림 대체 증거가 아니다. 다음은 실제 이벤트 경로의 성능 수집 연결과 변경 패키지의 누적 확인이다. Codex 파일 수정 재시험 승인·G6·Windows·출시 검증은 남으며 유료 호출/main 병합/push 없음.

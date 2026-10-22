@@ -198,6 +198,33 @@ test("public event burst는 하나의 hydration으로 합치고 durable sequence
   controller.dispose();
 });
 
+test("actual event hydration appends contiguous pages without changing existing message identities", async () => {
+  const bridge = new AgentBridge(); const controller = await open(bridge);
+  const first = controller.snapshot().messages[0];
+  for (let sequence = 2; sequence <= 151; sequence++) {
+    bridge.messages.push(message(bridge.chatA, sequence, `durable ${sequence}`));
+  }
+  bridge.calls.length = 0;
+  bridge.emitAgent(publicEvent(bridge.chatA));
+  await flush(); await flush();
+  assert.deepEqual(bridge.calls, [1, 51, 101, 151]);
+  assert.equal(controller.snapshot().messages[0], first);
+  assert.deepEqual(controller.snapshot().messages.map(entry => entry.eventSequence),
+    Array.from({length:151}, (_, index) => index + 1));
+  assert.equal(controller.snapshot().error, null);
+  controller.dispose();
+});
+
+test("actual event hydration still rejects a gap inside a multi-message page", async () => {
+  const bridge = new AgentBridge(); const controller = await open(bridge);
+  bridge.messages.push(message(bridge.chatA, 2, "second"), message(bridge.chatA, 4, "gap"));
+  bridge.emitAgent(publicEvent(bridge.chatA));
+  await flush();
+  assert.equal(controller.snapshot().error?.messageKey, "m5.chatError.history");
+  assert.deepEqual(controller.snapshot().messages.map(entry => entry.eventSequence), [1]);
+  controller.dispose();
+});
+
 test("public and state notification burst coalesces through the same durable tail hydration latch", async () => {
   const bridge = new AgentBridge(); const controller = await open(bridge);
   bridge.agentRuns = [agentRun(bridge.chatA, "succeeded")]; bridge.calls.length = 0;

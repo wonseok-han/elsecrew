@@ -523,10 +523,11 @@ function agentRecoveryFor(detail: ChatDetail): AgentRecoveryRecordV1 | null { re
 function agentRecoveryIdentity(recovery: AgentRecoveryRecordV1) { return { chatId: recovery.chatId, taskId: recovery.taskId, projectId: recovery.projectId, worktreeId: recovery.worktreeId, workspaceIdentity: recovery.workspaceIdentity, runId: recovery.runId, recoveryId: recovery.recoveryId }; }
 function mergeMessages(base: readonly TeamMessageV1[], incoming: readonly TeamMessageV1[]): TeamMessageV1[] {
   // Existing state is already contiguous. Avoid rebuilding and sorting its
-  // full index for the common single-event append; overlap still uses the
+  // full index for contiguous event/page appends; overlap still uses the
   // conflict-checking merge below.
-  if (incoming.length === 1 && incoming[0]!.eventSequence === (base[base.length - 1]?.eventSequence ?? 0) + 1) {
-    return [...base, incoming[0]!];
+  const tail = base[base.length - 1]?.eventSequence ?? 0;
+  if (incoming.every((message, index) => message.eventSequence === tail + index + 1)) {
+    return [...base, ...incoming];
   }
   const bySequence = new Map<number, TeamMessageV1>();
   for (const message of [...base, ...incoming]) {
