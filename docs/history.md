@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- 2a968bd/clean에서 기존 종료 stdio 시험 두 개의 증거를 읽고 저장 경합 수집기에 고정 --termination 모드를 연결했다. Karpathy 재사용 원칙으로 Rust/제품 경계는 수정하지 않았다. 두 상이한 clean/uncertain scenario와 관측 자손/별도 세션 자손·생존0·불확실 보고·정상 종료를 모두 요구하며 raw JSON/로그와 source 전후를 보존한다. 정상도 NOT_READY/exit2이고 전체 G6 canonical 파일을 생성하지 않는다.
+- 최초5VHOB7은 실제 시험2PASS/child exit0이나 순차 libtest의 시험명 접두사 때문에 JSON0건으로 수집 FAIL이었다. 정확한 두 이름만 제거하는 parser와 회귀를 추가했다. validator/parser5PASS, 재시험 세션38793의VW49d5는 두 정상 JSON·원시시험2PASS/child exit0·소스 전후 일치로 NOT_READY/exit2다. 각 시나리오는 관측 자손2/별도 세션1/생존0이며 uncertain은 불확실 상태를 보고했다. 두 경로 `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-termination-metrics-{5VHOB7,VW49d5}/`의 결과·로그를 보존했다.
+- 상시 승인된 읽기 전용 config_layers_review가 저장 경합+종료 수집 파동을 검토해 구체 차단 결함을 찾지 못했다. 검토자는 실행하지 않았다. 시험 자체의 폐기/정상 종료와 관측 신원 Gone만 다루며 독립 재부모화 orphan·실제 공급자·전체 G6 합격으로 확대하지 않는다. 화면 성능/stream 전체 수집·Codex 승인·Windows/출시는 계속 남는다. main/push·사용자 프로젝트/인증/실제 모델 변경 없음.
+
+### 2026-10-22 · by GPT-6 Astra
 - 412022b와 기존 기록1줄 상태에서 저장 경합 증거를 조사했다. 기존 ignored stdio 시험이 이미100회 경합/100회 정상 대조를 구현한 것을 확인해 중복 구현하지 않았다. Karpathy 재사용 원칙으로 `scripts/m5-save-race-metrics.mjs`를 추가해 정확한 기존 시험의 release/locked 실행, 원시 cargo.log·JSON 보존, Git 전후 상태 및 종료·100행·두 채팅 교대·보존/충돌/대조 결과 검증을 연결했다. 미측정 종료/stream 카운터를0으로 만들지 않고 canonical G6 파일도 생성하지 않는다.
 - validator 회귀3PASS. 실제 수집 세션41365는 release 캐시 빌드2.96초 후 시험 exit0/정상 종료,100 observations와 silentOverwrites/unreportedConflicts/crossChatWrites 모두0, Git 전후 일치를 확인했다. 수집기는 부분 진단이므로 exit2/NOT_READY를 유지했다. `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-save-race-metrics-jC3LIR/`에 로그/JSON을 보존하며 시험 자체가 정상 종료 후 제거한 hello-agent-save-races-hSK4q8의 부재를 재확인했다. 계정·모델·사용자 프로젝트·강제 종료는 사용하지 않았다.
 - 현재 증거는 두 workspace의 commit 전 제어된 경합이며 packaged UI/실제 agent writer/임의 scheduling 전체 합격이 아니다. 전체 collector의 stream·종료 관측 및 화면 성능 연결, Codex 승인·Windows/출시는 남는다. diff check PASS, main/push 없음. 직전 clean412022b 성능 명령의 누락 증거 거절 기록도 함께 보존했다.

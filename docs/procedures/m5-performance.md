@@ -143,6 +143,8 @@ clean `m5/coding-agent-ide`에서 `pnpm run m5:measure:sidecar-startup`을 실�
 
 ### Native 저장 경합 관측
 
+종료 관측은 `node scripts/m5-save-race-metrics.mjs --termination`으로 같은 수집기를 사용한다. 기존 `binary_cancel_` 두 시험을 release/locked·직렬 실행해 정상 중단과 불확실 종료/명시 복구의 JSON을 모두 요구한다. 관측 자손2개 이상·별도 세션 자손1개 이상·관측 생존0·불확실 상태 보고·정상 종료를 대조하며 한쪽 누락/중복/값 불일치는 FAIL이다. libtest가 JSON 앞에 붙이는 정확한 두 시험 이름만 허용한다. OS 임시 `hello-agent-termination-metrics-*`에 원시 로그와 관측을 보존하며 정상 자료도 NOT_READY/exit2다. 대상은 시험 전용 프로세스이고 실제 공급자/사용자 앱은 실행하지 않는다. 독립적으로 재부모화된 orphan 전체, 실제 공급자 및 전체 G6 종료 안전성의 증거는 아니며 외부 관측기도 제품과 같은 OS probe 구현을 공유한다.
+
 `node scripts/m5-save-race-metrics.mjs`는 아래 기존 시험 하나를 release/locked로 실행하고 OS 임시 `hello-agent-save-race-metrics-*`의 `cargo.log`와 `measurement.json`에 보존한다. 전후 Git HEAD/status, Cargo 종료, 정확히 하나의 완료 관측,100개 순서·두 채팅 교대·개별 보존/충돌/대조 저장 결과를 검사한다. Rust 동시 실행은4 이하이며 다른 무거운 시험과 동시에 실행하지 않는다. 정상 관측도 partial diagnostic이므로 NOT_READY/exit2이고 실패는 exit1이다. 프로세스를 시간 초과로 강제 종료하거나 실패 fixture를 자동 삭제하지 않는다. 전체 G6용 canonical measurement.json을 생성하지 않는다.
 
 `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 CARGO_INCREMENTAL=0 cargo test -p hello-agent-sidecar --locked -j4 --test stdio_process binary_workspace_save_races_preserve_external_bytes_across_two_chats -- --ignored --nocapture`는 생성한 Git 프로젝트와 실제 `--stdio` sidecar에서 두 채팅의 `workspace.file.save` begin/chunk/commit을 실행한다. 100회 동안 두 사본을 번갈아 선택하고 begin 또는 chunk 이후 외부 내용을 써 commit 충돌을 유도한다. 각 충돌의 명시 응답·외부 바이트 보존·다른 채팅/원본 불변을 검사한 뒤, 최신 버전으로 정상 저장되는지 대조한다.

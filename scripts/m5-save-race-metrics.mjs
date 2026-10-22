@@ -8,6 +8,12 @@ import { spawn, execFileSync } from 'node:child_process';
 import { qaEnvironment, lowerQaPriority } from './m5-qa-resources.mjs';
 import { assertMeasurementSourceUnchanged } from './m5-measurement-source.mjs';
 
+export function parseNativeObservationLine(line) {
+  // libtest's sequential runner prefixes stdout with the exact test name.
+  const json = line.replace(/^test (?:binary_cancel_clean_proves_fixture_parent_and_descendant_gone|binary_cancel_uncertain_blocks_then_abandon_resolution_clears_quit) \.\.\. /, '');
+  try { return JSON.parse(json); } catch { return null; }
+}
+
 export function validateSaveRaceObservation(value) {
   assert.equal(value?.evidence, 'native-workspace-save-races');
   assert.equal(value.diagnostic, true);
@@ -33,17 +39,42 @@ export function validateSaveRaceObservation(value) {
   return value;
 }
 
+export function validateTerminationObservations(values) {
+  assert.equal(values.length, 2, 'Both clean and uncertain cancellation observations are required');
+  const scenarios = new Set();
+  for (const value of values) {
+    assert.equal(value.evidence, 'fixture-cancel-external-process-observation');
+    assert.ok(['cancel-clean', 'cancel-uncertain'].includes(value.scenario));
+    assert.ok(!scenarios.has(value.scenario), 'Duplicate cancellation scenario');
+    scenarios.add(value.scenario);
+    assert.equal(value.diagnostic, true);
+    assert.equal(value.gateEligible, false);
+    assert.equal(value.shutdown, 'accepted');
+    assert.ok(Number.isSafeInteger(value.observedDescendants) && value.observedDescendants >= 2);
+    assert.ok(Number.isSafeInteger(value.detachedSessionDescendants) && value.detachedSessionDescendants >= 1 &&
+      value.detachedSessionDescendants <= value.observedDescendants);
+    assert.equal(value.survivingObservedProcesses, 0);
+    assert.equal(value.uncertainReported, value.scenario === 'cancel-uncertain');
+  }
+  return values;
+}
+
 async function main() {
-  assert.equal(process.argv.length, 2, 'No arguments supported');
+  const terminationMode = process.argv.length === 3 && process.argv[2] === '--termination';
+  assert.ok(process.argv.length === 2 || terminationMode, 'Only --termination is supported');
   assert.equal(process.platform, 'darwin', 'macOS native diagnostic only');
   const repo = fileURLToPath(new URL('..', import.meta.url));
   const git = (...args) => execFileSync('/usr/bin/git', args, {cwd:repo, encoding:'utf8'}).trim();
   const source = () => ({head:git('rev-parse', 'HEAD'), gitStatus:git('status', '--porcelain')});
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hello-agent-save-race-metrics-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), terminationMode ? 'hello-agent-termination-metrics-' : 'hello-agent-save-race-metrics-'));
   const report = {schemaVersion:1, diagnostic:true, gateEligible:false, status:'RUNNING',
     sourceBefore:source(), measuredAt:new Date().toISOString(), priority:lowerQaPriority(),
-    limitations:['Native release sidecar protocol only, not packaged UI or agent writers.',
-      '100 controlled pre-commit interleavings, not arbitrary scheduling or descendant termination coverage.']};
+    mode:terminationMode ? 'fixture-termination' : 'save-races',
+    limitations:terminationMode
+      ? ['Session-detached fixtures, not independently reparented orphans or real providers.',
+        'External observer shares the core OS probe implementation; not full G6 evidence.']
+      : ['Native release sidecar protocol only, not packaged UI or agent writers.',
+        '100 controlled pre-commit interleavings, not arbitrary scheduling or descendant termination coverage.']};
   const persist = () => fs.writeFileSync(path.join(root, 'measurement.json'), JSON.stringify(report, null, 2));
   persist(); console.log(JSON.stringify({stage:'COLLECTION_STARTED', root}));
   const log = fs.createWriteStream(path.join(root, 'cargo.log'));
@@ -51,7 +82,10 @@ async function main() {
   log.on('error', error => { logError = String(error); });
   let pending = '', parseFailure, observations = [];
   const args = ['test', '--release', '--locked', '-p', 'hello-agent-sidecar', '--test', 'stdio_process',
-    'binary_workspace_save_races_preserve_external_bytes_across_two_chats', '--', '--exact', '--ignored', '--nocapture'];
+    ...(terminationMode ? ['binary_cancel_', '--', '--test-threads=1', '--nocapture']
+      : ['binary_workspace_save_races_preserve_external_bytes_across_two_chats', '--', '--exact', '--ignored', '--nocapture'])];
+  const expectedEvidence = terminationMode ? 'fixture-cancel-external-process-observation' : 'native-workspace-save-races';
+  const expectedCount = terminationMode ? 2 : 1;
   report.command = ['cargo', ...args];
   const child = spawn('cargo', args, {cwd:repo, env:{...qaEnvironment(), CARGO_INCREMENTAL:'0'}, stdio:['ignore','pipe','pipe']});
   report.pid = child.pid; persist();
@@ -64,13 +98,13 @@ async function main() {
     let end;
     while ((end = pending.indexOf('\n')) !== -1) {
       const line = pending.slice(0, end); pending = pending.slice(end + 1);
-      try {
-        const value = JSON.parse(line);
-        if (value?.evidence === 'native-workspace-save-races') {
-          if (observations.length) parseFailure = 'Duplicate observation';
+      {
+        const value = parseNativeObservationLine(line);
+        if (value?.evidence === expectedEvidence) {
+          if (observations.length >= expectedCount) parseFailure = 'Excess observations';
           else observations.push(value);
         }
-      } catch { /* Cargo output remains in the raw log. */ }
+      }
     }
   });
   child.stderr.on('data', chunk => log.write(chunk));
@@ -84,8 +118,9 @@ async function main() {
   try {
     assert.deepEqual(report.termination, {code:0, signal:null});
     assert.ok(!parseFailure && !logError, parseFailure ?? logError);
-    assert.equal(observations.length, 1, 'Missing native observations');
-    validateSaveRaceObservation(observations[0]);
+    assert.equal(observations.length, expectedCount, 'Missing native observations');
+    if (terminationMode) validateTerminationObservations(observations);
+    else validateSaveRaceObservation(observations[0]);
     report.sourceAfter = source();
     assertMeasurementSourceUnchanged(report.sourceBefore, report.sourceAfter);
     report.status = 'NOT_READY';
