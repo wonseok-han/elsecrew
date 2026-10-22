@@ -1,4 +1,9 @@
 # 작업 이력 (Hello, Agent)
+### 2026-10-22 · by GPT-6 Astra
+- 직전 턴은 패키지 반영·원장 대조로 진척했다. 5ad7086 clean에서 기존 최신 패키지의 --memory-diff 진단1회를 임시 데이터로 실행했다(세션69388 exit1). 정상 종료/원장 clean marker 확인, 실제 공급자·인증·사용자 프로젝트 호출 없음. 결과는 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-QWD7D0/result.json에 보존했다.
+- 관측 idle461422592B(약440MiB), peak545357824B(약520MiB), retained delta0B로 idle400MiB만 초과했다. renderer JS used heap 약3.6MB, 최종 idle 표본의 main164.6MB/renderer137.4MB/GPU88.5MB/network41.7MB/sidecar17.1MB로 분해됐다. 제품 메모리 누수나 특정 모듈 원인으로 확정하지 않는다. diff500파일/20000줄/10MiB의 원본 불변과 summary182.6ms/first275.7ms를 관측했지만 hiddenTransitions1이므로 성능 합격 증거는 아니다.
+- 이번에 만든 project·other-project·userdata만 정상 종료 및 관측 PID 부재 확인 후 삭제했고 결과 JSON·이미지는 남겼다. Karpathy 원칙에 따라 근거 없는 메모리 최적화·기준 완화·안전 검사 제거는 하지 않았다. 다음은 계측 오버헤드와 기본 Electron 프로세스 메모리의 분리, G6 결손 수집이며 과거 Codex 잠금·Windows·출시는 계속 미완료다. main/push 없음.
+
 ### 2026-10-21 · by GPT-6 Astra
 - 64860d2의 최신 소스로 기존 out/hello-agent-darwin-arm64/hello-agent.app을 갱신하고 pnpm run m5:package:smoke를 완료했다(세션47514 exit0, darwin-arm64 PASS). 별도 패키지 사본/ZIP 없이 release 캐시를 재사용했다. 앱은 원장 진단 후 종료 상태로 유지하며 실제 로그인·모델 실행은 하지 않았다.
 - 새 결속 복구 패키지 반영은 완료했으나 과거 비결속 Codex pending은 그대로다. 원장과 프로세스 집합 일치는 확인했지만 이를 자동 삭제 근거로 확대하지 않았다. 다음은 과거 잠금의 명시적 안전 복구 방안이며 G6·Windows·출시 미완료, main/push 없음.
