@@ -1,4 +1,31 @@
 # 작업 이력 (Hello, Agent)
+### 2026-10-23 · by Codex
+- 직전 무CDP 관측은 새 실패 증거를 얻은 진척으로 분류한다. HEAD3406668에서 main/preload 번들(143/65KiB), 지연 Monaco, 기존 빈 Electron 창356~359MiB 기록을 대조했다. 조건이 다른 표본을 차감해 원인을 확정하거나 보안/GPU 기능을 끄지 않는다. 시작 메모리 원인은 아직 미확정이다.
+- 다음 실행 가능한 작업은 out에 빠진 a2deb80의 텍스트 갱신 시 Monaco 옵션 재설정 방지 변경을 정식 패키지에 포함하는 것이다. 기존 미커밋 진단 워크로그를 함께 보존하고 최신 소스 패키징을 진행한다. 이번 기록은 패키징/성능 성공 선언이 아니며 실제 결과는 후속 기록한다. 실제 모델 승인과 채팅 검사 분리 결정은 대기 상태를 유지한다.
+
+### 2026-10-23 · by Codex
+- 정상 종료 후 관측PID9501/9506/9507/9535/9537의 부재를 일반 권한 ps로 확인하고 이번 lE2OWw/userdata(2.3MiB)만 영구 삭제했다. JSON 증거는 보존했으며 기존 사용자 데이터는 대상이 아니다.
+- 목표 재개 후 메모리 경로를 읽었다. Monaco는 이미 지연 로딩되고 모델/편집기/구독의 dispose 및 controller stream 정리가 있어 Karpathy 원칙에 따라 추측성 삭제·기능 축소를 하지 않았다. OS 잠금 표시가 사라져 이전 환경 차단이 달라졌으며, 기존 f168262 소스 패키지의 무CDP 진단을 재개했다(현재 HEAD3406668과 패키지 소스를 구별한다).
+- 제한 실행9FtpiK는 준비 전 SIGABRT/표본0으로 실패했다. 일반 앱 권한으로 실행한 lE2OWw는 실제 시작 화면을 CUA로 확인했고 준비 표식1460.07ms 후40개 RSS 표본을 수집했다. 최대455229440B(약434.14MiB)로400MiB 초과/FAIL이다. 마지막400900096B만 선택해 합격으로 바꾸지 않는다. 디버거 미사용만으로 기준 실패가 해소되지 않는 새 증거이며 전체 G6 합격은 아니다.
+- CUA Cmd+Q로 시험 앱9501의 정상 종료(code0/signal null)와 DB shutdown confirmed를 확인했다. 결과는 `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-lE2OWw/result.json`에 보존했다. 모델/로그인/사용자 프로젝트·안전 검사 변경은 없고 별도 승인 두 건은 여전히 대기다. 다음은 이 시작 메모리 관측과 기존 구성별 증거의 원인 비교 및 최신 패키지 검증이며 Windows/전체G6/출시 미완료는 유지한다.
+
+### 2026-10-22 · by Codex
+- 자동 목표 재개에서 직전 턴을 개발 진척 없는 단건 복구 재확인으로 분류했다. 현재 Git은 기존 워크로그만 변경됐고 diff check가 통과하며, OS의 CGSSessionScreenIsLocked=Yes를 다시 확인했다. 진행 중인 시험 핸들은 없고 메시지 저장 검사 분리·새 Codex 실제 쓰기 시험 승인 응답도 없다. 동일 승인/환경 차단이 세 차례 이상 연속되어 목표를 blocked로 전환한다. 이는 완료나 사용자 요청에 의한 일시정지가 아니다.
+- 재개 조건: 화면 잠금 해제 후 가시성 기반 성능 검증, 채팅 저장 시 Git 전체 검사 분리 여부 결정, Codex 임시 프로젝트 파일 수정1회 실행 승인. 승인 전 안전 검사 변경이나 모델 실행을 하지 않는다. 전체 G6 수집·입력/메모리 기준 실패·Windows/출시 검증은 미완료로 유지한다. 이 기록 외 제품·인증·프로젝트 변경, main 병합/push는 없다.
+
+### 2026-10-22 · by Codex
+- 재전달된 단건 잠금 복구 승인에 대해 현재 HEAD3406668에서 읽기 전용 확인을 했다. 복구 구현 커밋45c28d6, approved-legacy-codex-repair-20261022.json 존재(161 bytes), codex-login.pending 부재를 재확인했다. 이미 처리된 대상이므로 중복 복구·삭제·프로세스 종료·모델 실행은 하지 않았다. 인증정보와 프로젝트는 변경하지 않았다.
+- 기존 미커밋 워크로그는 보존했다. 이 확인은 새로운 Codex 실제 실행 성공이나 M5 완료 증거가 아니며 기존 성능·실제 공급자·Windows/출시 잔여는 유지한다.
+
+### 2026-10-22 · by GPT-6 Astra
+- 직전 결정 요청 이후 두 번째 승인/환경 차단 확인이다. HEAD3406668과 이전 분석 워크로그만 변경된 상태를 확인했고, OS IOConsoleUsers의 CGSSessionScreenIsLocked=Yes를 읽기 전용으로 재확인했다. 검사 분리·Codex 실행 승인 응답은 아직 없고 canonical 전체 실측 파일도 없다. 새 코드·검증 진척이나 실행 중인 시험은 없다.
+- 같은 부하 시험/빌드를 반복하거나 부분 증거를 합격으로 바꾸지 않았다. 다음 실제 검증은 화면 잠금 해제, 실제 Codex 쓰기는 별도 승인, 채팅 검사 경계 변경은 사용자 결정이 필요하다. Windows/출시와 전체 성능 수집 미완료는 유지한다. 목표 완료/중단 선언 없이 현재 active를 유지하며 사용자 프로젝트·인증·앱 실행 상태는 변경하지 않았다.
+
+### 2026-10-22 · by GPT-6 Astra
+- 3406668/clean에서 native 다중 채팅 지연의 제품 경로를 대조했다. chat.rs append_user_message는 매 메시지마다 verify_workspace를 호출하고 project.rs validate_workspace_address는 HEAD/index/detached/fsck/remotes/metadata 검사를 실행한다. storage append_followup_checked의 전체 원장 replay도 유지된다. 기존 followup_cost_attribution 구현과10월 기록의 append60.48~85.29ms/workspace60.17~88.12ms/retry0.042~0.098ms를 찾아 동일 진단을 반복하지 않았다. 독립 표본이라 차감해 비용을 확정하지 않는다.
+- 메시지 저장에서의 Git 전체 검사와 실제 실행/파일 저장/반영 검사를 분리하는 방안을 사용자에게 명시 승인 요청했다. 제안은 메시지 저장의 결속·잠금/복구 상태를 유지하되 Git 손상 발견 시점이 실제 작업 시점으로 늦어질 수 있으므로 기존 안전 경계 변경으로 취급한다. 응답 전 검사 제거·캐시 권위 추가·제품 변경은 하지 않는다. 이번 턴은 원인 재확인/결정 요청이며 새 성능 개선이나 새 실측 증거가 아니다.
+- 화면 잠금 해제·Codex 실제 파일 수정 승인도 대기 중이며 전체 성능 collector/Windows/출시 미완료다. main/push·프로젝트/인증/모델 실행 없음.
+
 ### 2026-10-22 · by GPT-6 Astra
 - 2a968bd/clean에서 기존 종료 stdio 시험 두 개의 증거를 읽고 저장 경합 수집기에 고정 --termination 모드를 연결했다. Karpathy 재사용 원칙으로 Rust/제품 경계는 수정하지 않았다. 두 상이한 clean/uncertain scenario와 관측 자손/별도 세션 자손·생존0·불확실 보고·정상 종료를 모두 요구하며 raw JSON/로그와 source 전후를 보존한다. 정상도 NOT_READY/exit2이고 전체 G6 canonical 파일을 생성하지 않는다.
 - 최초5VHOB7은 실제 시험2PASS/child exit0이나 순차 libtest의 시험명 접두사 때문에 JSON0건으로 수집 FAIL이었다. 정확한 두 이름만 제거하는 parser와 회귀를 추가했다. validator/parser5PASS, 재시험 세션38793의VW49d5는 두 정상 JSON·원시시험2PASS/child exit0·소스 전후 일치로 NOT_READY/exit2다. 각 시나리오는 관측 자손2/별도 세션1/생존0이며 uncertain은 불확실 상태를 보고했다. 두 경로 `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-termination-metrics-{5VHOB7,VW49d5}/`의 결과·로그를 보존했다.
