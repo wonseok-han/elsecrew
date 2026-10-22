@@ -776,7 +776,10 @@ impl Storage {
         aggregate_type: &str,
         aggregate_id: &str,
     ) -> Result<Option<Map<String, Value>>, SidecarError> {
-        let projection = load_projection(&self.connection)?;
+        let projection = load_projection_selected(
+            &self.connection,
+            Some((aggregate_type, Some(aggregate_id))),
+        )?;
         let table = match aggregate_type {
             "project" => &projection.projects,
             "chat" => &projection.chats,
@@ -796,7 +799,7 @@ impl Storage {
         &self,
         aggregate_type: &str,
     ) -> Result<Vec<Map<String, Value>>, SidecarError> {
-        let projection = load_projection(&self.connection)?;
+        let projection = load_projection_selected(&self.connection, Some((aggregate_type, None)))?;
         let table = match aggregate_type {
             "project" => &projection.projects,
             "chat" => &projection.chats,
@@ -4539,6 +4542,16 @@ fn ledger_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<LedgerEventV1> 
 }
 
 pub(crate) fn load_projection(connection: &Connection) -> Result<ProjectionStateV1, SidecarError> {
+    load_projection_selected(connection, None)
+}
+
+// Retain only requested rows, but still read and decode every original row.
+// This preserves cross-table corruption rejection without allocating a full
+// projection for each single-record lookup. It is not a validation cache.
+fn load_projection_selected(
+    connection: &Connection,
+    selection: Option<(&str, Option<&str>)>,
+) -> Result<ProjectionStateV1, SidecarError> {
     let mut projection = ProjectionStateV1::default();
     let mut statement = connection
         .prepare(
@@ -4560,6 +4573,9 @@ pub(crate) fn load_projection(connection: &Connection) -> Result<ProjectionState
         .map_err(sqlite_error)?;
     for row in rows {
         let (id, pid, platform, started, heartbeat, clean, sequence) = row.map_err(sqlite_error)?;
+        if selection.is_some() {
+            continue;
+        }
         projection.app_instances.insert(
             id.clone(),
             json!({
@@ -4578,15 +4594,18 @@ pub(crate) fn load_projection(connection: &Connection) -> Result<ProjectionState
     }
     drop(statement);
 
-    load_json_projection(
-        connection,
-        "projects",
-        "project_id",
-        &mut projection.projects,
-    )?;
-    load_json_projection(connection, "chats", "chat_id", &mut projection.chats)?;
-    load_json_projection(connection, "runs", "run_id", &mut projection.runs)?;
-    load_json_projection(connection, "locks", "lock_id", &mut projection.locks)?;
+    for (kind, table, column, target) in [
+        ("project", "projects", "project_id", &mut projection.projects),
+        ("chat", "chats", "chat_id", &mut projection.chats),
+        ("run", "runs", "run_id", &mut projection.runs),
+        ("lock", "locks", "lock_id", &mut projection.locks),
+    ] {
+        load_json_projection(connection, table, column, target, |id| {
+            selection.is_none_or(|(selected_kind, selected_id)| {
+                selected_kind == kind && selected_id.is_none_or(|selected| selected == id)
+            })
+        })?;
+    }
     Ok(projection)
 }
 
@@ -4595,6 +4614,7 @@ fn load_json_projection(
     table: &str,
     id_column: &str,
     target: &mut std::collections::BTreeMap<String, Map<String, Value>>,
+    retain: impl Fn(&str) -> bool,
 ) -> Result<(), SidecarError> {
     let sql = format!("SELECT {id_column}, projection_json, last_event_sequence FROM {table};");
     let mut statement = connection.prepare(&sql).map_err(sqlite_error)?;
@@ -4616,7 +4636,9 @@ fn load_json_projection(
             )
         })?;
         value.insert("last_event_sequence".to_string(), Value::from(sequence));
-        target.insert(id, value);
+        if retain(&id) {
+            target.insert(id, value);
+        }
     }
     Ok(())
 }

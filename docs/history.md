@@ -1,5 +1,14 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- 직전 승인 응답 처리는 이미 완료된 복구 재확인으로 남은 개발 진척은 없었다. e4d30b4의 미커밋 storage 조회 개선을 마무리했다. 단건/종류별 조회에서 전체 projection을 보관하던 대신 요청한 결과만 유지한다. 모든 테이블의 SQL 타입·JSON·sequence 검사는 기존 순서로 계속 수행하고 전체 load/replay 경로는 유지한다. CPU/읽기 복잡도 개선이나 G6 메모리 원인 해결을 주장하지 않는다.
+- 기존 config_layers_review의 읽기 전용 검토에서 의미/안전 차단 결함 없음(전체 행 디코딩 비용은 남음)을 확인했고, 최종 형식 정리 뒤 release focused 회귀 1건 PASS(세션97543, exit0, 683 filtered out)다. 선택 결과/정렬/없는 ID/미지원 종류 및 무관 테이블 손상 거절을 고정한다. 이전 전체 회귀 결과를 이번 변경 전체 합격으로 확대하지 않으며 전체 재실행·새 패키지 생성은 하지 않았다. Karpathy 지침으로 검증 생략·캐시 도입 없이 범위를 제한했다.
+- architecture에 조회 수명과 이미 완료된 패키지/단건 잠금 복구의 현행 사실을 보완했다. 성능 수집기 조사 결과 native chat stream은 user-message append 경로여서 실제 agent event 스트림 대체 증거가 아니다. 다음은 실제 이벤트 경로의 성능 수집 연결과 변경 패키지의 누적 확인이다. Codex 파일 수정 재시험 승인·G6·Windows·출시 검증은 남으며 유료 호출/main 병합/push 없음.
+
+### 2026-10-22 · by GPT-6 Astra
+- 과거 Codex pending 단건 복구 승인 응답을 현재 상태와 대조했다. 45c28d6 워크로그에 정확 신원·배타 잠금·원장·Gone 재검증 후 제거 완료가 기록돼 있고, 현재 파일 부재 및 approved-legacy-codex-repair-20261022.json 감사 파일 존재를 다시 확인했다. 이미 완료된 제거를 반복하거나 인증정보·프로젝트·프로세스를 변경하지 않았다.
+- 후속 d2a069d의 두 공급자 연결 표시/정상 종료 관측은 기존 증거이며 이번에 앱을 다시 실행한 것은 아니다. 현재 m5/coding-agent-ide/e4d30b4의 기존 storage.rs·storage/tests.rs 미커밋 최적화는 이번 승인 처리와 섞지 않고 보존했다. 실제 Codex 파일 수정 재시험 승인, G6·Windows·출시 검증은 별도 남는다.
+
+### 2026-10-22 · by GPT-6 Astra
 - 직전 일반 실행 RSS 관측은 조건 분리 진척이다. 7b63832에서 기존 packaged 수집기에 --no-cdp를 추가했다. 새 임시 프로필·기존 패키지를 쓰며 remote-debugging 인자/클라이언트 없이12초 고정 대기→RSS40표본→메뉴 정상 종료를 관측한다. UI-ready 측정으로 이름을 바꾸지 않고 uninstrumentedRssBytes/diagnostic/gateEligible=false를 유지했다. 절차 문서에 종료 제한·근거 범위를 추가했다.
 - 실제 S0JnOa 진단은 exit1/FAIL: 최대422461440B(약403MiB)로400MiB 초과. CUA에서 빈 프로젝트 시작 화면/선택 버튼 활성 상태를 관측하고 메뉴 Quit 뒤 exit0 및 단일 sidecar clean marker를 확인했다. 임시 userdata는 관측 PID 부재 뒤 삭제하고 result.json은 보존했다. 진단 서버만 제거하면 기준을 만족한다는 가설은 지지되지 않는다. 기존315~328MiB는 데이터·실행 조건이 달랐으며 전체 G6 합격 증거가 아니다.
 - Karpathy 최소 변경 원칙으로 기존 수집기만 보완하고 제품 안전 검사·메모리 기준·앱 기능은 변경하지 않았다. node --check/diff check PASS, 전체 회귀 반복 없음. 실제 Codex 재시험 승인 대기·G6 초기 메모리 원인·Windows/출시는 미완료, 새 빌드·유료 모델·main/push 없음.

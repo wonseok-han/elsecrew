@@ -1,5 +1,9 @@
 # Hello, Agent 기술 설계
 
+> **조회 메모리 수명(2026-10-22)**: `Storage::projection_record`와 `projection_records`는 모든 projection 행의 디코딩·오류 검사를 유지하되 요청한 종류/ID의 결과만 보관한다. 시작·재생 검증의 전체 projection 경로는 유지한다. 캐시나 검증 생략이 아니며 전체 행 읽기 비용도 남는다. 패키지 RSS 기준 충족은 별도 실측 대상이다.
+
+> **연결 복구 상태 갱신(2026-10-22)**: 아래 10월21일의 패키지 미반영·과거 잠금 미완료 설명은 후속 작업으로 갱신됐다. 결속 복구는 64860d2 소스 패키지에 반영·smoke 검증했고, 과거 비결속 파일 1건은 명시 승인된 시험 전용 도구로 재검증 후 제거했다(45c28d6). 일반 제품 경로의 legacy 거절은 유지한다. 기존 인증으로 Codex·Claude 연결 표시와 정상 종료를 관측했으나 이것을 실제 도구 작업 성공으로 확대하지 않는다.
+
 > **결속된 실제 작업의 연결 잠금 복구(2026-10-21, 소스 구현)**: 새 native Codex/Claude 실행은 spawn 전에 pending 파일에 run ID·connection UUID·공급자·파일/디렉터리 신원을 동기화하고 동일 receipt를 실행 원장에 저장한다. 명시적 `provider.login recover`는 기존 로그인 종료 marker 경로에 더해 이 결속 경로를 검사한다. 정확한 receipt·프로세스 집합, resolvedAbandoned/cleanExit, 폐기된 채팅·manifest, 해제된 writer lock 및 현재 프로세스 소멸을 모두 확인하고 잠금 파일을 배타적으로 보유한 채 해제한다. 부분 기록·살아 있는 소유자·불일치·결속 없는 과거 파일은 거절한다. 사용자 인증과 원장은 변경하지 않는다. 일반 시작 시 자동 해제하지 않으며 현재 실행 중인 패키지에는 아직 반영하지 않았다. 과거 비결속 잠금 복구는 별도 미완료다.
 
 > **Codex 설정 구조 검사(2026-10-21, 활성화 승인 반영)**: 앱 전용 config.toml은 64KiB 이하 TOML로 읽고 `cli_auth_credentials_store=file`을 의미상 검증한다. 주석/공백 차이는 허용하고, 알 수 없는 설정·중복·잘못된 값은 거절한다. 사용자 승인으로 유효한 `projects` 신뢰 기록이 있다는 이유만의 프로필 입장 차단을 제거했다. 로그인·상태 조회·discovery·실제 실행과 버전 확인 launcher는 저장된 project 키 및 home/cwd 조상 경로를 invocation-only untrusted로 지정하고 hooks/apps/plugins를 끈다. native preflight는 플래그와 effective 설정 일치를 요구하며, 알려진 격리 경고는 config/read 응답 대기 중 1회만 보류해 실제 disabled project layer 경로·사유와 대조한다. 로그인/상태 확인도 계정 조회·OAuth 전에 cwd=home의 config/read(id60)를 거친다. 임시 프로필에서 로그인 설정 응답·버전 확인과 별도 첫 작업 요청 hook 격리 대조를 확인했다. 입장 변경 후 실제 계정 연결 성공·패키지 검증은 별도로 남는다. 설정 파일이나 인증을 자동 변경하지 않는다.

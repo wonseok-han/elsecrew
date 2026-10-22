@@ -31,6 +31,34 @@ fn database() -> (TempDir, PathBuf) {
 }
 
 #[test]
+fn selected_projection_retains_only_requested_rows_without_skipping_validation() {
+    let (_root, path) = database();
+    let storage = Storage::open(&path).unwrap();
+    for id in ["project_c", "project_a", "project_b"] {
+        storage.connection.execute(
+            "INSERT INTO projects(project_id,canonical_path,projection_json,last_event_sequence) VALUES (?1,?1,?2,7)",
+            params![id, json!({"id":id,"payload":"x".repeat(65536)}).to_string()],
+        ).unwrap();
+    }
+    storage.connection.execute(
+        "INSERT INTO runs(run_id,state,projection_json,last_event_sequence) VALUES ('run_other','failed','{}',3)", [],
+    ).unwrap();
+    let full = load_projection(&storage.connection).unwrap();
+    let selected = load_projection_selected(&storage.connection, Some(("project", Some("project_b")))).unwrap();
+    assert_eq!(selected.projects.len(), 1);
+    assert!(selected.runs.is_empty() && selected.chats.is_empty() && selected.locks.is_empty() && selected.app_instances.is_empty());
+    assert_eq!(storage.projection_record("project", "project_b").unwrap(), full.projects.get("project_b").cloned());
+    assert_eq!(storage.projection_record("project", "missing").unwrap(), None);
+    assert_eq!(storage.projection_records("project").unwrap(), full.projects.values().cloned().collect::<Vec<_>>());
+    assert_eq!(storage.projection_record("unknown", "project_b").unwrap_err().kind, "aggregateUnsupported");
+    // Even a missing selected row must not mask corruption in another table.
+    storage.connection.execute("UPDATE runs SET projection_json='[]' WHERE run_id='run_other'", []).unwrap();
+    assert_eq!(storage.projection_record("project", "missing").unwrap_err().kind, "projectionInvalid");
+    assert_eq!(storage.projection_records("project").unwrap_err().kind, "projectionInvalid");
+    assert_eq!(load_projection(&storage.connection).unwrap_err().kind, "projectionInvalid");
+}
+
+#[test]
 fn runtime_storage_owner_excludes_external_transaction_until_drop() {
     let (_root, path) = database();
     let storage = Storage::open(&path).unwrap();
