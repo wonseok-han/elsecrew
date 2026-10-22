@@ -49,6 +49,30 @@ import {
 const version = (text: string): FileVersionV1 => sha256FileVersionV1(new TextEncoder().encode(text));
 const baseCommit = "a".repeat(40);
 
+test("draft edits preserve tree identity while tree reloads and action gates remain observable", async () => {
+  const controller = new ProjectEditorController(new FakeBridge());
+  controller.start();
+  try {
+    await controller.chooseProject();
+    await controller.openFile("src/file-000.ts");
+    const before = controller.snapshot();
+    controller.updateText("src/file-000.ts", "memoized tree must not lose this draft");
+    const edited = controller.snapshot();
+    assert.notEqual(edited, before);
+    assert.equal(edited.tree, before.tree);
+    assert.equal(edited.activePath, before.activePath);
+    assert.equal(edited.tabs[0].text, "memoized tree must not lose this draft");
+    assert.equal(edited.tabs[0].saveState, "dirty");
+    controller.setActionBlocked(true);
+    assert.equal(controller.snapshot().actionBlocked, true);
+    controller.setActionBlocked(false);
+    assert.equal(controller.snapshot().actionBlocked, false);
+    await controller.loadTree("");
+    assert.notEqual(controller.snapshot().tree, before.tree);
+    assert.equal(controller.snapshot().tabs[0].text, edited.tabs[0].text);
+  } finally { controller.dispose(); }
+});
+
 test("initial suspended watcher result preserves rescan after tree and diff finish", async () => {
   const bridge: ProjectBridge = new FakeBridge();
   bridge.watchProjectFiles = async () => ({ watching: false, rescanRequired: true });

@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- 기준67ab343/clean에서 입력 시 `ProjectEditorController.updateText`가 전체 작업대 구독을 갱신하고 VirtualFileList의 최대120행도 재생성하는 경로를 확인했다. 파일 목록에 기본 React.memo를 적용하고 controller 의존 useCallback으로 열기 핸들러를 안정화했다. custom comparator/상태 지연/저장 debounce는 없으며 entries·activePath·disabled·callback 중 하나라도 바뀌면 갱신한다. 편집 초안 보존·저장·실행/복구 계약은 변경하지 않았다.
+- 새 회귀는 초안 갱신 시 tree 참조 유지와 최신 초안/dirty 저장, action gate 변경 관측, tree 재조회 시 새 참조 게시를 확인한다. tsc --noEmit·Electron renderer Vite build PASS. editor/Monaco/renderer 합동67건 중66PASS·Electron 실행1건 비정상 종료(null)였으며, 일반 앱 권한으로 UI 시험만 재실행해2/2PASS(세션65302 exit0)했다. 제한 실행 실패를 제품 성공으로 숨기지 않았고 같은 순수 검사는 반복하지 않았다. diff check PASS.
+- 이는 불필요한 렌더링 경로 제거이며 입력52.3ms/idle438MiB가 해결됐다는 증거는 아니다. 현재 .vite renderer만 갱신됐고 out 패키지는 이전 버전이다. 다음은 패키지 반영 후 입력 영향 측정과 시작 메모리 원인 분리다. 전체G6/실제 Codex 승인/Windows/출시는 미완료, main/push·사용자 프로젝트/인증/모델 실행 없음.
+
+### 2026-10-22 · by GPT-6 Astra
 - 직전 실험 철회는 성능 회귀 근거를 확보한 진전으로 분류하고, 새 추측성 최적화 대신 남은 패키지 반복 검증을 수행했다. 기준6ed0740/clean에서 `node scripts/m5-packaged-performance.mjs --tree-file` 준비1+본10회 완료(세션24241 exit1/FAIL). 실행 중 소스/HEAD 불변과 패키지 asar/sidecar 지문 일치를 수집기가 대조했다. Karpathy 원칙에 따라 아직 원인 미확정인 제품 코드는 변경하지 않았다.
 - 본10회 p95: treeRoot290.1ms/1000, expand133.2ms/250, fileEditable416.6ms/1500, DOM362/500은 기준 이내다. 입력은 각 trial 준비1+10 edits의 최대값을 집계해 p95 52.3ms/50, 본6/10회 초과다. main long task 최대76.491ms/200, renderer0ms/200이며 모두 visible/hiddenTransitions0이다. CDP 전달·두 프레임 관측 포함 진단으로 물리 키보드/IME나 전체G6 합격은 아니다.
 - 본10회 idle RSS458014720~459571200B(약437~438MiB)는400MiB 기준 초과다. 전체 결과를 FAIL로 보존했다. 11회 모두 앱exit0/종료확인·관측PID부재 뒤 자체 project/other-project/userdata만 정리했고 JSON/스크린샷/로그는 `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-performance-pKFAeB/measurement.json`과 각 trial root에 보존했다. 현재 여유503GiB다.

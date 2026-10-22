@@ -4,7 +4,7 @@ import { emptyProjectGuide, parseProjectGuide, projectGuideKey, projectGuideStep
 import type { ChatRecordV1 } from "./contracts/run-recovery-v1.ts";
 import { groupRunHistory, runOutcomeNotice } from "./work-status.ts";
 import type { ModelChoicesResult } from "./contracts/model-choices-v1.ts";
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type * as Monaco from "monaco-editor/esm/vs/editor/editor.api";
 import { I18nProvider, useI18n } from "../i18n";
 
@@ -118,6 +118,12 @@ function WorkbenchUnavailable() {
 function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const { lang, setLang, t } = useI18n();
   const controller = useMemo(() => new ProjectEditorController(bridge), [bridge]);
+  // Draft edits do not change the tree. Keep its callback stable so memo can
+  // skip rebuilding up to 120 rows on every keystroke without ignoring props.
+  const openTreeEntry = useCallback((entry: TreeEntryV1) => {
+    if (entry.kind === "file") void controller.openFile(entry.path);
+    else if (entry.kind === "directory") void controller.loadTree(entry.path);
+  }, [controller]);
   const chatController = useMemo(() => new ChatUiController(bridge), [bridge]);
   const { admission, fixtureAvailable } = useStorageAdmission(bridge);
   const admissionReady = admission === "ready";
@@ -333,7 +339,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
                 <button className="m5-root" type="button" title={snapshot.project.root} disabled={!admissionReady || snapshot.actionBlocked || snapshot.treeLoading} onClick={() => void controller.loadTree("")}>{snapshot.project.name}</button>
                 {snapshot.treeParent.split("/").filter(Boolean).map((part, index, parts) => <button key={index} type="button" aria-current={index === parts.length - 1 ? "location" : undefined} disabled={!admissionReady || snapshot.actionBlocked || snapshot.treeLoading} onClick={() => void controller.loadTree(parts.slice(0, index + 1).join("/"))}>/ {part}</button>)}
               </nav>
-              <VirtualFileList key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}:${snapshot.treeParent}:${snapshot.treePage}`} entries={snapshot.tree} activePath={snapshot.activePath} disabled={!admissionReady || snapshot.actionBlocked} onOpen={entry => { if (entry.kind === "file") void controller.openFile(entry.path); else if (entry.kind === "directory") void controller.loadTree(entry.path); }} />
+              <VirtualFileList key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}:${snapshot.treeParent}:${snapshot.treePage}`} entries={snapshot.tree} activePath={snapshot.activePath} disabled={!admissionReady || snapshot.actionBlocked} onOpen={openTreeEntry} />
               <nav className="m5-tree-pages" aria-label={t("m5.navigation.pages")}>
                 <button type="button" disabled={!admissionReady || snapshot.treeLoading || snapshot.treePage === 1} onClick={() => void controller.loadTree(snapshot.treeParent)}>{t("m5.navigation.first")}</button>
                 <span>{snapshot.treeLoading ? t("m5.navigation.loading") : t("m5.navigation.page", { page: snapshot.treePage })}</span>
@@ -418,7 +424,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   );
 }
 
-function VirtualFileList({ entries, activePath, disabled, onOpen }: { entries: readonly TreeEntryV1[]; activePath: string | null; disabled: boolean; onOpen: (entry: TreeEntryV1) => void }) {
+const VirtualFileList = memo(function VirtualFileList({ entries, activePath, disabled, onOpen }: { entries: readonly TreeEntryV1[]; activePath: string | null; disabled: boolean; onOpen: (entry: TreeEntryV1) => void }) {
   const [scrollTop, setScrollTop] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const rowHeight = 32;
@@ -447,7 +453,7 @@ function VirtualFileList({ entries, activePath, disabled, onOpen }: { entries: r
     </button>)}
     <div aria-hidden="true" style={{ height: (entries.length - end) * rowHeight }} />
   </div>;
-}
+});
 
 function ProjectGuide({ projectId, activeChat, onResume, hasChat, hasOpenFile, disabled, onGoal, onTeam, onConversation, onChanges }: {
   projectId: string; activeChat: ChatRecordV1 | null; onResume: (chatId: string) => void;
