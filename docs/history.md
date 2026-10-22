@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- 직전eb0375d는 실제 응답 관측 연결로 진척했다. clean eb0375d에서 최근 조회/채팅/관측 변경의 누적 검증을 진행했다. npm test558건 PASS/0 skipped, pnpm build(tsc+기본 Vite) PASS다. 같은 실행의 Electron package는 제한 환경의 fetch failed로 중단돼 package 단계만 권한 확장 재실행했고 macOS arm64 package+smoke PASS(세션28429 exit0)를 확인했다. 최신 release sidecar와 renderer가 기존 out 패키지에 반영됐다.
+- CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4로 cargo test --release -p hello-agent-sidecar --lib storage::tests --locked를 수행해221건 PASS/0 ignored/463 filtered out(세션76237 exit0,318.31초)다. 전체 Rust suite를 재실행한 것은 아니며 이전 전체 증거와 이번 변경 영역 결과를 구분한다.
+- 시작 전 해당 앱/sidecar·Cargo 실행 부재를 확인했고 target1.9G/out309M을 재사용했다. 새 워크트리·ZIP·앱 사본·유료 모델 호출·사용자 프로젝트/인증 변경은 없다. 실제 화면 성능 및 실제 final-event 관측, Codex 작업 재시험 승인, 전체 G6·Windows·출시는 남는다. main/push 없음.
+
+### 2026-10-22 · by GPT-6 Astra
 - 직전59919b9은 대화 페이지 병합 개선으로 진척했다. 이번에는 실제 응답 smoke에 passive final-event 관측기를 연결했다. 실행 전에 구독하고 durable role 행의 chat/run·final 순서 및 두 renderer frame으로 notificationToFrameMs를 수집한다. renderer 행에 기존 식별자만 추가했으며 알림 원문을 화면에 직접 붙이거나 모델/원장 호출을 추가하지 않았다. Karpathy 최소 변경 원칙으로 별도 실행 경로나 제품 진단 API를 만들지 않았다.
 - 관측은 final만/최대256개이며 본문은 보관하지 않는다. 숨김·중복·누락·제거·미완료 frame은 INCOMPLETE, 정상 관측도 OBSERVED/diagnostic/gateEligible=false로 실제 실행 PASS와 분리한다. finally에서 구독/observer/frame을 정리하고 outcome.paint에 기록한다. 절차 문서에 오래된 패키지·상태 이벤트·전달/물리 표시·전체 G6 제외를 명시했다.
 - 합성 관측기/기존 live-smoke 13건 PASS, JS 문법 및 diff check PASS. 실계정·유료 모델·패키지 실행은 없으며 실제 화면 성능 증거는 아직 없다. 다음은 최신 패키지 누적 검증과 승인된 실제 시험 시 이 관측 연결 확인이다. 전체 G6·Windows·출시는 미완료이며 main/push 없음.
