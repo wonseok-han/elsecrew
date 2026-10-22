@@ -60,13 +60,13 @@ ENOSPC로 terminal/복구 기록 자체도 실패할 수 있다. 실패를 성�
 | 경계 | 초기 제안 | 초과 처리 |
 | --- | --- | --- |
 | 단일 전송 frame | 기존1MiB control line 유지 | protocol 실패 |
-| 출력 page | 최대100개, encoded256KiB 이하 | byte 상한에 맞춰 다음 페이지; 한 항목이 안 들어가면 계약 오류 |
+| 출력 page | 최대100개, encoded512KiB 이하 | byte 상한에 맞춰 다음 페이지; 한 항목이 안 들어가면 계약 오류 |
 | 공급자 ingress RAM | run당4MiB/global16MiB | 예산 종료·기존 프로세스 정리, 불확실하면 recoveryRequired |
 | renderer 유지 | 선택 run 최근200개 + 열린 과거 page1개 | 오래된 화면 row만 퇴거, 디스크 기록은 보존 |
 | run 공개 본문 |64MiB | 사용자에게 출력 저장 한도 설명 후 안전 중단 |
 | 전체 출력 저장 물리 예산 |1GiB, 시작 전 최소256MiB 여유 제안 | 새 실행 거절/활성 실행 안전 중단; 자동 기록 삭제 없음 |
 
-page 직렬화는 항목 수만이 아니라 UTF-8/JSON escaping 후 bytes로 제한한다. 현행 단일 공개 항목 상한과256KiB page 간 호환을 L1에서 확인한다. 하나의 public event를 UI가 임의 분할해 event 수를 부풀리지 않는다. 시간 제한도 별도다: 현행 run 총10분 제한을 조용히 없애지 않고, 장시간 실행의 사용자 선택 시간 예산·최대값·취소 응답 시간을 L1에서 동결한다.
+page 직렬화는 항목 수만이 아니라 UTF-8/JSON escaping 후 bytes로 제한한다. 현행 단일 공개 본문은64KiB이며 JSON escaping 시384KiB가 될 수 있어 초기256KiB 제안을512KiB로 조정했다. 전체 transport envelope는 별도로 기존1MiB 경계를 검증해야 한다. 하나의 public event를 UI가 임의 분할해 event 수를 부풀리지 않는다. 시간 제한도 별도다: 현행 run 총10분 제한을 조용히 없애지 않고, 장시간 실행의 사용자 선택 시간 예산·최대값·취소 응답 시간을 L1에서 동결한다.
 
 ## 6. UI와 초보자 경험
 
@@ -113,3 +113,8 @@ L1/L3의 공급자 범위에는 core parser와 Codex/Claude observation adapter�
 4. 보존/사용자 선택 삭제 UI와 물리 디스크 quota 산정: 이번 설계는 자동 삭제를 허용하지 않는다.
 
 이 문서의 채택은 Windows 실행 활성화·실제 계정 시험·출시 승인이 아니다. 시작 메모리400MiB 기준 실패와 다른 M5 잔여도 그대로 남는다.
+
+## 11. 구현 체크포인트
+
+- L1 일부: `crates/hello-agent-protocol/src/agent_adapter_v1/output_pages.rs`에 독립 출력 형식 버전1, 요청 결속·연속 순서·페이지100개/512KiB 검증 초안을 추가했다. 기존 public event의 단일 항목 검증을 재사용하며 전체 v1 원장256개 제한은 변경하지 않는다.
+- 아직 capability 광고·wire method 등록·저장 schema 변경·runtime 연결은 없다. 페이지 검사기는 요청 watermark가 실제 commit됐다는 증거가 아니며 저장 계층에서 별도로 검증해야 한다. cross-page event ID 유일성은 영속 원장의 책임이다. TS 대응·golden fixture·head/구독 계약·L1 독립 검토가 남아 있다.

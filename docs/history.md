@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전 dac8afd는 승인 방향·독립 검토가 반영된 설계 진척이다. 같은 clean 통합 checkout에서 메인이 L1 출력 page 계약 구현을 시작했다. Karpathy 최소 변경 원칙으로 기존 단일 public event 검증을 재사용하고, 독립 모듈에 요청/run 결속·연속 durable 순서·100개/512KiB·유효 cursor·zero-progress 거절을 추가했다.
+- 현행 본문64KiB는 JSON escaping으로384KiB가 될 수 있어 page 제안을256→512KiB로 보완했다. runtime capability/IPC/DB·기존256개 제한은 변경하지 않아 현재 실행 동작은 그대로다. 3,000개 페이지 순회·교차run/중복/누락/범위·최대 escaped 항목 회귀를 작성했다. 이는 parser/저장/전송/UI의 실제3,000개 실행 성공이 아니다.
+- 다음은 TS/golden·head/구독 및 저장 스키마 계약을 연결하는 L1 잔여다. 전체 검증은 연결 뒤 모아서 진행하며 모델 호출·사용자 프로젝트·main/push 없음.
+- focused `cargo test -p hello-agent-protocol output_pages --lib` 4PASS. 첫 실행의 fixture 상대경로 컴파일 오류를 바로잡았다. 새 모듈 Rust2021 format과 diff check를 수행했다. 전체 회귀·독립 안전 검토·제품 활성화는 아직 하지 않았다.
+
+### 2026-10-23 · by Codex
 - 사용자가 여러 bounded run으로 부하를 나누는 대신 **장시간 단일 실행 계약부터 재설계**를 선택했다. 직전 선택 대기는 해소됐으며 준비했던 결합 메모리11회 시험은 시작하지 않았다. 기준 HEAD8ddd8ac, m5/coding-agent-ide에서 설계 문서와 색인만 변경했다.
 - `proposals/m5-long-running-agent-streams.md`에 append-only 출력 원장/작은 head, 영속 순서와 페이지 조회, bounded 전달·UI, v1 호환·R3 admission, L1~L5 구현 순서를 제안했다. runtime의 persist_public_event_record 전체 배열 복제와 protocol/전송 제한을 대조했다. 새 상한·schema/API 번호는 미확정이며 현재 제품의256개 제한·시간 제한·종료/복구 계약을 변경하지 않았다.
 - 다음은 독립 설계 검토 후 L1 계약 동결·구현이다. 실제 모델 호출·앱 실행·생성 데이터·main 병합/push 없음. 시작 메모리 기준 실패와 전체G6·실제 공급자·Windows/출시 잔여는 유지한다.

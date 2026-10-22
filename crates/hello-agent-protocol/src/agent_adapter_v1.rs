@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::{self, Display};
 
+pub mod output_pages;
 pub mod phased_claude;
 
 use crate::run_recovery_v1::{
