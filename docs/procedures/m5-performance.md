@@ -16,6 +16,8 @@
 
 `node scripts/m5-packaged-ui-smoke.mjs --memory-file-diff`는 기존 큰 파일/트리와 diff fixture를 같은 임시 프로젝트에 생성한다. 5MiB 파일을 편집기에 연 뒤 입력 없이 깨끗한 모델을 유지하고 10MiB diff를 열어 두 화면의 공존을 확인한다. 기존 250ms RSS 수집과 프로젝트 닫기 후60초 대기·잔류 관측을 재사용한다. 원본 불변·정상 종료 검사와400/800/120MiB 기준을 유지한다. 네 채팅 스트림까지 동시 부하한 시험이나10회 반복/전체G6 증거는 아니며 `diagnostic:true`, `gateEligible:false`다. 종료 확인 후 이번 생성 프로젝트/프로필만 정리하고 결과 JSON은 보존한다.
 
+반복하려면 `node scripts/m5-packaged-performance.mjs --memory-file-diff`를 사용한다. 준비1회와 본10회를 순차 실행하고 각 회차의 파일/diff 크기·공존 관측·원본 불변·60초 대기 및 원시 RSS로 재계산한 요약을 확인한다. 기존 종료·관측PID 부재 검사 뒤 해당 회차의 생성 데이터만 정리한다. 본10회의 메모리는 p95가 아닌 최대값을 집계하며 실패와 부분 진단 상태를 유지한다. 전체 실행에는 최소11분의 잔류 대기와 프로젝트 생성 시간이 필요하므로 반복 검증 파동에서 실행한다. 이 명령의 구현과 실제11회 수집 완료는 별개다.
+
 `node --experimental-strip-types scripts/m5-packaged-ui-smoke.mjs --no-cdp`는 같은 패키지를 새 임시 프로필로 열되 remote-debugging 인자를 넣지 않는다. renderer가 기존 두 frame 준비 검사 뒤 출력한 고정 표식을 main이 허용된 main frame에서만 한 번 전달한다. 수집기는 stdout에서 표식을 최대30초 기다리고 수신 시각을 `startScreenReadyReceivedAtMs`로 기록한다. 수신 후2초 뒤 OS 프로세스 RSS를250ms 간격으로40회 수집하고 `MANUAL_QUIT_REQUIRED`를 출력한다. 이때60초 안에 해당 시험 앱 메뉴에서 정상 종료해야 한다. 종료 코드0과 새 DB의 단일 sidecar clean marker를 확인하며, 불확실하면 강제 종료나 자동 삭제하지 않는다.
 
 `uninstrumentedRssBytes`는 시작 화면 준비 표식 이후의 진단 RSS 최대값이다. 표식 수신 시각은 renderer-local mark 시각과 다르며 이후 지속 가시성·실제 paint 완료를 증명하지 않는다. 최초 마이그레이션·OS 캐시 영향도 남는다. 400MiB 초과는 FAIL로 보존하지만 기준 이내여도 `NOT_READY`, `gateEligible=false`로 전체 G6 합격에 사용하지 않는다. 과거12초 고정 대기 결과와 측정 조건이 다르다. `--deferred-cdp`는 서버는 켜고 클라이언트 연결만 늦추는 별도 대조다.

@@ -9,10 +9,11 @@ import { packagedInputMaximum } from './m5-packaged-input-probe.mjs';
 import { packagedLongTaskMaximum } from './m5-packaged-long-task-probe.mjs';
 import { mainTaskMaximum } from './m5-main-task-trace.mjs';
 import { assertMeasurementSourceUnchanged } from './m5-measurement-source.mjs';
+import { packagedMemoryObservation } from './m5-packaged-memory-observation.mjs';
 
 const mode = process.argv[2];
-assert.ok(process.argv.length === 3 && ['--diff', '--tree-file', '--memory-diff'].includes(mode));
-const memoryMode = mode === '--memory-diff';
+assert.ok(process.argv.length === 3 && ['--diff', '--tree-file', '--memory-diff', '--memory-file-diff'].includes(mode));
+const memoryMode = mode === '--memory-diff' || mode === '--memory-file-diff';
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const output = fs.mkdtempSync(path.join(os.tmpdir(), 'hello-agent-packaged-performance-'));
 const git = (...args) => execFileSync('/usr/bin/git', args, {cwd:repo, encoding:'utf8'}).trim();
@@ -23,7 +24,7 @@ const persist = () => fs.writeFileSync(path.join(output, 'measurement.json'), JS
 persist(); console.log(JSON.stringify({stage:'COLLECTION_STARTED', output}));
 
 async function trial(index) {
-  const child = spawn(process.execPath, ['--experimental-strip-types', 'scripts/m5-packaged-ui-smoke.mjs', memoryMode ? '--memory-diff' : mode === '--diff' ? '--large-diff' : '--large-project'], {cwd:repo, stdio:['ignore','pipe','pipe']});
+  const child = spawn(process.execPath, ['--experimental-strip-types', 'scripts/m5-packaged-ui-smoke.mjs', memoryMode ? mode : mode === '--diff' ? '--large-diff' : '--large-project'], {cwd:repo, stdio:['ignore','pipe','pipe']});
   const log = fs.createWriteStream(path.join(output, `trial-${index}.log`));
   let pending = '', root;
   child.stdout.setEncoding('utf8');
@@ -64,14 +65,7 @@ async function trial(index) {
   assert.ok(metric?.values, 'Incomplete measurement; fixture retained');
   sample.values = {...metric.values};
   if (memoryMode) {
-    const lifecycle = result.memoryLifecycle;
-    assert.ok(lifecycle && !lifecycle.error && lifecycle.samples?.length, 'Incomplete memory lifecycle; fixture retained');
-    assert.ok(lifecycle.retainedStartedAtMs - lifecycle.closedAtMs >= 60000, 'Retention wait incomplete');
-    const { summarizeMemory } = await import('./m5-process-memory.cjs');
-    const observed = summarizeMemory(lifecycle.samples);
-    assert.deepEqual(lifecycle.maxima, observed.maxima);
-    assert.deepEqual(lifecycle.failedMetrics, observed.failedMetrics);
-    sample.values = observed.maxima;
+    sample.values = packagedMemoryObservation(result, mode === '--memory-file-diff');
   }
   if (mode === '--tree-file') sample.values.inputPaintMs = packagedInputMaximum(result.largeProjectInput);
   assert.ok(!result.rendererLongTaskError, 'Long-task observation failed; fixture retained');

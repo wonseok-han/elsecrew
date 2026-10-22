@@ -1,5 +1,15 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전 원인 검토는 제품 진척 없는 분석으로 분류하고 bd21cec에서 결합 메모리 시나리오를 기존 반복 수집기에 연결했다. --memory-file-diff가 준비1+본10회로 전달되며 기존 순차 실행·소스/패키지 동일성·정상 종료·관측PID 부재 후 회차별 임시 데이터 정리를 재사용한다. Karpathy 최소 변경으로 제품/안전 경계와400/800/120MiB 기준은 건드리지 않았다.
+- 재사용 가능한 원시 관측 검증은 공존 표식·정확 fixture 크기/원본 불변·유한60초 대기·원시 RSS 요약 일치를 요구한다. focused4PASS(기준 초과 보존, 공존/fixture/대기/표본/요약 변조 거절, 기존 diff-only 호환), 문법/diff 검사 PASS. 기존 실제 gy5icd JSON을 새 검증기로 읽어 idle457719808/peak724025344/retained0을 재계산 확인했다. 이는 과거 관측 검증이지 최신 commit의 새 실측이 아니다.
+- 최소11분 대기가 필요한 실제11회 실행은 아직 하지 않았다. 같은 idle 실패를 반복하기 전에 이 반복 수집 연결을 구현 체크포인트로 남긴다. 네 stream 결합·전체G6와 시작 메모리 원인·실제 공급자 승인·Windows/출시 잔여는 유지한다. 새 앱/모델 실행·생성 데이터·main/push 없음.
+
+### 2026-10-23 · by Codex
+- bd21cec/clean에서 시작 메모리 원인 조사에 대한 독립 읽기 전용 config_layers_review 1명을 호출했다. 기존 qSKTqA/gy5icd/lE2OWw와 빈창·폰트/preload 비교, Monaco lazy·main/preload/renderer·필수 sidecar 경로를 대조했다. 시작 시 제거하여31~37MiB 절감을 기대할 근거가 있는 구체 자원은 찾지 못했다. 검토자는 시험/앱/모델 실행·파일 변경을 하지 않았다.
+- 메인도 생성 index.html이 entry JS/CSS만 로드하고 Monaco는 동적 import임을 확인했다. qSKTqA의 renderer used heap 약3.47MB만으로 프로세스RSS나 누수 원인을 확정하지 않는다. 빈 resource timing 배열을 미로딩 증거로 쓰지 않는다. 동일 언어/빈창 실험은 반복하지 않고 GPU·sandbox·sidecar admission·400MiB 기준은 유지한다.
+- 시작 메모리 개선은 아직 원인 미확정이다. 독립 검토 결과는 성능 합격이나 전체 완료가 아니며, 다음은 이미 구현한 결합 메모리 시나리오의 반복 수집 연결 등 G6 누락 부분이다. 실제 Codex 쓰기·메시지 검사 분리 승인과 Windows/출시 조건은 별도로 남는다. 이번은 분석만 수행했고 새 제품 수정·빌드·앱 실행·main/push 없음.
+
+### 2026-10-23 · by Codex
 - G6 수집 누락 중 큰 파일 모델과 diff 동시 유지 메모리를 보완했다. Karpathy 최소 변경으로 기존 packaged 관측기에 --memory-file-diff를 추가했다. 기존 생성기·파일/트리 probe·diff probe·250ms RSS·닫기60초/잔류3초·정상 종료를 재사용하며 편집 입력 없이 clean 모델을 유지해 프로젝트 닫기를 시험한다. 제품 코드·합격선·안전 계약은 변경하지 않았다. 네 stream 동시 부하/10회 반복/전체G6는 여전히 별도다.
 - 문법/diff check PASS. 실제 세션57975의 gy5icd는 파일 모델+diff 공존 true, 원본 불변 true, 가시성 유지,419표본,60,001.5ms 대기와 seed/앱 exit0·shutdown confirmed를 확인했다. idle457719808B/peak724025344B/retained delta0B로 idle만 초과하여 exit1/FAIL이다. 파일/트리/diff 시간은 이번 단일 관측 기준 이내이며 누수 없음이나 제품 완료로 확대하지 않는다.
 - `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-gy5icd/result.json`과 캡처는 보존했다. 모든 관측PID 부재 확인 뒤 자체 project/other-project/userdata 약105MiB를 영구 정리했다. 다음 원인 분석은 시작 메모리에 집중하며 스트림/G6 전체·별도 승인·Windows/출시 잔여는 유지한다. main/push·로그인·모델 실행·사용자 프로젝트 변경 없음.
