@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- f168262/clean에서 입력 경로를 조사해 Monaco 텍스트 동기화 effect가 매 초안 변경마다 updateOptions(readOnly)를 반복하는 것을 확인했다. 텍스트 동기화와 saveState/readOnly 옵션 effect를 분리했다. 최신 초안 전달·저장/복구 잠금·lazy 생성 시 최신 권한 확인은 유지하며 Karpathy 최소 변경으로 controller/저장 계약은 건드리지 않았다.
+- 실제 component effect 회귀7PASS: 연속 dirty 텍스트 갱신이 editor 옵션을 재설정하지 않고, admission/saving 전환·지연 로딩·오류 후 초안 보존/재시도는 유지한다. diff check PASS. 입력50ms 기준 통과나 실측 개선을 주장하지 않는다. 전체 빌드/패키지/성능을 이 작은 변경마다 반복하지 않으며 out은 직전 f168262 소스 상태다.
+- 다음은 화면 잠금 해제 후 무CDP 준비 신호·메모리 확인, 입력 지연 및 전체 시안/G6의 묶음 검증이다. Codex 실제 시험 승인·Windows 환경·출시 결정은 별도 남는다. 인증·사용자 프로젝트·모델 실행·main/push 변경 없음.
+
+### 2026-10-22 · by GPT-6 Astra
 - 직전 턴은 중복 승인 재확인으로 개발 진척이 없었다. 0976d05 기준 무CDP 메모리 수집의12초 고정 대기를 기존 visible/enabled 시작 버튼·두 frame 준비 표식 이후2초로 바꿨다. renderer는 개인정보 없는 고정 문자열만 출력하고 main은 허용된 main frame의 정확 문자열을 한 번만 stdout에 전달한다. IPC/실행/종료 권한과400MiB 기준은 그대로다. Karpathy 최소 변경 원칙을 적용했다.
 - 준비 수신 시각을 기록하고30초 내 미수신은 실패로 남긴다. 지속 가시성/실제 paint 완료나 G6 전체 증거는 아니므로 NOT_READY/gateEligible=false를 유지하며 과거 고정 대기 결과와 직접 비교하지 않는다. 회귀5PASS(숨김/비활성/실패/중복·다른 frame·origin·임의 로그 제외), tsc 및 문법·diff 검사 PASS. Vite main 단독 호출은 Forge 전용 설정 누락으로 실패했고 정식 경로로 교정했다. 제한 환경 패키지는 fetch 실패했지만 네트워크 허용 재실행 세션1205는 darwin-arm64 package smoke PASS, release 캐시0.26초 재사용했다.
 - 현재 out 패키지에 이 변경이 반영됐다. CUA 사전 확인에서 Mac locked가 확인되어 실제 no-CDP GUI 시험은 시작하지 않았다. 다음은 잠금 해제 후 이 패키지의 준비 신호/메모리 측정과 남은 입력 지연·G6/시안 마감이다. Codex 실제 작업 승인·Windows/출시 검증도 남는다. 사용자 프로젝트/인증/모델 실행/main 병합/push 없음.

@@ -834,8 +834,11 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
       currentModel.setValue(tab.text);
       modelText.current = tab.text;
     }
+  }, [tab.text]);
+
+  useEffect(() => {
     editor.current?.updateOptions({ readOnly: readOnly || tab.saveState === "saving" });
-  }, [tab.text, tab.saveState, readOnly]);
+  }, [tab.saveState, readOnly]);
 
   return <>{failed && <section className="m5-error" role="alert"><strong>{t("m5.feedback.failed")}</strong><p>{t("m5.feedback.help")}</p><textarea aria-label={t("m5.editor.preserved")} readOnly value={tab.text} style={{ width: "100%", minHeight: 240, boxSizing: "border-box" }} /><button type="button" onClick={() => setAttempt(value => value + 1)}>{t("m5.feedback.retry")}</button></section>}<div className="m5-monaco" ref={host} style={failed ? { display: "none" } : undefined} /></>;
 }

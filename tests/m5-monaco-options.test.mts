@@ -59,13 +59,14 @@ for (const delayedGate of [null, "admission", "saving"]) test(`Monaco keeps curr
   let lang: "ko" | "en" = "ko";
   let editorCreates = 0;
   let actionDisposals = 0;
+  let optionUpdates = 0;
   let accessibleName = "";
   const saves: string[] = [];
   let saveAction: { run(): void; keybindings: number[]; label: string } | undefined;
   let resolveLoader!: (value: unknown) => void;
   const loader = new Promise(resolve => { resolveLoader = resolve; });
   const model = { getValue: () => { valueReads++; return text; }, setValue: (value: string) => { text = value; changeContent?.(); }, onDidChangeContent: (listener: () => void) => { changeContent = listener; return { dispose() { changeContent = undefined; } }; }, dispose() {} };
-  const editor = { updateOptions: (options: { readOnly?: boolean; ariaLabel?: string }) => { if (options.readOnly !== undefined) readOnly = options.readOnly; if (options.ariaLabel !== undefined) accessibleName = options.ariaLabel; }, addAction: (action: typeof saveAction) => { saveAction = action; return { dispose() { actionDisposals++; } }; }, dispose() {} };
+  const editor = { updateOptions: (options: { readOnly?: boolean; ariaLabel?: string }) => { optionUpdates++; if (options.readOnly !== undefined) readOnly = options.readOnly; if (options.ariaLabel !== undefined) accessibleName = options.ariaLabel; }, addAction: (action: typeof saveAction) => { saveAction = action; return { dispose() { actionDisposals++; } }; }, dispose() {} };
   const context: Record<string, any> = {
     useState: (initial: unknown) => [initial, () => {}],
     useI18n: () => ({ t: (key: keyof typeof ko, params: { path?: string } = {}) => (lang === "ko" ? ko : en)[key].replace("{path}", params.path ?? "") }),
@@ -117,6 +118,11 @@ for (const delayedGate of [null, "admission", "saving"]) test(`Monaco keeps curr
   assert.equal(readOnly, true, "finishing a save must not clear admission lock");
   await render(false, "clean");
   assert.equal(readOnly, false);
+  await render(false, "dirty", "latest editable draft");
+  const beforeDraftUpdate = optionUpdates;
+  await render(false, "dirty", "next editable draft");
+  assert.equal(text, "next editable draft");
+  assert.equal(optionUpdates, beforeDraftUpdate, "text-only changes must not reconfigure the editor");
   await render(false, "dirty", "latest editable draft");
   lang = "en";
   await render(false, "dirty", "latest editable draft");
