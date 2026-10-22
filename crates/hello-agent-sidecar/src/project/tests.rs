@@ -2,6 +2,54 @@ use super::*;
 use hello_agent_protocol::project_v1::validate_project_payload_v1;
 use tempfile::TempDir;
 
+#[cfg(unix)]
+#[test]
+#[ignore = "opt-in generated 10000-file snapshot phase diagnostic"]
+fn large_snapshot_phase_diagnostic() {
+    let fixture = Fixture::open();
+    // Application baselines deliberately reject submodules; remove only the
+    // synthetic fixture gitlink before constructing this independent workload.
+    git_raw(&fixture.source, ["rm", "--cached", "vendor/sub"]);
+    for directory in 0..1000 {
+        let folder = fixture.source.join(format!("tree/folder-{directory:04}"));
+        fs::create_dir_all(&folder).unwrap();
+        for file in 0..10 {
+            fs::write(folder.join(format!("file-{file}.txt")), b"fixture\n").unwrap();
+        }
+    }
+    fs::write(fixture.source.join("large.txt"), vec![b'x'; 5 * 1024 * 1024]).unwrap();
+    git_raw(&fixture.source, ["add", "."]);
+    git_raw(&fixture.source, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "large diagnostic"]);
+    let begin = std::time::Instant::now();
+    let source = fixture.manager.open_source_repository(&fixture.source).unwrap();
+    let opened = begin.elapsed();
+    let first = application::git_baseline::raw_baseline::capture_clean_baseline(&fixture.manager, &source).unwrap();
+    let captured = begin.elapsed();
+    let staging_root = TempDir::new().unwrap();
+    let staging = Dir::open_ambient_dir(staging_root.path(), ambient_authority()).unwrap();
+    fixture.manager.export_bundle(&source.git_dir, &staging).unwrap();
+    let exported = begin.elapsed();
+    let second = application::git_baseline::raw_baseline::capture_clean_baseline(&fixture.manager, &source).unwrap();
+    assert_eq!(first, second);
+    let recaptured = begin.elapsed();
+    fixture.manager.initialize_snapshot_repository(&staging, &source).unwrap();
+    let initialized = begin.elapsed();
+    let stats = fixture.manager.materialize_snapshot(&staging, &source).unwrap();
+    let materialized = begin.elapsed();
+    assert!(stats.entry_count >= 10001);
+    assert_eq!(fs::read(staging_root.path().join("tree/folder-0999/file-9.txt")).unwrap(), b"fixture\n");
+    assert!(git_text(&fixture.source, ["status", "--porcelain"]).is_empty());
+    println!("{}", json!({"diagnostic":true,"gateEligible":false,
+        "kind":"snapshot-phase-cost","addedFiles":10001,"addedDirectories":1001,
+        "openMs":opened.as_secs_f64()*1000.0,
+        "baselineMs":(captured-opened).as_secs_f64()*1000.0,
+        "exportMs":(exported-captured).as_secs_f64()*1000.0,
+        "baselineRecheckMs":(recaptured-exported).as_secs_f64()*1000.0,
+        "initializeMs":(initialized-recaptured).as_secs_f64()*1000.0,
+        "materializeAndSyncMs":(materialized-initialized).as_secs_f64()*1000.0,
+        "scope":"Private phase diagnostic; excludes receipt publication, UI and full create safety sequence"}));
+}
+
 #[test]
 fn materialized_snapshot_refreshes_index_stat_without_hiding_edits() {
     let mut fixture = Fixture::open();

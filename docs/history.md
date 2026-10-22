@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- 직전309f51d의 대형 snapshot33.8초 관측에서 이어 원인 분리용 opt-in Rust 진단을 추가했다. 생성 fixture에1만 파일/1천 하위 폴더와5MiB 파일을 더해 private source open→baseline→export→baseline 재검증→init→materialize/sync를 개별 측정한다. 전체 create safety sequence/receipt 게시/UI를 대신하지 않으며 제품 동작·안전 검사·동기화는 변경하지 않았다. Karpathy 원칙에 따라 근거 없는 검사 제거보다 단계 비용을 먼저 확인했다.
+- release large_snapshot_phase_diagnostic1건 PASS(세션20181 exit0,37.02초): open40.6ms, baseline1073.7ms, export36.3ms, 재검증1064.2ms, init76.5ms, materialize+sync32539.8ms다. 전체33.8초와 fixture/시점은 다르지만 지배 비용은 materialize+sync로 좁혀졌다. sync 자체/파일 capability traversal/스레드 생성의 세부 비중은 아직 미분리다. 기본 테스트는 ignored, 임시 데이터는 TempDir로 정리했다.
+- 다음은 이 구간의 안전 계약을 유지하는 개선이며 원본 baseline 검사를 줄일 근거는 없다. 전체 G6/메모리/실제 Codex 승인·Windows·출시는 계속 미완료다. 절차 문서에 재현 명령·한계를 추가했고 diff check PASS, 사용자 프로젝트·인증·모델 호출/main/push 변경 없음.
+
+### 2026-10-22 · by GPT-6 Astra
 - 직전461cb98의 무계측 관측 뒤 최신 패키지 --large-project를 실행했다(세션42931 exit1). b66XZ8/result.json의1만 파일/1천 폴더·5MiB/10만 줄 fixture에서 treeRoot256.3ms, expand149.8ms, DOM362, fileEditable415.2ms로 해당 단회 기준 이내다. 같은 실행 입력 warmup1+10회 p95는49.6ms/50ms 이내이며 visible 유지/hiddenTransitions0이다. 전체10회 시작 반복·물리 키보드·전체 G6 증거는 아니다.
 - 작업 복사본 준비 관측33764.4ms는 사용자 대기 병목 후보로 남겼다. 전체 진단은 idle459358208B로400MiB 초과/FAIL이며 종료는exit0/confirmed다. 관측 PID 부재 후 이번 project·other-project·userdata만 영구 삭제하고 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-b66XZ8/의 JSON·스크린샷은 보존했다. 다음은 복사본 준비 비용의 원인 조사/안전 보존 개선과 G6 수집 완성이다. 모델·사용자 인증/프로젝트·main/push 변경 없음.
 

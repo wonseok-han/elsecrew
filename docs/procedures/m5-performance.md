@@ -1,5 +1,11 @@
 # M5 성능 측정
 
+## 작업 복사본 준비 비용 분리
+
+`CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 cargo test --release -p hello-agent-sidecar --lib large_snapshot_phase_diagnostic -- --ignored --nocapture`는 기본 임시 fixture에1만 파일·1천 폴더 및5MiB 파일을 추가하고 source open, baseline capture, bundle export, baseline 재검증, snapshot 초기화, materialize+sync의 시간을 각각 출력한다. 추가 tree 루트까지 새 디렉터리는1001개다. 성공 시 TempDir가 생성 데이터를 정리한다.
+
+이는 private 단계 비용 비교용이며 전체 create 경로의 원장/manifest/receipt 게시·안전 검사 순서나 UI 준비 시간의 대체물이 아니다. `diagnostic=true`, `gateEligible=false`를 유지한다. 기본 테스트에서 ignored이며 실제 계정·사용자 프로젝트·모델 호출은 사용하지 않는다. 단계별 지연을 확인하기 전 안전 검사 생략이나 동기화 완화를 근거 없이 적용하지 않는다.
+
 ## 실제 최종 응답의 화면 관측
 
 `m5-live-provider-smoke.cjs`는 승인된 실제 실행 직전에 수동 관측기 `m5-agent-paint-probe.cjs`를 연결한다. 관측기는 모델/원장 API를 호출하지 않고 `onAgentPublicEvent`의 `final`만 수신한다. 동일 chat/run의 durable role 행 순서와 두 renderer frame을 대조하며 `notificationToFrameMs`를 기록한다. 본문·인증정보는 수집하지 않는다. 실행 전부터 구독해야 하며, 행의 chat/run 식별 속성이 없는 이전 패키지는 완전 관측으로 인정하지 않는다.
