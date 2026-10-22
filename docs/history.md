@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- 직전e695365의 누적 회귀/패키지 검증 뒤 최신 패키지로 --project 실제 renderer/native sidecar 시험을 완료했다(세션61740 exit1). R8Xvps/result.json·restart.json에서 편집/저장 diff/원본 불변, 재시작 후 편집 내용, 적용 전 취소·명시 동의·정확 적용·별도 동의 원복, 두 프로젝트 파일/채팅 분리와 원래 채팅 복귀를 확인했다. 양 시나리오 visible→visible/hiddenTransitions0이며 두 앱 모두 exit0/clean shutdown 확인이다.
+- 전체 진단은 FAIL이다. idle RSS는460423168/460341248B(약439MiB)로400MiB를 초과했다. 프로젝트 구간 main 최대15.395/11.329ms, renderer 최대53/0ms는200ms 이내다. CDP 계측 포함 단회 작은 프로젝트 결과로 전체 성능/실제 모델 합격을 주장하지 않는다. 증거는 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-R8Xvps/에 보존한다.
+- 정상 종료와 seed/앱/관측 자손 PID 부재를 확인한 뒤 이번 생성 project·other-project·userdata만 영구 삭제해 공간을 회수했다. 시험 데이터는 앱 복구 대상이 아니며 JSON·스크린샷은 남겼다. 사용자 인증/프로젝트·모델 호출은 없었다. 다음은 메모리 기준 실패 해결과 전체 G6 수집 완성, 승인 필요한 Codex 재시험·Windows·출시 검증이며 main/push 없음.
+
+### 2026-10-22 · by GPT-6 Astra
 - 직전eb0375d는 실제 응답 관측 연결로 진척했다. clean eb0375d에서 최근 조회/채팅/관측 변경의 누적 검증을 진행했다. npm test558건 PASS/0 skipped, pnpm build(tsc+기본 Vite) PASS다. 같은 실행의 Electron package는 제한 환경의 fetch failed로 중단돼 package 단계만 권한 확장 재실행했고 macOS arm64 package+smoke PASS(세션28429 exit0)를 확인했다. 최신 release sidecar와 renderer가 기존 out 패키지에 반영됐다.
 - CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4로 cargo test --release -p hello-agent-sidecar --lib storage::tests --locked를 수행해221건 PASS/0 ignored/463 filtered out(세션76237 exit0,318.31초)다. 전체 Rust suite를 재실행한 것은 아니며 이전 전체 증거와 이번 변경 영역 결과를 구분한다.
 - 시작 전 해당 앱/sidecar·Cargo 실행 부재를 확인했고 target1.9G/out309M을 재사용했다. 새 워크트리·ZIP·앱 사본·유료 모델 호출·사용자 프로젝트/인증 변경은 없다. 실제 화면 성능 및 실제 final-event 관측, Codex 작업 재시험 승인, 전체 G6·Windows·출시는 남는다. main/push 없음.
