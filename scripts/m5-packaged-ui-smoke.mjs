@@ -93,7 +93,15 @@ const closed = new Promise(resolve => {
 let stderr = '';
 child.stderr.setEncoding('utf8');
 child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-65536); });
-child.stdout.resume();
+let stdout = '';
+child.stdout.setEncoding('utf8');
+child.stdout.on('data', chunk => {
+  stdout = (stdout + chunk).slice(-65536);
+  const completedLines = stdout.slice(0, stdout.lastIndexOf('\n') + 1);
+  if (report.startScreenReadyReceivedAtMs === undefined && completedLines.split(/\r?\n/).includes('m5:start-screen-ready')) {
+    report.startScreenReadyReceivedAtMs = performance.now() - started;
+  }
+});
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(read, milliseconds = 15000) {
   const deadline = performance.now() + milliseconds;
@@ -132,11 +140,12 @@ async function evaluate(expression) {
 try {
   if (noCdp) {
     report.limitations = ['No debugging server or client. Fresh temporary profile; first launch includes migration.',
-      'Samples start after a fixed 12-second settling interval, not a measured UI-ready signal.',
-      'UI readiness and visibility require separate observation; this is not G6 evidence.',
+      'Samples start two seconds after a fixed renderer readiness marker is received through main stdout, without CDP.',
+      'Marker verifies visible enabled start-screen button across two frames only; continued visibility is not measured. This is not G6 evidence.',
       'Observed descendants only; ps identity resolution is seconds.'];
     report.debuggingEnabled = false;
-    await sleep(12000);
+    await until(() => report.startScreenReadyReceivedAtMs !== undefined, 30000);
+    await sleep(2000);
     for (let index = 0; index < 40; index++) {
       assert.ok(!termination, 'App exited before uninstrumented collection completed');
       report.memory.push({elapsedMs:performance.now() - started, ...readMemory()});

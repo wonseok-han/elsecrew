@@ -446,6 +446,15 @@ async function createMainWindow() {
 
   mainWindow = window;
   secureWindow(window);
+  let startupReported = false;
+  window.webContents.on("console-message", (event) => {
+    // Forward only the fixed readiness marker, never arbitrary renderer logs.
+    // This observation grants no IPC, execution or shutdown authority.
+    if (startupReported || event.message !== "m5:start-screen-ready" ||
+      event.frame !== window.webContents.mainFrame || !isAllowedNavigation(event.frame.url)) return;
+    startupReported = true;
+    console.info("m5:start-screen-ready");
+  });
   window.on("closed", () => {
     if (mainWindow !== window) return;
     mainWindow = undefined;

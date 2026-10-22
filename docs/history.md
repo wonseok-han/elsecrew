@@ -1,5 +1,14 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- 직전 턴은 중복 승인 재확인으로 개발 진척이 없었다. 0976d05 기준 무CDP 메모리 수집의12초 고정 대기를 기존 visible/enabled 시작 버튼·두 frame 준비 표식 이후2초로 바꿨다. renderer는 개인정보 없는 고정 문자열만 출력하고 main은 허용된 main frame의 정확 문자열을 한 번만 stdout에 전달한다. IPC/실행/종료 권한과400MiB 기준은 그대로다. Karpathy 최소 변경 원칙을 적용했다.
+- 준비 수신 시각을 기록하고30초 내 미수신은 실패로 남긴다. 지속 가시성/실제 paint 완료나 G6 전체 증거는 아니므로 NOT_READY/gateEligible=false를 유지하며 과거 고정 대기 결과와 직접 비교하지 않는다. 회귀5PASS(숨김/비활성/실패/중복·다른 frame·origin·임의 로그 제외), tsc 및 문법·diff 검사 PASS. Vite main 단독 호출은 Forge 전용 설정 누락으로 실패했고 정식 경로로 교정했다. 제한 환경 패키지는 fetch 실패했지만 네트워크 허용 재실행 세션1205는 darwin-arm64 package smoke PASS, release 캐시0.26초 재사용했다.
+- 현재 out 패키지에 이 변경이 반영됐다. CUA 사전 확인에서 Mac locked가 확인되어 실제 no-CDP GUI 시험은 시작하지 않았다. 다음은 잠금 해제 후 이 패키지의 준비 신호/메모리 측정과 남은 입력 지연·G6/시안 마감이다. Codex 실제 작업 승인·Windows/출시 검증도 남는다. 사용자 프로젝트/인증/모델 실행/main 병합/push 없음.
+
+### 2026-10-22 · by GPT-6 Astra
+- 재전달된 과거 Codex 잠금 1건 복구 승인을 0976d05/clean에서 재확인했다. 45c28d6의 단건 복구 기록과 현재 codex-login.pending 부재, approved-legacy-codex-repair-20261022.json 존재를 대조해 이미 처리된 승인임을 확인했다. 오래된 메모리의 미해결 표시는 현재 사실로 사용하지 않는다.
+- 중복 제거·프로세스 종료·모델 실행·인증/프로젝트 변경은 하지 않았다. 이번에는 읽기 전용 확인과 작업 기록만 남긴다. 실제 Codex 도구 작업 성공 및 G6/Windows/출시 잔여는 이 승인으로 완료되지 않는다.
+
+### 2026-10-22 · by GPT-6 Astra
 - c29fa8d/clean에서 중앙diff·안내 접기 변경 파동의 누적 프런트 검사 npm test560PASS/0skip(세션66838 exit0), darwin-arm64 m5:package:smoke PASS를 확인했다. 현재 out 패키지에 두 UI 변경이 반영되어 이전 'dfaf6e3 패키지' 상태는 해소됐다. Rust는 내용 변경이 없어 기존 회귀를 재실행하지 않고 release 캐시 빌드0.25초를 재사용했다.
 - 실제 패키지 --project 첫 실행/정상 재시작에서 savedDiffVisible·원본 불변·persistedEditorText, 검토취소 원본보존/별도 동의 반영·정확 bytes/별도 복원 동의·정확 bytes, 두 프로젝트 파일/채팅 분리·원래 채팅 재열기를 확인했다. YcnTnA/result.json·restart.json의 기능 assertion은 완료됐으나 idle458719232/459456512B로400MiB 초과여서 전체 세션20426은exit1/FAIL을 유지한다. 두 앱은exit0/shutdown confirmed다.
 - 관측 PID 부재 뒤 이번 project/other-project/userdata만 영구 정리했고 `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-YcnTnA/`의 JSON·스크린샷은 보존했다. 기능 UI 파동의 패키지 회귀는 이 범위에서 닫으며 같은 흐름을 새 변경 없이 반복하지 않는다. 전체 시안·입력/메모리/G6 수집·Codex 실제 승인·Windows/출시는 남고 인증/사용자 프로젝트/모델 호출/main/push는 변경하지 않았다.

@@ -27,7 +27,11 @@ export function markStartScreenReady(): () => void {
         frame = undefined;
         if (stopped || !ready()) return;
         // Telemetry must never block the UI or grant readiness/permissions.
-        try { performance.mark(name); } catch { /* Optional measurement only. */ } finally { stop(); }
+        try {
+          performance.mark(name);
+          // Static diagnostic only: no project, account or performance payload.
+          console.info("m5:start-screen-ready");
+        } catch { /* Optional measurement only. */ } finally { stop(); }
       });
     });
   };

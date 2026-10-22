@@ -14,9 +14,9 @@
 
 ## 진단 서버 없는 RSS 비교
 
-`node --experimental-strip-types scripts/m5-packaged-ui-smoke.mjs --no-cdp`는 같은 패키지를 새 임시 프로필로 열되 remote-debugging 인자를 넣지 않는다. 12초 고정 대기 후 OS 프로세스 RSS를 250ms 간격으로40회 수집하고 `MANUAL_QUIT_REQUIRED`를 출력한다. 이때60초 안에 해당 시험 앱 메뉴에서 정상 종료해야 한다. 종료 코드0과 새 DB의 단일 sidecar clean marker를 확인하며, 불확실하면 강제 종료나 자동 삭제하지 않는다.
+`node --experimental-strip-types scripts/m5-packaged-ui-smoke.mjs --no-cdp`는 같은 패키지를 새 임시 프로필로 열되 remote-debugging 인자를 넣지 않는다. renderer가 기존 두 frame 준비 검사 뒤 출력한 고정 표식을 main이 허용된 main frame에서만 한 번 전달한다. 수집기는 stdout에서 표식을 최대30초 기다리고 수신 시각을 `startScreenReadyReceivedAtMs`로 기록한다. 수신 후2초 뒤 OS 프로세스 RSS를250ms 간격으로40회 수집하고 `MANUAL_QUIT_REQUIRED`를 출력한다. 이때60초 안에 해당 시험 앱 메뉴에서 정상 종료해야 한다. 종료 코드0과 새 DB의 단일 sidecar clean marker를 확인하며, 불확실하면 강제 종료나 자동 삭제하지 않는다.
 
-`uninstrumentedRssBytes`는 UI-ready 시점을 측정한 idle 값이 아니다. 화면 준비/가시성은 별도로 관측하며 최초 마이그레이션·OS 캐시 영향도 남는다. 400MiB 초과는 FAIL로 보존하지만 기준 이내여도 `NOT_READY`, `gateEligible=false`로 전체 G6 합격에 사용하지 않는다. `--deferred-cdp`는 서버는 켜고 클라이언트 연결만 늦추는 별도 대조다.
+`uninstrumentedRssBytes`는 시작 화면 준비 표식 이후의 진단 RSS 최대값이다. 표식 수신 시각은 renderer-local mark 시각과 다르며 이후 지속 가시성·실제 paint 완료를 증명하지 않는다. 최초 마이그레이션·OS 캐시 영향도 남는다. 400MiB 초과는 FAIL로 보존하지만 기준 이내여도 `NOT_READY`, `gateEligible=false`로 전체 G6 합격에 사용하지 않는다. 과거12초 고정 대기 결과와 측정 조건이 다르다. `--deferred-cdp`는 서버는 켜고 클라이언트 연결만 늦추는 별도 대조다.
 
 반복 packaged 수집기는 각 trial 종료 후와 전체 종료 시 Git HEAD 및 porcelain 상태를 시작값과 비교한다. 달라지거나 조회에 실패하면 FAIL로 보존한다. trial 단계에서 발견하면 해당 fixture 정리 전에 중단한다. dirty 진단의 동일 상태는 허용하지만, 동일 porcelain 문자열 안의 파일 내용 변경까지 증명하는 검사는 아니며 패키지 freshness/전체 소스 동일성 증거로 쓰지 않는다.
 
