@@ -602,7 +602,7 @@ const TeamMessageRow = memo(function TeamMessageRow({ message, roleLabel, messag
   messageTime: Intl.DateTimeFormat;
 }) {
   const { t } = useI18n();
-  return <article className={`m5-message m5-message-${message.kind}`}>
+  return <article className={`m5-message m5-message-${message.kind}`} data-chat-id={message.chatId} data-run-id={message.runId ?? undefined}>
     <div><strong>{message.kind === "user" ? t("m5.chat.me") : message.roleId ? t(`m5.roles.${message.roleId}`) : t("m5.chat.status")}</strong>{message.roleId && <span> · {roleLabel}</span>}<time>{messageTime.format(new Date(message.createdAt))}</time></div>
     <MessageBody text={message.text} />
     {message.runId && <small>{t("m5.chat.runId", { id: message.runId })}</small>}

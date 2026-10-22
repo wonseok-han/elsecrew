@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- 직전59919b9은 대화 페이지 병합 개선으로 진척했다. 이번에는 실제 응답 smoke에 passive final-event 관측기를 연결했다. 실행 전에 구독하고 durable role 행의 chat/run·final 순서 및 두 renderer frame으로 notificationToFrameMs를 수집한다. renderer 행에 기존 식별자만 추가했으며 알림 원문을 화면에 직접 붙이거나 모델/원장 호출을 추가하지 않았다. Karpathy 최소 변경 원칙으로 별도 실행 경로나 제품 진단 API를 만들지 않았다.
+- 관측은 final만/최대256개이며 본문은 보관하지 않는다. 숨김·중복·누락·제거·미완료 frame은 INCOMPLETE, 정상 관측도 OBSERVED/diagnostic/gateEligible=false로 실제 실행 PASS와 분리한다. finally에서 구독/observer/frame을 정리하고 outcome.paint에 기록한다. 절차 문서에 오래된 패키지·상태 이벤트·전달/물리 표시·전체 G6 제외를 명시했다.
+- 합성 관측기/기존 live-smoke 13건 PASS, JS 문법 및 diff check PASS. 실계정·유료 모델·패키지 실행은 없으며 실제 화면 성능 증거는 아직 없다. 다음은 최신 패키지 누적 검증과 승인된 실제 시험 시 이 관측 연결 확인이다. 전체 G6·Windows·출시는 미완료이며 main/push 없음.
+
+### 2026-10-22 · by GPT-6 Astra
 - 직전51fe511은 조회 결과 메모리 보관 개선으로 진척했다. 이번에는 실제 agent.publicEvent→ChatUiController→durable chat.get 경로를 확인했다. 알림 원문을 직접 붙이지 않고 원장을 재조회하는 구조이므로 기존 user-message append 스트림 수집기를 actual event 측정으로 이름만 바꾸지 않았다. 수집 경로 완성은 아직 남는다.
 - 원장 페이지를 합칠 때 단건만 빠른 경로를 쓰고 여러 메시지/빈 tail은 기존 전체 메시지 Map 재생성·정렬을 반복하던 부분을 개선했다. 현재 tail 다음의 연속된 페이지는 한 번 복사해 붙이며, 중복·겹침·비연속 입력은 기존 충돌/연속성 검사로 보낸다. 원문 알림·원장 권위·복구 상태·실행 권한은 변경하지 않았다. Karpathy 지침에 따라 이 병합 범위만 수정했다.
 - 151개 기록의 세 페이지 연속 병합·기존 객체 동일성, 페이지 내부 gap 거절 회귀를 추가했다. node --experimental-strip-types --test tests/m5-g5a-public-event-ui.test.mts 27건 PASS(0.15초), diff check PASS. 실제 패키지 성능 향상/전체 G6 완료 증거는 아니다. 다음은 미완료 actual-event 수집 경로와 누적 패키지 확인이며 유료 Codex 재시험 승인·Windows·출시도 남는다. 새 빌드 캐시/워크트리/모델 실행/main 병합/push 없음.

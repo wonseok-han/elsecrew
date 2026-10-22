@@ -18,6 +18,7 @@ const appUserData = fs.realpathSync(userData);
 app.setPath('userData', appUserData);
 dialog.showOpenDialog = async () => ({canceled:false,filePaths:[source]});
 const outcomes = [];
+const {startAgentPaintProbe} = require('./m5-agent-paint-probe.cjs');
 function checkedLoginResult(status, attemptId) {
   if (status.attemptId !== attemptId) throw new Error('Login check attempt changed');
   if (['diagnosing','starting','verifying'].includes(status.state)) return null;
@@ -151,10 +152,13 @@ app.on('browser-window-created', (_event, window) => {
       for(const [provider,roleId,runtime] of [['codex','planning','codex'],['claude','coding','claude-code']]) {
         if (!providers.includes(provider)) continue;
         if(connected[provider].state!=='connected'){outcomes.push({provider,state:'loginBlocked'});continue;}
+        let observedRunId;
         try {
           const capability = await run(`window.m5.getAgentCapabilities({runtime:${JSON.stringify(runtime)},refresh:true,chatId:${JSON.stringify(chatId)},roleId:${JSON.stringify(roleId)}})`);
           if(!capability.canStart){outcomes.push({provider,state:'admissionBlocked',reason:capability.blockedReason});continue;}
+          await run(`(${startAgentPaintProbe.toString()})(${JSON.stringify(chatId)})`);
           const accepted = await run(`(async()=>{const chat=await window.m5.getChat({chatId:${JSON.stringify(chatId)},cursor:null,limit:50,afterEventSequence:0});return window.m5.startAgentRun({chatId:${JSON.stringify(chatId)},roleId:${JSON.stringify(roleId)},inputMessageIds:chat.messages.map(m=>m.messageId),expectedCapabilityFingerprint:${JSON.stringify(capability.fingerprint)}});})()`);
+          observedRunId = accepted.runId;
           console.log(JSON.stringify({stage:'RUN_ACCEPTED',provider,runId:accepted.runId,chatId}));
           let terminal;
           for(let i=0;i<900;i++){
@@ -180,6 +184,11 @@ app.on('browser-window-created', (_event, window) => {
             ].find(c=>s.error?.detail?.includes(c))??'unclassified'}))`).catch(()=>({state:'unavailable',knownCause:'status unavailable'}));
             console.log(JSON.stringify({stage:'SERVICE_FAILURE',...diagnostic}));
           }
+        } finally {
+          // Observation failure never authorizes another run or changes its outcome.
+          const paint = await window.webContents.executeJavaScript(`globalThis.__m5AgentPaintProbe?.stop(${JSON.stringify(observedRunId ?? null)}) ?? null`).catch(() => ({status:'INCOMPLETE'}));
+          const outcome = outcomes.findLast(item => item.provider === provider);
+          if (outcome && paint) outcome.paint = paint;
         }
       }
       finish();

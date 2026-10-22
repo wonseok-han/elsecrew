@@ -1,5 +1,11 @@
 # M5 성능 측정
 
+## 실제 최종 응답의 화면 관측
+
+`m5-live-provider-smoke.cjs`는 승인된 실제 실행 직전에 수동 관측기 `m5-agent-paint-probe.cjs`를 연결한다. 관측기는 모델/원장 API를 호출하지 않고 `onAgentPublicEvent`의 `final`만 수신한다. 동일 chat/run의 durable role 행 순서와 두 renderer frame을 대조하며 `notificationToFrameMs`를 기록한다. 본문·인증정보는 수집하지 않는다. 실행 전부터 구독해야 하며, 행의 chat/run 식별 속성이 없는 이전 패키지는 완전 관측으로 인정하지 않는다.
+
+창 숨김, 중복 알림, 256개 초과, 누락/제거된 행, 종료 시 미완료 frame은 `INCOMPLETE`다. 종료 시 구독·observer·frame을 해제한다. 정상 표본은 `OBSERVED`이지 성능 gate PASS가 아니다. 상태 이벤트, sidecar→renderer 전달 시간, 물리적 화면 표시, 4채팅 부하/10회 반복은 측정하지 않으며 `diagnostic=true`, `gateEligible=false`를 유지한다. 기존 실제 작업의 합격 판정과 별도로 outcome.paint에 저장한다. 이 연결은 새 유료 실행 승인이 아니며 actual 시험은 별도 승인이 필요하다.
+
 ## 진단 서버 없는 RSS 비교
 
 `node --experimental-strip-types scripts/m5-packaged-ui-smoke.mjs --no-cdp`는 같은 패키지를 새 임시 프로필로 열되 remote-debugging 인자를 넣지 않는다. 12초 고정 대기 후 OS 프로세스 RSS를 250ms 간격으로40회 수집하고 `MANUAL_QUIT_REQUIRED`를 출력한다. 이때60초 안에 해당 시험 앱 메뉴에서 정상 종료해야 한다. 종료 코드0과 새 DB의 단일 sidecar clean marker를 확인하며, 불확실하면 강제 종료나 자동 삭제하지 않는다.
