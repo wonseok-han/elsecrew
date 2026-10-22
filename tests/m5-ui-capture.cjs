@@ -61,6 +61,18 @@ app.whenReady().then(async () => {
     if (!document.querySelector('.m5-settings-scope strong').textContent.trim()) throw new Error('settings project scope missing');
   })()`);
   await capture(window, 'product-settings-minimum');
+  window.setContentSize(1440, 1000);
+  await window.webContents.executeJavaScript("[...document.querySelectorAll('.m5-settings button')].find(b => b.textContent === '작업대로 돌아가기').click()");
+  await wait("!document.querySelector('.m5-settings-dialog')?.open");
+  await window.webContents.executeJavaScript("[...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent.startsWith('변경') && b.getClientRects().length).click()");
+  await wait("document.querySelector('.m5-change-row')?.getClientRects().length");
+  await window.webContents.executeJavaScript("document.querySelector('.m5-change-row').click()");
+  await wait("document.querySelector('.m5-diff-details')");
+  await capture(window, 'product-active-diff');
+  await window.webContents.executeJavaScript("[...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent === '채팅' && b.getClientRects().length).click()");
+  await window.webContents.executeJavaScript("document.querySelector('.m5-chat-chip').click()");
+  await wait("document.querySelector('.m5-timeline') && !document.querySelector('.m5-refresh').disabled");
+  await capture(window, 'product-active-conversation');
   const concept = new BrowserWindow({ width: 1440, height: 1000, show: false, webPreferences: { partition: 'm5-visual', sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
   windows.push(concept);
   for (const name of ['agent-ide', 'guided-start']) {

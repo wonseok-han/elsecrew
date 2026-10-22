@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- 5adc953/clean에서 승인 시안과 현재 production renderer의 시각 대조를 재개했다. 기존 외부 통신 차단·합성 bridge 캡처 도구로 시작/최소창/작업대/설정/로컬 시안 이미지를 직접 확인했다(HFJaTL). `tests/m5-ui-capture.cjs`에 실제 diff 선택·채팅 열기 후 캡처를 추가했다. 첫 선택자 오류와 채팅 fixture의 빈 diff 때문에 실패한 두 실행은 실제 제품 실패로 혼동하지 않고 원인을 고쳤다. 최종 세션89000 exit0, `.artifacts/m5-visual/capture-AJzbLX`의 active-diff/active-conversation을 직접 확인했다.
+- 시안 적용의 구체 누락: 시안은 가운데 넓은 영역에서 줄 diff를 읽지만 현행 DiffDetails는 변경 목록과 같은 왼쪽 패널에 있어 약280px 아래쪽으로 밀리고 가운데 편집기는 빈 상태다. 또 첫 작업 안내가 열린 채팅에서도 큰 높이를 차지한다. 다음 구현은 편집 초안을 유지한 중앙 diff 보기/편집 복귀와, 재열기 가능한 안내 축소다. 사용자 저장 dock 배치와 안전/복구 안내를 임의 초기화하거나 숨기지 않는다.
+- 캡처는 합성 프로젝트 diff와 합성 채팅 화면을 따로 관측한 것이며 실제 에이전트/원본 반영·전체 시안 합격이 아니다. 제품 코드는 아직 변경하지 않았다. Karpathy 최소 범위 원칙으로 추측성 스타일 교체 대신 확인된 배치 문제를 우선한다. 성능/G6·Codex 실제 승인·Windows/출시 잔여는 유지하며 main/push·인증·사용자 프로젝트/모델 호출 없음.
+
+### 2026-10-22 · by GPT-6 Astra
 - dfaf6e3/clean의 파일 목록 memo 변경을 실제 darwin-arm64 패키지에 반영했다. CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4 `pnpm run m5:package:smoke` PASS(세션18557 exit0). 직전 .vite만 갱신된 상태는 해소됐으며 main/push/외부 배포는 없다.
 - 최신 패키지 `--large-project` 단회(세션52309 exit1)에서 treeRoot260.2ms/expand118.6ms/fileEditable383.5ms/DOM362는 기준 이내지만 입력 준비1+10회 p95는50.6ms/50 초과, idle459177984B(약438MiB)/400MiB 초과로 FAIL이다. visible 유지/hiddenTransitions0, snapshot31489.0ms, 앱exit0/shutdown confirmed. 입력 본문 DOM 관측14.6~16.8ms 뒤 두 frame 관측32.2~34.4ms이며, memo가 기준 실패를 해소했다고 주장하지 않는다. 이전 반복값과 단회의 차이를 개선률로 인용하지 않는다.
 - `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-5qVosU/result.json`·스크린샷은 보존하고 관측PID부재 확인 후 이번 project/other-project/userdata만 영구 정리했다. 기존 메모리 blank/preload/product와 no-CDP 기록도 재조회했으며 이미 수행한 대조를 반복하지 않았다. 입력 관측 상한과 실제 처리 비용 분리, 메모리 기준 초과, 전체G6/시안 비교/실제 Codex 승인/Windows/출시는 계속 남는다. 인증·사용자 프로젝트·모델 호출 없음.
