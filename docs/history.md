@@ -1,4 +1,8 @@
 # 작업 이력 (Hello, Agent)
+### 2026-10-22 · by GPT-6 Astra
+- 직전461cb98의 무계측 관측 뒤 최신 패키지 --large-project를 실행했다(세션42931 exit1). b66XZ8/result.json의1만 파일/1천 폴더·5MiB/10만 줄 fixture에서 treeRoot256.3ms, expand149.8ms, DOM362, fileEditable415.2ms로 해당 단회 기준 이내다. 같은 실행 입력 warmup1+10회 p95는49.6ms/50ms 이내이며 visible 유지/hiddenTransitions0이다. 전체10회 시작 반복·물리 키보드·전체 G6 증거는 아니다.
+- 작업 복사본 준비 관측33764.4ms는 사용자 대기 병목 후보로 남겼다. 전체 진단은 idle459358208B로400MiB 초과/FAIL이며 종료는exit0/confirmed다. 관측 PID 부재 후 이번 project·other-project·userdata만 영구 삭제하고 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-b66XZ8/의 JSON·스크린샷은 보존했다. 다음은 복사본 준비 비용의 원인 조사/안전 보존 개선과 G6 수집 완성이다. 모델·사용자 인증/프로젝트·main/push 변경 없음.
+
 최신 워크로그(2026-10-22 포함)는 [10월 아카이브](archive/history-2026-10.md)에 있다. 날짜 단위를 보존해 이동했다.
 
 현재 검증: 최신 패키지 편집·diff·적용/원복·다중 프로젝트 흐름 확인. CDP 진단 idle 약439MiB는 기준 초과, 무계측 최신 단회 약367MiB는 기준 이내이나 전체 G6 합격 아님. Codex 추가 실제 시험 승인·Windows·출시 검증은 남는다.
