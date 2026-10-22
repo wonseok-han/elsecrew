@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-22 · by GPT-6 Astra
+- dfaf6e3/clean의 파일 목록 memo 변경을 실제 darwin-arm64 패키지에 반영했다. CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4 `pnpm run m5:package:smoke` PASS(세션18557 exit0). 직전 .vite만 갱신된 상태는 해소됐으며 main/push/외부 배포는 없다.
+- 최신 패키지 `--large-project` 단회(세션52309 exit1)에서 treeRoot260.2ms/expand118.6ms/fileEditable383.5ms/DOM362는 기준 이내지만 입력 준비1+10회 p95는50.6ms/50 초과, idle459177984B(약438MiB)/400MiB 초과로 FAIL이다. visible 유지/hiddenTransitions0, snapshot31489.0ms, 앱exit0/shutdown confirmed. 입력 본문 DOM 관측14.6~16.8ms 뒤 두 frame 관측32.2~34.4ms이며, memo가 기준 실패를 해소했다고 주장하지 않는다. 이전 반복값과 단회의 차이를 개선률로 인용하지 않는다.
+- `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-5qVosU/result.json`·스크린샷은 보존하고 관측PID부재 확인 후 이번 project/other-project/userdata만 영구 정리했다. 기존 메모리 blank/preload/product와 no-CDP 기록도 재조회했으며 이미 수행한 대조를 반복하지 않았다. 입력 관측 상한과 실제 처리 비용 분리, 메모리 기준 초과, 전체G6/시안 비교/실제 Codex 승인/Windows/출시는 계속 남는다. 인증·사용자 프로젝트·모델 호출 없음.
+
+### 2026-10-22 · by GPT-6 Astra
 - 기준67ab343/clean에서 입력 시 `ProjectEditorController.updateText`가 전체 작업대 구독을 갱신하고 VirtualFileList의 최대120행도 재생성하는 경로를 확인했다. 파일 목록에 기본 React.memo를 적용하고 controller 의존 useCallback으로 열기 핸들러를 안정화했다. custom comparator/상태 지연/저장 debounce는 없으며 entries·activePath·disabled·callback 중 하나라도 바뀌면 갱신한다. 편집 초안 보존·저장·실행/복구 계약은 변경하지 않았다.
 - 새 회귀는 초안 갱신 시 tree 참조 유지와 최신 초안/dirty 저장, action gate 변경 관측, tree 재조회 시 새 참조 게시를 확인한다. tsc --noEmit·Electron renderer Vite build PASS. editor/Monaco/renderer 합동67건 중66PASS·Electron 실행1건 비정상 종료(null)였으며, 일반 앱 권한으로 UI 시험만 재실행해2/2PASS(세션65302 exit0)했다. 제한 실행 실패를 제품 성공으로 숨기지 않았고 같은 순수 검사는 반복하지 않았다. diff check PASS.
 - 이는 불필요한 렌더링 경로 제거이며 입력52.3ms/idle438MiB가 해결됐다는 증거는 아니다. 현재 .vite renderer만 갱신됐고 out 패키지는 이전 버전이다. 다음은 패키지 반영 후 입력 영향 측정과 시작 메모리 원인 분리다. 전체G6/실제 Codex 승인/Windows/출시는 미완료, main/push·사용자 프로젝트/인증/모델 실행 없음.
