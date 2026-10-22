@@ -26,14 +26,16 @@ const { createProcessMemoryTracker, summarizeMemory } = createRequire(import.met
 const repo = fileURLToPath(new URL('..', import.meta.url));
 assert.equal(process.platform, 'darwin');
 assert.equal(process.arch, 'arm64');
-const largeProject = process.argv.length === 3 && process.argv[2] === '--large-project';
+const memoryFileDiff = process.argv.length === 3 && process.argv[2] === '--memory-file-diff';
+const largeProject = memoryFileDiff || (process.argv.length === 3 && process.argv[2] === '--large-project');
 const memoryDiff = process.argv.length === 3 && process.argv[2] === '--memory-diff';
+const memoryLifecycle = memoryDiff || memoryFileDiff;
 const startupSeries = process.argv.length === 3 && process.argv[2] === '--startup';
 const deferredCdp = process.argv.length === 3 && process.argv[2] === '--deferred-cdp';
 const noCdp = process.argv.length === 3 && process.argv[2] === '--no-cdp';
 const mainTraceDiagnostic = process.argv.length === 3 && process.argv[2] === '--main-trace';
 const nativeChatStream = process.argv.length === 3 && process.argv[2] === '--native-chat-stream';
-const largeDiff = memoryDiff || (process.argv.length === 3 && process.argv[2] === '--large-diff');
+const largeDiff = memoryLifecycle || (process.argv.length === 3 && process.argv[2] === '--large-diff');
 const diagnosticLanguage = process.argv.length === 3
   ? (process.argv[2] === '--english' ? 'en' : process.argv[2] === '--korean' ? 'ko' : undefined)
   : undefined;
@@ -247,11 +249,12 @@ try {
   report.idleRssWithinLimit = report.idleRssBytes <= 400 * 1024 * 1024;
   report.chromiumProcessesAfter = (await send('SystemInfo.getProcessInfo')).processInfo;
   report.rendererHeapAfter = await send('Runtime.getHeapUsage', {}, sessionId);
-  if (memoryDiff) {
+  if (memoryLifecycle) {
     report.memoryLifecycle = {diagnostic:true, gateEligible:false,
       intervalMs:250, samples:report.memory.map(sample => ({...sample, phase:'idle'})),
       limitations:['Observed descendants retained after reparenting; unseen children, same-second PID reuse and between-sample peak remain unverified.',
-        'Large diff only; does not cover all large fixtures concurrently.']};
+        memoryFileDiff ? 'Large file model and diff together; no concurrent chat streams or whole G6 evidence.'
+          : 'Large diff only; does not cover all large fixtures concurrently.']};
     const sample = () => {
       try {
         assert.ok(!termination, 'App exited during memory lifecycle observation');
@@ -305,6 +308,12 @@ try {
       report.nativeChatStream = await until(() => evaluate(`globalThis.__m5NativeChatStream?.status !== 'RUNNING' ? globalThis.__m5NativeChatStream : null`), 180000);
       if (report.nativeChatStream.status === 'FAIL') report.error = report.nativeChatStream.error;
     } else if (largeDiff) {
+      if (memoryFileDiff) {
+        // Keep the clean large-file model mounted when diff takes the editor
+        // panel. Do not insert text: an unsaved draft must block project close.
+        report.largeProject = await evaluate(`(${probeLargeProject.toString()})(${JSON.stringify(report.project.projectId)})`);
+        if (report.largeProject.failedMetrics.length) report.error = `Large project limits exceeded: ${report.largeProject.failedMetrics.join(', ')}`;
+      }
       const worktrees = path.join(userData, 'com.wonseokhan.helloagent/m5/worktrees-v1');
       const matches = fs.readdirSync(worktrees, {withFileTypes:true})
         .filter(entry => entry.isDirectory() && fs.existsSync(path.join(worktrees, entry.name, 'native-diff-fixture')))
@@ -312,6 +321,10 @@ try {
       assert.equal(matches.length, 1, 'Expected one generated diff snapshot');
       const dimensions = diffFixture.change(matches[0]);
       report.largeDiff = {...await evaluate(`(${probeLargeDiff.toString()})()`), ...dimensions};
+      if (memoryFileDiff) {
+        report.memoryLifecycle.largeFileRetainedWithDiff = await evaluate(`!!document.querySelector('.monaco-editor') && !!document.querySelector('.m5-diff-details')`);
+        assert.equal(report.memoryLifecycle.largeFileRetainedWithDiff, true, 'Large editor and diff must coexist');
+      }
       assert.equal(execFileSync('/usr/bin/git', ['-C', report.project.source, 'status', '--porcelain'],
         {encoding:'utf8', env:{...env, GIT_CONFIG_NOSYSTEM:'1', GIT_CONFIG_GLOBAL:'/dev/null', GIT_CONFIG_COUNT:'0'}}).trim(), '', 'Large diff changed original project');
       report.largeDiff.originalUnchanged = true;
@@ -394,7 +407,7 @@ try {
     }
     }
   }
-  if (memoryDiff) {
+  if (memoryLifecycle) {
     const loadedCapture = await send('Page.captureScreenshot', {format:'png'}, sessionId);
     fs.writeFileSync(path.join(root, 'loaded-diff.png'), Buffer.from(loadedCapture.data, 'base64'));
     await evaluate(`(() => {

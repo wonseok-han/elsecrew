@@ -1,7 +1,18 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- G6 수집 누락 중 큰 파일 모델과 diff 동시 유지 메모리를 보완했다. Karpathy 최소 변경으로 기존 packaged 관측기에 --memory-file-diff를 추가했다. 기존 생성기·파일/트리 probe·diff probe·250ms RSS·닫기60초/잔류3초·정상 종료를 재사용하며 편집 입력 없이 clean 모델을 유지해 프로젝트 닫기를 시험한다. 제품 코드·합격선·안전 계약은 변경하지 않았다. 네 stream 동시 부하/10회 반복/전체G6는 여전히 별도다.
+- 문법/diff check PASS. 실제 세션57975의 gy5icd는 파일 모델+diff 공존 true, 원본 불변 true, 가시성 유지,419표본,60,001.5ms 대기와 seed/앱 exit0·shutdown confirmed를 확인했다. idle457719808B/peak724025344B/retained delta0B로 idle만 초과하여 exit1/FAIL이다. 파일/트리/diff 시간은 이번 단일 관측 기준 이내이며 누수 없음이나 제품 완료로 확대하지 않는다.
+- `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-gy5icd/result.json`과 캡처는 보존했다. 모든 관측PID 부재 확인 뒤 자체 project/other-project/userdata 약105MiB를 영구 정리했다. 다음 원인 분석은 시작 메모리에 집중하며 스트림/G6 전체·별도 승인·Windows/출시 잔여는 유지한다. main/push·로그인·모델 실행·사용자 프로젝트 변경 없음.
+
+### 2026-10-23 · by Codex
+- 최신5af0541 소스 패키지의 기존 --large-project 시험을 한 차례 실행했다(세션93537). 자체10,000파일/1,000폴더·5MiB/100,000줄 fixture이며 로그인·모델·사용자 프로젝트를 사용하지 않았다. treeRoot264.6ms/expand133.3ms/fileEditable449.5ms/DOM362와 입력 준비1+측정10회 p95 24.7ms는 각 기준 이내다. visible 유지/hiddenTransitions0, renderer long task최대70ms/main73.621ms·관측완료/유실없음이다.
+- idle452329472B(약431.38MiB)로400MiB 초과이므로 전체exit1/FAIL을 유지한다. 이전50.6ms와 다른 단일 실행을 최적화 인과 효과·전체G6 합격으로 확대하지 않는다. 입력은 CDP 삽입/DOM+두frame 근사이며 물리키보드/IME 검증이 아니다. snapshot관측31.09초는 계속 남는다.
+- seed13813 및 앱13824 exit0/shutdown confirmed 후 관측 자손13825/13826/13828/13836 포함 부재를 확인했다. 이번 qSKTqA의 project/other-project/userdata 약93MiB만 영구 정리했으며 `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-qSKTqA/result.json`과 화면/진단 증거는 보존한다. 저장소/인증·main/push 변경 없음. 다음은 메모리 기준과 전체G6 수집 미완료이며 Codex 실제 쓰기·채팅 검사 분리 승인 및 Windows/출시 잔여는 유지한다.
+
+### 2026-10-23 · by Codex
 - 직전 무CDP 관측은 새 실패 증거를 얻은 진척으로 분류한다. HEAD3406668에서 main/preload 번들(143/65KiB), 지연 Monaco, 기존 빈 Electron 창356~359MiB 기록을 대조했다. 조건이 다른 표본을 차감해 원인을 확정하거나 보안/GPU 기능을 끄지 않는다. 시작 메모리 원인은 아직 미확정이다.
 - 다음 실행 가능한 작업은 out에 빠진 a2deb80의 텍스트 갱신 시 Monaco 옵션 재설정 방지 변경을 정식 패키지에 포함하는 것이다. 기존 미커밋 진단 워크로그를 함께 보존하고 최신 소스 패키징을 진행한다. 이번 기록은 패키징/성능 성공 선언이 아니며 실제 결과는 후속 기록한다. 실제 모델 승인과 채팅 검사 분리 결정은 대기 상태를 유지한다.
+- clean5af0541에서 CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4 pnpm run m5:package:smoke를 실행했다. 세션44421 exit0, darwin-arm64 패키지 검사 PASS이며 Rust release 캐시는0.26초에 재사용했다. out 앱에 a2deb80 입력 최적화가 포함되어 패키지 소스 지연은 해소됐다. 실제 입력 지연 기준 통과·메모리 개선·제품 완료를 뜻하지 않는다. main 병합/push·실제 모델 호출은 없으며 이 결과 기록은 후속 미커밋으로 남긴다.
 
 ### 2026-10-23 · by Codex
 - 정상 종료 후 관측PID9501/9506/9507/9535/9537의 부재를 일반 권한 ps로 확인하고 이번 lE2OWw/userdata(2.3MiB)만 영구 삭제했다. JSON 증거는 보존했으며 기존 사용자 데이터는 대상이 아니다.
