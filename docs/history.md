@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전e6b0c6a는 lifecycle 원자 저장 연결 진척이다. clean 통합 checkout에서 actual runtime의 명시 output_format_version 경로를 추가했다. projection 조회는 head/run 결속을 확인하고 공개 출력 저장은 배열 복사 대신 Storage append로 전달한다. poll collector는 새 형식에서 과거 배열을 보관하지 않고100개/4MiB ingress batch만 유지하며64MiB 본문 예산은 저장 계층에 전달한다. 기존 v1 제한은 유지한다.
+- 복구 시 output head를 확인하고 종료/실패 projection 재작성 시 marker를 보존하며 legacy 배열/중복 counters를 제거한다. 새 형식의 per-event chat projection 중복 쓰기는 하지 않는다. 따라서 UI page 조회와 최종 응답/후속 문맥 연결은 활성화 전 필수 잔여다. provider observation/parser 한도와 새 run marker 생성·V11 자동 이관은 아직 미연결이라 실제 장시간 실행을 켜지 않았다.
+- Karpathy 최소 변경 원칙으로 기존 run/event binding·Storage API를 재사용했다. 이번 누적 runtime 변경은 아직 실행 검증 전이며 diff check만 수행했다. 물리 quota·IPC/UI·독립 검토/누적 검증이 남으며 사용자 DB·앱·모델·main/push 없음.
+
+### 2026-10-23 · by Codex
 - 직전8d22b9b는 Storage 진입점 연결 진척이다. clean 통합 checkout에서 기존 write_projection의 run 저장 transaction에 sync_run_projection을 연결했다. 새 output marker는 V11에서만 허용하고 첫 aggregate event에서 head를 생성하며 terminal 상태 저장 시 seal을 같은 transaction에 반영한다. 중간 누락 head 복원·legacy로 되돌림·sealed→active 전환은 거절한다.
 - 기존 legacy run은 output marker가 없으면 기존 저장을 유지한다. 생성/종료 모두 기존 runRecord/run binding/fence 검증을 재사용하며 실패하면 상위 transaction이 run/lock/output 갱신을 함께 rollback한다. 실제 provider는 아직 새 marker를 생성하지 않고 자동 V11 이관도 비활성이므로 장시간 실행 기능은 아직 켜지지 않았다.
 - lifecycle 변경과 head가 함께 rollback되는 회귀를 작성했다. 누적 테스트 실행은 보류했고 format/diff만 확인했다. 다음은 provider/runtime 새 형식 생성·출력 append/terminal 경로와 quota 연결이다. 사용자 DB·앱·모델·main/push 없음.

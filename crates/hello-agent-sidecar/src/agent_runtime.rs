@@ -253,13 +253,18 @@ impl AgentRuntime {
                 .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
             let recovery_id = reserved_recovery_id(&projection)
                 .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
-            let public_events =
+            let public_events = if projection.get("output_format_version").is_some() {
+                let binding = output_binding(&projection["record"]).map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
+                storage.agent_output_head(&binding)?;
+                Vec::new()
+            } else {
                 projection["public_events"]
                     .as_array()
                     .cloned()
                     .ok_or_else(|| {
                         SidecarError::new("recoveryInvalid", "public event ledger is missing")
-                    })?;
+                    })?
+            };
             public_budget_metrics(&public_events)
                 .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
             let run_id = projection["run_id"].as_str().unwrap_or_default();
@@ -1213,16 +1218,19 @@ impl AgentRuntime {
             }
             let projection = actual_run_projection(storage, &run_id)
                 .map_err(|error| self.fail_poll(storage, projects, &run_id, error))?;
-            let persisted_budget = stored_public_budget(&projection)
+            let durable_output = projection.get("output_format_version").is_some();
+            let persisted_budget = if durable_output {
+                Ok(PublicBudgetMetrics { event_count: 0, text_bytes: 0, cumulative_snapshot_bytes: 0 })
+            } else { stored_public_budget(&projection) }
                 .map_err(|error| self.fail_poll(storage, projects, &run_id, error))?;
-            let persisted_events = projection["public_events"].as_array().ok_or_else(|| {
+            let persisted_events: &[Value] = if durable_output { &[] } else { projection["public_events"].as_array().ok_or_else(|| {
                 self.fail_poll(
                     storage,
                     projects,
                     &run_id,
                     ProjectFailure::recovery("actual-agent public event ledger is missing"),
                 )
-            })?;
+            })? };
             let mut public =
                 PublicEventCollector::new(&projection, persisted_events, persisted_budget);
             let mut parser_failed = false;
@@ -2780,7 +2788,15 @@ fn actual_run_projection(
             "run is not an actual-agent ledger record",
         ));
     }
-    stored_public_budget(&value)?;
+    if value.get("output_format_version").is_some() {
+        if value.get("output_format_version").and_then(Value::as_u64) != Some(1)
+            || value.get("public_events").is_some() {
+            return Err(ProjectFailure::recovery("invalid durable output projection"));
+        }
+        storage.agent_output_head(&output_binding(&value["record"])?).map_err(ProjectFailure::from)?;
+    } else {
+        stored_public_budget(&value)?;
+    }
     native_evidence::validate(&value)?;
     if let Some(binding) = value.get("provider_run_fence") {
         let failure = || ProjectFailure::recovery("provider run fence binding differs");
@@ -2792,6 +2808,12 @@ fn actual_run_projection(
 }
 
 fn preserve_provider_evidence(source: &Map<String, Value>, target: &mut Map<String, Value>) {
+    if let Some(format) = source.get("output_format_version") {
+        target.insert("output_format_version".into(), format.clone());
+        for name in ["public_events", "public_event_count", "public_text_bytes", "public_ledger_cumulative_snapshot_bytes"] {
+            target.remove(name);
+        }
+    }
     for field in [
         "provider_discovery",
         "runtime_attestation",
@@ -3014,8 +3036,11 @@ impl<'a> PublicEventCollector<'a> {
             .text_bytes
             .checked_add(self.text_bytes)
             .and_then(|value| value.checked_add(text.len()));
-        if event_count.is_none_or(|value| value > AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1)
-            || text_bytes.is_none_or(|value| value > AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1)
+        let durable = self.projection.get("output_format_version").is_some();
+        let count_limit = if durable { 100 } else { AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1 };
+        let byte_limit = if durable { 4 * 1024 * 1024 } else { AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1 };
+        if event_count.is_none_or(|value| value > count_limit)
+            || text_bytes.is_none_or(|value| value > byte_limit)
         {
             return Ok(false);
         }
@@ -3027,6 +3052,12 @@ impl<'a> PublicEventCollector<'a> {
             return Err(ProjectFailure::recovery(
                 "durable agent run fingerprint differs from the accepted run",
             ));
+        }
+        if durable {
+            self.text_bytes = self.text_bytes.checked_add(event_text_bytes)
+                .ok_or_else(|| ProjectFailure::recovery("public output ingress overflow"))?;
+            self.events.push(event);
+            return Ok(true);
         }
         let mut prospective =
             Vec::with_capacity(self.persisted_events.len() + self.events.len() + 1);
@@ -3070,6 +3101,18 @@ fn persist_public_event_record(
     let run_id = expected["runId"].as_str().unwrap_or_default();
     let projection =
         actual_run_projection(storage, run_id).map_err(PublicEventPersistError::Fault)?;
+    if projection.get("output_format_version").is_some() {
+        if projection["record"] != *expected {
+            return Err(PublicEventPersistError::Fault(ProjectFailure::recovery("durable run differs from accepted run")));
+        }
+        let binding = output_binding(expected).map_err(PublicEventPersistError::Fault)?;
+        let head = storage.agent_output_head(&binding).map_err(ProjectFailure::from).map_err(PublicEventPersistError::Fault)?;
+        let next = head.committed_sequence.checked_add(1).ok_or(PublicEventPersistError::BudgetExceeded)?;
+        // Draft long-run byte budget; capability remains disabled until the
+        // provider parser, transport and UI all support this storage format.
+        return storage.append_agent_output_record(&binding, next, event, 64 * 1024 * 1024)
+            .map_err(ProjectFailure::from).map_err(PublicEventPersistError::Fault);
+    }
     let current = stored_public_budget(&projection).map_err(PublicEventPersistError::Fault)?;
     let mut events = projection["public_events"]
         .as_array()
@@ -3256,6 +3299,15 @@ fn validate_projection_public_budget(
         ));
     }
     Ok(metrics)
+}
+
+fn output_binding(record: &Value) -> Result<hello_agent_protocol::agent_adapter_v1::AgentRunBindingV1, ProjectFailure> {
+    serde_json::from_value(json!({
+        "chatId":record["chatId"], "taskId":record["taskId"], "projectId":record["projectId"],
+        "worktreeId":record["worktreeId"], "workspaceIdentity":record["workspaceIdentity"],
+        "runId":record["runId"], "roleId":record["selectedProfile"]["roleId"],
+        "capabilityFingerprint":record["capabilityFingerprint"]
+    })).map_err(json_failure)
 }
 
 fn stored_public_budget(

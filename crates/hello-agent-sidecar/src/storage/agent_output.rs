@@ -40,11 +40,11 @@ impl super::Storage {
     }
 
     pub(crate) fn agent_output_head(
-        &mut self,
+        &self,
         binding: &AgentRunBindingV1,
     ) -> Result<OutputHead, SidecarError> {
         self.ensure_writes_admitted()?;
-        let tx = self.connection.transaction().map_err(sqlite_error)?;
+        let tx = self.connection.unchecked_transaction().map_err(sqlite_error)?;
         require_output_schema(&tx)?;
         let result = head(&tx, binding)?;
         verify_run_binding(&tx, &result)?;
