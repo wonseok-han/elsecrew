@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전e8835c0는 run/output 결속 구현 진척이다. 현재 clean 통합 checkout에서 V10 exact schema identity·메타데이터 CHECK·기존 migration/admission 분기를 대조했다. 새 테이블만 생성하면 기존 검증이 거절하므로 자동 이관은 아직 활성화하지 않았다. 다음 저장 연결 전 필요한 누적 컴파일 진단만 수행했다.
+- `cargo check -p hello-agent-sidecar --tests`에서 새 출력 코드의 serde 직접 의존성 누락과 rusqlite0.40의 u64 FromSql/ToSql 미지원 오류를 발견했다. 기존 잠금버전 serde1.0.228을 직접 선언하고 기존 row_u64 및 checked i64 변환을 재사용해 음수/범위초과를 거절하도록 수정했다. Cargo.lock은 sidecar 의존성 목록1줄만 변경됐다.
+- 동일 누적 컴파일 재실행 PASS(5.71초), 테스트 실행은 하지 않았다. format/diff 검사 수행. 새 migration·기존 run 이관·R3 통합·quota/runtime/UI는 여전히 남으며 제품 DB/앱/모델·main/push 변경 없음. 이번은 구현 연결을 막는 컴파일 결함 수정이지 전체 기능 합격이 아니다.
+
+### 2026-10-23 · by Codex
 - 직전0eeb86d는 출력 table closure 구현 진척이다. clean 통합 checkout에서 실제 runs projection/AgentRunRecord/RunFenceBinding 형식을 대조하고 output head→run 결속을 연결했다. source_kind·명시 output_format_version=1·배열 부재·run/chat/task/project/worktree/profile 신원·state와 terminal 출력 sealed를 검사한다. provider fence가 있으면 기존 검증기를 재사용하며 이것만으로 프로세스 종료나 잠금 해제를 승인하지 않는다.
 - 전체 closure 끝에 runs→output head 역방향 검사를 추가하여 새 형식 run의 누락 head/지원하지 않는 형식을 거절한다. 기존 legacy는 marker가 없으면 이 검사 대상이 아니며 기존 검증기를 대체하지 않는다. Karpathy 최소 변경 원칙으로 runRecord 검증을 재사용했다. 누락/legacy/신원/state 및 reverse 누락 회귀를 작성했다.
 - 새 테스트 포함 누적 구현은 아직 실행 검증 전이며 format/diff만 확인했다. schema migration/R3 admission 및 runtime의 새 형식 생성·physical quota 연결은 남아 있다. 사용자 DB·인증·모델·앱 실행·main/push 없음. 다음은 새 형식의 생성/이관과 기존 저장 검증 경계 연결이다.

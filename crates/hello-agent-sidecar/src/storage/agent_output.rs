@@ -1,6 +1,6 @@
 //! Transaction-scoped output ledger. No migration or public runtime activation.
 //! Caller must hold write admission and atomically persist the run/fence state.
-use super::{sqlite_error, SidecarError};
+use super::{row_u64, sqlite_error, SidecarError};
 use hello_agent_protocol::agent_adapter_v1::{
     output_pages::{
         decode_output_page, OutputHead, OutputPage, OutputPageRequest, OutputRow,
@@ -83,6 +83,10 @@ fn encode<T: serde::Serialize>(value: &T) -> Result<String, SidecarError> {
     serde_json::to_string(value).map_err(|_| invalid("output serialization failed"))
 }
 
+fn sql_integer(value: u64) -> Result<i64, SidecarError> {
+    i64::try_from(value).map_err(|_| invalid("output integer exceeds SQLite range"))
+}
+
 pub(super) fn begin(tx: &Transaction<'_>, binding: &AgentRunBindingV1) -> Result<(), SidecarError> {
     let head = OutputHead {
         format_version: OUTPUT_FORMAT_VERSION,
@@ -106,7 +110,7 @@ pub(super) fn head(
 ) -> Result<OutputHead, SidecarError> {
     let row: Option<(String, u64, bool)> = tx.query_row(
         "SELECT binding_json, committed_sequence, sealed FROM run_output_heads WHERE run_id=?1 AND length(CAST(binding_json AS BLOB)) <= 8192",
-        [&binding.run_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        [&binding.run_id], |row| Ok((row.get(0)?, row_u64(row, 1)?, row.get(2)?)),
     ).optional().map_err(sqlite_error)?;
     let (json, committed_sequence, sealed) =
         row.ok_or_else(|| invalid("missing or oversized output head"))?;
@@ -146,7 +150,7 @@ pub(super) fn append(
         .query_row(
             "SELECT text_bytes FROM run_output_heads WHERE run_id=?1",
             [&binding.run_id],
-            |row| row.get(0),
+            |row| row_u64(row, 0),
         )
         .map_err(sqlite_error)?;
     let next = used
@@ -176,13 +180,13 @@ pub(super) fn append(
         "INSERT INTO run_output_records VALUES (?1,?2,?3,?4)",
         params![
             binding.run_id,
-            sequence,
+            sql_integer(sequence)?,
             single.rows[0].event.event_id,
             json
         ],
     )
     .map_err(sqlite_error)?;
-    let updated = tx.execute("UPDATE run_output_heads SET committed_sequence=?2, text_bytes=?3 WHERE run_id=?1 AND committed_sequence=?4 AND sealed=0", params![binding.run_id, sequence, next, previous.committed_sequence]).map_err(sqlite_error)?;
+    let updated = tx.execute("UPDATE run_output_heads SET committed_sequence=?2, text_bytes=?3 WHERE run_id=?1 AND committed_sequence=?4 AND sealed=0", params![binding.run_id, sql_integer(sequence)?, sql_integer(next)?, sql_integer(previous.committed_sequence)?]).map_err(sqlite_error)?;
     if updated != 1 {
         return Err(invalid("output head update conflict"));
     }
@@ -214,9 +218,9 @@ pub(super) fn page(
     let mut rows = statement
         .query(params![
             request.binding.run_id,
-            request.after_sequence,
-            request.through_sequence,
-            request.limit as u64
+            sql_integer(request.after_sequence)?,
+            sql_integer(request.through_sequence)?,
+            request.limit as i64
         ])
         .map_err(sqlite_error)?;
     let mut result = OutputPage {
@@ -225,8 +229,8 @@ pub(super) fn page(
         next_after_sequence: request.after_sequence,
     };
     while let Some(row) = rows.next().map_err(sqlite_error)? {
-        let sequence: u64 = row.get(0).map_err(sqlite_error)?;
-        let length: u64 = row.get(1).map_err(sqlite_error)?;
+        let sequence = row_u64(row, 0).map_err(sqlite_error)?;
+        let length = row_u64(row, 1).map_err(sqlite_error)?;
         if length > OUTPUT_PAGE_MAX_BYTES as u64 {
             return Err(invalid("oversized stored output event"));
         }
@@ -333,12 +337,12 @@ mod tests {
         }
         let records: u64 = db
             .query_row("SELECT count(*) FROM run_output_records", [], |row| {
-                row.get(0)
+                row_u64(row, 0)
             })
             .unwrap();
         let heads: u64 = db
             .query_row("SELECT count(*) FROM run_output_heads", [], |row| {
-                row.get(0)
+                row_u64(row, 0)
             })
             .unwrap();
         assert_eq!((records, heads), (0, 0));

@@ -1564,6 +1564,7 @@ dependencies = [
  "hello-agent-protocol",
  "libc",
  "rusqlite",
+ "serde",
  "serde_json",
  "sha1",
  "sha2",

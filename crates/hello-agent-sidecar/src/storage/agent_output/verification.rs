@@ -174,7 +174,7 @@ impl<'a> AllOutputVerification<'a> {
         }
         let row: Option<(i64, Option<String>, Option<String>, u64)> = tx.query_row(
             "SELECT rowid, CASE WHEN length(CAST(run_id AS BLOB))<=8192 THEN run_id ELSE NULL END, CASE WHEN length(CAST(binding_json AS BLOB))<=8192 THEN binding_json ELSE NULL END, text_bytes FROM run_output_heads WHERE rowid>?1 ORDER BY rowid LIMIT 1",
-            [self.after_head], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            [self.after_head], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row_u64(row, 3)?)),
         ).optional().map_err(sqlite_error)?;
         let next = if let Some((rowid, run_id, json, expected_bytes)) = row {
             let binding: AgentRunBindingV1 =
@@ -232,7 +232,7 @@ impl<'a> OutputVerification<'a> {
             .query_row(
                 "SELECT text_bytes FROM run_output_heads WHERE run_id=?1",
                 [&binding.run_id],
-                |row| row.get(0),
+                |row| row_u64(row, 0),
             )
             .map_err(sqlite_error)?;
         tx.commit().map_err(sqlite_error)?;
@@ -283,7 +283,7 @@ impl<'a> OutputVerification<'a> {
         }
         let finished = batch.next_after_sequence == self.expected.committed_sequence;
         if finished {
-            let extra: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM run_output_records WHERE run_id=?1 AND (output_sequence>?2 OR output_sequence<=0))", params![self.expected.binding.run_id, self.expected.committed_sequence], |row| row.get(0)).map_err(sqlite_error)?;
+            let extra: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM run_output_records WHERE run_id=?1 AND (output_sequence>?2 OR output_sequence<=0))", params![self.expected.binding.run_id, sql_integer(self.expected.committed_sequence)?], |row| row.get(0)).map_err(sqlite_error)?;
             if extra || total != self.expected_bytes {
                 return Err(invalid("output rows/head counters disagree"));
             }
