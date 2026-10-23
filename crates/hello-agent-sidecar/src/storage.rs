@@ -18,6 +18,7 @@ use hello_agent_protocol::storage_lifetime_v1::{
     validate_storage_lifetime_reopen_pair_v3, validate_storage_lifetime_reopen_pair_v4,
     FrozenOperationSourceV1, OperationReceiptV2, StorageStatusV1,
     STORAGE_LIFETIME_SCHEMA_VERSION_V1, STORAGE_LIFETIME_SCHEMA_VERSION_V10,
+    STORAGE_LIFETIME_SCHEMA_VERSION_V11,
     STORAGE_LIFETIME_SCHEMA_VERSION_V3, STORAGE_LIFETIME_SCHEMA_VERSION_V4,
     STORAGE_LIFETIME_SCHEMA_VERSION_V5, STORAGE_LIFETIME_SCHEMA_VERSION_V6,
     STORAGE_LIFETIME_SCHEMA_VERSION_V7, STORAGE_LIFETIME_SCHEMA_VERSION_V8,
@@ -3822,6 +3823,7 @@ pub(crate) fn load_v8_verified_frozen_event(
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
+            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11)
     ) {
         return Ok(None);
     }
@@ -3860,6 +3862,7 @@ pub(crate) fn load_v8_verified_frozen_message_event(
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
+            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11)
     ) {
         return Ok(None);
     }
@@ -4236,6 +4239,7 @@ fn replay_storage_ledger(
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
+            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11)
     ) {
         return replay_ledger_v1(events).map_err(storage_contract_error);
     }
@@ -4312,7 +4316,7 @@ fn load_verified_compaction_seeds(
     }
     let prefixes = if matches!(
         storage_schema_version(connection)?,
-        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9) | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9) | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10) | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11)
     ) {
         let mut statement = connection
             .prepare(
@@ -4398,6 +4402,7 @@ fn classify_storage_operation(
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
+            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11)
     ) {
         return classify_operation_v1(existing_events, incoming).map_err(storage_contract_error);
     }
@@ -4680,7 +4685,7 @@ fn insert_event(transaction: &Transaction<'_>, event: &LedgerEventV1) -> Result<
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9) => {
             insert_v6_source_index_and_invalidate_ready(transaction, event)?;
         }
-        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10) => {
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10 | STORAGE_LIFETIME_SCHEMA_VERSION_V11) => {
             insert_v6_source_index_and_invalidate_ready(transaction, event)?;
         }
         None
@@ -4712,7 +4717,7 @@ fn verify_append_runtime_state(connection: &Connection) -> Result<(), SidecarErr
             verify_append_materialization_pair(connection)?;
             verify_v9_append_runtime_state(connection)
         }
-        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10) => {
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10 | STORAGE_LIFETIME_SCHEMA_VERSION_V11) => {
             verify_append_materialization_pair(connection)?;
             verify_v9_append_runtime_state(connection)
         }

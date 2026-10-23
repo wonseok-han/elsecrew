@@ -6,7 +6,8 @@ use crate::storage::{
 };
 use rusqlite::{Connection, TransactionBehavior};
 
-pub(in crate::storage) const VERSION: u32 = 11;
+pub(in crate::storage) const VERSION: u32 =
+    hello_agent_protocol::storage_lifetime_v1::STORAGE_LIFETIME_SCHEMA_VERSION_V11;
 const META: &str = "CREATE TABLE storage_schema_meta (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
     storage_schema_version INTEGER NOT NULL CHECK (storage_schema_version = 11),
@@ -20,7 +21,7 @@ const META: &str = "CREATE TABLE storage_schema_meta (
 
 type Identity = (String, String, String, String);
 
-fn expected_schema() -> Result<Vec<Identity>, SidecarError> {
+pub(in crate::storage) fn expected_schema() -> Result<Vec<Identity>, SidecarError> {
     let mut expected = schema_identity_v10_golden()?;
     let metadata = expected
         .iter_mut()
@@ -124,6 +125,48 @@ pub(in crate::storage) fn migrate(connection: &mut Connection) -> Result<(), Sid
     tx.commit().map_err(sqlite_error)
 }
 
+/// Compose existing ledger admission and output closure under one unchanged
+/// connection epoch. This prepares the future product-open integration only.
+pub(in crate::storage) fn verify_admission(
+    connection: &mut Connection,
+    cancelled: &mut impl FnMut() -> bool,
+) -> Result<(), SidecarError> {
+    use crate::storage::reopen::snapshot::{ReopenMaintenanceSession, ReopenMaintenanceStep};
+    if cancelled() || !connection.is_autocommit() {
+        return Err(invalid("output admission interrupted"));
+    }
+    let marker: i64 = connection
+        .query_row("PRAGMA data_version", [], |row| row.get(0))
+        .map_err(sqlite_error)?;
+    {
+        let mut existing = ReopenMaintenanceSession::start_for_admission(connection)?;
+        loop {
+            match existing.step(cancelled)? {
+                ReopenMaintenanceStep::Pending(_) => {}
+                ReopenMaintenanceStep::Cancelled => {
+                    return Err(invalid("output admission cancelled"))
+                }
+                ReopenMaintenanceStep::ReadyVerified(_) => break,
+            }
+        }
+    }
+    {
+        let mut output = super::verification::AllOutputVerification::start(connection)?;
+        while !output.step(cancelled)? {}
+    }
+    let tx = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(sqlite_error)?;
+    let current: i64 = tx
+        .query_row("PRAGMA data_version", [], |row| row.get(0))
+        .map_err(sqlite_error)?;
+    if cancelled() || marker != current {
+        return Err(invalid("output admission source changed"));
+    }
+    verify(&tx)?;
+    tx.commit().map_err(sqlite_error)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,6 +203,7 @@ mod tests {
             .unwrap();
         migrate(&mut db).unwrap();
         verify(&db).unwrap();
+        verify_admission(&mut db, &mut || false).unwrap();
         assert!(verify_schema_v10(&db).is_err());
         let count: i64 = db
             .query_row("SELECT count(*) FROM run_output_records", [], |row| {

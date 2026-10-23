@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전9a0b757는 V11 이관 준비 구현 진척이다. 현재 clean 통합 checkout에서 V11 공용 저장버전 상수와 기존 bounded admission의 schema/control 분기, 압축 prefix/보존 event/message 조회·replay·append source index 분기를 연결했다. 기존 V10 조건은 유지하고 V11에서 같은 압축 witness 의미를 사용한다.
+- `agent_output::schema::verify_admission`이 기존 snapshot/replay session과 새 output closure를 순차 검증한 뒤 최초 data_version과 최종 transaction의 version/schema를 대조한다. output 검사만으로 기존 원장 검증을 대체하지 않는다. 이관 회귀에 결합 admission 호출을 추가했지만 아직 실행 전이다.
+- diff check만 확인했다. product open 자동 이관/실행은 활성화하지 않았으며 V11의 나머지 lifecycle/compaction 계약·신규 run 생성/runtime·물리 quota·UI 연결과 누적 검증/독립 검토는 남는다. 사용자 DB·앱·모델·main/push 변경 없음.
+
+### 2026-10-23 · by Codex
 - 직전be517e2는 누적 Rust 컴파일 결함 수정 진척이다. clean 통합 checkout에서 V10→V11 schema 준비와 exact schema 검증 함수를 구현했다. IMMEDIATE transaction 안에서 기존 V10 schema/control을 확인하고 빈 출력 원장2table 추가·metadata11 교체·새 schema 검증 후 commit한다. ALTER RENAME 대신 같은 이름으로 metadata를 transaction 내 교체해 기존 trigger 참조 이름을 보존한다. 기존 run 배열은 변환/삭제하지 않는다.
 - Karpathy 최소 변경으로 기존 V10 golden과 materialization 검증을 재사용했다. 새 schema 확인은 object 수/문자열 길이를 제한한 뒤 비교한다. 성공/기존 validator 거절·재이관 거절·변조된 base에서 무변경 거절 회귀2개를 작성했다. 아직 실행하지 않았고 format/diff만 확인했다.
 - product open에는 호출하지 않았다. V11을 처리하는 기존 replay/compaction/admission 분기 및 신규 run 생성/runtime 연결을 함께 바꾸고 독립 검토하기 전 자동 이관은 비활성이다. 사용자 DB·앱·모델·main/push 변경 없음. 다음은 이 V11 호환 분기와 admission 연결이다.
