@@ -6,6 +6,7 @@ import type { M5BridgeV4 } from "./contracts/bridge-v4.ts";
 import type { M5BridgeV5 } from "./contracts/bridge-v5.ts";
 import type { M5BridgeV6 } from "./contracts/bridge-v6.ts";
 import type { M5BridgeV7 } from "./contracts/bridge-v7.ts";
+import type { M5BridgeV8 } from "./contracts/bridge-v8.ts";
 import { validateChatAppendMessageRequestV1, validateChatAppendMessageTranscriptV1, type ChatAppendMessageRequestV1 } from "./contracts/run-recovery-v1.ts";
 
 export interface FollowupDraft {
@@ -46,7 +47,7 @@ export interface ChatUiSnapshot {
   error: { message: string; messageKey: ChatErrorKey; detail: string; retryChatId?: string } | null;
 }
 
-type M5ChatBridge = M5BridgeV3 | M5BridgeV4 | M5BridgeV5 | M5BridgeV6 | M5BridgeV7;
+type M5ChatBridge = M5BridgeV3 | M5BridgeV4 | M5BridgeV5 | M5BridgeV6 | M5BridgeV7 | M5BridgeV8;
 type ChatDetail = Awaited<ReturnType<M5BridgeV4["getChat"]>>;
 
 /** Renderer-only projection. The sidecar owns all durable identity, state transitions and CAS. */
@@ -67,7 +68,7 @@ export class ChatUiController {
   snapshot(): ChatUiSnapshot { return this.#state; }
   canAppendFollowup(): boolean {
     const chat = this.#state.activeChat;
-    return !this.#disposed && this.#bridge.version === 7 && Boolean(chat)
+    return !this.#disposed && (this.#bridge.version === 7 || this.#bridge.version === 8) && Boolean(chat)
       && !this.#state.switching && !this.isRecoveryBlocked()
       && ["draft", "running", "waitingForUser", "reviewReady", "needsAttention", "canceled"].includes(chat!.state);
   }
@@ -92,7 +93,7 @@ export class ChatUiController {
     const chat = this.#state.activeChat;
     const bridge = this.#bridge;
     const draft = chat && this.#state.followups?.[chat.chatId];
-    if (!admissionReady || !chat || bridge.version !== 7 || !draft || draft.sending || !this.canAppendFollowup() || (!draft.request && !draft.text.trim())) return;
+    if (!admissionReady || !chat || (bridge.version !== 7 && bridge.version !== 8) || !draft || draft.sending || !this.canAppendFollowup() || (!draft.request && !draft.text.trim())) return;
     const generation = this.#generation;
     let request: ChatAppendMessageRequestV1;
     try {

@@ -7,11 +7,23 @@ import { M5_BRIDGE_V4_METHODS } from "../src/m5/contracts/bridge-v4.ts";
 import { M5_BRIDGE_V5_METHODS } from "../src/m5/contracts/bridge-v5.ts";
 import { M5_BRIDGE_V6_METHODS } from "../src/m5/contracts/bridge-v6.ts";
 import { M5_BRIDGE_V7_METHODS } from "../src/m5/contracts/bridge-v7.ts";
+import { M5_BRIDGE_V8_METHODS } from "../src/m5/contracts/bridge-v8.ts";
 import type { SystemStatusG5DV1 } from "../src/m5/contracts/lifecycle-g5d-v1.ts";
 
 function status(state: "verifying" | "ready" | "failed") {
   return { storageAdmission: { state } } as SystemStatusG5DV1;
 }
+
+test("V8 output bridge requires both read methods and all prior methods", () => {
+  const bridge: Record<string, unknown> = { version: 8 };
+  for (const method of M5_BRIDGE_V8_METHODS) bridge[method] = () => {};
+  assert.equal(resolveM5Bridge(bridge), bridge);
+  delete bridge.getAgentOutputPage;
+  assert.equal(resolveM5Bridge(bridge), null);
+  bridge.getAgentOutputPage = () => {};
+  delete bridge.appendChatMessage;
+  assert.equal(resolveM5Bridge(bridge), null);
+});
 
 test("G5D admission poller is one-at-a-time and settles verifying to ready", async () => {
   let calls = 0;

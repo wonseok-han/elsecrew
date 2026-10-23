@@ -2787,6 +2787,36 @@ fn output_budget_from_projection(projection: &Map<String, Value>) -> Result<hell
     }
 }
 
+fn require_output_binding(
+    storage: &Storage,
+    binding: &hello_agent_protocol::agent_adapter_v1::AgentRunBindingV1,
+) -> Result<(), ProjectFailure> {
+    let projection = actual_run_projection(storage, &binding.run_id)?;
+    if projection.get("output_format_version").and_then(Value::as_u64) != Some(1)
+        || output_binding(&projection["record"])? != *binding
+    {
+        return Err(ProjectFailure::manifest("durable output run binding differs"));
+    }
+    Ok(())
+}
+
+pub(crate) fn read_output_head(storage: &Storage, params: &Value) -> Result<Value, ProjectFailure> {
+    let binding: hello_agent_protocol::agent_adapter_v1::AgentRunBindingV1 =
+        serde_json::from_value(params.clone()).map_err(|_| ProjectFailure::manifest("invalid output binding"))?;
+    require_output_binding(storage, &binding)?;
+    serde_json::to_value(storage.agent_output_head(&binding)?)
+        .map_err(|_| ProjectFailure::manifest("output head encoding failed"))
+}
+
+pub(crate) fn read_output_page(storage: &mut Storage, params: &Value) -> Result<Value, ProjectFailure> {
+    let request: hello_agent_protocol::agent_adapter_v1::output_pages::OutputPageRequest =
+        serde_json::from_value(params.clone()).map_err(|_| ProjectFailure::manifest("invalid output page request"))?;
+    request.validate().map_err(contract_failure)?;
+    require_output_binding(storage, &request.binding)?;
+    serde_json::to_value(storage.agent_output_page(&request)?)
+        .map_err(|_| ProjectFailure::manifest("output page encoding failed"))
+}
+
 fn actual_run_projection(
     storage: &Storage,
     run_id: &str,

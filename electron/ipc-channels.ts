@@ -1,4 +1,5 @@
 export const M5_BRIDGE_V7_CHANNELS = { chatAppendMessage: "m5:v7:chat:append-message" } as const;
+export const M5_BRIDGE_V8_CHANNELS = { agentOutputHead: "m5:v8:agent:output-head", agentOutputPage: "m5:v8:agent:output-page" } as const;
 
 export const M5_BRIDGE_V2_CHANNELS = {
   projectOpen: "m5:v2:project:open",

@@ -416,6 +416,8 @@ function registerIpcHandlers(): void {
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.chatList, invoke((client, input: ChatListRequestV1) => client.listChats(input)));
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.chatGet, invoke((client, input: ChatGetRequestV1) => client.getChat(input)));
   ipcMain.handle(M5_BRIDGE_V7_CHANNELS.chatAppendMessage, invoke((client, input: ChatAppendMessageRequestV1) => client.appendChatMessage(input)));
+  ipcMain.handle(M5_BRIDGE_V8_CHANNELS.agentOutputHead, invoke((client, input: AgentRunBindingV1) => client.getAgentOutputHead(input)));
+  ipcMain.handle(M5_BRIDGE_V8_CHANNELS.agentOutputPage, invoke((client, input: OutputPageRequest) => client.getAgentOutputPage(input)));
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.runStartFixture, invoke((client, input: FixtureRunStartRequestV1) => client.startFixtureRun(input)));
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.runCancel, invoke((client, input: RunCancelRequestV1) => client.cancelRun(input)));
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.recoveryList, invoke((client, input: PageRequestV1) => client.listRecoveries(input)));
@@ -498,4 +500,7 @@ export {
   sidecarLaunch,
 };
 import { M5_BRIDGE_V7_CHANNELS } from "./ipc-channels.ts";
+import { M5_BRIDGE_V8_CHANNELS } from "./ipc-channels.ts";
+import type { AgentRunBindingV1 } from "../src/m5/contracts/agent-adapter-v1.ts";
+import type { OutputPageRequest } from "../src/m5/contracts/agent-output-pages.ts";
 import type { ChatAppendMessageRequestV1 } from "../src/m5/contracts/run-recovery-v1.ts";

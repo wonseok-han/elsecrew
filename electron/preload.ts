@@ -9,7 +9,10 @@ import { INSTALL_CHANNEL as M5_INSTALL_CHANNEL, validateInstallRequest, validate
 
 import { M5_INTERNAL_CHANNELS_V1 } from "../src/m5/contracts/lifecycle-v1.ts";
 import type { M5BridgeV6 } from "../src/m5/contracts/bridge-v6.ts";
-import type { M5BridgeV7 } from "../src/m5/contracts/bridge-v7.ts";
+import type { M5BridgeV8 } from "../src/m5/contracts/bridge-v8.ts";
+import { validateAgentRunBindingV1 } from "../src/m5/contracts/agent-adapter-v1.ts";
+import { validateOutputPageRequest } from "../src/m5/contracts/agent-output-pages.ts";
+import { M5_BRIDGE_V8_CHANNELS } from "./ipc-channels.ts";
 import { validateChatAppendMessageRequestV1 } from "../src/m5/contracts/run-recovery-v1.ts";
 import { M5_BRIDGE_V7_CHANNELS } from "./ipc-channels.ts";
 import type { EventV1 } from "../src/m5/contracts/protocol-v1.ts";
@@ -38,8 +41,10 @@ import {
   validateWorkspaceSaveCommitInput, validateWorkspaceTreeInput,
 } from "./bridge-input.ts";
 
-const bridge: M5BridgeV7 = Object.freeze({
-  version: 7,
+const bridge: M5BridgeV8 = Object.freeze({
+  version: 8,
+  getAgentOutputHead: (input) => ipcRenderer.invoke(M5_BRIDGE_V8_CHANNELS.agentOutputHead, validateAgentRunBindingV1(input)),
+  getAgentOutputPage: (input) => ipcRenderer.invoke(M5_BRIDGE_V8_CHANNELS.agentOutputPage, validateOutputPageRequest(input)),
   appendChatMessage: (input) => ipcRenderer.invoke(M5_BRIDGE_V7_CHANNELS.chatAppendMessage, validateChatAppendMessageRequestV1(input)),
   getSystemStatus: () => ipcRenderer.invoke(M5_INTERNAL_CHANNELS_V1.systemGetStatus),
   getStorageStatus: (input) => ipcRenderer.invoke(M5_BRIDGE_V6_CHANNELS.storageGetStatus, validateStorageStatusRequestV1(input)),

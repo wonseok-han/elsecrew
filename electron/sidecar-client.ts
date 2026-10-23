@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { validateAgentRunBindingV1 } from "../src/m5/contracts/agent-adapter-v1.ts";
+import { decodeOutputPage, validateOutputHead, validateOutputPageRequest, type OutputHead, type OutputPage, type OutputPageRequest } from "../src/m5/contracts/agent-output-pages.ts";
 import { validateModelChoicesRequest, validateModelChoicesResult, type ModelChoicesRequest, type ModelChoicesResult } from "../src/m5/contracts/model-choices-v1.ts";
 import { validateApprovalRequest, validateApprovalResult, type ApprovalRequest, type ApprovalResult } from "../src/m5/contracts/approval-v1.ts";
 import { validateLoginRequest, validateLoginStatus, type LoginRequest, type LoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
@@ -543,6 +545,16 @@ export class SidecarClientV1 {
   inspectAgentRecovery(input: AgentRecoveryInspectRequestV1): Promise<AgentRecoveryRecordV1> {
     return this.#requestAgent("recovery.inspectAgent", { ...validateAgentRecoveryInspectRequestV1(input) }) as Promise<AgentRecoveryRecordV1>;
   }
+  getAgentOutputHead(input: AgentRunBindingV1): Promise<OutputHead> {
+    this.#requireAgentAdapter();
+    if (!this.#ready?.capabilities.includes("agent.outputHead")) return Promise.reject(new Error("durable output query unavailable"));
+    return this.#request("agent.outputHead", { ...validateAgentRunBindingV1(input) }) as Promise<OutputHead>;
+  }
+  getAgentOutputPage(input: OutputPageRequest): Promise<OutputPage> {
+    this.#requireAgentAdapter();
+    if (!this.#ready?.capabilities.includes("agent.outputPage")) return Promise.reject(new Error("durable output query unavailable"));
+    return this.#request("agent.outputPage", { ...validateOutputPageRequest(input) }) as Promise<OutputPage>;
+  }
   resolveAgentRecovery(input: AgentRecoveryResolveRequestV1): Promise<AgentRecoveryResolveResultV1> {
     return this.#requestAgent("recovery.resolveAgent", { ...validateAgentRecoveryResolveRequestV1(input) }) as Promise<AgentRecoveryResolveResultV1>;
   }
@@ -991,6 +1003,13 @@ export class SidecarClientV1 {
         const value = validateAgentRecoveryRecordV1(response.result);
         assertSameAgentRecoveryIdentity(request, value, "agent recovery response");
         return value;
+      }
+      case "agent.outputHead": {
+        return validateOutputHead(response.result, validateAgentRunBindingV1(pending.params));
+      }
+      case "agent.outputPage": {
+        const request = validateOutputPageRequest(pending.params);
+        return decodeOutputPage(new TextEncoder().encode(JSON.stringify(response.result)), request);
       }
       case "recovery.resolveAgent": {
         const request = validateAgentRecoveryResolveRequestV1(pending.params);

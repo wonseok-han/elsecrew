@@ -61,6 +61,8 @@ pub const METHODS_V1: &[&str] = &[
     "project.catalog",
     "agent.getCapabilities",
     "agent.getModelChoices",
+    "agent.outputHead",
+    "agent.outputPage",
     "run.startFixture",
     "run.startAgent",
     "run.startAgentSmoke",

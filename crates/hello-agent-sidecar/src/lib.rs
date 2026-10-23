@@ -594,6 +594,7 @@ impl SidecarSession {
                 capabilities: capabilities
                     .iter()
                     .chain(std::iter::once(&"chat.appendMessage"))
+                    .chain(["agent.outputHead", "agent.outputPage"].iter())
                     .chain(std::iter::once(&"provider.login"))
                     .chain(std::iter::once(&"run.approval"))
                     .chain(std::iter::once(&"project.catalog"))
@@ -998,6 +999,8 @@ impl Sidecar {
                 | "recovery.markResolved"
                 | "agent.getCapabilities"
                 | "agent.getModelChoices"
+                | "agent.outputHead"
+                | "agent.outputPage"
                 | "run.startAgent"
                 | "run.cancelAgent"
                 | "recovery.inspectAgent"
@@ -1007,6 +1010,8 @@ impl Sidecar {
                 request.method.as_str(),
                 "agent.getCapabilities"
                     | "agent.getModelChoices"
+                    | "agent.outputHead"
+                    | "agent.outputPage"
                     | "run.startAgent"
                     | "run.cancelAgent"
                     | "recovery.inspectAgent"
@@ -1958,6 +1963,14 @@ impl Sidecar {
                             ..chat::G5Action::default()
                         })
                     }
+                    "agent.outputHead" => Ok(chat::G5Action {
+                        result: agent_runtime::read_output_head(&self.storage, &request.params)?,
+                        ..chat::G5Action::default()
+                    }),
+                    "agent.outputPage" => Ok(chat::G5Action {
+                        result: agent_runtime::read_output_page(&mut self.storage, &request.params)?,
+                        ..chat::G5Action::default()
+                    }),
                     "run.startAgent" => {
                         let parsed: AgentRunStartRequestV1 =
                             serde_json::from_value(request.params.clone()).map_err(|error| {
