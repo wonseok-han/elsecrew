@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전921251c는 출력 저장 primitive 구현 진척이다. clean 통합 checkout에서 기존 R3 session의 connection 독점 차용/data_version/오류 시 cursor 폐기 방식을 읽고 Karpathy 최소 변경으로 단일 run 출력 검증 세션을 추가했다. 호출당100행/512KiB page만 확인하며 transaction은 호출 사이 보유하지 않는다. 전체 row 순서·본문 byte 합계·head 뒤 extra row·DB event ID와 JSON event ID 불일치를 거절한다.
+- 정상101개 다중 호출·누락/합계/ID/extra 손상·취소 이후 재사용 거절 회귀3개를 작성했다. 이전 추가분과 함께 아직 실행하지 않았으며 format/diff 검사만 수행했다. 한 run의 출력 검증은 전체 admission이 아니다. 전체 head 목록/고아 row 역방향 검사·run/fence 결속·schema migration·물리 quota·제품 연결이 계속 남는다.
+- 새 DB 생성/기존 사용자 데이터·모델·앱 실행·main/push 없음. 다음은 위 전체 admission closure와 migration 연결이며 전체 목표는 유지한다.
+
+### 2026-10-23 · by Codex
 - 직전eed1472는 출력 reader 구현 진척이다. 현재 통합 checkout에서 storage V10과 기존 append/replay 경계를 확인하고 Karpathy 최소 변경으로 transaction-scoped 출력 원장 함수를 추가했다. begin/append/seal/head/page, run 결속·연속 seq·event ID 유일성·text 예산·byte 제한 keyset 조회를 구현했다. 본문은 전용 canonical row 한 번만 저장하고 head만 파생 갱신하도록 설계를 구체화했다.
 - 아직 schema migration/admission/R3 검증·run/fence 원자 결속·물리 quota·실제 runtime 호출은 연결하지 않았다. 제품 DB는 변경하지 않는다. caller는 write admission과 helper 실패 시 전체 rollback을 책임지며 sealed는 종료 성공을 뜻하지 않는다. source/read/UI 활성화는 이 경계 연결 및 독립 검토 뒤다.
 - 3,000개 append/page/seal 및 rollback 두 회귀를 작성했다. 테스트 실행은 이전 TS/head/reader 추가분과 함께 후속 연결 검증으로 모은다. diff check만 수행했다. 모델/앱·사용자 데이터·main/push 없음. 다음은 migration/R3 admission 연결이다.

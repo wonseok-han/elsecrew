@@ -11,6 +11,8 @@ use hello_agent_protocol::agent_adapter_v1::{
 use rusqlite::{params, OptionalExtension, Transaction};
 use serde_json::Value;
 
+pub(super) mod verification;
+
 pub(super) const SCHEMA: &str = "
 CREATE TABLE run_output_heads (
  run_id TEXT PRIMARY KEY NOT NULL,
@@ -161,7 +163,7 @@ pub(super) fn page(
     if request.through_sequence > current.committed_sequence {
         return Err(invalid("output cursor exceeds committed head"));
     }
-    let mut statement = tx.prepare("SELECT output_sequence, length(CAST(event_json AS BLOB)), CASE WHEN length(CAST(event_json AS BLOB)) <= 524288 THEN event_json ELSE NULL END FROM run_output_records WHERE run_id=?1 AND output_sequence>?2 AND output_sequence<=?3 ORDER BY output_sequence LIMIT ?4").map_err(sqlite_error)?;
+    let mut statement = tx.prepare("SELECT output_sequence, length(CAST(event_json AS BLOB)), CASE WHEN length(CAST(event_json AS BLOB)) <= 524288 THEN event_json ELSE NULL END, CASE WHEN length(CAST(event_id AS BLOB)) <= 8192 THEN event_id ELSE NULL END FROM run_output_records WHERE run_id=?1 AND output_sequence>?2 AND output_sequence<=?3 ORDER BY output_sequence LIMIT ?4").map_err(sqlite_error)?;
     let mut rows = statement
         .query(params![
             request.binding.run_id,
@@ -182,8 +184,12 @@ pub(super) fn page(
             return Err(invalid("oversized stored output event"));
         }
         let json: String = row.get(2).map_err(sqlite_error)?;
-        let event =
+        let event: hello_agent_protocol::agent_adapter_v1::AgentPublicEventV1 =
             serde_json::from_str(&json).map_err(|_| invalid("invalid stored output event"))?;
+        let event_id: String = row.get(3).map_err(sqlite_error)?;
+        if event_id != event.event_id {
+            return Err(invalid("stored output event id mismatch"));
+        }
         let previous_sequence = result.next_after_sequence;
         result.rows.push(OutputRow {
             output_sequence: sequence,
