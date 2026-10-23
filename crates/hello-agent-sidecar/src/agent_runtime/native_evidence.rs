@@ -46,7 +46,13 @@ pub(super) fn validate(projection: &Map<String, Value>) -> Result<(), ProjectFai
         // A launch can fail before a thread exists. It cannot produce output or
         // be marked running/successful without the atomic thread receipt.
         if projection.contains_key("claude_session_observation") || matches!(record["state"].as_str(), Some("running" | "succeeded"))
-            || !projection.get("public_events").and_then(Value::as_array).is_some_and(Vec::is_empty)
+            || if projection.get("output_format_version") == Some(&json!(1)) {
+                // Storage admission/runtime verifies the bound output head is
+                // empty until the native thread receipt exists.
+                projection.contains_key("public_events")
+            } else {
+                !projection.get("public_events").and_then(Value::as_array).is_some_and(Vec::is_empty)
+            }
         { return Err(failure()); }
         return Ok(());
     };

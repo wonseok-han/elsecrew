@@ -15,16 +15,19 @@ fn quoted(value: &Value) -> String {
 
 #[test]
 fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init() {
-    for case in [
-        "success",
-        "organization-guard",
-        "default-effort",
-        "allow",
-        "cancel",
-        "bad-init",
-        "unknown-queue",
+    for (case, durable) in [
+        ("success", false),
+        ("organization-guard", false),
+        ("default-effort", false),
+        ("allow", false),
+        ("cancel", false),
+        ("bad-init", false),
+        ("unknown-queue", false),
+        ("success", true),
+        ("cancel", true),
+        ("bad-init", true),
     ] {
-        let mut f = Fixture::new();
+        let mut f = Fixture::with_durable_output(durable);
         let snapshot = f.snapshot("req_claude_snapshot");
         let chat = f.create_exact_claude_chat(&snapshot, "goal", "req_claude_chat");
         let chat_id = chat["chatId"].as_str().unwrap();
@@ -143,7 +146,8 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
         let mut events = Vec::new();
         while runtime.has_active_run(&identity.run_id) {
             assert!(Instant::now() < deadline, "{case}: owner did not terminate");
-            events.extend(runtime.poll(&mut f.storage, &mut f.projects).unwrap());
+            events.extend(runtime.poll(&mut f.storage, &mut f.projects)
+                .unwrap_or_else(|error| panic!("{case} durable={durable}: {error:?}")));
             let current = f
                 .storage
                 .projection_record("run", &identity.run_id)
@@ -223,9 +227,23 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
             "{case}"
         );
         assert_eq!(approved, case == "allow");
-        let final_text: Vec<_> = ended["public_events"]
-            .as_array()
-            .unwrap()
+        let public = if durable {
+            assert!(ended.get("public_events").is_none());
+            assert!(!events.iter().any(|event| event.event == "agent.publicEvent"));
+            let binding = serde_json::from_value(json!({
+                "chatId":identity.chat_id,"taskId":identity.task_id,"projectId":identity.project_id,
+                "worktreeId":identity.worktree_id,"workspaceIdentity":identity.workspace_identity,
+                "runId":identity.run_id,"roleId":"coding","capabilityFingerprint":capability.fingerprint
+            })).unwrap();
+            let head = f.storage.agent_output_head(&binding).unwrap();
+            assert!(head.sealed);
+            if head.committed_sequence == 0 { vec![] } else {
+                f.storage.agent_output_page(&hello_agent_protocol::agent_adapter_v1::output_pages::OutputPageRequest {
+                    format_version:1,binding,after_sequence:0,through_sequence:head.committed_sequence,limit:100,
+                }).unwrap().rows.into_iter().map(|row| serde_json::to_value(row.event).unwrap()).collect()
+            }
+        } else { ended["public_events"].as_array().unwrap().clone() };
+        let final_text: Vec<_> = public
             .iter()
             .filter(|event| event["kind"] == "final")
             .map(|event| event["text"].clone())
@@ -247,7 +265,9 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
         reusable.finish().unwrap();
         let database = f._root.path().join("data/hello-agent.sqlite3");
         drop(f.storage);
-        let mut storage = crate::Storage::open(&database).unwrap();
+        let mut storage = if durable {
+            crate::Storage::open_durable_output_for_test(&database).unwrap()
+        } else { crate::Storage::open(&database).unwrap() };
         AgentRuntime::blocked()
             .recover_unclean_runs(&mut storage, &mut f.projects)
             .unwrap();

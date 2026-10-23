@@ -50,6 +50,7 @@ pub(super) fn append_final(tx: &Transaction<'_>, output: &FinalOutput, path: &st
     let current = head(tx, &output.binding)?;
     verify_run_binding(tx, &current)?;
     append_item(tx, &output.binding, output.sequence, &output.event, 64 * 1024 * 1024, output.item_update.as_ref())?;
+    verify_run_binding(tx, &head(tx, &output.binding)?)?;
     quota::check(tx, path, false)
 }
 
@@ -86,6 +87,7 @@ impl super::Storage {
         let current = head(&tx, binding)?;
         verify_run_binding(&tx, &current)?;
         append_item(&tx, binding, sequence, event, text_budget, item_update)?;
+        verify_run_binding(&tx, &head(&tx, binding)?)?;
         // The pager can retain dirty pages until commit; the pre-write headroom
         // is conservative, while this catches WAL growth already flushed.
         quota::check(&tx, &path, false)?;
@@ -242,6 +244,12 @@ fn verify_run_binding(tx: &Transaction<'_>, output: &OutputHead) -> Result<(), S
     }
     if !matches!(state.as_str(), "preparing" | "running" | "cancelling") && !output.sealed {
         return Err(invalid("terminal run output must be sealed"));
+    }
+    if projection.get("native_transport").is_some()
+        && projection.get("native_thread_receipt").is_none()
+        && output.committed_sequence != 0
+    {
+        return Err(invalid("native output requires a committed thread receipt"));
     }
     if let Some(value) = projection.get("provider_run_fence") {
         let fence = crate::provider_login_process::RunFenceBinding::from_value(value)?;

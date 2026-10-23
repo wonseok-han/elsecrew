@@ -67,7 +67,18 @@ impl NativeRun {
         {
             return Err(failure());
         }
-        let public = projection["public_events"].as_array().ok_or_else(failure)?;
+        let public: &[Value] = if projection.contains_key("output_format_version") {
+            // Durable bodies are consumed through the bounded output-page API.
+            // Emitting them into the legacy public-event reducer would recreate
+            // its per-run array/count limit. The renderer reconciles the head
+            // periodically even when no notification arrives.
+            let binding = output_binding(run).map_err(|_| failure())?;
+            storage.agent_output_head(&binding)?;
+            if self.public_count != 0 { return Err(failure()); }
+            &[]
+        } else {
+            projection.get("public_events").and_then(Value::as_array).ok_or_else(failure)?
+        };
         if public.len() < self.public_count {
             return Err(failure());
         }

@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 기준49083d7/clean 통합 checkout에서 native event 전달도 제거된 legacy public_events를 요구하는 누락을 수정했다. durable는 결속된 output head를 검사하고 본문은 기존 bounded page reader가 조회한다. legacy 이벤트 배열로 재주입하지 않으며 run 상태 알림은 유지한다. 출력 패널은 선택 run의 공개/상태 알림을 조회 힌트로 사용하고 두 구독을 함께 정리한다. 별도 output-head 알림은 아직 없으며500ms reconciliation에 의존하는 현황을 완료로 숨기지 않는다.
+- 기존 Claude 로컬 pipe-peer 시험에 durable 성공/취소/잘못된 init을 추가했다. 첫 실패에서 native_evidence가 준비 중 빈 legacy 배열을 요구하는 원인을 확인했다. format1은 배열 부재를 허용하되 Storage의 결속 검사에서 native receipt 전 head가 비어 있음을 요구한다. append 뒤에도 같은 transaction에서 검사해 첫 부적절한 출력과 final 문맥을 함께 rollback한다. marker 추가/재시작 검증에도 같은 경계가 적용된다. Karpathy 최소 변경으로 기존 입장/프로세스 종료 검사를 보존했다.
+- 누적 cargo check --tests와 TypeScript noEmit PASS. Claude 모의 native 수신 시험10경우 PASS(28.11초), 실제 공급자 실행은 아니다. 읽기 전용 검토1명은 이번 전달/검증 이동 diff에서 차단 결함 없음으로 확인했으며 음성 회귀를 요구했다. receipt 전 첫 append·출력 있는 run의 pre-thread marker 추가 거절을 기존 atomic/reopen 회귀에 추가해 PASS(1.72초)했고 diff check PASS다. 실제 계정/모델·사용자 DB/앱·main/push 없음. Codex native 장시간·head 알림·화면 통합/G6/Windows/출시는 남는다.
+
+### 2026-10-23 · by Codex
 - 기준cfe496a/clean 통합 checkout에서4개 actual-adapter fixture run을 동시에 시작해 각각3,000개 공개 출력을 내보내는 통합 회귀를 연결했다. 실제 모델 없이 launcher/child 파이프·classifier·runtime·출력 저장·종료·V11 재열기/전체 page 원문을 대조한다. 네 snapshot은 실행 전에 준비하며 기존 실행 중 export 차단을 우회하지 않는다. 이는 native Codex/Claude 또는 renderer 성능 시험의 대체 증거가 아니다.
 - 연결 조사에서 poll의100건/4MiB 묶음 경계를 run 전체 예산 초과로 처리하는 결함을 발견했다. durable만 다음 프레임 소비 전에100frame 또는 최대 본문 여유 경계에서 yield하며 종료한 child의 잔여 출력도 다음 poll에 이어 읽는다. legacy 한도는 그대로다. Karpathy 최소 변경 원칙으로 기존 bounded 수신 queue·종료 확인 경로를 유지했다.
 - 첫 통합 실행은 snapshot 준비 순서 때문에 실패해 시험 순서를 수정했고 남은 long-stream 프로세스 없음 확인. 두 번째는33.09초 뒤 종료 처리에서 제거된 public_events Map key 직접 접근 panic을 드러냈다. finish와 start-failure의 optional 배열 접근을 get으로 수정했으며 marker/출력 head 보존 경로는 유지한다. 읽기 전용 독립 검토1명은 배치/추가 수정 범위에서 차단 결함 없음으로 확인했다. 전체 파동 승인 아님. 최종 재시험 PASS(58.29초): 네 run 각3,000건·poll당 최대400건·성공/봉인·재열기 뒤12,000개 원문 순서 일치. 새 시험 파일 rustfmt와 diff check PASS. 시작 실패/취소/본문 경계와 native/UI 통합은 남는다. 사용자 계정/모델·앱 패키지·main/push 없음.

@@ -58,7 +58,15 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
     setState("loading");
     const fail = () => { if (!abort.signal.aborted) { setState("failed"); clearInterval(timer); } };
     const source: AgentOutputSource = {
-      subscribe: async (_binding, notify) => bridge.onAgentPublicEvent(() => notify()),
+      subscribe: async (selectedBinding, notify) => {
+        const publicOff = bridge.onAgentPublicEvent(event => {
+          if (event.runId === selectedBinding.runId) notify();
+        });
+        const stateOff = bridge.onAgentRunStateChanged(event => {
+          if (event.run.runId === selectedBinding.runId) notify();
+        });
+        return () => { publicOff(); stateOff(); };
+      },
       head: (value, signal) => abortable(bridge.getAgentOutputHead(value), signal),
       page: async (request, signal) => new TextEncoder().encode(JSON.stringify(await abortable(bridge.getAgentOutputPage(request), signal))),
     };

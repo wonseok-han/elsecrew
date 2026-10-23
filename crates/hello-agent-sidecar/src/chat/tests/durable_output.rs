@@ -187,6 +187,47 @@ fn final_output_and_followup_context_commit_or_rollback_together_after_restart()
         item_update: None,
     };
 
+    // A native transport without its thread receipt cannot commit even its
+    // first output. The chat half must roll back along with that output.
+    let mut native_projection = projection.clone();
+    native_projection.remove("last_event_sequence");
+    native_projection.insert("native_transport".into(), json!({
+        "schemaVersion":1,"adapter":"claude.stream.v1",
+        "connectionId":"11111111-1111-4111-8111-111111111111","requiresProviderAttestation":false
+    }));
+    f.storage
+        .upsert_projection_record(
+            "run",
+            &binding.run_id,
+            "op_no_receipt_marker",
+            None,
+            native_projection.clone(),
+        )
+        .unwrap();
+    assert!(f
+        .storage
+        .append_final_output_with_context(context(), expected, output())
+        .is_err());
+    assert_eq!(f.storage.chat_message_history(chat_id).unwrap(), before);
+    assert_eq!(
+        f.storage
+            .agent_output_head(&binding)
+            .unwrap()
+            .committed_sequence,
+        0
+    );
+    let mut restored = projection.clone();
+    restored.remove("last_event_sequence");
+    f.storage
+        .upsert_projection_record(
+            "run",
+            &binding.run_id,
+            "op_remove_test_marker",
+            None,
+            restored,
+        )
+        .unwrap();
+
     // Reject at the output insert, after the chat event and projection writes.
     f.storage.connection_for_test().execute_batch("CREATE TRIGGER reject_test_output BEFORE INSERT ON run_output_records BEGIN SELECT RAISE(ABORT, 'injected output failure'); END;").unwrap();
     assert!(f
@@ -228,6 +269,17 @@ fn final_output_and_followup_context_commit_or_rollback_together_after_restart()
     f.storage
         .append_final_output_with_context(context(), expected, output())
         .unwrap();
+    // Existing output cannot be relabeled as a pre-thread native run either.
+    assert!(f
+        .storage
+        .upsert_projection_record(
+            "run",
+            &binding.run_id,
+            "op_late_native_marker",
+            None,
+            native_projection
+        )
+        .is_err());
     assert!(f
         .storage
         .append_final_output_with_context(context(), expected, output())
