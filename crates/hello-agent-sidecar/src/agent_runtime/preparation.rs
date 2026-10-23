@@ -1407,6 +1407,12 @@ impl RunPreparation {
             &created,
         )?;
         let mut projection = agent_run_projection(&run, &self.manifest, None, None, Vec::new())?;
+        if storage.uses_durable_output()? {
+            projection.insert("output_format_version".into(), Value::from(1));
+            for key in ["public_events", "public_event_count", "public_text_bytes", "public_ledger_cumulative_snapshot_bytes"] {
+                projection.remove(key);
+            }
+        }
         projection.insert(
             RECOVERY_RESERVATION_FIELD.into(),
             Value::String(new_recovery_id()),

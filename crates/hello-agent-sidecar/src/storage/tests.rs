@@ -9,6 +9,24 @@ use rusqlite::types::Value as SqlValue;
 use rusqlite::Connection;
 use tempfile::TempDir;
 
+#[test]
+fn durable_fixture_open_migrates_reopens_and_does_not_enable_product_open() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("output.sqlite3");
+    {
+        let storage = Storage::open_durable_output_for_test(&path).unwrap();
+        assert!(storage.uses_durable_output().unwrap());
+        assert_eq!(storage_schema_version(&storage.connection).unwrap(), Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11));
+    }
+    assert!(Storage::open_for_admission(&path, &AtomicBool::new(false)).is_err());
+    {
+        let storage = Storage::open_durable_output_for_test(&path).unwrap();
+        assert!(storage.uses_durable_output().unwrap());
+        storage.connection.execute_batch("DROP INDEX run_output_item_order").unwrap();
+    }
+    assert!(Storage::open_durable_output_for_test(&path).is_err());
+}
+
 mod catalog;
 mod compaction_writer_v10;
 mod reopen_bytes;

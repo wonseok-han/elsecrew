@@ -812,10 +812,9 @@ impl AgentRuntime {
                 Some(internal),
                 Vec::new(),
             )?;
-            preserve_recovery_internal(
-                &actual_run_projection(storage, &run_id)?,
-                &mut preparing_payload,
-            );
+            let stored = actual_run_projection(storage, &run_id)?;
+            preserve_provider_evidence(&stored, &mut preparing_payload);
+            preserve_recovery_internal(&stored, &mut preparing_payload);
             Ok((barrier, preparing_payload))
         })();
         let (barrier, preparing_payload) = match configured {
@@ -943,7 +942,15 @@ impl AgentRuntime {
                 ))
             }
         };
-        let mut provider_classifier = observed_provider.definition.event_classifier();
+        let classifier = (|| {
+            let projection = actual_run_projection(storage, &run_id).map_err(|error| error.detail)?;
+            let budget = output_budget_from_projection(&projection).map_err(|error| error.detail().to_owned())?;
+            observed_provider.definition.event_classifier().with_output_budget(budget).map_err(|error| error.to_string())
+        })();
+        let mut provider_classifier = match classifier {
+            Ok(classifier) => classifier,
+            Err(error) => return Err(fail_before_release(storage, projects, &run_id, Some(launcher), Some(tracker), &error)),
+        };
         let provider_profile = ProviderProfileTupleV1 {
             model_selector: profile.model_selector.clone(),
             reasoning_effort: profile.reasoning_effort.clone(),

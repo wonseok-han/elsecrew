@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전2755548는 final/문맥 원자 저장과 누적 컴파일 진척이다. clean 통합 checkout에서 cfg(test) 전용 open_durable_output_for_test를 추가했다. 기존 product admission으로 V10을 만든 뒤 V11 이관/기존+출력 admission을 완료해야 쓰기를 허용하며 V11 재열기도 같은 검증을 거친다. 일반 product open은 V11 거절을 유지한다.
+- 준비 run 생성은 admission된 V11에서만 output_format_version=1과 빈 output head를 원자 생성하도록 연결했다. fixture pre-release projection 재작성의 marker 보존 누락을 보완했고 fixture classifier도 검증된 run의 출력 예산을 선택한다. native 전송/저장/화면에 이어 신규 실행 생성까지 시험 가능한 경로가 준비됐으나 실제 모델/제품 활성화는 아니다.
+- Karpathy 최소 변경으로 기존 admission/migration/launch 실패 cleanup 경로를 재사용했다. fresh 이관·재열기·product open 거절·schema index 손상 거절 회귀를 작성했다. diff check만 확인, 새 경로 컴파일/실행과 누적 통합 검증·독립 검토는 아직 남는다. 다음은 합성 장시간 실행/최종 문맥 원자 rollback·재시작 묶음 검증과 수정이며 G6/Windows/출시도 미완료다. 사용자 DB·모델·앱/main/push 없음.
+
+### 2026-10-23 · by Codex
 - 직전7e7f324는 출력 항목 순서 검사 구현 진척이다. clean 통합 checkout에서 durable final만 기존 teamMessage 문맥 스냅샷에 함께 저장하도록 연결했다. 출력 row와 chat ledger/materialization은 하나의 IMMEDIATE transaction이며 예상 chat aggregate sequence를 확인한다. duplicate/no-op·출력 거절 시 문맥만 남지 않도록 rollback한다. delta/status는 문맥에 넣지 않는다.
 - resolve_prompt가 기존 chat_message_history와 명시 선택 message IDs를 읽는 것을 확인해 입력 선택 범위를 바꾸지 않았다. 제안서에 bounded final1건 문맥 복사 예외를 명시했다. 기존 전체 run 배열 중복 저장은 재도입하지 않으며 종료 증거 이후 final 호출 조건도 유지했다. Karpathy 원칙으로 기존 atomic upsert/replay/메시지 검증을 재사용했다.
 - 누적 cargo check -p hello-agent-sidecar --tests --locked에서 quota PRAGMA의 u64 FromSql 오류2건을 발견해 기존 checked row_u64로 수정, 재검사 PASS(16278 exit0,5.06초)했다. 테스트 실행·실패 주입/재시작 교차 원장 검증·독립 검토는 아직 전이다. 신규 run format 생성/이관 활성화와 통합 UI/성능/G6/Windows/출시는 남는다. 사용자 DB·모델·앱/main/push 없음.
