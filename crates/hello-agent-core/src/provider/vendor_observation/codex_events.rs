@@ -7,10 +7,9 @@
 //! silent acceptance. Raw reasoning, tools, errors and credentials are not projected.
 
 use super::{BoundedObservation, ProviderError};
-use crate::provider::{
-    PROVIDER_INTERNAL_EVENTS_MAX, PROVIDER_OBSERVATION_TOTAL_MAX_BYTES, PROVIDER_PUBLIC_EVENTS_MAX,
-    PROVIDER_PUBLIC_TEXT_MAX_BYTES, PROVIDER_PUBLIC_TEXT_TOTAL_MAX_BYTES,
-};
+use crate::provider::PROVIDER_PUBLIC_TEXT_MAX_BYTES;
+#[cfg(test)]
+use crate::provider::{PROVIDER_INTERNAL_EVENTS_MAX, PROVIDER_OBSERVATION_TOTAL_MAX_BYTES, PROVIDER_PUBLIC_EVENTS_MAX};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
@@ -111,6 +110,7 @@ struct TextItem {
 
 /// One bounded projection budget per expected turn. Failure is sticky.
 pub struct TurnProjection {
+    budget: crate::provider::ProviderEventBudget,
     thread_id: String,
     turn_id: String,
     events: usize,
@@ -132,10 +132,15 @@ fn decode<T: serde::de::DeserializeOwned>(raw: &str) -> Result<T, ProviderError>
 
 impl TurnProjection {
     pub fn new(thread_id: &str, turn_id: &str) -> Result<Self, ProviderError> {
+        Self::with_budget(thread_id, turn_id, crate::provider::ProviderEventBudget::LegacyV1)
+    }
+
+    pub fn with_budget(thread_id: &str, turn_id: &str, budget: crate::provider::ProviderEventBudget) -> Result<Self, ProviderError> {
         if !identifier(thread_id) || !identifier(turn_id) {
             return Err(invalid());
         }
         Ok(Self {
+            budget,
             thread_id: thread_id.into(),
             turn_id: turn_id.into(),
             events: 0,
@@ -165,8 +170,8 @@ impl TurnProjection {
     fn charge(&mut self, input: &BoundedObservation) -> Result<(), ProviderError> {
         self.events += 1;
         self.bytes += input.bytes.len();
-        if self.events > PROVIDER_INTERNAL_EVENTS_MAX
-            || self.bytes > PROVIDER_OBSERVATION_TOTAL_MAX_BYTES
+        if self.events > self.budget.internal_events()
+            || self.bytes > self.budget.observation_bytes()
         {
             return Err(invalid());
         }
@@ -211,8 +216,8 @@ impl TurnProjection {
         }
         self.public_events += 1;
         self.public_bytes += text.len();
-        if self.public_events > PROVIDER_PUBLIC_EVENTS_MAX
-            || self.public_bytes > PROVIDER_PUBLIC_TEXT_TOTAL_MAX_BYTES
+        if self.public_events > self.budget.public_events()
+            || self.public_bytes > self.budget.public_bytes()
         {
             return Err(invalid());
         }
@@ -349,5 +354,16 @@ mod tests {
         }
         assert!(p.project(&large_private).is_err());
         assert!(p.project(&delta()).is_err());
+    }
+
+    #[test]
+    fn durable_turn_accepts_long_stream_and_still_stops_at_budget() {
+        let budget = crate::provider::ProviderEventBudget::DurableV1;
+        let mut parser = TurnProjection::with_budget("t", "r", budget).unwrap();
+        for _ in 0..budget.public_events() {
+            assert!(parser.project(&delta()).is_ok());
+        }
+        assert!(parser.project(&delta()).is_err());
+        assert!(parser.project(&delta()).is_err());
     }
 }

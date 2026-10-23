@@ -4,10 +4,7 @@
 //! Result observations are not proof of completion, empty queues, or child cleanup.
 //! Partial stream events are not emitted here, avoiding duplicate text delivery.
 use super::{BoundedObservation, ProviderError};
-use crate::provider::{
-    PROVIDER_INTERNAL_EVENTS_MAX, PROVIDER_OBSERVATION_TOTAL_MAX_BYTES, PROVIDER_PUBLIC_EVENTS_MAX,
-    PROVIDER_PUBLIC_TEXT_MAX_BYTES, PROVIDER_PUBLIC_TEXT_TOTAL_MAX_BYTES,
-};
+use crate::provider::PROVIDER_PUBLIC_TEXT_MAX_BYTES;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::collections::BTreeSet;
@@ -83,6 +80,7 @@ fn identifier(value: &str) -> bool {
 
 /// One session's bounded public projection. Failure is sticky; no raw frames retained.
 pub struct SessionProjection {
+    budget: crate::provider::ProviderEventBudget,
     session_id: String,
     seen: BTreeSet<String>,
     events: usize,
@@ -94,10 +92,15 @@ pub struct SessionProjection {
 
 impl SessionProjection {
     pub fn new(session_id: &str) -> Result<Self, ProviderError> {
+        Self::with_budget(session_id, crate::provider::ProviderEventBudget::LegacyV1)
+    }
+
+    pub fn with_budget(session_id: &str, budget: crate::provider::ProviderEventBudget) -> Result<Self, ProviderError> {
         if !identifier(session_id) {
             return Err(invalid());
         }
         Ok(Self {
+            budget,
             session_id: session_id.into(),
             seen: BTreeSet::new(),
             events: 0,
@@ -122,8 +125,8 @@ impl SessionProjection {
     fn project_inner(&mut self, input: &BoundedObservation) -> Result<Projection, ProviderError> {
         self.events += 1;
         self.bytes += input.bytes.len();
-        if self.events > PROVIDER_INTERNAL_EVENTS_MAX
-            || self.bytes > PROVIDER_OBSERVATION_TOTAL_MAX_BYTES
+        if self.events > self.budget.internal_events()
+            || self.bytes > self.budget.observation_bytes()
         {
             return Err(invalid());
         }
@@ -202,8 +205,8 @@ impl SessionProjection {
         }
         self.public_events += 1;
         self.public_bytes += text.len();
-        if self.public_events > PROVIDER_PUBLIC_EVENTS_MAX
-            || self.public_bytes > PROVIDER_PUBLIC_TEXT_TOTAL_MAX_BYTES
+        if self.public_events > self.budget.public_events()
+            || self.public_bytes > self.budget.public_bytes()
         {
             return Err(invalid());
         }
@@ -218,6 +221,16 @@ impl SessionProjection {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn durable_session_exceeds_legacy_count_without_retaining_raw_frames() {
+        let mut parser = super::SessionProjection::with_budget("session", crate::provider::ProviderEventBudget::DurableV1).unwrap();
+        for i in 0..3000 {
+            let mut value = frame(&format!("uuid-{i}"));
+            value["session_id"] = serde_json::Value::String("session".into());
+            assert!(parser.project(&observe(&value)).is_ok());
+        }
+        assert_eq!(parser.seen.len(), 3000);
+    }
     use super::*;
     use serde_json::{json, Value};
     fn result() -> Value {

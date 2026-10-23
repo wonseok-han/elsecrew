@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전d24301d는 durable runtime 경로 진척이다. clean 통합 checkout에서 core classifier와 Codex TurnProjection/Claude SessionProjection의 예산을 LegacyV1/DurableV1로 분리했다. 기존 생성자는 legacy를 유지하고 새 생성자/초기 classifier 선택에서만 durable을 지정할 수 있다. 관측 시작 후 예산 변경은 거절한다.
+- 새 비활성 예산은 내부65,536개·공개16,384개·raw256MiB·공개본문64MiB이며 단일 항목 상한은 그대로다. parser는 원문 누적 없이 카운터/Claude bounded delivery ID 집합을 유지한다. 장시간 count 통과·초과 후 sticky 실패 회귀를 작성했지만 실행 전이다. 실제 runtime은 아직 이 모드를 선택하지 않는다.
+- diff check만 확인했다. 물리 quota·capability negotiation·새 run 생성/IPC/UI·최종 응답 문맥 및 누적 검증/독립 검토가 남으며 수치와 예산 합계는 활성화 전 검토 대상이다. 사용자 DB·앱·모델·main/push 없음.
+
+### 2026-10-23 · by Codex
 - 직전e6b0c6a는 lifecycle 원자 저장 연결 진척이다. clean 통합 checkout에서 actual runtime의 명시 output_format_version 경로를 추가했다. projection 조회는 head/run 결속을 확인하고 공개 출력 저장은 배열 복사 대신 Storage append로 전달한다. poll collector는 새 형식에서 과거 배열을 보관하지 않고100개/4MiB ingress batch만 유지하며64MiB 본문 예산은 저장 계층에 전달한다. 기존 v1 제한은 유지한다.
 - 복구 시 output head를 확인하고 종료/실패 projection 재작성 시 marker를 보존하며 legacy 배열/중복 counters를 제거한다. 새 형식의 per-event chat projection 중복 쓰기는 하지 않는다. 따라서 UI page 조회와 최종 응답/후속 문맥 연결은 활성화 전 필수 잔여다. provider observation/parser 한도와 새 run marker 생성·V11 자동 이관은 아직 미연결이라 실제 장시간 실행을 켜지 않았다.
 - Karpathy 최소 변경 원칙으로 기존 run/event binding·Storage API를 재사용했다. 이번 누적 runtime 변경은 아직 실행 검증 전이며 diff check만 수행했다. 물리 quota·IPC/UI·독립 검토/누적 검증이 남으며 사용자 DB·앱·모델·main/push 없음.

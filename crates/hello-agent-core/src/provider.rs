@@ -20,6 +20,20 @@ pub const PROVIDER_PUBLIC_EVENTS_MAX: usize = 256;
 pub const PROVIDER_PUBLIC_TEXT_TOTAL_MAX_BYTES: usize = 1024 * 1024;
 pub const PROVIDER_PUBLIC_TEXT_MAX_BYTES: usize = 64 * 1024;
 
+/// Explicit parser budget selection, not runtime admission or execution authority.
+/// DurableV1 is inactive until the owning runtime negotiates durable output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderEventBudget {
+    LegacyV1,
+    DurableV1,
+}
+impl ProviderEventBudget {
+    fn internal_events(self) -> usize { match self { Self::LegacyV1 => PROVIDER_INTERNAL_EVENTS_MAX, Self::DurableV1 => 65_536 } }
+    fn observation_bytes(self) -> usize { match self { Self::LegacyV1 => PROVIDER_OBSERVATION_TOTAL_MAX_BYTES, Self::DurableV1 => 256 * 1024 * 1024 } }
+    fn public_events(self) -> usize { match self { Self::LegacyV1 => PROVIDER_PUBLIC_EVENTS_MAX, Self::DurableV1 => 16_384 } }
+    fn public_bytes(self) -> usize { match self { Self::LegacyV1 => PROVIDER_PUBLIC_TEXT_TOTAL_MAX_BYTES, Self::DurableV1 => 64 * 1024 * 1024 } }
+}
+
 const CLAUDE_VERSION: &str = "2.1.241";
 const CODEX_VERSION: &str = "0.150.0";
 const CLAUDE_AUTH_PARSER: &str = "claude-code.auth-status.v1";
@@ -500,6 +514,8 @@ struct ClaudeHandshakeWire {
 
 #[derive(Debug)]
 pub struct ProviderEventClassifierV1 {
+    budget: ProviderEventBudget,
+    observation_bytes: usize,
     definition: ProviderDefinitionV1,
     handshake_seen: bool,
     final_seen: bool,
@@ -513,6 +529,8 @@ impl ProviderEventClassifierV1 {
     fn new(definition: ProviderDefinitionV1) -> Self {
         Self {
             definition,
+            budget: ProviderEventBudget::LegacyV1,
+            observation_bytes: 0,
             handshake_seen: false,
             final_seen: false,
             terminal_seen: false,
@@ -520,6 +538,14 @@ impl ProviderEventClassifierV1 {
             public_events: 0,
             public_text_bytes: 0,
         }
+    }
+
+    pub fn with_output_budget(mut self, budget: ProviderEventBudget) -> Result<Self, ProviderError> {
+        if self.sequence != 0 || self.handshake_seen || self.terminal_seen {
+            return fail("cannot change provider budget after observations started");
+        }
+        self.budget = budget;
+        Ok(self)
     }
 
     pub fn accept_claude_handshake(
@@ -617,8 +643,15 @@ impl ProviderEventClassifierV1 {
         &mut self,
         observation: BoundedObservation,
     ) -> Result<InternalProviderEventV1, ProviderError> {
-        if self.terminal_seen || self.sequence as usize >= PROVIDER_INTERNAL_EVENTS_MAX {
+        if self.terminal_seen || self.sequence as usize >= self.budget.internal_events() {
             return fail("provider event arrived after terminal or exceeded the run limit");
+        }
+        if self.budget == ProviderEventBudget::DurableV1 {
+            self.observation_bytes = self.observation_bytes.saturating_add(observation.bytes.len());
+            if self.observation_bytes > self.budget.observation_bytes() {
+                self.terminal_seen = true;
+                return fail("provider observation byte budget exceeded");
+            }
         }
         let value = observation.json()?;
         let object = value
@@ -648,8 +681,8 @@ impl ProviderEventClassifierV1 {
                     .public_text_bytes
                     .checked_add(text.len())
                     .ok_or_else(|| ProviderError("public provider text bytes overflow".into()))?;
-                if next_events > PROVIDER_PUBLIC_EVENTS_MAX
-                    || next_text > PROVIDER_PUBLIC_TEXT_TOTAL_MAX_BYTES
+                if next_events > self.budget.public_events()
+                    || next_text > self.budget.public_bytes()
                 {
                     return fail("public provider event exceeds the G5B run budget");
                 }
