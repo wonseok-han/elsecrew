@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전ce9dc96는 단일 run 검사 구현 진척이다. clean 통합 checkout에서 같은 검사기를 재사용하는 전체 출력 table closure를 추가했다. head를 rowid keyset으로 순회하고 각 run을 제한된 page로 검사한 뒤 record→head 역방향 exact lookup으로 고아/범위 밖 row를 거절한다. 비양수 rowid·head key/binding 불일치도 거절하며 한 connection 차용/data_version 경계를 유지한다.
+- 빈 run을 포함한 전체 순회·고아 row 거절 회귀를 추가했다. 이전 누적 변경과 함께 아직 실행 전이며 format/diff만 확인했다. 전체 출력 table 일치와 전체 DB admission은 구별한다. run/fence 결속·기존 schema identity/이관·물리 quota·runtime/UI 연결은 남아 있어 실제 제품 DB에는 활성화하지 않았다.
+- Karpathy 최소 변경으로 기존 page/session 구현을 재사용했다. 사용자 데이터·앱·모델 실행·main/push 없음. 다음은 run/fence 결속과 migration/admission 통합이며 전체 목표는 미완료다.
+
+### 2026-10-23 · by Codex
 - 직전921251c는 출력 저장 primitive 구현 진척이다. clean 통합 checkout에서 기존 R3 session의 connection 독점 차용/data_version/오류 시 cursor 폐기 방식을 읽고 Karpathy 최소 변경으로 단일 run 출력 검증 세션을 추가했다. 호출당100행/512KiB page만 확인하며 transaction은 호출 사이 보유하지 않는다. 전체 row 순서·본문 byte 합계·head 뒤 extra row·DB event ID와 JSON event ID 불일치를 거절한다.
 - 정상101개 다중 호출·누락/합계/ID/extra 손상·취소 이후 재사용 거절 회귀3개를 작성했다. 이전 추가분과 함께 아직 실행하지 않았으며 format/diff 검사만 수행했다. 한 run의 출력 검증은 전체 admission이 아니다. 전체 head 목록/고아 row 역방향 검사·run/fence 결속·schema migration·물리 quota·제품 연결이 계속 남는다.
 - 새 DB 생성/기존 사용자 데이터·모델·앱 실행·main/push 없음. 다음은 위 전체 admission closure와 migration 연결이며 전체 목표는 유지한다.

@@ -20,6 +20,159 @@ fn version(connection: &Connection) -> Result<i64, SidecarError> {
         .map_err(sqlite_error)
 }
 
+struct RunScan {
+    expected: OutputHead,
+    expected_bytes: u64,
+    after: u64,
+    text_bytes: u64,
+}
+
+/// Full output-table closure only. Run/fence and schema verification must still
+/// be composed into the same admission fence before this can authorize writes.
+pub(in crate::storage) struct AllOutputVerification<'a> {
+    connection: &'a mut Connection,
+    version: i64,
+    after_head: i64,
+    current: Option<RunScan>,
+    reverse_after: Option<i64>,
+    usable: bool,
+}
+
+impl<'a> AllOutputVerification<'a> {
+    pub(in crate::storage) fn start(connection: &'a mut Connection) -> Result<Self, SidecarError> {
+        if !connection.is_autocommit() {
+            return Err(invalid("output verification requires idle connection"));
+        }
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(sqlite_error)?;
+        let marker = version(&tx)?;
+        for table in ["run_output_heads", "run_output_records"] {
+            let hidden: bool = tx
+                .query_row(
+                    &format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE rowid<=0 LIMIT 1)"),
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(sqlite_error)?;
+            if hidden {
+                return Err(invalid("output table has invalid row identity"));
+            }
+        }
+        tx.commit().map_err(sqlite_error)?;
+        Ok(Self {
+            connection,
+            version: marker,
+            after_head: 0,
+            current: None,
+            reverse_after: None,
+            usable: true,
+        })
+    }
+
+    pub(in crate::storage) fn step(
+        &mut self,
+        cancelled: &mut impl FnMut() -> bool,
+    ) -> Result<bool, SidecarError> {
+        if !std::mem::replace(&mut self.usable, false) || cancelled() {
+            return Err(invalid("output closure invalidated"));
+        }
+        if let Some(progress) = self.current.take() {
+            let mut run = OutputVerification {
+                connection: self.connection,
+                version: self.version,
+                expected: progress.expected,
+                expected_bytes: progress.expected_bytes,
+                after: progress.after,
+                text_bytes: progress.text_bytes,
+                usable: true,
+                finished: false,
+            };
+            let done = run.step(cancelled)?;
+            if !done {
+                self.current = Some(RunScan {
+                    expected: run.expected.clone(),
+                    expected_bytes: run.expected_bytes,
+                    after: run.after,
+                    text_bytes: run.text_bytes,
+                });
+            }
+            self.usable = true;
+            return Ok(false);
+        }
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(sqlite_error)?;
+        if version(&tx)? != self.version {
+            return Err(invalid("output closure source changed"));
+        }
+        if let Some(after) = self.reverse_after {
+            // Each indexed existence check has one dependency. No body is read.
+            let mut statement = tx.prepare("SELECT r.rowid, EXISTS(SELECT 1 FROM run_output_heads h WHERE h.run_id=r.run_id AND r.output_sequence>0 AND r.output_sequence<=h.committed_sequence) FROM run_output_records r WHERE r.rowid>?1 ORDER BY r.rowid LIMIT 100").map_err(sqlite_error)?;
+            let mut rows = statement.query([after]).map_err(sqlite_error)?;
+            let mut next = after;
+            let mut count = 0;
+            while let Some(row) = rows.next().map_err(sqlite_error)? {
+                if cancelled() || !row.get::<_, bool>(1).map_err(sqlite_error)? {
+                    return Err(invalid("orphan output record or cancelled closure"));
+                }
+                next = row.get(0).map_err(sqlite_error)?;
+                count += 1;
+            }
+            drop(rows);
+            drop(statement);
+            if cancelled() || version(&tx)? != self.version {
+                return Err(invalid("output closure interrupted"));
+            }
+            tx.commit().map_err(sqlite_error)?;
+            self.reverse_after = Some(next);
+            let done = count < 100;
+            self.usable = !done;
+            return Ok(done);
+        }
+        let row: Option<(i64, Option<String>, Option<String>, u64)> = tx.query_row(
+            "SELECT rowid, CASE WHEN length(CAST(run_id AS BLOB))<=8192 THEN run_id ELSE NULL END, CASE WHEN length(CAST(binding_json AS BLOB))<=8192 THEN binding_json ELSE NULL END, text_bytes FROM run_output_heads WHERE rowid>?1 ORDER BY rowid LIMIT 1",
+            [self.after_head], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).optional().map_err(sqlite_error)?;
+        let next = if let Some((rowid, run_id, json, expected_bytes)) = row {
+            let binding: AgentRunBindingV1 =
+                serde_json::from_str(&json.ok_or_else(|| invalid("oversized output binding"))?)
+                    .map_err(|_| invalid("invalid output binding"))?;
+            if Some(&binding.run_id) != run_id.as_ref() {
+                return Err(invalid("output head key mismatch"));
+            }
+            let expected = head(&tx, &binding)?;
+            Some((
+                rowid,
+                RunScan {
+                    expected,
+                    expected_bytes,
+                    after: 0,
+                    text_bytes: 0,
+                },
+            ))
+        } else {
+            None
+        };
+        if cancelled() || version(&tx)? != self.version {
+            return Err(invalid("output closure interrupted"));
+        }
+        tx.commit().map_err(sqlite_error)?;
+        match next {
+            Some((rowid, progress)) => {
+                self.after_head = rowid;
+                self.current = Some(progress);
+            }
+            None => {
+                self.reverse_after = Some(0);
+            }
+        }
+        self.usable = true;
+        Ok(false)
+    }
+}
+
 impl<'a> OutputVerification<'a> {
     pub(in crate::storage) fn start(
         connection: &'a mut Connection,
@@ -133,6 +286,32 @@ mod tests {
         }
         tx.commit().unwrap();
         (db, binding)
+    }
+
+    #[test]
+    fn full_closure_visits_empty_runs_and_rejects_orphans() {
+        let (mut db, binding) = database();
+        let mut empty = binding.clone();
+        empty.run_id = "agent_run_empty".to_string();
+        let tx = db.transaction().unwrap();
+        begin(&tx, &empty).unwrap();
+        tx.commit().unwrap();
+        {
+            let mut all = AllOutputVerification::start(&mut db).unwrap();
+            let mut calls = 0;
+            while !all.step(&mut || false).unwrap() {
+                calls += 1;
+                assert!(calls < 20);
+            }
+            assert!(calls >= 5);
+            assert!(all.step(&mut || false).is_err());
+        }
+        // Simulate a damaged database even when normal foreign keys prevent it.
+        db.execute_batch("PRAGMA foreign_keys=OFF; DELETE FROM run_output_heads")
+            .unwrap();
+        let mut all = AllOutputVerification::start(&mut db).unwrap();
+        assert!(!all.step(&mut || false).unwrap());
+        assert!(all.step(&mut || false).is_err());
     }
 
     #[test]
