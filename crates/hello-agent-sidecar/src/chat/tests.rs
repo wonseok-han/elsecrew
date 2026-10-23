@@ -719,6 +719,23 @@ fn text_candidate_cases_selected(
     proxied: bool,
     selected: Option<&str>,
 ) {
+    text_candidate_cases_with_output(offline_native, interactions, proxied, selected, false);
+}
+
+#[test]
+fn codex_durable_native_delivery_and_cancel() {
+    for case in ["bound", "bound-handler-runtime", "bound-handler-runtime-cancel"] {
+        text_candidate_cases_with_output(false, case != "bound", false, Some(case), true);
+    }
+}
+
+fn text_candidate_cases_with_output(
+    offline_native: bool,
+    interactions: bool,
+    proxied: bool,
+    selected: Option<&str>,
+    durable: bool,
+) {
     use crate::provider_login_process::LoginProcess;
     use crate::provider_preflight_session::{run_text_and_close, TextWorkspace};
     use crate::provider_profile::CodexProfileBinding;
@@ -822,7 +839,7 @@ fn text_candidate_cases_selected(
                 | "bound-interrupted"
                 | "bound-multiple"
         );
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::with_durable_output(durable);
         let snapshot = fixture.snapshot("req_sink_snapshot");
         let chat = fixture.create_chat(&snapshot, "goal", "req_sink_chat");
         let address = address_from_chat(&chat).unwrap();
@@ -1771,6 +1788,11 @@ fn text_candidate_cases_selected(
                                 .unwrap()["outcome"],
                             "canceled"
                         );
+                    } else if durable {
+                        assert!(!emitted.iter().any(|event| event.event == "agent.publicEvent"));
+                        let output = durable_output::read_all(&mut fixture.storage, &run["record"]);
+                        assert_eq!(output.last().unwrap()["kind"], "final");
+                        assert_eq!(output.last().unwrap()["text"], "hello");
                     } else {
                         assert!(emitted
                             .iter()
@@ -2101,9 +2123,12 @@ fn text_candidate_cases_selected(
                 .as_array()
                 .unwrap()
                 .is_empty());
-            assert_eq!(run["public_events"].as_array().unwrap().len(), 1);
-            assert_eq!(run["public_events"][0]["kind"], "final");
-            assert_eq!(run["public_events"][0]["text"], "hello");
+            let output = if durable {
+                durable_output::read_all(&mut fixture.storage, &run["record"])
+            } else { run["public_events"].as_array().unwrap().clone() };
+            assert_eq!(output.last().unwrap()["kind"], "final");
+            assert_eq!(output.last().unwrap()["text"], "hello");
+            if !durable { assert_eq!(output.len(), 1); }
             assert_eq!(last_message["kind"], "role");
             assert_eq!(last_message["text"], "hello");
             assert_eq!(
@@ -2300,7 +2325,8 @@ fn text_candidate_cases_selected(
             }
             let database = fixture._root.path().join("data/hello-agent.sqlite3");
             drop(fixture.storage);
-            fixture.storage = Storage::open(&database).unwrap();
+            fixture.storage = if durable { Storage::open_durable_output_for_test(&database).unwrap() }
+                else { Storage::open(&database).unwrap() };
             fixture.projects = ProjectManager::new(&database).unwrap();
             let runtime = AgentRuntime::blocked();
             runtime

@@ -404,8 +404,15 @@ impl AgentRuntime {
     pub(crate) fn validate_persisted_runs(&self, storage: &Storage) -> Result<(), SidecarError> {
         for projection in storage.projection_records("run")? {
             if projection.get("source_kind").and_then(Value::as_str) == Some(SOURCE_KIND) {
-                validate_projection_public_budget(&projection)
-                    .map_err(|error| SidecarError::new("projectionInvalid", error.detail))?;
+                if projection.contains_key("output_format_version") {
+                    let run_id = projection.get("run_id").and_then(Value::as_str)
+                        .ok_or_else(|| SidecarError::new("projectionInvalid", "durable run identity missing"))?;
+                    actual_run_projection(storage, run_id)
+                        .map_err(|error| SidecarError::new("projectionInvalid", error.detail))?;
+                } else {
+                    validate_projection_public_budget(&projection)
+                        .map_err(|error| SidecarError::new("projectionInvalid", error.detail))?;
+                }
                 validate_provider_projection(&projection)
                     .map_err(|error| SidecarError::new("projectionInvalid", error.detail))?;
                 if projection

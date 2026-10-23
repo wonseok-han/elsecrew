@@ -3,6 +3,39 @@ use crate::agent_runtime::preparation::RunPreparation;
 use crate::storage::{agent_output::FinalOutput, ProjectionUpsert};
 use hello_agent_protocol::agent_adapter_v1::AgentRunBindingV1;
 
+pub(super) fn read_all(storage: &mut Storage, run: &Value) -> Vec<Value> {
+    let binding: AgentRunBindingV1 = serde_json::from_value(json!({
+        "chatId":run["chatId"],"taskId":run["taskId"],"projectId":run["projectId"],
+        "worktreeId":run["worktreeId"],"workspaceIdentity":run["workspaceIdentity"],
+        "runId":run["runId"],"roleId":run["selectedProfile"]["roleId"],
+        "capabilityFingerprint":run["capabilityFingerprint"]
+    }))
+    .unwrap();
+    let head = storage.agent_output_head(&binding).unwrap();
+    let mut cursor = 0;
+    let mut events = Vec::new();
+    while cursor < head.committed_sequence {
+        let page = storage
+            .agent_output_page(
+                &hello_agent_protocol::agent_adapter_v1::output_pages::OutputPageRequest {
+                    format_version: 1,
+                    binding: binding.clone(),
+                    after_sequence: cursor,
+                    through_sequence: head.committed_sequence,
+                    limit: 100,
+                },
+            )
+            .unwrap();
+        cursor = page.next_after_sequence;
+        events.extend(
+            page.rows
+                .into_iter()
+                .map(|row| serde_json::to_value(row.event).unwrap()),
+        );
+    }
+    events
+}
+
 #[test]
 fn four_durable_runs_drain_three_thousand_events_each_without_batch_failure() {
     let mut f = Fixture::with_durable_output(true);

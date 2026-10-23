@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 기준8dd1262/clean 통합 checkout에서 Codex 기존 로컬 pipe-peer/예약/dispatcher 시험 틀에 durable 선택을 연결했다. 정상 bound 실행·dispatcher 전달·중간 취소3경우를 추가하고 legacy 알림 대신 page 원문 최종 응답과 종료 상태를 대조한다. 정상 실행 재열기에서도 같은 형식으로 admission/recovery 검증한다. Karpathy 원칙으로 별도 모의 저장 구현 없이 기존 경로를 사용한다.
+- 최초 실행이 재시작 validate_persisted_runs의 무조건 legacy 배열 예산 검사에서 panic을 드러냈다. marker 있는 실행은 actual_run_projection의 기존 형식/신원/head/native evidence 검증을 재사용하고, legacy 예산 및 후속 provider/recovery 검사는 유지하도록 수정했다.
+- 수정 후 codex_durable_native_delivery_and_cancel PASS(3경우,14.69초). 읽기 전용 독립 검토1명은 재시작 분기 수정 범위에 차단 결함 없음, diff check PASS. 실제 공급자 바이너리/계정/모델 시험이나3,000개 native 스트림 증거는 아니다. 출력 page 전체 조회 도우미는 시험 전용이다. 사용자 프로젝트/앱 패키지·main/push 없음. 장시간 native stream·독립 head 알림·실제 화면/G6/Windows/출시는 남는다.
+
+### 2026-10-23 · by Codex
 - 기준49083d7/clean 통합 checkout에서 native event 전달도 제거된 legacy public_events를 요구하는 누락을 수정했다. durable는 결속된 output head를 검사하고 본문은 기존 bounded page reader가 조회한다. legacy 이벤트 배열로 재주입하지 않으며 run 상태 알림은 유지한다. 출력 패널은 선택 run의 공개/상태 알림을 조회 힌트로 사용하고 두 구독을 함께 정리한다. 별도 output-head 알림은 아직 없으며500ms reconciliation에 의존하는 현황을 완료로 숨기지 않는다.
 - 기존 Claude 로컬 pipe-peer 시험에 durable 성공/취소/잘못된 init을 추가했다. 첫 실패에서 native_evidence가 준비 중 빈 legacy 배열을 요구하는 원인을 확인했다. format1은 배열 부재를 허용하되 Storage의 결속 검사에서 native receipt 전 head가 비어 있음을 요구한다. append 뒤에도 같은 transaction에서 검사해 첫 부적절한 출력과 final 문맥을 함께 rollback한다. marker 추가/재시작 검증에도 같은 경계가 적용된다. Karpathy 최소 변경으로 기존 입장/프로세스 종료 검사를 보존했다.
 - 누적 cargo check --tests와 TypeScript noEmit PASS. Claude 모의 native 수신 시험10경우 PASS(28.11초), 실제 공급자 실행은 아니다. 읽기 전용 검토1명은 이번 전달/검증 이동 diff에서 차단 결함 없음으로 확인했으며 음성 회귀를 요구했다. receipt 전 첫 append·출력 있는 run의 pre-thread marker 추가 거절을 기존 atomic/reopen 회귀에 추가해 PASS(1.72초)했고 diff check PASS다. 실제 계정/모델·사용자 DB/앱·main/push 없음. Codex native 장시간·head 알림·화면 통합/G6/Windows/출시는 남는다.
