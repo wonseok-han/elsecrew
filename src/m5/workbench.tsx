@@ -1,4 +1,5 @@
 import { formatChatNotice } from "./chat-notice.ts";
+import { AgentOutputPanel } from "./agent-output-panel.tsx";
 import { markStartScreenReady } from "./startup-mark.ts";
 import { emptyProjectGuide, parseProjectGuide, projectGuideKey, projectGuideStep, type ProjectGuidePreference } from "./project-guide-state.ts";
 import type { ChatRecordV1 } from "./contracts/run-recovery-v1.ts";
@@ -721,6 +722,7 @@ function AgentRuns({ runs }: { runs: ReturnType<ChatUiController["snapshot"]>["a
   return <section className="m5-agent-runs" aria-label={t("m5.run.label")}>
     <strong>{t("m5.run.title")}</strong>
     {current.map(renderRun)}
+    <AgentOutputPanel runs={runs} />
     {previous.length > 0 && <details className="m5-agent-run-history">
       <summary>{t("m5.run.previous", { count: previous.length })}</summary>
       <div>{previous.map(renderRun)}</div>

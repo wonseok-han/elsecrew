@@ -2803,6 +2803,13 @@ fn require_output_binding(
 pub(crate) fn read_output_head(storage: &Storage, params: &Value) -> Result<Value, ProjectFailure> {
     let binding: hello_agent_protocol::agent_adapter_v1::AgentRunBindingV1 =
         serde_json::from_value(params.clone()).map_err(|_| ProjectFailure::manifest("invalid output binding"))?;
+    let projection = actual_run_projection(storage, &binding.run_id)?;
+    if output_binding(&projection["record"])? != binding {
+        return Err(ProjectFailure::manifest("output run binding differs"));
+    }
+    // A positively identified legacy run has no separate output ledger. Missing
+    // or corrupt runs remain errors, never a silent fallback to legacy output.
+    if !projection.contains_key("output_format_version") { return Ok(Value::Null); }
     require_output_binding(storage, &binding)?;
     serde_json::to_value(storage.agent_output_head(&binding)?)
         .map_err(|_| ProjectFailure::manifest("output head encoding failed"))

@@ -545,10 +545,10 @@ export class SidecarClientV1 {
   inspectAgentRecovery(input: AgentRecoveryInspectRequestV1): Promise<AgentRecoveryRecordV1> {
     return this.#requestAgent("recovery.inspectAgent", { ...validateAgentRecoveryInspectRequestV1(input) }) as Promise<AgentRecoveryRecordV1>;
   }
-  getAgentOutputHead(input: AgentRunBindingV1): Promise<OutputHead> {
+  getAgentOutputHead(input: AgentRunBindingV1): Promise<OutputHead | null> {
     this.#requireAgentAdapter();
     if (!this.#ready?.capabilities.includes("agent.outputHead")) return Promise.reject(new Error("durable output query unavailable"));
-    return this.#request("agent.outputHead", { ...validateAgentRunBindingV1(input) }) as Promise<OutputHead>;
+    return this.#request("agent.outputHead", { ...validateAgentRunBindingV1(input) }) as Promise<OutputHead | null>;
   }
   getAgentOutputPage(input: OutputPageRequest): Promise<OutputPage> {
     this.#requireAgentAdapter();
@@ -1005,6 +1005,7 @@ export class SidecarClientV1 {
         return value;
       }
       case "agent.outputHead": {
+        if (response.result === null) return null;
         return validateOutputHead(response.result, validateAgentRunBindingV1(pending.params));
       }
       case "agent.outputPage": {

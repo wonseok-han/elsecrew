@@ -39,6 +39,7 @@ export class AgentOutputReader {
   }
 
   get cursor(): number { return this.#cursor; }
+  get sealed(): boolean { return this.#head?.sealed === true && this.#cursor === this.#head.committedSequence; }
 
   async start(): Promise<void> {
     if (this.#started || this.#abort.signal.aborted) throw new Error("output reader already started or stopped");

@@ -6,6 +6,6 @@ import type { OutputHead, OutputPage, OutputPageRequest } from "./agent-output-p
 export const M5_BRIDGE_V8_METHODS = [...M5_BRIDGE_V7_METHODS, "getAgentOutputHead", "getAgentOutputPage"] as const;
 export type M5BridgeV8 = Omit<M5BridgeV7, "version"> & {
   readonly version: 8;
-  getAgentOutputHead(input: AgentRunBindingV1): Promise<OutputHead>;
+  getAgentOutputHead(input: AgentRunBindingV1): Promise<OutputHead | null>;
   getAgentOutputPage(input: OutputPageRequest): Promise<OutputPage>;
 };

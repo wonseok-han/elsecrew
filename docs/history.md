@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전da8c39d는 V8 출력 조회 bridge 연결 진척이다. clean 통합 checkout에서 AgentRuns에 실행 선택형 출력 패널을 연결했다. head 확인 뒤 기존 bounded reader/window를 사용하고 한 선택 run만 읽는다. 알림은 힌트이며500ms head 재조회로 누락을 보완하고 sealed catch-up 후 타이머를 멈춘다. 선택 변경/unmount 시 abort·구독/타이머 정리로 늦은 결과를 표시하지 않는다.
+- head 조회는 전체 run binding이 검증된 legacy 기록에만 null을 돌려 기존 대화 안내를 표시한다. 손상/누락/다른 run은 계속 오류다. 조회 실패와 실행 실패/종료를 구분하는 ko/en 안내, 재시도·부분 텍스트/최신 창 안내를 추가했다. 과거 출력 page 탐색 버튼은 아직 미구현이며 안내만으로 전체 기록 접근 완료라고 주장하지 않는다.
+- Karpathy 최소 변경과 React 지침의 primitive effect 의존성·단일 구독·cleanup·label/상태 접근성을 적용했다. 이번 TSX 연결은 diff check만 수행했고 누적 컴파일/UI/회귀·독립 검토 전이다. DB 항목 순서 검증·과거 page 탐색/후속 문맥·장시간 실행 활성화와 G6/Windows/출시가 남는다. 사용자 DB·모델·앱 실행/main/push 없음.
+
+### 2026-10-23 · by Codex
 - 직전658417c는 native 출력 저장과 bounded 표시 모델 구현 진척이다. clean 통합 checkout에서 agent.outputHead/outputPage 읽기 요청을 공용 method 목록·sidecar dispatcher·run binding 검증·Storage API·Electron client/main/preload까지 연결했다. V8 bridge를 추가하고 renderer 경계와 V7 follow-up 조건을 V8에도 유지했다. 페이지 응답은 요청의 전체 binding/cursor/limit에 대조하며 별도 읽기 capability를 요구한다.
 - 새 query capability는 읽기 구현 존재일 뿐 새 run format 실행 허가가 아니다. 기존 V10의 legacy run 조회는 durable marker가 없어 거절하며 자동 V11 이관/새 실행 marker 생성은 아직 꺼져 있다. V8 전체 메서드 누락 거절 회귀를 작성했다. Karpathy 원칙으로 기존 저장 admission/권한·종료 규칙을 유지했다.
 - 인터페이스 연결에 필요한 pnpm exec tsc --noEmit PASS(37005, exit0)를 확인했다. 전체 테스트/Rust 누적 검증/독립 검토는 미실행이다. 실제 화면 구독/페이지 소비·저장 항목 순서 검증·후속 문맥·활성화 및 G6/Windows/출시가 남는다. 사용자 DB/앱/모델/main/push 없음.
