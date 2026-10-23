@@ -10,6 +10,7 @@ use std::process::Command;
 use tempfile::TempDir;
 
 mod claude_native;
+mod durable_output;
 
 #[test]
 fn workspace_watchers_progress_fairly_one_per_poll() {
@@ -159,6 +160,10 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        Self::with_durable_output(false)
+    }
+
+    fn with_durable_output(durable: bool) -> Self {
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("source");
         let data = root.path().join("data");
@@ -181,7 +186,11 @@ impl Fixture {
             ],
         );
         let database = data.join("hello-agent.sqlite3");
-        let mut storage = Storage::open(&database).unwrap();
+        let mut storage = if durable {
+            Storage::open_durable_output_for_test(&database).unwrap()
+        } else {
+            Storage::open(&database).unwrap()
+        };
         let mut projects = ProjectManager::new(&database).unwrap();
         let opened = projects
             .open_project(&mut storage, source.to_str().unwrap(), "req_open")

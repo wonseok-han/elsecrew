@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 기준d7a94e6/clean 통합 checkout에서 기존 chat fixture에 test-only durable open 선택을 추가하고 실제 RunPreparation 예약→출력/문맥 transaction→재시작 경로의 회귀를 연결했다. Karpathy 지침에 따라 기존 프로젝트/채팅 생성·materializer를 재사용하며 별도 모의 저장 구현을 만들지 않았다.
+- 출력 row INSERT에 실패 trigger를 주입해 먼저 수행된 chat event/projection도 rollback되는지 확인한다. trigger 제거 후 V11 admission 재열기에서 양쪽 미저장, 성공 뒤 재열기에서 후속 문맥 최종 응답1건, 같은 요청 재시도 거절과 출력 head1을 검증했다. 원본 fixture 파일 불변도 확인한다. 실제 공급자 프로세스 종료·모델 입력 실행 성공을 주장하지 않는다.
+- 최초 컴파일의 private helper 참조는 명시 binding 생성으로 수정했다. 다음 실행은 fixture 바이너리 미생성으로 차단되어 sidecar bin만 빌드했고 집중 회귀 PASS했다. 재열기 page 원문 대조 assertion 추가 후 최종 회귀도 PASS(1개,1.70초), 새 파일 rustfmt/diff check PASS다. 실제 계정/모델·사용자 DB·앱 패키지 생성 없음. 다음은4×3,000 공급자/저장/화면 통합과 파동 검토이며 제품 V11 활성화·G6/Windows/출시는 계속 미완료다.
+
+### 2026-10-23 · by Codex
 - 기준48d9719에서 장시간 단일 실행의 누적 검증을 시작했다. 출력 페이지/reader/window/V8 경계 Node 검사21개와 TypeScript noEmit이 통과했다. Rust 출력 저장 검사에서15개 중2개가 실패해 원인을 수정했다: V10 frozen identity의 SQL 해시를 SQL 원문으로 비교하고 있었다. reference V10 DDL을 복원하고 frozen 해시와 대조한 뒤 V11 예상 schema를 구성하도록 고쳤으며 기존 정확 비교/제품 활성화 경계는 유지한다.
 - 수정 후 출력 저장15개·test-only V11 이관/재열기/일반 product open 거절1개·core durable stream5개·protocol output page6개 모두 PASS다. 3,000 이벤트 페이지/스트림 및 상한 거절 회귀를 포함한다. 변경 파일 rustfmt를 적용했다. 이는 개별 계층 검사이며4채팅 동시 실행의 실제 UI 성능이나 전체 제품 합격은 아니다.
 - 스키마 수정 diff에 대한 읽기 전용 독립 검토1명은 수정 필요 결함 없음으로 확인했다. diff check PASS. 이는 파동 전체 검토/활성화 승인이 아니다. 다음은 final/후속 문맥 원자 저장 실패 주입과 재시작 교차 원장, 합성4×3,000 통합/UI 및 파동 독립 검토다. V11 일반 앱 활성화는 보류하며 G6/Windows/출시 미완료를 유지한다. 이번에는 실제 계정·모델·사용자 DB/앱·main/push를 사용하지 않았다.
