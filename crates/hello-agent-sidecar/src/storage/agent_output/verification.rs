@@ -274,6 +274,7 @@ impl<'a> OutputVerification<'a> {
         let batch = page(&tx, &request)?;
         let mut total = self.text_bytes;
         for row in &batch.rows {
+            item_order::verify(&tx, &self.expected.binding, row.output_sequence, &row.event, row.item_update.as_ref())?;
             if cancelled() {
                 return Err(invalid("output verification cancelled"));
             }
@@ -330,6 +331,29 @@ mod tests {
         }
         tx.commit().unwrap();
         (db, binding)
+    }
+
+    #[test]
+    fn reopened_output_rejects_same_length_final_body_tampering() {
+        use hello_agent_protocol::agent_adapter_v1::output_pages::{OutputItemChannel, OutputItemOperation};
+        let (mut db, binding) = database();
+        let tx = db.transaction().unwrap();
+        let body: String = tx.query_row("SELECT event_json FROM run_output_records WHERE run_id=?1 AND output_sequence=101", [&binding.run_id], |row| row.get(0)).unwrap();
+        let mut event: Value = serde_json::from_str(&body).unwrap();
+        event["eventId"] = "agent_event_102".into();
+        event["kind"] = "status".into();
+        event["text"] = "answer".into();
+        let update = OutputItemUpdate { item_id: "item-1".into(), operation: OutputItemOperation::Complete, channel: OutputItemChannel::Message };
+        append_item(&tx, &binding, 102, &event, 1024 * 1024, Some(&update)).unwrap();
+        event["eventId"] = "agent_event_103".into();
+        event["kind"] = "final".into();
+        append_item(&tx, &binding, 103, &event, 1024 * 1024, Some(&update)).unwrap();
+        tx.execute("UPDATE run_output_records SET event_json=json_set(event_json,'$.text','broken') WHERE run_id=?1 AND output_sequence=103", [&binding.run_id]).unwrap();
+        tx.commit().unwrap();
+        let mut scan = OutputVerification::start(&mut db, &binding).unwrap();
+        assert!(!scan.step(&mut || false).unwrap());
+        assert!(scan.step(&mut || false).is_err());
+        assert!(scan.step(&mut || false).is_err());
     }
 
     fn install_run(tx: &Transaction<'_>, binding: &AgentRunBindingV1) {

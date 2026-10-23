@@ -14,6 +14,7 @@ use serde_json::Value;
 pub(super) mod schema;
 pub(super) mod verification;
 mod quota;
+mod item_order;
 
 impl super::Storage {
     /// Output mutations use the same admitted connection and transaction as
@@ -227,7 +228,9 @@ CREATE TABLE run_output_records (
  event_json TEXT NOT NULL CHECK(length(CAST(event_json AS BLOB)) <= 524288),
  item_update_json TEXT CHECK(item_update_json IS NULL OR length(CAST(item_update_json AS BLOB)) <= 2048),
  PRIMARY KEY(run_id, output_sequence)
-) STRICT;";
+) STRICT;
+CREATE INDEX run_output_item_order ON run_output_records(run_id, json_extract(item_update_json,'$.itemId'), output_sequence);
+";
 
 fn invalid(detail: &str) -> SidecarError {
     SidecarError::new("storageInvalid", detail)
@@ -309,6 +312,7 @@ pub(super) fn append_item(
     }
     let event = validate_agent_public_event_against_run_v1(value, binding)
         .map_err(|_| invalid("invalid public output event"))?;
+    item_order::verify(tx, binding, sequence, &event, item_update)?;
     let bytes = u64::try_from(event.text.len()).map_err(|_| invalid("output length overflow"))?;
     let used: u64 = tx
         .query_row(
@@ -461,6 +465,34 @@ mod tests {
         assert_eq!(page.rows[0].event, event);
         assert_eq!(page.rows[0].item_update.as_ref(), Some(&update));
         tx.rollback().unwrap();
+    }
+
+    #[test]
+    fn item_completion_rejects_late_delta_and_changed_final_without_advancing_head() {
+        use hello_agent_protocol::agent_adapter_v1::output_pages::{OutputItemChannel, OutputItemOperation};
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(SCHEMA).unwrap();
+        let fixture = fixture();
+        let binding = fixture.request.binding;
+        let tx = db.transaction().unwrap();
+        begin(&tx, &binding).unwrap();
+        let mut event = fixture.rows[0].event.clone();
+        event.kind = "status".into();
+        event.text = "answer".into();
+        let mut update = OutputItemUpdate { item_id: "item-1".into(), operation: OutputItemOperation::Complete, channel: OutputItemChannel::Message };
+        append_item(&tx, &binding, 1, &serde_json::to_value(&event).unwrap(), 1024, Some(&update)).unwrap();
+        event.event_id = "agent_event_second".into();
+        update.operation = OutputItemOperation::Append;
+        assert!(append_item(&tx, &binding, 2, &serde_json::to_value(&event).unwrap(), 1024, Some(&update)).is_err());
+        assert_eq!(head(&tx, &binding).unwrap().committed_sequence, 1);
+        update.operation = OutputItemOperation::Complete;
+        event.kind = "final".into();
+        event.text = "broken".into();
+        assert!(append_item(&tx, &binding, 2, &serde_json::to_value(&event).unwrap(), 1024, Some(&update)).is_err());
+        event.text = "answer".into();
+        append_item(&tx, &binding, 2, &serde_json::to_value(&event).unwrap(), 1024, Some(&update)).unwrap();
+        event.event_id = "agent_event_third".into();
+        assert!(append_item(&tx, &binding, 3, &serde_json::to_value(&event).unwrap(), 1024, Some(&update)).is_err());
     }
 
     #[test]

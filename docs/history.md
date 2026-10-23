@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전3e23f3f는 과거 출력 페이지 탐색 구현 진척이다. clean 통합 checkout에서 item_order 검사를 append transaction과 bounded 재시작 verifier 양쪽에 연결했다. 같은 run/item의 직전 row만 expression index로 조회하고 채널 변경·complete 뒤 append/중복 complete·본문이 달라진 final 승격을 거절한다. final item은 앞선 complete가 있어야 하며 승격은1회뿐이다. 이는 저장 순서 검사이며 기존 runtime 종료 증거를 대체하지 않는다.
+- 아직 비활성 V11 schema에 item 순서 인덱스를 추가했다. 전체 item/text map을 RAM에 축적하지 않는다. append 거절 시 head 불변과 동일 길이 final 본문 변조의 재시작 거절/sticky 실패 회귀를 작성했다. metadata 없는 기존 이벤트의 전역 final 순서 검사는 이 변경의 증거가 아니다.
+- Karpathy 최소 변경으로 기존 transaction/page 검증을 재사용했다. diff check만 수행했고 누적 컴파일/회귀/독립 검토는 아직 전이다. 후속 모델 문맥·신규 형식 생성/이관 활성화·실측/전체 G6·Windows/출시가 남는다. 사용자 DB/모델/앱/main/push 없음.
+
+### 2026-10-23 · by Codex
 - 직전c02f10c는 선택 실행의 최신 출력 패널 연결 진척이다. clean 통합 checkout에서 과거 기록 처음/다음/최신 전환을 연결했다. 탐색 시작 시 소비된 committed cursor를 고정하고100건/encoded512KiB 페이지 하나만 보관하며 byte 제한으로100건 미만인 경우에도 nextAfterSequence를 그대로 사용한다. live window 갱신은 별도로 유지한다.
 - 과거 페이지는 delta와 complete 원문을 명시적으로 구분해 표시한다. partial page를 완전한 답변처럼 조립하지 않으며 긴 항목의 저장 원문도 여기서 조회할 수 있다. 선택 변경/최신 전환 때 과거 요청을 abort하고 요청 객체에 결속해 이전 응답을 표시하지 않는다. 조회 실패 재시도와 고정 전체 범위 ko/en 안내를 추가했다.
 - Karpathy 최소 변경으로 기존 page decoder와 abort 수명을 재사용했다. diff check만 수행, 새 UI의 실행/컴파일·통합 회귀는 아직 전이다. 최신/과거 화면 연결은 구현됐지만 저장 항목 순서 검증·후속 모델 문맥·새 형식 활성화/독립 검토 및 G6/Windows/출시는 남는다. 사용자 DB/모델/앱 실행·main/push 없음.
