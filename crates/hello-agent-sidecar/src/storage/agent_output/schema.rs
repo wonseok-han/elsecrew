@@ -22,7 +22,35 @@ const META: &str = "CREATE TABLE storage_schema_meta (
 type Identity = (String, String, String, String);
 
 pub(in crate::storage) fn expected_schema() -> Result<Vec<Identity>, SidecarError> {
-    let mut expected = schema_identity_v10_golden()?;
+    // The frozen V10 tuples contain SQL digests, not SQL source. Recover the
+    // trusted reference DDL and cross-check its digests before extending it.
+    let mut expected: Vec<Identity> = crate::storage::reference_schema_v10()?
+        .into_iter()
+        .map(|(kind, name, table, sql)| {
+            Ok((
+                kind,
+                name,
+                table,
+                sql.ok_or_else(|| invalid("missing reference SQL"))?,
+            ))
+        })
+        .collect::<Result<_, SidecarError>>()?;
+    let digests: Vec<Identity> = expected
+        .iter()
+        .map(|(kind, name, table, sql)| {
+            (
+                kind.clone(),
+                name.clone(),
+                table.clone(),
+                hello_agent_protocol::project_v1::sha256_file_version_v1(sql.as_bytes())
+                    .trim_start_matches("sha256:")
+                    .to_owned(),
+            )
+        })
+        .collect();
+    if digests != schema_identity_v10_golden()? {
+        return Err(invalid("reference V10 schema differs from frozen identity"));
+    }
     let metadata = expected
         .iter_mut()
         .find(|row| row.0 == "table" && row.1 == "storage_schema_meta")
@@ -169,8 +197,8 @@ pub(in crate::storage) fn verify_admission(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::migrate;
+    use super::*;
     use crate::storage::*;
 
     fn v10() -> Connection {

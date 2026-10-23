@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 기준48d9719에서 장시간 단일 실행의 누적 검증을 시작했다. 출력 페이지/reader/window/V8 경계 Node 검사21개와 TypeScript noEmit이 통과했다. Rust 출력 저장 검사에서15개 중2개가 실패해 원인을 수정했다: V10 frozen identity의 SQL 해시를 SQL 원문으로 비교하고 있었다. reference V10 DDL을 복원하고 frozen 해시와 대조한 뒤 V11 예상 schema를 구성하도록 고쳤으며 기존 정확 비교/제품 활성화 경계는 유지한다.
+- 수정 후 출력 저장15개·test-only V11 이관/재열기/일반 product open 거절1개·core durable stream5개·protocol output page6개 모두 PASS다. 3,000 이벤트 페이지/스트림 및 상한 거절 회귀를 포함한다. 변경 파일 rustfmt를 적용했다. 이는 개별 계층 검사이며4채팅 동시 실행의 실제 UI 성능이나 전체 제품 합격은 아니다.
+- 스키마 수정 diff에 대한 읽기 전용 독립 검토1명은 수정 필요 결함 없음으로 확인했다. diff check PASS. 이는 파동 전체 검토/활성화 승인이 아니다. 다음은 final/후속 문맥 원자 저장 실패 주입과 재시작 교차 원장, 합성4×3,000 통합/UI 및 파동 독립 검토다. V11 일반 앱 활성화는 보류하며 G6/Windows/출시 미완료를 유지한다. 이번에는 실제 계정·모델·사용자 DB/앱·main/push를 사용하지 않았다.
+
+### 2026-10-23 · by Codex
 - 직전2755548는 final/문맥 원자 저장과 누적 컴파일 진척이다. clean 통합 checkout에서 cfg(test) 전용 open_durable_output_for_test를 추가했다. 기존 product admission으로 V10을 만든 뒤 V11 이관/기존+출력 admission을 완료해야 쓰기를 허용하며 V11 재열기도 같은 검증을 거친다. 일반 product open은 V11 거절을 유지한다.
 - 준비 run 생성은 admission된 V11에서만 output_format_version=1과 빈 output head를 원자 생성하도록 연결했다. fixture pre-release projection 재작성의 marker 보존 누락을 보완했고 fixture classifier도 검증된 run의 출력 예산을 선택한다. native 전송/저장/화면에 이어 신규 실행 생성까지 시험 가능한 경로가 준비됐으나 실제 모델/제품 활성화는 아니다.
 - Karpathy 최소 변경으로 기존 admission/migration/launch 실패 cleanup 경로를 재사용했다. fresh 이관·재열기·product open 거절·schema index 손상 거절 회귀를 작성했다. diff check만 확인, 새 경로 컴파일/실행과 누적 통합 검증·독립 검토는 아직 남는다. 다음은 합성 장시간 실행/최종 문맥 원자 rollback·재시작 묶음 검증과 수정이며 G6/Windows/출시도 미완료다. 사용자 DB·모델·앱/main/push 없음.
