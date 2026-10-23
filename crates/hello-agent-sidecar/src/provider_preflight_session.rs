@@ -782,8 +782,9 @@ impl BoundTextSession {
         flow: PreflightExchange,
         workspace: &TextWorkspace<'_>,
         text: &str,
+        output_budget: hello_agent_core::provider::ProviderEventBudget,
     ) -> Result<Self, SidecarError> {
-        let session = incremental::TextSession::new(flow, &workspace.cwd, text)?;
+        let session = incremental::TextSession::new(flow, &workspace.cwd, text, output_budget)?;
         workspace.revalidate()?;
         process.begin_preflight()?;
         Ok(Self {
@@ -868,7 +869,7 @@ fn run_text_checked(
     hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
     SidecarError,
 > {
-    let mut session = incremental::TextSession::new(flow, cwd, text)?;
+    let mut session = incremental::TextSession::new(flow, cwd, text, hello_agent_core::provider::ProviderEventBudget::LegacyV1)?;
     on_action(process, TextAction::VerifyWorkspace)?;
     process.begin_preflight()?;
     let result = loop {

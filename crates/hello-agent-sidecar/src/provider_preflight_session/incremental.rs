@@ -67,6 +67,7 @@ pub(super) struct TextSession {
     requires_approval_boundary: bool,
     // Fixed labels only: never retain provider frames, paths, or account data.
     diagnostic_stage: &'static str,
+    output_budget: hello_agent_core::provider::ProviderEventBudget,
 }
 
 impl TextSession {
@@ -88,6 +89,7 @@ impl TextSession {
         flow: PreflightExchange,
         cwd: &std::path::Path,
         text: &str,
+        output_budget: hello_agent_core::provider::ProviderEventBudget,
     ) -> Result<Self, SidecarError> {
         TurnStart::validate_text(text).map_err(|_| failure())?;
         PreflightExchange::validate_thread_cwd(cwd).map_err(|_| failure())?;
@@ -108,6 +110,7 @@ impl TextSession {
             transmitting: false,
             requires_approval_boundary: false,
             diagnostic_stage: "preflight initialization",
+            output_budget,
         })
     }
 
@@ -213,7 +216,9 @@ impl TextSession {
                         // frame containing the user's input is even queued.
                         on_action(process, TextAction::ThreadMatched(&receipt))?;
                         self.remaining(cancel)?;
-                        let mut turn = flow.into_text_turn(&self.text).map_err(|_| failure())?;
+                        let mut turn = flow.into_text_turn(&self.text)
+                            .and_then(|turn| turn.with_output_budget(self.output_budget))
+                            .map_err(|_| failure())?;
                         self.outgoing.push_back(NativeFrame::Turn(
                             turn.take_frame().map_err(|_| failure())?,
                         ));
@@ -343,7 +348,7 @@ mod tests {
                 "/profile",
             )
             .unwrap();
-            TextSession::new(flow, std::path::Path::new("/workspace"), "goal").unwrap()
+            TextSession::new(flow, std::path::Path::new("/workspace"), "goal", hello_agent_core::provider::ProviderEventBudget::LegacyV1).unwrap()
         };
         let cancel = AtomicBool::new(false);
         let mut expired = make();
@@ -401,7 +406,7 @@ mod tests {
                         .spawn()
                 })
                 .unwrap();
-            let mut session = TextSession::new(flow, &root, "goal").unwrap();
+            let mut session = TextSession::new(flow, &root, "goal", hello_agent_core::provider::ProviderEventBudget::LegacyV1).unwrap();
             let cancel = AtomicBool::new(false);
             process.begin_preflight().unwrap();
             let mut observe = |_: &mut LoginProcess<'_>, action: TextAction| {

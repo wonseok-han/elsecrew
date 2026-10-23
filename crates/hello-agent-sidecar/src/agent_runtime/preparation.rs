@@ -685,6 +685,7 @@ impl RunReservation {
         let address = address_from_chat(&self.run).map_err(|_| failure())?;
         let mut projection = actual_run_projection(storage, &self.run_id).map_err(|_| failure())?;
         if projection.contains_key("native_transport") { return Err(failure()); }
+        let output_budget = output_budget_from_projection(&projection)?;
         projection.remove("last_event_sequence");
         projection.insert("native_transport".into(), json!({
             "schemaVersion": 1, "adapter": "codex.preflight.v1",
@@ -721,7 +722,7 @@ impl RunReservation {
             process.retain_fence_until_terminal()?;
         }
         let transport = crate::provider_preflight_session::BoundTextSession::begin(
-            process, flow, &workspace, text,
+            process, flow, &workspace, text, output_budget,
         )?;
         Ok(RunTextState {
             transport,

@@ -2776,6 +2776,17 @@ fn agent_run_projection(
     let budget = public_budget_metrics(&events)?;
     Ok(json!({"run_id":run["runId"],"chat_id":run["chatId"],"state":run["state"],"worktree_path":manifest["worktreePath"],"source_kind":SOURCE_KIND,"record":run,"workspace_manifest":manifest,"barrier":barrier,"process_identity_internal":internal,"public_events":events,"public_event_count":budget.event_count,"public_text_bytes":budget.text_bytes,"public_ledger_cumulative_snapshot_bytes":budget.cumulative_snapshot_bytes,"termination":null,"recovery":null}).as_object().expect("agent projection").clone())
 }
+/// Only call with a ledger projection admitted by actual_run_projection.
+/// Unknown formats must not silently fall back to legacy limits.
+fn output_budget_from_projection(projection: &Map<String, Value>) -> Result<hello_agent_core::provider::ProviderEventBudget, SidecarError> {
+    use hello_agent_core::provider::ProviderEventBudget;
+    match projection.get("output_format_version") {
+        None => Ok(ProviderEventBudget::LegacyV1),
+        Some(value) if value.as_u64() == Some(1) => Ok(ProviderEventBudget::DurableV1),
+        Some(_) => Err(SidecarError::new("agentInputChanged", "unsupported output format")),
+    }
+}
+
 fn actual_run_projection(
     storage: &Storage,
     run_id: &str,

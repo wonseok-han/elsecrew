@@ -223,6 +223,12 @@ impl PermissionDenial {
 }
 
 impl SessionChannel {
+    /// Must be selected before initialization observations. No launch authority.
+    pub(crate) fn with_output_budget(mut self, budget: hello_agent_core::provider::ProviderEventBudget) -> Result<Self, SidecarError> {
+        if self.prompt_attempted || self.transmitting { return Err(failure()); }
+        self.permissions = self.permissions.with_output_budget(budget).map_err(|_| failure())?;
+        Ok(self)
+    }
     pub(crate) fn matches_init_receipt(&self, receipt: &hello_agent_core::provider::vendor_observation::claude_session::InitReceipt) -> bool {
         !self.permissions.is_closed() && self.cwd.to_str().is_some_and(|cwd| receipt.matches(cwd, &self.session_model))
     }

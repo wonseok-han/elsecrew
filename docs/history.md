@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전6c99bde는 native parser 예산 전달과 누적 컴파일 진척이다. clean 통합 checkout에서 Codex BoundTextSession→TextSession→TurnStart, Claude 초기화→SessionChannel→Session의 durable 예산 선택을 연결했다. 선택은 검증된 run projection의 format1에서만 하며 unknown marker는 거절한다. 기존 동기 진단/테스트 경로는 legacy를 명시한다.
+- Karpathy 최소 변경으로 기존 입장·프로필·권한·종료 검사를 유지했다. 새 run marker 생성과 V11 자동 이관은 여전히 비활성이어서 실제 제품 한도를 아직 올리지 않았다. native 경로는 완성 응답 중심으로 persist_text를 호출하므로 진행 delta 저장·조회/UI 연결도 남는다. transport deadline/권한 요청 한도는 바꾸지 않았다.
+- 이번 변경은 diff check와 호출 지점 대조만 수행했고 컴파일/회귀는 누적 검증 대상으로 남겼다. 물리 quota·최종 응답 문맥·page IPC/UI·독립 검토·G6 전체/Windows/출시는 미완료다. 사용자 DB·앱·인증·모델 실행, main 병합/push 없음.
+
+### 2026-10-23 · by Codex
 - 49b72ba/clean 통합 브랜치에서 native observation 소유 경로를 추적했다. Codex TurnStart→TurnStream, Claude Session→SessionProjection에도 명시 예산 전달을 추가하고 전송/관측 시작 이후 예산 전환을 거절한다. 기본값은 legacy이고 transport/runtime 자동 선택은 아직 연결하지 않았다.
 - durable Codex의 lifecycle 항목 문자열 보관에 별도4MiB 상한을 두었다. 출력3,000 delta·상한 후 sticky 실패·초기화 이후 전환 거절 회귀를 작성했다. Claude 권한 요청1,024개 제한과10분 실행 제한은 변경하지 않았다. 이 수치들은 전체 메모리 검증 전 제안이며 제품 활성화가 아니다.
 - 누적 cargo check -p hello-agent-sidecar --tests --locked에서 V11 migration 테스트의 glob import 충돌을 발견해 명시 import로 수정했고 재실행 PASS(19612, exit0)했다. 새 회귀 실행·전체 QA는 아직 하지 않았다. 물리 quota·transport 선택·IPC/UI·최종 응답 문맥·독립 검토가 남는다. 사용자 DB/계정/모델/앱 실행 및 main/push 없음.

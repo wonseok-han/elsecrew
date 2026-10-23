@@ -103,7 +103,10 @@ impl ClaudeStart {
                 tools:crate::provider_claude_session::expected_tools(access),
             };
             let effort = pending.run["selectedProfile"]["reasoningEffort"].as_str();
-            self.channel = Some(self.initialization.take().ok_or_else(failure)?.into_profile_channel(&expected, effort)?);
+            let projection = actual_run_projection(storage, &pending.run_id).map_err(|_| failure())?;
+            let output_budget = output_budget_from_projection(&projection)?;
+            self.channel = Some(self.initialization.take().ok_or_else(failure)?
+                .into_profile_channel(&expected, effort)?.with_output_budget(output_budget)?);
             stage = "owner preparation";
             let mut owner = OwnedClaudeRun::take_prepared(storage, projects, reservation, process, &mut self.channel)?;
             // After this point every failure must restore ownership, not drop it.
