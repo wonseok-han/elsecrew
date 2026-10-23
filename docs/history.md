@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전9bbe3d6는 durable 공간 검사 구현 진척이다. clean 통합 checkout에서 Rust/TS OutputRow에 선택 itemUpdate(itemId/channel/append-or-complete)를 추가했다. UTF-8 ID128B·control 문자·kind/operation 조합을 양쪽에서 검사하며 final+append를 거절한다. 기존 event 및 marker 없는 페이지는 유지한다.
+- V11 출력 row에 bounded nullable metadata 열을 추가하고 append transaction/페이지 조회/단일 page 검증에 연결했다. 기존 v1 DB가 아니라 아직 비활성인 V11 초안 변경이며 정확 schema 검사는 이전 개발용 V11을 거절한다. 항목 완성은 종료 증거가 아니고 중복 제거용 표시 의미다. 저장 왕복 및 Rust/TS 메타데이터 경계 회귀를 작성했다.
+- Karpathy 원칙으로 기존 public event 계약은 바꾸지 않았다. diff check만 수행했으며 컴파일/회귀는 누적 검증 전이다. 다음은 공급자 이벤트→itemUpdate 저장 연결·항목별 순서 검증·bounded 표시 모델과 page IPC/UI다. 후속 문맥·실행 활성화/독립 검토·전체 G6/Windows/출시도 남는다. 사용자 DB·인증·실제 모델·앱·main/push 변경 없음.
+
+### 2026-10-23 · by Codex
 - 직전7f64397은 native transport 예산 선택 구현 진척이다. clean 통합 checkout에서 진행 출력 연결을 조사했고, 현행 public event에는 item ID/append-replace 정보가 없어 delta를 status 문자열로 단순 저장하면 완성 응답과 중복되는 계약 누락을 확인했다. 이 부분은 별도 출력 항목 계약 확장 후 연결하며 완료로 표시하지 않는다.
 - 독립적으로 필요한 durable output 저장 용량 검사부터 연결했다. DB의 물리 길이와 SQLite 논리 페이지 중 큰 값+WAL/SHM을 합산해 제안1GiB 예산을 검사하고 여유 공간256MiB+쓰기 전8MiB headroom을 요구한다. Unix no-follow regular file/fstatvfs, overflow 거절, 쓰기 전/transaction 내 확인을 추가했다. 복구/lifecycle 쓰기는 제한하지 않고 기록 자동 삭제도 없다. OS 공간 예약이 아니므로 concurrent ENOSPC/commit 실패의 persistent fence 처리는 여전히 필수다. Windows probe 미구현은 fail-closed다.
 - Karpathy 최소 변경 원칙으로 기존 append transaction만 사용했고 검사 경계 회귀를 작성했다. diff check만 수행, 새 코드 컴파일·회귀·독립 검토/수치 검증은 누적 파동에서 진행한다. 제품 새 형식 활성화는 아직 하지 않았다. 항목별 진행 출력·page IPC/UI·후속 문맥·전체 G6/Windows/출시가 남으며 사용자 파일 삭제/모델/앱/main/push 없음.

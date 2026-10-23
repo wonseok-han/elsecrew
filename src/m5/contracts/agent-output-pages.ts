@@ -17,7 +17,12 @@ export interface OutputPageRequest {
   throughSequence: number;
   limit: number;
 }
-export interface OutputRow { outputSequence: number; event: AgentPublicEventV1 }
+export interface OutputItemUpdate {
+  itemId: string;
+  operation: "append" | "complete";
+  channel: "message" | "plan";
+}
+export interface OutputRow { outputSequence: number; event: AgentPublicEventV1; itemUpdate?: OutputItemUpdate }
 /** sealed closes output only; it does not prove process termination/success. */
 export interface OutputHead {
   formatVersion: 1;
@@ -76,13 +81,25 @@ export function decodeOutputPage(bytes: Uint8Array, expectedValue: OutputPageReq
   const ids = new Set<string>();
   const rows: OutputRow[] = [];
   for (const raw of page.rows) {
-    const row = object(raw, ["outputSequence", "event"]);
+    const hasUpdate = !!raw && typeof raw === "object" && Object.prototype.hasOwnProperty.call(raw, "itemUpdate");
+    const row = object(raw, hasUpdate ? ["outputSequence", "event", "itemUpdate"] : ["outputSequence", "event"]);
     const outputSequence = sequence(row.outputSequence);
     if (next === expected.throughSequence || outputSequence !== next + 1) return fail();
     const event = validateAgentPublicEventAgainstRunV1(row.event, expected.binding);
     if (ids.has(event.eventId)) return fail();
     ids.add(event.eventId);
-    rows.push({ outputSequence, event });
+    let itemUpdate: OutputItemUpdate | undefined;
+    if (hasUpdate && row.itemUpdate !== null) {
+      const update = object(row.itemUpdate, ["itemId", "operation", "channel"]);
+      if (typeof update.itemId !== "string" || !update.itemId.length
+        || new TextEncoder().encode(update.itemId).length > 128 || /[\u0000-\u001f\u007f-\u009f]/u.test(update.itemId)
+        || (update.operation !== "append" && update.operation !== "complete")
+        || (update.channel !== "message" && update.channel !== "plan")
+        || (event.kind !== "status" && event.kind !== "final")
+        || (event.kind === "final" && update.operation !== "complete")) return fail();
+      itemUpdate = update as unknown as OutputItemUpdate;
+    }
+    rows.push({ outputSequence, event, ...(itemUpdate ? { itemUpdate } : {}) });
     next = outputSequence;
   }
   if (sequence(page.nextAfterSequence) !== next || (!rows.length && next !== expected.throughSequence)) return fail();

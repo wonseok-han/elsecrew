@@ -69,6 +69,39 @@ impl OutputPageRequest {
 pub struct OutputRow {
     pub output_sequence: u64,
     pub event: AgentPublicEventV1,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_update: Option<OutputItemUpdate>,
+}
+
+/// Public text only. Item completion replaces prior deltas; it never proves
+/// process termination. IDs are scoped by the row's full run binding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct OutputItemUpdate {
+    pub item_id: String,
+    pub operation: OutputItemOperation,
+    pub channel: OutputItemChannel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OutputItemOperation { Append, Complete }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OutputItemChannel { Message, Plan }
+
+impl OutputItemUpdate {
+    pub fn validate(&self, event: &AgentPublicEventV1) -> Result<(), AgentAdapterContractError> {
+        if self.item_id.is_empty() || self.item_id.len() > 128
+            || self.item_id.chars().any(char::is_control)
+            || !matches!(event.kind.as_str(), "status" | "final")
+            || (event.kind == "final" && self.operation != OutputItemOperation::Complete)
+        {
+            return Err(AgentAdapterContractError::new("invalid output item update"));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,6 +142,7 @@ pub fn decode_output_page(
         let value = serde_json::to_value(&row.event)
             .map_err(|_| AgentAdapterContractError::new("invalid output event encoding"))?;
         validate_agent_public_event_against_run_v1(&value, &expected.binding)?;
+        if let Some(update) = &row.item_update { update.validate(&row.event)?; }
         if !ids.insert(&row.event.event_id) {
             return Err(AgentAdapterContractError::new("duplicate output event id"));
         }
@@ -127,6 +161,22 @@ pub fn decode_output_page(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn item_update_contract_distinguishes_progress_from_final() {
+        let mut event = event();
+        event.kind = "status".into();
+        let mut update = OutputItemUpdate { item_id: "item-1".into(), operation: OutputItemOperation::Append, channel: OutputItemChannel::Message };
+        assert!(update.validate(&event).is_ok());
+        event.kind = "final".into();
+        assert!(update.validate(&event).is_err());
+        update.operation = OutputItemOperation::Complete;
+        assert!(update.validate(&event).is_ok());
+        for id in [String::new(), "a\0b".into(), "가".repeat(43)] {
+            update.item_id = id;
+            assert!(update.validate(&event).is_err());
+        }
+    }
 
     fn event() -> AgentPublicEventV1 {
         let envelope: serde_json::Value = serde_json::from_str(include_str!(
@@ -155,6 +205,7 @@ mod tests {
                 OutputRow {
                     output_sequence: sequence,
                     event,
+                    item_update: None,
                 }
             })
             .collect();

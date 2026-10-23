@@ -19,6 +19,24 @@ function page(query: OutputPageRequest, count: number): OutputPage {
 }
 const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
 
+test("item updates retain append/complete identity and reject unsafe metadata", () => {
+  const query = request(0, 1);
+  const value = page(query, 1);
+  value.rows[0]!.event.kind = "status";
+  value.rows[0]!.itemUpdate = { itemId: "item-1", operation: "append", channel: "message" };
+  assert.deepEqual(decodeOutputPage(encode(value), query), value);
+  value.rows[0]!.itemUpdate.operation = "complete";
+  value.rows[0]!.event.kind = "final";
+  assert.deepEqual(decodeOutputPage(encode(value), query), value);
+  value.rows[0]!.itemUpdate.operation = "append";
+  assert.throws(() => decodeOutputPage(encode(value), query));
+  value.rows[0]!.event.kind = "status";
+  for (const itemId of ["", "a\u0000b", "가".repeat(43)]) {
+    value.rows[0]!.itemUpdate.itemId = itemId;
+    assert.throws(() => decodeOutputPage(encode(value), query));
+  }
+});
+
 test("shared Rust/TypeScript golden page", () => {
   const bytes = readFileSync(new URL("./fixtures/m5/agent-output-page.json", import.meta.url));
   const query = request(2999);

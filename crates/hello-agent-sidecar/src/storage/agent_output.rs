@@ -3,7 +3,7 @@
 use super::{row_u64, sqlite_error, SidecarError};
 use hello_agent_protocol::agent_adapter_v1::{
     output_pages::{
-        decode_output_page, OutputHead, OutputPage, OutputPageRequest, OutputRow,
+        decode_output_page, OutputHead, OutputPage, OutputPageRequest, OutputRow, OutputItemUpdate,
         OUTPUT_FORMAT_VERSION, OUTPUT_PAGE_MAX_BYTES,
     },
     validate_agent_public_event_against_run_v1, AgentRunBindingV1,
@@ -25,6 +25,17 @@ impl super::Storage {
         event: &Value,
         text_budget: u64,
     ) -> Result<(), SidecarError> {
+        self.append_agent_output_item(binding, sequence, event, text_budget, None)
+    }
+
+    pub(crate) fn append_agent_output_item(
+        &mut self,
+        binding: &AgentRunBindingV1,
+        sequence: u64,
+        event: &Value,
+        text_budget: u64,
+        item_update: Option<&OutputItemUpdate>,
+    ) -> Result<(), SidecarError> {
         self.ensure_writes_admitted()?;
         let path = self.path().to_path_buf();
         quota::check(&self.connection, &path, true)?;
@@ -36,7 +47,7 @@ impl super::Storage {
         super::verify_append_runtime_state(&tx)?;
         let current = head(&tx, binding)?;
         verify_run_binding(&tx, &current)?;
-        append(&tx, binding, sequence, event, text_budget)?;
+        append_item(&tx, binding, sequence, event, text_budget, item_update)?;
         // The pager can retain dirty pages until commit; the pre-write headroom
         // is conservative, while this catches WAL growth already flushed.
         quota::check(&tx, &path, false)?;
@@ -214,6 +225,7 @@ CREATE TABLE run_output_records (
  output_sequence INTEGER NOT NULL CHECK(output_sequence > 0),
  event_id TEXT NOT NULL UNIQUE,
  event_json TEXT NOT NULL CHECK(length(CAST(event_json AS BLOB)) <= 524288),
+ item_update_json TEXT CHECK(item_update_json IS NULL OR length(CAST(item_update_json AS BLOB)) <= 2048),
  PRIMARY KEY(run_id, output_sequence)
 ) STRICT;";
 
@@ -277,6 +289,17 @@ pub(super) fn append(
     value: &Value,
     text_budget: u64,
 ) -> Result<(), SidecarError> {
+    append_item(tx, binding, sequence, value, text_budget, None)
+}
+
+pub(super) fn append_item(
+    tx: &Transaction<'_>,
+    binding: &AgentRunBindingV1,
+    sequence: u64,
+    value: &Value,
+    text_budget: u64,
+    item_update: Option<&OutputItemUpdate>,
+) -> Result<(), SidecarError> {
     let previous = head(tx, binding)?;
     if previous.sealed
         || previous.committed_sequence.checked_add(1) != Some(sequence)
@@ -312,18 +335,20 @@ pub(super) fn append(
         rows: vec![OutputRow {
             output_sequence: sequence,
             event,
+            item_update: item_update.cloned(),
         }],
         next_after_sequence: sequence,
     };
     decode_output_page(encode(&single)?.as_bytes(), &request)
         .map_err(|_| invalid("output event exceeds page budget"))?;
     tx.execute(
-        "INSERT INTO run_output_records VALUES (?1,?2,?3,?4)",
+        "INSERT INTO run_output_records VALUES (?1,?2,?3,?4,?5)",
         params![
             binding.run_id,
             sql_integer(sequence)?,
             single.rows[0].event.event_id,
-            json
+            json,
+            item_update.map(encode).transpose()?
         ],
     )
     .map_err(sqlite_error)?;
@@ -355,7 +380,7 @@ pub(super) fn page(
     if request.through_sequence > current.committed_sequence {
         return Err(invalid("output cursor exceeds committed head"));
     }
-    let mut statement = tx.prepare("SELECT output_sequence, length(CAST(event_json AS BLOB)), CASE WHEN length(CAST(event_json AS BLOB)) <= 524288 THEN event_json ELSE NULL END, CASE WHEN length(CAST(event_id AS BLOB)) <= 8192 THEN event_id ELSE NULL END FROM run_output_records WHERE run_id=?1 AND output_sequence>?2 AND output_sequence<=?3 ORDER BY output_sequence LIMIT ?4").map_err(sqlite_error)?;
+    let mut statement = tx.prepare("SELECT output_sequence, length(CAST(event_json AS BLOB)), CASE WHEN length(CAST(event_json AS BLOB)) <= 524288 THEN event_json ELSE NULL END, CASE WHEN length(CAST(event_id AS BLOB)) <= 8192 THEN event_id ELSE NULL END, length(CAST(item_update_json AS BLOB)), CASE WHEN length(CAST(item_update_json AS BLOB)) <= 2048 THEN item_update_json ELSE NULL END FROM run_output_records WHERE run_id=?1 AND output_sequence>?2 AND output_sequence<=?3 ORDER BY output_sequence LIMIT ?4").map_err(sqlite_error)?;
     let mut rows = statement
         .query(params![
             request.binding.run_id,
@@ -382,10 +407,18 @@ pub(super) fn page(
         if event_id != event.event_id {
             return Err(invalid("stored output event id mismatch"));
         }
+        let update_length: Option<i64> = row.get(4).map_err(sqlite_error)?;
+        if update_length.is_some_and(|length| !(0..=2048).contains(&length)) {
+            return Err(invalid("oversized stored output item update"));
+        }
+        let update_json: Option<String> = row.get(5).map_err(sqlite_error)?;
+        let item_update = update_json.map(|json| serde_json::from_str::<OutputItemUpdate>(&json)
+            .map_err(|_| invalid("invalid stored output item update"))).transpose()?;
         let previous_sequence = result.next_after_sequence;
         result.rows.push(OutputRow {
             output_sequence: sequence,
             event,
+            item_update,
         });
         result.next_after_sequence = sequence;
         if encode(&result)?.len() > OUTPUT_PAGE_MAX_BYTES {
@@ -408,6 +441,26 @@ mod tests {
             "../../../../tests/fixtures/m5/agent-output-page.json"
         ))
         .unwrap()
+    }
+
+    #[test]
+    fn item_update_round_trips_with_output_body() {
+        use hello_agent_protocol::agent_adapter_v1::output_pages::{OutputItemChannel, OutputItemOperation};
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(SCHEMA).unwrap();
+        let fixture = fixture();
+        let binding = fixture.request.binding;
+        let tx = db.transaction().unwrap();
+        begin(&tx, &binding).unwrap();
+        let mut event = fixture.rows[0].event.clone();
+        event.kind = "status".into();
+        let update = OutputItemUpdate { item_id: "item-1".into(), operation: OutputItemOperation::Append, channel: OutputItemChannel::Message };
+        append_item(&tx, &binding, 1, &serde_json::to_value(&event).unwrap(), 1024 * 1024, Some(&update)).unwrap();
+        let request = OutputPageRequest { format_version: OUTPUT_FORMAT_VERSION, binding, after_sequence: 0, through_sequence: 1, limit: 1 };
+        let page = page(&tx, &request).unwrap();
+        assert_eq!(page.rows[0].event, event);
+        assert_eq!(page.rows[0].item_update.as_ref(), Some(&update));
+        tx.rollback().unwrap();
     }
 
     #[test]
