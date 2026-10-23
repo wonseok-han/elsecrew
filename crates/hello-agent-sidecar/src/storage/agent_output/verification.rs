@@ -35,6 +35,7 @@ pub(in crate::storage) struct AllOutputVerification<'a> {
     after_head: i64,
     current: Option<RunScan>,
     reverse_after: Option<i64>,
+    runs_after: Option<i64>,
     usable: bool,
 }
 
@@ -66,6 +67,7 @@ impl<'a> AllOutputVerification<'a> {
             after_head: 0,
             current: None,
             reverse_after: None,
+            runs_after: None,
             usable: true,
         })
     }
@@ -107,6 +109,43 @@ impl<'a> AllOutputVerification<'a> {
         if version(&tx)? != self.version {
             return Err(invalid("output closure source changed"));
         }
+        if let Some(after) = self.runs_after {
+            let row: Option<(i64, Option<String>, Option<String>)> = tx.query_row(
+                "SELECT rowid, CASE WHEN length(CAST(run_id AS BLOB))<=8192 THEN run_id ELSE NULL END, CASE WHEN length(CAST(projection_json AS BLOB))<=1048576 THEN projection_json ELSE NULL END FROM runs WHERE rowid>?1 ORDER BY rowid LIMIT 1",
+                [after], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            ).optional().map_err(sqlite_error)?;
+            let next = if let Some((rowid, id, json)) = row {
+                let id = id.ok_or_else(|| invalid("oversized run identity"))?;
+                let value: Value =
+                    serde_json::from_str(&json.ok_or_else(|| invalid("oversized run projection"))?)
+                        .map_err(|_| invalid("invalid run projection"))?;
+                if let Some(format) = value.get("output_format_version") {
+                    let exists: bool = tx
+                        .query_row(
+                            "SELECT EXISTS(SELECT 1 FROM run_output_heads WHERE run_id=?1)",
+                            [&id],
+                            |row| row.get(0),
+                        )
+                        .map_err(sqlite_error)?;
+                    if format != OUTPUT_FORMAT_VERSION || !exists {
+                        return Err(invalid(
+                            "durable output run has missing head or unsupported format",
+                        ));
+                    }
+                }
+                Some(rowid)
+            } else {
+                None
+            };
+            if cancelled() || version(&tx)? != self.version {
+                return Err(invalid("output closure interrupted"));
+            }
+            tx.commit().map_err(sqlite_error)?;
+            let done = next.is_none();
+            self.runs_after = next;
+            self.usable = !done;
+            return Ok(done);
+        }
         if let Some(after) = self.reverse_after {
             // Each indexed existence check has one dependency. No body is read.
             let mut statement = tx.prepare("SELECT r.rowid, EXISTS(SELECT 1 FROM run_output_heads h WHERE h.run_id=r.run_id AND r.output_sequence>0 AND r.output_sequence<=h.committed_sequence) FROM run_output_records r WHERE r.rowid>?1 ORDER BY r.rowid LIMIT 100").map_err(sqlite_error)?;
@@ -127,9 +166,11 @@ impl<'a> AllOutputVerification<'a> {
             }
             tx.commit().map_err(sqlite_error)?;
             self.reverse_after = Some(next);
-            let done = count < 100;
-            self.usable = !done;
-            return Ok(done);
+            if count < 100 {
+                self.runs_after = Some(0);
+            }
+            self.usable = true;
+            return Ok(false);
         }
         let row: Option<(i64, Option<String>, Option<String>, u64)> = tx.query_row(
             "SELECT rowid, CASE WHEN length(CAST(run_id AS BLOB))<=8192 THEN run_id ELSE NULL END, CASE WHEN length(CAST(binding_json AS BLOB))<=8192 THEN binding_json ELSE NULL END, text_bytes FROM run_output_heads WHERE rowid>?1 ORDER BY rowid LIMIT 1",
@@ -143,6 +184,7 @@ impl<'a> AllOutputVerification<'a> {
                 return Err(invalid("output head key mismatch"));
             }
             let expected = head(&tx, &binding)?;
+            verify_run_binding(&tx, &expected)?;
             Some((
                 rowid,
                 RunScan {
@@ -265,12 +307,14 @@ mod tests {
     fn database() -> (Connection, AgentRunBindingV1) {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(SCHEMA).unwrap();
+        db.execute_batch("CREATE TABLE runs(run_id TEXT PRIMARY KEY, state TEXT NOT NULL, projection_json TEXT NOT NULL)").unwrap();
         let fixture: OutputPage = serde_json::from_str(include_str!(
             "../../../../../tests/fixtures/m5/agent-output-page.json"
         ))
         .unwrap();
         let binding = fixture.request.binding;
         let tx = db.transaction().unwrap();
+        install_run(&tx, &binding);
         begin(&tx, &binding).unwrap();
         for sequence in 1..=101 {
             let mut event = fixture.rows[0].event.clone();
@@ -288,12 +332,33 @@ mod tests {
         (db, binding)
     }
 
+    fn install_run(tx: &Transaction<'_>, binding: &AgentRunBindingV1) {
+        let envelope: Value = serde_json::from_str(
+            include_str!(
+                "../../../../../tests/fixtures/m5/protocol-v1/valid/agent-run-state-changed.jsonl"
+            )
+            .lines()
+            .last()
+            .unwrap(),
+        )
+        .unwrap();
+        let mut record = envelope["payload"]["run"].clone();
+        record["runId"] = Value::String(binding.run_id.clone());
+        let projection = serde_json::json!({"run_id":binding.run_id,"state":"running","source_kind":"actualAgent","output_format_version":1,"record":record});
+        tx.execute(
+            "INSERT INTO runs VALUES (?1,'running',?2)",
+            params![binding.run_id, projection.to_string()],
+        )
+        .unwrap();
+    }
+
     #[test]
     fn full_closure_visits_empty_runs_and_rejects_orphans() {
         let (mut db, binding) = database();
         let mut empty = binding.clone();
         empty.run_id = "agent_run_empty".to_string();
         let tx = db.transaction().unwrap();
+        install_run(&tx, &empty);
         begin(&tx, &empty).unwrap();
         tx.commit().unwrap();
         {
@@ -310,6 +375,32 @@ mod tests {
         db.execute_batch("PRAGMA foreign_keys=OFF; DELETE FROM run_output_heads")
             .unwrap();
         let mut all = AllOutputVerification::start(&mut db).unwrap();
+        assert!(!all.step(&mut || false).unwrap());
+        assert!(all.step(&mut || false).is_err());
+    }
+
+    #[test]
+    fn closure_rejects_missing_legacy_and_mismatched_runs() {
+        for sql in [
+            "DELETE FROM runs",
+            "UPDATE runs SET projection_json=json_remove(projection_json,'$.output_format_version')",
+            "UPDATE runs SET projection_json=json_set(projection_json,'$.record.taskId','task_other')",
+            "UPDATE runs SET state='succeeded'",
+        ] {
+            let (mut db, _) = database();
+            db.execute_batch(sql).unwrap();
+            let mut all = AllOutputVerification::start(&mut db).unwrap();
+            assert!(all.step(&mut || false).is_err());
+        }
+    }
+
+    #[test]
+    fn closure_rejects_new_run_without_output_head() {
+        let (mut db, _) = database();
+        db.execute_batch("DELETE FROM run_output_records; DELETE FROM run_output_heads")
+            .unwrap();
+        let mut all = AllOutputVerification::start(&mut db).unwrap();
+        assert!(!all.step(&mut || false).unwrap());
         assert!(!all.step(&mut || false).unwrap());
         assert!(all.step(&mut || false).is_err());
     }

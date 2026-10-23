@@ -13,6 +13,53 @@ use serde_json::Value;
 
 pub(super) mod verification;
 
+/// New output format is opt-in per run; a legacy array is never silently
+/// reinterpreted as this ledger. Existing lifecycle/fence checks remain required.
+fn verify_run_binding(tx: &Transaction<'_>, output: &OutputHead) -> Result<(), SidecarError> {
+    use hello_agent_protocol::agent_adapter_v1::{
+        validate_agent_adapter_payload_v1, AgentRunRecordV1,
+    };
+    let row: Option<(String, String)> = tx.query_row(
+        "SELECT state, projection_json FROM runs WHERE run_id=?1 AND length(CAST(projection_json AS BLOB))<=1048576 AND length(CAST(state AS BLOB))<=128",
+        [&output.binding.run_id], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).optional().map_err(sqlite_error)?;
+    let (state, json) = row.ok_or_else(|| invalid("output run missing or oversized"))?;
+    let projection: Value =
+        serde_json::from_str(&json).map_err(|_| invalid("invalid output run projection"))?;
+    if projection["source_kind"] != "actualAgent"
+        || projection["output_format_version"] != OUTPUT_FORMAT_VERSION
+        || projection.get("public_events").is_some()
+        || projection["run_id"].as_str() != Some(&output.binding.run_id)
+    {
+        return Err(invalid("run is not a durable output run"));
+    }
+    validate_agent_adapter_payload_v1("runRecord", &projection["record"])
+        .map_err(|_| invalid("invalid output run record"))?;
+    let record: AgentRunRecordV1 = serde_json::from_value(projection["record"].clone())
+        .map_err(|_| invalid("invalid output run record"))?;
+    let binding = AgentRunBindingV1 {
+        chat_id: record.chat_id,
+        task_id: record.task_id,
+        project_id: record.project_id,
+        worktree_id: record.worktree_id,
+        workspace_identity: record.workspace_identity,
+        run_id: record.run_id,
+        role_id: record.selected_profile.role_id,
+        capability_fingerprint: record.capability_fingerprint,
+    };
+    if binding != output.binding || state != record.state || projection["state"] != state {
+        return Err(invalid("output run identity or state mismatch"));
+    }
+    if !matches!(state.as_str(), "preparing" | "running" | "cancelling") && !output.sealed {
+        return Err(invalid("terminal run output must be sealed"));
+    }
+    if let Some(value) = projection.get("provider_run_fence") {
+        let fence = crate::provider_login_process::RunFenceBinding::from_value(value)?;
+        fence.validate(&binding.run_id, &record.selected_profile.runtime)?;
+    }
+    Ok(())
+}
+
 pub(super) const SCHEMA: &str = "
 CREATE TABLE run_output_heads (
  run_id TEXT PRIMARY KEY NOT NULL,

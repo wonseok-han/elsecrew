@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전0eeb86d는 출력 table closure 구현 진척이다. clean 통합 checkout에서 실제 runs projection/AgentRunRecord/RunFenceBinding 형식을 대조하고 output head→run 결속을 연결했다. source_kind·명시 output_format_version=1·배열 부재·run/chat/task/project/worktree/profile 신원·state와 terminal 출력 sealed를 검사한다. provider fence가 있으면 기존 검증기를 재사용하며 이것만으로 프로세스 종료나 잠금 해제를 승인하지 않는다.
+- 전체 closure 끝에 runs→output head 역방향 검사를 추가하여 새 형식 run의 누락 head/지원하지 않는 형식을 거절한다. 기존 legacy는 marker가 없으면 이 검사 대상이 아니며 기존 검증기를 대체하지 않는다. Karpathy 최소 변경 원칙으로 runRecord 검증을 재사용했다. 누락/legacy/신원/state 및 reverse 누락 회귀를 작성했다.
+- 새 테스트 포함 누적 구현은 아직 실행 검증 전이며 format/diff만 확인했다. schema migration/R3 admission 및 runtime의 새 형식 생성·physical quota 연결은 남아 있다. 사용자 DB·인증·모델·앱 실행·main/push 없음. 다음은 새 형식의 생성/이관과 기존 저장 검증 경계 연결이다.
+
+### 2026-10-23 · by Codex
 - 직전ce9dc96는 단일 run 검사 구현 진척이다. clean 통합 checkout에서 같은 검사기를 재사용하는 전체 출력 table closure를 추가했다. head를 rowid keyset으로 순회하고 각 run을 제한된 page로 검사한 뒤 record→head 역방향 exact lookup으로 고아/범위 밖 row를 거절한다. 비양수 rowid·head key/binding 불일치도 거절하며 한 connection 차용/data_version 경계를 유지한다.
 - 빈 run을 포함한 전체 순회·고아 row 거절 회귀를 추가했다. 이전 누적 변경과 함께 아직 실행 전이며 format/diff만 확인했다. 전체 출력 table 일치와 전체 DB admission은 구별한다. run/fence 결속·기존 schema identity/이관·물리 quota·runtime/UI 연결은 남아 있어 실제 제품 DB에는 활성화하지 않았다.
 - Karpathy 최소 변경으로 기존 page/session 구현을 재사용했다. 사용자 데이터·앱·모델 실행·main/push 없음. 다음은 run/fence 결속과 migration/admission 통합이며 전체 목표는 미완료다.
