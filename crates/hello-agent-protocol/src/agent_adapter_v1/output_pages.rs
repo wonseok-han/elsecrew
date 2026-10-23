@@ -151,6 +151,14 @@ mod tests {
     }
 
     #[test]
+    fn shared_typescript_golden_page() {
+        let bytes = include_bytes!("../../../../tests/fixtures/m5/agent-output-page.json");
+        let decoded = decode_output_page(bytes, &request(2999, 3000)).unwrap();
+        assert_eq!(decoded.next_after_sequence, 3000);
+        assert_eq!(decoded.rows[0].event.text, "완료 — done");
+    }
+
+    #[test]
     fn three_thousand_events_in_bounded_pages() {
         for after in (0..3000).step_by(100) {
             let request = request(after, 3000);

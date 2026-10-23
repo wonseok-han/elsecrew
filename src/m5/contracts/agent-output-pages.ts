@@ -1,0 +1,75 @@
+/** Draft durable-output contract; not yet exposed through the runtime bridge. */
+import {
+  validateAgentPublicEventAgainstRunV1,
+  validateAgentRunBindingV1,
+  type AgentPublicEventV1,
+  type AgentRunBindingV1,
+} from "./agent-adapter-v1.ts";
+
+export const OUTPUT_FORMAT_VERSION = 1;
+export const OUTPUT_PAGE_MAX_ITEMS = 100;
+export const OUTPUT_PAGE_MAX_BYTES = 512 * 1024;
+
+export interface OutputPageRequest {
+  formatVersion: 1;
+  binding: AgentRunBindingV1;
+  afterSequence: number;
+  throughSequence: number;
+  limit: number;
+}
+export interface OutputRow { outputSequence: number; event: AgentPublicEventV1 }
+export interface OutputPage {
+  request: OutputPageRequest;
+  rows: OutputRow[];
+  nextAfterSequence: number;
+}
+function fail(): never { throw new Error("invalid durable output page"); }
+function object(value: unknown, keys: readonly string[]): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return fail();
+  const result = value as Record<string, unknown>;
+  if (Object.keys(result).length !== keys.length || keys.some(key => !Object.prototype.hasOwnProperty.call(result, key))) return fail();
+  return result;
+}
+function sequence(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return fail();
+  return value;
+}
+export function validateOutputPageRequest(value: unknown): OutputPageRequest {
+  const request = object(value, ["formatVersion", "binding", "afterSequence", "throughSequence", "limit"]);
+  const binding = validateAgentRunBindingV1(request.binding);
+  const afterSequence = sequence(request.afterSequence);
+  const throughSequence = sequence(request.throughSequence);
+  const limit = sequence(request.limit);
+  if (request.formatVersion !== OUTPUT_FORMAT_VERSION || afterSequence > throughSequence
+    || limit < 1 || limit > OUTPUT_PAGE_MAX_ITEMS) return fail();
+  return { formatVersion: OUTPUT_FORMAT_VERSION, binding, afterSequence, throughSequence, limit };
+}
+
+/** Validate bytes before decoding; storage must separately prove the committed
+ * watermark and cross-page event-ID uniqueness. Transport seq is not used. */
+export function decodeOutputPage(bytes: Uint8Array, expectedValue: OutputPageRequest): OutputPage {
+  const expected = validateOutputPageRequest(expectedValue);
+  if (bytes.byteLength > OUTPUT_PAGE_MAX_BYTES) return fail();
+  const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  const page = object(value, ["request", "rows", "nextAfterSequence"]);
+  const request = validateOutputPageRequest(page.request);
+  if (request.afterSequence !== expected.afterSequence || request.throughSequence !== expected.throughSequence
+    || request.limit !== expected.limit
+    || (Object.keys(expected.binding) as (keyof AgentRunBindingV1)[]).some(key => request.binding[key] !== expected.binding[key])) return fail();
+  if (!Array.isArray(page.rows) || page.rows.length > expected.limit) return fail();
+  let next = expected.afterSequence;
+  const ids = new Set<string>();
+  const rows: OutputRow[] = [];
+  for (const raw of page.rows) {
+    const row = object(raw, ["outputSequence", "event"]);
+    const outputSequence = sequence(row.outputSequence);
+    if (next === expected.throughSequence || outputSequence !== next + 1) return fail();
+    const event = validateAgentPublicEventAgainstRunV1(row.event, expected.binding);
+    if (ids.has(event.eventId)) return fail();
+    ids.add(event.eventId);
+    rows.push({ outputSequence, event });
+    next = outputSequence;
+  }
+  if (sequence(page.nextAfterSequence) !== next || (!rows.length && next !== expected.throughSequence)) return fail();
+  return { request, rows, nextAfterSequence: next };
+}

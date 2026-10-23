@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전34c5ea3는 Rust 페이지 계약 구현 진척이며 현재 clean m5/coding-agent-ide에서 TypeScript 대응을 추가했다. Karpathy 최소 변경 원칙으로 기존 public event/run binding 검증기를 재사용하며100개/512KiB, 안전 정수·요청 결속·연속 순서·중복/zero-progress 거절과 decode 전 byte 상한을 맞췄다. ES2020 기준 API를 유지했다.
+- Rust/TypeScript가 함께 읽는3,000번째 출력 golden JSON과 TS5개/Rust1개 회귀를 추가했다. 이번에는 전체/개별 테스트를 실행하지 않고 후속 계약 연결과 묶는다. diff check만 통과했으며 추가 테스트 결과는 아직 미검증이다. 실제 단일 run3,000개 성공으로 표현하지 않는다.
+- 다음은 head/구독 catch-up 및 storage admission·append/page 연결이다. L1 전체 동결·독립 검토는 아직이며 capability/IPC 활성화·기존256개 경계 변경은 없다. 사용자 데이터·모델·앱 실행·main/push 없음.
+
+### 2026-10-23 · by Codex
 - 직전 dac8afd는 승인 방향·독립 검토가 반영된 설계 진척이다. 같은 clean 통합 checkout에서 메인이 L1 출력 page 계약 구현을 시작했다. Karpathy 최소 변경 원칙으로 기존 단일 public event 검증을 재사용하고, 독립 모듈에 요청/run 결속·연속 durable 순서·100개/512KiB·유효 cursor·zero-progress 거절을 추가했다.
 - 현행 본문64KiB는 JSON escaping으로384KiB가 될 수 있어 page 제안을256→512KiB로 보완했다. runtime capability/IPC/DB·기존256개 제한은 변경하지 않아 현재 실행 동작은 그대로다. 3,000개 페이지 순회·교차run/중복/누락/범위·최대 escaped 항목 회귀를 작성했다. 이는 parser/저장/전송/UI의 실제3,000개 실행 성공이 아니다.
 - 다음은 TS/golden·head/구독 및 저장 스키마 계약을 연결하는 L1 잔여다. 전체 검증은 연결 뒤 모아서 진행하며 모델 호출·사용자 프로젝트·main/push 없음.
