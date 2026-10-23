@@ -18,6 +18,13 @@ export interface OutputPageRequest {
   limit: number;
 }
 export interface OutputRow { outputSequence: number; event: AgentPublicEventV1 }
+/** sealed closes output only; it does not prove process termination/success. */
+export interface OutputHead {
+  formatVersion: 1;
+  binding: AgentRunBindingV1;
+  committedSequence: number;
+  sealed: boolean;
+}
 export interface OutputPage {
   request: OutputPageRequest;
   rows: OutputRow[];
@@ -33,6 +40,14 @@ function object(value: unknown, keys: readonly string[]): Record<string, unknown
 function sequence(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return fail();
   return value;
+}
+export function validateOutputHead(value: unknown, expectedValue: AgentRunBindingV1): OutputHead {
+  const head = object(value, ["formatVersion", "binding", "committedSequence", "sealed"]);
+  const expected = validateAgentRunBindingV1(expectedValue);
+  const binding = validateAgentRunBindingV1(head.binding);
+  if (head.formatVersion !== OUTPUT_FORMAT_VERSION || typeof head.sealed !== "boolean"
+    || (Object.keys(expected) as (keyof AgentRunBindingV1)[]).some(key => binding[key] !== expected[key])) return fail();
+  return { formatVersion: OUTPUT_FORMAT_VERSION, binding, committedSequence: sequence(head.committedSequence), sealed: head.sealed };
 }
 export function validateOutputPageRequest(value: unknown): OutputPageRequest {
   const request = object(value, ["formatVersion", "binding", "afterSequence", "throughSequence", "limit"]);

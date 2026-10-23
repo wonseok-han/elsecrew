@@ -14,6 +14,29 @@ pub const OUTPUT_PAGE_MAX_ITEMS: usize = 100;
 pub const OUTPUT_PAGE_MAX_BYTES: usize = 512 * 1024;
 pub const OUTPUT_FORMAT_VERSION: u32 = 1;
 
+/// Output closure is not process-termination evidence or execution success.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct OutputHead {
+    pub format_version: u32,
+    pub binding: AgentRunBindingV1,
+    pub committed_sequence: u64,
+    pub sealed: bool,
+}
+
+impl OutputHead {
+    pub fn validate(&self, expected: &AgentRunBindingV1) -> Result<(), AgentAdapterContractError> {
+        validate_run_binding(expected)?;
+        if self.format_version != OUTPUT_FORMAT_VERSION
+            || &self.binding != expected
+            || self.committed_sequence > MAX_SEQUENCE
+        {
+            return Err(AgentAdapterContractError::new("invalid output head"));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct OutputPageRequest {
