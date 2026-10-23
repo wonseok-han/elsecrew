@@ -224,6 +224,53 @@ mod tests {
     }
 
     #[test]
+    fn output_lifecycle_rolls_back_with_run_projection() {
+        let mut db = v10();
+        migrate(&mut db).unwrap();
+        let envelope: Value = serde_json::from_str(
+            include_str!(
+                "../../../../../tests/fixtures/m5/protocol-v1/valid/agent-run-state-changed.jsonl"
+            )
+            .lines()
+            .last()
+            .unwrap(),
+        )
+        .unwrap();
+        let record = envelope["payload"]["run"].clone();
+        let mut projection = serde_json::json!({"run_id":"agent_run_01","state":"running","source_kind":"actualAgent","output_format_version":1,"record":record}).as_object().unwrap().clone();
+        let tx = db.transaction().unwrap();
+        tx.execute("INSERT INTO runs(run_id,state,projection_json,last_event_sequence) VALUES ('agent_run_01','running',?1,1)", [encode(&projection).unwrap()]).unwrap();
+        sync_run_projection(&tx, &projection, "agent_run_01", 1).unwrap();
+        let binding: AgentRunBindingV1 = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/m5/agent-output-page.json"
+        ))
+        .map(|page: OutputPage| page.request.binding)
+        .unwrap();
+        assert!(!head(&tx, &binding).unwrap().sealed);
+        projection.insert("state".into(), Value::String("succeeded".into()));
+        projection.get_mut("record").unwrap()["state"] = Value::String("succeeded".into());
+        projection.get_mut("record").unwrap()["terminationOutcome"] =
+            Value::String("cleanExit".into());
+        tx.execute(
+            "UPDATE runs SET state='succeeded',projection_json=?1,last_event_sequence=2",
+            [encode(&projection).unwrap()],
+        )
+        .unwrap();
+        sync_run_projection(&tx, &projection, "agent_run_01", 2).unwrap();
+        assert!(head(&tx, &binding).unwrap().sealed);
+        tx.rollback().unwrap();
+        let runs: i64 = db
+            .query_row("SELECT count(*) FROM runs", [], |row| row.get(0))
+            .unwrap();
+        let heads: i64 = db
+            .query_row("SELECT count(*) FROM run_output_heads", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!((runs, heads), (0, 0));
+    }
+
+    #[test]
     fn rejects_drift_before_creating_output_tables() {
         let mut db = v10();
         db.execute_batch("CREATE TABLE unexpected(value TEXT)")

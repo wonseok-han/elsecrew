@@ -74,6 +74,80 @@ fn require_output_schema(connection: &rusqlite::Connection) -> Result<(), Sideca
     Ok(())
 }
 
+/// Called after the run projection is written, inside that same transaction.
+/// A failed output transition rolls back the run/lock updates as well.
+pub(super) fn sync_run_projection(
+    tx: &Transaction<'_>,
+    projection: &serde_json::Map<String, Value>,
+    run_id: &str,
+    event_sequence: u64,
+) -> Result<(), SidecarError> {
+    use hello_agent_protocol::agent_adapter_v1::{
+        validate_agent_adapter_payload_v1, AgentRunRecordV1,
+    };
+    let format = projection.get("output_format_version");
+    if super::storage_schema_version(tx)? != Some(schema::VERSION) {
+        if format.is_some() {
+            return Err(invalid("new output run requires schema v11"));
+        }
+        return Ok(());
+    }
+    let exists: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM run_output_heads WHERE run_id=?1)",
+            [run_id],
+            |row| row.get(0),
+        )
+        .map_err(sqlite_error)?;
+    let Some(format) = format else {
+        if exists {
+            return Err(invalid("durable output run cannot revert to legacy format"));
+        }
+        return Ok(());
+    };
+    if format != OUTPUT_FORMAT_VERSION {
+        return Err(invalid("unsupported output format"));
+    }
+    let value = projection
+        .get("record")
+        .ok_or_else(|| invalid("missing output run record"))?;
+    validate_agent_adapter_payload_v1("runRecord", value)
+        .map_err(|_| invalid("invalid output run record"))?;
+    let record: AgentRunRecordV1 =
+        serde_json::from_value(value.clone()).map_err(|_| invalid("invalid output run record"))?;
+    let binding = AgentRunBindingV1 {
+        chat_id: record.chat_id,
+        task_id: record.task_id,
+        project_id: record.project_id,
+        worktree_id: record.worktree_id,
+        workspace_identity: record.workspace_identity,
+        run_id: record.run_id,
+        role_id: record.selected_profile.role_id,
+        capability_fingerprint: record.capability_fingerprint,
+    };
+    if binding.run_id != run_id {
+        return Err(invalid("output run key mismatch"));
+    }
+    if !exists {
+        if event_sequence != 1 {
+            return Err(invalid("existing run is missing output head"));
+        }
+        begin(tx, &binding)?;
+    }
+    let current = head(tx, &binding)?;
+    let active = matches!(
+        record.state.as_str(),
+        "preparing" | "running" | "cancelling"
+    );
+    if current.sealed && active {
+        return Err(invalid("sealed output run cannot resume"));
+    }
+    if !active {
+        seal(tx, &binding)?;
+    }
+    verify_run_binding(tx, &head(tx, &binding)?)
+}
+
 /// New output format is opt-in per run; a legacy array is never silently
 /// reinterpreted as this ledger. Existing lifecycle/fence checks remain required.
 fn verify_run_binding(tx: &Transaction<'_>, output: &OutputHead) -> Result<(), SidecarError> {

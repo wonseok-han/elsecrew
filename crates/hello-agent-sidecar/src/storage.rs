@@ -5067,6 +5067,7 @@ fn write_projection(
                     sql_i64(sequence)?,
                 ],
             ).map_err(sqlite_error)?;
+            agent_output::sync_run_projection(transaction, record, &event.aggregate_id, event.aggregate_sequence)?;
         }
         "lock" => {
             let evidence = record.get("evidence").cloned().ok_or_else(|| {

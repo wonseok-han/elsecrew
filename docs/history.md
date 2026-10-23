@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전8d22b9b는 Storage 진입점 연결 진척이다. clean 통합 checkout에서 기존 write_projection의 run 저장 transaction에 sync_run_projection을 연결했다. 새 output marker는 V11에서만 허용하고 첫 aggregate event에서 head를 생성하며 terminal 상태 저장 시 seal을 같은 transaction에 반영한다. 중간 누락 head 복원·legacy로 되돌림·sealed→active 전환은 거절한다.
+- 기존 legacy run은 output marker가 없으면 기존 저장을 유지한다. 생성/종료 모두 기존 runRecord/run binding/fence 검증을 재사용하며 실패하면 상위 transaction이 run/lock/output 갱신을 함께 rollback한다. 실제 provider는 아직 새 marker를 생성하지 않고 자동 V11 이관도 비활성이므로 장시간 실행 기능은 아직 켜지지 않았다.
+- lifecycle 변경과 head가 함께 rollback되는 회귀를 작성했다. 누적 테스트 실행은 보류했고 format/diff만 확인했다. 다음은 provider/runtime 새 형식 생성·출력 append/terminal 경로와 quota 연결이다. 사용자 DB·앱·모델·main/push 없음.
+
+### 2026-10-23 · by Codex
 - 직전abfd003는 V11 재시작 검증 연결 진척이다. 현재 clean 통합 checkout에서 materializer/compaction writer의 runtime schema 분기에11을 추가하고 TS 버전 상수를 맞췄다. V10의 기존 frozen policy/golden은 덮어쓰지 않는다. 출력 원장은 기존 event 압축 대상에 추가하지 않았다.
 - Storage 내부 append_agent_output_record/agent_output_head/agent_output_page 진입점을 추가했다. admission 완료·schema11·run 결속을 확인하며 쓰기는 IMMEDIATE transaction과 기존 append runtime fence 검사 후 commit, maintenance epoch 무효화를 수행한다. private primitive를 실제 Storage 수명에 연결했지만 provider/runtime/IPC 호출은 아직 없다. physical quota는 미연결이다.
 - Karpathy 최소 변경으로 기존 admission/fence 검사를 재사용했다. 이번 누적 변경은 아직 실행 검증 전이며 format/diff만 확인했다. V11 자동 이관·제품 활성화/출력 실행 생성·UI 및 독립 검토는 남는다. 사용자 DB·앱·모델·main/push 변경 없음.
