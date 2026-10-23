@@ -1,6 +1,6 @@
 //! One connection's post-handshake observations; not permission to launch or send a prompt.
 use super::{claude_approval, claude_events, claude_init, BoundedObservation, ProviderError};
-use crate::provider::{PROVIDER_INTERNAL_EVENTS_MAX, PROVIDER_OBSERVATION_TOTAL_MAX_BYTES};
+use crate::provider::ProviderEventBudget;
 use serde::Deserialize;
 
 pub enum Event {
@@ -33,6 +33,7 @@ pub struct Session {
     failed: bool,
     diagnostic_stage: &'static str,
     allow_organization_guard: bool,
+    budget: ProviderEventBudget,
 }
 
 fn invalid() -> ProviderError {
@@ -68,6 +69,7 @@ impl Session {
             failed: false,
             diagnostic_stage: "session state",
             allow_organization_guard: false,
+            budget: ProviderEventBudget::LegacyV1,
         }
     }
 
@@ -75,6 +77,15 @@ impl Session {
     /// Does not authenticate provider registration strings by itself.
     pub fn for_native_organization_guard(expected: &claude_init::ExpectedInit<'_>) -> Self {
         Self { allow_organization_guard: true, ..Self::new(expected) }
+    }
+
+    /// Select before observing initialization; never resets an existing budget.
+    pub fn with_output_budget(mut self, budget: ProviderEventBudget) -> Result<Self, ProviderError> {
+        if self.failed || self.events != 0 || self.projection.is_some() {
+            return Err(invalid());
+        }
+        self.budget = budget;
+        Ok(self)
     }
 
     pub fn observe(&mut self, input: &BoundedObservation) -> Result<Event, ProviderError> {
@@ -101,8 +112,8 @@ impl Session {
             .bytes
             .checked_add(input.bytes.len())
             .ok_or_else(invalid)?;
-        if self.events > PROVIDER_INTERNAL_EVENTS_MAX
-            || self.bytes > PROVIDER_OBSERVATION_TOTAL_MAX_BYTES
+        if self.events > self.budget.internal_events()
+            || self.bytes > self.budget.observation_bytes()
         {
             return Err(invalid());
         }
@@ -131,7 +142,7 @@ impl Session {
             };
             self.permissions
                 .bind_hook_scope(init.session_id(), &self.cwd);
-            self.projection = Some(init.into_projection()?);
+            self.projection = Some(claude_events::SessionProjection::with_budget(init.session_id(), self.budget)?);
             return Ok(event);
         }
         // Do not infer a session or quietly accept tool requests before reported init.
@@ -205,6 +216,15 @@ mod tests {
         input(
             json!({"type":"system","subtype":"init","uuid":"init","session_id":"s","cwd":"/snapshot","model":"model","permissionMode":"default","tools":["Read"],"mcp_servers":[],"skills":[],"plugins":[]}),
         )
+    }
+    #[test]
+    fn durable_session_budget_must_be_selected_before_init() {
+        let mut session = Session::new(&expected()).with_output_budget(ProviderEventBudget::DurableV1).unwrap();
+        session.observe(&init()).unwrap();
+        assert!(session.with_output_budget(ProviderEventBudget::LegacyV1).is_err());
+        let mut closed = Session::new(&expected());
+        closed.close();
+        assert!(closed.with_output_budget(ProviderEventBudget::DurableV1).is_err());
     }
     #[test]
     fn native_guard_receipt_is_explicit_and_generic_session_still_rejects() {

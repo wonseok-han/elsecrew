@@ -170,6 +170,7 @@ pub(in crate::storage) fn verify_admission(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::migrate;
     use crate::storage::*;
 
     fn v10() -> Connection {

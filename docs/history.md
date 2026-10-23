@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 49b72ba/clean 통합 브랜치에서 native observation 소유 경로를 추적했다. Codex TurnStart→TurnStream, Claude Session→SessionProjection에도 명시 예산 전달을 추가하고 전송/관측 시작 이후 예산 전환을 거절한다. 기본값은 legacy이고 transport/runtime 자동 선택은 아직 연결하지 않았다.
+- durable Codex의 lifecycle 항목 문자열 보관에 별도4MiB 상한을 두었다. 출력3,000 delta·상한 후 sticky 실패·초기화 이후 전환 거절 회귀를 작성했다. Claude 권한 요청1,024개 제한과10분 실행 제한은 변경하지 않았다. 이 수치들은 전체 메모리 검증 전 제안이며 제품 활성화가 아니다.
+- 누적 cargo check -p hello-agent-sidecar --tests --locked에서 V11 migration 테스트의 glob import 충돌을 발견해 명시 import로 수정했고 재실행 PASS(19612, exit0)했다. 새 회귀 실행·전체 QA는 아직 하지 않았다. 물리 quota·transport 선택·IPC/UI·최종 응답 문맥·독립 검토가 남는다. 사용자 DB/계정/모델/앱 실행 및 main/push 없음.
+- 500줄 초과 예방을 위해10월22일 워크로그 전부를 같은 월 아카이브로 내용 그대로 이동했다.10월23일 전체와 고정 섹션을 보존하면300줄 이하로 줄일 수 없어 날짜 분할/고정 섹션 이동 금지를 우선했다.
+
+### 2026-10-23 · by Codex
 - 직전d24301d는 durable runtime 경로 진척이다. clean 통합 checkout에서 core classifier와 Codex TurnProjection/Claude SessionProjection의 예산을 LegacyV1/DurableV1로 분리했다. 기존 생성자는 legacy를 유지하고 새 생성자/초기 classifier 선택에서만 durable을 지정할 수 있다. 관측 시작 후 예산 변경은 거절한다.
 - 새 비활성 예산은 내부65,536개·공개16,384개·raw256MiB·공개본문64MiB이며 단일 항목 상한은 그대로다. parser는 원문 누적 없이 카운터/Claude bounded delivery ID 집합을 유지한다. 장시간 count 통과·초과 후 sticky 실패 회귀를 작성했지만 실행 전이다. 실제 runtime은 아직 이 모드를 선택하지 않는다.
 - diff check만 확인했다. 물리 quota·capability negotiation·새 run 생성/IPC/UI·최종 응답 문맥 및 누적 검증/독립 검토가 남으며 수치와 예산 합계는 활성화 전 검토 대상이다. 사용자 DB·앱·모델·main/push 없음.
@@ -112,111 +118,6 @@
 - 제한 실행9FtpiK는 준비 전 SIGABRT/표본0으로 실패했다. 일반 앱 권한으로 실행한 lE2OWw는 실제 시작 화면을 CUA로 확인했고 준비 표식1460.07ms 후40개 RSS 표본을 수집했다. 최대455229440B(약434.14MiB)로400MiB 초과/FAIL이다. 마지막400900096B만 선택해 합격으로 바꾸지 않는다. 디버거 미사용만으로 기준 실패가 해소되지 않는 새 증거이며 전체 G6 합격은 아니다.
 - CUA Cmd+Q로 시험 앱9501의 정상 종료(code0/signal null)와 DB shutdown confirmed를 확인했다. 결과는 `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-lE2OWw/result.json`에 보존했다. 모델/로그인/사용자 프로젝트·안전 검사 변경은 없고 별도 승인 두 건은 여전히 대기다. 다음은 이 시작 메모리 관측과 기존 구성별 증거의 원인 비교 및 최신 패키지 검증이며 Windows/전체G6/출시 미완료는 유지한다.
 
-### 2026-10-22 · by Codex
-- 자동 목표 재개에서 직전 턴을 개발 진척 없는 단건 복구 재확인으로 분류했다. 현재 Git은 기존 워크로그만 변경됐고 diff check가 통과하며, OS의 CGSSessionScreenIsLocked=Yes를 다시 확인했다. 진행 중인 시험 핸들은 없고 메시지 저장 검사 분리·새 Codex 실제 쓰기 시험 승인 응답도 없다. 동일 승인/환경 차단이 세 차례 이상 연속되어 목표를 blocked로 전환한다. 이는 완료나 사용자 요청에 의한 일시정지가 아니다.
-- 재개 조건: 화면 잠금 해제 후 가시성 기반 성능 검증, 채팅 저장 시 Git 전체 검사 분리 여부 결정, Codex 임시 프로젝트 파일 수정1회 실행 승인. 승인 전 안전 검사 변경이나 모델 실행을 하지 않는다. 전체 G6 수집·입력/메모리 기준 실패·Windows/출시 검증은 미완료로 유지한다. 이 기록 외 제품·인증·프로젝트 변경, main 병합/push는 없다.
-
-### 2026-10-22 · by Codex
-- 재전달된 단건 잠금 복구 승인에 대해 현재 HEAD3406668에서 읽기 전용 확인을 했다. 복구 구현 커밋45c28d6, approved-legacy-codex-repair-20261022.json 존재(161 bytes), codex-login.pending 부재를 재확인했다. 이미 처리된 대상이므로 중복 복구·삭제·프로세스 종료·모델 실행은 하지 않았다. 인증정보와 프로젝트는 변경하지 않았다.
-- 기존 미커밋 워크로그는 보존했다. 이 확인은 새로운 Codex 실제 실행 성공이나 M5 완료 증거가 아니며 기존 성능·실제 공급자·Windows/출시 잔여는 유지한다.
-
-### 2026-10-22 · by GPT-6 Astra
-- 직전 결정 요청 이후 두 번째 승인/환경 차단 확인이다. HEAD3406668과 이전 분석 워크로그만 변경된 상태를 확인했고, OS IOConsoleUsers의 CGSSessionScreenIsLocked=Yes를 읽기 전용으로 재확인했다. 검사 분리·Codex 실행 승인 응답은 아직 없고 canonical 전체 실측 파일도 없다. 새 코드·검증 진척이나 실행 중인 시험은 없다.
-- 같은 부하 시험/빌드를 반복하거나 부분 증거를 합격으로 바꾸지 않았다. 다음 실제 검증은 화면 잠금 해제, 실제 Codex 쓰기는 별도 승인, 채팅 검사 경계 변경은 사용자 결정이 필요하다. Windows/출시와 전체 성능 수집 미완료는 유지한다. 목표 완료/중단 선언 없이 현재 active를 유지하며 사용자 프로젝트·인증·앱 실행 상태는 변경하지 않았다.
-
-### 2026-10-22 · by GPT-6 Astra
-- 3406668/clean에서 native 다중 채팅 지연의 제품 경로를 대조했다. chat.rs append_user_message는 매 메시지마다 verify_workspace를 호출하고 project.rs validate_workspace_address는 HEAD/index/detached/fsck/remotes/metadata 검사를 실행한다. storage append_followup_checked의 전체 원장 replay도 유지된다. 기존 followup_cost_attribution 구현과10월 기록의 append60.48~85.29ms/workspace60.17~88.12ms/retry0.042~0.098ms를 찾아 동일 진단을 반복하지 않았다. 독립 표본이라 차감해 비용을 확정하지 않는다.
-- 메시지 저장에서의 Git 전체 검사와 실제 실행/파일 저장/반영 검사를 분리하는 방안을 사용자에게 명시 승인 요청했다. 제안은 메시지 저장의 결속·잠금/복구 상태를 유지하되 Git 손상 발견 시점이 실제 작업 시점으로 늦어질 수 있으므로 기존 안전 경계 변경으로 취급한다. 응답 전 검사 제거·캐시 권위 추가·제품 변경은 하지 않는다. 이번 턴은 원인 재확인/결정 요청이며 새 성능 개선이나 새 실측 증거가 아니다.
-- 화면 잠금 해제·Codex 실제 파일 수정 승인도 대기 중이며 전체 성능 collector/Windows/출시 미완료다. main/push·프로젝트/인증/모델 실행 없음.
-
-### 2026-10-22 · by GPT-6 Astra
-- 2a968bd/clean에서 기존 종료 stdio 시험 두 개의 증거를 읽고 저장 경합 수집기에 고정 --termination 모드를 연결했다. Karpathy 재사용 원칙으로 Rust/제품 경계는 수정하지 않았다. 두 상이한 clean/uncertain scenario와 관측 자손/별도 세션 자손·생존0·불확실 보고·정상 종료를 모두 요구하며 raw JSON/로그와 source 전후를 보존한다. 정상도 NOT_READY/exit2이고 전체 G6 canonical 파일을 생성하지 않는다.
-- 최초5VHOB7은 실제 시험2PASS/child exit0이나 순차 libtest의 시험명 접두사 때문에 JSON0건으로 수집 FAIL이었다. 정확한 두 이름만 제거하는 parser와 회귀를 추가했다. validator/parser5PASS, 재시험 세션38793의VW49d5는 두 정상 JSON·원시시험2PASS/child exit0·소스 전후 일치로 NOT_READY/exit2다. 각 시나리오는 관측 자손2/별도 세션1/생존0이며 uncertain은 불확실 상태를 보고했다. 두 경로 `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-termination-metrics-{5VHOB7,VW49d5}/`의 결과·로그를 보존했다.
-- 상시 승인된 읽기 전용 config_layers_review가 저장 경합+종료 수집 파동을 검토해 구체 차단 결함을 찾지 못했다. 검토자는 실행하지 않았다. 시험 자체의 폐기/정상 종료와 관측 신원 Gone만 다루며 독립 재부모화 orphan·실제 공급자·전체 G6 합격으로 확대하지 않는다. 화면 성능/stream 전체 수집·Codex 승인·Windows/출시는 계속 남는다. main/push·사용자 프로젝트/인증/실제 모델 변경 없음.
-
-### 2026-10-22 · by GPT-6 Astra
-- 412022b와 기존 기록1줄 상태에서 저장 경합 증거를 조사했다. 기존 ignored stdio 시험이 이미100회 경합/100회 정상 대조를 구현한 것을 확인해 중복 구현하지 않았다. Karpathy 재사용 원칙으로 `scripts/m5-save-race-metrics.mjs`를 추가해 정확한 기존 시험의 release/locked 실행, 원시 cargo.log·JSON 보존, Git 전후 상태 및 종료·100행·두 채팅 교대·보존/충돌/대조 결과 검증을 연결했다. 미측정 종료/stream 카운터를0으로 만들지 않고 canonical G6 파일도 생성하지 않는다.
-- validator 회귀3PASS. 실제 수집 세션41365는 release 캐시 빌드2.96초 후 시험 exit0/정상 종료,100 observations와 silentOverwrites/unreportedConflicts/crossChatWrites 모두0, Git 전후 일치를 확인했다. 수집기는 부분 진단이므로 exit2/NOT_READY를 유지했다. `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-save-race-metrics-jC3LIR/`에 로그/JSON을 보존하며 시험 자체가 정상 종료 후 제거한 hello-agent-save-races-hSK4q8의 부재를 재확인했다. 계정·모델·사용자 프로젝트·강제 종료는 사용하지 않았다.
-- 현재 증거는 두 workspace의 commit 전 제어된 경합이며 packaged UI/실제 agent writer/임의 scheduling 전체 합격이 아니다. 전체 collector의 stream·종료 관측 및 화면 성능 연결, Codex 승인·Windows/출시는 남는다. diff check PASS, main/push 없음. 직전 clean412022b 성능 명령의 누락 증거 거절 기록도 함께 보존했다.
-
-### 2026-10-22 · by GPT-6 Astra
-- 7ea6107/clean 기준 G6의 누락 명령 m5:test:performance를 기존 측정 판정기와 canonical `.artifacts/m5-performance/measurement.json`에 연결했다. 판정기는 변경하지 않았고 새 실측 파일을 합성하지 않았다. Karpathy 최소 변경으로 기존 clean HEAD·bounded regular JSON·diagnostic 거절·누락 NOT_READY·known failure FAIL 정책을 재사용한다.
-- harness --list는 COMMANDS_READY로 명령 등록과 합격 상태를 분리하고 안내문을 추가했다. 관련 회귀19PASS(50551 exit0): canonical 명령, 실제 임시 clean Git의 파일 부재/불일치/오류 거절 및 하네스 exit2 전파를 확인했다. 독립 config_layers_review는 차단 결함을 찾지 못했고 전체 collector/실측/G6 합격으로 보지 않았다. 실제 pnpm wrapper도 현재 dirty checkout에서 exit2/NOT_READY를 전파했다. canonical 파일 부재도 확인했다. diff check PASS.
-- 전체 collector는 여전히 미완성이며 이 등록으로 G6를 마감하지 않는다. 현재 화면 잠금 해제·Codex 임시 파일 수정 승인 응답은 없고 새 앱/모델 시험은 실행하지 않았다. 다음은 실제 수집에서 빠진 stream·저장 경합/종료·전체 측정 연결과 잠금 해제 후 화면 성능이다. main/push·사용자 프로젝트/인증 변경 없음.
-- 커밋 후 clean412022b에서도 실제 pnpm 명령이 누락된 canonical 증거를 exit2/NOT_READY로 거절함을 확인했다. 이 기록만 후속 보완한다.
-
-### 2026-10-22 · by GPT-6 Astra
-- a2deb80/clean에서 최근 두 변경의 묶음 검증을 수행했다. npm test561PASS/0skip(세션92727 exit0,24.3초), tsc --noEmit PASS(86293). 상시 승인된 읽기 전용 config_layers_review가0976d05..a2deb80의 준비 신호 전달/무CDP 수집과 Monaco effect 분리를 검토해 구체 차단 회귀·준비/권한/종료 경계 약화를 찾지 못했다. 검토자는 앱/시험을 실행하지 않았고 실제 GUI 증거를 대신하지 않는다.
-- Mac locked를 CUA로 다시 확인해 새 화면 시험은 시작하지 않았다. 사용자에게 잠금 해제와 별도로 Codex 임시 파일 수정1회 승인을 비동기 요청했다. 승인 응답 전 실제 모델 요청은 하지 않는다. 기존 YcnTnA result/restart JSON의 head·FAIL·idle 수치·정상 종료를 재확인했고 architecture의 현재 작업대/성능 단락을 실제 코드와 최신 증거에 맞췄다.
-- 완료 감사에서 전체 시안/가시성 기반 성능, 전체 G6 collector 및 m5:test:performance 연결, Codex 도구 작업·중단/복구 전체, Windows 패키지/UI 및 최종 안전 실패 주입·출시 결정이 남음을 확인했다. 부분 진단/기능 회귀를 G6나 제품 완료로 확대하지 않는다. out은 f168262 소스 패키지이고 a2deb80 포함 재패키징은 다음 실측 때 묶는다. main/push·인증/사용자 프로젝트 변경 없음.
-
-### 2026-10-22 · by GPT-6 Astra
-- f168262/clean에서 입력 경로를 조사해 Monaco 텍스트 동기화 effect가 매 초안 변경마다 updateOptions(readOnly)를 반복하는 것을 확인했다. 텍스트 동기화와 saveState/readOnly 옵션 effect를 분리했다. 최신 초안 전달·저장/복구 잠금·lazy 생성 시 최신 권한 확인은 유지하며 Karpathy 최소 변경으로 controller/저장 계약은 건드리지 않았다.
-- 실제 component effect 회귀7PASS: 연속 dirty 텍스트 갱신이 editor 옵션을 재설정하지 않고, admission/saving 전환·지연 로딩·오류 후 초안 보존/재시도는 유지한다. diff check PASS. 입력50ms 기준 통과나 실측 개선을 주장하지 않는다. 전체 빌드/패키지/성능을 이 작은 변경마다 반복하지 않으며 out은 직전 f168262 소스 상태다.
-- 다음은 화면 잠금 해제 후 무CDP 준비 신호·메모리 확인, 입력 지연 및 전체 시안/G6의 묶음 검증이다. Codex 실제 시험 승인·Windows 환경·출시 결정은 별도 남는다. 인증·사용자 프로젝트·모델 실행·main/push 변경 없음.
-
-### 2026-10-22 · by GPT-6 Astra
-- 직전 턴은 중복 승인 재확인으로 개발 진척이 없었다. 0976d05 기준 무CDP 메모리 수집의12초 고정 대기를 기존 visible/enabled 시작 버튼·두 frame 준비 표식 이후2초로 바꿨다. renderer는 개인정보 없는 고정 문자열만 출력하고 main은 허용된 main frame의 정확 문자열을 한 번만 stdout에 전달한다. IPC/실행/종료 권한과400MiB 기준은 그대로다. Karpathy 최소 변경 원칙을 적용했다.
-- 준비 수신 시각을 기록하고30초 내 미수신은 실패로 남긴다. 지속 가시성/실제 paint 완료나 G6 전체 증거는 아니므로 NOT_READY/gateEligible=false를 유지하며 과거 고정 대기 결과와 직접 비교하지 않는다. 회귀5PASS(숨김/비활성/실패/중복·다른 frame·origin·임의 로그 제외), tsc 및 문법·diff 검사 PASS. Vite main 단독 호출은 Forge 전용 설정 누락으로 실패했고 정식 경로로 교정했다. 제한 환경 패키지는 fetch 실패했지만 네트워크 허용 재실행 세션1205는 darwin-arm64 package smoke PASS, release 캐시0.26초 재사용했다.
-- 현재 out 패키지에 이 변경이 반영됐다. CUA 사전 확인에서 Mac locked가 확인되어 실제 no-CDP GUI 시험은 시작하지 않았다. 다음은 잠금 해제 후 이 패키지의 준비 신호/메모리 측정과 남은 입력 지연·G6/시안 마감이다. Codex 실제 작업 승인·Windows/출시 검증도 남는다. 사용자 프로젝트/인증/모델 실행/main 병합/push 없음.
-
-### 2026-10-22 · by GPT-6 Astra
-- 재전달된 과거 Codex 잠금 1건 복구 승인을 0976d05/clean에서 재확인했다. 45c28d6의 단건 복구 기록과 현재 codex-login.pending 부재, approved-legacy-codex-repair-20261022.json 존재를 대조해 이미 처리된 승인임을 확인했다. 오래된 메모리의 미해결 표시는 현재 사실로 사용하지 않는다.
-- 중복 제거·프로세스 종료·모델 실행·인증/프로젝트 변경은 하지 않았다. 이번에는 읽기 전용 확인과 작업 기록만 남긴다. 실제 Codex 도구 작업 성공 및 G6/Windows/출시 잔여는 이 승인으로 완료되지 않는다.
-
-### 2026-10-22 · by GPT-6 Astra
-- c29fa8d/clean에서 중앙diff·안내 접기 변경 파동의 누적 프런트 검사 npm test560PASS/0skip(세션66838 exit0), darwin-arm64 m5:package:smoke PASS를 확인했다. 현재 out 패키지에 두 UI 변경이 반영되어 이전 'dfaf6e3 패키지' 상태는 해소됐다. Rust는 내용 변경이 없어 기존 회귀를 재실행하지 않고 release 캐시 빌드0.25초를 재사용했다.
-- 실제 패키지 --project 첫 실행/정상 재시작에서 savedDiffVisible·원본 불변·persistedEditorText, 검토취소 원본보존/별도 동의 반영·정확 bytes/별도 복원 동의·정확 bytes, 두 프로젝트 파일/채팅 분리·원래 채팅 재열기를 확인했다. YcnTnA/result.json·restart.json의 기능 assertion은 완료됐으나 idle458719232/459456512B로400MiB 초과여서 전체 세션20426은exit1/FAIL을 유지한다. 두 앱은exit0/shutdown confirmed다.
-- 관측 PID 부재 뒤 이번 project/other-project/userdata만 영구 정리했고 `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-YcnTnA/`의 JSON·스크린샷은 보존했다. 기능 UI 파동의 패키지 회귀는 이 범위에서 닫으며 같은 흐름을 새 변경 없이 반복하지 않는다. 전체 시안·입력/메모리/G6 수집·Codex 실제 승인·Windows/출시는 남고 인증/사용자 프로젝트/모델 호출/main/push는 변경하지 않았다.
-
-### 2026-10-22 · by GPT-6 Astra
-- 15bb3f6 기준 첫 작업 안내의 작업 진입 조건을 파일뿐 아니라 활성 채팅·열린 diff까지 확장했다. 첫 채팅 기록을 저장하며 안내를 강제로 다시 열던 경로는 제거했다. 작업 진입 boolean의 false→true 때만 접고, 작업 중 사용자가 수동으로 다시 펼친 상태는 파일/채팅 갱신 때 유지한다. 최초 시작 안내·프로젝트별 첫 작업 기록/명시 dismissal·별도 실행/복구 경고는 유지한다. Karpathy 최소 변경 원칙으로 표시 상태만 조정했다.
-- tsc·renderer build PASS, Chromium UI2PASS(기존 수동 재열기/안내 상태·미저장 파일·중앙diff 왕복 포함), 캡처도구의 diff/채팅 진입 자동 접힘 assertion PASS(세션63722 exit0). `.artifacts/m5-visual/capture-6oEvbv`의 active-conversation/active-diff를 직접 확인해 안내 한 줄과 확대된 작업 영역을 관측했다. 합성 renderer이며 실제 공급자/패키지 전체 합격은 아니다.
-- out 패키지는 여전히 dfaf6e3 빌드로 중앙diff/이번 안내 변경은 다음 묶음 패키지에 반영해야 한다. 시안 전체 마감·성능/G6·Codex 실제 승인·Windows/출시는 미완료이며 main/push·인증·사용자 프로젝트·모델 실행 없음.
-
-### 2026-10-22 · by GPT-6 Astra
-- f2c2830 기준 시각 대조 결함을 수정했다. 변경 목록은 기존 changes dock에 유지하고 선택한 줄 diff는 editor dock으로 요청·표시한다. 사용자 저장 배치를 초기화하지 않는다. diffVisible은 읽기 전용 표시 상태이며 clear diff/편집 복귀에서 해제한다. Monaco는 hidden wrapper로 유지해 모델·초안을 폐기하지 않고 diff 화면에서는 다른 열린 파일의 저장/재조회 버튼을 숨긴다. 파일 선택/명시 편집 복귀는 이전 diff 세대를 무효화해 늦은 결과가 다시 검토 화면을 열지 못한다.
-- Karpathy 최소 변경으로 기존 DiffDetails/데이터·쓰기 계약을 재사용했다. tsc·renderer build PASS, editor 회귀59PASS(미저장 초안/추가 IO 없음·늦은 diff 취소 포함), 실제 Chromium UI2PASS(동일 Monaco 인스턴스 왕복·기존 dock/편집 흐름 포함). 첫 UI 검사의 버튼 문구 선택자 실패를 실제 '코드 편집기'로 수정한 뒤 UI만 재실행했다. diff check PASS.
-- `.artifacts/m5-visual/capture-MpNAgF/product-active-diff.png`를 직접 확인해 가운데 넓은 diff/왼쪽 목록 분리를 검증했다(합성 renderer, sidecar/실제 공급자 없음). out 패키지는 아직 이전 dfaf6e3 빌드다. 첫 작업 안내 높이 축소·전체 시안 마감/성능/G6·Codex 실제 승인·Windows/출시는 남는다. 인증·원본·모델/main/push 변경 없음.
-
-### 2026-10-22 · by GPT-6 Astra
-- 5adc953/clean에서 승인 시안과 현재 production renderer의 시각 대조를 재개했다. 기존 외부 통신 차단·합성 bridge 캡처 도구로 시작/최소창/작업대/설정/로컬 시안 이미지를 직접 확인했다(HFJaTL). `tests/m5-ui-capture.cjs`에 실제 diff 선택·채팅 열기 후 캡처를 추가했다. 첫 선택자 오류와 채팅 fixture의 빈 diff 때문에 실패한 두 실행은 실제 제품 실패로 혼동하지 않고 원인을 고쳤다. 최종 세션89000 exit0, `.artifacts/m5-visual/capture-AJzbLX`의 active-diff/active-conversation을 직접 확인했다.
-- 시안 적용의 구체 누락: 시안은 가운데 넓은 영역에서 줄 diff를 읽지만 현행 DiffDetails는 변경 목록과 같은 왼쪽 패널에 있어 약280px 아래쪽으로 밀리고 가운데 편집기는 빈 상태다. 또 첫 작업 안내가 열린 채팅에서도 큰 높이를 차지한다. 다음 구현은 편집 초안을 유지한 중앙 diff 보기/편집 복귀와, 재열기 가능한 안내 축소다. 사용자 저장 dock 배치와 안전/복구 안내를 임의 초기화하거나 숨기지 않는다.
-- 캡처는 합성 프로젝트 diff와 합성 채팅 화면을 따로 관측한 것이며 실제 에이전트/원본 반영·전체 시안 합격이 아니다. 제품 코드는 아직 변경하지 않았다. Karpathy 최소 범위 원칙으로 추측성 스타일 교체 대신 확인된 배치 문제를 우선한다. 성능/G6·Codex 실제 승인·Windows/출시 잔여는 유지하며 main/push·인증·사용자 프로젝트/모델 호출 없음.
-
-### 2026-10-22 · by GPT-6 Astra
-- dfaf6e3/clean의 파일 목록 memo 변경을 실제 darwin-arm64 패키지에 반영했다. CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4 `pnpm run m5:package:smoke` PASS(세션18557 exit0). 직전 .vite만 갱신된 상태는 해소됐으며 main/push/외부 배포는 없다.
-- 최신 패키지 `--large-project` 단회(세션52309 exit1)에서 treeRoot260.2ms/expand118.6ms/fileEditable383.5ms/DOM362는 기준 이내지만 입력 준비1+10회 p95는50.6ms/50 초과, idle459177984B(약438MiB)/400MiB 초과로 FAIL이다. visible 유지/hiddenTransitions0, snapshot31489.0ms, 앱exit0/shutdown confirmed. 입력 본문 DOM 관측14.6~16.8ms 뒤 두 frame 관측32.2~34.4ms이며, memo가 기준 실패를 해소했다고 주장하지 않는다. 이전 반복값과 단회의 차이를 개선률로 인용하지 않는다.
-- `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-5qVosU/result.json`·스크린샷은 보존하고 관측PID부재 확인 후 이번 project/other-project/userdata만 영구 정리했다. 기존 메모리 blank/preload/product와 no-CDP 기록도 재조회했으며 이미 수행한 대조를 반복하지 않았다. 입력 관측 상한과 실제 처리 비용 분리, 메모리 기준 초과, 전체G6/시안 비교/실제 Codex 승인/Windows/출시는 계속 남는다. 인증·사용자 프로젝트·모델 호출 없음.
-
-### 2026-10-22 · by GPT-6 Astra
-- 기준67ab343/clean에서 입력 시 `ProjectEditorController.updateText`가 전체 작업대 구독을 갱신하고 VirtualFileList의 최대120행도 재생성하는 경로를 확인했다. 파일 목록에 기본 React.memo를 적용하고 controller 의존 useCallback으로 열기 핸들러를 안정화했다. custom comparator/상태 지연/저장 debounce는 없으며 entries·activePath·disabled·callback 중 하나라도 바뀌면 갱신한다. 편집 초안 보존·저장·실행/복구 계약은 변경하지 않았다.
-- 새 회귀는 초안 갱신 시 tree 참조 유지와 최신 초안/dirty 저장, action gate 변경 관측, tree 재조회 시 새 참조 게시를 확인한다. tsc --noEmit·Electron renderer Vite build PASS. editor/Monaco/renderer 합동67건 중66PASS·Electron 실행1건 비정상 종료(null)였으며, 일반 앱 권한으로 UI 시험만 재실행해2/2PASS(세션65302 exit0)했다. 제한 실행 실패를 제품 성공으로 숨기지 않았고 같은 순수 검사는 반복하지 않았다. diff check PASS.
-- 이는 불필요한 렌더링 경로 제거이며 입력52.3ms/idle438MiB가 해결됐다는 증거는 아니다. 현재 .vite renderer만 갱신됐고 out 패키지는 이전 버전이다. 다음은 패키지 반영 후 입력 영향 측정과 시작 메모리 원인 분리다. 전체G6/실제 Codex 승인/Windows/출시는 미완료, main/push·사용자 프로젝트/인증/모델 실행 없음.
-
-### 2026-10-22 · by GPT-6 Astra
-- 직전 실험 철회는 성능 회귀 근거를 확보한 진전으로 분류하고, 새 추측성 최적화 대신 남은 패키지 반복 검증을 수행했다. 기준6ed0740/clean에서 `node scripts/m5-packaged-performance.mjs --tree-file` 준비1+본10회 완료(세션24241 exit1/FAIL). 실행 중 소스/HEAD 불변과 패키지 asar/sidecar 지문 일치를 수집기가 대조했다. Karpathy 원칙에 따라 아직 원인 미확정인 제품 코드는 변경하지 않았다.
-- 본10회 p95: treeRoot290.1ms/1000, expand133.2ms/250, fileEditable416.6ms/1500, DOM362/500은 기준 이내다. 입력은 각 trial 준비1+10 edits의 최대값을 집계해 p95 52.3ms/50, 본6/10회 초과다. main long task 최대76.491ms/200, renderer0ms/200이며 모두 visible/hiddenTransitions0이다. CDP 전달·두 프레임 관측 포함 진단으로 물리 키보드/IME나 전체G6 합격은 아니다.
-- 본10회 idle RSS458014720~459571200B(약437~438MiB)는400MiB 기준 초과다. 전체 결과를 FAIL로 보존했다. 11회 모두 앱exit0/종료확인·관측PID부재 뒤 자체 project/other-project/userdata만 정리했고 JSON/스크린샷/로그는 `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-performance-pKFAeB/measurement.json`과 각 trial root에 보존했다. 현재 여유503GiB다.
-- 다음 수정 우선순위는 반복 실패한 시작 메모리와 입력 지연 원인 분리다. 이미 반복 통과한 트리/파일 열기 수치를 다시 확인하려고 전체 시험을 반복하지 않는다. 전체 스트림/메모리 수명·Codex 실제 시험 승인·Windows·출시 검증은 남으며 사용자 프로젝트/인증/모델 호출/main/push 변경 없음.
-
-### 2026-10-22 · by GPT-6 Astra
-- e5d2f0e 기준 snapshot materialize의 파일별 scoped thread/4개 barrier를 최대4개 재사용 sync worker로 바꾸는 실험을 수행했다. 기존 materialized 회귀3건과 오류/panic/early Drop에서 지연 peer join을 기다리는 새 회귀1건 PASS, 독립 config_layers_review 재검토에서 추가 차단 결함 없음, 새 모듈 rustfmt/diff check PASS였다. Karpathy 지침에 따라 원본 검사·fsync·공개 전 완료 조건은 유지했다.
-- 그러나 같은 large_snapshot_phase_diagnostic 단회는 materialize+sync52463.3ms로 직전32539.8ms보다 느렸다(세션3057 exit0, 전체56.73초; baseline1048.8ms/recheck1055.6ms). 단회 환경 변동과 원인은 미분리지만 개선 근거가 없어 실험 코드·새 테스트 파일을 모두 철회하고 tracked Rust 파일이 HEAD와 완전 일치함을 확인했다. 추가 기능/성능 개선으로 인용하지 않는다. 임시 fixture는 TempDir로 정리됐으며 새 패키지는 만들지 않았다.
-- 재전달된 Codex 단건 잠금 복구 승인은45c28d6 및 최신 고정 기록에서 이미 처리 완료임을 확인했다. 동일 삭제·모델 실행·인증 변경은 반복하지 않았다. 다음은 materialize의 sync/파일 접근 비용을 더 분리하는 진단과 남은 G6/메모리·실제 Codex 시험 승인·Windows/출시 검증이다. main 병합/push 없음.
-
-### 2026-10-22 · by GPT-6 Astra
-- 직전309f51d의 대형 snapshot33.8초 관측에서 이어 원인 분리용 opt-in Rust 진단을 추가했다. 생성 fixture에1만 파일/1천 하위 폴더와5MiB 파일을 더해 private source open→baseline→export→baseline 재검증→init→materialize/sync를 개별 측정한다. 전체 create safety sequence/receipt 게시/UI를 대신하지 않으며 제품 동작·안전 검사·동기화는 변경하지 않았다. Karpathy 원칙에 따라 근거 없는 검사 제거보다 단계 비용을 먼저 확인했다.
-- release large_snapshot_phase_diagnostic1건 PASS(세션20181 exit0,37.02초): open40.6ms, baseline1073.7ms, export36.3ms, 재검증1064.2ms, init76.5ms, materialize+sync32539.8ms다. 전체33.8초와 fixture/시점은 다르지만 지배 비용은 materialize+sync로 좁혀졌다. sync 자체/파일 capability traversal/스레드 생성의 세부 비중은 아직 미분리다. 기본 테스트는 ignored, 임시 데이터는 TempDir로 정리했다.
-- 다음은 이 구간의 안전 계약을 유지하는 개선이며 원본 baseline 검사를 줄일 근거는 없다. 전체 G6/메모리/실제 Codex 승인·Windows·출시는 계속 미완료다. 절차 문서에 재현 명령·한계를 추가했고 diff check PASS, 사용자 프로젝트·인증·모델 호출/main/push 변경 없음.
-
-### 2026-10-22 · by GPT-6 Astra
-- 직전461cb98의 무계측 관측 뒤 최신 패키지 --large-project를 실행했다(세션42931 exit1). b66XZ8/result.json의1만 파일/1천 폴더·5MiB/10만 줄 fixture에서 treeRoot256.3ms, expand149.8ms, DOM362, fileEditable415.2ms로 해당 단회 기준 이내다. 같은 실행 입력 warmup1+10회 p95는49.6ms/50ms 이내이며 visible 유지/hiddenTransitions0이다. 전체10회 시작 반복·물리 키보드·전체 G6 증거는 아니다.
-- 작업 복사본 준비 관측33764.4ms는 사용자 대기 병목 후보로 남겼다. 전체 진단은 idle459358208B로400MiB 초과/FAIL이며 종료는exit0/confirmed다. 관측 PID 부재 후 이번 project·other-project·userdata만 영구 삭제하고 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-b66XZ8/의 JSON·스크린샷은 보존했다. 다음은 복사본 준비 비용의 원인 조사/안전 보존 개선과 G6 수집 완성이다. 모델·사용자 인증/프로젝트·main/push 변경 없음.
-
-최신 워크로그(2026-10-22 포함)는 [10월 아카이브](archive/history-2026-10.md)에 있다. 날짜 단위를 보존해 이동했다.
-
-현재 검증: 최신 패키지 편집·diff·적용/원복·다중 프로젝트 흐름 확인. CDP 진단 idle 약439MiB는 기준 초과, 무계측 최신 단회 약367MiB는 기준 이내이나 전체 G6 합격 아님. Codex 추가 실제 시험 승인·Windows·출시 검증은 남는다.
 
 ## 프로젝트 요약 (고정)
 

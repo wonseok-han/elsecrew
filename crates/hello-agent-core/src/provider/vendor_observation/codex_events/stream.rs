@@ -87,6 +87,8 @@ pub struct TurnStream {
     approvals: BTreeMap<RequestId, Option<String>>,
     prepared_replies: BTreeSet<RequestId>,
     diagnostic_stage: &'static str,
+    retained_item_bytes: usize,
+    budget: crate::provider::ProviderEventBudget,
 }
 
 #[derive(Deserialize)]
@@ -113,8 +115,12 @@ struct ItemReference {
 impl TurnStream {
     /// Identity comes from the owner's correlated start response, never a notification.
     pub fn new(thread_id: &str, turn_id: &str) -> Result<Self, ProviderError> {
+        Self::with_budget(thread_id, turn_id, crate::provider::ProviderEventBudget::LegacyV1)
+    }
+
+    pub fn with_budget(thread_id: &str, turn_id: &str, budget: crate::provider::ProviderEventBudget) -> Result<Self, ProviderError> {
         Ok(Self {
-            projection: TurnProjection::new(thread_id, turn_id)?,
+            projection: TurnProjection::with_budget(thread_id, turn_id, budget)?,
             started: false,
             outcome: None,
             items: BTreeMap::new(),
@@ -122,6 +128,8 @@ impl TurnStream {
             approvals: BTreeMap::new(),
             prepared_replies: BTreeSet::new(),
             diagnostic_stage: "turn stream state",
+            retained_item_bytes: 0,
+            budget,
         })
     }
 
@@ -426,6 +434,15 @@ impl TurnStream {
                 } else {
                     None
                 };
+                // Keep lifecycle tombstones for duplicate rejection, but bound their
+                // retained strings independently of the larger raw stream budget.
+                let bytes = item.id.len() + item.kind.len()
+                    + command.as_ref().map_or(0, |(command, cwd)| command.len() + cwd.len());
+                self.retained_item_bytes = self.retained_item_bytes.checked_add(bytes).ok_or_else(invalid)?;
+                if self.budget == crate::provider::ProviderEventBudget::DurableV1
+                    && self.retained_item_bytes > 4 * 1024 * 1024 {
+                    return Err(invalid());
+                }
                 self.items.insert(
                     item.id,
                     ItemState {
@@ -554,6 +571,27 @@ mod tests {
             Observed::Started
         ));
         stream
+    }
+    #[test]
+    fn durable_stream_keeps_ordering_for_three_thousand_deltas() {
+        let mut stream = TurnStream::with_budget("t", "r", crate::provider::ProviderEventBudget::DurableV1).unwrap();
+        stream.observe(&turn("turn/started", "inProgress")).unwrap();
+        stream.observe(&item("item/started", "agentMessage")).unwrap();
+        for _ in 0..3000 {
+            assert!(matches!(stream.observe(&delta()).unwrap(), Observed::Public(_)));
+        }
+        stream.observe(&item("item/completed", "agentMessage")).unwrap();
+        assert!(stream.observe(&turn("turn/completed", "completed")).is_ok());
+        assert!(stream.observe(&delta()).is_err());
+    }
+
+    #[test]
+    fn durable_stream_retained_item_limit_is_sticky() {
+        let mut stream = TurnStream::with_budget("t", "r", crate::provider::ProviderEventBudget::DurableV1).unwrap();
+        stream.observe(&turn("turn/started", "inProgress")).unwrap();
+        stream.retained_item_bytes = 4 * 1024 * 1024;
+        assert!(stream.observe(&item("item/started", "commandExecution")).is_err());
+        assert!(stream.observe(&delta()).is_err());
     }
     #[test]
     fn account_limits_are_bounded_advisory_not_auth_or_completion() {

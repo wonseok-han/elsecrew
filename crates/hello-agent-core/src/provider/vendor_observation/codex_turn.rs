@@ -2,6 +2,7 @@
 //! No process caller yet. Requires the same admitted connection as preflight.
 use super::codex_events::stream::{Observed, TurnStream};
 use super::{BoundedObservation, ProviderError};
+use crate::provider::ProviderEventBudget;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
@@ -15,6 +16,7 @@ pub struct TurnStart {
     diagnostic_stage: &'static str,
     status_events: usize,
     status_bytes: usize,
+    budget: ProviderEventBudget,
 }
 
 /// Typed text request. No arbitrary renderer JSON can construct it.
@@ -82,7 +84,17 @@ impl TurnStart {
             diagnostic_stage: "turn start state",
             status_events: 0,
             status_bytes: 0,
+            budget: ProviderEventBudget::LegacyV1,
         })
+    }
+
+    /// Select before sending the start frame. Preflight limits remain unchanged.
+    pub fn with_output_budget(mut self, budget: ProviderEventBudget) -> Result<Self, ProviderError> {
+        if self.failed || self.complete || self.request.is_none() {
+            return Err(invalid());
+        }
+        self.budget = budget;
+        Ok(self)
     }
 
     /// May contain private user text. Never log it. Can be taken only once.
@@ -181,7 +193,7 @@ impl TurnStart {
         }
         if let (Some(turn), Some(started)) = (&self.reply, &self.started) {
             self.diagnostic_stage = "turn start stream binding";
-            let mut stream = TurnStream::new(&self.thread, turn)?;
+            let mut stream = TurnStream::with_budget(&self.thread, turn, self.budget)?;
             if !matches!(stream.observe(started)?, Observed::Started) {
                 return Err(invalid());
             }
@@ -207,6 +219,13 @@ mod tests {
             json!({"id":6,"result":{"turn":turn}}),
             json!({"method":"turn/started","params":{"threadId":"thread-1","turn":turn}}),
         ]
+    }
+    #[test]
+    fn output_budget_cannot_change_after_start_frame_is_taken() {
+        let mut start = TurnStart::new("thread-1", "goal").unwrap()
+            .with_output_budget(ProviderEventBudget::DurableV1).unwrap();
+        start.take_request().unwrap();
+        assert!(start.with_output_budget(ProviderEventBudget::LegacyV1).is_err());
     }
     #[test]
     fn thread_status_is_advisory_and_never_replaces_turn_receipts() {
