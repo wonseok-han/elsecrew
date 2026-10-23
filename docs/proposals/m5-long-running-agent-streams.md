@@ -32,6 +32,7 @@ Rust sidecar가 신원·출력 commit·순서의 권위다. Electron/renderer의
 - 기존 envelope `seq`는 연결별 전송 순서이며 `output_sequence`는 재시작 후에도 유지되는 실행별 영속 순서다. 둘을 혼용하지 않는다.
 - 새로운 원장 이벤트가 권위이고 output table/head는 검증 가능한 파생 데이터로 둔다. 기존 projection snapshot 안에 출력 전체를 다시 넣지 않는다. 정확한 SQLite migration 번호·이벤트 이름·bridge 버전은 현재 등록표와 충돌 없이 L1에서 동결한다.
 - L2 구현 구체화: 공개 본문은 전용 `run_output_records` 원장에 한 번만 저장하고 `run_output_heads`만 파생 요약으로 둔다. 기존 전체 projection 원장에 본문을 중복 저장하지 않는다. run 시작/폐쇄와 원장의 결속, 두 방향 R3 검증을 새 migration/admission에 포함하기 전에는 활성화하지 않는다. 위 논리 event/head 이름은 실제 SQL 이름과 구별한다.
+  - 후속 문맥 예외: 종료 확인 후 `final` 본문 한 건은 기존 `teamMessage` 문맥 스냅샷에도 저장한다. 진행 delta/status 전체를 복제하는 것은 아니며 기존 message ID 선택·보존/압축·문맥 동의 계약을 그대로 재사용하기 위한 bounded 복사다. 출력 final과 chat snapshot을 같은 transaction에서 저장하고 chat sequence 경합 또는 출력 실패 시 모두 rollback한다. 이 복사 비용도 저장 예산에 포함하며 런타임/재시작 통합 회귀가 활성화 선행 조건이다.
 
 ### commit 규칙
 

@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전7e7f324는 출력 항목 순서 검사 구현 진척이다. clean 통합 checkout에서 durable final만 기존 teamMessage 문맥 스냅샷에 함께 저장하도록 연결했다. 출력 row와 chat ledger/materialization은 하나의 IMMEDIATE transaction이며 예상 chat aggregate sequence를 확인한다. duplicate/no-op·출력 거절 시 문맥만 남지 않도록 rollback한다. delta/status는 문맥에 넣지 않는다.
+- resolve_prompt가 기존 chat_message_history와 명시 선택 message IDs를 읽는 것을 확인해 입력 선택 범위를 바꾸지 않았다. 제안서에 bounded final1건 문맥 복사 예외를 명시했다. 기존 전체 run 배열 중복 저장은 재도입하지 않으며 종료 증거 이후 final 호출 조건도 유지했다. Karpathy 원칙으로 기존 atomic upsert/replay/메시지 검증을 재사용했다.
+- 누적 cargo check -p hello-agent-sidecar --tests --locked에서 quota PRAGMA의 u64 FromSql 오류2건을 발견해 기존 checked row_u64로 수정, 재검사 PASS(16278 exit0,5.06초)했다. 테스트 실행·실패 주입/재시작 교차 원장 검증·독립 검토는 아직 전이다. 신규 run format 생성/이관 활성화와 통합 UI/성능/G6/Windows/출시는 남는다. 사용자 DB·모델·앱/main/push 없음.
+
+### 2026-10-23 · by Codex
 - 직전3e23f3f는 과거 출력 페이지 탐색 구현 진척이다. clean 통합 checkout에서 item_order 검사를 append transaction과 bounded 재시작 verifier 양쪽에 연결했다. 같은 run/item의 직전 row만 expression index로 조회하고 채널 변경·complete 뒤 append/중복 complete·본문이 달라진 final 승격을 거절한다. final item은 앞선 complete가 있어야 하며 승격은1회뿐이다. 이는 저장 순서 검사이며 기존 runtime 종료 증거를 대체하지 않는다.
 - 아직 비활성 V11 schema에 item 순서 인덱스를 추가했다. 전체 item/text map을 RAM에 축적하지 않는다. append 거절 시 head 불변과 동일 길이 final 본문 변조의 재시작 거절/sticky 실패 회귀를 작성했다. metadata 없는 기존 이벤트의 전역 final 순서 검사는 이 변경의 증거가 아니다.
 - Karpathy 최소 변경으로 기존 transaction/page 검증을 재사용했다. diff check만 수행했고 누적 컴파일/회귀/독립 검토는 아직 전이다. 후속 모델 문맥·신규 형식 생성/이관 활성화·실측/전체 G6·Windows/출시가 남는다. 사용자 DB/모델/앱/main/push 없음.

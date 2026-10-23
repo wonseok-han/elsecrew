@@ -16,6 +16,43 @@ pub(super) mod verification;
 mod quota;
 mod item_order;
 
+pub(crate) struct FinalOutput {
+    pub binding: AgentRunBindingV1,
+    pub sequence: u64,
+    pub event: Value,
+    pub item_update: Option<OutputItemUpdate>,
+}
+
+impl super::Storage {
+    /// The bounded final context snapshot and its canonical output row commit
+    /// together. Progress/delta events never enter the chat context ledger.
+    pub(crate) fn append_final_output_with_context(
+        &mut self, chat: super::ProjectionUpsert, expected_chat_sequence: u64, output: FinalOutput,
+    ) -> Result<(), SidecarError> {
+        let message = chat.payload.get("last_message").ok_or_else(|| invalid("final context message missing"))?;
+        if chat.aggregate_type != "chat" || chat.aggregate_id != output.binding.chat_id
+            || output.event["kind"] != "final" || message["kind"] != "role"
+            || message["chatId"] != output.binding.chat_id || message["taskId"] != output.binding.task_id
+            || message["worktreeId"] != output.binding.worktree_id || message["runId"] != output.binding.run_id
+            || message["roleId"] != output.binding.role_id || message["text"] != output.event["text"]
+        { return Err(invalid("final context differs from output")); }
+        hello_agent_protocol::run_recovery_v1::validate_g5_payload_v1("teamMessage", message)
+            .map_err(|_| invalid("invalid final context message"))?;
+        quota::check(&self.connection, self.path(), true)?;
+        let id = chat.aggregate_id.clone();
+        self.upsert_projection_records_atomic_inner(vec![chat], &[("chat", &id, expected_chat_sequence)], Some(output))?;
+        Ok(())
+    }
+}
+
+pub(super) fn append_final(tx: &Transaction<'_>, output: &FinalOutput, path: &std::path::Path) -> Result<(), SidecarError> {
+    require_output_schema(tx)?;
+    let current = head(tx, &output.binding)?;
+    verify_run_binding(tx, &current)?;
+    append_item(tx, &output.binding, output.sequence, &output.event, 64 * 1024 * 1024, output.item_update.as_ref())?;
+    quota::check(tx, path, false)
+}
+
 impl super::Storage {
     /// Output mutations use the same admitted connection and transaction as
     /// lifecycle storage. This is not a public IPC or provider authorization API.

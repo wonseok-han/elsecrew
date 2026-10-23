@@ -33,8 +33,8 @@ pub(super) fn check(connection: &rusqlite::Connection, path: &Path, before_write
     let database = open(path).map_err(|_| failure())?;
     let metadata = database.metadata().map_err(|_| failure())?;
     if !metadata.is_file() { return Err(failure()); }
-    let pages: u64 = connection.query_row("PRAGMA main.page_count", [], |row| row.get(0)).map_err(|_| failure())?;
-    let page_size: u64 = connection.query_row("PRAGMA main.page_size", [], |row| row.get(0)).map_err(|_| failure())?;
+    let pages = connection.query_row("PRAGMA main.page_count", [], |row| super::row_u64(row, 0)).map_err(|_| failure())?;
+    let page_size = connection.query_row("PRAGMA main.page_size", [], |row| super::row_u64(row, 0)).map_err(|_| failure())?;
     let logical = pages.checked_mul(page_size).ok_or_else(failure)?;
     // Count uncheckpointed growth too; main-file length alone can be stale in WAL mode.
     let mut bytes = metadata.len().max(logical);

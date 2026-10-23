@@ -3165,6 +3165,13 @@ fn persist_public_event_item(
         let binding = output_binding(expected).map_err(PublicEventPersistError::Fault)?;
         let head = storage.agent_output_head(&binding).map_err(ProjectFailure::from).map_err(PublicEventPersistError::Fault)?;
         let next = head.committed_sequence.checked_add(1).ok_or(PublicEventPersistError::BudgetExceeded)?;
+        if event["kind"] == "final" {
+            let (context, expected_chat_sequence) = final_output_context(storage, expected, event)
+                .map_err(PublicEventPersistError::Fault)?;
+            return storage.append_final_output_with_context(context, expected_chat_sequence, crate::storage::agent_output::FinalOutput {
+                binding, sequence: next, event: event.clone(), item_update: item_update.cloned(),
+            }).map_err(ProjectFailure::from).map_err(PublicEventPersistError::Fault);
+        }
         // Draft long-run byte budget; capability remains disabled until the
         // provider parser, transport and UI all support this storage format.
         return storage.append_agent_output_item(&binding, next, event, 64 * 1024 * 1024, item_update)
@@ -3285,6 +3292,29 @@ fn persist_public_event_item(
         .map_err(ProjectFailure::from)
         .map_err(PublicEventPersistError::Fault)?;
     Ok(())
+}
+
+fn final_output_context(storage: &Storage, run: &Value, event: &Value) -> Result<(ProjectionUpsert, u64), ProjectFailure> {
+    let chat_id = run["chatId"].as_str().ok_or_else(|| ProjectFailure::manifest("missing final chat identity"))?;
+    let mut chat = actual_chat_projection(storage, chat_id)?;
+    let expected = chat["last_event_sequence"].as_u64().ok_or_else(|| ProjectFailure::manifest("missing chat sequence"))?;
+    let sequence = chat["durable_event_sequence"].as_u64().and_then(|value| value.checked_add(1))
+        .ok_or_else(|| ProjectFailure::manifest("invalid final context sequence"))?;
+    let message = json!({
+        "schemaVersion":1, "messageId":format!("message_{}",Uuid::new_v4().simple()),
+        "chatId":run["chatId"], "taskId":run["taskId"], "worktreeId":run["worktreeId"],
+        "eventSequence":sequence, "kind":"role", "roleId":run["selectedProfile"]["roleId"],
+        "runId":run["runId"], "text":event["text"], "createdAt":event["createdAt"],
+    });
+    validate_g5_payload_v1("teamMessage", &message).map_err(|error| ProjectFailure::manifest(error.to_string()))?;
+    chat.remove("last_event_sequence");
+    chat.insert("last_message".into(), message);
+    chat.insert("durable_event_sequence".into(), sequence.into());
+    Ok((ProjectionUpsert {
+        aggregate_type:"chat", aggregate_id:chat_id.into(),
+        operation_id:format!("op_agent_final_context_{}",event["eventId"].as_str().unwrap_or_default()),
+        request_id:None, payload:chat,
+    }, expected))
 }
 
 fn public_budget_metrics(events: &[Value]) -> Result<PublicBudgetMetrics, ProjectFailure> {

@@ -1071,6 +1071,15 @@ impl Storage {
         upserts: Vec<ProjectionUpsert>,
         expected: &[(&str, &str, u64)],
     ) -> Result<Vec<AppendOutcome>, SidecarError> {
+        self.upsert_projection_records_atomic_inner(upserts, expected, None)
+    }
+
+    fn upsert_projection_records_atomic_inner(
+        &mut self,
+        upserts: Vec<ProjectionUpsert>,
+        expected: &[(&str, &str, u64)],
+        output: Option<agent_output::FinalOutput>,
+    ) -> Result<Vec<AppendOutcome>, SidecarError> {
         self.ensure_writes_admitted()?;
         if upserts.is_empty() {
             return Ok(Vec::new());
@@ -1148,6 +1157,10 @@ impl Storage {
         }
         for event in &appended {
             write_projection(&transaction, event, &projection)?;
+        }
+        if let Some(output) = &output {
+            if appended.len() != 1 { return Err(SidecarError::new("operationConflict", "final output requires a new context record")); }
+            agent_output::append_final(&transaction, output, &self.path)?;
         }
         transaction.commit().map_err(sqlite_error)?;
         if !appended.is_empty() {
