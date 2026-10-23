@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전abfd003는 V11 재시작 검증 연결 진척이다. 현재 clean 통합 checkout에서 materializer/compaction writer의 runtime schema 분기에11을 추가하고 TS 버전 상수를 맞췄다. V10의 기존 frozen policy/golden은 덮어쓰지 않는다. 출력 원장은 기존 event 압축 대상에 추가하지 않았다.
+- Storage 내부 append_agent_output_record/agent_output_head/agent_output_page 진입점을 추가했다. admission 완료·schema11·run 결속을 확인하며 쓰기는 IMMEDIATE transaction과 기존 append runtime fence 검사 후 commit, maintenance epoch 무효화를 수행한다. private primitive를 실제 Storage 수명에 연결했지만 provider/runtime/IPC 호출은 아직 없다. physical quota는 미연결이다.
+- Karpathy 최소 변경으로 기존 admission/fence 검사를 재사용했다. 이번 누적 변경은 아직 실행 검증 전이며 format/diff만 확인했다. V11 자동 이관·제품 활성화/출력 실행 생성·UI 및 독립 검토는 남는다. 사용자 DB·앱·모델·main/push 변경 없음.
+
+### 2026-10-23 · by Codex
 - 직전9a0b757는 V11 이관 준비 구현 진척이다. 현재 clean 통합 checkout에서 V11 공용 저장버전 상수와 기존 bounded admission의 schema/control 분기, 압축 prefix/보존 event/message 조회·replay·append source index 분기를 연결했다. 기존 V10 조건은 유지하고 V11에서 같은 압축 witness 의미를 사용한다.
 - `agent_output::schema::verify_admission`이 기존 snapshot/replay session과 새 output closure를 순차 검증한 뒤 최초 data_version과 최종 transaction의 version/schema를 대조한다. output 검사만으로 기존 원장 검증을 대체하지 않는다. 이관 회귀에 결합 admission 호출을 추가했지만 아직 실행 전이다.
 - diff check만 확인했다. product open 자동 이관/실행은 활성화하지 않았으며 V11의 나머지 lifecycle/compaction 계약·신규 run 생성/runtime·물리 quota·UI 연결과 누적 검증/독립 검토는 남는다. 사용자 DB·앱·모델·main/push 변경 없음.

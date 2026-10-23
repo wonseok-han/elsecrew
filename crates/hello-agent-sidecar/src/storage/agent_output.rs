@@ -14,6 +14,66 @@ use serde_json::Value;
 pub(super) mod schema;
 pub(super) mod verification;
 
+impl super::Storage {
+    /// Output mutations use the same admitted connection and transaction as
+    /// lifecycle storage. This is not a public IPC or provider authorization API.
+    pub(crate) fn append_agent_output_record(
+        &mut self,
+        binding: &AgentRunBindingV1,
+        sequence: u64,
+        event: &Value,
+        text_budget: u64,
+    ) -> Result<(), SidecarError> {
+        self.ensure_writes_admitted()?;
+        let tx = self
+            .connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(sqlite_error)?;
+        require_output_schema(&tx)?;
+        super::verify_append_runtime_state(&tx)?;
+        let current = head(&tx, binding)?;
+        verify_run_binding(&tx, &current)?;
+        append(&tx, binding, sequence, event, text_budget)?;
+        tx.commit().map_err(sqlite_error)?;
+        self.note_maintenance_invalidation();
+        Ok(())
+    }
+
+    pub(crate) fn agent_output_head(
+        &mut self,
+        binding: &AgentRunBindingV1,
+    ) -> Result<OutputHead, SidecarError> {
+        self.ensure_writes_admitted()?;
+        let tx = self.connection.transaction().map_err(sqlite_error)?;
+        require_output_schema(&tx)?;
+        let result = head(&tx, binding)?;
+        verify_run_binding(&tx, &result)?;
+        tx.commit().map_err(sqlite_error)?;
+        Ok(result)
+    }
+
+    pub(crate) fn agent_output_page(
+        &mut self,
+        request: &OutputPageRequest,
+    ) -> Result<OutputPage, SidecarError> {
+        self.ensure_writes_admitted()?;
+        let tx = self.connection.transaction().map_err(sqlite_error)?;
+        require_output_schema(&tx)?;
+        let current = head(&tx, &request.binding)?;
+        verify_run_binding(&tx, &current)?;
+        let result = page(&tx, request)?;
+        tx.commit().map_err(sqlite_error)?;
+        Ok(result)
+    }
+}
+
+fn require_output_schema(connection: &rusqlite::Connection) -> Result<(), SidecarError> {
+    if super::storage_schema_version(connection)? != Some(schema::VERSION) {
+        return Err(invalid("durable output requires storage schema v11"));
+    }
+    Ok(())
+}
+
 /// New output format is opt-in per run; a legacy array is never silently
 /// reinterpreted as this ledger. Existing lifecycle/fence checks remain required.
 fn verify_run_binding(tx: &Transaction<'_>, output: &OutputHead) -> Result<(), SidecarError> {
