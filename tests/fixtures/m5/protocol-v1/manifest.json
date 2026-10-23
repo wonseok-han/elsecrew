@@ -41,6 +41,8 @@
       "project.catalog",
       "agent.getCapabilities",
       "agent.getModelChoices",
+      "agent.outputHead",
+      "agent.outputPage",
       "run.startFixture",
       "run.startAgent",
       "run.startAgentSmoke",
@@ -66,6 +68,7 @@
       "workspace.changed",
       "workspace.blob.chunk",
       "agent.publicEvent",
+      "agent.outputAvailable",
       "agent.runStateChanged"
     ],
     "bridgeMethods": ["getSystemStatus", "prepareQuit", "onSidecarEvent"],
@@ -91,6 +94,10 @@
     },
     {
       "file": "valid/agent-public-event.jsonl",
+      "observeSession": false
+    },
+    {
+      "file": "valid/agent-output-available.jsonl",
       "observeSession": false
     },
     {

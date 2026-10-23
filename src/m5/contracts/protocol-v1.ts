@@ -74,6 +74,7 @@ export const EVENTS_V1 = [
   "workspace.changed",
   "workspace.blob.chunk",
   "agent.publicEvent",
+  "agent.outputAvailable",
   "agent.runStateChanged",
 ] as const;
 
@@ -415,6 +416,21 @@ function validateEvent(object: Record<string, unknown>): EventV1 {
     fail("chat.eventAppended requires explicit chatId");
   }
   const payload = requireJsonObject(object.payload, "event payload");
+  if (object.event === "agent.outputAvailable") {
+    exactKeys(payload, ["formatVersion", "binding", "committedSequence", "sealed"]);
+    if (payload.formatVersion !== 1 || typeof payload.sealed !== "boolean"
+      || !Number.isSafeInteger(payload.committedSequence) || Number(payload.committedSequence) < 0) fail("invalid output head");
+    // Keep the base wire module independent of the higher-level adapter graph.
+    const binding = requireJsonObject(payload.binding, "output binding");
+    exactKeys(binding, ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId", "roleId", "capabilityFingerprint"]);
+    for (const name of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId"]) requireBoundedId(binding[name], name);
+    if (!(binding.runId as string).startsWith("agent_run_")
+      || !["planning", "coding", "review"].includes(String(binding.roleId))
+      || typeof binding.capabilityFingerprint !== "string" || !/^sha256:[0-9a-f]{64}$/.test(binding.capabilityFingerprint)) fail("invalid output binding");
+    if (binding.chatId !== object.chatId || binding.taskId !== object.taskId || binding.runId !== object.runId) {
+      fail("output notification binding differs");
+    }
+  }
   if (object.event === "agent.publicEvent") {
     if (!("chatId" in object) || !("taskId" in object) || !("runId" in object)) {
       fail("agent.publicEvent requires explicit chatId, taskId, and runId");

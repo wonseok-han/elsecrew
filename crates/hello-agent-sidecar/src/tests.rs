@@ -22,6 +22,24 @@ fn database() -> (tempfile::TempDir, std::path::PathBuf) {
 }
 
 #[test]
+fn runtime_error_survives_a_concurrent_completed_response() {
+    let (_root, path) = database();
+    let instance = "deferred_runtime_error";
+    let mut session = SidecarSession::new(instance.into(), agent_runtime::AgentRuntime::blocked());
+    session.start_admission(&path);
+    wait_until_admitted(&mut session);
+    let AdmissionState::Ready { sidecar, .. } = &mut session.admission else { panic!("not ready") };
+    let request = request_value(instance, "concurrent_status", "system.status", json!({}));
+    let response = success_response(&request, json!({}));
+    let failure = SidecarError::new("agentRuntimeFailure", "injected concurrent cleanup failure");
+    let (responses, events) = sidecar.finish_runtime_poll(vec![response], Vec::new(), Some(failure.clone())).unwrap();
+    assert_eq!(responses.len(), 1);
+    assert!(events.is_empty());
+    assert_eq!(sidecar.poll_runtime_events().unwrap_err(), failure);
+    assert!(sidecar.deferred_runtime_error.is_none());
+}
+
+#[test]
 fn discovery_admission_rejection_keeps_session_available() {
     let (_root, path) = database();
     let instance = "discovery_rejection";

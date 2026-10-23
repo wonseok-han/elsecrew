@@ -20,6 +20,7 @@ pub(super) struct NativeRun {
     stream_id: String,
     sequence: u64,
     public_count: usize,
+    last_output_head: Option<hello_agent_protocol::agent_adapter_v1::output_pages::OutputHead>,
     last_state: Option<Value>,
     stopped: bool,
     approvals: super::approval::ApprovalQueue,
@@ -67,13 +68,14 @@ impl NativeRun {
         {
             return Err(failure());
         }
+        let mut output_head = None;
         let public: &[Value] = if projection.contains_key("output_format_version") {
             // Durable bodies are consumed through the bounded output-page API.
             // Emitting them into the legacy public-event reducer would recreate
             // its per-run array/count limit. The renderer reconciles the head
             // periodically even when no notification arrives.
             let binding = output_binding(run).map_err(|_| failure())?;
-            storage.agent_output_head(&binding)?;
+            output_head = Some(storage.agent_output_head(&binding)?);
             if self.public_count != 0 { return Err(failure()); }
             &[]
         } else {
@@ -109,6 +111,15 @@ impl NativeRun {
             }
             emit("agent.publicEvent", event.clone())?;
         }
+        if let Some(head) = &output_head {
+            if self.last_output_head.as_ref().is_some_and(|previous|
+                head.committed_sequence < previous.committed_sequence || (previous.sealed && !head.sealed)) {
+                return Err(failure());
+            }
+            if self.last_output_head.as_ref() != Some(head) {
+                emit("agent.outputAvailable", serde_json::to_value(head).map_err(|_| failure())?)?;
+            }
+        }
         // `preparing` is an internal reservation, not a wire run-state event.
         // Do not fabricate `running` before native admission/attestation exists.
         if run["state"] != "preparing" && self.last_state.as_ref() != Some(run) {
@@ -120,6 +131,7 @@ impl NativeRun {
         }
         self.sequence = sequence;
         self.public_count = public.len();
+        self.last_output_head = output_head;
         self.last_state = Some(run.clone());
         let terminal = matches!(
             run["state"].as_str(),
@@ -547,6 +559,7 @@ impl AgentRuntime {
                 stream_id: format!("agent_stream_{}", Uuid::new_v4().simple()),
                 sequence: 0,
                 public_count: 0,
+                last_output_head: None,
                 last_state: None,
                 stopped: false,
                 approvals: Default::default(),
@@ -569,7 +582,7 @@ impl AgentRuntime {
         self.native.insert(identity.run_id.clone(), NativeRun {
             owner: NativeOwner::Claude(Box::new(owner.take().ok_or_else(failure)?)), identity,
             stream_id:format!("agent_stream_{}", Uuid::new_v4().simple()), sequence:0,
-            public_count:0, last_state:None, stopped:false, approvals:Default::default(),
+            public_count:0, last_output_head:None, last_state:None, stopped:false, approvals:Default::default(),
         });
         Ok(())
     }

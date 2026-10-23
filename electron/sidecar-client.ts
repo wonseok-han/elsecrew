@@ -265,6 +265,7 @@ export class SidecarClientV1 {
   readonly #chatListeners = new Set<(event: TeamMessageV1, protocol: EventV1) => void>();
   readonly #agentPublicEventListeners = new Set<(event: AgentPublicEventV1, protocol: EventV1) => void>();
   readonly #agentRunStateChangedListeners = new Set<(event: AgentRunStateChangedV1, protocol: EventV1) => void>();
+  readonly #agentOutputListeners = new Set<(head: OutputHead, protocol: EventV1) => void>();
   readonly #workspaceSaves = new Map<string, WorkspaceSaveSessionV1>();
   readonly #preparedWorkspaces = new Map<string, PreparedWorkspaceSessionV1>();
   readonly #agentChatContexts = new Map<string, AgentChatContextV1>();
@@ -405,6 +406,10 @@ export class SidecarClientV1 {
   onAgentRunStateChanged(listener: (event: AgentRunStateChangedV1, protocol: EventV1) => void): () => void {
     this.#agentRunStateChangedListeners.add(listener);
     return () => this.#agentRunStateChangedListeners.delete(listener);
+  }
+  onAgentOutputAvailable(listener: (head: OutputHead, protocol: EventV1) => void): () => void {
+    this.#agentOutputListeners.add(listener);
+    return () => this.#agentOutputListeners.delete(listener);
   }
 
   async getSystemStatus(): Promise<SystemStatusV1 | SystemStatusG5DV1> {
@@ -735,6 +740,16 @@ export class SidecarClientV1 {
           }
         }
         for (const listener of this.#chatListeners) listener(message, envelope);
+      }
+      if (envelope.event === "agent.outputAvailable") {
+        const known = envelope.runId === undefined ? undefined : this.#seenAgentRuns.get(envelope.runId);
+        if (!this.#agentAdapterNegotiated || !this.#ready?.capabilities.includes("agent.outputHead") || !known || known.state === "terminal") throw new Error("output notification requires a live accepted run");
+        const head = validateOutputHead(envelope.payload, known.binding);
+        const bound = this.#agentStreamRuns.get(envelope.streamId);
+        if (bound !== undefined && bound !== head.binding.runId) throw new Error("output stream binding differs");
+        this.#bindAgentStream(envelope.streamId, head.binding.runId);
+        for (const listener of this.#agentOutputListeners) listener(head, envelope);
+        return;
       }
       if (envelope.event === "agent.publicEvent") {
         if (!this.#agentAdapterNegotiated) {

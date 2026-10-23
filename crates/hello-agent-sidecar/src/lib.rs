@@ -531,6 +531,7 @@ struct Sidecar {
     g5: chat::G5Manager,
     agent_runtime: agent_runtime::AgentRuntime,
     pending_agent_cancels: BTreeMap<String, (RequestV1, agent_runtime::RunIdentity)>,
+    deferred_runtime_error: Option<SidecarError>,
     pending_agent_capabilities: BTreeMap<String, RequestV1>,
     pending_agent_starts: BTreeMap<String, PendingAgentStart>,
     maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler,
@@ -924,6 +925,7 @@ impl Sidecar {
             g5,
             agent_runtime,
             pending_agent_cancels: BTreeMap::new(),
+            deferred_runtime_error: None,
             pending_agent_capabilities: BTreeMap::new(),
             pending_agent_starts: BTreeMap::new(),
             maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler::default(),
@@ -2153,6 +2155,9 @@ impl Sidecar {
     }
 
     fn poll_runtime_events(&mut self) -> Result<(Vec<ResponseV1>, Vec<EventV1>), SidecarError> {
+        if let Some(error) = self.deferred_runtime_error.take() {
+            return Err(error);
+        }
         let mut events = self.g5.poll_runs(&mut self.storage, &mut self.projects);
         self.projects.poll_application(&mut self.storage);
         // A cleanup error in another owner must not starve completed requests.
@@ -2264,8 +2269,14 @@ impl Sidecar {
             self.pending_agent_cancels.remove(&run_id);
             responses.push(response);
         }
+        self.finish_runtime_poll(responses, events, runtime_error)
+    }
+
+    fn finish_runtime_poll(&mut self, responses: Vec<ResponseV1>, events: Vec<chat::G5Event>, runtime_error: Option<SidecarError>) -> Result<(Vec<ResponseV1>, Vec<EventV1>), SidecarError> {
         if responses.is_empty() && events.is_empty() {
             if let Some(error) = runtime_error { return Err(error); }
+        } else {
+            self.deferred_runtime_error = runtime_error;
         }
         Ok((responses, self.g5_events(events)))
     }

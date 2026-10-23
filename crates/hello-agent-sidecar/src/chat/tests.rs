@@ -729,6 +729,11 @@ fn codex_durable_native_delivery_and_cancel() {
     }
 }
 
+#[test]
+fn codex_durable_native_three_thousand_outputs() {
+    text_candidate_cases_with_output(false, false, false, Some("bound-long"), true);
+}
+
 fn text_candidate_cases_with_output(
     offline_native: bool,
     interactions: bool,
@@ -751,6 +756,7 @@ fn text_candidate_cases_with_output(
         "idle-success",
         "idle-observer",
         "bound",
+        "bound-long",
         "bound-handler",
         "bound-handler-role",
         "bound-handler-cancel",
@@ -822,7 +828,9 @@ fn text_candidate_cases_with_output(
                 | "bound-writer-cleanup"
                 | "bound-writer-terminal"
         );
+        let long_output = failure == "bound-long";
         let failure = match failure {
+            "bound-long" => "bound",
             "bound-writer-cleanup" => "bound-cleanup",
             "bound-writer-terminal" => "bound-terminal",
             value => value,
@@ -961,6 +969,23 @@ fn text_candidate_cases_with_output(
             expanded.push_str(finished);
             replies[5] = expanded;
         }
+        if long_output {
+            assert!(durable);
+            let (preceding, finished) = replies[5].rsplit_once('\n').unwrap();
+            let mut expanded = preceding.to_owned();
+            // One initial delta + 2,998 completed items + final promotion = 3,000 rows.
+            for index in 2..=2998 {
+                for method in ["item/started", "item/completed"] {
+                    let event = json!({"method":method,"params":{"threadId":"thread-test","turnId":"t1",
+                        "item":{"type":"agentMessage","id":format!("a{index}"),"text":if method == "item/started" {""} else {"hello"}}}});
+                    expanded.push('\n');
+                    expanded.push_str(&event.to_string());
+                }
+            }
+            expanded.push('\n');
+            expanded.push_str(finished);
+            replies[5] = expanded;
+        }
         let handler = failure.starts_with("bound-handler") || accepting;
         if handler {
             let lines: Vec<_> = replies[5].lines().map(str::to_owned).collect();
@@ -1010,7 +1035,20 @@ fn text_candidate_cases_with_output(
         let responded = fixture._root.path().join("sent-first-response");
         let captured = evidence_root.join("captured-requests");
         let native_argv = evidence_root.join("native-argv");
+        let reply_files: Vec<_> = if long_output {
+            replies.iter().enumerate().map(|(index, body)| {
+                let path = evidence_root.join(format!("long-reply-{index}.jsonl"));
+                fs::write(&path, format!("{body}\n")).unwrap();
+                path
+            }).collect()
+        } else { Vec::new() };
         let spawn = || {
+            if long_output {
+                return Command::new("/bin/sh").args(["-c",
+                    "first=yes; for file in \"$@\"; do IFS= read -r line || exit 2; printf '%s\\n' \"$line\" >> \"$CAPTURED\"; printf received > \"$RECEIVED\"; /bin/cat \"$file\" || exit 4; if test \"$first\" = yes; then IFS= read -r initialized || exit 3; first=no; fi; done; IFS= read -r hold", "long-peer"])
+                    .args(&reply_files).env_clear().env("CAPTURED", &captured).env("RECEIVED", &received)
+                    .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn();
+            }
             Command::new("/bin/sh")
             .args(["-c", "first=yes; for reply in \"$@\"; do IFS= read -r line || exit 2; printf '%s\\n' \"$line\" >> \"$CAPTURED\"; printf received > \"$RECEIVED\"; if test \"$first\" = yes; then if test \"$DELAY\" = yes; then /bin/sleep 0.6; fi; printf sent > \"$RESPONDED\"; fi; printf '%s\\n' \"$reply\"; if test \"$first\" = yes; then IFS= read -r initialized || exit 3; first=no; fi; done; if test \"$HOLD_AFTER_RUN\" = yes; then exec /bin/sleep 30; fi; IFS= read -r hold", "snapshot-peer"])
             .args(&replies).env_clear().env("CAPTURED", &captured).env("RECEIVED", &received).env("RESPONDED", &responded).env("HOLD_AFTER_RUN", if failure == "bound-handler" {"yes"} else {"no"}).env("DELAY", if failure.starts_with("idle-") {"yes"} else {"no"}).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()
@@ -2011,7 +2049,7 @@ fn text_candidate_cases_with_output(
                     TurnOutcome::Completed
                 }
             );
-            assert_eq!(writes, if failure == "bound-multiple" { 4 } else { 2 });
+            assert_eq!(writes, if long_output { 2999 } else if failure == "bound-multiple" { 4 } else { 2 });
         }
         let stored = fixture
             .storage
@@ -2129,6 +2167,10 @@ fn text_candidate_cases_with_output(
             assert_eq!(output.last().unwrap()["kind"], "final");
             assert_eq!(output.last().unwrap()["text"], "hello");
             if !durable { assert_eq!(output.len(), 1); }
+            if long_output {
+                assert_eq!(output.len(), 3000);
+                assert!(output.iter().all(|event| event["text"] == "hello"));
+            }
             assert_eq!(last_message["kind"], "role");
             assert_eq!(last_message["text"], "hello");
             assert_eq!(
@@ -5610,9 +5652,15 @@ fn corrupted_durable_counter_and_terminal_state_construction_errors_propagate() 
                 .unwrap();
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
-        let error = runtime
-            .poll(&mut fixture.storage, &mut fixture.projects)
-            .expect_err("poll persistence/construction failure must propagate");
+        let first = runtime.poll(&mut fixture.storage, &mut fixture.projects);
+        let error = match first {
+            Err(error) => error,
+            Ok(events) => {
+                assert!(!events.is_empty(), "only collected events may defer an error");
+                runtime.poll(&mut fixture.storage, &mut fixture.projects)
+                    .expect_err("deferred poll persistence/construction failure must propagate")
+            }
+        };
         assert_eq!(error.kind(), "agentRuntimeFailure");
         assert!(
             error.detail().contains("counter")

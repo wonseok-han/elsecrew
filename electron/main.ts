@@ -293,6 +293,12 @@ function startSidecar(): SidecarClientV1 {
   client.onChatEvent(forwardChatEvent);
   client.onAgentPublicEvent(forwardAgentPublicEvent);
   client.onAgentRunStateChanged(forwardAgentRunStateChanged);
+  client.onAgentOutputAvailable((head, event) => {
+    const window = mainWindow;
+    if (!window || window.isDestroyed()) { sidecar?.failRendererDisconnected(); return; }
+    eventCredit.deliver(event, () => window.webContents.send(M5_BRIDGE_V8_CHANNELS.agentOutputAvailable,
+      { event: head, streamId: event.streamId, seq: event.seq }));
+  });
   void client.start().catch(() => {
     // getSystemStatus exposes a structured unavailable state. There is no restart or retry.
   });

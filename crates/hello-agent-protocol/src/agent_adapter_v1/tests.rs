@@ -760,8 +760,8 @@ fn rust_matches_g5c_provider_discovery_attestation_and_event_goldens() {
 
     assert!(G5A_CAPABILITIES_V1[..G5_CAPABILITIES_V1.len()] == *G5_CAPABILITIES_V1);
     assert_eq!(
-        &crate::EVENTS_V1[crate::EVENTS_V1.len() - 2..],
-        ["agent.publicEvent", "agent.runStateChanged"]
+        &crate::EVENTS_V1[crate::EVENTS_V1.len() - 3..],
+        ["agent.publicEvent", "agent.outputAvailable", "agent.runStateChanged"]
     );
     assert!(!crate::EVENTS_V1
         .iter()

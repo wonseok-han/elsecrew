@@ -3,10 +3,27 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { decodeOutputPage, validateOutputPageRequest, OUTPUT_PAGE_MAX_BYTES, type OutputPageRequest, type OutputPage } from "../src/m5/contracts/agent-output-pages.ts";
 import type { AgentPublicEventV1 } from "../src/m5/contracts/agent-adapter-v1.ts";
+import { decodeJsonl } from "../src/m5/contracts/protocol-v1.ts";
 
 const event: AgentPublicEventV1 = JSON.parse(readFileSync(new URL("./fixtures/m5/protocol-v1/valid/agent-public-event.jsonl", import.meta.url), "utf8")).payload;
 const { chatId, taskId, projectId, worktreeId, workspaceIdentity, runId, roleId, capabilityFingerprint } = event;
 const binding = { chatId, taskId, projectId, worktreeId, workspaceIdentity, runId, roleId, capabilityFingerprint };
+test("output notification contains only a bound committed head", () => {
+  const wire = JSON.parse(readFileSync(new URL("./fixtures/m5/protocol-v1/valid/agent-public-event.jsonl", import.meta.url), "utf8"));
+  wire.event = "agent.outputAvailable";
+  wire.payload = { formatVersion: 1, binding, committedSequence: 3000, sealed: true };
+  assert.deepEqual(decodeJsonl(JSON.stringify(wire)), wire);
+  for (const mutation of [
+    (value: typeof wire) => { value.runId = "agent_run_other"; },
+    (value: typeof wire) => { value.payload.committedSequence = -1; },
+    (value: typeof wire) => { value.payload.committedSequence = Number.MAX_SAFE_INTEGER + 1; },
+    (value: typeof wire) => { value.payload.text = "must not transmit bodies"; },
+    (value: typeof wire) => { value.payload.binding.roleId = "unknown"; },
+  ]) {
+    const bad = structuredClone(wire); mutation(bad);
+    assert.throws(() => decodeJsonl(JSON.stringify(bad)));
+  }
+});
 function request(afterSequence = 0, throughSequence = 3000): OutputPageRequest {
   return { formatVersion: 1, binding, afterSequence, throughSequence, limit: 100 };
 }

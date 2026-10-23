@@ -89,6 +89,7 @@ pub const EVENTS_V1: &[&str] = &[
     "workspace.changed",
     "workspace.blob.chunk",
     "agent.publicEvent",
+    "agent.outputAvailable",
     "agent.runStateChanged",
 ];
 
@@ -545,6 +546,16 @@ fn validate_envelope(envelope: &EnvelopeV1) -> Result<(), ProtocolError> {
             }
             if !event.payload.is_object() {
                 return Err(ProtocolError::new("event payload must be an object"));
+            }
+            if event.event == "agent.outputAvailable" {
+                let head: agent_adapter_v1::output_pages::OutputHead = serde_json::from_value(event.payload.clone())
+                    .map_err(|_| ProtocolError::new("invalid output notification"))?;
+                head.validate(&head.binding).map_err(|_| ProtocolError::new("invalid output head"))?;
+                if event.chat_id.as_ref() != Some(&head.binding.chat_id)
+                    || event.task_id.as_ref() != Some(&head.binding.task_id)
+                    || event.run_id.as_ref() != Some(&head.binding.run_id) {
+                    return Err(ProtocolError::new("output notification binding differs"));
+                }
             }
             if event.event == "agent.publicEvent" {
                 let (Some(chat_id), Some(task_id), Some(run_id)) =

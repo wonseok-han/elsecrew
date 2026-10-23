@@ -65,7 +65,10 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
         const stateOff = bridge.onAgentRunStateChanged(event => {
           if (event.run.runId === selectedBinding.runId) notify();
         });
-        return () => { publicOff(); stateOff(); };
+        const outputOff = bridge.onAgentOutputAvailable(head => {
+          if (head.binding.runId === selectedBinding.runId) notify();
+        });
+        return () => { publicOff(); stateOff(); outputOff(); };
       },
       head: (value, signal) => abortable(bridge.getAgentOutputHead(value), signal),
       page: async (request, signal) => new TextEncoder().encode(JSON.stringify(await abortable(bridge.getAgentOutputPage(request), signal))),

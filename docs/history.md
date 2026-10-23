@@ -1,5 +1,22 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 장시간 단일 실행의 head-only 전달을 fixture에도 연결했다. durable 본문은 page 저장에만 남기고 batch head 변화와 종료 직전 sealed head만 알린다. Rust/TS wire 공유 fixture와 Electron credit/ACK·renderer 구독은 같은 결속을 사용한다. legacy 본문 전달·제품 V11 비활성은 유지한다.
+- 독립 검토에서 같은 poll의 후속 실패가 앞선 알림/순번을 버리는 문제, owner 제거 후 오류가 사라지는 문제를 확인했다. fixture 수집 이벤트를 상위에 보존하고 AgentRuntime 및 Sidecar 응답 경계에 각각 지연 오류 슬롯을 두어 다음 poll에서 반드시 전파하도록 보완했다. 이는 오류 숨김이나 자동 재시도가 아니다.
+- 검증: tsc noEmit 및 관련 Node14개 PASS. 4×3,000 저장/알림/봉인/재열기 회귀 PASS(57.12초), 이후 durable 관련18개 묶음 PASS(63.93초; 알려진 긴 Codex 시험 제외). terminal write 실패 재시도·PollObserve/Wait 실패 전달도 포함한다. 상위 동시 응답 오류 회귀1개 PASS. protocol 누적 검사가 드러낸 예전 method manifest 누락 및 event suffix 기대값을 갱신했고 Rust65개·Node17개 PASS다. 독립 검토1명은 마지막 오류 전달 수정에서 추가 차단 결함 없음으로 확인했다.
+- 기존 session91332 Codex native3,000 시험은603.78초 뒤 turn stream/providerPreflightFailed로 실패했으며 closure(termination,profile)=(true,true)를 확인했다. 단일 native 장시간 검증은 미완료이며 timeout을 늘려 통과 처리하지 않는다. 넓은 durable 필터로 의도치 않게 재실행한 검사는 중단 후 해당 긴 시험을 제외해 재실행했고, 중단 뒤 해당 test 프로세스 잔존 없음 확인했다.
+- 새 제품 활성화/실제 모델·계정/사용자 DB·프로젝트 변경 없음. native 장시간 실패 원인·전체 화면/G6·Windows·출시 게이트는 남는다. 알려진 실패를 포함한 구현 체크포인트이며 기능/gate 완료가 아니다. main 병합/push 없음.
+
+### 2026-10-23 · by Codex
+- 이전 턴은 장시간 Codex 시험 추가 및 실행 확인 진척이다. session91332를 같은 handle로 재확인했으며 아직 실행 중이고 종료 결과는 없다. 재시작/중복 빌드하지 않았다. 그동안 agent.outputAvailable head-only 알림을 Rust wire/native→Electron client/main/preload credit/ACK→V8 bridge→선택 run reader 조회 힌트에 연결했다. 본문/eventId Set를 알림에 누적하지 않으며 terminal state 전에 마지막 head를 알린다.500ms 재조회도 유지한다.
+- wire에서 형식·head 순번·신원 결속을 검사하고 Electron은 협상된 outputHead capability와 알려진 비종결 run/stream 결속을 요구한다. native는 head 변화가 있을 때만 알리며 순번 후퇴/봉인 해제를 거절한다. fixture poll 경로의 알림 통합·shared wire fixture/Rust 회귀·최종 UI 전달 검증은 아직 남는다. 새 형식 제품 활성화는 하지 않았다.
+- 최초 TS 연결은 noEmit PASS였으나 Node 실행이 base protocol→상위 adapter 순환 참조를 발견했다. base wire 검증을 독립적으로 유지해 고쳤고 알림 본문/다른 run/음수·unsafe 순번 거절을 포함한 관련 Node14개 PASS다. 최종 Rust 컴파일은 실행 중인 무거운 시험 종료 뒤 진행한다. 독립 읽기 전용 검토1명 요청 중, 변경 미커밋. 실제 모델/계정·앱 패키지·main/push 없음.
+
+### 2026-10-23 · by Codex
+- 기준f8f6f72/clean 통합 checkout에서 codex_durable_native_three_thousand_outputs를 추가했다. 기존 Codex pipe-peer 경로에 한 run의 초기 delta1·완성 항목2,998·종료 후 final 승격1로 총3,000개 저장 원문을 기대한다. native parser/예약/프로세스 정리/최종 문맥/재열기 검증을 그대로 쓰며 실제 공급자 바이너리나 계정은 사용하지 않는다.
+- Karpathy 지침에 따라 기존 시험 틀의 선택 case를 확장했다. 긴 응답을 명령줄 인자로 넘기지 않고 fixture TempDir의 JSONL 파일을 모의 peer가 읽어 파이프로 전송한다. 원본 불변·종료 후 원문3,000개/내용·재열기 assertion을 유지한다. 임시 파일은 fixture 수명에 묶이며 새 앱 패키지를 만들지 않는다. 여유 공간499GiB 확인.
+- cargo test -p hello-agent-sidecar --lib codex_durable_native_three_thousand_outputs --locked가 컴파일 성공 후 실행 중이다(session91332). 같은 handle을 반복 확인했고60초 초과 알림 외 오류/종료는 아직 없다. 실행 시작 후 시험 peer의 received marker 누락을 소스에서 보완했으므로 현재 실행 바이너리는 그 보완 전이며 종료 후 assertion 실패 가능성을 구분해야 한다. 결과 없이 재시작하지 않는다. 변경 미커밋, diff check PASS. 독립 head 알림·화면 통합/G6/Windows/출시는 남는다.
+
+### 2026-10-23 · by Codex
 - 기준8dd1262/clean 통합 checkout에서 Codex 기존 로컬 pipe-peer/예약/dispatcher 시험 틀에 durable 선택을 연결했다. 정상 bound 실행·dispatcher 전달·중간 취소3경우를 추가하고 legacy 알림 대신 page 원문 최종 응답과 종료 상태를 대조한다. 정상 실행 재열기에서도 같은 형식으로 admission/recovery 검증한다. Karpathy 원칙으로 별도 모의 저장 구현 없이 기존 경로를 사용한다.
 - 최초 실행이 재시작 validate_persisted_runs의 무조건 legacy 배열 예산 검사에서 panic을 드러냈다. marker 있는 실행은 actual_run_projection의 기존 형식/신원/head/native evidence 검증을 재사용하고, legacy 예산 및 후속 provider/recovery 검사는 유지하도록 수정했다.
 - 수정 후 codex_durable_native_delivery_and_cancel PASS(3경우,14.69초). 읽기 전용 독립 검토1명은 재시작 분기 수정 범위에 차단 결함 없음, diff check PASS. 실제 공급자 바이너리/계정/모델 시험이나3,000개 native 스트림 증거는 아니다. 출력 page 전체 조회 도우미는 시험 전용이다. 사용자 프로젝트/앱 패키지·main/push 없음. 장시간 native stream·독립 head 알림·실제 화면/G6/Windows/출시는 남는다.

@@ -167,7 +167,7 @@ test("G5C remains internal and preserves the exact G5/G5A/G5B public capability,
   assert.deepEqual(G5A_CAPABILITIES_V1.slice(0, G5_CAPABILITIES_V1.length), G5_CAPABILITIES_V1);
   assert.deepEqual(M5_BRIDGE_V5_METHODS.slice(0, M5_BRIDGE_V4_METHODS.length), M5_BRIDGE_V4_METHODS);
   assert.deepEqual(M5_BRIDGE_V5_METHODS.slice(M5_BRIDGE_V4_METHODS.length), ["onAgentRunStateChanged"]);
-  assert.deepEqual(EVENTS_V1.slice(-2), ["agent.publicEvent", "agent.runStateChanged"]);
+  assert.deepEqual(EVENTS_V1.slice(-3), ["agent.publicEvent", "agent.outputAvailable", "agent.runStateChanged"]);
   assert.equal(EVENTS_V1.some((event) => event.includes("provider") || event.includes("attestation")), false);
 });
 

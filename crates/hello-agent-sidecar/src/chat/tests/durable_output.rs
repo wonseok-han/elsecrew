@@ -37,6 +37,70 @@ pub(super) fn read_all(storage: &mut Storage, run: &Value) -> Vec<Value> {
 }
 
 #[test]
+fn durable_poll_failure_is_delivered_after_collected_running_event() {
+    for scenario in [FakeScenario::PollObserveFailure, FakeScenario::PollWaitFailure] {
+        let mut f = Fixture::with_durable_output(true);
+        let snapshot = f.snapshot("req_failed_notice_snapshot");
+        let chat = f.create_exact_claude_chat(&snapshot, "notice", "req_failed_notice_chat");
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        let input_message_ids = vec![initial_message_id(&f, chat_id)];
+        runtime.start_agent(&mut f.storage, &mut f.projects, AgentRunStartRequestV1 {
+            chat_id: chat_id.into(), role_id: "coding".into(), input_message_ids,
+            expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+        }, "req_failed_notice_run").unwrap();
+        let events = runtime.poll(&mut f.storage, &mut f.projects).unwrap();
+        assert!(events.iter().any(|event| event.event == "agent.runStateChanged"));
+        assert!(runtime.poll(&mut f.storage, &mut f.projects).is_err(), "cleanup must not swallow the failure");
+    }
+}
+
+#[test]
+fn durable_head_delivery_survives_terminal_write_failure() {
+    let mut f = Fixture::with_durable_output(true);
+    let snapshot = f.snapshot("req_notice_snapshot");
+    let chat = f.create_exact_claude_chat(&snapshot, "notice", "req_notice_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let input_message_ids = vec![initial_message_id(&f, chat_id)];
+    let start = runtime.start_agent(&mut f.storage, &mut f.projects, AgentRunStartRequestV1 {
+        chat_id: chat_id.into(), role_id: "coding".into(),
+        input_message_ids,
+        expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+    }, "req_notice_run").unwrap();
+    let id = start.result["runId"].as_str().unwrap();
+    f.storage.connection_for_test().execute_batch("CREATE TRIGGER reject_notice_terminal BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_agent_terminal_%' BEGIN SELECT RAISE(ABORT, 'injected terminal failure'); END;").unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut seq = 0;
+    let mut saw_head = false;
+    let mut saw_failure = false;
+    let mut sealed = false;
+    while runtime.has_active_run(id) {
+        assert!(std::time::Instant::now() < deadline);
+        match runtime.poll(&mut f.storage, &mut f.projects) {
+            Ok(events) => for event in events {
+                assert_eq!(event.seq, seq + 1, "collected notifications must not disappear on error");
+                seq = event.seq;
+                if event.event == "agent.outputAvailable" {
+                    saw_head = true;
+                    sealed = event.payload["sealed"].as_bool().unwrap();
+                }
+            },
+            Err(_) => {
+                assert!(!saw_failure);
+                assert!(saw_head, "head must be delivered before terminal error");
+                saw_failure = true;
+                f.storage.connection_for_test().execute_batch("DROP TRIGGER reject_notice_terminal").unwrap();
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(saw_failure && sealed);
+}
+
+#[test]
 fn four_durable_runs_drain_three_thousand_events_each_without_batch_failure() {
     let mut f = Fixture::with_durable_output(true);
     let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::LongStream);
@@ -84,36 +148,46 @@ fn four_durable_runs_drain_three_thousand_events_each_without_batch_failure() {
         runs.push(start.result["runId"].as_str().unwrap().to_owned());
     }
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
-    let mut counts = std::collections::BTreeMap::<String, usize>::new();
+    let mut heads = std::collections::BTreeMap::<String, (u64, bool)>::new();
+    let mut sequences = std::collections::BTreeMap::<String, u64>::new();
+    let mut notice_count = 0;
     while runs.iter().any(|id| runtime.has_active_run(id)) {
         assert!(
             std::time::Instant::now() < deadline,
             "long streams did not drain"
         );
         let events = runtime.poll(&mut f.storage, &mut f.projects).unwrap();
-        assert!(
-            events
-                .iter()
-                .filter(|event| event.event == "agent.publicEvent")
-                .count()
-                <= 400
-        );
-        for event in events
-            .into_iter()
-            .filter(|event| event.event == "agent.publicEvent")
-        {
-            *counts
-                .entry(event.payload["runId"].as_str().unwrap().into())
-                .or_default() += 1;
+        for event in events {
+            assert_ne!(event.event, "agent.publicEvent");
+            let id = event.run_id.as_ref().unwrap();
+            let previous = sequences.insert(id.clone(), event.seq).unwrap_or(0);
+            assert!(event.seq > previous);
+            if event.event == "agent.outputAvailable" {
+                let head: hello_agent_protocol::agent_adapter_v1::output_pages::OutputHead =
+                    serde_json::from_value(event.payload).unwrap();
+                assert_eq!(&head.binding.run_id, id);
+                if let Some((committed, sealed)) = heads.get(id) {
+                    assert!(head.committed_sequence >= *committed);
+                    assert!(!sealed || head.sealed);
+                }
+                heads.insert(id.clone(), (head.committed_sequence, head.sealed));
+                notice_count += 1;
+            } else if event.payload["run"]["state"] == "succeeded" {
+                assert_eq!(heads.get(id), Some(&(3000, true)));
+            }
         }
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
     for id in &runs {
-        assert_eq!(counts.get(id), Some(&3000));
+        assert_eq!(heads.get(id), Some(&(3000, true)));
         let run = f.storage.projection_record("run", id).unwrap().unwrap();
         assert_eq!(run["record"]["state"], "succeeded");
         assert!(run.get("public_events").is_none());
     }
+    assert!(
+        notice_count < 8192,
+        "head notices must not replay every body item"
+    );
     let path = f.storage.path().to_path_buf();
     drop(f.storage);
     f.storage = Storage::open_durable_output_for_test(&path).unwrap();
