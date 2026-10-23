@@ -2,6 +2,14 @@
 // 보간은 {name} 형태 — t("key", { name }) 로 치환.
 export const ko = {
   "m5.output.title": "실행 출력",
+  "m5.output.history": "저장된 출력 탐색",
+  "m5.output.first": "처음 기록부터 보기",
+  "m5.output.next": "다음 기록",
+  "m5.output.historyHelp": "저장된 출력 조각과 완성 본문을 시간순으로 보여줘요. 완성 본문은 앞선 조각을 대체하며, 실행 성공을 뜻하지는 않아요.",
+  "m5.output.range": "저장 기록 {first}–{last} / {total}",
+  "m5.output.append": "이어지는 출력 조각",
+  "m5.output.complete": "완성된 항목 본문",
+  "m5.output.message": "메시지",
   "m5.output.loading": "저장된 출력을 불러오고 있어요.",
   "m5.output.legacy": "이 실행의 출력은 기존 대화 기록에서 확인할 수 있어요.",
   "m5.output.failed": "출력을 불러오지 못했어요. 실행 종료나 성공을 뜻하지는 않아요.",

@@ -3,6 +3,14 @@ import type { MessageKey } from "./ko";
 // 영어 문구. ko와 동일한 키를 모두 가져야 한다(Record<MessageKey>로 강제).
 export const en: Record<MessageKey, string> = {
   "m5.output.title": "Run output",
+  "m5.output.history": "Saved output history",
+  "m5.output.first": "Read from the beginning",
+  "m5.output.next": "Next records",
+  "m5.output.historyHelp": "Saved fragments and completed item text are shown in order. Completed text replaces earlier fragments; it does not mean the run succeeded.",
+  "m5.output.range": "Saved records {first}–{last} / {total}",
+  "m5.output.append": "Output fragment",
+  "m5.output.complete": "Completed item text",
+  "m5.output.message": "Message",
   "m5.output.loading": "Loading saved output…",
   "m5.output.legacy": "Output from this run is available in the existing conversation history.",
   "m5.output.failed": "Could not load output. This does not mean the run has stopped or succeeded.",

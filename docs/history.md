@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전c02f10c는 선택 실행의 최신 출력 패널 연결 진척이다. clean 통합 checkout에서 과거 기록 처음/다음/최신 전환을 연결했다. 탐색 시작 시 소비된 committed cursor를 고정하고100건/encoded512KiB 페이지 하나만 보관하며 byte 제한으로100건 미만인 경우에도 nextAfterSequence를 그대로 사용한다. live window 갱신은 별도로 유지한다.
+- 과거 페이지는 delta와 complete 원문을 명시적으로 구분해 표시한다. partial page를 완전한 답변처럼 조립하지 않으며 긴 항목의 저장 원문도 여기서 조회할 수 있다. 선택 변경/최신 전환 때 과거 요청을 abort하고 요청 객체에 결속해 이전 응답을 표시하지 않는다. 조회 실패 재시도와 고정 전체 범위 ko/en 안내를 추가했다.
+- Karpathy 최소 변경으로 기존 page decoder와 abort 수명을 재사용했다. diff check만 수행, 새 UI의 실행/컴파일·통합 회귀는 아직 전이다. 최신/과거 화면 연결은 구현됐지만 저장 항목 순서 검증·후속 모델 문맥·새 형식 활성화/독립 검토 및 G6/Windows/출시는 남는다. 사용자 DB/모델/앱 실행·main/push 없음.
+
+### 2026-10-23 · by Codex
 - 직전da8c39d는 V8 출력 조회 bridge 연결 진척이다. clean 통합 checkout에서 AgentRuns에 실행 선택형 출력 패널을 연결했다. head 확인 뒤 기존 bounded reader/window를 사용하고 한 선택 run만 읽는다. 알림은 힌트이며500ms head 재조회로 누락을 보완하고 sealed catch-up 후 타이머를 멈춘다. 선택 변경/unmount 시 abort·구독/타이머 정리로 늦은 결과를 표시하지 않는다.
 - head 조회는 전체 run binding이 검증된 legacy 기록에만 null을 돌려 기존 대화 안내를 표시한다. 손상/누락/다른 run은 계속 오류다. 조회 실패와 실행 실패/종료를 구분하는 ko/en 안내, 재시도·부분 텍스트/최신 창 안내를 추가했다. 과거 출력 page 탐색 버튼은 아직 미구현이며 안내만으로 전체 기록 접근 완료라고 주장하지 않는다.
 - Karpathy 최소 변경과 React 지침의 primitive effect 의존성·단일 구독·cleanup·label/상태 접근성을 적용했다. 이번 TSX 연결은 diff check만 수행했고 누적 컴파일/UI/회귀·독립 검토 전이다. DB 항목 순서 검증·과거 page 탐색/후속 문맥·장시간 실행 활성화와 G6/Windows/출시가 남는다. 사용자 DB·모델·앱 실행/main/push 없음.

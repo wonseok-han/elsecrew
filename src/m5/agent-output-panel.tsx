@@ -4,6 +4,7 @@ import { AgentOutputReader, type AgentOutputSource } from "./agent-output-reader
 import { reduceOutputWindow, type OutputWindow } from "./agent-output-window.ts";
 import { resolveM5Bridge } from "./bridge-boundary.ts";
 import type { AgentRunRecordV1 } from "./contracts/agent-adapter-v1.ts";
+import { decodeOutputPage, type OutputPage, type OutputPageRequest } from "./contracts/agent-output-pages.ts";
 
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -28,9 +29,27 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
   } : null, [run?.runId, run?.chatId, run?.taskId, run?.projectId, run?.worktreeId, run?.workspaceIdentity, run?.selectedProfile.roleId, run?.capabilityFingerprint]);
   const [view, setView] = useState<OutputWindow | null>(null);
   const [state, setState] = useState<"loading" | "legacy" | "live" | "failed">("loading");
+  const [historyRequest, setHistoryRequest] = useState<OutputPageRequest | null>(null);
+  const [historyPage, setHistoryPage] = useState<OutputPage | null>(null);
+  const [historyState, setHistoryState] = useState<"loading" | "ready" | "failed">("ready");
+  useEffect(() => {
+    const bridge = resolveM5Bridge(window.m5);
+    setHistoryPage(null);
+    if (!historyRequest || !binding || historyRequest.binding.runId !== binding.runId || bridge?.version !== 8) return;
+    const abort = new AbortController();
+    setHistoryState("loading");
+    void abortable(bridge.getAgentOutputPage(historyRequest), abort.signal).then(value => {
+      if (abort.signal.aborted) return;
+      const page = decodeOutputPage(new TextEncoder().encode(JSON.stringify(value)), historyRequest);
+      setHistoryPage({ ...page, request: historyRequest });
+      setHistoryState("ready");
+    }).catch(() => { if (!abort.signal.aborted) setHistoryState("failed"); });
+    return () => abort.abort();
+  }, [binding, historyRequest]);
   useEffect(() => {
     const bridge = resolveM5Bridge(window.m5);
     setView(null);
+    setHistoryRequest(null);
     if (!binding || bridge?.version !== 8) { setState("legacy"); return; }
     const abort = new AbortController();
     let reader: AgentOutputReader | undefined;
@@ -61,6 +80,8 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
     return () => { abort.abort(); clearInterval(timer); reader?.stop(); };
   }, [binding, retry]);
   if (!binding) return null;
+  const historyActive = historyRequest?.binding.runId === binding.runId;
+  const visibleHistory = historyActive && historyPage?.request === historyRequest ? historyPage : null;
   return <section className="m5-durable-output" aria-label={t("m5.output.title")}>
     <label>{t("m5.output.title")} <select value={run!.runId} onChange={event => select(event.target.value)}>
       {runs.map(value => <option key={value.runId} value={value.runId}>{t(`m5.roles.${value.selectedProfile.roleId}`)} · {value.runId}</option>)}
@@ -68,7 +89,29 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
     {state === "loading" && <p role="status">{t("m5.output.loading")}</p>}
     {state === "legacy" && <p>{t("m5.output.legacy")}</p>}
     {state === "failed" && <p role="alert">{t("m5.output.failed")} <button onClick={() => setRetry(value => value + 1)}>{t("m5.output.retry")}</button></p>}
-    {view?.binding.runId === binding.runId && <>
+    {view?.binding.runId === binding.runId && <nav aria-label={t("m5.output.history")}>
+      <button type="button" disabled={view.cursor === 0 || (historyActive && historyState === "loading")}
+        onClick={() => setHistoryRequest({ formatVersion: 1, binding, afterSequence: 0,
+          throughSequence: historyActive ? historyRequest!.throughSequence : view.cursor, limit: 100 })}>{t("m5.output.first")}</button>
+      {historyActive && <>
+        <button type="button" disabled={!visibleHistory || historyState !== "ready" || visibleHistory.nextAfterSequence >= historyRequest!.throughSequence}
+          onClick={() => setHistoryRequest({ ...historyRequest!, afterSequence: visibleHistory!.nextAfterSequence })}>{t("m5.output.next")}</button>
+        <button type="button" onClick={() => setHistoryRequest(null)}>{t("m5.chat.latest")}</button>
+      </>}
+    </nav>}
+    {historyActive && <>
+      <p>{t("m5.output.historyHelp")}</p>
+      {historyState === "loading" && <p role="status">{t("m5.output.loading")}</p>}
+      {historyState === "failed" && <p role="alert">{t("m5.output.failed")} <button type="button" onClick={() => setHistoryRequest({ ...historyRequest! })}>{t("m5.output.retry")}</button></p>}
+      {visibleHistory && <>
+        <p>{t("m5.output.range", { first: visibleHistory.request.afterSequence + 1, last: visibleHistory.nextAfterSequence, total: visibleHistory.request.throughSequence })}</p>
+        {visibleHistory.rows.map(row => <article key={row.event.eventId}>
+          <small>{row.outputSequence} · {row.itemUpdate ? t(row.itemUpdate.operation === "append" ? "m5.output.append" : "m5.output.complete") : t("m5.output.message")}</small>
+          <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{row.event.text}</pre>
+        </article>)}
+      </>}
+    </>}
+    {!historyActive && view?.binding.runId === binding.runId && <>
       {view.hasEarlier && <p>{t("m5.output.window")}</p>}
       {view.rows.map(row => <article key={row.key}>{row.truncated && <small>{t("m5.output.truncated")}</small>}<pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{row.text}</pre></article>)}
     </>}
