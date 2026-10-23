@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 기준cfe496a/clean 통합 checkout에서4개 actual-adapter fixture run을 동시에 시작해 각각3,000개 공개 출력을 내보내는 통합 회귀를 연결했다. 실제 모델 없이 launcher/child 파이프·classifier·runtime·출력 저장·종료·V11 재열기/전체 page 원문을 대조한다. 네 snapshot은 실행 전에 준비하며 기존 실행 중 export 차단을 우회하지 않는다. 이는 native Codex/Claude 또는 renderer 성능 시험의 대체 증거가 아니다.
+- 연결 조사에서 poll의100건/4MiB 묶음 경계를 run 전체 예산 초과로 처리하는 결함을 발견했다. durable만 다음 프레임 소비 전에100frame 또는 최대 본문 여유 경계에서 yield하며 종료한 child의 잔여 출력도 다음 poll에 이어 읽는다. legacy 한도는 그대로다. Karpathy 최소 변경 원칙으로 기존 bounded 수신 queue·종료 확인 경로를 유지했다.
+- 첫 통합 실행은 snapshot 준비 순서 때문에 실패해 시험 순서를 수정했고 남은 long-stream 프로세스 없음 확인. 두 번째는33.09초 뒤 종료 처리에서 제거된 public_events Map key 직접 접근 panic을 드러냈다. finish와 start-failure의 optional 배열 접근을 get으로 수정했으며 marker/출력 head 보존 경로는 유지한다. 읽기 전용 독립 검토1명은 배치/추가 수정 범위에서 차단 결함 없음으로 확인했다. 전체 파동 승인 아님. 최종 재시험 PASS(58.29초): 네 run 각3,000건·poll당 최대400건·성공/봉인·재열기 뒤12,000개 원문 순서 일치. 새 시험 파일 rustfmt와 diff check PASS. 시작 실패/취소/본문 경계와 native/UI 통합은 남는다. 사용자 계정/모델·앱 패키지·main/push 없음.
+
+### 2026-10-23 · by Codex
 - 기준d7a94e6/clean 통합 checkout에서 기존 chat fixture에 test-only durable open 선택을 추가하고 실제 RunPreparation 예약→출력/문맥 transaction→재시작 경로의 회귀를 연결했다. Karpathy 지침에 따라 기존 프로젝트/채팅 생성·materializer를 재사용하며 별도 모의 저장 구현을 만들지 않았다.
 - 출력 row INSERT에 실패 trigger를 주입해 먼저 수행된 chat event/projection도 rollback되는지 확인한다. trigger 제거 후 V11 admission 재열기에서 양쪽 미저장, 성공 뒤 재열기에서 후속 문맥 최종 응답1건, 같은 요청 재시도 거절과 출력 head1을 검증했다. 원본 fixture 파일 불변도 확인한다. 실제 공급자 프로세스 종료·모델 입력 실행 성공을 주장하지 않는다.
 - 최초 컴파일의 private helper 참조는 명시 binding 생성으로 수정했다. 다음 실행은 fixture 바이너리 미생성으로 차단되어 sidecar bin만 빌드했고 집중 회귀 PASS했다. 재열기 page 원문 대조 assertion 추가 후 최종 회귀도 PASS(1개,1.70초), 새 파일 rustfmt/diff check PASS다. 실제 계정/모델·사용자 DB·앱 패키지 생성 없음. 다음은4×3,000 공급자/저장/화면 통합과 파동 검토이며 제품 V11 활성화·G6/Windows/출시는 계속 미완료다.

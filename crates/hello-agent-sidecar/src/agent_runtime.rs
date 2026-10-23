@@ -117,6 +117,8 @@ pub(crate) enum FakeScenario {
     PublicTextExact,
     PublicAggregateExact,
     PublicAggregatePlusOne,
+    #[cfg_attr(not(test), allow(dead_code))]
+    LongStream,
     ProviderTerminalFailed,
     ProviderTerminalRecoveryRequired,
 }
@@ -1245,6 +1247,8 @@ impl AgentRuntime {
             let mut observed_identities = None;
             let mut observation_failure = None;
             let mut collection_failure = None;
+            let mut frames_read = 0;
+            let mut batch_deferred = false;
             if let Some(active) = self.active.get_mut(&run_id) {
                 let observed = if active.scenario == FakeScenario::PollObserveFailure {
                     Err("injected poll observation failure".to_string())
@@ -1259,8 +1263,12 @@ impl AgentRuntime {
                 }
                 observed_identities = Some(active.tracker.tracked_identities());
                 loop {
+                    if durable_output && (frames_read >= 100 || public.needs_flush()) {
+                        batch_deferred = true;
+                        break;
+                    }
                     match active.receiver.try_recv() {
-                        Ok(Ok(line)) => match classify_provider_line(active, line) {
+                        Ok(Ok(line)) => { frames_read += 1; match classify_provider_line(active, line) {
                             Ok(ProviderLine::Public { kind, text }) => {
                                 match public.push(active, &kind, text) {
                                     Ok(true) => {}
@@ -1279,7 +1287,7 @@ impl AgentRuntime {
                                 parser_failed = true;
                                 break;
                             }
-                        },
+                        } },
                         Ok(Err(_)) => {
                             parser_failed = true;
                             break;
@@ -1326,8 +1334,12 @@ impl AgentRuntime {
             if finished.is_some() {
                 if let Some(active) = self.active.get_mut(&run_id) {
                     loop {
+                        if durable_output && (frames_read >= 100 || public.needs_flush()) {
+                            batch_deferred = true;
+                            break;
+                        }
                         match active.receiver.recv_timeout(Duration::from_millis(100)) {
-                            Ok(Ok(line)) => match classify_provider_line(active, line) {
+                            Ok(Ok(line)) => { frames_read += 1; match classify_provider_line(active, line) {
                                 Ok(ProviderLine::Public { kind, text }) => {
                                     match public.push(active, &kind, text) {
                                         Ok(true) => {}
@@ -1346,7 +1358,7 @@ impl AgentRuntime {
                                     parser_failed = true;
                                     break;
                                 }
-                            },
+                            } },
                             Ok(Err(_)) | Err(RecvTimeoutError::Timeout) => {
                                 parser_failed = true;
                                 break;
@@ -1371,7 +1383,7 @@ impl AgentRuntime {
                     }
                 }
             }
-            if parser_failed || budget_exceeded || finished.is_some() {
+            if parser_failed || budget_exceeded || (finished.is_some() && !batch_deferred) {
                 let provider_outcome = self
                     .active
                     .get(&run_id)
@@ -2071,8 +2083,8 @@ impl AgentRuntime {
                     &projection["workspace_manifest"],
                     Some(barrier),
                     Some(Value::Array(internal)),
-                    projection["public_events"]
-                        .as_array()
+                    projection.get("public_events")
+                        .and_then(Value::as_array)
                         .cloned()
                         .unwrap_or_default(),
                 )?,
@@ -2423,8 +2435,8 @@ fn persist_start_failure(
         &projection["workspace_manifest"],
         projection.get("barrier").cloned(),
         Some(Value::Array(internal)),
-        projection["public_events"]
-            .as_array()
+        projection.get("public_events")
+            .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default(),
     )?;
@@ -3060,6 +3072,12 @@ struct PublicEventCollector<'a> {
 }
 
 impl<'a> PublicEventCollector<'a> {
+    // Leave room for one maximum-size public body before consuming its frame.
+    // Reaching an ingress batch boundary is backpressure, not run exhaustion.
+    fn needs_flush(&self) -> bool {
+        self.events.len() >= 100 || self.text_bytes > 4 * 1024 * 1024 - MAX_AGENT_EVENT_BYTES
+    }
+
     fn new(
         projection: &'a Map<String, Value>,
         persisted_events: &'a [Value],
@@ -3877,6 +3895,7 @@ fn scenario_name(value: FakeScenario) -> &'static str {
         FakeScenario::PublicTextExact => "public-text-exact",
         FakeScenario::PublicAggregateExact => "public-aggregate-exact",
         FakeScenario::PublicAggregatePlusOne => "public-aggregate-plus-one",
+        FakeScenario::LongStream => "long-stream",
         FakeScenario::ProviderTerminalFailed => "provider-terminal-failed",
         FakeScenario::ProviderTerminalRecoveryRequired => "provider-terminal-recovery-required",
     }
@@ -3959,6 +3978,7 @@ pub(crate) fn run_agent_fixture_launcher(scenario: &str) -> Result<(), SidecarEr
         "public-text-exact",
         "public-aggregate-exact",
         "public-aggregate-plus-one",
+        "long-stream",
         "provider-terminal-failed",
         "provider-terminal-recovery-required",
     ]
@@ -4093,6 +4113,12 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
             }
             if scenario == "public-aggregate-plus-one" {
                 println!("{{\"type\":\"status\",\"text\":\"x\"}}")
+            }
+            println!("{{\"type\":\"terminal\",\"outcome\":\"succeeded\"}}")
+        }
+        "long-stream" => {
+            for sequence in 1..=3000 {
+                println!("{}", json!({"type":"status","text":format!("output {sequence}")}));
             }
             println!("{{\"type\":\"terminal\",\"outcome\":\"succeeded\"}}")
         }
