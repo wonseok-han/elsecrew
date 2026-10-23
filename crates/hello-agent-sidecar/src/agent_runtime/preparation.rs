@@ -51,6 +51,7 @@ pub(crate) struct RunReservation {
 pub(crate) struct RunTextState {
     transport: crate::provider_preflight_session::BoundTextSession,
     pending_answer: Option<String>,
+    pending_item: Option<hello_agent_protocol::agent_adapter_v1::output_pages::OutputItemUpdate>,
     completion: Option<
         Result<
             hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
@@ -727,6 +728,7 @@ impl RunReservation {
         Ok(RunTextState {
             transport,
             pending_answer: None,
+            pending_item: None,
             completion: None,
             run_id: self.run_id.clone(),
             finished: false,
@@ -805,17 +807,32 @@ impl RunReservation {
                             return on_action(storage, action);
                         }
                     };
+                    use hello_agent_protocol::agent_adapter_v1::output_pages::{OutputItemUpdate, OutputItemOperation, OutputItemChannel};
+                    let update = match &event {
+                        Projection::Delta { kind, item_id, .. } | Projection::Completed { kind, item_id, .. } => Some(OutputItemUpdate {
+                            item_id: item_id.clone(),
+                            channel: if *kind == PublicKind::AgentMessage { OutputItemChannel::Message } else { OutputItemChannel::Plan },
+                            operation: if matches!(&event, Projection::Delta { .. }) { OutputItemOperation::Append } else { OutputItemOperation::Complete },
+                        }),
+                        _ => None,
+                    };
+                    let durable = match (&event, &update) {
+                        (Projection::Delta { text, .. } | Projection::Completed { text, .. }, Some(update)) =>
+                            self.persist_item_progress(storage, update, text.clone())?,
+                        _ => false,
+                    };
                     // Completed text replaces deltas; never append the same answer twice.
                     if let Projection::Completed { kind, text, .. } = &event {
                         match kind {
                             PublicKind::AgentMessage => {
                                 if let Some(previous) = state.pending_answer.take() {
-                                    self.persist_text(storage, "status", previous)?;
+                                    if !durable { self.persist_text(storage, "status", previous)?; }
                                 }
                                 state.pending_answer = Some(text.clone());
+                                state.pending_item = if durable { update } else { None };
                             }
                             PublicKind::Plan => {
-                                self.persist_text(storage, "status", text.clone())?
+                                if !durable { self.persist_text(storage, "status", text.clone())?; }
                             }
                         }
                     }
@@ -870,7 +887,10 @@ impl RunReservation {
             self.validate_text_input(storage, projects)
                 .map_err(|_| failure())?;
             if let Some(answer) = state.pending_answer.take() {
-                self.persist_text(
+                // Durable status completion is already stored; only promote it
+                // to final after the existing process-cleanup proof succeeds.
+                if state.pending_item.is_none() || outcome == TurnOutcome::Completed {
+                self.persist_text_update(
                     storage,
                     if outcome == TurnOutcome::Completed {
                         "final"
@@ -878,7 +898,9 @@ impl RunReservation {
                         "status"
                     },
                     answer,
+                    state.pending_item.as_ref(),
                 )?;
+                }
             }
             Ok(outcome)
         });
@@ -959,6 +981,31 @@ impl RunReservation {
         kind: &str,
         text: String,
     ) -> Result<(), SidecarError> {
+        self.persist_text_update(storage, kind, text, None)
+    }
+
+    pub(super) fn persist_item_progress(
+        &self,
+        storage: &mut Storage,
+        update: &hello_agent_protocol::agent_adapter_v1::output_pages::OutputItemUpdate,
+        text: String,
+    ) -> Result<bool, SidecarError> {
+        let projection = actual_run_projection(storage, &self.run_id)
+            .map_err(|_| SidecarError::new("agentInputChanged", "output run is unavailable"))?;
+        if output_budget_from_projection(&projection)? == hello_agent_core::provider::ProviderEventBudget::LegacyV1 {
+            return Ok(false);
+        }
+        self.persist_text_update(storage, "status", text, Some(update))?;
+        Ok(true)
+    }
+
+    pub(super) fn persist_text_update(
+        &self,
+        storage: &mut Storage,
+        kind: &str,
+        text: String,
+        update: Option<&hello_agent_protocol::agent_adapter_v1::output_pages::OutputItemUpdate>,
+    ) -> Result<(), SidecarError> {
         let event = json!({
             "schemaVersion":1, "eventId":format!("agent_event_{}", Uuid::new_v4().simple()),
             "chatId":self.run["chatId"], "taskId":self.run["taskId"],
@@ -968,7 +1015,7 @@ impl RunReservation {
             "capabilityFingerprint":self.run["capabilityFingerprint"],
             "kind":kind, "text":text, "createdAt":now()
         });
-        persist_public_event_record(storage, self.current_record(), &event).map_err(|_| {
+        persist_public_event_item(storage, self.current_record(), &event, update).map_err(|_| {
             SidecarError::new(
                 "agentOutputPersistenceFailed",
                 "public output could not be stored within the run budget",

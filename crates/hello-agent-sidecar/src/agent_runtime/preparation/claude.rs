@@ -14,6 +14,7 @@ pub(crate) struct ClaudeOutputState {
     connection: Uuid,
     initialized: bool,
     pending_answer: Option<String>,
+    pending_item: Option<hello_agent_protocol::agent_adapter_v1::output_pages::OutputItemUpdate>,
     completion: Option<Result<TurnOutcome, SidecarError>>,
     terminal_saved: bool,
     finished: bool,
@@ -537,6 +538,7 @@ impl RunReservation {
             connection: process.connection_id(),
             initialized: false,
             pending_answer: None,
+            pending_item: None,
             completion: None,
             terminal_saved: false,
             finished: false,
@@ -606,6 +608,7 @@ impl RunReservation {
                         state.initialized = true;
                     }
                     Some(Event::Output(Projection::Assistant {
+                        item_id,
                         text,
                         has_private_blocks,
                         ..
@@ -613,9 +616,13 @@ impl RunReservation {
                         if !state.initialized {
                             return Err(failure());
                         }
+                        use hello_agent_protocol::agent_adapter_v1::output_pages::{OutputItemUpdate, OutputItemOperation, OutputItemChannel};
+                        let update = OutputItemUpdate { item_id, operation: OutputItemOperation::Complete, channel: OutputItemChannel::Message };
+                        let durable = self.persist_item_progress(storage, &update, text.clone())?;
                         if let Some(previous) = state.pending_answer.replace(text) {
-                            self.persist_text(storage, "status", previous)?;
+                            if !durable { self.persist_text(storage, "status", previous)?; }
                         }
+                        state.pending_item = if durable { Some(update) } else { None };
                         if has_private_blocks {
                             handle(
                                 process,
@@ -691,8 +698,10 @@ impl RunReservation {
                     } else {
                         "status"
                     };
-                    if let Err(error) = self.persist_text(storage, kind, answer) {
+                    if state.pending_item.is_none() || kind == "final" {
+                    if let Err(error) = self.persist_text_update(storage, kind, answer, state.pending_item.as_ref()) {
                         state.completion = Some(Err(error));
+                    }
                     }
                 }
             }

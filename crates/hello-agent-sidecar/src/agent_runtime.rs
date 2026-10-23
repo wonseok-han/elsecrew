@@ -3109,6 +3109,15 @@ fn persist_public_event_record(
     expected: &Value,
     event: &Value,
 ) -> Result<(), PublicEventPersistError> {
+    persist_public_event_item(storage, expected, event, None)
+}
+
+fn persist_public_event_item(
+    storage: &mut Storage,
+    expected: &Value,
+    event: &Value,
+    item_update: Option<&hello_agent_protocol::agent_adapter_v1::output_pages::OutputItemUpdate>,
+) -> Result<(), PublicEventPersistError> {
     let run_id = expected["runId"].as_str().unwrap_or_default();
     let projection =
         actual_run_projection(storage, run_id).map_err(PublicEventPersistError::Fault)?;
@@ -3121,8 +3130,11 @@ fn persist_public_event_record(
         let next = head.committed_sequence.checked_add(1).ok_or(PublicEventPersistError::BudgetExceeded)?;
         // Draft long-run byte budget; capability remains disabled until the
         // provider parser, transport and UI all support this storage format.
-        return storage.append_agent_output_record(&binding, next, event, 64 * 1024 * 1024)
+        return storage.append_agent_output_item(&binding, next, event, 64 * 1024 * 1024, item_update)
             .map_err(ProjectFailure::from).map_err(PublicEventPersistError::Fault);
+    }
+    if item_update.is_some() {
+        return Err(PublicEventPersistError::Fault(ProjectFailure::recovery("item output requires durable format")));
     }
     let current = stored_public_budget(&projection).map_err(PublicEventPersistError::Fault)?;
     let mut events = projection["public_events"]
