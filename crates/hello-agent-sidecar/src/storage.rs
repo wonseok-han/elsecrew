@@ -46,6 +46,10 @@ pub(crate) mod reopen;
 #[allow(dead_code)]
 pub(crate) mod catalog;
 
+// Long-run output primitives; admission/migration integration is pending.
+#[allow(dead_code)]
+pub(crate) mod agent_output;
+
 const MIGRATION_V1: &str = include_str!("../../../tests/fixtures/m5/storage-v1/migration.sql");
 const MIGRATION_V2: &str =
     include_str!("../../../tests/fixtures/m5/storage-v2/migration-v1-to-v2.sql");

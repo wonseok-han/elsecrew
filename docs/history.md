@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전eed1472는 출력 reader 구현 진척이다. 현재 통합 checkout에서 storage V10과 기존 append/replay 경계를 확인하고 Karpathy 최소 변경으로 transaction-scoped 출력 원장 함수를 추가했다. begin/append/seal/head/page, run 결속·연속 seq·event ID 유일성·text 예산·byte 제한 keyset 조회를 구현했다. 본문은 전용 canonical row 한 번만 저장하고 head만 파생 갱신하도록 설계를 구체화했다.
+- 아직 schema migration/admission/R3 검증·run/fence 원자 결속·물리 quota·실제 runtime 호출은 연결하지 않았다. 제품 DB는 변경하지 않는다. caller는 write admission과 helper 실패 시 전체 rollback을 책임지며 sealed는 종료 성공을 뜻하지 않는다. source/read/UI 활성화는 이 경계 연결 및 독립 검토 뒤다.
+- 3,000개 append/page/seal 및 rollback 두 회귀를 작성했다. 테스트 실행은 이전 TS/head/reader 추가분과 함께 후속 연결 검증으로 모은다. diff check만 수행했다. 모델/앱·사용자 데이터·main/push 없음. 다음은 migration/R3 admission 연결이다.
+
+### 2026-10-23 · by Codex
 - 직전2479f04는 TS 계약·공유 fixture 구현 진척이다. clean 통합 checkout에서 L1의 run-bound OutputHead(Rust/TS)와 단일 page-in-flight reader를 추가했다. 구독 등록 완료→head→연속 page→head 재조회, 알림 합치기·외부 reconciliation 호출, consumer 수락 뒤 cursor 전진, abort 후 늦은 응답 무시, sealed head 역전 거절을 구현했다.
 - sealed는 출력만 닫으며 프로세스 종료/성공 증거가 아니다. reader는 출력 전체를 쌓지 않고1page만 소비자에게 전달한다. 소비자의 bounded 표시·실제 IPC source·정기 reconciliation timer·재접속 lifecycle 연결은 아직 남아 있고 새 코드는 제품 경로에서 호출하지 않는다. Karpathy 최소 변경으로 기존 page 검증을 재사용했다.
 - 구독/마지막 commit 경주·알림 누락·3,000개 순회/동시 refresh·consumer 실패·sealed 변경·닫힌 화면 늦은 응답 회귀5개를 작성했다. 이전 TS/golden 추가분과 함께 테스트 실행은 후속 연결 검증으로 모은다. diff check만 PASS, 앱/모델/사용자 데이터 변경 없음. 다음은 저장 schema/R3 admission 및 append/head/page source 구현이며 전체 목표는 미완료다.

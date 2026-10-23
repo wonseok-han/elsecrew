@@ -1,0 +1,293 @@
+//! Transaction-scoped output ledger. No migration or public runtime activation.
+//! Caller must hold write admission and atomically persist the run/fence state.
+use super::{sqlite_error, SidecarError};
+use hello_agent_protocol::agent_adapter_v1::{
+    output_pages::{
+        decode_output_page, OutputHead, OutputPage, OutputPageRequest, OutputRow,
+        OUTPUT_FORMAT_VERSION, OUTPUT_PAGE_MAX_BYTES,
+    },
+    validate_agent_public_event_against_run_v1, AgentRunBindingV1,
+};
+use rusqlite::{params, OptionalExtension, Transaction};
+use serde_json::Value;
+
+pub(super) const SCHEMA: &str = "
+CREATE TABLE run_output_heads (
+ run_id TEXT PRIMARY KEY NOT NULL,
+ binding_json TEXT NOT NULL,
+ committed_sequence INTEGER NOT NULL CHECK(committed_sequence >= 0),
+ text_bytes INTEGER NOT NULL CHECK(text_bytes >= 0),
+ sealed INTEGER NOT NULL CHECK(sealed IN (0,1))
+) STRICT;
+CREATE TABLE run_output_records (
+ run_id TEXT NOT NULL REFERENCES run_output_heads(run_id),
+ output_sequence INTEGER NOT NULL CHECK(output_sequence > 0),
+ event_id TEXT NOT NULL UNIQUE,
+ event_json TEXT NOT NULL CHECK(length(CAST(event_json AS BLOB)) <= 524288),
+ PRIMARY KEY(run_id, output_sequence)
+) STRICT;";
+
+fn invalid(detail: &str) -> SidecarError {
+    SidecarError::new("storageInvalid", detail)
+}
+fn encode<T: serde::Serialize>(value: &T) -> Result<String, SidecarError> {
+    serde_json::to_string(value).map_err(|_| invalid("output serialization failed"))
+}
+
+pub(super) fn begin(tx: &Transaction<'_>, binding: &AgentRunBindingV1) -> Result<(), SidecarError> {
+    let head = OutputHead {
+        format_version: OUTPUT_FORMAT_VERSION,
+        binding: binding.clone(),
+        committed_sequence: 0,
+        sealed: false,
+    };
+    head.validate(binding)
+        .map_err(|_| invalid("invalid output binding"))?;
+    tx.execute(
+        "INSERT INTO run_output_heads VALUES (?1,?2,0,0,0)",
+        params![binding.run_id, encode(binding)?],
+    )
+    .map_err(sqlite_error)?;
+    Ok(())
+}
+
+pub(super) fn head(
+    tx: &Transaction<'_>,
+    binding: &AgentRunBindingV1,
+) -> Result<OutputHead, SidecarError> {
+    let row: Option<(String, u64, bool)> = tx.query_row(
+        "SELECT binding_json, committed_sequence, sealed FROM run_output_heads WHERE run_id=?1 AND length(CAST(binding_json AS BLOB)) <= 8192",
+        [&binding.run_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).optional().map_err(sqlite_error)?;
+    let (json, committed_sequence, sealed) =
+        row.ok_or_else(|| invalid("missing or oversized output head"))?;
+    let result = OutputHead {
+        format_version: OUTPUT_FORMAT_VERSION,
+        binding: serde_json::from_str(&json)
+            .map_err(|_| invalid("invalid stored output binding"))?,
+        committed_sequence,
+        sealed,
+    };
+    result
+        .validate(binding)
+        .map_err(|_| invalid("output head binding mismatch"))?;
+    Ok(result)
+}
+
+/// No commit here: an error must roll back the caller's entire transaction.
+/// Sequence/event ID conflicts are rejected, never silently treated as success.
+pub(super) fn append(
+    tx: &Transaction<'_>,
+    binding: &AgentRunBindingV1,
+    sequence: u64,
+    value: &Value,
+    text_budget: u64,
+) -> Result<(), SidecarError> {
+    let previous = head(tx, binding)?;
+    if previous.sealed
+        || previous.committed_sequence.checked_add(1) != Some(sequence)
+        || sequence > hello_agent_protocol::MAX_SEQUENCE
+    {
+        return Err(invalid("output append sequence or sealed state mismatch"));
+    }
+    let event = validate_agent_public_event_against_run_v1(value, binding)
+        .map_err(|_| invalid("invalid public output event"))?;
+    let bytes = u64::try_from(event.text.len()).map_err(|_| invalid("output length overflow"))?;
+    let used: u64 = tx
+        .query_row(
+            "SELECT text_bytes FROM run_output_heads WHERE run_id=?1",
+            [&binding.run_id],
+            |row| row.get(0),
+        )
+        .map_err(sqlite_error)?;
+    let next = used
+        .checked_add(bytes)
+        .filter(|total| *total <= text_budget)
+        .ok_or_else(|| invalid("output text budget exceeded"))?;
+    let json = encode(&event)?;
+    // Ensure a valid event fits as a single page before committing it.
+    let request = OutputPageRequest {
+        format_version: OUTPUT_FORMAT_VERSION,
+        binding: binding.clone(),
+        after_sequence: sequence - 1,
+        through_sequence: sequence,
+        limit: 1,
+    };
+    let single = OutputPage {
+        request: request.clone(),
+        rows: vec![OutputRow {
+            output_sequence: sequence,
+            event,
+        }],
+        next_after_sequence: sequence,
+    };
+    decode_output_page(encode(&single)?.as_bytes(), &request)
+        .map_err(|_| invalid("output event exceeds page budget"))?;
+    tx.execute(
+        "INSERT INTO run_output_records VALUES (?1,?2,?3,?4)",
+        params![
+            binding.run_id,
+            sequence,
+            single.rows[0].event.event_id,
+            json
+        ],
+    )
+    .map_err(sqlite_error)?;
+    let updated = tx.execute("UPDATE run_output_heads SET committed_sequence=?2, text_bytes=?3 WHERE run_id=?1 AND committed_sequence=?4 AND sealed=0", params![binding.run_id, sequence, next, previous.committed_sequence]).map_err(sqlite_error)?;
+    if updated != 1 {
+        return Err(invalid("output head update conflict"));
+    }
+    Ok(())
+}
+
+pub(super) fn seal(tx: &Transaction<'_>, binding: &AgentRunBindingV1) -> Result<(), SidecarError> {
+    head(tx, binding)?;
+    tx.execute(
+        "UPDATE run_output_heads SET sealed=1 WHERE run_id=?1",
+        [&binding.run_id],
+    )
+    .map_err(sqlite_error)?;
+    Ok(())
+}
+
+pub(super) fn page(
+    tx: &Transaction<'_>,
+    request: &OutputPageRequest,
+) -> Result<OutputPage, SidecarError> {
+    request
+        .validate()
+        .map_err(|_| invalid("invalid output page request"))?;
+    let current = head(tx, &request.binding)?;
+    if request.through_sequence > current.committed_sequence {
+        return Err(invalid("output cursor exceeds committed head"));
+    }
+    let mut statement = tx.prepare("SELECT output_sequence, length(CAST(event_json AS BLOB)), CASE WHEN length(CAST(event_json AS BLOB)) <= 524288 THEN event_json ELSE NULL END FROM run_output_records WHERE run_id=?1 AND output_sequence>?2 AND output_sequence<=?3 ORDER BY output_sequence LIMIT ?4").map_err(sqlite_error)?;
+    let mut rows = statement
+        .query(params![
+            request.binding.run_id,
+            request.after_sequence,
+            request.through_sequence,
+            request.limit as u64
+        ])
+        .map_err(sqlite_error)?;
+    let mut result = OutputPage {
+        request: request.clone(),
+        rows: Vec::new(),
+        next_after_sequence: request.after_sequence,
+    };
+    while let Some(row) = rows.next().map_err(sqlite_error)? {
+        let sequence: u64 = row.get(0).map_err(sqlite_error)?;
+        let length: u64 = row.get(1).map_err(sqlite_error)?;
+        if length > OUTPUT_PAGE_MAX_BYTES as u64 {
+            return Err(invalid("oversized stored output event"));
+        }
+        let json: String = row.get(2).map_err(sqlite_error)?;
+        let event =
+            serde_json::from_str(&json).map_err(|_| invalid("invalid stored output event"))?;
+        let previous_sequence = result.next_after_sequence;
+        result.rows.push(OutputRow {
+            output_sequence: sequence,
+            event,
+        });
+        result.next_after_sequence = sequence;
+        if encode(&result)?.len() > OUTPUT_PAGE_MAX_BYTES {
+            result.rows.pop();
+            result.next_after_sequence = previous_sequence;
+            break;
+        }
+    }
+    decode_output_page(encode(&result)?.as_bytes(), request)
+        .map_err(|_| invalid("invalid stored output page"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn fixture() -> OutputPage {
+        serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/m5/agent-output-page.json"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn append_pages_and_seal_in_one_transaction() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(SCHEMA).unwrap();
+        let fixture = fixture();
+        let binding = fixture.request.binding;
+        let tx = db.transaction().unwrap();
+        begin(&tx, &binding).unwrap();
+        for sequence in 1..=3000 {
+            let mut event = fixture.rows[0].event.clone();
+            event.event_id = format!("agent_event_{sequence}");
+            append(
+                &tx,
+                &binding,
+                sequence,
+                &serde_json::to_value(event).unwrap(),
+                64 * 1024 * 1024,
+            )
+            .unwrap();
+        }
+        seal(&tx, &binding).unwrap();
+        tx.commit().unwrap();
+        let tx = db.transaction().unwrap();
+        assert!(head(&tx, &binding).unwrap().sealed);
+        for after in (0..3000).step_by(100) {
+            let request = OutputPageRequest {
+                format_version: 1,
+                binding: binding.clone(),
+                after_sequence: after,
+                through_sequence: 3000,
+                limit: 100,
+            };
+            assert_eq!(
+                page(&tx, &request).unwrap().next_after_sequence,
+                after + 100
+            );
+        }
+        assert!(append(
+            &tx,
+            &binding,
+            3001,
+            &serde_json::to_value(&fixture.rows[0].event).unwrap(),
+            64 * 1024 * 1024
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn rollback_removes_output_and_head_together() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(SCHEMA).unwrap();
+        let fixture = fixture();
+        let binding = fixture.request.binding;
+        {
+            let tx = db.transaction().unwrap();
+            begin(&tx, &binding).unwrap();
+            append(
+                &tx,
+                &binding,
+                1,
+                &serde_json::to_value(&fixture.rows[0].event).unwrap(),
+                1024,
+            )
+            .unwrap();
+            // Deliberate operation abort; neither canonical row nor head survives.
+        }
+        let records: u64 = db
+            .query_row("SELECT count(*) FROM run_output_records", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let heads: u64 = db
+            .query_row("SELECT count(*) FROM run_output_heads", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!((records, heads), (0, 0));
+    }
+}

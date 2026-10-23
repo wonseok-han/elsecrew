@@ -31,12 +31,14 @@ Rust sidecar가 신원·출력 commit·순서의 권위다. Electron/renderer의
 - `run_output_head`: 저장 형식 버전, committed_sequence, event_count, text_bytes, terminal_sequence(없으면 null), 기존 run 신원. 큰 본문 배열은 넣지 않는다.
 - 기존 envelope `seq`는 연결별 전송 순서이며 `output_sequence`는 재시작 후에도 유지되는 실행별 영속 순서다. 둘을 혼용하지 않는다.
 - 새로운 원장 이벤트가 권위이고 output table/head는 검증 가능한 파생 데이터로 둔다. 기존 projection snapshot 안에 출력 전체를 다시 넣지 않는다. 정확한 SQLite migration 번호·이벤트 이름·bridge 버전은 현재 등록표와 충돌 없이 L1에서 동결한다.
+- L2 구현 구체화: 공개 본문은 전용 `run_output_records` 원장에 한 번만 저장하고 `run_output_heads`만 파생 요약으로 둔다. 기존 전체 projection 원장에 본문을 중복 저장하지 않는다. run 시작/폐쇄와 원장의 결속, 두 방향 R3 검증을 새 migration/admission에 포함하기 전에는 활성화하지 않는다. 위 논리 event/head 이름은 실제 SQL 이름과 구별한다.
 
 ### commit 규칙
 
 1. 공급자 raw 입력을 기존 parser/공개 정보 필터로 검증한다. 비공개 추론·인증정보는 출력 원장에 넣지 않는다.
 2. 기존 run 결속, 현재 실행 권한, 다음 순서와 byte/storage 예산을 확인한다.
 3. 원장 append + output row + head/counters를 **동일 SQLite transaction**으로 commit한다. 실패 시 전부 rollback한다.
+   구현에서 canonical output row 자체가 전용 원장이므로 본문을 이중 insert하지 않는다. 외부 run/fence 갱신과 같은 transaction에 포함하며 helper 오류를 잡고 일부만 commit해서는 안 된다.
 4. commit된 항목만 live 전달 대상으로 공지한다. commit 후 전송 실패는 데이터 재조회로 복구하며 모델 작업을 재실행하지 않는다.
 5. terminal은 마지막 공개 출력 commit 뒤 같은 순서 체계로 영속화한다. 프로세스 종료 확인 없는 terminal은 성공으로 승격하지 않는다. 실패·취소·불확실 종료의 기존 잠금/복구 계약을 유지한다.
 
@@ -120,3 +122,4 @@ L1/L3의 공급자 범위에는 core parser와 Codex/Claude observation adapter�
 - 아직 capability 광고·wire method 등록·저장 schema 변경·runtime 연결은 없다. 페이지 검사기는 요청 watermark가 실제 commit됐다는 증거가 아니며 저장 계층에서 별도로 검증해야 한다. cross-page event ID 유일성은 영속 원장의 책임이다. TS 대응·golden fixture·head/구독 계약·L1 독립 검토가 남아 있다.
 - 후속 체크포인트: `src/m5/contracts/agent-output-pages.ts`의 TS 대응과 `tests/fixtures/m5/agent-output-page.json` 공유 fixture를 추가했다. Rust/TS 모두 같은 마지막3,000번째 page를 검증하는 회귀를 작성했으며 이 추가분은 다음 계약 연결과 묶어서 실행한다. head/구독·저장 계약과 L1 독립 검토는 계속 남는다.
 - 후속 체크포인트: Rust/TS `OutputHead`는 run 결속·committedSequence·sealed를 포함한다. sealed는 출력 폐쇄이지 종료/성공 증거가 아니다. `src/m5/agent-output-reader.ts`는 구독 완료 후 catch-up, dirty 알림 병합, 단일 page 소비, head 재조회와 stop 경계를 구현했다. source는 구독 등록 완료를 보장하고 abort에 응답해야 하며 호출자가 정기 reconciliation과 새 연결의 reader 재생성을 담당한다. 아직 실제 IPC source/화면/저장소에 연결되지 않았고 관련 회귀는 작성 상태다.
+- L2 일부: `storage/agent_output.rs`에 transaction-scoped begin/append/seal/head/page와 전용 원장 schema 초안을 추가했다. 호출자가 write admission과 전체 transaction rollback을 소유한다. schema 등록·기존 데이터 이관·R3 양방향 검증·물리 quota·run/fence 원자 결속은 아직 없고 제품 DB에는 새 테이블을 생성하지 않는다. 3,000개 저장/조회 및 rollback 회귀는 작성 상태이며 실행 전이다.
