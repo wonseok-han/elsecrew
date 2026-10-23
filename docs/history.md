@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전be517e2는 누적 Rust 컴파일 결함 수정 진척이다. clean 통합 checkout에서 V10→V11 schema 준비와 exact schema 검증 함수를 구현했다. IMMEDIATE transaction 안에서 기존 V10 schema/control을 확인하고 빈 출력 원장2table 추가·metadata11 교체·새 schema 검증 후 commit한다. ALTER RENAME 대신 같은 이름으로 metadata를 transaction 내 교체해 기존 trigger 참조 이름을 보존한다. 기존 run 배열은 변환/삭제하지 않는다.
+- Karpathy 최소 변경으로 기존 V10 golden과 materialization 검증을 재사용했다. 새 schema 확인은 object 수/문자열 길이를 제한한 뒤 비교한다. 성공/기존 validator 거절·재이관 거절·변조된 base에서 무변경 거절 회귀2개를 작성했다. 아직 실행하지 않았고 format/diff만 확인했다.
+- product open에는 호출하지 않았다. V11을 처리하는 기존 replay/compaction/admission 분기 및 신규 run 생성/runtime 연결을 함께 바꾸고 독립 검토하기 전 자동 이관은 비활성이다. 사용자 DB·앱·모델·main/push 변경 없음. 다음은 이 V11 호환 분기와 admission 연결이다.
+
+### 2026-10-23 · by Codex
 - 직전e8835c0는 run/output 결속 구현 진척이다. 현재 clean 통합 checkout에서 V10 exact schema identity·메타데이터 CHECK·기존 migration/admission 분기를 대조했다. 새 테이블만 생성하면 기존 검증이 거절하므로 자동 이관은 아직 활성화하지 않았다. 다음 저장 연결 전 필요한 누적 컴파일 진단만 수행했다.
 - `cargo check -p hello-agent-sidecar --tests`에서 새 출력 코드의 serde 직접 의존성 누락과 rusqlite0.40의 u64 FromSql/ToSql 미지원 오류를 발견했다. 기존 잠금버전 serde1.0.228을 직접 선언하고 기존 row_u64 및 checked i64 변환을 재사용해 음수/범위초과를 거절하도록 수정했다. Cargo.lock은 sidecar 의존성 목록1줄만 변경됐다.
 - 동일 누적 컴파일 재실행 PASS(5.71초), 테스트 실행은 하지 않았다. format/diff 검사 수행. 새 migration·기존 run 이관·R3 통합·quota/runtime/UI는 여전히 남으며 제품 DB/앱/모델·main/push 변경 없음. 이번은 구현 연결을 막는 컴파일 결함 수정이지 전체 기능 합격이 아니다.

@@ -11,6 +11,7 @@ use hello_agent_protocol::agent_adapter_v1::{
 use rusqlite::{params, OptionalExtension, Transaction};
 use serde_json::Value;
 
+pub(super) mod schema;
 pub(super) mod verification;
 
 /// New output format is opt-in per run; a legacy array is never silently
