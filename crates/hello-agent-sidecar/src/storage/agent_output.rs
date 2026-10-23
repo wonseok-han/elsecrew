@@ -13,6 +13,7 @@ use serde_json::Value;
 
 pub(super) mod schema;
 pub(super) mod verification;
+mod quota;
 
 impl super::Storage {
     /// Output mutations use the same admitted connection and transaction as
@@ -25,6 +26,8 @@ impl super::Storage {
         text_budget: u64,
     ) -> Result<(), SidecarError> {
         self.ensure_writes_admitted()?;
+        let path = self.path().to_path_buf();
+        quota::check(&self.connection, &path, true)?;
         let tx = self
             .connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -34,6 +37,9 @@ impl super::Storage {
         let current = head(&tx, binding)?;
         verify_run_binding(&tx, &current)?;
         append(&tx, binding, sequence, event, text_budget)?;
+        // The pager can retain dirty pages until commit; the pre-write headroom
+        // is conservative, while this catches WAL growth already flushed.
+        quota::check(&tx, &path, false)?;
         tx.commit().map_err(sqlite_error)?;
         self.note_maintenance_invalidation();
         Ok(())

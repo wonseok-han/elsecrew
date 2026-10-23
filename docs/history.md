@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-23 · by Codex
+- 직전7f64397은 native transport 예산 선택 구현 진척이다. clean 통합 checkout에서 진행 출력 연결을 조사했고, 현행 public event에는 item ID/append-replace 정보가 없어 delta를 status 문자열로 단순 저장하면 완성 응답과 중복되는 계약 누락을 확인했다. 이 부분은 별도 출력 항목 계약 확장 후 연결하며 완료로 표시하지 않는다.
+- 독립적으로 필요한 durable output 저장 용량 검사부터 연결했다. DB의 물리 길이와 SQLite 논리 페이지 중 큰 값+WAL/SHM을 합산해 제안1GiB 예산을 검사하고 여유 공간256MiB+쓰기 전8MiB headroom을 요구한다. Unix no-follow regular file/fstatvfs, overflow 거절, 쓰기 전/transaction 내 확인을 추가했다. 복구/lifecycle 쓰기는 제한하지 않고 기록 자동 삭제도 없다. OS 공간 예약이 아니므로 concurrent ENOSPC/commit 실패의 persistent fence 처리는 여전히 필수다. Windows probe 미구현은 fail-closed다.
+- Karpathy 최소 변경 원칙으로 기존 append transaction만 사용했고 검사 경계 회귀를 작성했다. diff check만 수행, 새 코드 컴파일·회귀·독립 검토/수치 검증은 누적 파동에서 진행한다. 제품 새 형식 활성화는 아직 하지 않았다. 항목별 진행 출력·page IPC/UI·후속 문맥·전체 G6/Windows/출시가 남으며 사용자 파일 삭제/모델/앱/main/push 없음.
+
+### 2026-10-23 · by Codex
 - 직전6c99bde는 native parser 예산 전달과 누적 컴파일 진척이다. clean 통합 checkout에서 Codex BoundTextSession→TextSession→TurnStart, Claude 초기화→SessionChannel→Session의 durable 예산 선택을 연결했다. 선택은 검증된 run projection의 format1에서만 하며 unknown marker는 거절한다. 기존 동기 진단/테스트 경로는 legacy를 명시한다.
 - Karpathy 최소 변경으로 기존 입장·프로필·권한·종료 검사를 유지했다. 새 run marker 생성과 V11 자동 이관은 여전히 비활성이어서 실제 제품 한도를 아직 올리지 않았다. native 경로는 완성 응답 중심으로 persist_text를 호출하므로 진행 delta 저장·조회/UI 연결도 남는다. transport deadline/권한 요청 한도는 바꾸지 않았다.
 - 이번 변경은 diff check와 호출 지점 대조만 수행했고 컴파일/회귀는 누적 검증 대상으로 남겼다. 물리 quota·최종 응답 문맥·page IPC/UI·독립 검토·G6 전체/Windows/출시는 미완료다. 사용자 DB·앱·인증·모델 실행, main 병합/push 없음.
