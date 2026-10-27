@@ -525,6 +525,23 @@ test("login capability negotiates exact status and fixed requests", async () => 
   assert.deepEqual(await login, idle);
 });
 
+test("durable output capability pair survives ready and status negotiation", async () => {
+  for (const tail of [[], ["provider.login", "run.approval", "project.catalog", "provider.install"]]) {
+    const { child, client } = createClient();
+    const started = client.start();
+    const suffix = ["chat.appendMessage", "agent.outputHead", "agent.outputPage", ...tail];
+    const ready = JSON.parse(g5dReadyLine());
+    ready.payload.capabilities.push(...suffix);
+    child.stdout.write(`${JSON.stringify(ready)}\n`);
+    assert.deepEqual((await started).capabilities, ready.payload.capabilities);
+    const status = client.getSystemStatus();
+    const result = g5dStatus("ready") as any;
+    result.sidecar.capabilities.push(...suffix);
+    child.stdout.write(responseLine(JSON.parse(child.writes.at(-1)!).requestId, result));
+    assert.deepEqual((await status).sidecar.capabilities, result.sidecar.capabilities);
+  }
+});
+
 test("installation suffix negotiates exact baseline without enabling installation", async () => {
   const { child, client } = createClient();
   const started = client.start();

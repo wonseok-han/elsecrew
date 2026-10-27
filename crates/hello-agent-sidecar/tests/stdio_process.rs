@@ -415,6 +415,12 @@ fn binary_agent_cancel_defers_completion_without_blocking_status_or_quit() {
     }
 }
 
+#[cfg(all(target_os = "macos", debug_assertions))]
+#[test]
+fn binary_long_stream_commits_and_pages_three_thousand_outputs() {
+    g5a_public_event_flow(false, Some("long-stream"));
+}
+
 #[test]
 #[cfg(not(debug_assertions))]
 fn release_cli_rejects_durable_fixture_before_opening_database() {
@@ -472,6 +478,7 @@ fn g5a_public_event_flow(continuous_requests: bool, cancellation: Option<&str>) 
         G5D_AGENT_FIXTURE_CAPABILITIES_V1
             .iter()
             .chain(std::iter::once(&"chat.appendMessage"))
+            .chain(["agent.outputHead", "agent.outputPage"].iter())
             .chain(std::iter::once(&"provider.login"))
             .chain(["run.approval", "project.catalog", "provider.install"].iter())
             .map(|value| (*value).to_string())
@@ -594,6 +601,18 @@ fn g5a_public_event_flow(continuous_requests: bool, cancellation: Option<&str>) 
     let accepted = accepted.result.unwrap();
     validate_agent_adapter_payload_v1("runAccepted", &accepted).unwrap();
     let run_id = accepted["runId"].as_str().unwrap().to_string();
+
+    if cancellation == Some("long-stream") {
+        durable_stdio_output_flow(&mut stdin, &envelopes, &ready.sidecar_instance_id,
+            &chat, &run_id, &capability["fingerprint"]);
+        write_request(&mut stdin, &ready.sidecar_instance_id, "req_long_quit",
+            "app.prepareQuit", serde_json::json!({}));
+        assert!(matches!(receive_envelope(&envelopes), EnvelopeV1::Response(response)
+            if response.ok && response.result.as_ref().unwrap()["safeToQuit"] == true));
+        drop(stdin);
+        assert!(child.wait().unwrap().success());
+        return;
+    }
 
     if let Some(scenario) = cancellation {
         agent_cancel_flow(
@@ -819,6 +838,81 @@ fn g5a_public_event_flow(continuous_requests: bool, cancellation: Option<&str>) 
     ] {
         assert!(!persisted.contains(forbidden));
     }
+}
+
+#[cfg(target_os = "macos")]
+fn durable_stdio_output_flow(
+    stdin: &mut std::process::ChildStdin,
+    envelopes: &Receiver<EnvelopeV1>,
+    instance: &str,
+    chat: &serde_json::Value,
+    run_id: &str,
+    fingerprint: &serde_json::Value,
+) {
+    use hello_agent_protocol::agent_adapter_v1::output_pages::{decode_output_page, OutputHead, OutputPageRequest};
+    let binding = serde_json::json!({
+        "chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],
+        "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+        "runId":run_id,"roleId":"coding","capabilityFingerprint":fingerprint,
+    });
+    let typed_binding = serde_json::from_value(binding.clone()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(180);
+    let mut sequence = 0;
+    let mut last_head = 0;
+    let mut sealed = false;
+    loop {
+        assert!(Instant::now() < deadline, "long stream did not terminate");
+        let EnvelopeV1::Event(event) = receive_envelope(envelopes) else { panic!("expected output/state event") };
+        assert_eq!(event.seq, sequence + 1);
+        sequence = event.seq;
+        assert_eq!(event.run_id.as_deref(), Some(run_id));
+        match event.event.as_str() {
+            "agent.outputAvailable" => {
+                let head: OutputHead = serde_json::from_value(event.payload).unwrap();
+                head.validate(&typed_binding).unwrap();
+                assert!(head.committed_sequence >= last_head);
+                last_head = head.committed_sequence;
+                sealed = head.sealed;
+            }
+            "agent.runStateChanged" => {
+                let state = event.payload["run"]["state"].as_str().unwrap();
+                if state == "running" { continue; }
+                assert_eq!(state, "succeeded", "{:?}", event.payload);
+                assert_eq!(event.payload["run"]["terminationOutcome"], "cleanExit");
+                break;
+            }
+            other => panic!("unexpected long output event: {other}"),
+        }
+    }
+    assert!(sealed);
+    assert_eq!(last_head, 3000);
+    write_request(stdin, instance, "req_long_head", "agent.outputHead", binding.clone());
+    let EnvelopeV1::Response(response) = receive_envelope(envelopes) else { panic!("head response") };
+    assert!(response.ok, "{:?}", response.error);
+    let head: OutputHead = serde_json::from_value(response.result.unwrap()).unwrap();
+    head.validate(&typed_binding).unwrap();
+    assert!(head.sealed);
+    assert_eq!(head.committed_sequence, 3000);
+    let mut cursor = 0;
+    let mut ids = std::collections::HashSet::new();
+    while cursor < head.committed_sequence {
+        let request = OutputPageRequest { format_version:1, binding:typed_binding.clone(),
+            after_sequence:cursor, through_sequence:head.committed_sequence, limit:100 };
+        write_request(stdin, instance, &format!("req_long_page_{cursor}"), "agent.outputPage",
+            serde_json::to_value(&request).unwrap());
+        let EnvelopeV1::Response(response) = receive_envelope(envelopes) else { panic!("page response") };
+        assert!(response.ok, "{:?}", response.error);
+        let page = decode_output_page(&serde_json::to_vec(&response.result.unwrap()).unwrap(), &request).unwrap();
+        for row in &page.rows {
+            cursor += 1;
+            assert_eq!(row.output_sequence, cursor);
+            assert_eq!(row.event.text, format!("output {cursor}"));
+            assert!(ids.insert(row.event.event_id.clone()));
+        }
+        assert_eq!(page.next_after_sequence, cursor);
+        assert!(!page.rows.is_empty());
+    }
+    assert_eq!(ids.len(), 3000);
 }
 
 #[cfg(target_os = "macos")]

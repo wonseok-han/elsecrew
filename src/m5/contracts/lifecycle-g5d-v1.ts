@@ -97,6 +97,23 @@ export function parseG5DProductSystemStatusV1(value: unknown): SystemStatusG5DV1
 
 /** Optional follow-up suffix over an otherwise exact D1 baseline. */
 export function parseCurrentSystemStatusV1(value: unknown, agentFixture: boolean, native = false): SystemStatusG5DV1 {
+  if (typeof value === "object" && value !== null && "sidecar" in value) {
+    const sidecar = value.sidecar;
+    if (typeof sidecar === "object" && sidecar !== null && "capabilities" in sidecar && Array.isArray(sidecar.capabilities)) {
+      const caps = sidecar.capabilities;
+      const index = caps.indexOf("agent.outputHead");
+      if (index >= 0 || caps.includes("agent.outputPage")) {
+        if (index < 1 || caps[index - 1] !== "chat.appendMessage" || caps[index + 1] !== "agent.outputPage"
+          || caps.filter(item => item === "agent.outputHead" || item === "agent.outputPage").length !== 2) {
+          throw new Error("invalid output capability baseline");
+        }
+        const parsed = parseCurrentSystemStatusV1({ ...value, sidecar: { ...sidecar,
+          capabilities: [...caps.slice(0, index), ...caps.slice(index + 2)] } }, agentFixture, native);
+        return { ...parsed, sidecar: { ...parsed.sidecar, capabilities: [...parsed.sidecar.capabilities.slice(0, index),
+          "agent.outputHead", "agent.outputPage", ...parsed.sidecar.capabilities.slice(index)] } };
+      }
+    }
+  }
   return parseSystemStatus(value, (sidecar) => {
     const baseline = native ? parseG5DNativeReadyPayloadV1 : agentFixture ? parseG5DAgentFixtureReadyPayloadV1 : parseG5DProductReadyPayloadV1;
     if (typeof sidecar === "object" && sidecar !== null && "capabilities" in sidecar && Array.isArray(sidecar.capabilities) && sidecar.capabilities[sidecar.capabilities.length - 1] === "provider.install") {

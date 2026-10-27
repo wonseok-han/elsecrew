@@ -11,12 +11,34 @@ import {
   G5D_STORAGE_READY_ONLY_METHODS_V1,
   parseG5DAgentFixtureSystemStatusV1,
   parseG5DProductSystemStatusV1,
+  parseCurrentSystemStatusV1,
   validateG5DBlockedRequestErrorV1,
   validateG5DStartupTraceV1,
   type StorageAdmissionStateV1,
 } from "../src/m5/contracts/lifecycle-g5d-v1.ts";
 import { PROTOCOL_VERSION } from "../src/m5/contracts/protocol-v1.ts";
 import { STORAGE_STATUS_BRIDGE_METHOD_V1 } from "../src/m5/contracts/storage-lifetime-v1.ts";
+
+test("current status accepts only the ordered output pair after follow-up capability", () => {
+  const valid = manifest.systemStatusCases.find(value => value.expectedValid)!;
+  for (const fixture of [false, true]) {
+    const ready = (fixture ? manifest.readyPayloads.agentFixture : manifest.readyPayloads.generalProduct) as Record<string, unknown>;
+    const baseline = ready.capabilities as string[];
+    for (const [suffix, accepted] of [
+      [["chat.appendMessage", "agent.outputHead", "agent.outputPage"], true],
+      [["chat.appendMessage", "agent.outputHead", "agent.outputPage", "provider.login", "run.approval", "project.catalog", "provider.install"], true],
+      [["chat.appendMessage", "agent.outputHead"], false],
+      [["chat.appendMessage", "agent.outputPage", "agent.outputHead"], false],
+      [["agent.outputHead", "agent.outputPage"], false],
+      [["chat.appendMessage", "agent.outputHead", "agent.outputPage", "agent.outputHead", "agent.outputPage"], false],
+    ] as const) {
+      const capabilities = [...baseline, ...suffix];
+      const value = { ...valid.value, sidecar: { ...ready, capabilities } };
+      if (accepted) assert.deepEqual(parseCurrentSystemStatusV1(value, fixture).sidecar.capabilities, capabilities);
+      else assert.throws(() => parseCurrentSystemStatusV1(value, fixture));
+    }
+  }
+});
 
 interface Manifest {
   schemaVersion: number;

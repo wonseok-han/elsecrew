@@ -140,6 +140,7 @@ fn parse_followup_status(
     let mut approval = false;
     let mut catalog = false;
     let mut install = false;
+    let mut output = false;
     let extended = capabilities.is_some_and(|capabilities| {
         if capabilities.last().and_then(Value::as_str) == Some("provider.install") {
             capabilities.pop();
@@ -157,6 +158,12 @@ fn parse_followup_status(
             capabilities.pop();
             login = true;
         }
+        if capabilities.len() >= 2
+            && capabilities[capabilities.len() - 2].as_str() == Some("agent.outputHead")
+            && capabilities.last().and_then(Value::as_str) == Some("agent.outputPage") {
+            capabilities.truncate(capabilities.len() - 2);
+            output = true;
+        }
         if capabilities.last().and_then(Value::as_str) == Some("chat.appendMessage") {
             capabilities.pop();
             true
@@ -165,6 +172,9 @@ fn parse_followup_status(
         }
     });
     let mut parsed = baseline(&normalized)?;
+    if output && !extended {
+        return Err(G5DAdmissionContractError::new("output requires followup baseline"));
+    }
     if install && !catalog {
         return Err(G5DAdmissionContractError::new("installation requires catalog baseline"));
     }
@@ -188,6 +198,9 @@ fn parse_followup_status(
             .sidecar
             .capabilities
             .push("chat.appendMessage".to_owned());
+    }
+    if output {
+        parsed.sidecar.capabilities.extend(["agent.outputHead".to_owned(), "agent.outputPage".to_owned()]);
     }
     if login {
         parsed

@@ -147,6 +147,12 @@ fn current_status_requires_exact_installation_suffix_and_preserves_d1() {
         let baseline = value["sidecar"]["capabilities"].as_array().unwrap().clone();
         for (suffix, valid) in [
             (vec!["chat.appendMessage", "provider.login", "run.approval", "project.catalog", "provider.install"], true),
+            (vec!["chat.appendMessage", "agent.outputHead", "agent.outputPage"], true),
+            (vec!["chat.appendMessage", "agent.outputHead", "agent.outputPage", "provider.login", "run.approval", "project.catalog", "provider.install"], true),
+            (vec!["chat.appendMessage", "agent.outputHead"], false),
+            (vec!["chat.appendMessage", "agent.outputPage", "agent.outputHead"], false),
+            (vec!["agent.outputHead", "agent.outputPage"], false),
+            (vec!["chat.appendMessage", "agent.outputHead", "agent.outputPage", "agent.outputHead", "agent.outputPage"], false),
             (vec!["provider.install"], false),
             (vec!["chat.appendMessage", "provider.login", "run.approval", "provider.install"], false),
             (vec!["chat.appendMessage", "provider.login", "run.approval", "provider.install", "project.catalog"], false),

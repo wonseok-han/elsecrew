@@ -1,6 +1,12 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 기준 e90f9c4의 깨끗한 트리에서 재개했다. 이전 턴은 개발 전용 fixture 연결·배포 경계 수정/검토/커밋으로 진척이다. 기존 stdio 프로젝트/채팅 준비를 재사용해 단일 LongStream 실행의 3,000개 출력, 순서 있는 head 알림, 봉인/cleanExit, 고정 watermark 페이지 전체의 요청 결속·순서·본문·event ID 유일성, 안전 종료를 확인하는 통합 시험을 추가했다.
+- 첫 실행은 기대 capability 순서가 오래돼 실패했고, 수정 뒤 Rust current-status 검사기가 새 output API를 거절하는 실제 누락을 찾았다. Rust/TS current-status와 Electron system.ready 협상에 chat.appendMessage 바로 뒤 outputHead/outputPage의 정확한 쌍을 허용하도록 연결했다. 한쪽 누락/역순/중복/기준 capability 부재는 거절하고 기존 D1·기존 suffix는 보존한다.
+- stdio 통합 PASS(12.87초), Rust current-status 회귀 PASS, Node admission 6검사와 Electron 신규 출력/기존 로그인/설치 협상 3검사 PASS. TypeScript noEmit과 diff check도 PASS. 이는 개발 바이너리의 모의 공급자 시험이며 실제 계정 또는 Chromium paint/G6 합격은 아니다. 실제 화면 통합·release 거절 시험·제품 활성화/Windows/출시는 남는다. 사용자 DB·계정·패키지·main/push 없음.
+
+### 2026-10-27 · by Codex
+
 - 기준 fe7463b의 깨끗한 트리에서 재개했다. 이전 턴은 이관 취소·기존 예약 복구 구현/검증/커밋으로 진척이다. 독립 검토의 남은 증거를 보완해 데이터가 있는 legacy 예약에서 4개 transaction 취소 경계와 commit 후 admission 취소를 주입했다. 실패 handle은 쓰기 불가, commit 전은 V10 재열기, commit 후는 일반 입장 거절/V11 명시 재입장, run/대화 보존과 recoveryRequired 재열기를 모두 확인했다(PASS 12.84초).
 - `--stdio-agent-fixture long-stream`을 추가하고 FakeExact+LongStream에만 새 입장을 연결했다. 일반/native/다른 fixture 모드의 활성화는 하지 않았다. 임시 DB에서 fixture startup/restart 및 일반 모드의 V11 거절 회귀 PASS(0.83초). 실제 stdio 출력 페이지 왕복·renderer/G6는 아직 다음 통합 작업이다.
 - 독립 검토에서 CLI 인자가 배포 바이너리에서도 V11 이관을 열 수 있다는 P1을 찾아 해당 long-stream 인자를 debug assertions 빌드에만 넣었다. 재검토는 정적 경로상 P1 해소로 확인했다. 패키징은 `--release`이며 Cargo artifact의 debug_assertions=false까지 요구해 profile override/설정 누락을 거절한다(관련 Node 8검사 PASS). release CLI의 DB 생성 전 거절 black-box 회귀를 추가했으며 실행은 최종 release 검증 묶음에 남겼다. architecture에 개발 빌드 한정 모드와 재열기 제약을 기록했다. 사용자 DB/계정·패키지·main 병합/push 없음. diff check PASS.

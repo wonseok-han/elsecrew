@@ -681,12 +681,15 @@ export class SidecarClientV1 {
         }
         const hasLogin = advertisedReady.capabilities.at(-1) === "provider.login";
         if (hasLogin) {
-          if (advertisedReady.capabilities.at(-2) !== "chat.appendMessage") throw new Error("invalid login capability baseline");
           advertisedReady.capabilities = advertisedReady.capabilities.slice(0,-1);
         }
+        const hasOutput = advertisedReady.capabilities.at(-2) === "agent.outputHead"
+          && advertisedReady.capabilities.at(-1) === "agent.outputPage";
+        if (hasOutput) advertisedReady.capabilities = advertisedReady.capabilities.slice(0, -2);
         // The optional suffix extends an exact known baseline, never an arbitrary
         // subset of capabilities. Older sidecars remain usable without follow-up.
         const hasFollowup = advertisedReady.capabilities.at(-1) === "chat.appendMessage";
+        if ((hasLogin || hasOutput) && !hasFollowup) throw new Error("invalid output/login capability baseline");
         const rawReady = hasFollowup
           ? { ...advertisedReady, capabilities: advertisedReady.capabilities.slice(0, -1) }
           : advertisedReady;
@@ -705,6 +708,7 @@ export class SidecarClientV1 {
               : parseG5ReadyPayloadV1(rawReady);
         if (hasFollowup && !negotiatedG5DAgent && !negotiatedG5DProduct) throw new Error("follow-up requires storage admission support");
         const negotiatedReady = hasFollowup ? advertisedReady : ready;
+        if (hasOutput) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "agent.outputHead", "agent.outputPage"];
         if (hasLogin) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "provider.login"];
         if (hasApproval) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "run.approval"];
         if (hasCatalog) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "project.catalog"];
