@@ -10,6 +10,32 @@ use rusqlite::Connection;
 use tempfile::TempDir;
 
 #[test]
+fn durable_admission_upgrade_reopen_cancel_and_schema_rejection() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("upgrade.sqlite3");
+    let running = AtomicBool::new(false);
+    let cancelled = AtomicBool::new(true);
+    drop(Storage::open_for_admission(&path, &running).unwrap());
+    assert!(Storage::open_for_durable_admission(&path, &cancelled).is_err());
+    {
+        let old = Storage::open_for_admission(&path, &running).unwrap();
+        assert!(!old.uses_durable_output().unwrap());
+    }
+    {
+        let upgraded = Storage::open_for_durable_admission(&path, &running).unwrap();
+        assert!(upgraded.uses_durable_output().unwrap());
+    }
+    assert!(Storage::open_for_admission(&path, &running).is_err());
+    assert!(Storage::open_for_durable_admission(&path, &cancelled).is_err());
+    {
+        let reopened = Storage::open_for_durable_admission(&path, &running).unwrap();
+        assert!(reopened.uses_durable_output().unwrap());
+        reopened.connection.execute_batch("DROP INDEX run_output_item_order").unwrap();
+    }
+    assert!(Storage::open_for_durable_admission(&path, &running).is_err());
+}
+
+#[test]
 fn durable_fixture_open_migrates_reopens_and_does_not_enable_product_open() {
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("output.sqlite3");

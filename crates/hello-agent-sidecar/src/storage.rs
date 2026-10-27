@@ -123,6 +123,7 @@ pub struct Storage {
 enum StorageOpenMode {
     Legacy,
     Admission,
+    DurableAdmission,
 }
 
 #[derive(Debug)]
@@ -191,6 +192,43 @@ impl Storage {
     pub(crate) fn uses_durable_output(&self) -> Result<bool, SidecarError> {
         self.ensure_writes_admitted()?;
         Ok(storage_schema_version(&self.connection)? == Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11))
+    }
+
+    /// Prepared upgrade path. Product startup remains on `open_for_admission`
+    /// until migration/restart integration and activation review are complete.
+    #[allow(dead_code)]
+    pub(crate) fn open_for_durable_admission(
+        path: &Path,
+        cancellation: &AtomicBool,
+    ) -> Result<Self, SidecarError> {
+        let mut storage = Self::open_inner(path, cancellation, StorageOpenMode::DurableAdmission)?;
+        storage.writes_admitted = false;
+        ensure_admission_not_cancelled(cancellation)?;
+        if storage_schema_version(&storage.connection)? != Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11) {
+            // Verify the old ledger before committing its forward-only schema upgrade.
+            let mut session = reopen::snapshot::ReopenMaintenanceSession::start_for_admission(
+                &mut storage.connection,
+            )?;
+            loop {
+                ensure_admission_not_cancelled(cancellation)?;
+                match session.step(&mut || cancellation.load(Ordering::Acquire))? {
+                    reopen::snapshot::ReopenMaintenanceStep::Pending(_) => {}
+                    reopen::snapshot::ReopenMaintenanceStep::Cancelled => {
+                        return Err(SidecarError::new("storageAdmissionCancelled",
+                            "storage admission was cancelled before output migration"));
+                    }
+                    reopen::snapshot::ReopenMaintenanceStep::ReadyVerified(_) => break,
+                }
+            }
+            drop(session);
+            ensure_admission_not_cancelled(cancellation)?;
+            agent_output::schema::migrate(&mut storage.connection)?;
+        }
+        agent_output::schema::verify_admission(&mut storage.connection,
+            &mut || cancellation.load(Ordering::Acquire))?;
+        ensure_admission_not_cancelled(cancellation)?;
+        storage.writes_admitted = true;
+        Ok(storage)
     }
 
     #[cfg(test)]
@@ -386,6 +424,10 @@ impl Storage {
                 }
                 verify_schema_v10(&connection)?;
             }
+            Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11)
+                if matches!(mode, StorageOpenMode::DurableAdmission) => {
+                agent_output::schema::verify(&connection)?;
+            }
             Some(_) => {
                 return Err(SidecarError::new(
                     "storageSchemaMismatch",
@@ -405,11 +447,12 @@ impl Storage {
         // V9/V10 admission establishes the active plan's exact cutoff before its
         // bounded source/copy/projection scans. Legacy replay cannot interpret
         // a valid prefix-inserted or partially deleted V3 witness.
-        let exact_plan_admission = matches!(mode, StorageOpenMode::Admission)
+        let exact_plan_admission = matches!(mode, StorageOpenMode::Admission | StorageOpenMode::DurableAdmission)
             && matches!(
                 storage_schema_version(&connection)?,
                 Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
                     | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
+                    | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11)
             );
         if !exact_plan_admission {
             verify_projection_replay(&connection)?;
@@ -1701,7 +1744,7 @@ fn finish_v8_open_for_mode(
 ) -> Result<(), SidecarError> {
     match mode {
         StorageOpenMode::Legacy => verify_schema_v8_for_open(connection),
-        StorageOpenMode::Admission => {
+        StorageOpenMode::Admission | StorageOpenMode::DurableAdmission => {
             verify_schema_v8(connection)?;
             let mut session =
                 reopen::snapshot::ReopenMaintenanceSession::start_for_v8_admission(connection)?;
