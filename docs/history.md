@@ -2,10 +2,22 @@
 
 ### 2026-10-27 · by Codex
 
+- 이전 턴의 verified wait를 이어 변경후debug3,000출력 session90727의 정상종료를 확인했다. 결과PASS/exit0,413.27초다. 이전같은debug단독조건은600초한도초과602.95초FAIL이었으며 이번에는한도·프레임별안전검사를유지했다. 원본로그는 `.artifacts/m5-sidecar-integration/2026-10-27/codex-overlap.log`에보존한다. 단회비교이며G6 10회/50events·실제계정성능PASS는아니다.
+- 전체lib667PASS/9FAIL/43ignored에서관측한9실패는앞선8개focusedPASS와이번1개PASS로관련재검사를마쳤다. 변경후전체719개를재실행한결과로표현하지않으며43ignored검증은여전히별도다. 관련6개Git회귀·독립검토결과도유지한다.
+- 다음은clean현재소스패키지반영과G6의전체화면/메모리/스트림수집이다. 사용자계정·실제모델·Windows검증및출시결정은남는다. main병합/push없음.
+
+### 2026-10-27 · by Codex
+
+- 이전 턴은 remote동시검사8baf58e 커밋·관련6회귀/독립검토PASS·baseline release579.71초PASS로 진척이다. 변경후debug3,000출력 session90727을 같은handle로 확인했고 마지막poll에서도live다(verified wait). 현재500/72.22초,1,000/143.81초로 이전debug84.65/191.99초보다빠르지만 최종통과/안정적개선폭은아직미확정이다.
+- G6잔여항목을 절차와판정코드에대조했다. 전체패키지UI/메모리/4채팅스트림·경합/종료수집·Windows는남는다. 성능절차의오래된명령미등록문구를현행등록상태에맞췄고 COMMANDS_READY와전체PASS의구분·누락증거거절은유지했다. diff검사PASS.
+- 다음은 동일90727과 `/private/tmp/m5-codex-durable-overlap.log`의종료결과확인이다. 재시작·추가무거운작업·실계정호출·사용자DB·main병합/push없음. 현재패키지는01d2f19이며성능수정8baf58e의패키지반영은아직이다.
+
+### 2026-10-27 · by Codex
+
 - 이전 턴은 성능sample·remote동시검사 후보·날짜경계 아카이브로 진척이다. baseline release3,000출력 session44976이579.71초/PASS/exit0로 끝났다. 3초sample을 포함한 관측이며600초한도 여유는 작고 debug실패나G6성능 기준을 해소한 결과는 아니다. 원본로그/sample은 `.artifacts/m5-sidecar-integration/2026-10-27/codex-release-{baseline.log,sample.txt}`에 보존한다.
 - remote읽기를 기존HEAD/symbolic/fsck와 겹쳐 실행하되 동일1024B상한·각child deadline/회수·오류우선순위·뒤따르는write-tree/metadata검사를 유지했다. 프레임별검사나authority검증을 생략하지 않는다. remote자식의결과는 일찍수집하되 기존위치에서검사한다. 독립검토자는 이를 재확인해차단결함없음으로마쳤고, 속도효과는미입증임을명시했다.
 - HEAD/참조/객체/인덱스/remote/oversized-remote 변조거절PASS4.41초(session13674), Git자식경계/timeout/drop/회수5검사PASS0.52초, diff검사PASS. 기록과후보2파일을작업단위커밋한다. 이전같은날로그전체가아카이브에그대로포함됨을문자열대조했다.
-- 다음은 변경후debug3,000출력의동일조건검사로실제효과확인이다. 제품패키지는01d2f19기준을유지하며새성능후보는아직패키지미반영. 실계정/사용자DB·main병합/push없음. 최종앱/G6/Windows/출시는미완료다.
+- 8baf58e 커밋 후 변경된debug3,000출력 검사를 단독 실행했다(session90727, `/private/tmp/m5-codex-durable-overlap.log`). 다음은 이 동일handle의 종료 결과로 실제 효과를 확인하는 것이다. 제품패키지는01d2f19기준을유지하며새성능후보는아직패키지미반영. 실계정/사용자DB·main병합/push없음. 최종앱/G6/Windows/출시는미완료다.
 
 이전 워크로그: [2026-10-27 기록](archive/history-2026-10.md). 같은 날짜의 기록은 분할하지 않고 모두 이동했다.
 
@@ -20,7 +32,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **2026-10-27 현재 인계**: macOS V11 시작 이관은 사용자 승인 후01d2f19로 활성화했고 해당패키지PASS(059a42f 기록). 전체sidecar667PASS/9FAIL/43ignored 중8실패는focusedPASS, Codex3,000모의출력은debug단독600초timeout 미해결이다. release단독검사는579.71초PASS지만 debug시간초과는미해결이다. Git remote 동시검사는 관련6회귀/독립검토PASS이며 효과비교가남는다. 최신상세는현재워크로그와10월아카이브. G6/실계정/Windows/출시는미완료.
+- **2026-10-27 현재 인계**: macOS V11 시작 이관은 사용자 승인 후01d2f19로 활성화했고 해당패키지PASS(059a42f 기록). 전체sidecar667PASS/9FAIL/43ignored 중8실패는focusedPASS, Codex3,000모의출력은debug단독600초timeout 미해결이다. release기준검사는579.71초PASS이며 remote동시검사8baf58e 후 debug3,000출력도413.27초PASS다. 관련6회귀/독립검토PASS를유지하며G6전체성능증거는아니다. 최신상세는현재워크로그와10월아카이브. G6/실계정/Windows/출시는미완료.
 - **2026-10-23 장시간 단일 실행 방향 승인**: 4채팅×각3,000개 공개 이벤트를 여러 짧은 run이나 사용자 메시지로 대체하지 않는다. 출력 저장·조회·전송·표시 계약부터 재설계한다. 구현 전 제안과 L1~L5 순서는 `proposals/m5-long-running-agent-streams.md`; 수치·새 버전은 아직 미확정이며 제품 활성화/성능 합격을 뜻하지 않는다.
 
 - **과거 Codex 단건 복구 완료(2026-10-22)**: 사용자 명시 위험 수용 승인 후 test-only ignored 도구로 원장 배타 잠금·완료/manifest·정확 파일 신원·기록 프로세스 Gone을 재검증해107바이트 codex-login.pending1건을 제거했다. 감사 기록은 앱 데이터에 보존한다. 일반 legacy 자동 복구나 소급 binding 생성은 아니며 실제 로그인/모델 성공은 별도 확인해야 한다.

@@ -215,7 +215,7 @@ clean checkout에서 `pnpm run m5:measure:renderer`를 실행한다. 현재 prod
 }
 ```
 
-패키지 크기는 기존 `m5:test:package`가 담당한다. 현재 전체 UI·메모리·경합·종료 측정 수집기를 모두 연결하지 않았으므로 `m5:test:performance` 예약 게이트는 아직 열지 않는다. `harness:list`의 G6는 계속 NOT_READY이며 이 두 측정 도구만으로 출시를 승인하지 않는다.
+패키지 크기는 `m5:test:package`가 담당한다. `m5:test:performance`는 등록된 측정 판정 명령이지만 전체 UI·메모리·경합·종료 수집기는 아직 모두 연결되지 않았다. `harness:list`의 COMMANDS_READY는 명령 등록만 뜻한다. 실제 게이트는 누락되거나 현재 HEAD와 맞지 않는 증거를 NOT_READY로 거절하며, 부분 측정이나 명령 등록만으로 G6 완료·출시를 승인하지 않는다.
 
 ### 장시간 출력의 실행 중 화면 진단 (개발 빌드 전용)
 
