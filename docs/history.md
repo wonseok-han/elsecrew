@@ -1,6 +1,13 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 기준 `67edd78`의 깨끗한 통합 트리에서 재개했다. 이전 턴은 패키지 복구·덮어쓰기 방지·검사 계약 정정으로 진척이다. 이번에는 먼저 guard의 OS 프로세스 부재 결과를 확인한 뒤 누적 `pnpm m5:test:package`를 실행해 PASS(exit0,session15520)했다. 증거 `.artifacts/m5-g6-package/darwin-arm64-2026-10-27T03-21-39-608Z.json`: 동일 clean HEAD, package/smoke/ZIP/metrics 모두0, unpacked323,106,413 bytes·ZIP124,387,805 bytes로 기준 이내다. 전체G6/서명/배포 합격은 아니다.
+- 같은 패키지의 `--project` UI session56026은 두 차례 정상 종료했고 편집/diff·재시작 본문 유지·확인 취소 원본 불변·반영 별도동의/정확bytes·복원 별도동의/정확bytes·두 프로젝트 파일/채팅 분리를 확인했다. 원본은 이번 시험용 프로젝트만 사용했다. 초기 snapshot 관측624.89ms, 재시작307.37ms다.
+- 진단 상태는 FAIL(exit1)로 보존한다. 기능 오류는 없으나 idle RSS 최대438,173,696 bytes(417.875MiB), 재시작479,608,832 bytes(457.390625MiB)가400MiB를 초과했다. CDP 계측을 포함한 프로세스 전체 관측이며 누락값이나 합격으로 바꾸지 않는다. 다음은 이 메모리 초과의 프로세스별 비용과 렌더러/메인 부하를 확인하고 필요한 제품 수정이다. 장시간 출력 packaged 성능/native 활성화·실계정·Windows·출시도 남는다.
+- JSON/PNG/로그를 `.artifacts/m5-packaged-ui/D2WoFX`에 보존했다. 두 앱·seed·관측자손 PID 부재를 OS에서 확인한 뒤 임시 root를 삭제했고 복구된 앱/최신ZIP은 out에 유지했다. 실제 계정/모델·사용자 프로젝트·main병합/push 없음.
+
+### 2026-10-27 · by Codex
+
 - 기준 `9c244ef`에서 남은 개발/출시 게이트를 대조하고 최신 패키지 검증을 진행했다. 이전 턴은 실행 중 출력 진단 구현과12,000행 확인으로 진척이나 전체 G6는 아니다.
 - 작업 실수: 실행 프로세스 조회와 package 명령을 같은 호출에서 순서 실행하면서 조회 결과를 해석하기 전에 package를 시작했다. 기존 패키지 앱 PID27706/sidecar27722가 실행 중이었고 Forge가 old out bundle을 삭제했다. 중단 후 out8KiB와 생존 프로세스를 확인해 사용자에게 공개했다. 사용자 정상 종료/최신 패키지 복구 승인 뒤 NSRunningApplication.terminate가 true를 반환했고 root/helper/sidecar4개 PID 부재를 확인했다. 강제 종료·인증/사용자 프로젝트 변경은 하지 않았다.
 - 재발 방지: macOS Forge prePackage에서 `/bin/ps -axo pid=,comm=`로 대상 package 경로의 root/helper/sidecar를 검사한다. 파일이 이미 없어도 실행 경로를 검사하며 실패/빈 목록/파싱 오류는 거절한다. 자동 종료하지 않는다. 검사 후 사용자가 새로 실행하는 경쟁까지 막는 잠금은 아니다. 관련3테스트 PASS. 읽기 전용 독립 검토자1명은 hook 인자/실행 순서·거절 조건·capability 정정에 차단 결함 없음으로 확인했다(검사 재실행 없음).
