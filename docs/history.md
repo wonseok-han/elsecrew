@@ -1,6 +1,13 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 기준 2f9a3c1의 깨끗한 트리에서 재개했다. 이전 턴은 4채팅 stdio 12,000건 PASS/커밋으로 진척이다. `scripts/m5-durable-output-ui-smoke.cjs`를 추가해 임시 프로젝트/userData, 실제 개발 main/preload/renderer와 debug sidecar의 long-stream fixture를 연결했다. spawn은 정확한 개발 binary·인자·임시 cwd만 치환하며 실제 공급자/인증을 사용하지 않는다. Vite로 main/preload/renderer 개발 산출물을 갱신했다(패키징 없음).
+- 첫 KNnBrA 시험은 /var vs /private/var 경로 비교 오류로 sidecar 생성 전에 실패했다. canonical path 비교로 수정했고, 해당 시험 앱 PID28380만 SIGTERM으로 종료해 session93600 exit1을 확인했다. 기존 패키지 앱 PID27706/sidecar27722는 유지했다.
+- 수정 뒤 session8798은 exit0/정상 종료했다. 4채팅 각각 최신 200건(2801~3000)과 처음 100건(1~100)의 DOM 본문 일치, 원본 파일 불변을 확인했다. 최종 visibility=hidden이고 캡처는 초기 화면을 보여 paint 성공 증거가 아니다. 기존 결과 JSON의 PASS는 기능 DOM 범위에 한정하며 스크립트는 이후 hidden 결과를 functionalStatus=PASS/status=NOT_READY로 구분하도록 수정했다. G6/가시 화면 성능 합격 아님.
+- 승인 조회 agentApprovalChanged 로그는 fake run에 native approval queue가 없어서 발생하는 경로를 확인했다. 실제 공급자 종료 후 오류로 단정하지 않는다. 두 시험 root의 결과 JSON/PNG만 `.artifacts/m5-durable-output-ui/{KNnBrA,6Nx0ii}`에 보존하고, 프로세스 종료 확인 후 임시 DB/프로젝트 약18MiB를 정리했다. 문법·diff 검사 PASS. 실제 화면 가시성/스크롤·성능, release 검증과 제품 활성화/Windows/출시는 남는다. main 병합/push 없음.
+
+### 2026-10-27 · by Codex
+
 - 기준 21b1a2d의 깨끗한 트리에서 재개했다. 이전 턴은 출력 capability 협상 결함 수정과 단일 stdio 3,000건 통합 PASS/커밋으로 진척이다. 기존 4채팅 stdio 준비를 재사용해 LongStream 모드의 독립 실행 4개를 시작하고, 각 결속/전송 순서/head·봉인/cleanExit 및 각 3,000행의 고정 watermark 페이지·본문·전역 event ID 유일성을 검사하도록 확장했다. 기존 짧은 fixture 시험은 유지한다.
 - `four_chat_durable_streams_page_twelve_thousand_outputs` PASS(50.43초), peak_active=4. 총 12,000개를 각 실행 페이지로 조회했고 chat.get에는 진행 본문을 중복 저장하지 않는 초기 메시지 1개만 남는 것을 확인했다. 원본 파일 불변·safeToQuit/child 정상 종료 뒤 해당 시험 root를 삭제했다. diff check PASS.
 - 이 결과는 개발 sidecar의 실제 JSONL 통신·저장/조회 증거이며 50events/s 발행/60초 paint, Chromium/G6 메모리 또는 실제 공급자 계정 증거가 아니다. 다음은 실제 renderer의 출력 페이지·채팅 전환·이전 기록·스크롤과 성능 수집 연결이다. release 거절 시험·제품 활성화·Windows·출시는 여전히 남는다. 사용자 DB/계정·패키지·main 병합/push 없음.
