@@ -29,7 +29,7 @@ const expectedProductCapabilities = process.platform === "darwin"
   ? G5D_NATIVE_CAPABILITIES_V1
   : storageStatusD1Manifest.modes?.generalProduct?.d1Capabilities;
 const expectedCurrentCapabilities = [...expectedProductCapabilities,
-  "chat.appendMessage", "provider.login", "run.approval", "project.catalog", "provider.install"];
+  "chat.appendMessage", "agent.outputHead", "agent.outputPage", "provider.login", "run.approval", "project.catalog", "provider.install"];
 const g5dAdmissionManifest = JSON.parse(await readFile(resolve(root, "tests/fixtures/m5/g5d-admission-v1/manifest.json"), "utf8"));
 const verifyingStatusFixture = g5dAdmissionManifest.systemStatusCases.find(({ value }) => value.storageAdmission?.state === "verifying")?.value;
 const failedStatusFixture = g5dAdmissionManifest.systemStatusCases.find(({ value }) => value.storageAdmission?.state === "failed")?.value;

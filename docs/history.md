@@ -1,6 +1,14 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 기준 `9c244ef`에서 남은 개발/출시 게이트를 대조하고 최신 패키지 검증을 진행했다. 이전 턴은 실행 중 출력 진단 구현과12,000행 확인으로 진척이나 전체 G6는 아니다.
+- 작업 실수: 실행 프로세스 조회와 package 명령을 같은 호출에서 순서 실행하면서 조회 결과를 해석하기 전에 package를 시작했다. 기존 패키지 앱 PID27706/sidecar27722가 실행 중이었고 Forge가 old out bundle을 삭제했다. 중단 후 out8KiB와 생존 프로세스를 확인해 사용자에게 공개했다. 사용자 정상 종료/최신 패키지 복구 승인 뒤 NSRunningApplication.terminate가 true를 반환했고 root/helper/sidecar4개 PID 부재를 확인했다. 강제 종료·인증/사용자 프로젝트 변경은 하지 않았다.
+- 재발 방지: macOS Forge prePackage에서 `/bin/ps -axo pid=,comm=`로 대상 package 경로의 root/helper/sidecar를 검사한다. 파일이 이미 없어도 실행 경로를 검사하며 실패/빈 목록/파싱 오류는 거절한다. 자동 종료하지 않는다. 검사 후 사용자가 새로 실행하는 경쟁까지 막는 잠금은 아니다. 관련3테스트 PASS. 읽기 전용 독립 검토자1명은 hook 인자/실행 순서·거절 조건·capability 정정에 차단 결함 없음으로 확인했다(검사 재실행 없음).
+- 승인된 복구 build 성공으로 out의 앱309MiB를 복원했다. 첫 smoke는 새 `agent.outputHead`/`agent.outputPage`가 expected capability 목록에 없어 실패했다. 실제 lib.rs의 고정 순서와 대조해 검사 목록에 정확한 두 항목을 추가했으며 같은 패키지 smoke 재실행 PASS, status-validator 회귀 PASS. 최신 제품 자동 V11 활성화는 하지 않았다. 전체 clean-HEAD package gate/GUI/G6/실계정/Windows/출시 합격은 아니다.
+- 중단/실패/복구 로그는 `.artifacts/m5-package-recovery/2026-10-27`에 보존했다. electron-packager 임시 경로는0B이며 사용자용 복구 앱은 out에 유지한다. 다음은 clean commit의 누적 패키지/G6와 native 실계정 검증이다. main 병합/push 없음.
+
+### 2026-10-27 · by Codex
+
 - 기준 `90cb727`에서 재개했다. 이전 턴은 중복 head 조회 제거/회귀/커밋으로 진척이다. `m5-durable-output-ui-smoke.cjs --live`를 연결해 종료 후 조회뿐 아니라 네 단일 실행의 진행 중 채팅 전환과 각12초 표시 갱신을 관측한다. observer의 bounded snapshot을 재사용하며 한 번 영역을 보여준 뒤 강제 스크롤 반복 없이 head/행 증가·최신 가시성·누락을 확인한다. 제품 안전/활성화는 변경하지 않는다.
 - debug sidecar build·JS 문법·diff 검사 PASS. session38057은 exit0/정상 종료/기능 PASS, 네 live 구간 head68/40/40/27개·frame30/22/26/31개·최신 가시성 모두 확인했다. 전체12,000기록·이전/최신 이동 성공. 다만 창 숨김 이력이 있어 전체 NOT_READY를 유지한다. peakRSS527.515625MiB는 개발 진단이며 G6 메모리 합격이 아니다.
 - 선택 직후 과거 페이지부터 따라잡아 frame 표본의 생성→표시 최대4.66/19.37/34.51/51.13초가 관측됐다. 이는 오래된 출력 재표시를 포함하므로 live eventPaint 값으로 오인하지 않는다. 실시간 표본과 catch-up의 구분, packaged G6/전체 성능 증거는 남는다. 기능 PASS를 제품 완료로 확대하지 않는다.

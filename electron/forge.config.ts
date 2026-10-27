@@ -5,6 +5,7 @@ import { VitePlugin } from "@electron-forge/plugin-vite";
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertPackageNotRunning } from "../scripts/m5-package-live-guard.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -36,6 +37,9 @@ export default {
     }),
   ],
   hooks: {
+    prePackage: async (_config: unknown, platform: string, arch: string) => {
+      assertPackageNotRunning(resolve(root, "out", `hello-agent-${platform}-${arch}`));
+    },
     packageAfterCopy: async (_config: unknown, buildPath: string) => {
       const resourcesDirectory = resolve(buildPath, "..");
       const stage = spawnSync(process.execPath, ["scripts/m5-stage-sidecar.mjs", resourcesDirectory], {

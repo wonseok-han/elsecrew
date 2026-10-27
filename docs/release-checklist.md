@@ -76,6 +76,8 @@ Hello, Agent의 설치 파일을 베타 또는 정식 버전으로 배포하기 
 
 ## 6. M5 Electron 후보의 추가 게이트
 
+macOS 패키징 전에는 실행 중인 해당 `out/hello-agent-<platform>-<arch>` 앱을 정상 종료한다. Forge `prePackage`는 해당 경로의 앱/sidecar/helper 실행 파일을 OS 목록에서 발견하거나 목록 확인에 실패하면 교체를 거절한다. 자동 종료는 하지 않으며, 검사 이후 새로 실행되는 경쟁까지 막는 OS 잠금은 아니므로 빌드 동안 그 앱을 다시 열지 않는다.
+
 위 Tauri 배포 기록을 Electron 후보의 합격으로 대신하지 않는다. 현재 상태는 `history.md`·`architecture.md`, 수치는 `proposals/m5-electron-spike.md` §9–13과 `procedures/m5-performance.md`를 따른다. 아래는 남은 증거 요구이며 완료 표시가 아니다.
 
 원격 검증 준비: `.github/workflows/m5-package-diagnostic.yml`은 수동 실행 전용 macOS/Windows Electron ZIP 빌드·패키지 자산/fuse·sidecar protocol 확인 경로다. 미서명 진단 ZIP은3일만 보관하며 release 게시·실제 계정/모델 호출은 하지 않는다. push/원격 실행은 사용자 승인 뒤 수행한다. 이 작업의 성공만으로 Windows UI/자손 안전·서명·G6/출시 합격을 주장하지 않는다. 기존 Tauri CI/배포와 별개다.
