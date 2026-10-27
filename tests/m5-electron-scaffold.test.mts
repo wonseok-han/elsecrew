@@ -17,7 +17,7 @@ test("패키지 smoke는 플랫폼별 native/product capability 순서를 exact 
   assert.match(smoke, /await import\("\.\.\/src\/m5\/contracts\/agent-adapter-v1\.ts"\)/);
   assert.match(smoke, /const expectedProductCapabilities = process\.platform === "darwin"\s*\? G5D_NATIVE_CAPABILITIES_V1\s*: storageStatusD1Manifest\.modes\?\.generalProduct\?\.d1Capabilities/);
   assert.match(smoke, /assert\.deepEqual\(ready\.payload\.capabilities, expectedCurrentCapabilities\)/);
-  assert.match(smoke, /"chat\.appendMessage", "provider\.login", "run\.approval", "project\.catalog", "provider\.install"\]/);
+  assert.match(smoke, /"chat\.appendMessage", "agent\.outputHead", "agent\.outputPage", "provider\.login", "run\.approval", "project\.catalog", "provider\.install"\]/);
   assert.match(smoke, /expectedProductCapabilities\.at\(-1\) === "storage\.status"/);
   assert.match(smoke, /assert\.equal\(status\.result\.state, "shellReady"\)/);
   assert.match(smoke, /await waitForStorageReady\(/);
@@ -104,8 +104,8 @@ test("M5 Electron 의존성과 명령은 Forge 8 alpha exact pin 및 실제 명�
   assert.match(source("electron/preload.ts"), /ipcRenderer\.on\(M5_BRIDGE_V5_CHANNELS\.agentRunStateChanged/);
   assert.match(source("electron/preload.ts"), /validateAgentRunStateChangedV1\(payload\.event\)/);
   assert.match(source("electron/preload.ts"), /validateAgentPublicEventV1\(payload\.event\)/);
-  assert.match(source("electron/preload.ts"), /const bridge: M5BridgeV7 = Object\.freeze\(\{/);
-  assert.match(source("electron/preload.ts"), /version: 7/);
+  assert.match(source("electron/preload.ts"), /const bridge: M5BridgeV8 = Object\.freeze\(\{/);
+  assert.match(source("electron/preload.ts"), /version: 8/);
   assert.match(source("electron/preload.ts"), /getStorageStatus: \(input\) => ipcRenderer\.invoke\(M5_BRIDGE_V6_CHANNELS\.storageGetStatus, validateStorageStatusRequestV1\(input\)\)/);
   assert.match(source("electron/main.ts"), /ipcMain\.handle\(M5_BRIDGE_V6_CHANNELS\.storageGetStatus/);
   assert.match(source("pnpm-workspace.yaml"), /^nodeLinker: hoisted$/m);

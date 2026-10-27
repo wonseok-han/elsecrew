@@ -1,6 +1,20 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 기준 `3de43ae`와 승인 대기 중인 native durable 후보3개 Rust 파일을 보존하고, 독립적인 프런트/IPC 누적 회귀를 수행했다. 이전 턴은 후보 구현·임시 migration검사·독립 검토로 진척이며 사용자 활성화 응답은 아직 없다. 패키지/일반 실행 파일 재빌드와 사용자 DB 실행은 하지 않았다.
+- `npm test` 최초596개 중12실패: scaffold가 outputHead/Page capability와 bridge V8을 반영하지 못했고, 보안 VM의 가짜 IPC 모듈에 V8이 없어 main 초기화가 실패했다. V8 채널과 output 구독/조회 fake를 추가하고 exact 기대값을 현재 계약에 맞췄다. 거절 조건이나 assertion을 없애지 않았으며 출력 head/page 두 채널의 외부 frame 거절과 sidecar 미호출 검사를 추가했다.
+- 관련16검사 PASS 뒤 전체 `npm test` 재실행597/597 PASS(34.52초,session46018), diff check PASS. 최초/수정/최종 로그를 `.artifacts/m5-frontend-integration/2026-10-27`에 보존한다. 이 결과는 Rust 전체/실계정/G6/제품 활성화 합격이 아니다.
+- 이번 커밋은 테스트2파일과 작업 기록만 포함한다. native 저장 형식 연결 Rust3파일은 승인 대기 미커밋으로 남긴다. 메모리·packaged 장시간 출력·실제 공급자·Windows·출시 검증은 여전히 남는다. main병합/push 없음.
+
+### 2026-10-27 · by Codex
+
+- 기준 `3de43ae`에서 재개했다. 이전 턴은 무계측 seeded 진단과 종료 식별 수정으로 진척이며 메모리 실패는 미해결이다. 시작 화면/main 자산 전송·장치 조회·provider polling을 확인했으나400MiB 초과를 설명할 확정적인 대형 중복 보관은 찾지 못했다. 기능/보안 설정이나 성능 기준을 임의 축소하지 않았다.
+- 장시간 출력의 일반 macOS 연결 후보를 워킹 트리에 준비했다. `uses_durable_output`은 macOS NativeProviders와 기존 두 long fixture만 V11의 검증된 migration/admission 경로로 보낸다. blocked/Windows·일반 fake는 기존 경로다. 제품 패키지/일반 debug binary는 재빌드하지 않았고 사용자 DB·계정으로 실행하지 않았다. 후보 patch는 `.artifacts/m5-durable-activation/activation.patch`; 활성화 승인 전 커밋/배포하지 않는다.
+- 컴파일에서 기존 fixture 경계 테스트의 옛 메서드 참조를 찾아 갱신했다. 임시 V10→native V11 admission→reopen 및 기존 cancel/schema rejection2검사PASS1.95초, populated legacy/new reservation의 취소 경계·재시작 복구PASS19.12초, runtime scope PASS0.01초, long fixture재열기·blocked V11거절PASS2.13초. 실제 공급자를 시작하지 않은 lib 테스트이며 장시간 실계정 성공이나G6합격은 아니다. 변경 함수 rustfmt/diff검사PASS.
+- 독립 검토자1명은 scoped macOS 연결에 새 코드 차단 결함 없음으로 확인했다(검사 재실행 없음). 실제 공급자 실행이 아니라 첫 앱 시작에서 V10→V11 이관되고 구버전이 거절하며 downgrade 경로가 없다는 호환 경계를 사용자 승인에 명시한다. 기존 기록 삭제는 없고 원본 보호·종료/poison·인증/모델 실행 승인은 유지한다. 실제 공급자 장시간 출력·성능/메모리·Windows·출시는 미완료다. main병합/push 없음.
+
+### 2026-10-27 · by Codex
+
 - 기준 `dfc2343`에서 메모리 실패를 조사했다. 이전 턴은 최신 패키지 gate와 실제 편집/반영/복원 수명주기 증거 확보로 진척이다. D2WoFX peak의 main/GPU/network/renderer/sidecar는146.59/86.81/39.45/128.23/16.78MiB, 재시작164.64/94.50/44.44/136.30/17.52MiB다. renderer JS used heap3~4MiB만으로 전체RSS 원인을 단정하지 않는다.
 - 동일 제품 패키지 `--no-cdp` 빈 프로필 session35792는382.8125MiB, exit2/NOT_READY/정상 종료였다. 기존 실패는 프로젝트 seed가 있어 직접 비교하지 않고 `--no-cdp-project` 모드를 추가했다. 기존 두 프로젝트 seed와 무디버깅 관측을 결합하며 사용자 프로젝트/편집/반영/모델 호출은 없다. 제품 코드나400MiB 기준은 바꾸지 않는다.
 - 첫 seeded 시험session3270은399.140625MiB였으나 진단 종료 검사가 seed+app의 두 인스턴스를 fresh1개로 오인해FAIL했다. seed가 자신의 sidecar ID를 반환하고 종료 검사가 exact seed와 앱을 분리·둘 다clean marker를 요구하도록 수정했다. 실패 증거는 그대로 보존했다. 재시험session4972는 종료 확인 성공,410.21875MiB로 메모리FAIL(exit1)이므로 CDP만의 문제/메모리 해결을 주장하지 않는다. JS문법/diff검사PASS. 누적 반복 측정·G6 메모리는 미완료다.

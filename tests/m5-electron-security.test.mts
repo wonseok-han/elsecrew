@@ -10,7 +10,7 @@ import * as modelChoicesContract from "../src/m5/contracts/model-choices-v1.ts";
 import * as deviceReportContract from "../src/m5/contracts/device-report-v1.ts";
 import * as sessionDiagnosticsContract from "../src/m5/contracts/session-diagnostics-v1.ts";
 import * as loginDiagnostic from "../src/m5/provider-login-diagnostic.ts";
-import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS, M5_BRIDGE_V7_CHANNELS } from "../electron/ipc-channels.ts";
+import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS, M5_BRIDGE_V7_CHANNELS, M5_BRIDGE_V8_CHANNELS } from "../electron/ipc-channels.ts";
 
 const require = createRequire(import.meta.url);
 const typescript = require("typescript") as typeof import("typescript");
@@ -73,6 +73,20 @@ test("main-process IPC accepts only the current main frame at the exact allowed 
     harness.window.webContents.mainFrame.url = spoofedOrigin;
     await assertRejectedWithoutSidecar(handler, harness.currentEvent(), harness);
   }
+});
+
+test("output head/page IPC rejects foreign frames before reaching sidecar", async () => {
+  const harness = await loadMain();
+  for (const channel of [M5_BRIDGE_V8_CHANNELS.agentOutputHead, M5_BRIDGE_V8_CHANNELS.agentOutputPage]) {
+    const handler = harness.handlers.get(channel);
+    assert.ok(handler);
+    await assertRejectedWithoutSidecar(handler, { sender: {}, senderFrame: {} }, harness);
+    await assertRejectedWithoutSidecar(handler, {
+      sender: harness.window.webContents,
+      senderFrame: { url: harness.window.webContents.mainFrame.url },
+    }, harness);
+  }
+  assert.deepEqual(harness.sidecarCalls, []);
 });
 
 test("dev server IPC permits only its configured origin and rejects credential spoofing", async () => {
@@ -246,6 +260,9 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
     onChatEvent() {}
     onAgentPublicEvent() {}
     onAgentRunStateChanged() {}
+    onAgentOutputAvailable() {}
+    async getAgentOutputHead() { sidecarCalls.push("getAgentOutputHead"); return null; }
+    async getAgentOutputPage() { sidecarCalls.push("getAgentOutputPage"); return { rows: [] }; }
     async start() {}
     async login() {
       sidecarCalls.push("login");
@@ -340,7 +357,7 @@ function moduleFor(
   if (specifier === "node:path" || specifier === "node:url") return require(specifier);
   if (specifier.endsWith("lifecycle-v1.ts")) return { M5_INTERNAL_CHANNELS_V1 };
   if (specifier === "./ipc-channels.ts") {
-    return { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS, M5_BRIDGE_V7_CHANNELS };
+    return { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS, M5_BRIDGE_V7_CHANNELS, M5_BRIDGE_V8_CHANNELS };
   }
   if (specifier === "./event-credit.ts") return { EventCreditV1: fakes.FakeEventCredit };
   if (specifier === "./quit-coordinator.ts") return { QuitCoordinatorV1: fakes.FakeQuitCoordinator };
