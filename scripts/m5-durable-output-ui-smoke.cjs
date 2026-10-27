@@ -6,6 +6,7 @@ const path = require('node:path');
 const cp = require('node:child_process');
 const assert = require('node:assert/strict');
 const { installOutputObserver } = require('./m5-durable-output-observer.cjs');
+const { createLiveOutputLatency } = require('./m5-live-output-latency.cjs');
 const { observeStdio } = require('./m5-stdio-observer.cjs');
 if (process.platform !== 'darwin' || app.isPackaged) throw new Error('Development macOS diagnostic only');
 const live = process.argv.includes('--live');
@@ -121,7 +122,7 @@ app.on('browser-window-created', (_event, window) => {
       await wait("document.querySelectorAll('.m5-chat-chip').length === 4");
       await run("document.querySelector('.m5-chat-chip').click()");
       await wait("!!document.querySelector('#m5-followup-text')");
-      await run(`globalThis.outputObservation = (${installOutputObserver.toString()})(); void 0`);
+      await run(`globalThis.outputObservation = (${installOutputObserver.toString()})((${createLiveOutputLatency.toString()})); void 0`);
       await run(`(async () => {
         const api = window.m5;
         const capability = await api.getAgentCapabilities({runtime:'claude-code',refresh:true});

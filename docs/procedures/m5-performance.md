@@ -224,3 +224,5 @@ clean checkout에서 `pnpm run m5:measure:renderer`를 실행한다. 현재 prod
 `liveWindows`에는 선택한 run, 관측 시간, head/화면 표본, 누락 카운터가 남는다. 생성 시각과 화면 시각의 차이에는 채팅 전환 후 과거 기록을 따라잡는 시간이 포함되므로 이를 곧바로 live eventPaint 지연으로 집계하지 않는다. 비선택 채팅의 paint나 물리 compositor 표시를 입증하지 않는다. 숨김 이력이 있으면 기능 성공이어도 전체 상태는 NOT_READY다. 결과는 `diagnostic:true, gateEligible:false`이며 정식 패키지/10회 G6 수집을 대체하지 않는다. 정상 종료와 OS 프로세스 부재를 확인한 뒤 작은 JSON/PNG만 보존하고 해당 시험 root를 정리한다.
 
 `--no-cdp-project`는 `--no-cdp`와 같은 디버깅 서버 없는 관측에 `--project`의 생성된 두 프로젝트 seed를 결합한다. 사용자 데이터는 쓰지 않으며 편집/반영/복원은 실행하지 않는다. 시작 화면 준비 표식 후40개 RSS 표본을 수집하고 별도 정상 종료를 기다린다. `seededProjectBaseline:true`로 빈 프로필과 구별한다. 같은 package의 프로젝트 baseline 비교를 돕지만, 단발 차이를 CDP 비용의 인과적/통계적 증명이나 전체 G6 합격으로 사용하지 않는다.
+
+`m5-durable-output-observer.cjs`의 `liveLatency`는 선택된 실행이 최신 head까지 따라잡은 뒤 도착한 새 알림만 대상으로 한다. 같은 선택 구간의 두 RAF 뒤 보이는 출력 순서가 알림 순서와 정확히 일치할 때 `notificationToFrameMs`를 기록한다. 채팅 전환·숨김·보이지 않는 출력은 구간을 끊고 다시 따라잡아야 한다. 더 최신 행으로 합쳐져 정확한 행 표시를 확인하지 못한 알림은 `superseded`, 구간 중단은 `interrupted`, 남은 알림은 `unfinished`, 수집 상한은 `dropped`로 남긴다. 이들을 0으로 바꾸거나 측정된 일부 표본만으로 전체 이벤트 paint 성공을 선언하지 않는다. 최대 대기256개·보존1024표본이며 기존 생성→화면 관측과 별도다. 실제 모델/commit 지연이나 전체G6 수집을 대체하지 않는다.

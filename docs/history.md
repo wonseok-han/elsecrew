@@ -2,9 +2,16 @@
 
 ### 2026-10-27 · by Codex
 
+- 이전 턴은3,000출력debug413.27초PASS와6a0a553패키지PASS로진척이다. 현재제품소스는변경하지않고 남은화면성능수집의실시간지연경계를보완했다. 기존생성→화면측정은채팅선택후history추격시간을포함하므로G6실시간지연으로사용하지않는다.
+- 새 `m5-live-output-latency.cjs`를개발UI관측기에직렬화해연결했다. 선택된run이head까지따라잡은뒤도착한알림만arm하고, 동일선택epoch·정확한sequence·가시성·두RAF검증뒤표본을남긴다. coalesced/switch/pending/overflow는각각superseded/interrupted/unfinished/dropped로명시한다. 대기256·보존1024상한이며제품bridge/원장권한은변경하지않았다.
+- 과거추격제외·선택/숨김epoch·중복알림/합쳐진행·상한4검사PASS, JS문법/diff검사PASS. 실제GUI새계측실행은아직이며개발진단을정식패키지/G6증거로승격하지않았다. 절차문서에경계를기록했다.
+- 다음은새계측의실제개발화면실행과정식패키지성능수집연결이다. 전체G6/메모리기준/실계정/Windows/출시는미완료다. 실계정·사용자DB·main병합/push없음.
+
+### 2026-10-27 · by Codex
+
 - 이전 턴의 verified wait를 이어 변경후debug3,000출력 session90727의 정상종료를 확인했다. 결과PASS/exit0,413.27초다. 이전같은debug단독조건은600초한도초과602.95초FAIL이었으며 이번에는한도·프레임별안전검사를유지했다. 원본로그는 `.artifacts/m5-sidecar-integration/2026-10-27/codex-overlap.log`에보존한다. 단회비교이며G6 10회/50events·실제계정성능PASS는아니다.
 - 전체lib667PASS/9FAIL/43ignored에서관측한9실패는앞선8개focusedPASS와이번1개PASS로관련재검사를마쳤다. 변경후전체719개를재실행한결과로표현하지않으며43ignored검증은여전히별도다. 관련6개Git회귀·독립검토결과도유지한다.
-- 다음은clean현재소스패키지반영과G6의전체화면/메모리/스트림수집이다. 사용자계정·실제모델·Windows검증및출시결정은남는다. main병합/push없음.
+- 6a0a553 cleanHEAD에서 package guard로기존앱부재를확인한뒤 `pnpm m5:test:package` PASS(exit0,session47018)했다. 수정된소스가out앱/ZIP에반영됐으며 증거는 `.artifacts/m5-g6-package/darwin-arm64-2026-10-27T04-32-35-185Z.json`이다. 다음은G6의전체화면/메모리/스트림수집이다. 사용자계정·실제모델·Windows검증및출시결정은남는다. main병합/push없음.
 
 ### 2026-10-27 · by Codex
 
