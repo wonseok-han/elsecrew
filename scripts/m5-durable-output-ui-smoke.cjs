@@ -107,6 +107,10 @@ app.on('browser-window-created', (_event, window) => {
       })()`);
       for (let index = 0; index < 4; index++) {
         await run(`[...document.querySelectorAll('.m5-chat-chip')].find(b => b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}').click()`);
+        // Every chat has identical output text. Wait for the selected run and the
+        // async chat load, not just rows that may still belong to the prior chat.
+        await wait(`document.querySelector('.m5-durable-output select')?.value === outputSmokeRuns[${index}].runId &&
+          [...document.querySelectorAll('.m5-chat-chip')].some(b => b.getAttribute('aria-current') === 'true' && !b.disabled && b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}')`);
         await wait("[...document.querySelectorAll('.m5-output-scroll article pre')].length === 200 && document.querySelector('.m5-output-scroll article:last-child pre')?.textContent === 'output 3000'", 240000);
         const visible = await run("[...document.querySelectorAll('.m5-output-scroll article pre')].map(e => e.textContent)");
         assert.deepEqual(visible, Array.from({length:200}, (_, i) => `output ${2801+i}`));

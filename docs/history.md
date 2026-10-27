@@ -1,6 +1,12 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 기준 beaed3d의 깨끗한 트리에서 재개했다. 이전 턴은 UI 스크롤 실패 증거/진단 추가로 진척이다. session67163 재현은 세 번째 채팅의 첫 기록 대기 후 최신2801~3000/top6738로 돌아간 상태를 수집했다(exit1/정상 종료). 같은 본문을 내는 네 채팅에서 시험이 전환 전 DOM을 다음 채팅 결과로 잘못 받아들이는 경주를 확인했다.
+- 시험을 선택 실행 ID와 aria-current 채팅/전환 완료(!disabled)를 기다리도록 수정했다. session88840 exit0/정상 종료, 네 채팅 모두 최신200건·처음100건·다음100건·기록 상단·최신 하단 복귀를 통과했다(functionalStatus=PASS). 제품 스크롤 코드 수정 없이 해당 실패가 해소됐다. 다만 visible→hidden 전환이 있어 전체 status=NOT_READY이며 paint/G6 합격은 아니다.
+- 두 결과는 `.artifacts/m5-durable-output-ui/{7vP20q,cu6d9A}`에 보존하고 OS에서 시험 프로세스 부재를 확인한 뒤 임시 root를 정리했다. 문법/diff 검사 PASS, 실제 모델/사용자 인증/프로젝트 변경 없음. 다음은 가시 화면의 지속 출력/스크롤·메모리/G6 통합, release 거절 증거와 장시간 출력 제품 활성화 검토이며 Windows/출시는 미완료다. main 병합/push 없음.
+
+### 2026-10-27 · by Codex
+
 - 기준 cb475eb의 깨끗한 m5/coding-agent-ide에서 재개했다. 이전 턴은 개발 renderer/IPC 출력 조회 증거와 시험 도구 추가로 진척이다. 출력 UI 진단에 visibility 전환 이력, 첫 기록 상단·다음 100건·최신 200건 복귀/하단 검사를 추가했다. 중간 hidden 이력도 전체 visible PASS에서 제외한다.
 - 임시 프로젝트/가짜 공급자로 session60629를 실행했다. 4채팅 중 3개는 첫/다음 페이지와 최신 하단 복귀 검사를 통과했지만 마지막 채팅의 첫 기록 scrollTop=0 대기가 timeout됐다. 프로세스는 exit1/정상 종료 accepted다. 이 결과는 FAIL이며 scroll 위치 원인은 아직 미확정이다. 실패 시 visibility/scroll 치수·첫/끝 본문을 수집하도록 추가해 다음 진단에서 제품 결함과 hidden/layout 영향을 구분한다. 이 진단 추가는 아직 재실행 전이다.
 - 결과 JSON은 `.artifacts/m5-durable-output-ui/kdbjri/`에 보존했고 OS에서 시험 프로세스 부재를 확인한 뒤 임시 root를 삭제했다. 사용자 인증/프로젝트·실제 모델 호출은 사용하지 않았다. 문법/diff 검사 PASS. 장시간 출력 제품 활성화·실제 가시 화면/G6·release/Windows/출시는 미완료다. main 병합/push 없음.
