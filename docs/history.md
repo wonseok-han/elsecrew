@@ -1,6 +1,13 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 기준1fd55db의 깨끗한 트리에서 재개했다. 이전 턴은 일정 속도12,000출력 생성·저장/수신 근거와 지연 발견으로 진척이다. stdio 루프의 고정100ms recv 대기와 poll완료 기준 재설정이 처리시간 위에 추가 대기를 붙이는 것을 확인했다. 기존100ms 간격은 유지하되 poll시작부터 elapsed를 빼고 남은 시간만 기다리도록 수정했다. 응답→이벤트 순서·입력 bounded channel·안전 검사·maintenance는 유지한다.
+- 기존 독립 검토자1명은 zero-wait에서도 입력/취소/EOF가 먼저 관측되고 admission/maintenance 경로가 유지돼 추가 차단 결함 없음으로 보고했다. 연속 요청 중 진행 회귀 PASS2.53초, 취소 중 status/quit 비차단 회귀 PASS2.89초. diff check PASS.
+- 동일 --paced UI 시험session80797은 exit0/전 구간visible/네 채팅3,000개씩60초 내생성·전체페이지·최신노출 PASS했다. 같은 head-sequence 대조 수신지연p95는 이전332.8/97.1/257.3/178.6ms에서78.7/47.6/115.4/143.6ms로 감소(각1회 비교), 최대232.7ms. 생성→head 수신 측정이며100ms paint/G6 완료가 아니다. peakRSS583.921875MiB/frame100으로 관측됐으며 idle기준/통계적 성능보장으로 인용하지 않는다.
+- 증거/PNG/summary/회귀로그는 `.artifacts/m5-durable-output-ui/UiIDGl`에 보존했다. 정상 종료/OS프로세스 부재 확인 뒤 임시 root를 삭제했다. 다음은 남은 직렬 처리/화면지연·packaged G6와 native 실제 계정/활성화이며 Windows/출시는 미완료다. 실제 모델/사용자프로젝트·main병합/push 없음.
+
+### 2026-10-27 · by Codex
+
 - 기준8498db8의 깨끗한 트리에서 재개했다. 이전 턴은 프레임/RSS 수집과 최신 출력 가시 확인으로 진척이다. debug 전용 paced-long-stream을 추가했다. 각 단일 실행에서20ms 절대 목표 시각으로3,000건을 생성하고 본문에 생성 직전 monotonic elapsed/Unix 시각을 함께 저장한다. 지연 시 catch-up도 실제 시각으로 드러나며 일반/native 활성화·기존 burst fixture는 유지한다.
 - UI 진단 --paced는 전체12,000행의 순서/생성 표본을 공개 page API로 다시 읽고, 관측기는 같은 출력의 시각을 보존한다. cargo check --tests/build PASS, JS문법·직렬화된 생성표본 regex·diff PASS. session37539 exit0/전 구간visible/네 채팅 기록·최신 노출 PASS. 모두60초 내3,000건, 마지막59,980.750~59,984.523ms, 최대간격25.004ms/최대 목표 지연5.671ms다.
 - 출력head493/frame100, drop0/수집오류0/최대RSS534.4375MiB. 같은 호스트 wall clock과 각 head의 committedSequence를 생성표본에 대조한 수신지연p95는 실행별332.8/97.1/257.3/178.6ms, 최대554.3ms다. 이는 batch 끝 항목의 생성→알림수신 관측이며 모든 항목·DB commit·물리paint 지연이 아니다. 전체G6/100ms 화면 합격으로 인용하지 않는다. 수신 경로 최적화와 지속 live 화면/packaged메모리 통합이 다음이다.

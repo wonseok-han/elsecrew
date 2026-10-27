@@ -372,9 +372,13 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
             }
         }
     });
+    let runtime_poll_interval = Duration::from_millis(100);
     let mut last_runtime_poll = Instant::now();
     loop {
-        let line = match receiver.recv_timeout(Duration::from_millis(100)) {
+        // Requests and polling work consume the same interval. Starting a fresh
+        // 100ms wait after either would add idle latency to every output batch.
+        let wait = runtime_poll_interval.saturating_sub(last_runtime_poll.elapsed());
+        let line = match receiver.recv_timeout(wait) {
             Ok(InputMessage::Line(line)) => line,
             Ok(InputMessage::Eof) => {
                 if sidecar.safe_to_quit() {
@@ -387,13 +391,13 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
             }
             Ok(InputMessage::Error(error)) => return Err(error),
             Err(RecvTimeoutError::Timeout) => {
+                last_runtime_poll = Instant::now();
                 sidecar.poll_admission();
                 let mut events = sidecar.poll_watch_events();
                 let (responses, runtime_events) = sidecar.poll_runtime_events()?;
                 write_responses(&mut session, &mut output, responses)?;
                 events.extend(runtime_events);
                 write_events(&mut session, &mut output, events)?;
-                last_runtime_poll = Instant::now();
                 sidecar.maintenance_tick()?;
                 continue;
             }
@@ -421,13 +425,13 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
         write_events(&mut session, &mut output, handled.events)?;
         // A busy renderer must not starve agent/watch progression by keeping
         // recv_timeout from expiring. Preserve response-before-event ordering.
-        if !sidecar.safe_to_quit() && last_runtime_poll.elapsed() >= Duration::from_millis(100) {
+        if !sidecar.safe_to_quit() && last_runtime_poll.elapsed() >= runtime_poll_interval {
+            last_runtime_poll = Instant::now();
             let mut events = sidecar.poll_watch_events();
             let (responses, runtime_events) = sidecar.poll_runtime_events()?;
             write_responses(&mut session, &mut output, responses)?;
             events.extend(runtime_events);
             write_events(&mut session, &mut output, events)?;
-            last_runtime_poll = Instant::now();
         }
         sidecar.maintenance_tick()?;
     }
