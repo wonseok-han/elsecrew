@@ -3741,17 +3741,19 @@ impl ProjectManager {
         active: &ActiveProject,
     ) -> Result<(), ProjectFailure> {
         // Keep the same checks without caching authority across polls. These
-        // three read-only commands overlap; each owned child retains its own
+        // four read-only commands overlap; each owned child retains its own
         // bounded pipes, deadline and Drop cleanup. This is not an atomic Git
         // snapshot and does not prevent concurrent metadata mutation.
         let head_child = self.spawn_git_control(workspace, ["rev-parse", "--verify", "HEAD^{commit}"])?;
         let symbolic_child = self.spawn_git_control(workspace, ["symbolic-ref", "-q", "HEAD"])?;
         let connectivity_child = self.spawn_git_control(workspace, ["fsck", "--strict", "--connectivity-only", "--no-reflogs", active.base_commit.as_str()])?;
+        let remote_child = self.spawn_git_control(workspace, ["remote"])?;
         // Finish all owners before interpreting any result. Spawn failures
         // above drop and reap already started children as well.
         let head_output = Self::finish_git_control(head_child, &[0]);
         let symbolic = Self::finish_git_control(symbolic_child, &[0, 1]);
         let connectivity = Self::finish_git_control(connectivity_child, &[0]);
+        let remotes = Self::finish_git_limited_bytes(remote_child, &[0], 1024);
         let head_output = head_output?;
         let symbolic = symbolic?;
         connectivity?;
@@ -3772,8 +3774,7 @@ impl ProjectManager {
                 "snapshot index differs from its base tree",
             ));
         }
-        let remotes = self.git_limited_bytes_at(workspace, ["remote"], &[0], 1024)?;
-        if !remotes.is_empty() {
+        if !remotes?.is_empty() {
             return Err(ProjectFailure::manifest("snapshot retains a Git remote"));
         }
         let git_dir = open_real_child_dir(workspace, ".git")?;
@@ -4116,11 +4117,14 @@ impl ProjectManager {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let mut command = self.git_command_at(directory)?;
-        command.args(args).stdout(Stdio::piped());
-        let mut child = StreamingGitChild::spawn(&mut command).map_err(|error| {
-            ProjectFailure::manifest(format!("could not start fixed Git command: {error}"))
-        })?;
+        Self::finish_git_limited_bytes(self.spawn_git_control(directory, args)?, allowed, limit)
+    }
+
+    fn finish_git_limited_bytes(
+        mut child: StreamingGitChild,
+        allowed: &[i32],
+        limit: usize,
+    ) -> Result<Vec<u8>, ProjectFailure> {
         let mut stdout =
             child.stdout.take().ok_or_else(|| {
                 ProjectFailure::recovery("fixed Git command did not expose stdout")

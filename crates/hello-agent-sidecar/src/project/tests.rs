@@ -4499,7 +4499,7 @@ fn sparse_base_over_diff_limit_is_classified_without_loading_blob() {
 #[test]
 fn concurrent_snapshot_checks_reject_each_repository_invariant_drift() {
     use std::os::unix::fs::PermissionsExt as _;
-    for case in ["head", "symbolic", "object", "index", "remote"] {
+    for case in ["head", "symbolic", "object", "index", "remote", "oversized-remote"] {
         let mut fixture = Fixture::open();
         let active = fixture.create();
         let workspace = fixture.manager.worktree_capability(&active).unwrap();
@@ -4535,6 +4535,10 @@ fn concurrent_snapshot_checks_reject_each_repository_invariant_drift() {
                 git_raw(&active.worktree_path, ["add", "drift.txt"]);
             }
             "remote" => git_raw(&active.worktree_path, ["remote", "add", "forbidden", "/nonexistent-fixture-remote"]),
+            "oversized-remote" => {
+                let name = "r".repeat(1025);
+                git_raw(&active.worktree_path, ["remote", "add", name.as_str(), "/nonexistent-fixture-remote"]);
+            }
             _ => unreachable!(),
         }
         assert!(fixture.manager.verify_snapshot_repository(&workspace, &active).is_err(), "accepted {case} drift");
