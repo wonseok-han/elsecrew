@@ -472,6 +472,13 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-agent-runs article p { margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
 .m5-agent-runs summary { cursor: pointer; color: inherit; padding: 4px 0; }
 .m5-agent-runs summary:focus-visible { outline: 2px solid #91c5ff; outline-offset: 2px; }
+.m5-durable-output { min-width: 0; border-top: 1px solid #303b49; padding-top: 10px; }
+.m5-durable-output > label, .m5-durable-output nav { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.m5-durable-output select { min-width: 0; max-width: 100%; }
+.m5-output-scroll { max-height: 360px; overflow: auto; overscroll-behavior: contain; overflow-anchor: none; margin: 8px 0; }
+.m5-output-scroll:empty { display: none; }
+.m5-output-scroll:focus-visible { outline: 2px solid #91c5ff; outline-offset: 2px; }
+.m5-output-scroll pre { margin: 0; font: inherit; line-height: 1.6; }
 .m5-agent-run-history { border-top: 1px solid #3b495b; padding-top: 6px; }
 .m5-agent-run-history > div { max-height: 240px; overflow: auto; }
 .m5-provider-login form input { width:min(100%,420px); box-sizing:border-box; padding:10px; margin:8px 8px 8px 0; background:#151a22; color:#e8edf5; border:1px solid #64799f; border-radius:8px; }

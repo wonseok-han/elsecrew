@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { AgentOutputReader, type AgentOutputSource } from "./agent-output-reader.ts";
 import { reduceOutputWindow, type OutputWindow } from "./agent-output-window.ts";
@@ -20,7 +20,8 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
   const { t } = useI18n();
   const [selected, select] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
-  const run = runs.find(value => value.runId === selected) ?? runs[0];
+  const orderedRuns = useMemo(() => [...runs].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)), [runs]);
+  const run = orderedRuns.find(value => value.runId === selected) ?? orderedRuns[0];
   const binding = useMemo(() => run ? {
     chatId: run.chatId, taskId: run.taskId, projectId: run.projectId,
     worktreeId: run.worktreeId, workspaceIdentity: run.workspaceIdentity,
@@ -32,6 +33,28 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
   const [historyRequest, setHistoryRequest] = useState<OutputPageRequest | null>(null);
   const [historyPage, setHistoryPage] = useState<OutputPage | null>(null);
   const [historyState, setHistoryState] = useState<"loading" | "ready" | "failed">("ready");
+  const outputRef = useRef<HTMLDivElement>(null);
+  const followLatest = useRef(true);
+  const [newOutput, setNewOutput] = useState(false);
+  useLayoutEffect(() => {
+    followLatest.current = true;
+    setNewOutput(false);
+  }, [binding]);
+  useLayoutEffect(() => {
+    const list = outputRef.current;
+    if (!list || view?.binding.runId !== binding?.runId || historyRequest) return;
+    if (followLatest.current) list.scrollTop = list.scrollHeight;
+    else setNewOutput(true);
+  }, [view, binding, historyRequest]);
+  useLayoutEffect(() => {
+    if (historyPage && outputRef.current) outputRef.current.scrollTop = 0;
+  }, [historyPage]);
+  const showLatest = () => {
+    followLatest.current = true;
+    setNewOutput(false);
+    setHistoryRequest(null);
+    if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
+  };
   useEffect(() => {
     const bridge = resolveM5Bridge(window.m5);
     setHistoryPage(null);
@@ -95,7 +118,7 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
   const visibleHistory = historyActive && historyPage?.request === historyRequest ? historyPage : null;
   return <section className="m5-durable-output" aria-label={t("m5.output.title")}>
     <label>{t("m5.output.title")} <select value={run!.runId} onChange={event => select(event.target.value)}>
-      {runs.map(value => <option key={value.runId} value={value.runId}>{t(`m5.roles.${value.selectedProfile.roleId}`)} · {value.runId}</option>)}
+      {orderedRuns.map(value => <option key={value.runId} value={value.runId}>{t(`m5.roles.${value.selectedProfile.roleId}`)} · {value.runId}</option>)}
     </select></label>
     {state === "loading" && <p role="status">{t("m5.output.loading")}</p>}
     {state === "legacy" && <p>{t("m5.output.legacy")}</p>}
@@ -107,9 +130,17 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
       {historyActive && <>
         <button type="button" disabled={!visibleHistory || historyState !== "ready" || visibleHistory.nextAfterSequence >= historyRequest!.throughSequence}
           onClick={() => setHistoryRequest({ ...historyRequest!, afterSequence: visibleHistory!.nextAfterSequence })}>{t("m5.output.next")}</button>
-        <button type="button" onClick={() => setHistoryRequest(null)}>{t("m5.chat.latest")}</button>
+        <button type="button" onClick={showLatest}>{t("m5.chat.latest")}</button>
       </>}
     </nav>}
+    <div ref={outputRef} className="m5-output-scroll" tabIndex={0} aria-label={t("m5.output.title")}
+      onScroll={event => {
+        if (historyActive) return;
+        const list = event.currentTarget;
+        if (list.clientHeight === 0) return;
+        followLatest.current = list.scrollHeight - list.scrollTop - list.clientHeight <= 32;
+        if (followLatest.current) setNewOutput(false);
+      }}>
     {historyActive && <>
       <p>{t("m5.output.historyHelp")}</p>
       {historyState === "loading" && <p role="status">{t("m5.output.loading")}</p>}
@@ -126,5 +157,7 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
       {view.hasEarlier && <p>{t("m5.output.window")}</p>}
       {view.rows.map(row => <article key={row.key}>{row.truncated && <small>{t("m5.output.truncated")}</small>}<pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{row.text}</pre></article>)}
     </>}
+    </div>
+    {!historyActive && newOutput && <button type="button" onClick={showLatest}>{t("m5.chat.newMessages")}</button>}
   </section>;
 }
