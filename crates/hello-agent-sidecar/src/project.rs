@@ -3740,13 +3740,31 @@ impl ProjectManager {
         workspace: &Dir,
         active: &ActiveProject,
     ) -> Result<(), ProjectFailure> {
-        let head_output = self.git_at(workspace, ["rev-parse", "--verify", "HEAD^{commit}"])?;
+        // Keep the same checks without caching authority across polls. These
+        // three read-only commands overlap; each owned child retains its own
+        // bounded pipes, deadline and Drop cleanup. This is not an atomic Git
+        // snapshot and does not prevent concurrent metadata mutation.
+        let head_child = self.spawn_git_control(workspace, ["rev-parse", "--verify", "HEAD^{commit}"])?;
+        let symbolic_child = self.spawn_git_control(workspace, ["symbolic-ref", "-q", "HEAD"])?;
+        let connectivity_child = self.spawn_git_control(workspace, ["fsck", "--strict", "--connectivity-only", "--no-reflogs", active.base_commit.as_str()])?;
+        // Finish all owners before interpreting any result. Spawn failures
+        // above drop and reap already started children as well.
+        let head_output = Self::finish_git_control(head_child, &[0]);
+        let symbolic = Self::finish_git_control(symbolic_child, &[0, 1]);
+        let connectivity = Self::finish_git_control(connectivity_child, &[0]);
+        let head_output = head_output?;
+        let symbolic = symbolic?;
+        connectivity?;
         let head = trim_output(&head_output)?;
         if head != active.base_commit {
             return Err(ProjectFailure::manifest(
                 "snapshot detached HEAD differs from its base commit",
             ));
         }
+        if symbolic.status.success() || !symbolic.stdout.is_empty() {
+            return Err(ProjectFailure::manifest("snapshot HEAD is not detached"));
+        }
+        // write-tree remains serial, after all read-only checks have finished.
         let tree_output = self.git_at(workspace, ["write-tree"])?;
         let tree = trim_output(&tree_output)?;
         if tree != active.base_tree {
@@ -3754,21 +3772,6 @@ impl ProjectManager {
                 "snapshot index differs from its base tree",
             ));
         }
-        let symbolic =
-            self.git_allow_status_at(workspace, ["symbolic-ref", "-q", "HEAD"], &[0, 1])?;
-        if symbolic.status.success() || !symbolic.stdout.is_empty() {
-            return Err(ProjectFailure::manifest("snapshot HEAD is not detached"));
-        }
-        self.git_at(
-            workspace,
-            [
-                "fsck",
-                "--strict",
-                "--connectivity-only",
-                "--no-reflogs",
-                active.base_commit.as_str(),
-            ],
-        )?;
         let remotes = self.git_limited_bytes_at(workspace, ["remote"], &[0], 1024)?;
         if !remotes.is_empty() {
             return Err(ProjectFailure::manifest("snapshot retains a Git remote"));
@@ -4055,11 +4058,20 @@ impl ProjectManager {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
+        Self::finish_git_control(self.spawn_git_control(directory, args)?, allowed)
+    }
+
+    fn spawn_git_control<I, S>(&self, directory: &Dir, args: I) -> Result<StreamingGitChild, ProjectFailure>
+    where I: IntoIterator<Item = S>, S: AsRef<OsStr>,
+    {
         let mut command = self.git_command_at(directory)?;
         command.args(args).stdout(Stdio::piped());
-        let mut child = StreamingGitChild::spawn(&mut command).map_err(|error| {
+        StreamingGitChild::spawn(&mut command).map_err(|error| {
             ProjectFailure::manifest(format!("could not start fixed Git command: {error}"))
-        })?;
+        })
+    }
+
+    fn finish_git_control(mut child: StreamingGitChild, allowed: &[i32]) -> Result<Output, ProjectFailure> {
         let mut stdout =
             child.stdout.take().ok_or_else(|| {
                 ProjectFailure::recovery("fixed Git command did not expose stdout")

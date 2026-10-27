@@ -333,6 +333,17 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 새 private `storage/reopen/snapshot.rs`의 `ReopenMaintenanceSession`은 승인된 분할 정책 아래 전역 source/frozen envelope·5 projection·5 derived table의 양방향 검증, index 선행 catch-up, ready 전체 재검증을 같은 연결에서 수행한다. `snapshot/workspace.rs`는 길이 제한 없는 manifest 경로와 historical live/frozen 출처를 조각으로 검사하고, `snapshot/catchup.rs`는 검증한 원본에서 파생 기록만 저장한다. COMMIT 뒤에만 진행을 보존하며 member 중간 재시작은 durable offset 없이 source 처음부터 멱등 처리한다. 기존 V1의 개별 기록 1 MiB 거부와 제품 진입점은 그대로다. 기능 `5ad7162`의 focused 회귀·독립 리뷰 뒤 통합 `5658480`에서 정상 production101을 포함한 workspace Rust 529 passed/14 ignored/0 failed, exit 0을 확인했다. 실제 생산 101-workspace DB 보존본의 별도 완료는 172,685 calls/98.288초로 **3초 제품 목표를 충족하지 않는다**. 이 `ReadyVerified`는 저장 정합성 완료이지 제품 실행 허가가 아니며 startup/복구/admission·성능은 여전히 미완료다.
 
+### 장시간 단일 실행 출력 — 구현 존재, 제품 활성화 전
+
+새 출력 형식은 schema V11의 `run_output_records`에 공개 항목을 순서대로 저장하고 `run_output_heads`에 검증된 요약을 유지한다. 일반 제품 DB 열기는 V11을 거절하며 `Storage::open_durable_output_for_test`로만 이관·실행을 시험한다. 이 코드의 존재는 제품에서 장시간 실행이 활성화됐다는 뜻이 아니다.
+
+- 형식 marker가 있는 실행은 legacy `public_events` 배열에 본문을 반복 저장하지 않는다. 종료 증거 이후 final 한 건만 후속 대화 문맥과 같은 transaction에 저장한다. 기존 형식의 검증·예산은 유지한다.
+- V8 bridge의 `getAgentOutputHead`·`getAgentOutputPage`·`onAgentOutputAvailable`은 읽기/알림 경로다. `agent.outputAvailable`은 결속된 head만 전달하며 본문은 최대100행/512KiB 페이지로 읽는다. wire 순번과 영속 출력 순번은 다르다.
+- native/fixture runtime은 변경된 head를 알리고 마지막 sealed head를 terminal 상태보다 먼저 보낸다. sealed는 프로세스 종료 확인이나 성공 판정을 대신하지 않는다. Electron은 기존 이벤트 credit/ACK를 사용하며 renderer는 bounded window와 주기적 head 재조회로 따라잡는다.
+- 실행 poll의 후속 실패가 이미 만든 알림을 버리지 않도록 수집 이벤트를 먼저 전달한다. 동시에 발생한 오류는 AgentRuntime/Sidecar 경계에서 보존하고 다음 poll에 전파한다. 모델을 자동 재실행하거나 오류를 성공으로 바꾸지 않는다.
+
+전체 native 장시간 실행, 실제 화면 자원 예산, 기존 DB 이관과 최종 안전 검토를 마쳐야 제품 활성화를 판단할 수 있다. 최신 시험 결과와 남은 게이트는 `history.md`가 기준이다.
+
 ## 10. 미해결 사항
 
 - **승인 직전 경계 후보**: 예약 owner의 `verify_approval_boundary`가 취소·현재 불변 role/input·writer 소유권·snapshot/파일 분리·exact 격리 launch scope·앱 profile·프로세스 관측 원장을 함께 검사한다. 파일 분리 스캔을 Git 검증보다 먼저 수행한다. TextSession의 AcceptOnce 제안은 이 callback을 거쳐야 하며 이후 전송마다 재검증하도록 묶었다. 일반 text-only 경로는 거절한다. Core의 실제 AcceptOnce 직렬화는 아직 차단되어 있어 이 전제 연결을 허용 기능 완료로 보지 않는다.

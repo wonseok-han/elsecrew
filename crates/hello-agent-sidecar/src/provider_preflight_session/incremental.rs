@@ -130,7 +130,10 @@ impl TextSession {
         budget
             .checked_sub(now.saturating_duration_since(started))
             .filter(|remaining| !remaining.is_zero())
-            .ok_or_else(failure)
+            .ok_or_else(|| SidecarError::new(
+                "providerPreflightFailed",
+                format!("Codex {} deadline reached at {}", if self.turn_started.is_some() { "turn" } else { "preflight" }, self.diagnostic_stage),
+            ))
     }
 
     fn begin_turn_budget(&mut self, now: Instant, cancel: &AtomicBool) -> Result<(), SidecarError> {
@@ -370,7 +373,9 @@ mod tests {
             .begin_turn_budget(turn + Duration::from_secs(32), &cancel)
             .is_err());
         assert_eq!(session.turn_started, Some(turn));
-        assert!(session.remaining_at(turn + TURN_BUDGET, &cancel).is_err());
+        session.diagnostic_stage = "turn stream";
+        assert_eq!(session.remaining_at(turn + TURN_BUDGET, &cancel).unwrap_err().detail(),
+            "Codex turn deadline reached at turn stream");
         cancel.store(true, Ordering::Release);
         assert!(session
             .remaining_at(turn + Duration::from_secs(1), &cancel)

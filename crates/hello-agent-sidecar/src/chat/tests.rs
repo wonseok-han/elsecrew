@@ -1376,6 +1376,7 @@ fn text_candidate_cases_with_output(
             fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER test_reject_terminal_chat BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_agent_native_chat_terminal_%' BEGIN SELECT RAISE(ABORT, 'injected terminal persistence failure'); END;").unwrap();
         }
         let mut writes = 0;
+        let output_started = std::time::Instant::now();
         let observations = std::cell::Cell::new(0);
         let observed_idle_child = std::cell::Cell::new(false);
         let has_reservation = reservation.is_some();
@@ -1392,6 +1393,16 @@ fn text_candidate_cases_with_output(
                 _ => panic!("unexpected projection"),
             };
             writes += 1;
+            if long_output {
+                assert_eq!(text, "hello");
+                if writes % 500 == 0 {
+                    eprintln!("long native output: {writes} callbacks in {:?}", output_started.elapsed());
+                }
+                // Production persists each item in the output ledger before
+                // this callback. Do not add thousands of synthetic chat
+                // snapshots that every input validation must replay.
+                if writes > 1 { return Ok(()); }
+            }
             // Synthetic sink verifies ownership/writes, not the actual-agent event contract.
             let mut record = storage
                 .projection_record("chat", &address.chat_id)?

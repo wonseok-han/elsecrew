@@ -249,6 +249,32 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_control_children_reap_after_output_and_timeout_failures() {
+        let mut children = Vec::new();
+        let mut pids = Vec::new();
+        for script in [
+            "printf ok",
+            "i=0; while [ $i -lt 7000 ]; do printf 0123456789; i=$((i+1)); done",
+            "exec /bin/sleep 5",
+        ] {
+            let mut command = shell(script);
+            command.stdout(Stdio::piped());
+            let child = StreamingGitChild::spawn_with_budget(
+                &mut command, Duration::from_millis(500),
+            ).unwrap();
+            pids.push(child.child.id());
+            children.push(child);
+        }
+        let results: Vec<_> = children.into_iter().map(|child| {
+            super::super::ProjectManager::finish_git_control(child, &[0])
+        }).collect();
+        assert_eq!(results[0].as_ref().unwrap().stdout, b"ok");
+        assert!(results[1].as_ref().unwrap_err().detail.contains("exceeds 64 KiB"));
+        assert!(results[2].is_err());
+        for pid in pids { assert_reaped(pid); }
+    }
+
+    #[test]
     fn git_budget_handles_many_interactive_round_trips() {
         let mut command = shell("while IFS= read -r line; do printf 'x'; done");
         command.stdin(Stdio::piped()).stdout(Stdio::piped());

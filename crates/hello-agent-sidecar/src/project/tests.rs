@@ -4495,6 +4495,52 @@ fn sparse_base_over_diff_limit_is_classified_without_loading_blob() {
     assert_eq!(file.result["byteLength"], DIFF_MAX_BYTES as u64 + 1);
 }
 
+#[cfg(unix)]
+#[test]
+fn concurrent_snapshot_checks_reject_each_repository_invariant_drift() {
+    use std::os::unix::fs::PermissionsExt as _;
+    for case in ["head", "symbolic", "object", "index", "remote"] {
+        let mut fixture = Fixture::open();
+        let active = fixture.create();
+        let workspace = fixture.manager.worktree_capability(&active).unwrap();
+        fixture.manager.verify_snapshot_repository(&workspace, &active).unwrap();
+        match case {
+            "head" => fs::write(active.worktree_path.join(".git/HEAD"), b"invalid\n").unwrap(),
+            "symbolic" => {
+                git_raw(&active.worktree_path, ["update-ref", "refs/heads/drift", &active.base_commit]);
+                git_raw(&active.worktree_path, ["symbolic-ref", "HEAD", "refs/heads/drift"]);
+            }
+            "object" => {
+                let objects = active.worktree_path.join(".git/objects");
+                let packs: Vec<_> = fs::read_dir(objects.join("pack")).unwrap()
+                    .map(|entry| entry.unwrap().path())
+                    .filter(|path| path.extension().is_some_and(|ext| ext == "pack"))
+                    .collect();
+                if packs.is_empty() {
+                    let object = objects.join(&active.base_commit[..2]).join(&active.base_commit[2..]);
+                    assert!(object.is_file());
+                    fs::set_permissions(&object, fs::Permissions::from_mode(0o600)).unwrap();
+                    fs::write(object, b"invalid object").unwrap();
+                } else {
+                    // Corrupt the actual test-owned object storage, not a
+                    // duplicate loose copy that Git may ignore in favor of a pack.
+                    for pack in packs {
+                        fs::set_permissions(&pack, fs::Permissions::from_mode(0o600)).unwrap();
+                        fs::write(pack, b"invalid pack").unwrap();
+                    }
+                }
+            }
+            "index" => {
+                fs::write(active.worktree_path.join("drift.txt"), b"drift").unwrap();
+                git_raw(&active.worktree_path, ["add", "drift.txt"]);
+            }
+            "remote" => git_raw(&active.worktree_path, ["remote", "add", "forbidden", "/nonexistent-fixture-remote"]),
+            _ => unreachable!(),
+        }
+        assert!(fixture.manager.verify_snapshot_repository(&workspace, &active).is_err(), "accepted {case} drift");
+    }
+}
+
 #[test]
 fn git_registration_drift_blocks_file_access_before_any_write() {
     let mut fixture = Fixture::open();

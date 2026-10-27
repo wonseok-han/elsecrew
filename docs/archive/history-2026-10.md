@@ -1,5 +1,224 @@
 # 작업 이력 아카이브 — 2026-10
 
+### 2026-10-23 · by Codex
+- 이전 턴의 시험 보정/stack 진단은 진척이다. 동일session89386은2,000callback/568.72초 뒤603.47초에 실패했고 closure(termination,profile)=(true,true)였다. Karpathy 최소 변경으로 TextSession timeout detail을 고정 stage 기반 preflight/turn deadline으로 구분했다. 읽기 전용 설계 검토 후 snapshot의 HEAD/symbolic/fsck3개를 동일 capability/env/출력 상한/종료 소유권으로 먼저 spawn하고 모두 finish한 뒤 결과를 검사하도록 구현했다. write-tree/remote/metadata 검사는 이후 직렬로 유지하며 fsck가 write-tree보다 먼저가 된 관찰 순서를 명시한다. 원자 snapshot·TOCTOU 해결이나 검사 생략을 주장하지 않는다. cargo check --tests PASS; 실제 diff 독립 검토 및 장시간 재시험 진행 중, 변경 미커밋. 기존 오류 kind·시간 예산·취소·종료 권한은 유지한다. main/push·실계정/과금/사용자 프로젝트 변경 없음. 최종 앱 완료는 아니다.
+
+### 2026-10-23 · by Codex
+- bd655e7 이후 clean 통합 checkout에서 Codex 장시간 시험을 조사했다. 시험용 sink가 모든 출력마다 같은 chat snapshot을 upsert하고 validate_text_input→resolve_prompt→chat_message_history가 누적 chat event를 다시 읽는 것을 확인했다. 제품은 durable 진행 항목을 별도 출력 원장에 저장하므로 시험만 불필요한 누적 chat 복사를 추가하고 있었다.
+- Karpathy 최소 변경으로 long-output case만 synthetic chat write를 첫1건으로 제한했다. 모든 callback 개수·본문과 실제 output ledger3,000개·재시작 검증은 그대로이며 제품의 프로세스/입력/작업 공간 안전 검사와10분 시간 제한은 변경하지 않았다.500callback마다 경과 시간을 남겨 처리 진척을 확인한다.
+- 동일 focused 시험은 컴파일 성공 후 실행 중(session89386),500callback/144.12초를 확인했다. 자체 test PID24543의1초 stack sample에서 validate_text_input→verify_workspace_for_run→verify_snapshot_repository→Git 대기가 반복 관측됐다(/private/tmp/hello-agent-long-output-sample.txt). 현재 검사는 frame마다 입력/작업 공간을 재검증하고 Git 명령5개를 실행한다. 따라서 synthetic 복사만이 원인이라고 단정하지 않으며 이번 실행 결과와 처리율로 확인한다. 실제 공급자 계정/과금·앱/사용자 DB 변경 없음. 최종 앱 완료·장시간 native/G6/Windows/출시는 계속 미완료다.
+
+### 2026-10-23 · by Codex
+- 장시간 단일 실행의 head-only 전달을 fixture에도 연결했다. durable 본문은 page 저장에만 남기고 batch head 변화와 종료 직전 sealed head만 알린다. Rust/TS wire 공유 fixture와 Electron credit/ACK·renderer 구독은 같은 결속을 사용한다. legacy 본문 전달·제품 V11 비활성은 유지한다.
+- 독립 검토에서 같은 poll의 후속 실패가 앞선 알림/순번을 버리는 문제, owner 제거 후 오류가 사라지는 문제를 확인했다. fixture 수집 이벤트를 상위에 보존하고 AgentRuntime 및 Sidecar 응답 경계에 각각 지연 오류 슬롯을 두어 다음 poll에서 반드시 전파하도록 보완했다. 이는 오류 숨김이나 자동 재시도가 아니다.
+- 검증: tsc noEmit 및 관련 Node14개 PASS. 4×3,000 저장/알림/봉인/재열기 회귀 PASS(57.12초), 이후 durable 관련18개 묶음 PASS(63.93초; 알려진 긴 Codex 시험 제외). terminal write 실패 재시도·PollObserve/Wait 실패 전달도 포함한다. 상위 동시 응답 오류 회귀1개 PASS. protocol 누적 검사가 드러낸 예전 method manifest 누락 및 event suffix 기대값을 갱신했고 Rust65개·Node17개 PASS다. 독립 검토1명은 마지막 오류 전달 수정에서 추가 차단 결함 없음으로 확인했다.
+- 기존 session91332 Codex native3,000 시험은603.78초 뒤 turn stream/providerPreflightFailed로 실패했으며 closure(termination,profile)=(true,true)를 확인했다. 단일 native 장시간 검증은 미완료이며 timeout을 늘려 통과 처리하지 않는다. 넓은 durable 필터로 의도치 않게 재실행한 검사는 중단 후 해당 긴 시험을 제외해 재실행했고, 중단 뒤 해당 test 프로세스 잔존 없음 확인했다.
+- 새 제품 활성화/실제 모델·계정/사용자 DB·프로젝트 변경 없음. native 장시간 실패 원인·전체 화면/G6·Windows·출시 게이트는 남는다. 알려진 실패를 포함한 구현 체크포인트이며 기능/gate 완료가 아니다. main 병합/push 없음.
+
+### 2026-10-23 · by Codex
+- 이전 턴은 장시간 Codex 시험 추가 및 실행 확인 진척이다. session91332를 같은 handle로 재확인했으며 아직 실행 중이고 종료 결과는 없다. 재시작/중복 빌드하지 않았다. 그동안 agent.outputAvailable head-only 알림을 Rust wire/native→Electron client/main/preload credit/ACK→V8 bridge→선택 run reader 조회 힌트에 연결했다. 본문/eventId Set를 알림에 누적하지 않으며 terminal state 전에 마지막 head를 알린다.500ms 재조회도 유지한다.
+- wire에서 형식·head 순번·신원 결속을 검사하고 Electron은 협상된 outputHead capability와 알려진 비종결 run/stream 결속을 요구한다. native는 head 변화가 있을 때만 알리며 순번 후퇴/봉인 해제를 거절한다. fixture poll 경로의 알림 통합·shared wire fixture/Rust 회귀·최종 UI 전달 검증은 아직 남는다. 새 형식 제품 활성화는 하지 않았다.
+- 최초 TS 연결은 noEmit PASS였으나 Node 실행이 base protocol→상위 adapter 순환 참조를 발견했다. base wire 검증을 독립적으로 유지해 고쳤고 알림 본문/다른 run/음수·unsafe 순번 거절을 포함한 관련 Node14개 PASS다. 최종 Rust 컴파일은 실행 중인 무거운 시험 종료 뒤 진행한다. 독립 읽기 전용 검토1명 요청 중, 변경 미커밋. 실제 모델/계정·앱 패키지·main/push 없음.
+
+### 2026-10-23 · by Codex
+- 기준f8f6f72/clean 통합 checkout에서 codex_durable_native_three_thousand_outputs를 추가했다. 기존 Codex pipe-peer 경로에 한 run의 초기 delta1·완성 항목2,998·종료 후 final 승격1로 총3,000개 저장 원문을 기대한다. native parser/예약/프로세스 정리/최종 문맥/재열기 검증을 그대로 쓰며 실제 공급자 바이너리나 계정은 사용하지 않는다.
+- Karpathy 지침에 따라 기존 시험 틀의 선택 case를 확장했다. 긴 응답을 명령줄 인자로 넘기지 않고 fixture TempDir의 JSONL 파일을 모의 peer가 읽어 파이프로 전송한다. 원본 불변·종료 후 원문3,000개/내용·재열기 assertion을 유지한다. 임시 파일은 fixture 수명에 묶이며 새 앱 패키지를 만들지 않는다. 여유 공간499GiB 확인.
+- cargo test -p hello-agent-sidecar --lib codex_durable_native_three_thousand_outputs --locked가 컴파일 성공 후 실행 중이다(session91332). 같은 handle을 반복 확인했고60초 초과 알림 외 오류/종료는 아직 없다. 실행 시작 후 시험 peer의 received marker 누락을 소스에서 보완했으므로 현재 실행 바이너리는 그 보완 전이며 종료 후 assertion 실패 가능성을 구분해야 한다. 결과 없이 재시작하지 않는다. 변경 미커밋, diff check PASS. 독립 head 알림·화면 통합/G6/Windows/출시는 남는다.
+
+### 2026-10-23 · by Codex
+- 기준8dd1262/clean 통합 checkout에서 Codex 기존 로컬 pipe-peer/예약/dispatcher 시험 틀에 durable 선택을 연결했다. 정상 bound 실행·dispatcher 전달·중간 취소3경우를 추가하고 legacy 알림 대신 page 원문 최종 응답과 종료 상태를 대조한다. 정상 실행 재열기에서도 같은 형식으로 admission/recovery 검증한다. Karpathy 원칙으로 별도 모의 저장 구현 없이 기존 경로를 사용한다.
+- 최초 실행이 재시작 validate_persisted_runs의 무조건 legacy 배열 예산 검사에서 panic을 드러냈다. marker 있는 실행은 actual_run_projection의 기존 형식/신원/head/native evidence 검증을 재사용하고, legacy 예산 및 후속 provider/recovery 검사는 유지하도록 수정했다.
+- 수정 후 codex_durable_native_delivery_and_cancel PASS(3경우,14.69초). 읽기 전용 독립 검토1명은 재시작 분기 수정 범위에 차단 결함 없음, diff check PASS. 실제 공급자 바이너리/계정/모델 시험이나3,000개 native 스트림 증거는 아니다. 출력 page 전체 조회 도우미는 시험 전용이다. 사용자 프로젝트/앱 패키지·main/push 없음. 장시간 native stream·독립 head 알림·실제 화면/G6/Windows/출시는 남는다.
+
+### 2026-10-23 · by Codex
+- 기준49083d7/clean 통합 checkout에서 native event 전달도 제거된 legacy public_events를 요구하는 누락을 수정했다. durable는 결속된 output head를 검사하고 본문은 기존 bounded page reader가 조회한다. legacy 이벤트 배열로 재주입하지 않으며 run 상태 알림은 유지한다. 출력 패널은 선택 run의 공개/상태 알림을 조회 힌트로 사용하고 두 구독을 함께 정리한다. 별도 output-head 알림은 아직 없으며500ms reconciliation에 의존하는 현황을 완료로 숨기지 않는다.
+- 기존 Claude 로컬 pipe-peer 시험에 durable 성공/취소/잘못된 init을 추가했다. 첫 실패에서 native_evidence가 준비 중 빈 legacy 배열을 요구하는 원인을 확인했다. format1은 배열 부재를 허용하되 Storage의 결속 검사에서 native receipt 전 head가 비어 있음을 요구한다. append 뒤에도 같은 transaction에서 검사해 첫 부적절한 출력과 final 문맥을 함께 rollback한다. marker 추가/재시작 검증에도 같은 경계가 적용된다. Karpathy 최소 변경으로 기존 입장/프로세스 종료 검사를 보존했다.
+- 누적 cargo check --tests와 TypeScript noEmit PASS. Claude 모의 native 수신 시험10경우 PASS(28.11초), 실제 공급자 실행은 아니다. 읽기 전용 검토1명은 이번 전달/검증 이동 diff에서 차단 결함 없음으로 확인했으며 음성 회귀를 요구했다. receipt 전 첫 append·출력 있는 run의 pre-thread marker 추가 거절을 기존 atomic/reopen 회귀에 추가해 PASS(1.72초)했고 diff check PASS다. 실제 계정/모델·사용자 DB/앱·main/push 없음. Codex native 장시간·head 알림·화면 통합/G6/Windows/출시는 남는다.
+
+### 2026-10-23 · by Codex
+- 기준cfe496a/clean 통합 checkout에서4개 actual-adapter fixture run을 동시에 시작해 각각3,000개 공개 출력을 내보내는 통합 회귀를 연결했다. 실제 모델 없이 launcher/child 파이프·classifier·runtime·출력 저장·종료·V11 재열기/전체 page 원문을 대조한다. 네 snapshot은 실행 전에 준비하며 기존 실행 중 export 차단을 우회하지 않는다. 이는 native Codex/Claude 또는 renderer 성능 시험의 대체 증거가 아니다.
+- 연결 조사에서 poll의100건/4MiB 묶음 경계를 run 전체 예산 초과로 처리하는 결함을 발견했다. durable만 다음 프레임 소비 전에100frame 또는 최대 본문 여유 경계에서 yield하며 종료한 child의 잔여 출력도 다음 poll에 이어 읽는다. legacy 한도는 그대로다. Karpathy 최소 변경 원칙으로 기존 bounded 수신 queue·종료 확인 경로를 유지했다.
+- 첫 통합 실행은 snapshot 준비 순서 때문에 실패해 시험 순서를 수정했고 남은 long-stream 프로세스 없음 확인. 두 번째는33.09초 뒤 종료 처리에서 제거된 public_events Map key 직접 접근 panic을 드러냈다. finish와 start-failure의 optional 배열 접근을 get으로 수정했으며 marker/출력 head 보존 경로는 유지한다. 읽기 전용 독립 검토1명은 배치/추가 수정 범위에서 차단 결함 없음으로 확인했다. 전체 파동 승인 아님. 최종 재시험 PASS(58.29초): 네 run 각3,000건·poll당 최대400건·성공/봉인·재열기 뒤12,000개 원문 순서 일치. 새 시험 파일 rustfmt와 diff check PASS. 시작 실패/취소/본문 경계와 native/UI 통합은 남는다. 사용자 계정/모델·앱 패키지·main/push 없음.
+
+### 2026-10-23 · by Codex
+- 기준d7a94e6/clean 통합 checkout에서 기존 chat fixture에 test-only durable open 선택을 추가하고 실제 RunPreparation 예약→출력/문맥 transaction→재시작 경로의 회귀를 연결했다. Karpathy 지침에 따라 기존 프로젝트/채팅 생성·materializer를 재사용하며 별도 모의 저장 구현을 만들지 않았다.
+- 출력 row INSERT에 실패 trigger를 주입해 먼저 수행된 chat event/projection도 rollback되는지 확인한다. trigger 제거 후 V11 admission 재열기에서 양쪽 미저장, 성공 뒤 재열기에서 후속 문맥 최종 응답1건, 같은 요청 재시도 거절과 출력 head1을 검증했다. 원본 fixture 파일 불변도 확인한다. 실제 공급자 프로세스 종료·모델 입력 실행 성공을 주장하지 않는다.
+- 최초 컴파일의 private helper 참조는 명시 binding 생성으로 수정했다. 다음 실행은 fixture 바이너리 미생성으로 차단되어 sidecar bin만 빌드했고 집중 회귀 PASS했다. 재열기 page 원문 대조 assertion 추가 후 최종 회귀도 PASS(1개,1.70초), 새 파일 rustfmt/diff check PASS다. 실제 계정/모델·사용자 DB·앱 패키지 생성 없음. 다음은4×3,000 공급자/저장/화면 통합과 파동 검토이며 제품 V11 활성화·G6/Windows/출시는 계속 미완료다.
+
+### 2026-10-23 · by Codex
+- 기준48d9719에서 장시간 단일 실행의 누적 검증을 시작했다. 출력 페이지/reader/window/V8 경계 Node 검사21개와 TypeScript noEmit이 통과했다. Rust 출력 저장 검사에서15개 중2개가 실패해 원인을 수정했다: V10 frozen identity의 SQL 해시를 SQL 원문으로 비교하고 있었다. reference V10 DDL을 복원하고 frozen 해시와 대조한 뒤 V11 예상 schema를 구성하도록 고쳤으며 기존 정확 비교/제품 활성화 경계는 유지한다.
+- 수정 후 출력 저장15개·test-only V11 이관/재열기/일반 product open 거절1개·core durable stream5개·protocol output page6개 모두 PASS다. 3,000 이벤트 페이지/스트림 및 상한 거절 회귀를 포함한다. 변경 파일 rustfmt를 적용했다. 이는 개별 계층 검사이며4채팅 동시 실행의 실제 UI 성능이나 전체 제품 합격은 아니다.
+- 스키마 수정 diff에 대한 읽기 전용 독립 검토1명은 수정 필요 결함 없음으로 확인했다. diff check PASS. 이는 파동 전체 검토/활성화 승인이 아니다. 다음은 final/후속 문맥 원자 저장 실패 주입과 재시작 교차 원장, 합성4×3,000 통합/UI 및 파동 독립 검토다. V11 일반 앱 활성화는 보류하며 G6/Windows/출시 미완료를 유지한다. 이번에는 실제 계정·모델·사용자 DB/앱·main/push를 사용하지 않았다.
+
+### 2026-10-23 · by Codex
+- 직전2755548는 final/문맥 원자 저장과 누적 컴파일 진척이다. clean 통합 checkout에서 cfg(test) 전용 open_durable_output_for_test를 추가했다. 기존 product admission으로 V10을 만든 뒤 V11 이관/기존+출력 admission을 완료해야 쓰기를 허용하며 V11 재열기도 같은 검증을 거친다. 일반 product open은 V11 거절을 유지한다.
+- 준비 run 생성은 admission된 V11에서만 output_format_version=1과 빈 output head를 원자 생성하도록 연결했다. fixture pre-release projection 재작성의 marker 보존 누락을 보완했고 fixture classifier도 검증된 run의 출력 예산을 선택한다. native 전송/저장/화면에 이어 신규 실행 생성까지 시험 가능한 경로가 준비됐으나 실제 모델/제품 활성화는 아니다.
+- Karpathy 최소 변경으로 기존 admission/migration/launch 실패 cleanup 경로를 재사용했다. fresh 이관·재열기·product open 거절·schema index 손상 거절 회귀를 작성했다. diff check만 확인, 새 경로 컴파일/실행과 누적 통합 검증·독립 검토는 아직 남는다. 다음은 합성 장시간 실행/최종 문맥 원자 rollback·재시작 묶음 검증과 수정이며 G6/Windows/출시도 미완료다. 사용자 DB·모델·앱/main/push 없음.
+
+### 2026-10-23 · by Codex
+- 직전7e7f324는 출력 항목 순서 검사 구현 진척이다. clean 통합 checkout에서 durable final만 기존 teamMessage 문맥 스냅샷에 함께 저장하도록 연결했다. 출력 row와 chat ledger/materialization은 하나의 IMMEDIATE transaction이며 예상 chat aggregate sequence를 확인한다. duplicate/no-op·출력 거절 시 문맥만 남지 않도록 rollback한다. delta/status는 문맥에 넣지 않는다.
+- resolve_prompt가 기존 chat_message_history와 명시 선택 message IDs를 읽는 것을 확인해 입력 선택 범위를 바꾸지 않았다. 제안서에 bounded final1건 문맥 복사 예외를 명시했다. 기존 전체 run 배열 중복 저장은 재도입하지 않으며 종료 증거 이후 final 호출 조건도 유지했다. Karpathy 원칙으로 기존 atomic upsert/replay/메시지 검증을 재사용했다.
+- 누적 cargo check -p hello-agent-sidecar --tests --locked에서 quota PRAGMA의 u64 FromSql 오류2건을 발견해 기존 checked row_u64로 수정, 재검사 PASS(16278 exit0,5.06초)했다. 테스트 실행·실패 주입/재시작 교차 원장 검증·독립 검토는 아직 전이다. 신규 run format 생성/이관 활성화와 통합 UI/성능/G6/Windows/출시는 남는다. 사용자 DB·모델·앱/main/push 없음.
+
+### 2026-10-23 · by Codex
+- 직전3e23f3f는 과거 출력 페이지 탐색 구현 진척이다. clean 통합 checkout에서 item_order 검사를 append transaction과 bounded 재시작 verifier 양쪽에 연결했다. 같은 run/item의 직전 row만 expression index로 조회하고 채널 변경·complete 뒤 append/중복 complete·본문이 달라진 final 승격을 거절한다. final item은 앞선 complete가 있어야 하며 승격은1회뿐이다. 이는 저장 순서 검사이며 기존 runtime 종료 증거를 대체하지 않는다.
+- 아직 비활성 V11 schema에 item 순서 인덱스를 추가했다. 전체 item/text map을 RAM에 축적하지 않는다. append 거절 시 head 불변과 동일 길이 final 본문 변조의 재시작 거절/sticky 실패 회귀를 작성했다. metadata 없는 기존 이벤트의 전역 final 순서 검사는 이 변경의 증거가 아니다.
+- Karpathy 최소 변경으로 기존 transaction/page 검증을 재사용했다. diff check만 수행했고 누적 컴파일/회귀/독립 검토는 아직 전이다. 후속 모델 문맥·신규 형식 생성/이관 활성화·실측/전체 G6·Windows/출시가 남는다. 사용자 DB/모델/앱/main/push 없음.
+
+### 2026-10-23 · by Codex
+- 직전c02f10c는 선택 실행의 최신 출력 패널 연결 진척이다. clean 통합 checkout에서 과거 기록 처음/다음/최신 전환을 연결했다. 탐색 시작 시 소비된 committed cursor를 고정하고100건/encoded512KiB 페이지 하나만 보관하며 byte 제한으로100건 미만인 경우에도 nextAfterSequence를 그대로 사용한다. live window 갱신은 별도로 유지한다.
+- 과거 페이지는 delta와 complete 원문을 명시적으로 구분해 표시한다. partial page를 완전한 답변처럼 조립하지 않으며 긴 항목의 저장 원문도 여기서 조회할 수 있다. 선택 변경/최신 전환 때 과거 요청을 abort하고 요청 객체에 결속해 이전 응답을 표시하지 않는다. 조회 실패 재시도와 고정 전체 범위 ko/en 안내를 추가했다.
+- Karpathy 최소 변경으로 기존 page decoder와 abort 수명을 재사용했다. diff check만 수행, 새 UI의 실행/컴파일·통합 회귀는 아직 전이다. 최신/과거 화면 연결은 구현됐지만 저장 항목 순서 검증·후속 모델 문맥·새 형식 활성화/독립 검토 및 G6/Windows/출시는 남는다. 사용자 DB/모델/앱 실행·main/push 없음.
+
+### 2026-10-23 · by Codex
+- 직전da8c39d는 V8 출력 조회 bridge 연결 진척이다. clean 통합 checkout에서 AgentRuns에 실행 선택형 출력 패널을 연결했다. head 확인 뒤 기존 bounded reader/window를 사용하고 한 선택 run만 읽는다. 알림은 힌트이며500ms head 재조회로 누락을 보완하고 sealed catch-up 후 타이머를 멈춘다. 선택 변경/unmount 시 abort·구독/타이머 정리로 늦은 결과를 표시하지 않는다.
+- head 조회는 전체 run binding이 검증된 legacy 기록에만 null을 돌려 기존 대화 안내를 표시한다. 손상/누락/다른 run은 계속 오류다. 조회 실패와 실행 실패/종료를 구분하는 ko/en 안내, 재시도·부분 텍스트/최신 창 안내를 추가했다. 과거 출력 page 탐색 버튼은 아직 미구현이며 안내만으로 전체 기록 접근 완료라고 주장하지 않는다.
+- Karpathy 최소 변경과 React 지침의 primitive effect 의존성·단일 구독·cleanup·label/상태 접근성을 적용했다. 이번 TSX 연결은 diff check만 수행했고 누적 컴파일/UI/회귀·독립 검토 전이다. DB 항목 순서 검증·과거 page 탐색/후속 문맥·장시간 실행 활성화와 G6/Windows/출시가 남는다. 사용자 DB·모델·앱 실행/main/push 없음.
+
+### 2026-10-23 · by Codex
+- 직전658417c는 native 출력 저장과 bounded 표시 모델 구현 진척이다. clean 통합 checkout에서 agent.outputHead/outputPage 읽기 요청을 공용 method 목록·sidecar dispatcher·run binding 검증·Storage API·Electron client/main/preload까지 연결했다. V8 bridge를 추가하고 renderer 경계와 V7 follow-up 조건을 V8에도 유지했다. 페이지 응답은 요청의 전체 binding/cursor/limit에 대조하며 별도 읽기 capability를 요구한다.
+- 새 query capability는 읽기 구현 존재일 뿐 새 run format 실행 허가가 아니다. 기존 V10의 legacy run 조회는 durable marker가 없어 거절하며 자동 V11 이관/새 실행 marker 생성은 아직 꺼져 있다. V8 전체 메서드 누락 거절 회귀를 작성했다. Karpathy 원칙으로 기존 저장 admission/권한·종료 규칙을 유지했다.
+- 인터페이스 연결에 필요한 pnpm exec tsc --noEmit PASS(37005, exit0)를 확인했다. 전체 테스트/Rust 누적 검증/독립 검토는 미실행이다. 실제 화면 구독/페이지 소비·저장 항목 순서 검증·후속 문맥·활성화 및 G6/Windows/출시가 남는다. 사용자 DB/앱/모델/main/push 없음.
+
+### 2026-10-23 · by Codex
+- 직전5397d19는 항목별 출력 계약/저장 진척이다. clean 통합 checkout에서 Codex delta/complete와 Claude assistant complete를 durable item metadata와 함께 저장하도록 연결했다. legacy는 종전 완료 응답 동작을 유지하고 metadata를 받지 않는다. 마지막 답변의 item 정보를 보관해 기존 프로세스 종료 확인 뒤에만 같은 항목을 final로 승격한다. 이미 저장한 durable status를 실패 종료 때 중복 저장하지 않는다.
+- bounded 표시 reducer를 추가했다. run 결속/연속 sequence·항목 channel·완성 뒤 잘못된 append를 거절하고 complete는 delta를 교체한다. 최신200행/본문4MiB·항목64KiB만 유지하며 잘린 텍스트/이전 기록 존재를 표시한다. 디스크 기록은 삭제하지 않는다. batch 실패는 기존 cursor/표시를 변경하지 않는다.3,000개·최종 승격·교차 run/경주 없는 원자 실패 회귀를 작성했다.
+- Karpathy 최소 변경으로 기존 cleanup-before-final 계약을 유지했다. diff check만 확인했고 누적 Rust/TS 컴파일·테스트/독립 검토는 아직 미실행이다. reducer는 UI 미연결이며 Claude token delta가 아니라 검증된 assistant 메시지 단위다. DB 항목 순서 admission·page IPC/화면/후속 문맥·새 run 활성화·G6/Windows/출시가 남는다. 사용자 DB/모델/앱/main/push 없음.
+
+### 2026-10-23 · by Codex
+- 직전9bbe3d6는 durable 공간 검사 구현 진척이다. clean 통합 checkout에서 Rust/TS OutputRow에 선택 itemUpdate(itemId/channel/append-or-complete)를 추가했다. UTF-8 ID128B·control 문자·kind/operation 조합을 양쪽에서 검사하며 final+append를 거절한다. 기존 event 및 marker 없는 페이지는 유지한다.
+- V11 출력 row에 bounded nullable metadata 열을 추가하고 append transaction/페이지 조회/단일 page 검증에 연결했다. 기존 v1 DB가 아니라 아직 비활성인 V11 초안 변경이며 정확 schema 검사는 이전 개발용 V11을 거절한다. 항목 완성은 종료 증거가 아니고 중복 제거용 표시 의미다. 저장 왕복 및 Rust/TS 메타데이터 경계 회귀를 작성했다.
+- Karpathy 원칙으로 기존 public event 계약은 바꾸지 않았다. diff check만 수행했으며 컴파일/회귀는 누적 검증 전이다. 다음은 공급자 이벤트→itemUpdate 저장 연결·항목별 순서 검증·bounded 표시 모델과 page IPC/UI다. 후속 문맥·실행 활성화/독립 검토·전체 G6/Windows/출시도 남는다. 사용자 DB·인증·실제 모델·앱·main/push 변경 없음.
+
+### 2026-10-23 · by Codex
+- 직전7f64397은 native transport 예산 선택 구현 진척이다. clean 통합 checkout에서 진행 출력 연결을 조사했고, 현행 public event에는 item ID/append-replace 정보가 없어 delta를 status 문자열로 단순 저장하면 완성 응답과 중복되는 계약 누락을 확인했다. 이 부분은 별도 출력 항목 계약 확장 후 연결하며 완료로 표시하지 않는다.
+- 독립적으로 필요한 durable output 저장 용량 검사부터 연결했다. DB의 물리 길이와 SQLite 논리 페이지 중 큰 값+WAL/SHM을 합산해 제안1GiB 예산을 검사하고 여유 공간256MiB+쓰기 전8MiB headroom을 요구한다. Unix no-follow regular file/fstatvfs, overflow 거절, 쓰기 전/transaction 내 확인을 추가했다. 복구/lifecycle 쓰기는 제한하지 않고 기록 자동 삭제도 없다. OS 공간 예약이 아니므로 concurrent ENOSPC/commit 실패의 persistent fence 처리는 여전히 필수다. Windows probe 미구현은 fail-closed다.
+- Karpathy 최소 변경 원칙으로 기존 append transaction만 사용했고 검사 경계 회귀를 작성했다. diff check만 수행, 새 코드 컴파일·회귀·독립 검토/수치 검증은 누적 파동에서 진행한다. 제품 새 형식 활성화는 아직 하지 않았다. 항목별 진행 출력·page IPC/UI·후속 문맥·전체 G6/Windows/출시가 남으며 사용자 파일 삭제/모델/앱/main/push 없음.
+
+### 2026-10-23 · by Codex
+- 직전6c99bde는 native parser 예산 전달과 누적 컴파일 진척이다. clean 통합 checkout에서 Codex BoundTextSession→TextSession→TurnStart, Claude 초기화→SessionChannel→Session의 durable 예산 선택을 연결했다. 선택은 검증된 run projection의 format1에서만 하며 unknown marker는 거절한다. 기존 동기 진단/테스트 경로는 legacy를 명시한다.
+- Karpathy 최소 변경으로 기존 입장·프로필·권한·종료 검사를 유지했다. 새 run marker 생성과 V11 자동 이관은 여전히 비활성이어서 실제 제품 한도를 아직 올리지 않았다. native 경로는 완성 응답 중심으로 persist_text를 호출하므로 진행 delta 저장·조회/UI 연결도 남는다. transport deadline/권한 요청 한도는 바꾸지 않았다.
+- 이번 변경은 diff check와 호출 지점 대조만 수행했고 컴파일/회귀는 누적 검증 대상으로 남겼다. 물리 quota·최종 응답 문맥·page IPC/UI·독립 검토·G6 전체/Windows/출시는 미완료다. 사용자 DB·앱·인증·모델 실행, main 병합/push 없음.
+
+### 2026-10-23 · by Codex
+- 49b72ba/clean 통합 브랜치에서 native observation 소유 경로를 추적했다. Codex TurnStart→TurnStream, Claude Session→SessionProjection에도 명시 예산 전달을 추가하고 전송/관측 시작 이후 예산 전환을 거절한다. 기본값은 legacy이고 transport/runtime 자동 선택은 아직 연결하지 않았다.
+- durable Codex의 lifecycle 항목 문자열 보관에 별도4MiB 상한을 두었다. 출력3,000 delta·상한 후 sticky 실패·초기화 이후 전환 거절 회귀를 작성했다. Claude 권한 요청1,024개 제한과10분 실행 제한은 변경하지 않았다. 이 수치들은 전체 메모리 검증 전 제안이며 제품 활성화가 아니다.
+- 누적 cargo check -p hello-agent-sidecar --tests --locked에서 V11 migration 테스트의 glob import 충돌을 발견해 명시 import로 수정했고 재실행 PASS(19612, exit0)했다. 새 회귀 실행·전체 QA는 아직 하지 않았다. 물리 quota·transport 선택·IPC/UI·최종 응답 문맥·독립 검토가 남는다. 사용자 DB/계정/모델/앱 실행 및 main/push 없음.
+- 500줄 초과 예방을 위해10월22일 워크로그 전부를 같은 월 아카이브로 내용 그대로 이동했다.10월23일 전체와 고정 섹션을 보존하면300줄 이하로 줄일 수 없어 날짜 분할/고정 섹션 이동 금지를 우선했다.
+
+### 2026-10-23 · by Codex
+- 직전d24301d는 durable runtime 경로 진척이다. clean 통합 checkout에서 core classifier와 Codex TurnProjection/Claude SessionProjection의 예산을 LegacyV1/DurableV1로 분리했다. 기존 생성자는 legacy를 유지하고 새 생성자/초기 classifier 선택에서만 durable을 지정할 수 있다. 관측 시작 후 예산 변경은 거절한다.
+- 새 비활성 예산은 내부65,536개·공개16,384개·raw256MiB·공개본문64MiB이며 단일 항목 상한은 그대로다. parser는 원문 누적 없이 카운터/Claude bounded delivery ID 집합을 유지한다. 장시간 count 통과·초과 후 sticky 실패 회귀를 작성했지만 실행 전이다. 실제 runtime은 아직 이 모드를 선택하지 않는다.
+- diff check만 확인했다. 물리 quota·capability negotiation·새 run 생성/IPC/UI·최종 응답 문맥 및 누적 검증/독립 검토가 남으며 수치와 예산 합계는 활성화 전 검토 대상이다. 사용자 DB·앱·모델·main/push 없음.
+
+### 2026-10-23 · by Codex
+- 직전e6b0c6a는 lifecycle 원자 저장 연결 진척이다. clean 통합 checkout에서 actual runtime의 명시 output_format_version 경로를 추가했다. projection 조회는 head/run 결속을 확인하고 공개 출력 저장은 배열 복사 대신 Storage append로 전달한다. poll collector는 새 형식에서 과거 배열을 보관하지 않고100개/4MiB ingress batch만 유지하며64MiB 본문 예산은 저장 계층에 전달한다. 기존 v1 제한은 유지한다.
+- 복구 시 output head를 확인하고 종료/실패 projection 재작성 시 marker를 보존하며 legacy 배열/중복 counters를 제거한다. 새 형식의 per-event chat projection 중복 쓰기는 하지 않는다. 따라서 UI page 조회와 최종 응답/후속 문맥 연결은 활성화 전 필수 잔여다. provider observation/parser 한도와 새 run marker 생성·V11 자동 이관은 아직 미연결이라 실제 장시간 실행을 켜지 않았다.
+- Karpathy 최소 변경 원칙으로 기존 run/event binding·Storage API를 재사용했다. 이번 누적 runtime 변경은 아직 실행 검증 전이며 diff check만 수행했다. 물리 quota·IPC/UI·독립 검토/누적 검증이 남으며 사용자 DB·앱·모델·main/push 없음.
+
+### 2026-10-23 · by Codex
+- 직전8d22b9b는 Storage 진입점 연결 진척이다. clean 통합 checkout에서 기존 write_projection의 run 저장 transaction에 sync_run_projection을 연결했다. 새 output marker는 V11에서만 허용하고 첫 aggregate event에서 head를 생성하며 terminal 상태 저장 시 seal을 같은 transaction에 반영한다. 중간 누락 head 복원·legacy로 되돌림·sealed→active 전환은 거절한다.
+- 기존 legacy run은 output marker가 없으면 기존 저장을 유지한다. 생성/종료 모두 기존 runRecord/run binding/fence 검증을 재사용하며 실패하면 상위 transaction이 run/lock/output 갱신을 함께 rollback한다. 실제 provider는 아직 새 marker를 생성하지 않고 자동 V11 이관도 비활성이므로 장시간 실행 기능은 아직 켜지지 않았다.
+- lifecycle 변경과 head가 함께 rollback되는 회귀를 작성했다. 누적 테스트 실행은 보류했고 format/diff만 확인했다. 다음은 provider/runtime 새 형식 생성·출력 append/terminal 경로와 quota 연결이다. 사용자 DB·앱·모델·main/push 없음.
+
+### 2026-10-23 · by Codex
+- 직전abfd003는 V11 재시작 검증 연결 진척이다. 현재 clean 통합 checkout에서 materializer/compaction writer의 runtime schema 분기에11을 추가하고 TS 버전 상수를 맞췄다. V10의 기존 frozen policy/golden은 덮어쓰지 않는다. 출력 원장은 기존 event 압축 대상에 추가하지 않았다.
+- Storage 내부 append_agent_output_record/agent_output_head/agent_output_page 진입점을 추가했다. admission 완료·schema11·run 결속을 확인하며 쓰기는 IMMEDIATE transaction과 기존 append runtime fence 검사 후 commit, maintenance epoch 무효화를 수행한다. private primitive를 실제 Storage 수명에 연결했지만 provider/runtime/IPC 호출은 아직 없다. physical quota는 미연결이다.
+- Karpathy 최소 변경으로 기존 admission/fence 검사를 재사용했다. 이번 누적 변경은 아직 실행 검증 전이며 format/diff만 확인했다. V11 자동 이관·제품 활성화/출력 실행 생성·UI 및 독립 검토는 남는다. 사용자 DB·앱·모델·main/push 변경 없음.
+
+### 2026-10-23 · by Codex
+- 직전9a0b757는 V11 이관 준비 구현 진척이다. 현재 clean 통합 checkout에서 V11 공용 저장버전 상수와 기존 bounded admission의 schema/control 분기, 압축 prefix/보존 event/message 조회·replay·append source index 분기를 연결했다. 기존 V10 조건은 유지하고 V11에서 같은 압축 witness 의미를 사용한다.
+- `agent_output::schema::verify_admission`이 기존 snapshot/replay session과 새 output closure를 순차 검증한 뒤 최초 data_version과 최종 transaction의 version/schema를 대조한다. output 검사만으로 기존 원장 검증을 대체하지 않는다. 이관 회귀에 결합 admission 호출을 추가했지만 아직 실행 전이다.
+- diff check만 확인했다. product open 자동 이관/실행은 활성화하지 않았으며 V11의 나머지 lifecycle/compaction 계약·신규 run 생성/runtime·물리 quota·UI 연결과 누적 검증/독립 검토는 남는다. 사용자 DB·앱·모델·main/push 변경 없음.
+
+### 2026-10-23 · by Codex
+- 직전be517e2는 누적 Rust 컴파일 결함 수정 진척이다. clean 통합 checkout에서 V10→V11 schema 준비와 exact schema 검증 함수를 구현했다. IMMEDIATE transaction 안에서 기존 V10 schema/control을 확인하고 빈 출력 원장2table 추가·metadata11 교체·새 schema 검증 후 commit한다. ALTER RENAME 대신 같은 이름으로 metadata를 transaction 내 교체해 기존 trigger 참조 이름을 보존한다. 기존 run 배열은 변환/삭제하지 않는다.
+- Karpathy 최소 변경으로 기존 V10 golden과 materialization 검증을 재사용했다. 새 schema 확인은 object 수/문자열 길이를 제한한 뒤 비교한다. 성공/기존 validator 거절·재이관 거절·변조된 base에서 무변경 거절 회귀2개를 작성했다. 아직 실행하지 않았고 format/diff만 확인했다.
+- product open에는 호출하지 않았다. V11을 처리하는 기존 replay/compaction/admission 분기 및 신규 run 생성/runtime 연결을 함께 바꾸고 독립 검토하기 전 자동 이관은 비활성이다. 사용자 DB·앱·모델·main/push 변경 없음. 다음은 이 V11 호환 분기와 admission 연결이다.
+
+### 2026-10-23 · by Codex
+- 직전e8835c0는 run/output 결속 구현 진척이다. 현재 clean 통합 checkout에서 V10 exact schema identity·메타데이터 CHECK·기존 migration/admission 분기를 대조했다. 새 테이블만 생성하면 기존 검증이 거절하므로 자동 이관은 아직 활성화하지 않았다. 다음 저장 연결 전 필요한 누적 컴파일 진단만 수행했다.
+- `cargo check -p hello-agent-sidecar --tests`에서 새 출력 코드의 serde 직접 의존성 누락과 rusqlite0.40의 u64 FromSql/ToSql 미지원 오류를 발견했다. 기존 잠금버전 serde1.0.228을 직접 선언하고 기존 row_u64 및 checked i64 변환을 재사용해 음수/범위초과를 거절하도록 수정했다. Cargo.lock은 sidecar 의존성 목록1줄만 변경됐다.
+- 동일 누적 컴파일 재실행 PASS(5.71초), 테스트 실행은 하지 않았다. format/diff 검사 수행. 새 migration·기존 run 이관·R3 통합·quota/runtime/UI는 여전히 남으며 제품 DB/앱/모델·main/push 변경 없음. 이번은 구현 연결을 막는 컴파일 결함 수정이지 전체 기능 합격이 아니다.
+
+### 2026-10-23 · by Codex
+- 직전0eeb86d는 출력 table closure 구현 진척이다. clean 통합 checkout에서 실제 runs projection/AgentRunRecord/RunFenceBinding 형식을 대조하고 output head→run 결속을 연결했다. source_kind·명시 output_format_version=1·배열 부재·run/chat/task/project/worktree/profile 신원·state와 terminal 출력 sealed를 검사한다. provider fence가 있으면 기존 검증기를 재사용하며 이것만으로 프로세스 종료나 잠금 해제를 승인하지 않는다.
+- 전체 closure 끝에 runs→output head 역방향 검사를 추가하여 새 형식 run의 누락 head/지원하지 않는 형식을 거절한다. 기존 legacy는 marker가 없으면 이 검사 대상이 아니며 기존 검증기를 대체하지 않는다. Karpathy 최소 변경 원칙으로 runRecord 검증을 재사용했다. 누락/legacy/신원/state 및 reverse 누락 회귀를 작성했다.
+- 새 테스트 포함 누적 구현은 아직 실행 검증 전이며 format/diff만 확인했다. schema migration/R3 admission 및 runtime의 새 형식 생성·physical quota 연결은 남아 있다. 사용자 DB·인증·모델·앱 실행·main/push 없음. 다음은 새 형식의 생성/이관과 기존 저장 검증 경계 연결이다.
+
+### 2026-10-23 · by Codex
+- 직전ce9dc96는 단일 run 검사 구현 진척이다. clean 통합 checkout에서 같은 검사기를 재사용하는 전체 출력 table closure를 추가했다. head를 rowid keyset으로 순회하고 각 run을 제한된 page로 검사한 뒤 record→head 역방향 exact lookup으로 고아/범위 밖 row를 거절한다. 비양수 rowid·head key/binding 불일치도 거절하며 한 connection 차용/data_version 경계를 유지한다.
+- 빈 run을 포함한 전체 순회·고아 row 거절 회귀를 추가했다. 이전 누적 변경과 함께 아직 실행 전이며 format/diff만 확인했다. 전체 출력 table 일치와 전체 DB admission은 구별한다. run/fence 결속·기존 schema identity/이관·물리 quota·runtime/UI 연결은 남아 있어 실제 제품 DB에는 활성화하지 않았다.
+- Karpathy 최소 변경으로 기존 page/session 구현을 재사용했다. 사용자 데이터·앱·모델 실행·main/push 없음. 다음은 run/fence 결속과 migration/admission 통합이며 전체 목표는 미완료다.
+
+### 2026-10-23 · by Codex
+- 직전921251c는 출력 저장 primitive 구현 진척이다. clean 통합 checkout에서 기존 R3 session의 connection 독점 차용/data_version/오류 시 cursor 폐기 방식을 읽고 Karpathy 최소 변경으로 단일 run 출력 검증 세션을 추가했다. 호출당100행/512KiB page만 확인하며 transaction은 호출 사이 보유하지 않는다. 전체 row 순서·본문 byte 합계·head 뒤 extra row·DB event ID와 JSON event ID 불일치를 거절한다.
+- 정상101개 다중 호출·누락/합계/ID/extra 손상·취소 이후 재사용 거절 회귀3개를 작성했다. 이전 추가분과 함께 아직 실행하지 않았으며 format/diff 검사만 수행했다. 한 run의 출력 검증은 전체 admission이 아니다. 전체 head 목록/고아 row 역방향 검사·run/fence 결속·schema migration·물리 quota·제품 연결이 계속 남는다.
+- 새 DB 생성/기존 사용자 데이터·모델·앱 실행·main/push 없음. 다음은 위 전체 admission closure와 migration 연결이며 전체 목표는 유지한다.
+
+### 2026-10-23 · by Codex
+- 직전eed1472는 출력 reader 구현 진척이다. 현재 통합 checkout에서 storage V10과 기존 append/replay 경계를 확인하고 Karpathy 최소 변경으로 transaction-scoped 출력 원장 함수를 추가했다. begin/append/seal/head/page, run 결속·연속 seq·event ID 유일성·text 예산·byte 제한 keyset 조회를 구현했다. 본문은 전용 canonical row 한 번만 저장하고 head만 파생 갱신하도록 설계를 구체화했다.
+- 아직 schema migration/admission/R3 검증·run/fence 원자 결속·물리 quota·실제 runtime 호출은 연결하지 않았다. 제품 DB는 변경하지 않는다. caller는 write admission과 helper 실패 시 전체 rollback을 책임지며 sealed는 종료 성공을 뜻하지 않는다. source/read/UI 활성화는 이 경계 연결 및 독립 검토 뒤다.
+- 3,000개 append/page/seal 및 rollback 두 회귀를 작성했다. 테스트 실행은 이전 TS/head/reader 추가분과 함께 후속 연결 검증으로 모은다. diff check만 수행했다. 모델/앱·사용자 데이터·main/push 없음. 다음은 migration/R3 admission 연결이다.
+
+### 2026-10-23 · by Codex
+- 직전2479f04는 TS 계약·공유 fixture 구현 진척이다. clean 통합 checkout에서 L1의 run-bound OutputHead(Rust/TS)와 단일 page-in-flight reader를 추가했다. 구독 등록 완료→head→연속 page→head 재조회, 알림 합치기·외부 reconciliation 호출, consumer 수락 뒤 cursor 전진, abort 후 늦은 응답 무시, sealed head 역전 거절을 구현했다.
+- sealed는 출력만 닫으며 프로세스 종료/성공 증거가 아니다. reader는 출력 전체를 쌓지 않고1page만 소비자에게 전달한다. 소비자의 bounded 표시·실제 IPC source·정기 reconciliation timer·재접속 lifecycle 연결은 아직 남아 있고 새 코드는 제품 경로에서 호출하지 않는다. Karpathy 최소 변경으로 기존 page 검증을 재사용했다.
+- 구독/마지막 commit 경주·알림 누락·3,000개 순회/동시 refresh·consumer 실패·sealed 변경·닫힌 화면 늦은 응답 회귀5개를 작성했다. 이전 TS/golden 추가분과 함께 테스트 실행은 후속 연결 검증으로 모은다. diff check만 PASS, 앱/모델/사용자 데이터 변경 없음. 다음은 저장 schema/R3 admission 및 append/head/page source 구현이며 전체 목표는 미완료다.
+
+### 2026-10-23 · by Codex
+- 직전34c5ea3는 Rust 페이지 계약 구현 진척이며 현재 clean m5/coding-agent-ide에서 TypeScript 대응을 추가했다. Karpathy 최소 변경 원칙으로 기존 public event/run binding 검증기를 재사용하며100개/512KiB, 안전 정수·요청 결속·연속 순서·중복/zero-progress 거절과 decode 전 byte 상한을 맞췄다. ES2020 기준 API를 유지했다.
+- Rust/TypeScript가 함께 읽는3,000번째 출력 golden JSON과 TS5개/Rust1개 회귀를 추가했다. 이번에는 전체/개별 테스트를 실행하지 않고 후속 계약 연결과 묶는다. diff check만 통과했으며 추가 테스트 결과는 아직 미검증이다. 실제 단일 run3,000개 성공으로 표현하지 않는다.
+- 다음은 head/구독 catch-up 및 storage admission·append/page 연결이다. L1 전체 동결·독립 검토는 아직이며 capability/IPC 활성화·기존256개 경계 변경은 없다. 사용자 데이터·모델·앱 실행·main/push 없음.
+
+### 2026-10-23 · by Codex
+- 직전 dac8afd는 승인 방향·독립 검토가 반영된 설계 진척이다. 같은 clean 통합 checkout에서 메인이 L1 출력 page 계약 구현을 시작했다. Karpathy 최소 변경 원칙으로 기존 단일 public event 검증을 재사용하고, 독립 모듈에 요청/run 결속·연속 durable 순서·100개/512KiB·유효 cursor·zero-progress 거절을 추가했다.
+- 현행 본문64KiB는 JSON escaping으로384KiB가 될 수 있어 page 제안을256→512KiB로 보완했다. runtime capability/IPC/DB·기존256개 제한은 변경하지 않아 현재 실행 동작은 그대로다. 3,000개 페이지 순회·교차run/중복/누락/범위·최대 escaped 항목 회귀를 작성했다. 이는 parser/저장/전송/UI의 실제3,000개 실행 성공이 아니다.
+- 다음은 TS/golden·head/구독 및 저장 스키마 계약을 연결하는 L1 잔여다. 전체 검증은 연결 뒤 모아서 진행하며 모델 호출·사용자 프로젝트·main/push 없음.
+- focused `cargo test -p hello-agent-protocol output_pages --lib` 4PASS. 첫 실행의 fixture 상대경로 컴파일 오류를 바로잡았다. 새 모듈 Rust2021 format과 diff check를 수행했다. 전체 회귀·독립 안전 검토·제품 활성화는 아직 하지 않았다.
+
+### 2026-10-23 · by Codex
+- 사용자가 여러 bounded run으로 부하를 나누는 대신 **장시간 단일 실행 계약부터 재설계**를 선택했다. 직전 선택 대기는 해소됐으며 준비했던 결합 메모리11회 시험은 시작하지 않았다. 기준 HEAD8ddd8ac, m5/coding-agent-ide에서 설계 문서와 색인만 변경했다.
+- `proposals/m5-long-running-agent-streams.md`에 append-only 출력 원장/작은 head, 영속 순서와 페이지 조회, bounded 전달·UI, v1 호환·R3 admission, L1~L5 구현 순서를 제안했다. runtime의 persist_public_event_record 전체 배열 복제와 protocol/전송 제한을 대조했다. 새 상한·schema/API 번호는 미확정이며 현재 제품의256개 제한·시간 제한·종료/복구 계약을 변경하지 않았다.
+- 다음은 독립 설계 검토 후 L1 계약 동결·구현이다. 실제 모델 호출·앱 실행·생성 데이터·main 병합/push 없음. 시작 메모리 기준 실패와 전체G6·실제 공급자·Windows/출시 잔여는 유지한다.
+- 독립 읽기 전용 검토에서 core/실제 공급자 observation 제한 누락과 구독/최종 출력 경주를 발견하여 초안에 반영했다. 기존 v1 경계 보존·신계약 parser 회귀, 구독 handshake 뒤 head 재조회와 reconciliation, ENOSPC 시 시작 fence 보존/재시작 복구를 추가했다. 문서 diff 검사 통과이며 실행 코드 검증이나 G6 합격은 아니다.
+- 같은 검토자의 재검토에서 세 지적은 구현 전 방향 수준에서 해소됐다. 구체 handshake·fence 구현 일치·실패 주입은 L1~L3 잔여이며 설계 검토를 구현 합격으로 표현하지 않는다.
+
+### 2026-10-23 · by Codex
+- 8ddd8ac/clean에서 남은 스트림 시험 범위를 대조했다. 기존 packaged probe는 사용자 appendChatMessage 저장 경로이며 provider output 시험이 아니다. 실제 agent 공개 이벤트의 실행당256개 상한은 Rust 입장/종료 및 TS 원장 검증에 걸려 있고, 기존 native4chat 시험은 각각 status/question/final3개와 종료를 확인한다. 이는 이미 알려진 제한의 코드 재확인이며 새 부하 성공 증거가 아니다.
+- 계획의 채팅당3000개를 단일 run에 넣으려면 계약 변경이 필요하다. 같은 채팅에서 여러 bounded fake run을 이어 부하 총량을 확인하는 방법과 장시간 단일 실행의 저장/표시 계약을 재설계하는 방법을 사용자에게 명시 선택 요청했다. 답변 전 상한을 늘리거나 사용자 메시지 결과를 provider event 결과로 바꾸지 않는다. 새 앱/모델/시험은 실행하지 않았고 전체G6·메모리·실제 공급자 승인·Windows/출시 미완료는 유지한다.
+
+### 2026-10-23 · by Codex
+- 직전 원인 검토는 제품 진척 없는 분석으로 분류하고 bd21cec에서 결합 메모리 시나리오를 기존 반복 수집기에 연결했다. --memory-file-diff가 준비1+본10회로 전달되며 기존 순차 실행·소스/패키지 동일성·정상 종료·관측PID 부재 후 회차별 임시 데이터 정리를 재사용한다. Karpathy 최소 변경으로 제품/안전 경계와400/800/120MiB 기준은 건드리지 않았다.
+- 재사용 가능한 원시 관측 검증은 공존 표식·정확 fixture 크기/원본 불변·유한60초 대기·원시 RSS 요약 일치를 요구한다. focused4PASS(기준 초과 보존, 공존/fixture/대기/표본/요약 변조 거절, 기존 diff-only 호환), 문법/diff 검사 PASS. 기존 실제 gy5icd JSON을 새 검증기로 읽어 idle457719808/peak724025344/retained0을 재계산 확인했다. 이는 과거 관측 검증이지 최신 commit의 새 실측이 아니다.
+- 최소11분 대기가 필요한 실제11회 실행은 아직 하지 않았다. 같은 idle 실패를 반복하기 전에 이 반복 수집 연결을 구현 체크포인트로 남긴다. 네 stream 결합·전체G6와 시작 메모리 원인·실제 공급자 승인·Windows/출시 잔여는 유지한다. 새 앱/모델 실행·생성 데이터·main/push 없음.
+
+### 2026-10-23 · by Codex
+- bd21cec/clean에서 시작 메모리 원인 조사에 대한 독립 읽기 전용 config_layers_review 1명을 호출했다. 기존 qSKTqA/gy5icd/lE2OWw와 빈창·폰트/preload 비교, Monaco lazy·main/preload/renderer·필수 sidecar 경로를 대조했다. 시작 시 제거하여31~37MiB 절감을 기대할 근거가 있는 구체 자원은 찾지 못했다. 검토자는 시험/앱/모델 실행·파일 변경을 하지 않았다.
+- 메인도 생성 index.html이 entry JS/CSS만 로드하고 Monaco는 동적 import임을 확인했다. qSKTqA의 renderer used heap 약3.47MB만으로 프로세스RSS나 누수 원인을 확정하지 않는다. 빈 resource timing 배열을 미로딩 증거로 쓰지 않는다. 동일 언어/빈창 실험은 반복하지 않고 GPU·sandbox·sidecar admission·400MiB 기준은 유지한다.
+- 시작 메모리 개선은 아직 원인 미확정이다. 독립 검토 결과는 성능 합격이나 전체 완료가 아니며, 다음은 이미 구현한 결합 메모리 시나리오의 반복 수집 연결 등 G6 누락 부분이다. 실제 Codex 쓰기·메시지 검사 분리 승인과 Windows/출시 조건은 별도로 남는다. 이번은 분석만 수행했고 새 제품 수정·빌드·앱 실행·main/push 없음.
+
+### 2026-10-23 · by Codex
+- G6 수집 누락 중 큰 파일 모델과 diff 동시 유지 메모리를 보완했다. Karpathy 최소 변경으로 기존 packaged 관측기에 --memory-file-diff를 추가했다. 기존 생성기·파일/트리 probe·diff probe·250ms RSS·닫기60초/잔류3초·정상 종료를 재사용하며 편집 입력 없이 clean 모델을 유지해 프로젝트 닫기를 시험한다. 제품 코드·합격선·안전 계약은 변경하지 않았다. 네 stream 동시 부하/10회 반복/전체G6는 여전히 별도다.
+- 문법/diff check PASS. 실제 세션57975의 gy5icd는 파일 모델+diff 공존 true, 원본 불변 true, 가시성 유지,419표본,60,001.5ms 대기와 seed/앱 exit0·shutdown confirmed를 확인했다. idle457719808B/peak724025344B/retained delta0B로 idle만 초과하여 exit1/FAIL이다. 파일/트리/diff 시간은 이번 단일 관측 기준 이내이며 누수 없음이나 제품 완료로 확대하지 않는다.
+- `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-gy5icd/result.json`과 캡처는 보존했다. 모든 관측PID 부재 확인 뒤 자체 project/other-project/userdata 약105MiB를 영구 정리했다. 다음 원인 분석은 시작 메모리에 집중하며 스트림/G6 전체·별도 승인·Windows/출시 잔여는 유지한다. main/push·로그인·모델 실행·사용자 프로젝트 변경 없음.
+
+### 2026-10-23 · by Codex
+- 최신5af0541 소스 패키지의 기존 --large-project 시험을 한 차례 실행했다(세션93537). 자체10,000파일/1,000폴더·5MiB/100,000줄 fixture이며 로그인·모델·사용자 프로젝트를 사용하지 않았다. treeRoot264.6ms/expand133.3ms/fileEditable449.5ms/DOM362와 입력 준비1+측정10회 p95 24.7ms는 각 기준 이내다. visible 유지/hiddenTransitions0, renderer long task최대70ms/main73.621ms·관측완료/유실없음이다.
+- idle452329472B(약431.38MiB)로400MiB 초과이므로 전체exit1/FAIL을 유지한다. 이전50.6ms와 다른 단일 실행을 최적화 인과 효과·전체G6 합격으로 확대하지 않는다. 입력은 CDP 삽입/DOM+두frame 근사이며 물리키보드/IME 검증이 아니다. snapshot관측31.09초는 계속 남는다.
+- seed13813 및 앱13824 exit0/shutdown confirmed 후 관측 자손13825/13826/13828/13836 포함 부재를 확인했다. 이번 qSKTqA의 project/other-project/userdata 약93MiB만 영구 정리했으며 `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-qSKTqA/result.json`과 화면/진단 증거는 보존한다. 저장소/인증·main/push 변경 없음. 다음은 메모리 기준과 전체G6 수집 미완료이며 Codex 실제 쓰기·채팅 검사 분리 승인 및 Windows/출시 잔여는 유지한다.
+
+### 2026-10-23 · by Codex
+- 직전 무CDP 관측은 새 실패 증거를 얻은 진척으로 분류한다. HEAD3406668에서 main/preload 번들(143/65KiB), 지연 Monaco, 기존 빈 Electron 창356~359MiB 기록을 대조했다. 조건이 다른 표본을 차감해 원인을 확정하거나 보안/GPU 기능을 끄지 않는다. 시작 메모리 원인은 아직 미확정이다.
+- 다음 실행 가능한 작업은 out에 빠진 a2deb80의 텍스트 갱신 시 Monaco 옵션 재설정 방지 변경을 정식 패키지에 포함하는 것이다. 기존 미커밋 진단 워크로그를 함께 보존하고 최신 소스 패키징을 진행한다. 이번 기록은 패키징/성능 성공 선언이 아니며 실제 결과는 후속 기록한다. 실제 모델 승인과 채팅 검사 분리 결정은 대기 상태를 유지한다.
+- clean5af0541에서 CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4 pnpm run m5:package:smoke를 실행했다. 세션44421 exit0, darwin-arm64 패키지 검사 PASS이며 Rust release 캐시는0.26초에 재사용했다. out 앱에 a2deb80 입력 최적화가 포함되어 패키지 소스 지연은 해소됐다. 실제 입력 지연 기준 통과·메모리 개선·제품 완료를 뜻하지 않는다. main 병합/push·실제 모델 호출은 없으며 이 결과 기록은 후속 미커밋으로 남긴다.
+
+### 2026-10-23 · by Codex
+- 정상 종료 후 관측PID9501/9506/9507/9535/9537의 부재를 일반 권한 ps로 확인하고 이번 lE2OWw/userdata(2.3MiB)만 영구 삭제했다. JSON 증거는 보존했으며 기존 사용자 데이터는 대상이 아니다.
+- 목표 재개 후 메모리 경로를 읽었다. Monaco는 이미 지연 로딩되고 모델/편집기/구독의 dispose 및 controller stream 정리가 있어 Karpathy 원칙에 따라 추측성 삭제·기능 축소를 하지 않았다. OS 잠금 표시가 사라져 이전 환경 차단이 달라졌으며, 기존 f168262 소스 패키지의 무CDP 진단을 재개했다(현재 HEAD3406668과 패키지 소스를 구별한다).
+- 제한 실행9FtpiK는 준비 전 SIGABRT/표본0으로 실패했다. 일반 앱 권한으로 실행한 lE2OWw는 실제 시작 화면을 CUA로 확인했고 준비 표식1460.07ms 후40개 RSS 표본을 수집했다. 최대455229440B(약434.14MiB)로400MiB 초과/FAIL이다. 마지막400900096B만 선택해 합격으로 바꾸지 않는다. 디버거 미사용만으로 기준 실패가 해소되지 않는 새 증거이며 전체 G6 합격은 아니다.
+- CUA Cmd+Q로 시험 앱9501의 정상 종료(code0/signal null)와 DB shutdown confirmed를 확인했다. 결과는 `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-packaged-ui-lE2OWw/result.json`에 보존했다. 모델/로그인/사용자 프로젝트·안전 검사 변경은 없고 별도 승인 두 건은 여전히 대기다. 다음은 이 시작 메모리 관측과 기존 구성별 증거의 원인 비교 및 최신 패키지 검증이며 Windows/전체G6/출시 미완료는 유지한다.
+
 ### 2026-10-22 · by Codex
 - 자동 목표 재개에서 직전 턴을 개발 진척 없는 단건 복구 재확인으로 분류했다. 현재 Git은 기존 워크로그만 변경됐고 diff check가 통과하며, OS의 CGSSessionScreenIsLocked=Yes를 다시 확인했다. 진행 중인 시험 핸들은 없고 메시지 저장 검사 분리·새 Codex 실제 쓰기 시험 승인 응답도 없다. 동일 승인/환경 차단이 세 차례 이상 연속되어 목표를 blocked로 전환한다. 이는 완료나 사용자 요청에 의한 일시정지가 아니다.
 - 재개 조건: 화면 잠금 해제 후 가시성 기반 성능 검증, 채팅 저장 시 Git 전체 검사 분리 여부 결정, Codex 임시 프로젝트 파일 수정1회 실행 승인. 승인 전 안전 검사 변경이나 모델 실행을 하지 않는다. 전체 G6 수집·입력/메모리 기준 실패·Windows/출시 검증은 미완료로 유지한다. 이 기록 외 제품·인증·프로젝트 변경, main 병합/push는 없다.
