@@ -32,7 +32,8 @@ const memoryDiff = process.argv.length === 3 && process.argv[2] === '--memory-di
 const memoryLifecycle = memoryDiff || memoryFileDiff;
 const startupSeries = process.argv.length === 3 && process.argv[2] === '--startup';
 const deferredCdp = process.argv.length === 3 && process.argv[2] === '--deferred-cdp';
-const noCdp = process.argv.length === 3 && process.argv[2] === '--no-cdp';
+const noCdpProject = process.argv.length === 3 && process.argv[2] === '--no-cdp-project';
+const noCdp = noCdpProject || (process.argv.length === 3 && process.argv[2] === '--no-cdp');
 const mainTraceDiagnostic = process.argv.length === 3 && process.argv[2] === '--main-trace';
 const nativeChatStream = process.argv.length === 3 && process.argv[2] === '--native-chat-stream';
 const largeDiff = memoryLifecycle || (process.argv.length === 3 && process.argv[2] === '--large-diff');
@@ -69,7 +70,7 @@ persist();
 const env = {...process.env};
 delete env.ELECTRON_RUN_AS_NODE;
 delete env.NODE_OPTIONS;
-if (projectFlow) {
+if (projectFlow || noCdpProject) {
   try {
     report.project = await seedPackagedProject(path.join(resources, 'sidecar/hello-agent-sidecar'), root, userData, env, largeProject, largeDiff);
     persist();
@@ -146,6 +147,8 @@ try {
       'Marker verifies visible enabled start-screen button across two frames only; continued visibility is not measured. This is not G6 evidence.',
       'Observed descendants only; ps identity resolution is seconds.'];
     report.debuggingEnabled = false;
+    report.seededProjectBaseline = noCdpProject;
+    if (noCdpProject) report.limitations.push('Same generated two-project seed as --project; no editor or apply/restore actions. Not a paired statistical attribution of CDP overhead.');
     await until(() => report.startScreenReadyReceivedAtMs !== undefined, 30000);
     await sleep(2000);
     for (let index = 0; index < 40; index++) {
@@ -489,9 +492,15 @@ finally {
       try {
         if (noCdp) {
           const instances = db.prepare('SELECT sidecar_instance_id, clean_shutdown_at FROM app_instances').all();
-          assert.equal(instances.length, 1, 'Fresh profile must have exactly one sidecar instance');
-          assert.equal(typeof instances[0].clean_shutdown_at, 'string');
-          report.sidecarInstanceId = instances[0].sidecar_instance_id;
+          assert.equal(instances.length, noCdpProject ? 2 : 1, 'Unexpected sidecar instance count');
+          for (const instance of instances) assert.equal(typeof instance.clean_shutdown_at, 'string');
+          if (noCdpProject) {
+            assert.equal(typeof report.project.seedSidecarInstanceId, 'string');
+            assert.equal(instances.filter(row => row.sidecar_instance_id === report.project.seedSidecarInstanceId).length, 1);
+          }
+          const observed = instances.filter(row => !noCdpProject || row.sidecar_instance_id !== report.project.seedSidecarInstanceId);
+          assert.equal(observed.length, 1, 'Observed app instance must differ from the seed');
+          report.sidecarInstanceId = observed[0].sidecar_instance_id;
         } else {
           assert.equal(typeof db.prepare('SELECT clean_shutdown_at FROM app_instances WHERE sidecar_instance_id = ?').get(report.sidecarInstanceId)?.clean_shutdown_at, 'string');
         }

@@ -79,6 +79,6 @@ export async function seedPackagedProject(binary, root, userData, env, largeProj
     assert.deepEqual(quit.blockers, []);
     child.stdin.end();
     assert.deepEqual(await Promise.race([closed, deadline]), {code:0, signal:null});
-    return {source, projectId:project.projectId, otherSource, otherProjectId:other.projectId, seedPid:child.pid, shutdown:'confirmed'};
+    return {source, projectId:project.projectId, otherSource, otherProjectId:other.projectId, seedPid:child.pid, seedSidecarInstanceId:ready.sidecarInstanceId, shutdown:'confirmed'};
   } finally { clearTimeout(timer); lines.close(); child.stdin.end(); }
 }

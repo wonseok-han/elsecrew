@@ -222,3 +222,5 @@ clean checkout에서 `pnpm run m5:measure:renderer`를 실행한다. 현재 prod
 현재 renderer/main/preload와 debug sidecar를 빌드한 뒤 `env -u ELECTRON_RUN_AS_NODE node_modules/.bin/electron scripts/m5-durable-output-ui-smoke.cjs --live`를 실행한다. 실제 계정 대신 임시 프로젝트의 네 합성 실행을 각 3,000개/20ms 간격으로 생성한다. `--live`는 `--paced`를 포함하며 각 채팅을 순서대로 선택해 12초 동안 head와 보이는 행의 두 RAF 관측이 증가하는지 확인한다. 처음 한 번 출력 영역을 화면으로 가져온 뒤 지속 강제 스크롤은 하지 않는다. 이후 전체 기록 조회와 이전/최신 이동을 검사한다.
 
 `liveWindows`에는 선택한 run, 관측 시간, head/화면 표본, 누락 카운터가 남는다. 생성 시각과 화면 시각의 차이에는 채팅 전환 후 과거 기록을 따라잡는 시간이 포함되므로 이를 곧바로 live eventPaint 지연으로 집계하지 않는다. 비선택 채팅의 paint나 물리 compositor 표시를 입증하지 않는다. 숨김 이력이 있으면 기능 성공이어도 전체 상태는 NOT_READY다. 결과는 `diagnostic:true, gateEligible:false`이며 정식 패키지/10회 G6 수집을 대체하지 않는다. 정상 종료와 OS 프로세스 부재를 확인한 뒤 작은 JSON/PNG만 보존하고 해당 시험 root를 정리한다.
+
+`--no-cdp-project`는 `--no-cdp`와 같은 디버깅 서버 없는 관측에 `--project`의 생성된 두 프로젝트 seed를 결합한다. 사용자 데이터는 쓰지 않으며 편집/반영/복원은 실행하지 않는다. 시작 화면 준비 표식 후40개 RSS 표본을 수집하고 별도 정상 종료를 기다린다. `seededProjectBaseline:true`로 빈 프로필과 구별한다. 같은 package의 프로젝트 baseline 비교를 돕지만, 단발 차이를 CDP 비용의 인과적/통계적 증명이나 전체 G6 합격으로 사용하지 않는다.
