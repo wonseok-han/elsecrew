@@ -26,6 +26,7 @@ const artifacts = (build.stdout ?? "").split(/\r?\n/).filter((line) => line.trim
   && message.target?.name === "hello-agent-sidecar"
   && Array.isArray(message.target.kind) && message.target.kind.includes("bin")
   && message.profile?.test === false
+  && message.profile?.debug_assertions === false
 );
 if (artifacts.length !== 1 || typeof artifacts[0].executable !== "string" || !isAbsolute(artifacts[0].executable)) {
   throw new Error("sidecar build did not report exactly one executable artifact");

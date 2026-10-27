@@ -203,6 +203,9 @@ where
         }
         let scenario = match scenario.to_string_lossy().as_ref() {
             "clean" => agent_runtime::FakeScenario::Clean,
+            // Never expose the inactive format upgrade through the packaged CLI.
+            #[cfg(debug_assertions)]
+            "long-stream" => agent_runtime::FakeScenario::LongStream,
             "final-delayed" => agent_runtime::FakeScenario::FinalDelayed,
             "cancel-clean" => agent_runtime::FakeScenario::CancelClean,
             "cancel-uncertain" => agent_runtime::FakeScenario::CancelUncertain,
@@ -898,7 +901,13 @@ impl Sidecar {
         agent_runtime: agent_runtime::AgentRuntime,
         cancellation: &AtomicBool,
     ) -> Result<Self, SidecarError> {
-        let mut storage = Storage::open_for_admission(&database_path, cancellation)?;
+        // Explicit synthetic workload only. Ordinary/native startup keeps its
+        // existing format until the durable product activation gate is closed.
+        let mut storage = if agent_runtime.uses_durable_output_fixture() {
+            Storage::open_for_durable_admission(&database_path, cancellation)?
+        } else {
+            Storage::open_for_admission(&database_path, cancellation)?
+        };
         admission_not_cancelled(cancellation)?;
         let mut projects = ProjectManager::new(&database_path)?;
         admission_not_cancelled(cancellation)?;

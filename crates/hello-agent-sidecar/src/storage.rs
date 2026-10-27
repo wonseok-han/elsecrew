@@ -175,6 +175,19 @@ impl Storage {
         Ok(storage_schema_version(&self.connection)? == Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11))
     }
 
+    /// Inject cancellation at migration checkpoints without admitting writes.
+    /// The caller must drop and reopen even when the migration commits.
+    #[cfg(test)]
+    pub(crate) fn migrate_output_for_test(
+        &mut self,
+        cancelled: &mut impl FnMut() -> bool,
+    ) -> Result<(), SidecarError> {
+        self.ensure_writes_admitted()?;
+        self.writes_admitted = false;
+        agent_output::schema::migrate_cancellable(&mut self.connection, cancelled)?;
+        agent_output::schema::verify_admission(&mut self.connection, cancelled)
+    }
+
     /// Prepared upgrade path. Product startup remains on `open_for_admission`
     /// until migration/restart integration and activation review are complete.
     #[allow(dead_code)]

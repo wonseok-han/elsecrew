@@ -337,6 +337,8 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 새 출력 형식은 schema V11의 `run_output_records`에 공개 항목을 순서대로 저장하고 `run_output_heads`에 검증된 요약을 유지한다. 일반 제품 DB 열기는 V11을 거절한다. 별도 `Storage::open_for_durable_admission`은 기존 원장 검증→취소 가능한 원자 이관→기존/출력 원장 합동 검증 후 쓰기를 허용하도록 준비돼 있으며, 시험 helper도 이 경로를 사용한다. 이관 commit 전 취소는 V10으로 롤백하고 commit 뒤 취소/검증 실패는 V11을 남길 수 있지만 입장을 허용하지 않는다. 정상 startup의 활성화는 아직 하지 않았으므로 이 코드의 존재는 제품에서 장시간 실행이 활성화됐다는 뜻이 아니다.
 
+개발 빌드(debug assertions)의 명시적 `--stdio-agent-fixture long-stream` 시험 모드는 `FakeExact + LongStream`일 때만 이 입장 경로를 사용한다. 배포 release 빌드에서는 이 인자를 DB open 이전에 거절한다. 일반 `--stdio`, 실제 공급자와 다른 fixture 모드는 기존 입장을 유지한다. 이 모드는 시험용 임시 DB에서 stdio·페이지·화면 통합을 검증하기 위한 것이며 실제 계정 호출을 하지 않는다. 생성된 V11 시험 DB는 같은 모드로 다시 열어야 한다.
+
 - 형식 marker가 있는 실행은 legacy `public_events` 배열에 본문을 반복 저장하지 않는다. 종료 증거 이후 final 한 건만 후속 대화 문맥과 같은 transaction에 저장한다. 기존 형식의 검증·예산은 유지한다.
 - V8 bridge의 `getAgentOutputHead`·`getAgentOutputPage`·`onAgentOutputAvailable`은 읽기/알림 경로다. `agent.outputAvailable`은 결속된 head만 전달하며 본문은 최대100행/512KiB 페이지로 읽는다. wire 순번과 영속 출력 순번은 다르다.
 - native/fixture runtime은 변경된 head를 알리고 마지막 sealed head를 terminal 상태보다 먼저 보낸다. sealed는 프로세스 종료 확인이나 성공 판정을 대신하지 않는다. Electron은 기존 이벤트 credit/ACK를 사용하며 renderer는 bounded window와 주기적 head 재조회로 따라잡는다.

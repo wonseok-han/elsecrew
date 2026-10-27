@@ -1,6 +1,12 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 기준 fe7463b의 깨끗한 트리에서 재개했다. 이전 턴은 이관 취소·기존 예약 복구 구현/검증/커밋으로 진척이다. 독립 검토의 남은 증거를 보완해 데이터가 있는 legacy 예약에서 4개 transaction 취소 경계와 commit 후 admission 취소를 주입했다. 실패 handle은 쓰기 불가, commit 전은 V10 재열기, commit 후는 일반 입장 거절/V11 명시 재입장, run/대화 보존과 recoveryRequired 재열기를 모두 확인했다(PASS 12.84초).
+- `--stdio-agent-fixture long-stream`을 추가하고 FakeExact+LongStream에만 새 입장을 연결했다. 일반/native/다른 fixture 모드의 활성화는 하지 않았다. 임시 DB에서 fixture startup/restart 및 일반 모드의 V11 거절 회귀 PASS(0.83초). 실제 stdio 출력 페이지 왕복·renderer/G6는 아직 다음 통합 작업이다.
+- 독립 검토에서 CLI 인자가 배포 바이너리에서도 V11 이관을 열 수 있다는 P1을 찾아 해당 long-stream 인자를 debug assertions 빌드에만 넣었다. 재검토는 정적 경로상 P1 해소로 확인했다. 패키징은 `--release`이며 Cargo artifact의 debug_assertions=false까지 요구해 profile override/설정 누락을 거절한다(관련 Node 8검사 PASS). release CLI의 DB 생성 전 거절 black-box 회귀를 추가했으며 실행은 최종 release 검증 묶음에 남겼다. architecture에 개발 빌드 한정 모드와 재열기 제약을 기록했다. 사용자 DB/계정·패키지·main 병합/push 없음. diff check PASS.
+
+### 2026-10-27 · by Codex
+
 - 기준 5898bf8의 깨끗한 트리에서 재개했다. 이전 턴은 UI와 명시 V11 입장 경로 커밋으로 진척이다. 모의 실행의 별도 V11 open 구현을 제거하고 `open_for_durable_admission`을 재사용하도록 연결했다. 이관에 사전/DDL 후/metadata 후/commit 전 취소 확인을 넣어 transaction 전체가 롤백되도록 했다.
 - V10 이관·V11 재입장·사전 취소·schema 손상 거절 PASS(0.69초), 이관 4경계 취소 후 V10 schema/timestamp/새 테이블 부재와 재시도 PASS(0.88초). 기존 형식/새 형식의 실제-agent 모의 예약을 이관·재열기해 run/대화를 그대로 보존하고, 프로세스 증거 없음은 recoveryRequired로 복구한 뒤 다시 재열기하는 시험 PASS(3.28초). 실제 공급자/계정 호출은 없다.
 - 독립 재검토는 준비된 입장 경로에 새 구현 차단 결함 없음으로 마쳤다. 보완할 증거는 데이터가 있는 V10의 각 취소 경계 보존 및 commit 후 취소→V11 재입장이다. 새 입장 경로를 사용하는 final/후속 문맥 원자 저장·rollback·재시작 회귀도 PASS(1.80초). 정상 startup·제품 활성화는 계속 비활성이며 실제 화면/G6·Windows·출시 검증은 남는다. architecture에 별도 입장 경로와 commit 전/후 취소 차이를 반영했다. diff check PASS. 전체 테스트/패키지 재빌드·사용자 DB 변경·main 병합/push 없음.

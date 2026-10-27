@@ -5,7 +5,9 @@ use hello_agent_protocol::agent_adapter_v1::AgentRunBindingV1;
 
 #[test]
 fn durable_upgrade_preserves_legacy_and_new_reservations_for_restart_recovery() {
-    for durable in [false, true] {
+    // Boundary 5 cancels combined admission after the schema transaction commits.
+    for (durable, cancel_at) in [(false, 0), (true, 0), (false, 1), (false, 2),
+        (false, 3), (false, 4), (false, 5)] {
         let mut f = Fixture::with_durable_output(durable);
         let snapshot = f.snapshot("req_upgrade_snapshot");
         let chat = f.create_exact_claude_chat(&snapshot, "saved goal", "req_upgrade_chat");
@@ -26,6 +28,26 @@ fn durable_upgrade_preserves_legacy_and_new_reservations_for_restart_recovery() 
         assert_eq!(before[0].get("output_format_version").is_some(), durable);
         let path = f.storage.path().to_path_buf();
         drop(f.storage);
+        if cancel_at > 0 {
+            let mut old = Storage::open_for_admission(&path, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+            let mut checks = 0;
+            assert!(old.migrate_output_for_test(&mut || {
+                checks += 1;
+                checks == cancel_at
+            }).is_err());
+            assert_eq!(checks, cancel_at);
+            // Failure never leaves a writable handle, including after commit.
+            assert!(old.uses_durable_output().is_err());
+            drop(old);
+            if cancel_at < 5 {
+                let old = Storage::open_for_admission(&path, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+                assert_eq!(old.projection_records("run").unwrap(), before);
+                assert_eq!(old.chat_message_history(chat_id).unwrap(), messages);
+                assert!(!old.uses_durable_output().unwrap());
+            } else {
+                assert!(Storage::open_for_admission(&path, &std::sync::atomic::AtomicBool::new(false)).is_err());
+            }
+        }
         f.storage = Storage::open_durable_output_for_test(&path).unwrap();
         assert_eq!(f.storage.projection_records("run").unwrap(), before);
         assert_eq!(f.storage.chat_message_history(chat_id).unwrap(), messages);

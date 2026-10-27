@@ -479,6 +479,10 @@ impl AgentRuntime {
         ensure_recovery_reservation_inner(storage, &projection, fail_before_commit)
     }
 
+    pub(crate) fn uses_durable_output_fixture(&self) -> bool {
+        self.provider == ProviderMode::FakeExact && self.scenario == FakeScenario::LongStream
+    }
+
     pub(crate) fn fake(executable: PathBuf, scenario: FakeScenario) -> Self {
         Self {
             provider: ProviderMode::FakeExact,

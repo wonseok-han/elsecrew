@@ -18,7 +18,7 @@ function artifact(executable: unknown, overrides: Record<string, unknown> = {}) 
     reason: "compiler-artifact",
     manifest_path: resolve(root, "crates", "hello-agent-sidecar", "Cargo.toml"),
     target: { name: "hello-agent-sidecar", kind: ["bin"] },
-    profile: { test: false },
+    profile: { test: false, debug_assertions: false },
     executable,
     ...overrides,
   };
@@ -106,6 +106,14 @@ test("sidecar staging preserves Windows destination naming without chmod", () =>
     ["mkdir", "/stage resources/sidecar", { recursive: true }],
     ["copy", "/cross/release/hello-agent-sidecar.exe", "/stage resources/sidecar/hello-agent-sidecar.exe"],
   ]);
+});
+
+test("sidecar staging rejects fixture-capable debug assertions and unknown profiles", () => {
+  for (const profile of [{ test: false, debug_assertions: true }, { test: false }]) {
+    const result = stage({ messages: [artifact("/overridden/release/hello-agent-sidecar", { profile })] });
+    assert.ok(result.error);
+    assert.equal(result.writes.length, 0);
+  }
 });
 
 test("sidecar staging never copies an artifact after Cargo failure or spawn error", () => {

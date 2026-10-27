@@ -634,6 +634,31 @@ fn g5d_agent_fixture_advertises_exact_d1_capabilities_before_storage() {
 }
 
 #[test]
+fn long_stream_fixture_admits_durable_storage_without_enabling_normal_startup() {
+    assert!(!agent_runtime::AgentRuntime::native_candidate().uses_durable_output_fixture());
+    for (scenario, expected) in [(agent_runtime::FakeScenario::Clean, false),
+        (agent_runtime::FakeScenario::LongStream, true)] {
+        let (_root, path) = database();
+        for iteration in 0..2 {
+            let runtime = agent_runtime::AgentRuntime::fake(std::env::current_exe().unwrap(), scenario);
+            let mut session = SidecarSession::new(format!("durable_fixture_{iteration}"), runtime);
+            session.start_admission(&path);
+            wait_until_admitted(&mut session);
+            let AdmissionState::Ready { sidecar, .. } = &session.admission else {
+                panic!("fixture admission did not become ready");
+            };
+            assert_eq!(sidecar.storage.uses_durable_output().unwrap(), expected);
+        }
+        if expected {
+            let mut normal = SidecarSession::new("normal_after_durable".into(), agent_runtime::AgentRuntime::blocked());
+            normal.start_admission(&path);
+            wait_until_admitted(&mut normal);
+            assert!(!matches!(normal.admission, AdmissionState::Ready { .. }));
+        }
+    }
+}
+
+#[test]
 fn admission_preflight_preserves_strict_allowed_and_ready_request_validation() {
     let (_root, path) = database();
     let instance = "sidecar_preflight_scope";

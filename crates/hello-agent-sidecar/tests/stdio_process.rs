@@ -415,6 +415,20 @@ fn binary_agent_cancel_defers_completion_without_blocking_status_or_quit() {
     }
 }
 
+#[test]
+#[cfg(not(debug_assertions))]
+fn release_cli_rejects_durable_fixture_before_opening_database() {
+    let root = tempfile::tempdir().unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_hello-agent-sidecar"))
+        .args(["--stdio-agent-fixture", "long-stream"])
+        .current_dir(root.path())
+        .stdin(Stdio::null())
+        .output().unwrap();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("unknown stdio agent fixture scenario"));
+    assert!(fs::read_dir(root.path()).unwrap().next().is_none());
+}
+
 #[cfg(target_os = "macos")]
 fn g5a_public_event_flow(continuous_requests: bool, cancellation: Option<&str>) {
     let root = tempfile::tempdir().expect("temporary directory");
