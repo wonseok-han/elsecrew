@@ -206,6 +206,8 @@ where
             // Never expose the inactive format upgrade through the packaged CLI.
             #[cfg(debug_assertions)]
             "long-stream" => agent_runtime::FakeScenario::LongStream,
+            #[cfg(debug_assertions)]
+            "paced-long-stream" => agent_runtime::FakeScenario::PacedLongStream,
             "final-delayed" => agent_runtime::FakeScenario::FinalDelayed,
             "cancel-clean" => agent_runtime::FakeScenario::CancelClean,
             "cancel-uncertain" => agent_runtime::FakeScenario::CancelUncertain,

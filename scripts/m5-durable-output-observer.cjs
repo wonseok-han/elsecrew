@@ -12,7 +12,7 @@ function installOutputObserver() {
   visibility();
   document.addEventListener('visibilitychange', visibility);
   const off = window.m5.onAgentOutputAvailable(head => {
-    const sample = { runId: head.binding.runId, sequence: head.committedSequence, sealed: head.sealed, receivedAt: performance.now() };
+    const sample = { runId: head.binding.runId, sequence: head.committedSequence, sealed: head.sealed, receivedAt: performance.now(), receivedUnixMs: performance.timeOrigin + performance.now() };
     latest.set(sample.runId, sample);
     if (result.heads.length < 4096) result.heads.push(sample); else result.droppedHeads++;
   });
@@ -38,7 +38,8 @@ function installOutputObserver() {
     const nodes = [...document.querySelectorAll('.m5-output-scroll article pre')];
     const node = nodes.reverse().find(visible);
     if (!node || !runId) return;
-    const match = /^output (\d+)$/.exec(node.textContent);
+    const text = node.textContent;
+    const match = /^output (\d+)(?: \[emitted_us=(\d+),unix_ms=(\d+)\])?$/.exec(text);
     if (!match) return;
     const sequence = Number(match[1]), key = `${runId}:${sequence}`;
     if (key === lastKey) return;
@@ -48,9 +49,10 @@ function installOutputObserver() {
     frame(() => frame(() => {
       if (stopped || !node.isConnected || !visible(node)
         || document.querySelector('.m5-durable-output select')?.value !== runId
-        || node.textContent !== `output ${sequence}`) return;
+        || node.textContent !== text) return;
       const sample = { runId, sequence, observedAt, frameAt: performance.now(),
-        headSequence: head?.sequence ?? null, headReceivedAt: head?.receivedAt ?? null };
+        emittedUs: match[2] ? Number(match[2]) : null, emittedUnixMs: match[3] ? Number(match[3]) : null,
+        frameUnixMs: performance.timeOrigin + performance.now(), headSequence: head?.sequence ?? null, headReceivedAt: head?.receivedAt ?? null };
       if (result.frames.length < 1024) result.frames.push(sample); else result.droppedFrames++;
     }));
   };

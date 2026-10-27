@@ -7,6 +7,7 @@ const cp = require('node:child_process');
 const assert = require('node:assert/strict');
 const { installOutputObserver } = require('./m5-durable-output-observer.cjs');
 if (process.platform !== 'darwin' || app.isPackaged) throw new Error('Development macOS diagnostic only');
+const paced = process.argv.includes('--paced');
 const repo = path.resolve(__dirname, '..');
 const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hello-agent-output-ui-'));
 const source = path.join(root, 'project');
@@ -21,7 +22,7 @@ for (const args of [['init', '-q', '--template='], ['add', '.'],
 app.setPath('userData', userData);
 dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [source] });
 const report = { schemaVersion: 1, diagnostic: true, gateEligible: false, root,
-  status: 'RUNNING', shutdown: 'pending', restoredChats: [], scrollChecks: [],
+  paced, status: 'RUNNING', shutdown: 'pending', restoredChats: [], scrollChecks: [],
   limitations: ['Development artifacts, synthetic providers, no actual accounts.',
     'Full retained-window and history checks; no 50-events/s paint or packaged RSS gate.',
     'Synthetic runs have no native approval queue; approval inspection rejection is not native-provider evidence.',
@@ -38,7 +39,7 @@ cp.spawn = function(command, args, options) {
     assert.deepEqual(args, ['--stdio']);
     assert.equal(fs.realpathSync(options.cwd), fs.realpathSync(path.join(userData, 'com.wonseokhan.helloagent', 'm5')));
     assert.equal(child, undefined, 'unexpected second sidecar');
-    child = Reflect.apply(spawn, this, [command, ['--stdio-agent-fixture', 'long-stream'], options]);
+    child = Reflect.apply(spawn, this, [command, ['--stdio-agent-fixture', paced ? 'paced-long-stream' : 'long-stream'], options]);
     child.once('close', (code, signal) => { report.sidecarExit = { code, signal }; persist(); });
     return child;
   }
@@ -131,20 +132,20 @@ app.on('browser-window-created', (_event, window) => {
         // async chat load, not just rows that may still belong to the prior chat.
         await wait(`document.querySelector('.m5-durable-output select')?.value === outputSmokeRuns[${index}].runId &&
           [...document.querySelectorAll('.m5-chat-chip')].some(b => b.getAttribute('aria-current') === 'true' && !b.disabled && b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}')`);
-        await wait("[...document.querySelectorAll('.m5-output-scroll article pre')].length === 200 && document.querySelector('.m5-output-scroll article:last-child pre')?.textContent === 'output 3000'", 240000);
-        const visible = await run("[...document.querySelectorAll('.m5-output-scroll article pre')].map(e => e.textContent)");
+        await wait("[...document.querySelectorAll('.m5-output-scroll article pre')].length === 200 && document.querySelector('.m5-output-scroll article:last-child pre')?.textContent?.split(' [')[0] === 'output 3000'", 240000);
+        const visible = await run("[...document.querySelectorAll('.m5-output-scroll article pre')].map(e => e.textContent.split(' [')[0])");
         assert.deepEqual(visible, Array.from({length:200}, (_, i) => `output ${2801+i}`));
         await run("[...document.querySelectorAll('.m5-durable-output button')].find(b => b.textContent === '처음 기록부터 보기').click()");
-        await wait("document.querySelector('.m5-output-scroll article:first-of-type pre')?.textContent === 'output 1'");
-        const history = await run("[...document.querySelectorAll('.m5-output-scroll article pre')].map(e => e.textContent)");
+        await wait("document.querySelector('.m5-output-scroll article:first-of-type pre')?.textContent?.split(' [')[0] === 'output 1'");
+        const history = await run("[...document.querySelectorAll('.m5-output-scroll article pre')].map(e => e.textContent.split(' [')[0])");
         assert.deepEqual(history, Array.from({length:100}, (_, i) => `output ${i+1}`));
         await wait("document.querySelector('.m5-output-scroll')?.scrollTop === 0");
         await run("[...document.querySelectorAll('.m5-durable-output button')].find(b => b.textContent === '다음 기록').click()");
-        await wait("document.querySelector('.m5-output-scroll article:first-of-type pre')?.textContent === 'output 101'");
-        const nextHistory = await run("[...document.querySelectorAll('.m5-output-scroll article pre')].map(e => e.textContent)");
+        await wait("document.querySelector('.m5-output-scroll article:first-of-type pre')?.textContent?.split(' [')[0] === 'output 101'");
+        const nextHistory = await run("[...document.querySelectorAll('.m5-output-scroll article pre')].map(e => e.textContent.split(' [')[0])");
         assert.deepEqual(nextHistory, Array.from({length:100}, (_, i) => `output ${101+i}`));
         await run("[...document.querySelectorAll('.m5-durable-output button')].find(b => b.textContent === '최신 대화').click()");
-        await wait("document.querySelector('.m5-output-scroll article:last-child pre')?.textContent === 'output 3000'");
+        await wait("document.querySelector('.m5-output-scroll article:last-child pre')?.textContent?.split(' [')[0] === 'output 3000'");
         await wait("(() => { const list = document.querySelector('.m5-output-scroll'); return list && list.clientHeight > 0 && list.scrollHeight - list.scrollTop - list.clientHeight <= 2; })()");
         // A scrolled inner list can still be clipped by the outer conversation.
         if (await run("document.visibilityState === 'visible'")) await wait("outputObservation.latestVisible()");
@@ -152,6 +153,24 @@ app.on('browser-window-created', (_event, window) => {
         report.restoredChats.push(index); persist();
       }
       assert.equal(fs.readFileSync(path.join(source, 'hello.txt'), 'utf8'), 'original\n');
+      if (paced) report.generation = await run(`(async () => {
+        const generated = [];
+        for (const accepted of outputSmokeRuns) {
+          const {schemaVersion, state, ...binding} = accepted;
+          const samples = [];
+          for (let afterSequence = 0; afterSequence < 3000; afterSequence += 100) {
+            const page = await window.m5.getAgentOutputPage({formatVersion:1,binding,afterSequence,throughSequence:3000,limit:100});
+            for (const row of page.rows) {
+              const match = /^output ([0-9]+) \\[emitted_us=([0-9]+),unix_ms=([0-9]+)\\]$/.exec(row.event.text);
+              if (!match || Number(match[1]) !== samples.length + 1) throw new Error('Paced fixture emission evidence differs');
+              samples.push([Number(match[1]),Number(match[2]),Number(match[3])]);
+            }
+          }
+          if (samples.length !== 3000) throw new Error('Missing emission samples');
+          generated.push({runId:binding.runId,samples});
+        }
+        return generated;
+      })()`);
       report.outputObservation = await run('outputObservation.stop()');
       report.visibility = await run('document.visibilityState');
       report.visibilityTrace = await run('outputSmokeVisibility');

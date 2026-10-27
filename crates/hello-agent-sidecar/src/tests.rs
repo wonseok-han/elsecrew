@@ -637,7 +637,8 @@ fn g5d_agent_fixture_advertises_exact_d1_capabilities_before_storage() {
 fn long_stream_fixture_admits_durable_storage_without_enabling_normal_startup() {
     assert!(!agent_runtime::AgentRuntime::native_candidate().uses_durable_output_fixture());
     for (scenario, expected) in [(agent_runtime::FakeScenario::Clean, false),
-        (agent_runtime::FakeScenario::LongStream, true)] {
+        (agent_runtime::FakeScenario::LongStream, true),
+        (agent_runtime::FakeScenario::PacedLongStream, true)] {
         let (_root, path) = database();
         for iteration in 0..2 {
             let runtime = agent_runtime::AgentRuntime::fake(std::env::current_exe().unwrap(), scenario);

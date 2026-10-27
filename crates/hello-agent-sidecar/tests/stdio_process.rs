@@ -424,15 +424,17 @@ fn binary_long_stream_commits_and_pages_three_thousand_outputs() {
 #[test]
 #[cfg(not(debug_assertions))]
 fn release_cli_rejects_durable_fixture_before_opening_database() {
-    let root = tempfile::tempdir().unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_hello-agent-sidecar"))
-        .args(["--stdio-agent-fixture", "long-stream"])
-        .current_dir(root.path())
-        .stdin(Stdio::null())
-        .output().unwrap();
-    assert!(!result.status.success());
-    assert!(String::from_utf8_lossy(&result.stderr).contains("unknown stdio agent fixture scenario"));
-    assert!(fs::read_dir(root.path()).unwrap().next().is_none());
+    for scenario in ["long-stream", "paced-long-stream"] {
+        let root = tempfile::tempdir().unwrap();
+        let result = Command::new(env!("CARGO_BIN_EXE_hello-agent-sidecar"))
+            .args(["--stdio-agent-fixture", scenario])
+            .current_dir(root.path())
+            .stdin(Stdio::null())
+            .output().unwrap();
+        assert!(!result.status.success());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("unknown stdio agent fixture scenario"));
+        assert!(fs::read_dir(root.path()).unwrap().next().is_none());
+    }
 }
 
 #[cfg(target_os = "macos")]

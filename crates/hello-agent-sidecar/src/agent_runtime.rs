@@ -119,6 +119,7 @@ pub(crate) enum FakeScenario {
     PublicAggregatePlusOne,
     #[cfg_attr(not(test), allow(dead_code))]
     LongStream,
+    PacedLongStream,
     ProviderTerminalFailed,
     ProviderTerminalRecoveryRequired,
 }
@@ -480,7 +481,11 @@ impl AgentRuntime {
     }
 
     pub(crate) fn uses_durable_output_fixture(&self) -> bool {
-        self.provider == ProviderMode::FakeExact && self.scenario == FakeScenario::LongStream
+        self.provider == ProviderMode::FakeExact
+            && matches!(
+                self.scenario,
+                FakeScenario::LongStream | FakeScenario::PacedLongStream
+            )
     }
 
     pub(crate) fn fake(executable: PathBuf, scenario: FakeScenario) -> Self {
@@ -4152,6 +4157,7 @@ fn scenario_name(value: FakeScenario) -> &'static str {
         FakeScenario::PublicAggregateExact => "public-aggregate-exact",
         FakeScenario::PublicAggregatePlusOne => "public-aggregate-plus-one",
         FakeScenario::LongStream => "long-stream",
+        FakeScenario::PacedLongStream => "paced-long-stream",
         FakeScenario::ProviderTerminalFailed => "provider-terminal-failed",
         FakeScenario::ProviderTerminalRecoveryRequired => "provider-terminal-recovery-required",
     }
@@ -4235,6 +4241,7 @@ pub(crate) fn run_agent_fixture_launcher(scenario: &str) -> Result<(), SidecarEr
         "public-aggregate-exact",
         "public-aggregate-plus-one",
         "long-stream",
+        "paced-long-stream",
         "provider-terminal-failed",
         "provider-terminal-recovery-required",
     ]
@@ -4372,11 +4379,29 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
             }
             println!("{{\"type\":\"terminal\",\"outcome\":\"succeeded\"}}")
         }
-        "long-stream" => {
+        "long-stream" | "paced-long-stream" => {
+            let paced = scenario == "paced-long-stream";
+            let started = std::time::Instant::now();
             for sequence in 1..=3000 {
+                let text = if paced {
+                    // Absolute deadlines expose accumulated backpressure instead of
+                    // silently stretching every interval by the preceding write time.
+                    let scheduled = Duration::from_millis((sequence - 1) * 20);
+                    if let Some(wait) = scheduled.checked_sub(started.elapsed()) {
+                        thread::sleep(wait);
+                    }
+                    let elapsed_us = started.elapsed().as_micros();
+                    let unix_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_err(|error| SidecarError::new("fixtureFailure", error.to_string()))?
+                        .as_millis();
+                    format!("output {sequence} [emitted_us={elapsed_us},unix_ms={unix_ms}]")
+                } else {
+                    format!("output {sequence}")
+                };
                 println!(
                     "{}",
-                    json!({"type":"status","text":format!("output {sequence}")})
+                    json!({"type":"status","text":text})
                 );
             }
             println!("{{\"type\":\"terminal\",\"outcome\":\"succeeded\"}}")

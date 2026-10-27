@@ -1,6 +1,13 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 기준8498db8의 깨끗한 트리에서 재개했다. 이전 턴은 프레임/RSS 수집과 최신 출력 가시 확인으로 진척이다. debug 전용 paced-long-stream을 추가했다. 각 단일 실행에서20ms 절대 목표 시각으로3,000건을 생성하고 본문에 생성 직전 monotonic elapsed/Unix 시각을 함께 저장한다. 지연 시 catch-up도 실제 시각으로 드러나며 일반/native 활성화·기존 burst fixture는 유지한다.
+- UI 진단 --paced는 전체12,000행의 순서/생성 표본을 공개 page API로 다시 읽고, 관측기는 같은 출력의 시각을 보존한다. cargo check --tests/build PASS, JS문법·직렬화된 생성표본 regex·diff PASS. session37539 exit0/전 구간visible/네 채팅 기록·최신 노출 PASS. 모두60초 내3,000건, 마지막59,980.750~59,984.523ms, 최대간격25.004ms/최대 목표 지연5.671ms다.
+- 출력head493/frame100, drop0/수집오류0/최대RSS534.4375MiB. 같은 호스트 wall clock과 각 head의 committedSequence를 생성표본에 대조한 수신지연p95는 실행별332.8/97.1/257.3/178.6ms, 최대554.3ms다. 이는 batch 끝 항목의 생성→알림수신 관측이며 모든 항목·DB commit·물리paint 지연이 아니다. 전체G6/100ms 화면 합격으로 인용하지 않는다. 수신 경로 최적화와 지속 live 화면/packaged메모리 통합이 다음이다.
+- release 거절 회귀를 두 fixture에 확장해 PASS(0.49초,session79098)했고 DB 미생성을 확인했다. admission 회귀는 paced 사례를 추가해 compile 확인했으며 별도 실행은 하지 않았다. 결과/PNG/파생summary/release로그는 `.artifacts/m5-durable-output-ui/dAjWJX`에 보존했고 정상 종료와 OS 프로세스 부재 확인 뒤 임시 root를 삭제했다. 실제 계정/사용자 프로젝트·main 병합/push 없음. native 활성화·실계정/Windows/출시는 계속 미완료다.
+
+### 2026-10-27 · by Codex
+
 - 기준78a0a37의 깨끗한 트리에서 재개했다. 이전 턴은 release 경계/가시 기능 증거와 최신 출력 노출 수정으로 진척이다. 개발 UI 시험에 bounded 출력 head 수신/클리핑을 고려한 DOM→2RAF 관측과 시험 앱 프로세스 트리의1초 RSS 수집을 추가했다. 표본 상한·손실/오류 카운터·구독/observer/RAF 회수를 두며 실제 생성/commit 시각이나 compositor timestamp로 주장하지 않는다. RSS는 관측용 ps 오버헤드/공유 페이지 중복을 포함한다.
 - renderer를78a0a37로 갱신했다. 첫 session2196은 함수가 있는 관측 객체를 executeJavaScript 결과로 반환해 clone 실패했다(실행 시작 전, exit1/정상 종료). 반환을void로 고쳐 session15359는 exit0/전 구간visible/4채팅 페이지·스크롤 PASS했다. head125건·frame100건·RSS57표본, drop0/수집오류0/최대499.421875MiB. 개발 실행 중 수치이며 idle400MiB 또는 packaged G6 판정이 아니다.
 - 최종 캡처에서 마지막 output3000이 바깥 패널 안에 보이는 것을 확인해 직전 UI 보완의 실제 표시를 확인했다. 시험 진행 중 추가한 latestVisible 클리핑 assertion은 다음 실행부터 적용되므로 이번 PASS에 포함하지 않는다. 원본 불변/정상 종료와 OS 프로세스 부재를 확인하고 두 임시 root를 정리했다. JSON/PNG는 `.artifacts/m5-durable-output-ui/{gPeSNK,dpsFnt}`에 보존했다. 문법/diff 검사 PASS.
