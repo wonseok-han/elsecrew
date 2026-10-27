@@ -15,7 +15,7 @@ fn quoted(value: &Value) -> String {
 
 #[test]
 fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init() {
-    for (case, durable) in [
+    claude_native_cases(&[
         ("success", false),
         ("organization-guard", false),
         ("default-effort", false),
@@ -26,7 +26,16 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
         ("success", true),
         ("cancel", true),
         ("bad-init", true),
-    ] {
+    ]);
+}
+
+#[test]
+fn claude_durable_native_three_thousand_outputs() {
+    claude_native_cases(&[("long", true)]);
+}
+
+fn claude_native_cases(cases: &[(&str, bool)]) {
+    for &(case, durable) in cases {
         let mut f = Fixture::with_durable_output(durable);
         let snapshot = f.snapshot("req_claude_snapshot");
         let chat = f.create_exact_claude_chat(&snapshot, "goal", "req_claude_chat");
@@ -109,7 +118,21 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
         if case == "allow" {
             script.push_str(&format!("printf '%s\\n' {}\nIFS= read -r reply || exit 3\ncase \"$reply\" in *'\"behavior\":\"allow\"'*) ;; *) exit 4 ;; esac\n", quoted(&approval)));
         }
-        if case != "cancel" {
+        if case == "long" {
+            let path = f._root.path().join("claude-long-output.jsonl");
+            let mut body = String::new();
+            for index in 0..2999 {
+                let mut frame = assistant.clone();
+                frame["uuid"] = json!(format!("answer-{index}"));
+                frame["message"]["id"] = json!(format!("message-{index}"));
+                body.push_str(&frame.to_string());
+                body.push('\n');
+            }
+            body.push_str(&result.to_string());
+            body.push('\n');
+            fs::write(&path, body).unwrap();
+            script.push_str(&format!("/bin/cat '{}' || exit 5\n", path.to_str().unwrap().replace('\'', "'\\''")));
+        } else if case != "cancel" {
             script.push_str(&format!(
                 "printf '%s\\n' {} {}\n",
                 quoted(&assistant),
@@ -140,7 +163,7 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
             )
             .unwrap();
         assert!(reserved.is_none() && owned_process.is_none());
-        let deadline = Instant::now() + Duration::from_secs(15);
+        let deadline = Instant::now() + Duration::from_secs(if case == "long" { 660 } else { 15 });
         let mut approved = false;
         let mut canceled = false;
         let mut events = Vec::new();
@@ -237,11 +260,8 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
             })).unwrap();
             let head = f.storage.agent_output_head(&binding).unwrap();
             assert!(head.sealed);
-            if head.committed_sequence == 0 { vec![] } else {
-                f.storage.agent_output_page(&hello_agent_protocol::agent_adapter_v1::output_pages::OutputPageRequest {
-                    format_version:1,binding,after_sequence:0,through_sequence:head.committed_sequence,limit:100,
-                }).unwrap().rows.into_iter().map(|row| serde_json::to_value(row.event).unwrap()).collect()
-            }
+            if case == "long" { assert_eq!(head.committed_sequence, 3000); }
+            durable_output::read_all(&mut f.storage, &ended["record"])
         } else { ended["public_events"].as_array().unwrap().clone() };
         let final_text: Vec<_> = public
             .iter()
@@ -250,7 +270,7 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
             .collect();
         assert_eq!(
             final_text,
-            if matches!(case, "success" | "organization-guard" | "default-effort" | "allow") {
+            if matches!(case, "success" | "long" | "organization-guard" | "default-effort" | "allow") {
                 vec![json!("hello")]
             } else {
                 vec![]
@@ -258,6 +278,11 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
             "{case}"
         );
         assert!(!events.is_empty());
+        if case == "long" {
+            assert_eq!(public.len(), 3000);
+            assert!(public.iter().all(|event| event["text"] == "hello"));
+            assert!(events.iter().any(|event| event.event == "agent.outputAvailable" && event.payload["sealed"] == true));
+        }
         let mut reusable = LoginProcess::reserve_claude_owned(
             ClaudeProfileBinding::from_storage(&f.storage).unwrap(),
         )
@@ -278,5 +303,8 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
                 .unwrap(),
             ended
         );
+        if case == "long" {
+            assert_eq!(durable_output::read_all(&mut storage, &ended["record"]), public);
+        }
     }
 }

@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 기준4913501/clean checkout에서 Claude native 모의 owner 시험을 재사용해 단일run 공개 출력2,999건+종료 후final 승격1건을 추가했다. Karpathy 최소 변경으로 JSONL을 fixture TempDir에 저장해 인자 길이 제한 없이 공급하며 기존 parser/예약/종료/봉인/재열기 검사를 유지한다. 기존10사례와 새 long사례는 별도 test로 선택 가능하고 durable 본문 읽기를 기존 전체 page 도우미로 통일했다.
+- 집중 시험 session95596은 191.72초에 PASS했다. 단일 run 3,000개 원문·봉인·종료·재열기 뒤 내용 일치를 확인했으며 실제 공급자 계정/모델 시험은 아니다. 공통 helper의 기존 10사례 회귀는 앞선 실행 결과를 회수하지 못해 프로세스 종료 확인 후 재실행했고, session33203에서 21.34초에 PASS했다. 직접 diff 검토와 git diff --check도 통과했다. 사용자 프로젝트/DB·앱 패키지·main/push 없음. 제품 V11 활성화·실제 화면/G6·Windows/출시는 여전히 남는다.
+
+### 2026-10-27 · by Codex
+
 - 이전 턴은 회수 회귀 추가 및 실제 실행 진척 확인으로 진척이다. session96174를 같은 handle로 계속 관측했고 Codex native 모의 단일 run3,000건 시험이512.21초에 PASS했다. 합성 CLI 파이프를 쓰되 실제 parser/예약/종료/출력 저장·재열기 assertion을 수행한 결과이며 실제 공급자 계정·모델 또는 UI/G6 성공은 아니다. 로그: /private/tmp/hello-agent-codex-long.vnz4RX.
 - 시간 예산10분·본문3,000건·안전 검사는 유지했고 synthetic chat 중복 기록 제거와 snapshot Git3명령 동시 실행으로 이전603초 timeout을 해소했다. 기존 독립 검토는 이 최적화의 검사/회수 계약에 추가 차단 결함 없음, 느린 파이프의 deadline 소진 가능성은 남겼다. architecture에 비활성 V11 출력 형식/읽기 bridge/head 알림·오류 보존 현행 코드를 분리 기록했다.
 - 변조5경우 PASS(3.49초), 시간 예산·고정 진단 회귀 PASS. 변조 시험은 처음에 유효 pack 대신 중복 loose object를 손상시켜 실패했고, 실제 test-owned pack을 쓰도록 고친 뒤 read-only 권한으로 setup 실패했다. 해당 fixture 파일만0600으로 전환해 최종 PASS했고 제품 권한 처리는 변경하지 않았다. 회수 회귀 PASS와 diff check도 확인했다. V11 활성화·Claude 장시간 native·실제 화면/G6·Windows·최종 출시 검증은 계속 미완료이며 main 병합/push·실계정 호출 없음.
