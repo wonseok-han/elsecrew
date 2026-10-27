@@ -20,7 +20,7 @@ for (const args of [['init', '-q', '--template='], ['add', '.'],
 app.setPath('userData', userData);
 dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [source] });
 const report = { schemaVersion: 1, diagnostic: true, gateEligible: false, root,
-  status: 'RUNNING', shutdown: 'pending', restoredChats: [],
+  status: 'RUNNING', shutdown: 'pending', restoredChats: [], scrollChecks: [],
   limitations: ['Development artifacts, synthetic providers, no actual accounts.',
     'Full retained-window and history checks; no 50-events/s paint or packaged RSS gate.',
     'Synthetic runs have no native approval queue; approval inspection rejection is not native-provider evidence.'] };
@@ -52,7 +52,7 @@ function finish(error) {
   app.once('will-quit', () => {
     clearTimeout(timer);
     report.shutdown = 'accepted'; report.functionalStatus = error ? 'FAIL' : 'PASS';
-    report.status = error ? 'FAIL' : report.visibility === 'visible' ? 'PASS' : 'NOT_READY';
+    report.status = error ? 'FAIL' : report.visibility === 'visible' && report.visibilityTrace?.every(entry => entry.state === 'visible') ? 'PASS' : 'NOT_READY';
     persist(); console.log(JSON.stringify(report));
     app.exit(error ? 1 : 0);
   });
@@ -73,6 +73,8 @@ app.on('browser-window-created', (_event, window) => {
     try {
       window.show(); window.focus();
       await wait("document.visibilityState === 'visible' && window.m5?.version === 8");
+      await run(`globalThis.outputSmokeVisibility = [{state:document.visibilityState,at:performance.now()}];
+        document.addEventListener('visibilitychange', () => outputSmokeVisibility.push({state:document.visibilityState,at:performance.now()}));`);
       await wait("[...document.querySelectorAll('button')].some(b => b.textContent === '프로젝트 선택' && !b.disabled)");
       await run(`(async () => {
         const api = window.m5;
@@ -112,13 +114,33 @@ app.on('browser-window-created', (_event, window) => {
         await wait("document.querySelector('.m5-output-scroll article:first-of-type pre')?.textContent === 'output 1'");
         const history = await run("[...document.querySelectorAll('.m5-output-scroll article pre')].map(e => e.textContent)");
         assert.deepEqual(history, Array.from({length:100}, (_, i) => `output ${i+1}`));
+        await wait("document.querySelector('.m5-output-scroll')?.scrollTop === 0");
+        await run("[...document.querySelectorAll('.m5-durable-output button')].find(b => b.textContent === '다음 기록').click()");
+        await wait("document.querySelector('.m5-output-scroll article:first-of-type pre')?.textContent === 'output 101'");
+        const nextHistory = await run("[...document.querySelectorAll('.m5-output-scroll article pre')].map(e => e.textContent)");
+        assert.deepEqual(nextHistory, Array.from({length:100}, (_, i) => `output ${101+i}`));
+        await run("[...document.querySelectorAll('.m5-durable-output button')].find(b => b.textContent === '최신 대화').click()");
+        await wait("document.querySelector('.m5-output-scroll article:last-child pre')?.textContent === 'output 3000'");
+        await wait("(() => { const list = document.querySelector('.m5-output-scroll'); return list && list.clientHeight > 0 && list.scrollHeight - list.scrollTop - list.clientHeight <= 2; })()");
+        report.scrollChecks.push({chat:index,historyTop:true,nextPage:true,latestBottom:true});
         report.restoredChats.push(index); persist();
       }
       assert.equal(fs.readFileSync(path.join(source, 'hello.txt'), 'utf8'), 'original\n');
       report.visibility = await run('document.visibilityState');
+      report.visibilityTrace = await run('outputSmokeVisibility');
       await fs.promises.writeFile(path.join(root, 'output.png'), (await window.webContents.capturePage()).toPNG());
       finish();
-    } catch (error) { finish(error); }
+    } catch (error) {
+      try {
+        report.failureView = await run(`(() => {
+          const list = document.querySelector('.m5-output-scroll');
+          return {visibility:document.visibilityState,trace:globalThis.outputSmokeVisibility ?? [],
+            scroll:list ? {top:list.scrollTop,height:list.scrollHeight,client:list.clientHeight,
+              first:list.querySelector('article pre')?.textContent,last:list.querySelector('article:last-child pre')?.textContent} : null};
+        })()`);
+      } catch (diagnosticError) { report.diagnosticError = diagnosticError.message; }
+      finish(error);
+    }
   });
 });
 console.log(JSON.stringify({stage:'STARTED',root}));

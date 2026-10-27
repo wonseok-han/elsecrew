@@ -1,6 +1,12 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 기준 cb475eb의 깨끗한 m5/coding-agent-ide에서 재개했다. 이전 턴은 개발 renderer/IPC 출력 조회 증거와 시험 도구 추가로 진척이다. 출력 UI 진단에 visibility 전환 이력, 첫 기록 상단·다음 100건·최신 200건 복귀/하단 검사를 추가했다. 중간 hidden 이력도 전체 visible PASS에서 제외한다.
+- 임시 프로젝트/가짜 공급자로 session60629를 실행했다. 4채팅 중 3개는 첫/다음 페이지와 최신 하단 복귀 검사를 통과했지만 마지막 채팅의 첫 기록 scrollTop=0 대기가 timeout됐다. 프로세스는 exit1/정상 종료 accepted다. 이 결과는 FAIL이며 scroll 위치 원인은 아직 미확정이다. 실패 시 visibility/scroll 치수·첫/끝 본문을 수집하도록 추가해 다음 진단에서 제품 결함과 hidden/layout 영향을 구분한다. 이 진단 추가는 아직 재실행 전이다.
+- 결과 JSON은 `.artifacts/m5-durable-output-ui/kdbjri/`에 보존했고 OS에서 시험 프로세스 부재를 확인한 뒤 임시 root를 삭제했다. 사용자 인증/프로젝트·실제 모델 호출은 사용하지 않았다. 문법/diff 검사 PASS. 장시간 출력 제품 활성화·실제 가시 화면/G6·release/Windows/출시는 미완료다. main 병합/push 없음.
+
+### 2026-10-27 · by Codex
+
 - 기준 2f9a3c1의 깨끗한 트리에서 재개했다. 이전 턴은 4채팅 stdio 12,000건 PASS/커밋으로 진척이다. `scripts/m5-durable-output-ui-smoke.cjs`를 추가해 임시 프로젝트/userData, 실제 개발 main/preload/renderer와 debug sidecar의 long-stream fixture를 연결했다. spawn은 정확한 개발 binary·인자·임시 cwd만 치환하며 실제 공급자/인증을 사용하지 않는다. Vite로 main/preload/renderer 개발 산출물을 갱신했다(패키징 없음).
 - 첫 KNnBrA 시험은 /var vs /private/var 경로 비교 오류로 sidecar 생성 전에 실패했다. canonical path 비교로 수정했고, 해당 시험 앱 PID28380만 SIGTERM으로 종료해 session93600 exit1을 확인했다. 기존 패키지 앱 PID27706/sidecar27722는 유지했다.
 - 수정 뒤 session8798은 exit0/정상 종료했다. 4채팅 각각 최신 200건(2801~3000)과 처음 100건(1~100)의 DOM 본문 일치, 원본 파일 불변을 확인했다. 최종 visibility=hidden이고 캡처는 초기 화면을 보여 paint 성공 증거가 아니다. 기존 결과 JSON의 PASS는 기능 DOM 범위에 한정하며 스크립트는 이후 hidden 결과를 functionalStatus=PASS/status=NOT_READY로 구분하도록 수정했다. G6/가시 화면 성능 합격 아님.
