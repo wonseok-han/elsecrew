@@ -35,16 +35,24 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
   const [historyState, setHistoryState] = useState<"loading" | "ready" | "failed">("ready");
   const outputRef = useRef<HTMLDivElement>(null);
   const followLatest = useRef(true);
+  const revealLatest = useRef(false);
   const [newOutput, setNewOutput] = useState(false);
   useLayoutEffect(() => {
     followLatest.current = true;
+    revealLatest.current = false;
     setNewOutput(false);
   }, [binding]);
   useLayoutEffect(() => {
     const list = outputRef.current;
     if (!list || view?.binding.runId !== binding?.runId || historyRequest) return;
-    if (followLatest.current) list.scrollTop = list.scrollHeight;
-    else setNewOutput(true);
+    if (followLatest.current) {
+      list.scrollTop = list.scrollHeight;
+      // Only an explicit latest action may move the surrounding conversation.
+      if (revealLatest.current) {
+        list.lastElementChild?.scrollIntoView({ block: "nearest", inline: "nearest" });
+        revealLatest.current = false;
+      }
+    } else setNewOutput(true);
   }, [view, binding, historyRequest]);
   useLayoutEffect(() => {
     if (historyPage && outputRef.current) outputRef.current.scrollTop = 0;
@@ -52,8 +60,12 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
   const showLatest = () => {
     followLatest.current = true;
     setNewOutput(false);
+    revealLatest.current = Boolean(historyRequest);
     setHistoryRequest(null);
-    if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    if (outputRef.current) {
+      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+      if (!historyRequest) outputRef.current.lastElementChild?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
   };
   useEffect(() => {
     const bridge = resolveM5Bridge(window.m5);

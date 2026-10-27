@@ -1,6 +1,13 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 기준 a3a6eab의 깨끗한 트리에서 재개했다. 이전 턴은 채팅 전환 시험 경주 수정과 네 채팅 DOM/스크롤 PASS로 진척이다. release CLI의 개발 long-stream 거절/DB 미생성 black-box 1검사 PASS(0.46초, 빌드23.73초, session20590). 로그는 `.artifacts/m5-durable-output-release/a3a6eab-boundary.log`에 보존했다.
+- 기존 독립 검토자1명은 macOS native 활성화 전 startup/marker/native budget/physical quota/legacy recovery를 읽고 추가 코드 차단 결함 없음으로 보고했다. 일반/native V11 활성화는 여전히 OFF이며 실제 공급자 durable 실행과 가시 성능/G6 증거는 별도다. 제안서에 현재 통합 증거 요약을 추가했다.
+- 사용자 화면 유지 확인 뒤 session61774로 임시4채팅 시험을 실행했다. 전 구간 visibility trace가 visible 하나였고 4채팅의 최신200/처음100/다음100건·상단/최신하단 복귀 PASS, 정상 종료 exit0. CUA에서 시험 창 Raise와 대화 스크롤을 수행했고 최종 캡처에서 실제 출력2991/2992가 보였다. 이는 개발 fixture의 가시 화면 기능 증거이며50events/s·60초/패키지 메모리/G6 합격이 아니다.
+- 캡처에서 내부 목록 하단이 바깥 대화 스크롤에 가려질 수 있음을 확인해 명시적인 최신 버튼에만 마지막 항목 scrollIntoView를 연결했다. 자동 새 출력은 바깥 스크롤을 옮기지 않는다. 이 보완의 TypeScript/diff 검사는 PASS, 보완 후 실제 화면 회귀는 다음 통합에 남긴다(앞선 PASS와 구분). 시험 결과/PNG는 `.artifacts/m5-durable-output-ui/9weJaL`에 보존하고 OS 프로세스 부재 확인 뒤 임시 root를 정리했다. 사용자 인증/프로젝트·실제 모델 호출·main 병합/push 없음. 실제 공급자/성능·Windows·출시는 미완료다.
+
+### 2026-10-27 · by Codex
+
 - 기준 beaed3d의 깨끗한 트리에서 재개했다. 이전 턴은 UI 스크롤 실패 증거/진단 추가로 진척이다. session67163 재현은 세 번째 채팅의 첫 기록 대기 후 최신2801~3000/top6738로 돌아간 상태를 수집했다(exit1/정상 종료). 같은 본문을 내는 네 채팅에서 시험이 전환 전 DOM을 다음 채팅 결과로 잘못 받아들이는 경주를 확인했다.
 - 시험을 선택 실행 ID와 aria-current 채팅/전환 완료(!disabled)를 기다리도록 수정했다. session88840 exit0/정상 종료, 네 채팅 모두 최신200건·처음100건·다음100건·기록 상단·최신 하단 복귀를 통과했다(functionalStatus=PASS). 제품 스크롤 코드 수정 없이 해당 실패가 해소됐다. 다만 visible→hidden 전환이 있어 전체 status=NOT_READY이며 paint/G6 합격은 아니다.
 - 두 결과는 `.artifacts/m5-durable-output-ui/{7vP20q,cu6d9A}`에 보존하고 OS에서 시험 프로세스 부재를 확인한 뒤 임시 root를 정리했다. 문법/diff 검사 PASS, 실제 모델/사용자 인증/프로젝트 변경 없음. 다음은 가시 화면의 지속 출력/스크롤·메모리/G6 통합, release 거절 증거와 장시간 출력 제품 활성화 검토이며 Windows/출시는 미완료다. main 병합/push 없음.

@@ -135,3 +135,12 @@ L1/L3의 공급자 범위에는 core parser와 Codex/Claude observation adapter�
 - 후속: 기존 `write_projection`의 run 갱신 transaction에 output head 초기화/terminal seal을 연결했다. marker가 있는 V11 첫 event만 head를 만들고 중간 누락·legacy 되돌림·sealed 재실행을 거절한다. provider가 새 marker를 생성하도록 바꾸거나 자동 이관을 활성화하지는 않았다. rollback 회귀는 작성 상태다.
 - runtime 체크포인트: 명시 marker 경로에서 actual projection/head 검증, 공개 event 직접 append, bounded collector(100개/4MiB), 복구/종료 재작성의 marker 보존을 연결했다. 새 형식은 매 event를 chat message로 중복 저장하지 않는다. 최종 응답의 후속 문맥·UI page 표시와 provider parser/observation 한도 변경이 남아 있어 새 run marker 생성/자동 이관은 아직 켜지 않는다. 이 추가분은 실행 검증 전이다.
 - parser 체크포인트: core/Codex/Claude에 명시 `ProviderEventBudget::DurableV1` 선택을 추가했다. 기본은 legacy이며 새 모드는 내부65,536개·공개16,384개·raw256MiB·공개64MiB, 기존 단일 항목 상한을 사용한다. 원문 frame을 누적하지 않으며 Claude delivery-ID 집합도 내부 event 상한에 의해 유한하다. 이 집합의 실제 RAM은 ingress와 별도로 측정해야 한다. 숫자는 비활성 초기 구현값이며 runtime 선택·전체 RAM/시간 예산 동결·독립 검토는 남는다.
+
+### 2026-10-27 통합 증거 갱신
+
+과거 체크포인트의 미구현 표시는 당시 기록이다. 현재 V11 이관/입장과 출력 원장·페이지·head 알림·renderer 연결은 개발 전용 `long-stream` 모드에서 연결돼 있다. 일반/native 시작의 자동 이관은 아직 비활성이다.
+
+- 실제 sidecar stdio에서 독립 4채팅×단일3,000개 출력의 저장·페이지·순서·격리·종료를 확인했다. 실제 모델 호출은 없다.
+- 개발 Electron에서 선택 실행 ID를 대조한 네 채팅의 최신200건/처음100건/다음100건과 스크롤 복귀를 확인했다. 후속 사용자 화면 유지 시험에서 전 구간 visible과 동일 기능 PASS를 확인했다. 캡처에 실제 본문이 보였지만 지속 paint/처리량·메모리 게이트는 아직 아니다.
+- a3a6eab release 바이너리의 개발 `long-stream` 인자 거절과 DB 생성 전 종료 black-box 검사가 통과했다. 이는 패키지 전체 검증이나 기능 활성화 승인이 아니다.
+- 제품 활성화 독립 검토, 가시 화면의50events/s·60초/메모리 통합 증거, 실제 공급자 전체 흐름·Windows·출시 검증은 남아 있다. 실행 증거와 최신 후속은 `../history.md`를 따른다.
