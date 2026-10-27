@@ -1,6 +1,13 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 이전 턴은 사용자 명시 승인에 따른 macOS V11 활성화01d2f19 커밋으로 진척이다. 단독 debug Codex3,000출력 session8111은602.95초/exit101로 종료됐다(2,500콜백509.75초,600초 turn deadline,종료/profile cleanup확인true). 동시 부하만의 문제라고 볼 수 없으며 `.artifacts/m5-sidecar-integration/2026-10-27/codex-isolated.log`에 보존했다. 제한 시간이나 안전 검사는 변경하지 않았다.
+- 출력 프레임마다 입력/역할/작업 복사본 검증과 Git 검사가 반복됨을 확인했다. 상시 승인된 읽기 전용 검토자1명에게 이 경로의 성능 개선과 안전 동등성 검토를 요청했다. 성능 구현 변경은 아직 없다.
+- package guard로 실행 중인 기존 앱이 없음을 먼저 확인한 뒤 clean01d2f19에서 `pnpm m5:test:package` PASS(exit0,session32339). release sidecar재컴파일18.26초,package/smoke/ZIP/크기PASS. 증거 `.artifacts/m5-g6-package/darwin-arm64-2026-10-27T04-12-05-203Z.json`. 승인된 기능이 out앱/ZIP에 반영됐으며 사용자 DB로 실행하지 않았다. 전체G6/실계정/출시PASS는 아니다.
+- 제품과 같은 최적화의 비용을 구분하기 위해 동일3,000출력 검사를 release lib로 실행 중(session44976, `/private/tmp/m5-codex-durable-release.log`,1thread). 가짜CLI/임시DB만 사용하고 실제 모델 호출 없음. 다음은 동일handle결과와 독립 검토에 근거해 남은 병목을 수정한다. main병합/push 없음.
+
+### 2026-10-27 · by Codex
+
 - 이전 턴은 누적 검사 실패8건 정리·관련 회귀PASS·7ce5e1e 커밋으로 진척이다. 단독 Codex 모의3,000출력 session8111을 같은 handle로 계속 확인 중이며 현재500콜백84.65초/1,000콜백191.99초다. 전체 검사 때보다 빠르지만 종료 결과 전 해결로 선언하지 않는다.
 - 사용자가 V11 이관·구버전 재열기 불가·downgrade 없음의 한계를 이해하고 macOS 장시간 출력 활성화를 명시 승인했다. 승인 대기였던 NativeProviders 입장 연결3파일과 현행 구조 문서를 작업 단위로 커밋한다. 독립 검토와 기존 이관/재열기/취소 경계 증거는 유지하며 코드 후보를 추가 확장하지 않았다. blocked/Windows·일반 fixture는 기존 경로다.
 - 이번 커밋은 소스 활성화이며 아직 패키지 재빌드/사용자 DB 실행을 하지 않았다. 진행 중인 무거운 검사 종료 뒤 기존 앱 실행 여부를 먼저 확인하고 패키지를 반영한다. 실제 모델 호출은 승인 범위에 포함되지 않는다. 단독 검사 결과·G6 메모리/성능·실계정·Windows·출시 검증은 미완료이고 main병합/push 없음.
