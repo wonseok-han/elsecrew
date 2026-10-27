@@ -2,6 +2,13 @@
 
 ### 2026-10-27 · by Codex
 
+- 이전 턴은실시간지연관측9bbe98f 구현·4검사PASS로진척이다. 최신debug sidecar빌드PASS(7.25초)후임시4스트림화면을실행했다. 첫ToO8Hc/session61123은33초뒤hidden으로FAIL/exit1이며결과를보존했다. 연속출력에서latest head가계속움직여arm되지않는관측결함을찾았다.
+- 선택epoch의첫head를고정catch-up경계로사용하도록수정하고, head변경마다동일화면행을중복기록하던key를제거했다. 전환epoch/실시간새알림·가시성·동일sequence·두RAF조건은유지한다. 연속head회귀를추가해5검사PASS, 문법/diff검사PASS.
+- 사용자화면2분유지확인후GokfSG/session38940 재시험PASS/exit0·4채팅전체12,000출력/history/latest조회PASS. liveLatency82표본,max508.10ms/p95414.40ms, superseded123/interrupted18/dropped0/unfinished0. 일부정확한head의진단표본이며모든event paint나정식G6/10회PASS가아니다. peakRSS565.34MiB도개발진단값이다.
+- 두시험모두관측PID부재와임시DB clean종료를재확인하고생성root를삭제했다. 작은JSON/PNG/log/cleanup증거는 `.artifacts/m5-durable-output-ui/{ToO8Hc,GokfSG}`에보존했다. 사용자데이터/계정/모델호출없음. 다음은관측된표시지연과정식성능수집연결을개선하는것이며G6/실계정/Windows/출시는미완료다. main병합/push없음.
+
+### 2026-10-27 · by Codex
+
 - 이전 턴은3,000출력debug413.27초PASS와6a0a553패키지PASS로진척이다. 현재제품소스는변경하지않고 남은화면성능수집의실시간지연경계를보완했다. 기존생성→화면측정은채팅선택후history추격시간을포함하므로G6실시간지연으로사용하지않는다.
 - 새 `m5-live-output-latency.cjs`를개발UI관측기에직렬화해연결했다. 선택된run이head까지따라잡은뒤도착한알림만arm하고, 동일선택epoch·정확한sequence·가시성·두RAF검증뒤표본을남긴다. coalesced/switch/pending/overflow는각각superseded/interrupted/unfinished/dropped로명시한다. 대기256·보존1024상한이며제품bridge/원장권한은변경하지않았다.
 - 과거추격제외·선택/숨김epoch·중복알림/합쳐진행·상한4검사PASS, JS문법/diff검사PASS. 실제GUI새계측실행은아직이며개발진단을정식패키지/G6증거로승격하지않았다. 절차문서에경계를기록했다.

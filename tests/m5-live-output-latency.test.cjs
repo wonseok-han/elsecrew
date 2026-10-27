@@ -52,3 +52,14 @@ test('pending and retained diagnostics are bounded and losses remain explicit', 
   assert.equal(tracker.snapshot().samples.length, 1024);
   assert.ok(tracker.snapshot().dropped > 44);
 });
+
+test('continuous newer heads do not move the selection catch-up boundary', () => {
+  const tracker = createLiveOutputLatency(); const epoch = tracker.select('a');
+  tracker.receive('a', 100, 1); tracker.receive('a', 110, 2);
+  tracker.frame('a', 100, 3, epoch);
+  tracker.receive('a', 120, 4); tracker.receive('a', 130, 5);
+  tracker.frame('a', 120, 8, epoch);
+  assert.equal(tracker.snapshot().samples[0].sequence, 120);
+  assert.equal(tracker.snapshot().samples[0].notificationToFrameMs, 4);
+  assert.equal(tracker.snapshot().unfinished, 1);
+});

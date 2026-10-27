@@ -48,7 +48,7 @@ function installOutputObserver(createLiveOutputLatency) {
     const text = node.textContent;
     const match = /^output (\d+)(?: \[emitted_us=(\d+),unix_ms=(\d+)\])?$/.exec(text);
     if (!match) return;
-    const sequence = Number(match[1]), key = `${capturedEpoch}:${runId}:${sequence}:${latest.get(runId)?.sequence ?? 0}`;
+    const sequence = Number(match[1]), key = `${capturedEpoch}:${runId}:${sequence}`;
     if (key === lastKey) return;
     lastKey = key;
     const head = latest.get(runId), observedAt = performance.now();
