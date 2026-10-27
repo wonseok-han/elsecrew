@@ -60,6 +60,7 @@ function installOutputObserver() {
   observer.observe(document.body, { childList: true, subtree: true, characterData: true });
   document.addEventListener('scroll', observe, true);
   return {
+    snapshot: () => structuredClone(result),
     latestVisible: () => visible(document.querySelector('.m5-output-scroll article:last-child pre')),
     stop() {
     stopped = true; off(); observer.disconnect();

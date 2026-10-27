@@ -216,3 +216,9 @@ clean checkout에서 `pnpm run m5:measure:renderer`를 실행한다. 현재 prod
 ```
 
 패키지 크기는 기존 `m5:test:package`가 담당한다. 현재 전체 UI·메모리·경합·종료 측정 수집기를 모두 연결하지 않았으므로 `m5:test:performance` 예약 게이트는 아직 열지 않는다. `harness:list`의 G6는 계속 NOT_READY이며 이 두 측정 도구만으로 출시를 승인하지 않는다.
+
+### 장시간 출력의 실행 중 화면 진단 (개발 빌드 전용)
+
+현재 renderer/main/preload와 debug sidecar를 빌드한 뒤 `env -u ELECTRON_RUN_AS_NODE node_modules/.bin/electron scripts/m5-durable-output-ui-smoke.cjs --live`를 실행한다. 실제 계정 대신 임시 프로젝트의 네 합성 실행을 각 3,000개/20ms 간격으로 생성한다. `--live`는 `--paced`를 포함하며 각 채팅을 순서대로 선택해 12초 동안 head와 보이는 행의 두 RAF 관측이 증가하는지 확인한다. 처음 한 번 출력 영역을 화면으로 가져온 뒤 지속 강제 스크롤은 하지 않는다. 이후 전체 기록 조회와 이전/최신 이동을 검사한다.
+
+`liveWindows`에는 선택한 run, 관측 시간, head/화면 표본, 누락 카운터가 남는다. 생성 시각과 화면 시각의 차이에는 채팅 전환 후 과거 기록을 따라잡는 시간이 포함되므로 이를 곧바로 live eventPaint 지연으로 집계하지 않는다. 비선택 채팅의 paint나 물리 compositor 표시를 입증하지 않는다. 숨김 이력이 있으면 기능 성공이어도 전체 상태는 NOT_READY다. 결과는 `diagnostic:true, gateEligible:false`이며 정식 패키지/10회 G6 수집을 대체하지 않는다. 정상 종료와 OS 프로세스 부재를 확인한 뒤 작은 JSON/PNG만 보존하고 해당 시험 root를 정리한다.

@@ -1,6 +1,13 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 기준 `90cb727`에서 재개했다. 이전 턴은 중복 head 조회 제거/회귀/커밋으로 진척이다. `m5-durable-output-ui-smoke.cjs --live`를 연결해 종료 후 조회뿐 아니라 네 단일 실행의 진행 중 채팅 전환과 각12초 표시 갱신을 관측한다. observer의 bounded snapshot을 재사용하며 한 번 영역을 보여준 뒤 강제 스크롤 반복 없이 head/행 증가·최신 가시성·누락을 확인한다. 제품 안전/활성화는 변경하지 않는다.
+- debug sidecar build·JS 문법·diff 검사 PASS. session38057은 exit0/정상 종료/기능 PASS, 네 live 구간 head68/40/40/27개·frame30/22/26/31개·최신 가시성 모두 확인했다. 전체12,000기록·이전/최신 이동 성공. 다만 창 숨김 이력이 있어 전체 NOT_READY를 유지한다. peakRSS527.515625MiB는 개발 진단이며 G6 메모리 합격이 아니다.
+- 선택 직후 과거 페이지부터 따라잡아 frame 표본의 생성→표시 최대4.66/19.37/34.51/51.13초가 관측됐다. 이는 오래된 출력 재표시를 포함하므로 live eventPaint 값으로 오인하지 않는다. 실시간 표본과 catch-up의 구분, packaged G6/전체 성능 증거는 남는다. 기능 PASS를 제품 완료로 확대하지 않는다.
+- 결과/PNG/live-summary를 `.artifacts/m5-durable-output-ui/3rwZHq`에 보존하고 OS 프로세스 부재 확인 후 해당 임시 root를 삭제했다. 실제 모델/사용자 프로젝트·main 병합/push 없음. native 활성화/실계정·Windows·출시는 계속 미완료다.
+
+### 2026-10-27 · by Codex
+
 - 기준 `73be96f`, `m5/coding-agent-ide`의 깨끗한 트리에서 출력 상태 조회 중복 제거를 직접 구현했다. `actual_run_projection_and_head`가 검증한 head를 요청 안에서 재사용해 `read_output_head`의 동일 head 조회를 3회에서 1회로 줄였다. 요청 간 캐시는 없으며 source kind·출력 형식·legacy budget·native evidence·provider fence·전체 요청 binding 검사는 유지한다. page/append/제품 활성화는 변경하지 않았다.
 - 새 회귀는 durable head/legacy null, 잘못된 chat·없는 run 거절과 형식·혼합 public_events·source·fence·nil native connection 손상을 검사해 PASS(1.58초). 최초 시험은 정상 writer가 손상 주입을 거절해 test-only SQL로 바꿨고, preparing native marker의 receipt 생략은 유효해 명백히 잘못된 nil UUID로 수정했다. 제품 결함으로 기록하지 않는다. 기존 native evidence 3개와 append 실패 rollback/reopen 회귀(1.25초)도 PASS. 변경 함수 rustfmt·diff check PASS.
 - 읽기 전용 독립 검토자 1명은 검증 경계·legacy 동작·활성화 유지에 새 차단 결함 없음으로 확인했다(검사 재실행은 하지 않음). 이번에는 UI/실제 모델/사용자 프로젝트를 실행하지 않았으며 지연 개선 수치는 재측정 전이다. 이전 화면 시험 성공은 직전 기록의 진단 범위만 유효하다. 다음은 packaged G6 지속 화면·메모리 증거와 native 활성화/실계정 검증이며 Windows·출시는 미완료다. main 병합/push 없음.

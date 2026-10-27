@@ -8,7 +8,8 @@ const assert = require('node:assert/strict');
 const { installOutputObserver } = require('./m5-durable-output-observer.cjs');
 const { observeStdio } = require('./m5-stdio-observer.cjs');
 if (process.platform !== 'darwin' || app.isPackaged) throw new Error('Development macOS diagnostic only');
-const paced = process.argv.includes('--paced');
+const live = process.argv.includes('--live');
+const paced = live || process.argv.includes('--paced');
 const repo = path.resolve(__dirname, '..');
 const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hello-agent-output-ui-'));
 const source = path.join(root, 'project');
@@ -23,7 +24,7 @@ for (const args of [['init', '-q', '--template='], ['add', '.'],
 app.setPath('userData', userData);
 dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [source] });
 const report = { schemaVersion: 1, diagnostic: true, gateEligible: false, root,
-  paced, status: 'RUNNING', shutdown: 'pending', restoredChats: [], scrollChecks: [],
+  paced, live, liveWindows: [], status: 'RUNNING', shutdown: 'pending', restoredChats: [], scrollChecks: [],
   limitations: ['Development artifacts, synthetic providers, no actual accounts.',
     'Full retained-window and history checks; no 50-events/s paint or packaged RSS gate.',
     'Synthetic runs have no native approval queue; approval inspection rejection is not native-provider evidence.',
@@ -131,6 +132,37 @@ app.on('browser-window-created', (_event, window) => {
             inputMessageIds:[detail.messages[0].messageId],expectedCapabilityFingerprint:capability.fingerprint}));
         }
       })()`);
+      if (live) for (let index = 0; index < 4; index++) {
+        await run(`[...document.querySelectorAll('.m5-chat-chip')].find(b => b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}').click()`);
+        await wait(`document.querySelector('.m5-durable-output select')?.value === outputSmokeRuns[${index}].runId &&
+          [...document.querySelectorAll('.m5-chat-chip')].some(b => b.getAttribute('aria-current') === 'true' && !b.disabled && b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}')`);
+        await wait("!!document.querySelector('.m5-output-scroll article:last-child pre')");
+        // Model the user bringing the live output into view once. Do not keep
+        // scrolling it in the probe: subsequent updates must follow naturally.
+        await run("document.querySelector('.m5-output-scroll').scrollIntoView({block:'end',inline:'nearest'})");
+        const observation = await run(`(async () => {
+          const runId = outputSmokeRuns[${index}].runId;
+          const before = outputObservation.snapshot();
+          const startedAt = performance.now();
+          await new Promise(resolve => setTimeout(resolve, 12000));
+          const after = outputObservation.snapshot();
+          const heads = after.heads.slice(before.heads.length).filter(row => row.runId === runId);
+          const frames = after.frames.slice(before.frames.length).filter(row => row.runId === runId);
+          return {runId,startedAt,endedAt:performance.now(),heads,frames,
+            latestVisible:outputObservation.latestVisible(),visibility:document.visibilityState,
+            droppedHeads:after.droppedHeads,droppedFrames:after.droppedFrames};
+        })()`);
+        report.liveWindows.push(observation); persist();
+        assert.equal(observation.visibility, 'visible', 'Live window became hidden');
+        assert.equal(observation.droppedHeads, 0, 'Live head observations truncated');
+        assert.equal(observation.droppedFrames, 0, 'Live frame observations truncated');
+        assert.ok(observation.heads.length >= 2 && observation.heads.at(-1).sequence > observation.heads[0].sequence,
+          'Selected stream did not advance during live window');
+        assert.ok(observation.heads[0].sequence < 3000, 'Live window started after completion');
+        assert.ok(observation.frames.length >= 2 && observation.frames.at(-1).sequence > observation.frames[0].sequence,
+          'Visible stream did not advance during live window');
+        assert.equal(observation.latestVisible, true, 'Latest live output is clipped');
+      }
       for (let index = 0; index < 4; index++) {
         await run(`[...document.querySelectorAll('.m5-chat-chip')].find(b => b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}').click()`);
         // Every chat has identical output text. Wait for the selected run and the
