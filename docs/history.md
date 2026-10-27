@@ -1,6 +1,13 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 기준78a0a37의 깨끗한 트리에서 재개했다. 이전 턴은 release 경계/가시 기능 증거와 최신 출력 노출 수정으로 진척이다. 개발 UI 시험에 bounded 출력 head 수신/클리핑을 고려한 DOM→2RAF 관측과 시험 앱 프로세스 트리의1초 RSS 수집을 추가했다. 표본 상한·손실/오류 카운터·구독/observer/RAF 회수를 두며 실제 생성/commit 시각이나 compositor timestamp로 주장하지 않는다. RSS는 관측용 ps 오버헤드/공유 페이지 중복을 포함한다.
+- renderer를78a0a37로 갱신했다. 첫 session2196은 함수가 있는 관측 객체를 executeJavaScript 결과로 반환해 clone 실패했다(실행 시작 전, exit1/정상 종료). 반환을void로 고쳐 session15359는 exit0/전 구간visible/4채팅 페이지·스크롤 PASS했다. head125건·frame100건·RSS57표본, drop0/수집오류0/최대499.421875MiB. 개발 실행 중 수치이며 idle400MiB 또는 packaged G6 판정이 아니다.
+- 최종 캡처에서 마지막 output3000이 바깥 패널 안에 보이는 것을 확인해 직전 UI 보완의 실제 표시를 확인했다. 시험 진행 중 추가한 latestVisible 클리핑 assertion은 다음 실행부터 적용되므로 이번 PASS에 포함하지 않는다. 원본 불변/정상 종료와 OS 프로세스 부재를 확인하고 두 임시 root를 정리했다. JSON/PNG는 `.artifacts/m5-durable-output-ui/{gPeSNK,dpsFnt}`에 보존했다. 문법/diff 검사 PASS.
+- 남은 것은 일정 간격으로 발행하는4×3,000 출력의 실제 발행/수신/paint 지연·전체 G6 통합, native 실제 계정 durable 시험과 활성화, Windows/출시다. 현재 burst fixture의57초/표본을50events/s·60초 합격으로 바꾸지 않는다. 실제 계정/프로젝트·main 병합/push 없음.
+
+### 2026-10-27 · by Codex
+
 - 기준 a3a6eab의 깨끗한 트리에서 재개했다. 이전 턴은 채팅 전환 시험 경주 수정과 네 채팅 DOM/스크롤 PASS로 진척이다. release CLI의 개발 long-stream 거절/DB 미생성 black-box 1검사 PASS(0.46초, 빌드23.73초, session20590). 로그는 `.artifacts/m5-durable-output-release/a3a6eab-boundary.log`에 보존했다.
 - 기존 독립 검토자1명은 macOS native 활성화 전 startup/marker/native budget/physical quota/legacy recovery를 읽고 추가 코드 차단 결함 없음으로 보고했다. 일반/native V11 활성화는 여전히 OFF이며 실제 공급자 durable 실행과 가시 성능/G6 증거는 별도다. 제안서에 현재 통합 증거 요약을 추가했다.
 - 사용자 화면 유지 확인 뒤 session61774로 임시4채팅 시험을 실행했다. 전 구간 visibility trace가 visible 하나였고 4채팅의 최신200/처음100/다음100건·상단/최신하단 복귀 PASS, 정상 종료 exit0. CUA에서 시험 창 Raise와 대화 스크롤을 수행했고 최종 캡처에서 실제 출력2991/2992가 보였다. 이는 개발 fixture의 가시 화면 기능 증거이며50events/s·60초/패키지 메모리/G6 합격이 아니다.

@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const cp = require('node:child_process');
 const assert = require('node:assert/strict');
+const { installOutputObserver } = require('./m5-durable-output-observer.cjs');
 if (process.platform !== 'darwin' || app.isPackaged) throw new Error('Development macOS diagnostic only');
 const repo = path.resolve(__dirname, '..');
 const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hello-agent-output-ui-'));
@@ -23,7 +24,9 @@ const report = { schemaVersion: 1, diagnostic: true, gateEligible: false, root,
   status: 'RUNNING', shutdown: 'pending', restoredChats: [], scrollChecks: [],
   limitations: ['Development artifacts, synthetic providers, no actual accounts.',
     'Full retained-window and history checks; no 50-events/s paint or packaged RSS gate.',
-    'Synthetic runs have no native approval queue; approval inspection rejection is not native-provider evidence.'] };
+    'Synthetic runs have no native approval queue; approval inspection rejection is not native-provider evidence.',
+    'RSS includes transient sampling overhead and counts shared pages per process; not a packaged idle-memory gate.',
+    'Two RAFs are rendering opportunities, not physical compositor timestamps or provider generation latency.'] };
 const persist = () => fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify(report, null, 2));
 persist();
 const spawn = cp.spawn;
@@ -41,10 +44,26 @@ cp.spawn = function(command, args, options) {
   }
   return Reflect.apply(spawn, this, [command, args, options]);
 };
+// Poll the process tree, including sidecar and fixture descendants. These are
+// sampled RSS totals (shared pages may be counted more than once), not heap size.
+report.memory = { scope: 'test-app-process-tree', samples: [], errors: 0, truncated: false };
+const memoryTimer = setInterval(() => {
+  try {
+    const rows = cp.execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,rss='], { encoding: 'utf8', timeout: 2000, maxBuffer: 4 * 1024 * 1024 })
+      .trim().split('\n').map(line => line.trim().split(/\s+/).map(Number));
+    const included = new Set([process.pid]);
+    let grew = true;
+    while (grew) { grew = false; for (const [pid, ppid] of rows) if (included.has(ppid) && !included.has(pid)) { included.add(pid); grew = true; } }
+    const processes = rows.filter(([pid]) => included.has(pid)).map(([pid, , kib]) => ({pid, rssBytes:kib * 1024}));
+    if (report.memory.samples.length < 600) report.memory.samples.push({at:Date.now(), processes, totalBytes:processes.reduce((sum, entry) => sum + entry.rssBytes, 0)});
+    else report.memory.truncated = true;
+  } catch { report.memory.errors++; }
+}, 1000);
 let finished = false;
 function finish(error) {
   if (finished) return;
   finished = true;
+  clearInterval(memoryTimer);
   report.error = error?.message;
   report.status = error ? 'FAIL' : 'PENDING';
   persist(); console.log(JSON.stringify(report));
@@ -95,6 +114,7 @@ app.on('browser-window-created', (_event, window) => {
       await wait("document.querySelectorAll('.m5-chat-chip').length === 4");
       await run("document.querySelector('.m5-chat-chip').click()");
       await wait("!!document.querySelector('#m5-followup-text')");
+      await run(`globalThis.outputObservation = (${installOutputObserver.toString()})(); void 0`);
       await run(`(async () => {
         const api = window.m5;
         const capability = await api.getAgentCapabilities({runtime:'claude-code',refresh:true});
@@ -126,16 +146,20 @@ app.on('browser-window-created', (_event, window) => {
         await run("[...document.querySelectorAll('.m5-durable-output button')].find(b => b.textContent === '최신 대화').click()");
         await wait("document.querySelector('.m5-output-scroll article:last-child pre')?.textContent === 'output 3000'");
         await wait("(() => { const list = document.querySelector('.m5-output-scroll'); return list && list.clientHeight > 0 && list.scrollHeight - list.scrollTop - list.clientHeight <= 2; })()");
+        // A scrolled inner list can still be clipped by the outer conversation.
+        if (await run("document.visibilityState === 'visible'")) await wait("outputObservation.latestVisible()");
         report.scrollChecks.push({chat:index,historyTop:true,nextPage:true,latestBottom:true});
         report.restoredChats.push(index); persist();
       }
       assert.equal(fs.readFileSync(path.join(source, 'hello.txt'), 'utf8'), 'original\n');
+      report.outputObservation = await run('outputObservation.stop()');
       report.visibility = await run('document.visibilityState');
       report.visibilityTrace = await run('outputSmokeVisibility');
       await fs.promises.writeFile(path.join(root, 'output.png'), (await window.webContents.capturePage()).toPNG());
       finish();
     } catch (error) {
       try {
+        report.outputObservation = await run('globalThis.outputObservation?.stop() ?? null');
         report.failureView = await run(`(() => {
           const list = document.querySelector('.m5-output-scroll');
           return {visibility:document.visibilityState,trace:globalThis.outputSmokeVisibility ?? [],
