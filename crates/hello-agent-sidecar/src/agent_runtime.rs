@@ -2969,7 +2969,7 @@ pub(crate) fn read_output_head(storage: &Storage, params: &Value) -> Result<Valu
     let binding: hello_agent_protocol::agent_adapter_v1::AgentRunBindingV1 =
         serde_json::from_value(params.clone())
             .map_err(|_| ProjectFailure::manifest("invalid output binding"))?;
-    let projection = actual_run_projection(storage, &binding.run_id)?;
+    let (projection, head) = actual_run_projection_and_head(storage, &binding.run_id)?;
     if output_binding(&projection["record"])? != binding {
         return Err(ProjectFailure::manifest("output run binding differs"));
     }
@@ -2978,8 +2978,7 @@ pub(crate) fn read_output_head(storage: &Storage, params: &Value) -> Result<Valu
     if !projection.contains_key("output_format_version") {
         return Ok(Value::Null);
     }
-    require_output_binding(storage, &binding)?;
-    serde_json::to_value(storage.agent_output_head(&binding)?)
+    serde_json::to_value(head.ok_or_else(|| ProjectFailure::manifest("output head missing"))?)
         .map_err(|_| ProjectFailure::manifest("output head encoding failed"))
 }
 
@@ -3032,6 +3031,20 @@ fn actual_run_projection(
     storage: &Storage,
     run_id: &str,
 ) -> Result<Map<String, Value>, ProjectFailure> {
+    actual_run_projection_and_head(storage, run_id).map(|(projection, _)| projection)
+}
+
+// Reuse the head validated for this projection within one request only.
+fn actual_run_projection_and_head(
+    storage: &Storage,
+    run_id: &str,
+) -> Result<
+    (
+        Map<String, Value>,
+        Option<hello_agent_protocol::agent_adapter_v1::output_pages::OutputHead>,
+    ),
+    ProjectFailure,
+> {
     let value = storage
         .projection_record("run", run_id)?
         .ok_or_else(|| ProjectFailure::manifest("agent run is missing"))?;
@@ -3040,7 +3053,7 @@ fn actual_run_projection(
             "run is not an actual-agent ledger record",
         ));
     }
-    if value.get("output_format_version").is_some() {
+    let head = if value.get("output_format_version").is_some() {
         if value.get("output_format_version").and_then(Value::as_u64) != Some(1)
             || value.get("public_events").is_some()
         {
@@ -3048,12 +3061,15 @@ fn actual_run_projection(
                 "invalid durable output projection",
             ));
         }
-        storage
-            .agent_output_head(&output_binding(&value["record"])?)
-            .map_err(ProjectFailure::from)?;
+        Some(
+            storage
+                .agent_output_head(&output_binding(&value["record"])?)
+                .map_err(ProjectFailure::from)?,
+        )
     } else {
         stored_public_budget(&value)?;
-    }
+        None
+    };
     native_evidence::validate(&value)?;
     if let Some(binding) = value.get("provider_run_fence") {
         let failure = || ProjectFailure::recovery("provider run fence binding differs");
@@ -3068,7 +3084,7 @@ fn actual_run_projection(
             )
             .map_err(|_| failure())?;
     }
-    Ok(value)
+    Ok((value, head))
 }
 
 fn preserve_provider_evidence(source: &Map<String, Value>, target: &mut Map<String, Value>) {

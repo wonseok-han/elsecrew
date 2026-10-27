@@ -1,6 +1,12 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 기준 `73be96f`, `m5/coding-agent-ide`의 깨끗한 트리에서 출력 상태 조회 중복 제거를 직접 구현했다. `actual_run_projection_and_head`가 검증한 head를 요청 안에서 재사용해 `read_output_head`의 동일 head 조회를 3회에서 1회로 줄였다. 요청 간 캐시는 없으며 source kind·출력 형식·legacy budget·native evidence·provider fence·전체 요청 binding 검사는 유지한다. page/append/제품 활성화는 변경하지 않았다.
+- 새 회귀는 durable head/legacy null, 잘못된 chat·없는 run 거절과 형식·혼합 public_events·source·fence·nil native connection 손상을 검사해 PASS(1.58초). 최초 시험은 정상 writer가 손상 주입을 거절해 test-only SQL로 바꿨고, preparing native marker의 receipt 생략은 유효해 명백히 잘못된 nil UUID로 수정했다. 제품 결함으로 기록하지 않는다. 기존 native evidence 3개와 append 실패 rollback/reopen 회귀(1.25초)도 PASS. 변경 함수 rustfmt·diff check PASS.
+- 읽기 전용 독립 검토자 1명은 검증 경계·legacy 동작·활성화 유지에 새 차단 결함 없음으로 확인했다(검사 재실행은 하지 않음). 이번에는 UI/실제 모델/사용자 프로젝트를 실행하지 않았으며 지연 개선 수치는 재측정 전이다. 이전 화면 시험 성공은 직전 기록의 진단 범위만 유효하다. 다음은 packaged G6 지속 화면·메모리 증거와 native 활성화/실계정 검증이며 Windows·출시는 미완료다. main 병합/push 없음.
+
+### 2026-10-27 · by Codex
+
 - 기준1a71f46의 깨끗한 트리에서 재개했다. 이전 턴은 출력 번호 transaction 결속/회귀/통합으로 진척이나 지연 개선은 미입증이다. 추가 추측 최적화 전에 시험 전용 stdio passive observer를 붙였다. 요청종류별왕복시간/최대동시pending/누락만 보존하고 payload는 저장하지 않는다. line1MiB/pending512/method64/종류별표본2048 상한이며 callback·backpressure·bytes를 유지하고 종료시해제한다.
 - fragment UTF8·reply 결속/본문 미보존·원래write반환/callback/해제, oversized/malformed후복구·prototype형method, pending상한3검사PASS. session38992의 paced4×3,000 UI는PASS/exit0/visible, 전체기록/최신노출 성공. transport pendingPeak7/미응답0/drop0/malformed0/oversized0.
 - outputPage370회 p95 296.71ms/max608.17ms, outputHead163회 p95 347.89ms/max869.61ms, approval59회 p95730.08ms다. 왕복에는 큐대기/계측overhead가 있어DB 자체지연으로 단정하지 않는다. 소스상 read_output_head는 actual_run_projection→head, require_output_binding→actual_run_projection→head, 최종head로 같은상태를3회읽는다. 다음은 동일조회내검증결과재사용으로 이중복을 제거하되 native/fence/legacy검증을 유지하는 작업이다.

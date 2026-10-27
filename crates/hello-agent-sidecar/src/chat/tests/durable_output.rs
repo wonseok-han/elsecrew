@@ -544,3 +544,91 @@ fn next_output_sequence_rolls_back_on_rejection_and_survives_reopen() {
     assert_eq!(f.storage.agent_output_head(&binding).unwrap().committed_sequence, 2);
     assert_eq!(read_all(&mut f.storage, run), vec![first, second]);
 }
+
+#[test]
+fn output_head_reuses_validated_projection_without_relaxing_identity_or_evidence() {
+    for durable in [false, true] {
+        let mut f = Fixture::with_durable_output(durable);
+        let snapshot = f.snapshot("req_durable_snapshot");
+        let chat = f.create_exact_claude_chat(&snapshot, "goal", "req_durable_chat");
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        let request = AgentRunStartRequestV1 {
+            chat_id: chat_id.into(),
+            role_id: "coding".into(),
+            input_message_ids: vec![initial_message_id(&f, chat_id)],
+            expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+        };
+        RunPreparation::resolve(&f.storage, &f.projects, &request)
+            .unwrap()
+            .reserve(
+                &mut f.storage,
+                &f.projects,
+                &serde_json::from_value(capability).unwrap(),
+                "req_durable_reserve",
+            )
+            .unwrap();
+        let projection = f.storage.projection_records("run").unwrap().remove(0);
+        assert_eq!(projection.contains_key("output_format_version"), durable);
+        let run = &projection["record"];
+        let event = json!({
+            "schemaVersion":1,"eventId":"agent_event_atomic_final",
+            "chatId":run["chatId"],"taskId":run["taskId"],"projectId":run["projectId"],
+            "worktreeId":run["worktreeId"],"workspaceIdentity":run["workspaceIdentity"],
+            "runId":run["runId"],"roleId":"coding","capabilityFingerprint":run["capabilityFingerprint"],
+            "kind":"final","text":"durable answer","createdAt":"2026-10-23T01:02:00Z"
+        });
+        let binding: AgentRunBindingV1 = serde_json::from_value(json!({
+        "chatId":event["chatId"],"taskId":event["taskId"],"projectId":event["projectId"],
+        "worktreeId":event["worktreeId"],"workspaceIdentity":event["workspaceIdentity"],
+        "runId":event["runId"],"roleId":event["roleId"],"capabilityFingerprint":event["capabilityFingerprint"]
+    })).unwrap();
+
+        let params = serde_json::to_value(&binding).unwrap();
+        let expected = if durable {
+            serde_json::to_value(f.storage.agent_output_head(&binding).unwrap()).unwrap()
+        } else {
+            Value::Null
+        };
+        assert_eq!(
+            crate::agent_runtime::read_output_head(&f.storage, &params).unwrap(),
+            expected
+        );
+        let mut wrong = params.clone();
+        wrong["chatId"] = json!("chat_wrong");
+        assert!(crate::agent_runtime::read_output_head(&f.storage, &wrong).is_err());
+        wrong = params.clone();
+        wrong["runId"] = json!("run_missing");
+        assert!(crate::agent_runtime::read_output_head(&f.storage, &wrong).is_err());
+        if !durable {
+            continue;
+        }
+        for (key, value) in [
+            ("output_format_version", json!(2)),
+            ("public_events", json!([])),
+            ("source_kind", json!("fixture")),
+            ("provider_run_fence", json!({})),
+            (
+                "native_transport",
+                json!({"schemaVersion":1,"adapter":"claude.stream.v1",
+            "connectionId":"00000000-0000-0000-0000-000000000000","requiresProviderAttestation":false}),
+            ),
+        ] {
+            let mut corrupt = projection.clone();
+            corrupt.remove("last_event_sequence");
+            corrupt.insert(key.into(), value);
+            f.storage
+                .connection_for_test()
+                .execute(
+                    "UPDATE runs SET projection_json=?1 WHERE run_id=?2",
+                    rusqlite::params![serde_json::to_string(&corrupt).unwrap(), &binding.run_id],
+                )
+                .unwrap();
+            assert!(
+                crate::agent_runtime::read_output_head(&f.storage, &params).is_err(),
+                "{key}"
+            );
+        }
+    }
+}
