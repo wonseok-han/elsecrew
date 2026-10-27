@@ -6,6 +6,16 @@ use std::collections::HashSet;
 // real-account benchmark. Queue all starts before consuming any run events.
 #[test]
 fn four_chat_agent_streams_keep_acceptance_events_and_history_scoped() {
+    four_chat_streams(false);
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn four_chat_durable_streams_page_twelve_thousand_outputs() {
+    four_chat_streams(true);
+}
+
+fn four_chat_streams(durable: bool) {
     let root = tempfile::Builder::new()
         .prefix("hello-agent-four-streams-")
         .tempdir()
@@ -32,7 +42,7 @@ fn four_chat_agent_streams_keep_acceptance_events_and_history_scoped() {
         ],
     );
     let mut child = Command::new(env!("CARGO_BIN_EXE_hello-agent-sidecar"))
-        .args(["--stdio-agent-fixture", "final-delayed"])
+        .args(["--stdio-agent-fixture", if durable { "long-stream" } else { "final-delayed" }])
         .current_dir(&data)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -140,7 +150,11 @@ fn four_chat_agent_streams_keep_acceptance_events_and_history_scoped() {
     let mut peak_active = 0;
     let mut public: Vec<Vec<Value>> = vec![Vec::new(); 4];
     let mut identities = HashSet::new();
+    let mut heads = [0_u64; 4];
+    let mut sealed = [false; 4];
+    let deadline = Instant::now() + Duration::from_secs(240);
     while !finished.iter().all(|done| *done) {
+        assert!(Instant::now() < deadline, "parallel streams exceeded deadline");
         match receive_envelope(&envelopes) {
             EnvelopeV1::Response(response) => {
                 let index: usize = response
@@ -171,9 +185,22 @@ fn four_chat_agent_streams_keep_acceptance_events_and_history_scoped() {
                     "run stream sequence gap/duplicate"
                 );
                 let payload = &event.payload;
-                assert!(identities.insert(payload["eventId"].as_str().unwrap().to_owned()));
+                if event.event != "agent.outputAvailable" {
+                    assert!(identities.insert(payload["eventId"].as_str().unwrap().to_owned()));
+                }
                 match event.event.as_str() {
+                    "agent.outputAvailable" => {
+                        assert!(durable);
+                        let head: hello_agent_protocol::agent_adapter_v1::output_pages::OutputHead =
+                            serde_json::from_value(payload.clone()).unwrap();
+                        let binding = output_binding(&chats[index], runs[index].as_deref().unwrap(), &capability["fingerprint"]);
+                        head.validate(&serde_json::from_value(binding).unwrap()).unwrap();
+                        assert!(head.committed_sequence >= heads[index]);
+                        heads[index] = head.committed_sequence;
+                        sealed[index] = head.sealed;
+                    }
                     "agent.publicEvent" => {
+                        assert!(!durable);
                         validate_agent_adapter_payload_v1("publicEvent", payload).unwrap();
                         for key in [
                             "chatId",
@@ -196,8 +223,12 @@ fn four_chat_agent_streams_keep_acceptance_events_and_history_scoped() {
                             active += 1;
                             peak_active = peak_active.max(active);
                         } else {
-                            assert_eq!(sequences[index], 5);
+                            if durable {
+                                assert_eq!(heads[index], 3000);
+                                assert!(sealed[index]);
+                            } else { assert_eq!(sequences[index], 5); }
                             assert_eq!(payload["run"]["state"], "succeeded");
+                            assert_eq!(payload["run"]["terminationOutcome"], "cleanExit");
                             finished[index] = true;
                             active -= 1;
                         }
@@ -212,6 +243,31 @@ fn four_chat_agent_streams_keep_acceptance_events_and_history_scoped() {
     assert_eq!(active, 0);
     let mut messages = HashSet::new();
     for (index, chat) in chats.iter().enumerate() {
+        if durable {
+            use hello_agent_protocol::agent_adapter_v1::output_pages::{decode_output_page, OutputHead, OutputPageRequest};
+            let binding = output_binding(chat, runs[index].as_deref().unwrap(), &capability["fingerprint"]);
+            let head: OutputHead = serde_json::from_value(request(&mut stdin, &format!("head_{index}"),
+                "agent.outputHead", binding.clone())).unwrap();
+            head.validate(&serde_json::from_value(binding).unwrap()).unwrap();
+            assert!(head.sealed);
+            assert_eq!(head.committed_sequence, 3000);
+            let mut cursor = 0;
+            while cursor < 3000 {
+                let query = OutputPageRequest { format_version:1, binding:head.binding.clone(),
+                    after_sequence:cursor, through_sequence:3000, limit:100 };
+                let value = request(&mut stdin, &format!("page_{index}_{cursor}"), "agent.outputPage",
+                    serde_json::to_value(&query).unwrap());
+                let page = decode_output_page(&serde_json::to_vec(&value).unwrap(), &query).unwrap();
+                assert!(!page.rows.is_empty());
+                for row in page.rows {
+                    cursor += 1;
+                    assert_eq!(row.output_sequence, cursor);
+                    assert_eq!(row.event.text, format!("output {cursor}"));
+                    assert!(identities.insert(row.event.event_id));
+                }
+                assert_eq!(cursor, page.next_after_sequence);
+            }
+        } else {
         assert_eq!(
             public[index]
                 .iter()
@@ -219,6 +275,7 @@ fn four_chat_agent_streams_keep_acceptance_events_and_history_scoped() {
                 .collect::<Vec<_>>(),
             ["status", "question", "final"]
         );
+        }
         let detail = request(
             &mut stdin,
             &format!("detail_{index}"),
@@ -234,7 +291,7 @@ fn four_chat_agent_streams_keep_acceptance_events_and_history_scoped() {
         assert_eq!(detail["agentRuns"][0]["state"], "succeeded");
         assert!(detail["agentRecovery"].is_null());
         let stored = detail["messages"].as_array().unwrap();
-        assert_eq!(stored.len(), 4);
+        assert_eq!(stored.len(), if durable { 1 } else { 4 });
         for (ordinal, message) in stored.iter().enumerate() {
             assert_eq!(message["chatId"], chat["chatId"]);
             assert_eq!(message["taskId"], chat["taskId"]);
@@ -263,6 +320,12 @@ fn four_chat_agent_streams_keep_acceptance_events_and_history_scoped() {
         peak_active > 1,
         "fixture must exercise overlapping run streams"
     );
-    eprintln!("four-chat transport: accepted=4 public=12 terminal=4 stored=16 peak_active={peak_active}; clean exit; original unchanged");
+    eprintln!("four-chat transport: durable={durable} accepted=4 terminal=4 peak_active={peak_active}; clean exit; original unchanged");
     fs::remove_dir_all(root).unwrap();
+}
+
+fn output_binding(chat: &Value, run_id: &str, fingerprint: &Value) -> Value {
+    json!({"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],
+        "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+        "runId":run_id,"roleId":"coding","capabilityFingerprint":fingerprint})
 }

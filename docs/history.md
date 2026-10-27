@@ -1,6 +1,12 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 기준 21b1a2d의 깨끗한 트리에서 재개했다. 이전 턴은 출력 capability 협상 결함 수정과 단일 stdio 3,000건 통합 PASS/커밋으로 진척이다. 기존 4채팅 stdio 준비를 재사용해 LongStream 모드의 독립 실행 4개를 시작하고, 각 결속/전송 순서/head·봉인/cleanExit 및 각 3,000행의 고정 watermark 페이지·본문·전역 event ID 유일성을 검사하도록 확장했다. 기존 짧은 fixture 시험은 유지한다.
+- `four_chat_durable_streams_page_twelve_thousand_outputs` PASS(50.43초), peak_active=4. 총 12,000개를 각 실행 페이지로 조회했고 chat.get에는 진행 본문을 중복 저장하지 않는 초기 메시지 1개만 남는 것을 확인했다. 원본 파일 불변·safeToQuit/child 정상 종료 뒤 해당 시험 root를 삭제했다. diff check PASS.
+- 이 결과는 개발 sidecar의 실제 JSONL 통신·저장/조회 증거이며 50events/s 발행/60초 paint, Chromium/G6 메모리 또는 실제 공급자 계정 증거가 아니다. 다음은 실제 renderer의 출력 페이지·채팅 전환·이전 기록·스크롤과 성능 수집 연결이다. release 거절 시험·제품 활성화·Windows·출시는 여전히 남는다. 사용자 DB/계정·패키지·main 병합/push 없음.
+
+### 2026-10-27 · by Codex
+
 - 기준 e90f9c4의 깨끗한 트리에서 재개했다. 이전 턴은 개발 전용 fixture 연결·배포 경계 수정/검토/커밋으로 진척이다. 기존 stdio 프로젝트/채팅 준비를 재사용해 단일 LongStream 실행의 3,000개 출력, 순서 있는 head 알림, 봉인/cleanExit, 고정 watermark 페이지 전체의 요청 결속·순서·본문·event ID 유일성, 안전 종료를 확인하는 통합 시험을 추가했다.
 - 첫 실행은 기대 capability 순서가 오래돼 실패했고, 수정 뒤 Rust current-status 검사기가 새 output API를 거절하는 실제 누락을 찾았다. Rust/TS current-status와 Electron system.ready 협상에 chat.appendMessage 바로 뒤 outputHead/outputPage의 정확한 쌍을 허용하도록 연결했다. 한쪽 누락/역순/중복/기준 capability 부재는 거절하고 기존 D1·기존 suffix는 보존한다.
 - stdio 통합 PASS(12.87초), Rust current-status 회귀 PASS, Node admission 6검사와 Electron 신규 출력/기존 로그인/설치 협상 3검사 PASS. TypeScript noEmit과 diff check도 PASS. 이는 개발 바이너리의 모의 공급자 시험이며 실제 계정 또는 Chromium paint/G6 합격은 아니다. 실제 화면 통합·release 거절 시험·제품 활성화/Windows/출시는 남는다. 사용자 DB·계정·패키지·main/push 없음.
