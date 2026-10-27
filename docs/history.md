@@ -1,6 +1,13 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 기준1a71f46의 깨끗한 트리에서 재개했다. 이전 턴은 출력 번호 transaction 결속/회귀/통합으로 진척이나 지연 개선은 미입증이다. 추가 추측 최적화 전에 시험 전용 stdio passive observer를 붙였다. 요청종류별왕복시간/최대동시pending/누락만 보존하고 payload는 저장하지 않는다. line1MiB/pending512/method64/종류별표본2048 상한이며 callback·backpressure·bytes를 유지하고 종료시해제한다.
+- fragment UTF8·reply 결속/본문 미보존·원래write반환/callback/해제, oversized/malformed후복구·prototype형method, pending상한3검사PASS. session38992의 paced4×3,000 UI는PASS/exit0/visible, 전체기록/최신노출 성공. transport pendingPeak7/미응답0/drop0/malformed0/oversized0.
+- outputPage370회 p95 296.71ms/max608.17ms, outputHead163회 p95 347.89ms/max869.61ms, approval59회 p95730.08ms다. 왕복에는 큐대기/계측overhead가 있어DB 자체지연으로 단정하지 않는다. 소스상 read_output_head는 actual_run_projection→head, require_output_binding→actual_run_projection→head, 최종head로 같은상태를3회읽는다. 다음은 동일조회내검증결과재사용으로 이중복을 제거하되 native/fence/legacy검증을 유지하는 작업이다.
+- 결과/PNG/transport-summary는 `.artifacts/m5-durable-output-ui/4xiVKM`에 보존하고 정상종료/OS프로세스부재 확인후 임시root를 삭제했다. JS문법/diff검사PASS. 전체G6/제품활성화·native실계정/Windows/출시는 미완료이며 실제모델/사용자프로젝트·main병합/push 없음.
+
+### 2026-10-27 · by Codex
+
 - 기준5d666aa의 깨끗한 트리에서 재개했다. 이전 턴은 poll대기 중복 제거/지연 감소로 진척이다. non-final 출력의 사전 read transaction을 제거하고 기존Immediate write transaction의 검증된 head에서 다음번호를 정하도록 연결했다. 명시 sequence/replay·final context 원자경로는 유지하며 admission/schema/runtime/전후binding/quota/item/page 검사를 생략하지 않았다.
 - 중복event ID·다른 chat 식별자 거절이 번호를 소비하지 않고 다음정상append/재열기에서1,2가 보존되는 회귀PASS1.37초. 독립 검토자1명은 원자성/실패 경계에 추가 차단 결함 없음으로 보고했다. build/diff PASS.
 - 동일paced UI session76785는 exit0/전구간visible/4×3,000개60초내생성·전체조회/화면이동PASS. head수신p95는87.1/48.2/155.6/125.9ms, peakRSS521.953125MiB. 앞선78.7/47.6/115.4/143.6ms보다 일관된 개선이 아니므로 속도개선을 주장하지 않는다. 이 변경의 확인된 효과는 출력당중복읽기transaction 제거와 write-lock아래번호결정이며 전체G6성공이 아니다.

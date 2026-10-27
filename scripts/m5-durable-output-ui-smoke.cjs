@@ -6,6 +6,7 @@ const path = require('node:path');
 const cp = require('node:child_process');
 const assert = require('node:assert/strict');
 const { installOutputObserver } = require('./m5-durable-output-observer.cjs');
+const { observeStdio } = require('./m5-stdio-observer.cjs');
 if (process.platform !== 'darwin' || app.isPackaged) throw new Error('Development macOS diagnostic only');
 const paced = process.argv.includes('--paced');
 const repo = path.resolve(__dirname, '..');
@@ -27,12 +28,14 @@ const report = { schemaVersion: 1, diagnostic: true, gateEligible: false, root,
     'Full retained-window and history checks; no 50-events/s paint or packaged RSS gate.',
     'Synthetic runs have no native approval queue; approval inspection rejection is not native-provider evidence.',
     'RSS includes transient sampling overhead and counts shared pages per process; not a packaged idle-memory gate.',
-    'Two RAFs are rendering opportunities, not physical compositor timestamps or provider generation latency.'] };
+    'Two RAFs are rendering opportunities, not physical compositor timestamps or provider generation latency.',
+    'Stdio round trips include queueing and observer parsing overhead; they are not isolated database execution times.'] };
 const persist = () => fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify(report, null, 2));
 persist();
 const spawn = cp.spawn;
 const expectedBinary = path.join(repo, 'target/debug/hello-agent-sidecar');
 let child;
+let transportObserver;
 cp.spawn = function(command, args, options) {
   if (typeof command === 'string' && path.basename(command) === 'hello-agent-sidecar') {
     assert.equal(command, expectedBinary);
@@ -40,6 +43,7 @@ cp.spawn = function(command, args, options) {
     assert.equal(fs.realpathSync(options.cwd), fs.realpathSync(path.join(userData, 'com.wonseokhan.helloagent', 'm5')));
     assert.equal(child, undefined, 'unexpected second sidecar');
     child = Reflect.apply(spawn, this, [command, ['--stdio-agent-fixture', paced ? 'paced-long-stream' : 'long-stream'], options]);
+    transportObserver = observeStdio(child);
     child.once('close', (code, signal) => { report.sidecarExit = { code, signal }; persist(); });
     return child;
   }
@@ -65,6 +69,7 @@ function finish(error) {
   if (finished) return;
   finished = true;
   clearInterval(memoryTimer);
+  report.transport = transportObserver?.stop();
   report.error = error?.message;
   report.status = error ? 'FAIL' : 'PENDING';
   persist(); console.log(JSON.stringify(report));
