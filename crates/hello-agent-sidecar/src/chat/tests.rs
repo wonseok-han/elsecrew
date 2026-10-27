@@ -828,6 +828,11 @@ fn text_candidate_cases_with_output(
                 | "bound-writer-cleanup"
                 | "bound-writer-terminal"
         );
+        // The 3,000-row case has a dedicated durable-output test. Legacy
+        // snapshots retain their existing bounded public-event contract.
+        if failure == "bound-long" && !durable {
+            continue;
+        }
         let long_output = failure == "bound-long";
         let failure = match failure {
             "bound-long" => "bound",
@@ -5580,9 +5585,15 @@ fn poll_observe_and_wait_failures_propagate_after_fail_closed_recovery_persisten
             )
             .unwrap();
         let run_id = started.result["runId"].as_str().unwrap();
+        let events = runtime
+            .poll(&mut fixture.storage, &mut fixture.projects)
+            .expect("the already collected running event must be delivered first");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event, "agent.runStateChanged");
+        assert_eq!(events[0].payload["run"]["state"], "running");
         let error = runtime
             .poll(&mut fixture.storage, &mut fixture.projects)
-            .expect_err("poll failure must reach the stdio owner");
+            .expect_err("deferred poll failure must reach the stdio owner");
         assert_eq!(error.kind(), "agentRuntimeFailure");
         let terminal = fixture
             .storage

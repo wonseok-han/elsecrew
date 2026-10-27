@@ -112,11 +112,12 @@ fn discovery_rejection_stdio_returns_error_then_status_and_clean_quit() {
         let request = EnvelopeV1::Request(request_value(instance, id, method, params));
         tx.send(encode_jsonl(&request).unwrap().into_bytes()).unwrap();
     };
-    for index in 0..100 {
+    let admission_deadline = Instant::now() + Duration::from_secs(10);
+    for index in 0.. {
         send(&format!("admission_{index}"), "system.status", json!({}));
         let EnvelopeV1::Response(status) = next() else { panic!("status response") };
         if status.result.as_ref().is_some_and(|v| v["storageAdmission"]["state"] == "ready") { break; }
-        assert!(index < 99, "storage admission did not finish");
+        assert!(Instant::now() < admission_deadline, "storage admission did not finish: {:?}", status.result);
         thread::sleep(Duration::from_millis(10));
     }
     send("reject", "agent.getModelChoices", json!({"runtime":"codex","refresh":true,"chatId":"chat_missing","roleId":"coding"}));
@@ -402,10 +403,12 @@ fn g5d_shell_ready_precedes_storage_and_verifying_blocks_before_params_or_side_e
         baseline["capabilities"].as_array_mut().unwrap().pop(),
         Some(json!("provider.login"))
     );
-    assert_eq!(
-        baseline["capabilities"].as_array_mut().unwrap().pop(),
-        Some(json!("chat.appendMessage"))
-    );
+    for capability in ["agent.outputPage", "agent.outputHead", "chat.appendMessage"] {
+        assert_eq!(
+            baseline["capabilities"].as_array_mut().unwrap().pop(),
+            Some(json!(capability))
+        );
+    }
     validate_g5d_product_ready_payload_v1(&baseline).expect("exact product D1 baseline");
     assert!(
         !path.exists(),

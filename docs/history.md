@@ -1,6 +1,43 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 이전 턴의 verified wait를 이어 같은 session4738의 종료를 확인했다. 전체 sidecar lib 결과667 PASS/9 FAIL/43 ignored,1116.79초,exit101이다. 원본 로그를 `.artifacts/m5-sidecar-integration/2026-10-27/full.log`로 보존한다. 전체 합격은 아니다.
+- 실패 중 회귀 기대값3건을 수정했다: poll은 먼저 수집한 running 이벤트를 전달하고 다음 호출에서 오류를 전달하는 계약을 검사하고, legacy 일반 행렬에서 durable 전용3,000행 사례를 분리하며(전용 테스트 유지), shell-ready 검사에 outputHead/Page capability를 정확히 포함한다. stdio admission의 약1초 반복 횟수 제한은 기존 admission helper와 같은10초 실제 deadline으로 바꾸고 실패 상태를 출력한다. 제품 deadline·안전 조건은 변경하지 않았다.
+- 제한 해제된 로컬 임시 fixture 재검사8개 모두PASS(session71139). 세 소켓 검사는 최초 OS PermissionDenied였으며 코드 변경 없이PASS, 로그인 종료 증거 검사도 코드 변경 없이PASS했다. 오류 전달·ready·admission·일반 출력 행렬도PASS. 로그 `.artifacts/m5-sidecar-integration/2026-10-27/focused.log`.
+- 남은 Codex 모의3,000행은 전체 실행 중2,000콜백563.94초에서600초 turn deadline을 넘었다. 종료 증거는확인됐고 timeout을 늘리지 않았다. 자원 경합 여부를 분리하기 위해 같은 검사만1thread로 실행 중(session8111, `/private/tmp/m5-codex-durable-isolated.log`). 실제 계정/모델 호출은 없다. 종료 결과 전 해결로 표시하지 않는다.
+- 이번 작업 단위는 테스트 수정과 기록만 커밋한다. 기존 V11 제품 활성화 후보3파일의 변경은 승인 대기 미커밋으로 보존한다. main병합/push 없음. 다음은 동일8111의 결과에 따른 성능 수정과 남은G6/실계정/Windows 검증이다.
+
+### 2026-10-27 · by Codex
+
+- 이전 턴에 이어 전체 sidecar 검사719개의 동일 session4738을 반복 poll했고 마지막 응답도 live다(verified wait). 현재 로그 566 PASS/7 FAILED이며 최종 오류 상세·종료 코드는 아직 없다. 새 검사나 재시작 없이 계속 진행시켰다.
+- 실패 관련 runtime/socket/login 테스트와 fail_poll 경로를 읽었다. 소켓 검사는 실제 UnixListener를 만들고 poll 실패는 evidence_failed를 설정해 종료 처리하므로, 환경 권한 제한과 제품 결함을 최종 panic 근거로 나눠야 한다. 추정만으로 테스트·제품 안전 조건을 고치지 않았다. 디스크 여유 약497GiB를 확인했다.
+- 다음은 같은 handle과 `/private/tmp/m5-sidecar-integration-ea8a52b.log`의 최종 결과 확인 후 실패별 수정/필요한 제한 해제 재검사다. 승인 대기 V11 후보를 보존하며 사용자 계정·프로젝트·제품 패키지 변경·main병합/push 없음.
+
+### 2026-10-27 · by Codex
+
+- 이전 턴은 종료·패키지 복구 재확인과 전체 검사 실패 발견으로 진척이다. 이번 턴은 전체 sidecar session4738을 같은 handle로 여러 차례 poll해 마지막에도 live임을 확인한 verified wait다. 재시작·추가 무거운 검사·제품 활성화는 하지 않았다.
+- 로그 기준 현재 450 PASS, 7 FAILED(최종 집계 아님). 실패 목록: chat::tests::poll_observe_and_wait_failures_propagate_after_fail_closed_recovery_persistence, chat::tests::text_candidate_public_sink_uses_the_same_snapshot_storage_owner, project::runtime_isolation::tests::runtime_scan_reports_special_files_without_exposing_names, provider_login_process::tests::explicit_recovery_requires_closed_owner_and_valid_termination_record, provider_profile::claude_runtime_files::tests::only_live_owner_mux_in_private_tmp_is_admitted, provider_profile::claude_runtime_files::tests::unrelated_sockets_and_links_remain_rejected, chat::tests::codex_durable_native_three_thousand_outputs. 실패 테스트 본문을 읽었으며 소켓 생성·프로세스 증거 관련 항목과 native 모의3,000출력이 포함된다. 샌드박스 원인 가능성은 있으나 최종 panic 상세가 아직 출력되지 않아 확정하지 않는다. 안전 검사나 assertion을 완화하지 않았다.
+- 다음은 `/private/tmp/m5-sidecar-integration-ea8a52b.log`와 동일 live handle4738의 종료 결과 확인, 실패별 원인 분류·필요한 수정이다. 승인 대기 V11 후보3파일을 보존하며 사용자 DB·계정·모델 호출·main병합/push 없음.
+
+### 2026-10-27 · by Codex
+
+- 지연 도착한 PID27706 정상 종료·패키지 복구 승인에 대해 현재 상태를 재대조했다. 기존 복구 기록과 일치하게 PID27706/27722는 OS 조회에서 없으며 `out/hello-agent-darwin-arm64/hello-agent.app`가 존재한다. 이미 완료된 종료·복구를 반복하거나 강제 종료하지 않았다. 저장 형식 V11 제품 활성화 승인을 의미하지 않는다.
+- 전체 sidecar 검사 session4738은 같은 handle로 계속 실행 중이다. 로그에서 현재 실패3건(poll_observe_and_wait_failures_propagate_after_fail_closed_recovery_persistence, text_candidate_public_sink_uses_the_same_snapshot_storage_owner, runtime_scan_reports_special_files_without_exposing_names)을 관측했다. 최종 집계 전이며 다음은 동일 검사 종료 후 실패 원인 확인이다. 사용자 데이터·인증·모델 호출·main병합/push 없음.
+
+### 2026-10-27 · by Codex
+
+- 이전 턴의 전체 sidecar 검사 `4738`을 재시작하지 않고 같은 handle로 재확인했다. 이번 턴은 verified wait이며 마지막 poll에서도 live다. 로그 `/private/tmp/m5-sidecar-integration-ea8a52b.log` 기준60 PASS/3 ignored/관측FAILED0, 전체 종료 결과는 아직 없다. 긴 synthetic Codex/Claude3,000출력·4run출력·저장 복구 항목이 진행 중이다.
+- 코드·패키지·사용자 데이터는 변경하지 않았다. 승인 대기 native 후보3파일과 기존 작업 기록만 미커밋 상태를 유지한다. 다음은 동일handle의 종료 결과 확인 후 실패 수정을 이어가는 것이다. 제외 검사를 합격으로 세지 않으며 실제 계정·전체G6/출시 완료는 아니다.
+
+### 2026-10-27 · by Codex
+
+- 기준 `ea8a52b`와 미커밋 native 활성화 후보3파일을 보존하고 독립 누적 검증을 이어갔다. 이전 턴은 프런트/IPC 12실패 정정과597개 전체PASS로 진척이다. 사용자 활성화 응답은 아직 없으며 후보 커밋/패키지 반영·사용자 DB 실행은 하지 않았다.
+- `pnpm build`(TypeScript+기존 Vite 프런트) PASS/exit0, 로그 `/private/tmp/m5-build-ea8a52b.log`. Electron 패키지 재빌드나 새 storage 제품 활성화가 아니다.
+- `CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 cargo test -p hello-agent-sidecar --locked --lib` 전체 검사를 실행 중이다. exec session `4738`, 로그 `/private/tmp/m5-sidecar-integration-ea8a52b.log`. 마지막 확인 시 같은 handle이 살아 있고33개 PASS/관측실패0이며 전체 결과는 아직 없다. 재시작하지 말고 이 handle을 계속 poll한다. 확인된 로그에는 synthetic native delivery/cancel도 포함되며 실제 계정 성공으로 인용하지 않는다.
+- 다음은 동일 검사 완료 후 실패 수정과 전체 결과 기록이다. 활성화 승인·실계정·G6 메모리/성능·Windows·출시는 계속 미완료다. main병합/push 없음.
+
+### 2026-10-27 · by Codex
+
 - 기준 `3de43ae`와 승인 대기 중인 native durable 후보3개 Rust 파일을 보존하고, 독립적인 프런트/IPC 누적 회귀를 수행했다. 이전 턴은 후보 구현·임시 migration검사·독립 검토로 진척이며 사용자 활성화 응답은 아직 없다. 패키지/일반 실행 파일 재빌드와 사용자 DB 실행은 하지 않았다.
 - `npm test` 최초596개 중12실패: scaffold가 outputHead/Page capability와 bridge V8을 반영하지 못했고, 보안 VM의 가짜 IPC 모듈에 V8이 없어 main 초기화가 실패했다. V8 채널과 output 구독/조회 fake를 추가하고 exact 기대값을 현재 계약에 맞췄다. 거절 조건이나 assertion을 없애지 않았으며 출력 head/page 두 채널의 외부 frame 거절과 sidecar 미호출 검사를 추가했다.
 - 관련16검사 PASS 뒤 전체 `npm test` 재실행597/597 PASS(34.52초,session46018), diff check PASS. 최초/수정/최종 로그를 `.artifacts/m5-frontend-integration/2026-10-27`에 보존한다. 이 결과는 Rust 전체/실계정/G6/제품 활성화 합격이 아니다.
