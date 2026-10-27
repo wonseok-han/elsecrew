@@ -75,6 +75,27 @@ impl super::Storage {
         text_budget: u64,
         item_update: Option<&OutputItemUpdate>,
     ) -> Result<(), SidecarError> {
+        self.append_agent_output_item_at(binding, Some(sequence), event, text_budget, item_update)
+    }
+
+    pub(crate) fn append_next_agent_output_item(
+        &mut self,
+        binding: &AgentRunBindingV1,
+        event: &Value,
+        text_budget: u64,
+        item_update: Option<&OutputItemUpdate>,
+    ) -> Result<(), SidecarError> {
+        self.append_agent_output_item_at(binding, None, event, text_budget, item_update)
+    }
+
+    fn append_agent_output_item_at(
+        &mut self,
+        binding: &AgentRunBindingV1,
+        sequence: Option<u64>,
+        event: &Value,
+        text_budget: u64,
+        item_update: Option<&OutputItemUpdate>,
+    ) -> Result<(), SidecarError> {
         self.ensure_writes_admitted()?;
         let path = self.path().to_path_buf();
         quota::check(&self.connection, &path, true)?;
@@ -86,6 +107,13 @@ impl super::Storage {
         super::verify_append_runtime_state(&tx)?;
         let current = head(&tx, binding)?;
         verify_run_binding(&tx, &current)?;
+        // Allocate from the validated head under the same write transaction.
+        // Explicit sequences remain available for replay/conflict validation.
+        let sequence = match sequence {
+            Some(value) => value,
+            None => current.committed_sequence.checked_add(1)
+                .ok_or_else(|| invalid("output sequence overflow"))?,
+        };
         append_item(&tx, binding, sequence, event, text_budget, item_update)?;
         verify_run_binding(&tx, &head(&tx, binding)?)?;
         // The pager can retain dirty pages until commit; the pre-write headroom

@@ -3409,15 +3409,15 @@ fn persist_public_event_item(
             )));
         }
         let binding = output_binding(expected).map_err(PublicEventPersistError::Fault)?;
-        let head = storage
-            .agent_output_head(&binding)
-            .map_err(ProjectFailure::from)
-            .map_err(PublicEventPersistError::Fault)?;
-        let next = head
-            .committed_sequence
-            .checked_add(1)
-            .ok_or(PublicEventPersistError::BudgetExceeded)?;
         if event["kind"] == "final" {
+            let head = storage
+                .agent_output_head(&binding)
+                .map_err(ProjectFailure::from)
+                .map_err(PublicEventPersistError::Fault)?;
+            let next = head
+                .committed_sequence
+                .checked_add(1)
+                .ok_or(PublicEventPersistError::BudgetExceeded)?;
             let (context, expected_chat_sequence) = final_output_context(storage, expected, event)
                 .map_err(PublicEventPersistError::Fault)?;
             return storage
@@ -3437,7 +3437,7 @@ fn persist_public_event_item(
         // Draft long-run byte budget; capability remains disabled until the
         // provider parser, transport and UI all support this storage format.
         return storage
-            .append_agent_output_item(&binding, next, event, 64 * 1024 * 1024, item_update)
+            .append_next_agent_output_item(&binding, event, 64 * 1024 * 1024, item_update)
             .map_err(ProjectFailure::from)
             .map_err(PublicEventPersistError::Fault);
     }

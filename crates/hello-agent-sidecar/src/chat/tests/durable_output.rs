@@ -482,3 +482,65 @@ fn final_output_and_followup_context_commit_or_rollback_together_after_restart()
     assert_eq!(serde_json::to_value(&page.rows[0].event).unwrap(), event);
     assert_eq!(fs::read(f.source.join("src/value.txt")).unwrap(), b"base");
 }
+
+#[test]
+fn next_output_sequence_rolls_back_on_rejection_and_survives_reopen() {
+    let mut f = Fixture::with_durable_output(true);
+    let snapshot = f.snapshot("req_durable_snapshot");
+    let chat = f.create_exact_claude_chat(&snapshot, "goal", "req_durable_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let request = AgentRunStartRequestV1 {
+        chat_id: chat_id.into(),
+        role_id: "coding".into(),
+        input_message_ids: vec![initial_message_id(&f, chat_id)],
+        expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+    };
+    RunPreparation::resolve(&f.storage, &f.projects, &request)
+        .unwrap()
+        .reserve(
+            &mut f.storage,
+            &f.projects,
+            &serde_json::from_value(capability).unwrap(),
+            "req_durable_reserve",
+        )
+        .unwrap();
+    let projection = f.storage.projection_records("run").unwrap().remove(0);
+    assert_eq!(projection["output_format_version"], 1);
+    let run = &projection["record"];
+    let event = json!({
+        "schemaVersion":1,"eventId":"agent_event_atomic_final",
+        "chatId":run["chatId"],"taskId":run["taskId"],"projectId":run["projectId"],
+        "worktreeId":run["worktreeId"],"workspaceIdentity":run["workspaceIdentity"],
+        "runId":run["runId"],"roleId":"coding","capabilityFingerprint":run["capabilityFingerprint"],
+        "kind":"final","text":"durable answer","createdAt":"2026-10-23T01:02:00Z"
+    });
+    let binding: AgentRunBindingV1 = serde_json::from_value(json!({
+        "chatId":event["chatId"],"taskId":event["taskId"],"projectId":event["projectId"],
+        "worktreeId":event["worktreeId"],"workspaceIdentity":event["workspaceIdentity"],
+        "runId":event["runId"],"roleId":event["roleId"],"capabilityFingerprint":event["capabilityFingerprint"]
+    })).unwrap();
+
+    let mut first = event.clone();
+    first["kind"] = json!("status");
+    first["eventId"] = json!("agent_event_next_1");
+    f.storage.append_next_agent_output_item(&binding, &first, 64 * 1024 * 1024, None).unwrap();
+    let head = f.storage.agent_output_head(&binding).unwrap();
+    assert_eq!(head.committed_sequence, 1);
+    // A duplicate ID and a mismatched identity must not consume a sequence.
+    assert!(f.storage.append_next_agent_output_item(&binding, &first, 64 * 1024 * 1024, None).is_err());
+    let mut second = first.clone();
+    second["eventId"] = json!("agent_event_next_2");
+    second["chatId"] = json!("chat_wrong");
+    assert!(f.storage.append_next_agent_output_item(&binding, &second, 64 * 1024 * 1024, None).is_err());
+    assert_eq!(f.storage.agent_output_head(&binding).unwrap(), head);
+    second["chatId"] = first["chatId"].clone();
+    f.storage.append_next_agent_output_item(&binding, &second, 64 * 1024 * 1024, None).unwrap();
+    assert_eq!(f.storage.agent_output_head(&binding).unwrap().committed_sequence, 2);
+    let path = f.storage.path().to_path_buf();
+    drop(f.storage);
+    f.storage = Storage::open_durable_output_for_test(&path).unwrap();
+    assert_eq!(f.storage.agent_output_head(&binding).unwrap().committed_sequence, 2);
+    assert_eq!(read_all(&mut f.storage, run), vec![first, second]);
+}

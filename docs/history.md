@@ -1,6 +1,13 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 기준5d666aa의 깨끗한 트리에서 재개했다. 이전 턴은 poll대기 중복 제거/지연 감소로 진척이다. non-final 출력의 사전 read transaction을 제거하고 기존Immediate write transaction의 검증된 head에서 다음번호를 정하도록 연결했다. 명시 sequence/replay·final context 원자경로는 유지하며 admission/schema/runtime/전후binding/quota/item/page 검사를 생략하지 않았다.
+- 중복event ID·다른 chat 식별자 거절이 번호를 소비하지 않고 다음정상append/재열기에서1,2가 보존되는 회귀PASS1.37초. 독립 검토자1명은 원자성/실패 경계에 추가 차단 결함 없음으로 보고했다. build/diff PASS.
+- 동일paced UI session76785는 exit0/전구간visible/4×3,000개60초내생성·전체조회/화면이동PASS. head수신p95는87.1/48.2/155.6/125.9ms, peakRSS521.953125MiB. 앞선78.7/47.6/115.4/143.6ms보다 일관된 개선이 아니므로 속도개선을 주장하지 않는다. 이 변경의 확인된 효과는 출력당중복읽기transaction 제거와 write-lock아래번호결정이며 전체G6성공이 아니다.
+- JSON/PNG/summary/회귀로그는 `.artifacts/m5-durable-output-ui/EQruvk`에 보존했고 정상종료/OS프로세스부재 확인후 임시root를 삭제했다. 다음은 실제 지연 병목 계측/지속화면·packagedG6이며 native실계정/활성화·Windows·출시는 미완료다. 실제모델/사용자프로젝트·main병합/push 없음.
+
+### 2026-10-27 · by Codex
+
 - 기준1fd55db의 깨끗한 트리에서 재개했다. 이전 턴은 일정 속도12,000출력 생성·저장/수신 근거와 지연 발견으로 진척이다. stdio 루프의 고정100ms recv 대기와 poll완료 기준 재설정이 처리시간 위에 추가 대기를 붙이는 것을 확인했다. 기존100ms 간격은 유지하되 poll시작부터 elapsed를 빼고 남은 시간만 기다리도록 수정했다. 응답→이벤트 순서·입력 bounded channel·안전 검사·maintenance는 유지한다.
 - 기존 독립 검토자1명은 zero-wait에서도 입력/취소/EOF가 먼저 관측되고 admission/maintenance 경로가 유지돼 추가 차단 결함 없음으로 보고했다. 연속 요청 중 진행 회귀 PASS2.53초, 취소 중 status/quit 비차단 회귀 PASS2.89초. diff check PASS.
 - 동일 --paced UI 시험session80797은 exit0/전 구간visible/네 채팅3,000개씩60초 내생성·전체페이지·최신노출 PASS했다. 같은 head-sequence 대조 수신지연p95는 이전332.8/97.1/257.3/178.6ms에서78.7/47.6/115.4/143.6ms로 감소(각1회 비교), 최대232.7ms. 생성→head 수신 측정이며100ms paint/G6 완료가 아니다. peakRSS583.921875MiB/frame100으로 관측됐으며 idle기준/통계적 성능보장으로 인용하지 않는다.
