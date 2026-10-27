@@ -1,6 +1,12 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 이전 턴은 누적 검사 실패8건 정리·관련 회귀PASS·7ce5e1e 커밋으로 진척이다. 단독 Codex 모의3,000출력 session8111을 같은 handle로 계속 확인 중이며 현재500콜백84.65초/1,000콜백191.99초다. 전체 검사 때보다 빠르지만 종료 결과 전 해결로 선언하지 않는다.
+- 사용자가 V11 이관·구버전 재열기 불가·downgrade 없음의 한계를 이해하고 macOS 장시간 출력 활성화를 명시 승인했다. 승인 대기였던 NativeProviders 입장 연결3파일과 현행 구조 문서를 작업 단위로 커밋한다. 독립 검토와 기존 이관/재열기/취소 경계 증거는 유지하며 코드 후보를 추가 확장하지 않았다. blocked/Windows·일반 fixture는 기존 경로다.
+- 이번 커밋은 소스 활성화이며 아직 패키지 재빌드/사용자 DB 실행을 하지 않았다. 진행 중인 무거운 검사 종료 뒤 기존 앱 실행 여부를 먼저 확인하고 패키지를 반영한다. 실제 모델 호출은 승인 범위에 포함되지 않는다. 단독 검사 결과·G6 메모리/성능·실계정·Windows·출시 검증은 미완료이고 main병합/push 없음.
+
+### 2026-10-27 · by Codex
+
 - 이전 턴의 verified wait를 이어 같은 session4738의 종료를 확인했다. 전체 sidecar lib 결과667 PASS/9 FAIL/43 ignored,1116.79초,exit101이다. 원본 로그를 `.artifacts/m5-sidecar-integration/2026-10-27/full.log`로 보존한다. 전체 합격은 아니다.
 - 실패 중 회귀 기대값3건을 수정했다: poll은 먼저 수집한 running 이벤트를 전달하고 다음 호출에서 오류를 전달하는 계약을 검사하고, legacy 일반 행렬에서 durable 전용3,000행 사례를 분리하며(전용 테스트 유지), shell-ready 검사에 outputHead/Page capability를 정확히 포함한다. stdio admission의 약1초 반복 횟수 제한은 기존 admission helper와 같은10초 실제 deadline으로 바꾸고 실패 상태를 출력한다. 제품 deadline·안전 조건은 변경하지 않았다.
 - 제한 해제된 로컬 임시 fixture 재검사8개 모두PASS(session71139). 세 소켓 검사는 최초 OS PermissionDenied였으며 코드 변경 없이PASS, 로그인 종료 증거 검사도 코드 변경 없이PASS했다. 오류 전달·ready·admission·일반 출력 행렬도PASS. 로그 `.artifacts/m5-sidecar-integration/2026-10-27/focused.log`.

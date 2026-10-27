@@ -637,8 +637,7 @@ fn g5d_agent_fixture_advertises_exact_d1_capabilities_before_storage() {
 }
 
 #[test]
-fn long_stream_fixture_admits_durable_storage_without_enabling_normal_startup() {
-    assert!(!agent_runtime::AgentRuntime::native_candidate().uses_durable_output_fixture());
+fn long_stream_fixture_admits_durable_storage_without_enabling_blocked_runtime() {
     for (scenario, expected) in [(agent_runtime::FakeScenario::Clean, false),
         (agent_runtime::FakeScenario::LongStream, true),
         (agent_runtime::FakeScenario::PacedLongStream, true)] {
@@ -659,6 +658,28 @@ fn long_stream_fixture_admits_durable_storage_without_enabling_normal_startup() 
             wait_until_admitted(&mut normal);
             assert!(!matches!(normal.admission, AdmissionState::Ready { .. }));
         }
+    }
+}
+
+#[test]
+fn native_durable_admission_migrates_and_reopens_without_launching_provider() {
+    let (_root, path) = database();
+    for iteration in 0..3 {
+        let runtime = if iteration == 0 {
+            agent_runtime::AgentRuntime::blocked()
+        } else {
+            agent_runtime::AgentRuntime::native_candidate()
+        };
+        let mut session = SidecarSession::new(format!("native_durable_{iteration}"), runtime);
+        session.start_admission(&path);
+        wait_until_admitted(&mut session);
+        let AdmissionState::Ready { sidecar, .. } = &session.admission else {
+            panic!("native admission did not become ready");
+        };
+        assert_eq!(
+            sidecar.storage.uses_durable_output().unwrap(),
+            iteration > 0 && cfg!(target_os = "macos")
+        );
     }
 }
 

@@ -907,9 +907,9 @@ impl Sidecar {
         agent_runtime: agent_runtime::AgentRuntime,
         cancellation: &AtomicBool,
     ) -> Result<Self, SidecarError> {
-        // Explicit synthetic workload only. Ordinary/native startup keeps its
-        // existing format until the durable product activation gate is closed.
-        let mut storage = if agent_runtime.uses_durable_output_fixture() {
+        // macOS native and explicit long-output fixtures use the same verified
+        // migration/admission path. Blocked platforms keep their existing format.
+        let mut storage = if agent_runtime.uses_durable_output() {
             Storage::open_for_durable_admission(&database_path, cancellation)?
         } else {
             Storage::open_for_admission(&database_path, cancellation)?

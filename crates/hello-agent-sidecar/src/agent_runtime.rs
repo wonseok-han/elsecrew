@@ -480,12 +480,13 @@ impl AgentRuntime {
         ensure_recovery_reservation_inner(storage, &projection, fail_before_commit)
     }
 
-    pub(crate) fn uses_durable_output_fixture(&self) -> bool {
-        self.provider == ProviderMode::FakeExact
-            && matches!(
-                self.scenario,
-                FakeScenario::LongStream | FakeScenario::PacedLongStream
-            )
+    pub(crate) fn uses_durable_output(&self) -> bool {
+        (cfg!(target_os = "macos") && self.uses_native_providers())
+            || (self.provider == ProviderMode::FakeExact
+                && matches!(
+                    self.scenario,
+                    FakeScenario::LongStream | FakeScenario::PacedLongStream
+                ))
     }
 
     pub(crate) fn fake(executable: PathBuf, scenario: FakeScenario) -> Self {
@@ -4472,6 +4473,26 @@ pub(crate) fn run_agent_fixture_grandchild() {
 
 #[cfg(test)]
 mod budget_tests {
+    #[test]
+    fn durable_output_admission_matches_runtime_scope() {
+        assert_eq!(
+            super::AgentRuntime::native_candidate().uses_durable_output(),
+            cfg!(target_os = "macos")
+        );
+        assert!(!super::AgentRuntime::blocked().uses_durable_output());
+        for (scenario, expected) in [
+            (super::FakeScenario::Clean, false),
+            (super::FakeScenario::LongStream, true),
+            (super::FakeScenario::PacedLongStream, true),
+        ] {
+            assert_eq!(
+                super::AgentRuntime::fake(std::path::PathBuf::from("not-spawned"), scenario)
+                    .uses_durable_output(),
+                expected
+            );
+        }
+    }
+
     #[test]
     fn native_mode_never_uses_global_fixture_discovery() {
         let mut runtime = super::AgentRuntime::native_candidate();

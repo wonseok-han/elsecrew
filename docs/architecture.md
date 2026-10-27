@@ -333,11 +333,11 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 새 private `storage/reopen/snapshot.rs`의 `ReopenMaintenanceSession`은 승인된 분할 정책 아래 전역 source/frozen envelope·5 projection·5 derived table의 양방향 검증, index 선행 catch-up, ready 전체 재검증을 같은 연결에서 수행한다. `snapshot/workspace.rs`는 길이 제한 없는 manifest 경로와 historical live/frozen 출처를 조각으로 검사하고, `snapshot/catchup.rs`는 검증한 원본에서 파생 기록만 저장한다. COMMIT 뒤에만 진행을 보존하며 member 중간 재시작은 durable offset 없이 source 처음부터 멱등 처리한다. 기존 V1의 개별 기록 1 MiB 거부와 제품 진입점은 그대로다. 기능 `5ad7162`의 focused 회귀·독립 리뷰 뒤 통합 `5658480`에서 정상 production101을 포함한 workspace Rust 529 passed/14 ignored/0 failed, exit 0을 확인했다. 실제 생산 101-workspace DB 보존본의 별도 완료는 172,685 calls/98.288초로 **3초 제품 목표를 충족하지 않는다**. 이 `ReadyVerified`는 저장 정합성 완료이지 제품 실행 허가가 아니며 startup/복구/admission·성능은 여전히 미완료다.
 
-### 장시간 단일 실행 출력 — 구현 존재, 제품 활성화 전
+### 장시간 단일 실행 출력 — macOS 소스 활성화, 패키지 검증 별도
 
-새 출력 형식은 schema V11의 `run_output_records`에 공개 항목을 순서대로 저장하고 `run_output_heads`에 검증된 요약을 유지한다. 일반 제품 DB 열기는 V11을 거절한다. 별도 `Storage::open_for_durable_admission`은 기존 원장 검증→취소 가능한 원자 이관→기존/출력 원장 합동 검증 후 쓰기를 허용하도록 준비돼 있으며, 시험 helper도 이 경로를 사용한다. 이관 commit 전 취소는 V10으로 롤백하고 commit 뒤 취소/검증 실패는 V11을 남길 수 있지만 입장을 허용하지 않는다. 정상 startup의 활성화는 아직 하지 않았으므로 이 코드의 존재는 제품에서 장시간 실행이 활성화됐다는 뜻이 아니다.
+새 출력 형식은 schema V11의 `run_output_records`에 공개 항목을 순서대로 저장하고 `run_output_heads`에 검증된 요약을 유지한다. 2026-10-27 사용자 승인에 따라 macOS NativeProviders의 일반 시작은 `Storage::open_for_durable_admission`을 사용한다. 기존 원장 검증→취소 가능한 원자 이관→기존/출력 원장 합동 검증 후 쓰기를 허용한다. 실제 모델 실행을 기다리지 않고 첫 앱 시작에서 V10→V11로 이관되며, 구버전 앱에서는 이 DB를 열 수 없고 다운그레이드 경로는 없다. 기존 기록을 삭제하지 않는다. 이관 commit 전 취소는 V10으로 롤백하고 commit 뒤 취소/검증 실패는 V11을 남길 수 있지만 입장을 허용하지 않는다. 패키지 반영·실제 계정·G6 성능 검증의 완료 여부는 작업 기록에서 별도로 확인한다.
 
-개발 빌드(debug assertions)의 명시적 `--stdio-agent-fixture long-stream` 시험 모드는 `FakeExact + LongStream`일 때만 이 입장 경로를 사용한다. 배포 release 빌드에서는 이 인자를 DB open 이전에 거절한다. 일반 `--stdio`, 실제 공급자와 다른 fixture 모드는 기존 입장을 유지한다. 이 모드는 시험용 임시 DB에서 stdio·페이지·화면 통합을 검증하기 위한 것이며 실제 계정 호출을 하지 않는다. 생성된 V11 시험 DB는 같은 모드로 다시 열어야 한다.
+개발 빌드(debug assertions)의 명시적 `--stdio-agent-fixture long-stream` 및 `paced-long-stream` 모드도 같은 입장 경로를 사용한다. 배포 release 빌드에서는 fixture 인자를 DB open 이전에 거절한다. blocked/Windows 및 다른 fixture 모드는 기존 입장을 유지하며 V11을 허용하지 않는다. fixture는 시험용 임시 DB에서 stdio·페이지·화면 통합을 검증하기 위한 것이며 실제 계정 호출을 하지 않는다. V11 시험 DB는 V11 입장을 허용하는 모드로 다시 열어야 한다.
 
 - 형식 marker가 있는 실행은 legacy `public_events` 배열에 본문을 반복 저장하지 않는다. 종료 증거 이후 final 한 건만 후속 대화 문맥과 같은 transaction에 저장한다. 기존 형식의 검증·예산은 유지한다.
 - V8 bridge의 `getAgentOutputHead`·`getAgentOutputPage`·`onAgentOutputAvailable`은 읽기/알림 경로다. `agent.outputAvailable`은 결속된 head만 전달하며 본문은 최대100행/512KiB 페이지로 읽는다. wire 순번과 영속 출력 순번은 다르다.
