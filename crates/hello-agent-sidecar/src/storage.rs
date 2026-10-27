@@ -167,26 +167,7 @@ impl Storage {
     #[cfg(test)]
     pub(crate) fn open_durable_output_for_test(path: &Path) -> Result<Self, SidecarError> {
         static NEVER_CANCELLED: AtomicBool = AtomicBool::new(false);
-        let path = safe_database_path(path)?;
-        let connection = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_WRITE
-            | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_NO_MUTEX | OpenFlags::SQLITE_OPEN_NOFOLLOW)
-            .map_err(sqlite_open_error)?;
-        configure_connection(&connection)?;
-        let mut storage = if storage_schema_version(&connection)? == Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11) {
-            Self { connection, path, writes_admitted: false, maintenance_epoch: 0 }
-        } else {
-            drop(connection);
-            let mut storage = Self::open_for_admission(&path, &NEVER_CANCELLED)?;
-            storage.writes_admitted = false;
-            agent_output::schema::migrate(&mut storage.connection)?;
-            storage
-        };
-        storage.connection.pragma_update(None, "journal_mode", "WAL").map_err(sqlite_error)?;
-        storage.connection.pragma_update(None, "synchronous", "FULL").map_err(sqlite_error)?;
-        verify_integrity(&storage.connection)?;
-        agent_output::schema::verify_admission(&mut storage.connection, &mut || false)?;
-        storage.writes_admitted = true;
-        Ok(storage)
+        Self::open_for_durable_admission(path, &NEVER_CANCELLED)
     }
 
     pub(crate) fn uses_durable_output(&self) -> Result<bool, SidecarError> {
@@ -222,7 +203,8 @@ impl Storage {
             }
             drop(session);
             ensure_admission_not_cancelled(cancellation)?;
-            agent_output::schema::migrate(&mut storage.connection)?;
+            agent_output::schema::migrate_cancellable(&mut storage.connection,
+                &mut || cancellation.load(Ordering::Acquire))?;
         }
         agent_output::schema::verify_admission(&mut storage.connection,
             &mut || cancellation.load(Ordering::Acquire))?;

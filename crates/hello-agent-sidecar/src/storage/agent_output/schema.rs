@@ -123,7 +123,21 @@ pub(in crate::storage) fn verify(connection: &Connection) -> Result<String, Side
     Ok(materialization)
 }
 
+#[cfg(test)]
 pub(in crate::storage) fn migrate(connection: &mut Connection) -> Result<(), SidecarError> {
+    migrate_cancellable(connection, &mut || false)
+}
+
+pub(in crate::storage) fn migrate_cancellable(
+    connection: &mut Connection,
+    cancelled: &mut impl FnMut() -> bool,
+) -> Result<(), SidecarError> {
+    let mut check = || {
+        if cancelled() {
+            Err(SidecarError::new("storageAdmissionCancelled", "output migration cancelled"))
+        } else { Ok(()) }
+    };
+    check()?;
     if !connection.is_autocommit() {
         return Err(invalid("migration requires idle connection"));
     }
@@ -139,6 +153,7 @@ pub(in crate::storage) fn migrate(connection: &mut Connection) -> Result<(), Sid
         )
         .map_err(sqlite_error)?;
     tx.execute_batch(SCHEMA).map_err(sqlite_error)?;
+    check()?;
     // No ALTER RENAME: existing trigger references retain the metadata name.
     // Replacement is invisible outside this transaction and rolls back on error.
     tx.execute_batch("DROP TABLE storage_schema_meta")
@@ -149,7 +164,9 @@ pub(in crate::storage) fn migrate(connection: &mut Connection) -> Result<(), Sid
         params![materialization, migrated_at],
     )
     .map_err(sqlite_error)?;
+    check()?;
     verify(&tx)?;
+    check()?;
     tx.commit().map_err(sqlite_error)
 }
 
@@ -218,6 +235,35 @@ mod tests {
             execute_migration(&mut db, migration, "output migration fixture").unwrap();
         }
         db
+    }
+
+    #[test]
+    fn output_migration_cancellation_rolls_back_every_boundary() {
+        for boundary in 1..=4 {
+            let mut db = v10();
+            let before: String = db.query_row(
+                "SELECT migrated_at FROM storage_schema_meta", [], |row| row.get(0),
+            ).unwrap();
+            let mut calls = 0;
+            assert!(migrate_cancellable(&mut db, &mut || {
+                calls += 1;
+                calls == boundary
+            }).is_err());
+            assert_eq!(calls, boundary);
+            assert!(db.is_autocommit());
+            verify_schema_v10(&db).unwrap();
+            let after: String = db.query_row(
+                "SELECT migrated_at FROM storage_schema_meta", [], |row| row.get(0),
+            ).unwrap();
+            assert_eq!(before, after);
+            let tables: i64 = db.query_row(
+                "SELECT count(*) FROM sqlite_schema WHERE name IN ('run_output_heads','run_output_records')",
+                [], |row| row.get(0),
+            ).unwrap();
+            assert_eq!(tables, 0);
+            migrate(&mut db).unwrap();
+            verify_admission(&mut db, &mut || false).unwrap();
+        }
     }
 
     #[test]

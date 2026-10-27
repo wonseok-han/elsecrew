@@ -3,6 +3,46 @@ use crate::agent_runtime::preparation::RunPreparation;
 use crate::storage::{agent_output::FinalOutput, ProjectionUpsert};
 use hello_agent_protocol::agent_adapter_v1::AgentRunBindingV1;
 
+#[test]
+fn durable_upgrade_preserves_legacy_and_new_reservations_for_restart_recovery() {
+    for durable in [false, true] {
+        let mut f = Fixture::with_durable_output(durable);
+        let snapshot = f.snapshot("req_upgrade_snapshot");
+        let chat = f.create_exact_claude_chat(&snapshot, "saved goal", "req_upgrade_chat");
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        let request = AgentRunStartRequestV1 {
+            chat_id: chat_id.into(), role_id: "coding".into(),
+            input_message_ids: vec![initial_message_id(&f, chat_id)],
+            expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+        };
+        RunPreparation::resolve(&f.storage, &f.projects, &request).unwrap()
+            .reserve(&mut f.storage, &f.projects, &serde_json::from_value(capability).unwrap(),
+                "req_upgrade_reserved").unwrap();
+        let before = f.storage.projection_records("run").unwrap();
+        let messages = f.storage.chat_message_history(chat_id).unwrap();
+        assert_eq!(before.len(), 1);
+        assert_eq!(before[0].get("output_format_version").is_some(), durable);
+        let path = f.storage.path().to_path_buf();
+        drop(f.storage);
+        f.storage = Storage::open_durable_output_for_test(&path).unwrap();
+        assert_eq!(f.storage.projection_records("run").unwrap(), before);
+        assert_eq!(f.storage.chat_message_history(chat_id).unwrap(), messages);
+        // No process was started. Migration cannot invent termination evidence.
+        AgentRuntime::blocked().recover_unclean_runs(&mut f.storage, &mut f.projects).unwrap();
+        let recovered = f.storage.projection_records("run").unwrap();
+        assert_eq!(recovered[0]["state"], "recoveryRequired");
+        assert_eq!(recovered[0]["recovery"]["reason"], "processIdentityUnavailable");
+        assert_eq!(recovered[0]["recovery"]["recoveryId"], before[0]["recovery_id_reservation"]);
+        assert_eq!(recovered[0].get("output_format_version").is_some(), durable);
+        drop(f.storage);
+        f.storage = Storage::open_durable_output_for_test(&path).unwrap();
+        assert_eq!(f.storage.projection_records("run").unwrap(), recovered);
+        assert_eq!(f.storage.chat_message_history(chat_id).unwrap(), messages);
+    }
+}
+
 pub(super) fn read_all(storage: &mut Storage, run: &Value) -> Vec<Value> {
     let binding: AgentRunBindingV1 = serde_json::from_value(json!({
         "chatId":run["chatId"],"taskId":run["taskId"],"projectId":run["projectId"],

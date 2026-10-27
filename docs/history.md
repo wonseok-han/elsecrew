@@ -1,6 +1,12 @@
 # 작업 이력 (Hello, Agent)
 ### 2026-10-27 · by Codex
 
+- 기준 5898bf8의 깨끗한 트리에서 재개했다. 이전 턴은 UI와 명시 V11 입장 경로 커밋으로 진척이다. 모의 실행의 별도 V11 open 구현을 제거하고 `open_for_durable_admission`을 재사용하도록 연결했다. 이관에 사전/DDL 후/metadata 후/commit 전 취소 확인을 넣어 transaction 전체가 롤백되도록 했다.
+- V10 이관·V11 재입장·사전 취소·schema 손상 거절 PASS(0.69초), 이관 4경계 취소 후 V10 schema/timestamp/새 테이블 부재와 재시도 PASS(0.88초). 기존 형식/새 형식의 실제-agent 모의 예약을 이관·재열기해 run/대화를 그대로 보존하고, 프로세스 증거 없음은 recoveryRequired로 복구한 뒤 다시 재열기하는 시험 PASS(3.28초). 실제 공급자/계정 호출은 없다.
+- 독립 재검토는 준비된 입장 경로에 새 구현 차단 결함 없음으로 마쳤다. 보완할 증거는 데이터가 있는 V10의 각 취소 경계 보존 및 commit 후 취소→V11 재입장이다. 새 입장 경로를 사용하는 final/후속 문맥 원자 저장·rollback·재시작 회귀도 PASS(1.80초). 정상 startup·제품 활성화는 계속 비활성이며 실제 화면/G6·Windows·출시 검증은 남는다. architecture에 별도 입장 경로와 commit 전/후 취소 차이를 반영했다. diff check PASS. 전체 테스트/패키지 재빌드·사용자 DB 변경·main 병합/push 없음.
+
+### 2026-10-27 · by Codex
+
 - UI 체크포인트 3ff549a 뒤 독립 검토가 V11 일반 입장 부재를 활성화 차단 사항으로 확정했다. IPC/UI는 이미 연결돼 있고 실행 marker는 V11 입장과 함께 켜야 한다. Windows quota 거절은 유지한다.
 - `Storage::open_for_durable_admission`과 별도 open mode를 추가했다. 기존 원장 admission → 원자 schema 이관 → 기존/출력 원장 합동 검증 → 쓰기 허용 순서이며 취소를 전달한다. 이관 commit 후 취소/검증 실패는 V11을 남길 수 있으나 쓰기를 허용하지 않고 다음 명시 입장에서 재검증한다. 정상 startup 호출은 바꾸지 않아 제품/사용자 DB는 계속 비활성이다.
 - Rust lib check PASS. V10 입장→사전 취소 시 V10 보존→이관→V11 재열기→schema 손상 거절 회귀를 작성했으며 아직 실행 전이다. 이관 중 실패/기존 데이터 보존·복구 검증과 변경 경로 재검토 뒤 활성화 판단을 이어간다. 전체 테스트·실제 계정·앱 패키지·main/push 없음.

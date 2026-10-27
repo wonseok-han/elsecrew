@@ -335,7 +335,7 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 ### 장시간 단일 실행 출력 — 구현 존재, 제품 활성화 전
 
-새 출력 형식은 schema V11의 `run_output_records`에 공개 항목을 순서대로 저장하고 `run_output_heads`에 검증된 요약을 유지한다. 일반 제품 DB 열기는 V11을 거절하며 `Storage::open_durable_output_for_test`로만 이관·실행을 시험한다. 이 코드의 존재는 제품에서 장시간 실행이 활성화됐다는 뜻이 아니다.
+새 출력 형식은 schema V11의 `run_output_records`에 공개 항목을 순서대로 저장하고 `run_output_heads`에 검증된 요약을 유지한다. 일반 제품 DB 열기는 V11을 거절한다. 별도 `Storage::open_for_durable_admission`은 기존 원장 검증→취소 가능한 원자 이관→기존/출력 원장 합동 검증 후 쓰기를 허용하도록 준비돼 있으며, 시험 helper도 이 경로를 사용한다. 이관 commit 전 취소는 V10으로 롤백하고 commit 뒤 취소/검증 실패는 V11을 남길 수 있지만 입장을 허용하지 않는다. 정상 startup의 활성화는 아직 하지 않았으므로 이 코드의 존재는 제품에서 장시간 실행이 활성화됐다는 뜻이 아니다.
 
 - 형식 marker가 있는 실행은 legacy `public_events` 배열에 본문을 반복 저장하지 않는다. 종료 증거 이후 final 한 건만 후속 대화 문맥과 같은 transaction에 저장한다. 기존 형식의 검증·예산은 유지한다.
 - V8 bridge의 `getAgentOutputHead`·`getAgentOutputPage`·`onAgentOutputAvailable`은 읽기/알림 경로다. `agent.outputAvailable`은 결속된 head만 전달하며 본문은 최대100행/512KiB 페이지로 읽는다. wire 순번과 영속 출력 순번은 다르다.
