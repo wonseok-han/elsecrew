@@ -1,7 +1,7 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { AgentOutputReader, type AgentOutputSource } from "./agent-output-reader.ts";
-import { reduceOutputWindow, type OutputWindow } from "./agent-output-window.ts";
+import { reduceOutputWindow, type OutputDisplayRow, type OutputWindow } from "./agent-output-window.ts";
 import { resolveM5Bridge } from "./bridge-boundary.ts";
 import type { AgentRunRecordV1 } from "./contracts/agent-adapter-v1.ts";
 import { decodeOutputPage, type OutputPage, type OutputPageRequest } from "./contracts/agent-output-pages.ts";
@@ -14,6 +14,12 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
     promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
   });
 }
+
+const LiveOutputRow = memo(function LiveOutputRow({ row, truncatedLabel }: {
+  row: OutputDisplayRow; truncatedLabel: string;
+}) {
+  return <article>{row.truncated && <small>{truncatedLabel}</small>}<pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{row.text}</pre></article>;
+});
 
 /** One selected run/window at a time; switching never starts or cancels a run. */
 export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }) {
@@ -167,7 +173,7 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
     </>}
     {!historyActive && view?.binding.runId === binding.runId && <>
       {view.hasEarlier && <p>{t("m5.output.window")}</p>}
-      {view.rows.map(row => <article key={row.key}>{row.truncated && <small>{t("m5.output.truncated")}</small>}<pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{row.text}</pre></article>)}
+      {view.rows.map(row => <LiveOutputRow key={row.key} row={row} truncatedLabel={t("m5.output.truncated")} />)}
     </>}
     </div>
     {!historyActive && newOutput && <button type="button" onClick={showLatest}>{t("m5.chat.newMessages")}</button>}

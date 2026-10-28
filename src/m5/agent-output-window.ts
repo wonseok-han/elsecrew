@@ -44,7 +44,10 @@ function suffix(text: string): { text: string; textBytes: number; truncated: boo
 /** Caller decodes OutputPage first. Batch acceptance is atomic: on failure the
  * old cursor/window are unchanged, so the reader must not ACK the failed page. */
 export function reduceOutputWindow(previous: OutputWindow, incoming: readonly OutputRow[]): OutputWindow {
-  const rows = previous.rows.map(row => ({ ...row }));
+  // Rows are replaced, never mutated. Preserve unchanged identities so the
+  // renderer need not reconcile every retained message on each output page.
+  const rows = [...previous.rows];
+  let bytes = rows.reduce((sum, value) => sum + value.textBytes, 0);
   let cursor = previous.cursor;
   let hasEarlier = previous.hasEarlier;
   for (const row of incoming) {
@@ -67,8 +70,8 @@ export function reduceOutputWindow(previous: OutputWindow, incoming: readonly Ou
       complete: !append,
       truncated: clipped.truncated || (append && (current?.truncated ?? cursor > 0)),
     };
+    bytes += next.textBytes - (current?.textBytes ?? 0);
     if (index < 0) rows.push(next); else rows[index] = next;
-    let bytes = rows.reduce((sum, value) => sum + value.textBytes, 0);
     while (rows.length > OUTPUT_WINDOW_ROWS || bytes > OUTPUT_WINDOW_BYTES) {
       bytes -= rows.shift()!.textBytes;
       hasEarlier = true;

@@ -36,3 +36,17 @@ test("failed batch leaves original cursor and content intact", () => {
   crossed.event.runId = "agent_run_other";
   assert.throws(() => reduceOutputWindow(state, [crossed]));
 });
+
+test("only changed items receive new identities, including rejected partial batches", () => {
+  const state = reduceOutputWindow(empty(), [row(1, "fixed"), row(2, "hel", "append")]);
+  state.rows.forEach(Object.freeze);
+  Object.freeze(state.rows);
+  const next = reduceOutputWindow(state, [row(3, "lo", "append")]);
+  assert.equal(next.rows[0], state.rows[0]);
+  assert.notEqual(next.rows[1], state.rows[1]);
+  assert.equal(next.rows[1]!.text, "hello");
+  assert.equal(state.rows[1]!.text, "hel");
+  assert.throws(() => reduceOutputWindow(state, [row(3, "lo", "append"), row(5, "gap")]));
+  assert.equal(state.rows[1]!.text, "hel");
+  assert.equal(state.cursor, 2);
+});
