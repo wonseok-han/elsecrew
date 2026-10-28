@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 중복 head 조회 제거 `0a29557`과 관련 회귀·독립 검토 완료로 진척이다. 이 clean HEAD에서 debug sidecar 빌드(5.96초)와 M5 renderer 빌드(295ms)를 수행해 최근 두 성능 변경을 함께 반영했다. 빌드는 PASS이며 기존 큰 chunk 경고는 남는다.
+- `m5-durable-output-ui-smoke.cjs --live` 실제 개발 GUI 진단 EnCbCK/session56330은 정상 종료(exit0), functional PASS, 네 채팅 전체 12,000출력·history/latest 조회를 통과했다. 그러나 시작 약72.7초 뒤 hidden 전환으로 최종 `NOT_READY`다. exit0/기능 PASS를 화면 전체 PASS로 승격하지 않는다.
+- liveLatency 204표본 p95 236.60ms/max425.70ms, superseded110/interrupted20/dropped0/unfinished0, 진단 peakRSS568.11MiB. 이전 단회 GokfSG p95414.40/max508.10보다 관측값은 낮지만 표본·가시성 조건이 달라 인과적 개선폭/정식 G6 합격으로 주장하지 않는다. release 패키지·10회 전체 성능 증거도 아니다.
+- 관측된 모든 PID 부재와 임시 DB app_instances의 clean 종료를 확인한 뒤 자체 EnCbCK root를 삭제했다. JSON/PNG/log/빌드/정리 증거는 `.artifacts/m5-durable-output-ui/EnCbCK`에 보존했다. 새 실제 모델 호출/사용자 데이터 변경 없음. 다음은 최신 제품 패키지 반영 및 남은 정식 G6 수집이며 Windows/실제 공급자 전체/출시도 미완료다. main 병합/push 없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 출력 행 재사용 `10418d8` 구현·커밋으로 진척이다. 해당 clean HEAD에서 메인이 sidecar 출력 조회 지연 경로를 조사했다.
 - native/fixture 출력 알림에서 `actual_run_projection_and_head`가 검증한 head를 버린 뒤 동일 호출 안에서 다시 조회하는 중복을 제거했다. 검증된 head를 호출 안에서만 재사용하며 run binding·native evidence·fence 검사와 seal/sequence·종료 이벤트 순서는 유지한다. 호출 간 캐시나 검증 생략은 없다.
 - `cargo check -p hello-agent-sidecar --locked` PASS. `codex_durable_native_delivery_and_cancel` PASS(9.50초, 모의 전달/handler/취소 세 경우); 실제 계정·모델 호출 없음. diff 검사 PASS. 읽기 전용 독립 검토자도 두 함수의 binding 동등성·손상 거절·출력/종료 순서를 확인해 차단 결함 없음으로 마쳤다. 실제 지연 개선 폭과 변경 후 패키지는 아직 미검증이다.
