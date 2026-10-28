@@ -57,8 +57,8 @@ impl NativeRun {
 
     fn events(&mut self, storage: &Storage) -> Result<(Vec<G5Event>, bool), SidecarError> {
         let failure = || SidecarError::new("agentRecoveryRequired", "native event ledger differs");
-        let projection =
-            actual_run_projection(storage, &self.identity.run_id).map_err(|_| failure())?;
+        let (projection, validated_head) =
+            actual_run_projection_and_head(storage, &self.identity.run_id).map_err(|_| failure())?;
         let run = &projection["record"];
         if identity_value(&self.identity)
             .as_object()
@@ -74,8 +74,7 @@ impl NativeRun {
             // Emitting them into the legacy public-event reducer would recreate
             // its per-run array/count limit. The renderer reconciles the head
             // periodically even when no notification arrives.
-            let binding = output_binding(run).map_err(|_| failure())?;
-            output_head = Some(storage.agent_output_head(&binding)?);
+            output_head = Some(validated_head.ok_or_else(failure)?);
             if self.public_count != 0 { return Err(failure()); }
             &[]
         } else {

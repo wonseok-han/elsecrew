@@ -1994,11 +1994,12 @@ impl AgentRuntime {
         storage: &Storage,
         run_id: &str,
     ) -> Result<Option<G5Event>, SidecarError> {
-        let projection = actual_run_projection(storage, run_id)
+        let (_, head) = actual_run_projection_and_head(storage, run_id)
             .map_err(|error| SidecarError::new("agentRecoveryRequired", error.detail))?;
-        let binding = output_binding(&projection["record"])
-            .map_err(|error| SidecarError::new("agentRecoveryRequired", error.detail))?;
-        let head = storage.agent_output_head(&binding)?;
+        let head = head.ok_or_else(|| {
+            SidecarError::new("agentRecoveryRequired", "durable output head missing")
+        })?;
+        let binding = &head.binding;
         let active = self
             .active
             .get_mut(run_id)
@@ -2013,8 +2014,8 @@ impl AgentRuntime {
             stream_id: active.stream_id.clone(),
             seq: active.next_wire_seq,
             event: "agent.outputAvailable",
-            chat_id: Some(binding.chat_id),
-            task_id: Some(binding.task_id),
+            chat_id: Some(binding.chat_id.clone()),
+            task_id: Some(binding.task_id.clone()),
             run_id: Some(run_id.into()),
             payload: serde_json::to_value(&head).map_err(|_| {
                 SidecarError::new("agentRecoveryRequired", "output head encoding failed")

@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 출력 행 재사용 `10418d8` 구현·커밋으로 진척이다. 해당 clean HEAD에서 메인이 sidecar 출력 조회 지연 경로를 조사했다.
+- native/fixture 출력 알림에서 `actual_run_projection_and_head`가 검증한 head를 버린 뒤 동일 호출 안에서 다시 조회하는 중복을 제거했다. 검증된 head를 호출 안에서만 재사용하며 run binding·native evidence·fence 검사와 seal/sequence·종료 이벤트 순서는 유지한다. 호출 간 캐시나 검증 생략은 없다.
+- `cargo check -p hello-agent-sidecar --locked` PASS. `codex_durable_native_delivery_and_cancel` PASS(9.50초, 모의 전달/handler/취소 세 경우); 실제 계정·모델 호출 없음. diff 검사 PASS. 읽기 전용 독립 검토자도 두 함수의 binding 동등성·손상 거절·출력/종료 순서를 확인해 차단 결함 없음으로 마쳤다. 실제 지연 개선 폭과 변경 후 패키지는 아직 미검증이다.
+- 추가 조사: `load_projection_selected`는 단건 요청도 모든 projection JSON을 검증한다. `selected_projection_retains_only_requested_rows_without_skipping_validation`이 다른 테이블 손상 거절을 명시하므로 단순 WHERE 최적화는 적용하지 않았다. 요청 사이 watcher/runtime polling도 직렬이며 기존 stdio 평균값만으로 DB 단독 비용을 확정할 수 없다. 다음은 검토 결과 반영과 화면/성능 묶음 검증이다. G6·실제 공급자 전체·Windows·출시 미완료, main 병합/push 없음.
+
+### 2026-10-29 · by Codex
+
 - 기준 HEAD `1c80825`, `m5/coding-agent-ide` clean 상태를 확인했다. 이전 턴은 관측기 수정과 실제 12,000출력 진단 PASS로 진척이다. 이번에는 메인이 출력 표시 경로를 직접 개선했다.
 - 출력 window는 바뀐 행만 새 객체로 만들고 나머지 행 신원을 보존한다. React memo 행으로 연결해 새 출력마다 유지된 최대 200개 행을 다시 렌더링하는 부담을 줄였다. 페이지 내 byte 합계도 매 행 전체 재계산 대신 증감하며, 기존 200행/4MiB 제한·검증·실패 원자성·원장은 유지한다. 언어 변경은 label prop 변경으로 반영된다.
 - reader/window 관련 9개 테스트와 TypeScript 검사, diff 검사 PASS. freeze된 이전 상태에서 부분 실패와 item 갱신 시 원본 불변·변경 행 신원 분리를 회귀로 확인했다. 실제 화면 지연 개선 폭은 아직 미측정이며 패키지 반영 전이다.
