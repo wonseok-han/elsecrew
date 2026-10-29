@@ -2,6 +2,14 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 QA feature/제품 staging 차단 `12994cc` 구현·검토 완료로 진척이다. 메인이 별도 `m5-package-output-qa.mjs`를 연결했다. explicit feature release Cargo 산출물을 확인/복사하고 fresh main/preload/renderer와 고정 QA entrypoint를 임시 앱으로 패키징한다. 일반 out·제품 main·런타임 설정은 바꾸지 않는다.
+- 기존 개발 출력 smoke를 함수로 재사용하되 QA는 app.isPackaged 일치·정확 resource sidecar 경로·원래 --stdio 인자·고유 임시 cwd를 대조한 뒤 고정 paced fixture를 실행한다. 실제 모델/사용자 인증 없이 동일 공개 bridge와 원장·화면을 통과한다. QA는 제품과 binary/fuse/signing 구성이 다르므로 diagnostic/gateEligible:false를 유지한다.
+- 로컬 packager export(named) 오류를 수정한 뒤 Q5WuJQ 빌드 PASS. 첫 패키지 실행 IpAsmv/session42122은 PASS/exit0·4채팅12,000출력·history/latest조회·전체 visible·정상 종료였다. live506표본 p9516.30ms/max159.70ms, superseded30/interrupted6, peakRSS538.27MiB. 정확 head 일부 표본·QA 단회이며 전체 event paint100ms/10회/G6 합격이 아니다.
+- 독립 검토 지적에 따라 main 로드 전에 userData뿐 아니라 sessionData/log 경로도 임시 root로 명시하고 assert했다. 위 실행은 이 보완 전 산출물이며 보완된 빌드 재실행은 다음 통합 단계다. QA 이름의 기본 Application Support/Logs/Caches 폴더는 관측되지 않았다. 독립 검토자는 경로 지정/assert가 제품 main 로드 전임을 재확인해 차단 결함 없음으로 마쳤다.
+- 모든 관측 PID 부재·임시 DB clean 종료를 확인하고 IpAsmv 데이터와 Q5WuJQ QA 앱을 삭제했다. 증거는 `.artifacts/m5-packaged-output-qa/IpAsmv`에 보존했다. JS 문법/diff 검사 PASS. 다음은 보완된 최신 QA 통합 검증과 실제 발행/수신 전체 수집·반복/메모리 결합이다. Windows/실제 공급자 전체/출시 미완료, main 병합/push 없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 최신 패키지 무디버거 RSS 두 조건 재측정과 안전 정리로 진척이다. clean `39ff294`에서 메인이 장시간 출력 패키지 연결의 실제 장애를 조사했다. 일반 release는 기존 짧은 fixture CLI를 제공하지만 long/paced만 debug로 제한하며, architecture와 회귀 검사도 그 경계를 명시한다.
 - 제품 경계를 제거하는 대신 기본 비활성 Cargo feature `qa-output-fixtures`를 추가했다. 명시적 QA 빌드에서만 최적화된 long/paced fixture CLI를 사용할 수 있고 일반 `--stdio` 공급자 선택은 그대로다. 기존 3,000출력 바이너리 검사는 QA release에서도 실행 가능하게 했으며 일반 release의 DB-open 이전 거절 검사는 유지했다.
 - 제품 staging에 Cargo artifact feature 검사도 추가해 QA feature가 켜졌거나 feature 증거가 없는 산출물을 파일 복사 전에 거절한다. QA 전용 패키지와 수집기는 아직 연결하지 않았다. 현행 구조/성능 절차에 이 상태와 제품 out 미교체·차이 기록·가짜 실행을 실제 공급자 검증으로 대체하지 않는 경계를 기록했다.

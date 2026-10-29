@@ -231,4 +231,4 @@ clean checkout에서 `pnpm run m5:measure:renderer`를 실행한다. 현재 prod
 
 `hello-agent-sidecar`의 명시적 Cargo feature `qa-output-fixtures`는 release 최적화를 유지하면서 `--stdio-agent-fixture long-stream`과 `paced-long-stream`을 시험하기 위한 진입점이다. 기본 feature는 아니며 일반 release의 거절 경계와 `--stdio` 실제 공급자 선택은 유지한다. 제품 staging은 이 feature를 포함한 Cargo 산출물을 거절한다.
 
-후속 수집기는 별도 QA 앱 경로와 임시 userData를 사용하고 제품 `out` 앱을 교체하지 않아야 한다. renderer/main 원본 및 설정 차이를 기록하고, QA 실행 파일을 제품과 동일한 바이너리라고 주장하지 않는다. 단일 run 3,000개·4채팅·실제 발행 간격·전체 기록 대조·보이는 채팅의 paint·숨김/미관측 구분·정상 종료·임시 데이터 정리를 함께 수집해야 한다. 현재 이 패키지 연결과 반복 수집은 미구현이다.
+후속 수집기는 별도 QA 앱 경로와 임시 userData를 사용하고 제품 `out` 앱을 교체하지 않아야 한다. renderer/main 원본 및 설정 차이를 기록하고, QA 실행 파일을 제품과 동일한 바이너리라고 주장하지 않는다. 단일 run 3,000개·4채팅·실제 발행 간격·전체 기록 대조·보이는 채팅의 paint·숨김/미관측 구분·정상 종료·임시 데이터 정리를 함께 수집해야 한다. `node scripts/m5-package-output-qa.mjs`는 fresh 임시 root에 QA 앱을 제작한다(자동 실행하지 않음). 출력된 build.json의 appDirectory 아래 앱을 실행하면 고정 QA main이 네 채팅 long-stream 진단을 수행한다. 결과와 build 메타데이터를 함께 보존하고 정상 종료/관측 PID 부재/DB clean 확인 후 생성한 QA 앱과 fixture root를 정리한다. 아직 10회 반복 전체 G6 수집은 미구현이며 결과는 diagnostic/gateEligible:false다.

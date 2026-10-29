@@ -1,5 +1,6 @@
 // Development integration diagnostic, not packaged G6 or a provider-account test.
 // Requires current .vite/build, renderer and target/debug sidecar artifacts.
+function runOutputSmoke(packagedQa = false) {
 const { app, dialog } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -8,8 +9,9 @@ const assert = require('node:assert/strict');
 const { installOutputObserver } = require('./m5-durable-output-observer.cjs');
 const { createLiveOutputLatency } = require('./m5-live-output-latency.cjs');
 const { observeStdio } = require('./m5-stdio-observer.cjs');
-if (process.platform !== 'darwin' || app.isPackaged) throw new Error('Development macOS diagnostic only');
-const live = process.argv.includes('--live');
+if (process.platform !== 'darwin' || app.isPackaged !== packagedQa) throw new Error('Output diagnostic build mode differs');
+if (packagedQa) app.setName('Hello Agent Output QA');
+const live = packagedQa || process.argv.includes('--live');
 const paced = live || process.argv.includes('--paced');
 const repo = path.resolve(__dirname, '..');
 const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hello-agent-output-ui-'));
@@ -23,10 +25,20 @@ for (const args of [['init', '-q', '--template='], ['add', '.'],
     GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_COUNT: '0' } });
 }
 app.setPath('userData', userData);
+// Electron may have resolved these paths before userData was overridden.
+// Pin caches and logs explicitly before loading the product main bundle.
+const sessionData = path.join(root, 'session-data');
+const logs = path.join(root, 'logs');
+fs.mkdirSync(sessionData); fs.mkdirSync(logs);
+app.setPath('sessionData', sessionData);
+app.setAppLogsPath(logs);
+assert.equal(app.getPath('userData'), userData);
+assert.equal(app.getPath('sessionData'), sessionData);
+assert.equal(app.getPath('logs'), logs);
 dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [source] });
-const report = { schemaVersion: 1, diagnostic: true, gateEligible: false, root,
+const report = { schemaVersion: 1, diagnostic: true, gateEligible: false, root, packagedQa,
   paced, live, liveWindows: [], status: 'RUNNING', shutdown: 'pending', restoredChats: [], scrollChecks: [],
-  limitations: ['Development artifacts, synthetic providers, no actual accounts.',
+  limitations: [packagedQa ? 'Explicit QA package, synthetic providers; not the production artifact or actual accounts.' : 'Development artifacts, synthetic providers, no actual accounts.',
     'Full retained-window and history checks; no 50-events/s paint or packaged RSS gate.',
     'Synthetic runs have no native approval queue; approval inspection rejection is not native-provider evidence.',
     'RSS includes transient sampling overhead and counts shared pages per process; not a packaged idle-memory gate.',
@@ -35,7 +47,7 @@ const report = { schemaVersion: 1, diagnostic: true, gateEligible: false, root,
 const persist = () => fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify(report, null, 2));
 persist();
 const spawn = cp.spawn;
-const expectedBinary = path.join(repo, 'target/debug/hello-agent-sidecar');
+const expectedBinary = packagedQa ? path.join(process.resourcesPath, 'sidecar/hello-agent-sidecar') : path.join(repo, 'target/debug/hello-agent-sidecar');
 let child;
 let transportObserver;
 cp.spawn = function(command, args, options) {
@@ -230,3 +242,7 @@ app.on('browser-window-created', (_event, window) => {
 });
 console.log(JSON.stringify({stage:'STARTED',root}));
 require(path.join(repo, '.vite/build/main.cjs'));
+
+}
+module.exports = { runOutputSmoke };
+if (require.main === module) runOutputSmoke();
