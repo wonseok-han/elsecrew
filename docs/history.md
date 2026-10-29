@@ -2,6 +2,12 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 diff 두 bounded pipe 동시 drain `a25770e` 구현·검토로 진척이다. clean HEAD에서 QA19O0jY를 빌드하고 iXAuLA/session83607로 단회 비교했다. visible·12,000출력 대조·history/latest·정상 종료/exit0은 통과했지만 화면 지연 최대253.5ms/다음238.1ms로 기준을 넘었다. 단회 diff조회 최대108.99ms(이전130.42)만으로 개선을 확정하지 않는다.
+- 큰 지연은 이번에는 live 구간 중간에도 나타났다. outputHead 최대225.43ms/outputPage237.99ms, tree117.26ms/watch100.31ms/chat.get125.35ms였다. 따라서 전환 시 diff 대기만으로 원인을 제한할 수 없다. 코드상 stdio100ms poll에서 watcher의 전체 Git 검증/스캔을 동기 수행한 뒤 runtime 출력과 요청을 처리하는 경로를 확인했다. 다음 조사 대상은 이 공용 루프의 watcher/runtime/maintenance 시간 분리이며, 안전 검사를 캐시하거나 제거하는 결정을 내리지 않았다.
+- 관측 PID 부재·DB clean을 확인하고 자체 QA 앱과 fixture를 삭제했다. 원시 JSON/PNG/build/log/정리 증거는 `.artifacts/m5-packaged-output-qa/iXAuLA`에 보존했다. 제품 변경 추가 없음, 기존 성능 실패 유지. 전체 G6/실제 공급자/Windows/출시 미완료, main 병합/push 없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 수집기 비용1ms 미만과 채팅 전환/조회 지연을 구분한 진척이다. `b72dcaf`에서 메인이 diff 경로를 조사했다. bindChat의 tree→diff→watch 순서는 실패 시 다음 작업 시작을 막는 계약이므로 유지하고, diff 내부의 독립적인 tracked/untracked Git 조회 시작만 겹치도록 변경했다.
 - 매 요청의 같은 검증된 디렉터리 capability·고정 Git/env·GIT_OPTIONAL_LOCKS=0·출력 제한·기존 timeout/Drop 정리를 유지한다. 최종 구현은 두 bounded stdout을 scoped reader thread와 호출 thread에서 동시에 읽고 두 결과를 회수한 뒤 tracked 결과/경로 파싱을 먼저 검사해 오류 우선순위도 유지한다. 캐시/검사 생략/원본 쓰기 없음. 두 조회가 atomic snapshot이라는 주장은 하지 않는다.
 - 기존 diff5개 PASS(2.15초), Git 프로세스 소유자5개 PASS(0.52초; 동시 자식의 출력/timeout 실패 후 회수 포함), diff 검사 PASS. 결과는 `.artifacts/m5-integration/2026-10-29`에 보존한다. 첫 독립 검토는 untracked pipe backpressure 중 child deadline 소진 결함을 지적했다. 두 pipe 동시 drain으로 수정했고3초 예산/첫 child2.2초 대기/두 번째262144B 출력 후1.2초 대기 회귀를 추가했다. 수정 후 process6+diff5 PASS, 독립 재검토에서 추가 차단 결함 없음으로 확인했다. 실제 화면 latency 감소는 미검증이다.
