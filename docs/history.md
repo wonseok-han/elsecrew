@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 최신 일반 패키지 반영과 편집/반영/복원 흐름 증거 확보로 진척이었다. 같은 adba8b0 일반 패키지에서 `--no-cdp-project`를 실행했다. z6kP5h/session65318은435,142,656B(414.98MiB)로400MiB 초과/FAIL이었다. 수집 중 CUA 접근성 조회가 있었으므로 순수 미관측 baseline으로 취급하지 않는다.
+- 화면 조회를 수집 완료 뒤로 미룬 bZpohl/session64931 대조도437,288,960B(417.03MiB), FAIL이었다. 두 결과는 정식 G6/인과 통계가 아니지만 동시 접근성 조회만으로 초과를 설명할 수 없다는 근거다. 두 번째 peak의 main148.61/GPU83.48/network39.75/renderer127.84/sidecar17.34MiB를 보존한다. 기준을 완화하거나 낮은 표본만 택하지 않았다.
+- 두 회차 모두 CUA Cmd+Q 뒤 정상종료와 DBclean을 확인했다. 첫 종료 직후 getAXState가 앱을 기본 프로필로 다시 연 사실을 확인했고 PID6741/sidecar6747을 추가 Cmd+Q로 정상종료했다. 재기동할 수 있는 앱 getter를 종료 확인에 다시 쓰지 않고 OS PID 부재로 확인했다. 로그인 입력·모델 호출·사용자 파일 편집은 하지 않았다.
+- `.artifacts/m5-packaged-ui/{z6kP5h,bZpohl}`에 결과/로그/정리 증거를 보존하고 자체 임시 프로젝트·프로필을 삭제했다. 다음은 프로세스별 시작 메모리 개선 대상 조사와 잔류/전체G6 수집이다. 가림/실제공급자/Windows/출시도 미완료이며 목표 계속 진행 중이다. main병합/push없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 가림 진단 보완·추가3회 미재현 증거 확보로 진척이었다. cleanadba8b0 진단 QA qZBrhv/XjZFoI(session12433)는 visible·12,000출력·정상종료, 표본최대31ms였고 trusted입력0/dropped0을 실제 수집했다. 가림 원인은 여전히 미확정이며 과거 실패를 해소하지 않았다. PID/DB 확인 뒤 임시 QA 앱/fixture를 정리했다.
 - 같은 소스에서 `pnpm m5:test:package` PASS(session73991). 일반앱/ZIP에 watcher 비동기화가 반영됐다. 패키지323,155,497B·ZIP124,392,729B, `.artifacts/m5-g6-package/darwin-arm64-2026-10-29T02-21-44-827Z.json`에 provenance/smoke/크기 증거를 보존한다. 서명/공증/출시 또는 전체G6 합격은 아니다.
 - 최신 일반 패키지 `--project` 시험(eXYmoB/session58111)은 초기·재시작 모두 정상종료했다. 편집/저장/diff·재시작 저장내용·반영취소 원본보존·별도동의 반영/복원 exact bytes·두 프로젝트 파일/채팅 격리·원래채팅 재열기를 확인했다. 그러나 CDP진단 유휴RSS461,733,888/482,689,024B가400MiB를 넘어 전체FAIL/exit1을 유지한다. 기능 성공으로 메모리 실패를 덮지 않는다.
