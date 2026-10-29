@@ -415,14 +415,14 @@ fn binary_agent_cancel_defers_completion_without_blocking_status_or_quit() {
     }
 }
 
-#[cfg(all(target_os = "macos", debug_assertions))]
+#[cfg(all(target_os = "macos", any(debug_assertions, feature = "qa-output-fixtures")))]
 #[test]
 fn binary_long_stream_commits_and_pages_three_thousand_outputs() {
     g5a_public_event_flow(false, Some("long-stream"));
 }
 
 #[test]
-#[cfg(not(debug_assertions))]
+#[cfg(all(not(debug_assertions), not(feature = "qa-output-fixtures")))]
 fn release_cli_rejects_durable_fixture_before_opening_database() {
     for scenario in ["long-stream", "paced-long-stream"] {
         let root = tempfile::tempdir().unwrap();

@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 최신 패키지 무디버거 RSS 두 조건 재측정과 안전 정리로 진척이다. clean `39ff294`에서 메인이 장시간 출력 패키지 연결의 실제 장애를 조사했다. 일반 release는 기존 짧은 fixture CLI를 제공하지만 long/paced만 debug로 제한하며, architecture와 회귀 검사도 그 경계를 명시한다.
+- 제품 경계를 제거하는 대신 기본 비활성 Cargo feature `qa-output-fixtures`를 추가했다. 명시적 QA 빌드에서만 최적화된 long/paced fixture CLI를 사용할 수 있고 일반 `--stdio` 공급자 선택은 그대로다. 기존 3,000출력 바이너리 검사는 QA release에서도 실행 가능하게 했으며 일반 release의 DB-open 이전 거절 검사는 유지했다.
+- 제품 staging에 Cargo artifact feature 검사도 추가해 QA feature가 켜졌거나 feature 증거가 없는 산출물을 파일 복사 전에 거절한다. QA 전용 패키지와 수집기는 아직 연결하지 않았다. 현행 구조/성능 절차에 이 상태와 제품 out 미교체·차이 기록·가짜 실행을 실제 공급자 검증으로 대체하지 않는 경계를 기록했다.
+- feature 켠 `cargo check` PASS(3.14초), staging 회귀9개 PASS, diff 검사 PASS. 독립 검토에서 차단 결함 없음으로 확인했다. 후속은 feature를 필수 확인하는 별도 임시 QA stager와 빌드 시점 Electron 설정을 사용하며 제품 런타임/환경 전환 스위치를 추가하지 않는다. 일반 release 거절 회귀는 feature 없는 빌드에서 별도 유지한다. optimized QA 실행/화면/일반 release 회귀 재실행은 아직이며 완료로 주장하지 않는다. 다음은 검토 후 별도 QA 패키지 연결과 단일4run 출력 수집이다. 사용자 데이터/모델 호출/main 병합/push 없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 최신 macOS 패키지 생성·기본 gate PASS로 진척이다. clean `9df546b`에서 G6 수집 코드를 대조했다. 시작/편집 입력/저장 경합 수집 경로는 이미 존재하며 패키지 agent-output 4스트림 및 전체 결합 증거는 미완성이다. 새 중복 수집기를 만들기 전에 알려진 메모리 초과를 최신 패키지로 재관측했다.
 - 기존 `m5-packaged-ui-smoke.mjs --no-cdp` NUktJ5/session57657에서 빈 시작 화면 370.578MiB, `--no-cdp-project` wgQt71/session64173에서 두 프로젝트 등록 상태397.563MiB였다. 각각40회/250ms RSS 표본의 최댓값으로 이번 단회는400MiB 이내다. 이전410.22MiB 초과를 삭제하거나 안정적 해결로 선언하지 않는다. 두 프로젝트 상태 여유는 약2.44MiB로 작다.
 - 둘 다 새 임시 프로필·공식 패키지·디버거 없음·실제 모델/인증 없음이다. 준비 완료 신호 후 측정했지만 전체 가시성 지속·10회·대형 파일/diff·닫은 뒤60초 retained·전체 G6 증거가 아니므로 결과는 `NOT_READY`/exit2로 유지했다.

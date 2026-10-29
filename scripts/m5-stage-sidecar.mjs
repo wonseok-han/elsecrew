@@ -32,6 +32,9 @@ if (artifacts.length !== 1 || typeof artifacts[0].executable !== "string" || !is
   throw new Error("sidecar build did not report exactly one executable artifact");
 }
 const source = artifacts[0].executable;
+if (!Array.isArray(artifacts[0].features) || artifacts[0].features.includes("qa-output-fixtures")) {
+  throw new Error("production sidecar staging requires a non-QA artifact");
+}
 
 const destinationDirectory = resolve(resourcesDirectory, "sidecar");
 mkdirSync(destinationDirectory, { recursive: true });

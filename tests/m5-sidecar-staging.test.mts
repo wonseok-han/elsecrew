@@ -19,10 +19,19 @@ function artifact(executable: unknown, overrides: Record<string, unknown> = {}) 
     manifest_path: resolve(root, "crates", "hello-agent-sidecar", "Cargo.toml"),
     target: { name: "hello-agent-sidecar", kind: ["bin"] },
     profile: { test: false, debug_assertions: false },
+    features: [],
     executable,
     ...overrides,
   };
 }
+
+test("production staging rejects QA or missing feature evidence before writing", () => {
+  for (const features of [["qa-output-fixtures"], undefined, null, "qa-output-fixtures"]) {
+    const result = stage({ messages: [artifact("/qa/release/hello-agent-sidecar", { features })] });
+    assert.ok(result.error);
+    assert.deepEqual(result.writes, []);
+  }
+});
 
 function stage(options: {
   messages?: unknown[];

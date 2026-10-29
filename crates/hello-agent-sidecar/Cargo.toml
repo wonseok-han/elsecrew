@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[features]
+# Explicit QA builds only. Standard release packaging does not enable this.
+qa-output-fixtures = []
+
 [dependencies]
 serde = "=1.0.228"
 base64 = { version = "=0.22.1", default-features = false, features = ["alloc"] }

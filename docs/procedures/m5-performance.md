@@ -226,3 +226,9 @@ clean checkout에서 `pnpm run m5:measure:renderer`를 실행한다. 현재 prod
 `--no-cdp-project`는 `--no-cdp`와 같은 디버깅 서버 없는 관측에 `--project`의 생성된 두 프로젝트 seed를 결합한다. 사용자 데이터는 쓰지 않으며 편집/반영/복원은 실행하지 않는다. 시작 화면 준비 표식 후40개 RSS 표본을 수집하고 별도 정상 종료를 기다린다. `seededProjectBaseline:true`로 빈 프로필과 구별한다. 같은 package의 프로젝트 baseline 비교를 돕지만, 단발 차이를 CDP 비용의 인과적/통계적 증명이나 전체 G6 합격으로 사용하지 않는다.
 
 `m5-durable-output-observer.cjs`의 `liveLatency`는 선택 구간에서 처음 받은 head의 고정 순서까지 따라잡은 뒤 도착한 새 알림만 대상으로 한다. 이후 head가 계속 증가해도 이 준비 기준을 옮기지 않는다. 같은 선택 구간의 두 RAF 뒤 보이는 출력 순서가 알림 순서와 정확히 일치할 때 `notificationToFrameMs`를 기록한다. 채팅 전환·숨김·보이지 않는 출력은 구간을 끊고 다시 따라잡아야 한다. 더 최신 행으로 합쳐져 정확한 행 표시를 확인하지 못한 알림은 `superseded`, 구간 중단은 `interrupted`, 남은 알림은 `unfinished`, 수집 상한은 `dropped`로 남긴다. 이들을 0으로 바꾸거나 측정된 일부 표본만으로 전체 이벤트 paint 성공을 선언하지 않는다. 최대 대기256개·보존1024표본이며 기존 생성→화면 관측과 별도다. 실제 모델/commit 지연이나 전체G6 수집을 대체하지 않는다.
+
+### 최적화된 장시간 출력 QA 빌드 경계
+
+`hello-agent-sidecar`의 명시적 Cargo feature `qa-output-fixtures`는 release 최적화를 유지하면서 `--stdio-agent-fixture long-stream`과 `paced-long-stream`을 시험하기 위한 진입점이다. 기본 feature는 아니며 일반 release의 거절 경계와 `--stdio` 실제 공급자 선택은 유지한다. 제품 staging은 이 feature를 포함한 Cargo 산출물을 거절한다.
+
+후속 수집기는 별도 QA 앱 경로와 임시 userData를 사용하고 제품 `out` 앱을 교체하지 않아야 한다. renderer/main 원본 및 설정 차이를 기록하고, QA 실행 파일을 제품과 동일한 바이너리라고 주장하지 않는다. 단일 run 3,000개·4채팅·실제 발행 간격·전체 기록 대조·보이는 채팅의 paint·숨김/미관측 구분·정상 종료·임시 데이터 정리를 함께 수집해야 한다. 현재 이 패키지 연결과 반복 수집은 미구현이다.

@@ -203,10 +203,12 @@ where
         }
         let scenario = match scenario.to_string_lossy().as_ref() {
             "clean" => agent_runtime::FakeScenario::Clean,
-            // Never expose the inactive format upgrade through the packaged CLI.
-            #[cfg(debug_assertions)]
+            // Standard release builds retain the durable-fixture rejection.
+            // QA can exercise the same optimized storage/transport code via an
+            // explicitly selected build, without changing normal --stdio mode.
+            #[cfg(any(debug_assertions, feature = "qa-output-fixtures"))]
             "long-stream" => agent_runtime::FakeScenario::LongStream,
-            #[cfg(debug_assertions)]
+            #[cfg(any(debug_assertions, feature = "qa-output-fixtures"))]
             "paced-long-stream" => agent_runtime::FakeScenario::PacedLongStream,
             "final-delayed" => agent_runtime::FakeScenario::FinalDelayed,
             "cancel-clean" => agent_runtime::FakeScenario::CancelClean,
