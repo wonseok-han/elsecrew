@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 격리 보완 QA80jcUA의 visible12,000출력 PASS와 일반release QA인자 거절 PASS로 진척이다. clean `526bd1c`에서 메인이 준비1회+측정10회용 `m5-repeat-output-qa.mjs`를 구현했다. QA 앱을 한 번 빌드하고 같은 artifact를 재사용하며 source HEAD/clean 상태·asar/sidecar 지문을 대조한다.
+- 원시 generation 전체row 재계산·가시성·완전 관측·RSS 합계 대조 helper를 연결했다. 기준을 넘은 지연/메모리는 제외하지 않고 집계한다. 숨김/누락/관측잘림은 실패로 남기고 재시도하지 않는다. 모든결과는 diagnostic/gateEligible:false이며 전체G6 합격으로 승격하지 않는다.
+- 각 회차는 원시 증거를 보존하고 종료 응답·관측 PID 부재·DB clean을 대조한 뒤 자체 fixture만 삭제한다. 독립 검토에서 부분 실패 후 QA 패키지까지 삭제하는 조건을 지적해, 모든 회차/집계 NOT_READY일 때만 패키지를 자동 정리하도록 수정했다. 부분 실패·원시 요약 불일치·초과값 보존 관련 4검사/문법/diff PASS; 독립 재검토에서 추가 차단 결함 없음으로 확인했다.
+- 실제11회수집은아직시작하지않았다. 다음은검토완료후clean commit에서반복수집을실행하는것이다. 사용자계정/모델/프로젝트변경없음. G6전체/실제공급자전체/Windows/출시미완료, main병합/push없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 전체 row 계측과 실제 경로 canonical 오류 수정 `f9f46e6`으로 진척이다. clean HEAD에서 QA F62cZA를 재빌드하고 80jcUA/session27984를 실행했다. 임시 userData/sessionData/log의 realpath 검증을 통과해 전체 visible·PASS/exit0·정상 종료를 확인했다.
 - 네 단일 run 각각3,000개, 총12,000개 persisted row의 본문/출력 sequence·event ID 유일성·run/프로젝트/채팅 결속을 대조했다. 네 run 모두 pre-write timestamp3,000개가60초 미만이며 마지막59982.548~59984.740ms, 최대 예정 지연17.832ms였다. 이는 실제 write 완료·commit·수신·모든 행 paint가60초 이내라는 증거가 아니다.
 - live notification→정확 행 두frame 진단526표본 p9515.50ms/max238.80ms, superseded12/interrupted6, peakRSS514.33MiB. 단회 QA 진단이며 일부 최댓값100ms 초과와 미관측 행을 숨기지 않는다. 제품과 동일 바이너리·전체 G6/10회/실제 공급자 합격은 아니다.
