@@ -2,6 +2,12 @@
 
 ### 2026-10-29 · by Codex
 
+- clean79daaa9의 QA ymy2aV/47mkun(session44937) 단회 비교는 visible·12,000출력/history/latest·정상 종료 exit0을 통과했다. 정확 head 일부 표본560개 최대59.5ms, peak588,955,648B, interrupted3/superseded0이었다. 각 run pre-write stamps3,000개는60초 내였으며 모든 행 paint/전체G6 완료 증거는 아니다.
+- watch615회/누적5,280.020ms/최대25.321ms로 이전 단회25,446.368/143.593ms보다 감소했다. runtime누적10,929.646ms/최대59.796ms, request누적4,345.386ms/최대277.104ms(초기 작업 포함). 화면 지연은 이전202.4ms에서59.5ms로 줄었지만 반복 측정 전 일반화하지 않는다.
+- PID부재·DBclean 확인 뒤 임시 QA 앱/fixture를 정리했다. 원시 결과/PNG/dispatch/build/log/정리 증거는 `.artifacts/m5-packaged-output-qa/47mkun`이다. 다음은 같은 소스·한 QA 빌드의 준비1+본10 반복 수집이다. 전체G6/실제공급자/Windows/출시 미완료, main병합/push없음.
+
+### 2026-10-29 · by Codex
+
 - 기준211c58b에서 메인이 Unix watcher의 고정 Git 읽기 검증을 단일 소유 worker로 분리했다. 매 결과는 현재 manifest/lock/채팅 결속·ActiveProject와 보관된 작업 폴더/.git FD 신원을 대조한 뒤 metadata·인덱스 검증과128단계 스캔을 수행한다. 다른 요청의 전체 검증은 유지하며 결과를 실행/쓰기 권한으로 캐시하지 않는다. 오래된 stream 결과는 버리고 종료/중지는 취소·join한다.
 - 첫 회귀에서 백그라운드 write-tree와 요청의 index.lock 충돌을 실제 확인했다. write-tree는 dispatcher 순차 경로로 되돌렸다. 독립 검토 의견에 따라 refs 재귀/metadata 읽기도 dispatcher에 남기고 worker를 취소 가능한 고정 Git 자식만 소유하도록 제한했다. 인덱스/metadata/스캔의 완전 비차단을 주장하지 않는다.
 - focused watch14 PASS(8.32초), Git owner7 PASS(2.25초; 취소 시 pipe/exit 대기 해제·회수·취소된 spawn 거절 포함), cargo check PASS, clippy exit0(기존 core2/sidecar15 경고), 신규 모듈/프로세스 파일 rustfmt와 diff 검사 PASS. 완료 후 manifest 변경·작업 폴더/.git 교체·stream 교체 거절을 포함한다. 증거는 `.artifacts/m5-integration/2026-10-29/m5-watch-*`에 보존한다.
