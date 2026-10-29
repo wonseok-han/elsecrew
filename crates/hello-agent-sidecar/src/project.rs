@@ -45,6 +45,8 @@ type GitStdin = ChildStdin;
 type GitStdout = ChildStdout;
 pub(crate) mod runtime_isolation;
 mod snapshot_recovery;
+#[cfg(unix)]
+mod watch_job;
 
 const MANIFEST_DIRECTORY: &str = "worktree-manifests-v1";
 const WORKTREE_DIRECTORY: &str = "worktrees-v1";
@@ -224,6 +226,7 @@ struct WatchState {
     initial_scan_pending: bool,
 }
 
+#[derive(Clone, PartialEq, Eq)]
 struct ActiveProject {
     project_id: String,
     canonical_git_root: PathBuf,
@@ -357,6 +360,10 @@ pub struct ProjectManager {
     pending_saves: HashMap<String, PendingSave>,
     watchers: HashMap<String, WatchState>,
     last_polled_watcher: Option<String>,
+    #[cfg(unix)]
+    watch_job: Option<watch_job::WatchJob>,
+    #[cfg(unix)]
+    watch_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -865,6 +872,10 @@ impl ProjectManager {
             pending_saves: HashMap::new(),
             watchers: HashMap::new(),
             last_polled_watcher: None,
+            #[cfg(unix)]
+            watch_job: None,
+            #[cfg(unix)]
+            watch_cancel: None,
         })
     }
 
@@ -2423,15 +2434,30 @@ impl ProjectManager {
     }
 
     pub fn poll_watchers(&mut self, storage: &Storage) -> Vec<WatchEmission> {
-        // One fully revalidated watcher per dispatcher turn. A per-watcher
+        // One watcher validation at a time; completed results are re-bound
+        // on the dispatcher before the bounded scan slice. A per-watcher
         // scan budget alone lets many chats monopolize the request loop.
         // Sort keys so HashMap iteration order cannot starve a watcher; a
         // removed cursor still advances to its successor, then wraps.
+        #[cfg(unix)]
+        if self.watch_job.as_ref().is_some_and(|job| {
+            self.watchers.get(&job.key).is_none_or(|state| state.stream_id != job.stream)
+        }) {
+            self.watch_job.take();
+        }
+        #[cfg(unix)]
+        let completed = match self.watch_job.as_ref() {
+            Some(job) if !job.finished() => return Vec::new(),
+            Some(_) => Some(self.watch_job.take().expect("owned watch job").complete()),
+            None => None,
+        };
         let mut project_ids = self.watchers.keys().cloned().collect::<Vec<_>>();
         project_ids.sort();
         let next = project_ids.iter().find(|key| {
             self.last_polled_watcher.as_ref().is_none_or(|last| *key > last)
         }).or_else(|| project_ids.first()).cloned();
+        #[cfg(unix)]
+        let next = completed.as_ref().map(|done| done.key.clone()).or(next);
         self.last_polled_watcher = next.clone();
         let mut emitted = Vec::new();
         for project_id in next.into_iter() {
@@ -2439,10 +2465,27 @@ impl ProjectManager {
                 .watchers
                 .get(&project_id)
                 .and_then(|state| state.workspace.clone());
+            #[cfg(unix)]
+            if completed.as_ref().is_some_and(|done| {
+                self.watchers.get(&project_id).is_none_or(|state| state.stream_id != done.stream)
+            }) { continue; }
+            #[cfg(not(unix))]
             let resolved = match workspace.as_ref() {
                 Some(address) => self.validate_workspace_address(storage, address),
                 None => self.validate_active_project(storage, &project_id),
             };
+            #[cfg(unix)]
+            let resolved = match workspace.as_ref() {
+                Some(address) => self.validate_workspace_address_binding(storage, address),
+                None => self.validate_active_project_binding(storage, &project_id),
+            }.and_then(|active| {
+                if let Some(done) = &completed {
+                    if done.active != active || !done.succeeded {
+                        return Err(ProjectFailure::manifest("watch validation failed or binding changed"));
+                    }
+                }
+                Ok(active)
+            });
             let emission_project_id = workspace
                 .as_ref()
                 .map_or(project_id.as_str(), |address| address.project_id.as_str());
@@ -2474,6 +2517,28 @@ impl ProjectManager {
                     continue;
                 }
             };
+            #[cfg(unix)]
+            if completed.is_none() {
+                let stream = self.watchers[&project_id].stream_id.clone();
+                match self.start_watch_job(project_id.clone(), stream, active, worktree) {
+                    Ok(job) => self.watch_job = Some(job),
+                    Err(_) => {
+                        if let Some(mut state) = self.watchers.remove(&project_id) {
+                            emitted.push(watch_emission(&mut state, emission_project_id, Vec::new(), true));
+                        }
+                    }
+                }
+                continue;
+            }
+            #[cfg(unix)]
+            if !completed.as_ref().expect("completed watcher").matches_capability(&worktree).unwrap_or(false)
+                || self.verify_snapshot_metadata(&worktree, &active).is_err()
+                || self.verify_snapshot_tree(&worktree, &active).is_err() {
+                if let Some(mut state) = self.watchers.remove(&project_id) {
+                    emitted.push(watch_emission(&mut state, emission_project_id, Vec::new(), true));
+                }
+                continue;
+            }
             let scan_result: Result<_, ProjectFailure> = (|| {
                 let state = self.watchers.get_mut(&project_id).expect("selected watcher");
                 if state.scan.is_none() {
@@ -2538,6 +2603,8 @@ impl ProjectManager {
     }
 
     pub fn stop_watchers(&mut self) {
+        #[cfg(unix)]
+        self.watch_job.take();
         self.watchers.clear();
         self.last_polled_watcher = None;
     }
@@ -3038,6 +3105,17 @@ impl ProjectManager {
         storage: &Storage,
         project_id: &str,
     ) -> Result<ActiveProject, ProjectFailure> {
+        let active = self.validate_active_project_binding(storage, project_id)?;
+        let worktree = self.worktree_capability(&active)?;
+        self.verify_snapshot_repository(&worktree, &active)?;
+        Ok(active)
+    }
+
+    fn validate_active_project_binding(
+        &self,
+        storage: &Storage,
+        project_id: &str,
+    ) -> Result<ActiveProject, ProjectFailure> {
         let record = required_project(storage, project_id)?;
         if value_string(&record, "lifecycle")? != "active" {
             return Err(ProjectFailure::recovery(
@@ -3111,11 +3189,21 @@ impl ProjectManager {
                 "snapshot Git marker differs from the active identity",
             ));
         }
-        self.verify_snapshot_repository(&worktree, &active)?;
         Ok(active)
     }
 
     fn validate_workspace_address(
+        &self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+    ) -> Result<ActiveProject, ProjectFailure> {
+        let active = self.validate_workspace_address_binding(storage, address)?;
+        let worktree = self.worktree_capability(&active)?;
+        self.verify_snapshot_repository(&worktree, &active)?;
+        Ok(active)
+    }
+
+    fn validate_workspace_address_binding(
         &self,
         storage: &Storage,
         address: &WorkspaceAddress,
@@ -3221,7 +3309,6 @@ impl ProjectManager {
                 "workspace Git marker differs from the durable chat binding",
             ));
         }
-        self.verify_snapshot_repository(&worktree, &active)?;
         Ok(active)
     }
 
@@ -3767,16 +3854,22 @@ impl ProjectManager {
             return Err(ProjectFailure::manifest("snapshot HEAD is not detached"));
         }
         // write-tree remains serial, after all read-only checks have finished.
-        let tree_output = self.git_at(workspace, ["write-tree"])?;
-        let tree = trim_output(&tree_output)?;
-        if tree != active.base_tree {
-            return Err(ProjectFailure::manifest(
-                "snapshot index differs from its base tree",
-            ));
-        }
+        // write-tree can acquire index.lock even during validation. Background
+        // watchers defer it to the dispatcher so concurrent requests cannot
+        // conflict with it and cancellation cannot leave its lock behind.
+        #[cfg(unix)]
+        let background_watch = self.watch_cancel.is_some();
+        #[cfg(not(unix))]
+        let background_watch = false;
+        if !background_watch { self.verify_snapshot_tree(workspace, active)?; }
         if !remotes?.is_empty() {
             return Err(ProjectFailure::manifest("snapshot retains a Git remote"));
         }
+        if background_watch { return Ok(()); }
+        self.verify_snapshot_metadata(workspace, active)
+    }
+
+    fn verify_snapshot_metadata(&self, workspace: &Dir, active: &ActiveProject) -> Result<(), ProjectFailure> {
         let git_dir = open_real_child_dir(workspace, ".git")?;
         if git_dir.symlink_metadata("objects/info/alternates").is_ok() {
             return Err(ProjectFailure::manifest(
@@ -3793,6 +3886,14 @@ impl ProjectManager {
             return Err(ProjectFailure::manifest(
                 "snapshot Git metadata retains the source absolute path",
             ));
+        }
+        Ok(())
+    }
+
+    fn verify_snapshot_tree(&self, workspace: &Dir, active: &ActiveProject) -> Result<(), ProjectFailure> {
+        let tree_output = self.git_at(workspace, ["write-tree"])?;
+        if trim_output(&tree_output)? != active.base_tree {
+            return Err(ProjectFailure::manifest("snapshot index differs from its base tree"));
         }
         Ok(())
     }
@@ -4071,7 +4172,14 @@ impl ProjectManager {
     {
         let mut command = self.git_command_at(directory)?;
         command.args(args).stdout(Stdio::piped());
-        StreamingGitChild::spawn(&mut command).map_err(|error| {
+        #[cfg(unix)]
+        let child = match &self.watch_cancel {
+            Some(cancel) => StreamingGitChild::spawn_cancellable(&mut command, cancel.clone()),
+            None => StreamingGitChild::spawn(&mut command),
+        };
+        #[cfg(not(unix))]
+        let child = StreamingGitChild::spawn(&mut command);
+        child.map_err(|error| {
             ProjectFailure::manifest(format!("could not start fixed Git command: {error}"))
         })
     }

@@ -26,7 +26,13 @@ fn workspace_watchers_progress_fairly_one_per_poll() {
     }
     let mut seen = std::collections::BTreeSet::new();
     for _ in 0..4 {
-        let events = fixture.projects.poll_watchers(&fixture.storage);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let events = loop {
+            let events = fixture.projects.poll_watchers(&fixture.storage);
+            if !events.is_empty() { break events; }
+            assert!(std::time::Instant::now() < deadline, "watch validation timed out");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        };
         assert_eq!(events.len(), 1, "one watcher must not monopolize the next turn");
         let id = events[0].payload["chatId"].as_str().unwrap().to_string();
         assert!(seen.insert(id), "a watcher was repeated before its peers");
@@ -58,9 +64,11 @@ fn oversized_workspace_watch_preserves_address_and_requests_rescan() {
     if cfg!(unix) {
         assert_eq!(action.result, json!({"watching":true}));
         assert!(events.is_empty());
-        for _ in 0..256 {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while std::time::Instant::now() < deadline {
             events = f.projects.poll_watchers(&f.storage);
             if !events.is_empty() { break; }
+            std::thread::sleep(std::time::Duration::from_millis(2));
         }
     } else {
         assert_eq!(action.result, json!({"watching":false,"rescanRequired":true}));

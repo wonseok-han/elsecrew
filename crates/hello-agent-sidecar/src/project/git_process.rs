@@ -21,6 +21,7 @@ pub(super) struct BudgetPipe<T> {
     pipe: T,
     deadline: Instant,
     cancelled: Arc<AtomicBool>,
+    external_cancel: Option<Arc<AtomicBool>>,
 }
 
 impl<T: AsRawFd> BudgetPipe<T> {
@@ -44,7 +45,12 @@ impl<T: AsRawFd> BudgetPipe<T> {
         self.check()
     }
 
-    fn new(pipe: T, deadline: Instant, cancelled: Arc<AtomicBool>) -> io::Result<Self> {
+    fn new(
+        pipe: T,
+        deadline: Instant,
+        cancelled: Arc<AtomicBool>,
+        external_cancel: Option<Arc<AtomicBool>>,
+    ) -> io::Result<Self> {
         let fd = pipe.as_raw_fd();
         let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
         if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
@@ -54,13 +60,19 @@ impl<T: AsRawFd> BudgetPipe<T> {
             pipe,
             deadline,
             cancelled,
+            external_cancel,
         })
     }
 }
 
 impl<T> BudgetPipe<T> {
     fn check(&self) -> io::Result<()> {
-        if self.cancelled.load(Ordering::Acquire) {
+        if self.cancelled.load(Ordering::Acquire)
+            || self
+                .external_cancel
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::Acquire))
+        {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "Git owner stopped",
@@ -115,6 +127,7 @@ pub(super) struct StreamingGitChild {
     stderr: Option<JoinHandle<io::Result<Vec<u8>>>>,
     deadline: Instant,
     cancelled: Arc<AtomicBool>,
+    external_cancel: Option<Arc<AtomicBool>>,
     reaped: bool,
 }
 
@@ -124,6 +137,30 @@ impl StreamingGitChild {
     }
 
     fn spawn_with_budget(command: &mut Command, budget: Duration) -> io::Result<Self> {
+        Self::spawn_with_external_cancel(command, budget, None)
+    }
+
+    pub(super) fn spawn_cancellable(
+        command: &mut Command,
+        cancel: Arc<AtomicBool>,
+    ) -> io::Result<Self> {
+        Self::spawn_with_external_cancel(command, BUDGET, Some(cancel))
+    }
+
+    fn spawn_with_external_cancel(
+        command: &mut Command,
+        budget: Duration,
+        external_cancel: Option<Arc<AtomicBool>>,
+    ) -> io::Result<Self> {
+        if external_cancel
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Acquire))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Git owner stopped",
+            ));
+        }
         command.process_group(0).stderr(Stdio::piped());
         let child = command.spawn()?;
         let mut owner = Self {
@@ -133,6 +170,7 @@ impl StreamingGitChild {
             stderr: None,
             deadline: Instant::now() + budget,
             cancelled: Arc::new(AtomicBool::new(false)),
+            external_cancel,
             reaped: false,
         };
         if let Some(pipe) = owner.child.stdin.take() {
@@ -140,6 +178,7 @@ impl StreamingGitChild {
                 pipe,
                 owner.deadline,
                 owner.cancelled.clone(),
+                owner.external_cancel.clone(),
             )?);
         }
         if let Some(pipe) = owner.child.stdout.take() {
@@ -147,6 +186,7 @@ impl StreamingGitChild {
                 pipe,
                 owner.deadline,
                 owner.cancelled.clone(),
+                owner.external_cancel.clone(),
             )?);
         }
         let pipe = owner
@@ -154,7 +194,12 @@ impl StreamingGitChild {
             .stderr
             .take()
             .ok_or_else(|| io::Error::other("Git stderr missing"))?;
-        let mut pipe = BudgetPipe::new(pipe, owner.deadline, owner.cancelled.clone())?;
+        let mut pipe = BudgetPipe::new(
+            pipe,
+            owner.deadline,
+            owner.cancelled.clone(),
+            owner.external_cancel.clone(),
+        )?;
         owner.stderr = Some(thread::spawn(move || {
             let mut tail = Vec::with_capacity(GIT_STDERR_TAIL_BYTES);
             let mut buffer = [0; 4096];
@@ -181,6 +226,16 @@ impl StreamingGitChild {
             .join()
             .map_err(|_| io::Error::other("Git stderr reader panicked"))??;
         loop {
+            if self
+                .external_cancel
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::Acquire))
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "Git owner stopped",
+                ));
+            }
             if Instant::now() >= self.deadline {
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
@@ -249,6 +304,33 @@ mod tests {
     }
 
     #[test]
+    fn watcher_cancel_interrupts_pipes_and_exit_wait_and_reaps() {
+        for script in ["exec /bin/sleep 30", "exec 1>&- 2>&-; exec /bin/sleep 30"] {
+            let cancel = Arc::new(AtomicBool::new(false));
+            let mut command = shell(script);
+            command.stdout(Stdio::piped());
+            let child = StreamingGitChild::spawn_cancellable(&mut command, cancel.clone()).unwrap();
+            let pid = child.child.id();
+            let worker = thread::spawn(move || {
+                super::super::ProjectManager::finish_git_control(child, &[0])
+            });
+            thread::sleep(Duration::from_millis(30));
+            cancel.store(true, Ordering::Release);
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while !worker.is_finished() && Instant::now() < deadline {
+                thread::sleep(TICK);
+            }
+            assert!(
+                worker.is_finished(),
+                "watch cancellation did not interrupt blocking Git"
+            );
+            assert!(worker.join().unwrap().is_err());
+            assert_reaped(pid);
+            assert!(StreamingGitChild::spawn_cancellable(&mut command, cancel).is_err());
+        }
+    }
+
+    #[test]
     fn concurrent_control_children_reap_after_output_and_timeout_failures() {
         let mut children = Vec::new();
         let mut pids = Vec::new();
@@ -259,36 +341,47 @@ mod tests {
         ] {
             let mut command = shell(script);
             command.stdout(Stdio::piped());
-            let child = StreamingGitChild::spawn_with_budget(
-                &mut command, Duration::from_millis(500),
-            ).unwrap();
+            let child =
+                StreamingGitChild::spawn_with_budget(&mut command, Duration::from_millis(500))
+                    .unwrap();
             pids.push(child.child.id());
             children.push(child);
         }
-        let results: Vec<_> = children.into_iter().map(|child| {
-            super::super::ProjectManager::finish_git_control(child, &[0])
-        }).collect();
+        let results: Vec<_> = children
+            .into_iter()
+            .map(|child| super::super::ProjectManager::finish_git_control(child, &[0]))
+            .collect();
         assert_eq!(results[0].as_ref().unwrap().stdout, b"ok");
-        assert!(results[1].as_ref().unwrap_err().detail.contains("exceeds 64 KiB"));
+        assert!(results[1]
+            .as_ref()
+            .unwrap_err()
+            .detail
+            .contains("exceeds 64 KiB"));
         assert!(results[2].is_err());
-        for pid in pids { assert_reaped(pid); }
+        for pid in pids {
+            assert_reaped(pid);
+        }
     }
 
     #[test]
     fn overlapping_scans_drain_large_second_pipe_within_its_own_budget() {
         let mut first = shell("/bin/sleep 2.2; printf tracked");
-        let mut second = shell("/bin/dd if=/dev/zero bs=262144 count=1 2>/dev/null; /bin/sleep 1.2");
+        let mut second =
+            shell("/bin/dd if=/dev/zero bs=262144 count=1 2>/dev/null; /bin/sleep 1.2");
         first.stdout(Stdio::piped());
         second.stdout(Stdio::piped());
-        let first = StreamingGitChild::spawn_with_budget(&mut first, Duration::from_secs(3)).unwrap();
-        let second = StreamingGitChild::spawn_with_budget(&mut second, Duration::from_secs(3)).unwrap();
+        let first =
+            StreamingGitChild::spawn_with_budget(&mut first, Duration::from_secs(3)).unwrap();
+        let second =
+            StreamingGitChild::spawn_with_budget(&mut second, Duration::from_secs(3)).unwrap();
         let pids = [first.child.id(), second.child.id()];
-        let (tracked, untracked) = super::super::ProjectManager::finish_git_limited_pair(
-            first, Ok(second), 1024 * 1024,
-        );
+        let (tracked, untracked) =
+            super::super::ProjectManager::finish_git_limited_pair(first, Ok(second), 1024 * 1024);
         assert_eq!(tracked.unwrap(), b"tracked");
         assert_eq!(untracked.unwrap().len(), 262144);
-        for pid in pids { assert_reaped(pid); }
+        for pid in pids {
+            assert_reaped(pid);
+        }
     }
 
     #[test]

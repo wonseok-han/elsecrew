@@ -5518,9 +5518,11 @@ fn watcher_entry_metadata_does_not_follow_external_or_dangling_links() {
 }
 
 fn poll_until_watch_event(fixture: &mut Fixture) -> Vec<WatchEmission> {
-    for _ in 0..256 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < deadline {
         let events = fixture.manager.poll_watchers(&fixture.storage);
         if !events.is_empty() { return events; }
+        std::thread::sleep(std::time::Duration::from_millis(2));
     }
     panic!("watch event did not arrive within bounded scan turns");
 }
@@ -5569,7 +5571,7 @@ fn watcher_coalesces_paths_and_overflow_requires_rescan() {
         .unwrap();
     fs::write(active.worktree_path.join("src/edit.txt"), b"changed").unwrap();
     fs::write(active.worktree_path.join("src/another.txt"), b"changed").unwrap();
-    let events = fixture.manager.poll_watchers(&fixture.storage);
+    let events = poll_until_watch_event(&mut fixture);
     assert_eq!(events.len(), 1);
     assert!(!events[0].payload["rescanRequired"].as_bool().unwrap());
     let paths = events[0].payload["paths"].as_array().unwrap();
@@ -5583,7 +5585,7 @@ fn watcher_coalesces_paths_and_overflow_requires_rescan() {
         .watch_project(&fixture.storage, &fixture.project_id)
         .unwrap();
     fs::write(active.worktree_path.join("src/edit.txt"), b"changed again").unwrap();
-    let restarted = fixture.manager.poll_watchers(&fixture.storage);
+    let restarted = poll_until_watch_event(&mut fixture);
     assert_eq!(restarted.len(), 1);
     assert_ne!(restarted[0].stream_id, first_stream);
     assert_eq!(restarted[0].seq, 1);
@@ -5833,4 +5835,65 @@ fn git_text<const N: usize>(directory: &Path, args: [&str; N]) -> String {
         .unwrap()
         .trim()
         .to_string()
+}
+
+#[test]
+#[cfg(unix)]
+fn watcher_completed_validation_rechecks_manifest_and_rejects_replaced_stream() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    fixture.manager.watch_project(&fixture.storage, &fixture.project_id).unwrap();
+    fs::write(active.worktree_path.join("src/edit.txt"), b"watch change").unwrap();
+    assert!(fixture.manager.poll_watchers(&fixture.storage).is_empty());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !fixture.manager.watch_job.as_ref().unwrap().finished() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let original = fs::read(&active.manifest_path).unwrap();
+    fs::write(&active.manifest_path, b"{}").unwrap();
+    let events = fixture.manager.poll_watchers(&fixture.storage);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].payload["rescanRequired"], true);
+    assert!(fixture.manager.watchers.is_empty());
+    fs::write(&active.manifest_path, original).unwrap();
+    fixture.manager.watch_project(&fixture.storage, &fixture.project_id).unwrap();
+    assert!(fixture.manager.poll_watchers(&fixture.storage).is_empty());
+    fixture.manager.watch_project(&fixture.storage, &fixture.project_id).unwrap();
+    let stream = fixture.manager.watchers[&fixture.project_id].stream_id.clone();
+    // Old result is canceled/discarded; a new validation is owned by the new stream.
+    assert!(fixture.manager.poll_watchers(&fixture.storage).is_empty());
+    assert_eq!(fixture.manager.watch_job.as_ref().unwrap().stream, stream);
+    fixture.manager.stop_watchers();
+    assert!(fixture.manager.watch_job.is_none());
+    assert!(fixture.manager.watchers.is_empty());
+}
+
+#[test]
+#[cfg(unix)]
+fn watcher_result_keeps_directory_identity_until_consumed() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    fixture.manager.watch_project(&fixture.storage, &fixture.project_id).unwrap();
+    assert!(fixture.manager.poll_watchers(&fixture.storage).is_empty());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !fixture.manager.watch_job.as_ref().unwrap().finished() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let done = fixture.manager.watch_job.take().unwrap().complete();
+    let current = fixture.manager.worktree_capability(&active).unwrap();
+    assert!(done.succeeded);
+    assert!(done.matches_capability(&current).unwrap());
+    fs::rename(active.worktree_path.join(".git"), active.worktree_path.join(".git-held")).unwrap();
+    fs::create_dir(active.worktree_path.join(".git")).unwrap();
+    assert!(!done.matches_capability(&current).unwrap());
+    fs::remove_dir(active.worktree_path.join(".git")).unwrap();
+    fs::rename(active.worktree_path.join(".git-held"), active.worktree_path.join(".git")).unwrap();
+    assert!(done.matches_capability(&current).unwrap());
+    let old_path = active.worktree_path.with_extension("old");
+    fs::rename(&active.worktree_path, &old_path).unwrap();
+    fs::create_dir(&active.worktree_path).unwrap();
+    let replacement = fixture.manager.worktree_capability(&active).unwrap();
+    assert!(!done.matches_capability(&replacement).unwrap());
 }

@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- 기준211c58b에서 메인이 Unix watcher의 고정 Git 읽기 검증을 단일 소유 worker로 분리했다. 매 결과는 현재 manifest/lock/채팅 결속·ActiveProject와 보관된 작업 폴더/.git FD 신원을 대조한 뒤 metadata·인덱스 검증과128단계 스캔을 수행한다. 다른 요청의 전체 검증은 유지하며 결과를 실행/쓰기 권한으로 캐시하지 않는다. 오래된 stream 결과는 버리고 종료/중지는 취소·join한다.
+- 첫 회귀에서 백그라운드 write-tree와 요청의 index.lock 충돌을 실제 확인했다. write-tree는 dispatcher 순차 경로로 되돌렸다. 독립 검토 의견에 따라 refs 재귀/metadata 읽기도 dispatcher에 남기고 worker를 취소 가능한 고정 Git 자식만 소유하도록 제한했다. 인덱스/metadata/스캔의 완전 비차단을 주장하지 않는다.
+- focused watch14 PASS(8.32초), Git owner7 PASS(2.25초; 취소 시 pipe/exit 대기 해제·회수·취소된 spawn 거절 포함), cargo check PASS, clippy exit0(기존 core2/sidecar15 경고), 신규 모듈/프로세스 파일 rustfmt와 diff 검사 PASS. 완료 후 manifest 변경·작업 폴더/.git 교체·stream 교체 거절을 포함한다. 증거는 `.artifacts/m5-integration/2026-10-29/m5-watch-*`에 보존한다.
+- 독립 최종 검토에서 남은 차단 결함 없음으로 확인했다(검토자는 테스트를 재실행하지 않음). 실제 화면 지연 개선은 아직 측정하지 않았다. 다음은 커밋 뒤 같은 QA 화면 비교다. 전체 G6/공급자 전체/Windows/출시는 미완료, 실제 모델/사용자 프로젝트 변경·main 병합/push 없음.
+
+### 2026-10-29 · by Codex
+
 - clean `2ac47e2` QA9NwzC6/z4EJtO(session51676) 단회에서 visible·12,000출력·history/latest·정상 종료/exit0을 확인했다. 정확 head 일부 표본 최대202.4ms로 성능 기준은 여전히 초과다. QA 단계 요약 파일도 정상 수집됐다.
 - dispatcher 계측: watch616회/누적25,446.368ms/최대143.593ms, runtime616회/8,311.326ms/66.237ms, request2199회/4,363.628ms/356.640ms, maintenance2758회/324.250ms/14.947ms. request에는 초기 snapshot 생성 등도 포함된다. 누적 비용의 가장 큰 부분이 watcher이며 synchronous watcher 수행 중 같은 dispatcher의 요청/출력이 대기할 수 있다. 정확 개별 latency와 인과 결속은 별도지만 작업 분리 대상을 좁히는 근거다.
 - 다음 구현은 watcher의 느린 검증/스캔을 요청 처리와 분리하는 범위다. 각 결과의 최신 manifest/lock/디렉터리 신원 재확인·중단/종료 소유권·bounded 작업 수·삭제/전환 뒤 오래된 결과 거절을 유지해야 하며 검증 캐시나 생략은 승인하지 않았다. 일반 배포 동작은 이번에 변경하지 않았다.
@@ -203,6 +210,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **2026-10-29 감시 검증 동시성**: Git `write-tree`는 검증에서도 index.lock을 만든다. watcher 백그라운드와 요청이 동시에 실행하면 실제 충돌하므로 dispatcher에서 순차 수행한다. worker는 취소 가능한 고정 읽기 자식만 담당하고 metadata/인덱스/스캔은 완료 후 최신 결속·held FD 신원 재확인 뒤 수행한다. watcher 결과는 실행 권한이 아니다.
 
 - **2026-10-27 현재 인계**: macOS V11 시작 이관은 사용자 승인 후01d2f19로 활성화했고 해당패키지PASS(059a42f 기록). 전체 sidecar 667PASS/9FAIL/43ignored에서 나온 9실패는 관련 focused 재검사로 해소했다. 변경 후 전체 suite 재실행 결과는 아니다. release기준검사는579.71초PASS이며 remote동시검사8baf58e 후 debug3,000출력도413.27초PASS다. 관련6회귀/독립검토PASS를유지하며G6전체성능증거는아니다. 최신상세는현재워크로그와10월아카이브. G6/실계정/Windows/출시는미완료.
 - **2026-10-23 장시간 단일 실행 방향 승인**: 4채팅×각3,000개 공개 이벤트를 여러 짧은 run이나 사용자 메시지로 대체하지 않는다. 출력 저장·조회·전송·표시 계약부터 재설계한다. 구현 전 제안과 L1~L5 순서는 `proposals/m5-long-running-agent-streams.md`; 수치·새 버전은 아직 미확정이며 제품 활성화/성능 합격을 뜻하지 않는다.
