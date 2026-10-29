@@ -2,6 +2,12 @@
 
 ### 2026-10-29 · by Codex
 
+- 반복 수집기 `e4e0ba1`의 clean checkout에서 QA Jd1L00을 빌드하고 ROGraB 준비 회차를 실행했다. 화면은 처음 visible이었으나 renderer 시간 9,893.6ms에 hidden으로 전환되어 `Live window became hidden`으로 FAIL/exit1이었다. 측정 10회는 시작하지 않았고 자동 재시도하지 않았다. 화면 잠금이 원인이라고 단정할 증거는 없다.
+- 시험 앱 PID80016은 정상 종료 응답을 남겼다. 관측 PID 부재·임시 DB clean 종료 확인 후 fixture가 정리됐다. 실패 시 패키지 보존도 실제 확인했으며, 원시 결과·가시성 trace·빌드·정리 증거를 `.artifacts/m5-packaged-output-qa/ROGraB`에 보존한 뒤 PID 부재를 재확인하고 자체 QA 앱과 중복 임시 증거만 제거했다.
+- 다음은 native 창 가림/최소화 상태와 renderer visibility 변화를 함께 계측해 환경 차단 원인을 구분하는 것이다. 이번 실행은 성능 합격 증거가 아니다. 전체 G6·실제 공급자 전체·Windows·출시 검증은 미완료다. 실제 모델 호출·사용자 프로젝트 변경·main 병합·push 없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 격리 보완 QA80jcUA의 visible12,000출력 PASS와 일반release QA인자 거절 PASS로 진척이다. clean `526bd1c`에서 메인이 준비1회+측정10회용 `m5-repeat-output-qa.mjs`를 구현했다. QA 앱을 한 번 빌드하고 같은 artifact를 재사용하며 source HEAD/clean 상태·asar/sidecar 지문을 대조한다.
 - 원시 generation 전체row 재계산·가시성·완전 관측·RSS 합계 대조 helper를 연결했다. 기준을 넘은 지연/메모리는 제외하지 않고 집계한다. 숨김/누락/관측잘림은 실패로 남기고 재시도하지 않는다. 모든결과는 diagnostic/gateEligible:false이며 전체G6 합격으로 승격하지 않는다.
 - 각 회차는 원시 증거를 보존하고 종료 응답·관측 PID 부재·DB clean을 대조한 뒤 자체 fixture만 삭제한다. 독립 검토에서 부분 실패 후 QA 패키지까지 삭제하는 조건을 지적해, 모든 회차/집계 NOT_READY일 때만 패키지를 자동 정리하도록 수정했다. 부분 실패·원시 요약 불일치·초과값 보존 관련 4검사/문법/diff PASS; 독립 재검토에서 추가 차단 결함 없음으로 확인했다.
