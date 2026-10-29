@@ -1190,10 +1190,6 @@ impl Sidecar {
                     self.projects.open_application_confirmation(&mut self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "chatId").map_err(invalid_params)?, param_string(params, "fingerprint").map_err(invalid_params)?, &request.request_id)
                 }
                 Some("inspectChatDiscard" | "discardChatWorkspace") => {
-                    // Admit the explicit synthetic integration harness; normal product remains gated.
-                    if !cfg!(test) && !self.agent_runtime.is_fixture_runtime() {
-                        return Ok(HandledRequest::response(error_response(&request, "requestBlocked", "requestBlocked", "workspace discard integration is not enabled")));
-                    }
                     if !self.agent_runtime.owned_run_ids().is_empty()
                         || !self.pending_agent_starts.is_empty()
                         || !self.pending_agent_cancels.is_empty()

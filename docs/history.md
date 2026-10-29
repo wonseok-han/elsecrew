@@ -2,6 +2,14 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 승인된 시험 앱 종료/임시 파일 정리로 진척이었다. d89ae0d 기준 최신 Rust debug/renderer로 자체 X34law 합동 UI를 실행했다. 앱 기본 역할 저장→신규 프로젝트 상속→프로젝트 역할 저장/재열기→채팅 생성→FakeExact Claude actual adapter→reviewReady→동의 후 discard→작업대 해제→chat.get discarded/메시지 보존/원본 불변이 PASS다. 실제 공급자·인증·과금은 없다.
+- Electron 시험 프로세스 exit0/shutdown accepted와 DB app_instances PID54429 clean_shutdown_at=2026-10-29T07:25:15Z, 프로세스 부재를 확인했다. .artifacts/m5-project-ui/X34law에 result/console/screenshot/cleanup을 보존하고 자체 임시 원본·프로필은 삭제했다.
+- 독립 검토자가 normal discard의 임시 gate 제거에 차단 결함 없음으로 마감했다. 지정된 Rust fixture/test gate 및 renderer fixtureAvailable 조건을 제거하고 불필요한 is_fixture_runtime helper도 삭제했다. 따라서 다음 빌드부터 일반 reviewReady 대화에도 표시되며 native owner/보류 start/cancel, 전체 주소/revision/종료 증거/recovery/writer/manifest 검사를 그대로 거친다. 일반 설치 패키지는 아직 교체하지 않았다.
+- gate 제거는 직접 diff 검토와 diff check를 통과했다. 위 통합 PASS는 제거 직전의 동일 core/가짜 actual adapter 경로이며 정상 non-fixture runtime의 별도 admission smoke는 아직 남는다. 이를 실제 공급자/원본 반영/전체G6 증거로 보지 않는다.
+- 다음: 레거시 데모 start/cancel wire 정합성 및 G5A raw event 분리, 새 기능 파동의 누적 검증. G6 메모리/가림·실제 공급자 전체·Windows·출시 미완료, 목표 active. main병합/push없음.
+
+### 2026-10-29 · by Codex
+
 - 사용자가 시험 앱 PID47863 종료·정리를 승인했다. 실행 경로와 시작 시각(Thu Oct 29 16:19:17 2026)을 다시 대조하고 sidecar 자식이 없음을 확인한 뒤 해당 Electron만 SIGKILL했다. 소유 PID47863/47885/47886/47887이 모두 사라진 것을 확인했다.
 - P3dUJc의 JSON/화면/console 로그를 .artifacts/m5-project-ui/P3dUJc에 보존하고 자체 임시 프로젝트·앱 프로필을 삭제했다. cleanup.json의 removed=true/remainingPids=[]를 확인했다. 사용자 앱·인증·프로젝트는 변경하지 않았다.
 - 다음은 e5da38d fixture-only 경로를 다시 빌드하고 가짜 actual 공급자로 합동 시험을 진행하는 것이다. legacy 데모 wire 정합성 수정과 G6/공급자 전체/Windows/출시도 계속 남는다. 이번 승인은 해당 시험 앱 한 건에만 적용하며 새 강제 종료 승인을 뜻하지 않는다.
@@ -90,6 +98,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **2026-10-29 일반 discard 연결**: X34law FakeExact actual adapter의 sidecar–작업대 합동 PASS와 독립 검토 뒤 임시 gate를 제거했다. 실제 공급자/일반 설치 패키지/전체G6 합격은 별도다. 기존 gated 체크포인트 기록은 당시 상태로 보존한다.
 
 - **2026-10-29 앱 기본 역할 경계**: 앱 기본값은 프로젝트 role_settings 최초 초기화 때만 복사한다. 기존 프로젝트·chat roleSnapshots에는 소급하지 않으며, 기본값 파일이 손상돼도 이미 초기화한 프로젝트는 독립적으로 사용한다. 실제 모델 가용성은 계속 실행 전 별도 검증한다.
 

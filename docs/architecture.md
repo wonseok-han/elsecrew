@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> 일반 작업 복사본 버리기: `reviewReady` 대화에서 명시 동의 후 해당 snapshot을 abandoned/chat을 discarded로 마감한다. 원본·대화·복사본 파일은 삭제하지 않는다. 종료 증거, writer/recovery/준비 중 작업, 주소/manifest 신원과 revision을 재검증한다. 완료 receipt로 응답 유실을 재개하고 releaseView를 확인한 뒤 편집/대화 화면을 해제한다.
+
 > 앱 기본 역할: 작업대의 `앱 기본 역할·모델`에서 저장한 세 역할은 앱 데이터의 `application-settings-v1/role-defaults.json`에 revision과 함께 원자 저장한다. 프로젝트 역할 설정을 처음 만들 때만 복사하며, 기존 프로젝트 설정과 채팅 생성 snapshot은 변경하지 않는다. `project.catalog`의 `getAppRoleDefaults`/`updateAppRoleDefaults`는 기존 역할 계약과 expected revision을 검사한다. 기본값 파일이 손상되면 임의의 값으로 덮지 않고 오류를 돌려주며, 이미 설정된 프로젝트는 해당 파일을 읽지 않는다.
 
 > **G6 명령 연결(2026-10-22)**: `m5:test:performance`는 기존 측정 판정기를 `.artifacts/m5-performance/measurement.json`에 연결한다. 아래의 명령 미완성 설명 중 등록 부재는 해소됐지만 전체 실측 collector는 여전히 미완성이다. 누락/부분 진단/불일치 HEAD는 합격시키지 않으며 하네스 목록의 COMMANDS_READY는 명령 등록 상태만 뜻한다.
