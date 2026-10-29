@@ -2211,6 +2211,28 @@ fn text_candidate_cases_with_output(
                     }
                 );
                 let args = fs::read_to_string(&native_argv).unwrap();
+                // Independently enumerate both launch roots and every ancestor;
+                // do not relax the exact argv assertion for invocation isolation.
+                let workspace = std::path::Path::new(snapshot["worktreePath"].as_str().unwrap());
+                let mut paths = std::collections::BTreeSet::new();
+                for root in [&home, workspace] {
+                    for ancestor in root.ancestors() {
+                        paths.insert(ancestor.to_str().unwrap());
+                    }
+                }
+                let entries = paths
+                    .iter()
+                    .map(|path| {
+                        format!(
+                            "{}={{trust_level=\"untrusted\"}}",
+                            serde_json::to_string(path).unwrap()
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let isolation = format!("projects={{{entries}}}");
+                let actual_args = args.lines().collect::<Vec<_>>();
+                assert_eq!(&actual_args[actual_args.len() - 2..], ["-c", isolation.as_str()]);
                 if writer {
                     assert!(args.contains("sandbox_mode=\"workspace-write\"\n"));
                     for setting in [
@@ -2244,6 +2266,8 @@ fn text_candidate_cases_with_output(
                             "features.apps=false",
                             "-c",
                             "features.plugins=false",
+                            "-c",
+                            isolation.as_str(),
                         ]
                     );
                 }

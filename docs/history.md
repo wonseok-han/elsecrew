@@ -2,6 +2,12 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 저장 경합/종료 원시 증거 재확보로 진척이다. 메인이 기본 ignored인 `text_candidate_os_isolated_` 두 native/proxied lifecycle 검사를 임시 toy CLI·OS sandbox·loopback으로 실행했다. 최초 두 실패는 새 projects 격리 인자가 argv 기대값에 빠진 테스트 불일치였다. 프로필/작업 복사본과 모든 상위 경로를 독립 BTreeSet으로 열거해 untrusted 값과 마지막 -c 인자를 정확히 대조하도록 보완했다. 쓰기 역할에도 같은 격리 인자 대조를 적용하며 제품 실행 인자를 완화하지 않았다.
+- 수정 후 두 OS 격리 검사 PASS(19.51초), diff 검사 PASS. 원시 실패/성공 로그는 `.artifacts/m5-integration/2026-10-29`에 보존한다. 실제 Codex/Claude 계정·외부 모델·사용자 프로젝트는 사용하지 않았다.
+- 사용자가 약20분 이상의 시험 창 유지 가능을 응답했다. 다음은 clean commit에서 화면 반복 측정을 재개하는 것이다. 전체 G6/실제 공급자/Windows/출시는 미완료, main 병합/push 없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 누적 기본 회귀와 stdio 기대값 수정 `dfc4da8`으로 진척이다. 별도 저장 경합/종료 검증의 과거 jC3LIR/VW49d5 원시 경로를 확인했지만 파일이 없었고 `.artifacts`에서도 해당 증거를 찾지 못했다. 과거 통과 기록을 삭제하지 않고 현재 HEAD에서 기존 수집기 두 개만 재실행했다.
 - `node scripts/m5-save-race-metrics.mjs`: eGGN8F, native release 시험 exit0; 경합100/정상 대조100, 외부 덮어쓰기·미보고 충돌·교차 채팅 쓰기 모두0, 정상 종료. 자체 fixture c4v5Vj 부재를 확인했다. `--termination`: qy3uhm, 두 시험 exit0; clean/uncertain 각각 관측 자손2·별도 세션 자손1·관측 생존0·정상 종료이며 uncertain만 불확실 상태를 보고했다.
 - 두 수집기는 제한된 synthetic native 진단이라 NOT_READY/exit2를 유지한다. 실제 공급자, 독립적으로 재부모화된 모든 orphan, UI 저장 경합, 전체 G6 합격으로 확대하지 않는다. 새 코드 변경이나 제품 활성화는 없다.
