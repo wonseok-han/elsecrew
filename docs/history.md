@@ -2,6 +2,14 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 별도 QA 패키지 연결 `01179a7`과 첫 visible12,000출력 진단 PASS로 진척이다. 이번에는 모든 persisted row의 run 결속/sequence/event ID를 대조하고 각 run의 pre-write timestamp·60초 내 건수·최대 간격/예정 대비 지연을 요약하는 계측을 연결했다. 늦게 도착한 전체 기록을60초 성공으로 바꾸지 않는다. head 알림 수와 실제 row 수는 구분한다.
+- 요약기 정상/지연·누락/중복run/중복event/sequence/시계역행 회귀2개 PASS, JS문법/diff PASS. 이 timestamp는 fixture stdout write 직전 값이며 commit/수신/paint 시간이 아니다. 전체 수신 지연·10회 gate를 대체하지 않는다.
+- 첫 빌드 WqkdIx는 제한 환경 fetch 실패로 앱 실행 전에 중단됐다. 허용 환경 yhi9od 빌드는 성공했지만 실행 PID59994/session33078은 제품 main 전에 오류 dialog에서 정지했다. OS sample에서 NSAlert modal을 확인했고 CUA 접근도 timeout이었다. 별도 창 없는 Electron API 시험으로 logs만 `/var`→`/private/var` canonical 경로로 반환됨을 확인했다. 이전 문자열 assert가 같은 폴더를 거절한 결함이다. 세 경로를 realpath 대조하도록 수정했다.
+- 정확 실행경로·자손 없음·fixture DB/result 미생성을 확인한 뒤 PID59994에 SIGTERM만 보냈고 exit143/부재를 확인했다. 실패는 PASS로 바꾸지 않는다. WqkdIx/yhi9od QA 산출물과 TgzQtP 빈 시험 root를 정리하고 작은 증거를 `.artifacts/m5-packaged-output-qa/startup-path-failure`에 보존했다. 실제 공급자·사용자 DB·강제 SIGKILL 없음.
+- 다음은 경로 정규화 수정과 전체 행 계측을 합친 QA 재실행이다. 이번 변경은 구현 체크포인트이며 보완된 packaged 실행은 아직 미검증이다. G6/실제 공급자 전체/Windows/출시 미완료. main 병합/push 없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 QA feature/제품 staging 차단 `12994cc` 구현·검토 완료로 진척이다. 메인이 별도 `m5-package-output-qa.mjs`를 연결했다. explicit feature release Cargo 산출물을 확인/복사하고 fresh main/preload/renderer와 고정 QA entrypoint를 임시 앱으로 패키징한다. 일반 out·제품 main·런타임 설정은 바꾸지 않는다.
 - 기존 개발 출력 smoke를 함수로 재사용하되 QA는 app.isPackaged 일치·정확 resource sidecar 경로·원래 --stdio 인자·고유 임시 cwd를 대조한 뒤 고정 paced fixture를 실행한다. 실제 모델/사용자 인증 없이 동일 공개 bridge와 원장·화면을 통과한다. QA는 제품과 binary/fuse/signing 구성이 다르므로 diagnostic/gateEligible:false를 유지한다.
 - 로컬 packager export(named) 오류를 수정한 뒤 Q5WuJQ 빌드 PASS. 첫 패키지 실행 IpAsmv/session42122은 PASS/exit0·4채팅12,000출력·history/latest조회·전체 visible·정상 종료였다. live506표본 p9516.30ms/max159.70ms, superseded30/interrupted6, peakRSS538.27MiB. 정확 head 일부 표본·QA 단회이며 전체 event paint100ms/10회/G6 합격이 아니다.

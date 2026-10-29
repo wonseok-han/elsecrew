@@ -9,6 +9,7 @@ const assert = require('node:assert/strict');
 const { installOutputObserver } = require('./m5-durable-output-observer.cjs');
 const { createLiveOutputLatency } = require('./m5-live-output-latency.cjs');
 const { observeStdio } = require('./m5-stdio-observer.cjs');
+const { summarizeOutputGeneration } = require('./m5-output-generation.cjs');
 if (process.platform !== 'darwin' || app.isPackaged !== packagedQa) throw new Error('Output diagnostic build mode differs');
 if (packagedQa) app.setName('Hello Agent Output QA');
 const live = packagedQa || process.argv.includes('--live');
@@ -32,9 +33,9 @@ const logs = path.join(root, 'logs');
 fs.mkdirSync(sessionData); fs.mkdirSync(logs);
 app.setPath('sessionData', sessionData);
 app.setAppLogsPath(logs);
-assert.equal(app.getPath('userData'), userData);
-assert.equal(app.getPath('sessionData'), sessionData);
-assert.equal(app.getPath('logs'), logs);
+assert.equal(fs.realpathSync(app.getPath('userData')), fs.realpathSync(userData));
+assert.equal(fs.realpathSync(app.getPath('sessionData')), fs.realpathSync(sessionData));
+assert.equal(fs.realpathSync(app.getPath('logs')), fs.realpathSync(logs));
 dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [source] });
 const report = { schemaVersion: 1, diagnostic: true, gateEligible: false, root, packagedQa,
   paced, live, liveWindows: [], status: 'RUNNING', shutdown: 'pending', restoredChats: [], scrollChecks: [],
@@ -213,7 +214,10 @@ app.on('browser-window-created', (_event, window) => {
             for (const row of page.rows) {
               const match = /^output ([0-9]+) \\[emitted_us=([0-9]+),unix_ms=([0-9]+)\\]$/.exec(row.event.text);
               if (!match || Number(match[1]) !== samples.length + 1) throw new Error('Paced fixture emission evidence differs');
-              samples.push([Number(match[1]),Number(match[2]),Number(match[3])]);
+              for (const key of ['runId','chatId','taskId','projectId','worktreeId','workspaceIdentity']) {
+                if (row.event[key] !== binding[key]) throw new Error('Output row crossed run binding');
+              }
+              samples.push([Number(match[1]),Number(match[2]),Number(match[3]),row.event.eventId,row.outputSequence]);
             }
           }
           if (samples.length !== 3000) throw new Error('Missing emission samples');
@@ -221,6 +225,7 @@ app.on('browser-window-created', (_event, window) => {
         }
         return generated;
       })()`);
+      if (paced) report.generationSummary = summarizeOutputGeneration(report.generation);
       report.outputObservation = await run('outputObservation.stop()');
       report.visibility = await run('document.visibilityState');
       report.visibilityTrace = await run('outputSmokeVisibility');
