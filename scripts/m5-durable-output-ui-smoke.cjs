@@ -293,10 +293,21 @@ app.on('browser-window-created', (_event, window) => {
         report.outputObservation = await run('globalThis.outputObservation?.stop() ?? null');
         report.failureView = await run(`(() => {
           const list = document.querySelector('.m5-output-scroll');
+          const last = list?.querySelector('article:last-child pre');
+          const boxes = [];
+          for (let node = last; node && boxes.length < 16; node = node.parentElement) {
+            const r = node.getBoundingClientRect(), style = getComputedStyle(node);
+            boxes.push({tag:node.tagName,className:node.className,
+              rect:{top:r.top,bottom:r.bottom,left:r.left,right:r.right,width:r.width,height:r.height},
+              scrollTop:node.scrollTop,scrollHeight:node.scrollHeight,clientHeight:node.clientHeight,
+              overflowX:style.overflowX,overflowY:style.overflowY});
+          }
           return {visibility:document.visibilityState,trace:globalThis.outputSmokeVisibility ?? [],
+            viewport:{width:innerWidth,height:innerHeight},boxes,
             scroll:list ? {top:list.scrollTop,height:list.scrollHeight,client:list.clientHeight,
               first:list.querySelector('article pre')?.textContent,last:list.querySelector('article:last-child pre')?.textContent} : null};
         })()`);
+        await fs.promises.writeFile(path.join(root, 'output.png'), (await window.webContents.capturePage()).toPNG());
       } catch (diagnosticError) { report.diagnosticError = diagnosticError.message; }
       finish(error);
     }

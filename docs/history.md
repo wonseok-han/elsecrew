@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- clean c70724b의 반복 QA eSjVnl(session48444)는 준비+본4회까지 visible/12,000출력/정상 종료를 통과했고, 본5회에서 `Latest live output is clipped`로 FAIL/exit1 종료했다. 실패 회차를 제외/재시도하지 않았으며 본6~10회는 미실행이다. 본1~4 최대지연61.3/56.4/51.1/66.9ms, peak최대622,264,320B였다. 단회 개선은 확인했지만 반복 전체 합격은 아니다.
+- 실패 회차의 세 번째 선택 채팅에서 마지막 관측frame은35,767.5ms/sequence1661, 검사39,371.4ms 시 head1838이었다. 창은visible이고 실패 당시 내부 scrollTop10577+client360=height10937로 내부 패널은 맨 아래였다. 부모 영역 가림/레이아웃 이동 여부는 현재 좌표 증거가 없어 미확정이며 자동 따라가기 코드 결함이라고 단정하지 않는다.
+- QA 실패 진단에 마지막 행부터 최대16개 상위 요소의 rect/scroll/overflow, viewport와 실패 스크린샷을 추가했다. 성공 경로/latency 계산/합격 기준에는 손대지 않았다. JS문법/diff PASS. 다음은 이 증거로 가림 원인을 재현·수정한 뒤 영향 UI 시험을 수행하는 것이다.
+- 전체6회 종료/fixture 정리 기록·관측PID부재를 확인한 뒤 QA 앱/중복 임시 증거를 삭제했다. `.artifacts/m5-packaged-output-qa/eSjVnl`에 실패 포함 원시결과/dispatch/log/정리기록을 보존했다. 실행 중 시험 앱 없음. 전체G6/실제공급자/Windows/출시 미완료, main병합/push없음.
+
+### 2026-10-29 · by Codex
+
 - clean79daaa9의 QA ymy2aV/47mkun(session44937) 단회 비교는 visible·12,000출력/history/latest·정상 종료 exit0을 통과했다. 정확 head 일부 표본560개 최대59.5ms, peak588,955,648B, interrupted3/superseded0이었다. 각 run pre-write stamps3,000개는60초 내였으며 모든 행 paint/전체G6 완료 증거는 아니다.
 - watch615회/누적5,280.020ms/최대25.321ms로 이전 단회25,446.368/143.593ms보다 감소했다. runtime누적10,929.646ms/최대59.796ms, request누적4,345.386ms/최대277.104ms(초기 작업 포함). 화면 지연은 이전202.4ms에서59.5ms로 줄었지만 반복 측정 전 일반화하지 않는다.
 - PID부재·DBclean 확인 뒤 임시 QA 앱/fixture를 정리했다. 원시 결과/PNG/dispatch/build/log/정리 증거는 `.artifacts/m5-packaged-output-qa/47mkun`이다. 다음은 같은 소스·한 QA 빌드의 준비1+본10 반복 수집이다. 전체G6/실제공급자/Windows/출시 미완료, main병합/push없음.
