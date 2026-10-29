@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 최근 출력 개선의 개발 GUI 통합 진단·시험 자료 정리로 진척이다. clean `68494dc`에서 실행 앱 부재를 package guard로 확인한 뒤 `pnpm m5:test:package`를 실행했다(session50688).
+- 결과 PASS/exit0. release sidecar·renderer·Electron 패키지·기본 sidecar 검사·ZIP/크기 검사가 완료됐다. 기존 out 앱/ZIP에 `10418d8` 출력 행 재사용과 `0a29557` head 중복 조회 제거가 반영됐다. 패키지 기준 HEAD는 `68494dc362e0ff2d888286587df14c2fd5bb0697`; 증거 `.artifacts/m5-g6-package/darwin-arm64-2026-10-28T23-59-32-435Z.json`, 로그 `/tmp/m5-package-68494dc.log`.
+- unpacked323,107,017B/compressed124,383,873B로 패키지 크기 기준 내다. 기존 fixture enum dead-code/renderer chunk 경고는 남으며 실행 실패는 아니다. 사용자 DB를 여는 앱 실행·실제 모델 호출·추가 시험 프로젝트 생성은 하지 않았다. target은 약2.8GiB, 작은 증거 모음은44MiB이며 임의 캐시 삭제 없이 기존 산출물을 갱신했다.
+- 다음은 미완성 정식 G6 수집 경로 연결이다. 패키지 PASS가 10회 화면/스트림/메모리·저장 경합·종료 안전 전체 증거를 대신하지 않는다. Windows·실제 공급자 전체·서명/출시 검증도 남는다. main 병합/push 없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 중복 head 조회 제거 `0a29557`과 관련 회귀·독립 검토 완료로 진척이다. 이 clean HEAD에서 debug sidecar 빌드(5.96초)와 M5 renderer 빌드(295ms)를 수행해 최근 두 성능 변경을 함께 반영했다. 빌드는 PASS이며 기존 큰 chunk 경고는 남는다.
 - `m5-durable-output-ui-smoke.cjs --live` 실제 개발 GUI 진단 EnCbCK/session56330은 정상 종료(exit0), functional PASS, 네 채팅 전체 12,000출력·history/latest 조회를 통과했다. 그러나 시작 약72.7초 뒤 hidden 전환으로 최종 `NOT_READY`다. exit0/기능 PASS를 화면 전체 PASS로 승격하지 않는다.
 - liveLatency 204표본 p95 236.60ms/max425.70ms, superseded110/interrupted20/dropped0/unfinished0, 진단 peakRSS568.11MiB. 이전 단회 GokfSG p95414.40/max508.10보다 관측값은 낮지만 표본·가시성 조건이 달라 인과적 개선폭/정식 G6 합격으로 주장하지 않는다. release 패키지·10회 전체 성능 증거도 아니다.
