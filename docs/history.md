@@ -2,6 +2,12 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 준비1+본10 화면 수집과141.3ms 초과 증거 확보로 진척이다. `2dfe6ea`에서 main이 수집기 오버헤드를 조사하고 live 구간의 전체 observer structuredClone을 cursor 기반 해당 run 신규 표본 읽기로 교체했다. 기존 전체 원시 trace는 stop 결과에 보존하며 invalid cursor·잘림 카운터·선택 전환/누락 처리와100ms 판정을 유지한다.
+- 구간 결과에 renderer 표본 읽기 `observationReadMs`와 main 동기 기록 `mainPersistMs`를 추가했다. crash breadcrumb인 중간 파일 기록을 제거하지 않았으며 해당 비용을 latency에서 빼거나 초과 표본을 제외하지 않는다. 제품 코드는 변경하지 않았다.
+- 신규 관측 회귀는 과거/다른 run 제외·원본 표본 불변·잘못된 cursor 거절·잘림 보존·종료 구독 해제를 확인한다. 기존 latency5+신규1=6 PASS, 두 스크립트 문법/diff PASS. 수정 후 실제 화면 수집은 미실행이므로 성능 개선/원인 확정을 주장하지 않는다. 다음 실제 비교에서 원시 지연과 두 오버헤드 값을 함께 확인한다. 전체 G6/실제 공급자/Windows/출시 미완료, main 병합/push 없음.
+
+### 2026-10-29 · by Codex
+
 - `8ed1fcf` clean checkout의 QA j3eXsH로 준비1회+본10회 연속 화면 수집(vXnICw/session81882)을 끝냈다. 11회 모두 visible 유지·각12,000 persisted row의 ID/순서/결속 대조·history/latest·정상 종료를 통과했다. 각 run의 pre-write stamp 3,000개도60초 안에 수집됐으며 실제 commit/모든 행 paint deadline을 증명하는 값은 아니다.
 - 본10회 정확 head 일부 표본의 회차별 최대 latency는141.3/116.1/25.6/112.5/138.7/124.8/104.7/64.5/67.7/67.4ms였다. 최대141.3ms가100ms를 넘어 series FAIL/exit1이다. 전체 process-tree sampled peak는578.625MiB로800MiB 미만이지만 idle/retained/full G6 증거는 아니다. superseded/interrupted 표본을0으로 만들거나 모든 row paint로 확대하지 않는다.
 - 100ms 초과 표본은 모두 각12초 live 관측 종료 시점의 약56~168ms 이내였다. 해당 경계에서는 전체 observer snapshot structuredClone·관측 결과 직렬화·main의 동기 persist·채팅 전환이 일어나므로 제품 자체 지연이라고 단정하지 않는다. 다음은 이 경계의 수집 오버헤드를 줄이거나 분리 계측한 뒤 원인을 검증하는 것이다. 기존 초과 결과는 그대로 보존한다.

@@ -242,3 +242,5 @@ clean checkout에서 `node scripts/m5-repeat-output-qa.mjs`를 실행하면 QA �
 결과는 임시 `hello-agent-output-series-*`의 series.json과 trial별 JSON/PNG/log에 남는다. 각 fixture는 정상 종료 응답, 관측 PID 부재, DB clean 표시를 대조한 뒤에만 삭제한다. 종료가 불명확하면 앱을 강제 종료하지 않고 QA 패키지와 fixture를 보존한다. 확실히 종료한 fixture는 측정 실패에도 정리하고 작은 증거를 남긴다. QA 패키지는 모든 회차와 집계가 NOT_READY로 끝난 경우에만 자동 정리한다. 실패·중단 때는 원인 확인을 위해 패키지와 build.json을 보존한다.
 
 이 수집기는 QA artifact·표본 live latency·생성 timestamp·샘플 RSS 진단이다. 모든 행 receipt/paint·닫기 후 retained memory·다른 G6 workload를 대체하지 않으며 기준 이내여도 NOT_READY/exit2다. 관측 실패나 집계 기준 초과는 FAIL/exit1이다.
+
+QA live 구간의 시작은 배열 길이 cursor만 보관하고 종료 때 해당 run의 새 head/frame만 읽는다. 누적 trace 전체와 latency 표본은 종료 시 원시 결과에 남기며, 읽기 비용 `observationReadMs`와 main의 동기 기록 비용 `mainPersistMs`를 각 live 구간에 별도 기록한다. 이 시간은 원래 latency에서 빼지 않는다. cursor 이후 누락/잘림 카운터도 유지하며 변경 전 초과 결과를 무효화하지 않는다.

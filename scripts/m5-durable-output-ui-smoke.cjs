@@ -184,17 +184,21 @@ app.on('browser-window-created', (_event, window) => {
         await run("document.querySelector('.m5-output-scroll').scrollIntoView({block:'end',inline:'nearest'})");
         const observation = await run(`(async () => {
           const runId = outputSmokeRuns[${index}].runId;
-          const before = outputObservation.snapshot();
+          const before = outputObservation.mark();
           const startedAt = performance.now();
           await new Promise(resolve => setTimeout(resolve, 12000));
-          const after = outputObservation.snapshot();
-          const heads = after.heads.slice(before.heads.length).filter(row => row.runId === runId);
-          const frames = after.frames.slice(before.frames.length).filter(row => row.runId === runId);
-          return {runId,startedAt,endedAt:performance.now(),heads,frames,
+          const endedAt = performance.now();
+          const readStartedAt = performance.now();
+          const after = outputObservation.readWindow(before, runId);
+          const observationReadMs = performance.now() - readStartedAt;
+          return {runId,startedAt,endedAt,observationReadMs,heads:after.heads,frames:after.frames,
             latestVisible:outputObservation.latestVisible(),visibility:document.visibilityState,
             droppedHeads:after.droppedHeads,droppedFrames:after.droppedFrames};
         })()`);
-        report.liveWindows.push(observation); persist();
+        report.liveWindows.push(observation);
+        const persistStartedAt = performance.now();
+        persist();
+        observation.mainPersistMs = performance.now() - persistStartedAt;
         assert.equal(observation.visibility, 'visible', 'Live window became hidden');
         assert.equal(observation.droppedHeads, 0, 'Live head observations truncated');
         assert.equal(observation.droppedFrames, 0, 'Live frame observations truncated');

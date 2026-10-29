@@ -69,7 +69,20 @@ function installOutputObserver(createLiveOutputLatency) {
   document.addEventListener('scroll', observe, true);
   document.addEventListener('change', observe, true);
   return {
-    snapshot: () => structuredClone({ ...result, liveLatency: latency.snapshot() }),
+    mark: () => ({ heads: result.heads.length, frames: result.frames.length }),
+    readWindow(mark, runId) {
+      if (!mark || !Number.isSafeInteger(mark.heads) || !Number.isSafeInteger(mark.frames)
+        || mark.heads < 0 || mark.frames < 0 || mark.heads > result.heads.length || mark.frames > result.frames.length) {
+        throw new Error('Invalid output observation cursor');
+      }
+      // Rows are append-only. Copy only this run's new samples, not the entire
+      // accumulated trace or unrelated live-latency history on the renderer.
+      return {
+        heads: result.heads.slice(mark.heads).filter(row => row.runId === runId).map(row => ({...row})),
+        frames: result.frames.slice(mark.frames).filter(row => row.runId === runId).map(row => ({...row})),
+        droppedHeads: result.droppedHeads, droppedFrames: result.droppedFrames,
+      };
+    },
     latestVisible: () => visible(document.querySelector('.m5-output-scroll article:last-child pre')),
     stop() {
     stopped = true; off(); observer.disconnect();
