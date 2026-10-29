@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 수집기 cursor 읽기/오버헤드 계측 `f1b6736` 구현으로 진척이다. clean HEAD의 QA5mLLQX를 단회 WlKYbJ/session93223으로 실행해 visible·12,000출력/전체 조회 대조·정상 종료/exit0을 확인했다. 이는 기능 smoke PASS이며 latency 기준 합격이 아니다.
+- renderer 관측 읽기0.1~0.2ms, main 동기 기록0.40~0.94ms였지만 정확 head 표본 최대133.4ms, 다음119.7ms로 기준을 넘었다. 전체 snapshot 복사가 주원인이라는 가설은 이 결과로 뒷받침되지 않는다. 초과는 각각 이전 선택 채팅 live 구간 종료 뒤 새 채팅으로 바뀌기 전 표본이었다. latency에서 이 값을 제외하지 않는다.
+- 같은 실행 transport 진단 최대는 workspace.diff.getSummary130.42ms, workspace.file.watch93.61ms, chat.get91.61ms, agent.outputHead128.38ms/outputPage147.60ms였다. 공유 sidecar에서 전환 요청과 출력 조회가 대기하는 경로가 다음 조사 대상이며, 집계 최댓값만으로 정확 인과를 확정하지 않는다.
+- 관측 PID 부재·DB clean을 검증하고 QA 앱/fixture를 제거했다. 원시 JSON/PNG/build/log/정리 증거는 `.artifacts/m5-packaged-output-qa/WlKYbJ`에 보존했다. 다음은 채팅 전환 중 diff/출력 요청 대기 비용 조사다. 제품 변경 없음, 전체 G6/실제 공급자/Windows/출시 미완료. main 병합/push 없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 준비1+본10 화면 수집과141.3ms 초과 증거 확보로 진척이다. `2dfe6ea`에서 main이 수집기 오버헤드를 조사하고 live 구간의 전체 observer structuredClone을 cursor 기반 해당 run 신규 표본 읽기로 교체했다. 기존 전체 원시 trace는 stop 결과에 보존하며 invalid cursor·잘림 카운터·선택 전환/누락 처리와100ms 판정을 유지한다.
 - 구간 결과에 renderer 표본 읽기 `observationReadMs`와 main 동기 기록 `mainPersistMs`를 추가했다. crash breadcrumb인 중간 파일 기록을 제거하지 않았으며 해당 비용을 latency에서 빼거나 초과 표본을 제외하지 않는다. 제품 코드는 변경하지 않았다.
 - 신규 관측 회귀는 과거/다른 run 제외·원본 표본 불변·잘못된 cursor 거절·잘림 보존·종료 구독 해제를 확인한다. 기존 latency5+신규1=6 PASS, 두 스크립트 문법/diff PASS. 수정 후 실제 화면 수집은 미실행이므로 성능 개선/원인 확정을 주장하지 않는다. 다음 실제 비교에서 원시 지연과 두 오버헤드 값을 함께 확인한다. 전체 G6/실제 공급자/Windows/출시 미완료, main 병합/push 없음.
