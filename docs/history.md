@@ -2,6 +2,12 @@
 
 ### 2026-10-29 · by Codex
 
+- 사용자가 시험 앱 PID47863 종료·정리를 승인했다. 실행 경로와 시작 시각(Thu Oct 29 16:19:17 2026)을 다시 대조하고 sidecar 자식이 없음을 확인한 뒤 해당 Electron만 SIGKILL했다. 소유 PID47863/47885/47886/47887이 모두 사라진 것을 확인했다.
+- P3dUJc의 JSON/화면/console 로그를 .artifacts/m5-project-ui/P3dUJc에 보존하고 자체 임시 프로젝트·앱 프로필을 삭제했다. cleanup.json의 removed=true/remainingPids=[]를 확인했다. 사용자 앱·인증·프로젝트는 변경하지 않았다.
+- 다음은 e5da38d fixture-only 경로를 다시 빌드하고 가짜 actual 공급자로 합동 시험을 진행하는 것이다. legacy 데모 wire 정합성 수정과 G6/공급자 전체/Windows/출시도 계속 남는다. 이번 승인은 해당 시험 앱 한 건에만 적용하며 새 강제 종료 승인을 뜻하지 않는다.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 6db300b 앱 기본 역할 구현으로 진척이었다. 이번에는 실제 sidecar–작업대 기본값/버리기 합동 시나리오를 scripts/m5-project-ui-smoke.cjs의 HELLO_AGENT_SMOKE_DISCARD에 추가했다. 앱 기본값 저장→새 프로젝트 상속→대화 생성→가짜 공급자 실행→버리기→기록/원본 보존을 검사한다. 명시 fake runtime과 fixture UI에만 discard를 열었고 일반 native 제품 gate는 유지한다.
 - 앱 기본값 회귀 1 PASS(재시작·revision 충돌·신규 프로젝트만 반영·손상 파일과 기존 프로젝트 독립성). Rust debug 및 Electron/renderer 개발 산출물을 빌드했다. 독립 검토는 처음 file CAS 경합 P1을 제기했으나 제품의 고정 cwd/DB 이름·Storage EXCLUSIVE 소유·단일 dispatcher를 재확인하고 철회했다. 이 전제가 바뀌면 별도 cross-process lock이 필요하다는 코드 주석을 추가했다. 새로운 제품 경로 차단 결함은 없으나 통합 증거는 남는다.
 - 첫 합동 UI P3dUJc는 앱 기본값 저장/프로젝트 상속/역할 편집까지 진행한 뒤 legacy demo start 응답({run,streamId})과 Electron의 RunRecord 기대 불일치로 FAIL했다. G5A 모드가 raw fixture event를 거절하는 경계도 있으므로 이 시험은 현재 계약에 맞는 FakeExact Claude actual 경로로 수정했다. legacy 데모 wire 정합성 결함은 별도 후속으로 남겼으며 고쳤다고 주장하지 않는다. 실제 Claude·Codex/계정/비용 호출은 없다.
