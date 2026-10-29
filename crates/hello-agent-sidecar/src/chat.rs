@@ -1,3 +1,4 @@
+mod discard;
 use crate::project::{ProjectFailure, ProjectManager, WorkspaceAddress};
 use crate::storage::{ChatBindInput, ChatBindOutcome, ProjectionUpsert, Storage};
 use crate::SidecarError;

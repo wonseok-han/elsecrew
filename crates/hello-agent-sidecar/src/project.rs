@@ -3208,6 +3208,16 @@ impl ProjectManager {
         storage: &Storage,
         address: &WorkspaceAddress,
     ) -> Result<ActiveProject, ProjectFailure> {
+        self.validate_workspace_address_binding_lifecycle(storage, address, "active")
+    }
+
+    // Only the discard retry path may validate an already terminal manifest.
+    fn validate_workspace_address_binding_lifecycle(
+        &self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+        lifecycle: &str,
+    ) -> Result<ActiveProject, ProjectFailure> {
         let chat = storage
             .projection_record("chat", &address.chat_id)?
             .ok_or_else(|| ProjectFailure::manifest("chat workspace binding is missing"))?;
@@ -3246,7 +3256,7 @@ impl ProjectManager {
                 ));
             }
         }
-        if manifest.get("lifecycle").and_then(Value::as_str) != Some("active") {
+        if manifest.get("lifecycle").and_then(Value::as_str) != Some(lifecycle) {
             return Err(ProjectFailure::recovery(
                 "chat workspace snapshot is not active",
             ));
@@ -3287,7 +3297,7 @@ impl ProjectManager {
             manifest_path: self.manifests_root.join(&manifest_name),
             lock_id: format!("lock_{}", address.worktree_id),
         };
-        if manifest != manifest_value(&active, "active")? {
+        if manifest != manifest_value(&active, lifecycle)? {
             return Err(ProjectFailure::manifest(
                 "workspace manifest is not the canonical snapshot identity",
             ));
@@ -3310,6 +3320,86 @@ impl ProjectManager {
             ));
         }
         Ok(active)
+    }
+
+    pub(crate) fn verify_discard_workspace(
+        &self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+    ) -> Result<Value, ProjectFailure> {
+        if self.application_running()
+            || self.preparation_cancel.is_some()
+            || !self.pending_saves.is_empty()
+        {
+            return Err(ProjectFailure::recovery(
+                "workspace discard requires idle saves and application processing",
+            ));
+        }
+        let project = required_project(storage, &address.project_id)?;
+        if project
+            .get("application_intent")
+            .is_some_and(|intent| intent["state"] != "abandoned")
+        {
+            return Err(ProjectFailure::recovery(
+                "workspace discard is blocked by an unfinished application",
+            ));
+        }
+        let manifest = read_bounded_json(
+            &self.manifests_dir,
+            &format!("{}.json", address.worktree_id),
+        )?;
+        let lifecycle = match manifest["lifecycle"].as_str() {
+            Some("active") => "active",
+            Some("abandoned") => "abandoned",
+            _ => {
+                return Err(ProjectFailure::recovery(
+                    "workspace discard lifecycle is unavailable",
+                ))
+            }
+        };
+        let active =
+            self.validate_workspace_address_binding_lifecycle(storage, address, lifecycle)?;
+        let lock = storage
+            .projection_record("lock", &active.lock_id)?
+            .ok_or_else(|| ProjectFailure::recovery("workspace discard lock missing"))?;
+        if lock.get("lock_id").and_then(Value::as_str) != Some(active.lock_id.as_str())
+            || lock.get("project_id").and_then(Value::as_str) != Some(address.project_id.as_str())
+            || lock.get("worktree_path").and_then(Value::as_str)
+                != Some(canonical_protocol_path(&active.worktree_path)?.as_str())
+            || lock.get("writer_run_id") != Some(&Value::Null)
+        {
+            return Err(ProjectFailure::recovery(
+                "workspace discard requires the exact unowned lock",
+            ));
+        }
+        let worktree = self.worktree_capability(&active)?;
+        self.verify_snapshot_repository(&worktree, &active)?;
+        Ok(manifest)
+    }
+
+    pub(crate) fn terminalize_discard_workspace(
+        &self,
+        address: &WorkspaceAddress,
+        expected_manifest: &Value,
+    ) -> Result<(), ProjectFailure> {
+        let name = format!("{}.json", address.worktree_id);
+        let mut manifest = read_bounded_json(&self.manifests_dir, &name)?;
+        if &manifest != expected_manifest {
+            return Err(ProjectFailure::dirty("workspace changed before discard"));
+        }
+        if manifest["lifecycle"] == "abandoned" {
+            return Ok(());
+        }
+        if manifest["lifecycle"] != "active" {
+            return Err(ProjectFailure::recovery("workspace cannot be discarded"));
+        }
+        manifest["lifecycle"] = Value::String("abandoned".into());
+        write_json_atomic(&self.manifests_dir, &name, &manifest)
+    }
+
+    pub(crate) fn finish_workspace_discard(&mut self, address: &WorkspaceAddress) {
+        self.watchers
+            .remove(&format!("workspace:{}", address.chat_id));
     }
 
     pub fn verify_workspace(
