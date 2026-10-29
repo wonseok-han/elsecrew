@@ -1,7 +1,7 @@
 // Development integration diagnostic, not packaged G6 or a provider-account test.
 // Requires current .vite/build, renderer and target/debug sidecar artifacts.
 function runOutputSmoke(packagedQa = false) {
-const { app, dialog } = require('electron');
+const { app, dialog, powerMonitor } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const cp = require('node:child_process');
@@ -79,10 +79,34 @@ const memoryTimer = setInterval(() => {
     else report.memory.truncated = true;
   } catch { report.memory.errors++; }
 }, 1000);
+// Observe native state without forcing focus, disabling throttling, or changing
+// the visibility-based acceptance rule. A visible native window may be occluded.
+report.windowState = { samples: [], dropped: 0 };
+let observedWindow;
+const nativeListeners = [];
+function sampleWindow(reason) {
+  if (report.windowState.samples.length >= 600) { report.windowState.dropped++; return; }
+  const window = observedWindow;
+  const state = { at: Date.now(), reason, destroyed: !window || window.isDestroyed() };
+  if (!state.destroyed) Object.assign(state, {
+    visible: window.isVisible(), minimized: window.isMinimized(),
+    focused: window.isFocused(), bounds: window.getBounds(),
+  });
+  report.windowState.samples.push(state);
+}
+function observeNative(emitter, event) {
+  const listener = () => sampleWindow(event);
+  emitter.on(event, listener);
+  nativeListeners.push(() => emitter.removeListener(event, listener));
+}
+const windowTimer = setInterval(() => sampleWindow('sample'), 1000);
 let finished = false;
 function finish(error) {
   if (finished) return;
   finished = true;
+  sampleWindow('finish');
+  clearInterval(windowTimer);
+  for (const remove of nativeListeners) remove();
   clearInterval(memoryTimer);
   report.transport = transportObserver?.stop();
   report.error = error?.message;
@@ -99,6 +123,10 @@ function finish(error) {
   app.quit(); // Preserve the normal termination gate; never force-kill a test.
 }
 app.on('browser-window-created', (_event, window) => {
+  observedWindow = window;
+  for (const event of ['show', 'hide', 'minimize', 'restore', 'focus', 'blur', 'closed']) observeNative(window, event);
+  for (const event of ['lock-screen', 'unlock-screen', 'suspend', 'resume']) observeNative(powerMonitor, event);
+  sampleWindow('created');
   window.webContents.once('did-finish-load', async () => {
     const run = code => window.webContents.executeJavaScript(code);
     const wait = async (predicate, timeout = 30000) => {
@@ -232,6 +260,7 @@ app.on('browser-window-created', (_event, window) => {
       await fs.promises.writeFile(path.join(root, 'output.png'), (await window.webContents.capturePage()).toPNG());
       finish();
     } catch (error) {
+      sampleWindow('assertion-failed');
       try {
         report.outputObservation = await run('globalThis.outputObservation?.stop() ?? null');
         report.failureView = await run(`(() => {

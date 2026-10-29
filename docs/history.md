@@ -2,6 +2,12 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 ROGraB의 visible→hidden 전환과 정상 종료/정리 증거를 확보한 진척이다. `e0fd888`에서 메인이 QA 화면 진단에 native 창 표시·최소화·포커스·bounds와 show/hide/blur/restore 및 OS lock/unlock/suspend/resume 이벤트를 추가했다. 최대 600개로 제한하고 종료 시 타이머·리스너를 해제한다. renderer visibility만으로 잠금 원인을 단정하지 않기 위한 진단이며 제품 창 설정·백그라운드 제한·합격 기준을 변경하지 않았다.
+- 반복 수집기의 실패 요약에도 원래 시험 오류를 포함해 `1 !== 0`만 보이던 문제를 보완했다. 두 스크립트 문법과 diff 검사 PASS. 실제 창 상태 이벤트의 패키지 실행은 아직 미검증이며 다음 화면 시험 때 수집한다. 사용자에게 화면 유지를 다시 요청하거나 실제 모델을 호출하지 않았다.
+- G6 성능·실제 공급자 전체·Windows·출시 검증은 계속 미완료다. 다음은 보완된 관측을 통한 숨김 원인 구분과 나머지 통합 검증이다. main 병합/push 없음.
+
+### 2026-10-29 · by Codex
+
 - 반복 수집기 `e4e0ba1`의 clean checkout에서 QA Jd1L00을 빌드하고 ROGraB 준비 회차를 실행했다. 화면은 처음 visible이었으나 renderer 시간 9,893.6ms에 hidden으로 전환되어 `Live window became hidden`으로 FAIL/exit1이었다. 측정 10회는 시작하지 않았고 자동 재시도하지 않았다. 화면 잠금이 원인이라고 단정할 증거는 없다.
 - 시험 앱 PID80016은 정상 종료 응답을 남겼다. 관측 PID 부재·임시 DB clean 종료 확인 후 fixture가 정리됐다. 실패 시 패키지 보존도 실제 확인했으며, 원시 결과·가시성 trace·빌드·정리 증거를 `.artifacts/m5-packaged-output-qa/ROGraB`에 보존한 뒤 PID 부재를 재확인하고 자체 QA 앱과 중복 임시 증거만 제거했다.
 - 다음은 native 창 가림/최소화 상태와 renderer visibility 변화를 함께 계측해 환경 차단 원인을 구분하는 것이다. 이번 실행은 성능 합격 증거가 아니다. 전체 G6·실제 공급자 전체·Windows·출시 검증은 미완료다. 실제 모델 호출·사용자 프로젝트 변경·main 병합·push 없음.

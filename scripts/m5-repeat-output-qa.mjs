@@ -92,7 +92,7 @@ try {
     try{const rows=db.prepare('SELECT clean_shutdown_at FROM app_instances').all();assert.ok(rows.length&&rows.every(row=>row.clean_shutdown_at));}finally{db.close();}
     fs.writeFileSync(path.join(destination,'cleanup.json'),JSON.stringify({root,observedPids:[...observed],cleanShutdown:true}));
     fs.rmSync(root,{recursive:true});trial.fixtureCleaned=true;persist();
-    assert.equal(termination.code,0);
+    assert.equal(termination.code,0, `Trial ${index}: ${result.error ?? result.status}`);
     trial.values=summarizeOutputTrial(result);sourceUnchanged();persist();
     console.log(JSON.stringify({stage:'TRIAL_FINISHED',index,values:trial.values}));
   }
