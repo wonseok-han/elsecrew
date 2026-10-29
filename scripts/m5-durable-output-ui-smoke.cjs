@@ -165,6 +165,15 @@ app.on('browser-window-created', (_event, window) => {
     try {
       window.show(); window.focus();
       await wait("document.visibilityState === 'visible' && window.m5?.version === 8");
+      await run(`globalThis.outputSmokeInput = {events:[],dropped:0};
+        const recordInput = event => {
+          if (!event.isTrusted) return;
+          if (event.type === 'keydown' && !['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key)) return;
+          if (outputSmokeInput.events.length >= 128) { outputSmokeInput.dropped++; return; }
+          outputSmokeInput.events.push({type:event.type,at:performance.now()});
+        };
+        for (const type of ['wheel','pointerdown','touchstart','keydown'])
+          document.addEventListener(type,recordInput,{capture:true,passive:true});`);
       await run(`globalThis.outputSmokeVisibility = [{state:document.visibilityState,at:performance.now()}];
         document.addEventListener('visibilitychange', () => outputSmokeVisibility.push({state:document.visibilityState,at:performance.now()}));`);
       await wait("[...document.querySelectorAll('button')].some(b => b.textContent === '프로젝트 선택' && !b.disabled)");
@@ -285,6 +294,7 @@ app.on('browser-window-created', (_event, window) => {
       report.outputObservation = await run('outputObservation.stop()');
       report.visibility = await run('document.visibilityState');
       report.visibilityTrace = await run('outputSmokeVisibility');
+      report.userInput = await run('outputSmokeInput');
       await fs.promises.writeFile(path.join(root, 'output.png'), (await window.webContents.capturePage()).toPNG());
       finish();
     } catch (error) {
@@ -304,6 +314,7 @@ app.on('browser-window-created', (_event, window) => {
           }
           return {visibility:document.visibilityState,trace:globalThis.outputSmokeVisibility ?? [],
             viewport:{width:innerWidth,height:innerHeight},boxes,
+            userInput:globalThis.outputSmokeInput ?? null,
             scroll:list ? {top:list.scrollTop,height:list.scrollHeight,client:list.clientHeight,
               first:list.querySelector('article pre')?.textContent,last:list.querySelector('article:last-child pre')?.textContent} : null};
         })()`);
