@@ -58,6 +58,30 @@ cp.spawn = function(command, args, options) {
     assert.equal(fs.realpathSync(options.cwd), fs.realpathSync(path.join(userData, 'com.wonseokhan.helloagent', 'm5')));
     assert.equal(child, undefined, 'unexpected second sidecar');
     child = Reflect.apply(spawn, this, [command, ['--stdio-agent-fixture', paced ? 'paced-long-stream' : 'long-stream'], options]);
+    if (packagedQa) {
+      // Copy only the fixed QA numeric summary, never arbitrary sidecar stderr.
+      let diagnosticTail = '';
+      child.stderr.on('data', chunk => {
+        diagnosticTail += chunk.toString('utf8');
+        let end;
+        while ((end = diagnosticTail.indexOf('\n')) !== -1) {
+          const line = diagnosticTail.slice(0, end); diagnosticTail = diagnosticTail.slice(end + 1);
+          if (/^QA_DISPATCH_TIMING \{/.test(line) && line.length <= 4096) {
+            try {
+              const value = JSON.parse(line.slice('QA_DISPATCH_TIMING '.length));
+              const phases = Object.fromEntries(['watch', 'runtime', 'request', 'maintenance'].map(name => {
+                const row = value.phases?.[name];
+                assert.ok(Array.isArray(row) && row.length === 3 && row.every(n => Number.isSafeInteger(n) && n >= 0));
+                return [name, row];
+              }));
+              fs.appendFileSync(path.join(root, 'dispatch-timing.log'), JSON.stringify({diagnostic:true, gateEligible:false,
+                units:'microseconds', columns:['count','total','maximum'], phases}) + '\n');
+            } catch { /* Missing/invalid diagnostics are never a timing PASS. */ }
+          }
+        }
+        if (diagnosticTail.length > 4096) diagnosticTail = '';
+      });
+    }
     transportObserver = observeStdio(child);
     child.once('close', (code, signal) => { report.sidecarExit = { code, signal }; persist(); });
     return child;

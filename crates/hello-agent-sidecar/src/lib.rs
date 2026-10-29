@@ -4,6 +4,7 @@
 
 mod agent_runtime;
 mod application_cancel;
+mod dispatch_timing;
 mod chat;
 mod project;
 #[cfg(target_os = "macos")]
@@ -335,6 +336,7 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
     runtime: agent_runtime::AgentRuntime,
 ) -> Result<(), SidecarError> {
     g4_platform_gate()?;
+    let mut timings = dispatch_timing::DispatchTiming::default();
     let mut sidecar = SidecarSession::new(sidecar_instance_id, runtime);
     let ready = EnvelopeV1::Event(sidecar.ready_event()?);
     let mut session = ProtocolSessionV1::default();
@@ -395,12 +397,12 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
             Err(RecvTimeoutError::Timeout) => {
                 last_runtime_poll = Instant::now();
                 sidecar.poll_admission();
-                let mut events = sidecar.poll_watch_events();
-                let (responses, runtime_events) = sidecar.poll_runtime_events()?;
+                let mut events = timings.measure("watch", || sidecar.poll_watch_events());
+                let (responses, runtime_events) = timings.measure("runtime", || sidecar.poll_runtime_events())?;
                 write_responses(&mut session, &mut output, responses)?;
                 events.extend(runtime_events);
                 write_events(&mut session, &mut output, events)?;
-                sidecar.maintenance_tick()?;
+                timings.measure("maintenance", || sidecar.maintenance_tick())?;
                 continue;
             }
             Err(RecvTimeoutError::Disconnected) => {
@@ -422,20 +424,21 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
                 "sidecar stdin accepts request envelopes only",
             ));
         };
-        let handled = sidecar.handle_request(request)?;
+        let handled = timings.measure("request", || sidecar.handle_request(request))?;
+        if sidecar.safe_to_quit() { timings.emit(); }
         write_responses(&mut session, &mut output, handled.response)?;
         write_events(&mut session, &mut output, handled.events)?;
         // A busy renderer must not starve agent/watch progression by keeping
         // recv_timeout from expiring. Preserve response-before-event ordering.
         if !sidecar.safe_to_quit() && last_runtime_poll.elapsed() >= runtime_poll_interval {
             last_runtime_poll = Instant::now();
-            let mut events = sidecar.poll_watch_events();
-            let (responses, runtime_events) = sidecar.poll_runtime_events()?;
+            let mut events = timings.measure("watch", || sidecar.poll_watch_events());
+            let (responses, runtime_events) = timings.measure("runtime", || sidecar.poll_runtime_events())?;
             write_responses(&mut session, &mut output, responses)?;
             events.extend(runtime_events);
             write_events(&mut session, &mut output, events)?;
         }
-        sidecar.maintenance_tick()?;
+        timings.measure("maintenance", || sidecar.maintenance_tick())?;
     }
 }
 

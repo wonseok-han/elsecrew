@@ -82,7 +82,7 @@ try {
     const result=JSON.parse(fs.readFileSync(path.join(root,'result.json'),'utf8'));
     assert.equal(result.root,root);
     const trial={index,warmup:index===0,termination,status:result.status};report.trials.push(trial);persist();
-    for(const name of ['result.json','output.png'])if(fs.existsSync(path.join(root,name)))fs.copyFileSync(path.join(root,name),path.join(destination,name));
+    for(const name of ['result.json','output.png','dispatch-timing.log'])if(fs.existsSync(path.join(root,name)))fs.copyFileSync(path.join(root,name),path.join(destination,name));
     // Cleanup is independent of whether the timing/visibility check passed.
     assert.equal(result.shutdown,'accepted','Uncertain shutdown; fixture retained');
     const observed=new Set([termination.pid,...result.memory.samples.flatMap(row=>row.processes.map(p=>p.pid))]);

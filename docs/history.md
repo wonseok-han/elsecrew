@@ -2,6 +2,12 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 diff 비교에서253.5ms 지연과 공용 dispatcher 조사를 남긴 진척이다. `eba6a33`에서 QA feature 전용 watch/runtime/request/maintenance 단계 시간 계측을 추가했다. 호출 결과·순서·오류 전파는 바꾸지 않고 숫자 count/total/max microseconds만 누적한다. 정상 종료 허용 시 stderr에 한 번 출력하며 일반 빌드에는 clock/map/출력이 없다.
+- QA 앱은 고정 prefix의 요약에서 허용된 네 phase의 비음수 정수3개만 검증·재직렬화해 자체 임시 dispatch-timing.log에 저장한다. 임의 stderr/요청 payload/경로를 보존하지 않는다. 반복 수집기는 이 작은 로그를 함께 보존한다. 로그 부재·파싱 실패를0이나PASS로 바꾸지 않는다.
+- QA feature/default cargo check 모두 PASS(3.80/3.53초), JS문법·신규Rust파일 포맷·diff 검사 확인. 실제 단계 시간 수집은 다음 clean QA 실행에서 확인하며, 제품 성능 개선이나 전체G6 완료로 주장하지 않는다. main 병합/push 없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 diff 두 bounded pipe 동시 drain `a25770e` 구현·검토로 진척이다. clean HEAD에서 QA19O0jY를 빌드하고 iXAuLA/session83607로 단회 비교했다. visible·12,000출력 대조·history/latest·정상 종료/exit0은 통과했지만 화면 지연 최대253.5ms/다음238.1ms로 기준을 넘었다. 단회 diff조회 최대108.99ms(이전130.42)만으로 개선을 확정하지 않는다.
 - 큰 지연은 이번에는 live 구간 중간에도 나타났다. outputHead 최대225.43ms/outputPage237.99ms, tree117.26ms/watch100.31ms/chat.get125.35ms였다. 따라서 전환 시 diff 대기만으로 원인을 제한할 수 없다. 코드상 stdio100ms poll에서 watcher의 전체 Git 검증/스캔을 동기 수행한 뒤 runtime 출력과 요청을 처리하는 경로를 확인했다. 다음 조사 대상은 이 공용 루프의 watcher/runtime/maintenance 시간 분리이며, 안전 검사를 캐시하거나 제거하는 결정을 내리지 않았다.
 - 관측 PID 부재·DB clean을 확인하고 자체 QA 앱과 fixture를 삭제했다. 원시 JSON/PNG/build/log/정리 증거는 `.artifacts/m5-packaged-output-qa/iXAuLA`에 보존했다. 제품 변경 추가 없음, 기존 성능 실패 유지. 전체 G6/실제 공급자/Windows/출시 미완료, main 병합/push 없음.
