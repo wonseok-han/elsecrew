@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 native 창 상태 진단 `49e9821` 구현으로 진척이다. clean HEAD의 QA mv216I/5Xk2Sw를 실행했다. 준비 회차는 약 10.36초에 잠시 hidden→visible, 약 50.18초에 다시 hidden이 되어 FAIL이었다. native 기록은 포커스 상실 후 hide 이벤트, visible:true/minimized:false이며 lock/unlock/suspend/resume 이벤트는 없었다. 가림 가능성을 시사하지만 원인을 확정하지 않는다. 측정 10회는 미실행이며 반복 재시도하지 않았다.
+- 정상 종료·관측 PID 부재·DB clean을 확인해 fixture를 정리했고, `.artifacts/m5-packaged-output-qa/5Xk2Sw`에 원시 기록과 빌드/정리 증거를 보존한 뒤 QA 앱과 중복 임시 로그를 삭제했다. 화면 유지 재요청 없이 독립 가능한 누적 회귀로 전환했다.
+- `npm test` 608/608 PASS(24.3초), `pnpm build` PASS. `CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 cargo test -p hello-agent-sidecar --locked`는 실행 중(session88297, `/tmp/m5-sidecar-49e9821.log`); 총 719개 중 장시간 3,000출력 테스트도 포함되어 아직 결과를 확정하지 않았다. 다음 턴은 이 동일 세션을 poll하고 실패가 있으면 수정한다. 중복 실행하지 않는다.
+- G6 화면 성능·실제 공급자 전체·Windows·출시 검증은 미완료다. 실제 모델·사용자 프로젝트·main 병합·push 없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 ROGraB의 visible→hidden 전환과 정상 종료/정리 증거를 확보한 진척이다. `e0fd888`에서 메인이 QA 화면 진단에 native 창 표시·최소화·포커스·bounds와 show/hide/blur/restore 및 OS lock/unlock/suspend/resume 이벤트를 추가했다. 최대 600개로 제한하고 종료 시 타이머·리스너를 해제한다. renderer visibility만으로 잠금 원인을 단정하지 않기 위한 진단이며 제품 창 설정·백그라운드 제한·합격 기준을 변경하지 않았다.
 - 반복 수집기의 실패 요약에도 원래 시험 오류를 포함해 `1 !== 0`만 보이던 문제를 보완했다. 두 스크립트 문법과 diff 검사 PASS. 실제 창 상태 이벤트의 패키지 실행은 아직 미검증이며 다음 화면 시험 때 수집한다. 사용자에게 화면 유지를 다시 요청하거나 실제 모델을 호출하지 않았다.
 - G6 성능·실제 공급자 전체·Windows·출시 검증은 계속 미완료다. 다음은 보완된 관측을 통한 숨김 원인 구분과 나머지 통합 검증이다. main 병합/push 없음.
