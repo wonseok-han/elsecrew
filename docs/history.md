@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 누적 기본 회귀와 stdio 기대값 수정 `dfc4da8`으로 진척이다. 별도 저장 경합/종료 검증의 과거 jC3LIR/VW49d5 원시 경로를 확인했지만 파일이 없었고 `.artifacts`에서도 해당 증거를 찾지 못했다. 과거 통과 기록을 삭제하지 않고 현재 HEAD에서 기존 수집기 두 개만 재실행했다.
+- `node scripts/m5-save-race-metrics.mjs`: eGGN8F, native release 시험 exit0; 경합100/정상 대조100, 외부 덮어쓰기·미보고 충돌·교차 채팅 쓰기 모두0, 정상 종료. 자체 fixture c4v5Vj 부재를 확인했다. `--termination`: qy3uhm, 두 시험 exit0; clean/uncertain 각각 관측 자손2·별도 세션 자손1·관측 생존0·정상 종료이며 uncertain만 불확실 상태를 보고했다.
+- 두 수집기는 제한된 synthetic native 진단이라 NOT_READY/exit2를 유지한다. 실제 공급자, 독립적으로 재부모화된 모든 orphan, UI 저장 경합, 전체 G6 합격으로 확대하지 않는다. 새 코드 변경이나 제품 활성화는 없다.
+- 두 원시 measurement.json/cargo.log를 `.artifacts/m5-integration/2026-10-29/hello-agent-save-race-metrics-eGGN8F` 및 `hello-agent-termination-metrics-qy3uhm`에 복사 보존했다. collector 정상 종료와 임시 폴더가 증거 파일 두 개만 포함함을 확인한 뒤 중복 임시 증거 폴더만 삭제했다. 다음은 G6 전체 화면/메모리 수집, 실제 공급자 전체, Windows/출시의 남은 증거다. main 병합/push·사용자 프로젝트/인증 변경 없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 프런트 608개/빌드 PASS와 Rust 누적 실행 시작으로 진척이다. 같은 session88297을 이어 확인했다. 라이브러리 676 PASS/0 FAIL/43 ignored(1065.58초), 별도 테스트 target 2 ignored였다. stdio 실행 파일 통합 검사는 14 PASS/2 FAIL/1 ignored로 끝났다. 장시간 Codex 형태 가짜 프로세스 3,000출력과 4run 12,000출력 라이브러리 회귀도 통과했다. 실제 공급자 검증은 아니다.
 - 두 실패는 일반 --stdio ready의 기대 capability 목록에서 승인·활성화된 `agent.outputHead`/`agent.outputPage`를 빠뜨린 테스트 불일치였다. `lib.rs`의 공통 광고 목록과 이미 갱신된 fixture 기대값을 확인하고 두 일반 실행 테스트를 맞췄다. 제품 코드·권한·기능 광고는 변경하지 않았다. touched test 파일의 기존 rustfmt 차이도 정리했고 하위 support 파일은 변경하지 않았다.
 - 영향받은 `cargo test -p hello-agent-sidecar --locked --test stdio_process` 재실행은 16 PASS/0 FAIL/1 ignored(50.98초). ready/quit·G4 읽기/종료와 binary 3,000출력/4chat 12,000출력 paging 포함이다. 수정 파일 rustfmt(skip_children)/diff 검사 PASS. 동일 라이브러리 검사를 다시 실행하지 않고 앞 결과를 재사용한다. 기본 전체 명령의 첫 실행은 실패였고, 수정 후 영향 target이 통과했다는 범위를 유지한다.
