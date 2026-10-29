@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 가림 진단 보완·추가3회 미재현 증거 확보로 진척이었다. cleanadba8b0 진단 QA qZBrhv/XjZFoI(session12433)는 visible·12,000출력·정상종료, 표본최대31ms였고 trusted입력0/dropped0을 실제 수집했다. 가림 원인은 여전히 미확정이며 과거 실패를 해소하지 않았다. PID/DB 확인 뒤 임시 QA 앱/fixture를 정리했다.
+- 같은 소스에서 `pnpm m5:test:package` PASS(session73991). 일반앱/ZIP에 watcher 비동기화가 반영됐다. 패키지323,155,497B·ZIP124,392,729B, `.artifacts/m5-g6-package/darwin-arm64-2026-10-29T02-21-44-827Z.json`에 provenance/smoke/크기 증거를 보존한다. 서명/공증/출시 또는 전체G6 합격은 아니다.
+- 최신 일반 패키지 `--project` 시험(eXYmoB/session58111)은 초기·재시작 모두 정상종료했다. 편집/저장/diff·재시작 저장내용·반영취소 원본보존·별도동의 반영/복원 exact bytes·두 프로젝트 파일/채팅 격리·원래채팅 재열기를 확인했다. 그러나 CDP진단 유휴RSS461,733,888/482,689,024B가400MiB를 넘어 전체FAIL/exit1을 유지한다. 기능 성공으로 메모리 실패를 덮지 않는다.
+- 원시 증거는 `.artifacts/m5-packaged-output-qa/XjZFoI` 및 `.artifacts/m5-packaged-ui/eXYmoB`다. 관측PID부재·DBclean 대조 후 임시앱/fixture를 삭제했고 일반out앱/ZIP만 유지한다. 다음은 진단 연결 없는 메모리 대조/잔류 메모리와 정식 전체 수집 연결, 미해결 가림·실제공급자/Windows/출시 검증이다. 실행 중 시험앱없음, main병합/push없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 watcher 비동기화와 반복 QA 가림 실패 증거 확보로 진척이었다. clean7db103f의 같은 진단 QA(z4pbpz)로 추가3회만 확인했다. 1sk6MF/dtNjHf/mFFOui 모두 visible·12,000출력/history/latest·정상 종료, 표본최대23.4/33.7/25.1ms였다. 과거 본5회 가림 실패를 지우거나 전체 반복/G6 합격으로 바꾸지 않는다.
 - 세 회차에서는 가림이 재현되지 않아 부모 영역 원인을 확정하지 못했다. 실패 당시 내부패널이 맨 아래였다는 기존 증거를 유지한다. QA에 trusted wheel/pointerdown/touchstart/스크롤키 입력의 종류·시각만 최대128개 수집하도록 추가했다. 입력 내용·키값은 저장하지 않으며 초과카운터를 남긴다. 미래 실패의 좌표/PNG와 함께 사용자 입력과 레이아웃 이동을 구분하기 위한 진단이며 자동 면책/표본 제외가 아니다. JS문법/diff PASS, 이 추가 입력 진단의 실제 수집은 아직 미검증이다.
 - 각 회차 PID부재·DBclean 확인 뒤 fixture 및 QA 패키지를 삭제했다. 원시 증거는 `.artifacts/m5-packaged-output-qa/{1sk6MF,dtNjHf,mFFOui}`에 있다. 기록이500줄을 넘게 되어 기존10/29·10/27 워크로그 전체를 원문 그대로10월 아카이브로 옮겼다. 고정 결정은 유지한다.
