@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { diffPages, diffRows, DIFF_PAGE_ROWS } from "../src/m5/diff-view.ts";
+import { diffPages, diffRows, splitDiffPage, DIFF_PAGE_ROWS } from "../src/m5/diff-view.ts";
 
 test("unified diff distinguishes file headers, context, changes and multiple hunks", () => {
   const rows = diffRows("--- a/a.ts\n+++ b/a.ts\n@@ -2,2 +2,2 @@ function\n same\n-old\n+new\n@@ -10 +20 @@\n-x\n+y\n");
@@ -67,4 +67,39 @@ test("a malformed final hunk invalidates numbering on earlier indexed pages too"
   assert.equal(diffPages("").rowCount, 0);
   assert.deepEqual(diffPages("").page(0), []);
   assert.equal(diffPages("\n").rowCount, 1);
+});
+
+
+test("split comparison pairs replacements without losing unequal sides or line references", () => {
+  const rows = splitDiffPage(diffRows("@@ -3,3 +8,2 @@\n context\n-old one\n-old two\n+new\n"));
+  assert.deepEqual(rows.map(row => [row.before?.before ?? null, row.after?.after ?? null]), [[null, null], [3, 8], [4, 9], [5, null]]);
+  assert.equal(rows[2]?.before?.text, "-old one");
+  assert.equal(rows[2]?.after?.text, "+new");
+  assert.equal(rows[3]?.before?.text, "-old two");
+});
+
+test("split comparison preserves metadata boundaries, additions and literal markup", () => {
+  const text = "@@ -1 +1 @@\n-<old>\n\\ No newline at end of file\n+<new>\n\\ No newline at end of file\n";
+  const rows = splitDiffPage(diffRows(text));
+  assert.equal(rows[1]?.after, null);
+  assert.equal(rows[2]?.metadata?.text, "\\ No newline at end of file");
+  assert.equal(rows[3]?.before, null);
+  assert.equal(rows[3]?.after?.text, "+<new>");
+  assert.equal(rows[3]?.after?.after, 1);
+});
+
+test("split comparison is page bounded and preserves every numbered source line across pages", () => {
+  const text = "@@ -1,210 +1,210 @@\n" + Array.from({length:210}, (_,i)=>`-old ${i}\n`).join("") + Array.from({length:210}, (_,i)=>`+new ${i}\n`).join("");
+  const pages = diffPages(text);
+  const before: number[] = [], after: number[] = [];
+  for (let index = 0; index < pages.pageCount; index++) {
+    const rows = splitDiffPage(pages.page(index));
+    assert.ok(rows.length <= DIFF_PAGE_ROWS);
+    for (const row of rows) {
+      if (row.before?.before !== null && row.before?.before !== undefined) before.push(row.before.before);
+      if (row.after?.after !== null && row.after?.after !== undefined) after.push(row.after.after);
+    }
+  }
+  assert.deepEqual(before, Array.from({length:210}, (_,i)=>i+1));
+  assert.deepEqual(after, before);
 });

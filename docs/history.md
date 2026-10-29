@@ -2,6 +2,15 @@
 
 ### 2026-10-29 · by Codex
 
+- 기준 a9085a9에서 시작 메모리와 시안 누락 기능을 확인했다. renderer 번들은 production React이며 Monaco는 이미 지연 로딩이다. Electron43.4.0 빈 창 대조 UwYplU는52표본 최대341,196,800B(325.39MiB), 정상 종료/관측 프로세스 부재였다. 자체 임시 프로필은 삭제하고 `.artifacts/m5-empty-memory/m5-empty-memory-UwYplU`에 수집기/원시 결과를 보존했다. data URL·preload/sidecar 없음·표본 수 차이가 있어 제품417.03MiB와의 차이를 특정 코드 비용이나 G6 합격으로 해석하지 않는다.
+- 승인된 읽기 전용 검토자가 정상 reviewReady 복사본 버리기, 앱 공통 역할 기본값, inline/split diff 누락을 확인했다. 검토자는 재검토에서 최초 연결 전 프로젝트 진입을 막자는 제안을 철회했다. 기존 프로젝트 탐색·offline 편집·diff·초안은 허용하고 실제 실행 전 연결 실패를 설정으로 안내하는 방향을 유지한다. 버리기는 아직 API/UI 구현 완료가 아니다.
+- 시안의 한 화면/나란히 diff 전환을 구현했다. 현재200행 페이지 안에서만 인접 삭제/추가를 짝지으며 metadata·서로 다른 줄 수·페이지 경계의 원래 줄 번호를 보존한다. 보기 전환은 조회/반영 계약을 바꾸지 않는다. ko/en 문구와 키보드 버튼, 원래 줄의 후속 요청 연결을 유지했다.
+- TypeScript 검사/renderer production build, diff 회귀9개, diff check 통과. native 자체 UI 첫 ABf653은 기존 탭 선택자가 변경 배지를 고려하지 않아 FAIL; 선택자 수정 뒤 Ztyx2r은 split 전환·줄 참조·초안 보존 포함 PASS/정상 종료했다. 두 시험의 DBclean/프로세스 부재 확인 뒤 자체 fixture를 삭제했고 `.artifacts/m5-project-ui/{ABf653,Ztyx2r}`에 실패와 성공 모두 보존했다. 일반 out 패키지는 아직 이전 버전이다.
+- 버리기 구현 경계: 기존 recovery/unbound/close를 넓히지 않고 reviewReady 전용 exact task/chat/workspace 주소와 aggregate revision CAS를 사용한다. 활성/보류 실행·취소·저장·반영/미완료 intent·writer/poison/recovery를 먼저 거절하고, manifest active→abandoned 뒤 DB chat→discarded와 상태 메시지를 원자 기록한다. DB 실패는 fail-closed로 두고 같은 주소/기대 revision의 재시도로 마무리하며 파일은 삭제하지 않는다. 독립 검토자의 설계 제안이며 구현/활성화 승인을 대신하지 않는다.
+- 다음은 정상 검토 복사본 버리기 구현·안전 검토, 앱 공통 역할 기본값과 처음 시작 흐름 정합성이다. G6 메모리·가림 재현/정식 수집, 실제 공급자·Windows·출시는 여전히 미완료다. 실제 모델 호출/main병합/push없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 최신 일반 패키지 반영과 편집/반영/복원 흐름 증거 확보로 진척이었다. 같은 adba8b0 일반 패키지에서 `--no-cdp-project`를 실행했다. z6kP5h/session65318은435,142,656B(414.98MiB)로400MiB 초과/FAIL이었다. 수집 중 CUA 접근성 조회가 있었으므로 순수 미관측 baseline으로 취급하지 않는다.
 - 화면 조회를 수집 완료 뒤로 미룬 bZpohl/session64931 대조도437,288,960B(417.03MiB), FAIL이었다. 두 결과는 정식 G6/인과 통계가 아니지만 동시 접근성 조회만으로 초과를 설명할 수 없다는 근거다. 두 번째 peak의 main148.61/GPU83.48/network39.75/renderer127.84/sidecar17.34MiB를 보존한다. 기준을 완화하거나 낮은 표본만 택하지 않았다.
 - 두 회차 모두 CUA Cmd+Q 뒤 정상종료와 DBclean을 확인했다. 첫 종료 직후 getAXState가 앱을 기본 프로필로 다시 연 사실을 확인했고 PID6741/sidecar6747을 추가 Cmd+Q로 정상종료했다. 재기동할 수 있는 앱 getter를 종료 확인에 다시 쓰지 않고 OS PID 부재로 확인했다. 로그인 입력·모델 호출·사용자 파일 편집은 하지 않았다.

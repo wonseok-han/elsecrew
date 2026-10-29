@@ -80,3 +80,33 @@ export function diffRows(text: string): DiffRow[] {
   const pages = diffPages(text);
   return Array.from({ length: pages.pageCount }, (_, index) => pages.page(index)).flat();
 }
+
+export interface SplitDiffRow {
+  before: DiffRow | null;
+  after: DiffRow | null;
+  metadata: DiffRow | null;
+}
+
+/** Pair only adjacent replacement lines in this visible page, never load another page. */
+export function splitDiffPage(rows: readonly DiffRow[]): SplitDiffRow[] {
+  const result: SplitDiffRow[] = [];
+  for (let index = 0; index < rows.length;) {
+    const row = rows[index]!;
+    if (row.kind === "deleted") {
+      const removed: DiffRow[] = [], added: DiffRow[] = [];
+      while (rows[index]?.kind === "deleted") removed.push(rows[index++]!);
+      while (rows[index]?.kind === "added") added.push(rows[index++]!);
+      for (let line = 0; line < Math.max(removed.length, added.length); line++) {
+        result.push({ before: removed[line] ?? null, after: added[line] ?? null, metadata: null });
+      }
+    } else {
+      result.push({
+        before: row.kind === "context" ? row : null,
+        after: row.kind === "context" || row.kind === "added" ? row : null,
+        metadata: row.kind === "metadata" ? row : null,
+      });
+      index++;
+    }
+  }
+  return result;
+}

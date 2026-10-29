@@ -482,3 +482,13 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-agent-run-history { border-top: 1px solid #3b495b; padding-top: 6px; }
 .m5-agent-run-history > div { max-height: 240px; overflow: auto; }
 .m5-provider-login form input { width:min(100%,420px); box-sizing:border-box; padding:10px; margin:8px 8px 8px 0; background:#151a22; color:#e8edf5; border:1px solid #64799f; border-radius:8px; }
+
+/* Split comparison retains the same bounded page and source line references. */
+.m5-diff-mode { display: flex; gap: 4px; margin: 8px 0; }
+.m5-diff-mode button[aria-pressed="true"] { border-color: #8ab4f8; box-shadow: inset 0 -2px #8ab4f8; }
+.m5-diff-lines.m5-diff-split th { width: 50%; }
+.m5-diff-number-column { width: 4ch; }
+.m5-diff-lines.m5-diff-split .m5-diff-side-code { width: auto; min-width: 0; text-align: left; color: inherit; user-select: text; }
+.m5-diff-split .m5-diff-absent { background: #171d26; }
+.m5-diff-lines.m5-diff-split .m5-diff-added { color: #bcf5d0; }
+.m5-diff-lines.m5-diff-split .m5-diff-deleted { color: #ffd0d6; }

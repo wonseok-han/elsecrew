@@ -21,10 +21,18 @@ module.exports = async function diffFollowupProbe() {
   button.click();
   await wait(() => composer().value === 'Keep this draft\n\n검토할 변경 파일: hello.txt\n'
     && composer().getBoundingClientRect().height > 0);
-  const changes = [...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent === '변경');
+  const changes = [...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.firstChild?.textContent === '변경');
   if (!changes) throw new Error('Changes tab missing');
   changes.click();
   await wait(() => document.querySelector('.m5-diff-line-reference')?.getBoundingClientRect().height > 0);
+  const modes = [...document.querySelectorAll('.m5-diff-mode button')];
+  const split = modes.find(button => button.textContent === '나란히');
+  const inline = modes.find(button => button.textContent === '한 화면');
+  if (!split || !inline) throw new Error('Diff display controls missing');
+  split.click();
+  await wait(() => split.getAttribute('aria-pressed') === 'true' && document.querySelector('.m5-diff-split'));
+  if (document.querySelectorAll('.m5-diff-split thead th').length !== 2) throw new Error('Split comparison headings missing');
+  if (!document.querySelector('.m5-diff-split .m5-diff-side-code.m5-diff-deleted') || !document.querySelector('.m5-diff-split .m5-diff-side-code.m5-diff-added')) throw new Error('Split comparison lost a changed side');
   const line = document.querySelector('.m5-diff-line-reference');
   const label = line.getAttribute('aria-label').replace('을 후속 요청 초안에 추가', '');
   line.click();
@@ -33,5 +41,7 @@ module.exports = async function diffFollowupProbe() {
   if (!composer().value.startsWith('Keep this draft\n\n검토할 변경 파일: hello.txt')) throw new Error('Line reference replaced the existing draft');
   setDraft(draft);
   await wait(() => composer().value === draft);
-  return { file: true, line: true, draftPreserved: true, draftRestored: true };
+  inline.click();
+  await wait(() => inline.getAttribute('aria-pressed') === 'true' && !document.querySelector('.m5-diff-split'));
+  return { file: true, line: true, draftPreserved: true, draftRestored: true, splitComparison: true };
 };

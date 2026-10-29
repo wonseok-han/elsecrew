@@ -26,7 +26,7 @@ import { MessageBody } from "./message-body.tsx";
 import { ProviderLogin } from "./provider-login.tsx";
 import { ApprovalCard } from "./approval-card.tsx";
 import { ChatApplicationPreview } from "./chat-application-preview.tsx";
-import { diffPages, DIFF_PAGE_ROWS } from "./diff-view.ts";
+import { diffPages, splitDiffPage, DIFF_PAGE_ROWS } from "./diff-view.ts";
 import { FileSearch } from "./file-search-view.tsx";
 import { requestEditorSave } from "./editor-actions.ts";
 import { languageFor } from "./editor-language.ts";
@@ -850,10 +850,12 @@ function DiffDetails({ descriptor, text, canOpen, onOpen, canDiscuss, onDiscuss 
   const indexed = useMemo(() => diffPages(text), [text]);
   const [page, setPage] = useState(0);
   const [wrapLines, setWrapLines] = useState(true);
+  const [diffMode, setDiffMode] = useState<"inline" | "split">("inline");
   useEffect(() => setPage(0), [descriptor, text]);
   const pages = indexed.pageCount;
   const current = Math.min(page, pages - 1);
   const visible = useMemo(() => indexed.page(current), [indexed, current]);
+  const splitRows = useMemo(() => diffMode === "split" ? splitDiffPage(visible) : [], [visible, diffMode]);
   const lineNumber = (side: "before" | "after", line: number | null) => line !== null && canDiscuss
     ? <button type="button" className="m5-diff-line-reference" title={t("m5.diff.discussLine", { side: t(`m5.diff.${side}`), line })} aria-label={t("m5.diff.discussLine", { side: t(`m5.diff.${side}`), line })} onClick={() => onDiscuss(descriptor.path, side, line)}>{line}</button>
     : line;
@@ -866,11 +868,26 @@ function DiffDetails({ descriptor, text, canOpen, onOpen, canDiscuss, onDiscuss 
       {descriptor.kind === "binary" ? <Empty text={t("m5.diff.binaryHelp")} /> : !text ? <Empty text={t("m5.diff.empty")} /> : <>
         <p>{t("m5.diff.help")}</p>
         {canDiscuss && <p>{t("m5.diff.lineHelp")}</p>}
+        <div className="m5-diff-mode" role="group" aria-label={t("m5.diff.displayMode")}>
+          <button type="button" aria-pressed={diffMode === "inline"} onClick={() => setDiffMode("inline")}>{t("m5.diff.inline")}</button>
+          <button type="button" aria-pressed={diffMode === "split"} onClick={() => setDiffMode("split")}>{t("m5.diff.split")}</button>
+        </div>
         <label className="m5-diff-wrap"><input type="checkbox" checked={wrapLines} onChange={event => setWrapLines(event.target.checked)} />{t("m5.diff.wrapLines")}</label>
-        <div className={`m5-diff-lines${wrapLines ? " m5-diff-lines-wrapped" : ""}`} tabIndex={0} aria-label={t("m5.diff.comparison")}>
-          <table><thead><tr><th scope="col">{t("m5.diff.before")}</th><th scope="col">{t("m5.diff.after")}</th><th scope="col">{t("m5.diff.content")}</th></tr></thead><tbody>
+        <div className={`m5-diff-lines${wrapLines ? " m5-diff-lines-wrapped" : ""}${diffMode === "split" ? " m5-diff-split" : ""}`} tabIndex={0} aria-label={t("m5.diff.comparison")}>
+          {diffMode === "split" ? <table>
+            <colgroup><col className="m5-diff-number-column" /><col /><col className="m5-diff-number-column" /><col /></colgroup>
+            <thead><tr><th scope="colgroup" colSpan={2}>{t("m5.diff.before")}</th><th scope="colgroup" colSpan={2}>{t("m5.diff.after")}</th></tr></thead>
+            <tbody>{splitRows.map((row, index) => row.metadata
+              ? <tr key={index} className="m5-diff-metadata"><td colSpan={4}><code>{row.metadata.text}</code></td></tr>
+              : <tr key={index}>
+                <td className={row.before ? `m5-diff-${row.before.kind}` : "m5-diff-absent"}>{lineNumber("before", row.before?.before ?? null)}</td>
+                <td className={`m5-diff-side-code m5-diff-${row.before?.kind ?? "absent"}`}><code>{row.before?.text}</code></td>
+                <td className={row.after ? `m5-diff-${row.after.kind}` : "m5-diff-absent"}>{lineNumber("after", row.after?.after ?? null)}</td>
+                <td className={`m5-diff-side-code m5-diff-${row.after?.kind ?? "absent"}`}><code>{row.after?.text}</code></td>
+              </tr>)}</tbody>
+          </table> : <table><thead><tr><th scope="col">{t("m5.diff.before")}</th><th scope="col">{t("m5.diff.after")}</th><th scope="col">{t("m5.diff.content")}</th></tr></thead><tbody>
             {visible.map((row, index) => <tr key={current * DIFF_PAGE_ROWS + index} className={`m5-diff-${row.kind}`}><td>{lineNumber("before", row.before)}</td><td>{lineNumber("after", row.after)}</td><td><code>{row.text}</code></td></tr>)}
-          </tbody></table>
+          </tbody></table>}
         </div>
         {pages > 1 && <nav className="m5-diff-pages" aria-label={t("m5.diff.pages")}>
           <button type="button" disabled={current === 0} onClick={() => setPage(current - 1)}>{t("m5.diff.previous")}</button>

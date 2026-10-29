@@ -26,7 +26,7 @@
 
 > 프로필 호환 검사 변경(2026-10-07, 독립 검토 완료·실연결은 후속): Codex/Claude 앱 전용 프로필의 top-level 생성물은 owner·mode·real-directory 또는 single-link regular-file로 검사하고 알려진 고정 설정/credential·기존 경로 타입·지시 파일 거절을 유지한다. Codex named-tool 경로는 별도 bounded no-follow scanner로 `tmp/arg0/codex-arg0*/`의 세 도구 alias가 현재 선택·재검증된 실행 파일을 정확히 가리킬 때만 링크를 허용한다. 일반 workspace/Claude/legacy outer scanner는 변경하지 않는다. 실계정 연결 복구는 아직 미검증이다.
 
-> 작업대 표시 수명(2026-10-07): 파일 트리는 페이지500개 중 최대120행만 렌더한다. diff는 페이지별 hunk 위치를 색인해 현재200행만 만들며 전체 탐색·잘못된 hunk의 원문 fallback을 유지한다. 대화는200개 표시와 이전/다음/최신 이동을 제공하고 과거 페이지를 읽을 때 새 이벤트가 화면을 이동시키지 않는다. 원장과 조회 기록을 잘라내는 정책은 아니다. Monaco는 마지막 동기화 문자열을 재사용하고 종료된 editor는 미완료 read를 끝내며 늦은 descriptor를 거절한다.
+> 작업대 표시 수명(2026-10-07): 파일 트리는 페이지500개 중 최대120행만 렌더한다. diff는 페이지별 hunk 위치를 색인해 현재200행만 만들며 전체 탐색·잘못된 hunk의 원문 fallback을 유지한다. 2026-10-29 한 화면/나란히 전환을 추가했으며 나란히 보기도 현재 페이지에서만 삭제/추가를 짝지어 원래 줄 참조와 metadata를 보존한다. 대화는200개 표시와 이전/다음/최신 이동을 제공하고 과거 페이지를 읽을 때 새 이벤트가 화면을 이동시키지 않는다. 원장과 조회 기록을 잘라내는 정책은 아니다. Monaco는 마지막 동기화 문자열을 재사용하고 종료된 editor는 미완료 read를 끝내며 늦은 descriptor를 거절한다.
 
 > 최신 부분 성능 관측(2026-10-07, 2612b74): synthetic renderer10회에서 표시 시간·DOM 기준은 이내지만 전체 Electron subtree RSS는 idle399.94MiB/peak1036.83MiB/60초 잔류delta128.38MiB로 **FAIL**이다. 아래 예전 PASS 수치를 현행 메모리 합격으로 인용하지 않는다. 실제 native sidecar/agent·stream paint·전체 G6 합격 증거는 아니다. 증거와 한계는 `docs/history.md` 및 `procedures/m5-performance.md`에 기록한다.
 
