@@ -1,6 +1,12 @@
 // 한국어 문구 리소스. 이 파일의 키 집합이 다른 언어 파일의 기준이 된다.
 // 보간은 {name} 형태 — t("key", { name }) 로 치환.
 export const ko = {
+  "m5.roles.appScope": "새 프로젝트의 기본값",
+  "m5.roles.appSave": "앱 기본값 저장",
+  "m5.roles.appDefaults": "앱 기본 역할·모델",
+  "m5.roles.appDefaultsHelp": "아직 역할 설정을 만들지 않은 프로젝트의 시작값입니다. 기존 프로젝트와 대화의 역할 설정은 바뀌지 않습니다.",
+  "m5.roles.appDefaultsSaved": "앱 기본값을 저장했습니다. 새 프로젝트부터 사용합니다.",
+  "m5.roles.appDefaultsError": "기본값을 읽거나 저장하지 못했습니다. 다시 불러온 뒤 시도하세요.",
   "m5.setup.openConnection": "{name} 연결 확인",
   "m5.setup.requestedConnection": "{name}의 설치와 로그인을 확인하세요. 연결 후 대화로 돌아가 실행 버튼을 다시 눌러 주세요.",
   "m5.output.title": "실행 출력",

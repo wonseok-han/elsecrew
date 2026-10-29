@@ -232,7 +232,7 @@ impl Fixture {
 
     fn create_chat(&mut self, snapshot: &Value, goal: &str, request: &str) -> Value {
         self.chats
-            .default_role_settings(&mut self.storage, &self.project_id, request)
+            .default_role_settings(&mut self.storage, &self.projects, &self.project_id, request)
             .unwrap();
         self.chats
             .create_chat(
@@ -252,7 +252,7 @@ impl Fixture {
 
     fn create_exact_claude_chat(&mut self, snapshot: &Value, goal: &str, request: &str) -> Value {
         self.chats
-            .default_role_settings(&mut self.storage, &self.project_id, request)
+            .default_role_settings(&mut self.storage, &self.projects, &self.project_id, request)
             .unwrap();
         self.chats
             .update_role_settings(
@@ -3237,7 +3237,7 @@ fn unavailable_exact_profile_never_persists_or_spawns_a_run() {
     let snapshot = fixture.snapshot("req_unavailable_snapshot");
     fixture
         .chats
-        .default_role_settings(&mut fixture.storage, &fixture.project_id, "req_defaults")
+        .default_role_settings(&mut fixture.storage, &fixture.projects, &fixture.project_id, "req_defaults")
         .unwrap();
     let roles = json!([
         {"roleId":"planning","runtime":"codex","modelSelector":"unavailable","reasoningEffort":"medium","permission":"readOnly"},
@@ -3466,6 +3466,7 @@ fn injected_bind_crash_rolls_back_preparation_and_initial_message_together() {
         .chats
         .default_role_settings(
             &mut fixture.storage,
+            &fixture.projects,
             &fixture.project_id,
             "req_crash_settings",
         )
@@ -6431,3 +6432,98 @@ fn dynamic_grandchild_is_durable_and_blocks_recovery_until_every_identity_is_gon
 }
 
 mod discard;
+
+#[test]
+fn app_role_defaults_seed_once_and_survive_reopen() {
+    let mut fixture = Fixture::new();
+    let original = fixture
+        .chats
+        .default_role_settings(
+            &mut fixture.storage,
+            &fixture.projects,
+            &fixture.project_id,
+            "defaults_original",
+        )
+        .unwrap();
+    let defaults = fixture.projects.app_role_defaults().unwrap();
+    let mut roles = defaults["roles"].clone();
+    roles[0]["modelSelector"] = json!("configured-model");
+    let saved = fixture
+        .projects
+        .update_app_role_defaults(1, roles.clone())
+        .unwrap();
+    assert_eq!(saved["revision"], 2);
+    assert!(fixture
+        .projects
+        .update_app_role_defaults(1, roles.clone())
+        .is_err());
+    assert_eq!(
+        fixture
+            .chats
+            .default_role_settings(
+                &mut fixture.storage,
+                &fixture.projects,
+                &fixture.project_id,
+                "defaults_again"
+            )
+            .unwrap(),
+        original
+    );
+    let other = Fixture::new();
+    let opened = fixture
+        .projects
+        .open_project(
+            &mut fixture.storage,
+            other.source.to_str().unwrap(),
+            "open_other_defaults",
+        )
+        .unwrap();
+    let other_id = opened.result["projectId"].as_str().unwrap();
+    let seeded = fixture
+        .chats
+        .default_role_settings(
+            &mut fixture.storage,
+            &fixture.projects,
+            other_id,
+            "defaults_new",
+        )
+        .unwrap();
+    assert_eq!(seeded["roles"], roles);
+    assert_eq!(seeded["revision"], 1);
+    fixture
+        .projects
+        .update_app_role_defaults(2, defaults["roles"].clone())
+        .unwrap();
+    assert_eq!(
+        fixture
+            .chats
+            .default_role_settings(
+                &mut fixture.storage,
+                &fixture.projects,
+                other_id,
+                "defaults_stable"
+            )
+            .unwrap(),
+        seeded
+    );
+    let reopened = ProjectManager::new(fixture.storage.path()).unwrap();
+    assert_eq!(reopened.app_role_defaults().unwrap()["revision"], 3);
+    let file = fixture
+        ._root
+        .path()
+        .join("data/application-settings-v1/role-defaults.json");
+    fs::write(file, b"invalid").unwrap();
+    assert!(reopened.app_role_defaults().is_err());
+    assert_eq!(
+        fixture
+            .chats
+            .default_role_settings(
+                &mut fixture.storage,
+                &fixture.projects,
+                &fixture.project_id,
+                "defaults_corrupt_existing"
+            )
+            .unwrap(),
+        original
+    );
+}

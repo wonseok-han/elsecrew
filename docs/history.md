@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 38aed28의 실행 전 연결 안내 구현으로 진척이었다. 해당 clean HEAD에서 앱 기본 역할·모델을 직접 연결했다. 기존 프로젝트 역할 편집기를 앱 범위에도 재사용하고 도구 모음에서 프로젝트 선택 없이 열 수 있다. 저장/불러오기 오류, 미저장 변경 확인, ko/en 문구, 오래된 비동기 응답 거절을 포함한다. 기본값 화면에서는 특정 채팅을 전제로 하는 모델 조회를 호출하지 않는다.
+- sidecar는 관리된 application-settings-v1/role-defaults.json에 schema/revision/roles/updatedAt을 저장한다. 기존 역할 검증·expected revision·원자 파일 교체를 사용하고 symlink/Unix hardlink/비정규 파일·크기 초과·손상값을 거절한다. Unix 읽기는 NONBLOCK으로 특수 파일 대기를 피한다. 프로젝트 역할 설정 최초 초기화와 직접 chat 생성의 초기화 경로 모두 앱 기본값을 복사하며, 이미 존재하는 프로젝트 설정·대화 snapshot은 유지한다. SQLite schema 변경은 없다.
+- project.catalog typed 요청/응답을 추가했고 역할 결과 비교는 JSON 키 순서에 의존하지 않는다. Rust check 및 check --tests, TypeScript, diff 검사 통과. 초기 컴파일의 json 매크로 경로 오류를 수정했다. 기본값 저장/충돌/재시작·새 프로젝트만 반영·손상 파일과 기존 프로젝트 독립성 회귀를 작성했으나 아직 실행하지 않았다. 전체 테스트/실제 UI/독립 검토는 기능 파동 마감에 묶어서 수행한다.
+- 다음: 새 기본값의 통합 회귀와 일반 discard 실제 sidecar+작업대 통합, 남은 G6 메모리/가림 원인 확인. 실제 공급자 전체·Windows·출시도 미완료이며 목표 active. 실제 모델·설치·로그인·사용자 프로젝트·패키지 교체·main병합·push없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 be4881d의 discard 재개·화면 해제 수정/회귀/독립 검토로 진척이었다. 이번에는 해당 clean HEAD에서 실행 전 연결 안내를 직접 연결했다. capability가 설치 누락/불완전/지원 버전 불일치/로그인 누락/만료로 실행을 거절하면 대화 알림에 해당 Codex·Claude Code 연결 확인 버튼을 표시한다.
 - 버튼은 기존 연결 관리 영역을 펼치고 스크롤·키보드 포커스를 이동한다. 대상 공급자가 선택되지 않았다면 선택 영역을 열어 명시적으로 추가할 수 있게 한다. 선택 목록/설치/로그인/모델 실행을 자동 변경하지 않고, 연결 후 사용자가 실행 버튼을 다시 누르도록 ko/en 안내를 제공한다. 복구 잠금·실행 중·플랫폼 불가·모델 불일치에는 로그인 유도 버튼을 표시하지 않는다. 프로젝트/편집/작성 중 대화는 유지한다.
 - TypeScript와 diff 검사 통과. 기존 run preflight 및 backend 실행 권한은 변경하지 않았다. 이번 안내의 실제 작업대 클릭 회귀는 기능 파동의 통합 UI 검증에서 수행할 예정이다. 작은 UI 연결마다 독립 검토/전체 빌드를 반복하지 않았다.
@@ -69,6 +76,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **2026-10-29 앱 기본 역할 경계**: 앱 기본값은 프로젝트 role_settings 최초 초기화 때만 복사한다. 기존 프로젝트·chat roleSnapshots에는 소급하지 않으며, 기본값 파일이 손상돼도 이미 초기화한 프로젝트는 독립적으로 사용한다. 실제 모델 가용성은 계속 실행 전 별도 검증한다.
 
 - **2026-10-29 일반 discard 완료 재개**: 응답 유실 후 dialog가 재생성돼도 inspect가 exact discard_receipt를 돌려주어 중복 쓰기 없이 재개한다. workspace watcher 제거만으로 project watcher는 종료되지 않으므로 완료 후 releaseView 응답을 확인한 뒤 화면을 비운다. 현재 기능은 gated checkpoint이며 아직 일반 앱에 활성화하지 않았다.
 

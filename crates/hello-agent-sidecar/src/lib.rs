@@ -1230,6 +1230,15 @@ impl Sidecar {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
                     Ok(self.projects.application_capabilities())
                 }
+                Some("getAppRoleDefaults") => {
+                    require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
+                    self.projects.app_role_defaults().map(|settings| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"getAppRoleDefaults","settings":settings}), ..Default::default() })
+                }
+                Some("updateAppRoleDefaults") => {
+                    let params = require_exact_params(&request.params, &["action", "expectedRevision", "roles"]).map_err(invalid_params)?;
+                    let revision = params.get("expectedRevision").and_then(Value::as_u64).ok_or_else(|| invalid_params("invalid settings revision".into()))?;
+                    self.projects.update_app_role_defaults(revision, params["roles"].clone()).map(|settings| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"updateAppRoleDefaults","settings":settings}), ..Default::default() })
+                }
                 Some("backupStorageUsage") => {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
                     self.projects.backup_storage_usage()
@@ -1689,6 +1698,7 @@ impl Sidecar {
                     chat::G5Action {
                         result: self.g5.default_role_settings(
                             &mut self.storage,
+                            &self.projects,
                             param_string(params, "projectId").map_err(ProjectFailure::manifest)?,
                             &request.request_id,
                         )?,

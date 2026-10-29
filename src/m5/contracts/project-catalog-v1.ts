@@ -1,4 +1,4 @@
-import { validateChatRecordV1, type ChatRecordV1 } from "./run-recovery-v1.ts";
+import { validateChatRecordV1, validateProjectRoleSettingsV1, validateProjectRoleSettingsUpdateRequestV1, type ProjectRoleSettingsV1, type RoleProfileV1, type ChatRecordV1 } from "./run-recovery-v1.ts";
 import { validateProjectIdentityV1, type ProjectIdentityV1 } from "./project-v1.ts";
 
 export const PROJECT_CATALOG_METHOD = "project.catalog";
@@ -15,7 +15,10 @@ export interface BackupRetention { reviewId: string; state: "preparing" | "ready
 export interface BackupStorageUsage { usedBytes: number; limitBytes: number; remainingBytes: number }
 export interface ChatDiscardAddress { chatId: string; taskId: string; projectId: string; worktreeId: string; workspaceIdentity: string }
 export interface ChatDiscardInspection extends ChatDiscardAddress { chatRevision: number }
+export type AppRoleDefaults = Omit<ProjectRoleSettingsV1, "projectId">;
 export type ProjectCatalogRequest =
+  | { action: "getAppRoleDefaults" }
+  | { action: "updateAppRoleDefaults"; expectedRevision: number; roles: readonly RoleProfileV1[] }
   | ({ action: "inspectChatDiscard" } & ChatDiscardAddress)
   | { action: "discardChatWorkspace"; inspection: ChatDiscardInspection; confirmed: true }
   | { action: "list"; cursor: string | null } | { action: "reopen"; projectId: string } | { action: "releaseView"; projectId: string }
@@ -46,6 +49,7 @@ export type ProjectCatalogRequest =
   | { action: "abandonPreparation"; inspection: PreparationInspection };
 export interface ProjectCatalogEntry { projectId: string; canonicalPath: string }
 export type ProjectCatalogResult =
+  | { schemaVersion: 1; action: "getAppRoleDefaults" | "updateAppRoleDefaults"; settings: AppRoleDefaults }
   | { schemaVersion: 1; action: "inspectChatDiscard"; inspection: ChatDiscardInspection }
   | { schemaVersion: 1; action: "discardChatWorkspace"; chat: ChatRecordV1 }
   | { schemaVersion: 1; action: "applicationCapabilities"; enabled: boolean }
@@ -107,7 +111,12 @@ export function validateChatDiscardInspection(value: unknown): ChatDiscardInspec
 }
 export function validateProjectCatalogRequest(value: unknown): ProjectCatalogRequest {
   const request = object(value);
-  if (request.action === "inspectChatDiscard") {
+  if (request.action === "getAppRoleDefaults") {
+    keys(request, ["action"]);
+  } else if (request.action === "updateAppRoleDefaults") {
+    keys(request, ["action", "expectedRevision", "roles"]);
+    validateProjectRoleSettingsUpdateRequestV1({projectId: "app_defaults", expectedRevision: request.expectedRevision, roles: request.roles});
+  } else if (request.action === "inspectChatDiscard") {
     keys(request, ["action", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"]);
     for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"]) id(request[key]);
   } else if (request.action === "discardChatWorkspace") {
@@ -167,7 +176,13 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   const request = validateProjectCatalogRequest(input);
   const result = object(value);
   if (result.schemaVersion !== 1 || result.action !== request.action || new TextEncoder().encode(JSON.stringify(value)).byteLength > 768 * 1024) throw new Error("invalid catalog response envelope");
-  if (request.action === "inspectChatDiscard") {
+  if (request.action === "getAppRoleDefaults" || request.action === "updateAppRoleDefaults") {
+    keys(result, ["schemaVersion", "action", "settings"]);
+    const settings = object(result.settings);
+    keys(settings, ["schemaVersion", "revision", "roles", "updatedAt"]);
+    validateProjectRoleSettingsV1({...settings, projectId: "app_defaults"});
+    if (request.action === "updateAppRoleDefaults" && (settings.revision !== request.expectedRevision + 1 || !request.roles.every((role, index) => (["roleId", "runtime", "modelSelector", "reasoningEffort", "permission"] as const).every(key => role[key] === (settings.roles as readonly RoleProfileV1[])[index]?.[key])))) throw new Error("app defaults result differs from request");
+  } else if (request.action === "inspectChatDiscard") {
     keys(result, ["schemaVersion", "action", "inspection"]);
     const inspection = validateChatDiscardInspection(result.inspection);
     for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) if (inspection[key] !== request[key]) throw new Error("discard inspection address mismatch");

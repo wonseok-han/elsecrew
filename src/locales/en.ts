@@ -2,6 +2,12 @@ import type { MessageKey } from "./ko";
 
 // 영어 문구. ko와 동일한 키를 모두 가져야 한다(Record<MessageKey>로 강제).
 export const en: Record<MessageKey, string> = {
+  "m5.roles.appScope": "Defaults for new projects",
+  "m5.roles.appSave": "Save app defaults",
+  "m5.roles.appDefaults": "App default roles and models",
+  "m5.roles.appDefaultsHelp": "Starting values for projects without role settings. Existing project settings and conversations stay unchanged.",
+  "m5.roles.appDefaultsSaved": "App defaults saved for new projects.",
+  "m5.roles.appDefaultsError": "Could not load or save defaults. Reload and try again.",
   "m5.setup.openConnection": "Check {name} connection",
   "m5.setup.requestedConnection": "Check installation and sign-in for {name}. Once connected, return to the conversation and press the run button again.",
   "m5.output.title": "Run output",

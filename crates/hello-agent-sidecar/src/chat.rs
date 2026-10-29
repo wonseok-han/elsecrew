@@ -144,6 +144,7 @@ impl G5Manager {
     pub fn default_role_settings(
         &self,
         storage: &mut Storage,
+        projects: &ProjectManager,
         project_id: &str,
         request_id: &str,
     ) -> Result<Value, ProjectFailure> {
@@ -151,7 +152,8 @@ impl G5Manager {
         if let Some(settings) = project.get("role_settings") {
             return Ok(settings.clone());
         }
-        let settings = settings_value(project_id, 1);
+        let mut settings = settings_value(project_id, 1);
+        settings["roles"] = projects.app_role_defaults()?["roles"].clone();
         project.insert("role_settings".to_string(), settings.clone());
         storage.upsert_projection_record(
             "project",
@@ -438,11 +440,7 @@ impl G5Manager {
         });
         validate_g5_payload_v1("chatCreateRequest", &request)
             .map_err(|error| ProjectFailure::manifest(format!("invalid chat request: {error}")))?;
-        let project = project_record(storage, project_id)?;
-        let settings = project
-            .get("role_settings")
-            .cloned()
-            .unwrap_or_else(|| settings_value(project_id, 1));
+        let settings = self.default_role_settings(storage, projects, project_id, request_id)?;
         if settings.get("revision").and_then(Value::as_u64) != Some(expected_settings_revision) {
             return Err(ProjectFailure::dirty(
                 "project role settings changed before chat creation",
@@ -1579,7 +1577,7 @@ pub fn run_fixture_leaf() {
     std::thread::sleep(Duration::from_secs(30));
 }
 
-fn settings_value(project_id: &str, revision: u64) -> Value {
+pub(crate) fn settings_value(project_id: &str, revision: u64) -> Value {
     json!({
         "schemaVersion":1,"projectId":project_id,"revision":revision,
         "roles":[
