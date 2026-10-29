@@ -2,6 +2,14 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 전체 row 계측과 실제 경로 canonical 오류 수정 `f9f46e6`으로 진척이다. clean HEAD에서 QA F62cZA를 재빌드하고 80jcUA/session27984를 실행했다. 임시 userData/sessionData/log의 realpath 검증을 통과해 전체 visible·PASS/exit0·정상 종료를 확인했다.
+- 네 단일 run 각각3,000개, 총12,000개 persisted row의 본문/출력 sequence·event ID 유일성·run/프로젝트/채팅 결속을 대조했다. 네 run 모두 pre-write timestamp3,000개가60초 미만이며 마지막59982.548~59984.740ms, 최대 예정 지연17.832ms였다. 이는 실제 write 완료·commit·수신·모든 행 paint가60초 이내라는 증거가 아니다.
+- live notification→정확 행 두frame 진단526표본 p9515.50ms/max238.80ms, superseded12/interrupted6, peakRSS514.33MiB. 단회 QA 진단이며 일부 최댓값100ms 초과와 미관측 행을 숨기지 않는다. 제품과 동일 바이너리·전체 G6/10회/실제 공급자 합격은 아니다.
+- QA feature 없는 optimized release의 `release_cli_rejects_durable_fixture_before_opening_database`를 실제 실행해 PASS(0.46초; 빌드19.78초)했다. 일반 빌드의 두 장시간 fixture 인자 거절·DB 미생성 경계가 유지된다.
+- 관측 PID 부재·임시 DB clean 종료를 확인하고 F62cZA QA 앱 및80jcUA 데이터를 삭제했다. 증거/생성표본/로그/정리/release거절 결과는 `.artifacts/m5-packaged-output-qa/80jcUA`에 보존한다. 다음은 단회 계측을 반복 수집·전체 수신 지연/메모리와 연결하는 단계다. Windows/실제 공급자 전체/출시도 미완료. main 병합/push 없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 별도 QA 패키지 연결 `01179a7`과 첫 visible12,000출력 진단 PASS로 진척이다. 이번에는 모든 persisted row의 run 결속/sequence/event ID를 대조하고 각 run의 pre-write timestamp·60초 내 건수·최대 간격/예정 대비 지연을 요약하는 계측을 연결했다. 늦게 도착한 전체 기록을60초 성공으로 바꾸지 않는다. head 알림 수와 실제 row 수는 구분한다.
 - 요약기 정상/지연·누락/중복run/중복event/sequence/시계역행 회귀2개 PASS, JS문법/diff PASS. 이 timestamp는 fixture stdout write 직전 값이며 commit/수신/paint 시간이 아니다. 전체 수신 지연·10회 gate를 대체하지 않는다.
 - 첫 빌드 WqkdIx는 제한 환경 fetch 실패로 앱 실행 전에 중단됐다. 허용 환경 yhi9od 빌드는 성공했지만 실행 PID59994/session33078은 제품 main 전에 오류 dialog에서 정지했다. OS sample에서 NSAlert modal을 확인했고 CUA 접근도 timeout이었다. 별도 창 없는 Electron API 시험으로 logs만 `/var`→`/private/var` canonical 경로로 반환됨을 확인했다. 이전 문자열 assert가 같은 폴더를 거절한 결함이다. 세 경로를 realpath 대조하도록 수정했다.
