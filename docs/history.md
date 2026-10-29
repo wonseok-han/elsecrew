@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- clean `2ac47e2` QA9NwzC6/z4EJtO(session51676) 단회에서 visible·12,000출력·history/latest·정상 종료/exit0을 확인했다. 정확 head 일부 표본 최대202.4ms로 성능 기준은 여전히 초과다. QA 단계 요약 파일도 정상 수집됐다.
+- dispatcher 계측: watch616회/누적25,446.368ms/최대143.593ms, runtime616회/8,311.326ms/66.237ms, request2199회/4,363.628ms/356.640ms, maintenance2758회/324.250ms/14.947ms. request에는 초기 snapshot 생성 등도 포함된다. 누적 비용의 가장 큰 부분이 watcher이며 synchronous watcher 수행 중 같은 dispatcher의 요청/출력이 대기할 수 있다. 정확 개별 latency와 인과 결속은 별도지만 작업 분리 대상을 좁히는 근거다.
+- 다음 구현은 watcher의 느린 검증/스캔을 요청 처리와 분리하는 범위다. 각 결과의 최신 manifest/lock/디렉터리 신원 재확인·중단/종료 소유권·bounded 작업 수·삭제/전환 뒤 오래된 결과 거절을 유지해야 하며 검증 캐시나 생략은 승인하지 않았다. 일반 배포 동작은 이번에 변경하지 않았다.
+- PID 부재·DB clean을 확인하고 자체 QA 앱/fixture를 삭제했다. 증거는 `.artifacts/m5-packaged-output-qa/z4EJtO`의 원시 JSON/PNG/dispatch 요약/build/log/정리 기록이다. 전체 G6/실제 공급자/Windows/출시 미완료, 사용자 계정/프로젝트 변경·main 병합/push 없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 diff 비교에서253.5ms 지연과 공용 dispatcher 조사를 남긴 진척이다. `eba6a33`에서 QA feature 전용 watch/runtime/request/maintenance 단계 시간 계측을 추가했다. 호출 결과·순서·오류 전파는 바꾸지 않고 숫자 count/total/max microseconds만 누적한다. 정상 종료 허용 시 stderr에 한 번 출력하며 일반 빌드에는 clock/map/출력이 없다.
 - QA 앱은 고정 prefix의 요약에서 허용된 네 phase의 비음수 정수3개만 검증·재직렬화해 자체 임시 dispatch-timing.log에 저장한다. 임의 stderr/요청 payload/경로를 보존하지 않는다. 반복 수집기는 이 작은 로그를 함께 보존한다. 로그 부재·파싱 실패를0이나PASS로 바꾸지 않는다.
 - QA feature/default cargo check 모두 PASS(3.80/3.53초), JS문법·신규Rust파일 포맷·diff 검사 확인. 실제 단계 시간 수집은 다음 clean QA 실행에서 확인하며, 제품 성능 개선이나 전체G6 완료로 주장하지 않는다. main 병합/push 없음.
