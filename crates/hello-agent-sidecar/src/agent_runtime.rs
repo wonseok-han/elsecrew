@@ -508,6 +508,10 @@ impl AgentRuntime {
         }
     }
 
+    pub(crate) fn is_fixture_runtime(&self) -> bool {
+        self.provider == ProviderMode::FakeExact
+    }
+
     pub(crate) fn advertises_g5a(&self) -> bool {
         self.provider != ProviderMode::Blocked
     }

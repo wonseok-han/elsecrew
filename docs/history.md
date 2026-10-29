@@ -2,6 +2,14 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 6db300b 앱 기본 역할 구현으로 진척이었다. 이번에는 실제 sidecar–작업대 기본값/버리기 합동 시나리오를 scripts/m5-project-ui-smoke.cjs의 HELLO_AGENT_SMOKE_DISCARD에 추가했다. 앱 기본값 저장→새 프로젝트 상속→대화 생성→가짜 공급자 실행→버리기→기록/원본 보존을 검사한다. 명시 fake runtime과 fixture UI에만 discard를 열었고 일반 native 제품 gate는 유지한다.
+- 앱 기본값 회귀 1 PASS(재시작·revision 충돌·신규 프로젝트만 반영·손상 파일과 기존 프로젝트 독립성). Rust debug 및 Electron/renderer 개발 산출물을 빌드했다. 독립 검토는 처음 file CAS 경합 P1을 제기했으나 제품의 고정 cwd/DB 이름·Storage EXCLUSIVE 소유·단일 dispatcher를 재확인하고 철회했다. 이 전제가 바뀌면 별도 cross-process lock이 필요하다는 코드 주석을 추가했다. 새로운 제품 경로 차단 결함은 없으나 통합 증거는 남는다.
+- 첫 합동 UI P3dUJc는 앱 기본값 저장/프로젝트 상속/역할 편집까지 진행한 뒤 legacy demo start 응답({run,streamId})과 Electron의 RunRecord 기대 불일치로 FAIL했다. G5A 모드가 raw fixture event를 거절하는 경계도 있으므로 이 시험은 현재 계약에 맞는 FakeExact Claude actual 경로로 수정했다. legacy 데모 wire 정합성 결함은 별도 후속으로 남겼으며 고쳤다고 주장하지 않는다. 실제 Claude·Codex/계정/비용 호출은 없다.
+- 시험 sidecar는 종료됐으나 Electron PID47863과 그 창 helper들이 남았고 정상 종료 확인이 실패했다. 해당 자체 시험 앱만 강제 종료·정리하도록 사용자 확인을 요청했으며 응답 전 종료/임시 데이터 삭제/재시험하지 않는다. 임시 root는 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-project-ui-P3dUJc, 로그 /tmp/m5-defaults-discard-ui.log다.
+- 다음은 시험 앱 종료 승인 처리, 가짜 actual 경로 합동 시험, legacy fixture 응답 연결 보정이다. 이번 마지막 fixture-only gate 변경은 문법/diff 검사만 했으며 새 build/통합 회귀가 필요하다. 전체G6·실제 공급자 전체·Windows·출시 미완료, 목표 active. 일반 패키지 교체·원본 쓰기·main병합·push없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 38aed28의 실행 전 연결 안내 구현으로 진척이었다. 해당 clean HEAD에서 앱 기본 역할·모델을 직접 연결했다. 기존 프로젝트 역할 편집기를 앱 범위에도 재사용하고 도구 모음에서 프로젝트 선택 없이 열 수 있다. 저장/불러오기 오류, 미저장 변경 확인, ko/en 문구, 오래된 비동기 응답 거절을 포함한다. 기본값 화면에서는 특정 채팅을 전제로 하는 모델 조회를 호출하지 않는다.
 - sidecar는 관리된 application-settings-v1/role-defaults.json에 schema/revision/roles/updatedAt을 저장한다. 기존 역할 검증·expected revision·원자 파일 교체를 사용하고 symlink/Unix hardlink/비정규 파일·크기 초과·손상값을 거절한다. Unix 읽기는 NONBLOCK으로 특수 파일 대기를 피한다. 프로젝트 역할 설정 최초 초기화와 직접 chat 생성의 초기화 경로 모두 앱 기본값을 복사하며, 이미 존재하는 프로젝트 설정·대화 snapshot은 유지한다. SQLite schema 변경은 없다.
 - project.catalog typed 요청/응답을 추가했고 역할 결과 비교는 JSON 키 순서에 의존하지 않는다. Rust check 및 check --tests, TypeScript, diff 검사 통과. 초기 컴파일의 json 매크로 경로 오류를 수정했다. 기본값 저장/충돌/재시작·새 프로젝트만 반영·손상 파일과 기존 프로젝트 독립성 회귀를 작성했으나 아직 실행하지 않았다. 전체 테스트/실제 UI/독립 검토는 기능 파동 마감에 묶어서 수행한다.

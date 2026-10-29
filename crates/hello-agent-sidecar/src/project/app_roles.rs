@@ -74,6 +74,10 @@ impl ProjectManager {
         Ok(value)
     }
 
+    // Product calls hold Storage's exclusive ownership of the one fixed database
+    // in this data directory and execute on its serial dispatcher. If additional
+    // databases or writers ever share this directory, add a cross-process lock
+    // spanning this read/compare/replace; atomic rename alone is not file CAS.
     pub(crate) fn update_app_role_defaults(
         &self,
         expected_revision: u64,

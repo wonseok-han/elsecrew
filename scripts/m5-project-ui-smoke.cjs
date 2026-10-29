@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFile, execFileSync } = require('node:child_process');
 const { processTreeMemory, summarizeMemory } = require('./m5-process-memory.cjs');
+const discardFlow = process.env.HELLO_AGENT_SMOKE_DISCARD === '1';
 const measureMemory = process.env.HELLO_AGENT_SMOKE_MEMORY === '1';
 const idleOnly = process.env.HELLO_AGENT_SMOKE_IDLE_ONLY === '1';
 const nativeInput = process.env.HELLO_AGENT_SMOKE_NATIVE_INPUT === '1';
@@ -15,6 +16,20 @@ const largeDiff = process.env.HELLO_AGENT_SMOKE_LARGE_DIFF === '1';
 if (nativeInput && (measureMemory || largeFile || largeTree || largeDiff)) throw new Error('Native input is a separate manual diagnostic scenario');
 if (idleOnly && (largeFile || largeTree || largeDiff || process.env.HELLO_AGENT_SMOKE_APPLY === '1')) throw new Error('Idle-only diagnostic cannot include project scenarios');
 if (largeDiff && (measureMemory || largeFile || largeTree || process.env.HELLO_AGENT_SMOKE_APPLY === '1')) throw new Error('Large diff is a separate diagnostic scenario');
+if (discardFlow && (measureMemory || idleOnly || nativeInput || largeFile || largeTree || largeDiff || process.env.HELLO_AGENT_SMOKE_APPLY === '1')) throw new Error('Discard is a separate synthetic integration scenario');
+if (discardFlow) {
+  const cp = require('node:child_process');
+  const assert = require('node:assert/strict');
+  const originalSpawn = cp.spawn;
+  cp.spawn = function(command, args, options) {
+    if (typeof command === 'string' && path.basename(command) === 'hello-agent-sidecar') {
+      assert.equal(command, path.resolve(__dirname, '../target/debug/hello-agent-sidecar'));
+      assert.deepEqual(args, ['--stdio']);
+      return Reflect.apply(originalSpawn, this, [command, ['--stdio-agent-fixture', 'clean'], options]);
+    }
+    return Reflect.apply(originalSpawn, this, arguments);
+  };
+}
 let largeDiffReport;
 const diffRequests = [];
 const treeRequests = [];
@@ -165,6 +180,16 @@ app.on('browser-window-created', (_event, window) => {
         memoryPhase = 'loaded';
       }
       if (!await run(`Boolean(document.querySelector('.m5-guided-start'))&&!document.querySelector('.m5-dock-tree')`)) throw new Error('initial guided start missing or empty dock exposed');
+      if (discardFlow) {
+        await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='앱 기본 역할·모델').click()`);
+        await wait(`document.querySelector('.m5-settings-dialog')?.matches(':modal')`);
+        await run(`(()=>{const e=document.querySelector('.m5-role-card input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,'fixture-default');e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+        await run(`(()=>{const e=document.querySelectorAll('.m5-role-card')[1].querySelector('input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,'claude-opus-5');e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+        await run(`Array.from(document.querySelectorAll('.m5-settings-dialog button')).find(b=>b.textContent==='앱 기본값 저장').click()`);
+        await wait(`document.querySelector('.m5-settings-dialog')?.textContent.includes('앱 기본값을 저장했습니다.')`);
+        await run(`Array.from(document.querySelectorAll('.m5-settings-dialog button')).find(b=>b.textContent==='작업대로 돌아가기').click()`);
+        await wait(`!document.querySelector('.m5-settings-dialog')`);
+      }
       const snapshotStarted = performance.now();
       await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='프로젝트 선택').click()`);
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent.includes('hello.txt'))`, largeTree ? 65000 : 15000);
@@ -259,6 +284,7 @@ app.on('browser-window-created', (_event, window) => {
       await clickText('역할과 모델');
       await wait(`document.querySelector('.m5-settings-dialog')?.matches(':modal')`);
       const originalModel = await run(`document.querySelector('.m5-role-card input').value`);
+      if (discardFlow && originalModel !== 'fixture-default') throw new Error('new project did not inherit app defaults');
       const modelInput = '.m5-role-card input';
       await fill(modelInput, 'ui-smoke-unsaved');
       window.show(); window.focus(); window.webContents.focus();
@@ -296,6 +322,23 @@ app.on('browser-window-created', (_event, window) => {
       await wait(`!document.querySelector('.m5-new-chat-form button[type=submit]').disabled`);
       await run(`document.querySelector('.m5-new-chat-form button[type=submit]').click()`);
       await wait(`document.querySelector('.m5-timeline h2')?.textContent==='Improve hello'`, largeTree ? 65000 : 15000);
+      if (discardFlow) {
+        const identity = await run(`(async()=>{const catalog=await window.m5Projects.request({action:'list',cursor:null});const projectId=catalog.projects[0].projectId;const page=await window.m5.listChats({projectId,cursor:null,limit:100});return page.items.find(c=>c.goal==='Improve hello');})()`);
+        await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='실제 실행 준비 · 코딩').click()`);
+        await wait(`Boolean(document.querySelector('.m5-chat-discard > button'))`, 25000);
+        await run(`document.querySelector('.m5-chat-discard > button').click()`);
+        await wait(`Boolean(document.querySelector('.m5-discard-dialog[open] input'))`);
+        if (!await run(`document.querySelector('.m5-discard-actions button:last-child').disabled`)) throw new Error('discard consent missing');
+        await run(`document.querySelector('.m5-discard-dialog input').click()`);
+        await wait(`!document.querySelector('.m5-discard-actions button:last-child').disabled`);
+        await run(`document.querySelector('.m5-discard-actions button:last-child').click()`);
+        await wait(`Boolean(document.querySelector('.m5-guided-start'))&&!document.querySelector('.m5-dock-tree')`);
+        const detail = await run(`window.m5.getChat({chatId:${JSON.stringify(identity.chatId)},afterEventSequence:0,cursor:null,limit:50})`);
+        if (detail.chat.state !== 'discarded' || detail.messages.length === 0) throw new Error('discard did not preserve terminal chat history');
+        if (fs.readFileSync(path.join(source,'hello.txt'),'utf8') !== 'original\n') throw new Error('discard changed original project');
+        const screenshot=path.join(root,'discard.png');fs.writeFileSync(screenshot,(await window.webContents.capturePage()).toPNG());
+        finish(null,{scenario:'appDefaultsAndDiscard',chatId:identity.chatId,screenshot,syntheticProvider:true});return;
+      }
       await run(`Array.from(document.querySelectorAll('.m5-files button')).find(b=>b.textContent.includes('hello.txt')).click()`);
       app.focus({steal:true}); window.show(); window.focus(); window.webContents.focus();
       await wait(`document.querySelector('.monaco-editor textarea')!==null`);
