@@ -1,3 +1,4 @@
+import { validateChatRecordV1, type ChatRecordV1 } from "./run-recovery-v1.ts";
 import { validateProjectIdentityV1, type ProjectIdentityV1 } from "./project-v1.ts";
 
 export const PROJECT_CATALOG_METHOD = "project.catalog";
@@ -12,7 +13,12 @@ export interface ApplicationRetirementInspection { applicationId: string; finger
 export interface BackupCleanupInspection { reviewId: string; fingerprint: string; filePresent: boolean; state: "available" | "pending" | "deleted" }
 export interface BackupRetention { reviewId: string; state: "preparing" | "ready" | "abandoned"; retainedFor: "currentApplication" | "applicationHistory" | "unfinishedPreparation" | "preparedBackup" | "abandonedPreparation"; cleanupState: "none" | "pending" | "deleted" }
 export interface BackupStorageUsage { usedBytes: number; limitBytes: number; remainingBytes: number }
-export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | { action: "reopen"; projectId: string } | { action: "releaseView"; projectId: string }
+export interface ChatDiscardAddress { chatId: string; taskId: string; projectId: string; worktreeId: string; workspaceIdentity: string }
+export interface ChatDiscardInspection extends ChatDiscardAddress { chatRevision: number }
+export type ProjectCatalogRequest =
+  | ({ action: "inspectChatDiscard" } & ChatDiscardAddress)
+  | { action: "discardChatWorkspace"; inspection: ChatDiscardInspection; confirmed: true }
+  | { action: "list"; cursor: string | null } | { action: "reopen"; projectId: string } | { action: "releaseView"; projectId: string }
   | { action: "applicationCapabilities" }
   | { action: "inspectApplicationRetirement"; projectId: string; applicationId: string }
   | { action: "retireApplication"; projectId: string; applicationId: string; fingerprint: string }
@@ -40,6 +46,8 @@ export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | 
   | { action: "abandonPreparation"; inspection: PreparationInspection };
 export interface ProjectCatalogEntry { projectId: string; canonicalPath: string }
 export type ProjectCatalogResult =
+  | { schemaVersion: 1; action: "inspectChatDiscard"; inspection: ChatDiscardInspection }
+  | { schemaVersion: 1; action: "discardChatWorkspace"; chat: ChatRecordV1 }
   | { schemaVersion: 1; action: "applicationCapabilities"; enabled: boolean }
   | { schemaVersion: 1; action: "inspectApplicationRetirement"; projectId: string; enabled: boolean; inspection: ApplicationRetirementInspection }
   | { schemaVersion: 1; action: "retireApplication"; projectId: string; applicationId: string }
@@ -90,9 +98,23 @@ export function validatePreparationInspection(value: unknown): PreparationInspec
   for (const key of ["projectRevision", "lockRevision"]) if (!Number.isSafeInteger(inspection[key]) || (inspection[key] as number) < 1) throw new Error("invalid preparation revision");
   return inspection as unknown as PreparationInspection;
 }
+export function validateChatDiscardInspection(value: unknown): ChatDiscardInspection {
+  const inspection = object(value);
+  keys(inspection, ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "chatRevision"]);
+  for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"]) id(inspection[key]);
+  if (!Number.isSafeInteger(inspection.chatRevision) || (inspection.chatRevision as number) < 1) throw new Error("invalid chat revision");
+  return inspection as unknown as ChatDiscardInspection;
+}
 export function validateProjectCatalogRequest(value: unknown): ProjectCatalogRequest {
   const request = object(value);
-  if (request.action === "applicationCapabilities" || request.action === "backupStorageUsage") {
+  if (request.action === "inspectChatDiscard") {
+    keys(request, ["action", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"]);
+    for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"]) id(request[key]);
+  } else if (request.action === "discardChatWorkspace") {
+    keys(request, ["action", "inspection", "confirmed"]);
+    validateChatDiscardInspection(request.inspection);
+    if (request.confirmed !== true) throw new Error("workspace discard requires explicit confirmation");
+  } else if (request.action === "applicationCapabilities" || request.action === "backupStorageUsage") {
     keys(request, ["action"]);
   } else if (request.action === "setBackupStorageLimit") {
     keys(request, ["action", "expectedLimitBytes", "limitBytes"]);
@@ -145,7 +167,16 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   const request = validateProjectCatalogRequest(input);
   const result = object(value);
   if (result.schemaVersion !== 1 || result.action !== request.action || new TextEncoder().encode(JSON.stringify(value)).byteLength > 768 * 1024) throw new Error("invalid catalog response envelope");
-  if (request.action === "applicationCapabilities") {
+  if (request.action === "inspectChatDiscard") {
+    keys(result, ["schemaVersion", "action", "inspection"]);
+    const inspection = validateChatDiscardInspection(result.inspection);
+    for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) if (inspection[key] !== request[key]) throw new Error("discard inspection address mismatch");
+  } else if (request.action === "discardChatWorkspace") {
+    keys(result, ["schemaVersion", "action", "chat"]);
+    const chat = validateChatRecordV1(result.chat);
+    for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) if (chat[key] !== request.inspection[key]) throw new Error("discard result address mismatch");
+    if (chat.state !== "discarded") throw new Error("discard result is not terminal");
+  } else if (request.action === "applicationCapabilities") {
     keys(result, ["schemaVersion", "action", "enabled"]);
     if (typeof result.enabled !== "boolean") throw new Error("invalid application capability");
   } else if (request.action === "inspectApplicationRetirement") {

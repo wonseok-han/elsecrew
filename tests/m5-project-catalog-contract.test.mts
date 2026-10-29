@@ -173,3 +173,19 @@ test("reopen response must identify the selected project", () => {
   assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, action: "reopen", project }, { action: "reopen", projectId: "project_a" }));
   assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "reopen", project }, { action: "reopen", projectId: "project_b" }));
 });
+
+test("review discard binds the exact inspected chat and requires explicit consent and revision", () => {
+  const address = {chatId:"chat_a",taskId:"task_a",projectId:"project_a",worktreeId:"worktree_a",workspaceIdentity:"workspace_a"};
+  const request = {action:"inspectChatDiscard" as const,...address};
+  const inspection = {...address,chatRevision:7};
+  assert.doesNotThrow(() => validateProjectCatalogResult({schemaVersion:1,action:request.action,inspection},request));
+  for (const field of ["chatId","taskId","projectId","worktreeId","workspaceIdentity"]) {
+    assert.throws(() => validateProjectCatalogResult({schemaVersion:1,action:request.action,inspection:{...inspection,[field]:"other"}},request));
+  }
+  const commit = {action:"discardChatWorkspace" as const,inspection,confirmed:true as const};
+  assert.doesNotThrow(() => validateProjectCatalogRequest(commit));
+  for (const confirmed of [false,null,undefined,1,"true"]) assert.throws(() => validateProjectCatalogRequest({...commit,confirmed}));
+  for (const chatRevision of [0,-1,1.5,Number.MAX_SAFE_INTEGER+1]) assert.throws(() => validateProjectCatalogRequest({...commit,inspection:{...inspection,chatRevision}}));
+  assert.throws(() => validateProjectCatalogRequest({...commit,inspection:{...inspection,extra:true}}));
+  assert.throws(() => validateProjectCatalogRequest({...request,workspaceIdentity:"../escape"}));
+});

@@ -1189,6 +1189,43 @@ impl Sidecar {
                     let params = require_exact_params(&request.params, &["action", "projectId", "chatId", "fingerprint"]).map_err(invalid_params)?;
                     self.projects.open_application_confirmation(&mut self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "chatId").map_err(invalid_params)?, param_string(params, "fingerprint").map_err(invalid_params)?, &request.request_id)
                 }
+                Some("inspectChatDiscard" | "discardChatWorkspace") => {
+                    // Keep product admission closed until UI and failure/restart review finish.
+                    if !cfg!(test) {
+                        return Ok(HandledRequest::response(error_response(&request, "requestBlocked", "requestBlocked", "workspace discard integration is not enabled")));
+                    }
+                    if !self.agent_runtime.owned_run_ids().is_empty()
+                        || !self.pending_agent_starts.is_empty()
+                        || !self.pending_agent_cancels.is_empty()
+                    {
+                        return Ok(HandledRequest::response(error_response(&request, "requestBlocked", "requestBlocked", "workspace discard requires idle native execution")));
+                    }
+                    let committing = request.params["action"] == "discardChatWorkspace";
+                    let fields = ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"];
+                    let params = if committing {
+                        let outer = require_exact_params(&request.params, &["action", "inspection", "confirmed"]).map_err(invalid_params)?;
+                        if outer["confirmed"] != true { return Err(invalid_params("workspace discard requires explicit confirmation".into())); }
+                        require_exact_params(&outer["inspection"], &["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "chatRevision"]).map_err(invalid_params)?
+                    } else {
+                        require_exact_params(&request.params, &["action", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"]).map_err(invalid_params)?
+                    };
+                    for field in fields { param_string(params, field).map_err(invalid_params)?; }
+                    let address = project::WorkspaceAddress {
+                        chat_id: param_string(params, "chatId").map_err(invalid_params)?.to_owned(),
+                        project_id: param_string(params, "projectId").map_err(invalid_params)?.to_owned(),
+                        worktree_id: param_string(params, "worktreeId").map_err(invalid_params)?.to_owned(),
+                        workspace_identity: param_string(params, "workspaceIdentity").map_err(invalid_params)?.to_owned(),
+                    };
+                    let task_id = param_string(params, "taskId").map_err(invalid_params)?;
+                    if committing {
+                        let revision = params["chatRevision"].as_u64().filter(|value| *value > 0 && *value <= 9_007_199_254_740_991).ok_or_else(|| invalid_params("invalid chat revision".into()))?;
+                        self.g5.discard_workspace(&mut self.storage, &mut self.projects, &address, task_id, revision, &request.request_id)
+                            .map(|chat| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"discardChatWorkspace","chat":chat}), ..Default::default() })
+                    } else {
+                        self.g5.preview_workspace_discard(&self.storage, &self.projects, &address, task_id)
+                            .map(|inspection| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"inspectChatDiscard","inspection":inspection}), ..Default::default() })
+                    }
+                }
                 Some("applicationCapabilities") => {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
                     Ok(self.projects.application_capabilities())

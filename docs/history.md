@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 복사본 버리기 핵심/CAS·재시도 회귀 구현으로 진척이었다. clean ddcde2a에서 inspectChatDiscard/discardChatWorkspace typed catalog 계약과 dispatcher를 연결했다. 전체 주소·task·chat revision을 재검증하고 명시 확인을 요구하며 활성 native owner/보류 start/cancel 작업을 차단한다. chat.get 기존 계약은 바꾸지 않고 별도 inspection으로 aggregate revision을 제공한다.
+- 작업대 확인창과 완료 후 로컬 편집/대화 화면 해제를 작성했다. 미저장 파일/진행 작업이 있으면 진입하지 못하고 native modal이 다른 화면 조작을 막는다. 동의 체크·취소·오류 재시도·ko/en 문구가 있으며, 요청이 성공했으나 화면 정리가 실패한 경우 같은 mutation을 다시 보내지 않도록 성공 결과를 보유한다. 이 UI의 실제 렌더링·흐름 시험은 아직 하지 않았다.
+- 제품 dispatcher는 cfg(test) 밖에서 거절하고 작업대 REVIEW_DISCARD_ENABLED도 false다. 따라서 일반 앱에는 아직 활성화하지 않았다. 검사 중 TS union 삽입 구문 오류를 바로잡았고 TypeScript/cargo check 통과, catalog 계약17개 통과, diff check 통과했다. React 지침으로 hooks·비동기 응답 세대·modal/checkbox 접근성·중복 제출을 자체 확인했다.
+- 다음은 native/fixture 종료 증거와 모든 거절 조건, 실제 SQLite 실패/재시작, 성공 응답 유실과 UI 화면 전환 회귀를 묶어 추가한 뒤 독립 안전 검토다. 검토 뒤 두 admission gate를 함께 활성화하고 실제 자체 UI로 마감한다. 아직 기능 완료/제품 활성화/G6 합격이 아니다. 일반 패키지·사용자 프로젝트·실제 모델은 사용하지 않았고 main병합/push없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 나란히 diff 구현/실제 UI 검증/커밋으로 진척이었다. clean a6cea5d에서 정상 검토 복사본 버리기의 백엔드 핵심을 직접 구현했다. 외부 요청·UI에는 아직 연결하지 않은 구현 체크포인트다.
 - reviewReady의 exact task/chat/project/workspace 주소·aggregate revision, 종료 증거가 있는 fixture/actual 원장, writer 없는 healthy lock, 저장/반영/준비/미완료 application intent 배제를 검사한다. 기존 active-only workspace 검증은 유지하고 별도 discard 재시도만 canonical abandoned manifest를 허용한다. 원본·복사본 파일을 삭제하지 않으며 manifest terminalization 다음 chat discarded/상태 메시지를 CAS 원자 저장한다. DB 저장 전후 사이의 실패는 일반 workspace API에서 사용 불가 상태로 남는다.
 - cargo check 통과(아직 미연결 메서드 dead-code 경고), 관련 Rust 회귀3개 통과: 원본/편집 복사본/이전 대화 보존·재사용 거절, 잘못된 task/stale revision 무변경, manifest만 terminal인 중간 상태의 재시도. 마지막 항목은 중단 경계를 모델링한 시험이며 실제 SQLite 실패 주입·프로세스 재시작 증거가 아니다. 새 Rust 모듈 포맷과 diff check도 통과했다.

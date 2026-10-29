@@ -25,6 +25,7 @@ import { WorkbenchDock } from "./workbench-dock.tsx";
 import { MessageBody } from "./message-body.tsx";
 import { ProviderLogin } from "./provider-login.tsx";
 import { ApprovalCard } from "./approval-card.tsx";
+import { ChatWorkspaceDiscard } from "./chat-workspace-discard.tsx";
 import { ChatApplicationPreview } from "./chat-application-preview.tsx";
 import { diffPages, splitDiffPage, DIFF_PAGE_ROWS } from "./diff-view.ts";
 import { FileSearch } from "./file-search-view.tsx";
@@ -33,6 +34,9 @@ import { languageFor } from "./editor-language.ts";
 import { ProjectCatalog } from "./project-catalog-view.tsx";
 import { WorkStatusNotice } from "./work-status-view.tsx";
 import { validateProjectCatalogResult } from "./contracts/project-catalog-v1.ts";
+
+// Enable together with sidecar admission after the discard safety review.
+const REVIEW_DISCARD_ENABLED = false;
 
 type MonacoApi = typeof Monaco;
 
@@ -137,6 +141,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [applicationBaseline, setApplicationBaseline] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [discardedWorkspaceNotice, setDiscardedWorkspaceNotice] = useState(false);
   const [returnToNewChat, setReturnToNewChat] = useState(false);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
   const restoreSettingsFocus = useRef(false);
@@ -256,6 +261,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         </div>
       </header>
 
+      {discardedWorkspaceNotice && !snapshot.project && <p className="m5-notice" role="status">{t("m5.discard.done")}</p>}
       {snapshot.notice && <p className="m5-notice" role="status">{snapshot.noticeKey ? t(snapshot.noticeKey) : snapshot.notice}</p>}
       {chat.notice && <p className="m5-notice m5-chat-notice" role="status">{formatChatNotice(chat, lang)}</p>}
       {leaveError && <p className="m5-error" role="alert">{t("m5.feedback.leaveError")}</p>}
@@ -311,7 +317,10 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         {chat.error && <section className="m5-error" role="alert"><strong>{t(chat.error.messageKey)}</strong><details><summary>{t("m5.feedback.details")}</summary><pre>{chat.error.detail}</pre></details></section>}
       </>} onSave={roles => chatController.updateSettings(roles)} onReload={() => chatController.reloadSettings()} onClose={closeRoleSettings} returnToDraft={returnToNewChat} projectName={snapshot.project?.name ?? chat.settings.projectId} />}
 
-      {snapshot.project && <WorkbenchDock changeCount={snapshot.rescanRequired ? undefined : snapshot.diffSummary?.entries.length} reveal={snapshot.panelRequest} conversation={chat.activeChat ? <div className="m5-conversation"><div className="m5-conversation-scroll"><TeamTimeline controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} /><ChatApplicationPreview onReviewDiff={() => { if (controller.snapshot().actionBlocked) return; controller.selectPanel("changes"); void controller.refreshChanges(); }} key={`${chat.activeChat.chatId}:${chat.activeChat.state}`} projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} worktreeId={chat.activeChat.worktreeId} disabled={!admissionReady || chat.switching || chatController.isActionBlocked()} /></div><FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} /></div> : <section className="m5-first-chat" aria-label={t("m5.firstChat.title")}>
+      {snapshot.project && <WorkbenchDock changeCount={snapshot.rescanRequired ? undefined : snapshot.diffSummary?.entries.length} reveal={snapshot.panelRequest} conversation={chat.activeChat ? <div className="m5-conversation"><div className="m5-conversation-scroll"><TeamTimeline controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} />{REVIEW_DISCARD_ENABLED && chat.activeChat.state === "reviewReady" && <ChatWorkspaceDiscard key={chat.activeChat.chatId} chat={chat.activeChat} disabled={!admissionReady || settingsOpen || !controller.canLeaveProject() || !chatController.canLeaveProjectView()} onCompleted={() => {
+        if (!controller.leaveProjectView() || !chatController.clearProjectView()) throw new Error("discarded workspace view could not be released");
+        setDiscardedWorkspaceNotice(true);
+      }} />}<ChatApplicationPreview onReviewDiff={() => { if (controller.snapshot().actionBlocked) return; controller.selectPanel("changes"); void controller.refreshChanges(); }} key={`${chat.activeChat.chatId}:${chat.activeChat.state}`} projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} worktreeId={chat.activeChat.worktreeId} disabled={!admissionReady || chat.switching || chatController.isActionBlocked()} /></div><FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} /></div> : <section className="m5-first-chat" aria-label={t("m5.firstChat.title")}>
         <h2>{t("m5.firstChat.title")}</h2><p>{t("m5.firstChat.help")}</p>
         <button type="button" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching} onClick={() => setNewChatOpen(true)}>{t("m5.navigation.newChat")}</button>
         <div className="m5-goal-examples">{(["explain", "plan", "readme"] as const).map(example => <button key={example} type="button" className="m5-secondary" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching || goal.trim().length > 0} onClick={() => { setGoal(t(`m5.firstChat.${example}`)); setNewChatOpen(true); }}>
