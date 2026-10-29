@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 최신 macOS 패키지 생성·기본 gate PASS로 진척이다. clean `9df546b`에서 G6 수집 코드를 대조했다. 시작/편집 입력/저장 경합 수집 경로는 이미 존재하며 패키지 agent-output 4스트림 및 전체 결합 증거는 미완성이다. 새 중복 수집기를 만들기 전에 알려진 메모리 초과를 최신 패키지로 재관측했다.
+- 기존 `m5-packaged-ui-smoke.mjs --no-cdp` NUktJ5/session57657에서 빈 시작 화면 370.578MiB, `--no-cdp-project` wgQt71/session64173에서 두 프로젝트 등록 상태397.563MiB였다. 각각40회/250ms RSS 표본의 최댓값으로 이번 단회는400MiB 이내다. 이전410.22MiB 초과를 삭제하거나 안정적 해결로 선언하지 않는다. 두 프로젝트 상태 여유는 약2.44MiB로 작다.
+- 둘 다 새 임시 프로필·공식 패키지·디버거 없음·실제 모델/인증 없음이다. 준비 완료 신호 후 측정했지만 전체 가시성 지속·10회·대형 파일/diff·닫은 뒤60초 retained·전체 G6 증거가 아니므로 결과는 `NOT_READY`/exit2로 유지했다.
+- 수집 종료 후 정확 PID/실행 경로를 대조해 AppKit 정상 종료만 요청했다. 모든 관측 PID 부재와 임시 DB clean 종료를 확인하고 두 시험 root를 삭제했다. 작은 결과/로그/정리 증거는 `.artifacts/m5-packaged-memory/{NUktJ5,wgQt71}`에 보존했다. 다음은 정식 agent-output 패키지 수집 연결과 전체 부하 메모리 검증이며 실제 공급자 전체/Windows/출시도 미완료다. main 병합/push 없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 최근 출력 개선의 개발 GUI 통합 진단·시험 자료 정리로 진척이다. clean `68494dc`에서 실행 앱 부재를 package guard로 확인한 뒤 `pnpm m5:test:package`를 실행했다(session50688).
 - 결과 PASS/exit0. release sidecar·renderer·Electron 패키지·기본 sidecar 검사·ZIP/크기 검사가 완료됐다. 기존 out 앱/ZIP에 `10418d8` 출력 행 재사용과 `0a29557` head 중복 조회 제거가 반영됐다. 패키지 기준 HEAD는 `68494dc362e0ff2d888286587df14c2fd5bb0697`; 증거 `.artifacts/m5-g6-package/darwin-arm64-2026-10-28T23-59-32-435Z.json`, 로그 `/tmp/m5-package-68494dc.log`.
 - unpacked323,107,017B/compressed124,383,873B로 패키지 크기 기준 내다. 기존 fixture enum dead-code/renderer chunk 경고는 남으며 실행 실패는 아니다. 사용자 DB를 여는 앱 실행·실제 모델 호출·추가 시험 프로젝트 생성은 하지 않았다. target은 약2.8GiB, 작은 증거 모음은44MiB이며 임의 캐시 삭제 없이 기존 산출물을 갱신했다.
