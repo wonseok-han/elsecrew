@@ -125,6 +125,7 @@ fn binary_ready_status_quit_flow_marks_clean_and_exits_zero() {
         G5D_PRODUCT_CAPABILITIES_V1
             .iter()
             .chain(std::iter::once(&"chat.appendMessage"))
+            .chain(["agent.outputHead", "agent.outputPage"].iter())
             .chain(std::iter::once(&"provider.login"))
             .chain(["run.approval", "project.catalog", "provider.install"].iter())
             .map(|value| (*value).to_string())
@@ -415,7 +416,10 @@ fn binary_agent_cancel_defers_completion_without_blocking_status_or_quit() {
     }
 }
 
-#[cfg(all(target_os = "macos", any(debug_assertions, feature = "qa-output-fixtures")))]
+#[cfg(all(
+    target_os = "macos",
+    any(debug_assertions, feature = "qa-output-fixtures")
+))]
 #[test]
 fn binary_long_stream_commits_and_pages_three_thousand_outputs() {
     g5a_public_event_flow(false, Some("long-stream"));
@@ -430,9 +434,11 @@ fn release_cli_rejects_durable_fixture_before_opening_database() {
             .args(["--stdio-agent-fixture", scenario])
             .current_dir(root.path())
             .stdin(Stdio::null())
-            .output().unwrap();
+            .output()
+            .unwrap();
         assert!(!result.status.success());
-        assert!(String::from_utf8_lossy(&result.stderr).contains("unknown stdio agent fixture scenario"));
+        assert!(String::from_utf8_lossy(&result.stderr)
+            .contains("unknown stdio agent fixture scenario"));
         assert!(fs::read_dir(root.path()).unwrap().next().is_none());
     }
 }
@@ -605,12 +611,25 @@ fn g5a_public_event_flow(continuous_requests: bool, cancellation: Option<&str>) 
     let run_id = accepted["runId"].as_str().unwrap().to_string();
 
     if cancellation == Some("long-stream") {
-        durable_stdio_output_flow(&mut stdin, &envelopes, &ready.sidecar_instance_id,
-            &chat, &run_id, &capability["fingerprint"]);
-        write_request(&mut stdin, &ready.sidecar_instance_id, "req_long_quit",
-            "app.prepareQuit", serde_json::json!({}));
-        assert!(matches!(receive_envelope(&envelopes), EnvelopeV1::Response(response)
-            if response.ok && response.result.as_ref().unwrap()["safeToQuit"] == true));
+        durable_stdio_output_flow(
+            &mut stdin,
+            &envelopes,
+            &ready.sidecar_instance_id,
+            &chat,
+            &run_id,
+            &capability["fingerprint"],
+        );
+        write_request(
+            &mut stdin,
+            &ready.sidecar_instance_id,
+            "req_long_quit",
+            "app.prepareQuit",
+            serde_json::json!({}),
+        );
+        assert!(
+            matches!(receive_envelope(&envelopes), EnvelopeV1::Response(response)
+            if response.ok && response.result.as_ref().unwrap()["safeToQuit"] == true)
+        );
         drop(stdin);
         assert!(child.wait().unwrap().success());
         return;
@@ -851,7 +870,9 @@ fn durable_stdio_output_flow(
     run_id: &str,
     fingerprint: &serde_json::Value,
 ) {
-    use hello_agent_protocol::agent_adapter_v1::output_pages::{decode_output_page, OutputHead, OutputPageRequest};
+    use hello_agent_protocol::agent_adapter_v1::output_pages::{
+        decode_output_page, OutputHead, OutputPageRequest,
+    };
     let binding = serde_json::json!({
         "chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],
         "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
@@ -864,7 +885,9 @@ fn durable_stdio_output_flow(
     let mut sealed = false;
     loop {
         assert!(Instant::now() < deadline, "long stream did not terminate");
-        let EnvelopeV1::Event(event) = receive_envelope(envelopes) else { panic!("expected output/state event") };
+        let EnvelopeV1::Event(event) = receive_envelope(envelopes) else {
+            panic!("expected output/state event")
+        };
         assert_eq!(event.seq, sequence + 1);
         sequence = event.seq;
         assert_eq!(event.run_id.as_deref(), Some(run_id));
@@ -878,7 +901,9 @@ fn durable_stdio_output_flow(
             }
             "agent.runStateChanged" => {
                 let state = event.payload["run"]["state"].as_str().unwrap();
-                if state == "running" { continue; }
+                if state == "running" {
+                    continue;
+                }
                 assert_eq!(state, "succeeded", "{:?}", event.payload);
                 assert_eq!(event.payload["run"]["terminationOutcome"], "cleanExit");
                 break;
@@ -888,8 +913,16 @@ fn durable_stdio_output_flow(
     }
     assert!(sealed);
     assert_eq!(last_head, 3000);
-    write_request(stdin, instance, "req_long_head", "agent.outputHead", binding.clone());
-    let EnvelopeV1::Response(response) = receive_envelope(envelopes) else { panic!("head response") };
+    write_request(
+        stdin,
+        instance,
+        "req_long_head",
+        "agent.outputHead",
+        binding.clone(),
+    );
+    let EnvelopeV1::Response(response) = receive_envelope(envelopes) else {
+        panic!("head response")
+    };
     assert!(response.ok, "{:?}", response.error);
     let head: OutputHead = serde_json::from_value(response.result.unwrap()).unwrap();
     head.validate(&typed_binding).unwrap();
@@ -898,13 +931,29 @@ fn durable_stdio_output_flow(
     let mut cursor = 0;
     let mut ids = std::collections::HashSet::new();
     while cursor < head.committed_sequence {
-        let request = OutputPageRequest { format_version:1, binding:typed_binding.clone(),
-            after_sequence:cursor, through_sequence:head.committed_sequence, limit:100 };
-        write_request(stdin, instance, &format!("req_long_page_{cursor}"), "agent.outputPage",
-            serde_json::to_value(&request).unwrap());
-        let EnvelopeV1::Response(response) = receive_envelope(envelopes) else { panic!("page response") };
+        let request = OutputPageRequest {
+            format_version: 1,
+            binding: typed_binding.clone(),
+            after_sequence: cursor,
+            through_sequence: head.committed_sequence,
+            limit: 100,
+        };
+        write_request(
+            stdin,
+            instance,
+            &format!("req_long_page_{cursor}"),
+            "agent.outputPage",
+            serde_json::to_value(&request).unwrap(),
+        );
+        let EnvelopeV1::Response(response) = receive_envelope(envelopes) else {
+            panic!("page response")
+        };
         assert!(response.ok, "{:?}", response.error);
-        let page = decode_output_page(&serde_json::to_vec(&response.result.unwrap()).unwrap(), &request).unwrap();
+        let page = decode_output_page(
+            &serde_json::to_vec(&response.result.unwrap()).unwrap(),
+            &request,
+        )
+        .unwrap();
         for row in &page.rows {
             cursor += 1;
             assert_eq!(row.output_sequence, cursor);
@@ -1379,6 +1428,7 @@ fn binary_project_worktree_read_stream_and_quit_follow_g4_order() {
         G5D_PRODUCT_CAPABILITIES_V1
             .iter()
             .chain(std::iter::once(&"chat.appendMessage"))
+            .chain(["agent.outputHead", "agent.outputPage"].iter())
             .chain(std::iter::once(&"provider.login"))
             .chain(["run.approval", "project.catalog", "provider.install"].iter())
             .map(|value| (*value).to_string())

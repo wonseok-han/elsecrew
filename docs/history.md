@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 프런트 608개/빌드 PASS와 Rust 누적 실행 시작으로 진척이다. 같은 session88297을 이어 확인했다. 라이브러리 676 PASS/0 FAIL/43 ignored(1065.58초), 별도 테스트 target 2 ignored였다. stdio 실행 파일 통합 검사는 14 PASS/2 FAIL/1 ignored로 끝났다. 장시간 Codex 형태 가짜 프로세스 3,000출력과 4run 12,000출력 라이브러리 회귀도 통과했다. 실제 공급자 검증은 아니다.
+- 두 실패는 일반 --stdio ready의 기대 capability 목록에서 승인·활성화된 `agent.outputHead`/`agent.outputPage`를 빠뜨린 테스트 불일치였다. `lib.rs`의 공통 광고 목록과 이미 갱신된 fixture 기대값을 확인하고 두 일반 실행 테스트를 맞췄다. 제품 코드·권한·기능 광고는 변경하지 않았다. touched test 파일의 기존 rustfmt 차이도 정리했고 하위 support 파일은 변경하지 않았다.
+- 영향받은 `cargo test -p hello-agent-sidecar --locked --test stdio_process` 재실행은 16 PASS/0 FAIL/1 ignored(50.98초). ready/quit·G4 읽기/종료와 binary 3,000출력/4chat 12,000출력 paging 포함이다. 수정 파일 rustfmt(skip_children)/diff 검사 PASS. 동일 라이브러리 검사를 다시 실행하지 않고 앞 결과를 재사용한다. 기본 전체 명령의 첫 실행은 실패였고, 수정 후 영향 target이 통과했다는 범위를 유지한다.
+- 로그는 `.artifacts/m5-integration/2026-10-29`에 보존했다. 기본 검사에서 제외된 항목은 합격으로 세지 않는다. 다음은 화면 가시성 조건을 충족하는 G6 수집과 별도 ignored 안전 게이트·실제 공급자/Windows/출시 검증이다. 사용자 계정·실제 모델·원본 프로젝트 변경·main 병합·push 없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 native 창 상태 진단 `49e9821` 구현으로 진척이다. clean HEAD의 QA mv216I/5Xk2Sw를 실행했다. 준비 회차는 약 10.36초에 잠시 hidden→visible, 약 50.18초에 다시 hidden이 되어 FAIL이었다. native 기록은 포커스 상실 후 hide 이벤트, visible:true/minimized:false이며 lock/unlock/suspend/resume 이벤트는 없었다. 가림 가능성을 시사하지만 원인을 확정하지 않는다. 측정 10회는 미실행이며 반복 재시도하지 않았다.
 - 정상 종료·관측 PID 부재·DB clean을 확인해 fixture를 정리했고, `.artifacts/m5-packaged-output-qa/5Xk2Sw`에 원시 기록과 빌드/정리 증거를 보존한 뒤 QA 앱과 중복 임시 로그를 삭제했다. 화면 유지 재요청 없이 독립 가능한 누적 회귀로 전환했다.
 - `npm test` 608/608 PASS(24.3초), `pnpm build` PASS. `CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 cargo test -p hello-agent-sidecar --locked`는 실행 중(session88297, `/tmp/m5-sidecar-49e9821.log`); 총 719개 중 장시간 3,000출력 테스트도 포함되어 아직 결과를 확정하지 않았다. 다음 턴은 이 동일 세션을 poll하고 실패가 있으면 수정한다. 중복 실행하지 않는다.
