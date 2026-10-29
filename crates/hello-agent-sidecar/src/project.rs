@@ -3823,7 +3823,7 @@ impl ProjectManager {
 
     fn diff_entries(&self, active: &ActiveProject) -> Result<Vec<DiffEntry>, ProjectFailure> {
         let worktree = self.worktree_capability(active)?;
-        let output = self.git_limited_bytes_at(
+        let tracked_child = self.spawn_git_control(
             &worktree,
             [
                 "diff",
@@ -3835,20 +3835,24 @@ impl ProjectManager {
                 active.base_commit.as_str(),
                 "--",
             ],
-            &[0],
-            DIFF_MAX_BYTES,
         )?;
-        let fields = output
+        // Both scans read the same verified directory but are not an atomic
+        // snapshot. Overlap their process startup without caching either scan.
+        // Drain both pipes concurrently so neither child's deadline is spent
+        // waiting for the other scan to release pipe backpressure.
+        let untracked_child = self.spawn_git_control(
+            &worktree,
+            ["ls-files", "--others", "--exclude-standard", "-z", "--"],
+        );
+        let (output, untracked) = Self::finish_git_limited_pair(
+            tracked_child, untracked_child, DIFF_MAX_BYTES,
+        );
+        let fields = output?
             .split(|byte| *byte == 0)
             .filter(|field| !field.is_empty())
             .map(protocol_git_path)
             .collect::<Result<Vec<_>, _>>()?;
-        let untracked = self.git_limited_bytes_at(
-            &worktree,
-            ["ls-files", "--others", "--exclude-standard", "-z", "--"],
-            &[0],
-            DIFF_MAX_BYTES,
-        )?;
+        let untracked = untracked?;
         // A fresh, unchanged snapshot has no blob contents to classify. Keep
         // both scans fresh on every request, but do not start idle batch readers.
         if fields.is_empty() && untracked.is_empty() {
@@ -4118,6 +4122,23 @@ impl ProjectManager {
         S: AsRef<OsStr>,
     {
         Self::finish_git_limited_bytes(self.spawn_git_control(directory, args)?, allowed, limit)
+    }
+
+    fn finish_git_limited_pair(
+        first: StreamingGitChild,
+        second: Result<StreamingGitChild, ProjectFailure>,
+        limit: usize,
+    ) -> (Result<Vec<u8>, ProjectFailure>, Result<Vec<u8>, ProjectFailure>) {
+        std::thread::scope(|scope| {
+            let reader = scope.spawn(move || {
+                second.and_then(|child| Self::finish_git_limited_bytes(child, &[0], limit))
+            });
+            let first = Self::finish_git_limited_bytes(first, &[0], limit);
+            let second = reader.join().unwrap_or_else(|_| {
+                Err(ProjectFailure::recovery("bounded Git reader panicked"))
+            });
+            (first, second)
+        })
     }
 
     fn finish_git_limited_bytes(

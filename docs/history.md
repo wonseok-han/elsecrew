@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 수집기 비용1ms 미만과 채팅 전환/조회 지연을 구분한 진척이다. `b72dcaf`에서 메인이 diff 경로를 조사했다. bindChat의 tree→diff→watch 순서는 실패 시 다음 작업 시작을 막는 계약이므로 유지하고, diff 내부의 독립적인 tracked/untracked Git 조회 시작만 겹치도록 변경했다.
+- 매 요청의 같은 검증된 디렉터리 capability·고정 Git/env·GIT_OPTIONAL_LOCKS=0·출력 제한·기존 timeout/Drop 정리를 유지한다. 최종 구현은 두 bounded stdout을 scoped reader thread와 호출 thread에서 동시에 읽고 두 결과를 회수한 뒤 tracked 결과/경로 파싱을 먼저 검사해 오류 우선순위도 유지한다. 캐시/검사 생략/원본 쓰기 없음. 두 조회가 atomic snapshot이라는 주장은 하지 않는다.
+- 기존 diff5개 PASS(2.15초), Git 프로세스 소유자5개 PASS(0.52초; 동시 자식의 출력/timeout 실패 후 회수 포함), diff 검사 PASS. 결과는 `.artifacts/m5-integration/2026-10-29`에 보존한다. 첫 독립 검토는 untracked pipe backpressure 중 child deadline 소진 결함을 지적했다. 두 pipe 동시 drain으로 수정했고3초 예산/첫 child2.2초 대기/두 번째262144B 출력 후1.2초 대기 회귀를 추가했다. 수정 후 process6+diff5 PASS, 독립 재검토에서 추가 차단 결함 없음으로 확인했다. 실제 화면 latency 감소는 미검증이다.
+- 다음은 독립 검토를 반영하고 기능 파동의 화면 비교에서 지연 변화를 확인하는 것이다. 전체 G6/실제 공급자/Windows/출시 미완료, main 병합/push 없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 수집기 cursor 읽기/오버헤드 계측 `f1b6736` 구현으로 진척이다. clean HEAD의 QA5mLLQX를 단회 WlKYbJ/session93223으로 실행해 visible·12,000출력/전체 조회 대조·정상 종료/exit0을 확인했다. 이는 기능 smoke PASS이며 latency 기준 합격이 아니다.
 - renderer 관측 읽기0.1~0.2ms, main 동기 기록0.40~0.94ms였지만 정확 head 표본 최대133.4ms, 다음119.7ms로 기준을 넘었다. 전체 snapshot 복사가 주원인이라는 가설은 이 결과로 뒷받침되지 않는다. 초과는 각각 이전 선택 채팅 live 구간 종료 뒤 새 채팅으로 바뀌기 전 표본이었다. latency에서 이 값을 제외하지 않는다.
 - 같은 실행 transport 진단 최대는 workspace.diff.getSummary130.42ms, workspace.file.watch93.61ms, chat.get91.61ms, agent.outputHead128.38ms/outputPage147.60ms였다. 공유 sidecar에서 전환 요청과 출력 조회가 대기하는 경로가 다음 조사 대상이며, 집계 최댓값만으로 정확 인과를 확정하지 않는다.

@@ -275,6 +275,23 @@ mod tests {
     }
 
     #[test]
+    fn overlapping_scans_drain_large_second_pipe_within_its_own_budget() {
+        let mut first = shell("/bin/sleep 2.2; printf tracked");
+        let mut second = shell("/bin/dd if=/dev/zero bs=262144 count=1 2>/dev/null; /bin/sleep 1.2");
+        first.stdout(Stdio::piped());
+        second.stdout(Stdio::piped());
+        let first = StreamingGitChild::spawn_with_budget(&mut first, Duration::from_secs(3)).unwrap();
+        let second = StreamingGitChild::spawn_with_budget(&mut second, Duration::from_secs(3)).unwrap();
+        let pids = [first.child.id(), second.child.id()];
+        let (tracked, untracked) = super::super::ProjectManager::finish_git_limited_pair(
+            first, Ok(second), 1024 * 1024,
+        );
+        assert_eq!(tracked.unwrap(), b"tracked");
+        assert_eq!(untracked.unwrap().len(), 262144);
+        for pid in pids { assert_reaped(pid); }
+    }
+
+    #[test]
     fn git_budget_handles_many_interactive_round_trips() {
         let mut command = shell("while IFS= read -r line; do printf 'x'; done");
         command.stdin(Stdio::piped()).stdout(Stdio::piped());
