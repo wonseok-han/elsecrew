@@ -1,4 +1,4 @@
-import { formatChatNotice } from "./chat-notice.ts";
+import { chatConnectionTarget, formatChatNotice } from "./chat-notice.ts";
 import { AgentOutputPanel } from "./agent-output-panel.tsx";
 import { markStartScreenReady } from "./startup-mark.ts";
 import { emptyProjectGuide, parseProjectGuide, projectGuideKey, projectGuideStep, type ProjectGuidePreference } from "./project-guide-state.ts";
@@ -23,7 +23,7 @@ import { resolveM5Bridge, type SupportedM5Bridge } from "./bridge-boundary.ts";
 import { canAbandonAgentRecovery, ChatUiController } from "./chat-state.ts";
 import { WorkbenchDock } from "./workbench-dock.tsx";
 import { MessageBody } from "./message-body.tsx";
-import { ProviderLogin } from "./provider-login.tsx";
+import { ProviderLogin, type ConnectionReveal } from "./provider-login.tsx";
 import { ApprovalCard } from "./approval-card.tsx";
 import { ChatWorkspaceDiscard } from "./chat-workspace-discard.tsx";
 import { ChatApplicationPreview } from "./chat-application-preview.tsx";
@@ -141,6 +141,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [applicationBaseline, setApplicationBaseline] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [connectionReveal, setConnectionReveal] = useState<ConnectionReveal>();
   const [discardedWorkspaceNotice, setDiscardedWorkspaceNotice] = useState(false);
   const [returnToNewChat, setReturnToNewChat] = useState(false);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
@@ -263,12 +264,15 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
 
       {discardedWorkspaceNotice && !snapshot.project && <p className="m5-notice" role="status">{t("m5.discard.done")}</p>}
       {snapshot.notice && <p className="m5-notice" role="status">{snapshot.noticeKey ? t(snapshot.noticeKey) : snapshot.notice}</p>}
-      {chat.notice && <p className="m5-notice m5-chat-notice" role="status">{formatChatNotice(chat, lang)}</p>}
+      {chat.notice && <p className="m5-notice m5-chat-notice" role="status">{formatChatNotice(chat, lang)}{chatConnectionTarget(chat) && <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => {
+        const provider = chatConnectionTarget(chat);
+        if (provider) setConnectionReveal(current => ({ provider, sequence: (current?.sequence ?? 0) + 1 }));
+      }}>{t("m5.setup.openConnection", { name: chatConnectionTarget(chat) === "codex" ? "Codex" : "Claude Code" })}</button>}</p>}
       {leaveError && <p className="m5-error" role="alert">{t("m5.feedback.leaveError")}</p>}
       <StorageAdmissionNotice admission={admission} />
       <WorkStatusNotice bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])} />
       {!snapshot.project && <GuidedStart disabled={!admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked} onChoose={() => void controller.chooseProject()} />}
-      <ProviderLogin disabled={!admissionReady} compact={Boolean(snapshot.project)} />
+      <ProviderLogin disabled={!admissionReady} compact={Boolean(snapshot.project)} reveal={connectionReveal} />
       {snapshot.error && (
         <section className="m5-error" role="alert">
           <strong>{t(snapshot.error.messageKey)}</strong>

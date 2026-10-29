@@ -1,6 +1,8 @@
 // 한국어 문구 리소스. 이 파일의 키 집합이 다른 언어 파일의 기준이 된다.
 // 보간은 {name} 형태 — t("key", { name }) 로 치환.
 export const ko = {
+  "m5.setup.openConnection": "{name} 연결 확인",
+  "m5.setup.requestedConnection": "{name}의 설치와 로그인을 확인하세요. 연결 후 대화로 돌아가 실행 버튼을 다시 눌러 주세요.",
   "m5.output.title": "실행 출력",
   "m5.output.history": "저장된 출력 탐색",
   "m5.output.first": "처음 기록부터 보기",

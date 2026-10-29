@@ -2,6 +2,8 @@ import type { MessageKey } from "./ko";
 
 // 영어 문구. ko와 동일한 키를 모두 가져야 한다(Record<MessageKey>로 강제).
 export const en: Record<MessageKey, string> = {
+  "m5.setup.openConnection": "Check {name} connection",
+  "m5.setup.requestedConnection": "Check installation and sign-in for {name}. Once connected, return to the conversation and press the run button again.",
   "m5.output.title": "Run output",
   "m5.output.history": "Saved output history",
   "m5.output.first": "Read from the beginning",

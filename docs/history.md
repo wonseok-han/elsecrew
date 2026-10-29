@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- 이전 턴은 be4881d의 discard 재개·화면 해제 수정/회귀/독립 검토로 진척이었다. 이번에는 해당 clean HEAD에서 실행 전 연결 안내를 직접 연결했다. capability가 설치 누락/불완전/지원 버전 불일치/로그인 누락/만료로 실행을 거절하면 대화 알림에 해당 Codex·Claude Code 연결 확인 버튼을 표시한다.
+- 버튼은 기존 연결 관리 영역을 펼치고 스크롤·키보드 포커스를 이동한다. 대상 공급자가 선택되지 않았다면 선택 영역을 열어 명시적으로 추가할 수 있게 한다. 선택 목록/설치/로그인/모델 실행을 자동 변경하지 않고, 연결 후 사용자가 실행 버튼을 다시 누르도록 ko/en 안내를 제공한다. 복구 잠금·실행 중·플랫폼 불가·모델 불일치에는 로그인 유도 버튼을 표시하지 않는다. 프로젝트/편집/작성 중 대화는 유지한다.
+- TypeScript와 diff 검사 통과. 기존 run preflight 및 backend 실행 권한은 변경하지 않았다. 이번 안내의 실제 작업대 클릭 회귀는 기능 파동의 통합 UI 검증에서 수행할 예정이다. 작은 UI 연결마다 독립 검토/전체 빌드를 반복하지 않았다.
+- 다음은 앱 기본 역할 설정을 기존 프로젝트별 역할/새 채팅 snapshot 계약과 연결하는 작업이다. 일반 discard 통합/활성화, G6/실제 공급자/Windows/출시도 남아 있으며 목표는 계속 active다. 모델 호출·설치·인증 변경·패키지 교체·main병합·push없음.
+
+### 2026-10-29 · by Codex
+
 - b1ef2c1 기준 일반 작업 복사본 버리기의 실패 복구/화면 정리 회귀를 마감했다. 원자적 chat projection에 전체 주소·task·원래 chatRevision의 discard_receipt를 함께 저장하며, 응답 유실 후 inspect 재조회와 같은 commit 재전송은 정확히 일치하는 완료 기록만 반환한다. SQLite events INSERT 직후 강제 실패와 DB 재시작에서도 원본·대화 기록을 보존하며 재시도는 상태 메시지를 한 번만 남긴다.
 - 독립 검토 P1 두 건(프로젝트 watcher 미해제, 응답 유실 뒤 확인창 close/remount 시 재개 불가)을 수정했다. releaseView 응답 검증 후 로컬 화면을 비우며 실패 시 완료 결과를 보유해 release만 재시도한다. 재검토자는 두 P1 해소/새 차단 결함 없음으로 마감했다. 제품 gate는 Rust test-only/renderer false를 유지하며 활성화 승인이 아니다.
 - 검증: discard 관련 Rust 8 PASS + owned fake-actual dispatcher 1 PASS, watcher 해제 1 PASS, TypeScript PASS. 테스트 초기 fixture FK·legacy helper·Drop 타입 이동 오류는 수정 후 해당 검사를 통과했다. 보류 start/cancel 및 소유 중 fake actual run은 dispatcher에서 거절되고 chat/manifest가 유지된다. legacy/actual 종료 증거 보존, writer/poison/recovery/save 차단도 확인했다.

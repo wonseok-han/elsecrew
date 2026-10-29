@@ -32,3 +32,11 @@ export function agentContextConfirmation(total: number, lang: "ko" | "en"): stri
   return (lang === "ko" ? ko : en)["m5.chat.contextConfirmation"]
     .replace("{total}", String(total)).replace("{omitted}", String(total - 100));
 }
+
+/** Only setup failures should offer connection management; recovery stays separate. */
+export function chatConnectionTarget(value: Notice): "codex" | "claude" | null {
+  if (value.noticeKey !== "m5.agentNotice.blocked" || !value.noticeContext) return null;
+  const { reason, runtime } = value.noticeContext;
+  if (!["notInstalled", "installationIncomplete", "unsupportedVersion", "notAuthenticated", "authExpired"].includes(reason ?? "")) return null;
+  return runtime === "codex" ? "codex" : "claude";
+}

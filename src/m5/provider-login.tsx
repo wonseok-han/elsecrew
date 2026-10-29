@@ -8,7 +8,9 @@ import { ProviderInstall } from "./provider-install.tsx";
 import { shouldPollLogin } from "./provider-login-poll.ts";
 import { readLoginDiagnostic, type LoginDiagnostic } from "./provider-login-diagnostic.ts";
 
-export function ProviderLogin({ disabled, compact = false }: {disabled: boolean; compact?: boolean}) {
+export type ConnectionReveal = { provider: LoginProvider; sequence: number };
+
+export function ProviderLogin({ disabled, compact = false, reveal }: {disabled: boolean; compact?: boolean; reveal?: ConnectionReveal}) {
   const { t } = useI18n();
   const [selected, setSelected] = useState(readProviderSelection);
   const [selectionExpanded, setSelectionExpanded] = useState(!compact && selected.length === 0);
@@ -27,6 +29,19 @@ export function ProviderLogin({ disabled, compact = false }: {disabled: boolean;
   const loginNeedsAttention = selected.some(provider => loginAttention[provider]);
   const needsAttention = installBlocked || installAttention || loginNeedsAttention || saveFailed;
   const showManagement = !compact || managementExpanded || needsAttention;
+  const managementRef = useRef<HTMLElement>(null);
+  const revealedSequence = useRef<number | null>(null);
+  useEffect(() => {
+    if (!reveal || revealedSequence.current === reveal.sequence) return;
+    revealedSequence.current = reveal.sequence;
+    setManagementExpanded(true);
+    if (!selected.includes(reveal.provider)) setSelectionExpanded(true);
+    requestAnimationFrame(() => {
+      if (revealedSequence.current !== reveal.sequence) return;
+      managementRef.current?.scrollIntoView({ block: "start" });
+      managementRef.current?.focus({ preventScroll: true });
+    });
+  }, [reveal, selected]);
   const navigate = (next: typeof step) => { if (!installBlocked) setStep(next); };
   const select = (providers: LoginProvider[]) => {
     if (disabled) return;
@@ -35,11 +50,12 @@ export function ProviderLogin({ disabled, compact = false }: {disabled: boolean;
     setSelectionExpanded(false);
     setStep("install");
   };
-  return <section className={compact ? "m5-agent-management m5-agent-management-compact" : "m5-agent-management"}>
+  return <section ref={managementRef} tabIndex={-1} aria-label={t("m5.setup.management")} className={compact ? "m5-agent-management m5-agent-management-compact" : "m5-agent-management"}>
     {compact && <button className="m5-management-toggle" type="button" aria-expanded={showManagement} aria-controls="m5-agent-management-content" disabled={needsAttention} onClick={() => setManagementExpanded(value => !value)}>
       {t("m5.setup.management")}<span>{t(needsAttention ? "m5.setup.managementAttention" : showManagement ? "m5.setup.managementHide" : "m5.setup.managementShow")}</span>
     </button>}
     <div id="m5-agent-management-content" hidden={!showManagement}>
+    {reveal && <p className="m5-notice">{t("m5.setup.requestedConnection", { name: reveal.provider === "codex" ? "Codex" : "Claude Code" })}</p>}
     {!compact && <nav className="m5-setup-navigation" aria-label={t("m5.setup.steps.label")}>
       {(["agents", "install", "login"] as const).map((item, index) => <button type="button" key={item}
         aria-current={step === item ? "step" : undefined}
