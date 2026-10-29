@@ -2,6 +2,13 @@
 
 ### 2026-10-29 · by Codex
 
+- `8ed1fcf` clean checkout의 QA j3eXsH로 준비1회+본10회 연속 화면 수집(vXnICw/session81882)을 끝냈다. 11회 모두 visible 유지·각12,000 persisted row의 ID/순서/결속 대조·history/latest·정상 종료를 통과했다. 각 run의 pre-write stamp 3,000개도60초 안에 수집됐으며 실제 commit/모든 행 paint deadline을 증명하는 값은 아니다.
+- 본10회 정확 head 일부 표본의 회차별 최대 latency는141.3/116.1/25.6/112.5/138.7/124.8/104.7/64.5/67.7/67.4ms였다. 최대141.3ms가100ms를 넘어 series FAIL/exit1이다. 전체 process-tree sampled peak는578.625MiB로800MiB 미만이지만 idle/retained/full G6 증거는 아니다. superseded/interrupted 표본을0으로 만들거나 모든 row paint로 확대하지 않는다.
+- 100ms 초과 표본은 모두 각12초 live 관측 종료 시점의 약56~168ms 이내였다. 해당 경계에서는 전체 observer snapshot structuredClone·관측 결과 직렬화·main의 동기 persist·채팅 전환이 일어나므로 제품 자체 지연이라고 단정하지 않는다. 다음은 이 경계의 수집 오버헤드를 줄이거나 분리 계측한 뒤 원인을 검증하는 것이다. 기존 초과 결과는 그대로 보존한다.
+- 11회 fixture는 종료/PID/DB 확인 뒤 정리됐고, 종료된 모든 관측 PID 부재를 다시 확인한 뒤 QA 앱과 중복 임시 증거를 삭제했다. 전체 원시 결과·스크린샷·빌드·정리 증거는 `.artifacts/m5-packaged-output-qa/vXnICw`에 보존한다. 사용자의 창 유지 요청은 이번 수집 완료로 끝났다. 실제 모델/사용자 프로젝트 변경·main 병합/push 없음. 전체 G6/실제 공급자 전체/Windows/출시는 미완료다.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 저장 경합/종료 원시 증거 재확보로 진척이다. 메인이 기본 ignored인 `text_candidate_os_isolated_` 두 native/proxied lifecycle 검사를 임시 toy CLI·OS sandbox·loopback으로 실행했다. 최초 두 실패는 새 projects 격리 인자가 argv 기대값에 빠진 테스트 불일치였다. 프로필/작업 복사본과 모든 상위 경로를 독립 BTreeSet으로 열거해 untrusted 값과 마지막 -c 인자를 정확히 대조하도록 보완했다. 쓰기 역할에도 같은 격리 인자 대조를 적용하며 제품 실행 인자를 완화하지 않았다.
 - 수정 후 두 OS 격리 검사 PASS(19.51초), diff 검사 PASS. 원시 실패/성공 로그는 `.artifacts/m5-integration/2026-10-29`에 보존한다. 실제 Codex/Claude 계정·외부 모델·사용자 프로젝트는 사용하지 않았다.
 - 사용자가 약20분 이상의 시험 창 유지 가능을 응답했다. 다음은 clean commit에서 화면 반복 측정을 재개하는 것이다. 전체 G6/실제 공급자/Windows/출시는 미완료, main 병합/push 없음.
