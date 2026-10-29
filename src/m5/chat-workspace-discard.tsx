@@ -5,7 +5,7 @@ import { validateProjectCatalogResult, type ChatDiscardInspection } from "./cont
 
 /** The host must prevent unsaved editor loss and clear its view after success. */
 export function ChatWorkspaceDiscard({ chat, disabled, onCompleted }: {
-  chat: ChatRecordV1; disabled: boolean; onCompleted: (chat: ChatRecordV1) => void;
+  chat: ChatRecordV1; disabled: boolean; onCompleted: (chat: ChatRecordV1) => Promise<void>;
 }) {
   const { t } = useI18n();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -47,7 +47,7 @@ export function ChatWorkspaceDiscard({ chat, disabled, onCompleted }: {
         if (epoch !== generation.current || result.action !== "discardChatWorkspace") return;
         committed.current = result.chat;
       }
-      onCompleted(committed.current);
+      await onCompleted(committed.current);
       dialog.current?.close();
     } catch { if (epoch === generation.current) setError(true); }
     finally { if (epoch === generation.current) { pending.current = false; setBusy(false); } }

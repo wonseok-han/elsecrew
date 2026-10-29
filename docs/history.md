@@ -2,6 +2,14 @@
 
 ### 2026-10-29 · by Codex
 
+- b1ef2c1 기준 일반 작업 복사본 버리기의 실패 복구/화면 정리 회귀를 마감했다. 원자적 chat projection에 전체 주소·task·원래 chatRevision의 discard_receipt를 함께 저장하며, 응답 유실 후 inspect 재조회와 같은 commit 재전송은 정확히 일치하는 완료 기록만 반환한다. SQLite events INSERT 직후 강제 실패와 DB 재시작에서도 원본·대화 기록을 보존하며 재시도는 상태 메시지를 한 번만 남긴다.
+- 독립 검토 P1 두 건(프로젝트 watcher 미해제, 응답 유실 뒤 확인창 close/remount 시 재개 불가)을 수정했다. releaseView 응답 검증 후 로컬 화면을 비우며 실패 시 완료 결과를 보유해 release만 재시도한다. 재검토자는 두 P1 해소/새 차단 결함 없음으로 마감했다. 제품 gate는 Rust test-only/renderer false를 유지하며 활성화 승인이 아니다.
+- 검증: discard 관련 Rust 8 PASS + owned fake-actual dispatcher 1 PASS, watcher 해제 1 PASS, TypeScript PASS. 테스트 초기 fixture FK·legacy helper·Drop 타입 이동 오류는 수정 후 해당 검사를 통과했다. 보류 start/cancel 및 소유 중 fake actual run은 dispatcher에서 거절되고 chat/manifest가 유지된다. legacy/actual 종료 증거 보존, writer/poison/recovery/save 차단도 확인했다.
+- 새 scripts/m5-discard-dialog-ui.mjs로 실제 Electron renderer + 가짜 transport의 동의/취소→응답 유실→close/remount→완료 receipt 재전송→release 실패/재시도를 확인했다. requests2/messages1/releases2/completion1 PASS, 확인창 문구/버튼을 직접 확인했다. 실제 sidecar 통합·모델 시험으로 간주하지 않는다. 증거 .artifacts/m5-discard-dialog/{m5-discard-dialog-Wqocr7,m5-discard-dialog-o9R59Y}. 최신 시험 소유 PID22215/22219/22220/22223 부재/정상 종료 후 임시 프로필·번들을 정리했고 이전 시험도 정상 종료 후 자체 경로 정리했다.
+- 다음: 일반 discard의 실제 sidecar+작업대 통합 및 활성화 판단, 앱 기본 역할 설정/실행 전 연결 안내 구현. G6 메모리·가림 원인·실계정·Windows·출시는 계속 미완료다. 전체 개발 완료나 성능 합격은 아니며 일반 패키지 교체·사용자 프로젝트·모델 호출·main병합·push없음.
+
+### 2026-10-29 · by Codex
+
 - 이전 턴은 복사본 버리기 핵심/CAS·재시도 회귀 구현으로 진척이었다. clean ddcde2a에서 inspectChatDiscard/discardChatWorkspace typed catalog 계약과 dispatcher를 연결했다. 전체 주소·task·chat revision을 재검증하고 명시 확인을 요구하며 활성 native owner/보류 start/cancel 작업을 차단한다. chat.get 기존 계약은 바꾸지 않고 별도 inspection으로 aggregate revision을 제공한다.
 - 작업대 확인창과 완료 후 로컬 편집/대화 화면 해제를 작성했다. 미저장 파일/진행 작업이 있으면 진입하지 못하고 native modal이 다른 화면 조작을 막는다. 동의 체크·취소·오류 재시도·ko/en 문구가 있으며, 요청이 성공했으나 화면 정리가 실패한 경우 같은 mutation을 다시 보내지 않도록 성공 결과를 보유한다. 이 UI의 실제 렌더링·흐름 시험은 아직 하지 않았다.
 - 제품 dispatcher는 cfg(test) 밖에서 거절하고 작업대 REVIEW_DISCARD_ENABLED도 false다. 따라서 일반 앱에는 아직 활성화하지 않았다. 검사 중 TS union 삽입 구문 오류를 바로잡았고 TypeScript/cargo check 통과, catalog 계약17개 통과, diff check 통과했다. React 지침으로 hooks·비동기 응답 세대·modal/checkbox 접근성·중복 제출을 자체 확인했다.
@@ -54,6 +62,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **2026-10-29 일반 discard 완료 재개**: 응답 유실 후 dialog가 재생성돼도 inspect가 exact discard_receipt를 돌려주어 중복 쓰기 없이 재개한다. workspace watcher 제거만으로 project watcher는 종료되지 않으므로 완료 후 releaseView 응답을 확인한 뒤 화면을 비운다. 현재 기능은 gated checkpoint이며 아직 일반 앱에 활성화하지 않았다.
 
 - **2026-10-29 현재 QA 인계**: watcher 읽기 비동기화79daaa9 후 단회/반복 본1~4 지연은100ms 이내였지만 본5의 latest clipping으로 eSjVnl은FAIL이다. 7db103f 진단3회는 재현되지 않았다. 내부 scroll은bottom/창visible였으며 부모좌표·trusted입력 진단으로 원인 확인이 남는다. 이를 전체G6 합격으로 보지 않는다.
 

@@ -1072,3 +1072,76 @@ fn cli_rejects_missing_or_extra_arguments_before_touching_stdio() {
         assert_eq!(error.kind(), "invalidArguments");
     }
 }
+
+#[test]
+fn review_discard_dispatcher_rejects_deferred_native_start_and_cancel() {
+    let (_root, path) = database();
+    let instance = "discard_busy";
+    let mut session = SidecarSession::new(instance.into(), agent_runtime::AgentRuntime::blocked());
+    session.start_admission(&path);
+    wait_until_admitted(&mut session);
+    let AdmissionState::Ready { sidecar, .. } = &mut session.admission else {
+        panic!("not ready")
+    };
+    let request = request_value(
+        instance,
+        "discard",
+        "project.catalog",
+        json!({"action":"inspectChatDiscard","chatId":"chat_a","taskId":"task_a","projectId":"project_a","worktreeId":"worktree_a","workspaceIdentity":"workspace_a"}),
+    );
+    for pending_start in [true, false] {
+        if pending_start {
+            sidecar.pending_agent_starts.insert(
+                "pending".into(),
+                PendingAgentStart {
+                    runtime: "codex".into(),
+                    request: request.clone(),
+                    input: hello_agent_protocol::agent_adapter_v1::AgentRunStartRequestV1 {
+                        chat_id: "chat_a".into(),
+                        role_id: "coding".into(),
+                        input_message_ids: vec![],
+                        expected_capability_fingerprint: "unused".into(),
+                    },
+                    reservation: None,
+                    process: None,
+                    result: None,
+                },
+            );
+        } else {
+            sidecar.pending_agent_cancels.insert(
+                "pending".into(),
+                (
+                    request.clone(),
+                    agent_runtime::RunIdentity {
+                        chat_id: "chat_a".into(),
+                        task_id: "task_a".into(),
+                        project_id: "project_a".into(),
+                        worktree_id: "worktree_a".into(),
+                        workspace_identity: "workspace_a".into(),
+                        run_id: "run_a".into(),
+                    },
+                ),
+            );
+        }
+        for action in ["inspectChatDiscard", "discardChatWorkspace"] {
+            let mut input = request.clone();
+            input.params["action"] = json!(action);
+            let error = sidecar
+                .handle_request(input)
+                .unwrap()
+                .response
+                .unwrap()
+                .error
+                .unwrap();
+            assert_eq!(error.code, "requestBlocked");
+            assert!(error.detail.contains("idle native execution"));
+        }
+        sidecar.pending_agent_starts.clear();
+        sidecar.pending_agent_cancels.clear();
+    }
+    assert!(sidecar
+        .storage
+        .projection_records("chat")
+        .unwrap()
+        .is_empty());
+}

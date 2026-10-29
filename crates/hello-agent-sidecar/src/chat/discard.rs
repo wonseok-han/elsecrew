@@ -9,6 +9,39 @@ impl G5Manager {
         address: &WorkspaceAddress,
         task_id: &str,
     ) -> Result<Value, ProjectFailure> {
+        let committed = chat_projection_record(storage, &address.chat_id)?;
+        if committed["state"] == "discarded" && committed["record"]["state"] == "discarded" {
+            let revision = committed
+                .get("discard_receipt")
+                .and_then(|receipt| receipt["chatRevision"].as_u64())
+                .filter(|value| *value > 0 && *value <= 9_007_199_254_740_991)
+                .ok_or_else(|| {
+                    ProjectFailure::recovery("discarded chat has no normal discard receipt")
+                })?;
+            let receipt = json!({"chatId":address.chat_id,"taskId":task_id,"projectId":address.project_id,
+                "worktreeId":address.worktree_id,"workspaceIdentity":address.workspace_identity,"chatRevision":revision});
+            validate_g5_payload_v1("chatRecord", &committed["record"])
+                .map_err(|error| ProjectFailure::manifest(error.to_string()))?;
+            if committed.get("discard_receipt") != Some(&receipt) {
+                return Err(ProjectFailure::manifest(
+                    "discard inspection receipt identity differs",
+                ));
+            }
+            for key in [
+                "chatId",
+                "taskId",
+                "projectId",
+                "worktreeId",
+                "workspaceIdentity",
+            ] {
+                if committed["record"][key] != receipt[key] {
+                    return Err(ProjectFailure::manifest(
+                        "discard inspection chat identity differs",
+                    ));
+                }
+            }
+            return Ok(receipt);
+        }
         let (stored, _) = self.validate_workspace_discard(storage, projects, address, task_id)?;
         Ok(
             json!({"chatId":address.chat_id,"taskId":task_id,"projectId":address.project_id,
@@ -26,6 +59,30 @@ impl G5Manager {
         expected_revision: u64,
         request_id: &str,
     ) -> Result<Value, ProjectFailure> {
+        let receipt = json!({"chatId":address.chat_id,"taskId":task_id,
+            "projectId":address.project_id,"worktreeId":address.worktree_id,
+            "workspaceIdentity":address.workspace_identity,"chatRevision":expected_revision});
+        let committed = chat_projection_record(storage, &address.chat_id)?;
+        if committed["state"] == "discarded"
+            && committed["record"]["state"] == "discarded"
+            && committed.get("discard_receipt") == Some(&receipt)
+        {
+            // A lost response must not require another state transition or write.
+            validate_g5_payload_v1("chatRecord", &committed["record"])
+                .map_err(|error| ProjectFailure::manifest(error.to_string()))?;
+            for key in [
+                "chatId",
+                "taskId",
+                "projectId",
+                "worktreeId",
+                "workspaceIdentity",
+            ] {
+                if committed["record"][key] != receipt[key] {
+                    return Err(ProjectFailure::manifest("discard receipt identity differs"));
+                }
+            }
+            return Ok(committed["record"].clone());
+        }
         let (mut stored, manifest) =
             self.validate_workspace_discard(storage, projects, address, task_id)?;
         if stored["last_event_sequence"].as_u64() != Some(expected_revision) {
@@ -47,6 +104,7 @@ impl G5Manager {
             None,
             "Workspace discarded. Original files and conversation history were preserved.",
         )?;
+        stored.insert("discard_receipt".into(), receipt);
         stored.insert("record".into(), chat.clone());
         stored.insert("state".into(), json!("discarded"));
         stored.insert("last_message".into(), message);

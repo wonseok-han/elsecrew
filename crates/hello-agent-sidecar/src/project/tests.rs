@@ -3614,6 +3614,14 @@ fn releasing_project_view_removes_watchers_without_abandoning_snapshot() {
             },
         );
     }
+    fixture.manager.finish_workspace_discard(&WorkspaceAddress {
+        chat_id: "chat_a".into(),
+        project_id: fixture.project_id.clone(),
+        worktree_id: "worktree_test".into(),
+        workspace_identity: "identity_test".into(),
+    });
+    assert_eq!(fixture.manager.watchers.len(), 2);
+    assert!(fixture.manager.watchers.contains_key(&fixture.project_id));
     let before = fixture
         .storage
         .projection_record("project", &fixture.project_id)
