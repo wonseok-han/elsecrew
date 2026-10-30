@@ -2,6 +2,13 @@
 
 ### 2026-10-30 · by GPT-6
 
+- 이전 턴은 시작 heap/RSS 분리 진단으로 진척이었다. 기준HEAD c65c9ee의 일반 macOS arm64 패키지를 재생성했다. 실행 중인 패키지 보호 검사를 통과했고 Electron 공식 런타임 다운로드와 Rust release 빌드가 완료됐다. out의 앱 한 벌만 교체했고 ZIP/별도 worktree는 만들지 않았다.
+- 최신 일반 패키지 --no-cdp-project mCtIJG에서 자체 임시 프로필/두 가짜 프로젝트로40표본을 수집했다. 최대391,905,280B(373.75MiB), 정상 종료 confirmed, 결과 NOT_READY(exit2)다. 최대 표본의 main144,031,744B/GPU76,333,056B/utility41,074,688B/renderer113,721,344B/sidecar16,744,448B를 별도 OS process identity와 대조했다. CDP·로그인·모델 호출은 없었다.
+- 과거 같은 수집기의371~417MiB 변동과 기존 초과 결과는 유지한다. 이번1회 기준 이내로 메모리 결함/G6를 닫지 않는다. 시작2프레임 readiness 이후 연속 표시 여부는 미측정이며 큰 fixture/loaded/retained 검증도 아니다. 개발 heap447MiB와 직접 회귀 비교하지 않는다. 다음은 전체G6의 남은 실제 표시/큰 fixture/잔류 메모리 및 출력 가림 증거를 통합하는 일이다.
+- .artifacts/m5-packaged-memory/mCtIJG에 패키지 hash/결과/프로세스 역할/빌드 로그/정리 증거를 보존했다. 정상 종료와 관측된5개PID 부재 확인 뒤 임시 프로필·프로젝트를 삭제했다. 현재 out309MiB/target약1.0GiB이며 기존 앱 데이터·인증·원본 프로젝트는 변경하지 않았다. 제품 완료/Windows 검증/실제 공급자 전체 흐름은 미완료, main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
 - 이전 턴은 출력 진단 진입점 수정/4스트림 관측으로 진척이었다. 시작 RSS 초과의 개선 대상을 분리하려고 기존 idle-only 진단에 RSS 표본 종료 후 main process.memoryUsage/V8 heap 및 renderer의 근사 performance.memory를 추가했다. RSS 기준을 heap 값으로 대체하거나 강제GC/안전·렌더링 설정 변경은 하지 않는다.
 - 최신 개발 UI kQGvXo는 idle 최대468,910,080B(447.19MiB)로400MiB 초과/FAIL. RSS 창 뒤 main heapUsed7,136,252B(6.81MiB), renderer usedJSHeap3,869,072B(3.69MiB)를 관측했다. 프로세스 RSS와 heap은 같은 범위/시점이 아니며 이것만으로 원인을 확정하지 않는다. JS 번들만 줄여 해결된다고 주장할 근거는 부족하다. resource timing 배열은 빈 값이므로 Monaco 미로딩 증거로 쓰지 않는다.
 - 일반 패키지와 달리 이 진단은 개발 harness/renderer 자동 관측/짧은 시작 표본을 포함하므로 기존417.03MiB와 직접 회귀 비교하지 않는다. 기준 초과는 보존하고 전체G6 합격으로 확대하지 않는다. 번들 조사에서 main152KiB/renderer entry560KiB 및 분리된 Monaco editor chunk2.2MiB를 확인했다.
