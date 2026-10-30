@@ -4,7 +4,7 @@
 
 - f7e2c8e의 패키징을 완료한 뒤 새 승인에 따라 Codex 짧은 응답 진단1회를 실행했다. run agent_run_33b6607ddc24456a9f73a0a24640e67e는 `turn item start user echo shape`에서 failed·cleanExit, processesProvenGone=true로 끝났다. 원본/복사본 hello.txt는 original\n 유지, 정상 quit 뒤 sidecar56026 clean_shutdown_at06:55:57Z를 확인했다. 승인1회 소진·재시도없음. 증거는 .artifacts/m5-codex-item-checkpoint-2026-10-30이다.
 - 실제 CLI0.166.0-alpha.5.1 생성 스키마의 ThreadItem **바깥 공통 속성** startedAtMs/completedAtMs(선택 nullable int64)을 private userMessage/reasoning 검사기가 거절하는 호환 결함을 오프라인으로 재현했다. 두 속성만 Option<i64>로 허용하고 폐기하며 unknown/type/overflow/duplicate 거절은 유지했다. 원문은 수집하지 않아 이번 실제 실패의 원인이라고 확정하지 않는다.
-- 수정 전 회귀1개 FAIL, 수정 후 Codex 이벤트34개 PASS. timestamp가 있어도 private 유지·공개 응답 진행·turn 종료 증거를 대체하지 않음을 검증했다. 독립 검토자1명 차단없음, private.rs rustfmt 완료. 다음은 수정 패키지 반영과 별도 승인된 실제 응답 재확인, 이어 Codex 수정/중단·G6/Windows/출시 잔여 검증이다. main병합·push없음.
+- 수정 전 회귀1개 FAIL, 수정 후 Codex 이벤트34개 PASS. timestamp가 있어도 private 유지·공개 응답 진행·turn 종료 증거를 대체하지 않음을 검증했다. 독립 검토자1명 차단없음, private.rs rustfmt 완료. 수정2c06e79의 macOS 패키징도 PASS했고 기존 out 앱 한 개를 교체했다. 다음은 별도 승인된 실제 응답 재확인, 이어 Codex 수정/중단·G6/Windows/출시 잔여 검증이다. main병합·push없음.
 
 ### 2026-10-30 · by GPT-6
 
