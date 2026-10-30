@@ -2,6 +2,13 @@
 
 ### 2026-10-30 · by GPT-6
 
+- 이전 턴은 8826bbd 레거시 시작 응답 수정으로 진척이었다. 취소 wire의 {outcome,runId}를 RunRecord로 오해하던 오류를 수정했다. finish_run 저장 성공 뒤 정확한 run ID로 원장을 읽어 {outcome,runId,run}을 보내고 Electron은 응답 필드·요청 chat/run·state 및 terminationEvidence를 검증한 뒤 renderer에 RunRecord를 반환한다.
+- 첫 구현은 취소 ACK 뒤 chat.get을 조회했으나 독립 검토에서 50개 run 목록 제한으로 완료된 취소를 표시하지 못하는 P2를 발견했다. 해당 경로를 제거하고 직접 원장 응답으로 보완했으며 재검토에서 P2 해소/차단 결함 없음으로 마감했다. raw event/종료 증거/복구 잠금 조건은 변경하지 않는다.
+- 검증: 첫 구현 시 누적 Node 617 PASS, 최종 변경 범위 bridge 61 PASS 및 TypeScript PASS. Rust build PASS, 51개 선행 원장으로 target이 목록 밖인 exact lookup 회귀 1 PASS, 실제 자체 fixture stdio 정상 취소·불확실 취소 2 PASS. unit에서 fixture-child를 직접 시작하려던 시험 구성과 원장 run_id 누락은 수정 후 재검증했다. 다운로드 sandbox 실패는 권한 경로로 고정 의존성을 받아 해결했다. diff check PASS. 증거 .artifacts/m5-bridge-compatibility/2026-10-30.
+- 새 Rust debug 검증 산출물 약792MiB가 재생성됐다. release/배포 ZIP은 만들지 않았고 설치 앱은 교체하지 않았다. 다음은 기능 파동의 일반 native admission/UI 확인 및 G6 메모리/공급자 전체/Windows/출시 검증이다. 전체 완료 아님, 실제 모델/인증/사용자 프로젝트 사용 및 main 병합/push 없음.
+
+### 2026-10-30 · by GPT-6
+
 - 직전 턴은 저장공간 정리로 진척이었다. 15558d8 및 기존 정리 워크로그에서 이어 레거시 데모 시작 응답을 조사·수정했다. sidecar의 {run,streamId}를 엄격 검증 후 renderer 계약인 RunRecord로 변환한다.
 - G5A/G5D agent adapter에서 레거시 시작을 요청 전 거절하고 해당 모드의 데모 버튼을 숨긴다. 가짜 actual adapter 실행은 기존 run.startAgent 경로를 유지한다. raw run.event/run.finished 거절 경계는 약화하지 않았다. native mode의 기존 거절도 유지한다.
 - 검증: Electron bridge 60 PASS(실제 envelope 모양과 두 agent handshake의 무전송 거절 회귀 포함), TypeScript 및 diff check 통과. Rust/패키지 재빌드는 하지 않았으며 설치 앱은 이전 버전이다. 레거시 run.cancel 응답 불일치는 아직 미해결이며 다음에 이어 처리한다.

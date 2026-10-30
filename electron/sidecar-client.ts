@@ -986,8 +986,14 @@ export class SidecarClientV1 {
         return value;
       }
       case "run.cancel": {
-        const value = validateRunRecordV1(response.result);
-        assertResponseField(value, pending.params, "chatId"); assertResponseField(value, pending.params, "runId"); return value;
+        const value = strictObject(response.result, ["outcome", "runId", "run"], "fixture cancel result");
+        assertResponseField(value, pending.params, "runId");
+        if (value.outcome !== "canceled" && value.outcome !== "recoveryRequired") throw new Error("fixture cancel outcome is invalid");
+        const run = validateRunRecordV1(value.run);
+        assertResponseField(run, pending.params, "chatId");
+        assertResponseField(run, pending.params, "runId");
+        if (run.state !== value.outcome) throw new Error("fixture cancel state does not match durable record");
+        return run;
       }
       case "recovery.list": return validateRecoveryPageV1(response.result);
       case "recovery.inspect": {

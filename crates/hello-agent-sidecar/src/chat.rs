@@ -1123,8 +1123,10 @@ impl G5Manager {
                 tracked: &report.tracked,
             },
         )?;
+        // Return the exact persisted run, independent of the bounded chat run list.
+        let result = legacy_cancel_result(storage, run_id, state)?;
         Ok(G5Action {
-            result: json!({"outcome":state,"runId":run_id}),
+            result,
             events: vec![event],
         })
     }
@@ -1648,6 +1650,11 @@ fn chat_projection_record(
     storage
         .projection_record("chat", chat_id)?
         .ok_or_else(|| ProjectFailure::manifest("chat projection is missing"))
+}
+
+fn legacy_cancel_result(storage: &Storage, run_id: &str, state: &str) -> Result<Value, ProjectFailure> {
+    let run = run_projection_record(storage, run_id)?["record"].clone();
+    Ok(json!({"outcome":state,"runId":run_id,"run":run}))
 }
 
 fn run_projection_record(

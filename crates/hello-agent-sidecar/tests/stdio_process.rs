@@ -2118,8 +2118,13 @@ fn binary_cancel_scenario(scenario: &str, clean: bool) {
     let EnvelopeV1::Response(cancel) = receive_envelope(&envelopes) else {
         panic!("cancel")
     };
+    let canceled = cancel.result.unwrap();
+    assert_eq!(canceled["run"]["runId"], run_id);
+    assert_eq!(canceled["run"]["chatId"], chat_id);
+    assert_eq!(canceled["run"]["state"], canceled["outcome"]);
+    assert_eq!(canceled["run"]["terminationEvidence"]["processesProvenGone"], clean);
     assert_eq!(
-        cancel.result.unwrap()["outcome"],
+        canceled["outcome"],
         if clean {
             "canceled"
         } else {

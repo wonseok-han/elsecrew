@@ -13,6 +13,40 @@ mod claude_native;
 mod durable_output;
 
 #[test]
+fn legacy_cancel_returns_exact_durable_run_outside_chat_page() {
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_cancel_page_snapshot");
+    let chat = fixture.create_chat(&snapshot, "cancel page", "req_cancel_page_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let cases: Value = serde_json::from_str(include_str!("../../../../tests/fixtures/m5/g5-v1/cases.json")).unwrap();
+    let mut run = cases["valid"].as_array().unwrap().iter()
+        .find(|case| case["name"] == "valid-cancel-transition").unwrap()["value"]["after"].clone();
+    for field in ["chatId", "taskId", "worktreeId", "workspaceIdentity"] {
+        run[field] = chat[field].clone();
+    }
+    let run_id = "run_target";
+    run["runId"] = json!(run_id);
+    persist_run(&mut fixture.storage, &run, &snapshot, None, "op_cancel_target").unwrap();
+    let projection = run_projection_record(&fixture.storage, run_id).unwrap();
+    for index in 0..51 {
+        let id = format!("run_0000_{index:03}");
+        let mut previous = projection.clone();
+        previous["record"]["runId"] = json!(id);
+        previous["run_id"] = json!(id);
+        fixture.storage.upsert_projection_record(
+            "run", &id, &format!("op_old_{index}"), None, previous,
+        ).unwrap();
+    }
+    let page = fixture.chats.get_chat(&fixture.storage, chat_id, 0, None, 1, false).unwrap();
+    assert!(!page["runs"].as_array().unwrap().iter().any(|run| run["runId"] == run_id));
+    let canceled = legacy_cancel_result(&fixture.storage, run_id, "canceled").unwrap();
+    assert_eq!(canceled["runId"], run_id);
+    assert_eq!(canceled["run"], run_projection_record(&fixture.storage, run_id).unwrap()["record"]);
+    assert_eq!(canceled["run"]["state"], canceled["outcome"]);
+    assert_eq!(canceled["run"]["terminationEvidence"]["processesProvenGone"], true);
+}
+
+#[test]
 fn workspace_watchers_progress_fairly_one_per_poll() {
     let mut fixture = Fixture::new();
     let mut chats = Vec::new();

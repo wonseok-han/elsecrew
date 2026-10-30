@@ -275,6 +275,27 @@ test("agent adapter sessions reject legacy starts before sending a request", asy
   }
 });
 
+test("legacy cancellation validates and returns its exact durable record", async () => {
+  for (const mutation of ["none", "ackId", "state", "missing"] as const) {
+    const { child, client } = createClient();
+    const starting = client.start(); child.stdout.write(`${readyLine()}\n`); await starting;
+    const run = g5Fixture("valid-cancel-transition").after as Record<string, unknown>;
+    const pending = client.cancelRun({ chatId: run.chatId as string, runId: run.runId as string });
+    const checked = mutation === "none" ? pending : assert.rejects(pending);
+    const cancel = JSON.parse(child.writes.at(-1)!);
+    const result: Record<string, unknown> = { outcome: "canceled", runId: run.runId, run };
+    if (mutation === "ackId") result.runId = "run_other";
+    if (mutation === "state") result.outcome = "recoveryRequired";
+    if (mutation === "missing") delete result.run;
+    child.stdout.write(responseLine(cancel.requestId, result));
+    if (mutation === "none") {
+      assert.deepEqual(await checked, run);
+      assert.equal(child.terminations, 0);
+      assert.equal(child.writes.length, 1, "no bounded chat list lookup");
+    } else await checked;
+  }
+});
+
 function measuredCapability(): AgentCapabilitySnapshotV1 {
   const snapshot = {
     schemaVersion: 1 as const,
