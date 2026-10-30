@@ -2,6 +2,13 @@
 
 ### 2026-10-30 · by GPT-6
 
+- 7db00dd 패키지 빌드 PASS 후 기존 out 앱 하나를 교체해 열었다. 남은 승인 Codex중단1회를 자체 임시프로젝트/new chat에서 planning/gpt-6.1-sol/medium/readOnly로 요청했다. 중단 버튼을 조작하기 전에 실패했으므로 중단 검증 PASS가 아니다. run agent_run_baf8ddd407084b09a95248d4c10fd3d6는 06:27:12Z 생성/06:27:30Z failed·cleanExit·processesProvenGone/poisoned=false로 종료됐다. 원본·작업복사본 hello.txt는 모두 original\n 불변이다.
+- 앱 실행정보에서 실패/실행종료확인 및 고정 진단 `turn stream item started`를 확인했다. 새 로그 파일도 동일 단계만 보존했고 정상 종료 뒤에도 읽혔다. 이 진단은 스트림 항목 시작 처리에서 거절됐다는 증거이며 정확한 항목 종류나 필드까지 확정하지는 않는다. 이전 실패와 같은 원인이라고 단정하지 않는다.
+- 앱 메뉴 정상 종료 후 sidecar PID5960 DB clean_shutdown_at06:29:03Z 및 개발앱/sidecar 프로세스 부재 확인. 강제종료없음. .artifacts/m5-approved-live-2026-10-30의 authorization/codex-cancel-record/diagnostics/files/latest-shutdown에 증거를 저장했다. 승인4회 모두 사용·재시도없음이며 추가 실제 모델 호출은 새 승인이 필요하다.
+- 다음은 비용 없는 스트림 파서/항목 계약 조사와 회귀 수정이다. 중단/도구쓰기 Codex 실검증은 아직 실패·미완료이고 G6/Windows/출시 검증도 남는다. 진단 보존의 실제 확인을 에이전트 성공으로 확대하지 않는다. main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
 - 이전 턴은 준비중 안내 오류 수정으로 진척이었다. HEAD93737d3에서 실제 실패의 고정 진단이 앱 종료 후 사라지는 공백을 보완했다. Electron 로그 폴더의 last-provider-checkpoints.json에 공급자별 최대32개 허용 단계명·포착시각·세션UUID만 저장하며 원문·인증·대화·경로·실행ID는 저장하지 않는다. 현재 세션 IPC에 과거 snapshot을 혼합하지 않는다.
 - 저장은 진행1건+최신 대기1건의 비동기 원자 교체다. 빈 새 세션은 마지막 비어 있지 않은 기록을 보존한다. 쓰기 실패는 IPC/실행/종료를 실패시키지 않으며 종료를 저장에 종속시키지 않는다(급작스러운 종료 시 최신 진단 유실 가능). 검토자가 찾은 로그 폴더 symlink 외부쓰기 위험을 lstat 거절과 직접 회귀로 수정했다. 동일 사용자 권한의 악의적 경로 교체 경쟁까지 방어한다고 주장하지 않는다.
 - 최초 관련 검사67개 PASS 후 지적 수정에 영향받는 저장 회귀5개 PASS(부분줄/원문 제외·세션보존·대상파일 및 폴더 symlink·burst 최신값/임시파일 정리·일시 저장 실패 뒤 동일 진단 재저장). 검토자의 폴더 symlink 차단 지적은 재검토에서 해소됐고, 비차단 권고인 성공 뒤 중복제거 처리도 반영했다. main 전체 strict TypeScript 검사는 기존 event-credit의 WorkspaceEventV1 payload 타입 불일치를 발견해 실제 사용하는 streamId/seq 타입으로 좁혔고 PASS했다. runtime 신용/ack 동작은 바꾸지 않았다. node 문법·diff 검사 PASS.
