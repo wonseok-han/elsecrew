@@ -2,6 +2,12 @@
 
 ### 2026-10-30 · by GPT-6
 
+- 이전 턴은 선택 필드 수정 후에도 실제 실패가 남는다는 증거를 얻은 진척이었다. HEAD54183f9에서 item/started 고정 진단을18개로 세분화했다: envelope/projection·turn 시작순서·scope/body/tag/identity·tool phase·user echo/reasoning shape·duplicate·command shape·retained budget·지원하지 않는 dynamic/MCP/협업/hook/기타 항목. 값이나 임의 타입명은 로그에 넣지 않으며 원래 수락/거절·권한·예산·종료 동작은 유지한다.
+- Rust에서 실패 위치와 sticky 실패, 미지원 타입의 RequiresHandling 유지, 비공개 값 비노출을 회귀했다. TypeScript 허용 목록이 모든 새 고정 진단을 전달하는지 검증했다. Codex 이벤트32개·진단/저장9개·pnpm build PASS, diff 검사 PASS. 실제 모델 호출0회. 이 진단 추가만으로 기존 실패가 해결됐다고 주장하지 않는다.
+- 다음은 최신 패키지 반영과 모델 비용 없는 경로 재현이다. 새 실제 실행은 별도 승인 대상이며 기존 최신2회는 소진됐다. G6/Windows/출시 검증 미완료, main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
 - 사용자가 승인한 Codex 최대2회를 da52055 패키지에서 각각 한 번 실행했다. 수정 run agent_run_af18cd5354ec46e29928af932e662c23와 중단 run agent_run_4203fc4b5b314fee89d80813706bf8c8 모두 item/started 처리 단계에서 failed·cleanExit로 종료했다. 중단 버튼 조작 전에 실패하여 중단 PASS가 아니며 선택 필드 수정만으로 실시험이 해결되지 않음을 확인했다. 추가 재시도없음.
 - UI 실패/종료 확인, 정상 메뉴 quit 후 sidecar27260 DB clean_shutdown_at06:44:46Z와 프로세스 부재를 대조했다. 원본과 두 작업복사본 hello.txt는 모두 original\n이다. 새 세션 로그와 .artifacts/m5-codex-two-2026-10-30에 횟수·진단·원장·종료 증거를 저장했다. 승인2회 소진/추가 호출없음, 사용자 프로젝트·인증 변경없음.
 - 새 기록 추가 시500줄을 넘으므로 기존10/29·10/30 워크로그 블록을 날짜 단위 그대로10월 아카이브로 옮겼다. 고정 섹션은 유지하고 최신 결정을 보강했으며 목록 사이 선택적 빈 줄만 정리했다. 다음은 고정 진단 세분화·오프라인 파서 조사, G6/Windows/출시 미완료 검증이다. main병합·push없음.

@@ -33,3 +33,15 @@ test("diagnostics are bounded and unknown text is not a successful diagnosis", (
     assert.throws(()=>validateSessionDiagnostics(value));
   }
 });
+
+
+test("all fixed Rust item-start checkpoints cross the renderer allowlist without raw payloads", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../crates/hello-agent-core/src/provider/vendor_observation/codex_events/stream.rs", import.meta.url), "utf8");
+  const labels = [...new Set([...source.matchAll(/"(turn item start [a-z ]+)"/g)].map(match => match[1]!))];
+  assert.ok(labels.length >= 18);
+  const result = classifySessionDiagnostics(labels.map(label => `native Codex transport failed at ${label}`).join("\n"));
+  assert.deepEqual(result.codexCheckpoints, labels);
+  assert.deepEqual(validateSessionDiagnostics(result), result);
+  assert.deepEqual(classifySessionDiagnostics("native Codex transport failed at turn item start SECRET_TYPE").codexCheckpoints, []);
+});

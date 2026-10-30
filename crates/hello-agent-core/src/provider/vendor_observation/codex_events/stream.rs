@@ -289,6 +289,8 @@ impl TurnStream {
     }
 
     fn observe_inner(&mut self, input: &BoundedObservation) -> Result<Observed, ProviderError> {
+        let item_start = self.diagnostic_stage == "turn stream item started";
+        if item_start { self.diagnostic_stage = "turn item start envelope"; }
         #[derive(Deserialize)]
         struct Envelope {
             id: Option<Box<RawValue>>,
@@ -302,6 +304,7 @@ impl TurnStream {
                 .map(Observed::Approval);
         }
         // Charge all notifications, including non-public ones, exactly once.
+        if item_start { self.diagnostic_stage = "turn item start projection"; }
         let projected = self.projection.project(input)?;
         if super::thread_status(input, &self.projection.thread_id)? {
             return Ok(Observed::Private);
@@ -381,6 +384,7 @@ impl TurnStream {
             self.outcome = Some(outcome);
             return Ok(Observed::Finished(outcome));
         }
+        if item_start { self.diagnostic_stage = "turn item start before turn"; }
         if !self.started {
             return Err(invalid());
         }
@@ -390,13 +394,18 @@ impl TurnStream {
             return Ok(Observed::Private);
         }
         if frame.method == "item/started" || frame.method == "item/completed" {
+            if item_start { self.diagnostic_stage = "turn item start scope"; }
             self.check_scope(frame.params.get())?;
+            if item_start { self.diagnostic_stage = "turn item start body"; }
             let wire: Completed = decode(frame.params.get())?;
+            if item_start { self.diagnostic_stage = "turn item start tag"; }
             let item: ItemTag = decode(wire.item.get())?;
+            if item_start { self.diagnostic_stage = "turn item start identity"; }
             if !identifier(&item.id) || !identifier(&item.kind) {
                 return Err(invalid());
             }
             let private = matches!(item.kind.as_str(), "userMessage" | "reasoning");
+            if item_start { self.diagnostic_stage = "turn item start tool phase"; }
             let tool = tool_kind(&item.kind)
                 .map(|kind| {
                     Ok::<_, ProviderError>(ToolEvent {
@@ -407,14 +416,21 @@ impl TurnStream {
                 })
                 .transpose()?;
             if private {
+                if item_start {
+                    self.diagnostic_stage = if item.kind == "userMessage" {
+                        "turn item start user echo shape"
+                    } else { "turn item start reasoning shape" };
+                }
                 super::private::validate_item(wire.item.get())?;
             }
             if frame.method == "item/started" {
+                self.diagnostic_stage = "turn item start duplicate";
                 if self.items.contains_key(&item.id) {
                     return Err(invalid());
                 }
                 let public = matches!(item.kind.as_str(), "agentMessage" | "plan");
                 let command = if item.kind == "commandExecution" {
+                    self.diagnostic_stage = "turn item start command shape";
                     #[derive(Deserialize)]
                     struct Command {
                         command: String,
@@ -436,6 +452,7 @@ impl TurnStream {
                 };
                 // Keep lifecycle tombstones for duplicate rejection, but bound their
                 // retained strings independently of the larger raw stream budget.
+                self.diagnostic_stage = "turn item start retained budget";
                 let bytes = item.id.len() + item.kind.len()
                     + command.as_ref().map_or(0, |(command, cwd)| command.len() + cwd.len());
                 self.retained_item_bytes = self.retained_item_bytes.checked_add(bytes).ok_or_else(invalid)?;
@@ -443,6 +460,15 @@ impl TurnStream {
                     && self.retained_item_bytes > 4 * 1024 * 1024 {
                     return Err(invalid());
                 }
+                // Fixed categories only: never interpolate the untrusted item type.
+                self.diagnostic_stage = match item.kind.as_str() {
+                    "dynamicToolCall" => "turn item start unsupported dynamic tool",
+                    "mcpToolCall" => "turn item start unsupported mcp tool",
+                    "collabAgentToolCall" | "collabToolCall" | "subAgentActivity" => "turn item start unsupported collaboration",
+                    "hookPrompt" => "turn item start unsupported hook",
+                    _ if !public && !private && tool.is_none() => "turn item start unsupported other",
+                    _ => "turn stream item started",
+                };
                 self.items.insert(
                     item.id,
                     ItemState {
@@ -671,9 +697,50 @@ mod tests {
         assert!(matches!(stream.observe(&frame("PRIVATE_TOKEN", json!({}))).unwrap(), Observed::RequiresHandling));
         assert_eq!(stream.diagnostic_stage(), "turn stream other frame");
         assert!(stream.observe(&frame("item/started", json!({"private":"SECRET"}))).is_err());
-        assert_eq!(stream.diagnostic_stage(), "turn stream item started");
+        assert_eq!(stream.diagnostic_stage(), "turn item start scope");
         assert!(stream.observe(&turn("turn/completed", "completed")).is_err());
-        assert_eq!(stream.diagnostic_stage(), "turn stream item started");
+        assert_eq!(stream.diagnostic_stage(), "turn item start scope");
+    }
+
+    #[test]
+    fn item_start_checkpoints_identify_rejection_without_private_values() {
+        for (item, expected) in [
+            (json!({"id":"i","type":"userMessage","content":[{"type":"text","text":42}]}), "turn item start user echo shape"),
+            (json!({"id":"i","type":"reasoning","content":null}), "turn item start reasoning shape"),
+            (json!({"id":"i","type":"commandExecution","status":"SECRET"}), "turn item start tool phase"),
+            (json!({"id":"i","type":"commandExecution","status":"inProgress","command":42,"cwd":"SECRET"}), "turn item start command shape"),
+            (json!({"id":"","type":"SECRET"}), "turn item start identity"),
+            (json!({"id":"i"}), "turn item start tag"),
+        ] {
+            let mut stream = started();
+            let event = frame("item/started", json!({"threadId":"t","turnId":"r","item":item}));
+            assert!(stream.observe(&event).is_err());
+            assert_eq!(stream.diagnostic_stage(), expected);
+            assert!(stream.observe(&delta()).is_err());
+            assert_eq!(stream.diagnostic_stage(), expected, "failure checkpoint stays sticky");
+        }
+        let mut stream = TurnStream::new("t", "r").unwrap();
+        assert!(stream.observe(&item("item/started", "agentMessage")).is_err());
+        assert_eq!(stream.diagnostic_stage(), "turn item start before turn");
+        let mut stream = started();
+        stream.observe(&item("item/started", "agentMessage")).unwrap();
+        assert!(stream.observe(&item("item/started", "agentMessage")).is_err());
+        assert_eq!(stream.diagnostic_stage(), "turn item start duplicate");
+    }
+
+    #[test]
+    fn unsupported_item_checkpoints_never_authorize_tools_or_echo_unknown_types() {
+        for (kind, expected) in [
+            ("dynamicToolCall", "turn item start unsupported dynamic tool"),
+            ("mcpToolCall", "turn item start unsupported mcp tool"),
+            ("collabAgentToolCall", "turn item start unsupported collaboration"),
+            ("hookPrompt", "turn item start unsupported hook"),
+            ("SECRET_UNKNOWN_TYPE", "turn item start unsupported other"),
+        ] {
+            let mut stream = started();
+            assert!(matches!(stream.observe(&item("item/started", kind)).unwrap(), Observed::RequiresHandling));
+            assert_eq!(stream.diagnostic_stage(), expected);
+        }
     }
 
     #[test]
