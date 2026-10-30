@@ -1,5 +1,19 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-30 · by GPT-6
+
+- 직전 턴은 저장공간 정리로 진척이었다. 15558d8 및 기존 정리 워크로그에서 이어 레거시 데모 시작 응답을 조사·수정했다. sidecar의 {run,streamId}를 엄격 검증 후 renderer 계약인 RunRecord로 변환한다.
+- G5A/G5D agent adapter에서 레거시 시작을 요청 전 거절하고 해당 모드의 데모 버튼을 숨긴다. 가짜 actual adapter 실행은 기존 run.startAgent 경로를 유지한다. raw run.event/run.finished 거절 경계는 약화하지 않았다. native mode의 기존 거절도 유지한다.
+- 검증: Electron bridge 60 PASS(실제 envelope 모양과 두 agent handshake의 무전송 거절 회귀 포함), TypeScript 및 diff check 통과. Rust/패키지 재빌드는 하지 않았으며 설치 앱은 이전 버전이다. 레거시 run.cancel 응답 불일치는 아직 미해결이며 다음에 이어 처리한다.
+- 다음: 레거시 취소 응답 정합성, 기능 파동 통합 검증, G6 메모리/전체 공급자/Windows/출시 증거. 제품 완료 선언/main 병합/push/실제 모델 호출 없음.
+
+### 2026-10-30 · by GPT-6
+
+- 사용자 저장공간 정리 요청으로 clean 15558d8/m5/coding-agent-ide에서 산출물·worktree·프로세스를 조사했다. 추가 Git worktree 및 실행 중인 이 프로젝트 앱/sidecar/Cargo/rustc는 없었다.
+- Git 추적 파일이 없는 재생성 가능한 target(3,022,036KiB)와 out/make 배포 ZIP(121,480KiB)을 제거했다. 합계 약 3.00GiB의 디렉터리 할당량이며 APFS 공유 블록 때문에 실제 디스크 여유 증가와 같다고 단정하지 않는다. 임시 경로의 hello-agent-/m5- 접두사 폴더 중 비어 있는 182개만 rmdir로 제거했다.
+- 실행 가능한 out 앱, node_modules, .vite, 검증 증거 .artifacts, 사용자 프로젝트/인증/앱 DB/복구 백업은 보존했다. 다음 Rust 빌드는 캐시를 재생성한다. 코드 변경/모델 호출/프로세스 강제 종료/main 병합/push는 없다.
+- 검증: 정리 대상 Git 비추적 확인, 프로세스 부재 확인, 삭제 후 경로·Git diff 검사. 기능 테스트는 산출물 정리만이므로 실행하지 않았다. 다음 개발 과제와 미완료 G6/공급자/Windows/출시 판정은 그대로다.
+
 ### 2026-10-29 · by Codex
 
 - 이전 턴은 승인된 시험 앱 종료/임시 파일 정리로 진척이었다. d89ae0d 기준 최신 Rust debug/renderer로 자체 X34law 합동 UI를 실행했다. 앱 기본 역할 저장→신규 프로젝트 상속→프로젝트 역할 저장/재열기→채팅 생성→FakeExact Claude actual adapter→reviewReady→동의 후 discard→작업대 해제→chat.get discarded/메시지 보존/원본 불변이 PASS다. 실제 공급자·인증·과금은 없다.

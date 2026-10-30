@@ -83,7 +83,7 @@ function useStorageAdmission(bridge: SupportedM5Bridge): { admission: AdmissionV
     setFixtureAvailable(false);
     const poller = new StorageAdmissionPoller(async () => {
       const status = await v6.getSystemStatus!();
-      if (active) setFixtureAvailable(status.sidecar.capabilities.includes("run.startFixture"));
+      if (active) setFixtureAvailable(status.sidecar.capabilities.includes("run.startFixture") && !status.sidecar.capabilities.includes("run.startAgent"));
       return status;
     }, setAdmission);
     poller.start();

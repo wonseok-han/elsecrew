@@ -524,6 +524,7 @@ export class SidecarClientV1 {
   }
   startFixtureRun(input: FixtureRunStartRequestV1): Promise<RunRecordV1> {
     if (this.#nativeAdapterNegotiated) return Promise.reject(new Error("fixture execution is unavailable in native mode"));
+    if (this.#agentAdapterNegotiated) return Promise.reject(new Error("legacy fixture execution is unavailable in agent adapter mode"));
     return this.#request("run.startFixture", validateFixtureRunStartRequestV1(input)) as Promise<RunRecordV1>;
   }
   cancelRun(input: RunCancelRequestV1): Promise<RunRecordV1> { return this.#request("run.cancel", validateRunCancelRequestV1(input)) as Promise<RunRecordV1>; }
@@ -977,7 +978,9 @@ export class SidecarClientV1 {
         assertResponseField(value.chat, pending.params, "chatId"); return value;
       }
       case "run.startFixture": {
-        const value = validateRunRecordV1(response.result);
+        const accepted = strictObject(response.result, ["run", "streamId"], "fixture start result");
+        if (!validId(accepted.streamId)) throw new Error("fixture streamId is invalid");
+        const value = validateRunRecordV1(accepted.run);
         assertResponseField(value, pending.params, "chatId");
         if (value.selectedProfile.roleId !== pending.params.roleId || value.fixtureScenario !== pending.params.scenario) throw new Error("started fixture run does not match request");
         return value;

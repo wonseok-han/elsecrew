@@ -252,6 +252,29 @@ function g5Fixture(name: string): Record<string, unknown> {
   return entry.value;
 }
 
+test("legacy fixture start unwraps the sidecar acceptance envelope", async () => {
+  const { child, client } = createClient();
+  const starting = client.start(); child.stdout.write(`${readyLine()}\n`); await starting;
+  const run = g5Fixture("active-run");
+  const profile = run.selectedProfile as { roleId: "planning" };
+  const pending = client.startFixtureRun({ chatId: run.chatId as string, roleId: profile.roleId, scenario: run.fixtureScenario as "success" });
+  const request = JSON.parse(child.writes.at(-1)!);
+  child.stdout.write(responseLine(request.requestId, { run, streamId: "run_stream_test" }));
+  assert.deepEqual(await pending, run);
+  assert.equal(child.terminations, 0);
+});
+
+test("agent adapter sessions reject legacy starts before sending a request", async () => {
+  for (const ready of [g5aReadyLine(), g5dAgentReadyLine()]) {
+    const { child, client } = createClient();
+    const starting = client.start(); child.stdout.write(`${ready}\n`); await starting;
+    const before = child.writes.length;
+    await assert.rejects(client.startFixtureRun({ chatId: "chat_test", roleId: "coding", scenario: "success" }), /legacy fixture execution/);
+    assert.equal(child.writes.length, before);
+    assert.equal(child.terminations, 0);
+  }
+});
+
 function measuredCapability(): AgentCapabilitySnapshotV1 {
   const snapshot = {
     schemaVersion: 1 as const,
