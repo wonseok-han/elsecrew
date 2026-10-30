@@ -2,6 +2,13 @@
 
 ### 2026-10-30 · by GPT-6
 
+- 이전 턴은 실제 Claude 파일수정 성공으로 진척이었다. 동일 앱/승인원장을 재확인하고 Claude중단1회 agent_run_5634bd5083934e7bb3543f10479caf67을 실행했다. Read권한 요청을 허용하지 않고 UI 취소, 취소됨/실행종료 확인을 관측했다. 종료 후 원장도 canceled로 대조했다.
+- Codex 지원목록에서 gpt-6.1-sol/medium을 확인해 자체 임시프로젝트 코딩역할에만 저장하고 새 채팅에서 수정1회를 요청했다. UI는 준비중에 머물렀으며 정상종료 후 DB에서 agent_run_73741875f3554d9f9b804fd3a94ef349가 06:01:20Z 생성/06:01:38Z failed·cleanExit·processesProvenGone·writerLock released임을 확인했다. ‘실행 미접수/준비 단계에서만 대기’ 추정은 철회한다. 실제 run은 실패했고 UI의 시작 promise/terminal 갱신 경로도 별도 결함 후보다.
+- 정상 앱메뉴 quit으로 PID35671/35770 종료, DB clean_shutdown_at06:04:04Z 확인. 강제종료없음. 자체 Codex 원본/복사본은 모두 original\n으로 불변. 세부 실패 원인은 아직 미확정이며 실패를 숨기거나 재시도하지 않는다. 1초 sidecar sample은 실행종료 이후의 입력대기/감시만 보여 실패 원인의 직접증거가 아니다.
+- .artifacts/m5-approved-live-2026-10-30에 run record/termination/shutdown/파일대조/호출스택과 횟수를 보존했다. 승인4회 중 Claude수정·Claude중단·Codex수정3회 사용, Codex중단1회만 남았다. 원본·시험복사본·기록은 후속 대조를 위해 유지하며 실행 중 앱은 없다. 다음은 Codex 실패 원장 상세와 UI갱신 결함 조사, 이후 남은 중단시험. 실제 수정 재시험은 별도 승인 없이는 하지 않는다. main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
 - 이전 턴은 최신 출력 이동 수정/회귀로 진척이었다. 가짜 stream의 approval 오류를 조사한 결과 fake 실행은 native map의 승인 큐에 없으므로 native.rs approval_request가 거절한다. 종료 경쟁 상태로 단정한 초기 추정은 철회하며 native 승인 검사를 완화하지 않았다.
 - 사용자가 최신 실제 시험 총최대4회(Codex/Claude 각각 파일수정1·중단1), 실패 재시도없음을 승인했다. bfc1abd 일반패키지 생성PASS 후 정상 앱(PID35671/sidecar35770)을 열었다. UI에서 두 앱전용 로그인 connected를 확인했고 자체 임시 프로젝트 hello-agent-approved-four-acu6xsk3/project를 생성·선택했다. 인증 변경/사용자 프로젝트 사용없음.
 - Claude 파일수정1회: agent_run_8e637a5e701649648c24096e4f23d8eb, opus/coding, worktree_5acbe690e8af42c59d70c53c91fac104. UI의 Read/Write 요청 상세에서 해당 복사본 hello.txt와 정확한 시험문자열만 확인해 각각 이번만 허용했다. 성공/실행종료 확인/검토준비와 DONE을 관측했고 diff1파일의 original→HELLO_AGENT_CLAUDE_WRITE_OK를 확인했다. 실제 파일도 복사본만 변경, 자체 원본 original\n 보존. 셸/네트워크 도구 요청은 허용하지 않았다.
