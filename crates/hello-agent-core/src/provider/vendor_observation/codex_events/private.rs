@@ -69,6 +69,23 @@ pub(super) fn validate_moderation(raw: &str) -> Result<(), ProviderError> {
     Ok(())
 }
 
+// A provider's aggregated diff is advisory. The app independently reads the
+// workspace to build review/apply evidence; this string grants no write rights.
+pub(super) fn validate_diff(raw: &str) -> Result<(), ProviderError> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Diff {
+        #[serde(rename = "threadId")]
+        _thread: String,
+        #[serde(rename = "turnId")]
+        _turn: String,
+        #[serde(rename = "diff")]
+        _diff: String,
+    }
+    let _: Diff = decode(raw)?;
+    Ok(())
+}
+
 pub(super) fn validate_delta(method: &str, raw: &str) -> Result<(), ProviderError> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]

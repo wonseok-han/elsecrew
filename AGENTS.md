@@ -64,7 +64,7 @@
 - 현행 구조: 재방문용 홈베이스 + 6단계 위저드(에이전트 → 진단 → 설치 → 로그인 → 프로젝트 → 첫 대화) + macOS M4 `HandoffPilot`
 - M5 현행 구현: Electron + React/TypeScript + Monaco와 Rust sidecar에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·채팅별 standalone snapshot·편집/diff·명시 반영/복원 흐름을 연결했다. macOS Codex·Claude Code의 앱 전용 로그인·모델 조회·실제 실행 adapter와 설치/업데이트 경로가 있으며 기존 터미널 인증을 자동 재사용하지 않는다. fixture 실행과 실제 공급자 실행은 분리한다. 구현 존재와 실제 계정/플랫폼 검증 완료는 구분하며 최신 증거는 `docs/history.md`에서 확인한다.
 - 홈베이스: 프로젝트 폴더 스캔, 에이전트 설치·로그인 상태, 업데이트 확인
-- 상태: M0~M3와 주요 오류 복구, M4 파일럿 완료. M5 G1~G5 macOS fixture gate `G5_READY`, G5A `G5A_READY`, G5B `G5B_READY`, G5C `G5C_READY` 기록은 유지한다. macOS 자체 임시 프로젝트에서 Claude의 실제 파일 수정·취소는 성공했다. Codex는 실제 짧은 응답을 확인했지만 뒤따른 moderation 알림에서 실행이 실패했고, 해당 호환 수정의 실제 재검증과 파일 수정·중단 검증이 남는다. 이 증거를 두 공급자의 전체 실행·복구 검증 완료로 보지 않는다. G6 성능 수집 누락·메모리 기준 초과, Windows 안전/패키지 검증, 출시 후보 검증과 서명/배포 결정이 남는다. Windows 실제 에이전트 실행은 비활성이다.
+- 상태: M0~M3와 주요 오류 복구, M4 파일럿 완료. M5 G1~G5 macOS fixture gate `G5_READY`, G5A `G5A_READY`, G5B `G5B_READY`, G5C `G5C_READY` 기록은 유지한다. macOS 자체 임시 프로젝트에서 Claude의 실제 파일 수정·취소는 성공했다. Codex의 실제 짧은 응답 실행도 성공했으나 파일 수정 실행의 정상 완료·중단 검증은 아직 남는다. 공급자 호환 결함과 UI 상태 전달의 최신 증거는 docs/history.md에서 확인한다. 이 증거를 두 공급자의 전체 실행·복구 검증 완료로 보지 않는다. G6 성능 수집 누락·메모리 기준 초과, Windows 안전/패키지 검증, 출시 후보 검증과 서명/배포 결정이 남는다. Windows 실제 에이전트 실행은 비활성이다.
 
 ## 코드 지도
 

@@ -388,6 +388,11 @@ impl TurnStream {
         if !self.started {
             return Err(invalid());
         }
+        if frame.method == "turn/diff/updated" {
+            self.check_scope(frame.params.get())?;
+            super::private::validate_diff(frame.params.get())?;
+            return Ok(Observed::Private);
+        }
         if frame.method == "turn/moderationMetadata" {
             self.check_scope(frame.params.get())?;
             super::private::validate_moderation(frame.params.get())?;
@@ -657,6 +662,43 @@ mod tests {
             if case == "budget" { stream.projection.events = PROVIDER_INTERNAL_EVENTS_MAX; }
             else { stream.observe(&turn("turn/completed", "completed")).unwrap(); }
             assert!(stream.observe(&frame("account/rateLimits/updated", body.clone())).is_err());
+            assert!(stream.finish().is_err());
+        }
+    }
+
+    #[test]
+    fn aggregate_diff_is_scoped_advisory_not_write_or_completion_authority() {
+        let mut stream = started();
+        for diff in ["", "SECRET_DIFF"] {
+            assert!(matches!(stream.observe(&frame("turn/diff/updated", json!({
+                "threadId":"t","turnId":"r","diff":diff
+            }))).unwrap(), Observed::Private));
+            assert!(stream.outcome.is_none());
+            assert!(stream.approvals.is_empty());
+        }
+        assert!(stream.finish().is_err());
+        let mut stream = started();
+        stream.observe(&frame("turn/diff/updated", json!({"threadId":"t","turnId":"r","diff":"SECRET_DIFF"}))).unwrap();
+        assert!(matches!(stream.observe(&turn("turn/completed", "completed")).unwrap(), Observed::Finished(TurnOutcome::Completed)));
+        for case in ["thread", "turn", "missing", "type", "extra", "duplicate", "before", "after", "budget"] {
+            let mut stream = if case == "before" { TurnStream::new("t", "r").unwrap() } else { started() };
+            let mut params = json!({"threadId":"t","turnId":"r","diff":"SECRET_DIFF"});
+            match case {
+                "thread" => params["threadId"] = json!("other"),
+                "turn" => params["turnId"] = json!("other"),
+                "missing" => { params.as_object_mut().unwrap().remove("diff"); }
+                "type" => params["diff"] = Value::Null,
+                "extra" => params["approved"] = json!(true),
+                "after" => { stream.observe(&turn("turn/completed", "completed")).unwrap(); }
+                "budget" => stream.projection.events = PROVIDER_INTERNAL_EVENTS_MAX,
+                _ => {}
+            }
+            let input = if case == "duplicate" {
+                BoundedObservation::new(br#"{"method":"turn/diff/updated","params":{"threadId":"t","turnId":"r","diff":"","diff":"SECRET_DIFF"}}"#.to_vec()).unwrap()
+            } else { frame("turn/diff/updated", params) };
+            let error = stream.observe(&input).err().unwrap();
+            assert!(!error.to_string().contains("SECRET_DIFF"));
+            assert!(stream.observe(&turn("turn/completed", "completed")).is_err(), "{case}");
             assert!(stream.finish().is_err());
         }
     }
