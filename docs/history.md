@@ -2,6 +2,14 @@
 
 ### 2026-10-30 · by GPT-6
 
+- 이전 턴은 44a03dd 취소 응답 수정/검증으로 진척이었다. 최신 main/preload/renderer 개발 산출물을 다시 빌드하고 실제 Electron 작업대의 두 자체 통합 시나리오를 마감했다. Rust는 직전 검증의 최신 debug 산출물을 재사용했다.
+- SkoRsq(가짜 actual adapter)는 앱 기본값 저장→신규 프로젝트 역할 상속→채팅 생성→가짜 실행→reviewReady→동의 후 discard→작업대 해제→메시지 보존/원본 불변 PASS. VDOo5Q(일반 native, 공급자 미선택)는 프로젝트 설정/두 채팅/편집·저장/inline·split diff/파일·줄 후속 지시/초안 보존/반영 전 목록 확인·취소 PASS. 원본 반영 실행·실계정 공급자 검증은 포함하지 않는다.
+- 두 프로세스 exit0/shutdown accepted, DB clean_shutdown_at과 소유 PID 부재를 확인했다. .artifacts/m5-project-ui/{SkoRsq,VDOo5Q}에 결과/화면/console/cleanup 증거를 보존하고 자체 임시 원본·앱 프로필을 삭제했다. target792MiB/.artifacts204MiB이며 새 release/ZIP/워크트리를 만들지 않았다.
+- 화면 스크린샷을 확인했다. 이 harness는 background throttling을 해제하며 자동 입력을 사용하므로 기능 연결 증거이지 정상 패키지 성능/G6/시안 전체 충실도 합격이 아니다. source gate 제거 뒤 discard 실제 통합은 확인했으나 일반 native에서 실제 공급자 종료 기록을 이용한 discard는 여전히 별도다.
+- 다음: 남은 연결 안내 UI/일반 admission 확인, G6 메모리·가림/정식 수집과 공급자 전체/Windows/출시 검증. 설치 앱 교체·모델 호출·사용자 인증/프로젝트 변경·main 병합/push 없음. 전체 목표 active.
+
+### 2026-10-30 · by GPT-6
+
 - 이전 턴은 8826bbd 레거시 시작 응답 수정으로 진척이었다. 취소 wire의 {outcome,runId}를 RunRecord로 오해하던 오류를 수정했다. finish_run 저장 성공 뒤 정확한 run ID로 원장을 읽어 {outcome,runId,run}을 보내고 Electron은 응답 필드·요청 chat/run·state 및 terminationEvidence를 검증한 뒤 renderer에 RunRecord를 반환한다.
 - 첫 구현은 취소 ACK 뒤 chat.get을 조회했으나 독립 검토에서 50개 run 목록 제한으로 완료된 취소를 표시하지 못하는 P2를 발견했다. 해당 경로를 제거하고 직접 원장 응답으로 보완했으며 재검토에서 P2 해소/차단 결함 없음으로 마감했다. raw event/종료 증거/복구 잠금 조건은 변경하지 않는다.
 - 검증: 첫 구현 시 누적 Node 617 PASS, 최종 변경 범위 bridge 61 PASS 및 TypeScript PASS. Rust build PASS, 51개 선행 원장으로 target이 목록 밖인 exact lookup 회귀 1 PASS, 실제 자체 fixture stdio 정상 취소·불확실 취소 2 PASS. unit에서 fixture-child를 직접 시작하려던 시험 구성과 원장 run_id 누락은 수정 후 재검증했다. 다운로드 sandbox 실패는 권한 경로로 고정 의존성을 받아 해결했다. diff check PASS. 증거 .artifacts/m5-bridge-compatibility/2026-10-30.
