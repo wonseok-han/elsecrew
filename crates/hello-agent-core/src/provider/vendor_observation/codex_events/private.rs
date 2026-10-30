@@ -52,6 +52,23 @@ pub(super) fn validate_item(raw: &str) -> Result<(), ProviderError> {
     let _: Item = decode(raw)?;
     Ok(())
 }
+// The vendor schema deliberately leaves metadata as arbitrary JSON. Discard it;
+// it is not public output, a moderation decision for this app, or tool authority.
+pub(super) fn validate_moderation(raw: &str) -> Result<(), ProviderError> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Metadata {
+        #[serde(rename = "threadId")]
+        _thread: String,
+        #[serde(rename = "turnId")]
+        _turn: String,
+        #[serde(rename = "metadata")]
+        _metadata: Box<serde_json::value::RawValue>,
+    }
+    let _: Metadata = decode(raw)?;
+    Ok(())
+}
+
 pub(super) fn validate_delta(method: &str, raw: &str) -> Result<(), ProviderError> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]

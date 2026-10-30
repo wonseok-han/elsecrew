@@ -388,6 +388,11 @@ impl TurnStream {
         if !self.started {
             return Err(invalid());
         }
+        if frame.method == "turn/moderationMetadata" {
+            self.check_scope(frame.params.get())?;
+            super::private::validate_moderation(frame.params.get())?;
+            return Ok(Observed::Private);
+        }
         if frame.method == "thread/tokenUsage/updated" {
             self.check_scope(frame.params.get())?;
             super::usage::validate(frame.params.get())?;
@@ -652,6 +657,52 @@ mod tests {
             if case == "budget" { stream.projection.events = PROVIDER_INTERNAL_EVENTS_MAX; }
             else { stream.observe(&turn("turn/completed", "completed")).unwrap(); }
             assert!(stream.observe(&frame("account/rateLimits/updated", body.clone())).is_err());
+            assert!(stream.finish().is_err());
+        }
+    }
+
+    #[test]
+    fn moderation_metadata_is_scoped_private_and_never_terminal() {
+        let mut stream = started();
+        for metadata in [Value::Null, json!({"private":"SECRET","approved":true}), json!([1,"SECRET"])] {
+            assert!(matches!(stream.observe(&frame("turn/moderationMetadata", json!({
+                "threadId":"t","turnId":"r","metadata":metadata
+            }))).unwrap(), Observed::Private));
+            assert!(stream.outcome.is_none());
+            assert!(stream.approvals.is_empty());
+        }
+        assert!(stream.finish().is_err());
+        let mut stream = started();
+        stream.observe(&item("item/started", "agentMessage")).unwrap();
+        assert!(matches!(stream.observe(&delta()).unwrap(), Observed::Public(_)));
+        stream.observe(&item("item/completed", "agentMessage")).unwrap();
+        assert!(matches!(stream.observe(&frame("turn/moderationMetadata", json!({
+            "threadId":"t","turnId":"r","metadata":{}
+        }))).unwrap(), Observed::Private));
+        assert!(matches!(stream.observe(&turn("turn/completed", "completed")).unwrap(), Observed::Finished(TurnOutcome::Completed)));
+        assert_eq!(stream.finish().unwrap(), TurnOutcome::Completed);
+    }
+
+    #[test]
+    fn invalid_moderation_metadata_fails_closed() {
+        for case in ["thread", "turn", "missing", "extra", "duplicate", "before", "after", "budget"] {
+            let mut stream = if case == "before" { TurnStream::new("t", "r").unwrap() } else { started() };
+            let mut params = json!({"threadId":"t","turnId":"r","metadata":{"private":"SECRET"}});
+            match case {
+                "thread" => params["threadId"] = json!("other"),
+                "turn" => params["turnId"] = json!("other"),
+                "missing" => { params.as_object_mut().unwrap().remove("metadata"); }
+                "extra" => params["approved"] = json!(true),
+                "after" => { stream.observe(&turn("turn/completed", "completed")).unwrap(); }
+                "budget" => stream.projection.events = PROVIDER_INTERNAL_EVENTS_MAX,
+                _ => {}
+            }
+            let input = if case == "duplicate" {
+                BoundedObservation::new(br#"{"method":"turn/moderationMetadata","params":{"threadId":"t","turnId":"r","metadata":{},"metadata":{}}}"#.to_vec()).unwrap()
+            } else { frame("turn/moderationMetadata", params) };
+            let error = stream.observe(&input).err().unwrap();
+            assert!(!error.to_string().contains("SECRET"));
+            assert!(stream.observe(&turn("turn/completed", "completed")).is_err(), "{case}");
             assert!(stream.finish().is_err());
         }
     }
