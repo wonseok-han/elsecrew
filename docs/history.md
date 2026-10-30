@@ -2,6 +2,13 @@
 
 ### 2026-10-30 · by GPT-6
 
+- 이전 턴은 큰 fixture/메모리 회수 검증과 diff 헤더 개선으로 진척이었다. 기준HEAD ad430d1에서 출력 최신 이동 경로를 조사했다. 내부 출력이 맨 아래에 있어도 외부 conversation이 위로 이동하면 출력이 가려질 수 있는데, 기존 최신 버튼은 history 또는 내부스크롤 newOutput 상태에서만 보였다.
+- AgentOutputPanel의 ‘최신 대화’ 버튼을 출력 cursor가 있는 동안 항상 제공한다. 기존 명시 동작의 inner bottom/outer nearest 이동을 재사용하며 자동 스크롤 정책은 변경하지 않았다. 사용자의 과거 읽기 위치를 강제로 따라가게 하지 않는다. 이는 가림에서 돌아오는 조작 경로의 수정이며, 과거 live 자동추종 가림 원인을 확정·해결했다고 주장하지 않는다.
+- 개발 UI euv4zP: 4채팅×3,000개 가짜 출력의 과거 첫100/다음100/최신 복귀와 외부conversation scrollTop0 후 live 최신버튼 복귀 PASS(exit0). fixture approval의 종료된 실행 조회 거절 로그는 남았으며 실제 공급자 승인 합격 증거가 아니다. renderer build/node syntax/diff check PASS. 전체G6/실제 공급자/정식 패키지 최신 코드 검증은 남는다.
+- .artifacts/m5-output-navigation/euv4zP에 결과·화면·정리 증거를 보존했다. 앱 shutdown accepted/DBclean/관측PID 부재 확인 후 자체 임시 프로필·프로젝트를 삭제했다. main병합·push없음. 다음은 자동추종 가림과 전체G6 누락, 실제 공급자 전체/Windows/출시 검증이다.
+
+### 2026-10-30 · by GPT-6
+
 - 이전 턴은 최신 일반 패키지 생성/시작 측정으로 진척이었다. 기준HEAD f478951(패키지 코드c65c9ee)의 --memory-file-diff 5stPtB를 자체 임시 데이터로 실행했다. 실제 모델·로그인·사용자 프로젝트는 사용하지 않았다.
 - 10,000파일/1,000폴더 트리: 최초160.9ms/확장65.9ms/DOM362개, 5MiB·10만줄 파일 편집가능396.1ms. 500파일·2만변경줄·10MiB diff: 요약215.8ms/첫 파일284.8ms, 원본 불변. 파일 모델과 diff 동시 보유를 확인하고 프로젝트 화면을 닫은 뒤60초 대기/3초 잔류 표본을 수집했다.
 - RSS idle456,261,632B/peak706,265,088B/idle대비 잔류0B. peak800MiB/잔류120MiB 기준은 이 진단에서 충족했으나 idle400MiB 초과로 FAIL(exit1) 유지. CDP 포함 단일 관측이며 동시 채팅 스트림/전체G6/성능p95 증거가 아니다. 기존 no-CDP 결과와 직접 인과 비교하지 않는다.

@@ -148,8 +148,8 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
       {historyActive && <>
         <button type="button" disabled={!visibleHistory || historyState !== "ready" || visibleHistory.nextAfterSequence >= historyRequest!.throughSequence}
           onClick={() => setHistoryRequest({ ...historyRequest!, afterSequence: visibleHistory!.nextAfterSequence })}>{t("m5.output.next")}</button>
-        <button type="button" onClick={showLatest}>{t("m5.chat.latest")}</button>
       </>}
+      <button type="button" disabled={view.cursor === 0} onClick={showLatest}>{t("m5.chat.latest")}</button>
     </nav>}
     <div ref={outputRef} className="m5-output-scroll" tabIndex={0} aria-label={t("m5.output.title")}
       onScroll={event => {

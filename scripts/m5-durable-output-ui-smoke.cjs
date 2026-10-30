@@ -265,7 +265,12 @@ app.on('browser-window-created', (_event, window) => {
         await wait("(() => { const list = document.querySelector('.m5-output-scroll'); return list && list.clientHeight > 0 && list.scrollHeight - list.scrollTop - list.clientHeight <= 2; })()");
         // A scrolled inner list can still be clipped by the outer conversation.
         if (await run("document.visibilityState === 'visible'")) await wait("outputObservation.latestVisible()");
-        report.scrollChecks.push({chat:index,historyTop:true,nextPage:true,latestBottom:true});
+        // Outer conversation scrolling must not remove the explicit latest action,
+        // even when the inner output list remains pinned at its bottom.
+        await run("document.querySelector('.m5-conversation-scroll').scrollTop = 0");
+        await run("[...document.querySelectorAll('.m5-durable-output button')].find(b => b.textContent === '최신 대화').click()");
+        if (await run("document.visibilityState === 'visible'")) await wait("outputObservation.latestVisible()");
+        report.scrollChecks.push({chat:index,historyTop:true,nextPage:true,latestBottom:true,outerLatestAction:true});
         report.restoredChats.push(index); persist();
       }
       assert.equal(fs.readFileSync(path.join(source, 'hello.txt'), 'utf8'), 'original\n');
