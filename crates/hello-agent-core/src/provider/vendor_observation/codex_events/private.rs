@@ -31,7 +31,8 @@ enum Text {
     Text {
         #[serde(rename = "text")]
         _text: String,
-        #[serde(rename = "text_elements")]
+        // Vendor UserInput.Text defaults omitted display spans to an empty array.
+        #[serde(default, rename = "text_elements")]
         _elements: Vec<serde::de::IgnoredAny>,
     },
 }
@@ -77,6 +78,15 @@ pub(super) fn validate_delta(method: &str, raw: &str) -> Result<(), ProviderErro
 mod tests {
     use super::*;
     #[test]
+    fn user_text_elements_default_to_empty_as_in_vendor_schema() {
+        for raw in [
+            r#"{"type":"userMessage","id":"i","content":[{"type":"text","text":"PRIVATE"}]}"#,
+            r#"{"type":"userMessage","id":"i","clientId":null,"content":[{"type":"text","text":"PRIVATE","text_elements":[]}]}"#,
+        ] {
+            validate_item(raw).unwrap();
+        }
+    }
+    #[test]
     fn reasoning_arrays_default_to_empty_as_in_vendor_schema() {
         for raw in [
             r#"{"type":"reasoning","id":"i"}"#,
@@ -93,7 +103,9 @@ mod tests {
             r#"{"type":"reasoning","id":"i","summary":[],"content":[],"content":["PRIVATE"]}"#,
             r#"{"type":"reasoning","id":"i","summary":[],"content":[{}]}"#,
             r#"{"type":"userMessage","id":"i","content":[{"type":"localImage","path":"PRIVATE"}]}"#,
-            r#"{"type":"userMessage","id":"i","content":[{"type":"text","text":"PRIVATE"}]}"#,
+            r#"{"type":"userMessage","id":"i","content":[{"type":"text","text":"PRIVATE","text_elements":null}]}"#,
+            r#"{"type":"userMessage","id":"i","content":[{"type":"text","text":"PRIVATE","text_elements":{}}]}"#,
+            r#"{"type":"userMessage","id":"i","content":[{"type":"text","text":"PRIVATE","text_elements":[],"text_elements":[]}]}"#,
             r#"{"type":"reasoning","id":"i","summary":[],"content":[],"command":"PRIVATE"}"#,
         ] {
             let error = validate_item(raw).unwrap_err();

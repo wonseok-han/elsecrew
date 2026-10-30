@@ -902,6 +902,23 @@ mod tests {
     }
 
     #[test]
+    fn omitted_text_elements_echo_remains_private_and_allows_public_reply() {
+        let mut stream = started();
+        let params = json!({"threadId":"t","turnId":"r","item":{
+            "id":"user_echo", "type":"userMessage",
+            "content":[{"type":"text","text":"PRIVATE"}]
+        }});
+        for method in ["item/started", "item/completed"] {
+            assert!(matches!(stream.observe(&frame(method, params.clone())).unwrap(), Observed::Private));
+        }
+        assert!(matches!(stream.observe(&item("item/started", "agentMessage")).unwrap(), Observed::ItemStarted));
+        assert!(matches!(stream.observe(&delta()).unwrap(), Observed::Public(_)));
+        stream.observe(&item("item/completed", "agentMessage")).unwrap();
+        stream.observe(&turn("turn/completed", "completed")).unwrap();
+        stream.finish().unwrap();
+    }
+
+    #[test]
     fn private_items_are_validated_without_public_projection() {
         for kind in ["userMessage", "reasoning"] {
             let mut stream = started();

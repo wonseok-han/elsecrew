@@ -2,6 +2,12 @@
 
 ### 2026-10-30 · by GPT-6
 
+- 이전 턴은 실제 Codex 실패 단계를 얻은 진척이었다. HEAD0564e0e에서 공식 App Server items 문서(https://learn.chatgpt.com/docs/app-server#items)와 설치 CLI가 생성하는 스키마를 대조했다. 처음 조회한 ~/.local/bin/codex는0.149.1이어서 실시험버전으로 인용하지 않았고, 실제 앱 후보 /Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex의0.166.0-alpha.5.1로 다시 생성했다. 임시 HOME에서 generate-json-schema/--version만 실행, 모델호출0·임시폴더 정리. 증거는 .artifacts/m5-codex-item-schema/current-*이다.
+- UserInput.Text.text_elements는 default[]/required아님인데 private echo 파서가 필수로 요구하는 호환 결함을 발견했다. 수정 전 회귀1개 FAIL을 확인한 뒤 serde(default)만 추가했다. 생략/빈 배열을 비공개 echo로 처리하며 명시null·객체·중복 필드는 거절한다. echo 시작/완료 뒤 공개 응답까지의 스트림 회귀와 Codex 이벤트30개 PASS. 권한·실행·종료 계약을 바꾸지 않았다. 독립 검토 차단결함없음, 제안대로 후속 delta의 Public 분류도 직접 단언했다.
+- 실제 실패 프레임 원문이 없으므로 이번 결함이 관측된 item/started 실패의 유일/직접 원인이라고 확정하지 않는다. 실제 재시험은 별도 승인 전까지 하지 않는다. 다음은 검토/패키지 반영 및 추가 실제 검증 승인, 남은 G6·Windows·출시 검증이다. main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
 - 7db00dd 패키지 빌드 PASS 후 기존 out 앱 하나를 교체해 열었다. 남은 승인 Codex중단1회를 자체 임시프로젝트/new chat에서 planning/gpt-6.1-sol/medium/readOnly로 요청했다. 중단 버튼을 조작하기 전에 실패했으므로 중단 검증 PASS가 아니다. run agent_run_baf8ddd407084b09a95248d4c10fd3d6는 06:27:12Z 생성/06:27:30Z failed·cleanExit·processesProvenGone/poisoned=false로 종료됐다. 원본·작업복사본 hello.txt는 모두 original\n 불변이다.
 - 앱 실행정보에서 실패/실행종료확인 및 고정 진단 `turn stream item started`를 확인했다. 새 로그 파일도 동일 단계만 보존했고 정상 종료 뒤에도 읽혔다. 이 진단은 스트림 항목 시작 처리에서 거절됐다는 증거이며 정확한 항목 종류나 필드까지 확정하지는 않는다. 이전 실패와 같은 원인이라고 단정하지 않는다.
 - 앱 메뉴 정상 종료 후 sidecar PID5960 DB clean_shutdown_at06:29:03Z 및 개발앱/sidecar 프로세스 부재 확인. 강제종료없음. .artifacts/m5-approved-live-2026-10-30의 authorization/codex-cancel-record/diagnostics/files/latest-shutdown에 증거를 저장했다. 승인4회 모두 사용·재시도없음이며 추가 실제 모델 호출은 새 승인이 필요하다.
