@@ -1,5 +1,212 @@
 # 작업 이력 아카이브 — 2026-10
 
+### 2026-10-30 · by GPT-6
+
+- da52055의 Rust release/개발 패키지 빌드 PASS, 실행 중 앱 부재 확인 후 기존 out 앱 하나만 최신 수정으로 교체했다. 모델호출0·실시험원인 확정없음. 기존4회 승인 소진 때문에 자체 임시프로젝트의 Codex 수정1회/중단1회(최대2회, 실패 후 추가 재시도없음) 승인을 요청했고 답변 전 실제 호출은 하지 않는다. 다음은 승인된 경우 실제 검증과 결과에 따른 수정이며 G6/Windows/출시는 계속 미완료다. main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
+- 이전 턴은 실제 Codex 실패 단계를 얻은 진척이었다. HEAD0564e0e에서 공식 App Server items 문서(https://learn.chatgpt.com/docs/app-server#items)와 설치 CLI가 생성하는 스키마를 대조했다. 처음 조회한 ~/.local/bin/codex는0.149.1이어서 실시험버전으로 인용하지 않았고, 실제 앱 후보 /Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex의0.166.0-alpha.5.1로 다시 생성했다. 임시 HOME에서 generate-json-schema/--version만 실행, 모델호출0·임시폴더 정리. 증거는 .artifacts/m5-codex-item-schema/current-*이다.
+- UserInput.Text.text_elements는 default[]/required아님인데 private echo 파서가 필수로 요구하는 호환 결함을 발견했다. 수정 전 회귀1개 FAIL을 확인한 뒤 serde(default)만 추가했다. 생략/빈 배열을 비공개 echo로 처리하며 명시null·객체·중복 필드는 거절한다. echo 시작/완료 뒤 공개 응답까지의 스트림 회귀와 Codex 이벤트30개 PASS. 권한·실행·종료 계약을 바꾸지 않았다. 독립 검토 차단결함없음, 제안대로 후속 delta의 Public 분류도 직접 단언했다.
+- 실제 실패 프레임 원문이 없으므로 이번 결함이 관측된 item/started 실패의 유일/직접 원인이라고 확정하지 않는다. 실제 재시험은 별도 승인 전까지 하지 않는다. 다음은 검토/패키지 반영 및 추가 실제 검증 승인, 남은 G6·Windows·출시 검증이다. main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
+- 7db00dd 패키지 빌드 PASS 후 기존 out 앱 하나를 교체해 열었다. 남은 승인 Codex중단1회를 자체 임시프로젝트/new chat에서 planning/gpt-6.1-sol/medium/readOnly로 요청했다. 중단 버튼을 조작하기 전에 실패했으므로 중단 검증 PASS가 아니다. run agent_run_baf8ddd407084b09a95248d4c10fd3d6는 06:27:12Z 생성/06:27:30Z failed·cleanExit·processesProvenGone/poisoned=false로 종료됐다. 원본·작업복사본 hello.txt는 모두 original\n 불변이다.
+- 앱 실행정보에서 실패/실행종료확인 및 고정 진단 `turn stream item started`를 확인했다. 새 로그 파일도 동일 단계만 보존했고 정상 종료 뒤에도 읽혔다. 이 진단은 스트림 항목 시작 처리에서 거절됐다는 증거이며 정확한 항목 종류나 필드까지 확정하지는 않는다. 이전 실패와 같은 원인이라고 단정하지 않는다.
+- 앱 메뉴 정상 종료 후 sidecar PID5960 DB clean_shutdown_at06:29:03Z 및 개발앱/sidecar 프로세스 부재 확인. 강제종료없음. .artifacts/m5-approved-live-2026-10-30의 authorization/codex-cancel-record/diagnostics/files/latest-shutdown에 증거를 저장했다. 승인4회 모두 사용·재시도없음이며 추가 실제 모델 호출은 새 승인이 필요하다.
+- 다음은 비용 없는 스트림 파서/항목 계약 조사와 회귀 수정이다. 중단/도구쓰기 Codex 실검증은 아직 실패·미완료이고 G6/Windows/출시 검증도 남는다. 진단 보존의 실제 확인을 에이전트 성공으로 확대하지 않는다. main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
+- 이전 턴은 준비중 안내 오류 수정으로 진척이었다. HEAD93737d3에서 실제 실패의 고정 진단이 앱 종료 후 사라지는 공백을 보완했다. Electron 로그 폴더의 last-provider-checkpoints.json에 공급자별 최대32개 허용 단계명·포착시각·세션UUID만 저장하며 원문·인증·대화·경로·실행ID는 저장하지 않는다. 현재 세션 IPC에 과거 snapshot을 혼합하지 않는다.
+- 저장은 진행1건+최신 대기1건의 비동기 원자 교체다. 빈 새 세션은 마지막 비어 있지 않은 기록을 보존한다. 쓰기 실패는 IPC/실행/종료를 실패시키지 않으며 종료를 저장에 종속시키지 않는다(급작스러운 종료 시 최신 진단 유실 가능). 검토자가 찾은 로그 폴더 symlink 외부쓰기 위험을 lstat 거절과 직접 회귀로 수정했다. 동일 사용자 권한의 악의적 경로 교체 경쟁까지 방어한다고 주장하지 않는다.
+- 최초 관련 검사67개 PASS 후 지적 수정에 영향받는 저장 회귀5개 PASS(부분줄/원문 제외·세션보존·대상파일 및 폴더 symlink·burst 최신값/임시파일 정리·일시 저장 실패 뒤 동일 진단 재저장). 검토자의 폴더 symlink 차단 지적은 재검토에서 해소됐고, 비차단 권고인 성공 뒤 중복제거 처리도 반영했다. main 전체 strict TypeScript 검사는 기존 event-credit의 WorkspaceEventV1 payload 타입 불일치를 발견해 실제 사용하는 streamId/seq 타입으로 좁혔고 PASS했다. runtime 신용/ack 동작은 바꾸지 않았다. node 문법·diff 검사 PASS.
+- 실제 공급자 호출0회이며 기존 승인 잔여는 Codex중단1회다. 원래 실패 원인·비활성 시작 버튼은 미해결이다. 앱/sidecar 프로세스 부재를 읽기 전용 확인했다. 새 진단을 실제 패키지로 확인하기 전 공급자 성공/전체G6/제품 완료를 선언하지 않는다. 다음은 패키지 반영과 남은 실제 중단시험, Codex 원인 조사/G6/Windows/출시 검증이다. main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
+- 기준 HEAD81230c0에서 Codex 실패 원장을 읽기 전용 조사했다. 해당 실행에는 native_thread_receipt가 있고 출력은0건이다. 등록된 native 실행이 스레드 확인까지 진행한 증거이므로 ‘접수 전 실패’ 경로로 설명하지 않는다. 상시 승인된 독립 검토자1명과 응답/이벤트 순서를 대조했으며 이번 실제 실패·비활성 버튼 원인은 아직 미확정이다.
+- 별도로 재현 가능한 UI 결함을 수정했다. startAgent의 연결/시작/접수 뒤 기록조회가 실패하면 준비/접수 안내를 지우고 오류를 표시한다. 늦은 실패는 이미 전환한 다른 채팅의 안내·오류를 덮어쓰지 않는다. 실행 재시도나 안전 잠금 해제 로직은 추가하지 않았다.
+- 관련 UI 상태 회귀30개 PASS(연결·시작 거절, 다른 채팅으로 전환 뒤 늦은 거절, 접수 뒤 조회 실패와 이후 durable failed 대조 포함), pnpm build PASS. 실제 앱 패키지에는 아직 반영하지 않았고 Codex 실행 성공으로 해석하지 않는다.
+- 실제 모델 추가 호출0회. 승인4회 중 사용3/남은 Codex중단1회 상태 유지. 원장에 실패의 세부 원인은 없고 고정 진단 단계는 실행 중 sidecar stderr에만 있어 이전 앱 종료 후에는 이번 조사로 복원할 수 없었다. 후속 실제 시험에서는 종료 전 해당 고정 진단을 수집해야 한다.
+- 저장공간 점검: target969MiB/out309MiB/.artifacts212MiB, 자체 이름 임시 디렉터리는 작은 상태이며 중복 패키지를 만들지 않았다. 원본·인증·복구기록 삭제없음. 다음은 Codex 고정 진단 보존/실패 조사와 남은 중단시험, G6/Windows/출시 미완료 검증이다. main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
+- 이전 턴은 실제 Claude 파일수정 성공으로 진척이었다. 동일 앱/승인원장을 재확인하고 Claude중단1회 agent_run_5634bd5083934e7bb3543f10479caf67을 실행했다. Read권한 요청을 허용하지 않고 UI 취소, 취소됨/실행종료 확인을 관측했다. 종료 후 원장도 canceled로 대조했다.
+- Codex 지원목록에서 gpt-6.1-sol/medium을 확인해 자체 임시프로젝트 코딩역할에만 저장하고 새 채팅에서 수정1회를 요청했다. UI는 준비중에 머물렀으며 정상종료 후 DB에서 agent_run_73741875f3554d9f9b804fd3a94ef349가 06:01:20Z 생성/06:01:38Z failed·cleanExit·processesProvenGone·writerLock released임을 확인했다. ‘실행 미접수/준비 단계에서만 대기’ 추정은 철회한다. 실제 run은 실패했고 UI의 시작 promise/terminal 갱신 경로도 별도 결함 후보다.
+- 정상 앱메뉴 quit으로 PID35671/35770 종료, DB clean_shutdown_at06:04:04Z 확인. 강제종료없음. 자체 Codex 원본/복사본은 모두 original\n으로 불변. 세부 실패 원인은 아직 미확정이며 실패를 숨기거나 재시도하지 않는다. 1초 sidecar sample은 실행종료 이후의 입력대기/감시만 보여 실패 원인의 직접증거가 아니다.
+- .artifacts/m5-approved-live-2026-10-30에 run record/termination/shutdown/파일대조/호출스택과 횟수를 보존했다. 승인4회 중 Claude수정·Claude중단·Codex수정3회 사용, Codex중단1회만 남았다. 원본·시험복사본·기록은 후속 대조를 위해 유지하며 실행 중 앱은 없다. 다음은 Codex 실패 원장 상세와 UI갱신 결함 조사, 이후 남은 중단시험. 실제 수정 재시험은 별도 승인 없이는 하지 않는다. main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
+- 이전 턴은 최신 출력 이동 수정/회귀로 진척이었다. 가짜 stream의 approval 오류를 조사한 결과 fake 실행은 native map의 승인 큐에 없으므로 native.rs approval_request가 거절한다. 종료 경쟁 상태로 단정한 초기 추정은 철회하며 native 승인 검사를 완화하지 않았다.
+- 사용자가 최신 실제 시험 총최대4회(Codex/Claude 각각 파일수정1·중단1), 실패 재시도없음을 승인했다. bfc1abd 일반패키지 생성PASS 후 정상 앱(PID35671/sidecar35770)을 열었다. UI에서 두 앱전용 로그인 connected를 확인했고 자체 임시 프로젝트 hello-agent-approved-four-acu6xsk3/project를 생성·선택했다. 인증 변경/사용자 프로젝트 사용없음.
+- Claude 파일수정1회: agent_run_8e637a5e701649648c24096e4f23d8eb, opus/coding, worktree_5acbe690e8af42c59d70c53c91fac104. UI의 Read/Write 요청 상세에서 해당 복사본 hello.txt와 정확한 시험문자열만 확인해 각각 이번만 허용했다. 성공/실행종료 확인/검토준비와 DONE을 관측했고 diff1파일의 original→HELLO_AGENT_CLAUDE_WRITE_OK를 확인했다. 실제 파일도 복사본만 변경, 자체 원본 original\n 보존. 셸/네트워크 도구 요청은 허용하지 않았다.
+- 증거/승인 소진 원장은 .artifacts/m5-approved-live-2026-10-30/{authorization.json,claude-write-files.json}. 남은 승인: Claude중단1/Codex수정1/Codex중단1, 추가 재시도불가. 앱은 다음 시험을 위해 실행 중이며 임시 원본/복사본은 아직 유지한다. 다음 턴은 이 앱·원장부터 재확인하고 남은3회를 진행한다. 패키지 교체/프로필 정리를 먼저 하지 않는다. 전체G6/Windows/출시 미완료, main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
+- 이전 턴은 큰 fixture/메모리 회수 검증과 diff 헤더 개선으로 진척이었다. 기준HEAD ad430d1에서 출력 최신 이동 경로를 조사했다. 내부 출력이 맨 아래에 있어도 외부 conversation이 위로 이동하면 출력이 가려질 수 있는데, 기존 최신 버튼은 history 또는 내부스크롤 newOutput 상태에서만 보였다.
+- AgentOutputPanel의 ‘최신 대화’ 버튼을 출력 cursor가 있는 동안 항상 제공한다. 기존 명시 동작의 inner bottom/outer nearest 이동을 재사용하며 자동 스크롤 정책은 변경하지 않았다. 사용자의 과거 읽기 위치를 강제로 따라가게 하지 않는다. 이는 가림에서 돌아오는 조작 경로의 수정이며, 과거 live 자동추종 가림 원인을 확정·해결했다고 주장하지 않는다.
+- 개발 UI euv4zP: 4채팅×3,000개 가짜 출력의 과거 첫100/다음100/최신 복귀와 외부conversation scrollTop0 후 live 최신버튼 복귀 PASS(exit0). fixture approval의 종료된 실행 조회 거절 로그는 남았으며 실제 공급자 승인 합격 증거가 아니다. renderer build/node syntax/diff check PASS. 전체G6/실제 공급자/정식 패키지 최신 코드 검증은 남는다.
+- .artifacts/m5-output-navigation/euv4zP에 결과·화면·정리 증거를 보존했다. 앱 shutdown accepted/DBclean/관측PID 부재 확인 후 자체 임시 프로필·프로젝트를 삭제했다. main병합·push없음. 다음은 자동추종 가림과 전체G6 누락, 실제 공급자 전체/Windows/출시 검증이다.
+
+### 2026-10-30 · by GPT-6
+
+- 이전 턴은 최신 일반 패키지 생성/시작 측정으로 진척이었다. 기준HEAD f478951(패키지 코드c65c9ee)의 --memory-file-diff 5stPtB를 자체 임시 데이터로 실행했다. 실제 모델·로그인·사용자 프로젝트는 사용하지 않았다.
+- 10,000파일/1,000폴더 트리: 최초160.9ms/확장65.9ms/DOM362개, 5MiB·10만줄 파일 편집가능396.1ms. 500파일·2만변경줄·10MiB diff: 요약215.8ms/첫 파일284.8ms, 원본 불변. 파일 모델과 diff 동시 보유를 확인하고 프로젝트 화면을 닫은 뒤60초 대기/3초 잔류 표본을 수집했다.
+- RSS idle456,261,632B/peak706,265,088B/idle대비 잔류0B. peak800MiB/잔류120MiB 기준은 이 진단에서 충족했으나 idle400MiB 초과로 FAIL(exit1) 유지. CDP 포함 단일 관측이며 동시 채팅 스트림/전체G6/성능p95 증거가 아니다. 기존 no-CDP 결과와 직접 인과 비교하지 않는다.
+- 캡처에서 diff 경로와 버튼이 붙어 보이는 문제를 확인해 경로를 별도 줄로 배치하고 버튼 간격·좁은 폭 줄바꿈을 CSS로 보완했다. renderer build/diff check PASS; 이 CSS 수정 후 실제 패키지 화면 재검증은 아직이며 위 측정은 수정 전 코드다.
+- 시험 앱 정상 종료 confirmed와 관측PID 부재 확인 후 임시 프로젝트·프로필을 삭제했다. .artifacts/m5-packaged-memory/5stPtB에 결과·화면·정리 증거를 보존했다. 다음은 CSS 패키지 반영과 전체G6 누락/가림/실제 공급자 전체/Windows/출시 검증이며 main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
+- 이전 턴은 시작 heap/RSS 분리 진단으로 진척이었다. 기준HEAD c65c9ee의 일반 macOS arm64 패키지를 재생성했다. 실행 중인 패키지 보호 검사를 통과했고 Electron 공식 런타임 다운로드와 Rust release 빌드가 완료됐다. out의 앱 한 벌만 교체했고 ZIP/별도 worktree는 만들지 않았다.
+- 최신 일반 패키지 --no-cdp-project mCtIJG에서 자체 임시 프로필/두 가짜 프로젝트로40표본을 수집했다. 최대391,905,280B(373.75MiB), 정상 종료 confirmed, 결과 NOT_READY(exit2)다. 최대 표본의 main144,031,744B/GPU76,333,056B/utility41,074,688B/renderer113,721,344B/sidecar16,744,448B를 별도 OS process identity와 대조했다. CDP·로그인·모델 호출은 없었다.
+- 과거 같은 수집기의371~417MiB 변동과 기존 초과 결과는 유지한다. 이번1회 기준 이내로 메모리 결함/G6를 닫지 않는다. 시작2프레임 readiness 이후 연속 표시 여부는 미측정이며 큰 fixture/loaded/retained 검증도 아니다. 개발 heap447MiB와 직접 회귀 비교하지 않는다. 다음은 전체G6의 남은 실제 표시/큰 fixture/잔류 메모리 및 출력 가림 증거를 통합하는 일이다.
+- .artifacts/m5-packaged-memory/mCtIJG에 패키지 hash/결과/프로세스 역할/빌드 로그/정리 증거를 보존했다. 정상 종료와 관측된5개PID 부재 확인 뒤 임시 프로필·프로젝트를 삭제했다. 현재 out309MiB/target약1.0GiB이며 기존 앱 데이터·인증·원본 프로젝트는 변경하지 않았다. 제품 완료/Windows 검증/실제 공급자 전체 흐름은 미완료, main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
+- 이전 턴은 출력 진단 진입점 수정/4스트림 관측으로 진척이었다. 시작 RSS 초과의 개선 대상을 분리하려고 기존 idle-only 진단에 RSS 표본 종료 후 main process.memoryUsage/V8 heap 및 renderer의 근사 performance.memory를 추가했다. RSS 기준을 heap 값으로 대체하거나 강제GC/안전·렌더링 설정 변경은 하지 않는다.
+- 최신 개발 UI kQGvXo는 idle 최대468,910,080B(447.19MiB)로400MiB 초과/FAIL. RSS 창 뒤 main heapUsed7,136,252B(6.81MiB), renderer usedJSHeap3,869,072B(3.69MiB)를 관측했다. 프로세스 RSS와 heap은 같은 범위/시점이 아니며 이것만으로 원인을 확정하지 않는다. JS 번들만 줄여 해결된다고 주장할 근거는 부족하다. resource timing 배열은 빈 값이므로 Monaco 미로딩 증거로 쓰지 않는다.
+- 일반 패키지와 달리 이 진단은 개발 harness/renderer 자동 관측/짧은 시작 표본을 포함하므로 기존417.03MiB와 직접 회귀 비교하지 않는다. 기준 초과는 보존하고 전체G6 합격으로 확대하지 않는다. 번들 조사에서 main152KiB/renderer entry560KiB 및 분리된 Monaco editor chunk2.2MiB를 확인했다.
+- 정상 종료 exit1/shutdown accepted와 DBclean/시험 프로세스 부재 확인 뒤 .artifacts/m5-idle-heap/kQGvXo에 결과·화면·메모리·정리 증거를 보존하고 자체 프로젝트/프로필을 삭제했다. node 문법/diff check PASS. 다음은 동일 조건의 패키지 프로세스별 비용 분리와 개선, 가림 재현·공급자 전체/Windows/출시 검증이다. 목표 active, 실제 모델·인증·사용자 프로젝트·main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
+- 이전 턴은 연결 안내 UI 검증으로 진척이었다. 과거 eSjVnl trial5는 내부 출력 scrollTop이 최대값인데 latestVisible=false였음을 확인했다. 당시 outer clip 좌표가 없어 원인을 확정하지 않는다. live 구간 종료 때 최대16개 clipping 조상의 좌표·scroll 범위·viewport를 기록하도록 관측기를 보완했다(출력 본문 추가 수집 없음).
+- 개발용 Electron 직접 실행에서 require.main이 해당 스크립트가 아니어서 runOutputSmoke가 호출되지 않는 진입점 오류를 수정했다. 최초 대기 앱은 정상 quit/exit0으로 종료했고 실제 argv 파일 경로 일치도 진입 조건으로 인정한다. packaged QA의 명시 함수 호출은 유지한다.
+- 최신 개발 빌드 ctvAkq에서 가짜4채팅×3000개 출력의 live4구간/이전·최신 기록 이동/원장 대조/원본 불변 PASS, 네 구간 모두 latestVisible=true였다. 실행 중 fixture approval 조회 거절 로그가 있었으며 실제 native 승인 기능의 합격 증거가 아니다. 이번 개발1회 미재현으로 과거 packaged 실패나 전체G6를 닫지 않는다.
+- 정상 종료 exit0/shutdown accepted·DB clean_shutdown_at·시험 프로세스 부재 확인 후 .artifacts/m5-output-geometry/ctvAkq에 JSON/화면/로그/cleanup을 남기고 자체 원본·프로필을 삭제했다. observer 회귀1개·node 문법·diff 검사 PASS. 제품 스크롤/안전/성능 기준은 변경하지 않았다.
+- 다음: 가림 원인의 결정적 재현/최신 패키지 수집, idle RSS 기준 초과 개선, 실제 공급자 전체/Windows/출시 검증. 실제 모델/인증/사용자 프로젝트 사용·main병합·push없음. 목표 active.
+
+### 2026-10-30 · by GPT-6
+
+- 이전 턴은 최신 작업대 두 통합 시험/정리로 진척이었다. 미완료였던 연결 설정 이동을 scripts/m5-connection-reveal-ui.mjs로 재현 가능하게 추가했다. 실제 ProviderLogin과 chatConnectionTarget에 가짜 로그인 응답만 연결하며 sidecar/실제 계정/모델을 사용하지 않는다.
+- 실제 Electron jJis6B에서 미선택 Claude 안내 시 설정 펼치기·선택 화면·포커스 이동, 기존 Codex 선택 유지, 접기 뒤 Codex 재안내를 확인했다. 최초 가짜 diagnose 1회 외 추가 로그인 요청 없음 PASS다. 스크린샷을 확인했고 정상 종료/소유 PID4개 부재 뒤 자체 번들·프로필·fixture를 정리했다. 증거 .artifacts/m5-connection-reveal/m5-connection-reveal-jJis6B.
+- 성능 후속 조사: admission poll은 verifying 동안만 500ms 단일 요청으로 반복하고 ready에서 종료됨을 확인했다. 이를 지속 idle polling 원인이라고 가정하지 않는다. 과거 eSjVnl trial5 latest output clipping 실패와 AgentOutputPanel의 내부 scroll/명시 latest만 outer scroll 정책을 대조했으나 원인은 아직 확정하지 않았다. 실패 증거를 지우거나 기준을 변경하지 않았다.
+- node --check 및 diff check 통과. 이번은 합성 연결 UI 증거이며 native 설치/로그인 성공이나 전체G6 합격이 아니다. 다음: output clipping 재현과 시작 메모리 개선, 남은 실제 공급자 전체/Windows/출시 검증. 목표 active, 사용자 데이터/인증 변경·실제 모델 호출·main병합/push없음.
+
+### 2026-10-30 · by GPT-6
+
+- 이전 턴은 44a03dd 취소 응답 수정/검증으로 진척이었다. 최신 main/preload/renderer 개발 산출물을 다시 빌드하고 실제 Electron 작업대의 두 자체 통합 시나리오를 마감했다. Rust는 직전 검증의 최신 debug 산출물을 재사용했다.
+- SkoRsq(가짜 actual adapter)는 앱 기본값 저장→신규 프로젝트 역할 상속→채팅 생성→가짜 실행→reviewReady→동의 후 discard→작업대 해제→메시지 보존/원본 불변 PASS. VDOo5Q(일반 native, 공급자 미선택)는 프로젝트 설정/두 채팅/편집·저장/inline·split diff/파일·줄 후속 지시/초안 보존/반영 전 목록 확인·취소 PASS. 원본 반영 실행·실계정 공급자 검증은 포함하지 않는다.
+- 두 프로세스 exit0/shutdown accepted, DB clean_shutdown_at과 소유 PID 부재를 확인했다. .artifacts/m5-project-ui/{SkoRsq,VDOo5Q}에 결과/화면/console/cleanup 증거를 보존하고 자체 임시 원본·앱 프로필을 삭제했다. target792MiB/.artifacts204MiB이며 새 release/ZIP/워크트리를 만들지 않았다.
+- 화면 스크린샷을 확인했다. 이 harness는 background throttling을 해제하며 자동 입력을 사용하므로 기능 연결 증거이지 정상 패키지 성능/G6/시안 전체 충실도 합격이 아니다. source gate 제거 뒤 discard 실제 통합은 확인했으나 일반 native에서 실제 공급자 종료 기록을 이용한 discard는 여전히 별도다.
+- 다음: 남은 연결 안내 UI/일반 admission 확인, G6 메모리·가림/정식 수집과 공급자 전체/Windows/출시 검증. 설치 앱 교체·모델 호출·사용자 인증/프로젝트 변경·main 병합/push 없음. 전체 목표 active.
+
+### 2026-10-30 · by GPT-6
+
+- 이전 턴은 8826bbd 레거시 시작 응답 수정으로 진척이었다. 취소 wire의 {outcome,runId}를 RunRecord로 오해하던 오류를 수정했다. finish_run 저장 성공 뒤 정확한 run ID로 원장을 읽어 {outcome,runId,run}을 보내고 Electron은 응답 필드·요청 chat/run·state 및 terminationEvidence를 검증한 뒤 renderer에 RunRecord를 반환한다.
+- 첫 구현은 취소 ACK 뒤 chat.get을 조회했으나 독립 검토에서 50개 run 목록 제한으로 완료된 취소를 표시하지 못하는 P2를 발견했다. 해당 경로를 제거하고 직접 원장 응답으로 보완했으며 재검토에서 P2 해소/차단 결함 없음으로 마감했다. raw event/종료 증거/복구 잠금 조건은 변경하지 않는다.
+- 검증: 첫 구현 시 누적 Node 617 PASS, 최종 변경 범위 bridge 61 PASS 및 TypeScript PASS. Rust build PASS, 51개 선행 원장으로 target이 목록 밖인 exact lookup 회귀 1 PASS, 실제 자체 fixture stdio 정상 취소·불확실 취소 2 PASS. unit에서 fixture-child를 직접 시작하려던 시험 구성과 원장 run_id 누락은 수정 후 재검증했다. 다운로드 sandbox 실패는 권한 경로로 고정 의존성을 받아 해결했다. diff check PASS. 증거 .artifacts/m5-bridge-compatibility/2026-10-30.
+- 새 Rust debug 검증 산출물 약792MiB가 재생성됐다. release/배포 ZIP은 만들지 않았고 설치 앱은 교체하지 않았다. 다음은 기능 파동의 일반 native admission/UI 확인 및 G6 메모리/공급자 전체/Windows/출시 검증이다. 전체 완료 아님, 실제 모델/인증/사용자 프로젝트 사용 및 main 병합/push 없음.
+
+### 2026-10-30 · by GPT-6
+
+- 직전 턴은 저장공간 정리로 진척이었다. 15558d8 및 기존 정리 워크로그에서 이어 레거시 데모 시작 응답을 조사·수정했다. sidecar의 {run,streamId}를 엄격 검증 후 renderer 계약인 RunRecord로 변환한다.
+- G5A/G5D agent adapter에서 레거시 시작을 요청 전 거절하고 해당 모드의 데모 버튼을 숨긴다. 가짜 actual adapter 실행은 기존 run.startAgent 경로를 유지한다. raw run.event/run.finished 거절 경계는 약화하지 않았다. native mode의 기존 거절도 유지한다.
+- 검증: Electron bridge 60 PASS(실제 envelope 모양과 두 agent handshake의 무전송 거절 회귀 포함), TypeScript 및 diff check 통과. Rust/패키지 재빌드는 하지 않았으며 설치 앱은 이전 버전이다. 레거시 run.cancel 응답 불일치는 아직 미해결이며 다음에 이어 처리한다.
+- 다음: 레거시 취소 응답 정합성, 기능 파동 통합 검증, G6 메모리/전체 공급자/Windows/출시 증거. 제품 완료 선언/main 병합/push/실제 모델 호출 없음.
+
+### 2026-10-30 · by GPT-6
+
+- 사용자 저장공간 정리 요청으로 clean 15558d8/m5/coding-agent-ide에서 산출물·worktree·프로세스를 조사했다. 추가 Git worktree 및 실행 중인 이 프로젝트 앱/sidecar/Cargo/rustc는 없었다.
+- Git 추적 파일이 없는 재생성 가능한 target(3,022,036KiB)와 out/make 배포 ZIP(121,480KiB)을 제거했다. 합계 약 3.00GiB의 디렉터리 할당량이며 APFS 공유 블록 때문에 실제 디스크 여유 증가와 같다고 단정하지 않는다. 임시 경로의 hello-agent-/m5- 접두사 폴더 중 비어 있는 182개만 rmdir로 제거했다.
+- 실행 가능한 out 앱, node_modules, .vite, 검증 증거 .artifacts, 사용자 프로젝트/인증/앱 DB/복구 백업은 보존했다. 다음 Rust 빌드는 캐시를 재생성한다. 코드 변경/모델 호출/프로세스 강제 종료/main 병합/push는 없다.
+- 검증: 정리 대상 Git 비추적 확인, 프로세스 부재 확인, 삭제 후 경로·Git diff 검사. 기능 테스트는 산출물 정리만이므로 실행하지 않았다. 다음 개발 과제와 미완료 G6/공급자/Windows/출시 판정은 그대로다.
+
+### 2026-10-29 · by Codex
+
+- 이전 턴은 승인된 시험 앱 종료/임시 파일 정리로 진척이었다. d89ae0d 기준 최신 Rust debug/renderer로 자체 X34law 합동 UI를 실행했다. 앱 기본 역할 저장→신규 프로젝트 상속→프로젝트 역할 저장/재열기→채팅 생성→FakeExact Claude actual adapter→reviewReady→동의 후 discard→작업대 해제→chat.get discarded/메시지 보존/원본 불변이 PASS다. 실제 공급자·인증·과금은 없다.
+- Electron 시험 프로세스 exit0/shutdown accepted와 DB app_instances PID54429 clean_shutdown_at=2026-10-29T07:25:15Z, 프로세스 부재를 확인했다. .artifacts/m5-project-ui/X34law에 result/console/screenshot/cleanup을 보존하고 자체 임시 원본·프로필은 삭제했다.
+- 독립 검토자가 normal discard의 임시 gate 제거에 차단 결함 없음으로 마감했다. 지정된 Rust fixture/test gate 및 renderer fixtureAvailable 조건을 제거하고 불필요한 is_fixture_runtime helper도 삭제했다. 따라서 다음 빌드부터 일반 reviewReady 대화에도 표시되며 native owner/보류 start/cancel, 전체 주소/revision/종료 증거/recovery/writer/manifest 검사를 그대로 거친다. 일반 설치 패키지는 아직 교체하지 않았다.
+- gate 제거는 직접 diff 검토와 diff check를 통과했다. 위 통합 PASS는 제거 직전의 동일 core/가짜 actual adapter 경로이며 정상 non-fixture runtime의 별도 admission smoke는 아직 남는다. 이를 실제 공급자/원본 반영/전체G6 증거로 보지 않는다.
+- 다음: 레거시 데모 start/cancel wire 정합성 및 G5A raw event 분리, 새 기능 파동의 누적 검증. G6 메모리/가림·실제 공급자 전체·Windows·출시 미완료, 목표 active. main병합/push없음.
+
+### 2026-10-29 · by Codex
+
+- 사용자가 시험 앱 PID47863 종료·정리를 승인했다. 실행 경로와 시작 시각(Thu Oct 29 16:19:17 2026)을 다시 대조하고 sidecar 자식이 없음을 확인한 뒤 해당 Electron만 SIGKILL했다. 소유 PID47863/47885/47886/47887이 모두 사라진 것을 확인했다.
+- P3dUJc의 JSON/화면/console 로그를 .artifacts/m5-project-ui/P3dUJc에 보존하고 자체 임시 프로젝트·앱 프로필을 삭제했다. cleanup.json의 removed=true/remainingPids=[]를 확인했다. 사용자 앱·인증·프로젝트는 변경하지 않았다.
+- 다음은 e5da38d fixture-only 경로를 다시 빌드하고 가짜 actual 공급자로 합동 시험을 진행하는 것이다. legacy 데모 wire 정합성 수정과 G6/공급자 전체/Windows/출시도 계속 남는다. 이번 승인은 해당 시험 앱 한 건에만 적용하며 새 강제 종료 승인을 뜻하지 않는다.
+
+### 2026-10-29 · by Codex
+
+- 이전 턴은 6db300b 앱 기본 역할 구현으로 진척이었다. 이번에는 실제 sidecar–작업대 기본값/버리기 합동 시나리오를 scripts/m5-project-ui-smoke.cjs의 HELLO_AGENT_SMOKE_DISCARD에 추가했다. 앱 기본값 저장→새 프로젝트 상속→대화 생성→가짜 공급자 실행→버리기→기록/원본 보존을 검사한다. 명시 fake runtime과 fixture UI에만 discard를 열었고 일반 native 제품 gate는 유지한다.
+- 앱 기본값 회귀 1 PASS(재시작·revision 충돌·신규 프로젝트만 반영·손상 파일과 기존 프로젝트 독립성). Rust debug 및 Electron/renderer 개발 산출물을 빌드했다. 독립 검토는 처음 file CAS 경합 P1을 제기했으나 제품의 고정 cwd/DB 이름·Storage EXCLUSIVE 소유·단일 dispatcher를 재확인하고 철회했다. 이 전제가 바뀌면 별도 cross-process lock이 필요하다는 코드 주석을 추가했다. 새로운 제품 경로 차단 결함은 없으나 통합 증거는 남는다.
+- 첫 합동 UI P3dUJc는 앱 기본값 저장/프로젝트 상속/역할 편집까지 진행한 뒤 legacy demo start 응답({run,streamId})과 Electron의 RunRecord 기대 불일치로 FAIL했다. G5A 모드가 raw fixture event를 거절하는 경계도 있으므로 이 시험은 현재 계약에 맞는 FakeExact Claude actual 경로로 수정했다. legacy 데모 wire 정합성 결함은 별도 후속으로 남겼으며 고쳤다고 주장하지 않는다. 실제 Claude·Codex/계정/비용 호출은 없다.
+- 시험 sidecar는 종료됐으나 Electron PID47863과 그 창 helper들이 남았고 정상 종료 확인이 실패했다. 해당 자체 시험 앱만 강제 종료·정리하도록 사용자 확인을 요청했으며 응답 전 종료/임시 데이터 삭제/재시험하지 않는다. 임시 root는 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-project-ui-P3dUJc, 로그 /tmp/m5-defaults-discard-ui.log다.
+- 다음은 시험 앱 종료 승인 처리, 가짜 actual 경로 합동 시험, legacy fixture 응답 연결 보정이다. 이번 마지막 fixture-only gate 변경은 문법/diff 검사만 했으며 새 build/통합 회귀가 필요하다. 전체G6·실제 공급자 전체·Windows·출시 미완료, 목표 active. 일반 패키지 교체·원본 쓰기·main병합·push없음.
+
+### 2026-10-29 · by Codex
+
+- 이전 턴은 38aed28의 실행 전 연결 안내 구현으로 진척이었다. 해당 clean HEAD에서 앱 기본 역할·모델을 직접 연결했다. 기존 프로젝트 역할 편집기를 앱 범위에도 재사용하고 도구 모음에서 프로젝트 선택 없이 열 수 있다. 저장/불러오기 오류, 미저장 변경 확인, ko/en 문구, 오래된 비동기 응답 거절을 포함한다. 기본값 화면에서는 특정 채팅을 전제로 하는 모델 조회를 호출하지 않는다.
+- sidecar는 관리된 application-settings-v1/role-defaults.json에 schema/revision/roles/updatedAt을 저장한다. 기존 역할 검증·expected revision·원자 파일 교체를 사용하고 symlink/Unix hardlink/비정규 파일·크기 초과·손상값을 거절한다. Unix 읽기는 NONBLOCK으로 특수 파일 대기를 피한다. 프로젝트 역할 설정 최초 초기화와 직접 chat 생성의 초기화 경로 모두 앱 기본값을 복사하며, 이미 존재하는 프로젝트 설정·대화 snapshot은 유지한다. SQLite schema 변경은 없다.
+- project.catalog typed 요청/응답을 추가했고 역할 결과 비교는 JSON 키 순서에 의존하지 않는다. Rust check 및 check --tests, TypeScript, diff 검사 통과. 초기 컴파일의 json 매크로 경로 오류를 수정했다. 기본값 저장/충돌/재시작·새 프로젝트만 반영·손상 파일과 기존 프로젝트 독립성 회귀를 작성했으나 아직 실행하지 않았다. 전체 테스트/실제 UI/독립 검토는 기능 파동 마감에 묶어서 수행한다.
+- 다음: 새 기본값의 통합 회귀와 일반 discard 실제 sidecar+작업대 통합, 남은 G6 메모리/가림 원인 확인. 실제 공급자 전체·Windows·출시도 미완료이며 목표 active. 실제 모델·설치·로그인·사용자 프로젝트·패키지 교체·main병합·push없음.
+
+### 2026-10-29 · by Codex
+
+- 이전 턴은 be4881d의 discard 재개·화면 해제 수정/회귀/독립 검토로 진척이었다. 이번에는 해당 clean HEAD에서 실행 전 연결 안내를 직접 연결했다. capability가 설치 누락/불완전/지원 버전 불일치/로그인 누락/만료로 실행을 거절하면 대화 알림에 해당 Codex·Claude Code 연결 확인 버튼을 표시한다.
+- 버튼은 기존 연결 관리 영역을 펼치고 스크롤·키보드 포커스를 이동한다. 대상 공급자가 선택되지 않았다면 선택 영역을 열어 명시적으로 추가할 수 있게 한다. 선택 목록/설치/로그인/모델 실행을 자동 변경하지 않고, 연결 후 사용자가 실행 버튼을 다시 누르도록 ko/en 안내를 제공한다. 복구 잠금·실행 중·플랫폼 불가·모델 불일치에는 로그인 유도 버튼을 표시하지 않는다. 프로젝트/편집/작성 중 대화는 유지한다.
+- TypeScript와 diff 검사 통과. 기존 run preflight 및 backend 실행 권한은 변경하지 않았다. 이번 안내의 실제 작업대 클릭 회귀는 기능 파동의 통합 UI 검증에서 수행할 예정이다. 작은 UI 연결마다 독립 검토/전체 빌드를 반복하지 않았다.
+- 다음은 앱 기본 역할 설정을 기존 프로젝트별 역할/새 채팅 snapshot 계약과 연결하는 작업이다. 일반 discard 통합/활성화, G6/실제 공급자/Windows/출시도 남아 있으며 목표는 계속 active다. 모델 호출·설치·인증 변경·패키지 교체·main병합·push없음.
+
+### 2026-10-29 · by Codex
+
+- b1ef2c1 기준 일반 작업 복사본 버리기의 실패 복구/화면 정리 회귀를 마감했다. 원자적 chat projection에 전체 주소·task·원래 chatRevision의 discard_receipt를 함께 저장하며, 응답 유실 후 inspect 재조회와 같은 commit 재전송은 정확히 일치하는 완료 기록만 반환한다. SQLite events INSERT 직후 강제 실패와 DB 재시작에서도 원본·대화 기록을 보존하며 재시도는 상태 메시지를 한 번만 남긴다.
+- 독립 검토 P1 두 건(프로젝트 watcher 미해제, 응답 유실 뒤 확인창 close/remount 시 재개 불가)을 수정했다. releaseView 응답 검증 후 로컬 화면을 비우며 실패 시 완료 결과를 보유해 release만 재시도한다. 재검토자는 두 P1 해소/새 차단 결함 없음으로 마감했다. 제품 gate는 Rust test-only/renderer false를 유지하며 활성화 승인이 아니다.
+- 검증: discard 관련 Rust 8 PASS + owned fake-actual dispatcher 1 PASS, watcher 해제 1 PASS, TypeScript PASS. 테스트 초기 fixture FK·legacy helper·Drop 타입 이동 오류는 수정 후 해당 검사를 통과했다. 보류 start/cancel 및 소유 중 fake actual run은 dispatcher에서 거절되고 chat/manifest가 유지된다. legacy/actual 종료 증거 보존, writer/poison/recovery/save 차단도 확인했다.
+- 새 scripts/m5-discard-dialog-ui.mjs로 실제 Electron renderer + 가짜 transport의 동의/취소→응답 유실→close/remount→완료 receipt 재전송→release 실패/재시도를 확인했다. requests2/messages1/releases2/completion1 PASS, 확인창 문구/버튼을 직접 확인했다. 실제 sidecar 통합·모델 시험으로 간주하지 않는다. 증거 .artifacts/m5-discard-dialog/{m5-discard-dialog-Wqocr7,m5-discard-dialog-o9R59Y}. 최신 시험 소유 PID22215/22219/22220/22223 부재/정상 종료 후 임시 프로필·번들을 정리했고 이전 시험도 정상 종료 후 자체 경로 정리했다.
+- 다음: 일반 discard의 실제 sidecar+작업대 통합 및 활성화 판단, 앱 기본 역할 설정/실행 전 연결 안내 구현. G6 메모리·가림 원인·실계정·Windows·출시는 계속 미완료다. 전체 개발 완료나 성능 합격은 아니며 일반 패키지 교체·사용자 프로젝트·모델 호출·main병합·push없음.
+
+### 2026-10-29 · by Codex
+
+- 이전 턴은 복사본 버리기 핵심/CAS·재시도 회귀 구현으로 진척이었다. clean ddcde2a에서 inspectChatDiscard/discardChatWorkspace typed catalog 계약과 dispatcher를 연결했다. 전체 주소·task·chat revision을 재검증하고 명시 확인을 요구하며 활성 native owner/보류 start/cancel 작업을 차단한다. chat.get 기존 계약은 바꾸지 않고 별도 inspection으로 aggregate revision을 제공한다.
+- 작업대 확인창과 완료 후 로컬 편집/대화 화면 해제를 작성했다. 미저장 파일/진행 작업이 있으면 진입하지 못하고 native modal이 다른 화면 조작을 막는다. 동의 체크·취소·오류 재시도·ko/en 문구가 있으며, 요청이 성공했으나 화면 정리가 실패한 경우 같은 mutation을 다시 보내지 않도록 성공 결과를 보유한다. 이 UI의 실제 렌더링·흐름 시험은 아직 하지 않았다.
+- 제품 dispatcher는 cfg(test) 밖에서 거절하고 작업대 REVIEW_DISCARD_ENABLED도 false다. 따라서 일반 앱에는 아직 활성화하지 않았다. 검사 중 TS union 삽입 구문 오류를 바로잡았고 TypeScript/cargo check 통과, catalog 계약17개 통과, diff check 통과했다. React 지침으로 hooks·비동기 응답 세대·modal/checkbox 접근성·중복 제출을 자체 확인했다.
+- 다음은 native/fixture 종료 증거와 모든 거절 조건, 실제 SQLite 실패/재시작, 성공 응답 유실과 UI 화면 전환 회귀를 묶어 추가한 뒤 독립 안전 검토다. 검토 뒤 두 admission gate를 함께 활성화하고 실제 자체 UI로 마감한다. 아직 기능 완료/제품 활성화/G6 합격이 아니다. 일반 패키지·사용자 프로젝트·실제 모델은 사용하지 않았고 main병합/push없음.
+
+### 2026-10-29 · by Codex
+
+- 이전 턴은 나란히 diff 구현/실제 UI 검증/커밋으로 진척이었다. clean a6cea5d에서 정상 검토 복사본 버리기의 백엔드 핵심을 직접 구현했다. 외부 요청·UI에는 아직 연결하지 않은 구현 체크포인트다.
+- reviewReady의 exact task/chat/project/workspace 주소·aggregate revision, 종료 증거가 있는 fixture/actual 원장, writer 없는 healthy lock, 저장/반영/준비/미완료 application intent 배제를 검사한다. 기존 active-only workspace 검증은 유지하고 별도 discard 재시도만 canonical abandoned manifest를 허용한다. 원본·복사본 파일을 삭제하지 않으며 manifest terminalization 다음 chat discarded/상태 메시지를 CAS 원자 저장한다. DB 저장 전후 사이의 실패는 일반 workspace API에서 사용 불가 상태로 남는다.
+- cargo check 통과(아직 미연결 메서드 dead-code 경고), 관련 Rust 회귀3개 통과: 원본/편집 복사본/이전 대화 보존·재사용 거절, 잘못된 task/stale revision 무변경, manifest만 terminal인 중간 상태의 재시도. 마지막 항목은 중단 경계를 모델링한 시험이며 실제 SQLite 실패 주입·프로세스 재시작 증거가 아니다. 새 Rust 모듈 포맷과 diff check도 통과했다.
+- 다음 구현은 inspect/discard typed 계약·dispatcher의 활성 native owner 및 보류 start/cancel 배제·명시 확인 UI/새 상태 반영이다. 이어 fixture/가짜 actual 종료 기록·저장 중/반영 중 거절·실제 DB 실패 및 재시작 회귀를 묶어 수행하고 독립 안전 검토 후 제품 경로를 마감한다. 아직 기능 완료/활성화/전체G6 합격이 아니며 일반 out 패키지는 변경하지 않았다. 실제 모델·사용자 프로젝트 사용/main병합/push없음.
+
+### 2026-10-29 · by Codex
+
+- 기준 a9085a9에서 시작 메모리와 시안 누락 기능을 확인했다. renderer 번들은 production React이며 Monaco는 이미 지연 로딩이다. Electron43.4.0 빈 창 대조 UwYplU는52표본 최대341,196,800B(325.39MiB), 정상 종료/관측 프로세스 부재였다. 자체 임시 프로필은 삭제하고 `.artifacts/m5-empty-memory/m5-empty-memory-UwYplU`에 수집기/원시 결과를 보존했다. data URL·preload/sidecar 없음·표본 수 차이가 있어 제품417.03MiB와의 차이를 특정 코드 비용이나 G6 합격으로 해석하지 않는다.
+- 승인된 읽기 전용 검토자가 정상 reviewReady 복사본 버리기, 앱 공통 역할 기본값, inline/split diff 누락을 확인했다. 검토자는 재검토에서 최초 연결 전 프로젝트 진입을 막자는 제안을 철회했다. 기존 프로젝트 탐색·offline 편집·diff·초안은 허용하고 실제 실행 전 연결 실패를 설정으로 안내하는 방향을 유지한다. 버리기는 아직 API/UI 구현 완료가 아니다.
+- 시안의 한 화면/나란히 diff 전환을 구현했다. 현재200행 페이지 안에서만 인접 삭제/추가를 짝지으며 metadata·서로 다른 줄 수·페이지 경계의 원래 줄 번호를 보존한다. 보기 전환은 조회/반영 계약을 바꾸지 않는다. ko/en 문구와 키보드 버튼, 원래 줄의 후속 요청 연결을 유지했다.
+- TypeScript 검사/renderer production build, diff 회귀9개, diff check 통과. native 자체 UI 첫 ABf653은 기존 탭 선택자가 변경 배지를 고려하지 않아 FAIL; 선택자 수정 뒤 Ztyx2r은 split 전환·줄 참조·초안 보존 포함 PASS/정상 종료했다. 두 시험의 DBclean/프로세스 부재 확인 뒤 자체 fixture를 삭제했고 `.artifacts/m5-project-ui/{ABf653,Ztyx2r}`에 실패와 성공 모두 보존했다. 일반 out 패키지는 아직 이전 버전이다.
+- 버리기 구현 경계: 기존 recovery/unbound/close를 넓히지 않고 reviewReady 전용 exact task/chat/workspace 주소와 aggregate revision CAS를 사용한다. 활성/보류 실행·취소·저장·반영/미완료 intent·writer/poison/recovery를 먼저 거절하고, manifest active→abandoned 뒤 DB chat→discarded와 상태 메시지를 원자 기록한다. DB 실패는 fail-closed로 두고 같은 주소/기대 revision의 재시도로 마무리하며 파일은 삭제하지 않는다. 독립 검토자의 설계 제안이며 구현/활성화 승인을 대신하지 않는다.
+- 다음은 정상 검토 복사본 버리기 구현·안전 검토, 앱 공통 역할 기본값과 처음 시작 흐름 정합성이다. G6 메모리·가림 재현/정식 수집, 실제 공급자·Windows·출시는 여전히 미완료다. 실제 모델 호출/main병합/push없음.
+
+### 2026-10-29 · by Codex
+
+- 이전 턴은 최신 일반 패키지 반영과 편집/반영/복원 흐름 증거 확보로 진척이었다. 같은 adba8b0 일반 패키지에서 `--no-cdp-project`를 실행했다. z6kP5h/session65318은435,142,656B(414.98MiB)로400MiB 초과/FAIL이었다. 수집 중 CUA 접근성 조회가 있었으므로 순수 미관측 baseline으로 취급하지 않는다.
+- 화면 조회를 수집 완료 뒤로 미룬 bZpohl/session64931 대조도437,288,960B(417.03MiB), FAIL이었다. 두 결과는 정식 G6/인과 통계가 아니지만 동시 접근성 조회만으로 초과를 설명할 수 없다는 근거다. 두 번째 peak의 main148.61/GPU83.48/network39.75/renderer127.84/sidecar17.34MiB를 보존한다. 기준을 완화하거나 낮은 표본만 택하지 않았다.
+- 두 회차 모두 CUA Cmd+Q 뒤 정상종료와 DBclean을 확인했다. 첫 종료 직후 getAXState가 앱을 기본 프로필로 다시 연 사실을 확인했고 PID6741/sidecar6747을 추가 Cmd+Q로 정상종료했다. 재기동할 수 있는 앱 getter를 종료 확인에 다시 쓰지 않고 OS PID 부재로 확인했다. 로그인 입력·모델 호출·사용자 파일 편집은 하지 않았다.
+- `.artifacts/m5-packaged-ui/{z6kP5h,bZpohl}`에 결과/로그/정리 증거를 보존하고 자체 임시 프로젝트·프로필을 삭제했다. 다음은 프로세스별 시작 메모리 개선 대상 조사와 잔류/전체G6 수집이다. 가림/실제공급자/Windows/출시도 미완료이며 목표 계속 진행 중이다. main병합/push없음.
+
+### 2026-10-29 · by Codex
+
+- 이전 턴은 가림 진단 보완·추가3회 미재현 증거 확보로 진척이었다. cleanadba8b0 진단 QA qZBrhv/XjZFoI(session12433)는 visible·12,000출력·정상종료, 표본최대31ms였고 trusted입력0/dropped0을 실제 수집했다. 가림 원인은 여전히 미확정이며 과거 실패를 해소하지 않았다. PID/DB 확인 뒤 임시 QA 앱/fixture를 정리했다.
+- 같은 소스에서 `pnpm m5:test:package` PASS(session73991). 일반앱/ZIP에 watcher 비동기화가 반영됐다. 패키지323,155,497B·ZIP124,392,729B, `.artifacts/m5-g6-package/darwin-arm64-2026-10-29T02-21-44-827Z.json`에 provenance/smoke/크기 증거를 보존한다. 서명/공증/출시 또는 전체G6 합격은 아니다.
+- 최신 일반 패키지 `--project` 시험(eXYmoB/session58111)은 초기·재시작 모두 정상종료했다. 편집/저장/diff·재시작 저장내용·반영취소 원본보존·별도동의 반영/복원 exact bytes·두 프로젝트 파일/채팅 격리·원래채팅 재열기를 확인했다. 그러나 CDP진단 유휴RSS461,733,888/482,689,024B가400MiB를 넘어 전체FAIL/exit1을 유지한다. 기능 성공으로 메모리 실패를 덮지 않는다.
+- 원시 증거는 `.artifacts/m5-packaged-output-qa/XjZFoI` 및 `.artifacts/m5-packaged-ui/eXYmoB`다. 관측PID부재·DBclean 대조 후 임시앱/fixture를 삭제했고 일반out앱/ZIP만 유지한다. 다음은 진단 연결 없는 메모리 대조/잔류 메모리와 정식 전체 수집 연결, 미해결 가림·실제공급자/Windows/출시 검증이다. 실행 중 시험앱없음, main병합/push없음.
+
+### 2026-10-29 · by Codex
+
+- 이전 턴은 watcher 비동기화와 반복 QA 가림 실패 증거 확보로 진척이었다. clean7db103f의 같은 진단 QA(z4pbpz)로 추가3회만 확인했다. 1sk6MF/dtNjHf/mFFOui 모두 visible·12,000출력/history/latest·정상 종료, 표본최대23.4/33.7/25.1ms였다. 과거 본5회 가림 실패를 지우거나 전체 반복/G6 합격으로 바꾸지 않는다.
+- 세 회차에서는 가림이 재현되지 않아 부모 영역 원인을 확정하지 못했다. 실패 당시 내부패널이 맨 아래였다는 기존 증거를 유지한다. QA에 trusted wheel/pointerdown/touchstart/스크롤키 입력의 종류·시각만 최대128개 수집하도록 추가했다. 입력 내용·키값은 저장하지 않으며 초과카운터를 남긴다. 미래 실패의 좌표/PNG와 함께 사용자 입력과 레이아웃 이동을 구분하기 위한 진단이며 자동 면책/표본 제외가 아니다. JS문법/diff PASS, 이 추가 입력 진단의 실제 수집은 아직 미검증이다.
+- 각 회차 PID부재·DBclean 확인 뒤 fixture 및 QA 패키지를 삭제했다. 원시 증거는 `.artifacts/m5-packaged-output-qa/{1sk6MF,dtNjHf,mFFOui}`에 있다. 기록이500줄을 넘게 되어 기존10/29·10/27 워크로그 전체를 원문 그대로10월 아카이브로 옮겼다. 고정 결정은 유지한다.
+- 다음은 가림 재발의 입력/좌표 증거 또는 제어된 레이아웃 재현으로 원인을 확정하는 것, 정식 G6 전체 수집 연결과 남은 실제공급자/Windows/출시 검증이다. 제품 UI를 추측으로 수정하지 않았다. 실행 중 시험 앱 없음, main병합/push없음. 목표는 계속 진행 중이다.
+
 ### 2026-10-29 · by Codex
 
 - clean c70724b의 반복 QA eSjVnl(session48444)는 준비+본4회까지 visible/12,000출력/정상 종료를 통과했고, 본5회에서 `Latest live output is clipped`로 FAIL/exit1 종료했다. 실패 회차를 제외/재시도하지 않았으며 본6~10회는 미실행이다. 본1~4 최대지연61.3/56.4/51.1/66.9ms, peak최대622,264,320B였다. 단회 개선은 확인했지만 반복 전체 합격은 아니다.
