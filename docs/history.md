@@ -2,6 +2,13 @@
 
 ### 2026-10-30 · by GPT-6
 
+- 이전 턴은 최신 출력 이동 수정/회귀로 진척이었다. 가짜 stream의 approval 오류를 조사한 결과 fake 실행은 native map의 승인 큐에 없으므로 native.rs approval_request가 거절한다. 종료 경쟁 상태로 단정한 초기 추정은 철회하며 native 승인 검사를 완화하지 않았다.
+- 사용자가 최신 실제 시험 총최대4회(Codex/Claude 각각 파일수정1·중단1), 실패 재시도없음을 승인했다. bfc1abd 일반패키지 생성PASS 후 정상 앱(PID35671/sidecar35770)을 열었다. UI에서 두 앱전용 로그인 connected를 확인했고 자체 임시 프로젝트 hello-agent-approved-four-acu6xsk3/project를 생성·선택했다. 인증 변경/사용자 프로젝트 사용없음.
+- Claude 파일수정1회: agent_run_8e637a5e701649648c24096e4f23d8eb, opus/coding, worktree_5acbe690e8af42c59d70c53c91fac104. UI의 Read/Write 요청 상세에서 해당 복사본 hello.txt와 정확한 시험문자열만 확인해 각각 이번만 허용했다. 성공/실행종료 확인/검토준비와 DONE을 관측했고 diff1파일의 original→HELLO_AGENT_CLAUDE_WRITE_OK를 확인했다. 실제 파일도 복사본만 변경, 자체 원본 original\n 보존. 셸/네트워크 도구 요청은 허용하지 않았다.
+- 증거/승인 소진 원장은 .artifacts/m5-approved-live-2026-10-30/{authorization.json,claude-write-files.json}. 남은 승인: Claude중단1/Codex수정1/Codex중단1, 추가 재시도불가. 앱은 다음 시험을 위해 실행 중이며 임시 원본/복사본은 아직 유지한다. 다음 턴은 이 앱·원장부터 재확인하고 남은3회를 진행한다. 패키지 교체/프로필 정리를 먼저 하지 않는다. 전체G6/Windows/출시 미완료, main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
 - 이전 턴은 큰 fixture/메모리 회수 검증과 diff 헤더 개선으로 진척이었다. 기준HEAD ad430d1에서 출력 최신 이동 경로를 조사했다. 내부 출력이 맨 아래에 있어도 외부 conversation이 위로 이동하면 출력이 가려질 수 있는데, 기존 최신 버튼은 history 또는 내부스크롤 newOutput 상태에서만 보였다.
 - AgentOutputPanel의 ‘최신 대화’ 버튼을 출력 cursor가 있는 동안 항상 제공한다. 기존 명시 동작의 inner bottom/outer nearest 이동을 재사용하며 자동 스크롤 정책은 변경하지 않았다. 사용자의 과거 읽기 위치를 강제로 따라가게 하지 않는다. 이는 가림에서 돌아오는 조작 경로의 수정이며, 과거 live 자동추종 가림 원인을 확정·해결했다고 주장하지 않는다.
 - 개발 UI euv4zP: 4채팅×3,000개 가짜 출력의 과거 첫100/다음100/최신 복귀와 외부conversation scrollTop0 후 live 최신버튼 복귀 PASS(exit0). fixture approval의 종료된 실행 조회 거절 로그는 남았으며 실제 공급자 승인 합격 증거가 아니다. renderer build/node syntax/diff check PASS. 전체G6/실제 공급자/정식 패키지 최신 코드 검증은 남는다.
