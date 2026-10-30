@@ -363,7 +363,12 @@ export class ChatUiController {
       await this.#hydrateChat(chat, generation);
       // The accepted binding is independently validated by the bridge. The durable ledger owns terminal state.
       if (accepted.runId.length === 0) throw new Error("empty accepted agent run identity");
-    } catch (error) { this.#error("m5.chatError.run", error); }
+    } catch (error) {
+      if (this.#live(generation) && this.#state.activeChat?.chatId === chat.chatId) {
+        this.#set({ notice: null });
+        this.#error("m5.chatError.run", error);
+      }
+    }
     finally { if (this.#live(generation) && this.#state.activeChat?.chatId === chat.chatId) this.#set({ agentStartingRoleId: null }); }
   }
 

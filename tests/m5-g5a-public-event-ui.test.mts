@@ -494,3 +494,66 @@ test("stale terminal hydration은 나중에 연 다른 채팅의 recovery 상태
   assert.equal(controller.snapshot().agentRecovery, null);
   controller.dispose();
 });
+
+
+test("rejected capability or start clears the preparation notice without retrying", async () => {
+  for (const phase of ["capability", "start"] as const) {
+    const bridge = new AgentBridge();
+    const controller = await open(bridge);
+    let attempts = 0;
+    const reject = async () => { attempts++; throw new Error(`rejected ${phase}`); };
+    if (phase === "capability") bridge.getAgentCapabilities = reject;
+    else bridge.startAgentRun = reject;
+    await controller.startAgent("coding");
+    assert.equal(attempts, 1);
+    assert.equal(controller.snapshot().agentStartingRoleId, null);
+    assert.equal(controller.snapshot().notice, null);
+    assert.equal(controller.snapshot().noticeKey, undefined);
+    assert.equal(controller.snapshot().error?.detail, `rejected ${phase}`);
+    assert.equal(controller.snapshot().agentRuns.length, 0);
+    controller.dispose();
+  }
+});
+
+test("late start rejection does not overwrite another chat's notice or error", async () => {
+  const bridge = new AgentBridge();
+  const controller = await open(bridge);
+  let reject!: (error: Error) => void;
+  bridge.getAgentCapabilities = () => new Promise((_, fail) => { reject = fail; });
+  const starting = controller.startAgent("coding");
+  await controller.prepareSwitch("chat_b", true);
+  await controller.commitPrepared("chat_b", true);
+  const current = controller.snapshot();
+  assert.equal(current.activeChat?.chatId, "chat_b");
+  reject(new Error("old chat start rejected"));
+  await starting;
+  assert.equal(controller.snapshot().notice, current.notice);
+  assert.equal(controller.snapshot().error, current.error);
+  assert.equal(controller.snapshot().agentStartingRoleId, null);
+  controller.dispose();
+});
+
+test("accepted start with failed hydration clears progress and later reconciles durable failure", async () => {
+  const bridge = new AgentBridge();
+  const controller = await open(bridge);
+  const start = bridge.startAgentRun.bind(bridge);
+  const getChat = bridge.getChat.bind(bridge);
+  bridge.startAgentRun = async (input) => {
+    const accepted = await start(input);
+    bridge.getChat = async () => { throw new Error("post-start history unavailable"); };
+    return accepted;
+  };
+  await controller.startAgent("coding");
+  assert.equal(bridge.starts.length, 1);
+  assert.equal(controller.snapshot().agentStartingRoleId, null);
+  assert.equal(controller.snapshot().notice, null);
+  assert.equal(controller.snapshot().error?.detail, "post-start history unavailable");
+  bridge.getChat = getChat;
+  const failed = agentRun(bridge.chatA, "failed");
+  bridge.agentRuns = [failed];
+  bridge.emitState(stateEvent(bridge.chatA, "failed"));
+  await flush();
+  assert.deepEqual(controller.snapshot().agentRuns, [failed]);
+  assert.equal(bridge.starts.length, 1, "reconciliation never retries the provider");
+  controller.dispose();
+});
