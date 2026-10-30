@@ -1,3 +1,4 @@
+import { createSessionDiagnosticLog } from "./session-diagnostic-log.ts";
 import { MODEL_CHOICES_CHANNEL, validateModelChoicesRequest } from "../src/m5/contracts/model-choices-v1.ts";
 import { DEVICE_REPORT_CHANNEL } from "../src/m5/contracts/device-report-v1.ts";
 import { SESSION_DIAGNOSTICS_CHANNEL, classifySessionDiagnostics } from "../src/m5/contracts/session-diagnostics-v1.ts";
@@ -286,7 +287,9 @@ function forwardAgentRunStateChanged(event: AgentRunStateChangedV1, protocolEven
 }
 
 function startSidecar(): SidecarClientV1 {
-  const client = new SidecarClientV1(sidecarLaunch(m5DataDirectory()));
+  const client = new SidecarClientV1(sidecarLaunch(m5DataDirectory()), {
+    onDiagnosticTail: createSessionDiagnosticLog(app.getPath("logs")).capture,
+  });
   client.onEvent(forwardSidecarEvent);
   client.onProjectEvent(forwardProjectEvent);
   client.onWorkspaceEvent(forwardWorkspaceEvent);

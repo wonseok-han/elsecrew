@@ -291,13 +291,15 @@ export class SidecarClientV1 {
   #failure: Error | undefined;
   #failureCode: "readyTimeout" | "pipesUnavailable" | "processError" | "processExit" | "consumerTooSlow" | "rendererDisconnected" | "requestWrite" | "requestInvalid" | "protocolInvalid" | "protocolOversized" | undefined;
   #stderrTail = Buffer.alloc(0);
+  readonly #onDiagnosticTail: ((tail: string) => void) | undefined;
   #terminationAttempted = false;
 
   constructor(
     launch: SidecarLaunchV1,
-    options: { spawn?: SidecarSpawnV1; readyTimeoutMs?: number } = {},
+    options: { spawn?: SidecarSpawnV1; readyTimeoutMs?: number; onDiagnosticTail?: (tail: string) => void } = {},
   ) {
     this.#launch = launch;
+    this.#onDiagnosticTail = options.onDiagnosticTail;
     this.#spawn = options.spawn ?? ((command, args, spawnOptions) => {
       const child = spawn(command, args, spawnOptions);
       return {
@@ -658,6 +660,8 @@ export class SidecarClientV1 {
         this.#stderrTail.byteLength - MAX_SIDECAR_STDERR_TAIL_BYTES,
       );
     }
+    // Diagnostic storage failures cannot stop execution or alter shutdown proof.
+    try { this.#onDiagnosticTail?.(this.#stderrTail.toString("utf8")); } catch { /* best effort only */ }
   }
 
   #onEnvelope(envelope: EnvelopeV1): void {

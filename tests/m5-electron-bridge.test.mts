@@ -54,13 +54,14 @@ class FixtureSidecar extends EventEmitter {
   }
 }
 
-function createClient(timeout = 1_000) {
+function createClient(timeout = 1_000, onDiagnosticTail?: (tail: string) => void) {
   const child = new FixtureSidecar();
   let spawns = 0;
   const client = new SidecarClientV1(
     { command: "fixture", args: ["--stdio"], cwd: "/private/tmp" },
     {
       readyTimeoutMs: timeout,
+      onDiagnosticTail,
       spawn: () => {
         spawns += 1;
         return child as unknown as SidecarProcessV1;
@@ -1958,3 +1959,16 @@ function preparedWorkspace(preparationId: string) {
     bindingState: "unbound", boundChatId: null, createdAt: "2026-08-26T01:00:00Z", updatedAt: "2026-08-26T01:00:00Z",
   };
 }
+
+
+test("diagnostic persistence errors do not fail the sidecar connection", async () => {
+  let observed = "";
+  const { child, client } = createClient(1_000, (tail) => { observed = tail; throw new Error("disk full"); });
+  const started = client.start();
+  child.stdout.write(`${readyLine()}\n`);
+  await started;
+  child.stderr.write("native Codex transport failed at turn start state\n");
+  assert.match(observed, /turn start state/);
+  assert.equal(client.failure, undefined);
+  assert.equal(child.terminations, 0);
+});

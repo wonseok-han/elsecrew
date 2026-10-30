@@ -1,14 +1,16 @@
 import type { EventV1 } from "../src/m5/contracts/protocol-v1.ts";
 
+type EventCreditIdentity = Pick<EventV1, "streamId" | "seq">;
+
 export const MAX_IN_FLIGHT_EVENTS = 32;
 export const MAX_GLOBAL_IN_FLIGHT_EVENTS = 128;
 
 export class EventCreditV1 {
-  readonly #pending = new Map<string, EventV1[]>();
+  readonly #pending = new Map<string, EventCreditIdentity[]>();
   readonly #fail: (error: Error) => void;
   #total = 0;
   constructor(fail: (error: Error) => void) { this.#fail = fail; }
-  deliver(event: EventV1, send: () => void): void {
+  deliver(event: EventCreditIdentity, send: () => void): void {
     if (this.#total >= MAX_GLOBAL_IN_FLIGHT_EVENTS || (this.#pending.get(event.streamId)?.length ?? 0) >= MAX_IN_FLIGHT_EVENTS) {
       this.#fail(new Error("consumerTooSlow: renderer event credit exhausted")); return;
     }
