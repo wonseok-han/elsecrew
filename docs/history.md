@@ -2,6 +2,12 @@
 
 ### 2026-10-30 · by GPT-6
 
+- 이전 턴은 Codex parser 호환 수정·패키징 진척이었다. HEADffa8c09에서 최신 출력이 바깥 대화 영역에 가려지는 경로를 보완했다. 안쪽 목록과 바깥 viewport 추적을 분리하고, 이미 최신 행을 보고 있을 때만 바깥 스크롤을 따라간다. 새 출력 commit 전에 scrollTop 변경도 비교하여 지연된 scroll 이벤트가 사용자 위치를 되돌리는 경합을 막았다.
+- 가짜 출력 첫 시험은 과거 대화 읽기 보존에서 FAIL(503≠0), 경합 수정 후 네 채팅×3,000 출력의 latest/history/명시 복귀와 출력 중 사용자 위치 보존은 functional PASS였다. 창 숨김 이력이 있어 최종 status=NOT_READY이며 G6/지연/패키지 합격은 아니다. .artifacts/m5-outer-follow-2026-10-30에 증거를 옮기고 DB clean shutdown 확인 후 두 임시 시험 폴더를 삭제했다. renderer build·tsc -b·diff PASS. tsc -b에서 발견한 vite.config.ts의 이제 불필요한 ts-expect-error도 제거했고 검사 생성물4개를 정리했다.
+- 별도 승인된 2c06e79 Codex 재시험1회는 실제 HELLO_AGENT_SMOKE_OK 응답까지 표시했으나 이후 `turn stream moderation metadata`에서 failed·cleanExit로 끝났다. run agent_run_2308ab08368343b4a2848c1b88d31178, processesProvenGone=true, 원본/복사본 original\n 유지, sidecar82888 정상 종료07:12:38Z. 호출1회 소진·재시도없음. 증거 .artifacts/m5-codex-lifecycle-retest-2026-10-30. 실제 CLI 생성 schema상 해당 알림은 threadId/turnId/metadata 필수다. 다음은 이 비공개 알림 호환 수정, 이후 별도 승인 재시험 및 Codex 수정/중단·G6/Windows/출시 검증이다. main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
 - f7e2c8e의 패키징을 완료한 뒤 새 승인에 따라 Codex 짧은 응답 진단1회를 실행했다. run agent_run_33b6607ddc24456a9f73a0a24640e67e는 `turn item start user echo shape`에서 failed·cleanExit, processesProvenGone=true로 끝났다. 원본/복사본 hello.txt는 original\n 유지, 정상 quit 뒤 sidecar56026 clean_shutdown_at06:55:57Z를 확인했다. 승인1회 소진·재시도없음. 증거는 .artifacts/m5-codex-item-checkpoint-2026-10-30이다.
 - 실제 CLI0.166.0-alpha.5.1 생성 스키마의 ThreadItem **바깥 공통 속성** startedAtMs/completedAtMs(선택 nullable int64)을 private userMessage/reasoning 검사기가 거절하는 호환 결함을 오프라인으로 재현했다. 두 속성만 Option<i64>로 허용하고 폐기하며 unknown/type/overflow/duplicate 거절은 유지했다. 원문은 수집하지 않아 이번 실제 실패의 원인이라고 확정하지 않는다.
 - 수정 전 회귀1개 FAIL, 수정 후 Codex 이벤트34개 PASS. timestamp가 있어도 private 유지·공개 응답 진행·turn 종료 증거를 대체하지 않음을 검증했다. 독립 검토자1명 차단없음, private.rs rustfmt 완료. 수정2c06e79의 macOS 패키징도 PASS했고 기존 out 앱 한 개를 교체했다. 다음은 별도 승인된 실제 응답 재확인, 이어 Codex 수정/중단·G6/Windows/출시 잔여 검증이다. main병합·push없음.
@@ -29,7 +35,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **2026-10-30 실제 공급자 최신 상태**: Claude 자체 파일수정·취소 성공. Codex는 da52055의 text_elements 생략 호환 수정 후에도 수정/중단 시험이 `turn stream item started`에서 failed·cleanExit로 끝났고 중단 클릭에는 도달하지 못했다. 원본/복사본 불변, 승인된 최신2회 소진. 단계명은 Electron 로그 폴더 last-provider-checkpoints.json에 민감 원문 없이 보존된다. 후속 승인 진단1회는 user echo shape 거절로 좁혀졌고 소진됐다. 공통 lifecycle timestamp를 거절하던 파서 호환 수정은 오프라인34개/독립 검토를 통과했으나 실제 해결은 미확인이다. 추가 모델 호출은 새 승인 대상이다. 증거 .artifacts/m5-codex-two-2026-10-30, 상세 과거 기록은 10월 아카이브. G6/Windows/출시는 미완료다.
+- **2026-10-30 실제 공급자 최신 상태**: Claude 자체 파일수정·취소 성공. Codex는 da52055의 text_elements 생략 호환 수정 후에도 수정/중단 시험이 `turn stream item started`에서 failed·cleanExit로 끝났고 중단 클릭에는 도달하지 못했다. 원본/복사본 불변, 승인된 최신2회 소진. 단계명은 Electron 로그 폴더 last-provider-checkpoints.json에 민감 원문 없이 보존된다. 후속 승인 진단1회는 user echo shape 거절로 좁혀졌고 소진됐다. 공통 lifecycle timestamp 수정2c06e79 후 재시험1회에서 실제 응답은 표시됐으나 다음 moderation metadata 알림에서 failed·cleanExit다. 승인 소진이며 이 후속 호환 수정이 남았다. 추가 모델 호출은 새 승인 대상이다. 증거 .artifacts/m5-codex-two-2026-10-30, 상세 과거 기록은 10월 아카이브. G6/Windows/출시는 미완료다.
 
 - **2026-10-29 일반 discard 연결**: X34law FakeExact actual adapter의 sidecar–작업대 합동 PASS와 독립 검토 뒤 임시 gate를 제거했다. 실제 공급자/일반 설치 패키지/전체G6 합격은 별도다. 기존 gated 체크포인트 기록은 당시 상태로 보존한다.
 - **2026-10-29 앱 기본 역할 경계**: 앱 기본값은 프로젝트 role_settings 최초 초기화 때만 복사한다. 기존 프로젝트·chat roleSnapshots에는 소급하지 않으며, 기본값 파일이 손상돼도 이미 초기화한 프로젝트는 독립적으로 사용한다. 실제 모델 가용성은 계속 실행 전 별도 검증한다.

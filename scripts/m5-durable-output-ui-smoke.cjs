@@ -241,6 +241,21 @@ app.on('browser-window-created', (_event, window) => {
         assert.ok(observation.frames.length >= 2 && observation.frames.at(-1).sequence > observation.frames[0].sequence,
           'Visible stream did not advance during live window');
         assert.equal(observation.latestVisible, true, 'Latest live output is clipped');
+        if (index === 0) {
+          const paused = await run(`(async () => {
+            const outer = document.querySelector('.m5-conversation-scroll');
+            outer.scrollTop = 0;
+            const before = document.querySelector('.m5-output-scroll article:last-child pre').textContent;
+            await new Promise(resolve => setTimeout(resolve, 800));
+            return {top:outer.scrollTop,before,after:document.querySelector('.m5-output-scroll article:last-child pre').textContent};
+          })()`);
+          assert.notEqual(paused.before, paused.after, 'Output did not advance while reading older conversation');
+          assert.equal(paused.top, 0, 'Live output pulled the reader away from older conversation');
+          await run("[...document.querySelectorAll('.m5-durable-output nav button')].at(-1).click()");
+          await wait("outputObservation.latestVisible()");
+          report.scrollChecks.push({chat:index,outerReadingPreserved:true,explicitResume:true});
+        }
+
       }
       for (let index = 0; index < 4; index++) {
         await run(`[...document.querySelectorAll('.m5-chat-chip')].find(b => b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}').click()`);

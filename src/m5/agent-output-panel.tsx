@@ -42,10 +42,31 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
   const outputRef = useRef<HTMLDivElement>(null);
   const followLatest = useRef(true);
   const revealLatest = useRef(false);
+  const followConversation = useRef(false);
+  const conversationTop = useRef<number | null>(null);
+  // Track the outer viewport separately: reaching the inner list's bottom
+  // does not mean its latest row remains visible in the conversation.
+  useEffect(() => {
+    const list = outputRef.current;
+    const conversation = list?.closest<HTMLElement>(".m5-conversation-scroll");
+    if (!list || !conversation) return;
+    const remember = () => {
+      conversationTop.current = conversation.scrollTop;
+      const row = list.lastElementChild?.getBoundingClientRect();
+      const viewport = conversation.getBoundingClientRect();
+      followConversation.current = Boolean(row && conversation.clientHeight > 0
+        && row.bottom > viewport.top && row.bottom <= viewport.top + conversation.clientTop + conversation.clientHeight + 2);
+    };
+    conversation.addEventListener("scroll", remember);
+    remember();
+    return () => conversation.removeEventListener("scroll", remember);
+  }, [binding]);
   const [newOutput, setNewOutput] = useState(false);
   useLayoutEffect(() => {
     followLatest.current = true;
     revealLatest.current = false;
+    followConversation.current = false;
+    conversationTop.current = null;
     setNewOutput(false);
   }, [binding]);
   useLayoutEffect(() => {
@@ -53,12 +74,32 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
     if (!list || view?.binding.runId !== binding?.runId || historyRequest) return;
     if (followLatest.current) {
       list.scrollTop = list.scrollHeight;
-      // Only an explicit latest action may move the surrounding conversation.
+      // Preserve an already visible latest row as layout grows; never pull a
+      // reader back from older content in the surrounding conversation.
+      const conversation = list.closest<HTMLElement>(".m5-conversation-scroll");
+      // Scroll events are queued. Honor a changed position even if its event
+      // has not arrived before this output commit.
+      if (conversation && conversationTop.current !== null
+        && Math.abs(conversation.scrollTop - conversationTop.current) > 2) followConversation.current = false;
+      if (conversation && followConversation.current && conversation.clientHeight > 0) {
+        const bottom = conversation.getBoundingClientRect().top + conversation.clientTop + conversation.clientHeight;
+        const overflow = list.getBoundingClientRect().bottom - bottom;
+        if (overflow > 0) conversation.scrollTop += overflow;
+      }
+      // An explicit latest action can also return from older conversation content.
       if (revealLatest.current) {
         list.lastElementChild?.scrollIntoView({ block: "nearest", inline: "nearest" });
         revealLatest.current = false;
       }
     } else setNewOutput(true);
+    const conversation = list.closest<HTMLElement>(".m5-conversation-scroll");
+    const row = list.lastElementChild?.getBoundingClientRect();
+    if (conversation && row) {
+      conversationTop.current = conversation.scrollTop;
+      const viewport = conversation.getBoundingClientRect();
+      followConversation.current = conversation.clientHeight > 0 && row.bottom > viewport.top
+        && row.bottom <= viewport.top + conversation.clientTop + conversation.clientHeight + 2;
+    }
   }, [view, binding, historyRequest]);
   useLayoutEffect(() => {
     if (historyPage && outputRef.current) outputRef.current.scrollTop = 0;
