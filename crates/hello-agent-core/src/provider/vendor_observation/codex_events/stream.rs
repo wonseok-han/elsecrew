@@ -972,7 +972,7 @@ mod tests {
     fn omitted_text_elements_echo_remains_private_and_allows_public_reply() {
         let mut stream = started();
         let params = json!({"threadId":"t","turnId":"r","item":{
-            "id":"user_echo", "type":"userMessage",
+            "id":"user_echo", "type":"userMessage", "startedAtMs":1793343295000i64,"completedAtMs":null,
             "content":[{"type":"text","text":"PRIVATE"}]
         }});
         for method in ["item/started", "item/completed"] {
@@ -983,6 +983,20 @@ mod tests {
         stream.observe(&item("item/completed", "agentMessage")).unwrap();
         stream.observe(&turn("turn/completed", "completed")).unwrap();
         stream.finish().unwrap();
+    }
+
+    #[test]
+    fn lifecycle_timestamps_are_not_turn_completion_evidence() {
+        for kind in ["userMessage", "reasoning"] {
+            let mut stream = started();
+            let content = if kind == "userMessage" { json!([{ "type":"text", "text":"PRIVATE" }]) } else { json!(["PRIVATE"]) };
+            let params = json!({"threadId":"t","turnId":"r","item":{
+                "id":"i","type":kind,"content":content,
+                "startedAtMs":1793343295000i64,"completedAtMs":1793343295001i64
+            }});
+            assert!(matches!(stream.observe(&frame("item/started", params)).unwrap(), Observed::Private));
+            assert!(stream.finish().is_err());
+        }
     }
 
     #[test]

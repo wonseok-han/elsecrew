@@ -2,6 +2,12 @@
 
 ### 2026-10-30 · by GPT-6
 
+- f7e2c8e의 패키징을 완료한 뒤 새 승인에 따라 Codex 짧은 응답 진단1회를 실행했다. run agent_run_33b6607ddc24456a9f73a0a24640e67e는 `turn item start user echo shape`에서 failed·cleanExit, processesProvenGone=true로 끝났다. 원본/복사본 hello.txt는 original\n 유지, 정상 quit 뒤 sidecar56026 clean_shutdown_at06:55:57Z를 확인했다. 승인1회 소진·재시도없음. 증거는 .artifacts/m5-codex-item-checkpoint-2026-10-30이다.
+- 실제 CLI0.166.0-alpha.5.1 생성 스키마의 ThreadItem **바깥 공통 속성** startedAtMs/completedAtMs(선택 nullable int64)을 private userMessage/reasoning 검사기가 거절하는 호환 결함을 오프라인으로 재현했다. 두 속성만 Option<i64>로 허용하고 폐기하며 unknown/type/overflow/duplicate 거절은 유지했다. 원문은 수집하지 않아 이번 실제 실패의 원인이라고 확정하지 않는다.
+- 수정 전 회귀1개 FAIL, 수정 후 Codex 이벤트34개 PASS. timestamp가 있어도 private 유지·공개 응답 진행·turn 종료 증거를 대체하지 않음을 검증했다. 독립 검토자1명 차단없음, private.rs rustfmt 완료. 다음은 수정 패키지 반영과 별도 승인된 실제 응답 재확인, 이어 Codex 수정/중단·G6/Windows/출시 잔여 검증이다. main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
 - 이전 턴은 선택 필드 수정 후에도 실제 실패가 남는다는 증거를 얻은 진척이었다. HEAD54183f9에서 item/started 고정 진단을18개로 세분화했다: envelope/projection·turn 시작순서·scope/body/tag/identity·tool phase·user echo/reasoning shape·duplicate·command shape·retained budget·지원하지 않는 dynamic/MCP/협업/hook/기타 항목. 값이나 임의 타입명은 로그에 넣지 않으며 원래 수락/거절·권한·예산·종료 동작은 유지한다.
 - Rust에서 실패 위치와 sticky 실패, 미지원 타입의 RequiresHandling 유지, 비공개 값 비노출을 회귀했다. TypeScript 허용 목록이 모든 새 고정 진단을 전달하는지 검증했다. Codex 이벤트32개·진단/저장9개·pnpm build PASS, diff 검사 PASS. 실제 모델 호출0회. 이 진단 추가만으로 기존 실패가 해결됐다고 주장하지 않는다.
 - 다음은 최신 패키지 반영과 모델 비용 없는 경로 재현이다. 새 실제 실행은 별도 승인 대상이며 기존 최신2회는 소진됐다. G6/Windows/출시 검증 미완료, main병합·push없음.
@@ -23,7 +29,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **2026-10-30 실제 공급자 최신 상태**: Claude 자체 파일수정·취소 성공. Codex는 da52055의 text_elements 생략 호환 수정 후에도 수정/중단 시험이 `turn stream item started`에서 failed·cleanExit로 끝났고 중단 클릭에는 도달하지 못했다. 원본/복사본 불변, 승인된 최신2회 소진. 단계명은 Electron 로그 폴더 last-provider-checkpoints.json에 민감 원문 없이 보존된다. 다음은 항목 검사의 고정 진단 세분화와 오프라인 재현이며 추가 실제 모델 호출은 새 승인 대상이다. 증거 .artifacts/m5-codex-two-2026-10-30, 상세 과거 기록은 10월 아카이브. G6/Windows/출시는 미완료다.
+- **2026-10-30 실제 공급자 최신 상태**: Claude 자체 파일수정·취소 성공. Codex는 da52055의 text_elements 생략 호환 수정 후에도 수정/중단 시험이 `turn stream item started`에서 failed·cleanExit로 끝났고 중단 클릭에는 도달하지 못했다. 원본/복사본 불변, 승인된 최신2회 소진. 단계명은 Electron 로그 폴더 last-provider-checkpoints.json에 민감 원문 없이 보존된다. 후속 승인 진단1회는 user echo shape 거절로 좁혀졌고 소진됐다. 공통 lifecycle timestamp를 거절하던 파서 호환 수정은 오프라인34개/독립 검토를 통과했으나 실제 해결은 미확인이다. 추가 모델 호출은 새 승인 대상이다. 증거 .artifacts/m5-codex-two-2026-10-30, 상세 과거 기록은 10월 아카이브. G6/Windows/출시는 미완료다.
 
 - **2026-10-29 일반 discard 연결**: X34law FakeExact actual adapter의 sidecar–작업대 합동 PASS와 독립 검토 뒤 임시 gate를 제거했다. 실제 공급자/일반 설치 패키지/전체G6 합격은 별도다. 기존 gated 체크포인트 기록은 당시 상태로 보존한다.
 - **2026-10-29 앱 기본 역할 경계**: 앱 기본값은 프로젝트 role_settings 최초 초기화 때만 복사한다. 기존 프로젝트·chat roleSnapshots에는 소급하지 않으며, 기본값 파일이 손상돼도 이미 초기화한 프로젝트는 독립적으로 사용한다. 실제 모델 가용성은 계속 실행 전 별도 검증한다.
