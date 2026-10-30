@@ -2,6 +2,13 @@
 
 ### 2026-10-30 · by GPT-6
 
+- 이전 턴은 출력 진단 진입점 수정/4스트림 관측으로 진척이었다. 시작 RSS 초과의 개선 대상을 분리하려고 기존 idle-only 진단에 RSS 표본 종료 후 main process.memoryUsage/V8 heap 및 renderer의 근사 performance.memory를 추가했다. RSS 기준을 heap 값으로 대체하거나 강제GC/안전·렌더링 설정 변경은 하지 않는다.
+- 최신 개발 UI kQGvXo는 idle 최대468,910,080B(447.19MiB)로400MiB 초과/FAIL. RSS 창 뒤 main heapUsed7,136,252B(6.81MiB), renderer usedJSHeap3,869,072B(3.69MiB)를 관측했다. 프로세스 RSS와 heap은 같은 범위/시점이 아니며 이것만으로 원인을 확정하지 않는다. JS 번들만 줄여 해결된다고 주장할 근거는 부족하다. resource timing 배열은 빈 값이므로 Monaco 미로딩 증거로 쓰지 않는다.
+- 일반 패키지와 달리 이 진단은 개발 harness/renderer 자동 관측/짧은 시작 표본을 포함하므로 기존417.03MiB와 직접 회귀 비교하지 않는다. 기준 초과는 보존하고 전체G6 합격으로 확대하지 않는다. 번들 조사에서 main152KiB/renderer entry560KiB 및 분리된 Monaco editor chunk2.2MiB를 확인했다.
+- 정상 종료 exit1/shutdown accepted와 DBclean/시험 프로세스 부재 확인 뒤 .artifacts/m5-idle-heap/kQGvXo에 결과·화면·메모리·정리 증거를 보존하고 자체 프로젝트/프로필을 삭제했다. node 문법/diff check PASS. 다음은 동일 조건의 패키지 프로세스별 비용 분리와 개선, 가림 재현·공급자 전체/Windows/출시 검증이다. 목표 active, 실제 모델·인증·사용자 프로젝트·main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
 - 이전 턴은 연결 안내 UI 검증으로 진척이었다. 과거 eSjVnl trial5는 내부 출력 scrollTop이 최대값인데 latestVisible=false였음을 확인했다. 당시 outer clip 좌표가 없어 원인을 확정하지 않는다. live 구간 종료 때 최대16개 clipping 조상의 좌표·scroll 범위·viewport를 기록하도록 관측기를 보완했다(출력 본문 추가 수집 없음).
 - 개발용 Electron 직접 실행에서 require.main이 해당 스크립트가 아니어서 runOutputSmoke가 호출되지 않는 진입점 오류를 수정했다. 최초 대기 앱은 정상 quit/exit0으로 종료했고 실제 argv 파일 경로 일치도 진입 조건으로 인정한다. packaged QA의 명시 함수 호출은 유지한다.
 - 최신 개발 빌드 ctvAkq에서 가짜4채팅×3000개 출력의 live4구간/이전·최신 기록 이동/원장 대조/원본 불변 PASS, 네 구간 모두 latestVisible=true였다. 실행 중 fixture approval 조회 거절 로그가 있었으며 실제 native 승인 기능의 합격 증거가 아니다. 이번 개발1회 미재현으로 과거 packaged 실패나 전체G6를 닫지 않는다.
