@@ -2,6 +2,12 @@
 
 ### 2026-10-30 · by GPT-6
 
+- 이전 목표 턴은 실제 Codex 응답 관측·후속 알림 호환 수정·패키징과 출력 스크롤 수정으로 진척했다. HEAD9c58ea0의 깨끗한 워킹 트리와 최신 기록을 다시 대조했다. 새 Codex 순차 검증 최대3회 승인은 대기 중이며 이번 턴 모델 호출은0회다.
+- AGENTS.md/CLAUDE.md의 오래된 실제 검증 상태를 함께 교정했다. Claude 자체 파일 수정·취소 성공과 Codex 응답 이후 moderation 알림 실패/호환 수정 후 미검증을 구분한다. 기존 운영·승인·안전 규칙은 유지한다. 두 파일 동일성과 diff 검사를 확인했다.
+- 다음은 승인 후82f7c77의 Codex 응답→수정→중단 순차 검증이며 어느 단계든 실패하면 멈춘다. 독립적인 미완료 범위는 G6의 전체 부하·반복/메모리·지속 가시성 증거, Windows 실제 환경, 출시/서명 결정이다. 가짜 출력 functional PASS를 G6 PASS로 대체하지 않는다. main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
 - 2c06e79 실제 응답 뒤 거절된 moderation 알림의 생성 스키마를 기준으로 지원을 추가했다. notification 예산→started→thread/turn scope→필수 metadata·최상위 필드 검사 뒤 Private로 폐기한다. arbitrary JSON인 metadata를 도구 권한·공개 출력·앱 moderation 결정·terminal 증거로 쓰지 않는다.
 - Codex 이벤트36개 PASS: 공개 응답→metadata→명시 terminal 완료, metadata만으로 완료 불가, cross-scope/누락/미지 필드/중복/시작 전/종료 후/예산 초과 거절과 sticky 실패를 확인했다. private.rs rustfmt·diff PASS. 추가 모델 호출0회이며 기존 승인1회는 앞선 실제 시험으로 소진됐다. 독립 검토자1명 차단없음. 82f7c77 macOS 패키징 PASS, 기존 out 앱 한 개에 반영했다. 새 승인 실제 재확인이 남는다. G6/Windows/출시 미완료, main병합·push없음.
 
