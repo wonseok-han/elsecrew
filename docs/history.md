@@ -2,6 +2,13 @@
 
 ### 2026-10-30 · by GPT-6
 
+- 이전 턴은 최신 작업대 두 통합 시험/정리로 진척이었다. 미완료였던 연결 설정 이동을 scripts/m5-connection-reveal-ui.mjs로 재현 가능하게 추가했다. 실제 ProviderLogin과 chatConnectionTarget에 가짜 로그인 응답만 연결하며 sidecar/실제 계정/모델을 사용하지 않는다.
+- 실제 Electron jJis6B에서 미선택 Claude 안내 시 설정 펼치기·선택 화면·포커스 이동, 기존 Codex 선택 유지, 접기 뒤 Codex 재안내를 확인했다. 최초 가짜 diagnose 1회 외 추가 로그인 요청 없음 PASS다. 스크린샷을 확인했고 정상 종료/소유 PID4개 부재 뒤 자체 번들·프로필·fixture를 정리했다. 증거 .artifacts/m5-connection-reveal/m5-connection-reveal-jJis6B.
+- 성능 후속 조사: admission poll은 verifying 동안만 500ms 단일 요청으로 반복하고 ready에서 종료됨을 확인했다. 이를 지속 idle polling 원인이라고 가정하지 않는다. 과거 eSjVnl trial5 latest output clipping 실패와 AgentOutputPanel의 내부 scroll/명시 latest만 outer scroll 정책을 대조했으나 원인은 아직 확정하지 않았다. 실패 증거를 지우거나 기준을 변경하지 않았다.
+- node --check 및 diff check 통과. 이번은 합성 연결 UI 증거이며 native 설치/로그인 성공이나 전체G6 합격이 아니다. 다음: output clipping 재현과 시작 메모리 개선, 남은 실제 공급자 전체/Windows/출시 검증. 목표 active, 사용자 데이터/인증 변경·실제 모델 호출·main병합/push없음.
+
+### 2026-10-30 · by GPT-6
+
 - 이전 턴은 44a03dd 취소 응답 수정/검증으로 진척이었다. 최신 main/preload/renderer 개발 산출물을 다시 빌드하고 실제 Electron 작업대의 두 자체 통합 시나리오를 마감했다. Rust는 직전 검증의 최신 debug 산출물을 재사용했다.
 - SkoRsq(가짜 actual adapter)는 앱 기본값 저장→신규 프로젝트 역할 상속→채팅 생성→가짜 실행→reviewReady→동의 후 discard→작업대 해제→메시지 보존/원본 불변 PASS. VDOo5Q(일반 native, 공급자 미선택)는 프로젝트 설정/두 채팅/편집·저장/inline·split diff/파일·줄 후속 지시/초안 보존/반영 전 목록 확인·취소 PASS. 원본 반영 실행·실계정 공급자 검증은 포함하지 않는다.
 - 두 프로세스 exit0/shutdown accepted, DB clean_shutdown_at과 소유 PID 부재를 확인했다. .artifacts/m5-project-ui/{SkoRsq,VDOo5Q}에 결과/화면/console/cleanup 증거를 보존하고 자체 임시 원본·앱 프로필을 삭제했다. target792MiB/.artifacts204MiB이며 새 release/ZIP/워크트리를 만들지 않았다.
