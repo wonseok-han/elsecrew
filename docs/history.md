@@ -3,7 +3,7 @@
 ### 2026-10-30 · by GPT-6
 
 - 2c06e79 실제 응답 뒤 거절된 moderation 알림의 생성 스키마를 기준으로 지원을 추가했다. notification 예산→started→thread/turn scope→필수 metadata·최상위 필드 검사 뒤 Private로 폐기한다. arbitrary JSON인 metadata를 도구 권한·공개 출력·앱 moderation 결정·terminal 증거로 쓰지 않는다.
-- Codex 이벤트36개 PASS: 공개 응답→metadata→명시 terminal 완료, metadata만으로 완료 불가, cross-scope/누락/미지 필드/중복/시작 전/종료 후/예산 초과 거절과 sticky 실패를 확인했다. private.rs rustfmt·diff PASS. 추가 모델 호출0회이며 기존 승인1회는 앞선 실제 시험으로 소진됐다. 독립 검토자1명 차단없음. 패키지 반영 후 새 승인 실제 재확인이 남는다. G6/Windows/출시 미완료, main병합·push없음.
+- Codex 이벤트36개 PASS: 공개 응답→metadata→명시 terminal 완료, metadata만으로 완료 불가, cross-scope/누락/미지 필드/중복/시작 전/종료 후/예산 초과 거절과 sticky 실패를 확인했다. private.rs rustfmt·diff PASS. 추가 모델 호출0회이며 기존 승인1회는 앞선 실제 시험으로 소진됐다. 독립 검토자1명 차단없음. 82f7c77 macOS 패키징 PASS, 기존 out 앱 한 개에 반영했다. 새 승인 실제 재확인이 남는다. G6/Windows/출시 미완료, main병합·push없음.
 
 ### 2026-10-30 · by GPT-6
 
