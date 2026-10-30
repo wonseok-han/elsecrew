@@ -225,7 +225,7 @@ app.on('browser-window-created', (_event, window) => {
           const after = outputObservation.readWindow(before, runId);
           const observationReadMs = performance.now() - readStartedAt;
           return {runId,startedAt,endedAt,observationReadMs,heads:after.heads,frames:after.frames,
-            latestVisible:outputObservation.latestVisible(),visibility:document.visibilityState,
+            latestVisible:outputObservation.latestVisible(),geometry:outputObservation.latestGeometry(),visibility:document.visibilityState,
             droppedHeads:after.droppedHeads,droppedFrames:after.droppedFrames};
         })()`);
         report.liveWindows.push(observation);
@@ -329,4 +329,5 @@ require(path.join(repo, '.vite/build/main.cjs'));
 
 }
 module.exports = { runOutputSmoke };
-if (require.main === module) runOutputSmoke();
+// Electron's default app loader does not always assign require.main to this file.
+if (require.main === module || require('node:path').resolve(process.argv[1] ?? '') === __filename) runOutputSmoke();

@@ -2,6 +2,14 @@
 
 ### 2026-10-30 · by GPT-6
 
+- 이전 턴은 연결 안내 UI 검증으로 진척이었다. 과거 eSjVnl trial5는 내부 출력 scrollTop이 최대값인데 latestVisible=false였음을 확인했다. 당시 outer clip 좌표가 없어 원인을 확정하지 않는다. live 구간 종료 때 최대16개 clipping 조상의 좌표·scroll 범위·viewport를 기록하도록 관측기를 보완했다(출력 본문 추가 수집 없음).
+- 개발용 Electron 직접 실행에서 require.main이 해당 스크립트가 아니어서 runOutputSmoke가 호출되지 않는 진입점 오류를 수정했다. 최초 대기 앱은 정상 quit/exit0으로 종료했고 실제 argv 파일 경로 일치도 진입 조건으로 인정한다. packaged QA의 명시 함수 호출은 유지한다.
+- 최신 개발 빌드 ctvAkq에서 가짜4채팅×3000개 출력의 live4구간/이전·최신 기록 이동/원장 대조/원본 불변 PASS, 네 구간 모두 latestVisible=true였다. 실행 중 fixture approval 조회 거절 로그가 있었으며 실제 native 승인 기능의 합격 증거가 아니다. 이번 개발1회 미재현으로 과거 packaged 실패나 전체G6를 닫지 않는다.
+- 정상 종료 exit0/shutdown accepted·DB clean_shutdown_at·시험 프로세스 부재 확인 후 .artifacts/m5-output-geometry/ctvAkq에 JSON/화면/로그/cleanup을 남기고 자체 원본·프로필을 삭제했다. observer 회귀1개·node 문법·diff 검사 PASS. 제품 스크롤/안전/성능 기준은 변경하지 않았다.
+- 다음: 가림 원인의 결정적 재현/최신 패키지 수집, idle RSS 기준 초과 개선, 실제 공급자 전체/Windows/출시 검증. 실제 모델/인증/사용자 프로젝트 사용·main병합·push없음. 목표 active.
+
+### 2026-10-30 · by GPT-6
+
 - 이전 턴은 최신 작업대 두 통합 시험/정리로 진척이었다. 미완료였던 연결 설정 이동을 scripts/m5-connection-reveal-ui.mjs로 재현 가능하게 추가했다. 실제 ProviderLogin과 chatConnectionTarget에 가짜 로그인 응답만 연결하며 sidecar/실제 계정/모델을 사용하지 않는다.
 - 실제 Electron jJis6B에서 미선택 Claude 안내 시 설정 펼치기·선택 화면·포커스 이동, 기존 Codex 선택 유지, 접기 뒤 Codex 재안내를 확인했다. 최초 가짜 diagnose 1회 외 추가 로그인 요청 없음 PASS다. 스크린샷을 확인했고 정상 종료/소유 PID4개 부재 뒤 자체 번들·프로필·fixture를 정리했다. 증거 .artifacts/m5-connection-reveal/m5-connection-reveal-jJis6B.
 - 성능 후속 조사: admission poll은 verifying 동안만 500ms 단일 요청으로 반복하고 ready에서 종료됨을 확인했다. 이를 지속 idle polling 원인이라고 가정하지 않는다. 과거 eSjVnl trial5 latest output clipping 실패와 AgentOutputPanel의 내부 scroll/명시 latest만 outer scroll 정책을 대조했으나 원인은 아직 확정하지 않았다. 실패 증거를 지우거나 기준을 변경하지 않았다.

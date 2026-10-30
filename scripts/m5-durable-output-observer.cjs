@@ -84,6 +84,26 @@ function installOutputObserver(createLiveOutputLatency) {
       };
     },
     latestVisible: () => visible(document.querySelector('.m5-output-scroll article:last-child pre')),
+    latestGeometry: () => {
+      const node = document.querySelector('.m5-output-scroll article:last-child pre');
+      if (!node) return null;
+      const box = element => {
+        const rect = element.getBoundingClientRect();
+        return {top:rect.top,bottom:rect.bottom,left:rect.left,right:rect.right};
+      };
+      const clips = [];
+      for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        if (['auto','scroll','hidden','clip'].includes(style.overflowY)
+          || ['auto','scroll','hidden','clip'].includes(style.overflowX)) {
+          clips.push({tag:parent.tagName,className:parent.className,box:box(parent),
+            scrollTop:parent.scrollTop,scrollHeight:parent.scrollHeight,clientHeight:parent.clientHeight,
+            overflowX:style.overflowX,overflowY:style.overflowY});
+        }
+        if (clips.length === 16) break;
+      }
+      return {visible:visible(node),row:box(node),viewport:{width:innerWidth,height:innerHeight},clips};
+    },
     stop() {
     stopped = true; off(); observer.disconnect();
     document.removeEventListener('scroll', observe, true);
