@@ -296,7 +296,8 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-diff-lines-wrapped table { table-layout: fixed; }
 .m5-diff-lines-wrapped th:not(:last-child) { width: 4ch; }
 .m5-diff-lines-wrapped code { white-space: pre-wrap; overflow-wrap: anywhere; }
-.m5-diff-details > strong { overflow-wrap: anywhere; }
+.m5-diff-details > strong { display: block; margin-bottom: 8px; overflow-wrap: anywhere; }
+.m5-diff-details > button { max-width: 100%; margin: 0 8px 8px 0; white-space: normal; }
 .m5-diff-added { background: #153d2d; color: #bcf5d0; }
 .m5-diff-deleted { background: #49242d; color: #ffd0d6; }
 .m5-diff-metadata { background: #202a36; color: #b8c9e3; }

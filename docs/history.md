@@ -2,6 +2,14 @@
 
 ### 2026-10-30 · by GPT-6
 
+- 이전 턴은 최신 일반 패키지 생성/시작 측정으로 진척이었다. 기준HEAD f478951(패키지 코드c65c9ee)의 --memory-file-diff 5stPtB를 자체 임시 데이터로 실행했다. 실제 모델·로그인·사용자 프로젝트는 사용하지 않았다.
+- 10,000파일/1,000폴더 트리: 최초160.9ms/확장65.9ms/DOM362개, 5MiB·10만줄 파일 편집가능396.1ms. 500파일·2만변경줄·10MiB diff: 요약215.8ms/첫 파일284.8ms, 원본 불변. 파일 모델과 diff 동시 보유를 확인하고 프로젝트 화면을 닫은 뒤60초 대기/3초 잔류 표본을 수집했다.
+- RSS idle456,261,632B/peak706,265,088B/idle대비 잔류0B. peak800MiB/잔류120MiB 기준은 이 진단에서 충족했으나 idle400MiB 초과로 FAIL(exit1) 유지. CDP 포함 단일 관측이며 동시 채팅 스트림/전체G6/성능p95 증거가 아니다. 기존 no-CDP 결과와 직접 인과 비교하지 않는다.
+- 캡처에서 diff 경로와 버튼이 붙어 보이는 문제를 확인해 경로를 별도 줄로 배치하고 버튼 간격·좁은 폭 줄바꿈을 CSS로 보완했다. renderer build/diff check PASS; 이 CSS 수정 후 실제 패키지 화면 재검증은 아직이며 위 측정은 수정 전 코드다.
+- 시험 앱 정상 종료 confirmed와 관측PID 부재 확인 후 임시 프로젝트·프로필을 삭제했다. .artifacts/m5-packaged-memory/5stPtB에 결과·화면·정리 증거를 보존했다. 다음은 CSS 패키지 반영과 전체G6 누락/가림/실제 공급자 전체/Windows/출시 검증이며 main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
 - 이전 턴은 시작 heap/RSS 분리 진단으로 진척이었다. 기준HEAD c65c9ee의 일반 macOS arm64 패키지를 재생성했다. 실행 중인 패키지 보호 검사를 통과했고 Electron 공식 런타임 다운로드와 Rust release 빌드가 완료됐다. out의 앱 한 벌만 교체했고 ZIP/별도 worktree는 만들지 않았다.
 - 최신 일반 패키지 --no-cdp-project mCtIJG에서 자체 임시 프로필/두 가짜 프로젝트로40표본을 수집했다. 최대391,905,280B(373.75MiB), 정상 종료 confirmed, 결과 NOT_READY(exit2)다. 최대 표본의 main144,031,744B/GPU76,333,056B/utility41,074,688B/renderer113,721,344B/sidecar16,744,448B를 별도 OS process identity와 대조했다. CDP·로그인·모델 호출은 없었다.
 - 과거 같은 수집기의371~417MiB 변동과 기존 초과 결과는 유지한다. 이번1회 기준 이내로 메모리 결함/G6를 닫지 않는다. 시작2프레임 readiness 이후 연속 표시 여부는 미측정이며 큰 fixture/loaded/retained 검증도 아니다. 개발 heap447MiB와 직접 회귀 비교하지 않는다. 다음은 전체G6의 남은 실제 표시/큰 fixture/잔류 메모리 및 출력 가림 증거를 통합하는 일이다.
