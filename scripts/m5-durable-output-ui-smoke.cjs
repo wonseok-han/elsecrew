@@ -98,13 +98,10 @@ let memoryPhase = 'starting';
 report.memory = { scope: 'test-app-process-tree', samples: [], errors: 0, truncated: false };
 const memoryTimer = setInterval(() => {
   try {
-    const rows = cp.execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,rss='], { encoding: 'utf8', timeout: 2000, maxBuffer: 4 * 1024 * 1024 })
-      .trim().split('\n').map(line => line.trim().split(/\s+/).map(Number));
-    const included = new Set([process.pid]);
-    let grew = true;
-    while (grew) { grew = false; for (const [pid, ppid] of rows) if (included.has(ppid) && !included.has(pid)) { included.add(pid); grew = true; } }
-    const processes = rows.filter(([pid]) => included.has(pid)).map(([pid, , kib]) => ({pid, rssBytes:kib * 1024}));
-    if (report.memory.samples.length < 600) report.memory.samples.push({phase:memoryPhase,at:Date.now(), processes, totalBytes:processes.reduce((sum, entry) => sum + entry.rssBytes, 0)});
+    const collected = cp.spawnSync('/bin/ps', ['-axo', 'pid=,ppid=,rss='], { encoding: 'utf8', timeout: 2000, maxBuffer: 4 * 1024 * 1024 });
+    if (collected.error || collected.status !== 0 || collected.signal) throw new Error('RSS collector failed');
+    const snapshot = require('./m5-process-memory.cjs').processTreeMemoryWithoutCollector(collected.stdout, process.pid, collected.pid);
+    if (report.memory.samples.length < 600) report.memory.samples.push({phase:memoryPhase,at:Date.now(), processes:snapshot.processes, totalBytes:snapshot.rssBytes});
     else report.memory.truncated = true;
   } catch { report.memory.errors++; }
 }, 1000);

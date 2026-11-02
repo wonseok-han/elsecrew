@@ -21,6 +21,19 @@ function processTreeMemory(output, rootPid) {
   return { rssBytes, processes };
 }
 
+// The collector's exact PID comes from spawnSync, never from a command-name
+// filter: a real agent may legitimately execute its own ps child.
+function processTreeMemoryWithoutCollector(output, rootPid, collectorPid) {
+  if (!Number.isSafeInteger(collectorPid) || collectorPid <= 0 || collectorPid === rootPid) throw new Error("invalid collector PID");
+  const snapshot = processTreeMemory(output, rootPid);
+  const collector = snapshot.processes.find(row => row.pid === collectorPid);
+  if (!collector || collector.parentPid !== rootPid) throw new Error("collector is not a direct child of measurement root");
+  const processes = snapshot.processes.filter(row => row.pid !== collectorPid);
+  const rssBytes = processes.reduce((sum, row) => sum + row.rssBytes, 0);
+  if (!Number.isSafeInteger(rssBytes) || rssBytes <= 0) throw new Error("invalid app RSS");
+  return {rssBytes, processes};
+}
+
 function summarizeMemory(samples) {
   const values = phase => samples.filter(sample => sample.phase === phase).map(sample => sample.rssBytes);
   const idle = values("idle"), loaded = values("loaded"), retained = values("retained");
@@ -76,4 +89,4 @@ function createProcessMemoryTracker(rootPid) {
     return {rssBytes:snapshot.rssBytes, processes, identityResolution:'ps-lstart-seconds'};
   };
 }
-module.exports = { processTreeMemory, summarizeMemory, createProcessMemoryTracker };
+module.exports = { processTreeMemoryWithoutCollector, processTreeMemory, summarizeMemory, createProcessMemoryTracker };
