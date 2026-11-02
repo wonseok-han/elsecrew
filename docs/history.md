@@ -2,6 +2,14 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 이전 턴은 IPC 전달 진단 구현·지연 회귀로 진척했다. HEAD0843105/깨끗한 m5/coding-agent-ide를 확인하고 실행 중인 시험 앱이 없음을 OS에서 확인한 뒤 macOS 패키징을 완료했다. 기존 out 앱 한 개를 교체했으며 out309MiB·target1.0GiB·남은 디스크514GiB다. 추가 ZIP/워크트리를 만들지 않았다.
+- 새로 승인된 Codex 순차 최대2회를 모두 실행했다. 수정 run agent_run_f5d74477668c4fac84b5b9ed8bc081f9는 coding/gpt-6.1-sol/medium/workspaceWrite에서 succeeded·cleanExit, processesProvenGone=true·poisoned=false·writerLockState=released다. UI DONE/성공/종료 확인과 hello.txt 단일 diff를 확인했다. 실제 복사본은 HELLO_AGENT_CODEX_WRITE_OK\n, 원본은 original\n이다.
+- 이어 planning/gpt-6.1-sol/medium/readOnly run agent_run_e700ee7525cd4523902874a488af82ac의 실행 중 표시 뒤 취소를 눌렀다. UI 취소됨/종료 확인 및 DB canceled·cleanExit·processesProvenGone=true·poisoned=false를 대조했고 취소 시험 복사본은 original\n이다. 도구 읽기 성공 검증은 아니며 출력 일부가 있던 실행의 중단 검증이다. 승인2회 소진/추가 호출없음.
+- 이번 두 실행은 start 응답 received/resolved와 상태 알림 received/forwarded, 후속 chat.get 응답이 모두 기록됐고 UI도 갱신됐다. 이전 checking 정체는 이번에 재현되지 않았으며 원인이 확정·수정됐다고 선언하지 않는다. .artifacts/m5-codex-write-retest-2026-11-02에 승인·원장·파일·transport·종료 증거를 보존했다. 앱65105와 sidecar65137은 정상 quit 후 OS 부재, DB clean_shutdown_at00:08:41Z다. 인증정보/사용자 프로젝트 변경·강제 종료없음.
+- AGENTS.md/CLAUDE.md를 두 공급자의 자체 파일 수정·취소 성공 상태로 함께 갱신했다. docs 일치·diff PASS. 다음은 G6 전체 부하/메모리 실패 해소와 누적 UI·복구/출시 검증이다. Windows 실환경 부재와 출시/서명 결정은 여전히 남는다. 한정 실제 시험 성공을 제품 전체 완료로 대체하지 않으며 main병합·push없음.
+
+### 2026-11-02 · by GPT-6
+
 - 이전 목표 턴은 실제 Codex 응답 성공·diff 호환 수정 fc731cb 커밋으로 진척했다. 현재 m5/coding-agent-ide의 HEAD와 깨끗한 워킹 트리를 확인했다. 독립 검토자는 diff 수정에 차단없음이며 UI 정체의 단일 원인은 현재 증거로 확정할 수 없다고 보고했다.
 - 실제 호출 없이 두 지연 경로를 제어하는 회귀를 추가했다. 접수 후 chat.get을 보류하면 시작 잠금은 유지되지만 notice는 ready이므로 당시 checking 화면과 일치하지 않는다. 종료 알림은 같은 조회로 합쳐지고 조회 해제 뒤 durable failed가 반영되며 추가 실행은 없다. 반대로 start 응답을 보류하면 checking은 유지되지만 전달된 종료 알림 자체는 durable 실패를 조회·표시한다. 이 두 조건만으로 실제 UI의 checking+실행 미표시를 설명할 수 없으므로 접수 응답/알림 전달 경로 증거가 더 필요하다.
 - Electron 요청 전송 대기/응답 수신/resolve·reject와 agent.runStateChanged 수신/검증 후 listener 전달의 고정 단계 진단을 추가했다. 최근64건의 앱 생성 request UUID·고정 method/phase·시각만 last-transport-progress.json에 기록한다. payload·경로·인증·모델 응답은 제외하고 기존 provider 오류 파일은 별도 보존한다. 기록 실패는 IPC·잠금·실행 판단에 영향이 없다. forwarded는 main listener 전달이며 renderer 표시 완료 증거가 아니다.
@@ -59,6 +67,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **2026-11-02 실제 공급자 상태 갱신**: 0843105 패키지에서 Codex 자체 파일 수정 succeeded·cleanExit 및 실행 중 취소 canceled·cleanExit를 확인했다. 둘 다 processesProvenGone=true이고 원본 불변이다. 앞선 Claude 자체 수정·취소 성공과 함께 기본 실제 실행 증거를 확보했다. 이전 checking UI 정체는 이번에 재현되지 않았으나 원인 미확정이며 전체 복구/G6/Windows/출시 합격과 구분한다. 아래10/30의 미완료 파일 수정·취소 항목은 이 결과로 갱신한다.
 
 - **2026-10-30 실제 공급자 최신 상태**: Claude 자체 파일수정·취소 성공. Codex는 da52055의 text_elements 생략 호환 수정 후에도 수정/중단 시험이 `turn stream item started`에서 failed·cleanExit로 끝났고 중단 클릭에는 도달하지 못했다. 원본/복사본 불변, 승인된 최신2회 소진. 단계명은 Electron 로그 폴더 last-provider-checkpoints.json에 민감 원문 없이 보존된다. 후속 승인 진단1회는 user echo shape 거절로 좁혀졌고 소진됐다. 공통 lifecycle timestamp 수정2c06e79 후 재시험1회에서 실제 응답은 표시됐으나 다음 moderation metadata 알림에서 failed·cleanExit다. 승인 소진이며 82f7c77 후속 시험에서 짧은 응답은 succeeded·cleanExit로 통과했다. 파일 수정도 복사본에서 이뤄졌으나 diff 알림에서 failed·cleanExit여서 취소는 미실행이다. 실패 상태가 UI에 반영되지 않은 별도 결함도 조사 중이다. 추가 모델 호출은 새 승인 대상이다. 증거 .artifacts/m5-codex-two-2026-10-30, 상세 과거 기록은 10월 아카이브. G6/Windows/출시는 미완료다.
 
