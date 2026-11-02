@@ -2,6 +2,13 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 825a9b4 경로 재확인 구현의 전체 sidecar 회귀는 695 passed/5 failed/43 ignored(722.74초)였다. 4건은 샌드박스의 임시 Unix socket/프로세스 신원 접근 제한이며 같은 바이너리·코드로 필요한 접근을 허용한 scoped 재시험 4/4가 통과했다. 실제 공급자나 사용자 인증은 사용하지 않았다.
+- 나머지 1건은 실제 회귀였다. 원본을 전혀 열지 않는 시작 전 snapshot 복구까지 새 경로 확인이 막았다. metadata 전용 `registered_project`를 분리해 관리 폴더만 검사하는 기존 복구와 반영 이력 조회를 유지했다. 원본 접근은 계속 `required_project`의 binding 검사를 거친다. 수정 후 legacy binding 4개·복구 dispatch 1개·snapshot 복구 3개, 총 8/8 PASS이며 독립 재검토 차단 결함 없음. 전체 suite를 다시 반복하지 않았으므로 최신 단일 전체 PASS로 표기하지 않는다.
+- TypeScript·renderer 빌드·편집기 회귀 63개·신규 모듈 rustfmt·diff 검사 통과. 증거 `.artifacts/m5-path-binding-20261102/`. 패키지 교체/추가 push/실제 모델 호출 없음. Windows 기능·패키징, G6 실측과 출시 검증은 계속 남는다.
+- Windows 다음 구현 조사: cap-fs-ext 3.4.5의 공용 ino 인터페이스는 64비트다. ReFS까지 신원을 비교할 때는 [Microsoft FILE_ID_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_id_info)의 volume serial + 128비트 FileId를 보존해야 한다. 현재 Windows 핸들 구현이 완료됐다는 뜻은 아니다.
+
+### 2026-11-02 · by GPT-6
+
 - 기준 4713c45에서 메인이 기존 프로젝트 경로 재확인 흐름을 직접 구현했다. 손실 변환 이전 기록은 native 폴더 선택으로 canonical 원본을 다시 확인해야 접근할 수 있으며, private `native_path_binding`을 원장에 남긴다. catalog reopen은 파일 접근 전에 차단하고, 명시 재선택은 기존 작업 복사본·편집 내용·이력·복구 상태를 유지한다. 존재하지만 불일치하는 표식은 자동 복구하지 않는다. 작업대에는 한국어/영어 재선택 설명과 원본 폴더 선택 버튼을 연결했다.
 - 읽기 전용 독립 검토 1명은 원본 접근 우회나 현재 변경의 차단 결함을 발견하지 않았다. 제안한 불일치 marker 회귀도 추가했다. 집중 Rust 3개와 편집기 63개 회귀·TypeScript·renderer 빌드가 통과했다. 불일치 marker 회귀를 포함한 sidecar 전체 743개 검사는 실행 중이며 아직 합격을 선언하지 않는다. 증거는 `.artifacts/m5-path-binding-20261102/`에 저장한다. 기존 Windows focused CI 승인은 이미 사용했으며 추가 push·main 병합·실제 모델 호출·패키지 교체는 하지 않았다.
 - 다음: Windows 핸들 기반 directory/Git·디스크·replace/watcher 안전 구현, Windows 패키징, G6 메모리/입력 성능 및 출시 검증. 이번 경로 보완으로 제품 전체 완료를 선언하지 않는다.

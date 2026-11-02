@@ -38,7 +38,7 @@ impl ProjectManager {
         project_id: &str,
     ) -> Result<Value, ProjectFailure> {
         self.verify_managed_paths()?;
-        let project = required_project(storage, project_id)?;
+        let project = registered_project(storage, project_id)?;
         let worktree_id = value_string(&project, "worktree_id")?;
         let workspace_identity = value_string(&project, "workspace_identity")?;
         let lock_id = value_string(&project, "lock_id")?;
@@ -139,7 +139,7 @@ impl ProjectManager {
             .and_then(Value::as_str)
             .ok_or_else(|| ProjectFailure::manifest("project identity missing"))?;
         // A lost response may be retried only against the exact durable completion.
-        let existing = required_project(storage, project_id)?;
+        let existing = registered_project(storage, project_id)?;
         if existing.get("lifecycle") == Some(&json!("abandoned")) {
             if let Some(lock_id) = expected.get("lockId").and_then(Value::as_str) {
                 if let Some(lock) = storage.projection_record("lock", lock_id)? {
@@ -170,7 +170,7 @@ impl ProjectManager {
         if let Some(hook) = hook {
             hook(storage);
         }
-        let mut project = required_project(storage, project_id)?;
+        let mut project = registered_project(storage, project_id)?;
         let lock_id = value_string(&project, "lock_id")?.to_owned();
         let mut lock = storage
             .projection_record("lock", &lock_id)?

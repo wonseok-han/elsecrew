@@ -16,6 +16,7 @@ fn legacy_path_binding_requires_picker_before_catalog_or_snapshot_access() {
     let original = make_legacy_binding(&mut fixture);
     let moved = fixture.source.with_extension("moved");
     fs::rename(&fixture.source, &moved).unwrap();
+    assert_eq!(fixture.manager.application_history(&fixture.storage, &fixture.project_id).unwrap().result["entries"], json!([]));
     let error = fixture.manager.reopen_project(&mut fixture.storage, &fixture.project_id, "req_legacy_reopen").unwrap_err();
     assert!(error.detail.contains("native folder selection"), "{:?}", error);
     let error = fixture.manager.create_worktree(&mut fixture.storage, &fixture.project_id, "req_legacy_create").unwrap_err();

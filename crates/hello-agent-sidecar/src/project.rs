@@ -731,7 +731,7 @@ impl ProjectManager {
         storage: &Storage,
         project_id: &str,
     ) -> Result<ProjectAction, ProjectFailure> {
-        let project = required_project(storage, project_id)?;
+        let project = registered_project(storage, project_id)?;
         let mut entries = Vec::new();
         if let Some(history) = project.get("application_history") {
             let invalid = || ProjectFailure::recovery("invalid application history");
@@ -5378,11 +5378,15 @@ fn required_project(
     storage: &Storage,
     project_id: &str,
 ) -> Result<Map<String, Value>, ProjectFailure> {
-    let record = storage
-        .projection_record("project", project_id)?
-        .ok_or_else(|| ProjectFailure::manifest("project identity is not durably registered"))?;
+    let record = registered_project(storage, project_id)?;
     path_binding::require(&record)?;
     Ok(record)
+}
+
+// Metadata access only; this does not authorize opening canonical_path.
+fn registered_project(storage: &Storage, project_id: &str) -> Result<Map<String, Value>, ProjectFailure> {
+    storage.projection_record("project", project_id)?
+        .ok_or_else(|| ProjectFailure::manifest("project identity is not durably registered"))
 }
 
 fn value_string<'a>(record: &'a Map<String, Value>, name: &str) -> Result<&'a str, ProjectFailure> {
