@@ -2,6 +2,14 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 23a7a3e clean checkout에서 초기 로딩 경로를 확인했다. 진입bundle약574KB이고Monaco는이미지연로딩이라 현재근거만으로 추가분할/제품최적화를정당화하지 않았다. 메모리진단만반복하지않고최근여러수정이누적된상태의통합회귀를한번수행했다.
+- npm test:657 passed/0 failed/0 skipped, exit0. pnpm build(tsc+vite):exit0. CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 CARGO_INCREMENTAL=0 cargo test --workspace --locked:전체1,108 passed/0 failed/59 ignored, exit0. sidecar단위691 passed/43 ignored, stdio통합16 passed/1 ignored를포함한다. 별도조건/승인이필요한ignored는실행하지않았고과거실패뒤부분재시험과달리이번에는전체workspace단회종료0을확인했다.
+- .artifacts/m5-consolidated-2026-11-02/{node.log,build.log,rust.log,summary.json}에원시로그·명령·기준HEAD를보존했다. 이는diagnostic/gateEligible=false이며G6성능·실제공급자·Windows·출시승인으로확대하지않는다. 같은코드로이전체검사를반복하지않고향후변경영역에재사용한다.
+- 무거운실행은하나만유지했다. 빌드전여유508GiB;검증후재사용캐시는저장소target/debug3.5GiB/release271MiB이며임의삭제하지않았다. 이번새QA앱·실계정·사용자프로젝트시험은없었다. 남은일은400MiB목표의제품메모리원인규명/개선, 외부입력오염없는반복UI성능, Windows안전/패키지와최종출시검증이다. main병합/push없음.
+
+
+### 2026-11-02 · by GPT-6
+
 - 392b711 기준 GPU buffer 수명 진단을 추가했다. idle runner의 product --surface-lifetime는 다른flag와 함께 쓸 수 없고 기존5개RSS표본 뒤12회만 비동기vmmap/프로세스RSS를 수집한다. raw map/주소/경로를 저장하지 않고 크기/format별개수/resident만 보존한다. 모호한GPU·형식변경·4MiB/2초 초과는 실패하며 강제GC/디버거/제품설정 변경은 없다. 전체프로세스RSS도 계속 기록한다.
 - 최신renderer 빌드와parser회귀2/2·syntax/diff 통과. 기존native 지도에서59.125MiB 집계를 재현했다. 실제 PID49815 진단은 visible/focused 상태의12표본을 남기고exit0 종료했다. 기존초기5표본최대406.516MiB는 여전히400MiB 초과이며, 나중391.234MiB만 골라 합격으로 쓰지 않는다. 합성bridge/sidecar없음의진단이지G6제품측정이 아니다.
 - 새관측에서는초기2560×416 surface13개52.8125MiB+192×1536 2개2.25MiB가 약3초뒤4개16.25MiB+1개1.125MiB로 줄었으나GPU RSS는85.0→84.6MiB로거의유지됐다. buffer가계속동일량으로남는다는가설은지지되지않고, native resident 감소를 RSS 절감량으로대입할수없다. collection첫1.517초/후속0.73~0.80초로관측비용도포함됐다.
