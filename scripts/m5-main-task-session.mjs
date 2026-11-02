@@ -1,3 +1,4 @@
+import {monitorEventLoopDelay, performance} from 'node:perf_hooks';
 import {createMainTaskTrace} from './m5-main-task-trace.mjs';
 
 // QA only. Own this debugger attachment; never detach another observer.
@@ -35,6 +36,35 @@ export async function startMainTaskSession(debuggerApi, rootPid) {
         clearTimeout(timer);
         detach();
       }
+    },
+  };
+}
+
+
+// Diagnostic attribution only. Timer delay is not a Chromium task duration.
+// https://nodejs.org/api/perf_hooks.html#perf_hooksmonitoreventloopdelayoptions
+export function createMainPhaseProbe() {
+  const histogram=monitorEventLoopDelay({resolution:10});
+  const allowed=['starting','idle','preparing','loaded','closing','retained'];
+  const rows=[];
+  let phase='starting', startedAt=performance.now(), baseline=performance.eventLoopUtilization(), stopped=false;
+  histogram.enable();
+  function record() {
+    const endedAt=performance.now(), utilization=performance.eventLoopUtilization(baseline);
+    rows.push({phase,startedAt,endedAt,samples:histogram.count,
+      maximumTimerDelayMs:histogram.count ? histogram.max/1e6 : null,
+      activeMs:utilization.active,idleMs:utilization.idle});
+    startedAt=endedAt;baseline=performance.eventLoopUtilization();histogram.reset();
+  }
+  return {
+    phase(next) {
+      if(stopped || !allowed.includes(next) || rows.length>=16) throw new Error('Invalid diagnostic phase');
+      record();phase=next;
+    },
+    stop() {
+      if(!stopped) {record();histogram.disable();stopped=true;}
+      return {diagnostic:true,gateEligible:false,rows:rows.map(row=>({...row})),
+        scope:'Node timer delay and event-loop utilization by QA phase; phase boundaries approximate; never replaces Chromium task limit.'};
     },
   };
 }

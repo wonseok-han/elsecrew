@@ -83,3 +83,9 @@ test('long root streams aggregate every task including late maxima and late main
     assert.throws(()=>mainTaskMaximum({...result,...patch}));
   }
 });
+test('maximum witness keeps only a bounded task name, never trace arguments',()=>{
+  const result=collect([metadata,{...task,name:'x'.repeat(4096),args:{privatePayload:'not retained'}}]);
+  assert.equal(result.tasks[0].name.length,128);
+  assert.equal(JSON.stringify(result).includes('privatePayload'),false);
+  assert.equal(mainTaskMaximum(result),201);
+});

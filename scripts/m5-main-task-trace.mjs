@@ -72,7 +72,8 @@ export function createMainTaskTrace(rootPid) {
         summary.count++;
         if (durationMs > 200) summary.overLimitCount++;
         if (!summary.maximum || durationMs > summary.maximum.durationMs) {
-          summary.maximum = {tid:event.tid, startUs:event.ts, durationMs};
+          summary.maximum = {tid:event.tid, startUs:event.ts, durationMs,
+            ...(typeof event.name === 'string' ? {name:event.name.slice(0,128)} : {})};
         }
       }
     },

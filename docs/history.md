@@ -2,6 +2,13 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 99e586b 이후 main 지연 원인을 특정하기 전에 제품 코드를 추측으로 바꾸지 않고 QA 단계 진단을 추가했다. Node monitorEventLoopDelay/ELU로 starting/idle/preparing/loaded/closing/retained별 timer 지연·active/idle 시간을 최대17개 행으로 남기며 종료 시 observer를 비활성화한다. 샘플 없는 최대값은null이다. 단계 경계는 근사치이고 Chromium task200ms 판정을 대체하지 않는다. 공식 API 근거: https://nodejs.org/api/perf_hooks.html#perf_hooksmonitoreventloopdelayoptions
+- main 최대 task에는 이름만 최대128자로 보존하고 args/임의 payload는 계속 제외한다. 기존 메모리/응답 시간 합격 기준과 main task 집계는 유지했다. timer 지연60ms를 실제로 주입한 Node 검사, 종료/개수 한도, task 이름 길이·payload 제외, 기존 trace/session 포함14 PASS. QA main 문법·diff 검사 PASS. .artifacts/m5-main-phase-2026-11-02/에 검사 로그를 보존했다.
+- 이번에는 앱·실제 모델을 실행하지 않았다. 다음은 새 패키지의 조작 없는 화면 측정으로 지연 발생 단계/작업 이름을 확인하고 해당 제품 경로를 수정하는 것이다. 기존275~294ms와 유휴400MiB 실패는 미해결이며 G6/Windows/출시도 미완료다. main병합/push없음.
+
+
+### 2026-11-02 · by GPT-6
+
 - 사용자5분 가시성 확인 후 깨끗한0498254 QA 빌드와 ASAR 측정 소스5개 일치를 확인하고 ninth 단일 combined 시험을 실행했다. 입력25ms/Undo 정상,4개 live 관찰은 완료했지만 이후 과거 출력 scrollTop=0 확인에서 시간 초과로 FAIL이다. .artifacts/m5-combined-output-2026-11-02/ninth/에 결과를 보존했다.
 - 실패 진단에 실제 wheel91건/pointerdown2건(시작195607ms, live 마지막 종료186111ms)이 있었다. 자동 스크롤 결과에 외부 조작이 섞였으므로 제품 결함으로 단정하거나 원인 불명 코드를 수정하지 않았다. 앞으로 이런 결과가 PASS로 집계되지 않도록 앱 QA와 summary에서 입력 증거 누락/잘림/외부 탐색 입력을 거부한다. 계획된Z 입력·Undo는 기존 관찰 필터대로 별도 검사한다. summary9 PASS, 스크립트 문법/diff 검사 PASS.
 - 비동기 RSS227표본/오류0, 수집 최장47.73ms. 관측 idle440.625MiB, 부분 peak792.406MiB; retained 단계 미도달이다. main 최대275.332ms/renderer62ms이나 모두 windowCompleted=false인 부분 관측이므로 전체 성능 합격 자료가 아니다.294ms 지연이 동기 RSS만의 원인이었다는 주장은 하지 않는다.

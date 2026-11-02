@@ -95,6 +95,7 @@ cp.spawn = function(command, args, options) {
 // sampled RSS totals (shared pages may be counted more than once), not heap size.
 report.combinedWorkload = combined ? {fixture:combinedFixture, diagnostic:true, gateEligible:false, status:'PREPARING'} : undefined;
 let memoryPhase = 'starting';
+let mainPhaseProbe;
 report.memory = { scope: 'test-app-process-tree', samples: [], errors: 0, truncated: false };
 const memorySampler = require('./m5-process-memory.cjs').createProcessMemorySampler({
   rootPid:process.pid, getPhase:()=>memoryPhase,
@@ -107,6 +108,7 @@ const memorySampler = require('./m5-process-memory.cjs').createProcessMemorySamp
 const memoryTimer = setInterval(() => { void memorySampler.tick(); }, 1000);
 async function setMemoryPhase(phase) {
   await memorySampler.drain();
+  mainPhaseProbe?.phase(phase);
   memoryPhase = phase;
 }
 // Observe native state without forcing focus, disabling throttling, or changing
@@ -139,6 +141,7 @@ async function finish(error) {
   for (const remove of nativeListeners) remove();
   clearInterval(memoryTimer);
   await memorySampler.stop();
+  if (mainPhaseProbe) report.mainPhaseDiagnostics = mainPhaseProbe.stop();
   report.transport = transportObserver?.stop();
   report.error = error?.message;
   report.status = error ? 'FAIL' : 'PENDING';
@@ -184,7 +187,8 @@ app.on('browser-window-created', (_event, window) => {
       window.show(); window.focus();
       await wait("document.visibilityState === 'visible' && window.m5?.version === 8");
       mainProbe = await import('./m5-main-task-trace.mjs');
-      const {startMainTaskSession} = await import('./m5-main-task-session.mjs');
+      const {startMainTaskSession,createMainPhaseProbe} = await import('./m5-main-task-session.mjs');
+      mainPhaseProbe = createMainPhaseProbe();
       mainSession = await startMainTaskSession(window.webContents.debugger, process.pid);
       report.rendererLongTaskStart = await run(`(${longTaskProbe.beginLongTaskProbe.toString()})()`);
       longTaskStarted = true;
