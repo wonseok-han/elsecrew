@@ -2,6 +2,13 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 기준 HEAD2bd1c6d에서 400MiB 유지 결정에 따라 GPU 합성 비용을 조사했다. 진단 runner에 선택적 `--layers`를 추가해 탐색 전 CDP LayerTree 알림을 구독하고 레이어·DOM 종류·합성 이유를 수집한다. 늦게 붙인 첫 시도는 트리를 놓쳤고, 탐색 전에 enable 응답을 기다린 두 번째는 watchdog 종료됐다. enable과 탐색 순서를 수정한 세 번째는 정상 종료·5개 레이어 수집에 성공했다. 앞선 실패는 제품 실패로 세지 않는다.
+- `.artifacts/m5-performance/idle-product-26084.json`: document/root scroller와 프로젝트 rail의 overflow/viewport 합성만 관측했다. 이 초기 화면에서는 불필요한 대형 승격 레이어를 찾지 못했으며 누수 없음의 증명은 아니다. 디버거가 붙은 RSS는 기존 무계측 성능 증거와 비교하거나 합격 판정에 쓰지 않는다. 제품 CSS·기능·보안 격리·400/800/120 기준은 유지했다.
+- 설치된 Electron43.4.0/Chromium150.0.7871.224를 확인했다. [Chromium SysInfo 소스](https://chromium.googlesource.com/chromium/src/+/main/base/system/sys_info.cc)의 low-end 강제 모드는 RAM512MiB 모사 등 광범위한 동작 변경이라 채택하지 않았다. [해당 Chromium 버전 GPU switch 소스](https://raw.githubusercontent.com/chromium/chromium/150.0.7871.224/gpu/command_buffer/service/gpu_switches.cc)에 discardable-cache 제한은 있으나 옛 전체 GPU 예산 flag는 없었다. 캐시가 실제 비용의 원인인지는 아직 입증하지 않았으며 플래그를 제품에 적용하지 않았다.
+- 진단 앱/관측 자손 부재 확인 후 자체 프로필 ap73Uf/urjER6/FvjSiK 3개(약3.65MiB)를 정리했다. 로그·cleanup JSON은 `.artifacts/m5-performance`에 보존했다. runner 문법·diff 검사 PASS. 다음은 실제 캐시/화면 버퍼 비용의 원인 확인과 제품 최적화이며 유휴400MiB 및 G6/Windows/출시는 여전히 미완료다. 실제 모델·사용자 데이터·제품 패키지 변경·main 병합·push 없음.
+
+### 2026-11-02 · by GPT-6
+
 - 이전 턴은 누적 Rust 회귀 완료와 소프트웨어 렌더링 후보 기각으로 진척했다. bcc262c/깨끗한 통합 상태에서 추가 초기 메모리 비용을 조사했다. 설치된 Electron 타입의 spellcheck 기본true를 확인하고 진단 runner에 --no-spellcheck·--native-memory·--defer-show와 관측 visibility를 추가했다. 제품 기본값·보안 격리·400/800/120 기준은 바꾸지 않았다.
 - 맞춤법 검사 순서 대조 on/off/off/on의 최대RSS는405.77/386.63/431.22/430.83MiB다. 변동이 커 일관된 개선 근거가 없으므로 기능을 끄지 않는다. 창 표시 시점도 기본/ready-to-show/ready-to-show/기본이430.45/432.95/431.94/431.91MiB이며 모두visible였다. 이를 메모리 개선으로 채택하지 않는다.
 - 앱 코드 없이 같은 화면이 크게 차지하던 이전 관측을 좁히기 위해 자체 앱/자식의 vmmap -summary를 RSS 측정 뒤 수집했다. GPU IOSurface resident 약59.1MiB, physical footprint87.8MiB 관측이며 main/renderer malloc 분류는 상대적으로 작았다. dyld canonical-path 경고도 로그에 보존했다. native 요약과 RSS는 다른 지표이며 기존 합격 기준을 대체하지 않는다. 전체 비용의 인과 기여량·누수 없음·제품 합격 주장이 아니다.

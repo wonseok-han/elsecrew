@@ -42,7 +42,22 @@ app.whenReady().then(async () => {
     contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false, spellcheck,
   } });
   if (deferShow) window.once('ready-to-show', () => window.show());
+  const collectLayers = process.argv.includes('--layers');
+  const debuggerApi = window.webContents.debugger;
+  let layers = [];
+  const onLayerMessage = (_event, method, params) => {
+    if (method === 'LayerTree.layerTreeDidChange' && params.layers?.length) layers = params.layers;
+  };
+  // Subscribe before navigation: an already-idle page may not emit a new tree.
+  let layerEnableResult = Promise.resolve(null);
+  if (collectLayers) {
+    debuggerApi.attach('1.3');
+    debuggerApi.on('message', onLayerMessage);
+    layerEnableResult = debuggerApi.sendCommand('LayerTree.enable').then(() => null, error => String(error));
+  }
   await window.loadURL('m5idle://m5/index.html');
+  const layerEnableError = await layerEnableResult;
+  if (layerEnableError) throw new Error(layerEnableError);
   if (hasBridge && !await window.webContents.executeJavaScript('window.m5PerformanceEnvironment?.sandboxed === true')) throw new Error('preload is not sandboxed');
   await new Promise(r => setTimeout(r, 1000));
   const samples = [];
@@ -78,6 +93,20 @@ app.whenReady().then(async () => {
           ['-summary',String(metric.pid)],{encoding:'utf8',timeout:5000,maxBuffer:256*1024})};
       } catch (error) { return {pid:metric.pid,type:metric.type,error:String(error)}; }
     });
+  }
+  if (collectLayers) {
+    report.layerInstrumentation = 'Debugger attached before navigation; RSS is diagnostic and not comparable to uninstrumented samples';
+    try {
+      if (!layers.length) throw new Error('No compositor layers observed');
+      report.layers = [];
+      for (const layer of layers.slice(0, 50)) {
+        const reasons = await debuggerApi.sendCommand('LayerTree.compositingReasons', {layerId:layer.layerId});
+        const node = layer.backendNodeId ? (await debuggerApi.sendCommand('DOM.describeNode', {backendNodeId:layer.backendNodeId})).node : null;
+        report.layers.push({...layer,reasons,node:node ? {name:node.nodeName,attributes:node.attributes} : null});
+      }
+      report.layerLimitExceeded = layers.length > 50;
+    } catch (error) { report.layerError = String(error); }
+    finally { debuggerApi.removeListener('message', onLayerMessage); if (debuggerApi.isAttached()) debuggerApi.detach(); }
   }
   const evidencePath = resolve(directory, `idle-${mode}-${process.pid}.json`);
   writeFileSync(evidencePath, JSON.stringify(report, null, 2) + '\n', { flag: 'wx' });
