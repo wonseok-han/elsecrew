@@ -102,16 +102,19 @@ mod tests {
 
     #[test]
     fn only_exact_isolation_warning_can_be_reconciled() {
-        let home = Path::new("/app/profile");
-        let cwd = Path::new("/app/workspace");
-        let summary =
-            format!("{HEADER}    1. /app/workspace/.codex\n       /app/workspace{REASON}\n");
+        let home = Path::new(test_path!("/app/profile"));
+        let cwd = Path::new(test_path!("/app/workspace"));
+        let summary = format!(
+            "{HEADER}    1. {}\n       {}{REASON}\n",
+            test_path!("/app/workspace", ".codex"),
+            test_path!("/app/workspace")
+        );
         let base = json!({"method":"configWarning","params":{"summary":summary}});
         let observation = |value: &serde_json::Value| {
             BoundedObservation::new(value.to_string().into_bytes()).unwrap()
         };
         let warning = IsolationWarning::parse(&observation(&base), home, cwd).unwrap();
-        let layers = json!({"layers":[{"name":{"type":"project","dotCodexFolder":"/app/workspace/.codex"},"disabledReason":format!("/app/workspace{REASON}")}]});
+        let layers = json!({"layers":[{"name":{"type":"project","dotCodexFolder":test_path!("/app/workspace", ".codex")},"disabledReason":format!("{}{REASON}", test_path!("/app/workspace"))}]});
         assert!(warning.matches_configuration(&layers));
         assert!(!warning.matches_configuration(&json!({"layers":[]})));
         let mut enabled = layers.clone();
@@ -133,10 +136,12 @@ mod tests {
                     value["params"]["summary"] = "Invalid configuration; using defaults".into()
                 }
                 "id" => value["id"] = 2.into(),
-                "path" => value["params"]["path"] = "/private".into(),
+                "path" => value["params"]["path"] = test_path!("/private").into(),
                 "details" => value["params"]["details"] = "unexpected".into(),
                 "outside" => {
-                    value["params"]["summary"] = summary.replace("/app/workspace", "/other").into()
+                    value["params"]["summary"] = summary
+                        .replace(test_path!("/app/workspace"), test_path!("/other"))
+                        .into()
                 }
                 "reason" => {
                     value["params"]["summary"] = summary.replace("untrusted", "trusted").into()

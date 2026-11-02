@@ -340,7 +340,10 @@ pub fn match_model_catalog(
     let catalog = read_model_catalog(input)?;
     if catalog.iter().any(|model| {
         model.model == profile.model
-            && model.reasoning_efforts.iter().any(|effort| effort == profile.reasoning_effort)
+            && model
+                .reasoning_efforts
+                .iter()
+                .any(|effort| effort == profile.reasoning_effort)
     }) {
         Ok(())
     } else {
@@ -425,15 +428,15 @@ mod tests {
     use serde_json::{json, Value};
 
     fn thread() -> Value {
-        json!({"thread":{"id":"thread-test"},"model":"test-model","modelProvider":"openai","cwd":"/managed/snapshot","instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"reasoningEffort":"medium"})
+        json!({"thread":{"id":"thread-test"},"model":"test-model","modelProvider":"openai","cwd":test_path!("/managed/snapshot"),"instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"reasoningEffort":"medium"})
     }
 
     #[test]
     fn named_thread_requires_selected_profile_and_exact_runtime_root() {
-        let cwd = std::path::Path::new("/managed/snapshot");
+        let cwd = std::path::Path::new(test_path!("/managed/snapshot"));
         let mut named = thread();
         named["activePermissionProfile"] = json!({"id":"hello-agent-snapshot","extends":null});
-        named["runtimeWorkspaceRoots"] = json!(["/managed/snapshot"]);
+        named["runtimeWorkspaceRoots"] = json!([test_path!("/managed/snapshot")]);
         // This legacy compatibility summary cannot represent named split policy.
         named["sandbox"] = json!({"type":"workspaceWrite","writableRoots":[],"networkAccess":false,"excludeTmpdirEnvVar":true,"excludeSlashTmp":true});
         assert!(match_named_thread(&input(&named), &profile(), cwd).is_ok());
@@ -447,7 +450,7 @@ mod tests {
             ("runtimeWorkspaceRoots", json!([])),
             (
                 "runtimeWorkspaceRoots",
-                json!(["/managed/snapshot", "/outside"]),
+                json!([test_path!("/managed/snapshot"), test_path!("/outside")]),
             ),
             ("model", json!("other")),
             ("reasoningEffort", json!("high")),
@@ -462,7 +465,7 @@ mod tests {
 
     #[test]
     fn thread_settings_are_exact_and_never_filesystem_authority() {
-        let cwd = std::path::Path::new("/managed/snapshot");
+        let cwd = std::path::Path::new(test_path!("/managed/snapshot"));
         assert!(match_read_only_thread(&input(&thread()), &profile(), cwd).is_ok());
         for key in [
             "model",
@@ -489,7 +492,7 @@ mod tests {
             assert!(match_read_only_thread(&input(&value), &profile(), cwd).is_err());
         }
         let mut value = thread();
-        value["instructionSources"] = json!(["/user/AGENTS.md"]);
+        value["instructionSources"] = json!([test_path!("/user/AGENTS.md")]);
         assert!(match_read_only_thread(&input(&value), &profile(), cwd).is_err());
         assert!(match_read_only_thread(
             &input(&thread()),
@@ -539,11 +542,18 @@ mod tests {
     #[test]
     fn display_catalog_is_sanitized_and_does_not_select_a_replacement() {
         let choices = read_model_catalog(&input(&catalog())).unwrap();
-        assert_eq!(choices, vec![CatalogModel {
-            model: "test-model".into(), reasoning_efforts: vec!["medium".into()],
-        }]);
+        assert_eq!(
+            choices,
+            vec![CatalogModel {
+                model: "test-model".into(),
+                reasoning_efforts: vec!["medium".into()],
+            }]
+        );
         assert!(!format!("{choices:?}").contains("PRIVATE"));
-        let missing = ExpectedProfile { model: "obsolete-model", reasoning_effort: "medium" };
+        let missing = ExpectedProfile {
+            model: "obsolete-model",
+            reasoning_effort: "medium",
+        };
         assert!(match_model_catalog(&input(&catalog()), &missing).is_err());
 
         let mut hidden = catalog();

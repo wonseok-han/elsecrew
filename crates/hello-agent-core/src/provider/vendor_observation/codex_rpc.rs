@@ -209,9 +209,10 @@ mod tests {
     use super::*;
     #[test]
     fn named_permissions_opt_in_does_not_change_stable_handshake() {
-        let mut named =
-            ModelFreeExchange::with_named_permission_config(std::path::Path::new("/snapshot"))
-                .unwrap();
+        let mut named = ModelFreeExchange::with_named_permission_config(std::path::Path::new(
+            test_path!("/snapshot"),
+        ))
+        .unwrap();
         let beta: serde_json::Value =
             serde_json::from_str(&named.next_request().unwrap().unwrap()).unwrap();
         let stable: serde_json::Value = serde_json::from_str(
@@ -228,9 +229,10 @@ mod tests {
 
     #[test]
     fn named_profile_query_binds_cwd_without_reusing_thread_ids() {
-        let mut exchange =
-            ModelFreeExchange::with_named_permission_config(std::path::Path::new("/snapshot"))
-                .unwrap();
+        let mut exchange = ModelFreeExchange::with_named_permission_config(std::path::Path::new(
+            test_path!("/snapshot"),
+        ))
+        .unwrap();
         for id in [1, 2, 3, 4, 50, 51] {
             let request = exchange.next_request().unwrap().unwrap();
             let wire: serde_json::Value =
@@ -240,14 +242,14 @@ mod tests {
             if id == 2 {
                 assert_eq!(
                     wire["params"],
-                    serde_json::json!({"cwd":"/snapshot","includeLayers":true})
+                    serde_json::json!({"cwd":test_path!("/snapshot"),"includeLayers":true})
                 );
             }
             if id == 51 {
                 assert_eq!(wire["method"], "permissionProfile/list");
                 assert_eq!(
                     wire["params"],
-                    serde_json::json!({"cwd":"/snapshot","limit":256})
+                    serde_json::json!({"cwd":test_path!("/snapshot"),"limit":256})
                 );
             }
             let body = if id == 1 {
@@ -263,7 +265,11 @@ mod tests {
             }
         }
         assert!(exchange.next_request().unwrap().is_none());
-        for cwd in ["relative", "/snapshot/../source", "/snapshot\n"] {
+        for cwd in [
+            "relative",
+            test_path!("/snapshot/../source"),
+            test_path!("/snapshot\n"),
+        ] {
             assert!(
                 ModelFreeExchange::with_named_permission_config(std::path::Path::new(cwd)).is_err()
             );

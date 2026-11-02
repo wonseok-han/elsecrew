@@ -597,13 +597,13 @@ mod tests {
                 model: "test-model",
                 reasoning_effort: "medium",
             },
-            "/app/profile",
+            test_path!("/app/profile"),
         )
         .unwrap()
     }
     fn results() -> Vec<Value> {
         let mut values = vec![
-            json!({"userAgent":"test","codexHome":"/app/profile","platformFamily":"unix","platformOs":"macos"}),
+            json!({"userAgent":"test","codexHome":test_path!("/app/profile"),"platformFamily":"unix","platformOs":"macos"}),
             json!({"config":{"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only"}}),
             json!({"account":{"type":"chatgpt","email":"PRIVATE"},"requiresOpenaiAuth":true}),
             json!({"data":[{"id":"test-model","model":"test-model","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"medium"}]}],"nextCursor":null}),
@@ -613,7 +613,7 @@ mod tests {
         let config = values[1]["config"].clone();
         values[1]["layers"] = json!([
             {"name":{"type":"sessionFlags"},"config":config},
-            {"name":{"type":"user","file":"/app/profile/config.toml"},"config":{"cli_auth_credentials_store":"file"}},
+            {"name":{"type":"user","file":test_path!("/app/profile/config.toml")},"config":{"cli_auth_credentials_store":"file"}},
             {"name":{"type":"system","file":"/etc/codex/config.toml"},"config":{}}
         ]);
         values
@@ -635,70 +635,133 @@ mod tests {
 
     #[test]
     fn isolated_disabled_project_layers_keep_other_source_checks() {
-        let home = std::path::Path::new("/app/profile");
-        let cwd = std::path::Path::new("/app/workspace");
-        let config = super::super::super::codex_profile_config::ProfileConfig::parse(b"cli_auth_credentials_store='file'\n").unwrap();
+        let home = std::path::Path::new(test_path!("/app/profile"));
+        let cwd = std::path::Path::new(test_path!("/app/workspace"));
+        let config = super::super::super::codex_profile_config::ProfileConfig::parse(
+            b"cli_auth_credentials_store='file'\n",
+        )
+        .unwrap();
         let projects = config.isolated_projects(&[home, cwd]).unwrap();
-        for case in ["disabled", "enabled", "legacy", "managed", "system", "duplicate-json"] {
+        for case in [
+            "disabled",
+            "enabled",
+            "legacy",
+            "managed",
+            "system",
+            "duplicate-json",
+        ] {
             let mut flow = exchange();
-            if case != "legacy" { flow.require_startup_isolation(cwd).unwrap(); }
+            if case != "legacy" {
+                flow.require_startup_isolation(cwd).unwrap();
+            }
             let mut values = results();
             values[1]["config"]["projects"] = projects.clone();
             values[1]["layers"][0]["config"]["projects"] = projects.clone();
             values[1]["layers"].as_array_mut().unwrap().push(json!({
-                "name":{"type":"project","dotCodexFolder":"/app/workspace/.codex"},
+                "name":{"type":"project","dotCodexFolder":test_path!("/app/workspace", ".codex")},
                 "config":{"private_marker":"unused"},"disabledReason":if case == "enabled" { Value::Null } else { json!("Not trusted") }
             }));
-            if case == "managed" { values[1]["layers"].as_array_mut().unwrap().push(json!({"name":{"type":"mdm"},"config":{},"disabledReason":"ignored"})); }
-            if case == "system" { values[1]["layers"][2]["config"] = json!({"hooks":{"private":"must reject"}}); }
+            if case == "managed" {
+                values[1]["layers"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json!({"name":{"type":"mdm"},"config":{},"disabledReason":"ignored"}));
+            }
+            if case == "system" {
+                values[1]["layers"][2]["config"] = json!({"hooks":{"private":"must reject"}});
+            }
             flow.next_frames().unwrap();
             flow.accept(&reply(0, &values[0])).unwrap();
             flow.next_frames().unwrap();
             let input = if case == "duplicate-json" {
-                let text = json!({"id":2,"result":values[1]}).to_string().replace("\"disabledReason\":", "\"disabledReason\":null,\"disabledReason\":");
+                let text = json!({"id":2,"result":values[1]}).to_string().replace(
+                    "\"disabledReason\":",
+                    "\"disabledReason\":null,\"disabledReason\":",
+                );
                 BoundedObservation::new(text.into_bytes()).unwrap()
-            } else { reply(1, &values[1]) };
+            } else {
+                reply(1, &values[1])
+            };
             assert_eq!(flow.accept(&input).is_ok(), case == "disabled", "{case}");
-            if case != "disabled" { assert_eq!(flow.state(), PreflightState::Failed); }
+            if case != "disabled" {
+                assert_eq!(flow.state(), PreflightState::Failed);
+            }
         }
     }
 
     #[test]
     fn isolation_warning_is_pending_evidence_not_configuration_authority() {
-        let home = std::path::Path::new("/app/profile");
-        let cwd = std::path::Path::new("/app/workspace");
-        let profile = super::super::super::codex_profile_config::ProfileConfig::parse(b"cli_auth_credentials_store='file'\n").unwrap();
+        let home = std::path::Path::new(test_path!("/app/profile"));
+        let cwd = std::path::Path::new(test_path!("/app/workspace"));
+        let profile = super::super::super::codex_profile_config::ProfileConfig::parse(
+            b"cli_auth_credentials_store='file'\n",
+        )
+        .unwrap();
         let projects = profile.isolated_projects(&[home, cwd]).unwrap();
-        let reason = "/app/workspace is marked as untrusted in the effective configuration. To load project-local config, hooks, and exec policies, update its trust setting. If that setting is managed by your organization, contact your administrator.";
-        let summary = format!("Project-local config, hooks, and exec policies are disabled in the following folders until the project is trusted, but skills still load.\n    1. /app/workspace/.codex\n       {reason}\n");
-        for case in ["valid", "early", "late", "account", "models", "requirements", "duplicate", "unknown", "missing", "changed", "active", "legacy"] {
+        let reason = test_path!("/app/workspace is marked as untrusted in the effective configuration. To load project-local config, hooks, and exec policies, update its trust setting. If that setting is managed by your organization, contact your administrator.");
+        let summary = format!("Project-local config, hooks, and exec policies are disabled in the following folders until the project is trusted, but skills still load.\n    1. {}\n       {reason}\n", test_path!("/app/workspace", ".codex"));
+        for case in [
+            "valid",
+            "early",
+            "late",
+            "account",
+            "models",
+            "requirements",
+            "duplicate",
+            "unknown",
+            "missing",
+            "changed",
+            "active",
+            "legacy",
+        ] {
             let mut flow = exchange();
-            if case != "legacy" { flow.require_startup_isolation(cwd).unwrap(); }
+            if case != "legacy" {
+                flow.require_startup_isolation(cwd).unwrap();
+            }
             let mut values = results();
             values[1]["config"]["projects"] = projects.clone();
             values[1]["layers"][0]["config"]["projects"] = projects.clone();
             if case != "missing" {
                 values[1]["layers"].as_array_mut().unwrap().push(json!({
-                    "name":{"type":"project","dotCodexFolder":"/app/workspace/.codex"},
+                    "name":{"type":"project","dotCodexFolder":test_path!("/app/workspace", ".codex")},
                     "config":{}, "disabledReason":reason
                 }));
             }
-            if case == "changed" { values[1]["layers"][3]["disabledReason"] = json!("Other reason"); }
-            if case == "active" { values[1]["layers"][3]["disabledReason"] = Value::Null; }
+            if case == "changed" {
+                values[1]["layers"][3]["disabledReason"] = json!("Other reason");
+            }
+            if case == "active" {
+                values[1]["layers"][3]["disabledReason"] = Value::Null;
+            }
             let warning = BoundedObservation::new(json!({"method":"configWarning","params":{"summary":if case == "unknown" { "Other warning" } else { &summary }}}).to_string().into_bytes()).unwrap();
             flow.next_frames().unwrap();
             if case != "early" {
                 flow.accept(&reply(0, &values[0])).unwrap();
                 flow.next_frames().unwrap();
             }
-            if case == "late" { flow.accept(&reply(1, &values[1])).unwrap(); }
-            if let Some(index) = ["account", "models", "requirements"].iter().position(|value| *value == case) {
-                for completed in 1..=index+1 {
+            if case == "late" {
+                flow.accept(&reply(1, &values[1])).unwrap();
+            }
+            if let Some(index) = ["account", "models", "requirements"]
+                .iter()
+                .position(|value| *value == case)
+            {
+                for completed in 1..=index + 1 {
                     flow.accept(&reply(completed, &values[completed])).unwrap();
                     flow.next_frames().unwrap();
                 }
             }
-            if ["early", "late", "account", "models", "requirements", "unknown", "legacy"].contains(&case) {
+            if [
+                "early",
+                "late",
+                "account",
+                "models",
+                "requirements",
+                "unknown",
+                "legacy",
+            ]
+            .contains(&case)
+            {
                 assert!(flow.accept(&warning).is_err(), "{case}");
                 assert_eq!(flow.state(), PreflightState::Failed);
                 continue;
@@ -708,9 +771,20 @@ mod tests {
             if case == "duplicate" {
                 assert!(flow.accept(&warning).is_err());
             } else {
-                assert_eq!(flow.accept(&reply(1, &values[1])).is_ok(), case == "valid", "{case}");
+                assert_eq!(
+                    flow.accept(&reply(1, &values[1])).is_ok(),
+                    case == "valid",
+                    "{case}"
+                );
             }
-            assert_eq!(flow.state(), if case == "valid" { PreflightState::Checking } else { PreflightState::Failed });
+            assert_eq!(
+                flow.state(),
+                if case == "valid" {
+                    PreflightState::Checking
+                } else {
+                    PreflightState::Failed
+                }
+            );
             assert!(flow.into_text_turn("must not send").is_err());
         }
     }
@@ -731,7 +805,9 @@ mod tests {
         assert_eq!(flow.display_models().unwrap()[0].model, "available-model");
         assert_eq!(flow.model, "test-model");
         assert!(flow.next_frames().is_err());
-        assert!(flow.start_thread(std::path::Path::new("/managed/snapshot")).is_err());
+        assert!(flow
+            .start_thread(std::path::Path::new(test_path!("/managed/snapshot")))
+            .is_err());
         assert!(flow.into_text_turn("must not send").is_err());
     }
 
@@ -752,7 +828,7 @@ mod tests {
                 model: "test-model",
                 reasoning_effort: "medium",
             },
-            "/app/profile",
+            test_path!("/app/profile"),
             ExpectedPermission::WorkspaceWrite,
         )
         .unwrap()
@@ -760,7 +836,7 @@ mod tests {
 
     #[test]
     fn named_preflight_requires_profile_selection_before_starting_same_snapshot() {
-        let cwd = std::path::Path::new("/managed/snapshot");
+        let cwd = std::path::Path::new(test_path!("/managed/snapshot"));
         for permission in [
             ExpectedPermission::ReadOnly,
             ExpectedPermission::WorkspaceWrite,
@@ -771,7 +847,7 @@ mod tests {
                         model: "test-model",
                         reasoning_effort: "medium",
                     },
-                    "/app/profile",
+                    test_path!("/app/profile"),
                     cwd,
                     permission,
                 )
@@ -781,11 +857,11 @@ mod tests {
                 config.as_object_mut().unwrap().remove("sandbox_mode");
                 config["default_permissions"] = json!("hello-agent-snapshot");
                 let mut policy = super::super::named_config::expected_write_policy(
-                    std::path::Path::new("/app/profile"),
+                    std::path::Path::new(test_path!("/app/profile")),
                     cwd,
                 );
                 if permission == ExpectedPermission::ReadOnly {
-                    policy["filesystem"]["/managed/snapshot"]["."] = json!("read");
+                    policy["filesystem"][test_path!("/managed/snapshot")]["."] = json!("read");
                 }
                 config["permissions"] = json!({"hello-agent-snapshot":policy});
                 values[1]["layers"][0]["config"] = values[1]["config"].clone();
@@ -800,7 +876,7 @@ mod tests {
                 let frames = flow.next_frames().unwrap();
                 let query: Value = serde_json::from_str(frames[0].as_str()).unwrap();
                 assert_eq!(query["method"], "permissionProfile/list");
-                assert_eq!(query["params"]["cwd"], "/managed/snapshot");
+                assert_eq!(query["params"]["cwd"], test_path!("/managed/snapshot"));
                 let answer = BoundedObservation::new(serde_json::to_vec(&json!({"id":51,"result":{"data":[{"id":"hello-agent-snapshot","allowed":allowed}],"nextCursor":null}})).unwrap()).unwrap();
                 if !allowed {
                     assert!(flow.accept(&answer).is_err());
@@ -811,13 +887,15 @@ mod tests {
                     flow.accept(&answer).unwrap(),
                     PreflightState::ObservationsMatched
                 );
-                assert!(flow.start_thread(std::path::Path::new("/other")).is_err());
+                assert!(flow
+                    .start_thread(std::path::Path::new(test_path!("/other")))
+                    .is_err());
                 let request = flow.start_thread(cwd).unwrap();
                 let wire: Value = serde_json::from_str(request.as_str()).unwrap();
                 assert_eq!(wire["params"]["permissions"], "hello-agent-snapshot");
                 assert_eq!(
                     wire["params"]["runtimeWorkspaceRoots"],
-                    json!(["/managed/snapshot"])
+                    json!([test_path!("/managed/snapshot")])
                 );
                 assert!(wire["params"].get("sandbox").is_none());
                 assert!(wire["params"]["config"]
@@ -847,7 +925,7 @@ mod tests {
                             model: "test-model",
                             reasoning_effort: "medium",
                         },
-                        "/app/profile",
+                        test_path!("/app/profile"),
                     )
                     .unwrap();
                     let values = results();
@@ -875,7 +953,7 @@ mod tests {
                     assert!(flow.accept(&reply(1, &values[1])).is_err());
                     assert!(flow.next_frames().is_err());
                     assert!(flow
-                        .start_thread(std::path::Path::new("/managed/snapshot"))
+                        .start_thread(std::path::Path::new(test_path!("/managed/snapshot")))
                         .is_err());
                     assert!(flow.into_text_turn("must not send").is_err());
                 }
@@ -890,7 +968,7 @@ mod tests {
                 model: "test-model",
                 reasoning_effort: "medium",
             },
-            "/app/profile",
+            test_path!("/app/profile"),
         )
         .unwrap();
         let mut methods = Vec::new();
@@ -906,7 +984,7 @@ mod tests {
         for _ in 0..3 {
             assert!(flow.next_frames().unwrap().is_empty());
             assert!(flow
-                .start_thread(std::path::Path::new("/managed/snapshot"))
+                .start_thread(std::path::Path::new(test_path!("/managed/snapshot")))
                 .is_err());
         }
         assert!(flow.matched_thread_id().is_none());
@@ -921,7 +999,7 @@ mod tests {
                     model: "test-model",
                     reasoning_effort: "medium",
                 },
-                "/app/profile",
+                test_path!("/app/profile"),
             )
             .unwrap();
             let mut values = results();
@@ -947,7 +1025,7 @@ mod tests {
                 model: "test-model",
                 reasoning_effort: "medium",
             },
-            "/app/profile",
+            test_path!("/app/profile"),
         )
         .unwrap();
         flow.next_frames().unwrap();
@@ -960,7 +1038,7 @@ mod tests {
         assert!(flow.accept(&reply(1, &results()[1])).is_err());
         assert!(flow.next_frames().is_err());
         assert!(flow
-            .start_thread(std::path::Path::new("/managed/snapshot"))
+            .start_thread(std::path::Path::new(test_path!("/managed/snapshot")))
             .is_err());
     }
 
@@ -978,7 +1056,7 @@ mod tests {
                 ),
                 (
                     "sandbox_workspace_write/writable_roots",
-                    json!(["/outside"]),
+                    json!([test_path!("/outside")]),
                 ),
             ] {
                 let mut flow = write_exchange();
@@ -1015,7 +1093,7 @@ mod tests {
                 flow.next_frames().unwrap();
                 flow.accept(&reply(index, value)).unwrap();
             }
-            let cwd = std::path::Path::new("/managed/snapshot");
+            let cwd = std::path::Path::new(test_path!("/managed/snapshot"));
             assert!(flow.start_read_only_thread(cwd).is_err());
             let request = flow.start_thread(cwd).unwrap();
             let request: Value = serde_json::from_str(request.as_str()).unwrap();
@@ -1027,13 +1105,13 @@ mod tests {
                     "exclude_tmpdir_env_var":true, "exclude_slash_tmp":true
                 })
             );
-            let mut response = json!({"thread":{"id":"write-1"},"model":"test-model","modelProvider":"openai","cwd":"/managed/snapshot","instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"workspaceWrite","writableRoots":[],"networkAccess":false,"excludeTmpdirEnvVar":true,"excludeSlashTmp":true},"reasoningEffort":"medium"});
+            let mut response = json!({"thread":{"id":"write-1"},"model":"test-model","modelProvider":"openai","cwd":test_path!("/managed/snapshot"),"instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"workspaceWrite","writableRoots":[],"networkAccess":false,"excludeTmpdirEnvVar":true,"excludeSlashTmp":true},"reasoningEffort":"medium"});
             match case {
                 "read-only" => {
                     response["sandbox"] = json!({"type":"readOnly","networkAccess":false})
                 }
                 "network" => response["sandbox"]["networkAccess"] = json!(true),
-                "root" => response["sandbox"]["writableRoots"] = json!(["/outside"]),
+                "root" => response["sandbox"]["writableRoots"] = json!([test_path!("/outside")]),
                 "tmp-env" => response["sandbox"]["excludeTmpdirEnvVar"] = json!(false),
                 "slash-tmp" => response["sandbox"]["excludeSlashTmp"] = json!(false),
                 "missing" => {
@@ -1134,7 +1212,7 @@ mod tests {
                 assert!(flow.awaiting_response());
                 assert!(flow.next_frames().is_err());
                 assert!(flow
-                    .start_thread(std::path::Path::new("/managed/snapshot"))
+                    .start_thread(std::path::Path::new(test_path!("/managed/snapshot")))
                     .is_err());
                 flow.accept(&reply(2, &values[2])).unwrap();
                 assert!(!flow.awaiting_response());
@@ -1174,12 +1252,17 @@ mod tests {
         flow.next_frames().unwrap();
         flow.accept(&reply(0, &values[0])).unwrap();
         flow.next_frames().unwrap();
-        let note = BoundedObservation::new(br#"{"method":"account/updated","params":{"authMode":"chatgpt"}}"#.to_vec()).unwrap();
+        let note = BoundedObservation::new(
+            br#"{"method":"account/updated","params":{"authMode":"chatgpt"}}"#.to_vec(),
+        )
+        .unwrap();
         flow.accept(&note).unwrap();
         assert!(flow.awaiting_response());
         assert!(flow.next_frames().is_err());
         for (index, value) in values.iter().enumerate().skip(1) {
-            if index > 1 { flow.next_frames().unwrap(); }
+            if index > 1 {
+                flow.next_frames().unwrap();
+            }
             flow.accept(&reply(index, value)).unwrap();
         }
         assert_eq!(flow.state(), PreflightState::ObservationsMatched);
@@ -1212,7 +1295,7 @@ mod tests {
             }
             assert_eq!(flow.state(), PreflightState::Checking);
             assert!(flow
-                .start_thread(std::path::Path::new("/managed/snapshot"))
+                .start_thread(std::path::Path::new(test_path!("/managed/snapshot")))
                 .is_err());
             let request = flow.next_frames().unwrap();
             assert_eq!(request.len(), 1);
@@ -1225,10 +1308,14 @@ mod tests {
                 BoundedObservation::new(format!(r#"{{"id":50,"result":{result}}}"#).into_bytes())
                     .unwrap();
             let accepted = flow.accept(&wire);
-            if [r#"{"requirements":null}"#,
+            if [
+                r#"{"requirements":null}"#,
                 r#"{"requirements":null,"supportsIndependentSpeedModes":true}"#,
                 r#"{"requirements":null,"supportsIndependentSpeedModes":false}"#,
-                r#"{"requirements":null,"supportsIndependentSpeedModes":null}"#].contains(&result) {
+                r#"{"requirements":null,"supportsIndependentSpeedModes":null}"#,
+            ]
+            .contains(&result)
+            {
                 assert_eq!(accepted.unwrap(), PreflightState::ObservationsMatched);
                 assert!(flow.next_frames().unwrap().is_empty());
             } else {
@@ -1236,7 +1323,13 @@ mod tests {
                 assert!(!error.to_string().contains("PRIVATE_POLICY"));
                 if result == r#"{"requirements":{}}"# || result.contains("allowedSandboxModes") {
                     assert_eq!(flow.diagnostic_stage(), "managed requirements present");
-                } else if [r#"{"requirements":false}"#, r#"{"requirements":[]}"#, r#"{"requirements":"null"}"#].contains(&result) {
+                } else if [
+                    r#"{"requirements":false}"#,
+                    r#"{"requirements":[]}"#,
+                    r#"{"requirements":"null"}"#,
+                ]
+                .contains(&result)
+                {
                     assert_eq!(flow.diagnostic_stage(), "requirements value shape");
                 }
                 assert!(!flow.diagnostic_stage().contains("PRIVATE_POLICY"));
@@ -1246,7 +1339,7 @@ mod tests {
                     .is_err());
                 assert!(flow.next_frames().is_err());
                 assert!(flow
-                    .start_thread(std::path::Path::new("/managed/snapshot"))
+                    .start_thread(std::path::Path::new(test_path!("/managed/snapshot")))
                     .is_err());
                 assert!(flow.into_text_turn("goal").is_err());
             }
@@ -1256,7 +1349,7 @@ mod tests {
     #[test]
     fn mismatch_at_each_stage_permanently_stops_followup_requests() {
         for (stage, field, value) in [
-            (0, "codexHome", json!("/other")),
+            (0, "codexHome", json!(test_path!("/other"))),
             (0, "platformOs", json!("windows")),
             (1, "config", json!({})),
             (1, "layers", Value::Null),
@@ -1312,9 +1405,9 @@ mod tests {
             flow.next_frames().unwrap();
             flow.accept(&reply(index, result)).unwrap();
         }
-        flow.start_read_only_thread(std::path::Path::new("/managed/snapshot"))
+        flow.start_read_only_thread(std::path::Path::new(test_path!("/managed/snapshot")))
             .unwrap();
-        let result = json!({"thread":{"id":"thread-1"},"model":"test-model","modelProvider":"openai","cwd":"/managed/snapshot","instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"reasoningEffort":"medium"});
+        let result = json!({"thread":{"id":"thread-1"},"model":"test-model","modelProvider":"openai","cwd":test_path!("/managed/snapshot"),"instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"reasoningEffort":"medium"});
         flow.accept(&thread_reply(&result)).unwrap();
         flow.accept(
             &BoundedObservation::new(
@@ -1330,7 +1423,7 @@ mod tests {
 
     #[test]
     fn thread_requires_preflight_and_exact_correlated_workspace_settings() {
-        let cwd = std::path::Path::new("/managed/snapshot");
+        let cwd = std::path::Path::new(test_path!("/managed/snapshot"));
         assert!(exchange().start_read_only_thread(cwd).is_err());
         for mismatch in ["none", "id", "cwd", "model", "sandbox", "instructions"] {
             let mut flow = exchange();
@@ -1339,7 +1432,7 @@ mod tests {
                 flow.accept(&reply(index, result)).unwrap();
             }
             assert!(flow
-                .start_read_only_thread(std::path::Path::new("/managed/../other"))
+                .start_read_only_thread(std::path::Path::new(test_path!("/managed/../other")))
                 .is_err());
             let request = flow.start_read_only_thread(cwd).unwrap();
             let request: Value = serde_json::from_str(request.as_str()).unwrap();
@@ -1353,12 +1446,14 @@ mod tests {
             assert_eq!(request["params"]["ephemeral"], true);
             assert!(flow.start_read_only_thread(cwd).is_err());
             assert_eq!(flow.matched_thread_id(), None);
-            let mut result = json!({"thread":{"id":"thread-1"},"model":"test-model","modelProvider":"openai","cwd":"/managed/snapshot","instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"reasoningEffort":"medium"});
+            let mut result = json!({"thread":{"id":"thread-1"},"model":"test-model","modelProvider":"openai","cwd":test_path!("/managed/snapshot"),"instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"reasoningEffort":"medium"});
             match mismatch {
-                "cwd" => result["cwd"] = json!("/other"),
+                "cwd" => result["cwd"] = json!(test_path!("/other")),
                 "model" => result["model"] = json!("other"),
                 "sandbox" => result["sandbox"] = json!({"type":"workspaceWrite"}),
-                "instructions" => result["instructionSources"] = json!(["/user/AGENTS.md"]),
+                "instructions" => {
+                    result["instructionSources"] = json!([test_path!("/user/AGENTS.md")])
+                }
                 _ => {}
             }
             let wire = if mismatch == "id" {
@@ -1390,7 +1485,7 @@ mod tests {
 
     #[test]
     fn thread_notification_is_bounded_correlated_and_never_authority_alone() {
-        let result = json!({"thread":{"id":"thread-1"},"model":"test-model","modelProvider":"openai","cwd":"/managed/snapshot","instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"reasoningEffort":"medium"});
+        let result = json!({"thread":{"id":"thread-1"},"model":"test-model","modelProvider":"openai","cwd":test_path!("/managed/snapshot"),"instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"reasoningEffort":"medium"});
         for case in [
             "before",
             "after",
@@ -1413,7 +1508,7 @@ mod tests {
                 flow.next_frames().unwrap();
                 flow.accept(&reply(index, result)).unwrap();
             }
-            flow.start_read_only_thread(std::path::Path::new("/managed/snapshot"))
+            flow.start_read_only_thread(std::path::Path::new(test_path!("/managed/snapshot")))
                 .unwrap();
             let mut note = json!({"method":"thread/started","params":{"thread":{"id":"thread-1"}}});
             match case {
@@ -1421,7 +1516,9 @@ mod tests {
                 "request" => note["id"] = json!(99),
                 "unknown" => note["method"] = json!("thread/unknown"),
                 "empty" => note["params"]["thread"]["id"] = json!(""),
-                "timedBefore" | "timedAfter" | "duplicateTime" => note["emittedAtMs"] = json!(1790643701003_u64),
+                "timedBefore" | "timedAfter" | "duplicateTime" => {
+                    note["emittedAtMs"] = json!(1790643701003_u64)
+                }
                 "negativeTime" => note["emittedAtMs"] = json!(-1),
                 "overflowTime" => note["emittedAtMs"] = json!(9_007_199_254_740_992_u64),
                 "stringTime" => note["emittedAtMs"] = json!("123"),
@@ -1431,9 +1528,22 @@ mod tests {
             }
             let raw = if case == "duplicateTime" {
                 note.to_string().replacen('{', "{\"emittedAtMs\":1,", 1)
-            } else { note.to_string() };
+            } else {
+                note.to_string()
+            };
             let note = BoundedObservation::new(raw.into_bytes()).unwrap();
-            if matches!(case, "request" | "unknown" | "empty" | "negativeTime" | "overflowTime" | "stringTime" | "nullTime" | "duplicateTime" | "extraEnvelope") {
+            if matches!(
+                case,
+                "request"
+                    | "unknown"
+                    | "empty"
+                    | "negativeTime"
+                    | "overflowTime"
+                    | "stringTime"
+                    | "nullTime"
+                    | "duplicateTime"
+                    | "extraEnvelope"
+            ) {
                 assert!(flow.accept(&note).is_err());
             } else if matches!(case, "after" | "timedAfter") {
                 assert_eq!(

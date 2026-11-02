@@ -238,7 +238,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("hello-agent-launch-{}", std::process::id()));
         fs::create_dir_all(&root).expect("temp cwd");
         let spec = LaunchSpec::new_internal(
-            PathBuf::from("/bin/echo"),
+            PathBuf::from(test_path!("/bin/echo")),
             vec![
                 OsString::from("--fixture"),
                 OsString::from("value; touch /tmp/no"),
@@ -256,8 +256,11 @@ mod tests {
             !String::from_utf8_lossy(&spec.redacted_digest_material()).contains("secret prompt")
         );
         assert!(LaunchSpec::new_internal(
-            PathBuf::from("/bin/echo"),
-            vec![OsString::from("--add-dir"), OsString::from("/tmp")],
+            PathBuf::from(test_path!("/bin/echo")),
+            vec![
+                OsString::from("--add-dir"),
+                OsString::from(test_path!("/tmp"))
+            ],
             root.clone(),
             BTreeMap::new(),
             b"prompt".to_vec(),

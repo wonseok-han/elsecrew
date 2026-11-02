@@ -423,16 +423,26 @@ impl ProfileConfig {
 mod tests {
     use super::*;
 
+    // TOML project keys are host paths too. Keep relative/parent/current-dir
+    // negative fixtures intact while adding a drive to rooted Windows inputs.
+    fn host_profile(input: &str) -> String {
+        if cfg!(windows) {
+            input.replace("[projects.'/", "[projects.'C:/")
+        } else {
+            input.to_owned()
+        }
+    }
+
     #[test]
     fn disabled_project_provenance_requires_isolation_and_exact_launch_ancestry() {
-        let home = Path::new("/app/profile");
-        let cwd = Path::new("/app/workspace");
+        let home = Path::new(test_path!("/app/profile"));
+        let cwd = Path::new(test_path!("/app/workspace"));
         let profile = ProfileConfig::parse(b"cli_auth_credentials_store='file'\n").unwrap();
         let projects = profile.isolated_projects(&[home, cwd]).unwrap();
         let flags = serde_json::json!({"projects":projects,"features":{"hooks":false,"apps":false,"plugins":false}});
         let base = serde_json::json!({"config":flags,"layers":[
             {"name":{"type":"sessionFlags"},"config":flags},
-            {"name":{"type":"project","dotCodexFolder":"/app/workspace/.codex"},"config":{"private_marker":"disabled content"},"disabledReason":"Not trusted"}
+            {"name":{"type":"project","dotCodexFolder":test_path!("/app/workspace", ".codex")},"config":{"private_marker":"disabled content"},"disabledReason":"Not trusted"}
         ]});
         assert!(validate_disabled_project_layers(&base, home, cwd).is_ok());
         for case in [
@@ -451,10 +461,13 @@ mod tests {
             match case {
                 "active" => value["layers"][1]["disabledReason"] = serde_json::Value::Null,
                 "empty" => value["layers"][1]["disabledReason"] = " ".into(),
-                "outside" => value["layers"][1]["name"]["dotCodexFolder"] = "/other/.codex".into(),
+                "outside" => {
+                    value["layers"][1]["name"]["dotCodexFolder"] =
+                        test_path!("/other/.codex").into()
+                }
                 "alias" => {
                     value["layers"][1]["name"]["dotCodexFolder"] =
-                        "/app/workspace/../workspace/.codex".into()
+                        test_path!("/app/workspace/../workspace/.codex").into()
                 }
                 "duplicate" => {
                     let duplicate = value["layers"][1].clone();
@@ -467,7 +480,8 @@ mod tests {
                         .remove("projects");
                 }
                 "effective" => {
-                    value["config"]["projects"]["/app/workspace"]["trust_level"] = "trusted".into()
+                    value["config"]["projects"][test_path!("/app/workspace")]["trust_level"] =
+                        "trusted".into()
                 }
                 "hooks" => value["config"]["features"]["hooks"] = true.into(),
                 "source" => value["layers"][1]["name"]["extra"] = true.into(),
@@ -531,7 +545,7 @@ mod tests {
                 "method" => note["method"] = "warning".into(),
                 "id" => note["id"] = 2.into(),
                 "extra" => note["params"]["extra"] = true.into(),
-                "path" => note["params"]["path"] = "/other".into(),
+                "path" => note["params"]["path"] = test_path!("/other").into(),
                 "range" => note["params"]["range"] = serde_json::json!({}),
                 "budget" => note["params"]["details"] = "x".repeat(16385).into(),
                 "control" => note["params"]["details"] = "\u{1b}secret".into(),
@@ -555,34 +569,42 @@ mod tests {
     #[test]
     fn observed_trust_requires_matching_override_and_rejects_unknown_user_settings() {
         let user = serde_json::json!({"cli_auth_credentials_store":"file","projects":{
-            "/old":{"trust_level":"trusted"}
+            (test_path!("/old")):{"trust_level":"trusted"}
         }});
         let parsed = ProfileConfig::parse(
-            b"cli_auth_credentials_store='file'\n[projects.'/old']\ntrust_level='trusted'",
+            host_profile(
+                "cli_auth_credentials_store='file'\n[projects.'/old']\ntrust_level='trusted'",
+            )
+            .as_bytes(),
         )
         .unwrap();
-        let projects = parsed.isolated_projects(&[Path::new("/profile")]).unwrap();
+        let projects = parsed
+            .isolated_projects(&[Path::new(test_path!("/profile"))])
+            .unwrap();
         let flags = serde_json::json!({"projects":projects});
         let effective = flags.clone();
         assert!(ProfileConfig::matches_observed_layer(
             &user,
             &flags,
             &effective,
-            Path::new("/profile")
+            Path::new(test_path!("/profile"))
         ));
         assert!(!ProfileConfig::matches_observed_layer(
             &user,
             &serde_json::json!({}),
             &effective,
-            Path::new("/profile")
+            Path::new(test_path!("/profile"))
         ));
         let mut missing = flags.clone();
-        missing["projects"].as_object_mut().unwrap().remove("/old");
+        missing["projects"]
+            .as_object_mut()
+            .unwrap()
+            .remove(test_path!("/old"));
         assert!(!ProfileConfig::matches_observed_layer(
             &user,
             &missing,
             &missing,
-            Path::new("/profile")
+            Path::new(test_path!("/profile"))
         ));
         let mut extra = user;
         extra["hooks"] = serde_json::json!({});
@@ -590,20 +612,23 @@ mod tests {
             &extra,
             &flags,
             &effective,
-            Path::new("/profile")
+            Path::new(test_path!("/profile"))
         ));
         assert!(!ProfileConfig::matches_observed_bytes(
             br#"{"cli_auth_credentials_store":"file","cli_auth_credentials_store":"file"}"#,
             &flags,
             &effective,
-            Path::new("/profile"),
+            Path::new(test_path!("/profile")),
         ));
     }
 
     #[test]
     fn observed_isolation_requires_every_ancestor_and_exact_effective_values() {
         let config = ProfileConfig::parse(b"cli_auth_credentials_store='file'").unwrap();
-        let paths = [Path::new("/profile"), Path::new("/workspace/child")];
+        let paths = [
+            Path::new(test_path!("/profile")),
+            Path::new(test_path!("/workspace/child")),
+        ];
         let projects = config.isolated_projects(&paths).unwrap();
         let effective = serde_json::json!({"projects":projects});
         let mut flags = serde_json::json!({"projects":projects,"model":"test"});
@@ -613,13 +638,21 @@ mod tests {
             let mut changed = projects.clone();
             let mut observed = effective.clone();
             match case {
-                "trusted" => changed["/workspace"]["trust_level"] = serde_json::json!("trusted"),
-                "missing" => {
-                    changed.as_object_mut().unwrap().remove("/workspace");
+                "trusted" => {
+                    changed[test_path!("/workspace")]["trust_level"] = serde_json::json!("trusted")
                 }
-                "extraField" => changed["/workspace"]["other"] = serde_json::json!(true),
+                "missing" => {
+                    changed
+                        .as_object_mut()
+                        .unwrap()
+                        .remove(test_path!("/workspace"));
+                }
+                "extraField" => {
+                    changed[test_path!("/workspace")]["other"] = serde_json::json!(true)
+                }
                 "effectiveDrift" => {
-                    observed["projects"]["/workspace"]["trust_level"] = serde_json::json!("trusted")
+                    observed["projects"][test_path!("/workspace")]["trust_level"] =
+                        serde_json::json!("trusted")
                 }
                 "null" => changed = serde_json::Value::Null,
                 _ => unreachable!(),
@@ -635,28 +668,32 @@ mod tests {
     #[test]
     fn isolation_overrides_all_stored_keys_and_ancestors_without_changing_profile() {
         let input = "cli_auth_credentials_store='file'\n[projects.'/old']\ntrust_level='trusted'";
-        let config = ProfileConfig::parse(input.as_bytes()).unwrap();
+        let config = ProfileConfig::parse(host_profile(&input).as_bytes()).unwrap();
         let paths = [
-            Path::new("/app/profile"),
-            Path::new("/work/한글.\"quoted\"\\name"),
+            Path::new(test_path!("/app/profile")),
+            Path::new(test_path!("/work/한글.\"quoted\"\\name")),
         ];
         let argument = config.isolation_argument(&paths).unwrap();
         let parsed: toml::Value = toml::from_str(&argument).unwrap();
         let projects = parsed["projects"].as_table().unwrap();
         for key in [
-            "/",
-            "/app",
-            "/app/profile",
-            "/old",
-            "/work",
-            "/work/한글.\"quoted\"\\name",
+            test_path!("/"),
+            test_path!("/app"),
+            test_path!("/app/profile"),
+            test_path!("/old"),
+            test_path!("/work"),
+            test_path!("/work/한글.\"quoted\"\\name"),
         ] {
             assert_eq!(projects[key]["trust_level"].as_str(), Some("untrusted"));
         }
         assert!(!config.is_auth_only());
         assert!(config.isolation_argument(&[Path::new("relative")]).is_err());
-        assert!(config.isolation_argument(&[Path::new("/a/../b")]).is_err());
-        assert!(config.isolation_argument(&[Path::new("/a/./b")]).is_err());
+        assert!(config
+            .isolation_argument(&[Path::new(test_path!("/a/../b"))])
+            .is_err());
+        assert!(config
+            .isolation_argument(&[Path::new(test_path!("/a/./b"))])
+            .is_err());
     }
 
     #[test]
@@ -666,7 +703,7 @@ mod tests {
             "# vendor comment\r\ncli_auth_credentials_store = 'file'\r\n",
             "cli_auth_credentials_store = \"file\"\n[projects]\n",
         ] {
-            assert!(ProfileConfig::parse(input.as_bytes())
+            assert!(ProfileConfig::parse(host_profile(&input).as_bytes())
                 .unwrap()
                 .is_auth_only());
         }
@@ -678,7 +715,7 @@ mod tests {
             let input = format!(
                 "cli_auth_credentials_store='file'\n[projects.'/snapshot']\ntrust_level='{level}'"
             );
-            assert!(!ProfileConfig::parse(input.as_bytes())
+            assert!(!ProfileConfig::parse(host_profile(&input).as_bytes())
                 .unwrap()
                 .is_auth_only());
         }
@@ -698,7 +735,10 @@ mod tests {
             "\n[projects.'/a/./b']\ntrust_level='trusted'",
         ] {
             let text = format!("cli_auth_credentials_store='file'{suffix}");
-            assert!(ProfileConfig::parse(text.as_bytes()).is_err(), "{suffix}");
+            assert!(
+                ProfileConfig::parse(host_profile(&text).as_bytes()).is_err(),
+                "{suffix}"
+            );
         }
         assert!(ProfileConfig::parse(b"cli_auth_credentials_store='keyring'").is_err());
         assert!(ProfileConfig::parse(&vec![b' '; MAX_CONFIG_BYTES + 1]).is_err());
@@ -707,6 +747,6 @@ mod tests {
         for index in 0..=MAX_PROJECTS {
             text.push_str(&format!("[projects.'/p{index}']\ntrust_level='trusted'\n"));
         }
-        assert!(ProfileConfig::parse(text.as_bytes()).is_err());
+        assert!(ProfileConfig::parse(host_profile(&text).as_bytes()).is_err());
     }
 }

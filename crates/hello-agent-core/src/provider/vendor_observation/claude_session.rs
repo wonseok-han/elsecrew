@@ -203,7 +203,7 @@ mod tests {
 
     fn expected() -> claude_init::ExpectedInit<'static> {
         claude_init::ExpectedInit {
-            cwd: "/snapshot",
+            cwd: test_path!("/snapshot"),
             model: "model",
             permission_mode: "default",
             tools: &["Read"],
@@ -214,17 +214,23 @@ mod tests {
     }
     fn init() -> BoundedObservation {
         input(
-            json!({"type":"system","subtype":"init","uuid":"init","session_id":"s","cwd":"/snapshot","model":"model","permissionMode":"default","tools":["Read"],"mcp_servers":[],"skills":[],"plugins":[]}),
+            json!({"type":"system","subtype":"init","uuid":"init","session_id":"s","cwd":test_path!("/snapshot"),"model":"model","permissionMode":"default","tools":["Read"],"mcp_servers":[],"skills":[],"plugins":[]}),
         )
     }
     #[test]
     fn durable_session_budget_must_be_selected_before_init() {
-        let mut session = Session::new(&expected()).with_output_budget(ProviderEventBudget::DurableV1).unwrap();
+        let mut session = Session::new(&expected())
+            .with_output_budget(ProviderEventBudget::DurableV1)
+            .unwrap();
         session.observe(&init()).unwrap();
-        assert!(session.with_output_budget(ProviderEventBudget::LegacyV1).is_err());
+        assert!(session
+            .with_output_budget(ProviderEventBudget::LegacyV1)
+            .is_err());
         let mut closed = Session::new(&expected());
         closed.close();
-        assert!(closed.with_output_budget(ProviderEventBudget::DurableV1).is_err());
+        assert!(closed
+            .with_output_budget(ProviderEventBudget::DurableV1)
+            .is_err());
     }
     #[test]
     fn native_guard_receipt_is_explicit_and_generic_session_still_rejects() {
@@ -233,11 +239,19 @@ mod tests {
         let observation = input(wire);
         assert!(Session::new(&expected()).observe(&observation).is_err());
         let mut session = Session::for_native_organization_guard(&expected());
-        let Event::Initialized { receipt, .. } = session.observe(&observation).unwrap() else { panic!("expected init") };
+        let Event::Initialized { receipt, .. } = session.observe(&observation).unwrap() else {
+            panic!("expected init")
+        };
         assert!(receipt.organization_guard());
-        assert!(receipt.matches("/snapshot", "model"));
+        assert!(receipt.matches(test_path!("/snapshot"), "model"));
         assert!(session.observe(&observation).is_err());
-        let Event::Initialized { receipt, .. } = Session::for_native_organization_guard(&expected()).observe(&init()).unwrap() else { panic!("expected init") };
+        let Event::Initialized { receipt, .. } =
+            Session::for_native_organization_guard(&expected())
+                .observe(&init())
+                .unwrap()
+        else {
+            panic!("expected init")
+        };
         assert!(!receipt.organization_guard());
     }
 

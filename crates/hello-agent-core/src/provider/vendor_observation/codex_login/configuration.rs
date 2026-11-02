@@ -76,7 +76,7 @@ mod tests {
 
     #[test]
     fn configuration_precedes_account_or_oauth_and_rejects_mutations() {
-        let home = Path::new("/app/profile");
+        let home = Path::new(test_path!("/app/profile"));
         let projects = ProfileConfig::parse(b"cli_auth_credentials_store='file'\n")
             .unwrap()
             .isolated_projects(&[home])
@@ -85,7 +85,7 @@ mod tests {
             json!({"projects":projects,"features":{"hooks":false,"apps":false,"plugins":false}});
         let base = json!({"id":60,"result":{"config":flags,"layers":[
             {"name":{"type":"sessionFlags"},"config":flags},
-            {"name":{"type":"user","file":"/app/profile/config.toml"},"config":{"cli_auth_credentials_store":"file"}},
+            {"name":{"type":"user","file":test_path!("/app/profile", "config.toml")},"config":{"cli_auth_credentials_store":"file"}},
             {"name":{"type":"system","file":"/etc/codex/config.toml"},"config":{}}
         ]}});
         let obs = |value: Value| BoundedObservation::new(value.to_string().into_bytes()).unwrap();
@@ -132,8 +132,8 @@ mod tests {
                     "source" => value["result"]["layers"][2]["name"]["type"] = "mdm".into(),
                     "flags" => value["result"]["layers"][0]["config"]["extra"] = true.into(),
                     "trust" => {
-                        value["result"]["config"]["projects"]["/app/profile"]["trust_level"] =
-                            "trusted".into()
+                        value["result"]["config"]["projects"][test_path!("/app/profile")]
+                            ["trust_level"] = "trusted".into()
                     }
                     _ => {}
                 }

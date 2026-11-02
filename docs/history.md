@@ -2,6 +2,18 @@
 
 ### 2026-11-02 · by GPT-6
 
+- c2b6d9d의 Windows CI 41392003768은 Rust 컴파일을 통과했으나 core 단위 검사 180 passed / 46 failed로 종료됐다. 실패는 공용 실행 명세·초기 응답·격리 설정 fixture의 Unix 고정 경로에서 시작했다. protocol/sidecar 실행과 패키징은 아직 도달하지 않았다.
+- core 테스트 전용 `test_path!`로 Windows drive와 native join을 사용하고, TOML 신뢰 경로 fixture도 같은 절대경로로 맞췄다. 제품 경로/출처 검증은 그대로이며 상대경로·부모 이탈·잘못된 신뢰/설정·순서 거부 사례도 유지했다. Windows 실제 공급자 활성화는 없다.
+- 로컬 `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 CARGO_INCREMENTAL=0 cargo test --locked --offline --release -p hello-agent-core`: 단위 228/228와 compile-fail 문서 3/3 PASS. diff 검사와 테스트 영역 밖 제품 소스 불변 비교도 통과했다. 증거는 `.artifacts/m5-windows-41392003768/{job.log,core-fixtures-test.log}`. 이는 macOS 회귀이며 Windows PASS가 아니다.
+- 다음: 승인된 추가 3회 중 두 번째 push/CI로 이번 fixture 수정을 검증한다. 그 뒤 잔여는 1회다. main 병합·릴리스·모델 호출은 없으며 G6/Windows/출시 완료를 선언하지 않는다.
+
+### 2026-11-02 · by GPT-6
+
+- 사용자가 같은 테스트·빌드 호환 범위로 push/CI 추가 최대 3회를 승인했다. 첫 번째로 c2b6d9d를 공개 진단 브랜치에 push했으며 [실행 41392003768](https://github.com/wonseok-han/hello-agent/actions/runs/41392003768), job 125105225068가 in_progress임을 API로 확인했다. 마지막 확인 단계는 Node 회귀다.
+- 새 승인 잔여는 2회이며 제품 활성화·안전 계약 변경·main 병합·릴리스·모델 호출은 계속 제외된다. 다음에는 같은 run/job의 Rust/패키지 결과를 확인하고 새 실행으로 대체하지 않는다. 전체 완료나 Windows 합격은 아직 미확정이다.
+
+### 2026-11-02 · by GPT-6
+
 - 마지막 승인 실행 [41391333828](https://github.com/wonseok-han/hello-agent/actions/runs/41391333828)은 Node 성공 후 Rust test build의 오류 1개로 종료됐다. sidecar 제품 라이브러리는 컴파일됐으나 Windows 전용 `fake_path_git_is_never_started` 테스트가 삭제된 `ProjectManager::git`을 호출했다. Rust 테스트 실행·패키징·ZIP 업로드는 완료되지 않았다. 143개 오류를 수정한 사실을 Windows 전체 합격으로 확대하지 않는다.
 - 이 테스트의 호출을 현재 handle-bound 명령 생성 경계인 `git_command_at(&manager.worktrees_dir)`로 수정했다. PATH 가짜 실행파일의 미실행/불변과 recoveryRequired 기대는 그대로다. 제품 코드는 바꾸지 않았다.
 - 로컬 임시 사본에서 비-macOS/비-Unix 분기와 해당 Windows 테스트 모듈을 함께 선택해 1/1 PASS를 확인했다. 이전 보조 검사는 Windows 테스트 모듈을 선택하지 않아 이 오래된 호출을 놓쳤다. 이 보조 검사도 실제 Windows 증거는 아니다. 원시 CI 로그·재현 스크립트·검사 로그는 `.artifacts/m5-windows-41391333828/`에 보존했고 임시 소스는 삭제했다. diff 검사 통과.

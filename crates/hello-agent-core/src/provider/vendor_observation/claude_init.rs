@@ -187,7 +187,7 @@ mod tests {
     use serde_json::{json, Value};
     fn expected() -> ExpectedInit<'static> {
         ExpectedInit {
-            cwd: "/managed/snapshot",
+            cwd: test_path!("/managed/snapshot"),
             model: "selected-model",
             permission_mode: "default",
             tools: &["Read", "Edit"],
@@ -195,7 +195,7 @@ mod tests {
     }
     fn init() -> Value {
         json!({"type":"system","subtype":"init","uuid":"init-a","session_id":"session-a",
-            "cwd":"/managed/snapshot","model":"selected-model","permissionMode":"default",
+            "cwd":test_path!("/managed/snapshot"),"model":"selected-model","permissionMode":"default",
             "tools":["Edit","Read"],"mcp_servers":[],"skills":[],"plugins":[]})
     }
     fn input(value: &Value) -> BoundedObservation {
@@ -207,17 +207,28 @@ mod tests {
         let mut wire = init();
         wire["plugins"] = json!([guard.clone()]);
         assert!(observe(&input(&wire), &expected()).is_err());
-        assert!(observe_with_guard_policy(&input(&wire), &expected(), &mut "", true).unwrap().organization_guard);
-        for plugins in [json!([guard.clone(),guard.clone()]), json!([guard.clone(),{"path":"builtin"}]),
+        assert!(
+            observe_with_guard_policy(&input(&wire), &expected(), &mut "", true)
+                .unwrap()
+                .organization_guard
+        );
+        for plugins in [
+            json!([guard.clone(), guard.clone()]),
+            json!([guard.clone(),{"path":"builtin"}]),
             json!([{"name":"other","path":"builtin","source":"cc-plugin-sec-default@builtin"}]),
-            json!([{"name":"cc-plugin-sec-default","path":"/tmp/plugin","source":"cc-plugin-sec-default@builtin"}]),
+            json!([{"name":"cc-plugin-sec-default","path":test_path!("/tmp/plugin"),"source":"cc-plugin-sec-default@builtin"}]),
             json!([{"name":"cc-plugin-sec-default","path":"builtin","source":"cc-plugin-sec-default@builtin","extra":true}]),
-            json!([{"path":"builtin","source":"cc-plugin-sec-default@builtin"}])] {
+            json!([{"path":"builtin","source":"cc-plugin-sec-default@builtin"}]),
+        ] {
             wire["plugins"] = plugins;
             assert!(observe_with_guard_policy(&input(&wire), &expected(), &mut "", true).is_err());
         }
         wire = init();
-        assert!(!observe_with_guard_policy(&input(&wire), &expected(), &mut "", true).unwrap().organization_guard);
+        assert!(
+            !observe_with_guard_policy(&input(&wire), &expected(), &mut "", true)
+                .unwrap()
+                .organization_guard
+        );
         wire["plugins"] = json!([guard]);
         wire["tools"] = json!(["Bash"]);
         assert!(observe_with_guard_policy(&input(&wire), &expected(), &mut "", true).is_err());
@@ -233,20 +244,53 @@ mod tests {
             ("skills", json!(["PRIVATE"]), "init skills"),
             ("agents", json!(["PRIVATE"]), "init agents"),
             ("mcp_servers", json!([{"name":"PRIVATE"}]), "init mcp"),
-            ("plugins", json!([{"name":"PRIVATE"}]), "init plugins other registration"),
-            ("plugins", json!([{"name":"PRIVATE","path":"builtin","source":"cc-plugin-agents-md@builtin"}]), "init plugins disabled builtins"),
-            ("plugins", json!([{"name":"PRIVATE","path":"builtin","source":"PRIVATE"}]), "init plugins other builtins"),
-            ("plugins", json!([{"name":"PRIVATE","path":"builtin","source":"cc-plugin-sec-default@builtin"}]), "init plugins organization guard"),
-            ("plugins", json!([{"path":"builtin","source":"cc-plugin-telemetry@builtin"}]), "init plugins telemetry"),
-            ("plugins", json!([{"path":"PRIVATE","source":"cc-plugin-sec-default@builtin"}]), "init plugins other registration"),
-            ("plugins", json!([{"path":"builtin","source":"cc-plugin-sec-default@builtin"},{"path":"builtin","source":"PRIVATE"}]), "init plugins other builtins"),
+            (
+                "plugins",
+                json!([{"name":"PRIVATE"}]),
+                "init plugins other registration",
+            ),
+            (
+                "plugins",
+                json!([{"name":"PRIVATE","path":"builtin","source":"cc-plugin-agents-md@builtin"}]),
+                "init plugins disabled builtins",
+            ),
+            (
+                "plugins",
+                json!([{"name":"PRIVATE","path":"builtin","source":"PRIVATE"}]),
+                "init plugins other builtins",
+            ),
+            (
+                "plugins",
+                json!([{"name":"PRIVATE","path":"builtin","source":"cc-plugin-sec-default@builtin"}]),
+                "init plugins organization guard",
+            ),
+            (
+                "plugins",
+                json!([{"path":"builtin","source":"cc-plugin-telemetry@builtin"}]),
+                "init plugins telemetry",
+            ),
+            (
+                "plugins",
+                json!([{"path":"PRIVATE","source":"cc-plugin-sec-default@builtin"}]),
+                "init plugins other registration",
+            ),
+            (
+                "plugins",
+                json!([{"path":"builtin","source":"cc-plugin-sec-default@builtin"},{"path":"builtin","source":"PRIVATE"}]),
+                "init plugins other builtins",
+            ),
             ("plugins", json!([null]), "init plugins other registration"),
-            ("plugin_errors", json!([{"message":"PRIVATE"}]), "init plugin errors"),
+            (
+                "plugin_errors",
+                json!([{"message":"PRIVATE"}]),
+                "init plugin errors",
+            ),
             ("uuid", json!(""), "init identity"),
             ("capabilities", json!([""]), "init capabilities"),
             ("model", json!(null), "init shape"),
         ] {
-            let mut wire = init(); wire[key] = value;
+            let mut wire = init();
+            wire[key] = value;
             let mut observed = "";
             assert!(observe_with_stage(&input(&wire), &expected(), &mut observed).is_err());
             assert_eq!(observed, stage);
@@ -272,7 +316,7 @@ mod tests {
     #[test]
     fn mismatched_target_or_loaded_extensions_are_not_matched() {
         for (key, value) in [
-            ("cwd", json!("/other")),
+            ("cwd", json!(test_path!("/other"))),
             ("model", json!("other")),
             ("permissionMode", json!("bypassPermissions")),
             ("tools", json!(["Read", "Edit", "Bash"])),

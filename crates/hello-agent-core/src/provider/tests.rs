@@ -6,14 +6,39 @@ use std::path::PathBuf;
 
 #[test]
 fn official_prerelease_versions_are_preserved_without_relaxing_version_syntax() {
-    for version in ["0.162.0-alpha.2", "1.2.3-rc.1+build.001", "1.2.3+001", "1.2.3"] {
-        let observation = BoundedObservation::new(format!("codex-cli {version}\n").into_bytes()).unwrap();
-        assert_eq!(parse_cli_version(ProviderId::Codex, &observation).unwrap(), version);
+    for version in [
+        "0.162.0-alpha.2",
+        "1.2.3-rc.1+build.001",
+        "1.2.3+001",
+        "1.2.3",
+    ] {
+        let observation =
+            BoundedObservation::new(format!("codex-cli {version}\n").into_bytes()).unwrap();
+        assert_eq!(
+            parse_cli_version(ProviderId::Codex, &observation).unwrap(),
+            version
+        );
     }
-    for version in ["01.2.3", "1.02.3", "1.2.03", "1.2", "1.2.3-", "1.2.3+",
-        "1.2.3-alpha..2", "1.2.3-01", "1.2.3+one+two", "1.2.3-alpha_2", "1.2.3-α", "1.2.3\nextra"] {
-        let observation = BoundedObservation::new(format!("codex-cli {version}").into_bytes()).unwrap();
-        assert!(parse_cli_version(ProviderId::Codex, &observation).is_err(), "{version}");
+    for version in [
+        "01.2.3",
+        "1.02.3",
+        "1.2.03",
+        "1.2",
+        "1.2.3-",
+        "1.2.3+",
+        "1.2.3-alpha..2",
+        "1.2.3-01",
+        "1.2.3+one+two",
+        "1.2.3-alpha_2",
+        "1.2.3-α",
+        "1.2.3\nextra",
+    ] {
+        let observation =
+            BoundedObservation::new(format!("codex-cli {version}").into_bytes()).unwrap();
+        assert!(
+            parse_cli_version(ProviderId::Codex, &observation).is_err(),
+            "{version}"
+        );
     }
     assert!(validate_semver(&format!("1.2.3-{}", "a".repeat(128))).is_err());
 }
@@ -268,7 +293,7 @@ fn managed_cwd() -> PathBuf {
 
 fn launch(cwd: PathBuf) -> LaunchSpec {
     LaunchSpec::new_internal(
-        PathBuf::from("/bin/echo"),
+        PathBuf::from(test_path!("/bin/echo")),
         vec![OsString::from("--fixture")],
         cwd,
         BTreeMap::new(),
@@ -362,7 +387,7 @@ fn every_claude_handshake_dimension_fails_closed_on_mismatch() {
     for (field, value) in [
         ("claude_code_version", serde_json::json!("2.1.242")),
         ("model", serde_json::json!("claude-unknown")),
-        ("cwd", serde_json::json!("/tmp/not-managed")),
+        ("cwd", serde_json::json!(test_path!("/tmp/not-managed"))),
         ("permissionMode", serde_json::json!("readOnly")),
         ("tools", serde_json::json!(["Read"])),
         ("mcp_servers", serde_json::json!(["unsafe"])),
