@@ -17,6 +17,10 @@ const paintAfterMount = process.argv.includes('--paint-after-mount');
 if (paintAfterMount && (mode !== 'product' || deferShow)) throw new Error('paint-after-mount requires product without defer-show');
 const startedAt = performance.now();
 let preSampleReadyAtMs;
+const tileBudgetArg = process.argv.find(arg => arg.startsWith('--tile-budget-mib='));
+const tileBudgetMiB = tileBudgetArg ? Number(tileBudgetArg.split('=')[1]) : undefined;
+if (tileBudgetArg && (!Number.isSafeInteger(tileBudgetMiB) || tileBudgetMiB < 32 || tileBudgetMiB > 1024)) throw new Error('invalid diagnostic tile budget');
+if (tileBudgetMiB) app.commandLine.appendSwitch('force-gpu-mem-available-mb', String(tileBudgetMiB));
 if (softwareRendering) app.disableHardwareAcceleration();
 const root = resolve(__dirname, '..');
 const renderer = resolve(root, '.vite/renderer/main_window');
@@ -84,7 +88,7 @@ app.whenReady().then(async () => {
     await new Promise(r => setTimeout(r, 250));
   }
   const report = { diagnostic: true, rendererSandbox: true, mode, userData, head: execFileSync('/usr/bin/git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
-    window: {width:1280,height:800}, softwareRendering, spellcheck, deferShow, paintAfterMount, preSampleReadyAtMs, visible:window.isVisible(),
+    window: {width:1280,height:800}, softwareRendering, spellcheck, deferShow, paintAfterMount, tileBudgetMiB, preSampleReadyAtMs, visible:window.isVisible(),
     scope: 'fresh Electron app idle only; no sidecar/provider; five samples after one second; painted/localized/rendered have no app code or preload; not release evidence',
     samples, metrics: app.getAppMetrics(), dom: await window.webContents.executeJavaScript('({nodes:document.querySelectorAll("*").length,ready:Boolean(document.querySelector(".m5-workbench")),visibility:document.visibilityState})') };
   if (mode === 'product' && !report.dom.ready) throw new Error('product did not mount');

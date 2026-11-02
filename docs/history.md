@@ -2,6 +2,12 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 직전 턴은 RSS수집기 결함b87480e 수정으로 진척했다. 깨끗한 동일HEAD에서 설치된 Chromium150.0.7871.224의 [Blink switches](https://raw.githubusercontent.com/chromium/chromium/150.0.7871.224/third_party/blink/common/switches.cc)와 [layer_tree_settings](https://raw.githubusercontent.com/chromium/chromium/150.0.7871.224/third_party/blink/renderer/platform/widget/compositing/layer_tree_settings.cc)를 확인했다. 이전 gpu/service 파일에 없었던 `force-gpu-mem-available-mb`는 Blink에 존재하며 cc 예산 override로 실제 소비된다. 해당 옵션 전체가 제거됐다는 추론은 하지 않는다. ResourcePool 기본 만료는5초다.
+- idle 진단 runner에만 `--tile-budget-mib=32` 후보를 추가하고 기본/32/32/기본으로 대조했다. 손실 없는 allocator 통계에서 renderer한도625→32MiB, 타일 할당72.4375→31.8125MiB로 적용이 확인됐으나 최대RSS434.6875/431.5/432.4375/430.96875MiB로 일관된 개선이 없었다. 여분 할당 감소가 RSS 절감량과 같지 않다는 실제 근거다. 화면 품질·큰 화면/부하 영향은 검증하지 않았으므로 제품 설정에 적용하지 않는다.
+- `.artifacts/m5-performance/idle-tile-budget-series-2026-11-02.json`과 원시 trace·로그·버전 고정 소스를 보존했다. 시험 앱/관측PID부재 확인 뒤 자체 프로필4개를 정리했다. 문법·diff PASS, 실제 모델/사용자 데이터/제품 패키지 변경없음. 유휴400MiB/G6/Windows/출시 미완료, main병합·push없음. 다음 메모리 조사는 동일 타일 할당 후보를 반복하지 않고 RSS의 다른 비용을 대상으로 한다.
+
+### 2026-11-02 · by GPT-6
+
 - 직전 턴은 동시 부하 반복 경로310c317 구현으로 진척했다. 깨끗한 동일HEAD에서 해당 QA 메모리 수집기를 점검한 결과, 동기 ps가 앱의 직계 자식으로 합산되는 결함을 확인했다. `spawnSync`가 반환한 정확한 수집기PID를 공용 엄격 파서로 확인하고 그 행만 제외하도록 수정했다. 명령 이름으로 다른 에이전트 자손을 제외하지 않으며 부모/중복PID/누락/실행 실패는 측정 오류로 남긴다.
 - Node 회귀8개 PASS(프로세스 트리·동시 부하 요약), runner문법·diff PASS. 자체 Node에서 macOS ps를 실제1회 호출해 root포함/수집기제외/양수RSS를 확인했다. 실제 앱·모델·사용자 데이터·대형 패키지 생성 없이 검증했다. 원본 보호·종료/정리 경계 변경 없음.
 - 기존 fourth434.41MiB 등 원시 결과는 재작성하거나 임의 차감하지 않는다. 기존 수집기 자체가 포함됐다는 한계를 절차 문서에 기록했으며 이 수정만으로400MiB 통과를 주장하지 않는다. 후속 최신 패키지 실측과 메모리 최적화·G6·Windows·출시 검증은 남는다. main병합·push없음.
@@ -167,7 +173,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **초기 메모리 조사(2026-11-02)**: 유휴400MiB 기준 유지. 같은 정적 화면도 큰 비용이며 software rendering/spellcheck/ready-to-show는 개선 근거 없음. 레이어5개에 명백한 불필요 승격 없음. 손실 없는 memory-infra 통계에서 renderer tile pool72.4375MiB 중 free55.0625MiB 확인(할당 통계≠RSS 절감량). 초기 paint를 DOM mount 뒤로 늦춘 대조도 RSS 개선이 없어 기각했다. 상세·증거는 최신 워크로그.
+- **초기 메모리 조사(2026-11-02)**: 유휴400MiB 기준 유지. 같은 정적 화면도 큰 비용이며 software rendering/spellcheck/ready-to-show는 개선 근거 없음. 레이어5개에 명백한 불필요 승격 없음. 손실 없는 memory-infra 통계에서 renderer tile pool72.4375MiB 중 free55.0625MiB 확인(할당 통계≠RSS 절감량). 초기 paint를 DOM mount 뒤로 늦춘 대조도 RSS 개선이 없어 기각했다. Blink 타일 예산32MiB로 실제 할당을 줄여도 RSS가 개선되지 않아 이 후보도 제품에 미적용이다. 상세·증거는 최신 워크로그.
 
 - **2026-11-02 사용자 확정 — 메모리 기준 유지**: macOS 유휴400MiB와 추가 최적화를 선택했다.512MiB 상향은 승인되지 않았다. 부하800MiB·잔류증분120MiB 및 전체 검증 요건도 유지한다.
 
