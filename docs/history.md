@@ -2,6 +2,13 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 사용자로부터 a2304da와 후속 Windows 테스트·빌드 호환 수정에 한해 같은 공개 진단 브랜치 push/CI 최대 3회를 승인받았다. 제품 활성화·안전 계약 변경·main 병합·릴리스·실제 모델 호출은 제외된다.
+- 첫 실행 [41389345425](https://github.com/wonseok-han/hello-agent/actions/runs/41389345425)는 647 passed / 4 failed / 7 skipped였다. 앞선 편집이 copy 목적지 기대값 두 곳을 빠뜨려 기존 네 staging 사례가 다시 실패했다. 이를 인정하고 두 기대값을 resolve로 수정했다. Rust/패키징 단계는 아직 미실행이다.
+- 기존 staging 전체를 win32 경로 함수로 바꾼 임시 사본에서도 10/10 PASS, 호스트 원본 10/10 PASS 및 diff 검사를 확인했다. 제품 코드는 변경하지 않았고 원시 CI/경로 검증 로그는 `.artifacts/m5-windows-41389345425/`에 보존했다. 임시 사본은 제거했다.
+- 현재 3회 중 1회 사용, 2회 남음. 이 수정 커밋을 두 번째로 push한 뒤 결과에 따라 범위 안에서 진행한다. 메모리 CSS/패키징/cfg 경로 정적 확인에서는 근거 있는 추가 제품 변경을 찾지 못해 임의 최적화는 하지 않았다. 전체 완료와 Windows 합격은 여전히 미증명이다.
+
+### 2026-11-02 · by GPT-6
+
 - 사용자 승인으로 aa66e0a를 공개 진단 브랜치에 push했다. [Windows CI 41388906711](https://github.com/wonseok-han/hello-agent/actions/runs/41388906711)는 설치·TypeScript 검사 성공 후 Node 646 passed / 4 failed / 7 skipped로 종료했다. 고정 해시/SQL/프로토콜 바이트와 앞선 경로·부모 교체 실패는 해소됐으나 staging의 import 오류에 가려졌던 네 destination 경로 기대값 실패가 남았다. Rust·패키징·ZIP 업로드는 이번에도 건너뛰었다.
 - `m5-sidecar-staging.test.mts`의 destination 기대값을 호스트 resolve로 맞추고, macOS에서도 win32 경로 함수를 주입해 드라이브·공백 포함 Cargo 원본 경로, 정확한 manifest/cwd, exe 목적지와 chmod 미호출을 확인하는 회귀를 추가했다. 제품/안전 계약은 변경하지 않았다.
 - 관련 10/10 PASS 및 diff 검사 통과. 변경 없는 전체 Node/Rust 검사는 반복하지 않았다. 원격 원시 로그와 로컬 결과는 `.artifacts/m5-windows-41388906711/`에 보존했다. 새 로컬 앱·무거운 캐시·실제 모델 실행은 없다.

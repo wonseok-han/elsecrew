@@ -85,7 +85,7 @@ for (const [name, executable, env] of [
     assert.equal(result.error, undefined);
     assert.deepEqual(result.writes, [
       ["mkdir", resolve("/stage resources/sidecar"), { recursive: true }],
-      ["copy", executable, "/stage resources/sidecar/hello-agent-sidecar"],
+      ["copy", executable, resolve("/stage resources/sidecar/hello-agent-sidecar")],
       ["chmod", resolve("/stage resources/sidecar/hello-agent-sidecar"), 0o755],
     ]);
     assert.deepEqual(result.calls, [["cargo", [
@@ -114,7 +114,7 @@ test("sidecar staging preserves Windows destination naming without chmod", () =>
   assert.equal(result.error, undefined);
   assert.deepEqual(result.writes, [
     ["mkdir", resolve("/stage resources/sidecar"), { recursive: true }],
-    ["copy", "/cross/release/hello-agent-sidecar.exe", "/stage resources/sidecar/hello-agent-sidecar.exe"],
+    ["copy", "/cross/release/hello-agent-sidecar.exe", resolve("/stage resources/sidecar/hello-agent-sidecar.exe")],
   ]);
 });
 
