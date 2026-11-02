@@ -2,6 +2,14 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 사용자5분 가시성 확인 후 깨끗한3008432에서 최신 QA를 빌드하고 단일 combined 시험을 완료했다. ASAR 내4개 측정 소스의 현재 파일 일치를 확인했다. .artifacts/m5-combined-output-2026-11-02/eighth/에 결과·빌드·정리 증거를 보존했다. 실제 모델 호출 없음.
+- main trace는240,460events/25,793개 main task를 손실 없이 집계했고 valid=true다. 따라서 긴 시험의 수집 누락은 이번 실제 실행에서 해소됐지만 최대294.538ms/200ms 초과2건으로 전체 FAIL이다. renderer 최대75ms. live 구간 결과 저장 비용은0.94~1.37ms였다. RSS 표본 수집기의 main spawnSync는 아직 남아 있으므로 관측 자체의 블로킹을 분리할 필요가 있다. 이 관측만으로294ms 원인을 확정하지 않는다.
+- 입력19.9ms/전달0.5ms/measure 진입12.3ms/첫 프레임12.9ms, Undo 정상. 이전798ms가 재현되지 않았을 뿐 해결·반복 합격은 아니다. idle448.703MiB(실패)/peak670.344MiB/잔류증분28.250MiB. 이전 단일 메모리 합격을 일반화하지 않는다.
+- 정상 quit, DB clean_shutdown_at02:35:04Z와 관측64개PID/경로 프로세스 부재를 확인하고 XPN9TR 앱·V4I6NE 시험 원본/복사본/프로필을 모두 삭제했다. 사용자 데이터·일반out 불변. 다음은 측정기 main 블로킹 분리와 성능 변동 원인 조사·수정, 이후 반복G6/Windows/출시 검증이다. main병합/push없음.
+
+
+### 2026-11-02 · by GPT-6
+
 - 917c819 기준으로 긴 시험의 main trace 수집 실패를 수정했다. 원시 task10,000개 배열 대신 최대128개 root 스레드별 전체 건수/200ms 초과 건수/최대값 증거1개를 누적한다. metadata가 마지막에 와도 main의 이전 작업을 포함하며, 전체 이벤트 처리100만 한도·불완전/손실/중복 완료 거부는 유지한다. 기존 원시 기록 검증도 호환한다. 과거 seventh FAIL 증거를 다시 PASS로 바꾸지 않았다.
 - 20만 건 뒤 늦은 최대값/worker outlier/늦은 metadata, 스레드·이벤트 예산과 collector→summary20,001건/250ms 초과 전달을 검증했다. trace/session/summary19 PASS, 입력 probe 문법 및 diff 검사 PASS, 독립 검토 승인. 새 수집기의 실제 장시간 패키지 검증은 남아 있다. 검사 로그는 .artifacts/m5-main-aggregate-2026-11-02/에 보존했다.
 - seventh 입력 구간에는 renderer long task가 기록되지 않았다. 이것만으로 원인을 확정할 수 없어 입력 probe에 measureEnteredAt/readyAt/firstFrameAt을 추가했다. 기존 입력→2프레임 전체 시간과50ms 기준은 그대로다. 다음은 새 패키지에서 호출 대기/DOM 준비/프레임 대기를 분리하고 실제 원인을 수정하는 것이다. 새 모델 호출·앱 실행·사용자 데이터 변경 없음. G6/유휴400MiB 반복/Windows/출시 미완료, main병합/push없음.
@@ -28,7 +36,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **현재 인계(2026-11-02, Undo 수정)**: 저장 내용으로 되돌려도 dirty가 남던 결함을 비동기 파일버전 비교로 수정했다. 원문 추가 보관 없이 경로 대기열·단일 digest·정확한 탭/세대 검사를 사용한다. controller62/작업복사본10/TypeScript/독립 검토 PASS, 2faed62 실제 QA에서도 Undo 복원을 확인했다. 단일 combined 시험은 입력798.1ms와 main trace 불완전으로 FAIL이다. 이후 main 수집기는 제한된 스레드별 전체 집계로 수정하고19개 검사·독립 검토를 통과했으나 새 실측은 남아 있다. 이 trial 메모리만 기준 내이며 반복 합격은 아니다. 관련 시험 앱/프로필은 종료 확인 후 모두 삭제했다. 실제 모델 호출 승인 잔여 없음. 유휴400MiB/G6/Windows/출시는 계속 미완료다. 최신 세부 워크로그는 [11월](archive/history-2026-11.md)을 먼저 확인한다.
+- **현재 인계(2026-11-02, Undo 수정)**: 저장 내용으로 되돌려도 dirty가 남던 결함을 비동기 파일버전 비교로 수정했다. 원문 추가 보관 없이 경로 대기열·단일 digest·정확한 탭/세대 검사를 사용한다. controller62/작업복사본10/TypeScript/독립 검토 PASS, 2faed62 실제 QA에서도 Undo 복원을 확인했다. 단일 combined 시험은 입력798.1ms와 main trace 불완전으로 FAIL이다. 이후 main 수집기는 제한된 스레드별 전체 집계로 수정하고19개 검사·독립 검토를 통과했으나 eighth 실제 실행에서도 수집 완결성을 확인했다. 다만 main294.538ms·idle448.703MiB 실패이며 입력19.9ms는 단일 관측이다. 이 trial 메모리만 기준 내이며 반복 합격은 아니다. 관련 시험 앱/프로필은 종료 확인 후 모두 삭제했다. 실제 모델 호출 승인 잔여 없음. 유휴400MiB/G6/Windows/출시는 계속 미완료다. 최신 세부 워크로그는 [11월](archive/history-2026-11.md)을 먼저 확인한다.
 
 - **누적 Node 검사 최신 증거(2026-11-02)**: 깨끗한803b937의 npm test635 PASS/실패·스킵0 및 src TypeScript PASS. 이전11개 focused 수정 이후 전체 재검사 공백 해소. Rust/패키지/G6/Windows/출시까지 합격한 결과는 아니다. 원문은 `.artifacts/m5-regression-2026-11-02/consolidated-node/`.
 
