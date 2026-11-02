@@ -283,3 +283,8 @@ combined QA는 첫12초 출력 관측 뒤 네 run이 아직 emitting인 상태�
 측정 중에는 창을 가리지 않고 휠·클릭·탐색 키를 입력하지 않는다. 계획된 native Z/Undo와 별도로 실제 외부 탐색 입력을 기록하며, 그 증거가 없거나 잘렸거나 외부 입력이 섞인 결과는 자동 합격에서 제외한다. 실패 진단에도 입력 기록을 보존한다. 일반 단회 준비/실행은 약5분이지만 반복은 더 오래 걸리므로 시작 전에 가시성 시간을 확인한다.
 
 Node timer 지연은 starting/idle/preparing/loaded/live-output/history-pages/generation-audit/closing/retained로 나눠 보조 진단한다. 행 수는 최대17개이며 단계 경계는 근사치다. ELU가 모두0이면 utilizationAvailable=false와null을 기록한다. 이 정보는 Chromium task 최대200ms나 RSS 기준을 대체하지 않으며, 관측 종료/trace 처리 비용까지 포함할 수 있다.
+
+
+### 추적 경계 최소 진단
+
+`node_modules/.bin/electron tests/m5-main-task-session-smoke.cjs --dense-trace`는 숨겨진 빈 창에서25초 timer와 고정10만 MessageChannel 이벤트를 만든다. 별도 임시 프로필을 사용하며 renderer 생성35초 제한이 있다. 시작/끝의 CDP clock_sync 표식을 제한된 메타데이터로 보존한다. 앱의 기능·sidecar·인증·공급자는 사용하지 않는다. 2026-11-02의 대량 관측은 incompleteMain으로 실패했으므로 종료 오버헤드 가설을 입증한 결과가 아니다. 일반 앱의 시간값을 차감하거나 gate 구간을 변경하는 근거로 사용하지 않는다. 결과를 보존하고 정상 종료·관측PID 부재를 확인한 뒤 해당 프로필만 정리한다.

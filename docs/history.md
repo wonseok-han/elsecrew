@@ -2,6 +2,14 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 05deeee 기준으로 제품 기능·sidecar 없이 숨겨진 빈 Electron 창/전용 임시 프로필에서 trace 종료 비용을 분리하는 최소 시험을 수행했다. timer25초의 첫 관측은41,780events/40,627main tasks·최대2.667ms·정상종료였다. 이어 MessageChannel10만건을 더한 관측은241,405events였으나 incompleteMain=true로FAIL이다. 완결X task 후보5.741ms를 전체 최대값/PASS로 인용하지 않는다. 이 두 결과만으로 실제284ms 원인을 확정하거나 배제하지 않는다.
+- 공식 CDP Tracing.recordClockSyncMarker를 시험해 start/end 표식2개가 같은root/main tid의clock_sync ts로 수집되는 것을 두 번 확인했다. 첫 최대후보는start표식보다 앞에 있었다. 다음 실제 앱 진단에 동일 시계 경계 표식을 연결하면 추적 초기화/종료와 측정 구간을 구분할 수 있지만 아직 제품 gate의 구간·판정은 변경하지 않았다. API 근거: https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/pdl/domains/Tracing.pdl
+- tests/m5-main-task-session-smoke.cjs에 명시적 --dense-trace 진단을 추가했다. native 두 관측 후 renderer 생성35초 watchdog과finally 정리를 추가하고 문법/diff 검사했다(이 마지막 timeout 보강으로 native 재실행은 하지 않았다). .artifacts/m5-main-trace-dense-2026-11-02/{timers,volume}에 결과와 각 실행 당시 소스 지문을 보존했다.
+- 두 진단 모두 정상 quit/PID 부재를 확인하고2QPckj/o2T8Uq 프로필을 삭제했다. 사용자 데이터·모델 호출 없음. 다음은 실제 앱 trace의 경계 표식을 진단용으로 기록해284ms 위치를 먼저 확인하는 것이다. 유휴400MiB/반복G6/Windows/출시 미완료, main병합/push없음.
+
+
+### 2026-11-02 · by GPT-6
+
 - 조작 없는5분 가시성 확인 후 깨끗한e1f80ba에서 빌드한 QA로 eleventh combined 시험을 완료했다. ASAR 측정 소스5개 일치, 외부 입력0, 입력25.2ms/Undo·4개 기록 복원 정상이다. main284.328ms(초과2건)/idle430.406MiB로 전체FAIL이며 peak688.125MiB/잔류증분0이다. 제품 재파싱 최적화의 UI 기능 회귀는 이 단회 경로에서 없었지만 G6 합격은 아니다.
 - 세분화된 Node timer 최대값은 preparing18.9ms, loaded14.5ms, live-output41.8ms, history-pages13.3ms, generation-audit11.5ms, closing14.6ms, retained638.1ms다. Chromium 최장 task 이름은 계속 ThreadControllerImpl::RunTask다. Node timer와 Chromium task는 서로 다른 관측이므로284ms가 실제 live 처리에서 발생했다고 단정하지 않는다. trace 종료/보고 구간의 자기 계측 비용 가능성을 먼저 분리해야 한다. 과거 FAIL을 임의로 PASS로 바꾸지 않는다.
 - .artifacts/m5-combined-output-2026-11-02/eleventh/에 증거를 보존했다. 정상quit, DB clean_shutdown_at03:11:41Z, 관측59개PID/경로 프로세스 부재 확인 뒤 WvMLtI 앱·Jm0TIV 원본/복사본/프로필을 삭제했다. 사용자 데이터·실제 모델 변경/호출 없음.
