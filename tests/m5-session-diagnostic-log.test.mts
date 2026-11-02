@@ -100,3 +100,32 @@ test("identical checkpoint can persist after a transient storage failure", async
     assert.deepEqual(record.codexCheckpoints, ["turn start state"]);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("transport diagnostics retain bounded correlation labels without arbitrary content", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "m5-checkpoints-"));
+  try {
+    writeFileSync(join(directory, "last-provider-checkpoints.json"), "previous failure");
+    const log = createSessionDiagnosticLog(directory, "transport");
+    const id = "m5_11111111-1111-4111-8111-111111111111";
+    log.capture("native Codex transport failed at turn start state\n");
+    for (let i = 0; i < 80; i++) log.captureTransport("chat.get", id, "queued");
+    log.captureTransport("run.startAgent", id, "received");
+    log.captureTransport("run.startAgent", id, "resolved");
+    log.captureTransport("agent.runStateChanged", null, "forwarded");
+    log.captureTransport("secret-method", id, "queued");
+    log.captureTransport("chat.get", "secret-id", "queued");
+    log.captureTransport("chat.get", id, "secret-phase");
+    await log.flush();
+    const text = readFileSync(join(directory, "last-transport-progress.json"), "utf8");
+    const record = JSON.parse(text);
+    assert.equal(record.transport.length, 64);
+    assert.deepEqual(record.transport.slice(-3).map(({method, phase}: {method: string; phase: string}) => [method, phase]), [
+      ["run.startAgent", "received"], ["run.startAgent", "resolved"], ["agent.runStateChanged", "forwarded"],
+    ]);
+    assert.deepEqual(record.codexCheckpoints, ["turn start state"]);
+    assert.ok(!text.includes("secret"));
+    assert.ok(Buffer.byteLength(text) < 16384);
+    assert.equal(readFileSync(join(directory, "last-provider-checkpoints.json"), "utf8"), "previous failure");
+    assert.deepEqual(readdirSync(directory).sort(), ["last-provider-checkpoints.json", "last-transport-progress.json"]);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});

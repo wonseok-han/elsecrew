@@ -557,3 +557,70 @@ test("accepted start with failed hydration clears progress and later reconciles 
   assert.equal(bridge.starts.length, 1, "reconciliation never retries the provider");
   controller.dispose();
 });
+
+test("held post-accept history coalesces terminal notifications and resolves without another start", async () => {
+  const bridge = new AgentBridge();
+  const controller = await open(bridge);
+  const start = bridge.startAgentRun.bind(bridge);
+  const getChat = bridge.getChat.bind(bridge);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let historyRequests = 0;
+  bridge.startAgentRun = async input => {
+    const accepted = await start(input);
+    bridge.getChat = async input => {
+      historyRequests++;
+      await held;
+      return getChat(input);
+    };
+    return accepted;
+  };
+  const starting = controller.startAgent("coding");
+  await flush();
+  try {
+    assert.equal(historyRequests, 1);
+    assert.equal(controller.snapshot().agentStartingRoleId, "coding");
+    assert.equal(controller.snapshot().noticeKey, "m5.agentNotice.ready",
+      "an accepted start held in hydration does not retain the checking notice");
+    bridge.agentRuns = [agentRun(bridge.chatA, "failed")];
+    bridge.emitState(stateEvent(bridge.chatA, "failed"));
+    await flush();
+    assert.equal(historyRequests, 1, "notifications reuse the outstanding history request");
+    assert.equal(controller.snapshot().agentRuns.length, 0, "notification is not ledger authority");
+    await controller.startAgent("coding");
+    assert.equal(bridge.starts.length, 1, "pending hydration cannot trigger a duplicate start");
+  } finally { release(); await starting; }
+  assert.deepEqual(controller.snapshot().agentRuns, bridge.agentRuns);
+  assert.equal(controller.snapshot().agentStartingRoleId, null);
+  assert.equal(historyRequests, 2, "a coalesced notification receives a final durable refresh");
+  assert.equal(bridge.starts.length, 1);
+  controller.dispose();
+});
+
+test("held start acceptance retains checking but delivered terminal events still hydrate", async () => {
+  const bridge = new AgentBridge();
+  const controller = await open(bridge);
+  const start = bridge.startAgentRun.bind(bridge);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  bridge.startAgentRun = async input => {
+    const accepted = await start(input);
+    await held;
+    return accepted;
+  };
+  const starting = controller.startAgent("coding");
+  await flush();
+  try {
+    assert.equal(controller.snapshot().noticeKey, "m5.agentNotice.checking");
+    bridge.agentRuns = [agentRun(bridge.chatA, "failed")];
+    bridge.emitState(stateEvent(bridge.chatA, "failed"));
+    await flush();
+    assert.deepEqual(controller.snapshot().agentRuns, bridge.agentRuns);
+    assert.equal(controller.snapshot().agentStartingRoleId, "coding");
+    await controller.startAgent("coding");
+    assert.equal(bridge.starts.length, 1);
+  } finally { release(); await starting; }
+  assert.deepEqual(controller.snapshot().agentRuns, bridge.agentRuns);
+  assert.equal(controller.snapshot().agentStartingRoleId, null);
+  controller.dispose();
+});

@@ -1972,3 +1972,24 @@ test("diagnostic persistence errors do not fail the sidecar connection", async (
   assert.equal(client.failure, undefined);
   assert.equal(child.terminations, 0);
 });
+
+test("transport lifecycle diagnostics correlate a held history response and cannot break IPC", async () => {
+  const child = new FixtureSidecar();
+  const trace: { method: string; id: string | null; phase: string }[] = [];
+  const client = new SidecarClientV1({ command: "fixture", args: ["--stdio"], cwd: "/private/tmp" }, {
+    spawn: () => child as unknown as SidecarProcessV1,
+    onTransportProgress: (method, id, phase) => {
+      trace.push({ method, id, phase });
+      throw new Error("diagnostic sink unavailable");
+    },
+  });
+  const ready = client.start(); child.stdout.write(g5aReadyLine() + "\n"); await ready;
+  const pending = client.getChat({ chatId: "chat_01", afterEventSequence: 0, cursor: null, limit: 50 });
+  const request = JSON.parse(child.writes.at(-1)!);
+  assert.deepEqual(trace, [{ method: "chat.get", id: request.requestId, phase: "queued" }]);
+  child.stdout.write(responseLine(request.requestId, g5aFixture("actual-agent-chat-page-keeps-distinct-ledger")));
+  await pending;
+  assert.deepEqual(trace.map(entry => entry.phase), ["queued", "received", "resolved"]);
+  assert.ok(trace.every(entry => entry.id === request.requestId && entry.method === "chat.get"));
+  assert.equal(child.terminations, 0);
+});

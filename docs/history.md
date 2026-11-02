@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-11-02 · by GPT-6
+
+- 이전 목표 턴은 실제 Codex 응답 성공·diff 호환 수정 fc731cb 커밋으로 진척했다. 현재 m5/coding-agent-ide의 HEAD와 깨끗한 워킹 트리를 확인했다. 독립 검토자는 diff 수정에 차단없음이며 UI 정체의 단일 원인은 현재 증거로 확정할 수 없다고 보고했다.
+- 실제 호출 없이 두 지연 경로를 제어하는 회귀를 추가했다. 접수 후 chat.get을 보류하면 시작 잠금은 유지되지만 notice는 ready이므로 당시 checking 화면과 일치하지 않는다. 종료 알림은 같은 조회로 합쳐지고 조회 해제 뒤 durable failed가 반영되며 추가 실행은 없다. 반대로 start 응답을 보류하면 checking은 유지되지만 전달된 종료 알림 자체는 durable 실패를 조회·표시한다. 이 두 조건만으로 실제 UI의 checking+실행 미표시를 설명할 수 없으므로 접수 응답/알림 전달 경로 증거가 더 필요하다.
+- Electron 요청 전송 대기/응답 수신/resolve·reject와 agent.runStateChanged 수신/검증 후 listener 전달의 고정 단계 진단을 추가했다. 최근64건의 앱 생성 request UUID·고정 method/phase·시각만 last-transport-progress.json에 기록한다. payload·경로·인증·모델 응답은 제외하고 기존 provider 오류 파일은 별도 보존한다. 기록 실패는 IPC·잠금·실행 판단에 영향이 없다. forwarded는 main listener 전달이며 renderer 표시 완료 증거가 아니다.
+- tests/m5-g5a-public-event-ui.test.mts의32개 PASS. 테스트는 독립 bridge 수준 재현이며 실제 Electron IPC 실패 재현이나 제품 수정 완료가 아니다. 실행 잠금을 timeout으로 해제하거나 요청을 재시도하지 않았다. Electron bridge63개·진단 저장6개 PASS: 지연된 응답의 같은 ID 추적과 진단 callback 예외 무영향,64건 상한·민감 입력 거절·이전 provider 오류 보존을 확인했다. 실제 모델 호출0회·패키지 교체없음. 다음은 최신 패키지 반영 후 요청/응답·알림 전달 관측으로 UI 결함을 좁히고 수정·누적 검증을 진행하는 것이다. G6 RSS·Windows·출시 미완료, main병합·push없음.
+
 ### 2026-10-30 · by GPT-6
 
 - HEAD4811029의 깨끗한 상태에서82f7c77 패키지 시작 시험을 실행했다. 최초1회+준비1회+본10회를 모두 정상 종료했다. 본10회 UI 준비 p95=963.84ms, storage 준비 p95=553.95ms, 최대 idle RSS=460.3125MiB로400MiB 기준 FAIL이다. renderer heap 약3.7MB/Monaco asset 미로드이며 아직 메모리 원인을 확정하지 않았다. .artifacts/m5-startup-2026-10-30에 JSON 증거를 보존하고 종료 확인된 임시 프로필을 정리했다.

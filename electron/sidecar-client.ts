@@ -292,14 +292,16 @@ export class SidecarClientV1 {
   #failureCode: "readyTimeout" | "pipesUnavailable" | "processError" | "processExit" | "consumerTooSlow" | "rendererDisconnected" | "requestWrite" | "requestInvalid" | "protocolInvalid" | "protocolOversized" | undefined;
   #stderrTail = Buffer.alloc(0);
   readonly #onDiagnosticTail: ((tail: string) => void) | undefined;
+  readonly #onTransportProgress: ((method: string, requestId: string | null, phase: string) => void) | undefined;
   #terminationAttempted = false;
 
   constructor(
     launch: SidecarLaunchV1,
-    options: { spawn?: SidecarSpawnV1; readyTimeoutMs?: number; onDiagnosticTail?: (tail: string) => void } = {},
+    options: { spawn?: SidecarSpawnV1; readyTimeoutMs?: number; onDiagnosticTail?: (tail: string) => void; onTransportProgress?: (method: string, requestId: string | null, phase: string) => void } = {},
   ) {
     this.#launch = launch;
     this.#onDiagnosticTail = options.onDiagnosticTail;
+    this.#onTransportProgress = options.onTransportProgress;
     this.#spawn = options.spawn ?? ((command, args, spawnOptions) => {
       const child = spawn(command, args, spawnOptions);
       return {
@@ -582,6 +584,10 @@ export class SidecarClientV1 {
     }
   }
 
+  #traceTransport(method: string, requestId: string | null, phase: string): void {
+    try { this.#onTransportProgress?.(method, requestId, phase); } catch { /* Diagnostics never affect IPC or execution authority. */ }
+  }
+
   #request(method: MethodV1, params: object): Promise<unknown> {
     if (!this.#ready) return Promise.reject(this.#failure ?? new Error("sidecar is not ready"));
     if (this.#failure) return Promise.reject(this.#failure);
@@ -613,9 +619,10 @@ export class SidecarClientV1 {
           method,
           saveKind: saveKindForRequest(method, requestParams),
           params: requestParams,
-          resolve,
-          reject,
+          resolve: value => { this.#traceTransport(method, requestId, "resolved"); resolve(value); },
+          reject: error => { this.#traceTransport(method, requestId, "rejected"); reject(error); },
         });
+        this.#traceTransport(method, requestId, "queued");
         process.stdin?.write(encoded, "utf8", (error) => {
           if (error) this.#fail(asError(error, "sidecar request write failed"), "requestWrite");
         });
@@ -782,6 +789,7 @@ export class SidecarClientV1 {
         return;
       }
       if (envelope.event === "agent.runStateChanged") {
+        this.#traceTransport("agent.runStateChanged", null, "received");
         if (!this.#agentAdapterNegotiated) {
           throw new Error("actual-agent state events require the exact planned G5A capability set");
         }
@@ -807,6 +815,7 @@ export class SidecarClientV1 {
           knownRun.state = "terminal";
         }
         for (const listener of this.#agentRunStateChangedListeners) listener(event, envelope);
+        this.#traceTransport("agent.runStateChanged", null, "forwarded");
         if (terminal) this.#activeAgentRuns.delete(event.run.runId);
         return;
       }
@@ -830,6 +839,7 @@ export class SidecarClientV1 {
   #resolveResponse(response: ResponseV1): void {
     const pending = this.#pending.get(response.requestId);
     if (!pending) throw new Error("sidecar response has no pending request");
+    this.#traceTransport(pending.method, response.requestId, "received");
     if (!response.ok) {
       this.#pending.delete(response.requestId);
       this.#discardWorkspaceSave(pending);

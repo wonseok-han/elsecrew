@@ -287,8 +287,11 @@ function forwardAgentRunStateChanged(event: AgentRunStateChangedV1, protocolEven
 }
 
 function startSidecar(): SidecarClientV1 {
+  const diagnosticLog = createSessionDiagnosticLog(app.getPath("logs"));
+  const transportLog = createSessionDiagnosticLog(app.getPath("logs"), "transport");
   const client = new SidecarClientV1(sidecarLaunch(m5DataDirectory()), {
-    onDiagnosticTail: createSessionDiagnosticLog(app.getPath("logs")).capture,
+    onDiagnosticTail: diagnosticLog.capture,
+    onTransportProgress: transportLog.captureTransport,
   });
   client.onEvent(forwardSidecarEvent);
   client.onProjectEvent(forwardProjectEvent);
