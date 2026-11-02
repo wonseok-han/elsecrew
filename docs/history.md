@@ -2,6 +2,12 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 마지막 승인 push로 c079cb2를 게시했으며 [Windows CI 41394071830](https://github.com/wonseok-han/hello-agent/actions/runs/41394071830), job 125111507931가 TypeScript/Node 성공 뒤 Rust 단계에서 실행 중이다. 추가 3회 승인은 모두 사용했다. 읽기 전용 검토자는 UNC fixture 수정과 거부 경계 유지에 차단 결함이 없다고 확인했다.
+- 현재의 묶음 Rust 단계는 실패하면 후속 crate 결과가 없고 실행 중 위치도 보이지 않는다. 다음 CI용으로 core/protocol/sidecar를 각각 표시하고, 앞선 Rust 실패 뒤에도 독립 검사를 수집하도록 로컬 workflow를 정리했다. continue-on-error 없이 실패는 전체 실패로 남고 패키징/업로드는 모든 앞선 검사 성공을 요구한다. 취소·선행 준비 실패 시 후속 Rust를 실행하지 않는다.
+- YAML 구문·기존 세 crate/release/locked 인자 유지·실패 수집 조건·패키징 성공 조건·diff 검사 PASS. 검사 생략·제품 활성화·승인 없는 추가 push는 없다. 현재 CI 최종 결과를 계속 확인하고, 이 workflow 변경의 원격 실행은 새 승인 뒤에만 한다.
+
+### 2026-11-02 · by GPT-6
+
 - 두 번째 승인 실행 [41393243979](https://github.com/wonseok-han/hello-agent/actions/runs/41393243979), 512144c는 Windows core 225 passed / 1 failed까지 진행했다. 남은 login configuration 테스트는 macOS 로그인 연결의 POSIX 선행 `/` 조건 때문에 `C:/` fixture를 거부했다. 제품 조건을 바꾸지 않았다.
 - 해당 테스트만 Unix 절대경로이면서 Windows UNC 절대경로인 `//fixture/profile/app` 문자열로 바꾸고 절대경로 assertion을 추가했다. 실제 파일/네트워크 접근 없이 JSON을 검사하며, 파생 config 경로와 신뢰 변경은 같은 home으로 묶었다. 로컬 해당 회귀 1/1와 diff 검사 PASS. 이전 512144c 읽기 전용 검토에서도 제품 코드/거부 경계 변경은 없었다.
 - 증거: `.artifacts/m5-windows-41393243979/{job.log,login-fixture-test.log}`. 다음은 추가 3회 승인 중 마지막 push/CI이며 실행 뒤 잔여 0회다. protocol/sidecar 실행·패키지/Windows 제품 합격은 여전히 미확정이다. 로컬 여유 공간 505GiB, target 3.7GiB이며 추가 앱/워크트리/실제 모델 시험은 만들지 않았다.
