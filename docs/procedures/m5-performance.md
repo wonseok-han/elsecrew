@@ -272,3 +272,7 @@ QA live 구간의 시작은 배열 길이 cursor만 보관하고 종료 때 해�
 이 관측은 QA 전용이며 debugger/trace 자체 비용도 측정 프로세스에 포함된다. trace 없는 과거 RSS와 직접 비교해 최적화 효과를 주장하지 않는다. 시작 이전 작업·물리적 화면 표시·전체G6를 증명하지 않는다. 연결 및 파서/요약 회귀까지 확인했고, 새 패키지의 완전한 동시 부하 실측은 아직 남아 있다.
 
 `node_modules/.bin/electron tests/m5-main-task-session-smoke.cjs`는 새 `startMainTaskSession`의 debugger attach/trace completion/detach를 실제 Electron에서 확인하는 별도 진단이다. 자체 임시 userData와 보이지 않는 빈 창만 사용하고 sidecar/공급자를 실행하지 않는다. 2026-11-02 완료/손실 없음/리스너 해제/정상 종료를 확인했지만, 빈 창 시간값은 제품 성능이나 전체G6 근거가 아니다. 결과의 root 아래 기록을 보존하고 종료/PID부재를 확인한 뒤 그 프로필만 정리한다.
+
+### 동시 부하의 편집 입력
+
+combined QA는 첫12초 출력 관측 뒤 네 run이 아직 emitting인 상태에서 5MiB Monaco 편집기에 Electron native char Z를 보낸다. 실제 trusted beforeinput1회·dirty 표시·첫 줄 변화·두 animation frame을 요구하고, 시작/전달/화면 관측 시각을 보존한다. Cmd+Z 뒤 원래 첫 줄과 clean 상태를 확인하며 저장/API model mutation은 하지 않는다. 입력 후에도 네 run이 미봉인 상태여야 한다. 요약기는 원시 시각 차이와 복원/trusted/live 증거를 검사하고 본10회 inputPaintMs 최대값을50ms 기준과 비교한다. 물리 화면 지연 측정은 아니며 새 패키지 실제 입력/Undo 경로 검증은 미완료다.

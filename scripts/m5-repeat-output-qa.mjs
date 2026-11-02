@@ -106,10 +106,12 @@ try {
   if (combined) for (const key of ['idleRssBytes','retainedRssBytes']) {
     report.maxima[key]=Math.max(...trials.map(t=>t.values.combinedMemory.maxima[key]));
   }
+  if (combined) report.maxima.inputPaintMs=Math.max(...trials.map(t=>t.values.inputPaintMs));
   report.status=trials.every(t=>t.values.allStampedWithin60Seconds)&&report.maxima.sampledLiveLatencyMs<=100
     &&report.maxima.mainLongTaskMs<=200
     &&report.maxima.rendererLongTaskMs<=200
     &&report.maxima.peakRssBytes<=800*1024*1024
+    &&(!combined || report.maxima.inputPaintMs<=50)
     &&(!combined || trials.every(t=>t.values.combinedMemory.failedMetrics.length===0))?'NOT_READY':'FAIL';
   // Preserve the build for diagnosis on any failed or incomplete series.
   qaCleanupSafe=report.status==='NOT_READY';

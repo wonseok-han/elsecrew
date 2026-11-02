@@ -33,7 +33,7 @@ export function summarizeOutputTrial(result, {combinedWorkload = false} = {}) {
       && Number.isSafeInteger(row.rssBytes) && row.rssBytes >= 0));
     assert.equal(sample.totalBytes, sample.processes.reduce((sum,row) => sum+row.rssBytes,0));
   }
-  let combinedMemory;
+  let combinedMemory, inputPaintMs;
   if (combinedWorkload) {
     const c = result.combinedWorkload;
     assert.equal(c.status, 'OBSERVED');
@@ -49,11 +49,18 @@ export function summarizeOutputTrial(result, {combinedWorkload = false} = {}) {
     assert.ok(result.memory.samples.filter(s=>s.phase==='retained').every(s=>Number.isFinite(s.at) && s.at >= c.retainedStartedAt));
     combinedMemory = summarizeMemory(result.memory.samples.map(s=>({...s,rssBytes:s.totalBytes})));
     assert.deepEqual(c.memory, combinedMemory, 'Combined memory summary does not match samples');
-    assert.deepEqual(c.failedMetrics, combinedMemory.failedMetrics);
+    const input = c.editorInput;
+    assert.equal(input?.restored, true); assert.equal(input.trustedInputs, 1); assert.equal(input.liveRuns, 4);
+    assert.ok([input.startedAt,input.receivedAt,input.paintAt].every(value => Number.isFinite(value) && value >= 0));
+    assert.ok(input.startedAt <= input.receivedAt && input.receivedAt <= input.paintAt);
+    assert.equal(input.inputPaintMs,input.paintAt-input.startedAt);
+    assert.equal(input.inputDeliveryMs,input.receivedAt-input.startedAt);
+    inputPaintMs = input.inputPaintMs;
+    assert.deepEqual(c.failedMetrics, [...combinedMemory.failedMetrics,...(inputPaintMs > 50 ? ['inputPaintMs'] : [])]);
   }
   const rendererLongTaskMs = packagedLongTaskMaximum(result.rendererLongTasks);
   const mainLongTaskMs = mainTaskMaximum(result.mainLongTasks);
-  return {mainLongTaskMs,rendererLongTaskMs,...(combinedMemory ? {combinedMemory} : {}),persistedRows:generation.persistedRows,
+  return {mainLongTaskMs,rendererLongTaskMs,...(combinedMemory ? {combinedMemory,inputPaintMs} : {}),persistedRows:generation.persistedRows,
     allStampedWithin60Seconds:generation.allStampedWithin60Seconds,
     maximumScheduleLagMs:Math.max(...generation.streams.map(row => row.maximumScheduleLagMs)),
     maximumSampledLiveLatencyMs:Math.max(...live.samples.map(row => row.notificationToFrameMs)),

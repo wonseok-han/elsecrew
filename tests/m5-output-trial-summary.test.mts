@@ -33,7 +33,7 @@ test('rejects incomplete visibility, truncated observations and inconsistent raw
 function combinedResult(): any {
   const r=result();
   r.memory.samples=['idle','loaded','retained'].map((phase,i)=>({phase,at:[1000,2000,63000][i],totalBytes:100,processes:[{pid:123,rssBytes:100}]}));
-  r.combinedWorkload={status:'OBSERVED',coexist:true,originalUnchanged:true,
+  r.combinedWorkload={editorInput:{restored:true,trustedInputs:1,liveRuns:4,startedAt:100,receivedAt:105,paintAt:125,inputPaintMs:25,inputDeliveryMs:5},status:'OBSERVED',coexist:true,originalUnchanged:true,
     fixture:{treeFiles:10000,treeDirectories:1000,fileBytes:5242880,fileLines:100000},
     largeProject:{failedMetrics:[]},largeDiff:{failedMetrics:[],diffFiles:500,diffChangedLines:20000,diffBytes:10485760},
     liveCoexistence:{editor:true,diff:true,runs:4},closedAt:3000,retainedStartedAt:63000,
@@ -80,4 +80,17 @@ test('requires complete main trace and preserves an observed main task over the 
   const r=result();r.mainLongTasks.tasks[0].durationMs=250;
   r.mainLongTasks.maximumMs=250;r.mainLongTasks.overLimitCount=1;
   assert.equal(summarizeOutputTrial(r).mainLongTaskMs,250);
+});
+
+test('combined input requires trusted, restored, live measurement and preserves slow input',()=>{
+  for(const mutate of [
+    (r:any)=>{delete r.combinedWorkload.editorInput;},
+    (r:any)=>{r.combinedWorkload.editorInput.restored=false;},
+    (r:any)=>{r.combinedWorkload.editorInput.trustedInputs=0;},
+    (r:any)=>{r.combinedWorkload.editorInput.liveRuns=3;},
+    (r:any)=>{r.combinedWorkload.editorInput.inputPaintMs=0;},
+  ]){const r=combinedResult();mutate(r);assert.throws(()=>summarizeOutputTrial(r,{combinedWorkload:true}));}
+  const r=combinedResult();Object.assign(r.combinedWorkload.editorInput,{paintAt:200,inputPaintMs:100});
+  r.combinedWorkload.failedMetrics=['inputPaintMs'];
+  assert.equal(summarizeOutputTrial(r,{combinedWorkload:true}).inputPaintMs,100);
 });

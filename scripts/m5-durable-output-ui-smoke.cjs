@@ -294,6 +294,20 @@ app.on('browser-window-created', (_event, window) => {
           assert.equal(report.combinedWorkload.liveCoexistence.runs, 4);
           assert.ok(report.combinedWorkload.liveCoexistence.heads.every(head => head && head.committedSequence > 0 && head.committedSequence < 3000 && !head.sealed), 'All four streams must still be emitting during combined observation');
           assert.ok(report.combinedWorkload.liveCoexistence.heads.every((head,i) => report.combinedWorkload.initialHeads[i] && head.committedSequence > report.combinedWorkload.initialHeads[i].committedSequence), 'Every stream must advance while the large model and diff are retained');
+          const {probeEditorInput} = await import('./m5-editor-input-probe.mjs');
+          const probe = action => run(`(${probeEditorInput.toString()})(${JSON.stringify(action)})`);
+          window.focus(); window.webContents.focus();
+          try {
+            await probe('arm');
+            window.webContents.sendInputEvent({type:'char', keyCode:'Z'});
+            report.combinedWorkload.editorInput = await probe('measure');
+            window.webContents.sendInputEvent({type:'keyDown',keyCode:'z',modifiers:['meta']});
+            window.webContents.sendInputEvent({type:'keyUp',keyCode:'z',modifiers:['meta']});
+            Object.assign(report.combinedWorkload.editorInput, await probe('restore'));
+            const heads = await run(`Promise.all(outputSmokeRuns.map(({schemaVersion,state,...binding}) => window.m5.getAgentOutputHead(binding)))`);
+            assert.ok(heads.every(head => head && head.committedSequence > 0 && head.committedSequence < 3000 && !head.sealed), 'Input measurement requires four live streams');
+            report.combinedWorkload.editorInput.liveRuns = heads.length;
+          } finally { await probe('cleanup'); }
           report.combinedWorkload.status = 'OBSERVED';
         }
         if (index === 0) {
@@ -388,7 +402,10 @@ app.on('browser-window-created', (_event, window) => {
       const mainLongTaskMs = mainProbe.mainTaskMaximum(report.mainLongTasks);
       const rendererLongTaskMs = longTaskProbe.packagedLongTaskMaximum(report.rendererLongTasks);
       const combinedFailures = combined ? [...report.combinedWorkload.largeProject.failedMetrics, ...report.combinedWorkload.largeDiff.failedMetrics, ...report.combinedWorkload.memory.failedMetrics] : [];
-      if (combined) report.combinedWorkload.failedMetrics = combinedFailures;
+      if (combined) {
+        if (report.combinedWorkload.editorInput.inputPaintMs > 50) combinedFailures.push('inputPaintMs');
+        report.combinedWorkload.failedMetrics = combinedFailures;
+      }
       if (mainLongTaskMs > 200) { finish(new Error('Main long-task limit exceeded')); return; }
       if (rendererLongTaskMs > 200) { finish(new Error('Renderer long-task limit exceeded')); return; }
       finish(combinedFailures.length ? new Error('Combined workload limits exceeded: ' + combinedFailures.join(', ')) : undefined);
