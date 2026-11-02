@@ -2,6 +2,15 @@
 
 ### 2026-11-02 · by GPT-6
 
+- eb3fd98 합성 QA(fourteenth)는 native 입력22.4ms·Undo·네 채팅 실시간 관측/과거 기록 복원과60초 회수 대기를 마쳤다. 다만 준비 중 탐색 keydown1건이 기록돼 External navigation input interrupted trial로FAIL이다. windowCompleted=false를 유지하며 전체성능PASS로 인용하지 않는다. 이 관측의main 최대54.764ms·유휴445.547MiB·peak710.812MiB·retained증분0이다.
+- 역할 기록에서 tracing.mojom.TracingService가유휴34.2MiB임을 확인했다. 제품과계측 비용을 분리하는 원인 자료지만 임의 차감/프로세스 제외는 하지 않는다. sidecar12.8MiB·Browser149.31MiB·GPU87.59MiB·Network39.45MiB·Tab122.19MiB가 같은 표본에 있었다. 과거 static/blank 결과는 다른 실행이라 절감량을 단순 산술로 주장하지 않는다.
+- 앱 활성화 보완 후 입력과복원은 수행됐고 가시성 이력은visible만이었다. 외부키 때문에 전체 결과는실패다. .artifacts/m5-combined-output-2026-11-02/fourteenth에 결과/빌드/정리 증거를 보존했고 accepted quit·관측PID부재·DB clean 확인 후7FAynu/xhWH5V의 시험 원본/사본/프로필/패키지를 삭제했다. 실제모델·사용자데이터·main병합/push없음.
+- 상시 승인된 읽기 전용 검토자는 현재 자료만으로 제품 최적화를 결정할 근거가 부족하다고 판단했다. 제안된 native region 자료가 기존idle-product-84950/19909에 있어 신규실행 대신 재검토를 요청했다.400MiB·반복G6·Windows·출시는여전히미완료다.
+- 재검토자는 신규native region 전체 수집은 기존자료의 반복이라고 정정했다. 기존 GPU 지도에서2560×416 BGRA14개와192×1536 2개 resident합계약59.1MiB를 확인했으나 회수가능성/누수 증명은 아니다. 다음은 전체vmmap 저장 대신 초기약12초 동안 해당IOSurface 그룹의크기/개수/resident만 제한해GPU RSS와 대조하는 수명 조사다. 제품변경이나400MiB 합격 근거는 아직 없다.
+
+
+### 2026-11-02 · by GPT-6
+
 - 86d211f 기준 유휴 메모리의 프로세스별 원시 자료를 대조했다. thirteenth의431.64MiB는6개PID 합계이며 역할 자료 없이 PID 순서로 sidecar/GPU 등을 추정할 수 없다. 예전 별도 synthetic idle runner의4개 역할 자료는 다른 실행이므로 현재PID에 대입하지 않는다. Monaco는 기존 지연 로딩을 유지하고 있다.
 - 다음 combined QA는 유휴 측정 직전 Electron app.getAppMetrics의pid/type/serviceName과 직접 spawn한sidecarPid를 기록한다. 알려지지 않은 자손도 기존RSS 합계에 포함하며 차감/제외/판정 변경은 없다. syntax/diff 검사 통과. 실제 역할별 재측정과 앱 활성화 수정의 전체 시나리오 검증은 다음 시험에서 확인한다.
 
