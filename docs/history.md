@@ -2,6 +2,12 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 이전 턴은 QA 생성용 대형 할당의 별도 프로세스 분리74f4b86으로 진척했다. 깨끗한 통합 HEAD에서 별도 QA 패키지의 combined-workload를 실행했다. 패키지 내 Node 모드 생성기도 정상 동작했고 네 단일3,000출력/기록 탐색·큰 모델/diff 공존·원본 불변을 끝까지 확인했다. 앱8758 정상 종료와 관측PID부재, sidecar8867 clean_shutdown_at00:34:47Z를 확인하고 자체v2X7vG/3Gykgq를 정리했다. 증거 .artifacts/m5-combined-output-2026-11-02/third.
+- 수집 결과는 idle428,425,216B/peak737,591,296B/잔류증분0B, idle 기준 초과 FAIL이었다. 단, 소스 대조로 idle phase가 최초3초 이후에도 채팅 복사본 준비까지 유지되는 분류 오류를 확인했다. 따라서 second/third의 idle 및 그 기준 잔류증분은 순수 유휴/회수 검증 근거로 사용할 수 없다. 기능·전체 RSS 원시 표본은 보존하며 임의로 이전 수치를 보정하지 않는다. 일반 제품10/30 시작 시험460.3MiB 실패와는 별개다.
+- 초기 idle 시작/종료 시각을 기록하고 프로젝트 준비 직전에 preparing phase로 바꿨다. 준비 비용은 전체 peak에 계속 포함한다. JS 문법·diff PASS; 이 마지막 구간 분리 수정 후 통합 재측정은 아직 하지 않았다. 다음은 정확한 유휴 구간으로 측정한 결과와 기존 일반 패키지 결과를 기준으로 제품 메모리 개선·G6 잔여를 이어가는 것이다. Windows/출시 미완료, 실제 모델 호출·제품 out 교체·main병합·push없음.
+
+### 2026-11-02 · by GPT-6
+
 - 이전 턴은 단회 통합 부하의 기능 완료·idle RSS 실패와 시험 파일 정리로 진척했다. a12f955/깨끗한 m5/coding-agent-ide를 확인하고 기존 blank/preload/product 대조와 현재 로딩 코드를 검토했다. Monaco는 이미 지연 로딩이며 일반 패키지460.3MiB 초과는 그대로 남는다.
 - 통합 QA 생성기가 측정 대상 Electron main에서5MiB 문서와10MiB 전체 patch를 할당하는 오염 경로를 확인했다. 생성/변경 작업만 동기적으로 종료를 기다리는 별도 Node 모드 프로세스로 옮기고 작은 크기 JSON만 반환한다. 제품 GC·메모리 기준·안전 설정·RSS 합산은 변경하지 않았다. 이전494MiB의 원인 전부나 제품 메모리 개선이라고 주장하지 않는다.
 - 실제 자체 임시 fixture 생성/변경 진단 PASS:10,000파일·5MiB 문서,500파일/20,000변경줄/10MiB diff 유지와 부모의 큰 fixture 모듈 미로드를 확인했다. JS 문법·diff PASS, 종료된 임시 자료는 즉시 정리했다. 절차 문서의 실행 증거 없음 설명도 단회 FAIL과 수정 후 미재측정 상태로 갱신했다.
@@ -93,6 +99,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **2026-11-02 통합 QA 메모리 정정**: second/third combined 결과의 idle phase에는 프로젝트 준비 비용이 섞였다. 해당 idle/잔류증분은 순수 유휴/회수 근거가 아니다. 생성 프로세스 분리와 준비 phase 분리는 별개 수정이며 마지막 phase 수정 후 재측정 필요. 일반 제품10/30 RSS 실패는 유지한다.
 
 - **2026-11-02 실제 공급자 상태 갱신**: 0843105 패키지에서 Codex 자체 파일 수정 succeeded·cleanExit 및 실행 중 취소 canceled·cleanExit를 확인했다. 둘 다 processesProvenGone=true이고 원본 불변이다. 앞선 Claude 자체 수정·취소 성공과 함께 기본 실제 실행 증거를 확보했다. 이전 checking UI 정체는 이번에 재현되지 않았으나 원인 미확정이며 전체 복구/G6/Windows/출시 합격과 구분한다. 아래10/30의 미완료 파일 수정·취소 항목은 이 결과로 갱신한다.
 

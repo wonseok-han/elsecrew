@@ -182,7 +182,16 @@ app.on('browser-window-created', (_event, window) => {
       await run(`globalThis.outputSmokeVisibility = [{state:document.visibilityState,at:performance.now()}];
         document.addEventListener('visibilitychange', () => outputSmokeVisibility.push({state:document.visibilityState,at:performance.now()}));`);
       await wait("[...document.querySelectorAll('button')].some(b => b.textContent === '프로젝트 선택' && !b.disabled)");
-      if (combined) { memoryPhase = 'idle'; await new Promise(resolve => setTimeout(resolve, 3000)); }
+      if (combined) {
+        memoryPhase = 'idle';
+        report.combinedWorkload.idleStartedAt = Date.now();
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        report.combinedWorkload.idleEndedAt = Date.now();
+        // Workspace creation is active work, not an idle baseline. Keep it in
+        // whole-process peak RSS while excluding it from idle/retained delta.
+        memoryPhase = 'preparing';
+        persist();
+      }
       await run(`(async () => {
         const api = window.m5;
         const project = await api.openProject();
