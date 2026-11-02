@@ -405,6 +405,8 @@ app.on('browser-window-created', (_event, window) => {
       report.visibility = await run('document.visibilityState');
       report.visibilityTrace = await run('outputSmokeVisibility');
       report.userInput = await run('outputSmokeInput');
+      assert.equal(report.userInput.dropped, 0, 'Navigation input evidence truncated');
+      assert.deepEqual(report.userInput.events, [], 'External navigation input interrupted trial');
       await fs.promises.writeFile(path.join(root, 'output.png'), (await window.webContents.capturePage()).toPNG());
       report.rendererLongTasks = {...await run(`(${longTaskProbe.endLongTaskProbe.toString()})()`), windowCompleted:true};
       await stopMainTrace(true);

@@ -12,6 +12,8 @@ export function summarizeOutputTrial(result, {combinedWorkload = false} = {}) {
   assert.equal(result.status, 'PASS', 'Incomplete/hidden output trial');
   assert.equal(result.functionalStatus, 'PASS');
   assert.equal(result.shutdown, 'accepted');
+  assert.equal(result.userInput?.dropped, 0, 'Missing/truncated navigation input evidence');
+  assert.deepEqual(result.userInput.events, [], 'External navigation input interrupted trial');
   assert.equal(result.visibility, 'visible');
   assert.ok(result.visibilityTrace?.length > 0);
   assert.ok(result.visibilityTrace.every(row => row.state === 'visible'));

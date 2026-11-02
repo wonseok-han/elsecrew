@@ -7,7 +7,7 @@ const {summarizeOutputGeneration}=createRequire(import.meta.url)('../scripts/m5-
 function result(): any {
   const generation=Array.from({length:4},(_,r)=>({runId:`run${r}`,
     samples:Array.from({length:3000},(_,i)=>[i+1,i*20000,1700000000000+i*20,`event${r}-${i}`,i+1])}));
-  return {packagedQa:true,status:'PASS',functionalStatus:'PASS',shutdown:'accepted',visibility:'visible',
+  return {userInput:{events:[],dropped:0},packagedQa:true,status:'PASS',functionalStatus:'PASS',shutdown:'accepted',visibility:'visible',
     mainLongTasks:{valid:true,windowCompleted:true,completed:true,dataLoss:false,incompleteMain:false,mainThreads:1,limitMs:200,tasks:[{tid:1,startUs:1,durationMs:10}],maximumMs:10,overLimitCount:0},
     rendererLongTasks:{supported:true,valid:true,windowCompleted:true,overflow:false,limitMs:200,startedAt:0,endedAt:1000,entries:[],maximumMs:0,overLimitCount:0},
     visibilityTrace:[{state:'visible'}],restoredChats:[0,1,2,3],generation,generationSummary:summarizeOutputGeneration(generation),
@@ -106,4 +106,11 @@ test('trial summary consumes bounded full-stream aggregates and preserves a late
   const r=result();r.mainLongTasks=trace.finish(true);
   assert.equal(r.mainLongTasks.taskCount,20001);
   assert.equal(summarizeOutputTrial(r).mainLongTaskMs,250);
+});
+
+test('external navigation or missing input evidence cannot pass an automated trial', () => {
+  for (const userInput of [undefined,{events:[],dropped:1},
+    {events:[{type:'wheel',at:100}],dropped:0},{events:[{type:'pointerdown',at:100}],dropped:0}]) {
+    const r=result();r.userInput=userInput;assert.throws(()=>summarizeOutputTrial(r));
+  }
 });
