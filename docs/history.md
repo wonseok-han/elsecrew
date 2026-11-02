@@ -2,6 +2,14 @@
 
 ### 2026-11-02 · by GPT-6
 
+- b4ff64d에서 QA의 RSS spawnSync와 traced 구간 git status 동기 호출을 비동기로 전환했다. 제품 코드를 바꾸거나294ms 원인이 확정됐다고 주장하지 않는다. 측정기가 main event loop를 직접 막는 구조를 제거한 것이다.
+- RSS는 exact 자식PID만 제외하며2초/4MiB 제한을 유지한다. 동시 수집은 한 건뿐이며 중복 tick은 오류로 기록한다. 단계 변경은 진행 중 수집을 drain한 뒤 적용하고, 종료·메모리 요약 전에는 stop/drain한다. 단계 교차·오류·잘린 자료는 실패로 처리하며 수집 시작/완료/소요 시간을 남긴다.400/800/120MiB·입력50ms·main/renderer200ms 기준은 그대로다.
+- 메모리/프로세스 추적/출력 summary18 PASS, 두 스크립트 문법·diff 검사 PASS. 실제 ps 자식 확인도 Node root만 남고 대기 중 heartbeat13회/수집약16ms로 통과했다. 앱 성능 증거는 아니며 새 UI 재시험은 하지 않았다. .artifacts/m5-async-rss-2026-11-02/에 로그를 보존했다.
+- 독립 검토 승인을 받았다. 다음은 새 패키지의 입력/main/RSS 재측정과 성능 변동 원인 수정이다. 실제 모델·사용자 데이터·main병합·push없음. G6/유휴400MiB 반복/Windows/출시는 미완료다.
+
+
+### 2026-11-02 · by GPT-6
+
 - 사용자5분 가시성 확인 후 깨끗한3008432에서 최신 QA를 빌드하고 단일 combined 시험을 완료했다. ASAR 내4개 측정 소스의 현재 파일 일치를 확인했다. .artifacts/m5-combined-output-2026-11-02/eighth/에 결과·빌드·정리 증거를 보존했다. 실제 모델 호출 없음.
 - main trace는240,460events/25,793개 main task를 손실 없이 집계했고 valid=true다. 따라서 긴 시험의 수집 누락은 이번 실제 실행에서 해소됐지만 최대294.538ms/200ms 초과2건으로 전체 FAIL이다. renderer 최대75ms. live 구간 결과 저장 비용은0.94~1.37ms였다. RSS 표본 수집기의 main spawnSync는 아직 남아 있으므로 관측 자체의 블로킹을 분리할 필요가 있다. 이 관측만으로294ms 원인을 확정하지 않는다.
 - 입력19.9ms/전달0.5ms/measure 진입12.3ms/첫 프레임12.9ms, Undo 정상. 이전798ms가 재현되지 않았을 뿐 해결·반복 합격은 아니다. idle448.703MiB(실패)/peak670.344MiB/잔류증분28.250MiB. 이전 단일 메모리 합격을 일반화하지 않는다.

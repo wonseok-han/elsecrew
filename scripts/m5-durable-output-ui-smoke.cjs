@@ -96,15 +96,19 @@ cp.spawn = function(command, args, options) {
 report.combinedWorkload = combined ? {fixture:combinedFixture, diagnostic:true, gateEligible:false, status:'PREPARING'} : undefined;
 let memoryPhase = 'starting';
 report.memory = { scope: 'test-app-process-tree', samples: [], errors: 0, truncated: false };
-const memoryTimer = setInterval(() => {
-  try {
-    const collected = cp.spawnSync('/bin/ps', ['-axo', 'pid=,ppid=,rss='], { encoding: 'utf8', timeout: 2000, maxBuffer: 4 * 1024 * 1024 });
-    if (collected.error || collected.status !== 0 || collected.signal) throw new Error('RSS collector failed');
-    const snapshot = require('./m5-process-memory.cjs').processTreeMemoryWithoutCollector(collected.stdout, process.pid, collected.pid);
-    if (report.memory.samples.length < 600) report.memory.samples.push({phase:memoryPhase,at:Date.now(), processes:snapshot.processes, totalBytes:snapshot.rssBytes});
+const memorySampler = require('./m5-process-memory.cjs').createProcessMemorySampler({
+  rootPid:process.pid, getPhase:()=>memoryPhase,
+  onSample:sample=>{
+    if (report.memory.samples.length < 600) report.memory.samples.push(sample);
     else report.memory.truncated = true;
-  } catch { report.memory.errors++; }
-}, 1000);
+  },
+  onError:()=>{report.memory.errors++;},
+});
+const memoryTimer = setInterval(() => { void memorySampler.tick(); }, 1000);
+async function setMemoryPhase(phase) {
+  await memorySampler.drain();
+  memoryPhase = phase;
+}
 // Observe native state without forcing focus, disabling throttling, or changing
 // the visibility-based acceptance rule. A visible native window may be occluded.
 report.windowState = { samples: [], dropped: 0 };
@@ -127,13 +131,14 @@ function observeNative(emitter, event) {
 }
 const windowTimer = setInterval(() => sampleWindow('sample'), 1000);
 let finished = false;
-function finish(error) {
+async function finish(error) {
   if (finished) return;
   finished = true;
   sampleWindow('finish');
   clearInterval(windowTimer);
   for (const remove of nativeListeners) remove();
   clearInterval(memoryTimer);
+  await memorySampler.stop();
   report.transport = transportObserver?.stop();
   report.error = error?.message;
   report.status = error ? 'FAIL' : 'PENDING';
@@ -197,13 +202,13 @@ app.on('browser-window-created', (_event, window) => {
         document.addEventListener('visibilitychange', () => outputSmokeVisibility.push({state:document.visibilityState,at:performance.now()}));`);
       await wait("[...document.querySelectorAll('button')].some(b => b.textContent === '프로젝트 선택' && !b.disabled)");
       if (combined) {
-        memoryPhase = 'idle';
+        await setMemoryPhase('idle');
         report.combinedWorkload.idleStartedAt = Date.now();
         await new Promise(resolve => setTimeout(resolve, 3000));
         report.combinedWorkload.idleEndedAt = Date.now();
         // Workspace creation is active work, not an idle baseline. Keep it in
         // whole-process peak RSS while excluding it from idle/retained delta.
-        memoryPhase = 'preparing';
+        await setMemoryPhase('preparing');
         persist();
       }
       await run(`(async () => {
@@ -229,7 +234,7 @@ app.on('browser-window-created', (_event, window) => {
         const first = await run('outputSmokeChats[0]');
         await run(`(() => { const b = [...document.querySelectorAll('.m5-chat-chip')].find(b => b.querySelector('.m5-chat-goal')?.textContent === 'Output stream 0'); if (b.getAttribute('aria-current') !== 'true') b.click(); })()`);
         await wait("document.querySelector('.m5-timeline h2')?.textContent === 'Output stream 0' && [...document.querySelectorAll('.m5-chat-chip')].some(b => b.getAttribute('aria-current') === 'true' && !b.disabled && b.querySelector('.m5-chat-goal')?.textContent === 'Output stream 0')", 65000);
-        memoryPhase = 'loaded';
+        await setMemoryPhase('loaded');
         Object.assign(report.combinedWorkload, await combinedWorkload.mount(run, userData, first));
         persist();
       }
@@ -381,14 +386,18 @@ app.on('browser-window-created', (_event, window) => {
       })()`);
       if (paced) report.generationSummary = summarizeOutputGeneration(report.generation);
       if (combined) {
-        assert.equal(cp.execFileSync('/usr/bin/git', ['-C',source,'status','--porcelain'], {encoding:'utf8',env:{...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_COUNT:'0'}}).trim(), '', 'Combined workload changed source');
+        assert.equal((await require('node:util').promisify(cp.execFile)('/usr/bin/git', ['-C',source,'status','--porcelain'], {encoding:'utf8',env:{...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_COUNT:'0'}})).stdout.trim(), '', 'Combined workload changed source');
         report.combinedWorkload.originalUnchanged = true;
         await run(`[...document.querySelectorAll('button')].find(b => b.textContent === '프로젝트 화면 닫기' && !b.disabled).click()`);
         await wait("!!document.querySelector('.m5-start-action') && !document.querySelector('.monaco-editor')");
-        memoryPhase = 'closing'; report.combinedWorkload.closedAt = Date.now();
+        await setMemoryPhase('closing'); report.combinedWorkload.closedAt = Date.now();
         await new Promise(resolve => setTimeout(resolve, 60000));
-        memoryPhase = 'retained'; report.combinedWorkload.retainedStartedAt = Date.now();
+        await setMemoryPhase('retained'); report.combinedWorkload.retainedStartedAt = Date.now();
         await new Promise(resolve => setTimeout(resolve, 3000));
+        clearInterval(memoryTimer);
+        await memorySampler.stop();
+        assert.equal(report.memory.errors, 0, 'RSS collection failed');
+        assert.equal(report.memory.truncated, false, 'RSS samples truncated');
         report.combinedWorkload.memory = require('./m5-process-memory.cjs').summarizeMemory(
           report.memory.samples.map(sample => ({...sample,rssBytes:sample.totalBytes})));
       }

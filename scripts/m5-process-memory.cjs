@@ -21,7 +21,7 @@ function processTreeMemory(output, rootPid) {
   return { rssBytes, processes };
 }
 
-// The collector's exact PID comes from spawnSync, never from a command-name
+// The collector's exact PID comes from the spawned child, never from a command-name
 // filter: a real agent may legitimately execute its own ps child.
 function processTreeMemoryWithoutCollector(output, rootPid, collectorPid) {
   if (!Number.isSafeInteger(collectorPid) || collectorPid <= 0 || collectorPid === rootPid) throw new Error("invalid collector PID");
@@ -90,3 +90,36 @@ function createProcessMemoryTracker(rootPid) {
   };
 }
 module.exports = { processTreeMemoryWithoutCollector, processTreeMemory, summarizeMemory, createProcessMemoryTracker };
+
+
+// QA collectors must not synchronously stall the measured Electron main loop.
+function collectProcessTreeMemory(rootPid) {
+  return new Promise((resolve, reject) => {
+    const child = require('node:child_process').execFile('/bin/ps', ['-axo', 'pid=,ppid=,rss='],
+      {encoding:'utf8', timeout:2000, maxBuffer:4*1024*1024}, (error, stdout) => {
+        if (error) { reject(error); return; }
+        try { resolve(processTreeMemoryWithoutCollector(stdout, rootPid, child.pid)); }
+        catch (error) { reject(error); }
+      });
+  });
+}
+function createProcessMemorySampler({rootPid, getPhase, onSample, onError, collect=collectProcessTreeMemory}) {
+  let pending, stopped=false;
+  return {
+    tick() {
+      if (stopped) return Promise.resolve();
+      if (pending) { onError(new Error('RSS collection overlapped sampling interval')); return pending; }
+      const phase=getPhase(), at=Date.now(), start=performance.now();
+      pending=Promise.resolve().then(()=>collect(rootPid)).then(snapshot=>{
+        if (getPhase() !== phase) throw new Error('RSS sample crossed a phase boundary');
+        onSample({phase, at, completedAt:Date.now(), collectionMs:performance.now()-start,
+          processes:snapshot.processes,totalBytes:snapshot.rssBytes});
+      }).catch(onError).finally(()=>{pending=undefined;});
+      return pending;
+    },
+    async drain() { await pending; },
+    async stop() { stopped=true; await pending; },
+  };
+}
+module.exports.collectProcessTreeMemory = collectProcessTreeMemory;
+module.exports.createProcessMemorySampler = createProcessMemorySampler;

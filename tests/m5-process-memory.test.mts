@@ -29,3 +29,33 @@ test("excludes only the exact collector PID while retaining sidecar and agent de
   }
   assert.throws(() => processTreeMemoryWithoutCollector(rows + "40 10 60\n", 10, 40));
 });
+
+const { createProcessMemorySampler } = createRequire(import.meta.url)("../scripts/m5-process-memory.cjs");
+test('async sampler preserves phase, excludes overlapping work and drains before stop', async () => {
+  let complete: (value: any)=>void = ()=>{};
+  let calls=0, phase='idle';
+  const samples:any[]=[], errors:any[]=[];
+  const sampler=createProcessMemorySampler({rootPid:10,getPhase:()=>phase,
+    onSample:value=>samples.push(value),onError:error=>errors.push(error),
+    collect:()=>{calls++;return new Promise(resolve=>{complete=resolve;});}});
+  const first=sampler.tick();await Promise.resolve();
+  let heartbeat=false;await new Promise(resolve=>setTimeout(()=>{heartbeat=true;resolve(null);},0));
+  assert.equal(heartbeat,true);assert.equal(calls,1);
+  assert.equal(sampler.tick(),first);assert.equal(errors.length,1);assert.equal(calls,1);
+  let drained=false;const drain=sampler.drain().then(()=>{drained=true;});
+  let stopped=false;const stop=sampler.stop().then(()=>{stopped=true;});
+  await Promise.resolve();assert.equal(drained,false);assert.equal(stopped,false);
+  complete({rssBytes:1024,processes:[{pid:10,parentPid:1,rssBytes:1024}]});
+  await Promise.all([first,drain,stop]);phase='loaded';await sampler.tick();
+  assert.equal(calls,1);assert.equal(samples.length,1);assert.equal(samples[0].phase,'idle');
+  assert.equal(samples[0].totalBytes,1024);assert.ok(samples[0].completedAt>=samples[0].at);
+});
+test('failed or phase-crossing samples cannot manufacture an RSS value', async () => {
+  let phase='idle', fail=true;
+  const samples:any[]=[], errors:any[]=[];
+  const sampler=createProcessMemorySampler({rootPid:10,getPhase:()=>phase,
+    onSample:value=>samples.push(value),onError:error=>errors.push(error),
+    collect:async()=>{if(fail)throw new Error('ps failed');phase='loaded';return {rssBytes:1024,processes:[]};}});
+  await sampler.tick();fail=false;await sampler.tick();await sampler.stop();
+  assert.equal(errors.length,2);assert.equal(samples.length,0);
+});
