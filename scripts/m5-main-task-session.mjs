@@ -51,9 +51,11 @@ export function createMainPhaseProbe() {
   histogram.enable();
   function record() {
     const endedAt=performance.now(), utilization=performance.eventLoopUtilization(baseline);
-    rows.push({phase,startedAt,endedAt,samples:histogram.count,
+    const utilizationAvailable=utilization.active+utilization.idle>0;
+    rows.push({phase,startedAt,endedAt,samples:histogram.count,utilizationAvailable,
       maximumTimerDelayMs:histogram.count ? histogram.max/1e6 : null,
-      activeMs:utilization.active,idleMs:utilization.idle});
+      activeMs:utilizationAvailable ? utilization.active : null,
+      idleMs:utilizationAvailable ? utilization.idle : null});
     startedAt=endedAt;baseline=performance.eventLoopUtilization();histogram.reset();
   }
   return {

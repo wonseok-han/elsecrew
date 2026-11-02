@@ -2,6 +2,14 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 조작 없는5분 가시성 확인 후 깨끗한9750856 QA 빌드/ASAR5개 소스 일치를 확인하고 tenth combined 시험을 완료했다. 외부 입력0,4개 채팅의 과거/다음/최신 기록 복원 완료, 입력24.9ms/Undo 정상이다. 전체는 main247.916ms(초과2건)·idle429.016MiB로FAIL이며 peak699.969MiB/잔류증분0이다. 단일 진단이며 출시/G6 합격이 아니다.
+- 최장 Chromium task 이름은 ThreadControllerImpl::RunTask다. Node timer 진단은 준비 구간30.8ms, loaded249.8ms로 실제 출력/검토 구간에 집중됐다. retained 진단567ms는 trace 종료/보고 처리까지 포함하므로 제품 main 지연과 동일시하지 않는다. Electron의 ELU active/idle은 전 단계0으로 측정 가용성을 확인할 수 없었다. 이를 활동0의 증거로 쓰지 않도록 후속 코드에서는 utilizationAvailable=false 및null로 표기한다. phase/session5 PASS·diff 검사PASS이며 새 패키지 재시험은 하지 않았다.
+- .artifacts/m5-combined-output-2026-11-02/tenth/에 결과·빌드·정리 증거를 저장했다. 정상quit, DB clean_shutdown_at02:58:26Z, 관측74개PID/경로 프로세스 부재 확인 후 Kua5pc 앱·ynyakv 원본/복사본/프로필을 모두 삭제했다. 모델·사용자 데이터 변경 없음.
+- 다음은 loaded 구간의 live 출력/과거 페이지/검증용 전체 이력 읽기를 구분해 main 병목을 좁히고 해당 경로를 수정하는 것이다.400MiB 목표와 기존 성능 기준을 유지한다. G6 반복/Windows/출시는 미완료이며 main병합/push없음.
+
+
+### 2026-11-02 · by GPT-6
+
 - 99e586b 이후 main 지연 원인을 특정하기 전에 제품 코드를 추측으로 바꾸지 않고 QA 단계 진단을 추가했다. Node monitorEventLoopDelay/ELU로 starting/idle/preparing/loaded/closing/retained별 timer 지연·active/idle 시간을 최대17개 행으로 남기며 종료 시 observer를 비활성화한다. 샘플 없는 최대값은null이다. 단계 경계는 근사치이고 Chromium task200ms 판정을 대체하지 않는다. 공식 API 근거: https://nodejs.org/api/perf_hooks.html#perf_hooksmonitoreventloopdelayoptions
 - main 최대 task에는 이름만 최대128자로 보존하고 args/임의 payload는 계속 제외한다. 기존 메모리/응답 시간 합격 기준과 main task 집계는 유지했다. timer 지연60ms를 실제로 주입한 Node 검사, 종료/개수 한도, task 이름 길이·payload 제외, 기존 trace/session 포함14 PASS. QA main 문법·diff 검사 PASS. .artifacts/m5-main-phase-2026-11-02/에 검사 로그를 보존했다.
 - 이번에는 앱·실제 모델을 실행하지 않았다. 다음은 새 패키지의 조작 없는 화면 측정으로 지연 발생 단계/작업 이름을 확인하고 해당 제품 경로를 수정하는 것이다. 기존275~294ms와 유휴400MiB 실패는 미해결이며 G6/Windows/출시도 미완료다. main병합/push없음.
