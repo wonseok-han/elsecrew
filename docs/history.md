@@ -2,6 +2,12 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 직전 턴은 합성 레이어 후보 기각과 진단 코드71af084로 진척했다. 깨끗한 동일 HEAD에서 `--memory-infra`를 추가해 RSS 샘플링 뒤 자체 가짜 화면의 Chromium allocator 통계만 수집했다. CDP deterministic=false로 강제 GC를 사용하지 않으며 사용자 앱/인증/모델은 접근하지 않는다. 제품 동작은 변경하지 않았다.
+- 첫4MiB trace는 dump success이지만 dataLossOccurred=true라 불완전 자료다. 진단 버퍼를16MiB로 늘린 두 번째(PID31733)는 success=true/dataLossOccurred=false이며 renderer 상세도 수집됐다. `.artifacts/m5-performance/idle-memory-infra-31733.json` 및 `idle-tile-summary-2026-11-02.json`: tile pool20개 총72.4375MiB 중 free_size55.0625MiB, busy_size0이다. GPU shared_images117.8125MiB와 renderer tile 소유량은 겹치므로 더하지 않는다. 이는 할당 통계이고 RSS·즉시 회수 가능량·누수 증명이 아니다.
+- 두 시험의 종료·trace/샘플에 기록된 PID부재를 확인한 뒤 자체 niWuY1/cnU9XY 프로필을 정리했다. 로그·cleanup 증거는 위 artifact 폴더에 유지했다. runner 문법·diff 검사 PASS; 초기 무계측 RSS 최대373.375/413.296875MiB의 변동으로400MiB 통과를 주장하지 않는다. 다음은 초기에 생성된 여분 타일을 줄일 수 있는지 첫 화면 표시/렌더 순서 대조로 확인한다. G6·Windows·출시 미완료, main병합·push없음.
+
+### 2026-11-02 · by GPT-6
+
 - 기준 HEAD2bd1c6d에서 400MiB 유지 결정에 따라 GPU 합성 비용을 조사했다. 진단 runner에 선택적 `--layers`를 추가해 탐색 전 CDP LayerTree 알림을 구독하고 레이어·DOM 종류·합성 이유를 수집한다. 늦게 붙인 첫 시도는 트리를 놓쳤고, 탐색 전에 enable 응답을 기다린 두 번째는 watchdog 종료됐다. enable과 탐색 순서를 수정한 세 번째는 정상 종료·5개 레이어 수집에 성공했다. 앞선 실패는 제품 실패로 세지 않는다.
 - `.artifacts/m5-performance/idle-product-26084.json`: document/root scroller와 프로젝트 rail의 overflow/viewport 합성만 관측했다. 이 초기 화면에서는 불필요한 대형 승격 레이어를 찾지 못했으며 누수 없음의 증명은 아니다. 디버거가 붙은 RSS는 기존 무계측 성능 증거와 비교하거나 합격 판정에 쓰지 않는다. 제품 CSS·기능·보안 격리·400/800/120 기준은 유지했다.
 - 설치된 Electron43.4.0/Chromium150.0.7871.224를 확인했다. [Chromium SysInfo 소스](https://chromium.googlesource.com/chromium/src/+/main/base/system/sys_info.cc)의 low-end 강제 모드는 RAM512MiB 모사 등 광범위한 동작 변경이라 채택하지 않았다. [해당 Chromium 버전 GPU switch 소스](https://raw.githubusercontent.com/chromium/chromium/150.0.7871.224/gpu/command_buffer/service/gpu_switches.cc)에 discardable-cache 제한은 있으나 옛 전체 GPU 예산 flag는 없었다. 캐시가 실제 비용의 원인인지는 아직 입증하지 않았으며 플래그를 제품에 적용하지 않았다.
@@ -142,6 +148,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **초기 메모리 조사(2026-11-02)**: 유휴400MiB 기준 유지. 같은 정적 화면도 큰 비용이며 software rendering/spellcheck/ready-to-show는 개선 근거 없음. 레이어5개에 명백한 불필요 승격 없음. 손실 없는 memory-infra 통계에서 renderer tile pool72.4375MiB 중 free55.0625MiB 확인(할당 통계≠RSS 절감량). 다음 후보는 초기 렌더 순서/타일 재사용이며 상세·증거는 최신 워크로그.
 
 - **2026-11-02 사용자 확정 — 메모리 기준 유지**: macOS 유휴400MiB와 추가 최적화를 선택했다.512MiB 상향은 승인되지 않았다. 부하800MiB·잔류증분120MiB 및 전체 검증 요건도 유지한다.
 

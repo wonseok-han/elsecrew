@@ -108,6 +108,35 @@ app.whenReady().then(async () => {
     } catch (error) { report.layerError = String(error); }
     finally { debuggerApi.removeListener('message', onLayerMessage); if (debuggerApi.isAttached()) debuggerApi.detach(); }
   }
+  // Allocator statistics only, after RSS sampling, in this synthetic app.
+  // Do not force GC or use the instrumented result as a performance gate.
+  if (process.argv.includes('--memory-infra')) {
+    const events = [];
+    let complete;
+    const finished = new Promise(resolve => { complete = resolve; });
+    const onTrace = (_event, method, params) => {
+      if (method === 'Tracing.dataCollected') events.push(...params.value);
+      if (method === 'Tracing.tracingComplete') complete(params);
+    };
+    debuggerApi.attach('1.3');
+    debuggerApi.on('message', onTrace);
+    try {
+      await debuggerApi.sendCommand('Tracing.start', {transferMode:'ReportEvents', traceConfig:{
+        recordMode:'recordUntilFull',traceBufferSizeInKb:16384,
+        includedCategories:['disabled-by-default-memory-infra'],excludedCategories:['*'],
+        memoryDumpConfig:{triggers:[]},
+      }});
+      const dump = await debuggerApi.sendCommand('Tracing.requestMemoryDump', {deterministic:false,levelOfDetail:'detailed'});
+      await debuggerApi.sendCommand('Tracing.end');
+      const completion = await finished;
+      const tracePath = resolve(directory, `idle-memory-infra-${process.pid}.json`);
+      writeFileSync(tracePath, JSON.stringify({traceEvents:events}) + '\n', {flag:'wx'});
+      report.memoryInfra = {dump,completion,tracePath,versions:process.versions,scope:'Allocator statistics after RSS sampling; no forced GC; diagnostic only'};
+    } finally {
+      debuggerApi.removeListener('message', onTrace);
+      if (debuggerApi.isAttached()) debuggerApi.detach();
+    }
+  }
   const evidencePath = resolve(directory, `idle-${mode}-${process.pid}.json`);
   writeFileSync(evidencePath, JSON.stringify(report, null, 2) + '\n', { flag: 'wx' });
   console.log(JSON.stringify({ mode, userData, evidencePath, rssMiB: samples.map(s => s.rssBytes / 1024 ** 2), dom: report.dom }));
