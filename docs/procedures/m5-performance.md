@@ -270,3 +270,5 @@ QA live 구간의 시작은 배열 길이 cursor만 보관하고 종료 때 해�
 출력 QA도 기존 `createMainTaskTrace`를 재사용한다. visible bridge 준비 뒤 QA 창의 debugger로 Chromium `toplevel` trace를 시작하고, 원시 이벤트에서 해당 앱 PID의 `CrBrowserMain` 완결 slice만 평가한다. 시나리오 종료 뒤 tracingComplete를 최대8초 기다리고 연결을 해제한다. 미완료·data loss·기존100만 이벤트/1만 task 상한 초과는0ms로 대체하지 않는다. 본10회의 mainLongTaskMs 최대값은200ms 기준과 비교한다. 이전 출력 기록에 mainLongTasks가 없으면 새 요약기는 거절한다.
 
 이 관측은 QA 전용이며 debugger/trace 자체 비용도 측정 프로세스에 포함된다. trace 없는 과거 RSS와 직접 비교해 최적화 효과를 주장하지 않는다. 시작 이전 작업·물리적 화면 표시·전체G6를 증명하지 않는다. 연결 및 파서/요약 회귀까지 확인했고, 새 패키지의 완전한 동시 부하 실측은 아직 남아 있다.
+
+`node_modules/.bin/electron tests/m5-main-task-session-smoke.cjs`는 새 `startMainTaskSession`의 debugger attach/trace completion/detach를 실제 Electron에서 확인하는 별도 진단이다. 자체 임시 userData와 보이지 않는 빈 창만 사용하고 sidecar/공급자를 실행하지 않는다. 2026-11-02 완료/손실 없음/리스너 해제/정상 종료를 확인했지만, 빈 창 시간값은 제품 성능이나 전체G6 근거가 아니다. 결과의 root 아래 기록을 보존하고 종료/PID부재를 확인한 뒤 그 프로필만 정리한다.

@@ -2,6 +2,12 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 이전716ff99의 전체635회귀/TypeScript 확인을 이어, 새 출력QA의 Electron debugger 수명주기를 실제로 검증했다. 기존 packaged --main-trace는 외부 CDP 경로여서 새 내부 debugger 연결 증거로 재사용할 수 없음을 확인했다. 연결/해제 코드를 `m5-main-task-session.mjs`로 분리해 출력QA가 같은 세션을 사용하도록 하고 QA 복사 목록을 갱신했다.
+- 별도 opt-in Electron 빈 창 진단에서 main thread1개/trace372events/손실 없음/완료 기록 및 debugger·listener 해제 PASS. 관측2.578ms는 빈 창 진단값으로 제품200ms 성능 합격이 아니다. 세션 시작 실패/종료 실패/다른 debugger 소유권 보존을 포함한3회귀 PASS. 이번 추출 이후 전체635재실행은 하지 않았다. 문법/diff PASS.
+- `.artifacts/m5-main-trace-session-2026-11-02/`에 원시 결과와 정리 증거를 보존했다. 정상 will-quit과 관측PID 부재를 확인하고 자체 임시 프로필을 삭제했다. 마지막으로 smoke 실패가 shell 종료코드에도 반영되도록 will-quit 뒤 exitCode를 명시했다(이 후처리는 문법 확인만). 사용자 프로젝트/인증/실제 모델/대형 패키지는 사용하지 않았다. main병합/push없음. 남은 것은 완전한 동시 부하·입력/경합 계측, 유휴400MiB 최적화, Windows/출시 검증이다.
+
+### 2026-11-02 · by GPT-6
+
 - 803b937의 깨끗한 m5/coding-agent-ide에서 누적 Node/TypeScript 검증을 수행했다. `npm test` 전체635개 PASS, 실패/스킵0(24.45초), `pnpm exec tsc --noEmit` PASS다. 이전23fea6f의11개 focused 수정 이후 전체 재실행이 없었던 증거 공백을 닫았다. 기능 연결 후 누적 검증 원칙에 따른 실행이며 새 실패는 없었다.
 - `.artifacts/m5-regression-2026-11-02/consolidated-node/`에 원문 로그와 기준HEAD/Node버전/명령/종료코드/로그 지문을 저장했다. 이 결과는 Node와src 타입검사만 증명하며 Rust 재실행·새 QA 패키지 tracing 실측·전체G6/Windows/출시 합격으로 확대하지 않는다. AGENTS/CLAUDE의 실제 공급자 범위 설명도 현재 Codex/Claude 파일 수정·취소 성공과 전체 복구 미완료를 이미 구분하고 있음을 확인했다.
 - 제품 수정은 없으며 대형 빌드·임시 앱·사용자 데이터·실제 모델 호출을 만들지 않았다. diff검사 PASS. 다음은 남은G6 계측/화면 측정과 유휴400MiB 최적화, Windows 실행 환경·출시/서명 검증이며 기준은 그대로다. main병합/push없음.
