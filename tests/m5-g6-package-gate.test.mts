@@ -17,15 +17,15 @@ test("G6 package gate uses only the exact Forge package and ZIP paths", () => {
   const artifacts = expectedPackageArtifacts({ root: "/repo", platform: "darwin", arch: "arm64", version: "0.1.2" });
 
   assert.deepEqual(artifacts, {
-    packageDirectory: "/repo/out/hello-agent-darwin-arm64",
-    archive: "/repo/out/make/zip/darwin/arm64/hello-agent-darwin-arm64-0.1.2.zip",
+    packageDirectory: resolve("/repo/out/hello-agent-darwin-arm64"),
+    archive: resolve("/repo/out/make/zip/darwin/arm64/hello-agent-darwin-arm64-0.1.2.zip"),
     requiredOutputs: [
       "/repo/out/hello-agent-darwin-arm64",
       "/repo/out/hello-agent-darwin-arm64/hello-agent.app/Contents/MacOS/hello-agent",
       "/repo/out/hello-agent-darwin-arm64/hello-agent.app/Contents/Resources/app.asar",
       "/repo/out/hello-agent-darwin-arm64/hello-agent.app/Contents/Resources/sidecar/hello-agent-sidecar",
       "/repo/out/make/zip/darwin/arm64/hello-agent-darwin-arm64-0.1.2.zip",
-    ],
+    ].map(path => resolve(path)),
   });
 });
 
@@ -50,7 +50,7 @@ test("G6 package gate orders package, smoke, make, then exact-path metrics and w
       },
       writeFileSync(path: string, contents: string) {
         evidence = contents;
-        assert.match(path, /\.artifacts\/m5-g6-package\/darwin-arm64-2026-09-08T00-00-00-000Z\.json$/);
+        assert.equal(path, resolve(root, ".artifacts", "m5-g6-package", "darwin-arm64-2026-09-08T00-00-00-000Z.json"));
       },
       mkdirSync() {},
     });

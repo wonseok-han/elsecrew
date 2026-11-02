@@ -37,7 +37,7 @@ function harness(catalogOnly = false, autoFinish = true, projectUi = false, sele
         writeFileSync(file, value) { if (file.endsWith('result.json')) evidence = JSON.parse(value); },
       };
       if (name === 'node:child_process') return childProcess;
-      if (name.endsWith('/.vite/build/main.cjs')) return {};
+      if (name === path.resolve(__dirname, '../.vite/build/main.cjs')) return {};
       if (name === './m5-process-memory.cjs') return {};
       if (name === './m5-agent-paint-probe.cjs') return require('../scripts/m5-agent-paint-probe.cjs');
       return require(name);

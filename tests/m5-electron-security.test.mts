@@ -226,7 +226,7 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
   const protocolHandlers = new Map<string, (request: { url: string }) => Promise<Response>>();
   const netFetches: string[] = [];
   const sidecarCalls: string[] = [];
-  const files = new Set(["/app/.vite/renderer/main_window/index.html"]);
+  const files = new Set([resolve("/app/.vite/renderer/main_window/index.html")]);
   const electron = {
     app: {
       whenReady: () => Promise.resolve(),

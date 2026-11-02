@@ -268,12 +268,13 @@ test("replaced evidence parent fails closed without touching a sentinel or the d
       randomToken: () => "predictable-token",
       spawnSync() { return { status: 0, signal: null }; },
       openSync(path: string, flags: number, permissions: number) {
-        const descriptor = openSync(path, flags, permissions);
         temporaryPath = path;
+        // Model a descriptor bound to the original parent after replacement.
+        // Rename before opening: Windows forbids moving a directory with open handles.
         renameSync(evidenceDirectory, displacedDirectory);
         mkdirSync(evidenceDirectory);
         writeFileSync(sentinel, "do not alter");
-        return descriptor;
+        return openSync(resolve(displacedDirectory, basename(path)), flags, permissions);
       },
     });
     assert.equal(outcome.exitCode, 1);

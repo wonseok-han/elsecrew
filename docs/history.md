@@ -2,6 +2,14 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 사용자 승인으로 9e85d6f를 공개 저장소의 새 브랜치 `codex/m5-windows-diagnostic-20261102`에 push하고 Windows 진단 CI 1회를 실행했다. [실행 41388152199](https://github.com/wonseok-han/hello-agent/actions/runs/41388152199)는 설치·TypeScript 검사 뒤 Node 테스트에서 625 passed / 25 failed / 7 skipped로 종료했다. Rust·패키징·ZIP 업로드는 실행되지 않았다. main 병합·릴리스·모델 호출은 없으며 승인된 push/CI 1회는 소진됐다.
+- 25개 실패를 분석해 `.gitattributes`로 소스·스키마 LF와 golden fixture 원본 바이트 보존을 명시했다. 고정 해시·프로토콜 바이트 비교를 완화하지 않았다. 여섯 테스트 파일의 호스트 경로/VM require 가정과 CRLF import 제거를 수정했다. 열린 파일이 있는 디렉터리 이동을 Windows가 거절하는 테스트는 부모 교체 후 원래 부모에 묶인 descriptor를 반환하는 주입으로 재현하며, sentinel·분리된 임시 파일 보존과 fail-closed 검사를 유지했다. 제품 코드는 변경하지 않았다.
+- 관련 테스트 56/56, 전체 `npm test` 657/657, CRLF 임시 사본의 staging 9/9 PASS. `core.autocrlf=true` checkout-index로 대표 파일 10개의 index 원본 바이트 보존을 확인했다. 모든 결과는 macOS 로컬 증거이며 Windows PASS가 아니다. 변경 없는 Rust 전체 검사는 재실행하지 않았다. diff 검사 통과.
+- 원격 원시 로그와 로컬 회귀/체크아웃/CRLF 증거는 `.artifacts/m5-windows-41388152199/`에 보존했다. 소규모 임시 체크아웃은 삭제했고 새 앱·빌드 캐시는 만들지 않았다.
+- 다음: 수정 커밋의 공개 push와 Windows CI 재실행 승인을 받아 실제 Windows 결과 확인. 이번 승인으로 추가 push/재실행하지 않는다. 400MiB 유휴 메모리, 반복 G6 화면 성능, Windows Rust/패키징·안전 검증과 출시 판단은 미완료다.
+
+### 2026-11-02 · by GPT-6
+
 - 727ab96 기준 Windows 원격 검증을 준비하며 새 m5-combined-generator 회귀가 macOS 고정/usr/bin/git 도우미를 호출함을 발견했다. 이 테스트만macOS한정으로명시했고macOS실행1/1 PASS, diff검사를통과했다. Windows전체검사를통과했다고주장하지않는다.
 - GitHub 연결로 wonseok-han/hello-agent의 public/default main을확인했다. 원격main의M5진단workflow와 codex/m5-windows-diagnostic-20261102 ref는404였다. 공식workflow_dispatch 기본브랜치조건을확인해 main병합없이시작할수있는전용push trigger를로컬에준비했다. 해당진단브랜치push는Windows만, 기존수동실행은macOS/Windows를검사한다. contents:read/45분/미서명ZIP3일보관/실제공급자미호출을유지한다.
 - 시스템Ruby YAML parser로구문·전용브랜치·read권한·timeout/보관기간을검사했다. Node YAML패키지는없어추가설치하지않았다. release-checklist에공개범위와승인경계를기록했다. 아직push/CI실행/main병합/외부artifact게시는없다. 다음은공개진단브랜치게시와CI실행사용자승인후Windows결과확인이다.400MiB/반복UI성능/Windows실증/출시미완료이며기존통합PASS는재실행하지않았다.
@@ -149,6 +157,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Windows 체크아웃 바이트 (2026-11-02)**: 첫 원격 CI에서 core.autocrlf 변환으로 golden 해시·SQL manifest·JSONL 동일 바이트 검사가 실패했다. `.gitattributes`는 소스 LF, `tests/fixtures/** -text`로 의도된 원본 바이트를 보존한다. 테스트의 호스트 경로와 macOS 모의 inventory를 구분한다. 로컬 수정 PASS를 Windows 실행 증거로 대체하지 않는다.
 
 - **main 지연 귀속 주의(2026-11-02 eleventh)**: Chromium284ms와 달리 live/history/generation Node timer는42ms 이하다. retained 보조 진단638ms는 trace 종료/보고까지 포함한다. 측정기 종료 비용 가설을 먼저 최소 시험으로 분리하고, 다른 시계/측정의 값을 직접 동일시하거나 기존FAIL을 차감하지 않는다. 출력 재파싱 최적화만으로200ms/400MiB 문제가 해결되지는 않았다.
 

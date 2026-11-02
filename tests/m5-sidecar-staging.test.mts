@@ -10,7 +10,7 @@ const root = resolve(dirname(fileURLToPath(scriptUrl)), "..");
 // Execute the real script body with only built-in imports/process replaced.
 // Neither Cargo nor filesystem mutations are allowed in these focused tests.
 const script = readFileSync(scriptUrl, "utf8")
-  .replace(/^import .* from "node:[^"]+";\n/gm, "")
+  .replace(/^import .* from "node:[^"]+";\r?\n/gm, "")
   .replace("import.meta.url", "scriptUrl");
 
 function artifact(executable: unknown, overrides: Record<string, unknown> = {}) {
