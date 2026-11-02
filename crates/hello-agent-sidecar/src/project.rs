@@ -1,11 +1,15 @@
 mod app_roles;
 mod protocol_path;
 mod path_binding;
+#[cfg(any(windows, test))]
+mod windows_fs;
 use crate::{AppendOutcome, SidecarError, Storage};
 #[cfg(unix)]
 use cap_fs_ext::OsMetadataExt;
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt, OpenOptionsMaybeDirExt};
 use cap_std::ambient_authority;
+#[cfg(windows)]
+use cap_std::fs::OpenOptionsExt as _;
 #[cfg(unix)]
 use cap_std::fs::PermissionsExt;
 use cap_std::fs::{Dir, File as CapFile, OpenOptions as CapOpenOptions};
@@ -5486,6 +5490,8 @@ fn open_real_os_child_dir(parent: &Dir, name: &OsStr) -> Result<Dir, ProjectFail
         .read(true)
         .follow(FollowSymlinks::No)
         .maybe_dir(true);
+    #[cfg(windows)]
+    options.custom_flags(windows_fs::OPEN_REPARSE_POINT);
     let opened = parent.open_with(component, &options).map_err(|error| {
         ProjectFailure::symlink(format!(
             "directory component is unavailable without following links: {error}"
@@ -5501,9 +5507,16 @@ fn open_real_os_child_dir(parent: &Dir, name: &OsStr) -> Result<Dir, ProjectFail
             "directory component is a symlink, reparse point, or non-directory",
         ));
     }
-    Dir::reopen_dir(&opened).map_err(|error| {
+    #[cfg(windows)]
+    let identity = windows_fs::identity(&opened, true)?;
+    let directory = Dir::reopen_dir(&opened).map_err(|error| {
         ProjectFailure::symlink(format!("could not retain directory capability: {error}"))
-    })
+    })?;
+    #[cfg(windows)]
+    if windows_fs::identity(&directory, true)? != identity {
+        return Err(ProjectFailure::symlink("directory identity changed while retaining capability"));
+    }
+    Ok(directory)
 }
 
 fn open_real_child_dir(parent: &Dir, name: &str) -> Result<Dir, ProjectFailure> {
@@ -5546,6 +5559,8 @@ fn open_real_file_at(parent: &Dir, name: &str) -> Result<CapFile, ProjectFailure
     }
     let mut options = CapOpenOptions::new();
     options.read(true).follow(FollowSymlinks::No);
+    #[cfg(windows)]
+    options.custom_flags(windows_fs::OPEN_REPARSE_POINT);
     let opened = parent.open_with(name, &options).map_err(|error| {
         ProjectFailure::symlink(format!(
             "file is unavailable without following links or reparse points: {error}"
@@ -5559,6 +5574,8 @@ fn open_real_file_at(parent: &Dir, name: &str) -> Result<CapFile, ProjectFailure
             "file is a symlink, reparse point, or non-regular object",
         ));
     }
+    #[cfg(windows)]
+    windows_fs::identity(&opened, false)?;
     Ok(opened)
 }
 
@@ -6081,7 +6098,12 @@ mod windows_tests {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn open_absolute_directory_capability(path: &Path) -> Result<Dir, ProjectFailure> {
+    windows_fs::open_directory(path)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn open_absolute_directory_capability(_path: &Path) -> Result<Dir, ProjectFailure> {
     Err(ProjectFailure::recovery("source repository access requires verified handle-bound traversal on this platform"))
 }

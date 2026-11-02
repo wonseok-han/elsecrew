@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> **Windows 파일 접근 기반(미검증)**: `project/windows_fs.rs`에 열린 핸들의 전체 파일 신원·재분석 속성·local GUID volume 검사와 component 탐색을 구현했다. 디렉터리/파일은 OPEN_REPARSE_POINT로 열어 대상에 접근하기 전에 재분석 지점을 거부한다. Windows 컴파일/실기기 검증은 남아 있고 G4/stdio 및 실제 공급자 gate는 비활성이다.
+
 > **저장된 원본 폴더 재확인**: project projection의 비공개 `native_path_binding`은 손실 없는 변환으로 확인한 canonical 원본 경로를 기록한다. 새 프로젝트는 native 폴더 선택으로 기록하며, 이전 기록은 목록/대화 이력을 유지하되 폴더를 다시 선택하기 전에는 catalog reopen과 원본 접근을 거부한다. 명시 재선택은 기존 작업 복사본·편집·복구 상태를 보존한다. marker가 있는데 경로가 불일치하면 자동 수정하지 않는다. 원본을 열지 않는 반영 이력 조회와 시작 전 snapshot 복구는 metadata 전용 조회를 사용해 재선택 전에도 유지한다. 이 표식은 원본 선택만 증명하며 종료·반영·복구 승인을 대체하지 않는다. 과거 손실된 경로 철자는 자동 복원하지 않는다.
 
 > 프로젝트 경로 인코딩: `project/protocol_path.rs`가 native 경로를 기존 canonical wire 계약으로 변환한다. Windows local drive 및 정규화 가능한 verbatim drive 경로만 지원하며 namespace/ADS/예약 장치명/후행 점·공백 등 의미가 달라질 수 있는 입력은 거부한다. Unix 파일명의 역슬래시를 슬래시로 바꾸지 않는다. 이 변환은 파일 신원·핸들 검증이나 IO 권한의 증거가 아니며 Windows G4/stdio 차단은 유지한다. 과거 손실 변환된 기록의 원래 철자는 이 parser로 복구할 수 없으며 별도 재선택/이관 계약이 미완료다. Windows 이름 해석 근거: [Microsoft 파일·경로 규칙](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file).

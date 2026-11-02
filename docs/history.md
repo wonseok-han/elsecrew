@@ -2,6 +2,12 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 이전 turn은 기존 경로 재확인 및 복구 회귀 해소로 진전했다. 깨끗한 323d5a7에서 Windows 파일 접근 기반을 직접 구현했다. `project/windows_fs.rs`는 열린 핸들의 FILE_ID_INFO(volume + 128비트 ID), FILE_ATTRIBUTE_TAG_INFO, GUID volume 경로를 검사하며 기존 component별 디렉터리 탐색/파일 열기에 연결했다. UNC/알 수 없는 volume과 재분석 지점은 거부하고 Dir 핸들 재확보 전후 신원을 비교한다.
+- 독립 검토에서 cap-std의 nofollow만으로 Windows 정션이 먼저 따라가질 수 있는 결함을 찾아, 디렉터리와 파일 모두 열기 시점에 FILE_FLAG_OPEN_REPARSE_POINT를 지정하도록 수정했다. native 회귀에 핸들 복제/서로 다른 디렉터리, symlink, DeviceIoControl로 만든 임시 junction 및 reparse file 거부를 추가했다. 수정 후 독립 재검토에서 추가 차단 결함 없음.
+- macOS cargo check 및 신규 모듈 rustfmt·diff 검사는 통과했다. 설치된 Rust target은 macOS뿐이며 Windows native 부분의 컴파일·실행은 아직 검증하지 않았다. 이번 작업은 구현 체크포인트이고 Windows 제품/G4/stdio gate는 열지 않았다. 새 push/CI·실제 모델 호출·패키지 교체 없음. 다음은 Windows 프로세스 수명주기·디스크/replace/watcher 연결과 묶음 검증이다.
+
+### 2026-11-02 · by GPT-6
+
 - 825a9b4 경로 재확인 구현의 전체 sidecar 회귀는 695 passed/5 failed/43 ignored(722.74초)였다. 4건은 샌드박스의 임시 Unix socket/프로세스 신원 접근 제한이며 같은 바이너리·코드로 필요한 접근을 허용한 scoped 재시험 4/4가 통과했다. 실제 공급자나 사용자 인증은 사용하지 않았다.
 - 나머지 1건은 실제 회귀였다. 원본을 전혀 열지 않는 시작 전 snapshot 복구까지 새 경로 확인이 막았다. metadata 전용 `registered_project`를 분리해 관리 폴더만 검사하는 기존 복구와 반영 이력 조회를 유지했다. 원본 접근은 계속 `required_project`의 binding 검사를 거친다. 수정 후 legacy binding 4개·복구 dispatch 1개·snapshot 복구 3개, 총 8/8 PASS이며 독립 재검토 차단 결함 없음. 전체 suite를 다시 반복하지 않았으므로 최신 단일 전체 PASS로 표기하지 않는다.
 - TypeScript·renderer 빌드·편집기 회귀 63개·신규 모듈 rustfmt·diff 검사 통과. 증거 `.artifacts/m5-path-binding-20261102/`. 패키지 교체/추가 push/실제 모델 호출 없음. Windows 기능·패키징, G6 실측과 출시 검증은 계속 남는다.
