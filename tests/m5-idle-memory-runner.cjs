@@ -13,6 +13,10 @@ const hasBridge = mode === 'preload' || mode === 'product';
 const softwareRendering = process.argv.includes('--software-rendering');
 const spellcheck = !process.argv.includes('--no-spellcheck');
 const deferShow = process.argv.includes('--defer-show');
+const paintAfterMount = process.argv.includes('--paint-after-mount');
+if (paintAfterMount && (mode !== 'product' || deferShow)) throw new Error('paint-after-mount requires product without defer-show');
+const startedAt = performance.now();
+let preSampleReadyAtMs;
 if (softwareRendering) app.disableHardwareAcceleration();
 const root = resolve(__dirname, '..');
 const renderer = resolve(root, '.vite/renderer/main_window');
@@ -37,7 +41,7 @@ app.whenReady().then(async () => {
     if (!asset.startsWith(renderer + sep)) return new Response('not found', { status: 404 });
     return net.fetch(pathToFileURL(asset).href);
   });
-  window = new BrowserWindow({ width: 1280, height: 800, show: !deferShow, webPreferences: {
+  window = new BrowserWindow({ width: 1280, height: 800, show: !deferShow && !paintAfterMount, paintWhenInitiallyHidden: !paintAfterMount, webPreferences: {
     ...(hasBridge ? { preload: buildPerformancePreload(resolve(userData, 'performance-preload.cjs')) } : {}),
     contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false, spellcheck,
   } });
@@ -56,6 +60,16 @@ app.whenReady().then(async () => {
     layerEnableResult = debuggerApi.sendCommand('LayerTree.enable').then(() => null, error => String(error));
   }
   await window.loadURL('m5idle://m5/index.html');
+  if (paintAfterMount) {
+    // Wait for the actual mounted UI, not ready-to-show (which requires paint).
+    const deadline = performance.now() + 3000;
+    while (!await window.webContents.executeJavaScript('Boolean(document.querySelector(".m5-workbench"))')) {
+      if (performance.now() >= deadline) throw new Error('UI did not mount before first show');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    window.show();
+  }
+  preSampleReadyAtMs = performance.now() - startedAt;
   const layerEnableError = await layerEnableResult;
   if (layerEnableError) throw new Error(layerEnableError);
   if (hasBridge && !await window.webContents.executeJavaScript('window.m5PerformanceEnvironment?.sandboxed === true')) throw new Error('preload is not sandboxed');
@@ -70,7 +84,7 @@ app.whenReady().then(async () => {
     await new Promise(r => setTimeout(r, 250));
   }
   const report = { diagnostic: true, rendererSandbox: true, mode, userData, head: execFileSync('/usr/bin/git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
-    window: {width:1280,height:800}, softwareRendering, spellcheck, deferShow, visible:window.isVisible(),
+    window: {width:1280,height:800}, softwareRendering, spellcheck, deferShow, paintAfterMount, preSampleReadyAtMs, visible:window.isVisible(),
     scope: 'fresh Electron app idle only; no sidecar/provider; five samples after one second; painted/localized/rendered have no app code or preload; not release evidence',
     samples, metrics: app.getAppMetrics(), dom: await window.webContents.executeJavaScript('({nodes:document.querySelectorAll("*").length,ready:Boolean(document.querySelector(".m5-workbench")),visibility:document.visibilityState})') };
   if (mode === 'product' && !report.dom.ready) throw new Error('product did not mount');

@@ -2,6 +2,12 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 직전 턴의 allocator 통계 수집은 진척이며 이번 기준은35fec4a/깨끗한 통합 브랜치다. 진단 runner에 product 전용 `--paint-after-mount`를 추가했다. 창을 숨기고 초기 paint를 끈 채 실제 workbench DOM을 기다린 뒤 표시한다. 제품 main/표시 동작은 변경하지 않았다. 표시 준비 관측 시각은 startup/실제 paint 완료 지표로 쓰지 않는다.
+- 기본/후보/후보/기본 순서 대조의 최대RSS는401.046875/433.515625/428.9375/429.125MiB였다. 모두 visible·DOM111개, trace 손실 없음. tile 할당은72.4375/55.0625/55.0625/59.125MiB로 일부 감소했지만 RSS 개선은 일관되지 않아 제품 최적화로 채택하지 않는다. `.artifacts/m5-performance/idle-first-paint-series-2026-11-02.json`에 비교와 종료/PID부재·자체 프로필4개 정리 기록을 남겼다. 실제 공급자·인증·사용자 데이터는 접근하지 않았다.
+- `docs/procedures/m5-performance.md`의 구간 분리 재측정 대기 문구를 실제 fourth 결과와 대조해 갱신했다. 해당 JSON status/functionalStatus 모두FAIL이며 명시된 오류는idle RSS 초과다. 유휴434.41MiB이므로 기존400MiB 기준을 계속 실패로 유지한다. runner 문법·diff PASS, main병합·push없음. 다음은 첫 paint 지연 외의 실제 메모리 절감과 G6·Windows·출시 미완료 항목이다.
+
+### 2026-11-02 · by GPT-6
+
 - 직전 턴은 합성 레이어 후보 기각과 진단 코드71af084로 진척했다. 깨끗한 동일 HEAD에서 `--memory-infra`를 추가해 RSS 샘플링 뒤 자체 가짜 화면의 Chromium allocator 통계만 수집했다. CDP deterministic=false로 강제 GC를 사용하지 않으며 사용자 앱/인증/모델은 접근하지 않는다. 제품 동작은 변경하지 않았다.
 - 첫4MiB trace는 dump success이지만 dataLossOccurred=true라 불완전 자료다. 진단 버퍼를16MiB로 늘린 두 번째(PID31733)는 success=true/dataLossOccurred=false이며 renderer 상세도 수집됐다. `.artifacts/m5-performance/idle-memory-infra-31733.json` 및 `idle-tile-summary-2026-11-02.json`: tile pool20개 총72.4375MiB 중 free_size55.0625MiB, busy_size0이다. GPU shared_images117.8125MiB와 renderer tile 소유량은 겹치므로 더하지 않는다. 이는 할당 통계이고 RSS·즉시 회수 가능량·누수 증명이 아니다.
 - 두 시험의 종료·trace/샘플에 기록된 PID부재를 확인한 뒤 자체 niWuY1/cnU9XY 프로필을 정리했다. 로그·cleanup 증거는 위 artifact 폴더에 유지했다. runner 문법·diff 검사 PASS; 초기 무계측 RSS 최대373.375/413.296875MiB의 변동으로400MiB 통과를 주장하지 않는다. 다음은 초기에 생성된 여분 타일을 줄일 수 있는지 첫 화면 표시/렌더 순서 대조로 확인한다. G6·Windows·출시 미완료, main병합·push없음.
@@ -149,7 +155,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **초기 메모리 조사(2026-11-02)**: 유휴400MiB 기준 유지. 같은 정적 화면도 큰 비용이며 software rendering/spellcheck/ready-to-show는 개선 근거 없음. 레이어5개에 명백한 불필요 승격 없음. 손실 없는 memory-infra 통계에서 renderer tile pool72.4375MiB 중 free55.0625MiB 확인(할당 통계≠RSS 절감량). 다음 후보는 초기 렌더 순서/타일 재사용이며 상세·증거는 최신 워크로그.
+- **초기 메모리 조사(2026-11-02)**: 유휴400MiB 기준 유지. 같은 정적 화면도 큰 비용이며 software rendering/spellcheck/ready-to-show는 개선 근거 없음. 레이어5개에 명백한 불필요 승격 없음. 손실 없는 memory-infra 통계에서 renderer tile pool72.4375MiB 중 free55.0625MiB 확인(할당 통계≠RSS 절감량). 초기 paint를 DOM mount 뒤로 늦춘 대조도 RSS 개선이 없어 기각했다. 상세·증거는 최신 워크로그.
 
 - **2026-11-02 사용자 확정 — 메모리 기준 유지**: macOS 유휴400MiB와 추가 최적화를 선택했다.512MiB 상향은 승인되지 않았다. 부하800MiB·잔류증분120MiB 및 전체 검증 요건도 유지한다.
 
