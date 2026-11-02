@@ -2,6 +2,14 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 조작 없는5분 가시성 확인 후 깨끗한e1f80ba에서 빌드한 QA로 eleventh combined 시험을 완료했다. ASAR 측정 소스5개 일치, 외부 입력0, 입력25.2ms/Undo·4개 기록 복원 정상이다. main284.328ms(초과2건)/idle430.406MiB로 전체FAIL이며 peak688.125MiB/잔류증분0이다. 제품 재파싱 최적화의 UI 기능 회귀는 이 단회 경로에서 없었지만 G6 합격은 아니다.
+- 세분화된 Node timer 최대값은 preparing18.9ms, loaded14.5ms, live-output41.8ms, history-pages13.3ms, generation-audit11.5ms, closing14.6ms, retained638.1ms다. Chromium 최장 task 이름은 계속 ThreadControllerImpl::RunTask다. Node timer와 Chromium task는 서로 다른 관측이므로284ms가 실제 live 처리에서 발생했다고 단정하지 않는다. trace 종료/보고 구간의 자기 계측 비용 가능성을 먼저 분리해야 한다. 과거 FAIL을 임의로 PASS로 바꾸지 않는다.
+- .artifacts/m5-combined-output-2026-11-02/eleventh/에 증거를 보존했다. 정상quit, DB clean_shutdown_at03:11:41Z, 관측59개PID/경로 프로세스 부재 확인 뒤 WvMLtI 앱·Jm0TIV 원본/복사본/프로필을 삭제했다. 사용자 데이터·실제 모델 변경/호출 없음.
+- 대기 중 성능 절차의 오래된10,000 task/동기RSS/입력 미실측 설명을 현재 집계·비동기 수집·단회 증거로 교정했고 외부 입력과 보조 단계 진단 경계를 명시했다. 문서 diff검사PASS. 다음은 화면 재시험을 곧바로 반복하기보다 별도 최소 trace 시험으로 종료 계측 비용을 분리하는 것이다. 유휴400MiB/반복G6/Windows/출시 미완료, main병합/push없음.
+
+
+### 2026-11-02 · by GPT-6
+
 - 3a236d4 이후 실제 main의 agent.outputPage 응답이 이미 JSON 파싱된 값을 다시 직렬화→UTF8 decode→JSON parse하던 중복을 제거했다. 새 validateDecodedOutputPage는 직렬화된UTF8의512KiB 한도를 그대로 검사하고, raw decoder와 같은 비공개 validatePage로 binding/순서/중복/필드/item metadata를 검증한다. 원시 protocol1MiB 및 fatalUTF8 검사는 유지한다. 임의 JS 객체가 아니라 protocol이 JSON-value 검증한 값만 새 main 경로로 들어가는 것을 독립 검토에서 확인했다.
 - output-page8/bridge64/src TypeScript PASS, QA phase2/문법/diff 검사PASS, 제품 경계 독립 검토 승인.394,022byte escaped 페이지에서 교차순서210회씩 부분 벤치마크의 중앙값은 이전0.684ms→새0.357ms/페이지였다. 재파싱 비용 감소 증거이며247ms 원인 규명이나 앱 성능 합격은 아니다. .artifacts/m5-decoded-output-2026-11-02/에 로그/벤치마크를 보존했다.
 - 다음 실측의 loaded 진단을 live-output/history-pages/generation-audit로 분리했다. 전체200ms gate/메모리 단계/시나리오는 그대로다. 이번 앱·모델 실행 없음. 다음은 세 구간 중 실제 병목을 특정하고 수정하는 것이다. 유휴400MiB/반복G6/Windows/출시는 미완료, main병합/push없음.
@@ -73,6 +81,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **main 지연 귀속 주의(2026-11-02 eleventh)**: Chromium284ms와 달리 live/history/generation Node timer는42ms 이하다. retained 보조 진단638ms는 trace 종료/보고까지 포함한다. 측정기 종료 비용 가설을 먼저 최소 시험으로 분리하고, 다른 시계/측정의 값을 직접 동일시하거나 기존FAIL을 차감하지 않는다. 출력 재파싱 최적화만으로200ms/400MiB 문제가 해결되지는 않았다.
 
 - **현재 인계(2026-11-02, Undo 수정)**: 저장 내용으로 되돌려도 dirty가 남던 결함을 비동기 파일버전 비교로 수정했다. 원문 추가 보관 없이 경로 대기열·단일 digest·정확한 탭/세대 검사를 사용한다. controller62/작업복사본10/TypeScript/독립 검토 PASS, 2faed62 실제 QA에서도 Undo 복원을 확인했다. 단일 combined 시험은 입력798.1ms와 main trace 불완전으로 FAIL이다. 이후 main 수집기는 제한된 스레드별 전체 집계로 수정하고19개 검사·독립 검토를 통과했으나 eighth 실제 실행에서도 수집 완결성을 확인했다. 다만 main294.538ms·idle448.703MiB 실패이며 입력19.9ms는 단일 관측이다. 이 trial 메모리만 기준 내이며 반복 합격은 아니다. 관련 시험 앱/프로필은 종료 확인 후 모두 삭제했다. 실제 모델 호출 승인 잔여 없음. 유휴400MiB/G6/Windows/출시는 계속 미완료다. 최신 세부 워크로그는 [11월](archive/history-2026-11.md)을 먼저 확인한다.
 

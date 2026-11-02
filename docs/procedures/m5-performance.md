@@ -40,9 +40,9 @@ renderer는 저장소 admission ready·빈 시작 화면·선택 차단 해제 �
 
 ## 패키지 메인 스레드 추적
 
-전체 Chromium 이벤트의 처리 예산은 1,000,000개, 보존하는 root 프로세스 작업 표본은 10,000개다. 긴 스트림에서 다른 프로세스 이벤트만으로 이전 100,000개 처리 예산을 넘던 수집 중단을 줄이며, 어느 한도든 넘으면 불완전 측정으로 거절한다. 합격선이나 유실 판정은 변경하지 않는다.
+전체 Chromium 이벤트 처리 예산은1,000,000개다. root 스레드는 최대128개이며 각 스레드의 전체 작업 수·200ms 초과 수·최대값 증거1개를 누적한다. metadata가 나중에 도착해도 앞선 main 작업을 포함한다. 최대값의 task 이름은128자까지만 보존하고 args는 제외한다. 이벤트/스레드 한도 초과·모호한 main 식별은 불완전 관측이다. 이전10,000개 원시 task 배열 한도는 폐기했지만 과거 실패 기록은 재판정하지 않는다.
 
-`m5-packaged-ui-smoke.mjs`의 프로젝트 시나리오는 가시성 전제 확인 뒤 CDP `Tracing`의 `toplevel`을 수집한다. 앱 PID와 `CrBrowserMain` metadata가 지정한 스레드의 complete duration만 μs→ms로 변환한다. 다른 스레드·순간/flow 표식은 시간값에 섞지 않으며, 메인 스레드의 미완료/알 수 없는 duration 형식·추적 유실·종료 누락·표본 초과는 불완전한 관측이다. task args와 사용자 payload는 보존하지 않는다. 반복 수집기는 원시 timing에서 최대값/200ms 초과 개수를 다시 계산하고 idle 진단을 프로젝트 증거로 받지 않는다.
+`m5-packaged-ui-smoke.mjs`의 프로젝트 시나리오는 가시성 전제 확인 뒤 CDP `Tracing`의 `toplevel`을 수집한다. 앱 PID와 `CrBrowserMain` metadata가 지정한 스레드의 complete duration만 μs→ms로 변환한다. 다른 스레드·순간/flow 표식은 시간값에 섞지 않으며, 메인 스레드의 미완료/알 수 없는 duration 형식·추적 유실·종료 누락·표본 초과는 불완전한 관측이다. task args와 사용자 payload는 보존하지 않는다. 반복 수집기는 집계 형식의 작업 수/초과 수/최대값 증거와 완료·유실 상태를 검증한다. 이전 원시 timing 형식도 검사하며 idle 진단을 프로젝트 증거로 받지 않는다.
 
 `node --experimental-strip-types scripts/m5-packaged-ui-smoke.mjs --main-trace`는 빈 임시 프로필에서 추적 형식만 확인한다. 가시성이 검증된 프로젝트 성능이나 정식 G6를 대신하지 않는다. 추적 자체가 메모리·시간에 영향을 주며, 시작 이전/추적 밖 작업과 JSON B/E duration 쌍의 완전한 지원은 보장하지 않는다. 메인 스레드 B/E가 관측되면 PASS 대신 불완전한 측정으로 남긴다. 프로토콜 근거: [Chromium Tracing](https://chromedevtools.github.io/devtools-protocol/tot/Tracing/).
 
@@ -259,7 +259,7 @@ QA live 구간의 시작은 배열 길이 cursor만 보관하고 종료 때 해�
 
 ### 출력 QA의 RSS 수집기 자체 제외 (2026-11-02)
 
-동시 부하를 포함한 출력 QA는 `spawnSync`가 반환한 ps PID를 검증하고 해당 수집기 행만 프로세스 트리 합계에서 제외한다. 앱·sidecar·에이전트 자손은 계속 합산한다. 정확한 PID·직계 부모를 확인하지 못하거나 ps가 실패하면 관측 오류를 기록한다. 이 수정 전 fourth 등 결과에는 일시적인 수집기 RSS가 포함돼 있다. 과거 원시 값과 실패 결과를 임의 차감/재판정하지 않으며 최신 실행의 수집으로 교체해야 한다. 수집기 제외는 실제 제품 메모리 최적화 또는400MiB 합격 증거가 아니다.
+동시 부하를 포함한 출력 QA는 비동기 `execFile`의 ps PID를 검증하고 해당 수집기 행만 프로세스 트리 합계에서 제외한다. 한 번에 한 수집만 허용하고2초/4MiB 상한을 유지한다. 단계 변경·종료 전에 진행 중 수집을 drain하며 단계 교차·중복 tick·오류·자료 잘림은 실패다. 시작/완료/소요 시간을 기록한다. 앱·sidecar·에이전트 자손은 계속 합산한다. 정확한 PID·직계 부모를 확인하지 못하거나 ps가 실패하면 관측 오류를 기록한다. 이 수정 전 fourth 등 결과에는 일시적인 수집기 RSS가 포함돼 있다. 과거 원시 값과 실패 결과를 임의 차감/재판정하지 않으며 최신 실행의 수집으로 교체해야 한다. 수집기 제외는 실제 제품 메모리 최적화 또는400MiB 합격 증거가 아니다.
 
 ### 출력·동시 부하의 renderer long task
 
@@ -269,10 +269,17 @@ QA live 구간의 시작은 배열 길이 cursor만 보관하고 종료 때 해�
 
 출력 QA도 기존 `createMainTaskTrace`를 재사용한다. visible bridge 준비 뒤 QA 창의 debugger로 Chromium `toplevel` trace를 시작하고, 원시 이벤트에서 해당 앱 PID의 `CrBrowserMain` 완결 slice만 평가한다. 시나리오 종료 뒤 tracingComplete를 최대8초 기다리고 연결을 해제한다. 미완료·data loss·기존100만 이벤트/1만 task 상한 초과는0ms로 대체하지 않는다. 본10회의 mainLongTaskMs 최대값은200ms 기준과 비교한다. 이전 출력 기록에 mainLongTasks가 없으면 새 요약기는 거절한다.
 
-이 관측은 QA 전용이며 debugger/trace 자체 비용도 측정 프로세스에 포함된다. trace 없는 과거 RSS와 직접 비교해 최적화 효과를 주장하지 않는다. 시작 이전 작업·물리적 화면 표시·전체G6를 증명하지 않는다. 연결 및 파서/요약 회귀까지 확인했고, 새 패키지의 완전한 동시 부하 실측은 아직 남아 있다.
+이 관측은 QA 전용이며 debugger/trace 자체 비용도 측정 프로세스에 포함된다. trace 없는 과거 RSS와 직접 비교해 최적화 효과를 주장하지 않는다. 시작 이전 작업·물리적 화면 표시·전체G6를 증명하지 않는다. 연결 및 파서/요약 회귀까지 확인했고, 완전한 단회 실측은 eighth/tenth에서 수행했으나 main/idle 기준을 넘었고 반복 합격은 남아 있다.
 
 `node_modules/.bin/electron tests/m5-main-task-session-smoke.cjs`는 새 `startMainTaskSession`의 debugger attach/trace completion/detach를 실제 Electron에서 확인하는 별도 진단이다. 자체 임시 userData와 보이지 않는 빈 창만 사용하고 sidecar/공급자를 실행하지 않는다. 2026-11-02 완료/손실 없음/리스너 해제/정상 종료를 확인했지만, 빈 창 시간값은 제품 성능이나 전체G6 근거가 아니다. 결과의 root 아래 기록을 보존하고 종료/PID부재를 확인한 뒤 그 프로필만 정리한다.
 
 ### 동시 부하의 편집 입력
 
-combined QA는 첫12초 출력 관측 뒤 네 run이 아직 emitting인 상태에서 5MiB Monaco 편집기에 Electron native char Z를 보낸다. 실제 trusted beforeinput1회·dirty 표시·첫 줄 변화·두 animation frame을 요구하고, 시작/전달/화면 관측 시각을 보존한다. Cmd+Z 뒤 원래 첫 줄과 clean 상태를 확인하며 저장/API model mutation은 하지 않는다. 입력 후에도 네 run이 미봉인 상태여야 한다. 요약기는 원시 시각 차이와 복원/trusted/live 증거를 검사하고 본10회 inputPaintMs 최대값을50ms 기준과 비교한다. 물리 화면 지연 측정은 아니며 새 패키지 실제 입력/Undo 경로 검증은 미완료다.
+combined QA는 첫12초 출력 관측 뒤 네 run이 아직 emitting인 상태에서 5MiB Monaco 편집기에 Electron native char Z를 보낸다. 실제 trusted beforeinput1회·dirty 표시·첫 줄 변화·두 animation frame을 요구하고, 시작/전달/화면 관측 시각을 보존한다. Cmd+Z 뒤 원래 첫 줄과 clean 상태를 확인하며 저장/API model mutation은 하지 않는다. 입력 후에도 네 run이 미봉인 상태여야 한다. 요약기는 원시 시각 차이와 복원/trusted/live 증거를 검사하고 본10회 inputPaintMs 최대값을50ms 기준과 비교한다. 물리 화면 지연 측정은 아니다. 실제 입력/Undo는 seventh 이후 단회 실행에서 확인했고 입력798ms 실패와 후속19.9~25.2ms 관측이 공존하므로 반복 합격으로 주장하지 않는다. measure 진입/DOM 준비/첫 프레임도 별도 기록한다.
+
+
+### 화면 조작과 단계별 보조 진단
+
+측정 중에는 창을 가리지 않고 휠·클릭·탐색 키를 입력하지 않는다. 계획된 native Z/Undo와 별도로 실제 외부 탐색 입력을 기록하며, 그 증거가 없거나 잘렸거나 외부 입력이 섞인 결과는 자동 합격에서 제외한다. 실패 진단에도 입력 기록을 보존한다. 일반 단회 준비/실행은 약5분이지만 반복은 더 오래 걸리므로 시작 전에 가시성 시간을 확인한다.
+
+Node timer 지연은 starting/idle/preparing/loaded/live-output/history-pages/generation-audit/closing/retained로 나눠 보조 진단한다. 행 수는 최대17개이며 단계 경계는 근사치다. ELU가 모두0이면 utilizationAvailable=false와null을 기록한다. 이 정보는 Chromium task 최대200ms나 RSS 기준을 대체하지 않으며, 관측 종료/trace 처리 비용까지 포함할 수 있다.
