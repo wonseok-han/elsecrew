@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { decodeOutputPage, validateOutputPageRequest, OUTPUT_PAGE_MAX_BYTES, type OutputPageRequest, type OutputPage } from "../src/m5/contracts/agent-output-pages.ts";
+import { validateDecodedOutputPage, decodeOutputPage, validateOutputPageRequest, OUTPUT_PAGE_MAX_BYTES, type OutputPageRequest, type OutputPage } from "../src/m5/contracts/agent-output-pages.ts";
 import type { AgentPublicEventV1 } from "../src/m5/contracts/agent-adapter-v1.ts";
 import { decodeJsonl } from "../src/m5/contracts/protocol-v1.ts";
 
@@ -96,4 +96,27 @@ test("maximum escaped body fits without splitting an event", () => {
   const bytes = encode(value);
   assert.ok(bytes.length > 256 * 1024);
   assert.equal(decodeOutputPage(bytes, query).rows.length, 1);
+});
+
+
+test("decoded transport path preserves binding, sequence, shape and UTF8 byte limits", () => {
+  const query=request();
+  const value=page(query,100);
+  assert.deepEqual(validateDecodedOutputPage(value,query),decodeOutputPage(encode(value),query));
+  for(const mutate of [
+    (p:any)=>{p.rows[1].outputSequence=3;},
+    (p:any)=>{p.rows[1].event.eventId=p.rows[0].event.eventId;},
+    (p:any)=>{p.rows[0].event.runId='agent_run_other';},
+    (p:any)=>{p.request.binding.projectId='project_other';},
+    (p:any)=>{p.nextAfterSequence=99;},
+    (p:any)=>{p.extra=true;},
+    (p:any)=>{p.rows[0].itemUpdate={itemId:'x',operation:'unsafe',channel:'message'};},
+    (p:any)=>{for(const row of p.rows)row.event.text='가'.repeat(10000);},
+  ]) {
+    const bad=structuredClone(value);mutate(bad);
+    assert.throws(()=>validateDecodedOutputPage(bad,query));
+    assert.throws(()=>decodeOutputPage(encode(bad),query));
+  }
+  const escaped=page(request(0,1),1);escaped.rows[0].event.text='\u0001'.repeat(64*1024);
+  assert.deepEqual(validateDecodedOutputPage(escaped,escaped.request),decodeOutputPage(encode(escaped),escaped.request));
 });

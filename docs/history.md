@@ -2,6 +2,13 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 3a236d4 이후 실제 main의 agent.outputPage 응답이 이미 JSON 파싱된 값을 다시 직렬화→UTF8 decode→JSON parse하던 중복을 제거했다. 새 validateDecodedOutputPage는 직렬화된UTF8의512KiB 한도를 그대로 검사하고, raw decoder와 같은 비공개 validatePage로 binding/순서/중복/필드/item metadata를 검증한다. 원시 protocol1MiB 및 fatalUTF8 검사는 유지한다. 임의 JS 객체가 아니라 protocol이 JSON-value 검증한 값만 새 main 경로로 들어가는 것을 독립 검토에서 확인했다.
+- output-page8/bridge64/src TypeScript PASS, QA phase2/문법/diff 검사PASS, 제품 경계 독립 검토 승인.394,022byte escaped 페이지에서 교차순서210회씩 부분 벤치마크의 중앙값은 이전0.684ms→새0.357ms/페이지였다. 재파싱 비용 감소 증거이며247ms 원인 규명이나 앱 성능 합격은 아니다. .artifacts/m5-decoded-output-2026-11-02/에 로그/벤치마크를 보존했다.
+- 다음 실측의 loaded 진단을 live-output/history-pages/generation-audit로 분리했다. 전체200ms gate/메모리 단계/시나리오는 그대로다. 이번 앱·모델 실행 없음. 다음은 세 구간 중 실제 병목을 특정하고 수정하는 것이다. 유휴400MiB/반복G6/Windows/출시는 미완료, main병합/push없음.
+
+
+### 2026-11-02 · by GPT-6
+
 - 조작 없는5분 가시성 확인 후 깨끗한9750856 QA 빌드/ASAR5개 소스 일치를 확인하고 tenth combined 시험을 완료했다. 외부 입력0,4개 채팅의 과거/다음/최신 기록 복원 완료, 입력24.9ms/Undo 정상이다. 전체는 main247.916ms(초과2건)·idle429.016MiB로FAIL이며 peak699.969MiB/잔류증분0이다. 단일 진단이며 출시/G6 합격이 아니다.
 - 최장 Chromium task 이름은 ThreadControllerImpl::RunTask다. Node timer 진단은 준비 구간30.8ms, loaded249.8ms로 실제 출력/검토 구간에 집중됐다. retained 진단567ms는 trace 종료/보고 처리까지 포함하므로 제품 main 지연과 동일시하지 않는다. Electron의 ELU active/idle은 전 단계0으로 측정 가용성을 확인할 수 없었다. 이를 활동0의 증거로 쓰지 않도록 후속 코드에서는 utilizationAvailable=false 및null로 표기한다. phase/session5 PASS·diff 검사PASS이며 새 패키지 재시험은 하지 않았다.
 - .artifacts/m5-combined-output-2026-11-02/tenth/에 결과·빌드·정리 증거를 저장했다. 정상quit, DB clean_shutdown_at02:58:26Z, 관측74개PID/경로 프로세스 부재 확인 후 Kua5pc 앱·ynyakv 원본/복사본/프로필을 모두 삭제했다. 모델·사용자 데이터 변경 없음.

@@ -253,6 +253,7 @@ app.on('browser-window-created', (_event, window) => {
             inputMessageIds:[detail.messages[0].messageId],expectedCapabilityFingerprint:capability.fingerprint}));
         }
       })()`);
+      mainPhaseProbe?.phase('live-output');
       if (live) for (let index = 0; index < 4; index++) {
         if (combined && index === 0) {
           await wait("document.querySelector('.m5-durable-output select')?.value === outputSmokeRuns[0].runId && document.querySelector('.m5-timeline h2')?.textContent === 'Output stream 0'");
@@ -335,6 +336,7 @@ app.on('browser-window-created', (_event, window) => {
         }
 
       }
+      mainPhaseProbe?.phase('history-pages');
       for (let index = 0; index < 4; index++) {
         await run(`[...document.querySelectorAll('.m5-chat-chip')].find(b => b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}').click()`);
         // Every chat has identical output text. Wait for the selected run and the
@@ -367,6 +369,7 @@ app.on('browser-window-created', (_event, window) => {
         report.restoredChats.push(index); persist();
       }
       assert.equal(fs.readFileSync(path.join(source, 'hello.txt'), 'utf8'), 'original\n');
+      mainPhaseProbe?.phase('generation-audit');
       if (paced) report.generation = await run(`(async () => {
         const generated = [];
         for (const accepted of outputSmokeRuns) {

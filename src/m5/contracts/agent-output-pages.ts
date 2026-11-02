@@ -1,4 +1,4 @@
-/** Draft durable-output contract; not yet exposed through the runtime bridge. */
+/** Durable-output page validation shared by transport boundaries. */
 import {
   validateAgentPublicEventAgainstRunV1,
   validateAgentRunBindingV1,
@@ -68,9 +68,21 @@ export function validateOutputPageRequest(value: unknown): OutputPageRequest {
 /** Validate bytes before decoding; storage must separately prove the committed
  * watermark and cross-page event-ID uniqueness. Transport seq is not used. */
 export function decodeOutputPage(bytes: Uint8Array, expectedValue: OutputPageRequest): OutputPage {
-  const expected = validateOutputPageRequest(expectedValue);
   if (bytes.byteLength > OUTPUT_PAGE_MAX_BYTES) return fail();
   const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  return validatePage(value, expectedValue);
+}
+
+/** For already JSON-decoded transport values. Preserve the same serialized byte
+ * budget without decoding and parsing a second full copy of the page. */
+export function validateDecodedOutputPage(value: unknown, expectedValue: OutputPageRequest): OutputPage {
+  const serialized = JSON.stringify(value);
+  if (typeof serialized !== "string" || new TextEncoder().encode(serialized).byteLength > OUTPUT_PAGE_MAX_BYTES) return fail();
+  return validatePage(value, expectedValue);
+}
+
+function validatePage(value: unknown, expectedValue: OutputPageRequest): OutputPage {
+  const expected = validateOutputPageRequest(expectedValue);
   const page = object(value, ["request", "rows", "nextAfterSequence"]);
   const request = validateOutputPageRequest(page.request);
   if (request.afterSequence !== expected.afterSequence || request.throughSequence !== expected.throughSequence

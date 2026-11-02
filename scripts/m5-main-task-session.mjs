@@ -45,7 +45,7 @@ export async function startMainTaskSession(debuggerApi, rootPid) {
 // https://nodejs.org/api/perf_hooks.html#perf_hooksmonitoreventloopdelayoptions
 export function createMainPhaseProbe() {
   const histogram=monitorEventLoopDelay({resolution:10});
-  const allowed=['starting','idle','preparing','loaded','closing','retained'];
+  const allowed=['starting','idle','preparing','loaded','live-output','history-pages','generation-audit','closing','retained'];
   const rows=[];
   let phase='starting', startedAt=performance.now(), baseline=performance.eventLoopUtilization(), stopped=false;
   histogram.enable();

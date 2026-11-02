@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { validateAgentRunBindingV1 } from "../src/m5/contracts/agent-adapter-v1.ts";
-import { decodeOutputPage, validateOutputHead, validateOutputPageRequest, type OutputHead, type OutputPage, type OutputPageRequest } from "../src/m5/contracts/agent-output-pages.ts";
+import { validateDecodedOutputPage, validateOutputHead, validateOutputPageRequest, type OutputHead, type OutputPage, type OutputPageRequest } from "../src/m5/contracts/agent-output-pages.ts";
 import { validateModelChoicesRequest, validateModelChoicesResult, type ModelChoicesRequest, type ModelChoicesResult } from "../src/m5/contracts/model-choices-v1.ts";
 import { validateApprovalRequest, validateApprovalResult, type ApprovalRequest, type ApprovalResult } from "../src/m5/contracts/approval-v1.ts";
 import { validateLoginRequest, validateLoginStatus, type LoginRequest, type LoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
@@ -1055,7 +1055,7 @@ export class SidecarClientV1 {
       }
       case "agent.outputPage": {
         const request = validateOutputPageRequest(pending.params);
-        return decodeOutputPage(new TextEncoder().encode(JSON.stringify(response.result)), request);
+        return validateDecodedOutputPage(response.result, request);
       }
       case "recovery.resolveAgent": {
         const request = validateAgentRecoveryResolveRequestV1(pending.params);
