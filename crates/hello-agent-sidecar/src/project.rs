@@ -3,6 +3,8 @@ mod protocol_path;
 mod path_binding;
 #[cfg(any(windows, test))]
 mod windows_fs;
+#[cfg(any(windows, test))]
+mod windows_space;
 use crate::{AppendOutcome, SidecarError, Storage};
 #[cfg(unix)]
 use cap_fs_ext::OsMetadataExt;
@@ -5121,7 +5123,12 @@ fn available_space(dir: &Dir) -> Result<u64, ProjectFailure> {
         .ok_or_else(|| ProjectFailure::recovery("available disk byte count overflow"))
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn available_space(dir: &Dir) -> Result<u64, ProjectFailure> {
+    windows_space::available(dir)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn available_space(_dir: &Dir) -> Result<u64, ProjectFailure> {
     Err(ProjectFailure::recovery(
         "snapshot disk reserve is unsupported before the Windows safety gate",

@@ -1,6 +1,6 @@
 # Hello, Agent 기술 설계
 
-> **Windows 파일 접근 기반(미검증)**: `project/windows_fs.rs`에 열린 핸들의 전체 파일 신원·재분석 속성·local GUID volume 검사와 component 탐색을 구현했다. 디렉터리/파일은 OPEN_REPARSE_POINT로 열어 대상에 접근하기 전에 재분석 지점을 거부한다. Windows 컴파일/실기기 검증은 남아 있고 G4/stdio 및 실제 공급자 gate는 비활성이다.
+> **Windows 파일 접근 기반(미검증)**: `project/windows_fs.rs`에 열린 핸들의 전체 파일 신원·재분석 속성·local GUID volume 검사와 component 탐색을 구현했다. 디렉터리/파일은 OPEN_REPARSE_POINT로 열어 대상에 접근하기 전에 재분석 지점을 거부한다. `windows_space.rs`는 열린 동기 핸들로 native volume 정보를 조회해 사용자 quota 기준 여유 공간을 계산한다. Windows 컴파일/실기기 검증은 남아 있고 G4/stdio 및 실제 공급자 gate는 비활성이다.
 
 > **저장된 원본 폴더 재확인**: project projection의 비공개 `native_path_binding`은 손실 없는 변환으로 확인한 canonical 원본 경로를 기록한다. 새 프로젝트는 native 폴더 선택으로 기록하며, 이전 기록은 목록/대화 이력을 유지하되 폴더를 다시 선택하기 전에는 catalog reopen과 원본 접근을 거부한다. 명시 재선택은 기존 작업 복사본·편집·복구 상태를 보존한다. marker가 있는데 경로가 불일치하면 자동 수정하지 않는다. 원본을 열지 않는 반영 이력 조회와 시작 전 snapshot 복구는 metadata 전용 조회를 사용해 재선택 전에도 유지한다. 이 표식은 원본 선택만 증명하며 종료·반영·복구 승인을 대체하지 않는다. 과거 손실된 경로 철자는 자동 복원하지 않는다.
 

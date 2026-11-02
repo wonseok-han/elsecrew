@@ -109,7 +109,7 @@ mod native {
         Ok(id)
     }
 
-    fn require_local_volume(held: &Dir) -> Result<(), ProjectFailure> {
+    pub(crate) fn require_local_volume(held: &Dir) -> Result<(), ProjectFailure> {
         // A GUID volume path is obtained from the held handle, not from a drive
         // letter lookup which could be remapped between checks. UNC is excluded.
         let mut buffer = vec![0u16; 32_768];
@@ -269,7 +269,7 @@ mod native {
 }
 
 #[cfg(windows)]
-pub(super) use native::{identity, open_directory};
+pub(super) use native::{identity, open_directory, require_local_volume};
 
 #[cfg(test)]
 mod tests {

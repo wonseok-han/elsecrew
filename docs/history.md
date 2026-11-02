@@ -2,6 +2,12 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 이전 turn의 Windows 파일 핸들 기반 구현에 이어, 깨끗한 65f68c6에서 Windows snapshot 디스크 여유 공간 조회를 연결했다. `windows_space.rs`는 원본 경로를 재조회하지 않고 ReOpenFile로 얻은 동기 핸들에 NtQueryVolumeInformationFile을 호출한다. 사용자 quota가 반영된 가용 allocation 수를 사용하며 음수·모순된 geometry·곱셈 overflow를 거부한다.
+- local GUID volume 및 전체 파일 신원을 검사하고 요청 완료와 반환 바이트 수를 확인한다. 예외적인 pending 요청의 완료를 증명하지 못하면 native 출력 버퍼/핸들을 해제하지 않고 오류로 처리한다. quota·잘못된 geometry 회귀와, 디렉터리 이름을 바꾼 뒤 기존 경로에 파일을 놓아도 보유 핸들로 조회하는 Windows 회귀를 작성했다.
+- macOS cargo check·신규 모듈 rustfmt·diff 검사 통과, 독립 정적 검토 차단 결함 없음. Windows 컴파일/native 회귀는 아직 실행하지 않았으며 이번에도 Windows 제품/G4/stdio gate를 활성화하지 않았다. 전체 검사·push/CI·패키징·실제 모델 호출은 반복하지 않았다. 다음은 Windows Git 프로세스 소유/종료 및 파일 교체·변경 감시 연결과 통합 검증이다.
+
+### 2026-11-02 · by GPT-6
+
 - 이전 turn은 기존 경로 재확인 및 복구 회귀 해소로 진전했다. 깨끗한 323d5a7에서 Windows 파일 접근 기반을 직접 구현했다. `project/windows_fs.rs`는 열린 핸들의 FILE_ID_INFO(volume + 128비트 ID), FILE_ATTRIBUTE_TAG_INFO, GUID volume 경로를 검사하며 기존 component별 디렉터리 탐색/파일 열기에 연결했다. UNC/알 수 없는 volume과 재분석 지점은 거부하고 Dir 핸들 재확보 전후 신원을 비교한다.
 - 독립 검토에서 cap-std의 nofollow만으로 Windows 정션이 먼저 따라가질 수 있는 결함을 찾아, 디렉터리와 파일 모두 열기 시점에 FILE_FLAG_OPEN_REPARSE_POINT를 지정하도록 수정했다. native 회귀에 핸들 복제/서로 다른 디렉터리, symlink, DeviceIoControl로 만든 임시 junction 및 reparse file 거부를 추가했다. 수정 후 독립 재검토에서 추가 차단 결함 없음.
 - macOS cargo check 및 신규 모듈 rustfmt·diff 검사는 통과했다. 설치된 Rust target은 macOS뿐이며 Windows native 부분의 컴파일·실행은 아직 검증하지 않았다. 이번 작업은 구현 체크포인트이고 Windows 제품/G4/stdio gate는 열지 않았다. 새 push/CI·실제 모델 호출·패키지 교체 없음. 다음은 Windows 프로세스 수명주기·디스크/replace/watcher 연결과 묶음 검증이다.
