@@ -106,6 +106,8 @@ export const en: Record<MessageKey, string> = {
   "m5.chatError.pendingTermination": "Termination cannot be verified yet. Check the details.",
   "m5.chatError.protected": "Could not verify the real agent's termination state. This working copy remains protected.",
   "m5.chatError.order": "Could not safely verify conversation history order. Reopen the conversation.",
+  "m5.editorError.reopenProject": "Could not confirm the saved folder. Select the original folder again. Existing history is kept.",
+  "m5.editor.reselectOriginal": "Choose original folder",
   "m5.editorError.openProject": "Could not open the project. Try another Git project.",
   "m5.editorError.workspaceUnavailable": "Cannot open this conversation's working copy.",
   "m5.editorError.identity": "The selected project does not match the conversation's working copy.",

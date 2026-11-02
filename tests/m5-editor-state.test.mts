@@ -135,6 +135,18 @@ test("saved project mismatched identity cannot create a snapshot", async () => {
   } finally { controller.dispose(); }
 });
 
+test("saved project rejection offers folder reselection without losing history or starting work", async () => {
+  const bridge = new FakeBridge(); const controller = new ProjectEditorController(bridge);
+  try {
+    await controller.reopenProject("legacy_project", async () => { throw new Error("saved binding needs selection"); });
+    assert.equal(controller.snapshot().error?.messageKey, "m5.editorError.reopenProject");
+    assert.equal(controller.snapshot().project, null);
+    assert.deepEqual(bridge.calls, []);
+    await controller.chooseProject();
+    assert.equal(controller.snapshot().project?.id, "project_01");
+  } finally { controller.dispose(); }
+});
+
 test("action blocking before or during saved project lookup prevents switching", async () => {
   const bridge = new FakeBridge(); const controller = new ProjectEditorController(bridge);
   try {

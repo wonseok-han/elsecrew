@@ -232,10 +232,10 @@ export class ProjectEditorController {
       const result = validateProjectCatalogResult(await request(input), input);
       if (result.action !== "reopen") throw new Error("unexpected project catalog response");
       return result.project;
-    });
+    }, "m5.editorError.reopenProject");
   }
 
-  async #selectProject(open: ProjectBridge["openProject"]): Promise<void> {
+  async #selectProject(open: ProjectBridge["openProject"], failure: EditorErrorKey = "m5.editorError.openProject"): Promise<void> {
     if (this.#disposed) return;
     if (this.#actionBlocked) return;
     if (this.#state.workspace) {
@@ -280,7 +280,7 @@ export class ProjectEditorController {
       if (isPickerCancelled(error)) {
         return;
       }
-      this.#setError("m5.editorError.openProject", error);
+      this.#setError(failure, error);
     }
   }
 

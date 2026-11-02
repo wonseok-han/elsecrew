@@ -276,6 +276,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       {snapshot.error && (
         <section className="m5-error" role="alert">
           <strong>{t(snapshot.error.messageKey)}</strong>
+          {snapshot.error.messageKey === "m5.editorError.reopenProject" && <button type="button" className="m5-secondary" disabled={settingsOpen || !admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} onClick={() => void controller.chooseProject()}>{t("m5.editor.reselectOriginal")}</button>}
           <details><summary>{t("m5.feedback.details")}</summary><pre>{snapshot.error.technicalDetail}</pre></details>
         </section>
       )}

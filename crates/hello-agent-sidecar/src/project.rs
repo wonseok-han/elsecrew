@@ -1,5 +1,6 @@
 mod app_roles;
 mod protocol_path;
+mod path_binding;
 use crate::{AppendOutcome, SidecarError, Storage};
 #[cfg(unix)]
 use cap_fs_ext::OsMetadataExt;
@@ -899,6 +900,7 @@ impl ProjectManager {
         project_id: &str,
         request_id: &str,
     ) -> Result<ProjectAction, ProjectFailure> {
+        required_project(storage, project_id)?;
         let path = storage
             .project_catalog_path(project_id)?
             .ok_or_else(|| ProjectFailure::manifest("saved project was not found"))?;
@@ -991,7 +993,21 @@ impl ProjectManager {
         let selected_text = canonical_protocol_path(selected)?;
         let project_id = project_id_for_root(&canonical_text);
 
-        if let Some(existing) = storage.projection_record("project", &project_id)? {
+        if let Some(mut existing) = storage.projection_record("project", &project_id)? {
+            if existing.contains_key(path_binding::FIELD) {
+                path_binding::require(&existing)?;
+            } else {
+                // Only open_project's fresh native picker may reach this branch:
+                // catalog reopening rejects unbound records before touching disk.
+                if value_string(&existing, "canonical_path")? != canonical_text {
+                    return Err(ProjectFailure::manifest("selected root differs from saved project"));
+                }
+                existing.insert("selected_path".into(), json!(selected_text));
+                existing.insert(path_binding::FIELD.into(), path_binding::value(&canonical_text));
+                append_object(storage, "project", &project_id,
+                    &format!("op_project_path_binding_{request_id}"), request_id,
+                    Value::Object(existing.clone()))?;
+            }
             let lifecycle = value_string(&existing, "lifecycle")?;
             if lifecycle == "recoveryRequired" {
                 return Err(ProjectFailure::recovery(
@@ -1023,6 +1039,7 @@ impl ProjectManager {
                     "project_id": project_id,
                     "canonical_path": canonical_text,
                     "selected_path": selected_text,
+                    "native_path_binding": path_binding::value(&canonical_text),
                     "base_commit": source.base_commit,
                     "base_tree": source.base_tree,
                     "object_format": source.object_format,
@@ -5346,7 +5363,10 @@ fn preserve_project_extensions(
         .as_object()
         .cloned()
         .ok_or_else(|| ProjectFailure::manifest("project payload must be an object"))?;
-    for field in ["role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews", "application_backups", "application_intent", "application_history"] {
+    for field in ["native_path_binding", "role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews", "application_backups", "application_intent", "application_history"] {
+        if field == path_binding::FIELD && object.contains_key(field) {
+            continue;
+        }
         if let Some(extension) = previous.get(field).cloned() {
             object.insert(field.to_string(), extension);
         }
@@ -5358,9 +5378,11 @@ fn required_project(
     storage: &Storage,
     project_id: &str,
 ) -> Result<Map<String, Value>, ProjectFailure> {
-    storage
+    let record = storage
         .projection_record("project", project_id)?
-        .ok_or_else(|| ProjectFailure::manifest("project identity is not durably registered"))
+        .ok_or_else(|| ProjectFailure::manifest("project identity is not durably registered"))?;
+    path_binding::require(&record)?;
+    Ok(record)
 }
 
 fn value_string<'a>(record: &'a Map<String, Value>, name: &str) -> Result<&'a str, ProjectFailure> {

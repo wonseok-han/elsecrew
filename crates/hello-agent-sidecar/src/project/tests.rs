@@ -2,6 +2,81 @@ use super::*;
 use hello_agent_protocol::project_v1::validate_project_payload_v1;
 use tempfile::TempDir;
 
+fn make_legacy_binding(fixture: &mut Fixture) -> serde_json::Map<String, Value> {
+    let mut record = fixture.storage.projection_record("project", &fixture.project_id).unwrap().unwrap();
+    record.remove(path_binding::FIELD);
+    append_object(&mut fixture.storage, "project", &fixture.project_id,
+        "op_legacy_path_fixture", "req_legacy_path_fixture", Value::Object(record.clone())).unwrap();
+    fixture.storage.projection_record("project", &fixture.project_id).unwrap().unwrap()
+}
+
+#[test]
+fn legacy_path_binding_requires_picker_before_catalog_or_snapshot_access() {
+    let mut fixture = Fixture::open();
+    let original = make_legacy_binding(&mut fixture);
+    let moved = fixture.source.with_extension("moved");
+    fs::rename(&fixture.source, &moved).unwrap();
+    let error = fixture.manager.reopen_project(&mut fixture.storage, &fixture.project_id, "req_legacy_reopen").unwrap_err();
+    assert!(error.detail.contains("native folder selection"), "{:?}", error);
+    let error = fixture.manager.create_worktree(&mut fixture.storage, &fixture.project_id, "req_legacy_create").unwrap_err();
+    assert!(error.detail.contains("native folder selection"), "{:?}", error);
+    assert_eq!(fixture.storage.projection_record("project", &fixture.project_id).unwrap().unwrap(), original);
+    fs::rename(moved, &fixture.source).unwrap();
+    fixture.manager.open_project(&mut fixture.storage, fixture.source.to_str().unwrap(), "req_legacy_picker").unwrap();
+    fixture.manager.reopen_project(&mut fixture.storage, &fixture.project_id, "req_bound_reopen").unwrap();
+}
+
+#[test]
+fn legacy_path_binding_picker_preserves_active_workspace_and_draft() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    fs::write(active.worktree_path.join("src/edit.txt"), b"unsaved work kept").unwrap();
+    let mut original = make_legacy_binding(&mut fixture);
+    assert!(fixture.manager.validate_active_project(&fixture.storage, &fixture.project_id).is_err());
+    fixture.manager.open_project(&mut fixture.storage, fixture.source.to_str().unwrap(), "req_legacy_active_picker").unwrap();
+    let record = fixture.storage.projection_record("project", &fixture.project_id).unwrap().unwrap();
+    path_binding::require(&record).unwrap();
+    original.insert("selected_path".into(), json!(canonical_protocol_path(&fixture.source).unwrap()));
+    original.insert(path_binding::FIELD.into(), record[path_binding::FIELD].clone());
+    original.insert("last_event_sequence".into(), record["last_event_sequence"].clone());
+    assert_eq!(record, original);
+    let restored = fixture.manager.validate_active_project(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(restored.worktree_id, active.worktree_id);
+    assert_eq!(fs::read(active.worktree_path.join("src/edit.txt")).unwrap(), b"unsaved work kept");
+    assert_eq!(fs::read(fixture.source.join("src/edit.txt")).unwrap(), b"hello");
+}
+
+#[test]
+fn legacy_path_binding_picker_does_not_clear_recovery() {
+    let mut fixture = Fixture::open();
+    let mut record = make_legacy_binding(&mut fixture);
+    record.insert("lifecycle".into(), json!("recoveryRequired"));
+    append_object(&mut fixture.storage, "project", &fixture.project_id,
+        "op_legacy_recovery", "req_legacy_recovery", Value::Object(record)).unwrap();
+    let error = fixture.manager.open_project(&mut fixture.storage, fixture.source.to_str().unwrap(), "req_legacy_recovery_picker").unwrap_err();
+    assert_eq!(error.kind, "recoveryRequired");
+    let record = fixture.storage.projection_record("project", &fixture.project_id).unwrap().unwrap();
+    path_binding::require(&record).unwrap();
+    assert_eq!(record["lifecycle"], "recoveryRequired");
+}
+
+#[test]
+fn legacy_path_binding_mismatched_marker_is_not_repaired_implicitly() {
+    let mut fixture = Fixture::open();
+    let mut record = fixture.storage.projection_record("project", &fixture.project_id).unwrap().unwrap();
+    record.insert(path_binding::FIELD.into(), path_binding::value("/different/source"));
+    append_object(&mut fixture.storage, "project", &fixture.project_id,
+        "op_invalid_binding", "req_invalid_binding", Value::Object(record)).unwrap();
+    let before = fixture.storage.projection_record("project", &fixture.project_id).unwrap();
+    let moved = fixture.source.with_extension("moved");
+    fs::rename(&fixture.source, &moved).unwrap();
+    assert_eq!(fixture.manager.reopen_project(&mut fixture.storage, &fixture.project_id, "req_invalid_reopen").unwrap_err().kind, "manifestMismatch");
+    assert_eq!(fixture.manager.create_worktree(&mut fixture.storage, &fixture.project_id, "req_invalid_create").unwrap_err().kind, "manifestMismatch");
+    fs::rename(moved, &fixture.source).unwrap();
+    assert_eq!(fixture.manager.open_project(&mut fixture.storage, fixture.source.to_str().unwrap(), "req_invalid_picker").unwrap_err().kind, "manifestMismatch");
+    assert_eq!(fixture.storage.projection_record("project", &fixture.project_id).unwrap(), before);
+}
+
 #[cfg(unix)]
 #[test]
 #[ignore = "opt-in generated 10000-file snapshot phase diagnostic"]

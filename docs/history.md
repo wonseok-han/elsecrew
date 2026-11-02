@@ -2,6 +2,12 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 기준 4713c45에서 메인이 기존 프로젝트 경로 재확인 흐름을 직접 구현했다. 손실 변환 이전 기록은 native 폴더 선택으로 canonical 원본을 다시 확인해야 접근할 수 있으며, private `native_path_binding`을 원장에 남긴다. catalog reopen은 파일 접근 전에 차단하고, 명시 재선택은 기존 작업 복사본·편집 내용·이력·복구 상태를 유지한다. 존재하지만 불일치하는 표식은 자동 복구하지 않는다. 작업대에는 한국어/영어 재선택 설명과 원본 폴더 선택 버튼을 연결했다.
+- 읽기 전용 독립 검토 1명은 원본 접근 우회나 현재 변경의 차단 결함을 발견하지 않았다. 제안한 불일치 marker 회귀도 추가했다. 집중 Rust 3개와 편집기 63개 회귀·TypeScript·renderer 빌드가 통과했다. 불일치 marker 회귀를 포함한 sidecar 전체 743개 검사는 실행 중이며 아직 합격을 선언하지 않는다. 증거는 `.artifacts/m5-path-binding-20261102/`에 저장한다. 기존 Windows focused CI 승인은 이미 사용했으며 추가 push·main 병합·실제 모델 호출·패키지 교체는 하지 않았다.
+- 다음: Windows 핸들 기반 directory/Git·디스크·replace/watcher 안전 구현, Windows 패키징, G6 메모리/입력 성능 및 출시 검증. 이번 경로 보완으로 제품 전체 완료를 선언하지 않는다.
+
+### 2026-11-02 · by GPT-6
+
 - 이전 turn은 마지막 Windows fixture PASS 증거를 확보한 진전이다. 3a33c0d의 깨끗한 m5/coding-agent-ide에서 남은 Windows 구현을 직접 이어갔다. project 경로 변환이 Windows verbatim drive prefix를 처리하지 못하고 Unix의 실제 역슬래시 파일명을 slash 경로로 재해석하는 결함을 확인했다.
 - `project/protocol_path.rs`를 기존 경로 입구에 연결했다. 정상 local-drive/verbatim drive를 wire 형식으로 변환하고 namespace/ADS/예약 장치명/후행 점·공백/verbatim의 혼합 구분자는 거부한다. Unix 역슬래시 이름은 다른 파일을 가리키게 바꾸지 않고 거부한다. 기존 AbsolutePathScanV1을 재사용하며 Windows G4/stdio·공급자 실행 차단은 유지한다.
 - 최종 scoped release 회귀 4/4 PASS: Windows 변환/거부 표와 실제 Unix literal-backslash 디렉터리·별도 nested 디렉터리의 혼동 방지를 포함한다. 증거 `.artifacts/m5-native-path-20261102/focused.log`. 직접 diff·독립 검토 통과, 전체 회귀/Windows 실기기는 기능 연결 뒤 검증한다. 추가 push/모델 호출 없음.
@@ -23,6 +29,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+- **기존 원본 경로 재확인 (2026-11-02)**: 과거 경로 철자는 source_identity로도 복원할 수 없다. native 폴더 선택으로만 `native_path_binding`을 보강하며 catalog reopen/원본 접근은 없는 표식을 자동 생성하지 않는다. 재선택은 기존 snapshot과 복구 상태를 보존한다.
 - **2026-11-02 Windows 경로 fixture**: host 절대경로와 canonical wire 경로는 구분한다. 실행 41394071830에서 core 226·protocol 65·sidecar 313 PASS, 마지막 fixture 1개는 수정 후 focused 실행 41399404281에서 PASS했다. 최신 전체 suite 단일 재실행/Windows 제품 합격은 아니다. 원장 테스트에 native 역슬래시 경로를 넣지 않으며 제품 검증·실제 공급자 차단은 유지한다.
 
 - **Windows 컴파일과 제품 준비 구분 (2026-11-02)**: macOS native owner를 cfg로 분리해도 Windows G4/stdio는 DB·ready 전에 unsupportedPlatform으로 차단된다. 공통 영수증 검증은 플랫폼 독립으로 유지한다. Windows CI를 녹색으로 만들려고 패키지 smoke의 ready 조건을 낮추지 않으며, Windows의 실제 안전 경로 구현·검증·활성화가 별도로 남는다.
