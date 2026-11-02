@@ -18,6 +18,10 @@ export async function probeEditorInput(action) {
   if (action === 'cleanup') { clean(); delete globalThis[key]; return; }
   if (action === 'arm') {
     if (globalThis[key] || !input || input.readOnly || dirty() || !text() || document.visibilityState !== 'visible') throw new Error('Editor input baseline unavailable');
+    const tab = [...document.querySelectorAll('.m5-editor-tab button[role=tab]')].find(button => button.textContent.includes('large.txt') && !button.disabled);
+    if (!tab) throw new Error('QA large file tab unavailable');
+    tab.click();
+    await wait(() => input.getClientRects().length > 0);
     input.focus();
     await wait(() => document.hasFocus() && document.activeElement === input);
     const state = {baseline:text(), startedAt:performance.now(), receivedAt:null, trustedInputs:0};
@@ -50,6 +54,10 @@ export async function probeEditorInput(action) {
   if (action === 'restore') {
     await wait(() => !dirty() && text() === state.baseline);
     clean(); delete globalThis[key];
+    const diff = document.querySelector('.m5-change-row');
+    if (!diff || diff.disabled) throw new Error('QA diff cannot be restored');
+    diff.click();
+    await wait(() => !!document.querySelector('.m5-diff-details'));
     return {restored:true};
   }
   throw new Error('Unknown editor input probe action');

@@ -31,6 +31,9 @@ export interface EditorTab {
   baseVersion: FileVersionV1;
   byteLength: number;
   text: string;
+  /** Metadata only: never retain a second full original per dirty tab. */
+  baseTextLength?: number;
+  cleanRestoreAllowed?: boolean;
   technicalDetail?: string;
 }
 
@@ -520,6 +523,8 @@ export class ProjectEditorController {
         baseVersion: descriptor.version,
         byteLength: descriptor.byteLength,
         text,
+        baseTextLength: text.length,
+        cleanRestoreAllowed: descriptor.classification === "utf8",
       };
       // Another read may have opened this path while this stream was pending.
       // Keep its current draft/version rather than appending a duplicate tab.
@@ -539,6 +544,31 @@ export class ProjectEditorController {
     if (!tab || tab.mode !== "text" || tab.saveState === "conflicted") return;
     if (text === tab.text) return;
     this.#replaceTab(path, { ...tab, text, saveState: tab.saveState === "saving" ? "saving" : "dirty" });
+    this.#cleanChecks.add(path);
+    if (!this.#checkingClean) { this.#checkingClean = true; setTimeout(() => void this.#checkCleanDrafts(), 0); }
+  }
+
+  // Queue only paths; at most one digest owns an encoded (<=5MiB) draft.
+  #cleanChecks = new Set<string>();
+  #checkingClean = false;
+  async #checkCleanDrafts(): Promise<void> {
+    try {
+      while (!this.#disposed && this.#cleanChecks.size) {
+        const path = this.#cleanChecks.values().next().value!;
+        this.#cleanChecks.delete(path);
+        const tab = this.#tab(path), epoch = this.#projectEpoch;
+        if (!tab || tab.mode !== "text" || tab.saveState !== "dirty" || !tab.cleanRestoreAllowed
+          || tab.text.length !== tab.baseTextLength || tab.byteLength > FILE_MAX_BYTES_V1
+          || utf8ByteLength(tab.text) !== tab.byteLength) continue;
+        try {
+          const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(tab.text));
+          const version = `sha256:${Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, "0")).join("")}`;
+          if (!this.#disposed && epoch === this.#projectEpoch && this.#tab(path) === tab && version === tab.baseVersion) {
+            this.#replaceTab(path, { ...tab, saveState: "clean" });
+          }
+        } catch { /* Unavailable comparison is not evidence that the draft is clean. */ }
+      }
+    } finally { this.#checkingClean = false; if (this.#disposed) this.#cleanChecks.clear(); }
   }
 
   /** Requires explicit UI confirmation of this exact draft; does not write any file. */
@@ -553,7 +583,7 @@ export class ProjectEditorController {
       if (descriptor.classification !== "utf8" || !descriptor.stream) throw new Error("saved file is not an editable text file");
       const text = await this.#awaitStream(descriptor.stream.streamId, descriptor.byteLength, FILE_MAX_BYTES_V1);
       if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace) || this.#actionBlocked || this.#tab(confirmed.path) !== confirmed) return false;
-      this.#replaceTab(confirmed.path, { ...confirmed, text, baseVersion: descriptor.version, byteLength: descriptor.byteLength, saveState: "clean", technicalDetail: undefined });
+      this.#replaceTab(confirmed.path, { ...confirmed, text, baseTextLength: text.length, cleanRestoreAllowed: true, baseVersion: descriptor.version, byteLength: descriptor.byteLength, saveState: "clean", technicalDetail: undefined });
       this.#set({ error: null, ...editorNotice("m5.editorNotice.reloaded") });
       return true;
     } catch (error) {
@@ -599,14 +629,15 @@ export class ProjectEditorController {
         return;
       }
       const hasNewerDraft = latest.text !== tab.text;
-      this.#replaceTab(path, { ...latest, baseVersion: committed.version, saveState: hasNewerDraft ? "dirty" : "clean", byteLength: totalBytes });
+      this.#replaceTab(path, { ...latest, baseTextLength: tab.text.length, cleanRestoreAllowed: true, baseVersion: committed.version, saveState: hasNewerDraft ? "dirty" : "clean", byteLength: totalBytes });
       this.#setNotice(hasNewerDraft ? "m5.editorNotice.newerDraft" : "m5.editorNotice.saved");
       await this.refreshChanges();
     } catch (error) {
       if (!this.#isCurrent(project.id, epoch)) return;
       const latest = this.#tab(path);
       if (latest?.saveState === "saving" && this.#saveGenerations.get(path) === saveGeneration) {
-        this.#replaceTab(path, { ...latest, saveState: "dirty" });
+        // A failed reply may follow a disk write; do not infer clean from the old baseline.
+        this.#replaceTab(path, { ...latest, cleanRestoreAllowed: false, saveState: "dirty" });
       }
       this.#setError("m5.editorError.save", error);
     } finally {

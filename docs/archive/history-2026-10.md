@@ -2,6 +2,48 @@
 
 ### 2026-10-30 · by GPT-6
 
+- HEAD4811029의 깨끗한 상태에서82f7c77 패키지 시작 시험을 실행했다. 최초1회+준비1회+본10회를 모두 정상 종료했다. 본10회 UI 준비 p95=963.84ms, storage 준비 p95=553.95ms, 최대 idle RSS=460.3125MiB로400MiB 기준 FAIL이다. renderer heap 약3.7MB/Monaco asset 미로드이며 아직 메모리 원인을 확정하지 않았다. .artifacts/m5-startup-2026-10-30에 JSON 증거를 보존하고 종료 확인된 임시 프로필을 정리했다.
+- 사용자 승인 순차 최대3회 중2회만 요청했다. 응답 run agent_run_0e3b48e1aa3645bc9f4e6dd8f1e1188e는 HELLO_AGENT_SMOKE_OK·succeeded·cleanExit였다. 수정 run agent_run_012ccbfa9abd4339a6420a95171bfbff는 복사본 hello.txt를 정확히 변경했지만 turn/diff/updated 알림에서 failed·cleanExit였다. 원본과 응답 시험 복사본은 original\n 유지. 실패 시 중단 조건에 따라 세 번째 취소 시험은 실행하지 않았으며 잔여1회를 재시도로 사용하지 않는다.
+- 수정 실행은07:37:31Z에 등록되고07:38:11Z에 종료됐지만 UI는 draft/준비 확인 중에 머물렀다. 초기에는 준비 단계 정체로 관측했으나 종료 후 DB로 정정했다. sidecar8970 sample은 recv_timeout/정상 watcher 작업이 주였고 Codex 자손은 없었다. 앱/sidecar는07:44:03Z 정상 종료했다. 실제 실행 완료와 응답/상태 UI 전달 문제를 구분해 조사해야 하며 임의 timeout으로 시작 잠금을 풀지 않는다. 증거 .artifacts/m5-codex-sequential-2026-10-30.
+- 실제 CLI의 생성 schema로 turn/diff/updated(threadId/turnId/diff:string 필수)를 확인했다. 현재 turn에 속한 시작 후 알림만 bounded budget 안에서 검증·폐기하는 호환 처리를 추가했다. 공급자 diff를 공개 출력·실제 파일 비교·원본 반영·도구 허가·종료 증거로 쓰지 않는다. Codex 이벤트37개·rustfmt(private.rs)·diff PASS. AGENTS.md/CLAUDE.md는 실제 응답 성공을 반영하되 변동하는 오류 지점은 history를 보도록 정리했다. 독립 검토자1명 차단없음. 소스 체크포인트로 커밋하고 UI 상태 전달 결함을 이어 조사한다. 설치 패키지는 아직82f7c77이며 이번 diff 호환 수정은 미반영이다. 추가 실제 호출·G6/Windows/출시 완료 선언·main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
+- 이전 목표 턴은 실제 Codex 응답 관측·후속 알림 호환 수정·패키징과 출력 스크롤 수정으로 진척했다. HEAD9c58ea0의 깨끗한 워킹 트리와 최신 기록을 다시 대조했다. 새 Codex 순차 검증 최대3회 승인은 대기 중이며 이번 턴 모델 호출은0회다.
+- AGENTS.md/CLAUDE.md의 오래된 실제 검증 상태를 함께 교정했다. Claude 자체 파일 수정·취소 성공과 Codex 응답 이후 moderation 알림 실패/호환 수정 후 미검증을 구분한다. 기존 운영·승인·안전 규칙은 유지한다. 두 파일 동일성과 diff 검사를 확인했다.
+- 다음은 승인 후82f7c77의 Codex 응답→수정→중단 순차 검증이며 어느 단계든 실패하면 멈춘다. 독립적인 미완료 범위는 G6의 전체 부하·반복/메모리·지속 가시성 증거, Windows 실제 환경, 출시/서명 결정이다. 가짜 출력 functional PASS를 G6 PASS로 대체하지 않는다. main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
+- 2c06e79 실제 응답 뒤 거절된 moderation 알림의 생성 스키마를 기준으로 지원을 추가했다. notification 예산→started→thread/turn scope→필수 metadata·최상위 필드 검사 뒤 Private로 폐기한다. arbitrary JSON인 metadata를 도구 권한·공개 출력·앱 moderation 결정·terminal 증거로 쓰지 않는다.
+- Codex 이벤트36개 PASS: 공개 응답→metadata→명시 terminal 완료, metadata만으로 완료 불가, cross-scope/누락/미지 필드/중복/시작 전/종료 후/예산 초과 거절과 sticky 실패를 확인했다. private.rs rustfmt·diff PASS. 추가 모델 호출0회이며 기존 승인1회는 앞선 실제 시험으로 소진됐다. 독립 검토자1명 차단없음. 82f7c77 macOS 패키징 PASS, 기존 out 앱 한 개에 반영했다. 새 승인 실제 재확인이 남는다. G6/Windows/출시 미완료, main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
+- 이전 턴은 Codex parser 호환 수정·패키징 진척이었다. HEADffa8c09에서 최신 출력이 바깥 대화 영역에 가려지는 경로를 보완했다. 안쪽 목록과 바깥 viewport 추적을 분리하고, 이미 최신 행을 보고 있을 때만 바깥 스크롤을 따라간다. 새 출력 commit 전에 scrollTop 변경도 비교하여 지연된 scroll 이벤트가 사용자 위치를 되돌리는 경합을 막았다.
+- 가짜 출력 첫 시험은 과거 대화 읽기 보존에서 FAIL(503≠0), 경합 수정 후 네 채팅×3,000 출력의 latest/history/명시 복귀와 출력 중 사용자 위치 보존은 functional PASS였다. 창 숨김 이력이 있어 최종 status=NOT_READY이며 G6/지연/패키지 합격은 아니다. .artifacts/m5-outer-follow-2026-10-30에 증거를 옮기고 DB clean shutdown 확인 후 두 임시 시험 폴더를 삭제했다. renderer build·tsc -b·diff PASS. tsc -b에서 발견한 vite.config.ts의 이제 불필요한 ts-expect-error도 제거했고 검사 생성물4개를 정리했다.
+- 별도 승인된 2c06e79 Codex 재시험1회는 실제 HELLO_AGENT_SMOKE_OK 응답까지 표시했으나 이후 `turn stream moderation metadata`에서 failed·cleanExit로 끝났다. run agent_run_2308ab08368343b4a2848c1b88d31178, processesProvenGone=true, 원본/복사본 original\n 유지, sidecar82888 정상 종료07:12:38Z. 호출1회 소진·재시도없음. 증거 .artifacts/m5-codex-lifecycle-retest-2026-10-30. 실제 CLI 생성 schema상 해당 알림은 threadId/turnId/metadata 필수다. 다음은 이 비공개 알림 호환 수정, 이후 별도 승인 재시험 및 Codex 수정/중단·G6/Windows/출시 검증이다. main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
+- f7e2c8e의 패키징을 완료한 뒤 새 승인에 따라 Codex 짧은 응답 진단1회를 실행했다. run agent_run_33b6607ddc24456a9f73a0a24640e67e는 `turn item start user echo shape`에서 failed·cleanExit, processesProvenGone=true로 끝났다. 원본/복사본 hello.txt는 original\n 유지, 정상 quit 뒤 sidecar56026 clean_shutdown_at06:55:57Z를 확인했다. 승인1회 소진·재시도없음. 증거는 .artifacts/m5-codex-item-checkpoint-2026-10-30이다.
+- 실제 CLI0.166.0-alpha.5.1 생성 스키마의 ThreadItem **바깥 공통 속성** startedAtMs/completedAtMs(선택 nullable int64)을 private userMessage/reasoning 검사기가 거절하는 호환 결함을 오프라인으로 재현했다. 두 속성만 Option<i64>로 허용하고 폐기하며 unknown/type/overflow/duplicate 거절은 유지했다. 원문은 수집하지 않아 이번 실제 실패의 원인이라고 확정하지 않는다.
+- 수정 전 회귀1개 FAIL, 수정 후 Codex 이벤트34개 PASS. timestamp가 있어도 private 유지·공개 응답 진행·turn 종료 증거를 대체하지 않음을 검증했다. 독립 검토자1명 차단없음, private.rs rustfmt 완료. 수정2c06e79의 macOS 패키징도 PASS했고 기존 out 앱 한 개를 교체했다. 다음은 별도 승인된 실제 응답 재확인, 이어 Codex 수정/중단·G6/Windows/출시 잔여 검증이다. main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
+- 이전 턴은 선택 필드 수정 후에도 실제 실패가 남는다는 증거를 얻은 진척이었다. HEAD54183f9에서 item/started 고정 진단을18개로 세분화했다: envelope/projection·turn 시작순서·scope/body/tag/identity·tool phase·user echo/reasoning shape·duplicate·command shape·retained budget·지원하지 않는 dynamic/MCP/협업/hook/기타 항목. 값이나 임의 타입명은 로그에 넣지 않으며 원래 수락/거절·권한·예산·종료 동작은 유지한다.
+- Rust에서 실패 위치와 sticky 실패, 미지원 타입의 RequiresHandling 유지, 비공개 값 비노출을 회귀했다. TypeScript 허용 목록이 모든 새 고정 진단을 전달하는지 검증했다. Codex 이벤트32개·진단/저장9개·pnpm build PASS, diff 검사 PASS. 실제 모델 호출0회. 이 진단 추가만으로 기존 실패가 해결됐다고 주장하지 않는다.
+- 다음은 최신 패키지 반영과 모델 비용 없는 경로 재현이다. 새 실제 실행은 별도 승인 대상이며 기존 최신2회는 소진됐다. G6/Windows/출시 검증 미완료, main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
+- 사용자가 승인한 Codex 최대2회를 da52055 패키지에서 각각 한 번 실행했다. 수정 run agent_run_af18cd5354ec46e29928af932e662c23와 중단 run agent_run_4203fc4b5b314fee89d80813706bf8c8 모두 item/started 처리 단계에서 failed·cleanExit로 종료했다. 중단 버튼 조작 전에 실패하여 중단 PASS가 아니며 선택 필드 수정만으로 실시험이 해결되지 않음을 확인했다. 추가 재시도없음.
+- UI 실패/종료 확인, 정상 메뉴 quit 후 sidecar27260 DB clean_shutdown_at06:44:46Z와 프로세스 부재를 대조했다. 원본과 두 작업복사본 hello.txt는 모두 original\n이다. 새 세션 로그와 .artifacts/m5-codex-two-2026-10-30에 횟수·진단·원장·종료 증거를 저장했다. 승인2회 소진/추가 호출없음, 사용자 프로젝트·인증 변경없음.
+- 새 기록 추가 시500줄을 넘으므로 기존10/29·10/30 워크로그 블록을 날짜 단위 그대로10월 아카이브로 옮겼다. 고정 섹션은 유지하고 최신 결정을 보강했으며 목록 사이 선택적 빈 줄만 정리했다. 다음은 고정 진단 세분화·오프라인 파서 조사, G6/Windows/출시 미완료 검증이다. main병합·push없음.
+
+### 2026-10-30 · by GPT-6
+
 - da52055의 Rust release/개발 패키지 빌드 PASS, 실행 중 앱 부재 확인 후 기존 out 앱 하나만 최신 수정으로 교체했다. 모델호출0·실시험원인 확정없음. 기존4회 승인 소진 때문에 자체 임시프로젝트의 Codex 수정1회/중단1회(최대2회, 실패 후 추가 재시도없음) 승인을 요청했고 답변 전 실제 호출은 하지 않는다. 다음은 승인된 경우 실제 검증과 결과에 따른 수정이며 G6/Windows/출시는 계속 미완료다. main병합·push없음.
 
 ### 2026-10-30 · by GPT-6

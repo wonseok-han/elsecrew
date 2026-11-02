@@ -1782,3 +1782,59 @@ function resolveSummary(bridge: { summaries: { projectId: string; deferred: Defe
   assert.ok(request, `missing ${projectId} summary request`);
   request.deferred.resolve({ projectId, baseCommit, entries: [] });
 }
+
+test("returning to the confirmed text clears dirty without writing and uses the latest saved baseline", async () => {
+  const {bridge,controller}=await openText();
+  const path="src/file-000.ts", original=controller.snapshot().tabs[0]!.text;
+  controller.updateText(path,original+"edit");
+  assert.equal(controller.closeTab(path),false);
+  controller.updateText(path,original);
+  await waitForCleanDraft(controller);
+  assert.equal(controller.snapshot().tabs[0]!.saveState,"clean");
+  assert.equal(bridge.savedText,"");
+  controller.updateText(path,"new saved text");await controller.saveActive();
+  controller.updateText(path,original);assert.equal(controller.snapshot().tabs[0]!.saveState,"dirty");
+  controller.updateText(path,"new saved text");await waitForCleanDraft(controller);assert.equal(controller.closeTab(path),true);
+  controller.dispose();
+});
+
+test("return to old text does not clear uncertain save failures or explicit conflicts", async () => {
+  for (const conflict of [false,true]) {
+    const {bridge,controller}=await openText();const path="src/file-000.ts",original=controller.snapshot().tabs[0]!.text;
+    if(conflict) bridge.saveConflict=true;
+    else bridge.commitFileSave=async()=>{throw new Error("reply lost after possible write");};
+    controller.updateText(path,"draft");await controller.saveActive();
+    controller.updateText(path,original);
+    assert.equal(controller.snapshot().tabs[0]!.saveState,conflict?"conflicted":"dirty");
+    assert.equal(controller.closeTab(path),false);controller.dispose();
+  }
+});
+
+async function waitForCleanDraft(controller: ProjectEditorController) {
+  const deadline=Date.now()+2000;
+  while(controller.snapshot().tabs[0]?.saveState!=="clean") {
+    assert.ok(Date.now()<deadline,"clean comparison did not complete");
+    await new Promise(resolve=>setTimeout(resolve,5));
+  }
+}
+
+test("late clean comparison cannot clear a newer draft and digest work is serialized", async (t) => {
+  const {controller}=await openText();const path="src/file-000.ts", original=controller.snapshot().tabs[0]!.text;
+  const pending=deferred<ArrayBuffer>();const realDigest=crypto.subtle.digest.bind(crypto.subtle);
+  let calls=0, active=0, maximum=0;
+  const second=deferred<void>();
+  t.mock.method(crypto.subtle,"digest",async (...args: Parameters<SubtleCrypto["digest"]>)=>{
+    const index=++calls;active++;maximum=Math.max(maximum,active);
+    try { return index===1 ? await pending.promise : await realDigest(...args); }
+    finally { active--;if(index===2)second.resolve(); }
+  });
+  controller.updateText(path,original+"x");controller.updateText(path,original);
+  const deadline=Date.now()+2000;
+  while(calls===0){assert.ok(Date.now()<deadline);await new Promise(resolve=>setTimeout(resolve,5));}
+  const newer="X"+original.slice(1);controller.updateText(path,newer);
+  assert.equal(calls,1);
+  pending.resolve(await realDigest("SHA-256",new TextEncoder().encode(original)));
+  await second.promise;await Promise.resolve();
+  assert.equal(maximum,1);assert.equal(controller.snapshot().tabs[0]!.text,newer);
+  assert.equal(controller.snapshot().tabs[0]!.saveState,"dirty");controller.dispose();
+});

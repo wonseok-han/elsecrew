@@ -11,6 +11,7 @@
 | **지난 기록** | `archive/` | 당시엔 사실이었다 |
 | **2026-09 작업 이력** | [`archive/history-2026-09.md`](archive/history-2026-09.md) | 날짜 단위로 이동한 과거 워크로그; 현재 상태는 `history.md` 우선 |
 | **2026-10 작업 이력** | [`archive/history-2026-10.md`](archive/history-2026-10.md) | 날짜 단위로 이동한 워크로그; 현재 결정·미완료 경계는 `history.md` 우선 |
+| **2026-11 작업 이력** | [`archive/history-2026-11.md`](archive/history-2026-11.md) | 날짜 전체 블록을 보존한 워크로그; 현재 결정·미완료 경계는 `history.md` 우선 |
 | **M5 잔여 워크트리 대조** | [`archive/m5-worktree-reconciliation-2026-09.md`](archive/m5-worktree-reconciliation-2026-09.md) | 9개 초안의 현행 구현 대응·보존 커밋·이식한 회귀 |
 | **M5 변경 반영·복원 계약 초안** | [`proposals/m5-change-application.md`](proposals/m5-change-application.md) | 원본 비교·검토 묶음·복원 지점·적용/복구 구현 순서; 아직 제품 동작 아님 |
 | **M5 장시간 단일 실행 출력 계약 초안** | [`proposals/m5-long-running-agent-streams.md`](proposals/m5-long-running-agent-streams.md) | 사용자 승인 방향에 따른 append-only 출력·페이지 조회·재접속·이관·자원 예산과 단계별 구현; 아직 제품 동작 아님 |
