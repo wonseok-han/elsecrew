@@ -2,6 +2,18 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 마지막 승인 실행 [41391333828](https://github.com/wonseok-han/hello-agent/actions/runs/41391333828)은 Node 성공 후 Rust test build의 오류 1개로 종료됐다. sidecar 제품 라이브러리는 컴파일됐으나 Windows 전용 `fake_path_git_is_never_started` 테스트가 삭제된 `ProjectManager::git`을 호출했다. Rust 테스트 실행·패키징·ZIP 업로드는 완료되지 않았다. 143개 오류를 수정한 사실을 Windows 전체 합격으로 확대하지 않는다.
+- 이 테스트의 호출을 현재 handle-bound 명령 생성 경계인 `git_command_at(&manager.worktrees_dir)`로 수정했다. PATH 가짜 실행파일의 미실행/불변과 recoveryRequired 기대는 그대로다. 제품 코드는 바꾸지 않았다.
+- 로컬 임시 사본에서 비-macOS/비-Unix 분기와 해당 Windows 테스트 모듈을 함께 선택해 1/1 PASS를 확인했다. 이전 보조 검사는 Windows 테스트 모듈을 선택하지 않아 이 오래된 호출을 놓쳤다. 이 보조 검사도 실제 Windows 증거는 아니다. 원시 CI 로그·재현 스크립트·검사 로그는 `.artifacts/m5-windows-41391333828/`에 보존했고 임시 소스는 삭제했다. diff 검사 통과.
+- 계획 §666/701/837을 다시 확인했다. Windows 실제 에이전트 실행은 별도 종료 게이트까지 비활성이나 Windows standalone snapshot 안전·패키지 검증은 미완료 요구사항이다. 원격 3회 승인은 모두 소진됐다. 다음 수정 커밋은 로컬에 남기며 추가 push/CI는 새 승인 뒤 수행한다. Windows ready 차단을 우회하거나 합격선을 낮추지 않는다.
+
+### 2026-11-02 · by GPT-6
+
+- 플랫폼 분리 수정과 이력을 c50e60b로 로컬 커밋하고 승인된 세 번째 push를 완료했다. [Windows CI 41391333828](https://github.com/wonseok-han/hello-agent/actions/runs/41391333828), job 125103179244가 동일 HEAD로 실행 중이다. 마지막 API 확인 시 Node 회귀 단계였으며 Rust/패키지 결과는 미확정이다.
+- 마지막 로컬 검사는 portable receipt 1/1, 이동한 Cargo 경로 검사 1/1 PASS 및 diff 검사 통과였다. 실제 Windows 시험 결과로 대체하지 않는다. 원격 실행 3회 승인은 모두 사용했으며 추가 push/재실행은 별도 승인 대상이다. 다음은 이 run/job을 계속 조회하고 완료된 로그에서 남은 결함을 확인한다.
+
+### 2026-11-02 · by GPT-6
+
 - Windows CI 41389598005는 Node 651 passed / 0 failed / 7 skipped 뒤 Rust 컴파일에서 143개 오류로 종료했다. macOS 전용 프로세스/발견/준비 코드를 공통 실행·원장 경로가 참조하는 cfg 누락과 Unix 전용 프로젝트 helper가 원인이었다. 패키징은 실행되지 않았다. 원시 로그는 `.artifacts/m5-windows-41389598005/job.log`에 보존했다.
 - `RunFenceBinding`의 순수 데이터/검증을 `provider_run_binding.rs`로 분리했다. 필드는 private, 정확한 JSON shape·오류·영수증 형식·실행/역할 결속 검증은 유지한다. macOS owner는 같은 parser/validator로 영수증을 만들며 프로세스 회수/잠금 해제 권한은 이동하지 않는다. 공통 원장 읽기는 macOS owner에 의존하지 않는다.
 - native/discovery·RunReservation의 native 메서드·dispatcher의 native 처리·프로세스 필드를 macOS 경계로 묶었다. 비-macOS native candidate는 blocked, 승인 요청은 저장소/입력을 다루기 전에 unsupportedPlatform을 반환한다. Unix helper가 없는 환경은 기존 handle-bound 프로젝트 차단 원칙대로 실패하며 ambient 경로 열기나 Windows 실제 실행을 활성화하지 않았다.

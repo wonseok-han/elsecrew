@@ -6056,7 +6056,7 @@ mod windows_tests {
         let manager = ProjectManager::new(&data.join("hello-agent.sqlite3")).unwrap();
         let old_path = std::env::var_os("PATH");
         std::env::set_var("PATH", &fake_path);
-        let error = manager.git(root.path(), ["status"]).unwrap_err();
+        let error = manager.git_command_at(&manager.worktrees_dir).unwrap_err();
         if let Some(old_path) = old_path {
             std::env::set_var("PATH", old_path);
         } else {
