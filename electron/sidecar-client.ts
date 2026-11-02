@@ -640,7 +640,9 @@ export class SidecarClientV1 {
     let lineEnd = this.#stdout.indexOf(0x0a);
     while (lineEnd !== -1) {
       const rawLine = this.#stdout.subarray(0, lineEnd);
-      this.#stdout = this.#stdout.subarray(lineEnd + 1);
+      // An empty subarray still owns the entire received backing store.
+      this.#stdout = lineEnd + 1 === this.#stdout.byteLength
+        ? Buffer.alloc(0) : this.#stdout.subarray(lineEnd + 1);
       if (rawLine.byteLength > MAX_CONTROL_LINE_BYTES) {
         this.#fail(new Error("sidecar stdout line exceeds 1 MiB"), "protocolOversized");
         return;
@@ -663,9 +665,10 @@ export class SidecarClientV1 {
   #onStderr(chunk: Buffer): void {
     this.#stderrTail = Buffer.concat([this.#stderrTail, chunk]);
     if (this.#stderrTail.byteLength > MAX_SIDECAR_STDERR_TAIL_BYTES) {
-      this.#stderrTail = this.#stderrTail.subarray(
+      // Keep only the bounded diagnostic bytes, not the larger input allocation.
+      this.#stderrTail = Buffer.from(this.#stderrTail.subarray(
         this.#stderrTail.byteLength - MAX_SIDECAR_STDERR_TAIL_BYTES,
-      );
+      ));
     }
     // Diagnostic storage failures cannot stop execution or alter shutdown proof.
     try { this.#onDiagnosticTail?.(this.#stderrTail.toString("utf8")); } catch { /* best effort only */ }

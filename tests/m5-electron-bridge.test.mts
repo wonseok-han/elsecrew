@@ -497,6 +497,25 @@ test("sidecar waits for ready, accepts chunked JSONL, and exposes only ordered e
   assert.equal(received[0]?.event, "system.fatal");
 });
 
+test("large complete stdout buffers can be released without losing the next partial line", async () => {
+  const { child, client } = createClient();
+  const start = client.start();
+  child.stdout.write(readyLine().padEnd(MAX_CONTROL_LINE_BYTES - 1, " ") + "\n");
+  await start;
+  const received: EventV1[] = [];
+  client.onEvent(event => received.push(event));
+  const line = (seq: number) => eventLine({protocolVersion:1,kind:"event",sidecarInstanceId:"sidecar_test_01",
+    streamId:"system",seq,event:"system.fatal",payload:{code:"diagnostic"}});
+  const first = line(2), second = line(3);
+  child.stdout.write(first.slice(0, 20));
+  assert.equal(received.length, 0);
+  child.stdout.write(first.slice(20) + second.slice(0, 20));
+  assert.deepEqual(received.map(event => event.seq), [2]);
+  child.stdout.write(second.slice(20));
+  assert.deepEqual(received.map(event => event.seq), [2,3]);
+  assert.equal(child.terminations, 0);
+});
+
 test("ready timeout, pre-ready stderr exit, and oversized partial output fail closed", async () => {
   const timeout = createClient(10);
   await assert.rejects(timeout.client.start(), /within 3 seconds/);

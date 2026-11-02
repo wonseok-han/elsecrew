@@ -2,6 +2,12 @@
 
 ### 2026-11-02 · by GPT-6
 
+- ccfbbe0의 깨끗한 통합 상태에서 초기 로딩을 직접 조사하고 상시 승인된 읽기 전용 검토자1명과 메모리 후보를 대조했다. Monaco 지연 로드·admission 완료 후 polling 종료·작은 초기 controller 상태를 확인했다. 현재 증거로 import 분리나 이미 기각한 Chromium 플래그를 제품 최적화로 적용할 근거는 없다.400MiB 원인은 추가 native resident allocation 귀속이 필요하다.
+- 별개의 실제 보유 문제를 수정했다. sidecar stdout의 마지막 완결 JSONL 뒤0길이 subarray는 큰 입력 backing buffer를 계속 붙잡을 수 있으므로 빈 Buffer로 교체했다. stderr는 마지막32KiB를 복사해 큰 원래 입력 allocation의 보유를 끊는다. 부분 JSONL·원시 line decode·1MiB 제한·오류/종료 계약은 유지한다. 예상 효과는 큰I/O 후 제한된 잔류 메모리이며 cold idle400MiB 해결이나 RSS 실측 개선으로 주장하지 않는다.
+- near-limit 정상ready 뒤 부분 event/완결+다음 부분 event 회귀를 추가했고 기존 stderr tail/오류 검사 포함 bridge64개 PASS. 독립 검토자는 정확한제품diff에 correctness/security 차단없음으로 승인했다. `.artifacts/m5-buffer-retention-2026-11-02/`에 로그/검토 요약을 보존했다. diff PASS, 새 앱·대형 빌드·모델 호출 없음. 이번제품수정 이후 전체635재실행은 하지 않았다. main병합/push없음. 다음은 native 메모리 귀속과 남은G6/Windows/출시 검증이다.
+
+### 2026-11-02 · by GPT-6
+
 - 이전716ff99의 전체635회귀/TypeScript 확인을 이어, 새 출력QA의 Electron debugger 수명주기를 실제로 검증했다. 기존 packaged --main-trace는 외부 CDP 경로여서 새 내부 debugger 연결 증거로 재사용할 수 없음을 확인했다. 연결/해제 코드를 `m5-main-task-session.mjs`로 분리해 출력QA가 같은 세션을 사용하도록 하고 QA 복사 목록을 갱신했다.
 - 별도 opt-in Electron 빈 창 진단에서 main thread1개/trace372events/손실 없음/완료 기록 및 debugger·listener 해제 PASS. 관측2.578ms는 빈 창 진단값으로 제품200ms 성능 합격이 아니다. 세션 시작 실패/종료 실패/다른 debugger 소유권 보존을 포함한3회귀 PASS. 이번 추출 이후 전체635재실행은 하지 않았다. 문법/diff PASS.
 - `.artifacts/m5-main-trace-session-2026-11-02/`에 원시 결과와 정리 증거를 보존했다. 정상 will-quit과 관측PID 부재를 확인하고 자체 임시 프로필을 삭제했다. 마지막으로 smoke 실패가 shell 종료코드에도 반영되도록 will-quit 뒤 exitCode를 명시했다(이 후처리는 문법 확인만). 사용자 프로젝트/인증/실제 모델/대형 패키지는 사용하지 않았다. main병합/push없음. 남은 것은 완전한 동시 부하·입력/경합 계측, 유휴400MiB 최적화, Windows/출시 검증이다.
@@ -217,6 +223,8 @@
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
 - **누적 Node 검사 최신 증거(2026-11-02)**: 깨끗한803b937의 npm test635 PASS/실패·스킵0 및 src TypeScript PASS. 이전11개 focused 수정 이후 전체 재검사 공백 해소. Rust/패키지/G6/Windows/출시까지 합격한 결과는 아니다. 원문은 `.artifacts/m5-regression-2026-11-02/consolidated-node/`.
+
+- **통신 버퍼 보유 해소(2026-11-02)**: 완결stdout 뒤 빈 view와 잘린stderr tail의 큰 backing allocation 보유를 제거했다. bridge64회귀·독립 검토PASS. 큰I/O 후 잔류 문제 수정이며cold idle400MiB 달성 증거가 아니다.
 
 - **초기 메모리 조사(2026-11-02)**: 유휴400MiB 기준 유지. 같은 정적 화면도 큰 비용이며 software rendering/spellcheck/ready-to-show는 개선 근거 없음. 레이어5개에 명백한 불필요 승격 없음. 손실 없는 memory-infra 통계에서 renderer tile pool72.4375MiB 중 free55.0625MiB 확인(할당 통계≠RSS 절감량). 초기 paint를 DOM mount 뒤로 늦춘 대조도 RSS 개선이 없어 기각했다. Blink 타일 예산32MiB로 실제 할당을 줄여도 RSS가 개선되지 않아 이 후보도 제품에 미적용이다. 상세·증거는 최신 워크로그.
 
