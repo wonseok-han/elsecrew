@@ -4758,8 +4758,11 @@ mod budget_tests {
             for key in ["projectId", "worktreeId", "workspaceIdentity"] {
                 manifest[key] = chat[key].clone();
             }
-            manifest["canonicalGitRoot"] = json!(root.path().join("project"));
-            manifest["worktreePath"] = json!(root.path().join("workspace"));
+            // Ledger-only wire paths: no project directories are opened here.
+            // Host tempfile paths may contain Windows separators, which the
+            // canonical manifest contract intentionally rejects.
+            manifest["canonicalGitRoot"] = json!("/fixture/project");
+            manifest["worktreePath"] = json!("/fixture/workspace");
             let profile_value = golden(
                 include_str!("../../../tests/fixtures/m5/agent-adapter-v1/cases.json"),
                 "actual-run-persists-without-fixture-scenario",

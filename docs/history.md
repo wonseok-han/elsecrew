@@ -2,6 +2,12 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 마지막 승인 실행 41394071830(c079cb2)은 정상 종료 실패이며 시간 초과가 아니다. Windows Node 651 passed/0 failed/7 skipped, core 226/226, protocol 65/65, sidecar 313 passed/1 failed(2305.14초)를 확인했다. 패키징은 미도달이다. 원시/시각 포함 로그와 summary는 `.artifacts/m5-windows-41394071830/`에 보존했다.
+- 남은 실패는 원장 전용 fixture가 Windows tempfile 경로의 역슬래시를 canonical manifest에 넣은 것이다. 실제 프로젝트를 열지 않는 두 경로를 고정 wire 경로로 바꿨으며 제품 검증은 불변이다. 로컬 release 해당 회귀 1/1 PASS(10초), exact filter는 1개 테스트를 선택한다. 독립 검토도 차단 결함 없음이다.
+- 재검증에 기존 313개/38분을 다시 쓰지 않도록 새 공개 진단 브랜치 `codex/m5-windows-fixture-followup-20261102`용 focused workflow를 준비했다(회귀 1개·20분·read 권한·전체 gate 아님). 별도 전체 진단은 기존 범위 유지와 60분 상한이다. YAML/트리거 분리/실패 유지/패키징 조건/diff 검사를 통과했다. 추가 3회 승인은 모두 소진됐으며 이 로컬 수정의 push는 새 승인 전까지 대기한다. main 병합·릴리스·실제 모델 호출 없음.
+
+### 2026-11-02 · by GPT-6
+
 - 마지막 승인 push로 c079cb2를 게시했으며 [Windows CI 41394071830](https://github.com/wonseok-han/hello-agent/actions/runs/41394071830), job 125111507931가 TypeScript/Node 성공 뒤 Rust 단계에서 실행 중이다. 추가 3회 승인은 모두 사용했다. 읽기 전용 검토자는 UNC fixture 수정과 거부 경계 유지에 차단 결함이 없다고 확인했다.
 - 현재의 묶음 Rust 단계는 실패하면 후속 crate 결과가 없고 실행 중 위치도 보이지 않는다. 다음 CI용으로 core/protocol/sidecar를 각각 표시하고, 앞선 Rust 실패 뒤에도 독립 검사를 수집하도록 로컬 workflow를 정리했다. continue-on-error 없이 실패는 전체 실패로 남고 패키징/업로드는 모든 앞선 검사 성공을 요구한다. 취소·선행 준비 실패 시 후속 Rust를 실행하지 않는다.
 - YAML 구문·기존 세 crate/release/locked 인자 유지·실패 수집 조건·패키징 성공 조건·diff 검사 PASS. 검사 생략·제품 활성화·승인 없는 추가 push는 없다. 현재 CI 최종 결과를 계속 확인하고, 이 workflow 변경의 원격 실행은 새 승인 뒤에만 한다.
@@ -222,6 +228,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+- **2026-11-02 Windows 경로 fixture**: host 절대경로와 canonical wire 경로는 구분한다. core/protocol Windows 회귀는 모두 통과했고 sidecar 313 PASS/1 FAIL의 마지막 fixture 수정은 로컬 1 PASS, Windows 재검증 대기다. 원장 테스트에 native 역슬래시 경로를 넣지 않으며 제품 경로 검사를 완화하지 않는다. 상세는 실행 41394071830 기록.
 
 - **Windows 컴파일과 제품 준비 구분 (2026-11-02)**: macOS native owner를 cfg로 분리해도 Windows G4/stdio는 DB·ready 전에 unsupportedPlatform으로 차단된다. 공통 영수증 검증은 플랫폼 독립으로 유지한다. Windows CI를 녹색으로 만들려고 패키지 smoke의 ready 조건을 낮추지 않으며, Windows의 실제 안전 경로 구현·검증·활성화가 별도로 남는다.
 

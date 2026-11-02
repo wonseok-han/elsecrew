@@ -86,6 +86,8 @@ macOS 패키징 전에는 실행 중인 해당 `out/hello-agent-<platform>-<arch
 - [ ] macOS 실제 에이전트 입력·출력·명시 중단·자손 소멸 확인; Codex planning 1회 성공을 쓰기·승인·복구 전체 합격으로 확대하지 않음
 - [ ] Claude 앱 전용 로그인과 실제 작업 경로 확인; 계정/유료 모델 시험은 별도 승인 범위만 실행
 - [ ] G6 시작·대형 파일/diff·입력·스트림·전체 프로세스 메모리·패키지 크기 측정; 실제 collector를 연결한 `m5:test:performance`와 최종 하네스 증거 확보 (합성 진단 JSON만으로 통과시키지 않음)
+단일 실패 재검증용 `.github/workflows/m5-windows-fixture-followup.yml`은 `codex/m5-windows-fixture-followup-20261102` 전용 push에서 원장 snapshot fixture 1개만 검사한다(20분 상한, 실제 모델·패키징·artifact 업로드 없음). 전체 회귀/Windows 사용 가능/출시 합격 증거가 아니며, 기존 통과 기록과 구분한다. 이 별도 공개 브랜치의 push·CI도 사용자 승인 뒤에만 실행한다.
+
 - [ ] Windows 패키지의 UI·sidecar·fixture 확인 및 실제 agent 실행 차단 유지; 자손 안전 구현 전 실행 활성화 금지
 - [ ] 데이터 손실·교차 채팅 오염·원본 보호·미확인 종료/복구의 최종 실패 주입과 독립 검토
 - [ ] 깨끗한 기기·서명/공증·배포 방식 결정과 최종 설치본 확인; main 병합·push·외부 배포는 별도 사용자 승인

@@ -1,0 +1,31 @@
+name: M5 Windows fixture follow-up (diagnostic only)
+
+on:
+  push:
+    branches:
+      - codex/m5-windows-fixture-followup-20261102
+
+permissions:
+  contents: read
+
+jobs:
+  previously-failed-fixture:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: 4
+      CARGO_INCREMENTAL: 0
+      RUST_TEST_THREADS: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify the previously failed ledger fixture only
+        run: cargo test --locked --release -p hello-agent-sidecar --lib agent_runtime::budget_tests::budget_valid_actual_run_snapshot_exceeds_reopen_primary -- --exact
+      - name: Record diagnostic scope
+        shell: pwsh
+        run: |
+          @'
+          Diagnostic only: one previously failed Windows fixture regression.
+          This is not a full regression, package, platform-readiness, or release gate.
+          No application activation, credentials, or actual model calls are included.
+          '@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
