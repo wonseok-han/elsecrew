@@ -2,6 +2,12 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 803b937의 깨끗한 m5/coding-agent-ide에서 누적 Node/TypeScript 검증을 수행했다. `npm test` 전체635개 PASS, 실패/스킵0(24.45초), `pnpm exec tsc --noEmit` PASS다. 이전23fea6f의11개 focused 수정 이후 전체 재실행이 없었던 증거 공백을 닫았다. 기능 연결 후 누적 검증 원칙에 따른 실행이며 새 실패는 없었다.
+- `.artifacts/m5-regression-2026-11-02/consolidated-node/`에 원문 로그와 기준HEAD/Node버전/명령/종료코드/로그 지문을 저장했다. 이 결과는 Node와src 타입검사만 증명하며 Rust 재실행·새 QA 패키지 tracing 실측·전체G6/Windows/출시 합격으로 확대하지 않는다. AGENTS/CLAUDE의 실제 공급자 범위 설명도 현재 Codex/Claude 파일 수정·취소 성공과 전체 복구 미완료를 이미 구분하고 있음을 확인했다.
+- 제품 수정은 없으며 대형 빌드·임시 앱·사용자 데이터·실제 모델 호출을 만들지 않았다. diff검사 PASS. 다음은 남은G6 계측/화면 측정과 유휴400MiB 최적화, Windows 실행 환경·출시/서명 검증이며 기준은 그대로다. main병합/push없음.
+
+### 2026-11-02 · by GPT-6
+
 - 직전8ba273a의 실측은 새 수집 경로 동작과 화면 숨김 실패를 확인한 진척이며 반복 대기 상태가 아니다. 이번에는 같은 가시성 시험을 재실행하지 않고, 출력/동시 부하에 빠져 있던 main task 관측을 기존 `createMainTaskTrace`로 연결했다. QA 창의 debugger tracing을 시작/종료하고 최대8초 완료 대기·리스너/연결 해제·중도 실패 기록을 추가했다. 제품 코드와 안전 경계 변경은 없다.
 - 반복 요약은 완전한 mainLongTasks 원시 기록을 요구하고 mainLongTaskMs 최대값/200ms 기준을 집계한다. 누락·data loss·미완료는 실패이며250ms 관측을 버리지 않는다. QA 패키지 복사 목록과 절차도 갱신했다. debugger/trace 추가 비용이 포함되므로 과거 trace 없는 RSS와 최적화 효과를 직접 비교하지 않는다.
 - 관련 파서7개와 요약6개, 총13회귀 PASS 및 실행 스크립트 문법/diff PASS. 새 패키지의 tracing 수명주기 실측은 아직 수행하지 않았고 전체G6 PASS가 아니다. 대형 빌드·QA 앱/임시 프로젝트·실제 모델 호출 없음. 다음은 가시성 확보 후 연결 계측 통합 검증, 유휴400MiB 최적화, 입력/경합 등 미완료G6 및Windows/출시 검증이다. main병합/push없음.
@@ -203,6 +209,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **누적 Node 검사 최신 증거(2026-11-02)**: 깨끗한803b937의 npm test635 PASS/실패·스킵0 및 src TypeScript PASS. 이전11개 focused 수정 이후 전체 재검사 공백 해소. Rust/패키지/G6/Windows/출시까지 합격한 결과는 아니다. 원문은 `.artifacts/m5-regression-2026-11-02/consolidated-node/`.
 
 - **초기 메모리 조사(2026-11-02)**: 유휴400MiB 기준 유지. 같은 정적 화면도 큰 비용이며 software rendering/spellcheck/ready-to-show는 개선 근거 없음. 레이어5개에 명백한 불필요 승격 없음. 손실 없는 memory-infra 통계에서 renderer tile pool72.4375MiB 중 free55.0625MiB 확인(할당 통계≠RSS 절감량). 초기 paint를 DOM mount 뒤로 늦춘 대조도 RSS 개선이 없어 기각했다. Blink 타일 예산32MiB로 실제 할당을 줄여도 RSS가 개선되지 않아 이 후보도 제품에 미적용이다. 상세·증거는 최신 워크로그.
 
