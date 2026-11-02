@@ -116,11 +116,13 @@ app.whenReady().then(async () => {
   }
   // Optional native allocation summary after RSS sampling. Only this owned
   // diagnostic app and its Electron-reported children are inspected; no dumps.
-  if (process.argv.includes('--native-memory')) {
+  if (process.argv.includes('--native-memory') || process.argv.includes('--native-regions')) {
+    const regions = process.argv.includes('--native-regions');
+    report.nativeMemoryScope = regions ? 'Region map after RSS sampling; mapped resident totals are not ps RSS or additive physical usage' : 'Summary after RSS sampling';
     report.nativeMemory = report.metrics.map(metric => {
       try {
         return {pid:metric.pid,type:metric.type,summary:execFileSync('/usr/bin/vmmap',
-          ['-summary',String(metric.pid)],{encoding:'utf8',timeout:5000,maxBuffer:256*1024})};
+          [regions ? '-wide' : '-summary',String(metric.pid)],{encoding:'utf8',timeout:5000,maxBuffer:regions ? 4*1024*1024 : 256*1024})};
       } catch (error) { return {pid:metric.pid,type:metric.type,error:String(error)}; }
     });
   }

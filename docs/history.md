@@ -2,6 +2,13 @@
 
 ### 2026-11-02 · by GPT-6
 
+- bcdae46 이후 native 메모리 귀속을 조사했다. 기존 vmmap summary에는 영역별 파일/화면 자원 신원이 없어 진단 runner에 opt-in --native-regions를 추가했다. RSS를 먼저 측정한 뒤 자체 앱/보고된 자손의 vmmap -wide 영역 지도만 최대4MiB/프로세스·5초로 수집한다. 내용 덤프·실계정·sidecar 실행은 없다. 로컬 vmmap 설명서를 확인했으며 mapped resident total/physical footprint/ps RSS는 서로 대체·합산하지 않는다.
+- 합성 product 단회는 DOM111개/visible, RSS401.16~405.03MiB로 여전히400초과다. 영역 지도에서 GPU의 BGRA IOSurface는2560x416 14개,192x1536 2개,2560x1536 3개다(큰3개는해당지도RSDNT0). native footprint는Browser52.8M/GPU87.9M/Utility7137K/Tab42.3M이며400MiB RSS 판정값이 아니다. `.artifacts/m5-performance/idle-product-84950.json`과native-regions-summary에 원문/요약을 보존했다.
+- 추가 실행 대신10/30 startup 본10회 시계열을 재분석했다. GPU 첫93.80~95.83MiB→약12초시점70.53~90.34MiB로 감소하나폭이일정하지않다. 예를들어trial1 전체마지막451.67MiB,trial7 379.30MiB,trial10 370.44MiB다. 늦은낮은표본만고르거나idle측정시점을바꿔기존FAIL을PASS로바꾸지않는다. 요약은idle-existing-gpu-timeseries-2026-11-02.json이며OS압축/자원반환등원인은아직구분되지않았다.
+- 진단 exit0·관측PID부재 확인 후 자체프로필a6bzcA 삭제/정리증거 보존. 문법/diff PASS, 새패키지·유료모델·사용자데이터변경없음. 이번변경은계측확장이지제품최적화가아니다. 다음은 native 영역의 시간별 반환 원인과 실제절감후보 확인, 미완료G6/Windows/출시 검증이다. main병합/push없음.
+
+### 2026-11-02 · by GPT-6
+
 - ccfbbe0의 깨끗한 통합 상태에서 초기 로딩을 직접 조사하고 상시 승인된 읽기 전용 검토자1명과 메모리 후보를 대조했다. Monaco 지연 로드·admission 완료 후 polling 종료·작은 초기 controller 상태를 확인했다. 현재 증거로 import 분리나 이미 기각한 Chromium 플래그를 제품 최적화로 적용할 근거는 없다.400MiB 원인은 추가 native resident allocation 귀속이 필요하다.
 - 별개의 실제 보유 문제를 수정했다. sidecar stdout의 마지막 완결 JSONL 뒤0길이 subarray는 큰 입력 backing buffer를 계속 붙잡을 수 있으므로 빈 Buffer로 교체했다. stderr는 마지막32KiB를 복사해 큰 원래 입력 allocation의 보유를 끊는다. 부분 JSONL·원시 line decode·1MiB 제한·오류/종료 계약은 유지한다. 예상 효과는 큰I/O 후 제한된 잔류 메모리이며 cold idle400MiB 해결이나 RSS 실측 개선으로 주장하지 않는다.
 - near-limit 정상ready 뒤 부분 event/완결+다음 부분 event 회귀를 추가했고 기존 stderr tail/오류 검사 포함 bridge64개 PASS. 독립 검토자는 정확한제품diff에 correctness/security 차단없음으로 승인했다. `.artifacts/m5-buffer-retention-2026-11-02/`에 로그/검토 요약을 보존했다. diff PASS, 새 앱·대형 빌드·모델 호출 없음. 이번제품수정 이후 전체635재실행은 하지 않았다. main병합/push없음. 다음은 native 메모리 귀속과 남은G6/Windows/출시 검증이다.
