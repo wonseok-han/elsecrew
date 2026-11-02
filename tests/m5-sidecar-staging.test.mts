@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, resolve, win32 } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
@@ -41,11 +41,12 @@ function stage(options: {
   platform?: string;
   env?: Record<string, string>;
   resources?: string;
+  windowsPaths?: boolean;
 } = {}) {
   const writes: unknown[][] = [];
   const calls: unknown[][] = [];
   const context = {
-    dirname, isAbsolute, resolve, fileURLToPath,
+    ...(options.windowsPaths ? { dirname: win32.dirname, isAbsolute: win32.isAbsolute, resolve: win32.resolve, fileURLToPath: () => "C:\\repo\\scripts\\m5-stage-sidecar.mjs" } : { dirname, isAbsolute, resolve, fileURLToPath }),
     scriptUrl: scriptUrl.href,
     process: {
       argv: ["node", fileURLToPath(scriptUrl), options.resources ?? "/stage resources"],
@@ -83,9 +84,9 @@ for (const [name, executable, env] of [
     const result = stage({ messages: [artifact(executable)], env });
     assert.equal(result.error, undefined);
     assert.deepEqual(result.writes, [
-      ["mkdir", "/stage resources/sidecar", { recursive: true }],
+      ["mkdir", resolve("/stage resources/sidecar"), { recursive: true }],
       ["copy", executable, "/stage resources/sidecar/hello-agent-sidecar"],
-      ["chmod", "/stage resources/sidecar/hello-agent-sidecar", 0o755],
+      ["chmod", resolve("/stage resources/sidecar/hello-agent-sidecar"), 0o755],
     ]);
     assert.deepEqual(result.calls, [["cargo", [
       "build", "--locked", "--release", "-p", "hello-agent-sidecar", "--bin", "hello-agent-sidecar", "--message-format=json-render-diagnostics",
@@ -112,7 +113,7 @@ test("sidecar staging preserves Windows destination naming without chmod", () =>
   const result = stage({ platform: "win32", messages: [artifact("/cross/release/hello-agent-sidecar.exe")] });
   assert.equal(result.error, undefined);
   assert.deepEqual(result.writes, [
-    ["mkdir", "/stage resources/sidecar", { recursive: true }],
+    ["mkdir", resolve("/stage resources/sidecar"), { recursive: true }],
     ["copy", "/cross/release/hello-agent-sidecar.exe", "/stage resources/sidecar/hello-agent-sidecar.exe"],
   ]);
 });
@@ -152,4 +153,19 @@ test("sidecar staging rejects absent, ambiguous or invalid executable artifacts 
   const malformed = stage({ stdout: `${JSON.stringify(artifact("/valid"))}\n{truncated` });
   assert.ok(malformed.error);
   assert.deepEqual(malformed.writes, []);
+});
+
+// Exercise drive-qualified paths even when this suite runs on macOS.
+test("sidecar staging uses Windows path semantics and exact Cargo source", () => {
+  const source = "C:\\cargo cache\\release\\hello-agent-sidecar.exe";
+  const result = stage({
+    platform: "win32", windowsPaths: true, resources: "C:\\stage resources",
+    messages: [artifact(source, { manifest_path: "C:\\repo\\crates\\hello-agent-sidecar\\Cargo.toml" })],
+  });
+  assert.equal(result.error, undefined);
+  assert.deepEqual(result.writes, [
+    ["mkdir", "C:\\stage resources\\sidecar", { recursive: true }],
+    ["copy", source, "C:\\stage resources\\sidecar\\hello-agent-sidecar.exe"],
+  ]);
+  assert.equal(result.calls[0][2].cwd, "C:\\repo");
 });

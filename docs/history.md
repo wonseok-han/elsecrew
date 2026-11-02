@@ -2,6 +2,13 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 사용자 승인으로 aa66e0a를 공개 진단 브랜치에 push했다. [Windows CI 41388906711](https://github.com/wonseok-han/hello-agent/actions/runs/41388906711)는 설치·TypeScript 검사 성공 후 Node 646 passed / 4 failed / 7 skipped로 종료했다. 고정 해시/SQL/프로토콜 바이트와 앞선 경로·부모 교체 실패는 해소됐으나 staging의 import 오류에 가려졌던 네 destination 경로 기대값 실패가 남았다. Rust·패키징·ZIP 업로드는 이번에도 건너뛰었다.
+- `m5-sidecar-staging.test.mts`의 destination 기대값을 호스트 resolve로 맞추고, macOS에서도 win32 경로 함수를 주입해 드라이브·공백 포함 Cargo 원본 경로, 정확한 manifest/cwd, exe 목적지와 chmod 미호출을 확인하는 회귀를 추가했다. 제품/안전 계약은 변경하지 않았다.
+- 관련 10/10 PASS 및 diff 검사 통과. 변경 없는 전체 Node/Rust 검사는 반복하지 않았다. 원격 원시 로그와 로컬 결과는 `.artifacts/m5-windows-41388906711/`에 보존했다. 새 로컬 앱·무거운 캐시·실제 모델 실행은 없다.
+- 승인된 원격 1회는 소진됐다. 다음은 수정 커밋에 대한 별도 push/CI 승인 뒤 Windows 실증이다. main 병합·릴리스는 없으며 G6/400MiB/Windows/출시 완료를 선언하지 않는다.
+
+### 2026-11-02 · by GPT-6
+
 - 사용자 승인으로 9e85d6f를 공개 저장소의 새 브랜치 `codex/m5-windows-diagnostic-20261102`에 push하고 Windows 진단 CI 1회를 실행했다. [실행 41388152199](https://github.com/wonseok-han/hello-agent/actions/runs/41388152199)는 설치·TypeScript 검사 뒤 Node 테스트에서 625 passed / 25 failed / 7 skipped로 종료했다. Rust·패키징·ZIP 업로드는 실행되지 않았다. main 병합·릴리스·모델 호출은 없으며 승인된 push/CI 1회는 소진됐다.
 - 25개 실패를 분석해 `.gitattributes`로 소스·스키마 LF와 golden fixture 원본 바이트 보존을 명시했다. 고정 해시·프로토콜 바이트 비교를 완화하지 않았다. 여섯 테스트 파일의 호스트 경로/VM require 가정과 CRLF import 제거를 수정했다. 열린 파일이 있는 디렉터리 이동을 Windows가 거절하는 테스트는 부모 교체 후 원래 부모에 묶인 descriptor를 반환하는 주입으로 재현하며, sentinel·분리된 임시 파일 보존과 fail-closed 검사를 유지했다. 제품 코드는 변경하지 않았다.
 - 관련 테스트 56/56, 전체 `npm test` 657/657, CRLF 임시 사본의 staging 9/9 PASS. `core.autocrlf=true` checkout-index로 대표 파일 10개의 index 원본 바이트 보존을 확인했다. 모든 결과는 macOS 로컬 증거이며 Windows PASS가 아니다. 변경 없는 Rust 전체 검사는 재실행하지 않았다. diff 검사 통과.
