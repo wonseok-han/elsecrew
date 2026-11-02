@@ -2,6 +2,12 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 직전 초기 paint 대조는 효과 없는 후보를 제외한 진척이었다. 기준cef8a5b/깨끗한m5 통합 상태에서 남은 수집 경로를 재대조하고, 메모리 후보 반복 대신 아직 연결되지 않은 동시 부하 반복 실행을 구현했다. `m5-repeat-output-qa.mjs --combined-workload`는 기존 warmup1+측정10회 흐름에 큰 파일/diff/네 출력 시나리오를 전달한다. 기본 출력 모드는 유지한다.
+- `summarizeOutputTrial`에 동시 부하 신원·고정 fixture 크기·공존·원본 불변·60초 회수 대기·유휴 시간 경계 확인을 연결했다. 원시 RSS 표본으로 idle/peak/retained를 재계산하고 저장된 요약과 대조한다. series에 workload와idle/retained최대값을 추가하며 실패 시 중단·원시 결과 보존·기존 종료/정리 조건을 유지한다. 제품 활성화·합격 기준 변경은 없다.
+- `node --experimental-strip-types --test tests/m5-output-trial-summary.test.mts`4개 PASS, 반복기 문법·diff PASS. 누락된 동시 부하 증거·잘못된 시간 경계·요약 불일치가 거절되고401MiB실패가 출력 성공 뒤에 숨지 않는 회귀를 포함한다. 이는 요약기 단위 검사이며 실제10회 측정/제품G6 합격이 아니다. 알려진400MiB실패 상태에서 대형 앱을 재빌드·반복 실행하지 않았다. 추가 시험 프로필/패키지 생성 없음, main병합·push없음. 다음은 유휴 메모리 절감과 실측 수집 완결, Windows/출시 검증이다.
+
+### 2026-11-02 · by GPT-6
+
 - 직전 턴의 allocator 통계 수집은 진척이며 이번 기준은35fec4a/깨끗한 통합 브랜치다. 진단 runner에 product 전용 `--paint-after-mount`를 추가했다. 창을 숨기고 초기 paint를 끈 채 실제 workbench DOM을 기다린 뒤 표시한다. 제품 main/표시 동작은 변경하지 않았다. 표시 준비 관측 시각은 startup/실제 paint 완료 지표로 쓰지 않는다.
 - 기본/후보/후보/기본 순서 대조의 최대RSS는401.046875/433.515625/428.9375/429.125MiB였다. 모두 visible·DOM111개, trace 손실 없음. tile 할당은72.4375/55.0625/55.0625/59.125MiB로 일부 감소했지만 RSS 개선은 일관되지 않아 제품 최적화로 채택하지 않는다. `.artifacts/m5-performance/idle-first-paint-series-2026-11-02.json`에 비교와 종료/PID부재·자체 프로필4개 정리 기록을 남겼다. 실제 공급자·인증·사용자 데이터는 접근하지 않았다.
 - `docs/procedures/m5-performance.md`의 구간 분리 재측정 대기 문구를 실제 fourth 결과와 대조해 갱신했다. 해당 JSON status/functionalStatus 모두FAIL이며 명시된 오류는idle RSS 초과다. 유휴434.41MiB이므로 기존400MiB 기준을 계속 실패로 유지한다. runner 문법·diff PASS, main병합·push없음. 다음은 첫 paint 지연 외의 실제 메모리 절감과 G6·Windows·출시 미완료 항목이다.

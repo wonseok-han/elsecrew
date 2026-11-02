@@ -9,17 +9,20 @@ import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { summarizeOutputTrial } from './m5-output-trial-summary.mjs';
 
-assert.equal(process.platform,'darwin'); assert.equal(process.argv.length,2);
+assert.equal(process.platform,'darwin');
+const combined = process.argv.includes('--combined-workload');
+assert.deepEqual(process.argv.slice(2), combined ? ['--combined-workload'] : []);
 const repo=fileURLToPath(new URL('..',import.meta.url));
 const git=(...args)=>execFileSync('/usr/bin/git',args,{cwd:repo,encoding:'utf8'}).trim();
 assert.equal(git('status','--porcelain'),'','Commit the measurement source first');
 const output=fs.mkdtempSync(path.join(os.tmpdir(),'hello-agent-output-series-'));
 const report={diagnostic:true,gateEligible:false,status:'RUNNING',head:git('rev-parse','HEAD'),
+  workload:combined ? 'large-file-diff-four-streams' : 'four-streams',
   warmupRuns:1,measuredRuns:10,trials:[],limitations:[
     'Explicit QA artifact, not production signing/fuses or actual providers.',
     'Exact-head live samples do not measure every output row paint.',
     'Pre-write fixture stamps do not prove commit or delivery deadlines.',
-    'Sampled process-tree RSS does not establish retained memory or all G6 workloads.']};
+    combined ? 'Combined workload includes sampled retained memory, but is not all G6 evidence.' : 'Sampled process-tree RSS does not establish retained memory or all G6 workloads.']};
 const persist=()=>fs.writeFileSync(path.join(output,'series.json'),JSON.stringify(report,null,2));
 const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const sourceUnchanged=()=>{assert.equal(git('rev-parse','HEAD'),report.head);assert.equal(git('status','--porcelain'),'');};
@@ -75,7 +78,7 @@ try {
     sourceUnchanged();assert.deepEqual({asar:hash(asar),sidecar:hash(sidecar)},hashes);
     const destination=path.join(output,`trial-${index}`);fs.mkdirSync(destination);
     let root;
-    const termination=await run(executable,[],path.join(destination,'trial.log'),message=>{
+    const termination=await run(executable,combined ? ['--combined-workload'] : [],path.join(destination,'trial.log'),message=>{
       if(message.stage==='STARTED'){assert.equal(root,undefined);root=message.root;}
     });
     ownedRoot(root,'hello-agent-output-ui-');
@@ -93,14 +96,18 @@ try {
     fs.writeFileSync(path.join(destination,'cleanup.json'),JSON.stringify({root,observedPids:[...observed],cleanShutdown:true}));
     fs.rmSync(root,{recursive:true});trial.fixtureCleaned=true;persist();
     assert.equal(termination.code,0, `Trial ${index}: ${result.error ?? result.status}`);
-    trial.values=summarizeOutputTrial(result);sourceUnchanged();persist();
+    trial.values=summarizeOutputTrial(result, {combinedWorkload:combined});sourceUnchanged();persist();
     console.log(JSON.stringify({stage:'TRIAL_FINISHED',index,values:trial.values}));
   }
   const trials=report.trials.slice(1);
   report.maxima={sampledLiveLatencyMs:Math.max(...trials.map(t=>t.values.maximumSampledLiveLatencyMs)),
     peakRssBytes:Math.max(...trials.map(t=>t.values.peakRssBytes))};
+  if (combined) for (const key of ['idleRssBytes','retainedRssBytes']) {
+    report.maxima[key]=Math.max(...trials.map(t=>t.values.combinedMemory.maxima[key]));
+  }
   report.status=trials.every(t=>t.values.allStampedWithin60Seconds)&&report.maxima.sampledLiveLatencyMs<=100
-    &&report.maxima.peakRssBytes<=800*1024*1024?'NOT_READY':'FAIL';
+    &&report.maxima.peakRssBytes<=800*1024*1024
+    &&(!combined || trials.every(t=>t.values.combinedMemory.failedMetrics.length===0))?'NOT_READY':'FAIL';
   // Preserve the build for diagnosis on any failed or incomplete series.
   qaCleanupSafe=report.status==='NOT_READY';
 }catch(error){report.status='FAIL';report.error=String(error);}

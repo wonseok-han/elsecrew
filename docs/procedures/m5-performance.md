@@ -6,7 +6,7 @@
 
 첫 채팅에서 큰 모델과 diff를 연 뒤 네 실행을 시작한다. 첫 관측 구간의 앞뒤 head를 대조해 네 출력이 모두 증가하고 아직 sealed되지 않았는지, 모델과 diff가 함께 존재하는지 확인한다. 이후 기존 채팅별 출력·기록 탐색 검사를 수행한다. 프로젝트 닫기 후 60초를 기다린 뒤 잔류 RSS를 수집한다. 원본 Git 상태 불변을 확인하고 기존 정상 종료 경계를 유지한다. 진단은 일반 제품 `out`이 아닌 별도 QA 앱에서만 실행하며 실제 공급자·인증·모델을 사용하지 않는다.
 
-**2026-11-02 단회 실행은 기능 경로를 완료했지만 idle RSS 초과로 FAIL했다.** 증거는 `.artifacts/m5-combined-output-2026-11-02/second`이며 전체 G6 합격은 아니다. 이후 대형 문서·diff 생성은 별도 프로세스에서 완료하고 종료를 기다리도록 수정했다. 생성용 문자열·patch 버퍼를 측정 대상 Electron main에 직접 할당하지 않으며 강제 GC나 RSS 차감은 사용하지 않는다. 이 수정 후 third 실행은 기능 경로를 완료했지만 idle 기준에서 FAIL했다. 다만 second/third 모두 idle phase에 채팅 작업 복사본 준비가 포함된 분류 오류가 있어 idle/잔류증분은 순수 유휴/회수 근거로 사용하지 않는다. 후속 수정은 최초 유휴 구간의 시작/종료 시각을 기록하고 준비 구간을 preparing으로 분리하며 전체 peak에는 계속 포함한다. 구간 분리 후 fourth 재측정도 완료했으며 `.artifacts/m5-combined-output-2026-11-02/fourth/result.json`의 오류는 `Combined workload limits exceeded: idleRssBytes`다. 순수 유휴 최대455,507,968bytes(434.41MiB)로 FAIL이며 전체 G6 합격이 아니다. QA main의 나머지 비용, 초 단위 표본, 10회 반복 미완료 등의 범위 차이가 남는다. 기존 400/800/120MiB와 파일/diff 시간 기준 초과는 실패로 기록한다. 기존 반복 수집기는 기본 출력 모드이므로 이 새 모드의 반복 수집으로 인용하지 않는다. 생성한 QA 패키지와 fixture는 기존 종료·PID 부재·DB clean 확인 뒤 정리한다.
+**2026-11-02 단회 실행은 기능 경로를 완료했지만 idle RSS 초과로 FAIL했다.** 증거는 `.artifacts/m5-combined-output-2026-11-02/second`이며 전체 G6 합격은 아니다. 이후 대형 문서·diff 생성은 별도 프로세스에서 완료하고 종료를 기다리도록 수정했다. 생성용 문자열·patch 버퍼를 측정 대상 Electron main에 직접 할당하지 않으며 강제 GC나 RSS 차감은 사용하지 않는다. 이 수정 후 third 실행은 기능 경로를 완료했지만 idle 기준에서 FAIL했다. 다만 second/third 모두 idle phase에 채팅 작업 복사본 준비가 포함된 분류 오류가 있어 idle/잔류증분은 순수 유휴/회수 근거로 사용하지 않는다. 후속 수정은 최초 유휴 구간의 시작/종료 시각을 기록하고 준비 구간을 preparing으로 분리하며 전체 peak에는 계속 포함한다. 구간 분리 후 fourth 재측정도 완료했으며 `.artifacts/m5-combined-output-2026-11-02/fourth/result.json`의 오류는 `Combined workload limits exceeded: idleRssBytes`다. 순수 유휴 최대455,507,968bytes(434.41MiB)로 FAIL이며 전체 G6 합격이 아니다. QA main의 나머지 비용, 초 단위 표본, 10회 반복 미완료 등의 범위 차이가 남는다. 기존 400/800/120MiB와 파일/diff 시간 기준 초과는 실패로 기록한다. 반복 수집기의 기본값은 출력 전용이다. `node scripts/m5-repeat-output-qa.mjs --combined-workload`는 같은 QA 빌드로 동시 부하 warmup1회+측정10회를 연결하며 실패 시 중단한다. 이 경로는 구현·요약기 단위 검증만 마쳤고 실제10회 수집은 아직 하지 않았다. 기존 출력 전용 결과를 동시 부하 증거로 인용하지 않는다. 생성한 QA 패키지와 fixture는 기존 종료·PID 부재·DB clean 확인 뒤 정리한다.
 
 ## 작업 복사본 준비 비용 분리
 
@@ -252,3 +252,7 @@ clean checkout에서 `node scripts/m5-repeat-output-qa.mjs`를 실행하면 QA �
 이 수집기는 QA artifact·표본 live latency·생성 timestamp·샘플 RSS 진단이다. 모든 행 receipt/paint·닫기 후 retained memory·다른 G6 workload를 대체하지 않으며 기준 이내여도 NOT_READY/exit2다. 관측 실패나 집계 기준 초과는 FAIL/exit1이다.
 
 QA live 구간의 시작은 배열 길이 cursor만 보관하고 종료 때 해당 run의 새 head/frame만 읽는다. 누적 trace 전체와 latency 표본은 종료 시 원시 결과에 남기며, 읽기 비용 `observationReadMs`와 main의 동기 기록 비용 `mainPersistMs`를 각 live 구간에 별도 기록한다. 이 시간은 원래 latency에서 빼지 않는다. cursor 이후 누락/잘림 카운터도 유지하며 변경 전 초과 결과를 무효화하지 않는다.
+
+### 동시 부하 반복 수집
+
+`--combined-workload`를 지정한 series는 각 QA 실행에 같은 인수를 전달하고 workload 종류를 기록한다. 원래 종료 응답·관측 PID부재·DB clean 확인 및 fixture 정리 경계를 그대로 사용한다. 요약기는 표준 출력과 동시 부하 자료가 섞이는 것을 거절하며 fixture 크기·파일/diff 공존·원본 불변·60초 대기·유휴 구간 경계를 확인한다. 메모리 최대값과 실패 목록은 원시 PID별 RSS 표본에서 다시 계산해 저장된 요약과 대조한다. 최종 series에는 peak뿐 아니라 idle/retained 최대값도 남는다. 실패를 제외해10회를 채우지 않고 원시 결과를 남긴 뒤 중단한다. 이 경로도 `diagnostic:true`, `gateEligible:false`이며 계측 누락·전체G6 완료를 대신하지 않는다.

@@ -27,3 +27,37 @@ test('rejects incomplete visibility, truncated observations and inconsistent raw
     (r:any)=>{r.restoredChats.pop();},
   ]){const r=result();mutate(r);assert.throws(()=>summarizeOutputTrial(r));}
 });
+
+function combinedResult(): any {
+  const r=result();
+  r.memory.samples=['idle','loaded','retained'].map((phase,i)=>({phase,at:[1000,2000,63000][i],totalBytes:100,processes:[{pid:123,rssBytes:100}]}));
+  r.combinedWorkload={status:'OBSERVED',coexist:true,originalUnchanged:true,
+    fixture:{treeFiles:10000,treeDirectories:1000,fileBytes:5242880,fileLines:100000},
+    largeProject:{failedMetrics:[]},largeDiff:{failedMetrics:[],diffFiles:500,diffChangedLines:20000,diffBytes:10485760},
+    liveCoexistence:{editor:true,diff:true,runs:4},closedAt:3000,retainedStartedAt:63000,
+    idleStartedAt:900,idleEndedAt:1100,
+    memory:{maxima:{idleRssBytes:100,peakRssBytes:100,retainedRssBytes:0},failedMetrics:[]},failedMetrics:[]};
+  return r;
+}
+test('combined series requires workload evidence and recomputes memory from raw samples',()=>{
+  const r=combinedResult();
+  assert.equal(summarizeOutputTrial(r,{combinedWorkload:true}).combinedMemory.maxima.idleRssBytes,100);
+  assert.throws(()=>summarizeOutputTrial(r));
+  assert.throws(()=>summarizeOutputTrial(result(),{combinedWorkload:true}));
+  for(const mutate of [
+    (r:any)=>{r.combinedWorkload.coexist=false;},
+    (r:any)=>{r.combinedWorkload.originalUnchanged=false;},
+    (r:any)=>{r.combinedWorkload.retainedStartedAt=62000;},
+    (r:any)=>{r.memory.samples[0].at=1200;},
+    (r:any)=>{r.memory.samples[2].at=62000;},
+    (r:any)=>{r.combinedWorkload.memory.maxima.idleRssBytes=1;},
+    (r:any)=>{r.combinedWorkload.fixture.fileBytes=10;},
+  ]){const r=combinedResult();mutate(r);assert.throws(()=>summarizeOutputTrial(r,{combinedWorkload:true}));}
+});
+test('combined memory failures cannot disappear behind a successful output-only summary',()=>{
+  const r=combinedResult();const high=401*1024*1024;
+  r.memory.samples[0].totalBytes=high;r.memory.samples[0].processes[0].rssBytes=high;
+  r.combinedWorkload.memory={maxima:{idleRssBytes:high,peakRssBytes:high,retainedRssBytes:0},failedMetrics:['idleRssBytes']};
+  r.combinedWorkload.failedMetrics=['idleRssBytes'];
+  assert.deepEqual(summarizeOutputTrial(r,{combinedWorkload:true}).combinedMemory.failedMetrics,['idleRssBytes']);
+});

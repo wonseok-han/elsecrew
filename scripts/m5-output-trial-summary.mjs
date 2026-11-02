@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const { summarizeOutputGeneration } = createRequire(import.meta.url)('./m5-output-generation.cjs');
 
-export function summarizeOutputTrial(result) {
+const { summarizeMemory } = createRequire(import.meta.url)('./m5-process-memory.cjs');
+
+export function summarizeOutputTrial(result, {combinedWorkload = false} = {}) {
+  assert.equal(Boolean(result.combinedWorkload), combinedWorkload, 'Unexpected workload evidence');
   assert.equal(result.packagedQa, true);
   assert.equal(result.status, 'PASS', 'Incomplete/hidden output trial');
   assert.equal(result.functionalStatus, 'PASS');
@@ -28,7 +31,25 @@ export function summarizeOutputTrial(result) {
       && Number.isSafeInteger(row.rssBytes) && row.rssBytes >= 0));
     assert.equal(sample.totalBytes, sample.processes.reduce((sum,row) => sum+row.rssBytes,0));
   }
-  return {persistedRows:generation.persistedRows,
+  let combinedMemory;
+  if (combinedWorkload) {
+    const c = result.combinedWorkload;
+    assert.equal(c.status, 'OBSERVED');
+    assert.equal(c.coexist, true); assert.equal(c.originalUnchanged, true);
+    assert.deepEqual(c.fixture, {treeFiles:10000,treeDirectories:1000,fileBytes:5242880,fileLines:100000});
+    assert.deepEqual([c.largeDiff.diffFiles,c.largeDiff.diffChangedLines,c.largeDiff.diffBytes], [500,20000,10485760]);
+    assert.deepEqual(c.largeProject.failedMetrics, []); assert.deepEqual(c.largeDiff.failedMetrics, []);
+    assert.equal(c.liveCoexistence.editor, true); assert.equal(c.liveCoexistence.diff, true);
+    assert.equal(c.liveCoexistence.runs, 4);
+    assert.ok(Number.isFinite(c.closedAt) && c.retainedStartedAt - c.closedAt >= 60000);
+    const idle = result.memory.samples.filter(s=>s.phase==='idle');
+    assert.ok(idle.length && idle.every(s=>Number.isFinite(s.at) && s.at >= c.idleStartedAt && s.at <= c.idleEndedAt));
+    assert.ok(result.memory.samples.filter(s=>s.phase==='retained').every(s=>Number.isFinite(s.at) && s.at >= c.retainedStartedAt));
+    combinedMemory = summarizeMemory(result.memory.samples.map(s=>({...s,rssBytes:s.totalBytes})));
+    assert.deepEqual(c.memory, combinedMemory, 'Combined memory summary does not match samples');
+    assert.deepEqual(c.failedMetrics, combinedMemory.failedMetrics);
+  }
+  return {...(combinedMemory ? {combinedMemory} : {}),persistedRows:generation.persistedRows,
     allStampedWithin60Seconds:generation.allStampedWithin60Seconds,
     maximumScheduleLagMs:Math.max(...generation.streams.map(row => row.maximumScheduleLagMs)),
     maximumSampledLiveLatencyMs:Math.max(...live.samples.map(row => row.notificationToFrameMs)),
