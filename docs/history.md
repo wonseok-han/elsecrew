@@ -2,6 +2,12 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 두 번째 승인 실행 [41393243979](https://github.com/wonseok-han/hello-agent/actions/runs/41393243979), 512144c는 Windows core 225 passed / 1 failed까지 진행했다. 남은 login configuration 테스트는 macOS 로그인 연결의 POSIX 선행 `/` 조건 때문에 `C:/` fixture를 거부했다. 제품 조건을 바꾸지 않았다.
+- 해당 테스트만 Unix 절대경로이면서 Windows UNC 절대경로인 `//fixture/profile/app` 문자열로 바꾸고 절대경로 assertion을 추가했다. 실제 파일/네트워크 접근 없이 JSON을 검사하며, 파생 config 경로와 신뢰 변경은 같은 home으로 묶었다. 로컬 해당 회귀 1/1와 diff 검사 PASS. 이전 512144c 읽기 전용 검토에서도 제품 코드/거부 경계 변경은 없었다.
+- 증거: `.artifacts/m5-windows-41393243979/{job.log,login-fixture-test.log}`. 다음은 추가 3회 승인 중 마지막 push/CI이며 실행 뒤 잔여 0회다. protocol/sidecar 실행·패키지/Windows 제품 합격은 여전히 미확정이다. 로컬 여유 공간 505GiB, target 3.7GiB이며 추가 앱/워크트리/실제 모델 시험은 만들지 않았다.
+
+### 2026-11-02 · by GPT-6
+
 - c2b6d9d의 Windows CI 41392003768은 Rust 컴파일을 통과했으나 core 단위 검사 180 passed / 46 failed로 종료됐다. 실패는 공용 실행 명세·초기 응답·격리 설정 fixture의 Unix 고정 경로에서 시작했다. protocol/sidecar 실행과 패키징은 아직 도달하지 않았다.
 - core 테스트 전용 `test_path!`로 Windows drive와 native join을 사용하고, TOML 신뢰 경로 fixture도 같은 절대경로로 맞췄다. 제품 경로/출처 검증은 그대로이며 상대경로·부모 이탈·잘못된 신뢰/설정·순서 거부 사례도 유지했다. Windows 실제 공급자 활성화는 없다.
 - 로컬 `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 CARGO_INCREMENTAL=0 cargo test --locked --offline --release -p hello-agent-core`: 단위 228/228와 compile-fail 문서 3/3 PASS. diff 검사와 테스트 영역 밖 제품 소스 불변 비교도 통과했다. 증거는 `.artifacts/m5-windows-41392003768/{job.log,core-fixtures-test.log}`. 이는 macOS 회귀이며 Windows PASS가 아니다.
