@@ -2,8 +2,18 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
-const diff = require('../tests/m5-native-diff-fixture.cjs');
-function prepare(source) {
+// Keep fixture strings and full Git patches out of the measured Electron heap.
+// execFileSync returns only after the generator exits; no GC switch or RSS
+// subtraction is used, and the product keeps its normal memory policy.
+function generate(action, directory) {
+  const output = require('node:child_process').execFileSync(process.execPath,
+    [__filename, action, directory], {
+      env: {...process.env, ELECTRON_RUN_AS_NODE: '1'}, encoding: 'utf8', maxBuffer: 4096,
+    });
+  return JSON.parse(output);
+}
+function prepare(source) { return generate('prepare', source); }
+function prepareInGenerator(source) {
   const tree = path.join(source, 'aaa-tree');
   fs.mkdirSync(tree);
   for (let index = 0; index < 1000; index++) {
@@ -14,7 +24,7 @@ function prepare(source) {
   const text = require('../tests/m5-renderer-performance-fixture.cjs').getFileText();
   assert.equal(Buffer.byteLength(text), 5242880);
   fs.writeFileSync(path.join(source, 'large.txt'), text, {flag:'wx'});
-  diff.prepare(source);
+  require('../tests/m5-native-diff-fixture.cjs').prepare(source);
   return {treeFiles:10000, treeDirectories:1000, fileBytes:5242880, fileLines:100000};
 }
 async function mount(run, userData, chat) {
@@ -33,7 +43,7 @@ async function mount(run, userData, chat) {
     assert.ok(Date.now() < readyBy, 'Combined workspace file list did not become ready');
     await new Promise(resolve => setTimeout(resolve, 50));
   }
-  const dimensions = diff.change(snapshot);
+  const dimensions = generate('change', snapshot);
   const largeProject = await run(`(${probeLargeProject.toString()})(${JSON.stringify(chat.projectId)})`);
   const largeDiff = {...await run(`(${probeLargeDiff.toString()})()`), ...dimensions};
   const coexist = await run(`!!document.querySelector('.monaco-editor') && !!document.querySelector('.m5-diff-details')`);
@@ -41,3 +51,13 @@ async function mount(run, userData, chat) {
   return {largeProject, largeDiff, coexist};
 }
 module.exports = {prepare, mount};
+
+if (require.main === module) {
+  const [action, directory] = process.argv.slice(2);
+  assert.equal(process.argv.length, 4);
+  assert.ok(action === 'prepare' || action === 'change', 'Unknown QA generator action');
+  assert.ok(path.isAbsolute(directory), 'QA generator requires an absolute directory');
+  const dimensions = action === 'prepare' ? prepareInGenerator(directory)
+    : require('../tests/m5-native-diff-fixture.cjs').change(directory);
+  process.stdout.write(JSON.stringify(dimensions));
+}

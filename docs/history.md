@@ -2,6 +2,13 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 이전 턴은 단회 통합 부하의 기능 완료·idle RSS 실패와 시험 파일 정리로 진척했다. a12f955/깨끗한 m5/coding-agent-ide를 확인하고 기존 blank/preload/product 대조와 현재 로딩 코드를 검토했다. Monaco는 이미 지연 로딩이며 일반 패키지460.3MiB 초과는 그대로 남는다.
+- 통합 QA 생성기가 측정 대상 Electron main에서5MiB 문서와10MiB 전체 patch를 할당하는 오염 경로를 확인했다. 생성/변경 작업만 동기적으로 종료를 기다리는 별도 Node 모드 프로세스로 옮기고 작은 크기 JSON만 반환한다. 제품 GC·메모리 기준·안전 설정·RSS 합산은 변경하지 않았다. 이전494MiB의 원인 전부나 제품 메모리 개선이라고 주장하지 않는다.
+- 실제 자체 임시 fixture 생성/변경 진단 PASS:10,000파일·5MiB 문서,500파일/20,000변경줄/10MiB diff 유지와 부모의 큰 fixture 모듈 미로드를 확인했다. JS 문법·diff PASS, 종료된 임시 자료는 즉시 정리했다. 절차 문서의 실행 증거 없음 설명도 단회 FAIL과 수정 후 미재측정 상태로 갱신했다.
+- 다음은 별도 QA 패키지에서 생성기 분리 후 통합 관측, 일반 패키지 유휴 RSS 문제 개선과 나머지 G6/Windows/출시 검증이다. 실제 모델 호출·제품 out 교체·main병합·push없음.
+
+### 2026-11-02 · by GPT-6
+
 - 수집기 준비 수정8315bcb의 별도 QA 패키지로 combined-workload를 끝까지 실행했다. 네 단일3,000출력 스트림·각 채팅 최신200/과거100/다음페이지·스크롤 유지·큰 모델/diff 공존 중 네 head 증가·원본 Git clean을 확인했다. 첫 준비 실패는 재현되지 않았다.
 - 대형 트리 root75.7ms/expand65.5ms, 5MiB 파일 editable274.9ms, 500파일 diff summary227.2ms/first246.9ms로 해당 scoped 기준은 통과했다. 메모리 idle518,029,312B(494.0MiB), peak666,206,208B(635.3MiB), 닫기60초 후 idle 대비 잔류증분0B였다. idle400MiB 기준 초과로 전체 FAIL; 단회 QA 진단이며 G6 합격·출시 증거가 아니다. 유휴3초 관측과 QA main 오버헤드 한계를 유지한다.
 - 앱94089 정상 종료/전체 관측PID부재, sidecar94160 clean_shutdown_at00:26:09Z 확인 후 자체 fixture2xRzWU/QA패키지2z3Kd7을 제거했다. .artifacts/m5-combined-output-2026-11-02/second에 결과·화면·build·정리 증거를 보존했다. 제품 out/인증정보/사용자 프로젝트 변경·실제 모델 호출·main병합·push없음.
