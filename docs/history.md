@@ -2,6 +2,13 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 깨끗한 ea04cf5에서 별도 QA 패키지를 만들고 combined workload를1회 실행했다. 새 renderer long-task 관측은 supported/valid로 시작·실패 종료 기록을 남겼고 RSS140표본 수집 오류0이다. 실제 모델 호출은 없었다. 저장된 waitingFor는 이전 조건으로 남을 수 있으므로 진행 위치 확정에 단독 사용하지 않는다.
+- 결과는 FAIL: 큰 파일 presentation deadline 초과이며 실패 시 document.visibilityState=hidden(visible/hidden 전환 기록 있음)이었다. window.isVisible=true만으로 실제 renderer 표시를 보장하지 않는다. long-task 원시 entry0/maximum0은 windowCompleted=false인 중도 종료 기록이며200ms 합격으로 사용할 수 없다. 4개 출력·닫기 후60초 측정에는 도달하지 않았다.
+- 이번 유휴3초 최대400.9375MiB로400MiB 기준을 여전히 초과했다. 다른 실행의434MiB와 직접 비교해 제품 최적화 성공으로 주장하지 않는다. 제품 코드·메모리 합격 기준 변경 없음. 원시 결과·스크린샷·빌드/실행 로그·정리 증거는 `.artifacts/m5-combined-output-2026-11-02/fifth/`에 보존했다.
+- 앱 정상 종료 accepted, 관측한19개PID 부재, 임시 DB clean_shutdown_at=2026-11-02T01:43:19Z를 확인하고 이번 QA 앱과 임시 프로젝트 두 root를 삭제했다. 일반 out·사용자 인증/프로젝트 불변, diff검사 PASS, main병합/push없음. 다음은 화면 가시성을 확보한 통합 측정과 메모리400MiB 추가 최적화·미연결 G6 계측/Windows/출시 검증이다.
+
+### 2026-11-02 · by GPT-6
+
 - 직전 동일DOM 초기화 대조b9d0f8a는 비용 귀속을 좁힌 진척이었다. 깨끗한 동일HEAD에서 메모리 후보 반복보다 미연결 G6 관측을 진행했다. 출력/동시 부하 QA에 기존 `m5-packaged-long-task-probe.mjs`를 재사용해 visible bridge 준비부터 시나리오 종료까지 renderer long task를 수집한다. QA 패키지 복사 목록에도 관측기를 추가했다.
 - 정상 완료에서는 원시 entry와 요약을 대조하고200ms 초과를 실패로 남긴다. 중간 실패는 windowCompleted=false와 남은 기록/관측 오류를 보존한다. 출력 반복 요약은 누락·불완전 관측을0으로 취급하지 않으며 본10회 rendererLongTaskMs 최대값과200ms 기준을 연결했다. 제품·권한·종료/정리 계약 변경은 없다.
 - 출력 요약기5개와 기존 long-task 관측기4개, 총9회귀 PASS. 변경된 세 실행 스크립트 문법·diff PASS. 관측기 미지원/overflow/pending record/미완료와250ms 초과 유지 검사를 포함한다. 실제 패키지의 새 경로는 아직 실행하지 않았으며9개 단위 검사를 실측/G6 합격으로 표현하지 않는다. 새 패키지·임시 프로젝트 생성 없음, main병합·push없음. 다음은 새 수집 경로의 패키지 확인과 남은 main/입력/경합 계측·유휴400MiB·Windows/출시 검증이다.
