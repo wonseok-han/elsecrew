@@ -180,6 +180,7 @@ app.on('browser-window-created', (_event, window) => {
       mainSession = undefined;
       const result = await session.stop(windowCompleted);
       report.mainLongTasks = result.observation;
+      report.mainTraceClockBoundaries = result.clockBoundaries;
       if (result.error) report.mainLongTaskError = result.error;
     };
     try {
@@ -189,7 +190,7 @@ app.on('browser-window-created', (_event, window) => {
       mainProbe = await import('./m5-main-task-trace.mjs');
       const {startMainTaskSession,createMainPhaseProbe} = await import('./m5-main-task-session.mjs');
       mainPhaseProbe = createMainPhaseProbe();
-      mainSession = await startMainTaskSession(window.webContents.debugger, process.pid);
+      mainSession = await startMainTaskSession(window.webContents.debugger, process.pid, {clockMarkers:true});
       report.rendererLongTaskStart = await run(`(${longTaskProbe.beginLongTaskProbe.toString()})()`);
       longTaskStarted = true;
       assert.equal(report.rendererLongTaskStart.supported, true, 'Renderer long-task observation unsupported');

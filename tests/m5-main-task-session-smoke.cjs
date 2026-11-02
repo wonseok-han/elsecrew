@@ -27,7 +27,7 @@ app.whenReady().then(async () => {
     await window.loadURL('about:blank');
     const {startMainTaskSession} = await import('../scripts/m5-main-task-session.mjs');
     const {mainTaskMaximum} = await import('../scripts/m5-main-task-trace.mjs');
-    session = await startMainTaskSession(window.webContents.debugger,process.pid);
+    session = await startMainTaskSession(window.webContents.debugger,process.pid,{clockMarkers:true});
     if(dense) {
       window.webContents.debugger.on('message',markerListener);
       await window.webContents.debugger.sendCommand('Tracing.recordClockSyncMarker',{syncId:'m5-blank-start'});
@@ -48,6 +48,7 @@ app.whenReady().then(async () => {
     if(dense) await window.webContents.debugger.sendCommand('Tracing.recordClockSyncMarker',{syncId:'m5-blank-end'});
     clearInterval(timer);
     report.trace = await session.stop(true); session = undefined;
+    assert.equal(report.trace.clockBoundaries.complete,true);
     report.maximumMs = mainTaskMaximum(report.trace.observation);
     assert.equal(report.trace.error,undefined);
     window.webContents.debugger.removeListener('message',markerListener);

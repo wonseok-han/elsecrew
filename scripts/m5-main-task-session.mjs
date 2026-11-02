@@ -2,10 +2,47 @@ import {monitorEventLoopDelay, performance} from 'node:perf_hooks';
 import {createMainTaskTrace} from './m5-main-task-trace.mjs';
 
 // QA only. Own this debugger attachment; never detach another observer.
-export async function startMainTaskSession(debuggerApi, rootPid) {
+export async function startMainTaskSession(debuggerApi, rootPid, {clockMarkers=false}={}) {
   const trace = createMainTaskTrace(rootPid);
   debuggerApi.attach('1.3');
-  const listener = (_event, method, params) => trace.accept({method, params});
+  const markers=[], markerErrors=[];
+  let markerInvalid=false;
+  const listener = (_event, method, params) => {
+    trace.accept({method, params});
+    if (!clockMarkers || method !== 'Tracing.dataCollected' || !Array.isArray(params?.value)) return;
+    for (const event of params.value) {
+      const id=event?.args?.sync_id;
+      if (!['m5-workload-start','m5-workload-end'].includes(id)) continue;
+      if (event.pid !== rootPid || event.name !== 'clock_sync' || event.ph !== 'c' ||
+          !Number.isSafeInteger(event.tid) || event.tid<0 || !Number.isFinite(event.ts) || event.ts<0 ||
+          markers.some(marker=>marker.id===id)) {markerInvalid=true;continue;}
+      markers.push({id,tid:event.tid,ts:event.ts});
+    }
+  };
+  const mark = async stage => {
+    if (!clockMarkers) return;
+    let timer;
+    try {
+      await Promise.race([
+        debuggerApi.sendCommand('Tracing.recordClockSyncMarker',{syncId:`m5-workload-${stage}`}),
+        new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Clock marker timeout')),1000);}),
+      ]);
+    } catch {markerErrors.push(stage);}
+    finally {clearTimeout(timer);}
+  };
+  const finish = windowCompleted => {
+    const observation=trace.finish(windowCompleted);
+    if (!clockMarkers) return {observation};
+    const start=markers.find(marker=>marker.id==='m5-workload-start');
+    const end=markers.find(marker=>marker.id==='m5-workload-end');
+    const witness=observation.tasks[0];
+    const complete=Boolean(!markerInvalid && markerErrors.length===0 && start && end &&
+      start.ts<=end.ts && start.tid===end.tid && start.tid===witness?.tid &&
+      observation.valid && observation.windowCompleted);
+    return {observation,clockBoundaries:{diagnostic:true,gateEligible:false,complete,
+      invalid:markerInvalid,errors:[...markerErrors],markers:[...markers],
+      scope:'Same trace clock only. Does not exclude tasks or alter the performance gate.'}};
+  };
   const detach = () => {
     debuggerApi.removeListener('message', listener);
     if (debuggerApi.isAttached()) debuggerApi.detach();
@@ -14,6 +51,7 @@ export async function startMainTaskSession(debuggerApi, rootPid) {
   try {
     await debuggerApi.sendCommand('Tracing.start', {categories:'toplevel', transferMode:'ReportEvents'});
   } catch (error) { detach(); throw error; }
+  await mark('start');
   let stopped = false;
   return {
     async stop(windowCompleted) {
@@ -23,14 +61,16 @@ export async function startMainTaskSession(debuggerApi, rootPid) {
       try {
         await Promise.race([
           (async () => {
+            await mark('end');
+            if (cancelled) return;
             await debuggerApi.sendCommand('Tracing.end');
             while (!trace.completed && !cancelled) await new Promise(resolve => setTimeout(resolve, 20));
           })(),
           new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Main trace completion timeout')), 8000); })
         ]);
-        return {observation:trace.finish(windowCompleted)};
+        return finish(windowCompleted);
       } catch (error) {
-        return {observation:trace.finish(false), error:String(error)};
+        return {...finish(false), error:String(error)};
       } finally {
         cancelled = true;
         clearTimeout(timer);

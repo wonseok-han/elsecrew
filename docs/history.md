@@ -2,6 +2,13 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 8d98890 기준 실제 durable-output QA의 main trace에 선택적 clock marker 수집을 연결했다. start/end 두 표식만 보존하며 중복·잘못된 thread·누락·지원 오류·미완료 실행은 경계 진단을 불완전으로 표시한다. 표식 명령은 각각1초 제한이며 기존 trace의 모든 task와200ms 판정은 유지한다. 시간 차감이나 PASS 기준 변경 없음.
+- 관련 Node 테스트5개 PASS, syntax/diff 검사 통과. 같은 session helper의 숨겨진 빈 Electron 창1초 시험에서 두 표식·complete=true·정상 detach/quit을 확인했다(최대3.098ms). 이는 계측 수명주기 검증이며 실제 앱 성능 합격은 아니다. .artifacts/m5-clock-boundaries-2026-11-02에 결과/정리 증거를 보존하고 관측PID 부재 확인 후8AJz3E 임시 프로필을 삭제했다.
+- 다음: 새 계측을 포함한 전체 앱 QA에서 최대 task 좌표를 start/end와 대조한다. 기존284ms 지연·400MiB 초과 원인은 아직 미해결이며 반복G6/Windows/출시도 미완료다. 모델 호출·사용자 데이터 변경·main병합·push 없음.
+
+
+### 2026-11-02 · by GPT-6
+
 - 05deeee 기준으로 제품 기능·sidecar 없이 숨겨진 빈 Electron 창/전용 임시 프로필에서 trace 종료 비용을 분리하는 최소 시험을 수행했다. timer25초의 첫 관측은41,780events/40,627main tasks·최대2.667ms·정상종료였다. 이어 MessageChannel10만건을 더한 관측은241,405events였으나 incompleteMain=true로FAIL이다. 완결X task 후보5.741ms를 전체 최대값/PASS로 인용하지 않는다. 이 두 결과만으로 실제284ms 원인을 확정하거나 배제하지 않는다.
 - 공식 CDP Tracing.recordClockSyncMarker를 시험해 start/end 표식2개가 같은root/main tid의clock_sync ts로 수집되는 것을 두 번 확인했다. 첫 최대후보는start표식보다 앞에 있었다. 다음 실제 앱 진단에 동일 시계 경계 표식을 연결하면 추적 초기화/종료와 측정 구간을 구분할 수 있지만 아직 제품 gate의 구간·판정은 변경하지 않았다. API 근거: https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/pdl/domains/Tracing.pdl
 - tests/m5-main-task-session-smoke.cjs에 명시적 --dense-trace 진단을 추가했다. native 두 관측 후 renderer 생성35초 watchdog과finally 정리를 추가하고 문법/diff 검사했다(이 마지막 timeout 보강으로 native 재실행은 하지 않았다). .artifacts/m5-main-trace-dense-2026-11-02/{timers,volume}에 결과와 각 실행 당시 소스 지문을 보존했다.

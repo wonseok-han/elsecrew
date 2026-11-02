@@ -38,3 +38,31 @@ test('end failure keeps incomplete evidence and releases the debugger',async()=>
   assert.match(result.error!,/Command failed/);assert.equal(result.observation.windowCompleted,false);
   assert.equal(result.observation.valid,false);assert.equal(api.detached,1);assert.equal(api.listenerCount('message'),0);
 });
+
+class MarkerStub extends DebuggerStub {
+  mode='valid';
+  async sendCommand(method:string,params?:{syncId?:string}) {
+    if(method==='Tracing.recordClockSyncMarker') {
+      if(this.mode==='unsupported') throw new Error('Unsupported');
+      if(this.mode==='missing') return;
+      const marker={pid:7,tid:1,ph:'c',name:'clock_sync',ts:params?.syncId?.endsWith('start') ? 100 : 200,args:{sync_id:params?.syncId}};
+      this.emit('message',{},'Tracing.dataCollected',{value:this.mode==='duplicate' ? [marker,marker] : [marker]});
+    } else await super.sendCommand(method);
+  }
+}
+test('clock boundaries preserve full-interval long task and bounded diagnostics',async()=>{
+  for(const mode of ['valid','duplicate','missing','unsupported']) {
+    const api=new MarkerStub();api.mode=mode;
+    const session=await startMainTaskSession(api,7,{clockMarkers:true});
+    const result=await session.stop(true);
+    assert.equal(result.observation.maximumMs,250);
+    assert.equal(result.observation.valid,true);
+    assert.equal(result.clockBoundaries!.complete,mode==='valid');
+    assert.ok(result.clockBoundaries!.markers.length<=2);
+    assert.equal(api.detached,1);assert.equal(api.listenerCount('message'),0);
+  }
+});
+test('aborted scenario cannot claim complete boundaries',async()=>{
+  const api=new MarkerStub();const session=await startMainTaskSession(api,7,{clockMarkers:true});
+  assert.equal((await session.stop(false)).clockBoundaries!.complete,false);
+});
