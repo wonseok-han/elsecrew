@@ -2,6 +2,12 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 직전 동일DOM 초기화 대조b9d0f8a는 비용 귀속을 좁힌 진척이었다. 깨끗한 동일HEAD에서 메모리 후보 반복보다 미연결 G6 관측을 진행했다. 출력/동시 부하 QA에 기존 `m5-packaged-long-task-probe.mjs`를 재사용해 visible bridge 준비부터 시나리오 종료까지 renderer long task를 수집한다. QA 패키지 복사 목록에도 관측기를 추가했다.
+- 정상 완료에서는 원시 entry와 요약을 대조하고200ms 초과를 실패로 남긴다. 중간 실패는 windowCompleted=false와 남은 기록/관측 오류를 보존한다. 출력 반복 요약은 누락·불완전 관측을0으로 취급하지 않으며 본10회 rendererLongTaskMs 최대값과200ms 기준을 연결했다. 제품·권한·종료/정리 계약 변경은 없다.
+- 출력 요약기5개와 기존 long-task 관측기4개, 총9회귀 PASS. 변경된 세 실행 스크립트 문법·diff PASS. 관측기 미지원/overflow/pending record/미완료와250ms 초과 유지 검사를 포함한다. 실제 패키지의 새 경로는 아직 실행하지 않았으며9개 단위 검사를 실측/G6 합격으로 표현하지 않는다. 새 패키지·임시 프로젝트 생성 없음, main병합·push없음. 다음은 새 수집 경로의 패키지 확인과 남은 main/입력/경합 계측·유휴400MiB·Windows/출시 검증이다.
+
+### 2026-11-02 · by GPT-6
+
 - 직전 독립 검토/실행 신원 기록3fb1681을 이어 같은 DOM의 비용 분리를 수행했다. 진단 runner에 `rendered-bridge`를 추가해 정적 DOM/CSS에 synthetic preload만 남긴 경우를 분리하고, 읽은 HTML/renderer entry의 fingerprint를 기록했다. 초기 제품 코드/기능/400MiB 기준은 변경하지 않았다.
 - Python supervisor에서 product/static/static+bridge/static+bridge/static/product를 순차 실행했다. 모든 경우 같은 DOM snapshot·같은 renderer entry가 확인됐고 visible였다. 최대RSS404.03125/410.625/410.25/410.4375/410.46875/408.3125MiB다. static renderer109.5~109.52MiB, bridge110.28~110.36MiB, product124.02~126.48MiB였다. preload 자체는 이 합성 조건에서1MiB 미만 차이지만 제품 JS가 더한 renderer 비용은 전체RSS 절감 가능량으로 단순 환산할 수 없다(main/utility가 반대 방향으로 달랐다). 과거 다른 시점의430MiB와 직접 비교하지 않는다.
 - 초기 import도 확인했다. Monaco/worker/언어 모듈은 이미 동적 로드하며 message body는 외부 대형 parser 없이 자체 구현이다. 이번 근거만으로 기능 제거·임의 코드 분할을 제품 최적화로 적용하지 않았다. `.artifacts/m5-performance/idle-init-split-series-2026-11-02.json` 및 같은 정적 HTML/원시 결과를 보존했다. 시작·완료시각/부모 실행 파일을 기록했고 종료/PID부재 확인 후 자체 프로필6개를 정리했다. 문법·diff PASS, 실제 모델/사용자 프로젝트/패키지 생성없음. 400MiB와G6/Windows/출시는 미완료이며 main병합·push없음.

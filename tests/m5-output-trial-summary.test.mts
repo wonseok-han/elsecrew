@@ -7,6 +7,7 @@ function result(): any {
   const generation=Array.from({length:4},(_,r)=>({runId:`run${r}`,
     samples:Array.from({length:3000},(_,i)=>[i+1,i*20000,1700000000000+i*20,`event${r}-${i}`,i+1])}));
   return {packagedQa:true,status:'PASS',functionalStatus:'PASS',shutdown:'accepted',visibility:'visible',
+    rendererLongTasks:{supported:true,valid:true,windowCompleted:true,overflow:false,limitMs:200,startedAt:0,endedAt:1000,entries:[],maximumMs:0,overLimitCount:0},
     visibilityTrace:[{state:'visible'}],restoredChats:[0,1,2,3],generation,generationSummary:summarizeOutputGeneration(generation),
     outputObservation:{droppedHeads:0,droppedFrames:0,liveLatency:{dropped:0,unfinished:0,superseded:2,interrupted:1,samples:[{notificationToFrameMs:150}]}},
     memory:{errors:0,truncated:false,samples:[{totalBytes:100,processes:[{pid:123,rssBytes:100}]}]}};
@@ -60,4 +61,11 @@ test('combined memory failures cannot disappear behind a successful output-only 
   r.combinedWorkload.memory={maxima:{idleRssBytes:high,peakRssBytes:high,retainedRssBytes:0},failedMetrics:['idleRssBytes']};
   r.combinedWorkload.failedMetrics=['idleRssBytes'];
   assert.deepEqual(summarizeOutputTrial(r,{combinedWorkload:true}).combinedMemory.failedMetrics,['idleRssBytes']);
+});
+
+test('output summary rejects missing long-task evidence and retains measured threshold failures',()=>{
+  const r=result();delete r.rendererLongTasks;assert.throws(()=>summarizeOutputTrial(r));
+  const high=result();Object.assign(high.rendererLongTasks,{entries:[{startTime:10,duration:250}],maximumMs:250,overLimitCount:1});
+  assert.equal(summarizeOutputTrial(high).rendererLongTaskMs,250);
+  high.rendererLongTasks.windowCompleted=false;assert.throws(()=>summarizeOutputTrial(high));
 });

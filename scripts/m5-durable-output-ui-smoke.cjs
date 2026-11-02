@@ -164,9 +164,14 @@ app.on('browser-window-created', (_event, window) => {
       }
       throw new Error('UI condition timeout: ' + predicate);
     };
+    let longTaskProbe, longTaskStarted = false;
     try {
+      longTaskProbe = await import('./m5-packaged-long-task-probe.mjs');
       window.show(); window.focus();
       await wait("document.visibilityState === 'visible' && window.m5?.version === 8");
+      report.rendererLongTaskStart = await run(`(${longTaskProbe.beginLongTaskProbe.toString()})()`);
+      longTaskStarted = true;
+      assert.equal(report.rendererLongTaskStart.supported, true, 'Renderer long-task observation unsupported');
       await run(`globalThis.outputSmokeInput = {events:[],dropped:0};
         const recordInput = event => {
           if (!event.isTrusted) return;
@@ -366,11 +371,18 @@ app.on('browser-window-created', (_event, window) => {
       report.visibilityTrace = await run('outputSmokeVisibility');
       report.userInput = await run('outputSmokeInput');
       await fs.promises.writeFile(path.join(root, 'output.png'), (await window.webContents.capturePage()).toPNG());
+      report.rendererLongTasks = {...await run(`(${longTaskProbe.endLongTaskProbe.toString()})()`), windowCompleted:true};
+      const rendererLongTaskMs = longTaskProbe.packagedLongTaskMaximum(report.rendererLongTasks);
       const combinedFailures = combined ? [...report.combinedWorkload.largeProject.failedMetrics, ...report.combinedWorkload.largeDiff.failedMetrics, ...report.combinedWorkload.memory.failedMetrics] : [];
       if (combined) report.combinedWorkload.failedMetrics = combinedFailures;
+      if (rendererLongTaskMs > 200) { finish(new Error('Renderer long-task limit exceeded')); return; }
       finish(combinedFailures.length ? new Error('Combined workload limits exceeded: ' + combinedFailures.join(', ')) : undefined);
     } catch (error) {
       sampleWindow('assertion-failed');
+      if (longTaskStarted && !report.rendererLongTasks) {
+        try { report.rendererLongTasks = {...await run(`(${longTaskProbe.endLongTaskProbe.toString()})()`),windowCompleted:false}; }
+        catch (probeError) { report.rendererLongTaskError = String(probeError); }
+      }
       try {
         report.outputObservation = await run('globalThis.outputObservation?.stop() ?? null');
         report.failureView = await run(`(() => {

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { packagedLongTaskMaximum } from './m5-packaged-long-task-probe.mjs';
 import { createRequire } from 'node:module';
 const { summarizeOutputGeneration } = createRequire(import.meta.url)('./m5-output-generation.cjs');
 
@@ -49,7 +50,8 @@ export function summarizeOutputTrial(result, {combinedWorkload = false} = {}) {
     assert.deepEqual(c.memory, combinedMemory, 'Combined memory summary does not match samples');
     assert.deepEqual(c.failedMetrics, combinedMemory.failedMetrics);
   }
-  return {...(combinedMemory ? {combinedMemory} : {}),persistedRows:generation.persistedRows,
+  const rendererLongTaskMs = packagedLongTaskMaximum(result.rendererLongTasks);
+  return {rendererLongTaskMs,...(combinedMemory ? {combinedMemory} : {}),persistedRows:generation.persistedRows,
     allStampedWithin60Seconds:generation.allStampedWithin60Seconds,
     maximumScheduleLagMs:Math.max(...generation.streams.map(row => row.maximumScheduleLagMs)),
     maximumSampledLiveLatencyMs:Math.max(...live.samples.map(row => row.notificationToFrameMs)),

@@ -100,12 +100,14 @@ try {
     console.log(JSON.stringify({stage:'TRIAL_FINISHED',index,values:trial.values}));
   }
   const trials=report.trials.slice(1);
-  report.maxima={sampledLiveLatencyMs:Math.max(...trials.map(t=>t.values.maximumSampledLiveLatencyMs)),
+  report.maxima={rendererLongTaskMs:Math.max(...trials.map(t=>t.values.rendererLongTaskMs)),
+    sampledLiveLatencyMs:Math.max(...trials.map(t=>t.values.maximumSampledLiveLatencyMs)),
     peakRssBytes:Math.max(...trials.map(t=>t.values.peakRssBytes))};
   if (combined) for (const key of ['idleRssBytes','retainedRssBytes']) {
     report.maxima[key]=Math.max(...trials.map(t=>t.values.combinedMemory.maxima[key]));
   }
   report.status=trials.every(t=>t.values.allStampedWithin60Seconds)&&report.maxima.sampledLiveLatencyMs<=100
+    &&report.maxima.rendererLongTaskMs<=200
     &&report.maxima.peakRssBytes<=800*1024*1024
     &&(!combined || trials.every(t=>t.values.combinedMemory.failedMetrics.length===0))?'NOT_READY':'FAIL';
   // Preserve the build for diagnosis on any failed or incomplete series.
