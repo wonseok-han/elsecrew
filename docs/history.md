@@ -2,6 +2,13 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 이전 턴은 정적/앱 화면 메모리 비용 대조로 진척했다. d701b6a/깨끗한 통합 상태에서 결정과 독립적인 누적 Node 회귀를 수행했다.630개 중619 PASS/11 FAIL이며11개 모두 Electron security VM loader의 새 session-diagnostic-log.ts import 누락으로 실제 assertion 전에 실패했다.
+- 보안 테스트 로더에 진단 저장의 무쓰기 stub만 추가했다. IPC/origin·승인·로그인·외부 탐색 검사는 그대로 실제 main.ts를 실행하며 별도 진단 저장 tests가 실제 logger를 검증한다. 수정 후 해당11개 모두 PASS. 전체630개를 수정 후 재실행했다고 주장하지 않는다.
+- 사용자는 macOS idle400MiB 기준 유지와 추가 최적화를 선택했다.512MiB 대안은 채택하지 않으며 peak800/잔류120MiB도 그대로 유지한다. 현재 메모리 FAIL은 계속 열려 있다.
+- release 캐시를 재사용해 CARGO_BUILD_JOBS=4/CARGO_INCREMENTAL=0/RUST_TEST_THREADS=4 cargo test --release --locked -p hello-agent-sidecar를 실행 중이다.734개 suite가 시작됐으며 최종 결과는 아직 없다. 프로세스 session77787을 재확인하고 같은 실행을 이어 관측한다. target약1.0GiB; 실제 모델/사용자 데이터/제품 out 변경·main병합·push없음.
+
+### 2026-11-02 · by GPT-6
+
 - 이전 턴은 올바른 유휴 구간의 통합 관측과 메모리 실패 확정으로 진척했다.64ed340/깨끗한 통합 상태에서 초기 로딩을 조사했다. Monaco는 이미 지연 로딩, 로그인/설치 poll은 상태 제한이 있어 근거 없는 코드 분할·조회 제거는 하지 않았다.
 - 기존 idle 대조에 painted/localized(앱 코드·preload 없는 정적 영문/한글)와 rendered(자체 합성 앱 DOM/CSS를 복제하되 script/modulepreload 제거)를 추가했다. 창1280×800을 제품과 맞췄으며 기존1440×1000 대조와 동일 조건이라고 주장하지 않는다. sandbox·보안·제품 설정은 유지했다.
 - 순차 단회5표본 대조: blank 최대356.19MiB, painted377.19, localized375.77, preload354.47, product428.81. 추가 같은 화면 pair는 product423.19→381.64 변동, rendered413.92MiB였다. 한글 자체가 주원인이라는 가설은 지지되지 않고 앱 코드 제거만으로400MiB를 안정적으로 만족한다는 증거도 없다. 단회/합성/sidecar없음의 한계를 유지하며 인과 기여량·불가능성·제품 합격으로 단정하지 않는다.
@@ -114,6 +121,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **2026-11-02 사용자 확정 — 메모리 기준 유지**: macOS 유휴400MiB와 추가 최적화를 선택했다.512MiB 상향은 승인되지 않았다. 부하800MiB·잔류증분120MiB 및 전체 검증 요건도 유지한다.
 
 - **2026-11-02 통합 QA 메모리 정정**: second/third combined 결과의 idle phase에는 프로젝트 준비 비용이 섞였다. 해당 idle/잔류증분은 순수 유휴/회수 근거가 아니다. 생성 프로세스 분리와 준비 phase 분리는 별개 수정이며 마지막 phase 수정 후 재측정 필요. 일반 제품10/30 RSS 실패는 유지한다.
 

@@ -335,6 +335,15 @@ function moduleFor(
   },
 ) {
   if (specifier === "electron") return fakes.electron;
+  // Diagnostic persistence has its own filesystem tests. This harness exercises
+  // the real main IPC/origin checks without writing outside its fake app path.
+  if (specifier === "./session-diagnostic-log.ts") return {
+    createSessionDiagnosticLog: () => ({
+      capture: () => undefined,
+      captureTransport: () => undefined,
+      flush: async () => undefined,
+    }),
+  };
   if (specifier.endsWith("provider-login-v1.ts")) return loginContract;
   if (specifier.endsWith("provider-login-diagnostic.ts")) return loginDiagnostic;
   if (specifier.endsWith("provider-install-v1.ts")) return installContract;
