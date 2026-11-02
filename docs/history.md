@@ -2,6 +2,13 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 이전 턴은 Node 보안 회귀 복구23fea6f와 Rust 전체 회귀 시작으로 진척했다. 같은 live session77787을 재확인하며 재시작하지 않고 완료까지 관측했다. release 라이브러리734개 결과는687 PASS/4 FAIL/43 ignored,727.64초다.3실패는 임시 Unix socket bind의 EPERM,1실패는 프로세스 확인이 필요한 자체 login recovery 상태 불일치였다.
+- 같은 코드의 실패4개만 권한 허용 환경에서 exact filter로 실행해4개 모두 PASS했다. 제품 검사를 삭제하거나 스킵으로 바꾸지 않았다. 라이브러리 실패로 미실행된 통합 대상도 별도로 이어서 실행: stdio15 PASS/1 ignored, macOS opt-in sandbox0실행/2 ignored, doctest0개 PASS. 실제 공급자/사용자 계정/강제 종료 opt-in 검증은 수행하지 않았다. .artifacts/m5-regression-2026-11-02에 initial/focused/integration/doc 로그를 보존했으며 처음부터 전체 suite 단일 PASS였다고 표현하지 않는다.
+- 메모리 최적화 후보로 기존 진단 runner에 --software-rendering만 추가했다. 같은1280×800 합성 화면의 단회 대조는 GPU 가속 최대408.86MiB, 소프트웨어517.08MiB였다. 이 후보는 개선 증거가 없어 제품에 적용하지 않는다. sandbox·기능·400/800/120 기준 유지, 제품코드 변경없음.
+- 종료된 메모리 시험PID15570/15720 및 자손 부재를 확인한 뒤 자체gsz3X1/OLI7mj 프로필을 삭제했다. .artifacts/m5-performance/idle-product-{15570,15720}.json과 cleanup증거 보존. JS문법·diff PASS, target약1.0GiB 유지. 다음은 다른 초기 메모리 비용의 실제 최적화와 G6/Windows/출시 잔여 검증이며 main병합·push없음.
+
+### 2026-11-02 · by GPT-6
+
 - 이전 턴은 정적/앱 화면 메모리 비용 대조로 진척했다. d701b6a/깨끗한 통합 상태에서 결정과 독립적인 누적 Node 회귀를 수행했다.630개 중619 PASS/11 FAIL이며11개 모두 Electron security VM loader의 새 session-diagnostic-log.ts import 누락으로 실제 assertion 전에 실패했다.
 - 보안 테스트 로더에 진단 저장의 무쓰기 stub만 추가했다. IPC/origin·승인·로그인·외부 탐색 검사는 그대로 실제 main.ts를 실행하며 별도 진단 저장 tests가 실제 logger를 검증한다. 수정 후 해당11개 모두 PASS. 전체630개를 수정 후 재실행했다고 주장하지 않는다.
 - 사용자는 macOS idle400MiB 기준 유지와 추가 최적화를 선택했다.512MiB 대안은 채택하지 않으며 peak800/잔류120MiB도 그대로 유지한다. 현재 메모리 FAIL은 계속 열려 있다.

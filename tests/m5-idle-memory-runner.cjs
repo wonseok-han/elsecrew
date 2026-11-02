@@ -10,6 +10,8 @@ const { buildPerformancePreload } = require('./m5-performance-preload-build.cjs'
 const mode = process.argv[2];
 if (!['blank', 'painted', 'localized', 'rendered', 'preload', 'product'].includes(mode)) throw new Error('unknown idle control');
 const hasBridge = mode === 'preload' || mode === 'product';
+const softwareRendering = process.argv.includes('--software-rendering');
+if (softwareRendering) app.disableHardwareAcceleration();
 const root = resolve(__dirname, '..');
 const renderer = resolve(root, '.vite/renderer/main_window');
 const userData = mkdtempSync(resolve(tmpdir(), 'hello-agent-idle-memory-'));
@@ -50,7 +52,7 @@ app.whenReady().then(async () => {
     await new Promise(r => setTimeout(r, 250));
   }
   const report = { diagnostic: true, rendererSandbox: true, mode, userData, head: execFileSync('/usr/bin/git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
-    window: {width:1280,height:800},
+    window: {width:1280,height:800}, softwareRendering,
     scope: 'fresh Electron app idle only; no sidecar/provider; five samples after one second; painted/localized/rendered have no app code or preload; not release evidence',
     samples, metrics: app.getAppMetrics(), dom: await window.webContents.executeJavaScript('({nodes:document.querySelectorAll("*").length,ready:Boolean(document.querySelector(".m5-workbench"))})') };
   if (mode === 'product' && !report.dom.ready) throw new Error('product did not mount');
