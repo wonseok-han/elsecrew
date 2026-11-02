@@ -7,7 +7,7 @@ export async function probeLargeDiff() {
     }
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   };
-  const tab = [...document.querySelectorAll('.m5-dock-group-tab')].find(button => button.textContent.includes('변경'));
+  const tab = [...document.querySelectorAll('.m5-dock-group-tabs button')].find(button => button.textContent.includes('변경'));
   if (tab) tab.click();
   await wait(() => [...document.querySelectorAll('.m5-changes button')].some(button => button.textContent === '변경 새로 고침' && !button.disabled));
   const start = performance.now();

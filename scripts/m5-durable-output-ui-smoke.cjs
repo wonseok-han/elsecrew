@@ -204,8 +204,8 @@ app.on('browser-window-created', (_event, window) => {
       await wait("!!document.querySelector('#m5-followup-text')");
       if (combined) {
         const first = await run('outputSmokeChats[0]');
-        await run(`[...document.querySelectorAll('.m5-chat-chip')].find(b => b.textContent.includes('Output stream 0')).click()`);
-        await wait("document.querySelector('.m5-timeline h2')?.textContent === 'Output stream 0'");
+        await run(`(() => { const b = [...document.querySelectorAll('.m5-chat-chip')].find(b => b.querySelector('.m5-chat-goal')?.textContent === 'Output stream 0'); if (b.getAttribute('aria-current') !== 'true') b.click(); })()`);
+        await wait("document.querySelector('.m5-timeline h2')?.textContent === 'Output stream 0' && [...document.querySelectorAll('.m5-chat-chip')].some(b => b.getAttribute('aria-current') === 'true' && !b.disabled && b.querySelector('.m5-chat-goal')?.textContent === 'Output stream 0')", 65000);
         memoryPhase = 'loaded';
         Object.assign(report.combinedWorkload, await combinedWorkload.mount(run, userData, first));
         persist();
@@ -225,7 +225,7 @@ app.on('browser-window-created', (_event, window) => {
         if (combined && index === 0) {
           await wait("document.querySelector('.m5-durable-output select')?.value === outputSmokeRuns[0].runId && document.querySelector('.m5-timeline h2')?.textContent === 'Output stream 0'");
         } else {
-        if (combined) await run("[...document.querySelectorAll('.m5-dock-group-tab')].find(b => b.textContent.trim() === '채팅').click()");
+        if (combined) await run("[...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent.trim() === '채팅').click()");
         await run(`[...document.querySelectorAll('.m5-chat-chip')].find(b => b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}').click()`);
         await wait(`document.querySelector('.m5-durable-output select')?.value === outputSmokeRuns[${index}].runId &&
           [...document.querySelectorAll('.m5-chat-chip')].some(b => b.getAttribute('aria-current') === 'true' && !b.disabled && b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}')`);

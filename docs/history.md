@@ -2,6 +2,12 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 이전 턴은 통합 부하 수집 경로7f3e2f0 구현으로 진척했다. 깨끗한 기준에서 별도 output QA 패키지를 만들고 --combined-workload를 실행했다. 큰 프로젝트·네 채팅 준비 후 첫 파일 탐색에서 Large project target missing: aaa-tree로 FAIL했다. 실제/가짜 에이전트 시작 전이며 G6 결과가 아니다.
+- 실패 캡처는 chat 제목은 바뀌었지만 파일 목록과 채팅 전환이 아직 진행 중이었다. 수집기가 제목만 보고 준비 완료로 취급한 오류다. 현재 선택/활성 채팅과 파일 목록 준비를 기다리고 이미 선택된 첫 채팅을 다시 열지 않도록 고쳤다. 이 준비 대기는 cold 파일/트리 측정값에 섞지 않는다. 현행 dock 버튼에 없는 m5-dock-group-tab 선택자도 실제 m5-dock-group-tabs button으로 교정했다.
+- 앱89312 종료/관측 PID 부재와 sidecar89382의 DB clean_shutdown_at00:19:31Z를 확인한 뒤 자체 fixture7nTpGn/QA 패키지m734uN을 정리했다. .artifacts/m5-combined-output-2026-11-02/first에 실패 JSON·화면·build/정리 증거를 보존했다. JS3개 문법·diff PASS. 수정 후 통합 재실행이 다음이며 실제 모델 호출·제품 out 교체·main병합·push없음.
+
+### 2026-11-02 · by GPT-6
+
 - 이전 목표 턴은 Codex 실제 수정/취소 성공 증거로 진척했다. HEAD45d03b4/깨끗한 통합 브랜치에서 성능 수집 경로를 조사했다. 과거 빈 창/preload/product 및 no-CDP 대조가 이미 있다는 점을10월 아카이브와 기존 runner에서 확인해 같은 대조를 반복하지 않았다. 10/30 시작 RSS 최대460.3MiB 실패는 유지하며 원인을 아직 확정하지 않았다.
 - 기존 output QA에 선택적 --combined-workload 경로를 구현했다. 실제 sidecar의 단일3,000출력×4채팅 fixture와 10,000파일/1,000디렉터리·5MiB/100,000줄 파일·500파일/20,000변경줄/10MiB diff를 결합한다. 첫 채팅의 큰 모델/diff 공존 중 네 head가 모두 증가하는지 확인하며, 이후 기존 출력·기록 검증과 원본 불변·닫기60초 후 잔류 관측을 수행한다. appendChatMessage 부하로 단일 에이전트 출력을 대체하지 않는다.
 - 제품 실행 코드·메모리 기준·승인 경계는 바꾸지 않았다. QA packager에 필요한 fixture/probe 파일을 포함했고3개 JS 문법·diff 검사를 통과했다. 새 수집 경로는 아직 실행하지 않은 구현 체크포인트다. 다음은 별도 QA 패키지의 통합 부하 실행과 결과에 따른 수정이며, 이를 전체G6/Windows/출시 완료로 표시하지 않는다. 실제 모델 호출·새 QA 패키지/대형 fixture 생성·main병합·push없음.

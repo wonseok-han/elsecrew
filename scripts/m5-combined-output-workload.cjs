@@ -22,13 +22,18 @@ async function mount(run, userData, chat) {
   assert.match(chat.worktreeId, /^worktree_[a-zA-Z0-9_]+$/);
   const snapshot = fs.realpathSync(path.join(root, chat.worktreeId));
   assert.ok(snapshot.startsWith(root + path.sep), 'QA snapshot escaped its temporary root');
-  const dimensions = diff.change(snapshot);
   const {probeLargeProject} = await import('./m5-packaged-large-project-probe.mjs');
   const {probeLargeDiff} = await import('./m5-packaged-diff-probe.mjs');
   await run(`(() => {
     const tab = [...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => ['파일','Files'].includes(b.textContent.trim()));
     if (tab) tab.click();
   })()`);
+  const readyBy = Date.now() + 65000;
+  while (!await run(`!![...document.querySelectorAll('.m5-files button')].find(b => b.textContent.includes('aaa-tree') && !b.disabled)`)) {
+    assert.ok(Date.now() < readyBy, 'Combined workspace file list did not become ready');
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  const dimensions = diff.change(snapshot);
   const largeProject = await run(`(${probeLargeProject.toString()})(${JSON.stringify(chat.projectId)})`);
   const largeDiff = {...await run(`(${probeLargeDiff.toString()})()`), ...dimensions};
   const coexist = await run(`!!document.querySelector('.monaco-editor') && !!document.querySelector('.m5-diff-details')`);
