@@ -2,6 +2,13 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 이전 turn은 마지막 Windows fixture PASS 증거를 확보한 진전이다. 3a33c0d의 깨끗한 m5/coding-agent-ide에서 남은 Windows 구현을 직접 이어갔다. project 경로 변환이 Windows verbatim drive prefix를 처리하지 못하고 Unix의 실제 역슬래시 파일명을 slash 경로로 재해석하는 결함을 확인했다.
+- `project/protocol_path.rs`를 기존 경로 입구에 연결했다. 정상 local-drive/verbatim drive를 wire 형식으로 변환하고 namespace/ADS/예약 장치명/후행 점·공백/verbatim의 혼합 구분자는 거부한다. Unix 역슬래시 이름은 다른 파일을 가리키게 바꾸지 않고 거부한다. 기존 AbsolutePathScanV1을 재사용하며 Windows G4/stdio·공급자 실행 차단은 유지한다.
+- 최종 scoped release 회귀 4/4 PASS: Windows 변환/거부 표와 실제 Unix literal-backslash 디렉터리·별도 nested 디렉터리의 혼동 방지를 포함한다. 증거 `.artifacts/m5-native-path-20261102/focused.log`. 직접 diff·독립 검토 통과, 전체 회귀/Windows 실기기는 기능 연결 뒤 검증한다. 추가 push/모델 호출 없음.
+- 독립 검토의 기존 기록 주의점도 확인했다. 과거 canonical_path와 selected_path 모두 손실 변환됐을 수 있고 source_identity도 그 문자열·Git 내용에서 만들어져 원래 철자를 복원하지 못한다. 이번 parser 수정이 과거 기록을 자동 복구한다고 주장하지 않는다. 다음은 기존 기록 재선택/신원 재결속의 안전한 이관 설계와 Windows 핸들 기반 directory/Git·디스크·replace/watcher 구현이다. 제품 전체 완료는 아니다.
+
+### 2026-11-02 · by GPT-6
+
 - 사용자가 승인한 620f06d의 새 공개 브랜치 `codex/m5-windows-fixture-followup-20261102` push와 focused CI 1회를 수행했다. [실행 41399404281](https://github.com/wonseok-han/hello-agent/actions/runs/41399404281), job 125127717552는 success이며 해당 회귀 1 passed/0 failed/313 filtered out(52.53초), release 빌드 3분15초를 확인했다. 이 push에서 다른 workflow는 실행되지 않았다.
 - 이전 c079cb2의 Windows core 226/226·protocol 65/65·sidecar 313 PASS에 이어 마지막 fixture 1개도 실제 Windows에서 통과했다. 이는 두 실행의 분리된 증거이며 최신 전체 suite 단일 재실행이나 Windows 제품/패키지/출시 합격은 아니다. 제품 안전 검사·실제 공급자 차단은 그대로다. 원시 로그와 summary는 `.artifacts/m5-windows-fixture-41399404281/`에 보존했다.
 - 새 기록으로 500줄을 넘기기 전에 기존 2026-11-02 기록 묶음 218줄을 내용 그대로 월 아카이브로 옮겼다. 고정 섹션과 아카이브 기존 내용 보존을 비교했고 diff 검사를 통과했다. 승인 1회는 소진됐고 추가 push·main 병합·릴리스·모델 호출은 없다. 다음은 Windows 파일/프로세스 안전 구현 및 패키징, G6 성능/출시 미완료 항목이며 이 focused PASS로 닫지 않는다.

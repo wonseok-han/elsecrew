@@ -1,4 +1,5 @@
 mod app_roles;
+mod protocol_path;
 use crate::{AppendOutcome, SidecarError, Storage};
 #[cfg(unix)]
 use cap_fs_ext::OsMetadataExt;
@@ -5216,25 +5217,8 @@ fn canonical_protocol_path_without_existing(path: &Path) -> Result<String, Proje
 fn canonical_protocol_path_from_absolute(path: &Path) -> Result<String, ProjectFailure> {
     let value = path
         .to_str()
-        .ok_or_else(|| ProjectFailure::manifest("path is not valid Unicode for the protocol"))?
-        .replace('\\', "/");
-    #[cfg(windows)]
-    let value = {
-        let mut value = value;
-        if value.as_bytes().get(1) == Some(&b':') {
-            value.replace_range(0..1, &value[0..1].to_ascii_uppercase());
-        }
-        value
-    };
-    if !value.starts_with('/')
-        && !(value.len() >= 3
-            && value.as_bytes()[0].is_ascii_uppercase()
-            && value.as_bytes()[1] == b':'
-            && value.as_bytes()[2] == b'/')
-    {
-        return Err(ProjectFailure::manifest("path is not absolute"));
-    }
-    Ok(value)
+        .ok_or_else(|| ProjectFailure::manifest("path is not valid Unicode for the protocol"))?;
+    protocol_path::from_native(value, cfg!(windows)).map_err(ProjectFailure::manifest)
 }
 
 fn project_id_for_root(root: &str) -> String {

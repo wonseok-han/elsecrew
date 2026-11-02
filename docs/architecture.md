@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> 프로젝트 경로 인코딩: `project/protocol_path.rs`가 native 경로를 기존 canonical wire 계약으로 변환한다. Windows local drive 및 정규화 가능한 verbatim drive 경로만 지원하며 namespace/ADS/예약 장치명/후행 점·공백 등 의미가 달라질 수 있는 입력은 거부한다. Unix 파일명의 역슬래시를 슬래시로 바꾸지 않는다. 이 변환은 파일 신원·핸들 검증이나 IO 권한의 증거가 아니며 Windows G4/stdio 차단은 유지한다. 과거 손실 변환된 기록의 원래 철자는 이 parser로 복구할 수 없으며 별도 재선택/이관 계약이 미완료다. Windows 이름 해석 근거: [Microsoft 파일·경로 규칙](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file).
+
 > 일반 작업 복사본 버리기: `reviewReady` 대화에서 명시 동의 후 해당 snapshot을 abandoned/chat을 discarded로 마감한다. 원본·대화·복사본 파일은 삭제하지 않는다. 종료 증거, writer/recovery/준비 중 작업, 주소/manifest 신원과 revision을 재검증한다. 완료 receipt로 응답 유실을 재개하고 releaseView를 확인한 뒤 편집/대화 화면을 해제한다.
 
 > 앱 기본 역할: 작업대의 `앱 기본 역할·모델`에서 저장한 세 역할은 앱 데이터의 `application-settings-v1/role-defaults.json`에 revision과 함께 원자 저장한다. 프로젝트 역할 설정을 처음 만들 때만 복사하며, 기존 프로젝트 설정과 채팅 생성 snapshot은 변경하지 않는다. `project.catalog`의 `getAppRoleDefaults`/`updateAppRoleDefaults`는 기존 역할 계약과 expected revision을 검사한다. 기본값 파일이 손상되면 임의의 값으로 덮지 않고 오류를 돌려주며, 이미 설정된 프로젝트는 해당 파일을 읽지 않는다.
