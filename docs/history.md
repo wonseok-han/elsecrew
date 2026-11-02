@@ -2,6 +2,11 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 깨끗한62fca91에서 최신 입력/main-trace 포함 QA패키지 빌드PASS. `.artifacts/m5-combined-output-2026-11-02/sixth/`에build.json과ASAR내4개계측파일/source동일성지문을보존했다. 대기앱은 `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-output-qa-lz6R7D` 한개이며일반out/사용자데이터불변이다.
+- 창가림으로실패했던조건을반복하지않도록사용자에게약3분가시성유지가능여부를질문했고응답대기다. 실제QA앱/fixture/모델은아직실행하지않았다. 다음작업자는같은build를재사용하되ASAR/HEAD변경여부를확인한다. 이빌드는실측/G6합격이아니다. diff검사PASS, main병합/push없음. 남은입력/동시부하실측·유휴400MiB·Windows/출시요건은유지한다.
+
+### 2026-11-02 · by GPT-6
+
 - c5e4926 이후 남은G6 입력 관측을 연결했다. combined QA의 대형파일/diff·첫12초 출력 공존 확인 뒤 실제Electron char Z→trusted beforeinput→dirty/첫줄변화→두frame을 측정하고 Cmd+Z로 원래첫줄/clean상태를 복원한다. 파일 저장이나 model 직접수정은 하지 않는다. 네 출력이 전후 미봉인 상태인지 확인한다.
 - 원시 시작/전달/화면 시각·trusted입력1회·복원·liveRun4개를 요약기에서 재검사하고 본10회 inputPaintMs 최대값과50ms를 연결했다. 누락/불일치/복원실패는거절하며100ms 관측을0으로바꾸지않는다. 관련요약7회귀·스크립트문법/diff PASS. 새QA패키지의 native입력/Undo 경로는 아직 실측하지 않았다; 요약검사를실제UI/G6합격으로표현하지않는다.
 - 새빌드·임시앱·모델호출없음. 제품기능/안전계약과400MiB기준변경없음, main병합/push없음. 다음은 연결계측의동시부하실측, 유휴메모리최적화와경합/종료 등나머지G6, Windows/출시검증이다.
