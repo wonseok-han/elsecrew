@@ -267,7 +267,7 @@ QA live 구간의 시작은 배열 길이 cursor만 보관하고 종료 때 해�
 
 ### 출력·동시 부하의 main task
 
-출력 QA도 기존 `createMainTaskTrace`를 재사용한다. visible bridge 준비 뒤 QA 창의 debugger로 Chromium `toplevel` trace를 시작하고, 원시 이벤트에서 해당 앱 PID의 `CrBrowserMain` 완결 slice만 평가한다. 시나리오 종료 뒤 tracingComplete를 최대8초 기다리고 연결을 해제한다. 미완료·data loss·기존100만 이벤트/1만 task 상한 초과는0ms로 대체하지 않는다. 본10회의 mainLongTaskMs 최대값은200ms 기준과 비교한다. 이전 출력 기록에 mainLongTasks가 없으면 새 요약기는 거절한다.
+출력 QA도 기존 `createMainTaskTrace`를 재사용한다. visible bridge 준비 뒤 QA 창의 debugger로 Chromium `toplevel` trace를 시작하고, 원시 이벤트에서 해당 앱 PID의 `CrBrowserMain` 완결 slice만 평가한다. 시나리오 종료 뒤 tracingComplete를 최대8초 기다리고 연결을 해제한다. 미완료·data loss·100만 이벤트/128개 root thread 집계 상한 초과는0ms로 대체하지 않는다. task 원시 배열 대신 thread별 count와 최대 witness를 보존한다. 본10회의 mainLongTaskMs 최대값은200ms 기준과 비교한다. 이전 출력 기록에 mainLongTasks가 없으면 새 요약기는 거절한다.
 
 이 관측은 QA 전용이며 debugger/trace 자체 비용도 측정 프로세스에 포함된다. trace 없는 과거 RSS와 직접 비교해 최적화 효과를 주장하지 않는다. 시작 이전 작업·물리적 화면 표시·전체G6를 증명하지 않는다. 연결 및 파서/요약 회귀까지 확인했고, 완전한 단회 실측은 eighth/tenth에서 수행했으나 main/idle 기준을 넘었고 반복 합격은 남아 있다.
 
@@ -291,3 +291,6 @@ Node timer 지연은 starting/idle/preparing/loaded/live-output/history-pages/ge
 
 
 측정 중 동시 부하 diff 생성은 비동기 자식 실행을 기다린다. 별도 프로세스를 쓰더라도 execFileSync 대기는 앱 main을 막으므로 측정 구간에서는 사용하지 않는다. 2026-11-02 twelfth의271ms는 종료 표식 이전에 관측됐으나 입력 단계 실패/포커스 이탈로 전체 시나리오는 미완료다. 비동기 전환은 계측 간섭 수정이며 과거 지연을 차감하거나 합격으로 재분류하지 않는다.
+
+
+macOS QA는 창 표시 및 native 입력 직전에만 app.focus({steal:true})로 시험 앱을 활성화한다. window.focus만으로 다른 활성 앱에서 전환되지 않는 경우를 다룬다. 사용자가 화면 유지 가능하다고 확인한 시험에서만 사용하고 지속적인 포커스 루프는 만들지 않는다. 숨김/외부 입력/불완전 구간 판정은 유지한다.

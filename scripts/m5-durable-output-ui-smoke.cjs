@@ -185,7 +185,7 @@ app.on('browser-window-created', (_event, window) => {
     };
     try {
       longTaskProbe = await import('./m5-packaged-long-task-probe.mjs');
-      window.show(); window.focus();
+      app.focus({steal:true}); window.show(); window.focus();
       await wait("document.visibilityState === 'visible' && window.m5?.version === 8");
       mainProbe = await import('./m5-main-task-trace.mjs');
       const {startMainTaskSession,createMainPhaseProbe} = await import('./m5-main-task-session.mjs');
@@ -307,7 +307,7 @@ app.on('browser-window-created', (_event, window) => {
           assert.ok(report.combinedWorkload.liveCoexistence.heads.every((head,i) => report.combinedWorkload.initialHeads[i] && head.committedSequence > report.combinedWorkload.initialHeads[i].committedSequence), 'Every stream must advance while the large model and diff are retained');
           const {probeEditorInput} = await import('./m5-editor-input-probe.mjs');
           const probe = action => run(`(${probeEditorInput.toString()})(${JSON.stringify(action)})`);
-          window.focus(); window.webContents.focus();
+          app.focus({steal:true}); window.focus(); window.webContents.focus();
           try {
             await probe('arm');
             window.webContents.sendInputEvent({type:'char', keyCode:'Z'});
