@@ -1,5 +1,13 @@
 # M5 성능 측정
 
+## 큰 파일·diff·네 실행 출력의 동시 부하 진단
+
+별도 output QA 앱 실행 파일에 `--combined-workload`를 전달하면 기존 단일 실행 3,000개×4채팅 paced fixture에 큰 파일/트리/diff를 결합한다. 생성하는 임시 원본에는 10,000개 트리 파일·1,000개 디렉터리와 5MiB/100,000줄 파일, diff 기준 파일이 들어간다. 첫 채팅의 복사본에서만 500파일/20,000변경줄/10MiB diff를 만든다. 사용자 메시지 append로 에이전트 출력을 대체하지 않는다.
+
+첫 채팅에서 큰 모델과 diff를 연 뒤 네 실행을 시작한다. 첫 관측 구간의 앞뒤 head를 대조해 네 출력이 모두 증가하고 아직 sealed되지 않았는지, 모델과 diff가 함께 존재하는지 확인한다. 이후 기존 채팅별 출력·기록 탐색 검사를 수행한다. 프로젝트 닫기 후 60초를 기다린 뒤 잔류 RSS를 수집한다. 원본 Git 상태 불변을 확인하고 기존 정상 종료 경계를 유지한다. 진단은 일반 제품 `out`이 아닌 별도 QA 앱에서만 실행하며 실제 공급자·인증·모델을 사용하지 않는다.
+
+**현재는 수집 경로 구현 단계이며 실행 증거는 아직 없다.** 실행 성공도 전체 G6 합격은 아니다. QA main/fixture의 메모리 비용, 초 단위 표본, 10회 반복 미완료 등의 범위 차이가 남는다. 기존 400/800/120MiB와 파일/diff 시간 기준 초과는 실패로 기록한다. 기존 반복 수집기는 기본 출력 모드이므로 이 새 모드의 반복 수집으로 인용하지 않는다. 생성한 QA 패키지와 fixture는 기존 종료·PID 부재·DB clean 확인 뒤 정리한다.
+
 ## 작업 복사본 준비 비용 분리
 
 `CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 cargo test --release -p hello-agent-sidecar --lib large_snapshot_phase_diagnostic -- --ignored --nocapture`는 기본 임시 fixture에1만 파일·1천 폴더 및5MiB 파일을 추가하고 source open, baseline capture, bundle export, baseline 재검증, snapshot 초기화, materialize+sync의 시간을 각각 출력한다. 추가 tree 루트까지 새 디렉터리는1001개다. 성공 시 TempDir가 생성 데이터를 정리한다.

@@ -2,6 +2,12 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 이전 목표 턴은 Codex 실제 수정/취소 성공 증거로 진척했다. HEAD45d03b4/깨끗한 통합 브랜치에서 성능 수집 경로를 조사했다. 과거 빈 창/preload/product 및 no-CDP 대조가 이미 있다는 점을10월 아카이브와 기존 runner에서 확인해 같은 대조를 반복하지 않았다. 10/30 시작 RSS 최대460.3MiB 실패는 유지하며 원인을 아직 확정하지 않았다.
+- 기존 output QA에 선택적 --combined-workload 경로를 구현했다. 실제 sidecar의 단일3,000출력×4채팅 fixture와 10,000파일/1,000디렉터리·5MiB/100,000줄 파일·500파일/20,000변경줄/10MiB diff를 결합한다. 첫 채팅의 큰 모델/diff 공존 중 네 head가 모두 증가하는지 확인하며, 이후 기존 출력·기록 검증과 원본 불변·닫기60초 후 잔류 관측을 수행한다. appendChatMessage 부하로 단일 에이전트 출력을 대체하지 않는다.
+- 제품 실행 코드·메모리 기준·승인 경계는 바꾸지 않았다. QA packager에 필요한 fixture/probe 파일을 포함했고3개 JS 문법·diff 검사를 통과했다. 새 수집 경로는 아직 실행하지 않은 구현 체크포인트다. 다음은 별도 QA 패키지의 통합 부하 실행과 결과에 따른 수정이며, 이를 전체G6/Windows/출시 완료로 표시하지 않는다. 실제 모델 호출·새 QA 패키지/대형 fixture 생성·main병합·push없음.
+
+### 2026-11-02 · by GPT-6
+
 - 이전 턴은 IPC 전달 진단 구현·지연 회귀로 진척했다. HEAD0843105/깨끗한 m5/coding-agent-ide를 확인하고 실행 중인 시험 앱이 없음을 OS에서 확인한 뒤 macOS 패키징을 완료했다. 기존 out 앱 한 개를 교체했으며 out309MiB·target1.0GiB·남은 디스크514GiB다. 추가 ZIP/워크트리를 만들지 않았다.
 - 새로 승인된 Codex 순차 최대2회를 모두 실행했다. 수정 run agent_run_f5d74477668c4fac84b5b9ed8bc081f9는 coding/gpt-6.1-sol/medium/workspaceWrite에서 succeeded·cleanExit, processesProvenGone=true·poisoned=false·writerLockState=released다. UI DONE/성공/종료 확인과 hello.txt 단일 diff를 확인했다. 실제 복사본은 HELLO_AGENT_CODEX_WRITE_OK\n, 원본은 original\n이다.
 - 이어 planning/gpt-6.1-sol/medium/readOnly run agent_run_e700ee7525cd4523902874a488af82ac의 실행 중 표시 뒤 취소를 눌렀다. UI 취소됨/종료 확인 및 DB canceled·cleanExit·processesProvenGone=true·poisoned=false를 대조했고 취소 시험 복사본은 original\n이다. 도구 읽기 성공 검증은 아니며 출력 일부가 있던 실행의 중단 검증이다. 승인2회 소진/추가 호출없음.

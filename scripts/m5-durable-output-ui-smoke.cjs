@@ -12,7 +12,9 @@ const { observeStdio } = require('./m5-stdio-observer.cjs');
 const { summarizeOutputGeneration } = require('./m5-output-generation.cjs');
 if (process.platform !== 'darwin' || app.isPackaged !== packagedQa) throw new Error('Output diagnostic build mode differs');
 if (packagedQa) app.setName('Hello Agent Output QA');
-const live = packagedQa || process.argv.includes('--live');
+const combined = process.argv.includes('--combined-workload');
+const combinedWorkload = combined ? require('./m5-combined-output-workload.cjs') : null;
+const live = combined || packagedQa || process.argv.includes('--live');
 const paced = live || process.argv.includes('--paced');
 const repo = path.resolve(__dirname, '..');
 const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hello-agent-output-ui-'));
@@ -20,6 +22,7 @@ const source = path.join(root, 'project');
 const userData = path.join(root, 'userdata');
 fs.mkdirSync(source); fs.mkdirSync(userData);
 fs.writeFileSync(path.join(source, 'hello.txt'), 'original\n');
+const combinedFixture = combinedWorkload?.prepare(source);
 for (const args of [['init', '-q', '--template='], ['add', '.'],
   ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture']]) {
   cp.execFileSync('/usr/bin/git', args, { cwd: source, env: { ...process.env,
@@ -90,6 +93,8 @@ cp.spawn = function(command, args, options) {
 };
 // Poll the process tree, including sidecar and fixture descendants. These are
 // sampled RSS totals (shared pages may be counted more than once), not heap size.
+report.combinedWorkload = combined ? {fixture:combinedFixture, diagnostic:true, gateEligible:false, status:'PREPARING'} : undefined;
+let memoryPhase = 'starting';
 report.memory = { scope: 'test-app-process-tree', samples: [], errors: 0, truncated: false };
 const memoryTimer = setInterval(() => {
   try {
@@ -99,7 +104,7 @@ const memoryTimer = setInterval(() => {
     let grew = true;
     while (grew) { grew = false; for (const [pid, ppid] of rows) if (included.has(ppid) && !included.has(pid)) { included.add(pid); grew = true; } }
     const processes = rows.filter(([pid]) => included.has(pid)).map(([pid, , kib]) => ({pid, rssBytes:kib * 1024}));
-    if (report.memory.samples.length < 600) report.memory.samples.push({at:Date.now(), processes, totalBytes:processes.reduce((sum, entry) => sum + entry.rssBytes, 0)});
+    if (report.memory.samples.length < 600) report.memory.samples.push({phase:memoryPhase,at:Date.now(), processes, totalBytes:processes.reduce((sum, entry) => sum + entry.rssBytes, 0)});
     else report.memory.truncated = true;
   } catch { report.memory.errors++; }
 }, 1000);
@@ -177,6 +182,7 @@ app.on('browser-window-created', (_event, window) => {
       await run(`globalThis.outputSmokeVisibility = [{state:document.visibilityState,at:performance.now()}];
         document.addEventListener('visibilitychange', () => outputSmokeVisibility.push({state:document.visibilityState,at:performance.now()}));`);
       await wait("[...document.querySelectorAll('button')].some(b => b.textContent === '프로젝트 선택' && !b.disabled)");
+      if (combined) { memoryPhase = 'idle'; await new Promise(resolve => setTimeout(resolve, 3000)); }
       await run(`(async () => {
         const api = window.m5;
         const project = await api.openProject();
@@ -196,6 +202,14 @@ app.on('browser-window-created', (_event, window) => {
       await wait("document.querySelectorAll('.m5-chat-chip').length === 4");
       await run("document.querySelector('.m5-chat-chip').click()");
       await wait("!!document.querySelector('#m5-followup-text')");
+      if (combined) {
+        const first = await run('outputSmokeChats[0]');
+        await run(`[...document.querySelectorAll('.m5-chat-chip')].find(b => b.textContent.includes('Output stream 0')).click()`);
+        await wait("document.querySelector('.m5-timeline h2')?.textContent === 'Output stream 0'");
+        memoryPhase = 'loaded';
+        Object.assign(report.combinedWorkload, await combinedWorkload.mount(run, userData, first));
+        persist();
+      }
       await run(`globalThis.outputObservation = (${installOutputObserver.toString()})((${createLiveOutputLatency.toString()})); void 0`);
       await run(`(async () => {
         const api = window.m5;
@@ -208,10 +222,16 @@ app.on('browser-window-created', (_event, window) => {
         }
       })()`);
       if (live) for (let index = 0; index < 4; index++) {
+        if (combined && index === 0) {
+          await wait("document.querySelector('.m5-durable-output select')?.value === outputSmokeRuns[0].runId && document.querySelector('.m5-timeline h2')?.textContent === 'Output stream 0'");
+        } else {
+        if (combined) await run("[...document.querySelectorAll('.m5-dock-group-tab')].find(b => b.textContent.trim() === '채팅').click()");
         await run(`[...document.querySelectorAll('.m5-chat-chip')].find(b => b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}').click()`);
         await wait(`document.querySelector('.m5-durable-output select')?.value === outputSmokeRuns[${index}].runId &&
           [...document.querySelectorAll('.m5-chat-chip')].some(b => b.getAttribute('aria-current') === 'true' && !b.disabled && b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}')`);
+        }
         await wait("!!document.querySelector('.m5-output-scroll article:last-child pre')");
+        if (combined && index === 0) report.combinedWorkload.initialHeads = await run(`Promise.all(outputSmokeRuns.map(({schemaVersion,state,...binding}) => window.m5.getAgentOutputHead(binding)))`);
         // Model the user bringing the live output into view once. Do not keep
         // scrolling it in the probe: subsequent updates must follow naturally.
         await run("document.querySelector('.m5-output-scroll').scrollIntoView({block:'end',inline:'nearest'})");
@@ -241,6 +261,18 @@ app.on('browser-window-created', (_event, window) => {
         assert.ok(observation.frames.length >= 2 && observation.frames.at(-1).sequence > observation.frames[0].sequence,
           'Visible stream did not advance during live window');
         assert.equal(observation.latestVisible, true, 'Latest live output is clipped');
+        if (combined && index === 0) {
+          report.combinedWorkload.liveCoexistence = await run(`(async () => ({
+            editor:!!document.querySelector('.monaco-editor'), diff:!!document.querySelector('.m5-diff-details'),
+            runs:outputSmokeRuns.length, heads:await Promise.all(outputSmokeRuns.map(({schemaVersion,state,...binding}) => window.m5.getAgentOutputHead(binding)))
+          }))()`);
+          assert.equal(report.combinedWorkload.liveCoexistence.editor, true);
+          assert.equal(report.combinedWorkload.liveCoexistence.diff, true);
+          assert.equal(report.combinedWorkload.liveCoexistence.runs, 4);
+          assert.ok(report.combinedWorkload.liveCoexistence.heads.every(head => head && head.committedSequence > 0 && head.committedSequence < 3000 && !head.sealed), 'All four streams must still be emitting during combined observation');
+          assert.ok(report.combinedWorkload.liveCoexistence.heads.every((head,i) => report.combinedWorkload.initialHeads[i] && head.committedSequence > report.combinedWorkload.initialHeads[i].committedSequence), 'Every stream must advance while the large model and diff are retained');
+          report.combinedWorkload.status = 'OBSERVED';
+        }
         if (index === 0) {
           const paused = await run(`(async () => {
             const outer = document.querySelector('.m5-conversation-scroll');
@@ -311,12 +343,26 @@ app.on('browser-window-created', (_event, window) => {
         return generated;
       })()`);
       if (paced) report.generationSummary = summarizeOutputGeneration(report.generation);
+      if (combined) {
+        assert.equal(cp.execFileSync('/usr/bin/git', ['-C',source,'status','--porcelain'], {encoding:'utf8',env:{...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_COUNT:'0'}}).trim(), '', 'Combined workload changed source');
+        report.combinedWorkload.originalUnchanged = true;
+        await run(`[...document.querySelectorAll('button')].find(b => b.textContent === '프로젝트 화면 닫기' && !b.disabled).click()`);
+        await wait("!!document.querySelector('.m5-start-action') && !document.querySelector('.monaco-editor')");
+        memoryPhase = 'closing'; report.combinedWorkload.closedAt = Date.now();
+        await new Promise(resolve => setTimeout(resolve, 60000));
+        memoryPhase = 'retained'; report.combinedWorkload.retainedStartedAt = Date.now();
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        report.combinedWorkload.memory = require('./m5-process-memory.cjs').summarizeMemory(
+          report.memory.samples.map(sample => ({...sample,rssBytes:sample.totalBytes})));
+      }
       report.outputObservation = await run('outputObservation.stop()');
       report.visibility = await run('document.visibilityState');
       report.visibilityTrace = await run('outputSmokeVisibility');
       report.userInput = await run('outputSmokeInput');
       await fs.promises.writeFile(path.join(root, 'output.png'), (await window.webContents.capturePage()).toPNG());
-      finish();
+      const combinedFailures = combined ? [...report.combinedWorkload.largeProject.failedMetrics, ...report.combinedWorkload.largeDiff.failedMetrics, ...report.combinedWorkload.memory.failedMetrics] : [];
+      if (combined) report.combinedWorkload.failedMetrics = combinedFailures;
+      finish(combinedFailures.length ? new Error('Combined workload limits exceeded: ' + combinedFailures.join(', ')) : undefined);
     } catch (error) {
       sampleWindow('assertion-failed');
       try {
