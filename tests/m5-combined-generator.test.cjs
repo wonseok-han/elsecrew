@@ -5,7 +5,9 @@ const os=require('node:os');
 const path=require('node:path');
 const {execFileSync}=require('node:child_process');
 const {mount}=require('../scripts/m5-combined-output-workload.cjs');
-test('measured diff generation yields main timers and completes before probing',async()=>{
+// This exercises the macOS-only Output QA generator and its fixed Git path.
+test('measured diff generation yields main timers and completes before probing',
+  {skip:process.platform!=='darwin'},async()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'m5-generator-test-'));
   const snapshot=path.join(root,'com.wonseokhan.helloagent/m5/worktrees-v1/worktree_test');
   let timer,ticks=0,calls=0;

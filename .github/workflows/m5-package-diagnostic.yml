@@ -1,8 +1,11 @@
 name: M5 package diagnostic (unsigned)
 
-# Opt-in only. This does not publish a release or establish G6 readiness.
+# Opt-in only: manual dispatch, or an explicitly approved diagnostic-branch push.
+# This does not publish a release or establish G6 readiness.
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/m5-windows-diagnostic-20261102]
 
 permissions:
   contents: read
@@ -12,7 +15,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        # Branch-only bootstrap avoids requiring a main merge for Windows proof.
+        os: ${{ fromJSON(github.event_name == 'push' && '["windows-latest"]' || '["macos-latest", "windows-latest"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     env:

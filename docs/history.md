@@ -2,6 +2,13 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 727ab96 기준 Windows 원격 검증을 준비하며 새 m5-combined-generator 회귀가 macOS 고정/usr/bin/git 도우미를 호출함을 발견했다. 이 테스트만macOS한정으로명시했고macOS실행1/1 PASS, diff검사를통과했다. Windows전체검사를통과했다고주장하지않는다.
+- GitHub 연결로 wonseok-han/hello-agent의 public/default main을확인했다. 원격main의M5진단workflow와 codex/m5-windows-diagnostic-20261102 ref는404였다. 공식workflow_dispatch 기본브랜치조건을확인해 main병합없이시작할수있는전용push trigger를로컬에준비했다. 해당진단브랜치push는Windows만, 기존수동실행은macOS/Windows를검사한다. contents:read/45분/미서명ZIP3일보관/실제공급자미호출을유지한다.
+- 시스템Ruby YAML parser로구문·전용브랜치·read권한·timeout/보관기간을검사했다. Node YAML패키지는없어추가설치하지않았다. release-checklist에공개범위와승인경계를기록했다. 아직push/CI실행/main병합/외부artifact게시는없다. 다음은공개진단브랜치게시와CI실행사용자승인후Windows결과확인이다.400MiB/반복UI성능/Windows실증/출시미완료이며기존통합PASS는재실행하지않았다.
+
+
+### 2026-11-02 · by GPT-6
+
 - 23a7a3e clean checkout에서 초기 로딩 경로를 확인했다. 진입bundle약574KB이고Monaco는이미지연로딩이라 현재근거만으로 추가분할/제품최적화를정당화하지 않았다. 메모리진단만반복하지않고최근여러수정이누적된상태의통합회귀를한번수행했다.
 - npm test:657 passed/0 failed/0 skipped, exit0. pnpm build(tsc+vite):exit0. CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 CARGO_INCREMENTAL=0 cargo test --workspace --locked:전체1,108 passed/0 failed/59 ignored, exit0. sidecar단위691 passed/43 ignored, stdio통합16 passed/1 ignored를포함한다. 별도조건/승인이필요한ignored는실행하지않았고과거실패뒤부분재시험과달리이번에는전체workspace단회종료0을확인했다.
 - .artifacts/m5-consolidated-2026-11-02/{node.log,build.log,rust.log,summary.json}에원시로그·명령·기준HEAD를보존했다. 이는diagnostic/gateEligible=false이며G6성능·실제공급자·Windows·출시승인으로확대하지않는다. 같은코드로이전체검사를반복하지않고향후변경영역에재사용한다.

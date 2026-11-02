@@ -80,7 +80,7 @@ macOS 패키징 전에는 실행 중인 해당 `out/hello-agent-<platform>-<arch
 
 위 Tauri 배포 기록을 Electron 후보의 합격으로 대신하지 않는다. 현재 상태는 `history.md`·`architecture.md`, 수치는 `proposals/m5-electron-spike.md` §9–13과 `procedures/m5-performance.md`를 따른다. 아래는 남은 증거 요구이며 완료 표시가 아니다.
 
-원격 검증 준비: `.github/workflows/m5-package-diagnostic.yml`은 수동 실행 전용 macOS/Windows Electron ZIP 빌드·패키지 자산/fuse·sidecar protocol 확인 경로다. 미서명 진단 ZIP은3일만 보관하며 release 게시·실제 계정/모델 호출은 하지 않는다. push/원격 실행은 사용자 승인 뒤 수행한다. 이 작업의 성공만으로 Windows UI/자손 안전·서명·G6/출시 합격을 주장하지 않는다. 기존 Tauri CI/배포와 별개다.
+원격 검증 준비: `.github/workflows/m5-package-diagnostic.yml`은 수동 macOS/Windows 진단과 `codex/m5-windows-diagnostic-20261102` 전용 브랜치 push의 Windows 진단을 제공한다. 일반 브랜치/main push는 이 workflow를 실행하지 않는다. 기본 브랜치에 파일이 없는 초기 상태에서는 사용자 승인 후 전용 브랜치에 게시해 Windows 검증을 시작할 수 있다. 현재 저장소는 공개이므로 게시하는 M5 코드/문서와 진단 artifact도 공개 범위임을 승인 전에 알린다. 미서명 진단 ZIP은3일만 보관하며 release 게시·실제 계정/모델 호출은 하지 않는다. push/원격 실행은 사용자 승인 뒤 수행한다. 이 작업의 성공만으로 Windows UI/자손 안전·서명·G6/출시 합격을 주장하지 않는다. 기존 Tauri CI/배포와 별개다.
 
 - [ ] 최신 후보의 여러 프로젝트·영속 채팅·역할 설정·코드 편집/diff·반영/복원·재시작을 패키징 앱에서 확인하고 전체 시안 비교 결과를 기록
 - [ ] macOS 실제 에이전트 입력·출력·명시 중단·자손 소멸 확인; Codex planning 1회 성공을 쓰기·승인·복구 전체 합격으로 확대하지 않음
@@ -89,3 +89,5 @@ macOS 패키징 전에는 실행 중인 해당 `out/hello-agent-<platform>-<arch
 - [ ] Windows 패키지의 UI·sidecar·fixture 확인 및 실제 agent 실행 차단 유지; 자손 안전 구현 전 실행 활성화 금지
 - [ ] 데이터 손실·교차 채팅 오염·원본 보호·미확인 종료/복구의 최종 실패 주입과 독립 검토
 - [ ] 깨끗한 기기·서명/공증·배포 방식 결정과 최종 설치본 확인; main 병합·push·외부 배포는 별도 사용자 승인
+
+수동 workflow_dispatch의 기본 브랜치 조건: [GitHub 공식 문서](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch). 전용 브랜치 진단은 main 병합이나 출시 승인이 아니다.
