@@ -207,6 +207,11 @@ app.on('browser-window-created', (_event, window) => {
         document.addEventListener('visibilitychange', () => outputSmokeVisibility.push({state:document.visibilityState,at:performance.now()}));`);
       await wait("[...document.querySelectorAll('button')].some(b => b.textContent === '프로젝트 선택' && !b.disabled)");
       if (combined) {
+        // Roles only: retain unknown sampled descendants; never infer from PID order.
+        report.processRoles = {
+          observedAt:Date.now(), sidecarPid:child?.pid ?? null,
+          chromium:app.getAppMetrics().map(({pid,type,serviceName}) => ({pid,type,serviceName})),
+        };
         await setMemoryPhase('idle');
         report.combinedWorkload.idleStartedAt = Date.now();
         await new Promise(resolve => setTimeout(resolve, 3000));
