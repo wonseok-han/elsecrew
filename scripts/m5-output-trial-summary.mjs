@@ -1,3 +1,4 @@
+import { mainTaskMaximum } from './m5-main-task-trace.mjs';
 import assert from 'node:assert/strict';
 import { packagedLongTaskMaximum } from './m5-packaged-long-task-probe.mjs';
 import { createRequire } from 'node:module';
@@ -51,7 +52,8 @@ export function summarizeOutputTrial(result, {combinedWorkload = false} = {}) {
     assert.deepEqual(c.failedMetrics, combinedMemory.failedMetrics);
   }
   const rendererLongTaskMs = packagedLongTaskMaximum(result.rendererLongTasks);
-  return {rendererLongTaskMs,...(combinedMemory ? {combinedMemory} : {}),persistedRows:generation.persistedRows,
+  const mainLongTaskMs = mainTaskMaximum(result.mainLongTasks);
+  return {mainLongTaskMs,rendererLongTaskMs,...(combinedMemory ? {combinedMemory} : {}),persistedRows:generation.persistedRows,
     allStampedWithin60Seconds:generation.allStampedWithin60Seconds,
     maximumScheduleLagMs:Math.max(...generation.streams.map(row => row.maximumScheduleLagMs)),
     maximumSampledLiveLatencyMs:Math.max(...live.samples.map(row => row.notificationToFrameMs)),

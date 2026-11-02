@@ -165,10 +165,43 @@ app.on('browser-window-created', (_event, window) => {
       throw new Error('UI condition timeout: ' + predicate);
     };
     let longTaskProbe, longTaskStarted = false;
+    let mainProbe, mainTrace, mainTraceStarted = false, ownsDebugger = false;
+    const onTrace = (_event, method, params) => mainTrace.accept({method, params});
+    const stopMainTrace = async windowCompleted => {
+      if (!mainTraceStarted) return;
+      mainTraceStarted = false;
+      let timer, cancelled = false;
+      try {
+        await Promise.race([
+          (async () => {
+            await window.webContents.debugger.sendCommand('Tracing.end');
+            while (!mainTrace.completed && !cancelled) await new Promise(resolve => setTimeout(resolve, 20));
+          })(),
+          new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Main trace completion timeout')), 8000); })
+        ]);
+        report.mainLongTasks = mainTrace.finish(windowCompleted);
+      } catch (error) {
+        report.mainLongTaskError = String(error);
+        report.mainLongTasks = mainTrace.finish(false);
+      } finally {
+        cancelled = true;
+        clearTimeout(timer);
+        window.webContents.debugger.removeListener('message', onTrace);
+        if (ownsDebugger && window.webContents.debugger.isAttached()) window.webContents.debugger.detach();
+        ownsDebugger = false;
+      }
+    };
     try {
       longTaskProbe = await import('./m5-packaged-long-task-probe.mjs');
       window.show(); window.focus();
       await wait("document.visibilityState === 'visible' && window.m5?.version === 8");
+      mainProbe = await import('./m5-main-task-trace.mjs');
+      mainTrace = mainProbe.createMainTaskTrace(process.pid);
+      window.webContents.debugger.attach('1.3');
+      ownsDebugger = true;
+      window.webContents.debugger.on('message', onTrace);
+      await window.webContents.debugger.sendCommand('Tracing.start', {categories:'toplevel',transferMode:'ReportEvents'});
+      mainTraceStarted = true;
       report.rendererLongTaskStart = await run(`(${longTaskProbe.beginLongTaskProbe.toString()})()`);
       longTaskStarted = true;
       assert.equal(report.rendererLongTaskStart.supported, true, 'Renderer long-task observation unsupported');
@@ -372,13 +405,22 @@ app.on('browser-window-created', (_event, window) => {
       report.userInput = await run('outputSmokeInput');
       await fs.promises.writeFile(path.join(root, 'output.png'), (await window.webContents.capturePage()).toPNG());
       report.rendererLongTasks = {...await run(`(${longTaskProbe.endLongTaskProbe.toString()})()`), windowCompleted:true};
+      await stopMainTrace(true);
+      const mainLongTaskMs = mainProbe.mainTaskMaximum(report.mainLongTasks);
       const rendererLongTaskMs = longTaskProbe.packagedLongTaskMaximum(report.rendererLongTasks);
       const combinedFailures = combined ? [...report.combinedWorkload.largeProject.failedMetrics, ...report.combinedWorkload.largeDiff.failedMetrics, ...report.combinedWorkload.memory.failedMetrics] : [];
       if (combined) report.combinedWorkload.failedMetrics = combinedFailures;
+      if (mainLongTaskMs > 200) { finish(new Error('Main long-task limit exceeded')); return; }
       if (rendererLongTaskMs > 200) { finish(new Error('Renderer long-task limit exceeded')); return; }
       finish(combinedFailures.length ? new Error('Combined workload limits exceeded: ' + combinedFailures.join(', ')) : undefined);
     } catch (error) {
       sampleWindow('assertion-failed');
+      await stopMainTrace(false);
+      if (ownsDebugger) {
+        window.webContents.debugger.removeListener('message', onTrace);
+        if (window.webContents.debugger.isAttached()) window.webContents.debugger.detach();
+        ownsDebugger = false;
+      }
       if (longTaskStarted && !report.rendererLongTasks) {
         try { report.rendererLongTasks = {...await run(`(${longTaskProbe.endLongTaskProbe.toString()})()`),windowCompleted:false}; }
         catch (probeError) { report.rendererLongTaskError = String(probeError); }

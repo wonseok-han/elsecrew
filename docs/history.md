@@ -2,6 +2,12 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 직전8ba273a의 실측은 새 수집 경로 동작과 화면 숨김 실패를 확인한 진척이며 반복 대기 상태가 아니다. 이번에는 같은 가시성 시험을 재실행하지 않고, 출력/동시 부하에 빠져 있던 main task 관측을 기존 `createMainTaskTrace`로 연결했다. QA 창의 debugger tracing을 시작/종료하고 최대8초 완료 대기·리스너/연결 해제·중도 실패 기록을 추가했다. 제품 코드와 안전 경계 변경은 없다.
+- 반복 요약은 완전한 mainLongTasks 원시 기록을 요구하고 mainLongTaskMs 최대값/200ms 기준을 집계한다. 누락·data loss·미완료는 실패이며250ms 관측을 버리지 않는다. QA 패키지 복사 목록과 절차도 갱신했다. debugger/trace 추가 비용이 포함되므로 과거 trace 없는 RSS와 최적화 효과를 직접 비교하지 않는다.
+- 관련 파서7개와 요약6개, 총13회귀 PASS 및 실행 스크립트 문법/diff PASS. 새 패키지의 tracing 수명주기 실측은 아직 수행하지 않았고 전체G6 PASS가 아니다. 대형 빌드·QA 앱/임시 프로젝트·실제 모델 호출 없음. 다음은 가시성 확보 후 연결 계측 통합 검증, 유휴400MiB 최적화, 입력/경합 등 미완료G6 및Windows/출시 검증이다. main병합/push없음.
+
+### 2026-11-02 · by GPT-6
+
 - 깨끗한 ea04cf5에서 별도 QA 패키지를 만들고 combined workload를1회 실행했다. 새 renderer long-task 관측은 supported/valid로 시작·실패 종료 기록을 남겼고 RSS140표본 수집 오류0이다. 실제 모델 호출은 없었다. 저장된 waitingFor는 이전 조건으로 남을 수 있으므로 진행 위치 확정에 단독 사용하지 않는다.
 - 결과는 FAIL: 큰 파일 presentation deadline 초과이며 실패 시 document.visibilityState=hidden(visible/hidden 전환 기록 있음)이었다. window.isVisible=true만으로 실제 renderer 표시를 보장하지 않는다. long-task 원시 entry0/maximum0은 windowCompleted=false인 중도 종료 기록이며200ms 합격으로 사용할 수 없다. 4개 출력·닫기 후60초 측정에는 도달하지 않았다.
 - 이번 유휴3초 최대400.9375MiB로400MiB 기준을 여전히 초과했다. 다른 실행의434MiB와 직접 비교해 제품 최적화 성공으로 주장하지 않는다. 제품 코드·메모리 합격 기준 변경 없음. 원시 결과·스크린샷·빌드/실행 로그·정리 증거는 `.artifacts/m5-combined-output-2026-11-02/fifth/`에 보존했다.

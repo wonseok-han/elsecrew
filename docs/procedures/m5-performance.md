@@ -264,3 +264,9 @@ QA live 구간의 시작은 배열 길이 cursor만 보관하고 종료 때 해�
 ### 출력·동시 부하의 renderer long task
 
 출력 QA는 visible bridge 준비 이후 기존 `beginLongTaskProbe`를 시작하고 시나리오 종료 때 pending record까지 수집한다. 시작 단계 이전이나 main process의 작업 시간은 포함하지 않는다. 중단 시 windowCompleted=false로 남기며 관측 미지원·overflow·미완료·요약 불일치는0ms로 대체하지 않는다. 200ms 초과는 실패다. 반복 수집기는 본10회 원시 관측을 재검증해 rendererLongTaskMs 최대값을 집계한다. 이전 출력 결과에 이 필드가 없으면 새 요약기는 거절한다. 이 연결은 단위 검증까지 완료됐으며 최신 QA 패키지 실측과 전체G6는 남아 있다.
+
+### 출력·동시 부하의 main task
+
+출력 QA도 기존 `createMainTaskTrace`를 재사용한다. visible bridge 준비 뒤 QA 창의 debugger로 Chromium `toplevel` trace를 시작하고, 원시 이벤트에서 해당 앱 PID의 `CrBrowserMain` 완결 slice만 평가한다. 시나리오 종료 뒤 tracingComplete를 최대8초 기다리고 연결을 해제한다. 미완료·data loss·기존100만 이벤트/1만 task 상한 초과는0ms로 대체하지 않는다. 본10회의 mainLongTaskMs 최대값은200ms 기준과 비교한다. 이전 출력 기록에 mainLongTasks가 없으면 새 요약기는 거절한다.
+
+이 관측은 QA 전용이며 debugger/trace 자체 비용도 측정 프로세스에 포함된다. trace 없는 과거 RSS와 직접 비교해 최적화 효과를 주장하지 않는다. 시작 이전 작업·물리적 화면 표시·전체G6를 증명하지 않는다. 연결 및 파서/요약 회귀까지 확인했고, 새 패키지의 완전한 동시 부하 실측은 아직 남아 있다.

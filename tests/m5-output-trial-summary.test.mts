@@ -7,6 +7,7 @@ function result(): any {
   const generation=Array.from({length:4},(_,r)=>({runId:`run${r}`,
     samples:Array.from({length:3000},(_,i)=>[i+1,i*20000,1700000000000+i*20,`event${r}-${i}`,i+1])}));
   return {packagedQa:true,status:'PASS',functionalStatus:'PASS',shutdown:'accepted',visibility:'visible',
+    mainLongTasks:{valid:true,windowCompleted:true,completed:true,dataLoss:false,incompleteMain:false,mainThreads:1,limitMs:200,tasks:[{tid:1,startUs:1,durationMs:10}],maximumMs:10,overLimitCount:0},
     rendererLongTasks:{supported:true,valid:true,windowCompleted:true,overflow:false,limitMs:200,startedAt:0,endedAt:1000,entries:[],maximumMs:0,overLimitCount:0},
     visibilityTrace:[{state:'visible'}],restoredChats:[0,1,2,3],generation,generationSummary:summarizeOutputGeneration(generation),
     outputObservation:{droppedHeads:0,droppedFrames:0,liveLatency:{dropped:0,unfinished:0,superseded:2,interrupted:1,samples:[{notificationToFrameMs:150}]}},
@@ -68,4 +69,15 @@ test('output summary rejects missing long-task evidence and retains measured thr
   const high=result();Object.assign(high.rendererLongTasks,{entries:[{startTime:10,duration:250}],maximumMs:250,overLimitCount:1});
   assert.equal(summarizeOutputTrial(high).rendererLongTaskMs,250);
   high.rendererLongTasks.windowCompleted=false;assert.throws(()=>summarizeOutputTrial(high));
+});
+
+test('requires complete main trace and preserves an observed main task over the limit',()=>{
+  for(const mutate of [
+    (r:any)=>{delete r.mainLongTasks;},
+    (r:any)=>{r.mainLongTasks.windowCompleted=false;},
+    (r:any)=>{r.mainLongTasks.dataLoss=true;},
+  ]){const r=result();mutate(r);assert.throws(()=>summarizeOutputTrial(r));}
+  const r=result();r.mainLongTasks.tasks[0].durationMs=250;
+  r.mainLongTasks.maximumMs=250;r.mainLongTasks.overLimitCount=1;
+  assert.equal(summarizeOutputTrial(r).mainLongTaskMs,250);
 });
