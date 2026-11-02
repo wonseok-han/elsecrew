@@ -2,6 +2,14 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 8346e54의 전체 합성 QA(twelfth)는 Editor input observation unavailable로 실패했다. 실패 화면은 visible이나 window focused=false였고 과거 숨김 이력도 있어 온전한 화면 성능 증거가 아니다. 입력/복원 이후 단계는 미완료이며 재시도하지 않았다. 정상 종료 accepted·관측PID 부재·DB clean_shutdown을 확인하고 rhNbl9/My0dEc 임시 데이터와 QA 패키지를 정리했다. 결과는 .artifacts/m5-combined-output-2026-11-02/twelfth에 보존했다.
+- main trace는 valid=true/windowCompleted=false, 최대271.323ms였다. start marker1217506888039, max start1217647663341, end marker1217664003264로 최대 task가 두 표식 사이에 있다. 따라서 이번 최대 task를 trace 종료 처리로 설명할 수 없다. 경계 전체 complete=false는 시나리오 중단을 정확히 나타낸다. loaded 구간 Node timer 최대274.203ms도 관측됐다. 과거284ms와 원인이 동일하다고 확정하지 않는다.
+- 해당 loaded 구간의 QA fixture 생성에서 execFileSync 대기가 남아 있음을 발견했다. m5-combined-output-workload.cjs의 측정 중 change 생성만 비동기 execFile로 전환하고 자식의 성공 종료 후 UI probe를 시작한다. 초기 측정 전 prepare는 유지한다. 제품 코드/성능 기준/표본 제외는 변경하지 않았다.
+- 새 회귀는 실제 임시 Git fixture에서500파일·20,000변경줄·10MiB diff 생성 중 메인 timer 진행과 완료 순서를 확인했다(1/1 PASS, 자체 임시 폴더 정리). syntax/diff 검사 통과. 이 수정의 전체 앱 재측정은 아직 안 했으므로271ms 해결이나 메모리/G6 합격으로 주장하지 않는다. 다음은 비동기 fixture의 전체 앱 재측정이며400MiB/반복G6/Windows/출시 검증은 남는다.
+
+
+### 2026-11-02 · by GPT-6
+
 - 8d98890 기준 실제 durable-output QA의 main trace에 선택적 clock marker 수집을 연결했다. start/end 두 표식만 보존하며 중복·잘못된 thread·누락·지원 오류·미완료 실행은 경계 진단을 불완전으로 표시한다. 표식 명령은 각각1초 제한이며 기존 trace의 모든 task와200ms 판정은 유지한다. 시간 차감이나 PASS 기준 변경 없음.
 - 관련 Node 테스트5개 PASS, syntax/diff 검사 통과. 같은 session helper의 숨겨진 빈 Electron 창1초 시험에서 두 표식·complete=true·정상 detach/quit을 확인했다(최대3.098ms). 이는 계측 수명주기 검증이며 실제 앱 성능 합격은 아니다. .artifacts/m5-clock-boundaries-2026-11-02에 결과/정리 증거를 보존하고 관측PID 부재 확인 후8AJz3E 임시 프로필을 삭제했다.
 - 다음: 새 계측을 포함한 전체 앱 QA에서 최대 task 좌표를 start/end와 대조한다. 기존284ms 지연·400MiB 초과 원인은 아직 미해결이며 반복G6/Windows/출시도 미완료다. 모델 호출·사용자 데이터 변경·main병합·push 없음.

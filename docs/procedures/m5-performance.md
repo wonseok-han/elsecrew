@@ -288,3 +288,6 @@ Node timer 지연은 starting/idle/preparing/loaded/live-output/history-pages/ge
 ### 추적 경계 최소 진단
 
 `node_modules/.bin/electron tests/m5-main-task-session-smoke.cjs --dense-trace`는 숨겨진 빈 창에서25초 timer와 고정10만 MessageChannel 이벤트를 만든다. 별도 임시 프로필을 사용하며 renderer 생성35초 제한이 있다. 시작/끝의 CDP clock_sync 표식을 제한된 메타데이터로 보존한다. 앱의 기능·sidecar·인증·공급자는 사용하지 않는다. 2026-11-02의 대량 관측은 incompleteMain으로 실패했으므로 종료 오버헤드 가설을 입증한 결과가 아니다. 일반 앱의 시간값을 차감하거나 gate 구간을 변경하는 근거로 사용하지 않는다. 결과를 보존하고 정상 종료·관측PID 부재를 확인한 뒤 해당 프로필만 정리한다.
+
+
+측정 중 동시 부하 diff 생성은 비동기 자식 실행을 기다린다. 별도 프로세스를 쓰더라도 execFileSync 대기는 앱 main을 막으므로 측정 구간에서는 사용하지 않는다. 2026-11-02 twelfth의271ms는 종료 표식 이전에 관측됐으나 입력 단계 실패/포커스 이탈로 전체 시나리오는 미완료다. 비동기 전환은 계측 간섭 수정이며 과거 지연을 차감하거나 합격으로 재분류하지 않는다.

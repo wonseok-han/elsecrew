@@ -3,14 +3,22 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 // Keep fixture strings and full Git patches out of the measured Electron heap.
-// execFileSync returns only after the generator exits; no GC switch or RSS
-// subtraction is used, and the product keeps its normal memory policy.
+// Initial preparation precedes measurement. In-window generation awaits an
+// asynchronous child exit so fixture construction never blocks the app main.
+// No GC switch or RSS subtraction changes the product memory policy.
 function generate(action, directory) {
   const output = require('node:child_process').execFileSync(process.execPath,
     [__filename, action, directory], {
       env: {...process.env, ELECTRON_RUN_AS_NODE: '1'}, encoding: 'utf8', maxBuffer: 4096,
     });
   return JSON.parse(output);
+}
+async function generateDuringMeasurement(action, directory) {
+  const {stdout} = await require('node:util').promisify(require('node:child_process').execFile)(process.execPath,
+    [__filename, action, directory], {
+      env: {...process.env, ELECTRON_RUN_AS_NODE: '1'}, encoding: 'utf8', maxBuffer: 4096,
+    });
+  return JSON.parse(stdout);
 }
 function prepare(source) { return generate('prepare', source); }
 function prepareInGenerator(source) {
@@ -43,7 +51,7 @@ async function mount(run, userData, chat) {
     assert.ok(Date.now() < readyBy, 'Combined workspace file list did not become ready');
     await new Promise(resolve => setTimeout(resolve, 50));
   }
-  const dimensions = generate('change', snapshot);
+  const dimensions = await generateDuringMeasurement('change', snapshot);
   const largeProject = await run(`(${probeLargeProject.toString()})(${JSON.stringify(chat.projectId)})`);
   const largeDiff = {...await run(`(${probeLargeDiff.toString()})()`), ...dimensions};
   const coexist = await run(`!!document.querySelector('.monaco-editor') && !!document.querySelector('.m5-diff-details')`);
