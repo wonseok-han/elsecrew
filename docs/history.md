@@ -2,6 +2,13 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 수집기 준비 수정8315bcb의 별도 QA 패키지로 combined-workload를 끝까지 실행했다. 네 단일3,000출력 스트림·각 채팅 최신200/과거100/다음페이지·스크롤 유지·큰 모델/diff 공존 중 네 head 증가·원본 Git clean을 확인했다. 첫 준비 실패는 재현되지 않았다.
+- 대형 트리 root75.7ms/expand65.5ms, 5MiB 파일 editable274.9ms, 500파일 diff summary227.2ms/first246.9ms로 해당 scoped 기준은 통과했다. 메모리 idle518,029,312B(494.0MiB), peak666,206,208B(635.3MiB), 닫기60초 후 idle 대비 잔류증분0B였다. idle400MiB 기준 초과로 전체 FAIL; 단회 QA 진단이며 G6 합격·출시 증거가 아니다. 유휴3초 관측과 QA main 오버헤드 한계를 유지한다.
+- 앱94089 정상 종료/전체 관측PID부재, sidecar94160 clean_shutdown_at00:26:09Z 확인 후 자체 fixture2xRzWU/QA패키지2z3Kd7을 제거했다. .artifacts/m5-combined-output-2026-11-02/second에 결과·화면·build·정리 증거를 보존했다. 제품 out/인증정보/사용자 프로젝트 변경·실제 모델 호출·main병합·push없음.
+- 다음: 유휴 RSS 초과 원인과 제품 개선을 진행한다. 기존 blank/preload/product·no-CDP 대조를 재사용하며 단회 통합 결과를 반복/물리 paint/입력지연 증거로 확장하지 않는다. Windows 환경·출시/서명 검증도 남아 있다.
+
+### 2026-11-02 · by GPT-6
+
 - 이전 턴은 통합 부하 수집 경로7f3e2f0 구현으로 진척했다. 깨끗한 기준에서 별도 output QA 패키지를 만들고 --combined-workload를 실행했다. 큰 프로젝트·네 채팅 준비 후 첫 파일 탐색에서 Large project target missing: aaa-tree로 FAIL했다. 실제/가짜 에이전트 시작 전이며 G6 결과가 아니다.
 - 실패 캡처는 chat 제목은 바뀌었지만 파일 목록과 채팅 전환이 아직 진행 중이었다. 수집기가 제목만 보고 준비 완료로 취급한 오류다. 현재 선택/활성 채팅과 파일 목록 준비를 기다리고 이미 선택된 첫 채팅을 다시 열지 않도록 고쳤다. 이 준비 대기는 cold 파일/트리 측정값에 섞지 않는다. 현행 dock 버튼에 없는 m5-dock-group-tab 선택자도 실제 m5-dock-group-tabs button으로 교정했다.
 - 앱89312 종료/관측 PID 부재와 sidecar89382의 DB clean_shutdown_at00:19:31Z를 확인한 뒤 자체 fixture7nTpGn/QA 패키지m734uN을 정리했다. .artifacts/m5-combined-output-2026-11-02/first에 실패 JSON·화면·build/정리 증거를 보존했다. JS3개 문법·diff PASS. 수정 후 통합 재실행이 다음이며 실제 모델 호출·제품 out 교체·main병합·push없음.
