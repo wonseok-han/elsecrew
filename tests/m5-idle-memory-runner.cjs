@@ -10,6 +10,8 @@ const { execFileSync } = require('node:child_process');
 const { processTreeMemory } = require('../scripts/m5-process-memory.cjs');
 const { buildPerformancePreload } = require('./m5-performance-preload-build.cjs');
 const mode = process.argv[2];
+const surfaceLifetime=process.argv.includes('--surface-lifetime');
+if(surfaceLifetime && JSON.stringify(process.argv.slice(2))!==JSON.stringify(['product','--surface-lifetime'])) throw new Error('Surface lifetime requires unmodified product mode');
 if (!['blank', 'painted', 'localized', 'rendered', 'rendered-bridge', 'preload', 'product'].includes(mode)) throw new Error('unknown idle control');
 const hasBridge = mode === 'preload' || mode === 'product' || mode === 'rendered-bridge';
 const isStaticProduct = mode === 'rendered' || mode === 'rendered-bridge';
@@ -36,7 +38,7 @@ const userData = mkdtempSync(resolve(tmpdir(), 'hello-agent-idle-memory-'));
 app.setPath('userData', userData);
 protocol.registerSchemesAsPrivileged([{ scheme: 'm5idle', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 let window;
-const timeout = setTimeout(() => { console.error({ mode, userData, error: 'timeout' }); app.exit(1); }, 15000);
+const timeout = setTimeout(() => { console.error({ mode, userData, error: 'timeout' }); app.exit(1); }, surfaceLifetime ? 40000 : 15000);
 app.whenReady().then(async () => {
   await protocol.handle('m5idle', request => {
     const url = new URL(request.url);
@@ -99,6 +101,11 @@ app.whenReady().then(async () => {
     window: {width:1280,height:800}, softwareRendering, spellcheck, deferShow, paintAfterMount, tileBudgetMiB, preSampleReadyAtMs, visible:window.isVisible(),
     scope: 'fresh Electron app idle only; no sidecar/provider; five samples after one second; static modes have no renderer app code; rendered-bridge retains synthetic preload; not release evidence',
     samples, metrics: app.getAppMetrics(), dom: await window.webContents.executeJavaScript('({nodes:document.querySelectorAll("*").length,ready:Boolean(document.querySelector(".m5-workbench")),visibility:document.visibilityState})') };
+  if(surfaceLifetime) report.surfaceLifetime=await require('../scripts/m5-surface-lifetime.cjs').collectSurfaceLifetime(
+    process.pid,()=>{
+      const gpu=app.getAppMetrics().filter(row=>row.type==='GPU');
+      if(gpu.length!==1) throw new Error('Ambiguous GPU identity');return gpu[0].pid;
+    },()=>window.webContents.executeJavaScript('({visible:document.visibilityState,focused:document.hasFocus()})'));
   report.rendererEntrySha256 = sha256(readFileSync(resolve(renderer, 'index.html')));
   if (isStaticProduct) report.staticMarkupSha256 = sha256(staticMarkup);
   report.bridgeLoaded = hasBridge;

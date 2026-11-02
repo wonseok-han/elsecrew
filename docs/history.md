@@ -2,6 +2,14 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 392b711 기준 GPU buffer 수명 진단을 추가했다. idle runner의 product --surface-lifetime는 다른flag와 함께 쓸 수 없고 기존5개RSS표본 뒤12회만 비동기vmmap/프로세스RSS를 수집한다. raw map/주소/경로를 저장하지 않고 크기/format별개수/resident만 보존한다. 모호한GPU·형식변경·4MiB/2초 초과는 실패하며 강제GC/디버거/제품설정 변경은 없다. 전체프로세스RSS도 계속 기록한다.
+- 최신renderer 빌드와parser회귀2/2·syntax/diff 통과. 기존native 지도에서59.125MiB 집계를 재현했다. 실제 PID49815 진단은 visible/focused 상태의12표본을 남기고exit0 종료했다. 기존초기5표본최대406.516MiB는 여전히400MiB 초과이며, 나중391.234MiB만 골라 합격으로 쓰지 않는다. 합성bridge/sidecar없음의진단이지G6제품측정이 아니다.
+- 새관측에서는초기2560×416 surface13개52.8125MiB+192×1536 2개2.25MiB가 약3초뒤4개16.25MiB+1개1.125MiB로 줄었으나GPU RSS는85.0→84.6MiB로거의유지됐다. buffer가계속동일량으로남는다는가설은지지되지않고, native resident 감소를 RSS 절감량으로대입할수없다. collection첫1.517초/후속0.73~0.80초로관측비용도포함됐다.
+- .artifacts/m5-performance/idle-product-49815.json과source/cleanup JSON에근거를보존했다. 원시전체map은새로저장하지않았다. exit0·관측PID부재후9RkEd4 임시프로필을삭제했다. 이번가설을근거로GPU flag나제품회수정책을바꾸지않는다. 다음은이버퍼실험을반복하지않고초기renderer/main 사용량의원인을좁히는것이다.400MiB/반복G6/Windows/출시미완료; 실제모델·사용자데이터·main병합/push없음.
+
+
+### 2026-11-02 · by GPT-6
+
 - eb3fd98 합성 QA(fourteenth)는 native 입력22.4ms·Undo·네 채팅 실시간 관측/과거 기록 복원과60초 회수 대기를 마쳤다. 다만 준비 중 탐색 keydown1건이 기록돼 External navigation input interrupted trial로FAIL이다. windowCompleted=false를 유지하며 전체성능PASS로 인용하지 않는다. 이 관측의main 최대54.764ms·유휴445.547MiB·peak710.812MiB·retained증분0이다.
 - 역할 기록에서 tracing.mojom.TracingService가유휴34.2MiB임을 확인했다. 제품과계측 비용을 분리하는 원인 자료지만 임의 차감/프로세스 제외는 하지 않는다. sidecar12.8MiB·Browser149.31MiB·GPU87.59MiB·Network39.45MiB·Tab122.19MiB가 같은 표본에 있었다. 과거 static/blank 결과는 다른 실행이라 절감량을 단순 산술로 주장하지 않는다.
 - 앱 활성화 보완 후 입력과복원은 수행됐고 가시성 이력은visible만이었다. 외부키 때문에 전체 결과는실패다. .artifacts/m5-combined-output-2026-11-02/fourteenth에 결과/빌드/정리 증거를 보존했고 accepted quit·관측PID부재·DB clean 확인 후7FAynu/xhWH5V의 시험 원본/사본/프로필/패키지를 삭제했다. 실제모델·사용자데이터·main병합/push없음.

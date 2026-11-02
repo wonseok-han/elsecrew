@@ -294,3 +294,8 @@ Node timer 지연은 starting/idle/preparing/loaded/live-output/history-pages/ge
 
 
 macOS QA는 창 표시 및 native 입력 직전에만 app.focus({steal:true})로 시험 앱을 활성화한다. window.focus만으로 다른 활성 앱에서 전환되지 않는 경우를 다룬다. 사용자가 화면 유지 가능하다고 확인한 시험에서만 사용하고 지속적인 포커스 루프는 만들지 않는다. 숨김/외부 입력/불완전 구간 판정은 유지한다.
+
+
+### IOSurface 수명 진단
+
+최신 renderer를 빌드한 뒤 `node_modules/.bin/electron tests/m5-idle-memory-runner.cjs product --surface-lifetime`로 실행한다. 다른 옵션과 결합하지 않는다. 합성 preload의 유휴 화면이며 sidecar/실제 공급자는 사용하지 않는다. 기존 초기5개 RSS 표본 뒤 약12초 동안 GPU PID를 다시 확인하며 bounded vmmap과 RSS를 순차 수집한다. 각 표본의 실제 소요시간과 visible/focused를 보존하며 원시 map은 저장하지 않는다. native resident는 RSS나 가산 가능한 물리사용량이 아니며 관측비용/처음부터의 전체 구간을 제외해 합격으로 바꾸지 않는다. 2026-11-02에는 surface resident가 줄어도GPU RSS는거의같아 이 버퍼의존속을 RSS초과원인으로확정하지 못했다.
