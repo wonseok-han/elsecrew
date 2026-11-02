@@ -11,6 +11,8 @@ const mode = process.argv[2];
 if (!['blank', 'painted', 'localized', 'rendered', 'preload', 'product'].includes(mode)) throw new Error('unknown idle control');
 const hasBridge = mode === 'preload' || mode === 'product';
 const softwareRendering = process.argv.includes('--software-rendering');
+const spellcheck = !process.argv.includes('--no-spellcheck');
+const deferShow = process.argv.includes('--defer-show');
 if (softwareRendering) app.disableHardwareAcceleration();
 const root = resolve(__dirname, '..');
 const renderer = resolve(root, '.vite/renderer/main_window');
@@ -35,10 +37,11 @@ app.whenReady().then(async () => {
     if (!asset.startsWith(renderer + sep)) return new Response('not found', { status: 404 });
     return net.fetch(pathToFileURL(asset).href);
   });
-  window = new BrowserWindow({ width: 1280, height: 800, show: true, webPreferences: {
+  window = new BrowserWindow({ width: 1280, height: 800, show: !deferShow, webPreferences: {
     ...(hasBridge ? { preload: buildPerformancePreload(resolve(userData, 'performance-preload.cjs')) } : {}),
-    contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false,
+    contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false, spellcheck,
   } });
+  if (deferShow) window.once('ready-to-show', () => window.show());
   await window.loadURL('m5idle://m5/index.html');
   if (hasBridge && !await window.webContents.executeJavaScript('window.m5PerformanceEnvironment?.sandboxed === true')) throw new Error('preload is not sandboxed');
   await new Promise(r => setTimeout(r, 1000));
@@ -52,9 +55,9 @@ app.whenReady().then(async () => {
     await new Promise(r => setTimeout(r, 250));
   }
   const report = { diagnostic: true, rendererSandbox: true, mode, userData, head: execFileSync('/usr/bin/git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
-    window: {width:1280,height:800}, softwareRendering,
+    window: {width:1280,height:800}, softwareRendering, spellcheck, deferShow, visible:window.isVisible(),
     scope: 'fresh Electron app idle only; no sidecar/provider; five samples after one second; painted/localized/rendered have no app code or preload; not release evidence',
-    samples, metrics: app.getAppMetrics(), dom: await window.webContents.executeJavaScript('({nodes:document.querySelectorAll("*").length,ready:Boolean(document.querySelector(".m5-workbench"))})') };
+    samples, metrics: app.getAppMetrics(), dom: await window.webContents.executeJavaScript('({nodes:document.querySelectorAll("*").length,ready:Boolean(document.querySelector(".m5-workbench")),visibility:document.visibilityState})') };
   if (mode === 'product' && !report.dom.ready) throw new Error('product did not mount');
   const directory = resolve(root, '.artifacts/m5-performance'); mkdirSync(directory, { recursive: true });
   if (mode === 'product') {
@@ -65,6 +68,16 @@ app.whenReady().then(async () => {
       return '<!doctype html>' + clone.outerHTML;
     })()`);
     writeFileSync(resolve(directory, 'idle-static.html'), markup);
+  }
+  // Optional native allocation summary after RSS sampling. Only this owned
+  // diagnostic app and its Electron-reported children are inspected; no dumps.
+  if (process.argv.includes('--native-memory')) {
+    report.nativeMemory = report.metrics.map(metric => {
+      try {
+        return {pid:metric.pid,type:metric.type,summary:execFileSync('/usr/bin/vmmap',
+          ['-summary',String(metric.pid)],{encoding:'utf8',timeout:5000,maxBuffer:256*1024})};
+      } catch (error) { return {pid:metric.pid,type:metric.type,error:String(error)}; }
+    });
   }
   const evidencePath = resolve(directory, `idle-${mode}-${process.pid}.json`);
   writeFileSync(evidencePath, JSON.stringify(report, null, 2) + '\n', { flag: 'wx' });

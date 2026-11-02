@@ -2,6 +2,13 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 이전 턴은 누적 Rust 회귀 완료와 소프트웨어 렌더링 후보 기각으로 진척했다. bcc262c/깨끗한 통합 상태에서 추가 초기 메모리 비용을 조사했다. 설치된 Electron 타입의 spellcheck 기본true를 확인하고 진단 runner에 --no-spellcheck·--native-memory·--defer-show와 관측 visibility를 추가했다. 제품 기본값·보안 격리·400/800/120 기준은 바꾸지 않았다.
+- 맞춤법 검사 순서 대조 on/off/off/on의 최대RSS는405.77/386.63/431.22/430.83MiB다. 변동이 커 일관된 개선 근거가 없으므로 기능을 끄지 않는다. 창 표시 시점도 기본/ready-to-show/ready-to-show/기본이430.45/432.95/431.94/431.91MiB이며 모두visible였다. 이를 메모리 개선으로 채택하지 않는다.
+- 앱 코드 없이 같은 화면이 크게 차지하던 이전 관측을 좁히기 위해 자체 앱/자식의 vmmap -summary를 RSS 측정 뒤 수집했다. GPU IOSurface resident 약59.1MiB, physical footprint87.8MiB 관측이며 main/renderer malloc 분류는 상대적으로 작았다. dyld canonical-path 경고도 로그에 보존했다. native 요약과 RSS는 다른 지표이며 기존 합격 기준을 대체하지 않는다. 전체 비용의 인과 기여량·누수 없음·제품 합격 주장이 아니다.
+- .artifacts/m5-performance의 spellcheck/defer-show series와 idle-product-19909.json(native 요약), 로그/cleanup 증거를 보존했다.9개 자체 프로필을 각 종료·관측PID부재 확인 후 정리했다. JS문법·diff PASS. 다음은 GPU 화면 버퍼/합성 비용을 원인별로 좁혀 실제 제품 개선을 찾는 일이며 G6/Windows/출시는 미완료다. 실제 모델/사용자 데이터/제품 out 변경·main병합·push없음.
+
+### 2026-11-02 · by GPT-6
+
 - 이전 턴은 Node 보안 회귀 복구23fea6f와 Rust 전체 회귀 시작으로 진척했다. 같은 live session77787을 재확인하며 재시작하지 않고 완료까지 관측했다. release 라이브러리734개 결과는687 PASS/4 FAIL/43 ignored,727.64초다.3실패는 임시 Unix socket bind의 EPERM,1실패는 프로세스 확인이 필요한 자체 login recovery 상태 불일치였다.
 - 같은 코드의 실패4개만 권한 허용 환경에서 exact filter로 실행해4개 모두 PASS했다. 제품 검사를 삭제하거나 스킵으로 바꾸지 않았다. 라이브러리 실패로 미실행된 통합 대상도 별도로 이어서 실행: stdio15 PASS/1 ignored, macOS opt-in sandbox0실행/2 ignored, doctest0개 PASS. 실제 공급자/사용자 계정/강제 종료 opt-in 검증은 수행하지 않았다. .artifacts/m5-regression-2026-11-02에 initial/focused/integration/doc 로그를 보존했으며 처음부터 전체 suite 단일 PASS였다고 표현하지 않는다.
 - 메모리 최적화 후보로 기존 진단 runner에 --software-rendering만 추가했다. 같은1280×800 합성 화면의 단회 대조는 GPU 가속 최대408.86MiB, 소프트웨어517.08MiB였다. 이 후보는 개선 증거가 없어 제품에 적용하지 않는다. sandbox·기능·400/800/120 기준 유지, 제품코드 변경없음.
