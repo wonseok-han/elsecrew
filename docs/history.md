@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-11-02 · by GPT-6
+
+- 사용자 가시성 승인 후 깨끗한2faed62에서 QA 앱을 새로 빌드하고 단일 combined 시험을 수행했다. 큰 프로젝트/작업복사본 준비가 길어 총 약4분30초 걸렸다. 실제 모델 호출은 없으며 .artifacts/m5-combined-output-2026-11-02/seventh/에 원문과 종료 증거를 보존했다.
+- 실제 입력1건·4개 실행 동시 진행 상태에서 Undo 원복/dirty 해제를 확인했다. 큰 파일 표시284.3ms, diff 첫 파일257.4ms, renderer long task 최대71ms. 하지만 입력→2프레임798.1ms로50ms 기준 실패다. 메모리는 이 단일 trial에서 idle393.344MiB/peak703.266MiB/종료60초 후 잔류증분12.484MiB로 기준 내였으나 반복 합격/제품 유휴400MiB 완료 증거는 아니다.
+- 전체 결과 FAIL: main trace가 incomplete로 거부됐다(수집 완료/dataLoss없음, 전체239,232events, root toplevel X47,149). 수집기는 main 선택 전 모든 스레드 task를10,000개까지만 보관하므로 긴 시험에 맞는 bounded 집계 수정이 필요하다. 최대값을0/PASS로 대체하지 않는다. 입력 지연 원인과 main 수집기 보완을 다음 작업으로 고정했다.
+- 정상 quit accepted, DB clean_shutdown_at02:22:25Z, 관측62개PID와 시험 경로 프로세스 부재를 확인했다. 시험 앱YTkel1·프로젝트/프로필K358Cl 전체를 삭제했다. 사용자 인증/프로젝트/일반out은 보존했다. 다음은 위 두 실패 수정과 잔여G6 반복·Windows/출시 검증이다. main병합/push없음.
+
+
 최신 워크로그: [2026-11 전체 기록](archive/history-2026-11.md). 아래 고정 섹션은 현재 판단의 진입점이다.
 
 ## 프로젝트 요약 (고정)
@@ -13,7 +21,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **현재 인계(2026-11-02, Undo 수정)**: 저장 내용으로 되돌려도 dirty가 남던 결함을 비동기 파일버전 비교로 수정했다. 원문 추가 보관 없이 경로 대기열·단일 digest·정확한 탭/세대 검사를 사용한다. controller62/TypeScript/독립 검토 PASS, 실제 새 패키지 Undo는 미검증이다. 미실행 QA lz6R7D는 삭제했으므로 재빌드 필요. 사용자 화면 가시성 응답 대기이며 실제 모델 호출 승인 잔여 없음. 유휴400MiB/G6/Windows/출시는 계속 미완료다. 최신 세부 워크로그는 [11월](archive/history-2026-11.md)을 먼저 확인한다.
+- **현재 인계(2026-11-02, Undo 수정)**: 저장 내용으로 되돌려도 dirty가 남던 결함을 비동기 파일버전 비교로 수정했다. 원문 추가 보관 없이 경로 대기열·단일 digest·정확한 탭/세대 검사를 사용한다. controller62/작업복사본10/TypeScript/독립 검토 PASS, 2faed62 실제 QA에서도 Undo 복원을 확인했다. 단일 combined 시험은 입력798.1ms와 main trace 불완전으로 FAIL이다. 이 trial 메모리만 기준 내이며 반복 합격은 아니다. 관련 시험 앱/프로필은 종료 확인 후 모두 삭제했다. 실제 모델 호출 승인 잔여 없음. 유휴400MiB/G6/Windows/출시는 계속 미완료다. 최신 세부 워크로그는 [11월](archive/history-2026-11.md)을 먼저 확인한다.
 
 - **누적 Node 검사 최신 증거(2026-11-02)**: 깨끗한803b937의 npm test635 PASS/실패·스킵0 및 src TypeScript PASS. 이전11개 focused 수정 이후 전체 재검사 공백 해소. Rust/패키지/G6/Windows/출시까지 합격한 결과는 아니다. 원문은 `.artifacts/m5-regression-2026-11-02/consolidated-node/`.
 
