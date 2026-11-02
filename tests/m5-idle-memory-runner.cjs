@@ -22,6 +22,10 @@ const tileBudgetMiB = tileBudgetArg ? Number(tileBudgetArg.split('=')[1]) : unde
 if (tileBudgetArg && (!Number.isSafeInteger(tileBudgetMiB) || tileBudgetMiB < 32 || tileBudgetMiB > 1024)) throw new Error('invalid diagnostic tile budget');
 if (tileBudgetMiB) app.commandLine.appendSwitch('force-gpu-mem-available-mb', String(tileBudgetMiB));
 if (softwareRendering) app.disableHardwareAcceleration();
+// A shell may exec the last trial while retaining its PID. Capture the
+// executable at launch instead of inferring concurrent apps from PPIDs later.
+const launch = {pid:process.pid,parentPid:process.ppid,startedAt:new Date().toISOString(),
+  parentExecutable:execFileSync('/bin/ps', ['-p',String(process.ppid),'-o','comm='], {encoding:'utf8',timeout:2000}).trim()};
 const root = resolve(__dirname, '..');
 const renderer = resolve(root, '.vite/renderer/main_window');
 const userData = mkdtempSync(resolve(tmpdir(), 'hello-agent-idle-memory-'));
@@ -87,7 +91,7 @@ app.whenReady().then(async () => {
     samples.push(processTreeMemory(clean, process.pid));
     await new Promise(r => setTimeout(r, 250));
   }
-  const report = { diagnostic: true, rendererSandbox: true, mode, userData, head: execFileSync('/usr/bin/git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
+  const report = { launch, diagnostic: true, rendererSandbox: true, mode, userData, head: execFileSync('/usr/bin/git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
     window: {width:1280,height:800}, softwareRendering, spellcheck, deferShow, paintAfterMount, tileBudgetMiB, preSampleReadyAtMs, visible:window.isVisible(),
     scope: 'fresh Electron app idle only; no sidecar/provider; five samples after one second; painted/localized/rendered have no app code or preload; not release evidence',
     samples, metrics: app.getAppMetrics(), dom: await window.webContents.executeJavaScript('({nodes:document.querySelectorAll("*").length,ready:Boolean(document.querySelector(".m5-workbench")),visibility:document.visibilityState})') };
@@ -156,6 +160,7 @@ app.whenReady().then(async () => {
     }
   }
   const evidencePath = resolve(directory, `idle-${mode}-${process.pid}.json`);
+  report.completedAt = new Date().toISOString();
   writeFileSync(evidencePath, JSON.stringify(report, null, 2) + '\n', { flag: 'wx' });
   console.log(JSON.stringify({ mode, userData, evidencePath, rssMiB: samples.map(s => s.rssBytes / 1024 ** 2), dom: report.dom }));
   clearTimeout(timeout); window.destroy(); app.exit(0);

@@ -2,6 +2,12 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 직전 타일 예산 대조6514eda는 효과 없는 후보를 제외한 진척이었다. 깨끗한 동일HEAD에서 상시 승인된 읽기 전용 검토자1명(memory_evidence_review)에게 측정 코드와4개 원시 결과를 독립 검토받았다. RSS 합산 결함은 확인되지 않았다. 검토자가 처음 제기한 동일PPID→동시 Electron부모 지적은 순차 zsh 실행 및 마지막 명령 exec의 PID유지 가능성을 재대조한 뒤 철회됐다. 결함으로 수용하거나 제품 수정 근거로 쓰지 않는다.
+- 프로세스별 RSS에서도 타일 예산 전후 GPU/renderer 차이가 작음을 확인했다. 검토 결론은 타일 flag를 제품화/반복하지 않고 같은 DOM의 static·bridge·실행된 renderer 초기화 비용을 분리하라는 것이다. 과거 서로 다른 시점의 static/product 수치를 직접 인과 절감량으로 간주하지 않는다. 제품 완료/400MiB 통과는 아니다.
+- 진단 runner에 launch PID/PPID·당시 부모 실행 파일·시작/완료 시각을 추가했다. 이후 숫자PPID만으로 순차실행/동시실행을 추론하지 않도록 하는 기록 보강이며 이번에 동시 실행 결함이 있었다는 뜻은 아니다. 문법·diff PASS, 앱 재실행/패키지/임시 프로필 생성 없음. 다음은 초기화 비용의 같은 조건 대조 및 실제 제품 최적화, G6/Windows/출시 미완료 항목이다. main병합·push없음.
+
+### 2026-11-02 · by GPT-6
+
 - 직전 턴은 RSS수집기 결함b87480e 수정으로 진척했다. 깨끗한 동일HEAD에서 설치된 Chromium150.0.7871.224의 [Blink switches](https://raw.githubusercontent.com/chromium/chromium/150.0.7871.224/third_party/blink/common/switches.cc)와 [layer_tree_settings](https://raw.githubusercontent.com/chromium/chromium/150.0.7871.224/third_party/blink/renderer/platform/widget/compositing/layer_tree_settings.cc)를 확인했다. 이전 gpu/service 파일에 없었던 `force-gpu-mem-available-mb`는 Blink에 존재하며 cc 예산 override로 실제 소비된다. 해당 옵션 전체가 제거됐다는 추론은 하지 않는다. ResourcePool 기본 만료는5초다.
 - idle 진단 runner에만 `--tile-budget-mib=32` 후보를 추가하고 기본/32/32/기본으로 대조했다. 손실 없는 allocator 통계에서 renderer한도625→32MiB, 타일 할당72.4375→31.8125MiB로 적용이 확인됐으나 최대RSS434.6875/431.5/432.4375/430.96875MiB로 일관된 개선이 없었다. 여분 할당 감소가 RSS 절감량과 같지 않다는 실제 근거다. 화면 품질·큰 화면/부하 영향은 검증하지 않았으므로 제품 설정에 적용하지 않는다.
 - `.artifacts/m5-performance/idle-tile-budget-series-2026-11-02.json`과 원시 trace·로그·버전 고정 소스를 보존했다. 시험 앱/관측PID부재 확인 뒤 자체 프로필4개를 정리했다. 문법·diff PASS, 실제 모델/사용자 데이터/제품 패키지 변경없음. 유휴400MiB/G6/Windows/출시 미완료, main병합·push없음. 다음 메모리 조사는 동일 타일 할당 후보를 반복하지 않고 RSS의 다른 비용을 대상으로 한다.
