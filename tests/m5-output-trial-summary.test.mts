@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import {createMainTaskTrace} from '../scripts/m5-main-task-trace.mjs';
 import { summarizeOutputTrial } from '../scripts/m5-output-trial-summary.mjs';
 const {summarizeOutputGeneration}=createRequire(import.meta.url)('../scripts/m5-output-generation.cjs');
 function result(): any {
@@ -93,4 +94,16 @@ test('combined input requires trusted, restored, live measurement and preserves 
   const r=combinedResult();Object.assign(r.combinedWorkload.editorInput,{paintAt:200,inputPaintMs:100});
   r.combinedWorkload.failedMetrics=['inputPaintMs'];
   assert.equal(summarizeOutputTrial(r,{combinedWorkload:true}).inputPaintMs,100);
+});
+
+test('trial summary consumes bounded full-stream aggregates and preserves a late violation', () => {
+  const trace=createMainTaskTrace(12);
+  const task={pid:12,tid:8,ph:'X',cat:'toplevel',ts:100,dur:1000};
+  trace.accept({method:'Tracing.dataCollected',params:{value:[
+    ...Array(20000).fill(task), {...task,dur:250000},
+    {pid:12,tid:8,ph:'M',name:'thread_name',args:{name:'CrBrowserMain'}}]}});
+  trace.accept({method:'Tracing.tracingComplete',params:{dataLossOccurred:false}});
+  const r=result();r.mainLongTasks=trace.finish(true);
+  assert.equal(r.mainLongTasks.taskCount,20001);
+  assert.equal(summarizeOutputTrial(r).mainLongTaskMs,250);
 });

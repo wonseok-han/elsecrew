@@ -38,15 +38,18 @@ export async function probeEditorInput(action) {
   if (!state) throw new Error('Editor input was not armed');
   if (action === 'measure') {
     try {
+      const measureEnteredAt = performance.now();
       await wait(() => dirty() && text() !== state.baseline && state.trustedInputs === 1);
+      const readyAt = performance.now();
+      let firstFrameAt;
       await new Promise((resolve, reject) => {
         let frame;
         const timer = setTimeout(() => { cancelAnimationFrame(frame); reject(new Error('Editor input presentation timeout')); }, 2000);
-        frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => { clearTimeout(timer); resolve(); }); });
+        frame = requestAnimationFrame(() => { firstFrameAt = performance.now(); frame = requestAnimationFrame(() => { clearTimeout(timer); resolve(); }); });
       });
       if (document.visibilityState !== 'visible' || state.trustedInputs !== 1) throw new Error('Editor input observation interrupted');
       const paintAt = performance.now();
-      return {startedAt:state.startedAt,receivedAt:state.receivedAt,paintAt,
+      return {startedAt:state.startedAt,receivedAt:state.receivedAt,measureEnteredAt,readyAt,firstFrameAt,paintAt,
         inputPaintMs:paintAt-state.startedAt, inputDeliveryMs:state.receivedAt-state.startedAt,
         trustedInputs:state.trustedInputs, scope:'Native char dispatch to dirty text and two animation frames; not physical display latency'};
     } finally { clean(); }

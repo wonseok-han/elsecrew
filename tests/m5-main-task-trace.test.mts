@@ -34,7 +34,7 @@ test('missing, incomplete, unsupported and lost traces never manufacture zero', 
   assert.equal(trace.finish(false).maximumMs,null);
 });
 test('trace bounds and completion ordering fail closed', () => {
-  assert.equal(collect([metadata,...Array(10001).fill(task)]).valid,false);
+  assert.equal(collect([metadata,...Array.from({length:129}, (_,i)=>({...task,tid:i}))]).valid,false);
   const trace = createMainTaskTrace(12);
   trace.accept({method:'Tracing.tracingComplete',params:{dataLossOccurred:false}});
   trace.accept({method:'Tracing.dataCollected',params:{value:[metadata,task]}});
@@ -63,4 +63,23 @@ test('long cross-process streams retain only bounded root tasks and fail at the 
   assert.equal(trace.finish(true).valid,false);
   const withinBudget=collect([metadata,task,...Array(100001).fill({...task,pid:99})]);
   assert.equal(mainTaskMaximum(withinBudget),201);
+});
+
+test('long root streams aggregate every task including late maxima and late main metadata', () => {
+  const trace=createMainTaskTrace(12);
+  for(let i=0;i<20;i++) trace.accept({method:'Tracing.dataCollected',params:{value:
+    Array(10000).fill({...task,dur:1000})}});
+  trace.accept({method:'Tracing.dataCollected',params:{value:[
+    {...task,tid:9,dur:900000}, {...task,dur:501000}, {...task,dur:201000}, metadata]}});
+  trace.accept({method:'Tracing.tracingComplete',params:{dataLossOccurred:false}});
+  const result=trace.finish(true);
+  assert.equal(mainTaskMaximum(result),501);
+  assert.equal(result.taskCount,200002);
+  assert.equal(result.overLimitCount,2);
+  assert.equal(result.tasks.length,1);
+  assert.ok(JSON.stringify(result).length<1500);
+  for(const patch of [{taskCount:0},{taskCount:1},{taskCount:1000001},
+    {overLimitCount:-1},{overLimitCount:200003},{aggregation:'sampled'}, {receivedEvents:1}]) {
+    assert.throws(()=>mainTaskMaximum({...result,...patch}));
+  }
 });
