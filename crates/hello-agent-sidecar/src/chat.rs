@@ -1957,5 +1957,8 @@ fn now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
-#[cfg(test)]
+// These integration fixtures require the macOS G4 snapshot/process boundary.
+#[cfg(all(test, target_os = "macos"))]
 mod tests;
+#[cfg(test)]
+mod test_binary;

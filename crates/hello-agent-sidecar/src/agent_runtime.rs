@@ -45,12 +45,14 @@ use uuid::Uuid;
 
 const SOURCE_KIND: &str = "actualAgent";
 mod approval;
+#[cfg(target_os = "macos")]
 mod native;
 mod native_evidence;
 mod provider_fence;
 #[cfg(test)]
 pub(crate) use provider_fence::verify_approved_legacy_fence;
 pub(crate) use provider_fence::verify_resolved_provider_fence;
+#[cfg(target_os = "macos")]
 mod discovery;
 pub(crate) mod preparation;
 mod reap;
@@ -171,11 +173,17 @@ pub(crate) struct AgentRuntime {
     fake_executable: Option<PathBuf>,
     scenario: FakeScenario,
     active: HashMap<String, ActiveAgentRun>,
+    #[cfg(target_os = "macos")]
     native: HashMap<String, native::NativeRun>,
+    #[cfg(target_os = "macos")]
     pending_claude_starts: HashMap<String, native::PendingClaudeStart>,
+    #[cfg(target_os = "macos")]
     failed_starts: HashMap<String, native::FailedStart>,
+    #[cfg(target_os = "macos")]
     discovery_cleanup: HashMap<String, crate::provider_login_process::LoginProcess<'static>>,
+    #[cfg(target_os = "macos")]
     pending_discoveries: HashMap<String, discovery::PendingDiscovery>,
+    #[cfg(target_os = "macos")]
     pending_claude_discoveries: HashMap<String, discovery::PendingClaudeDiscovery>,
     preparing_to_quit: bool,
     discovery_cache: HashMap<String, ObservedProvider>,
@@ -196,7 +204,8 @@ impl AgentRuntime {
     #[allow(dead_code)]
     pub(crate) fn native_candidate() -> Self {
         let mut runtime = Self::blocked();
-        runtime.provider = ProviderMode::NativeProviders;
+        #[cfg(target_os = "macos")]
+        { runtime.provider = ProviderMode::NativeProviders; }
         runtime
     }
 
@@ -210,11 +219,17 @@ impl AgentRuntime {
             fake_executable: None,
             scenario: FakeScenario::Clean,
             active: HashMap::new(),
+            #[cfg(target_os = "macos")]
             native: HashMap::new(),
+            #[cfg(target_os = "macos")]
             pending_claude_starts: HashMap::new(),
+            #[cfg(target_os = "macos")]
             failed_starts: HashMap::new(),
+            #[cfg(target_os = "macos")]
             discovery_cleanup: HashMap::new(),
+            #[cfg(target_os = "macos")]
             pending_discoveries: HashMap::new(),
+            #[cfg(target_os = "macos")]
             pending_claude_discoveries: HashMap::new(),
             preparing_to_quit: false,
             discovery_cache: HashMap::new(),
@@ -450,23 +465,23 @@ impl AgentRuntime {
     }
 
     pub(crate) fn has_active_run(&self, run_id: &str) -> bool {
+        #[cfg(target_os = "macos")]
+        if self.native.contains_key(run_id) || self.pending_claude_starts.contains_key(run_id) || self.failed_starts.contains_key(run_id) {
+            return true;
+        }
         self.active.contains_key(run_id)
-            || self.native.contains_key(run_id)
-            || self.pending_claude_starts.contains_key(run_id)
-            || self.failed_starts.contains_key(run_id)
     }
 
     pub(crate) fn owned_run_ids(&self) -> Vec<String> {
-        self.active
-            .keys()
-            .chain(self.native.keys())
+        let ids = self.active.keys();
+        #[cfg(target_os = "macos")]
+        let ids = ids.chain(self.native.keys())
             .chain(self.pending_claude_starts.keys())
             .chain(self.failed_starts.keys())
             .chain(self.discovery_cleanup.keys())
             .chain(self.pending_discoveries.keys())
-            .chain(self.pending_claude_discoveries.keys())
-            .cloned()
-            .collect()
+            .chain(self.pending_claude_discoveries.keys());
+        ids.cloned().collect()
     }
 
     #[cfg(test)]
@@ -495,11 +510,17 @@ impl AgentRuntime {
             fake_executable: Some(executable),
             scenario,
             active: HashMap::new(),
+            #[cfg(target_os = "macos")]
             native: HashMap::new(),
+            #[cfg(target_os = "macos")]
             pending_claude_starts: HashMap::new(),
+            #[cfg(target_os = "macos")]
             failed_starts: HashMap::new(),
+            #[cfg(target_os = "macos")]
             discovery_cleanup: HashMap::new(),
+            #[cfg(target_os = "macos")]
             pending_discoveries: HashMap::new(),
+            #[cfg(target_os = "macos")]
             pending_claude_discoveries: HashMap::new(),
             preparing_to_quit: false,
             discovery_cache: HashMap::new(),
@@ -1226,6 +1247,7 @@ impl AgentRuntime {
         // Poll every ownership namespace even when another needs recovery.
         // Deliver successfully collected events before reporting a persistent
         // error on a subsequent idle poll, rather than discarding those events.
+        #[cfg(target_os = "macos")]
         for result in [
             self.poll_discoveries(),
             self.poll_claude_discoveries(),
@@ -1507,9 +1529,11 @@ impl AgentRuntime {
 
     /// Queue only. The wire response must wait for the terminal transaction.
     pub(crate) fn request_cancel(&mut self, identity: &RunIdentity) -> Result<(), ProjectFailure> {
+        #[cfg(target_os = "macos")]
         if let Some(pending) = self.pending_claude_starts.get(&identity.run_id) {
             return pending.request_cancel(identity);
         }
+        #[cfg(target_os = "macos")]
         if let Some(active) = self.native.get(&identity.run_id) {
             return active.request_cancel(identity);
         }
@@ -1567,6 +1591,7 @@ impl AgentRuntime {
         storage: &Storage,
         identity: &RunIdentity,
     ) -> Result<Option<Value>, ProjectFailure> {
+        #[cfg(target_os = "macos")]
         if let Some(active) = self.native.get(&identity.run_id) {
             if !same_identity(&active.identity, identity) {
                 return Err(ProjectFailure::manifest("native cancel identity differs"));
@@ -1806,15 +1831,19 @@ impl AgentRuntime {
 
     pub(crate) fn prepare_quit(&mut self, storage: &mut Storage, projects: &mut ProjectManager) {
         self.preparing_to_quit = true;
+        #[cfg(target_os = "macos")]
         for pending in self.pending_claude_starts.values() {
             pending.cancel();
         }
+        #[cfg(target_os = "macos")]
         for pending in self.pending_discoveries.values() {
             pending.worker.cancel();
         }
+        #[cfg(target_os = "macos")]
         for pending in self.pending_claude_discoveries.values() {
             pending.worker.cancel();
         }
+        #[cfg(target_os = "macos")]
         for active in self.native.values() {
             let _ = active.request_cancel(&active.identity);
         }
@@ -3075,7 +3104,7 @@ fn actual_run_projection_and_head(
     native_evidence::validate(&value)?;
     if let Some(binding) = value.get("provider_run_fence") {
         let failure = || ProjectFailure::recovery("provider run fence binding differs");
-        let binding = crate::provider_login_process::RunFenceBinding::from_value(binding)
+        let binding = crate::provider_run_binding::RunFenceBinding::from_value(binding)
             .map_err(|_| failure())?;
         binding
             .validate(
@@ -4495,6 +4524,7 @@ mod budget_tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn native_mode_never_uses_global_fixture_discovery() {
         let mut runtime = super::AgentRuntime::native_candidate();
         assert!(runtime.uses_native_providers());
@@ -4529,7 +4559,9 @@ mod budget_tests {
                     "platformUnsupported"
                 }
             );
-            assert!(runtime.active.is_empty() && runtime.native.is_empty());
+            assert!(runtime.active.is_empty());
+            #[cfg(target_os = "macos")]
+            assert!(runtime.native.is_empty());
         }
     }
 
@@ -5211,4 +5243,21 @@ mod budget_tests {
         text_events.push(public_event(text_events.len(), "x".into()));
         assert!(public_budget_metrics(&text_events).is_err());
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+impl AgentRuntime {
+    pub(crate) fn approval_request(
+        &mut self, _storage: &mut Storage, _projects: &ProjectManager, _params: &Value,
+    ) -> Result<Value, SidecarError> {
+        Err(SidecarError::new("unsupportedPlatform", "native agent approvals are unavailable on this platform"))
+    }
+}
+
+#[cfg(all(test, not(target_os = "macos")))]
+#[test]
+fn unsupported_platform_cannot_select_native_provider_mode() {
+    let runtime = AgentRuntime::native_candidate();
+    assert!(!runtime.uses_native_providers());
+    assert!(runtime.owned_run_ids().is_empty());
 }

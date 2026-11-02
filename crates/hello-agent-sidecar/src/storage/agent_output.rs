@@ -280,7 +280,7 @@ fn verify_run_binding(tx: &Transaction<'_>, output: &OutputHead) -> Result<(), S
         return Err(invalid("native output requires a committed thread receipt"));
     }
     if let Some(value) = projection.get("provider_run_fence") {
-        let fence = crate::provider_login_process::RunFenceBinding::from_value(value)?;
+        let fence = crate::provider_run_binding::RunFenceBinding::from_value(value)?;
         fence.validate(&binding.run_id, &record.selected_profile.runtime)?;
     }
     Ok(())

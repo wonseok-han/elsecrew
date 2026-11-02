@@ -48,6 +48,7 @@ mod provider_claude_session;
 mod provider_profile;
 #[cfg(target_os = "macos")]
 mod provider_runtime_sandbox;
+mod provider_run_binding;
 mod storage;
 #[allow(dead_code)] // D1A keeps status internal until the later wire-activation wave.
 mod storage_lifetime;
@@ -557,6 +558,7 @@ struct PendingAgentStart {
     request: RequestV1,
     input: hello_agent_protocol::agent_adapter_v1::AgentRunStartRequestV1,
     reservation: Option<agent_runtime::preparation::RunReservation>,
+    #[cfg(target_os = "macos")]
     process: Option<provider_login_process::LoginProcess<'static>>,
     result: Option<Result<chat::G5Action, SidecarError>>,
 }
@@ -1941,10 +1943,13 @@ impl Sidecar {
             if !self.agent_runtime.uses_native_providers() || request.params["runtime"] != "codex" {
                 return Err(SidecarError::new("agentDiscoveryRejected", "model choices require a native Codex context"));
             }
+            #[cfg(target_os = "macos")]
             return self.defer_agent_capabilities(request);
         }
+        #[cfg(target_os = "macos")]
         if self.agent_runtime.uses_native_providers() {
             if request.method == "run.startAgent" {
+                #[cfg(target_os = "macos")]
                 return self.defer_agent_start(request);
             }
             if request.method == "agent.getCapabilities" {
@@ -1956,6 +1961,7 @@ impl Sidecar {
                 let input: AgentCapabilitiesRequestV1 = serde_json::from_value(request.params.clone())
                     .map_err(|_| SidecarError::new("invalidParams", "invalid discovery request"))?;
                 if matches!(input.runtime.as_str(), "codex" | "claude-code") && input.chat_id.is_some() {
+                    #[cfg(target_os = "macos")]
                     return self.defer_agent_capabilities(request);
                 }
                 // Unsupported/unscoped queries keep a blocked capability,
@@ -2160,6 +2166,7 @@ impl Sidecar {
 
     /// Native mode dispatches scoped requests here. Keep the request
     /// until its owned worker has completed, including failed-query cleanup.
+    #[cfg(target_os = "macos")]
     fn defer_agent_capabilities(
         &mut self,
         request: RequestV1,
@@ -2201,6 +2208,7 @@ impl Sidecar {
         })
     }
 
+    #[cfg(target_os = "macos")]
     fn defer_agent_start(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
         if request.method != "run.startAgent"
             || self.pending_agent_starts.contains_key(&request.request_id)
@@ -2229,6 +2237,8 @@ impl Sidecar {
             Err(error) => Some(error),
         };
         let mut responses = Vec::new();
+        #[cfg(target_os = "macos")]
+        {
         let ids: Vec<_> = self.pending_agent_starts.keys().cloned().collect();
         for id in ids {
             let mut pending = self.pending_agent_starts.remove(&id).unwrap();
@@ -2320,6 +2330,7 @@ impl Sidecar {
                     error_response(&request, error.kind(), "requestBlocked", error.detail())
                 }
             });
+        }
         }
         let ids: Vec<_> = self.pending_agent_cancels.keys().cloned().collect();
         for run_id in ids {

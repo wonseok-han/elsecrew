@@ -1,6 +1,6 @@
 //! Read-only completion evidence for explicit provider-fence recovery.
 use super::*;
-use crate::provider_login_process::RunFenceBinding;
+use crate::provider_run_binding::RunFenceBinding;
 
 pub(crate) fn verify_resolved_provider_fence(
     storage: &Storage,

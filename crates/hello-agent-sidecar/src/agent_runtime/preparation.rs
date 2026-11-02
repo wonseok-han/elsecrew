@@ -1,12 +1,17 @@
 //! Shared durable preparation, without spawning or granting provider authority.
 use super::*;
 use hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedPermission;
+#[cfg(target_os = "macos")]
 mod terminal;
 #[allow(dead_code)] // Claude launch admission/owner will call this output bridge.
+#[cfg(target_os = "macos")]
 mod claude;
+#[cfg(target_os = "macos")]
 pub(crate) use claude::OwnedClaudeRun;
+#[cfg(target_os = "macos")]
 pub(crate) use claude::ClaudeToolAdmission;
 #[allow(unused_imports)] // Pending native Claude dispatcher integration.
+#[cfg(target_os = "macos")]
 pub(crate) use claude::ClaudeStart;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -43,11 +48,13 @@ pub(crate) struct RunReservation {
     prompt: Vec<u8>,
     // Set exactly once, only after the atomic thread-receipt/running commit.
     running_record: std::sync::OnceLock<(Value, Value)>,
+    #[cfg(target_os = "macos")]
     pub(super) native_provider: Option<super::discovery::NativeProviderContext>,
     pub(super) claude_preflight: Option<hello_agent_protocol::agent_adapter_v1::phased_claude::Preflight>,
 }
 
 /// No Storage borrow: the dispatcher can service other requests between steps.
+#[cfg(target_os = "macos")]
 pub(crate) struct RunTextState {
     transport: crate::provider_preflight_session::BoundTextSession,
     pending_answer: Option<String>,
@@ -65,6 +72,7 @@ pub(crate) struct RunTextState {
 /// Long-lived native execution owner. No borrowed Storage or profile remains
 /// across dispatcher requests. Creation does not launch or admit a provider.
 #[cfg_attr(not(test), allow(dead_code))]
+#[cfg(target_os = "macos")]
 pub(crate) struct OwnedTextRun {
     reservation: RunReservation,
     process: crate::provider_login_process::LoginProcess<'static>,
@@ -73,6 +81,7 @@ pub(crate) struct OwnedTextRun {
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
+#[cfg(target_os = "macos")]
 impl OwnedTextRun {
     pub(super) fn polling_finished(&self) -> bool {
         self.state.finished
@@ -221,6 +230,7 @@ impl OwnedTextRun {
     }
 }
 
+#[cfg(target_os = "macos")]
 impl RunReservation {
     pub(super) fn bind_provider_fence(
         &self,
@@ -1432,6 +1442,7 @@ impl RunPreparation {
         storage.upsert_projection_records_atomic(upserts)?;
         Ok(RunReservation {
             running_record: std::sync::OnceLock::new(),
+            #[cfg(target_os = "macos")]
             native_provider: None,
             claude_preflight: None,
             run_id,

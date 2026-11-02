@@ -3861,6 +3861,9 @@ impl ProjectManager {
                 let target = std::str::from_utf8(&bytes).map_err(|_| {
                     ProjectFailure::manifest("committed symlink target is not UTF-8")
                 })?;
+                #[cfg(not(unix))]
+                return Err(ProjectFailure::recovery("snapshot symlink creation is unavailable on this platform"));
+                #[cfg(unix)]
                 staging
                     .symlink_contents(target, &entry.path)
                     .map_err(|error| {
@@ -6066,4 +6069,9 @@ mod windows_tests {
             b"must-not-run"
         );
     }
+}
+
+#[cfg(not(unix))]
+fn open_absolute_directory_capability(_path: &Path) -> Result<Dir, ProjectFailure> {
+    Err(ProjectFailure::recovery("source repository access requires verified handle-bound traversal on this platform"))
 }

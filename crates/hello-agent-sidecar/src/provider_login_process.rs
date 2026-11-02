@@ -29,7 +29,9 @@ const OBSERVE_INTERVAL: Duration = Duration::from_millis(100);
 mod run_binding;
 #[cfg(test)]
 mod approved_legacy_repair;
-pub(crate) use run_binding::{recover_bound_run, RunFenceBinding};
+pub(crate) use run_binding::recover_bound_run;
+#[cfg(test)]
+use crate::provider_run_binding::RunFenceBinding;
 
 fn failure() -> SidecarError {
     SidecarError::new(

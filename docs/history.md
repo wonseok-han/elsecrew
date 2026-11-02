@@ -2,6 +2,21 @@
 
 ### 2026-11-02 · by GPT-6
 
+- Windows CI 41389598005는 Node 651 passed / 0 failed / 7 skipped 뒤 Rust 컴파일에서 143개 오류로 종료했다. macOS 전용 프로세스/발견/준비 코드를 공통 실행·원장 경로가 참조하는 cfg 누락과 Unix 전용 프로젝트 helper가 원인이었다. 패키징은 실행되지 않았다. 원시 로그는 `.artifacts/m5-windows-41389598005/job.log`에 보존했다.
+- `RunFenceBinding`의 순수 데이터/검증을 `provider_run_binding.rs`로 분리했다. 필드는 private, 정확한 JSON shape·오류·영수증 형식·실행/역할 결속 검증은 유지한다. macOS owner는 같은 parser/validator로 영수증을 만들며 프로세스 회수/잠금 해제 권한은 이동하지 않는다. 공통 원장 읽기는 macOS owner에 의존하지 않는다.
+- native/discovery·RunReservation의 native 메서드·dispatcher의 native 처리·프로세스 필드를 macOS 경계로 묶었다. 비-macOS native candidate는 blocked, 승인 요청은 저장소/입력을 다루기 전에 unsupportedPlatform을 반환한다. Unix helper가 없는 환경은 기존 handle-bound 프로젝트 차단 원칙대로 실패하며 ambient 경로 열기나 Windows 실제 실행을 활성화하지 않았다.
+- 읽기 전용 검토자의 권고로 macOS Git snapshot을 생성하는 chat 통합 fixture 전체를 macOS에 한정했다. 독립적인 Cargo 경로 helper/test는 `chat/test_binary.rs`로 이동해 다른 플랫폼에서도 유지했다. 새 portable receipt 검사와 비-macOS native-mode 차단 검사를 추가했다. 검토자가 발견한 native-mode 양성 테스트의 macOS cfg 누락도 수정했고 최종 차단 결함 없음 의견을 받았다.
+- macOS check --tests 성공, portable receipt 1개 및 기존 fence lifecycle 2개 통과. 임시 Rust 소스 사본에서 비-macOS/비-Unix 분기만 선택한 로컬 compile --tests 성공과 native 차단/DB·ready 전 거부 2개 통과를 확인했다. 이는 Mac 도구체인 보조 진단이지 Windows 실행 증거가 아니다. 사본은 제거했고 재현 스크립트/로그는 같은 artifact 디렉터리에 보존했다. 실제 모델/앱 설치/무거운 새 패키지는 만들지 않았다.
+- 다음: 최종 변경의 관련 로컬 검사 후 승인된 세 번째(마지막) Windows CI를 실행한다. Windows stdio는 현재 의도적으로 ready 전에 차단되므로 패키지 smoke가 이를 발견하더라도 합격 조건을 낮추지 않는다. Windows 제품 준비/활성화와 G6·400MiB·출시는 아직 미완료다.
+
+### 2026-11-02 · by GPT-6
+
+- 승인된 3회 중 두 번째로 bc413b2를 진단 브랜치에 push했다. [Windows CI 41389598005](https://github.com/wonseok-han/hello-agent/actions/runs/41389598005), job 125097836983에서 설치·TypeScript·Frontend and bridge contract regressions가 success임을 API로 확인했다. 이전 staging 경로 실패를 포함한 Node 단계가 실제 Windows에서 통과했다.
+- 마지막 API 확인 시 job은 in_progress이고 M5 core, protocol and sidecar regressions를 실행 중이다. 종료·Rust 성공·패키지 성공을 추정하지 않는다. 다음 차례에는 같은 run/job을 조회하며 새 실행으로 대체하지 않는다. 승인 잔여는 1회다.
+- 로컬 제품 변경/추가 빌드/모델 호출은 없다. Windows 패키지 smoke의 플랫폼별 경로 분기를 읽어 확인했고 수정 근거는 찾지 못했다. 이 엔트리는 진행 중인 원격 실행의 인계 기록이며 전체 완료를 뜻하지 않는다.
+
+### 2026-11-02 · by GPT-6
+
 - 사용자로부터 a2304da와 후속 Windows 테스트·빌드 호환 수정에 한해 같은 공개 진단 브랜치 push/CI 최대 3회를 승인받았다. 제품 활성화·안전 계약 변경·main 병합·릴리스·실제 모델 호출은 제외된다.
 - 첫 실행 [41389345425](https://github.com/wonseok-han/hello-agent/actions/runs/41389345425)는 647 passed / 4 failed / 7 skipped였다. 앞선 편집이 copy 목적지 기대값 두 곳을 빠뜨려 기존 네 staging 사례가 다시 실패했다. 이를 인정하고 두 기대값을 resolve로 수정했다. Rust/패키징 단계는 아직 미실행이다.
 - 기존 staging 전체를 win32 경로 함수로 바꾼 임시 사본에서도 10/10 PASS, 호스트 원본 10/10 PASS 및 diff 검사를 확인했다. 제품 코드는 변경하지 않았고 원시 CI/경로 검증 로그는 `.artifacts/m5-windows-41389345425/`에 보존했다. 임시 사본은 제거했다.
@@ -171,6 +186,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Windows 컴파일과 제품 준비 구분 (2026-11-02)**: macOS native owner를 cfg로 분리해도 Windows G4/stdio는 DB·ready 전에 unsupportedPlatform으로 차단된다. 공통 영수증 검증은 플랫폼 독립으로 유지한다. Windows CI를 녹색으로 만들려고 패키지 smoke의 ready 조건을 낮추지 않으며, Windows의 실제 안전 경로 구현·검증·활성화가 별도로 남는다.
 
 - **Windows 체크아웃 바이트 (2026-11-02)**: 첫 원격 CI에서 core.autocrlf 변환으로 golden 해시·SQL manifest·JSONL 동일 바이트 검사가 실패했다. `.gitattributes`는 소스 LF, `tests/fixtures/** -text`로 의도된 원본 바이트를 보존한다. 테스트의 호스트 경로와 macOS 모의 inventory를 구분한다. 로컬 수정 PASS를 Windows 실행 증거로 대체하지 않는다.
 
