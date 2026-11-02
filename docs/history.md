@@ -2,6 +2,14 @@
 
 ### 2026-11-02 · by GPT-6
 
+- 이전 턴은 올바른 유휴 구간의 통합 관측과 메모리 실패 확정으로 진척했다.64ed340/깨끗한 통합 상태에서 초기 로딩을 조사했다. Monaco는 이미 지연 로딩, 로그인/설치 poll은 상태 제한이 있어 근거 없는 코드 분할·조회 제거는 하지 않았다.
+- 기존 idle 대조에 painted/localized(앱 코드·preload 없는 정적 영문/한글)와 rendered(자체 합성 앱 DOM/CSS를 복제하되 script/modulepreload 제거)를 추가했다. 창1280×800을 제품과 맞췄으며 기존1440×1000 대조와 동일 조건이라고 주장하지 않는다. sandbox·보안·제품 설정은 유지했다.
+- 순차 단회5표본 대조: blank 최대356.19MiB, painted377.19, localized375.77, preload354.47, product428.81. 추가 같은 화면 pair는 product423.19→381.64 변동, rendered413.92MiB였다. 한글 자체가 주원인이라는 가설은 지지되지 않고 앱 코드 제거만으로400MiB를 안정적으로 만족한다는 증거도 없다. 단회/합성/sidecar없음의 한계를 유지하며 인과 기여량·불가능성·제품 합격으로 단정하지 않는다.
+- 모든7개 진단 exit0/프로세스 부재 확인 뒤 임시 프로필을 정리했다. .artifacts/m5-performance/idle-*-{30305,30350,30422,30592,30637,31535,31587}.json, snapshot31535와 pair/source/cleanup 증거를 보존했다. JS문법·diff PASS. 실제 모델/사용자 데이터/제품 out 변경없음.
+- 400MiB 유지 최적화 또는 macOS 유휴만512MiB로 조정(부하800/잔류120 유지) 여부를 사용자에게 질문했다. 답변 전 기존400 기준과 FAIL을 유지한다. 기준 변경은 구현/전체검증/출시 합격을 뜻하지 않는다. 다음은 사용자 결정에 따른 메모리 작업과 독립적으로 가능한 누적 회귀·G6 나머지/Windows/출시 정리다. main병합·push없음.
+
+### 2026-11-02 · by GPT-6
+
 - 이전 턴은 메모리 준비/유휴 구간 분리eeccc82로 진척했다. 깨끗한 통합 HEAD의 별도 QA 패키지로 통합 시험을 완료했다. idle 시작/종료가 정확히3초로 기록되고 preparing과 분리됐다. 네 단일3,000출력·기록 탐색·대형 모델/diff 공존·원본 불변을 확인했다. 네 live 관측 창은 visible이지만 전체 visibility trace에는 약39ms hidden 전환이 있으므로 지속 가시성 합격은 아니다.
 - 최종 FAIL은 idle RSS455,507,968B(434.41MiB)>400MiB다. peak761,856,000B(726.56MiB), 닫기60초 후 유휴 대비 잔류증분0B는 해당 단회 기준 이내다. 유휴 첫 표본 main155.14/renderer130.17/GPU보조89.48/network보조40.0/sidecar17.78MiB로 Electron 쪽 비중이 크다. 원인 전체를 확정하지 않으며3초/1Hz QA 진단을 전체G6 또는 일반 패키지 합격으로 대체하지 않는다.
 - 앱19043 정상 종료, 관측PID부재와 sidecar19114 clean_shutdown_at00:41:08Z 확인 후 자체JrHcKT/98sfid를 정리했다. .artifacts/m5-combined-output-2026-11-02/fourth에 결과·화면·build/정리 증거를 보존했다. architecture에 현재 제한적 검증 범위와 과거 단계 서술의 경계를 추가했다.
