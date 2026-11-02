@@ -4,12 +4,15 @@ const { resolve, sep } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { mkdtempSync, mkdirSync, writeFileSync, readFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
+const { createHash } = require('node:crypto');
+const sha256 = value => createHash('sha256').update(value).digest('hex');
 const { execFileSync } = require('node:child_process');
 const { processTreeMemory } = require('../scripts/m5-process-memory.cjs');
 const { buildPerformancePreload } = require('./m5-performance-preload-build.cjs');
 const mode = process.argv[2];
-if (!['blank', 'painted', 'localized', 'rendered', 'preload', 'product'].includes(mode)) throw new Error('unknown idle control');
-const hasBridge = mode === 'preload' || mode === 'product';
+if (!['blank', 'painted', 'localized', 'rendered', 'rendered-bridge', 'preload', 'product'].includes(mode)) throw new Error('unknown idle control');
+const hasBridge = mode === 'preload' || mode === 'product' || mode === 'rendered-bridge';
+const isStaticProduct = mode === 'rendered' || mode === 'rendered-bridge';
 const softwareRendering = process.argv.includes('--software-rendering');
 const spellcheck = !process.argv.includes('--no-spellcheck');
 const deferShow = process.argv.includes('--defer-show');
@@ -28,6 +31,7 @@ const launch = {pid:process.pid,parentPid:process.ppid,startedAt:new Date().toIS
   parentExecutable:execFileSync('/bin/ps', ['-p',String(process.ppid),'-o','comm='], {encoding:'utf8',timeout:2000}).trim()};
 const root = resolve(__dirname, '..');
 const renderer = resolve(root, '.vite/renderer/main_window');
+const staticMarkup = isStaticProduct ? readFileSync(resolve(root, '.artifacts/m5-performance/idle-static.html'), 'utf8') : undefined;
 const userData = mkdtempSync(resolve(tmpdir(), 'hello-agent-idle-memory-'));
 app.setPath('userData', userData);
 protocol.registerSchemesAsPrivileged([{ scheme: 'm5idle', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
@@ -37,8 +41,8 @@ app.whenReady().then(async () => {
   await protocol.handle('m5idle', request => {
     const url = new URL(request.url);
     if (url.hostname !== 'm5') return new Response('not found', { status: 404 });
-    if (mode === 'rendered' && url.pathname === '/index.html') return new Response(readFileSync(resolve(root, '.artifacts/m5-performance/idle-static.html'), 'utf8'), {headers:{'Content-Type':'text/html; charset=utf-8'}});
-    if (mode !== 'product' && mode !== 'rendered') {
+    if (isStaticProduct && url.pathname === '/index.html') return new Response(staticMarkup, {headers:{'Content-Type':'text/html; charset=utf-8'}});
+    if (mode !== 'product' && !isStaticProduct) {
       // Identical geometry/style for Latin and Korean text, with no app code or
       // preload. Compare these controls within one run series, not old sizes.
       const label = mode === 'localized' ? '프로젝트 선택 · 에이전트 연결 · 안전한 첫 작업'
@@ -93,9 +97,12 @@ app.whenReady().then(async () => {
   }
   const report = { launch, diagnostic: true, rendererSandbox: true, mode, userData, head: execFileSync('/usr/bin/git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
     window: {width:1280,height:800}, softwareRendering, spellcheck, deferShow, paintAfterMount, tileBudgetMiB, preSampleReadyAtMs, visible:window.isVisible(),
-    scope: 'fresh Electron app idle only; no sidecar/provider; five samples after one second; painted/localized/rendered have no app code or preload; not release evidence',
+    scope: 'fresh Electron app idle only; no sidecar/provider; five samples after one second; static modes have no renderer app code; rendered-bridge retains synthetic preload; not release evidence',
     samples, metrics: app.getAppMetrics(), dom: await window.webContents.executeJavaScript('({nodes:document.querySelectorAll("*").length,ready:Boolean(document.querySelector(".m5-workbench")),visibility:document.visibilityState})') };
-  if (mode === 'product' && !report.dom.ready) throw new Error('product did not mount');
+  report.rendererEntrySha256 = sha256(readFileSync(resolve(renderer, 'index.html')));
+  if (isStaticProduct) report.staticMarkupSha256 = sha256(staticMarkup);
+  report.bridgeLoaded = hasBridge;
+  if ((mode === 'product' || isStaticProduct) && !report.dom.ready) throw new Error('product did not mount');
   const directory = resolve(root, '.artifacts/m5-performance'); mkdirSync(directory, { recursive: true });
   if (mode === 'product') {
     // Own synthetic UI only: preserve DOM/CSS but remove executable app code.
@@ -104,6 +111,7 @@ app.whenReady().then(async () => {
       clone.querySelectorAll('script, link[rel="modulepreload"]').forEach(node => node.remove());
       return '<!doctype html>' + clone.outerHTML;
     })()`);
+    report.staticMarkupSha256 = sha256(markup);
     writeFileSync(resolve(directory, 'idle-static.html'), markup);
   }
   // Optional native allocation summary after RSS sampling. Only this owned
