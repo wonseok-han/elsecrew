@@ -37,14 +37,16 @@ impl ProjectManager {
         if !matches!(
             record["phase"].as_str(),
             Some(
-                "replaced"
+                "replaceIntent"
+                    | "replaced"
                     | "cleanupIntent"
                     | "guardRemoved"
                     | "stagingRemoved"
                     | "cleanupComplete"
             )
         ) || record["durabilityPolicy"] != windows_durability::POLICY
-            || record["directoryDurability"] != windows_durability::FLUSHED
+            || (record["phase"] != "replaceIntent"
+                && record["directoryDurability"] != windows_durability::FLUSHED)
         {
             return Err(ProjectFailure::recovery(
                 "save has no completed replacement receipt",
@@ -84,6 +86,20 @@ impl ProjectManager {
             windows_save_recovery::internal_name(&record, "sourceName", ".hello-agent-save-")?;
         require_absent(&root, source)?;
         verify_committed(&parent, &target, &record)?;
+        if record["phase"] == "replaceIntent" {
+            // Never repeat rename: only the exact replacement already at the
+            // destination can advance. Reopen it and obtain a fresh OS flush
+            // acknowledgement rather than inferring one from matching bytes.
+            require_recorded(&parent, &guard, &record["guardIdentity"])?;
+            require_recorded(&self.save_staging_dir, &staging, &record["stagingIdentity"])?;
+            flush_recovered_replacement(&parent, &target, &record)?;
+            target_pin.validate()?;
+            staging_pin.validate()?;
+            verify_committed(&parent, &target, &record)?;
+            record["phase"] = json!("replaced");
+            record["directoryDurability"] = json!(windows_durability::FLUSHED);
+            self.write_windows_guard_intent(storage, &active, save_id, request_id, &record)?;
+        }
         if record["phase"] == "replaced" {
             // No cleanup authorization existed yet: missing artifacts cannot be
             // interpreted as a previously completed deletion.
@@ -275,6 +291,39 @@ impl ProjectManager {
     }
 }
 
+fn flush_recovered_replacement(
+    parent: &Dir,
+    target: &str,
+    record: &Value,
+) -> Result<(), ProjectFailure> {
+    let mut options = CapOpenOptions::new();
+    options
+        .read(true)
+        .write(true)
+        .follow(FollowSymlinks::No)
+        .share_mode(1)
+        .custom_flags(windows_fs::OPEN_REPARSE_POINT | windows_durability::WRITE_THROUGH);
+    let mut file = parent.open_with(target, &options).map_err(|error| {
+        ProjectFailure::recovery(format!(
+            "could not hold replacement for recovery flush: {error}"
+        ))
+    })?;
+    windows_durability::require_ntfs(&file)?;
+    let observation = windows_save_recovery::observe_file(&mut file)?;
+    if record["durabilityPolicy"] != windows_durability::POLICY
+        || observation["identity"] != record["sourceIdentity"]
+        || observation["version"] != record["sourceVersion"]
+        || windows_security::fingerprint(&file)? != record["accessFingerprint"]
+    {
+        return Err(ProjectFailure::recovery(
+            "recovery flush target differs from replacement intent",
+        ));
+    }
+    file.sync_all().map_err(|error| {
+        ProjectFailure::ambiguous(format!("recovery replacement flush failed: {error}"))
+    })
+}
+
 fn verify_committed(parent: &Dir, target: &str, record: &Value) -> Result<(), ProjectFailure> {
     let observation = windows_save_recovery::observe(parent, target)?;
     let file = open_real_file_at(parent, target)?;
@@ -335,6 +384,42 @@ fn remove_or_observe_absent(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recovery_flush_requires_exact_replacement_and_preserves_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = Dir::open_ambient_dir(temp.path(), ambient_authority()).unwrap();
+        std::fs::write(temp.path().join("guard"), b"guard").unwrap();
+        std::fs::write(temp.path().join("target"), b"old").unwrap();
+        let pin = DirectoryLease::acquire(&dir, OsStr::new("guard")).unwrap();
+        let mut source = dir
+            .open_with("source", &windows_replace::source_options())
+            .unwrap();
+        source.write_all(b"replacement").unwrap();
+        source.sync_all().unwrap();
+        let record = json!({
+            "durabilityPolicy":windows_durability::POLICY,
+            "sourceIdentity":windows_fs::identity(&source, false).unwrap().recovery_token(),
+            "sourceVersion":sha256_file_version_v1(b"replacement"),
+            "accessFingerprint":windows_security::fingerprint(&source).unwrap(),
+        });
+        // The old destination cannot be promoted by content/phase assumptions.
+        assert!(flush_recovered_replacement(&dir, "target", &record).is_err());
+        windows_replace::replace(&source, &pin, "target").unwrap();
+        drop(source); // Simulate loss of the original write-through handle.
+        flush_recovered_replacement(&dir, "target", &record).unwrap();
+        let mut wrong = record.clone();
+        wrong["sourceVersion"] = json!(sha256_file_version_v1(b"other"));
+        assert!(flush_recovered_replacement(&dir, "target", &wrong).is_err());
+        wrong = record.clone();
+        wrong["accessFingerprint"] = json!("wrong");
+        assert!(flush_recovered_replacement(&dir, "target", &wrong).is_err());
+        assert_eq!(
+            std::fs::read(temp.path().join("target")).unwrap(),
+            b"replacement"
+        );
+        assert!(!temp.path().join("source").exists());
+    }
 
     #[test]
     fn interrupted_cleanup_accepts_absence_but_preserves_reused_name() {

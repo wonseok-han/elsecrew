@@ -4,6 +4,15 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은81ac097 cleanup 재개로 진전했다. 이번 메인 구현은 replaceIntent 이후 실제 rename은 끝났으나 replaced 원장 게시 전 종료된 경우를 내부 재개에 연결했다. 현재 source 이름 부재·target의 기록된 source full ID/내용/권한 일치와 guard/staging ID를 먼저 요구한다. rename 재시도나 이전 target 덮어쓰기는 없다.
+- 복구 시 target을 nofollow read/write·share-read·WRITE_THROUGH로 열고 보유 handle의 NTFS/full ID/5MiB bounded hash/접근 권한을 확인해 같은 handle sync_all 성공을 얻는다. target/staging lease와 target 재확인 뒤 기존 replaceIntent→replaced 전이로 flush receipt를 기록하고 정상 cleanup/원자 완료를 계속한다. 원본 target이 남았거나 이름/내용/권한이 다른 경우는 잠금/증거를 유지한다.
+- read-only 관찰과 recovery flush가 같은 bounded held-file reader를 공유하도록 추출했다. native 회귀는 실제 handle-relative rename 후 원래 source handle을 닫고 재개 flush, 이전 target/잘못된 version/권한 거절과 bytes 보존을 추가했으나 아직 실행 전이다.
+- [Microsoft FlushFileBuffers](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers)의 GENERIC_WRITE 필요와 지정 파일의 buffered information flush 의미를 다시 확인했다. 현재 NTFS write-through OS acknowledgement 정책 범위이며 하드웨어 전원 장애 보장은 아니다.
+- 같은 독립 검토자1명이 source 부재/정확한 replacement 검증·동일 재개 handle의 bounded read/권한/flush·receipt 이후 전이 및 rename 재시도/제품 활성화 없음에 구체적 정적 차단 결함이 없음을 확인했다. native 검증은 별도로 남는다.
+- 변경 모듈 rustfmt·git diff --check 확인. Cargo/패키지/cache/worktree/모델/CI/push 없음. 공개 API/UI/Windows 제품 gate는 여전히 미활성이고 교체 전 중단 복구와 native 통합이 남는다. 다음은 나머지 저장 실패 상태와 복구 계약 연결이다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은5e28744의 Windows 완료 원자화로 진전했다. 이번에는 메인이 같은 checkout에서 내부 resume_windows_save_cleanup을 연결했다. active pending save 거절, inspected lock revision/SaveRecovery durable session/canonical workspace 확인 뒤 replaced~cleanupComplete와 정확한 NTFS 정책/flush receipt만 받아들인다.
 - target/staging anchor lease·현재 managed/staging root·기록된 parent/anchor ID를 대조하고 교체 source 이름은 부재, target full ID/내용/접근 권한은 일치를 요구한다. replaced 상태에서는 guard/staging의 실재 ID를 먼저 요구해 기록 없는 부재를 완료로 승격하지 않는다. cleanupIntent 이후 guard, guardRemoved 이후 staging은 exact-ID 삭제 또는 이미 부재 관찰로 단계 전이를 재개한다. foreign name은 보존·거절한다. 최종 lease/target 확인 뒤 cleanupComplete 및 lock/chat 원자 완료를 사용한다.
 - 공개 IPC/UI와 Windows 제품 gate는 아직 연결/활성화하지 않았다. 교체 전 실패와 replaceIntent 상태의 불확실 복구, 전체 save 재시작 통합은 남아 있다. helper native 회귀는 삭제 후 재진입/의도 전 부재 거절/이름 재사용 보존을 작성했으며 아직 실행하지 않았다. 기존34 PASS로 대체하지 않는다.

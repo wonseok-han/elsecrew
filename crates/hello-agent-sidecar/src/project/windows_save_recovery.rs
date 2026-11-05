@@ -234,11 +234,19 @@ pub(super) fn observe(parent: &Dir, name: &str) -> Result<Value, ProjectFailure>
             "save artifact cannot be held for inspection: {error}"
         ))
     })?;
-    let identity = windows_fs::identity(&file, false)?.recovery_token();
+    observe_file(&mut file)
+}
+
+/// Bounded inspection of the exact held file, including recovery flush handles.
+pub(super) fn observe_file(file: &mut CapFile) -> Result<Value, ProjectFailure> {
+    file.seek(SeekFrom::Start(0)).map_err(|error| {
+        ProjectFailure::recovery(format!("could not rewind save artifact: {error}"))
+    })?;
+    let identity = windows_fs::identity(file, false)?.recovery_token();
     let mut hash = Sha256::new();
     let mut count = 0u64;
     let mut buffer = [0u8; 65536];
-    let mut reader = std::io::Read::by_ref(&mut file).take(FILE_MAX_BYTES_V1 + 1);
+    let mut reader = std::io::Read::by_ref(file).take(FILE_MAX_BYTES_V1 + 1);
     loop {
         let read = reader.read(&mut buffer).map_err(|error| {
             ProjectFailure::recovery(format!("could not read save artifact: {error}"))
