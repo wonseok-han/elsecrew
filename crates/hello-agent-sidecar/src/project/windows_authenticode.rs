@@ -38,6 +38,128 @@ struct TrustData {
 extern "system" {
     fn WinVerifyTrust(window: *mut c_void, action: *mut Guid, data: *mut TrustData) -> i32;
 }
+// Only the documented prefix is inspected. The provider owns all pointers
+// until WTD_STATEACTION_CLOSE; no pointer escapes into the returned identity.
+#[repr(C)]
+struct ProviderCertificatePrefix {
+    size: u32,
+    certificate: *const c_void,
+}
+#[derive(Debug)]
+#[allow(dead_code)] // Consumed by installation admission in the next implementation wave.
+pub(super) struct VerifiedPublisher {
+    pub(super) common_name: String,
+    pub(super) organization: Option<String>,
+}
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetModuleHandleW(name: *const u16) -> *mut c_void;
+    fn GetProcAddress(module: *mut c_void, name: *const u8) -> *mut c_void;
+}
+#[link(name = "crypt32")]
+extern "system" {
+    fn CertGetNameStringW(
+        certificate: *const c_void,
+        kind: u32,
+        flags: u32,
+        parameter: *const c_void,
+        output: *mut u16,
+        length: u32,
+    ) -> u32;
+}
+fn signer_failure() -> ProjectFailure {
+    ProjectFailure::recovery("verified image signer information is unavailable")
+}
+impl TrustState {
+    fn publisher(&self) -> Result<VerifiedPublisher, ProjectFailure> {
+        if self.0.state.is_null() {
+            return Err(signer_failure());
+        }
+        // wintrust is already a static import of this module. Resolve helper
+        // exports from that loaded module; never search a selected Git folder.
+        let module_name: Vec<u16> = "wintrust.dll".encode_utf16().chain(Some(0)).collect();
+        let module = unsafe { GetModuleHandleW(module_name.as_ptr()) };
+        if module.is_null() {
+            return Err(signer_failure());
+        }
+        let resolve = |name: &'static [u8]| -> Result<*mut c_void, ProjectFailure> {
+            let address = unsafe { GetProcAddress(module, name.as_ptr()) };
+            if address.is_null() {
+                Err(signer_failure())
+            } else {
+                Ok(address)
+            }
+        };
+        type Provider = unsafe extern "system" fn(*mut c_void) -> *mut c_void;
+        type Signer = unsafe extern "system" fn(*mut c_void, u32, i32, u32) -> *mut c_void;
+        type Certificate =
+            unsafe extern "system" fn(*mut c_void, u32) -> *const ProviderCertificatePrefix;
+        // Export signatures match wintrust.h, checked before invocation.
+        let provider: Provider =
+            unsafe { std::mem::transmute(resolve(b"WTHelperProvDataFromStateData\0")?) };
+        let signer: Signer =
+            unsafe { std::mem::transmute(resolve(b"WTHelperGetProvSignerFromChain\0")?) };
+        let certificate: Certificate =
+            unsafe { std::mem::transmute(resolve(b"WTHelperGetProvCertFromChain\0")?) };
+        let data = unsafe { provider(self.0.state) };
+        if data.is_null() {
+            return Err(signer_failure());
+        }
+        // First primary signer; never use a timestamp countersigner as publisher.
+        let signer = unsafe { signer(data, 0, 0, 0) };
+        if signer.is_null() {
+            return Err(signer_failure());
+        }
+        let cert = unsafe { certificate(signer, 0) };
+        if cert.is_null() {
+            return Err(signer_failure());
+        }
+        if unsafe { (*cert).size } < std::mem::size_of::<ProviderCertificatePrefix>() as u32 {
+            return Err(signer_failure());
+        }
+        let cert = unsafe { (*cert).certificate };
+        if cert.is_null() {
+            return Err(signer_failure());
+        }
+        let common_name = certificate_attribute(cert, b"2.5.4.3\0")?.ok_or_else(signer_failure)?;
+        let organization = certificate_attribute(cert, b"2.5.4.10\0")?;
+        Ok(VerifiedPublisher {
+            common_name,
+            organization,
+        })
+    }
+}
+fn certificate_attribute(
+    certificate: *const c_void,
+    oid: &'static [u8],
+) -> Result<Option<String>, ProjectFailure> {
+    // CERT_NAME_ATTR_TYPE; flags=0 selects the subject, not issuer or display alias.
+    let length =
+        unsafe { CertGetNameStringW(certificate, 3, 0, oid.as_ptr().cast(), ptr::null_mut(), 0) };
+    if length == 0 || length > 4096 {
+        return Err(signer_failure());
+    }
+    let mut buffer = vec![0u16; length as usize];
+    let written = unsafe {
+        CertGetNameStringW(
+            certificate,
+            3,
+            0,
+            oid.as_ptr().cast(),
+            buffer.as_mut_ptr(),
+            length,
+        )
+    };
+    if written != length || buffer.last() != Some(&0) {
+        return Err(signer_failure());
+    }
+    buffer.pop();
+    let value = String::from_utf16(&buffer).map_err(|_| signer_failure())?;
+    if value.chars().any(char::is_control) {
+        return Err(signer_failure());
+    }
+    Ok(if value.is_empty() { None } else { Some(value) })
+}
 fn action() -> Guid {
     // WINTRUST_ACTION_GENERIC_VERIFY_V2 (softpub.h).
     Guid {
@@ -57,7 +179,10 @@ impl Drop for TrustState {
     }
 }
 
-pub(super) fn verify(file: &impl AsRawHandle, path: &str) -> Result<(), ProjectFailure> {
+pub(super) fn verify(
+    file: &impl AsRawHandle,
+    path: &str,
+) -> Result<VerifiedPublisher, ProjectFailure> {
     if path.contains('\0') {
         return Err(ProjectFailure::manifest(
             "signature image path contains NUL",
@@ -96,11 +221,12 @@ pub(super) fn verify(file: &impl AsRawHandle, path: &str) -> Result<(), ProjectF
             result as u32
         )));
     }
-    Ok(())
+    state.publisher()
 }
 
 #[cfg(target_pointer_width = "64")]
 const _: () = {
+    assert!(std::mem::offset_of!(ProviderCertificatePrefix, certificate) == 8);
     assert!(std::mem::size_of::<FileInfo>() == 32);
     assert!(std::mem::size_of::<TrustData>() == 88);
     assert!(std::mem::offset_of!(TrustData, file) == 40);

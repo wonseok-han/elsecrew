@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준0edb401/깨끗한 통합 checkout에서 Authenticode 성공 state의 실제 주 서명자 인증서를 읽도록 연결했다. 이미 로드된 wintrust의 helper export를 동적으로 조회하고 timestamp countersigner가 아닌 signer0/cert0의 CN·조직 속성을 복사한다.4096 UTF-16 상한·반환 길이/종료 문자·제어 문자 거부를 적용하며 provider 소유 pointer는 state close 전에만 읽는다. 후보 파일 결속 재확인 뒤 owned publisher를 함께 보유한다. 아직 특정 이름을 Git 배포자로 승인하거나 실행을 허용하지 않는다.
+- [Microsoft signer helper](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/nf-wintrust-wthelpergetprovsignerfromchain), [provider certificate](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-crypt_provider_cert), [certificate name API](https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certgetnamestringw)의 실제 ABI·수명 규칙을 확인했다. rustfmt/diff만 실행했고 Windows compile/native·독립 검토는 기능 연결 뒤 묶음 검증에 남긴다. 새 빌드/cache/push/모델/제품 활성화 없음.
+- 의존성 조사에서 [공식 저장소6491](https://github.com/git-for-windows/git/issues/6491)의 유지보수자가 배포 의존 DLL 모두를 서명하지는 않는다고 설명한 것을 확인했다. 따라서 모든 DLL Authenticode 필수 정책을 구현하면 정상 Git도 거부할 수 있다. 설치 폴더/의존 이미지의 신뢰 근거와 실제 로드 결속을 별도로 구현해야 하며, 이름/파일 선택/서명 성공 하나로 전체 설치본을 신뢰하지 않는다. 이 근거와 남은 작업을 고정 발견에도 기록한다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준95df836의 깨끗한 통합 checkout에서 Windows 후보 파일의 Authenticode 검증을 구현했다. ExecutableLease가 보유한 읽기 handle과 GUID 경로를 WinVerifyTrust에 함께 전달하고 전후 결속을 확인한다. 성공은 반환값0만 인정하며 성공/실패 모두 provider state를 닫는다. 임의 버전 SHA pin이나 후보 실행/PowerShell 호출은 추가하지 않았다.
 - 비대화형·URL 캐시 전용·체인 폐기 확인을 사용하므로 인증서 확인 자료가 부족하면 실패한다. 이 검사는 서명의 OS 신뢰 여부일 뿐 Git 배포자 식별/의존성 허가가 아니다. selected_git_candidate에 연결했지만 제품 spawn에는 미연결이고 Windows gate는 유지한다. 다음은 검증된 signer의 배포자 식별과 의존 이미지 결속·실행 경로 연결이다.
 - [Microsoft WinVerifyTrust](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/nf-wintrust-winverifytrust), [WINTRUST_DATA](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-wintrust_data), [FILE_INFO](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-wintrust_file_info)를 확인해 FFI와 handle/state 수명을 작성했다.64비트 ABI 정적 assertion·미서명 파일 거부 native 회귀를 추가했다. 구현 우선 지시에 따라 이번에는 rustfmt/diff만 확인했으며 Windows 컴파일/시험·독립 안전 검토는 기능 연결 후 묶음 검증에 남긴다. 추가CI/push/모델/패키지 없음.
@@ -64,6 +70,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Windows Git 의존 DLL 서명(2026-11-06)**: [공식 이슈6491](https://github.com/git-for-windows/git/issues/6491)에서 유지보수자는 모든 배포 DLL 서명을 제공하지 않는다고 설명했다. 모든 의존 DLL에 Authenticode를 요구하는 방식은 정상 설치본 호환성을 보장하지 못한다. 주 실행 파일의 검증된 signer 추출을 구현했으나 배포자 정책·설치본/의존성 신뢰·실제 로드 결속은 미완료이고 제품 gate는 유지한다.
 
 - **Windows 저장/복구 native45 PASS(2026-11-06)**: 공개6e079a9/tree77dd9ad3, CI42129091905에서44 native+1 직접 호출 차단 통과. 통합02657f7/9a62344와 같은 소스 수정이다. Win32 상대 rename87은 동기 handle의 NtSetInformationFile class10으로, 이미 동일한 보안 descriptor의 불필요한 재적용은 exact-equal/recheck 경로로 수정했다. 4개 파일/DB 재열기 fixture가 통과했지만 Windows Git admission·실제 프로세스 재시작·제품 활성화·출시는 별도다. 이번 승인3회는 모두 사용했다.
 

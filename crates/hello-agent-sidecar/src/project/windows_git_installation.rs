@@ -10,6 +10,7 @@ use std::{ffi::OsStr, path::Path};
 pub(super) struct SelectedGitCandidate {
     _image: ExecutableLease,
     _selected_path: String,
+    _publisher: super::windows_authenticode::VerifiedPublisher,
 }
 
 impl ProjectManager {
@@ -41,10 +42,11 @@ impl ProjectManager {
         let directory = windows_fs::open_directory(parent)?;
         let name = Path::new(&path).file_name().unwrap_or(OsStr::new(""));
         let image = ExecutableLease::acquire(&directory, name)?;
-        image.verify_authenticode()?;
+        let publisher = image.verify_authenticode()?;
         Ok(Some(SelectedGitCandidate {
             _image: image,
             _selected_path: path,
+            _publisher: publisher,
         }))
     }
 }
