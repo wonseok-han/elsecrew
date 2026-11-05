@@ -5,6 +5,8 @@ use crate::process_spawn::SpawnGuarded as _;
 mod app_roles;
 #[cfg(any(windows, test))]
 mod git_selection;
+#[cfg(any(windows, test))]
+mod git_installation_layout;
 #[cfg(windows)]
 mod windows_git_installation;
 mod protocol_path;

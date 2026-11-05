@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준2505240/깨끗한 통합 checkout에서 Git 설치 레이아웃과 runtime/DLL inventory를 연결했다. cmd/bin 선택은 같은 설치 root의 ucrt64/mingw64/clangarm64/mingw32 후보만 검사하고, runtime 직접 선택은 해당 경로만 검사한다. 여러 runtime은 임의 선택하지 않으며 명시 재선택 오류를 반환한다. 접근 실패와 reparse를 단순 없음으로 처리하지 않는다.
+- 선택 파일·실제 runtime의 검증된 CN/조직을 대조하고 둘 다 ExecutableLease로 보유한다. runtime 폴더의 DLL은 최대256개, 전체 entry4096개 상한으로 열어 파일/부모 결속을 보유하며 목록·결속 재확인으로 검사 중 변경을 거부한다. DLL 자체에 일괄 서명을 요구하지 않는다. 이 inventory는 동적/system DLL까지 포함한 실행 허가가 아니며 설치 출처 신뢰·실제 load event 결속·spawn 연결은 다음 작업이다. 제품 gate는 유지한다.
+- [공식 Git Credential Manager 문서](https://github.com/git-ecosystem/git-credential-manager/blob/main/docs/wsl.md)의 ucrt64 전환·기존mingw64·ARM64clangarm64 경로를 확인했다. portable layout 회귀를 추가했고 구현 우선 지시에 따라 이번에는 rustfmt/diff만 확인했다. Windows compile/native·독립 검토·누적 시험은 기능 연결 뒤 수행한다. 신규 패키지/worktree/모델/push/CI 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준0edb401/깨끗한 통합 checkout에서 Authenticode 성공 state의 실제 주 서명자 인증서를 읽도록 연결했다. 이미 로드된 wintrust의 helper export를 동적으로 조회하고 timestamp countersigner가 아닌 signer0/cert0의 CN·조직 속성을 복사한다.4096 UTF-16 상한·반환 길이/종료 문자·제어 문자 거부를 적용하며 provider 소유 pointer는 state close 전에만 읽는다. 후보 파일 결속 재확인 뒤 owned publisher를 함께 보유한다. 아직 특정 이름을 Git 배포자로 승인하거나 실행을 허용하지 않는다.
 - [Microsoft signer helper](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/nf-wintrust-wthelpergetprovsignerfromchain), [provider certificate](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-crypt_provider_cert), [certificate name API](https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certgetnamestringw)의 실제 ABI·수명 규칙을 확인했다. rustfmt/diff만 실행했고 Windows compile/native·독립 검토는 기능 연결 뒤 묶음 검증에 남긴다. 새 빌드/cache/push/모델/제품 활성화 없음.
 - 의존성 조사에서 [공식 저장소6491](https://github.com/git-for-windows/git/issues/6491)의 유지보수자가 배포 의존 DLL 모두를 서명하지는 않는다고 설명한 것을 확인했다. 따라서 모든 DLL Authenticode 필수 정책을 구현하면 정상 Git도 거부할 수 있다. 설치 폴더/의존 이미지의 신뢰 근거와 실제 로드 결속을 별도로 구현해야 하며, 이름/파일 선택/서명 성공 하나로 전체 설치본을 신뢰하지 않는다. 이 근거와 남은 작업을 고정 발견에도 기록한다.
