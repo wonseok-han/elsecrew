@@ -996,6 +996,16 @@ export const ko = {
   "m5.saveRecovery.reference": "저장 식별자",
   "m5.saveRecovery.phase": "기록된 단계",
   "m5.saveRecovery.revision": "기록 번호",
+  "m5.saveRecovery.complete": "저장 완료 처리",
+  "m5.saveRecovery.abort": "중단된 저장 취소",
+  "m5.saveRecovery.completeHelp": "확인된 새 파일은 유지하고, 이 저장에서 만든 임시 파일을 정리합니다.",
+  "m5.saveRecovery.abortHelp": "저장 전 파일은 유지하고, 이 저장에서 만든 임시 파일을 정리합니다.",
+  "m5.saveRecovery.confirm": "확인한 내용으로 진행",
+  "m5.saveRecovery.back": "돌아가기",
+  "m5.saveRecovery.confirmHelp": "위 파일과 처리 내용을 확인했나요? 파일 상태가 바뀌었으면 중단됩니다.",
+  "m5.saveRecovery.committed": "저장 완료 처리를 마쳤어요. 파일을 다시 열어 확인해 주세요.",
+  "m5.saveRecovery.aborted": "중단된 저장을 취소하고 기존 파일을 보존했어요. 파일을 다시 열어 주세요.",
+  "m5.saveRecovery.unknown": "처리 결과를 확인하지 못했어요. 자동으로 다시 실행하지 않습니다. 저장 상태를 다시 확인해 주세요.",
 } as const;
 
 export type MessageKey = keyof typeof ko;

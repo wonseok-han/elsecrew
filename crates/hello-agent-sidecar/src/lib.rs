@@ -1490,6 +1490,34 @@ impl Sidecar {
                     )
                     .map(|action| addressed_action(action, &address))
             }
+            "workspace.resolveSaveRecovery" => {
+                let params = require_exact_params(&request.params,
+                    &["chatId", "projectId", "worktreeId", "workspaceIdentity", "saveId", "expectedLockRevision", "decision", "confirmed"])
+                    .map_err(invalid_params)?;
+                let address = workspace_address(params).map_err(invalid_params)?;
+                let save_id = param_string(params, "saveId").map_err(invalid_params)?;
+                let revision = param_u64(params, "expectedLockRevision").map_err(invalid_params)?;
+                let decision = param_string(params, "decision").map_err(invalid_params)?;
+                if params.get("confirmed") != Some(&Value::Bool(true)) || revision == 0
+                    || revision > hello_agent_protocol::MAX_SEQUENCE || !matches!(decision, "complete" | "abort") {
+                    return Err(invalid_params("explicit save recovery confirmation is invalid".into()));
+                }
+                if !cfg!(windows) || !project::WINDOWS_SAVE_RECOVERY_MUTATIONS_ENABLED {
+                    return Ok(HandledRequest::response(error_response(&request, "methodUnavailable", "unsupportedCapability",
+                        "Windows save recovery mutations have not been activated")));
+                }
+                #[cfg(windows)]
+                {
+                    let result = if decision == "abort" {
+                        self.projects.abort_windows_save(&mut self.storage, &address, save_id, revision, &request.request_id)
+                    } else {
+                        self.projects.resume_windows_save_cleanup(&mut self.storage, &address, save_id, revision, &request.request_id)
+                    };
+                    result.map(|action| addressed_action(action, &address))
+                }
+                #[cfg(not(windows))]
+                { let _ = (address, save_id); unreachable!("non-Windows recovery rejected above") }
+            }
             "workspace.saveRecovery" => {
                 let params = require_exact_params(&request.params,
                     &["chatId", "projectId", "worktreeId", "workspaceIdentity"])

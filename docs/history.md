@@ -4,6 +4,14 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은549c69a 복구 조회 UI로 진전했다. 이번 메인 작업은 명시 확인을 받는 복구 변경 계약을 UI→preload→main-frame IPC→client→sidecar→기존 내부 complete/abort까지 연결했다. exact workspace 참조/saveId/양수 JS-safe expectedLockRevision/decision/confirmed:true를 요구하고 결과 주소·saveId·예상 outcome·version도 검증한다.
+- 공용 WINDOWS_SAVE_RECOVERY_MUTATIONS_ENABLED=false를 조회 actionsAvailable과 sidecar 실행 admission 양쪽에 적용했다. 제품 활성화가 아니며 직접 IPC/프로토콜 호출로도 gate를 우회할 수 없다. Windows native QA와 별도 활성화 결정은 남아 있다.
+- UI는 gate와 현재 observation/phase 조합이 맞을 때만 동작을 제안하고 파일/처리 설명 뒤 별도 확인을 받는다. 요청 전에 inspection을 소모하고 중복 클릭을 막는다. 오류는 unknown으로 표시하고 자동 재시도하지 않으며 상태를 다시 조회해야 한다. ko/en 완료/취소/불확실 안내를 추가했다. 성공 응답의 해당 client save session만 제거한다.
+- 독립 검토자1명이 gate 닫힘·직접 호출 거절·명시 확인 및 대상/버전 검증·UI 관찰 소모/오류 처리에 구체적 차단 결함 없음으로 확인했다. gate 활성화 승인이 아니며 native 검증은 별도다.
+- src TypeScript 검사와 계약 검사3개 통과. macOS cargo check에서 새 확인 분기의 json 매크로 import 누락을 발견해 Value::Bool(true)로 수정했고 재검사0.97초 PASS(jobs/threads4, locked/offline). Windows cfg 코드 컴파일 증거가 아니다. diff 검사 통과. 새 패키지/worktree/CI/push/모델 없음; 기존 target check만 갱신했다. 다음은 누적 Windows 저장·복구 native 통합 검증 준비와 승인된 범위 내 남은 구현이다. 전체 앱 목표는 미완료다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은263d32a의 read-only 복구 조회 bridge 연결로 진전했다. 이번 메인 작업은 Windows 활성 채팅의 접힌 ‘중단된 파일 저장 확인’ 화면을 연결했다. 기기 platform이 win32이고 preload가 있을 때만 표시하며 사용자 버튼으로 조회한다. 작업 준비/채팅 전환/설정/프로젝트 닫기 중에는 버튼을 잠근다.
 - 주소의 네 식별자와 admission disabled가 바뀌면 조회 소유자를 remount하고 unmount된 요청의 결과를 폐기한다. 중복 클릭은 pending ref로 차단한다. 새 파일/기존 파일/내용만 일치/충돌·부재·조회 오류·중단 기록 없음 각각을 ko/en으로 설명한다. saveId/phase/revision은 펼치는 도움 정보에만 표시한다.
 - UI에는 mutation 버튼을 넣지 않았으며 현재 버전에서 복구 실행은 불가하고 화면을 닫아도 기존 보호는 유지된다는 한계를 명시한다. 조회 결과를 저장 성공이나 잠금 해제로 처리하지 않는다. 실제 Windows 기능 활성화·복구 명령 연결은 별도 native 검증/계약이 남는다.

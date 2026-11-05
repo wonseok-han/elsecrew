@@ -1,3 +1,4 @@
+import { validateSaveRecoveryResolveRequest, validateSaveRecoveryResolveResult, type SaveRecoveryResolveRequest, type SaveRecoveryResolveResult } from "../src/m5/contracts/save-recovery-v1.ts";
 import { validateSaveRecoveryRequest, validateSaveRecoveryResult, type SaveRecoveryResult } from "../src/m5/contracts/save-recovery-v1.ts";
 import { randomUUID } from "node:crypto";
 import { validateAgentRunBindingV1 } from "../src/m5/contracts/agent-adapter-v1.ts";
@@ -472,6 +473,9 @@ export class SidecarClientV1 {
   readWorkspaceFile(input: WorkspaceFileReadRequestV1): Promise<WorkspaceFileReadDescriptorV1> {
     return this.#request("workspace.file.read", validateWorkspaceFileReadRequestV1(input)) as Promise<WorkspaceFileReadDescriptorV1>;
   }
+  resolveWorkspaceSaveRecovery(input: SaveRecoveryResolveRequest): Promise<SaveRecoveryResolveResult> {
+    return this.#request("workspace.resolveSaveRecovery", validateSaveRecoveryResolveRequest(input)) as Promise<SaveRecoveryResolveResult>;
+  }
   inspectWorkspaceSaveRecovery(input: ChatWorkspaceRefV1): Promise<SaveRecoveryResult> {
     return this.#request("workspace.saveRecovery", validateSaveRecoveryRequest(input)) as Promise<SaveRecoveryResult>;
   }
@@ -939,6 +943,11 @@ export class SidecarClientV1 {
         const value = validateWorkspaceDiffFileDescriptorV1(response.result);
         assertWorkspaceResponse(value, pending.params); assertResponseField(value, pending.params, "path");
         this.#registerStream(value.byteLength, value.stream, null, MAX_DIFF_STREAM_BYTES);
+        return value;
+      }
+      case "workspace.resolveSaveRecovery": {
+        const value = validateSaveRecoveryResolveResult(response.result, validateSaveRecoveryResolveRequest(pending.params));
+        this.#workspaceSaves.delete(value.saveId);
         return value;
       }
       case "workspace.saveRecovery": return validateSaveRecoveryResult(response.result, validateSaveRecoveryRequest(pending.params));

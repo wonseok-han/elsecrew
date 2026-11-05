@@ -29,7 +29,7 @@ impl ProjectManager {
                 "saveId":save_id,"path":intent["path"],"phase":intent["phase"],
                 "lockRevision":inspection["lockRevision"],"observation":inspection["observation"],
                 // Read-only public contract. Mutation admission waits for native QA.
-                "actionsAvailable":false,
+                "actionsAvailable":WINDOWS_SAVE_RECOVERY_MUTATIONS_ENABLED,
             }}),
             ..ProjectAction::default()
         })

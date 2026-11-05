@@ -1,3 +1,4 @@
+import { SAVE_RECOVERY_RESOLVE_CHANNEL, validateSaveRecoveryResolveRequest, validateSaveRecoveryResolveResult } from "../src/m5/contracts/save-recovery-v1.ts";
 import { SAVE_RECOVERY_CHANNEL, validateSaveRecoveryRequest, validateSaveRecoveryResult } from "../src/m5/contracts/save-recovery-v1.ts";
 import { contextBridge, ipcRenderer } from "electron";
 import { SESSION_DIAGNOSTICS_CHANNEL as M5_SESSION_DIAGNOSTICS_CHANNEL, validateSessionDiagnostics } from "../src/m5/contracts/session-diagnostics-v1.ts";
@@ -108,6 +109,10 @@ contextBridge.exposeInMainWorld("m5Models", Object.freeze({
   },
 }));
 contextBridge.exposeInMainWorld("m5SaveRecovery", Object.freeze({
+  resolve: async (input: unknown) => {
+    const request = validateSaveRecoveryResolveRequest(input);
+    return validateSaveRecoveryResolveResult(await ipcRenderer.invoke(SAVE_RECOVERY_RESOLVE_CHANNEL, request), request);
+  },
   inspect: async (input: unknown) => {
     const request = validateSaveRecoveryRequest(input);
     return validateSaveRecoveryResult(await ipcRenderer.invoke(SAVE_RECOVERY_CHANNEL, request), request);

@@ -45,6 +45,7 @@ pub const METHODS_V1: &[&str] = &[
     "workspace.file.read",
     "workspace.file.save",
     "workspace.saveRecovery",
+    "workspace.resolveSaveRecovery",
     "workspace.file.watch",
     "workspace.diff.getSummary",
     "workspace.diff.getFile",
