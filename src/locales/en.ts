@@ -73,6 +73,7 @@ export const en: Record<MessageKey, string> = {
   "m5.editorNotice.failedOpen": "Could not safely open the new conversation's working copy. The previous conversation was preserved.",
   "m5.editorNotice.lateClosed": "The late working copy was closed safely. Select the project again if needed.",
   "m5.editorNotice.previousClosed": "The previous project selection was closed safely. Select the project again if needed.",
+  "m5.editorNotice.saveRecovered": "File save recovery finished. Your open edits have been preserved. Choose Reload in that file to read its current contents.",
   "m5.editorNotice.reloaded": "Your edits were discarded and the saved file was reloaded. The file itself was not changed.",
   "m5.editorNotice.blockedSave": "Saving is unavailable during recovery or conversation switching.",
   "m5.editorNotice.newerChange": "Another change arrived first. Your draft is preserved and was not overwritten.",

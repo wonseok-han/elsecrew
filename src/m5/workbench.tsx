@@ -271,7 +271,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       {chat.activeChat && chat.activeChat.state !== "discarded" && <SaveRecoveryView address={{
         chatId: chat.activeChat.chatId, projectId: chat.activeChat.projectId,
         worktreeId: chat.activeChat.worktreeId, workspaceIdentity: chat.activeChat.workspaceIdentity,
-      }} disabled={!admissionReady || chat.switching || settingsOpen || leavingProject || leaveError} />}
+      }} disabled={!admissionReady || chat.switching || settingsOpen || leavingProject || leaveError}
+        onResolved={(result, path) => controller.observeCompletedSaveRecovery(result, path)} />}
       {leaveError && <p className="m5-error" role="alert">{t("m5.feedback.leaveError")}</p>}
       {appDefaultsOpen && <AppRoleDefaultsEditor disabled={!admissionReady} onClose={() => setAppDefaultsOpen(false)} />}
       <StorageAdmissionNotice admission={admission} />

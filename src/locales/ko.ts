@@ -72,6 +72,7 @@ export const ko = {
   "m5.editorNotice.failedOpen": "새 채팅 작업 복사본을 안전하게 열지 못했어요. 이전 채팅은 그대로 두었어요.",
   "m5.editorNotice.lateClosed": "늦게 끝난 작업 복사본을 안전하게 닫았어요. 필요하면 프로젝트를 다시 선택해 주세요.",
   "m5.editorNotice.previousClosed": "이전 프로젝트 선택을 안전하게 닫았어요. 필요하면 프로젝트를 다시 선택해 주세요.",
+  "m5.editorNotice.saveRecovered": "파일 저장 복구가 끝났어요. 열려 있는 편집 내용은 보존했어요. 해당 파일에서 ‘다시 불러오기’를 선택해 디스크 내용을 확인하세요.",
   "m5.editorNotice.reloaded": "내 편집 내용을 버리고 저장된 파일을 다시 불러왔어요. 파일 자체는 변경하지 않았어요.",
   "m5.editorNotice.blockedSave": "복구 또는 채팅 전환 중에는 저장할 수 없어요.",
   "m5.editorNotice.newerChange": "다른 변경이 먼저 들어왔어요. 내 초안은 보존했고 덮어쓰지는 않았어요.",

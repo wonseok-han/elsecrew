@@ -1,17 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.tsx";
 import type { ChatWorkspaceRefV1 } from "./contracts/workspace-addressing-v1.ts";
-import { saveRecoveryDecision, validateSaveRecoveryResolveResult, validateSaveRecoveryResult, type SaveRecoveryResult } from "./contracts/save-recovery-v1.ts";
+import { saveRecoveryDecision, validateSaveRecoveryResolveResult, validateSaveRecoveryResult, type SaveRecoveryResult, type SaveRecoveryResolveResult } from "./contracts/save-recovery-v1.ts";
+
+type RecoveryProps = {
+  address: ChatWorkspaceRefV1; disabled: boolean;
+  onResolved: (result: SaveRecoveryResolveResult, path: string) => void;
+};
 
 /** Inspected, explicitly confirmed recovery; the sidecar owns mutation admission. */
-export function SaveRecoveryView({ address, disabled }: { address: ChatWorkspaceRefV1; disabled: boolean }) {
+export function SaveRecoveryView({ address, disabled, onResolved }: RecoveryProps) {
   // Remount the owner for every address/admission change so late results cannot
   // appear in a different chat or after admission is withdrawn.
   const key = JSON.stringify([address.chatId, address.projectId, address.worktreeId, address.workspaceIdentity, disabled]);
-  return <SaveRecoveryOwner key={key} address={address} disabled={disabled} />;
+  return <SaveRecoveryOwner key={key} address={address} disabled={disabled} onResolved={onResolved} />;
 }
 
-function SaveRecoveryOwner({ address, disabled }: { address: ChatWorkspaceRefV1; disabled: boolean }) {
+function SaveRecoveryOwner({ address, disabled, onResolved }: RecoveryProps) {
   const { t } = useI18n();
   const [supported, setSupported] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -51,15 +56,19 @@ function SaveRecoveryOwner({ address, disabled }: { address: ChatWorkspaceRefV1;
     if (disabled || pending.current || !confirmation || !recovery || !decision || !window.m5SaveRecovery) return;
     const request = { ...address, saveId: recovery.saveId, expectedLockRevision: recovery.lockRevision, decision, confirmed: true as const };
     pending.current = true; setBusy(true); setConfirmation(false); setResult(null); setResolution(null);
+    let completed: SaveRecoveryResolveResult | null = null;
     try {
-      const value = validateSaveRecoveryResolveResult(await window.m5SaveRecovery.resolve(request), request);
-      if (live.current) setResolution(value.outcome);
+      completed = validateSaveRecoveryResolveResult(await window.m5SaveRecovery.resolve(request), request);
     } catch {
       // The request may have reached the service. Reinspect before any retry.
       if (live.current) setResolution("unknown");
     } finally {
       pending.current = false;
       if (live.current) setBusy(false);
+    }
+    if (live.current && completed) {
+      setResolution(completed.outcome);
+      onResolved(completed, recovery.path);
     }
   }
   if (!supported) return null;

@@ -715,6 +715,24 @@ export class ProjectEditorController {
     return true;
   }
 
+  /** Recovery changes disk state, never grants permission to discard an editor draft. */
+  observeCompletedSaveRecovery(workspace: ChatWorkspaceRefV1, path: string): void {
+    if (this.#disposed || !sameWorkspace(this.#state.workspace, workspace)) return;
+    const tab = this.#tab(path);
+    if (tab) {
+      // Invalidate a late save reply without accepting the recovery version as a
+      // baseline for text that may have changed since that save was prepared.
+      this.#saveGenerations.set(path, (this.#saveGenerations.get(path) ?? 0) + 1);
+      this.#replaceTab(path, { ...tab, saveState: "conflicted", cleanRestoreAllowed: false,
+        technicalDetail: "File save recovery completed; reload requires confirmation." });
+    }
+    this.#diffGeneration++;
+    this.#diffSummaryGeneration++;
+    this.#set({ diffSummary: null, diffFile: null, diffText: "", diffLoading: false,
+      rescanRequired: true, ...editorNotice("m5.editorNotice.saveRecovered") });
+    void this.refreshChanges();
+  }
+
   async refreshChanges(): Promise<void> {
     if (this.#actionBlocked) return;
     const project = this.#state.project;

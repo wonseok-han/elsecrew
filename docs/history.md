@@ -4,6 +4,12 @@
 
 ### 2026-11-05 · by GPT-6
 
+- f32ff64 이후 메인이 저장 복구 성공→편집기/diff 갱신의 빠진 연결을 추가했다. 검증된 resolve 응답과 조회했던 path를 현재 controller에 전달하며 네 workspace 식별자가 모두 같고 controller가 살아 있을 때만 처리한다. unmount/주소 변경 뒤 늦은 응답은 폐기한다.
+- 열린 대상 파일의 text/baseVersion은 그대로 보존하고 conflicted로 표시해 기존 명시 다시 불러오기 흐름을 사용한다. late save generation을 무효화하고 이전 diff를 비운 뒤 현재 summary를 재조회한다. 복구 성공을 현재 초안의 저장 성공으로 간주하지 않으며 callback은 공급자 응답의 unknown 판정과 분리했다. ko/en 안내 추가. Windows mutation gate는 계속 false다.
+- 직접 diff·git diff --check 확인. 사용자 방침에 따라 빌드/시험은 최종 묶음으로 남겼다. 정상/취소 복구 후 초안 보존·다른 workspace 늦은 응답·diff 오류와 재조회는 미검증이다. 새 cache/패키지/worktree/CI/push/모델 없음. Windows native/원본 반영 포트/G6/출시를 포함한 전체 개발은 미완료다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전a6f27dd는 저장 복구2개 추가 시나리오 구현으로 진전했다. 이번 메인은 남은 구현을 실제 코드와 대조한 뒤 G6 편집기 자원 수명 개선을 직접 수행했다. 기존 파일 탭 전환마다 Monaco editor/model 전체를 dispose/create하던 경로를 단일 editor 유지+현재 파일 model 교체로 변경했다.
 - 탭 교체 시 이전 subscription/model/undo buffer를 해제하며 숨은 모델 cache는 만들지 않는다. layout effect에서 새 파일을 연결하고 모델별 소유 path를 확인해 이전 파일 이벤트가 새 탭 callback으로 들어가지 않게 한다. 외부 text 동기화는 변경 이벤트를 사용자 편집으로 재전달하지 않는다. 프로젝트/workspace 변경 시 기존 keyed remount와 전체 해제를 유지한다.
 - 직접 diff·git diff --check 확인. 사용자 구현 우선 방침에 따라 이번에는 빌드/자동 시험/GUI 성능 측정을 반복하지 않았다. 실제 Monaco 전환·저장·읽기전용·실패 재시도·unmount 및400MiB/부하/회수 기준은 최종 묶음 검증에서 확인해야 하며 개선 수치를 주장하지 않는다. 새 cache/패키지/worktree/CI/push/모델 실행 없음. Windows native/Git 제공 결정·원본 반영/복원 포트와 G6/출시는 계속 남는다.
