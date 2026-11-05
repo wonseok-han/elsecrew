@@ -15,6 +15,8 @@ mod windows_pipe;
 mod windows_transport;
 #[cfg(windows)]
 mod windows_directory_lease;
+#[cfg(windows)]
+mod windows_executable;
 use crate::{AppendOutcome, SidecarError, Storage};
 #[cfg(unix)]
 use cap_fs_ext::OsMetadataExt;

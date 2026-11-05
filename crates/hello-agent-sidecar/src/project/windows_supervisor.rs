@@ -6,7 +6,7 @@ use super::native::{accounting, Launch};
 use std::{
     ffi::c_void,
     io,
-    os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
+    os::windows::io::{AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle},
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc, Mutex,
@@ -115,6 +115,7 @@ impl Supervisor {
                         process: launch.process.try_clone()?,
                         thread: launch.thread.try_clone()?,
                         directory: launch.directory.as_ref().map(|pin| pin.observer()),
+                        executable: launch.executable.as_ref().map(|pin| pin.observer()),
                     };
                     if send.send(published).is_err() {
                         unsafe {
@@ -123,9 +124,9 @@ impl Supervisor {
                         return Err(io::Error::other("family creation receiver closed"));
                     }
                     let result = pump(&launch, &stop_worker).map_err(|error| {
-                        if launch.directory.is_some() {
+                        if launch.directory.is_some() || launch.executable.is_some() {
                             io::Error::other(format!(
-                                "{error}; CWD pins retained until sidecar exit"
+                                "{error}; launch pins retained until sidecar exit"
                             ))
                         } else {
                             error
@@ -133,6 +134,11 @@ impl Supervisor {
                     });
                     if result.is_ok() {
                         if let Some(pin) = &mut launch.directory {
+                            pin.confirmed();
+                        }
+                    }
+                    if result.is_ok() {
+                        if let Some(pin) = &mut launch.executable {
                             pin.confirmed();
                         }
                     }
@@ -246,7 +252,8 @@ fn pump(launch: &Launch, stop: &AtomicBool) -> io::Result<u32> {
         }
         let mut event: DebugEvent = unsafe { std::mem::zeroed() };
         if unsafe { WaitForDebugEvent(&mut event, 10) } != 0 {
-            // Even a rejected event must be continued before cleanup can finish.
+            // Rejected events must NOT resume user code. The worker requests
+            // Job termination and exits its debugger thread on any rejection.
             let result = if members.is_empty() && (event.code != 3 || event.pid != root_pid) {
                 // Still close image handles delivered by an invalid event.
                 if event.code == 3 {
@@ -259,13 +266,17 @@ fn pump(launch: &Launch, stop: &AtomicBool) -> io::Result<u32> {
                     "first debug event does not identify owned root",
                 ))
             } else {
-                handle_event(&event, &launch.job, &mut members)
+                let image = if members.is_empty() {
+                    launch.executable.as_ref().map(|pin| pin.resource())
+                } else {
+                    None
+                };
+                handle_event(&event, &launch.job, &mut members, image)
             };
-            let status = result.as_ref().copied().unwrap_or(NOT_HANDLED);
+            let status = result?;
             if unsafe { ContinueDebugEvent(event.pid, event.tid, status) } == 0 {
                 return Err(io::Error::last_os_error());
             }
-            result?;
             if event.code == 5 {
                 let member = members
                     .iter_mut()
@@ -313,11 +324,27 @@ fn handle_event(
     event: &DebugEvent,
     job: &OwnedHandle,
     members: &mut Vec<Member>,
+    image: Option<&crate::project::windows_executable::ExecutableLease>,
 ) -> io::Result<u32> {
     match event.code {
         3 => {
             let created = unsafe { event.data.create };
+            let verified = if let Some(image) = image {
+                if created.file.is_null() || created.file as isize == -1 {
+                    Err(io::Error::other("root image handle is unavailable"))
+                } else {
+                    // This event precedes user-mode execution. Compare the actual
+                    // image object, never the optional process-supplied filename.
+                    let actual = unsafe { BorrowedHandle::borrow_raw(created.file) };
+                    image
+                        .verify_loaded_image(&actual)
+                        .map_err(|error| io::Error::other(error.detail))
+                }
+            } else {
+                Ok(())
+            };
             close_image(created.file);
+            verified?;
             if members.len() >= MAX_MEMBERS
                 || members
                     .iter()

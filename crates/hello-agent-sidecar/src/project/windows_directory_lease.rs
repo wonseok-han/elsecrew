@@ -23,12 +23,12 @@ pub(super) struct DirectoryLease {
 /// Creator-thread resource ownership. Once a process exists, only the proven
 /// family barrier can release the final pin. On unconfirmed failure retain pins
 /// until sidecar exit; the durable launch fence must prohibit automatic retry.
-pub(super) struct RetainedDirectory {
-    pin: Option<Arc<DirectoryLease>>,
+pub(super) struct RetainedPin<T> {
+    pin: Option<Arc<T>>,
     armed: bool,
 }
-impl RetainedDirectory {
-    pub(super) fn new(pin: DirectoryLease) -> Self {
+impl<T> RetainedPin<T> {
+    pub(super) fn new(pin: T) -> Self {
         Self {
             pin: Some(Arc::new(pin)),
             armed: false,
@@ -40,11 +40,8 @@ impl RetainedDirectory {
             armed: false,
         }
     }
-    pub(super) fn path(&self) -> &str {
-        self.pin.as_ref().unwrap().path()
-    }
-    pub(super) fn validate(&self) -> Result<(), ProjectFailure> {
-        self.pin.as_ref().unwrap().validate()
+    pub(super) fn resource(&self) -> &T {
+        self.pin.as_ref().unwrap()
     }
     pub(super) fn arm(&mut self) {
         self.armed = true;
@@ -53,7 +50,7 @@ impl RetainedDirectory {
         self.armed = false;
     }
 }
-impl Drop for RetainedDirectory {
+impl<T> Drop for RetainedPin<T> {
     fn drop(&mut self) {
         if self.armed {
             // Do not close pathname pins while an unconfirmed descendant may
@@ -63,6 +60,16 @@ impl Drop for RetainedDirectory {
                 std::mem::forget(pin);
             }
         }
+    }
+}
+
+pub(super) type RetainedDirectory = RetainedPin<DirectoryLease>;
+impl RetainedDirectory {
+    pub(super) fn path(&self) -> &str {
+        self.resource().path()
+    }
+    pub(super) fn validate(&self) -> Result<(), ProjectFailure> {
+        self.resource().validate()
     }
 }
 

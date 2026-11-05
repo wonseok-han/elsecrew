@@ -35,6 +35,7 @@ mod supervisor;
 pub(super) mod native {
     use super::{quoted, supervisor::Supervisor};
     use crate::project::windows_directory_lease::{DirectoryLease, RetainedDirectory};
+    use crate::project::windows_executable::{ExecutableLease, RetainedExecutable};
     use std::{
         alloc::{alloc_zeroed, dealloc, Layout},
         collections::BTreeMap,
@@ -233,6 +234,7 @@ pub(super) mod native {
         started: bool,
         supervisor: Supervisor,
         directory: Option<RetainedDirectory>,
+        executable: Option<RetainedExecutable>,
     }
 
     pub(super) struct Launch {
@@ -240,6 +242,7 @@ pub(super) mod native {
         pub(super) process: OwnedHandle,
         pub(super) thread: OwnedHandle,
         pub(super) directory: Option<RetainedDirectory>,
+        pub(super) executable: Option<RetainedExecutable>,
     }
 
     pub(super) fn accounting(job: &OwnedHandle) -> io::Result<(u32, u32)> {
@@ -286,7 +289,15 @@ pub(super) mod native {
             directory: &str,
             stdio: Option<[BorrowedHandle<'_>; 3]>,
         ) -> io::Result<Self> {
-            Self::suspended_inner(executable, arguments, environment, directory, stdio, None)
+            Self::suspended_inner(
+                executable,
+                arguments,
+                environment,
+                directory,
+                stdio,
+                None,
+                None,
+            )
         }
 
         /// CWD binding only. Executable authority/product admission is separate.
@@ -305,6 +316,28 @@ pub(super) mod native {
                 &path,
                 stdio,
                 Some(RetainedDirectory::new(directory)),
+                None,
+            )
+        }
+
+        /// Binds the selected image, not its publisher or dependency trust.
+        pub(crate) fn suspended_bound(
+            executable: ExecutableLease,
+            arguments: &[String],
+            environment: &BTreeMap<String, String>,
+            directory: DirectoryLease,
+            stdio: Option<[BorrowedHandle<'_>; 3]>,
+        ) -> io::Result<Self> {
+            let image_path = executable.path().to_owned();
+            let cwd = directory.path().to_owned();
+            Self::suspended_inner(
+                &image_path,
+                arguments,
+                environment,
+                &cwd,
+                stdio,
+                Some(RetainedDirectory::new(directory)),
+                Some(RetainedExecutable::new(executable)),
             )
         }
 
@@ -315,6 +348,7 @@ pub(super) mod native {
             directory: &str,
             stdio: Option<[BorrowedHandle<'_>; 3]>,
             retained: Option<RetainedDirectory>,
+            image: Option<RetainedExecutable>,
         ) -> io::Result<Self> {
             // Borrowed stdio may not cross the creator thread's lifetime.
             // These clones stay non-inheritable; only Launch::create duplicates
@@ -342,6 +376,7 @@ pub(super) mod native {
                     &directory,
                     stdio,
                     retained,
+                    image,
                 )
             })?;
             Ok(Self {
@@ -351,6 +386,7 @@ pub(super) mod native {
                 started: false,
                 supervisor,
                 directory: launch.directory,
+                executable: launch.executable,
             })
         }
 
@@ -361,6 +397,12 @@ pub(super) mod native {
             self.supervisor.check()?;
             if let Some(directory) = &self.directory {
                 directory
+                    .validate()
+                    .map_err(|error| io::Error::other(error.detail))?;
+            }
+            if let Some(image) = &self.executable {
+                image
+                    .resource()
                     .validate()
                     .map_err(|error| io::Error::other(error.detail))?;
             }
@@ -412,8 +454,19 @@ pub(super) mod native {
             directory: &str,
             stdio: Option<[BorrowedHandle<'_>; 3]>,
             mut retained: Option<RetainedDirectory>,
+            mut image: Option<RetainedExecutable>,
         ) -> io::Result<Self> {
-            crate::project::protocol_path::from_native(executable, true).map_err(invalid)?;
+            if let Some(image) = &image {
+                if image.resource().path() != executable {
+                    return Err(invalid("image lease path mismatch"));
+                }
+                image
+                    .resource()
+                    .validate()
+                    .map_err(|error| io::Error::other(error.detail))?;
+            } else {
+                crate::project::protocol_path::from_native(executable, true).map_err(invalid)?;
+            }
             if let Some(pin) = &retained {
                 if pin.path() != directory {
                     return Err(invalid("CWD lease path mismatch"));
@@ -555,6 +608,12 @@ pub(super) mod native {
                 pin.validate()
                     .map_err(|error| io::Error::other(error.detail))?;
             }
+            if let Some(image) = &image {
+                image
+                    .resource()
+                    .validate()
+                    .map_err(|error| io::Error::other(error.detail))?;
+            }
             let ok = unsafe {
                 CreateProcessW(
                     executable_wide.as_ptr(),
@@ -575,6 +634,9 @@ pub(super) mod native {
             if let Some(pin) = &mut retained {
                 pin.arm();
             }
+            if let Some(image) = &mut image {
+                image.arm();
+            }
             // Successful creation transfers both handles to the creator thread.
             // All debug events remain on that thread through final completion.
             Ok(Self {
@@ -582,6 +644,7 @@ pub(super) mod native {
                 process: unsafe { OwnedHandle::from_raw_handle(info.process) },
                 thread: unsafe { OwnedHandle::from_raw_handle(info.thread) },
                 directory: retained,
+                executable: image,
             })
         }
     }

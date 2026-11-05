@@ -2,6 +2,13 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 621c9fd 기준으로 메인이 Windows 실행 이미지 신원 결속을 구현했다. 명시적으로 선택한 부모 Dir의 image를 no-follow/read-only sharing으로 열고 전체 파일 ID를 보유한다. 부모 경로 pin과 image pin을 typed Transport/Family 경로에 연결했다. RetainedPin<T>로 기존 CWD의 creator 소유·실패 시 보존 정책을 재사용한다.
+- 첫 CREATE_PROCESS debug event의 실제 hFile을 미리 선택한 image ID와 비교한 뒤 ContinueDebugEvent한다. 거절된 이벤트는 계속하지 않으며 worker가 Job 종료를 요청하고 debugger thread를 끝낸다. 미확인 종료의 pin은 sidecar 종료까지 보존한다. 공식 설치본/서명/DLL 신뢰·기존 writable mapping·자손 image 검증을 구현했다고 주장하지 않고 실제 Git/Windows 제품 gate는 닫아 둔다. Microsoft CREATE_PROCESS_DEBUG_INFO와 Debugging Events의 actual image handle·user-mode 실행 전 이벤트 계약을 근거로 했다.
+- native 회귀 초안: 다른 image ID 거절, 기존 writer 충돌·후속 쓰기/rename 차단·해제 후 쓰기, 실제 fixture 실행에서 GUID image+CWD 동시 결속이다. rustfmt·git diff --check 통과. Windows 실행은 미검증이며 앞선25 PASS를 새 변경에 적용하지 않는다. 새 로컬 빌드/캐시/worktree·모델 호출·push·main 병합 없음. 이전 CI 승인3회는 모두 소진됐다.
+- 읽기 전용 독립 정적 검토에서 현재 파일-ID 결속 범위의 차단 결함은 발견되지 않았다. image share mode와 실제 CreateProcess/hFile 호환은 native 검증 대상으로 남긴다. 다음: 공식 Git 설치/의존성 신뢰와 빈 관리 폴더 준비·실제 Git 연결을 구현한 뒤 native 검증을 묶는다. G6/Windows 전체/출시는 여전히 미완료다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은0943902 CWD lease 기반 구현으로 진전했다. 메인이 typed lease를 Family/Transport의 내부 실행 경로에 연결했다. GUID CWD는 보유 DirectoryLease를 넘긴 경로로만 허용하며 기존 raw-string 진단 경로는 그대로 GUID 입력을 거부한다. 생성 직전과 ResumeThread 직전에 전체 경로 결속을 재검증한다. 실제 Git 호출/Windows 제품 admission과 실행 파일 권한은 아직 연결하지 않았다.
 - lease 수명은 creator supervisor가 소유한다. CreateProcess 성공 뒤에만 armed 상태로 바꾸고 전체 자손 종료 barrier 통과 뒤 해제한다. Family에는 비무장 관찰용 Arc만 전달한다. 생성 전 실패는 정상 해제하지만 armed 상태의 오류·panic·미확인 종료는 마지막 pin Arc를 의도적으로 유지하여 sidecar 종료 전 경로 보호가 풀리지 않게 한다. 실패 시 폴더 이름 변경 등이 계속 막힐 수 있으며 자동 복구 완료나 안전한 종료로 표현하지 않는다. 이 보존은 개별 launch의 경로 깊이 상한만 가지며 전역 자원 상한을 보장하지 않는다. 호출자의 durable fence·자동 재시도 금지와 복구 흐름이 필수다.
 - native 회귀 초안을 추가했다: (1) 실제 GUID CWD에서 marker 읽기·실행 중 guard 삭제 거절·정상 종료/owner 해제 뒤 삭제, (2) 없는 실행 파일의 생성 전 실패에서 pin 해제, (3) 별도 fixture 프로세스의 armed pin unwind 뒤 삭제 거절·프로세스 종료 뒤 해제. 세 번째는 시험 호스트 자체에 pin을 누출하지 않는다.

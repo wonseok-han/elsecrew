@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 use super::{
     windows_directory_lease::DirectoryLease,
+    windows_executable::ExecutableLease,
     windows_job::native::Family,
     windows_pipe::{BudgetPipe, Direction},
     GIT_STDERR_TAIL_BYTES,
@@ -47,6 +48,7 @@ impl Transport {
             budget,
             external_cancel,
             None,
+            None,
         )
     }
     /// Moves CWD protection into process-family ownership. This does not grant
@@ -68,6 +70,30 @@ impl Transport {
             budget,
             external_cancel,
             Some(directory),
+            None,
+        )
+    }
+    /// Root image/CWD identity binding only; caller must separately attest Git
+    /// installation and dependencies before enabling product admission.
+    pub(super) fn spawn_bound(
+        executable: ExecutableLease,
+        args: &[String],
+        environment: &BTreeMap<String, String>,
+        directory: DirectoryLease,
+        budget: Duration,
+        external_cancel: Option<Arc<AtomicBool>>,
+    ) -> io::Result<Self> {
+        let image_path = executable.path().to_owned();
+        let cwd = directory.path().to_owned();
+        Self::spawn_inner(
+            &image_path,
+            args,
+            environment,
+            &cwd,
+            budget,
+            external_cancel,
+            Some(directory),
+            Some(executable),
         )
     }
     #[allow(clippy::too_many_arguments)]
@@ -79,6 +105,7 @@ impl Transport {
         budget: Duration,
         external_cancel: Option<Arc<AtomicBool>>,
         lease: Option<DirectoryLease>,
+        image: Option<ExecutableLease>,
     ) -> io::Result<Self> {
         let deadline = Instant::now()
             .checked_add(budget)
@@ -117,9 +144,17 @@ impl Transport {
             child_out.as_handle(),
             child_err.as_handle(),
         ]);
-        let family = match lease {
-            Some(lease) => Family::suspended_in_lease(executable, args, environment, lease, stdio),
-            None => Family::suspended_with_stdio(executable, args, environment, directory, stdio),
+        let family = match (image, lease) {
+            (Some(image), Some(lease)) => {
+                Family::suspended_bound(image, args, environment, lease, stdio)
+            }
+            (None, Some(lease)) => {
+                Family::suspended_in_lease(executable, args, environment, lease, stdio)
+            }
+            (None, None) => {
+                Family::suspended_with_stdio(executable, args, environment, directory, stdio)
+            }
+            (Some(_), None) => return Err(io::Error::other("bound image requires a held CWD")),
         }?;
         // Do not keep parent copies of child endpoints: they would suppress EOF.
         drop((child_in, child_out, child_err));
@@ -249,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn guid_cwd_pins_survive_until_confirmed_family_release() {
+    fn guid_image_and_cwd_pins_survive_until_confirmed_family_release() {
         use cap_std::{ambient_authority, fs::Dir};
         use std::ffi::OsStr;
         let root = tempfile::tempdir().unwrap();
@@ -257,8 +292,12 @@ mod tests {
         std::fs::write(root.path().join("cwd-marker"), b"owned-directory").unwrap();
         let dir = Dir::open_ambient_dir(root.path(), ambient_authority()).unwrap();
         let lease = DirectoryLease::acquire(&dir, OsStr::new("guard")).unwrap();
-        let mut owner = Transport::spawn_in_lease(
-            std::env::current_exe().unwrap().to_str().unwrap(),
+        let executable = std::env::current_exe().unwrap();
+        let parent =
+            Dir::open_ambient_dir(executable.parent().unwrap(), ambient_authority()).unwrap();
+        let image = ExecutableLease::acquire(&parent, executable.file_name().unwrap()).unwrap();
+        let mut owner = Transport::spawn_bound(
+            image,
             &[
                 "--exact".into(),
                 "project::windows_job::native::tests::family_fixture".into(),
