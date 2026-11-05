@@ -1,3 +1,5 @@
+import { GitSelectionStore } from "./git-selection.ts";
+import { GIT_SELECTION_CHANNEL, validateGitSelectionAction, validateGitSelection } from "../src/m5/contracts/git-selection-v1.ts";
 import { SAVE_RECOVERY_RESOLVE_CHANNEL, validateSaveRecoveryResolveRequest, validateSaveRecoveryResolveResult } from "../src/m5/contracts/save-recovery-v1.ts";
 import { SAVE_RECOVERY_CHANNEL, validateSaveRecoveryRequest, validateSaveRecoveryResult } from "../src/m5/contracts/save-recovery-v1.ts";
 import { createSessionDiagnosticLog } from "./session-diagnostic-log.ts";
@@ -339,6 +341,19 @@ function registerIpcHandlers(): void {
     assertCurrentMainFrame(event);
     if (!sidecar) throw new Error("sidecar was not started");
     return validateInstallStatus(await sidecar.install(validateInstallRequest(input)));
+  });
+  const gitSelection = new GitSelectionStore(app.getPath("userData"));
+  ipcMain.handle(GIT_SELECTION_CHANNEL, async (event, ...args: unknown[]) => {
+    assertCurrentMainFrame(event);
+    if (args.length !== 1) throw new Error("Git selection takes one action");
+    const action = validateGitSelectionAction(args[0]);
+    return validateGitSelection(await gitSelection.request(action, async () => {
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        properties: ["openFile"], filters: [{ name: "Git", extensions: ["exe"] }],
+      });
+      assertCurrentMainFrame(event);
+      return result.canceled || result.filePaths.length !== 1 ? null : result.filePaths[0]!;
+    }));
   });
   ipcMain.handle(DEVICE_REPORT_CHANNEL, async (event, ...args: unknown[]) => {
     assertCurrentMainFrame(event);

@@ -2,6 +2,15 @@ import type { MessageKey } from "./ko";
 
 // 영어 문구. ko와 동일한 키를 모두 가져야 한다(Record<MessageKey>로 강제).
 export const en: Record<MessageKey, string> = {
+  "m5.git.title": "Prepare Git connection",
+  "m5.git.intro": "Use Git installed on your PC for working copies and change comparison. Select git.exe in its installation folder.",
+  "m5.git.selected": "Installation location saved. Connection checks are still required before use.",
+  "m5.git.unselected": "No Git installation selected yet.",
+  "m5.git.unavailable": "The saved Git location could not be checked. Select the installation again.",
+  "m5.git.failed": "Could not save or check the Git location. Please select it again.",
+  "m5.git.choose": "Choose Git location",
+  "m5.git.refresh": "Check location again",
+  "m5.git.forget": "Clear selection (keep Git installed)",
   "m5.roles.appScope": "Defaults for new projects",
   "m5.roles.appSave": "Save app defaults",
   "m5.roles.appDefaults": "App default roles and models",

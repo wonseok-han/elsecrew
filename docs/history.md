@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 이전 Windows45 PASS 이후 메인이 사용자 설치 Git 선택의 main/preload/renderer 경로를 구현했다. 고정 IPC는 inspect/choose/forget만 받으며 renderer에서 path를 받지 않는다. main-frame 검사와 native file dialog 복귀 뒤 재검사를 수행하고 선택한 일반 git.exe의 canonical path를 userData/git-selection-v1.json에 temp+sync+rename으로 기억한다. 읽기는64KiB 상한·file identity 비교, 오류는unavailable로 처리한다.
+- 저장된 경로는 실행 권한이 아닌 선호 설정이다. executionEnabled:false 고정이며 실행·설치·PATH 검색·sidecar admission 변경은 없다. 잊기 동작은 설정만 비우며 Git 자체를 삭제하지 않는다. Windows 화면에 선택/재확인/해제와 ko/en 상태를 연결했고 macOS는unsupported로 숨긴다. unmount 뒤 결과 폐기·중복 변경 방지, StrictMode 중복 inspect 허용을 유지한다.
+- 직접 diff·git diff --check와 React 스킬 체크리스트로 hook 수명/사용자 동작/접근성 문구를 확인했다. 사용자 구현 우선 방침에 따라 빌드/시험/GUI 실행은 후속 묶음 검증으로 남긴다. Electron 보안 harness의 새 import mock도 누적 검사 때 갱신이 필요할 수 있다. 다음은 Rust의 선택 설치본·의존성·업데이트 재검증 및 Git 실행 연결이다. 이 선택 UI만으로 연결 완료/제품 활성화를 주장하지 않는다. 추가CI/push/모델/패키지 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 사용자 재개/승인을 확인하고 원격0556a1a·기존CI2개 terminal을 대조했다. 동일2120facf Git push가 다시 commit_refs로 실패해 GitHub Git Data API로 수정2개 파일만 게시했다. 생성 tree77dd9ad3b208a01545d1ffdea2d6b305438ed940가 로컬 승인 수정 tree와 정확히 같음을 확인하고 부모0556a1a/current ref 재확인 뒤 force=false로 같은 진단 branch를 갱신했다.
 - 공개 commit6e079a9344be7851a930722a7dea1bbb11034fd1, CI42129091905 queued 확인. 실제 승인 사용3/3회이며 중복 실행·추가 branch·강제 push·제품 활성화·패키징·모델·main 병합 없음. 결과는 이어 기록한다.
 - 세 번째42129091905는2분20초에 성공했다. release compile1분59초, native44 PASS/0 FAIL/0 ignored(2.81초), direct dispatcher gate1 PASS(0.65초). prepared abort/replaced complete/rename 직후 receipt 누락/cleanupComplete 원장 미완료4개 재열기 통합 시나리오 모두 통과했다. 이는 seeded snapshot/파일·SQLite 재열기 증거이며 실제 Git admission·프로세스 kill/startup·전체 패키지/전원 장애·출시 합격은 아니다.

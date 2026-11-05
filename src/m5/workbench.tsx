@@ -1,3 +1,4 @@
+import { GitSelectionView } from "./git-selection-view.tsx";
 import { SaveRecoveryView } from "./save-recovery-view.tsx";
 import { chatConnectionTarget, formatChatNotice } from "./chat-notice.ts";
 import { AgentOutputPanel } from "./agent-output-panel.tsx";
@@ -278,6 +279,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       <StorageAdmissionNotice admission={admission} />
       <WorkStatusNotice bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])} />
       {!snapshot.project && <GuidedStart disabled={!admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked} onChoose={() => void controller.chooseProject()} />}
+      <GitSelectionView disabled={leavingProject || settingsOpen || leaveError} />
       <ProviderLogin disabled={!admissionReady} compact={Boolean(snapshot.project)} reveal={connectionReveal} />
       {snapshot.error && (
         <section className="m5-error" role="alert">

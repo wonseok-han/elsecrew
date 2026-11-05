@@ -1,3 +1,4 @@
+import { GIT_SELECTION_CHANNEL as M5_GIT_SELECTION_CHANNEL, validateGitSelectionAction, validateGitSelection, type GitSelectionAction } from "../src/m5/contracts/git-selection-v1.ts";
 import { SAVE_RECOVERY_RESOLVE_CHANNEL as M5_SAVE_RECOVERY_RESOLVE_CHANNEL, validateSaveRecoveryResolveRequest, validateSaveRecoveryResolveResult } from "../src/m5/contracts/save-recovery-v1.ts";
 import { SAVE_RECOVERY_CHANNEL as M5_SAVE_RECOVERY_CHANNEL, validateSaveRecoveryRequest, validateSaveRecoveryResult } from "../src/m5/contracts/save-recovery-v1.ts";
 import { contextBridge, ipcRenderer } from "electron";
@@ -191,3 +192,7 @@ function isProjectPickerCancelled(value: unknown): boolean {
   const result = value as Record<string, unknown>;
   return Object.keys(result).length === 1 && result.outcome === "cancelled";
 }
+
+contextBridge.exposeInMainWorld("m5GitSelection", Object.freeze({
+  request: async (action: GitSelectionAction) => validateGitSelection(await ipcRenderer.invoke(M5_GIT_SELECTION_CHANNEL, validateGitSelectionAction(action))),
+}));
