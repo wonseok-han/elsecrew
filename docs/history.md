@@ -1,6 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
-이전 Windows 기반 진단34개는 통과했지만 신규 저장·복구는 native 미검증이다. 2026-11-06 사용자가 d9947f8 공개·CI 최대3회를 승인했고 Git은 사용자 설치본 사용으로 확정했다. 두 번째42128250149는44개 중37 PASS/7 FAIL이며 교체 API·권한 보존 수정02657f7을 완료했으나 세 번째 진단은 GitHub 전송 오류로 아직 시작하지 못했다. 전체 개발은 미완료이며 이전 기록은 [11월 아카이브](archive/history-2026-11.md)에 보존한다.
+2026-11-06 Windows 진단42129091905/6e079a9에서 native44개+직접 복구 호출 차단1개, 총45 PASS를 확인했다. 승인된3회는 모두 사용했다. 사용자 설치 Git 연결·Windows 제품 검증/활성화·G6/출시는 남아 있으며 전체 개발은 미완료다. 이전 기록은 [11월 아카이브](archive/history-2026-11.md)에 보존한다.
+
+### 2026-11-06 · by GPT-6
+
+- 사용자 재개/승인을 확인하고 원격0556a1a·기존CI2개 terminal을 대조했다. 동일2120facf Git push가 다시 commit_refs로 실패해 GitHub Git Data API로 수정2개 파일만 게시했다. 생성 tree77dd9ad3b208a01545d1ffdea2d6b305438ed940가 로컬 승인 수정 tree와 정확히 같음을 확인하고 부모0556a1a/current ref 재확인 뒤 force=false로 같은 진단 branch를 갱신했다.
+- 공개 commit6e079a9344be7851a930722a7dea1bbb11034fd1, CI42129091905 queued 확인. 실제 승인 사용3/3회이며 중복 실행·추가 branch·강제 push·제품 활성화·패키징·모델·main 병합 없음. 결과는 이어 기록한다.
+- 세 번째42129091905는2분20초에 성공했다. release compile1분59초, native44 PASS/0 FAIL/0 ignored(2.81초), direct dispatcher gate1 PASS(0.65초). prepared abort/replaced complete/rename 직후 receipt 누락/cleanupComplete 원장 미완료4개 재열기 통합 시나리오 모두 통과했다. 이는 seeded snapshot/파일·SQLite 재열기 증거이며 실제 Git admission·프로세스 kill/startup·전체 패키지/전원 장애·출시 합격은 아니다.
+- 승인3/3회 소진. 사용자 설치 Git 선택/신뢰·의존성/업데이트 확인·프로젝트 연결, Windows 원본 반영/복원 포트 및 제품 gate, G6/출시가 다음이다. 현재 Windows mutation gate는 false로 유지했다. 로그/tmp/hello-agent-windows-42129091905.log. rustfmt 변경 없음·문서 diff 검사 확인, 사용자 데이터/모델/패키지/main 변경 없음.
 
 ### 2026-11-06 · by GPT-6
 
@@ -39,6 +46,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Windows 저장/복구 native45 PASS(2026-11-06)**: 공개6e079a9/tree77dd9ad3, CI42129091905에서44 native+1 직접 호출 차단 통과. 통합02657f7/9a62344와 같은 소스 수정이다. Win32 상대 rename87은 동기 handle의 NtSetInformationFile class10으로, 이미 동일한 보안 descriptor의 불필요한 재적용은 exact-equal/recheck 경로로 수정했다. 4개 파일/DB 재열기 fixture가 통과했지만 Windows Git admission·실제 프로세스 재시작·제품 활성화·출시는 별도다. 이번 승인3회는 모두 사용했다.
 
 - **Windows Git 제공 확정(2026-11-06)**: 사용자 설치 Git을 사용한다. 앱 포함 MinGit은 채택하지 않았다. 명시 설치 위치·실행 파일/의존성·업데이트 후 재확인과 기존 config/hook/filter 격리가 필요하며 PATH 첫 git.exe 자동 신뢰나 제품 activation 승인이 아니다.
 
