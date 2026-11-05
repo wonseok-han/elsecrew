@@ -1,3 +1,4 @@
+import { SaveRecoveryView } from "./save-recovery-view.tsx";
 import { chatConnectionTarget, formatChatNotice } from "./chat-notice.ts";
 import { AgentOutputPanel } from "./agent-output-panel.tsx";
 import { markStartScreenReady } from "./startup-mark.ts";
@@ -267,6 +268,10 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         const provider = chatConnectionTarget(chat);
         if (provider) setConnectionReveal(current => ({ provider, sequence: (current?.sequence ?? 0) + 1 }));
       }}>{t("m5.setup.openConnection", { name: chatConnectionTarget(chat) === "codex" ? "Codex" : "Claude Code" })}</button>}</p>}
+      {chat.activeChat && chat.activeChat.state !== "discarded" && <SaveRecoveryView address={{
+        chatId: chat.activeChat.chatId, projectId: chat.activeChat.projectId,
+        worktreeId: chat.activeChat.worktreeId, workspaceIdentity: chat.activeChat.workspaceIdentity,
+      }} disabled={!admissionReady || chat.switching || settingsOpen || leavingProject || leaveError} />}
       {leaveError && <p className="m5-error" role="alert">{t("m5.feedback.leaveError")}</p>}
       {appDefaultsOpen && <AppRoleDefaultsEditor disabled={!admissionReady} onClose={() => setAppDefaultsOpen(false)} />}
       <StorageAdmissionNotice admission={admission} />

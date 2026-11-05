@@ -4,6 +4,13 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은263d32a의 read-only 복구 조회 bridge 연결로 진전했다. 이번 메인 작업은 Windows 활성 채팅의 접힌 ‘중단된 파일 저장 확인’ 화면을 연결했다. 기기 platform이 win32이고 preload가 있을 때만 표시하며 사용자 버튼으로 조회한다. 작업 준비/채팅 전환/설정/프로젝트 닫기 중에는 버튼을 잠근다.
+- 주소의 네 식별자와 admission disabled가 바뀌면 조회 소유자를 remount하고 unmount된 요청의 결과를 폐기한다. 중복 클릭은 pending ref로 차단한다. 새 파일/기존 파일/내용만 일치/충돌·부재·조회 오류·중단 기록 없음 각각을 ko/en으로 설명한다. saveId/phase/revision은 펼치는 도움 정보에만 표시한다.
+- UI에는 mutation 버튼을 넣지 않았으며 현재 버전에서 복구 실행은 불가하고 화면을 닫아도 기존 보호는 유지된다는 한계를 명시한다. 조회 결과를 저장 성공이나 잠금 해제로 처리하지 않는다. 실제 Windows 기능 활성화·복구 명령 연결은 별도 native 검증/계약이 남는다.
+- pnpm exec tsc --noEmit과 git diff --check 통과. 이는 src TypeScript 범위이며 Electron/Rust/native UI 실행 증거는 아니다. 기존 계약 검사 증거는263d32a에 있고 재실행하지 않았다. 패키지/새 build cache/worktree/CI/push/모델 없음. 다음은 복구 변경 API의 명시 확인 계약 및 Windows 묶음 통합 검증이다. 전체 앱 목표는 미완료다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은773f9a7 교체 전 취소 구현으로 진전했다. 이번 메인 작업은 저장 복구의 read-only 공개 조회 workspace.saveRecovery를 Rust dispatcher→Electron client/main→preload m5SaveRecovery.inspect까지 연결했다. 기존 run/agent recovery namespace를 재사용하지 않는다.
 - 정확한 네 workspace 참조 필드만 받으며 Windows에서는 현재 lock/session/canonical workspace를 확인한 descriptor를 반환한다. save guard가 없을 때도 Ready 검증을 거쳐야 recovery:null이며 unrelated poisoned/recovery lock은 오류로 남는다. 다른 플랫폼은 명시 unavailable이다. 상대 파일 경로/saveId/phase/revision/관찰 분류만 공개하고 raw intent·파일 ID/hash·절대경로는 노출하지 않는다.
 - TypeScript exact-key·주소 echo·phase/observation enum·positive revision·save UUID/상대경로 검증을 client/main/preload에 연결했다. actionsAvailable:false만 허용하고 복구 변경 API는 노출하지 않는다. Windows 제품 activation도 변경하지 않았다. 화면 컴포넌트와 실제 mutation 연결은 아직 후속이다.

@@ -981,6 +981,21 @@ export const ko = {
   "m5.retire.error": "복구점을 확인하지 못했습니다. 진행 중인 작업이나 변경된 기록이 있는지 다시 확인하세요.",
   "m5.retire.unknown": "종료 결과가 불확실합니다. 자동 재시도하지 않습니다. 반영 상태와 이력을 다시 조회하세요.",
   "m5.prep.retired": "복구점을 종료하고 이력에 보존했습니다. 파일은 삭제하지 않았습니다.",
+  "m5.saveRecovery.title": "중단된 파일 저장 확인",
+  "m5.saveRecovery.intro": "파일 저장 중 앱이 종료됐거나 저장 결과가 불확실할 때 상태를 확인하세요.",
+  "m5.saveRecovery.check": "저장 상태 확인",
+  "m5.saveRecovery.checking": "확인 중…",
+  "m5.saveRecovery.error": "저장 상태를 확인하지 못했어요. 다른 복구 안내가 있는지 확인하고, 문제가 계속되면 도움을 요청해 주세요.",
+  "m5.saveRecovery.empty": "이 작업 복사본에 기록된 중단된 저장이 없어요.",
+  "m5.saveRecovery.replacementObserved": "새 파일이 확인됐지만 저장 완료 처리가 남아 있어요.",
+  "m5.saveRecovery.originalObserved": "저장 전 파일이 그대로 확인됐어요. 중단된 저장의 정리가 필요해요.",
+  "m5.saveRecovery.expectedContentOnly": "내용은 저장 전과 같지만 같은 파일인지 확인되지 않았어요.",
+  "m5.saveRecovery.conflictOrMissing": "파일이 바뀌었거나 없어서 저장 결과를 확정할 수 없어요.",
+  "m5.saveRecovery.pending": "현재 버전에서는 여기서 복구를 실행할 수 없어요. 이 화면을 닫아도 작업 보호는 유지됩니다. 아래 확인 정보를 함께 전달해 도움을 요청해 주세요.",
+  "m5.saveRecovery.evidence": "도움 요청용 확인 정보",
+  "m5.saveRecovery.reference": "저장 식별자",
+  "m5.saveRecovery.phase": "기록된 단계",
+  "m5.saveRecovery.revision": "기록 번호",
 } as const;
 
 export type MessageKey = keyof typeof ko;
