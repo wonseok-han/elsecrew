@@ -2,6 +2,13 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 세 번째 승인 CI [41980701769](https://github.com/wonseok-han/hello-agent/actions/runs/41980701769), 3a02b76504e9f4d371a915581349cd79ebaa9cc0는 3분32초에 SUCCESS했다. 실제 로그에서 native20/20·공통 spawn 잠금1/1·watcher identity3/3·Windows 초기 분할1/1, 합계25 PASS·0 FAIL·0 ignored를 확인했다. watcher4개 존재 검사도 통과했다. raw 전체 로그와 run metadata는 `.artifacts/m5-windows-supervisor-41980701769/`에 보존한다.
+- CI41977646539의 실제 child 미종료 반증에 대응한 동일 child handle signal 회귀가 PASS했고, 짧은 자손16개·중첩 debugger 누락 거절·debug ABI·transport도 통과했다. 이는 감독 기반 종료와 watcher의 scoped native 증거이며 전체 Windows 제품/복구/출시 합격은 아니다. 외부 broker 범위 제한과 CWD/실행 파일 권한·원본 쓰기/교체·실제 Git 연결의 미완료를 유지한다.
+- 이번 승인3/3회 소진, 최종 공개 HEAD3a02b76. 마지막 결과 기록은 로컬 커밋으로만 남긴다. main 병합·제품 활성화·패키징·모델 호출 없음. 로컬 빌드·추가 worktree 없이 원격 검사만 실행했고 일회용 커밋 메시지·중복 임시 로그를 정리했다. 보존하는 진단 로그는 작은 텍스트 증거다.
+- 다음: 검증된 기반을 Windows 실제 프로젝트 경로에 연결하기 위한 CWD/실행 파일 권한·파일 교체·복구 구현, 그 뒤 묶음 검증. macOS G6 idle400MiB 및 출시 검증도 남아 있으며 전체 자동 목표는 계속 active다.
+
+### 2026-11-05 · by GPT-6
+
 - 두 번째 승인 CI41980310141(dee1398)는 Windows release 컴파일 성공(1분54초), native19 PASS/1 FAIL이다. 기존 parent_exit_does_not_hide_a_live_descendant의 실제 자손 signal 검사가 통과했고 supervisor ABI·중첩 debugger 누락 거절·미시작 종료·명시 stdio·transport도 PASS했다. 다음 spawn/watcher 단계는 앞선 실패로 skipped다.
 - 남은 실패는 새 short-lived fixture가 전체 Job 멤버를 정확히17로 가정한 assertion이다. 실제로는18이었으며 supervisor의 전체 추적 수 일치·모든 보유 handle signal 검사는 이미 성공했다. 추가 멤버의 정체는 아직 확인하지 않았으며 console host라고 단정하지 않는다.
 - fixture가 직접 생성하고 정상 종료를 기다린16개 child PID를 기록하게 하고 이 기록16개와 total>=17을 확인하도록 보완했다. production의 정확한 전체 inventory 일치와 개별 종료 검사는 완화하지 않는다. 기존 실제 child signal 회귀도 유지한다. Rust 포맷·diff 검사 통과. 로그는 .artifacts/m5-windows-supervisor-41980310141/failed.log에 보존한다.
@@ -151,10 +158,10 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
-- **Windows 자손 supervisor(2026-11-05, native 미검증)**: a7c0674의 상시 Unsupported 봉쇄 뒤 creator-thread DEBUG_PROCESS 추적을 구현했다. 생성 이벤트를 계속하기 전 handle 복제·EXIT 계속 후 모든 signal·root signal·누적 Job 수 일치·active0이 완료 조건이다. 중첩 debugger 누락/상한/오류는 실패이며 Job 밖의 외부 broker는 보장 범위가 아니다. 이전 native FAIL 해소·제품 PASS로 주장하지 않으며 Windows admission은 닫혀 있다.
+- **Windows 자손 supervisor(2026-11-05, scoped native PASS)**: a7c0674의 상시 Unsupported 봉쇄 뒤 creator-thread DEBUG_PROCESS 추적을 구현했다. 생성 이벤트를 계속하기 전 handle 복제·EXIT 계속 후 모든 signal·root signal·누적 Job 수 일치·active0이 완료 조건이다. 중첩 debugger 누락/상한/오류는 실패이며 Job 밖의 외부 broker는 보장 범위가 아니다. 3a02b76/CI41980701769에서 기존 실제 child signal 회귀와 native20·spawn1·watcher4 합계25개가 PASS했다. 전체 제품 PASS가 아니며 Windows admission은 닫혀 있다.
 - **Windows Job 종료 판정 반증(2026-11-05)**: 실제 CI41977646539에서 parent signal+Job active0/terminate(true) 뒤에도 별도 보유 자손 handle은 WAIT_TIMEOUT이었다. 기존 completed()/terminate()를 모든 자손 종료 증거로 인용하지 않는다. 임의 지연·카운트 완화로 해결하지 않으며 native gate는 닫아 둔다. 동일 실행의 disk capacity 회귀는 PASS, 전체16PASS1FAIL·watcher skipped다.
 - **Windows CWD 공유 잠금의 한계(2026-11-05)**: deny-share-write/delete만으로 reparse 불변을 증명하지 않는다. attribute 접근은 공유 제한과 별개이며 MS-FSA는 FILE_WRITE_ATTRIBUTES로 reparse 설정을 허용한다. CWD admission은 미완료이고 Windows gate는 유지한다.
-- **Windows 프로세스 연결 조건(2026-11-05)**: Job 생성 시 결속과 제한 시간/취소 가능한 stdio transport 기반은 아직 Git에 미연결·native 미검증이다. stdio가 없으면 STARTF_USESTDHANDLES를 켜지 않으며, 지정 시 임시 복제 핸들+HANDLE_LIST만 전달한다. 다른 broad-inherit spawn과의 경합 방지 및 CWD 권한·Git 호출 연결 및 native 묶음 검증 전에는 Windows gate를 열지 않는다. Drop의 Job close는 종료 요청이며 부모 signal과 active-process 0만으로는 전체 종료 증거가 되지 않는다(11/05 native 반증 참조).
+- **Windows 프로세스 연결 조건(2026-11-05)**: Job 생성 시 결속과 제한 시간/취소 가능한 stdio transport 기반은 scoped native 검증을 통과했으나 실제 Git에는 아직 미연결이다. stdio가 없으면 STARTF_USESTDHANDLES를 켜지 않으며, 지정 시 임시 복제 핸들+HANDLE_LIST만 전달한다. 공통 spawn 잠금의 경합 회귀는 통과했다. CWD 권한·Git 호출 연결과 제품 native 묶음 검증 전에는 Windows gate를 열지 않는다. Drop의 Job close는 종료 요청이며 부모 signal과 active-process 0만으로는 전체 종료 증거가 되지 않는다(11/05 native 반증 참조).
 - **기존 원본 경로 재확인 (2026-11-02)**: 과거 경로 철자는 source_identity로도 복원할 수 없다. native 폴더 선택으로만 `native_path_binding`을 보강하며 catalog reopen/원본 접근은 없는 표식을 자동 생성하지 않는다. 재선택은 기존 snapshot과 복구 상태를 보존한다.
 - **2026-11-02 Windows 경로 fixture**: host 절대경로와 canonical wire 경로는 구분한다. 실행 41394071830에서 core 226·protocol 65·sidecar 313 PASS, 마지막 fixture 1개는 수정 후 focused 실행 41399404281에서 PASS했다. 최신 전체 suite 단일 재실행/Windows 제품 합격은 아니다. 원장 테스트에 native 역슬래시 경로를 넣지 않으며 제품 검증·실제 공급자 차단은 유지한다.
 
