@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 사용자가 설치 폴더 신뢰·변경 시 재확인 정책을 승인했다. 앱에서 설치 폴더와 OS가 확인한 서명자를 보여주고 명시 동의 후 동일 설치본의 미서명 runtime DLL을 수용하며, 업데이트마다 재검사·서명자 변경 시 재동의한다. 제품 Windows gate 활성화나 추가CI/push/실제 모델 승인과는 별개다.
+- 기준c7d65cc에서 Rust preview/confirm/revoke/admitted-runtime 경로를 구현했다. 동의는 native 설치 경로·GUID volume 경로·실제 root directory ID·검증된 CN/조직에 결속하고 release version/실행 파일 digest/certificate serial은 pin하지 않는다. confirm은 재검사한 identity와 화면 expected 값이 같을 때만 app-owned bounded schema record를 atomic replace한다. 미동의/다른 root/서명자 변경은 실행 후보 반환을 거절한다. 매 admission은 기존 runtime/DLL 검사를 다시 수행한다.
+- 이 메서드는 아직 protocol/IPC/앱 화면·제품 spawn에 연결되지 않았다. root 디렉터리 자체가 교체되면 같은 문자열 경로라도 재동의가 필요하다. 업데이트 호환·동의 영속성·변경 거절 native 시험은 미실행이며 이번은 rustfmt/diff만 확인했다. 신규 빌드/cache/모델/CI/push/패키지 없음. 다음은 이 동의 경로의 계약·화면·단일 Git 호출 연결이다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준45f230c/깨끗한 통합 checkout에서 Windows 내부 Git 전용 실행 진입점을 작성했다. spawn_internal_git는 의존 이미지 관찰 구성을 요구하고 고정 --no-pager와 새 환경 map을 구성한 뒤 기존 typed Transport로 연결한다. 외부에서 임의 환경 map을 받는 fixture용 spawn_bound와 분리했다. 아직 ProjectManager의 제품 호출은 이 경로를 사용하지 않는다.
 - Windows directory는 OS API로 얻고 PATH/GIT_EXEC_PATH는 보유 runtime 디렉터리만 넣는다. 시스템/global config 비활성·count0·replace object/시스템attributes/프롬프트/pager 차단을 Unix 내부 Git과 맞췄다. 부모의 GIT_CONFIG_PARAMETERS/GIT_DIR/WORK_TREE/HOME/SSH/ASKPASS/PATH 등을 복사하지 않으며 source CWD를 임시 출력 위치로 지정하지 않는다. 세미콜론 포함 설치 경로는 PATH에 다른 root를 섞지 않도록 명시 거부한다. TEMP 별도 managed capability 필요 여부와 실제 명령 호환은 누적 native 시험에서 확인한다.
 - rustfmt/diff만 확인했고 Windows 컴파일·실제 Git 호출·누적 시험·독립 검토는 아직이다. 설치 root 동의 정책 응답 전 admission/제품 활성화는 하지 않는다. 신규 빌드/cache/모델/push/CI/패키지 없음. 다음은 신뢰 동의 저장/표시·단일 제품 호출 연결과 남은 Windows 원본 작업 구현이다.
@@ -100,6 +106,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Windows Git 설치 신뢰 정책 승인(2026-11-06)**: 사용자가 선택한 설치 폴더와 OS 검증 서명자를 보여준 뒤 명시 동의하는 방식으로 확정했다. 같은 설치본의 서명 없는 DLL을 수용하되 실행마다 재검사하고 root/서명자 변경은 재동의한다. 버전/파일 digest 고정은 하지 않는다. 이 승인은 Windows 제품 활성화·추가CI/push 승인이 아니다.
 
 - **Windows Git 의존 DLL 서명(2026-11-06)**: [공식 이슈6491](https://github.com/git-for-windows/git/issues/6491)에서 유지보수자는 모든 배포 DLL 서명을 제공하지 않는다고 설명했다. 모든 의존 DLL에 Authenticode를 요구하는 방식은 정상 설치본 호환성을 보장하지 못한다. 주 실행 파일의 검증된 signer 추출을 구현했으나 배포자 정책·설치본/의존성 신뢰·실제 로드 결속은 미완료이고 제품 gate는 유지한다.
 

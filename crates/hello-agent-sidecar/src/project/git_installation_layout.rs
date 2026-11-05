@@ -26,6 +26,26 @@ pub(super) fn runtime_candidates(selected: &str) -> Result<Vec<String>, ProjectF
         .collect())
 }
 
+pub(super) fn installation_root(selected: &str) -> Result<String, ProjectFailure> {
+    let path = protocol_path::from_native(selected, true).map_err(ProjectFailure::manifest)?;
+    let lower = path.to_ascii_lowercase();
+    for suffix in [
+        "/ucrt64/bin/git.exe",
+        "/mingw64/bin/git.exe",
+        "/clangarm64/bin/git.exe",
+        "/mingw32/bin/git.exe",
+        "/cmd/git.exe",
+        "/bin/git.exe",
+    ] {
+        if lower.ends_with(suffix) && path.len() - suffix.len() >= 3 {
+            return Ok(path[..path.len() - suffix.len()].to_owned());
+        }
+    }
+    Err(ProjectFailure::manifest(
+        "unsupported Git installation layout",
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

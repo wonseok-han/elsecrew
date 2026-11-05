@@ -9,6 +9,7 @@ use std::{ffi::OsStr, path::Path};
 
 pub(super) struct SelectedGitCandidate {
     _image: ExecutableLease,
+    identity: GitTrustIdentity,
     _selected_path: String,
     _publisher: super::windows_authenticode::VerifiedPublisher,
     _runtime: ExecutableLease,
@@ -64,6 +65,15 @@ impl ProjectManager {
         let name = Path::new(&path).file_name().unwrap_or(OsStr::new(""));
         let image = ExecutableLease::acquire(&directory, name)?;
         let publisher = image.verify_authenticode()?;
+        let root_path = super::git_installation_layout::installation_root(&path)?;
+        let root = windows_fs::open_directory(Path::new(&root_path))?;
+        let identity = GitTrustIdentity {
+            installation_path: root_path,
+            volume_path: windows_fs::local_guid_path(&root)?,
+            directory_id: windows_fs::identity(&root, true)?.recovery_token(),
+            common_name: publisher.common_name.clone(),
+            organization: publisher.organization.clone(),
+        };
         let mut runtime = None;
         for candidate in super::git_installation_layout::runtime_candidates(&path)? {
             // Only absence skips a layout. Access errors/reparse points are not
@@ -102,6 +112,7 @@ impl ProjectManager {
         dependencies.validate()?;
         Ok(Some(SelectedGitCandidate {
             _image: image,
+            identity,
             _selected_path: path,
             _publisher: publisher,
             _runtime: runtime,
@@ -178,5 +189,116 @@ impl DependencyInventory {
             image.validate()?;
         }
         Ok(())
+    }
+}
+
+// Root identity and verified publisher survive normal file updates. No release
+// version, executable digest or signing certificate serial is pinned here.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct GitTrustIdentity {
+    installation_path: String,
+    volume_path: String,
+    directory_id: String,
+    common_name: String,
+    organization: Option<String>,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TrustRecord {
+    schema_version: u32,
+    identity: Option<GitTrustIdentity>,
+}
+const TRUST_FILE: &str = "git-installation-trust-v1.json";
+impl ProjectManager {
+    fn read_git_trust(&self) -> Result<Option<GitTrustIdentity>, ProjectFailure> {
+        use std::io::Read;
+        self.verify_managed_paths()?;
+        match self.data_dir.symlink_metadata(TRUST_FILE) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(ProjectFailure::recovery("Git trust record is unavailable")),
+            Ok(_) => {}
+        }
+        let file = open_real_file_at(&self.data_dir, TRUST_FILE)?;
+        let mut bytes = Vec::new();
+        file.take(65_537)
+            .read_to_end(&mut bytes)
+            .map_err(|_| ProjectFailure::recovery("could not read Git trust record"))?;
+        if bytes.len() > 65_536 {
+            return Err(ProjectFailure::manifest("Git trust record exceeds limit"));
+        }
+        let record: TrustRecord = serde_json::from_slice(&bytes)
+            .map_err(|_| ProjectFailure::manifest("invalid Git trust record"))?;
+        if record.schema_version != 1 {
+            return Err(ProjectFailure::manifest(
+                "unsupported Git trust record version",
+            ));
+        }
+        Ok(record.identity)
+    }
+    pub(crate) fn preview_git_trust(&self) -> Result<serde_json::Value, ProjectFailure> {
+        let candidate = self
+            .selected_git_candidate()?
+            .ok_or_else(|| ProjectFailure::recovery("select a Git installation first"))?;
+        let trusted = self.read_git_trust()?.as_ref() == Some(&candidate.identity);
+        Ok(
+            serde_json::json!({"identity": candidate.identity, "trusted": trusted, "executionEnabled": false}),
+        )
+    }
+    pub(crate) fn confirm_git_trust(
+        &self,
+        expected: GitTrustIdentity,
+        confirmed: bool,
+    ) -> Result<serde_json::Value, ProjectFailure> {
+        if !confirmed {
+            return Err(ProjectFailure::manifest(
+                "Git installation trust requires explicit confirmation",
+            ));
+        }
+        // Reinspect now, never persist renderer-supplied identity as authority.
+        let candidate = self
+            .selected_git_candidate()?
+            .ok_or_else(|| ProjectFailure::recovery("Git selection is unavailable"))?;
+        if candidate.identity != expected {
+            return Err(ProjectFailure::dirty(
+                "Git installation or verified publisher changed; inspect again",
+            ));
+        }
+        self.verify_managed_paths()?;
+        super::write_json_atomic(
+            &self.data_dir,
+            TRUST_FILE,
+            &serde_json::json!(TrustRecord {
+                schema_version: 1,
+                identity: Some(candidate.identity.clone())
+            }),
+        )?;
+        Ok(
+            serde_json::json!({"identity": candidate.identity, "trusted": true, "executionEnabled": false}),
+        )
+    }
+    pub(crate) fn revoke_git_trust(&self) -> Result<(), ProjectFailure> {
+        self.verify_managed_paths()?;
+        super::write_json_atomic(
+            &self.data_dir,
+            TRUST_FILE,
+            &serde_json::json!(TrustRecord {
+                schema_version: 1,
+                identity: None
+            }),
+        )
+    }
+    pub(super) fn admitted_git_runtime(&self) -> Result<ExecutableLease, ProjectFailure> {
+        // Every launch repeats image/installation/identity inspection. A version
+        // update with the same root/publisher can pass without a hash whitelist.
+        let candidate = self
+            .selected_git_candidate()?
+            .ok_or_else(|| ProjectFailure::recovery("select and trust a Git installation first"))?;
+        if self.read_git_trust()?.as_ref() != Some(&candidate.identity) {
+            return Err(ProjectFailure::recovery(
+                "Git installation trust needs confirmation",
+            ));
+        }
+        candidate.into_retained_runtime()
     }
 }
