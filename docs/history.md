@@ -4,6 +4,12 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전a6f27dd는 저장 복구2개 추가 시나리오 구현으로 진전했다. 이번 메인은 남은 구현을 실제 코드와 대조한 뒤 G6 편집기 자원 수명 개선을 직접 수행했다. 기존 파일 탭 전환마다 Monaco editor/model 전체를 dispose/create하던 경로를 단일 editor 유지+현재 파일 model 교체로 변경했다.
+- 탭 교체 시 이전 subscription/model/undo buffer를 해제하며 숨은 모델 cache는 만들지 않는다. layout effect에서 새 파일을 연결하고 모델별 소유 path를 확인해 이전 파일 이벤트가 새 탭 callback으로 들어가지 않게 한다. 외부 text 동기화는 변경 이벤트를 사용자 편집으로 재전달하지 않는다. 프로젝트/workspace 변경 시 기존 keyed remount와 전체 해제를 유지한다.
+- 직접 diff·git diff --check 확인. 사용자 구현 우선 방침에 따라 이번에는 빌드/자동 시험/GUI 성능 측정을 반복하지 않았다. 실제 Monaco 전환·저장·읽기전용·실패 재시도·unmount 및400MiB/부하/회수 기준은 최종 묶음 검증에서 확인해야 하며 개선 수치를 주장하지 않는다. 새 cache/패키지/worktree/CI/push/모델 실행 없음. Windows native/Git 제공 결정·원본 반영/복원 포트와 G6/출시는 계속 남는다.
+
+### 2026-11-05 · by GPT-6
+
 - b10cbb9 이후 메인이 Windows 파일 교체 syscall 직후/replaced receipt 전 실패 주입을 추가했다. 실제 rename 성공 뒤 outcome_unknown으로 종료하며 기존 제품 호출은 failure=None을 유지한다. Windows gate는 변경하지 않았다.
 - 실제 파일/SQLite 재열기 fixture를4개 상태로 확장했다. 추가2개는 replaceIntent에서 source handle을 모두 닫은 뒤 fresh flush/완료하는 경우와 cleanupComplete 이후 lock/session 완료 전에 닫힌 경우다. 각 중단 phase를 단언하고 기존 stale revision 거절·원본 불변·임시 파일 제거·최종 DB 지속성 검사를 재사용한다.
 - 로컬 Windows 진단 workflow의 compiled-test 목록에4개 통합 회귀를 추가하고 seeded snapshot 재열기와 실제 Git admission/process-kill startup E2E를 구분했다. rustfmt·YAML 파싱·git diff --check 통과. Windows native 컴파일/실행은 미검증이며 기존34 PASS로 대체하지 않는다. 새 cache/패키지/worktree/CI/push/모델 실행 없음.

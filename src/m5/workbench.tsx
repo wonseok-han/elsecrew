@@ -813,6 +813,7 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
   const editor = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const model = useRef<Monaco.editor.ITextModel | null>(null);
   const modelText = useRef<string | null>(null);
+  const syncModel = useRef<(() => void) | null>(null);
   const labels = { save: t("m5.editor.commandSave"), name: t("m5.editor.accessibleName", { path: tab.path }) };
   const refreshLabels = useRef<(() => void) | null>(null);
   const latest = useRef({ tab, readOnly, onChange, onSave, labels });
@@ -824,6 +825,7 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
     const resources: { dispose(): void }[] = [];
     const cleanup = () => {
       refreshLabels.current = null;
+      syncModel.current = null;
       for (const resource of resources.splice(0).reverse()) resource.dispose();
       editor.current = null;
       model.current = null;
@@ -832,12 +834,8 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
     void loadMonaco().then((monaco) => {
       if (cancelled || !host.current) return;
       const current = latest.current;
-      const nextModel = monaco.editor.createModel(current.tab.text, languageFor(current.tab.path));
-      resources.push(nextModel);
-      model.current = nextModel;
-      modelText.current = current.tab.text;
       const nextEditor = monaco.editor.create(host.current, {
-        model: nextModel,
+        model: null,
         theme: "vs-dark",
         automaticLayout: true,
         minimap: { enabled: false },
@@ -869,12 +867,51 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
         try { registerLabels(); }
         catch { cleanup(); setFailed(true); }
       };
-      const subscription = nextModel.onDidChangeContent(() => {
-        const text = nextModel.getValue();
-        modelText.current = text;
-        latest.current.onChange(text);
-      });
-      resources.push(subscription);
+      // Keep one editor surface and one file model. Switching tabs releases the
+      // previous model/undo buffer instead of retaining a hidden editor per file.
+      let modelPath: string | null = null;
+      let subscription: Monaco.IDisposable | null = null;
+      let synchronizing = false;
+      const releaseModel = () => {
+        subscription?.dispose();
+        subscription = null;
+        nextEditor.setModel(null);
+        model.current?.dispose();
+        model.current = null;
+        modelText.current = null;
+        modelPath = null;
+      };
+      resources.push({ dispose: releaseModel });
+      const synchronize = () => {
+        const current = latest.current;
+        if (modelPath !== current.tab.path) {
+          releaseModel();
+          const nextModel = monaco.editor.createModel(current.tab.text, languageFor(current.tab.path));
+          model.current = nextModel;
+          modelText.current = current.tab.text;
+          modelPath = current.tab.path;
+          nextEditor.setModel(nextModel);
+          const ownerPath = current.tab.path;
+          subscription = nextModel.onDidChangeContent(() => {
+            if (synchronizing || latest.current.tab.path !== ownerPath) return;
+            const text = nextModel.getValue();
+            modelText.current = text;
+            latest.current.onChange(text);
+          });
+        } else if (model.current && modelText.current !== current.tab.text) {
+          synchronizing = true;
+          try {
+            model.current.setValue(current.tab.text);
+            modelText.current = current.tab.text;
+          } finally { synchronizing = false; }
+        }
+        nextEditor.updateOptions({ readOnly: current.readOnly || current.tab.saveState === "saving" });
+      };
+      syncModel.current = () => {
+        try { synchronize(); }
+        catch { cleanup(); setFailed(true); }
+      };
+      synchronize();
     }).catch(() => {
       if (cancelled) return;
       cleanup();
@@ -884,21 +921,14 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
       cancelled = true;
       cleanup();
     };
-  }, [tab.path, attempt]);
+  }, [attempt]);
 
   useEffect(() => { refreshLabels.current?.(); }, [labels.save, labels.name]);
 
-  useEffect(() => {
-    const currentModel = model.current;
-    if (currentModel && modelText.current !== tab.text) {
-      currentModel.setValue(tab.text);
-      modelText.current = tab.text;
-    }
-  }, [tab.text]);
+  // Install the current file before paint; an old model must never send edits
+  // through the new tab's callback during a switch.
+  useLayoutEffect(() => { syncModel.current?.(); }, [tab.path, tab.text, tab.saveState, readOnly]);
 
-  useEffect(() => {
-    editor.current?.updateOptions({ readOnly: readOnly || tab.saveState === "saving" });
-  }, [tab.saveState, readOnly]);
 
   return <>{failed && <section className="m5-error" role="alert"><strong>{t("m5.feedback.failed")}</strong><p>{t("m5.feedback.help")}</p><textarea aria-label={t("m5.editor.preserved")} readOnly value={tab.text} style={{ width: "100%", minHeight: 240, boxSizing: "border-box" }} /><button type="button" onClick={() => setAttempt(value => value + 1)}>{t("m5.feedback.retry")}</button></section>}<div className="m5-monaco" ref={host} style={failed ? { display: "none" } : undefined} /></>;
 }
