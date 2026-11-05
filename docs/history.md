@@ -2,6 +2,12 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은 1ee23f9의 Windows spawn 잠금 연결로 진전했다. b5bc222에 대한 공개 CI 승인은 아직 대기 중이며 새 push/실행은 하지 않았다. 제품 제안의 M5.1~M5.4 성공 기준과 실제 작업대/편집 상태를 대조했다. Windows·G6·출시 미완료 범위는 축소하지 않는다.
+- 작업대 EditorContent의 React identity를 프로젝트 ID + workspaceIdentity에 명시 결속했다. 기존 Monaco 수명은 파일 path만 의존해 동일 경로의 다른 작업에서 인스턴스가 재사용될 여지가 있었다. 기존 bindChat은 tabs를 비우고 dirty 전환도 막지만, 편집기 폐기가 중간 빈 렌더에 의존하지 않도록 했다. 사용자 데이터 혼입을 실제 재현했다는 주장은 아니며 controller의 저장·미저장 보호 계약은 바꾸지 않았다.
+- TypeScript 전체 noEmit 검사와 직접 diff 확인 통과. 실제 Monaco 전환/되돌리기 UI 검증은 최종 통합 시 남는다. 전체 빌드·패키징·새 독립 검토·모델 호출을 반복하지 않았다. 다음은 승인 범위의 Windows native 진단과 CWD/실행 파일·파일 교체 연결, 이후 G6/제품 통합 검증이다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은 b5bc222의 Windows 감시·진단 준비로 진전했다. 요청한 b5bc222 공개 진단 push/CI 승인은 아직 응답이 없어 실행하지 않았다. 현재 turn의 추가 구현을 그 요청의 승인 범위로 간주하지 않는다.
 - Windows 임시 inheritable stdio 핸들 생성 구간을 공통 `process_spawn` mutex로 묶었다. 일반 Windows 빌드에 포함되는 chat·agent_runtime(실행 및 fixture launcher)·project fallback은 같은 SpawnGuarded 경로를 사용한다. Family는 복제 전부터 attribute와 임시 핸들이 모두 닫힐 때까지 잠금을 보유한다. 자식 실행·종료 대기에는 잠금을 유지하지 않으며 Unix는 기존 Command::spawn으로 그대로 전달한다.
 - Windows에 포함되지 않는 macOS/Unix provider 구현은 변경하지 않았다. 향후 Windows provider 입장 시 동일 spawn 경로 사용을 검증해야 한다. 잠금 오염은 실행 거부이며 자동 복구하지 않는다. 잠금 경합 회귀 초안을 추가했다. 기존 테스트 코드의 임의 std Command 실행까지 이 변경이 모두 포괄한다고 주장하지 않는다.

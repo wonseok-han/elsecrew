@@ -411,7 +411,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
             {!snapshot.tabs.includes(reloadDraft) && <p>{t("m5.editor.changed")}</p>}
           </section>}
           <div className="m5-editor-surface" hidden={snapshot.diffVisible}>
-          <EditorContent tab={activeTab} readOnly={!admissionReady || snapshot.actionBlocked} onChange={(text) => activeTab && controller.updateText(activeTab.path, text)} onSave={(path) => {
+          <EditorContent key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}`} tab={activeTab} readOnly={!admissionReady || snapshot.actionBlocked} onChange={(text) => activeTab && controller.updateText(activeTab.path, text)} onSave={(path) => {
             if (admissionReadyRef.current && controller.snapshot().activePath === path) void controller.saveActive();
           }} />
           </div>
