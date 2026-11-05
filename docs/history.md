@@ -4,6 +4,14 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은ac4315f Electron 경계78 PASS로 진전했다. 현재 잔여 항목을 현행 코드/11월 기록과 대조했다. Windows Git 제공/admission·저장 재시작 실증·원본 반영/복원 포트 및 G6 idle400MiB/출시가 남으며, 기각했던 메모리 flag 실험은 반복하지 않는다. 외부955880e push/CI 승인은 아직 대기다.
+- 이번 메인은 Git/모델 없이 동작하는 Windows 저장 재시작 통합 fixture를 추가했다. canonical snapshot manifest/.git identity marker/project/chat/session은 명시 seed하고, guard/staging anchor 준비·source identity 게시·선택적 replacement는 실제 제품 helper를 사용한다. 모든 file/lease/manager/DB를 닫은 뒤 새 Storage/ProjectManager에서 inspection과 resume 또는 abort를 호출한다.
+- 교체 후 완료와 교체 전 취소2개가 source/staging/guard 제거, 작업 파일 내용, 별도 원본 프로젝트 불변, lock/session 원자 완료와 DB 재열기 지속성을 단언한다. stale inspected revision 거절 뒤 두 원장이 불변이고 완료 후 재실행도 거절됨을 검사한다. 이는 Git snapshot 생성/SidecarSession startup/프로세스 강제 종료를 실행하는 E2E가 아니다.
+- 독립 검토가 guard 삭제 단언 누락을 지적했다. 검토 진행 중 추가한 before-lock의 정확한 guardName 기반 부재 단언과 stale revision 원장 불변 검사를 같은 검토자가 재확인해 해당 공백 해소를 확인했다. replaceIntent-syscall 직후 receipt 누락 시나리오는 이2개 시험에 포함되지 않으며 별도 native 회귀가 남는다.
+- rustfmt·git diff --check 확인. Windows cfg 시험은 아직 컴파일/실행 전이며 PASS로 기록하지 않는다. 추가 Cargo/패키지/cache/worktree/CI/push/모델 없음. 대기 승인 범위955880e에 새 fixture commit을 임의로 포함하지 않는다. 다음은 Windows 진단 및 이 전체 recovery 경로 fixture의 native 실행, 이후 실패 수리와 남은 제품 연결이다. 전체 목표는 미완료다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은16588ba 실제 SQLite 원자 완료 회귀로 진전했다. 이번 메인은 저장 복구 Electron 통합을 확인했다. 실제 SidecarClient+가짜 child JSONL transport로 다른 chat 응답과 abort 요청에 committed 응답을 거절하고 protocolInvalid로 닫는 회귀를 추가했다. 전달된 request의 inspected revision/전체 address가 그대로임도 확인한다.
 - main.ts를 실행하는 기존 보안 harness에 새 계약 import와 최소 fake sidecar 응답을 추가했다. 외부 frame·추가 path·confirmed:false·0 revision·unknown decision·추가 force가 sidecar 호출 전에 거절되며 정상 inspect/resolve는 정확히1회씩 전달됨을 검사한다. 실 Windows mutation 검증이 아닌 Electron 경계 검증이다.
 - 첫 누적 실행에서 기존 fixed-channel 정적 검사3개가 새 preload 채널 상수의 M5 접두 alias 누락으로 실패했다. 상수를 M5_SAVE_RECOVERY_CHANNEL/M5_SAVE_RECOVERY_RESOLVE_CHANNEL로 import alias해 기존 규칙을 유지했다. 동적 invoke를 허용하거나 검사를 완화하지 않았다. 복구 view의 낡은 read-only 주석도 현재 gate 기반 확인 흐름으로 교정했다.

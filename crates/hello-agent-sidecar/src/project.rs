@@ -35,6 +35,8 @@ mod windows_durability;
 mod windows_save_cleanup;
 #[cfg(any(windows, test))]
 mod save_completion;
+#[cfg(all(windows, test))]
+mod windows_save_integration_tests;
 use crate::{AppendOutcome, SidecarError, Storage};
 #[cfg(unix)]
 use cap_fs_ext::OsMetadataExt;
