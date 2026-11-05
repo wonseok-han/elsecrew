@@ -169,8 +169,17 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let original = temp.path().join("original");
         std::fs::create_dir(&original).unwrap();
-        let dir =
-            cap_std::fs::Dir::open_ambient_dir(&original, cap_std::ambient_authority()).unwrap();
+        // cap-std's normal directory open denies rename on Windows. This
+        // adversarial fixture deliberately permits deletion/rename, so the
+        // query must demonstrate that it uses the held object, not its path.
+        use std::os::windows::fs::OpenOptionsExt;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(7)
+            .custom_flags(0x02000000 | super::super::windows_fs::OPEN_REPARSE_POINT)
+            .open(&original)
+            .unwrap();
+        let dir = cap_std::fs::Dir::from_std_file(file);
         std::fs::rename(&original, temp.path().join("moved")).unwrap();
         std::fs::write(&original, b"not the held directory").unwrap();
         available(&dir).unwrap();

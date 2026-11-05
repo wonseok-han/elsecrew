@@ -508,15 +508,24 @@ pub(super) mod native {
             }
         }
         fn fixture_owner(directory: &str) -> Family {
+            use std::os::windows::io::AsHandle;
+            // The Rust test harness expects valid standard handles even when
+            // no output is captured. Give the fixture explicit NUL endpoints.
+            let null = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open("NUL")
+                .unwrap();
             let environment = BTreeMap::from([
                 ("SystemRoot".into(), std::env::var("SystemRoot").unwrap()),
                 ("HELLO_AGENT_JOB_FIXTURE".into(), "parent".into()),
             ]);
-            Family::suspended(
+            Family::suspended_with_stdio(
                 std::env::current_exe().unwrap().to_str().unwrap(),
                 &["--exact".into(), FIXTURE.into()],
                 &environment,
                 directory,
+                Some([null.as_handle(), null.as_handle(), null.as_handle()]),
             )
             .unwrap()
         }
@@ -575,7 +584,13 @@ pub(super) mod native {
         #[test]
         fn suspended_process_is_owned_before_first_instruction() {
             let directory = tempfile::tempdir().unwrap();
-            let owner = fixture_owner(directory.path().canonicalize().unwrap().to_str().unwrap());
+            let owner = Family::suspended(
+                std::env::current_exe().unwrap().to_str().unwrap(),
+                &["--exact".into(), FIXTURE.into()],
+                &BTreeMap::from([("SystemRoot".into(), std::env::var("SystemRoot").unwrap())]),
+                directory.path().canonicalize().unwrap().to_str().unwrap(),
+            )
+            .unwrap();
             assert_eq!(owner.active().unwrap(), 1);
             assert_eq!(owner.completed().unwrap(), None);
             assert!(owner.terminate(Duration::from_secs(5)).unwrap());
@@ -593,9 +608,16 @@ pub(super) mod native {
                 {
                     break;
                 }
+                assert_eq!(
+                    owner.completed().unwrap(),
+                    None,
+                    "fixture exited without a retained child (parent exit code)"
+                );
                 assert!(
                     Instant::now() < deadline,
-                    "fixture parent/child state was not observed"
+                    "fixture parent/child state was not observed: parent signal {}, active {}",
+                    unsafe { WaitForSingleObject(owner.process.as_raw_handle(), 0) },
+                    owner.active().unwrap()
                 );
                 std::thread::sleep(Duration::from_millis(10));
             }
