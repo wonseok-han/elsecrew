@@ -2,6 +2,11 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn4893df6은 Windows 저장 guard 충돌과 포트 조건 확인으로 진전했다. 이번에는 기존 G6 idle 원시 JSON과 현재 main/window 설정을 읽기 전용으로 재대조했다. static rendered31587/56894/57089의 최대 RSS는413.9/410.6/410.5MiB다. 개별 product 실행은 조건/계측이 달라 최저값을 골라 합격이나 최적화 인과로 사용하지 않는다. 이미 기각한 렌더링/spellcheck/tile 실험을 반복하지 않았으며 새 제품 최적화 근거를 찾지 못했다.
+- 현재 진전 없는 turn으로 분류한다. Windows 다음 판단에는 요청한 f41eb29 native CI 승인과 Git 제공 방식 선택이 필요하다. 실행 중인 검사/모델은 없고 기존 CI 승인은 소진됐다. 추가 미검증 helper나 동일 성능 시험으로 이를 대체하지 않는다. 이번에는 코드/빌드/캐시/워크트리/외부 변경 없음; 문서 diff 검사만 수행했다. 첫 입력 의존 정체로 기록하며 전체 목표는 active, 미완료다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은f41eb29 Windows background watcher 연결로 진전했다. 이번에는 실제 편집 저장의 commit_pending_save→PreparedTarget→rename→durability/원장 경로를 조사했다. Windows 최종 교체는 여전히 명시 거절한다. 현재 CWD lease를 target 파일 guard로 그대로 쓰면 deny-delete 때문에 의도한 저장도 차단되며, syscall 직전 해제는 보호 공백을 만든다는 설계 충돌을 확인했다.
 - Windows save 포트는 별도 guard의 durable intent/ID/cleanup, DELETE 접근 source handle과 parent-relative 단일 destination, 공유/readonly/volume 조건, 교체 후 durability와 재시작 복구까지 묶어야 한다. Microsoft FILE_RENAME_INFO/FILE_RENAME_INFORMATION 문서의 root-relative handle·길이·권한 조건을 확인하고 제품 제안서 §12에 구체적 조건과 native 회귀 목록을 기록했다. 이 문서 검토를 native 실행 증거나 저장 활성화로 표현하지 않는다.
 - 현재까지 모인 f41eb29와 컴파일/시험 호환 수정에 대한 공개 push·Windows CI 최대3회 승인을 새로 요청했다. 기존 승인3회는 소진됐으며 아직 추가 push/CI 없음. Git 제공 방식 선택도 아직 대기다. 새 code/build/cache/worktree·모델 호출·원본 쓰기 없음. 문서 diff 검사 통과.
