@@ -150,6 +150,18 @@ impl Descriptor {
 pub(super) fn copy_access(previous: &File, replacement: &File) -> Result<String, ProjectFailure> {
     let original = Descriptor::read(previous)?;
     let expected = original.normalized()?;
+    // A newly created source can already have exactly the target descriptor.
+    // Reapplying an unprotected DACL invokes Windows inheritance processing and
+    // can change its representation. Avoid that mutation when nothing differs;
+    // still recheck the original so this is not an optimistic bypass.
+    if Descriptor::read(replacement)?.normalized()? == expected {
+        if Descriptor::read(previous)?.normalized()? != expected {
+            return Err(ProjectFailure::recovery(
+                "Windows save security changed during preservation",
+            ));
+        }
+        return Ok(digest(&expected));
+    }
     let protection = if original.protected {
         0x8000_0000
     } else {

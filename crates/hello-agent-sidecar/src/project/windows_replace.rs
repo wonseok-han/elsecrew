@@ -33,14 +33,29 @@ struct RenameInfo {
     name: [u16; 1],
 }
 
-#[link(name = "kernel32")]
+// IO_STATUS_BLOCK contains a pointer-sized status/pointer union and ULONG_PTR.
+#[repr(C)]
+#[derive(Default)]
+struct IoStatusBlock {
+    status: usize,
+    information: usize,
+}
+
+const _: () = assert!(offset_of!(RenameInfo, root) == size_of::<usize>());
+const _: () = assert!(offset_of!(RenameInfo, name_bytes) == 2 * size_of::<usize>());
+const _: () = assert!(offset_of!(RenameInfo, name) == 2 * size_of::<usize>() + 4);
+const _: () = assert!(size_of::<IoStatusBlock>() == 2 * size_of::<usize>());
+
+#[link(name = "ntdll")]
 extern "system" {
-    fn SetFileInformationByHandle(
+    fn NtSetInformationFile(
         handle: *mut c_void,
-        class: i32,
+        status: *mut IoStatusBlock,
         information: *const c_void,
         bytes: u32,
+        class: i32,
     ) -> i32;
+    fn RtlNtStatusToDosError(status: i32) -> u32;
 }
 
 /// Does not open a source pathname or resolve a multi-component destination.
@@ -78,19 +93,25 @@ pub(super) fn replace(
         );
     }
     destination.validate()?;
-    // FileRenameInfo = 3. RootDirectory is the pinned parent, not process CWD.
+    // Native FileRenameInformation = 10 supports the held RootDirectory. The
+    // Win32 FileRenameInfo wrapper rejected this relative form with error 87.
+    // source_options creates a synchronous file (no FILE_FLAG_OVERLAPPED), so
+    // the native call completes before this stack-owned IO_STATUS_BLOCK expires.
+    let mut completion = IoStatusBlock::default();
     let result = unsafe {
-        SetFileInformationByHandle(
+        NtSetInformationFile(
             source.as_raw_handle(),
-            3,
+            &mut completion,
             words.as_ptr().cast(),
             length as u32,
+            10,
         )
     };
-    if result == 0 {
+    if result < 0 {
+        let code = unsafe { RtlNtStatusToDosError(result) };
         return Err(ProjectFailure::recovery(format!(
-            "Windows handle-relative replace failed: {}",
-            std::io::Error::last_os_error()
+            "Windows handle-relative replace failed: {} (NTSTATUS {result:#x})",
+            std::io::Error::from_raw_os_error(code as i32)
         )));
     }
     // Success here is rename only; never clear a durable save lock here.
