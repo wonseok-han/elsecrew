@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준3d764e2의 깨끗한 통합 checkout에서 Git family의 자손 CREATE_PROCESS image 대조를 연결했다. DLL 관찰을 구성한 Git owner는 모든 생성 이벤트의 실제 hFile이 root runtime과 동일한 full file ID인지 확인한 뒤에만 계속한다. 같은 파일의 hardlink 재실행은 허용하지만 companion 보유 자체를 EXE 실행 허가로 취급하지 않으며 다른 helper/shell은 거절한다. 기존 비Git fixture의 root-only image 계약은 유지한다.
+- 동일 runtime hardlink 허용·다른 companion EXE 거부 native 회귀를 추가했다. 실제 Git 배포본이 별도 file ID의 helper를 필요로 하는지는 아직 검증되지 않았다. 이를 모든 Git 명령 호환 완료로 표현하지 않으며, 필요한 helper는 명시 inventory/정책으로 연결해야 한다. 이번은 rustfmt/diff만 확인했고 Windows compile/native·누적 회귀는 뒤에 묶어서 진행한다.
+- 설치 root 신뢰 동의 정책은 아직 답변 대기다. 제품 gate/유료 모델/사용자 프로젝트/push/CI/패키지 변경 없음. 다음은 승인된 신뢰 정책을 단일 Git admission과 앱의 확인 흐름에 연결하고 Windows 원본 반영/복원 및 최종 누적 검증을 이어가는 것이다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준39416fe의 깨끗한 통합 checkout에서 실제 LOAD_DLL 이벤트 검사를 연결했다. Git runtime 후보는 retained companion inventory와 시스템 module 관찰을 함께 구성하고, supervisor는 root뿐 아니라 family의 DLL 이벤트를 해당 owner에 전달한다. 실제 hFile의 full file ID를 보유한 image와 대조하고 handle 부재/불일치는 ContinueDebugEvent 전에 거절한다. 이벤트 handle은 성공/오류 모두 닫으며 기존 종료/poisoned pin 정책을 유지한다.
 - inventory 외 DLL은 GetSystemDirectoryW로 얻은 Windows native 시스템 폴더의 직접 DLL만 별도 분류한다. 환경변수·PATH·자식 제공 파일명 대신 held GUID 경로/부모/다시 연 파일 ID를 비교하고 해당 image도 family 소유권으로 보유한다. 시스템 폴더 밖 임의 DLL은 허용하지 않는다. 이는 신뢰하는 OS 설치 경계에 의존하며 WinSxS/보안 제품 주입 DLL/다른 architecture의 호환성까지 증명하지 않는다. 자손 EXE 정책과 설치 root 사용자 동의·단일 spawn admission 연결은 여전히 남고 제품 gate는 비활성이다.
 - [Microsoft DLL debug event](https://learn.microsoft.com/en-us/windows/win32/api/minwinbase/ns-minwinbase-load_dll_debug_info)·[검색 순서](https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order)를 확인했다. inventory DLL/추가 DLL 거절·시스템 kernel32 허용/동명 외부 파일 거절 native 회귀를 추가했다. 구현 우선 지시에 따라 실행하지 않았고 rustfmt/diff만 확인했다. 신규 빌드/cache/CI/push/모델 없음. 설치 root 신뢰 정책 응답은 아직 대기하며 이 작업을 제품 검증 완료로 표현하지 않는다.

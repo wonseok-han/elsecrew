@@ -266,7 +266,7 @@ fn pump(launch: &Launch, stop: &AtomicBool) -> io::Result<u32> {
                     "first debug event does not identify owned root",
                 ))
             } else {
-                let image = if members.is_empty() || event.code == 6 {
+                let image = if members.is_empty() || matches!(event.code, 3 | 6) {
                     launch.executable.as_ref().map(|pin| pin.resource())
                 } else {
                     None
@@ -329,9 +329,14 @@ fn handle_event(
     match event.code {
         3 => {
             let created = unsafe { event.data.create };
+            // A Git invocation permits re-execution of its inspected runtime
+            // (including hard links to that same file), not arbitrary helpers,
+            // shells or repository executables. Non-Git fixture owners retain
+            // their existing root-only image contract.
+            let image = image.filter(|image| members.is_empty() || image.observes_dependencies());
             let verified = if let Some(image) = image {
                 if created.file.is_null() || created.file as isize == -1 {
-                    Err(io::Error::other("root image handle is unavailable"))
+                    Err(io::Error::other("process image handle is unavailable"))
                 } else {
                     // This event precedes user-mode execution. Compare the actual
                     // image object, never the optional process-supplied filename.

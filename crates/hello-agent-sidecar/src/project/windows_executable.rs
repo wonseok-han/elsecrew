@@ -160,6 +160,26 @@ mod tests {
     use super::*;
     use cap_std::ambient_authority;
     #[test]
+    fn process_identity_accepts_runtime_hardlink_but_not_other_companion() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("git.exe"), b"runtime").unwrap();
+        std::fs::hard_link(
+            temp.path().join("git.exe"),
+            temp.path().join("git-helper.exe"),
+        )
+        .unwrap();
+        std::fs::write(temp.path().join("other.exe"), b"other").unwrap();
+        let dir = Dir::open_ambient_dir(temp.path(), ambient_authority()).unwrap();
+        let runtime = ExecutableLease::acquire(&dir, OsStr::new("git.exe")).unwrap();
+        let other = ExecutableLease::acquire(&dir, OsStr::new("other.exe")).unwrap();
+        let runtime = runtime.retain_companions(vec![other]).unwrap();
+        let hardlink = std::fs::File::open(temp.path().join("git-helper.exe")).unwrap();
+        runtime.verify_loaded_image(&hardlink).unwrap();
+        let other = std::fs::File::open(temp.path().join("other.exe")).unwrap();
+        assert!(runtime.verify_loaded_image(&other).is_err());
+    }
+
+    #[test]
     fn observed_dependencies_require_inventory_or_system_identity() {
         let temp = tempfile::tempdir().unwrap();
         for name in ["git.exe", "known.dll", "added.dll"] {
