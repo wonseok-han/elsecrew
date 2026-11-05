@@ -2,6 +2,12 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은 976011a 편집기 수명 결속 변경으로 진전했다. 현재 HEAD·깨끗한 워킹 트리·Darwin 호스트 및 설치 target(aarch64-apple-darwin만)을 다시 확인했다. Windows native 진단 workflow는 준비됐지만 실행되지 않았다.
+- b5bc222 진단 push/CI 승인 대기가 최근 세 goal turn에 계속 남아 있다. 그동안 독립 로컬 구현인 spawn 잠금과 편집기 결속을 완료했다. 다음 Windows 연결 판단에는 현재 native 기반의 컴파일/실행 증거가 필요하며, macOS check 또는 추가 미검증 helper로 대체하지 않는다. Windows 환경도 별도로 제공되지 않았다. 사용자 응답 없이 반복 승인 요청이나 추가 공개 push는 하지 않는다.
+- 자동 목표를 입력 대기(blocked)로 전환한다. 완료·일시중지가 아니며 전체 목표와 Windows/G6/출시 잔여 범위를 유지한다. 재개 입력은 이미 제시한 b5bc222의 새 진단 브랜치 push·CI 최대3회 승인 또는 사용할 Windows 검증 환경이다. 이후 커밋 1ee23f9·976011a는 그 기존 승인 요청에 자동 포함하지 않는다. 이 turn에서는 코드 수정/빌드/모델 호출/외부 변경 없음.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은 1ee23f9의 Windows spawn 잠금 연결로 진전했다. b5bc222에 대한 공개 CI 승인은 아직 대기 중이며 새 push/실행은 하지 않았다. 제품 제안의 M5.1~M5.4 성공 기준과 실제 작업대/편집 상태를 대조했다. Windows·G6·출시 미완료 범위는 축소하지 않는다.
 - 작업대 EditorContent의 React identity를 프로젝트 ID + workspaceIdentity에 명시 결속했다. 기존 Monaco 수명은 파일 path만 의존해 동일 경로의 다른 작업에서 인스턴스가 재사용될 여지가 있었다. 기존 bindChat은 tabs를 비우고 dirty 전환도 막지만, 편집기 폐기가 중간 빈 렌더에 의존하지 않도록 했다. 사용자 데이터 혼입을 실제 재현했다는 주장은 아니며 controller의 저장·미저장 보호 계약은 바꾸지 않았다.
 - TypeScript 전체 noEmit 검사와 직접 diff 확인 통과. 실제 Monaco 전환/되돌리기 UI 검증은 최종 통합 시 남는다. 전체 빌드·패키징·새 독립 검토·모델 호출을 반복하지 않았다. 다음은 승인 범위의 Windows native 진단과 CWD/실행 파일·파일 교체 연결, 이후 G6/제품 통합 검증이다.
