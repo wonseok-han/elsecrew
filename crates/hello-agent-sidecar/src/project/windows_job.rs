@@ -442,6 +442,9 @@ pub(super) mod native {
             Ok(accounting.active)
         }
 
+        /// Provisional accounting result, NOT a complete descendant-exit barrier.
+        /// Windows CI observed an unsignaled child after this returned Some.
+        /// Keep product admission closed until all-member termination is proven.
         pub(crate) fn completed(&self) -> io::Result<Option<u32>> {
             match unsafe { WaitForSingleObject(self.process.as_raw_handle(), 0) } {
                 258 => return Ok(None),
@@ -654,7 +657,8 @@ pub(super) mod native {
     }
 
     // Dropping the unnamed job closes its only inheritable-free handle and
-    // requests kernel cleanup. Only completed()/terminate() prove completion.
+    // requests kernel cleanup. completed()/terminate() currently do NOT prove
+    // every descendant handle is signaled; see the failing native regression.
 }
 
 #[cfg(test)]

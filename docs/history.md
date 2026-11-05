@@ -2,6 +2,14 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 세 번째 승인 CI [41977646539](https://github.com/wonseok-han/hello-agent/actions/runs/41977646539), d36b22c는 Windows 컴파일 성공·16 PASS/1 FAIL이다. 디스크 quota 조회의 held-handle rename 회귀가 통과해 ReOpenFile 접근 거부 결함을 해소했다. watcher 단계는 앞선 실패로 skipped이므로 합격/실행으로 기록하지 않는다. raw 로그·run metadata는 `.artifacts/m5-windows-native-41977646539/`에 보존한다.
+- 중요한 실제 결함: Job terminate가 true, completed가 Some을 반환한 직후 별도로 보유한 실제 자손 process handle은 WaitForSingleObject(0)=258(미종료)이었다. parent signal + ActiveProcesses=0만으로 모든 자손의 종료를 증명한다는 기존 판단은 반증됐다. 단순 sleep이나 시험 기대값 완화로 덮지 않으며 전체 자손 handle/종료 증거 계약을 보완해야 한다. Windows 제품/G4/stdio/실제 공급자 차단은 유지한다.
+- 앞선 fixture 수정만의 문제라는 추정에서 종료 판정 구현 결함으로 판단을 갱신했다. 독립 검토자에게 이 실제 증거 기반의 종료 보장 설계 검토를 요청했다. 기존 정적 검토 통과는 이 native 실패를 뒤집지 않는다.
+- 이번 사용자 승인3/3회 소진·추가 실행0회. 공개된 최종 진단 commit은 d36b22c이며 이후 공통 spawn 잠금/UI 변경은 이번 증거 범위 밖이다. 동일 호환 수정은 통합 브랜치 c50d200·fe0cae4에 보존했다. 미커밋 없는 시험 worktree `/private/tmp/hello-agent-windows-native-fixes`는 제거했고 의존성/로컬 빌드 캐시는 새로 만들지 않았다. main 병합·제품 활성화·패키징·모델 호출 없음.
+- 다음: 모든 자손 종료 확인 계약/구현 보완, 그다음 별도 승인 후 Windows 재검증. CWD/실행 파일·파일 교체·watcher와 G6/출시는 여전히 남는다. 자동 목표는 완료가 아니며 검토·구현을 계속한다.
+
+### 2026-11-05 · by GPT-6
+
 - 두 번째 Windows native CI41976810920(976a2b9)는 컴파일 성공 후15 PASS·2 FAIL이다. 디렉터리 rename fixture는 다음 단계까지 진행했지만 ReOpenFile 자체가 접근 거부5로 실패했다. parent/child 시험은 parent signal0·Job active2를 관측했으므로 앞선 NUL stdio 보완만으로 해결되지 않았다. watcher 실행 단계는 앞선 실패 때문에 아직 실행되지 않았다.
 - 디스크 조회는 ReOpenFile을 제거하고 기존 Dir의 복제 핸들로 직접 NtQueryVolumeInformationFile을 호출하도록 수정했다. 전체 신원·local volume·반환 길이·quota geometry 검사는 유지한다. 복제된 file object의 signal을 자기 요청 완료로 오인하지 않도록, 예외적 STATUS_PENDING은 native 출력/핸들을 보유한 채 즉시 실패한다. 경로 재조회나 안전 계약 완화는 없다.
 - 자손 시험은 활성 멤버가 정확히1개라는 가정을 제거하고 임시 cwd에 기록한 실제 child PID를 SYNCHRONIZE 핸들로 연다. 부모 exit0·자손 live·completed(None), Job 종료 후 자손 signal·Job empty를 확인한다. 콘솔 등 추가 멤버가 있어도 실제 자손 종료 조건을 생략하지 않는다.
@@ -115,8 +123,9 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+- **Windows Job 종료 판정 반증(2026-11-05)**: 실제 CI41977646539에서 parent signal+Job active0/terminate(true) 뒤에도 별도 보유 자손 handle은 WAIT_TIMEOUT이었다. 기존 completed()/terminate()를 모든 자손 종료 증거로 인용하지 않는다. 임의 지연·카운트 완화로 해결하지 않으며 native gate는 닫아 둔다. 동일 실행의 disk capacity 회귀는 PASS, 전체16PASS1FAIL·watcher skipped다.
 - **Windows CWD 공유 잠금의 한계(2026-11-05)**: deny-share-write/delete만으로 reparse 불변을 증명하지 않는다. attribute 접근은 공유 제한과 별개이며 MS-FSA는 FILE_WRITE_ATTRIBUTES로 reparse 설정을 허용한다. CWD admission은 미완료이고 Windows gate는 유지한다.
-- **Windows 프로세스 연결 조건(2026-11-05)**: Job 생성 시 결속과 제한 시간/취소 가능한 stdio transport 기반은 아직 Git에 미연결·native 미검증이다. stdio가 없으면 STARTF_USESTDHANDLES를 켜지 않으며, 지정 시 임시 복제 핸들+HANDLE_LIST만 전달한다. 다른 broad-inherit spawn과의 경합 방지 및 CWD 권한·Git 호출 연결 및 native 묶음 검증 전에는 Windows gate를 열지 않는다. Drop의 Job close는 종료 요청이며 완료 증거는 부모 signal과 active-process 0의 확인이다.
+- **Windows 프로세스 연결 조건(2026-11-05)**: Job 생성 시 결속과 제한 시간/취소 가능한 stdio transport 기반은 아직 Git에 미연결·native 미검증이다. stdio가 없으면 STARTF_USESTDHANDLES를 켜지 않으며, 지정 시 임시 복제 핸들+HANDLE_LIST만 전달한다. 다른 broad-inherit spawn과의 경합 방지 및 CWD 권한·Git 호출 연결 및 native 묶음 검증 전에는 Windows gate를 열지 않는다. Drop의 Job close는 종료 요청이며 부모 signal과 active-process 0만으로는 전체 종료 증거가 되지 않는다(11/05 native 반증 참조).
 - **기존 원본 경로 재확인 (2026-11-02)**: 과거 경로 철자는 source_identity로도 복원할 수 없다. native 폴더 선택으로만 `native_path_binding`을 보강하며 catalog reopen/원본 접근은 없는 표식을 자동 생성하지 않는다. 재선택은 기존 snapshot과 복구 상태를 보존한다.
 - **2026-11-02 Windows 경로 fixture**: host 절대경로와 canonical wire 경로는 구분한다. 실행 41394071830에서 core 226·protocol 65·sidecar 313 PASS, 마지막 fixture 1개는 수정 후 focused 실행 41399404281에서 PASS했다. 최신 전체 suite 단일 재실행/Windows 제품 합격은 아니다. 원장 테스트에 native 역슬래시 경로를 넣지 않으며 제품 검증·실제 공급자 차단은 유지한다.
 
