@@ -4,6 +4,14 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은542b9c3의 확인 기반 복구 연결로 진전했다. 이번 메인은 누적 Windows 저장/복구 native 진단용 workflow를 준비했다. 새 codex/m5-windows-save-recovery-20261105에서만 동작하며20분 상한/jobs4/threads4/incremental0이다. 필요한12개 테스트가 compiled list에 존재하는지 확인한 뒤 Windows primitive/helper 전체와 direct-request gate 검사를 실행한다. 패키징/활성화/인증/모델은 포함하지 않는다.
+- 기존 project Fixture는 /usr/bin/git를 직접 호출하고 Windows Git admission과 전체 save-session 생성도 미연결이므로 이 진단을 full save-session restart/UI/power-loss 합격으로 표현하지 않는다. 현재 helper 기반 범위와 전체 통합 공백을 workflow summary에 명시했다.
+- 실제 dispatcher에 complete/abort의 confirmed 요청을 직접 보내 gate가 닫힌 상태에서 methodUnavailable인 것을 확인하는 회귀를 추가했다. confirmed:false/0 또는 JS-safe 초과 revision/unknown decision/추가 force 인자는 invalidParams이며 그 후 system.status가 계속 응답함을 확인한다.
+- CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo test -p hello-agent-sidecar --locked --offline --lib windows_save_recovery_gate_rejects_direct_confirmed_requests -- --nocapture:1 PASS/0 ignored, 기존 target 증분 컴파일15.98초·시험0.24초. macOS 증거이며 Windows 미실행이다. workflow YAML 파싱·git diff --check 통과. df 확인 여유537GiB. 새 worktree/패키지/모델/CI/push 없음.
+- 기존 승인 잔여1회는 f41eb29와 시험 호환 수정에 한정되므로 새 저장/복구 기능을 공개하는 데 쓰지 않는다. 새 진단 커밋 공개와 최대3회 CI에 별도 승인을 요청할 준비를 마쳤다. 승인 대기 중에도 전체 세션 재시작 fixture 등 로컬 구현을 계속할 수 있다. Windows 제품/G6/출시와 전체 앱 목표는 미완료다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은549c69a 복구 조회 UI로 진전했다. 이번 메인 작업은 명시 확인을 받는 복구 변경 계약을 UI→preload→main-frame IPC→client→sidecar→기존 내부 complete/abort까지 연결했다. exact workspace 참조/saveId/양수 JS-safe expectedLockRevision/decision/confirmed:true를 요구하고 결과 주소·saveId·예상 outcome·version도 검증한다.
 - 공용 WINDOWS_SAVE_RECOVERY_MUTATIONS_ENABLED=false를 조회 actionsAvailable과 sidecar 실행 admission 양쪽에 적용했다. 제품 활성화가 아니며 직접 IPC/프로토콜 호출로도 gate를 우회할 수 없다. Windows native QA와 별도 활성화 결정은 남아 있다.
 - UI는 gate와 현재 observation/phase 조합이 맞을 때만 동작을 제안하고 파일/처리 설명 뒤 별도 확인을 받는다. 요청 전에 inspection을 소모하고 중복 클릭을 막는다. 오류는 unknown으로 표시하고 자동 재시도하지 않으며 상태를 다시 조회해야 한다. ko/en 완료/취소/불확실 안내를 추가했다. 성공 응답의 해당 client save session만 제거한다.

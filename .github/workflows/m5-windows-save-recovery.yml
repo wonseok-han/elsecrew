@@ -1,0 +1,56 @@
+name: M5 Windows save recovery (diagnostic only)
+
+on:
+  push:
+    branches:
+      - codex/m5-windows-save-recovery-20261105
+
+permissions:
+  contents: read
+
+jobs:
+  save-recovery:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: 4
+      CARGO_INCREMENTAL: 0
+      RUST_TEST_THREADS: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Require compiled save and recovery regressions
+        shell: pwsh
+        run: |
+          $tests = cargo test --locked --release -p hello-agent-sidecar --lib -- --list
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $required = @(
+            'project::windows_replace::tests::replacement_is_relative_to_pinned_parent_and_preserves_guard',
+            'project::windows_remove::tests::cleanup_requires_exact_identity_and_preserves_guard_and_foreign_files',
+            'project::windows_durability::tests::ntfs_write_through_source_can_be_flushed_after_handle_relative_rename',
+            'project::windows_security::tests::replacement_preserves_inherited_access_in_same_parent',
+            'project::windows_security::tests::replacement_preserves_protected_access_descriptor_without_changing_old_file',
+            'project::windows_save_recovery::tests::preparing_original_identity_is_used_before_replace_intent',
+            'project::windows_save_recovery::tests::same_content_with_different_identity_is_not_original',
+            'project::windows_save_recovery::tests::oversized_recovery_artifact_is_rejected',
+            'project::windows_save_cleanup::tests::abort_preserves_unknown_artifacts_and_rejects_changed_original',
+            'project::windows_save_cleanup::tests::recovery_flush_requires_exact_replacement_and_preserves_bytes',
+            'project::windows_save_cleanup::tests::interrupted_cleanup_accepts_absence_but_preserves_reused_name',
+            'tests::windows_save_recovery_gate_rejects_direct_confirmed_requests'
+          )
+          foreach ($name in $required) {
+            if (-not ($tests | Select-String -SimpleMatch "${name}: test")) { throw "Missing regression: $name" }
+          }
+      - name: Exercise native Windows primitives and save helpers
+        run: cargo test --locked --release -p hello-agent-sidecar --lib project::windows_ -- --nocapture
+      - name: Reject unactivated recovery through the request dispatcher
+        run: cargo test --locked --release -p hello-agent-sidecar --lib tests::windows_save_recovery_gate_rejects_direct_confirmed_requests -- --exact --nocapture
+      - name: Record limits
+        if: always()
+        shell: pwsh
+        run: |
+          @'
+          Diagnostic: Windows compilation, native primitives/save helpers, and closed recovery admission.
+          Not a full save-session restart, packaged UI, power-loss, or release qualification.
+          No product activation, packaging, credentials, model calls, or user projects.
+          '@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
