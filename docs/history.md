@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-11-05 · by GPT-6
+
+- 사용자의 활성 목표를 따라 중단했던 3de4ec4의 Windows 프로세스 관리 구현을 재개했다. 이전 turn은 구현 중 사용자 일시중지였으며, 현재 워킹 트리와 종료된 macOS check 로그(3.39초 PASS)를 확인했다. 원격 focused CI 승인은 이미 사용된 기록이므로 추가 push/CI는 실행하지 않았다.
+- `project/windows_job.rs`는 생성과 동시에 Job에 연결한 suspended 프로세스, 단일 resume, 부모 종료와 Job active-process 0을 함께 확인하는 종료 판정, 명시 종료 예산을 구현한다. 지정한 입출력 핸들만 임시 inheritable 복제본과 HANDLE_LIST로 전달하며 원래 핸들의 상속 설정은 바꾸지 않는다. 검토에서 지적된 null stdio에 STARTF_USESTDHANDLES를 켜던 오류는 명시 핸들이 있을 때만 설정하도록 수정했다.
+- native 회귀 초안은 생성 직후 소유·부모 종료 후 자손 잔류·명시 stdout/stderr 전달·64비트 ABI 크기를 포함한다. macOS에서 문자열 인자 escape 검사 1개와 rustfmt/diff 검사는 통과했다. Windows target은 설치되지 않아 native 컴파일/실행은 미검증이다. Git transport/deadline·CWD 권한 연결과 Windows 제품 활성화는 아직 하지 않았다. 전체 회귀·패키징·모델 호출을 반복하지 않았다.
+- 독립 재검토에서 현재 기반의 추가 차단 결함 없음. 이는 Windows 실행 합격이 아니다. 남은 연결 조건: 기존 broad-inherit spawn과의 상속 경합 방지, 제한된 pipe 입출력·취소/시간 제한, 경로 문자열 이상의 CWD 결속. Job은 일반 자손 소유 수단이지 외부 broker를 이용한 임의 코드 격리 보장이 아니다. Windows G4/stdio/실제 공급자 차단은 유지하며 이후 파일 교체·감시·묶음 native 검증도 남는다.
+
+### 2026-11-02 · by GPT-6
+
+- 사용자 요청으로 목표를 일시중지했다. 기준 3de4ec4에서 Windows Job Object 프로세스 소유 기반(`project/windows_job.rs` 및 module 선언)을 작성하던 중이며 미커밋 상태로 남긴다. 생성 시 Job 연결·suspended 시작·명시 종료/잔여 프로세스 확인과 native 회귀 초안이 포함된다. Git pipe/작업 디렉터리 안전 연결은 아직 하지 않았고 Windows 활성화도 하지 않았다.
+- 중지 시 독립 검토를 중단했다. Windows 컴파일/실행·최종 검토는 미완료이며 이 변경을 합격으로 취급하지 않는다. 재개 시 현재 diff와 진행 중이던 macOS check 로그(`/private/tmp/m5-windows-job-check.log`)부터 확인한다. 이번 미커밋 작업의 push·모델 실행 없음.
+
 ### 2026-11-02 · by GPT-6
 
 - 이전 turn의 Windows 파일 핸들 기반 구현에 이어, 깨끗한 65f68c6에서 Windows snapshot 디스크 여유 공간 조회를 연결했다. `windows_space.rs`는 원본 경로를 재조회하지 않고 ReOpenFile로 얻은 동기 핸들에 NtQueryVolumeInformationFile을 호출한다. 사용자 quota가 반영된 가용 allocation 수를 사용하며 음수·모순된 geometry·곱셈 overflow를 거부한다.
@@ -48,6 +60,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+- **Windows 프로세스 연결 조건(2026-11-05)**: Job 생성 시 결속 기반은 아직 Git에 미연결·native 미검증이다. stdio가 없으면 STARTF_USESTDHANDLES를 켜지 않으며, 지정 시 임시 복제 핸들+HANDLE_LIST만 전달한다. 다른 broad-inherit spawn과의 경합 방지 및 CWD 권한·pipe 예산 연결 전에는 Windows gate를 열지 않는다. Drop의 Job close는 종료 요청이며 완료 증거는 부모 signal과 active-process 0의 확인이다.
 - **기존 원본 경로 재확인 (2026-11-02)**: 과거 경로 철자는 source_identity로도 복원할 수 없다. native 폴더 선택으로만 `native_path_binding`을 보강하며 catalog reopen/원본 접근은 없는 표식을 자동 생성하지 않는다. 재선택은 기존 snapshot과 복구 상태를 보존한다.
 - **2026-11-02 Windows 경로 fixture**: host 절대경로와 canonical wire 경로는 구분한다. 실행 41394071830에서 core 226·protocol 65·sidecar 313 PASS, 마지막 fixture 1개는 수정 후 focused 실행 41399404281에서 PASS했다. 최신 전체 suite 단일 재실행/Windows 제품 합격은 아니다. 원장 테스트에 native 역슬래시 경로를 넣지 않으며 제품 검증·실제 공급자 차단은 유지한다.
 

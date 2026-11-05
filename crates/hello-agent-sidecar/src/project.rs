@@ -5,6 +5,8 @@ mod path_binding;
 mod windows_fs;
 #[cfg(any(windows, test))]
 mod windows_space;
+#[cfg(any(windows, test))]
+mod windows_job;
 use crate::{AppendOutcome, SidecarError, Storage};
 #[cfg(unix)]
 use cap_fs_ext::OsMetadataExt;
