@@ -2,6 +2,13 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 두 번째 Windows native CI41976810920(976a2b9)는 컴파일 성공 후15 PASS·2 FAIL이다. 디렉터리 rename fixture는 다음 단계까지 진행했지만 ReOpenFile 자체가 접근 거부5로 실패했다. parent/child 시험은 parent signal0·Job active2를 관측했으므로 앞선 NUL stdio 보완만으로 해결되지 않았다. watcher 실행 단계는 앞선 실패 때문에 아직 실행되지 않았다.
+- 디스크 조회는 ReOpenFile을 제거하고 기존 Dir의 복제 핸들로 직접 NtQueryVolumeInformationFile을 호출하도록 수정했다. 전체 신원·local volume·반환 길이·quota geometry 검사는 유지한다. 복제된 file object의 signal을 자기 요청 완료로 오인하지 않도록, 예외적 STATUS_PENDING은 native 출력/핸들을 보유한 채 즉시 실패한다. 경로 재조회나 안전 계약 완화는 없다.
+- 자손 시험은 활성 멤버가 정확히1개라는 가정을 제거하고 임시 cwd에 기록한 실제 child PID를 SYNCHRONIZE 핸들로 연다. 부모 exit0·자손 live·completed(None), Job 종료 후 자손 signal·Job empty를 확인한다. 콘솔 등 추가 멤버가 있어도 실제 자손 종료 조건을 생략하지 않는다.
+- 변경은 두 번째 CI가 드러낸 Windows native 호환 수정 범위다. 포맷/diff 검사 통과, 마지막 승인1회 실행 전 검토 중이다. 제품 gate·모델·패키징·main 병합은 건드리지 않는다.
+
+### 2026-11-05 · by GPT-6
+
 - 사용자 승인 첫 Windows native CI 41975775061은 b5bc222 release 컴파일(3분03초) 성공 후 17개 중15 PASS·2 FAIL(10.01초)로 끝났다. Job 생성/명시 stdio·전체 ABI 크기, pipe 입출력/취소/제한시간, transport 출력·종료 및 파일 handle/reparse 검사는 통과했다. Windows 제품 합격은 아니다.
 - 실패한 disk-space fixture는 cap-std directory handle이 rename을 막아 공유 위반32로 중단됐다. 시험에만 share-delete 핸들을 사용해 실제 rename 뒤 원본 경로를 파일로 바꾸는 기존 검증을 유지한다. parent/child Job fixture는 Rust test harness에 명시 NUL stdio를 제공하고 timeout 시 parent signal/active 수를 남기도록 수정했다. 이 수정의 성공은 아직 미검증이다. stdio 없는 suspended 생성 검사는 별도로 유지한다.
 - Windows watcher 테스트는 기존 project/tests.rs 자체가 not(windows)여서 컴파일되지 않는 누락을 확인했다. 전용 watch_native_tests 모듈로 128단계 yield·root 교체·잘못된 retained descendant·rename 차단 또는 신원 재확인을 검사한다. CI에 4개 필수 테스트의 존재 검사를 넣어 0-test 녹색을 거부한다. production 정책/게이트는 변경하지 않았다.

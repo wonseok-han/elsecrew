@@ -485,7 +485,7 @@ pub(super) mod native {
         fn family_fixture() {
             let mode = std::env::var("HELLO_AGENT_JOB_FIXTURE").unwrap_or_default();
             if mode == "parent" {
-                std::process::Command::new(std::env::current_exe().unwrap())
+                let child = std::process::Command::new(std::env::current_exe().unwrap())
                     .args(["--exact", FIXTURE])
                     .env_clear()
                     .env("SystemRoot", std::env::var("SystemRoot").unwrap())
@@ -495,6 +495,7 @@ pub(super) mod native {
                     .stderr(std::process::Stdio::null())
                     .spawn()
                     .unwrap();
+                std::fs::write("fixture-child.pid", child.id().to_string()).unwrap();
             } else if mode == "output" {
                 use std::io::Write;
                 std::io::stdout().write_all(b"HELLO_JOB_STDOUT").unwrap();
@@ -600,7 +601,7 @@ pub(super) mod native {
             let deadline = Instant::now() + Duration::from_secs(10);
             loop {
                 if unsafe { WaitForSingleObject(owner.process.as_raw_handle(), 0) } == 0
-                    && owner.active().unwrap() == 1
+                    && owner.active().unwrap() > 0
                 {
                     break;
                 }
@@ -617,10 +618,34 @@ pub(super) mod native {
                 );
                 std::thread::sleep(Duration::from_millis(10));
             }
+            let mut parent_code = 0;
+            assert_ne!(
+                unsafe { GetExitCodeProcess(owner.process.as_raw_handle(), &mut parent_code) },
+                0
+            );
+            assert_eq!(parent_code, 0);
+            // The job may include console-host processes as well. Bind to the
+            // actual spawned fixture PID instead of assuming exactly one member.
+            #[link(name = "kernel32")]
+            extern "system" {
+                fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
+            }
+            let pid: u32 = std::fs::read_to_string(directory.path().join("fixture-child.pid"))
+                .unwrap()
+                .parse()
+                .unwrap();
+            let raw = unsafe { OpenProcess(0x00100000, 0, pid) }; // SYNCHRONIZE only
+            assert!(!raw.is_null(), "{}", io::Error::last_os_error());
+            let child = unsafe { OwnedHandle::from_raw_handle(raw) };
+            assert_eq!(
+                unsafe { WaitForSingleObject(child.as_raw_handle(), 0) },
+                258
+            );
             assert_eq!(owner.completed().unwrap(), None);
             assert!(owner.start().is_err());
             assert!(owner.terminate(Duration::from_secs(5)).unwrap());
             assert!(owner.completed().unwrap().is_some());
+            assert_eq!(unsafe { WaitForSingleObject(child.as_raw_handle(), 0) }, 0);
         }
     }
 
