@@ -433,6 +433,9 @@ mod tests {
         junction_on_existing(&control, &outside).unwrap();
         let dir = authority(&cwd);
         let lease = DirectoryLease::acquire(&dir, OsStr::new("guard")).unwrap();
+        // Leave only the lease's handles alive: even a share-delete handle to
+        // a descendant directory can block renaming its ancestor on Windows.
+        drop(dir);
         assert_eq!(
             std::fs::remove_file(cwd.join("guard"))
                 .unwrap_err()
