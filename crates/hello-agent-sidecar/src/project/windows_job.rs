@@ -28,14 +28,18 @@ fn quoted(argument: &str) -> String {
 }
 
 #[cfg(windows)]
+#[path = "windows_supervisor.rs"]
+mod supervisor;
+
+#[cfg(windows)]
 pub(super) mod native {
-    use super::quoted;
+    use super::{quoted, supervisor::Supervisor};
     use std::{
         alloc::{alloc_zeroed, dealloc, Layout},
         collections::BTreeMap,
         ffi::c_void,
         io,
-        os::windows::io::{AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle},
+        os::windows::io::{AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle},
         ptr::NonNull,
         time::{Duration, Instant},
     };
@@ -226,6 +230,34 @@ pub(super) mod native {
         process: OwnedHandle,
         thread: OwnedHandle,
         started: bool,
+        supervisor: Supervisor,
+    }
+
+    pub(super) struct Launch {
+        pub(super) job: OwnedHandle,
+        pub(super) process: OwnedHandle,
+        pub(super) thread: OwnedHandle,
+    }
+
+    pub(super) fn accounting(job: &OwnedHandle) -> io::Result<(u32, u32)> {
+        let mut value = Accounting::default();
+        let mut returned = 0;
+        if unsafe {
+            QueryInformationJobObject(
+                job.as_raw_handle(),
+                1,
+                (&mut value as *mut Accounting).cast(),
+                std::mem::size_of::<Accounting>() as u32,
+                &mut returned,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        if returned as usize != std::mem::size_of::<Accounting>() {
+            return Err(io::Error::other("incomplete job accounting"));
+        }
+        Ok((value.total, value.active))
     }
 
     impl Family {
@@ -245,6 +277,89 @@ pub(super) mod native {
         /// the temporary inheritable duplicates exist.
         /// Pipe deadlines/cancellation and CWD authority belong to the caller.
         pub(crate) fn suspended_with_stdio(
+            executable: &str,
+            arguments: &[String],
+            environment: &BTreeMap<String, String>,
+            directory: &str,
+            stdio: Option<[BorrowedHandle<'_>; 3]>,
+        ) -> io::Result<Self> {
+            // Borrowed stdio may not cross the creator thread's lifetime.
+            // These clones stay non-inheritable; only Launch::create duplicates
+            // them as inheritable while holding the common spawn mutex.
+            let handles = stdio
+                .map(|handles| {
+                    handles
+                        .into_iter()
+                        .map(|h| h.try_clone_to_owned())
+                        .collect::<io::Result<Vec<_>>>()
+                })
+                .transpose()?;
+            let executable = executable.to_owned();
+            let arguments = arguments.to_owned();
+            let environment = environment.to_owned();
+            let directory = directory.to_owned();
+            let (launch, supervisor) = Supervisor::spawn(move || {
+                let stdio = handles
+                    .as_ref()
+                    .map(|h| [h[0].as_handle(), h[1].as_handle(), h[2].as_handle()]);
+                Launch::create(&executable, &arguments, &environment, &directory, stdio)
+            })?;
+            Ok(Self {
+                job: launch.job,
+                process: launch.process,
+                thread: launch.thread,
+                started: false,
+                supervisor,
+            })
+        }
+
+        pub(crate) fn start(&mut self) -> io::Result<()> {
+            if self.started {
+                return Err(invalid("primary thread has already been resumed"));
+            }
+            self.supervisor.check()?;
+            self.started = true;
+            if unsafe { ResumeThread(self.thread.as_raw_handle()) } != 1 {
+                return Err(io::Error::other(
+                    "primary thread did not have exactly one suspension",
+                ));
+            }
+            Ok(())
+        }
+
+        fn active(&self) -> io::Result<u32> {
+            accounting(&self.job).map(|(_, active)| active)
+        }
+
+        pub(crate) fn completed(&self) -> io::Result<Option<u32>> {
+            self.supervisor.completed()
+        }
+
+        /// Only the supervisor's retained-handle barrier can return true.
+        pub(crate) fn terminate(&self, budget: Duration) -> io::Result<bool> {
+            if self.completed()?.is_some() {
+                return Ok(true);
+            }
+            if unsafe { TerminateJobObject(self.job.as_raw_handle(), 1) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let deadline = Instant::now()
+                .checked_add(budget)
+                .ok_or_else(|| invalid("termination budget overflow"))?;
+            loop {
+                if self.completed()?.is_some() {
+                    return Ok(true);
+                }
+                if Instant::now() >= deadline {
+                    return Ok(false);
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+    }
+
+    impl Launch {
+        fn create(
             executable: &str,
             arguments: &[String],
             environment: &BTreeMap<String, String>,
@@ -388,7 +503,7 @@ pub(super) mod native {
                     std::ptr::null(),
                     std::ptr::null(),
                     i32::from(!handles.is_empty()),
-                    0x08080404,
+                    0x08080405, // DEBUG_PROCESS: creator thread pumps every descendant event.
                     env.as_ptr().cast(),
                     directory_wide.as_ptr(),
                     &startup,
@@ -398,99 +513,13 @@ pub(super) mod native {
             if ok == 0 {
                 return Err(io::Error::last_os_error());
             }
-            // Successful creation transfers both handles. No fallible work occurs
-            // between receiving them and installing the owning Family.
+            // Successful creation transfers both handles to the creator thread.
+            // All debug events remain on that thread through final completion.
             Ok(Self {
                 job,
                 process: unsafe { OwnedHandle::from_raw_handle(info.process) },
                 thread: unsafe { OwnedHandle::from_raw_handle(info.thread) },
-                started: false,
             })
-        }
-
-        pub(crate) fn start(&mut self) -> io::Result<()> {
-            if self.started {
-                return Err(invalid("primary thread has already been resumed"));
-            }
-            self.started = true; // Never resume twice, even after an unexpected result.
-            if unsafe { ResumeThread(self.thread.as_raw_handle()) } != 1 {
-                return Err(io::Error::other(
-                    "primary thread did not have exactly one suspension",
-                ));
-            }
-            Ok(())
-        }
-
-        fn active(&self) -> io::Result<u32> {
-            let mut accounting = Accounting::default();
-            let mut returned = 0;
-            if unsafe {
-                QueryInformationJobObject(
-                    self.job.as_raw_handle(),
-                    1,
-                    (&mut accounting as *mut Accounting).cast(),
-                    std::mem::size_of::<Accounting>() as u32,
-                    &mut returned,
-                )
-            } == 0
-            {
-                return Err(io::Error::last_os_error());
-            }
-            if returned as usize != std::mem::size_of::<Accounting>() {
-                return Err(io::Error::other("incomplete job accounting"));
-            }
-            Ok(accounting.active)
-        }
-
-        /// Whole-family completion is unavailable until every member has a
-        /// retained process handle. Never promote accounting zero to completion.
-        pub(crate) fn completed(&self) -> io::Result<Option<u32>> {
-            match self.root_exit_and_job_drained()? {
-                None => Ok(None),
-                Some(_) => Err(io::Error::new(
-                    io::ErrorKind::Unsupported,
-                    "Windows descendant termination proof is unavailable",
-                )),
-            }
-        }
-
-        /// Diagnostic observation only; a descendant can still be unsignaled.
-        fn root_exit_and_job_drained(&self) -> io::Result<Option<u32>> {
-            match unsafe { WaitForSingleObject(self.process.as_raw_handle(), 0) } {
-                258 => return Ok(None),
-                0 => {}
-                _ => return Err(io::Error::last_os_error()),
-            }
-            if self.active()? != 0 {
-                return Ok(None);
-            }
-            let mut code = 0;
-            if unsafe { GetExitCodeProcess(self.process.as_raw_handle(), &mut code) } == 0 {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(Some(code))
-        }
-
-        /// False or Err retains ownership and is never proof of termination.
-        pub(crate) fn terminate(&self, budget: Duration) -> io::Result<bool> {
-            // Always issue the request, even if accounting already reads zero.
-            // A previously exited root does not establish descendant completion.
-            if unsafe { TerminateJobObject(self.job.as_raw_handle(), 1) } == 0 {
-                return Err(io::Error::last_os_error());
-            }
-            let deadline = Instant::now()
-                .checked_add(budget)
-                .ok_or_else(|| invalid("termination budget overflow"))?;
-            loop {
-                if self.root_exit_and_job_drained()?.is_some() {
-                    // The request drained accounting, not all process handles.
-                    return Ok(false);
-                }
-                if Instant::now() >= deadline {
-                    return Ok(false);
-                }
-                std::thread::sleep(Duration::from_millis(5));
-            }
         }
     }
     #[cfg(test)]
@@ -513,6 +542,38 @@ pub(super) mod native {
                     .spawn_guarded()
                     .unwrap();
                 std::fs::write("fixture-child.pid", child.id().to_string()).unwrap();
+            } else if mode == "short-children" {
+                for _ in 0..16 {
+                    let status = std::process::Command::new(std::env::current_exe().unwrap())
+                        .args(["--exact", FIXTURE])
+                        .env_clear()
+                        .env("SystemRoot", std::env::var("SystemRoot").unwrap())
+                        .env("HELLO_AGENT_JOB_FIXTURE", "output")
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn_guarded()
+                        .unwrap()
+                        .wait()
+                        .unwrap();
+                    assert!(status.success());
+                }
+            } else if mode == "nested-debugger" {
+                use std::os::windows::process::CommandExt;
+                let child = std::process::Command::new(std::env::current_exe().unwrap())
+                    .args(["--exact", FIXTURE])
+                    .env_clear()
+                    .env("SystemRoot", std::env::var("SystemRoot").unwrap())
+                    .env("HELLO_AGENT_JOB_FIXTURE", "child")
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .creation_flags(0x3) // Break the inherited debug chain.
+                    .spawn_guarded()
+                    .unwrap();
+                std::fs::write("nested-child.pid", child.id().to_string()).unwrap();
+                // This debugger thread's exit terminates its own debug child.
+                // The outer supervisor must still reject the missing inventory.
             } else if mode == "output" {
                 use std::io::Write;
                 std::io::stdout().write_all(b"HELLO_JOB_STDOUT").unwrap();
@@ -522,6 +583,9 @@ pub(super) mod native {
             }
         }
         fn fixture_owner(directory: &str) -> Family {
+            fixture_mode(directory, "parent")
+        }
+        fn fixture_mode(directory: &str, mode: &str) -> Family {
             use std::os::windows::io::AsHandle;
             // The Rust test harness expects valid standard handles even when
             // no output is captured. Give the fixture explicit NUL endpoints.
@@ -532,7 +596,7 @@ pub(super) mod native {
                 .unwrap();
             let environment = BTreeMap::from([
                 ("SystemRoot".into(), std::env::var("SystemRoot").unwrap()),
-                ("HELLO_AGENT_JOB_FIXTURE".into(), "parent".into()),
+                ("HELLO_AGENT_JOB_FIXTURE".into(), mode.into()),
             ]);
             Family::suspended_with_stdio(
                 std::env::current_exe().unwrap().to_str().unwrap(),
@@ -585,22 +649,58 @@ pub(super) mod native {
         }
 
         #[test]
-        fn drained_accounting_cannot_authorize_family_completion() {
+        fn short_lived_descendants_remain_in_completion_inventory() {
             let directory = tempfile::tempdir().unwrap();
-            let owner = Family::suspended(
-                std::env::current_exe().unwrap().to_str().unwrap(),
-                &["--exact".into(), FIXTURE.into()],
-                &BTreeMap::from([("SystemRoot".into(), std::env::var("SystemRoot").unwrap())]),
+            let mut owner = fixture_mode(
                 directory.path().canonicalize().unwrap().to_str().unwrap(),
-            )
-            .unwrap();
-            assert!(!owner.terminate(Duration::from_secs(5)).unwrap());
-            // A timeout is still unconfirmed. If accounting drained, it must
-            // produce an explicit unsupported-proof error rather than success.
-            match owner.completed() {
-                Ok(None) => {}
-                Err(error) => assert_eq!(error.kind(), io::ErrorKind::Unsupported),
-                Ok(Some(_)) => panic!("accounting authorized family completion"),
+                "short-children",
+            );
+            owner.start().unwrap();
+            let deadline = Instant::now() + Duration::from_secs(15);
+            loop {
+                if let Some(code) = owner.completed().unwrap() {
+                    assert_eq!(code, 0);
+                    let (total, active) = accounting(&owner.job).unwrap();
+                    assert_eq!(total, 17);
+                    assert_eq!(active, 0);
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "short-lived family did not complete"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+        #[test]
+        fn nested_debugger_cannot_hide_untracked_job_members() {
+            let directory = tempfile::tempdir().unwrap();
+            let mut owner = fixture_mode(
+                directory.path().canonicalize().unwrap().to_str().unwrap(),
+                "nested-debugger",
+            );
+            owner.start().unwrap();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                match owner.completed() {
+                    Err(error) => {
+                        assert!(
+                            error
+                                .to_string()
+                                .contains("incomplete Windows family inventory"),
+                            "{error}"
+                        );
+                        assert!(directory.path().join("nested-child.pid").exists());
+                        break;
+                    }
+                    Ok(None) => {}
+                    Ok(Some(code)) => panic!("untracked child authorized completion: {code}"),
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "untracked child was not rejected"
+                );
+                std::thread::sleep(Duration::from_millis(5));
             }
         }
 
@@ -687,8 +787,8 @@ pub(super) mod native {
     }
 
     // Dropping the unnamed job closes its only inheritable-free handle and
-    // requests kernel cleanup. completed()/terminate() currently do NOT prove
-    // every descendant handle is signaled; see the failing native regression.
+    // requests kernel cleanup. Only the supervisor barrier proves completion;
+    // Drop itself is never evidence that descendants have terminated.
 }
 
 #[cfg(test)]
