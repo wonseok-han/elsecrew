@@ -2,6 +2,14 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은 abeba5d의 Windows bounded transport 구현으로 진전했다. 이번에는 Windows CWD 고정을 조사했으며, ancestor에 FILE_SHARE_WRITE/DELETE를 제한하는 것만으로 reparse 변경까지 막는다고 주장할 수 없음을 확인했다. [CreateFile 공유 규칙](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)은 attribute 접근을 공유 제한에서 제외하고, [MS-FSA reparse 설정](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/4aeefef8-92c3-4abc-af7a-a610caf8a165)은 FILE_WRITE_ATTRIBUTES도 허용한다. 실제 공격 재현은 아니며 이 경로 고정 방식을 구현·활성화하지 않았다.
+- 독립적으로 가능한 Windows watcher 연결을 진행했다. Windows도 128단계씩 나누고 다음 회차마다 현재 root에서 prefix를 다시 열어 전체 volume/128-bit file ID와 객체 종류를 대조한다. 교체·reparse·신원 조회 실패는 기존 rescan/중단 흐름으로 전달한다. 하위 폴더 교체 회귀를 Windows에도 적용하고 다른 root 및 초기 분할 회귀를 추가했다. Windows Git 검증은 아직 동기·차단 상태이며 이 변경이 전체 watcher 비동기화 완료는 아니다.
+- native 코드가 쌓인 상태에서 Windows 컴파일·실행 증거를 얻을 수 있도록 `.github/workflows/m5-windows-native-diagnostic.yml`을 준비했다. 새 진단 브랜치 한정·20분·동시성4 이하이며 windows_ primitives와 watcher slice 회귀만 수행한다. 패키징/전체 suite/모델 호출/제품 활성화는 포함하지 않는다. 아직 push·CI는 실행하지 않았으며 이전 승인 잔여는 없다.
+- 검증: Rust 구문 파싱·diff 검사 통과. 독립 정적 검토에서 watcher 변경과 진단 workflow의 차단 결함 없음. Windows native 실행과 제품 검증은 아직 미완료다.
+- 다음: 새 진단 실행 승인 후 native 실패 수정, CWD/실행 파일 권한과 상속 직렬화 설계·연결, 파일 교체 및 묶음 제품 검증. Windows gate·G6 400MiB·출시 미완료는 유지한다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은 e2e7956의 Windows Job 기반 구현·검토·커밋으로 진전했다. 깨끗한 해당 HEAD에서 메인이 `windows_pipe.rs`와 `windows_transport.rs`를 작성해 명시 stdio와 Job 소유를 연결했다. 현재 Git 호출에는 아직 연결하지 않았고 Windows gate는 계속 닫혀 있다.
 - 부모 측 pipe는 overlapped I/O, 실행 공통 deadline·내부/외부 취소, 64KiB 전송 단위를 사용한다. random local single-instance pipe를 현재 프로세스의 client와 결속하고 자식용 핸들만 Job launcher에 넘긴다. stdout·stdin과 stderr 제한 tail, 종료 대기가 같은 예산을 사용하며 부모가 자식 endpoint를 남겨 EOF를 막지 않도록 닫는다.
 - CancelIoEx는 완료 증거가 아니므로 커널이 사용하는 buffer/OVERLAPPED/event/handle을 완료 확인까지 소유한다. 2초 drain 뒤에도 미완료면 그 자원을 해제하지 않고 endpoint를 사용 불가로 남긴다. 취소는 read_exact/write_all이 자동 재시도하는 Interrupted 대신 ConnectionAborted로 전달한다. Drop은 정리 요청이며 성공/종료 증거로 승격하지 않는다.
@@ -67,6 +75,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+- **Windows CWD 공유 잠금의 한계(2026-11-05)**: deny-share-write/delete만으로 reparse 불변을 증명하지 않는다. attribute 접근은 공유 제한과 별개이며 MS-FSA는 FILE_WRITE_ATTRIBUTES로 reparse 설정을 허용한다. CWD admission은 미완료이고 Windows gate는 유지한다.
 - **Windows 프로세스 연결 조건(2026-11-05)**: Job 생성 시 결속과 제한 시간/취소 가능한 stdio transport 기반은 아직 Git에 미연결·native 미검증이다. stdio가 없으면 STARTF_USESTDHANDLES를 켜지 않으며, 지정 시 임시 복제 핸들+HANDLE_LIST만 전달한다. 다른 broad-inherit spawn과의 경합 방지 및 CWD 권한·Git 호출 연결 및 native 묶음 검증 전에는 Windows gate를 열지 않는다. Drop의 Job close는 종료 요청이며 완료 증거는 부모 signal과 active-process 0의 확인이다.
 - **기존 원본 경로 재확인 (2026-11-02)**: 과거 경로 철자는 source_identity로도 복원할 수 없다. native 폴더 선택으로만 `native_path_binding`을 보강하며 catalog reopen/원본 접근은 없는 표식을 자동 생성하지 않는다. 재선택은 기존 snapshot과 복구 상태를 보존한다.
 - **2026-11-02 Windows 경로 fixture**: host 절대경로와 canonical wire 경로는 구분한다. 실행 41394071830에서 core 226·protocol 65·sidecar 313 PASS, 마지막 fixture 1개는 수정 후 focused 실행 41399404281에서 PASS했다. 최신 전체 suite 단일 재실행/Windows 제품 합격은 아니다. 원장 테스트에 native 역슬래시 경로를 넣지 않으며 제품 검증·실제 공급자 차단은 유지한다.

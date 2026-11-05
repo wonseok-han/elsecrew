@@ -5612,7 +5612,7 @@ fn poll_until_watch_event(fixture: &mut Fixture) -> Vec<WatchEmission> {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn watcher_scan_rejects_descendant_replaced_between_slices() {
     let root = TempDir::new().unwrap();
     fs::create_dir(root.path().join("child")).unwrap();
@@ -5980,4 +5980,36 @@ fn watcher_result_keeps_directory_identity_until_consumed() {
     fs::create_dir(&active.worktree_path).unwrap();
     let replacement = fixture.manager.worktree_capability(&active).unwrap();
     assert!(!done.matches_capability(&replacement).unwrap());
+}
+
+#[test]
+#[cfg(any(unix, windows))]
+fn watcher_scan_rejects_a_different_root_between_slices() {
+    let root = TempDir::new().unwrap();
+    let other = TempDir::new().unwrap();
+    fs::write(root.path().join("old.txt"), b"old").unwrap();
+    let capability = Dir::open_ambient_dir(root.path(), ambient_authority()).unwrap();
+    let replacement = Dir::open_ambient_dir(other.path(), ambient_authority()).unwrap();
+    let scan = WatchScan::new(&capability).unwrap();
+    scan.validate_held_paths(&capability).unwrap();
+    assert!(scan.validate_held_paths(&replacement).is_err());
+}
+
+#[test]
+#[cfg(windows)]
+fn windows_watch_initial_scan_retains_only_a_bounded_slice() {
+    let root = TempDir::new().unwrap();
+    for index in 0..300 {
+        fs::write(root.path().join(format!("file-{index}.txt")), b"x").unwrap();
+    }
+    let capability = Dir::open_ambient_dir(root.path(), ambient_authority()).unwrap();
+    let (initial, pending) = begin_watch_scan(&capability).unwrap();
+    assert!(initial.is_empty());
+    let mut scan = pending.expect("large Windows scan must yield to the dispatcher");
+    assert!(scan.snapshot.len() <= 128);
+    loop {
+        scan.validate_held_paths(&capability).unwrap();
+        if scan.advance(WATCH_SCAN_BUDGET).unwrap() { break; }
+    }
+    assert_eq!(scan.snapshot.len(), 300);
 }

@@ -67,10 +67,9 @@ const MANIFEST_DIRECTORY: &str = "worktree-manifests-v1";
 const WORKTREE_DIRECTORY: &str = "worktrees-v1";
 const SAVE_STAGING_DIRECTORY: &str = "save-staging-v1";
 const WATCH_MAX_ENTRIES: usize = 10_000;
-// Cross-turn directory identity validation is currently implemented on Unix.
-// Other platforms retain the prior single-call scan until equivalent identity
-// checks are available; do not retain unchecked handles between turns there.
-const WATCH_SCAN_BUDGET: usize = if cfg!(unix) { 128 } else { usize::MAX };
+// Unix and Windows rebind retained directories to the current root between
+// slices. Other platforms must not retain unchecked handles across turns.
+const WATCH_SCAN_BUDGET: usize = if cfg!(any(unix, windows)) { 128 } else { usize::MAX };
 const WATCH_MAX_CHANGED_PATHS: usize = 1_024;
 const DIFF_MAX_BYTES: usize = 10 * 1024 * 1024;
 const DIFF_MAX_ENTRIES: usize = 10_000;
@@ -2576,7 +2575,7 @@ impl ProjectManager {
                     state.scan = Some(WatchScan::new(&worktree)?);
                 }
                 let scan = state.scan.as_mut().expect("started scan");
-                #[cfg(unix)]
+                #[cfg(any(unix, windows))]
                 scan.validate_held_paths(&worktree)?;
                 if !scan.advance(WATCH_SCAN_BUDGET)? {
                     return Ok(None);
@@ -5865,11 +5864,15 @@ struct WatchScan {
 }
 
 impl WatchScan {
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn validate_held_paths(&self, root: &Dir) -> Result<(), ProjectFailure> {
         for (held, _, prefix) in &self.pending {
             let current = open_relative_dir(root, prefix)?;
-            if capability_directory_identity(held)? != capability_directory_identity(&current)? {
+            #[cfg(unix)]
+            let same = capability_directory_identity(held)? == capability_directory_identity(&current)?;
+            #[cfg(windows)]
+            let same = windows_fs::identity(held, true)? == windows_fs::identity(&current, true)?;
+            if !same {
                 return Err(ProjectFailure::recovery("watched directory changed between scan slices"));
             }
         }
