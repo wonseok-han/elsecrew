@@ -6,6 +6,14 @@ use cap_std::fs::OpenOptionsExt as _;
 const SAVE: &str = "save_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const SOURCE: &str = ".hello-agent-save-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.tmp";
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Interruption {
+    Prepared,
+    Renamed,
+    Replaced,
+    Cleaned,
+}
+
 struct Fixture {
     root: tempfile::TempDir,
     db: PathBuf,
@@ -14,7 +22,7 @@ struct Fixture {
     address: WorkspaceAddress,
 }
 impl Fixture {
-    fn interrupted(replace: bool) -> Self {
+    fn interrupted(point: Interruption) -> Self {
         let root = tempfile::tempdir().unwrap();
         let data = root.path().join("data");
         let original = root.path().join("original");
@@ -166,23 +174,58 @@ impl Fixture {
             )
             .unwrap();
         prepared.file = Some(source);
-        if replace {
-            manager
-                .replace_windows_save(
+        if point != Interruption::Prepared {
+            let result = manager.replace_windows_save(
+                &mut storage,
+                &active,
+                SAVE,
+                "replace",
+                &guard,
+                &mut prepared,
+                &expected,
+                None,
+                None,
+                (point == Interruption::Renamed)
+                    .then_some(SaveFailurePoint::AfterWindowsRenameBeforeReceipt),
+            );
+            if point == Interruption::Renamed {
+                assert!(result.unwrap_err().outcome_unknown);
+                assert_eq!(
+                    storage
+                        .projection_record("lock", &active.lock_id)
+                        .unwrap()
+                        .unwrap()["evidence"]["windowsSaveGuard"]["phase"],
+                    "replaceIntent"
+                );
+            } else {
+                result.unwrap();
+            }
+        }
+        if point == Interruption::Cleaned {
+            let pin = manager
+                .cleanup_windows_save(
                     &mut storage,
                     &active,
                     SAVE,
-                    "replace",
-                    &guard,
+                    "cleanup",
+                    guard,
                     &mut prepared,
-                    &expected,
-                    None,
-                    None,
+                    &mut pending,
                 )
                 .unwrap();
+            assert_eq!(
+                storage
+                    .projection_record("lock", &active.lock_id)
+                    .unwrap()
+                    .unwrap()["evidence"]["windowsSaveGuard"]["phase"],
+                "cleanupComplete"
+            );
+            drop(pin);
+        } else {
+            drop(guard);
         }
         // Close every owning handle and database before a fresh manager reopens.
-        drop((prepared, pending, guard, parent, worktree, manager, storage));
+        drop((prepared, pending, parent, worktree, manager, storage));
         Self {
             root,
             db,
@@ -283,9 +326,19 @@ impl Fixture {
 
 #[test]
 fn interrupted_replaced_save_completes_after_database_and_handles_reopen() {
-    Fixture::interrupted(true).recover(false);
+    Fixture::interrupted(Interruption::Replaced).recover(false);
 }
 #[test]
 fn interrupted_prepared_save_aborts_after_database_and_handles_reopen() {
-    Fixture::interrupted(false).recover(true);
+    Fixture::interrupted(Interruption::Prepared).recover(true);
+}
+
+#[test]
+fn interrupted_rename_without_receipt_completes_after_reopen() {
+    Fixture::interrupted(Interruption::Renamed).recover(false);
+}
+
+#[test]
+fn interrupted_cleanup_before_ledger_completion_recovers_after_reopen() {
+    Fixture::interrupted(Interruption::Cleaned).recover(false);
 }

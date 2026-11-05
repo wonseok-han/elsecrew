@@ -181,6 +181,7 @@ impl ProjectManager {
         expected_version: &str,
         mut pre_revalidation_hook: Option<&mut dyn FnMut()>,
         mut pre_syscall_hook: Option<&mut dyn FnMut()>,
+        failure: Option<SaveFailurePoint>,
     ) -> Result<(), ProjectFailure> {
         if let Some(hook) = &mut pre_revalidation_hook {
             hook();
@@ -301,6 +302,11 @@ impl ProjectManager {
         drop((current_target, target, source_name));
         windows_replace::replace(source, &guard.lease, &name)?;
         prepared.renamed = true;
+        if failure == Some(SaveFailurePoint::AfterWindowsRenameBeforeReceipt) {
+            return Err(ProjectFailure::ambiguous(
+                "failure injected after Windows replacement before receipt",
+            ));
+        }
         let mut committed = open_real_file_at(&parent, &name)?;
         if windows_fs::identity(&committed, false)? != source_id {
             return Err(ProjectFailure::ambiguous(

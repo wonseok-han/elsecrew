@@ -36,6 +36,10 @@ jobs:
             'project::windows_save_cleanup::tests::abort_preserves_unknown_artifacts_and_rejects_changed_original',
             'project::windows_save_cleanup::tests::recovery_flush_requires_exact_replacement_and_preserves_bytes',
             'project::windows_save_cleanup::tests::interrupted_cleanup_accepts_absence_but_preserves_reused_name',
+            'project::windows_save_integration_tests::interrupted_replaced_save_completes_after_database_and_handles_reopen',
+            'project::windows_save_integration_tests::interrupted_prepared_save_aborts_after_database_and_handles_reopen',
+            'project::windows_save_integration_tests::interrupted_rename_without_receipt_completes_after_reopen',
+            'project::windows_save_integration_tests::interrupted_cleanup_before_ledger_completion_recovers_after_reopen',
             'tests::windows_save_recovery_gate_rejects_direct_confirmed_requests'
           )
           foreach ($name in $required) {
@@ -50,7 +54,7 @@ jobs:
         shell: pwsh
         run: |
           @'
-          Diagnostic: Windows compilation, native primitives/save helpers, and closed recovery admission.
-          Not a full save-session restart, packaged UI, power-loss, or release qualification.
+          Diagnostic: Windows compilation, native primitives/save helpers, seeded snapshot save recovery across file/SQLite reopen, and closed recovery admission.
+          Not Git admission or process-kill/startup E2E, packaged UI, power-loss, or release qualification.
           No product activation, packaging, credentials, model calls, or user projects.
           '@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY

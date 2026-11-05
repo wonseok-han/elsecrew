@@ -1,6 +1,14 @@
 # 작업 이력 (Hello, Agent)
 
-승인된 Windows 진단은 두 번째 실행에서34개 모두 통과했다(3회 중2회 사용). 전체 개발은 미완료이며 내부 Git 제공 방식 선택은 별도 대기다. 최신 작업·검증·대기 사유는 [11월 워크로그](archive/history-2026-11.md) 맨 위에 있다.
+승인된 Windows 진단은 두 번째 실행에서34개 모두 통과했다(3회 중2회 사용). 전체 개발은 미완료이며 내부 Git 제공 방식 선택은 별도 대기다. 최신 작업·검증·대기 사유는 이 문서 맨 위에 있으며 이전 기록은 [11월 아카이브](archive/history-2026-11.md)에 있다.
+
+### 2026-11-05 · by GPT-6
+
+- b10cbb9 이후 메인이 Windows 파일 교체 syscall 직후/replaced receipt 전 실패 주입을 추가했다. 실제 rename 성공 뒤 outcome_unknown으로 종료하며 기존 제품 호출은 failure=None을 유지한다. Windows gate는 변경하지 않았다.
+- 실제 파일/SQLite 재열기 fixture를4개 상태로 확장했다. 추가2개는 replaceIntent에서 source handle을 모두 닫은 뒤 fresh flush/완료하는 경우와 cleanupComplete 이후 lock/session 완료 전에 닫힌 경우다. 각 중단 phase를 단언하고 기존 stale revision 거절·원본 불변·임시 파일 제거·최종 DB 지속성 검사를 재사용한다.
+- 로컬 Windows 진단 workflow의 compiled-test 목록에4개 통합 회귀를 추가하고 seeded snapshot 재열기와 실제 Git admission/process-kill startup E2E를 구분했다. rustfmt·YAML 파싱·git diff --check 통과. Windows native 컴파일/실행은 미검증이며 기존34 PASS로 대체하지 않는다. 새 cache/패키지/worktree/CI/push/모델 실행 없음.
+- 상시 승인된 동일 독립 검토자1명이 실패 주입 위치·handle 수명·복구 단언·workflow 범위에 구체적 정적 차단 결함 없음으로 확인했다. native 실행 합격은 아니다.
+- 최신955880e 공개/CI 요청은 승인 대기 상태이며 이후 새 기능·시험 commit을 해당 범위로 임의 공개하지 않는다. 다음은 native 실행과 발견된 호환 오류 수리, Windows 제품 연결/G6/출시 검증이다. 전체 개발은 미완료다.
 
 ### 2026-11-05 · by GPT-6
 
@@ -199,7 +207,7 @@
 
 - **Windows native34 PASS(2026-11-05 최신)**: CI41988529910/0a7efd5에서 lease/image/GUID 실행·공용 reader·종료 supervisor·spawn/watcher34개 통과. 첫41987756587의1FAIL은 fixture의 별도 directory handle 수명으로 수정했다. 통합 수정2812429. 현재 batch3회 중2회 사용·1회 남음. 실제 Git 설치본/저장·복구·background watcher 종단 실행/제품G6 합격은 아니다.
 
-- **Windows save guard 충돌(2026-11-05)**: 기존 DirectoryLease에서 교체 대상 자체를 guard로 잡으면 의도한 replace도 막힌다. 마지막에 pin을 풀어 해결하지 않는다. 별도 guard의 durable intent/ID/cleanup과 handle-relative replace·durability/복구를 묶어야 하며 제안서 §12에 조건을 기록했다. Windows 저장은 아직 미구현/차단이다.
+- **Windows save guard 충돌(2026-11-05)**: 기존 DirectoryLease에서 교체 대상 자체를 guard로 잡으면 의도한 replace도 막힌다. 마지막에 pin을 풀어 해결하지 않는다. 별도 guard의 durable intent/ID/cleanup과 handle-relative replace·durability/복구를 묶어야 하며 제안서 §12에 조건을 기록했다. Windows 저장·cleanup·명시 복구 및 재열기 fixture는 구현됐으나 native 검증/제품 admission은 차단 상태다.
 
 - **Watcher 현재 구조(2026-11-05)**: Unix/Windows 모두 한 background 검증 job과 한 bounded scan slice를 순환한다. 완료 뒤 현재 stream/active/root/.git 결속과 metadata/tree 재검증을 유지한다. Windows 연결은 native 미검증·실제 Git 차단 상태이고 과거 동기 Windows 설명보다 이 구현 상태를 우선한다. 실측 UI 지연 PASS는 별도다.
 

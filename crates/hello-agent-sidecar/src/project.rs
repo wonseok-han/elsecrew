@@ -219,6 +219,8 @@ pub enum SaveFailurePoint {
     AfterReopenBeforeLedgerClear,
     #[cfg(windows)]
     AfterWindowsCleanupBeforeLedgerClear,
+    #[cfg(windows)]
+    AfterWindowsRenameBeforeReceipt,
 }
 
 struct PendingSave {
@@ -2263,7 +2265,7 @@ impl ProjectManager {
         #[cfg(windows)]
         self.replace_windows_save(
             storage, &active, save_id, request_id, &save_guard, &mut prepared,
-            expected_version, pre_revalidation_hook, pre_syscall_hook,
+            expected_version, pre_revalidation_hook, pre_syscall_hook, failure,
         )?;
         #[cfg(not(windows))]
         self.rename_prepared_save_from_stable_root(
