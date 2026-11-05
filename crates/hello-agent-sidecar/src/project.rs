@@ -2230,8 +2230,8 @@ impl ProjectManager {
 
         self.persist_save_lock(storage, &active, save_id, request_id, true, None)?;
         #[cfg(windows)]
-        self.prepare_windows_replacement(
-            storage, &active, save_id, request_id, &save_guard, &prepared,
+        self.replace_windows_save(
+            storage, &active, save_id, request_id, &save_guard, &mut prepared,
             expected_version, pre_revalidation_hook, pre_syscall_hook,
         )?;
         #[cfg(not(windows))]

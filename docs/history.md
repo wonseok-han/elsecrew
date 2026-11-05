@@ -4,6 +4,15 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은 1440873의 준비 검증/기록으로 진전했다. 후속 계약 감사에서 atomic namespace rename과 expected-ID/content compare-and-replace(CAS)를 혼동한 추가 요구를 확인했다. 원본 반영에 관한 사용자 승인 범위는 `m5-coding-agent-ide.md` §5.5(2026-09-30)에 전후 충돌검사·보존·불확실 중단과 same-UID 외부 작성자 완전 배제 비보장으로 명시돼 있다. 작업복사본 save의 기존 macOS 구현도 version 검사 뒤 renameatx_np이며 leaf CAS가 아니다. project_v1::validate_save_transcript는 expected/current 관측 버전 충돌 계약이다. tests.rs syscall hook은 parent 이동/symlink 외부 탈출을 검사한다.
+- 동일 독립 검토자가 이전 CAS 부재만의 activation blocker 판정을 승인 범위를 넘긴 판단으로 명시 철회했다. 이전 로그는 당시 판단으로 보존한다. 이 정정은 외부 원본 적용 정책을 작업복사본에 임의 확장하거나 충돌 검사를 삭제하는 승인이 아니다. 기존 save의 관측 버전 검사와 atomic rename·경로 confinement를 구분해 구현한다.
+- Windows workspace save는 replaceIntent와 이전 target ID 기록 → 열린 target 확인 핸들 해제(legacy API 조건) → 독립 parent/guard lease와 같은 source handle로 FileRenameInfo → destination full ID/내용 검증 → replaced 기록으로 연결했다. target 내용 검사 동안 writer 배제, 마지막 name ID 확인, 현재 managed root/workspace/parent 결속은 유지한다. hostile same-user leaf swap의 CAS 보장은 하지 않는다.
+- replaced는 durable save 완료가 아니다. namespace durability/guard cleanup 미연결 오류와 recovery lock·session/staging 보존은 유지하며 Windows 제품/Git admission은 그대로 닫혀 있다. ACL/권한 보존·디스크 기록 보장·재시작 복구/cleanup·native 실행이 남는다. 원본 apply/restore는 이번 변경에 포함하지 않았다.
+- 독립 재검토에서 workspace save 범위만 변경하고 macOS 전용 원본 쓰기/복원과 Windows 제품 gate를 확장하지 않았음을 확인했다.
+- 검증은 rustfmt·project.rs 구문 파싱·diff 검사이며 새 Cargo/패키지/CI/cache/worktree/모델/push는 없다. 기존34 native PASS를 이번 변경의 증거로 재사용하지 않는다. 다음은 Windows 권한/내구성/복구 구현과 묶음 검증이며 전체 앱 목표는 미완료다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은 1e425f1 source 준비로 진전했다. 이번 메인 구현은 Windows 교체 전 sourceReady/작업복사본/guard/source ID, 현재 managed root/parent, target 내용/ID와 intent 경로를 재검증하고 replacementChecked+이전 target ID를 기록한다. hook 이후 target name ID도 확인한다. 복구 준비 증거를 추가했으며 아직 교체 syscall은 호출하지 않는다.
 - 실제 교체 연결을 검토하다 새 차단 조건을 발견했다. [Microsoft FileRenameInformation](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information)의 legacy replacement는 destination open handle을 닫아야 한다. 마지막 ID 확인과 syscall 사이 foreign target swap을 원자적으로 배제하지 못하므로 parent pin만으로 expectedVersion의 compare-and-replace를 주장할 수 없다. 실제 사용자 손실을 관찰한 것은 아니며 정적 경합 분석이다.
 - 독립 검토의 차단 지적을 반영해 destructive 호출과 replaced 기록을 제거했다. 준비 검증 뒤 명시 오류로 종료하고 guard/source/session/staging·원장 증거를 유지한다. 임의 POSIX flag나 검증 성공으로 이 경합을 덮지 않는다. Windows 제품/Git admission은 계속 닫혀 있다. namespace durability no-op도 저장 성공 증거로 쓰지 않도록 Windows save에 명시 오류를 둔다.
@@ -55,7 +64,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **Windows replacement 경합 미해결(2026-11-05)**: FileRenameInfo는 expected target ID를 조건으로 비교·교체하지 않는다. destination handle 해제부터 syscall 사이 다른 프로세스의 name swap을 parent/guard pin만으로 차단하지 못한다. replacementChecked 기록 뒤 실제 교체는 차단하며 POSIX flag·사후 source ID 검증만으로 해결했다고 보지 않는다. native primitive 성공과 제품 저장 안전 계약은 별도다.
+- **Windows replacement 계약 정정(2026-11-05)**: 앞선 expected-ID CAS 부재 blocker는 기존 atomic rename/관측 충돌 검사와 별도 보장을 혼동한 것으로 독립 검토자가 철회했다. macOS workspace save도 leaf CAS가 아니며 hostile same-user 동시 편집의 OS 완전배제 보장이 아니다. Windows save는 경로 결속·전후 ID/내용 검사와 replaceIntent/replaced 기록으로 연결했으나 ACL·namespace durability·cleanup/복구/native가 미완료라 제품 admission은 계속 닫혀 있다. 원본 apply/restore에 새 승인을 추가하거나 보존 계약을 약화하지 않는다.
 
 - **Windows native34 PASS(2026-11-05 최신)**: CI41988529910/0a7efd5에서 lease/image/GUID 실행·공용 reader·종료 supervisor·spawn/watcher34개 통과. 첫41987756587의1FAIL은 fixture의 별도 directory handle 수명으로 수정했다. 통합 수정2812429. 현재 batch3회 중2회 사용·1회 남음. 실제 Git 설치본/저장·복구·background watcher 종단 실행/제품G6 합격은 아니다.
 

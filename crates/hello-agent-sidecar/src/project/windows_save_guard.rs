@@ -147,14 +147,14 @@ impl ProjectManager {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn prepare_windows_replacement(
+    pub(super) fn replace_windows_save(
         &self,
         storage: &mut Storage,
         active: &ActiveProject,
         save_id: &str,
         request_id: &str,
         guard: &SaveGuard,
-        prepared: &PreparedTarget,
+        prepared: &mut PreparedTarget,
         expected_version: &str,
         mut pre_revalidation_hook: Option<&mut dyn FnMut()>,
         mut pre_syscall_hook: Option<&mut dyn FnMut()>,
@@ -241,7 +241,7 @@ impl ProjectManager {
             ));
         }
         guard.lease.validate()?;
-        record["phase"] = json!("replacementChecked");
+        record["phase"] = json!("replaceIntent");
         record["previousTargetIdentity"] = json!(target_id.recovery_token());
         self.write_windows_guard_intent(storage, active, save_id, request_id, &record)?;
         if let Some(hook) = &mut pre_syscall_hook {
@@ -254,13 +254,25 @@ impl ProjectManager {
                 "save target name changed before syscall",
             ));
         }
-        // FileRenameInfo does not compare the expected destination identity.
-        // Closing destination handles to allow replacement leaves a name-swap
-        // window; the parent lease prevents escape, not lost concurrent edits.
-        // Do not issue destructive replacement until that contract is resolved.
-        Err(ProjectFailure::recovery(
-            "Windows replacement requires an atomic destination-change contract; no replacement was issued",
-        ))
+        // Optimistic version checking, as in macOS save, is not an atomic
+        // comparison against hostile same-user edits. Legacy rename requires
+        // destination handles closed; parent/guard and exact source stay pinned.
+        drop((current_target, target, source_name));
+        windows_replace::replace(source, &guard.lease, &name)?;
+        prepared.renamed = true;
+        let mut committed = open_real_file_at(&parent, &name)?;
+        if windows_fs::identity(&committed, false)? != source_id {
+            return Err(ProjectFailure::ambiguous(
+                "replacement file identity differs",
+            ));
+        }
+        let (_, _, version) = read_file_bounded_handle(&mut committed, 0)?;
+        if record["sourceVersion"] != version {
+            return Err(ProjectFailure::ambiguous("replacement content differs"));
+        }
+        record["phase"] = json!("replaced");
+        // Observed replacement is not proof of directory durability/save success.
+        self.write_windows_guard_intent(storage, active, save_id, request_id, &record)
     }
 
     fn write_windows_guard_intent(
@@ -310,14 +322,19 @@ impl ProjectManager {
                     && expected == *guard
                     && lock.get("recovery_required") == Some(&json!(true))
             }),
-            Some("replacementChecked") => previous.is_some_and(|old| {
+            Some("replaceIntent") | Some("replaced") => previous.is_some_and(|old| {
                 if !old.is_object() {
                     return false;
                 }
                 let mut expected = old.clone();
-                expected["phase"] = json!("replacementChecked");
-                expected["previousTargetIdentity"] = guard["previousTargetIdentity"].clone();
-                old["phase"] == "sourceReady"
+                expected["phase"] = guard["phase"].clone();
+                let predecessor = if guard["phase"] == "replaceIntent" {
+                    expected["previousTargetIdentity"] = guard["previousTargetIdentity"].clone();
+                    "sourceReady"
+                } else {
+                    "replaceIntent"
+                };
+                old["phase"] == predecessor
                     && expected == *guard
                     && lock.get("recovery_required") == Some(&json!(true))
             }),
