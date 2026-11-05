@@ -21,7 +21,7 @@ pub(super) fn source_options() -> OpenOptions {
         .follow(FollowSymlinks::No)
         .access_mode(0xc00d0000) // GENERIC_READ | GENERIC_WRITE | DELETE | WRITE_DAC | WRITE_OWNER
         .share_mode(1)
-        .custom_flags(windows_fs::OPEN_REPARSE_POINT);
+        .custom_flags(windows_fs::OPEN_REPARSE_POINT | super::windows_durability::WRITE_THROUGH);
     options
 }
 

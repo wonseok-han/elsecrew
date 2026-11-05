@@ -27,6 +27,8 @@ mod windows_security;
 mod windows_save_recovery;
 #[cfg(windows)]
 mod windows_remove;
+#[cfg(windows)]
+mod windows_durability;
 use crate::{AppendOutcome, SidecarError, Storage};
 #[cfg(unix)]
 use cap_fs_ext::OsMetadataExt;
@@ -2272,9 +2274,7 @@ impl ProjectManager {
                 ))
             })?;
         #[cfg(windows)]
-        let directory_sync: Result<(), ProjectFailure> = Err(ProjectFailure::ambiguous(
-            "Windows replacement observed; namespace durability and guard cleanup are not yet connected",
-        ));
+        let directory_sync = self.verify_windows_save_flush(storage, &active, save_id, &prepared);
         #[cfg(not(windows))]
         let directory_sync = sync_capability_directory(&committed_parent);
         directory_sync.map_err(|error| {

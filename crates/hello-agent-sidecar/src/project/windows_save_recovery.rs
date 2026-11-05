@@ -132,6 +132,7 @@ impl ProjectManager {
             "sourceIdentityMatches":matches(&source, &intent["sourceIdentity"]),
             "stagingIdentityMatches":matches(&staging, &intent["stagingIdentity"]),
             "guard":guard,"source":source,"staging":staging,"destination":destination,
+            "recordedDirectoryDurability":intent["directoryDurability"],
             "directoryDurability":"unconfirmed","cleanupAllowed":false,"completionAllowed":false,
         }))
     }

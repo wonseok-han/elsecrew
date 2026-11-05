@@ -4,6 +4,15 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은 dc59164의 exact-handle 정리 primitive로 진전했다. 후속 조사에서 [Microsoft CreateFileW Caching Behavior](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)는 FILE_FLAG_WRITE_THROUGH 요청이 NTFS의 timestamp/rename metadata flush를 유발한다고 명시한다. [FlushFileBuffers](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers)의 파일 flush와 함께 OS acknowledgement 정책을 구성하며 임의 디스크 controller의 전원 장애 내구성을 보장한다고 주장하지 않는다. 관리자 volume flush나 NO_BUFFERING 정렬 우회를 사용하지 않는다.
+- `windows_durability.rs`는 보유 file/directory handle의 GetVolumeInformationByHandleW로 NTFS 여부를 확인한다. 이 정책은 NTFS에만 적용하며 ReFS/FAT/미확인 FS를 추정 허용하지 않는다. source/guard 생성에 WRITE_THROUGH를 지정하고 새 intent에 durabilityPolicy=ntfsWriteThroughV1을 기록한다. 교체 전 source NTFS와 정책을 다시 대조하고 교체/신원·내용·권한 확인 뒤 같은 source handle sync_all 성공 시 replaced+ntfsWriteThroughFlushed를 게시한다.
+- Windows save의 무조건 namespace 미연결 오류는 현재 source ID·workspace·save·정확한 phase/policy/flush receipt 확인으로 대체했다. 이것은 guard cleanup 완료가 아니며 persist_save_lock(false)는 여전히 정리 미연결을 거절한다. read-only recovery는 과거 기록된 flush 상태를 별도 필드로 표시하고 현재 관찰만으로 완료/정리 권위를 만들지 않는다. 과거 policy 없는 기록을 자동 승격하지 않는다.
+- NTFS handle 확인 → write-through source 쓰기/flush → handle-relative rename → 같은 handle flush와 새 내용/옛 이름 부재의 native 회귀를 작성했다. API/namespace 통합 시험이며 power-loss 시험이 아니고 아직 실행 전이다. cap-primitives 3.4.6의 custom_flags 전달 경로도 읽기 전용 확인했다.
+- 독립 정적 검토에서 NTFS handle 판정·write-through/same-handle flush 순서·receipt 결속·cleanup 차단 유지에 차단 결함 없음. native/전원 장애 검증 완료를 뜻하지 않는다.
+- rustfmt·project.rs 파싱·git diff --check만 확인했다. Cargo/패키지/cache/worktree/모델/push/CI 없음. 다음은 durable cleanup intent·정리/재시작 재개와 Windows native 묶음 검증이다. Windows 제품 활성화와 전체 앱 완료는 계속 미완료다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은 6c3cc58의 중단 저장 read-only 관찰로 진전했다. 메인이 Windows journal-owned 임시 파일의 exact-handle 삭제 primitive(`windows_remove.rs`)를 추가했다. 독립 DirectoryLease 아래 정상 단일 이름/guard alias 거절 → read+DELETE/share0/nofollow로 파일 열기 → 기록된 full ID 비교 → lease 재검증 → FileDispositionInfo(1-byte BOOLEAN) → handle close → parent 재검증/이름 부재 확인 순서다.
 - 이름 기반 remove fallback, 누락 파일 자동 성공/재시도, readonly/POSIX 우회는 없다. 삭제 요청 뒤 부재를 확인하지 못하면 outcome_unknown으로 남긴다. caller는 current managed workspace 결속·durable cleanup intent·명시 정책을 먼저 확보해야 하며 이 helper의 Ok는 현재 부재 관찰이지 namespace durability/복구 완료가 아니다. 아직 save recovery나 제품 UI에서 호출하지 않는다.
 - [Microsoft FILE_DISPOSITION_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_disposition_info)의 handle 삭제 요청 구조와 [CreateFile 공유 규칙](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)을 확인했다. 기존 사용자 파일·실행 앱에 삭제를 수행하지 않았다.

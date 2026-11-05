@@ -44,6 +44,7 @@ impl ProjectManager {
             ));
         }
         preparing.validate()?;
+        windows_durability::require_ntfs(parent)?;
         let name = format!(".hello-agent-save-guard-{}.tmp", Uuid::new_v4().simple());
         let mut record = json!({
             "schemaVersion":1,"phase":"preparing","saveId":save_id,
@@ -53,6 +54,7 @@ impl ProjectManager {
             "stagingIdentity":windows_fs::identity(&pending.file, false)?.recovery_token(),
             "parentIdentity":parent_id.recovery_token(),"guardIdentity":Value::Null,
             "directoryDurability":"unconfirmed",
+            "durabilityPolicy":windows_durability::POLICY,
             "sourceName":source_name,"sourceIdentity":Value::Null,
             "sourceVersion":Value::Null,
         });
@@ -64,7 +66,8 @@ impl ProjectManager {
             options
                 .write(true)
                 .create_new(true)
-                .follow(FollowSymlinks::No);
+                .follow(FollowSymlinks::No)
+                .custom_flags(windows_fs::OPEN_REPARSE_POINT | windows_durability::WRITE_THROUGH);
             let mut file = parent.open_with(&name, &options).map_err(|error| {
                 ProjectFailure::recovery(format!("could not create save guard: {error}"))
             })?;
@@ -177,6 +180,12 @@ impl ProjectManager {
             .as_ref()
             .ok_or_else(|| ProjectFailure::recovery("save replacement source handle missing"))?;
         let source_id = windows_fs::identity(source, false)?;
+        windows_durability::require_ntfs(source)?;
+        if record["durabilityPolicy"] != windows_durability::POLICY {
+            return Err(ProjectFailure::recovery(
+                "save write-through policy is missing",
+            ));
+        }
         if record["phase"] != "sourceReady"
             || record["worktreeId"] != active.worktree_id
             || record["workspaceIdentity"] != active.workspace_identity
@@ -286,9 +295,48 @@ impl ProjectManager {
         if record["sourceVersion"] != version {
             return Err(ProjectFailure::ambiguous("replacement content differs"));
         }
+        source.sync_all().map_err(|error| {
+            ProjectFailure::ambiguous(format!("replacement metadata flush failed: {error}"))
+        })?;
         record["phase"] = json!("replaced");
-        // Observed replacement is not proof of directory durability/save success.
+        record["directoryDurability"] = json!(windows_durability::FLUSHED);
+        // NTFS write-through metadata + flush acknowledgement is not cleanup
+        // completion or a hardware power-loss guarantee.
         self.write_windows_guard_intent(storage, active, save_id, request_id, &record)
+    }
+
+    pub(super) fn verify_windows_save_flush(
+        &self,
+        storage: &Storage,
+        active: &ActiveProject,
+        save_id: &str,
+        prepared: &PreparedTarget,
+    ) -> Result<(), ProjectFailure> {
+        let lock = storage
+            .projection_record("lock", &active.lock_id)?
+            .ok_or_else(|| ProjectFailure::ambiguous("save flush lock missing"))?;
+        let record = lock
+            .get("evidence")
+            .and_then(|value| value.get("windowsSaveGuard"))
+            .ok_or_else(|| ProjectFailure::ambiguous("save flush receipt missing"))?;
+        let source = prepared
+            .file
+            .as_ref()
+            .ok_or_else(|| ProjectFailure::ambiguous("flushed replacement handle missing"))?;
+        if !prepared.renamed
+            || record["phase"] != "replaced"
+            || record["saveId"] != save_id
+            || record["worktreeId"] != active.worktree_id
+            || record["workspaceIdentity"] != active.workspace_identity
+            || record["durabilityPolicy"] != windows_durability::POLICY
+            || record["directoryDurability"] != windows_durability::FLUSHED
+            || record["sourceIdentity"] != windows_fs::identity(source, false)?.recovery_token()
+        {
+            return Err(ProjectFailure::ambiguous(
+                "save flush receipt binding differs",
+            ));
+        }
+        Ok(())
     }
 
     fn write_windows_guard_intent(
@@ -349,6 +397,12 @@ impl ProjectManager {
                     expected["accessFingerprint"] = guard["accessFingerprint"].clone();
                     "sourceReady"
                 } else {
+                    if guard["durabilityPolicy"] != windows_durability::POLICY
+                        || guard["directoryDurability"] != windows_durability::FLUSHED
+                    {
+                        return false;
+                    }
+                    expected["directoryDurability"] = json!(windows_durability::FLUSHED);
                     "replaceIntent"
                 };
                 old["phase"] == predecessor
