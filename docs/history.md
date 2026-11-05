@@ -2,6 +2,13 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 두 번째 승인 CI41980310141(dee1398)는 Windows release 컴파일 성공(1분54초), native19 PASS/1 FAIL이다. 기존 parent_exit_does_not_hide_a_live_descendant의 실제 자손 signal 검사가 통과했고 supervisor ABI·중첩 debugger 누락 거절·미시작 종료·명시 stdio·transport도 PASS했다. 다음 spawn/watcher 단계는 앞선 실패로 skipped다.
+- 남은 실패는 새 short-lived fixture가 전체 Job 멤버를 정확히17로 가정한 assertion이다. 실제로는18이었으며 supervisor의 전체 추적 수 일치·모든 보유 handle signal 검사는 이미 성공했다. 추가 멤버의 정체는 아직 확인하지 않았으며 console host라고 단정하지 않는다.
+- fixture가 직접 생성하고 정상 종료를 기다린16개 child PID를 기록하게 하고 이 기록16개와 total>=17을 확인하도록 보완했다. production의 정확한 전체 inventory 일치와 개별 종료 검사는 완화하지 않는다. 기존 실제 child signal 회귀도 유지한다. Rust 포맷·diff 검사 통과. 로그는 .artifacts/m5-windows-supervisor-41980310141/failed.log에 보존한다.
+- 승인2/3회 사용·1회 남음. 이 시험 수정만 반영해 세 번째 native 진단을 실행한다. Windows 제품 활성화·main 병합·모델 호출·패키징은 하지 않는다.
+
+### 2026-11-05 · by GPT-6
+
 - 사용자가 0dcc385 및 후속 Windows 컴파일·시험 수정의 공개 push/CI 최대3회를 승인했다. 새 codex/m5-windows-supervisor-20261105 브랜치에 해당 커밋을 push했다. 첫 실행41980173860은 jobs=[]·로그 없음으로 즉시 실패했으며 native 컴파일/시험은 시작하지 않았다.
 - 로컬 YAML 파서로 원인을 확인했다: 추가한 process_spawn:: 필터 뒤 공백 때문에 따옴표 없는 run scalar가 문법 오류였다(line26). 명령 전체를 따옴표로 감쌌고 yaml.safe_load·diff 검사를 통과했다. 제품 동작이나 시험 조건은 바꾸지 않았다.
 - 승인1/3회 사용·2회 남음. 이 설정 수정으로 두 번째 실행을 이어간다. native 완료 증거는 아직 없으며 main 병합·패키징·모델 실행·제품 활성화는 하지 않는다.

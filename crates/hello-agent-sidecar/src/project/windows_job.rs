@@ -543,8 +543,9 @@ pub(super) mod native {
                     .unwrap();
                 std::fs::write("fixture-child.pid", child.id().to_string()).unwrap();
             } else if mode == "short-children" {
+                let mut child_ids = Vec::new();
                 for _ in 0..16 {
-                    let status = std::process::Command::new(std::env::current_exe().unwrap())
+                    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
                         .args(["--exact", FIXTURE])
                         .env_clear()
                         .env("SystemRoot", std::env::var("SystemRoot").unwrap())
@@ -553,11 +554,11 @@ pub(super) mod native {
                         .stdout(std::process::Stdio::null())
                         .stderr(std::process::Stdio::null())
                         .spawn_guarded()
-                        .unwrap()
-                        .wait()
                         .unwrap();
-                    assert!(status.success());
+                    child_ids.push(child.id().to_string());
+                    assert!(child.wait().unwrap().success());
                 }
+                std::fs::write("completed-children.pids", child_ids.join("\n")).unwrap();
             } else if mode == "nested-debugger" {
                 use std::os::windows::process::CommandExt;
                 let child = std::process::Command::new(std::env::current_exe().unwrap())
@@ -661,7 +662,15 @@ pub(super) mod native {
                 if let Some(code) = owner.completed().unwrap() {
                     assert_eq!(code, 0);
                     let (total, active) = accounting(&owner.job).unwrap();
-                    assert_eq!(total, 17);
+                    // Windows may add another owned process. The supervisor
+                    // must retain every Job member, not only our 16 children.
+                    assert!(total >= 17, "missing fixture family members: {total}");
+                    let pids =
+                        std::fs::read_to_string(directory.path().join("completed-children.pids"))
+                            .unwrap();
+                    let pids: Vec<u32> = pids.lines().map(|p| p.parse().unwrap()).collect();
+                    assert_eq!(pids.len(), 16);
+                    assert!(pids.iter().all(|pid| *pid != 0));
                     assert_eq!(active, 0);
                     break;
                 }
