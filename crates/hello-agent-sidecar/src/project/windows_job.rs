@@ -442,10 +442,20 @@ pub(super) mod native {
             Ok(accounting.active)
         }
 
-        /// Provisional accounting result, NOT a complete descendant-exit barrier.
-        /// Windows CI observed an unsignaled child after this returned Some.
-        /// Keep product admission closed until all-member termination is proven.
+        /// Whole-family completion is unavailable until every member has a
+        /// retained process handle. Never promote accounting zero to completion.
         pub(crate) fn completed(&self) -> io::Result<Option<u32>> {
+            match self.root_exit_and_job_drained()? {
+                None => Ok(None),
+                Some(_) => Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "Windows descendant termination proof is unavailable",
+                )),
+            }
+        }
+
+        /// Diagnostic observation only; a descendant can still be unsignaled.
+        fn root_exit_and_job_drained(&self) -> io::Result<Option<u32>> {
             match unsafe { WaitForSingleObject(self.process.as_raw_handle(), 0) } {
                 258 => return Ok(None),
                 0 => {}
@@ -463,9 +473,8 @@ pub(super) mod native {
 
         /// False or Err retains ownership and is never proof of termination.
         pub(crate) fn terminate(&self, budget: Duration) -> io::Result<bool> {
-            if self.completed()?.is_some() {
-                return Ok(true);
-            }
+            // Always issue the request, even if accounting already reads zero.
+            // A previously exited root does not establish descendant completion.
             if unsafe { TerminateJobObject(self.job.as_raw_handle(), 1) } == 0 {
                 return Err(io::Error::last_os_error());
             }
@@ -473,8 +482,9 @@ pub(super) mod native {
                 .checked_add(budget)
                 .ok_or_else(|| invalid("termination budget overflow"))?;
             loop {
-                if self.completed()?.is_some() {
-                    return Ok(true);
+                if self.root_exit_and_job_drained()?.is_some() {
+                    // The request drained accounting, not all process handles.
+                    return Ok(false);
                 }
                 if Instant::now() >= deadline {
                     return Ok(false);
@@ -572,6 +582,26 @@ pub(super) mod native {
             assert!(std::fs::read_to_string(stderr.path())
                 .unwrap()
                 .contains("HELLO_JOB_STDERR"));
+        }
+
+        #[test]
+        fn drained_accounting_cannot_authorize_family_completion() {
+            let directory = tempfile::tempdir().unwrap();
+            let owner = Family::suspended(
+                std::env::current_exe().unwrap().to_str().unwrap(),
+                &["--exact".into(), FIXTURE.into()],
+                &BTreeMap::from([("SystemRoot".into(), std::env::var("SystemRoot").unwrap())]),
+                directory.path().canonicalize().unwrap().to_str().unwrap(),
+            )
+            .unwrap();
+            assert!(!owner.terminate(Duration::from_secs(5)).unwrap());
+            // A timeout is still unconfirmed. If accounting drained, it must
+            // produce an explicit unsupported-proof error rather than success.
+            match owner.completed() {
+                Ok(None) => {}
+                Err(error) => assert_eq!(error.kind(), io::ErrorKind::Unsupported),
+                Ok(Some(_)) => panic!("accounting authorized family completion"),
+            }
         }
 
         #[test]

@@ -2,6 +2,13 @@
 
 ### 2026-11-05 · by GPT-6
 
+- b67aeb3 기준 메인이 Windows Job의 잘못된 종료 성공 반환을 우선 봉쇄했다. root signal+Job accounting zero 관찰은 private 진단 함수로 분리하고, completed는 그 상태에서도 Unsupported를 반환한다. terminate는 여전히 종료 요청·제한 시간 내 accounting 관찰을 수행하지만 true를 반환하지 않는다. transport는 이 오류를 전달하므로 finished 성공으로 승격하지 않는다.
+- 이는 전체 자손 종료 구현의 완성이 아니라 안전한 미완료 상태다. 별도 보유 process handle 없이 PID snapshot·일반 Job 알림·시간 지연으로 모든 자손 종료를 증명하지 않는다. 상시 승인된 읽기 전용 독립 검토에서 잘못된 성공 경로·종료 요청 누락에 해당하는 차단 결함 없음. 이는 native 실행 검증이 아니다.
+- 봉쇄 회귀를 추가했으며 기존 전체 종료 readiness 시험은 그대로 유지했다. 따라서 기존 성공을 요구하는 native 시험은 여전히 실패할 것으로 예상하며 이를 PASS로 바꾸거나 숨기지 않는다. Windows 실행 환경이 없어 새 회귀 실행은 미검증이다. rustfmt·diff 검사만 수행했으며 불필요한 전체 빌드·패키징·캐시는 만들지 않았다.
+- 이전 공개 CI 승인3회는 모두 소진된 상태로 추가 push/CI·모델 호출·main 병합·제품 활성화 없음. 다음은 모든 자손의 실행 전 handle 확보와 종료 확인을 담당할 supervisor 설계·구현, 그 후 native 검증이다. Windows CWD/파일 교체·watcher, G6와 출시도 미완료이며 목표는 계속 진행 중이다.
+
+### 2026-11-05 · by GPT-6
+
 - 세 번째 승인 CI [41977646539](https://github.com/wonseok-han/hello-agent/actions/runs/41977646539), d36b22c는 Windows 컴파일 성공·16 PASS/1 FAIL이다. 디스크 quota 조회의 held-handle rename 회귀가 통과해 ReOpenFile 접근 거부 결함을 해소했다. watcher 단계는 앞선 실패로 skipped이므로 합격/실행으로 기록하지 않는다. raw 로그·run metadata는 `.artifacts/m5-windows-native-41977646539/`에 보존한다.
 - 중요한 실제 결함: Job terminate가 true, completed가 Some을 반환한 직후 별도로 보유한 실제 자손 process handle은 WaitForSingleObject(0)=258(미종료)이었다. parent signal + ActiveProcesses=0만으로 모든 자손의 종료를 증명한다는 기존 판단은 반증됐다. 단순 sleep이나 시험 기대값 완화로 덮지 않으며 전체 자손 handle/종료 증거 계약을 보완해야 한다. Windows 제품/G4/stdio/실제 공급자 차단은 유지한다.
 - 앞선 fixture 수정만의 문제라는 추정에서 종료 판정 구현 결함으로 판단을 갱신했다. 독립 검토자에게 이 실제 증거 기반의 종료 보장 설계 검토를 요청했다. 기존 정적 검토 통과는 이 native 실패를 뒤집지 않는다.
@@ -123,6 +130,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+- **Windows 종료 성공 봉쇄(2026-11-05)**: 현재 completed는 root/Job accounting이 비어도 Unsupported이며 terminate는 성공 true를 반환하지 않는다. 전체 자손 handle 기반 종료 barrier 구현 전까지 transport 성공과 Windows admission을 허용하지 않는다. 기존 readiness 회귀는 유지하며 합격을 주장하지 않는다.
 - **Windows Job 종료 판정 반증(2026-11-05)**: 실제 CI41977646539에서 parent signal+Job active0/terminate(true) 뒤에도 별도 보유 자손 handle은 WAIT_TIMEOUT이었다. 기존 completed()/terminate()를 모든 자손 종료 증거로 인용하지 않는다. 임의 지연·카운트 완화로 해결하지 않으며 native gate는 닫아 둔다. 동일 실행의 disk capacity 회귀는 PASS, 전체16PASS1FAIL·watcher skipped다.
 - **Windows CWD 공유 잠금의 한계(2026-11-05)**: deny-share-write/delete만으로 reparse 불변을 증명하지 않는다. attribute 접근은 공유 제한과 별개이며 MS-FSA는 FILE_WRITE_ATTRIBUTES로 reparse 설정을 허용한다. CWD admission은 미완료이고 Windows gate는 유지한다.
 - **Windows 프로세스 연결 조건(2026-11-05)**: Job 생성 시 결속과 제한 시간/취소 가능한 stdio transport 기반은 아직 Git에 미연결·native 미검증이다. stdio가 없으면 STARTF_USESTDHANDLES를 켜지 않으며, 지정 시 임시 복제 핸들+HANDLE_LIST만 전달한다. 다른 broad-inherit spawn과의 경합 방지 및 CWD 권한·Git 호출 연결 및 native 묶음 검증 전에는 Windows gate를 열지 않는다. Drop의 Job close는 종료 요청이며 부모 signal과 active-process 0만으로는 전체 종료 증거가 되지 않는다(11/05 native 반증 참조).
