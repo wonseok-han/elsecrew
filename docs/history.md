@@ -4,6 +4,14 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은5e28744의 Windows 완료 원자화로 진전했다. 이번에는 메인이 같은 checkout에서 내부 resume_windows_save_cleanup을 연결했다. active pending save 거절, inspected lock revision/SaveRecovery durable session/canonical workspace 확인 뒤 replaced~cleanupComplete와 정확한 NTFS 정책/flush receipt만 받아들인다.
+- target/staging anchor lease·현재 managed/staging root·기록된 parent/anchor ID를 대조하고 교체 source 이름은 부재, target full ID/내용/접근 권한은 일치를 요구한다. replaced 상태에서는 guard/staging의 실재 ID를 먼저 요구해 기록 없는 부재를 완료로 승격하지 않는다. cleanupIntent 이후 guard, guardRemoved 이후 staging은 exact-ID 삭제 또는 이미 부재 관찰로 단계 전이를 재개한다. foreign name은 보존·거절한다. 최종 lease/target 확인 뒤 cleanupComplete 및 lock/chat 원자 완료를 사용한다.
+- 공개 IPC/UI와 Windows 제품 gate는 아직 연결/활성화하지 않았다. 교체 전 실패와 replaceIntent 상태의 불확실 복구, 전체 save 재시작 통합은 남아 있다. helper native 회귀는 삭제 후 재진입/의도 전 부재 거절/이름 재사용 보존을 작성했으며 아직 실행하지 않았다. 기존34 PASS로 대체하지 않는다.
+- 같은 독립 검토자1명이 현재 diff의 revision/receipt admission·lease 재결속·의도 전후 부재 처리·foreign 보존·원자 완료를 검토해 구체적 정적 차단 결함 없음을 확인했다. native 실행 합격이나 복구 전체 완료를 뜻하지 않는다.
+- 변경 Windows 모듈 rustfmt와 git diff --check를 확인했다. Cargo/패키지/cache/worktree/CI/push/모델 실행 없음. 다음은 복구 상태별 통합과 Windows 묶음 검증이다. 전체 앱 목표는 미완료다.
+
+### 2026-11-05 · by GPT-6
+
 - df793c6 이후 중단 저장 재개를 준비하다 Windows 정상 저장의 마지막 lock clear와 chat save_session 삭제가 별도 원장 쓰기인 틈을 확인했다. 메인이 최종 완료를 lock/chat의 정확한 revision을 검사하는 단일 SQLite transaction으로 묶었다. cleanupComplete/flush receipt 검사는 그대로며 성공 경로는 session을 다시 삭제하지 않는다. V2 chat 없는 저장과 macOS의 기존 흐름은 유지한다.
 - 이 변경은 재시작 재개 자체의 완료가 아니다. 명시 복구·단계별 실패 주입/native 통합·Windows 제품 활성화는 여전히 미완료다. 기존34 native PASS는 새 Windows 저장 코드의 검증 증거가 아니다.
 - 기존 캐시를 이용한 macOS cargo check -p hello-agent-sidecar --locked --offline 통과(1.78초, jobs/threads4). Windows cfg 컴파일은 검증하지 못했다. project.rs 구문 파싱·git diff --check 확인; 별도 패키지/worktree/CI/push/모델 실행 없음. 승인된 기존 CI 예산은2/3 사용 상태를 유지하며 새 기능 공개에 쓰지 않는다.

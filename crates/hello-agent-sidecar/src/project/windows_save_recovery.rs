@@ -178,7 +178,7 @@ fn classify_destination(destination: &Value, intent: &Value) -> &'static str {
     }
 }
 
-fn internal_name<'a>(
+pub(super) fn internal_name<'a>(
     intent: &'a Value,
     field: &str,
     prefix: &str,
@@ -197,7 +197,7 @@ fn internal_name<'a>(
     }
     Ok(name)
 }
-fn staging_name(intent: &Value) -> Result<&str, ProjectFailure> {
+pub(super) fn staging_name(intent: &Value) -> Result<&str, ProjectFailure> {
     let name = intent["stagingName"]
         .as_str()
         .ok_or_else(|| ProjectFailure::recovery("staging name missing"))?;
