@@ -104,6 +104,44 @@ fn pin_child(parent: &Dir, name: &str) -> Result<File, ProjectFailure> {
     parent.open_with(name, &options).map_err(failure)
 }
 impl DirectoryLease {
+    /// Keep a different guard pinned throughout replacement. Do not expose an
+    /// unprotected raw path or allow the operation to consume this lease's pin.
+    pub(super) fn replacement_parent(&self, name: &str) -> Result<&Dir, ProjectFailure> {
+        normal_component(name)?;
+        if name.eq_ignore_ascii_case(&self.guard_name) {
+            return Err(ProjectFailure::recovery(
+                "replacement requires an independent directory guard",
+            ));
+        }
+        self.validate()?;
+        let parent = self
+            .directories
+            .last()
+            .map(|(dir, _)| dir)
+            .ok_or_else(|| ProjectFailure::recovery("directory lease has no parent handle"))?;
+        // Windows names can alias through Unicode casing or short names. Use
+        // the filesystem's actual identity rather than ASCII folding alone.
+        let mut options = OpenOptions::new();
+        options
+            .read(true)
+            .follow(FollowSymlinks::No)
+            .maybe_dir(true)
+            .share_mode(7)
+            .custom_flags(windows_fs::OPEN_REPARSE_POINT);
+        match parent.open_with(name, &options) {
+            Ok(target) => {
+                if windows_fs::identity(&target, false)? == self.guard_id {
+                    return Err(ProjectFailure::recovery(
+                        "replacement aliases the directory guard",
+                    ));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(failure(error)),
+        }
+        Ok(parent)
+    }
+
     /// `guard_name` is an existing direct child, e.g. `.git`. This function never
     /// creates a guard or writes to the source. Empty/unavailable directories
     /// remain unsupported until the caller supplies a managed preparation step.

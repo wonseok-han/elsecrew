@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> **Windows replacement primitive(native 미검증·제품 미연결)**: `windows_replace.rs`는 source file handle과 pinned destination Dir handle·단일 leaf로 FileRenameInfo 교체를 요청한다. 독립 guard를 유지하고 비정상 이름·guard 자체 교체를 거절하며 readonly/POSIX 우회·delete/copy fallback은 없다. 이는 save transaction이 아니므로 durable intent·버전 확인·sync/복구 연결 전 제품에서 사용하지 않는다. 기존34 PASS는 이 신규 코드를 포함하지 않는다.
+
 > **2026-11-05 최신 Windows native 증거**: [CI41988529910](https://github.com/wonseok-han/hello-agent/actions/runs/41988529910), 공개0a7efd5(f41eb29+시험 핸들 수명 수정)는 native29·spawn1·watcher4, 합계34 PASS/0 FAIL/0 ignored다. CWD pin/ACL/reparse·실제 GUID image/CWD 실행·공용 control reader EOF·unwind retention을 포함한다. background watcher의 실제 Git 검증·공식 Git 설치본 신뢰·파일 교체/복구·전체 제품/성능 합격은 포함하지 않는다.
 
 > **Windows watcher background 연결(컴파일 확인·종단 실행 미검증)**: Unix와 Windows는 한 번에 하나의 소유형 repository 검증 worker를 사용한다. 결과는 dispatcher에서 현재 stream/active binding 및 보유 root/.git 신원과 다시 대조하며, Windows는 full FILE_ID_INFO를 사용한다. metadata/write-tree 재검증 뒤 bounded scan을 이어간다. 취소 후 worker join을 유지하고 Windows 실제 Git admission은 계속 차단한다. 따라서 연결 구현을 Windows 실사용/성능 합격으로 해석하지 않는다.

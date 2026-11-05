@@ -1,0 +1,145 @@
+//! Handle-relative replacement primitive, not a complete save transaction.
+//! The caller must own the durable intent, version check, temp identity, and
+//! post-rename durability/recovery. Product save admission remains disabled.
+#![allow(dead_code)]
+use super::{windows_directory_lease::DirectoryLease, windows_fs, ProjectFailure};
+use cap_std::fs::File;
+use std::{
+    ffi::c_void,
+    mem::{offset_of, size_of},
+    os::windows::io::AsRawHandle,
+};
+
+#[repr(C)]
+struct RenameInfo {
+    replace: u32,
+    root: *mut c_void,
+    name_bytes: u32,
+    name: [u16; 1],
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn SetFileInformationByHandle(
+        handle: *mut c_void,
+        class: i32,
+        information: *const c_void,
+        bytes: u32,
+    ) -> i32;
+}
+
+/// Does not open a source pathname or resolve a multi-component destination.
+/// No POSIX/ignore-readonly flags and no delete/copy fallback are used.
+pub(super) fn replace(
+    source: &File,
+    destination: &DirectoryLease,
+    name: &str,
+) -> Result<(), ProjectFailure> {
+    let parent = destination.replacement_parent(name)?;
+    windows_fs::identity(source, false)?;
+    let wide: Vec<u16> = name.encode_utf16().collect();
+    if wide.is_empty() || wide.len() > 255 || wide.contains(&0) {
+        return Err(ProjectFailure::manifest("invalid replacement leaf name"));
+    }
+    // Word allocation provides the native pointer alignment. Include room for
+    // a terminator although FileNameLength describes only actual UTF-16 bytes.
+    let length = size_of::<RenameInfo>() + (wide.len() + 1) * 2;
+    let mut words = vec![0usize; length.div_ceil(size_of::<usize>())];
+    let info = words.as_mut_ptr().cast::<RenameInfo>();
+    // SAFETY: aligned allocation is larger than the fixed header and name;
+    // both handles and the allocation outlive this synchronous call.
+    unsafe {
+        (*info).replace = 1;
+        (*info).root = parent.as_raw_handle();
+        (*info).name_bytes = (wide.len() * 2) as u32;
+        std::ptr::copy_nonoverlapping(
+            wide.as_ptr(),
+            words
+                .as_mut_ptr()
+                .cast::<u8>()
+                .add(offset_of!(RenameInfo, name))
+                .cast::<u16>(),
+            wide.len(),
+        );
+    }
+    destination.validate()?;
+    // FileRenameInfo = 3. RootDirectory is the pinned parent, not process CWD.
+    let result = unsafe {
+        SetFileInformationByHandle(
+            source.as_raw_handle(),
+            3,
+            words.as_ptr().cast(),
+            length as u32,
+        )
+    };
+    if result == 0 {
+        return Err(ProjectFailure::recovery(format!(
+            "Windows handle-relative replace failed: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+    // Success here is rename only; never clear a durable save lock here.
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cap_std::{ambient_authority, fs::Dir};
+    use std::{ffi::OsStr, os::windows::fs::OpenOptionsExt};
+
+    #[test]
+    fn replacement_is_relative_to_pinned_parent_and_preserves_guard() {
+        let temp = tempfile::tempdir().unwrap();
+        let parent = temp.path().join("destination");
+        std::fs::create_dir(&parent).unwrap();
+        std::fs::write(parent.join("guard"), b"guard").unwrap();
+        std::fs::write(parent.join("file.txt"), b"before").unwrap();
+        std::fs::write(temp.path().join("staged"), b"after").unwrap();
+        let dir = Dir::open_ambient_dir(&parent, ambient_authority()).unwrap();
+        let lease = DirectoryLease::acquire(&dir, OsStr::new("guard")).unwrap();
+        let source = File::from_std(
+            std::fs::OpenOptions::new()
+                .access_mode(0xc0010000) // GENERIC_READ | GENERIC_WRITE | DELETE
+                .share_mode(7)
+                .open(temp.path().join("staged"))
+                .unwrap(),
+        );
+        let identity = windows_fs::identity(&source, false).unwrap();
+        for name in ["guard", "../escape", "sub/file", "file:stream", "NUL"] {
+            assert!(replace(&source, &lease, name).is_err());
+            assert_eq!(std::fs::read(parent.join("file.txt")).unwrap(), b"before");
+        }
+        let held_target = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(parent.join("file.txt"))
+            .unwrap();
+        assert!(replace(&source, &lease, "file.txt").is_err());
+        assert_eq!(std::fs::read(parent.join("file.txt")).unwrap(), b"before");
+        assert!(temp.path().join("staged").exists());
+        drop(held_target);
+        std::fs::write(parent.join("Å.txt"), b"unicode guard").unwrap();
+        let unicode_guard = DirectoryLease::acquire(&dir, OsStr::new("Å.txt")).unwrap();
+        // Prove the two names refer to the same object on this test filesystem.
+        let upper = dir.open("Å.txt").unwrap();
+        let lower = dir.open("å.txt").unwrap();
+        assert_eq!(
+            windows_fs::identity(&upper, false).unwrap(),
+            windows_fs::identity(&lower, false).unwrap()
+        );
+        assert!(unicode_guard.replacement_parent("å.txt").is_err());
+        assert!(replace(&source, &unicode_guard, "å.txt").is_err());
+        assert_eq!(
+            std::fs::read(parent.join("Å.txt")).unwrap(),
+            b"unicode guard"
+        );
+        drop((upper, lower, unicode_guard));
+        replace(&source, &lease, "file.txt").unwrap();
+        let written = dir.open("file.txt").unwrap();
+        assert_eq!(windows_fs::identity(&written, false).unwrap(), identity);
+        assert_eq!(std::fs::read(parent.join("file.txt")).unwrap(), b"after");
+        assert_eq!(std::fs::read(parent.join("guard")).unwrap(), b"guard");
+        assert!(!temp.path().join("staged").exists());
+    }
+}

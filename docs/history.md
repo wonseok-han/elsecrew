@@ -4,6 +4,14 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 앞선 turn은 Windows34 native PASS로 진전했다. f83b143의 깨끗한 checkout에서 메인이 `windows_replace.rs`를 구현했다. source는 보유 file handle, destination은 검증한 DirectoryLease의 parent handle과 정상 단일 leaf다. SetFileInformationByHandle(FileRenameInfo=3)에 pointer-aligned buffer와 UTF-16 바이트 길이를 전달한다. 상대 다중 경로/ADS/장치명·guard 자체 대상은 거절하고 POSIX/readonly 우회나 delete/copy fallback을 사용하지 않는다.
+- DirectoryLease는 별도의 guard를 유지한 채 parent를 제공하며 syscall 직전에 다시 전체 결속을 검증한다. 이 primitive는 rename만 수행한다. durable save intent·현재 버전/임시 파일 신원·권한·교체 후 sync/재열기/복구를 caller가 묶어야 하므로 현재 제품 save 경로에 연결하거나 활성화하지 않았다.
+- native 회귀 초안은 다른 디렉터리의 source를 pinned parent의 기존 target으로 교체하고 전체 file ID/bytes/guard를 대조한다. 탈출/ADS/장치명/guard 이름 거절과 target sharing 충돌 시 source/target 보존도 포함한다. Rust 포맷/diff 검사 통과, Windows 실행은 미검증이며 기존34 PASS에 포함되지 않는다.
+- 정적 검토에서 ASCII 이름 비교만으로는 Unicode/short-name guard alias를 사전 차단하지 못하는 점을 지적받아, 기존 destination을 no-follow로 열어 guard와 전체 file ID를 비교하도록 보완했다. Å/å가 실제 같은 file ID임을 확인하고 API 호출 전 거절하는 native 회귀도 추가했다. 기존 커널 deny-delete 검사까지 실제로 우회됐다는 증거는 없으므로 사전 검증 결함으로 한정한다. 같은 독립 검토자의 재검토에서 보완 후 차단 결함 없음.
+- 남은 기존 CI 승인1회는 f41eb29의 컴파일/시험 호환 수정 범위이므로 이 새 기능 push에는 쓰지 않는다. 새 build/cache/worktree·모델 호출·외부 변경 없음. 다음은 별도 guard의 durable 준비/cleanup과 save 원장 연결 및 묶음 native 검증이다. 내부 Git 제공 방식 선택·G6/전체 출시도 미완료다.
+
+### 2026-11-05 · by GPT-6
+
 - 사용자가 f41eb29 및 Windows 컴파일/시험 호환 수정의 공개 push·CI 최대3회를 승인했다. 기존 codex/m5-windows-supervisor-20261105에 정확히 f41eb29852c8c20c5318d0a908c3ba72d7030029를 push하고 첫 실행41987756587이 in_progress임을 확인했다. 승인1/3회 사용·2회 남음. 이후 로컬 문서 커밋은 공개하지 않았다.
 - 범위는 native primitives·공통 spawn·watcher 진단이며 패키징/제품 활성화/모델 호출/main 병합은 제외한다. 결과는 아직 미정이고 이전25 PASS로 대체하지 않는다. 로컬 빌드·새 캐시/worktree 없음. 다음은 동일 run의 결과 확인과 필요한 호환 수정이다.
 - 첫 실행41987756587은 release 컴파일3분17초 성공·native28 PASS/1 FAIL이다. 실패는 lease 해제 후 ancestor rename에서5(AccessDenied)였으며 별도 authority Dir가 아직 열려 있었다. acquire 직후 이 외부 Dir를 닫아 lease 핸들만으로 차단/해제를 검사하도록 시험만 수정했다. 기존 공유32·nonempty145·guard 내용 검사는 유지한다. image/GUID CWD·공용 control EOF·unwind retention 등 새 검사는 PASS였다. spawn/watch 단계는 skipped다. 원시 실패 로그는 .artifacts/m5-windows-supervisor-41987756587/failed.log에 보존하며 포맷/diff 검사 통과.

@@ -17,6 +17,8 @@ mod windows_transport;
 mod windows_directory_lease;
 #[cfg(windows)]
 mod windows_executable;
+#[cfg(windows)]
+mod windows_replace;
 use crate::{AppendOutcome, SidecarError, Storage};
 #[cfg(unix)]
 use cap_fs_ext::OsMetadataExt;
