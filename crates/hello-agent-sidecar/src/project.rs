@@ -1,4 +1,4 @@
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 use crate::process_spawn::SpawnGuarded as _;
 mod app_roles;
 mod protocol_path;
@@ -44,9 +44,9 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 use std::process::{Child, ChildStdin, ChildStdout, ExitStatus};
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 use std::thread::JoinHandle;
 #[cfg(unix)]
 use std::{
@@ -60,9 +60,13 @@ mod application;
 mod git_process;
 #[cfg(unix)]
 use git_process::{GitStdin, GitStdout, StreamingGitChild};
-#[cfg(not(unix))]
+#[cfg(windows)]
+mod windows_git_process;
+#[cfg(windows)]
+use windows_git_process::{GitStdin, GitStdout, StreamingGitChild};
+#[cfg(not(any(unix, windows)))]
 type GitStdin = ChildStdin;
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 type GitStdout = ChildStdout;
 pub(crate) mod runtime_isolation;
 mod snapshot_recovery;
@@ -304,7 +308,7 @@ struct SnapshotStats {
     largest_blob: u64,
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 struct StreamingGitChild {
     child: Child,
     stdin: Option<ChildStdin>,
@@ -313,7 +317,7 @@ struct StreamingGitChild {
     finished: bool,
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 impl StreamingGitChild {
     fn spawn(command: &mut Command) -> std::io::Result<Self> {
         command.stderr(Stdio::piped());
@@ -346,7 +350,7 @@ impl StreamingGitChild {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 impl Drop for StreamingGitChild {
     fn drop(&mut self) {
         if !self.finished {
@@ -4822,13 +4826,13 @@ fn sync_materialized_files(files: &mut Vec<CapFile>) -> Result<(), ProjectFailur
     })
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn terminate_child(child: &mut Child) {
     let _ = child.kill();
     let _ = child.wait();
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn spawn_bounded_stderr_reader(
     mut stderr: std::process::ChildStderr,
 ) -> JoinHandle<std::io::Result<Vec<u8>>> {

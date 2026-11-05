@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> **Windows 공용 Git reader adapter(native 미검증)**: `windows_git_process.rs`가 공용 snapshot/diff reader의 StreamingGitChild와 pipe 타입을 제공한다. typed image/CWD로 생성한 Transport만 소유하고 bounded pipe·전체 자손 종료 확인·Windows ExitStatus 변환을 수행한다. 일반 Command 실행은 거절하며 Windows의 이전 parent-only Child fallback은 사용하지 않는다. 실제 Git 설치본 신뢰·admission 연결은 여전히 미완료다.
+
 > **Windows 실행 이미지 결속(native 미검증)**: `windows_executable.rs`는 명시적으로 선택한 부모 handle 아래 실행 파일과 부모 경로를 보유하고 전체 파일 ID를 기록한다. 쓰기/delete 공유를 허용하지 않는 image handle을 실행 수명 동안 유지한다. `Transport::spawn_bound`는 image와 CWD lease를 creator supervisor로 넘기며 첫 CREATE_PROCESS 이벤트의 실제 hFile을 선택한 파일 ID와 비교한 뒤에만 이벤트를 계속한다. 거절 시 user code를 계속하지 않고 종료를 요청하며 pin은 미확인 종료 정책에 따라 유지한다. 이는 파일 신원 결속이지 공식 Git 설치본·서명·기존 writable mapping·DLL/자손 실행 파일의 신뢰 보장이 아니다. 실제 Git admission은 계속 닫혀 있고 이전25 PASS는 이 변경을 검증하지 않는다.
 
 > **Windows CWD lease 기반(native 미검증·제품 미연결)**: `windows_directory_lease.rs`는 이미 보유한 디렉터리의 GUID volume 경로에서 각 성분을 handle-relative로 다시 열어 전체 신원을 대조한다. 명시적인 delete 공유 금지 핸들과 기존 직접 child pin으로 폴더의 nonempty 상태를 유지하고, 모든 pin 확보 뒤 전체 ID·no-reparse·부모/자식 결속을 확인한다. 사용자 파일 생성/수정은 하지 않으며 guard가 없는 빈 폴더는 거부한다. 이 기반을 모든 종류의 reparse 불변·프로세스 CWD 권한의 완성으로 보지 않는다. Family/Transport 내부에는 typed lease 경로를 연결했으며 생성 직전·resume 직전에 재검증한다. creator supervisor가 CreateProcess 성공 후 pin을 armed로 보유하고 전체 종료 확인 뒤 해제한다. 미확인 오류·unwind에서는 마지막 Arc를 sidecar 종료까지 보존하므로 durable fence/자동 재시도 금지와 복구 처리가 필수다. 이는 전역 자원 상한이나 자동 복구 완료 보장이 아니다. GUID CWD native 호환·실행 파일 권한과 실제 Git 연결을 마치기 전까지 제품 admission에는 사용하지 않는다.

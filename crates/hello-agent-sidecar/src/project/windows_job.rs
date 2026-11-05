@@ -722,6 +722,13 @@ pub(super) mod native {
                 );
                 std::io::stdout().write_all(b"HELLO_RETAINED").unwrap();
                 // The retained pin is released by process exit, not unwinding.
+            } else if mode == "control-eof" {
+                use std::io::{Read, Write};
+                assert_eq!(std::fs::read("cwd-marker").unwrap(), b"owned-directory");
+                let mut input = Vec::new();
+                std::io::stdin().read_to_end(&mut input).unwrap();
+                assert!(input.is_empty());
+                std::io::stdout().write_all(b"HELLO_CWD_OK").unwrap();
             } else if mode == "cwd" {
                 use std::io::Write;
                 assert_eq!(std::fs::read("cwd-marker").unwrap(), b"owned-directory");

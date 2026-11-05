@@ -2,6 +2,13 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은458f80a 실행 이미지 결속 구현으로 진전했다. 메인이 Windows 공용 Git reader 연결을 이어서 구현했다. 기존 Windows StreamingGitChild의 parent-only Child.wait/kill·무제한 blocking pipe 경로를 제거하고 `windows_git_process` adapter를 사용하도록 cfg를 분리했다. Unix 동작은 변경하지 않았다.
+- adapter는 typed image/CWD lease의 Transport를 소유하며 공용 snapshot/diff reader에 bounded stdin/stdout을 제공한다. finish는 stdin EOF 후 supervisor의 전체 종료 증거를 기다리고 Windows exit code를 std ExitStatus로 변환한다. Drop은 외부 pipe를 닫고 Transport의 취소/종료 처리로 이어진다. 일반 Command는 capability를 전달하지 못하므로 실행을 거절한다. 이는 실제 Git 설치본 admission 활성화가 아니며 기존 제품 차단은 유지한다.
+- native 회귀 초안으로 raw Command 우회 거절과 bound Transport의 입력 EOF → fixture 응답 → 실제 공용 finish_git_control 출력/종료 소비 → guard 해제를 연결했다. rustfmt·diff 검사 통과, Windows 컴파일/실행은 미검증이다. 추가 로컬 빌드 캐시/패키지/worktree·push/CI·실제 모델 호출 없음.
+- 읽기 전용 독립 검토에서 adapter의 raw Command 거절·EOF·finish/Drop 소유권에 구체적 차단 결함 없음. 다음: 공식 Git 설치본/의존성 신뢰 및 빈 관리 폴더 준비와 admission 연결, 이후 native 묶음 검증. Windows 파일 교체/복구·G6·출시 검증도 미완료다.
+
+### 2026-11-05 · by GPT-6
+
 - 621c9fd 기준으로 메인이 Windows 실행 이미지 신원 결속을 구현했다. 명시적으로 선택한 부모 Dir의 image를 no-follow/read-only sharing으로 열고 전체 파일 ID를 보유한다. 부모 경로 pin과 image pin을 typed Transport/Family 경로에 연결했다. RetainedPin<T>로 기존 CWD의 creator 소유·실패 시 보존 정책을 재사용한다.
 - 첫 CREATE_PROCESS debug event의 실제 hFile을 미리 선택한 image ID와 비교한 뒤 ContinueDebugEvent한다. 거절된 이벤트는 계속하지 않으며 worker가 Job 종료를 요청하고 debugger thread를 끝낸다. 미확인 종료의 pin은 sidecar 종료까지 보존한다. 공식 설치본/서명/DLL 신뢰·기존 writable mapping·자손 image 검증을 구현했다고 주장하지 않고 실제 Git/Windows 제품 gate는 닫아 둔다. Microsoft CREATE_PROCESS_DEBUG_INFO와 Debugging Events의 actual image handle·user-mode 실행 전 이벤트 계약을 근거로 했다.
 - native 회귀 초안: 다른 image ID 거절, 기존 writer 충돌·후속 쓰기/rename 차단·해제 후 쓰기, 실제 fixture 실행에서 GUID image+CWD 동시 결속이다. rustfmt·git diff --check 통과. Windows 실행은 미검증이며 앞선25 PASS를 새 변경에 적용하지 않는다. 새 로컬 빌드/캐시/worktree·모델 호출·push·main 병합 없음. 이전 CI 승인3회는 모두 소진됐다.
