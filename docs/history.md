@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준8e7b73e/깨끗한 통합 checkout에서 project.catalog에 inspectGitTrust/confirmGitTrust/revokeGitTrust 계약·Rust dispatch를 연결했다. exact field/명시 confirmed:true·identity 일치·응답 executionEnabled:false를 검사하고 Windows 외 플랫폼은 unsupportedCapability를 반환한다. 기존 고정 catalog IPC를 재사용하며 임의 경로 실행 통로는 추가하지 않았다.
+- Git 위치 화면에 설치 폴더·검증 서명자 표시, 미서명 구성 파일/업데이트 재검사 설명, 기본 해제된 동의 checkbox, 신뢰 저장·철회 버튼과 ko/en 문구를 연결했다. 선택/갱신 시 이전 inspection·checkbox를 폐기하고 요청 중 변경과 unmount 후 응답 반영을 막는다. 선택 잊기는 신뢰 철회를 확인한 뒤 진행하며 서비스 부재/실패를 신뢰 해제로 표시하지 않는다.
+- 현재 Windows 내부 서비스 시작/제품 gate는 닫혀 있어 실제 화면 종단 사용은 아직 불가하다. 계약·UI·native 합동 시험과 독립 검토는 기능 연결 뒤 진행하며 이번은 diff 검사만 확인했다. 새 빌드/cache/CI/push/모델/제품 활성화 없음. 다음은 Windows startup에서 설치 준비용 요청의 허용 범위를 분리하고 신뢰된 Git을 단일 호출에 연결하는 것이다.
+
+### 2026-11-06 · by GPT-6
+
 - 사용자가 설치 폴더 신뢰·변경 시 재확인 정책을 승인했다. 앱에서 설치 폴더와 OS가 확인한 서명자를 보여주고 명시 동의 후 동일 설치본의 미서명 runtime DLL을 수용하며, 업데이트마다 재검사·서명자 변경 시 재동의한다. 제품 Windows gate 활성화나 추가CI/push/실제 모델 승인과는 별개다.
 - 기준c7d65cc에서 Rust preview/confirm/revoke/admitted-runtime 경로를 구현했다. 동의는 native 설치 경로·GUID volume 경로·실제 root directory ID·검증된 CN/조직에 결속하고 release version/실행 파일 digest/certificate serial은 pin하지 않는다. confirm은 재검사한 identity와 화면 expected 값이 같을 때만 app-owned bounded schema record를 atomic replace한다. 미동의/다른 root/서명자 변경은 실행 후보 반환을 거절한다. 매 admission은 기존 runtime/DLL 검사를 다시 수행한다.
 - 이 메서드는 아직 protocol/IPC/앱 화면·제품 spawn에 연결되지 않았다. root 디렉터리 자체가 교체되면 같은 문자열 경로라도 재동의가 필요하다. 업데이트 호환·동의 영속성·변경 거절 native 시험은 미실행이며 이번은 rustfmt/diff만 확인했다. 신규 빌드/cache/모델/CI/push/패키지 없음. 다음은 이 동의 경로의 계약·화면·단일 Git 호출 연결이다.

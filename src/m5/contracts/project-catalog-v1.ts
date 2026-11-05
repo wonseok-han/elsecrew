@@ -16,7 +16,32 @@ export interface BackupStorageUsage { usedBytes: number; limitBytes: number; rem
 export interface ChatDiscardAddress { chatId: string; taskId: string; projectId: string; worktreeId: string; workspaceIdentity: string }
 export interface ChatDiscardInspection extends ChatDiscardAddress { chatRevision: number }
 export type AppRoleDefaults = Omit<ProjectRoleSettingsV1, "projectId">;
+export interface GitTrustIdentity {
+  installationPath: string; volumePath: string; directoryId: string;
+  commonName: string; organization: string | null;
+}
+export interface GitTrustInspection { identity: GitTrustIdentity; trusted: boolean; executionEnabled: false }
+export function validateGitTrustIdentity(value: unknown): GitTrustIdentity {
+  const identity = object(value);
+  keys(identity, ["installationPath", "volumePath", "directoryId", "commonName", "organization"]);
+  for (const key of ["installationPath", "volumePath", "directoryId", "commonName", "organization"]) {
+    const text = identity[key];
+    if (key === "organization" && text === null) continue;
+    if (typeof text !== "string" || text.length === 0 || text.length > (key === "commonName" || key === "organization" ? 4096 : 32768) || /[\u0000-\u001f\u007f]/.test(text)) throw new Error("invalid Git trust identity");
+  }
+  return identity as unknown as GitTrustIdentity;
+}
+function validateGitTrustInspection(value: unknown): GitTrustInspection {
+  const inspection = object(value);
+  keys(inspection, ["identity", "trusted", "executionEnabled"]);
+  validateGitTrustIdentity(inspection.identity);
+  if (typeof inspection.trusted !== "boolean" || inspection.executionEnabled !== false) throw new Error("invalid Git trust inspection");
+  return inspection as unknown as GitTrustInspection;
+}
 export type ProjectCatalogRequest =
+  | { action: "inspectGitTrust" }
+  | { action: "confirmGitTrust"; identity: GitTrustIdentity; confirmed: true }
+  | { action: "revokeGitTrust" }
   | { action: "getAppRoleDefaults" }
   | { action: "updateAppRoleDefaults"; expectedRevision: number; roles: readonly RoleProfileV1[] }
   | ({ action: "inspectChatDiscard" } & ChatDiscardAddress)
@@ -49,6 +74,8 @@ export type ProjectCatalogRequest =
   | { action: "abandonPreparation"; inspection: PreparationInspection };
 export interface ProjectCatalogEntry { projectId: string; canonicalPath: string }
 export type ProjectCatalogResult =
+  | { schemaVersion: 1; action: "inspectGitTrust" | "confirmGitTrust"; inspection: GitTrustInspection }
+  | { schemaVersion: 1; action: "revokeGitTrust"; revoked: true }
   | { schemaVersion: 1; action: "getAppRoleDefaults" | "updateAppRoleDefaults"; settings: AppRoleDefaults }
   | { schemaVersion: 1; action: "inspectChatDiscard"; inspection: ChatDiscardInspection }
   | { schemaVersion: 1; action: "discardChatWorkspace"; chat: ChatRecordV1 }
@@ -111,7 +138,13 @@ export function validateChatDiscardInspection(value: unknown): ChatDiscardInspec
 }
 export function validateProjectCatalogRequest(value: unknown): ProjectCatalogRequest {
   const request = object(value);
-  if (request.action === "getAppRoleDefaults") {
+  if (request.action === "inspectGitTrust" || request.action === "revokeGitTrust") {
+    keys(request, ["action"]);
+  } else if (request.action === "confirmGitTrust") {
+    keys(request, ["action", "identity", "confirmed"]);
+    validateGitTrustIdentity(request.identity);
+    if (request.confirmed !== true) throw new Error("Git trust requires explicit confirmation");
+  } else if (request.action === "getAppRoleDefaults") {
     keys(request, ["action"]);
   } else if (request.action === "updateAppRoleDefaults") {
     keys(request, ["action", "expectedRevision", "roles"]);
@@ -176,7 +209,15 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   const request = validateProjectCatalogRequest(input);
   const result = object(value);
   if (result.schemaVersion !== 1 || result.action !== request.action || new TextEncoder().encode(JSON.stringify(value)).byteLength > 768 * 1024) throw new Error("invalid catalog response envelope");
-  if (request.action === "getAppRoleDefaults" || request.action === "updateAppRoleDefaults") {
+  if (request.action === "inspectGitTrust" || request.action === "confirmGitTrust") {
+    keys(result, ["schemaVersion", "action", "inspection"]);
+    const inspection = validateGitTrustInspection(result.inspection);
+    if (request.action === "confirmGitTrust" && (!inspection.trusted ||
+      (Object.keys(request.identity) as (keyof GitTrustIdentity)[]).some(key => inspection.identity[key] !== request.identity[key]))) throw new Error("Git trust confirmation differs from inspection");
+  } else if (request.action === "revokeGitTrust") {
+    keys(result, ["schemaVersion", "action", "revoked"]);
+    if (result.revoked !== true) throw new Error("Git trust revocation was not confirmed");
+  } else if (request.action === "getAppRoleDefaults" || request.action === "updateAppRoleDefaults") {
     keys(result, ["schemaVersion", "action", "settings"]);
     const settings = object(result.settings);
     keys(settings, ["schemaVersion", "revision", "roles", "updatedAt"]);

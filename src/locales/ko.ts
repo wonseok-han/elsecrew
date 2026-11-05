@@ -1,6 +1,15 @@
 // 한국어 문구 리소스. 이 파일의 키 집합이 다른 언어 파일의 기준이 된다.
 // 보간은 {name} 형태 — t("key", { name }) 로 치환.
 export const ko = {
+  "m5.git.inspectTrust": "설치 폴더와 서명자 확인",
+  "m5.git.trustFailed": "설치본을 확인하지 못했어요. 내부 서비스 상태와 선택한 Git 설치를 확인해 주세요.",
+  "m5.git.publisher": "확인된 서명자",
+  "m5.git.trustScope": "이 폴더의 Git과 함께 설치된 서명 없는 구성 파일도 신뢰합니다. 업데이트 후 다시 검사하며 폴더나 서명자가 바뀌면 동의를 다시 요청합니다.",
+  "m5.git.trusted": "이 설치본을 신뢰하도록 저장했어요. 실행 기능은 아직 준비 중이에요.",
+  "m5.git.needsTrust": "폴더와 서명자를 확인한 뒤 동의해 주세요.",
+  "m5.git.consent": "표시된 설치 폴더와 구성 파일을 신뢰합니다.",
+  "m5.git.confirmTrust": "이 설치본 신뢰하기",
+  "m5.git.revokeTrust": "신뢰 동의 취소",
   "m5.git.title": "Git 연결 준비",
   "m5.git.intro": "프로젝트의 작업 복사본과 변경 비교에 PC에 설치된 Git을 사용해요. 설치 폴더에서 git.exe를 선택하세요.",
   "m5.git.selected": "설치 위치를 기억했어요. 실제 사용 전 연결 확인이 더 필요해요.",

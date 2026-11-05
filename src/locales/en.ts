@@ -2,6 +2,15 @@ import type { MessageKey } from "./ko";
 
 // 영어 문구. ko와 동일한 키를 모두 가져야 한다(Record<MessageKey>로 강제).
 export const en: Record<MessageKey, string> = {
+  "m5.git.inspectTrust": "Inspect installation and publisher",
+  "m5.git.trustFailed": "Could not inspect the installation. Check the internal service and selected Git installation.",
+  "m5.git.publisher": "Verified publisher",
+  "m5.git.trustScope": "Trust Git and unsigned components installed in this folder. Updates are reinspected; a changed folder or publisher requires new consent.",
+  "m5.git.trusted": "Trust saved for this installation. Execution is still being prepared.",
+  "m5.git.needsTrust": "Review the folder and publisher before consenting.",
+  "m5.git.consent": "I trust the displayed installation folder and its components.",
+  "m5.git.confirmTrust": "Trust this installation",
+  "m5.git.revokeTrust": "Revoke installation trust",
   "m5.git.title": "Prepare Git connection",
   "m5.git.intro": "Use Git installed on your PC for working copies and change comparison. Select git.exe in its installation folder.",
   "m5.git.selected": "Installation location saved. Connection checks are still required before use.",
