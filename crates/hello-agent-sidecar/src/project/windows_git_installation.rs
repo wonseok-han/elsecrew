@@ -41,7 +41,7 @@ impl ProjectManager {
         let directory = windows_fs::open_directory(parent)?;
         let name = Path::new(&path).file_name().unwrap_or(OsStr::new(""));
         let image = ExecutableLease::acquire(&directory, name)?;
-        image.validate()?;
+        image.verify_authenticode()?;
         Ok(Some(SelectedGitCandidate {
             _image: image,
             _selected_path: path,

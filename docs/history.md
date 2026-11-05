@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준95df836의 깨끗한 통합 checkout에서 Windows 후보 파일의 Authenticode 검증을 구현했다. ExecutableLease가 보유한 읽기 handle과 GUID 경로를 WinVerifyTrust에 함께 전달하고 전후 결속을 확인한다. 성공은 반환값0만 인정하며 성공/실패 모두 provider state를 닫는다. 임의 버전 SHA pin이나 후보 실행/PowerShell 호출은 추가하지 않았다.
+- 비대화형·URL 캐시 전용·체인 폐기 확인을 사용하므로 인증서 확인 자료가 부족하면 실패한다. 이 검사는 서명의 OS 신뢰 여부일 뿐 Git 배포자 식별/의존성 허가가 아니다. selected_git_candidate에 연결했지만 제품 spawn에는 미연결이고 Windows gate는 유지한다. 다음은 검증된 signer의 배포자 식별과 의존 이미지 결속·실행 경로 연결이다.
+- [Microsoft WinVerifyTrust](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/nf-wintrust-winverifytrust), [WINTRUST_DATA](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-wintrust_data), [FILE_INFO](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-wintrust_file_info)를 확인해 FFI와 handle/state 수명을 작성했다.64비트 ABI 정적 assertion·미서명 파일 거부 native 회귀를 추가했다. 구현 우선 지시에 따라 이번에는 rustfmt/diff만 확인했으며 Windows 컴파일/시험·독립 안전 검토는 기능 연결 후 묶음 검증에 남긴다. 추가CI/push/모델/패키지 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준2109bc6에서 사용자 설치 Git 설정의 공유 위치와 Rust 읽기 기반을 메인이 연결했다. main은 sidecar와 같은 m5 데이터 폴더를 사용하며, 기존 userData 설정은 새 파일이 없을 때만 보존 이관한다. inspect/choose/forget을 직렬화하고 새 선택/해제는 읽을 수 없는 예전 설정으로 막지 않는다. 기존 파일은 삭제하지 않는다.
 - Rust는64KiB 상한·정확한 필드/버전·중복 필드 거부·로컬 drive의 정규 경로·git.exe 이름을 검증한다. Windows 후보는 설정 file ID 재확인과 기존 ExecutableLease로 파일/부모를 결속한다. 이 후보는 실행 권한이 아니며 아직 호출 경로에 연결하지 않았다. 설치본 출처·의존 이미지·업데이트 검증 및 Git 실행 연결은 다음 구현이다. Windows 제품/저장 mutation gate는 그대로 비활성이다.
 - focused Rust decoder2 PASS(6.04초 컴파일,0.01초 시험), Git 설정 store의 strict TypeScript 검사·새 Rust 파일 rustfmt 및 diff 검사 확인. Windows 전용 후보 코드는 이 Mac에서 컴파일/실행하지 못했으며 후속 Windows 묶음 검증이 필요하다. 새 패키지/worktree/모델/push/CI 없이 구현 체크포인트를 남긴다. 전체 개발 완료가 아니다.

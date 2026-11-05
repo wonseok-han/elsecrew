@@ -53,6 +53,12 @@ impl ExecutableLease {
         lease.validate()?;
         Ok(lease)
     }
+    /// OS chain/signature validity only. Does not identify an approved Git publisher.
+    pub(super) fn verify_authenticode(&self) -> Result<(), ProjectFailure> {
+        self.validate()?;
+        super::windows_authenticode::verify(&self.image, &self.path)?;
+        self.validate()
+    }
     pub(super) fn path(&self) -> &str {
         &self.path
     }

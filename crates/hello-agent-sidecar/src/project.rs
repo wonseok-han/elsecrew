@@ -24,6 +24,8 @@ mod windows_directory_lease;
 #[cfg(windows)]
 mod windows_executable;
 #[cfg(windows)]
+mod windows_authenticode;
+#[cfg(windows)]
 mod windows_replace;
 #[cfg(windows)]
 mod windows_save_guard;
