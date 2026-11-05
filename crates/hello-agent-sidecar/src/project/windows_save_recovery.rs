@@ -3,6 +3,38 @@
 use super::*;
 
 impl ProjectManager {
+    pub(crate) fn describe_windows_save_recovery(
+        &self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        let lock = storage
+            .projection_record("lock", &format!("lock_{}", address.worktree_id))?
+            .ok_or_else(|| ProjectFailure::recovery("workspace lock missing"))?;
+        let intent = lock.get("evidence").and_then(|v| v.get("windowsSaveGuard"));
+        let Some(intent) = intent else {
+            // An unrelated recovery/poisoned lock is not an empty save recovery.
+            self.validate_workspace_address_binding(storage, address)?;
+            return Ok(ProjectAction {
+                result: json!({"recovery":Value::Null}),
+                ..ProjectAction::default()
+            });
+        };
+        let save_id = intent["saveId"]
+            .as_str()
+            .ok_or_else(|| ProjectFailure::recovery("save identity missing"))?;
+        let inspection = self.inspect_windows_save_recovery(storage, address, save_id)?;
+        Ok(ProjectAction {
+            result: json!({"recovery":{
+                "saveId":save_id,"path":intent["path"],"phase":intent["phase"],
+                "lockRevision":inspection["lockRevision"],"observation":inspection["observation"],
+                // Read-only public contract. Mutation admission waits for native QA.
+                "actionsAvailable":false,
+            }}),
+            ..ProjectAction::default()
+        })
+    }
+
     pub(super) fn validate_windows_save_recovery_lock(
         &self,
         storage: &Storage,
@@ -162,6 +194,11 @@ impl ProjectManager {
 }
 
 fn classify_destination(destination: &Value, intent: &Value) -> &'static str {
+    let original_id = if intent["previousTargetIdentity"].is_string() {
+        &intent["previousTargetIdentity"]
+    } else {
+        &intent["originalTargetIdentity"]
+    };
     if intent["sourceIdentity"].is_string()
         && intent["sourceVersion"].is_string()
         && destination["identity"] == intent["sourceIdentity"]
@@ -171,9 +208,9 @@ fn classify_destination(destination: &Value, intent: &Value) -> &'static str {
     } else if intent["expectedVersion"].is_string()
         && destination["version"] == intent["expectedVersion"]
     {
-        if !intent["previousTargetIdentity"].is_string() {
+        if !original_id.is_string() {
             "expectedContentOnly"
-        } else if destination["identity"] == intent["previousTargetIdentity"] {
+        } else if destination["identity"] == *original_id {
             "originalObserved"
         } else {
             "conflictOrMissing"
@@ -274,6 +311,18 @@ pub(super) fn observe_file(file: &mut CapFile) -> Result<Value, ProjectFailure> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn preparing_original_identity_is_used_before_replace_intent() {
+        let intent = json!({"originalTargetIdentity":"original", "expectedVersion":"old"});
+        assert_eq!(
+            classify_destination(&json!({"identity":"original","version":"old"}), &intent),
+            "originalObserved"
+        );
+        assert_eq!(
+            classify_destination(&json!({"identity":"foreign","version":"old"}), &intent),
+            "conflictOrMissing"
+        );
+    }
     #[test]
     fn same_content_with_different_identity_is_not_original() {
         let intent = json!({"expectedVersion":"old", "previousTargetIdentity":"original",

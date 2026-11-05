@@ -1490,6 +1490,19 @@ impl Sidecar {
                     )
                     .map(|action| addressed_action(action, &address))
             }
+            "workspace.saveRecovery" => {
+                let params = require_exact_params(&request.params,
+                    &["chatId", "projectId", "worktreeId", "workspaceIdentity"])
+                    .map_err(invalid_params)?;
+                let address = workspace_address(params).map_err(invalid_params)?;
+                #[cfg(windows)]
+                { self.projects.describe_windows_save_recovery(&self.storage, &address)
+                    .map(|action| addressed_action(action, &address)) }
+                #[cfg(not(windows))]
+                { let _ = address; return Ok(HandledRequest::response(error_response(
+                    &request, "methodUnavailable", "unsupportedCapability",
+                    "Windows save recovery is not available on this platform"))); }
+            }
             "workspace.file.save" => self.handle_workspace_file_save(&request)?,
             "workspace.file.watch" => {
                 let params = require_exact_params(

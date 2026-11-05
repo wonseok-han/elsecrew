@@ -4,6 +4,14 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은773f9a7 교체 전 취소 구현으로 진전했다. 이번 메인 작업은 저장 복구의 read-only 공개 조회 workspace.saveRecovery를 Rust dispatcher→Electron client/main→preload m5SaveRecovery.inspect까지 연결했다. 기존 run/agent recovery namespace를 재사용하지 않는다.
+- 정확한 네 workspace 참조 필드만 받으며 Windows에서는 현재 lock/session/canonical workspace를 확인한 descriptor를 반환한다. save guard가 없을 때도 Ready 검증을 거쳐야 recovery:null이며 unrelated poisoned/recovery lock은 오류로 남는다. 다른 플랫폼은 명시 unavailable이다. 상대 파일 경로/saveId/phase/revision/관찰 분류만 공개하고 raw intent·파일 ID/hash·절대경로는 노출하지 않는다.
+- TypeScript exact-key·주소 echo·phase/observation enum·positive revision·save UUID/상대경로 검증을 client/main/preload에 연결했다. actionsAvailable:false만 허용하고 복구 변경 API는 노출하지 않는다. Windows 제품 activation도 변경하지 않았다. 화면 컴포넌트와 실제 mutation 연결은 아직 후속이다.
+- preparing 시 기록한 originalTargetIdentity도 관찰 분류에 사용하도록 수정했다. native 회귀는 동일 내용의 foreign ID가 원래 파일로 분류되지 않음을 추가했으며 실행 전이다. 순수 계약 검사1개는80ms에 통과했고 주소 오염·추가 abort 인자·잘못된 phase/revision/path/ID·mutation 허용 응답을 거절한다.
+- 같은 독립 검토자1명이 조회 namespace·정확한 결속·최소 공개 정보·main-frame/양단 검증·mutation 비노출에 구체적 차단 결함 없음으로 검토했다. rustfmt·diff 검사 확인. Cargo/패키지/cache/worktree/모델/CI/push 없음. 다음은 복구 화면 연결과 Windows 묶음 검증이며 전체 목표는 미완료다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은3a6917f의 교체 후 receipt 복구로 진전했다. 이번 메인 구현은 교체 전 명시 취소를 내부 abort_windows_save에 연결했다. 최초 guard intent에 originalTargetIdentity/originalAccessFingerprint를 추가하고 기존 expectedVersion과 대조한다. 과거 결속 정보 없는 기록은 추정 승격하지 않는다.
 - shared recovery는 inspected lock revision/정확한 chat·workspace·managed roots/target·staging anchor pin을 유지한다. abort는 preparing/ready/sourceReady/replaceIntent 및 abort 중간 단계만 허용한다. 기존 target ID/내용/권한이 원래와 같음을 확인하고 root의 별도 lease 아래 source를, target lease 아래 guard를, staging anchor 아래 staging을 정리한다.
 - abortIntent→abortSourceRemoved→abortGuardRemoved→abortStagingRemoved→abortComplete를 원장에 기록한다. 삭제 전에는 ID가 기록된 파일의 실제 일치를 요구하고 intent 이후에만 이미 부재를 인정한다. ID가 null인 파일은 이름이 없을 때만 허용한다. create 성공/ID 게시 전 종료로 생긴 미기록 파일은 삭제하지 않고 복구 잠금을 유지한다. 외부 수정/다른 파일도 보존·거절한다.

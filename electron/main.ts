@@ -1,3 +1,4 @@
+import { SAVE_RECOVERY_CHANNEL, validateSaveRecoveryRequest, validateSaveRecoveryResult } from "../src/m5/contracts/save-recovery-v1.ts";
 import { createSessionDiagnosticLog } from "./session-diagnostic-log.ts";
 import { MODEL_CHOICES_CHANNEL, validateModelChoicesRequest } from "../src/m5/contracts/model-choices-v1.ts";
 import { DEVICE_REPORT_CHANNEL } from "../src/m5/contracts/device-report-v1.ts";
@@ -342,6 +343,12 @@ function registerIpcHandlers(): void {
     assertCurrentMainFrame(event);
     if (args.length !== 0) throw new Error("device report takes no input");
     return readDeviceReport(app.getPath("userData"));
+  });
+  ipcMain.handle(SAVE_RECOVERY_CHANNEL, async (event, input: unknown) => {
+    assertCurrentMainFrame(event);
+    if (!sidecar) throw new Error("sidecar was not started");
+    const request = validateSaveRecoveryRequest(input);
+    return validateSaveRecoveryResult(await sidecar.inspectWorkspaceSaveRecovery(request), request);
   });
   ipcMain.handle(PROJECT_CATALOG_CHANNEL, async (event, input: unknown) => {
     assertCurrentMainFrame(event);

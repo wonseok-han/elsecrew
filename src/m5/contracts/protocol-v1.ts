@@ -29,6 +29,7 @@ export const METHODS_V1 = [
   "workspace.close",
   "workspace.file.read",
   "workspace.file.save",
+  "workspace.saveRecovery",
   "workspace.file.watch",
   "workspace.diff.getSummary",
   "workspace.diff.getFile",
