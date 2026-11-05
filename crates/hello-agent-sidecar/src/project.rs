@@ -7,6 +7,10 @@ mod windows_fs;
 mod windows_space;
 #[cfg(any(windows, test))]
 mod windows_job;
+#[cfg(windows)]
+mod windows_pipe;
+#[cfg(windows)]
+mod windows_transport;
 use crate::{AppendOutcome, SidecarError, Storage};
 #[cfg(unix)]
 use cap_fs_ext::OsMetadataExt;
