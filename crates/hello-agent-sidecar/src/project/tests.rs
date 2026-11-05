@@ -5994,22 +5994,3 @@ fn watcher_scan_rejects_a_different_root_between_slices() {
     scan.validate_held_paths(&capability).unwrap();
     assert!(scan.validate_held_paths(&replacement).is_err());
 }
-
-#[test]
-#[cfg(windows)]
-fn windows_watch_initial_scan_retains_only_a_bounded_slice() {
-    let root = TempDir::new().unwrap();
-    for index in 0..300 {
-        fs::write(root.path().join(format!("file-{index}.txt")), b"x").unwrap();
-    }
-    let capability = Dir::open_ambient_dir(root.path(), ambient_authority()).unwrap();
-    let (initial, pending) = begin_watch_scan(&capability).unwrap();
-    assert!(initial.is_empty());
-    let mut scan = pending.expect("large Windows scan must yield to the dispatcher");
-    assert!(scan.snapshot.len() <= 128);
-    loop {
-        scan.validate_held_paths(&capability).unwrap();
-        if scan.advance(WATCH_SCAN_BUDGET).unwrap() { break; }
-    }
-    assert_eq!(scan.snapshot.len(), 300);
-}

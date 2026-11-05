@@ -2,6 +2,13 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 사용자 승인 첫 Windows native CI 41975775061은 b5bc222 release 컴파일(3분03초) 성공 후 17개 중15 PASS·2 FAIL(10.01초)로 끝났다. Job 생성/명시 stdio·전체 ABI 크기, pipe 입출력/취소/제한시간, transport 출력·종료 및 파일 handle/reparse 검사는 통과했다. Windows 제품 합격은 아니다.
+- 실패한 disk-space fixture는 cap-std directory handle이 rename을 막아 공유 위반32로 중단됐다. 시험에만 share-delete 핸들을 사용해 실제 rename 뒤 원본 경로를 파일로 바꾸는 기존 검증을 유지한다. parent/child Job fixture는 Rust test harness에 명시 NUL stdio를 제공하고 timeout 시 parent signal/active 수를 남기도록 수정했다. 이 수정의 성공은 아직 미검증이다. stdio 없는 suspended 생성 검사는 별도로 유지한다.
+- Windows watcher 테스트는 기존 project/tests.rs 자체가 not(windows)여서 컴파일되지 않는 누락을 확인했다. 전용 watch_native_tests 모듈로 128단계 yield·root 교체·잘못된 retained descendant·rename 차단 또는 신원 재확인을 검사한다. CI에 4개 필수 테스트의 존재 검사를 넣어 0-test 녹색을 거부한다. production 정책/게이트는 변경하지 않았다.
+- 별도 임시 체크아웃은 승인된 b5bc222 위 테스트/CI 호환 변경만 담으며 의존성/빌드 캐시는 만들지 않는다. Rust 구문·신규 테스트 포맷·diff 검사 수행, native 재시험은 승인 잔여2회 범위에서 이어간다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은 abeba5d의 Windows bounded transport 구현으로 진전했다. 이번에는 Windows CWD 고정을 조사했으며, ancestor에 FILE_SHARE_WRITE/DELETE를 제한하는 것만으로 reparse 변경까지 막는다고 주장할 수 없음을 확인했다. [CreateFile 공유 규칙](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)은 attribute 접근을 공유 제한에서 제외하고, [MS-FSA reparse 설정](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/4aeefef8-92c3-4abc-af7a-a610caf8a165)은 FILE_WRITE_ATTRIBUTES도 허용한다. 실제 공격 재현은 아니며 이 경로 고정 방식을 구현·활성화하지 않았다.
 - 독립적으로 가능한 Windows watcher 연결을 진행했다. Windows도 128단계씩 나누고 다음 회차마다 현재 root에서 prefix를 다시 열어 전체 volume/128-bit file ID와 객체 종류를 대조한다. 교체·reparse·신원 조회 실패는 기존 rescan/중단 흐름으로 전달한다. 하위 폴더 교체 회귀를 Windows에도 적용하고 다른 root 및 초기 분할 회귀를 추가했다. Windows Git 검증은 아직 동기·차단 상태이며 이 변경이 전체 watcher 비동기화 완료는 아니다.
 - native 코드가 쌓인 상태에서 Windows 컴파일·실행 증거를 얻을 수 있도록 `.github/workflows/m5-windows-native-diagnostic.yml`을 준비했다. 새 진단 브랜치 한정·20분·동시성4 이하이며 windows_ primitives와 watcher slice 회귀만 수행한다. 패키징/전체 suite/모델 호출/제품 활성화는 포함하지 않는다. 아직 push·CI는 실행하지 않았으며 이전 승인 잔여는 없다.

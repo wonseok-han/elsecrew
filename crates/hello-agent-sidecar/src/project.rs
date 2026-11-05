@@ -6084,6 +6084,9 @@ fn null_device() -> &'static str {
 mod tests;
 
 #[cfg(all(test, windows))]
+mod watch_native_tests;
+
+#[cfg(all(test, windows))]
 mod windows_tests {
     use super::*;
 
