@@ -4,6 +4,13 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은16588ba 실제 SQLite 원자 완료 회귀로 진전했다. 이번 메인은 저장 복구 Electron 통합을 확인했다. 실제 SidecarClient+가짜 child JSONL transport로 다른 chat 응답과 abort 요청에 committed 응답을 거절하고 protocolInvalid로 닫는 회귀를 추가했다. 전달된 request의 inspected revision/전체 address가 그대로임도 확인한다.
+- main.ts를 실행하는 기존 보안 harness에 새 계약 import와 최소 fake sidecar 응답을 추가했다. 외부 frame·추가 path·confirmed:false·0 revision·unknown decision·추가 force가 sidecar 호출 전에 거절되며 정상 inspect/resolve는 정확히1회씩 전달됨을 검사한다. 실 Windows mutation 검증이 아닌 Electron 경계 검증이다.
+- 첫 누적 실행에서 기존 fixed-channel 정적 검사3개가 새 preload 채널 상수의 M5 접두 alias 누락으로 실패했다. 상수를 M5_SAVE_RECOVERY_CHANNEL/M5_SAVE_RECOVERY_RESOLVE_CHANNEL로 import alias해 기존 규칙을 유지했다. 동적 invoke를 허용하거나 검사를 완화하지 않았다. 복구 view의 낡은 read-only 주석도 현재 gate 기반 확인 흐름으로 교정했다.
+- node --test --experimental-strip-types tests/m5-electron-security.test.mts tests/m5-electron-bridge.test.mts:78 PASS/0 FAIL/0 skipped,1.34초. git diff --check 통과. UI 실제 mount/사용자 조작·Windows native·전체 앱 검증으로 확대 해석하지 않는다. 새 패키지/Cargo cache/worktree/CI/push/모델 없음.955880e 외부 실행 승인은 계속 대기이며 독립 로컬 작업을 이어간다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은955880e Windows 진단 준비와 gate 회귀로 진전했다. 새 push/CI 승인 응답은 아직 없어 외부 쓰기는 하지 않았다. 메인은 기존 Windows 최종 lock/chat 원자 게시 코드를 의미 변경 없이 save_completion 모듈로 추출해 Windows 또는 test에서 컴파일하도록 했다. 정상 macOS 저장 경로와 Windows receipt 검증 호출 순서는 유지한다.
 - 실제 임시 SQLite를 사용하는 통합 회귀3개를 추가했다. 완료 시 요청한 session만 제거/다른 session과 extension 보존/DB 재열기 후 상태 동일/반복 완료 거절, 두 번째 chat operation conflict 시 먼저 시도한 lock clear까지 rollback, 다른 workspace session으로 완료 시 두 기록 불변을 확인했다. 정책을 흉내 내는 모형이 아니라 제품이 호출하는 동일 atomic helper와 실제 Storage를 사용한다.
 - CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo test -p hello-agent-sidecar --locked --offline --lib project::save_completion::tests -- --nocapture:3 PASS/0 ignored, 기존 target 증분 컴파일4.86초·실행0.67초. 이는 파일 교체/권한/native 전체 재시작 증거가 아니다.

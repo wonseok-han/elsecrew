@@ -1,3 +1,4 @@
+import * as saveRecoveryContract from "../src/m5/contracts/save-recovery-v1.ts";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
@@ -268,6 +269,16 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
       sidecarCalls.push("login");
       return {state: "waiting", attemptId: "test", authUrl: "https://auth.openai.com/authorize?state=private", error: null};
     }
+    async inspectWorkspaceSaveRecovery(input: Record<string, unknown>) {
+      sidecarCalls.push("inspectWorkspaceSaveRecovery");
+      return { ...input, recovery: null };
+    }
+    async resolveWorkspaceSaveRecovery(input: Record<string, unknown>) {
+      sidecarCalls.push("resolveWorkspaceSaveRecovery");
+      return { chatId: input.chatId, projectId: input.projectId, worktreeId: input.worktreeId,
+        workspaceIdentity: input.workspaceIdentity, saveId: input.saveId,
+        outcome: input.decision === "abort" ? "aborted" : "committed", version: `sha256:${"a".repeat(64)}` };
+    }
     async getSystemStatus() {
       sidecarCalls.push("getSystemStatus");
       return { state: "ready" };
@@ -344,6 +355,7 @@ function moduleFor(
       flush: async () => undefined,
     }),
   };
+  if (specifier.endsWith("save-recovery-v1.ts")) return saveRecoveryContract;
   if (specifier.endsWith("provider-login-v1.ts")) return loginContract;
   if (specifier.endsWith("provider-login-diagnostic.ts")) return loginDiagnostic;
   if (specifier.endsWith("provider-install-v1.ts")) return installContract;
@@ -415,4 +427,25 @@ test("installation IPC rejects foreign frames, arbitrary paths, and recovery wit
     {action: "recover", operationId: "11111111-1111-4111-8111-111111111111", force: true},
   ]) await assert.rejects(handler(harness.currentEvent(), input));
   assert.deepEqual(harness.sidecarCalls, []);
+});
+
+
+test("save recovery IPC isolates frames and validates confirmation before reaching the sidecar", async () => {
+  const harness = await loadMain();
+  const inspect = harness.handlers.get(saveRecoveryContract.SAVE_RECOVERY_CHANNEL)!;
+  const resolveSave = harness.handlers.get(saveRecoveryContract.SAVE_RECOVERY_RESOLVE_CHANNEL)!;
+  assert.ok(inspect); assert.ok(resolveSave);
+  const address = {chatId:"chat_one",projectId:"project_one",worktreeId:"worktree_one",workspaceIdentity:"workspace_one"};
+  const request = {...address,saveId:`save_${"a".repeat(32)}`,expectedLockRevision:1,decision:"abort",confirmed:true};
+  await assertRejectedWithoutSidecar(inspect, {sender:{},senderFrame:{}}, harness);
+  await assertRejectedWithoutSidecar(resolveSave, {sender:{},senderFrame:{}}, harness);
+  await assert.rejects(inspect(harness.currentEvent(), {...address,path:"/private/other"}));
+  for (const patch of [{confirmed:false},{expectedLockRevision:0},{decision:"force"},{force:true}]) {
+    await assert.rejects(resolveSave(harness.currentEvent(), {...request,...patch}));
+  }
+  assert.deepEqual(harness.sidecarCalls, []);
+  assert.deepEqual(JSON.parse(JSON.stringify(await inspect(harness.currentEvent(),address))), {...address,recovery:null});
+  const result = await resolveSave(harness.currentEvent(),request) as {outcome:string};
+  assert.equal(result.outcome,"aborted");
+  assert.deepEqual(harness.sidecarCalls,["inspectWorkspaceSaveRecovery","resolveWorkspaceSaveRecovery"]);
 });

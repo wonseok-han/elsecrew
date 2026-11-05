@@ -2012,3 +2012,33 @@ test("transport lifecycle diagnostics correlate a held history response and cann
   assert.ok(trace.every(entry => entry.id === request.requestId && entry.method === "chat.get"));
   assert.equal(child.terminations, 0);
 });
+
+
+test("save recovery bridge correlates request and response workspace identities", async () => {
+  const { child, client } = createClient();
+  const started = client.start(); child.stdout.write(`${readyLine()}\n`); await started;
+  const address = {chatId:"chat_one",projectId:"project_one",worktreeId:"worktree_one",workspaceIdentity:"workspace_one"};
+  const inspection = client.inspectWorkspaceSaveRecovery(address);
+  const request = JSON.parse(child.writes.at(-1)!);
+  assert.equal(request.method,"workspace.saveRecovery");
+  const rejected = assert.rejects(inspection);
+  child.stdout.write(responseLine(request.requestId,{...address,chatId:"chat_other",recovery:null}));
+  await rejected;
+  assert.equal(client.failureCode,"protocolInvalid");
+});
+
+test("save recovery bridge preserves reviewed revision and rejects a mismatched resolution", async () => {
+  const { child, client } = createClient();
+  const started = client.start(); child.stdout.write(`${readyLine()}\n`); await started;
+  const input = {chatId:"chat_one",projectId:"project_one",worktreeId:"worktree_one",workspaceIdentity:"workspace_one",
+    saveId:`save_${"a".repeat(32)}`,expectedLockRevision:42,decision:"abort" as const,confirmed:true as const};
+  const resolution = client.resolveWorkspaceSaveRecovery(input);
+  const request = JSON.parse(child.writes.at(-1)!);
+  assert.equal(request.method,"workspace.resolveSaveRecovery");
+  assert.deepEqual(request.params,input);
+  const rejected = assert.rejects(resolution);
+  child.stdout.write(responseLine(request.requestId,{chatId:input.chatId,projectId:input.projectId,worktreeId:input.worktreeId,
+    workspaceIdentity:input.workspaceIdentity,saveId:input.saveId,outcome:"committed",version:`sha256:${"a".repeat(64)}`}));
+  await rejected;
+  assert.equal(client.failureCode,"protocolInvalid");
+});

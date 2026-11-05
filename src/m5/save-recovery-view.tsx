@@ -3,7 +3,7 @@ import { useI18n } from "../i18n.tsx";
 import type { ChatWorkspaceRefV1 } from "./contracts/workspace-addressing-v1.ts";
 import { saveRecoveryDecision, validateSaveRecoveryResolveResult, validateSaveRecoveryResult, type SaveRecoveryResult } from "./contracts/save-recovery-v1.ts";
 
-/** Read-only diagnosis; no completion or cancellation authority in this view. */
+/** Inspected, explicitly confirmed recovery; the sidecar owns mutation admission. */
 export function SaveRecoveryView({ address, disabled }: { address: ChatWorkspaceRefV1; disabled: boolean }) {
   // Remount the owner for every address/admission change so late results cannot
   // appear in a different chat or after admission is withdrawn.
