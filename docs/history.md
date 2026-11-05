@@ -1,6 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
-현재 자동 목표는 입력 대기(blocked)이며 전체 개발은 미완료다. Windows CI 추가 승인/실행 환경과 내부 Git 제공 방식 선택 후 재개한다. 최신 작업·검증·대기 사유는 [11월 워크로그](archive/history-2026-11.md) 맨 위에 있다.
+사용자가 Windows CI 추가 최대3회를 승인하여 검증을 재개했다. 전체 개발은 미완료이며 내부 Git 제공 방식 선택은 별도 대기다. 최신 작업·검증·대기 사유는 [11월 워크로그](archive/history-2026-11.md) 맨 위에 있다.
+
+### 2026-11-05 · by GPT-6
+
+- 사용자가 f41eb29 및 Windows 컴파일/시험 호환 수정의 공개 push·CI 최대3회를 승인했다. 기존 codex/m5-windows-supervisor-20261105에 정확히 f41eb29852c8c20c5318d0a908c3ba72d7030029를 push하고 첫 실행41987756587이 in_progress임을 확인했다. 승인1/3회 사용·2회 남음. 이후 로컬 문서 커밋은 공개하지 않았다.
+- 범위는 native primitives·공통 spawn·watcher 진단이며 패키징/제품 활성화/모델 호출/main 병합은 제외한다. 결과는 아직 미정이고 이전25 PASS로 대체하지 않는다. 로컬 빌드·새 캐시/worktree 없음. 다음은 동일 run의 결과 확인과 필요한 호환 수정이다.
+- 첫 실행41987756587은 release 컴파일3분17초 성공·native28 PASS/1 FAIL이다. 실패는 lease 해제 후 ancestor rename에서5(AccessDenied)였으며 별도 authority Dir가 아직 열려 있었다. acquire 직후 이 외부 Dir를 닫아 lease 핸들만으로 차단/해제를 검사하도록 시험만 수정했다. 기존 공유32·nonempty145·guard 내용 검사는 유지한다. image/GUID CWD·공용 control EOF·unwind retention 등 새 검사는 PASS였다. spawn/watch 단계는 skipped다. 원시 실패 로그는 .artifacts/m5-windows-supervisor-41987756587/failed.log에 보존하며 포맷/diff 검사 통과.
 
 ## 프로젝트 요약 (고정)
 
