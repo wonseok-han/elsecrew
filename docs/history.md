@@ -2,6 +2,13 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은f41eb29 Windows background watcher 연결로 진전했다. 이번에는 실제 편집 저장의 commit_pending_save→PreparedTarget→rename→durability/원장 경로를 조사했다. Windows 최종 교체는 여전히 명시 거절한다. 현재 CWD lease를 target 파일 guard로 그대로 쓰면 deny-delete 때문에 의도한 저장도 차단되며, syscall 직전 해제는 보호 공백을 만든다는 설계 충돌을 확인했다.
+- Windows save 포트는 별도 guard의 durable intent/ID/cleanup, DELETE 접근 source handle과 parent-relative 단일 destination, 공유/readonly/volume 조건, 교체 후 durability와 재시작 복구까지 묶어야 한다. Microsoft FILE_RENAME_INFO/FILE_RENAME_INFORMATION 문서의 root-relative handle·길이·권한 조건을 확인하고 제품 제안서 §12에 구체적 조건과 native 회귀 목록을 기록했다. 이 문서 검토를 native 실행 증거나 저장 활성화로 표현하지 않는다.
+- 현재까지 모인 f41eb29와 컴파일/시험 호환 수정에 대한 공개 push·Windows CI 최대3회 승인을 새로 요청했다. 기존 승인3회는 소진됐으며 아직 추가 push/CI 없음. Git 제공 방식 선택도 아직 대기다. 새 code/build/cache/worktree·모델 호출·원본 쓰기 없음. 문서 diff 검사 통과.
+- 다음: 승인 응답 후 모인 Windows 기반의 native 검증/실패 수정, Git 제공 방식에 따른 admission 연결, 위 save/복구 포트. 독립 구현이 가능한 나머지 항목도 계속 확인하며 G6/전체 제품 완료를 선언하지 않는다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은501d91b Git 호출부 통합으로 진전했다. Git 제공 방식 선택은 아직 대기지만 독립적으로 Windows watcher의 동기 repository 검증을 기존 소유형 background job 경로로 연결했다. 한 번에 하나의 worker만 실행하고 정렬된 watcher 순서를 유지한다. 완료 결과는 현재 stream/active binding 및 root/.git의 전체 Windows file ID와 대조한 뒤에만 scan에 사용한다.
 - worker는 write-tree를 실행하지 않고, dispatcher가 metadata/tree를 재검증한다. 중단 시 취소 토큰을 설정하고 join하며 background 작업을 분리해 버리지 않는다. Windows adapter에 취소된 raw 요청 거절을 추가했지만 일반 Command와 실제 Git admission은 계속 차단한다. 전체 Windows 실행 활성화나 지연 합격을 선언하지 않는다.
 - 읽기 전용 독립 검토에서 현재 변경의 차단 결함 없음. Git 차단 상태에서 worker 실패를 성공으로 승격하지 않는 경로도 확인했다. Rust 구문·변경 모듈 포맷·diff 검사 통과. Windows compile/native 및 macOS watcher 누적 회귀는 후속 묶음 검증 대상으로 남긴다. 새 build/cache/worktree·모델 호출·push/CI 없음. 과거 기록의 전체 watcher 합계 비용 문제는 이미 한 job/한 slice 정책으로 바뀌었음을 실제 코드로 확인했으며 실측 지연 상한 합격과 구분한다.
@@ -204,6 +211,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Windows save guard 충돌(2026-11-05)**: 기존 DirectoryLease에서 교체 대상 자체를 guard로 잡으면 의도한 replace도 막힌다. 마지막에 pin을 풀어 해결하지 않는다. 별도 guard의 durable intent/ID/cleanup과 handle-relative replace·durability/복구를 묶어야 하며 제안서 §12에 조건을 기록했다. Windows 저장은 아직 미구현/차단이다.
 
 - **Watcher 현재 구조(2026-11-05)**: Unix/Windows 모두 한 background 검증 job과 한 bounded scan slice를 순환한다. 완료 뒤 현재 stream/active/root/.git 결속과 metadata/tree 재검증을 유지한다. Windows 연결은 native 미검증·실제 Git 차단 상태이고 과거 동기 Windows 설명보다 이 구현 상태를 우선한다. 실측 UI 지연 PASS는 별도다.
 

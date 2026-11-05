@@ -835,6 +835,20 @@ fixture 크기와 허용 지연은 M5.0 첫 구현 명세에서 수치로 고정
 
 ---
 
+### Windows 편집 저장 포트 — 구현 전 확인한 조건 (2026-11-05)
+
+현재 `commit_pending_save`는 managed staging을 flush/sync하고 작업 복사본 root에 새 temp를 만든 뒤 save lock을 기록한다. 최종 교체는 macOS의 stable-root rename만 구현되어 있으며 Windows는 명시적으로 거절한다. `PreparedTarget`의 실패 시 temp 정리와 이후 directory sync/파일 재열기/원장 해제까지 함께 이식해야 한다. syscall 하나의 교체로 끝내지 않는다.
+
+1. **경로 보호와 교체 대상 분리**: `DirectoryLease::acquire(parent, target)`의 guard는 delete 공유를 거부하므로 의도한 target 교체도 막는다. syscall 직전에 guard를 drop하는 방식은 보호 공백을 만든다. 대상/이동할 temp와 다른 guard로 parent의 nonempty 상태를 유지해야 한다. 사용할 sibling이 없는 디렉터리는 앱 소유 snapshot 내부에만 새 보호 파일을 만들고, 생성 전 복구 intent·정확한 파일 ID·cleanup 상태를 기록하는 절차가 필요하다. 사용자 원본에는 만들지 않는다. 임의의 기존 파일을 guard로 선택하거나 이름만으로 삭제하지 않는다.
+2. **핸들 기반 source와 destination**: Microsoft [FILE_RENAME_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info)는 상대 이름과 RootDirectory handle을 지원한다고 명시한다. source는 DELETE 접근으로 연 실제 temp handle, destination은 검증한 parent handle과 정상 단일 이름을 사용한다. Windows API native 실행 증거 없이 이 형태가 현재 filesystem/handle sharing 조합에서 작동한다고 선언하지 않는다.
+3. **실제 buffer/권한 계약**: `FileNameLength`는 UTF-16 바이트 수이며 구조체 정렬과 유연 배열 길이를 검증한다. [FILE_RENAME_INFORMATION](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information)의 같은 volume·DELETE 접근·열린 target/readonly 제한을 반영한다. POSIX/ignore-readonly 옵션으로 사용자 권한을 무조건 우회하지 않는다. 파일 내용뿐 아니라 필요한 접근 권한 보존도 native 확인 대상이다.
+4. **교체 전후**: stable managed root·parent chain·temp ID·target 현재 버전을 재확인하고 기존 두 failure hook의 의미를 유지한다. 교체 뒤 destination을 다시 열어 staged bytes/ID와 비교한다. directory durability가 확인되지 않거나 결과가 불명확하면 save lock/증거를 보존하고 성공으로 반환하지 않는다. `PreparedTarget::Drop`이 불명확한 교체의 유일한 복구 증거를 삭제하지 않도록 소유권도 변경해야 한다.
+5. **묶음 native 회귀**: 정상 교체, 외부 수정 충돌, ancestor rename/reparse 교체, target handle sharing 충돌, temp 교체, 다른 volume 거절, readonly 대상, 교체 직전/직후 중단 및 재시작 복구를 자체 temp snapshot으로 확인한다. 사용자 프로젝트·실제 모델을 사용하지 않는다. 로컬 macOS 검사나 단순 API 성공을 Windows 저장/복구 합격으로 대체하지 않는다.
+
+이 절은 구현 조건이며 저장 활성화 승인이 아니다. 현재 Windows 원본 쓰기·편집 저장 gate는 유지한다.
+
+---
+
 ## 13. 브랜치와 의사결정 정책
 
 - 통합 기준선: `m5/coding-agent-ide`
