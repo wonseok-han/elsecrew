@@ -1,4 +1,4 @@
-//! Volume capacity queried through a synchronous handle, never a pathname.
+//! Volume capacity queried through a held handle, never a pathname.
 //! https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntqueryvolumeinformationfile
 
 fn available_bytes(total: i64, caller: i64, actual: i64, sectors: u32, bytes: u32) -> Option<u64> {
@@ -13,10 +13,7 @@ fn available_bytes(total: i64, caller: i64, actual: i64, sectors: u32, bytes: u3
 #[cfg(windows)]
 pub(super) fn available(directory: &cap_std::fs::Dir) -> Result<u64, super::ProjectFailure> {
     use super::{windows_fs, ProjectFailure};
-    use std::{
-        ffi::c_void,
-        os::windows::io::{AsRawHandle, FromRawHandle},
-    };
+    use std::{ffi::c_void, os::windows::io::AsRawHandle};
 
     #[repr(C)]
     union Status {
@@ -43,11 +40,6 @@ pub(super) fn available(directory: &cap_std::fs::Dir) -> Result<u64, super::Proj
     }
     const _: () = assert!(std::mem::size_of::<FullSize>() == 32);
 
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn ReOpenFile(handle: *mut c_void, access: u32, share: u32, flags: u32) -> *mut c_void;
-        fn WaitForSingleObject(handle: *mut c_void, milliseconds: u32) -> u32;
-    }
     #[link(name = "ntdll")]
     extern "system" {
         fn NtQueryVolumeInformationFile(
@@ -61,29 +53,17 @@ pub(super) fn available(directory: &cap_std::fs::Dir) -> Result<u64, super::Proj
 
     let expected = windows_fs::identity(directory, true)?;
     windows_fs::require_local_volume(directory)?;
-    // No OVERLAPPED flag: create our own synchronous file object, independent
-    // of how the caller's handle was opened. ReOpenFile uses the held object.
-    // SAFETY: directory owns the input handle; constants request generic read,
-    // read/write/delete sharing, directory access and no reparse processing.
-    let raw = unsafe {
-        ReOpenFile(
-            directory.as_raw_handle(),
-            0x80000000,
-            7,
-            0x02000000 | windows_fs::OPEN_REPARSE_POINT,
-        )
-    };
-    if raw.is_null() || raw as isize == -1 {
-        return Err(ProjectFailure::recovery(format!(
-            "could not reopen disk capability: {}",
-            std::io::Error::last_os_error()
-        )));
-    }
-    // SAFETY: successful ReOpenFile returned a new owned handle.
-    let held = unsafe { std::fs::File::from_raw_handle(raw) };
+    // Preserve the original object instead of reopening a directory through
+    // ReOpenFile (which failed with ACCESS_DENIED on the Windows runner).
+    let held = directory
+        .try_clone()
+        .map_err(|error| {
+            ProjectFailure::recovery(format!("could not clone disk capability: {error}"))
+        })?
+        .into_std_file();
     if windows_fs::identity(&held, true)? != expected {
         return Err(ProjectFailure::manifest(
-            "disk capability changed during reopen",
+            "disk capability changed during clone",
         ));
     }
     let mut query = Box::new(Query {
@@ -95,8 +75,8 @@ pub(super) fn available(directory: &cap_std::fs::Dir) -> Result<u64, super::Proj
     });
     // SAFETY: the buffers have IO_STATUS_BLOCK / FILE_FS_FULL_SIZE_INFORMATION
     // layouts and stay alive until completion, including an unexpected pending
-    // result. The synchronous owned handle remains open throughout the query.
-    let mut status = unsafe {
+    // result. The owned handle remains open throughout the query.
+    let status = unsafe {
         NtQueryVolumeInformationFile(
             held.as_raw_handle(),
             &mut query.io,
@@ -106,18 +86,15 @@ pub(super) fn available(directory: &cap_std::fs::Dir) -> Result<u64, super::Proj
         )
     };
     if status == 0x103 {
-        // STATUS_PENDING: keep native output storage alive.
-        let waited = unsafe { WaitForSingleObject(held.as_raw_handle(), u32::MAX) };
-        if waited != 0 || unsafe { query.io.status.status } == 0x103 {
-            // Do not release buffers or their handle while a driver might still
-            // write to them. This exceptional OS failure cannot grant capacity.
-            std::mem::forget(query);
-            std::mem::forget(held);
-            return Err(ProjectFailure::recovery(
-                "disk query completion could not be confirmed",
-            ));
-        }
-        status = unsafe { query.io.status.status };
+        // A cloned handle shares a file object, so a signal on that object may
+        // belong to another operation. Do not treat it as proof that this query
+        // completed or inspect concurrently written IO_STATUS_BLOCK fields.
+        // Retain storage/handle and fail closed on unexpected async completion.
+        std::mem::forget(query);
+        std::mem::forget(held);
+        return Err(ProjectFailure::recovery(
+            "disk query completion could not be confirmed",
+        ));
     }
     if status != 0
         || unsafe { query.io.status.status } != 0
