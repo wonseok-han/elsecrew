@@ -31,6 +31,19 @@ impl StreamingGitChild {
         ))
     }
 
+    pub(super) fn spawn_cancellable(
+        command: &mut Command,
+        cancel: Arc<AtomicBool>,
+    ) -> io::Result<Self> {
+        if cancel.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Git owner stopped",
+            ));
+        }
+        Self::spawn(command)
+    }
+
     #[allow(dead_code)] // Installation trust and product admission are separate.
     pub(super) fn spawn_bound(
         image: ExecutableLease,

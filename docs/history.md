@@ -2,6 +2,13 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은501d91b Git 호출부 통합으로 진전했다. Git 제공 방식 선택은 아직 대기지만 독립적으로 Windows watcher의 동기 repository 검증을 기존 소유형 background job 경로로 연결했다. 한 번에 하나의 worker만 실행하고 정렬된 watcher 순서를 유지한다. 완료 결과는 현재 stream/active binding 및 root/.git의 전체 Windows file ID와 대조한 뒤에만 scan에 사용한다.
+- worker는 write-tree를 실행하지 않고, dispatcher가 metadata/tree를 재검증한다. 중단 시 취소 토큰을 설정하고 join하며 background 작업을 분리해 버리지 않는다. Windows adapter에 취소된 raw 요청 거절을 추가했지만 일반 Command와 실제 Git admission은 계속 차단한다. 전체 Windows 실행 활성화나 지연 합격을 선언하지 않는다.
+- 읽기 전용 독립 검토에서 현재 변경의 차단 결함 없음. Git 차단 상태에서 worker 실패를 성공으로 승격하지 않는 경로도 확인했다. Rust 구문·변경 모듈 포맷·diff 검사 통과. Windows compile/native 및 macOS watcher 누적 회귀는 후속 묶음 검증 대상으로 남긴다. 새 build/cache/worktree·모델 호출·push/CI 없음. 과거 기록의 전체 watcher 합계 비용 문제는 이미 한 job/한 slice 정책으로 바뀌었음을 실제 코드로 확인했으며 실측 지연 상한 합격과 구분한다.
+- 다음: Git 제공 방식 선택 후 admission 연결, Windows 파일 교체/복구, 누적 watcher/snapshot/diff 및 native 검사. G6 메모리400MiB와 출시 검증도 미완료다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은ced393a Windows 공용 reader adapter로 진전했다. 메인이 bundle export·ls-tree·cat-file materialization·diff batch·control 출력을 `spawn_git_stream` 한 곳으로 모았다. 명령별 stdin 필요 여부는 보존하고 watcher 취소 토큰도 이 경계로 전달한다. 프로세스 시작 실패는 기존 export/diff와 같은 recovery 분류로 통일하며 control의 manifest 분류를 바꾼다. Windows 실제 admission은 아직 차단이며 capability 획득/설치본 신뢰를 이 한 곳에 연결할 수 있다.
 - 공식 MinGit 문서를 확인했다. 타사 앱용 최소 비대화형 Git+의존성 배포판이지만 alias/hook 실행을 지원하므로 격리 정책을 대신하지 않는다. Windows 내부 Git 제공 방식이 아직 결정되지 않았음을 확인하고 앱 포함 MinGit(권고) 대 기존 PC Git 재사용을 사용자에게 질문했다. 이는 Codex·Claude 업데이트 정책과 별도이며 다운로드·설치·패키징은 하지 않았다. 검토 가능한 제안을 M5 제품 제안서 §12에 기록했다.
 - Rust 구문·diff 검사 통과. 구현 우선 지시에 따라 이 호출부 통합 뒤 전체 build/회귀는 반복하지 않았다. 후속 묶음 검증에는 기존 snapshot·source-root-swap·diff·watcher 취소 시험 및 Windows adapter native 시험을 포함한다. 새 캐시/worktree/CI·모델 호출·push·main 병합 없음.
@@ -197,6 +204,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Watcher 현재 구조(2026-11-05)**: Unix/Windows 모두 한 background 검증 job과 한 bounded scan slice를 순환한다. 완료 뒤 현재 stream/active/root/.git 결속과 metadata/tree 재검증을 유지한다. Windows 연결은 native 미검증·실제 Git 차단 상태이고 과거 동기 Windows 설명보다 이 구현 상태를 우선한다. 실측 UI 지연 PASS는 별도다.
 
 - **Windows 내부 Git 제공 방식(2026-11-05, 미결정)**: 앱 포함 공식 MinGit과 기존 PC Git 재사용 중 사용자 선택 대기. MinGit도 hook/alias를 지원하므로 격리 대체가 아니다. 제안·출처는 `docs/proposals/m5-coding-agent-ide.md` §12. Codex/Claude 설치 정책과 별도이며 아직 다운로드/활성화 없음.
 - **Windows 자손 supervisor(2026-11-05, scoped native PASS)**: a7c0674의 상시 Unsupported 봉쇄 뒤 creator-thread DEBUG_PROCESS 추적을 구현했다. 생성 이벤트를 계속하기 전 handle 복제·EXIT 계속 후 모든 signal·root signal·누적 Job 수 일치·active0이 완료 조건이다. 중첩 debugger 누락/상한/오류는 실패이며 Job 밖의 외부 broker는 보장 범위가 아니다. 3a02b76/CI41980701769에서 기존 실제 child signal 회귀와 native20·spawn1·watcher4 합계25개가 PASS했다. 전체 제품 PASS가 아니며 Windows admission은 닫혀 있다.

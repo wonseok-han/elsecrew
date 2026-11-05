@@ -70,7 +70,7 @@ type GitStdin = ChildStdin;
 type GitStdout = ChildStdout;
 pub(crate) mod runtime_isolation;
 mod snapshot_recovery;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod watch_job;
 
 const MANIFEST_DIRECTORY: &str = "worktree-manifests-v1";
@@ -384,9 +384,9 @@ pub struct ProjectManager {
     pending_saves: HashMap<String, PendingSave>,
     watchers: HashMap<String, WatchState>,
     last_polled_watcher: Option<String>,
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     watch_job: Option<watch_job::WatchJob>,
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     watch_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
@@ -896,9 +896,9 @@ impl ProjectManager {
             pending_saves: HashMap::new(),
             watchers: HashMap::new(),
             last_polled_watcher: None,
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             watch_job: None,
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             watch_cancel: None,
         })
     }
@@ -2479,13 +2479,13 @@ impl ProjectManager {
         // scan budget alone lets many chats monopolize the request loop.
         // Sort keys so HashMap iteration order cannot starve a watcher; a
         // removed cursor still advances to its successor, then wraps.
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         if self.watch_job.as_ref().is_some_and(|job| {
             self.watchers.get(&job.key).is_none_or(|state| state.stream_id != job.stream)
         }) {
             self.watch_job.take();
         }
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         let completed = match self.watch_job.as_ref() {
             Some(job) if !job.finished() => return Vec::new(),
             Some(_) => Some(self.watch_job.take().expect("owned watch job").complete()),
@@ -2496,7 +2496,7 @@ impl ProjectManager {
         let next = project_ids.iter().find(|key| {
             self.last_polled_watcher.as_ref().is_none_or(|last| *key > last)
         }).or_else(|| project_ids.first()).cloned();
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         let next = completed.as_ref().map(|done| done.key.clone()).or(next);
         self.last_polled_watcher = next.clone();
         let mut emitted = Vec::new();
@@ -2505,16 +2505,16 @@ impl ProjectManager {
                 .watchers
                 .get(&project_id)
                 .and_then(|state| state.workspace.clone());
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             if completed.as_ref().is_some_and(|done| {
                 self.watchers.get(&project_id).is_none_or(|state| state.stream_id != done.stream)
             }) { continue; }
-            #[cfg(not(unix))]
+            #[cfg(not(any(unix, windows)))]
             let resolved = match workspace.as_ref() {
                 Some(address) => self.validate_workspace_address(storage, address),
                 None => self.validate_active_project(storage, &project_id),
             };
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             let resolved = match workspace.as_ref() {
                 Some(address) => self.validate_workspace_address_binding(storage, address),
                 None => self.validate_active_project_binding(storage, &project_id),
@@ -2557,7 +2557,7 @@ impl ProjectManager {
                     continue;
                 }
             };
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             if completed.is_none() {
                 let stream = self.watchers[&project_id].stream_id.clone();
                 match self.start_watch_job(project_id.clone(), stream, active, worktree) {
@@ -2570,7 +2570,7 @@ impl ProjectManager {
                 }
                 continue;
             }
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             if !completed.as_ref().expect("completed watcher").matches_capability(&worktree).unwrap_or(false)
                 || self.verify_snapshot_metadata(&worktree, &active).is_err()
                 || self.verify_snapshot_tree(&worktree, &active).is_err() {
@@ -2643,7 +2643,7 @@ impl ProjectManager {
     }
 
     pub fn stop_watchers(&mut self) {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         self.watch_job.take();
         self.watchers.clear();
         self.last_polled_watcher = None;
@@ -3975,9 +3975,9 @@ impl ProjectManager {
         // write-tree can acquire index.lock even during validation. Background
         // watchers defer it to the dispatcher so concurrent requests cannot
         // conflict with it and cancellation cannot leave its lock behind.
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         let background_watch = self.watch_cancel.is_some();
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         let background_watch = false;
         if !background_watch { self.verify_snapshot_tree(workspace, active)?; }
         if !remotes?.is_empty() {
@@ -4302,12 +4302,12 @@ impl ProjectManager {
         let mut command = self.git_command_at(directory)?;
         command.args(args).stdout(Stdio::piped());
         command.stdin(if input { Stdio::piped() } else { Stdio::null() });
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         let child = match &self.watch_cancel {
             Some(cancel) => StreamingGitChild::spawn_cancellable(&mut command, cancel.clone()),
             None => StreamingGitChild::spawn(&mut command),
         };
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         let child = StreamingGitChild::spawn(&mut command);
         child.map_err(|error| {
             ProjectFailure::recovery(format!("could not start fixed Git command: {error}"))

@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> **Windows watcher background 연결(native 미검증)**: Unix와 Windows는 한 번에 하나의 소유형 repository 검증 worker를 사용한다. 결과는 dispatcher에서 현재 stream/active binding 및 보유 root/.git 신원과 다시 대조하며, Windows는 full FILE_ID_INFO를 사용한다. metadata/write-tree 재검증 뒤 bounded scan을 이어간다. 취소 후 worker join을 유지하고 Windows 실제 Git admission은 계속 차단한다. 따라서 연결 구현을 Windows 실사용/성능 합격으로 해석하지 않는다.
+
 > **Windows 공용 Git reader adapter(native 미검증)**: `windows_git_process.rs`가 공용 snapshot/diff reader의 StreamingGitChild와 pipe 타입을 제공한다. typed image/CWD로 생성한 Transport만 소유하고 bounded pipe·전체 자손 종료 확인·Windows ExitStatus 변환을 수행한다. 일반 Command 실행은 거절하며 Windows의 이전 parent-only Child fallback은 사용하지 않는다. 실제 Git 설치본 신뢰·admission 연결은 여전히 미완료다.
 
 > **Windows 실행 이미지 결속(native 미검증)**: `windows_executable.rs`는 명시적으로 선택한 부모 handle 아래 실행 파일과 부모 경로를 보유하고 전체 파일 ID를 기록한다. 쓰기/delete 공유를 허용하지 않는 image handle을 실행 수명 동안 유지한다. `Transport::spawn_bound`는 image와 CWD lease를 creator supervisor로 넘기며 첫 CREATE_PROCESS 이벤트의 실제 hFile을 선택한 파일 ID와 비교한 뒤에만 이벤트를 계속한다. 거절 시 user code를 계속하지 않고 종료를 요청하며 pin은 미확인 종료 정책에 따라 유지한다. 이는 파일 신원 결속이지 공식 Git 설치본·서명·기존 writable mapping·DLL/자손 실행 파일의 신뢰 보장이 아니다. 실제 Git admission은 계속 닫혀 있고 이전25 PASS는 이 변경을 검증하지 않는다.

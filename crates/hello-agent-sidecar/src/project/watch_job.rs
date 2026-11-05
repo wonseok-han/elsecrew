@@ -28,10 +28,20 @@ pub(super) struct Completed {
 
 impl Completed {
     pub fn matches_capability(&self, current: &Dir) -> Result<bool, ProjectFailure> {
-        Ok(capability_directory_identity(&self.held_worktree)?
-            == capability_directory_identity(current)?
-            && capability_directory_identity(&self.held_git)?
-                == capability_directory_identity(&open_real_child_dir(current, ".git")?)?)
+        same_directory(&self.held_worktree, current).and_then(|same| {
+            Ok(same && same_directory(&self.held_git, &open_real_child_dir(current, ".git")?)?)
+        })
+    }
+}
+
+fn same_directory(left: &Dir, right: &Dir) -> Result<bool, ProjectFailure> {
+    #[cfg(unix)]
+    {
+        Ok(capability_directory_identity(left)? == capability_directory_identity(right)?)
+    }
+    #[cfg(windows)]
+    {
+        Ok(windows_fs::identity(left, true)? == windows_fs::identity(right, true)?)
     }
 }
 
@@ -93,6 +103,7 @@ impl ProjectManager {
             application_cancel: Default::default(),
             #[cfg(target_os = "macos")]
             application_job: None,
+            #[cfg(unix)]
             application_confirmations: Default::default(),
             data_root: self.data_root.clone(),
             data_dir: clone_dir(&self.data_dir)?,
