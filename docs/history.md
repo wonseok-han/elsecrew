@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준45f230c/깨끗한 통합 checkout에서 Windows 내부 Git 전용 실행 진입점을 작성했다. spawn_internal_git는 의존 이미지 관찰 구성을 요구하고 고정 --no-pager와 새 환경 map을 구성한 뒤 기존 typed Transport로 연결한다. 외부에서 임의 환경 map을 받는 fixture용 spawn_bound와 분리했다. 아직 ProjectManager의 제품 호출은 이 경로를 사용하지 않는다.
+- Windows directory는 OS API로 얻고 PATH/GIT_EXEC_PATH는 보유 runtime 디렉터리만 넣는다. 시스템/global config 비활성·count0·replace object/시스템attributes/프롬프트/pager 차단을 Unix 내부 Git과 맞췄다. 부모의 GIT_CONFIG_PARAMETERS/GIT_DIR/WORK_TREE/HOME/SSH/ASKPASS/PATH 등을 복사하지 않으며 source CWD를 임시 출력 위치로 지정하지 않는다. 세미콜론 포함 설치 경로는 PATH에 다른 root를 섞지 않도록 명시 거부한다. TEMP 별도 managed capability 필요 여부와 실제 명령 호환은 누적 native 시험에서 확인한다.
+- rustfmt/diff만 확인했고 Windows 컴파일·실제 Git 호출·누적 시험·독립 검토는 아직이다. 설치 root 동의 정책 응답 전 admission/제품 활성화는 하지 않는다. 신규 빌드/cache/모델/push/CI/패키지 없음. 다음은 신뢰 동의 저장/표시·단일 제품 호출 연결과 남은 Windows 원본 작업 구현이다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준3d764e2의 깨끗한 통합 checkout에서 Git family의 자손 CREATE_PROCESS image 대조를 연결했다. DLL 관찰을 구성한 Git owner는 모든 생성 이벤트의 실제 hFile이 root runtime과 동일한 full file ID인지 확인한 뒤에만 계속한다. 같은 파일의 hardlink 재실행은 허용하지만 companion 보유 자체를 EXE 실행 허가로 취급하지 않으며 다른 helper/shell은 거절한다. 기존 비Git fixture의 root-only image 계약은 유지한다.
 - 동일 runtime hardlink 허용·다른 companion EXE 거부 native 회귀를 추가했다. 실제 Git 배포본이 별도 file ID의 helper를 필요로 하는지는 아직 검증되지 않았다. 이를 모든 Git 명령 호환 완료로 표현하지 않으며, 필요한 helper는 명시 inventory/정책으로 연결해야 한다. 이번은 rustfmt/diff만 확인했고 Windows compile/native·누적 회귀는 뒤에 묶어서 진행한다.
 - 설치 root 신뢰 동의 정책은 아직 답변 대기다. 제품 gate/유료 모델/사용자 프로젝트/push/CI/패키지 변경 없음. 다음은 승인된 신뢰 정책을 단일 Git admission과 앱의 확인 흐름에 연결하고 Windows 원본 반영/복원 및 최종 누적 검증을 이어가는 것이다.

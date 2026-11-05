@@ -9,6 +9,8 @@ mod git_selection;
 mod git_installation_layout;
 #[cfg(windows)]
 mod windows_git_installation;
+#[cfg(windows)]
+mod windows_git_environment;
 mod protocol_path;
 mod path_binding;
 #[cfg(any(windows, test))]
