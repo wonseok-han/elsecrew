@@ -3,6 +3,7 @@
 //! macOS production selects native providers with scoped discovery and owned admission.
 //! Tests may separately inject an exact fake manifest and the sidecar fixture executable.
 
+use crate::process_spawn::SpawnGuarded as _;
 use crate::chat::{G5Action, G5Event};
 use crate::project::{ProjectFailure, ProjectManager, WorkspaceAddress};
 use crate::storage::{ProjectionUpsert, Storage};
@@ -713,7 +714,7 @@ impl AgentRuntime {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
-        let mut launcher = match command.spawn() {
+        let mut launcher = match command.spawn_guarded() {
             Ok(launcher) => launcher,
             Err(error) => {
                 return Err(fail_before_release(
@@ -4308,7 +4309,7 @@ pub(crate) fn run_agent_fixture_launcher(scenario: &str) -> Result<(), SidecarEr
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .spawn()
+        .spawn_guarded()
         .map_err(|error| {
             SidecarError::new("fixtureFailure", format!("agent fixture child: {error}"))
         })?;
@@ -4473,7 +4474,7 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
-                    .spawn()
+                    .spawn_guarded()
                     .map_err(|error| {
                         SidecarError::new("fixtureFailure", format!("fixture grandchild: {error}"))
                     })?;

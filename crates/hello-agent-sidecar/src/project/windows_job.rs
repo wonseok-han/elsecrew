@@ -241,8 +241,8 @@ pub(super) mod native {
         }
 
         /// Only these three duplicated handles are inherited by this child.
-        /// Callers must serialize against any legacy spawn that inherits all
-        /// handles; explicit HANDLE_LIST does not protect that other process.
+        /// The sidecar spawn lock excludes its other Windows launch paths while
+        /// the temporary inheritable duplicates exist.
         /// Pipe deadlines/cancellation and CWD authority belong to the caller.
         pub(crate) fn suspended_with_stdio(
             executable: &str,
@@ -306,6 +306,9 @@ pub(super) mod native {
             {
                 return Err(io::Error::last_os_error());
             }
+            // Shared with all admitted Windows std::process launch paths.
+            // Declared before duplicates so it is released after they close.
+            let _spawn_guard = crate::process_spawn::lock()?;
             // Duplicates are temporary; the caller's original inheritance flags
             // are never modified. All failure paths close partial duplicates.
             let mut inherited = Vec::new();
@@ -480,6 +483,7 @@ pub(super) mod native {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use crate::process_spawn::SpawnGuarded as _;
         const FIXTURE: &str = "project::windows_job::native::tests::family_fixture";
         #[test]
         fn family_fixture() {
@@ -493,7 +497,7 @@ pub(super) mod native {
                     .stdin(std::process::Stdio::null())
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
-                    .spawn()
+                    .spawn_guarded()
                     .unwrap();
             } else if mode == "output" {
                 use std::io::Write;

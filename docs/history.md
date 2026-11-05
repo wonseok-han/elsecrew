@@ -2,6 +2,14 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은 b5bc222의 Windows 감시·진단 준비로 진전했다. 요청한 b5bc222 공개 진단 push/CI 승인은 아직 응답이 없어 실행하지 않았다. 현재 turn의 추가 구현을 그 요청의 승인 범위로 간주하지 않는다.
+- Windows 임시 inheritable stdio 핸들 생성 구간을 공통 `process_spawn` mutex로 묶었다. 일반 Windows 빌드에 포함되는 chat·agent_runtime(실행 및 fixture launcher)·project fallback은 같은 SpawnGuarded 경로를 사용한다. Family는 복제 전부터 attribute와 임시 핸들이 모두 닫힐 때까지 잠금을 보유한다. 자식 실행·종료 대기에는 잠금을 유지하지 않으며 Unix는 기존 Command::spawn으로 그대로 전달한다.
+- Windows에 포함되지 않는 macOS/Unix provider 구현은 변경하지 않았다. 향후 Windows provider 입장 시 동일 spawn 경로 사용을 검증해야 한다. 잠금 오염은 실행 거부이며 자동 복구하지 않는다. 잠금 경합 회귀 초안을 추가했다. 기존 테스트 코드의 임의 std Command 실행까지 이 변경이 모두 포괄한다고 주장하지 않는다.
+- 독립 검토에서 Windows 공통 production spawn 경로 누락·동일 프로세스 중첩 잠금·임시 핸들 해제 전 잠금 해제에 해당하는 차단 결함 없음. native 실행 증거는 아니다.
+- macOS cargo check 3.40초 완료 중 project의 플랫폼 전용 import 경고를 발견해 cfg를 맞췄다. 전체 suite·패키징·Windows native·실제 모델 검사는 수행하지 않았으며 diff 검사를 통과했다. 다음은 승인된 범위의 Windows 진단, CWD/실행 파일 결속·파일 교체·전체 watcher 연결과 G6/출시 검증이다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은 abeba5d의 Windows bounded transport 구현으로 진전했다. 이번에는 Windows CWD 고정을 조사했으며, ancestor에 FILE_SHARE_WRITE/DELETE를 제한하는 것만으로 reparse 변경까지 막는다고 주장할 수 없음을 확인했다. [CreateFile 공유 규칙](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)은 attribute 접근을 공유 제한에서 제외하고, [MS-FSA reparse 설정](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/4aeefef8-92c3-4abc-af7a-a610caf8a165)은 FILE_WRITE_ATTRIBUTES도 허용한다. 실제 공격 재현은 아니며 이 경로 고정 방식을 구현·활성화하지 않았다.
 - 독립적으로 가능한 Windows watcher 연결을 진행했다. Windows도 128단계씩 나누고 다음 회차마다 현재 root에서 prefix를 다시 열어 전체 volume/128-bit file ID와 객체 종류를 대조한다. 교체·reparse·신원 조회 실패는 기존 rescan/중단 흐름으로 전달한다. 하위 폴더 교체 회귀를 Windows에도 적용하고 다른 root 및 초기 분할 회귀를 추가했다. Windows Git 검증은 아직 동기·차단 상태이며 이 변경이 전체 watcher 비동기화 완료는 아니다.
 - native 코드가 쌓인 상태에서 Windows 컴파일·실행 증거를 얻을 수 있도록 `.github/workflows/m5-windows-native-diagnostic.yml`을 준비했다. 새 진단 브랜치 한정·20분·동시성4 이하이며 windows_ primitives와 watcher slice 회귀만 수행한다. 패키징/전체 suite/모델 호출/제품 활성화는 포함하지 않는다. 아직 push·CI는 실행하지 않았으며 이전 승인 잔여는 없다.

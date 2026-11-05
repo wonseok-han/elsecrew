@@ -1,3 +1,4 @@
+use crate::process_spawn::SpawnGuarded as _;
 mod discard;
 use crate::project::{ProjectFailure, ProjectManager, WorkspaceAddress};
 use crate::storage::{ChatBindInput, ChatBindOutcome, ProjectionUpsert, Storage};
@@ -924,7 +925,7 @@ impl G5Manager {
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        let mut child = match command.spawn() {
+        let mut child = match command.spawn_guarded() {
             Ok(child) => child,
             Err(error) => {
                 self.fail_before_fixture_release(
@@ -1565,7 +1566,7 @@ pub fn run_fixture_child(scenario: &str) -> Result<(), SidecarError> {
                 });
             }
         }
-        let mut leaf = command.spawn().map_err(|error| {
+        let mut leaf = command.spawn_guarded().map_err(|error| {
             SidecarError::new("fixtureFailure", format!("fixture leaf: {error}"))
         })?;
         let _ = leaf.wait();

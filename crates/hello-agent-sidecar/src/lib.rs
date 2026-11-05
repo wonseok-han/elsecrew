@@ -7,6 +7,7 @@ mod application_cancel;
 mod dispatch_timing;
 mod chat;
 mod project;
+mod process_spawn;
 #[cfg(target_os = "macos")]
 mod provider_claude_login;
 #[cfg(target_os = "macos")]

@@ -28,8 +28,8 @@ pub(super) struct Transport {
     finished: bool,
 }
 impl Transport {
-    /// Caller must hold the spawn serialization boundary and persist its launch
-    /// fence before calling. This API does not establish CWD/executable authority.
+    /// Caller must persist its launch fence before calling. Family holds the
+    /// shared Windows spawn lock while temporary inheritable handles exist. This API does not establish CWD/executable authority.
     pub(super) fn spawn(
         executable: &str,
         args: &[String],

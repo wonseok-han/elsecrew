@@ -1,3 +1,5 @@
+#[cfg(not(unix))]
+use crate::process_spawn::SpawnGuarded as _;
 mod app_roles;
 mod protocol_path;
 mod path_binding;
@@ -311,7 +313,7 @@ struct StreamingGitChild {
 impl StreamingGitChild {
     fn spawn(command: &mut Command) -> std::io::Result<Self> {
         command.stderr(Stdio::piped());
-        let mut child = command.spawn()?;
+        let mut child = command.spawn_guarded()?;
         let Some(stderr) = child.stderr.take() else {
             terminate_child(&mut child);
             return Err(std::io::Error::other(
