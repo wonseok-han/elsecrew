@@ -266,7 +266,7 @@ fn pump(launch: &Launch, stop: &AtomicBool) -> io::Result<u32> {
                     "first debug event does not identify owned root",
                 ))
             } else {
-                let image = if members.is_empty() {
+                let image = if members.is_empty() || event.code == 6 {
                     launch.executable.as_ref().map(|pin| pin.resource())
                 } else {
                     None
@@ -371,7 +371,24 @@ fn handle_event(
                 initial_breakpoint: true,
             });
         }
-        6 => close_image(unsafe { event.data.file }),
+        6 => {
+            let file = unsafe { event.data.file };
+            let verified = if let Some(image) = image.filter(|image| image.observes_dependencies())
+            {
+                if file.is_null() || file as isize == -1 {
+                    Err(io::Error::other("loaded DLL handle is unavailable"))
+                } else {
+                    let actual = unsafe { BorrowedHandle::borrow_raw(file) };
+                    image
+                        .verify_loaded_dependency(&actual)
+                        .map_err(|error| io::Error::other(error.detail))
+                }
+            } else {
+                Ok(())
+            };
+            close_image(file);
+            verified?;
+        }
         1 => {
             let exception = unsafe { event.data.exception };
             let member = members

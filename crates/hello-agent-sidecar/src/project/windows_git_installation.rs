@@ -28,7 +28,9 @@ impl SelectedGitCandidate {
             .map(|(_, image)| image)
             .collect();
         companions.push(self._image);
-        self._runtime.retain_companions(companions)
+        self._runtime
+            .retain_companions(companions)?
+            .inspect_dependency_loads()
     }
 }
 

@@ -28,6 +28,8 @@ mod windows_executable;
 #[cfg(windows)]
 mod windows_authenticode;
 #[cfg(windows)]
+mod windows_system_modules;
+#[cfg(windows)]
 mod windows_replace;
 #[cfg(windows)]
 mod windows_save_guard;

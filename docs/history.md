@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준39416fe의 깨끗한 통합 checkout에서 실제 LOAD_DLL 이벤트 검사를 연결했다. Git runtime 후보는 retained companion inventory와 시스템 module 관찰을 함께 구성하고, supervisor는 root뿐 아니라 family의 DLL 이벤트를 해당 owner에 전달한다. 실제 hFile의 full file ID를 보유한 image와 대조하고 handle 부재/불일치는 ContinueDebugEvent 전에 거절한다. 이벤트 handle은 성공/오류 모두 닫으며 기존 종료/poisoned pin 정책을 유지한다.
+- inventory 외 DLL은 GetSystemDirectoryW로 얻은 Windows native 시스템 폴더의 직접 DLL만 별도 분류한다. 환경변수·PATH·자식 제공 파일명 대신 held GUID 경로/부모/다시 연 파일 ID를 비교하고 해당 image도 family 소유권으로 보유한다. 시스템 폴더 밖 임의 DLL은 허용하지 않는다. 이는 신뢰하는 OS 설치 경계에 의존하며 WinSxS/보안 제품 주입 DLL/다른 architecture의 호환성까지 증명하지 않는다. 자손 EXE 정책과 설치 root 사용자 동의·단일 spawn admission 연결은 여전히 남고 제품 gate는 비활성이다.
+- [Microsoft DLL debug event](https://learn.microsoft.com/en-us/windows/win32/api/minwinbase/ns-minwinbase-load_dll_debug_info)·[검색 순서](https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order)를 확인했다. inventory DLL/추가 DLL 거절·시스템 kernel32 허용/동명 외부 파일 거절 native 회귀를 추가했다. 구현 우선 지시에 따라 실행하지 않았고 rustfmt/diff만 확인했다. 신규 빌드/cache/CI/push/모델 없음. 설치 root 신뢰 정책 응답은 아직 대기하며 이 작업을 제품 검증 완료로 표현하지 않는다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준dceb148/깨끗한 통합 checkout에서 선택 wrapper·runtime DLL pin을 실행 runtime의 단일 소유권으로 옮기는 경로를 구현했다. ExecutableLease의 flat companion 상한257개와 중첩 금지로 검사 재귀를 제한하며 기존 RetainedExecutable/creator supervisor의 종료 확인·미확인 pin 유지 정책을 함께 적용할 수 있다. into_retained_runtime은 실행 승인 타입이 아니며 아직 제품 spawn에 연결하지 않았다.
 - companion의 쓰기 잠금이 마지막 observer 해제까지 유지되는 native 회귀를 작성했고 아직 실행하지 않았다. 요청대로 rustfmt/diff만 확인했으며 Windows compile/native·독립 안전 검토는 파동 검증에 남긴다. architecture에 선택/서명자/runtime/DLL 구현과 미완료 admission 경계를 갱신했다. 새 빌드/캐시/worktree/push/CI/모델 없음.
 - 기존 상시 승인 검토자1명에게 사용자 설치 Git·미서명 공식 DLL의 최소 신뢰 경계를 읽기 전용으로 검토 요청했다. 검토 결과 retention 연결 자체의 차단 결함은 없고, signed installer/모든 DLL 서명을 새 의무로 만들 필요가 없다는 의견을 받았다. 실제 LOAD_DLL handle 대조와 단일 admission 연결은 남는다. 선택 root·서명자 표시 후 동의, 미서명 runtime 수용, 업데이트 재검사·서명자 변경 재동의의 제품 정책을 사용자에게 요청했다. 답변 전 활성화하지 않으며 독립적으로 load event 대조 구현은 계속할 수 있다.

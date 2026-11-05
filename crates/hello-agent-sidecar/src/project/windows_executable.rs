@@ -15,6 +15,7 @@ pub(super) struct ExecutableLease {
     identity: windows_fs::Identity,
     path: String,
     companions: Vec<ExecutableLease>,
+    system_modules: Option<Box<super::windows_system_modules::SystemModules>>,
 }
 pub(super) type RetainedExecutable = RetainedPin<ExecutableLease>;
 impl ExecutableLease {
@@ -51,6 +52,7 @@ impl ExecutableLease {
             identity,
             path,
             companions: Vec::new(),
+            system_modules: None,
         };
         lease.validate()?;
         Ok(lease)
@@ -73,7 +75,9 @@ impl ExecutableLease {
     ) -> Result<Self, ProjectFailure> {
         if !self.companions.is_empty()
             || companions.len() > 257
-            || companions.iter().any(|image| !image.companions.is_empty())
+            || companions
+                .iter()
+                .any(|image| !image.companions.is_empty() || image.system_modules.is_some())
         {
             return Err(ProjectFailure::manifest(
                 "invalid executable companion inventory",
@@ -82,6 +86,42 @@ impl ExecutableLease {
         self.companions = companions;
         self.validate()?;
         Ok(self)
+    }
+    pub(super) fn inspect_dependency_loads(mut self) -> Result<Self, ProjectFailure> {
+        if self.system_modules.is_some() {
+            return Err(ProjectFailure::manifest(
+                "DLL observation is already configured",
+            ));
+        }
+        self.system_modules = Some(Box::new(
+            super::windows_system_modules::SystemModules::acquire()?,
+        ));
+        self.validate()?;
+        Ok(self)
+    }
+    pub(super) fn matches_file(&self, actual: &impl AsRawHandle) -> Result<bool, ProjectFailure> {
+        Ok(windows_fs::identity(actual, false)? == self.identity)
+    }
+    pub(super) fn observes_dependencies(&self) -> bool {
+        self.system_modules.is_some()
+    }
+    pub(super) fn verify_loaded_dependency(
+        &self,
+        actual: &impl AsRawHandle,
+    ) -> Result<(), ProjectFailure> {
+        self.validate()?;
+        if self.matches_file(actual)? {
+            return Ok(());
+        }
+        for image in &self.companions {
+            if image.matches_file(actual)? {
+                return Ok(());
+            }
+        }
+        self.system_modules
+            .as_ref()
+            .ok_or_else(|| ProjectFailure::recovery("DLL observation is not configured"))?
+            .retain_loaded(actual)
     }
     pub(super) fn path(&self) -> &str {
         &self.path
@@ -95,6 +135,9 @@ impl ExecutableLease {
         }
         for image in &self.companions {
             image.validate()?;
+        }
+        if let Some(system) = &self.system_modules {
+            system.validate()?;
         }
         Ok(())
     }
@@ -116,6 +159,26 @@ impl ExecutableLease {
 mod tests {
     use super::*;
     use cap_std::ambient_authority;
+    #[test]
+    fn observed_dependencies_require_inventory_or_system_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        for name in ["git.exe", "known.dll", "added.dll"] {
+            std::fs::write(temp.path().join(name), name.as_bytes()).unwrap();
+        }
+        let dir = Dir::open_ambient_dir(temp.path(), ambient_authority()).unwrap();
+        let root = ExecutableLease::acquire(&dir, OsStr::new("git.exe")).unwrap();
+        let known = ExecutableLease::acquire(&dir, OsStr::new("known.dll")).unwrap();
+        let root = root
+            .retain_companions(vec![known])
+            .unwrap()
+            .inspect_dependency_loads()
+            .unwrap();
+        let actual = std::fs::File::open(temp.path().join("known.dll")).unwrap();
+        root.verify_loaded_dependency(&actual).unwrap();
+        let added = std::fs::File::open(temp.path().join("added.dll")).unwrap();
+        assert!(root.verify_loaded_dependency(&added).is_err());
+    }
+
     #[test]
     fn companion_write_lock_follows_retained_runtime_lifetime() {
         let temp = tempfile::tempdir().unwrap();
