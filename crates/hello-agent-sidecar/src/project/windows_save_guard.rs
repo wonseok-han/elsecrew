@@ -146,6 +146,123 @@ impl ProjectManager {
         self.write_windows_guard_intent(storage, active, save_id, request_id, &record)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn prepare_windows_replacement(
+        &self,
+        storage: &mut Storage,
+        active: &ActiveProject,
+        save_id: &str,
+        request_id: &str,
+        guard: &SaveGuard,
+        prepared: &PreparedTarget,
+        expected_version: &str,
+        mut pre_revalidation_hook: Option<&mut dyn FnMut()>,
+        mut pre_syscall_hook: Option<&mut dyn FnMut()>,
+    ) -> Result<(), ProjectFailure> {
+        if let Some(hook) = &mut pre_revalidation_hook {
+            hook();
+        }
+        let lock = storage
+            .projection_record("lock", &active.lock_id)?
+            .ok_or_else(|| ProjectFailure::recovery("save replacement lock missing"))?;
+        let mut record = lock
+            .get("evidence")
+            .and_then(|value| value.get("windowsSaveGuard"))
+            .filter(|value| value.is_object())
+            .cloned()
+            .ok_or_else(|| ProjectFailure::recovery("save replacement intent missing"))?;
+        let source = prepared
+            .file
+            .as_ref()
+            .ok_or_else(|| ProjectFailure::recovery("save replacement source handle missing"))?;
+        let source_id = windows_fs::identity(source, false)?;
+        if record["phase"] != "sourceReady"
+            || record["worktreeId"] != active.worktree_id
+            || record["workspaceIdentity"] != active.workspace_identity
+            || record["saveId"] != save_id
+            || record["expectedVersion"] != expected_version
+            || record["sourceName"] != prepared.temp_name
+            || record["sourceIdentity"] != source_id.recovery_token()
+            || record["guardName"] != guard.name
+            || record["guardIdentity"] != guard.identity.recovery_token()
+        {
+            return Err(ProjectFailure::recovery("save replacement binding changed"));
+        }
+        let relative = record["path"]
+            .as_str()
+            .ok_or_else(|| ProjectFailure::recovery("save destination path missing"))?;
+        let destination = PathBuf::from(WORKTREE_DIRECTORY)
+            .join(&active.worktree_id)
+            .join(relative);
+        if destination != prepared.target_relative {
+            return Err(ProjectFailure::recovery(
+                "save destination intent path changed",
+            ));
+        }
+        let managed = open_absolute_directory_capability(&self.worktrees_root)?;
+        if windows_fs::identity(&managed, true)? != windows_fs::identity(&self.worktrees_dir, true)?
+        {
+            return Err(ProjectFailure::recovery(
+                "managed root changed before replacement",
+            ));
+        }
+        let root = self.worktree_capability(active)?;
+        if windows_fs::identity(&root, true)? != windows_fs::identity(&prepared.temp_parent, true)?
+        {
+            return Err(ProjectFailure::recovery(
+                "save source root changed before replacement",
+            ));
+        }
+        let (parent, name) = open_parent_capability(&root, relative)?;
+        if windows_fs::identity(&parent, true)?.recovery_token() != record["parentIdentity"] {
+            return Err(ProjectFailure::recovery("save destination parent changed"));
+        }
+        let source_name = open_real_file_at(&root, &prepared.temp_name)?;
+        if windows_fs::identity(&source_name, false)? != source_id {
+            return Err(ProjectFailure::recovery("save source name changed"));
+        }
+        // Refuse ordinary writers while validating the old contents. Legacy
+        // FileRenameInfo requires destination handles closed before replacement;
+        // the independent parent/guard lease remains held throughout.
+        let mut options = CapOpenOptions::new();
+        options
+            .read(true)
+            .follow(FollowSymlinks::No)
+            .share_mode(5)
+            .custom_flags(windows_fs::OPEN_REPARSE_POINT);
+        let mut target = parent.open_with(&name, &options).map_err(|error| {
+            ProjectFailure::recovery(format!("save target cannot be held: {error}"))
+        })?;
+        let target_id = windows_fs::identity(&target, false)?;
+        let (_, _, current) = read_file_bounded_handle(&mut target, 0)?;
+        if current != expected_version {
+            return Err(ProjectFailure::recovery(
+                "save target changed before replacement",
+            ));
+        }
+        guard.lease.validate()?;
+        record["phase"] = json!("replacementChecked");
+        record["previousTargetIdentity"] = json!(target_id.recovery_token());
+        self.write_windows_guard_intent(storage, active, save_id, request_id, &record)?;
+        if let Some(hook) = &mut pre_syscall_hook {
+            hook();
+        }
+        // Recheck the namespace after the test hook. The lease remains held.
+        let current_target = open_real_file_at(&parent, &name)?;
+        if windows_fs::identity(&current_target, false)? != target_id {
+            return Err(ProjectFailure::recovery(
+                "save target name changed before syscall",
+            ));
+        }
+        // FileRenameInfo does not compare the expected destination identity.
+        // Closing destination handles to allow replacement leaves a name-swap
+        // window; the parent lease prevents escape, not lost concurrent edits.
+        // Do not issue destructive replacement until that contract is resolved.
+        Err(ProjectFailure::recovery(
+            "Windows replacement requires an atomic destination-change contract; no replacement was issued",
+        ))
+    }
+
     fn write_windows_guard_intent(
         &self,
         storage: &mut Storage,
@@ -190,6 +307,17 @@ impl ProjectManager {
                 expected["sourceIdentity"] = guard["sourceIdentity"].clone();
                 expected["sourceVersion"] = guard["sourceVersion"].clone();
                 old["phase"] == "ready"
+                    && expected == *guard
+                    && lock.get("recovery_required") == Some(&json!(true))
+            }),
+            Some("replacementChecked") => previous.is_some_and(|old| {
+                if !old.is_object() {
+                    return false;
+                }
+                let mut expected = old.clone();
+                expected["phase"] = json!("replacementChecked");
+                expected["previousTargetIdentity"] = guard["previousTargetIdentity"].clone();
+                old["phase"] == "sourceReady"
                     && expected == *guard
                     && lock.get("recovery_required") == Some(&json!(true))
             }),

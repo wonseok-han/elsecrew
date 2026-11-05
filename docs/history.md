@@ -4,6 +4,14 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은 1e425f1 source 준비로 진전했다. 이번 메인 구현은 Windows 교체 전 sourceReady/작업복사본/guard/source ID, 현재 managed root/parent, target 내용/ID와 intent 경로를 재검증하고 replacementChecked+이전 target ID를 기록한다. hook 이후 target name ID도 확인한다. 복구 준비 증거를 추가했으며 아직 교체 syscall은 호출하지 않는다.
+- 실제 교체 연결을 검토하다 새 차단 조건을 발견했다. [Microsoft FileRenameInformation](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information)의 legacy replacement는 destination open handle을 닫아야 한다. 마지막 ID 확인과 syscall 사이 foreign target swap을 원자적으로 배제하지 못하므로 parent pin만으로 expectedVersion의 compare-and-replace를 주장할 수 없다. 실제 사용자 손실을 관찰한 것은 아니며 정적 경합 분석이다.
+- 독립 검토의 차단 지적을 반영해 destructive 호출과 replaced 기록을 제거했다. 준비 검증 뒤 명시 오류로 종료하고 guard/source/session/staging·원장 증거를 유지한다. 임의 POSIX flag나 검증 성공으로 이 경합을 덮지 않는다. Windows 제품/Git admission은 계속 닫혀 있다. namespace durability no-op도 저장 성공 증거로 쓰지 않도록 Windows save에 명시 오류를 둔다.
+- 같은 독립 검토자의 재확인으로 destructive 교체 호출이 제거되고 replacementChecked 뒤 오류·증거 보존만 남음을 확인했다. 교체 전략의 활성화 blocker는 해결됐다고 주장하지 않는다.
+- 변경 모듈 rustfmt, project.rs 구문 파싱, git diff --check 확인. native 컴파일/실행 미검증이며 기존34 PASS와 구분한다. cache/package/worktree·모델·push/CI 없음. 다음은 destination 동시 변경 계약을 만족하는 교체 전략, ACL/내구성·복구/cleanup 구현과 묶음 native 검증이다. Git 제공 방식 선택·G6/출시도 여전히 남아 있다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 goal turn은 5ad0c4b 구현 커밋으로 진전했다. 이번에는 같은 통합 checkout에서 Windows replacement source 준비를 연결했다. 최초 guard intent가 sourceName을 생성 전에 예약하고, 복사/flush 뒤 보유 source와 no-follow 재열기 file ID를 비교해 sourceReady의 sourceIdentity/sourceVersion을 기록한다. 교체 호출까지 같은 source handle을 유지할 수 있도록 PreparedTarget에 보관한다.
 - Windows source는 공용 source_options에서 create_new/nofollow와 READ|WRITE|DELETE, share-read만 사용한다. 외부 write/delete를 허용하지 않는다. 실패 시 Windows PreparedTarget Drop은 경로만 보고 임시 파일을 삭제하지 않고 원장에 기록된 이름을 보존한다. intent 성공 이후 오류는 기존 ambiguous/session/staging 보존 규칙을 따른다. cleanup의 신원 확인과 namespace durability는 아직 미완료다.
 - 기존 native replacement 회귀도 같은 옵션으로 source를 만들도록 바꾸고 외부 write/delete/rename 거절 단언을 추가했다. 실제 replace 성공과 guard·full ID·내용 검사는 유지한다. native 실행은 하지 않았으며 기존34 PASS에 포함되지 않는다.
@@ -46,6 +54,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Windows replacement 경합 미해결(2026-11-05)**: FileRenameInfo는 expected target ID를 조건으로 비교·교체하지 않는다. destination handle 해제부터 syscall 사이 다른 프로세스의 name swap을 parent/guard pin만으로 차단하지 못한다. replacementChecked 기록 뒤 실제 교체는 차단하며 POSIX flag·사후 source ID 검증만으로 해결했다고 보지 않는다. native primitive 성공과 제품 저장 안전 계약은 별도다.
 
 - **Windows native34 PASS(2026-11-05 최신)**: CI41988529910/0a7efd5에서 lease/image/GUID 실행·공용 reader·종료 supervisor·spawn/watcher34개 통과. 첫41987756587의1FAIL은 fixture의 별도 directory handle 수명으로 수정했다. 통합 수정2812429. 현재 batch3회 중2회 사용·1회 남음. 실제 Git 설치본/저장·복구·background watcher 종단 실행/제품G6 합격은 아니다.
 

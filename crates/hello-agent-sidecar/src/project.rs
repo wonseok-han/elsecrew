@@ -2229,6 +2229,12 @@ impl ProjectManager {
         drop(target_temp);
 
         self.persist_save_lock(storage, &active, save_id, request_id, true, None)?;
+        #[cfg(windows)]
+        self.prepare_windows_replacement(
+            storage, &active, save_id, request_id, &save_guard, &prepared,
+            expected_version, pre_revalidation_hook, pre_syscall_hook,
+        )?;
+        #[cfg(not(windows))]
         self.rename_prepared_save_from_stable_root(
             &prepared,
             expected_version,
@@ -2253,7 +2259,13 @@ impl ProjectManager {
                     error.detail
                 ))
             })?;
-        sync_capability_directory(&committed_parent).map_err(|error| {
+        #[cfg(windows)]
+        let directory_sync: Result<(), ProjectFailure> = Err(ProjectFailure::ambiguous(
+            "Windows replacement observed; namespace durability and guard cleanup are not yet connected",
+        ));
+        #[cfg(not(windows))]
+        let directory_sync = sync_capability_directory(&committed_parent);
+        directory_sync.map_err(|error| {
             ProjectFailure::ambiguous(format!(
                 "save rename completed but directory durability is unknown: {}",
                 error.detail
@@ -2386,7 +2398,7 @@ impl ProjectManager {
         Ok(())
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     fn rename_prepared_save_from_stable_root(
         &self,
         _prepared: &PreparedTarget,
