@@ -342,7 +342,7 @@ function registerIpcHandlers(): void {
     if (!sidecar) throw new Error("sidecar was not started");
     return validateInstallStatus(await sidecar.install(validateInstallRequest(input)));
   });
-  const gitSelection = new GitSelectionStore(app.getPath("userData"));
+  const gitSelection = new GitSelectionStore(m5DataDirectory(), process.platform, app.getPath("userData"));
   ipcMain.handle(GIT_SELECTION_CHANNEL, async (event, ...args: unknown[]) => {
     assertCurrentMainFrame(event);
     if (args.length !== 1) throw new Error("Git selection takes one action");

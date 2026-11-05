@@ -3,6 +3,10 @@ pub(crate) const WINDOWS_SAVE_RECOVERY_MUTATIONS_ENABLED: bool = false;
 #[cfg(not(any(unix, windows)))]
 use crate::process_spawn::SpawnGuarded as _;
 mod app_roles;
+#[cfg(any(windows, test))]
+mod git_selection;
+#[cfg(windows)]
+mod windows_git_installation;
 mod protocol_path;
 mod path_binding;
 #[cfg(any(windows, test))]

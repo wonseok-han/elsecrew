@@ -11,26 +11,37 @@ const status = (state: GitSelection["state"], path: string | null = null): GitSe
  * and validate the installation/dependencies before any future invocation.
  */
 export class GitSelectionStore {
-  #busy = false;
-  constructor(private readonly dataRoot: string, private readonly platform = process.platform) {}
+  #queue: Promise<void> = Promise.resolve();
+  constructor(private readonly dataRoot: string, private readonly platform = process.platform,
+    private readonly legacyRoot?: string) {}
 
-  async request(action: GitSelectionAction, choose: () => Promise<string | null>): Promise<GitSelection> {
-    if (this.platform !== "win32") return status("unsupported");
-    if (action === "inspect") return this.#inspect();
-    if (this.#busy) throw new Error("Git selection is busy");
-    this.#busy = true;
-    try {
+  request(action: GitSelectionAction, choose: () => Promise<string | null>): Promise<GitSelection> {
+    if (this.platform !== "win32") return Promise.resolve(status("unsupported"));
+    // Migration, selection and inspection share one owner; an old preference
+    // must never publish over a newer native-dialog selection.
+    const task = this.#queue.then(async () => {
+      if (action === "inspect") await this.#migratePreference();
       if (action === "choose") {
         const path = await choose();
-        if (path !== null) {
-          const selected = await this.#checkCandidate(path);
-          await this.#write(selected);
-        }
+        if (path !== null) await this.#write(await this.#checkCandidate(path));
       } else if (action === "forget") {
-        await this.#write(null); // Forget the preference; never remove Git itself.
+        await this.#write(null); // Never remove Git itself.
       }
-      return await this.#inspect();
-    } finally { this.#busy = false; }
+      return this.#inspect();
+    });
+    this.#queue = task.then(() => {}, () => {});
+    return task;
+  }
+
+  async #migratePreference(): Promise<void> {
+    if (!this.legacyRoot) return;
+    try { await lstat(join(await this.#root(), "git-selection-v1.json")); return; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    const old = await new GitSelectionStore(this.legacyRoot, this.platform).request("inspect", async () => null);
+    if (old.state === "selected") await this.#write(old.path);
+    else if (old.state === "unavailable") throw new Error("previous Git preference is unavailable");
+    // Preserve the old preference file. A new null record prevents resurrection
+    // after the user explicitly forgets the migrated selection.
   }
 
   async #root(): Promise<string> {
