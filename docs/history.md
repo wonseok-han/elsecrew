@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준dceb148/깨끗한 통합 checkout에서 선택 wrapper·runtime DLL pin을 실행 runtime의 단일 소유권으로 옮기는 경로를 구현했다. ExecutableLease의 flat companion 상한257개와 중첩 금지로 검사 재귀를 제한하며 기존 RetainedExecutable/creator supervisor의 종료 확인·미확인 pin 유지 정책을 함께 적용할 수 있다. into_retained_runtime은 실행 승인 타입이 아니며 아직 제품 spawn에 연결하지 않았다.
+- companion의 쓰기 잠금이 마지막 observer 해제까지 유지되는 native 회귀를 작성했고 아직 실행하지 않았다. 요청대로 rustfmt/diff만 확인했으며 Windows compile/native·독립 안전 검토는 파동 검증에 남긴다. architecture에 선택/서명자/runtime/DLL 구현과 미완료 admission 경계를 갱신했다. 새 빌드/캐시/worktree/push/CI/모델 없음.
+- 기존 상시 승인 검토자1명에게 사용자 설치 Git·미서명 공식 DLL의 최소 신뢰 경계를 읽기 전용으로 검토 요청했다. 검토 결과 retention 연결 자체의 차단 결함은 없고, signed installer/모든 DLL 서명을 새 의무로 만들 필요가 없다는 의견을 받았다. 실제 LOAD_DLL handle 대조와 단일 admission 연결은 남는다. 선택 root·서명자 표시 후 동의, 미서명 runtime 수용, 업데이트 재검사·서명자 변경 재동의의 제품 정책을 사용자에게 요청했다. 답변 전 활성화하지 않으며 독립적으로 load event 대조 구현은 계속할 수 있다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준2505240/깨끗한 통합 checkout에서 Git 설치 레이아웃과 runtime/DLL inventory를 연결했다. cmd/bin 선택은 같은 설치 root의 ucrt64/mingw64/clangarm64/mingw32 후보만 검사하고, runtime 직접 선택은 해당 경로만 검사한다. 여러 runtime은 임의 선택하지 않으며 명시 재선택 오류를 반환한다. 접근 실패와 reparse를 단순 없음으로 처리하지 않는다.
 - 선택 파일·실제 runtime의 검증된 CN/조직을 대조하고 둘 다 ExecutableLease로 보유한다. runtime 폴더의 DLL은 최대256개, 전체 entry4096개 상한으로 열어 파일/부모 결속을 보유하며 목록·결속 재확인으로 검사 중 변경을 거부한다. DLL 자체에 일괄 서명을 요구하지 않는다. 이 inventory는 동적/system DLL까지 포함한 실행 허가가 아니며 설치 출처 신뢰·실제 load event 결속·spawn 연결은 다음 작업이다. 제품 gate는 유지한다.
 - [공식 Git Credential Manager 문서](https://github.com/git-ecosystem/git-credential-manager/blob/main/docs/wsl.md)의 ucrt64 전환·기존mingw64·ARM64clangarm64 경로를 확인했다. portable layout 회귀를 추가했고 구현 우선 지시에 따라 이번에는 rustfmt/diff만 확인했다. Windows compile/native·독립 검토·누적 시험은 기능 연결 뒤 수행한다. 신규 패키지/worktree/모델/push/CI 없음.

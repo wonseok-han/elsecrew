@@ -15,6 +15,23 @@ pub(super) struct SelectedGitCandidate {
     _dependencies: DependencyInventory,
 }
 
+impl SelectedGitCandidate {
+    /// This consumes file bindings only, not an installation admission grant.
+    /// The caller still needs publisher/dependency policy before any spawn.
+    pub(super) fn into_retained_runtime(self) -> Result<ExecutableLease, ProjectFailure> {
+        self._image.validate()?;
+        self._dependencies.validate()?;
+        let mut companions: Vec<ExecutableLease> = self
+            ._dependencies
+            .images
+            .into_iter()
+            .map(|(_, image)| image)
+            .collect();
+        companions.push(self._image);
+        self._runtime.retain_companions(companions)
+    }
+}
+
 impl ProjectManager {
     pub(super) fn selected_git_candidate(
         &self,

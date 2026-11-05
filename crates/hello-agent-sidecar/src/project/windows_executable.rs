@@ -14,6 +14,7 @@ pub(super) struct ExecutableLease {
     image: File,
     identity: windows_fs::Identity,
     path: String,
+    companions: Vec<ExecutableLease>,
 }
 pub(super) type RetainedExecutable = RetainedPin<ExecutableLease>;
 impl ExecutableLease {
@@ -49,6 +50,7 @@ impl ExecutableLease {
             image,
             identity,
             path,
+            companions: Vec::new(),
         };
         lease.validate()?;
         Ok(lease)
@@ -62,6 +64,25 @@ impl ExecutableLease {
         self.validate()?;
         Ok(publisher)
     }
+    /// Attach inspected files to the same process-family retention owner.
+    /// No trust is conferred by attachment. A flat bounded set avoids unbounded
+    /// validation recursion and releases only with the existing family barrier.
+    pub(super) fn retain_companions(
+        mut self,
+        companions: Vec<Self>,
+    ) -> Result<Self, ProjectFailure> {
+        if !self.companions.is_empty()
+            || companions.len() > 257
+            || companions.iter().any(|image| !image.companions.is_empty())
+        {
+            return Err(ProjectFailure::manifest(
+                "invalid executable companion inventory",
+            ));
+        }
+        self.companions = companions;
+        self.validate()?;
+        Ok(self)
+    }
     pub(super) fn path(&self) -> &str {
         &self.path
     }
@@ -71,6 +92,9 @@ impl ExecutableLease {
             return Err(ProjectFailure::symlink(
                 "selected executable identity changed",
             ));
+        }
+        for image in &self.companions {
+            image.validate()?;
         }
         Ok(())
     }
@@ -92,6 +116,30 @@ impl ExecutableLease {
 mod tests {
     use super::*;
     use cap_std::ambient_authority;
+    #[test]
+    fn companion_write_lock_follows_retained_runtime_lifetime() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("git.exe"), b"root").unwrap();
+        std::fs::write(temp.path().join("dependency.dll"), b"dependency").unwrap();
+        let dir = Dir::open_ambient_dir(temp.path(), ambient_authority()).unwrap();
+        let root = ExecutableLease::acquire(&dir, OsStr::new("git.exe")).unwrap();
+        let dependency = ExecutableLease::acquire(&dir, OsStr::new("dependency.dll")).unwrap();
+        let root = root.retain_companions(vec![dependency]).unwrap();
+        let retained = RetainedExecutable::new(root);
+        let observer = retained.observer();
+        drop(retained);
+        assert!(std::fs::OpenOptions::new()
+            .write(true)
+            .open(temp.path().join("dependency.dll"))
+            .is_err());
+        observer.resource().validate().unwrap();
+        drop(observer);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(temp.path().join("dependency.dll"))
+            .unwrap();
+    }
+
     #[test]
     fn image_binding_rejects_different_file_and_conflicting_write_access() {
         let temp = tempfile::tempdir().unwrap();
