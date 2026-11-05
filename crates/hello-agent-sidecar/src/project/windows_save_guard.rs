@@ -45,13 +45,17 @@ impl ProjectManager {
         }
         preparing.validate()?;
         windows_durability::require_ntfs(parent)?;
+        let staging_anchor = self.prepare_windows_staging_anchor(pending)?;
         let name = format!(".hello-agent-save-guard-{}.tmp", Uuid::new_v4().simple());
         let mut record = json!({
             "schemaVersion":1,"phase":"preparing","saveId":save_id,
             "worktreeId":active.worktree_id,"workspaceIdentity":active.workspace_identity,
             "path":pending.relative_path,"expectedVersion":pending.expected_version,
             "stagingName":pending.staging_name,"guardName":name,
-            "stagingIdentity":windows_fs::identity(&pending.file, false)?.recovery_token(),
+            "stagingIdentity":windows_fs::identity(pending.file.as_ref()
+                .ok_or_else(|| ProjectFailure::recovery("save staging handle missing"))?, false)?.recovery_token(),
+            "stagingParentIdentity":windows_fs::identity(&self.save_staging_dir, true)?.recovery_token(),
+            "stagingAnchorIdentity":staging_anchor.recovery_token(),
             "parentIdentity":parent_id.recovery_token(),"guardIdentity":Value::Null,
             "directoryDurability":"unconfirmed",
             "durabilityPolicy":windows_durability::POLICY,
@@ -339,7 +343,7 @@ impl ProjectManager {
         Ok(())
     }
 
-    fn write_windows_guard_intent(
+    pub(super) fn write_windows_guard_intent(
         &self,
         storage: &mut Storage,
         active: &ActiveProject,
@@ -409,6 +413,26 @@ impl ProjectManager {
                     && expected == *guard
                     && lock.get("recovery_required") == Some(&json!(true))
             }),
+            Some("cleanupIntent" | "guardRemoved" | "stagingRemoved" | "cleanupComplete") => {
+                previous.is_some_and(|old| {
+                    if !old.is_object() {
+                        return false;
+                    }
+                    let predecessor = match guard["phase"].as_str() {
+                        Some("cleanupIntent") => "replaced",
+                        Some("guardRemoved") => "cleanupIntent",
+                        Some("stagingRemoved") => "guardRemoved",
+                        _ => "stagingRemoved",
+                    };
+                    let mut expected = old.clone();
+                    expected["phase"] = guard["phase"].clone();
+                    old["phase"] == predecessor
+                        && expected == *guard
+                        && guard["durabilityPolicy"] == windows_durability::POLICY
+                        && guard["directoryDurability"] == windows_durability::FLUSHED
+                        && lock.get("recovery_required") == Some(&json!(true))
+                })
+            }
             _ => false,
         };
         if !valid_phase

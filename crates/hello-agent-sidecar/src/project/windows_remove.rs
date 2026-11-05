@@ -5,10 +5,14 @@
 use super::{windows_directory_lease::DirectoryLease, windows_fs, ProjectFailure};
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
 use cap_std::fs::{OpenOptions, OpenOptionsExt};
-use std::{ffi::c_void, os::windows::io::AsRawHandle};
+use std::{
+    ffi::c_void,
+    os::windows::io::{AsRawHandle, IntoRawHandle},
+};
 
 #[link(name = "kernel32")]
 extern "system" {
+    fn CloseHandle(handle: *mut c_void) -> i32;
     fn SetFileInformationByHandle(
         handle: *mut c_void,
         class: i32,
@@ -26,13 +30,14 @@ pub(super) fn remove_recorded(
 ) -> Result<(), ProjectFailure> {
     // Also rejects guard aliases, paths, streams, reserved names and directories.
     let parent = lease.replacement_parent(name)?;
+    super::windows_durability::require_ntfs(parent)?;
     let mut options = OpenOptions::new();
     options
         .read(true)
-        .access_mode(0x8001_0000) // GENERIC_READ | DELETE
+        .access_mode(0xc001_0000) // GENERIC_READ | GENERIC_WRITE | DELETE
         .share_mode(0)
         .follow(FollowSymlinks::No)
-        .custom_flags(windows_fs::OPEN_REPARSE_POINT);
+        .custom_flags(windows_fs::OPEN_REPARSE_POINT | super::windows_durability::WRITE_THROUGH);
     let file = parent.open_with(name, &options).map_err(|error| {
         ProjectFailure::recovery(format!(
             "could not exclusively open recorded cleanup file: {error}"
@@ -58,7 +63,14 @@ pub(super) fn remove_recorded(
             std::io::Error::last_os_error()
         )));
     }
-    drop(file);
+    let raw = file.into_std().into_raw_handle();
+    // SAFETY: ownership moved out of File; this is the only close attempt.
+    // On failure preserve the recovery fence rather than retry an uncertain handle.
+    if unsafe { CloseHandle(raw) } == 0 {
+        return Err(ProjectFailure::ambiguous(
+            "cleanup disposition set but handle close failed",
+        ));
+    }
     lease.validate().map_err(|error| {
         ProjectFailure::ambiguous(format!(
             "cleanup was requested but parent revalidation failed: {}",

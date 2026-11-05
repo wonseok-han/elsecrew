@@ -4,6 +4,15 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은 cacf883의 NTFS write-through flush receipt로 진전했다. 이번 메인 구현은 Windows 정상 저장의 cleanup journal과 잠금 해제까지 연결했다. staging 파일 pin/current root 확인 아래 고정 anchor를 create_new/write-through/flush하고 기존 marker는 정확한 bytes를 읽기만 한다. staging parent/anchor/file ID를 최초 intent에 결속한다. 마지막 임시 파일 정리 뒤에도 staging parent를 nonempty로 pin할 수 있는 소량의 영구 표식이다.
+- 교체 flush receipt 확인 뒤 기존 guard lease를 유지하며 source handle을 해제하고 committed target으로 parent pin을 인계한다. target full ID/내용/접근 권한 재확인 → cleanupIntent → old guard lease 해제/exact-ID 삭제 → guardRemoved → target 재확인 → staging handle 해제/exact-ID 삭제 → stagingRemoved → target/두 lease 재확인 → cleanupComplete를 기록한다. target pin은 최종 lock clear까지 유지한다. 실패는 기존 outcome_unknown/session·증거 보존 경로다.
+- 최종 lock clear는 cleanupComplete의 정확한 save/workspace/version/flush receipt를 요구하며 증거가 없으면 거절한다. 완료 증거는 completedWindowsSave로 남겨 다음 저장의 새 windowsSaveGuard와 구분한다. PendingSave.file을 Option+오류 반환 getter로 바꿔 staging handle을 명시적으로 닫으며 macOS는 정상 Some 경로와 기존 정리 순서를 유지한다.
+- 삭제 helper는 NTFS 확인과 write-through read/write/DELETE handle을 사용하고 FileDispositionInfo 뒤 명시 CloseHandle 성공과 부재를 확인한다. close/부재 불확실은 재시도하지 않는다. 관찰 조회는 새 cleanup 단계들을 허용하지만 자체 cleanup/completion 권위는 계속 false다. 현재 작업은 정상 경로 연결이며 중단 후 명시 재개/UI·native 통합·메타데이터 정책은 여전히 미완료다. Windows 제품/Git activation은 바꾸지 않았다.
+- 독립 검토에서 정상 cleanup의 exact-ID/단계 원장·target pin 인계·실패 fence 및 macOS Option 경로의 정적 차단 결함 없음. 검토가 요구한 cleanupComplete→최종 lock clear 실패 시험을 위해 Windows 전용 실패 주입 지점을 추가했으며 native 실행은 후속이다.
+- 변경 모듈 rustfmt·project.rs 구문 파싱·diff 검사. 공용 PendingSave 변경의 macOS 컴파일 확인만 기존 target에서 CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo check -p hello-agent-sidecar --locked --offline로 수행해5.42초에 통과했다. 이는 Windows cfg 코드 컴파일 증거가 아니다. native/전체 테스트/패키지/CI/모델/push와 새 worktree는 없으며 기존 check cache만 갱신했다. cap-std File::into_std를 로컬 의존성에서 확인했다. 디스크 읽기 전용 점검에서 현재 여유537GiB이며 이번 작업은 소스/문서만 추가했다. 다음은 정상 cleanup 실패 주입/재시작 재개와 Windows 묶음 검증이다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은 dc59164의 exact-handle 정리 primitive로 진전했다. 후속 조사에서 [Microsoft CreateFileW Caching Behavior](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)는 FILE_FLAG_WRITE_THROUGH 요청이 NTFS의 timestamp/rename metadata flush를 유발한다고 명시한다. [FlushFileBuffers](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers)의 파일 flush와 함께 OS acknowledgement 정책을 구성하며 임의 디스크 controller의 전원 장애 내구성을 보장한다고 주장하지 않는다. 관리자 volume flush나 NO_BUFFERING 정렬 우회를 사용하지 않는다.
 - `windows_durability.rs`는 보유 file/directory handle의 GetVolumeInformationByHandleW로 NTFS 여부를 확인한다. 이 정책은 NTFS에만 적용하며 ReFS/FAT/미확인 FS를 추정 허용하지 않는다. source/guard 생성에 WRITE_THROUGH를 지정하고 새 intent에 durabilityPolicy=ntfsWriteThroughV1을 기록한다. 교체 전 source NTFS와 정책을 다시 대조하고 교체/신원·내용·권한 확인 뒤 같은 source handle sync_all 성공 시 replaced+ntfsWriteThroughFlushed를 게시한다.
 - Windows save의 무조건 namespace 미연결 오류는 현재 source ID·workspace·save·정확한 phase/policy/flush receipt 확인으로 대체했다. 이것은 guard cleanup 완료가 아니며 persist_save_lock(false)는 여전히 정리 미연결을 거절한다. read-only recovery는 과거 기록된 flush 상태를 별도 필드로 표시하고 현재 관찰만으로 완료/정리 권위를 만들지 않는다. 과거 policy 없는 기록을 자동 승격하지 않는다.

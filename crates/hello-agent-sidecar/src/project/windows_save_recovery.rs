@@ -20,7 +20,15 @@ impl ProjectManager {
         )?;
         if matches!(
             intent["phase"].as_str(),
-            Some("sourceReady" | "replaceIntent" | "replaced")
+            Some(
+                "sourceReady"
+                    | "replaceIntent"
+                    | "replaced"
+                    | "cleanupIntent"
+                    | "guardRemoved"
+                    | "stagingRemoved"
+                    | "cleanupComplete"
+            )
         ) {
             validate_file_version(intent["sourceVersion"].as_str().ok_or_else(|| {
                 ProjectFailure::recovery("save recovery source version missing")
@@ -49,7 +57,17 @@ impl ProjectManager {
             || intent["workspaceIdentity"] != address.workspace_identity
             || !matches!(
                 intent["phase"].as_str(),
-                Some("preparing" | "ready" | "sourceReady" | "replaceIntent" | "replaced")
+                Some(
+                    "preparing"
+                        | "ready"
+                        | "sourceReady"
+                        | "replaceIntent"
+                        | "replaced"
+                        | "cleanupIntent"
+                        | "guardRemoved"
+                        | "stagingRemoved"
+                        | "cleanupComplete"
+                )
             )
         {
             return Err(ProjectFailure::recovery(
@@ -193,7 +211,7 @@ fn staging_name(intent: &Value) -> Result<&str, ProjectFailure> {
     }
     Ok(name)
 }
-fn observe(parent: &Dir, name: &str) -> Result<Value, ProjectFailure> {
+pub(super) fn observe(parent: &Dir, name: &str) -> Result<Value, ProjectFailure> {
     match parent.symlink_metadata(name) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(json!({"present":false}))

@@ -29,6 +29,8 @@ mod windows_save_recovery;
 mod windows_remove;
 #[cfg(windows)]
 mod windows_durability;
+#[cfg(windows)]
+mod windows_save_cleanup;
 use crate::{AppendOutcome, SidecarError, Storage};
 #[cfg(unix)]
 use cap_fs_ext::OsMetadataExt;
@@ -209,6 +211,8 @@ enum SnapshotCreation {
 pub enum SaveFailurePoint {
     AfterRenameBeforeDirectorySync,
     AfterReopenBeforeLedgerClear,
+    #[cfg(windows)]
+    AfterWindowsCleanupBeforeLedgerClear,
 }
 
 struct PendingSave {
@@ -224,7 +228,13 @@ struct PendingSave {
     received_bytes: u64,
     last_seq: u64,
     staging_name: String,
-    file: CapFile,
+    file: Option<CapFile>,
+}
+
+impl PendingSave {
+    fn file_mut(&mut self) -> Result<&mut CapFile, ProjectFailure> {
+        self.file.as_mut().ok_or_else(|| ProjectFailure::recovery("save staging handle is closed"))
+    }
 }
 
 struct PreparedTarget {
@@ -1703,7 +1713,7 @@ impl ProjectManager {
                 received_bytes: 0,
                 last_seq: 0,
                 staging_name,
-                file,
+                file: Some(file),
             },
         );
         Ok(ProjectAction {
@@ -1736,7 +1746,7 @@ impl ProjectManager {
                 "save chunks exceed declared total bytes",
             ));
         }
-        pending.file.write_all(bytes).map_err(|error| {
+        pending.file_mut()?.write_all(bytes).map_err(|error| {
             ProjectFailure::recovery(format!("could not write save temp file: {error}"))
         })?;
         pending.received_bytes = next;
@@ -2084,13 +2094,13 @@ impl ProjectManager {
                 "save commit does not match its begin and received chunks",
             ));
         }
-        pending.file.flush().map_err(|error| {
+        pending.file_mut()?.flush().map_err(|error| {
             ProjectFailure::recovery(format!("could not flush save temp file: {error}"))
         })?;
-        pending.file.sync_all().map_err(|error| {
+        pending.file_mut()?.sync_all().map_err(|error| {
             ProjectFailure::recovery(format!("could not sync managed save staging file: {error}"))
         })?;
-        pending.file.seek(SeekFrom::Start(0)).map_err(|error| {
+        pending.file_mut()?.seek(SeekFrom::Start(0)).map_err(|error| {
             ProjectFailure::recovery(format!(
                 "could not rewind managed save staging file: {error}"
             ))
@@ -2191,7 +2201,7 @@ impl ProjectManager {
         let mut staged_hasher = Sha256::new();
         let mut buffer = vec![0_u8; MAX_TEXT_CHUNK_BYTES];
         loop {
-            let read = pending.file.read(&mut buffer).map_err(|error| {
+            let read = pending.file_mut()?.read(&mut buffer).map_err(|error| {
                 ProjectFailure::recovery(format!(
                     "could not read managed save staging file: {error}"
                 ))
@@ -2304,6 +2314,16 @@ impl ProjectManager {
         if failure == Some(SaveFailurePoint::AfterReopenBeforeLedgerClear) {
             return Err(ProjectFailure::ambiguous(
                 "failure injected after save verification before recovery ledger clear",
+            ));
+        }
+        #[cfg(windows)]
+        let _cleanup_lease = self.cleanup_windows_save(
+            storage, &active, save_id, request_id, save_guard, &mut prepared, pending,
+        )?;
+        #[cfg(windows)]
+        if failure == Some(SaveFailurePoint::AfterWindowsCleanupBeforeLedgerClear) {
+            return Err(ProjectFailure::ambiguous(
+                "failure injected after Windows cleanup before final lock clear",
             ));
         }
         self.persist_save_lock(storage, &active, save_id, request_id, false, Some(&version))
@@ -3188,9 +3208,20 @@ impl ProjectManager {
                 .and_then(|lock| lock.get("evidence").and_then(|v| v.get("windowsSaveGuard")).cloned())
             {
                 if !recovery_required {
-                    return Err(ProjectFailure::ambiguous("Windows save guard cleanup is not yet connected"));
+                    if guard["phase"] != "cleanupComplete"
+                        || guard["saveId"] != save_id
+                        || guard["worktreeId"] != active.worktree_id
+                        || guard["workspaceIdentity"] != active.workspace_identity
+                        || guard["sourceVersion"].as_str() != committed_version
+                        || guard["directoryDurability"] != windows_durability::FLUSHED {
+                        return Err(ProjectFailure::ambiguous("Windows save cleanup receipt differs"));
+                    }
+                    evidence["completedWindowsSave"] = guard;
+                } else {
+                    evidence["windowsSaveGuard"] = guard;
                 }
-                evidence["windowsSaveGuard"] = guard;
+            } else if !recovery_required {
+                return Err(ProjectFailure::ambiguous("Windows save cleanup receipt is missing"));
             }
             evidence
         };
