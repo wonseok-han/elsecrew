@@ -3,12 +3,27 @@
 //! post-rename durability/recovery. Product save admission remains disabled.
 #![allow(dead_code)]
 use super::{windows_directory_lease::DirectoryLease, windows_fs, ProjectFailure};
-use cap_std::fs::File;
+use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+use cap_std::fs::{File, OpenOptions, OpenOptionsExt};
 use std::{
     ffi::c_void,
     mem::{offset_of, size_of},
     os::windows::io::AsRawHandle,
 };
+
+/// Create the replacement source once and retain this handle until the rename.
+/// No second writer or deleter is admitted while the source is prepared.
+pub(super) fn source_options() -> OpenOptions {
+    let mut options = OpenOptions::new();
+    options
+        .write(true)
+        .create_new(true)
+        .follow(FollowSymlinks::No)
+        .access_mode(0xc0010000) // GENERIC_READ | GENERIC_WRITE | DELETE
+        .share_mode(1)
+        .custom_flags(windows_fs::OPEN_REPARSE_POINT);
+    options
+}
 
 #[repr(C)]
 struct RenameInfo {
@@ -95,16 +110,18 @@ mod tests {
         std::fs::create_dir(&parent).unwrap();
         std::fs::write(parent.join("guard"), b"guard").unwrap();
         std::fs::write(parent.join("file.txt"), b"before").unwrap();
-        std::fs::write(temp.path().join("staged"), b"after").unwrap();
+        let staging = Dir::open_ambient_dir(temp.path(), ambient_authority()).unwrap();
         let dir = Dir::open_ambient_dir(&parent, ambient_authority()).unwrap();
         let lease = DirectoryLease::acquire(&dir, OsStr::new("guard")).unwrap();
-        let source = File::from_std(
-            std::fs::OpenOptions::new()
-                .access_mode(0xc0010000) // GENERIC_READ | GENERIC_WRITE | DELETE
-                .share_mode(7)
-                .open(temp.path().join("staged"))
-                .unwrap(),
-        );
+        let mut source = staging.open_with("staged", &source_options()).unwrap();
+        std::io::Write::write_all(&mut source, b"after").unwrap();
+        source.sync_all().unwrap();
+        assert!(std::fs::OpenOptions::new()
+            .write(true)
+            .open(temp.path().join("staged"))
+            .is_err());
+        assert!(std::fs::remove_file(temp.path().join("staged")).is_err());
+        assert!(std::fs::rename(temp.path().join("staged"), temp.path().join("moved")).is_err());
         let identity = windows_fs::identity(&source, false).unwrap();
         for name in ["guard", "../escape", "sub/file", "file:stream", "NUL"] {
             assert!(replace(&source, &lease, name).is_err());

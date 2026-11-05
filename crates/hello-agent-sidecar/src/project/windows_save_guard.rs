@@ -3,7 +3,6 @@
 use super::windows_directory_lease::DirectoryLease;
 use super::*;
 
-#[allow(dead_code)] // Replacement and verified cleanup are the next connection.
 pub(super) struct SaveGuard {
     pub(super) lease: DirectoryLease,
     pub(super) name: String,
@@ -22,6 +21,7 @@ impl ProjectManager {
         worktree: &Dir,
         parent: &Dir,
         target_name: &str,
+        source_name: &str,
     ) -> Result<SaveGuard, ProjectFailure> {
         // Before creating anything, pin the existing target, then rebind the
         // pinned hierarchy to the managed workspace's CURRENT rooted path.
@@ -52,6 +52,8 @@ impl ProjectManager {
             "stagingName":pending.staging_name,"guardName":name,
             "parentIdentity":parent_id.recovery_token(),"guardIdentity":Value::Null,
             "directoryDurability":"unconfirmed",
+            "sourceName":source_name,"sourceIdentity":Value::Null,
+            "sourceVersion":Value::Null,
         });
         self.write_windows_guard_intent(storage, active, save_id, request_id, &record)?;
         pending.recovery_fenced = true;
@@ -95,6 +97,55 @@ impl ProjectManager {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn persist_windows_save_source(
+        &self,
+        storage: &mut Storage,
+        active: &ActiveProject,
+        save_id: &str,
+        request_id: &str,
+        guard: &SaveGuard,
+        prepared: &PreparedTarget,
+        source: &CapFile,
+        version: &str,
+    ) -> Result<(), ProjectFailure> {
+        guard.lease.validate()?;
+        let current_root = self.worktree_capability(active)?;
+        if windows_fs::identity(&current_root, true)?
+            != windows_fs::identity(&prepared.temp_parent, true)?
+        {
+            return Err(ProjectFailure::recovery("save source parent changed"));
+        }
+        let reopened = open_real_file_at(&current_root, &prepared.temp_name)?;
+        let identity = windows_fs::identity(source, false)?;
+        if windows_fs::identity(&reopened, false)? != identity {
+            return Err(ProjectFailure::recovery("save source identity changed"));
+        }
+        let lock = storage
+            .projection_record("lock", &active.lock_id)?
+            .ok_or_else(|| ProjectFailure::recovery("save source lock missing"))?;
+        let mut record = lock
+            .get("evidence")
+            .and_then(|value| value.get("windowsSaveGuard"))
+            .filter(|value| value.is_object())
+            .cloned()
+            .ok_or_else(|| ProjectFailure::recovery("save guard intent missing"))?;
+        if record["saveId"] != save_id
+            || record["phase"] != "ready"
+            || record["sourceName"] != prepared.temp_name
+            || record["guardName"] != guard.name
+            || record["guardIdentity"] != guard.identity.recovery_token()
+        {
+            return Err(ProjectFailure::recovery(
+                "save source intent binding changed",
+            ));
+        }
+        record["phase"] = json!("sourceReady");
+        record["sourceIdentity"] = json!(identity.recovery_token());
+        record["sourceVersion"] = json!(version);
+        self.write_windows_guard_intent(storage, active, save_id, request_id, &record)
+    }
+
     fn write_windows_guard_intent(
         &self,
         storage: &mut Storage,
@@ -127,6 +178,18 @@ impl ProjectManager {
                 expected["phase"] = json!("ready");
                 expected["guardIdentity"] = guard["guardIdentity"].clone();
                 old["phase"] == "preparing"
+                    && expected == *guard
+                    && lock.get("recovery_required") == Some(&json!(true))
+            }),
+            Some("sourceReady") => previous.is_some_and(|old| {
+                if !old.is_object() {
+                    return false;
+                }
+                let mut expected = old.clone();
+                expected["phase"] = json!("sourceReady");
+                expected["sourceIdentity"] = guard["sourceIdentity"].clone();
+                expected["sourceVersion"] = guard["sourceVersion"].clone();
+                old["phase"] == "ready"
                     && expected == *guard
                     && lock.get("recovery_required") == Some(&json!(true))
             }),

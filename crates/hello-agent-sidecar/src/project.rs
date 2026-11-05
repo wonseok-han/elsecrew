@@ -233,6 +233,13 @@ struct PreparedTarget {
 
 impl Drop for PreparedTarget {
     fn drop(&mut self) {
+        #[cfg(windows)]
+        {
+            // Windows save intent owns this name from before creation. Keep
+            // the file for identity-checked recovery, never path-only cleanup.
+            self.file.take();
+        }
+        #[cfg(not(windows))]
         if !self.renamed {
             self.file.take();
             remove_capability_temp(&self.temp_parent, &self.temp_name);
@@ -2116,16 +2123,20 @@ impl ProjectManager {
             });
         }
         drop(target);
-        #[cfg(windows)]
-        let _save_guard = self.prepare_windows_save_guard(
-            storage, &active, pending, save_id, request_id, &worktree, &parent, &target_name,
-        )?;
         let temp_name = format!(".hello-agent-save-{}.tmp", Uuid::new_v4().simple());
-        let mut options = CapOpenOptions::new();
-        options
-            .write(true)
-            .create_new(true)
-            .follow(FollowSymlinks::No);
+        #[cfg(windows)]
+        let save_guard = self.prepare_windows_save_guard(
+            storage, &active, pending, save_id, request_id, &worktree, &parent, &target_name,
+            &temp_name,
+        )?;
+        #[cfg(not(windows))]
+        let options = {
+            let mut options = CapOpenOptions::new();
+            options.write(true).create_new(true).follow(FollowSymlinks::No);
+            options
+        };
+        #[cfg(windows)]
+        let options = windows_replace::source_options();
         let file = worktree.open_with(&temp_name, &options).map_err(|error| {
             ProjectFailure::recovery(format!("could not create target save temp file: {error}"))
         })?;
@@ -2204,6 +2215,17 @@ impl ProjectManager {
         target_temp.sync_all().map_err(|error| {
             ProjectFailure::recovery(format!("could not sync target save temp file: {error}"))
         })?;
+        #[cfg(windows)]
+        {
+            self.persist_windows_save_source(
+                storage, &active, save_id, request_id, &save_guard,
+                &prepared, &target_temp, &staged_version,
+            )?;
+            // Keep the exact flushed source handle through replacement; reopening
+            // by pathname would lose the write/delete exclusion and identity.
+            prepared.file = Some(target_temp);
+        }
+        #[cfg(not(windows))]
         drop(target_temp);
 
         self.persist_save_lock(storage, &active, save_id, request_id, true, None)?;

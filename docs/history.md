@@ -4,6 +4,13 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 goal turn은 5ad0c4b 구현 커밋으로 진전했다. 이번에는 같은 통합 checkout에서 Windows replacement source 준비를 연결했다. 최초 guard intent가 sourceName을 생성 전에 예약하고, 복사/flush 뒤 보유 source와 no-follow 재열기 file ID를 비교해 sourceReady의 sourceIdentity/sourceVersion을 기록한다. 교체 호출까지 같은 source handle을 유지할 수 있도록 PreparedTarget에 보관한다.
+- Windows source는 공용 source_options에서 create_new/nofollow와 READ|WRITE|DELETE, share-read만 사용한다. 외부 write/delete를 허용하지 않는다. 실패 시 Windows PreparedTarget Drop은 경로만 보고 임시 파일을 삭제하지 않고 원장에 기록된 이름을 보존한다. intent 성공 이후 오류는 기존 ambiguous/session/staging 보존 규칙을 따른다. cleanup의 신원 확인과 namespace durability는 아직 미완료다.
+- 기존 native replacement 회귀도 같은 옵션으로 source를 만들도록 바꾸고 외부 write/delete/rename 거절 단언을 추가했다. 실제 replace 성공과 guard·full ID·내용 검사는 유지한다. native 실행은 하지 않았으며 기존34 PASS에 포함되지 않는다.
+- 독립 읽기 전용 검토에서 이 준비 단계의 구체적 차단 결함 없음. 변경 모듈 rustfmt 및 project.rs 파싱, git diff --check 통과. Cargo/패키지/모델/외부 push/CI/새 cache·worktree 없음. Windows rename 연결·권한/내구성·복구/cleanup, 첫 intent 실패 주입과 native 묶음 검증, Git 배포 선택 및 G6/출시는 계속 남아 있다. Windows 제품 gate는 그대로 닫혀 있다.
+
+### 2026-11-05 · by GPT-6
+
 - 2294e07 기준 메인 직접 구현: Windows 저장 준비에 별도 guard 생성 의도와 실제 file ID를 기존 lock 원장에 기록하는 경로를 추가했다. 기존 target pin을 유지하며 현재 managed root/workspace/parent 신원을 재확인하고, preparing 기록 → create_new/write/sync → 독립 lease/ID 재확인 → ready 기록 순서다. guard는 Drop에서 삭제하지 않는다.
 - 첫 intent 기록 실패는 파일 생성 전에 반환하며 staging의 기존 정리 규칙을 유지한다. 독립 검토가 발견한 실패 시 orphan staging 문제를 수정했다. intent 성공 뒤에는 staging과 workspace save_session을 모두 보존하도록 이후 모든 실패를 outcome_unknown으로 전달한다. 기존 save lock 갱신도 guard 증거를 보존하며 cleanup 미연결 상태에서 성공 잠금 해제를 거절한다.
 - guard 파일 sync는 디렉터리 namespace durability 증거가 아니다. 원장에 directoryDurability=unconfirmed를 명시했고 Windows 제품/Git/저장 활성화는 계속 차단한다. 교체 primitive 호출·guard cleanup/복구 연결과 첫 intent 실패 주입을 포함한 native 회귀는 아직 미완료다. 기존34 PASS는 이번 변경의 증거가 아니다.
