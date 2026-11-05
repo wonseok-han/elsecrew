@@ -4,6 +4,15 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은 f871585의 접근 권한 보존 구현으로 진전했다. 이번에는 중단된 Windows workspace save의 내부 read-only inspect를 추가했다. 일반 workspace 검증은 Ready 잠금 검사 그대로이며 SaveRecovery 전용 분기만 durable chat save session·정확한 save/workspace/lock/path·writer 없음·poison false·recovery true·허용 phase/버전을 대조한 뒤 기존 canonical manifest/.git marker 검증을 공유한다. 제품/UI에 아직 노출하지 않았다.
+- inspect는 active pending save를 거절하고 현재 managed root/parent identity를 다시 확인한다. guard/source/staging/destination을 nofollow read handle과 full ID/내용으로 관찰한다. source 준비 intent에는 stagingIdentity도 추가했다. 기존 ID 미기록 파일은 존재만으로 소유했다고 보지 않으며 cleanupAllowed/completionAllowed는 항상 false다. 관찰은 삭제·재시도·잠금 해제 권위가 아니다.
+- destination은 source ID+version 일치시 replacementObserved, 이전 target ID+expectedVersion 일치시 originalObserved, 이전 ID 미기록은 expectedContentOnly, 나머지는 conflictOrMissing이다. 검토가 지적한 같은 내용의 다른 파일을 original로 분류하는 오류를 수정하고 ID기록 유무/일치도 별도로 반환한다.
+- 기존 read_file_bounded_handle의 retain_limit=0은 저장 메모리만 줄이고 읽기 총량을 제한하지 않음을 확인했다. 새 recovery reader는 해당 helper를 사용하지 않고 take(FILE_MAX_BYTES_V1+1)+64KiB buffer로 실제 읽기량을 제한한다. 공유 read만 허용하고 write/delete가 열린 파일은 거절한다. 같은 내용/다른 ID 및 oversized artifact 회귀는 작성했으나 native 실행 전이다.
+- 같은 독립 검토자가 bounded read와 ID/content 분류 보완을 재확인했고 추가 정적 차단 결함 없음. native 테스트 PASS가 아니다.
+- 변경 모듈 rustfmt·project.rs 구문 파싱·git diff --check 확인. Cargo/패키지/CI/cache/worktree/모델/push 없음. 다음은 이 관찰을 사용하는 명시 복구/cleanup과 namespace durability, Windows native 통합 검증이다. 일반 제품 실행과 전체 앱 완료는 계속 미완료다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은 8bf522b의 Windows 교체 연결과 계약 정정으로 진전했다. 메인이 `windows_security.rs`를 추가해 보유 file handle에서 owner/group/DACL과 protection flag를 읽고 새 replacement source에만 복사한다. OS 반환 descriptor/SDDL 메모리는 LocalFree RAII로 해제하며 SDDL은 최대131,072 WCHAR로 제한한다. null/incomplete DACL이나 표현 불가·복사 실패·정규화 불일치는 교체 전에 거절한다.
 - source create 권한에 WRITE_DAC/WRITE_OWNER를 추가했으며 token privilege를 켜거나 관리자 권한을 올리지 않는다. target version 확인 뒤 source 권한 복사/flush → old/source descriptor 동일성 확인 → replaceIntent accessFingerprint 기록 → syscall 전 재확인 → destination 권한 재확인으로 연결했다. raw SID/ACL은 원장이나 오류에 저장하지 않고 정규화된 접근 descriptor digest만 기록한다. 이는 실행 파일 신뢰용 고정 해시가 아니다.
 - 범위는 owner/group/DACL 및 protected/unprotected 상태다. SACL/감사·integrity label·기타 메타데이터 보존은 아직 다루지 않았으며 전체 Windows 권한 지원 완료를 선언하지 않는다. 상속 canonicalization이 달라지면 임의 완화 없이 실패한다. 기존 source 권한을 수정하지 않으며 새 temp만 변경한다.

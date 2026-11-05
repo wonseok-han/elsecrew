@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> **Windows save 복구 관찰(내부·미활성)**: windows_save_recovery는 정확한 durable save session/lock과 canonical workspace binding을 대조한 뒤 guard/source/staging/destination의 full ID와 5MiB 한도 내용 hash를 읽는다. 이전 target ID+내용, replacement ID+내용, 내용만 일치, 충돌/부재를 구분하며 ID 미기록 파일을 정리 소유권으로 승격하지 않는다. 일반 Ready 잠금 검사는 유지한다. 조회는 cleanup/completion을 허용하지 않으며 재시작 UI·명시 복구/정리·native 검증은 후속이다.
+
 > **Windows replacement 접근 권한(구현 중·native 미검증)**: windows_security는 열린 파일의 owner/group/DACL과 protection 상태를 읽어 새 source handle에 SetSecurityInfo로 복사한다. 교체 전 old/source 정규화 descriptor 일치와 교체 후 destination 일치를 확인하며 원장에는 접근 descriptor digest만 남긴다. 권한 상승은 없고 보존 실패·상속 결과 차이는 거절한다. SACL/감사·integrity label 등은 미구현이며 전체 메타데이터 보존이나 Windows 출시 합격을 뜻하지 않는다.
 
 > **Windows save guard 준비(구현 중·native 미검증)**: 저장 준비는 기존 target pin을 유지한 채 현재 managed root/workspace/parent 신원을 확인하고, lock 원장에 preparing 의도를 기록한 뒤 독립 guard를 생성·flush·pin하여 ready와 전체 file ID를 기록한다. 첫 intent 실패 전에는 파일을 만들지 않으며, intent 성공 이후 실패는 staging과 workspace save_session을 함께 보존한다. save lock 갱신은 guard 증거를 유지하고 cleanup 연결 전 성공 해제를 거절한다. guard Drop 자동 삭제는 없다. replacement source 이름도 생성 전 intent에 포함하며, flush 뒤 full ID/version을 sourceReady로 기록한다. source는 READ|WRITE|DELETE/share-read-only handle을 계속 보유하고 Windows PreparedTarget Drop은 path-only 삭제를 하지 않는다. directoryDurability는 unconfirmed이며 namespace durability·복구/cleanup과 native 회귀가 남아 있어 Windows 제품 admission은 닫혀 있다.

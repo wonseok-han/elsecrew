@@ -50,6 +50,7 @@ impl ProjectManager {
             "worktreeId":active.worktree_id,"workspaceIdentity":active.workspace_identity,
             "path":pending.relative_path,"expectedVersion":pending.expected_version,
             "stagingName":pending.staging_name,"guardName":name,
+            "stagingIdentity":windows_fs::identity(&pending.file, false)?.recovery_token(),
             "parentIdentity":parent_id.recovery_token(),"guardIdentity":Value::Null,
             "directoryDurability":"unconfirmed",
             "sourceName":source_name,"sourceIdentity":Value::Null,

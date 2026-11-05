@@ -23,6 +23,8 @@ mod windows_replace;
 mod windows_save_guard;
 #[cfg(windows)]
 mod windows_security;
+#[cfg(windows)]
+mod windows_save_recovery;
 use crate::{AppendOutcome, SidecarError, Storage};
 #[cfg(unix)]
 use cap_fs_ext::OsMetadataExt;
@@ -263,6 +265,12 @@ struct WatchState {
     workspace: Option<WorkspaceAddress>,
     scan: Option<WatchScan>,
     initial_scan_pending: bool,
+}
+
+enum WorkspaceLockAdmission {
+    Ready,
+    #[cfg(windows)]
+    SaveRecovery(String),
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -3328,6 +3336,16 @@ impl ProjectManager {
         address: &WorkspaceAddress,
         lifecycle: &str,
     ) -> Result<ActiveProject, ProjectFailure> {
+        self.validate_workspace_binding_with_lock(storage, address, lifecycle, WorkspaceLockAdmission::Ready)
+    }
+
+    fn validate_workspace_binding_with_lock(
+        &self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+        lifecycle: &str,
+        admission: WorkspaceLockAdmission,
+    ) -> Result<ActiveProject, ProjectFailure> {
         let chat = storage
             .projection_record("chat", &address.chat_id)?
             .ok_or_else(|| ProjectFailure::manifest("chat workspace binding is missing"))?;
@@ -3415,12 +3433,20 @@ impl ProjectManager {
         let lock = storage
             .projection_record("lock", &active.lock_id)?
             .ok_or_else(|| ProjectFailure::manifest("workspace lock projection is missing"))?;
-        if lock.get("poisoned").and_then(Value::as_bool) != Some(false)
-            || lock.get("recovery_required").and_then(Value::as_bool) != Some(false)
-        {
-            return Err(ProjectFailure::recovery(
-                "workspace is locked, poisoned, or recovery-required",
-            ));
+        match admission {
+            WorkspaceLockAdmission::Ready => {
+                if lock.get("poisoned").and_then(Value::as_bool) != Some(false)
+                    || lock.get("recovery_required").and_then(Value::as_bool) != Some(false)
+                {
+                    return Err(ProjectFailure::recovery(
+                        "workspace is locked, poisoned, or recovery-required",
+                    ));
+                }
+            }
+            #[cfg(windows)]
+            WorkspaceLockAdmission::SaveRecovery(save_id) => {
+                self.validate_windows_save_recovery_lock(storage, address, &save_id, &lock)?;
+            }
         }
         let worktree = self.worktree_capability(&active)?;
         let marker = read_bounded_json(&open_real_child_dir(&worktree, ".git")?, SNAPSHOT_MARKER)?;
