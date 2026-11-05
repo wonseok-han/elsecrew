@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> **Windows 임시 파일 정리 primitive(내부·미연결)**: windows_remove는 caller가 결속한 독립 DirectoryLease 아래에서 정상 leaf를 read+DELETE/share0/nofollow로 열고 기록된 full ID와 일치할 때만 FileDispositionInfo를 호출한다. guard alias/다른 ID/사용 중 파일을 거절하고 close 뒤 부재를 확인하며 path-delete fallback은 없다. 현재 부재 관찰은 durable cleanup 완료가 아니며 원장 intent·정책·재시작 재개/native 검증 전에는 제품에서 호출하지 않는다.
+
 > **Windows save 복구 관찰(내부·미활성)**: windows_save_recovery는 정확한 durable save session/lock과 canonical workspace binding을 대조한 뒤 guard/source/staging/destination의 full ID와 5MiB 한도 내용 hash를 읽는다. 이전 target ID+내용, replacement ID+내용, 내용만 일치, 충돌/부재를 구분하며 ID 미기록 파일을 정리 소유권으로 승격하지 않는다. 일반 Ready 잠금 검사는 유지한다. 조회는 cleanup/completion을 허용하지 않으며 재시작 UI·명시 복구/정리·native 검증은 후속이다.
 
 > **Windows replacement 접근 권한(구현 중·native 미검증)**: windows_security는 열린 파일의 owner/group/DACL과 protection 상태를 읽어 새 source handle에 SetSecurityInfo로 복사한다. 교체 전 old/source 정규화 descriptor 일치와 교체 후 destination 일치를 확인하며 원장에는 접근 descriptor digest만 남긴다. 권한 상승은 없고 보존 실패·상속 결과 차이는 거절한다. SACL/감사·integrity label 등은 미구현이며 전체 메타데이터 보존이나 Windows 출시 합격을 뜻하지 않는다.

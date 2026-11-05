@@ -25,6 +25,8 @@ mod windows_save_guard;
 mod windows_security;
 #[cfg(windows)]
 mod windows_save_recovery;
+#[cfg(windows)]
+mod windows_remove;
 use crate::{AppendOutcome, SidecarError, Storage};
 #[cfg(unix)]
 use cap_fs_ext::OsMetadataExt;

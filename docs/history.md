@@ -4,6 +4,14 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은 6c3cc58의 중단 저장 read-only 관찰로 진전했다. 메인이 Windows journal-owned 임시 파일의 exact-handle 삭제 primitive(`windows_remove.rs`)를 추가했다. 독립 DirectoryLease 아래 정상 단일 이름/guard alias 거절 → read+DELETE/share0/nofollow로 파일 열기 → 기록된 full ID 비교 → lease 재검증 → FileDispositionInfo(1-byte BOOLEAN) → handle close → parent 재검증/이름 부재 확인 순서다.
+- 이름 기반 remove fallback, 누락 파일 자동 성공/재시도, readonly/POSIX 우회는 없다. 삭제 요청 뒤 부재를 확인하지 못하면 outcome_unknown으로 남긴다. caller는 current managed workspace 결속·durable cleanup intent·명시 정책을 먼저 확보해야 하며 이 helper의 Ok는 현재 부재 관찰이지 namespace durability/복구 완료가 아니다. 아직 save recovery나 제품 UI에서 호출하지 않는다.
+- [Microsoft FILE_DISPOSITION_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_disposition_info)의 handle 삭제 요청 구조와 [CreateFile 공유 규칙](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)을 확인했다. 기존 사용자 파일·실행 앱에 삭제를 수행하지 않았다.
+- 독립 정적 검토에서 파일 신원·FFI 크기/access mask·이름 재사용 시 ambiguous/no-retry 경로의 차단 결함 없음.
+- native 회귀는 다른 ID·guard/탈출·열린 handle 충돌 거절, exact 파일 삭제, 이름 재사용 후 foreign 파일 보존을 작성했으며 실행 전이다. rustfmt·project.rs 구문 파싱·diff 검사만 수행한다. Cargo/패키지/cache/worktree/모델/push/CI 없음. 다음은 durable cleanup intent/재시작 재개와 namespace durability 연결 및 Windows 묶음 검증이다. 전체 앱/Windows 제품 gate는 미완료 상태를 유지한다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은 f871585의 접근 권한 보존 구현으로 진전했다. 이번에는 중단된 Windows workspace save의 내부 read-only inspect를 추가했다. 일반 workspace 검증은 Ready 잠금 검사 그대로이며 SaveRecovery 전용 분기만 durable chat save session·정확한 save/workspace/lock/path·writer 없음·poison false·recovery true·허용 phase/버전을 대조한 뒤 기존 canonical manifest/.git marker 검증을 공유한다. 제품/UI에 아직 노출하지 않았다.
 - inspect는 active pending save를 거절하고 현재 managed root/parent identity를 다시 확인한다. guard/source/staging/destination을 nofollow read handle과 full ID/내용으로 관찰한다. source 준비 intent에는 stagingIdentity도 추가했다. 기존 ID 미기록 파일은 존재만으로 소유했다고 보지 않으며 cleanupAllowed/completionAllowed는 항상 false다. 관찰은 삭제·재시도·잠금 해제 권위가 아니다.
 - destination은 source ID+version 일치시 replacementObserved, 이전 target ID+expectedVersion 일치시 originalObserved, 이전 ID 미기록은 expectedContentOnly, 나머지는 conflictOrMissing이다. 검토가 지적한 같은 내용의 다른 파일을 original로 분류하는 오류를 수정하고 ID기록 유무/일치도 별도로 반환한다.
