@@ -2,6 +2,12 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 사용자가 0dcc385 및 후속 Windows 컴파일·시험 수정의 공개 push/CI 최대3회를 승인했다. 새 codex/m5-windows-supervisor-20261105 브랜치에 해당 커밋을 push했다. 첫 실행41980173860은 jobs=[]·로그 없음으로 즉시 실패했으며 native 컴파일/시험은 시작하지 않았다.
+- 로컬 YAML 파서로 원인을 확인했다: 추가한 process_spawn:: 필터 뒤 공백 때문에 따옴표 없는 run scalar가 문법 오류였다(line26). 명령 전체를 따옴표로 감쌌고 yaml.safe_load·diff 검사를 통과했다. 제품 동작이나 시험 조건은 바꾸지 않았다.
+- 승인1/3회 사용·2회 남음. 이 설정 수정으로 두 번째 실행을 이어간다. native 완료 증거는 아직 없으며 main 병합·패키징·모델 실행·제품 활성화는 하지 않는다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn a7c0674는 종료 오판을 봉쇄하는 실제 진전이었다. 깨끗한 HEAD에서 메인이 Windows creator-thread supervisor를 구현했다. CreateProcess(DEBUG_PROCESS)·WaitForDebugEvent·ContinueDebugEvent를 한 스레드에 유지하며 CREATE_PROCESS를 계속하기 전 process handle 복제·Job 결속을 확인한다. 첫 이벤트는 보유 root PID와 일치해야 한다. EXIT를 계속한 뒤 모든 복제 핸들의 signal, root signal, Job 누적 멤버 수 일치와 active0을 모두 요구한다. 근거는 Microsoft [debugging events](https://learn.microsoft.com/en-us/windows/win32/debug/debugging-events)와 [process creation flags](https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags)다.
 - stdio는 비상속 복제본으로 creator 스레드에 전달하고 기존 공통 spawn 잠금 안에서만 임시 상속 핸들을 만든다. 추적 상한4,096개·오류·시간 초과·스레드 비정상 종료는 성공이 아니다. Drop은 종료 요청과 제한된 drain만 수행하며 durable fence를 해제하는 근거가 아니다. 이 supervisor는 Job/DEBUG_PROCESS 밖의 외부 broker가 대신 생성한 프로세스를 포괄한다고 주장하지 않는다.
 - 기존 부모 종료 후 실제 child handle 신호 검사는 그대로 보존했다. 별도로 짧은 자손16개를 모두 원장에 남기는 시험, 중첩 debugger가 추적을 끊으면 누적 Job 멤버 불일치로 거부하는 시험, debug ABI 크기 검사를 추가했다. 이전의 상시 Unsupported 봉쇄 회귀는 새 완료 증거 시험으로 대체했다. Windows 제품·Git 실제 연결·G4/stdio·실제 공급자 활성화는 여전히 비활성이다.

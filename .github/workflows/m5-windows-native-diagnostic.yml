@@ -23,7 +23,7 @@ jobs:
       - name: Compile and exercise Windows handle, job, and pipe primitives
         run: cargo test --locked --release -p hello-agent-sidecar --lib project::windows_ -- --nocapture
       - name: Verify shared Windows handle-inheritance lock
-        run: cargo test --locked --release -p hello-agent-sidecar --lib process_spawn:: -- --nocapture
+        run: "cargo test --locked --release -p hello-agent-sidecar --lib process_spawn:: -- --nocapture"
       - name: Require Windows watcher tests to be compiled
         shell: pwsh
         run: |
