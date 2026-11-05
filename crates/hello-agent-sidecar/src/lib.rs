@@ -2671,6 +2671,9 @@ fn json_error(error: serde_json::Error) -> SidecarError {
     SidecarError::new("jsonFailure", error.to_string())
 }
 
+#[cfg(test)]
+mod save_recovery_dispatch_tests;
+
 #[cfg(all(test, target_os = "macos"))]
 mod tests;
 
