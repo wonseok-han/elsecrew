@@ -4,6 +4,15 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은3a6917f의 교체 후 receipt 복구로 진전했다. 이번 메인 구현은 교체 전 명시 취소를 내부 abort_windows_save에 연결했다. 최초 guard intent에 originalTargetIdentity/originalAccessFingerprint를 추가하고 기존 expectedVersion과 대조한다. 과거 결속 정보 없는 기록은 추정 승격하지 않는다.
+- shared recovery는 inspected lock revision/정확한 chat·workspace·managed roots/target·staging anchor pin을 유지한다. abort는 preparing/ready/sourceReady/replaceIntent 및 abort 중간 단계만 허용한다. 기존 target ID/내용/권한이 원래와 같음을 확인하고 root의 별도 lease 아래 source를, target lease 아래 guard를, staging anchor 아래 staging을 정리한다.
+- abortIntent→abortSourceRemoved→abortGuardRemoved→abortStagingRemoved→abortComplete를 원장에 기록한다. 삭제 전에는 ID가 기록된 파일의 실제 일치를 요구하고 intent 이후에만 이미 부재를 인정한다. ID가 null인 파일은 이름이 없을 때만 허용한다. create 성공/ID 게시 전 종료로 생긴 미기록 파일은 삭제하지 않고 복구 잠금을 유지한다. 외부 수정/다른 파일도 보존·거절한다.
+- 최종 기존 target과 세 lease 확인 뒤 saveAborted/abortedWindowsSave·preserved_version 기록과 chat session 제거를 원자 완료한다. 정상 새 내용 저장 성공과 구분한다. 공개 IPC/UI와 Windows 활성화는 계속 미연결이다. native helper 회귀는 미기록 파일 보존·부재 허용·외부 수정 거절을 작성했으나 아직 실행 전이다.
+- 같은 독립 검토자1명이 취소 phase admission·기존 파일 검증·중첩 경로의 root lease·미기록 파일 보존·원자 취소 완료를 검토해 구체적 정적 차단 결함 없음. native 검증 합격은 아니며 전체 회귀는 기능 연결 뒤 묶어서 수행한다.
+- 변경 Windows 모듈 rustfmt·project.rs 구문 파싱·diff 검사만 수행했다. Cargo/패키지/cache/worktree/CI/push/모델 실행 없음. 다음은 복구 공개 계약/통합 및 Windows 묶음 검증이며 전체 개발은 미완료다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은81ac097 cleanup 재개로 진전했다. 이번 메인 구현은 replaceIntent 이후 실제 rename은 끝났으나 replaced 원장 게시 전 종료된 경우를 내부 재개에 연결했다. 현재 source 이름 부재·target의 기록된 source full ID/내용/권한 일치와 guard/staging ID를 먼저 요구한다. rename 재시도나 이전 target 덮어쓰기는 없다.
 - 복구 시 target을 nofollow read/write·share-read·WRITE_THROUGH로 열고 보유 handle의 NTFS/full ID/5MiB bounded hash/접근 권한을 확인해 같은 handle sync_all 성공을 얻는다. target/staging lease와 target 재확인 뒤 기존 replaceIntent→replaced 전이로 flush receipt를 기록하고 정상 cleanup/원자 완료를 계속한다. 원본 target이 남았거나 이름/내용/권한이 다른 경우는 잠금/증거를 유지한다.
 - read-only 관찰과 recovery flush가 같은 bounded held-file reader를 공유하도록 추출했다. native 회귀는 실제 handle-relative rename 후 원래 source handle을 닫고 재개 flush, 이전 target/잘못된 version/권한 거절과 bytes 보존을 추가했으나 아직 실행 전이다.

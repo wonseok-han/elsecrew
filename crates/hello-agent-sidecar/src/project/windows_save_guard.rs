@@ -45,12 +45,27 @@ impl ProjectManager {
         }
         preparing.validate()?;
         windows_durability::require_ntfs(parent)?;
+        let original = windows_save_recovery::observe(parent, target_name)?;
+        if original["version"] != pending.expected_version {
+            return Err(ProjectFailure::recovery(
+                "save target changed before guard intent",
+            ));
+        }
+        let original_file = open_real_file_at(parent, target_name)?;
+        if windows_fs::identity(&original_file, false)?.recovery_token() != original["identity"] {
+            return Err(ProjectFailure::recovery(
+                "save target identity changed before guard intent",
+            ));
+        }
+        let original_access = windows_security::fingerprint(&original_file)?;
+        drop(original_file);
         let staging_anchor = self.prepare_windows_staging_anchor(pending)?;
         let name = format!(".hello-agent-save-guard-{}.tmp", Uuid::new_v4().simple());
         let mut record = json!({
             "schemaVersion":1,"phase":"preparing","saveId":save_id,
             "worktreeId":active.worktree_id,"workspaceIdentity":active.workspace_identity,
             "path":pending.relative_path,"expectedVersion":pending.expected_version,
+            "originalTargetIdentity":original["identity"],"originalAccessFingerprint":original_access,
             "stagingName":pending.staging_name,"guardName":name,
             "stagingIdentity":windows_fs::identity(pending.file.as_ref()
                 .ok_or_else(|| ProjectFailure::recovery("save staging handle missing"))?, false)?.recovery_token(),
@@ -411,6 +426,35 @@ impl ProjectManager {
                 };
                 old["phase"] == predecessor
                     && expected == *guard
+                    && lock.get("recovery_required") == Some(&json!(true))
+            }),
+            Some(
+                "abortIntent"
+                | "abortSourceRemoved"
+                | "abortGuardRemoved"
+                | "abortStagingRemoved"
+                | "abortComplete",
+            ) => previous.is_some_and(|old| {
+                if !old.is_object() {
+                    return false;
+                }
+                let predecessor = match guard["phase"].as_str() {
+                    Some("abortIntent") => matches!(
+                        old["phase"].as_str(),
+                        Some("preparing" | "ready" | "sourceReady" | "replaceIntent")
+                    ),
+                    Some("abortSourceRemoved") => old["phase"] == "abortIntent",
+                    Some("abortGuardRemoved") => old["phase"] == "abortSourceRemoved",
+                    Some("abortStagingRemoved") => old["phase"] == "abortGuardRemoved",
+                    _ => old["phase"] == "abortStagingRemoved",
+                };
+                let mut expected = old.clone();
+                expected["phase"] = guard["phase"].clone();
+                predecessor
+                    && expected == *guard
+                    && guard["originalTargetIdentity"].is_string()
+                    && guard["originalAccessFingerprint"].is_string()
+                    && guard["durabilityPolicy"] == windows_durability::POLICY
                     && lock.get("recovery_required") == Some(&json!(true))
             }),
             Some("cleanupIntent" | "guardRemoved" | "stagingRemoved" | "cleanupComplete") => {

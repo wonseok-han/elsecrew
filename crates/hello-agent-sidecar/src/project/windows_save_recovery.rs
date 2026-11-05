@@ -67,6 +67,11 @@ impl ProjectManager {
                         | "guardRemoved"
                         | "stagingRemoved"
                         | "cleanupComplete"
+                        | "abortIntent"
+                        | "abortSourceRemoved"
+                        | "abortGuardRemoved"
+                        | "abortStagingRemoved"
+                        | "abortComplete"
                 )
             )
         {

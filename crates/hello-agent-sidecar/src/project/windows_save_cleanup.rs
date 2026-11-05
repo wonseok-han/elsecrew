@@ -5,8 +5,6 @@ const ANCHOR: &str = ".hello-agent-staging-anchor-v1";
 const ANCHOR_BYTES: &[u8] = b"hello-agent-staging-anchor-v1\n";
 
 impl ProjectManager {
-    /// Internal explicit recovery entry point. The caller supplies the inspected
-    /// lock revision; observations alone are never accepted as authorization.
     #[allow(dead_code)] // Public recovery contract/UI and native gate are pending.
     pub(crate) fn resume_windows_save_cleanup(
         &self,
@@ -15,6 +13,45 @@ impl ProjectManager {
         save_id: &str,
         expected_lock_revision: u64,
         request_id: &str,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        self.recover_windows_save(
+            storage,
+            address,
+            save_id,
+            expected_lock_revision,
+            request_id,
+            false,
+        )
+    }
+
+    #[allow(dead_code)] // Explicit cancellation, never an automatic retry.
+    pub(crate) fn abort_windows_save(
+        &self,
+        storage: &mut Storage,
+        address: &WorkspaceAddress,
+        save_id: &str,
+        expected_lock_revision: u64,
+        request_id: &str,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        self.recover_windows_save(
+            storage,
+            address,
+            save_id,
+            expected_lock_revision,
+            request_id,
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn recover_windows_save(
+        &self,
+        storage: &mut Storage,
+        address: &WorkspaceAddress,
+        save_id: &str,
+        expected_lock_revision: u64,
+        request_id: &str,
+        abort: bool,
     ) -> Result<ProjectAction, ProjectFailure> {
         if self.pending_saves.contains_key(save_id) {
             return Err(ProjectFailure::recovery("save still has an active owner"));
@@ -34,22 +71,39 @@ impl ProjectManager {
             ));
         }
         let mut record = lock["evidence"]["windowsSaveGuard"].clone();
-        if !matches!(
-            record["phase"].as_str(),
-            Some(
-                "replaceIntent"
-                    | "replaced"
-                    | "cleanupIntent"
-                    | "guardRemoved"
-                    | "stagingRemoved"
-                    | "cleanupComplete"
+        let phase = record["phase"].as_str();
+        let allowed = if abort {
+            matches!(
+                phase,
+                Some(
+                    "preparing"
+                        | "ready"
+                        | "sourceReady"
+                        | "replaceIntent"
+                        | "abortIntent"
+                        | "abortSourceRemoved"
+                        | "abortGuardRemoved"
+                        | "abortStagingRemoved"
+                        | "abortComplete"
+                )
             )
-        ) || record["durabilityPolicy"] != windows_durability::POLICY
-            || (record["phase"] != "replaceIntent"
-                && record["directoryDurability"] != windows_durability::FLUSHED)
-        {
+        } else {
+            matches!(
+                phase,
+                Some(
+                    "replaceIntent"
+                        | "replaced"
+                        | "cleanupIntent"
+                        | "guardRemoved"
+                        | "stagingRemoved"
+                        | "cleanupComplete"
+                )
+            ) && (record["phase"] == "replaceIntent"
+                || record["directoryDurability"] == windows_durability::FLUSHED)
+        };
+        if !allowed || record["durabilityPolicy"] != windows_durability::POLICY {
             return Err(ProjectFailure::recovery(
-                "save has no completed replacement receipt",
+                "save phase does not permit the requested recovery",
             ));
         }
         let managed = open_absolute_directory_capability(&self.worktrees_root)?;
@@ -60,8 +114,9 @@ impl ProjectManager {
         let root = self.worktree_capability(&active)?;
         let path = record["path"]
             .as_str()
-            .ok_or_else(|| ProjectFailure::recovery("save path missing"))?;
-        let (parent, target) = open_parent_capability(&root, path)?;
+            .ok_or_else(|| ProjectFailure::recovery("save path missing"))?
+            .to_owned();
+        let (parent, target) = open_parent_capability(&root, &path)?;
         let target_pin = DirectoryLease::acquire(&parent, OsStr::new(&target))?;
         let staging_pin = DirectoryLease::acquire(&self.save_staging_dir, OsStr::new(ANCHOR))?;
         self.verify_windows_staging_root()?;
@@ -83,8 +138,77 @@ impl ProjectManager {
                 .to_owned();
         let staging = windows_save_recovery::staging_name(&record)?.to_owned();
         let source =
-            windows_save_recovery::internal_name(&record, "sourceName", ".hello-agent-save-")?;
-        require_absent(&root, source)?;
+            windows_save_recovery::internal_name(&record, "sourceName", ".hello-agent-save-")?
+                .to_owned();
+        if abort {
+            // Pin the source's root independently, even for a nested target.
+            let first = path
+                .split('/')
+                .next()
+                .ok_or_else(|| ProjectFailure::recovery("save path missing"))?;
+            let root_pin = DirectoryLease::acquire(&root, OsStr::new(first))?;
+            verify_original(&parent, &target, &record)?;
+            if !record["phase"]
+                .as_str()
+                .is_some_and(|v| v.starts_with("abort"))
+            {
+                require_owned_or_uncreated(&root, &source, &record["sourceIdentity"])?;
+                require_owned_or_uncreated(&parent, &guard, &record["guardIdentity"])?;
+                require_recorded(&self.save_staging_dir, &staging, &record["stagingIdentity"])?;
+                record["phase"] = json!("abortIntent");
+                self.write_windows_guard_intent(storage, &active, save_id, request_id, &record)?;
+            }
+            if record["phase"] == "abortIntent" {
+                remove_owned_or_uncreated(&root, &root_pin, &source, &record["sourceIdentity"])?;
+                record["phase"] = json!("abortSourceRemoved");
+                self.write_windows_guard_intent(storage, &active, save_id, request_id, &record)?;
+            }
+            require_absent(&root, &source)?;
+            verify_original(&parent, &target, &record)?;
+            if record["phase"] == "abortSourceRemoved" {
+                remove_owned_or_uncreated(&parent, &target_pin, &guard, &record["guardIdentity"])?;
+                record["phase"] = json!("abortGuardRemoved");
+                self.write_windows_guard_intent(storage, &active, save_id, request_id, &record)?;
+            }
+            require_absent(&parent, &guard)?;
+            verify_original(&parent, &target, &record)?;
+            if record["phase"] == "abortGuardRemoved" {
+                remove_or_observe_absent(
+                    &self.save_staging_dir,
+                    &staging_pin,
+                    &staging,
+                    &record["stagingIdentity"],
+                )?;
+                record["phase"] = json!("abortStagingRemoved");
+                self.write_windows_guard_intent(storage, &active, save_id, request_id, &record)?;
+            }
+            require_absent(&self.save_staging_dir, &staging)?;
+            verify_original(&parent, &target, &record)?;
+            root_pin.validate()?;
+            target_pin.validate()?;
+            staging_pin.validate()?;
+            if record["phase"] == "abortStagingRemoved" {
+                record["phase"] = json!("abortComplete");
+                self.write_windows_guard_intent(storage, &active, save_id, request_id, &record)?;
+            }
+            let version = record["expectedVersion"]
+                .as_str()
+                .ok_or_else(|| ProjectFailure::recovery("save version missing"))?;
+            self.persist_save_lock(
+                storage,
+                &active,
+                save_id,
+                request_id,
+                false,
+                Some(version),
+                Some(&address.chat_id),
+            )?;
+            return Ok(ProjectAction {
+                result: json!({"saveId":save_id,"outcome":"aborted","version":version}),
+                ..ProjectAction::default()
+            });
+        }
+        require_absent(&root, &source)?;
         verify_committed(&parent, &target, &record)?;
         if record["phase"] == "replaceIntent" {
             // Never repeat rename: only the exact replacement already at the
@@ -291,6 +415,47 @@ impl ProjectManager {
     }
 }
 
+fn verify_original(parent: &Dir, target: &str, record: &Value) -> Result<(), ProjectFailure> {
+    let observation = windows_save_recovery::observe(parent, target)?;
+    let file = open_real_file_at(parent, target)?;
+    if !record["originalTargetIdentity"].is_string()
+        || observation["identity"] != record["originalTargetIdentity"]
+        || observation["version"] != record["expectedVersion"]
+        || windows_fs::identity(&file, false)?.recovery_token() != record["originalTargetIdentity"]
+        || windows_security::fingerprint(&file)? != record["originalAccessFingerprint"]
+    {
+        return Err(ProjectFailure::recovery(
+            "original save target changed; cancellation refused",
+        ));
+    }
+    Ok(())
+}
+
+fn require_owned_or_uncreated(
+    parent: &Dir,
+    name: &str,
+    identity: &Value,
+) -> Result<(), ProjectFailure> {
+    if identity.is_null() {
+        require_absent(parent, name)
+    } else {
+        require_recorded(parent, name, identity)
+    }
+}
+
+fn remove_owned_or_uncreated(
+    parent: &Dir,
+    pin: &DirectoryLease,
+    name: &str,
+    identity: &Value,
+) -> Result<(), ProjectFailure> {
+    if identity.is_null() {
+        require_absent(parent, name)
+    } else {
+        remove_or_observe_absent(parent, pin, name, identity)
+    }
+}
+
 fn flush_recovered_replacement(
     parent: &Dir,
     target: &str,
@@ -384,6 +549,33 @@ fn remove_or_observe_absent(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn abort_preserves_unknown_artifacts_and_rejects_changed_original() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = Dir::open_ambient_dir(temp.path(), ambient_authority()).unwrap();
+        std::fs::write(temp.path().join("target"), b"original").unwrap();
+        std::fs::write(temp.path().join("unknown"), b"keep").unwrap();
+        let file = dir.open("target").unwrap();
+        let record = json!({
+            "originalTargetIdentity":windows_fs::identity(&file, false).unwrap().recovery_token(),
+            "expectedVersion":sha256_file_version_v1(b"original"),
+            "originalAccessFingerprint":windows_security::fingerprint(&file).unwrap(),
+        });
+        drop(file);
+        let pin = DirectoryLease::acquire(&dir, OsStr::new("target")).unwrap();
+        verify_original(&dir, "target", &record).unwrap();
+        assert!(require_owned_or_uncreated(&dir, "unknown", &Value::Null).is_err());
+        assert!(remove_owned_or_uncreated(&dir, &pin, "unknown", &Value::Null).is_err());
+        remove_owned_or_uncreated(&dir, &pin, "missing", &Value::Null).unwrap();
+        std::fs::write(temp.path().join("target"), b"external edit").unwrap();
+        assert!(verify_original(&dir, "target", &record).is_err());
+        assert_eq!(std::fs::read(temp.path().join("unknown")).unwrap(), b"keep");
+        assert_eq!(
+            std::fs::read(temp.path().join("target")).unwrap(),
+            b"external edit"
+        );
+    }
 
     #[test]
     fn recovery_flush_requires_exact_replacement_and_preserves_bytes() {

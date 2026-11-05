@@ -3217,18 +3217,34 @@ impl ProjectManager {
                 })
             {
                 if !recovery_required {
-                    if guard["phase"] != "cleanupComplete"
+                    let aborted = guard["phase"] == "abortComplete";
+                    let receipt_valid = if aborted {
+                        guard["expectedVersion"].as_str() == committed_version
+                            && guard["originalTargetIdentity"].is_string()
+                            && guard["originalAccessFingerprint"].is_string()
+                            && guard["durabilityPolicy"] == windows_durability::POLICY
+                    } else {
+                        guard["phase"] == "cleanupComplete"
+                            && guard["sourceVersion"].as_str() == committed_version
+                            && guard["directoryDurability"] == windows_durability::FLUSHED
+                    };
+                    if !receipt_valid
                         || guard["saveId"] != save_id
                         || guard["worktreeId"] != active.worktree_id
                         || guard["workspaceIdentity"] != active.workspace_identity
-                        || guard["sourceVersion"].as_str() != committed_version
-                        || guard["directoryDurability"] != windows_durability::FLUSHED
                     {
                         return Err(ProjectFailure::ambiguous(
                             "Windows save cleanup receipt differs",
                         ));
                     }
-                    evidence["completedWindowsSave"] = guard;
+                    if aborted {
+                        evidence["phase"] = json!("saveAborted");
+                        evidence["committed_version"] = Value::Null;
+                        evidence["preserved_version"] = json!(committed_version);
+                        evidence["abortedWindowsSave"] = guard;
+                    } else {
+                        evidence["completedWindowsSave"] = guard;
+                    }
                 } else {
                     evidence["windowsSaveGuard"] = guard;
                 }
