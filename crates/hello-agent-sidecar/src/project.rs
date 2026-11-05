@@ -13,6 +13,8 @@ mod windows_job;
 mod windows_pipe;
 #[cfg(windows)]
 mod windows_transport;
+#[cfg(windows)]
+mod windows_directory_lease;
 use crate::{AppendOutcome, SidecarError, Storage};
 #[cfg(unix)]
 use cap_fs_ext::OsMetadataExt;

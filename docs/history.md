@@ -2,6 +2,15 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은 종료 supervisor·spawn 잠금·watcher25개의 Windows native PASS로 진전했다. 현재6514973의 깨끗한 checkout에서 메인이 CWD의 이름 교체/재분석 경로 문제를 이어서 구현했다. `windows_directory_lease.rs`는 held Dir에서 얻은 local GUID volume root부터 각 성분을 handle-relative로 열고, 명시 share read/write·delete 불허 핸들을 모두 보유한다. 기존 직접 자식 하나도 같은 방식으로 잡아 각 폴더를 비어 있지 않게 유지하며 모든 pin 확보 후 전체 ID·no-reparse·부모/자식 결속을 다시 확인한다.
+- 사용자 파일을 만들거나 수정하지 않는다. guard 없음/빈 폴더, 사전 DELETE 접근 핸들과 충돌, 이름 alias/ADS/장치명·256성분 상한·신원 변경은 거부한다. `windows_fs`의 GUID 경로 조회를 재사용 가능한 함수로 분리했으며 기존 local-volume 검증 의미는 유지한다.
+- 문서 근거: Microsoft [FSCTL_SET_REPARSE_POINT](https://learn.microsoft.com/en-us/windows-hardware/drivers/ifs/fsctl-set-reparse-point)의 nonempty 제한과 [reparse tags](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/c8e77b37-3909-4fe6-a4ea-2b9d423b1ee4)의 Directory/NameSurrogate bit 비호환이다. 이를 모든 cloud/third-party tag의 불변 증거로 확대하지 않는다. 실제 프로세스 연결 전 native 공격 시험·GUID CWD 호환, 실행 파일 권한, 실패/미종료 시 lease 보존 소유권이 남아 있다.
+- native 회귀 초안은 guard 없음·사전 DELETE 충돌 거절, 기존 빈 폴더에 attribute-only junction을 설정할 수 있는 control, pin 중 child 삭제/ancestor rename 거절, nonempty component의 같은 FSCTL 거절과 해제 후 정상 rename이다. 현재 Mac에서는 Windows 코드 실행을 하지 않았으며 rustfmt·diff 검사만 수행했다. 불필요한 빌드 캐시·worktree·패키지는 만들지 않았다.
+- 독립 정적 검토에서 lease 구성·handle-relative 검증의 차단 결함 없음. 연결 전에는 부모의 FILE_DELETE_CHILD 권한만으로 삭제를 허용하는 ACL 회귀도 추가해야 한다. 현재 remove_file 시험만으로 그 권한 경로를 검증했다고 보지 않는다.
+- 아직 Family/Transport/Git에 연결하지 않았고 Windows 제품 gate도 유지한다. 이전 push/CI3회 승인은 소진된 상태로 새 외부 실행 없음. 다음은 소유권·실행 파일/빈 관리 폴더 준비와 실제 연결을 묶어 구현한 뒤 native 검증이다. G6/전체 출시도 미완료다.
+
+### 2026-11-05 · by GPT-6
+
 - 세 번째 승인 CI [41980701769](https://github.com/wonseok-han/hello-agent/actions/runs/41980701769), 3a02b76504e9f4d371a915581349cd79ebaa9cc0는 3분32초에 SUCCESS했다. 실제 로그에서 native20/20·공통 spawn 잠금1/1·watcher identity3/3·Windows 초기 분할1/1, 합계25 PASS·0 FAIL·0 ignored를 확인했다. watcher4개 존재 검사도 통과했다. raw 전체 로그와 run metadata는 `.artifacts/m5-windows-supervisor-41980701769/`에 보존한다.
 - CI41977646539의 실제 child 미종료 반증에 대응한 동일 child handle signal 회귀가 PASS했고, 짧은 자손16개·중첩 debugger 누락 거절·debug ABI·transport도 통과했다. 이는 감독 기반 종료와 watcher의 scoped native 증거이며 전체 Windows 제품/복구/출시 합격은 아니다. 외부 broker 범위 제한과 CWD/실행 파일 권한·원본 쓰기/교체·실제 Git 연결의 미완료를 유지한다.
 - 이번 승인3/3회 소진, 최종 공개 HEAD3a02b76. 마지막 결과 기록은 로컬 커밋으로만 남긴다. main 병합·제품 활성화·패키징·모델 호출 없음. 로컬 빌드·추가 worktree 없이 원격 검사만 실행했고 일회용 커밋 메시지·중복 임시 로그를 정리했다. 보존하는 진단 로그는 작은 텍스트 증거다.
@@ -160,6 +169,7 @@
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 - **Windows 자손 supervisor(2026-11-05, scoped native PASS)**: a7c0674의 상시 Unsupported 봉쇄 뒤 creator-thread DEBUG_PROCESS 추적을 구현했다. 생성 이벤트를 계속하기 전 handle 복제·EXIT 계속 후 모든 signal·root signal·누적 Job 수 일치·active0이 완료 조건이다. 중첩 debugger 누락/상한/오류는 실패이며 Job 밖의 외부 broker는 보장 범위가 아니다. 3a02b76/CI41980701769에서 기존 실제 child signal 회귀와 native20·spawn1·watcher4 합계25개가 PASS했다. 전체 제품 PASS가 아니며 Windows admission은 닫혀 있다.
 - **Windows Job 종료 판정 반증(2026-11-05)**: 실제 CI41977646539에서 parent signal+Job active0/terminate(true) 뒤에도 별도 보유 자손 handle은 WAIT_TIMEOUT이었다. 기존 completed()/terminate()를 모든 자손 종료 증거로 인용하지 않는다. 임의 지연·카운트 완화로 해결하지 않으며 native gate는 닫아 둔다. 동일 실행의 disk capacity 회귀는 PASS, 전체16PASS1FAIL·watcher skipped다.
+- **Windows CWD lease 초안(2026-11-05, native 미검증)**: 모든 경로 성분과 기존 직접 child를 delete 공유 없이 보유해 nonempty를 유지하고 전체 ID/부모 결속을 검증하는 기반을 구현했다. 일반적인 공유 잠금만으로 속성 변경을 막는다는 주장은 하지 않는다. name-surrogate와 directory-bit tag 구분·프로세스 수명 소유권·실행 파일 권한·GUID CWD 호환이 남아 있어 아직 실행에 연결하지 않았다.
 - **Windows CWD 공유 잠금의 한계(2026-11-05)**: deny-share-write/delete만으로 reparse 불변을 증명하지 않는다. attribute 접근은 공유 제한과 별개이며 MS-FSA는 FILE_WRITE_ATTRIBUTES로 reparse 설정을 허용한다. CWD admission은 미완료이고 Windows gate는 유지한다.
 - **Windows 프로세스 연결 조건(2026-11-05)**: Job 생성 시 결속과 제한 시간/취소 가능한 stdio transport 기반은 scoped native 검증을 통과했으나 실제 Git에는 아직 미연결이다. stdio가 없으면 STARTF_USESTDHANDLES를 켜지 않으며, 지정 시 임시 복제 핸들+HANDLE_LIST만 전달한다. 공통 spawn 잠금의 경합 회귀는 통과했다. CWD 권한·Git 호출 연결과 제품 native 묶음 검증 전에는 Windows gate를 열지 않는다. Drop의 Job close는 종료 요청이며 부모 signal과 active-process 0만으로는 전체 종료 증거가 되지 않는다(11/05 native 반증 참조).
 - **기존 원본 경로 재확인 (2026-11-02)**: 과거 경로 철자는 source_identity로도 복원할 수 없다. native 폴더 선택으로만 `native_path_binding`을 보강하며 catalog reopen/원본 접근은 없는 표식을 자동 생성하지 않는다. 재선택은 기존 snapshot과 복구 상태를 보존한다.

@@ -110,6 +110,10 @@ mod native {
     }
 
     pub(crate) fn require_local_volume(held: &Dir) -> Result<(), ProjectFailure> {
+        local_guid_path(held).map(|_| ())
+    }
+
+    pub(crate) fn local_guid_path(held: &Dir) -> Result<String, ProjectFailure> {
         // A GUID volume path is obtained from the held handle, not from a drive
         // letter lookup which could be remapped between checks. UNC is excluded.
         let mut buffer = vec![0u16; 32_768];
@@ -137,7 +141,7 @@ mod native {
                 "source capability requires a local GUID volume",
             ));
         }
-        Ok(())
+        Ok(path)
     }
 
     pub(crate) fn open_directory(path: &Path) -> Result<Dir, ProjectFailure> {
@@ -269,7 +273,9 @@ mod native {
 }
 
 #[cfg(windows)]
-pub(super) use native::{identity, open_directory, require_local_volume};
+pub(super) use native::{
+    identity, local_guid_path, open_directory, require_local_volume, Identity,
+};
 
 #[cfg(test)]
 mod tests {
