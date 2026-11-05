@@ -33,6 +33,18 @@ mod native {
         file: [u8; 16],
     }
 
+    impl Identity {
+        /// Lossless internal recovery token; never a path or file-content hash.
+        pub(crate) fn recovery_token(&self) -> String {
+            let file = self
+                .file
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            format!("win-file-id-v1:{:016x}:{file}", self.volume)
+        }
+    }
+
     #[repr(C)]
     #[derive(Default)]
     struct AttributeTag {

@@ -19,6 +19,8 @@ mod windows_directory_lease;
 mod windows_executable;
 #[cfg(windows)]
 mod windows_replace;
+#[cfg(windows)]
+mod windows_save_guard;
 use crate::{AppendOutcome, SidecarError, Storage};
 #[cfg(unix)]
 use cap_fs_ext::OsMetadataExt;
@@ -202,6 +204,8 @@ pub enum SaveFailurePoint {
 }
 
 struct PendingSave {
+    #[cfg(windows)]
+    recovery_fenced: bool,
     chat_id: Option<String>,
     worktree_id: String,
     workspace_identity: String,
@@ -1666,6 +1670,8 @@ impl ProjectManager {
         self.pending_saves.insert(
             save_id.clone(),
             PendingSave {
+                #[cfg(windows)]
+                recovery_fenced: false,
                 chat_id: chat_id.map(str::to_string),
                 worktree_id: active.worktree_id.clone(),
                 workspace_identity: active.workspace_identity.clone(),
@@ -2011,10 +2017,22 @@ impl ProjectManager {
             pre_syscall_hook,
             &mut pending,
         );
+        // A durable guard intent also requires keeping the workspace save
+        // session on any later failure, including ordinary I/O errors.
+        #[cfg(windows)]
+        let result = result.map_err(|error| {
+            if pending.recovery_fenced {
+                ProjectFailure::ambiguous(error.detail)
+            } else {
+                error
+            }
+        });
         let preserve_staging = result
             .as_ref()
             .err()
             .is_some_and(|error| error.outcome_unknown);
+        #[cfg(windows)]
+        let preserve_staging = preserve_staging || pending.recovery_fenced;
         drop(pending.file);
         if !preserve_staging {
             remove_capability_temp(&self.save_staging_dir, &pending.staging_name);
@@ -2098,6 +2116,10 @@ impl ProjectManager {
             });
         }
         drop(target);
+        #[cfg(windows)]
+        let _save_guard = self.prepare_windows_save_guard(
+            storage, &active, pending, save_id, request_id, &worktree, &parent, &target_name,
+        )?;
         let temp_name = format!(".hello-agent-save-{}.tmp", Uuid::new_v4().simple());
         let mut options = CapOpenOptions::new();
         options
@@ -3112,6 +3134,20 @@ impl ProjectManager {
         } else {
             "saveCommitted"
         };
+        let evidence = json!({"phase":phase,"save_id":save_id,"committed_version":committed_version});
+        #[cfg(windows)]
+        let evidence = {
+            let mut evidence = evidence;
+            if let Some(guard) = storage.projection_record("lock", &active.lock_id)?
+                .and_then(|lock| lock.get("evidence").and_then(|v| v.get("windowsSaveGuard")).cloned())
+            {
+                if !recovery_required {
+                    return Err(ProjectFailure::ambiguous("Windows save guard cleanup is not yet connected"));
+                }
+                evidence["windowsSaveGuard"] = guard;
+            }
+            evidence
+        };
         append_object(
             storage,
             "lock",
@@ -3133,11 +3169,7 @@ impl ProjectManager {
                 "worktree_path":canonical_protocol_path(&active.worktree_path)?,
                 "poisoned":false,
                 "recovery_required":recovery_required,
-                "evidence":{
-                    "phase":phase,
-                    "save_id":save_id,
-                    "committed_version":committed_version,
-                },
+                "evidence":evidence,
             }),
         )
     }

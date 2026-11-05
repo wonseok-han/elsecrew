@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> **Windows save guard 준비(구현 중·native 미검증)**: 저장 준비는 기존 target pin을 유지한 채 현재 managed root/workspace/parent 신원을 확인하고, lock 원장에 preparing 의도를 기록한 뒤 독립 guard를 생성·flush·pin하여 ready와 전체 file ID를 기록한다. 첫 intent 실패 전에는 파일을 만들지 않으며, intent 성공 이후 실패는 staging과 workspace save_session을 함께 보존한다. save lock 갱신은 guard 증거를 유지하고 cleanup 연결 전 성공 해제를 거절한다. guard Drop 자동 삭제는 없다. directoryDurability는 unconfirmed이며 namespace durability·실제 교체·복구/cleanup과 native 회귀가 남아 있어 Windows 제품 admission은 닫혀 있다.
+
 > **Windows replacement primitive(native 미검증·제품 미연결)**: `windows_replace.rs`는 source file handle과 pinned destination Dir handle·단일 leaf로 FileRenameInfo 교체를 요청한다. 독립 guard를 유지하고 비정상 이름·guard 자체 교체를 거절하며 readonly/POSIX 우회·delete/copy fallback은 없다. 이는 save transaction이 아니므로 durable intent·버전 확인·sync/복구 연결 전 제품에서 사용하지 않는다. 기존34 PASS는 이 신규 코드를 포함하지 않는다.
 
 > **2026-11-05 최신 Windows native 증거**: [CI41988529910](https://github.com/wonseok-han/hello-agent/actions/runs/41988529910), 공개0a7efd5(f41eb29+시험 핸들 수명 수정)는 native29·spawn1·watcher4, 합계34 PASS/0 FAIL/0 ignored다. CWD pin/ACL/reparse·실제 GUID image/CWD 실행·공용 control reader EOF·unwind retention을 포함한다. background watcher의 실제 Git 검증·공식 Git 설치본 신뢰·파일 교체/복구·전체 제품/성능 합격은 포함하지 않는다.

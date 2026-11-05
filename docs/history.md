@@ -4,6 +4,14 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 2294e07 기준 메인 직접 구현: Windows 저장 준비에 별도 guard 생성 의도와 실제 file ID를 기존 lock 원장에 기록하는 경로를 추가했다. 기존 target pin을 유지하며 현재 managed root/workspace/parent 신원을 재확인하고, preparing 기록 → create_new/write/sync → 독립 lease/ID 재확인 → ready 기록 순서다. guard는 Drop에서 삭제하지 않는다.
+- 첫 intent 기록 실패는 파일 생성 전에 반환하며 staging의 기존 정리 규칙을 유지한다. 독립 검토가 발견한 실패 시 orphan staging 문제를 수정했다. intent 성공 뒤에는 staging과 workspace save_session을 모두 보존하도록 이후 모든 실패를 outcome_unknown으로 전달한다. 기존 save lock 갱신도 guard 증거를 보존하며 cleanup 미연결 상태에서 성공 잠금 해제를 거절한다.
+- guard 파일 sync는 디렉터리 namespace durability 증거가 아니다. 원장에 directoryDurability=unconfirmed를 명시했고 Windows 제품/Git/저장 활성화는 계속 차단한다. 교체 primitive 호출·guard cleanup/복구 연결과 첫 intent 실패 주입을 포함한 native 회귀는 아직 미완료다. 기존34 PASS는 이번 변경의 증거가 아니다.
+- 같은 독립 검토자의 재검토에서 orphan staging 차단 결함 해소 및 이 체크포인트의 추가 정적 차단 결함 없음. 실패 주입 native 회귀 공백은 그대로 남는다.
+- 검증: 변경 모듈 rustfmt, project.rs 구문 포맷 파싱 및 git diff --check. 이번에는 Cargo/패키지/모델/CI를 실행하지 않았으며 캐시·worktree를 추가하지 않았다. 현재 CI 승인 잔여1회는 새 기능 공개에 쓰지 않는다. 다음은 guard 복구/cleanup과 교체 연결, 묶음 Windows 검증이다.
+
+### 2026-11-05 · by GPT-6
+
 - 앞선 turn은 Windows34 native PASS로 진전했다. f83b143의 깨끗한 checkout에서 메인이 `windows_replace.rs`를 구현했다. source는 보유 file handle, destination은 검증한 DirectoryLease의 parent handle과 정상 단일 leaf다. SetFileInformationByHandle(FileRenameInfo=3)에 pointer-aligned buffer와 UTF-16 바이트 길이를 전달한다. 상대 다중 경로/ADS/장치명·guard 자체 대상은 거절하고 POSIX/readonly 우회나 delete/copy fallback을 사용하지 않는다.
 - DirectoryLease는 별도의 guard를 유지한 채 parent를 제공하며 syscall 직전에 다시 전체 결속을 검증한다. 이 primitive는 rename만 수행한다. durable save intent·현재 버전/임시 파일 신원·권한·교체 후 sync/재열기/복구를 caller가 묶어야 하므로 현재 제품 save 경로에 연결하거나 활성화하지 않았다.
 - native 회귀 초안은 다른 디렉터리의 source를 pinned parent의 기존 target으로 교체하고 전체 file ID/bytes/guard를 대조한다. 탈출/ADS/장치명/guard 이름 거절과 target sharing 충돌 시 source/target 보존도 포함한다. Rust 포맷/diff 검사 통과, Windows 실행은 미검증이며 기존34 PASS에 포함되지 않는다.
