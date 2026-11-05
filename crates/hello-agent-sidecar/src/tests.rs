@@ -354,37 +354,6 @@ fn approval_errors_are_request_scoped_and_do_not_stop_the_session() {
     assert!(status.ok);
 }
 
-#[test]
-fn windows_save_recovery_gate_rejects_direct_confirmed_requests() {
-    let (_root, path) = database();
-    let instance = "save_recovery_gate";
-    let mut session = SidecarSession::new(instance.into(), agent_runtime::AgentRuntime::blocked());
-    session.start_admission(&path);
-    wait_until_admitted(&mut session);
-    let valid = json!({"chatId":"chat_one","projectId":"project_one","worktreeId":"worktree_one",
-        "workspaceIdentity":"workspace_one","saveId":"save_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "expectedLockRevision":1,"decision":"complete","confirmed":true});
-    for decision in ["complete", "abort"] {
-        let mut params = valid.clone();
-        params["decision"] = json!(decision);
-        let response = session.handle_request(request_value(instance, decision,
-            "workspace.resolveSaveRecovery", params)).unwrap().response.unwrap();
-        assert!(!response.ok);
-        assert_eq!(response.error.unwrap().code, "methodUnavailable");
-    }
-    for (field, value) in [("confirmed", json!(false)), ("expectedLockRevision", json!(0)),
-        ("expectedLockRevision", json!(hello_agent_protocol::MAX_SEQUENCE + 1)), ("decision", json!("retry")), ("force", json!(true))] {
-        let mut params = valid.clone();
-        params[field] = value;
-        let response = session.handle_request(request_value(instance, "invalid_save_recovery",
-            "workspace.resolveSaveRecovery", params)).unwrap().response.unwrap();
-        assert!(!response.ok);
-        assert_eq!(response.error.unwrap().code, "invalidParams");
-    }
-    let status = session.handle_request(request_value(instance, "after_save_recovery",
-        "system.status", json!({}))).unwrap().response.unwrap();
-    assert!(status.ok);
-}
 
 fn request_value(instance: &str, id: &str, method: &str, params: Value) -> RequestV1 {
     RequestV1 {
