@@ -33,6 +33,8 @@ mod windows_remove;
 mod windows_durability;
 #[cfg(windows)]
 mod windows_save_cleanup;
+#[cfg(any(windows, test))]
+mod save_completion;
 use crate::{AppendOutcome, SidecarError, Storage};
 #[cfg(unix)]
 use cap_fs_ext::OsMetadataExt;
@@ -3275,55 +3277,9 @@ impl ProjectManager {
                     worktree_id: active.worktree_id.clone(),
                     workspace_identity: active.workspace_identity.clone(),
                 };
-                self.verify_durable_save_session(storage, &address, save_id)?;
-                let lock = storage
-                    .projection_record("lock", &active.lock_id)?
-                    .ok_or_else(|| ProjectFailure::ambiguous("save lock is missing"))?;
-                let mut chat = storage
-                    .projection_record("chat", chat_id)?
-                    .ok_or_else(|| ProjectFailure::ambiguous("save chat is missing"))?;
-                let revision = |record: &Map<String, Value>| {
-                    record
-                        .get("last_event_sequence")
-                        .and_then(Value::as_u64)
-                        .ok_or_else(|| {
-                            ProjectFailure::ambiguous("save completion revision is missing")
-                        })
-                };
-                let lock_revision = revision(&lock)?;
-                let chat_revision = revision(&chat)?;
-                let sessions = chat
-                    .get_mut("save_sessions")
-                    .and_then(Value::as_object_mut)
-                    .ok_or_else(|| ProjectFailure::ambiguous("save sessions are missing"))?;
-                if sessions.remove(save_id).is_none() {
-                    return Err(ProjectFailure::ambiguous("save session disappeared"));
-                }
-                storage.upsert_projection_records_atomic_checked(
-                    vec![
-                        crate::storage::ProjectionUpsert {
-                            aggregate_type: "lock",
-                            aggregate_id: active.lock_id.clone(),
-                            operation_id: format!("op_save_commit_{save_id}"),
-                            request_id: Some(request_id.to_string()),
-                            payload: payload.as_object().cloned().ok_or_else(|| {
-                                ProjectFailure::manifest("save lock payload differs")
-                            })?,
-                        },
-                        crate::storage::ProjectionUpsert {
-                            aggregate_type: "chat",
-                            aggregate_id: chat_id.to_string(),
-                            operation_id: format!("op_workspace_save_session_finish_{save_id}"),
-                            request_id: None,
-                            payload: chat,
-                        },
-                    ],
-                    &[
-                        ("lock", &active.lock_id, lock_revision),
-                        ("chat", chat_id, chat_revision),
-                    ],
-                )?;
-                return Ok(());
+                return self.complete_save_session_atomic(
+                    storage, &address, &active.lock_id, save_id, request_id, &payload,
+                );
             }
         }
         append_object(

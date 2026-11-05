@@ -4,6 +4,13 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은955880e Windows 진단 준비와 gate 회귀로 진전했다. 새 push/CI 승인 응답은 아직 없어 외부 쓰기는 하지 않았다. 메인은 기존 Windows 최종 lock/chat 원자 게시 코드를 의미 변경 없이 save_completion 모듈로 추출해 Windows 또는 test에서 컴파일하도록 했다. 정상 macOS 저장 경로와 Windows receipt 검증 호출 순서는 유지한다.
+- 실제 임시 SQLite를 사용하는 통합 회귀3개를 추가했다. 완료 시 요청한 session만 제거/다른 session과 extension 보존/DB 재열기 후 상태 동일/반복 완료 거절, 두 번째 chat operation conflict 시 먼저 시도한 lock clear까지 rollback, 다른 workspace session으로 완료 시 두 기록 불변을 확인했다. 정책을 흉내 내는 모형이 아니라 제품이 호출하는 동일 atomic helper와 실제 Storage를 사용한다.
+- CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo test -p hello-agent-sidecar --locked --offline --lib project::save_completion::tests -- --nocapture:3 PASS/0 ignored, 기존 target 증분 컴파일4.86초·실행0.67초. 이는 파일 교체/권한/native 전체 재시작 증거가 아니다.
+- 같은 독립 검토자1명이 추출의 의미 변경·검증 순서 차이 없음과 회귀 범위를 확인했다. rustfmt·git diff --check 통과. 새 패키지/worktree/CI/push/모델 없음. 승인 대기 중인955880e 외부 실행 범위에 이번 새 추출 commit을 임의로 포함하지 않는다. 다음은 Windows 진단 결과 또는 전체 save-session fixture 연결이며 앱 전체 목표는 미완료다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은542b9c3의 확인 기반 복구 연결로 진전했다. 이번 메인은 누적 Windows 저장/복구 native 진단용 workflow를 준비했다. 새 codex/m5-windows-save-recovery-20261105에서만 동작하며20분 상한/jobs4/threads4/incremental0이다. 필요한12개 테스트가 compiled list에 존재하는지 확인한 뒤 Windows primitive/helper 전체와 direct-request gate 검사를 실행한다. 패키징/활성화/인증/모델은 포함하지 않는다.
 - 기존 project Fixture는 /usr/bin/git를 직접 호출하고 Windows Git admission과 전체 save-session 생성도 미연결이므로 이 진단을 full save-session restart/UI/power-loss 합격으로 표현하지 않는다. 현재 helper 기반 범위와 전체 통합 공백을 workflow summary에 명시했다.
 - 실제 dispatcher에 complete/abort의 confirmed 요청을 직접 보내 gate가 닫힌 상태에서 methodUnavailable인 것을 확인하는 회귀를 추가했다. confirmed:false/0 또는 JS-safe 초과 revision/unknown decision/추가 force 인자는 invalidParams이며 그 후 system.status가 계속 응답함을 확인한다.
