@@ -1,12 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
-사용자가 Windows CI 추가 최대3회를 승인하여 검증을 재개했다. 전체 개발은 미완료이며 내부 Git 제공 방식 선택은 별도 대기다. 최신 작업·검증·대기 사유는 [11월 워크로그](archive/history-2026-11.md) 맨 위에 있다.
+승인된 Windows 진단은 두 번째 실행에서34개 모두 통과했다(3회 중2회 사용). 전체 개발은 미완료이며 내부 Git 제공 방식 선택은 별도 대기다. 최신 작업·검증·대기 사유는 [11월 워크로그](archive/history-2026-11.md) 맨 위에 있다.
 
 ### 2026-11-05 · by GPT-6
 
 - 사용자가 f41eb29 및 Windows 컴파일/시험 호환 수정의 공개 push·CI 최대3회를 승인했다. 기존 codex/m5-windows-supervisor-20261105에 정확히 f41eb29852c8c20c5318d0a908c3ba72d7030029를 push하고 첫 실행41987756587이 in_progress임을 확인했다. 승인1/3회 사용·2회 남음. 이후 로컬 문서 커밋은 공개하지 않았다.
 - 범위는 native primitives·공통 spawn·watcher 진단이며 패키징/제품 활성화/모델 호출/main 병합은 제외한다. 결과는 아직 미정이고 이전25 PASS로 대체하지 않는다. 로컬 빌드·새 캐시/worktree 없음. 다음은 동일 run의 결과 확인과 필요한 호환 수정이다.
 - 첫 실행41987756587은 release 컴파일3분17초 성공·native28 PASS/1 FAIL이다. 실패는 lease 해제 후 ancestor rename에서5(AccessDenied)였으며 별도 authority Dir가 아직 열려 있었다. acquire 직후 이 외부 Dir를 닫아 lease 핸들만으로 차단/해제를 검사하도록 시험만 수정했다. 기존 공유32·nonempty145·guard 내용 검사는 유지한다. image/GUID CWD·공용 control EOF·unwind retention 등 새 검사는 PASS였다. spawn/watch 단계는 skipped다. 원시 실패 로그는 .artifacts/m5-windows-supervisor-41987756587/failed.log에 보존하며 포맷/diff 검사 통과.
+
+- 검토된 fixture 수정은 통합2812429와 공개 진단0a7efd5에 각각 기록했다. 진단 커밋은 f41eb29 위 시험3줄만 포함한다. 두 번째 CI41988529910이 in_progress로 등록됐으며 승인2/3회 사용·1회 남음이다.
+
+- 두 번째 [CI41988529910](https://github.com/wonseok-han/hello-agent/actions/runs/41988529910), 0a7efd5fe71598005ca86d254876398933cc9207는3분29초에 SUCCESS했다. 전체 로그에서 native29·spawn1·watcher3+initial1, 총34 PASS/0 FAIL/0 ignored와 watcher 존재검사를 확인했다. 실패했던 lease final rename도 PASS이며 fixture-only 외부 핸들 해제가 원인이었음을 확인했다. raw log/metadata는 .artifacts/m5-windows-supervisor-41988529910에 보존한다.
+- 승인2/3회 사용·1회 잔여. 추가 실행을 소모하지 않는다. 제품 Git/저장/복구·background watcher 실제 Git·G6/출시는 아직 미완료이며 이 scoped 결과로 활성화하지 않는다. current architecture의 CWD/image/reader 증거 상태만 갱신한다. 로컬 빌드/패키지/worktree·main 병합·모델 호출 없음. 다음은 내부 Git 제공 방식 선택 후 실제 admission 및 Windows save/복구 구현이다.
 
 ## 프로젝트 요약 (고정)
 
@@ -18,6 +23,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Windows native34 PASS(2026-11-05 최신)**: CI41988529910/0a7efd5에서 lease/image/GUID 실행·공용 reader·종료 supervisor·spawn/watcher34개 통과. 첫41987756587의1FAIL은 fixture의 별도 directory handle 수명으로 수정했다. 통합 수정2812429. 현재 batch3회 중2회 사용·1회 남음. 실제 Git 설치본/저장·복구·background watcher 종단 실행/제품G6 합격은 아니다.
 
 - **Windows save guard 충돌(2026-11-05)**: 기존 DirectoryLease에서 교체 대상 자체를 guard로 잡으면 의도한 replace도 막힌다. 마지막에 pin을 풀어 해결하지 않는다. 별도 guard의 durable intent/ID/cleanup과 handle-relative replace·durability/복구를 묶어야 하며 제안서 §12에 조건을 기록했다. Windows 저장은 아직 미구현/차단이다.
 
