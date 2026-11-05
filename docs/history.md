@@ -1,6 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
-이전 Windows 기반 진단34개는 통과했지만 신규 저장·복구는 native 미검증이다. 최신d9947f8 공개·CI 최대3회와 내부 Git 제공 선택은 사용자 응답 대기다. 전체 개발은 미완료이며 이전 기록은 [11월 아카이브](archive/history-2026-11.md)에 보존한다.
+이전 Windows 기반 진단34개는 통과했지만 신규 저장·복구는 native 미검증이다. 2026-11-06 사용자가 d9947f8 공개·CI 최대3회를 승인했고 Git은 사용자 설치본 사용으로 확정했다. 두 번째42128250149는44개 중37 PASS/7 FAIL이며 교체 API·권한 보존 수정02657f7을 완료했으나 세 번째 진단은 GitHub 전송 오류로 아직 시작하지 못했다. 전체 개발은 미완료이며 이전 기록은 [11월 아카이브](archive/history-2026-11.md)에 보존한다.
+
+### 2026-11-06 · by GPT-6
+
+- 사용자 승인으로 작업을 재개했다. d9947f8 및 이후 Windows 컴파일/시험 오류 수정만 공개 진단 브랜치에 push·CI 최대3회, 회당20분 범위다. 제품 활성화/패키징/모델/main 병합은 제외한다. Git은 사용자 설치본 사용으로 확정했으며 MinGit 번들 권고를 채택하지 않았다.
+- 정확한d9947f89099db6ad8ebc1c61ded20b11dd11d57a를 codex/m5-windows-save-recovery-20261105에 push했다. CI42127616502 in_progress 확인, 승인1/3회 사용. 이후 로컬 문서 커밋은 아직 공개하지 않았다. 결과와 호환 수리는 이어 기록한다.
+- 첫 CI는 Windows release 컴파일3분11초 성공 뒤 필수 direct-request 회귀 누락으로 실패했다. 기존 tests 모듈이 macOS 전용이었다. 해당 테스트만 공통 cfg(test) 모듈로 옮기고 workflow의 정확한 이름을 변경했다. 로컬 focused1 PASS(컴파일5.42초/시험0.22초), diff 검사 통과. 제품 gate/시험 조건은 완화하지 않았다.
+- 통합 수정9a62344. 별도 임시 index로 승인된d9947f8+동일4개 수정만 진단 commit0556a1a에 게시해 후속 로컬 문서 변경을 공개에서 제외했다. CI42128250149 in_progress, 승인2/3회 사용. 새 checkout/패키지는 만들지 않았다.
+- 두 번째는 Windows compile/필수16개 존재 확인 통과, native44개 중37 PASS/7 FAIL(2.57초). 교체 API의87 오류3개, 권한 복사 불일치 및 그 선행 실패4개이며 prepared abort 재열기는 통과했다. 후속 dispatcher 단계는 앞 단계 실패로 미실행이다.
+- 교체는 동일 source/parent handle과 단일 leaf를 유지한 NtSetInformationFile FileRenameInformation(10)으로 수정했다. [공식 API](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntsetinformationfile)와 [구조체](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information)를 확인했고 실제 cap-primitives3.4.6가 OVERLAPPED 없는 source를 FILE_SYNCHRONOUS_IO_NONALERT로 연다는 로컬 소스를 확인했다. descriptor가 이미 정확히 같으면 불필요한 SetSecurityInfo 상속 재처리를 생략하고 원본을 재확인하며, 다르면 기존 엄격한 복사/재검사를 유지한다. 검사 완화·제품 활성화는 없다.
+- 동일 독립 검토자1명이 동기 handle 전제·native ABI/NTSTATUS·정확한 권한 일치 fast path에 정적 차단 결함 없음으로 확인했다. 통합 수정02657f7, 진단 전용2120facf0ae39b51bb50e11fe28f9173744efa48(부모0556a1a). rustfmt/diff 확인; 실제 수정 native 검증은 아직 없다.
+- 세 번째 전송은 GitHub fatal error in commit_refs로2회 실패했다. 매 실행 생성 여부를 대조했고 원격은0556a1a, CI는기존2개만 존재한다. 동일 ref의 force=false API 갱신도 Object does not exist422로 거절됐다. 실제 CI 사용은2/3,1회 남음. 강제 push/새 branch 우회는 하지 않았다. 원격 오류가 해소되면 같은 진단 commit을 전송해 남은1회를 진행한다. 로그는/tmp/hello-agent-windows-42128250149.log에 있고 새 패키지/worktree/모델은 없다.
 
 ### 2026-11-05 · by GPT-6
 
@@ -28,6 +39,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Windows Git 제공 확정(2026-11-06)**: 사용자 설치 Git을 사용한다. 앱 포함 MinGit은 채택하지 않았다. 명시 설치 위치·실행 파일/의존성·업데이트 후 재확인과 기존 config/hook/filter 격리가 필요하며 PATH 첫 git.exe 자동 신뢰나 제품 activation 승인이 아니다.
 
 - **Windows replacement 계약 정정(2026-11-05)**: 앞선 expected-ID CAS 부재 blocker는 기존 atomic rename/관측 충돌 검사와 별도 보장을 혼동한 것으로 독립 검토자가 철회했다. macOS workspace save도 leaf CAS가 아니며 hostile same-user 동시 편집의 OS 완전배제 보장이 아니다. Windows save는 경로 결속·전후 ID/내용 검사와 replaceIntent/replaced 기록으로 연결했으나 ACL·namespace durability·cleanup/복구/native가 미완료라 제품 admission은 계속 닫혀 있다. 원본 apply/restore에 새 승인을 추가하거나 보존 계약을 약화하지 않는다.
 
