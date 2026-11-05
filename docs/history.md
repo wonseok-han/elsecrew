@@ -2,6 +2,15 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은0943902 CWD lease 기반 구현으로 진전했다. 메인이 typed lease를 Family/Transport의 내부 실행 경로에 연결했다. GUID CWD는 보유 DirectoryLease를 넘긴 경로로만 허용하며 기존 raw-string 진단 경로는 그대로 GUID 입력을 거부한다. 생성 직전과 ResumeThread 직전에 전체 경로 결속을 재검증한다. 실제 Git 호출/Windows 제품 admission과 실행 파일 권한은 아직 연결하지 않았다.
+- lease 수명은 creator supervisor가 소유한다. CreateProcess 성공 뒤에만 armed 상태로 바꾸고 전체 자손 종료 barrier 통과 뒤 해제한다. Family에는 비무장 관찰용 Arc만 전달한다. 생성 전 실패는 정상 해제하지만 armed 상태의 오류·panic·미확인 종료는 마지막 pin Arc를 의도적으로 유지하여 sidecar 종료 전 경로 보호가 풀리지 않게 한다. 실패 시 폴더 이름 변경 등이 계속 막힐 수 있으며 자동 복구 완료나 안전한 종료로 표현하지 않는다. 이 보존은 개별 launch의 경로 깊이 상한만 가지며 전역 자원 상한을 보장하지 않는다. 호출자의 durable fence·자동 재시도 금지와 복구 흐름이 필수다.
+- native 회귀 초안을 추가했다: (1) 실제 GUID CWD에서 marker 읽기·실행 중 guard 삭제 거절·정상 종료/owner 해제 뒤 삭제, (2) 없는 실행 파일의 생성 전 실패에서 pin 해제, (3) 별도 fixture 프로세스의 armed pin unwind 뒤 삭제 거절·프로세스 종료 뒤 해제. 세 번째는 시험 호스트 자체에 pin을 누출하지 않는다.
+- FILE_DELETE_CHILD ACL 회귀도 추가했다. 현재 토큰 SID만으로 자체 temp parent/child DACL을 구성해 child DELETE 거절+parent DELETE_CHILD 없음에서는 삭제 거절, parent 권한 추가 후에는 같은 child ACL로 삭제 성공을 먼저 확인한다. 그 상태에서 guard pin이 삭제를 막고 해제 후 삭제되는지 검사한다. 실제 사용자 폴더·ACL은 변경하지 않는다. 근거: Microsoft [삭제 권한 설명](https://devblogs.microsoft.com/oldnewthing/20070726-00/?p=25833).
+- 독립 정적 검토에서 현재 소유권/ACL 시험 변경의 구체적 차단 결함 없음. rustfmt·diff 검사 통과. Windows 컴파일/실행은 아직 미검증이며 앞선25 PASS를 이번 변경의 실행 증거로 재사용하지 않는다. 전체 build·CI·패키징·모델 호출·새 worktree/캐시·push·main 병합 없음.
+- 다음: 실행 파일 권한과 관리 영역의 빈 폴더 준비, 실제 Git 경로 연결을 구현한 뒤 native 검증을 묶는다. 제품 gate와 G6/출시 미완료는 유지한다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은 종료 supervisor·spawn 잠금·watcher25개의 Windows native PASS로 진전했다. 현재6514973의 깨끗한 checkout에서 메인이 CWD의 이름 교체/재분석 경로 문제를 이어서 구현했다. `windows_directory_lease.rs`는 held Dir에서 얻은 local GUID volume root부터 각 성분을 handle-relative로 열고, 명시 share read/write·delete 불허 핸들을 모두 보유한다. 기존 직접 자식 하나도 같은 방식으로 잡아 각 폴더를 비어 있지 않게 유지하며 모든 pin 확보 후 전체 ID·no-reparse·부모/자식 결속을 다시 확인한다.
 - 사용자 파일을 만들거나 수정하지 않는다. guard 없음/빈 폴더, 사전 DELETE 접근 핸들과 충돌, 이름 alias/ADS/장치명·256성분 상한·신원 변경은 거부한다. `windows_fs`의 GUID 경로 조회를 재사용 가능한 함수로 분리했으며 기존 local-volume 검증 의미는 유지한다.
 - 문서 근거: Microsoft [FSCTL_SET_REPARSE_POINT](https://learn.microsoft.com/en-us/windows-hardware/drivers/ifs/fsctl-set-reparse-point)의 nonempty 제한과 [reparse tags](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/c8e77b37-3909-4fe6-a4ea-2b9d423b1ee4)의 Directory/NameSurrogate bit 비호환이다. 이를 모든 cloud/third-party tag의 불변 증거로 확대하지 않는다. 실제 프로세스 연결 전 native 공격 시험·GUID CWD 호환, 실행 파일 권한, 실패/미종료 시 lease 보존 소유권이 남아 있다.
@@ -169,7 +178,7 @@
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 - **Windows 자손 supervisor(2026-11-05, scoped native PASS)**: a7c0674의 상시 Unsupported 봉쇄 뒤 creator-thread DEBUG_PROCESS 추적을 구현했다. 생성 이벤트를 계속하기 전 handle 복제·EXIT 계속 후 모든 signal·root signal·누적 Job 수 일치·active0이 완료 조건이다. 중첩 debugger 누락/상한/오류는 실패이며 Job 밖의 외부 broker는 보장 범위가 아니다. 3a02b76/CI41980701769에서 기존 실제 child signal 회귀와 native20·spawn1·watcher4 합계25개가 PASS했다. 전체 제품 PASS가 아니며 Windows admission은 닫혀 있다.
 - **Windows Job 종료 판정 반증(2026-11-05)**: 실제 CI41977646539에서 parent signal+Job active0/terminate(true) 뒤에도 별도 보유 자손 handle은 WAIT_TIMEOUT이었다. 기존 completed()/terminate()를 모든 자손 종료 증거로 인용하지 않는다. 임의 지연·카운트 완화로 해결하지 않으며 native gate는 닫아 둔다. 동일 실행의 disk capacity 회귀는 PASS, 전체16PASS1FAIL·watcher skipped다.
-- **Windows CWD lease 초안(2026-11-05, native 미검증)**: 모든 경로 성분과 기존 직접 child를 delete 공유 없이 보유해 nonempty를 유지하고 전체 ID/부모 결속을 검증하는 기반을 구현했다. 일반적인 공유 잠금만으로 속성 변경을 막는다는 주장은 하지 않는다. name-surrogate와 directory-bit tag 구분·프로세스 수명 소유권·실행 파일 권한·GUID CWD 호환이 남아 있어 아직 실행에 연결하지 않았다.
+- **Windows CWD lease 초안(2026-11-05, native 미검증)**: 모든 경로 성분과 기존 직접 child를 delete 공유 없이 보유해 nonempty를 유지하고 전체 ID/부모 결속을 검증하는 기반을 구현했다. 일반적인 공유 잠금만으로 속성 변경을 막는다는 주장은 하지 않는다. name-surrogate와 directory-bit tag 구분·실행 파일 권한·GUID CWD native 호환이 남아 있다. typed Family/Transport 연결과 armed pin의 성공/실패 소유권은 구현했으나 native 미검증이며 실제 Git/제품 admission에는 연결하지 않았다.
 - **Windows CWD 공유 잠금의 한계(2026-11-05)**: deny-share-write/delete만으로 reparse 불변을 증명하지 않는다. attribute 접근은 공유 제한과 별개이며 MS-FSA는 FILE_WRITE_ATTRIBUTES로 reparse 설정을 허용한다. CWD admission은 미완료이고 Windows gate는 유지한다.
 - **Windows 프로세스 연결 조건(2026-11-05)**: Job 생성 시 결속과 제한 시간/취소 가능한 stdio transport 기반은 scoped native 검증을 통과했으나 실제 Git에는 아직 미연결이다. stdio가 없으면 STARTF_USESTDHANDLES를 켜지 않으며, 지정 시 임시 복제 핸들+HANDLE_LIST만 전달한다. 공통 spawn 잠금의 경합 회귀는 통과했다. CWD 권한·Git 호출 연결과 제품 native 묶음 검증 전에는 Windows gate를 열지 않는다. Drop의 Job close는 종료 요청이며 부모 signal과 active-process 0만으로는 전체 종료 증거가 되지 않는다(11/05 native 반증 참조).
 - **기존 원본 경로 재확인 (2026-11-02)**: 과거 경로 철자는 source_identity로도 복원할 수 없다. native 폴더 선택으로만 `native_path_binding`을 보강하며 catalog reopen/원본 접근은 없는 표식을 자동 생성하지 않는다. 재선택은 기존 snapshot과 복구 상태를 보존한다.

@@ -8,7 +8,7 @@
 use super::{protocol_path, windows_fs, ProjectFailure};
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt, OpenOptionsMaybeDirExt};
 use cap_std::fs::{Dir, File, OpenOptions, OpenOptionsExt};
-use std::{ffi::OsStr, os::windows::fs::OpenOptionsExt as _};
+use std::{ffi::OsStr, os::windows::fs::OpenOptionsExt as _, sync::Arc};
 
 pub(super) struct DirectoryLease {
     path: String,
@@ -18,6 +18,52 @@ pub(super) struct DirectoryLease {
     guard_name: String,
     guard_id: windows_fs::Identity,
     guard_is_directory: bool,
+}
+
+/// Creator-thread resource ownership. Once a process exists, only the proven
+/// family barrier can release the final pin. On unconfirmed failure retain pins
+/// until sidecar exit; the durable launch fence must prohibit automatic retry.
+pub(super) struct RetainedDirectory {
+    pin: Option<Arc<DirectoryLease>>,
+    armed: bool,
+}
+impl RetainedDirectory {
+    pub(super) fn new(pin: DirectoryLease) -> Self {
+        Self {
+            pin: Some(Arc::new(pin)),
+            armed: false,
+        }
+    }
+    pub(super) fn observer(&self) -> Self {
+        Self {
+            pin: self.pin.clone(),
+            armed: false,
+        }
+    }
+    pub(super) fn path(&self) -> &str {
+        self.pin.as_ref().unwrap().path()
+    }
+    pub(super) fn validate(&self) -> Result<(), ProjectFailure> {
+        self.pin.as_ref().unwrap().validate()
+    }
+    pub(super) fn arm(&mut self) {
+        self.armed = true;
+    }
+    pub(super) fn confirmed(&mut self) {
+        self.armed = false;
+    }
+}
+impl Drop for RetainedDirectory {
+    fn drop(&mut self) {
+        if self.armed {
+            // Do not close pathname pins while an unconfirmed descendant may
+            // still resolve its CWD. This bounded per-failed-launch retention is
+            // intentionally not reported as successful cleanup.
+            if let Some(pin) = self.pin.take() {
+                std::mem::forget(pin);
+            }
+        }
+    }
 }
 
 fn failure(error: std::io::Error) -> ProjectFailure {
@@ -216,6 +262,140 @@ mod tests {
         }
         Ok(())
     }
+    #[test]
+    fn parent_delete_child_permission_cannot_bypass_guard_pin() {
+        use std::os::windows::{
+            ffi::OsStrExt,
+            io::{FromRawHandle, OwnedHandle},
+        };
+        #[link(name = "advapi32")]
+        extern "system" {
+            fn OpenProcessToken(process: *mut c_void, access: u32, token: *mut *mut c_void) -> i32;
+            fn GetTokenInformation(
+                token: *mut c_void,
+                class: i32,
+                data: *mut c_void,
+                size: u32,
+                needed: *mut u32,
+            ) -> i32;
+            fn ConvertSidToStringSidW(sid: *const c_void, text: *mut *mut u16) -> i32;
+            fn ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                text: *const u16,
+                revision: u32,
+                descriptor: *mut *mut c_void,
+                size: *mut u32,
+            ) -> i32;
+            fn SetFileSecurityW(
+                path: *const u16,
+                information: u32,
+                descriptor: *const c_void,
+            ) -> i32;
+        }
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetCurrentProcess() -> *mut c_void;
+            fn LocalFree(memory: *mut c_void) -> *mut c_void;
+        }
+        struct Local(*mut c_void);
+        impl Drop for Local {
+            fn drop(&mut self) {
+                unsafe {
+                    LocalFree(self.0);
+                }
+            }
+        }
+        let mut raw = std::ptr::null_mut();
+        assert_ne!(
+            unsafe { OpenProcessToken(GetCurrentProcess(), 8, &mut raw) },
+            0
+        );
+        let token = unsafe { OwnedHandle::from_raw_handle(raw) };
+        let mut size = 0;
+        assert_eq!(
+            unsafe {
+                GetTokenInformation(token.as_raw_handle(), 1, std::ptr::null_mut(), 0, &mut size)
+            },
+            0
+        );
+        assert!((8..65536).contains(&size));
+        let mut data = vec![0usize; (size as usize).div_ceil(std::mem::size_of::<usize>())];
+        assert_ne!(
+            unsafe {
+                GetTokenInformation(
+                    token.as_raw_handle(),
+                    1,
+                    data.as_mut_ptr().cast(),
+                    size,
+                    &mut size,
+                )
+            },
+            0
+        );
+        // TOKEN_USER begins with SID_AND_ATTRIBUTES, whose first field is PSID.
+        let sid = unsafe { *(data.as_ptr().cast::<*const c_void>()) };
+        let mut raw_text = std::ptr::null_mut();
+        assert_ne!(unsafe { ConvertSidToStringSidW(sid, &mut raw_text) }, 0);
+        let _text_allocation = Local(raw_text.cast());
+        let mut length = 0;
+        while unsafe { *raw_text.add(length) } != 0 {
+            length += 1;
+            assert!(length < 256);
+        }
+        let sid =
+            String::from_utf16(unsafe { std::slice::from_raw_parts(raw_text, length) }).unwrap();
+        let set_acl = |path: &Path, sddl: &str| {
+            let text: Vec<u16> = sddl.encode_utf16().chain([0]).collect();
+            let mut raw = std::ptr::null_mut();
+            assert_ne!(
+                unsafe {
+                    ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                        text.as_ptr(),
+                        1,
+                        &mut raw,
+                        std::ptr::null_mut(),
+                    )
+                },
+                0
+            );
+            let descriptor = Local(raw);
+            let path: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+            assert_ne!(
+                unsafe { SetFileSecurityW(path.as_ptr(), 0x80000004, descriptor.0) },
+                0,
+                "{}",
+                std::io::Error::last_os_error()
+            ); // protected DACL only
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let parent = temp.path().join("parent");
+        std::fs::create_dir(&parent).unwrap();
+        let guard = parent.join("guard");
+        let control = parent.join("control");
+        std::fs::write(&guard, b"guard").unwrap();
+        std::fs::write(&control, b"control").unwrap();
+        let child_acl = format!("D:P(D;;SD;;;{sid})(A;;FA;;;{sid})");
+        set_acl(&guard, &child_acl);
+        set_acl(&control, &child_acl);
+        // Child DELETE denied, parent FILE_DELETE_CHILD absent: deletion fails.
+        set_acl(&parent, &format!("D:P(A;;0x001f01bf;;;{sid})"));
+        let denied = std::fs::remove_file(&control);
+        // Restore parent full access before assertions so temp cleanup remains
+        // possible if the negative control unexpectedly fails.
+        set_acl(&parent, &format!("D:P(A;;FA;;;{sid})"));
+        assert_eq!(denied.unwrap_err().raw_os_error(), Some(5));
+        // Same child ACL, parent now grants FILE_DELETE_CHILD: deletion works.
+        std::fs::remove_file(&control).unwrap();
+        let dir = authority(&parent);
+        let lease = DirectoryLease::acquire(&dir, OsStr::new("guard")).unwrap();
+        assert_eq!(
+            std::fs::remove_file(&guard).unwrap_err().raw_os_error(),
+            Some(32)
+        );
+        lease.validate().unwrap();
+        drop(lease);
+        std::fs::remove_file(&guard).unwrap();
+    }
+
     #[test]
     fn missing_guard_and_preexisting_delete_access_are_rejected() {
         let temp = tempfile::tempdir().unwrap();

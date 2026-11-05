@@ -34,6 +34,7 @@ mod supervisor;
 #[cfg(windows)]
 pub(super) mod native {
     use super::{quoted, supervisor::Supervisor};
+    use crate::project::windows_directory_lease::{DirectoryLease, RetainedDirectory};
     use std::{
         alloc::{alloc_zeroed, dealloc, Layout},
         collections::BTreeMap,
@@ -231,12 +232,14 @@ pub(super) mod native {
         thread: OwnedHandle,
         started: bool,
         supervisor: Supervisor,
+        directory: Option<RetainedDirectory>,
     }
 
     pub(super) struct Launch {
         pub(super) job: OwnedHandle,
         pub(super) process: OwnedHandle,
         pub(super) thread: OwnedHandle,
+        pub(super) directory: Option<RetainedDirectory>,
     }
 
     pub(super) fn accounting(job: &OwnedHandle) -> io::Result<(u32, u32)> {
@@ -283,6 +286,36 @@ pub(super) mod native {
             directory: &str,
             stdio: Option<[BorrowedHandle<'_>; 3]>,
         ) -> io::Result<Self> {
+            Self::suspended_inner(executable, arguments, environment, directory, stdio, None)
+        }
+
+        /// CWD binding only. Executable authority/product admission is separate.
+        pub(crate) fn suspended_in_lease(
+            executable: &str,
+            arguments: &[String],
+            environment: &BTreeMap<String, String>,
+            directory: DirectoryLease,
+            stdio: Option<[BorrowedHandle<'_>; 3]>,
+        ) -> io::Result<Self> {
+            let path = directory.path().to_owned();
+            Self::suspended_inner(
+                executable,
+                arguments,
+                environment,
+                &path,
+                stdio,
+                Some(RetainedDirectory::new(directory)),
+            )
+        }
+
+        fn suspended_inner(
+            executable: &str,
+            arguments: &[String],
+            environment: &BTreeMap<String, String>,
+            directory: &str,
+            stdio: Option<[BorrowedHandle<'_>; 3]>,
+            retained: Option<RetainedDirectory>,
+        ) -> io::Result<Self> {
             // Borrowed stdio may not cross the creator thread's lifetime.
             // These clones stay non-inheritable; only Launch::create duplicates
             // them as inheritable while holding the common spawn mutex.
@@ -302,7 +335,14 @@ pub(super) mod native {
                 let stdio = handles
                     .as_ref()
                     .map(|h| [h[0].as_handle(), h[1].as_handle(), h[2].as_handle()]);
-                Launch::create(&executable, &arguments, &environment, &directory, stdio)
+                Launch::create(
+                    &executable,
+                    &arguments,
+                    &environment,
+                    &directory,
+                    stdio,
+                    retained,
+                )
             })?;
             Ok(Self {
                 job: launch.job,
@@ -310,6 +350,7 @@ pub(super) mod native {
                 thread: launch.thread,
                 started: false,
                 supervisor,
+                directory: launch.directory,
             })
         }
 
@@ -318,6 +359,11 @@ pub(super) mod native {
                 return Err(invalid("primary thread has already been resumed"));
             }
             self.supervisor.check()?;
+            if let Some(directory) = &self.directory {
+                directory
+                    .validate()
+                    .map_err(|error| io::Error::other(error.detail))?;
+            }
             self.started = true;
             if unsafe { ResumeThread(self.thread.as_raw_handle()) } != 1 {
                 return Err(io::Error::other(
@@ -365,9 +411,18 @@ pub(super) mod native {
             environment: &BTreeMap<String, String>,
             directory: &str,
             stdio: Option<[BorrowedHandle<'_>; 3]>,
+            mut retained: Option<RetainedDirectory>,
         ) -> io::Result<Self> {
-            for path in [executable, directory] {
-                crate::project::protocol_path::from_native(path, true).map_err(invalid)?;
+            crate::project::protocol_path::from_native(executable, true).map_err(invalid)?;
+            if let Some(pin) = &retained {
+                if pin.path() != directory {
+                    return Err(invalid("CWD lease path mismatch"));
+                }
+                pin.validate()
+                    .map_err(|error| io::Error::other(error.detail))?;
+            } else {
+                // Raw GUID paths cannot enter the diagnostic string path.
+                crate::project::protocol_path::from_native(directory, true).map_err(invalid)?;
             }
             if arguments.len() > 512 {
                 return Err(invalid("too many native process arguments"));
@@ -496,6 +551,10 @@ pub(super) mod native {
             let mut info: ProcessInfo = unsafe { std::mem::zeroed() };
             // EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT |
             // CREATE_SUSPENDED | CREATE_NO_WINDOW. Membership is atomic with creation.
+            if let Some(pin) = &retained {
+                pin.validate()
+                    .map_err(|error| io::Error::other(error.detail))?;
+            }
             let ok = unsafe {
                 CreateProcessW(
                     executable_wide.as_ptr(),
@@ -513,12 +572,16 @@ pub(super) mod native {
             if ok == 0 {
                 return Err(io::Error::last_os_error());
             }
+            if let Some(pin) = &mut retained {
+                pin.arm();
+            }
             // Successful creation transfers both handles to the creator thread.
             // All debug events remain on that thread through final completion.
             Ok(Self {
                 job,
                 process: unsafe { OwnedHandle::from_raw_handle(info.process) },
                 thread: unsafe { OwnedHandle::from_raw_handle(info.thread) },
+                directory: retained,
             })
         }
     }
@@ -575,6 +638,31 @@ pub(super) mod native {
                 std::fs::write("nested-child.pid", child.id().to_string()).unwrap();
                 // This debugger thread's exit terminates its own debug child.
                 // The outer supervisor must still reject the missing inventory.
+            } else if mode == "retention-unwind" {
+                use cap_std::{ambient_authority, fs::Dir};
+                use std::{ffi::OsStr, io::Write};
+                let dir =
+                    Dir::open_ambient_dir(std::env::current_dir().unwrap(), ambient_authority())
+                        .unwrap();
+                let mut retained = RetainedDirectory::new(
+                    DirectoryLease::acquire(&dir, OsStr::new("guard")).unwrap(),
+                );
+                retained.arm();
+                let failure = std::panic::catch_unwind(move || {
+                    let _pin = retained;
+                    panic!("injected unconfirmed owner failure");
+                });
+                assert!(failure.is_err());
+                assert_eq!(
+                    std::fs::remove_file("guard").unwrap_err().raw_os_error(),
+                    Some(32)
+                );
+                std::io::stdout().write_all(b"HELLO_RETAINED").unwrap();
+                // The retained pin is released by process exit, not unwinding.
+            } else if mode == "cwd" {
+                use std::io::Write;
+                assert_eq!(std::fs::read("cwd-marker").unwrap(), b"owned-directory");
+                std::io::stdout().write_all(b"HELLO_CWD_OK").unwrap();
             } else if mode == "output" {
                 use std::io::Write;
                 std::io::stdout().write_all(b"HELLO_JOB_STDOUT").unwrap();
@@ -608,6 +696,26 @@ pub(super) mod native {
             )
             .unwrap()
         }
+        #[test]
+        fn rejected_process_creation_releases_unarmed_directory_pins() {
+            use cap_std::{ambient_authority, fs::Dir};
+            use std::ffi::OsStr;
+            let root = tempfile::tempdir().unwrap();
+            std::fs::write(root.path().join("guard"), b"pin").unwrap();
+            let dir = Dir::open_ambient_dir(root.path(), ambient_authority()).unwrap();
+            let lease = DirectoryLease::acquire(&dir, OsStr::new("guard")).unwrap();
+            let missing = root.path().canonicalize().unwrap().join("missing.exe");
+            assert!(Family::suspended_in_lease(
+                missing.to_str().unwrap(),
+                &[],
+                &BTreeMap::new(),
+                lease,
+                None
+            )
+            .is_err());
+            std::fs::remove_file(root.path().join("guard")).unwrap();
+        }
+
         #[test]
         fn explicit_standard_handles_receive_output() {
             use std::os::windows::io::AsHandle;

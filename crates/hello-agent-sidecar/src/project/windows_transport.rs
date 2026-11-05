@@ -1,6 +1,7 @@
 //! Owned Windows stdio transport. The Git/CWD admission gate is still closed.
 #![allow(dead_code)]
 use super::{
+    windows_directory_lease::DirectoryLease,
     windows_job::native::Family,
     windows_pipe::{BudgetPipe, Direction},
     GIT_STDERR_TAIL_BYTES,
@@ -38,6 +39,47 @@ impl Transport {
         budget: Duration,
         external_cancel: Option<Arc<AtomicBool>>,
     ) -> io::Result<Self> {
+        Self::spawn_inner(
+            executable,
+            args,
+            environment,
+            directory,
+            budget,
+            external_cancel,
+            None,
+        )
+    }
+    /// Moves CWD protection into process-family ownership. This does not grant
+    /// executable authority or enable the product's Windows Git admission.
+    pub(super) fn spawn_in_lease(
+        executable: &str,
+        args: &[String],
+        environment: &BTreeMap<String, String>,
+        directory: DirectoryLease,
+        budget: Duration,
+        external_cancel: Option<Arc<AtomicBool>>,
+    ) -> io::Result<Self> {
+        let path = directory.path().to_owned();
+        Self::spawn_inner(
+            executable,
+            args,
+            environment,
+            &path,
+            budget,
+            external_cancel,
+            Some(directory),
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_inner(
+        executable: &str,
+        args: &[String],
+        environment: &BTreeMap<String, String>,
+        directory: &str,
+        budget: Duration,
+        external_cancel: Option<Arc<AtomicBool>>,
+        lease: Option<DirectoryLease>,
+    ) -> io::Result<Self> {
         let deadline = Instant::now()
             .checked_add(budget)
             .ok_or_else(|| io::Error::other("invalid Git budget"))?;
@@ -70,17 +112,15 @@ impl Transport {
             cancelled.clone(),
             external_cancel.clone(),
         )?;
-        let family = Family::suspended_with_stdio(
-            executable,
-            args,
-            environment,
-            directory,
-            Some([
-                child_in.as_handle(),
-                child_out.as_handle(),
-                child_err.as_handle(),
-            ]),
-        )?;
+        let stdio = Some([
+            child_in.as_handle(),
+            child_out.as_handle(),
+            child_err.as_handle(),
+        ]);
+        let family = match lease {
+            Some(lease) => Family::suspended_in_lease(executable, args, environment, lease, stdio),
+            None => Family::suspended_with_stdio(executable, args, environment, directory, stdio),
+        }?;
         // Do not keep parent copies of child endpoints: they would suppress EOF.
         drop((child_in, child_out, child_err));
         let mut owner = Self {
@@ -176,6 +216,82 @@ impl Drop for Transport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unconfirmed_unwind_retains_pins_until_owner_process_exits() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("guard"), b"pin").unwrap();
+        let mut owner = Transport::spawn(
+            std::env::current_exe().unwrap().to_str().unwrap(),
+            &[
+                "--exact".into(),
+                "project::windows_job::native::tests::family_fixture".into(),
+                "--nocapture".into(),
+            ],
+            &BTreeMap::from([
+                ("SystemRoot".into(), std::env::var("SystemRoot").unwrap()),
+                ("HELLO_AGENT_JOB_FIXTURE".into(), "retention-unwind".into()),
+            ]),
+            root.path().canonicalize().unwrap().to_str().unwrap(),
+            Duration::from_secs(10),
+            None,
+        )
+        .unwrap();
+        let mut output = String::new();
+        owner
+            .stdout
+            .take()
+            .unwrap()
+            .read_to_string(&mut output)
+            .unwrap();
+        assert_eq!(owner.finish().unwrap().0, 0);
+        assert!(output.contains("HELLO_RETAINED"));
+        std::fs::remove_file(root.path().join("guard")).unwrap();
+    }
+
+    #[test]
+    fn guid_cwd_pins_survive_until_confirmed_family_release() {
+        use cap_std::{ambient_authority, fs::Dir};
+        use std::ffi::OsStr;
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("guard"), b"pin").unwrap();
+        std::fs::write(root.path().join("cwd-marker"), b"owned-directory").unwrap();
+        let dir = Dir::open_ambient_dir(root.path(), ambient_authority()).unwrap();
+        let lease = DirectoryLease::acquire(&dir, OsStr::new("guard")).unwrap();
+        let mut owner = Transport::spawn_in_lease(
+            std::env::current_exe().unwrap().to_str().unwrap(),
+            &[
+                "--exact".into(),
+                "project::windows_job::native::tests::family_fixture".into(),
+                "--nocapture".into(),
+            ],
+            &BTreeMap::from([
+                ("SystemRoot".into(), std::env::var("SystemRoot").unwrap()),
+                ("HELLO_AGENT_JOB_FIXTURE".into(), "cwd".into()),
+            ]),
+            lease,
+            Duration::from_secs(10),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::remove_file(root.path().join("guard"))
+                .unwrap_err()
+                .raw_os_error(),
+            Some(32)
+        );
+        let mut output = String::new();
+        owner
+            .stdout
+            .take()
+            .unwrap()
+            .read_to_string(&mut output)
+            .unwrap();
+        assert_eq!(owner.finish().unwrap().0, 0);
+        assert!(output.contains("HELLO_CWD_OK"));
+        drop(owner);
+        std::fs::remove_file(root.path().join("guard")).unwrap();
+    }
+
     #[test]
     fn owned_transport_captures_fixture_and_proves_completion() {
         let directory = tempfile::tempdir().unwrap();

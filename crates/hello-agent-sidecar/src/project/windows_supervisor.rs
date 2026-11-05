@@ -109,11 +109,12 @@ impl Supervisor {
             .name("windows-family-owner".into())
             .spawn(move || {
                 let result = (|| -> io::Result<u32> {
-                    let launch = create()?;
+                    let mut launch = create()?;
                     let published = Launch {
                         job: launch.job.try_clone()?,
                         process: launch.process.try_clone()?,
                         thread: launch.thread.try_clone()?,
+                        directory: launch.directory.as_ref().map(|pin| pin.observer()),
                     };
                     if send.send(published).is_err() {
                         unsafe {
@@ -121,7 +122,20 @@ impl Supervisor {
                         }
                         return Err(io::Error::other("family creation receiver closed"));
                     }
-                    let result = pump(&launch, &stop_worker);
+                    let result = pump(&launch, &stop_worker).map_err(|error| {
+                        if launch.directory.is_some() {
+                            io::Error::other(format!(
+                                "{error}; CWD pins retained until sidecar exit"
+                            ))
+                        } else {
+                            error
+                        }
+                    });
+                    if result.is_ok() {
+                        if let Some(pin) = &mut launch.directory {
+                            pin.confirmed();
+                        }
+                    }
                     if result.is_err() {
                         // Request only. Failure never changes into completion proof.
                         unsafe {
