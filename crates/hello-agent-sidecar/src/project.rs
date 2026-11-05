@@ -1839,7 +1839,8 @@ impl ProjectManager {
             .as_ref()
             .err()
             .is_some_and(|error| error.outcome_unknown);
-        if !preserve {
+        let session_completed_atomically = cfg!(windows) && result.is_ok();
+        if !preserve && !session_completed_atomically {
             if let Err(error) =
                 self.persist_workspace_save_session(storage, address, save_id, false)
             {
@@ -2252,7 +2253,7 @@ impl ProjectManager {
         #[cfg(not(windows))]
         drop(target_temp);
 
-        self.persist_save_lock(storage, &active, save_id, request_id, true, None)?;
+        self.persist_save_lock(storage, &active, save_id, request_id, true, None, pending.chat_id.as_deref())?;
         #[cfg(windows)]
         self.replace_windows_save(
             storage, &active, save_id, request_id, &save_guard, &mut prepared,
@@ -2326,7 +2327,7 @@ impl ProjectManager {
                 "failure injected after Windows cleanup before final lock clear",
             ));
         }
-        self.persist_save_lock(storage, &active, save_id, request_id, false, Some(&version))
+        self.persist_save_lock(storage, &active, save_id, request_id, false, Some(&version), pending.chat_id.as_deref())
             .map_err(|error| {
                 ProjectFailure::ambiguous(format!(
                     "save bytes were replaced but recovery ledger clear failed: {}",
@@ -3186,6 +3187,7 @@ impl ProjectManager {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn persist_save_lock(
         &self,
         storage: &mut Storage,
@@ -3194,18 +3196,25 @@ impl ProjectManager {
         request_id: &str,
         recovery_required: bool,
         committed_version: Option<&str>,
+        _chat_id: Option<&str>,
     ) -> Result<(), ProjectFailure> {
         let phase = if recovery_required {
             "saveBeforeRename"
         } else {
             "saveCommitted"
         };
-        let evidence = json!({"phase":phase,"save_id":save_id,"committed_version":committed_version});
+        let evidence =
+            json!({"phase":phase,"save_id":save_id,"committed_version":committed_version});
         #[cfg(windows)]
         let evidence = {
             let mut evidence = evidence;
-            if let Some(guard) = storage.projection_record("lock", &active.lock_id)?
-                .and_then(|lock| lock.get("evidence").and_then(|v| v.get("windowsSaveGuard")).cloned())
+            if let Some(guard) = storage
+                .projection_record("lock", &active.lock_id)?
+                .and_then(|lock| {
+                    lock.get("evidence")
+                        .and_then(|v| v.get("windowsSaveGuard"))
+                        .cloned()
+                })
             {
                 if !recovery_required {
                     if guard["phase"] != "cleanupComplete"
@@ -3213,18 +3222,92 @@ impl ProjectManager {
                         || guard["worktreeId"] != active.worktree_id
                         || guard["workspaceIdentity"] != active.workspace_identity
                         || guard["sourceVersion"].as_str() != committed_version
-                        || guard["directoryDurability"] != windows_durability::FLUSHED {
-                        return Err(ProjectFailure::ambiguous("Windows save cleanup receipt differs"));
+                        || guard["directoryDurability"] != windows_durability::FLUSHED
+                    {
+                        return Err(ProjectFailure::ambiguous(
+                            "Windows save cleanup receipt differs",
+                        ));
                     }
                     evidence["completedWindowsSave"] = guard;
                 } else {
                     evidence["windowsSaveGuard"] = guard;
                 }
             } else if !recovery_required {
-                return Err(ProjectFailure::ambiguous("Windows save cleanup receipt is missing"));
+                return Err(ProjectFailure::ambiguous(
+                    "Windows save cleanup receipt is missing",
+                ));
             }
             evidence
         };
+        let payload = json!({
+            "lock_id":active.lock_id,
+            "project_id":active.project_id,
+            "writer_run_id":Value::Null,
+            "worktree_path":canonical_protocol_path(&active.worktree_path)?,
+            "poisoned":false,
+            "recovery_required":recovery_required,
+            "evidence":evidence,
+        });
+        #[cfg(windows)]
+        if !recovery_required {
+            if let Some(chat_id) = _chat_id {
+                let address = WorkspaceAddress {
+                    chat_id: chat_id.to_string(),
+                    project_id: active.project_id.clone(),
+                    worktree_id: active.worktree_id.clone(),
+                    workspace_identity: active.workspace_identity.clone(),
+                };
+                self.verify_durable_save_session(storage, &address, save_id)?;
+                let lock = storage
+                    .projection_record("lock", &active.lock_id)?
+                    .ok_or_else(|| ProjectFailure::ambiguous("save lock is missing"))?;
+                let mut chat = storage
+                    .projection_record("chat", chat_id)?
+                    .ok_or_else(|| ProjectFailure::ambiguous("save chat is missing"))?;
+                let revision = |record: &Map<String, Value>| {
+                    record
+                        .get("last_event_sequence")
+                        .and_then(Value::as_u64)
+                        .ok_or_else(|| {
+                            ProjectFailure::ambiguous("save completion revision is missing")
+                        })
+                };
+                let lock_revision = revision(&lock)?;
+                let chat_revision = revision(&chat)?;
+                let sessions = chat
+                    .get_mut("save_sessions")
+                    .and_then(Value::as_object_mut)
+                    .ok_or_else(|| ProjectFailure::ambiguous("save sessions are missing"))?;
+                if sessions.remove(save_id).is_none() {
+                    return Err(ProjectFailure::ambiguous("save session disappeared"));
+                }
+                storage.upsert_projection_records_atomic_checked(
+                    vec![
+                        crate::storage::ProjectionUpsert {
+                            aggregate_type: "lock",
+                            aggregate_id: active.lock_id.clone(),
+                            operation_id: format!("op_save_commit_{save_id}"),
+                            request_id: Some(request_id.to_string()),
+                            payload: payload.as_object().cloned().ok_or_else(|| {
+                                ProjectFailure::manifest("save lock payload differs")
+                            })?,
+                        },
+                        crate::storage::ProjectionUpsert {
+                            aggregate_type: "chat",
+                            aggregate_id: chat_id.to_string(),
+                            operation_id: format!("op_workspace_save_session_finish_{save_id}"),
+                            request_id: None,
+                            payload: chat,
+                        },
+                    ],
+                    &[
+                        ("lock", &active.lock_id, lock_revision),
+                        ("chat", chat_id, chat_revision),
+                    ],
+                )?;
+                return Ok(());
+            }
+        }
         append_object(
             storage,
             "lock",
@@ -3239,15 +3322,7 @@ impl ProjectManager {
                 save_id
             ),
             request_id,
-            json!({
-                "lock_id":active.lock_id,
-                "project_id":active.project_id,
-                "writer_run_id":Value::Null,
-                "worktree_path":canonical_protocol_path(&active.worktree_path)?,
-                "poisoned":false,
-                "recovery_required":recovery_required,
-                "evidence":evidence,
-            }),
+            payload,
         )
     }
 

@@ -4,6 +4,14 @@
 
 ### 2026-11-05 · by GPT-6
 
+- df793c6 이후 중단 저장 재개를 준비하다 Windows 정상 저장의 마지막 lock clear와 chat save_session 삭제가 별도 원장 쓰기인 틈을 확인했다. 메인이 최종 완료를 lock/chat의 정확한 revision을 검사하는 단일 SQLite transaction으로 묶었다. cleanupComplete/flush receipt 검사는 그대로며 성공 경로는 session을 다시 삭제하지 않는다. V2 chat 없는 저장과 macOS의 기존 흐름은 유지한다.
+- 이 변경은 재시작 재개 자체의 완료가 아니다. 명시 복구·단계별 실패 주입/native 통합·Windows 제품 활성화는 여전히 미완료다. 기존34 native PASS는 새 Windows 저장 코드의 검증 증거가 아니다.
+- 기존 캐시를 이용한 macOS cargo check -p hello-agent-sidecar --locked --offline 통과(1.78초, jobs/threads4). Windows cfg 컴파일은 검증하지 못했다. project.rs 구문 파싱·git diff --check 확인; 별도 패키지/worktree/CI/push/모델 실행 없음. 승인된 기존 CI 예산은2/3 사용 상태를 유지하며 새 기능 공개에 쓰지 않는다.
+- 상시 승인된 독립 검토자1명이 이 diff의 원자성·revision 경합·성공/오류 분기·macOS 비변경을 검토해 정적 차단 결함 없음을 확인했다. 최종 transaction 실패 시 lock/session 동시 보존과 성공 시 정확히 한 번 완료되는 회귀는 Windows 묶음 검증에 남긴다.
+- 다음은 최종 완료 실패/재시작 경계 회귀와 중단 cleanup 명시 재개 연결, 이후 Windows 묶음 검증이다. 전체 앱 개발 완료를 선언하지 않는다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은 cacf883의 NTFS write-through flush receipt로 진전했다. 이번 메인 구현은 Windows 정상 저장의 cleanup journal과 잠금 해제까지 연결했다. staging 파일 pin/current root 확인 아래 고정 anchor를 create_new/write-through/flush하고 기존 marker는 정확한 bytes를 읽기만 한다. staging parent/anchor/file ID를 최초 intent에 결속한다. 마지막 임시 파일 정리 뒤에도 staging parent를 nonempty로 pin할 수 있는 소량의 영구 표식이다.
 - 교체 flush receipt 확인 뒤 기존 guard lease를 유지하며 source handle을 해제하고 committed target으로 parent pin을 인계한다. target full ID/내용/접근 권한 재확인 → cleanupIntent → old guard lease 해제/exact-ID 삭제 → guardRemoved → target 재확인 → staging handle 해제/exact-ID 삭제 → stagingRemoved → target/두 lease 재확인 → cleanupComplete를 기록한다. target pin은 최종 lock clear까지 유지한다. 실패는 기존 outcome_unknown/session·증거 보존 경로다.
 - 최종 lock clear는 cleanupComplete의 정확한 save/workspace/version/flush receipt를 요구하며 증거가 없으면 거절한다. 완료 증거는 completedWindowsSave로 남겨 다음 저장의 새 windowsSaveGuard와 구분한다. PendingSave.file을 Option+오류 반환 getter로 바꿔 staging handle을 명시적으로 닫으며 macOS는 정상 Some 경로와 기존 정리 순서를 유지한다.
