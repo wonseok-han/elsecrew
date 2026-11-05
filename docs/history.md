@@ -2,6 +2,13 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은ced393a Windows 공용 reader adapter로 진전했다. 메인이 bundle export·ls-tree·cat-file materialization·diff batch·control 출력을 `spawn_git_stream` 한 곳으로 모았다. 명령별 stdin 필요 여부는 보존하고 watcher 취소 토큰도 이 경계로 전달한다. 프로세스 시작 실패는 기존 export/diff와 같은 recovery 분류로 통일하며 control의 manifest 분류를 바꾼다. Windows 실제 admission은 아직 차단이며 capability 획득/설치본 신뢰를 이 한 곳에 연결할 수 있다.
+- 공식 MinGit 문서를 확인했다. 타사 앱용 최소 비대화형 Git+의존성 배포판이지만 alias/hook 실행을 지원하므로 격리 정책을 대신하지 않는다. Windows 내부 Git 제공 방식이 아직 결정되지 않았음을 확인하고 앱 포함 MinGit(권고) 대 기존 PC Git 재사용을 사용자에게 질문했다. 이는 Codex·Claude 업데이트 정책과 별도이며 다운로드·설치·패키징은 하지 않았다. 검토 가능한 제안을 M5 제품 제안서 §12에 기록했다.
+- Rust 구문·diff 검사 통과. 구현 우선 지시에 따라 이 호출부 통합 뒤 전체 build/회귀는 반복하지 않았다. 후속 묶음 검증에는 기존 snapshot·source-root-swap·diff·watcher 취소 시험 및 Windows adapter native 시험을 포함한다. 새 캐시/worktree/CI·모델 호출·push·main 병합 없음.
+- 다음: 사용자 Git 제공 방식 선택을 반영해 설치 위치/의존성 신뢰와 capability admission을 연결하고, 빈 관리 폴더 및 Windows 파일 교체/복구를 마친 뒤 누적 검증한다. G6/출시는 여전히 미완료다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은458f80a 실행 이미지 결속 구현으로 진전했다. 메인이 Windows 공용 Git reader 연결을 이어서 구현했다. 기존 Windows StreamingGitChild의 parent-only Child.wait/kill·무제한 blocking pipe 경로를 제거하고 `windows_git_process` adapter를 사용하도록 cfg를 분리했다. Unix 동작은 변경하지 않았다.
 - adapter는 typed image/CWD lease의 Transport를 소유하며 공용 snapshot/diff reader에 bounded stdin/stdout을 제공한다. finish는 stdin EOF 후 supervisor의 전체 종료 증거를 기다리고 Windows exit code를 std ExitStatus로 변환한다. Drop은 외부 pipe를 닫고 Transport의 취소/종료 처리로 이어진다. 일반 Command는 capability를 전달하지 못하므로 실행을 거절한다. 이는 실제 Git 설치본 admission 활성화가 아니며 기존 제품 차단은 유지한다.
 - native 회귀 초안으로 raw Command 우회 거절과 bound Transport의 입력 EOF → fixture 응답 → 실제 공용 finish_git_control 출력/종료 소비 → guard 해제를 연결했다. rustfmt·diff 검사 통과, Windows 컴파일/실행은 미검증이다. 추가 로컬 빌드 캐시/패키지/worktree·push/CI·실제 모델 호출 없음.
@@ -190,6 +197,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Windows 내부 Git 제공 방식(2026-11-05, 미결정)**: 앱 포함 공식 MinGit과 기존 PC Git 재사용 중 사용자 선택 대기. MinGit도 hook/alias를 지원하므로 격리 대체가 아니다. 제안·출처는 `docs/proposals/m5-coding-agent-ide.md` §12. Codex/Claude 설치 정책과 별도이며 아직 다운로드/활성화 없음.
 - **Windows 자손 supervisor(2026-11-05, scoped native PASS)**: a7c0674의 상시 Unsupported 봉쇄 뒤 creator-thread DEBUG_PROCESS 추적을 구현했다. 생성 이벤트를 계속하기 전 handle 복제·EXIT 계속 후 모든 signal·root signal·누적 Job 수 일치·active0이 완료 조건이다. 중첩 debugger 누락/상한/오류는 실패이며 Job 밖의 외부 broker는 보장 범위가 아니다. 3a02b76/CI41980701769에서 기존 실제 child signal 회귀와 native20·spawn1·watcher4 합계25개가 PASS했다. 전체 제품 PASS가 아니며 Windows admission은 닫혀 있다.
 - **Windows Job 종료 판정 반증(2026-11-05)**: 실제 CI41977646539에서 parent signal+Job active0/terminate(true) 뒤에도 별도 보유 자손 handle은 WAIT_TIMEOUT이었다. 기존 completed()/terminate()를 모든 자손 종료 증거로 인용하지 않는다. 임의 지연·카운트 완화로 해결하지 않으며 native gate는 닫아 둔다. 동일 실행의 disk capacity 회귀는 PASS, 전체16PASS1FAIL·watcher skipped다.
 - **Windows CWD lease 초안(2026-11-05, native 미검증)**: 모든 경로 성분과 기존 직접 child를 delete 공유 없이 보유해 nonempty를 유지하고 전체 ID/부모 결속을 검증하는 기반을 구현했다. 일반적인 공유 잠금만으로 속성 변경을 막는다는 주장은 하지 않는다. name-surrogate와 directory-bit tag 구분·실행 파일 권한·GUID CWD native 호환이 남아 있다. typed Family/Transport 연결과 armed pin의 성공/실패 소유권은 구현했으나 native 미검증이며 실제 Git/제품 admission에는 연결하지 않았다.

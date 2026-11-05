@@ -3678,13 +3678,7 @@ impl ProjectManager {
             .map_err(|error| {
                 ProjectFailure::recovery(format!("could not create managed bundle: {error}"))
             })?;
-        let mut command = self.git_command_at(source_git)?;
-        command
-            .args(["bundle", "create", "-", "HEAD"])
-            .stdout(Stdio::piped());
-        let mut child = StreamingGitChild::spawn(&mut command).map_err(|error| {
-            ProjectFailure::recovery(format!("could not start bundle export: {error}"))
-        })?;
+        let mut child = self.spawn_git_stream(source_git, ["bundle", "create", "-", "HEAD"], false)?;
         let mut stdout = child
             .stdout
             .take()
@@ -3783,25 +3777,16 @@ impl ProjectManager {
         staging: &Dir,
         source: &SourceRepository,
     ) -> Result<SnapshotStats, ProjectFailure> {
-        let mut ls = self.git_command_at(staging)?;
-        ls.args(["ls-tree", "-rz", "--full-tree", source.base_tree.as_str()])
-            .stdout(Stdio::piped());
-        let mut ls_child = StreamingGitChild::spawn(&mut ls).map_err(|error| {
-            ProjectFailure::recovery(format!("could not start tree stream: {error}"))
-        })?;
+        let mut ls_child = self.spawn_git_stream(
+            staging, ["ls-tree", "-rz", "--full-tree", source.base_tree.as_str()], false,
+        )?;
         let stdout = ls_child
             .stdout
             .take()
             .ok_or_else(|| ProjectFailure::recovery("tree stream did not expose stdout"))?;
         let mut tree = BufReader::new(stdout);
 
-        let mut cat = self.git_command_at(staging)?;
-        cat.args(["cat-file", "--batch"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped());
-        let mut cat_child = StreamingGitChild::spawn(&mut cat).map_err(|error| {
-            ProjectFailure::recovery(format!("could not start blob stream: {error}"))
-        })?;
+        let mut cat_child = self.spawn_git_stream(staging, ["cat-file", "--batch"], true)?;
         let mut cat_stdin = cat_child
             .stdin
             .take()
@@ -4303,8 +4288,20 @@ impl ProjectManager {
     fn spawn_git_control<I, S>(&self, directory: &Dir, args: I) -> Result<StreamingGitChild, ProjectFailure>
     where I: IntoIterator<Item = S>, S: AsRef<OsStr>,
     {
+        self.spawn_git_stream(directory, args, false)
+    }
+
+    // Single launch boundary for control output, bundle export, materialization,
+    // and diff batch readers. Windows admission can bind capabilities here
+    // without leaving raw Command spawning at individual consumers.
+    fn spawn_git_stream<I, S>(
+        &self, directory: &Dir, args: I, input: bool,
+    ) -> Result<StreamingGitChild, ProjectFailure>
+    where I: IntoIterator<Item = S>, S: AsRef<OsStr>,
+    {
         let mut command = self.git_command_at(directory)?;
         command.args(args).stdout(Stdio::piped());
+        command.stdin(if input { Stdio::piped() } else { Stdio::null() });
         #[cfg(unix)]
         let child = match &self.watch_cancel {
             Some(cancel) => StreamingGitChild::spawn_cancellable(&mut command, cancel.clone()),
@@ -4313,7 +4310,7 @@ impl ProjectManager {
         #[cfg(not(unix))]
         let child = StreamingGitChild::spawn(&mut command);
         child.map_err(|error| {
-            ProjectFailure::manifest(format!("could not start fixed Git command: {error}"))
+            ProjectFailure::recovery(format!("could not start fixed Git command: {error}"))
         })
     }
 
@@ -4525,10 +4522,7 @@ struct DiffBlobPipe {
 
 impl DiffBlobPipe {
     fn new(manager: &ProjectManager, root: &Dir, mode: &str) -> Result<Self, ProjectFailure> {
-        let mut command = manager.git_command_at(root)?;
-        command.args(["cat-file", mode]).stdin(Stdio::piped()).stdout(Stdio::piped());
-        let mut owner = StreamingGitChild::spawn(&mut command)
-            .map_err(|error| ProjectFailure::recovery(format!("could not start diff blob reader: {error}")))?;
+        let mut owner = manager.spawn_git_stream(root, ["cat-file", mode], true)?;
         let input = owner.stdin.take().ok_or_else(|| ProjectFailure::recovery("diff blob stdin missing"))?;
         let output = owner.stdout.take().ok_or_else(|| ProjectFailure::recovery("diff blob stdout missing"))?;
         Ok(Self { owner, input: Some(input), output: BufReader::new(output) })

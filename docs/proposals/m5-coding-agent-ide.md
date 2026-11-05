@@ -823,6 +823,18 @@ fixture 크기와 허용 지연은 M5.0 첫 구현 명세에서 수치로 고정
 
 ---
 
+### Windows 내부 Git 제공 방식 — 현재 제안, 사용자 선택 대기 (2026-11-05)
+
+앱 내부 snapshot/diff에 사용하는 Git은 Codex·Claude Code 설치/업데이트와 별도다. Windows에서 기존 PC Git 재사용과 앱 포함 공식 MinGit 중 선택이 필요하다. 현재 권고는 **공식 MinGit을 앱과 함께 배포·업데이트**하는 것이다. 사용자가 Git을 별도 설치하지 않아도 되고, 앱이 검증한 실행 파일·의존성 묶음을 함께 교체할 수 있다. 설치 용량 증가, 보안 업데이트 추적, 라이선스/출처 고지와 배포 경로 검증 비용이 따른다. 아직 선택·다운로드·패키징·활성화되지 않았다.
+
+- 공식 [MinGit 설명](https://gitforwindows.org/mingit.html)은 타사 앱용 비대화형 배포판이며 git.exe와 의존성을 함께 제공한다고 명시한다. GUI/Bash 전체 배포보다 필요한 구성이 작지만 실제 앱 용량은 패키지 측정 전 수치로 단정하지 않는다.
+- MinGit도 alias/hook 실행을 지원한다. 번들 채택이 기존 config/hook/filter/외부 명령 격리를 대체하지 않는다.
+- 앱 포함 방식을 선택하면 설치 위치는 renderer/프로젝트/PATH에서 받지 않고 앱의 배포 자원 경로에서 결정한다. 전체 의존성 묶음과 업데이트의 신뢰를 확인하며, 파일 ID 결속만으로 출처를 증명했다고 보지 않는다. 실행 중 묶음 교체 금지와 실패 시 이전 정상 묶음 보존이 필요하다.
+- 기존 PC Git을 선택하면 명시적 설치 위치·실제 image/의존성·업데이트 호환을 별도로 검증한다. PATH의 첫 git.exe 또는 특정 내부 mingw 디렉터리 이름만으로 신뢰하지 않는다.
+- 선택과 무관하게 공통 호출 경계는 인수 배열·입력 필요 여부·취소 토큰을 받고, Windows에서 image/CWD capability와 전체 자손 종료 Transport로 연결한다. bundle export·tree/blob materialization·diff batch reader가 별도 일반 프로세스 경로를 갖지 않는다.
+
+---
+
 ## 13. 브랜치와 의사결정 정책
 
 - 통합 기준선: `m5/coding-agent-ide`
