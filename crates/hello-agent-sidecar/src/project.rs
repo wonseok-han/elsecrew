@@ -21,6 +21,8 @@ mod windows_executable;
 mod windows_replace;
 #[cfg(windows)]
 mod windows_save_guard;
+#[cfg(windows)]
+mod windows_security;
 use crate::{AppendOutcome, SidecarError, Storage};
 #[cfg(unix)]
 use cap_fs_ext::OsMetadataExt;

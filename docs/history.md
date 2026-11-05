@@ -4,6 +4,15 @@
 
 ### 2026-11-05 · by GPT-6
 
+- 이전 turn은 8bf522b의 Windows 교체 연결과 계약 정정으로 진전했다. 메인이 `windows_security.rs`를 추가해 보유 file handle에서 owner/group/DACL과 protection flag를 읽고 새 replacement source에만 복사한다. OS 반환 descriptor/SDDL 메모리는 LocalFree RAII로 해제하며 SDDL은 최대131,072 WCHAR로 제한한다. null/incomplete DACL이나 표현 불가·복사 실패·정규화 불일치는 교체 전에 거절한다.
+- source create 권한에 WRITE_DAC/WRITE_OWNER를 추가했으며 token privilege를 켜거나 관리자 권한을 올리지 않는다. target version 확인 뒤 source 권한 복사/flush → old/source descriptor 동일성 확인 → replaceIntent accessFingerprint 기록 → syscall 전 재확인 → destination 권한 재확인으로 연결했다. raw SID/ACL은 원장이나 오류에 저장하지 않고 정규화된 접근 descriptor digest만 기록한다. 이는 실행 파일 신뢰용 고정 해시가 아니다.
+- 범위는 owner/group/DACL 및 protected/unprotected 상태다. SACL/감사·integrity label·기타 메타데이터 보존은 아직 다루지 않았으며 전체 Windows 권한 지원 완료를 선언하지 않는다. 상속 canonicalization이 달라지면 임의 완화 없이 실패한다. 기존 source 권한을 수정하지 않으며 새 temp만 변경한다.
+- [Microsoft GetSecurityInfo](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-getsecurityinfo), [SetSecurityInfo](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-setsecurityinfo), [SDDL 변환](https://learn.microsoft.com/en-us/windows/win32/api/sddl/nf-sddl-convertsecuritydescriptortostringsecuritydescriptorw)을 확인했다. filesystem에 쓰지 말라는 SetKernelObjectSecurity 대신 SetSecurityInfo를 사용한다.
+- 독립 정적 검토에서 FFI 수명·access mask·원장 전이의 차단 결함 없음. 다른 상속 ACL의 nested target과 root source 조합 검증 공백은 남는다.
+- native 회귀는 protected DACL 복사와 같은 부모의 unprotected inherited DACL 복사, old bytes/권한 불변, source ID 분리를 작성했으며 실행 전이다. 변경 모듈 rustfmt·project.rs 구문 파싱·diff 검사만 수행했다. Cargo/패키지/CI/cache/worktree/모델/push 없음. 다음은 namespace durability·guard 복구/cleanup과 권한 native 검증이며 Windows 제품 gate와 전체 앱 미완료 상태를 유지한다.
+
+### 2026-11-05 · by GPT-6
+
 - 이전 turn은 1440873의 준비 검증/기록으로 진전했다. 후속 계약 감사에서 atomic namespace rename과 expected-ID/content compare-and-replace(CAS)를 혼동한 추가 요구를 확인했다. 원본 반영에 관한 사용자 승인 범위는 `m5-coding-agent-ide.md` §5.5(2026-09-30)에 전후 충돌검사·보존·불확실 중단과 same-UID 외부 작성자 완전 배제 비보장으로 명시돼 있다. 작업복사본 save의 기존 macOS 구현도 version 검사 뒤 renameatx_np이며 leaf CAS가 아니다. project_v1::validate_save_transcript는 expected/current 관측 버전 충돌 계약이다. tests.rs syscall hook은 parent 이동/symlink 외부 탈출을 검사한다.
 - 동일 독립 검토자가 이전 CAS 부재만의 activation blocker 판정을 승인 범위를 넘긴 판단으로 명시 철회했다. 이전 로그는 당시 판단으로 보존한다. 이 정정은 외부 원본 적용 정책을 작업복사본에 임의 확장하거나 충돌 검사를 삭제하는 승인이 아니다. 기존 save의 관측 버전 검사와 atomic rename·경로 confinement를 구분해 구현한다.
 - Windows workspace save는 replaceIntent와 이전 target ID 기록 → 열린 target 확인 핸들 해제(legacy API 조건) → 독립 parent/guard lease와 같은 source handle로 FileRenameInfo → destination full ID/내용 검증 → replaced 기록으로 연결했다. target 내용 검사 동안 writer 배제, 마지막 name ID 확인, 현재 managed root/workspace/parent 결속은 유지한다. hostile same-user leaf swap의 CAS 보장은 하지 않는다.

@@ -240,8 +240,13 @@ impl ProjectManager {
                 "save target changed before replacement",
             ));
         }
+        let access = windows_security::copy_access(&target, source)?;
+        source.sync_all().map_err(|error| {
+            ProjectFailure::recovery(format!("could not flush replacement security: {error}"))
+        })?;
         guard.lease.validate()?;
         record["phase"] = json!("replaceIntent");
+        record["accessFingerprint"] = json!(access);
         record["previousTargetIdentity"] = json!(target_id.recovery_token());
         self.write_windows_guard_intent(storage, active, save_id, request_id, &record)?;
         if let Some(hook) = &mut pre_syscall_hook {
@@ -257,6 +262,13 @@ impl ProjectManager {
         // Optimistic version checking, as in macOS save, is not an atomic
         // comparison against hostile same-user edits. Legacy rename requires
         // destination handles closed; parent/guard and exact source stay pinned.
+        if windows_security::fingerprint(&current_target)? != access
+            || windows_security::fingerprint(source)? != access
+        {
+            return Err(ProjectFailure::recovery(
+                "save security changed before replacement",
+            ));
+        }
         drop((current_target, target, source_name));
         windows_replace::replace(source, &guard.lease, &name)?;
         prepared.renamed = true;
@@ -265,6 +277,9 @@ impl ProjectManager {
             return Err(ProjectFailure::ambiguous(
                 "replacement file identity differs",
             ));
+        }
+        if windows_security::fingerprint(&committed)? != access {
+            return Err(ProjectFailure::ambiguous("replacement security differs"));
         }
         let (_, _, version) = read_file_bounded_handle(&mut committed, 0)?;
         if record["sourceVersion"] != version {
@@ -330,6 +345,7 @@ impl ProjectManager {
                 expected["phase"] = guard["phase"].clone();
                 let predecessor = if guard["phase"] == "replaceIntent" {
                     expected["previousTargetIdentity"] = guard["previousTargetIdentity"].clone();
+                    expected["accessFingerprint"] = guard["accessFingerprint"].clone();
                     "sourceReady"
                 } else {
                     "replaceIntent"
