@@ -348,15 +348,20 @@ mod integration_tests {
         std::fs::create_dir(&cwd_path).unwrap();
         std::fs::write(cwd_path.join("guard"), b"keep").unwrap();
         let directory = Dir::open_ambient_dir(&cwd_path, ambient_authority()).unwrap();
-        for (args, input, expected) in [
-            (vec!["--version".to_owned()], None, None),
+        for (args, input, expected, minimal_environment) in [
+            (vec!["--version".to_owned()], None, None, true),
+            (vec!["--version".to_owned()], None, None, false),
             (
                 vec!["hash-object".to_owned(), "--stdin".to_owned()],
                 Some(b"hello\n".as_slice()),
                 Some("ce013625030ba8dba906f756967f9e9ca394464a"),
+                false,
             ),
         ] {
-            eprintln!("installed Git diagnostic operation: {}", args[0]);
+            eprintln!(
+                "installed Git diagnostic operation: {}, minimalEnvironment={minimal_environment}",
+                args[0]
+            );
             // Admission is repeated for every process; the persisted consent
             // alone cannot supply executable/dependency handles.
             let runtime = manager.admitted_git_runtime().unwrap();
@@ -365,7 +370,25 @@ mod integration_tests {
                 OsStr::new("guard"),
             )
             .unwrap();
-            let mut child =
+            let mut child = if minimal_environment {
+                // Controlled diagnostic only: retain the same admitted image,
+                // dependencies, bound CWD and supervisor; vary only the env.
+                // Never retry after a failed launch or substitute this in product.
+                let mut environment =
+                    super::super::windows_git_environment::for_runtime(&runtime, &cwd).unwrap();
+                environment.retain(|key, _| key == "SystemRoot");
+                assert_eq!(environment.len(), 1);
+                let fixed = vec!["--no-pager".to_owned(), "--version".to_owned()];
+                super::super::windows_git_process::StreamingGitChild::spawn_bound(
+                    runtime,
+                    &fixed,
+                    &environment,
+                    cwd,
+                    false,
+                    None,
+                )
+                .expect("minimal-environment installed Git start")
+            } else {
                 super::super::windows_git_process::StreamingGitChild::spawn_internal_git(
                     runtime,
                     &args,
@@ -373,7 +396,8 @@ mod integration_tests {
                     input.is_some(),
                     None,
                 )
-                .unwrap();
+                .expect("fixed-environment installed Git start")
+            };
             if let Some(input) = input {
                 let mut stdin = child.stdin.take().unwrap();
                 stdin.write_all(input).unwrap();
