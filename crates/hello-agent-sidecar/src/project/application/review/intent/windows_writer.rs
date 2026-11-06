@@ -402,15 +402,9 @@ pub(in crate::project) fn stage(
 /// Open either supported object kind without following a link. The caller still
 /// checks its exact receipt; opening a directory is not directory write authority.
 fn open_object_at(dir: &Dir, name: &str) -> Result<File, ProjectFailure> {
-    let mut options = OpenOptions::new();
-    options
-        .read(true)
-        .follow(FollowSymlinks::No)
-        .maybe_dir(true)
-        .custom_flags(windows_fs::OPEN_REPARSE_POINT);
-    let file = dir.open_with(name, &options).map_err(|_| invalid())?;
-    windows_fs::identity(&file, file.metadata().map_err(|_| invalid())?.is_dir())?;
-    Ok(file)
+    // cap-std's maybe_dir option strips FILE_SHARE_DELETE even for files,
+    // which conflicts with the retained mutation handle used at this boundary.
+    crate::project::windows_directory_create::open_object(dir, name)
 }
 fn is_directory(value: &Value) -> bool {
     value["observation"]["attributes"]

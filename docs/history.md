@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준37588c49에서 Windows 제품 연결 경로를 대조했다. installed cap-primitives3.4.6 windows/fs/oflags.rs가 maybe_dir일 때 FILE_SHARE_DELETE를 제거함을 확인했고 writer::open_object_at도 같은 옵션을 사용하므로 retained DELETE handle과 파일/폴더 재관측이 충돌하는 경로가 남아 있었다. 앞선74개 PASS는 이 일반 writer 재관측 경로 전체를 증명하지 않는다.
+- 검증된 부모상대 native FILE_OPEN을 open_object(File반환)로 분리해 writer의 read-only rebind에 연결했다. no-follow·단일이름·read-only rights/share7·열린handle의 종류/신원검사를 유지하며 directory 전용 open_existing은 추가directory identity 검사 후 Dir로 전환한다. mutation/pin/lease 권한은 변경하지 않았다.
+- native 회귀 후보는 DELETE sourcehandle 보유중 파일읽기/동일신원 성공, rebound 쓰기거부, 외부 rename거부, directory전용 regularfile거부와 bytes보존을 검사한다. CI필수존재목록에 추가했다. 독립 검토 차단결함없음/rustfmt/diff 통과. Windows실행은 아직 미확인이며 추가승인없어 push하지 않았다. 제품gate·실제모델·패키징·main은 그대로다.
+
+### 2026-11-06 · by GPT-6
+
 - 마지막 추가 승인으로2개 Windows 수정 파일만5e2b9b23에 게시했다. CI42154541724 success: 컴파일·필수 테스트 존재 확인, native73 PASS/0 FAIL(6.97초), dispatcher 비활성 복구 직접 호출 차단1 PASS(0.87초). stage_new sharing 실패가 실제 Windows에서 해소됐고 read-only native rebind/기존 create·move/child변경검사도 통과했다.
 - 원격 범위는 승인된 Windows 코드/후속 수정만이며 local4f2c1dfb와 해당 파일의 내용이 같다. 추가 승인2/2 소진, 후속 push는 별도 승인이다. main 미병합, 패키징/제품 활성화/실제 공급자 호출 없음.
 - 이 결과는 Windows helper/진단 범위74개이며 full application transaction crash·패키지UI·실제Git admission·실제agent·전원장애/출시 합격을 뜻하지 않는다. 현재 macOS 편집기 후속 변경은 로컬에만 있다. Windows 제품 통합과 G6 메모리/전체시안/출시 검증이 남는다.
