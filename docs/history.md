@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준4d5bbd18의 실제 입력 지연 실패 후 workbench 렌더 경로를 조사했다. draft/output 갱신마다 동일 diff 표200행이 다시 렌더되는 경로를 memo와 안정된 open/discuss callback으로 줄였다. 사용자 언어/context·descriptor/text·권한 변경은 일반 shallow 비교와 context 갱신으로 계속 반영하며 현재 workspace/path 검사를 유지한다.
+- TypeScript noEmit·diff-check 통과. 실제 입력 지연 개선은 아직 재측정하지 않았으며50ms 합격으로 주장하지 않는다. 메모리 조사에서 프로젝트 leave는 tabs/tree/diffText를 비우고 Monaco unmount는 model/editor를 dispose하는 기존 경로를 확인했다. renderer RSS 증가만으로 해당 데이터 누수를 확정할 수 없어 강제GC나 임의 캐시 삭제는 추가하지 않았다.
+- 다음은 renderer 잔류의 실제 보유 객체/worker와 측정기 보유를 구분하고 같은 전체 workload에서 수정 효과를 확인하는 것이다. Windows 추가push 승인은 대기 중이며 원격 실행·새 패키지·모델 호출은 없었다.
+
+### 2026-11-06 · by GPT-6
+
 - e9328b65에서 macOS combined QA를 실제 실행했다. 사전 실행 시험 앱 없음·여유526GiB 확인. 제한 환경의 포장 다운로드 실패 뒤 허용된 환경에서 Rust release/renderer/QA 포장을 완료했다. 소스 변경은 기존 history 기록뿐이며 제품 out/사용자 데이터/모델은 사용하지 않았다.
 - 사용자 화면 유지 확인 후 첫 시험은 정상 종료(shutdown accepted)했지만 idle425.41MiB·peak747.92MiB·retained증분165.47MiB·입력141.3ms로 idle/retained/input 기준 FAIL. main70.233ms·renderer62ms 관측, 전체 G6 합격은 아니다. idle 뒤 trace 시작 순서는 기록됐고 기존400/800/120MiB·50ms 기준을 유지한다.
 - 진행 보고가 오래 갱신되지 않아 작업 중 AX 읽기와1초 process sample을 수행했다. 따라서 방해 없는 성능 합격 증거로 사용하지 않는다. 실제로 작업은 계속 진행 중이었다. 다음에는 단계 진행 보고를 보완해 측정 중 추가 진단을 피한다. idle renderer127.2MiB→retained242.7MiB, trace Utility39.3MiB 등 잔류 원인 구분이 다음 조사다. 값을 차감해 합격시키지 않는다.

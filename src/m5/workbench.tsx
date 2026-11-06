@@ -156,6 +156,15 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     () => controller.snapshot(),
   );
   const chat = useSyncExternalStore(chatController.subscribe.bind(chatController), () => chatController.snapshot(), () => chatController.snapshot());
+  const openDiffFile = useCallback((path: string) => { void controller.openFile(path); }, [controller]);
+  const discussDiff = useCallback((path: string, side?: "before" | "after", line?: number) => {
+    const current = controller.snapshot();
+    if (!admissionReady || current.actionBlocked || !current.workspace || current.diffFile?.path !== path) return;
+    const reference = side && line !== undefined
+      ? t("m5.diff.lineReference", { path: side === "before" ? current.diffFile.oldPath ?? path : path, side: t(`m5.diff.${side}`), line })
+      : t("m5.diff.reference", { path });
+    if (chatController.addReviewReference(current.workspace, reference)) controller.revealConversation();
+  }, [controller, chatController, admissionReady, t]);
   const projectDataReady = Boolean(snapshot.project && chat.projectId === snapshot.project.id && chat.settings?.projectId === snapshot.project.id);
   useEffect(() => {
     if (!admissionReady || snapshot.actionBlocked || snapshot.project) return;
@@ -423,16 +432,9 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
             if (admissionReadyRef.current && controller.snapshot().activePath === path) void controller.saveActive();
           }} />
           </div>
-              {snapshot.diffVisible && snapshot.diffFile && <DiffDetails descriptor={snapshot.diffFile} text={snapshot.diffText} canOpen={admissionReady && !snapshot.actionBlocked} onOpen={path => { void controller.openFile(path); }}
+              {snapshot.diffVisible && snapshot.diffFile && <DiffDetails descriptor={snapshot.diffFile} text={snapshot.diffText} canOpen={admissionReady && !snapshot.actionBlocked} onOpen={openDiffFile}
                 canDiscuss={admissionReady && !snapshot.actionBlocked && Boolean(snapshot.workspace) && chatController.canAppendFollowup() && !chat.followups?.[chat.activeChat?.chatId ?? ""]?.request}
-                onDiscuss={(path, side, line) => {
-                  const current = controller.snapshot();
-                  if (!admissionReady || current.actionBlocked || !current.workspace || current.diffFile?.path !== path) return;
-                  const reference = side && line !== undefined
-                    ? t("m5.diff.lineReference", { path: side === "before" ? current.diffFile.oldPath ?? path : path, side: t(`m5.diff.${side}`), line })
-                    : t("m5.diff.reference", { path });
-                  if (chatController.addReviewReference(current.workspace, reference)) controller.revealConversation();
-                }} />}
+                onDiscuss={discussDiff} />}
         </section>
 
         <aside className="m5-panel m5-changes" aria-label={t("m5.editor.changes")}>
@@ -941,7 +943,9 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
   return <>{failed && <section className="m5-error" role="alert"><strong>{t("m5.feedback.failed")}</strong><p>{t("m5.feedback.help")}</p><textarea aria-label={t("m5.editor.preserved")} readOnly value={tab.text} style={{ width: "100%", minHeight: 240, boxSizing: "border-box" }} /><button type="button" onClick={() => setAttempt(value => value + 1)}>{t("m5.feedback.retry")}</button></section>}<div className="m5-monaco" ref={host} style={failed ? { display: "none" } : undefined} /></>;
 }
 
-function DiffDetails({ descriptor, text, canOpen, onOpen, canDiscuss, onDiscuss }: { descriptor: NonNullable<ReturnType<ProjectEditorController["snapshot"]>["diffFile"]>; text: string; canOpen: boolean; onOpen: (path: string) => void; canDiscuss: boolean; onDiscuss: (path: string, side?: "before" | "after", line?: number) => void }) {
+// Draft/output updates leave the reviewed diff unchanged. Stable callbacks and
+// ordinary shallow comparison skip its rows; context and permission changes still render.
+const DiffDetails = memo(function DiffDetails({ descriptor, text, canOpen, onOpen, canDiscuss, onDiscuss }: { descriptor: NonNullable<ReturnType<ProjectEditorController["snapshot"]>["diffFile"]>; text: string; canOpen: boolean; onOpen: (path: string) => void; canDiscuss: boolean; onDiscuss: (path: string, side?: "before" | "after", line?: number) => void }) {
   const { t } = useI18n();
   const indexed = useMemo(() => diffPages(text), [text]);
   const [page, setPage] = useState(0);
@@ -993,7 +997,7 @@ function DiffDetails({ descriptor, text, canOpen, onOpen, canDiscuss, onDiscuss 
       </>}
     </section>
   );
-}
+});
 
 function ChangeFileList({ entries, selected, disabled, onOpen }: { entries: readonly DiffEntryV1[]; selected?: string; disabled: boolean; onOpen: (path: string) => void }) {
   const { t } = useI18n();
