@@ -6,9 +6,9 @@ use confirmation::{Confirmations, PreparedApplication};
 use serde_json::json;
 use uuid::Uuid;
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub(in crate::project) mod completion;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub(in crate::project) mod execution;
 mod observation;
 pub(in crate::project) mod retirement;

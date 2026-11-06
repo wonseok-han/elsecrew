@@ -727,3 +727,108 @@ fn validate_receipts(j: &Value, item: &Value) -> Result<(), ProjectFailure> {
     }
     Ok(())
 }
+
+/// Read-only before-image check for an untouched tail. Archive validation is
+/// owned by the batch caller; this never turns matching bytes into write authority.
+pub(in crate::project) fn verify_unwritten_item(
+    manager: &ProjectManager,
+    record: &Value,
+    item: &Value,
+) -> Result<(), ProjectFailure> {
+    let binding = &record["binding"];
+    let source = manager.open_source_repository(Path::new(
+        binding["canonicalGitRoot"].as_str().ok_or_else(invalid)?,
+    ))?;
+    if binding["sourceIdentity"] != source.source_identity
+        || binding["baseCommit"] != source.base_commit
+        || binding["baseTree"] != source.base_tree
+        || binding["objectFormat"] != source.object_format
+    {
+        return Err(invalid());
+    }
+    let path = item["path"].as_str().ok_or_else(invalid)?;
+    validate_relative_path(path, false)?;
+    crate::project::protocol_path::from_native(&format!("C:/{path}"), true)
+        .map_err(ProjectFailure::manifest)?;
+    let parts: Vec<_> = path.split('/').collect();
+    if parts.iter().any(|part| part.eq_ignore_ascii_case(".git")) {
+        return Err(invalid());
+    }
+    let (leaf, ancestors) = parts.split_last().ok_or_else(invalid)?;
+    let root_id = windows_fs::identity(&source._root, true)?;
+    let mut dir = source._root.try_clone().map_err(|_| invalid())?;
+    for (depth, part) in ancestors.iter().enumerate() {
+        match dir.symlink_metadata(part) {
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound && item["before"].is_null() =>
+            {
+                let rebound = open_absolute_directory_capability(&source.canonical_root)?;
+                if windows_fs::identity(&rebound, true)? != root_id {
+                    return Err(invalid());
+                }
+                let mut rebound_parent = rebound;
+                for ancestor in &ancestors[..depth] {
+                    rebound_parent = open_real_child_dir(&rebound_parent, ancestor)?;
+                }
+                if windows_fs::identity(&rebound_parent, true)? != windows_fs::identity(&dir, true)?
+                {
+                    return Err(invalid());
+                }
+                absent(&rebound_parent, part)?;
+                return Ok(());
+            }
+            Ok(meta) if meta.is_dir() => dir = open_real_child_dir(&dir, part)?,
+            _ => return Err(invalid()),
+        }
+    }
+    let parent_id = windows_fs::identity(&dir, true)?;
+    let mut held = pin_entry(&dir, leaf, &item["before"], &|| Ok(()))?;
+    verify_pin(&dir, leaf, &item["before"], &mut held, &|| Ok(()))?;
+    let rebound = open_absolute_directory_capability(&source.canonical_root)?;
+    let (rebound_parent, _) = parent(&rebound, path)?;
+    if windows_fs::identity(&rebound, true)? != root_id
+        || windows_fs::identity(&rebound_parent, true)? != parent_id
+    {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
+/// A new confirmed session may advance a fresh item through its fixed stages.
+/// Failure leaves its last durable journal and must not recreate this owner.
+pub(in crate::project) fn write_item_cancellable(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    project_id: &str,
+    expected: &Value,
+    request: &str,
+    canceled: &std::sync::atomic::AtomicBool,
+) -> Result<Value, ProjectFailure> {
+    let check = || {
+        if canceled.load(std::sync::atomic::Ordering::Acquire) {
+            Err(invalid())
+        } else {
+            Ok(())
+        }
+    };
+    let reserved = reserve(manager, storage, project_id, expected, request, &check)?;
+    let staged = stage(manager, storage, project_id, &reserved, request, &check)?;
+    let retained = move_file(
+        manager,
+        storage,
+        project_id,
+        &staged,
+        Move::PreserveBefore,
+        request,
+        &check,
+    )?;
+    move_file(
+        manager,
+        storage,
+        project_id,
+        &retained,
+        Move::InstallAfter,
+        request,
+        &check,
+    )
+}

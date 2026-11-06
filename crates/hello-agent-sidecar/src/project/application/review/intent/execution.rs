@@ -1,9 +1,15 @@
-//! Apply/restore state machines advanced by the macOS product scheduler.
+//! Apply/restore state machines; Windows product admission remains disabled.
 //! Synchronous entry points below also support focused recovery tests.
 use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 mod applying;
+#[cfg(target_os = "macos")]
 mod restoring;
+#[cfg(windows)]
+#[path = "execution/windows_restoring.rs"]
+mod restoring;
+#[cfg(windows)]
+use super::windows_writer as writer;
 pub(in crate::project) use applying::ApplyingBatch;
 pub(in crate::project) use restoring::RestoringBatch;
 
@@ -68,6 +74,7 @@ pub(in crate::project) fn restore_selected(
     Ok(owner.record().clone())
 }
 
+#[cfg(target_os = "macos")]
 fn recover_restoring(
     manager: &ProjectManager,
     storage: &mut Storage,

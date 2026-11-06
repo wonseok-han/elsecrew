@@ -24,13 +24,26 @@ impl ApplyingBatch {
             .to_owned();
         let archive = backup::Backup::from_value(&current["backup"]["backup"])?;
         let (header, items) = backup::verify_items(manager, &archive)?;
-        if header != current["backup"]["header"]
-            || items.is_empty()
-            || items.iter().any(|item| {
-                item["before"]["kind"] == 2
-                    || (item["after"]["kind"] == 2 && !item["before"].is_null())
-            })
-        {
+        if header != current["backup"]["header"] || items.is_empty() {
+            return Err(invalid());
+        }
+        if items.iter().any(|item| {
+            if cfg!(windows) {
+                // Directory support must be connected before admitting these
+                // items, never fail only after earlier source writes.
+                return (!item["after"].is_null() && item["after"]["kind"] != 1)
+                    || (!item["before"].is_null()
+                        && item["before"]["observation"]["attributes"]
+                            .as_u64()
+                            .is_none_or(|v| v & 0x10 != 0));
+            }
+            item["before"]["kind"] == 2 || (item["after"]["kind"] == 2 && !item["before"].is_null())
+        }) {
+            // This exact owner has never left prepared or created a writer
+            // journal. Do not strand a recovery lock on a known unsupported
+            // Windows item. A failed CAS still leaves the fence intact.
+            #[cfg(windows)]
+            abandon_unwritten(storage, &project_id, &current, request)?;
             return Err(invalid());
         }
         Ok(Self {

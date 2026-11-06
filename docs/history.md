@@ -4,6 +4,14 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준43d562f의 깨끗한 통합 checkout에서 Windows batch completion을 연결했다. 기존 전체 항목 수/index·completed/restored prefix/suffix·unstarted tail·archive 결속 검사를 유지하고 플랫폼별 파일 검증을2pass 수행한 뒤 같은 project/lock CAS로 완료·복원·원본 쓰기 전 포기를 기록한다. Windows selected 항목은 원래 scope 전체와 목록 포함 관계를 대조하며 pending-item용 DB 검증과 파일 배치 검증을 분리해 완료 목록을 검증한다.
+- Windows untouched tail은 Git/source binding과 before entry를 확인하고 root/parent를 재결속한다. 아직 없는 부모를 허용할 때도 held parent를 원본 root에서 다시 찾아 ID와 부재를 대조한다. 단일 항목 관측을 전체 완료로 대체하지 않는다.
+- 내부 실행 owner도 Windows에 연결했다. 새 확인 handoff만 reserve→stage→보존→설치를 실행하며 오류/취소는 owner를 영구 중단한다. 명시 restore owner는 준비 포기·미시작 tail·원본 미이동 취소·부분 취소·moved intent 확인·역순 cursor·전체 마감을 조합한다. 새 디렉터리/미지원 종류는 첫 원본 이동 전 묶음 admission에서 거부한다. reserved 부분 파일과 unmoved restore intent는 아직 오류/잠금 유지이며 재시도·삭제로 덮지 않는다.
+- 독립 검토에서 unsupported Windows 항목 거절 후 prepared 잠금이 남는 결함을 수정했다. archive header/목록 검증을 통과한 뒤 미지원 종류를 거절하는 정확한 prepared 분기에만 abandon_unwritten CAS를 적용하며 실패 시 fence를 유지한다. 재검토에서 추가 차단 결함 없음으로 확인했다. header 손상·쓰기 시작 이후 오류는 자동 포기하지 않는다.
+- Windows 제품 scheduler/gates는 비활성이다. 전체 metadata·directory·잔여 중단 재개/cleanup·제품 연결·native 검증과 G6/출시는 남는다. 선택 rustfmt/diff만 실행했고 빌드/시험은 기능 연결 후 누적 검증으로 남긴다. 신규 cache/package/worktree/push/CI/모델 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준b2b1ceb의 깨끗한 통합 checkout에서 staged 및 실제 unmoved인 moveBeforeIntent 취소를 추가했다. 원본 exact before·guard/staged receipt·retained/detached 부재를 held handle 아래 대조하고 원본/준비 파일의 rename·삭제 없이 canceledUnwritten:true/restoredEntry=before를 CAS 게시한다. 이 표시는 restored에만 허용하고 before-install 취소와 혼합을 거절한다. 재조회는 원본과 남겨 둔 staged 파일을 모두 검증한다.
 - Windows에 공유 다중 항목 cursor를 연결했다. 적용된 항목의 다음 선택, 미시작 tail 취소, 현재 항목 복원 후 이전 completed 항목 선택은 Windows 전용 파일 배치 검사를 통과해야 한다. 기존 archive index·project/lock CAS·metadata 상한·completed/restored 기록 보존을 재사용하며 macOS 비교 판정은 유지했다. 이 cursor만으로 전체 완료나 잠금 해제를 하지 않는다.
 - reserved 부분 생성의 처리·전체 completion/실행/cleanup·directory/추가 metadata·Windows native 회귀와 G6/출시는 남는다. 제품 gate/scheduler 활성화 없음. 독립 검토자1명은 이번 원본 미이동 취소·Windows cursor 연결 diff에 정적 차단 결함이 없다고 확인했다. 선택 rustfmt/diff만 확인했고 빌드/시험은 기능 파동 최종 검증으로 남긴다. 신규 cache/package/worktree/push/CI/모델 없음.

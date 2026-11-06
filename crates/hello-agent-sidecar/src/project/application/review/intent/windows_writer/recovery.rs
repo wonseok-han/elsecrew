@@ -226,10 +226,28 @@ pub(in crate::project) fn inspect_settled_item(
     expected: &Value,
     check: &dyn Fn() -> Result<(), ProjectFailure>,
 ) -> Result<Value, ProjectFailure> {
-    check()?;
     if inspect_pending_item(manager, storage, project_id)? != *expected {
         return Err(invalid());
     }
+    let restored = verify_bound_item_layout(manager, expected, check)?;
+    if inspect_pending_item(manager, storage, project_id)? != *expected {
+        return Err(invalid());
+    }
+    Ok(
+        json!({"applicationId":expected["applicationId"],"index":expected["pendingItem"]["index"],
+        "comparison": if restored { "matchesRestoredPair" } else { "matchesAppliedPair" }}),
+    )
+}
+
+/// Verify one archive-bound record selected by the batch verifier. This helper
+/// performs filesystem checks only: its caller must validate the full ledger and
+/// archive before selecting a completed/restored item and before publication.
+pub(in crate::project) fn verify_bound_item_layout(
+    manager: &ProjectManager,
+    expected: &Value,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<bool, ProjectFailure> {
+    check()?;
     let j = &expected["pendingItem"]["writeJournal"];
     validate_receipts(j, &expected["pendingItem"]["item"])?;
     let restored = match j["phase"].as_str() {
@@ -302,15 +320,11 @@ pub(in crate::project) fn inspect_settled_item(
     )?;
     if json!(windows_fs::identity(&rebound, true)?) != j["rootIdentity"]
         || json!(windows_fs::identity(&rebound_parent, true)?) != j["parentIdentity"]
-        || inspect_pending_item(manager, storage, project_id)? != *expected
     {
         return Err(invalid());
     }
     check()?;
-    Ok(
-        json!({"applicationId":expected["applicationId"],"index":expected["pendingItem"]["index"],
-        "comparison": if restored { "matchesRestoredPair" } else { "matchesAppliedPair" }}),
-    )
+    Ok(restored)
 }
 
 /// An install intent may have been committed before cancellation prevented its
