@@ -107,6 +107,9 @@ impl Transport {
         lease: Option<DirectoryLease>,
         image: Option<ExecutableLease>,
     ) -> io::Result<Self> {
+        let at = |phase: &str, error: io::Error| {
+            io::Error::new(error.kind(), format!("Windows Git {phase}: {error}"))
+        };
         let deadline = Instant::now()
             .checked_add(budget)
             .ok_or_else(|| io::Error::other("invalid Git budget"))?;
@@ -126,19 +129,22 @@ impl Transport {
             deadline,
             cancelled.clone(),
             external_cancel.clone(),
-        )?;
+        )
+        .map_err(|error| at("stdin pipe", error))?;
         let (stdout, child_out) = BudgetPipe::pair(
             Direction::Read,
             deadline,
             cancelled.clone(),
             external_cancel.clone(),
-        )?;
+        )
+        .map_err(|error| at("stdout pipe", error))?;
         let (mut stderr, child_err) = BudgetPipe::pair(
             Direction::Read,
             deadline,
             cancelled.clone(),
             external_cancel.clone(),
-        )?;
+        )
+        .map_err(|error| at("stderr pipe", error))?;
         let stdio = Some([
             child_in.as_handle(),
             child_out.as_handle(),
@@ -155,7 +161,8 @@ impl Transport {
                 Family::suspended_with_stdio(executable, args, environment, directory, stdio)
             }
             (Some(_), None) => return Err(io::Error::other("bound image requires a held CWD")),
-        }?;
+        }
+        .map_err(|error| at("suspended family creation", error))?;
         // Do not keep parent copies of child endpoints: they would suppress EOF.
         drop((child_in, child_out, child_err));
         let mut owner = Self {
@@ -185,8 +192,13 @@ impl Transport {
                     }
                 })?,
         );
-        owner.check()?;
-        owner.family.start()?;
+        owner
+            .check()
+            .map_err(|error| at("pre-start supervision", error))?;
+        owner
+            .family
+            .start()
+            .map_err(|error| at("primary thread start", error))?;
         Ok(owner)
     }
     fn check(&self) -> io::Result<()> {
