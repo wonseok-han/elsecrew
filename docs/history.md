@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 사용자 화면5분 유지 응답 후 기준4c7ad212에서 QA 앱sImIEN을 준비하고 actual-sidecar combined 시험1회를 실행했다. 제품 코드는 변경하지 않았으며 성능 수집 종료 뒤에만 opt-in heap snapshot을 받는 진단을 추가했다. GC 가능성이 있는 덤프를 성능 증거로 사용하지 않으며 기존 측정/합격 기준은 유지한다.
+- 결과 `.artifacts/m5-combined-output-2026-11-06/fourth`: Large project presentation deadline exceeded로 프로젝트 준비 단계에서 FAIL. renderer visibility가 시작 약3초부터 반복 hidden/visible로 전환됐고 native 창 visible과 renderer 실제 표시 상태가 달랐다. 사용자 조작 기록은 없으며 원인을 사용자 행동으로 단정하지 않는다. retained 단계까지 도달하지 않아 메모리 개선/종료 후 보유 분석 근거가 아니다. 실패 시 생성된 약30.6MB snapshot도 활성 프로젝트 상태임을 명시하고 삭제했으며 후속 collector는 retained 단계에 도달한 경우에만 덤프를 수집하도록 좁혔다.
+- 앱 shutdown accepted·관측PID 전부 부재·DB clean_shutdown_at 확인 후 fixtureFry11g와 package sImIEN 및 raw dump를 정리하고 보고서/해시만 보존했다. node --check·git diff --check 통과. 후속 조건 보완은 전체 재실행하지 않았다. 같은 화면 시험을 즉시 반복하지 않는다. macOS 유휴400MiB/retained120MiB 실패 및 유효한 전체 성능 시험, Windows2e5a98a 추가push 승인·통합 검증, 최종 출시 검증이 남는다. 실제 모델·push·제품 활성화 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준e96eef8b에서 별도 숨긴 Chromium/합성 performance preload로5MiB 문서 열기→정상 프로젝트 닫기를2회 수행하고 각 종료 후 heap snapshot을 수집했다. 초기 일회용 스크립트의 Electron import 오류는 userData/sidecar 초기화 전에 발생했으며 정확한 진단PID85417에 TERM 후 종료를 확인하고 builtin import로 수정했다. 제품 코드는 변경하지 않았다.
 - 수정 진단 exit0: snapshot 후 JS used19,623,848→19,915,900 bytes, DOM244→244/listeners184→184. snapshot은 GC를 유발할 수 있어400/800/120MiB·실제 화면성능·누수 부재의 증거가 아니다. 약10,085,776bytes 큰 문자열의 strong retainer는 cachedFileText→patch closure/context→m5SmokeFailedClaude→Window→GC roots였다. tests/m5-renderer-performance-fixture.cjs:7-8의 합성 데이터 캐시와 일치하며 제품 controller/Monaco 누수로 오인하지 않는다. 실제 sidecar combined runner는 이 renderer fixture와 다르므로 해당 원인으로 앞선FAIL을 설명하지 않는다.
 - 재현 스크립트·보고서·덤프 SHA256·보유 경로를 .artifacts/m5-retention-2026-11-06에 보존하고 진단 프로세스 부재 확인 후 두 임시 프로필/약46MB 덤프를 삭제했다. 다음은 더 많은 합성 계측으로 제품 성공을 추정하지 않고 실제 패키지의 기본 비용/보유 관계를 확인하는 것이다. 기존 성능FAIL·Windows 승인 대기·제품 미완료는 유지한다. 참고 API: https://chromedevtools.github.io/devtools-protocol/tot/HeapProfiler/ .

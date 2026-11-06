@@ -145,6 +145,36 @@ async function finish(error) {
   report.transport = transportObserver?.stop();
   report.error = error?.message;
   report.status = error ? 'FAIL' : 'PENDING';
+  // Optional retention diagnosis runs only after all timing/RSS collectors stop.
+  // Heap snapshots can trigger GC; never use their values as performance proof.
+  if (packagedQa && combined && process.argv.includes('--retention-snapshot')
+      && report.combinedWorkload?.retainedStartedAt) {
+    const debuggerApi = observedWindow?.webContents.debugger;
+    const snapshotPath = path.join(root, 'retention.heapsnapshot');
+    let fd, attached = false, bytes = 0, overflow = false;
+    const onMessage = (_event, method, params) => {
+      if (method !== 'HeapProfiler.addHeapSnapshotChunk' || overflow) return;
+      bytes += Buffer.byteLength(params.chunk);
+      if (bytes > 128 * 1024 * 1024) { overflow = true; return; }
+      fs.writeSync(fd, params.chunk);
+    };
+    report.retentionSnapshot = { diagnostic: true, gateEligible: false, startedAt: Date.now() };
+    try {
+      if (!debuggerApi || debuggerApi.isAttached()) throw new Error('Snapshot debugger unavailable');
+      fd = fs.openSync(snapshotPath, 'wx', 0o600);
+      debuggerApi.attach('1.3'); attached = true;
+      debuggerApi.on('message', onMessage);
+      await debuggerApi.sendCommand('HeapProfiler.takeHeapSnapshot', { reportProgress: false });
+      if (overflow) throw new Error('Snapshot exceeded 128 MiB');
+      Object.assign(report.retentionSnapshot, { path: snapshotPath, bytes, completedAt: Date.now() });
+    } catch (snapshotError) {
+      report.retentionSnapshot.error = snapshotError.message;
+    } finally {
+      debuggerApi?.removeListener('message', onMessage);
+      if (attached && debuggerApi.isAttached()) debuggerApi.detach();
+      if (fd !== undefined) fs.closeSync(fd);
+    }
+  }
   persist(); console.log(JSON.stringify(report));
   const timer = setTimeout(() => { report.shutdown = 'notConfirmed'; report.status = 'FAIL'; persist(); console.log(JSON.stringify(report)); }, 15000);
   app.once('will-quit', () => {
