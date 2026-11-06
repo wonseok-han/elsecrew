@@ -1,6 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
-2026-11-06 Windows 진단42171589050에서 컴파일·native75개·dispatcher1개는 통과했으나 최소 환경에서도 설치Git 생성이 OS87로 실패했다. 사용자 추가3회 승인 중2회를 사용했고 no-stdio suspended-only 후보9dfab1ba/CI42172986342가 실행 중이다(1회 잔여). 전체 반영/복원·macOS G6·Windows 제품 검증/활성화·출시는 미완료다. 상세는 아래 및 [11월 아카이브](archive/history-2026-11.md).
+2026-11-06 Windows 설치Git은 최소 환경·no-stdio에서도 CreateProcessW OS87로 실패했다. 사용자 추가3회 승인은 모두 사용했으며, 같은 held image의 DOS 경로 표기만 비교하는 검토 후보40a784d/CI42174341305가 실행 대기 중이다. 전체 반영/복원·macOS G6·Windows 제품 검증/활성화·출시는 미완료다. 상세는 아래 및 [11월 아카이브](archive/history-2026-11.md).
+
+### 2026-11-06 · by GPT-6
+
+- 이전 턴은 두 번째 Windows CI42172986342의 실재 실행을 확인한 verified wait로 끝났고, 이번에 같은 run/watch를 계속 관찰해 completed failure를 확인했다. 새 실행을 중복 시작하지 않았다. 사용자 승인3회 중2회 사용·1회 잔여다.
+- no-stdio suspended-only 생성도 CreateProcessW OS87로 실패했다. 기록된 UTF16 길이는 image85/cwd100이며 primary thread는 시작되지 않았다. 입출력/상속 bundle과 MAX_PATH 초과만으로 설명할 수 없고, 설치된 Git 이미지/경로·추가 companion lease의 차이가 남는다. 로컬에 Windows 실행기가 없어 정적 추정으로 제품 실행 보호를 제거하지 않는다. 동일 독립 검토자에게 남은1회로 원인을 구분할 후속 진단을 요청했다. 로그 /tmp/hello-agent-windows-42172986342-failure.log. macOS G6·Windows 전체apply/restore·제품 활성화·출시 미완료는 유지한다.
+- 후속 후보40a784d는 held image handle의 GetFinalPathNameByHandleW(VOLUME_NAME_DOS)에서 얻은 local extended-drive 경로만 테스트 lease의 launch 표기로 사용한다. GUID/DOS GetBinaryTypeW 결과도 읽기 전용으로 기록한다. GUID CWD·모든 image/dependency pin·Job·debugger·일시정지/미실행·terminate completion barrier는 유지한다. 제품 코드에 helper가 포함되지 않으며 실패 뒤 fallback도 없다. 두 파일64+/3-에 rustfmt/diff·동일 독립 검토자 승인을 확보한 뒤 마지막3/3으로 게시했다. CI42174341305 queued 확인, 잔여0회. 결과는 테스트 경로 표기 비교이며 제품 DOS 전환 승인/구현이 아니다.
 
 ### 2026-11-06 · by GPT-6
 

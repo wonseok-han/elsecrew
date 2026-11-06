@@ -126,6 +126,62 @@ impl ExecutableLease {
     pub(super) fn path(&self) -> &str {
         &self.path
     }
+    /// Diagnostic only: derive an alternate launch spelling from the held file,
+    /// never from caller input. All identity/dependency pins remain unchanged.
+    #[cfg(test)]
+    pub(super) fn diagnostic_dos_launch_alias(mut self) -> Result<Self, ProjectFailure> {
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetFinalPathNameByHandleW(
+                file: *mut std::ffi::c_void,
+                path: *mut u16,
+                capacity: u32,
+                flags: u32,
+            ) -> u32;
+            fn GetBinaryTypeW(path: *const u16, kind: *mut u32) -> i32;
+        }
+        self.validate()?;
+        let mut buffer = vec![0u16; 32768];
+        let count = unsafe {
+            GetFinalPathNameByHandleW(
+                self.image.as_raw_handle(),
+                buffer.as_mut_ptr(),
+                buffer.len() as u32,
+                0, // FILE_NAME_NORMALIZED | VOLUME_NAME_DOS
+            )
+        } as usize;
+        if count == 0 || count >= buffer.len() {
+            return Err(ProjectFailure::recovery("diagnostic DOS alias unavailable"));
+        }
+        let alias = String::from_utf16(&buffer[..count])
+            .map_err(|_| ProjectFailure::manifest("diagnostic alias is not Unicode"))?;
+        // Admit only a local extended drive path, not a UNC/network alias.
+        let bytes = alias.as_bytes();
+        if !alias.starts_with(r"\\?\")
+            || bytes.len() < 7
+            || !bytes[4].is_ascii_alphabetic()
+            || bytes[5] != b':'
+            || bytes[6] != b'\\'
+        {
+            return Err(ProjectFailure::manifest(
+                "diagnostic alias is not a local drive path",
+            ));
+        }
+        for (kind, path) in [("guid", &self.path), ("dos", &alias)] {
+            let wide: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
+            let mut binary_type = 0;
+            let ok = unsafe { GetBinaryTypeW(wide.as_ptr(), &mut binary_type) };
+            let error = if ok == 0 {
+                std::io::Error::last_os_error().raw_os_error()
+            } else {
+                None
+            };
+            eprintln!("installed Git image classification: alias={kind}, ok={}, type={binary_type}, error={error:?}", ok != 0);
+        }
+        self.validate()?;
+        self.path = alias;
+        Ok(self)
+    }
     pub(super) fn validate(&self) -> Result<(), ProjectFailure> {
         self.parent.validate()?;
         if windows_fs::identity(&self.image, false)? != self.identity {
