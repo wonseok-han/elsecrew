@@ -105,3 +105,5 @@ cargo test --locked --release -p hello-agent-sidecar --lib selected_git_trust_ru
 ```
 
 자체 임시 앱 데이터에서 선택 → 서명자/설치 폴더 확인 → 미동의 실행 거절 → 명시 동의 → 매 실행 재검사 → `--version` 및 `hash-object --stdin` → 동의 철회 후 실행 거절을 검사한다. 실제 실행은 제품의 실행 파일/의존 DLL 관측·고정 환경·보호된 작업 폴더·프로세스 종료 경로를 사용한다. 내용 해시 명령은 객체를 저장하지 않으며 네트워크·모델 호출도 하지 않는다. 성공 시 임시 자료를 정리한다. 이 검사 후보는 아직 Windows에서 실행하지 않았으며 프로젝트 전체 반영/복원·패키지 UI·출시 합격 증거가 아니다. 검사가 동의를 만들어 사용하는 대상은 임시 데이터뿐이며 일반 앱의 실행 gate는 그대로 비활성이다.
+
+동일한 설치본 환경에서 `confirmed_multi_item_apply_and_restore_through_scheduler_and_ledger -- --ignored --nocapture --test-threads=1` 필터를 사용하면 전체 반영·복원 진단 후보를 실행한다. 앱이 임시 원본을 Git으로 준비한 뒤 실제 프로젝트/snapshot·review·확인 토큰·백업·scheduler·SQLite 원장을 거쳐 파일 수정/추가/삭제와 새 중첩 폴더를 반영하고 역순 복원한다. 오래된 복원 기록 거절과 SQLite 재열기도 검사한다. 테스트 바이너리에서 해당 manager에만 Git 실행을 허용하며 설치본 동의/서명/의존성 검사와 일반 앱의 공개 쓰기 gate는 우회하지 않는다. 이 후보도 Windows 실행 전이며 중간 syscall 강제 중단·전원장애·패키지 UI 시험은 별도로 남는다.

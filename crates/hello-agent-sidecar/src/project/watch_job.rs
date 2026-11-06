@@ -96,6 +96,8 @@ impl ProjectManager {
         // No Storage connection, application owner, pending save or watcher is
         // shared with the worker, and mutation features remain disabled.
         let verifier = Self {
+            #[cfg(all(test, windows))]
+            windows_git_diagnostic: self.windows_git_diagnostic,
             preparation_cancel: None,
             source_writes_enabled: false,
             application_cleanup_enabled: false,

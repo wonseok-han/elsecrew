@@ -4,6 +4,10 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준e389bf35에서 Windows 전체 원장/scheduler roundtrip opt-in 후보를 추가했다. 명시 설치Git·임시 데이터/원본만 사용해 Git준비→snapshot→검토/확인/백업→파일 수정·추가·삭제/중첩폴더 반영→stale복원기록 거부→역순 복원→SQLite재열기를 연결했다. Git허용 필드는 cfg(test,windows)의 manager 한정이며 제품const/공개쓰기 gate·설치본 동의/의존성 검사를 유지한다. 독립 검토 차단결함없음, rustfmt/diff 통과; Windows 컴파일/실행·syscall중단 회귀는 미확인이다. release-checklist에 실행 절차를 추가했다. push/CI·제품활성화·실제모델·패키징 없음. 다음은 이 후보의 native 검증과 중단/복구 확장, G6·출시 검증이다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준d88e436e에서 Windows 프로젝트 실행의 남은 입장 경로를 확인했다. 고정환경/설치본 재검사/보호 CWD 기반 내부 Git transport는 연결돼 있으나 제품 gate는 비활성이다. 선택된 실제 설치본을 검증하는 opt-in native 통합 진단을 추가했다.
 - HELLO_AGENT_WINDOWS_TEST_GIT로 명시한 설치본만 자체 임시 선택/동의 기록으로 검사한다. 미동의·false 확인 거절, 동의 후 매회 runtime 재검사·--version/표준입력 hash-object·종료, 철회 후 실행 거절과 작업 폴더 불변을 확인한다. 실제 사용자 데이터/프로젝트·모델 호출은 사용하지 않는다. release-checklist에 실행 절차와 증거 범위를 기록했다.
 - rustfmt/diff 통과. Windows 컴파일/실행은 아직 하지 않았으며 기존75 PASS로 덮지 않는다. 추가 push/CI·제품 활성화·패키징 없음. 상시 승인된 독립 검토자1명이 d88e436e Windows 파일 교체/추가/삭제·중첩 폴더·역순 복원·intent recovery를 검토했으며 구체적인 정확성 결함은 찾지 못했다. Windows 전체 원장/scheduler roundtrip 부재는 검증 공백이며 기존 helper PASS나 정적 검토로 대체하지 않는다. 전체 제품 완료가 아니다.
