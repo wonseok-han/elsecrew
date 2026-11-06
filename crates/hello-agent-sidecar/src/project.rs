@@ -55,8 +55,12 @@ mod windows_git_baseline;
 #[path = "project/application/git_baseline/raw_baseline/receipt.rs"]
 mod windows_baseline_receipt;
 #[cfg(windows)]
-#[path = "project/application/review.rs"]
-mod windows_application_review;
+#[path = "project/application"]
+mod windows_application {
+    pub(super) mod review;
+}
+#[cfg(windows)]
+use windows_application::review as windows_application_review;
 #[cfg(windows)]
 mod windows_save_recovery;
 #[cfg(windows)]
@@ -244,7 +248,7 @@ enum SnapshotCreation {
     ReuseActive,
     FreshChat,
     // Explicit clean-source creation; never upgrades an existing snapshot.
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[allow(dead_code)]
     ApplicationCandidate,
 }

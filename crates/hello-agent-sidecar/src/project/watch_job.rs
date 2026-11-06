@@ -101,9 +101,9 @@ impl ProjectManager {
             application_cleanup_enabled: false,
             application_failure: None,
             application_cancel: Default::default(),
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", windows))]
             application_job: None,
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             application_confirmations: Default::default(),
             data_root: self.data_root.clone(),
             data_dir: clone_dir(&self.data_dir)?,
