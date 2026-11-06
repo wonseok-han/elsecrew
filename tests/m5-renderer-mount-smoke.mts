@@ -54,6 +54,10 @@ test("packaged renderer build mounts lazy Monaco and creates a local worker in C
   if (!result.error && result.signal === null && [0, 1].includes(result.status ?? -1)) {
     rmSync(temporaryRoot, { recursive: true });
   }
-  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(result.status, 0, `${JSON.stringify({
+    status: result.status,
+    signal: result.signal,
+    error: result.error?.message ?? null,
+  })}\n${result.stdout}\n${result.stderr}`);
   assert.match(result.stdout, /"workerCreated":true/);
 });

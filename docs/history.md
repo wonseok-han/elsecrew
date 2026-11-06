@@ -4,6 +4,13 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준7c60748에서 최신 M5 renderer production build를 생성했다. 빌드 성공(383ms), main596kB/Monaco2.26MB minified chunk 경고는 유지한다. 새 설치 패키지나 worktree를 만들지 않았다.
+- 합성 Chromium mount 시험은 제한 환경에서 child status=null로 실패했으나, 동일 빌드를 제한 밖에서 실행하자2/2 PASS(14.79초)였다. 숨김 창·자체 임시 profile·fake bridge만 사용했고 실제 Monaco/local worker 및 runner의 설정/반영 UI 시나리오를 수행했다. 실제 sidecar·계정·원본 변경 또는 RSS/G6/출시 완료 증거가 아니다.
+- Electron 개발 배포본의 codesign strict는 제한 밖에서도 sealed resources 오류를 냈지만 display는 linker-signed ad-hoc/Sealed Resources none을 표시했고 위 실제 실행은 성공했다. 이를 공식 공급자 서명 실패나 설치본 손상으로 단정하지 않고 재설치·재서명하지 않았다. 다음 실패에서 null exit를 원인으로 오판하지 않도록 mount test assertion에 signal/error를 함께 표시했다.
+- 정상 종료한 시험 profile은 기존 runner가 정리했으며 첫 비정상 종료의 임시 폴더는 기존 정책대로 보존했다. diff 검사 통과. Windows CI 승인 대기·성능/G6/출시 검증은 계속 남는다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준2ee253a2에서 Windows 원격 CI 승인 대기와 독립적으로 누적 프런트/통신 계약 검사를 진행했다. 최초 npm test는668개 중661 PASS/7 FAIL이었다.6개는 Monaco 재사용 이후 setModel 없는 mock/이전 생성·dispose 순서,1개는 공통 protocol fixture에서 workspace.saveRecovery/resolveSaveRecovery 누락이었다. Rust/TypeScript 양쪽 메서드 목록에 실제 존재함을 대조해 fixture를 교정했다.
 - mock를 현재 editor/model 분리 수명에 맞추자3개 검사에서 실제 text-only render의 중복 updateOptions가 드러났다. Monaco 최초 설정을 기억하고 admission 또는 saving에 따른 최종 readOnly가 달라질 때만 갱신하도록 수정했다. 지연 load·현재 잠금·저장 단축키·초안 보존·명시 재시도 검사는 유지했다. 실제 RSS400MiB나 입력 지연 개선을 측정한 결과는 아니다.
 - 관련11개 PASS, 수정 후 전체 npm test 668 PASS/0 FAIL(24.85초), TypeScript --noEmit 및 diff 검사 통과. 새 패키지/worktree/모델 실행/원격 작업은 없다. Windows CI·실제 GUI/메모리/G6·출시는 계속 남아 전체 완료를 선언하지 않는다.
