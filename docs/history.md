@@ -1,6 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
-2026-11-06 Windows 진단42129091905/6e079a9에서 native44개+직접 복구 호출 차단1개, 총45 PASS를 확인했다. 승인된3회는 모두 사용했다. 사용자 설치 Git 연결·Windows 제품 검증/활성화·G6/출시는 남아 있으며 전체 개발은 미완료다. 최신 구현·미완료 기록은 [11월 아카이브](archive/history-2026-11.md)에 보존한다.
+2026-11-06 Windows 진단42154541724/5e2b9b23에서 native73개+직접 복구 호출 차단1개, 총74 PASS를 확인했다. 추가 승인2회는 모두 사용했다. macOS sidecar lib711개와 stdio16개·별도100회 저장 경합도 확인했다. Windows 제품 검증/활성화·G6/출시는 남아 있으며 전체 개발은 미완료다. 최신 구현·미완료 기록은 아래 및 [11월 아카이브](archive/history-2026-11.md)에 보존한다.
+
+### 2026-11-06 · by GPT-6
+
+- 마지막 추가 승인으로2개 Windows 수정 파일만5e2b9b23에 게시했다. CI42154541724 success: 컴파일·필수 테스트 존재 확인, native73 PASS/0 FAIL(6.97초), dispatcher 비활성 복구 직접 호출 차단1 PASS(0.87초). stage_new sharing 실패가 실제 Windows에서 해소됐고 read-only native rebind/기존 create·move/child변경검사도 통과했다.
+- 원격 범위는 승인된 Windows 코드/후속 수정만이며 local4f2c1dfb와 해당 파일의 내용이 같다. 추가 승인2/2 소진, 후속 push는 별도 승인이다. main 미병합, 패키징/제품 활성화/실제 공급자 호출 없음.
+- 이 결과는 Windows helper/진단 범위74개이며 full application transaction crash·패키지UI·실제Git admission·실제agent·전원장애/출시 합격을 뜻하지 않는다. 현재 macOS 편집기 후속 변경은 로컬에만 있다. Windows 제품 통합과 G6 메모리/전체시안/출시 검증이 남는다.
 
 ### 2026-11-06 · by GPT-6
 
@@ -172,6 +178,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Windows 생성 폴더 재관측(2026-11-06)**: DELETE-capable creation handle을 유지한 상태의 generic directory reopen은 sharing 위반을 낼 수 있다. 부모handle 상대 read-only FILE_OPEN/share7/no-follow+full identity로 재관측하고 기존 creation pin·lease·flush·receipt 비교는 유지한다. CI42154541724에서 stage/new-directory 회귀 포함74개 진단 통과; 전체 Windows 제품 활성화 근거로 확장하지 않는다.
 - **Windows Git 설치 신뢰 정책 승인(2026-11-06)**: 사용자가 선택한 설치 폴더와 OS 검증 서명자를 보여준 뒤 명시 동의하는 방식으로 확정했다. 같은 설치본의 서명 없는 DLL을 수용하되 실행마다 재검사하고 root/서명자 변경은 재동의한다. 버전/파일 digest 고정은 하지 않는다. 이 승인은 Windows 제품 활성화·추가CI/push 승인이 아니다. 후속 Git admission·baseline receipt·review/confirmation·before archive·pre-write intent·취소 가능한 원본 관측은 구현 checkpoint이며 Windows native 검증 전이다. 일반 파일 writer/명시 restore·archive cleanup·제품 scheduler 내부 연결은 구현 checkpoint다. directory/추가 metadata·원본 잔여 파일 처리와 native 검증은 미완료다. 제품 gate는 닫혀 있다. 최신 상세는 현재 워크로그와11월 아카이브에서 확인한다.
 - **Windows Git 의존 DLL 서명(2026-11-06)**: [공식 이슈6491](https://github.com/git-for-windows/git/issues/6491)에서 유지보수자는 모든 배포 DLL 서명을 제공하지 않는다고 설명했다. 모든 의존 DLL에 Authenticode를 요구하는 방식은 정상 설치본 호환성을 보장하지 못한다. 주 실행 파일의 검증된 signer 추출을 구현했으나 배포자 정책·설치본/의존성 신뢰·실제 로드 결속은 미완료이고 제품 gate는 유지한다.
 - **Windows 저장/복구 native45 PASS(2026-11-06)**: 공개6e079a9/tree77dd9ad3, CI42129091905에서44 native+1 직접 호출 차단 통과. 통합02657f7/9a62344와 같은 소스 수정이다. Win32 상대 rename87은 동기 handle의 NtSetInformationFile class10으로, 이미 동일한 보안 descriptor의 불필요한 재적용은 exact-equal/recheck 경로로 수정했다. 4개 파일/DB 재열기 fixture가 통과했지만 Windows Git admission·실제 프로세스 재시작·제품 활성화·출시는 별도다. 이번 승인3회는 모두 사용했다.
