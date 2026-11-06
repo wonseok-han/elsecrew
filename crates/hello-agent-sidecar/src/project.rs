@@ -445,8 +445,8 @@ pub struct ProjectManager {
     application_cleanup_enabled: bool,
     application_failure: Option<(String, String, ProjectFailure)>,
     pub(crate) application_cancel: crate::application_cancel::ApplicationCancel,
-    #[cfg(target_os = "macos")]
-    application_job: Option<application::review::intent::execution::ApplicationJob>,
+    #[cfg(any(target_os = "macos", windows))]
+    application_job: Option<application_review::intent::execution::ApplicationJob>,
     #[cfg(any(unix, windows))]
     application_confirmations: application_review::confirmation::Confirmations,
     data_root: PathBuf,
@@ -591,40 +591,40 @@ impl ProjectManager {
     }
 
     pub(crate) fn start_application_request(&mut self, storage: &mut Storage, project: &str, chat: &str, token: &str, request: &str) -> Result<ProjectAction, ProjectFailure> {
-        if !self.source_writes_enabled { return Err(ProjectFailure::recovery("source application is not enabled")); }
-        #[cfg(target_os = "macos")]
+        if !self.source_writes_enabled || !cfg!(target_os = "macos") { return Err(ProjectFailure::recovery("source application is not enabled")); }
+        #[cfg(any(target_os = "macos", windows))]
         {
             if !self.application_confirmations.matches_chat(token, project, chat) { return Err(ProjectFailure::recovery("application confirmation target changed")); }
             let record = self.start_confirmed_application(storage, token, request)?;
             Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"startApplication","projectId":project,"chatId":chat,"applicationId":record["applicationId"]}), ..Default::default() })
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         { let _ = (storage, project, chat, token, request); Err(ProjectFailure::recovery("application unavailable on this platform")) }
     }
 
     pub(crate) fn restore_application_request(&mut self, storage: &Storage, project: &str, application_id: &str, fingerprint: &str, request: &str) -> Result<ProjectAction, ProjectFailure> {
-        if !self.source_writes_enabled { return Err(ProjectFailure::recovery("source restoration is not enabled")); }
-        #[cfg(target_os = "macos")]
+        if !self.source_writes_enabled || !cfg!(target_os = "macos") { return Err(ProjectFailure::recovery("source restoration is not enabled")); }
+        #[cfg(any(target_os = "macos", windows))]
         {
             self.restoration_preview(storage, project, application_id, 0, Some(fingerprint))?;
-            let record = application::review::intent::inspect(storage, project)?;
+            let record = application_review::intent::inspect(storage, project)?;
             let current = format!("{:x}", Sha256::digest(serde_json::to_vec(&record).map_err(|_| ProjectFailure::recovery("invalid restoration record"))?));
             if current != fingerprint { return Err(ProjectFailure::recovery("restoration record changed")); }
             self.start_selected_restoration(storage, project, &record, request)?;
             Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"restoreApplication","projectId":project,"applicationId":application_id}), ..Default::default() })
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         { let _ = (storage, project, application_id, fingerprint, request); Err(ProjectFailure::recovery("restoration unavailable on this platform")) }
     }
     pub(crate) fn application_running(&self) -> bool {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         { self.application_job.is_some() }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         { false }
     }
 
     /// Internal admission only: no public source-write command is enabled yet.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     #[allow(dead_code)]
     fn start_confirmed_application(&mut self, storage: &mut Storage, token: &str, request: &str) -> Result<Value, ProjectFailure> {
         if self.application_job.is_some() || !self.pending_saves.is_empty() || !storage.blocker_ids()?.is_empty() {
@@ -635,7 +635,7 @@ impl ProjectManager {
             .ok_or_else(|| ProjectFailure::recovery("application confirmation cancellation slot missing"))?);
         let mut confirmations = std::mem::take(&mut self.application_confirmations);
         let result = confirmations.prepare_backup(self, storage, token, request)
-            .and_then(|prepared| application::review::intent::execution::ApplyingBatch::start(self, storage, &mut confirmations, prepared, request));
+            .and_then(|prepared| application_review::intent::execution::ApplyingBatch::start(self, storage, &mut confirmations, prepared, request));
         self.application_confirmations = confirmations;
         if result.is_err() { self.application_confirmations.cancel(); }
         self.preparation_cancel = None;
@@ -646,29 +646,29 @@ impl ProjectManager {
             token,
             record["applicationId"].as_str().ok_or_else(|| ProjectFailure::recovery("missing application identity"))?,
         ) { return Err(ProjectFailure::recovery("application preparation identity changed")); }
-        self.application_job = Some(application::review::intent::execution::ApplicationJob::Apply(owner));
+        self.application_job = Some(application_review::intent::execution::ApplicationJob::Apply(owner));
         self.application_failure = None;
         Ok(record)
     }
 
     /// Internal exact-record restoration admission; not a public write endpoint.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     #[allow(dead_code)]
     fn start_selected_restoration(&mut self, storage: &Storage, project_id: &str, expected: &Value, request: &str) -> Result<Value, ProjectFailure> {
         if self.application_job.is_some() || !self.pending_saves.is_empty() {
             return Err(ProjectFailure::recovery("restoration requires an idle workspace"));
         }
-        let owner = application::review::intent::execution::RestoringBatch::start(storage, project_id, expected, request)?;
+        let owner = application_review::intent::execution::RestoringBatch::start(storage, project_id, expected, request)?;
         let id = expected["applicationId"].as_str().ok_or_else(|| ProjectFailure::recovery("missing application identity"))?;
         self.application_confirmations.cancel();
         self.application_cancel.begin(project_id, id);
-        self.application_job = Some(application::review::intent::execution::ApplicationJob::Restore(owner));
+        self.application_job = Some(application_review::intent::execution::ApplicationJob::Restore(owner));
         self.application_failure = None;
         Ok(expected.clone())
     }
 
     pub(crate) fn poll_application(&mut self, storage: &mut Storage) {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         if let Some(mut owner) = self.application_job.take() {
             // Failure leaves the durable application fence for explicit recovery;
             // never infer completion from dropping the session owner.
@@ -686,13 +686,13 @@ impl ProjectManager {
                 }
             }
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         let _ = storage;
     }
 
     pub(crate) fn stop_application(&mut self) {
         self.application_cancel.stop();
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         { self.application_job = None; }
         #[cfg(any(unix, windows))]
         self.application_confirmations.cancel();
@@ -701,7 +701,7 @@ impl ProjectManager {
     }
 
     pub(crate) fn cancel_application(&mut self, project_id: &str, application_id: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         {
             let matches_owner = self.application_job.as_ref().is_some_and(|owner|
                 owner.record()["applicationId"] == application_id && owner.record()["binding"]["projectId"] == project_id);
@@ -711,7 +711,7 @@ impl ProjectManager {
             self.stop_application();
             Ok(ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"cancelApplication","projectId":project_id,"applicationId":application_id}), ..Default::default() })
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         { let _ = (project_id, application_id); Err(ProjectFailure::recovery("application unavailable on this platform")) }
     }
     pub(crate) fn cancel_application_confirmation(&mut self, token: &str) -> Result<ProjectAction, ProjectFailure> {
@@ -881,7 +881,7 @@ impl ProjectManager {
             }
         };
         let mut running = false;
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         if let Some(owner) = self.application_job.as_ref() {
             running = owner.record()["applicationId"] == status["applicationId"]
                 && owner.record()["binding"]["projectId"] == project_id;
@@ -912,9 +912,9 @@ impl ProjectManager {
     }
     /// Archive contents are evidence, not a prediction that every item will be changed.
     pub(crate) fn restoration_preview(&self, storage: &Storage, project_id: &str, application_id: &str, offset: usize, expected_fingerprint: Option<&str>) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
-            use application::review::{backup, intent};
+            use application_review::{backup, intent};
             let invalid = || ProjectFailure::recovery("restoration review changed or is unavailable");
             if self.application_running() || offset > 100_000 || offset % 100 != 0 || (offset != 0 && expected_fingerprint.is_none()) { return Err(invalid()); }
             let record = intent::inspect(storage, project_id)?;
@@ -931,7 +931,7 @@ impl ProjectManager {
             if intent::inspect(storage, project_id)? != record { return Err(invalid()); }
             Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"restorationPreview","projectId":project_id,"applicationId":application_id,"state":record["state"],"page":{"worktreeId":record["binding"]["worktreeId"],"total":items.len(),"offset":offset,"fingerprint":fingerprint,"changes":changes}}), ..Default::default() })
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         { let _ = (storage, project_id, application_id, offset, expected_fingerprint); Err(ProjectFailure::recovery("restoration review unavailable on this platform")) }
     }
     pub fn new(database_path: &Path) -> Result<Self, SidecarError> {
@@ -965,7 +965,7 @@ impl ProjectManager {
             application_cleanup_enabled: cfg!(target_os = "macos"),
             application_failure: None,
             application_cancel: Default::default(),
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", windows))]
             application_job: None,
             #[cfg(any(unix, windows))]
             application_confirmations: Default::default(),
@@ -6393,6 +6393,31 @@ mod watch_native_tests;
 #[cfg(all(test, windows))]
 mod windows_tests {
     use super::*;
+
+    #[test]
+    fn application_scheduler_connection_does_not_enable_windows_writes() {
+        let root = tempfile::tempdir().unwrap();
+        let database = root.path().join("hello-agent.sqlite3");
+        let mut storage = Storage::open(&database).unwrap();
+        let mut manager = ProjectManager::new(&database).unwrap();
+        assert!(!manager.application_running());
+        // An accidentally set preference is not Windows platform activation.
+        manager.source_writes_enabled = true;
+        assert_eq!(manager.application_capabilities().result["enabled"], false);
+        let apply = manager.start_application_request(
+            &mut storage, "project_missing", "chat_missing", "token_missing", "req_apply",
+        ).unwrap_err();
+        assert_eq!(apply.detail, "source application is not enabled");
+        let restore = manager.restore_application_request(
+            &storage, "project_missing", "application_missing", "fingerprint", "req_restore",
+        ).unwrap_err();
+        assert_eq!(restore.detail, "source restoration is not enabled");
+        manager.poll_application(&mut storage);
+        manager.stop_application();
+        assert!(!manager.application_running());
+        assert!(storage.projection_records("project").unwrap().is_empty());
+        assert!(storage.blocker_ids().unwrap().is_empty());
+    }
 
     #[test]
     fn fake_path_git_is_never_started() {
