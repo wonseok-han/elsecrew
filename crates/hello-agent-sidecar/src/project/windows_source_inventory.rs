@@ -18,6 +18,9 @@ pub(super) struct Inventory {
     pub(super) entries: BTreeMap<String, Entry>,
 }
 impl Inventory {
+    pub(super) fn root_identity(&self) -> windows_fs::Identity {
+        self.root.identity
+    }
     pub(super) fn write_receipt<W: std::io::Write>(
         &self,
         output: &mut W,

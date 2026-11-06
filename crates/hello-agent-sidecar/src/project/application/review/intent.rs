@@ -10,12 +10,10 @@ use uuid::Uuid;
 pub(in crate::project) mod completion;
 #[cfg(target_os = "macos")]
 pub(in crate::project) mod execution;
-#[cfg(unix)]
 mod observation;
 pub(in crate::project) mod retirement;
 #[cfg(target_os = "macos")]
 pub(in crate::project) mod writer;
-#[cfg(unix)]
 #[allow(unused_imports)]
 pub(in crate::project) use observation::observe_pending_source;
 

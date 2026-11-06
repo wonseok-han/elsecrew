@@ -1,6 +1,8 @@
 //! Point-in-time comparison only. Matching an after image is not writer ownership.
 use super::*;
-use crate::project::application::capture;
+#[cfg(unix)]
+use crate::project::application::capture_checked;
+#[cfg(unix)]
 use cap_std::fs::MetadataExt;
 use std::path::Path;
 
@@ -10,6 +12,18 @@ pub(in crate::project) fn observe_pending_source(
     storage: &Storage,
     project_id: &str,
 ) -> Result<Value, ProjectFailure> {
+    observe_pending_source_checked(manager, storage, project_id, &|| Ok(()))
+}
+
+/// Cancellation is advisory for this read-only observation; it never abandons
+/// an intent or clears the lock. A writer must still recheck held objects.
+pub(in crate::project) fn observe_pending_source_checked(
+    manager: &ProjectManager,
+    storage: &Storage,
+    project_id: &str,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<Value, ProjectFailure> {
+    check()?;
     let current = inspect_pending_item(manager, storage, project_id)?;
     let binding = &current["binding"];
     let root = binding["canonicalGitRoot"].as_str().ok_or_else(invalid)?;
@@ -26,12 +40,31 @@ pub(in crate::project) fn observe_pending_source(
     {
         return Err(invalid());
     }
-    let raw = capture(&source._root)?;
+    #[cfg(unix)]
+    let raw = capture_checked(&source._root, check)?;
+    #[cfg(windows)]
+    let raw = crate::project::windows_source_inventory::capture(
+        &source._root,
+        &source.canonical_root,
+        check,
+    )?;
     let reopened = crate::project::open_absolute_directory_capability(&source.canonical_root)?;
+    #[cfg(unix)]
     let meta = reopened.dir_metadata().map_err(|_| invalid())?;
+    #[cfg(unix)]
     if crate::project::application::stamp(&meta) != raw.root_stamp {
         return Err(invalid());
     }
+    #[cfg(unix)]
+    let root_identity = json!([meta.dev(), meta.ino()]);
+    #[cfg(windows)]
+    let root_identity = {
+        let identity = crate::project::windows_fs::identity(&reopened, true)?;
+        if identity != raw.root_identity() {
+            return Err(invalid());
+        }
+        json!(identity)
+    };
     let item = &current["pendingItem"]["item"];
     let path = item["path"].as_str().ok_or_else(invalid)?;
     let mut parent = Path::new(path).parent();
@@ -40,7 +73,7 @@ pub(in crate::project) fn observe_pending_source(
         if raw
             .entries
             .get(p.to_str().ok_or_else(invalid)?)
-            .is_none_or(|e| e.kind != 2)
+            .is_none_or(|e| e.kind() != 2)
         {
             parents_present = false;
             break;
@@ -48,8 +81,20 @@ pub(in crate::project) fn observe_pending_source(
         parent = p.parent();
     }
     let entry = raw.entries.get(path);
+    #[cfg(unix)]
     let before = entry.map(|e| json!({"kind":e.kind,"mode":e.mode,"size":e.size,"digest":e.digest,"identity":e.identity})).unwrap_or(Value::Null);
+    #[cfg(unix)]
     let after = entry.map(|e| json!({"kind":e.kind,"executable":e.kind == 1 && e.mode & 0o100 != 0,"size":e.size,"digest":e.digest})).unwrap_or(Value::Null);
+    #[cfg(windows)]
+    let before = entry
+        .map(|e| serde_json::to_value(e).map_err(|_| invalid()))
+        .transpose()?
+        .unwrap_or(Value::Null);
+    #[cfg(windows)]
+    let after = entry
+        .map(|e| serde_json::to_value(Image::from(e)).map_err(|_| invalid()))
+        .transpose()?
+        .unwrap_or(Value::Null);
     let comparison = if !parents_present {
         "conflict"
     } else if before == item["before"] {
@@ -59,9 +104,13 @@ pub(in crate::project) fn observe_pending_source(
     } else {
         "conflict"
     };
+    check()?;
+    if inspect_pending_item(manager, storage, project_id)? != current {
+        return Err(invalid());
+    }
     // No durable state changes: current bytes cannot prove which process wrote them.
     Ok(
         json!({"applicationId":current["applicationId"],"index":current["pendingItem"]["index"],"path":path,
-        "comparison":comparison,"rootIdentity":[meta.dev(),meta.ino()],"observed":before}),
+        "comparison":comparison,"rootIdentity":root_identity,"observed":before}),
     )
 }
