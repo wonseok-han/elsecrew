@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 깨끗한73f6ea9d에서 Rust release·Electron main/preload·renderer·QA 포장을 완료했다. 대기 시험 앱은 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-output-qa-2ONxaj (310MiB), build.json status BUILT이며 sidecar SHA256은 이전 시험과 동일하다. 앱/모델은 아직 실행하지 않았다. 시작 전 관련 시험 프로세스 부재를 확인했다.
+- 사용자에게 새5분 화면 유지 가능 여부를 요청했고 아직 미응답이다. 기존 시험 폴더를 재사용할 수 있도록 이 경로를 기록하며 중복 패키지를 만들지 않는다. 다음은 해당 응답 후 이 패키지로 combined 1회 실행·종료 확인·증거 보존·임시 폴더 정리다.
+- Windows2e5a98a commit 존재와 native launch 환경 구성·CreateProcessW 호출을 읽기 전용으로 재확인했으나 새 원인 근거는 없었다. 기존 추가push 승인 질문도 미응답이며 원격 실행 없음. 메모리/입력FAIL·Windows 전체 반영/복원·출시 검증은 계속 남는다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준84bf1c42에서 채팅 출력 reader/panel의 abort·unsubscribe·timer cleanup, chat view reset, 설치된 Monaco editor worker의 마지막 model 제거 시 dispose를 확인했다. 후속 초안은 사용자 보존 데이터이므로 메모리 절약 목적으로 삭제하지 않는다. 코드 확인만으로 실측 renderer 잔류의 원인을 확정하지 않았다.
 - 다음 QA에 JS heap 사용/할당량과 DOM document/node/listener 숫자만 기록하는 선택적 진단을 추가했다. 기존 debugger를 사용하고 cold idle 뒤 workload 전 및 retained RSS 수집 종료 뒤에만 조회한다. heap snapshot·GC·내용 보관·RSS 차감은 없다. 미지원/잘못된 숫자는 valid:false이며0으로 합격 처리하지 않는다. 프로젝트 닫힘 시점도 짧은 진행 로그로 남겨60초 잔류 대기를 정체로 오해하지 않게 했다.
 - session 진단7개 PASS·두 collector node --check·diff 통과. 실제 앱 카운터 수집/성능 재시험은 아직 없으며400/800/120MiB·입력50ms 및 기존FAIL을 유지한다. 다음은 계측을 포함한 단일 전체 시험에서 renderer 보유 증가와 RSS를 대조하는 것이다. Windows 공개 승인 대기·제품 활성화/모델 호출 없음.
