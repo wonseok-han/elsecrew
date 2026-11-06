@@ -13,6 +13,9 @@ const { summarizeOutputGeneration } = require('./m5-output-generation.cjs');
 if (process.platform !== 'darwin' || app.isPackaged !== packagedQa) throw new Error('Output diagnostic build mode differs');
 if (packagedQa) app.setName('Hello Agent Output QA');
 const combined = process.argv.includes('--combined-workload');
+// A real foreground surface, not a visibility/throttling override. Limited to
+// the explicitly named QA package; production window policy stays unchanged.
+const keepTestVisible = packagedQa && process.argv.includes('--keep-test-visible');
 const combinedWorkload = combined ? require('./m5-combined-output-workload.cjs') : null;
 const live = combined || packagedQa || process.argv.includes('--live');
 const paced = live || process.argv.includes('--paced');
@@ -41,6 +44,7 @@ assert.equal(fs.realpathSync(app.getPath('sessionData')), fs.realpathSync(sessio
 assert.equal(fs.realpathSync(app.getPath('logs')), fs.realpathSync(logs));
 dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [source] });
 const report = { schemaVersion: 1, diagnostic: true, gateEligible: false, root, packagedQa,
+  keepTestVisible,
   paced, live, liveWindows: [], status: 'RUNNING', shutdown: 'pending', restoredChats: [], scrollChecks: [],
   limitations: [packagedQa ? 'Explicit QA package, synthetic providers; not the production artifact or actual accounts.' : 'Development artifacts, synthetic providers, no actual accounts.',
     'Full retained-window and history checks; no 50-events/s paint or packaged RSS gate.',
@@ -188,6 +192,7 @@ async function finish(error) {
 }
 app.on('browser-window-created', (_event, window) => {
   observedWindow = window;
+  if (keepTestVisible) window.setAlwaysOnTop(true, 'floating');
   for (const event of ['show', 'hide', 'minimize', 'restore', 'focus', 'blur', 'closed']) observeNative(window, event);
   for (const event of ['lock-screen', 'unlock-screen', 'suspend', 'resume']) observeNative(powerMonitor, event);
   sampleWindow('created');

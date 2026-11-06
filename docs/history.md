@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 직전 턴은 시험 실패/정상 종료/정리와 collector 변경 증거를 남긴 progress로 분류했다. 기준5bc548be clean에서 창 생성 코드와 fourth 원시 기록을 대조했다. native isVisible=true 상태의 hide/renderer hidden은 macOS occlusion을 반영한다는 Electron 공식 문서와 일치하지만 어떤 창/Space/OS 동작인지 확인되지 않았다. 제품의 감지 오류로 단정하거나 backgroundThrottling을 끄지 않았다.
+- QA 패키지 전용 --keep-test-visible 옵션을 추가했다. 실제 창에 floating always-on-top만 적용하며 보고서에 옵션을 기록한다. 제품 창·숨김 판정·외부 입력 감시·포커스 반복·기준은 변경하지 않는다. 패키지WamQk6로 기존 무과금 임시 시험1회를 실행했다. fifth 기록에서 대형 tree56/58ms·file216.7ms·diff183.4/208.8ms 단일 관측은 얻었지만23.58~31.71초 및164.23초 이후 renderer hidden, Live window became hidden FAIL이다. 옵션만으로 가림을 해결하지 못했고 전체G6/성능 합격이 아니다.
+- retained 단계에 못 가서 heap snapshot은 새 조건대로 수집하지 않았다. shutdown accepted·관측44PID 부재·DB clean_shutdown_at 확인 후 fixture rY7hsc와 packageWamQk6를 제거했다. 증거 `.artifacts/m5-combined-output-2026-11-06/fifth`. node --check·diff 검사를 통과했고 옵션/증거 한계는 performance 절차에 반영했다. 유효한 foreground 연속 시험·유휴/retained 메모리 목표·Windows 후보2e5a98a 추가승인과 native 통합·출시가 남는다. 화면 시험을 같은 조건으로 반복하지 않으며 다음은 시각 성능 증거와 분리한 실제 sidecar 파일 open/close 보유 진단 등 독립적으로 가능한 원인 조사다. 모델·push·제품 활성화 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 사용자 화면5분 유지 응답 후 기준4c7ad212에서 QA 앱sImIEN을 준비하고 actual-sidecar combined 시험1회를 실행했다. 제품 코드는 변경하지 않았으며 성능 수집 종료 뒤에만 opt-in heap snapshot을 받는 진단을 추가했다. GC 가능성이 있는 덤프를 성능 증거로 사용하지 않으며 기존 측정/합격 기준은 유지한다.
 - 결과 `.artifacts/m5-combined-output-2026-11-06/fourth`: Large project presentation deadline exceeded로 프로젝트 준비 단계에서 FAIL. renderer visibility가 시작 약3초부터 반복 hidden/visible로 전환됐고 native 창 visible과 renderer 실제 표시 상태가 달랐다. 사용자 조작 기록은 없으며 원인을 사용자 행동으로 단정하지 않는다. retained 단계까지 도달하지 않아 메모리 개선/종료 후 보유 분석 근거가 아니다. 실패 시 생성된 약30.6MB snapshot도 활성 프로젝트 상태임을 명시하고 삭제했으며 후속 collector는 retained 단계에 도달한 경우에만 덤프를 수집하도록 좁혔다.
 - 앱 shutdown accepted·관측PID 전부 부재·DB clean_shutdown_at 확인 후 fixtureFry11g와 package sImIEN 및 raw dump를 정리하고 보고서/해시만 보존했다. node --check·git diff --check 통과. 후속 조건 보완은 전체 재실행하지 않았다. 같은 화면 시험을 즉시 반복하지 않는다. macOS 유휴400MiB/retained120MiB 실패 및 유효한 전체 성능 시험, Windows2e5a98a 추가push 승인·통합 검증, 최종 출시 검증이 남는다. 실제 모델·push·제품 활성화 없음.
