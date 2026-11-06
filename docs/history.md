@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
-2026-11-06 Windows CI42176391575에서 실행용 DOS 표기 수정이 컴파일·native·dispatcher를 통과하고 CreateProcessW OS87 이후 단계까지 진행했으나 실제 실행 image 신원 비교에서 거부됐다. 최초/자손 구분 진단과 후속수정이 필요하며 전체 반영/복원은 미검증이다. 최신 공개 승인3회 중2회사용·1회잔여. macOS G6 메모리·Windows 제품 활성화·출시는 미완료다. 상세는 아래 및 [11월 아카이브](archive/history-2026-11.md).
+2026-11-06 Windows CI42176391575에서 실행용 DOS 표기 수정이 컴파일·native·dispatcher를 통과하고 CreateProcessW OS87 이후 단계까지 진행했으나 실제 실행 image 신원 비교에서 거부됐다. 최초/자손 구분 진단과 후속수정이 필요하며 전체 반영/복원은 미검증이다. 최신 공개 승인3회 모두 사용; exact conhost 허용 수정 후보5dd9393b의 CI42178206686 실행 중. macOS G6 메모리·Windows 제품 활성화·출시는 미완료다. 상세는 아래 및 [11월 아카이브](archive/history-2026-11.md).
+
+### 2026-11-06 · by GPT-6
+
+- 직전 턴은 Windows 실패 위치 진단 구현/독립 검토와 CI42177252779 live 확인을 완료한 progress였다. 같은 watch74665가 exit1로 종료될 때까지 관찰했고 두 번째 시험도 installed Git에서 실패했다. 이번 진단 first=false와 actual held path가 Windows/System32/conhost.exe임을 확인했다. root ucrt64/bin/git.exe는 통과했으며 OS console host descendant를 runtime-only matcher가 거절했다. 로그 /tmp/hello-agent-windows-42177252779-failure.log. 새승인2/3사용·1회잔여다.
+- 독립 검토자는 pre-acquired exact conhost ExecutableLease만 descendant로 인정하고 root/DLL/Job/전체 종료는 유지하는 방안을 권고했다. 이는 현재 runtime-only process image 권위의 확장이므로 기존컴파일/시험수정 승인만으로 실행하지 않는다. 사용자 결정용으로3파일 미커밋 후보를 준비했다: SystemModules의 별도 console_host pin, descendant 전용 identity matcher, 최초 image는 원래 matcher 유지. cmd.exe·동명외부파일·root matcher 거절 회귀를 함께 준비했다. rustfmt/diff 통과, Windows native 미검증·미게시·미활성이다. 동일 검토자가 후보의 좁은 신원허용/종료계약 보존을 확인했고, 지적한 authorization join 회귀도 직접 runtime+SystemModules 경로로 보완했다. 사용자가 call_a224b6cfe7a94c25bb21cc270e506eaa에서 해당 exact 시스템 보조프로그램 허용·커밋·공개 진단 반영·잔여CI1회를 명시 승인했다. 제품 gate/모델/main 제외는 유지한다. 승인된3파일 후보5dd9393b를 마지막3/3으로 게시했고 CI42178206686 in_progress를 확인했다. 잔여0회이며 해당 실행 결과는 미확인이다.
 
 ### 2026-11-06 · by GPT-6
 

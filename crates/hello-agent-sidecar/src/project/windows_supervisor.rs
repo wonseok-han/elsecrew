@@ -329,10 +329,9 @@ fn handle_event(
     match event.code {
         3 => {
             let created = unsafe { event.data.create };
-            // A Git invocation permits re-execution of its inspected runtime
-            // (including hard links to that same file), not arbitrary helpers,
-            // shells or repository executables. Non-Git fixture owners retain
-            // their existing root-only image contract.
+            // Git descendants must be the inspected runtime or the exact
+            // pre-acquired OS console host. The initial image remains runtime
+            // only. Non-Git fixture owners keep their root-only contract.
             let image = image.filter(|image| members.is_empty() || image.observes_dependencies());
             let verified = if let Some(image) = image {
                 if created.file.is_null() || created.file as isize == -1 {
@@ -341,7 +340,12 @@ fn handle_event(
                     // This event precedes user-mode execution. Compare the actual
                     // image object, never the optional process-supplied filename.
                     let actual = unsafe { BorrowedHandle::borrow_raw(created.file) };
-                    image.verify_loaded_image(&actual).map_err(|error| {
+                    let verified = if members.is_empty() {
+                        image.verify_loaded_image(&actual)
+                    } else {
+                        image.verify_loaded_descendant(&actual)
+                    };
+                    verified.map_err(|error| {
                         // Opt-in installed-Git CI needs to distinguish the root
                         // from a rejected child. Diagnostics never admit it or
                         // continue the event after a failed identity check.
