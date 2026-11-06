@@ -4,6 +4,13 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준c05b1f5에서 sidecar lib 전체 누적 검사를1회 수행했다(4jobs/4threads, 기존 캐시).1022.87초에708 PASS/3 FAIL/43 ignored였다.3개는 UnixListener::bind가 제한 환경에서 EPERM으로 거절된 시험이었다. runtime_scan_reports_special_files_without_exposing_names와 claude_runtime_files의2개만 제한 밖에서 재실행해3/3 PASS. 합산711개 실행 검사를 확인했으나43개 opt-in·통합 바이너리·Windows/G6/출시를 포함한 전체 합격은 아니다.
+- 사용자에게 2ee253a 및 후속 Windows 컴파일/시험 수정의 동일 공개 브랜치 push/CI 최대3회 승인을 받았다. 첫 push는 원격 선행 이력 때문에 거절되어 CI를 시작하지 않았다. 원격0556a1a/6e079a9의 패치가 로컬과 동일함을 git cherry로 확인하고 중복 이력 충돌은 승인된2ee253a의 exact tree로 해결했다. 원격을 덮어쓰지 않는2-parent 진단 커밋2b413850을 게시했고 diff2ee253a=empty 확인. 후속 편집기 커밋은 게시하지 않았다.
+- Windows CI42151580388(승인1/3)은 컴파일에서 실패했다. path attribute로 alias한 review 모듈이 하위 confirmation/intent/persistence를 잘못된 폴더에서 찾았고 watcher의 ProjectManager 초기화2개 cfg·SnapshotCreation variant Windows cfg가 누락됐다. inline module directory로 정상 하위 경로를 유지하고 alias API는 보존했으며 native 필수 테스트 이름도 새 실제 module path에 맞췄다. 제품 gate는 비활성 그대로다.
+- 작은 Rust 모듈 경로 재현에서 기존 실패/수정 성공을 확인했고 macOS cargo check --tests와 diff 검사 통과. 이 수정만 두 번째 진단에 게시할 준비를 마쳤으며 native 결과는 아직 미확인이다. main 병합·제품 활성화·패키징·실제 모델 호출 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준7c60748에서 최신 M5 renderer production build를 생성했다. 빌드 성공(383ms), main596kB/Monaco2.26MB minified chunk 경고는 유지한다. 새 설치 패키지나 worktree를 만들지 않았다.
 - 합성 Chromium mount 시험은 제한 환경에서 child status=null로 실패했으나, 동일 빌드를 제한 밖에서 실행하자2/2 PASS(14.79초)였다. 숨김 창·자체 임시 profile·fake bridge만 사용했고 실제 Monaco/local worker 및 runner의 설정/반영 UI 시나리오를 수행했다. 실제 sidecar·계정·원본 변경 또는 RSS/G6/출시 완료 증거가 아니다.
 - Electron 개발 배포본의 codesign strict는 제한 밖에서도 sealed resources 오류를 냈지만 display는 linker-signed ad-hoc/Sealed Resources none을 표시했고 위 실제 실행은 성공했다. 이를 공식 공급자 서명 실패나 설치본 손상으로 단정하지 않고 재설치·재서명하지 않았다. 다음 실패에서 null exit를 원인으로 오판하지 않도록 mount test assertion에 signal/error를 함께 표시했다.
