@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- Windows 진단3회차d4bc678a/42152805707은 컴파일과 필수 테스트 존재 검사를 통과했다. native73개 중72 PASS/1 FAIL(3.91초); 후속 dispatcher 차단 검사는 선행 실패로 실행되지 않았다. 실패는 new_directory_stage_is_empty_and_never_reuses_a_name의 stage_new에서 directory lease 공유 위반(os32)이다. 디렉터리 create/move primitive, child 변경 재검사, metadata/stream 검사 등은 통과했다. 승인3회는 모두 소진됐다.
+- 생성된 DELETE-capable 폴더 handle을 보유한 뒤 replacement_parent로 같은 이름을 다시 검사하는 경로의 자체 공유 충돌을 원인 후보로 식별했다. 생성 전에 검증된 lease parent reference를 보관하고 생성후 read-only rebind에 사용하도록 수정했다. FILE_CREATE의 이름 충돌 거절·held output·flush·빈목록·exact receipt 대조·최종 lease.validate를 유지하고 보호 handle을 해제하지 않는다.
+- 독립 검토자는 이 좁은 변경의 경계 유지/차단 결함 없음으로 판정했다. rustfmt/diff 검사 통과. Windows 재실행 전이므로 이 실패의 실제 해소는 아직 미확인이다. 추가 공개 push/CI는 새 승인이 필요하며 main 병합·제품 활성화·모델 호출·패키징은 하지 않았다.
+
+### 2026-11-06 · by GPT-6
+
 - Windows 진단2회차는 로컬ec1b6ca8 중3개 Windows 컴파일/CI 파일만 임시 Git index로 추출해7a56d5ed에 게시했다. 별도 worktree/cache 없이 원격2b413850을 부모로 유지했으며 후속 편집기 변경과 로컬 전용 기록은 제외했다. CI42152377136은 기존7개 오류 해소 후 Image의 serde::Serialize 누락1개에서 실패했다. 사용자 승인3회 중2회 사용.
 - shared review Image에 Serialize derive를 추가했다. 기존 Deserialize/deny_unknown_fields 및 kind/executable/size/digest 형태는 유지한다. 세 번째 진단에 이 컴파일 수정만 게시할 예정이며 native/제품 합격은 아직 아니다. main 병합·기능 활성화·모델 호출 없음.
 

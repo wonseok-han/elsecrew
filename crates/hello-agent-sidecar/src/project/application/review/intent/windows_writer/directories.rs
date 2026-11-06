@@ -80,6 +80,11 @@ pub(super) fn stage_new(
     check()?;
     let input = open_real_child_dir(snapshot_parent, snapshot_leaf)?;
     let before = observed_directory(&input)?;
+    // Validate the independent guard/target before creation. Once our retained
+    // DELETE-capable handle exists, replacement admission may conflict with its
+    // own share restrictions. Rebinding below needs only this pinned parent;
+    // full identity/content checks still bind it to the newly created handle.
+    let output_parent = lease.replacement_parent(staged_name)?;
     let output = crate::project::windows_directory_create::create_new(lease, staged_name)?;
     let directory = Dir::from_std_file(output.try_clone().map_err(|_| invalid())?.into_std());
     for _ in 0..2 {
@@ -96,7 +101,7 @@ pub(super) fn stage_new(
     if observed_directory(&input)? != before || observed_directory(&rebound)? != before {
         return Err(invalid());
     }
-    let output_rebound = open_real_child_dir(lease.replacement_parent(staged_name)?, staged_name)?;
+    let output_rebound = open_real_child_dir(output_parent, staged_name)?;
     if output_rebound
         .entries()
         .map_err(|_| invalid())?
