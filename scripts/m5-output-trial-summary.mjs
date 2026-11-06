@@ -46,6 +46,8 @@ export function summarizeOutputTrial(result, {combinedWorkload = false} = {}) {
     assert.equal(c.liveCoexistence.editor, true); assert.equal(c.liveCoexistence.diff, true);
     assert.equal(c.liveCoexistence.runs, 4);
     assert.ok(Number.isFinite(c.closedAt) && c.retainedStartedAt - c.closedAt >= 60000);
+    assert.ok(Number.isFinite(result.outputObserverStoppedAt) && result.outputObserverStoppedAt >= 0
+      && result.outputObserverStoppedAt <= c.closedAt, 'Output observer must be released before project close');
     const trace = result.mainTraceTiming;
     assert.ok(trace && [c.idleStartedAt,c.idleEndedAt,trace.requestedAt,trace.readyAt,trace.workloadRequestedAt]
       .every(value => Number.isFinite(value) && value >= 0), 'Missing workload trace boundary evidence');

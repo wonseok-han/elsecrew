@@ -4,16 +4,17 @@ const vm = require('node:vm');
 const { installOutputObserver } = require('../scripts/m5-durable-output-observer.cjs');
 
 test('window reads retain scoped new heads without copying accumulated traces', () => {
-  let receive, unsubscribed = false;
+  let receive, unsubscribed = false, disconnected = false;
+  const listeners = new Set();
   const context = vm.createContext({
     document: { visibilityState: 'visible', querySelector: () => null,
-      addEventListener() {}, removeEventListener() {}, body: {} },
+      addEventListener(type) { listeners.add(type); }, removeEventListener(type) { listeners.delete(type); }, body: {} },
     window: { m5: { onAgentOutputAvailable(listener) {
       receive = listener; return () => { unsubscribed = true; };
     } } },
     performance: { now: () => 10, timeOrigin: 1000 },
     queueMicrotask() {},
-    MutationObserver: class { observe() {} disconnect() {} },
+    MutationObserver: class { observe() {} disconnect() { disconnected = true; } },
     // A live-window read must not clone the accumulated global report.
     structuredClone() { throw new Error('Unexpected full trace copy'); },
   });
@@ -37,4 +38,6 @@ test('window reads retain scoped new heads without copying accumulated traces', 
   assert.equal(full.heads.length, 4096);
   assert.equal(full.heads[0].sequence, 1);
   assert.equal(unsubscribed, true);
+  assert.equal(disconnected, true);
+  assert.equal(listeners.size, 0);
 });

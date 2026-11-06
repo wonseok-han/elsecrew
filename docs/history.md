@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준1f770410에서 상시 승인된 읽기 전용 검토자 windows_transaction_review1명과 메모리 증거/측정기/제품 수명을 대조했다. 제품 close·stream·Monaco 정리 경로에서 확정된 누수나 memo 회귀는 찾지 못했다. retained 중 renderer output observer가 구독/MutationObserver/DOM listener와 trace 배열을 보유하는 측정기 수명 문제를 확인했다.
+- 최종 출력·이력·스크롤·generation 검증 뒤 결과를 main 보고서로 보존하고 renderer observer를 stop/delete한 후 프로젝트를 닫도록 수정했다. 집계는 outputObserverStoppedAt≤closedAt을 요구하고 catch가 이미 수집한 결과를 덮지 않는다. 관련11개 검사·node --check·diff 통과. 독립 검토는 QA-inclusive 수치임을 문서화하는 조건으로 좁은 수정 승인했고 해당 설명을 performance 절차에 반영했다.
+- main의 liveWindows/generation/outputObservation 원시 증거와 trace Utility는 계속 RSS에 포함된다. 따라서 renderer observer 해제를 전체 측정기 비용 제거/제품 누수 해소로 주장하지 않는다. full-window 가시성/외부 입력 감시·기준400/800/120MiB·강제GC 없음은 유지한다. 실제 보정 후 측정은 미실행이며 기존FAIL은 그대로다. 다음은 제품 메모리와 보수적 QA 합계의 구분을 유지한 실제 검증이고 Windows2e5a98a 추가push 승인은 여전히 대기다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준9c10ac6b에서 숨긴 Chromium 정상 view 해제 진단을 추가/실행했다. 최초 시도는 기존 releaseView 실패 주입 뒤 정상 해제를 기대하여 timeout했다. 제품은 의도대로 잠겨 있었으므로 안전 경로를 수정하지 않고 실패 주입 이전 별도 opt-in(M5_MEASURE_RELEASE_LIFETIME=1)으로 분리했다.
 - 분리 진단 exit0: connectedElements516→162, editorRemoved:true, Worker created1/terminated1. 이1개는 기존 시험의 수동 worker 생성이며 대형 model/JSON worker 전체 수명의 증거가 아니다. DOM/worker 객체를 전역 배열에 보존하지 않고 숫자만 관찰한다. 기본 smoke의 실패 주입은 그대로 유지하며 계측 wrapper는 opt-in에서만 사용한다. 실행 로그 /tmp/hello-agent-lifetime-only.log; 직접 실행의 임시 profile은 이번 실행에서 경로를 보고하지 않아 추정 삭제하지 않았다. 향후 보고에는 userData 경로를 포함한다.
 - 다음 combined collector는 retained RSS 수집 뒤에만 connected element/editor/diff/output row 숫자를 추가 기록한다. 이전 DOM3101을 연결된 화면/미회수 detached 객체로 구분하기 위함이며 GC·RSS 차감·기준 변경은 없다. 두 스크립트 node --check·diff 통과; 보완된 전체 workload는 미실행이다. 메모리FAIL과 Windows 추가push 승인 대기는 유지한다.

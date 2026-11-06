@@ -1,5 +1,8 @@
 # M5 성능 측정
 
+**2026-11-06 측정기 수명 보정:** combined 시험은 최종 출력·이력·스크롤 검증이 끝나면 출력 관찰 결과를 main 보고서로 전달하고 renderer의 output observer 구독·MutationObserver·scroll/change/visibility listener와 전역 참조를 해제한 뒤 프로젝트를 닫는다. `outputObserverStoppedAt <= closedAt`을 집계 때 요구한다. 전체 구간의 화면 가시성·외부 입력 감시와 main tracing은 계속 유지하므로 추적 프로세스 RSS도 포함된다. 또한 main 보고서의 liveWindows·generation·outputObservation 원시 증거도 보존하므로 합계는 측정기 자료까지 포함한 보수적 QA 수치다. renderer 관찰기 해제를 전체 프로세스에서 측정기 비용이 제거됐다는 주장으로 해석하지 않으며, 이 합계만으로 제품 누수나 해소를 확정하지 않는다. 기존 실행은 이 해제 시점 증거가 없으며 과거 실패를 새 합격으로 바꾸지 않는다. 강제 GC·RSS 차감·400/800/120MiB 기준 변경은 없다. 보정 후 실제 재측정은 별도 필요하다.
+
+
 ## 큰 파일·diff·네 실행 출력의 동시 부하 진단
 
 별도 output QA 앱 실행 파일에 `--combined-workload`를 전달하면 기존 단일 실행 3,000개×4채팅 paced fixture에 큰 파일/트리/diff를 결합한다. 생성하는 임시 원본에는 10,000개 트리 파일·1,000개 디렉터리와 5MiB/100,000줄 파일, diff 기준 파일이 들어간다. 첫 채팅의 복사본에서만 500파일/20,000변경줄/10MiB diff를 만든다. 사용자 메시지 append로 에이전트 출력을 대체하지 않는다.

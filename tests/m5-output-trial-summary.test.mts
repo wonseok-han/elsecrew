@@ -34,6 +34,7 @@ test('rejects incomplete visibility, truncated observations and inconsistent raw
 function combinedResult(): any {
   const r=result();
   r.memory.samples=['idle','loaded','retained'].map((phase,i)=>({phase,at:[1000,2000,63000][i],completedAt:[1010,2010,63010][i],totalBytes:100,processes:[{pid:123,rssBytes:100}]}));
+  r.outputObserverStoppedAt=2900;
   r.mainTraceTiming={requestedAt:1200,readyAt:1300,workloadRequestedAt:1400};
   r.combinedWorkload={editorInput:{restored:true,trustedInputs:1,liveRuns:4,startedAt:100,receivedAt:105,paintAt:125,inputPaintMs:25,inputDeliveryMs:5},status:'OBSERVED',coexist:true,originalUnchanged:true,
     fixture:{treeFiles:10000,treeDirectories:1000,fileBytes:5242880,fileLines:100000},
@@ -50,6 +51,8 @@ test('combined series requires workload evidence and recomputes memory from raw 
   assert.throws(()=>summarizeOutputTrial(result(),{combinedWorkload:true}));
   for(const mutate of [
     (r:any)=>{r.combinedWorkload.coexist=false;},
+    (r:any)=>{delete r.outputObserverStoppedAt;},
+    (r:any)=>{r.outputObserverStoppedAt=3001;},
     (r:any)=>{r.combinedWorkload.originalUnchanged=false;},
     (r:any)=>{r.combinedWorkload.retainedStartedAt=62000;},
     (r:any)=>{r.memory.samples[0].at=1200;},

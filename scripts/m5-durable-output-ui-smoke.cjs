@@ -409,6 +409,14 @@ app.on('browser-window-created', (_event, window) => {
         return generated;
       })()`);
       if (paced) report.generationSummary = summarizeOutputGeneration(report.generation);
+      // Output assertions are complete. Release QA subscriptions/DOM observers
+      // and renderer trace arrays before measuring the closed product view.
+      report.outputObservation = await run(`(() => {
+        const observation = outputObservation.stop();
+        delete globalThis.outputObservation;
+        return observation;
+      })()`);
+      report.outputObserverStoppedAt = Date.now();
       if (combined) {
         assert.equal((await require('node:util').promisify(cp.execFile)('/usr/bin/git', ['-C',source,'status','--porcelain'], {encoding:'utf8',env:{...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_COUNT:'0'}})).stdout.trim(), '', 'Combined workload changed source');
         report.combinedWorkload.originalUnchanged = true;
@@ -436,7 +444,6 @@ app.on('browser-window-created', (_event, window) => {
           outputRows:document.querySelectorAll('.m5-output-scroll article').length,
         })`);
       }
-      report.outputObservation = await run('outputObservation.stop()');
       report.visibility = await run('document.visibilityState');
       report.visibilityTrace = await run('outputSmokeVisibility');
       report.userInput = await run('outputSmokeInput');
@@ -463,7 +470,7 @@ app.on('browser-window-created', (_event, window) => {
         catch (probeError) { report.rendererLongTaskError = String(probeError); }
       }
       try {
-        report.outputObservation = await run('globalThis.outputObservation?.stop() ?? null');
+        report.outputObservation ??= await run('globalThis.outputObservation?.stop() ?? null');
         report.failureView = await run(`(() => {
           const list = document.querySelector('.m5-output-scroll');
           const last = list?.querySelector('article:last-child pre');
