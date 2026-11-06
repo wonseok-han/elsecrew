@@ -281,30 +281,19 @@ pub(in crate::project) fn inspect_settled_item(
     )
 }
 
-/// Verify one archive-bound record selected by the batch verifier. This helper
-/// performs filesystem checks only: its caller must validate the full ledger and
-/// archive before selecting a completed/restored item and before publication.
-pub(in crate::project) fn verify_bound_item_layout(
-    manager: &ProjectManager,
-    expected: &Value,
-    check: &dyn Fn() -> Result<(), ProjectFailure>,
-) -> Result<bool, ProjectFailure> {
-    check()?;
-    let j = &expected["pendingItem"]["writeJournal"];
-    validate_receipts(j, &expected["pendingItem"]["item"])?;
+/// Exact settled leaf layout, shared with newly-created directory child checks.
+pub(super) fn settled_names(
+    j: &Value,
+    leaf: String,
+) -> Result<[(String, Value); 5], ProjectFailure> {
+    validate(j)?;
     let restored = match j["phase"].as_str() {
         Some("applied") => false,
         Some("restored") => true,
         _ => return Err(invalid()),
     };
-    let (root, dir, leaf) = source_parent(manager, expected)?;
-    if json!(windows_fs::identity(&root, true)?) != j["rootIdentity"]
-        || json!(windows_fs::identity(&dir, true)?) != j["parentIdentity"]
-    {
-        return Err(invalid());
-    }
     let guard = name(j, "guard")?;
-    let expected_names = [
+    Ok([
         (guard, j["guardEntry"].clone()),
         (
             leaf,
@@ -339,7 +328,32 @@ pub(in crate::project) fn verify_bound_item_layout(
                 Value::Null
             },
         ),
-    ];
+    ])
+}
+
+/// Verify one archive-bound record selected by the batch verifier. This helper
+/// performs filesystem checks only: its caller must validate the full ledger and
+/// archive before selecting a completed/restored item and before publication.
+pub(in crate::project) fn verify_bound_item_layout(
+    manager: &ProjectManager,
+    expected: &Value,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<bool, ProjectFailure> {
+    check()?;
+    let j = &expected["pendingItem"]["writeJournal"];
+    validate_receipts(j, &expected["pendingItem"]["item"])?;
+    let restored = match j["phase"].as_str() {
+        Some("applied") => false,
+        Some("restored") => true,
+        _ => return Err(invalid()),
+    };
+    let (root, dir, leaf) = source_parent(manager, expected)?;
+    if json!(windows_fs::identity(&root, true)?) != j["rootIdentity"]
+        || json!(windows_fs::identity(&dir, true)?) != j["parentIdentity"]
+    {
+        return Err(invalid());
+    }
+    let expected_names = settled_names(j, leaf)?;
     let mut pins = Vec::with_capacity(expected_names.len());
     for (name, expected_entry) in &expected_names {
         pins.push(pin_entry(&dir, name, expected_entry, check)?);

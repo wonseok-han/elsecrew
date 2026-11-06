@@ -3,6 +3,7 @@
 //! cleanup follows an uncertain result. Staging/scheduler admission is separate.
 #![allow(dead_code)]
 use super::*;
+mod directories;
 pub(super) mod metadata;
 pub(in crate::project) mod recovery;
 use crate::project::{

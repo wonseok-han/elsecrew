@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준7c7db95에서 Windows 새 폴더의 하위 항목 소유권 지도를 구현했다. completedItems/restoredItems/pendingItem의 immediate child만 고르고 새 부모 아래 기존 before가 있는 항목·중복 논리 경로·중복 private 이름·미완료 journal을 거절한다. restored 요구 시 모든 관련 child가 restored여야 하며 최대100,000개 원장 항목을 제한한다.
+- 현재 파일 복구 검사의 guard/원본/retained/detached/staged 배치를 settled_names로 추출해 실제 기존 verify_bound_item_layout과 새 child map이 같은 규칙을 사용하도록 했다. canceledUnwritten/부분 canceledReservation의 남겨 둔 파일도 포함하고 null 부재 항목은 이름 소유권으로 세지 않는다. 이름 목록만으로 파일 신원이나 이동 권위를 부여하지 않는다.
+- 빈 취소 예약·기존 before·미완료 phase·중복 경로 회귀 후보를 추가했다. 선택 rustfmt/diff만 수행했고 native/컴파일/독립 검토는 최종 파동 검증에 남긴다. 새 폴더 생성 primitive와 이 지도를 실제 directory 관측·이동·하위 항목 역복원에 연결해야 하며 아직 폴더 지원 완료가 아니다. Windows 제품 gate·원본은 변경하지 않았고 신규 cache/package/push/CI/모델 실행 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준94f46895에서 원본 변경 제안의 A2를 재대조했다. 기존 디렉터리는 유지하고 새 디렉터리 추가를 기록하는 것이 범위이며 Windows batch는 아직 이를 첫 쓰기 전 거절한다. 기본 속성 보존만으로 폴더 기능이나 전체 Windows 구현 완료를 주장하지 않는다.
 - 새 폴더 writer의 기반으로 windows_directory_create를 추가했다. 검증된 parent lease와 정상 단일 leaf 아래 NtCreateFile FILE_CREATE·DIRECTORY_FILE·WRITE_THROUGH·동기·OPEN_REPARSE_POINT로 만들고 생성 syscall의 handle을 그대로 보유한다. 기존 이름을 열거나 덮어쓰지 않고 FILE_CREATED/full directory ID/parent lease를 확인한다. 생성 후 오류는 caller의 예약/파일을 보존하며 임의 정리하지 않는다.
 - windows_replace에 directory 전용 비덮어쓰기 move_new_directory를 추가했다. 기존 regular-file replace/move 동작은 별도 kind 검사로 유지한다. 이름 충돌·경로/guard 거절·이동 후 ID 연속성과 외부 폴더 내용 보존 native 회귀 후보를 추가했으나 실행하지 않았다. Microsoft NtCreateFile 공식 문서로 인수/구조/FILE_CREATE 경계를 확인했고 선택 rustfmt/diff만 수행했다.

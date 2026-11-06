@@ -1,6 +1,6 @@
 # Hello, Agent 기술 설계
 
-> **Windows 새 디렉터리 기반(미연결, native 검증 전)**: windows_directory_create는 parent lease 아래 [NtCreateFile](https://learn.microsoft.com/windows/win32/api/winternl/nf-winternl-ntcreatefile)의 FILE_CREATE로 새 디렉터리를 생성하고 반환 handle/full ID를 유지한다. directory 전용 비덮어쓰기 rename도 제공한다. 기존 이름·guard/path alias를 거절하지만 아직 application journal·하위 항목 소유권·역순 복원에 연결하지 않았으므로 폴더 반영 지원을 주장하지 않는다.
+> **Windows 새 디렉터리 기반(미연결, native 검증 전)**: windows_directory_create는 parent lease 아래 [NtCreateFile](https://learn.microsoft.com/windows/win32/api/winternl/nf-winternl-ntcreatefile)의 FILE_CREATE로 새 디렉터리를 생성하고 반환 handle/full ID를 유지한다. directory 전용 비덮어쓰기 rename도 제공한다. 기존 이름·guard/path alias를 거절한다. 하위 항목의 원장 소유권 지도는 settled journal의 정상/private 이름과 취소 보존 파일을 계산하고 중복·미완료 항목을 거절한다. 실제 directory 관측·이동·역순 복원 연결은 남아 있어 폴더 반영 지원을 주장하지 않는다.
 
 > **Windows 기본 파일 속성(구현, native 검증 전)**: 새 staged 파일에 기존 생성 시각과 기본 파일 속성을 보존하고 동일 handle의 신원/크기/속성을 재검증한다. 새 basicMetadataV1 journal은 이를 receipt 조건으로 요구하며 과거 journal 복구는 유지한다. [FILE_BASIC_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_basic_info)를 사용하며 압축/암호화/cloud·추가 stream/SACL 보존을 이 구현으로 주장하지 않는다. 미지원 교체 속성은 batch 첫 쓰기 전에 거절하고 Windows 제품 gate는 계속 닫혀 있다.
 
