@@ -4,6 +4,13 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준c9ee142에서 Windows writer/recovery의 held entry 관측과 no-follow reopen/pin에 디렉터리를 연결했다. 파일은 기존 내용 hash/전체 관측을 유지하고 디렉터리는 full ID·metadata/security 관측과 digest0으로 구분한다. 실제 source 이동은 receipt 종류에 따라 regular move_new 또는 directory move_new_directory를 선택한다.
+- 이동 전후와 interrupted move 분류/명시 복원 재개에서 디렉터리 child ownership tree를 확인한다. 복원 계열은 하위 항목 restored 조건을 요구하고 상대편 보존 객체/완료 배치 검사도 디렉터리일 때 tree를 대조한다. 일반 파일을 디렉터리처럼 읽어 성공시키지 않으며 오류/취소·미확인 flush는 기존 intent를 유지한다.
+- completion이 과거 항목을 pendingItem으로 선택하면 원래 현재 child 기록이 사라질 수 있어 전체 scope를 별도로 전달하는 verify_bound_item_layout_in_scope를 연결했다. 선택 항목 외 scope 필드 일치·기존 completed/restored membership 검사는 유지하고 child map에는 원래 pending child까지 포함한다.
+- 선택 rustfmt/diff만 수행했고 compile/native/독립 검토는 파동 최종 검증으로 남긴다. child 작업에 따른 directory 시각 변화를 receipt와 결속하는 처리·부분 reserved 취소·다중/중첩 폴더 복원 연결은 미완료이며 batch directory admission은 계속 거절한다. Windows 제품 gate/원본 변경·신규 cache/package/push/CI/모델 실행 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준4ed00741에서 Windows 새 디렉터리의 reserved→staged 경로를 내부 writer에 연결했다. before 없음/정규 kind2 after만 허용하고 예약 journal에 directoryV1:true를 결속한다. 기존 디렉터리 교체·종류 전환은 거절하며 regular 파일 기록에는 marker를 요구하지 않는다.
 - snapshot 디렉터리를 no-follow로 열어 전후 신원/metadata를 대조하고, 기존 native create primitive로 예약된 이름의 빈 디렉터리를 생성한다. 생성 handle의 sync 성공·빈 목록 재확인·held/reopened 전체 관측·parent lease 확인 뒤 staged receipt를 게시한다. 같은 이름은 재사용하지 않고 오류/취소는 예약·부분 파일을 보존한다. directory flush가 해당 Windows 환경에서 성공하는지는 native 검증 전이다.
 - receipt 검증은 directory marker와 archive kind를 서로 결속하고 디렉터리 after image의 kind/size0/digest0을 확인한다. 파일 staged receipt가 디렉터리로 바뀌는 경우도 거절한다. 빈 준비 폴더·원본 snapshot 보존·동일 이름 거절 native 회귀 후보를 추가했다. 선택 rustfmt/diff만 수행했으며 컴파일/native/독립 검토는 파동 최종 검증으로 남긴다.

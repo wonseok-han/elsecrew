@@ -275,6 +275,15 @@ fn verify_record_pair_in_scope(
         {
             return Err(invalid());
         }
-        verify_record_pair(manager, selected, applied)
+        let restored = windows_writer::recovery::verify_bound_item_layout_in_scope(
+            manager,
+            selected,
+            scope,
+            &|| Ok(()),
+        )?;
+        if restored == applied {
+            return Err(invalid());
+        }
+        Ok(())
     }
 }

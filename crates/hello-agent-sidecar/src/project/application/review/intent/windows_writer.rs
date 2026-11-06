@@ -7,11 +7,11 @@ mod directories;
 pub(super) mod metadata;
 pub(in crate::project) mod recovery;
 use crate::project::{
-    open_absolute_directory_capability, open_real_child_dir, open_real_file_at,
-    validate_relative_path, windows_directory_lease::DirectoryLease, windows_durability,
-    windows_fs, windows_replace, windows_source_inventory::file_observation,
+    open_absolute_directory_capability, open_real_child_dir, validate_relative_path,
+    windows_directory_lease::DirectoryLease, windows_durability, windows_fs, windows_replace,
+    windows_source_inventory::file_observation,
 };
-use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt, OpenOptionsMaybeDirExt};
 use cap_std::fs::{Dir, File, OpenOptions, OpenOptionsExt};
 use std::{
     ffi::OsStr,
@@ -344,7 +344,7 @@ pub(in crate::project) fn stage(
         ))?;
         let (input_parent, input_leaf) =
             parent(&snapshot, item["path"].as_str().ok_or_else(invalid)?)?;
-        let mut input = open_real_file_at(&input_parent, &input_leaf)?;
+        let mut input = open_object_at(&input_parent, &input_leaf)?;
         let input_before = entry(&mut input, check)?;
         let image = json!({"kind":1,"executable":false,"size":input_before["observation"]["length"],"digest":input_before["digest"]});
         if image != item["after"] {
@@ -381,7 +381,7 @@ pub(in crate::project) fn stage(
         if staged["observation"]["length"] != item["after"]["size"]
             || staged["digest"] != item["after"]["digest"]
             || entry(&mut input, check)? != input_before
-            || entry(&mut open_real_file_at(&input_parent, &input_leaf)?, check)? != input_before
+            || entry(&mut open_object_at(&input_parent, &input_leaf)?, check)? != input_before
         {
             return Err(invalid());
         }
@@ -394,12 +394,62 @@ pub(in crate::project) fn stage(
     publish(storage, project_id, expected, j, request)
 }
 
-/// Observe one retained regular-file handle without trusting its pathname.
+/// Open either supported object kind without following a link. The caller still
+/// checks its exact receipt; opening a directory is not directory write authority.
+fn open_object_at(dir: &Dir, name: &str) -> Result<File, ProjectFailure> {
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .follow(FollowSymlinks::No)
+        .maybe_dir(true)
+        .custom_flags(windows_fs::OPEN_REPARSE_POINT);
+    let file = dir.open_with(name, &options).map_err(|_| invalid())?;
+    windows_fs::identity(&file, file.metadata().map_err(|_| invalid())?.is_dir())?;
+    Ok(file)
+}
+fn is_directory(value: &Value) -> bool {
+    value["observation"]["attributes"]
+        .as_u64()
+        .is_some_and(|v| v & 0x10 != 0)
+}
+fn verify_directory_contents(
+    file: &File,
+    receipt: &Value,
+    scope: &Value,
+    restored: bool,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<(), ProjectFailure> {
+    if is_directory(receipt) {
+        let dir = Dir::from_std_file(file.try_clone().map_err(|_| invalid())?.into_std());
+        directories::verify_tree(
+            &dir,
+            receipt,
+            scope,
+            scope["pendingItem"]["item"]["path"]
+                .as_str()
+                .ok_or_else(invalid)?,
+            restored,
+            check,
+        )?;
+    }
+    Ok(())
+}
+
+/// Observe one retained file/directory handle without trusting its pathname.
 /// The caller compares the leaf separately while holding its directory lease.
 fn entry(
     file: &mut File,
     check: &dyn Fn() -> Result<(), ProjectFailure>,
 ) -> Result<Value, ProjectFailure> {
+    if file.metadata().map_err(|_| invalid())?.is_dir() {
+        check()?;
+        let dir = Dir::from_std_file(file.try_clone().map_err(|_| invalid())?.into_std());
+        let before = directories::observed_directory(&dir)?;
+        if directories::observed_directory(&dir)? != before {
+            return Err(invalid());
+        }
+        return Ok(before);
+    }
     let before = file_observation(file)?;
     if before.length > 4 * 1024 * 1024 * 1024 {
         return Err(invalid());
@@ -479,7 +529,7 @@ pub(in crate::project) fn move_file(
     }
     let guard = name(&j, "guard")?;
     let lease = DirectoryLease::acquire(&dir, OsStr::new(&guard))?;
-    if entry(&mut open_real_file_at(&dir, &guard)?, check)? != j["guardEntry"] {
+    if entry(&mut open_object_at(&dir, &guard)?, check)? != j["guardEntry"] {
         return Err(invalid());
     }
     let (prior, intent, complete, from, to, expected_entry, receipt) =
@@ -509,6 +559,18 @@ pub(in crate::project) fn move_file(
     // Hold the other half of the recoverable pair against write/delete while
     // moving this half. Reopening only the moved file cannot prove rollback.
     let mut other = pin_entry(&dir, &other_name, &other_entry, check)?;
+    if let Some(file) = &other {
+        verify_directory_contents(
+            file,
+            &other_entry,
+            expected,
+            matches!(
+                step,
+                Move::DetachAfter | Move::RestoreBefore | Move::CancelStaged
+            ),
+            check,
+        )?;
+    }
     if matches!(step, Move::CancelStaged) {
         absent(&dir, &leaf)?;
     }
@@ -533,25 +595,49 @@ pub(in crate::project) fn move_file(
         return Err(invalid());
     }
     let mut options = windows_replace::source_options();
-    options.create_new(false);
+    options.create_new(false).maybe_dir(true);
     let mut source = dir.open_with(&from, &options).map_err(|_| invalid())?;
     windows_durability::require_ntfs(&source)?;
     if entry(&mut source, check)? != expected_entry
-        || entry(&mut open_real_file_at(&dir, &from)?, check)? != expected_entry
+        || entry(&mut open_object_at(&dir, &from)?, check)? != expected_entry
     {
         return Err(invalid());
     }
+    verify_directory_contents(
+        &source,
+        &expected_entry,
+        expected,
+        matches!(
+            step,
+            Move::DetachAfter | Move::RestoreBefore | Move::CancelStaged
+        ),
+        check,
+    )?;
     j["phase"] = json!(intent);
     let current = publish(storage, project_id, expected, j.clone(), request)?;
     check()?;
     lease.validate()?;
-    windows_replace::move_new(&source, &lease, &to)?;
+    if is_directory(&expected_entry) {
+        windows_replace::move_new_directory(&source, &lease, &to)?;
+    } else {
+        windows_replace::move_new(&source, &lease, &to)?;
+    }
     // Do not acknowledge completion on cancellation or any flush/observation
     // failure. The durable intent remains the recovery boundary.
     source.sync_all().map_err(|_| invalid())?;
     let moved = entry(&mut source, check)?;
+    verify_directory_contents(
+        &source,
+        &moved,
+        expected,
+        matches!(
+            step,
+            Move::DetachAfter | Move::RestoreBefore | Move::CancelStaged
+        ),
+        check,
+    )?;
     if !unchanged_by_move(&expected_entry, &moved)
-        || entry(&mut open_real_file_at(&dir, &to)?, check)? != moved
+        || entry(&mut open_object_at(&dir, &to)?, check)? != moved
     {
         return Err(invalid());
     }
@@ -603,6 +689,7 @@ fn pin_entry(
     options
         .read(true)
         .follow(FollowSymlinks::No)
+        .maybe_dir(true)
         .share_mode(1)
         .custom_flags(windows_fs::OPEN_REPARSE_POINT);
     let file = dir.open_with(name, &options).map_err(|_| invalid())?;
@@ -621,7 +708,7 @@ fn verify_pin(
         None if expected.is_null() => absent(dir, name),
         Some(file) => {
             if entry(file, check)? == *expected
-                && entry(&mut open_real_file_at(dir, name)?, check)? == *expected
+                && entry(&mut open_object_at(dir, name)?, check)? == *expected
             {
                 Ok(())
             } else {

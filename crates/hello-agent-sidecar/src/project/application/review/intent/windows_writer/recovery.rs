@@ -26,12 +26,13 @@ fn observe_leaf(
     }
     let options = if writable {
         let mut options = windows_replace::source_options();
-        options.create_new(false);
+        options.create_new(false).maybe_dir(true);
         options
     } else {
         let mut options = OpenOptions::new();
         options
             .read(true)
+            .maybe_dir(true)
             .follow(FollowSymlinks::No)
             .share_mode(1)
             .custom_flags(windows_fs::OPEN_REPARSE_POINT);
@@ -41,7 +42,7 @@ fn observe_leaf(
     // final comparison or acknowledgement publication.
     let mut file = dir.open_with(name, &options).map_err(|_| invalid())?;
     let observed = entry(&mut file, check)?;
-    if entry(&mut open_real_file_at(dir, name)?, check)? != observed {
+    if entry(&mut open_object_at(dir, name)?, check)? != observed {
         return Err(invalid());
     }
     Ok(Some((file, observed)))
@@ -100,7 +101,7 @@ fn observe(
     }
     let guard = name(&j, "guard")?;
     let lease = DirectoryLease::acquire(&dir, OsStr::new(&guard))?;
-    if entry(&mut open_real_file_at(&dir, &guard)?, check)? != j["guardEntry"] {
+    if entry(&mut open_object_at(&dir, &guard)?, check)? != j["guardEntry"] {
         return Err(invalid());
     }
     let (_, intent, complete, from, to, expected_entry, receipt) =
@@ -129,6 +130,18 @@ fn observe(
         return Err(invalid());
     }
     let mut other = pin_entry(&dir, &other_name, &other_entry, check)?;
+    if let Some(file) = &other {
+        verify_directory_contents(
+            file,
+            &other_entry,
+            expected,
+            matches!(
+                step,
+                Move::DetachAfter | Move::RestoreBefore | Move::CancelStaged
+            ),
+            check,
+        )?;
+    }
     if matches!(step, Move::CancelStaged) {
         absent(&dir, &leaf)?;
     }
@@ -139,6 +152,18 @@ fn observe(
         check,
     )?;
     let mut destination = observe_leaf(&dir, &to, mode == ObservationMode::FlushMoved, check)?;
+    for (file, observed) in source.iter().chain(destination.iter()) {
+        verify_directory_contents(
+            file,
+            observed,
+            expected,
+            matches!(
+                step,
+                Move::DetachAfter | Move::CancelStaged | Move::RestoreBefore
+            ),
+            check,
+        )?;
+    }
     let comparison = match (&source, &destination) {
         (Some((_, before)), None) if *before == expected_entry => "matchesUnmoved",
         (None, Some((_, after))) if unchanged_by_move(&expected_entry, after) => "matchesMoved",
@@ -165,7 +190,7 @@ fn observe(
     for (name, held) in [(&from, &mut source), (&to, &mut destination)] {
         if let Some((file, observed)) = held {
             if entry(file, check)? != *observed
-                || entry(&mut open_real_file_at(&dir, name)?, check)? != *observed
+                || entry(&mut open_object_at(&dir, name)?, check)? != *observed
             {
                 return Err(invalid());
             }
@@ -339,6 +364,20 @@ pub(in crate::project) fn verify_bound_item_layout(
     expected: &Value,
     check: &dyn Fn() -> Result<(), ProjectFailure>,
 ) -> Result<bool, ProjectFailure> {
+    verify_bound_item_layout_in_scope(manager, expected, expected, check)
+}
+
+pub(in crate::project) fn verify_bound_item_layout_in_scope(
+    manager: &ProjectManager,
+    expected: &Value,
+    scope: &Value,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<bool, ProjectFailure> {
+    let mut selected_scope = scope.clone();
+    selected_scope["pendingItem"] = expected["pendingItem"].clone();
+    if selected_scope != *expected {
+        return Err(invalid());
+    }
     check()?;
     let j = &expected["pendingItem"]["writeJournal"];
     validate_receipts(j, &expected["pendingItem"]["item"])?;
@@ -360,6 +399,22 @@ pub(in crate::project) fn verify_bound_item_layout(
     }
     for ((name, expected_entry), held) in expected_names.iter().zip(pins.iter_mut()) {
         verify_pin(&dir, name, expected_entry, held, check)?;
+        if let Some(file) = held {
+            if is_directory(expected_entry) {
+                let directory =
+                    Dir::from_std_file(file.try_clone().map_err(|_| invalid())?.into_std());
+                directories::verify_tree(
+                    &directory,
+                    expected_entry,
+                    scope,
+                    expected["pendingItem"]["item"]["path"]
+                        .as_str()
+                        .ok_or_else(invalid)?,
+                    restored,
+                    check,
+                )?;
+            }
+        }
     }
     // Normal journals always have a guard. A canceled empty reservation may
     // have no existing child at all; this path only observes and never mutates.
@@ -543,11 +598,16 @@ pub(in crate::project) fn resume_interrupted_restore(
     if inspect_pending_item(manager, storage, project_id)? != *expected {
         return Err(invalid());
     }
-    windows_replace::move_new(file, &evidence._lease, &to)?;
+    if is_directory(&expected_entry) {
+        windows_replace::move_new_directory(file, &evidence._lease, &to)?;
+    } else {
+        windows_replace::move_new(file, &evidence._lease, &to)?;
+    }
     file.sync_all().map_err(|_| invalid())?;
     let moved = entry(file, check)?;
+    verify_directory_contents(file, &moved, expected, true, check)?;
     if !unchanged_by_move(&expected_entry, &moved)
-        || entry(&mut open_real_file_at(&evidence._parent, &to)?, check)? != moved
+        || entry(&mut open_object_at(&evidence._parent, &to)?, check)? != moved
     {
         return Err(invalid());
     }
@@ -630,7 +690,7 @@ pub(in crate::project) fn cancel_reserved_staging(
     for (name, held) in [(&guard_name, &mut guard), (&staged_name, &mut staged)] {
         if let Some((file, observed)) = held {
             if entry(file, check)? != *observed
-                || entry(&mut open_real_file_at(&dir, name)?, check)? != *observed
+                || entry(&mut open_object_at(&dir, name)?, check)? != *observed
             {
                 return Err(invalid());
             }

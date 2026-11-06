@@ -127,7 +127,7 @@ fn same_directory(expected: &Value, actual: &Value) -> bool {
     }
     comparable == *expected
 }
-fn observed_directory(dir: &Dir) -> Result<Value, ProjectFailure> {
+pub(super) fn observed_directory(dir: &Dir) -> Result<Value, ProjectFailure> {
     Ok(
         json!({"observation":crate::project::windows_source_inventory::directory_observation(dir)?,"digest":vec![0u8;32]}),
     )
