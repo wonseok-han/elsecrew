@@ -1,6 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
-2026-11-06 Windows 설치Git은 최소 환경·no-stdio에서도 CreateProcessW OS87로 실패했다. 사용자 추가3회 승인은 모두 사용했으며, 같은 held image의 DOS 경로 표기만 비교하는 검토 후보40a784d/CI42174341305가 실행 대기 중이다. 전체 반영/복원·macOS G6·Windows 제품 검증/활성화·출시는 미완료다. 상세는 아래 및 [11월 아카이브](archive/history-2026-11.md).
+2026-11-06 Windows CI42174341305에서 같은 Git image의 GUID 실행 표기는 오류87, held-handle DOS 표기는 suspended 생성·확인된 종료에 성공했다. 실행용 locator를 canonical GUID authority와 분리하는 호환 수정을 준비 중이며 Windows 실제 명령·전체 반영/복원은 미검증이다. 추가3회 push/CI 승인은 모두 소진됐다. macOS G6·Windows 제품 활성화·출시는 미완료다. 상세는 아래 및 [11월 아카이브](archive/history-2026-11.md).
+
+### 2026-11-06 · by GPT-6
+
+- CI42174341305 completed failure: GUID/DOS GetBinaryTypeW는 모두type6(64bit) 성공. 같은 Git image의 DOS43자·GUID CWD100자로 no-stdio suspended 생성과 family termination barrier는 성공했다. 이어 기존 GUID+stdio 최소환경은 CreateProcessW OS87로 실패했다. 설치 파일 자체의 손상으로 단정할 근거는 없고 image 실행 표기 호환 원인을 구분했다. 전체 실제명령·반영/복원은 미실행이다. 이번 승인3/3 소진, 추가push 없음.
+- 제품 기반 수정은 canonical GUID path/authenticode/env를 보존하고 실제 root image launch_path만 held handle에서 지연 파생한다. Transport/Family/Launch가 그 locator를 사용하고 생성 직전 재파생 비교한다. 첫 검토가 지적한 eager-acquire의 preview/DLL inventory 회귀는 파생을 launch 시점으로 옮겨 해소했다. actual hFile 신원 검증·GUID CWD·dependency lease·Job/debugger·종료 barrier는 유지하며 drive remap 완전배제라고 주장하지 않는다. GUID 신원/환경 불변과 alias의 동일파일 검증 native 회귀를 추가했다. 일반 Windows gate는 닫혀 있다.
+- rustfmt/diff 통과. 설치된 Rust target은 macOS뿐이므로 Windows 코드의 로컬 형식검사를 native 컴파일/실행 성공으로 표현하지 않는다. 동일 독립 검토자 최종 재검토에서 eager-acquire 회귀 해소와 기존 안전 경계 보존을 확인했다. Transport의 중복 이름 조회는 비차단 사항으로 남긴다. 수정 뒤 원격 검증은 새승인 범위다. 네 코드 파일만 모은 공개 검증 후보d0c02647을 준비했고 같은 범위 push/CI최대3회 추가 승인을 요청했다. 아직 게시하지 않았다. 원시 CI 로그는 /tmp/hello-agent-windows-42174341305-failure.log. 전체 앱 완료·macOS G6·출시 미완료는 유지한다.
 
 ### 2026-11-06 · by GPT-6
 

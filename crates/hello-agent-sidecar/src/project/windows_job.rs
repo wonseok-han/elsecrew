@@ -333,7 +333,9 @@ pub(super) mod native {
             directory: DirectoryLease,
             stdio: Option<[BorrowedHandle<'_>; 3]>,
         ) -> io::Result<Self> {
-            let image_path = executable.path().to_owned();
+            let image_path = executable
+                .launch_path()
+                .map_err(|error| io::Error::other(error.detail))?;
             let cwd = directory.path().to_owned();
             Self::suspended_inner(
                 &image_path,
@@ -462,7 +464,12 @@ pub(super) mod native {
             mut image: Option<RetainedExecutable>,
         ) -> io::Result<Self> {
             if let Some(image) = &image {
-                if image.resource().path() != executable {
+                if image
+                    .resource()
+                    .launch_path()
+                    .map_err(|error| io::Error::other(error.detail))?
+                    != executable
+                {
                     return Err(invalid("image lease path mismatch"));
                 }
                 image

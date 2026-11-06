@@ -83,7 +83,9 @@ impl Transport {
         budget: Duration,
         external_cancel: Option<Arc<AtomicBool>>,
     ) -> io::Result<Self> {
-        let image_path = executable.path().to_owned();
+        let image_path = executable
+            .launch_path()
+            .map_err(|error| io::Error::other(error.detail))?;
         let cwd = directory.path().to_owned();
         Self::spawn_inner(
             &image_path,

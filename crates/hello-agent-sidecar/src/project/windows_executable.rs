@@ -126,61 +126,11 @@ impl ExecutableLease {
     pub(super) fn path(&self) -> &str {
         &self.path
     }
-    /// Diagnostic only: derive an alternate launch spelling from the held file,
-    /// never from caller input. All identity/dependency pins remain unchanged.
-    #[cfg(test)]
-    pub(super) fn diagnostic_dos_launch_alias(mut self) -> Result<Self, ProjectFailure> {
-        #[link(name = "kernel32")]
-        extern "system" {
-            fn GetFinalPathNameByHandleW(
-                file: *mut std::ffi::c_void,
-                path: *mut u16,
-                capacity: u32,
-                flags: u32,
-            ) -> u32;
-            fn GetBinaryTypeW(path: *const u16, kind: *mut u32) -> i32;
-        }
+    /// CreateProcess spelling only. Authority stays with the retained GUID
+    /// parent/file handles and the pre-execution debug-event identity check.
+    pub(super) fn launch_path(&self) -> Result<String, ProjectFailure> {
         self.validate()?;
-        let mut buffer = vec![0u16; 32768];
-        let count = unsafe {
-            GetFinalPathNameByHandleW(
-                self.image.as_raw_handle(),
-                buffer.as_mut_ptr(),
-                buffer.len() as u32,
-                0, // FILE_NAME_NORMALIZED | VOLUME_NAME_DOS
-            )
-        } as usize;
-        if count == 0 || count >= buffer.len() {
-            return Err(ProjectFailure::recovery("diagnostic DOS alias unavailable"));
-        }
-        let alias = String::from_utf16(&buffer[..count])
-            .map_err(|_| ProjectFailure::manifest("diagnostic alias is not Unicode"))?;
-        // Admit only a local extended drive path, not a UNC/network alias.
-        let bytes = alias.as_bytes();
-        if !alias.starts_with(r"\\?\")
-            || bytes.len() < 7
-            || !bytes[4].is_ascii_alphabetic()
-            || bytes[5] != b':'
-            || bytes[6] != b'\\'
-        {
-            return Err(ProjectFailure::manifest(
-                "diagnostic alias is not a local drive path",
-            ));
-        }
-        for (kind, path) in [("guid", &self.path), ("dos", &alias)] {
-            let wide: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
-            let mut binary_type = 0;
-            let ok = unsafe { GetBinaryTypeW(wide.as_ptr(), &mut binary_type) };
-            let error = if ok == 0 {
-                std::io::Error::last_os_error().raw_os_error()
-            } else {
-                None
-            };
-            eprintln!("installed Git image classification: alias={kind}, ok={}, type={binary_type}, error={error:?}", ok != 0);
-        }
-        self.validate()?;
-        self.path = alias;
-        Ok(self)
+        local_image_launch_path(&self.image)
     }
     pub(super) fn validate(&self) -> Result<(), ProjectFailure> {
         self.parent.validate()?;
@@ -211,10 +161,72 @@ impl ExecutableLease {
     }
 }
 
+// Windows accepts some installed images via a DOS final name but rejects their
+// volume-GUID application spelling. Never accept a caller-provided substitute.
+fn local_image_launch_path(image: &File) -> Result<String, ProjectFailure> {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetFinalPathNameByHandleW(
+            file: *mut std::ffi::c_void,
+            path: *mut u16,
+            capacity: u32,
+            flags: u32,
+        ) -> u32;
+    }
+    let mut buffer = vec![0u16; 32768];
+    let count = unsafe {
+        GetFinalPathNameByHandleW(
+            image.as_raw_handle(),
+            buffer.as_mut_ptr(),
+            buffer.len() as u32,
+            0,
+        )
+    } as usize;
+    if count == 0 || count >= buffer.len() {
+        return Err(ProjectFailure::recovery(
+            "held image launch path unavailable",
+        ));
+    }
+    let path = String::from_utf16(&buffer[..count])
+        .map_err(|_| ProjectFailure::manifest("image launch path is not Unicode"))?;
+    let bytes = path.as_bytes();
+    if !path.starts_with(r"\\?\")
+        || bytes.len() < 7
+        || !bytes[4].is_ascii_alphabetic()
+        || bytes[5] != b':'
+        || bytes[6] != b'\\'
+    {
+        return Err(ProjectFailure::manifest(
+            "image launch path is not a local drive path",
+        ));
+    }
+    Ok(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use cap_std::ambient_authority;
+    #[test]
+    fn launch_spelling_preserves_guid_identity_and_git_environment() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("git.exe"), b"selected image").unwrap();
+        let directory = Dir::open_ambient_dir(root.path(), ambient_authority()).unwrap();
+        let image = ExecutableLease::acquire(&directory, OsStr::new("git.exe")).unwrap();
+        let cwd = DirectoryLease::acquire(&directory, OsStr::new("git.exe")).unwrap();
+        assert!(image.path().starts_with(r"\\?\Volume{"));
+        assert!(cwd.path().starts_with(r"\\?\Volume{"));
+        assert_ne!(image.path(), image.launch_path().unwrap());
+        let actual = std::fs::File::open(image.launch_path().unwrap()).unwrap();
+        image.verify_loaded_image(&actual).unwrap();
+        let environment = super::super::windows_git_environment::for_runtime(&image, &cwd).unwrap();
+        assert_eq!(
+            environment["PATH"],
+            image.path().rsplit_once('\\').unwrap().0
+        );
+        assert_eq!(environment["GIT_EXEC_PATH"], environment["PATH"]);
+        image.validate().unwrap();
+    }
     #[test]
     fn process_identity_accepts_runtime_hardlink_but_not_other_companion() {
         let temp = tempfile::tempdir().unwrap();
