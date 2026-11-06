@@ -88,6 +88,9 @@ impl RestoringBatch {
                         "applied" | "restored" if tail => {
                             cancel_unstarted_tail(manager, storage, id, current, request)?
                         }
+                        "reserved" => writer::recovery::cancel_reserved_staging(
+                            manager, storage, id, current, request, &check,
+                        )?,
                         "staged" => writer::recovery::cancel_unwritten_item(
                             manager, storage, id, current, request, &check,
                         )?,
@@ -163,8 +166,7 @@ impl RestoringBatch {
                         "restored" => {
                             previous_regular_item(manager, storage, id, current, request)?
                         }
-                        // In particular, a partial reserved staging operation has
-                        // no identity receipts. Never infer ownership or delete it.
+                        // Unknown phases are not authority for recovery writes.
                         _ => return Err(invalid()),
                     }
                 }

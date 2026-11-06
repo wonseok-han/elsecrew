@@ -61,6 +61,7 @@ fn validate(j: &Value) -> Result<(), ProjectFailure> {
             != 12
                 + usize::from(o.contains_key("cancelingBeforeInstall"))
                 + usize::from(o.contains_key("canceledUnwritten"))
+                + usize::from(o.contains_key("canceledReservation"))
             || [
                 "version",
                 "platform",
@@ -98,6 +99,15 @@ fn validate(j: &Value) -> Result<(), ProjectFailure> {
         )
     {
         return Err(invalid());
+    }
+    if let Some(partial) = j.get("canceledReservation") {
+        if partial != &json!(true)
+            || j["phase"] != "restored"
+            || j.get("canceledUnwritten").is_some()
+            || j.get("cancelingBeforeInstall").is_some()
+        {
+            return Err(invalid());
+        }
     }
     if let Some(unwritten) = j.get("canceledUnwritten") {
         if unwritten != &json!(true)
@@ -655,6 +665,38 @@ fn transition(
 /// fields are evidence to check, not authority to substitute arbitrary files.
 fn validate_receipts(j: &Value, item: &Value) -> Result<(), ProjectFailure> {
     validate(j)?;
+    if j["canceledReservation"] == true {
+        // Observed partial files are preserved, not authenticated after-images
+        // or authority for deletion. The original must still be exact before.
+        if j["restoredEntry"] != item["before"]
+            || ["retainedEntry", "installedEntry", "detachedEntry"]
+                .iter()
+                .any(|key| !j[*key].is_null())
+        {
+            return Err(invalid());
+        }
+        for key in ["guardEntry", "stagedEntry"] {
+            let entry = &j[key];
+            if entry.is_null() {
+                continue;
+            }
+            if !entry.is_object() {
+                return Err(invalid());
+            }
+            let max = if key == "guardEntry" {
+                b"hello-agent-windows-application-guard-v1\n".len() as u64
+            } else {
+                item["after"]["size"].as_u64().ok_or_else(invalid)?
+            };
+            if entry["observation"]["length"]
+                .as_u64()
+                .is_none_or(|n| n > max)
+            {
+                return Err(invalid());
+            }
+        }
+        return Ok(());
+    }
     if j["canceledUnwritten"] == true {
         // No source rename occurred. Keep prepared private files and validate
         // their original staged receipts, not a fictitious installed pair.

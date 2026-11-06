@@ -304,7 +304,6 @@ pub(in crate::project) fn verify_bound_item_layout(
         return Err(invalid());
     }
     let guard = name(j, "guard")?;
-    let lease = DirectoryLease::acquire(&dir, OsStr::new(&guard))?;
     let expected_names = [
         (guard, j["guardEntry"].clone()),
         (
@@ -334,7 +333,7 @@ pub(in crate::project) fn verify_bound_item_layout(
         ),
         (
             name(j, "staged")?,
-            if j["canceledUnwritten"] == true {
+            if j["canceledUnwritten"] == true || j["canceledReservation"] == true {
                 j["stagedEntry"].clone()
             } else {
                 Value::Null
@@ -348,7 +347,17 @@ pub(in crate::project) fn verify_bound_item_layout(
     for ((name, expected_entry), held) in expected_names.iter().zip(pins.iter_mut()) {
         verify_pin(&dir, name, expected_entry, held, check)?;
     }
-    lease.validate()?;
+    // Normal journals always have a guard. A canceled empty reservation may
+    // have no existing child at all; this path only observes and never mutates.
+    let lease = expected_names
+        .iter()
+        .zip(pins.iter())
+        .find_map(|((name, _), held)| held.as_ref().map(|_| name))
+        .map(|name| DirectoryLease::acquire(&dir, OsStr::new(name)))
+        .transpose()?;
+    if let Some(lease) = &lease {
+        lease.validate()?;
+    }
     let rebound = open_absolute_directory_capability(Path::new(
         expected["binding"]["canonicalGitRoot"]
             .as_str()
@@ -554,5 +563,96 @@ pub(in crate::project) fn resume_interrupted_restore(
     check()?;
     j[receipt] = moved;
     j["phase"] = json!(complete);
+    publish(storage, project_id, expected, j, request)
+}
+
+/// Reconcile a partial reservation without deleting or completing any staging
+/// file. Captured partial entries are observations, not successful after-images.
+pub(in crate::project) fn cancel_reserved_staging(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    project_id: &str,
+    expected: &Value,
+    request: &str,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<Value, ProjectFailure> {
+    check()?;
+    if expected["state"] != "applying"
+        || inspect_pending_item(manager, storage, project_id)? != *expected
+    {
+        return Err(invalid());
+    }
+    let mut j = expected["pendingItem"]["writeJournal"].clone();
+    let item = &expected["pendingItem"]["item"];
+    validate_receipts(&j, item)?;
+    if j["phase"] != "reserved" {
+        return Err(invalid());
+    }
+    let (root, dir, leaf) = source_parent(manager, expected)?;
+    if json!(windows_fs::identity(&root, true)?) != j["rootIdentity"]
+        || json!(windows_fs::identity(&dir, true)?) != j["parentIdentity"]
+    {
+        return Err(invalid());
+    }
+    let mut original = pin_entry(&dir, &leaf, &item["before"], check)?;
+    let guard_name = name(&j, "guard")?;
+    let staged_name = name(&j, "staged")?;
+    let mut guard = observe_leaf(&dir, &guard_name, false, check)?;
+    let mut staged = observe_leaf(&dir, &staged_name, false, check)?;
+    let lease_name = if guard.is_some() {
+        Some(&guard_name)
+    } else if staged.is_some() {
+        Some(&staged_name)
+    } else if original.is_some() {
+        Some(&leaf)
+    } else {
+        None
+    };
+    let lease = lease_name
+        .map(|name| DirectoryLease::acquire(&dir, OsStr::new(name)))
+        .transpose()?;
+    absent(&dir, &name(&j, "retained")?)?;
+    absent(&dir, &name(&j, "detached")?)?;
+    for (name, held) in [(&guard_name, &mut guard), (&staged_name, &mut staged)] {
+        if let Some((file, observed)) = held {
+            if entry(file, check)? != *observed
+                || entry(&mut open_real_file_at(&dir, name)?, check)? != *observed
+            {
+                return Err(invalid());
+            }
+        } else {
+            absent(&dir, name)?;
+        }
+    }
+    verify_pin(&dir, &leaf, &item["before"], &mut original, check)?;
+    if let Some(lease) = &lease {
+        lease.validate()?;
+    }
+    let rebound = open_absolute_directory_capability(Path::new(
+        expected["binding"]["canonicalGitRoot"]
+            .as_str()
+            .ok_or_else(invalid)?,
+    ))?;
+    let (rebound_parent, _) = parent(&rebound, item["path"].as_str().ok_or_else(invalid)?)?;
+    if json!(windows_fs::identity(&rebound, true)?) != j["rootIdentity"]
+        || json!(windows_fs::identity(&rebound_parent, true)?) != j["parentIdentity"]
+    {
+        return Err(invalid());
+    }
+    check()?;
+    if inspect_pending_item(manager, storage, project_id)? != *expected {
+        return Err(invalid());
+    }
+    j["guardEntry"] = guard
+        .as_ref()
+        .map(|(_, value)| value.clone())
+        .unwrap_or(Value::Null);
+    j["stagedEntry"] = staged
+        .as_ref()
+        .map(|(_, value)| value.clone())
+        .unwrap_or(Value::Null);
+    j["restoredEntry"] = item["before"].clone();
+    j["canceledReservation"] = json!(true);
+    j["phase"] = json!("restored");
     publish(storage, project_id, expected, j, request)
 }

@@ -4,6 +4,13 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준b3947ec의 깨끗한 통합 checkout에서 Windows reserved 부분 준비의 명시 취소를 restore owner에 연결했다. exact pending/archive·root/parent·원본 before를 대조하고 guard/staged의 현재 신원·내용 또는 부재를 read-only handle로 보유·재확인한다. retained/detached는 없어야 하며 파일 생성/이동/삭제 없이 canceledReservation:true/restored로 기록한다.
+- 부분 파일은 성공 after-image나 삭제 권위가 아닌 관측 기록이다. flag는 restored에서만 허용하고 다른 취소 flag와 혼합을 거절한다. 원본은 exact before, 기존 이동 receipt는 null, guard 길이는 고정 marker 길이 이하·staged 길이는 검토 after 크기 이하를 요구한다. 다음 batch 검증은 관측된 partial 파일과 원본·없는 이름을 모두 대조한다.
+- 비어 있는 예약에는 guard가 없을 수 있어 읽기 전용 settled 검사에서 관측된 기존 child가 있을 때만 lease를 보유한다. 모든 관련 이름이 없으면 새 guard를 만들지 않고 root/parent 재결속과 부재를 확인한다. 정상 작업 journal은 여전히 guard receipt가 필요하며 파일 변경 경계의 lease 요구는 완화하지 않았다.
+- 사용자 구현 우선 방침에 따라 선택 rustfmt/diff·직접 코드 대조만 수행했다. 이 변경의 독립 검토·Windows compile/native 중단/부분/빈 예약 회귀는 후속 누적 검증으로 남긴다. 추가 metadata/directory·cleanup·제품 연결·G6/출시는 미완료이며 제품 gate 비활성, 신규 cache/package/worktree/push/CI/모델 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준7fb9e90의 깨끗한 통합 checkout에서 unmoved 복원 intent의 명시 재개를 추가했다. 관측 모드를 read-only/moved flush/unmoved restore로 분리하고 restore3종(DetachAfter/CancelStaged/RestoreBefore)에만 source rename권한·write-through handle을 보유한다. 원본 보존/새 내용 설치 intent는 재개를 거절하며 explicit restore owner만 이 경로를 호출한다.
 - exact pending/archive·source/목적지 부재·상대편 pin·root/parent/guard를 재확인한 뒤 기존 durable restore intent 아래 move_new를 수행한다. sync/전체 재관측/이전 이름 부재/상대편/root 재결속 뒤에만 phase를 CAS 게시하며 오류·취소는 intent와 보존 파일을 남긴다. 이미 moved면 기존 acknowledge, conflict면 오류로 구분한다.
 - Windows reserve/stage/move와 쓰기 모드 관측에 applying 사전 조건을 추가했다. 완료 상태의 기록으로 원본을 먼저 바꾼 뒤 publish에서 거절되는 호출을 방지하며 begin_restore의 재잠금이 필요하다. 독립 검토자1명은 이번 diff에 정적 차단 결함 없음으로 확인했다. 선택 rustfmt/diff만 실행했고 native 시험은 누적 검증에 남긴다.
