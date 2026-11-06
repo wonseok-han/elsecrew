@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 직전 턴은10만줄 fixture 동일화와 실행 비교를 완료한 progress였다. 기준09aaf3bb clean에서 QA IIaMRg를 하나만 빌드하고 retention-only+output-diff를 실행했다. 실제 bridge/sidecar/Monaco의5MiB·100,000줄 파일,500개diff,가짜출력1개 open→정상close→snapshot→정상종료를 확인했다. functional PASS/전체NOT_READY이며 실제표시·전체G6 합격이 아니다.
+- snapshot25,515,006bytes의 큰4,511,352/1,120,348bytes external strings는 이전 코드 source와 같은 크기였고 fixture 한글48자x줄 접두 string은0개였다. 이 관측으로 native/allocator/RSS 문제나 전체 누수 부재를 입증하지 않는다. 출력 원장3000/committed3000/sealed1 및 clean_shutdown_at·관측PID부재 확인 후 이번 package/profile/rawdump를 정리했다. 요약·재현 분석기는 .artifacts/m5-multiline-retention-2026-11-06에 보존했다.
+- 사용자 새승인 call_c422e5a673a7494388ad026b9acaea08로 후보d0c02647 및 해당 컴파일/시험 오류수정의 동일 공개branch push/CI 최대3회를 받았다. 원격40a784d와4파일 scope/diff-check 확인 후 후보를 게시했고 CI42176391575 실행 중이다. 새예산1/3사용·2회잔여이며 제품활성화/패키징/모델/main은 제외한다. 기존승인과 중복계산하지 않는다. 다음은 같은 CI의 terminal 결과 확인 및 Windows 실제 Git/반영·복원 실패 수정이다. macOS G6·출시 미완료는 유지한다.
+
+### 2026-11-06 · by GPT-6
+
 - 직전 목표 턴은 중복 승인 확인 외 새 실행 증거가 없어 no progress로 분류했다. Windows 추가 공개 승인을 사용하지 않고 독립적인 macOS 원인 조사를 진행했다. Monaco는 이미 lazy import 및 model/editor dispose를 수행하며 측정 trace도 최대 witness만 유지하는 현재 코드를 확인했다. 이 확인만으로 누수 부재를 주장하지 않는다.
 - 기존 retention-only의 5MiB 단일행과 combined의 5MiB·100,000줄 차이를 제거했다. 동일 fixture 함수를 별도 child에서 호출해 QA main에 본문 캐시를 남기지 않으며 보고서에 크기·줄 수를 기록한다. 제품 동작·메모리 기준·NOT_READY 경계는 그대로다. native 화면/heap 재측정 전이며 이전 단일행 결과를 새 형태의 결과로 인용하지 않는다.
 - generator 실행 결과 실제 본문이 combined fixture와 동일하고 5,242,880bytes/100,000줄임을 확인했다. 임시 폴더는 정리했고 두 script의 node --check 및 diff 검사가 통과했다. 다음은 이 형태의 실제 파일 해제 진단으로 줄별 editor 보유를 확인하는 것이다. Windows d0c02647 추가승인·macOS 전체 G6·출시는 미완료다.
