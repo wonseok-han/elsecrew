@@ -1,6 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
-2026-11-06 Windows 최신 통합 진단에서 컴파일·native75개·dispatcher1개는 통과했으나 설치Git 실제 시작에서 OS87이 발생했다. 세부 진단46eece57/CI42159418644는 --version의 CreateProcessW 실패를 확인했고 최신 승인3/3을 모두 사용했다. 전체 반영/복원은 아직 실행되지 않았다. macOS G6·Windows 제품 검증/활성화·출시는 계속 미완료다. 상세 작업 기록은 아래 및 [11월 아카이브](archive/history-2026-11.md)에 보존한다.
+2026-11-06 Windows 진단42171589050에서 컴파일·native75개·dispatcher1개는 통과했으나 최소 환경에서도 설치Git 생성이 OS87로 실패했다. 사용자 추가3회 승인 중2회를 사용했고 no-stdio suspended-only 후보9dfab1ba/CI42172986342가 실행 중이다(1회 잔여). 전체 반영/복원·macOS G6·Windows 제품 검증/활성화·출시는 미완료다. 상세는 아래 및 [11월 아카이브](archive/history-2026-11.md).
+
+### 2026-11-06 · by GPT-6
+
+- 사용자 새승인: 후보2e5a98a와 동일 Windows 시험의 컴파일/오류 수정에 한해 같은 공개 진단 브랜치 push/CI 최대3회. 현재2/3 사용·1회 잔여. 원격HEAD46eece57 확인 후2e5a98a를 게시했고 CI42171589050은 completed failure다. 연결 도구는push 실행을 반환하지 않아gh로 같은run을 관찰했으며 timeout만으로 재시작하지 않았다.
+- 이번CI는 컴파일·native/dispatcher 단계를 통과했으나 installed Git의 minimalEnvironment=true, --version에서 CreateProcessW OS87이 반복됐다. 최소SystemRoot환경에서도 실패해 환경변수만의 원인 가설을 좁혔다. 전체apply/restore는 미실행이다. 로그 /tmp/hello-agent-windows-42171589050-failure.log. 상시 승인된 읽기 전용 windows_transaction_review1명은 일반ABI/GUID/stdio/Job 결함을 현재증거로확정할수없으며 admitted image/CWD/deps를유지한 no-stdio suspended-only 생성진단을권고했다. 테스트 전용33줄로 생성 후 resume 없이 terminate5초·completed barrier 확인을 추가했고 rustfmt/diff 검사와 고정 후보9dfab1ba 독립 검토를 통과했다. 두 번째 push로 CI42172986342 실행 중이다. 결과는 handle-list 단독이 아니라 stdio/inheritance bundle 판별로만 해석한다. 제품실행gate·종료/이미지/CWD결속은 유지한다.
+- 기존메모리 second 원시자료 재분석: idle459.69MiB에서 main170.72/GPU94.34/network44.81/renderer132.23/sidecar17.58, retained603.56에서 main175.06/GPU82.39/network40/renderer241.92/sidecar24.50/후발자손39.69MiB였다. 후발자손의역할을PID순서만으로확정하지않으며 어떤값도차감해합격처리하지않는다. 앱유휴/전체G6·Windows·출시는미완료다.
 
 ### 2026-11-06 · by GPT-6
 
