@@ -47,7 +47,10 @@ impl ProjectManager {
         }
         let file = open_real_file_at(&self.data_dir, git_selection::FILE)?;
         let identity = windows_fs::identity(&file, false)?;
-        let path = git_selection::read(&file)?;
+        let path = git_selection::read(&file).map_err(|mut error| {
+            error.detail = format!("Git preference: {}", error.detail);
+            error
+        })?;
         self.verify_managed_paths()?;
         let current = open_real_file_at(&self.data_dir, git_selection::FILE)?;
         if windows_fs::identity(&current, false)? != identity {
@@ -61,9 +64,15 @@ impl ProjectManager {
         let parent = Path::new(&path)
             .parent()
             .ok_or_else(|| ProjectFailure::manifest("selected Git has no parent"))?;
-        let directory = windows_fs::open_directory(parent)?;
+        let directory = windows_fs::open_directory(parent).map_err(|mut error| {
+            error.detail = format!("Git selected parent: {}", error.detail);
+            error
+        })?;
         let name = Path::new(&path).file_name().unwrap_or(OsStr::new(""));
-        let image = ExecutableLease::acquire(&directory, name)?;
+        let image = ExecutableLease::acquire(&directory, name).map_err(|mut error| {
+            error.detail = format!("Git selected image: {}", error.detail);
+            error
+        })?;
         let publisher = image.verify_authenticode()?;
         let root_path = super::git_installation_layout::installation_root(&path)?;
         let root = windows_fs::open_directory(Path::new(&root_path))?;
@@ -325,7 +334,9 @@ mod integration_tests {
             &serde_json::json!({"schemaVersion":1,"path":selected}),
         )
         .unwrap();
-        let preview = manager.preview_git_trust().unwrap();
+        let preview = manager
+            .preview_git_trust()
+            .expect("inspect selected Git installation");
         assert_eq!(preview["trusted"], false);
         assert_eq!(preview["executionEnabled"], false);
         assert!(manager.admitted_git_runtime().is_err());
