@@ -223,9 +223,11 @@ app.on('browser-window-created', (_event, window) => {
       // Trace the active workload, not the cold-idle RSS baseline. Starting
       // Chromium tracing creates a utility process; never subtract its RSS.
       // It remains included in preparing/load/retained measurements below.
+      report.mainTraceTiming = {requestedAt:Date.now()};
       mainSession = await startMainTaskSession(window.webContents.debugger, process.pid, {clockMarkers:true});
-      report.mainTraceStartedAfterIdle = combined ? Date.now() : null;
-      if (combined) assert.ok(report.mainTraceStartedAfterIdle >= report.combinedWorkload.idleEndedAt);
+      report.mainTraceTiming.readyAt = Date.now();
+      if (combined) assert.ok(report.mainTraceTiming.requestedAt >= report.combinedWorkload.idleEndedAt);
+      report.mainTraceTiming.workloadRequestedAt = Date.now();
       await run(`(async () => {
         const api = window.m5;
         const project = await api.openProject();

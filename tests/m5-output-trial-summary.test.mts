@@ -33,7 +33,8 @@ test('rejects incomplete visibility, truncated observations and inconsistent raw
 
 function combinedResult(): any {
   const r=result();
-  r.memory.samples=['idle','loaded','retained'].map((phase,i)=>({phase,at:[1000,2000,63000][i],totalBytes:100,processes:[{pid:123,rssBytes:100}]}));
+  r.memory.samples=['idle','loaded','retained'].map((phase,i)=>({phase,at:[1000,2000,63000][i],completedAt:[1010,2010,63010][i],totalBytes:100,processes:[{pid:123,rssBytes:100}]}));
+  r.mainTraceTiming={requestedAt:1200,readyAt:1300,workloadRequestedAt:1400};
   r.combinedWorkload={editorInput:{restored:true,trustedInputs:1,liveRuns:4,startedAt:100,receivedAt:105,paintAt:125,inputPaintMs:25,inputDeliveryMs:5},status:'OBSERVED',coexist:true,originalUnchanged:true,
     fixture:{treeFiles:10000,treeDirectories:1000,fileBytes:5242880,fileLines:100000},
     largeProject:{failedMetrics:[]},largeDiff:{failedMetrics:[],diffFiles:500,diffChangedLines:20000,diffBytes:10485760},
@@ -112,5 +113,22 @@ test('external navigation or missing input evidence cannot pass an automated tri
   for (const userInput of [undefined,{events:[],dropped:1},
     {events:[{type:'wheel',at:100}],dropped:0},{events:[{type:'pointerdown',at:100}],dropped:0}]) {
     const r=result();r.userInput=userInput;assert.throws(()=>summarizeOutputTrial(r));
+  }
+});
+
+
+test('combined idle rejects missing, reversed or overlapping tracing boundaries', () => {
+  for (const mutate of [
+    (r:any)=>{delete r.mainTraceTiming;},
+    (r:any)=>{r.mainTraceTiming.requestedAt=1000;},
+    (r:any)=>{r.mainTraceTiming.readyAt=1199;},
+    (r:any)=>{r.mainTraceTiming.workloadRequestedAt=1299;},
+    (r:any)=>{r.mainTraceTiming.readyAt=NaN;},
+    (r:any)=>{delete r.memory.samples[0].completedAt;},
+    (r:any)=>{r.memory.samples[0].completedAt=1201;},
+    (r:any)=>{r.memory.samples[0].completedAt=999;},
+  ]) {
+    const r=combinedResult();mutate(r);
+    assert.throws(()=>summarizeOutputTrial(r,{combinedWorkload:true}));
   }
 });

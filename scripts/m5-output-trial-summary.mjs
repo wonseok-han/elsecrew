@@ -46,8 +46,17 @@ export function summarizeOutputTrial(result, {combinedWorkload = false} = {}) {
     assert.equal(c.liveCoexistence.editor, true); assert.equal(c.liveCoexistence.diff, true);
     assert.equal(c.liveCoexistence.runs, 4);
     assert.ok(Number.isFinite(c.closedAt) && c.retainedStartedAt - c.closedAt >= 60000);
+    const trace = result.mainTraceTiming;
+    assert.ok(trace && [c.idleStartedAt,c.idleEndedAt,trace.requestedAt,trace.readyAt,trace.workloadRequestedAt]
+      .every(value => Number.isFinite(value) && value >= 0), 'Missing workload trace boundary evidence');
+    assert.ok(c.idleStartedAt <= c.idleEndedAt && c.idleEndedAt <= trace.requestedAt
+      && trace.requestedAt <= trace.readyAt && trace.readyAt <= trace.workloadRequestedAt,
+      'Tracing must start after idle and be ready before workload');
     const idle = result.memory.samples.filter(s=>s.phase==='idle');
     assert.ok(idle.length && idle.every(s=>Number.isFinite(s.at) && s.at >= c.idleStartedAt && s.at <= c.idleEndedAt));
+    assert.ok(idle.every(sample => Number.isFinite(sample.completedAt)
+      && sample.at <= sample.completedAt && sample.completedAt <= trace.requestedAt),
+      'Idle RSS collection overlapped tracing');
     assert.ok(result.memory.samples.filter(s=>s.phase==='retained').every(s=>Number.isFinite(s.at) && s.at >= c.retainedStartedAt));
     combinedMemory = summarizeMemory(result.memory.samples.map(s=>({...s,rssBytes:s.totalBytes})));
     assert.deepEqual(c.memory, combinedMemory, 'Combined memory summary does not match samples');

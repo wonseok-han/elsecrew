@@ -4,6 +4,11 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준a67a84de에서 G6 추적 시작 순서의 기록/집계 계약을 연결했다. 추적 요청 전 requestedAt·준비 후 readyAt·프로젝트 호출 전 workloadRequestedAt을 기록하고 idle종료≤요청≤준비≤작업 순서를 검증한다. idle RSS 표본의 completedAt까지 확인해 추적 시작과 겹치는 수집을 거절한다. 기존 post-start 시각 하나를 근거로 시작 전 분리를 추정하지 않는다.
+- 누락·역전·NaN·표본완료 겹침 회귀를 포함한 output trial summary10개 PASS, node --check/diff 통과. 실제 GUI/메모리 재측정은 아직 없고400/800/120MiB 기준·기존 실패는 유지한다. Windows2e5a98a 추가 공개 승인도 아직 미응답이며 새push/CI/package/cache/모델 실행 없음. 다음은 승인된 범위의 native/실제화면 누적 검증과 발견 결함 수정이다.
+
+### 2026-11-06 · by GPT-6
+
 - Windows 후보2e5a98a 추가push/CI 승인은 미응답이므로 실행하지 않고 독립적인 G6 기존 증거를 확인했다. 기존combined시험은 idle 전에 main tracing을 시작해 fourteenth의 idle에 tracing Utility 약34MiB가 포함됐다. 해당 시험은 외부 입력으로 실패했으며 RSS를 차감해 합격으로 처리하지 않는다.
 - 동시 부하 수집기의 main 추적 시작을 idle종료/preparing전환 뒤·프로젝트열기 전으로 이동하고 mainTraceStartedAfterIdle 시각을 기록한다. 추적 서비스는 이후 전체peak/잔류에 계속 포함하며400/800/120MiB 기준·기존 실패는 유지한다. 시작 화면main long task는 별도시작진단 범위임을 성능문서에 명시했다. node --check/diff 통과, 새 실제측정/성능개선 증거는 아직 없다. 패키지/cache/모델/원격 실행 없음.
 
