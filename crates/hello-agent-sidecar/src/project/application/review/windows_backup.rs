@@ -34,10 +34,10 @@ pub(in crate::project) struct Backup {
     digest: [u8; 32],
 }
 impl Backup {
-    fn to_value(&self) -> Value {
+    pub(in crate::project) fn to_value(&self) -> Value {
         serde_json::to_value(self).expect("fixed backup fields")
     }
-    fn from_value(value: &Value) -> Result<Self, ProjectFailure> {
+    pub(in crate::project) fn from_value(value: &Value) -> Result<Self, ProjectFailure> {
         let result: Self = serde_json::from_value(value.clone()).map_err(|_| invalid())?;
         if result.version != FORMAT_VERSION
             || !valid_name(&result.name)
@@ -84,8 +84,68 @@ fn write_json(output: &mut Output, value: &Value) -> Result<(), ProjectFailure> 
         .map_err(|_| invalid())?;
     output.write_all(&bytes).map_err(|_| invalid())
 }
-mod space {
+pub(in crate::project) mod space {
     use super::*;
+    pub(in crate::project) fn intent(
+        manager: &ProjectManager,
+        record: &Value,
+        restoring: bool,
+    ) -> Result<(), ProjectFailure> {
+        let backup = Backup::from_value(&record["backup"]["backup"])?;
+        let (header, items) = verify_items(manager, &backup)?;
+        if header != record["backup"]["header"] || header["binding"] != record["binding"] {
+            return Err(invalid());
+        }
+        let root = crate::project::open_absolute_directory_capability(std::path::Path::new(
+            record["binding"]["canonicalGitRoot"]
+                .as_str()
+                .ok_or_else(invalid)?,
+        ))?;
+        let mut volumes: BTreeMap<String, (u64, u64)> = BTreeMap::new();
+        for item in items {
+            manager.check_application_preparation()?;
+            let path = item["path"].as_str().ok_or_else(invalid)?;
+            let mut parent = root.try_clone().map_err(|_| invalid())?;
+            let mut components = path.split('/').peekable();
+            while let Some(component) = components.next() {
+                if components.peek().is_none() {
+                    break;
+                }
+                match parent.symlink_metadata(component) {
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => break,
+                    Err(_) => return Err(invalid()),
+                    Ok(_) => parent = crate::project::open_real_child_dir(&parent, component)?,
+                }
+            }
+            let guid = crate::project::windows_fs::local_guid_path(&parent)?;
+            let volume = guid.split_once("}\\").ok_or_else(invalid)?.0.to_owned();
+            let free = crate::project::available_space(&parent)?;
+            let bytes = if restoring {
+                item["before"]["observation"]["length"]
+                    .as_u64()
+                    .unwrap_or(0)
+            } else {
+                item["after"]["size"].as_u64().unwrap_or(0)
+            };
+            let entry = volumes.entry(volume).or_insert((free, 0));
+            entry.0 = entry.0.min(free);
+            entry.1 = entry
+                .1
+                .checked_add(bytes)
+                .and_then(|v| v.checked_add(65536))
+                .ok_or_else(invalid)?;
+        }
+        for (free, bytes) in volumes.values() {
+            if *free
+                < bytes
+                    .checked_add(crate::project::SNAPSHOT_DISK_RESERVE_BYTES_V1)
+                    .ok_or_else(invalid)?
+            {
+                return Err(invalid());
+            }
+        }
+        Ok(())
+    }
     pub(super) fn plan(manager: &ProjectManager, plan: &ReviewPlan) -> Result<(), ProjectFailure> {
         let mut bytes = 32u64 * 1024 * 1024;
         for change in plan.changes.values() {
@@ -207,6 +267,7 @@ fn create_inner(
         name,
         Some(&backup),
         Some(baseline.inventory()),
+        false,
     )?
     .1 != header
     {
@@ -262,7 +323,8 @@ fn read_archive(
     name: &str,
     expected: Option<&Backup>,
     baseline: Option<&SourceInventory>,
-) -> Result<(Backup, Value), ProjectFailure> {
+    collect: bool,
+) -> Result<(Backup, Value, Vec<Value>), ProjectFailure> {
     if !valid_name(name) {
         return Err(invalid());
     }
@@ -295,6 +357,7 @@ fn read_archive(
         remaining: MAX_REVIEW_BYTES,
     };
     serde_json::to_writer(&mut changes, &(1u32, &header["binding"])).map_err(|_| invalid())?;
+    let mut items = Vec::new();
     let mut previous = String::new();
     let mut buffer = vec![0u8; 65536];
     for _ in 0..count {
@@ -348,6 +411,9 @@ fn read_archive(
         };
         serde_json::to_writer(&mut changes, &(path, image(&before_image), image(&after)))
             .map_err(|_| invalid())?;
+        if collect {
+            items.push(record.clone());
+        }
         if record["before"].is_null() {
             if !record["access"].is_null() || record["after"].is_null() {
                 return Err(invalid());
@@ -408,11 +474,19 @@ fn read_archive(
     }) {
         return Err(invalid());
     }
-    Ok((backup, header))
+    Ok((backup, header, items))
 }
 fn verify(manager: &ProjectManager, backup: &Backup) -> Result<Value, ProjectFailure> {
     let guard = BudgetGuard::acquire(manager)?;
-    Ok(read_archive(manager, &guard.directory, &backup.name, Some(backup), None)?.1)
+    Ok(read_archive(
+        manager,
+        &guard.directory,
+        &backup.name,
+        Some(backup),
+        None,
+        false,
+    )?
+    .1)
 }
 fn recover_candidate(
     manager: &ProjectManager,
@@ -420,5 +494,23 @@ fn recover_candidate(
     baseline: &SourceInventory,
 ) -> Result<(Backup, Value), ProjectFailure> {
     let guard = BudgetGuard::acquire(manager)?;
-    read_archive(manager, &guard.directory, name, None, Some(baseline))
+    let (backup, header, _) =
+        read_archive(manager, &guard.directory, name, None, Some(baseline), false)?;
+    Ok((backup, header))
+}
+
+pub(in crate::project) fn verify_items(
+    manager: &ProjectManager,
+    backup: &Backup,
+) -> Result<(Value, Vec<Value>), ProjectFailure> {
+    let guard = BudgetGuard::acquire(manager)?;
+    let (_, header, items) = read_archive(
+        manager,
+        &guard.directory,
+        &backup.name,
+        Some(backup),
+        None,
+        true,
+    )?;
+    Ok((header, items))
 }

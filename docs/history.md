@@ -4,6 +4,13 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준e4aaa76의 깨끗한 통합 checkout에서 pre-write intent 원장을 Windows review에도 공유했다. 기존 준비 확인 소비·project/lock pair 기록·쓰기 시작 전 phase 전환·pending item 예약·완료/복원 이력 검사·unwritten abandon 코드를 Windows 모듈 구성에도 포함하도록 변경했다. Windows application_status도 같은 원장 검사를 사용한다. 실제 writer/scheduler는 아직 macOS 전용이라 새 원본 쓰기는 활성화되지 않았다.
+- Windows archive는 전체 framing/payload/access/changes digest/EOF/file identity 검증 뒤에만 metadata item 목록을 반환한다. 검증 중 수집한 항목은 실패 시 밖으로 반환하지 않으며 재생성되는 pending item을 저장된 backup과 비교한다. collect 요청에만 최대32MiB encoded metadata 범위의 목록을 보유한다.
+- 쓰기 시작 admission에 destination volume 여유공간 검사를 연결했다. 각 경로의 존재하는 가장 가까운 부모를 no-follow로 열고 held GUID volume별로 temporary payload/entry allowance를 합산하며512MiB reserve를 유지한다. restore는 before 길이, apply는 after 길이를 사용한다. archive 생성 공간과 별도이며 실제 동시 외부 쓰기에 대한 예약을 주장하지 않는다.
+- 구현 우선에 따라 rustfmt/diff만 확인했고 Windows compile/native·공통 intent 회귀/독립 검토는 후속 누적 검증에 남긴다. 다음은 Windows 파일 교체 journal과 실제 apply/restore scheduler, metadata 보존·cleanup 연결이다. 신규 build/cache/package/worktree/push/CI/모델 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준62143c5의 깨끗한 통합 checkout에서 Windows before-image archive writer/reader를 구현했다. Windows version3/magic·길이 프레임으로 Unix version2와 구분하고64KiB content streaming·metadata 항목1MiB/총32MiB·archive4GiB+32MiB 상한을 적용한다. budget owner를 보유한 채 NTFS/write-through exclusive 생성·sync·전체 readback을 수행하고 부분/기존 파일은 삭제·덮어쓰지 않는다. 파일별 before observation·SavedAccess·after image를 기록하고 원본 handle/leaf/내용을 재확인한다.
 - 공유 staging의 preparing→ready 원장 흐름·reservation 전 이름 저장·revision CAS·explicit resume/abandon을 Windows에 연결했다. decoder는 파일 digest뿐 아니라 정렬된 path·payload 길이/hash·접근 권한 fingerprint·검토 changesDigest를 다시 계산한다. 중단 파일 재사용은 현재 baseline의 전체 before metadata와 대조하며 파일 존재만으로 ready로 올리지 않는다. 기존 confirmation prepare/consume도 이 staging을 사용할 수 있게 연결했고 preparation 목록/abandon API를 공유했다.
 - Windows cleanup record 처리는 아직 미지원이라 거부하며 자동 삭제는 없다. ADS/SACL/추가 file metadata 보존·destination 여유공간·실제 apply/restore writer/cleanup과 native crash/reopen 검증은 남아 source-write/product gate를 유지한다. 이번은 rustfmt/diff만 확인한 구현 checkpoint다. build/test/CI/독립 검토는 후속 누적 검증에 남겼으며 신규 cache/package/worktree/push/모델 없음.

@@ -27,7 +27,6 @@ pub(in crate::project) mod backup;
 #[path = "review/windows_backup.rs"]
 pub(in crate::project) mod backup;
 pub(in crate::project) mod confirmation;
-#[cfg(unix)]
 pub(in crate::project) mod intent;
 pub(in crate::project) mod persistence;
 

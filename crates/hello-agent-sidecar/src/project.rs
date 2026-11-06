@@ -868,12 +868,12 @@ impl ProjectManager {
         let mut status = if project.get("application_intent").is_none() {
             serde_json::json!({"projectId":project_id,"applicationId":null,"state":"none","currentIndex":null,"total":0})
         } else {
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             {
-                let record = application::review::intent::inspect(storage, project_id)?;
+                let record = application_review::intent::inspect(storage, project_id)?;
                 serde_json::json!({"projectId":project_id,"applicationId":record["applicationId"],"state":record["state"],"currentIndex":record["pendingItem"]["index"],"total":record["backup"]["header"]["count"]})
             }
-            #[cfg(not(unix))]
+            #[cfg(not(any(unix, windows)))]
             {
                 return Err(ProjectFailure::recovery(
                     "application state inspection unavailable on this platform",
