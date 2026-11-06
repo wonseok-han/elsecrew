@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준37179231에서 Windows 원본 반영의 기본 metadata 보존을 추가했다. 새 staged 파일의 내용 flush 후 기존 생성 시각·READONLY/HIDDEN/SYSTEM/ARCHIVE/NORMAL/TEMPORARY/NOT_CONTENT_INDEXED를 handle 기반 FILE_BASIC_INFO로 적용하고 sync·full ID/크기/시각/속성을 다시 관측한다. 수정된 내용의 write time은 기존 내용의 시각으로 되돌리지 않는다. 원본과 같은 ID면 metadata 수정 전에 거절한다.
+- 새 journal의 basicMetadataV1:true에 staged receipt의 생성 시각/속성 검증을 결속한다. marker 없는 과거 journal은 종전 복구 조건을 유지하며 소급 강제하지 않는다. batch admission은 교체 대상의 미지원 속성을 첫 원본 변경 전에 거절한다. 삭제 항목에는 불필요한 교체 metadata 조건을 추가하지 않는다. 압축/암호화/cloud·ADS/SACL과 directory 처리는 여전히 미완료이며 제품 gate는 닫혀 있다.
+- Microsoft FILE_BASIC_INFO 공식 문서의 class0/속성·시각 의미를 확인했다. 제어 시각/특수 속성 거절 및 새 파일 보존·원본 미변경·receipt 불일치 Windows 회귀 후보를 추가했다. 선택 rustfmt/diff 검사만 통과했으며 compile/native·독립 검토는 사용자 지시에 따라 기능 파동 최종 검증으로 남긴다. 신규 cache/package/worktree/push/CI/모델 실행 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준2c2eb79의 깨끗한 통합 checkout에서 Windows apply/restore owner를 ProjectManager scheduler에 연결했다. 세션 확인·backup 준비·cancel slot 승격·poll·stop·정확한 작업 ID 취소·running/failure 표시를 기존 macOS와 같은 수명주기로 연결하고 플랫폼별 writer owner를 alias로 선택한다. 재시작된 원장만으로 새 apply 세션을 자동 시작하지 않는다.
 - Windows 복원 미리보기도 전체 archive 검증·exact application/header 결속·100개 페이지/동일 fingerprint·원장 재확인을 재사용한다. 읽기 전용 조회와 제품 원본 쓰기 허용은 분리한다. 외부 apply/restore 진입점은 source_writes_enabled 외에도 macOS 조건을 명시 확인하여 Windows 내부 scheduler 연결만으로 활성화되지 않는다.
 - Windows 전용 회귀 후보에 잘못 켜진 preference에서도 두 mutation이 원장 접근 전에 거절되고 idle poll/stop이 원장·blocker를 만들지 않는 검사를 추가했다. 사용자 구현 우선 방침에 따라 이번 작업의 compile/native·통합 시험과 독립 안전 검토는 기능 파동 마감에 수행한다. 직접 diff 검사만 수행하며 PASS/제품 완료로 간주하지 않는다.

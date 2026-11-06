@@ -28,16 +28,22 @@ impl ApplyingBatch {
             return Err(invalid());
         }
         if items.iter().any(|item| {
-            if cfg!(windows) {
+            #[cfg(windows)]
+            {
                 // Directory support must be connected before admitting these
                 // items, never fail only after earlier source writes.
-                return (!item["after"].is_null() && item["after"]["kind"] != 1)
+                return (!item["after"].is_null() && !writer::metadata::supported(&item["before"]))
+                    || (!item["after"].is_null() && item["after"]["kind"] != 1)
                     || (!item["before"].is_null()
                         && item["before"]["observation"]["attributes"]
                             .as_u64()
                             .is_none_or(|v| v & 0x10 != 0));
             }
-            item["before"]["kind"] == 2 || (item["after"]["kind"] == 2 && !item["before"].is_null())
+            #[cfg(not(windows))]
+            {
+                item["before"]["kind"] == 2
+                    || (item["after"]["kind"] == 2 && !item["before"].is_null())
+            }
         }) {
             // This exact owner has never left prepared or created a writer
             // journal. Do not strand a recovery lock on a known unsupported

@@ -3,6 +3,7 @@
 //! cleanup follows an uncertain result. Staging/scheduler admission is separate.
 #![allow(dead_code)]
 use super::*;
+pub(super) mod metadata;
 pub(in crate::project) mod recovery;
 use crate::project::{
     open_absolute_directory_capability, open_real_child_dir, open_real_file_at,
@@ -62,6 +63,7 @@ fn validate(j: &Value) -> Result<(), ProjectFailure> {
                 + usize::from(o.contains_key("cancelingBeforeInstall"))
                 + usize::from(o.contains_key("canceledUnwritten"))
                 + usize::from(o.contains_key("canceledReservation"))
+                + usize::from(o.contains_key("basicMetadataV1"))
             || [
                 "version",
                 "platform",
@@ -98,6 +100,9 @@ fn validate(j: &Value) -> Result<(), ProjectFailure> {
             )
         )
     {
+        return Err(invalid());
+    }
+    if j.get("basicMetadataV1").is_some_and(|v| v != &json!(true)) {
         return Err(invalid());
     }
     if let Some(partial) = j.get("canceledReservation") {
@@ -249,7 +254,7 @@ pub(in crate::project) fn reserve(
     if observed["rootIdentity"] != root_identity {
         return Err(invalid());
     }
-    let journal = json!({"version":1,"platform":"windows","phase":"reserved","nonce":Uuid::new_v4().simple().to_string(),
+    let journal = json!({"version":1,"platform":"windows","basicMetadataV1":true,"phase":"reserved","nonce":Uuid::new_v4().simple().to_string(),
         "rootIdentity":root_identity,"parentIdentity":windows_fs::identity(&dir,true)?,
         "guardEntry":null,"stagedEntry":null,"retainedEntry":null,"installedEntry":null,"detachedEntry":null,"restoredEntry":null});
     check()?;
@@ -339,6 +344,9 @@ pub(in crate::project) fn stage(
         }
         output.flush().map_err(|_| invalid())?;
         output.sync_all().map_err(|_| invalid())?;
+        if !item["before"].is_null() {
+            metadata::preserve(&item["before"], &output)?;
+        }
         let staged = entry(&mut output, check)?;
         if staged["observation"]["length"] != item["after"]["size"]
             || staged["digest"] != item["after"]["digest"]
@@ -351,6 +359,7 @@ pub(in crate::project) fn stage(
     }
     lease.validate()?;
     check()?;
+    j["basicMetadataV1"] = json!(true);
     j["phase"] = json!("staged");
     publish(storage, project_id, expected, j, request)
 }
@@ -740,6 +749,7 @@ fn validate_receipts(j: &Value, item: &Value) -> Result<(), ProjectFailure> {
         let staged = &j["stagedEntry"];
         let image = json!({"kind":1,"executable":false,"size":staged["observation"]["length"],"digest":staged["digest"]});
         if image != item["after"]
+            || (j["basicMetadataV1"] == true && !metadata::matches(&item["before"], staged))
             || (before
                 && staged["observation"]["access"] != item["before"]["observation"]["access"])
         {
