@@ -2,7 +2,7 @@
 
 `--file-retention-only --file-retention-with-output-diff`는 같은 비시각 진단에500개 변경 요약·첫 파일diff와 가짜 실행1개를 추가한다. 출력 원장3000개·sealed와 정상 종료는 별도 확인한다. UI에 출력이 나타난 관측과 전체3000개가 화면에서 소비된 증거는 다르며, 이 모드는 모든 출력 표시·4개 스트림·전체combined 성능 시험을 대체하지 않는다.
 
-**실제 파일 수명 진단:** QA 패키지의 `--file-retention-only`는 combined와 함께 사용할 수 없다. 5MiB 단일행 임시 파일과 채팅1개를 만들고 실제 bridge/sidecar·Monaco로 연 뒤 정상 프로젝트 화면 해제와 heap snapshot을 수행한다. 모델 호출·사용자 인증은 없고 창은 숨긴다. 기능 성공도 전체 status는 `NOT_READY`, gateEligible는 false다. 실제 표시·입력·RSS·출력/diff 공존 검증으로 인용하지 않는다. 덤프에 원문이 없다는 관측은 snapshot의 GC 가능성·단일 시나리오 범위 안에서만 해석한다.
+**실제 파일 수명 진단:** QA 패키지의 `--file-retention-only`는 combined와 함께 사용할 수 없다. 전체 성능 시험과 동일한 5MiB·100,000줄 임시 파일과 채팅1개를 만들고 실제 bridge/sidecar·Monaco로 연 뒤 정상 프로젝트 화면 해제와 heap snapshot을 수행한다. 파일은 별도 생성 프로세스에서 만들어 QA main에 본문 캐시를 남기지 않는다. 이전 단일행 진단 결과와 구분하며 report.retentionFixture에 크기·줄 수를 기록한다. 모델 호출·사용자 인증은 없고 창은 숨긴다. 기능 성공도 전체 status는 `NOT_READY`, gateEligible는 false다. 실제 표시·입력·RSS·출력/diff 공존 검증으로 인용하지 않는다. 덤프에 원문이 없다는 관측은 snapshot의 GC 가능성·단일 시나리오 범위 안에서만 해석한다.
 
 **QA 창 가림 방지(2026-11-06):** 명시 QA 패키지에서만 `--keep-test-visible`을 지정하면 시험 창에 `setAlwaysOnTop(true, 'floating')`을 적용하고 보고서에 `keepTestVisible:true`를 기록한다. macOS에서는 다른 창에 완전히 가려져도 renderer visibility가 hidden이 된다([Electron 문서](https://www.electronjs.org/docs/latest/api/browser-window#page-visibility)). 이 옵션은 실제 시험 창의 배치만 바꾸며 제품 창 설정·backgroundThrottling·visibility 판정·숨김 실패·외부 입력 감시는 바꾸지 않는다. 잠금/다른 Space/OS 창 등 모든 가림을 막는다고 보장하지 않으며 실제 수집된 가시성 전체를 검증한다. 포커스를 계속 빼앗는 반복 호출은 하지 않는다. `--retention-snapshot`은 combined의 retained 단계까지 완료한 경우에만 성능 수집 종료 뒤 최대128MiB heap dump를 별도로 남긴다. snapshot은 GC를 유발할 수 있으므로 성능/누수 부재 증거가 아니며 정상 종료 확인 뒤 필요한 요약을 보존하고 원시 덤프를 정리한다.
 

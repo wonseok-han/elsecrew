@@ -29,11 +29,16 @@ function prepareInGenerator(source) {
     if (index) fs.mkdirSync(folder);
     for (let file = 0; file < 10; file++) fs.writeFileSync(path.join(folder, `file-${file}.txt`), 'tree fixture\n', {flag:'wx'});
   }
+  prepareFileInGenerator(source);
+  require('../tests/m5-native-diff-fixture.cjs').prepare(source);
+  return {treeFiles:10000, treeDirectories:1000, fileBytes:5242880, fileLines:100000};
+}
+function prepareFile(source) { return generate('file', source); }
+function prepareFileInGenerator(source) {
   const text = require('../tests/m5-renderer-performance-fixture.cjs').getFileText();
   assert.equal(Buffer.byteLength(text), 5242880);
   fs.writeFileSync(path.join(source, 'large.txt'), text, {flag:'wx'});
-  require('../tests/m5-native-diff-fixture.cjs').prepare(source);
-  return {treeFiles:10000, treeDirectories:1000, fileBytes:5242880, fileLines:100000};
+  return {fileBytes:5242880, fileLines:100000};
 }
 async function mount(run, userData, chat) {
   const root = fs.realpathSync(path.join(userData, 'com.wonseokhan.helloagent/m5/worktrees-v1'));
@@ -58,14 +63,15 @@ async function mount(run, userData, chat) {
   assert.equal(coexist, true, 'Large model and diff did not coexist');
   return {largeProject, largeDiff, coexist};
 }
-module.exports = {prepare, mount};
+module.exports = {prepare, prepareFile, mount};
 
 if (require.main === module) {
   const [action, directory] = process.argv.slice(2);
   assert.equal(process.argv.length, 4);
-  assert.ok(action === 'prepare' || action === 'change', 'Unknown QA generator action');
+  assert.ok(action === 'prepare' || action === 'change' || action === 'file', 'Unknown QA generator action');
   assert.ok(path.isAbsolute(directory), 'QA generator requires an absolute directory');
-  const dimensions = action === 'prepare' ? prepareInGenerator(directory)
+  const dimensions = action === 'file' ? prepareFileInGenerator(directory)
+    : action === 'prepare' ? prepareInGenerator(directory)
     : require('../tests/m5-native-diff-fixture.cjs').change(directory);
   process.stdout.write(JSON.stringify(dimensions));
 }

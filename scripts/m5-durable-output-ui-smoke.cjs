@@ -28,7 +28,7 @@ const source = path.join(root, 'project');
 const userData = path.join(root, 'userdata');
 fs.mkdirSync(source); fs.mkdirSync(userData);
 fs.writeFileSync(path.join(source, 'hello.txt'), 'original\n');
-if (retentionOnly) fs.writeFileSync(path.join(source, 'large.txt'), 'x'.repeat(5 * 1024 * 1024));
+const retentionFixture = retentionOnly ? require('./m5-combined-output-workload.cjs').prepareFile(source) : undefined;
 if (retentionWithOutputDiff) require('../tests/m5-native-diff-fixture.cjs').prepare(source);
 const combinedFixture = combinedWorkload?.prepare(source);
 for (const args of [['init', '-q', '--template='], ['add', '.'],
@@ -49,7 +49,7 @@ assert.equal(fs.realpathSync(app.getPath('sessionData')), fs.realpathSync(sessio
 assert.equal(fs.realpathSync(app.getPath('logs')), fs.realpathSync(logs));
 dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [source] });
 const report = { schemaVersion: 1, diagnostic: true, gateEligible: false, root, packagedQa,
-  keepTestVisible, retentionOnly, retentionWithOutputDiff,
+  keepTestVisible, retentionOnly, retentionWithOutputDiff, retentionFixture,
   paced, live, liveWindows: [], status: 'RUNNING', shutdown: 'pending', restoredChats: [], scrollChecks: [],
   limitations: [packagedQa ? 'Explicit QA package, synthetic providers; not the production artifact or actual accounts.' : 'Development artifacts, synthetic providers, no actual accounts.',
     'Full retained-window and history checks; no 50-events/s paint or packaged RSS gate.',
