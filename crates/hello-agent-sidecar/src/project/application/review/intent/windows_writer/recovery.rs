@@ -272,7 +272,14 @@ pub(in crate::project) fn inspect_settled_item(
                 Value::Null
             },
         ),
-        (name(j, "staged")?, Value::Null),
+        (
+            name(j, "staged")?,
+            if j["canceledUnwritten"] == true {
+                j["stagedEntry"].clone()
+            } else {
+                Value::Null
+            },
+        ),
     ];
     let mut pins = Vec::with_capacity(expected_names.len());
     for (name, expected_entry) in &expected_names {
@@ -334,4 +341,70 @@ pub(in crate::project) fn cancel_unmoved_install(
         evidence.journal.clone(),
         request,
     )
+}
+
+/// Cancel a prepared item only while the exact original is still at its leaf.
+/// This also handles a preserve intent whose syscall never happened. Prepared
+/// files remain in place under their receipts; cleanup and batch unlock remain
+/// separate. A partial reservation without staged receipts is not accepted.
+pub(in crate::project) fn cancel_unwritten_item(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    project_id: &str,
+    expected: &Value,
+    request: &str,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<Value, ProjectFailure> {
+    check()?;
+    if inspect_pending_item(manager, storage, project_id)? != *expected {
+        return Err(invalid());
+    }
+    let mut j = expected["pendingItem"]["writeJournal"].clone();
+    let item = &expected["pendingItem"]["item"];
+    validate_receipts(&j, item)?;
+    if !matches!(j["phase"].as_str(), Some("staged" | "moveBeforeIntent")) {
+        return Err(invalid());
+    }
+    let (root, dir, leaf) = source_parent(manager, expected)?;
+    if json!(windows_fs::identity(&root, true)?) != j["rootIdentity"]
+        || json!(windows_fs::identity(&dir, true)?) != j["parentIdentity"]
+    {
+        return Err(invalid());
+    }
+    let guard = name(&j, "guard")?;
+    let lease = DirectoryLease::acquire(&dir, OsStr::new(&guard))?;
+    let expected_names = [
+        (guard, j["guardEntry"].clone()),
+        (leaf, item["before"].clone()),
+        (name(&j, "staged")?, j["stagedEntry"].clone()),
+        (name(&j, "retained")?, Value::Null),
+        (name(&j, "detached")?, Value::Null),
+    ];
+    let mut pins = Vec::with_capacity(expected_names.len());
+    for (name, expected_entry) in &expected_names {
+        pins.push(pin_entry(&dir, name, expected_entry, check)?);
+    }
+    for ((name, expected_entry), held) in expected_names.iter().zip(pins.iter_mut()) {
+        verify_pin(&dir, name, expected_entry, held, check)?;
+    }
+    lease.validate()?;
+    let rebound = open_absolute_directory_capability(Path::new(
+        expected["binding"]["canonicalGitRoot"]
+            .as_str()
+            .ok_or_else(invalid)?,
+    ))?;
+    let (rebound_parent, _) = parent(&rebound, item["path"].as_str().ok_or_else(invalid)?)?;
+    if json!(windows_fs::identity(&rebound, true)?) != j["rootIdentity"]
+        || json!(windows_fs::identity(&rebound_parent, true)?) != j["parentIdentity"]
+    {
+        return Err(invalid());
+    }
+    check()?;
+    if inspect_pending_item(manager, storage, project_id)? != *expected {
+        return Err(invalid());
+    }
+    j["canceledUnwritten"] = json!(true);
+    j["restoredEntry"] = item["before"].clone();
+    j["phase"] = json!("restored");
+    publish(storage, project_id, expected, j, request)
 }

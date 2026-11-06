@@ -57,7 +57,10 @@ fn source_parent(
 
 fn validate(j: &Value) -> Result<(), ProjectFailure> {
     if j.as_object().is_none_or(|o| {
-        o.len() != 12 + usize::from(o.contains_key("cancelingBeforeInstall"))
+        o.len()
+            != 12
+                + usize::from(o.contains_key("cancelingBeforeInstall"))
+                + usize::from(o.contains_key("canceledUnwritten"))
             || [
                 "version",
                 "platform",
@@ -95,6 +98,14 @@ fn validate(j: &Value) -> Result<(), ProjectFailure> {
         )
     {
         return Err(invalid());
+    }
+    if let Some(unwritten) = j.get("canceledUnwritten") {
+        if unwritten != &json!(true)
+            || j["phase"] != "restored"
+            || j.get("cancelingBeforeInstall").is_some()
+        {
+            return Err(invalid());
+        }
     }
     if let Some(canceling) = j.get("cancelingBeforeInstall") {
         if canceling != &json!(true)
@@ -639,6 +650,21 @@ fn transition(
 /// fields are evidence to check, not authority to substitute arbitrary files.
 fn validate_receipts(j: &Value, item: &Value) -> Result<(), ProjectFailure> {
     validate(j)?;
+    if j["canceledUnwritten"] == true {
+        // No source rename occurred. Keep prepared private files and validate
+        // their original staged receipts, not a fictitious installed pair.
+        if j["restoredEntry"] != item["before"] {
+            return Err(invalid());
+        }
+        let mut staged = j.clone();
+        staged
+            .as_object_mut()
+            .ok_or_else(invalid)?
+            .remove("canceledUnwritten");
+        staged["phase"] = json!("staged");
+        staged["restoredEntry"] = Value::Null;
+        return validate_receipts(&staged, item);
+    }
     let rank = match j["phase"].as_str() {
         Some("reserved") => 0,
         Some("staged" | "moveBeforeIntent") => 1,

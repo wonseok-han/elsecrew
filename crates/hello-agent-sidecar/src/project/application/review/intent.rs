@@ -384,9 +384,47 @@ pub(in crate::project) fn inspect_pending_item(
     Ok(current)
 }
 
+/// Keep platform-specific file layouts behind the same cursor admission. A
+/// Windows restored pair is not a macOS exchange pair; only the verdict is shared.
+#[cfg(any(target_os = "macos", windows))]
+fn pending_pair_matches(
+    manager: &ProjectManager,
+    storage: &Storage,
+    project_id: &str,
+    _expected: &Value,
+    applied: bool,
+) -> Result<bool, ProjectFailure> {
+    #[cfg(target_os = "macos")]
+    {
+        let observed = writer::inspect_regular_outcome(manager, storage, project_id)?;
+        Ok(observed["comparison"]
+            == if applied {
+                "matchesAppliedPair"
+            } else {
+                "matchesUnappliedPair"
+            })
+    }
+    #[cfg(windows)]
+    {
+        let observed = windows_writer::recovery::inspect_settled_item(
+            manager,
+            storage,
+            project_id,
+            _expected,
+            &|| Ok(()),
+        )?;
+        Ok(observed["comparison"]
+            == if applied {
+                "matchesAppliedPair"
+            } else {
+                "matchesRestoredPair"
+            })
+    }
+}
+
 /// Advance only after a verified applied pair. Preserve the full old journal so
 /// subsequent recovery can restore in reverse order; never infer batch success.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 #[allow(dead_code)]
 pub(in crate::project) fn advance_regular_item(
     manager: &ProjectManager,
@@ -400,8 +438,7 @@ pub(in crate::project) fn advance_regular_item(
         || expected.get("restoredItems").is_some()
         || expected.get("unstartedFrom").is_some()
         || expected["pendingItem"]["writeJournal"]["phase"] != "applied"
-        || writer::inspect_regular_outcome(manager, storage, project_id)?["comparison"]
-            != "matchesAppliedPair"
+        || !pending_pair_matches(manager, storage, project_id, expected, true)?
     {
         return Err(invalid());
     }
@@ -454,7 +491,7 @@ pub(in crate::project) fn advance_regular_item(
 
 /// Cancel the untouched tail after a completed prefix, preserving its current
 /// applied/restored journal, or move back from a journal-free next item.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 #[allow(dead_code)]
 pub(in crate::project) fn cancel_unstarted_tail(
     manager: &ProjectManager,
@@ -480,7 +517,12 @@ pub(in crate::project) fn cancel_unstarted_tail(
             Some("restored") => false,
             _ => return Err(invalid()),
         };
+        #[cfg(target_os = "macos")]
         writer::verify_record_pair(manager, expected, applied)?;
+        #[cfg(windows)]
+        if !pending_pair_matches(manager, storage, project_id, expected, applied)? {
+            return Err(invalid());
+        }
         index.checked_add(1).ok_or_else(invalid)?
     } else {
         let mut completed = expected["completedItems"]
@@ -530,7 +572,7 @@ pub(in crate::project) fn cancel_unstarted_tail(
 
 /// Move backwards only after explicit restoration of the current item. Keep the
 /// restored suffix, including retained after images, for final reconciliation.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 #[allow(dead_code)]
 pub(in crate::project) fn previous_regular_item(
     manager: &ProjectManager,
@@ -542,8 +584,7 @@ pub(in crate::project) fn previous_regular_item(
     if inspect_pending_item(manager, storage, project_id)? != *expected
         || expected["state"] != "applying"
         || expected["pendingItem"]["writeJournal"]["phase"] != "restored"
-        || writer::inspect_regular_outcome(manager, storage, project_id)?["comparison"]
-            != "matchesUnappliedPair"
+        || !pending_pair_matches(manager, storage, project_id, expected, false)?
     {
         return Err(invalid());
     }

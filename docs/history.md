@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준b2b1ceb의 깨끗한 통합 checkout에서 staged 및 실제 unmoved인 moveBeforeIntent 취소를 추가했다. 원본 exact before·guard/staged receipt·retained/detached 부재를 held handle 아래 대조하고 원본/준비 파일의 rename·삭제 없이 canceledUnwritten:true/restoredEntry=before를 CAS 게시한다. 이 표시는 restored에만 허용하고 before-install 취소와 혼합을 거절한다. 재조회는 원본과 남겨 둔 staged 파일을 모두 검증한다.
+- Windows에 공유 다중 항목 cursor를 연결했다. 적용된 항목의 다음 선택, 미시작 tail 취소, 현재 항목 복원 후 이전 completed 항목 선택은 Windows 전용 파일 배치 검사를 통과해야 한다. 기존 archive index·project/lock CAS·metadata 상한·completed/restored 기록 보존을 재사용하며 macOS 비교 판정은 유지했다. 이 cursor만으로 전체 완료나 잠금 해제를 하지 않는다.
+- reserved 부분 생성의 처리·전체 completion/실행/cleanup·directory/추가 metadata·Windows native 회귀와 G6/출시는 남는다. 제품 gate/scheduler 활성화 없음. 독립 검토자1명은 이번 원본 미이동 취소·Windows cursor 연결 diff에 정적 차단 결함이 없다고 확인했다. 선택 rustfmt/diff만 확인했고 빌드/시험은 기능 파동 최종 검증으로 남긴다. 신규 cache/package/worktree/push/CI/모델 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준32240bb의 깨끗한 통합 checkout에서 beforeMoved 부분반영 취소를 추가했다. 명시 CancelStaged가 staged→detached를 cancelStagedIntent/receipt로 이동한 뒤 기존 RestoreBefore로 retained→원본을 복원한다. 설치하지 않은 파일의 installedEntry는 끝까지 null이고 cancelingBeforeInstall:true를 엄격한 phase 범위에서만 수용하며 detached receipt는 staged에 결속한다. 추가/삭제의 null 분기도 같은 기록 계약을 사용한다.
 - 취소 이동 전후 원본 target 부재와 보존 원본을 재대조한다. 취소 이동 자체의 중단도 기존 read-only 분류/명시 sync·acknowledge에 연결했다. installIntent지만 실제 파일이 unmoved인 경우 exact pending/held 증거 아래 고유 cancelReady phase로만 전환하고 이전 beforeMoved operation ID를 재사용하거나 설치 syscall을 재시도하지 않는다.
 - 이 경로는 원본을 이미 보존한 부분반영의 취소다. reserved/staged 단계 원본 미변경 취소·unmoved preserve 처리·다중 항목 실행/정리·디렉터리/추가 metadata·native 검증은 여전히 남는다. Windows 제품 gate와 scheduler 연결은 변경하지 않았다. 독립 검토자1명은 이번 부분취소 diff에 정적 차단 결함이 없다고 확인했다. 선택 rustfmt/diff만 확인했고 빌드/시험은 기능 파동 최종 검증으로 남긴다. 신규 cache/package/worktree/push/CI/모델 없음.
