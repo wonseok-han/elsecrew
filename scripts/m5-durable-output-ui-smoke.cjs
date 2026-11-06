@@ -188,7 +188,7 @@ app.on('browser-window-created', (_event, window) => {
       app.focus({steal:true}); window.show(); window.focus();
       await wait("document.visibilityState === 'visible' && window.m5?.version === 8");
       mainProbe = await import('./m5-main-task-trace.mjs');
-      const {startMainTaskSession,createMainPhaseProbe} = await import('./m5-main-task-session.mjs');
+      const {startMainTaskSession,createMainPhaseProbe,sampleRendererAllocation} = await import('./m5-main-task-session.mjs');
       mainPhaseProbe = createMainPhaseProbe();
       report.rendererLongTaskStart = await run(`(${longTaskProbe.beginLongTaskProbe.toString()})()`);
       longTaskStarted = true;
@@ -227,6 +227,10 @@ app.on('browser-window-created', (_event, window) => {
       mainSession = await startMainTaskSession(window.webContents.debugger, process.pid, {clockMarkers:true});
       report.mainTraceTiming.readyAt = Date.now();
       if (combined) assert.ok(report.mainTraceTiming.requestedAt >= report.combinedWorkload.idleEndedAt);
+      if (combined) report.rendererAllocation = {
+        scope: 'Diagnostic JS heap and DOM counters; not RSS, leak proof, or a gate. No forced GC.',
+        beforeWorkload: await sampleRendererAllocation(window.webContents.debugger),
+      };
       report.mainTraceTiming.workloadRequestedAt = Date.now();
       await run(`(async () => {
         const api = window.m5;
@@ -411,6 +415,7 @@ app.on('browser-window-created', (_event, window) => {
         await run(`[...document.querySelectorAll('button')].find(b => b.textContent === '프로젝트 화면 닫기' && !b.disabled).click()`);
         await wait("!!document.querySelector('.m5-start-action') && !document.querySelector('.monaco-editor')");
         await setMemoryPhase('closing'); report.combinedWorkload.closedAt = Date.now();
+        console.log(JSON.stringify({stage:'PROJECT_CLOSED', at:report.combinedWorkload.closedAt}));
         await new Promise(resolve => setTimeout(resolve, 60000));
         await setMemoryPhase('retained'); report.combinedWorkload.retainedStartedAt = Date.now();
         await new Promise(resolve => setTimeout(resolve, 3000));
@@ -421,6 +426,8 @@ app.on('browser-window-created', (_event, window) => {
         report.combinedWorkload.memory = require('./m5-process-memory.cjs').summarizeMemory(
           report.memory.samples.map(sample => ({...sample,rssBytes:sample.totalBytes})));
       }
+      // RSS retained sampling has ended; these queries cannot alter its window.
+      if (combined) report.rendererAllocation.afterRetained = await sampleRendererAllocation(window.webContents.debugger);
       report.outputObservation = await run('outputObservation.stop()');
       report.visibility = await run('document.visibilityState');
       report.visibilityTrace = await run('outputSmokeVisibility');

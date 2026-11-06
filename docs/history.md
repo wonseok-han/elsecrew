@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준84bf1c42에서 채팅 출력 reader/panel의 abort·unsubscribe·timer cleanup, chat view reset, 설치된 Monaco editor worker의 마지막 model 제거 시 dispose를 확인했다. 후속 초안은 사용자 보존 데이터이므로 메모리 절약 목적으로 삭제하지 않는다. 코드 확인만으로 실측 renderer 잔류의 원인을 확정하지 않았다.
+- 다음 QA에 JS heap 사용/할당량과 DOM document/node/listener 숫자만 기록하는 선택적 진단을 추가했다. 기존 debugger를 사용하고 cold idle 뒤 workload 전 및 retained RSS 수집 종료 뒤에만 조회한다. heap snapshot·GC·내용 보관·RSS 차감은 없다. 미지원/잘못된 숫자는 valid:false이며0으로 합격 처리하지 않는다. 프로젝트 닫힘 시점도 짧은 진행 로그로 남겨60초 잔류 대기를 정체로 오해하지 않게 했다.
+- session 진단7개 PASS·두 collector node --check·diff 통과. 실제 앱 카운터 수집/성능 재시험은 아직 없으며400/800/120MiB·입력50ms 및 기존FAIL을 유지한다. 다음은 계측을 포함한 단일 전체 시험에서 renderer 보유 증가와 RSS를 대조하는 것이다. Windows 공개 승인 대기·제품 활성화/모델 호출 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준4d5bbd18의 실제 입력 지연 실패 후 workbench 렌더 경로를 조사했다. draft/output 갱신마다 동일 diff 표200행이 다시 렌더되는 경로를 memo와 안정된 open/discuss callback으로 줄였다. 사용자 언어/context·descriptor/text·권한 변경은 일반 shallow 비교와 context 갱신으로 계속 반영하며 현재 workspace/path 검사를 유지한다.
 - TypeScript noEmit·diff-check 통과. 실제 입력 지연 개선은 아직 재측정하지 않았으며50ms 합격으로 주장하지 않는다. 메모리 조사에서 프로젝트 leave는 tabs/tree/diffText를 비우고 Monaco unmount는 model/editor를 dispose하는 기존 경로를 확인했다. renderer RSS 증가만으로 해당 데이터 누수를 확정할 수 없어 강제GC나 임의 캐시 삭제는 추가하지 않았다.
 - 다음은 renderer 잔류의 실제 보유 객체/worker와 측정기 보유를 구분하고 같은 전체 workload에서 수정 효과를 확인하는 것이다. Windows 추가push 승인은 대기 중이며 원격 실행·새 패키지·모델 호출은 없었다.

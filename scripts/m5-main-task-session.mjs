@@ -110,3 +110,25 @@ export function createMainPhaseProbe() {
     },
   };
 }
+
+// Optional attribution only: no heap snapshot, GC, or retained user content.
+// The caller owns the existing debugger attachment and samples outside RSS windows.
+export async function sampleRendererAllocation(debuggerApi) {
+  const startedAt = Date.now();
+  let timer;
+  try {
+    const [heap, dom] = await Promise.race([
+      Promise.all([debuggerApi.sendCommand('Runtime.getHeapUsage'), debuggerApi.sendCommand('Memory.getDOMCounters')]),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Allocation diagnostic timeout')), 2000); }),
+    ]);
+    const counters = {
+      usedHeapBytes: heap.usedSize, totalHeapBytes: heap.totalSize,
+      documents: dom.documents, nodes: dom.nodes, listeners: dom.jsEventListeners,
+    };
+    if (!Object.values(counters).every(value => Number.isSafeInteger(value) && value >= 0)
+      || counters.usedHeapBytes > counters.totalHeapBytes) throw new Error('Invalid allocation counters');
+    return {diagnostic:true, gateEligible:false, valid:true, startedAt, completedAt:Date.now(), counters};
+  } catch {
+    return {diagnostic:true, gateEligible:false, valid:false, startedAt, completedAt:Date.now()};
+  } finally { clearTimeout(timer); }
+}

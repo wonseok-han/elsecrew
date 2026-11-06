@@ -66,3 +66,31 @@ test('aborted scenario cannot claim complete boundaries',async()=>{
   const api=new MarkerStub();const session=await startMainTaskSession(api,7,{clockMarkers:true});
   assert.equal((await session.stop(false)).clockBoundaries!.complete,false);
 });
+
+test('allocation diagnostics keep only validated numeric counters and never collect garbage', async () => {
+  const {sampleRendererAllocation} = await import('../scripts/m5-main-task-session.mjs');
+  const calls: string[] = [];
+  const api = {sendCommand: async (method: string) => {
+    calls.push(method);
+    return method === 'Runtime.getHeapUsage'
+      ? {usedSize:100,totalSize:200,privateContent:'must not retain'}
+      : {documents:1,nodes:10,jsEventListeners:2};
+  }};
+  const result = await sampleRendererAllocation(api);
+  assert.equal(result.valid,true);
+  assert.deepEqual(result.counters,{usedHeapBytes:100,totalHeapBytes:200,documents:1,nodes:10,listeners:2});
+  assert.deepEqual(calls,['Runtime.getHeapUsage','Memory.getDOMCounters']);
+  assert.equal(JSON.stringify(result).includes('must not retain'),false);
+  assert.equal(result.gateEligible,false);
+});
+
+test('unsupported or inconsistent allocation evidence stays invalid, not zero memory', async () => {
+  const {sampleRendererAllocation} = await import('../scripts/m5-main-task-session.mjs');
+  for (const sendCommand of [async () => {throw new Error('unsupported');},
+    async () => ({usedSize:201,totalSize:200,documents:1,nodes:10,jsEventListeners:2}),
+    async () => ({usedSize:1,totalSize:2,documents:1,nodes:NaN,jsEventListeners:2})]) {
+    const result = await sampleRendererAllocation({sendCommand});
+    assert.equal(result.valid,false);
+    assert.equal('counters' in result,false);
+  }
+});
