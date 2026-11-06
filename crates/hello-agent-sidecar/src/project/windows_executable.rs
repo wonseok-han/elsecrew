@@ -123,6 +123,19 @@ impl ExecutableLease {
             .ok_or_else(|| ProjectFailure::recovery("DLL observation is not configured"))?
             .retain_loaded(actual)
     }
+    pub(super) fn verify_loaded_descendant(
+        &self,
+        actual: &impl AsRawHandle,
+    ) -> Result<(), ProjectFailure> {
+        self.validate()?;
+        if self.matches_file(actual)? {
+            return Ok(());
+        }
+        self.system_modules
+            .as_ref()
+            .ok_or_else(|| ProjectFailure::recovery("descendant observation is not configured"))?
+            .verify_console_host(actual)
+    }
     pub(super) fn path(&self) -> &str {
         &self.path
     }
