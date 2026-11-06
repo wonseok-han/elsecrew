@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
-2026-11-06 Windows CI42174341305에서 같은 Git image의 GUID 실행 표기는 오류87, held-handle DOS 표기는 suspended 생성·확인된 종료에 성공했다. 실행용 locator를 canonical GUID authority와 분리하는 호환 수정을 준비 중이며 Windows 실제 명령·전체 반영/복원은 미검증이다. 추가3회 push/CI 승인은 모두 소진됐다. macOS G6·Windows 제품 활성화·출시는 미완료다. 상세는 아래 및 [11월 아카이브](archive/history-2026-11.md).
+2026-11-06 Windows CI42176391575에서 실행용 DOS 표기 수정이 컴파일·native·dispatcher를 통과하고 CreateProcessW OS87 이후 단계까지 진행했으나 실제 실행 image 신원 비교에서 거부됐다. 최초/자손 구분 진단과 후속수정이 필요하며 전체 반영/복원은 미검증이다. 최신 공개 승인3회 중2회사용·1회잔여. macOS G6 메모리·Windows 제품 활성화·출시는 미완료다. 상세는 아래 및 [11월 아카이브](archive/history-2026-11.md).
+
+### 2026-11-06 · by GPT-6
+
+- 직전 턴은 실제 multiline 진단/정리와 CI42176391575의 live 상태를 확인한 progress/verified wait였다. 같은 watch14379를 이어서 관찰해 exit1·completed failure를 확인했다. 컴파일/native/dispatcher는 통과했으나 installed Git 최소환경 --version의 finish에서 loaded image differs로 실패했다. DOS suspended 생성·종료는 성공했고 OS87 이후의 실제 image 검증까지 진행했다. 전체 반영/복원은 실행되지 않았다.
+- windows_supervisor에 최초/자손 image 구분을 추가하고 cfg(test)에서만 held 실제 파일의 GUID 경로/신원을 출력하도록 보완했다. 실패한 image를 수락/continue하지 않으며 이미지·의존성·종료 보호는 그대로다. root와 descendant 중 어느 것인지 확인 전 conhost/다른 helper 문제로 단정하지 않는다. rustfmt/diff 통과, 동일 독립 검토자의 검토 뒤 잔여승인 범위에서 후속진단한다. 실패 로그 /tmp/hello-agent-windows-42176391575-failure.log. 동일 독립 검토에서 진단 변경의 거부/종료/pin 계약 보존을 확인했다. first=true는 pump의 선행 root PID 검사 때문에 최초 root를 의미한다. 단일파일 후보f47ab501을 새승인2/3으로 게시했고 CI42177252779 in_progress 확인, 잔여1회다.
 
 ### 2026-11-06 · by GPT-6
 
