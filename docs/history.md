@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
-2026-11-06 Windows CI42178206686에서 실제 Git 버전조회·stdin 명령·동의철회와 엄격한 conhost 신원/종료 처리가 통과했다. 다음 반영/복원 fixture의 저장소 초기화가 설치 template 경로 오류로 실패해 --template= 수정 후보3a02b433을 준비했다. 새로 승인된 최대3회 중1회를 사용해 후보3a02b433의 CI42178964335가 실행 중이다. macOS G6·Windows 전체 반영/복원·제품 활성화·출시는 미완료다. 상세는 아래 및 [11월 아카이브](archive/history-2026-11.md).
+2026-11-06 Windows CI42178206686에서 실제 Git 버전조회·stdin 명령·동의철회와 엄격한 conhost 신원/종료 처리가 통과했다. 다음 반영/복원 fixture의 저장소 초기화가 설치 template 경로 오류로 실패해 --template= 수정 후보3a02b433을 준비했다. 추가 승인2/3회로 Git 내부 검색 경로 수정 후보04afcf3b의 CI42179853118이 실행 중이며1회잔여다. macOS G6·Windows 전체 반영/복원·제품 활성화·출시는 미완료다. 상세는 아래 및 [11월 아카이브](archive/history-2026-11.md).
+
+### 2026-11-06 · by GPT-6
+
+- 직전 목표 턴은 실제 Git/콘솔 보조프로그램 검증과 template fixture 수정·추가승인 CI 시작을 완료한 progress였다. 동일 watch97397를 이어서 관찰해 CI42178964335 completed failure를 확인했다. 컴파일/native/dispatcher 및 Git diagnostic은 통과했고 source init/add/commit 뒤 create_worktree_inner의 bundle export가 cannot spawn git: Invalid argument / pack-objects로 실패했다. 전체 반영/복원은 아직 미도달이며 새예산1/3사용·2회잔여다.
+- Git 내부 검색 PATH/GIT_EXEC_PATH의 GUID 표기를 의심해 held image launch_path에서 ordinary DOS parent만 파생하는2파일 호환 수정 후보를 준비했다. caller/inherited PATH는 받지 않고 canonical GUID identity/CWD·root 및 descendant 실제이미지 검사·종료 barrier는 유지한다. 이 변경이 실패를 해결하는지는 다음 native 실행 전 미확인이다. 검색 경로로 다시 연 파일도 같은 identity인지 회귀에 추가했다. rustfmt/diff 통과, 동일 검토자에게 기존 실행 신원/종료 경계 보존과 회귀의 확인을 받았다.2코드파일 후보04afcf3b를 추가승인2/3으로 게시했고 CI42179853118 in_progress 확인,1회잔여다. 로그 /tmp/hello-agent-windows-42178964335-failure.log.
 
 ### 2026-11-06 · by GPT-6
 
