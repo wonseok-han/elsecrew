@@ -161,7 +161,31 @@ fn confirmed_multi_item_apply_and_restore_through_scheduler_and_ledger() {
     assert!(storage.blocker_ids().unwrap().is_empty());
     // Completion must survive reopening the real SQLite ledger.
     drop(storage);
-    let reopened = Storage::open(&db).unwrap();
+    let mut reopened = Storage::open(&db).unwrap();
     assert_eq!(intent::inspect(&reopened, &project).unwrap(), restored);
     assert_eq!(manager.application_capabilities().result["enabled"], false);
+    // After a successful real rename/apply/restore, interrupt a fresh snapshot
+    // at the rename boundary. It must remain fenced instead of becoming active.
+    let failure = manager
+        .create_worktree_inner(
+            &mut reopened,
+            &project,
+            "req_native_rename_interrupted",
+            Some(WorktreeFailurePoint::AfterWorkspaceRenameBeforeActivation),
+            None,
+            SnapshotCreation::ApplicationCandidate,
+        )
+        .unwrap_err();
+    assert_eq!(failure.code, "E_RECOVERY_REQUIRED");
+    assert!(failure
+        .detail
+        .contains("failure injected after snapshot rename"));
+    assert_eq!(
+        required_project(&reopened, &project).unwrap()["lifecycle"],
+        "recoveryRequired"
+    );
+    assert!(!reopened.blocker_ids().unwrap().is_empty());
+    assert!(manager
+        .validate_active_project(&reopened, &project)
+        .is_err());
 }

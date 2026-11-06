@@ -1425,6 +1425,13 @@ impl ProjectManager {
         let git_dir = open_real_child_dir(&staging, ".git")?;
         write_json_atomic(&git_dir, SNAPSHOT_MARKER, &snapshot_identity(&active)?)?;
         self.verify_snapshot_repository(&staging, &active)?;
+        #[cfg(windows)]
+        let staging_identity = windows_fs::identity(&staging, true)?;
+        // Windows capability directory handles deny delete sharing. Release
+        // completed staging readers before the parent-relative rename; the
+        // final directory, marker and invariant are rechecked before activation.
+        drop(git_dir);
+        drop(staging);
         self.worktrees_dir
             .rename(&staging_name, &self.worktrees_dir, &active.worktree_id)
             .map_err(|error| {
@@ -1437,10 +1444,16 @@ impl ProjectManager {
             ));
         }
 
+        let final_dir = self.worktree_capability(&active)?;
+        #[cfg(windows)]
+        if windows_fs::identity(&final_dir, true)? != staging_identity {
+            return Err(ProjectFailure::recovery(
+                "snapshot directory identity changed during activation rename",
+            ));
+        }
         // Publication may have added a source receipt after the original open record.
         let project = required_project(storage, project_id)?;
         self.persist_pre_activation(storage, &active, &project, request_id)?;
-        let final_dir = self.worktree_capability(&active)?;
         let durable = required_project(storage, &active.project_id)?;
         let canonical_root_text =
             canonical_protocol_path_without_existing(&active.canonical_git_root)?;
