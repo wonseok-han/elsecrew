@@ -8,6 +8,10 @@ use crate::project::{
 use cap_std::fs::{Dir, File};
 use std::io::Read;
 use uuid::Uuid;
+#[path = "backup/cleanup.rs"]
+pub(in crate::project) mod cleanup;
+#[path = "backup/retention.rs"]
+pub(in crate::project) mod retention;
 #[path = "backup/staging.rs"]
 pub(in crate::project) mod staging;
 const FORMAT_VERSION: u32 = 3;

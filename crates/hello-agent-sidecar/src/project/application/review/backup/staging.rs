@@ -189,10 +189,7 @@ pub(in crate::project) fn inspect(
                 && record.get("cleanup").is_some() =>
         {
             // Cleanup is separate from preparation state; it never makes an archive ready.
-            #[cfg(unix)]
             super::cleanup::preview(manager, storage, project_id, review_id)?;
-            #[cfg(windows)]
-            return Err(invalid()); // Cleanup records require the separate Windows cleanup port.
             Ok(record.clone())
         }
         Some("preparing" | "abandoned") if record.as_object().is_some_and(|v| v.len() == 4) => {

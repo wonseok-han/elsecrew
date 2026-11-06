@@ -476,48 +476,48 @@ pub struct WorkspaceAddress {
 
 impl ProjectManager {
     pub(crate) fn inspect_application_retirement(&self, storage: &Storage, project: &str, application: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
-        { let inspection = application::review::intent::retirement::preview(storage, project, application)?;
+        #[cfg(any(unix, windows))]
+        { let inspection = application_review::intent::retirement::preview(storage, project, application)?;
           Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"inspectApplicationRetirement","projectId":project,"enabled":self.application_cleanup_enabled && cfg!(target_os="macos"),"inspection":inspection}), ..Default::default() }) }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         { let _ = (storage,project,application); Err(ProjectFailure::recovery("application retirement unavailable on this platform")) }
     }
 
     pub(crate) fn retire_application(&mut self, storage: &mut Storage, project: &str, application: &str, fingerprint: &str, request: &str) -> Result<ProjectAction, ProjectFailure> {
         if !self.application_cleanup_enabled || !cfg!(target_os="macos") { return Err(ProjectFailure::recovery("application retirement is not enabled")); }
         if self.application_running() || self.preparation_cancel.is_some() || !self.pending_saves.is_empty() { return Err(ProjectFailure::recovery("application retirement requires idle processing")); }
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         { self.application_confirmations.cancel();
-          application::review::intent::retirement::retire(storage, project, application, fingerprint, request)?;
+          application_review::intent::retirement::retire(storage, project, application, fingerprint, request)?;
           Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"retireApplication","projectId":project,"applicationId":application}), ..Default::default() }) }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         { let _ = (storage,project,application,fingerprint,request); Err(ProjectFailure::recovery("application retirement unavailable on this platform")) }
     }
 
     pub(crate) fn inspect_backup_cleanup(&self, storage: &Storage, project: &str, review: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
-        { let inspection = application::review::backup::cleanup::preview(self, storage, project, review)?;
+        #[cfg(any(unix, windows))]
+        { let inspection = application_review::backup::cleanup::preview(self, storage, project, review)?;
           Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"inspectBackupCleanup","projectId":project,"enabled":self.application_cleanup_enabled && cfg!(target_os="macos"),"inspection":inspection}), ..Default::default() }) }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         { let _ = (storage, project, review); Err(ProjectFailure::recovery("backup cleanup unavailable on this platform")) }
     }
 
     pub(crate) fn cleanup_backup(&mut self, storage: &mut Storage, project: &str, review: &str, fingerprint: &str, request: &str) -> Result<ProjectAction, ProjectFailure> {
         if !self.application_cleanup_enabled || !cfg!(target_os="macos") { return Err(ProjectFailure::recovery("backup cleanup is not enabled")); }
         if self.application_running() || self.preparation_cancel.is_some() || !self.pending_saves.is_empty() { return Err(ProjectFailure::recovery("backup cleanup requires idle processing")); }
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         { self.application_confirmations.cancel();
-          application::review::backup::cleanup::remove(self, storage, project, review, fingerprint, request)?;
+          application_review::backup::cleanup::remove(self, storage, project, review, fingerprint, request)?;
           Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"cleanupBackup","projectId":project,"reviewId":review}), ..Default::default() }) }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         { let _ = (storage, project, review, fingerprint, request); Err(ProjectFailure::recovery("backup cleanup unavailable on this platform")) }
     }
 
     pub(crate) fn backup_retention(&self, storage: &Storage, project_id: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         { let project = required_project(storage, project_id)?;
-          Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"backupRetention","projectId":project_id,"entries":application::review::backup::retention::summarize(&project)?}), ..Default::default() }) }
-        #[cfg(not(unix))]
+          Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"backupRetention","projectId":project_id,"entries":application_review::backup::retention::summarize(&project)?}), ..Default::default() }) }
+        #[cfg(not(any(unix, windows)))]
         { let _ = (storage, project_id); Err(ProjectFailure::recovery("backup retention inspection unavailable on this platform")) }
     }
 

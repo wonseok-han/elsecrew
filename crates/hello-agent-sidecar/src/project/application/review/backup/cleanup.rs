@@ -7,7 +7,10 @@ use serde_json::json;
 
 #[cfg(test)]
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(in crate::project) enum FailurePoint { Pending, Unlinked }
+pub(in crate::project) enum FailurePoint {
+    Pending,
+    Unlinked,
+}
 
 #[cfg(test)]
 thread_local! {
@@ -25,12 +28,35 @@ fn inject_failure(point: FailurePoint) -> Result<(), ProjectFailure> {
         if slot.get() == Some(point) {
             slot.set(None);
             Err(ProjectFailure::recovery("injected cleanup interruption"))
-        } else { Ok(()) }
+        } else {
+            Ok(())
+        }
     })
 }
 
+#[cfg(unix)]
 fn lock(manager: &ProjectManager) -> Result<ArchiveLock, ProjectFailure> {
-    ArchiveLock::acquire(directory(manager)?, libc::LOCK_EX, "backup cleanup requires idle preparation")
+    ArchiveLock::acquire(
+        directory(manager)?,
+        libc::LOCK_EX,
+        "backup cleanup requires idle preparation",
+    )
+}
+
+#[cfg(windows)]
+struct CleanupLock(crate::project::windows_backup_storage::BudgetGuard);
+#[cfg(windows)]
+impl std::ops::Deref for CleanupLock {
+    type Target = Dir;
+    fn deref(&self) -> &Dir {
+        &self.0.directory
+    }
+}
+#[cfg(windows)]
+fn lock(manager: &ProjectManager) -> Result<CleanupLock, ProjectFailure> {
+    Ok(CleanupLock(
+        crate::project::windows_backup_storage::BudgetGuard::acquire(manager)?,
+    ))
 }
 
 fn record(storage: &Storage, project: &str, review: &str) -> Result<Value, ProjectFailure> {
@@ -110,7 +136,19 @@ pub(super) fn recorded_state(record: &Value) -> Result<&str, ProjectFailure> {
         .ok_or_else(invalid)?;
     let identity = cleanup.get("identity").ok_or_else(invalid)?;
     if !identity.is_null() {
+        #[cfg(unix)]
         serde_json::from_value::<[i128; 9]>(identity.clone()).map_err(|_| invalid())?;
+        #[cfg(windows)]
+        {
+            if identity.as_object().is_none_or(|v| v.len() != 2) {
+                return Err(invalid());
+            }
+            let observation: crate::project::windows_source_inventory::Observation =
+                serde_json::from_value(identity["observation"].clone()).map_err(|_| invalid())?;
+            if identity["fileId"] != observation.identity_token() {
+                return Err(invalid());
+            }
+        }
     }
     Ok(state)
 }
@@ -150,6 +188,7 @@ mod reference_tests {
     }
 }
 
+#[cfg(unix)]
 fn identity(dir: &Dir, name: &str) -> Result<Value, ProjectFailure> {
     let path = match dir.symlink_metadata(name) {
         Ok(meta) => meta,
@@ -165,6 +204,47 @@ fn identity(dir: &Dir, name: &str) -> Result<Value, ProjectFailure> {
         return Err(invalid());
     }
     serde_json::to_value(stamp(&actual)).map_err(|_| invalid())
+}
+
+#[cfg(windows)]
+fn identity(dir: &Dir, name: &str) -> Result<Value, ProjectFailure> {
+    match dir.symlink_metadata(name) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Value::Null),
+        Err(_) => return Err(invalid()),
+        Ok(_) => {}
+    }
+    let file = crate::project::open_real_file_at(dir, name)?;
+    let observed = crate::project::windows_source_inventory::file_observation(&file)?;
+    let rebound = crate::project::open_real_file_at(dir, name)?;
+    if crate::project::windows_source_inventory::file_observation(&rebound)? != observed
+        || crate::project::windows_source_inventory::file_observation(&file)? != observed
+    {
+        return Err(invalid());
+    }
+    Ok(json!({"fileId":observed.identity_token(),"observation":observed}))
+}
+
+/// A permanent zero-byte managed child pins the archive directory during exact
+/// deletion. Only explicit remove creates it; preview and startup do not.
+#[cfg(windows)]
+fn cleanup_lease(
+    dir: &Dir,
+) -> Result<crate::project::windows_directory_lease::DirectoryLease, ProjectFailure> {
+    const GUARD: &str = ".cleanup-guard-v1";
+    crate::project::windows_durability::require_ntfs(dir)?;
+    match dir.open_with(GUARD, &crate::project::windows_replace::source_options()) {
+        Ok(file) => file.sync_all().map_err(|_| invalid())?,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(_) => return Err(invalid()),
+    }
+    let file = crate::project::open_real_file_at(dir, GUARD)?;
+    if crate::project::windows_source_inventory::file_observation(&file)?.length != 0 {
+        return Err(invalid());
+    }
+    crate::project::windows_directory_lease::DirectoryLease::acquire(
+        dir,
+        std::ffi::OsStr::new(GUARD),
+    )
 }
 
 fn preview_inner(
@@ -274,8 +354,27 @@ pub(in crate::project) fn remove(
         if now != current["cleanup"]["identity"] {
             return Err(invalid());
         }
+        #[cfg(unix)]
         dir.remove_file(name).map_err(|_| invalid())?;
+        #[cfg(windows)]
+        {
+            let lease = cleanup_lease(&dir)?;
+            crate::project::windows_remove::remove_recorded_checked(
+                &lease,
+                name,
+                now["fileId"].as_str().ok_or_else(invalid)?,
+                &|file| {
+                    let observed =
+                        crate::project::windows_source_inventory::file_observation(file)?;
+                    if json!({"fileId":observed.identity_token(),"observation":observed}) != now {
+                        return Err(invalid());
+                    }
+                    Ok(())
+                },
+            )?;
+        }
     }
+    #[cfg(unix)]
     sync_capability_directory(&dir)?;
     #[cfg(test)]
     inject_failure(FailurePoint::Unlinked)?;

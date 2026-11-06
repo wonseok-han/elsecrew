@@ -27,7 +27,8 @@ mod native {
     };
 
     #[repr(C)]
-    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
     pub(crate) struct Identity {
         volume: u64,
         file: [u8; 16],

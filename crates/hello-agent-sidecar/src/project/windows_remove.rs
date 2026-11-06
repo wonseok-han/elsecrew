@@ -4,7 +4,7 @@
 #![allow(dead_code)]
 use super::{windows_directory_lease::DirectoryLease, windows_fs, ProjectFailure};
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
-use cap_std::fs::{OpenOptions, OpenOptionsExt};
+use cap_std::fs::{File, OpenOptions, OpenOptionsExt};
 use std::{
     ffi::c_void,
     os::windows::io::{AsRawHandle, IntoRawHandle},
@@ -28,6 +28,17 @@ pub(super) fn remove_recorded(
     name: &str,
     expected_identity: &str,
 ) -> Result<(), ProjectFailure> {
+    remove_recorded_checked(lease, name, expected_identity, &|_| Ok(()))
+}
+
+/// Optional policy check runs on the same exclusive handle that is deleted,
+/// closing a metadata-observation/reopen gap for explicit archive cleanup.
+pub(super) fn remove_recorded_checked(
+    lease: &DirectoryLease,
+    name: &str,
+    expected_identity: &str,
+    check: &dyn Fn(&File) -> Result<(), ProjectFailure>,
+) -> Result<(), ProjectFailure> {
     // Also rejects guard aliases, paths, streams, reserved names and directories.
     let parent = lease.replacement_parent(name)?;
     super::windows_durability::require_ntfs(parent)?;
@@ -48,6 +59,7 @@ pub(super) fn remove_recorded(
             "cleanup file identity differs from durable record",
         ));
     }
+    check(&file)?;
     lease.validate()?;
     // FILE_DISPOSITION_INFO contains one BOOLEAN, not a Win32 four-byte BOOL.
     // No POSIX/ignore-readonly/delete-on-close fallback is used.
@@ -113,6 +125,15 @@ mod tests {
         assert!(remove_recorded(&lease, "owned", &id).is_err());
         assert_eq!(std::fs::read(temp.path().join("owned")).unwrap(), b"owned");
         drop(held);
+        let checked = std::cell::Cell::new(false);
+        assert!(remove_recorded_checked(&lease, "owned", &id, &|file| {
+            checked.set(true);
+            assert_eq!(windows_fs::identity(file, false)?.recovery_token(), id);
+            Err(ProjectFailure::recovery("changed consent observation"))
+        })
+        .is_err());
+        assert!(checked.get());
+        assert_eq!(std::fs::read(temp.path().join("owned")).unwrap(), b"owned");
         remove_recorded(&lease, "owned", &id).unwrap();
         assert!(!temp.path().join("owned").exists());
         assert_eq!(

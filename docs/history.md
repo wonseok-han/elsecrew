@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준6cdc875의 통합 checkout에서 Windows archive cleanup/retention과 retirement 조회를 연결했다. 현재 복원 대상·다중 owner·역사 기록 불일치는 기존 공유 원장 검사가 거절하고 삭제 전 fingerprint/명시 pending을 보존한다. Windows 관측은 full file ID·시각·크기·속성·링크·권한이며 동일 exclusive 삭제 handle에서 재확인한다.
+- archive budget lock과 영구 zero-byte cleanup guard의 directory lease를 사용한다. preview는 guard를 만들지 않으며 원본의 private staged/retained/detached는 이 정리 대상이 아니다. 정상 save의 기존 exact-ID 삭제는 no-op 추가 검사로 유지한다. 정책 검사 거절 시 파일이 보존되는 Windows 회귀를 추가했다.
+- Windows mutator gate는 계속 macOS-only로 닫혀 있다. 선택 rustfmt와 diff check 통과; 독립 읽기 전용 검토자1명은 이번7개 Rust 파일의 삭제 경계·플랫폼 분기에 정적 차단 결함이 없다고 확인했다. 추가 회귀 실행·Windows compile/native·중단 재시작 시험은 아직 수행하지 않았다. 신규 build/cache/package/worktree/push/CI/모델 실행 없음. directory/추가 metadata·원본 잔여 파일 처리·제품 scheduler 연결·누적 검증·G6/출시는 남는다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준b3947ec의 깨끗한 통합 checkout에서 Windows reserved 부분 준비의 명시 취소를 restore owner에 연결했다. exact pending/archive·root/parent·원본 before를 대조하고 guard/staged의 현재 신원·내용 또는 부재를 read-only handle로 보유·재확인한다. retained/detached는 없어야 하며 파일 생성/이동/삭제 없이 canceledReservation:true/restored로 기록한다.
 - 부분 파일은 성공 after-image나 삭제 권위가 아닌 관측 기록이다. flag는 restored에서만 허용하고 다른 취소 flag와 혼합을 거절한다. 원본은 exact before, 기존 이동 receipt는 null, guard 길이는 고정 marker 길이 이하·staged 길이는 검토 after 크기 이하를 요구한다. 다음 batch 검증은 관측된 partial 파일과 원본·없는 이름을 모두 대조한다.
 - 비어 있는 예약에는 guard가 없을 수 있어 읽기 전용 settled 검사에서 관측된 기존 child가 있을 때만 lease를 보유한다. 모든 관련 이름이 없으면 새 guard를 만들지 않고 root/parent 재결속과 부재를 확인한다. 정상 작업 journal은 여전히 guard receipt가 필요하며 파일 변경 경계의 lease 요구는 완화하지 않았다.
@@ -60,7 +66,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
-- **Windows Git 설치 신뢰 정책 승인(2026-11-06)**: 사용자가 선택한 설치 폴더와 OS 검증 서명자를 보여준 뒤 명시 동의하는 방식으로 확정했다. 같은 설치본의 서명 없는 DLL을 수용하되 실행마다 재검사하고 root/서명자 변경은 재동의한다. 버전/파일 digest 고정은 하지 않는다. 이 승인은 Windows 제품 활성화·추가CI/push 승인이 아니다. 후속 Git admission·baseline receipt·review/confirmation·before archive·pre-write intent·취소 가능한 원본 관측은 구현 checkpoint이며 Windows native 검증 전이다. 원본 writer/restore/cleanup 연결은 미완료이고 제품 gate는 닫혀 있다. 최신 상세는11월 아카이브 맨 위에서 확인한다.
+- **Windows Git 설치 신뢰 정책 승인(2026-11-06)**: 사용자가 선택한 설치 폴더와 OS 검증 서명자를 보여준 뒤 명시 동의하는 방식으로 확정했다. 같은 설치본의 서명 없는 DLL을 수용하되 실행마다 재검사하고 root/서명자 변경은 재동의한다. 버전/파일 digest 고정은 하지 않는다. 이 승인은 Windows 제품 활성화·추가CI/push 승인이 아니다. 후속 Git admission·baseline receipt·review/confirmation·before archive·pre-write intent·취소 가능한 원본 관측은 구현 checkpoint이며 Windows native 검증 전이다. 일반 파일 writer/명시 restore·archive cleanup의 내부 연결은 구현 checkpoint이며 directory/추가 metadata·원본 잔여 파일 처리·제품 scheduler와 native 검증은 미완료다. 제품 gate는 닫혀 있다. 최신 상세는 현재 워크로그와11월 아카이브에서 확인한다.
 - **Windows Git 의존 DLL 서명(2026-11-06)**: [공식 이슈6491](https://github.com/git-for-windows/git/issues/6491)에서 유지보수자는 모든 배포 DLL 서명을 제공하지 않는다고 설명했다. 모든 의존 DLL에 Authenticode를 요구하는 방식은 정상 설치본 호환성을 보장하지 못한다. 주 실행 파일의 검증된 signer 추출을 구현했으나 배포자 정책·설치본/의존성 신뢰·실제 로드 결속은 미완료이고 제품 gate는 유지한다.
 - **Windows 저장/복구 native45 PASS(2026-11-06)**: 공개6e079a9/tree77dd9ad3, CI42129091905에서44 native+1 직접 호출 차단 통과. 통합02657f7/9a62344와 같은 소스 수정이다. Win32 상대 rename87은 동기 handle의 NtSetInformationFile class10으로, 이미 동일한 보안 descriptor의 불필요한 재적용은 exact-equal/recheck 경로로 수정했다. 4개 파일/DB 재열기 fixture가 통과했지만 Windows Git admission·실제 프로세스 재시작·제품 활성화·출시는 별도다. 이번 승인3회는 모두 사용했다.
 - **Windows Git 제공 확정(2026-11-06)**: 사용자 설치 Git을 사용한다. 앱 포함 MinGit은 채택하지 않았다. 명시 설치 위치·실행 파일/의존성·업데이트 후 재확인과 기존 config/hook/filter 격리가 필요하며 PATH 첫 git.exe 자동 신뢰나 제품 activation 승인이 아니다.

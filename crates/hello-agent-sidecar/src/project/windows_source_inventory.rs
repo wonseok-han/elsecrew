@@ -67,7 +67,8 @@ impl Entry {
         (self.observation.length, self.digest)
     }
 }
-#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct Observation {
     identity: windows_fs::Identity,
     created: i64,
@@ -77,6 +78,11 @@ pub(super) struct Observation {
     pub(super) length: u64,
     links: u32,
     access: String,
+}
+impl Observation {
+    pub(super) fn identity_token(&self) -> String {
+        self.identity.recovery_token()
+    }
 }
 #[repr(C)]
 #[derive(Default)]
