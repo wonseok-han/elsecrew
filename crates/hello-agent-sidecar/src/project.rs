@@ -1,5 +1,7 @@
 // Requires native Windows recovery QA and explicit product activation.
 pub(crate) const WINDOWS_SAVE_RECOVERY_MUTATIONS_ENABLED: bool = false;
+// Installation consent is not product activation; native integration review remains required.
+pub(crate) const WINDOWS_GIT_EXECUTION_ENABLED: bool = false;
 #[cfg(not(any(unix, windows)))]
 use crate::process_spawn::SpawnGuarded as _;
 mod app_roles;
@@ -4488,6 +4490,7 @@ impl ProjectManager {
     // Single launch boundary for control output, bundle export, materialization,
     // and diff batch readers. Windows admission can bind capabilities here
     // without leaving raw Command spawning at individual consumers.
+    #[cfg(not(windows))]
     fn spawn_git_stream<I, S>(
         &self, directory: &Dir, args: I, input: bool,
     ) -> Result<StreamingGitChild, ProjectFailure>
@@ -4506,6 +4509,45 @@ impl ProjectManager {
         child.map_err(|error| {
             ProjectFailure::recovery(format!("could not start fixed Git command: {error}"))
         })
+    }
+
+    #[cfg(windows)]
+    fn spawn_git_stream<I, S>(
+        &self, directory: &Dir, args: I, input: bool,
+    ) -> Result<StreamingGitChild, ProjectFailure>
+    where I: IntoIterator<Item = S>, S: AsRef<OsStr>,
+    {
+        if !WINDOWS_GIT_EXECUTION_ENABLED {
+            return Err(ProjectFailure::recovery("Windows Git execution has not been activated"));
+        }
+        self.verify_managed_paths()?;
+        let runtime = self.admitted_git_runtime()?;
+        // Retain an existing repository directory, never a file Git must
+        // replace. Empty managed staging needs its own durable guard before
+        // init; never manufacture a guard in a user-selected source folder.
+        let mut guard = None;
+        for name in [".git", "objects"] {
+            match directory.symlink_metadata(name) {
+                Ok(metadata) if metadata.is_dir() => { guard = Some(name); break; },
+                Ok(_) => return Err(ProjectFailure::symlink("Git cwd guard is not a real directory")),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+                Err(_) => return Err(ProjectFailure::recovery("Git cwd guard is unavailable")),
+            }
+        }
+        let guard = guard.ok_or_else(|| ProjectFailure::recovery("Git cwd requires a retained repository directory"))?;
+        let cwd = windows_directory_lease::DirectoryLease::acquire(directory, OsStr::new(guard))?;
+        let mut encoded = Vec::new();
+        let mut size = 0usize;
+        for arg in args {
+            let arg = arg.as_ref().to_str().ok_or_else(|| ProjectFailure::manifest("Git argument is not Unicode"))?;
+            size = size.saturating_add(arg.encode_utf16().count() + 1);
+            if encoded.len() >= 256 || size > 30_000 || arg.contains('\0') {
+                return Err(ProjectFailure::manifest("Git arguments exceed Windows limits"));
+            }
+            encoded.push(arg.to_owned());
+        }
+        StreamingGitChild::spawn_internal_git(runtime, &encoded, cwd, input, self.watch_cancel.clone())
+            .map_err(|error| ProjectFailure::recovery(format!("could not start inspected Git command: {error}")))
     }
 
     fn finish_git_control(mut child: StreamingGitChild, allowed: &[i32]) -> Result<Output, ProjectFailure> {

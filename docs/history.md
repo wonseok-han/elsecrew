@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준0ae070d/깨끗한 통합 checkout에서 Windows 단일 spawn_git_stream을 구현했다. 제품 activation 상수false를 먼저 확인하고, 앱 관리 경로·매번 설치 동의/서명/DLL 재검사·기존 .git 또는 bare objects directory CWD lease·bounded Unicode argv를 거쳐 spawn_internal_git로 연결한다. 기존 Windows raw Command adapter로 우회하지 않는다. Unix 호출은 기존 경로를 유지한다.
+- startup 조사 결과 g4_platform_gate는 ready/DB 전에 Windows 전체를 차단한다. 이를 무조건 제거하면 준비 요청 외 기능도 노출되므로 그대로 유지했다. 준비 전용 서비스 경로 분리와 empty managed staging init의 durable guard 연결이 남는다. 원본 폴더에 guard를 임의 생성하거나 활성화false를 제품 완료로 표현하지 않는다.
+- 이번은 diff 검사만 확인했으며 Windows compile/native·전체 통합 검증은 아직이다. 기존 신뢰 정책 승인을 다시 요청하지 않았고 신규 빌드/cache/모델/CI/push/패키지 없음. 다음은 준비 전용 요청 경로와 app-owned staging guard를 연결한 뒤 Windows 원본 반영/복원 등 남은 구현을 이어간다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준8e7b73e/깨끗한 통합 checkout에서 project.catalog에 inspectGitTrust/confirmGitTrust/revokeGitTrust 계약·Rust dispatch를 연결했다. exact field/명시 confirmed:true·identity 일치·응답 executionEnabled:false를 검사하고 Windows 외 플랫폼은 unsupportedCapability를 반환한다. 기존 고정 catalog IPC를 재사용하며 임의 경로 실행 통로는 추가하지 않았다.
 - Git 위치 화면에 설치 폴더·검증 서명자 표시, 미서명 구성 파일/업데이트 재검사 설명, 기본 해제된 동의 checkbox, 신뢰 저장·철회 버튼과 ko/en 문구를 연결했다. 선택/갱신 시 이전 inspection·checkbox를 폐기하고 요청 중 변경과 unmount 후 응답 반영을 막는다. 선택 잊기는 신뢰 철회를 확인한 뒤 진행하며 서비스 부재/실패를 신뢰 해제로 표시하지 않는다.
 - 현재 Windows 내부 서비스 시작/제품 gate는 닫혀 있어 실제 화면 종단 사용은 아직 불가하다. 계약·UI·native 합동 시험과 독립 검토는 기능 연결 뒤 진행하며 이번은 diff 검사만 확인했다. 새 빌드/cache/CI/push/모델/제품 활성화 없음. 다음은 Windows startup에서 설치 준비용 요청의 허용 범위를 분리하고 신뢰된 Git을 단일 호출에 연결하는 것이다.
