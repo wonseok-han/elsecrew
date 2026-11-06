@@ -43,6 +43,7 @@ jobs:
             'project::windows_tests::application_scheduler_connection_does_not_enable_windows_writes',
             'project::windows_directory_create::tests::retained_directory_create_and_move_never_replace_an_existing_leaf',
             'project::windows_directory_create::tests::read_only_rebind_coexists_with_retained_file_rename_handle',
+            'project::windows_directory_create::tests::retained_file_rebind_survives_apply_and_reverse_restore_moves',
             'project::windows_streams::tests::default_stream_parser_never_ignores_additional_or_malformed_records',
             'project::windows_streams::tests::named_stream_is_rejected_without_modifying_any_content',
             'project::windows_application::review::intent::windows_writer::metadata::tests::basic_metadata_rejects_special_attributes_and_control_times',

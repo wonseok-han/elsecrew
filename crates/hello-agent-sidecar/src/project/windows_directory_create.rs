@@ -238,6 +238,67 @@ mod tests {
         );
     }
 
+    /// Exercise the complete rename/rebind sequence without releasing either
+    /// mutation handle. This is filesystem coverage, not journal/Git admission.
+    #[test]
+    fn retained_file_rebind_survives_apply_and_reverse_restore_moves() {
+        use super::super::windows_replace::{move_new, source_options};
+        use std::io::{Read, Write};
+        for (has_before, has_after) in [(true, true), (true, false), (false, true)] {
+            let temp = tempfile::tempdir().unwrap();
+            let dir = Dir::open_ambient_dir(temp.path(), ambient_authority()).unwrap();
+            std::fs::write(temp.path().join("guard"), b"guard").unwrap();
+            let lease = DirectoryLease::acquire(&dir, OsStr::new("guard")).unwrap();
+            let create = |name: &str, bytes: &[u8]| {
+                let mut file = dir.open_with(name, &source_options()).unwrap();
+                file.write_all(bytes).unwrap();
+                file.sync_all().unwrap();
+                file
+            };
+            let before = has_before.then(|| create("visible", b"before"));
+            let after = has_after.then(|| create("staged", b"after"));
+            let observe = |name: &str, held: &File, expected: &[u8]| {
+                let mut read = open_object(&dir, name).unwrap();
+                assert_eq!(
+                    windows_fs::identity(&read, false).unwrap(),
+                    windows_fs::identity(held, false).unwrap()
+                );
+                let mut bytes = Vec::new();
+                read.read_to_end(&mut bytes).unwrap();
+                assert_eq!(bytes, expected);
+                assert!(read.write_all(b"forbidden").is_err());
+                read
+            };
+            // Keep readers alive across moves too: observation must not become
+            // an accidental delete-sharing fence on our own retained source.
+            let original_read = before
+                .as_ref()
+                .map(|file| observe("visible", file, b"before"));
+            if let Some(file) = &before {
+                move_new(file, &lease, "retained").unwrap();
+                observe("retained", file, b"before");
+            }
+            let installed_read = after.as_ref().map(|file| {
+                move_new(file, &lease, "visible").unwrap();
+                observe("visible", file, b"after")
+            });
+            if let Some(file) = &after {
+                move_new(file, &lease, "detached").unwrap();
+                observe("detached", file, b"after");
+            }
+            if let Some(file) = &before {
+                move_new(file, &lease, "visible").unwrap();
+                observe("visible", file, b"before");
+            } else {
+                assert!(!temp.path().join("visible").exists());
+            }
+            assert!(!temp.path().join("retained").exists());
+            assert!(!temp.path().join("staged").exists());
+            assert_eq!(std::fs::read(temp.path().join("guard")).unwrap(), b"guard");
+            drop((original_read, installed_read));
+        }
+    }
+
     #[test]
     fn retained_directory_create_and_move_never_replace_an_existing_leaf() {
         let temp = tempfile::tempdir().unwrap();
