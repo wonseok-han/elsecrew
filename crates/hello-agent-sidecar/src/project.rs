@@ -40,6 +40,8 @@ mod windows_save_guard;
 #[cfg(windows)]
 mod windows_security;
 #[cfg(windows)]
+mod windows_backup_storage;
+#[cfg(windows)]
 mod windows_source_inventory;
 #[cfg(windows)]
 #[path = "project/application/git_baseline.rs"]
@@ -524,14 +526,19 @@ impl ProjectManager {
         #[cfg(unix)]
         { application::review::backup::set_storage_limit(self, expected, limit)?;
           Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"setBackupStorageLimit","limitBytes":limit}), ..Default::default() }) }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        { windows_backup_storage::set_limit(self, expected, limit)?;
+          Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"setBackupStorageLimit","limitBytes":limit}), ..Default::default() }) }
+        #[cfg(not(any(unix, windows)))]
         { let _ = (expected, limit); Err(ProjectFailure::recovery("backup budget change unavailable on this platform")) }
     }
 
     pub(crate) fn backup_storage_usage(&self) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(unix)]
         { Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"backupStorageUsage","usage":application::review::backup::storage_usage(self)?}), ..Default::default() }) }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        { Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"backupStorageUsage","usage":windows_backup_storage::usage(self)?}), ..Default::default() }) }
+        #[cfg(not(any(unix, windows)))]
         { Err(ProjectFailure::recovery("backup storage inspection unavailable on this platform")) }
     }
 
