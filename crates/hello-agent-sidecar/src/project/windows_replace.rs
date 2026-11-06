@@ -65,8 +65,39 @@ pub(super) fn replace(
     destination: &DirectoryLease,
     name: &str,
 ) -> Result<(), ProjectFailure> {
+    rename(source, destination, name, true, false)
+}
+
+/// Preserve the source under a previously unused name. The kernel checks for
+/// collisions in the rename itself: a prior existence check is not authority
+/// to overwrite a recovery file. Caller still owns the durable intent/receipt.
+pub(super) fn move_new(
+    source: &File,
+    destination: &DirectoryLease,
+    name: &str,
+) -> Result<(), ProjectFailure> {
+    rename(source, destination, name, false, false)
+}
+
+/// Directory moves never replace an existing destination. Child ownership and
+/// restoration ordering must be validated by the enclosing application journal.
+pub(super) fn move_new_directory(
+    source: &File,
+    destination: &DirectoryLease,
+    name: &str,
+) -> Result<(), ProjectFailure> {
+    rename(source, destination, name, false, true)
+}
+
+fn rename(
+    source: &File,
+    destination: &DirectoryLease,
+    name: &str,
+    replace_existing: bool,
+    directory: bool,
+) -> Result<(), ProjectFailure> {
     let parent = destination.replacement_parent(name)?;
-    windows_fs::identity(source, false)?;
+    windows_fs::identity(source, directory)?;
     let wide: Vec<u16> = name.encode_utf16().collect();
     if wide.is_empty() || wide.len() > 255 || wide.contains(&0) {
         return Err(ProjectFailure::manifest("invalid replacement leaf name"));
@@ -79,7 +110,7 @@ pub(super) fn replace(
     // SAFETY: aligned allocation is larger than the fixed header and name;
     // both handles and the allocation outlive this synchronous call.
     unsafe {
-        (*info).replace = 1;
+        (*info).replace = u32::from(replace_existing);
         (*info).root = parent.as_raw_handle();
         (*info).name_bytes = (wide.len() * 2) as u32;
         std::ptr::copy_nonoverlapping(
@@ -110,7 +141,7 @@ pub(super) fn replace(
     if result < 0 {
         let code = unsafe { RtlNtStatusToDosError(result) };
         return Err(ProjectFailure::recovery(format!(
-            "Windows handle-relative replace failed: {} (NTSTATUS {result:#x})",
+            "Windows handle-relative rename failed: {} (NTSTATUS {result:#x})",
             std::io::Error::from_raw_os_error(code as i32)
         )));
     }
@@ -123,6 +154,43 @@ mod tests {
     use super::*;
     use cap_std::{ambient_authority, fs::Dir};
     use std::{ffi::OsStr, os::windows::fs::OpenOptionsExt};
+
+    #[test]
+    fn move_new_rejects_collisions_and_preserves_source_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let parent = temp.path().join("destination");
+        std::fs::create_dir(&parent).unwrap();
+        std::fs::write(parent.join("guard"), b"guard").unwrap();
+        std::fs::write(parent.join("retained"), b"earlier recovery").unwrap();
+        let staging = Dir::open_ambient_dir(temp.path(), ambient_authority()).unwrap();
+        let dir = Dir::open_ambient_dir(&parent, ambient_authority()).unwrap();
+        let lease = DirectoryLease::acquire(&dir, OsStr::new("guard")).unwrap();
+        let mut source = staging.open_with("staged", &source_options()).unwrap();
+        std::io::Write::write_all(&mut source, b"current source").unwrap();
+        source.sync_all().unwrap();
+        let identity = windows_fs::identity(&source, false).unwrap();
+
+        for name in ["retained", "guard", "../escape", "file:stream", "NUL"] {
+            assert!(move_new(&source, &lease, name).is_err());
+            assert_eq!(
+                std::fs::read(parent.join("retained")).unwrap(),
+                b"earlier recovery"
+            );
+            assert_eq!(
+                std::fs::read(temp.path().join("staged")).unwrap(),
+                b"current source"
+            );
+        }
+        move_new(&source, &lease, "new-recovery").unwrap();
+        assert!(!temp.path().join("staged").exists());
+        let moved = dir.open("new-recovery").unwrap();
+        assert_eq!(windows_fs::identity(&moved, false).unwrap(), identity);
+        assert_eq!(
+            std::fs::read(parent.join("new-recovery")).unwrap(),
+            b"current source"
+        );
+        assert_eq!(std::fs::read(parent.join("guard")).unwrap(), b"guard");
+    }
 
     #[test]
     fn replacement_is_relative_to_pinned_parent_and_preserves_guard() {

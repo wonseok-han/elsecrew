@@ -266,7 +266,7 @@ fn pump(launch: &Launch, stop: &AtomicBool) -> io::Result<u32> {
                     "first debug event does not identify owned root",
                 ))
             } else {
-                let image = if members.is_empty() {
+                let image = if members.is_empty() || matches!(event.code, 3 | 6) {
                     launch.executable.as_ref().map(|pin| pin.resource())
                 } else {
                     None
@@ -329,9 +329,14 @@ fn handle_event(
     match event.code {
         3 => {
             let created = unsafe { event.data.create };
+            // A Git invocation permits re-execution of its inspected runtime
+            // (including hard links to that same file), not arbitrary helpers,
+            // shells or repository executables. Non-Git fixture owners retain
+            // their existing root-only image contract.
+            let image = image.filter(|image| members.is_empty() || image.observes_dependencies());
             let verified = if let Some(image) = image {
                 if created.file.is_null() || created.file as isize == -1 {
-                    Err(io::Error::other("root image handle is unavailable"))
+                    Err(io::Error::other("process image handle is unavailable"))
                 } else {
                     // This event precedes user-mode execution. Compare the actual
                     // image object, never the optional process-supplied filename.
@@ -371,7 +376,24 @@ fn handle_event(
                 initial_breakpoint: true,
             });
         }
-        6 => close_image(unsafe { event.data.file }),
+        6 => {
+            let file = unsafe { event.data.file };
+            let verified = if let Some(image) = image.filter(|image| image.observes_dependencies())
+            {
+                if file.is_null() || file as isize == -1 {
+                    Err(io::Error::other("loaded DLL handle is unavailable"))
+                } else {
+                    let actual = unsafe { BorrowedHandle::borrow_raw(file) };
+                    image
+                        .verify_loaded_dependency(&actual)
+                        .map_err(|error| io::Error::other(error.detail))
+                }
+            } else {
+                Ok(())
+            };
+            close_image(file);
+            verified?;
+        }
         1 => {
             let exception = unsafe { event.data.exception };
             let member = members

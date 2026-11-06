@@ -1,3 +1,4 @@
+import * as gitSelectionContract from "../src/m5/contracts/git-selection-v1.ts";
 import * as saveRecoveryContract from "../src/m5/contracts/save-recovery-v1.ts";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
@@ -346,6 +347,23 @@ function moduleFor(
   },
 ) {
   if (specifier === "electron") return fakes.electron;
+  if (specifier.endsWith("git-selection-v1.ts")) return gitSelectionContract;
+  if (specifier === "./git-selection.ts") return {
+    GitSelectionStore: class {
+      async request() { return { state: "unsupported", path: null, executionEnabled: false }; }
+    },
+  };
+  if (specifier === "./git-preparation.ts") return {
+    WINDOWS_GIT_PREPARATION_ENABLED: false,
+    isGitPreparation: (request: { action: string }) => ["inspectGitTrust", "confirmGitTrust", "revokeGitTrust"].includes(request.action),
+    GitPreparationClient: class {
+      pending = false;
+      reopen() {}
+      async close() {}
+      request() { throw new Error("unexpected preparation process in main security harness"); }
+    },
+  };
+
   // Diagnostic persistence has its own filesystem tests. This harness exercises
   // the real main IPC/origin checks without writing outside its fake app path.
   if (specifier === "./session-diagnostic-log.ts") return {

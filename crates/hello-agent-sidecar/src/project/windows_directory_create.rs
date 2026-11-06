@@ -1,0 +1,157 @@
+//! Create a new directory relative to a retained parent and keep the creating
+//! handle. The caller must persist its reservation first and retain failures.
+//! This primitive is not a directory application/restore transaction.
+//! https://learn.microsoft.com/windows/win32/api/winternl/nf-winternl-ntcreatefile
+#![allow(dead_code)]
+use super::{
+    windows_directory_lease::DirectoryLease, windows_durability, windows_fs, ProjectFailure,
+};
+use cap_std::fs::File;
+use std::{
+    ffi::c_void,
+    mem::size_of,
+    os::windows::io::{AsRawHandle, FromRawHandle},
+};
+
+#[repr(C)]
+struct UnicodeString {
+    length: u16,
+    maximum: u16,
+    buffer: *mut u16,
+}
+#[repr(C)]
+struct ObjectAttributes {
+    length: u32,
+    root: *mut c_void,
+    name: *mut UnicodeString,
+    attributes: u32,
+    security: *mut c_void,
+    quality: *mut c_void,
+}
+#[repr(C)]
+#[derive(Default)]
+struct IoStatusBlock {
+    status: usize,
+    information: usize,
+}
+const _: () = assert!(size_of::<UnicodeString>() == 2 * size_of::<usize>());
+const _: () = assert!(size_of::<ObjectAttributes>() == 6 * size_of::<usize>());
+const _: () = assert!(size_of::<IoStatusBlock>() == 2 * size_of::<usize>());
+
+#[link(name = "ntdll")]
+extern "system" {
+    fn NtCreateFile(
+        handle: *mut *mut c_void,
+        access: u32,
+        attributes: *mut ObjectAttributes,
+        status: *mut IoStatusBlock,
+        allocation: *const i64,
+        file_attributes: u32,
+        sharing: u32,
+        disposition: u32,
+        options: u32,
+        ea: *const c_void,
+        ea_length: u32,
+    ) -> i32;
+    fn RtlNtStatusToDosError(status: i32) -> u32;
+}
+
+/// FILE_CREATE never opens or replaces an existing name. The returned handle
+/// owns the newly created object, avoiding a create-by-path/reopen ownership gap.
+/// Parent namespace durability still needs the enclosing transaction contract.
+pub(super) fn create_new(lease: &DirectoryLease, name: &str) -> Result<File, ProjectFailure> {
+    let parent = lease.replacement_parent(name)?;
+    windows_durability::require_ntfs(parent)?;
+    let mut wide: Vec<u16> = name.encode_utf16().collect();
+    if wide.is_empty() || wide.len() > 255 || wide.contains(&0) {
+        return Err(ProjectFailure::manifest("invalid new directory leaf"));
+    }
+    let mut unicode = UnicodeString {
+        length: (wide.len() * 2) as u16,
+        maximum: (wide.len() * 2) as u16,
+        buffer: wide.as_mut_ptr(),
+    };
+    let mut attributes = ObjectAttributes {
+        length: size_of::<ObjectAttributes>() as u32,
+        root: parent.as_raw_handle(),
+        name: &mut unicode,
+        attributes: 0x40, // OBJ_CASE_INSENSITIVE: do not introduce case aliases.
+        security: std::ptr::null_mut(),
+        quality: std::ptr::null_mut(),
+    };
+    let mut status = IoStatusBlock::default();
+    let mut raw = std::ptr::null_mut();
+    lease.validate()?;
+    // SAFETY: parent handle and all ABI buffers remain live for this synchronous
+    // FILE_CREATE call. The single normal component cannot traverse the parent.
+    let result = unsafe {
+        NtCreateFile(
+            &mut raw,
+            0xc011_0000,
+            &mut attributes,
+            &mut status,
+            std::ptr::null(),
+            0x10,
+            3,
+            2,
+            0x0020_0023, // DIRECTORY_FILE | WRITE_THROUGH | SYNCHRONOUS_IO_NONALERT | OPEN_REPARSE_POINT
+            std::ptr::null(),
+            0,
+        )
+    };
+    if result < 0 {
+        return Err(ProjectFailure::recovery(format!(
+            "could not create reserved directory: {}",
+            std::io::Error::from_raw_os_error(unsafe { RtlNtStatusToDosError(result) } as i32)
+        )));
+    }
+    if raw.is_null() || raw == (-1isize) as *mut c_void {
+        return Err(ProjectFailure::ambiguous(
+            "directory creation returned no usable handle",
+        ));
+    }
+    // SAFETY: successful synchronous create transfers exactly one live handle.
+    let file = File::from_std(unsafe { std::fs::File::from_raw_handle(raw) });
+    if status.information != 2 {
+        // FILE_CREATED
+        return Err(ProjectFailure::ambiguous(
+            "directory creation did not report a new object",
+        ));
+    }
+    windows_fs::identity(&file, true)?;
+    lease.validate()?;
+    Ok(file)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cap_std::{ambient_authority, fs::Dir};
+    use std::ffi::OsStr;
+    #[test]
+    fn retained_directory_create_and_move_never_replace_an_existing_leaf() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("guard"), b"guard").unwrap();
+        let dir = Dir::open_ambient_dir(temp.path(), ambient_authority()).unwrap();
+        let lease = DirectoryLease::acquire(&dir, OsStr::new("guard")).unwrap();
+        for invalid in ["guard", "../escape", "nested/child", "stream:ads"] {
+            assert!(create_new(&lease, invalid).is_err());
+        }
+        let staged = create_new(&lease, "staged").unwrap();
+        let identity = windows_fs::identity(&staged, true).unwrap();
+        assert!(create_new(&lease, "staged").is_err());
+        std::fs::create_dir(temp.path().join("occupied")).unwrap();
+        std::fs::write(temp.path().join("occupied/foreign"), b"keep").unwrap();
+        assert!(
+            super::super::windows_replace::move_new_directory(&staged, &lease, "occupied").is_err()
+        );
+        super::super::windows_replace::move_new_directory(&staged, &lease, "installed").unwrap();
+        assert_eq!(identity, windows_fs::identity(&staged, true).unwrap());
+        assert!(!temp.path().join("staged").exists());
+        assert!(temp.path().join("installed").is_dir());
+        assert_eq!(
+            std::fs::read(temp.path().join("occupied/foreign")).unwrap(),
+            b"keep"
+        );
+    }
+}

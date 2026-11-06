@@ -31,7 +31,7 @@ pub(in crate::project) fn cancel_before_first_write(
     }
     for _ in 0..2 {
         for item in &items {
-            writer::verify_unwritten_item(manager, expected, item)?;
+            verify_unwritten_item(manager, expected, item)?;
         }
     }
     transition(
@@ -103,13 +103,13 @@ fn verify_batch(
             let item = archive_items
                 .get(usize::try_from(index).map_err(|_| invalid())?)
                 .ok_or_else(invalid)?;
-            writer::verify_unwritten_item(manager, record, item)?;
+            verify_unwritten_item(manager, record, item)?;
         }
-        writer::verify_record_pair(manager, record, applied)?;
+        verify_record_pair(manager, record, applied)?;
         for item in items {
             let mut selected = record.clone();
             selected["pendingItem"] = item.clone();
-            writer::verify_record_pair_in_scope(manager, &selected, record, applied)?;
+            verify_record_pair_in_scope(manager, &selected, record, applied)?;
         }
     }
     Ok(())
@@ -213,4 +213,77 @@ pub(in crate::project) fn begin_restore(
         true,
         request,
     )
+}
+
+fn verify_unwritten_item(
+    manager: &ProjectManager,
+    record: &Value,
+    item: &Value,
+) -> Result<(), ProjectFailure> {
+    #[cfg(target_os = "macos")]
+    {
+        writer::verify_unwritten_item(manager, record, item)
+    }
+    #[cfg(windows)]
+    {
+        windows_writer::verify_unwritten_item(manager, record, item)
+    }
+}
+fn verify_record_pair(
+    manager: &ProjectManager,
+    record: &Value,
+    applied: bool,
+) -> Result<(), ProjectFailure> {
+    #[cfg(target_os = "macos")]
+    {
+        writer::verify_record_pair(manager, record, applied)
+    }
+    #[cfg(windows)]
+    {
+        let restored =
+            windows_writer::recovery::verify_bound_item_layout(manager, record, &|| Ok(()))?;
+        if restored == applied {
+            return Err(invalid());
+        }
+        Ok(())
+    }
+}
+fn verify_record_pair_in_scope(
+    manager: &ProjectManager,
+    selected: &Value,
+    scope: &Value,
+    applied: bool,
+) -> Result<(), ProjectFailure> {
+    #[cfg(target_os = "macos")]
+    {
+        writer::verify_record_pair_in_scope(manager, selected, scope, applied)
+    }
+    #[cfg(windows)]
+    {
+        // A batch may select only a recorded item, not substitute root, backup,
+        // history, or other fields while reusing an otherwise valid journal.
+        let mut expected = scope.clone();
+        expected["pendingItem"] = selected["pendingItem"].clone();
+        if expected != *selected
+            || !scope[if applied {
+                "completedItems"
+            } else {
+                "restoredItems"
+            }]
+            .as_array()
+            .is_some_and(|items| items.contains(&selected["pendingItem"]))
+        {
+            return Err(invalid());
+        }
+        let restored = windows_writer::recovery::verify_bound_item_layout_in_scope(
+            manager,
+            selected,
+            scope,
+            &|| Ok(()),
+        )?;
+        if restored == applied {
+            return Err(invalid());
+        }
+        Ok(())
+    }
 }

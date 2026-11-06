@@ -29,6 +29,10 @@ struct Entry {
     digest: [u8; 32],
 }
 
+impl Entry {
+    fn kind(&self) -> u8 { self.kind }
+}
+
 struct Budget {
     entries: usize,
     bytes: u64,

@@ -75,6 +75,37 @@ impl StreamingGitChild {
         })
     }
 
+    /// Internal Git entry point after caller-owned installation admission.
+    /// Unlike fixture spawn_bound, callers cannot inject environment entries.
+    #[allow(dead_code)] // Product admission and user trust UI remain disabled.
+    pub(super) fn spawn_internal_git(
+        image: ExecutableLease,
+        args: &[String],
+        directory: DirectoryLease,
+        interactive_input: bool,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> io::Result<Self> {
+        if !image.observes_dependencies() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Git dependency observation is required",
+            ));
+        }
+        let environment = super::windows_git_environment::for_runtime(&image, &directory)
+            .map_err(|error| io::Error::other(error.detail))?;
+        let mut fixed_args = Vec::with_capacity(args.len() + 1);
+        fixed_args.push("--no-pager".into());
+        fixed_args.extend_from_slice(args);
+        Self::spawn_bound(
+            image,
+            &fixed_args,
+            &environment,
+            directory,
+            interactive_input,
+            cancel,
+        )
+    }
+
     pub(super) fn finish(&mut self) -> io::Result<(ExitStatus, Vec<u8>)> {
         // EOF must precede the owner's stderr/family drain, including for callers
         // that did not move stdin into a batch reader.

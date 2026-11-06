@@ -43,9 +43,14 @@ pub(in crate::project) struct PreparedApplication {
 // No serialization or persisted approval: a new owner always starts empty.
 #[allow(dead_code)]
 impl Confirmations {
-    pub(in crate::project) fn project_for_token(&self, token: &str) -> Result<String, ProjectFailure> {
+    pub(in crate::project) fn project_for_token(
+        &self,
+        token: &str,
+    ) -> Result<String, ProjectFailure> {
         let pending = self.pending.as_ref().ok_or_else(invalid)?;
-        if pending.token != token || Instant::now() >= pending.expires { return Err(invalid()); }
+        if pending.token != token || Instant::now() >= pending.expires {
+            return Err(invalid());
+        }
         Ok(pending.target.borrowed().project_id().to_owned())
     }
     pub(in crate::project) fn matches_chat(&self, token: &str, project: &str, chat: &str) -> bool {
@@ -53,7 +58,13 @@ impl Confirmations {
             && matches!(&pending.target, Target::Chat(address, _) if address.project_id == project && address.chat_id == chat))
     }
     pub(in crate::project) fn cancel_token(&mut self, token: &str) -> Result<(), ProjectFailure> {
-        if self.pending.as_ref().is_none_or(|pending| pending.token != token) { return Err(invalid()); }
+        if self
+            .pending
+            .as_ref()
+            .is_none_or(|pending| pending.token != token)
+        {
+            return Err(invalid());
+        }
         self.cancel();
         Ok(())
     }

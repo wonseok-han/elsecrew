@@ -40,6 +40,17 @@ jobs:
             'project::windows_save_integration_tests::interrupted_prepared_save_aborts_after_database_and_handles_reopen',
             'project::windows_save_integration_tests::interrupted_rename_without_receipt_completes_after_reopen',
             'project::windows_save_integration_tests::interrupted_cleanup_before_ledger_completion_recovers_after_reopen',
+            'project::windows_tests::application_scheduler_connection_does_not_enable_windows_writes',
+            'project::windows_directory_create::tests::retained_directory_create_and_move_never_replace_an_existing_leaf',
+            'project::windows_streams::tests::default_stream_parser_never_ignores_additional_or_malformed_records',
+            'project::windows_streams::tests::named_stream_is_rejected_without_modifying_any_content',
+            'project::windows_application_review::intent::windows_writer::metadata::tests::basic_metadata_rejects_special_attributes_and_control_times',
+            'project::windows_application_review::intent::windows_writer::metadata::tests::staged_basic_metadata_preserves_source_and_binds_receipt',
+            'project::windows_application_review::intent::windows_writer::directories::tests::directory_child_metadata_changes_do_not_allow_identity_or_access_changes',
+            'project::windows_application_review::intent::windows_writer::directories::tests::new_directory_stage_is_empty_and_never_reuses_a_name',
+            'project::windows_application_review::intent::windows_writer::directories::tests::tree_observation_checks_owned_content_and_rejects_foreign_names',
+            'project::windows_application_review::intent::windows_writer::directories::tests::counterpart_recheck_rejects_child_mutation_after_initial_tree_check',
+            'project::windows_application_review::intent::windows_writer::directories::tests::child_map_rejects_unsettled_or_preexisting_children',
             'save_recovery_dispatch_tests::windows_save_recovery_gate_rejects_direct_confirmed_requests'
           )
           foreach ($name in $required) {
@@ -54,7 +65,7 @@ jobs:
         shell: pwsh
         run: |
           @'
-          Diagnostic: Windows compilation, native primitives/save helpers, seeded snapshot save recovery across file/SQLite reopen, and closed recovery admission.
+          Diagnostic: Windows compilation, native primitives/save helpers, application metadata/directory/stream regressions, seeded snapshot save recovery across file/SQLite reopen, and closed recovery admission.
           Not Git admission or process-kill/startup E2E, packaged UI, power-loss, or release qualification.
           No product activation, packaging, credentials, model calls, or user projects.
           '@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY

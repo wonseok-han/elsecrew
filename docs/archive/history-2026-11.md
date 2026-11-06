@@ -1,3 +1,403 @@
+### 2026-11-06 · by GPT-6
+
+- 기준b2bbbf7의 깨끗한 통합 checkout에서 원본 pending 항목 관측을 Windows에도 연결했다. 기존 project/root/source identity·HEAD/tree/object format·backup/pending 결속 검사를 공유하며 Windows before는 전체 Entry(128-bit ID/권한/시각/길이/내용), after는 공통 Image로 비교한다. 부모 부재/종류 변경은 conflict이며 내용 일치를 작성자 소유권이나 반영 성공으로 취급하지 않는다.
+- 취소 callback을 관측 API에 전달하고 macOS writer의 기존 취소 신호도 연결했다. raw inventory의 bounded chunk/entry 검사에서 취소를 확인하고 관측 종료 시 pending 원장을 다시 대조한다. 취소/기록 변경은 오류이며 원본·원장·잠금을 변경하지 않는다. Windows 캡처의 두 pass/경로 재결속에 더해 재열린 root full ID를 대조한다.
+- 구현 우선 방침에 따라 선택 파일 rustfmt·diff 검사만 수행했다. Windows compile/native 및 macOS 관측/취소 회귀는 최종 파동 검증에 남는다. Windows writer journal·metadata 보존·apply/restore scheduler·cleanup 연결, G6/출시가 계속 미완료다. 새 build/cache/package/worktree/push/CI/모델 없음.
+- history가500줄을 넘어 11월5~6일 워크로그 전체를 날짜 경계대로11월 아카이브로 이동했다. 고정 섹션은 유지하고 목록 사이 공백만 줄였으며 최신 구현 기록도 해당 아카이브 맨 위에 있다.
+
+### 2026-11-06 · by GPT-6
+
+- 기준56cb239의 깨끗한 통합 checkout에서 Windows handle-relative rename에 비덮어쓰기 move_new를 추가했다. 기존 replace 경로는 유지하며 보존 이름 충돌을 커널 rename 자체에서 거부한다. source/parent/guard 보호와 leaf 검증을 공유하고 복사·삭제 fallback은 없다. 실제 application writer에는 아직 연결하지 않았다.
+- 충돌·guard/잘못된 이름 거부 시 source/기존 복구 파일 보존과 성공 시 full file ID 유지를 확인하는 Windows 회귀1개를 추가했다. rustfmt/diff 검사만 통과했고 Windows compile/native 실행은 후속 누적 검증 대상이다. 새 build/cache/package/worktree/push/CI/모델 없음.
+- macOS swap journal은 Windows 두 번의 rename과 동등하지 않다. 별도 보존 이름·이동 전 durable intent·중간 source 부재·복원 중단의 명시 분류가 필요하며 기존 완료 판정을 그대로 재사용하지 않는다. 상시 승인된 읽기 전용 검토자1명은 primitive diff에 차단 결함이 없다고 확인했다. 이는 전체 writer 설계 합격이나 Windows 실행 증거가 아니다. 다음은 Windows journal/metadata 보존·apply/restore 연결이며 제품 gate는 유지한다.
+
+### 2026-11-06 · by GPT-6
+
+- 기준e4aaa76의 깨끗한 통합 checkout에서 pre-write intent 원장을 Windows review에도 공유했다. 기존 준비 확인 소비·project/lock pair 기록·쓰기 시작 전 phase 전환·pending item 예약·완료/복원 이력 검사·unwritten abandon 코드를 Windows 모듈 구성에도 포함하도록 변경했다. Windows application_status도 같은 원장 검사를 사용한다. 실제 writer/scheduler는 아직 macOS 전용이라 새 원본 쓰기는 활성화되지 않았다.
+- Windows archive는 전체 framing/payload/access/changes digest/EOF/file identity 검증 뒤에만 metadata item 목록을 반환한다. 검증 중 수집한 항목은 실패 시 밖으로 반환하지 않으며 재생성되는 pending item을 저장된 backup과 비교한다. collect 요청에만 최대32MiB encoded metadata 범위의 목록을 보유한다.
+- 쓰기 시작 admission에 destination volume 여유공간 검사를 연결했다. 각 경로의 존재하는 가장 가까운 부모를 no-follow로 열고 held GUID volume별로 temporary payload/entry allowance를 합산하며512MiB reserve를 유지한다. restore는 before 길이, apply는 after 길이를 사용한다. archive 생성 공간과 별도이며 실제 동시 외부 쓰기에 대한 예약을 주장하지 않는다.
+- 구현 우선에 따라 rustfmt/diff만 확인했고 Windows compile/native·공통 intent 회귀/독립 검토는 후속 누적 검증에 남긴다. 다음은 Windows 파일 교체 journal과 실제 apply/restore scheduler, metadata 보존·cleanup 연결이다. 신규 build/cache/package/worktree/push/CI/모델 없음.
+
+### 2026-11-06 · by GPT-6
+
+- 기준62143c5의 깨끗한 통합 checkout에서 Windows before-image archive writer/reader를 구현했다. Windows version3/magic·길이 프레임으로 Unix version2와 구분하고64KiB content streaming·metadata 항목1MiB/총32MiB·archive4GiB+32MiB 상한을 적용한다. budget owner를 보유한 채 NTFS/write-through exclusive 생성·sync·전체 readback을 수행하고 부분/기존 파일은 삭제·덮어쓰지 않는다. 파일별 before observation·SavedAccess·after image를 기록하고 원본 handle/leaf/내용을 재확인한다.
+- 공유 staging의 preparing→ready 원장 흐름·reservation 전 이름 저장·revision CAS·explicit resume/abandon을 Windows에 연결했다. decoder는 파일 digest뿐 아니라 정렬된 path·payload 길이/hash·접근 권한 fingerprint·검토 changesDigest를 다시 계산한다. 중단 파일 재사용은 현재 baseline의 전체 before metadata와 대조하며 파일 존재만으로 ready로 올리지 않는다. 기존 confirmation prepare/consume도 이 staging을 사용할 수 있게 연결했고 preparation 목록/abandon API를 공유했다.
+- Windows cleanup record 처리는 아직 미지원이라 거부하며 자동 삭제는 없다. ADS/SACL/추가 file metadata 보존·destination 여유공간·실제 apply/restore writer/cleanup과 native crash/reopen 검증은 남아 source-write/product gate를 유지한다. 이번은 rustfmt/diff만 확인한 구현 checkpoint다. build/test/CI/독립 검토는 후속 누적 검증에 남겼으며 신규 cache/package/worktree/push/모델 없음.
+
+### 2026-11-06 · by GPT-6
+
+- 기준58119b9의 깨끗한 통합 checkout에서 Windows backup storage 소유권·사용량·상한 설정을 구현하고 기존 catalog API에 연결했다. app-data의 별도 no-follow/share-denied lock handle을 유지해 cooperating 검사/설정/후속 archive 작성을 직렬화한다. archive 디렉터리는 managed path/full ID를 재확인하고 최대100,000 entry를 순회해 orphan/abandoned를 포함한 모든 일반 단일-link 파일의 실제 길이를 합산한다. 삭제는 하지 않는다.
+- 기존 restore-budget.json 형식·기본5GiB·1~1024GiB 정수 단위를 유지한다. 설정은256B 상한·전후 handle/leaf 관찰·exact field/version으로 읽고, 변경은 잠금 안에서 expected limit 확인·atomic write·readback한다. budget guard의 directory/remaining은 다음 Windows archive writer에서 계속 보유하도록 구성했다. 실제 writer/backup ledger 연결과 crash/native 검증은 아직 남는다.
+- 공유 review가 사용하는 unicode-normalization이 Cargo에서 Unix 전용인 누락을 발견해 같은 고정 버전의 공통 dependency로 이동했다. 새 패키지/버전/lockfile 변경은 없다. 구현 우선에 따라 rustfmt/diff만 확인했고 build/test/CI/push/모델 없음. 제품 gate는 유지하며 다음은 이 budget owner 아래 archive 내용·권한의 streaming 기록과 검증을 연결하는 것이다.
+
+### 2026-11-06 · by GPT-6
+
+- 기준b032635의 깨끗한 통합 checkout에서 Windows backup용 SavedAccess를 구현했다. owner/group/DACL의 canonical UTF-16 SDDL과 버전을 직렬화하고, 131,072 unit 미만·NUL/누락/null DACL/알 수 없는 version·재정규화 불일치를 거부한다. OS 변환으로 만든 descriptor allocation은 LocalFree로 닫으며 component pointer는 owner 수명 안에서만 사용한다. SACL/전체 metadata 보존을 주장하지 않는다.
+- restore_replacement는 caller가 보유한 새 replacement handle에만 적용하는 내부 API이며 권한·file ID를 재확인한다. 기존 copy_access도 capture/restore/recheck 경로로 통합해 백업 전용 미사용 코드로만 남기지 않았다. 원본은 읽기만 하고 새 파일의 권한이 이미 같으면 불필요한 상속 재처리를 생략한다. SavedAccess 단독으로 원본 쓰기 권한을 부여하지 않으며 backup descriptor·writer 결속은 다음 연결 단계다.
+- [Microsoft SDDL 역변환](https://learn.microsoft.com/en-us/windows/win32/api/sddl/nf-sddl-convertstringsecuritydescriptortosecuritydescriptorw)·[DACL 조회](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-getsecuritydescriptordacl)의 ABI/LocalFree/null DACL 조건을 확인했다. 저장/복원 roundtrip 및 잘못된 archive의 mutation 전 거부 native 회귀2개를 추가했으나 실행하지 않았다. rustfmt/diff만 확인했고 기존 Windows save 회귀 포함 누적 검증·독립 검토가 남는다. gate/원본/모델/push/CI/build/cache 변경 없음.
+
+### 2026-11-06 · by GPT-6
+
+- 기준0d736c7의 깨끗한 통합 checkout에서 review persistence와 session confirmation을 Windows에도 연결했다. 저장 시 project/chat/lock revision의 같은 transaction CAS, 재열기 시 현재 계획 재구성과 descriptor 전체 일치 검사를 기존 코드로 공유한다. Windows snapshot digest는 identity/access가 포함된 bounded inventory 직렬화를 사용한다.
+- open/cancel confirmation을 플랫폼 공통으로 연결하고 pending owner 필드·초기화·stop 시 cancel을 Windows에도 적용했다. 확인은 세션 메모리의 단일 token/300초 만료·현재 preview fingerprint에 결속되며 재시작으로 복원되지 않는다. backup prepare/consume 및 실제 writer는 아직 Unix 전용으로 유지했다. 기존 Windows startup/Git/source-write gate를 열지 않았다.
+- 구현 우선 방침에 따라 rustfmt/diff만 확인하고 build/test/CI는 생략했다. Windows compile/native·공통 persistence/confirmation 회귀·독립 검토는 최종 파동 검증에 남는다. 다음은 Windows metadata를 보존하는 backup archive와 복구/반영 writer 연결이다. 새 cache/package/worktree/push/모델 없음.
+
+### 2026-11-06 · by GPT-6
+
+- 기준9dcca5b/깨끗한 통합 checkout에서 Windows 반영용 복사본 준비와 project/chat preview·preview page 경로를 연결했다. 기존 review 소스를 플랫폼별 inventory/baseline adapter와 공유해 chat/task/workspace revision·healthy lock·전체 blocker·source receipt 검증·case/Unicode 충돌·untracked 원본 충돌·검토 중 변경 재확인·100개 pagination fingerprint를 유지했다. fork한 별도 대상 검증 규칙을 만들지 않았다.
+- Windows inventory는 읽기 전용 kind/content view를 제공하고 파일 mode는 POSIX 실행 bit로 해석하지 않는다. 새/기존 디렉터리 처리와 tracked deletion 구분은 기존 review와 같다. Windows snapshot fingerprint는 raw identity/access observation까지 bounded serialization한다. 아직 Windows의 ACL/ADS 변경을 어떤 반영으로 다룰지와 backup/confirmation/intent/writer 포트가 남아 쓰기 capability는 비활성이다. 준비·preview도 기존 Git/startup gate가 열리기 전에는 제품에서 사용할 수 없다.
+- 이번은 구현 checkpoint로 rustfmt/diff만 확인했다. Windows compile/native·Unix review 회귀·독립 검토와 실제 UI 종단 검증은 후속 묶음 검증 대상이다. 신규 build/cache/package/worktree/push/CI/모델 없음. 다음은 review 영속 기록·백업·명시 확인을 Windows writer/복구 흐름에 연결하는 것이다.
+
+### 2026-11-06 · by GPT-6
+
+- 기준73c8fce의 깨끗한 통합 checkout에서 Windows clean baseline의 영속 receipt를 연결했다. 기존 receipt의 project/lock 준비 fence·snapshot identity·source_baselines 원장 결속 코드를 공유하고 플랫폼별 encode/persist/verify만 분기했다. Windows baseline에는 canonical root/source identity/object format을 추가해 다른 원본·복사본의 기록 재사용을 거부한다.
+- Windows 전용 filename과 platform:windows 형식으로 index·전체 raw observation(128-bit file ID/권한/시각/내용)을 bounded64MiB에 기록한다. entry마다 취소 확인, NTFS 확인·기존 write-through/no-follow exclusive create·파일 sync·leaf identity 재열기·전체 readback/digest/재인코딩 일치 후에만 원장에 결속한다. 기존/부분 기록은 덮어쓰거나 삭제하지 않는다. Unix filename/내용 형식은 유지했다.
+- ApplicationCandidate의 snapshot publication 전 receipt 저장까지 연결했고, 저장된 receipt로 현재 baseline을 다시 확인하는 verify_bound도 Windows에서 사용할 수 있다. 아직 Windows review 호출·backup/apply/restore writer와 metadata 보존·native crash/reopen 검증은 남으므로 제품 API는 계속 비활성이다. 구현 우선 방침에 따라 rustfmt/diff만 확인했으며 build/test/CI/push/package/모델 없음. 이 체크포인트를 Windows durability 또는 제품 합격으로 보지 않는다.
+
+### 2026-11-06 · by GPT-6
+
+- 기준3ecd884의 깨끗한 통합 checkout에서 Git index/HEAD 기준선 구현을 Windows에서도 공유하도록 연결했다. 공통 parser·index stage/assume-unchanged/skip-worktree·split-index·intent-to-add 거부, HEAD 재확인은 기존 로직을 사용한다. Windows index 읽기는 full handle identity/권한/시각 관찰·32MiB 제한·stream hash·leaf 재열기로 전후 결속을 확인한다. Unix 경로는 기존 metadata 관찰을 유지한다.
+- Windows clean baseline은 raw inventory의 일반 파일과 cat-file batch의 OID/종류/길이/내용을 대조한다. 4GiB 총량·bounded header/chunk·취소·잔여 출력/종료 성공 확인 후 index/raw를 다시 캡처한다. ApplicationCandidate의 bundle 전후 검사에 이 전체 baseline을 연결했다. Windows에 없는 POSIX 실행 bit를 가정하지 않고 index mode를 보존한다. symlink blob은 일반 파일로 취급하지 않는다. 줄바꿈/filter 변환은 하지 않으므로 committed raw bytes와 다른 파일은 거부한다.
+- 구현 우선에 따라 빌드/테스트/CI를 실행하지 않았고 해당 파일 rustfmt/diff만 확인했다. Windows compile/native·공통 index 회귀는 누적 검증에 남는다. 아직 baseline 영속 receipt·review·backup/apply/restore writer/ADS metadata 계약과 제품 activation이 남아 Windows source API는 비활성이다. 신규 cache/package/worktree/push/모델 없음.
+
+### 2026-11-06 · by GPT-6
+
+- 기준c1fdb16/깨끗한 통합 checkout에서 Windows source inventory를 구현했다. 기존 held directory/file helper·full FILE_ID_INFO와 owner/group/DACL fingerprint를 사용하고 생성/쓰기/change 시각·속성·크기·link count·내용 digest를 기록한다. 접근 시각은 제외한다. heap traversal·100,000 entry/4GiB/8MiB path/depth128 상한·chunk 사이 취소 확인, 두 번 관찰·부모 leaf 재열기·최종 canonical root 결속을 적용한다. reparse/다중 hardlink/Win32 별칭 이름은 거부한다.
+- ApplicationCandidate snapshot의 bundle export 전후에 inventory를 연결했다. 일반 snapshot 범위를 확대하지 않았고 원본 쓰기/Windows application API는 계속 비활성이다. 이는 원본 관찰 구현이며 Git HEAD/index와 clean baseline 대조·실행 bit 의미·ADS 등 전체 metadata 보존·backup/apply/restore writer 포트는 아직 남는다. 동시 악성 쓰기를 완전히 배제하는 atomic snapshot으로 주장하지 않는다.
+- [Microsoft FILE_BASIC_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_basic_info), [FILE_STANDARD_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_standard_info)의 ABI를 확인했다. Windows 파일 변경/.git 제외·hardlink/root 불일치·취소 회귀3개를 작성했으나 구현 우선 방침에 따라 실행하지 않았다. rustfmt/diff만 확인했고 Windows compile/native·독립 검토는 최종 연결 뒤 수행한다. 신규 cache/build/package/worktree/push/CI/모델 없음.
+
+### 2026-11-06 · by GPT-6
+
+- 기준9ebce47/깨끗한 통합 checkout에서 Windows 원본 반영·복원 포트의 기존 Git 의존 경로를 조사했다. raw baseline의 committed blob 비교가 유일하게 application 아래에서 raw Command/StreamingGitChild::spawn을 직접 사용했다. 이를 snapshot/diff와 같은 spawn_git_stream으로 연결해 플랫폼별 설치 admission·CWD 소유권·취소/종료 관리를 공유하도록 변경했다.
+- 기존 baseline 전용 GIT_NO_LAZY_FETCH=1은 Unix 고정 명령 환경과 Windows 내부 Git 환경으로 옮겼다. 내부 Git이 누락 객체를 자동 다운로드하지 않는 정책을 공통으로 유지한다. cat-file batch의 입출력/길이/추가 출력/종료 성공 검사는 그대로다. Windows application 모듈 자체는 아직 Unix 전용이므로 이 변경만으로 원본 반영·복원을 사용할 수 없다.
+- 사용자 구현 우선 지시에 따라 테스트·빌드·패키징 없이 직접 diff와 application 내부 직접 spawn 잔존 여부만 확인했다. 전체 회귀·독립 종료 경계 검토는 파동 마감에 수행한다. 다음은 raw inventory/파일 권한·기준선·반영 writer의 Windows 포트이며 제품 gate는 비활성 유지다. 새 cache/worktree/모델/push/CI 없음.
+
+### 2026-11-06 · by GPT-6
+
+- 기준e4df6ee의 깨끗한 통합 checkout에서 승인된 Windows 설치 폴더 신뢰 정책과 준비 연결을 점검했다. 기존 main 보안 harness가 새 git-preparation/git-selection import를 제공하지 못해 시작 실패하는 것을 재현하고, 파일/프로세스를 사용하지 않는 경계 mock과 실제 선택 계약을 연결했다. 제품 코드는 변경하지 않았다.
+- 준비 client의 실제 코드를 fake execFile로 실행하는 회귀3개를 추가했다. 고정 실행 경로/인자/작업 폴더·shell 차단·출력/시간 상한, 직렬 처리, 요청 전후 owner 검사, active 완료까지 종료 대기, queued 요청 취소, 재개, 잘못된 응답/프로세스 오류 거부를 확인했다. 이는 실제 Windows 프로세스 종료나 서명 검증 증거는 아니다.
+- 화면 tsc --noEmit 통과, 기존 Electron 보안12 PASS, 준비 client3 PASS, diff 검사 통과. 빌드/패키지/cache/모델/push/CI 없이 확인했다. Windows 원본 반영/복원 포트·native 통합/독립 검토·제품 활성화·G6/출시는 여전히 남는다. 고정 발견의 오래된 Git 제공 방식 미결정 문구를 사용자 설치본 결정으로 바로잡았다.
+
+### 2026-11-06 · by GPT-6
+
+- 기준8f6abdc/깨끗한 통합 checkout에서 Windows --git-preparation 단발 모드를 구현했다. 추가 경로 인자는 거부하고 stdin64KiB/응답64KiB 상한으로 inspect/confirm/revoke 세 action만 받는다. 일반 ready/Storage/DB migration/복구 replay/Git·provider 실행을 호출하지 않으며 앱 고정 cwd의 기존 ProjectManager 설정 메서드만 사용한다. 잘못된 action은 managed directory 생성 전 거부한다.
+- Electron은 고정 sidecar binary/args/cwd·shell:false·30초/64KiB 제한으로 helper를 실행하고 close callback 뒤에만 결과를 검증한다. 한 owner가 요청을 직렬화하고 큐 시작/응답 시 현재 main-frame을 재확인한다. 선택한 exe를 실행하지 않는다. 종료 요청은 pending helper가 끝날 때까지 대기하며 종료가 차단되면 준비 요청을 다시 허용한다. 일반 Windows sidecar gate는 그대로이며 preparation activation 상수도 false로 두었다.
+- 이번은 diff 검사만 확인했다. native 빌드·ABI·helper lifecycle/타임아웃·IPC/화면·독립 안전 검토는 파동 검증에 남아 있고 제품 기능 활성화는 아직 하지 않았다. 신규 빌드/cache/CI/push/모델 없음. 다음은 준비 경로를 포함한 Windows 기능 연결 점검과 원본 반영/복원 구현이다.
+
+### 2026-11-06 · by GPT-6
+
+- 기준8262353/깨끗한 통합 checkout에서 Windows snapshot 초기화 CWD 보호를 연결했다. 기존 export_bundle이 flush/sync_all로 저장한 .hello-agent-snapshot.bundle을 git init 동안 directory guard로 재사용한다. 새 sentinel을 만들지 않는다. CWD의 held GUID parent가 앱 worktrees와 일치하고 .worktree_<32hex>.creating 형식이며 관리 부모에서 다시 연 directory ID까지 일치할 때만 fallback을 허용한다. bundle도 no-follow 일반 파일·비어 있지 않음을 확인한다.
+- git init 이후 호출은 기존 .git directory guard를 사용하며, 번들 제거는 unbundle owner의 종료 확인 뒤 기존 위치에서 수행한다. 원본 경로에 파일을 생성하거나 임의 비어 있는 폴더에 guard fallback을 허용하지 않는다. 추가 디스크 산출물은 없다.
+- 이번은 직접 흐름 대조와 diff만 확인했다. 실제 Windows snapshot init/rename·cleanup 및 전체 호환은 아직 검증 전이며 제품 gate는 false다. 준비 전용 서비스 경로·Windows 원본 반영/복원·최종 묶음 검증이 남는다. 새 빌드/cache/모델/push/CI/패키지 없음.
+
+### 2026-11-06 · by GPT-6
+
+- 기준0ae070d/깨끗한 통합 checkout에서 Windows 단일 spawn_git_stream을 구현했다. 제품 activation 상수false를 먼저 확인하고, 앱 관리 경로·매번 설치 동의/서명/DLL 재검사·기존 .git 또는 bare objects directory CWD lease·bounded Unicode argv를 거쳐 spawn_internal_git로 연결한다. 기존 Windows raw Command adapter로 우회하지 않는다. Unix 호출은 기존 경로를 유지한다.
+- startup 조사 결과 g4_platform_gate는 ready/DB 전에 Windows 전체를 차단한다. 이를 무조건 제거하면 준비 요청 외 기능도 노출되므로 그대로 유지했다. 준비 전용 서비스 경로 분리와 empty managed staging init의 durable guard 연결이 남는다. 원본 폴더에 guard를 임의 생성하거나 활성화false를 제품 완료로 표현하지 않는다.
+- 이번은 diff 검사만 확인했으며 Windows compile/native·전체 통합 검증은 아직이다. 기존 신뢰 정책 승인을 다시 요청하지 않았고 신규 빌드/cache/모델/CI/push/패키지 없음. 다음은 준비 전용 요청 경로와 app-owned staging guard를 연결한 뒤 Windows 원본 반영/복원 등 남은 구현을 이어간다.
+
+### 2026-11-06 · by GPT-6
+
+- 기준8e7b73e/깨끗한 통합 checkout에서 project.catalog에 inspectGitTrust/confirmGitTrust/revokeGitTrust 계약·Rust dispatch를 연결했다. exact field/명시 confirmed:true·identity 일치·응답 executionEnabled:false를 검사하고 Windows 외 플랫폼은 unsupportedCapability를 반환한다. 기존 고정 catalog IPC를 재사용하며 임의 경로 실행 통로는 추가하지 않았다.
+- Git 위치 화면에 설치 폴더·검증 서명자 표시, 미서명 구성 파일/업데이트 재검사 설명, 기본 해제된 동의 checkbox, 신뢰 저장·철회 버튼과 ko/en 문구를 연결했다. 선택/갱신 시 이전 inspection·checkbox를 폐기하고 요청 중 변경과 unmount 후 응답 반영을 막는다. 선택 잊기는 신뢰 철회를 확인한 뒤 진행하며 서비스 부재/실패를 신뢰 해제로 표시하지 않는다.
+- 현재 Windows 내부 서비스 시작/제품 gate는 닫혀 있어 실제 화면 종단 사용은 아직 불가하다. 계약·UI·native 합동 시험과 독립 검토는 기능 연결 뒤 진행하며 이번은 diff 검사만 확인했다. 새 빌드/cache/CI/push/모델/제품 활성화 없음. 다음은 Windows startup에서 설치 준비용 요청의 허용 범위를 분리하고 신뢰된 Git을 단일 호출에 연결하는 것이다.
+
+### 2026-11-06 · by GPT-6
+
+- 사용자가 설치 폴더 신뢰·변경 시 재확인 정책을 승인했다. 앱에서 설치 폴더와 OS가 확인한 서명자를 보여주고 명시 동의 후 동일 설치본의 미서명 runtime DLL을 수용하며, 업데이트마다 재검사·서명자 변경 시 재동의한다. 제품 Windows gate 활성화나 추가CI/push/실제 모델 승인과는 별개다.
+- 기준c7d65cc에서 Rust preview/confirm/revoke/admitted-runtime 경로를 구현했다. 동의는 native 설치 경로·GUID volume 경로·실제 root directory ID·검증된 CN/조직에 결속하고 release version/실행 파일 digest/certificate serial은 pin하지 않는다. confirm은 재검사한 identity와 화면 expected 값이 같을 때만 app-owned bounded schema record를 atomic replace한다. 미동의/다른 root/서명자 변경은 실행 후보 반환을 거절한다. 매 admission은 기존 runtime/DLL 검사를 다시 수행한다.
+- 이 메서드는 아직 protocol/IPC/앱 화면·제품 spawn에 연결되지 않았다. root 디렉터리 자체가 교체되면 같은 문자열 경로라도 재동의가 필요하다. 업데이트 호환·동의 영속성·변경 거절 native 시험은 미실행이며 이번은 rustfmt/diff만 확인했다. 신규 빌드/cache/모델/CI/push/패키지 없음. 다음은 이 동의 경로의 계약·화면·단일 Git 호출 연결이다.
+
+### 2026-11-06 · by GPT-6
+
+- 기준45f230c/깨끗한 통합 checkout에서 Windows 내부 Git 전용 실행 진입점을 작성했다. spawn_internal_git는 의존 이미지 관찰 구성을 요구하고 고정 --no-pager와 새 환경 map을 구성한 뒤 기존 typed Transport로 연결한다. 외부에서 임의 환경 map을 받는 fixture용 spawn_bound와 분리했다. 아직 ProjectManager의 제품 호출은 이 경로를 사용하지 않는다.
+- Windows directory는 OS API로 얻고 PATH/GIT_EXEC_PATH는 보유 runtime 디렉터리만 넣는다. 시스템/global config 비활성·count0·replace object/시스템attributes/프롬프트/pager 차단을 Unix 내부 Git과 맞췄다. 부모의 GIT_CONFIG_PARAMETERS/GIT_DIR/WORK_TREE/HOME/SSH/ASKPASS/PATH 등을 복사하지 않으며 source CWD를 임시 출력 위치로 지정하지 않는다. 세미콜론 포함 설치 경로는 PATH에 다른 root를 섞지 않도록 명시 거부한다. TEMP 별도 managed capability 필요 여부와 실제 명령 호환은 누적 native 시험에서 확인한다.
+- rustfmt/diff만 확인했고 Windows 컴파일·실제 Git 호출·누적 시험·독립 검토는 아직이다. 설치 root 동의 정책 응답 전 admission/제품 활성화는 하지 않는다. 신규 빌드/cache/모델/push/CI/패키지 없음. 다음은 신뢰 동의 저장/표시·단일 제품 호출 연결과 남은 Windows 원본 작업 구현이다.
+
+### 2026-11-06 · by GPT-6
+
+- 기준3d764e2의 깨끗한 통합 checkout에서 Git family의 자손 CREATE_PROCESS image 대조를 연결했다. DLL 관찰을 구성한 Git owner는 모든 생성 이벤트의 실제 hFile이 root runtime과 동일한 full file ID인지 확인한 뒤에만 계속한다. 같은 파일의 hardlink 재실행은 허용하지만 companion 보유 자체를 EXE 실행 허가로 취급하지 않으며 다른 helper/shell은 거절한다. 기존 비Git fixture의 root-only image 계약은 유지한다.
+- 동일 runtime hardlink 허용·다른 companion EXE 거부 native 회귀를 추가했다. 실제 Git 배포본이 별도 file ID의 helper를 필요로 하는지는 아직 검증되지 않았다. 이를 모든 Git 명령 호환 완료로 표현하지 않으며, 필요한 helper는 명시 inventory/정책으로 연결해야 한다. 이번은 rustfmt/diff만 확인했고 Windows compile/native·누적 회귀는 뒤에 묶어서 진행한다.
+- 설치 root 신뢰 동의 정책은 아직 답변 대기다. 제품 gate/유료 모델/사용자 프로젝트/push/CI/패키지 변경 없음. 다음은 승인된 신뢰 정책을 단일 Git admission과 앱의 확인 흐름에 연결하고 Windows 원본 반영/복원 및 최종 누적 검증을 이어가는 것이다.
+
+### 2026-11-06 · by GPT-6
+
+- 기준39416fe의 깨끗한 통합 checkout에서 실제 LOAD_DLL 이벤트 검사를 연결했다. Git runtime 후보는 retained companion inventory와 시스템 module 관찰을 함께 구성하고, supervisor는 root뿐 아니라 family의 DLL 이벤트를 해당 owner에 전달한다. 실제 hFile의 full file ID를 보유한 image와 대조하고 handle 부재/불일치는 ContinueDebugEvent 전에 거절한다. 이벤트 handle은 성공/오류 모두 닫으며 기존 종료/poisoned pin 정책을 유지한다.
+- inventory 외 DLL은 GetSystemDirectoryW로 얻은 Windows native 시스템 폴더의 직접 DLL만 별도 분류한다. 환경변수·PATH·자식 제공 파일명 대신 held GUID 경로/부모/다시 연 파일 ID를 비교하고 해당 image도 family 소유권으로 보유한다. 시스템 폴더 밖 임의 DLL은 허용하지 않는다. 이는 신뢰하는 OS 설치 경계에 의존하며 WinSxS/보안 제품 주입 DLL/다른 architecture의 호환성까지 증명하지 않는다. 자손 EXE 정책과 설치 root 사용자 동의·단일 spawn admission 연결은 여전히 남고 제품 gate는 비활성이다.
+- [Microsoft DLL debug event](https://learn.microsoft.com/en-us/windows/win32/api/minwinbase/ns-minwinbase-load_dll_debug_info)·[검색 순서](https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order)를 확인했다. inventory DLL/추가 DLL 거절·시스템 kernel32 허용/동명 외부 파일 거절 native 회귀를 추가했다. 구현 우선 지시에 따라 실행하지 않았고 rustfmt/diff만 확인했다. 신규 빌드/cache/CI/push/모델 없음. 설치 root 신뢰 정책 응답은 아직 대기하며 이 작업을 제품 검증 완료로 표현하지 않는다.
+
+### 2026-11-06 · by GPT-6
+
+- 기준dceb148/깨끗한 통합 checkout에서 선택 wrapper·runtime DLL pin을 실행 runtime의 단일 소유권으로 옮기는 경로를 구현했다. ExecutableLease의 flat companion 상한257개와 중첩 금지로 검사 재귀를 제한하며 기존 RetainedExecutable/creator supervisor의 종료 확인·미확인 pin 유지 정책을 함께 적용할 수 있다. into_retained_runtime은 실행 승인 타입이 아니며 아직 제품 spawn에 연결하지 않았다.
+- companion의 쓰기 잠금이 마지막 observer 해제까지 유지되는 native 회귀를 작성했고 아직 실행하지 않았다. 요청대로 rustfmt/diff만 확인했으며 Windows compile/native·독립 안전 검토는 파동 검증에 남긴다. architecture에 선택/서명자/runtime/DLL 구현과 미완료 admission 경계를 갱신했다. 새 빌드/캐시/worktree/push/CI/모델 없음.
+- 기존 상시 승인 검토자1명에게 사용자 설치 Git·미서명 공식 DLL의 최소 신뢰 경계를 읽기 전용으로 검토 요청했다. 검토 결과 retention 연결 자체의 차단 결함은 없고, signed installer/모든 DLL 서명을 새 의무로 만들 필요가 없다는 의견을 받았다. 실제 LOAD_DLL handle 대조와 단일 admission 연결은 남는다. 선택 root·서명자 표시 후 동의, 미서명 runtime 수용, 업데이트 재검사·서명자 변경 재동의의 제품 정책을 사용자에게 요청했다. 답변 전 활성화하지 않으며 독립적으로 load event 대조 구현은 계속할 수 있다.
+
+### 2026-11-06 · by GPT-6
+
+- 기준2505240/깨끗한 통합 checkout에서 Git 설치 레이아웃과 runtime/DLL inventory를 연결했다. cmd/bin 선택은 같은 설치 root의 ucrt64/mingw64/clangarm64/mingw32 후보만 검사하고, runtime 직접 선택은 해당 경로만 검사한다. 여러 runtime은 임의 선택하지 않으며 명시 재선택 오류를 반환한다. 접근 실패와 reparse를 단순 없음으로 처리하지 않는다.
+- 선택 파일·실제 runtime의 검증된 CN/조직을 대조하고 둘 다 ExecutableLease로 보유한다. runtime 폴더의 DLL은 최대256개, 전체 entry4096개 상한으로 열어 파일/부모 결속을 보유하며 목록·결속 재확인으로 검사 중 변경을 거부한다. DLL 자체에 일괄 서명을 요구하지 않는다. 이 inventory는 동적/system DLL까지 포함한 실행 허가가 아니며 설치 출처 신뢰·실제 load event 결속·spawn 연결은 다음 작업이다. 제품 gate는 유지한다.
+- [공식 Git Credential Manager 문서](https://github.com/git-ecosystem/git-credential-manager/blob/main/docs/wsl.md)의 ucrt64 전환·기존mingw64·ARM64clangarm64 경로를 확인했다. portable layout 회귀를 추가했고 구현 우선 지시에 따라 이번에는 rustfmt/diff만 확인했다. Windows compile/native·독립 검토·누적 시험은 기능 연결 뒤 수행한다. 신규 패키지/worktree/모델/push/CI 없음.
+
+### 2026-11-06 · by GPT-6
+
+- 기준0edb401/깨끗한 통합 checkout에서 Authenticode 성공 state의 실제 주 서명자 인증서를 읽도록 연결했다. 이미 로드된 wintrust의 helper export를 동적으로 조회하고 timestamp countersigner가 아닌 signer0/cert0의 CN·조직 속성을 복사한다.4096 UTF-16 상한·반환 길이/종료 문자·제어 문자 거부를 적용하며 provider 소유 pointer는 state close 전에만 읽는다. 후보 파일 결속 재확인 뒤 owned publisher를 함께 보유한다. 아직 특정 이름을 Git 배포자로 승인하거나 실행을 허용하지 않는다.
+- [Microsoft signer helper](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/nf-wintrust-wthelpergetprovsignerfromchain), [provider certificate](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-crypt_provider_cert), [certificate name API](https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certgetnamestringw)의 실제 ABI·수명 규칙을 확인했다. rustfmt/diff만 실행했고 Windows compile/native·독립 검토는 기능 연결 뒤 묶음 검증에 남긴다. 새 빌드/cache/push/모델/제품 활성화 없음.
+- 의존성 조사에서 [공식 저장소6491](https://github.com/git-for-windows/git/issues/6491)의 유지보수자가 배포 의존 DLL 모두를 서명하지는 않는다고 설명한 것을 확인했다. 따라서 모든 DLL Authenticode 필수 정책을 구현하면 정상 Git도 거부할 수 있다. 설치 폴더/의존 이미지의 신뢰 근거와 실제 로드 결속을 별도로 구현해야 하며, 이름/파일 선택/서명 성공 하나로 전체 설치본을 신뢰하지 않는다. 이 근거와 남은 작업을 고정 발견에도 기록한다.
+
+### 2026-11-06 · by GPT-6
+
+- 기준95df836의 깨끗한 통합 checkout에서 Windows 후보 파일의 Authenticode 검증을 구현했다. ExecutableLease가 보유한 읽기 handle과 GUID 경로를 WinVerifyTrust에 함께 전달하고 전후 결속을 확인한다. 성공은 반환값0만 인정하며 성공/실패 모두 provider state를 닫는다. 임의 버전 SHA pin이나 후보 실행/PowerShell 호출은 추가하지 않았다.
+- 비대화형·URL 캐시 전용·체인 폐기 확인을 사용하므로 인증서 확인 자료가 부족하면 실패한다. 이 검사는 서명의 OS 신뢰 여부일 뿐 Git 배포자 식별/의존성 허가가 아니다. selected_git_candidate에 연결했지만 제품 spawn에는 미연결이고 Windows gate는 유지한다. 다음은 검증된 signer의 배포자 식별과 의존 이미지 결속·실행 경로 연결이다.
+- [Microsoft WinVerifyTrust](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/nf-wintrust-winverifytrust), [WINTRUST_DATA](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-wintrust_data), [FILE_INFO](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-wintrust_file_info)를 확인해 FFI와 handle/state 수명을 작성했다.64비트 ABI 정적 assertion·미서명 파일 거부 native 회귀를 추가했다. 구현 우선 지시에 따라 이번에는 rustfmt/diff만 확인했으며 Windows 컴파일/시험·독립 안전 검토는 기능 연결 후 묶음 검증에 남긴다. 추가CI/push/모델/패키지 없음.
+
+### 2026-11-06 · by GPT-6
+
+- 기준2109bc6에서 사용자 설치 Git 설정의 공유 위치와 Rust 읽기 기반을 메인이 연결했다. main은 sidecar와 같은 m5 데이터 폴더를 사용하며, 기존 userData 설정은 새 파일이 없을 때만 보존 이관한다. inspect/choose/forget을 직렬화하고 새 선택/해제는 읽을 수 없는 예전 설정으로 막지 않는다. 기존 파일은 삭제하지 않는다.
+- Rust는64KiB 상한·정확한 필드/버전·중복 필드 거부·로컬 drive의 정규 경로·git.exe 이름을 검증한다. Windows 후보는 설정 file ID 재확인과 기존 ExecutableLease로 파일/부모를 결속한다. 이 후보는 실행 권한이 아니며 아직 호출 경로에 연결하지 않았다. 설치본 출처·의존 이미지·업데이트 검증 및 Git 실행 연결은 다음 구현이다. Windows 제품/저장 mutation gate는 그대로 비활성이다.
+- focused Rust decoder2 PASS(6.04초 컴파일,0.01초 시험), Git 설정 store의 strict TypeScript 검사·새 Rust 파일 rustfmt 및 diff 검사 확인. Windows 전용 후보 코드는 이 Mac에서 컴파일/실행하지 못했으며 후속 Windows 묶음 검증이 필요하다. 새 패키지/worktree/모델/push/CI 없이 구현 체크포인트를 남긴다. 전체 개발 완료가 아니다.
+
+### 2026-11-06 · by GPT-6
+
+- 이전 Windows45 PASS 이후 메인이 사용자 설치 Git 선택의 main/preload/renderer 경로를 구현했다. 고정 IPC는 inspect/choose/forget만 받으며 renderer에서 path를 받지 않는다. main-frame 검사와 native file dialog 복귀 뒤 재검사를 수행하고 선택한 일반 git.exe의 canonical path를 userData/git-selection-v1.json에 temp+sync+rename으로 기억한다. 읽기는64KiB 상한·file identity 비교, 오류는unavailable로 처리한다.
+- 저장된 경로는 실행 권한이 아닌 선호 설정이다. executionEnabled:false 고정이며 실행·설치·PATH 검색·sidecar admission 변경은 없다. 잊기 동작은 설정만 비우며 Git 자체를 삭제하지 않는다. Windows 화면에 선택/재확인/해제와 ko/en 상태를 연결했고 macOS는unsupported로 숨긴다. unmount 뒤 결과 폐기·중복 변경 방지, StrictMode 중복 inspect 허용을 유지한다.
+- 직접 diff·git diff --check와 React 스킬 체크리스트로 hook 수명/사용자 동작/접근성 문구를 확인했다. 사용자 구현 우선 방침에 따라 빌드/시험/GUI 실행은 후속 묶음 검증으로 남긴다. Electron 보안 harness의 새 import mock도 누적 검사 때 갱신이 필요할 수 있다. 다음은 Rust의 선택 설치본·의존성·업데이트 재검증 및 Git 실행 연결이다. 이 선택 UI만으로 연결 완료/제품 활성화를 주장하지 않는다. 추가CI/push/모델/패키지 없음.
+
+### 2026-11-06 · by GPT-6
+
+- 사용자 재개/승인을 확인하고 원격0556a1a·기존CI2개 terminal을 대조했다. 동일2120facf Git push가 다시 commit_refs로 실패해 GitHub Git Data API로 수정2개 파일만 게시했다. 생성 tree77dd9ad3b208a01545d1ffdea2d6b305438ed940가 로컬 승인 수정 tree와 정확히 같음을 확인하고 부모0556a1a/current ref 재확인 뒤 force=false로 같은 진단 branch를 갱신했다.
+- 공개 commit6e079a9344be7851a930722a7dea1bbb11034fd1, CI42129091905 queued 확인. 실제 승인 사용3/3회이며 중복 실행·추가 branch·강제 push·제품 활성화·패키징·모델·main 병합 없음. 결과는 이어 기록한다.
+- 세 번째42129091905는2분20초에 성공했다. release compile1분59초, native44 PASS/0 FAIL/0 ignored(2.81초), direct dispatcher gate1 PASS(0.65초). prepared abort/replaced complete/rename 직후 receipt 누락/cleanupComplete 원장 미완료4개 재열기 통합 시나리오 모두 통과했다. 이는 seeded snapshot/파일·SQLite 재열기 증거이며 실제 Git admission·프로세스 kill/startup·전체 패키지/전원 장애·출시 합격은 아니다.
+- 승인3/3회 소진. 사용자 설치 Git 선택/신뢰·의존성/업데이트 확인·프로젝트 연결, Windows 원본 반영/복원 포트 및 제품 gate, G6/출시가 다음이다. 현재 Windows mutation gate는 false로 유지했다. 로그/tmp/hello-agent-windows-42129091905.log. rustfmt 변경 없음·문서 diff 검사 확인, 사용자 데이터/모델/패키지/main 변경 없음.
+
+### 2026-11-06 · by GPT-6
+
+- 사용자 승인으로 작업을 재개했다. d9947f8 및 이후 Windows 컴파일/시험 오류 수정만 공개 진단 브랜치에 push·CI 최대3회, 회당20분 범위다. 제품 활성화/패키징/모델/main 병합은 제외한다. Git은 사용자 설치본 사용으로 확정했으며 MinGit 번들 권고를 채택하지 않았다.
+- 정확한d9947f89099db6ad8ebc1c61ded20b11dd11d57a를 codex/m5-windows-save-recovery-20261105에 push했다. CI42127616502 in_progress 확인, 승인1/3회 사용. 이후 로컬 문서 커밋은 아직 공개하지 않았다. 결과와 호환 수리는 이어 기록한다.
+- 첫 CI는 Windows release 컴파일3분11초 성공 뒤 필수 direct-request 회귀 누락으로 실패했다. 기존 tests 모듈이 macOS 전용이었다. 해당 테스트만 공통 cfg(test) 모듈로 옮기고 workflow의 정확한 이름을 변경했다. 로컬 focused1 PASS(컴파일5.42초/시험0.22초), diff 검사 통과. 제품 gate/시험 조건은 완화하지 않았다.
+- 통합 수정9a62344. 별도 임시 index로 승인된d9947f8+동일4개 수정만 진단 commit0556a1a에 게시해 후속 로컬 문서 변경을 공개에서 제외했다. CI42128250149 in_progress, 승인2/3회 사용. 새 checkout/패키지는 만들지 않았다.
+- 두 번째는 Windows compile/필수16개 존재 확인 통과, native44개 중37 PASS/7 FAIL(2.57초). 교체 API의87 오류3개, 권한 복사 불일치 및 그 선행 실패4개이며 prepared abort 재열기는 통과했다. 후속 dispatcher 단계는 앞 단계 실패로 미실행이다.
+- 교체는 동일 source/parent handle과 단일 leaf를 유지한 NtSetInformationFile FileRenameInformation(10)으로 수정했다. [공식 API](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntsetinformationfile)와 [구조체](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information)를 확인했고 실제 cap-primitives3.4.6가 OVERLAPPED 없는 source를 FILE_SYNCHRONOUS_IO_NONALERT로 연다는 로컬 소스를 확인했다. descriptor가 이미 정확히 같으면 불필요한 SetSecurityInfo 상속 재처리를 생략하고 원본을 재확인하며, 다르면 기존 엄격한 복사/재검사를 유지한다. 검사 완화·제품 활성화는 없다.
+- 동일 독립 검토자1명이 동기 handle 전제·native ABI/NTSTATUS·정확한 권한 일치 fast path에 정적 차단 결함 없음으로 확인했다. 통합 수정02657f7, 진단 전용2120facf0ae39b51bb50e11fe28f9173744efa48(부모0556a1a). rustfmt/diff 확인; 실제 수정 native 검증은 아직 없다.
+- 세 번째 전송은 GitHub fatal error in commit_refs로2회 실패했다. 매 실행 생성 여부를 대조했고 원격은0556a1a, CI는기존2개만 존재한다. 동일 ref의 force=false API 갱신도 Object does not exist422로 거절됐다. 실제 CI 사용은2/3,1회 남음. 강제 push/새 branch 우회는 하지 않았다. 원격 오류가 해소되면 같은 진단 commit을 전송해 남은1회를 진행한다. 로그는/tmp/hello-agent-windows-42128250149.log에 있고 새 패키지/worktree/모델은 없다.
+
+### 2026-11-05 · by GPT-6
+
+7acee1c/깨끗한 워킹 트리·macOS target만 설치된 상태를 재확인했다. 최신d9947f8 공개/Windows CI 최대3회 승인과 Git 제공 선택의 동일 입력 의존 조건이 세 번째 연속 turn에 지속됐다. 준비된 구현 이후 의미 있는 다음 진행에 이 입력이 필요하므로 목표를 blocked(입력 대기)로 전환한다. 완료나 사용자 요청 일시중지가 아니며 Windows/G6/출시 전체 범위는 유지한다. 코드·빌드·시험·패키지·모델·push·main 병합 없이 기록만 남긴다. 요청한 두 응답 또는 대체 Windows 환경이 제공되면 승인 범위와 현재 HEAD를 확인해 재개한다.
+
+### 2026-11-05 · by GPT-6
+
+현재a2dce81과 깨끗한 워킹 트리를 확인했다. Windows 공개 CI 승인·Git 제공 선택의 같은 입력 의존 조건이 두 번째 연속 turn에 지속된다. G6 기존 기록도 대조했지만 기각한 메모리 실험을 재개할 새 근거는 없으며 새 편집기 수명 변경의 실제 성능은 최종 통합 검증에 남긴다. 이번은 진전 없는 상태 확인이며 완료나 실행 중인 검증 대기로 표현하지 않는다. 코드·빌드·시험·cache·모델·외부 쓰기 없이 목표active/미완료를 유지한다.
+
+### 2026-11-05 · by GPT-6
+
+98f1ab8/깨끗한 워킹 트리와 실제 호스트Darwin·설치 Rust target aarch64-apple-darwin만 존재함을 확인했다. 최신d9947f8 공개/Windows CI 요청과 Git 제공 선택은 아직 응답이 없다. 기존34 PASS는 신규 save/recovery 검증이 아니고 mutation gate는 false다. 원본 반영/복원 Windows 포트는 이 미검증 파일 교체/복구 기반과 Git admission에 의존한다. 이번은 새 구현/실행 증거 없는 첫 입력 의존 정체로 기록한다. pgrep은 sysmond 오류로 프로세스 목록을 읽지 못했으며 이를 실행 종료 증거로 쓰지 않는다. 새 빌드/시험/패키지/cache/모델/push 없이 목표는 미완료·active로 유지한다. 요청한 두 응답이 오면 해당 범위부터 이어간다.
+
+### 2026-11-05 · by GPT-6
+
+앞선d9947f8은 복구 후 화면 연결 진전이다. 이번에는 현행 architecture의 오래된 ‘복구/UI 미연결’을 실제 코드와 맞추고 구현/미검증/비활성 경계를 교정했다. 제안서의 당시 조건은 역사로 구분했다. 최신d9947f8까지 공개·Windows CI 최대3회와 내부 Git 제공 선택을 사용자에게 다시 묶어 요청했으며 응답 전 push/설치/활성화는 하지 않는다. 남은 범위는 Windows Git admission·원본 반영/복원 포트·native 검증, G6 유휴400MiB/화면/회수, 출시 후보/서명·배포 결정이다. 문서 diff만 확인했으며 시험/빌드/모델/새 cache 없음.500줄 초과를 피하도록 기존11월5일 워크로그 전체를 날짜 분할 없이11월 아카이브로 원문 이동했다. 전체 개발은 미완료다.
+
+### 2026-11-05 · by GPT-6
+
+- f32ff64 이후 메인이 저장 복구 성공→편집기/diff 갱신의 빠진 연결을 추가했다. 검증된 resolve 응답과 조회했던 path를 현재 controller에 전달하며 네 workspace 식별자가 모두 같고 controller가 살아 있을 때만 처리한다. unmount/주소 변경 뒤 늦은 응답은 폐기한다.
+- 열린 대상 파일의 text/baseVersion은 그대로 보존하고 conflicted로 표시해 기존 명시 다시 불러오기 흐름을 사용한다. late save generation을 무효화하고 이전 diff를 비운 뒤 현재 summary를 재조회한다. 복구 성공을 현재 초안의 저장 성공으로 간주하지 않으며 callback은 공급자 응답의 unknown 판정과 분리했다. ko/en 안내 추가. Windows mutation gate는 계속 false다.
+- 직접 diff·git diff --check 확인. 사용자 방침에 따라 빌드/시험은 최종 묶음으로 남겼다. 정상/취소 복구 후 초안 보존·다른 workspace 늦은 응답·diff 오류와 재조회는 미검증이다. 새 cache/패키지/worktree/CI/push/모델 없음. Windows native/원본 반영 포트/G6/출시를 포함한 전체 개발은 미완료다.
+
+### 2026-11-05 · by GPT-6
+
+- 이전a6f27dd는 저장 복구2개 추가 시나리오 구현으로 진전했다. 이번 메인은 남은 구현을 실제 코드와 대조한 뒤 G6 편집기 자원 수명 개선을 직접 수행했다. 기존 파일 탭 전환마다 Monaco editor/model 전체를 dispose/create하던 경로를 단일 editor 유지+현재 파일 model 교체로 변경했다.
+- 탭 교체 시 이전 subscription/model/undo buffer를 해제하며 숨은 모델 cache는 만들지 않는다. layout effect에서 새 파일을 연결하고 모델별 소유 path를 확인해 이전 파일 이벤트가 새 탭 callback으로 들어가지 않게 한다. 외부 text 동기화는 변경 이벤트를 사용자 편집으로 재전달하지 않는다. 프로젝트/workspace 변경 시 기존 keyed remount와 전체 해제를 유지한다.
+- 직접 diff·git diff --check 확인. 사용자 구현 우선 방침에 따라 이번에는 빌드/자동 시험/GUI 성능 측정을 반복하지 않았다. 실제 Monaco 전환·저장·읽기전용·실패 재시도·unmount 및400MiB/부하/회수 기준은 최종 묶음 검증에서 확인해야 하며 개선 수치를 주장하지 않는다. 새 cache/패키지/worktree/CI/push/모델 실행 없음. Windows native/Git 제공 결정·원본 반영/복원 포트와 G6/출시는 계속 남는다.
+
+### 2026-11-05 · by GPT-6
+
+- b10cbb9 이후 메인이 Windows 파일 교체 syscall 직후/replaced receipt 전 실패 주입을 추가했다. 실제 rename 성공 뒤 outcome_unknown으로 종료하며 기존 제품 호출은 failure=None을 유지한다. Windows gate는 변경하지 않았다.
+- 실제 파일/SQLite 재열기 fixture를4개 상태로 확장했다. 추가2개는 replaceIntent에서 source handle을 모두 닫은 뒤 fresh flush/완료하는 경우와 cleanupComplete 이후 lock/session 완료 전에 닫힌 경우다. 각 중단 phase를 단언하고 기존 stale revision 거절·원본 불변·임시 파일 제거·최종 DB 지속성 검사를 재사용한다.
+- 로컬 Windows 진단 workflow의 compiled-test 목록에4개 통합 회귀를 추가하고 seeded snapshot 재열기와 실제 Git admission/process-kill startup E2E를 구분했다. rustfmt·YAML 파싱·git diff --check 통과. Windows native 컴파일/실행은 미검증이며 기존34 PASS로 대체하지 않는다. 새 cache/패키지/worktree/CI/push/모델 실행 없음.
+- 상시 승인된 동일 독립 검토자1명이 실패 주입 위치·handle 수명·복구 단언·workflow 범위에 구체적 정적 차단 결함 없음으로 확인했다. native 실행 합격은 아니다.
+- 최신955880e 공개/CI 요청은 승인 대기 상태이며 이후 새 기능·시험 commit을 해당 범위로 임의 공개하지 않는다. 다음은 native 실행과 발견된 호환 오류 수리, Windows 제품 연결/G6/출시 검증이다. 전체 개발은 미완료다.
+
+### 2026-11-05 · by GPT-6
+
+- 이전 turn은ac4315f Electron 경계78 PASS로 진전했다. 현재 잔여 항목을 현행 코드/11월 기록과 대조했다. Windows Git 제공/admission·저장 재시작 실증·원본 반영/복원 포트 및 G6 idle400MiB/출시가 남으며, 기각했던 메모리 flag 실험은 반복하지 않는다. 외부955880e push/CI 승인은 아직 대기다.
+- 이번 메인은 Git/모델 없이 동작하는 Windows 저장 재시작 통합 fixture를 추가했다. canonical snapshot manifest/.git identity marker/project/chat/session은 명시 seed하고, guard/staging anchor 준비·source identity 게시·선택적 replacement는 실제 제품 helper를 사용한다. 모든 file/lease/manager/DB를 닫은 뒤 새 Storage/ProjectManager에서 inspection과 resume 또는 abort를 호출한다.
+- 교체 후 완료와 교체 전 취소2개가 source/staging/guard 제거, 작업 파일 내용, 별도 원본 프로젝트 불변, lock/session 원자 완료와 DB 재열기 지속성을 단언한다. stale inspected revision 거절 뒤 두 원장이 불변이고 완료 후 재실행도 거절됨을 검사한다. 이는 Git snapshot 생성/SidecarSession startup/프로세스 강제 종료를 실행하는 E2E가 아니다.
+- 독립 검토가 guard 삭제 단언 누락을 지적했다. 검토 진행 중 추가한 before-lock의 정확한 guardName 기반 부재 단언과 stale revision 원장 불변 검사를 같은 검토자가 재확인해 해당 공백 해소를 확인했다. replaceIntent-syscall 직후 receipt 누락 시나리오는 이2개 시험에 포함되지 않으며 별도 native 회귀가 남는다.
+- rustfmt·git diff --check 확인. Windows cfg 시험은 아직 컴파일/실행 전이며 PASS로 기록하지 않는다. 추가 Cargo/패키지/cache/worktree/CI/push/모델 없음. 대기 승인 범위955880e에 새 fixture commit을 임의로 포함하지 않는다. 다음은 Windows 진단 및 이 전체 recovery 경로 fixture의 native 실행, 이후 실패 수리와 남은 제품 연결이다. 전체 목표는 미완료다.
+
+### 2026-11-05 · by GPT-6
+
+- 이전 turn은16588ba 실제 SQLite 원자 완료 회귀로 진전했다. 이번 메인은 저장 복구 Electron 통합을 확인했다. 실제 SidecarClient+가짜 child JSONL transport로 다른 chat 응답과 abort 요청에 committed 응답을 거절하고 protocolInvalid로 닫는 회귀를 추가했다. 전달된 request의 inspected revision/전체 address가 그대로임도 확인한다.
+- main.ts를 실행하는 기존 보안 harness에 새 계약 import와 최소 fake sidecar 응답을 추가했다. 외부 frame·추가 path·confirmed:false·0 revision·unknown decision·추가 force가 sidecar 호출 전에 거절되며 정상 inspect/resolve는 정확히1회씩 전달됨을 검사한다. 실 Windows mutation 검증이 아닌 Electron 경계 검증이다.
+- 첫 누적 실행에서 기존 fixed-channel 정적 검사3개가 새 preload 채널 상수의 M5 접두 alias 누락으로 실패했다. 상수를 M5_SAVE_RECOVERY_CHANNEL/M5_SAVE_RECOVERY_RESOLVE_CHANNEL로 import alias해 기존 규칙을 유지했다. 동적 invoke를 허용하거나 검사를 완화하지 않았다. 복구 view의 낡은 read-only 주석도 현재 gate 기반 확인 흐름으로 교정했다.
+- node --test --experimental-strip-types tests/m5-electron-security.test.mts tests/m5-electron-bridge.test.mts:78 PASS/0 FAIL/0 skipped,1.34초. git diff --check 통과. UI 실제 mount/사용자 조작·Windows native·전체 앱 검증으로 확대 해석하지 않는다. 새 패키지/Cargo cache/worktree/CI/push/모델 없음.955880e 외부 실행 승인은 계속 대기이며 독립 로컬 작업을 이어간다.
+
+### 2026-11-05 · by GPT-6
+
+- 이전 turn은955880e Windows 진단 준비와 gate 회귀로 진전했다. 새 push/CI 승인 응답은 아직 없어 외부 쓰기는 하지 않았다. 메인은 기존 Windows 최종 lock/chat 원자 게시 코드를 의미 변경 없이 save_completion 모듈로 추출해 Windows 또는 test에서 컴파일하도록 했다. 정상 macOS 저장 경로와 Windows receipt 검증 호출 순서는 유지한다.
+- 실제 임시 SQLite를 사용하는 통합 회귀3개를 추가했다. 완료 시 요청한 session만 제거/다른 session과 extension 보존/DB 재열기 후 상태 동일/반복 완료 거절, 두 번째 chat operation conflict 시 먼저 시도한 lock clear까지 rollback, 다른 workspace session으로 완료 시 두 기록 불변을 확인했다. 정책을 흉내 내는 모형이 아니라 제품이 호출하는 동일 atomic helper와 실제 Storage를 사용한다.
+- CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo test -p hello-agent-sidecar --locked --offline --lib project::save_completion::tests -- --nocapture:3 PASS/0 ignored, 기존 target 증분 컴파일4.86초·실행0.67초. 이는 파일 교체/권한/native 전체 재시작 증거가 아니다.
+- 같은 독립 검토자1명이 추출의 의미 변경·검증 순서 차이 없음과 회귀 범위를 확인했다. rustfmt·git diff --check 통과. 새 패키지/worktree/CI/push/모델 없음. 승인 대기 중인955880e 외부 실행 범위에 이번 새 추출 commit을 임의로 포함하지 않는다. 다음은 Windows 진단 결과 또는 전체 save-session fixture 연결이며 앱 전체 목표는 미완료다.
+
+### 2026-11-05 · by GPT-6
+
+- 이전 turn은542b9c3의 확인 기반 복구 연결로 진전했다. 이번 메인은 누적 Windows 저장/복구 native 진단용 workflow를 준비했다. 새 codex/m5-windows-save-recovery-20261105에서만 동작하며20분 상한/jobs4/threads4/incremental0이다. 필요한12개 테스트가 compiled list에 존재하는지 확인한 뒤 Windows primitive/helper 전체와 direct-request gate 검사를 실행한다. 패키징/활성화/인증/모델은 포함하지 않는다.
+- 기존 project Fixture는 /usr/bin/git를 직접 호출하고 Windows Git admission과 전체 save-session 생성도 미연결이므로 이 진단을 full save-session restart/UI/power-loss 합격으로 표현하지 않는다. 현재 helper 기반 범위와 전체 통합 공백을 workflow summary에 명시했다.
+- 실제 dispatcher에 complete/abort의 confirmed 요청을 직접 보내 gate가 닫힌 상태에서 methodUnavailable인 것을 확인하는 회귀를 추가했다. confirmed:false/0 또는 JS-safe 초과 revision/unknown decision/추가 force 인자는 invalidParams이며 그 후 system.status가 계속 응답함을 확인한다.
+- CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo test -p hello-agent-sidecar --locked --offline --lib windows_save_recovery_gate_rejects_direct_confirmed_requests -- --nocapture:1 PASS/0 ignored, 기존 target 증분 컴파일15.98초·시험0.24초. macOS 증거이며 Windows 미실행이다. workflow YAML 파싱·git diff --check 통과. df 확인 여유537GiB. 새 worktree/패키지/모델/CI/push 없음.
+- 기존 승인 잔여1회는 f41eb29와 시험 호환 수정에 한정되므로 새 저장/복구 기능을 공개하는 데 쓰지 않는다. 새 진단 커밋 공개와 최대3회 CI에 별도 승인을 요청할 준비를 마쳤다. 승인 대기 중에도 전체 세션 재시작 fixture 등 로컬 구현을 계속할 수 있다. Windows 제품/G6/출시와 전체 앱 목표는 미완료다.
+
+### 2026-11-05 · by GPT-6
+
+- 이전 turn은549c69a 복구 조회 UI로 진전했다. 이번 메인 작업은 명시 확인을 받는 복구 변경 계약을 UI→preload→main-frame IPC→client→sidecar→기존 내부 complete/abort까지 연결했다. exact workspace 참조/saveId/양수 JS-safe expectedLockRevision/decision/confirmed:true를 요구하고 결과 주소·saveId·예상 outcome·version도 검증한다.
+- 공용 WINDOWS_SAVE_RECOVERY_MUTATIONS_ENABLED=false를 조회 actionsAvailable과 sidecar 실행 admission 양쪽에 적용했다. 제품 활성화가 아니며 직접 IPC/프로토콜 호출로도 gate를 우회할 수 없다. Windows native QA와 별도 활성화 결정은 남아 있다.
+- UI는 gate와 현재 observation/phase 조합이 맞을 때만 동작을 제안하고 파일/처리 설명 뒤 별도 확인을 받는다. 요청 전에 inspection을 소모하고 중복 클릭을 막는다. 오류는 unknown으로 표시하고 자동 재시도하지 않으며 상태를 다시 조회해야 한다. ko/en 완료/취소/불확실 안내를 추가했다. 성공 응답의 해당 client save session만 제거한다.
+- 독립 검토자1명이 gate 닫힘·직접 호출 거절·명시 확인 및 대상/버전 검증·UI 관찰 소모/오류 처리에 구체적 차단 결함 없음으로 확인했다. gate 활성화 승인이 아니며 native 검증은 별도다.
+- src TypeScript 검사와 계약 검사3개 통과. macOS cargo check에서 새 확인 분기의 json 매크로 import 누락을 발견해 Value::Bool(true)로 수정했고 재검사0.97초 PASS(jobs/threads4, locked/offline). Windows cfg 코드 컴파일 증거가 아니다. diff 검사 통과. 새 패키지/worktree/CI/push/모델 없음; 기존 target check만 갱신했다. 다음은 누적 Windows 저장·복구 native 통합 검증 준비와 승인된 범위 내 남은 구현이다. 전체 앱 목표는 미완료다.
+
+### 2026-11-05 · by GPT-6
+
+- 이전 turn은263d32a의 read-only 복구 조회 bridge 연결로 진전했다. 이번 메인 작업은 Windows 활성 채팅의 접힌 ‘중단된 파일 저장 확인’ 화면을 연결했다. 기기 platform이 win32이고 preload가 있을 때만 표시하며 사용자 버튼으로 조회한다. 작업 준비/채팅 전환/설정/프로젝트 닫기 중에는 버튼을 잠근다.
+- 주소의 네 식별자와 admission disabled가 바뀌면 조회 소유자를 remount하고 unmount된 요청의 결과를 폐기한다. 중복 클릭은 pending ref로 차단한다. 새 파일/기존 파일/내용만 일치/충돌·부재·조회 오류·중단 기록 없음 각각을 ko/en으로 설명한다. saveId/phase/revision은 펼치는 도움 정보에만 표시한다.
+- UI에는 mutation 버튼을 넣지 않았으며 현재 버전에서 복구 실행은 불가하고 화면을 닫아도 기존 보호는 유지된다는 한계를 명시한다. 조회 결과를 저장 성공이나 잠금 해제로 처리하지 않는다. 실제 Windows 기능 활성화·복구 명령 연결은 별도 native 검증/계약이 남는다.
+- pnpm exec tsc --noEmit과 git diff --check 통과. 이는 src TypeScript 범위이며 Electron/Rust/native UI 실행 증거는 아니다. 기존 계약 검사 증거는263d32a에 있고 재실행하지 않았다. 패키지/새 build cache/worktree/CI/push/모델 없음. 다음은 복구 변경 API의 명시 확인 계약 및 Windows 묶음 통합 검증이다. 전체 앱 목표는 미완료다.
+
+### 2026-11-05 · by GPT-6
+
+- 이전 turn은773f9a7 교체 전 취소 구현으로 진전했다. 이번 메인 작업은 저장 복구의 read-only 공개 조회 workspace.saveRecovery를 Rust dispatcher→Electron client/main→preload m5SaveRecovery.inspect까지 연결했다. 기존 run/agent recovery namespace를 재사용하지 않는다.
+- 정확한 네 workspace 참조 필드만 받으며 Windows에서는 현재 lock/session/canonical workspace를 확인한 descriptor를 반환한다. save guard가 없을 때도 Ready 검증을 거쳐야 recovery:null이며 unrelated poisoned/recovery lock은 오류로 남는다. 다른 플랫폼은 명시 unavailable이다. 상대 파일 경로/saveId/phase/revision/관찰 분류만 공개하고 raw intent·파일 ID/hash·절대경로는 노출하지 않는다.
+- TypeScript exact-key·주소 echo·phase/observation enum·positive revision·save UUID/상대경로 검증을 client/main/preload에 연결했다. actionsAvailable:false만 허용하고 복구 변경 API는 노출하지 않는다. Windows 제품 activation도 변경하지 않았다. 화면 컴포넌트와 실제 mutation 연결은 아직 후속이다.
+- preparing 시 기록한 originalTargetIdentity도 관찰 분류에 사용하도록 수정했다. native 회귀는 동일 내용의 foreign ID가 원래 파일로 분류되지 않음을 추가했으며 실행 전이다. 순수 계약 검사1개는80ms에 통과했고 주소 오염·추가 abort 인자·잘못된 phase/revision/path/ID·mutation 허용 응답을 거절한다.
+- 같은 독립 검토자1명이 조회 namespace·정확한 결속·최소 공개 정보·main-frame/양단 검증·mutation 비노출에 구체적 차단 결함 없음으로 검토했다. rustfmt·diff 검사 확인. Cargo/패키지/cache/worktree/모델/CI/push 없음. 다음은 복구 화면 연결과 Windows 묶음 검증이며 전체 목표는 미완료다.
+
+### 2026-11-05 · by GPT-6
+
+- 이전 turn은3a6917f의 교체 후 receipt 복구로 진전했다. 이번 메인 구현은 교체 전 명시 취소를 내부 abort_windows_save에 연결했다. 최초 guard intent에 originalTargetIdentity/originalAccessFingerprint를 추가하고 기존 expectedVersion과 대조한다. 과거 결속 정보 없는 기록은 추정 승격하지 않는다.
+- shared recovery는 inspected lock revision/정확한 chat·workspace·managed roots/target·staging anchor pin을 유지한다. abort는 preparing/ready/sourceReady/replaceIntent 및 abort 중간 단계만 허용한다. 기존 target ID/내용/권한이 원래와 같음을 확인하고 root의 별도 lease 아래 source를, target lease 아래 guard를, staging anchor 아래 staging을 정리한다.
+- abortIntent→abortSourceRemoved→abortGuardRemoved→abortStagingRemoved→abortComplete를 원장에 기록한다. 삭제 전에는 ID가 기록된 파일의 실제 일치를 요구하고 intent 이후에만 이미 부재를 인정한다. ID가 null인 파일은 이름이 없을 때만 허용한다. create 성공/ID 게시 전 종료로 생긴 미기록 파일은 삭제하지 않고 복구 잠금을 유지한다. 외부 수정/다른 파일도 보존·거절한다.
+- 최종 기존 target과 세 lease 확인 뒤 saveAborted/abortedWindowsSave·preserved_version 기록과 chat session 제거를 원자 완료한다. 정상 새 내용 저장 성공과 구분한다. 공개 IPC/UI와 Windows 활성화는 계속 미연결이다. native helper 회귀는 미기록 파일 보존·부재 허용·외부 수정 거절을 작성했으나 아직 실행 전이다.
+- 같은 독립 검토자1명이 취소 phase admission·기존 파일 검증·중첩 경로의 root lease·미기록 파일 보존·원자 취소 완료를 검토해 구체적 정적 차단 결함 없음. native 검증 합격은 아니며 전체 회귀는 기능 연결 뒤 묶어서 수행한다.
+- 변경 Windows 모듈 rustfmt·project.rs 구문 파싱·diff 검사만 수행했다. Cargo/패키지/cache/worktree/CI/push/모델 실행 없음. 다음은 복구 공개 계약/통합 및 Windows 묶음 검증이며 전체 개발은 미완료다.
+
+### 2026-11-05 · by GPT-6
+
+- 이전 turn은81ac097 cleanup 재개로 진전했다. 이번 메인 구현은 replaceIntent 이후 실제 rename은 끝났으나 replaced 원장 게시 전 종료된 경우를 내부 재개에 연결했다. 현재 source 이름 부재·target의 기록된 source full ID/내용/권한 일치와 guard/staging ID를 먼저 요구한다. rename 재시도나 이전 target 덮어쓰기는 없다.
+- 복구 시 target을 nofollow read/write·share-read·WRITE_THROUGH로 열고 보유 handle의 NTFS/full ID/5MiB bounded hash/접근 권한을 확인해 같은 handle sync_all 성공을 얻는다. target/staging lease와 target 재확인 뒤 기존 replaceIntent→replaced 전이로 flush receipt를 기록하고 정상 cleanup/원자 완료를 계속한다. 원본 target이 남았거나 이름/내용/권한이 다른 경우는 잠금/증거를 유지한다.
+- read-only 관찰과 recovery flush가 같은 bounded held-file reader를 공유하도록 추출했다. native 회귀는 실제 handle-relative rename 후 원래 source handle을 닫고 재개 flush, 이전 target/잘못된 version/권한 거절과 bytes 보존을 추가했으나 아직 실행 전이다.
+- [Microsoft FlushFileBuffers](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers)의 GENERIC_WRITE 필요와 지정 파일의 buffered information flush 의미를 다시 확인했다. 현재 NTFS write-through OS acknowledgement 정책 범위이며 하드웨어 전원 장애 보장은 아니다.
+- 같은 독립 검토자1명이 source 부재/정확한 replacement 검증·동일 재개 handle의 bounded read/권한/flush·receipt 이후 전이 및 rename 재시도/제품 활성화 없음에 구체적 정적 차단 결함이 없음을 확인했다. native 검증은 별도로 남는다.
+- 변경 모듈 rustfmt·git diff --check 확인. Cargo/패키지/cache/worktree/모델/CI/push 없음. 공개 API/UI/Windows 제품 gate는 여전히 미활성이고 교체 전 중단 복구와 native 통합이 남는다. 다음은 나머지 저장 실패 상태와 복구 계약 연결이다.
+
+### 2026-11-05 · by GPT-6
+
+- 이전 turn은5e28744의 Windows 완료 원자화로 진전했다. 이번에는 메인이 같은 checkout에서 내부 resume_windows_save_cleanup을 연결했다. active pending save 거절, inspected lock revision/SaveRecovery durable session/canonical workspace 확인 뒤 replaced~cleanupComplete와 정확한 NTFS 정책/flush receipt만 받아들인다.
+- target/staging anchor lease·현재 managed/staging root·기록된 parent/anchor ID를 대조하고 교체 source 이름은 부재, target full ID/내용/접근 권한은 일치를 요구한다. replaced 상태에서는 guard/staging의 실재 ID를 먼저 요구해 기록 없는 부재를 완료로 승격하지 않는다. cleanupIntent 이후 guard, guardRemoved 이후 staging은 exact-ID 삭제 또는 이미 부재 관찰로 단계 전이를 재개한다. foreign name은 보존·거절한다. 최종 lease/target 확인 뒤 cleanupComplete 및 lock/chat 원자 완료를 사용한다.
+- 공개 IPC/UI와 Windows 제품 gate는 아직 연결/활성화하지 않았다. 교체 전 실패와 replaceIntent 상태의 불확실 복구, 전체 save 재시작 통합은 남아 있다. helper native 회귀는 삭제 후 재진입/의도 전 부재 거절/이름 재사용 보존을 작성했으며 아직 실행하지 않았다. 기존34 PASS로 대체하지 않는다.
+- 같은 독립 검토자1명이 현재 diff의 revision/receipt admission·lease 재결속·의도 전후 부재 처리·foreign 보존·원자 완료를 검토해 구체적 정적 차단 결함 없음을 확인했다. native 실행 합격이나 복구 전체 완료를 뜻하지 않는다.
+- 변경 Windows 모듈 rustfmt와 git diff --check를 확인했다. Cargo/패키지/cache/worktree/CI/push/모델 실행 없음. 다음은 복구 상태별 통합과 Windows 묶음 검증이다. 전체 앱 목표는 미완료다.
+
+### 2026-11-05 · by GPT-6
+
+- df793c6 이후 중단 저장 재개를 준비하다 Windows 정상 저장의 마지막 lock clear와 chat save_session 삭제가 별도 원장 쓰기인 틈을 확인했다. 메인이 최종 완료를 lock/chat의 정확한 revision을 검사하는 단일 SQLite transaction으로 묶었다. cleanupComplete/flush receipt 검사는 그대로며 성공 경로는 session을 다시 삭제하지 않는다. V2 chat 없는 저장과 macOS의 기존 흐름은 유지한다.
+- 이 변경은 재시작 재개 자체의 완료가 아니다. 명시 복구·단계별 실패 주입/native 통합·Windows 제품 활성화는 여전히 미완료다. 기존34 native PASS는 새 Windows 저장 코드의 검증 증거가 아니다.
+- 기존 캐시를 이용한 macOS cargo check -p hello-agent-sidecar --locked --offline 통과(1.78초, jobs/threads4). Windows cfg 컴파일은 검증하지 못했다. project.rs 구문 파싱·git diff --check 확인; 별도 패키지/worktree/CI/push/모델 실행 없음. 승인된 기존 CI 예산은2/3 사용 상태를 유지하며 새 기능 공개에 쓰지 않는다.
+- 상시 승인된 독립 검토자1명이 이 diff의 원자성·revision 경합·성공/오류 분기·macOS 비변경을 검토해 정적 차단 결함 없음을 확인했다. 최종 transaction 실패 시 lock/session 동시 보존과 성공 시 정확히 한 번 완료되는 회귀는 Windows 묶음 검증에 남긴다.
+- 다음은 최종 완료 실패/재시작 경계 회귀와 중단 cleanup 명시 재개 연결, 이후 Windows 묶음 검증이다. 전체 앱 개발 완료를 선언하지 않는다.
+
+### 2026-11-05 · by GPT-6
+
+- 이전 turn은 cacf883의 NTFS write-through flush receipt로 진전했다. 이번 메인 구현은 Windows 정상 저장의 cleanup journal과 잠금 해제까지 연결했다. staging 파일 pin/current root 확인 아래 고정 anchor를 create_new/write-through/flush하고 기존 marker는 정확한 bytes를 읽기만 한다. staging parent/anchor/file ID를 최초 intent에 결속한다. 마지막 임시 파일 정리 뒤에도 staging parent를 nonempty로 pin할 수 있는 소량의 영구 표식이다.
+- 교체 flush receipt 확인 뒤 기존 guard lease를 유지하며 source handle을 해제하고 committed target으로 parent pin을 인계한다. target full ID/내용/접근 권한 재확인 → cleanupIntent → old guard lease 해제/exact-ID 삭제 → guardRemoved → target 재확인 → staging handle 해제/exact-ID 삭제 → stagingRemoved → target/두 lease 재확인 → cleanupComplete를 기록한다. target pin은 최종 lock clear까지 유지한다. 실패는 기존 outcome_unknown/session·증거 보존 경로다.
+- 최종 lock clear는 cleanupComplete의 정확한 save/workspace/version/flush receipt를 요구하며 증거가 없으면 거절한다. 완료 증거는 completedWindowsSave로 남겨 다음 저장의 새 windowsSaveGuard와 구분한다. PendingSave.file을 Option+오류 반환 getter로 바꿔 staging handle을 명시적으로 닫으며 macOS는 정상 Some 경로와 기존 정리 순서를 유지한다.
+- 삭제 helper는 NTFS 확인과 write-through read/write/DELETE handle을 사용하고 FileDispositionInfo 뒤 명시 CloseHandle 성공과 부재를 확인한다. close/부재 불확실은 재시도하지 않는다. 관찰 조회는 새 cleanup 단계들을 허용하지만 자체 cleanup/completion 권위는 계속 false다. 현재 작업은 정상 경로 연결이며 중단 후 명시 재개/UI·native 통합·메타데이터 정책은 여전히 미완료다. Windows 제품/Git activation은 바꾸지 않았다.
+- 독립 검토에서 정상 cleanup의 exact-ID/단계 원장·target pin 인계·실패 fence 및 macOS Option 경로의 정적 차단 결함 없음. 검토가 요구한 cleanupComplete→최종 lock clear 실패 시험을 위해 Windows 전용 실패 주입 지점을 추가했으며 native 실행은 후속이다.
+- 변경 모듈 rustfmt·project.rs 구문 파싱·diff 검사. 공용 PendingSave 변경의 macOS 컴파일 확인만 기존 target에서 CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo check -p hello-agent-sidecar --locked --offline로 수행해5.42초에 통과했다. 이는 Windows cfg 코드 컴파일 증거가 아니다. native/전체 테스트/패키지/CI/모델/push와 새 worktree는 없으며 기존 check cache만 갱신했다. cap-std File::into_std를 로컬 의존성에서 확인했다. 디스크 읽기 전용 점검에서 현재 여유537GiB이며 이번 작업은 소스/문서만 추가했다. 다음은 정상 cleanup 실패 주입/재시작 재개와 Windows 묶음 검증이다.
+
+### 2026-11-05 · by GPT-6
+
+- 이전 turn은 dc59164의 exact-handle 정리 primitive로 진전했다. 후속 조사에서 [Microsoft CreateFileW Caching Behavior](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)는 FILE_FLAG_WRITE_THROUGH 요청이 NTFS의 timestamp/rename metadata flush를 유발한다고 명시한다. [FlushFileBuffers](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers)의 파일 flush와 함께 OS acknowledgement 정책을 구성하며 임의 디스크 controller의 전원 장애 내구성을 보장한다고 주장하지 않는다. 관리자 volume flush나 NO_BUFFERING 정렬 우회를 사용하지 않는다.
+- `windows_durability.rs`는 보유 file/directory handle의 GetVolumeInformationByHandleW로 NTFS 여부를 확인한다. 이 정책은 NTFS에만 적용하며 ReFS/FAT/미확인 FS를 추정 허용하지 않는다. source/guard 생성에 WRITE_THROUGH를 지정하고 새 intent에 durabilityPolicy=ntfsWriteThroughV1을 기록한다. 교체 전 source NTFS와 정책을 다시 대조하고 교체/신원·내용·권한 확인 뒤 같은 source handle sync_all 성공 시 replaced+ntfsWriteThroughFlushed를 게시한다.
+- Windows save의 무조건 namespace 미연결 오류는 현재 source ID·workspace·save·정확한 phase/policy/flush receipt 확인으로 대체했다. 이것은 guard cleanup 완료가 아니며 persist_save_lock(false)는 여전히 정리 미연결을 거절한다. read-only recovery는 과거 기록된 flush 상태를 별도 필드로 표시하고 현재 관찰만으로 완료/정리 권위를 만들지 않는다. 과거 policy 없는 기록을 자동 승격하지 않는다.
+- NTFS handle 확인 → write-through source 쓰기/flush → handle-relative rename → 같은 handle flush와 새 내용/옛 이름 부재의 native 회귀를 작성했다. API/namespace 통합 시험이며 power-loss 시험이 아니고 아직 실행 전이다. cap-primitives 3.4.6의 custom_flags 전달 경로도 읽기 전용 확인했다.
+- 독립 정적 검토에서 NTFS handle 판정·write-through/same-handle flush 순서·receipt 결속·cleanup 차단 유지에 차단 결함 없음. native/전원 장애 검증 완료를 뜻하지 않는다.
+- rustfmt·project.rs 파싱·git diff --check만 확인했다. Cargo/패키지/cache/worktree/모델/push/CI 없음. 다음은 durable cleanup intent·정리/재시작 재개와 Windows native 묶음 검증이다. Windows 제품 활성화와 전체 앱 완료는 계속 미완료다.
+
+### 2026-11-05 · by GPT-6
+
+- 이전 turn은 6c3cc58의 중단 저장 read-only 관찰로 진전했다. 메인이 Windows journal-owned 임시 파일의 exact-handle 삭제 primitive(`windows_remove.rs`)를 추가했다. 독립 DirectoryLease 아래 정상 단일 이름/guard alias 거절 → read+DELETE/share0/nofollow로 파일 열기 → 기록된 full ID 비교 → lease 재검증 → FileDispositionInfo(1-byte BOOLEAN) → handle close → parent 재검증/이름 부재 확인 순서다.
+- 이름 기반 remove fallback, 누락 파일 자동 성공/재시도, readonly/POSIX 우회는 없다. 삭제 요청 뒤 부재를 확인하지 못하면 outcome_unknown으로 남긴다. caller는 current managed workspace 결속·durable cleanup intent·명시 정책을 먼저 확보해야 하며 이 helper의 Ok는 현재 부재 관찰이지 namespace durability/복구 완료가 아니다. 아직 save recovery나 제품 UI에서 호출하지 않는다.
+- [Microsoft FILE_DISPOSITION_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_disposition_info)의 handle 삭제 요청 구조와 [CreateFile 공유 규칙](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)을 확인했다. 기존 사용자 파일·실행 앱에 삭제를 수행하지 않았다.
+- 독립 정적 검토에서 파일 신원·FFI 크기/access mask·이름 재사용 시 ambiguous/no-retry 경로의 차단 결함 없음.
+- native 회귀는 다른 ID·guard/탈출·열린 handle 충돌 거절, exact 파일 삭제, 이름 재사용 후 foreign 파일 보존을 작성했으며 실행 전이다. rustfmt·project.rs 구문 파싱·diff 검사만 수행한다. Cargo/패키지/cache/worktree/모델/push/CI 없음. 다음은 durable cleanup intent/재시작 재개와 namespace durability 연결 및 Windows 묶음 검증이다. 전체 앱/Windows 제품 gate는 미완료 상태를 유지한다.
+
+### 2026-11-05 · by GPT-6
+
+- 이전 turn은 f871585의 접근 권한 보존 구현으로 진전했다. 이번에는 중단된 Windows workspace save의 내부 read-only inspect를 추가했다. 일반 workspace 검증은 Ready 잠금 검사 그대로이며 SaveRecovery 전용 분기만 durable chat save session·정확한 save/workspace/lock/path·writer 없음·poison false·recovery true·허용 phase/버전을 대조한 뒤 기존 canonical manifest/.git marker 검증을 공유한다. 제품/UI에 아직 노출하지 않았다.
+- inspect는 active pending save를 거절하고 현재 managed root/parent identity를 다시 확인한다. guard/source/staging/destination을 nofollow read handle과 full ID/내용으로 관찰한다. source 준비 intent에는 stagingIdentity도 추가했다. 기존 ID 미기록 파일은 존재만으로 소유했다고 보지 않으며 cleanupAllowed/completionAllowed는 항상 false다. 관찰은 삭제·재시도·잠금 해제 권위가 아니다.
+- destination은 source ID+version 일치시 replacementObserved, 이전 target ID+expectedVersion 일치시 originalObserved, 이전 ID 미기록은 expectedContentOnly, 나머지는 conflictOrMissing이다. 검토가 지적한 같은 내용의 다른 파일을 original로 분류하는 오류를 수정하고 ID기록 유무/일치도 별도로 반환한다.
+- 기존 read_file_bounded_handle의 retain_limit=0은 저장 메모리만 줄이고 읽기 총량을 제한하지 않음을 확인했다. 새 recovery reader는 해당 helper를 사용하지 않고 take(FILE_MAX_BYTES_V1+1)+64KiB buffer로 실제 읽기량을 제한한다. 공유 read만 허용하고 write/delete가 열린 파일은 거절한다. 같은 내용/다른 ID 및 oversized artifact 회귀는 작성했으나 native 실행 전이다.
+- 같은 독립 검토자가 bounded read와 ID/content 분류 보완을 재확인했고 추가 정적 차단 결함 없음. native 테스트 PASS가 아니다.
+- 변경 모듈 rustfmt·project.rs 구문 파싱·git diff --check 확인. Cargo/패키지/CI/cache/worktree/모델/push 없음. 다음은 이 관찰을 사용하는 명시 복구/cleanup과 namespace durability, Windows native 통합 검증이다. 일반 제품 실행과 전체 앱 완료는 계속 미완료다.
+
+### 2026-11-05 · by GPT-6
+
+- 이전 turn은 8bf522b의 Windows 교체 연결과 계약 정정으로 진전했다. 메인이 `windows_security.rs`를 추가해 보유 file handle에서 owner/group/DACL과 protection flag를 읽고 새 replacement source에만 복사한다. OS 반환 descriptor/SDDL 메모리는 LocalFree RAII로 해제하며 SDDL은 최대131,072 WCHAR로 제한한다. null/incomplete DACL이나 표현 불가·복사 실패·정규화 불일치는 교체 전에 거절한다.
+- source create 권한에 WRITE_DAC/WRITE_OWNER를 추가했으며 token privilege를 켜거나 관리자 권한을 올리지 않는다. target version 확인 뒤 source 권한 복사/flush → old/source descriptor 동일성 확인 → replaceIntent accessFingerprint 기록 → syscall 전 재확인 → destination 권한 재확인으로 연결했다. raw SID/ACL은 원장이나 오류에 저장하지 않고 정규화된 접근 descriptor digest만 기록한다. 이는 실행 파일 신뢰용 고정 해시가 아니다.
+- 범위는 owner/group/DACL 및 protected/unprotected 상태다. SACL/감사·integrity label·기타 메타데이터 보존은 아직 다루지 않았으며 전체 Windows 권한 지원 완료를 선언하지 않는다. 상속 canonicalization이 달라지면 임의 완화 없이 실패한다. 기존 source 권한을 수정하지 않으며 새 temp만 변경한다.
+- [Microsoft GetSecurityInfo](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-getsecurityinfo), [SetSecurityInfo](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-setsecurityinfo), [SDDL 변환](https://learn.microsoft.com/en-us/windows/win32/api/sddl/nf-sddl-convertsecuritydescriptortostringsecuritydescriptorw)을 확인했다. filesystem에 쓰지 말라는 SetKernelObjectSecurity 대신 SetSecurityInfo를 사용한다.
+- 독립 정적 검토에서 FFI 수명·access mask·원장 전이의 차단 결함 없음. 다른 상속 ACL의 nested target과 root source 조합 검증 공백은 남는다.
+- native 회귀는 protected DACL 복사와 같은 부모의 unprotected inherited DACL 복사, old bytes/권한 불변, source ID 분리를 작성했으며 실행 전이다. 변경 모듈 rustfmt·project.rs 구문 파싱·diff 검사만 수행했다. Cargo/패키지/CI/cache/worktree/모델/push 없음. 다음은 namespace durability·guard 복구/cleanup과 권한 native 검증이며 Windows 제품 gate와 전체 앱 미완료 상태를 유지한다.
+
+### 2026-11-05 · by GPT-6
+
+- 이전 turn은 1440873의 준비 검증/기록으로 진전했다. 후속 계약 감사에서 atomic namespace rename과 expected-ID/content compare-and-replace(CAS)를 혼동한 추가 요구를 확인했다. 원본 반영에 관한 사용자 승인 범위는 `m5-coding-agent-ide.md` §5.5(2026-09-30)에 전후 충돌검사·보존·불확실 중단과 same-UID 외부 작성자 완전 배제 비보장으로 명시돼 있다. 작업복사본 save의 기존 macOS 구현도 version 검사 뒤 renameatx_np이며 leaf CAS가 아니다. project_v1::validate_save_transcript는 expected/current 관측 버전 충돌 계약이다. tests.rs syscall hook은 parent 이동/symlink 외부 탈출을 검사한다.
+- 동일 독립 검토자가 이전 CAS 부재만의 activation blocker 판정을 승인 범위를 넘긴 판단으로 명시 철회했다. 이전 로그는 당시 판단으로 보존한다. 이 정정은 외부 원본 적용 정책을 작업복사본에 임의 확장하거나 충돌 검사를 삭제하는 승인이 아니다. 기존 save의 관측 버전 검사와 atomic rename·경로 confinement를 구분해 구현한다.
+- Windows workspace save는 replaceIntent와 이전 target ID 기록 → 열린 target 확인 핸들 해제(legacy API 조건) → 독립 parent/guard lease와 같은 source handle로 FileRenameInfo → destination full ID/내용 검증 → replaced 기록으로 연결했다. target 내용 검사 동안 writer 배제, 마지막 name ID 확인, 현재 managed root/workspace/parent 결속은 유지한다. hostile same-user leaf swap의 CAS 보장은 하지 않는다.
+- replaced는 durable save 완료가 아니다. namespace durability/guard cleanup 미연결 오류와 recovery lock·session/staging 보존은 유지하며 Windows 제품/Git admission은 그대로 닫혀 있다. ACL/권한 보존·디스크 기록 보장·재시작 복구/cleanup·native 실행이 남는다. 원본 apply/restore는 이번 변경에 포함하지 않았다.
+- 독립 재검토에서 workspace save 범위만 변경하고 macOS 전용 원본 쓰기/복원과 Windows 제품 gate를 확장하지 않았음을 확인했다.
+- 검증은 rustfmt·project.rs 구문 파싱·diff 검사이며 새 Cargo/패키지/CI/cache/worktree/모델/push는 없다. 기존34 native PASS를 이번 변경의 증거로 재사용하지 않는다. 다음은 Windows 권한/내구성/복구 구현과 묶음 검증이며 전체 앱 목표는 미완료다.
+
+### 2026-11-05 · by GPT-6
+
+- 이전 turn은 1e425f1 source 준비로 진전했다. 이번 메인 구현은 Windows 교체 전 sourceReady/작업복사본/guard/source ID, 현재 managed root/parent, target 내용/ID와 intent 경로를 재검증하고 replacementChecked+이전 target ID를 기록한다. hook 이후 target name ID도 확인한다. 복구 준비 증거를 추가했으며 아직 교체 syscall은 호출하지 않는다.
+- 실제 교체 연결을 검토하다 새 차단 조건을 발견했다. [Microsoft FileRenameInformation](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information)의 legacy replacement는 destination open handle을 닫아야 한다. 마지막 ID 확인과 syscall 사이 foreign target swap을 원자적으로 배제하지 못하므로 parent pin만으로 expectedVersion의 compare-and-replace를 주장할 수 없다. 실제 사용자 손실을 관찰한 것은 아니며 정적 경합 분석이다.
+- 독립 검토의 차단 지적을 반영해 destructive 호출과 replaced 기록을 제거했다. 준비 검증 뒤 명시 오류로 종료하고 guard/source/session/staging·원장 증거를 유지한다. 임의 POSIX flag나 검증 성공으로 이 경합을 덮지 않는다. Windows 제품/Git admission은 계속 닫혀 있다. namespace durability no-op도 저장 성공 증거로 쓰지 않도록 Windows save에 명시 오류를 둔다.
+- 같은 독립 검토자의 재확인으로 destructive 교체 호출이 제거되고 replacementChecked 뒤 오류·증거 보존만 남음을 확인했다. 교체 전략의 활성화 blocker는 해결됐다고 주장하지 않는다.
+- 변경 모듈 rustfmt, project.rs 구문 파싱, git diff --check 확인. native 컴파일/실행 미검증이며 기존34 PASS와 구분한다. cache/package/worktree·모델·push/CI 없음. 다음은 destination 동시 변경 계약을 만족하는 교체 전략, ACL/내구성·복구/cleanup 구현과 묶음 native 검증이다. Git 제공 방식 선택·G6/출시도 여전히 남아 있다.
+
+### 2026-11-05 · by GPT-6
+
+- 이전 goal turn은 5ad0c4b 구현 커밋으로 진전했다. 이번에는 같은 통합 checkout에서 Windows replacement source 준비를 연결했다. 최초 guard intent가 sourceName을 생성 전에 예약하고, 복사/flush 뒤 보유 source와 no-follow 재열기 file ID를 비교해 sourceReady의 sourceIdentity/sourceVersion을 기록한다. 교체 호출까지 같은 source handle을 유지할 수 있도록 PreparedTarget에 보관한다.
+- Windows source는 공용 source_options에서 create_new/nofollow와 READ|WRITE|DELETE, share-read만 사용한다. 외부 write/delete를 허용하지 않는다. 실패 시 Windows PreparedTarget Drop은 경로만 보고 임시 파일을 삭제하지 않고 원장에 기록된 이름을 보존한다. intent 성공 이후 오류는 기존 ambiguous/session/staging 보존 규칙을 따른다. cleanup의 신원 확인과 namespace durability는 아직 미완료다.
+- 기존 native replacement 회귀도 같은 옵션으로 source를 만들도록 바꾸고 외부 write/delete/rename 거절 단언을 추가했다. 실제 replace 성공과 guard·full ID·내용 검사는 유지한다. native 실행은 하지 않았으며 기존34 PASS에 포함되지 않는다.
+- 독립 읽기 전용 검토에서 이 준비 단계의 구체적 차단 결함 없음. 변경 모듈 rustfmt 및 project.rs 파싱, git diff --check 통과. Cargo/패키지/모델/외부 push/CI/새 cache·worktree 없음. Windows rename 연결·권한/내구성·복구/cleanup, 첫 intent 실패 주입과 native 묶음 검증, Git 배포 선택 및 G6/출시는 계속 남아 있다. Windows 제품 gate는 그대로 닫혀 있다.
+
+### 2026-11-05 · by GPT-6
+
+- 2294e07 기준 메인 직접 구현: Windows 저장 준비에 별도 guard 생성 의도와 실제 file ID를 기존 lock 원장에 기록하는 경로를 추가했다. 기존 target pin을 유지하며 현재 managed root/workspace/parent 신원을 재확인하고, preparing 기록 → create_new/write/sync → 독립 lease/ID 재확인 → ready 기록 순서다. guard는 Drop에서 삭제하지 않는다.
+- 첫 intent 기록 실패는 파일 생성 전에 반환하며 staging의 기존 정리 규칙을 유지한다. 독립 검토가 발견한 실패 시 orphan staging 문제를 수정했다. intent 성공 뒤에는 staging과 workspace save_session을 모두 보존하도록 이후 모든 실패를 outcome_unknown으로 전달한다. 기존 save lock 갱신도 guard 증거를 보존하며 cleanup 미연결 상태에서 성공 잠금 해제를 거절한다.
+- guard 파일 sync는 디렉터리 namespace durability 증거가 아니다. 원장에 directoryDurability=unconfirmed를 명시했고 Windows 제품/Git/저장 활성화는 계속 차단한다. 교체 primitive 호출·guard cleanup/복구 연결과 첫 intent 실패 주입을 포함한 native 회귀는 아직 미완료다. 기존34 PASS는 이번 변경의 증거가 아니다.
+- 같은 독립 검토자의 재검토에서 orphan staging 차단 결함 해소 및 이 체크포인트의 추가 정적 차단 결함 없음. 실패 주입 native 회귀 공백은 그대로 남는다.
+- 검증: 변경 모듈 rustfmt, project.rs 구문 포맷 파싱 및 git diff --check. 이번에는 Cargo/패키지/모델/CI를 실행하지 않았으며 캐시·worktree를 추가하지 않았다. 현재 CI 승인 잔여1회는 새 기능 공개에 쓰지 않는다. 다음은 guard 복구/cleanup과 교체 연결, 묶음 Windows 검증이다.
+
+### 2026-11-05 · by GPT-6
+
+- 앞선 turn은 Windows34 native PASS로 진전했다. f83b143의 깨끗한 checkout에서 메인이 `windows_replace.rs`를 구현했다. source는 보유 file handle, destination은 검증한 DirectoryLease의 parent handle과 정상 단일 leaf다. SetFileInformationByHandle(FileRenameInfo=3)에 pointer-aligned buffer와 UTF-16 바이트 길이를 전달한다. 상대 다중 경로/ADS/장치명·guard 자체 대상은 거절하고 POSIX/readonly 우회나 delete/copy fallback을 사용하지 않는다.
+- DirectoryLease는 별도의 guard를 유지한 채 parent를 제공하며 syscall 직전에 다시 전체 결속을 검증한다. 이 primitive는 rename만 수행한다. durable save intent·현재 버전/임시 파일 신원·권한·교체 후 sync/재열기/복구를 caller가 묶어야 하므로 현재 제품 save 경로에 연결하거나 활성화하지 않았다.
+- native 회귀 초안은 다른 디렉터리의 source를 pinned parent의 기존 target으로 교체하고 전체 file ID/bytes/guard를 대조한다. 탈출/ADS/장치명/guard 이름 거절과 target sharing 충돌 시 source/target 보존도 포함한다. Rust 포맷/diff 검사 통과, Windows 실행은 미검증이며 기존34 PASS에 포함되지 않는다.
+- 정적 검토에서 ASCII 이름 비교만으로는 Unicode/short-name guard alias를 사전 차단하지 못하는 점을 지적받아, 기존 destination을 no-follow로 열어 guard와 전체 file ID를 비교하도록 보완했다. Å/å가 실제 같은 file ID임을 확인하고 API 호출 전 거절하는 native 회귀도 추가했다. 기존 커널 deny-delete 검사까지 실제로 우회됐다는 증거는 없으므로 사전 검증 결함으로 한정한다. 같은 독립 검토자의 재검토에서 보완 후 차단 결함 없음.
+- 남은 기존 CI 승인1회는 f41eb29의 컴파일/시험 호환 수정 범위이므로 이 새 기능 push에는 쓰지 않는다. 새 build/cache/worktree·모델 호출·외부 변경 없음. 다음은 별도 guard의 durable 준비/cleanup과 save 원장 연결 및 묶음 native 검증이다. 내부 Git 제공 방식 선택·G6/전체 출시도 미완료다.
+
+### 2026-11-05 · by GPT-6
+
+- 사용자가 f41eb29 및 Windows 컴파일/시험 호환 수정의 공개 push·CI 최대3회를 승인했다. 기존 codex/m5-windows-supervisor-20261105에 정확히 f41eb29852c8c20c5318d0a908c3ba72d7030029를 push하고 첫 실행41987756587이 in_progress임을 확인했다. 승인1/3회 사용·2회 남음. 이후 로컬 문서 커밋은 공개하지 않았다.
+- 범위는 native primitives·공통 spawn·watcher 진단이며 패키징/제품 활성화/모델 호출/main 병합은 제외한다. 결과는 아직 미정이고 이전25 PASS로 대체하지 않는다. 로컬 빌드·새 캐시/worktree 없음. 다음은 동일 run의 결과 확인과 필요한 호환 수정이다.
+- 첫 실행41987756587은 release 컴파일3분17초 성공·native28 PASS/1 FAIL이다. 실패는 lease 해제 후 ancestor rename에서5(AccessDenied)였으며 별도 authority Dir가 아직 열려 있었다. acquire 직후 이 외부 Dir를 닫아 lease 핸들만으로 차단/해제를 검사하도록 시험만 수정했다. 기존 공유32·nonempty145·guard 내용 검사는 유지한다. image/GUID CWD·공용 control EOF·unwind retention 등 새 검사는 PASS였다. spawn/watch 단계는 skipped다. 원시 실패 로그는 .artifacts/m5-windows-supervisor-41987756587/failed.log에 보존하며 포맷/diff 검사 통과.
+
+- 검토된 fixture 수정은 통합2812429와 공개 진단0a7efd5에 각각 기록했다. 진단 커밋은 f41eb29 위 시험3줄만 포함한다. 두 번째 CI41988529910이 in_progress로 등록됐으며 승인2/3회 사용·1회 남음이다.
+
+- 두 번째 [CI41988529910](https://github.com/wonseok-han/hello-agent/actions/runs/41988529910), 0a7efd5fe71598005ca86d254876398933cc9207는3분29초에 SUCCESS했다. 전체 로그에서 native29·spawn1·watcher3+initial1, 총34 PASS/0 FAIL/0 ignored와 watcher 존재검사를 확인했다. 실패했던 lease final rename도 PASS이며 fixture-only 외부 핸들 해제가 원인이었음을 확인했다. raw log/metadata는 .artifacts/m5-windows-supervisor-41988529910에 보존한다.
+- 승인2/3회 사용·1회 잔여. 추가 실행을 소모하지 않는다. 제품 Git/저장/복구·background watcher 실제 Git·G6/출시는 아직 미완료이며 이 scoped 결과로 활성화하지 않는다. current architecture의 CWD/image/reader 증거 상태만 갱신한다. 로컬 빌드/패키지/worktree·main 병합·모델 호출 없음. 다음은 내부 Git 제공 방식 선택 후 실제 admission 및 Windows save/복구 구현이다.
+
 ### 2026-11-05 · by GPT-6
 
 - HEAD b283b5a와 깨끗한 워킹 트리를 재확인했다. Windows 추가 CI 승인/실행 환경과 Git 제공 방식 응답이 없는 동일 입력 의존 조건이 세 번째 연속 turn에 지속됐다. 독립 구현과 기존 메모리 자료 재검토까지 수행했지만 현재 다음 판단을 바꿀 실행 증거는 추가할 수 없다. 반복 helper/빌드/공개 실행 대신 자동 목표를 blocked(입력 대기)로 전환한다. 완료·사용자 요청 일시중지는 아니다.

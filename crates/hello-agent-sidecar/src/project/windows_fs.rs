@@ -27,7 +27,8 @@ mod native {
     };
 
     #[repr(C)]
-    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
     pub(crate) struct Identity {
         volume: u64,
         file: [u8; 16],
@@ -125,7 +126,7 @@ mod native {
         local_guid_path(held).map(|_| ())
     }
 
-    pub(crate) fn local_guid_path(held: &Dir) -> Result<String, ProjectFailure> {
+    pub(crate) fn local_guid_path<T: AsRawHandle>(held: &T) -> Result<String, ProjectFailure> {
         // A GUID volume path is obtained from the held handle, not from a drive
         // letter lookup which could be remapped between checks. UNC is excluded.
         let mut buffer = vec![0u16; 32_768];

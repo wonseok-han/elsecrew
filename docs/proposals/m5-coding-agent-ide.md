@@ -823,11 +823,13 @@ fixture 크기와 허용 지연은 M5.0 첫 구현 명세에서 수치로 고정
 
 ---
 
-### Windows 내부 Git 제공 방식 — 현재 제안, 사용자 선택 대기 (2026-11-05)
+### Windows 내부 Git 제공 방식 — 사용자 설치 Git 사용 확정 (2026-11-06)
 
-앱 내부 snapshot/diff에 사용하는 Git은 Codex·Claude Code 설치/업데이트와 별도다. Windows에서 기존 PC Git 재사용과 앱 포함 공식 MinGit 중 선택이 필요하다. 현재 권고는 **공식 MinGit을 앱과 함께 배포·업데이트**하는 것이다. 사용자가 Git을 별도 설치하지 않아도 되고, 앱이 검증한 실행 파일·의존성 묶음을 함께 교체할 수 있다. 설치 용량 증가, 보안 업데이트 추적, 라이선스/출처 고지와 배포 경로 검증 비용이 따른다. 아직 선택·다운로드·패키징·활성화되지 않았다.
+**설치 신뢰 정책 승인(2026-11-06)**: 앱은 선택한 설치 폴더와 Windows가 검증한 실행 파일 서명자를 표시하고 명시 동의를 받는다. 동의한 설치본의 서명 없는 runtime DLL도 포함하며 실행마다 설치본을 재검사한다. 폴더의 실제 식별 정보 또는 서명자가 바뀌면 재동의한다. 정상 업데이트를 특정 버전·파일 해시 allowlist로 제한하지 않는다. Windows 제품 활성화는 별도 검증/승인 경계를 유지한다.
 
-- 공식 [MinGit 설명](https://gitforwindows.org/mingit.html)은 타사 앱용 비대화형 배포판이며 git.exe와 의존성을 함께 제공한다고 명시한다. GUI/Bash 전체 배포보다 필요한 구성이 작지만 실제 앱 용량은 패키지 측정 전 수치로 단정하지 않는다.
+앱 내부 snapshot/diff에 사용하는 Git은 Codex·Claude Code 설치/업데이트와 별도다. **2026-11-06 사용자 결정: 사용자가 설치한 Git을 사용한다.** 공식 MinGit 앱 포함 권고는 채택하지 않았다. 앱은 별도 Git 묶음을 다운로드하거나 배포하지 않으며, 선택한 설치 위치의 실행 파일·의존성과 업데이트 후 재확인을 연결해야 한다. 이 결정은 임의 PATH 실행이나 Windows 제품 활성화 승인이 아니다.
+
+- 채택하지 않은 대안: 공식 [MinGit 설명](https://gitforwindows.org/mingit.html)은 타사 앱용 비대화형 배포판이며 git.exe와 의존성을 함께 제공한다고 명시한다. GUI/Bash 전체 배포보다 필요한 구성이 작지만 실제 앱 용량은 패키지 측정 전 수치로 단정하지 않는다.
 - MinGit도 alias/hook 실행을 지원한다. 번들 채택이 기존 config/hook/filter/외부 명령 격리를 대체하지 않는다.
 - 앱 포함 방식을 선택하면 설치 위치는 renderer/프로젝트/PATH에서 받지 않고 앱의 배포 자원 경로에서 결정한다. 전체 의존성 묶음과 업데이트의 신뢰를 확인하며, 파일 ID 결속만으로 출처를 증명했다고 보지 않는다. 실행 중 묶음 교체 금지와 실패 시 이전 정상 묶음 보존이 필요하다.
 - 기존 PC Git을 선택하면 명시적 설치 위치·실제 image/의존성·업데이트 호환을 별도로 검증한다. PATH의 첫 git.exe 또는 특정 내부 mingw 디렉터리 이름만으로 신뢰하지 않는다.
@@ -837,7 +839,7 @@ fixture 크기와 허용 지연은 M5.0 첫 구현 명세에서 수치로 고정
 
 ### Windows 편집 저장 포트 — 구현 전 확인한 조건 (2026-11-05)
 
-현재 `commit_pending_save`는 managed staging을 flush/sync하고 작업 복사본 root에 새 temp를 만든 뒤 save lock을 기록한다. 최종 교체는 macOS의 stable-root rename만 구현되어 있으며 Windows는 명시적으로 거절한다. `PreparedTarget`의 실패 시 temp 정리와 이후 directory sync/파일 재열기/원장 해제까지 함께 이식해야 한다. syscall 하나의 교체로 끝내지 않는다.
+아래 조건을 정리한 당시에는 `commit_pending_save`의 최종 교체가 macOS에만 구현되어 있었다. 이후 Windows handle 교체·cleanup·명시 복구와 공개 확인 흐름을 구현했으나 native 검증/제품 활성화는 남아 있다. 현행 구조는 [architecture](../architecture.md)를 따른다. `PreparedTarget`의 실패 시 temp 정리와 이후 directory sync/파일 재열기/원장 해제까지 함께 이식해야 한다. syscall 하나의 교체로 끝내지 않는다.
 
 1. **경로 보호와 교체 대상 분리**: `DirectoryLease::acquire(parent, target)`의 guard는 delete 공유를 거부하므로 의도한 target 교체도 막는다. syscall 직전에 guard를 drop하는 방식은 보호 공백을 만든다. 대상/이동할 temp와 다른 guard로 parent의 nonempty 상태를 유지해야 한다. 사용할 sibling이 없는 디렉터리는 앱 소유 snapshot 내부에만 새 보호 파일을 만들고, 생성 전 복구 intent·정확한 파일 ID·cleanup 상태를 기록하는 절차가 필요하다. 사용자 원본에는 만들지 않는다. 임의의 기존 파일을 guard로 선택하거나 이름만으로 삭제하지 않는다.
 2. **핸들 기반 source와 destination**: Microsoft [FILE_RENAME_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info)는 상대 이름과 RootDirectory handle을 지원한다고 명시한다. source는 DELETE 접근으로 연 실제 temp handle, destination은 검증한 parent handle과 정상 단일 이름을 사용한다. Windows API native 실행 증거 없이 이 형태가 현재 filesystem/handle sharing 조합에서 작동한다고 선언하지 않는다.

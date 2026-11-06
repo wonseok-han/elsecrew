@@ -8,6 +8,7 @@ use std::io::{Read, Seek};
 use std::os::fd::{AsRawFd, FromRawFd};
 use uuid::Uuid;
 
+const FORMAT_VERSION: u32 = 2;
 const MAX_ARCHIVE: u64 = MAX_BYTES + 32 * 1024 * 1024;
 const RESTORE_BUDGET: u64 = 5 * 1024 * 1024 * 1024;
 mod decode;

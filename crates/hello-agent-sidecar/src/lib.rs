@@ -7,6 +7,8 @@ mod application_cancel;
 mod dispatch_timing;
 mod chat;
 mod project;
+#[cfg(windows)]
+mod git_preparation;
 mod process_spawn;
 #[cfg(target_os = "macos")]
 mod provider_claude_login;
@@ -128,6 +130,13 @@ where
     let mut args = args.into_iter();
     let _program = args.next();
     let mode = args.next();
+    if mode.as_deref() == Some(std::ffi::OsStr::new("--git-preparation")) {
+        if args.next().is_some() { return Err(SidecarError::new("invalidArguments", "Git preparation accepts no path arguments")); }
+        #[cfg(windows)]
+        { return git_preparation::run(); }
+        #[cfg(not(windows))]
+        { return Err(SidecarError::new("unsupportedPlatform", "Git preparation is Windows-only")); }
+    }
     if mode.as_deref() == Some(std::ffi::OsStr::new("--fixture-child")) {
         let scenario = args.next().ok_or_else(|| {
             SidecarError::new("invalidArguments", "fixture child scenario is required")
@@ -1228,6 +1237,29 @@ impl Sidecar {
                 Some("applicationCapabilities") => {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
                     Ok(self.projects.application_capabilities())
+                }
+                Some(action @ ("inspectGitTrust" | "confirmGitTrust" | "revokeGitTrust")) => {
+                    if action == "confirmGitTrust" {
+                        let params = require_exact_params(&request.params, &["action", "identity", "confirmed"]).map_err(invalid_params)?;
+                        require_exact_params(&params["identity"], &["installationPath", "volumePath", "directoryId", "commonName", "organization"]).map_err(invalid_params)?;
+                        if params["confirmed"] != true { return Err(invalid_params("Git trust requires explicit confirmation".into())); }
+                    } else {
+                        require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
+                    }
+                    #[cfg(windows)]
+                    {
+                        let result = match action {
+                            "inspectGitTrust" => self.projects.preview_git_trust().map(|inspection| serde_json::json!({"schemaVersion":1,"action":action,"inspection":inspection})),
+                            "confirmGitTrust" => {
+                                let identity = serde_json::from_value(request.params["identity"].clone()).map_err(|_| invalid_params("invalid Git trust identity".into()))?;
+                                self.projects.confirm_git_trust(identity, true).map(|inspection| serde_json::json!({"schemaVersion":1,"action":action,"inspection":inspection}))
+                            },
+                            _ => self.projects.revoke_git_trust().map(|()| serde_json::json!({"schemaVersion":1,"action":action,"revoked":true})),
+                        };
+                        result.map(|result| project::ProjectAction { result, ..Default::default() })
+                    }
+                    #[cfg(not(windows))]
+                    { return Ok(HandledRequest::response(error_response(&request, "methodUnavailable", "unsupportedCapability", "Windows Git trust is not available on this platform"))); }
                 }
                 Some("getAppRoleDefaults") => {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;

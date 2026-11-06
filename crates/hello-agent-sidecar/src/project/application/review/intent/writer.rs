@@ -551,7 +551,10 @@ pub(super) fn write_item_cancellable(
     if item["before"].is_null() && item["after"].is_null() {
         return Err(invalid());
     }
-    let observation = observe_pending_source(manager, storage, project_id)?;
+    let observation =
+        super::observation::observe_pending_source_checked(manager, storage, project_id, &|| {
+            check_canceled(canceled)
+        })?;
     if observation["comparison"] != "matchesBeforeEntry" {
         return Err(invalid());
     }

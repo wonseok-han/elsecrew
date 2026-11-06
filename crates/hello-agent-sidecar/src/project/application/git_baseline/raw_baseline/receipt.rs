@@ -1,16 +1,26 @@
 //! Immutable receipt and ledger binding for the internal application snapshot candidate.
+#[cfg(unix)]
 use super::SourceBaseline;
+#[cfg(unix)]
 use crate::project::application::{open, stamp};
+#[cfg(unix)]
+use crate::project::sync_capability_directory;
+#[cfg(windows)]
+use crate::project::windows_git_baseline::WindowsBaseline as SourceBaseline;
 use crate::project::{
     canonical_protocol_path_without_existing, create_managed_directory, snapshot_identity,
-    sync_capability_directory, ActiveProject, ProjectFailure, ProjectManager,
+    ActiveProject, ProjectFailure, ProjectManager,
 };
 use crate::storage::Storage;
-use cap_std::fs::{Dir, File, MetadataExt};
+use cap_std::fs::Dir;
+#[cfg(unix)]
+use cap_std::fs::{File, MetadataExt};
 use serde_json::json;
 use sha2::{Digest, Sha256};
+#[cfg(unix)]
 use std::ffi::CString;
 use std::io::{Read, Write};
+#[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd};
 
 const RECEIPT_MAX_BYTES: usize = 64 * 1024 * 1024;
@@ -191,7 +201,12 @@ fn filename(active: &ActiveProject) -> Result<String, ProjectFailure> {
     {
         return Err(invalid());
     }
-    Ok(format!("{}.source-baseline-v1.json", active.worktree_id))
+    let suffix = if cfg!(windows) {
+        "source-baseline-windows-v1.json"
+    } else {
+        "source-baseline-v1.json"
+    };
+    Ok(format!("{}.{suffix}", active.worktree_id))
 }
 
 struct LimitedBytes(Vec<u8>);
@@ -212,6 +227,7 @@ fn encode(active: &ActiveProject, baseline: &SourceBaseline) -> Result<Vec<u8>, 
     encode_checked(active, baseline, &|| Ok(()))
 }
 
+#[cfg(unix)]
 fn encode_checked(
     active: &ActiveProject,
     baseline: &SourceBaseline,
@@ -293,6 +309,7 @@ fn encode_checked(
     Ok(output.0)
 }
 
+#[cfg(unix)]
 #[allow(dead_code)]
 pub(in crate::project) fn persist(
     store: &ReceiptStore,
@@ -345,6 +362,7 @@ pub(in crate::project) fn verify(
     verify_checked(store, active, current, recorded, &|| Ok(()))
 }
 
+#[cfg(unix)]
 fn verify_checked(
     store: &ReceiptStore,
     active: &ActiveProject,
@@ -384,6 +402,126 @@ fn verify_checked(
     if bytes.len() as u64 != recorded.length
         || stamp(&before) != stamp(&file.metadata().map_err(|_| invalid())?)
         || stamp(&before) != stamp(&root.symlink_metadata(&name).map_err(|_| invalid())?)
+        || format!("sha256:{:x}", Sha256::digest(&bytes)) != recorded.digest
+        || bytes != encode_checked(active, current, check)?
+    {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn encode_checked(
+    active: &ActiveProject,
+    baseline: &SourceBaseline,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<Vec<u8>, ProjectFailure> {
+    check()?;
+    if baseline.source_root != canonical_protocol_path_without_existing(&active.canonical_git_root)?
+        || baseline.source_identity != active.source_identity
+        || baseline.object_format != active.object_format
+        || baseline.index.commit != active.base_commit
+        || baseline.index.tree != active.base_tree
+    {
+        return Err(invalid());
+    }
+    let mut output = LimitedBytes(Vec::new());
+    output
+        .write_all(b"{\"schemaVersion\":1,\"platform\":\"windows\",\"binding\":")
+        .map_err(|_| invalid())?;
+    serde_json::to_writer(&mut output, &snapshot_identity(active)?).map_err(|_| invalid())?;
+    output
+        .write_all(b",\"indexDigest\":")
+        .map_err(|_| invalid())?;
+    serde_json::to_writer(&mut output, &baseline.index.index_digest).map_err(|_| invalid())?;
+    output
+        .write_all(b",\"indexEntries\":[")
+        .map_err(|_| invalid())?;
+    for (i, (path, entry)) in baseline.index.entries.iter().enumerate() {
+        check()?;
+        if i != 0 {
+            output.write_all(b",").map_err(|_| invalid())?;
+        }
+        serde_json::to_writer(&mut output, &(path, &entry.mode, &entry.oid))
+            .map_err(|_| invalid())?;
+    }
+    output.write_all(b"],\"raw\":").map_err(|_| invalid())?;
+    baseline.raw.write_receipt(&mut output, check)?;
+    output.write_all(b"}").map_err(|_| invalid())?;
+    Ok(output.0)
+}
+
+#[cfg(windows)]
+pub(in crate::project) fn persist(
+    store: &ReceiptStore,
+    active: &ActiveProject,
+    baseline: &SourceBaseline,
+) -> Result<BaselineReceipt, ProjectFailure> {
+    use crate::project::{
+        open_real_file_at, windows_durability, windows_replace,
+        windows_source_inventory::file_observation,
+    };
+    let root = &store.directory;
+    windows_durability::require_ntfs(root)?;
+    let name = filename(active)?;
+    let bytes = encode(active, baseline)?;
+    let receipt = BaselineReceipt {
+        digest: format!("sha256:{:x}", Sha256::digest(&bytes)),
+        length: bytes.len() as u64,
+    };
+    // Exclusive creation, no replacement or cleanup of an existing/partial receipt.
+    // Existing Windows replacement options include WRITE_THROUGH and no-follow.
+    let mut file = root
+        .open_with(&name, &windows_replace::source_options())
+        .map_err(|_| invalid())?;
+    file.write_all(&bytes).map_err(|_| invalid())?;
+    file.sync_all().map_err(|_| invalid())?;
+    let observed = file_observation(&file)?;
+    if observed.length != receipt.length
+        || observed != file_observation(&open_real_file_at(root, &name)?)?
+    {
+        return Err(invalid());
+    }
+    drop(file);
+    verify(store, active, baseline, Some(&receipt))?;
+    Ok(receipt)
+}
+
+#[cfg(windows)]
+fn verify_checked(
+    store: &ReceiptStore,
+    active: &ActiveProject,
+    current: &SourceBaseline,
+    recorded: Option<&BaselineReceipt>,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<(), ProjectFailure> {
+    use crate::project::{open_real_file_at, windows_source_inventory::file_observation};
+    check()?;
+    let recorded = recorded.ok_or_else(invalid)?;
+    if recorded.length == 0 || recorded.length > RECEIPT_MAX_BYTES as u64 {
+        return Err(invalid());
+    }
+    let name = filename(active)?;
+    let mut file = open_real_file_at(&store.directory, &name)?;
+    let before = file_observation(&file)?;
+    if before.length != recorded.length {
+        return Err(invalid());
+    }
+    let mut bytes = Vec::new();
+    let mut input = (&mut file).take(recorded.length + 1);
+    let mut buffer = [0u8; 65536];
+    loop {
+        check()?;
+        let count = input.read(&mut buffer).map_err(|_| invalid())?;
+        check()?;
+        if count == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..count]);
+    }
+    if bytes.len() as u64 != recorded.length
+        || file_observation(&file)? != before
+        || file_observation(&open_real_file_at(&store.directory, &name)?)? != before
         || format!("sha256:{:x}", Sha256::digest(&bytes)) != recorded.digest
         || bytes != encode_checked(active, current, check)?
     {

@@ -24,13 +24,34 @@ impl ApplyingBatch {
             .to_owned();
         let archive = backup::Backup::from_value(&current["backup"]["backup"])?;
         let (header, items) = backup::verify_items(manager, &archive)?;
-        if header != current["backup"]["header"]
-            || items.is_empty()
-            || items.iter().any(|item| {
+        if header != current["backup"]["header"] || items.is_empty() {
+            return Err(invalid());
+        }
+        if items.iter().any(|item| {
+            #[cfg(windows)]
+            {
+                // Admit only regular changes and newly added directories. Reject
+                // type changes before any source item can be written.
+                return (!item["after"].is_null() && !writer::metadata::supported(&item["before"]))
+                    || (!item["after"].is_null()
+                        && !matches!(item["after"]["kind"].as_u64(), Some(1 | 2)))
+                    || (item["after"]["kind"] == 2 && !item["before"].is_null())
+                    || (!item["before"].is_null()
+                        && item["before"]["observation"]["attributes"]
+                            .as_u64()
+                            .is_none_or(|v| v & 0x10 != 0));
+            }
+            #[cfg(not(windows))]
+            {
                 item["before"]["kind"] == 2
                     || (item["after"]["kind"] == 2 && !item["before"].is_null())
-            })
-        {
+            }
+        }) {
+            // This exact owner has never left prepared or created a writer
+            // journal. Do not strand a recovery lock on a known unsupported
+            // Windows item. A failed CAS still leaves the fence intact.
+            #[cfg(windows)]
+            abandon_unwritten(storage, &project_id, &current, request)?;
             return Err(invalid());
         }
         Ok(Self {

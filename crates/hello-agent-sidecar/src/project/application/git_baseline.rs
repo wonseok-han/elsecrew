@@ -1,13 +1,18 @@
 //! Index/HEAD semantic comparison only; raw working-tree equivalence is a separate step.
+#[cfg(unix)]
 use super::{failure, open, stamp, MAX_ENTRIES, MAX_PATH_BYTES};
+#[cfg(windows)]
+use crate::project::windows_source_inventory::{failure, MAX_ENTRIES, MAX_PATH_BYTES};
 use crate::project::{
     parse_tree_record, trim_output, validate_relative_path, validated_oid, ProjectFailure,
     ProjectManager, SourceRepository,
 };
+#[cfg(unix)]
 use cap_std::fs::MetadataExt;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::io::Read;
+#[cfg(unix)]
 pub(in crate::project) mod raw_baseline;
 
 const OUTPUT_LIMIT: usize = 24 * 1024 * 1024;
@@ -15,16 +20,16 @@ const INDEX_LIMIT: u64 = 32 * 1024 * 1024;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(in crate::project) struct GitIndexBaseline {
-    entries: BTreeMap<String, GitEntry>,
-    index_digest: [u8; 32],
-    commit: String,
-    tree: String,
+    pub(in crate::project) entries: BTreeMap<String, GitEntry>,
+    pub(in crate::project) index_digest: [u8; 32],
+    pub(in crate::project) commit: String,
+    pub(in crate::project) tree: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct GitEntry {
-    mode: String,
-    oid: String,
+pub(in crate::project) struct GitEntry {
+    pub(in crate::project) mode: String,
+    pub(in crate::project) oid: String,
 }
 
 // Index-only component; snapshot admission must use the full baseline and durable binding.
@@ -146,6 +151,7 @@ pub(in crate::project) fn capture_index_baseline(
     })
 }
 
+#[cfg(unix)]
 fn index_image(
     manager: &ProjectManager,
     source: &SourceRepository,
@@ -180,6 +186,48 @@ fn index_image(
         return Err(failure());
     }
     Ok((stamp(&metadata), Sha256::digest(&bytes).into()))
+}
+
+#[cfg(windows)]
+fn index_image(
+    manager: &ProjectManager,
+    source: &SourceRepository,
+) -> Result<
+    (
+        crate::project::windows_source_inventory::Observation,
+        [u8; 32],
+    ),
+    ProjectFailure,
+> {
+    use crate::project::{open_real_file_at, windows_source_inventory::file_observation};
+    let mut file = open_real_file_at(&source.git_dir, "index")?;
+    let before = file_observation(&file)?;
+    if before.length > INDEX_LIMIT {
+        return Err(failure());
+    }
+    let mut hash = Sha256::new();
+    let mut count = 0u64;
+    let mut buffer = [0u8; 65536];
+    loop {
+        manager.check_application_preparation()?;
+        let n = file.read(&mut buffer).map_err(|_| failure())?;
+        manager.check_application_preparation()?;
+        if n == 0 {
+            break;
+        }
+        count = count.checked_add(n as u64).ok_or_else(failure)?;
+        if count > INDEX_LIMIT {
+            return Err(failure());
+        }
+        hash.update(&buffer[..n]);
+    }
+    if count != before.length
+        || file_observation(&file)? != before
+        || file_observation(&open_real_file_at(&source.git_dir, "index")?)? != before
+    {
+        return Err(failure());
+    }
+    Ok((before, hash.finalize().into()))
 }
 
 fn parse(
@@ -247,6 +295,121 @@ fn parse(
         }
     }
     Ok(result)
+}
+
+#[cfg(windows)]
+#[derive(Debug, PartialEq, Eq)]
+pub(in crate::project) struct WindowsBaseline {
+    pub(in crate::project) source_root: String,
+    pub(in crate::project) source_identity: String,
+    pub(in crate::project) object_format: String,
+    pub(in crate::project) index: GitIndexBaseline,
+    pub(in crate::project) raw: crate::project::windows_source_inventory::Inventory,
+}
+
+#[cfg(windows)]
+impl WindowsBaseline {
+    pub(in crate::project) fn inventory(
+        &self,
+    ) -> &crate::project::windows_source_inventory::Inventory {
+        &self.raw
+    }
+    pub(in crate::project) fn tracked_paths(&self) -> impl Iterator<Item = &str> {
+        self.index.entries.keys().map(String::as_str)
+    }
+}
+
+#[cfg(windows)]
+pub(in crate::project) fn capture_windows_clean_baseline(
+    manager: &ProjectManager,
+    source: &SourceRepository,
+) -> Result<WindowsBaseline, ProjectFailure> {
+    use crate::project::windows_source_inventory;
+    use std::io::{BufRead, BufReader, Write};
+    let check = || manager.check_application_preparation();
+    let index = capture_index_baseline(manager, source)?;
+    let raw = windows_source_inventory::capture(&source._root, &source.canonical_root, &check)?;
+    let mut child = manager.spawn_git_stream(
+        &source.git_dir,
+        [
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "protocol.allow=never",
+            "cat-file",
+            "--batch",
+        ],
+        true,
+    )?;
+    let mut input = child.stdin.take().ok_or_else(failure)?;
+    let mut output = BufReader::new(child.stdout.take().ok_or_else(failure)?);
+    let mut budget = 4u64 * 1024 * 1024 * 1024;
+    let mut buffer = vec![0u8; 65536];
+    for (path, entry) in &index.entries {
+        check()?;
+        // Windows has no POSIX executable bit. Preserve the committed mode in
+        // the index baseline; never interpret a symlink blob as an ordinary file.
+        if !matches!(entry.mode.as_str(), "100644" | "100755") {
+            return Err(failure());
+        }
+        let (size, expected) = raw.regular_content(path).ok_or_else(failure)?;
+        budget = budget.checked_sub(size).ok_or_else(failure)?;
+        writeln!(input, "{}", entry.oid).map_err(|_| failure())?;
+        input.flush().map_err(|_| failure())?;
+        let mut header = Vec::new();
+        output
+            .by_ref()
+            .take(257)
+            .read_until(b'\n', &mut header)
+            .map_err(|_| failure())?;
+        // Exact framing and bounded size: no filters, textconv or newline conversion.
+        if header != format!("{} blob {size}\n", entry.oid).as_bytes() {
+            return Err(failure());
+        }
+        let mut remaining = size;
+        let mut hash = Sha256::new();
+        while remaining != 0 {
+            check()?;
+            let count = remaining.min(buffer.len() as u64) as usize;
+            output
+                .read_exact(&mut buffer[..count])
+                .map_err(|_| failure())?;
+            check()?;
+            hash.update(&buffer[..count]);
+            remaining -= count as u64;
+        }
+        let mut newline = [0];
+        output.read_exact(&mut newline).map_err(|_| failure())?;
+        let digest: [u8; 32] = hash.finalize().into();
+        if newline != [b'\n'] || digest != expected {
+            return Err(failure());
+        }
+    }
+    drop(input);
+    if output.read(&mut [0u8; 1]).map_err(|_| failure())? != 0 {
+        return Err(failure());
+    }
+    let (status, _) = child.finish().map_err(|_| failure())?;
+    if !status.success() {
+        return Err(failure());
+    }
+    if index != capture_index_baseline(manager, source)?
+        || raw != windows_source_inventory::capture(&source._root, &source.canonical_root, &check)?
+    {
+        return Err(failure());
+    }
+    check()?;
+    Ok(WindowsBaseline {
+        source_root: crate::project::canonical_protocol_path_without_existing(
+            &source.canonical_root,
+        )?,
+        source_identity: source.source_identity.clone(),
+        object_format: source.object_format.clone(),
+        index,
+        raw,
+    })
 }
 
 #[cfg(test)]

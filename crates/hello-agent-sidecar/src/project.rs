@@ -1,8 +1,19 @@
 // Requires native Windows recovery QA and explicit product activation.
 pub(crate) const WINDOWS_SAVE_RECOVERY_MUTATIONS_ENABLED: bool = false;
+// Installation consent is not product activation; native integration review remains required.
+#[cfg(windows)]
+pub(crate) const WINDOWS_GIT_EXECUTION_ENABLED: bool = false;
 #[cfg(not(any(unix, windows)))]
 use crate::process_spawn::SpawnGuarded as _;
 mod app_roles;
+#[cfg(any(windows, test))]
+mod git_selection;
+#[cfg(any(windows, test))]
+mod git_installation_layout;
+#[cfg(windows)]
+mod windows_git_installation;
+#[cfg(windows)]
+mod windows_git_environment;
 mod protocol_path;
 mod path_binding;
 #[cfg(any(windows, test))]
@@ -20,11 +31,32 @@ mod windows_directory_lease;
 #[cfg(windows)]
 mod windows_executable;
 #[cfg(windows)]
+mod windows_authenticode;
+#[cfg(windows)]
+mod windows_system_modules;
+#[cfg(windows)]
 mod windows_replace;
+#[cfg(windows)]
+mod windows_directory_create;
+#[cfg(windows)]
+mod windows_streams;
 #[cfg(windows)]
 mod windows_save_guard;
 #[cfg(windows)]
 mod windows_security;
+#[cfg(windows)]
+mod windows_backup_storage;
+#[cfg(windows)]
+mod windows_source_inventory;
+#[cfg(windows)]
+#[path = "project/application/git_baseline.rs"]
+mod windows_git_baseline;
+#[cfg(windows)]
+#[path = "project/application/git_baseline/raw_baseline/receipt.rs"]
+mod windows_baseline_receipt;
+#[cfg(windows)]
+#[path = "project/application/review.rs"]
+mod windows_application_review;
 #[cfg(windows)]
 mod windows_save_recovery;
 #[cfg(windows)]
@@ -76,6 +108,10 @@ use std::{
 use uuid::Uuid;
 #[cfg(unix)]
 mod application;
+#[cfg(unix)]
+use application::review as application_review;
+#[cfg(windows)]
+use windows_application_review as application_review;
 #[cfg(unix)]
 mod git_process;
 #[cfg(unix)]
@@ -414,10 +450,10 @@ pub struct ProjectManager {
     application_cleanup_enabled: bool,
     application_failure: Option<(String, String, ProjectFailure)>,
     pub(crate) application_cancel: crate::application_cancel::ApplicationCancel,
-    #[cfg(target_os = "macos")]
-    application_job: Option<application::review::intent::execution::ApplicationJob>,
-    #[cfg(unix)]
-    application_confirmations: application::review::confirmation::Confirmations,
+    #[cfg(any(target_os = "macos", windows))]
+    application_job: Option<application_review::intent::execution::ApplicationJob>,
+    #[cfg(any(unix, windows))]
+    application_confirmations: application_review::confirmation::Confirmations,
     data_root: PathBuf,
     data_dir: Dir,
     worktrees_root: PathBuf,
@@ -445,48 +481,48 @@ pub struct WorkspaceAddress {
 
 impl ProjectManager {
     pub(crate) fn inspect_application_retirement(&self, storage: &Storage, project: &str, application: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
-        { let inspection = application::review::intent::retirement::preview(storage, project, application)?;
+        #[cfg(any(unix, windows))]
+        { let inspection = application_review::intent::retirement::preview(storage, project, application)?;
           Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"inspectApplicationRetirement","projectId":project,"enabled":self.application_cleanup_enabled && cfg!(target_os="macos"),"inspection":inspection}), ..Default::default() }) }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         { let _ = (storage,project,application); Err(ProjectFailure::recovery("application retirement unavailable on this platform")) }
     }
 
     pub(crate) fn retire_application(&mut self, storage: &mut Storage, project: &str, application: &str, fingerprint: &str, request: &str) -> Result<ProjectAction, ProjectFailure> {
         if !self.application_cleanup_enabled || !cfg!(target_os="macos") { return Err(ProjectFailure::recovery("application retirement is not enabled")); }
         if self.application_running() || self.preparation_cancel.is_some() || !self.pending_saves.is_empty() { return Err(ProjectFailure::recovery("application retirement requires idle processing")); }
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         { self.application_confirmations.cancel();
-          application::review::intent::retirement::retire(storage, project, application, fingerprint, request)?;
+          application_review::intent::retirement::retire(storage, project, application, fingerprint, request)?;
           Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"retireApplication","projectId":project,"applicationId":application}), ..Default::default() }) }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         { let _ = (storage,project,application,fingerprint,request); Err(ProjectFailure::recovery("application retirement unavailable on this platform")) }
     }
 
     pub(crate) fn inspect_backup_cleanup(&self, storage: &Storage, project: &str, review: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
-        { let inspection = application::review::backup::cleanup::preview(self, storage, project, review)?;
+        #[cfg(any(unix, windows))]
+        { let inspection = application_review::backup::cleanup::preview(self, storage, project, review)?;
           Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"inspectBackupCleanup","projectId":project,"enabled":self.application_cleanup_enabled && cfg!(target_os="macos"),"inspection":inspection}), ..Default::default() }) }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         { let _ = (storage, project, review); Err(ProjectFailure::recovery("backup cleanup unavailable on this platform")) }
     }
 
     pub(crate) fn cleanup_backup(&mut self, storage: &mut Storage, project: &str, review: &str, fingerprint: &str, request: &str) -> Result<ProjectAction, ProjectFailure> {
         if !self.application_cleanup_enabled || !cfg!(target_os="macos") { return Err(ProjectFailure::recovery("backup cleanup is not enabled")); }
         if self.application_running() || self.preparation_cancel.is_some() || !self.pending_saves.is_empty() { return Err(ProjectFailure::recovery("backup cleanup requires idle processing")); }
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         { self.application_confirmations.cancel();
-          application::review::backup::cleanup::remove(self, storage, project, review, fingerprint, request)?;
+          application_review::backup::cleanup::remove(self, storage, project, review, fingerprint, request)?;
           Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"cleanupBackup","projectId":project,"reviewId":review}), ..Default::default() }) }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         { let _ = (storage, project, review, fingerprint, request); Err(ProjectFailure::recovery("backup cleanup unavailable on this platform")) }
     }
 
     pub(crate) fn backup_retention(&self, storage: &Storage, project_id: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         { let project = required_project(storage, project_id)?;
-          Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"backupRetention","projectId":project_id,"entries":application::review::backup::retention::summarize(&project)?}), ..Default::default() }) }
-        #[cfg(not(unix))]
+          Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"backupRetention","projectId":project_id,"entries":application_review::backup::retention::summarize(&project)?}), ..Default::default() }) }
+        #[cfg(not(any(unix, windows)))]
         { let _ = (storage, project_id); Err(ProjectFailure::recovery("backup retention inspection unavailable on this platform")) }
     }
 
@@ -495,19 +531,24 @@ impl ProjectManager {
         #[cfg(unix)]
         { application::review::backup::set_storage_limit(self, expected, limit)?;
           Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"setBackupStorageLimit","limitBytes":limit}), ..Default::default() }) }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        { windows_backup_storage::set_limit(self, expected, limit)?;
+          Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"setBackupStorageLimit","limitBytes":limit}), ..Default::default() }) }
+        #[cfg(not(any(unix, windows)))]
         { let _ = (expected, limit); Err(ProjectFailure::recovery("backup budget change unavailable on this platform")) }
     }
 
     pub(crate) fn backup_storage_usage(&self) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(unix)]
         { Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"backupStorageUsage","usage":application::review::backup::storage_usage(self)?}), ..Default::default() }) }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        { Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"backupStorageUsage","usage":windows_backup_storage::usage(self)?}), ..Default::default() }) }
+        #[cfg(not(any(unix, windows)))]
         { Err(ProjectFailure::recovery("backup storage inspection unavailable on this platform")) }
     }
 
     pub(crate) fn backup_preparations(&self, storage: &Storage, project_id: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             let project = required_project(storage, project_id)?;
             let mut entries = Vec::new();
@@ -518,29 +559,29 @@ impl ProjectManager {
                     if id.len() != 39 || !id.starts_with("review_") || !id[7..].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) || entries.len() >= 1000 {
                         return Err(ProjectFailure::recovery("invalid backup preparation identity"));
                     }
-                    let checked = application::review::backup::staging::inspect(self, storage, project_id, id)?;
+                    let checked = application_review::backup::staging::inspect(self, storage, project_id, id)?;
                     let fingerprint = format!("{:x}", Sha256::digest(serde_json::to_vec(&checked).map_err(|_| ProjectFailure::recovery("invalid backup record"))?));
                     entries.push(json!({"reviewId":id,"fingerprint":fingerprint}));
                 }
             }
             Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"backupPreparations","projectId":project_id,"entries":entries}), ..Default::default() })
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         { let _ = (storage, project_id); Err(ProjectFailure::recovery("backup recovery unavailable on this platform")) }
     }
 
     pub(crate) fn abandon_backup_preparation(&mut self, storage: &mut Storage, project_id: &str, review_id: &str, fingerprint: &str, request: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             if self.application_running() || self.preparation_cancel.is_some() || !self.pending_saves.is_empty() { return Err(ProjectFailure::recovery("backup recovery requires idle processing")); }
-            let record = application::review::backup::staging::inspect(self, storage, project_id, review_id)?;
+            let record = application_review::backup::staging::inspect(self, storage, project_id, review_id)?;
             let current = format!("{:x}", Sha256::digest(serde_json::to_vec(&record).map_err(|_| ProjectFailure::recovery("invalid backup record"))?));
             if current != fingerprint || record["state"] != "preparing" { return Err(ProjectFailure::recovery("backup preparation changed; inspect again")); }
-            application::review::backup::staging::abandon(self, storage, project_id, review_id, &record, request)?;
+            application_review::backup::staging::abandon(self, storage, project_id, review_id, &record, request)?;
             self.application_confirmations.cancel();
             Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"abandonBackupPreparation","projectId":project_id,"reviewId":review_id}), ..Default::default() })
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         { let _ = (storage, project_id, review_id, fingerprint, request); Err(ProjectFailure::recovery("backup recovery unavailable on this platform")) }
     }
 
@@ -555,40 +596,40 @@ impl ProjectManager {
     }
 
     pub(crate) fn start_application_request(&mut self, storage: &mut Storage, project: &str, chat: &str, token: &str, request: &str) -> Result<ProjectAction, ProjectFailure> {
-        if !self.source_writes_enabled { return Err(ProjectFailure::recovery("source application is not enabled")); }
-        #[cfg(target_os = "macos")]
+        if !self.source_writes_enabled || !cfg!(target_os = "macos") { return Err(ProjectFailure::recovery("source application is not enabled")); }
+        #[cfg(any(target_os = "macos", windows))]
         {
             if !self.application_confirmations.matches_chat(token, project, chat) { return Err(ProjectFailure::recovery("application confirmation target changed")); }
             let record = self.start_confirmed_application(storage, token, request)?;
             Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"startApplication","projectId":project,"chatId":chat,"applicationId":record["applicationId"]}), ..Default::default() })
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         { let _ = (storage, project, chat, token, request); Err(ProjectFailure::recovery("application unavailable on this platform")) }
     }
 
     pub(crate) fn restore_application_request(&mut self, storage: &Storage, project: &str, application_id: &str, fingerprint: &str, request: &str) -> Result<ProjectAction, ProjectFailure> {
-        if !self.source_writes_enabled { return Err(ProjectFailure::recovery("source restoration is not enabled")); }
-        #[cfg(target_os = "macos")]
+        if !self.source_writes_enabled || !cfg!(target_os = "macos") { return Err(ProjectFailure::recovery("source restoration is not enabled")); }
+        #[cfg(any(target_os = "macos", windows))]
         {
             self.restoration_preview(storage, project, application_id, 0, Some(fingerprint))?;
-            let record = application::review::intent::inspect(storage, project)?;
+            let record = application_review::intent::inspect(storage, project)?;
             let current = format!("{:x}", Sha256::digest(serde_json::to_vec(&record).map_err(|_| ProjectFailure::recovery("invalid restoration record"))?));
             if current != fingerprint { return Err(ProjectFailure::recovery("restoration record changed")); }
             self.start_selected_restoration(storage, project, &record, request)?;
             Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"restoreApplication","projectId":project,"applicationId":application_id}), ..Default::default() })
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         { let _ = (storage, project, application_id, fingerprint, request); Err(ProjectFailure::recovery("restoration unavailable on this platform")) }
     }
     pub(crate) fn application_running(&self) -> bool {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         { self.application_job.is_some() }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         { false }
     }
 
     /// Internal admission only: no public source-write command is enabled yet.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     #[allow(dead_code)]
     fn start_confirmed_application(&mut self, storage: &mut Storage, token: &str, request: &str) -> Result<Value, ProjectFailure> {
         if self.application_job.is_some() || !self.pending_saves.is_empty() || !storage.blocker_ids()?.is_empty() {
@@ -599,7 +640,7 @@ impl ProjectManager {
             .ok_or_else(|| ProjectFailure::recovery("application confirmation cancellation slot missing"))?);
         let mut confirmations = std::mem::take(&mut self.application_confirmations);
         let result = confirmations.prepare_backup(self, storage, token, request)
-            .and_then(|prepared| application::review::intent::execution::ApplyingBatch::start(self, storage, &mut confirmations, prepared, request));
+            .and_then(|prepared| application_review::intent::execution::ApplyingBatch::start(self, storage, &mut confirmations, prepared, request));
         self.application_confirmations = confirmations;
         if result.is_err() { self.application_confirmations.cancel(); }
         self.preparation_cancel = None;
@@ -610,29 +651,29 @@ impl ProjectManager {
             token,
             record["applicationId"].as_str().ok_or_else(|| ProjectFailure::recovery("missing application identity"))?,
         ) { return Err(ProjectFailure::recovery("application preparation identity changed")); }
-        self.application_job = Some(application::review::intent::execution::ApplicationJob::Apply(owner));
+        self.application_job = Some(application_review::intent::execution::ApplicationJob::Apply(owner));
         self.application_failure = None;
         Ok(record)
     }
 
     /// Internal exact-record restoration admission; not a public write endpoint.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     #[allow(dead_code)]
     fn start_selected_restoration(&mut self, storage: &Storage, project_id: &str, expected: &Value, request: &str) -> Result<Value, ProjectFailure> {
         if self.application_job.is_some() || !self.pending_saves.is_empty() {
             return Err(ProjectFailure::recovery("restoration requires an idle workspace"));
         }
-        let owner = application::review::intent::execution::RestoringBatch::start(storage, project_id, expected, request)?;
+        let owner = application_review::intent::execution::RestoringBatch::start(storage, project_id, expected, request)?;
         let id = expected["applicationId"].as_str().ok_or_else(|| ProjectFailure::recovery("missing application identity"))?;
         self.application_confirmations.cancel();
         self.application_cancel.begin(project_id, id);
-        self.application_job = Some(application::review::intent::execution::ApplicationJob::Restore(owner));
+        self.application_job = Some(application_review::intent::execution::ApplicationJob::Restore(owner));
         self.application_failure = None;
         Ok(expected.clone())
     }
 
     pub(crate) fn poll_application(&mut self, storage: &mut Storage) {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         if let Some(mut owner) = self.application_job.take() {
             // Failure leaves the durable application fence for explicit recovery;
             // never infer completion from dropping the session owner.
@@ -650,22 +691,22 @@ impl ProjectManager {
                 }
             }
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         let _ = storage;
     }
 
     pub(crate) fn stop_application(&mut self) {
         self.application_cancel.stop();
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         { self.application_job = None; }
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         self.application_confirmations.cancel();
         // Between synchronous ticks, dropping this owner stops future writes.
         // The existing recovery lock is deliberately not cleared here.
     }
 
     pub(crate) fn cancel_application(&mut self, project_id: &str, application_id: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         {
             let matches_owner = self.application_job.as_ref().is_some_and(|owner|
                 owner.record()["applicationId"] == application_id && owner.record()["binding"]["projectId"] == project_id);
@@ -675,31 +716,31 @@ impl ProjectManager {
             self.stop_application();
             Ok(ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"cancelApplication","projectId":project_id,"applicationId":application_id}), ..Default::default() })
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         { let _ = (project_id, application_id); Err(ProjectFailure::recovery("application unavailable on this platform")) }
     }
     pub(crate) fn cancel_application_confirmation(&mut self, token: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         if self.application_cancel.cancel_confirmation(token) {
             self.stop_application();
         } else {
             self.application_confirmations.cancel_token(token)?;
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         return Err(ProjectFailure::recovery("application confirmation unavailable on this platform"));
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         Ok(ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"cancelApplicationConfirmation","confirmationId":token}), ..Default::default() })
     }
     pub(crate) fn open_application_confirmation(&mut self, storage: &mut Storage, project_id: &str, chat_id: &str, fingerprint: &str, request_id: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             self.application_confirmations.cancel();
             let chat = storage.projection_record("chat", chat_id)?.ok_or_else(|| ProjectFailure::dirty("review chat missing"))?;
             let record = chat.get("record").and_then(Value::as_object).ok_or_else(|| ProjectFailure::dirty("review chat record missing"))?;
             let address = WorkspaceAddress { project_id: project_id.to_owned(), chat_id: chat_id.to_owned(), worktree_id: value_string(record, "worktreeId")?.to_owned(), workspace_identity: value_string(record, "workspaceIdentity")?.to_owned() };
-            let target = application::review::ReviewTarget::Chat { address: &address, task_id: value_string(record, "taskId")? };
-            application::review::prepare_target(self, storage, target)?.preview_page(0, Some(fingerprint))?;
-            let saved = application::review::persistence::publish_target(self, storage, target, request_id)?;
+            let target = application_review::ReviewTarget::Chat { address: &address, task_id: value_string(record, "taskId")? };
+            application_review::prepare_target(self, storage, target)?.preview_page(0, Some(fingerprint))?;
+            let saved = application_review::persistence::publish_target(self, storage, target, request_id)?;
             let mut owner = std::mem::take(&mut self.application_confirmations);
             let opened = owner.open(self, storage, target, saved["reviewId"].as_str().ok_or_else(|| ProjectFailure::dirty("review identity missing"))?);
             let result = opened.and_then(|(token, plan)| {
@@ -711,33 +752,33 @@ impl ProjectManager {
             self.application_confirmations = owner;
             result
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = (storage, project_id, chat_id, fingerprint, request_id);
             Err(ProjectFailure::recovery("application confirmation unavailable on this platform"))
         }
     }
     pub(crate) fn application_preview_page(&self, storage: &Storage, project_id: &str, chat_id: Option<&str>, offset: usize, fingerprint: Option<&str>) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             let page = if let Some(chat_id) = chat_id {
                 let chat = storage.projection_record("chat", chat_id)?.ok_or_else(|| ProjectFailure::dirty("review chat missing"))?;
                 let record = chat.get("record").and_then(Value::as_object).ok_or_else(|| ProjectFailure::dirty("review chat record missing"))?;
                 let address = WorkspaceAddress { project_id: project_id.to_owned(), chat_id: chat_id.to_owned(), worktree_id: value_string(record, "worktreeId")?.to_owned(), workspace_identity: value_string(record, "workspaceIdentity")?.to_owned() };
-                application::review::prepare_target(self, storage, application::review::ReviewTarget::Chat { address: &address, task_id: value_string(record, "taskId")? })?.preview_page(offset, fingerprint)?
+                application_review::prepare_target(self, storage, application_review::ReviewTarget::Chat { address: &address, task_id: value_string(record, "taskId")? })?.preview_page(offset, fingerprint)?
             } else {
-                application::review::prepare(self, storage, project_id)?.preview_page(offset, fingerprint)?
+                application_review::prepare(self, storage, project_id)?.preview_page(offset, fingerprint)?
             };
             Ok(ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"applicationPreviewPage","projectId":project_id,"chatId":chat_id,"page":page}), ..Default::default() })
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = (storage, project_id, chat_id, offset, fingerprint);
             Err(ProjectFailure::recovery("application preview unavailable on this platform"))
         }
     }
     pub(crate) fn chat_application_preview(&self, storage: &Storage, project_id: &str, chat_id: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             let chat = storage.projection_record("chat", chat_id)?.ok_or_else(|| ProjectFailure::dirty("review chat missing"))?;
             let record = chat.get("record").and_then(Value::as_object).ok_or_else(|| ProjectFailure::dirty("review chat record missing"))?;
@@ -746,23 +787,26 @@ impl ProjectManager {
                 worktree_id: value_string(record, "worktreeId")?.to_owned(),
                 workspace_identity: value_string(record, "workspaceIdentity")?.to_owned(),
             };
-            let plan = application::review::prepare_target(self, storage, application::review::ReviewTarget::Chat { address: &address, task_id: value_string(record, "taskId")? })?;
+            let plan = application_review::prepare_target(self, storage, application_review::ReviewTarget::Chat { address: &address, task_id: value_string(record, "taskId")? })?;
             Ok(ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"chatApplicationPreview","projectId":project_id,"chatId":chat_id,"preview":plan.preview()}), ..Default::default() })
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = (storage, project_id, chat_id);
             Err(ProjectFailure::recovery("chat application preview unavailable on this platform"))
         }
     }
     pub(crate) fn prepare_application_workspace(&mut self, storage: &mut Storage, project_id: &str, request_id: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             // Reject unsupported/dirty input before reserving a recovery lock.
             // Creation captures again under its durable launch fence.
             let project = required_project(storage, project_id)?;
             let source = self.open_source_repository(Path::new(value_string(&project, "canonical_path")?))?;
+            #[cfg(unix)]
             application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)?;
+            #[cfg(windows)]
+            windows_git_baseline::capture_windows_clean_baseline(self, &source)?;
             self.create_worktree_inner(storage, project_id, request_id, None, None, SnapshotCreation::ApplicationCandidate)?;
             let active = self.validate_active_project(storage, project_id)?;
             Ok(ProjectAction {
@@ -770,22 +814,22 @@ impl ProjectManager {
                 ..Default::default()
             })
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = (storage, project_id, request_id);
             Err(ProjectFailure::recovery("application workspace unavailable on this platform"))
         }
     }
     pub(crate) fn application_preview(&self, storage: &Storage, project_id: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
-            let plan = application::review::prepare(self, storage, project_id)?;
+            let plan = application_review::prepare(self, storage, project_id)?;
             Ok(ProjectAction {
                 result: serde_json::json!({"schemaVersion":1,"action":"applicationPreview","projectId":project_id,"preview":plan.preview()}),
                 ..Default::default()
             })
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = (storage, project_id);
             Err(ProjectFailure::recovery("application preview unavailable on this platform"))
@@ -829,12 +873,12 @@ impl ProjectManager {
         let mut status = if project.get("application_intent").is_none() {
             serde_json::json!({"projectId":project_id,"applicationId":null,"state":"none","currentIndex":null,"total":0})
         } else {
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             {
-                let record = application::review::intent::inspect(storage, project_id)?;
+                let record = application_review::intent::inspect(storage, project_id)?;
                 serde_json::json!({"projectId":project_id,"applicationId":record["applicationId"],"state":record["state"],"currentIndex":record["pendingItem"]["index"],"total":record["backup"]["header"]["count"]})
             }
-            #[cfg(not(unix))]
+            #[cfg(not(any(unix, windows)))]
             {
                 return Err(ProjectFailure::recovery(
                     "application state inspection unavailable on this platform",
@@ -842,7 +886,7 @@ impl ProjectManager {
             }
         };
         let mut running = false;
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         if let Some(owner) = self.application_job.as_ref() {
             running = owner.record()["applicationId"] == status["applicationId"]
                 && owner.record()["binding"]["projectId"] == project_id;
@@ -873,9 +917,9 @@ impl ProjectManager {
     }
     /// Archive contents are evidence, not a prediction that every item will be changed.
     pub(crate) fn restoration_preview(&self, storage: &Storage, project_id: &str, application_id: &str, offset: usize, expected_fingerprint: Option<&str>) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
-            use application::review::{backup, intent};
+            use application_review::{backup, intent};
             let invalid = || ProjectFailure::recovery("restoration review changed or is unavailable");
             if self.application_running() || offset > 100_000 || offset % 100 != 0 || (offset != 0 && expected_fingerprint.is_none()) { return Err(invalid()); }
             let record = intent::inspect(storage, project_id)?;
@@ -892,7 +936,7 @@ impl ProjectManager {
             if intent::inspect(storage, project_id)? != record { return Err(invalid()); }
             Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"restorationPreview","projectId":project_id,"applicationId":application_id,"state":record["state"],"page":{"worktreeId":record["binding"]["worktreeId"],"total":items.len(),"offset":offset,"fingerprint":fingerprint,"changes":changes}}), ..Default::default() })
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         { let _ = (storage, project_id, application_id, offset, expected_fingerprint); Err(ProjectFailure::recovery("restoration review unavailable on this platform")) }
     }
     pub fn new(database_path: &Path) -> Result<Self, SidecarError> {
@@ -926,9 +970,9 @@ impl ProjectManager {
             application_cleanup_enabled: cfg!(target_os = "macos"),
             application_failure: None,
             application_cancel: Default::default(),
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", windows))]
             application_job: None,
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             application_confirmations: Default::default(),
             data_root,
             data_dir,
@@ -1296,6 +1340,10 @@ impl ProjectManager {
         } else {
             None
         };
+        #[cfg(windows)]
+        let raw_source = if creation == SnapshotCreation::ApplicationCandidate {
+            Some(windows_git_baseline::capture_windows_clean_baseline(self, &source)?)
+        } else { None };
         let bundle_bytes = self.export_bundle(&source.git_dir, &staging)?;
         let after = source_digest(&source.git_dir)?;
         if before != after || after.lock_count != 0 {
@@ -1313,6 +1361,14 @@ impl ProjectManager {
         if let Some(expected) = &baseline {
             if *expected != application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)? {
                 return Err(ProjectFailure::dirty("source baseline changed during snapshot export"));
+            }
+        }
+
+        #[cfg(windows)]
+        if let Some(expected) = &raw_source {
+            let observed = windows_git_baseline::capture_windows_clean_baseline(self, &source)?;
+            if *expected != observed {
+                return Err(ProjectFailure::dirty("Windows source changed during snapshot export"));
             }
         }
 
@@ -1344,6 +1400,10 @@ impl ProjectManager {
             application::git_baseline::raw_baseline::receipt::persist_and_bind(
                 self, storage, &active, baseline, request_id,
             )?;
+        }
+        #[cfg(windows)]
+        if let Some(baseline) = &raw_source {
+            windows_baseline_receipt::persist_and_bind(self, storage, &active, baseline, request_id)?;
         }
         let manifest = manifest_value(&active, "active")?;
         write_json_atomic(
@@ -4476,6 +4536,7 @@ impl ProjectManager {
     // Single launch boundary for control output, bundle export, materialization,
     // and diff batch readers. Windows admission can bind capabilities here
     // without leaving raw Command spawning at individual consumers.
+    #[cfg(not(windows))]
     fn spawn_git_stream<I, S>(
         &self, directory: &Dir, args: I, input: bool,
     ) -> Result<StreamingGitChild, ProjectFailure>
@@ -4494,6 +4555,67 @@ impl ProjectManager {
         child.map_err(|error| {
             ProjectFailure::recovery(format!("could not start fixed Git command: {error}"))
         })
+    }
+
+    #[cfg(windows)]
+    fn spawn_git_stream<I, S>(
+        &self, directory: &Dir, args: I, input: bool,
+    ) -> Result<StreamingGitChild, ProjectFailure>
+    where I: IntoIterator<Item = S>, S: AsRef<OsStr>,
+    {
+        if !WINDOWS_GIT_EXECUTION_ENABLED {
+            return Err(ProjectFailure::recovery("Windows Git execution has not been activated"));
+        }
+        self.verify_managed_paths()?;
+        let runtime = self.admitted_git_runtime()?;
+        // Retain an existing repository directory, never a file Git must
+        // replace. Before init, only the already-durable app staging bundle
+        // can substitute; never manufacture a guard in a source folder.
+        let mut guard = None;
+        for name in [".git", "objects"] {
+            match directory.symlink_metadata(name) {
+                Ok(metadata) if metadata.is_dir() => { guard = Some(name); break; },
+                Ok(_) => return Err(ProjectFailure::symlink("Git cwd guard is not a real directory")),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+                Err(_) => return Err(ProjectFailure::recovery("Git cwd guard is unavailable")),
+            }
+        }
+        if guard.is_none() {
+            // Snapshot export fsyncs this app-created bundle before git init.
+            // Reuse it as the nonempty-directory guard instead of writing a
+            // sentinel into a source or leaving another cleanup obligation.
+            let cwd_path = windows_fs::local_guid_path(directory)?;
+            let managed_path = windows_fs::local_guid_path(&self.worktrees_dir)?;
+            let (parent, name) = cwd_path.rsplit_once('\\').ok_or_else(|| ProjectFailure::manifest("snapshot staging has no parent"))?;
+            let staging_id = name.strip_prefix(".worktree_").and_then(|value| value.strip_suffix(".creating"));
+            if !parent.eq_ignore_ascii_case(managed_path.trim_end_matches('\\'))
+                || !staging_id.is_some_and(|value| value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))) {
+                return Err(ProjectFailure::recovery("empty Git cwd is not an app-owned snapshot staging directory"));
+            }
+            let linked = open_real_child_dir(&self.worktrees_dir, name)?;
+            if windows_fs::identity(&linked, true)? != windows_fs::identity(directory, true)? {
+                return Err(ProjectFailure::recovery("snapshot staging directory changed"));
+            }
+            let bundle = open_real_file_at(directory, SNAPSHOT_BUNDLE)?;
+            if bundle.metadata().map_err(|_| ProjectFailure::recovery("snapshot bundle metadata is unavailable"))?.len() == 0 {
+                return Err(ProjectFailure::recovery("snapshot initialization bundle is empty"));
+            }
+            guard = Some(SNAPSHOT_BUNDLE);
+        }
+        let guard = guard.ok_or_else(|| ProjectFailure::recovery("Git cwd requires a retained repository directory"))?;
+        let cwd = windows_directory_lease::DirectoryLease::acquire(directory, OsStr::new(guard))?;
+        let mut encoded = Vec::new();
+        let mut size = 0usize;
+        for arg in args {
+            let arg = arg.as_ref().to_str().ok_or_else(|| ProjectFailure::manifest("Git argument is not Unicode"))?;
+            size = size.saturating_add(arg.encode_utf16().count() + 1);
+            if encoded.len() >= 256 || size > 30_000 || arg.contains('\0') {
+                return Err(ProjectFailure::manifest("Git arguments exceed Windows limits"));
+            }
+            encoded.push(arg.to_owned());
+        }
+        StreamingGitChild::spawn_internal_git(runtime, &encoded, cwd, input, self.watch_cancel.clone())
+            .map_err(|error| ProjectFailure::recovery(format!("could not start inspected Git command: {error}")))
     }
 
     fn finish_git_control(mut child: StreamingGitChild, allowed: &[i32]) -> Result<Output, ProjectFailure> {
@@ -4611,6 +4733,7 @@ impl ProjectManager {
             .env("GIT_CONFIG_COUNT", "0")
             .env("GIT_OPTIONAL_LOCKS", "0")
             .env("GIT_NO_REPLACE_OBJECTS", "1")
+            .env("GIT_NO_LAZY_FETCH", "1")
             .env("GIT_ATTR_NOSYSTEM", "1")
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_PAGER", "")
@@ -6275,6 +6398,31 @@ mod watch_native_tests;
 #[cfg(all(test, windows))]
 mod windows_tests {
     use super::*;
+
+    #[test]
+    fn application_scheduler_connection_does_not_enable_windows_writes() {
+        let root = tempfile::tempdir().unwrap();
+        let database = root.path().join("hello-agent.sqlite3");
+        let mut storage = Storage::open(&database).unwrap();
+        let mut manager = ProjectManager::new(&database).unwrap();
+        assert!(!manager.application_running());
+        // An accidentally set preference is not Windows platform activation.
+        manager.source_writes_enabled = true;
+        assert_eq!(manager.application_capabilities().result["enabled"], false);
+        let apply = manager.start_application_request(
+            &mut storage, "project_missing", "chat_missing", "token_missing", "req_apply",
+        ).unwrap_err();
+        assert_eq!(apply.detail, "source application is not enabled");
+        let restore = manager.restore_application_request(
+            &storage, "project_missing", "application_missing", "fingerprint", "req_restore",
+        ).unwrap_err();
+        assert_eq!(restore.detail, "source restoration is not enabled");
+        manager.poll_application(&mut storage);
+        manager.stop_application();
+        assert!(!manager.application_running());
+        assert!(storage.projection_records("project").unwrap().is_empty());
+        assert!(storage.blocker_ids().unwrap().is_empty());
+    }
 
     #[test]
     fn fake_path_git_is_never_started() {

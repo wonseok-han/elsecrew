@@ -115,7 +115,7 @@ fn prepare_inner(
     }
     let name = format!("backup_{}.bin", Uuid::new_v4().simple());
     space::plan(manager, &plan)?;
-    let header = json!({"version":2,"reviewId":review_id,"binding":plan.binding,"changesDigest":plan.digest,"count":plan.changes.len()});
+    let header = json!({"version":FORMAT_VERSION,"reviewId":review_id,"binding":plan.binding,"changesDigest":plan.digest,"count":plan.changes.len()});
     let pending = json!({"version":1,"state":"preparing","name":name,"header":header});
     write_record(
         storage,
@@ -184,7 +184,10 @@ pub(in crate::project) fn inspect(
         return Err(invalid());
     }
     match record["state"].as_str() {
-        Some("abandoned") if record.as_object().is_some_and(|v| v.len() == 5) && record.get("cleanup").is_some() => {
+        Some("abandoned")
+            if record.as_object().is_some_and(|v| v.len() == 5)
+                && record.get("cleanup").is_some() =>
+        {
             // Cleanup is separate from preparation state; it never makes an archive ready.
             super::cleanup::preview(manager, storage, project_id, review_id)?;
             Ok(record.clone())
@@ -218,7 +221,7 @@ pub(in crate::project) fn resume(
         return Err(invalid());
     }
     let plan = persistence::reopen_target(manager, storage, target, review_id)?;
-    let expected_header = json!({"version":2,"reviewId":review_id,"binding":plan.binding,"changesDigest":plan.digest,"count":plan.changes.len()});
+    let expected_header = json!({"version":FORMAT_VERSION,"reviewId":review_id,"binding":plan.binding,"changesDigest":plan.digest,"count":plan.changes.len()});
     if record["header"] != expected_header {
         return Err(invalid());
     }
