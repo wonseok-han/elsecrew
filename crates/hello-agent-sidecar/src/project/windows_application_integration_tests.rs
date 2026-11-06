@@ -62,7 +62,9 @@ fn confirmed_multi_item_apply_and_restore_through_scheduler_and_ledger() {
     fs::write(source.join("edit.txt"), b"before-edit").unwrap();
     fs::write(source.join("delete.txt"), b"before-delete").unwrap();
     let directory = Dir::open_ambient_dir(&source, ambient_authority()).unwrap();
-    bootstrap_git(&manager, &directory, &["init", "--quiet"]);
+    // This generated repository needs no installed template files or hooks.
+    // Keep fixture initialization independent of Git's relocated template path.
+    bootstrap_git(&manager, &directory, &["init", "--quiet", "--template="]);
     bootstrap_git(&manager, &directory, &["add", "."]);
     bootstrap_git(
         &manager,

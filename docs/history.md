@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
-2026-11-06 Windows CI42176391575에서 실행용 DOS 표기 수정이 컴파일·native·dispatcher를 통과하고 CreateProcessW OS87 이후 단계까지 진행했으나 실제 실행 image 신원 비교에서 거부됐다. 최초/자손 구분 진단과 후속수정이 필요하며 전체 반영/복원은 미검증이다. 최신 공개 승인3회 모두 사용; exact conhost 허용 수정 후보5dd9393b의 CI42178206686 실행 중. macOS G6 메모리·Windows 제품 활성화·출시는 미완료다. 상세는 아래 및 [11월 아카이브](archive/history-2026-11.md).
+2026-11-06 Windows CI42178206686에서 실제 Git 버전조회·stdin 명령·동의철회와 엄격한 conhost 신원/종료 처리가 통과했다. 다음 반영/복원 fixture의 저장소 초기화가 설치 template 경로 오류로 실패해 --template= 수정 후보3a02b433을 준비했다. 새로 승인된 최대3회 중1회를 사용해 후보3a02b433의 CI42178964335가 실행 중이다. macOS G6·Windows 전체 반영/복원·제품 활성화·출시는 미완료다. 상세는 아래 및 [11월 아카이브](archive/history-2026-11.md).
+
+### 2026-11-06 · by GPT-6
+
+- CI42178206686은 terminal failure다. installed Git 진단은 최소/고정환경 --version과 stdin hash-object, trust revoke를 통과했다. root Git/exact conhost의 기존 family 종료 확인 증거를 얻었다. 다음 generated application fixture는 git init의 설치 template 경로가 //?/C:/...로 해석되어 copy 실패(exit128)했고 실제 반영/복원에는 미도달했다.
+- 시험 생성 repository는 외부 template/hooks가 필요 없으므로 init에 --template=를 명시하는 최소 fixture 수정을 준비했다. 제품 Git environment/실행권한/안전계약은 변경하지 않는다. rustfmt/diff 통과, native 재실행은 아직이다. 추가push 예산0이며 단일파일 후보3a02b433을 준비해 다음 CI 범위승인을 요청한다. 사용자 call_7b336145811043eaa5b7232ac2868086 승인으로 동일 시험 오류수정 push/CI 최대3회가 새로 허용됐다. 후보3a02b433 게시와 CI42178964335 in_progress 확인으로1/3사용·2회잔여다. 제품활성화/안전계약변경/패키징/모델/main 제외. 로그 /tmp/hello-agent-windows-42178206686-failure.log. macOS G6/Windows 전체반영복원/출시 미완료다.
 
 ### 2026-11-06 · by GPT-6
 
