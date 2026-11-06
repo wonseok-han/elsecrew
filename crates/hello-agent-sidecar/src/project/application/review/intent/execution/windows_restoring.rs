@@ -140,9 +140,22 @@ impl RestoringBatch {
                             }
                         }
                         "detachAfterIntent" | "cancelStagedIntent" | "restoreBeforeIntent" => {
-                            writer::recovery::acknowledge_interrupted_move(
-                                manager, storage, id, current, request, &check,
-                            )?
+                            let observed = writer::recovery::inspect_interrupted_move(
+                                manager, storage, id, current, &check,
+                            )?;
+                            match observed["comparison"].as_str() {
+                                Some("matchesMoved") => {
+                                    writer::recovery::acknowledge_interrupted_move(
+                                        manager, storage, id, current, request, &check,
+                                    )?
+                                }
+                                Some("matchesUnmoved") => {
+                                    writer::recovery::resume_interrupted_restore(
+                                        manager, storage, id, current, request, &check,
+                                    )?
+                                }
+                                _ => return Err(invalid()),
+                            }
                         }
                         "restored" if pending["index"] == 0 => {
                             completion::finish(manager, storage, id, current, true, request)?

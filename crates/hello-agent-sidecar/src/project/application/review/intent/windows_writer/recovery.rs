@@ -1,4 +1,5 @@
-//! Explicit acknowledgement of an interrupted rename; never reruns a syscall.
+//! Read-only inspection and explicit recovery of journaled moves.
+//! New apply execution cannot be resumed from a persisted journal.
 use super::*;
 
 fn interrupted_step(j: &Value) -> Result<Move, ProjectFailure> {
@@ -46,6 +47,13 @@ fn observe_leaf(
     Ok(Some((file, observed)))
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ObservationMode {
+    ReadOnly,
+    FlushMoved,
+    ResumeUnmovedRestore,
+}
+
 struct Evidence {
     journal: Value,
     comparison: &'static str,
@@ -56,6 +64,8 @@ struct Evidence {
     _source: Option<(File, Value)>,
     _destination: Option<(File, Value)>,
     _other: Option<File>,
+    other_name: String,
+    other_entry: Value,
 }
 
 fn observe(
@@ -63,16 +73,24 @@ fn observe(
     storage: &Storage,
     project_id: &str,
     expected: &Value,
-    flush_moved: bool,
+    mode: ObservationMode,
     check: &dyn Fn() -> Result<(), ProjectFailure>,
 ) -> Result<Evidence, ProjectFailure> {
     check()?;
+    if mode != ObservationMode::ReadOnly && expected["state"] != "applying" {
+        return Err(invalid());
+    }
     if inspect_pending_item(manager, storage, project_id)? != *expected {
         return Err(invalid());
     }
     let mut j = expected["pendingItem"]["writeJournal"].clone();
     validate_receipts(&j, &expected["pendingItem"]["item"])?;
     let step = interrupted_step(&j)?;
+    if mode == ObservationMode::ResumeUnmovedRestore
+        && matches!(step, Move::PreserveBefore | Move::InstallAfter)
+    {
+        return Err(invalid());
+    }
     let item = &expected["pendingItem"]["item"];
     let (root, dir, leaf) = source_parent(manager, expected)?;
     if json!(windows_fs::identity(&root, true)?) != j["rootIdentity"]
@@ -114,14 +132,22 @@ fn observe(
     if matches!(step, Move::CancelStaged) {
         absent(&dir, &leaf)?;
     }
-    let mut source = observe_leaf(&dir, &from, false, check)?;
-    let mut destination = observe_leaf(&dir, &to, flush_moved, check)?;
+    let mut source = observe_leaf(
+        &dir,
+        &from,
+        mode == ObservationMode::ResumeUnmovedRestore,
+        check,
+    )?;
+    let mut destination = observe_leaf(&dir, &to, mode == ObservationMode::FlushMoved, check)?;
     let comparison = match (&source, &destination) {
         (Some((_, before)), None) if *before == expected_entry => "matchesUnmoved",
         (None, Some((_, after))) if unchanged_by_move(&expected_entry, after) => "matchesMoved",
         _ => "conflict",
     };
-    if flush_moved {
+    if mode == ObservationMode::ResumeUnmovedRestore && comparison != "matchesUnmoved" {
+        return Err(invalid());
+    }
+    if mode == ObservationMode::FlushMoved {
         if comparison != "matchesMoved" {
             return Err(invalid());
         }
@@ -176,6 +202,8 @@ fn observe(
         _source: source,
         _destination: destination,
         _other: other,
+        other_name,
+        other_entry,
     })
 }
 
@@ -188,7 +216,14 @@ pub(in crate::project) fn inspect_interrupted_move(
     expected: &Value,
     check: &dyn Fn() -> Result<(), ProjectFailure>,
 ) -> Result<Value, ProjectFailure> {
-    let evidence = observe(manager, storage, project_id, expected, false, check)?;
+    let evidence = observe(
+        manager,
+        storage,
+        project_id,
+        expected,
+        ObservationMode::ReadOnly,
+        check,
+    )?;
     Ok(
         json!({"applicationId":expected["applicationId"],"index":expected["pendingItem"]["index"],"phase":expected["pendingItem"]["writeJournal"]["phase"],"comparison":evidence.comparison}),
     )
@@ -205,7 +240,14 @@ pub(in crate::project) fn acknowledge_interrupted_move(
     request: &str,
     check: &dyn Fn() -> Result<(), ProjectFailure>,
 ) -> Result<Value, ProjectFailure> {
-    let evidence = observe(manager, storage, project_id, expected, true, check)?;
+    let evidence = observe(
+        manager,
+        storage,
+        project_id,
+        expected,
+        ObservationMode::FlushMoved,
+        check,
+    )?;
     check()?;
     publish(
         storage,
@@ -341,7 +383,14 @@ pub(in crate::project) fn cancel_unmoved_install(
     if expected["pendingItem"]["writeJournal"]["phase"] != "installIntent" {
         return Err(invalid());
     }
-    let mut evidence = observe(manager, storage, project_id, expected, false, check)?;
+    let mut evidence = observe(
+        manager,
+        storage,
+        project_id,
+        expected,
+        ObservationMode::ReadOnly,
+        check,
+    )?;
     if evidence.comparison != "matchesUnmoved" {
         return Err(invalid());
     }
@@ -420,5 +469,90 @@ pub(in crate::project) fn cancel_unwritten_item(
     j["canceledUnwritten"] = json!(true);
     j["restoredEntry"] = item["before"].clone();
     j["phase"] = json!("restored");
+    publish(storage, project_id, expected, j, request)
+}
+
+/// Only an explicit restore owner may request this. Reobserve and hold the exact
+/// unmoved source with rename rights; do not convert an apply intent into write
+/// permission. The existing durable restore intent precedes this syscall too.
+pub(in crate::project) fn resume_interrupted_restore(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    project_id: &str,
+    expected: &Value,
+    request: &str,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<Value, ProjectFailure> {
+    let mut evidence = observe(
+        manager,
+        storage,
+        project_id,
+        expected,
+        ObservationMode::ResumeUnmovedRestore,
+        check,
+    )?;
+    let mut j = evidence.journal.clone();
+    let step = interrupted_step(&j)?;
+    if !matches!(
+        step,
+        Move::DetachAfter | Move::CancelStaged | Move::RestoreBefore
+    ) {
+        return Err(invalid());
+    }
+    let item = &expected["pendingItem"]["item"];
+    let (_, leaf) = parent(&evidence._root, item["path"].as_str().ok_or_else(invalid)?)?;
+    let (_, intent, complete, from, to, expected_entry, receipt) =
+        transition(&j, item, &leaf, step)?;
+    if j["phase"] != intent
+        || evidence.comparison != "matchesUnmoved"
+        || evidence._destination.is_some()
+    {
+        return Err(invalid());
+    }
+    let (file, observed) = evidence._source.as_mut().ok_or_else(invalid)?;
+    if *observed != expected_entry || entry(file, check)? != expected_entry {
+        return Err(invalid());
+    }
+    windows_durability::require_ntfs(file)?;
+    absent(&evidence._parent, &to)?;
+    evidence._lease.validate()?;
+    check()?;
+    if inspect_pending_item(manager, storage, project_id)? != *expected {
+        return Err(invalid());
+    }
+    windows_replace::move_new(file, &evidence._lease, &to)?;
+    file.sync_all().map_err(|_| invalid())?;
+    let moved = entry(file, check)?;
+    if !unchanged_by_move(&expected_entry, &moved)
+        || entry(&mut open_real_file_at(&evidence._parent, &to)?, check)? != moved
+    {
+        return Err(invalid());
+    }
+    absent(&evidence._parent, &from)?;
+    if matches!(step, Move::CancelStaged) {
+        absent(&evidence._parent, &leaf)?;
+    }
+    verify_pin(
+        &evidence._parent,
+        &evidence.other_name,
+        &evidence.other_entry,
+        &mut evidence._other,
+        check,
+    )?;
+    evidence._lease.validate()?;
+    let rebound = open_absolute_directory_capability(Path::new(
+        expected["binding"]["canonicalGitRoot"]
+            .as_str()
+            .ok_or_else(invalid)?,
+    ))?;
+    let (rebound_parent, _) = parent(&rebound, item["path"].as_str().ok_or_else(invalid)?)?;
+    if json!(windows_fs::identity(&rebound, true)?) != j["rootIdentity"]
+        || json!(windows_fs::identity(&rebound_parent, true)?) != j["parentIdentity"]
+    {
+        return Err(invalid());
+    }
+    check()?;
+    j[receipt] = moved;
+    j["phase"] = json!(complete);
     publish(storage, project_id, expected, j, request)
 }

@@ -223,7 +223,8 @@ pub(in crate::project) fn reserve(
     check: &dyn Fn() -> Result<(), ProjectFailure>,
 ) -> Result<Value, ProjectFailure> {
     check()?;
-    if inspect_pending_item(manager, storage, project_id)? != *expected
+    if expected["state"] != "applying"
+        || inspect_pending_item(manager, storage, project_id)? != *expected
         || expected["pendingItem"].get("writeJournal").is_some()
     {
         return Err(invalid());
@@ -256,7 +257,9 @@ pub(in crate::project) fn stage(
     check: &dyn Fn() -> Result<(), ProjectFailure>,
 ) -> Result<Value, ProjectFailure> {
     check()?;
-    if inspect_pending_item(manager, storage, project_id)? != *expected {
+    if expected["state"] != "applying"
+        || inspect_pending_item(manager, storage, project_id)? != *expected
+    {
         return Err(invalid());
     }
     let mut j = expected["pendingItem"]["writeJournal"].clone();
@@ -404,7 +407,9 @@ pub(in crate::project) fn move_file(
     check: &dyn Fn() -> Result<(), ProjectFailure>,
 ) -> Result<Value, ProjectFailure> {
     check()?;
-    if inspect_pending_item(manager, storage, project_id)? != *expected {
+    if expected["state"] != "applying"
+        || inspect_pending_item(manager, storage, project_id)? != *expected
+    {
         return Err(invalid());
     }
     let mut j = expected["pendingItem"]["writeJournal"].clone();

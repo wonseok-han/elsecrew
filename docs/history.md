@@ -4,6 +4,13 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준7fb9e90의 깨끗한 통합 checkout에서 unmoved 복원 intent의 명시 재개를 추가했다. 관측 모드를 read-only/moved flush/unmoved restore로 분리하고 restore3종(DetachAfter/CancelStaged/RestoreBefore)에만 source rename권한·write-through handle을 보유한다. 원본 보존/새 내용 설치 intent는 재개를 거절하며 explicit restore owner만 이 경로를 호출한다.
+- exact pending/archive·source/목적지 부재·상대편 pin·root/parent/guard를 재확인한 뒤 기존 durable restore intent 아래 move_new를 수행한다. sync/전체 재관측/이전 이름 부재/상대편/root 재결속 뒤에만 phase를 CAS 게시하며 오류·취소는 intent와 보존 파일을 남긴다. 이미 moved면 기존 acknowledge, conflict면 오류로 구분한다.
+- Windows reserve/stage/move와 쓰기 모드 관측에 applying 사전 조건을 추가했다. 완료 상태의 기록으로 원본을 먼저 바꾼 뒤 publish에서 거절되는 호출을 방지하며 begin_restore의 재잠금이 필요하다. 독립 검토자1명은 이번 diff에 정적 차단 결함 없음으로 확인했다. 선택 rustfmt/diff만 실행했고 native 시험은 누적 검증에 남긴다.
+- 다음은 reserved 부분 준비의 명시 취소/보존, directory·추가 metadata·cleanup·제품 scheduler 연결과 검증이다. 기존 macOS cancel_reserved_staging은 부분 파일을 삭제하지 않고 현재 신원/내용을 관측해 canceledStaging/restored로 보존하므로 Windows 후속도 이 비파괴 경계를 참조한다. Windows gate 비활성, 신규 cache/package/worktree/push/CI/모델 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준43d562f의 깨끗한 통합 checkout에서 Windows batch completion을 연결했다. 기존 전체 항목 수/index·completed/restored prefix/suffix·unstarted tail·archive 결속 검사를 유지하고 플랫폼별 파일 검증을2pass 수행한 뒤 같은 project/lock CAS로 완료·복원·원본 쓰기 전 포기를 기록한다. Windows selected 항목은 원래 scope 전체와 목록 포함 관계를 대조하며 pending-item용 DB 검증과 파일 배치 검증을 분리해 완료 목록을 검증한다.
 - Windows untouched tail은 Git/source binding과 before entry를 확인하고 root/parent를 재결속한다. 아직 없는 부모를 허용할 때도 held parent를 원본 root에서 다시 찾아 ID와 부재를 대조한다. 단일 항목 관측을 전체 완료로 대체하지 않는다.
 - 내부 실행 owner도 Windows에 연결했다. 새 확인 handoff만 reserve→stage→보존→설치를 실행하며 오류/취소는 owner를 영구 중단한다. 명시 restore owner는 준비 포기·미시작 tail·원본 미이동 취소·부분 취소·moved intent 확인·역순 cursor·전체 마감을 조합한다. 새 디렉터리/미지원 종류는 첫 원본 이동 전 묶음 admission에서 거부한다. reserved 부분 파일과 unmoved restore intent는 아직 오류/잠금 유지이며 재시도·삭제로 덮지 않는다.
