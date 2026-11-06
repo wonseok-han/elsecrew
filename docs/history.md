@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준2a07f177에서 남은 범위를 release-checklist의 Electron 후보 요구와 대조했다. G6 메모리/입력·Windows 통합/활성화·최종 안전/출시 증거가 남으며 제안서의 과거 미구현 표현을 현재 코드 누락으로 단정하지 않았다.
+- 화면 유지 응답 없이 가능한 최신 renderer 기능 회귀를 수행했다. Vite renderer build 및 tests/m5-renderer-mount-smoke.mts2/2 PASS(Chromium 약15.4초). lazy Monaco/local worker·기존 diff 페이지/재열기 등의 기능 경로가 유지됨을 확인했으며 실제 RSS/입력/G6/제품 전체 합격으로 확장하지 않는다. 출력은 /tmp/hello-agent-renderer-20261106-test.log, 임시 테스트 데이터는 부모 harness의 정상 종료 정리 경로로 제거됐다.
+- 미실행 QA package2ONxaj는 그대로 보관하며 중복 포장하지 않았다. 새 화면 유지 질문과 Windows2e5a98a 추가push 질문은 아직 미응답이다. 다음은 각각 응답 후 준비된 단일 성능 시험 및 승인 범위 Windows 통합 진단이다. 새 모델·원격 실행·제품 활성화 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 깨끗한73f6ea9d에서 Rust release·Electron main/preload·renderer·QA 포장을 완료했다. 대기 시험 앱은 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-output-qa-2ONxaj (310MiB), build.json status BUILT이며 sidecar SHA256은 이전 시험과 동일하다. 앱/모델은 아직 실행하지 않았다. 시작 전 관련 시험 프로세스 부재를 확인했다.
 - 사용자에게 새5분 화면 유지 가능 여부를 요청했고 아직 미응답이다. 기존 시험 폴더를 재사용할 수 있도록 이 경로를 기록하며 중복 패키지를 만들지 않는다. 다음은 해당 응답 후 이 패키지로 combined 1회 실행·종료 확인·증거 보존·임시 폴더 정리다.
 - Windows2e5a98a commit 존재와 native launch 환경 구성·CreateProcessW 호출을 읽기 전용으로 재확인했으나 새 원인 근거는 없었다. 기존 추가push 승인 질문도 미응답이며 원격 실행 없음. 메모리/입력FAIL·Windows 전체 반영/복원·출시 검증은 계속 남는다.
