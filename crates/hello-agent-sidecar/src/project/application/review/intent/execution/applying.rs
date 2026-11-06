@@ -30,10 +30,12 @@ impl ApplyingBatch {
         if items.iter().any(|item| {
             #[cfg(windows)]
             {
-                // Directory support must be connected before admitting these
-                // items, never fail only after earlier source writes.
+                // Admit only regular changes and newly added directories. Reject
+                // type changes before any source item can be written.
                 return (!item["after"].is_null() && !writer::metadata::supported(&item["before"]))
-                    || (!item["after"].is_null() && item["after"]["kind"] != 1)
+                    || (!item["after"].is_null()
+                        && !matches!(item["after"]["kind"].as_u64(), Some(1 | 2)))
+                    || (item["after"]["kind"] == 2 && !item["before"].is_null())
                     || (!item["before"].is_null()
                         && item["before"]["observation"]["attributes"]
                             .as_u64()

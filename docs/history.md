@@ -4,6 +4,14 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준d347029f에서 하위 작업으로 변하는 directory written/changed/length와 identity/생성시각/권한/속성을 구분했다. 과거 receipt 연속성·pin·중단 분류는 directory 안정 필드를 비교하되 실제 mutation/completion은 full scope child tree 검사를 함께 요구한다. 이동 자체의 전후 비교는 현재 held 관측을 기준으로 ChangeTime만 허용하며 일반 파일의 비교는 유지한다.
+- 부분 reserved directory 취소는 관측된 staged 폴더의 종류·자식 부재/소유권을 확인하고 삭제 없이 보존한다. 취소 receipt는 directory 길이를 파일 after-size0으로 잘못 제한하지 않으며 directory marker/digest0을 요구한다. 원본 before/이동 receipt 부재 검사는 유지한다.
+- 상위 새 폴더를 detached 이름으로 복원한 뒤 하위 항목을 원래 경로에서 찾지 못하는 문제에 대해 읽기 전용 parent_in_scope를 연결했다. exact 원장의 적용/복원된 ancestor 이름과 full ID를 따라가고 parent/root를 다시 검증한다. mutation 경로에는 이 이름 추론을 사용하지 않는다. completion은 전체 scope를 계속 전달한다.
+- 내부 ApplyingBatch가 새 디렉터리(kind2/before없음)를 처리하도록 연결했다. 기존 디렉터리 교체·종류 전환은 첫 쓰기 전에 거절한다. 외부 Windows apply/restore 제품 gate는 계속 닫혀 있다. 안정 필드 불일치/합법 child metadata 변화 회귀 후보를 추가했고 선택 rustfmt/diff만 수행했다. 이번 연결의 compile/native·중첩/부분/중단 통합 및 독립 검토는 최종 파동 검증 전이므로 합격/완료가 아니다.
+- 남은 구현/검증: Windows 추가 metadata·원본 private 파일 수명/정리·플랫폼 통합과 G6/출시. 신규 cache/package/push/CI/모델 실행 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준c9ee142에서 Windows writer/recovery의 held entry 관측과 no-follow reopen/pin에 디렉터리를 연결했다. 파일은 기존 내용 hash/전체 관측을 유지하고 디렉터리는 full ID·metadata/security 관측과 digest0으로 구분한다. 실제 source 이동은 receipt 종류에 따라 regular move_new 또는 directory move_new_directory를 선택한다.
 - 이동 전후와 interrupted move 분류/명시 복원 재개에서 디렉터리 child ownership tree를 확인한다. 복원 계열은 하위 항목 restored 조건을 요구하고 상대편 보존 객체/완료 배치 검사도 디렉터리일 때 tree를 대조한다. 일반 파일을 디렉터리처럼 읽어 성공시키지 않으며 오류/취소·미확인 flush는 기존 intent를 유지한다.
 - completion이 과거 항목을 pendingItem으로 선택하면 원래 현재 child 기록이 사라질 수 있어 전체 scope를 별도로 전달하는 verify_bound_item_layout_in_scope를 연결했다. 선택 항목 외 scope 필드 일치·기존 completed/restored membership 검사는 유지하고 child map에는 원래 pending child까지 포함한다.

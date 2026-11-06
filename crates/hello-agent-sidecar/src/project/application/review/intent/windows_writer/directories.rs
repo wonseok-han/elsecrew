@@ -112,9 +112,91 @@ pub(super) fn stage_new(
     Ok(receipt)
 }
 
+/// Resolve a descendant after an ancestor added by this application has been
+/// restored into its retained private name. Read-only completion uses this;
+/// mutation paths never guess or follow a renamed ancestor from arbitrary input.
+pub(super) fn parent_in_scope(
+    root: &Dir,
+    path: &str,
+    scope: &Value,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<(Dir, String), ProjectFailure> {
+    validate_relative_path(path, false)?;
+    let mut ancestors = BTreeMap::new();
+    let mut count = 0usize;
+    let mut add = |record: &Value| -> Result<(), ProjectFailure> {
+        count += 1;
+        if count > 100_000 {
+            return Err(invalid());
+        }
+        let candidate = record["item"]["path"].as_str().ok_or_else(invalid)?;
+        if !path
+            .strip_prefix(candidate)
+            .is_some_and(|tail| tail.starts_with('/'))
+        {
+            return Ok(());
+        }
+        if record["item"]["after"]["kind"] != 2 || !record["item"]["before"].is_null() {
+            return Err(invalid());
+        }
+        let j = &record["writeJournal"];
+        validate_receipts(j, &record["item"])?;
+        let (physical, receipt) = match j["phase"].as_str() {
+            Some("applied") => (
+                candidate.rsplit('/').next().ok_or_else(invalid)?.to_owned(),
+                j["installedEntry"].clone(),
+            ),
+            Some("restored") if !j["detachedEntry"].is_null() => {
+                (name(j, "detached")?, j["detachedEntry"].clone())
+            }
+            _ => return Err(invalid()),
+        };
+        if ancestors
+            .insert(candidate.to_owned(), (physical, receipt))
+            .is_some()
+        {
+            return Err(invalid());
+        }
+        Ok(())
+    };
+    for field in ["completedItems", "restoredItems"] {
+        if let Some(records) = scope.get(field) {
+            for record in records.as_array().ok_or_else(invalid)? {
+                add(record)?;
+            }
+        }
+    }
+    if let Some(record) = scope.get("pendingItem") {
+        add(record)?;
+    }
+    let components: Vec<_> = path.split('/').collect();
+    if components.len() > 129 {
+        return Err(invalid());
+    }
+    let (leaf, parents) = components.split_last().ok_or_else(invalid)?;
+    let mut directory = root.try_clone().map_err(|_| invalid())?;
+    let mut logical = String::new();
+    for component in parents {
+        check()?;
+        if !logical.is_empty() {
+            logical.push('/');
+        }
+        logical.push_str(component);
+        if let Some((physical, receipt)) = ancestors.get(&logical) {
+            directory = open_real_child_dir(&directory, physical)?;
+            if !same_directory(receipt, &observed_directory(&directory)?) {
+                return Err(invalid());
+            }
+        } else {
+            directory = open_real_child_dir(&directory, component)?;
+        }
+    }
+    Ok((directory, (*leaf).to_owned()))
+}
+
 /// Directory timestamps/length can change as journaled children are installed.
 /// Only use this comparison together with the complete child ownership scan.
-fn same_directory(expected: &Value, actual: &Value) -> bool {
+pub(super) fn same_directory(expected: &Value, actual: &Value) -> bool {
     if expected["observation"]["attributes"]
         .as_u64()
         .is_none_or(|v| v & 0x10 == 0)
@@ -287,6 +369,25 @@ mod tests {
             "rootIdentity":{"volume":1,"file":vec![1;16]},"parentIdentity":{"volume":1,"file":vec![2;16]},"guardEntry":null,"stagedEntry":null,
             "retainedEntry":null,"installedEntry":null,"detachedEntry":null,"restoredEntry":null,
             "canceledReservation":true}})
+    }
+    #[test]
+    fn directory_child_metadata_changes_do_not_allow_identity_or_access_changes() {
+        let before = json!({"observation":{"identity":{"volume":1,"file":vec![1;16]},"created":1,"written":2,"changed":3,"length":0,"attributes":16,"links":1,"access":"acl"},"digest":vec![0;32]});
+        let mut after = before.clone();
+        after["observation"]["written"] = json!(20);
+        after["observation"]["changed"] = json!(30);
+        after["observation"]["length"] = json!(4096);
+        assert!(same_directory(&before, &after));
+        for (field, value) in [
+            ("created", json!(2)),
+            ("attributes", json!(18)),
+            ("access", json!("other")),
+            ("identity", json!({"volume":2,"file":vec![1;16]})),
+        ] {
+            let mut changed = after.clone();
+            changed["observation"][field] = value;
+            assert!(!same_directory(&before, &changed));
+        }
     }
     #[test]
     fn new_directory_stage_is_empty_and_never_reuses_a_name() {

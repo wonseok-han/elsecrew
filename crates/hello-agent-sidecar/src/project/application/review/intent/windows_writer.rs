@@ -32,10 +32,7 @@ fn parent(root: &Dir, path: &str) -> Result<(Dir, String), ProjectFailure> {
     Ok((dir, leaf.to_string()))
 }
 
-fn source_parent(
-    manager: &ProjectManager,
-    record: &Value,
-) -> Result<(Dir, Dir, String), ProjectFailure> {
+fn source_root(manager: &ProjectManager, record: &Value) -> Result<Dir, ProjectFailure> {
     let binding = &record["binding"];
     let source = manager.open_source_repository(Path::new(
         binding["canonicalGitRoot"].as_str().ok_or_else(invalid)?,
@@ -47,14 +44,22 @@ fn source_parent(
     {
         return Err(invalid());
     }
+    Ok(source._root)
+}
+
+fn source_parent(
+    manager: &ProjectManager,
+    record: &Value,
+) -> Result<(Dir, Dir, String), ProjectFailure> {
+    let root = source_root(manager, record)?;
     let (dir, leaf) = parent(
-        &source._root,
+        &root,
         record["pendingItem"]["item"]["path"]
             .as_str()
             .ok_or_else(invalid)?,
     )?;
     windows_durability::require_ntfs(&dir)?;
-    Ok((source._root, dir, leaf))
+    Ok((root, dir, leaf))
 }
 
 fn validate(j: &Value) -> Result<(), ProjectFailure> {
@@ -476,6 +481,24 @@ fn entry(
     Ok(json!({"observation":before,"digest":<[u8;32]>::from(hash.finalize())}))
 }
 
+/// Child work legitimately changes directory size/write/change times. This is
+/// only receipt continuity: every directory mutation/completion also requires
+/// verify_directory_contents with the full application scope.
+fn same_recorded_entry(expected: &Value, actual: &Value) -> bool {
+    if is_directory(expected) && is_directory(actual) {
+        directories::same_directory(expected, actual)
+    } else {
+        expected == actual
+    }
+}
+fn receipt_continuity(before: &Value, after: &Value) -> bool {
+    if is_directory(before) && is_directory(after) {
+        directories::same_directory(before, after)
+    } else {
+        unchanged_by_move(before, after)
+    }
+}
+
 fn unchanged_by_move(before: &Value, after: &Value) -> bool {
     // A rename can update ChangeTime. All other captured fields, including full
     // ID, content, creation/write times, attributes and ACL must remain equal.
@@ -598,8 +621,9 @@ pub(in crate::project) fn move_file(
     options.create_new(false).maybe_dir(true);
     let mut source = dir.open_with(&from, &options).map_err(|_| invalid())?;
     windows_durability::require_ntfs(&source)?;
-    if entry(&mut source, check)? != expected_entry
-        || entry(&mut open_object_at(&dir, &from)?, check)? != expected_entry
+    let source_before = entry(&mut source, check)?;
+    if !same_recorded_entry(&expected_entry, &source_before)
+        || entry(&mut open_object_at(&dir, &from)?, check)? != source_before
     {
         return Err(invalid());
     }
@@ -636,7 +660,7 @@ pub(in crate::project) fn move_file(
         ),
         check,
     )?;
-    if !unchanged_by_move(&expected_entry, &moved)
+    if !unchanged_by_move(&source_before, &moved)
         || entry(&mut open_object_at(&dir, &to)?, check)? != moved
     {
         return Err(invalid());
@@ -707,8 +731,9 @@ fn verify_pin(
     match held {
         None if expected.is_null() => absent(dir, name),
         Some(file) => {
-            if entry(file, check)? == *expected
-                && entry(&mut open_object_at(dir, name)?, check)? == *expected
+            let observed = entry(file, check)?;
+            if same_recorded_entry(expected, &observed)
+                && entry(&mut open_object_at(dir, name)?, check)? == observed
             {
                 Ok(())
             } else {
@@ -813,6 +838,12 @@ fn validate_receipts(j: &Value, item: &Value) -> Result<(), ProjectFailure> {
             if !entry.is_object() {
                 return Err(invalid());
             }
+            if directory && key == "stagedEntry" {
+                if !is_directory(entry) || entry["digest"] != json!(vec![0u8; 32]) {
+                    return Err(invalid());
+                }
+                continue;
+            }
             let max = if key == "guardEntry" {
                 b"hello-agent-windows-application-guard-v1\n".len() as u64
             } else {
@@ -915,7 +946,7 @@ fn validate_receipts(j: &Value, item: &Value) -> Result<(), ProjectFailure> {
             &j["restoredEntry"],
         ),
     ] {
-        if required && !unchanged_by_move(before, after) {
+        if required && !receipt_continuity(before, after) {
             return Err(invalid());
         }
     }

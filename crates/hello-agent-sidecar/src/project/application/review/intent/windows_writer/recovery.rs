@@ -165,8 +165,10 @@ fn observe(
         )?;
     }
     let comparison = match (&source, &destination) {
-        (Some((_, before)), None) if *before == expected_entry => "matchesUnmoved",
-        (None, Some((_, after))) if unchanged_by_move(&expected_entry, after) => "matchesMoved",
+        (Some((_, before)), None) if same_recorded_entry(&expected_entry, before) => {
+            "matchesUnmoved"
+        }
+        (None, Some((_, after))) if receipt_continuity(&expected_entry, after) => "matchesMoved",
         _ => "conflict",
     };
     if mode == ObservationMode::ResumeUnmovedRestore && comparison != "matchesUnmoved" {
@@ -386,7 +388,15 @@ pub(in crate::project) fn verify_bound_item_layout_in_scope(
         Some("restored") => true,
         _ => return Err(invalid()),
     };
-    let (root, dir, leaf) = source_parent(manager, expected)?;
+    let root = source_root(manager, expected)?;
+    let (dir, leaf) = directories::parent_in_scope(
+        &root,
+        expected["pendingItem"]["item"]["path"]
+            .as_str()
+            .ok_or_else(invalid)?,
+        scope,
+        check,
+    )?;
     if json!(windows_fs::identity(&root, true)?) != j["rootIdentity"]
         || json!(windows_fs::identity(&dir, true)?) != j["parentIdentity"]
     {
@@ -432,11 +442,13 @@ pub(in crate::project) fn verify_bound_item_layout_in_scope(
             .as_str()
             .ok_or_else(invalid)?,
     ))?;
-    let (rebound_parent, _) = parent(
+    let (rebound_parent, _) = directories::parent_in_scope(
         &rebound,
         expected["pendingItem"]["item"]["path"]
             .as_str()
             .ok_or_else(invalid)?,
+        scope,
+        check,
     )?;
     if json!(windows_fs::identity(&rebound, true)?) != j["rootIdentity"]
         || json!(windows_fs::identity(&rebound_parent, true)?) != j["parentIdentity"]
@@ -588,7 +600,7 @@ pub(in crate::project) fn resume_interrupted_restore(
         return Err(invalid());
     }
     let (file, observed) = evidence._source.as_mut().ok_or_else(invalid)?;
-    if *observed != expected_entry || entry(file, check)? != expected_entry {
+    if !same_recorded_entry(&expected_entry, observed) || entry(file, check)? != *observed {
         return Err(invalid());
     }
     windows_durability::require_ntfs(file)?;
@@ -606,7 +618,7 @@ pub(in crate::project) fn resume_interrupted_restore(
     file.sync_all().map_err(|_| invalid())?;
     let moved = entry(file, check)?;
     verify_directory_contents(file, &moved, expected, true, check)?;
-    if !unchanged_by_move(&expected_entry, &moved)
+    if !unchanged_by_move(observed, &moved)
         || entry(&mut open_object_at(&evidence._parent, &to)?, check)? != moved
     {
         return Err(invalid());
@@ -673,6 +685,16 @@ pub(in crate::project) fn cancel_reserved_staging(
     let staged_name = name(&j, "staged")?;
     let mut guard = observe_leaf(&dir, &guard_name, false, check)?;
     let mut staged = observe_leaf(&dir, &staged_name, false, check)?;
+    if let Some((file, observed)) = &staged {
+        if j["directoryV1"] == true {
+            if !is_directory(observed) {
+                return Err(invalid());
+            }
+            verify_directory_contents(file, observed, expected, true, check)?;
+        } else if is_directory(observed) {
+            return Err(invalid());
+        }
+    }
     let lease_name = if guard.is_some() {
         Some(&guard_name)
     } else if staged.is_some() {
