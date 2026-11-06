@@ -65,6 +65,7 @@ fn validate(j: &Value) -> Result<(), ProjectFailure> {
                 + usize::from(o.contains_key("canceledUnwritten"))
                 + usize::from(o.contains_key("canceledReservation"))
                 + usize::from(o.contains_key("basicMetadataV1"))
+                + usize::from(o.contains_key("directoryV1"))
             || [
                 "version",
                 "platform",
@@ -101,6 +102,9 @@ fn validate(j: &Value) -> Result<(), ProjectFailure> {
             )
         )
     {
+        return Err(invalid());
+    }
+    if j.get("directoryV1").is_some_and(|v| v != &json!(true)) {
         return Err(invalid());
     }
     if j.get("basicMetadataV1").is_some_and(|v| v != &json!(true)) {
@@ -255,10 +259,16 @@ pub(in crate::project) fn reserve(
     if observed["rootIdentity"] != root_identity {
         return Err(invalid());
     }
-    let journal = json!({"version":1,"platform":"windows","basicMetadataV1":true,"phase":"reserved","nonce":Uuid::new_v4().simple().to_string(),
+    let mut journal = json!({"version":1,"platform":"windows","basicMetadataV1":true,"phase":"reserved","nonce":Uuid::new_v4().simple().to_string(),
         "rootIdentity":root_identity,"parentIdentity":windows_fs::identity(&dir,true)?,
         "guardEntry":null,"stagedEntry":null,"retainedEntry":null,"installedEntry":null,"detachedEntry":null,"restoredEntry":null});
     check()?;
+    if expected["pendingItem"]["item"]["after"]["kind"] == 2 {
+        if !expected["pendingItem"]["item"]["before"].is_null() {
+            return Err(invalid());
+        }
+        journal["directoryV1"] = json!(true);
+    }
     publish(storage, project_id, expected, journal, request)
 }
 
@@ -288,7 +298,8 @@ pub(in crate::project) fn stage(
         && item["before"]["observation"]["attributes"]
             .as_u64()
             .is_none_or(|v| v & 0x10 != 0))
-        || (!item["after"].is_null() && item["after"]["kind"] != 1)
+        || (!item["after"].is_null() && !matches!(item["after"]["kind"].as_u64(), Some(1 | 2)))
+        || (item["after"]["kind"] == 2 && !item["before"].is_null())
         || (item["before"].is_null() && item["after"].is_null())
     {
         return Err(invalid());
@@ -309,7 +320,25 @@ pub(in crate::project) fn stage(
     guard.sync_all().map_err(|_| invalid())?;
     let lease = DirectoryLease::acquire(&dir, OsStr::new(&guard_name))?;
     j["guardEntry"] = entry(&mut guard, check)?;
-    if !item["after"].is_null() {
+    if item["after"]["kind"] == 2 {
+        if j["directoryV1"] != true
+            || item["after"] != json!({"kind":2,"executable":false,"size":0,"digest":vec![0u8;32]})
+        {
+            return Err(invalid());
+        }
+        let snapshot = open_absolute_directory_capability(Path::new(
+            expected["worktreePath"].as_str().ok_or_else(invalid)?,
+        ))?;
+        let (input_parent, input_leaf) =
+            parent(&snapshot, item["path"].as_str().ok_or_else(invalid)?)?;
+        j["stagedEntry"] = directories::stage_new(
+            &lease,
+            &input_parent,
+            &input_leaf,
+            &name(&j, "staged")?,
+            check,
+        )?;
+    } else if !item["after"].is_null() {
         let snapshot = open_absolute_directory_capability(Path::new(
             expected["worktreePath"].as_str().ok_or_else(invalid)?,
         ))?;
@@ -675,6 +704,10 @@ fn transition(
 /// fields are evidence to check, not authority to substitute arbitrary files.
 fn validate_receipts(j: &Value, item: &Value) -> Result<(), ProjectFailure> {
     validate(j)?;
+    let directory = item["after"]["kind"] == 2;
+    if directory != (j["directoryV1"] == true) || (directory && !item["before"].is_null()) {
+        return Err(invalid());
+    }
     if j["canceledReservation"] == true {
         // Observed partial files are preserved, not authenticated after-images
         // or authority for deletion. The original must still be exact before.
@@ -748,7 +781,23 @@ fn validate_receipts(j: &Value, item: &Value) -> Result<(), ProjectFailure> {
     }
     if rank >= 1 && after {
         let staged = &j["stagedEntry"];
-        let image = json!({"kind":1,"executable":false,"size":staged["observation"]["length"],"digest":staged["digest"]});
+        let image = if directory {
+            if staged["observation"]["attributes"]
+                .as_u64()
+                .is_none_or(|v| v & 0x10 == 0)
+            {
+                return Err(invalid());
+            }
+            json!({"kind":2,"executable":false,"size":0,"digest":staged["digest"]})
+        } else {
+            if staged["observation"]["attributes"]
+                .as_u64()
+                .is_none_or(|v| v & 0x10 != 0)
+            {
+                return Err(invalid());
+            }
+            json!({"kind":1,"executable":false,"size":staged["observation"]["length"],"digest":staged["digest"]})
+        };
         if image != item["after"]
             || (j["basicMetadataV1"] == true && !metadata::matches(&item["before"], staged))
             || (before

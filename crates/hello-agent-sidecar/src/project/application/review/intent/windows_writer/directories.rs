@@ -68,6 +68,50 @@ fn child(
     Ok(())
 }
 
+/// Prepare only an empty new directory. Children are separate archive items;
+/// the caller has already durably reserved this private name. Never reuse it.
+pub(super) fn stage_new(
+    lease: &DirectoryLease,
+    snapshot_parent: &Dir,
+    snapshot_leaf: &str,
+    staged_name: &str,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<Value, ProjectFailure> {
+    check()?;
+    let input = open_real_child_dir(snapshot_parent, snapshot_leaf)?;
+    let before = observed_directory(&input)?;
+    let output = crate::project::windows_directory_create::create_new(lease, staged_name)?;
+    let directory = Dir::from_std_file(output.try_clone().map_err(|_| invalid())?.into_std());
+    for _ in 0..2 {
+        check()?;
+        if directory.entries().map_err(|_| invalid())?.next().is_some() {
+            return Err(invalid());
+        }
+    }
+    // Failure preserves the reserved directory; no successful stage receipt is
+    // published without the OS flush acknowledgement. Native coverage pending.
+    output.sync_all().map_err(|_| invalid())?;
+    let receipt = observed_directory(&directory)?;
+    let rebound = open_real_child_dir(snapshot_parent, snapshot_leaf)?;
+    if observed_directory(&input)? != before || observed_directory(&rebound)? != before {
+        return Err(invalid());
+    }
+    let output_rebound = open_real_child_dir(lease.replacement_parent(staged_name)?, staged_name)?;
+    if output_rebound
+        .entries()
+        .map_err(|_| invalid())?
+        .next()
+        .is_some()
+        || observed_directory(&output_rebound)? != receipt
+        || observed_directory(&directory)? != receipt
+    {
+        return Err(invalid());
+    }
+    lease.validate()?;
+    check()?;
+    Ok(receipt)
+}
+
 /// Directory timestamps/length can change as journaled children are installed.
 /// Only use this comparison together with the complete child ownership scan.
 fn same_directory(expected: &Value, actual: &Value) -> bool {
@@ -243,6 +287,26 @@ mod tests {
             "rootIdentity":{"volume":1,"file":vec![1;16]},"parentIdentity":{"volume":1,"file":vec![2;16]},"guardEntry":null,"stagedEntry":null,
             "retainedEntry":null,"installedEntry":null,"detachedEntry":null,"restoredEntry":null,
             "canceledReservation":true}})
+    }
+    #[test]
+    fn new_directory_stage_is_empty_and_never_reuses_a_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = Dir::open_ambient_dir(temp.path(), cap_std::ambient_authority()).unwrap();
+        dir.write("guard", b"guard").unwrap();
+        dir.create_dir("snapshot").unwrap();
+        let snapshot = open_real_child_dir(&dir, "snapshot").unwrap();
+        snapshot.create_dir("new").unwrap();
+        let input = open_real_child_dir(&snapshot, "new").unwrap();
+        input.write("child.txt", b"future child").unwrap();
+        let before = observed_directory(&input).unwrap();
+        let lease = DirectoryLease::acquire(&dir, OsStr::new("guard")).unwrap();
+        let receipt = stage_new(&lease, &snapshot, "new", "staged", &|| Ok(())).unwrap();
+        let staged = open_real_child_dir(&dir, "staged").unwrap();
+        assert!(staged.entries().unwrap().next().is_none());
+        assert_eq!(observed_directory(&staged).unwrap(), receipt);
+        assert_eq!(observed_directory(&input).unwrap(), before);
+        assert!(stage_new(&lease, &snapshot, "new", "staged", &|| Ok(())).is_err());
+        assert_eq!(input.read("child.txt").unwrap(), b"future child");
     }
     #[test]
     fn tree_observation_checks_owned_content_and_rejects_foreign_names() {

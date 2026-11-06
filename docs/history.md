@@ -4,6 +4,13 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준4ed00741에서 Windows 새 디렉터리의 reserved→staged 경로를 내부 writer에 연결했다. before 없음/정규 kind2 after만 허용하고 예약 journal에 directoryV1:true를 결속한다. 기존 디렉터리 교체·종류 전환은 거절하며 regular 파일 기록에는 marker를 요구하지 않는다.
+- snapshot 디렉터리를 no-follow로 열어 전후 신원/metadata를 대조하고, 기존 native create primitive로 예약된 이름의 빈 디렉터리를 생성한다. 생성 handle의 sync 성공·빈 목록 재확인·held/reopened 전체 관측·parent lease 확인 뒤 staged receipt를 게시한다. 같은 이름은 재사용하지 않고 오류/취소는 예약·부분 파일을 보존한다. directory flush가 해당 Windows 환경에서 성공하는지는 native 검증 전이다.
+- receipt 검증은 directory marker와 archive kind를 서로 결속하고 디렉터리 after image의 kind/size0/digest0을 확인한다. 파일 staged receipt가 디렉터리로 바뀌는 경우도 거절한다. 빈 준비 폴더·원본 snapshot 보존·동일 이름 거절 native 회귀 후보를 추가했다. 선택 rustfmt/diff만 수행했으며 컴파일/native/독립 검토는 파동 최종 검증으로 남긴다.
+- 실제 directory move/pin·중단 재개·부분 준비 취소·역순 복원 연결이 남아 batch admission은 여전히 디렉터리를 거절한다. 원본 writes 제품 gate 비활성, 신규 cache/package/push/CI/모델 실행 없음. 이 구현을 폴더 반영 지원 완료로 표시하지 않는다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준5693f7a에서 Windows 새 폴더의 read-only 실제 관측 후보를 추가했다. 대상 subtree의 settled child 원장을 한 번 index하고 physical private 이름→원래 logical 경로를 보존한다. 다른 sibling 작업의 phase는 subtree 복원 판정을 막지 않는다. 항목100,000·깊이128 상한과 취소 callback을 유지한다.
 - 각 directory의 full ID/생성시각/속성/권한을 receipt와 대조하고 이름 목록을2pass 확인한다. journaled child 작업으로 변할 수 있는 directory written/changed/length만 소유권 목록 확인과 함께 비교에서 제외하며, 한 directory 관측 전후에는 해당 전체 관측이 같아야 한다. 일반 파일은 기존 held pin/내용·metadata 재확인을 사용한다. 외부 파일이나 바뀐 partial staged 내용은 거절한다.
 - 빈 폴더·관측된 부분 준비 파일·외부 파일·내용 변경 회귀 후보를 추가했다. 선택 rustfmt/diff만 수행했으며 compile/native/독립 검토는 최종 검증에 남긴다. 이 관측만으로 원자 snapshot·rename/삭제 권위·완료를 주장하지 않는다. 디렉터리 receipt/staging/이동/역복원 통합은 아직 남고 기존 writer는 디렉터리 admission을 거절한다. 신규 cache/package/push/CI/모델 실행 없음.
