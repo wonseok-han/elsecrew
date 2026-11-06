@@ -12,24 +12,41 @@ const MAX_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 pub(super) const MAX_PATH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_DEPTH: usize = 128;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
 pub(super) struct Inventory {
     root: Observation,
     entries: BTreeMap<String, Entry>,
 }
 impl Inventory {
+    pub(super) fn write_receipt<W: std::io::Write>(
+        &self,
+        output: &mut W,
+        check: &dyn Fn() -> Result<(), ProjectFailure>,
+    ) -> Result<(), ProjectFailure> {
+        output.write_all(b"{\"root\":").map_err(|_| failure())?;
+        serde_json::to_writer(&mut *output, &self.root).map_err(|_| failure())?;
+        output.write_all(b",\"entries\":[").map_err(|_| failure())?;
+        for (i, entry) in self.entries.iter().enumerate() {
+            check()?;
+            if i != 0 {
+                output.write_all(b",").map_err(|_| failure())?;
+            }
+            serde_json::to_writer(&mut *output, &entry).map_err(|_| failure())?;
+        }
+        output.write_all(b"]}").map_err(|_| failure())
+    }
     pub(super) fn regular_content(&self, path: &str) -> Option<(u64, [u8; 32])> {
         let entry = self.entries.get(path)?;
         (entry.observation.attributes & 0x10 == 0)
             .then_some((entry.observation.length, entry.digest))
     }
 }
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
 struct Entry {
     observation: Observation,
     digest: [u8; 32],
 }
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
 pub(super) struct Observation {
     identity: windows_fs::Identity,
     created: i64,

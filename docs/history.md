@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준73c8fce의 깨끗한 통합 checkout에서 Windows clean baseline의 영속 receipt를 연결했다. 기존 receipt의 project/lock 준비 fence·snapshot identity·source_baselines 원장 결속 코드를 공유하고 플랫폼별 encode/persist/verify만 분기했다. Windows baseline에는 canonical root/source identity/object format을 추가해 다른 원본·복사본의 기록 재사용을 거부한다.
+- Windows 전용 filename과 platform:windows 형식으로 index·전체 raw observation(128-bit file ID/권한/시각/내용)을 bounded64MiB에 기록한다. entry마다 취소 확인, NTFS 확인·기존 write-through/no-follow exclusive create·파일 sync·leaf identity 재열기·전체 readback/digest/재인코딩 일치 후에만 원장에 결속한다. 기존/부분 기록은 덮어쓰거나 삭제하지 않는다. Unix filename/내용 형식은 유지했다.
+- ApplicationCandidate의 snapshot publication 전 receipt 저장까지 연결했고, 저장된 receipt로 현재 baseline을 다시 확인하는 verify_bound도 Windows에서 사용할 수 있다. 아직 Windows review 호출·backup/apply/restore writer와 metadata 보존·native crash/reopen 검증은 남으므로 제품 API는 계속 비활성이다. 구현 우선 방침에 따라 rustfmt/diff만 확인했으며 build/test/CI/push/package/모델 없음. 이 체크포인트를 Windows durability 또는 제품 합격으로 보지 않는다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준3ecd884의 깨끗한 통합 checkout에서 Git index/HEAD 기준선 구현을 Windows에서도 공유하도록 연결했다. 공통 parser·index stage/assume-unchanged/skip-worktree·split-index·intent-to-add 거부, HEAD 재확인은 기존 로직을 사용한다. Windows index 읽기는 full handle identity/권한/시각 관찰·32MiB 제한·stream hash·leaf 재열기로 전후 결속을 확인한다. Unix 경로는 기존 metadata 관찰을 유지한다.
 - Windows clean baseline은 raw inventory의 일반 파일과 cat-file batch의 OID/종류/길이/내용을 대조한다. 4GiB 총량·bounded header/chunk·취소·잔여 출력/종료 성공 확인 후 index/raw를 다시 캡처한다. ApplicationCandidate의 bundle 전후 검사에 이 전체 baseline을 연결했다. Windows에 없는 POSIX 실행 bit를 가정하지 않고 index mode를 보존한다. symlink blob은 일반 파일로 취급하지 않는다. 줄바꿈/filter 변환은 하지 않으므로 committed raw bytes와 다른 파일은 거부한다.
 - 구현 우선에 따라 빌드/테스트/CI를 실행하지 않았고 해당 파일 rustfmt/diff만 확인했다. Windows compile/native·공통 index 회귀는 누적 검증에 남는다. 아직 baseline 영속 receipt·review·backup/apply/restore writer/ADS metadata 계약과 제품 activation이 남아 Windows source API는 비활성이다. 신규 cache/package/worktree/push/모델 없음.

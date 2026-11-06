@@ -45,6 +45,9 @@ mod windows_source_inventory;
 #[path = "project/application/git_baseline.rs"]
 mod windows_git_baseline;
 #[cfg(windows)]
+#[path = "project/application/git_baseline/raw_baseline/receipt.rs"]
+mod windows_baseline_receipt;
+#[cfg(windows)]
 mod windows_save_recovery;
 #[cfg(windows)]
 mod windows_remove;
@@ -1340,9 +1343,9 @@ impl ProjectManager {
         }
 
         #[cfg(windows)]
-        if let Some(expected) = raw_source {
+        if let Some(expected) = &raw_source {
             let observed = windows_git_baseline::capture_windows_clean_baseline(self, &source)?;
-            if expected != observed {
+            if *expected != observed {
                 return Err(ProjectFailure::dirty("Windows source changed during snapshot export"));
             }
         }
@@ -1375,6 +1378,10 @@ impl ProjectManager {
             application::git_baseline::raw_baseline::receipt::persist_and_bind(
                 self, storage, &active, baseline, request_id,
             )?;
+        }
+        #[cfg(windows)]
+        if let Some(baseline) = &raw_source {
+            windows_baseline_receipt::persist_and_bind(self, storage, &active, baseline, request_id)?;
         }
         let manifest = manifest_value(&active, "active")?;
         write_json_atomic(

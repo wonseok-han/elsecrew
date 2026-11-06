@@ -20,16 +20,16 @@ const INDEX_LIMIT: u64 = 32 * 1024 * 1024;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(in crate::project) struct GitIndexBaseline {
-    entries: BTreeMap<String, GitEntry>,
-    index_digest: [u8; 32],
-    commit: String,
-    tree: String,
+    pub(in crate::project) entries: BTreeMap<String, GitEntry>,
+    pub(in crate::project) index_digest: [u8; 32],
+    pub(in crate::project) commit: String,
+    pub(in crate::project) tree: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct GitEntry {
-    mode: String,
-    oid: String,
+pub(in crate::project) struct GitEntry {
+    pub(in crate::project) mode: String,
+    pub(in crate::project) oid: String,
 }
 
 // Index-only component; snapshot admission must use the full baseline and durable binding.
@@ -300,8 +300,11 @@ fn parse(
 #[cfg(windows)]
 #[derive(Debug, PartialEq, Eq)]
 pub(in crate::project) struct WindowsBaseline {
-    index: GitIndexBaseline,
-    raw: crate::project::windows_source_inventory::Inventory,
+    pub(in crate::project) source_root: String,
+    pub(in crate::project) source_identity: String,
+    pub(in crate::project) object_format: String,
+    pub(in crate::project) index: GitIndexBaseline,
+    pub(in crate::project) raw: crate::project::windows_source_inventory::Inventory,
 }
 
 #[cfg(windows)]
@@ -386,7 +389,15 @@ pub(in crate::project) fn capture_windows_clean_baseline(
         return Err(failure());
     }
     check()?;
-    Ok(WindowsBaseline { index, raw })
+    Ok(WindowsBaseline {
+        source_root: crate::project::canonical_protocol_path_without_existing(
+            &source.canonical_root,
+        )?,
+        source_identity: source.source_identity.clone(),
+        object_format: source.object_format.clone(),
+        index,
+        raw,
+    })
 }
 
 #[cfg(test)]
