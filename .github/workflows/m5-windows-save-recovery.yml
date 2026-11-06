@@ -67,7 +67,9 @@ jobs:
       - name: Exercise installed Git admission and generated application roundtrip
         shell: pwsh
         run: |
-          $env:HELLO_AGENT_WINDOWS_TEST_GIT = (Get-Command git.exe -CommandType Application -ErrorAction Stop).Source
+          $gitCommand = Get-Command git.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
+          $env:HELLO_AGENT_WINDOWS_TEST_GIT = $gitCommand.Source
+          Write-Host "Selected runner Git: $env:HELLO_AGENT_WINDOWS_TEST_GIT"
           cargo test --locked --release -p hello-agent-sidecar --lib project::windows_git_installation::integration_tests::selected_git_trust_runs_bounded_version_and_stdin_then_revokes -- --ignored --exact --nocapture --test-threads=1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --locked --release -p hello-agent-sidecar --lib project::windows_application_integration_tests::confirmed_multi_item_apply_and_restore_through_scheduler_and_ledger -- --ignored --exact --nocapture --test-threads=1

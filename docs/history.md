@@ -2,6 +2,11 @@
 
 2026-11-06 Windows 진단42155540808/ff54ad68에서 native74개+직접 복구 호출 차단1개, 총75 PASS를 확인했다. 최신 승인2회 중1회 사용, 동일 수정 후속 검사1회가 남는다. macOS sidecar lib711개와 stdio16개·별도100회 저장 경합도 확인했다. Windows 제품 검증/활성화·G6/출시는 남아 있으며 전체 개발은 미완료다. 최신 구현·미완료 기록은 아래 및 [11월 아카이브](archive/history-2026-11.md)에 보존한다.
 
+### 2026-11-06 · by GPT-6
+
+- 사용자에게06f73a47과 해당 Windows 통합 시험의 후속 컴파일/시험 오류 수정만 같은 공개 브랜치에 push·CI최대3회 승인을 받았다. Windows6파일만 추출한 후보와 로컬의 해당파일 diff=empty 및 diff-check를 확인하고 게시했다. CI42158094723 시작, 승인1/3사용. 제품활성화/패키징/모델/main은 제외한다. 과거 rebind 잔여1회와 새 승인 횟수를 섞지 않는다.
+- CI42158094723은 컴파일/필수목록·native75개(새 rename연쇄 포함)·dispatcher1개가 통과했다. Git opt-in은 preview_git_trust에서 ambiguous Windows component로0.02초 실패했고 전체 반영/복원은 실행되지 않았다. Get-Command의 다중 결과가 환경변수 문자열로 합쳐질 가능성을 제거해 첫 실행파일 하나를 선택하고 runner선택을 로그로 남긴다. Git선택읽기/부모열기/이미지보호 실패에 고정 단계설명을 추가했다. 원인 확정이나 안전검사 완화가 아니며 다음 native 실행으로 확인한다. 새 worktree/cache/package/모델 없음.
+
 ## 프로젝트 요약 (고정)
 
 터미널을 한 번도 안 열어본 비개발자를 **코딩 에이전트(Claude Code·Codex)가 굴러가는 상태까지** 데려다주는 데스크톱 GUI 앱. 현재 배포 경로는 Tauri 2 + React 19이고, M5는 Electron + React/TypeScript + Monaco와 Rust sidecar의 별도 작업대 골격으로 전환 중이다.
