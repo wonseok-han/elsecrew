@@ -170,7 +170,7 @@ fn validate_paths<'a>(paths: impl Iterator<Item = &'a str>) -> Result<(), Projec
     Ok(())
 }
 
-#[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Image {
     kind: u8,
