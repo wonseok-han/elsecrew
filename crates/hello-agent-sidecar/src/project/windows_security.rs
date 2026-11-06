@@ -72,7 +72,10 @@ fn failure(operation: &str, code: u32) -> ProjectFailure {
 }
 impl Descriptor {
     fn read(file: &File) -> Result<Self, ProjectFailure> {
-        windows_fs::identity(file, false)?;
+        Self::read_handle(file, false)
+    }
+    fn read_handle<T: AsRawHandle>(file: &T, directory: bool) -> Result<Self, ProjectFailure> {
+        windows_fs::identity(file, directory)?;
         let (mut owner, mut group, mut dacl, mut allocation) = (
             ptr::null_mut(),
             ptr::null_mut(),
@@ -195,6 +198,13 @@ pub(super) fn copy_access(previous: &File, replacement: &File) -> Result<String,
 
 pub(super) fn fingerprint(file: &File) -> Result<String, ProjectFailure> {
     Ok(digest(&Descriptor::read(file)?.normalized()?))
+}
+pub(super) fn directory_fingerprint(
+    directory: &cap_std::fs::Dir,
+) -> Result<String, ProjectFailure> {
+    Ok(digest(
+        &Descriptor::read_handle(directory, true)?.normalized()?,
+    ))
 }
 fn digest(value: &[u16]) -> String {
     let mut hash = Sha256::new();

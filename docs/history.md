@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준c1fdb16/깨끗한 통합 checkout에서 Windows source inventory를 구현했다. 기존 held directory/file helper·full FILE_ID_INFO와 owner/group/DACL fingerprint를 사용하고 생성/쓰기/change 시각·속성·크기·link count·내용 digest를 기록한다. 접근 시각은 제외한다. heap traversal·100,000 entry/4GiB/8MiB path/depth128 상한·chunk 사이 취소 확인, 두 번 관찰·부모 leaf 재열기·최종 canonical root 결속을 적용한다. reparse/다중 hardlink/Win32 별칭 이름은 거부한다.
+- ApplicationCandidate snapshot의 bundle export 전후에 inventory를 연결했다. 일반 snapshot 범위를 확대하지 않았고 원본 쓰기/Windows application API는 계속 비활성이다. 이는 원본 관찰 구현이며 Git HEAD/index와 clean baseline 대조·실행 bit 의미·ADS 등 전체 metadata 보존·backup/apply/restore writer 포트는 아직 남는다. 동시 악성 쓰기를 완전히 배제하는 atomic snapshot으로 주장하지 않는다.
+- [Microsoft FILE_BASIC_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_basic_info), [FILE_STANDARD_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_standard_info)의 ABI를 확인했다. Windows 파일 변경/.git 제외·hardlink/root 불일치·취소 회귀3개를 작성했으나 구현 우선 방침에 따라 실행하지 않았다. rustfmt/diff만 확인했고 Windows compile/native·독립 검토는 최종 연결 뒤 수행한다. 신규 cache/build/package/worktree/push/CI/모델 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준9ebce47/깨끗한 통합 checkout에서 Windows 원본 반영·복원 포트의 기존 Git 의존 경로를 조사했다. raw baseline의 committed blob 비교가 유일하게 application 아래에서 raw Command/StreamingGitChild::spawn을 직접 사용했다. 이를 snapshot/diff와 같은 spawn_git_stream으로 연결해 플랫폼별 설치 admission·CWD 소유권·취소/종료 관리를 공유하도록 변경했다.
 - 기존 baseline 전용 GIT_NO_LAZY_FETCH=1은 Unix 고정 명령 환경과 Windows 내부 Git 환경으로 옮겼다. 내부 Git이 누락 객체를 자동 다운로드하지 않는 정책을 공통으로 유지한다. cat-file batch의 입출력/길이/추가 출력/종료 성공 검사는 그대로다. Windows application 모듈 자체는 아직 Unix 전용이므로 이 변경만으로 원본 반영·복원을 사용할 수 없다.
 - 사용자 구현 우선 지시에 따라 테스트·빌드·패키징 없이 직접 diff와 application 내부 직접 spawn 잔존 여부만 확인했다. 전체 회귀·독립 종료 경계 검토는 파동 마감에 수행한다. 다음은 raw inventory/파일 권한·기준선·반영 writer의 Windows 포트이며 제품 gate는 비활성 유지다. 새 cache/worktree/모델/push/CI 없음.

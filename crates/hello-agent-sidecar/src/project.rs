@@ -40,6 +40,8 @@ mod windows_save_guard;
 #[cfg(windows)]
 mod windows_security;
 #[cfg(windows)]
+mod windows_source_inventory;
+#[cfg(windows)]
 mod windows_save_recovery;
 #[cfg(windows)]
 mod windows_remove;
@@ -1310,6 +1312,12 @@ impl ProjectManager {
         } else {
             None
         };
+        #[cfg(windows)]
+        let raw_source = if creation == SnapshotCreation::ApplicationCandidate {
+            Some(windows_source_inventory::capture(
+                &source._root, &source.canonical_root, &|| self.check_application_preparation(),
+            )?)
+        } else { None };
         let bundle_bytes = self.export_bundle(&source.git_dir, &staging)?;
         let after = source_digest(&source.git_dir)?;
         if before != after || after.lock_count != 0 {
@@ -1327,6 +1335,15 @@ impl ProjectManager {
         if let Some(expected) = &baseline {
             if *expected != application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)? {
                 return Err(ProjectFailure::dirty("source baseline changed during snapshot export"));
+            }
+        }
+
+        #[cfg(windows)]
+        if let Some(expected) = raw_source {
+            if expected != windows_source_inventory::capture(
+                &source._root, &source.canonical_root, &|| self.check_application_preparation(),
+            )? {
+                return Err(ProjectFailure::dirty("Windows source changed during snapshot export"));
             }
         }
 
