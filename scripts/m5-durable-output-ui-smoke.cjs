@@ -14,6 +14,7 @@ if (process.platform !== 'darwin' || app.isPackaged !== packagedQa) throw new Er
 if (packagedQa) app.setName('Hello Agent Output QA');
 const combined = process.argv.includes('--combined-workload');
 const retentionOnly = packagedQa && process.argv.includes('--file-retention-only');
+const retentionWithOutputDiff = retentionOnly && process.argv.includes('--file-retention-with-output-diff');
 assert.ok(!retentionOnly || !combined, 'Retention-only diagnosis is separate from combined performance');
 // A real foreground surface, not a visibility/throttling override. Limited to
 // the explicitly named QA package; production window policy stays unchanged.
@@ -28,6 +29,7 @@ const userData = path.join(root, 'userdata');
 fs.mkdirSync(source); fs.mkdirSync(userData);
 fs.writeFileSync(path.join(source, 'hello.txt'), 'original\n');
 if (retentionOnly) fs.writeFileSync(path.join(source, 'large.txt'), 'x'.repeat(5 * 1024 * 1024));
+if (retentionWithOutputDiff) require('../tests/m5-native-diff-fixture.cjs').prepare(source);
 const combinedFixture = combinedWorkload?.prepare(source);
 for (const args of [['init', '-q', '--template='], ['add', '.'],
   ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture']]) {
@@ -47,7 +49,7 @@ assert.equal(fs.realpathSync(app.getPath('sessionData')), fs.realpathSync(sessio
 assert.equal(fs.realpathSync(app.getPath('logs')), fs.realpathSync(logs));
 dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [source] });
 const report = { schemaVersion: 1, diagnostic: true, gateEligible: false, root, packagedQa,
-  keepTestVisible, retentionOnly,
+  keepTestVisible, retentionOnly, retentionWithOutputDiff,
   paced, live, liveWindows: [], status: 'RUNNING', shutdown: 'pending', restoredChats: [], scrollChecks: [],
   limitations: [packagedQa ? 'Explicit QA package, synthetic providers; not the production artifact or actual accounts.' : 'Development artifacts, synthetic providers, no actual accounts.',
     'Full retained-window and history checks; no 50-events/s paint or packaged RSS gate.',
@@ -229,9 +231,12 @@ app.on('browser-window-created', (_event, window) => {
         await wait("window.m5?.version === 8 && [...document.querySelectorAll('button')].some(b => b.textContent === '프로젝트 선택' && !b.disabled)");
         await run(`(async () => {
           const p = await window.m5.openProject();
-          const settings = await window.m5.getProjectRoleSettings({projectId:p.projectId});
+          let settings = await window.m5.getProjectRoleSettings({projectId:p.projectId});
+          if (${retentionWithOutputDiff}) settings = await window.m5.updateProjectRoleSettings({projectId:p.projectId,
+            expectedRevision:settings.revision, roles:settings.roles.map(role => role.roleId === 'coding'
+              ? {...role,runtime:'claude-code',modelSelector:'claude-opus-5',reasoningEffort:null} : role)});
           const prepared = await window.m5.prepareChatWorkspace({projectId:p.projectId});
-          await window.m5.createChat({preparationId:prepared.preparationId,projectId:p.projectId,
+          globalThis.retentionChat = await window.m5.createChat({preparationId:prepared.preparationId,projectId:p.projectId,
             worktreeId:prepared.manifest.worktreeId,workspaceIdentity:prepared.manifest.workspaceIdentity,
             goal:'File retention diagnosis',expectedSettingsRevision:settings.revision});
         })()`);
@@ -242,6 +247,32 @@ app.on('browser-window-created', (_event, window) => {
         await run("[...document.querySelectorAll('.m5-file-row')].find(b => b.title === 'large.txt').click()");
         await wait("!!document.querySelector('.monaco-editor textarea') && !!document.querySelector('.m5-editor-tab-name')", 30000);
         report.fileRetention = {diagnostic:true, gateEligible:false, bytes:5*1024*1024, loaded:true};
+        if (retentionWithOutputDiff) {
+          const chat = await run('retentionChat');
+          assert.match(chat.worktreeId, /^worktree_[a-zA-Z0-9_]+$/);
+          const workspaceRoot = fs.realpathSync(path.join(userData, 'com.wonseokhan.helloagent/m5/worktrees-v1'));
+          const workspace = fs.realpathSync(path.join(workspaceRoot, chat.worktreeId));
+          assert.ok(workspace.startsWith(workspaceRoot + path.sep));
+          report.fileRetention.diffFixture = require('../tests/m5-native-diff-fixture.cjs').change(workspace);
+          await run("[...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent.trim() === '변경')?.click()");
+          await wait("!![...document.querySelectorAll('.m5-changes button')].find(b => b.textContent === '변경 새로 고침' && !b.disabled)");
+          await run("[...document.querySelectorAll('.m5-changes button')].find(b => b.textContent === '변경 새로 고침').click()");
+          await wait("document.querySelector('.m5-changes')?.textContent.includes('변경 (500)')");
+          await run("[...document.querySelectorAll('.m5-change-row')].find(b => b.title === 'native-diff-fixture/file-000.txt').click()");
+          await wait("document.querySelector('.m5-diff-details')?.textContent.includes('after--')");
+          await run(`(async () => {
+            const c = retentionChat, api = window.m5;
+            const capability = await api.getAgentCapabilities({runtime:'claude-code',refresh:true});
+            const detail = await api.getChat({chatId:c.chatId,afterEventSequence:0,cursor:null,limit:50});
+            await api.startAgentRun({chatId:c.chatId,roleId:'coding',inputMessageIds:[detail.messages[0].messageId],
+              expectedCapabilityFingerprint:capability.fingerprint});
+            delete globalThis.retentionChat;
+          })()`);
+          await wait("!!document.querySelector('.m5-output-scroll article:last-child pre')", 65000);
+          await wait("!![...document.querySelectorAll('button')].find(b => b.textContent === '프로젝트 화면 닫기' && !b.disabled)", 65000);
+          report.fileRetention.outputLoaded = true;
+        }
+        await run('delete globalThis.retentionChat');
         await run("[...document.querySelectorAll('button')].find(b => b.textContent === '프로젝트 화면 닫기' && !b.disabled).click()");
         await wait("!!document.querySelector('.m5-start-action') && !document.querySelector('.monaco-editor')");
         report.fileRetention.closed = true;

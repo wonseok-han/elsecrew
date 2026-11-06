@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 직전 턴은 실제 파일 해제 후 heap 보유 경로를 확인한 progress였다. 기준18b16fb3 clean에서 editor/chat clearProjectView, output reader abort/unsubscribe·timer cleanup을 읽고 확정된 보유 결함은 찾지 못했다. 실제 수명 진단에 --file-retention-with-output-diff opt-in을 추가해5MiB 단일행 파일·500개diff 요약/첫 파일내용·가짜 출력1개를 함께 읽고 정상 view release했다. 제품 코드는 변경하지 않았다.
+- QA3jACkk 실행 exit0·functionalStatus PASS·전체NOT_READY·shutdown accepted. 원장3000 records/committed_sequence3000/sealed1을 확인했다. UI출력 등장만 확인했으므로 화면3000개 전체 소비/4개stream 증거로 확대하지 않는다.25,566,038bytes heap snapshot의 큰 external strings4,511,352/1,120,348bytes는 이전과 동일한 Monaco/renderer 코드 source strong path였다. node self size 합계21,055,609bytes, 파일x100·output timestamp·after-- 접두 문자열 node는0개였다. GC snapshot/문자열표 한계 때문에 전체 누수부재나RSS 기준 합격으로 간주하지 않는다. renderer 데이터 보유를 원인으로 단정해 임의 수정할 근거가 없다.
+- `.artifacts/m5-actual-output-retention-2026-11-06`에 요약·해시·재현 분석기를 보존하고 관측PID 부재·DB clean_shutdown_at 확인 후 profileiYJZeZ·package3jACkk·raw dump를 제거했다. node --check·git diff --check 통과. 다음은 JS live data와 구분되는 프로세스 기본비용/native·allocator 및 QA 보고서/trace 비용의 원인 조사다. 기존400/800/120MiB·유효한전체UI·Windows 후보2e5a98a 추가push 승인/native 통합·출시 미완료는 유지한다. 실제 모델·push·활성화 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 직전 턴은 QA 가림 방지 옵션과 실패 증거를 남긴 progress였다. 기준7583e140 clean에서 실제 파일 수명 진단 --file-retention-only를 추가했다. combined와 상호배타이며 hidden 상태에서 임시5MiB 단일행 파일·채팅1개를 실제 sidecar/typed bridge/Monaco로 열고 정상 view release 뒤 heap snapshot을 수집한다. 실제 모델·계정은 없고 기능 성공도 전체NOT_READY/gateEligible:false를 유지한다.
 - QA k85HoW 실행 exit0·functionalStatus PASS·shutdown accepted, loaded/closed true. `.artifacts/m5-actual-file-retention-2026-11-06`에 증거를 보존했다. snapshot23,224,213bytes 분석에서 큰 external strings4,511,352/1,120,348bytes는 각각 Monaco editor.api/index 코드 source→Window global의 strong path였다. fixture의 x100 prefix 문자열 node는0개였다. 이것은 단일 파일 해제 후 본문 보유 증거가 없다는 제한된 관측이며 GC 가능성·코드minify·단일행 파일이라는 한계 때문에 전체 누수부재/143MiB retained 해소/G6 합격으로 확대하지 않는다.
 - 관측PID 부재와DB clean_shutdown_at을 확인한 뒤 profileN1aneG·packagek85HoW·raw snapshot을 삭제하고 요약·해시·분석기를 남겼다. node --check·diff 검사 통과. 제품 변경 없음. 남은 메모리 원인은 combined 출력/diff·renderer allocator/native·main 측정기 자료 범위에서 조사해야 하며 유효한 화면성능/400·800·120MiB·Windows native 통합·출시는 미완료다. Windows2e5a98a 추가push 승인도 여전히 없다.
