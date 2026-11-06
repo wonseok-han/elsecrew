@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준62143c5의 깨끗한 통합 checkout에서 Windows before-image archive writer/reader를 구현했다. Windows version3/magic·길이 프레임으로 Unix version2와 구분하고64KiB content streaming·metadata 항목1MiB/총32MiB·archive4GiB+32MiB 상한을 적용한다. budget owner를 보유한 채 NTFS/write-through exclusive 생성·sync·전체 readback을 수행하고 부분/기존 파일은 삭제·덮어쓰지 않는다. 파일별 before observation·SavedAccess·after image를 기록하고 원본 handle/leaf/내용을 재확인한다.
+- 공유 staging의 preparing→ready 원장 흐름·reservation 전 이름 저장·revision CAS·explicit resume/abandon을 Windows에 연결했다. decoder는 파일 digest뿐 아니라 정렬된 path·payload 길이/hash·접근 권한 fingerprint·검토 changesDigest를 다시 계산한다. 중단 파일 재사용은 현재 baseline의 전체 before metadata와 대조하며 파일 존재만으로 ready로 올리지 않는다. 기존 confirmation prepare/consume도 이 staging을 사용할 수 있게 연결했고 preparation 목록/abandon API를 공유했다.
+- Windows cleanup record 처리는 아직 미지원이라 거부하며 자동 삭제는 없다. ADS/SACL/추가 file metadata 보존·destination 여유공간·실제 apply/restore writer/cleanup과 native crash/reopen 검증은 남아 source-write/product gate를 유지한다. 이번은 rustfmt/diff만 확인한 구현 checkpoint다. build/test/CI/독립 검토는 후속 누적 검증에 남겼으며 신규 cache/package/worktree/push/모델 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준58119b9의 깨끗한 통합 checkout에서 Windows backup storage 소유권·사용량·상한 설정을 구현하고 기존 catalog API에 연결했다. app-data의 별도 no-follow/share-denied lock handle을 유지해 cooperating 검사/설정/후속 archive 작성을 직렬화한다. archive 디렉터리는 managed path/full ID를 재확인하고 최대100,000 entry를 순회해 orphan/abandoned를 포함한 모든 일반 단일-link 파일의 실제 길이를 합산한다. 삭제는 하지 않는다.
 - 기존 restore-budget.json 형식·기본5GiB·1~1024GiB 정수 단위를 유지한다. 설정은256B 상한·전후 handle/leaf 관찰·exact field/version으로 읽고, 변경은 잠금 안에서 expected limit 확인·atomic write·readback한다. budget guard의 directory/remaining은 다음 Windows archive writer에서 계속 보유하도록 구성했다. 실제 writer/backup ledger 연결과 crash/native 검증은 아직 남는다.
 - 공유 review가 사용하는 unicode-normalization이 Cargo에서 Unix 전용인 누락을 발견해 같은 고정 버전의 공통 dependency로 이동했다. 새 패키지/버전/lockfile 변경은 없다. 구현 우선에 따라 rustfmt/diff만 확인했고 build/test/CI/push/모델 없음. 제품 gate는 유지하며 다음은 이 budget owner 아래 archive 내용·권한의 streaming 기록과 검증을 연결하는 것이다.

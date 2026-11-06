@@ -47,6 +47,12 @@ pub(super) struct Entry {
     digest: [u8; 32],
 }
 impl Entry {
+    pub(super) fn observation(&self) -> &Observation {
+        &self.observation
+    }
+    pub(super) fn access_fingerprint(&self) -> &str {
+        &self.observation.access
+    }
     pub(super) fn kind(&self) -> u8 {
         if self.observation.attributes & 0x10 != 0 {
             2

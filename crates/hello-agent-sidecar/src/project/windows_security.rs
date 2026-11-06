@@ -246,6 +246,15 @@ pub(super) struct SavedAccess {
     text: Vec<u16>,
 }
 impl SavedAccess {
+    pub(super) fn validated_fingerprint(&self) -> Result<String, ProjectFailure> {
+        if self.schema_version != 1 {
+            return Err(ProjectFailure::recovery(
+                "unknown Windows access archive version",
+            ));
+        }
+        Descriptor::from_text(&self.text)?;
+        Ok(digest(&self.text))
+    }
     pub(super) fn capture(file: &File) -> Result<Self, ProjectFailure> {
         let text = Descriptor::read(file)?.normalized()?;
         // Require restorability before accepting an archive payload.

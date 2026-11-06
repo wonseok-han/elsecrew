@@ -34,7 +34,6 @@ pub(in crate::project) struct Confirmations {
 
 // Move-only, session-local handoff. It cannot be reconstructed from a ready
 // backup record and does not authorize source writes by itself.
-#[cfg(unix)]
 pub(in crate::project) struct PreparedApplication {
     pending: Pending,
     generation: Uuid,
@@ -124,7 +123,6 @@ impl Confirmations {
         Ok(plan)
     }
 
-    #[cfg(unix)]
     pub(in crate::project) fn prepare_backup(
         &mut self,
         manager: &ProjectManager,
@@ -167,7 +165,6 @@ impl Confirmations {
 
     /// Final read-only handoff to a future application transaction. The writer
     /// must separately acquire project exclusion and validate at the write boundary.
-    #[cfg(unix)]
     pub(in crate::project) fn consume_prepared(
         &mut self,
         manager: &ProjectManager,
@@ -208,7 +205,7 @@ impl Confirmations {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 impl PreparedApplication {
     pub(in crate::project) fn expire_for_test(&mut self) {
         self.pending.expires = Instant::now();

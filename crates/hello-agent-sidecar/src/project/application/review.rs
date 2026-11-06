@@ -23,6 +23,9 @@ use unicode_normalization::UnicodeNormalization;
 const MAX_REVIEW_BYTES: usize = 32 * 1024 * 1024;
 #[cfg(unix)]
 pub(in crate::project) mod backup;
+#[cfg(windows)]
+#[path = "review/windows_backup.rs"]
+pub(in crate::project) mod backup;
 pub(in crate::project) mod confirmation;
 #[cfg(unix)]
 pub(in crate::project) mod intent;
@@ -168,7 +171,8 @@ fn validate_paths<'a>(paths: impl Iterator<Item = &'a str>) -> Result<(), Projec
     Ok(())
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Image {
     kind: u8,
     executable: bool,
