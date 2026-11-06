@@ -127,6 +127,14 @@ pub(super) fn create_new(lease: &DirectoryLease, name: &str) -> Result<File, Pro
 /// Share-delete permits observation beside our existing DELETE-capable handle;
 /// this handle grants no rename/delete authority and does not replace its pin.
 pub(super) fn open_existing(parent: &Dir, name: &str) -> Result<Dir, ProjectFailure> {
+    let file = open_object(parent, name)?;
+    windows_fs::identity(&file, true)?;
+    Ok(Dir::from_std_file(file.into_std()))
+}
+
+/// Rebind a regular file or directory beside a retained rename handle. The
+/// caller must compare the full receipt and keep its mutation/guard pins alive.
+pub(super) fn open_object(parent: &Dir, name: &str) -> Result<File, ProjectFailure> {
     if name.is_empty() || name.contains(['/', '\\']) {
         return Err(ProjectFailure::manifest(
             "invalid directory observation leaf",
@@ -167,7 +175,7 @@ pub(super) fn open_existing(parent: &Dir, name: &str) -> Result<Dir, ProjectFail
             0,
             7,           // SHARE_READ | SHARE_WRITE | SHARE_DELETE
             1,           // FILE_OPEN: never create or overwrite.
-            0x0020_0021, // DIRECTORY | SYNCHRONOUS_NONALERT | OPEN_REPARSE_POINT
+            0x0020_0020, // SYNCHRONOUS_NONALERT | OPEN_REPARSE_POINT; either object kind
             std::ptr::null(),
             0,
         )
@@ -184,14 +192,20 @@ pub(super) fn open_existing(parent: &Dir, name: &str) -> Result<Dir, ProjectFail
         ));
     }
     // SAFETY: successful synchronous open transfers one owned handle.
-    let directory = Dir::from_std_file(unsafe { std::fs::File::from_raw_handle(raw) });
+    let file = File::from_std(unsafe { std::fs::File::from_raw_handle(raw) });
     if status.information != 1 {
         return Err(ProjectFailure::recovery(
             "directory observation was not FILE_OPENED",
         ));
     }
-    windows_fs::identity(&directory, true)?;
-    Ok(directory)
+    let directory = file
+        .metadata()
+        .map_err(|error| {
+            ProjectFailure::recovery(format!("could not inspect rebound object: {error}"))
+        })?
+        .is_dir();
+    windows_fs::identity(&file, directory)?;
+    Ok(file)
 }
 
 #[cfg(test)]
@@ -199,6 +213,31 @@ mod tests {
     use super::*;
     use cap_std::{ambient_authority, fs::Dir};
     use std::ffi::OsStr;
+    #[test]
+    fn read_only_rebind_coexists_with_retained_file_rename_handle() {
+        use std::io::{Read, Write};
+        let temp = tempfile::tempdir().unwrap();
+        let dir = Dir::open_ambient_dir(temp.path(), ambient_authority()).unwrap();
+        let mut source = dir
+            .open_with("staged", &super::super::windows_replace::source_options())
+            .unwrap();
+        source.write_all(b"preserved").unwrap();
+        source.sync_all().unwrap();
+        let identity = windows_fs::identity(&source, false).unwrap();
+        let mut rebound = open_object(&dir, "staged").unwrap();
+        assert_eq!(identity, windows_fs::identity(&rebound, false).unwrap());
+        let mut bytes = Vec::new();
+        rebound.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, b"preserved");
+        assert!(rebound.write_all(b"denied").is_err());
+        assert!(std::fs::rename(temp.path().join("staged"), temp.path().join("foreign")).is_err());
+        assert!(open_existing(&dir, "staged").is_err());
+        assert_eq!(
+            std::fs::read(temp.path().join("staged")).unwrap(),
+            b"preserved"
+        );
+    }
+
     #[test]
     fn retained_directory_create_and_move_never_replace_an_existing_leaf() {
         let temp = tempfile::tempdir().unwrap();
