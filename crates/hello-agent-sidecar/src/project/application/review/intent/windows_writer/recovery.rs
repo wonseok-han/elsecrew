@@ -7,6 +7,7 @@ fn interrupted_step(j: &Value) -> Result<Move, ProjectFailure> {
         Some("installIntent") => Ok(Move::InstallAfter),
         Some("detachAfterIntent") => Ok(Move::DetachAfter),
         Some("restoreBeforeIntent") => Ok(Move::RestoreBefore),
+        Some("cancelStagedIntent") => Ok(Move::CancelStaged),
         _ => Err(invalid()),
     }
 }
@@ -95,7 +96,7 @@ fn observe(
             j["stagedEntry"].clone(),
             !item["after"].is_null(),
         ),
-        Move::InstallAfter | Move::DetachAfter => (
+        Move::InstallAfter | Move::DetachAfter | Move::CancelStaged => (
             name(&j, "retained")?,
             j["retainedEntry"].clone(),
             !item["before"].is_null(),
@@ -110,6 +111,9 @@ fn observe(
         return Err(invalid());
     }
     let mut other = pin_entry(&dir, &other_name, &other_entry, check)?;
+    if matches!(step, Move::CancelStaged) {
+        absent(&dir, &leaf)?;
+    }
     let mut source = observe_leaf(&dir, &from, false, check)?;
     let mut destination = observe_leaf(&dir, &to, flush_moved, check)?;
     let comparison = match (&source, &destination) {
@@ -144,6 +148,9 @@ fn observe(
         }
     }
     verify_pin(&dir, &other_name, &other_entry, &mut other, check)?;
+    if matches!(step, Move::CancelStaged) {
+        absent(&dir, &leaf)?;
+    }
     lease.validate()?;
     let rebound = open_absolute_directory_capability(Path::new(
         expected["binding"]["canonicalGitRoot"]
@@ -296,5 +303,35 @@ pub(in crate::project) fn inspect_settled_item(
     Ok(
         json!({"applicationId":expected["applicationId"],"index":expected["pendingItem"]["index"],
         "comparison": if restored { "matchesRestoredPair" } else { "matchesAppliedPair" }}),
+    )
+}
+
+/// An install intent may have been committed before cancellation prevented its
+/// syscall. Preserve that evidence and select a distinct cancellation phase;
+/// never republish the earlier beforeMoved operation or retry installation.
+pub(in crate::project) fn cancel_unmoved_install(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    project_id: &str,
+    expected: &Value,
+    request: &str,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<Value, ProjectFailure> {
+    if expected["pendingItem"]["writeJournal"]["phase"] != "installIntent" {
+        return Err(invalid());
+    }
+    let mut evidence = observe(manager, storage, project_id, expected, false, check)?;
+    if evidence.comparison != "matchesUnmoved" {
+        return Err(invalid());
+    }
+    evidence.journal["cancelingBeforeInstall"] = json!(true);
+    evidence.journal["phase"] = json!("cancelReady");
+    check()?;
+    publish(
+        storage,
+        project_id,
+        expected,
+        evidence.journal.clone(),
+        request,
     )
 }

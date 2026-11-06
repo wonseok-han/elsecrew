@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준32240bb의 깨끗한 통합 checkout에서 beforeMoved 부분반영 취소를 추가했다. 명시 CancelStaged가 staged→detached를 cancelStagedIntent/receipt로 이동한 뒤 기존 RestoreBefore로 retained→원본을 복원한다. 설치하지 않은 파일의 installedEntry는 끝까지 null이고 cancelingBeforeInstall:true를 엄격한 phase 범위에서만 수용하며 detached receipt는 staged에 결속한다. 추가/삭제의 null 분기도 같은 기록 계약을 사용한다.
+- 취소 이동 전후 원본 target 부재와 보존 원본을 재대조한다. 취소 이동 자체의 중단도 기존 read-only 분류/명시 sync·acknowledge에 연결했다. installIntent지만 실제 파일이 unmoved인 경우 exact pending/held 증거 아래 고유 cancelReady phase로만 전환하고 이전 beforeMoved operation ID를 재사용하거나 설치 syscall을 재시도하지 않는다.
+- 이 경로는 원본을 이미 보존한 부분반영의 취소다. reserved/staged 단계 원본 미변경 취소·unmoved preserve 처리·다중 항목 실행/정리·디렉터리/추가 metadata·native 검증은 여전히 남는다. Windows 제품 gate와 scheduler 연결은 변경하지 않았다. 독립 검토자1명은 이번 부분취소 diff에 정적 차단 결함이 없다고 확인했다. 선택 rustfmt/diff만 확인했고 빌드/시험은 기능 파동 최종 검증으로 남긴다. 신규 cache/package/worktree/push/CI/모델 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준9684c88의 깨끗한 통합 checkout에서 Windows 중단 rename4종의 read-only 판정과 명시 acknowledge를 추가했다. exact pending/archive·root/parent/guard·이동 양쪽/상대편을 held handle로 대조해 matchesUnmoved/matchesMoved/conflict로 분류한다. acknowledge는 moved에 한해 fresh write-through handle의 NTFS sync·전체 재관측 뒤 단일 journal phase를 CAS 게시한다. rename 재실행·자동 삭제·batch 완료·잠금 해제는 없다.
 - 공통 transition mapping을 추출하고 phase별 receipt 존재/부재와 archive before/after 결속 검사를 publish/stage/move/recovery에 적용했다. staged 내용·기존 권한과 retained/installed/detached/restored의 full ID·내용·metadata chain을 검증하며 rename ChangeTime만 제외한다. 잘못된 단계/위조된 항목 교체를 기존 기록만으로 수용하지 않는다.
 - Windows applied/restored의 전체 private 이름 배치를 읽기 전용으로 대조하는 pending-item inspector도 추가했다. restored는 target(before)+detached(after)·retained/staged 부재이며 단일 항목의 관측을 전체 완료나 삭제 권위로 사용하지 않는다. 이동 전 중단 취소·부분반영 역복원·directory/추가 metadata·cleanup·scheduler와 native 검증은 계속 남는다.

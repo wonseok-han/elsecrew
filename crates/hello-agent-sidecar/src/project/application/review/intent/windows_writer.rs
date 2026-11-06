@@ -57,7 +57,7 @@ fn source_parent(
 
 fn validate(j: &Value) -> Result<(), ProjectFailure> {
     if j.as_object().is_none_or(|o| {
-        o.len() != 12
+        o.len() != 12 + usize::from(o.contains_key("cancelingBeforeInstall"))
             || [
                 "version",
                 "platform",
@@ -84,6 +84,8 @@ fn validate(j: &Value) -> Result<(), ProjectFailure> {
                     | "moveBeforeIntent"
                     | "beforeMoved"
                     | "installIntent"
+                    | "cancelStagedIntent"
+                    | "cancelReady"
                     | "applied"
                     | "detachAfterIntent"
                     | "afterDetached"
@@ -91,6 +93,30 @@ fn validate(j: &Value) -> Result<(), ProjectFailure> {
                     | "restored"
             )
         )
+    {
+        return Err(invalid());
+    }
+    if let Some(canceling) = j.get("cancelingBeforeInstall") {
+        if canceling != &json!(true)
+            || !matches!(
+                j["phase"].as_str(),
+                Some(
+                    "beforeMoved"
+                        | "cancelReady"
+                        | "cancelStagedIntent"
+                        | "afterDetached"
+                        | "restoreBeforeIntent"
+                        | "restored"
+                )
+            )
+        {
+            return Err(invalid());
+        }
+    }
+    if matches!(
+        j["phase"].as_str(),
+        Some("cancelStagedIntent" | "cancelReady")
+    ) && j["cancelingBeforeInstall"] != true
     {
         return Err(invalid());
     }
@@ -351,6 +377,7 @@ pub(in crate::project) enum Move {
     InstallAfter,
     DetachAfter,
     RestoreBefore,
+    CancelStaged,
 }
 
 /// The caller selects a fixed lifecycle step, never arbitrary source/target
@@ -371,6 +398,14 @@ pub(in crate::project) fn move_file(
     }
     let mut j = expected["pendingItem"]["writeJournal"].clone();
     validate_receipts(&j, &expected["pendingItem"]["item"])?;
+    if matches!(step, Move::CancelStaged) {
+        if !matches!(j["phase"].as_str(), Some("beforeMoved" | "cancelReady")) {
+            return Err(invalid());
+        }
+        j["cancelingBeforeInstall"] = json!(true);
+    } else if j["cancelingBeforeInstall"] == true && !matches!(step, Move::RestoreBefore) {
+        return Err(invalid());
+    }
     let (root, dir, leaf) = source_parent(manager, expected)?;
     if json!(windows_fs::identity(&root, true)?) != j["rootIdentity"]
         || json!(windows_fs::identity(&dir, true)?) != j["parentIdentity"]
@@ -390,18 +425,18 @@ pub(in crate::project) fn move_file(
     let item = &expected["pendingItem"]["item"];
     let absent_side = match step {
         Move::PreserveBefore | Move::RestoreBefore => item["before"].is_null(),
-        Move::InstallAfter | Move::DetachAfter => item["after"].is_null(),
+        Move::InstallAfter | Move::DetachAfter | Move::CancelStaged => item["after"].is_null(),
     };
     let (other_name, other_entry) = match step {
         Move::PreserveBefore => (name(&j, "staged")?, j["stagedEntry"].clone()),
-        Move::InstallAfter | Move::DetachAfter => {
+        Move::InstallAfter | Move::DetachAfter | Move::CancelStaged => {
             (name(&j, "retained")?, j["retainedEntry"].clone())
         }
         Move::RestoreBefore => (name(&j, "detached")?, j["detachedEntry"].clone()),
     };
     let other_required = match step {
         Move::PreserveBefore | Move::RestoreBefore => !item["after"].is_null(),
-        Move::InstallAfter | Move::DetachAfter => !item["before"].is_null(),
+        Move::InstallAfter | Move::DetachAfter | Move::CancelStaged => !item["before"].is_null(),
     };
     if other_entry.is_null() == other_required {
         return Err(invalid());
@@ -409,6 +444,9 @@ pub(in crate::project) fn move_file(
     // Hold the other half of the recoverable pair against write/delete while
     // moving this half. Reopening only the moved file cannot prove rollback.
     let mut other = pin_entry(&dir, &other_name, &other_entry, check)?;
+    if matches!(step, Move::CancelStaged) {
+        absent(&dir, &leaf)?;
+    }
     if absent_side {
         if !expected_entry.is_null() {
             return Err(invalid());
@@ -420,6 +458,9 @@ pub(in crate::project) fn move_file(
         check()?;
         lease.validate()?;
         verify_pin(&dir, &other_name, &other_entry, &mut other, check)?;
+        if matches!(step, Move::CancelStaged) {
+            absent(&dir, &leaf)?;
+        }
         j["phase"] = json!(complete);
         return publish(storage, project_id, expected, j, request);
     }
@@ -468,6 +509,9 @@ pub(in crate::project) fn move_file(
         return Err(invalid());
     }
     verify_pin(&dir, &other_name, &other_entry, &mut other, check)?;
+    if matches!(step, Move::CancelStaged) {
+        absent(&dir, &leaf)?;
+    }
     j[receipt] = moved;
     j["phase"] = json!(complete);
     publish(storage, project_id, &current, j, request)
@@ -566,6 +610,19 @@ fn transition(
             j["installedEntry"].clone(),
             "detachedEntry",
         ),
+        Move::CancelStaged => (
+            if j["phase"] == "cancelReady" {
+                "cancelReady"
+            } else {
+                "beforeMoved"
+            },
+            "cancelStagedIntent",
+            "afterDetached",
+            name(j, "staged")?,
+            name(j, "detached")?,
+            j["stagedEntry"].clone(),
+            "detachedEntry",
+        ),
         Move::RestoreBefore => (
             "afterDetached",
             "restoreBeforeIntent",
@@ -585,19 +642,20 @@ fn validate_receipts(j: &Value, item: &Value) -> Result<(), ProjectFailure> {
     let rank = match j["phase"].as_str() {
         Some("reserved") => 0,
         Some("staged" | "moveBeforeIntent") => 1,
-        Some("beforeMoved" | "installIntent") => 2,
+        Some("beforeMoved" | "installIntent" | "cancelStagedIntent" | "cancelReady") => 2,
         Some("applied" | "detachAfterIntent") => 3,
         Some("afterDetached" | "restoreBeforeIntent") => 4,
         Some("restored") => 5,
         _ => return Err(invalid()),
     };
+    let canceling = j["cancelingBeforeInstall"] == true;
     let before = !item["before"].is_null();
     let after = !item["after"].is_null();
     for (key, required) in [
         ("guardEntry", rank >= 1),
         ("stagedEntry", rank >= 1 && after),
         ("retainedEntry", rank >= 2 && before),
-        ("installedEntry", rank >= 3 && after),
+        ("installedEntry", rank >= 3 && after && !canceling),
         ("detachedEntry", rank >= 4 && after),
         ("restoredEntry", rank >= 5 && before),
     ] {
@@ -617,10 +675,18 @@ fn validate_receipts(j: &Value, item: &Value) -> Result<(), ProjectFailure> {
     }
     for (required, before, after) in [
         (rank >= 2 && before, &item["before"], &j["retainedEntry"]),
-        (rank >= 3 && after, &j["stagedEntry"], &j["installedEntry"]),
+        (
+            rank >= 3 && after && !canceling,
+            &j["stagedEntry"],
+            &j["installedEntry"],
+        ),
         (
             rank >= 4 && after,
-            &j["installedEntry"],
+            &j[if canceling {
+                "stagedEntry"
+            } else {
+                "installedEntry"
+            }],
             &j["detachedEntry"],
         ),
         (
