@@ -4,6 +4,11 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 승인2/3으로7ae2287f를 게시한 CI42158624221에서 컴파일/기존 native·dispatcher 단계는 통과했다. runner선택이 C:\Program Files\Git\bin\git.exe 한 개로 전달됐고 Git설치본 preview/명시동의/runtime재검사는 통과했다. 다음 spawn_internal_git에서 OS87(parameter incorrect)로 실패했다. 전체 반영/복원은 아직 실행되지 않았다.
+- 실패 원인을 권한/경로 추정으로 우회하지 않고 Windows transport의 stdin/stdout/stderr·family creation·start 단계와6개 native 생성 API에 고정 오류 문맥을 붙였다. 시험도 --version/hash-object 중 어느 요청인지 표시한다. 프로세스 권한·handle/종료·제품gate는 변경하지 않는다. rustfmt/diff 및 독립 검토 차단결함없음. 검토자는 기존 bound fixture도 GUID 경로를 사용하므로 경로 자체가 원인이라는 근거는 부족하며, native 실패 API를 먼저 확인해야 한다고 판단했다. 마지막 승인 실행에서 위치를 확인할 예정이다.
+
+### 2026-11-06 · by GPT-6
+
 - 사용자에게06f73a47과 해당 Windows 통합 시험의 후속 컴파일/시험 오류 수정만 같은 공개 브랜치에 push·CI최대3회 승인을 받았다. Windows6파일만 추출한 후보와 로컬의 해당파일 diff=empty 및 diff-check를 확인하고 게시했다. CI42158094723 시작, 승인1/3사용. 제품활성화/패키징/모델/main은 제외한다. 과거 rebind 잔여1회와 새 승인 횟수를 섞지 않는다.
 - CI42158094723은 컴파일/필수목록·native75개(새 rename연쇄 포함)·dispatcher1개가 통과했다. Git opt-in은 preview_git_trust에서 ambiguous Windows component로0.02초 실패했고 전체 반영/복원은 실행되지 않았다. Get-Command의 다중 결과가 환경변수 문자열로 합쳐질 가능성을 제거해 첫 실행파일 하나를 선택하고 runner선택을 로그로 남긴다. Git선택읽기/부모열기/이미지보호 실패에 고정 단계설명을 추가했다. 원인 확정이나 안전검사 완화가 아니며 다음 native 실행으로 확인한다. 새 worktree/cache/package/모델 없음.
 

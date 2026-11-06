@@ -356,6 +356,7 @@ mod integration_tests {
                 Some("ce013625030ba8dba906f756967f9e9ca394464a"),
             ),
         ] {
+            eprintln!("installed Git diagnostic operation: {}", args[0]);
             // Admission is repeated for every process; the persisted consent
             // alone cannot supply executable/dependency handles.
             let runtime = manager.admitted_git_runtime().unwrap();

@@ -163,6 +163,11 @@ pub(super) mod native {
         fn GetExitCodeProcess(process: *mut c_void, code: *mut u32) -> i32;
     }
 
+    fn os_failure(stage: &str) -> io::Error {
+        let error = io::Error::last_os_error();
+        io::Error::new(error.kind(), format!("{stage}: {error}"))
+    }
+
     fn invalid(message: &str) -> io::Error {
         io::Error::new(io::ErrorKind::InvalidInput, message)
     }
@@ -513,7 +518,7 @@ pub(super) mod native {
             // Null security attributes make the unnamed owner handle non-inheritable.
             let raw_job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
             if raw_job.is_null() {
-                return Err(io::Error::last_os_error());
+                return Err(os_failure("CreateJobObjectW"));
             }
             let job = unsafe { OwnedHandle::from_raw_handle(raw_job) };
             let mut limits = Limits::default();
@@ -527,7 +532,7 @@ pub(super) mod native {
                 )
             } == 0
             {
-                return Err(io::Error::last_os_error());
+                return Err(os_failure("SetInformationJobObject"));
             }
             // Shared with all admitted Windows std::process launch paths.
             // Declared before duplicates so it is released after they close.
@@ -551,7 +556,7 @@ pub(super) mod native {
                         ) // DUPLICATE_SAME_ACCESS
                     } == 0
                     {
-                        return Err(io::Error::last_os_error());
+                        return Err(os_failure("DuplicateHandle(stdio)"));
                     }
                     inherited.push(unsafe { OwnedHandle::from_raw_handle(duplicate) });
                 }
@@ -572,7 +577,7 @@ pub(super) mod native {
                     )
                 } == 0
             {
-                return Err(io::Error::last_os_error());
+                return Err(os_failure("UpdateProcThreadAttribute(handles)"));
             }
             // The handle array stays alive until after the attribute list drops.
             if unsafe {
@@ -587,7 +592,7 @@ pub(super) mod native {
                 )
             } == 0
             {
-                return Err(io::Error::last_os_error());
+                return Err(os_failure("UpdateProcThreadAttribute(job)"));
             }
             // SAFETY: these C records contain only integer and pointer fields.
             let mut startup: StartupEx = unsafe { std::mem::zeroed() };
@@ -629,7 +634,7 @@ pub(super) mod native {
                 )
             };
             if ok == 0 {
-                return Err(io::Error::last_os_error());
+                return Err(os_failure("CreateProcessW"));
             }
             if let Some(pin) = &mut retained {
                 pin.arm();
