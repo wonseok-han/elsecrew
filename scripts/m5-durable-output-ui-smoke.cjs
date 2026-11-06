@@ -190,7 +190,6 @@ app.on('browser-window-created', (_event, window) => {
       mainProbe = await import('./m5-main-task-trace.mjs');
       const {startMainTaskSession,createMainPhaseProbe} = await import('./m5-main-task-session.mjs');
       mainPhaseProbe = createMainPhaseProbe();
-      mainSession = await startMainTaskSession(window.webContents.debugger, process.pid, {clockMarkers:true});
       report.rendererLongTaskStart = await run(`(${longTaskProbe.beginLongTaskProbe.toString()})()`);
       longTaskStarted = true;
       assert.equal(report.rendererLongTaskStart.supported, true, 'Renderer long-task observation unsupported');
@@ -221,6 +220,12 @@ app.on('browser-window-created', (_event, window) => {
         await setMemoryPhase('preparing');
         persist();
       }
+      // Trace the active workload, not the cold-idle RSS baseline. Starting
+      // Chromium tracing creates a utility process; never subtract its RSS.
+      // It remains included in preparing/load/retained measurements below.
+      mainSession = await startMainTaskSession(window.webContents.debugger, process.pid, {clockMarkers:true});
+      report.mainTraceStartedAfterIdle = combined ? Date.now() : null;
+      if (combined) assert.ok(report.mainTraceStartedAfterIdle >= report.combinedWorkload.idleEndedAt);
       await run(`(async () => {
         const api = window.m5;
         const project = await api.openProject();

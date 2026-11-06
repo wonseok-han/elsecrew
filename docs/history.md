@@ -4,6 +4,11 @@
 
 ### 2026-11-06 · by GPT-6
 
+- Windows 후보2e5a98a 추가push/CI 승인은 미응답이므로 실행하지 않고 독립적인 G6 기존 증거를 확인했다. 기존combined시험은 idle 전에 main tracing을 시작해 fourteenth의 idle에 tracing Utility 약34MiB가 포함됐다. 해당 시험은 외부 입력으로 실패했으며 RSS를 차감해 합격으로 처리하지 않는다.
+- 동시 부하 수집기의 main 추적 시작을 idle종료/preparing전환 뒤·프로젝트열기 전으로 이동하고 mainTraceStartedAfterIdle 시각을 기록한다. 추적 서비스는 이후 전체peak/잔류에 계속 포함하며400/800/120MiB 기준·기존 실패는 유지한다. 시작 화면main long task는 별도시작진단 범위임을 성능문서에 명시했다. node --check/diff 통과, 새 실제측정/성능개선 증거는 아직 없다. 패키지/cache/모델/원격 실행 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 승인3/3으로46eece57을 게시한 CI42159418644는 컴파일/기존 native·dispatcher를 통과했으나 --version의 suspended family creation/CreateProcessW에서 OS87로 실패했다. 설치본 선택/동의/admitted runtime까지는 통과했으며 전체 반영/복원은 미실행이다. 원격 실행은 종료됐고 추가승인은 아직 없다.
 - 독립 검토 제안에 따라 opt-in 시험에 동일 admitted image/의존성/CWD/감시를 유지하고 환경만 SystemRoot1개로 줄인 --version 대조를 먼저 추가했다. 성공 후에만 원래 고정환경 --version/hash-object로 진행한다. 실패 후 재시도/fallback은 없고 제품 환경이나 안전계약을 변경하지 않는다. rustfmt/diff 통과, 새 대조는 미실행이며 별도 공개 승인이 필요하다. G6·Windows 전체 거래/출시 검증은 남는다.
 
