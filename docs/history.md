@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준3ecd884의 깨끗한 통합 checkout에서 Git index/HEAD 기준선 구현을 Windows에서도 공유하도록 연결했다. 공통 parser·index stage/assume-unchanged/skip-worktree·split-index·intent-to-add 거부, HEAD 재확인은 기존 로직을 사용한다. Windows index 읽기는 full handle identity/권한/시각 관찰·32MiB 제한·stream hash·leaf 재열기로 전후 결속을 확인한다. Unix 경로는 기존 metadata 관찰을 유지한다.
+- Windows clean baseline은 raw inventory의 일반 파일과 cat-file batch의 OID/종류/길이/내용을 대조한다. 4GiB 총량·bounded header/chunk·취소·잔여 출력/종료 성공 확인 후 index/raw를 다시 캡처한다. ApplicationCandidate의 bundle 전후 검사에 이 전체 baseline을 연결했다. Windows에 없는 POSIX 실행 bit를 가정하지 않고 index mode를 보존한다. symlink blob은 일반 파일로 취급하지 않는다. 줄바꿈/filter 변환은 하지 않으므로 committed raw bytes와 다른 파일은 거부한다.
+- 구현 우선에 따라 빌드/테스트/CI를 실행하지 않았고 해당 파일 rustfmt/diff만 확인했다. Windows compile/native·공통 index 회귀는 누적 검증에 남는다. 아직 baseline 영속 receipt·review·backup/apply/restore writer/ADS metadata 계약과 제품 activation이 남아 Windows source API는 비활성이다. 신규 cache/package/worktree/push/모델 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준c1fdb16/깨끗한 통합 checkout에서 Windows source inventory를 구현했다. 기존 held directory/file helper·full FILE_ID_INFO와 owner/group/DACL fingerprint를 사용하고 생성/쓰기/change 시각·속성·크기·link count·내용 digest를 기록한다. 접근 시각은 제외한다. heap traversal·100,000 entry/4GiB/8MiB path/depth128 상한·chunk 사이 취소 확인, 두 번 관찰·부모 leaf 재열기·최종 canonical root 결속을 적용한다. reparse/다중 hardlink/Win32 별칭 이름은 거부한다.
 - ApplicationCandidate snapshot의 bundle export 전후에 inventory를 연결했다. 일반 snapshot 범위를 확대하지 않았고 원본 쓰기/Windows application API는 계속 비활성이다. 이는 원본 관찰 구현이며 Git HEAD/index와 clean baseline 대조·실행 bit 의미·ADS 등 전체 metadata 보존·backup/apply/restore writer 포트는 아직 남는다. 동시 악성 쓰기를 완전히 배제하는 atomic snapshot으로 주장하지 않는다.
 - [Microsoft FILE_BASIC_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_basic_info), [FILE_STANDARD_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_standard_info)의 ABI를 확인했다. Windows 파일 변경/.git 제외·hardlink/root 불일치·취소 회귀3개를 작성했으나 구현 우선 방침에 따라 실행하지 않았다. rustfmt/diff만 확인했고 Windows compile/native·독립 검토는 최종 연결 뒤 수행한다. 신규 cache/build/package/worktree/push/CI/모델 없음.

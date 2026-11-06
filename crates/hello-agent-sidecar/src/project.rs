@@ -42,6 +42,9 @@ mod windows_security;
 #[cfg(windows)]
 mod windows_source_inventory;
 #[cfg(windows)]
+#[path = "project/application/git_baseline.rs"]
+mod windows_git_baseline;
+#[cfg(windows)]
 mod windows_save_recovery;
 #[cfg(windows)]
 mod windows_remove;
@@ -1314,9 +1317,7 @@ impl ProjectManager {
         };
         #[cfg(windows)]
         let raw_source = if creation == SnapshotCreation::ApplicationCandidate {
-            Some(windows_source_inventory::capture(
-                &source._root, &source.canonical_root, &|| self.check_application_preparation(),
-            )?)
+            Some(windows_git_baseline::capture_windows_clean_baseline(self, &source)?)
         } else { None };
         let bundle_bytes = self.export_bundle(&source.git_dir, &staging)?;
         let after = source_digest(&source.git_dir)?;
@@ -1340,9 +1341,8 @@ impl ProjectManager {
 
         #[cfg(windows)]
         if let Some(expected) = raw_source {
-            if expected != windows_source_inventory::capture(
-                &source._root, &source.canonical_root, &|| self.check_application_preparation(),
-            )? {
+            let observed = windows_git_baseline::capture_windows_clean_baseline(self, &source)?;
+            if expected != observed {
                 return Err(ProjectFailure::dirty("Windows source changed during snapshot export"));
             }
         }

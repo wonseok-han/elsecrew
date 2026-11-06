@@ -7,9 +7,9 @@ use cap_std::fs::Dir;
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, ffi::c_void, io::Read, os::windows::io::AsRawHandle, path::Path};
 
-const MAX_ENTRIES: usize = 100_000;
+pub(super) const MAX_ENTRIES: usize = 100_000;
 const MAX_BYTES: u64 = 4 * 1024 * 1024 * 1024;
-const MAX_PATH_BYTES: usize = 8 * 1024 * 1024;
+pub(super) const MAX_PATH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_DEPTH: usize = 128;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -17,19 +17,26 @@ pub(super) struct Inventory {
     root: Observation,
     entries: BTreeMap<String, Entry>,
 }
+impl Inventory {
+    pub(super) fn regular_content(&self, path: &str) -> Option<(u64, [u8; 32])> {
+        let entry = self.entries.get(path)?;
+        (entry.observation.attributes & 0x10 == 0)
+            .then_some((entry.observation.length, entry.digest))
+    }
+}
 #[derive(Debug, PartialEq, Eq)]
 struct Entry {
     observation: Observation,
     digest: [u8; 32],
 }
 #[derive(Debug, PartialEq, Eq)]
-struct Observation {
+pub(super) struct Observation {
     identity: windows_fs::Identity,
     created: i64,
     written: i64,
     changed: i64,
     attributes: u32,
-    length: u64,
+    pub(super) length: u64,
     links: u32,
     access: String,
 }
@@ -62,7 +69,7 @@ extern "system" {
         size: u32,
     ) -> i32;
 }
-fn failure() -> ProjectFailure {
+pub(super) fn failure() -> ProjectFailure {
     ProjectFailure::dirty("Windows source inventory changed, is unsupported, or exceeds its budget")
 }
 fn observe<T: AsRawHandle>(
@@ -113,7 +120,7 @@ fn observe<T: AsRawHandle>(
 fn directory_observation(dir: &Dir) -> Result<Observation, ProjectFailure> {
     observe(dir, true, windows_security::directory_fingerprint(dir)?)
 }
-fn file_observation(file: &cap_std::fs::File) -> Result<Observation, ProjectFailure> {
+pub(super) fn file_observation(file: &cap_std::fs::File) -> Result<Observation, ProjectFailure> {
     observe(file, false, windows_security::fingerprint(file)?)
 }
 
