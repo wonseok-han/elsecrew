@@ -130,7 +130,13 @@ impl Confirmations {
         token: &str,
         request_id: &str,
     ) -> Result<PreparedApplication, ProjectFailure> {
+        #[cfg(all(test, windows))]
+        let diagnostic_started = Instant::now();
+        #[cfg(all(test, windows))]
+        eprintln!("Windows preparation timing: stage=prepare_enter elapsedMs={}", diagnostic_started.elapsed().as_millis());
         manager.check_application_preparation()?;
+        #[cfg(all(test, windows))]
+        eprintln!("Windows preparation timing: stage=prepare_checked elapsedMs={}", diagnostic_started.elapsed().as_millis());
         let pending = self.pending.take().ok_or_else(invalid)?;
         if pending.token != token || Instant::now() >= pending.expires {
             return Err(invalid());
@@ -139,6 +145,8 @@ impl Confirmations {
         let target = pending.target.borrowed();
         // Consume the user's exact review before doing potentially lengthy backup IO.
         persistence::reopen_target(manager, storage, target, &pending.review_id)?;
+        #[cfg(all(test, windows))]
+        eprintln!("Windows preparation timing: stage=review_reopened elapsedMs={}", diagnostic_started.elapsed().as_millis());
         let project = crate::project::required_project(storage, target.project_id())?;
         let backup = match project
             .get("application_backups")
@@ -152,6 +160,8 @@ impl Confirmations {
             }
             _ => return Err(invalid()), // Pending recovery needs a separate explicit action.
         };
+        #[cfg(all(test, windows))]
+        eprintln!("Windows preparation timing: stage=backup_ready elapsedMs={} expired={}", diagnostic_started.elapsed().as_millis(), Instant::now() >= pending.expires);
         manager.check_application_preparation()?;
         if Instant::now() >= pending.expires {
             return Err(invalid());
@@ -171,7 +181,13 @@ impl Confirmations {
         storage: &Storage,
         prepared: PreparedApplication,
     ) -> Result<(ReviewPlan, Value), ProjectFailure> {
+        #[cfg(all(test, windows))]
+        let diagnostic_started = Instant::now();
+        #[cfg(all(test, windows))]
+        eprintln!("Windows preparation timing: stage=handoff_enter elapsedMs={}", diagnostic_started.elapsed().as_millis());
         manager.check_application_preparation()?;
+        #[cfg(all(test, windows))]
+        eprintln!("Windows preparation timing: stage=handoff_checked elapsedMs={}", diagnostic_started.elapsed().as_millis());
         if self.generation.take() != Some(prepared.generation)
             || Instant::now() >= prepared.pending.expires
         {
@@ -180,12 +196,16 @@ impl Confirmations {
         let target = prepared.pending.target.borrowed();
         let plan =
             persistence::reopen_target(manager, storage, target, &prepared.pending.review_id)?;
+        #[cfg(all(test, windows))]
+        eprintln!("Windows preparation timing: stage=handoff_review_reopened elapsedMs={}", diagnostic_started.elapsed().as_millis());
         let current = backup::staging::inspect(
             manager,
             storage,
             target.project_id(),
             &prepared.pending.review_id,
         )?;
+        #[cfg(all(test, windows))]
+        eprintln!("Windows preparation timing: stage=handoff_backup_checked elapsedMs={} expired={}", diagnostic_started.elapsed().as_millis(), Instant::now() >= prepared.pending.expires);
         if current != prepared.backup || Instant::now() >= prepared.pending.expires {
             return Err(invalid());
         }
