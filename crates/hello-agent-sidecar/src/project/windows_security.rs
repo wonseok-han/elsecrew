@@ -12,6 +12,28 @@ const SE_DACL_PROTECTED: u16 = 0x1000;
 
 #[link(name = "advapi32")]
 extern "system" {
+    fn ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        text: *const u16,
+        revision: u32,
+        descriptor: *mut *mut c_void,
+        size: *mut u32,
+    ) -> i32;
+    fn GetSecurityDescriptorOwner(
+        descriptor: *mut c_void,
+        owner: *mut *mut c_void,
+        defaulted: *mut i32,
+    ) -> i32;
+    fn GetSecurityDescriptorGroup(
+        descriptor: *mut c_void,
+        group: *mut *mut c_void,
+        defaulted: *mut i32,
+    ) -> i32;
+    fn GetSecurityDescriptorDacl(
+        descriptor: *mut c_void,
+        present: *mut i32,
+        dacl: *mut *mut c_void,
+        defaulted: *mut i32,
+    ) -> i32;
     fn GetSecurityInfo(
         handle: *mut c_void,
         kind: i32,
@@ -120,6 +142,60 @@ impl Descriptor {
             protected: control & SE_DACL_PROTECTED != 0,
         })
     }
+    fn from_text(text: &[u16]) -> Result<Self, ProjectFailure> {
+        if text.is_empty() || text.len() >= 131_072 || text.contains(&0) {
+            return Err(ProjectFailure::recovery(
+                "invalid archived Windows access descriptor",
+            ));
+        }
+        // Own the terminator and keep the bounded input alive during conversion.
+        let mut input = text.to_vec();
+        input.push(0);
+        let (mut raw, mut size) = (ptr::null_mut(), 0u32);
+        let ok = unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                input.as_ptr(),
+                1,
+                &mut raw,
+                &mut size,
+            )
+        };
+        let allocation = LocalMemory(raw);
+        if ok == 0 || allocation.0.is_null() || size == 0 || size > 1024 * 1024 {
+            return Err(ProjectFailure::recovery(
+                "could not decode archived Windows access descriptor",
+            ));
+        }
+        let (mut owner, mut group, mut dacl) = (ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
+        let (mut defaulted, mut present, mut control, mut revision) = (0i32, 0i32, 0u16, 0u32);
+        // Conversion returned a valid self-relative descriptor. These borrowed
+        // component pointers cannot escape the LocalFree owner below.
+        let ok = unsafe {
+            GetSecurityDescriptorOwner(allocation.0, &mut owner, &mut defaulted) != 0
+                && GetSecurityDescriptorGroup(allocation.0, &mut group, &mut defaulted) != 0
+                && GetSecurityDescriptorDacl(allocation.0, &mut present, &mut dacl, &mut defaulted)
+                    != 0
+                && GetSecurityDescriptorControl(allocation.0, &mut control, &mut revision) != 0
+        };
+        if !ok || owner.is_null() || group.is_null() || present == 0 || dacl.is_null() {
+            return Err(ProjectFailure::recovery(
+                "archived Windows access descriptor is incomplete",
+            ));
+        }
+        let descriptor = Self {
+            allocation,
+            owner,
+            group,
+            dacl,
+            protected: control & SE_DACL_PROTECTED != 0,
+        };
+        if descriptor.normalized()? != text {
+            return Err(ProjectFailure::recovery(
+                "archived Windows access descriptor is not canonical",
+            ));
+        }
+        Ok(descriptor)
+    }
     fn normalized(&self) -> Result<Vec<u16>, ProjectFailure> {
         let (mut text, mut length) = (ptr::null_mut(), 0u32);
         // SAFETY: descriptor remains owned; API returns its own LocalFree buffer.
@@ -151,49 +227,74 @@ impl Descriptor {
 /// Inheritance canonicalization must reproduce exactly the inspected access
 /// descriptor; any unsupported owner or inheritance combination fails closed.
 pub(super) fn copy_access(previous: &File, replacement: &File) -> Result<String, ProjectFailure> {
-    let original = Descriptor::read(previous)?;
-    let expected = original.normalized()?;
-    // A newly created source can already have exactly the target descriptor.
-    // Reapplying an unprotected DACL invokes Windows inheritance processing and
-    // can change its representation. Avoid that mutation when nothing differs;
-    // still recheck the original so this is not an optimistic bypass.
-    if Descriptor::read(replacement)?.normalized()? == expected {
-        if Descriptor::read(previous)?.normalized()? != expected {
-            return Err(ProjectFailure::recovery(
-                "Windows save security changed during preservation",
-            ));
-        }
-        return Ok(digest(&expected));
-    }
-    let protection = if original.protected {
-        0x8000_0000
-    } else {
-        0x2000_0000
-    };
-    // SAFETY: all component pointers belong to original, which outlives this
-    // synchronous call. Only the retained replacement handle is modified.
-    let code = unsafe {
-        SetSecurityInfo(
-            replacement.as_raw_handle(),
-            SE_FILE_OBJECT,
-            OWNER_GROUP_DACL | protection,
-            original.owner,
-            original.group,
-            original.dacl,
-            ptr::null_mut(),
-        )
-    };
-    if code != 0 {
-        return Err(failure("copy", code));
-    }
-    if Descriptor::read(replacement)?.normalized()? != expected
-        || Descriptor::read(previous)?.normalized()? != expected
-    {
+    let saved = SavedAccess::capture(previous)?;
+    let result = saved.restore_replacement(replacement)?;
+    if SavedAccess::capture(previous)? != saved {
         return Err(ProjectFailure::recovery(
             "Windows save security changed during preservation",
         ));
     }
-    Ok(digest(&expected))
+    Ok(result)
+}
+
+/// Archive payload only, not permission to mutate a user file. Callers must bind
+/// this to a verified backup and pass their newly created replacement handle.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct SavedAccess {
+    schema_version: u32,
+    text: Vec<u16>,
+}
+impl SavedAccess {
+    pub(super) fn capture(file: &File) -> Result<Self, ProjectFailure> {
+        let text = Descriptor::read(file)?.normalized()?;
+        // Require restorability before accepting an archive payload.
+        Descriptor::from_text(&text)?;
+        Ok(Self {
+            schema_version: 1,
+            text,
+        })
+    }
+    pub(super) fn restore_replacement(&self, replacement: &File) -> Result<String, ProjectFailure> {
+        if self.schema_version != 1 {
+            return Err(ProjectFailure::recovery(
+                "unknown Windows access archive version",
+            ));
+        }
+        let original = Descriptor::from_text(&self.text)?;
+        let identity = windows_fs::identity(replacement, false)?;
+        // Reapplying an already equal inherited ACL can canonicalize it differently.
+        if Descriptor::read(replacement)?.normalized()? != self.text {
+            let protection = if original.protected {
+                0x8000_0000
+            } else {
+                0x2000_0000
+            };
+            // All pointers remain borrowed from original through this call.
+            let code = unsafe {
+                SetSecurityInfo(
+                    replacement.as_raw_handle(),
+                    SE_FILE_OBJECT,
+                    OWNER_GROUP_DACL | protection,
+                    original.owner,
+                    original.group,
+                    original.dacl,
+                    ptr::null_mut(),
+                )
+            };
+            if code != 0 {
+                return Err(failure("restore replacement", code));
+            }
+        }
+        if Descriptor::read(replacement)?.normalized()? != self.text
+            || windows_fs::identity(replacement, false)? != identity
+        {
+            return Err(ProjectFailure::recovery(
+                "restored Windows access descriptor differs from archive",
+            ));
+        }
+        Ok(digest(&self.text))
+    }
 }
 
 pub(super) fn fingerprint(file: &File) -> Result<String, ProjectFailure> {
@@ -219,6 +320,66 @@ mod tests {
     use super::*;
     use crate::project::windows_replace;
     use cap_std::{ambient_authority, fs::Dir};
+
+    #[test]
+    fn archived_access_roundtrips_before_restoring_a_new_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = Dir::open_ambient_dir(temp.path(), ambient_authority()).unwrap();
+        std::fs::write(temp.path().join("previous"), b"original").unwrap();
+        let previous = super::super::open_real_file_at(&dir, "previous").unwrap();
+        let saved = SavedAccess::capture(&previous).unwrap();
+        let encoded = serde_json::to_vec(&saved).unwrap();
+        let decoded: SavedAccess = serde_json::from_slice(&encoded).unwrap();
+        let replacement = dir
+            .open_with("replacement", &windows_replace::source_options())
+            .unwrap();
+        assert_eq!(
+            decoded.restore_replacement(&replacement).unwrap(),
+            fingerprint(&previous).unwrap()
+        );
+        assert_eq!(SavedAccess::capture(&replacement).unwrap(), saved);
+        assert_eq!(
+            std::fs::read(temp.path().join("previous")).unwrap(),
+            b"original"
+        );
+    }
+
+    #[test]
+    fn malformed_archived_access_is_rejected_before_replacement_mutation() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = Dir::open_ambient_dir(temp.path(), ambient_authority()).unwrap();
+        let replacement = dir
+            .open_with("replacement", &windows_replace::source_options())
+            .unwrap();
+        let before = fingerprint(&replacement).unwrap();
+        for saved in [
+            SavedAccess {
+                schema_version: 2,
+                text: vec![65],
+            },
+            SavedAccess {
+                schema_version: 1,
+                text: vec![0],
+            },
+            SavedAccess {
+                schema_version: 1,
+                text: Vec::new(),
+            },
+            SavedAccess {
+                schema_version: 1,
+                text: vec![65; 131_072],
+            },
+        ] {
+            assert!(saved.restore_replacement(&replacement).is_err());
+            assert_eq!(fingerprint(&replacement).unwrap(), before);
+        }
+        assert!(Descriptor::from_text(
+            &"O:SYG:SYD:NO_ACCESS_CONTROL"
+                .encode_utf16()
+                .collect::<Vec<_>>()
+        )
+        .is_err());
+    }
 
     #[test]
     fn replacement_preserves_inherited_access_in_same_parent() {

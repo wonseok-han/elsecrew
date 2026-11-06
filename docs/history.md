@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준b032635의 깨끗한 통합 checkout에서 Windows backup용 SavedAccess를 구현했다. owner/group/DACL의 canonical UTF-16 SDDL과 버전을 직렬화하고, 131,072 unit 미만·NUL/누락/null DACL/알 수 없는 version·재정규화 불일치를 거부한다. OS 변환으로 만든 descriptor allocation은 LocalFree로 닫으며 component pointer는 owner 수명 안에서만 사용한다. SACL/전체 metadata 보존을 주장하지 않는다.
+- restore_replacement는 caller가 보유한 새 replacement handle에만 적용하는 내부 API이며 권한·file ID를 재확인한다. 기존 copy_access도 capture/restore/recheck 경로로 통합해 백업 전용 미사용 코드로만 남기지 않았다. 원본은 읽기만 하고 새 파일의 권한이 이미 같으면 불필요한 상속 재처리를 생략한다. SavedAccess 단독으로 원본 쓰기 권한을 부여하지 않으며 backup descriptor·writer 결속은 다음 연결 단계다.
+- [Microsoft SDDL 역변환](https://learn.microsoft.com/en-us/windows/win32/api/sddl/nf-sddl-convertstringsecuritydescriptortosecuritydescriptorw)·[DACL 조회](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-getsecuritydescriptordacl)의 ABI/LocalFree/null DACL 조건을 확인했다. 저장/복원 roundtrip 및 잘못된 archive의 mutation 전 거부 native 회귀2개를 추가했으나 실행하지 않았다. rustfmt/diff만 확인했고 기존 Windows save 회귀 포함 누적 검증·독립 검토가 남는다. gate/원본/모델/push/CI/build/cache 변경 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준0d736c7의 깨끗한 통합 checkout에서 review persistence와 session confirmation을 Windows에도 연결했다. 저장 시 project/chat/lock revision의 같은 transaction CAS, 재열기 시 현재 계획 재구성과 descriptor 전체 일치 검사를 기존 코드로 공유한다. Windows snapshot digest는 identity/access가 포함된 bounded inventory 직렬화를 사용한다.
 - open/cancel confirmation을 플랫폼 공통으로 연결하고 pending owner 필드·초기화·stop 시 cancel을 Windows에도 적용했다. 확인은 세션 메모리의 단일 token/300초 만료·현재 preview fingerprint에 결속되며 재시작으로 복원되지 않는다. backup prepare/consume 및 실제 writer는 아직 Unix 전용으로 유지했다. 기존 Windows startup/Git/source-write gate를 열지 않았다.
 - 구현 우선 방침에 따라 rustfmt/diff만 확인하고 build/test/CI는 생략했다. Windows compile/native·공통 persistence/confirmation 회귀·독립 검토는 최종 파동 검증에 남는다. 다음은 Windows metadata를 보존하는 backup archive와 복구/반영 writer 연결이다. 새 cache/package/worktree/push/모델 없음.
