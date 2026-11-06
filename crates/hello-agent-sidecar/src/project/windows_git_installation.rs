@@ -349,9 +349,14 @@ mod integration_tests {
         std::fs::write(cwd_path.join("guard"), b"keep").unwrap();
         let directory = Dir::open_ambient_dir(&cwd_path, ambient_authority()).unwrap();
         {
-            // Separate CreateProcess handle-list setup from image/CWD admission.
+            // Compare held-file DOS image spelling with the previous GUID trial;
+            // the GUID CWD, dependency leases and no-stdio setup stay unchanged.
             // Never resume this diagnostic child or retry with weaker leases.
-            let runtime = manager.admitted_git_runtime().unwrap();
+            let runtime = manager
+                .admitted_git_runtime()
+                .unwrap()
+                .diagnostic_dos_launch_alias()
+                .unwrap();
             let cwd = super::super::windows_directory_lease::DirectoryLease::acquire(
                 &directory,
                 OsStr::new("guard"),
@@ -363,7 +368,7 @@ mod integration_tests {
             assert_eq!(environment.len(), 1);
             assert!(runtime.observes_dependencies());
             eprintln!(
-                "installed Git suspended-only diagnostic: stdio=false, imageUtf16={}, cwdUtf16={}",
+                "installed Git suspended-only diagnostic: imageAlias=dos, stdio=false, imageUtf16={}, cwdUtf16={}",
                 runtime.path().encode_utf16().count(),
                 cwd.path().encode_utf16().count()
             );
