@@ -1274,6 +1274,13 @@ impl ProjectManager {
             }
         }
 
+        // Both paths are fresh native canonical paths. Reject before any
+        // preparation ledger or staging write can land inside the source.
+        if self.worktrees_root.starts_with(&source.canonical_root) {
+            return Err(ProjectFailure::manifest(
+                "managed worktree root is inside the original project",
+            ));
+        }
         let worktree_id = format!("worktree_{}", Uuid::new_v4().simple());
         let workspace_identity = format!("workspace_{}", Uuid::new_v4().simple());
         let worktree_path = self.worktrees_root.join(&worktree_id);
@@ -3431,7 +3438,11 @@ impl ProjectManager {
             ));
         }
         let canonical_git_root = PathBuf::from(value_string(&record, "canonical_path")?);
-        if worktree_path == canonical_git_root || worktree_path.starts_with(&canonical_git_root) {
+        // Compare component-aware protocol spellings on both sides. Reopening
+        // the source here would break standalone views after source deletion.
+        let source_protocol = canonical_protocol_path_from_absolute(&canonical_git_root)?;
+        let worktree_protocol = canonical_protocol_path(&worktree_path)?;
+        if Path::new(&worktree_protocol).starts_with(Path::new(&source_protocol)) {
             return Err(ProjectFailure::manifest(
                 "managed snapshot overlaps the original project",
             ));

@@ -21,6 +21,27 @@ fn active_manifest_binding_rejects_other_managed_child() {
     assert_eq!(restored.manifest_path, active.manifest_path);
 }
 
+#[cfg(unix)]
+#[test]
+fn snapshot_rejects_managed_root_inside_source_before_preparation() {
+    let fixture = Fixture::open();
+    let data = fixture.source.join("nested-app-data");
+    fs::create_dir(&data).unwrap();
+    let db = data.join("nested.sqlite3");
+    let mut manager = ProjectManager::new(&db).unwrap();
+    let mut storage = Storage::open(&db).unwrap();
+    manager.open_project(&mut storage, fixture.source.to_str().unwrap(), "req_nested_open").unwrap();
+    let before = required_project(&storage, &fixture.project_id).unwrap();
+    let sequence = storage.connection_for_test().query_row("SELECT COUNT(*) FROM events", [], |row| row.get::<_, i64>(0)).unwrap();
+    let error = manager.create_worktree(&mut storage, &fixture.project_id, "req_nested_create").unwrap_err();
+    assert!(error.detail.contains("inside the original project"));
+    assert_eq!(required_project(&storage, &fixture.project_id).unwrap(), before);
+    assert_eq!(storage.connection_for_test().query_row("SELECT COUNT(*) FROM events", [], |row| row.get::<_, i64>(0)).unwrap(), sequence);
+    assert!(storage.blocker_ids().unwrap().is_empty());
+    assert_eq!(fs::read_dir(manager.worktrees_root).unwrap().count(), 0);
+    assert_eq!(fs::read_dir(manager.manifests_root).unwrap().count(), 0);
+}
+
 fn make_legacy_binding(fixture: &mut Fixture) -> serde_json::Map<String, Value> {
     let mut record = fixture.storage.projection_record("project", &fixture.project_id).unwrap().unwrap();
     record.remove(path_binding::FIELD);

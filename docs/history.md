@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 동일 watch78263을 유지해 CI42182889320 terminal failure를 확인했다. 복사본 생성/경로 검증을 넘어 start_confirmed_application에서300초 확인권한 만료로 실패했다(통합시험491.74초). 준비/백업/최종확인 중 원인은 아직 분리되지 않았으며 TTL은 변경하지 않는다. 추가승인2/3사용·1회잔여, 로그 /tmp/hello-agent-windows-42182889320-failure.log.
+- 대기 중 별도 원본격리 감사에서 create-time overlap 검사가 없고 durable Windows native/protocol 비교가 무효임을 확인했다. fresh canonical source 아래 managed root이면 ledger/staging 전에 거절하고 durable 비교는 양쪽protocol Path component로 수행해 원본 재open을 요구하지 않도록 수정했다. 새 원본내부data-root/no-write 회귀와 기존 source삭제후 restart/diff 회귀각1개 PASS, 동일 독립 검토 차단결함없음. 이 로컬 안전수정은 기존 공개 후보/CI범위와 분리한다. Windows overlap/legacy-active native 회귀는 남는다.
+- 확인권한 만료 원인을 좁히기 위해 Windows 테스트 빌드에만 준비 review/backup/handoff 단계의 경과시간·만료여부 로그를 준비했다. TTL/승인수명·제품동작은 유지하며 같은 검토자 확인 후 기존잔여1회로 측정한다.
+
+### 2026-11-06 · by GPT-6
+
 - 직전 턴은 snapshot rename 수정·same-object 회귀/검토와 CI42182048972 live 확인을 완료한 progress였다. 같은 watch50148이 exit1로 종료될 때까지 관찰했다. snapshot 생성/rename은 통과했고 직후 validate_active_project가 persisted manifest path mismatch로 실패했다. Windows native verbatim root와 저장된 protocol path를 PathBuf 그대로 비교하는 표현 불일치다. 추가승인1/3사용·2회잔여이며 전체반영복원 미완료다.
 - manifest_path는 trusted manifests_root+worktree ID에서 native 경로를 만들고 저장 때와 같은 canonical_protocol_path_without_existing과 ledger 문자열을 exact 비교하도록 최소 수정했다. 같은 검토자는 I/O권위/경계 약화없음을 확인했고 인접 source/worktree overlap 표현 비교는 기존 별도 audit 항목으로 남겼다. 다른 managed child로 경로변조→거부→원복 재수락을 로컬/Windows opt-in 회귀에 추가했다. 로컬 테스트의 unwrap_err Debug 요구 컴파일 오류는 err().unwrap()으로 바로잡았고 최종 scoped 로컬회귀1개가 PASS했다. diff-check 통과 및3코드파일 후보60878b21을 새승인2/3으로 게시, CI42182889320 in_progress 확인·1회잔여다. 로그 /tmp/hello-agent-windows-42182048972-failure.log.
 
@@ -203,6 +209,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **원본/관리폴더 겹침(2026-11-06)**: snapshot 생성은 source 내부 managed root를 준비기록/폴더생성 전에 거절해야 한다. durable Windows 비교는 native verbatim/protocol 혼용을 피하되 원본 삭제 후 standalone view를 위해 원본 재open은 요구하지 않는다. 로컬 회귀/독립 검토를 통과한 별도수정이며 Windows native 추가확인은 남는다.
 - **Windows 전체 통합 진단 후보(2026-11-06)**: d1071b95까지 명시 설치Git/임시 프로젝트의 선택·동의·실행·철회와 snapshot→review/token→scheduler 반영/복원→SQLite재열기 opt-in을 연결했다. 테스트 전용 manager Git허용은 제품에 컴파일되지 않으며 독립 검토 차단결함없음. native 실행은 아직 미확인, 새 CI 공개 범위 승인이 필요하다. 이전75 PASS에 포함하지 않는다.
 - **Windows 일반 파일 재관측(2026-11-06)**: cap-primitives3.4.6의 maybe_dir는 일반 파일에도 FILE_SHARE_DELETE를 제거한다. retained DELETE handle과 병존하는 writer read-only rebind는 부모 상대 native FILE_OPEN/share7/no-follow 및 열린 객체 종류/신원 검사를 사용한다. mutation 보호 handle은 유지한다. CI42155540808에서 전용 회귀 포함75개 통과; 전체 반영/복원 거래 검증과 구분한다.
 - **Windows 생성 폴더 재관측(2026-11-06)**: DELETE-capable creation handle을 유지한 상태의 generic directory reopen은 sharing 위반을 낼 수 있다. 부모handle 상대 read-only FILE_OPEN/share7/no-follow+full identity로 재관측하고 기존 creation pin·lease·flush·receipt 비교는 유지한다. CI42154541724에서 stage/new-directory 회귀 포함74개 진단 통과; 전체 Windows 제품 활성화 근거로 확장하지 않는다.
