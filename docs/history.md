@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
-2026-11-06 Windows CI42178206686에서 실제 Git 버전조회·stdin 명령·동의철회와 엄격한 conhost 신원/종료 처리가 통과했다. 다음 반영/복원 fixture의 저장소 초기화가 설치 template 경로 오류로 실패해 --template= 수정 후보3a02b433을 준비했다. 추가 승인2/3회로 Git 내부 검색 경로 수정 후보04afcf3b의 CI42179853118이 실행 중이며1회잔여다. macOS G6·Windows 전체 반영/복원·제품 활성화·출시는 미완료다. 상세는 아래 및 [11월 아카이브](archive/history-2026-11.md).
+2026-11-06 Windows CI42178206686에서 실제 Git 버전조회·stdin 명령·동의철회와 엄격한 conhost 신원/종료 처리가 통과했다. 다음 반영/복원 fixture의 저장소 초기화가 설치 template 경로 오류로 실패해 --template= 수정 후보3a02b433을 준비했다. snapshot 초기화의 빈 template 수정 후보a126d521을 추가승인3/3으로 게시해 CI42180712653 실행 중이며 잔여0회다. macOS G6·Windows 전체 반영/복원·제품 활성화·출시는 미완료다. 상세는 아래 및 [11월 아카이브](archive/history-2026-11.md).
+
+### 2026-11-06 · by GPT-6
+
+- 직전 턴은 Git 검색 경로 호환 수정/독립 검토 및 CI42179853118 live 확인을 완료한 progress였다. 같은 watch66125가 exit1로 종료될 때까지 관찰했다. Git 진단과 bundle export는 통과했고 다음 initialize_snapshot_repository의 git init이 설치 template 경로 copy 오류로 실패했다. 검색 locator 수정으로 이전 cannot spawn git 단계를 넘었지만 전체 반영/복원은 미완료다. 현재추가승인2/3사용·1회잔여.
+- app-created standalone snapshot init에 --template= 한 인자를 추가했다. 외부 설치template/hooks를 복사하지 않고 기존 검증 bundle만 가져오는 범위이며 source·HEAD/tree·image·CWD·종료 보호를 바꾸지 않는다. 동일 독립 검토자는 기존 fixture에서 통과한 인자와 같은 좁은 수정으로 승인했다. 로컬 readonly-source snapshot 회귀1개 PASS(754개 중 scoped1). project.rs 전체 rustfmt check는 기존차이로 실패했고 변경 전 HEAD도 동일하게 실패함을 별도 확인했다; 관련 없는 전체 재포맷은 하지 않았다. diff-check 통과. 단일파일 후보a126d521을 마지막승인3/3으로 게시해 CI42180712653 in_progress를 확인했다. 잔여0회다. 로그 /tmp/hello-agent-windows-42179853118-failure.log.
 
 ### 2026-11-06 · by GPT-6
 

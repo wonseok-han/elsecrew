@@ -3992,6 +3992,9 @@ impl ProjectManager {
             [
                 "init",
                 "--quiet",
+                // Standalone snapshots import only the verified bundle. Do not
+                // copy installation templates or hooks into this repository.
+                "--template=",
                 &format!("--object-format={}", source.object_format),
                 ".",
             ],
