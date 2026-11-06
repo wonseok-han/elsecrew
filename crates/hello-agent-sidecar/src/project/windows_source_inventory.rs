@@ -15,7 +15,7 @@ const MAX_DEPTH: usize = 128;
 #[derive(Debug, PartialEq, Eq, serde::Serialize)]
 pub(super) struct Inventory {
     root: Observation,
-    entries: BTreeMap<String, Entry>,
+    pub(super) entries: BTreeMap<String, Entry>,
 }
 impl Inventory {
     pub(super) fn write_receipt<W: std::io::Write>(
@@ -42,9 +42,21 @@ impl Inventory {
     }
 }
 #[derive(Debug, PartialEq, Eq, serde::Serialize)]
-struct Entry {
+pub(super) struct Entry {
     observation: Observation,
     digest: [u8; 32],
+}
+impl Entry {
+    pub(super) fn kind(&self) -> u8 {
+        if self.observation.attributes & 0x10 != 0 {
+            2
+        } else {
+            1
+        }
+    }
+    pub(super) fn content(&self) -> (u64, [u8; 32]) {
+        (self.observation.length, self.digest)
+    }
 }
 #[derive(Debug, PartialEq, Eq, serde::Serialize)]
 pub(super) struct Observation {

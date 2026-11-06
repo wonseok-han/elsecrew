@@ -48,6 +48,9 @@ mod windows_git_baseline;
 #[path = "project/application/git_baseline/raw_baseline/receipt.rs"]
 mod windows_baseline_receipt;
 #[cfg(windows)]
+#[path = "project/application/review.rs"]
+mod windows_application_review;
+#[cfg(windows)]
 mod windows_save_recovery;
 #[cfg(windows)]
 mod windows_remove;
@@ -98,6 +101,10 @@ use std::{
 use uuid::Uuid;
 #[cfg(unix)]
 mod application;
+#[cfg(unix)]
+use application::review as application_review;
+#[cfg(windows)]
+use windows_application_review as application_review;
 #[cfg(unix)]
 mod git_process;
 #[cfg(unix)]
@@ -740,26 +747,26 @@ impl ProjectManager {
         }
     }
     pub(crate) fn application_preview_page(&self, storage: &Storage, project_id: &str, chat_id: Option<&str>, offset: usize, fingerprint: Option<&str>) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             let page = if let Some(chat_id) = chat_id {
                 let chat = storage.projection_record("chat", chat_id)?.ok_or_else(|| ProjectFailure::dirty("review chat missing"))?;
                 let record = chat.get("record").and_then(Value::as_object).ok_or_else(|| ProjectFailure::dirty("review chat record missing"))?;
                 let address = WorkspaceAddress { project_id: project_id.to_owned(), chat_id: chat_id.to_owned(), worktree_id: value_string(record, "worktreeId")?.to_owned(), workspace_identity: value_string(record, "workspaceIdentity")?.to_owned() };
-                application::review::prepare_target(self, storage, application::review::ReviewTarget::Chat { address: &address, task_id: value_string(record, "taskId")? })?.preview_page(offset, fingerprint)?
+                application_review::prepare_target(self, storage, application_review::ReviewTarget::Chat { address: &address, task_id: value_string(record, "taskId")? })?.preview_page(offset, fingerprint)?
             } else {
-                application::review::prepare(self, storage, project_id)?.preview_page(offset, fingerprint)?
+                application_review::prepare(self, storage, project_id)?.preview_page(offset, fingerprint)?
             };
             Ok(ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"applicationPreviewPage","projectId":project_id,"chatId":chat_id,"page":page}), ..Default::default() })
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = (storage, project_id, chat_id, offset, fingerprint);
             Err(ProjectFailure::recovery("application preview unavailable on this platform"))
         }
     }
     pub(crate) fn chat_application_preview(&self, storage: &Storage, project_id: &str, chat_id: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             let chat = storage.projection_record("chat", chat_id)?.ok_or_else(|| ProjectFailure::dirty("review chat missing"))?;
             let record = chat.get("record").and_then(Value::as_object).ok_or_else(|| ProjectFailure::dirty("review chat record missing"))?;
@@ -768,23 +775,26 @@ impl ProjectManager {
                 worktree_id: value_string(record, "worktreeId")?.to_owned(),
                 workspace_identity: value_string(record, "workspaceIdentity")?.to_owned(),
             };
-            let plan = application::review::prepare_target(self, storage, application::review::ReviewTarget::Chat { address: &address, task_id: value_string(record, "taskId")? })?;
+            let plan = application_review::prepare_target(self, storage, application_review::ReviewTarget::Chat { address: &address, task_id: value_string(record, "taskId")? })?;
             Ok(ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"chatApplicationPreview","projectId":project_id,"chatId":chat_id,"preview":plan.preview()}), ..Default::default() })
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = (storage, project_id, chat_id);
             Err(ProjectFailure::recovery("chat application preview unavailable on this platform"))
         }
     }
     pub(crate) fn prepare_application_workspace(&mut self, storage: &mut Storage, project_id: &str, request_id: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             // Reject unsupported/dirty input before reserving a recovery lock.
             // Creation captures again under its durable launch fence.
             let project = required_project(storage, project_id)?;
             let source = self.open_source_repository(Path::new(value_string(&project, "canonical_path")?))?;
+            #[cfg(unix)]
             application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)?;
+            #[cfg(windows)]
+            windows_git_baseline::capture_windows_clean_baseline(self, &source)?;
             self.create_worktree_inner(storage, project_id, request_id, None, None, SnapshotCreation::ApplicationCandidate)?;
             let active = self.validate_active_project(storage, project_id)?;
             Ok(ProjectAction {
@@ -792,22 +802,22 @@ impl ProjectManager {
                 ..Default::default()
             })
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = (storage, project_id, request_id);
             Err(ProjectFailure::recovery("application workspace unavailable on this platform"))
         }
     }
     pub(crate) fn application_preview(&self, storage: &Storage, project_id: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
-            let plan = application::review::prepare(self, storage, project_id)?;
+            let plan = application_review::prepare(self, storage, project_id)?;
             Ok(ProjectAction {
                 result: serde_json::json!({"schemaVersion":1,"action":"applicationPreview","projectId":project_id,"preview":plan.preview()}),
                 ..Default::default()
             })
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = (storage, project_id);
             Err(ProjectFailure::recovery("application preview unavailable on this platform"))

@@ -308,6 +308,18 @@ pub(in crate::project) struct WindowsBaseline {
 }
 
 #[cfg(windows)]
+impl WindowsBaseline {
+    pub(in crate::project) fn inventory(
+        &self,
+    ) -> &crate::project::windows_source_inventory::Inventory {
+        &self.raw
+    }
+    pub(in crate::project) fn tracked_paths(&self) -> impl Iterator<Item = &str> {
+        self.index.entries.keys().map(String::as_str)
+    }
+}
+
+#[cfg(windows)]
 pub(in crate::project) fn capture_windows_clean_baseline(
     manager: &ProjectManager,
     source: &SourceRepository,

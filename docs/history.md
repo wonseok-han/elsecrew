@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준9dcca5b/깨끗한 통합 checkout에서 Windows 반영용 복사본 준비와 project/chat preview·preview page 경로를 연결했다. 기존 review 소스를 플랫폼별 inventory/baseline adapter와 공유해 chat/task/workspace revision·healthy lock·전체 blocker·source receipt 검증·case/Unicode 충돌·untracked 원본 충돌·검토 중 변경 재확인·100개 pagination fingerprint를 유지했다. fork한 별도 대상 검증 규칙을 만들지 않았다.
+- Windows inventory는 읽기 전용 kind/content view를 제공하고 파일 mode는 POSIX 실행 bit로 해석하지 않는다. 새/기존 디렉터리 처리와 tracked deletion 구분은 기존 review와 같다. Windows snapshot fingerprint는 raw identity/access observation까지 bounded serialization한다. 아직 Windows의 ACL/ADS 변경을 어떤 반영으로 다룰지와 backup/confirmation/intent/writer 포트가 남아 쓰기 capability는 비활성이다. 준비·preview도 기존 Git/startup gate가 열리기 전에는 제품에서 사용할 수 없다.
+- 이번은 구현 checkpoint로 rustfmt/diff만 확인했다. Windows compile/native·Unix review 회귀·독립 검토와 실제 UI 종단 검증은 후속 묶음 검증 대상이다. 신규 build/cache/package/worktree/push/CI/모델 없음. 다음은 review 영속 기록·백업·명시 확인을 Windows writer/복구 흐름에 연결하는 것이다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준73c8fce의 깨끗한 통합 checkout에서 Windows clean baseline의 영속 receipt를 연결했다. 기존 receipt의 project/lock 준비 fence·snapshot identity·source_baselines 원장 결속 코드를 공유하고 플랫폼별 encode/persist/verify만 분기했다. Windows baseline에는 canonical root/source identity/object format을 추가해 다른 원본·복사본의 기록 재사용을 거부한다.
 - Windows 전용 filename과 platform:windows 형식으로 index·전체 raw observation(128-bit file ID/권한/시각/내용)을 bounded64MiB에 기록한다. entry마다 취소 확인, NTFS 확인·기존 write-through/no-follow exclusive create·파일 sync·leaf identity 재열기·전체 readback/digest/재인코딩 일치 후에만 원장에 결속한다. 기존/부분 기록은 덮어쓰거나 삭제하지 않는다. Unix filename/내용 형식은 유지했다.
 - ApplicationCandidate의 snapshot publication 전 receipt 저장까지 연결했고, 저장된 receipt로 현재 baseline을 다시 확인하는 verify_bound도 Windows에서 사용할 수 있다. 아직 Windows review 호출·backup/apply/restore writer와 metadata 보존·native crash/reopen 검증은 남으므로 제품 API는 계속 비활성이다. 구현 우선 방침에 따라 rustfmt/diff만 확인했으며 build/test/CI/push/package/모델 없음. 이 체크포인트를 Windows durability 또는 제품 합격으로 보지 않는다.

@@ -1,10 +1,17 @@
 //! Read-only project review candidate. Not an approval ticket or write capability.
+#[cfg(unix)]
 use super::{
     git_baseline::raw_baseline::{capture_clean_baseline, receipt},
     Entry, SourceInventory,
 };
 use crate::project::{
     snapshot_identity, ActiveProject, ProjectFailure, ProjectManager, WorkspaceAddress,
+};
+#[cfg(windows)]
+use crate::project::{
+    windows_baseline_receipt as receipt,
+    windows_git_baseline::capture_windows_clean_baseline as capture_clean_baseline,
+    windows_source_inventory::{Entry, Inventory as SourceInventory},
 };
 use crate::storage::Storage;
 use serde_json::Value;
@@ -14,9 +21,13 @@ use std::io::{self, Write};
 use unicode_normalization::UnicodeNormalization;
 
 const MAX_REVIEW_BYTES: usize = 32 * 1024 * 1024;
+#[cfg(unix)]
 pub(in crate::project) mod backup;
+#[cfg(unix)]
 pub(in crate::project) mod confirmation;
+#[cfg(unix)]
 pub(in crate::project) mod intent;
+#[cfg(unix)]
 pub(in crate::project) mod persistence;
 
 #[derive(Clone, Copy)]
@@ -125,7 +136,10 @@ impl ReviewTarget<'_> {
 
 fn validate_paths<'a>(paths: impl Iterator<Item = &'a str>) -> Result<(), ProjectFailure> {
     let mut names = BTreeMap::new();
+    #[cfg(unix)]
     let mut budget = 2 * super::MAX_PATH_BYTES;
+    #[cfg(windows)]
+    let mut budget = 2 * crate::project::windows_source_inventory::MAX_PATH_BYTES;
     for path in paths {
         let mut key = String::new();
         // Conservative compatibility normalization may reject more than the host FS.
@@ -164,6 +178,7 @@ struct Image {
     digest: [u8; 32],
 }
 
+#[cfg(unix)]
 impl From<&Entry> for Image {
     fn from(entry: &Entry) -> Self {
         Self {
@@ -172,6 +187,51 @@ impl From<&Entry> for Image {
             size: entry.size,
             digest: entry.digest,
         }
+    }
+}
+
+#[cfg(windows)]
+impl From<&Entry> for Image {
+    fn from(entry: &Entry) -> Self {
+        let (size, digest) = entry.content();
+        Self {
+            kind: entry.kind(),
+            executable: false,
+            size: if entry.kind() == 2 { 0 } else { size },
+            digest,
+        }
+    }
+}
+
+fn capture_workspace(
+    root: &cap_std::fs::Dir,
+    path: &std::path::Path,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<SourceInventory, ProjectFailure> {
+    #[cfg(unix)]
+    {
+        let _ = path;
+        super::capture_checked(root, check)
+    }
+    #[cfg(windows)]
+    {
+        crate::project::windows_source_inventory::capture(root, path, check)
+    }
+}
+
+fn snapshot_digest(snapshot: &SourceInventory) -> Result<String, ProjectFailure> {
+    #[cfg(unix)]
+    {
+        persistence::snapshot_digest(snapshot)
+    }
+    #[cfg(windows)]
+    {
+        let mut sink = ReviewHash {
+            hash: Sha256::new(),
+            remaining: MAX_REVIEW_BYTES,
+        };
+        snapshot.write_receipt(&mut sink, &|| Ok(()))?;
+        Ok(format!("sha256:{:x}", sink.hash.finalize()))
     }
 }
 
@@ -231,9 +291,12 @@ pub(in crate::project) fn prepare_target(
     let baseline = capture_clean_baseline(manager, &source)?;
     receipt::verify_bound(manager, storage, &active, &baseline)?;
     let workspace = manager.worktree_capability(&active)?;
-    let snapshot = super::capture_checked(&workspace, &|| manager.check_application_preparation())?;
+    let snapshot = capture_workspace(&workspace, &active.worktree_path, &|| {
+        manager.check_application_preparation()
+    })?;
     // Snapshot files are materialized with Git's 0644/0755 modes. Other chmod
     // changes have no supported application semantics yet; never omit them.
+    #[cfg(unix)]
     for entry in snapshot.entries.values() {
         if (entry.kind == 1 && !matches!(entry.mode & 0o7777, 0o644 | 0o755))
             || (entry.kind == 2 && entry.mode & 0o7777 != 0o755)
@@ -257,7 +320,7 @@ pub(in crate::project) fn prepare_target(
             .get(*path)
             .ok_or_else(|| ProjectFailure::dirty("tracked baseline file missing"))?;
         let after = snapshot.entries.get(*path);
-        if after.is_some_and(|entry| entry.kind != before.kind) {
+        if after.is_some_and(|entry| entry.kind() != before.kind()) {
             return Err(ProjectFailure::dirty(
                 "file kind transitions require a separately supported apply policy",
             ));
@@ -281,7 +344,7 @@ pub(in crate::project) fn prepare_target(
             continue;
         }
         if let Some(before) = original.get(path) {
-            if before.kind == 2 && after.kind == 2 {
+            if before.kind() == 2 && after.kind() == 2 {
                 continue;
             }
             return Err(ProjectFailure::dirty(
@@ -298,7 +361,12 @@ pub(in crate::project) fn prepare_target(
     }
     // Source entries not tracked by Git are never inferred to be deletions.
     // Existing directories remain; only new directories appear as additions.
-    if baseline != capture_clean_baseline(manager, &source)? || snapshot != super::capture_checked(&workspace, &|| manager.check_application_preparation())? {
+    if baseline != capture_clean_baseline(manager, &source)?
+        || snapshot
+            != capture_workspace(&workspace, &active.worktree_path, &|| {
+                manager.check_application_preparation()
+            })?
+    {
         return Err(ProjectFailure::dirty(
             "source or snapshot changed during review",
         ));
@@ -355,15 +423,33 @@ pub(in crate::project) fn revalidate(
 }
 
 impl ReviewPlan {
-    pub(in crate::project) fn preview_page(&self, offset: usize, expected: Option<&str>) -> Result<Value, ProjectFailure> {
-        let fingerprint = format!("{:x}", Sha256::digest(serde_json::to_vec(&(&self.binding, self.digest, persistence::snapshot_digest(&self.snapshot)?)).map_err(|_| ProjectFailure::dirty("review fingerprint failed"))?));
-        if offset > self.changes.len() || offset % 100 != 0 || (offset > 0 && expected.is_none()) || expected.is_some_and(|value| value != fingerprint) {
-            return Err(ProjectFailure::dirty("review changed or page cursor is invalid; restart review"));
+    pub(in crate::project) fn preview_page(
+        &self,
+        offset: usize,
+        expected: Option<&str>,
+    ) -> Result<Value, ProjectFailure> {
+        let fingerprint = format!(
+            "{:x}",
+            Sha256::digest(
+                serde_json::to_vec(&(&self.binding, self.digest, snapshot_digest(&self.snapshot)?))
+                    .map_err(|_| ProjectFailure::dirty("review fingerprint failed"))?
+            )
+        );
+        if offset > self.changes.len()
+            || offset % 100 != 0
+            || (offset > 0 && expected.is_none())
+            || expected.is_some_and(|value| value != fingerprint)
+        {
+            return Err(ProjectFailure::dirty(
+                "review changed or page cursor is invalid; restart review",
+            ));
         }
         let changes: Vec<Value> = self.changes.iter().skip(offset).take(100).map(|(path, change)| {
             serde_json::json!({"path":path,"kind":if change.before.is_none() {"added"} else if change.after.is_none() {"deleted"} else {"modified"}})
         }).collect();
-        Ok(serde_json::json!({"worktreeId":self.binding["worktreeId"],"total":self.changes.len(),"changes":changes,"offset":offset,"fingerprint":fingerprint}))
+        Ok(
+            serde_json::json!({"worktreeId":self.binding["worktreeId"],"total":self.changes.len(),"changes":changes,"offset":offset,"fingerprint":fingerprint}),
+        )
     }
     pub(in crate::project) fn preview(&self) -> Value {
         let changes: Vec<Value> = self
