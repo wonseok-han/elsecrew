@@ -52,6 +52,7 @@ pub(super) fn for_runtime(
         ("GIT_CONFIG_COUNT", "0"),
         ("GIT_OPTIONAL_LOCKS", "0"),
         ("GIT_NO_REPLACE_OBJECTS", "1"),
+        ("GIT_NO_LAZY_FETCH", "1"),
         ("GIT_ATTR_NOSYSTEM", "1"),
         ("GIT_TERMINAL_PROMPT", "0"),
         ("GIT_PAGER", ""),

@@ -3,11 +3,10 @@ use super::super::{capture_once_checked, failure, stamp, Entry, SourceInventory,
 use super::{capture_index_baseline, GitIndexBaseline};
 use crate::project::{
     open_absolute_directory_capability, validated_oid, ProjectFailure, ProjectManager,
-    SourceRepository, StreamingGitChild,
+    SourceRepository,
 };
 use sha2::{Digest, Sha256};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::process::Stdio;
 pub(in crate::project) mod receipt;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -78,9 +77,11 @@ fn verify_blobs(
     index: &GitIndexBaseline,
     raw: &SourceInventory,
 ) -> Result<(), ProjectFailure> {
-    let mut command = manager.git_command_at(&source.git_dir)?;
-    command
-        .args([
+    // Use the same capability-bound launch/termination owner as snapshot and diff.
+    // The fixed environment disables lazy fetch on every supported platform.
+    let mut child = manager.spawn_git_stream(
+        &source.git_dir,
+        [
             "-c",
             "core.fsmonitor=false",
             "-c",
@@ -89,11 +90,9 @@ fn verify_blobs(
             "protocol.allow=never",
             "cat-file",
             "--batch",
-        ])
-        .env("GIT_NO_LAZY_FETCH", "1")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped());
-    let mut child = StreamingGitChild::spawn(&mut command).map_err(|_| failure())?;
+        ],
+        true,
+    )?;
     let mut input = child.stdin.take().ok_or_else(failure)?;
     let mut output = BufReader::new(child.stdout.take().ok_or_else(failure)?);
     let mut remaining = MAX_BYTES;

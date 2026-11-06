@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준9ebce47/깨끗한 통합 checkout에서 Windows 원본 반영·복원 포트의 기존 Git 의존 경로를 조사했다. raw baseline의 committed blob 비교가 유일하게 application 아래에서 raw Command/StreamingGitChild::spawn을 직접 사용했다. 이를 snapshot/diff와 같은 spawn_git_stream으로 연결해 플랫폼별 설치 admission·CWD 소유권·취소/종료 관리를 공유하도록 변경했다.
+- 기존 baseline 전용 GIT_NO_LAZY_FETCH=1은 Unix 고정 명령 환경과 Windows 내부 Git 환경으로 옮겼다. 내부 Git이 누락 객체를 자동 다운로드하지 않는 정책을 공통으로 유지한다. cat-file batch의 입출력/길이/추가 출력/종료 성공 검사는 그대로다. Windows application 모듈 자체는 아직 Unix 전용이므로 이 변경만으로 원본 반영·복원을 사용할 수 없다.
+- 사용자 구현 우선 지시에 따라 테스트·빌드·패키징 없이 직접 diff와 application 내부 직접 spawn 잔존 여부만 확인했다. 전체 회귀·독립 종료 경계 검토는 파동 마감에 수행한다. 다음은 raw inventory/파일 권한·기준선·반영 writer의 Windows 포트이며 제품 gate는 비활성 유지다. 새 cache/worktree/모델/push/CI 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준e4df6ee의 깨끗한 통합 checkout에서 승인된 Windows 설치 폴더 신뢰 정책과 준비 연결을 점검했다. 기존 main 보안 harness가 새 git-preparation/git-selection import를 제공하지 못해 시작 실패하는 것을 재현하고, 파일/프로세스를 사용하지 않는 경계 mock과 실제 선택 계약을 연결했다. 제품 코드는 변경하지 않았다.
 - 준비 client의 실제 코드를 fake execFile로 실행하는 회귀3개를 추가했다. 고정 실행 경로/인자/작업 폴더·shell 차단·출력/시간 상한, 직렬 처리, 요청 전후 owner 검사, active 완료까지 종료 대기, queued 요청 취소, 재개, 잘못된 응답/프로세스 오류 거부를 확인했다. 이는 실제 Windows 프로세스 종료나 서명 검증 증거는 아니다.
 - 화면 tsc --noEmit 통과, 기존 Electron 보안12 PASS, 준비 client3 PASS, diff 검사 통과. 빌드/패키지/cache/모델/push/CI 없이 확인했다. Windows 원본 반영/복원 포트·native 통합/독립 검토·제품 활성화·G6/출시는 여전히 남는다. 고정 발견의 오래된 Git 제공 방식 미결정 문구를 사용자 설치본 결정으로 바로잡았다.
