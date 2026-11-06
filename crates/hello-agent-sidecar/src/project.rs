@@ -73,6 +73,8 @@ mod windows_save_cleanup;
 mod save_completion;
 #[cfg(all(windows, test))]
 mod windows_save_integration_tests;
+#[cfg(all(test, windows))]
+mod windows_application_integration_tests;
 use crate::{AppendOutcome, SidecarError, Storage};
 #[cfg(unix)]
 use cap_fs_ext::OsMetadataExt;
@@ -448,6 +450,9 @@ impl Drop for StreamingGitChild {
 }
 
 pub struct ProjectManager {
+    // Test-binary only; never an environment or renderer-controlled gate.
+    #[cfg(all(test, windows))]
+    windows_git_diagnostic: bool,
     preparation_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     // Remains false in product builds until integrated safety review is complete.
     source_writes_enabled: bool,
@@ -966,6 +971,8 @@ impl ProjectManager {
         let (save_staging_root, save_staging_dir) =
             create_managed_directory(&data_root, &data_dir, SAVE_STAGING_DIRECTORY)?;
         Ok(Self {
+            #[cfg(all(test, windows))]
+            windows_git_diagnostic: false,
             preparation_cancel: None,
             // Only macOS has the no-follow/atomic rename writer and recovery gate.
             // Enabling the capability never bypasses review, consent, or fencing.
@@ -4567,7 +4574,10 @@ impl ProjectManager {
     ) -> Result<StreamingGitChild, ProjectFailure>
     where I: IntoIterator<Item = S>, S: AsRef<OsStr>,
     {
-        if !WINDOWS_GIT_EXECUTION_ENABLED {
+        let enabled = WINDOWS_GIT_EXECUTION_ENABLED;
+        #[cfg(test)]
+        let enabled = enabled || self.windows_git_diagnostic;
+        if !enabled {
             return Err(ProjectFailure::recovery("Windows Git execution has not been activated"));
         }
         self.verify_managed_paths()?;

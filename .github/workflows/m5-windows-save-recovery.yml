@@ -43,6 +43,9 @@ jobs:
             'project::windows_tests::application_scheduler_connection_does_not_enable_windows_writes',
             'project::windows_directory_create::tests::retained_directory_create_and_move_never_replace_an_existing_leaf',
             'project::windows_directory_create::tests::read_only_rebind_coexists_with_retained_file_rename_handle',
+            'project::windows_directory_create::tests::retained_file_rebind_survives_apply_and_reverse_restore_moves',
+            'project::windows_git_installation::integration_tests::selected_git_trust_runs_bounded_version_and_stdin_then_revokes',
+            'project::windows_application_integration_tests::confirmed_multi_item_apply_and_restore_through_scheduler_and_ledger',
             'project::windows_streams::tests::default_stream_parser_never_ignores_additional_or_malformed_records',
             'project::windows_streams::tests::named_stream_is_rejected_without_modifying_any_content',
             'project::windows_application::review::intent::windows_writer::metadata::tests::basic_metadata_rejects_special_attributes_and_control_times',
@@ -61,12 +64,20 @@ jobs:
         run: cargo test --locked --release -p hello-agent-sidecar --lib project::windows_ -- --nocapture
       - name: Reject unactivated recovery through the request dispatcher
         run: cargo test --locked --release -p hello-agent-sidecar --lib save_recovery_dispatch_tests::windows_save_recovery_gate_rejects_direct_confirmed_requests -- --exact --nocapture
+      - name: Exercise installed Git admission and generated application roundtrip
+        shell: pwsh
+        run: |
+          $env:HELLO_AGENT_WINDOWS_TEST_GIT = (Get-Command git.exe -CommandType Application -ErrorAction Stop).Source
+          cargo test --locked --release -p hello-agent-sidecar --lib project::windows_git_installation::integration_tests::selected_git_trust_runs_bounded_version_and_stdin_then_revokes -- --ignored --exact --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked --release -p hello-agent-sidecar --lib project::windows_application_integration_tests::confirmed_multi_item_apply_and_restore_through_scheduler_and_ledger -- --ignored --exact --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Record limits
         if: always()
         shell: pwsh
         run: |
           @'
           Diagnostic: Windows compilation, native primitives/save helpers, application metadata/directory/stream regressions, seeded snapshot save recovery across file/SQLite reopen, and closed recovery admission.
-          Not Git admission or process-kill/startup E2E, packaged UI, power-loss, or release qualification.
+          Includes runner-installed Git consent/transport and generated-project scheduler/ledger apply/restore when those steps pass. Not process-kill/startup E2E, packaged UI, power-loss, or release qualification.
           No product activation, packaging, credentials, model calls, or user projects.
           '@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
