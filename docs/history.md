@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
-2026-11-06 Windows 진단42155540808/ff54ad68에서 native74개+직접 복구 호출 차단1개, 총75 PASS를 확인했다. 최신 승인2회 중1회 사용, 동일 수정 후속 검사1회가 남는다. macOS sidecar lib711개와 stdio16개·별도100회 저장 경합도 확인했다. Windows 제품 검증/활성화·G6/출시는 남아 있으며 전체 개발은 미완료다. 최신 구현·미완료 기록은 아래 및 [11월 아카이브](archive/history-2026-11.md)에 보존한다.
+2026-11-06 Windows 최신 통합 진단에서 컴파일·native75개·dispatcher1개는 통과했으나 설치Git 실제 시작에서 OS87이 발생했다. 세부 진단46eece57/CI42159418644는 --version의 CreateProcessW 실패를 확인했고 최신 승인3/3을 모두 사용했다. 전체 반영/복원은 아직 실행되지 않았다. macOS G6·Windows 제품 검증/활성화·출시는 계속 미완료다. 상세 작업 기록은 아래 및 [11월 아카이브](archive/history-2026-11.md)에 보존한다.
+
+### 2026-11-06 · by GPT-6
+
+- 승인3/3으로46eece57을 게시한 CI42159418644는 컴파일/기존 native·dispatcher를 통과했으나 --version의 suspended family creation/CreateProcessW에서 OS87로 실패했다. 설치본 선택/동의/admitted runtime까지는 통과했으며 전체 반영/복원은 미실행이다. 원격 실행은 종료됐고 추가승인은 아직 없다.
+- 독립 검토 제안에 따라 opt-in 시험에 동일 admitted image/의존성/CWD/감시를 유지하고 환경만 SystemRoot1개로 줄인 --version 대조를 먼저 추가했다. 성공 후에만 원래 고정환경 --version/hash-object로 진행한다. 실패 후 재시도/fallback은 없고 제품 환경이나 안전계약을 변경하지 않는다. rustfmt/diff 통과, 새 대조는 미실행이며 별도 공개 승인이 필요하다. G6·Windows 전체 거래/출시 검증은 남는다.
 
 ### 2026-11-06 · by GPT-6
 
