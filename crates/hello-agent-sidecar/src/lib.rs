@@ -7,6 +7,8 @@ mod application_cancel;
 mod dispatch_timing;
 mod chat;
 mod project;
+#[cfg(windows)]
+mod git_preparation;
 mod process_spawn;
 #[cfg(target_os = "macos")]
 mod provider_claude_login;
@@ -128,6 +130,13 @@ where
     let mut args = args.into_iter();
     let _program = args.next();
     let mode = args.next();
+    if mode.as_deref() == Some(std::ffi::OsStr::new("--git-preparation")) {
+        if args.next().is_some() { return Err(SidecarError::new("invalidArguments", "Git preparation accepts no path arguments")); }
+        #[cfg(windows)]
+        { return git_preparation::run(); }
+        #[cfg(not(windows))]
+        { return Err(SidecarError::new("unsupportedPlatform", "Git preparation is Windows-only")); }
+    }
     if mode.as_deref() == Some(std::ffi::OsStr::new("--fixture-child")) {
         let scenario = args.next().ok_or_else(|| {
             SidecarError::new("invalidArguments", "fixture child scenario is required")

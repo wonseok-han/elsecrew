@@ -1,3 +1,4 @@
+import { GitPreparationClient, isGitPreparation, WINDOWS_GIT_PREPARATION_ENABLED } from "./git-preparation.ts";
 import { GitSelectionStore } from "./git-selection.ts";
 import { GIT_SELECTION_CHANNEL, validateGitSelectionAction, validateGitSelection } from "../src/m5/contracts/git-selection-v1.ts";
 import { SAVE_RECOVERY_RESOLVE_CHANNEL, validateSaveRecoveryResolveRequest, validateSaveRecoveryResolveResult } from "../src/m5/contracts/save-recovery-v1.ts";
@@ -64,6 +65,7 @@ const APP_ORIGIN = `${APP_SCHEME}://${APP_HOST}`;
 
 let mainWindow: BrowserWindow | undefined;
 let sidecar: SidecarClientV1 | undefined;
+let gitPreparation: GitPreparationClient | undefined;
 const eventCredit = new EventCreditV1((error) => sidecar?.failConsumerTooSlow());
 const quitCoordinator = new QuitCoordinatorV1({
   prepareSidecarQuit: () => {
@@ -73,6 +75,7 @@ const quitCoordinator = new QuitCoordinatorV1({
   failedBeforeReady: () => sidecar?.failedBeforeReady ?? false,
   allowProcessExit: () => app.quit(),
   notifyQuitBlocked: async (reason) => {
+    gitPreparation?.reopen();
     const korean = app.getLocale().toLowerCase().startsWith("ko");
     const options: Electron.MessageBoxOptions = {
       type: "warning",
@@ -327,8 +330,13 @@ async function getSystemStatus(): Promise<SystemStatusV1 | SystemStatusG5DV1> {
   }
 }
 
-function prepareQuit(): Promise<PrepareQuitResultV1> {
-  return quitCoordinator.prepareQuit();
+async function prepareQuit(): Promise<PrepareQuitResultV1> {
+  await gitPreparation?.close();
+  try {
+    const result = await quitCoordinator.prepareQuit();
+    if (!result.safeToQuit) gitPreparation?.reopen();
+    return result;
+  } catch (error) { gitPreparation?.reopen(); throw error; }
 }
 
 function registerIpcHandlers(): void {
@@ -342,6 +350,7 @@ function registerIpcHandlers(): void {
     if (!sidecar) throw new Error("sidecar was not started");
     return validateInstallStatus(await sidecar.install(validateInstallRequest(input)));
   });
+  gitPreparation = new GitPreparationClient(sidecarLaunch(m5DataDirectory()));
   const gitSelection = new GitSelectionStore(m5DataDirectory(), process.platform, app.getPath("userData"));
   ipcMain.handle(GIT_SELECTION_CHANNEL, async (event, ...args: unknown[]) => {
     assertCurrentMainFrame(event);
@@ -374,8 +383,12 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle(PROJECT_CATALOG_CHANNEL, async (event, input: unknown) => {
     assertCurrentMainFrame(event);
-    if (!sidecar) throw new Error("sidecar was not started");
     const request = validateProjectCatalogRequest(input);
+    if (process.platform === "win32" && isGitPreparation(request)) {
+      if (!WINDOWS_GIT_PREPARATION_ENABLED) throw new Error("Git preparation has not been activated");
+      return gitPreparation!.request(request, () => assertCurrentMainFrame(event));
+    }
+    if (!sidecar) throw new Error("sidecar was not started");
     return validateProjectCatalogResult(await sidecar.projectCatalog(request), request);
   });
   ipcMain.handle(APPROVAL_CHANNEL, async (event, input: unknown) => {
@@ -524,6 +537,11 @@ app.whenReady().then(async () => {
 });
 
 app.on("before-quit", (event) => {
+  if (gitPreparation?.pending) {
+    event.preventDefault();
+    void gitPreparation.close().then(() => app.quit());
+    return;
+  }
   if (quitCoordinator.exitAllowed) return;
   event.preventDefault();
   quitCoordinator.handleBeforeQuit();

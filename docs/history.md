@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준8f6abdc/깨끗한 통합 checkout에서 Windows --git-preparation 단발 모드를 구현했다. 추가 경로 인자는 거부하고 stdin64KiB/응답64KiB 상한으로 inspect/confirm/revoke 세 action만 받는다. 일반 ready/Storage/DB migration/복구 replay/Git·provider 실행을 호출하지 않으며 앱 고정 cwd의 기존 ProjectManager 설정 메서드만 사용한다. 잘못된 action은 managed directory 생성 전 거부한다.
+- Electron은 고정 sidecar binary/args/cwd·shell:false·30초/64KiB 제한으로 helper를 실행하고 close callback 뒤에만 결과를 검증한다. 한 owner가 요청을 직렬화하고 큐 시작/응답 시 현재 main-frame을 재확인한다. 선택한 exe를 실행하지 않는다. 종료 요청은 pending helper가 끝날 때까지 대기하며 종료가 차단되면 준비 요청을 다시 허용한다. 일반 Windows sidecar gate는 그대로이며 preparation activation 상수도 false로 두었다.
+- 이번은 diff 검사만 확인했다. native 빌드·ABI·helper lifecycle/타임아웃·IPC/화면·독립 안전 검토는 파동 검증에 남아 있고 제품 기능 활성화는 아직 하지 않았다. 신규 빌드/cache/CI/push/모델 없음. 다음은 준비 경로를 포함한 Windows 기능 연결 점검과 원본 반영/복원 구현이다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준8262353/깨끗한 통합 checkout에서 Windows snapshot 초기화 CWD 보호를 연결했다. 기존 export_bundle이 flush/sync_all로 저장한 .hello-agent-snapshot.bundle을 git init 동안 directory guard로 재사용한다. 새 sentinel을 만들지 않는다. CWD의 held GUID parent가 앱 worktrees와 일치하고 .worktree_<32hex>.creating 형식이며 관리 부모에서 다시 연 directory ID까지 일치할 때만 fallback을 허용한다. bundle도 no-follow 일반 파일·비어 있지 않음을 확인한다.
 - git init 이후 호출은 기존 .git directory guard를 사용하며, 번들 제거는 unbundle owner의 종료 확인 뒤 기존 위치에서 수행한다. 원본 경로에 파일을 생성하거나 임의 비어 있는 폴더에 guard fallback을 허용하지 않는다. 추가 디스크 산출물은 없다.
 - 이번은 직접 흐름 대조와 diff만 확인했다. 실제 Windows snapshot init/rename·cleanup 및 전체 호환은 아직 검증 전이며 제품 gate는 false다. 준비 전용 서비스 경로·Windows 원본 반영/복원·최종 묶음 검증이 남는다. 새 빌드/cache/모델/push/CI/패키지 없음.
