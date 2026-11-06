@@ -4523,8 +4523,8 @@ impl ProjectManager {
         self.verify_managed_paths()?;
         let runtime = self.admitted_git_runtime()?;
         // Retain an existing repository directory, never a file Git must
-        // replace. Empty managed staging needs its own durable guard before
-        // init; never manufacture a guard in a user-selected source folder.
+        // replace. Before init, only the already-durable app staging bundle
+        // can substitute; never manufacture a guard in a source folder.
         let mut guard = None;
         for name in [".git", "objects"] {
             match directory.symlink_metadata(name) {
@@ -4533,6 +4533,28 @@ impl ProjectManager {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
                 Err(_) => return Err(ProjectFailure::recovery("Git cwd guard is unavailable")),
             }
+        }
+        if guard.is_none() {
+            // Snapshot export fsyncs this app-created bundle before git init.
+            // Reuse it as the nonempty-directory guard instead of writing a
+            // sentinel into a source or leaving another cleanup obligation.
+            let cwd_path = windows_fs::local_guid_path(directory)?;
+            let managed_path = windows_fs::local_guid_path(&self.worktrees_dir)?;
+            let (parent, name) = cwd_path.rsplit_once('\\').ok_or_else(|| ProjectFailure::manifest("snapshot staging has no parent"))?;
+            let staging_id = name.strip_prefix(".worktree_").and_then(|value| value.strip_suffix(".creating"));
+            if !parent.eq_ignore_ascii_case(managed_path.trim_end_matches('\\'))
+                || !staging_id.is_some_and(|value| value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))) {
+                return Err(ProjectFailure::recovery("empty Git cwd is not an app-owned snapshot staging directory"));
+            }
+            let linked = open_real_child_dir(&self.worktrees_dir, name)?;
+            if windows_fs::identity(&linked, true)? != windows_fs::identity(directory, true)? {
+                return Err(ProjectFailure::recovery("snapshot staging directory changed"));
+            }
+            let bundle = open_real_file_at(directory, SNAPSHOT_BUNDLE)?;
+            if bundle.metadata().map_err(|_| ProjectFailure::recovery("snapshot bundle metadata is unavailable"))?.len() == 0 {
+                return Err(ProjectFailure::recovery("snapshot initialization bundle is empty"));
+            }
+            guard = Some(SNAPSHOT_BUNDLE);
         }
         let guard = guard.ok_or_else(|| ProjectFailure::recovery("Git cwd requires a retained repository directory"))?;
         let cwd = windows_directory_lease::DirectoryLease::acquire(directory, OsStr::new(guard))?;

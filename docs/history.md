@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준8262353/깨끗한 통합 checkout에서 Windows snapshot 초기화 CWD 보호를 연결했다. 기존 export_bundle이 flush/sync_all로 저장한 .hello-agent-snapshot.bundle을 git init 동안 directory guard로 재사용한다. 새 sentinel을 만들지 않는다. CWD의 held GUID parent가 앱 worktrees와 일치하고 .worktree_<32hex>.creating 형식이며 관리 부모에서 다시 연 directory ID까지 일치할 때만 fallback을 허용한다. bundle도 no-follow 일반 파일·비어 있지 않음을 확인한다.
+- git init 이후 호출은 기존 .git directory guard를 사용하며, 번들 제거는 unbundle owner의 종료 확인 뒤 기존 위치에서 수행한다. 원본 경로에 파일을 생성하거나 임의 비어 있는 폴더에 guard fallback을 허용하지 않는다. 추가 디스크 산출물은 없다.
+- 이번은 직접 흐름 대조와 diff만 확인했다. 실제 Windows snapshot init/rename·cleanup 및 전체 호환은 아직 검증 전이며 제품 gate는 false다. 준비 전용 서비스 경로·Windows 원본 반영/복원·최종 묶음 검증이 남는다. 새 빌드/cache/모델/push/CI/패키지 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준0ae070d/깨끗한 통합 checkout에서 Windows 단일 spawn_git_stream을 구현했다. 제품 activation 상수false를 먼저 확인하고, 앱 관리 경로·매번 설치 동의/서명/DLL 재검사·기존 .git 또는 bare objects directory CWD lease·bounded Unicode argv를 거쳐 spawn_internal_git로 연결한다. 기존 Windows raw Command adapter로 우회하지 않는다. Unix 호출은 기존 경로를 유지한다.
 - startup 조사 결과 g4_platform_gate는 ready/DB 전에 Windows 전체를 차단한다. 이를 무조건 제거하면 준비 요청 외 기능도 노출되므로 그대로 유지했다. 준비 전용 서비스 경로 분리와 empty managed staging init의 durable guard 연결이 남는다. 원본 폴더에 guard를 임의 생성하거나 활성화false를 제품 완료로 표현하지 않는다.
 - 이번은 diff 검사만 확인했으며 Windows compile/native·전체 통합 검증은 아직이다. 기존 신뢰 정책 승인을 다시 요청하지 않았고 신규 빌드/cache/모델/CI/push/패키지 없음. 다음은 준비 전용 요청 경로와 app-owned staging guard를 연결한 뒤 Windows 원본 반영/복원 등 남은 구현을 이어간다.
