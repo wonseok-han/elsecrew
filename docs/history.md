@@ -4,6 +4,18 @@
 
 ### 2026-11-06 · by GPT-6
 
+- e9328b65에서 macOS combined QA를 실제 실행했다. 사전 실행 시험 앱 없음·여유526GiB 확인. 제한 환경의 포장 다운로드 실패 뒤 허용된 환경에서 Rust release/renderer/QA 포장을 완료했다. 소스 변경은 기존 history 기록뿐이며 제품 out/사용자 데이터/모델은 사용하지 않았다.
+- 사용자 화면 유지 확인 후 첫 시험은 정상 종료(shutdown accepted)했지만 idle425.41MiB·peak747.92MiB·retained증분165.47MiB·입력141.3ms로 idle/retained/input 기준 FAIL. main70.233ms·renderer62ms 관측, 전체 G6 합격은 아니다. idle 뒤 trace 시작 순서는 기록됐고 기존400/800/120MiB·50ms 기준을 유지한다.
+- 진행 보고가 오래 갱신되지 않아 작업 중 AX 읽기와1초 process sample을 수행했다. 따라서 방해 없는 성능 합격 증거로 사용하지 않는다. 실제로 작업은 계속 진행 중이었다. 다음에는 단계 진행 보고를 보완해 측정 중 추가 진단을 피한다. idle renderer127.2MiB→retained242.7MiB, trace Utility39.3MiB 등 잔류 원인 구분이 다음 조사다. 값을 차감해 합격시키지 않는다.
+- 증거는 .artifacts/m5-combined-output-2026-11-06/first에 보존했다. 모든 관측PID 부재와 DB clean_shutdown_at을 확인하고 이번 fixture 및 실패/성공 QA 빌드 폴더2개만 삭제했다. Windows 후속2e5a98a 공개 승인은 여전히 미응답이며 새push/CI 없음. 다음은 메모리/입력 병목 개선과 Windows 승인 범위 시험이다.
+
+### 2026-11-06 · by GPT-6
+
+- 수신한 승인 답변의 요청 ID/candidate06f73a47을 현재 Git e9328b65 및 기존 실행 기록과 대조했다. 이 승인의3회는 CI42158094723·42158624221·42159418644에 이미 사용됐다. 중복 답변을 새 실행 예산으로 계산하지 않으며 추가 push/CI는 실행하지 않았다.
+- 후속 후보2e5a98a의 동일 설치Git 최소환경/고정환경 비교 및 후속 컴파일·시험 수정에 한정한 추가최대3회 승인을 다시 명확히 요청했다. Windows 전체 반영/복원·macOS G6·출시는 계속 미완료다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준a67a84de에서 G6 추적 시작 순서의 기록/집계 계약을 연결했다. 추적 요청 전 requestedAt·준비 후 readyAt·프로젝트 호출 전 workloadRequestedAt을 기록하고 idle종료≤요청≤준비≤작업 순서를 검증한다. idle RSS 표본의 completedAt까지 확인해 추적 시작과 겹치는 수집을 거절한다. 기존 post-start 시각 하나를 근거로 시작 전 분리를 추정하지 않는다.
 - 누락·역전·NaN·표본완료 겹침 회귀를 포함한 output trial summary10개 PASS, node --check/diff 통과. 실제 GUI/메모리 재측정은 아직 없고400/800/120MiB 기준·기존 실패는 유지한다. Windows2e5a98a 추가 공개 승인도 아직 미응답이며 새push/CI/package/cache/모델 실행 없음. 다음은 승인된 범위의 native/실제화면 누적 검증과 발견 결함 수정이다.
 
