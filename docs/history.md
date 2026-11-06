@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준56cb239의 깨끗한 통합 checkout에서 Windows handle-relative rename에 비덮어쓰기 move_new를 추가했다. 기존 replace 경로는 유지하며 보존 이름 충돌을 커널 rename 자체에서 거부한다. source/parent/guard 보호와 leaf 검증을 공유하고 복사·삭제 fallback은 없다. 실제 application writer에는 아직 연결하지 않았다.
+- 충돌·guard/잘못된 이름 거부 시 source/기존 복구 파일 보존과 성공 시 full file ID 유지를 확인하는 Windows 회귀1개를 추가했다. rustfmt/diff 검사만 통과했고 Windows compile/native 실행은 후속 누적 검증 대상이다. 새 build/cache/package/worktree/push/CI/모델 없음.
+- macOS swap journal은 Windows 두 번의 rename과 동등하지 않다. 별도 보존 이름·이동 전 durable intent·중간 source 부재·복원 중단의 명시 분류가 필요하며 기존 완료 판정을 그대로 재사용하지 않는다. 상시 승인된 읽기 전용 검토자1명은 primitive diff에 차단 결함이 없다고 확인했다. 이는 전체 writer 설계 합격이나 Windows 실행 증거가 아니다. 다음은 Windows journal/metadata 보존·apply/restore 연결이며 제품 gate는 유지한다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준e4aaa76의 깨끗한 통합 checkout에서 pre-write intent 원장을 Windows review에도 공유했다. 기존 준비 확인 소비·project/lock pair 기록·쓰기 시작 전 phase 전환·pending item 예약·완료/복원 이력 검사·unwritten abandon 코드를 Windows 모듈 구성에도 포함하도록 변경했다. Windows application_status도 같은 원장 검사를 사용한다. 실제 writer/scheduler는 아직 macOS 전용이라 새 원본 쓰기는 활성화되지 않았다.
 - Windows archive는 전체 framing/payload/access/changes digest/EOF/file identity 검증 뒤에만 metadata item 목록을 반환한다. 검증 중 수집한 항목은 실패 시 밖으로 반환하지 않으며 재생성되는 pending item을 저장된 backup과 비교한다. collect 요청에만 최대32MiB encoded metadata 범위의 목록을 보유한다.
 - 쓰기 시작 admission에 destination volume 여유공간 검사를 연결했다. 각 경로의 존재하는 가장 가까운 부모를 no-follow로 열고 held GUID volume별로 temporary payload/entry allowance를 합산하며512MiB reserve를 유지한다. restore는 before 길이, apply는 after 길이를 사용한다. archive 생성 공간과 별도이며 실제 동시 외부 쓰기에 대한 예약을 주장하지 않는다.
