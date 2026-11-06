@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준e4df6ee의 깨끗한 통합 checkout에서 승인된 Windows 설치 폴더 신뢰 정책과 준비 연결을 점검했다. 기존 main 보안 harness가 새 git-preparation/git-selection import를 제공하지 못해 시작 실패하는 것을 재현하고, 파일/프로세스를 사용하지 않는 경계 mock과 실제 선택 계약을 연결했다. 제품 코드는 변경하지 않았다.
+- 준비 client의 실제 코드를 fake execFile로 실행하는 회귀3개를 추가했다. 고정 실행 경로/인자/작업 폴더·shell 차단·출력/시간 상한, 직렬 처리, 요청 전후 owner 검사, active 완료까지 종료 대기, queued 요청 취소, 재개, 잘못된 응답/프로세스 오류 거부를 확인했다. 이는 실제 Windows 프로세스 종료나 서명 검증 증거는 아니다.
+- 화면 tsc --noEmit 통과, 기존 Electron 보안12 PASS, 준비 client3 PASS, diff 검사 통과. 빌드/패키지/cache/모델/push/CI 없이 확인했다. Windows 원본 반영/복원 포트·native 통합/독립 검토·제품 활성화·G6/출시는 여전히 남는다. 고정 발견의 오래된 Git 제공 방식 미결정 문구를 사용자 설치본 결정으로 바로잡았다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준8f6abdc/깨끗한 통합 checkout에서 Windows --git-preparation 단발 모드를 구현했다. 추가 경로 인자는 거부하고 stdin64KiB/응답64KiB 상한으로 inspect/confirm/revoke 세 action만 받는다. 일반 ready/Storage/DB migration/복구 replay/Git·provider 실행을 호출하지 않으며 앱 고정 cwd의 기존 ProjectManager 설정 메서드만 사용한다. 잘못된 action은 managed directory 생성 전 거부한다.
 - Electron은 고정 sidecar binary/args/cwd·shell:false·30초/64KiB 제한으로 helper를 실행하고 close callback 뒤에만 결과를 검증한다. 한 owner가 요청을 직렬화하고 큐 시작/응답 시 현재 main-frame을 재확인한다. 선택한 exe를 실행하지 않는다. 종료 요청은 pending helper가 끝날 때까지 대기하며 종료가 차단되면 준비 요청을 다시 허용한다. 일반 Windows sidecar gate는 그대로이며 preparation activation 상수도 false로 두었다.
 - 이번은 diff 검사만 확인했다. native 빌드·ABI·helper lifecycle/타임아웃·IPC/화면·독립 안전 검토는 파동 검증에 남아 있고 제품 기능 활성화는 아직 하지 않았다. 신규 빌드/cache/CI/push/모델 없음. 다음은 준비 경로를 포함한 Windows 기능 연결 점검과 원본 반영/복원 구현이다.
@@ -147,7 +153,7 @@
 
 - **Watcher 현재 구조(2026-11-05)**: Unix/Windows 모두 한 background 검증 job과 한 bounded scan slice를 순환한다. 완료 뒤 현재 stream/active/root/.git 결속과 metadata/tree 재검증을 유지한다. Windows 연결은 native 미검증·실제 Git 차단 상태이고 과거 동기 Windows 설명보다 이 구현 상태를 우선한다. 실측 UI 지연 PASS는 별도다.
 
-- **Windows 내부 Git 제공 방식(2026-11-05, 미결정)**: 앱 포함 공식 MinGit과 기존 PC Git 재사용 중 사용자 선택 대기. MinGit도 hook/alias를 지원하므로 격리 대체가 아니다. 제안·출처는 `docs/proposals/m5-coding-agent-ide.md` §12. Codex/Claude 설치 정책과 별도이며 아직 다운로드/활성화 없음.
+- **Windows 내부 Git 제공 방식(2026-11-06 확정)**: 사용자 설치 Git을 사용한다. MinGit 번들은 채택하지 않았다. 선택한 설치 폴더·OS 검증 서명자를 표시하고 명시 동의하며 매 실행 재검사한다. Codex/Claude 설치 정책과 별개이고 Windows 제품 실행은 아직 비활성이다. 제안·출처는 `docs/proposals/m5-coding-agent-ide.md` §12.
 - **Windows 자손 supervisor(2026-11-05, scoped native PASS)**: a7c0674의 상시 Unsupported 봉쇄 뒤 creator-thread DEBUG_PROCESS 추적을 구현했다. 생성 이벤트를 계속하기 전 handle 복제·EXIT 계속 후 모든 signal·root signal·누적 Job 수 일치·active0이 완료 조건이다. 중첩 debugger 누락/상한/오류는 실패이며 Job 밖의 외부 broker는 보장 범위가 아니다. 3a02b76/CI41980701769에서 기존 실제 child signal 회귀와 native20·spawn1·watcher4 합계25개가 PASS했다. 전체 제품 PASS가 아니며 Windows admission은 닫혀 있다.
 - **Windows Job 종료 판정 반증(2026-11-05)**: 실제 CI41977646539에서 parent signal+Job active0/terminate(true) 뒤에도 별도 보유 자손 handle은 WAIT_TIMEOUT이었다. 기존 completed()/terminate()를 모든 자손 종료 증거로 인용하지 않는다. 임의 지연·카운트 완화로 해결하지 않으며 native gate는 닫아 둔다. 동일 실행의 disk capacity 회귀는 PASS, 전체16PASS1FAIL·watcher skipped다.
 - **Windows CWD lease 초안(2026-11-05, native 미검증)**: 모든 경로 성분과 기존 직접 child를 delete 공유 없이 보유해 nonempty를 유지하고 전체 ID/부모 결속을 검증하는 기반을 구현했다. 일반적인 공유 잠금만으로 속성 변경을 막는다는 주장은 하지 않는다. name-surrogate와 directory-bit tag 구분·실행 파일 권한·GUID CWD native 호환이 남아 있다. typed Family/Transport 연결과 armed pin의 성공/실패 소유권은 구현했으나 native 미검증이며 실제 Git/제품 admission에는 연결하지 않았다.
