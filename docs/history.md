@@ -4,6 +4,13 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준94f46895에서 원본 변경 제안의 A2를 재대조했다. 기존 디렉터리는 유지하고 새 디렉터리 추가를 기록하는 것이 범위이며 Windows batch는 아직 이를 첫 쓰기 전 거절한다. 기본 속성 보존만으로 폴더 기능이나 전체 Windows 구현 완료를 주장하지 않는다.
+- 새 폴더 writer의 기반으로 windows_directory_create를 추가했다. 검증된 parent lease와 정상 단일 leaf 아래 NtCreateFile FILE_CREATE·DIRECTORY_FILE·WRITE_THROUGH·동기·OPEN_REPARSE_POINT로 만들고 생성 syscall의 handle을 그대로 보유한다. 기존 이름을 열거나 덮어쓰지 않고 FILE_CREATED/full directory ID/parent lease를 확인한다. 생성 후 오류는 caller의 예약/파일을 보존하며 임의 정리하지 않는다.
+- windows_replace에 directory 전용 비덮어쓰기 move_new_directory를 추가했다. 기존 regular-file replace/move 동작은 별도 kind 검사로 유지한다. 이름 충돌·경로/guard 거절·이동 후 ID 연속성과 외부 폴더 내용 보존 native 회귀 후보를 추가했으나 실행하지 않았다. Microsoft NtCreateFile 공식 문서로 인수/구조/FILE_CREATE 경계를 확인했고 선택 rustfmt/diff만 수행했다.
+- 이 기반은 아직 원본 application directory journal/하위 항목 ownership/역순 복원에 연결 전이다. namespace 전원 장애 durability나 native 합격을 주장하지 않으며 Windows 제품 gate는 닫혀 있다. 후속은 해당 연결·추가 metadata·원본 잔여 파일 처리와 누적 검증이다. 신규 cache/package/worktree/push/CI/모델 실행 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준37179231에서 Windows 원본 반영의 기본 metadata 보존을 추가했다. 새 staged 파일의 내용 flush 후 기존 생성 시각·READONLY/HIDDEN/SYSTEM/ARCHIVE/NORMAL/TEMPORARY/NOT_CONTENT_INDEXED를 handle 기반 FILE_BASIC_INFO로 적용하고 sync·full ID/크기/시각/속성을 다시 관측한다. 수정된 내용의 write time은 기존 내용의 시각으로 되돌리지 않는다. 원본과 같은 ID면 metadata 수정 전에 거절한다.
 - 새 journal의 basicMetadataV1:true에 staged receipt의 생성 시각/속성 검증을 결속한다. marker 없는 과거 journal은 종전 복구 조건을 유지하며 소급 강제하지 않는다. batch admission은 교체 대상의 미지원 속성을 첫 원본 변경 전에 거절한다. 삭제 항목에는 불필요한 교체 metadata 조건을 추가하지 않는다. 압축/암호화/cloud·ADS/SACL과 directory 처리는 여전히 미완료이며 제품 gate는 닫혀 있다.
 - Microsoft FILE_BASIC_INFO 공식 문서의 class0/속성·시각 의미를 확인했다. 제어 시각/특수 속성 거절 및 새 파일 보존·원본 미변경·receipt 불일치 Windows 회귀 후보를 추가했다. 선택 rustfmt/diff 검사만 통과했으며 compile/native·독립 검토는 사용자 지시에 따라 기능 파동 최종 검증으로 남긴다. 신규 cache/package/worktree/push/CI/모델 실행 없음.

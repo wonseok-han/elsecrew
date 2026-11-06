@@ -65,7 +65,7 @@ pub(super) fn replace(
     destination: &DirectoryLease,
     name: &str,
 ) -> Result<(), ProjectFailure> {
-    rename(source, destination, name, true)
+    rename(source, destination, name, true, false)
 }
 
 /// Preserve the source under a previously unused name. The kernel checks for
@@ -76,7 +76,17 @@ pub(super) fn move_new(
     destination: &DirectoryLease,
     name: &str,
 ) -> Result<(), ProjectFailure> {
-    rename(source, destination, name, false)
+    rename(source, destination, name, false, false)
+}
+
+/// Directory moves never replace an existing destination. Child ownership and
+/// restoration ordering must be validated by the enclosing application journal.
+pub(super) fn move_new_directory(
+    source: &File,
+    destination: &DirectoryLease,
+    name: &str,
+) -> Result<(), ProjectFailure> {
+    rename(source, destination, name, false, true)
 }
 
 fn rename(
@@ -84,9 +94,10 @@ fn rename(
     destination: &DirectoryLease,
     name: &str,
     replace_existing: bool,
+    directory: bool,
 ) -> Result<(), ProjectFailure> {
     let parent = destination.replacement_parent(name)?;
-    windows_fs::identity(source, false)?;
+    windows_fs::identity(source, directory)?;
     let wide: Vec<u16> = name.encode_utf16().collect();
     if wide.is_empty() || wide.len() > 255 || wide.contains(&0) {
         return Err(ProjectFailure::manifest("invalid replacement leaf name"));

@@ -36,6 +36,8 @@ mod windows_system_modules;
 #[cfg(windows)]
 mod windows_replace;
 #[cfg(windows)]
+mod windows_directory_create;
+#[cfg(windows)]
 mod windows_save_guard;
 #[cfg(windows)]
 mod windows_security;
