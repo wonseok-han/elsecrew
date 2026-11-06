@@ -1,6 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
-2026-11-06 Windows 진단42154541724/5e2b9b23에서 native73개+직접 복구 호출 차단1개, 총74 PASS를 확인했다. 추가 승인2회는 모두 사용했다. macOS sidecar lib711개와 stdio16개·별도100회 저장 경합도 확인했다. Windows 제품 검증/활성화·G6/출시는 남아 있으며 전체 개발은 미완료다. 최신 구현·미완료 기록은 아래 및 [11월 아카이브](archive/history-2026-11.md)에 보존한다.
+2026-11-06 Windows 진단42155540808/ff54ad68에서 native74개+직접 복구 호출 차단1개, 총75 PASS를 확인했다. 최신 승인2회 중1회 사용, 동일 수정 후속 검사1회가 남는다. macOS sidecar lib711개와 stdio16개·별도100회 저장 경합도 확인했다. Windows 제품 검증/활성화·G6/출시는 남아 있으며 전체 개발은 미완료다. 최신 구현·미완료 기록은 아래 및 [11월 아카이브](archive/history-2026-11.md)에 보존한다.
+
+### 2026-11-06 · by GPT-6
+
+- 사용자 승인 범위의 ff54ad68을 같은 공개 진단 브랜치에 게시한 CI42155540808이 success로 종료됐다. 컴파일·필수 테스트 존재 확인, native74 PASS/0 FAIL(3.73초), dispatcher 비활성 복구 호출 거부1 PASS(0.70초), 총75개를 원격 최종 로그에서 확인했다. retained DELETE file handle과 read-only rebind 병존 회귀도 통과했다.
+- 로컬 구현 fcf5d6bb의 Windows 코드/워크플로3개만 게시했으며 다른 로컬 편집기 변경은 포함하지 않았다. 현재 승인 최대2회 중1회 사용했고 실패가 없어 추가 실행하지 않았다. 남은1회는 동일 수정의 후속 컴파일·시험 오류 범위에만 적용된다.
+- 다음 할 일은 Windows 전체 반영/복원·중단 통합, Git/패키지 화면 검증과 G6 메모리·출시 검증이다. 이번75개는 진단 범위의 증거이며 제품 완료나 Windows 활성화 승인이 아니다. main 병합·제품 활성화·패키징·실제 모델 실행 없음.
 
 ### 2026-11-06 · by GPT-6
 
@@ -184,6 +190,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Windows 일반 파일 재관측(2026-11-06)**: cap-primitives3.4.6의 maybe_dir는 일반 파일에도 FILE_SHARE_DELETE를 제거한다. retained DELETE handle과 병존하는 writer read-only rebind는 부모 상대 native FILE_OPEN/share7/no-follow 및 열린 객체 종류/신원 검사를 사용한다. mutation 보호 handle은 유지한다. CI42155540808에서 전용 회귀 포함75개 통과; 전체 반영/복원 거래 검증과 구분한다.
 
 - **Windows 생성 폴더 재관측(2026-11-06)**: DELETE-capable creation handle을 유지한 상태의 generic directory reopen은 sharing 위반을 낼 수 있다. 부모handle 상대 read-only FILE_OPEN/share7/no-follow+full identity로 재관측하고 기존 creation pin·lease·flush·receipt 비교는 유지한다. CI42154541724에서 stage/new-directory 회귀 포함74개 진단 통과; 전체 Windows 제품 활성화 근거로 확장하지 않는다.
 - **Windows Git 설치 신뢰 정책 승인(2026-11-06)**: 사용자가 선택한 설치 폴더와 OS 검증 서명자를 보여준 뒤 명시 동의하는 방식으로 확정했다. 같은 설치본의 서명 없는 DLL을 수용하되 실행마다 재검사하고 root/서명자 변경은 재동의한다. 버전/파일 digest 고정은 하지 않는다. 이 승인은 Windows 제품 활성화·추가CI/push 승인이 아니다. 후속 Git admission·baseline receipt·review/confirmation·before archive·pre-write intent·취소 가능한 원본 관측은 구현 checkpoint이며 Windows native 검증 전이다. 일반 파일 writer/명시 restore·archive cleanup·제품 scheduler 내부 연결은 구현 checkpoint다. directory/추가 metadata·원본 잔여 파일 처리와 native 검증은 미완료다. 제품 gate는 닫혀 있다. 최신 상세는 현재 워크로그와11월 아카이브에서 확인한다.
