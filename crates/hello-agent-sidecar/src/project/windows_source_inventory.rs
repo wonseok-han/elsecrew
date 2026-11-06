@@ -161,7 +161,7 @@ fn observe<T: AsRawHandle>(
         access,
     })
 }
-fn directory_observation(dir: &Dir) -> Result<Observation, ProjectFailure> {
+pub(super) fn directory_observation(dir: &Dir) -> Result<Observation, ProjectFailure> {
     observe(dir, true, windows_security::directory_fingerprint(dir)?)
 }
 pub(super) fn file_observation(file: &cap_std::fs::File) -> Result<Observation, ProjectFailure> {

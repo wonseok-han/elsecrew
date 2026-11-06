@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준5693f7a에서 Windows 새 폴더의 read-only 실제 관측 후보를 추가했다. 대상 subtree의 settled child 원장을 한 번 index하고 physical private 이름→원래 logical 경로를 보존한다. 다른 sibling 작업의 phase는 subtree 복원 판정을 막지 않는다. 항목100,000·깊이128 상한과 취소 callback을 유지한다.
+- 각 directory의 full ID/생성시각/속성/권한을 receipt와 대조하고 이름 목록을2pass 확인한다. journaled child 작업으로 변할 수 있는 directory written/changed/length만 소유권 목록 확인과 함께 비교에서 제외하며, 한 directory 관측 전후에는 해당 전체 관측이 같아야 한다. 일반 파일은 기존 held pin/내용·metadata 재확인을 사용한다. 외부 파일이나 바뀐 partial staged 내용은 거절한다.
+- 빈 폴더·관측된 부분 준비 파일·외부 파일·내용 변경 회귀 후보를 추가했다. 선택 rustfmt/diff만 수행했으며 compile/native/독립 검토는 최종 검증에 남긴다. 이 관측만으로 원자 snapshot·rename/삭제 권위·완료를 주장하지 않는다. 디렉터리 receipt/staging/이동/역복원 통합은 아직 남고 기존 writer는 디렉터리 admission을 거절한다. 신규 cache/package/push/CI/모델 실행 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준7c7db95에서 Windows 새 폴더의 하위 항목 소유권 지도를 구현했다. completedItems/restoredItems/pendingItem의 immediate child만 고르고 새 부모 아래 기존 before가 있는 항목·중복 논리 경로·중복 private 이름·미완료 journal을 거절한다. restored 요구 시 모든 관련 child가 restored여야 하며 최대100,000개 원장 항목을 제한한다.
 - 현재 파일 복구 검사의 guard/원본/retained/detached/staged 배치를 settled_names로 추출해 실제 기존 verify_bound_item_layout과 새 child map이 같은 규칙을 사용하도록 했다. canceledUnwritten/부분 canceledReservation의 남겨 둔 파일도 포함하고 null 부재 항목은 이름 소유권으로 세지 않는다. 이름 목록만으로 파일 신원이나 이동 권위를 부여하지 않는다.
 - 빈 취소 예약·기존 before·미완료 phase·중복 경로 회귀 후보를 추가했다. 선택 rustfmt/diff만 수행했고 native/컴파일/독립 검토는 최종 파동 검증에 남긴다. 새 폴더 생성 primitive와 이 지도를 실제 directory 관측·이동·하위 항목 역복원에 연결해야 하며 아직 폴더 지원 완료가 아니다. Windows 제품 gate·원본은 변경하지 않았고 신규 cache/package/push/CI/모델 실행 없음.
