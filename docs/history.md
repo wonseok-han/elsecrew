@@ -4,6 +4,13 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준0826cf9a에서 macOS 실제 sidecar stdio 통합16개 PASS/1 ignored(51.73초). 네 채팅 durable12,000출력, 상태/취소/복구/정상종료·프로젝트 read를 포함한다. 별도 opt-in100회 저장 경합 시험도1 PASS(57.86초); 두 채팅과 외부 변경 bytes 보존을 자체 임시 프로젝트에서 확인하고 정상종료 후 시험 데이터를 정리했다. 실제 계정/모델이나 사용자 프로젝트는 사용하지 않았다.
+- 사용자에게378661de 및 동일 실패 후속 수정의 공개 push/CI 추가최대2회 승인을 받고1회 게시했다. CI42153643068/378661de는 컴파일·72개 PASS, 같은 stage_new1개 FAIL. 오류가 lease replacement 검사에서 generic open_real_child_dir의 공유 위반으로 이동해 이전 수정만으로 해소되지 않음을 확인했다. 추가 승인 잔여1회.
+- 생성 handle과 병존하는 read-only rebind를 위해 windows_directory_create::open_existing을 추가했다. NtCreateFile FILE_OPEN/부모handle 상대 단일이름·읽기권한·share7·DIRECTORY/SYNCHRONOUS/OPEN_REPARSE_POINT, FILE_OPENED와종류/신원 검사만 사용한다. create/overwrite/delete/rename 권한은 없고 기존 creatinghandle/lease/fullreceipt/flush는 유지한다. MS NtCreateFile 공식문서를 확인했다.
+- 기존 native primitive 회귀에 creationhandle보유중 동일신원rebind·누락이름무생성·잘못된경로/일반파일 거부를 추가했다. 독립 검토에서 이 좁은 수정의 차단 결함 없음, rustfmt/diff 통과. Windows 실실행은 아직 미확인으로 마지막 승인1회에 해당2파일만 게시할 준비를 마쳤다. 제품활성화·main병합·패키징 없음.
+
+### 2026-11-06 · by GPT-6
+
 - Windows 진단3회차d4bc678a/42152805707은 컴파일과 필수 테스트 존재 검사를 통과했다. native73개 중72 PASS/1 FAIL(3.91초); 후속 dispatcher 차단 검사는 선행 실패로 실행되지 않았다. 실패는 new_directory_stage_is_empty_and_never_reuses_a_name의 stage_new에서 directory lease 공유 위반(os32)이다. 디렉터리 create/move primitive, child 변경 재검사, metadata/stream 검사 등은 통과했다. 승인3회는 모두 소진됐다.
 - 생성된 DELETE-capable 폴더 handle을 보유한 뒤 replacement_parent로 같은 이름을 다시 검사하는 경로의 자체 공유 충돌을 원인 후보로 식별했다. 생성 전에 검증된 lease parent reference를 보관하고 생성후 read-only rebind에 사용하도록 수정했다. FILE_CREATE의 이름 충돌 거절·held output·flush·빈목록·exact receipt 대조·최종 lease.validate를 유지하고 보호 handle을 해제하지 않는다.
 - 독립 검토자는 이 좁은 변경의 경계 유지/차단 결함 없음으로 판정했다. rustfmt/diff 검사 통과. Windows 재실행 전이므로 이 실패의 실제 해소는 아직 미확인이다. 추가 공개 push/CI는 새 승인이 필요하며 main 병합·제품 활성화·모델 호출·패키징은 하지 않았다.
