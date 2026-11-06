@@ -6,7 +6,7 @@
 use super::{
     windows_directory_lease::DirectoryLease, windows_durability, windows_fs, ProjectFailure,
 };
-use cap_std::fs::File;
+use cap_std::fs::{Dir, File};
 use std::{
     ffi::c_void,
     mem::size_of,
@@ -123,6 +123,77 @@ pub(super) fn create_new(lease: &DirectoryLease, name: &str) -> Result<File, Pro
     Ok(file)
 }
 
+/// Read-only, no-follow rebind of a single directory name under a held parent.
+/// Share-delete permits observation beside our existing DELETE-capable handle;
+/// this handle grants no rename/delete authority and does not replace its pin.
+pub(super) fn open_existing(parent: &Dir, name: &str) -> Result<Dir, ProjectFailure> {
+    if name.is_empty() || name.contains(['/', '\\']) {
+        return Err(ProjectFailure::manifest(
+            "invalid directory observation leaf",
+        ));
+    }
+    super::protocol_path::from_native(&format!("C:/{name}"), true)
+        .map_err(ProjectFailure::manifest)?;
+    let mut wide: Vec<u16> = name.encode_utf16().collect();
+    if wide.len() > 255 || wide.contains(&0) {
+        return Err(ProjectFailure::manifest(
+            "invalid directory observation leaf",
+        ));
+    }
+    let mut unicode = UnicodeString {
+        length: (wide.len() * 2) as u16,
+        maximum: (wide.len() * 2) as u16,
+        buffer: wide.as_mut_ptr(),
+    };
+    let mut attributes = ObjectAttributes {
+        length: size_of::<ObjectAttributes>() as u32,
+        root: parent.as_raw_handle(),
+        name: &mut unicode,
+        attributes: 0x40,
+        security: std::ptr::null_mut(),
+        quality: std::ptr::null_mut(),
+    };
+    let mut status = IoStatusBlock::default();
+    let mut raw = std::ptr::null_mut();
+    // SAFETY: synchronous FILE_OPEN of one validated component, relative to
+    // the retained parent. All buffers remain live; no create/write rights.
+    let result = unsafe {
+        NtCreateFile(
+            &mut raw,
+            0x0012_0081, // SYNCHRONIZE | READ_CONTROL | READ_ATTRIBUTES | LIST_DIRECTORY
+            &mut attributes,
+            &mut status,
+            std::ptr::null(),
+            0,
+            7,           // SHARE_READ | SHARE_WRITE | SHARE_DELETE
+            1,           // FILE_OPEN: never create or overwrite.
+            0x0020_0021, // DIRECTORY | SYNCHRONOUS_NONALERT | OPEN_REPARSE_POINT
+            std::ptr::null(),
+            0,
+        )
+    };
+    if result < 0 {
+        return Err(ProjectFailure::recovery(format!(
+            "could not observe retained directory: {}",
+            std::io::Error::from_raw_os_error(unsafe { RtlNtStatusToDosError(result) } as i32)
+        )));
+    }
+    if raw.is_null() || raw == (-1isize) as *mut c_void {
+        return Err(ProjectFailure::recovery(
+            "directory observation returned no handle",
+        ));
+    }
+    // SAFETY: successful synchronous open transfers one owned handle.
+    let directory = Dir::from_std_file(unsafe { std::fs::File::from_raw_handle(raw) });
+    if status.information != 1 {
+        return Err(ProjectFailure::recovery(
+            "directory observation was not FILE_OPENED",
+        ));
+    }
+    windows_fs::identity(&directory, true)?;
+    Ok(directory)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,6 +210,15 @@ mod tests {
         }
         let staged = create_new(&lease, "staged").unwrap();
         let identity = windows_fs::identity(&staged, true).unwrap();
+        let observed = open_existing(&dir, "staged").unwrap();
+        assert_eq!(identity, windows_fs::identity(&observed, true).unwrap());
+        for invalid in ["../escape", "nested/child", "stream:ads", ".", ".."] {
+            assert!(open_existing(&dir, invalid).is_err());
+        }
+        assert!(open_existing(&dir, "missing").is_err());
+        assert!(!temp.path().join("missing").exists());
+        assert!(open_existing(&dir, "guard").is_err());
+        drop(observed);
         assert!(create_new(&lease, "staged").is_err());
         std::fs::create_dir(temp.path().join("occupied")).unwrap();
         std::fs::write(temp.path().join("occupied/foreign"), b"keep").unwrap();

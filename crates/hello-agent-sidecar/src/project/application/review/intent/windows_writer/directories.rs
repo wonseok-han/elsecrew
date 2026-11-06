@@ -101,7 +101,8 @@ pub(super) fn stage_new(
     if observed_directory(&input)? != before || observed_directory(&rebound)? != before {
         return Err(invalid());
     }
-    let output_rebound = open_real_child_dir(output_parent, staged_name)?;
+    let output_rebound =
+        crate::project::windows_directory_create::open_existing(output_parent, staged_name)?;
     if output_rebound
         .entries()
         .map_err(|_| invalid())?
