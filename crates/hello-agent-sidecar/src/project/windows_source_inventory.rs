@@ -1,7 +1,7 @@
 //! Read-only Windows source observations for application candidates. This is not
 //! a clean-index baseline, write grant, or atomic snapshot. Reparse objects and
-//! multiply linked files are rejected; alternate-stream preservation still needs
-//! the application writer contract before product admission can be enabled.
+//! multiply linked files are rejected. Unsupported named streams are detected
+//! and refused instead of silently omitted from archives or replacements.
 use super::{open_real_child_dir, open_real_file_at, windows_fs, windows_security, ProjectFailure};
 use cap_std::fs::Dir;
 use sha2::{Digest, Sha256};
@@ -150,6 +150,7 @@ fn observe<T: AsRawHandle>(
     {
         return Err(failure());
     }
+    super::windows_streams::require_supported(held, directory, standard.end as u64)?;
     Ok(Observation {
         identity,
         created: basic.created,

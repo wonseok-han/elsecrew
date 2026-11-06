@@ -4,6 +4,13 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준0cd9c121에서 private 파일 정리 수명을 proposal/retirement와 대조했다. retirement는 현재 복원 지점을 역사로 옮길 뿐 원본 private 파일을 삭제하지 않으며 archive cleanup과 원본 파일 삭제는 별개다. 이 경계를 바꾸거나 원본 파일을 자동 삭제하지 않았다. 보존 데이터가 실제 archive/교체에 모두 반영되는지도 확인하다 named stream 누락 위험을 발견했다.
+- Windows 파일 관측에 held handle의 FileStreamInfo 검사를 연결했다. 현재 archive/staged writer는 unnamed data만 저장하므로 named stream·복수 entry·조회 불가·너무 큰 목록을 정상 파일로 취급하지 않는다.128byte/8byte-aligned 고정 buffer에서 유일한 ::$DATA entry의 이름/길이/size·next0를 검증하며 ERROR_MORE_DATA를 부재로 처리하지 않는다. stream 없는 directory/빈 파일은 공식 EOF 계약으로 구분하고 호출 전 LastError를 초기화한다.
+- 이 변경은 추가 stream 보존 구현이 아니라 기존의 조용한 누락을 막는 지원 경계다. 사용자 파일/stream을 읽어 삭제하거나 수정하지 않는다. pure framing/길이/추가 entry 거절과 native named stream 보존 회귀 후보를 추가했다. Microsoft FILE_STREAM_INFO/GetFileInformationByHandleEx 공식 문서를 확인했고 rustfmt/diff만 수행했다. compile/native/독립 검토는 파동 최종 검증 전이다.
+- Windows named stream 보존·추가 metadata/정리·플랫폼/G6/출시 검증은 여전히 남는다. 제품 gate 비활성, 신규 cache/package/push/CI/모델 실행 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준d347029f에서 하위 작업으로 변하는 directory written/changed/length와 identity/생성시각/권한/속성을 구분했다. 과거 receipt 연속성·pin·중단 분류는 directory 안정 필드를 비교하되 실제 mutation/completion은 full scope child tree 검사를 함께 요구한다. 이동 자체의 전후 비교는 현재 held 관측을 기준으로 ChangeTime만 허용하며 일반 파일의 비교는 유지한다.
 - 부분 reserved directory 취소는 관측된 staged 폴더의 종류·자식 부재/소유권을 확인하고 삭제 없이 보존한다. 취소 receipt는 directory 길이를 파일 after-size0으로 잘못 제한하지 않으며 directory marker/digest0을 요구한다. 원본 before/이동 receipt 부재 검사는 유지한다.
 - 상위 새 폴더를 detached 이름으로 복원한 뒤 하위 항목을 원래 경로에서 찾지 못하는 문제에 대해 읽기 전용 parent_in_scope를 연결했다. exact 원장의 적용/복원된 ancestor 이름과 full ID를 따라가고 parent/root를 다시 검증한다. mutation 경로에는 이 이름 추론을 사용하지 않는다. completion은 전체 scope를 계속 전달한다.

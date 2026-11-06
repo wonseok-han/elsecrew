@@ -38,6 +38,8 @@ mod windows_replace;
 #[cfg(windows)]
 mod windows_directory_create;
 #[cfg(windows)]
+mod windows_streams;
+#[cfg(windows)]
 mod windows_save_guard;
 #[cfg(windows)]
 mod windows_security;
