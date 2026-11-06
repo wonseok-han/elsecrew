@@ -12,6 +12,8 @@ pub(in crate::project) mod completion;
 pub(in crate::project) mod execution;
 mod observation;
 pub(in crate::project) mod retirement;
+#[cfg(windows)]
+pub(in crate::project) mod windows_writer;
 #[cfg(target_os = "macos")]
 pub(in crate::project) mod writer;
 #[allow(unused_imports)]

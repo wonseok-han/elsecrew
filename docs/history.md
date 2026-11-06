@@ -2,6 +2,13 @@
 
 2026-11-06 Windows 진단42129091905/6e079a9에서 native44개+직접 복구 호출 차단1개, 총45 PASS를 확인했다. 승인된3회는 모두 사용했다. 사용자 설치 Git 연결·Windows 제품 검증/활성화·G6/출시는 남아 있으며 전체 개발은 미완료다. 최신 구현·미완료 기록은 [11월 아카이브](archive/history-2026-11.md)에 보존한다.
 
+### 2026-11-06 · by GPT-6
+
+- 기준7fc1424의 깨끗한 통합 checkout에서 Windows original-application 전용 writer 후보를 연결했다. archive pending·원본 관측·Git/root/parent ID/NTFS를 대조한 뒤 무작위 private 이름을 durable 예약하고 guard/staged 내용을 exclusive-create·64KiB streaming·sync/readback으로 준비한다. 기존 파일의 archive owner/group/DACL을 staged에 적용한다.
+- 일반 파일 추가/수정/삭제·역복원 각 이동을 고정 단계로 구현했다. source/상대편 파일 ID·내용·권한/시각을 대조하고 상대편은 write/delete-denied handle로 유지한다. syscall 전 project/lock CAS intent, 비덮어쓰기 move, sync·leaf/parent 재결속·전후 receipt 뒤에만 단계 완료를 기록한다. rename ChangeTime 변화만 별도로 허용하며 생성/삭제의 없는 쪽은 NotFound를 명시 확인한다. 중간 오류/취소는 자동 재이동·삭제·잠금 해제하지 않는다.
+- Windows 복원 완료 표현은 target(before)+detached(after), retained 부재이며 restoredEntry를 별도 기록한다. macOS swap completion을 재사용하지 않는다. 새 내부 함수를 production scheduler에 연결하거나 제품 gate를 열지 않았다. 중단 phase 판정/재개·전체 metadata·directory·cleanup·scheduler/native 검증은 계속 남는다.
+- 선택 rustfmt/diff만 확인했으며 빌드/테스트는 파동 최종 검증으로 남긴다. 상시 승인 검토자1명은 최종 현재 내부 후보에 추가 차단 결함이 없다고 확인했으며 native 실행/제품 연결 승인은 아니다. workspace edit-save의 원본 guard 금지와 macOS pair를 이 original-application 후보에 적용한 최초 지적은 검토자가 철회했고, restored receipt 분리는 반영했다. 신규 build/cache/package/worktree/push/CI/모델 없음.
+
 ## 프로젝트 요약 (고정)
 
 터미널을 한 번도 안 열어본 비개발자를 **코딩 에이전트(Claude Code·Codex)가 굴러가는 상태까지** 데려다주는 데스크톱 GUI 앱. 현재 배포 경로는 Tauri 2 + React 19이고, M5는 Electron + React/TypeScript + Monaco와 Rust sidecar의 별도 작업대 골격으로 전환 중이다.
