@@ -3419,9 +3419,13 @@ impl ProjectManager {
                 "persisted snapshot path is not the exact managed child",
             ));
         }
-        let manifest_path = PathBuf::from(value_string(&record, "manifest_path")?);
         let manifest_name = format!("{worktree_id}.json");
-        if manifest_path != self.manifests_root.join(&manifest_name) {
+        let manifest_path = self.manifests_root.join(&manifest_name);
+        // The ledger stores protocol spelling, while Windows roots can retain
+        // the native verbatim prefix. Compare wire spellings, keep native IO.
+        if value_string(&record, "manifest_path")?
+            != canonical_protocol_path_without_existing(&manifest_path)?
+        {
             return Err(ProjectFailure::manifest(
                 "persisted manifest is not the exact managed snapshot manifest child",
             ));

@@ -101,6 +101,40 @@ fn confirmed_multi_item_apply_and_restore_through_scheduler_and_ledger() {
         )
         .unwrap();
     let active = manager.validate_active_project(&storage, &project).unwrap();
+    let saved = required_project(&storage, &project).unwrap();
+    let mut wrong = saved.clone();
+    wrong.insert(
+        "manifest_path".into(),
+        json!(canonical_protocol_path_without_existing(
+            &manager.manifests_root.join("worktree_other.json")
+        )
+        .unwrap()),
+    );
+    append_object(
+        &mut storage,
+        "project",
+        &project,
+        "op_native_wrong_manifest",
+        "req_native_wrong_manifest",
+        Value::Object(wrong),
+    )
+    .unwrap();
+    assert!(manager
+        .validate_active_project(&storage, &project)
+        .err()
+        .unwrap()
+        .detail
+        .contains("exact managed snapshot manifest child"));
+    append_object(
+        &mut storage,
+        "project",
+        &project,
+        "op_native_restore_manifest",
+        "req_native_restore_manifest",
+        Value::Object(saved),
+    )
+    .unwrap();
+    manager.validate_active_project(&storage, &project).unwrap();
     fs::write(active.worktree_path.join("edit.txt"), b"after-edit").unwrap();
     fs::remove_file(active.worktree_path.join("delete.txt")).unwrap();
     fs::write(active.worktree_path.join("added.txt"), b"after-add").unwrap();

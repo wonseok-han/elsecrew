@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
-2026-11-06 Windows CI42180712653에서 실제 Git·bundle·snapshot 초기화/파일생성 뒤 최종폴더 rename이 OS32로 실패했다. 열린 staging/.git 핸들 해제와 Windows same-directory 신원 재확인 후보880f29a0를 준비했고 로컬 회귀2개·독립 검토를 통과했다. 새 승인3회 중1회로 CI42182048972가 실행 중이며2회잔여다. macOS G6·Windows 전체 반영/복원·제품 활성화·출시는 미완료다. 상세는 아래 및 [11월 아카이브](archive/history-2026-11.md).
+2026-11-06 Windows CI42182048972에서 snapshot 생성/rename을 통과한 뒤 manifest 경로의 Windows native/protocol 표기 불일치가 발견됐다. 비교수정·경로변조 거절 회귀 후보60878b21을 새승인2/3으로 게시했고 CI42182889320 실행 중이며1회잔여다. macOS G6·Windows 전체 반영/복원·제품 활성화·출시는 미완료다. 상세는 아래 및 [11월 아카이브](archive/history-2026-11.md).
+
+### 2026-11-06 · by GPT-6
+
+- 직전 턴은 snapshot rename 수정·same-object 회귀/검토와 CI42182048972 live 확인을 완료한 progress였다. 같은 watch50148이 exit1로 종료될 때까지 관찰했다. snapshot 생성/rename은 통과했고 직후 validate_active_project가 persisted manifest path mismatch로 실패했다. Windows native verbatim root와 저장된 protocol path를 PathBuf 그대로 비교하는 표현 불일치다. 추가승인1/3사용·2회잔여이며 전체반영복원 미완료다.
+- manifest_path는 trusted manifests_root+worktree ID에서 native 경로를 만들고 저장 때와 같은 canonical_protocol_path_without_existing과 ledger 문자열을 exact 비교하도록 최소 수정했다. 같은 검토자는 I/O권위/경계 약화없음을 확인했고 인접 source/worktree overlap 표현 비교는 기존 별도 audit 항목으로 남겼다. 다른 managed child로 경로변조→거부→원복 재수락을 로컬/Windows opt-in 회귀에 추가했다. 로컬 테스트의 unwrap_err Debug 요구 컴파일 오류는 err().unwrap()으로 바로잡았고 최종 scoped 로컬회귀1개가 PASS했다. diff-check 통과 및3코드파일 후보60878b21을 새승인2/3으로 게시, CI42182889320 in_progress 확인·1회잔여다. 로그 /tmp/hello-agent-windows-42182048972-failure.log.
 
 ### 2026-11-06 · by GPT-6
 

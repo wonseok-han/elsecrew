@@ -2,6 +2,25 @@ use super::*;
 use hello_agent_protocol::project_v1::validate_project_payload_v1;
 use tempfile::TempDir;
 
+#[test]
+fn active_manifest_binding_rejects_other_managed_child() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    let original = required_project(&fixture.storage, &fixture.project_id).unwrap();
+    let mut changed = original.clone();
+    changed.insert("manifest_path".into(), json!(canonical_protocol_path_without_existing(
+        &fixture.manager.manifests_root.join("worktree_other.json")
+    ).unwrap()));
+    append_object(&mut fixture.storage, "project", &fixture.project_id,
+        "op_wrong_manifest_child", "req_wrong_manifest_child", Value::Object(changed)).unwrap();
+    let error = fixture.manager.validate_active_project(&fixture.storage, &fixture.project_id).err().unwrap();
+    assert!(error.detail.contains("exact managed snapshot manifest child"));
+    append_object(&mut fixture.storage, "project", &fixture.project_id,
+        "op_restore_manifest_child", "req_restore_manifest_child", Value::Object(original)).unwrap();
+    let restored = fixture.manager.validate_active_project(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(restored.manifest_path, active.manifest_path);
+}
+
 fn make_legacy_binding(fixture: &mut Fixture) -> serde_json::Map<String, Value> {
     let mut record = fixture.storage.projection_record("project", &fixture.project_id).unwrap().unwrap();
     record.remove(path_binding::FIELD);
