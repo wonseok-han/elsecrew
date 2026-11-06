@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
-2026-11-06 Windows CI42178206686에서 실제 Git 버전조회·stdin 명령·동의철회와 엄격한 conhost 신원/종료 처리가 통과했다. 다음 반영/복원 fixture의 저장소 초기화가 설치 template 경로 오류로 실패해 --template= 수정 후보3a02b433을 준비했다. snapshot 초기화의 빈 template 수정 후보a126d521을 추가승인3/3으로 게시해 CI42180712653 실행 중이며 잔여0회다. macOS G6·Windows 전체 반영/복원·제품 활성화·출시는 미완료다. 상세는 아래 및 [11월 아카이브](archive/history-2026-11.md).
+2026-11-06 Windows CI42180712653에서 실제 Git·bundle·snapshot 초기화/파일생성 뒤 최종폴더 rename이 OS32로 실패했다. 열린 staging/.git 핸들 해제와 Windows same-directory 신원 재확인 후보880f29a0를 준비했고 로컬 회귀2개·독립 검토를 통과했다. 새 승인3회 중1회로 CI42182048972가 실행 중이며2회잔여다. macOS G6·Windows 전체 반영/복원·제품 활성화·출시는 미완료다. 상세는 아래 및 [11월 아카이브](archive/history-2026-11.md).
+
+### 2026-11-06 · by GPT-6
+
+- 직전 턴은 snapshot template 수정/로컬 readonly-source 회귀/독립 검토와 CI42180712653 live 확인을 완료한 progress였다. 같은 watch65138이 exit1로 종료될 때까지 관찰했다. 이번에는 bundle/init/materialize 뒤 staging→active rename에서 OS32 공유 잠금 오류가 발생했다. 추가승인3/3 소진, 전체반영/복원은 미도달이다. 로그 /tmp/hello-agent-windows-42180712653-failure.log.
+- rename 직전까지 보유한 staging 및 .git Dir를 해제하는 후보를 준비했고 기존 restart receipt/failure fence 회귀2개가 통과했다. 독립 검토가 새 release/rename 구간의 same-object 증거를 요구해 Windows staging FILE_ID_INFO를 drop 전에 저장하고 최종 폴더를 no-follow reopen한 뒤 동일신원을 persist_pre_activation 전에 확인하도록 보완했다. marker/manifest/invariant 검사는 그대로 유지한다. 최종 same-object 후보에서도 로컬 Unix 회귀2개 PASS 및 동일 독립 검토 차단결함없음을 확인했다. Windows native 증거는 아직 없으므로 기존 opt-in 전체거래 시험 마지막에 fresh snapshot의 post-rename failure 주입→recoveryRequired/blocker/no-active 회귀를 추가했다. 성공rename/최종activation은 기존 전체거래 경로가 검증한다. Windows 추가회귀는 미실행이며 2코드파일 후보880f29a0를 준비해 추가 공개승인을 요청한다. 사용자 call_cab47f6c549a40bbaaad97352047d589로 동일시험 후속컴파일/오류수정 push/CI 최대3회가 승인됐다. 후보 게시 후 CI42182048972 in_progress 확인, 새예산1/3사용·2회잔여다. 기존안전계약/활성화/패키징/모델/main 제외는 유지한다.
 
 ### 2026-11-06 · by GPT-6
 
