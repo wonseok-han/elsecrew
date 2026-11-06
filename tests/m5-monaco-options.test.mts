@@ -66,7 +66,7 @@ for (const delayedGate of [null, "admission", "saving"]) test(`Monaco keeps curr
   let resolveLoader!: (value: unknown) => void;
   const loader = new Promise(resolve => { resolveLoader = resolve; });
   const model = { getValue: () => { valueReads++; return text; }, setValue: (value: string) => { text = value; changeContent?.(); }, onDidChangeContent: (listener: () => void) => { changeContent = listener; return { dispose() { changeContent = undefined; } }; }, dispose() {} };
-  const editor = { updateOptions: (options: { readOnly?: boolean; ariaLabel?: string }) => { optionUpdates++; if (options.readOnly !== undefined) readOnly = options.readOnly; if (options.ariaLabel !== undefined) accessibleName = options.ariaLabel; }, addAction: (action: typeof saveAction) => { saveAction = action; return { dispose() { actionDisposals++; } }; }, dispose() {} };
+  const editor = { setModel() {}, updateOptions: (options: { readOnly?: boolean; ariaLabel?: string }) => { optionUpdates++; if (options.readOnly !== undefined) readOnly = options.readOnly; if (options.ariaLabel !== undefined) accessibleName = options.ariaLabel; }, addAction: (action: typeof saveAction) => { saveAction = action; return { dispose() { actionDisposals++; } }; }, dispose() {} };
   const context: Record<string, any> = {
     useState: (initial: unknown) => [initial, () => {}],
     useI18n: () => ({ t: (key: keyof typeof ko, params: { path?: string } = {}) => (lang === "ko" ? ko : en)[key].replace("{path}", params.path ?? "") }),
@@ -196,7 +196,7 @@ for (const failure of ["load", "editor", "action"]) test(`Monaco preserves draft
         create: (_host: unknown, options: { readOnly: boolean }) => {
           if (fail && failure === "editor") throw new Error("editor unavailable");
           locked = options.readOnly;
-          return { updateOptions: (next: { readOnly?: boolean }) => { if (next.readOnly !== undefined) locked = next.readOnly; },
+          return { setModel() {}, updateOptions: (next: { readOnly?: boolean }) => { if (next.readOnly !== undefined) locked = next.readOnly; },
             addAction: () => {
               if (fail && failure === "action") throw new Error("action unavailable");
               return { dispose() { disposed.push("action"); } };
@@ -225,7 +225,7 @@ for (const failure of ["load", "editor", "action"]) test(`Monaco preserves draft
   assert.equal(drafts[0].value, "unsaved draft");
   assert.equal(drafts[0].readOnly, true);
   assert.equal(loads, 1, "language change must not retry initialization");
-  assert.deepEqual(disposed, failure === "load" ? [] : failure === "editor" ? ["model"] : ["editor", "model"]);
+  assert.deepEqual(disposed, failure === "action" ? ["editor"] : []);
   fail = false;
   buttons[0].onClick();
   await render(); await render();
@@ -236,5 +236,5 @@ for (const failure of ["load", "editor", "action"]) test(`Monaco preserves draft
   assert.deepEqual(changes, []);
   const before = disposed.length;
   for (const cleanup of cleanups) cleanup?.();
-  assert.deepEqual(disposed.slice(before), ["subscription", "action", "editor", "model"]);
+  assert.deepEqual(disposed.slice(before), ["subscription", "model", "action", "editor"]);
 });

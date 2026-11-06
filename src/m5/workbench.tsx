@@ -837,13 +837,14 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
     void loadMonaco().then((monaco) => {
       if (cancelled || !host.current) return;
       const current = latest.current;
+      let appliedReadOnly = current.readOnly || current.tab.saveState === "saving";
       const nextEditor = monaco.editor.create(host.current, {
         model: null,
         theme: "vs-dark",
         automaticLayout: true,
         minimap: { enabled: false },
         fontSize: 13,
-        readOnly: current.readOnly || current.tab.saveState === "saving",
+        readOnly: appliedReadOnly,
         ariaLabel: current.labels.name,
       });
       resources.push(nextEditor);
@@ -908,7 +909,11 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
             modelText.current = current.tab.text;
           } finally { synchronizing = false; }
         }
-        nextEditor.updateOptions({ readOnly: current.readOnly || current.tab.saveState === "saving" });
+        const nextReadOnly = current.readOnly || current.tab.saveState === "saving";
+        if (nextReadOnly !== appliedReadOnly) {
+          nextEditor.updateOptions({ readOnly: nextReadOnly });
+          appliedReadOnly = nextReadOnly;
+        }
       };
       syncModel.current = () => {
         try { synchronize(); }

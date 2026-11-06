@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준2ee253a2에서 Windows 원격 CI 승인 대기와 독립적으로 누적 프런트/통신 계약 검사를 진행했다. 최초 npm test는668개 중661 PASS/7 FAIL이었다.6개는 Monaco 재사용 이후 setModel 없는 mock/이전 생성·dispose 순서,1개는 공통 protocol fixture에서 workspace.saveRecovery/resolveSaveRecovery 누락이었다. Rust/TypeScript 양쪽 메서드 목록에 실제 존재함을 대조해 fixture를 교정했다.
+- mock를 현재 editor/model 분리 수명에 맞추자3개 검사에서 실제 text-only render의 중복 updateOptions가 드러났다. Monaco 최초 설정을 기억하고 admission 또는 saving에 따른 최종 readOnly가 달라질 때만 갱신하도록 수정했다. 지연 load·현재 잠금·저장 단축키·초안 보존·명시 재시도 검사는 유지했다. 실제 RSS400MiB나 입력 지연 개선을 측정한 결과는 아니다.
+- 관련11개 PASS, 수정 후 전체 npm test 668 PASS/0 FAIL(24.85초), TypeScript --noEmit 및 diff 검사 통과. 새 패키지/worktree/모델 실행/원격 작업은 없다. Windows CI·실제 GUI/메모리/G6·출시는 계속 남아 전체 완료를 선언하지 않는다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준3fba8b89에서 최근 Windows 반영·복원 구현을 묶어 검증했다. macOS cargo check --locked --offline -p hello-agent-sidecar --tests 통과, project::tests:: 결과100 PASS/0 FAIL/2 ignored(76.06초). Windows 전용 경로는 이 결과로 검증되지 않는다. macOS에서만 발생한 Windows const/helper dead-code 경고2개를 cfg(windows)로 한정한 뒤 check 재실행은 경고 없이 통과했다.
 - 독립 검토자1명이 directory counterpart의 내부 파일 변경을 이동 후 shallow pin만으로 놓치는 P1을 발견했다. move_file의 이동/부재 완료, interrupted restore 재개, FlushMoved acknowledgement 최종 경계에 공통 verify_counterpart(신원+하위 소유 내용 재검사)를 연결했다. 오류는 receipt 게시 전에 반환하여 기존 durable intent를 유지한다. 수정 재검토에서 해당 P1 종료·추가 차단 결함 없음. 이 검토는 native 실행/제품 합격을 대신하지 않는다.
 - initial tree scan 후 child 내용을 바꾸면 shallow pin은 통과하지만 최종 counterpart 검사는 거절하는 Windows 회귀 후보를 추가했다. helper 수준 검사이며 전체 Storage crash/acknowledgement 통합 시험이라고 주장하지 않는다. 기존 Windows 진단 workflow에 directory/metadata/stream/scheduler의 필수 테스트11개 존재 확인을 추가했다. native 컴파일/실행은 아직 미검증이다.
