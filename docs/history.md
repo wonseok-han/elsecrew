@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준e96eef8b에서 별도 숨긴 Chromium/합성 performance preload로5MiB 문서 열기→정상 프로젝트 닫기를2회 수행하고 각 종료 후 heap snapshot을 수집했다. 초기 일회용 스크립트의 Electron import 오류는 userData/sidecar 초기화 전에 발생했으며 정확한 진단PID85417에 TERM 후 종료를 확인하고 builtin import로 수정했다. 제품 코드는 변경하지 않았다.
+- 수정 진단 exit0: snapshot 후 JS used19,623,848→19,915,900 bytes, DOM244→244/listeners184→184. snapshot은 GC를 유발할 수 있어400/800/120MiB·실제 화면성능·누수 부재의 증거가 아니다. 약10,085,776bytes 큰 문자열의 strong retainer는 cachedFileText→patch closure/context→m5SmokeFailedClaude→Window→GC roots였다. tests/m5-renderer-performance-fixture.cjs:7-8의 합성 데이터 캐시와 일치하며 제품 controller/Monaco 누수로 오인하지 않는다. 실제 sidecar combined runner는 이 renderer fixture와 다르므로 해당 원인으로 앞선FAIL을 설명하지 않는다.
+- 재현 스크립트·보고서·덤프 SHA256·보유 경로를 .artifacts/m5-retention-2026-11-06에 보존하고 진단 프로세스 부재 확인 후 두 임시 프로필/약46MB 덤프를 삭제했다. 다음은 더 많은 합성 계측으로 제품 성공을 추정하지 않고 실제 패키지의 기본 비용/보유 관계를 확인하는 것이다. 기존 성능FAIL·Windows 승인 대기·제품 미완료는 유지한다. 참고 API: https://chromedevtools.github.io/devtools-protocol/tot/HeapProfiler/ .
+
+### 2026-11-06 · by GPT-6
+
 - 깨끗한020a425e에서 QA 앱1개를 준비했다. 새 화면 유지 질문은 미응답이었고 기존 자동개발/무과금 fixture 범위에서 약1분 대기 후 현재 화면 상태로1회 실행했다. 시작 시 visible/focused였으나244초에 hidden으로 바뀌어 전체 성능 유효시험이 아니다. 사용자 응답이 없음을 승인으로 처리하거나 합격으로 간주하지 않는다.
 - 결과 .artifacts/m5-combined-output-2026-11-06/third: shutdown accepted, 출력 observer stop1793942583987≤close1793942584075 확인. idle452.69/peak739.48/retained증분132.08MiB로 기존 기준초과이며 입력14.9ms도 이 불완전 전체시험의 단일 관측이다. afterRetained connectedElements151/editor0/diff0/outputRows0, 전체 DOM3101·JS used38,536,324bytes로 화면 subtree 제거와 전체 heap/RSS 보유를 구분할 근거를 얻었다. 관찰기 해제만으로 기준이 해결되지는 않았고 제품 누수로 확정하지 않는다.
 - 모든 관측PID 부재·DB clean_shutdown_at 확인 뒤 fixture70GVFV와 packageivqjTH를 삭제했다. 새 모델·Windows push/CI 없음. 다음은 같은 계측을 반복 추가하기보다 제품 renderer의 실제 보유 객체/기본 프로세스 비용을 분리하는 진단이며, 유효한 전체 성능 재시험에는 화면 유지가 필요하다. Windows 후속2e5a98a 추가승인은 계속 대기다.
