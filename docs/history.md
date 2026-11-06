@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 깨끗한020a425e에서 QA 앱1개를 준비했다. 새 화면 유지 질문은 미응답이었고 기존 자동개발/무과금 fixture 범위에서 약1분 대기 후 현재 화면 상태로1회 실행했다. 시작 시 visible/focused였으나244초에 hidden으로 바뀌어 전체 성능 유효시험이 아니다. 사용자 응답이 없음을 승인으로 처리하거나 합격으로 간주하지 않는다.
+- 결과 .artifacts/m5-combined-output-2026-11-06/third: shutdown accepted, 출력 observer stop1793942583987≤close1793942584075 확인. idle452.69/peak739.48/retained증분132.08MiB로 기존 기준초과이며 입력14.9ms도 이 불완전 전체시험의 단일 관측이다. afterRetained connectedElements151/editor0/diff0/outputRows0, 전체 DOM3101·JS used38,536,324bytes로 화면 subtree 제거와 전체 heap/RSS 보유를 구분할 근거를 얻었다. 관찰기 해제만으로 기준이 해결되지는 않았고 제품 누수로 확정하지 않는다.
+- 모든 관측PID 부재·DB clean_shutdown_at 확인 뒤 fixture70GVFV와 packageivqjTH를 삭제했다. 새 모델·Windows push/CI 없음. 다음은 같은 계측을 반복 추가하기보다 제품 renderer의 실제 보유 객체/기본 프로세스 비용을 분리하는 진단이며, 유효한 전체 성능 재시험에는 화면 유지가 필요하다. Windows 후속2e5a98a 추가승인은 계속 대기다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준1f770410에서 상시 승인된 읽기 전용 검토자 windows_transaction_review1명과 메모리 증거/측정기/제품 수명을 대조했다. 제품 close·stream·Monaco 정리 경로에서 확정된 누수나 memo 회귀는 찾지 못했다. retained 중 renderer output observer가 구독/MutationObserver/DOM listener와 trace 배열을 보유하는 측정기 수명 문제를 확인했다.
 - 최종 출력·이력·스크롤·generation 검증 뒤 결과를 main 보고서로 보존하고 renderer observer를 stop/delete한 후 프로젝트를 닫도록 수정했다. 집계는 outputObserverStoppedAt≤closedAt을 요구하고 catch가 이미 수집한 결과를 덮지 않는다. 관련11개 검사·node --check·diff 통과. 독립 검토는 QA-inclusive 수치임을 문서화하는 조건으로 좁은 수정 승인했고 해당 설명을 performance 절차에 반영했다.
 - main의 liveWindows/generation/outputObservation 원시 증거와 trace Utility는 계속 RSS에 포함된다. 따라서 renderer observer 해제를 전체 측정기 비용 제거/제품 누수 해소로 주장하지 않는다. full-window 가시성/외부 입력 감시·기준400/800/120MiB·강제GC 없음은 유지한다. 실제 보정 후 측정은 미실행이며 기존FAIL은 그대로다. 다음은 제품 메모리와 보수적 QA 합계의 구분을 유지한 실제 검증이고 Windows2e5a98a 추가push 승인은 여전히 대기다.
