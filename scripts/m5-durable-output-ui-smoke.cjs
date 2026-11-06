@@ -13,6 +13,8 @@ const { summarizeOutputGeneration } = require('./m5-output-generation.cjs');
 if (process.platform !== 'darwin' || app.isPackaged !== packagedQa) throw new Error('Output diagnostic build mode differs');
 if (packagedQa) app.setName('Hello Agent Output QA');
 const combined = process.argv.includes('--combined-workload');
+const retentionOnly = packagedQa && process.argv.includes('--file-retention-only');
+assert.ok(!retentionOnly || !combined, 'Retention-only diagnosis is separate from combined performance');
 // A real foreground surface, not a visibility/throttling override. Limited to
 // the explicitly named QA package; production window policy stays unchanged.
 const keepTestVisible = packagedQa && process.argv.includes('--keep-test-visible');
@@ -25,6 +27,7 @@ const source = path.join(root, 'project');
 const userData = path.join(root, 'userdata');
 fs.mkdirSync(source); fs.mkdirSync(userData);
 fs.writeFileSync(path.join(source, 'hello.txt'), 'original\n');
+if (retentionOnly) fs.writeFileSync(path.join(source, 'large.txt'), 'x'.repeat(5 * 1024 * 1024));
 const combinedFixture = combinedWorkload?.prepare(source);
 for (const args of [['init', '-q', '--template='], ['add', '.'],
   ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture']]) {
@@ -44,7 +47,7 @@ assert.equal(fs.realpathSync(app.getPath('sessionData')), fs.realpathSync(sessio
 assert.equal(fs.realpathSync(app.getPath('logs')), fs.realpathSync(logs));
 dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [source] });
 const report = { schemaVersion: 1, diagnostic: true, gateEligible: false, root, packagedQa,
-  keepTestVisible,
+  keepTestVisible, retentionOnly,
   paced, live, liveWindows: [], status: 'RUNNING', shutdown: 'pending', restoredChats: [], scrollChecks: [],
   limitations: [packagedQa ? 'Explicit QA package, synthetic providers; not the production artifact or actual accounts.' : 'Development artifacts, synthetic providers, no actual accounts.',
     'Full retained-window and history checks; no 50-events/s paint or packaged RSS gate.',
@@ -151,8 +154,8 @@ async function finish(error) {
   report.status = error ? 'FAIL' : 'PENDING';
   // Optional retention diagnosis runs only after all timing/RSS collectors stop.
   // Heap snapshots can trigger GC; never use their values as performance proof.
-  if (packagedQa && combined && process.argv.includes('--retention-snapshot')
-      && report.combinedWorkload?.retainedStartedAt) {
+  if (packagedQa && ((combined && process.argv.includes('--retention-snapshot')
+      && report.combinedWorkload?.retainedStartedAt) || (retentionOnly && report.fileRetention?.closed))) {
     const debuggerApi = observedWindow?.webContents.debugger;
     const snapshotPath = path.join(root, 'retention.heapsnapshot');
     let fd, attached = false, bytes = 0, overflow = false;
@@ -184,7 +187,7 @@ async function finish(error) {
   app.once('will-quit', () => {
     clearTimeout(timer);
     report.shutdown = 'accepted'; report.functionalStatus = error ? 'FAIL' : 'PASS';
-    report.status = error ? 'FAIL' : report.visibility === 'visible' && report.visibilityTrace?.every(entry => entry.state === 'visible') ? 'PASS' : 'NOT_READY';
+    report.status = error ? 'FAIL' : retentionOnly ? 'NOT_READY' : report.visibility === 'visible' && report.visibilityTrace?.every(entry => entry.state === 'visible') ? 'PASS' : 'NOT_READY';
     persist(); console.log(JSON.stringify(report));
     app.exit(error ? 1 : 0);
   });
@@ -219,6 +222,32 @@ app.on('browser-window-created', (_event, window) => {
       if (result.error) report.mainLongTaskError = result.error;
     };
     try {
+      if (retentionOnly) {
+        // Exercise the real bridge, sidecar file reader and editor teardown.
+        // Hidden DOM/model readiness is not a paint/latency or RSS gate.
+        window.hide();
+        await wait("window.m5?.version === 8 && [...document.querySelectorAll('button')].some(b => b.textContent === '프로젝트 선택' && !b.disabled)");
+        await run(`(async () => {
+          const p = await window.m5.openProject();
+          const settings = await window.m5.getProjectRoleSettings({projectId:p.projectId});
+          const prepared = await window.m5.prepareChatWorkspace({projectId:p.projectId});
+          await window.m5.createChat({preparationId:prepared.preparationId,projectId:p.projectId,
+            worktreeId:prepared.manifest.worktreeId,workspaceIdentity:prepared.manifest.workspaceIdentity,
+            goal:'File retention diagnosis',expectedSettingsRevision:settings.revision});
+        })()`);
+        await run("[...document.querySelectorAll('button')].find(b => b.textContent === '프로젝트 선택' && !b.disabled).click()");
+        await wait("document.querySelectorAll('.m5-chat-chip').length === 1");
+        await run("document.querySelector('.m5-chat-chip').click()");
+        await wait("!![...document.querySelectorAll('.m5-file-row')].find(b => b.title === 'large.txt' && !b.disabled)", 65000);
+        await run("[...document.querySelectorAll('.m5-file-row')].find(b => b.title === 'large.txt').click()");
+        await wait("!!document.querySelector('.monaco-editor textarea') && !!document.querySelector('.m5-editor-tab-name')", 30000);
+        report.fileRetention = {diagnostic:true, gateEligible:false, bytes:5*1024*1024, loaded:true};
+        await run("[...document.querySelectorAll('button')].find(b => b.textContent === '프로젝트 화면 닫기' && !b.disabled).click()");
+        await wait("!!document.querySelector('.m5-start-action') && !document.querySelector('.monaco-editor')");
+        report.fileRetention.closed = true;
+        await finish();
+        return;
+      }
       longTaskProbe = await import('./m5-packaged-long-task-probe.mjs');
       app.focus({steal:true}); window.show(); window.focus();
       await wait("document.visibilityState === 'visible' && window.m5?.version === 8");

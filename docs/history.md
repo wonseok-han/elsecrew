@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 직전 턴은 QA 가림 방지 옵션과 실패 증거를 남긴 progress였다. 기준7583e140 clean에서 실제 파일 수명 진단 --file-retention-only를 추가했다. combined와 상호배타이며 hidden 상태에서 임시5MiB 단일행 파일·채팅1개를 실제 sidecar/typed bridge/Monaco로 열고 정상 view release 뒤 heap snapshot을 수집한다. 실제 모델·계정은 없고 기능 성공도 전체NOT_READY/gateEligible:false를 유지한다.
+- QA k85HoW 실행 exit0·functionalStatus PASS·shutdown accepted, loaded/closed true. `.artifacts/m5-actual-file-retention-2026-11-06`에 증거를 보존했다. snapshot23,224,213bytes 분석에서 큰 external strings4,511,352/1,120,348bytes는 각각 Monaco editor.api/index 코드 source→Window global의 strong path였다. fixture의 x100 prefix 문자열 node는0개였다. 이것은 단일 파일 해제 후 본문 보유 증거가 없다는 제한된 관측이며 GC 가능성·코드minify·단일행 파일이라는 한계 때문에 전체 누수부재/143MiB retained 해소/G6 합격으로 확대하지 않는다.
+- 관측PID 부재와DB clean_shutdown_at을 확인한 뒤 profileN1aneG·packagek85HoW·raw snapshot을 삭제하고 요약·해시·분석기를 남겼다. node --check·diff 검사 통과. 제품 변경 없음. 남은 메모리 원인은 combined 출력/diff·renderer allocator/native·main 측정기 자료 범위에서 조사해야 하며 유효한 화면성능/400·800·120MiB·Windows native 통합·출시는 미완료다. Windows2e5a98a 추가push 승인도 여전히 없다.
+
+### 2026-11-06 · by GPT-6
+
 - 직전 턴은 시험 실패/정상 종료/정리와 collector 변경 증거를 남긴 progress로 분류했다. 기준5bc548be clean에서 창 생성 코드와 fourth 원시 기록을 대조했다. native isVisible=true 상태의 hide/renderer hidden은 macOS occlusion을 반영한다는 Electron 공식 문서와 일치하지만 어떤 창/Space/OS 동작인지 확인되지 않았다. 제품의 감지 오류로 단정하거나 backgroundThrottling을 끄지 않았다.
 - QA 패키지 전용 --keep-test-visible 옵션을 추가했다. 실제 창에 floating always-on-top만 적용하며 보고서에 옵션을 기록한다. 제품 창·숨김 판정·외부 입력 감시·포커스 반복·기준은 변경하지 않는다. 패키지WamQk6로 기존 무과금 임시 시험1회를 실행했다. fifth 기록에서 대형 tree56/58ms·file216.7ms·diff183.4/208.8ms 단일 관측은 얻었지만23.58~31.71초 및164.23초 이후 renderer hidden, Live window became hidden FAIL이다. 옵션만으로 가림을 해결하지 못했고 전체G6/성능 합격이 아니다.
 - retained 단계에 못 가서 heap snapshot은 새 조건대로 수집하지 않았다. shutdown accepted·관측44PID 부재·DB clean_shutdown_at 확인 후 fixture rY7hsc와 packageWamQk6를 제거했다. 증거 `.artifacts/m5-combined-output-2026-11-06/fifth`. node --check·diff 검사를 통과했고 옵션/증거 한계는 performance 절차에 반영했다. 유효한 foreground 연속 시험·유휴/retained 메모리 목표·Windows 후보2e5a98a 추가승인과 native 통합·출시가 남는다. 화면 시험을 같은 조건으로 반복하지 않으며 다음은 시각 성능 증거와 분리한 실제 sidecar 파일 open/close 보유 진단 등 독립적으로 가능한 원인 조사다. 모델·push·제품 활성화 없음.
