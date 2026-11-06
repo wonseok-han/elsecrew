@@ -3,6 +3,7 @@
 //! cleanup follows an uncertain result. Staging/scheduler admission is separate.
 #![allow(dead_code)]
 use super::*;
+pub(in crate::project) mod recovery;
 use crate::project::{
     open_absolute_directory_capability, open_real_child_dir, open_real_file_at,
     validate_relative_path, windows_directory_lease::DirectoryLease, windows_durability,
@@ -132,7 +133,7 @@ fn publish(
     journal: Value,
     request: &str,
 ) -> Result<Value, ProjectFailure> {
-    validate(&journal)?;
+    validate_receipts(&journal, &expected["pendingItem"]["item"])?;
     if expected["state"] != "applying" || inspect(storage, project_id)? != *expected {
         return Err(invalid());
     }
@@ -222,7 +223,7 @@ pub(in crate::project) fn stage(
         return Err(invalid());
     }
     let mut j = expected["pendingItem"]["writeJournal"].clone();
-    validate(&j)?;
+    validate_receipts(&j, &expected["pendingItem"]["item"])?;
     if j["phase"] != "reserved" {
         return Err(invalid());
     }
@@ -369,7 +370,7 @@ pub(in crate::project) fn move_file(
         return Err(invalid());
     }
     let mut j = expected["pendingItem"]["writeJournal"].clone();
-    validate(&j)?;
+    validate_receipts(&j, &expected["pendingItem"]["item"])?;
     let (root, dir, leaf) = source_parent(manager, expected)?;
     if json!(windows_fs::identity(&root, true)?) != j["rootIdentity"]
         || json!(windows_fs::identity(&dir, true)?) != j["parentIdentity"]
@@ -381,44 +382,8 @@ pub(in crate::project) fn move_file(
     if entry(&mut open_real_file_at(&dir, &guard)?, check)? != j["guardEntry"] {
         return Err(invalid());
     }
-    let (prior, intent, complete, from, to, expected_entry, receipt) = match step {
-        Move::PreserveBefore => (
-            "staged",
-            "moveBeforeIntent",
-            "beforeMoved",
-            leaf.clone(),
-            name(&j, "retained")?,
-            expected["pendingItem"]["item"]["before"].clone(),
-            "retainedEntry",
-        ),
-        Move::InstallAfter => (
-            "beforeMoved",
-            "installIntent",
-            "applied",
-            name(&j, "staged")?,
-            leaf.clone(),
-            j["stagedEntry"].clone(),
-            "installedEntry",
-        ),
-        Move::DetachAfter => (
-            "applied",
-            "detachAfterIntent",
-            "afterDetached",
-            leaf.clone(),
-            name(&j, "detached")?,
-            j["installedEntry"].clone(),
-            "detachedEntry",
-        ),
-        Move::RestoreBefore => (
-            "afterDetached",
-            "restoreBeforeIntent",
-            "restored",
-            name(&j, "retained")?,
-            leaf.clone(),
-            j["retainedEntry"].clone(),
-            "restoredEntry",
-        ),
-    };
+    let (prior, intent, complete, from, to, expected_entry, receipt) =
+        transition(&j, &expected["pendingItem"]["item"], &leaf, step)?;
     if j["phase"] != prior {
         return Err(invalid());
     }
@@ -556,4 +521,117 @@ fn verify_pin(
         }
         _ => Err(invalid()),
     }
+}
+
+type Transition = (
+    &'static str,
+    &'static str,
+    &'static str,
+    String,
+    String,
+    Value,
+    &'static str,
+);
+fn transition(
+    j: &Value,
+    item: &Value,
+    leaf: &str,
+    step: Move,
+) -> Result<Transition, ProjectFailure> {
+    Ok(match step {
+        Move::PreserveBefore => (
+            "staged",
+            "moveBeforeIntent",
+            "beforeMoved",
+            leaf.to_owned(),
+            name(&j, "retained")?,
+            item["before"].clone(),
+            "retainedEntry",
+        ),
+        Move::InstallAfter => (
+            "beforeMoved",
+            "installIntent",
+            "applied",
+            name(&j, "staged")?,
+            leaf.to_owned(),
+            j["stagedEntry"].clone(),
+            "installedEntry",
+        ),
+        Move::DetachAfter => (
+            "applied",
+            "detachAfterIntent",
+            "afterDetached",
+            leaf.to_owned(),
+            name(&j, "detached")?,
+            j["installedEntry"].clone(),
+            "detachedEntry",
+        ),
+        Move::RestoreBefore => (
+            "afterDetached",
+            "restoreBeforeIntent",
+            "restored",
+            name(&j, "retained")?,
+            leaf.to_owned(),
+            j["retainedEntry"].clone(),
+            "restoredEntry",
+        ),
+    })
+}
+
+/// Bind stored receipts back to the validated archive item. Durable journal
+/// fields are evidence to check, not authority to substitute arbitrary files.
+fn validate_receipts(j: &Value, item: &Value) -> Result<(), ProjectFailure> {
+    validate(j)?;
+    let rank = match j["phase"].as_str() {
+        Some("reserved") => 0,
+        Some("staged" | "moveBeforeIntent") => 1,
+        Some("beforeMoved" | "installIntent") => 2,
+        Some("applied" | "detachAfterIntent") => 3,
+        Some("afterDetached" | "restoreBeforeIntent") => 4,
+        Some("restored") => 5,
+        _ => return Err(invalid()),
+    };
+    let before = !item["before"].is_null();
+    let after = !item["after"].is_null();
+    for (key, required) in [
+        ("guardEntry", rank >= 1),
+        ("stagedEntry", rank >= 1 && after),
+        ("retainedEntry", rank >= 2 && before),
+        ("installedEntry", rank >= 3 && after),
+        ("detachedEntry", rank >= 4 && after),
+        ("restoredEntry", rank >= 5 && before),
+    ] {
+        if (required && !j[key].is_object()) || (!required && !j[key].is_null()) {
+            return Err(invalid());
+        }
+    }
+    if rank >= 1 && after {
+        let staged = &j["stagedEntry"];
+        let image = json!({"kind":1,"executable":false,"size":staged["observation"]["length"],"digest":staged["digest"]});
+        if image != item["after"]
+            || (before
+                && staged["observation"]["access"] != item["before"]["observation"]["access"])
+        {
+            return Err(invalid());
+        }
+    }
+    for (required, before, after) in [
+        (rank >= 2 && before, &item["before"], &j["retainedEntry"]),
+        (rank >= 3 && after, &j["stagedEntry"], &j["installedEntry"]),
+        (
+            rank >= 4 && after,
+            &j["installedEntry"],
+            &j["detachedEntry"],
+        ),
+        (
+            rank >= 5 && before,
+            &j["retainedEntry"],
+            &j["restoredEntry"],
+        ),
+    ] {
+        if required && !unchanged_by_move(before, after) {
+            return Err(invalid());
+        }
+    }
+    Ok(())
 }

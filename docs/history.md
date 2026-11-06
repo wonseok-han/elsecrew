@@ -4,6 +4,13 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준9684c88의 깨끗한 통합 checkout에서 Windows 중단 rename4종의 read-only 판정과 명시 acknowledge를 추가했다. exact pending/archive·root/parent/guard·이동 양쪽/상대편을 held handle로 대조해 matchesUnmoved/matchesMoved/conflict로 분류한다. acknowledge는 moved에 한해 fresh write-through handle의 NTFS sync·전체 재관측 뒤 단일 journal phase를 CAS 게시한다. rename 재실행·자동 삭제·batch 완료·잠금 해제는 없다.
+- 공통 transition mapping을 추출하고 phase별 receipt 존재/부재와 archive before/after 결속 검사를 publish/stage/move/recovery에 적용했다. staged 내용·기존 권한과 retained/installed/detached/restored의 full ID·내용·metadata chain을 검증하며 rename ChangeTime만 제외한다. 잘못된 단계/위조된 항목 교체를 기존 기록만으로 수용하지 않는다.
+- Windows applied/restored의 전체 private 이름 배치를 읽기 전용으로 대조하는 pending-item inspector도 추가했다. restored는 target(before)+detached(after)·retained/staged 부재이며 단일 항목의 관측을 전체 완료나 삭제 권위로 사용하지 않는다. 이동 전 중단 취소·부분반영 역복원·directory/추가 metadata·cleanup·scheduler와 native 검증은 계속 남는다.
+- 독립 검토자1명은 중단 복구/acknowledge와 receipt 검증에 정적 차단 결함 없음으로 확인했다. 이후 추가한 read-only settled inspector는 메인 diff 검토 범위다. 선택 rustfmt/diff만 실행했고 빌드/시험은 기능 연결 후 누적 검증으로 남긴다. 제품 gate/원본/인증정보 변경과 신규 cache/package/worktree/push/CI/모델 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준7fc1424의 깨끗한 통합 checkout에서 Windows original-application 전용 writer 후보를 연결했다. archive pending·원본 관측·Git/root/parent ID/NTFS를 대조한 뒤 무작위 private 이름을 durable 예약하고 guard/staged 내용을 exclusive-create·64KiB streaming·sync/readback으로 준비한다. 기존 파일의 archive owner/group/DACL을 staged에 적용한다.
 - 일반 파일 추가/수정/삭제·역복원 각 이동을 고정 단계로 구현했다. source/상대편 파일 ID·내용·권한/시각을 대조하고 상대편은 write/delete-denied handle로 유지한다. syscall 전 project/lock CAS intent, 비덮어쓰기 move, sync·leaf/parent 재결속·전후 receipt 뒤에만 단계 완료를 기록한다. rename ChangeTime 변화만 별도로 허용하며 생성/삭제의 없는 쪽은 NotFound를 명시 확인한다. 중간 오류/취소는 자동 재이동·삭제·잠금 해제하지 않는다.
 - Windows 복원 완료 표현은 target(before)+detached(after), retained 부재이며 restoredEntry를 별도 기록한다. macOS swap completion을 재사용하지 않는다. 새 내부 함수를 production scheduler에 연결하거나 제품 gate를 열지 않았다. 중단 phase 판정/재개·전체 metadata·directory·cleanup·scheduler/native 검증은 계속 남는다.
