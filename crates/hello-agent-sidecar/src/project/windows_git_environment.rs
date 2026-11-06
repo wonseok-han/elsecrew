@@ -16,8 +16,14 @@ pub(super) fn for_runtime(
 ) -> Result<BTreeMap<String, String>, ProjectFailure> {
     runtime.validate()?;
     cwd.validate()?;
-    let runtime_directory = runtime
-        .path()
+    // Use ordinary DOS spelling for Git's own executable search instead of
+    // passing native namespace prefixes. This comes from the retained image,
+    // never inherited PATH; each descendant still needs actual-image approval.
+    let launch_path = runtime.launch_path()?;
+    let search_path = launch_path
+        .strip_prefix(r"\\?\")
+        .ok_or_else(|| ProjectFailure::manifest("Git launch path is not extended DOS"))?;
+    let runtime_directory = search_path
         .rsplit_once('\\')
         .map(|(parent, _)| parent)
         .ok_or_else(|| ProjectFailure::manifest("Git runtime has no directory"))?;

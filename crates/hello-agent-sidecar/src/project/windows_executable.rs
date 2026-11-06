@@ -221,7 +221,7 @@ mod tests {
     use super::*;
     use cap_std::ambient_authority;
     #[test]
-    fn launch_spelling_preserves_guid_identity_and_git_environment() {
+    fn launch_and_search_spelling_preserve_guid_identity() {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("git.exe"), b"selected image").unwrap();
         let directory = Dir::open_ambient_dir(root.path(), ambient_authority()).unwrap();
@@ -235,9 +235,18 @@ mod tests {
         let environment = super::super::windows_git_environment::for_runtime(&image, &cwd).unwrap();
         assert_eq!(
             environment["PATH"],
-            image.path().rsplit_once('\\').unwrap().0
+            image
+                .launch_path()
+                .unwrap()
+                .strip_prefix(r"\\?\")
+                .unwrap()
+                .rsplit_once('\\')
+                .unwrap()
+                .0
         );
         assert_eq!(environment["GIT_EXEC_PATH"], environment["PATH"]);
+        let searched = std::fs::File::open(format!("{}\\git.exe", environment["PATH"])).unwrap();
+        image.verify_loaded_image(&searched).unwrap();
         image.validate().unwrap();
     }
     #[test]
