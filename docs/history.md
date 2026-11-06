@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준0d736c7의 깨끗한 통합 checkout에서 review persistence와 session confirmation을 Windows에도 연결했다. 저장 시 project/chat/lock revision의 같은 transaction CAS, 재열기 시 현재 계획 재구성과 descriptor 전체 일치 검사를 기존 코드로 공유한다. Windows snapshot digest는 identity/access가 포함된 bounded inventory 직렬화를 사용한다.
+- open/cancel confirmation을 플랫폼 공통으로 연결하고 pending owner 필드·초기화·stop 시 cancel을 Windows에도 적용했다. 확인은 세션 메모리의 단일 token/300초 만료·현재 preview fingerprint에 결속되며 재시작으로 복원되지 않는다. backup prepare/consume 및 실제 writer는 아직 Unix 전용으로 유지했다. 기존 Windows startup/Git/source-write gate를 열지 않았다.
+- 구현 우선 방침에 따라 rustfmt/diff만 확인하고 build/test/CI는 생략했다. Windows compile/native·공통 persistence/confirmation 회귀·독립 검토는 최종 파동 검증에 남는다. 다음은 Windows metadata를 보존하는 backup archive와 복구/반영 writer 연결이다. 새 cache/package/worktree/push/모델 없음.
+
+### 2026-11-06 · by GPT-6
+
 - 기준9dcca5b/깨끗한 통합 checkout에서 Windows 반영용 복사본 준비와 project/chat preview·preview page 경로를 연결했다. 기존 review 소스를 플랫폼별 inventory/baseline adapter와 공유해 chat/task/workspace revision·healthy lock·전체 blocker·source receipt 검증·case/Unicode 충돌·untracked 원본 충돌·검토 중 변경 재확인·100개 pagination fingerprint를 유지했다. fork한 별도 대상 검증 규칙을 만들지 않았다.
 - Windows inventory는 읽기 전용 kind/content view를 제공하고 파일 mode는 POSIX 실행 bit로 해석하지 않는다. 새/기존 디렉터리 처리와 tracked deletion 구분은 기존 review와 같다. Windows snapshot fingerprint는 raw identity/access observation까지 bounded serialization한다. 아직 Windows의 ACL/ADS 변경을 어떤 반영으로 다룰지와 backup/confirmation/intent/writer 포트가 남아 쓰기 capability는 비활성이다. 준비·preview도 기존 Git/startup gate가 열리기 전에는 제품에서 사용할 수 없다.
 - 이번은 구현 checkpoint로 rustfmt/diff만 확인했다. Windows compile/native·Unix review 회귀·독립 검토와 실제 UI 종단 검증은 후속 묶음 검증 대상이다. 신규 build/cache/package/worktree/push/CI/모델 없음. 다음은 review 영속 기록·백업·명시 확인을 Windows writer/복구 흐름에 연결하는 것이다.

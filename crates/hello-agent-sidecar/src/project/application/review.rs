@@ -23,11 +23,9 @@ use unicode_normalization::UnicodeNormalization;
 const MAX_REVIEW_BYTES: usize = 32 * 1024 * 1024;
 #[cfg(unix)]
 pub(in crate::project) mod backup;
-#[cfg(unix)]
 pub(in crate::project) mod confirmation;
 #[cfg(unix)]
 pub(in crate::project) mod intent;
-#[cfg(unix)]
 pub(in crate::project) mod persistence;
 
 #[derive(Clone, Copy)]
@@ -220,19 +218,7 @@ fn capture_workspace(
 }
 
 fn snapshot_digest(snapshot: &SourceInventory) -> Result<String, ProjectFailure> {
-    #[cfg(unix)]
-    {
-        persistence::snapshot_digest(snapshot)
-    }
-    #[cfg(windows)]
-    {
-        let mut sink = ReviewHash {
-            hash: Sha256::new(),
-            remaining: MAX_REVIEW_BYTES,
-        };
-        snapshot.write_receipt(&mut sink, &|| Ok(()))?;
-        Ok(format!("sha256:{:x}", sink.hash.finalize()))
-    }
+    persistence::snapshot_digest(snapshot)
 }
 
 #[derive(Debug, PartialEq, Eq)]

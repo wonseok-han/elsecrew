@@ -34,6 +34,7 @@ pub(in crate::project) struct Confirmations {
 
 // Move-only, session-local handoff. It cannot be reconstructed from a ready
 // backup record and does not authorize source writes by itself.
+#[cfg(unix)]
 pub(in crate::project) struct PreparedApplication {
     pending: Pending,
     generation: Uuid,
@@ -43,9 +44,14 @@ pub(in crate::project) struct PreparedApplication {
 // No serialization or persisted approval: a new owner always starts empty.
 #[allow(dead_code)]
 impl Confirmations {
-    pub(in crate::project) fn project_for_token(&self, token: &str) -> Result<String, ProjectFailure> {
+    pub(in crate::project) fn project_for_token(
+        &self,
+        token: &str,
+    ) -> Result<String, ProjectFailure> {
         let pending = self.pending.as_ref().ok_or_else(invalid)?;
-        if pending.token != token || Instant::now() >= pending.expires { return Err(invalid()); }
+        if pending.token != token || Instant::now() >= pending.expires {
+            return Err(invalid());
+        }
         Ok(pending.target.borrowed().project_id().to_owned())
     }
     pub(in crate::project) fn matches_chat(&self, token: &str, project: &str, chat: &str) -> bool {
@@ -53,7 +59,13 @@ impl Confirmations {
             && matches!(&pending.target, Target::Chat(address, _) if address.project_id == project && address.chat_id == chat))
     }
     pub(in crate::project) fn cancel_token(&mut self, token: &str) -> Result<(), ProjectFailure> {
-        if self.pending.as_ref().is_none_or(|pending| pending.token != token) { return Err(invalid()); }
+        if self
+            .pending
+            .as_ref()
+            .is_none_or(|pending| pending.token != token)
+        {
+            return Err(invalid());
+        }
         self.cancel();
         Ok(())
     }
@@ -112,6 +124,7 @@ impl Confirmations {
         Ok(plan)
     }
 
+    #[cfg(unix)]
     pub(in crate::project) fn prepare_backup(
         &mut self,
         manager: &ProjectManager,
@@ -154,6 +167,7 @@ impl Confirmations {
 
     /// Final read-only handoff to a future application transaction. The writer
     /// must separately acquire project exclusion and validate at the write boundary.
+    #[cfg(unix)]
     pub(in crate::project) fn consume_prepared(
         &mut self,
         manager: &ProjectManager,
@@ -194,7 +208,7 @@ impl Confirmations {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 impl PreparedApplication {
     pub(in crate::project) fn expire_for_test(&mut self) {
         self.pending.expires = Instant::now();

@@ -445,8 +445,8 @@ pub struct ProjectManager {
     pub(crate) application_cancel: crate::application_cancel::ApplicationCancel,
     #[cfg(target_os = "macos")]
     application_job: Option<application::review::intent::execution::ApplicationJob>,
-    #[cfg(unix)]
-    application_confirmations: application::review::confirmation::Confirmations,
+    #[cfg(any(unix, windows))]
+    application_confirmations: application_review::confirmation::Confirmations,
     data_root: PathBuf,
     data_dir: Dir,
     worktrees_root: PathBuf,
@@ -687,7 +687,7 @@ impl ProjectManager {
         self.application_cancel.stop();
         #[cfg(target_os = "macos")]
         { self.application_job = None; }
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         self.application_confirmations.cancel();
         // Between synchronous ticks, dropping this owner stops future writes.
         // The existing recovery lock is deliberately not cleared here.
@@ -708,27 +708,27 @@ impl ProjectManager {
         { let _ = (project_id, application_id); Err(ProjectFailure::recovery("application unavailable on this platform")) }
     }
     pub(crate) fn cancel_application_confirmation(&mut self, token: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         if self.application_cancel.cancel_confirmation(token) {
             self.stop_application();
         } else {
             self.application_confirmations.cancel_token(token)?;
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         return Err(ProjectFailure::recovery("application confirmation unavailable on this platform"));
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         Ok(ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"cancelApplicationConfirmation","confirmationId":token}), ..Default::default() })
     }
     pub(crate) fn open_application_confirmation(&mut self, storage: &mut Storage, project_id: &str, chat_id: &str, fingerprint: &str, request_id: &str) -> Result<ProjectAction, ProjectFailure> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             self.application_confirmations.cancel();
             let chat = storage.projection_record("chat", chat_id)?.ok_or_else(|| ProjectFailure::dirty("review chat missing"))?;
             let record = chat.get("record").and_then(Value::as_object).ok_or_else(|| ProjectFailure::dirty("review chat record missing"))?;
             let address = WorkspaceAddress { project_id: project_id.to_owned(), chat_id: chat_id.to_owned(), worktree_id: value_string(record, "worktreeId")?.to_owned(), workspace_identity: value_string(record, "workspaceIdentity")?.to_owned() };
-            let target = application::review::ReviewTarget::Chat { address: &address, task_id: value_string(record, "taskId")? };
-            application::review::prepare_target(self, storage, target)?.preview_page(0, Some(fingerprint))?;
-            let saved = application::review::persistence::publish_target(self, storage, target, request_id)?;
+            let target = application_review::ReviewTarget::Chat { address: &address, task_id: value_string(record, "taskId")? };
+            application_review::prepare_target(self, storage, target)?.preview_page(0, Some(fingerprint))?;
+            let saved = application_review::persistence::publish_target(self, storage, target, request_id)?;
             let mut owner = std::mem::take(&mut self.application_confirmations);
             let opened = owner.open(self, storage, target, saved["reviewId"].as_str().ok_or_else(|| ProjectFailure::dirty("review identity missing"))?);
             let result = opened.and_then(|(token, plan)| {
@@ -740,7 +740,7 @@ impl ProjectManager {
             self.application_confirmations = owner;
             result
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = (storage, project_id, chat_id, fingerprint, request_id);
             Err(ProjectFailure::recovery("application confirmation unavailable on this platform"))
@@ -960,7 +960,7 @@ impl ProjectManager {
             application_cancel: Default::default(),
             #[cfg(target_os = "macos")]
             application_job: None,
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             application_confirmations: Default::default(),
             data_root,
             data_dir,

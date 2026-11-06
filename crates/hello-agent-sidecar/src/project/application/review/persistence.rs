@@ -6,6 +6,7 @@ use crate::storage::ProjectionUpsert;
 use serde_json::json;
 use uuid::Uuid;
 
+#[cfg(unix)]
 pub(super) fn snapshot_digest(snapshot: &SourceInventory) -> Result<String, ProjectFailure> {
     let mut sink = ReviewHash {
         hash: Sha256::new(),
@@ -30,6 +31,16 @@ pub(super) fn snapshot_digest(snapshot: &SourceInventory) -> Result<String, Proj
         )
         .map_err(|_| invalid())?;
     }
+    Ok(format!("sha256:{:x}", sink.hash.finalize()))
+}
+
+#[cfg(windows)]
+pub(super) fn snapshot_digest(snapshot: &SourceInventory) -> Result<String, ProjectFailure> {
+    let mut sink = ReviewHash {
+        hash: Sha256::new(),
+        remaining: MAX_REVIEW_BYTES,
+    };
+    snapshot.write_receipt(&mut sink, &|| Ok(()))?;
     Ok(format!("sha256:{:x}", sink.hash.finalize()))
 }
 
