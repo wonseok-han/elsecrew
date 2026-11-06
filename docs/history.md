@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 사용자 화면5분 유지 응답으로 준비된73f6ea9d QA package2ONxaj를 재빌드 없이 실행했다. 결과는 .artifacts/m5-combined-output-2026-11-06/second. 추가 화면 조작/process sample 없이 전체combined를 완료하고 shutdown accepted/모든 관측PID 부재/DB clean_shutdown_at을 확인했다. fixture9zefOC 및 package2ONxaj를 삭제하고 증거만 보존했다.
+- 단일 관측 입력21.2ms·main25.543ms·renderer51ms이며 이번 입력은50ms 이내다. 이전141.3ms 대비 감소했으나 단일 시험/환경 차이 때문에 memo 변경의 단독 인과나 반복G6 합격으로 확대하지 않는다. idle459.69MiB·peak765.77MiB·retained증분143.88MiB로 idle/retained 기준FAIL.400/800/120MiB 기준은 유지한다.
+- 새 진단 실제수집 valid:true: workload전 JS used3,155,980/allocated6,717,440 bytes·DOM documents2/nodes228/listeners230; retained RSS 종료 후 used37,411,440/allocated47,104,000·documents2/nodes3101/listeners510. GC를 강제하지 않았으므로 미회수 객체/정상 캐시/실제 참조 잔류를 구별하지 못하며 누수 확정이 아니다. 다음은 종료 후 연결된DOM과 제거된 editor 참조/worker를 구분하는 진단이다. 실제 모델·Windows push/CI는 실행하지 않았으며 Windows 추가승인은 계속 대기다.
+
+### 2026-11-06 · by GPT-6
+
 - 자동 진행 차단 상태를 재확인했다. 현재67706b54/워킹트리 clean, 준비 패키지2ONxaj의 build.json BUILT와 앱 존재, 관련 실행 프로세스 부재를 확인했다. 실행 중인 시험을 기다리는 상태가 아니다.
 - 최근 연속3개 목표 턴에서 동일한 화면 유지 확인·Windows 추가push 승인 대기가 지속됐다. 그동안 QA 포장과 최신 Chromium 기능 회귀까지 완료했으며 이를 새 성능/Windows 실행 증거로 대신하지 않는다. 승인 없는push나 동일 회귀 반복 대신 목표를 blocked로 전환한다. 완료/사용자 요청 일시정지가 아니다.
 - 재개 조건: 기존 질문에 화면5분 유지 가능 여부와 Windows 후보2e5a98a 후속push/CI최대3회 승인 여부를 답한다. 한쪽 답변만 와도 해당 작업부터 재개한다. QA 패키지는 중복 생성하지 않고 보관된2ONxaj를 사용하며 종료 후 임시 자료를 정리한다. 실제 성능FAIL·Windows 통합·최종 안전/출시는 미완료다.
