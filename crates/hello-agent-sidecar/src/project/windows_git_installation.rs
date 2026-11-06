@@ -349,14 +349,10 @@ mod integration_tests {
         std::fs::write(cwd_path.join("guard"), b"keep").unwrap();
         let directory = Dir::open_ambient_dir(&cwd_path, ambient_authority()).unwrap();
         {
-            // Compare held-file DOS image spelling with the previous GUID trial;
-            // the GUID CWD, dependency leases and no-stdio setup stay unchanged.
+            // Exercise the standard held-file launch spelling without resuming;
+            // GUID CWD, dependency leases and no-stdio setup stay unchanged.
             // Never resume this diagnostic child or retry with weaker leases.
-            let runtime = manager
-                .admitted_git_runtime()
-                .unwrap()
-                .diagnostic_dos_launch_alias()
-                .unwrap();
+            let runtime = manager.admitted_git_runtime().unwrap();
             let cwd = super::super::windows_directory_lease::DirectoryLease::acquire(
                 &directory,
                 OsStr::new("guard"),
@@ -369,7 +365,7 @@ mod integration_tests {
             assert!(runtime.observes_dependencies());
             eprintln!(
                 "installed Git suspended-only diagnostic: imageAlias=dos, stdio=false, imageUtf16={}, cwdUtf16={}",
-                runtime.path().encode_utf16().count(),
+                runtime.launch_path().unwrap().encode_utf16().count(),
                 cwd.path().encode_utf16().count()
             );
             let family = super::super::windows_job::native::Family::suspended_bound(
