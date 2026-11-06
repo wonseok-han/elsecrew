@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준d88e436e에서 Windows 프로젝트 실행의 남은 입장 경로를 확인했다. 고정환경/설치본 재검사/보호 CWD 기반 내부 Git transport는 연결돼 있으나 제품 gate는 비활성이다. 선택된 실제 설치본을 검증하는 opt-in native 통합 진단을 추가했다.
+- HELLO_AGENT_WINDOWS_TEST_GIT로 명시한 설치본만 자체 임시 선택/동의 기록으로 검사한다. 미동의·false 확인 거절, 동의 후 매회 runtime 재검사·--version/표준입력 hash-object·종료, 철회 후 실행 거절과 작업 폴더 불변을 확인한다. 실제 사용자 데이터/프로젝트·모델 호출은 사용하지 않는다. release-checklist에 실행 절차와 증거 범위를 기록했다.
+- rustfmt/diff 통과. Windows 컴파일/실행은 아직 하지 않았으며 기존75 PASS로 덮지 않는다. 추가 push/CI·제품 활성화·패키징 없음. 상시 승인된 독립 검토자1명이 d88e436e Windows 파일 교체/추가/삭제·중첩 폴더·역순 복원·intent recovery를 검토했으며 구체적인 정확성 결함은 찾지 못했다. Windows 전체 원장/scheduler roundtrip 부재는 검증 공백이며 기존 helper PASS나 정적 검토로 대체하지 않는다. 전체 제품 완료가 아니다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준4292fe56에서 남은 Windows 반영/복원과 G6 자원 수명을 대조했다. Monaco는 이미 지연 생성·단일 editor/model 해제를 적용하고 있어 추가 메모리 개선을 확인한 것처럼 주장하지 않으며 추측성 옵션 변경을 하지 않았다.
 - Windows rebind 회귀를 파일 교체·삭제·추가 세 경우의 적용/역순 복원 rename 연쇄로 확장했다. 원본/새 파일 mutation handle과 read-only 관측 handle을 이동 사이에 계속 유지하고 매 단계 파일 신원·내용·관측 handle 쓰기 거부, 마지막 원본 복원/추가 파일 부재·guard 보존을 검사한다. CI 필수 목록에도 넣어 누락을 검출한다.
 - 이는 파일 시스템 통합 회귀 후보이며 Git admission·SQLite intent·scheduler 전체 거래 시험을 대신하지 않는다. rustfmt/diff 검사만 통과했고 Windows 실행은 다음 누적 검증에 남긴다. 이전75 PASS에 새 검사를 포함하지 않는다. 새 push/CI·제품 활성화·모델 실행·패키징 없음.

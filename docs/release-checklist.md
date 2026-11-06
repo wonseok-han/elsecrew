@@ -93,3 +93,15 @@ macOS 패키징 전에는 실행 중인 해당 `out/hello-agent-<platform>-<arch
 - [ ] 깨끗한 기기·서명/공증·배포 방식 결정과 최종 설치본 확인; main 병합·push·외부 배포는 별도 사용자 승인
 
 수동 workflow_dispatch의 기본 브랜치 조건: [GitHub 공식 문서](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch). 전용 브랜치 진단은 main 병합이나 출시 승인이 아니다.
+
+### M5 Windows 설치된 Git 입장·입출력 진단
+
+제품 활성화와 별도로, Windows에서 `HELLO_AGENT_WINDOWS_TEST_GIT`에 시험할 설치본의 `git.exe` 절대 경로를 명시하고 아래 opt-in 검사를 실행한다. 사용자 저장소·앱의 기존 선택/동의 기록은 사용하지 않는다.
+
+```powershell
+$env:CARGO_BUILD_JOBS = '4'
+$env:RUST_TEST_THREADS = '4'
+cargo test --locked --release -p hello-agent-sidecar --lib selected_git_trust_runs_bounded_version_and_stdin_then_revokes -- --ignored --nocapture --test-threads=1
+```
+
+자체 임시 앱 데이터에서 선택 → 서명자/설치 폴더 확인 → 미동의 실행 거절 → 명시 동의 → 매 실행 재검사 → `--version` 및 `hash-object --stdin` → 동의 철회 후 실행 거절을 검사한다. 실제 실행은 제품의 실행 파일/의존 DLL 관측·고정 환경·보호된 작업 폴더·프로세스 종료 경로를 사용한다. 내용 해시 명령은 객체를 저장하지 않으며 네트워크·모델 호출도 하지 않는다. 성공 시 임시 자료를 정리한다. 이 검사 후보는 아직 Windows에서 실행하지 않았으며 프로젝트 전체 반영/복원·패키지 UI·출시 합격 증거가 아니다. 검사가 동의를 만들어 사용하는 대상은 임시 데이터뿐이며 일반 앱의 실행 gate는 그대로 비활성이다.

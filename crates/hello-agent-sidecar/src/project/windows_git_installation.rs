@@ -302,3 +302,98 @@ impl ProjectManager {
         candidate.into_retained_runtime()
     }
 }
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use cap_std::{ambient_authority, fs::Dir};
+    use std::io::{Read, Write};
+
+    /// Opt-in installed Git diagnostic, never an activation switch. The caller
+    /// explicitly supplies a Git installation; all preferences/consent/CWD live
+    /// in this test's temporary directory. No user repository is opened.
+    #[test]
+    #[ignore = "requires explicitly selected installed Windows Git"]
+    fn selected_git_trust_runs_bounded_version_and_stdin_then_revokes() {
+        let selected = std::env::var("HELLO_AGENT_WINDOWS_TEST_GIT")
+            .expect("set HELLO_AGENT_WINDOWS_TEST_GIT to the selected git.exe");
+        let root = tempfile::tempdir().unwrap();
+        let manager = ProjectManager::new(&root.path().join("diagnostic.sqlite3")).unwrap();
+        super::super::write_json_atomic(
+            &manager.data_dir,
+            git_selection::FILE,
+            &serde_json::json!({"schemaVersion":1,"path":selected}),
+        )
+        .unwrap();
+        let preview = manager.preview_git_trust().unwrap();
+        assert_eq!(preview["trusted"], false);
+        assert_eq!(preview["executionEnabled"], false);
+        assert!(manager.admitted_git_runtime().is_err());
+        let identity: GitTrustIdentity =
+            serde_json::from_value(preview["identity"].clone()).unwrap();
+        assert!(manager.confirm_git_trust(identity.clone(), false).is_err());
+        manager.confirm_git_trust(identity, true).unwrap();
+        let cwd_path = root.path().join("cwd");
+        std::fs::create_dir(&cwd_path).unwrap();
+        std::fs::write(cwd_path.join("guard"), b"keep").unwrap();
+        let directory = Dir::open_ambient_dir(&cwd_path, ambient_authority()).unwrap();
+        for (args, input, expected) in [
+            (vec!["--version".to_owned()], None, None),
+            (
+                vec!["hash-object".to_owned(), "--stdin".to_owned()],
+                Some(b"hello\n".as_slice()),
+                Some("ce013625030ba8dba906f756967f9e9ca394464a"),
+            ),
+        ] {
+            // Admission is repeated for every process; the persisted consent
+            // alone cannot supply executable/dependency handles.
+            let runtime = manager.admitted_git_runtime().unwrap();
+            let cwd = super::super::windows_directory_lease::DirectoryLease::acquire(
+                &directory,
+                OsStr::new("guard"),
+            )
+            .unwrap();
+            let mut child =
+                super::super::windows_git_process::StreamingGitChild::spawn_internal_git(
+                    runtime,
+                    &args,
+                    cwd,
+                    input.is_some(),
+                    None,
+                )
+                .unwrap();
+            if let Some(input) = input {
+                let mut stdin = child.stdin.take().unwrap();
+                stdin.write_all(input).unwrap();
+                drop(stdin);
+            }
+            let mut output = Vec::new();
+            child
+                .stdout
+                .take()
+                .unwrap()
+                .take(65_537)
+                .read_to_end(&mut output)
+                .unwrap();
+            assert!(output.len() <= 65_536);
+            let (status, stderr) = child.finish().unwrap();
+            assert!(
+                status.success(),
+                "Git diagnostic failed: {status:?}, stderr bytes={}",
+                stderr.len()
+            );
+            let text = std::str::from_utf8(&output).unwrap().trim();
+            if let Some(expected) = expected {
+                assert_eq!(text, expected);
+            } else {
+                assert!(text.starts_with("git version "));
+            }
+        }
+        manager.revoke_git_trust().unwrap();
+        assert_eq!(manager.preview_git_trust().unwrap()["trusted"], false);
+        assert!(manager.admitted_git_runtime().is_err());
+        assert_eq!(std::fs::read(cwd_path.join("guard")).unwrap(), b"keep");
+        assert_eq!(std::fs::read_dir(&cwd_path).unwrap().count(), 1);
+        assert!(!super::super::WINDOWS_GIT_EXECUTION_ENABLED);
+    }
+}
