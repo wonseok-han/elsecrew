@@ -1,6 +1,7 @@
 // Requires native Windows recovery QA and explicit product activation.
 pub(crate) const WINDOWS_SAVE_RECOVERY_MUTATIONS_ENABLED: bool = false;
 // Installation consent is not product activation; native integration review remains required.
+#[cfg(windows)]
 pub(crate) const WINDOWS_GIT_EXECUTION_ENABLED: bool = false;
 #[cfg(not(any(unix, windows)))]
 use crate::process_spawn::SpawnGuarded as _;

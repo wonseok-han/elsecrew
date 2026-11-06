@@ -26,6 +26,7 @@ pub(super) fn runtime_candidates(selected: &str) -> Result<Vec<String>, ProjectF
         .collect())
 }
 
+#[cfg(windows)]
 pub(super) fn installation_root(selected: &str) -> Result<String, ProjectFailure> {
     let path = protocol_path::from_native(selected, true).map_err(ProjectFailure::manifest)?;
     let lower = path.to_ascii_lowercase();

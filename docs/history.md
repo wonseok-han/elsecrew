@@ -4,6 +4,13 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준3fba8b89에서 최근 Windows 반영·복원 구현을 묶어 검증했다. macOS cargo check --locked --offline -p hello-agent-sidecar --tests 통과, project::tests:: 결과100 PASS/0 FAIL/2 ignored(76.06초). Windows 전용 경로는 이 결과로 검증되지 않는다. macOS에서만 발생한 Windows const/helper dead-code 경고2개를 cfg(windows)로 한정한 뒤 check 재실행은 경고 없이 통과했다.
+- 독립 검토자1명이 directory counterpart의 내부 파일 변경을 이동 후 shallow pin만으로 놓치는 P1을 발견했다. move_file의 이동/부재 완료, interrupted restore 재개, FlushMoved acknowledgement 최종 경계에 공통 verify_counterpart(신원+하위 소유 내용 재검사)를 연결했다. 오류는 receipt 게시 전에 반환하여 기존 durable intent를 유지한다. 수정 재검토에서 해당 P1 종료·추가 차단 결함 없음. 이 검토는 native 실행/제품 합격을 대신하지 않는다.
+- initial tree scan 후 child 내용을 바꾸면 shallow pin은 통과하지만 최종 counterpart 검사는 거절하는 Windows 회귀 후보를 추가했다. helper 수준 검사이며 전체 Storage crash/acknowledgement 통합 시험이라고 주장하지 않는다. 기존 Windows 진단 workflow에 directory/metadata/stream/scheduler의 필수 테스트11개 존재 확인을 추가했다. native 컴파일/실행은 아직 미검증이다.
+- 선택 rustfmt와 git diff --check 통과. 기존 캐시만 재사용했고 추가 worktree/package/모델 호출/제품 활성화/main 병합/push/CI는 없다. Windows CI 승인 횟수는 모두 소진되어 다음 공개 진단 push/CI는 새 승인이 필요하다. 지원하지 않는 특수 항목은 명확히 거절하는 기존 제안 범위를 유지하며 ADS 전체 보존을 새 필수 기능으로 추가하지 않는다. Windows 통합/G6/출시 검증은 남는다.
+
+### 2026-11-06 · by GPT-6
+
 - 기준0cd9c121에서 private 파일 정리 수명을 proposal/retirement와 대조했다. retirement는 현재 복원 지점을 역사로 옮길 뿐 원본 private 파일을 삭제하지 않으며 archive cleanup과 원본 파일 삭제는 별개다. 이 경계를 바꾸거나 원본 파일을 자동 삭제하지 않았다. 보존 데이터가 실제 archive/교체에 모두 반영되는지도 확인하다 named stream 누락 위험을 발견했다.
 - Windows 파일 관측에 held handle의 FileStreamInfo 검사를 연결했다. 현재 archive/staged writer는 unnamed data만 저장하므로 named stream·복수 entry·조회 불가·너무 큰 목록을 정상 파일로 취급하지 않는다.128byte/8byte-aligned 고정 buffer에서 유일한 ::$DATA entry의 이름/길이/size·next0를 검증하며 ERROR_MORE_DATA를 부재로 처리하지 않는다. stream 없는 directory/빈 파일은 공식 EOF 계약으로 구분하고 호출 전 LastError를 초기화한다.
 - 이 변경은 추가 stream 보존 구현이 아니라 기존의 조용한 누락을 막는 지원 경계다. 사용자 파일/stream을 읽어 삭제하거나 수정하지 않는다. pure framing/길이/추가 entry 거절과 native named stream 보존 회귀 후보를 추가했다. Microsoft FILE_STREAM_INFO/GetFileInformationByHandleEx 공식 문서를 확인했고 rustfmt/diff만 수행했다. compile/native/독립 검토는 파동 최종 검증 전이다.

@@ -200,7 +200,18 @@ fn observe(
             absent(&dir, name)?;
         }
     }
-    verify_pin(&dir, &other_name, &other_entry, &mut other, check)?;
+    verify_counterpart(
+        &dir,
+        &other_name,
+        &other_entry,
+        &mut other,
+        expected,
+        matches!(
+            step,
+            Move::DetachAfter | Move::CancelStaged | Move::RestoreBefore
+        ),
+        check,
+    )?;
     if matches!(step, Move::CancelStaged) {
         absent(&dir, &leaf)?;
     }
@@ -627,11 +638,13 @@ pub(in crate::project) fn resume_interrupted_restore(
     if matches!(step, Move::CancelStaged) {
         absent(&evidence._parent, &leaf)?;
     }
-    verify_pin(
+    verify_counterpart(
         &evidence._parent,
         &evidence.other_name,
         &evidence.other_entry,
         &mut evidence._other,
+        expected,
+        true,
         check,
     )?;
     evidence._lease.validate()?;

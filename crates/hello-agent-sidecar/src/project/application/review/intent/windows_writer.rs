@@ -607,7 +607,18 @@ pub(in crate::project) fn move_file(
         absent(&dir, &to)?;
         check()?;
         lease.validate()?;
-        verify_pin(&dir, &other_name, &other_entry, &mut other, check)?;
+        verify_counterpart(
+            &dir,
+            &other_name,
+            &other_entry,
+            &mut other,
+            expected,
+            matches!(
+                step,
+                Move::DetachAfter | Move::RestoreBefore | Move::CancelStaged
+            ),
+            check,
+        )?;
         if matches!(step, Move::CancelStaged) {
             absent(&dir, &leaf)?;
         }
@@ -683,7 +694,18 @@ pub(in crate::project) fn move_file(
     {
         return Err(invalid());
     }
-    verify_pin(&dir, &other_name, &other_entry, &mut other, check)?;
+    verify_counterpart(
+        &dir,
+        &other_name,
+        &other_entry,
+        &mut other,
+        expected,
+        matches!(
+            step,
+            Move::DetachAfter | Move::RestoreBefore | Move::CancelStaged
+        ),
+        check,
+    )?;
     if matches!(step, Move::CancelStaged) {
         absent(&dir, &leaf)?;
     }
@@ -742,6 +764,24 @@ fn verify_pin(
         }
         _ => Err(invalid()),
     }
+}
+
+// A directory pin protects the directory identity, not its descendants.
+// Revalidate owned children at the final receipt boundary as well.
+fn verify_counterpart(
+    dir: &Dir,
+    name: &str,
+    expected: &Value,
+    held: &mut Option<File>,
+    scope: &Value,
+    require_restored: bool,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<(), ProjectFailure> {
+    verify_pin(dir, name, expected, held, check)?;
+    if let Some(file) = held {
+        verify_directory_contents(file, expected, scope, require_restored, check)?;
+    }
+    Ok(())
 }
 
 type Transition = (

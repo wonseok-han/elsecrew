@@ -436,6 +436,50 @@ mod tests {
         assert_eq!(dir.read(&staged_name).unwrap(), b"changed");
     }
     #[test]
+    fn counterpart_recheck_rejects_child_mutation_after_initial_tree_check() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = Dir::open_ambient_dir(temp.path(), cap_std::ambient_authority()).unwrap();
+        root.create_dir("new").unwrap();
+        let dir = open_real_child_dir(&root, "new").unwrap();
+        let mut child = reserved_child("new/file.txt", "11111111111111111111111111111111");
+        let staged_name = name(&child["writeJournal"], "staged").unwrap();
+        dir.write(&staged_name, b"partial").unwrap();
+        child["item"]["after"]["size"] = json!(7);
+        child["writeJournal"]["stagedEntry"] =
+            entry(&mut open_object_at(&dir, &staged_name).unwrap(), &|| Ok(())).unwrap();
+        let scope = json!({
+            "completedItems": [child],
+            "pendingItem": {"item": {"path": "new"}, "writeJournal": {"phase": "restoreBeforeIntent"}}
+        });
+        let receipt = observed_directory(&dir).unwrap();
+        let mut held = pin_entry(&root, "new", &receipt, &|| Ok(())).unwrap();
+        verify_counterpart(&root, "new", &receipt, &mut held, &scope, true, &|| Ok(())).unwrap();
+        // A held parent directory does not prevent another writer from changing
+        // a child after the first tree scan has released its child handles.
+        let mut writer = dir
+            .open_with(&staged_name, &{
+                let mut options = OpenOptions::new();
+                options.write(true);
+                options
+            })
+            .unwrap();
+        writer.write_all(b"changed").unwrap();
+        writer.sync_all().unwrap();
+        drop(writer);
+        // The shallow directory check still succeeds; the final tree check must fail.
+        verify_pin(&root, "new", &receipt, &mut held, &|| Ok(())).unwrap();
+        assert!(
+            verify_counterpart(&root, "new", &receipt, &mut held, &scope, true, &|| Ok(()))
+                .is_err()
+        );
+        assert_eq!(
+            scope["pendingItem"]["writeJournal"]["phase"],
+            "restoreBeforeIntent"
+        );
+        assert_eq!(dir.read(&staged_name).unwrap(), b"changed");
+    }
+
+    #[test]
     fn child_map_rejects_unsettled_or_preexisting_children() {
         let child = reserved_child("new/file.txt", "11111111111111111111111111111111");
         let mut scope = json!({"pendingItem":child});
