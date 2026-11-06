@@ -4,6 +4,12 @@
 
 ### 2026-11-06 · by GPT-6
 
+- 기준9c10ac6b에서 숨긴 Chromium 정상 view 해제 진단을 추가/실행했다. 최초 시도는 기존 releaseView 실패 주입 뒤 정상 해제를 기대하여 timeout했다. 제품은 의도대로 잠겨 있었으므로 안전 경로를 수정하지 않고 실패 주입 이전 별도 opt-in(M5_MEASURE_RELEASE_LIFETIME=1)으로 분리했다.
+- 분리 진단 exit0: connectedElements516→162, editorRemoved:true, Worker created1/terminated1. 이1개는 기존 시험의 수동 worker 생성이며 대형 model/JSON worker 전체 수명의 증거가 아니다. DOM/worker 객체를 전역 배열에 보존하지 않고 숫자만 관찰한다. 기본 smoke의 실패 주입은 그대로 유지하며 계측 wrapper는 opt-in에서만 사용한다. 실행 로그 /tmp/hello-agent-lifetime-only.log; 직접 실행의 임시 profile은 이번 실행에서 경로를 보고하지 않아 추정 삭제하지 않았다. 향후 보고에는 userData 경로를 포함한다.
+- 다음 combined collector는 retained RSS 수집 뒤에만 connected element/editor/diff/output row 숫자를 추가 기록한다. 이전 DOM3101을 연결된 화면/미회수 detached 객체로 구분하기 위함이며 GC·RSS 차감·기준 변경은 없다. 두 스크립트 node --check·diff 통과; 보완된 전체 workload는 미실행이다. 메모리FAIL과 Windows 추가push 승인 대기는 유지한다.
+
+### 2026-11-06 · by GPT-6
+
 - 사용자 화면5분 유지 응답으로 준비된73f6ea9d QA package2ONxaj를 재빌드 없이 실행했다. 결과는 .artifacts/m5-combined-output-2026-11-06/second. 추가 화면 조작/process sample 없이 전체combined를 완료하고 shutdown accepted/모든 관측PID 부재/DB clean_shutdown_at을 확인했다. fixture9zefOC 및 package2ONxaj를 삭제하고 증거만 보존했다.
 - 단일 관측 입력21.2ms·main25.543ms·renderer51ms이며 이번 입력은50ms 이내다. 이전141.3ms 대비 감소했으나 단일 시험/환경 차이 때문에 memo 변경의 단독 인과나 반복G6 합격으로 확대하지 않는다. idle459.69MiB·peak765.77MiB·retained증분143.88MiB로 idle/retained 기준FAIL.400/800/120MiB 기준은 유지한다.
 - 새 진단 실제수집 valid:true: workload전 JS used3,155,980/allocated6,717,440 bytes·DOM documents2/nodes228/listeners230; retained RSS 종료 후 used37,411,440/allocated47,104,000·documents2/nodes3101/listeners510. GC를 강제하지 않았으므로 미회수 객체/정상 캐시/실제 참조 잔류를 구별하지 못하며 누수 확정이 아니다. 다음은 종료 후 연결된DOM과 제거된 editor 참조/worker를 구분하는 진단이다. 실제 모델·Windows push/CI는 실행하지 않았으며 Windows 추가승인은 계속 대기다.

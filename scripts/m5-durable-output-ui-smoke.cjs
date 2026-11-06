@@ -427,7 +427,15 @@ app.on('browser-window-created', (_event, window) => {
           report.memory.samples.map(sample => ({...sample,rssBytes:sample.totalBytes})));
       }
       // RSS retained sampling has ended; these queries cannot alter its window.
-      if (combined) report.rendererAllocation.afterRetained = await sampleRendererAllocation(window.webContents.debugger);
+      if (combined) {
+        report.rendererAllocation.afterRetained = await sampleRendererAllocation(window.webContents.debugger);
+        report.rendererAllocation.connectedDomAfterRetained = await run(`({
+          elements:document.querySelectorAll('*').length,
+          editors:document.querySelectorAll('.monaco-editor').length,
+          diffs:document.querySelectorAll('.m5-diff-details').length,
+          outputRows:document.querySelectorAll('.m5-output-scroll article').length,
+        })`);
+      }
       report.outputObservation = await run('outputObservation.stop()');
       report.visibility = await run('document.visibilityState');
       report.visibilityTrace = await run('outputSmokeVisibility');

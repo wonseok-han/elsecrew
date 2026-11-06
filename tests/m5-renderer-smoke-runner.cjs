@@ -47,6 +47,19 @@ app.whenReady().then(async () => {
   window.webContents.on("render-process-gone", (_event, details) => fail(new Error(`renderer exited: ${details.reason}`)));
   await window.loadURL("m5smoke://m5/index.html");
   const mountScript = `(async () => {
+    ${process.env.M5_MEASURE_RELEASE_LIFETIME === "1" ? `
+    // Count native worker lifetime without keeping worker/model/DOM references.
+    const NativeWorker = globalThis.Worker;
+    globalThis.workerLifetime = {created:0,terminated:0};
+    globalThis.Worker = class extends NativeWorker {
+      #ended = false;
+      constructor(...args) { super(...args); workerLifetime.created++; }
+      terminate() {
+        if (!this.#ended) { this.#ended = true; workerLifetime.terminated++; }
+        return super.terminate();
+      }
+    };
+    ` : ""}
     delete globalThis.MonacoEnvironment;
     if (typeof globalThis.MonacoEnvironment !== "undefined" || Object.hasOwn(globalThis, "MonacoEnvironment")) {
       throw new Error("MonacoEnvironment should be created by the product renderer");
@@ -362,6 +375,18 @@ app.whenReady().then(async () => {
   });
   if (!result.workerCreated || !result.text.includes("example.ts")) throw new Error("Monaco editor or local worker did not mount");
   if (!result.dockVerified) throw new Error("panel layout was not verified");
+  if (process.env.M5_MEASURE_RELEASE_LIFETIME === "1") {
+    const lifetime = await window.webContents.executeJavaScript(`(async () => {
+      const before = {...workerLifetime, connectedElements:document.querySelectorAll('*').length};
+      [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '프로젝트 화면 닫기').click();
+      await ${waitFor("document.querySelector('.m5-start-action') && !document.querySelector('.monaco-editor') && !document.querySelector('.m5-diff-details')", "normal project release")};
+      return {before, after:{...workerLifetime, connectedElements:document.querySelectorAll('*').length},
+        editorRemoved:!document.querySelector('.monaco-editor'), diagnostic:true, gateEligible:false};
+    })()`);
+    process.stdout.write(JSON.stringify({userData,releaseLifetime:lifetime}) + "\n");
+    await window.close(); app.exit(0); return;
+  }
+
   // Keep the synthetic window hidden: foregrounding it captures the user's real
   // keyboard/IME input and can alter the draft while a confirmation is pending.
   window.webContents.debugger.attach("1.3");
