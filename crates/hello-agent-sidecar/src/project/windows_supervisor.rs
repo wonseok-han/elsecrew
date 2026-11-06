@@ -341,9 +341,24 @@ fn handle_event(
                     // This event precedes user-mode execution. Compare the actual
                     // image object, never the optional process-supplied filename.
                     let actual = unsafe { BorrowedHandle::borrow_raw(created.file) };
-                    image
-                        .verify_loaded_image(&actual)
-                        .map_err(|error| io::Error::other(error.detail))
+                    image.verify_loaded_image(&actual).map_err(|error| {
+                        // Opt-in installed-Git CI needs to distinguish the root
+                        // from a rejected child. Diagnostics never admit it or
+                        // continue the event after a failed identity check.
+                        #[cfg(test)]
+                        eprintln!(
+                            "Windows image rejection: first={}, selected={:?}, actual={:?}, identity={:?}",
+                            members.is_empty(),
+                            image.path(),
+                            crate::project::windows_fs::local_guid_path(&actual),
+                            crate::project::windows_fs::identity(&actual, false),
+                        );
+                        io::Error::other(format!(
+                            "{} process image: {}",
+                            if members.is_empty() { "initial" } else { "descendant" },
+                            error.detail
+                        ))
+                    })
                 }
             } else {
                 Ok(())
