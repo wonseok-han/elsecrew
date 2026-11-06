@@ -348,6 +348,39 @@ mod integration_tests {
         std::fs::create_dir(&cwd_path).unwrap();
         std::fs::write(cwd_path.join("guard"), b"keep").unwrap();
         let directory = Dir::open_ambient_dir(&cwd_path, ambient_authority()).unwrap();
+        {
+            // Separate CreateProcess handle-list setup from image/CWD admission.
+            // Never resume this diagnostic child or retry with weaker leases.
+            let runtime = manager.admitted_git_runtime().unwrap();
+            let cwd = super::super::windows_directory_lease::DirectoryLease::acquire(
+                &directory,
+                OsStr::new("guard"),
+            )
+            .unwrap();
+            let mut environment =
+                super::super::windows_git_environment::for_runtime(&runtime, &cwd).unwrap();
+            environment.retain(|key, _| key == "SystemRoot");
+            assert_eq!(environment.len(), 1);
+            assert!(runtime.observes_dependencies());
+            eprintln!(
+                "installed Git suspended-only diagnostic: stdio=false, imageUtf16={}, cwdUtf16={}",
+                runtime.path().encode_utf16().count(),
+                cwd.path().encode_utf16().count()
+            );
+            let family = super::super::windows_job::native::Family::suspended_bound(
+                runtime,
+                &["--no-pager".into(), "--version".into()],
+                &environment,
+                cwd,
+                None,
+            )
+            .expect("installed Git creation without stdio; primary thread remains suspended");
+            assert!(family
+                .terminate(std::time::Duration::from_secs(5))
+                .expect("terminate suspended diagnostic family"));
+            assert!(family.completed().unwrap().is_some());
+            eprintln!("installed Git suspended-only diagnostic: family termination confirmed");
+        }
         for (args, input, expected, minimal_environment) in [
             (vec!["--version".to_owned()], None, None, true),
             (vec!["--version".to_owned()], None, None, false),
