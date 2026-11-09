@@ -2,6 +2,11 @@
 
 Windows CI42315705501은 준비·확인 전달을 통과했으나 실제 반영에서 폴더 lease 공유 잠금 충돌로 실패했다. 승인된 추가 push/CI 3회는 모두 사용했다. macOS G6·Windows 전체 반영/복원·제품 활성화·출시는 미완료다.
 
+### 2026-11-10 · by GPT-6
+
+- CI42315705501의 lease OS32를 조사해 stage가 guard를 DELETE-capable source_options로 만든 handle을 보유한 채 no-delete DirectoryLease를 획득하는 충돌을 확인했다. guard만 GENERIC_READ|WRITE로 생성하도록 최소 수정했고 create_new/no-follow/write-through/share1 및 writer 보유·lease 검증·원장/복구 계약은 유지했다. staged/rename 대상 권한은 변경하지 않는다.
+- Windows 전용 회귀는 writer+lease 공존, 정확신원/production receipt, 타 writer·삭제·rename 차단, writer 해제 후 lease의 삭제 차단과 최종 정리를 검사한다. 단일 파일 rustfmt와 diff-check PASS; macOS에서는 native 코드를 실행할 수 없어 Windows 회귀 미실행이다. 독립 검토 차단결함 없음. 다음은 별도 공개승인을 받아 같은 CI로 확인한다. 기존 승인3/3소진·추가push없음. 로컬 새 앱/워크트리/대형 빌드는 만들지 않았고 가용공간521GiB를 확인했다.
+
 ### 2026-11-09 · by GPT-6
 
 - 검토된 테스트 전용 시간 계측 한 파일을 후보c94880d4로 게시해 CI42315705501 terminal failure를 확인했다. native77개·dispatcher1개·설치Git1개 PASS. 준비 review37.204초, backup 추가194.132초, handoff review37.429초/backup inspect0.002초이며 이번에는300초 확인수명을 넘기지 않았다. 실제 반영 drain에서 Windows directory lease OS32로 실패했다. 기존42182889320의 만료를 없던 일로 보지 않으며 성능 병목도 남는다. 승인3/3소진, 추가push없음. 로그 /tmp/hello-agent-windows-42315705501-failure.log.

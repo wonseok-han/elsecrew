@@ -19,6 +19,14 @@ use std::{
     path::Path,
 };
 
+// Guards are never renamed through their creation handle. Do not request DELETE:
+// the retained no-delete lease must coexist with this writer until staging ends.
+fn guard_creation_options() -> OpenOptions {
+    let mut options = windows_replace::source_options();
+    options.access_mode(0xc0000000); // GENERIC_READ | GENERIC_WRITE only.
+    options
+}
+
 fn parent(root: &Dir, path: &str) -> Result<(Dir, String), ProjectFailure> {
     validate_relative_path(path, false)?;
     crate::project::protocol_path::from_native(&format!("C:/{path}"), true)
@@ -317,7 +325,7 @@ pub(in crate::project) fn stage(
     }
     let guard_name = name(&j, "guard")?;
     let mut guard = dir
-        .open_with(&guard_name, &windows_replace::source_options())
+        .open_with(&guard_name, &guard_creation_options())
         .map_err(|_| invalid())?;
     guard
         .write_all(b"hello-agent-windows-application-guard-v1\n")
@@ -1090,4 +1098,50 @@ pub(in crate::project) fn write_item_cancellable(
         request,
         &check,
     )
+}
+
+#[cfg(test)]
+mod guard_tests {
+    use super::*;
+
+    #[test]
+    fn guard_writer_coexists_with_lease_without_admitting_mutation() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = open_absolute_directory_capability(temp.path()).unwrap();
+        let mut guard = dir.open_with("guard", &guard_creation_options()).unwrap();
+        guard.write_all(b"guard").unwrap();
+        guard.sync_all().unwrap();
+        let identity = windows_fs::identity(&guard, false).unwrap();
+        let lease = DirectoryLease::acquire(&dir, OsStr::new("guard")).unwrap();
+        lease.validate().unwrap();
+        let receipt = entry(&mut guard, &|| Ok(())).unwrap();
+        assert_eq!(receipt["observation"]["length"], 5);
+        assert_eq!(windows_fs::identity(&guard, false).unwrap(), identity);
+        assert!(std::fs::OpenOptions::new()
+            .write(true)
+            .open(temp.path().join("guard"))
+            .is_err());
+        assert_eq!(
+            std::fs::remove_file(temp.path().join("guard"))
+                .unwrap_err()
+                .raw_os_error(),
+            Some(32)
+        );
+        assert_eq!(
+            std::fs::rename(temp.path().join("guard"), temp.path().join("moved"))
+                .unwrap_err()
+                .raw_os_error(),
+            Some(32)
+        );
+        drop(guard);
+        lease.validate().unwrap();
+        assert_eq!(
+            std::fs::remove_file(temp.path().join("guard"))
+                .unwrap_err()
+                .raw_os_error(),
+            Some(32)
+        );
+        drop(lease);
+        std::fs::remove_file(temp.path().join("guard")).unwrap();
+    }
 }
