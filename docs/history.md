@@ -4,6 +4,12 @@ Windows CI42315705501은 준비·확인 전달을 통과했으나 실제 반영�
 
 ### 2026-11-10 · by GPT-6
 
+- 직전 goal turn은 중복 신원조회 제거 c7e8fa64로 progress. 현재 clean checkout을 재확인하고 G6 입력 판정을 실행했으나 .artifacts/m5-performance/measurement.json 부재로 NOT_READY(exit2)였다. 기존 부분진단을 전체성능 PASS로 대체하지 않는다.
+- 같은 HEAD의 별도 macOS output QA 앱을 새로 준비했다. 첫 build는 release sidecar/renderer 성공 후 fetch failed로 종료했고 네트워크 접근 재시도의 session64702는 exit0/BUILT였다. root=/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-output-qa-V7XtVS, build metadata=.artifacts/m5-output-qa-preparation-2026-11-10/build.json. 앱은 아직 실행하지 않았다. 실패한 미실행 root m5To8v는 보고서를 보존하고15MiB 정리했다. 성공 앱은 다음 시각시험용으로1개만 보존한다.
+- Windows 추가CI 승인과 macOS5분 화면 유지 응답은 아직 대기다. 다음은 준비된 앱의 combined-workload/keep-test-visible 측정이며 현재 문서 커밋이 build HEAD와 다르면 source 변화가 문서뿐인지 명시하고 측정의 원래HEAD를 보존한다. 화면 응답 없이 과거 가시성 약속을 현재 확보된 증거로 보지 않는다. 모델 호출/제품out 교체/추가push 없음.
+
+### 2026-11-10 · by GPT-6
+
 - 직전 goal turn은 Windows CI terminal 결과와 guard 충돌 수정 ba8717c3/공개후보076e23a0를 준비한 progress다. 추가 공개승인은 아직 대기이며 push/CI를 실행하지 않았다. 현재 m5/coding-agent-ide 및 깨끗한 기준HEAD를 확인한 뒤 독립 가능한 반복조회 비용을 줄였다.
 - windows_executable::verify_loaded_dependency는 동일 debug-event retained file handle의 신원을 companion마다 최대258회 읽던 대신 한 번 읽고 exact 비교한다. self.validate의 전체 pin/identity검사·system module admission·수명은 유지한다. supervisor가 호출 완료 뒤 handle을 닫음을 확인했다. 독립 검토 차단결함없음, 단일파일 rustfmt/diff-check PASS. Windows native 회귀/성능 미실행이며 194초 backup 병목 해결을 주장하지 않는다. 추가 공개 범위에는 아직 넣지 않았다. 다음은 승인된 범위만 Windows 재시험하고 준비 지연/전체반영·복원 및 macOS G6를 마감한다.
 
