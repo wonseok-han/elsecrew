@@ -4,6 +4,11 @@ Windows CI42315705501은 준비·확인 전달을 통과했으나 실제 반영�
 
 ### 2026-11-10 · by GPT-6
 
+- 완료 감사: Windows 전체반영/복원은 CI42315705501 실패이며 수정 후보076e23a0 native 실행이 남고 승인3회는 소진됐다. macOS 종합 성능 입력은 부재/NOT_READY이며 준비된 QA 앱 V7XtVS의 BUILT/파일존재만 재확인했다. 전체 완료를 선언할 증거가 없다.
+- 추가CI 승인 및 현재5분 화면 유지 응답 대기가 연속 goal turn에서 지속됐다. 직전 턴의 QA 빌드는 progress였으나 이제 준비 가능한 동일시험 작업은 끝났고, 승인·측정 없이 안전경계/성능 기준을 바꾸거나 새 빌드를 반복할 이유가 없다. 자동 진행을 blocked(사용자 응답 필요)로 전환한다. 두 기존 질문 중 가능한 쪽의 응답으로 해당 경로를 재개하며 main/제품활성화/모델호출은 수행하지 않는다.
+
+### 2026-11-10 · by GPT-6
+
 - 직전 goal turn은 중복 신원조회 제거 c7e8fa64로 progress. 현재 clean checkout을 재확인하고 G6 입력 판정을 실행했으나 .artifacts/m5-performance/measurement.json 부재로 NOT_READY(exit2)였다. 기존 부분진단을 전체성능 PASS로 대체하지 않는다.
 - 같은 HEAD의 별도 macOS output QA 앱을 새로 준비했다. 첫 build는 release sidecar/renderer 성공 후 fetch failed로 종료했고 네트워크 접근 재시도의 session64702는 exit0/BUILT였다. root=/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-output-qa-V7XtVS, build metadata=.artifacts/m5-output-qa-preparation-2026-11-10/build.json. 앱은 아직 실행하지 않았다. 실패한 미실행 root m5To8v는 보고서를 보존하고15MiB 정리했다. 성공 앱은 다음 시각시험용으로1개만 보존한다.
 - Windows 추가CI 승인과 macOS5분 화면 유지 응답은 아직 대기다. 다음은 준비된 앱의 combined-workload/keep-test-visible 측정이며 현재 문서 커밋이 build HEAD와 다르면 source 변화가 문서뿐인지 명시하고 측정의 원래HEAD를 보존한다. 화면 응답 없이 과거 가시성 약속을 현재 확보된 증거로 보지 않는다. 모델 호출/제품out 교체/추가push 없음.
