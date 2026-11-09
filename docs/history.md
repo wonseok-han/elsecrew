@@ -4,6 +4,11 @@ Windows CI42315705501은 준비·확인 전달을 통과했으나 실제 반영�
 
 ### 2026-11-10 · by GPT-6
 
+- 직전 goal turn은 Windows CI terminal 결과와 guard 충돌 수정 ba8717c3/공개후보076e23a0를 준비한 progress다. 추가 공개승인은 아직 대기이며 push/CI를 실행하지 않았다. 현재 m5/coding-agent-ide 및 깨끗한 기준HEAD를 확인한 뒤 독립 가능한 반복조회 비용을 줄였다.
+- windows_executable::verify_loaded_dependency는 동일 debug-event retained file handle의 신원을 companion마다 최대258회 읽던 대신 한 번 읽고 exact 비교한다. self.validate의 전체 pin/identity검사·system module admission·수명은 유지한다. supervisor가 호출 완료 뒤 handle을 닫음을 확인했다. 독립 검토 차단결함없음, 단일파일 rustfmt/diff-check PASS. Windows native 회귀/성능 미실행이며 194초 backup 병목 해결을 주장하지 않는다. 추가 공개 범위에는 아직 넣지 않았다. 다음은 승인된 범위만 Windows 재시험하고 준비 지연/전체반영·복원 및 macOS G6를 마감한다.
+
+### 2026-11-10 · by GPT-6
+
 - CI42315705501의 lease OS32를 조사해 stage가 guard를 DELETE-capable source_options로 만든 handle을 보유한 채 no-delete DirectoryLease를 획득하는 충돌을 확인했다. guard만 GENERIC_READ|WRITE로 생성하도록 최소 수정했고 create_new/no-follow/write-through/share1 및 writer 보유·lease 검증·원장/복구 계약은 유지했다. staged/rename 대상 권한은 변경하지 않는다.
 - Windows 전용 회귀는 writer+lease 공존, 정확신원/production receipt, 타 writer·삭제·rename 차단, writer 해제 후 lease의 삭제 차단과 최종 정리를 검사한다. 단일 파일 rustfmt와 diff-check PASS; macOS에서는 native 코드를 실행할 수 없어 Windows 회귀 미실행이다. 독립 검토 차단결함 없음. 다음은 별도 공개승인을 받아 같은 CI로 확인한다. 기존 승인3/3소진·추가push없음. 로컬 새 앱/워크트리/대형 빌드는 만들지 않았고 가용공간521GiB를 확인했다.
 

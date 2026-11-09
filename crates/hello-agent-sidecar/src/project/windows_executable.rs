@@ -110,11 +110,16 @@ impl ExecutableLease {
         actual: &impl AsRawHandle,
     ) -> Result<(), ProjectFailure> {
         self.validate()?;
-        if self.matches_file(actual)? {
+        // The debug event retains this exact loaded-file handle for the call.
+        // Observe it once, rather than issuing the same identity query for
+        // every entry in the bounded companion inventory. All lease validation
+        // and the system-module admission path remain unchanged.
+        let actual_identity = windows_fs::identity(actual, false)?;
+        if actual_identity == self.identity {
             return Ok(());
         }
         for image in &self.companions {
-            if image.matches_file(actual)? {
+            if actual_identity == image.identity {
                 return Ok(());
             }
         }
