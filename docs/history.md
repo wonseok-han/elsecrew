@@ -4,6 +4,12 @@ macOS combined 측정은2026-11-10 메모리436/805/잔류증분296MiB로 실패
 
 ### 2026-11-10 · by GPT-6
 
+- 사용자 현재5분 화면유지 승인으로47748f10 QA jr5daV를 combined/keep-visible/native-memory로 실행했다. session52739/PID49535는exit1·shutdown accepted, 메모리 idle407.41MiB/peak750.92MiB/잔류증분191.19MiB로idle·잔류FAIL이다. 이전시험 대비 변동을 최적화 효과로 주장하지 않는다. 증거 .artifacts/m5-native-combined-2026-11-10/{result,build,summary}.json. 관측PID전부부재+DB clean을 확인해 fixtureurIAfs와QA jr5daV를 삭제했다.
+- 세 프로세스 native 수집이 generic error여서 실행실패/파싱실패를 구분하도록 stage와고정 exit/timeout/permission/output-limit 메타데이터를 추가했다. 창/모델 없는 자체Node 진단으로parse실패를 재현했고 vmmap의 단위없는 정수바이트 표기를 누락한 parser결함을 확인했다(자체구간932개 길이와전부일치). 정수바이트를 허용하되 무단위소수/잘못된값은 거절하도록 수정했다.
+- 회귀4개PASS 및diff-checkPASS. 수정 후 자체Node 실제vmmap1907구간/28종류 집계성공; 이를 종료한QA앱의 구성 또는제품성능통과로 보지 않는다. 주소·경로·stderr는 보존하지 않는다. 다음은 수정수집기로QA앱 native 구성 재측정이며 Windows 추가CI 승인은 여전히대기다.
+
+### 2026-11-10 · by GPT-6
+
 - 재개 이후 분석→진단구현→QA준비는 progress였으나 Windows 추가 실행 승인과 macOS 추가 시각시험의 현재 화면 가용 응답이 없는 상태는 계속됐다. 이번에는 clean checkout, 후보076e23a0 존재, QA jr5daV BUILT/앱존재를 읽기전용 재확인했으며 새 구현·실행 증거는 없다. 빌드90397은 이미terminal exit0이므로 실행중 시험을 기다리는 상태가 아니다.
 - 다음 증거가 필요한 두 경로 모두 사용자 응답 대기이며 동일빌드/테스트 반복이나 추측성 메모리 수정으로 이를 대체하지 않는다. goal을 blocked로 전환하고 준비물은 보존한다. 현재 native 원인진단5분 화면유지 또는 기존 Windows 추가CI 질문의 응답 후 해당경로를 재개한다. 전체완료는 여전히 미증명이다.
 

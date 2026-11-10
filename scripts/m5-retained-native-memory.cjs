@@ -6,9 +6,9 @@ function summarizeRegions(text) {
   const groups = new Map();
   let regions = 0;
   const bytes = value => {
-    const match = /^(\d+(?:\.\d+)?)([BKMG])$/.exec(value);
-    assert.ok(match, 'Unknown native size');
-    const result = Math.round(Number(match[1]) * 1024 ** 'BKMG'.indexOf(match[2]));
+    const match = /^(\d+(?:\.\d+)?)([BKMG])?$/.exec(value);
+    assert.ok(match && (match[2] || /^\d+$/.test(match[1])), 'Unknown native size');
+    const result = Math.round(Number(match[1]) * 1024 ** 'BKMG'.indexOf(match[2] ?? 'B'));
     assert.ok(Number.isSafeInteger(result), 'Native size overflow');
     return result;
   };
@@ -38,10 +38,21 @@ async function collectRetainedNativeMemory(targets, execute = require('node:util
   const report = { diagnostic: true, gateEligible: false, scope: 'After all timed measurements; native region residency is not RSS or additive physical memory. No forced GC or RSS subtraction.', processes: [] };
   for (const target of targets) {
     const startedAt = Date.now();
+    let stage = 'execute';
     try {
       const { stdout } = await execute('/usr/bin/vmmap', ['-wide', String(target.pid)], { encoding: 'utf8', timeout: 5000, maxBuffer: 4 * 1024 * 1024 });
+      stage = 'parse';
       report.processes.push({ ...target, startedAt, completedAt: Date.now(), ...summarizeRegions(stdout) });
-    } catch { report.processes.push({ ...target, startedAt, completedAt: Date.now(), error: 'nativeMapUnavailableOrInvalid' }); }
+    } catch (error) {
+      // Fixed classification and bounded exit metadata only; never stderr,
+      // exception text, command strings, raw maps, or process paths.
+      report.processes.push({ ...target, startedAt, completedAt: Date.now(), error: 'nativeMapUnavailableOrInvalid', stage,
+        exitCode: Number.isSafeInteger(error?.code) ? error.code : null,
+        timedOut: error?.killed === true && error?.signal === 'SIGTERM',
+        permissionDenied: error?.code === 'EPERM' || error?.code === 'EACCES',
+        outputLimitExceeded: error?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
+      });
+    }
   }
   return report;
 }

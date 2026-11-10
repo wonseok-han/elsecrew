@@ -26,6 +26,23 @@ test('bounds sequential native probes and preserves failure without passing it',
   assert.equal(calls,2);assert.equal(result.gateEligible,false);
   assert.equal(result.processes[0].regions,3);
   assert.equal(result.processes[1].error,'nativeMapUnavailableOrInvalid');
+  assert.equal(result.processes[1].stage,'execute');
   assert.ok(!JSON.stringify(result).includes('private path'));
   await assert.rejects(collectRetainedNativeMemory([{role:'main',pid:-1}], async () => {throw new Error('must not execute');}));
+});
+
+test('distinguishes parse rejection from permission failure without private messages', async () => {
+  const parsed = await collectRetainedNativeMemory([{role:'main',pid:100}], async () => ({stdout:'unknown format'}));
+  assert.equal(parsed.processes[0].stage,'parse');
+  const denied = await collectRetainedNativeMemory([{role:'main',pid:100}], async () => {throw Object.assign(new Error('/private/path'), {code:'EPERM'});});
+  assert.equal(denied.processes[0].stage,'execute');
+  assert.equal(denied.processes[0].permissionDenied,true);
+  assert.ok(!JSON.stringify(denied).includes('/private/path'));
+});
+
+test('native unitless region sizes are integer bytes', () => {
+  const result = summarizeRegions(map.replace('2M 1M 512K 0K','2944 184 64 0'));
+  assert.equal(result.groups[0].virtualBytes,2944+1048576);
+  assert.equal(result.groups[0].residentBytes,184+262144);
+  assert.throws(() => summarizeRegions(map.replace('2M','2.5')));
 });
