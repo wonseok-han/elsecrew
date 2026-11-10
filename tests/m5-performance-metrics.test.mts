@@ -29,7 +29,7 @@ function measurements(): any {
       treeRootMs: 1000, treeExpandMs: 250, fileEditableMs: 1500, inputPaintMs: 50,
       diffSummaryMs: 2000, diffFirstFileMs: 1500, eventPaintMs: 100 }).map(([key, value]) => [key, Array(10).fill(value)])),
     maxima: { appColdMs: 5000, treeDomNodes: 500, mainLongTaskMs: 200, rendererLongTaskMs: 200,
-      idleRssBytes: 400 * MiB, peakRssBytes: 800 * MiB, retainedRssBytes: 120 * MiB },
+      idleRssBytes: 512 * MiB, peakRssBytes: 800 * MiB, retainedRssBytes: 120 * MiB },
     counters: { lostEvents: 0, duplicateEvents: 0, crossChatEvents: 0, reorderedEvents: 0,
       silentOverwrites: 0, unreportedConflicts: 0, survivingTrackedIdentities: 0, unreportedUncertainExits: 0 },
   };

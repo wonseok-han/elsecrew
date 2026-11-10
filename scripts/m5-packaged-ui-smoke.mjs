@@ -157,7 +157,7 @@ try {
       await sleep(250);
     }
     report.uninstrumentedRssBytes = Math.max(...report.memory.map(sample => sample.rssBytes));
-    if (report.uninstrumentedRssBytes > 400 * 1024 * 1024) report.error = 'Uninstrumented RSS limit exceeded';
+    if (report.uninstrumentedRssBytes > 512 * 1024 * 1024) report.error = 'Uninstrumented RSS limit exceeded';
     assert.ok(!stderr.includes('DevTools listening on'), 'Unexpected debugging server');
     persist();
     console.log(JSON.stringify({stage:'MANUAL_QUIT_REQUIRED', root, pid:child.pid, rssBytes:report.uninstrumentedRssBytes}));
@@ -249,7 +249,7 @@ try {
   }
   report.idleRssBytes = Math.max(...report.memory.map(sample => sample.rssBytes));
   if (mainTraceDiagnostic) mainTaskWindowCompleted = true;
-  report.idleRssWithinLimit = report.idleRssBytes <= 400 * 1024 * 1024;
+  report.idleRssWithinLimit = report.idleRssBytes <= 512 * 1024 * 1024;
   report.chromiumProcessesAfter = (await send('SystemInfo.getProcessInfo')).processInfo;
   report.rendererHeapAfter = await send('Runtime.getHeapUsage', {}, sessionId);
   if (memoryLifecycle) {

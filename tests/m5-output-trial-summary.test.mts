@@ -62,7 +62,7 @@ test('combined series requires workload evidence and recomputes memory from raw 
   ]){const r=combinedResult();mutate(r);assert.throws(()=>summarizeOutputTrial(r,{combinedWorkload:true}));}
 });
 test('combined memory failures cannot disappear behind a successful output-only summary',()=>{
-  const r=combinedResult();const high=401*1024*1024;
+  const r=combinedResult();const high=513*1024*1024;
   r.memory.samples[0].totalBytes=high;r.memory.samples[0].processes[0].rssBytes=high;
   r.combinedWorkload.memory={maxima:{idleRssBytes:high,peakRssBytes:high,retainedRssBytes:0},failedMetrics:['idleRssBytes']};
   r.combinedWorkload.failedMetrics=['idleRssBytes'];

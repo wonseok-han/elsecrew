@@ -272,7 +272,7 @@ M5.0 합격 데모는 다음 한 흐름으로 고정한다.
 | 채팅 스트림 | 4 streams × 50 events/s × 60초 = 12,000 events | 유실·중복·cross-chat·순서 역전 0건, event→paint p95 ≤ 100ms |
 | 저장/외부 변경 | 저장과 외부 쓰기 100회 경합 | 무음 덮어쓰기 0건, 충돌을 항상 `file.conflict`로 표면화 |
 | 종료 | fixture child + 분리된 자손 | 정상 종료 시 추적 신원 생존 0건, 미확인은 항상 `recoveryRequired` |
-| 메모리 | cold idle / 모든 큰 fixture 열기 | 전체 RSS idle ≤ 400 MiB, peak ≤ 800 MiB, fixture 닫기 60초 뒤 idle 대비 잔류 ≤ 120 MiB |
+| 메모리 | cold idle / 모든 큰 fixture 열기 | 전체 RSS idle ≤ 512 MiB, peak ≤ 800 MiB, fixture 닫기 60초 뒤 idle 대비 잔류 ≤ 120 MiB |
 | 패키지 | macOS arm64 unpacked / 압축 산출물 | unpacked ≤ 350 MiB, 배포 산출물 ≤ 200 MiB; Windows는 같은 수치를 측정만 하고 기준은 후속 확정 |
 
 입력→paint와 event→paint는 renderer의 `performance.now()` 표식을 사용한다. 프로세스별 메모리와 전체 RSS를 함께 기록하며, 평균만으로 p95 실패를 숨기지 않는다.

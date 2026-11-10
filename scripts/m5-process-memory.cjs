@@ -42,7 +42,7 @@ function summarizeMemory(samples) {
   const peakRssBytes = Math.max(...samples.map(sample => sample.rssBytes));
   const retainedRssBytes = Math.max(0, Math.max(...retained) - idleRssBytes);
   const maxima = { idleRssBytes, peakRssBytes, retainedRssBytes };
-  const limits = { idleRssBytes: 400 * 1024 ** 2, peakRssBytes: 800 * 1024 ** 2, retainedRssBytes: 120 * 1024 ** 2 };
+  const limits = { idleRssBytes: 512 * 1024 ** 2, peakRssBytes: 800 * 1024 ** 2, retainedRssBytes: 120 * 1024 ** 2 };
   return { maxima, failedMetrics: Object.keys(limits).filter(key => maxima[key] > limits[key]) };
 }
 // ps lstart is only second-resolution. This retains observed orphans without

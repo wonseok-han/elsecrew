@@ -170,7 +170,7 @@ app.on('browser-window-created', (_event, window) => {
           clearInterval(memoryTimer);
           if (memoryError) throw memoryError;
           const idleRssBytes = Math.max(...memorySamples.map(sample => sample.rssBytes));
-          memoryReport = { status: idleRssBytes > 400 * 1024 ** 2 ? 'FAIL' : 'NOT_READY', maxima: { idleRssBytes },
+          memoryReport = { status: idleRssBytes > 512 * 1024 ** 2 ? 'FAIL' : 'NOT_READY', maxima: { idleRssBytes },
             scope: 'One native development startup; no loaded/retained measurement or packaged gate' };
           // Collect after the RSS window; heap figures are diagnostic subsets,
           // not replacements for the process-tree RSS acceptance metric.
@@ -190,7 +190,7 @@ app.on('browser-window-created', (_event, window) => {
           };
           const screenshot = path.join(root, 'idle.png');
           fs.writeFileSync(screenshot, (await window.webContents.capturePage()).toPNG());
-          finish(idleRssBytes > 400 * 1024 ** 2 ? new Error('native idle memory exceeds limit') : null, { screenshot, idleOnly: true });
+          finish(idleRssBytes > 512 * 1024 ** 2 ? new Error('native idle memory exceeds limit') : null, { screenshot, idleOnly: true });
           return;
         }
         memoryPhase = 'loaded';

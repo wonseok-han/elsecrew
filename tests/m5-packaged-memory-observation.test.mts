@@ -4,7 +4,7 @@ import { packagedMemoryObservation } from '../scripts/m5-packaged-memory-observa
 import { summarizeMemory } from '../scripts/m5-process-memory.cjs';
 
 function observation() {
-  const samples = [{phase:'idle', rssBytes:450 * 1024 ** 2},
+  const samples = [{phase:'idle', rssBytes:513 * 1024 ** 2},
     {phase:'loaded', rssBytes:700 * 1024 ** 2}, {phase:'retained', rssBytes:400 * 1024 ** 2}];
   return {
     memoryLifecycle: {samples, ...summarizeMemory(samples), closedAtMs:1000,
@@ -16,7 +16,7 @@ function observation() {
 
 test('complete combined observation retains known memory failure', () => {
   const result = observation();
-  assert.equal(packagedMemoryObservation(result, true).idleRssBytes, 450 * 1024 ** 2);
+  assert.equal(packagedMemoryObservation(result, true).idleRssBytes, 513 * 1024 ** 2);
   assert.deepEqual(result.memoryLifecycle.failedMetrics, ['idleRssBytes']);
 });
 test('combined observation rejects missing coexistence or wrong fixtures', () => {

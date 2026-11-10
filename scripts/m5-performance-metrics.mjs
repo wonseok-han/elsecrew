@@ -14,7 +14,7 @@ const TIMING_LIMITS = Object.freeze({
 });
 const MAXIMUM_LIMITS = Object.freeze({
   appColdMs: 5000, treeDomNodes: 500, mainLongTaskMs: 200,
-  rendererLongTaskMs: 200, idleRssBytes: 400 * MiB,
+  rendererLongTaskMs: 200, idleRssBytes: 512 * MiB,
   peakRssBytes: 800 * MiB, retainedRssBytes: 120 * MiB,
 });
 const ZERO_COUNTERS = ["lostEvents", "duplicateEvents", "crossChatEvents", "reorderedEvents",

@@ -1,6 +1,9 @@
 # M5 성능 측정
 
-**잔류 native 메모리 진단:** 명시 QA 앱의 `--combined-workload --retained-native-memory`는 RSS·입력·long-task 수집과 판정을 끝낸 뒤 main/renderer/GPU에만 `vmmap -wide`를 순차 실행한다(각5초/4MiB 상한). 결과에는 주소·파일경로 없이 종류별 virtual/resident/dirty/swapped 합과 main V8 통계를 남긴다. 실패는 고정 오류로 보존하고 제품 PASS 근거로 쓰지 않는다. 영역 resident 합은 RSS나 물리메모리 합계가 아니며 기존400/800/120MiB 판정에서 차감하지 않는다. 강제GC·heap snapshot은 실행하지 않는다.
+**현행 메모리 예산 — 2026-11-10 사용자 승인:** 유휴512MiB, 부하최대800MiB, 닫기60초뒤 잔류증분120MiB. 입력 및 나머지 안전/성능 기준은 유지한다. 아래 날짜별400MiB 기록과 미승인 재검토안은 당시 이력이며 이 결정이 우선한다. 과거 진단의 FAIL 원시결과는 다시 쓰지 않고 새 기준에서 정식 검증한다.
+
+
+**잔류 native 메모리 진단:** 명시 QA 앱의 `--combined-workload --retained-native-memory`는 RSS·입력·long-task 수집과 판정을 끝낸 뒤 main/renderer/GPU에만 `vmmap -wide`를 순차 실행한다(각5초/4MiB 상한). 결과에는 주소·파일경로 없이 종류별 virtual/resident/dirty/swapped 합과 main V8 통계를 남긴다. 실패는 고정 오류로 보존하고 제품 PASS 근거로 쓰지 않는다. 영역 resident 합은 RSS나 물리메모리 합계가 아니며 현행512/800/120MiB 판정에서 차감하지 않는다. 강제GC·heap snapshot은 실행하지 않는다.
 
 `--file-retention-only --file-retention-with-output-diff`는 같은 비시각 진단에500개 변경 요약·첫 파일diff와 가짜 실행1개를 추가한다. 출력 원장3000개·sealed와 정상 종료는 별도 확인한다. UI에 출력이 나타난 관측과 전체3000개가 화면에서 소비된 증거는 다르며, 이 모드는 모든 출력 표시·4개 스트림·전체combined 성능 시험을 대체하지 않는다.
 
