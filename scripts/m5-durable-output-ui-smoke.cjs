@@ -556,6 +556,14 @@ app.on('browser-window-created', (_event, window) => {
       }
       if (mainLongTaskMs > 200) { finish(new Error('Main long-task limit exceeded')); return; }
       if (rendererLongTaskMs > 200) { finish(new Error('Renderer long-task limit exceeded')); return; }
+      // Timed RSS, input, and trace collection are complete before vmmap runs.
+      if (packagedQa && combined && process.argv.includes('--retained-native-memory')) {
+        const targets = [{role:'main',pid:process.pid}, {role:'renderer',pid:window.webContents.getOSProcessId()}];
+        const gpu = app.getAppMetrics().find(metric => metric.type === 'GPU');
+        if (gpu) targets.push({role:'gpu',pid:gpu.pid});
+        report.retainedNativeMemory = await require('./m5-retained-native-memory.cjs').collectRetainedNativeMemory(targets);
+        report.retainedMainHeap = require('node:v8').getHeapStatistics();
+      }
       finish(combinedFailures.length ? new Error('Combined workload limits exceeded: ' + combinedFailures.join(', ')) : undefined);
     } catch (error) {
       sampleWindow('assertion-failed');

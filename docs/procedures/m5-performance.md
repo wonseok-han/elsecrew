@@ -1,5 +1,7 @@
 # M5 성능 측정
 
+**잔류 native 메모리 진단:** 명시 QA 앱의 `--combined-workload --retained-native-memory`는 RSS·입력·long-task 수집과 판정을 끝낸 뒤 main/renderer/GPU에만 `vmmap -wide`를 순차 실행한다(각5초/4MiB 상한). 결과에는 주소·파일경로 없이 종류별 virtual/resident/dirty/swapped 합과 main V8 통계를 남긴다. 실패는 고정 오류로 보존하고 제품 PASS 근거로 쓰지 않는다. 영역 resident 합은 RSS나 물리메모리 합계가 아니며 기존400/800/120MiB 판정에서 차감하지 않는다. 강제GC·heap snapshot은 실행하지 않는다.
+
 `--file-retention-only --file-retention-with-output-diff`는 같은 비시각 진단에500개 변경 요약·첫 파일diff와 가짜 실행1개를 추가한다. 출력 원장3000개·sealed와 정상 종료는 별도 확인한다. UI에 출력이 나타난 관측과 전체3000개가 화면에서 소비된 증거는 다르며, 이 모드는 모든 출력 표시·4개 스트림·전체combined 성능 시험을 대체하지 않는다.
 
 **실제 파일 수명 진단:** QA 패키지의 `--file-retention-only`는 combined와 함께 사용할 수 없다. 전체 성능 시험과 동일한 5MiB·100,000줄 임시 파일과 채팅1개를 만들고 실제 bridge/sidecar·Monaco로 연 뒤 정상 프로젝트 화면 해제와 heap snapshot을 수행한다. 파일은 별도 생성 프로세스에서 만들어 QA main에 본문 캐시를 남기지 않는다. 이전 단일행 진단 결과와 구분하며 report.retentionFixture에 크기·줄 수를 기록한다. 모델 호출·사용자 인증은 없고 창은 숨긴다. 기능 성공도 전체 status는 `NOT_READY`, gateEligible는 false다. 실제 표시·입력·RSS·출력/diff 공존 검증으로 인용하지 않는다. 덤프에 원문이 없다는 관측은 snapshot의 GC 가능성·단일 시나리오 범위 안에서만 해석한다.

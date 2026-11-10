@@ -57,7 +57,7 @@ try {
   fs.mkdirSync(path.join(source,'scripts'));
   for (const name of ['m5-durable-output-ui-smoke.cjs','m5-durable-output-observer.cjs',
     'm5-live-output-latency.cjs','m5-stdio-observer.cjs','m5-output-generation.cjs',
-    'm5-combined-output-workload.cjs','m5-process-memory.cjs','m5-packaged-large-project-probe.mjs','m5-packaged-diff-probe.mjs','m5-packaged-long-task-probe.mjs','m5-main-task-trace.mjs','m5-main-task-session.mjs','m5-editor-input-probe.mjs']) fs.copyFileSync(path.join(repo,'scripts',name),path.join(source,'scripts',name));
+    'm5-combined-output-workload.cjs','m5-retained-native-memory.cjs','m5-process-memory.cjs','m5-packaged-large-project-probe.mjs','m5-packaged-diff-probe.mjs','m5-packaged-long-task-probe.mjs','m5-main-task-trace.mjs','m5-main-task-session.mjs','m5-editor-input-probe.mjs']) fs.copyFileSync(path.join(repo,'scripts',name),path.join(source,'scripts',name));
   fs.mkdirSync(path.join(source,'tests'));
   for (const name of ['m5-native-diff-fixture.cjs','m5-renderer-performance-fixture.cjs'])
     fs.copyFileSync(path.join(repo,'tests',name),path.join(source,'tests',name));
