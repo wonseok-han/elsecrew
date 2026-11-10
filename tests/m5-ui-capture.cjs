@@ -55,6 +55,22 @@ app.whenReady().then(async () => {
   await window.webContents.executeJavaScript("[...document.querySelectorAll('button')].find(b => b.textContent === '프로젝트 선택' && !b.disabled).click()");
   await wait("document.querySelector('.m5-file-row') && !document.querySelector('.m5-toolbar-actions button:last-child').disabled");
   await capture(window, 'product-workbench');
+  await window.webContents.executeJavaScript("document.querySelector('.m5-first-chat > button').click()");
+  await wait("document.querySelector('.m5-new-chat-dialog')?.open");
+  await window.webContents.executeJavaScript(`(() => {
+    const dialog = document.querySelector('.m5-new-chat-dialog');
+    const form = dialog.querySelector('form');
+    const team = dialog.querySelector('.m5-chat-team-details');
+    if (team.open || form.getBoundingClientRect().top >= team.getBoundingClientRect().top) throw new Error('new chat must prioritize goal input');
+    if (form.querySelector('button').getBoundingClientRect().bottom > innerHeight) throw new Error('new chat action outside viewport');
+  })()`);
+  await capture(window, 'product-new-chat');
+  await window.webContents.executeJavaScript("document.querySelector('.m5-new-chat-dialog .m5-chat-team-details summary').click()");
+  await wait("document.querySelector('.m5-new-chat-dialog .m5-new-chat-team')?.getClientRects().length > 0");
+  await capture(window, 'product-new-chat-team');
+  await window.webContents.executeJavaScript("document.querySelector('.m5-new-chat-dialog header button').click()");
+  await wait("!document.querySelector('.m5-new-chat-dialog')?.open");
+
   await window.webContents.executeJavaScript("[...document.querySelectorAll('button')].find(b => b.textContent === '역할과 모델').click()");
   await wait("document.querySelector('.m5-settings-dialog')?.open");
   await capture(window, 'product-settings');

@@ -642,3 +642,28 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-diff-help p { margin: 8px 0 0; }
 .m5-diff-details .m5-diff-lines { border-radius: 0; border-left: 0; border-right: 0; }
 .m5-file-search p { margin: 6px 0 0; }
+
+/* Goal first, with project role configuration available on demand. */
+.m5-new-chat-dialog { width: min(680px, calc(100vw - 40px)); max-height: calc(100vh - 40px); overflow: auto; border-color: var(--m5-border-strong); }
+.m5-new-chat-dialog > p { margin: 12px 0; font-size: 13px; color: var(--m5-muted); }
+.m5-new-chat-dialog .m5-new-chat-form { margin-top: 16px; padding: 16px; border: 1px solid var(--m5-border-strong); border-radius: 10px; background: var(--m5-bg); }
+.m5-new-chat-dialog .m5-new-chat-form > input { min-width: 0; width: 100%; box-sizing: border-box; }
+.m5-chat-team-details { margin-top: 20px; border-top: 1px solid var(--m5-border); padding-top: 14px; color: var(--m5-muted); font-size: 12px; }
+.m5-chat-team-details > summary { cursor: pointer; font-weight: 600; }
+.m5-chat-team-details > p { line-height: 1.6; }
+.m5-chat-team-details .m5-team-preview { margin-top: 14px; }
+.m5-chat-team-details .m5-new-chat-team { margin: 14px 0; }
+.m5-first-chat { padding: 24px 20px; max-width: 640px; margin: auto; }
+.m5-first-chat h2 { font-size: 21px; letter-spacing: -.4px; }
+.m5-first-chat > p { font-size: 13px; }
+.m5-goal-examples { gap: 6px; margin-top: 20px; }
+.m5-goal-examples button { padding: 10px 12px; font-size: 12px; line-height: 1.6; background: transparent; border-color: var(--m5-border); }
+.m5-goal-examples button:hover:enabled { background: var(--m5-raised); border-color: var(--m5-border-strong); }
+.m5-timeline > header { align-items: flex-start; padding-bottom: 14px; border-bottom: 1px solid var(--m5-border); }
+.m5-timeline > header > div:first-child { min-width: 0; }
+.m5-timeline > header h2 { font-size: 16px; line-height: 1.5; overflow-wrap: anywhere; }
+.m5-run-actions { flex-shrink: 0; }
+.m5-agent-runs { border-color: var(--m5-border); background: var(--m5-bg); color: var(--m5-text); }
+.m5-agent-runs article { flex-wrap: wrap; color: var(--m5-muted); }
+.m5-chat-review, .m5-message-code { border-color: var(--m5-border-strong); }
+.m5-message-code, .m5-message-code > header { background: var(--m5-bg); }
