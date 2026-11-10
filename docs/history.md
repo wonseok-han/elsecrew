@@ -4,6 +4,20 @@
 
 ### 2026-11-10 · by GPT-6
 
+- 기준33684057에서 앱 자체 업데이트 구현 시작: 네이티브 앱 메뉴(ko/en), 명시 확인/다운로드, 최신/진행/실패/다운로드 완료 상태, 재시작 동의와 기존 안전 종료 확인을 연결했다. renderer가 배포 URL이나 실행 파일을 지정하는 경로는 없다. unsigned 개발판은 고정 feed=null·서명 플래그=false로 배포 준비 안내만 표시한다. 서명/실제 배포 활성화·업데이트 실전 합격 또는 설치본 교체를 주장하지 않는다.
+- 검증: updater/bridge 71개, security/scaffold 17개 PASS. 업데이트 모듈 TypeScript 검사·production main 번들·diff-check PASS. 첫 security 실행은 새 동적 import를 시험 환경이 지원하지 않아 실패했고 static import와 별도 메뉴 mock으로 수정 후 통과했다. 독립 읽기 전용 검토자1명은 종료·복구 경계 차단 결함 없음으로 판정했다. 실제 서버/서명 패키지 업데이트 시험은 미완료다.
+- PM형 AI 오케스트레이터→기획/디자인/개발/검토 담당 에이전트 위임→최종 결과 제공을 사용자 확정 제품 정의로 제안서에 추가했다. 기존 역할 버튼은 중간 구현이며 제품 PM 구현 완료로 보지 않는다.
+- 더미 프로젝트 정리 조사: 실행하던 Hello Agent에 정상 종료를 요청했고 readonly DB 조회에서 등록된30개가 자체 hello-agent-live/approved 시험 경로임을 확인했다. 아직 삭제하지 않았다. 프로젝트 목록만 SQL 삭제하면 원장/복구 결속을 훼손할 수 있어 안전한 목록 제거와 작업 복사본 정리는 후속이다. 인증정보 변경·모델 호출·main 병합·push 없음.
+- 다음: 서명된 배포 채널/설치 형식 결정과 실제 업데이트 검증, 더미 프로젝트 안전 정리, PM 오케스트레이션 실행 계약 및 구현. 설치본에는 이번 소스 변경을 아직 반영하지 않았다.
+
+### 2026-11-10 · by GPT-6
+
+- 사용자 요청으로 Electron 앱 자체 업데이트를 필수 요구사항으로 제안서 확정 결정에 기록했다. 구현은 아직 없으며 공급자 업데이트와 구분한다. 서명·배포 채널·적용 동의/실패 복구 상세는 별도 설계 사항이고 이번에 다운로드·게시·앱 교체를 추가 수행하지 않았다.
+- Orca 공식 https://www.onorca.dev/docs/cli/orchestration 및 https://github.com/stablyai/orca/blob/main/skill-guides/orchestration.md 를 확인했다. 서로 다른 worker agent/model 지정·coordinator inbox·결과 회신/질문·작업 의존성이 문서화돼 있어 “Orca에 이종 에이전트 AI 감독 기능이 없다”는 차별화 전제는 성립하지 않는다. 실험적 패널/스위치 일시 비가용은 문서상 한계이며 사용자 설치본 런타임 시험은 하지 않았다.
+- 현재 M5 startAgent와 UI 역할 버튼을 대조해 사용자 역할별 실행과 제품 AI coordinator를 구분했다. 개발용 서브에이전트 운영을 제품 기능으로 주장하지 않는다. 초보자 목표 중심 자동 위임·검토/재작업·명확한 통제의 차별화는 현재 제안으로 기록했다. 검증은 공식 출처/소스 대조·diff-check, 새 runtime 시험 없음.
+
+### 2026-11-10 · by GPT-6
+
 - 사용자 기존 앱 반영 요청으로 clean cd5878c0를 macOS arm64 제품 패키지로 빌드했다. /Applications와 ~/Applications에는 별도 Hello 앱이 없고 기존 대상은 out/hello-agent-darwin-arm64/hello-agent.app이었다. 교체 전 해당 앱/sidecar 실행 없음 확인, Forge live guard를 유지한 package 성공 및 package smoke PASS. 증거 .artifacts/m5-ui-installed-2026-11-10/{package,package-smoke}.log.
 - 같은 경로의 앱을 정상 실행했고 PID44249와 전용 sidecar44253이 새 경로에서 실행됨을 확인했다. 로그인/프로젝트 데이터는 삭제·변경하지 않았으며 모델 호출·사용자 프로젝트 작업은 하지 않았다. 기존 앱을 켜 둔 채 교체하거나 복제 설치본을 추가하지 않았다.
 - 앱 내 업데이트 질문: 현재 Electron main/renderer에 autoUpdater/checkForUpdates 연결이 없다. 기존 Tauri src/App.tsx에는 check/downloadAndInstall/relaunch가 있으나 M5 Electron 앱으로 이관되지 않았다. 공급자 Codex/Claude 설치·업데이트와 앱 자체 업데이트를 구분해 설명했다. 앱 자체 업데이트 구현은 이번 요청 범위에 추가하지 않았다. main 병합/push 없음.
@@ -201,6 +215,8 @@
 - 위저드 6단계: 에이전트 선택 → 진단 → 설치 → 로그인 → 첫 프로젝트 → 졸업식
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **2026-11-10 제품 요구/경쟁 확인:** Electron 앱 자체 업데이트는 필수이며 네이티브 메뉴·다운로드·안전 종료 후 설치 소스 연결을 구현했다. 서명된 배포 피드 미설정으로 비활성이고 실제 업데이트 검증은 미완료다. Orca 공식 orchestration은 이종 공급자 worker 감독을 문서화하므로 해당 기능 부재를 차별화 근거로 쓰지 않는다. 우리 M5의 사용자 역할별 실행과 제품 AI coordinator 구현은 구분한다. 상세는 M5 제안서 말미.
 - **원본/관리폴더 겹침(2026-11-06)**: snapshot 생성은 source 내부 managed root를 준비기록/폴더생성 전에 거절해야 한다. durable Windows 비교는 native verbatim/protocol 혼용을 피하되 원본 삭제 후 standalone view를 위해 원본 재open은 요구하지 않는다. 로컬 회귀/독립 검토를 통과한 별도수정이며 Windows native 추가확인은 남는다.
 - **Windows 전체 통합 진단 후보(2026-11-06)**: d1071b95까지 명시 설치Git/임시 프로젝트의 선택·동의·실행·철회와 snapshot→review/token→scheduler 반영/복원→SQLite재열기 opt-in을 연결했다. 테스트 전용 manager Git허용은 제품에 컴파일되지 않으며 독립 검토 차단결함없음. native 실행은 아직 미확인, 새 CI 공개 범위 승인이 필요하다. 이전75 PASS에 포함하지 않는다.
 - **Windows 일반 파일 재관측(2026-11-06)**: cap-primitives3.4.6의 maybe_dir는 일반 파일에도 FILE_SHARE_DELETE를 제거한다. retained DELETE handle과 병존하는 writer read-only rebind는 부모 상대 native FILE_OPEN/share7/no-follow 및 열린 객체 종류/신원 검사를 사용한다. mutation 보호 handle은 유지한다. CI42155540808에서 전용 회귀 포함75개 통과; 전체 반영/복원 거래 검증과 구분한다.

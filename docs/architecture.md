@@ -190,6 +190,8 @@
 
 ## 2. 시스템 구성
 
+M5 앱 자체 업데이트의 소스 연결은 `electron/app-update{,-menu}.ts`와 main 수명주기에 있다. 네이티브 앱 메뉴에서 명시적으로 확인·다운로드하고, 다운로드 완료 후 저장 안내/재시작 동의를 받아 기존 sidecar 안전 종료 확인이 성공한 경우에만 Electron `quitAndInstall`을 호출한다. 복구 차단·종료 오류는 설치 권한이 아니다. 현재 고정 배포 피드=null·서명 패키지 플래그=false이며 개발 앱에는 배포 준비 안내만 표시한다. 서명된 macOS 배포물·HTTPS 피드·실제 이전 버전→새 버전 시험은 미완료이고 Windows ZIP 자동 업데이트는 활성화하지 않는다. 공급자 설치/업데이트와 별도 기능이다. [Electron 공식 요구사항](https://www.electronjs.org/docs/latest/api/auto-updater)을 따른다.
+
 현재 배포 앱은 Tauri이고, M5 전환 골격은 같은 저장소에서 별도 Electron 진입점과 공용 Rust 안전 코어로 구성된다. 아직 Electron이 기본 실행·배포 경로를 대체하지는 않았다.
 
 ```

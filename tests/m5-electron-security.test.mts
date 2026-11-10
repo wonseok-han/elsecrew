@@ -347,6 +347,7 @@ function moduleFor(
   },
 ) {
   if (specifier === "electron") return fakes.electron;
+  if (specifier === "./app-update-menu.ts") return { installAppUpdateMenu() {} };
   if (specifier.endsWith("git-selection-v1.ts")) return gitSelectionContract;
   if (specifier === "./git-selection.ts") return {
     GitSelectionStore: class {

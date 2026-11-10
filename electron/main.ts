@@ -1,3 +1,4 @@
+import { installAppUpdateMenu } from "./app-update-menu.ts";
 import { GitPreparationClient, isGitPreparation, WINDOWS_GIT_PREPARATION_ENABLED } from "./git-preparation.ts";
 import { GitSelectionStore } from "./git-selection.ts";
 import { GIT_SELECTION_CHANNEL, validateGitSelectionAction, validateGitSelection } from "../src/m5/contracts/git-selection-v1.ts";
@@ -67,13 +68,19 @@ let mainWindow: BrowserWindow | undefined;
 let sidecar: SidecarClientV1 | undefined;
 let gitPreparation: GitPreparationClient | undefined;
 const eventCredit = new EventCreditV1((error) => sidecar?.failConsumerTooSlow());
+let pendingUpdateInstall: (() => void) | undefined;
 const quitCoordinator = new QuitCoordinatorV1({
   prepareSidecarQuit: () => {
     if (!sidecar) return Promise.reject(new Error("sidecar was not started"));
     return sidecar.prepareQuit();
   },
   failedBeforeReady: () => sidecar?.failedBeforeReady ?? false,
-  allowProcessExit: () => app.quit(),
+  allowProcessExit: (kind) => {
+    const install = pendingUpdateInstall;
+    pendingUpdateInstall = undefined;
+    if (kind === "clean" && install) install();
+    else app.quit();
+  },
   notifyQuitBlocked: async (reason) => {
     gitPreparation?.reopen();
     const korean = app.getLocale().toLowerCase().startsWith("ko");
@@ -528,6 +535,11 @@ async function createMainWindow() {
 app.whenReady().then(async () => {
   await protocol.handle(APP_SCHEME, serveAppAsset);
   registerIpcHandlers();
+  installAppUpdateMenu(async (install) => {
+    pendingUpdateInstall = install;
+    try { return (await prepareQuit()).safeToQuit; }
+    finally { pendingUpdateInstall = undefined; }
+  });
   await createMainWindow();
   sidecar ??= startSidecar();
 
