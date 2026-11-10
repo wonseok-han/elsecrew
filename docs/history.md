@@ -4,6 +4,12 @@
 
 ### 2026-11-10 · by GPT-6
 
+- 프로젝트 폴더 선택 취소: preload에서 DOMException을 던지고 renderer에서 instanceof Error/AbortError로 판별하던 경계를 제거했다. main의 명시 cancelled 결과를 preload가 null로 반환하고 controller는 상태 변경·snapshot 생성 전에 반환한다. 기존 AbortError 호환 처리는 유지한다. 일반 객체 오류는 문자열 message를 사용하고 없는 경우 고정 진단으로 표시해 [object Object] 노출을 막는다.
+- 프로젝트 헤더의 Elsecrew 문구를 제거하고 사이드바 상단에 독립 브랜드로 표시한다. 접힌 사이드바는 E와 전체 이름 접근성 라벨을 제공한다.
+- 검증: TypeScript·renderer build·controller66개·Electron bridge66개·Chromium2개·diff check PASS. 취소 후 기존 상태 보존, 객체 오류 message, 축소 브랜드/상단 중복 제거를 확인했다. 실제 설치 앱의 네이티브 선택창 재시험 및 재패키징은 아직 남았다. 사용자 프로젝트/인증 변경·모델 호출·push 없음.
+
+### 2026-11-10 · by GPT-6
+
 - 팝업 외부 클릭 닫힘: 공통 처리에서 누락된 사이드바 프로젝트 ⋯를 포함했다. pointerdown을 capture 단계에서 받아 내부에서 전파를 막는 편집기 등 바깥 영역도 닫힘을 처리한다. 메뉴 내부 클릭은 유지하며 기존 Escape 닫기를 유지한다. 일반 설명용 details와 확인 대화상자는 대상에 추가하지 않았다.
 - 검증: TypeScript·renderer build·Chromium2개·diff check PASS. 메뉴 내부 유지/전파 중단된 외부 클릭 닫힘을 검사했다. 초기 시험은 홈에 없는 dock을 선택해 실패하여 실제 표시되는 사이드바 제목 대상으로 수정했다. 설치 앱 반영은 아직 남아 있다.
 

@@ -1750,7 +1750,7 @@ test("main, preload, and package boundary retain fixed channels, origin checks, 
   assert.match(main, /dialog\.showOpenDialog/);
   assert.match(main, /properties: \["openDirectory"\]/);
   assert.match(main, /return \{ outcome: "cancelled" \}/);
-  assert.match(preload, /new DOMException\("Project selection cancelled", "AbortError"\)/);
+  assert.match(preload, /if \(isProjectPickerCancelled\(result\)\) return null/);
   assert.match(preload, /validateProjectIdentityV1\(result\)/);
   assert.doesNotMatch(preload, /openProject:\s*\([^)]*input/);
   assert.doesNotMatch(preload, /selectedPath/);

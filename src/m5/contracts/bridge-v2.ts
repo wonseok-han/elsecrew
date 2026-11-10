@@ -37,7 +37,7 @@ export const M5_BRIDGE_V2_METHODS = [
 
 export type M5BridgeV2 = Omit<M5BridgeV1, "version"> & {
   readonly version: 2;
-  openProject(): Promise<ProjectIdentityV1>;
+  openProject(): Promise<ProjectIdentityV1 | null>;
   getProjectTree(input: {
     projectId: string;
     parentPath: string;

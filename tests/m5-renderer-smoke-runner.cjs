@@ -209,6 +209,8 @@ app.whenReady().then(async () => {
     railToggle.click();
     await ${waitFor("document.querySelector('.m5-project-rail').getBoundingClientRect().width < 100", "user collapses project rail")};
     if (rail.getBoundingClientRect().width > 100 || railToggle.getAttribute('aria-expanded') !== 'false') throw new Error('project rail not compact');
+    if (rail.querySelector('.m5-rail-brand')?.textContent !== 'E') throw new Error('compact app identity missing');
+    if (document.querySelector('.m5-toolbar .m5-eyebrow')) throw new Error('duplicate toolbar app identity');
     const compactHeading = rail.querySelector('h2');
     const compactRefresh = rail.querySelector('.m5-project-refresh');
     if (compactHeading.textContent !== '프로젝트' || compactHeading.scrollWidth > compactHeading.clientWidth) throw new Error('compact project heading overflows');

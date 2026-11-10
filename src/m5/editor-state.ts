@@ -251,6 +251,7 @@ export class ProjectEditorController {
     const controllerGeneration = this.#controllerGeneration;
     try {
       const project = await open();
+      if (project === null) return;
       if (!this.#isLiveGeneration(controllerGeneration) || selection !== this.#selectionGeneration) return;
       if (this.#snapshotCreationBlocked) return;
       if (this.#actionBlocked) return;
@@ -1133,7 +1134,10 @@ function sameWorkspace(left: ChatWorkspaceRefV1 | null | undefined, right: ChatW
 }
 
 function errorDetail(message: EditorErrorKey, error: unknown): { message: string; messageKey: EditorErrorKey; technicalDetail: string } {
-  const technicalDetail = error instanceof Error ? error.message : String(error);
+  const technicalDetail = error instanceof Error ? error.message
+    : error && typeof error === "object"
+      ? (typeof (error as { message?: unknown }).message === "string" ? (error as { message: string }).message : "Unexpected project operation error")
+      : String(error);
   return { message: ko[message], messageKey: message, technicalDetail: technicalDetail.slice(0, 2048) };
 }
 

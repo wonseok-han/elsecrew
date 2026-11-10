@@ -280,7 +280,6 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       <ProjectCatalog rail settingsAction={<button type="button" className="m5-secondary m5-open-preferences" disabled={settingsOpen || newChatOpen || appDefaultsOpen} onClick={() => setPreferencesOpen(true)} title={t("m5.preferences.title")} aria-label={t("m5.preferences.title")}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"><path d="m10 3-.6 2.4-2 .9L5 5.6 3 9l1.8 1.7v2.6L3 15l2 3.4 2.4-.7 2 .9L10 21h4l.6-2.4 2-.9 2.4.7 2-3.4-1.8-1.7v-2.6L21 9l-2-3.4-2.4.7-2-.9L14 3Z"/><circle cx="12" cy="12" r="3"/></svg><span>{t("m5.preferences.title")}</span></button>} onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} onHasProjects={setHasSavedProjects} ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
       <header className={`m5-toolbar${snapshot.project ? " m5-toolbar-project" : ""}`}>
         <div>
-          <p className="m5-eyebrow">{t("m5.shell.eyebrow")}</p>
           <h1>{snapshot.project?.name ?? t(hasSavedProjects ? "m5.home.welcome" : "m5.shell.start")}</h1>
           <p className="m5-subtitle">
             {t(snapshot.project ? "m5.shell.active" : "m5.shell.intro")}

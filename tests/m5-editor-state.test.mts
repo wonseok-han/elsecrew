@@ -1871,3 +1871,26 @@ test("tree branch reads do not navigate and reject responses after context dispo
     await assert.rejects(read, /Tree context changed/);
   } finally { controller.dispose(); }
 });
+
+ test("native picker null cancellation preserves project and avoids snapshot creation", async () => {
+  const bridge = new FakeBridge();
+  const controller = new ProjectEditorController(bridge);
+  controller.start();
+  await controller.chooseProject();
+  const before = controller.snapshot();
+  bridge.calls.length = 0;
+  Object.assign(bridge, { openProject: async () => null });
+  await controller.chooseProject();
+  assert.equal(controller.snapshot(), before);
+  assert.deepEqual(bridge.calls, []);
+  controller.dispose();
+ });
+ test("plain bridge errors show their message instead of object coercion", async () => {
+  const bridge = new FakeBridge();
+  Object.assign(bridge, { openProject: async () => { throw { message: "Project cannot be opened" }; } });
+  const controller = new ProjectEditorController(bridge);
+  controller.start();
+  await controller.chooseProject();
+  assert.equal(controller.snapshot().error?.technicalDetail, "Project cannot be opened");
+  controller.dispose();
+ });

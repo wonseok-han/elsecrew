@@ -56,7 +56,7 @@ const bridge: M5BridgeV8 = Object.freeze({
   onSidecarEvent: (listener) => subscribe(sidecarListeners, listener),
   openProject: async () => {
     const result: unknown = await ipcRenderer.invoke(M5_BRIDGE_V2_CHANNELS.projectOpen);
-    if (isProjectPickerCancelled(result)) throw new DOMException("Project selection cancelled", "AbortError");
+    if (isProjectPickerCancelled(result)) return null;
     return validateProjectIdentityV1(result);
   },
   getProjectTree: (input) => ipcRenderer.invoke(M5_BRIDGE_V2_CHANNELS.projectGetTree, validateTreeInput(input)),

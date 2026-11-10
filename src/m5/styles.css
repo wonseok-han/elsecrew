@@ -821,3 +821,5 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-guide-popover { width: min(360px, calc(100vw - 40px)); padding: 12px; }
 .m5-guide-popover .m5-guide-next { padding: 10px; margin-bottom: 10px; }
 .m5-guide-popover ol { grid-template-columns: 1fr; gap: 8px; }
+
+.m5-rail-brand { padding: 4px 8px 18px; font-size: 15px; font-weight: 650; color: var(--m5-text); letter-spacing: -.3px; }
