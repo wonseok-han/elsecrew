@@ -4,6 +4,10 @@
 
 ### 2026-11-10 · by GPT-6
 
+- b6fda19c 앱 반영 완료. 기존 앱 정상 종료·패키지 생성·macOS package smoke PASS. 실제 local-audio-notes 화면에서 이전에 중간에서 잘렸던 requirements-transcription.txt 행과 마지막 server.mjs 행이 세로 잘림 없이 보이는 것을 스크린샷으로 확인했다. 원본/인증 변경·모델 호출·main 병합·push 없음.
+
+### 2026-11-10 · by GPT-6
+
 - 파일 목록이 400px 고정 높이로 잘리고 패널 아래 공간을 쓰지 못하는 UI 결함을 수정했다. 파일 패널은 세로 flex, 검색/경로는 고정 영역, 목록은 남은 높이를 채우는 단일 스크롤 영역으로 변경했다. TypeScript/renderer build·Chromium2개·diff check PASS. 실제 레이아웃의 목록 하단과 패널 하단 일치 및 기존501개 연속 스크롤 회귀를 확인했다. 설치 반영을 이어간다.
 
 ### 2026-11-10 · by GPT-6
