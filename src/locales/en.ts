@@ -709,7 +709,7 @@ export const en: Record<MessageKey, string> = {
   "m5.firstChat.explain": "Explain this project's structure in a way a beginner can understand.",
   "m5.firstChat.plan": "Suggest improvements and a work plan before changing any code.",
   "m5.firstChat.readme": "Read the README and identify guidance that is missing for a first-time user.",
-  "m5.firstChat.exampleHelp": "Examples only fill an empty input. Edit the goal, then choose New chat yourself. Agent execution is started separately inside the chat.",
+  "m5.firstChat.exampleHelp": "Examples only fill an empty input. Review the message, then choose Send to coordinator to start your configured agent.",
   "m5.firstChat.team": "Role settings for new chats",
   "m5.firstChat.teamHelp": "Use Roles and models above to change this project's settings. These settings do not confirm sign-in or model availability.",
   "m5.start.help": "No separate practice project needed. Choose a real project and start with one small task.",

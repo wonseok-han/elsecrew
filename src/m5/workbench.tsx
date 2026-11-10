@@ -395,7 +395,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           <button type="submit" disabled={!admissionReady || !projectDataReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject())}>{t("m5.chat.coordinatorSend")}</button>
         </form>
         <details className="m5-chat-team-details"><summary>{t("m5.firstChat.team")}</summary>
-        {chat.settings && <dl className="m5-new-chat-team">{chat.settings.roles.map(role => <div key={role.roleId}><dt>{t(`m5.roles.${role.roleId}`)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{role.modelSelector}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl>}
+        {chat.settings && <dl className="m5-new-chat-team">{coordinatorRoles(chat.settings.roles).map(role => <div key={role.roleId}><dt>{t(`m5.roles.${role.roleId}`)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{role.modelSelector}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl>}
         <button type="button" className="m5-secondary" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching} onClick={() => openRoleSettings(true)}>{t("m5.firstChat.editTeam")}</button>
         <p>{t("m5.firstChat.editTeamHelp")}</p>
         </details>
@@ -419,7 +419,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         <div className="m5-goal-examples">{(["explain", "plan", "readme"] as const).map(example => <button key={example} type="button" className="m5-secondary" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching || goal.trim().length > 0} onClick={() => { setGoal(t(`m5.firstChat.${example}`)); setNewChatOpen(true); }}>
           {t(`m5.firstChat.${example}`)}
         </button>)}</div><p className="m5-first-chat-note">{t("m5.firstChat.exampleHelp")}</p>
-        {chat.settings && <details className="m5-chat-team-details"><summary>{t("m5.firstChat.team")}</summary><dl className="m5-team-preview">{chat.settings.roles.map(role => <div key={role.roleId}><dt>{t(`m5.roles.${role.roleId}`)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{role.modelSelector}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl><p className="m5-first-chat-note">{t("m5.firstChat.teamHelp")}</p></details>}
+        {chat.settings && <details className="m5-chat-team-details"><summary>{t("m5.firstChat.team")}</summary><dl className="m5-team-preview">{coordinatorRoles(chat.settings.roles).map(role => <div key={role.roleId}><dt>{t(`m5.roles.${role.roleId}`)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{role.modelSelector}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl><p className="m5-first-chat-note">{t("m5.firstChat.teamHelp")}</p></details>}
       </section>} chats={<section className="m5-chat-navigation" aria-label={t("m5.navigation.chats")}>
         <div className="m5-chat-list">{chat.chats.map(item => {
           const selected = chat.activeChat?.chatId === item.chatId;
