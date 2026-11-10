@@ -1,6 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
-Windows CI42315705501은 준비·확인 전달을 통과했으나 실제 반영에서 폴더 lease 공유 잠금 충돌로 실패했다. 승인된 추가 push/CI 3회는 모두 사용했다. macOS G6·Windows 전체 반영/복원·제품 활성화·출시는 미완료다.
+macOS combined 측정은2026-11-10 메모리436/805/잔류증분296MiB로 실패했다. native 원인진단 QA 앱은 준비됐고 화면 유지 응답 대기다. Windows CI42315705501의 실제반영 잠금 충돌 수정은 로컬 완료/native 재검증 대기이며 추가CI 승인3회는 소진됐다. 전체G6·Windows 반영/복원·제품 활성화·출시는 미완료다.
+
+### 2026-11-10 · by GPT-6
+
+- 직전 goal turn은 native 원인진단 구현47748f10으로 progress. clean HEAD에서 별도QA build session90397이exit0/BUILT로 종료됐고 ASAR에 collector 포함을 확인했다. root=/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-output-qa-jr5daV. 앱은 미실행이며 새5분 화면 가용시간 질문을 보냈다. 모델호출/제품out 교체/추가push는 없다.
+- 다음은 해당 앱 --combined-workload --keep-test-visible --retained-native-memory 단회다. 이전 측정의 5분 약속은 소진됐으므로 현재 응답 뒤 실행한다. 기존 V7XtVS와2wFTzY는 이미 정리됐고 준비용QA1개만 남긴다. 결과/프로세스종료/DB clean 확인 뒤 새 임시 산출물도 정리한다. 빌드HEAD 이후 이번 변경은 history뿐이다.
 
 ### 2026-11-10 · by GPT-6
 
