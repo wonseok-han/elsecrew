@@ -4,6 +4,12 @@
 
 ### 2026-11-10 · by GPT-6
 
+- 최신 native 결과의 Memory Tag 의미를 Chromium 공식 page_allocator.h(main blob0711808209459e0e6dda35e75a045b7dd828e92d)에서 확인했다. 253=PartitionAlloc, 254=Chromium, 255=V8 heap pages다. 출처: https://chromium.googlesource.com/chromium/src/+/refs/heads/main/base/allocator/partition_allocator/src/partition_alloc/page_allocator.h . 패키지 Chromium의 정확한 source revision 대조까지 했다는 주장은 하지 않는다.
+- 실제 결과의 renderer tag255 resident69.58MiB/dirty68.1MiB, tag253 resident52.62MiB/dirty44.0MiB; main tag253 resident68.39MiB/dirty29.0MiB와 tag255 resident20.73MiB/dirty20.0MiB를 분리했다. 공유 __TEXT를 더해 ps RSS와 비교하거나 페이지수로 live-object 누수를 단정하지 않는다. .artifacts/m5-native-complete-combined-2026-11-10/allocator-attribution.json에 출처·한계·원시숫자를 보존했다.
+- 이번은 원인 분류를 좁힌 분석이며 제품 최적화/새 runtime PASS는 없다. 다음은 큰 allocator 범주 안에서 실제 유지 객체와 allocator 여유공간을 구분하는 것이다. 강제GC/프로세스 격리 해제/메모리 기준 변경은 하지 않았고 Windows 추가CI는 승인 대기다.
+
+### 2026-11-10 · by GPT-6
+
 - 직전 시험의 입력 161.3ms 중 전달 전 116.2ms와 같은 시기 renderer long-task 53ms를 확인했다. 원인 코드 결속은 없으므로 특정 제품 결함으로 확정하거나 실패를 제거하지 않았다. 최신 clean 479e739a로 QA OEjM5k를 준비(session78671 exit0)한 뒤 사용자의 새 5분 화면 유지 응답으로 단회 실행했다.
 - session76630/PID11318은 exit1·shutdown accepted. 유휴 431.02MiB >400, 최대 742.11MiB <800, 잔류증분 165.59MiB >120, 입력 36.5ms <50이었다. 이번 단회는 유휴/잔류 FAIL이며 이전 입력 실패나 전체 G6를 덮지 않는다. native main8256/renderer7836/GPU6566구간 수집이 모두 성공했다. main JS heap 약16.0MiB; region의 공유 __TEXT와 Memory Tag253/255 등은 RSS와 직접 합산/차감하지 않으며 tag의 allocator 의미는 추가 출처 확인이 필요하다.
 - 증거: .artifacts/m5-native-complete-combined-2026-11-10/{result,build,cleanup}.json. 관측 PID 전부 부재와 DB clean_shutdown_at 확인 후 fixture fzPSiz와 QA OEjM5k를 삭제했다. 이제 실제 부하의 native 구성으로 원인을 좁힐 수 있으며 다음은 allocator/code/shared 영역 구분과 제품 최적화다. 추가 모델 호출·Windows push는 없고 기존 Windows CI 질문은 대기다.
