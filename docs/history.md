@@ -4,6 +4,12 @@
 
 ### 2026-11-10 · by GPT-6
 
+- 직전 턴은 반복 수명 진단69a42d6e로 progress. clean HEAD로 QA를 준비했다. 제한 환경 준비는 fetch실패(JZ6Lka), 다운로드 접근 재시도(session14846)는 BUILT(KWr8oO)였다. 실제 숨김 file-only cycles 실행session27071/PID28148은 exit0·shutdown accepted로 종료했다. 실제 공급자·인증·사용자 프로젝트·화면 가용시간은 사용하지 않았다.
+- 초기 및 세 회차 닫기60초뒤 RSS는335.53→382.12→349.05→333.66MiB다. 매 구간3표본·수집오류/잘림없음. 강제GC/heapsnapshot없이 같은 앱/sidecar/프로젝트/채팅을 재사용했으며 이 파일 경로에서 지속 증가를 관측하지 않았다. 결과는 diagnostic/NOT_READY이며 종합 부하의 잔류165.59MiB 또는G6 실패를 지우지 않는다. 다음 원인분석은 파일 teardown을 반복 수정하기보다 출력·diff·추적 비용의 결합으로 좁힌다.
+- `.artifacts/m5-file-retention-cycles-2026-11-10/{result,build,cleanup}.json`에 증거를 보존했다. 관측PID전부부재·DB clean·shutdown accepted 대조 후 fixtureD0eCKr와 성공/실패QA 두 폴더를 제거했다. 문서/diff 검사 완료. 기준변경·push없음이며 유휴512MiB 제안과 Windows 추가CI 승인은 여전히 대기다.
+
+### 2026-11-10 · by GPT-6
+
 - 직전 턴은 기준 재검토 문서 c9386ccc로 progress였다. 현재 clean 통합 checkout을 확인하고, 독립 진행 가능한 같은 프로세스 반복 파일 수명 진단을 기존 QA에 추가했다. --file-retention-only --file-retention-cycles는 초기/세 회차의 60초 안정화+3초 RSS를 남기며 프로젝트/채팅/작업복사본을 재사용한다. 실제 모델·새 사용자 프로젝트·화면 유지 요청은 필요하지 않다.
 - 반복 모드에서는 heap snapshot을 생략해 수집 자체 GC가 후속 회차를 바꾸지 않도록 했다. 원시 PID별 RSS와 단계·오류·잘림을 보존하며 hidden file-only 진단이므로 전체 G6/누수 부재로 판단하지 않는다. 현재 합격 기준은 그대로다.
 - 검증: Node 구문·diff-check 및 sampler phase/수집 필드 대조. 실제 패키지 실행은 미완료이며 다음은 한 번 빌드·반복 진단 실행 후 정상 종료와 임시 산출물 정리다. Windows 추가 공개/CI와 유휴512MiB 제안은 아직 사용자 결정 대기다.
