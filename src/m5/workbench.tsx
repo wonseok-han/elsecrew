@@ -970,18 +970,22 @@ const DiffDetails = memo(function DiffDetails({ descriptor, text, canOpen, onOpe
     : line;
   return (
     <section className="m5-diff-details" aria-label={t("m5.diff.title")}>
-      <strong>{descriptor.path}</strong>
-      <button type="button" className="m5-secondary" disabled={!canDiscuss} onClick={() => onDiscuss(descriptor.path)}>{t("m5.diff.discuss")}</button>
-      {descriptor.kind !== "deleted" && descriptor.worktreeVersion !== null && <button type="button" className="m5-secondary" disabled={!canOpen} onClick={() => onOpen(descriptor.path)}>{t("m5.diff.openEditor")}</button>}
-      <p>{t(`m5.diff.${descriptor.kind}`)}{descriptor.oldPath ? t("m5.diff.old", { path: descriptor.oldPath }) : ""}</p>
-      {descriptor.kind === "binary" ? <Empty text={t("m5.diff.binaryHelp")} /> : !text ? <Empty text={t("m5.diff.empty")} /> : <>
-        <p>{t("m5.diff.help")}</p>
-        {canDiscuss && <p>{t("m5.diff.lineHelp")}</p>}
-        <div className="m5-diff-mode" role="group" aria-label={t("m5.diff.displayMode")}>
-          <button type="button" aria-pressed={diffMode === "inline"} onClick={() => setDiffMode("inline")}>{t("m5.diff.inline")}</button>
-          <button type="button" aria-pressed={diffMode === "split"} onClick={() => setDiffMode("split")}>{t("m5.diff.split")}</button>
+      <header className="m5-diff-header">
+        <div className="m5-diff-identity"><strong>{descriptor.path}</strong><span>{t(`m5.diff.${descriptor.kind}`)}{descriptor.oldPath ? t("m5.diff.old", { path: descriptor.oldPath }) : ""}</span></div>
+        <div className="m5-diff-actions">
+          <button type="button" className="m5-secondary" disabled={!canDiscuss} onClick={() => onDiscuss(descriptor.path)}>{t("m5.diff.discuss")}</button>
+          {descriptor.kind !== "deleted" && descriptor.worktreeVersion !== null && <button type="button" className="m5-secondary" disabled={!canOpen} onClick={() => onOpen(descriptor.path)}>{t("m5.diff.openEditor")}</button>}
         </div>
-        <label className="m5-diff-wrap"><input type="checkbox" checked={wrapLines} onChange={event => setWrapLines(event.target.checked)} />{t("m5.diff.wrapLines")}</label>
+      </header>
+      {descriptor.kind === "binary" ? <Empty text={t("m5.diff.binaryHelp")} /> : !text ? <Empty text={t("m5.diff.empty")} /> : <>
+        <div className="m5-diff-toolbar">
+          <div className="m5-diff-mode" role="group" aria-label={t("m5.diff.displayMode")}>
+            <button type="button" aria-pressed={diffMode === "inline"} onClick={() => setDiffMode("inline")}>{t("m5.diff.inline")}</button>
+            <button type="button" aria-pressed={diffMode === "split"} onClick={() => setDiffMode("split")}>{t("m5.diff.split")}</button>
+          </div>
+          <label className="m5-diff-wrap"><input type="checkbox" checked={wrapLines} onChange={event => setWrapLines(event.target.checked)} />{t("m5.diff.wrapLines")}</label>
+          <details className="m5-diff-help"><summary>{t("m5.diff.readingHelp")}</summary><p>{t("m5.diff.help")}</p>{canDiscuss && <p>{t("m5.diff.lineHelp")}</p>}</details>
+        </div>
         <div className={`m5-diff-lines${wrapLines ? " m5-diff-lines-wrapped" : ""}${diffMode === "split" ? " m5-diff-split" : ""}`} tabIndex={0} aria-label={t("m5.diff.comparison")}>
           {diffMode === "split" ? <table>
             <colgroup><col className="m5-diff-number-column" /><col /><col className="m5-diff-number-column" /><col /></colgroup>

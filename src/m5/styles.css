@@ -623,3 +623,22 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
   .m5-settings-dialog { padding: 16px; }
   .m5-settings-reload-help { margin-left: 0; }
 }
+
+/* Keep file identity and review actions together above the comparison. */
+.m5-diff-details { color: var(--m5-text); padding: 0; }
+.m5-diff-header { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; padding: 12px; border-bottom: 1px solid var(--m5-border); }
+.m5-diff-identity { flex: 1 1 180px; min-width: 0; display: grid; gap: 4px; }
+.m5-diff-identity strong { font-size: 13px; overflow-wrap: anywhere; }
+.m5-diff-identity span { font-size: 11px; color: var(--m5-muted); overflow-wrap: anywhere; }
+.m5-diff-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.m5-diff-actions button { font-size: 12px; }
+.m5-diff-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding: 8px 12px; background: var(--m5-surface); }
+.m5-diff-toolbar .m5-diff-mode, .m5-diff-toolbar .m5-diff-wrap { margin: 0; }
+.m5-diff-mode button { font-size: 12px; }
+.m5-diff-mode button[aria-pressed="true"] { border-color: var(--m5-border-strong); background: var(--m5-hover); box-shadow: none; color: var(--m5-text); }
+.m5-diff-help { margin-left: auto; font-size: 12px; color: var(--m5-muted); }
+.m5-diff-help summary { cursor: pointer; }
+.m5-diff-help[open] { flex-basis: 100%; margin-left: 0; }
+.m5-diff-help p { margin: 8px 0 0; }
+.m5-diff-details .m5-diff-lines { border-radius: 0; border-left: 0; border-right: 0; }
+.m5-file-search p { margin: 6px 0 0; }

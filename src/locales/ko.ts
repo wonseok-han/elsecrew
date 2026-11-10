@@ -357,6 +357,7 @@ export const ko = {
   "m5.diff.old": " · 이전: {path}",
   "m5.diff.binaryHelp": "이진 변경은 내용 대신 파일 변경 사실만 보여요.",
   "m5.diff.empty": "표시할 텍스트 변경이 없어요.",
+  "m5.diff.readingHelp": "비교 읽는 법",
   "m5.diff.help": "− 삭제된 줄 · + 추가된 줄 · 왼쪽 번호는 변경 전, 오른쪽은 변경 후예요.",
   "m5.discard.done": "작업 복사본 사용을 끝냈어요. 원본 프로젝트와 대화 기록은 보존했습니다.",
   "m5.discard.open": "작업 복사본 버리기",
