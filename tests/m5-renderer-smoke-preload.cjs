@@ -93,6 +93,12 @@ window.m5SmokeFailedClaude = () => {
     stage:'implementing',terminationOutcome:'cleanExit',createdAt:smokeChat.createdAt,updatedAt:smokeChat.updatedAt};
   for(const listener of agentRunStateListeners) listener({run:diagnosticRun});
 };
+// Visual-only state transition; no process or provider request is performed.
+window.m5SmokeVisualChatState = state => {
+  if (!['draft', 'reviewReady', 'recoveryRequired'].includes(state)) throw new Error('unexpected visual state');
+  smokeChat.state = state;
+  for (const listener of agentPublicEventListeners) listener({ ...smokeChat, runId:'smoke_failed_claude', roleId:'coding', eventId:'visual_state_' + state, kind:'status', text:'visual state', capabilityFingerprint:`sha256:${'0'.repeat(64)}` });
+};
 window.m5SmokeFailHistoryRefresh = () => {
   historyReadFailures = 1;
   for (const listener of agentPublicEventListeners) listener({ ...smokeChat, runId:"smoke_context_run", roleId:"planning", eventId:"smoke_refresh_event", kind:"status", text:"not durable", capabilityFingerprint:`sha256:${"0".repeat(64)}` });

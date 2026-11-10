@@ -128,6 +128,43 @@ app.whenReady().then(async () => {
   await window.webContents.executeJavaScript("window.m5SmokeFailedClaude()");
   await wait("document.querySelector('.m5-agent-runs details')");
   await capture(window, 'product-failed-run');
+  await window.webContents.executeJavaScript(`(() => {
+    const request = window.m5Projects.request;
+    window.visualReviewTotal = 3;
+    window.m5Projects.request = async input => {
+      if (input.action !== 'applicationPreviewPage') return request(input);
+      const total = window.visualReviewTotal;
+      return {schemaVersion:1,action:input.action,projectId:input.projectId,chatId:input.chatId,
+        page:{worktreeId:'smoke_chat_worktree',total,offset:input.offset,fingerprint:'a'.repeat(64),
+        changes:Array.from({length:Math.min(100,total-input.offset)},(_,i)=>({path:'src/file-'+(input.offset+i)+'.ts',kind:['added','modified','deleted'][i%3]}))}};
+    };
+    document.querySelector('.m5-chat-review > button').click();
+  })()`);
+  await wait("document.querySelectorAll('.m5-review-files li').length === 3");
+  await window.webContents.executeJavaScript(`(() => {
+    if (document.querySelector('.m5-review-pagination')) throw new Error('single page has redundant pagination');
+    document.querySelector('.m5-chat-review').scrollIntoView({block:'start'});
+  })()`);
+  await wait("document.querySelector('.m5-review-files')");
+  await window.webContents.executeJavaScript("document.querySelector('.m5-chat-review').scrollIntoView({block:'start'})");
+  await wait("document.querySelector('.m5-review-files').getBoundingClientRect().top < document.querySelector('.m5-conversation-scroll').getBoundingClientRect().bottom");
+  await capture(window, 'product-change-review');
+  await window.webContents.executeJavaScript("window.visualReviewTotal = 101; document.querySelector('.m5-chat-review > button').click()");
+  await wait("document.querySelectorAll('.m5-review-files li').length === 100");
+  await window.webContents.executeJavaScript("[...document.querySelectorAll('.m5-review-pagination button')].find(b => b.textContent === 'Next 100').click()");
+  await wait("document.querySelectorAll('.m5-review-files li').length === 1 && document.querySelector('.m5-review-files').textContent.includes('file-100.ts')");
+  await window.webContents.executeJavaScript("if (![...document.querySelectorAll('.m5-review-pagination button')].find(b => b.textContent === 'Next 100').disabled) throw new Error('last page still enabled'); window.m5SmokeVisualChatState('recoveryRequired')");
+  await wait("document.querySelector('.m5-timeline .m5-error')");
+  await window.webContents.executeJavaScript(`(() => {
+    if ([...document.querySelectorAll('.m5-actual-controls button')].some(b => !b.disabled)) throw new Error('recovery allowed execution');
+    if (!document.querySelector('.m5-followup button[type=submit]').disabled) throw new Error('recovery allowed followup');
+    document.querySelector('.m5-timeline .m5-error').scrollIntoView({block:'start'});
+  })()`);
+  await wait("document.querySelector('.m5-timeline .m5-error')");
+  await window.webContents.executeJavaScript("document.querySelector('.m5-timeline .m5-error').scrollIntoView({block:'start'})");
+  await wait("document.querySelector('.m5-timeline .m5-error').getBoundingClientRect().bottom <= document.querySelector('.m5-conversation-scroll').getBoundingClientRect().bottom");
+  await capture(window, 'product-recovery-required');
+
   await window.webContents.executeJavaScript("document.querySelector('.m5-management-toggle').click()");
   await wait("document.querySelector('.m5-management-toggle').getAttribute('aria-expanded') === 'true'");
   await window.webContents.executeJavaScript(`(() => {

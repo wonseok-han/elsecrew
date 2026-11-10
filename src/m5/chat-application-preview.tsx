@@ -92,13 +92,15 @@ function ChatApplicationPreviewSession({ projectId, chatId, worktreeId, disabled
     {error && <p role="status">{t("m5.application.previewError")}</p>}
     {preview && <>
       <p>{t("m5.application.previewHelp")}</p>
-      <p>{t("m5.application.workspace")} <code>{preview.worktreeId}</code></p>
-      <p>{t("m5.application.total")} {preview.total}</p>
+      <details className="m5-review-identity"><summary>{t("m5.application.workspace")}</summary><code>{preview.worktreeId}</code></details>
+      <p className="m5-review-count">{t("m5.application.total")} <strong>{preview.total}</strong></p>
       {preview.total === 0 && <p>{t("m5.application.noChanges")}</p>}
+      <ul className="m5-review-files">{preview.changes.map(change => <li key={change.path}><span className={`m5-review-kind m5-kind-${change.kind}`}>{t(`m5.application.${change.kind}`)}</span><code>{change.path.replace(/[\p{Cc}\p{Cf}]/gu, character => `\\u{${character.codePointAt(0)!.toString(16)}}`)}</code></li>)}</ul>
+      {preview.total > 100 && <nav className="m5-review-pagination">
       <p>{preview.total === 0 ? 0 : preview.offset + 1}–{preview.offset + preview.changes.length} / {preview.total}</p>
       <button type="button" disabled={disabled || busy || started || preview.offset === 0} onClick={() => void inspect(Math.max(0, preview.offset - 100), preview.fingerprint)}>{t("m5.application.previousPage")}</button>
       <button type="button" disabled={disabled || busy || started || preview.offset + preview.changes.length >= preview.total} onClick={() => void inspect(preview.offset + 100, preview.fingerprint)}>{t("m5.application.nextPage")}</button>
-      <ul>{preview.changes.map(change => <li key={change.path}>{t(`m5.application.${change.kind}`)} <code>{change.path.replace(/[\p{Cc}\p{Cf}]/gu, character => `\\u{${character.codePointAt(0)!.toString(16)}}`)}</code></li>)}</ul>
+      </nav>}
       <button type="button" disabled={disabled || busy || preview.total === 0 || confirmation !== null} onClick={() => void confirmReview()}>{t("m5.application.openConfirmation")}</button>
     </>}
     {confirmation && !started && <div role="status"><p>{t("m5.application.confirmationReady")}</p><button type="button" disabled={disabled || busy} onClick={() => void confirmReview(true)}>{t("m5.application.cancelConfirmation")}</button></div>}
