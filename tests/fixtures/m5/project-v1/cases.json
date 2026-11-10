@@ -57,12 +57,12 @@
     {
       "name": "tree-page-has-opaque-next-cursor",
       "validator": "treePage",
-      "value": {"projectId":"project_01","parentPath":"src","entries":[{"path":"src/App.tsx","name":"App.tsx","kind":"file"},{"path":"src/assets","name":"assets","kind":"directory"},{"path":"src/link","name":"link","kind":"symlink"}],"nextCursor":"cursor-owned-by-sidecar-opaque-02"}
+      "value": {"projectId":"project_01","parentPath":"src","entries":[{"path":"src/assets","name":"assets","kind":"directory"},{"path":"src/App.tsx","name":"App.tsx","kind":"file"},{"path":"src/link","name":"link","kind":"symlink"}],"nextCursor":"cursor-owned-by-sidecar-opaque-02"}
     },
     {
       "name": "root-tree-page-has-only-direct-child",
       "validator": "treePage",
-      "value": {"projectId":"project_01","parentPath":"","entries":[{"path":"README.md","name":"README.md","kind":"file"},{"path":"src","name":"src","kind":"directory"}],"nextCursor":null}
+      "value": {"projectId":"project_01","parentPath":"","entries":[{"path":"src","name":"src","kind":"directory"},{"path":"README.md","name":"README.md","kind":"file"}],"nextCursor":null}
     },
     {
       "name": "exact-hello-bytes-produce-canonical-sha256-version",

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../i18n";
 export type SettingsSection = "general" | "roles" | "agents" | "updates" | "storage" | "project";
-export function AppSettings({ open, section, onSection, onClose, onRoles, disabled, restartLocked, rolesEditor, storage, project, children }: {
+export function AppSettings({ open, section, onSection, onClose, onRoles, disabled, restartLocked, rolesEditor, rolesLocked, storage, project, children }: {
   open: boolean; section: SettingsSection; onSection: (section: SettingsSection) => void;
-  onClose: () => void; onRoles: () => void; disabled: boolean; restartLocked: boolean; rolesEditor: ReactNode; storage: ReactNode; project: ReactNode; children: ReactNode;
+  onClose: () => void; onRoles: () => void; disabled: boolean; restartLocked: boolean; rolesEditor: ReactNode; rolesLocked: boolean; storage: ReactNode; project: ReactNode; children: ReactNode;
 }) {
   const { t, lang, setLang } = useI18n();
   const dialog = useRef<HTMLElement>(null);
@@ -14,10 +14,10 @@ export function AppSettings({ open, section, onSection, onClose, onRoles, disabl
   }, [open]);
   return <section hidden={!open} tabIndex={-1} inert={restartLocked} ref={dialog} className="m5-app-settings" aria-labelledby="app-settings-title">
     <header><div><p className="m5-eyebrow">Elsecrew</p><h2 id="app-settings-title">{t("m5.preferences.title")}</h2></div>
-      <button type="button" className="m5-secondary" disabled={Boolean(rolesEditor)} onClick={onClose}>{t("m5.preferences.close")}</button></header>
+      <button type="button" className="m5-secondary" disabled={rolesLocked} onClick={onClose}>{t("m5.preferences.close")}</button></header>
     <div className="m5-preferences-layout">
       <nav aria-label={t("m5.preferences.title")}>{(["general", "roles", "agents", "storage", "project", "updates"] as const).map(key =>
-        <button key={key} type="button" aria-current={section === key ? "page" : undefined} disabled={Boolean(rolesEditor)} onClick={() => onSection(key)}>{t(`m5.preferences.${key}`)}</button>)}</nav>
+        <button key={key} type="button" aria-current={section === key ? "page" : undefined} disabled={rolesLocked} onClick={() => onSection(key)}>{t(`m5.preferences.${key}`)}</button>)}</nav>
       <div className="m5-preferences-content">
         <section hidden={section !== "general"}><h3>{t("m5.preferences.general")}</h3><p>{t("m5.shell.languageScope")}</p>
           <label className="m5-preferences-row">{t("m5.shell.language")}<select value={lang} onChange={event => setLang(event.target.value === "en" ? "en" : "ko")}><option value="ko">한국어</option><option value="en">English</option></select></label></section>

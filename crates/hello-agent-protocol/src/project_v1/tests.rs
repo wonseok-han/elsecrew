@@ -423,3 +423,22 @@ fn fragment_absolute_path_preserves_v1_predicate_at_every_byte_split() {
             .is_err());
     }
 }
+
+#[test]
+fn tree_directory_first_order_and_cross_kind_duplicates() {
+    let entry = |path: &str, kind: &str| json!({"path":path,"name":path,"kind":kind});
+    let page = |entries: Vec<Value>| json!({"projectId":"project_test","parentPath":"","entries":entries,"nextCursor":null});
+    assert!(validate_tree_page(&page(vec![entry("z", "directory"), entry("a", "file")])).is_ok());
+    for entries in [
+        vec![entry("a", "file"), entry("z", "directory")],
+        vec![entry("z", "directory"), entry("z", "file")],
+        vec![
+            entry("z", "directory"),
+            entry("a", "file"),
+            entry("z", "file"),
+        ],
+        vec![entry("z", "file"), entry("a", "file")],
+    ] {
+        assert!(validate_tree_page(&page(entries)).is_err());
+    }
+}

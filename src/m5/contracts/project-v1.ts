@@ -363,7 +363,8 @@ export function validateTreePageV1(value: unknown): TreePageV1 {
   if (!Array.isArray(object.entries) || object.entries.length > TREE_PAGE_MAX_ENTRIES_V1) {
     fail("tree page exceeds 500 entries");
   }
-  let previous = "";
+  let previous: [number, string] | null = null;
+  const paths = new Set<string>();
   for (const entryValue of object.entries) {
     const entry = requireObject(entryValue, "tree entry");
     exactKeys(entry, ["path", "name", "kind"]);
@@ -376,8 +377,12 @@ export function validateTreePageV1(value: unknown): TreePageV1 {
     const segments = path.split("/");
     if (segments[segments.length - 1] !== entry.name) fail("tree entry name must match its path");
     if (!["file", "directory", "symlink"].includes(String(entry.kind))) fail("unknown tree entry kind");
-    if (previous !== "" && path <= previous) fail("tree entries must be sorted and unique");
-    previous = path;
+    const rank = entry.kind === "directory" ? 0 : 1;
+    if (paths.has(path) || (previous && (rank < previous[0] || (rank === previous[0] && path <= previous[1])))) {
+      fail("tree entries must be directory-first, sorted and unique");
+    }
+    paths.add(path);
+    previous = [rank, path];
   }
   if (object.nextCursor !== null) requireId(object.nextCursor, "opaque nextCursor");
   return object as unknown as TreePageV1;

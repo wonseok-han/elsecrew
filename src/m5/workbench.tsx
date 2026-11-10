@@ -146,6 +146,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const [applicationBaseline, setApplicationBaseline] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appDefaultsOpen, setAppDefaultsOpen] = useState(false);
+  const [appDefaultsLoaded, setAppDefaultsLoaded] = useState(false);
   const [updatePreparing, setUpdatePreparing] = useState(false);
   const [managedProject, setManagedProject] = useState<{ projectId: string; canonicalPath: string } | null>(null);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
@@ -263,7 +264,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
 
   return (
     <main inert={updatePreparing} className={`m5-workbench${preferencesOpen ? " m5-settings-open" : ""}${window.m5Projects ? " m5-with-project-rail" : ""}`} lang={lang} aria-label={t("m5.shell.label")}>
-      <ProjectCatalog rail onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} onHasProjects={setHasSavedProjects} ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
+      <ProjectCatalog rail settingsAction={<button type="button" className="m5-secondary m5-open-preferences" disabled={settingsOpen || newChatOpen || appDefaultsOpen} onClick={() => setPreferencesOpen(true)} title={t("m5.preferences.title")} aria-label={t("m5.preferences.title")}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"><path d="m10 3-.6 2.4-2 .9L5 5.6 3 9l1.8 1.7v2.6L3 15l2 3.4 2.4-.7 2 .9L10 21h4l.6-2.4 2-.9 2.4.7 2-3.4-1.8-1.7v-2.6L21 9l-2-3.4-2.4.7-2-.9L14 3Z"/><circle cx="12" cy="12" r="3"/></svg><span>{t("m5.preferences.title")}</span></button>} onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} onHasProjects={setHasSavedProjects} ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
       <header className={`m5-toolbar${snapshot.project ? " m5-toolbar-project" : ""}`}>
         <div>
           <p className="m5-eyebrow">{t("m5.shell.eyebrow")}</p>
@@ -280,7 +281,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         onGoal={() => setNewChatOpen(true)} onTeam={() => openRoleSettings()}
         onConversation={() => controller.revealConversation()}
         onChanges={() => { controller.selectPanel("changes"); void controller.refreshChanges(); }} />}
-          <button type="button" className="m5-secondary m5-open-preferences" disabled={settingsOpen || newChatOpen || appDefaultsOpen} onClick={() => setPreferencesOpen(true)}>{t("m5.preferences.title")}</button>
+
           {snapshot.project && <details className="m5-project-menu"><summary>{t("m5.preferences.projectMenu")}</summary><div>          {snapshot.project && <button type="button" onClick={() => void controller.chooseProject()} disabled={settingsOpen || !admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked}>
             {t("m5.shell.switch")}
           </button>}
@@ -305,8 +306,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       }} disabled={!admissionReady || chat.switching || settingsOpen || leavingProject || leaveError}
         onResolved={(result, path) => controller.observeCompletedSaveRecovery(result, path)} />}
       {leaveError && <p className="m5-error" role="alert">{t("m5.feedback.leaveError")}</p>}
-      <AppSettings storage={<BackupStorageUsageView disabled={!admissionReady} />} project={managedProject ? <><p>{managedProject.canonicalPath}</p><PreparationRecovery projectId={managedProject.projectId} disabled={!admissionReady || snapshot.actionBlocked || snapshot.selectionBlocked || Boolean(snapshot.workspace) || settingsOpen || leavingProject || leaveError || !controller.canLeaveProject() || chat.switching} /></> : <p>{t("m5.preferences.chooseProject")}</p>} restartLocked={updatePreparing} open={preferencesOpen} section={preferencesSection} onSection={setPreferencesSection} onClose={() => { setPreferencesOpen(false); setAppDefaultsOpen(false); }}
-        rolesEditor={appDefaultsOpen && <AppRoleDefaultsEditor disabled={!admissionReady} onClose={() => setAppDefaultsOpen(false)} />}
+      <AppSettings rolesLocked={appDefaultsLoaded && appDefaultsOpen} storage={<BackupStorageUsageView disabled={!admissionReady} />} project={managedProject ? <><p>{managedProject.canonicalPath}</p><PreparationRecovery projectId={managedProject.projectId} disabled={!admissionReady || snapshot.actionBlocked || snapshot.selectionBlocked || Boolean(snapshot.workspace) || settingsOpen || leavingProject || leaveError || !controller.canLeaveProject() || chat.switching} /></> : <p>{t("m5.preferences.chooseProject")}</p>} restartLocked={updatePreparing} open={preferencesOpen} section={preferencesSection} onSection={section => { setPreferencesSection(section); if (!appDefaultsLoaded) setAppDefaultsOpen(false); }} onClose={() => { setPreferencesOpen(false); setAppDefaultsOpen(false); setAppDefaultsLoaded(false); }}
+        rolesEditor={appDefaultsOpen && <AppRoleDefaultsEditor onLoaded={setAppDefaultsLoaded} disabled={!admissionReady} onClose={() => setAppDefaultsOpen(false)} />}
         disabled={!admissionReady || !window.m5Projects} onRoles={() => setAppDefaultsOpen(true)}>
         <ProviderLogin disabled={!admissionReady} returning={hasSavedProjects} reveal={connectionReveal} />
       </AppSettings>
@@ -564,11 +565,13 @@ function GuidedStart({ disabled, onChoose, returning }: { disabled: boolean; onC
   </section>;
 }
 
-function AppRoleDefaultsEditor({ disabled, onClose }: { disabled: boolean; onClose: () => void }) {
+function AppRoleDefaultsEditor({ disabled, onClose, onLoaded }: { disabled: boolean; onClose: () => void; onLoaded: (loaded: boolean) => void }) {
   const { t } = useI18n();
   const [settings, setSettings] = useState<ProjectRoleSettingsV1 | null>(null);
   const [error, setError] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [errorDetail, setErrorDetail] = useState("");
+  useEffect(() => { onLoaded(Boolean(settings)); return () => onLoaded(false); }, [settings, onLoaded]);
   const mounted = useRef(false);
   const generation = useRef(0);
   const load = useCallback(async () => {
@@ -578,7 +581,7 @@ function AppRoleDefaultsEditor({ disabled, onClose }: { disabled: boolean; onClo
       const request = { action: "getAppRoleDefaults" as const };
       const result = validateProjectCatalogResult(await window.m5Projects!.request(request), request);
       if (mounted.current && generation.current === epoch && result.action === request.action) setSettings({ ...result.settings, projectId: "app_defaults" });
-    } catch { if (mounted.current && generation.current === epoch) setError(true); }
+    } catch (error) { if (mounted.current && generation.current === epoch) { setError(true); setErrorDetail(error instanceof Error ? error.message : "defaults request failed"); } }
   }, []);
   useEffect(() => { mounted.current = true; void load(); return () => { mounted.current = false; generation.current++; }; }, [load]);
   const save = async (roles: readonly RoleProfileV1[]) => {
@@ -589,12 +592,12 @@ function AppRoleDefaultsEditor({ disabled, onClose }: { disabled: boolean; onClo
       const request = { action: "updateAppRoleDefaults" as const, expectedRevision: settings.revision, roles };
       const result = validateProjectCatalogResult(await window.m5Projects!.request(request), request);
       if (mounted.current && generation.current === epoch && result.action === request.action) { setSettings({ ...result.settings, projectId: "app_defaults" }); setSaved(true); }
-    } catch { if (mounted.current && generation.current === epoch) setError(true); }
+    } catch (error) { if (mounted.current && generation.current === epoch) { setError(true); setErrorDetail(error instanceof Error ? error.message : "defaults request failed"); } }
   };
   if (!settings) return <section className="m5-notice" role="status">
     <p>{t(error ? "m5.roles.appDefaultsError" : "m5.roles.busy")}</p>
     {error && <button type="button" disabled={disabled} onClick={() => void load()}>{t("m5.roles.reload")}</button>}
-    <button type="button" onClick={onClose}>{t("m5.roles.back")}</button>
+    {error && <details><summary>{t("m5.feedback.details")}</summary><pre>{errorDetail}</pre></details>}
   </section>;
   return <RoleSettings scope="app" settings={settings} activeChat={null} disabled={disabled}
     feedback={<>{error && <p role="alert">{t("m5.roles.appDefaultsError")}</p>}{saved && <p role="status">{t("m5.roles.appDefaultsSaved")}</p>}</>}

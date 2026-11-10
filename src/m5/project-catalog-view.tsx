@@ -1,10 +1,10 @@
 import { useI18n } from "../i18n.tsx";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ProjectEditorController } from "./editor-state.ts";
 import { validateProjectCatalogResult, type ProjectCatalogEntry } from "./contracts/project-catalog-v1.ts";
 
-export function ProjectCatalog({ controller, disabled, currentId, ready = true, rail = false, home = false, onManage, onHasProjects }: {
-  onManage?: (entry: ProjectCatalogEntry) => void; controller: ProjectEditorController; disabled: boolean; currentId?: string; ready?: boolean; rail?: boolean; home?: boolean; onHasProjects?: (value: boolean) => void;
+export function ProjectCatalog({ controller, disabled, currentId, ready = true, rail = false, home = false, settingsAction, onManage, onHasProjects }: {
+  settingsAction?: ReactNode; onManage?: (entry: ProjectCatalogEntry) => void; controller: ProjectEditorController; disabled: boolean; currentId?: string; ready?: boolean; rail?: boolean; home?: boolean; onHasProjects?: (value: boolean) => void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -57,7 +57,7 @@ export function ProjectCatalog({ controller, disabled, currentId, ready = true, 
     finally { inFlight.current = false; setBusy(false); if (!rail && !home) setOpen(false); }
   };
   return <section className={`m5-project-catalog${home ? " m5-home-projects" : ""}${rail ? ` m5-project-rail${expanded || error ? " m5-project-rail-expanded" : ""}` : ""}`} aria-label={t("m5.catalog.title")}>
-    {home ? <header className="m5-home-projects-heading"><h2>{t("m5.home.recent")}</h2><span>{t("m5.catalog.order")}</span></header> : rail ? <header className="m5-project-rail-header"><h2 title={t("m5.catalog.title")}>{t(compact ? "m5.catalog.shortTitle" : "m5.catalog.title")}</h2><button type="button" aria-expanded={expanded || error} disabled={error} title={t(expanded || error ? "m5.catalog.collapse" : "m5.catalog.expand")} aria-label={t(expanded || error ? "m5.catalog.collapse" : "m5.catalog.expand")} onClick={() => setExpanded(value => !value)}>{expanded || error ? "‹" : "›"}</button><button type="button" className="m5-project-refresh" disabled={disabled || busy} title={t("m5.catalog.refresh")} aria-label={t("m5.catalog.refresh")} onClick={() => void load(null)}>↻</button><button type="button" className="m5-project-add" disabled={disabled || busy} title={t("m5.catalog.add")} aria-label={t("m5.catalog.add")} onClick={() => void controller.chooseProject()}>＋</button></header> : <button type="button" className="m5-secondary" disabled={disabled || busy} onClick={() => open ? setOpen(false) : void load(null)} aria-expanded={open}>{t("m5.catalog.title")}</button>}
+    {home ? <header className="m5-home-projects-heading"><h2>{t("m5.home.recent")}</h2><span>{t("m5.catalog.order")}</span></header> : rail ? <header className="m5-project-rail-header"><h2 title={t("m5.catalog.title")}>{t(compact ? "m5.catalog.shortTitle" : "m5.catalog.title")}</h2><button type="button" className="m5-rail-action" aria-expanded={expanded || error} disabled={error} title={t(expanded || error ? "m5.catalog.collapse" : "m5.catalog.expand")} aria-label={t(expanded || error ? "m5.catalog.collapse" : "m5.catalog.expand")} onClick={() => setExpanded(value => !value)}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d={expanded || error ? "m14 7-5 5 5 5" : "m10 7 5 5-5 5"} /></svg></button><button type="button" className="m5-project-refresh m5-rail-action" disabled={disabled || busy} title={t("m5.catalog.refresh")} aria-label={t("m5.catalog.refresh")} onClick={() => void load(null)}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M20 4v5h-5 M20 9a8 8 0 1 0 0 6" /></svg></button><button type="button" className="m5-project-add m5-rail-action" disabled={disabled || busy} title={t("m5.catalog.add")} aria-label={t("m5.catalog.add")} onClick={() => void controller.chooseProject()}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14 M5 12h14" /></svg></button></header> : <button type="button" className="m5-secondary" disabled={disabled || busy} onClick={() => open ? setOpen(false) : void load(null)} aria-expanded={open}>{t("m5.catalog.title")}</button>}
     {open && <div className="m5-project-catalog-list" aria-busy={busy}>
       {!rail && !home && <p>{t("m5.catalog.order")}</p>}
       {rail && ready && disabled && <details className="m5-project-switch-help" onToggle={event => { if (event.currentTarget.open) setExpanded(true); }}><summary title={t("m5.catalog.switchTitle")}>{t("m5.catalog.switchTitle")}</summary><p>{t("m5.catalog.switchHelp")}</p></details>}
@@ -73,5 +73,6 @@ export function ProjectCatalog({ controller, disabled, currentId, ready = true, 
         {next && <button type="button" disabled={disabled || busy || error} onClick={() => void load(next)}>{t("m5.catalog.next")}</button>}</div>}
     </div>}
 
+    {rail && <footer className="m5-rail-footer">{settingsAction}</footer>}
   </section>;
 }

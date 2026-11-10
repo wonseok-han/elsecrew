@@ -66,6 +66,7 @@ app.whenReady().then(async () => {
     }
     const controlLabel = "프로젝트 선택";
     await ${waitFor("document.querySelector('.m5-open-preferences')", "settings entry")};
+    if (!document.querySelector('.m5-rail-footer .m5-open-preferences svg') || document.querySelector('.m5-toolbar .m5-open-preferences')) throw new Error('settings must be a sidebar gear');
     document.querySelector('.m5-open-preferences').click();
     await ${waitFor("!document.querySelector('.m5-app-settings').hidden", "settings dialog visible")};
     if (document.querySelector('.m5-app-settings').tagName !== 'SECTION' || getComputedStyle(document.querySelector('.m5-toolbar')).display !== 'none') throw new Error('settings is not a full page');
@@ -78,8 +79,18 @@ app.whenReady().then(async () => {
       select.value = value;
       select.dispatchEvent(new Event('change', {bubbles:true}));
     };
+    document.querySelectorAll('.m5-preferences-layout nav button')[1].click();
+    await ${waitFor("!document.querySelector('.m5-preferences-content > section:nth-child(2) > button').disabled", "defaults ready")};
+    document.querySelector('.m5-preferences-content > section:nth-child(2) > button').click();
+    await ${waitFor("document.querySelector('.m5-preferences-content .m5-notice details')", "defaults failure")};
+    if (document.querySelector('.m5-preferences-content .m5-notice').querySelectorAll('button').length !== 1) throw new Error('defaults error duplicates navigation');
+    if (document.querySelector('.m5-app-settings > header button').disabled) throw new Error('failed defaults traps settings');
+    document.querySelector('.m5-app-settings > header button').click();
+    await ${waitFor("document.querySelector('.m5-app-settings').hidden", "leave failed settings")};
+    document.querySelector('.m5-open-preferences').click();
+    document.querySelectorAll('.m5-preferences-layout nav button')[0].click();
     chooseLanguage('en');
-    await ${waitFor("document.querySelector('main').lang === 'en' && document.querySelector('h1').textContent === 'Choose a project to get started'", "English shell")};
+    await ${waitFor("document.querySelector('main').lang === 'en' && document.querySelector('#app-settings-title').textContent === 'Settings'", "English shell")};
     document.querySelectorAll('.m5-preferences-layout nav button')[2].click();
     await ${waitFor("document.querySelector('.m5-provider-selection').getClientRects().length > 0", "agent settings visible")};
     const selection = document.querySelector('.m5-provider-selection');
@@ -199,7 +210,7 @@ app.whenReady().then(async () => {
     const compactHeading = rail.querySelector('h2');
     const compactRefresh = rail.querySelector('.m5-project-refresh');
     if (compactHeading.textContent !== '프로젝트' || compactHeading.scrollWidth > compactHeading.clientWidth) throw new Error('compact project heading overflows');
-    if (compactRefresh.textContent !== '↻' || compactRefresh.getAttribute('aria-label') !== '새로고침' || compactRefresh.scrollWidth > compactRefresh.clientWidth) throw new Error('compact refresh loses label or overflows');
+    if (!compactRefresh.querySelector('svg') || compactRefresh.getAttribute('aria-label') !== '새로고침' || compactRefresh.scrollWidth > compactRefresh.clientWidth) throw new Error('compact refresh loses label or overflows');
     railToggle.click();
     await ${waitFor("document.querySelector('.m5-project-rail').getBoundingClientRect().width >= 180", "expanded project rail")};
     if (getComputedStyle(document.querySelector('.m5-project-catalog-list li span')).display === 'none') throw new Error('expanded project path hidden');
@@ -208,7 +219,7 @@ app.whenReady().then(async () => {
     rail.querySelector('.m5-project-overflow > summary').click();
     rail.querySelector('.m5-project-manage').click();
     await ${waitFor("!document.querySelector('.m5-app-settings').hidden && document.querySelector('.m5-maintenance-group')", "project management page")};
-    document.querySelectorAll('.m5-maintenance-group').forEach(group => group.open = true);
+    if (document.querySelector('.m5-maintenance-group').tagName !== 'SECTION') throw new Error('management sections should be visible without expanding');
     const recoveryButton = text => [...document.querySelectorAll('[aria-label="프로젝트 시작 실패 복구"] button')].find(b => b.textContent === text);
     recoveryButton('시작 실패 확인').click();
     await ${waitFor("document.querySelector('[aria-label=\"실패한 준비 종료 확인\"]')", "explicit preparation inspection")};

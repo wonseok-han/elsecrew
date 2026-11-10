@@ -787,3 +787,14 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-project-rail:not(.m5-project-rail-expanded) .m5-project-overflow > summary { padding: 0; font-size: 16px; }
 .m5-project-rail:not(.m5-project-rail-expanded) .m5-project-rail-header h2 { flex: 0 0 100%; text-align: center; margin-bottom: 4px; }
 .m5-project-rail:not(.m5-project-rail-expanded) .m5-project-rail-header button { width: 20px; min-width: 20px; min-height: 24px; padding: 0; margin: 0; }
+.m5-project-rail-header .m5-rail-action { display: grid; place-items: center; flex: 0 0 26px; width: 26px; height: 26px; min-width: 26px; min-height: 26px; margin: 0; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--m5-muted); box-shadow: none; }
+.m5-project-rail-header .m5-rail-action svg { width: 15px; height: 15px; display: block; }
+.m5-project-rail-header .m5-rail-action:hover:not(:disabled) { background: var(--m5-raised); color: var(--m5-text); }
+.m5-project-rail-header .m5-rail-action:focus-visible { outline: 2px solid var(--m5-accent, #d89d87); outline-offset: 1px; }
+.m5-project-rail:not(.m5-project-rail-expanded) .m5-project-rail-header .m5-rail-action { flex-basis: 20px; width: 20px; min-width: 20px; }
+.m5-maintenance-group > h4 { margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--m5-text); }
+.m5-rail-footer { margin-top: auto; padding-top: 16px; border-top: 1px solid var(--m5-border); }
+.m5-rail-footer .m5-open-preferences { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: 0; background: transparent; color: var(--m5-muted); text-align: left; }
+.m5-rail-footer .m5-open-preferences svg { flex: 0 0 18px; width: 18px; height: 18px; }
+.m5-project-rail:not(.m5-project-rail-expanded) .m5-open-preferences { justify-content: center; }
+.m5-project-rail:not(.m5-project-rail-expanded) .m5-open-preferences span { display: none; }

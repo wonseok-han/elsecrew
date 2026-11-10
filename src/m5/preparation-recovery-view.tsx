@@ -67,13 +67,13 @@ function PreparationRecoverySession({ projectId, disabled }: { projectId: string
     return () => window.clearTimeout(timer);
   }, [application, disabled, busy, projectId]);
   return <div aria-label={t("m5.prep.title")} aria-busy={busy}>
-    <details className="m5-maintenance-group"><summary>{t("m5.preferences.backups")}</summary>
+    <section className="m5-maintenance-group"><h4>{t("m5.preferences.backups")}</h4>
     <BackupRetentionView projectId={projectId} disabled={disabled || busy} />
-    </details>
-    <details className="m5-maintenance-group"><summary>{t("m5.preferences.recovery")}</summary>
+    </section>
+    <section className="m5-maintenance-group"><h4>{t("m5.preferences.recovery")}</h4>
     <BackupPreparationRecovery projectId={projectId} disabled={disabled || busy} />
-    </details>
-    <details className="m5-maintenance-group"><summary>{t("m5.preferences.manual")}</summary>
+    </section>
+    <section className="m5-maintenance-group"><h4>{t("m5.preferences.manual")}</h4>
     <p>{t("m5.preferences.manualHelp")}</p>
     <button type="button" disabled={disabled || busy} onClick={() => setConfirmWorkspace(true)}>{t("m5.application.prepare")}</button>
     {confirmWorkspace && <div role="group" aria-label={t("m5.application.prepare")}>
@@ -93,8 +93,8 @@ function PreparationRecoverySession({ projectId, disabled }: { projectId: string
         {t(`m5.application.${change.kind}`)} <code>{change.path.replace(/[\p{Cc}\p{Cf}]/gu, character => `\\u{${character.codePointAt(0)!.toString(16)}}`)}</code>
       </li>)}</ul>
     </section>}
-    </details>
-    <details className="m5-maintenance-group"><summary>{t("m5.preferences.records")}</summary>
+    </section>
+    <section className="m5-maintenance-group"><h4>{t("m5.preferences.records")}</h4>
     <button type="button" disabled={disabled || busy} onClick={() => { setInspection(null); void request({ action: "inspectPreparation", projectId }); }}>{t("m5.prep.inspect")}</button>
     <button type="button" disabled={disabled || busy} onClick={() => { setApplication(null); void request({action:"applicationStatus",projectId}); }}>{t("m5.application.inspect")}</button>
     {application && <section aria-label={t("m5.application.inspect")}>
@@ -127,7 +127,7 @@ function PreparationRecoverySession({ projectId, disabled }: { projectId: string
       <button type="button" disabled={disabled || busy} onClick={() => void request({ action: "abandonPreparation", inspection })}>{t("m5.prep.abandon")}</button>
       <button type="button" disabled={busy} onClick={() => setInspection(null)}>{t("m5.prep.back")}</button>
     </div>}
-    </details>
+    </section>
     {message && <p role="status">{t(message === "prepareError" ? "m5.application.prepareError" : message === "previewError" ? "m5.application.previewError" : message === "applicationError" ? "m5.application.error" : `m5.prep.${message}`)}</p>}
   </div>;
 }

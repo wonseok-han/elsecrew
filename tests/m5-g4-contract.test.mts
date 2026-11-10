@@ -355,3 +355,15 @@ function applyJsonPointer(root: unknown, pointer: string, value: unknown): void 
   }
   (current as Record<string, unknown>)[segments.at(-1) ?? ""] = value;
 }
+
+test("tree pages accept directory-first ordering and reject duplicates across kinds", () => {
+  const entry = (path: string, kind: string) => ({ path, name: path, kind });
+  const page = (entries: unknown[]) => ({ projectId: "project_test", parentPath: "", entries, nextCursor: null });
+  assert.doesNotThrow(() => validateTreePageV1(page([entry("z", "directory"), entry("a", "file")])));
+  for (const entries of [
+    [entry("a", "file"), entry("z", "directory")],
+    [entry("z", "directory"), entry("z", "file")],
+    [entry("z", "directory"), entry("a", "file"), entry("z", "file")],
+    [entry("z", "file"), entry("a", "file")],
+  ]) assert.throws(() => validateTreePageV1(page(entries)));
+});

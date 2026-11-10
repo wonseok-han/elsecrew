@@ -6062,6 +6062,9 @@ fn tree_lists_directories_before_files_across_pages() {
             first.result["nextCursor"].as_str(),
         )
         .unwrap();
+    for page in [&first.result, &second.result] {
+        hello_agent_protocol::project_v1::validate_project_payload_v1("treePage", page).unwrap();
+    }
     assert_eq!(second.result["entries"][0]["kind"], "directory");
     assert_eq!(second.result["entries"][1]["name"], "aaa.txt");
     assert!(second.result["nextCursor"].is_null());

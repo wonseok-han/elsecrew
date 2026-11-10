@@ -772,7 +772,8 @@ fn validate_tree_page(value: &Value) -> Result<(), ProjectContractError> {
     if entries.len() > TREE_PAGE_MAX_ENTRIES_V1 {
         return fail("tree page exceeds 500 entries");
     }
-    let mut previous = "";
+    let mut previous: Option<(bool, &str)> = None;
+    let mut paths = std::collections::HashSet::new();
     for entry in entries {
         let entry = self::object(entry, "tree entry")?;
         exact_keys(entry, &["path", "name", "kind"])?;
@@ -794,10 +795,11 @@ fn validate_tree_page(value: &Value) -> Result<(), ProjectContractError> {
         if !["file", "directory", "symlink"].contains(&string(entry.get("kind"), "kind")?) {
             return fail("unknown tree entry kind");
         }
-        if !previous.is_empty() && path <= previous {
-            return fail("tree entries must be sorted and unique");
+        let current = (string(entry.get("kind"), "kind")? != "directory", path);
+        if !paths.insert(path) || previous.is_some_and(|previous| current <= previous) {
+            return fail("tree entries must be directory-first, sorted and unique");
         }
-        previous = path;
+        previous = Some(current);
     }
     if !matches!(object.get("nextCursor"), Some(Value::Null)) {
         id(object.get("nextCursor"), "opaque nextCursor")?;
