@@ -798,3 +798,8 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-rail-footer .m5-open-preferences svg { flex: 0 0 18px; width: 18px; height: 18px; }
 .m5-project-rail:not(.m5-project-rail-expanded) .m5-open-preferences { justify-content: center; }
 .m5-project-rail:not(.m5-project-rail-expanded) .m5-open-preferences span { display: none; }
+
+/* The file viewport fills its dock; only the listing scrolls. */
+.m5-dock-content > .m5-files { display: flex; flex-direction: column; overflow: hidden; }
+.m5-files > .m5-file-search, .m5-files > .m5-breadcrumbs { flex: 0 0 auto; }
+.m5-files > .m5-virtual-file-list { flex: 1 1 0; min-height: 0; max-height: none; box-sizing: border-box; }

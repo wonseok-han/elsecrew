@@ -495,7 +495,7 @@ const VirtualFileList = memo(function VirtualFileList({ entries, activePath, dis
   const rowHeight = 32;
   const start = Math.min(Math.max(0, entries.length - 1), Math.max(0, Math.floor(scrollTop / rowHeight) - 8));
   const end = Math.min(entries.length, start + 120);
-  return <div ref={listRef} className="m5-file-list m5-virtual-file-list" aria-busy={loading} style={{ height: Math.min(400, entries.length * rowHeight + (hasMore || loading || failed ? 32 : 0)) }} onScroll={event => setScrollTop(event.currentTarget.scrollTop)} onKeyDown={event => {
+  return <div ref={listRef} className="m5-file-list m5-virtual-file-list" aria-busy={loading} onScroll={event => setScrollTop(event.currentTarget.scrollTop)} onKeyDown={event => {
     if (disabled || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
     const current = Number((event.target as HTMLElement).closest<HTMLButtonElement>("button[data-index]")?.dataset.index);
     if (!Number.isInteger(current)) return;

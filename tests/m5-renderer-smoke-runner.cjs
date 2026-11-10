@@ -260,6 +260,10 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-file-row .m5-tree-name')?.textContent === 'src' && !document.querySelector('.m5-breadcrumbs [aria-current]')", "root breadcrumb")};
     [...document.querySelectorAll('[role=tab]')].find(tab => tab.getAttribute('aria-label') === '파일 패널 끌기' && tab.getClientRects().length > 0).click();
     await ${waitFor("document.querySelector('.m5-virtual-file-list').clientHeight > 0", "file pane visible for scrolling")};
+    const filePane = document.querySelector('.m5-files');
+    const fileViewport = document.querySelector('.m5-virtual-file-list');
+    const paneBottom = filePane.getBoundingClientRect().bottom;
+    if (Math.abs(paneBottom - fileViewport.getBoundingClientRect().bottom) > 3) throw new Error('file viewport leaves unused panel height');
     window.m5SmokeLongTree = true; window.m5SmokeTreeReads = 0;
     document.querySelector('.m5-breadcrumbs .m5-root').click();
     await ${waitFor("document.querySelector('.m5-file-row .m5-tree-name')?.textContent === 'file-0000.ts'", "long tree first batch")};
