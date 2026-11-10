@@ -774,6 +774,19 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-agent-runs').textContent.includes('문제가 없다는 뜻은 아니에요')", "empty diagnostic is inconclusive")};
     if (window.m5SmokeContextStarts.length !== 1) throw new Error('diagnostic inspection started an agent');
     const originalRequest = window.m5Projects.request;
+    let restoreRequests = 0;
+    window.m5Projects.request = input => {
+      if (input.action === 'restoreChats') { restoreRequests++; return Promise.resolve({ schemaVersion: 1, action: input.action, projectId: input.projectId }); }
+      if (input.action === 'releaseView' || input.action === 'reopen') throw new Error('restore must not leave project');
+      return originalRequest(input);
+    };
+    const retainedEditor = document.querySelector('.monaco-editor');
+    const retainedConversation = document.querySelector('#m5-followup-text');
+    document.querySelector('.m5-chat-restore').click();
+    await ${waitFor("!document.querySelector('.m5-chat-restore').disabled", "restore completes without navigation")};
+    if (restoreRequests !== 1 || retainedEditor !== document.querySelector('.monaco-editor') || retainedConversation !== document.querySelector('#m5-followup-text') || document.querySelector('h1').textContent !== 'smoke') throw new Error('restore replaced workspace surface');
+    window.m5Projects.request = originalRequest;
+
     ${process.env.M5_MEASURE_PARALLEL_PAINT === "1" ? `
     window.m5Projects.request = originalRequest;
     [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '프로젝트 화면 닫기').click();
@@ -814,7 +827,7 @@ app.whenReady().then(async () => {
     window.m5Projects.request = input => { if (input.action === 'removeChat' || input.action === 'removeProject') removalRequests++; return failingRequest(input); };
     document.querySelector('.m5-chat-remove').click();
     await ${waitFor("document.querySelector('#m5-remove-title')?.closest('dialog').open", "removal confirmation")};
-    [...document.querySelectorAll('#m5-remove-title ~ button')].find(button => button.textContent === '목록에서 제거').click();
+    [...document.querySelectorAll('#m5-remove-title ~ .m5-dialog-actions button')].find(button => button.textContent === '목록에서 제거').click();
     await ${waitFor("[...document.querySelectorAll('[role=alert]')].some(node => node.textContent.includes('파일 감시 해제를 확인하지 못해'))", "failed release blocks leaving")};
     if (!document.querySelector('#m5-followup-text') || document.querySelector('h1').textContent !== 'smoke') throw new Error('failed release cleared the project');
     if (removalRequests !== 0) throw new Error('release failure still removed list entry');
@@ -851,6 +864,7 @@ app.whenReady().then(async () => {
     [...document.querySelectorAll('.m5-project-rail .m5-project-overflow button')].find(button => button.textContent === '목록에서 제거').click();
     await ${waitFor("document.querySelector('#m5-remove-title')?.closest('dialog').open", "remove project confirmation")};
     const dialog = document.querySelector('#m5-remove-title').closest('dialog');
+    if (parseFloat(getComputedStyle(dialog.querySelector('.m5-dialog-actions')).gap) < 8) throw new Error('removal buttons need spacing');
     [...dialog.querySelectorAll('button')].find(button => button.textContent === '취소').click();
     if (removed) throw new Error('cancelled project removal mutated catalog');
     document.querySelector('.m5-project-rail .m5-project-overflow summary').click();

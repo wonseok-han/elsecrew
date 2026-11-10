@@ -194,6 +194,24 @@ export class ChatUiController {
 
   finishLeavingProjectView(): void { this.#set({ switching: false }); }
 
+  /** Refresh list metadata without replacing the selected chat or editor workspace. */
+  async refreshChatList(): Promise<void> {
+    const projectId = this.#state.projectId;
+    if (!projectId || this.#disposed || this.#state.loadingMoreChats) return;
+    const generation = this.#generation;
+    this.#set({ loadingMoreChats: true });
+    try {
+      const page = await this.#bridge.listChats({ projectId, cursor: null, limit: 100 });
+      if (!this.#live(generation) || this.#state.projectId !== projectId) return;
+      if (page.projectId !== projectId || page.items.some(item => item.projectId !== projectId)) throw new Error("chat list identity mismatch");
+      this.#set({ chats: page.items, nextChatCursor: page.nextCursor });
+    } catch (error) {
+      if (this.#live(generation) && this.#state.projectId === projectId) this.#error("m5.chatError.more", error);
+    } finally {
+      if (this.#live(generation) && this.#state.projectId === projectId) this.#set({ loadingMoreChats: false });
+    }
+  }
+
   async loadMoreChats(): Promise<void> {
     const { projectId, nextChatCursor: cursor, loadingMoreChats } = this.#state;
     if (!projectId || cursor === null || loadingMoreChats || this.#disposed) return;

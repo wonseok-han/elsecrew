@@ -246,13 +246,13 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       // Keep chat actions locked when watcher release cannot be confirmed.
     } finally { setLeavingProject(false); }
   };
-  const canRemove = admissionReady && !settingsOpen && !newChatOpen && !snapshot.actionBlocked && !snapshot.selectionBlocked && controller.canLeaveProject() && chatController.canLeaveProjectView() && !removing;
+  const canRemove = admissionReady && !settingsOpen && !newChatOpen && !snapshot.actionBlocked && !snapshot.selectionBlocked && controller.canLeaveProject() && chatController.canLeaveProjectView() && !chat.loadingMoreChats && !removing;
   const changeList = async (target: { projectId: string; chatId?: string }, restore = false) => {
     if (!canRemove || !window.m5Projects) return;
     setRemoving(true); setRemovalError(false);
     const wasCurrent = controller.snapshot().project?.id === target.projectId;
     try {
-      if (wasCurrent) {
+      if (wasCurrent && !restore) {
         await leaveProject();
         if (controller.snapshot().project) throw new Error("project view could not be released");
       }
@@ -260,9 +260,10 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         : target.chatId ? { action: "removeChat" as const, projectId: target.projectId, chatId: target.chatId }
         : { action: "removeProject" as const, projectId: target.projectId };
       validateProjectCatalogResult(await window.m5Projects.request(input), input);
-      setCatalogRevision(value => value + 1);
+      if (!restore) setCatalogRevision(value => value + 1);
       setRemoval(null);
-      if (wasCurrent && (target.chatId || restore)) await controller.reopenProject(target.projectId, input => window.m5Projects!.request(input));
+      if (wasCurrent && restore) await chatController.refreshChatList();
+      else if (wasCurrent && target.chatId) await controller.reopenProject(target.projectId, input => window.m5Projects!.request(input));
     } catch { setRemovalError(true); }
     finally { setRemoving(false); }
   };
@@ -308,8 +309,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         <h2 id="m5-remove-title">{t("m5.catalog.remove")}</h2>
         <p>{removal?.label}</p><p>{t(removal?.chatId ? "m5.catalog.removeChatHelp" : "m5.catalog.removeHelp")}</p>
         {removalError && <p role="alert">{t("m5.catalog.removeError")}</p>}
-        <button type="button" disabled={removing} onClick={() => setRemoval(null)}>{t("m5.editor.cancel")}</button>
-        <button type="button" disabled={!canRemove} onClick={() => removal && void changeList(removal)}>{t("m5.catalog.remove")}</button>
+        <div className="m5-dialog-actions"><button type="button" disabled={removing} onClick={() => setRemoval(null)}>{t("m5.editor.cancel")}</button>
+        <button type="button" disabled={!canRemove} onClick={() => removal && void changeList(removal)}>{t("m5.catalog.remove")}</button></div>
       </dialog>
       <header className={`m5-toolbar${snapshot.project ? " m5-toolbar-project" : ""}`}>
         <div>
@@ -429,9 +430,9 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
             <span className="m5-chat-goal">{item.goal}</span><span className={changed ? "m5-chat-update" : `m5-chat-status m5-chat-status-${state}`}>{status}</span>
           </button><button type="button" className="m5-chat-remove" title={t("m5.catalog.remove")} aria-label={t("m5.catalog.removeChat", { goal: item.goal })} disabled={!canRemove} onClick={() => { setRemovalError(false); setRemoval({ projectId: item.projectId, chatId: item.chatId, label: item.goal }); }}>×</button></div>;
         })}</div>
-        <button type="button" className="m5-secondary" disabled={!canRemove} onClick={() => snapshot.project && void changeList({ projectId: snapshot.project.id }, true)}>{t("m5.catalog.restoreChats")}</button>
+        <button type="button" className="m5-chat-restore" disabled={!canRemove} onClick={() => snapshot.project && void changeList({ projectId: snapshot.project.id }, true)}>{t("m5.catalog.restoreChats")}</button>
         {removalError && !removal && <p role="alert">{t("m5.catalog.removeError")}</p>}
-        {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? t("m5.navigation.loadingChats") : t("m5.navigation.moreChats")}</button>}
+        {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats || removing} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? t("m5.navigation.loadingChats") : t("m5.navigation.moreChats")}</button>}
         <button ref={newChatButtonRef} type="button" className="m5-new-chat-button" disabled={!admissionReady || !projectDataReady || settingsOpen || chat.preparing || chat.switching} onClick={() => setNewChatOpen(true)}>{t("m5.navigation.newChat")}</button>
       </section>}>
         <aside className="m5-panel m5-files" aria-label={t("m5.navigation.files")}>

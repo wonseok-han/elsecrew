@@ -827,3 +827,7 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-chat-list-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .m5-chat-list-row > .m5-chat-chip { flex: 1; min-width: 0; }
 .m5-chat-remove { flex: 0 0 24px; padding: 2px; background: transparent; border: 0; color: var(--m5-muted); }
+
+.m5-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.m5-chat-navigation > .m5-chat-restore { display: block; width: auto; align-self: flex-start; margin: 8px 0; padding: 4px 6px; min-height: 26px; border: 0; background: transparent; color: var(--m5-muted); font-size: 11px; box-shadow: none; }
+.m5-chat-navigation > .m5-chat-restore:hover:enabled { color: var(--m5-text); background: var(--m5-hover); }

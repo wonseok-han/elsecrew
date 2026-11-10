@@ -470,3 +470,18 @@ test("new chat automatically requests application baseline and does not retry wi
   assert.equal(controller.snapshot().error?.messageKey, "m5.chatError.prepare");
   controller.dispose();
 });
+
+test("refreshing chat list preserves selected conversation and its draft", async () => {
+  const bridge = new FakeBridge();
+  const controller = new ChatUiController(bridge as unknown as M5BridgeV3);
+  controller.start(); await controller.openProject("project_a");
+  await controller.prepareSwitch("chat_a", true); await controller.commitPrepared("chat_a", true);
+  const before = controller.snapshot();
+  bridge.chats = [...bridge.chats, chat("chat_restored")];
+  await controller.refreshChatList();
+  assert.equal(controller.snapshot().activeChat, before.activeChat);
+  assert.equal(controller.snapshot().messages, before.messages);
+  assert.equal(controller.snapshot().settings, before.settings);
+  assert.equal(controller.snapshot().chats.length, 3);
+  controller.dispose();
+});
