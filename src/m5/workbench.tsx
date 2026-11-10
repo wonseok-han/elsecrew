@@ -126,6 +126,13 @@ function WorkbenchUnavailable() {
 function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const { lang, t } = useI18n();
   const controller = useMemo(() => new ProjectEditorController(bridge), [bridge]);
+  const [catalogRevision, setCatalogRevision] = useState(0);
+  const [removal, setRemoval] = useState<{ projectId: string; chatId?: string; label: string } | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const [removalError, setRemovalError] = useState(false);
+  const removalDialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => { if (removal) removalDialog.current?.showModal(); else removalDialog.current?.close(); }, [removal]);
+
   useEffect(() => {
     const menus = () => document.querySelectorAll<HTMLDetailsElement>(".m5-project-menu, .m5-project-guide, .m5-project-overflow");
     const outside = (event: PointerEvent) => menus().forEach(menu => { if (!menu.contains(event.target as Node)) menu.open = false; });
@@ -156,7 +163,6 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const newChatDialogRef = useRef<HTMLDialogElement>(null);
   const newChatButtonRef = useRef<HTMLButtonElement>(null);
   const [newChatOpen, setNewChatOpen] = useState(false);
-  const [applicationBaseline, setApplicationBaseline] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appDefaultsOpen, setAppDefaultsOpen] = useState(false);
   const [appDefaultsLoaded, setAppDefaultsLoaded] = useState(false);
@@ -207,7 +213,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       settingsButtonRef.current?.focus();
     }
   }, [settingsOpen, newChatOpen]);
-  useEffect(() => { setNewChatOpen(false); setReturnToNewChat(false); setGoal(""); setApplicationBaseline(false); }, [snapshot.project?.id]);
+  useEffect(() => { setNewChatOpen(false); setReturnToNewChat(false); setGoal(""); }, [snapshot.project?.id]);
   useEffect(() => {
     const dialog = newChatDialogRef.current;
     if (newChatOpen) { dialog?.showModal(); goalInputRef.current?.focus(); }
@@ -240,6 +246,26 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       // Keep chat actions locked when watcher release cannot be confirmed.
     } finally { setLeavingProject(false); }
   };
+  const canRemove = admissionReady && !settingsOpen && !newChatOpen && !snapshot.actionBlocked && !snapshot.selectionBlocked && controller.canLeaveProject() && chatController.canLeaveProjectView() && !removing;
+  const changeList = async (target: { projectId: string; chatId?: string }, restore = false) => {
+    if (!canRemove || !window.m5Projects) return;
+    setRemoving(true); setRemovalError(false);
+    const wasCurrent = controller.snapshot().project?.id === target.projectId;
+    try {
+      if (wasCurrent) {
+        await leaveProject();
+        if (controller.snapshot().project) throw new Error("project view could not be released");
+      }
+      const input = restore ? { action: "restoreChats" as const, projectId: target.projectId }
+        : target.chatId ? { action: "removeChat" as const, projectId: target.projectId, chatId: target.chatId }
+        : { action: "removeProject" as const, projectId: target.projectId };
+      validateProjectCatalogResult(await window.m5Projects.request(input), input);
+      setCatalogRevision(value => value + 1);
+      setRemoval(null);
+      if (wasCurrent && (target.chatId || restore)) await controller.reopenProject(target.projectId, input => window.m5Projects!.request(input));
+    } catch { setRemovalError(true); }
+    finally { setRemoving(false); }
+  };
   const switchChat = async (chatId: string) => {
     controller.setActionBlocked(true, { key: "m5.editorNotice.switching" });
     const candidate = await chatController.prepareSwitch(chatId, controller.canLeaveProject());
@@ -251,7 +277,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const createChat = async () => {
     if (!snapshot.project) return;
     controller.setActionBlocked(true, { key: "m5.editorNotice.newChat" });
-    const created = await chatController.createChat({ projectId: snapshot.project.id }, goal, applicationBaseline);
+    const created = await chatController.createChat({ projectId: snapshot.project.id }, goal, true);
     if (created) { setGoal(""); setNewChatOpen(false); await switchChat(created.chatId); }
     else controller.setActionBlocked(chatController.isActionBlocked());
   };
@@ -277,7 +303,14 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
 
   return (
     <main inert={updatePreparing} className={`m5-workbench${preferencesOpen ? " m5-settings-open" : ""}${window.m5Projects ? " m5-with-project-rail" : ""}`} lang={lang} aria-label={t("m5.shell.label")}>
-      <ProjectCatalog rail settingsAction={<button type="button" className="m5-secondary m5-open-preferences" disabled={settingsOpen || newChatOpen || appDefaultsOpen} onClick={() => setPreferencesOpen(true)} title={t("m5.preferences.title")} aria-label={t("m5.preferences.title")}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"><path d="m10 3-.6 2.4-2 .9L5 5.6 3 9l1.8 1.7v2.6L3 15l2 3.4 2.4-.7 2 .9L10 21h4l.6-2.4 2-.9 2.4.7 2-3.4-1.8-1.7v-2.6L21 9l-2-3.4-2.4.7-2-.9L14 3Z"/><circle cx="12" cy="12" r="3"/></svg><span>{t("m5.preferences.title")}</span></button>} onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} onHasProjects={setHasSavedProjects} ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
+      <ProjectCatalog rail refreshKey={catalogRevision} removeDisabled={!canRemove} onRemove={entry => { setRemovalError(false); setRemoval({ projectId: entry.projectId, label: entry.canonicalPath }); }} settingsAction={<button type="button" className="m5-secondary m5-open-preferences" disabled={settingsOpen || newChatOpen || appDefaultsOpen} onClick={() => setPreferencesOpen(true)} title={t("m5.preferences.title")} aria-label={t("m5.preferences.title")}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"><path d="m10 3-.6 2.4-2 .9L5 5.6 3 9l1.8 1.7v2.6L3 15l2 3.4 2.4-.7 2 .9L10 21h4l.6-2.4 2-.9 2.4.7 2-3.4-1.8-1.7v-2.6L21 9l-2-3.4-2.4.7-2-.9L14 3Z"/><circle cx="12" cy="12" r="3"/></svg><span>{t("m5.preferences.title")}</span></button>} onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} onHasProjects={setHasSavedProjects} ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
+      <dialog ref={removalDialog} className="m5-discard-dialog" aria-labelledby="m5-remove-title" onCancel={event => { event.preventDefault(); if (!removing) setRemoval(null); }}>
+        <h2 id="m5-remove-title">{t("m5.catalog.remove")}</h2>
+        <p>{removal?.label}</p><p>{t(removal?.chatId ? "m5.catalog.removeChatHelp" : "m5.catalog.removeHelp")}</p>
+        {removalError && <p role="alert">{t("m5.catalog.removeError")}</p>}
+        <button type="button" disabled={removing} onClick={() => setRemoval(null)}>{t("m5.editor.cancel")}</button>
+        <button type="button" disabled={!canRemove} onClick={() => removal && void changeList(removal)}>{t("m5.catalog.remove")}</button>
+      </dialog>
       <header className={`m5-toolbar${snapshot.project ? " m5-toolbar-project" : ""}`}>
         <div>
           <h1>{snapshot.project?.name ?? t(hasSavedProjects ? "m5.home.welcome" : "m5.shell.start")}</h1>
@@ -326,7 +359,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       <StorageAdmissionNotice admission={admission} />
       <WorkStatusNotice bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])} />
       {!snapshot.project && <GuidedStart returning={hasSavedProjects} disabled={!admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked} onChoose={() => void controller.chooseProject()} />}
-      {!snapshot.project && hasSavedProjects && <ProjectCatalog home onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} ready={admissionReady} controller={controller}
+      {!snapshot.project && hasSavedProjects && <ProjectCatalog home refreshKey={catalogRevision} removeDisabled={!canRemove} onRemove={entry => { setRemovalError(false); setRemoval({ projectId: entry.projectId, label: entry.canonicalPath }); }} onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} ready={admissionReady} controller={controller}
         disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked} />}
       <GitSelectionView disabled={leavingProject || settingsOpen || leaveError} />
 
@@ -357,8 +390,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         {chat.notice && <p role="status">{formatChatNotice(chat, lang)}</p>}
         <form className="m5-new-chat-form" onSubmit={(event) => { event.preventDefault(); if (admissionReady && projectDataReady && goal.trim() && !chat.preparing && !chat.switching && !chat.preparationApiUnavailable && !(snapshot.workspace && !controller.canLeaveProject())) void createChat(); }}>
           <input ref={goalInputRef} aria-label={t("m5.navigation.goal")} value={goal} onChange={(event) => setGoal(event.target.value)} placeholder={t("m5.navigation.goalPlaceholder")} disabled={!admissionReady || chat.preparing} />
-          <label><input type="checkbox" checked={applicationBaseline} disabled={!admissionReady || chat.preparing} onChange={event => setApplicationBaseline(event.target.checked)} />{t("m5.application.chatBaseline")}</label>
-          {applicationBaseline && <p>{t("m5.application.chatBaselineHelp")}</p>}
+          <p className="m5-first-chat-note">{t("m5.application.autoBaseline")}</p>
           <button type="submit" disabled={!admissionReady || !projectDataReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject())}>{t("m5.navigation.newChat")}</button>
         </form>
         <details className="m5-chat-team-details"><summary>{t("m5.firstChat.team")}</summary>
@@ -393,10 +425,12 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           const state = selected ? chat.activeChat!.state : item.state;
           const changed = chat.refreshNeededChatIds.includes(item.chatId);
           const status = changed ? t("m5.navigation.newState") : t(`m5.chat.state.${state}`);
-          return <button key={item.chatId} type="button" disabled={!admissionReady || settingsOpen || chat.switching} aria-current={selected ? "true" : undefined} title={`${item.goal} · ${status}`} className={selected ? "m5-chat-chip selected" : "m5-chat-chip"} onClick={() => void switchChat(item.chatId)}>
+          return <div className="m5-chat-list-row" key={item.chatId}><button type="button" disabled={!admissionReady || settingsOpen || chat.switching} aria-current={selected ? "true" : undefined} title={`${item.goal} · ${status}`} className={selected ? "m5-chat-chip selected" : "m5-chat-chip"} onClick={() => void switchChat(item.chatId)}>
             <span className="m5-chat-goal">{item.goal}</span><span className={changed ? "m5-chat-update" : `m5-chat-status m5-chat-status-${state}`}>{status}</span>
-          </button>;
+          </button><button type="button" className="m5-chat-remove" title={t("m5.catalog.remove")} aria-label={t("m5.catalog.removeChat", { goal: item.goal })} disabled={!canRemove} onClick={() => { setRemovalError(false); setRemoval({ projectId: item.projectId, chatId: item.chatId, label: item.goal }); }}>×</button></div>;
         })}</div>
+        <button type="button" className="m5-secondary" disabled={!canRemove} onClick={() => snapshot.project && void changeList({ projectId: snapshot.project.id }, true)}>{t("m5.catalog.restoreChats")}</button>
+        {removalError && !removal && <p role="alert">{t("m5.catalog.removeError")}</p>}
         {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? t("m5.navigation.loadingChats") : t("m5.navigation.moreChats")}</button>}
         <button ref={newChatButtonRef} type="button" className="m5-new-chat-button" disabled={!admissionReady || !projectDataReady || settingsOpen || chat.preparing || chat.switching} onClick={() => setNewChatOpen(true)}>{t("m5.navigation.newChat")}</button>
       </section>}>

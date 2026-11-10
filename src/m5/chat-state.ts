@@ -245,7 +245,7 @@ export class ChatUiController {
     }
   }
 
-  async createChat(source: { projectId: string }, goal: string, applicationBaseline = false): Promise<ChatRecordV1 | null> {
+  async createChat(source: { projectId: string }, goal: string, applicationBaseline = true): Promise<ChatRecordV1 | null> {
     const settings = this.#state.settings;
     if (!settings || this.#state.switching || this.isRecoveryBlocked() || settings.projectId !== source.projectId || !goal.trim() || this.#state.preparing) return null;
     const generation = this.#generation;

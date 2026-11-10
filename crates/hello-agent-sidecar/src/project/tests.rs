@@ -6069,3 +6069,42 @@ fn tree_lists_directories_before_files_across_pages() {
     assert_eq!(second.result["entries"][1]["name"], "aaa.txt");
     assert!(second.result["nextCursor"].is_null());
 }
+
+#[test]
+fn catalog_removal_preserves_source_and_restores_after_selection() {
+    let mut f = Fixture::open();
+    let source = fs::read(f.source.join("src/edit.txt")).unwrap();
+    f.manager.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_hide").unwrap();
+    assert!(f.manager.list_saved_projects(&f.storage, None).unwrap().result["projects"].as_array().unwrap().is_empty());
+    assert!(f.storage.projection_record("project", &f.project_id).unwrap().is_some());
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), source);
+    f.manager.open_project(&mut f.storage, f.source.to_str().unwrap(), "req_show").unwrap();
+    assert_eq!(f.manager.list_saved_projects(&f.storage, None).unwrap().result["projects"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn catalog_removal_rejects_recovery_and_keeps_visibility() {
+    let mut f = Fixture::open();
+    let mut project = required_project(&f.storage, &f.project_id).unwrap();
+    project.insert("lifecycle".into(), json!("recoveryRequired"));
+    append_object(&mut f.storage, "project", &f.project_id, "op_test_recovery", "req_test_recovery", Value::Object(project)).unwrap();
+    assert!(f.manager.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_hide").is_err());
+    assert_eq!(f.manager.list_saved_projects(&f.storage, None).unwrap().result["projects"].as_array().unwrap().len(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn catalog_removal_refuses_open_application_confirmation() {
+    use application::review::{confirmation::Confirmations, ReviewTarget};
+    let (mut f, review_id) = prepared_backup_fixture();
+    let mut owner = Confirmations::default();
+    let (token, _) = owner.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review_id).unwrap();
+    f.manager.application_confirmations = owner;
+    for (action, chat) in [("removeProject", None), ("removeChat", Some("chat_pending")), ("restoreChats", None)] {
+        let error = f.manager.change_catalog_visibility(&mut f.storage, &f.project_id, chat, action, "req_confirmation_hide").err().unwrap();
+        assert!(error.detail.contains("close the application confirmation"));
+    }
+    assert_eq!(f.manager.list_saved_projects(&f.storage, None).unwrap().result["projects"].as_array().unwrap().len(), 1);
+    f.manager.cancel_application_confirmation(&token).unwrap();
+    f.manager.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_after_confirmation").unwrap();
+}

@@ -809,9 +809,15 @@ app.whenReady().then(async () => {
     parallelPaintReport.limitations = ['Four synthetic sources; only chat 0 timed. Background chats checked after selection, not painted during input.', 'Two animation frames are a presentation proxy, not a compositor timestamp. No native sidecar transport, packaged startup, or complete G6 gate.'];
     ` : ""}
     window.m5Projects.request = input => input.action === 'releaseView' ? Promise.reject(new Error('synthetic release failure')) : originalRequest(input);
-    [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '프로젝트 화면 닫기').click();
+    let removalRequests = 0;
+    const failingRequest = window.m5Projects.request;
+    window.m5Projects.request = input => { if (input.action === 'removeChat' || input.action === 'removeProject') removalRequests++; return failingRequest(input); };
+    document.querySelector('.m5-chat-remove').click();
+    await ${waitFor("document.querySelector('#m5-remove-title')?.closest('dialog').open", "removal confirmation")};
+    [...document.querySelectorAll('#m5-remove-title ~ button')].find(button => button.textContent === '목록에서 제거').click();
     await ${waitFor("[...document.querySelectorAll('[role=alert]')].some(node => node.textContent.includes('파일 감시 해제를 확인하지 못해'))", "failed release blocks leaving")};
     if (!document.querySelector('#m5-followup-text') || document.querySelector('h1').textContent !== 'smoke') throw new Error('failed release cleared the project');
+    if (removalRequests !== 0) throw new Error('release failure still removed list entry');
   })()`);
   process.stdout.write(`${JSON.stringify(result)}\n`);
   process.stdout.write(JSON.stringify({ cleanupConsent: await window.webContents.executeJavaScript('globalThis.cleanupConsentReport') }) + '\n');
@@ -834,6 +840,26 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"Codex 연결\"]')?.textContent.includes('로그인이 연결됐어요')", "saved agent selection after reload")};
     if (document.querySelector('.m5-provider-selection form')) throw new Error('saved agent choice was lost');
     if (!document.querySelector('[aria-label="Claude Code 연결"]')) throw new Error('added agent lost after reload');
+    await ${waitFor("document.querySelector('.m5-project-rail .m5-project-overflow')", "project removal on home")};
+    const catalogRequest = window.m5Projects.request;
+    let removed = false;
+    window.m5Projects.request = async input => {
+      if (input.action === 'removeProject') { if (input.projectId !== 'earlier_project') throw new Error('wrong removal target'); removed = true; window.m5SmokeCatalogEmpty = true; return {schemaVersion:1, action:input.action, projectId:input.projectId}; }
+      return catalogRequest(input);
+    };
+    document.querySelector('.m5-project-rail .m5-project-overflow summary').click();
+    [...document.querySelectorAll('.m5-project-rail .m5-project-overflow button')].find(button => button.textContent === '목록에서 제거').click();
+    await ${waitFor("document.querySelector('#m5-remove-title')?.closest('dialog').open", "remove project confirmation")};
+    const dialog = document.querySelector('#m5-remove-title').closest('dialog');
+    [...dialog.querySelectorAll('button')].find(button => button.textContent === '취소').click();
+    if (removed) throw new Error('cancelled project removal mutated catalog');
+    document.querySelector('.m5-project-rail .m5-project-overflow summary').click();
+    [...document.querySelectorAll('.m5-project-rail .m5-project-overflow button')].find(button => button.textContent === '목록에서 제거').click();
+    await ${waitFor("document.querySelector('#m5-remove-title')?.closest('dialog').open", "reopen removal confirmation")};
+    [...dialog.querySelectorAll('button')].find(button => button.textContent === '목록에서 제거').click();
+    await ${waitFor("!document.querySelector('.m5-project-rail .m5-project-overflow')", "project removed from catalog")};
+    if (!removed) throw new Error('project removal not persisted');
+
   })()`);
   if (window.isVisible() || window.isFocused()) throw new Error("renderer smoke captured desktop focus");
   window.webContents.debugger.detach();

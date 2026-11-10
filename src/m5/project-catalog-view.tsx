@@ -3,7 +3,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ProjectEditorController } from "./editor-state.ts";
 import { validateProjectCatalogResult, type ProjectCatalogEntry } from "./contracts/project-catalog-v1.ts";
 
-export function ProjectCatalog({ controller, disabled, currentId, ready = true, rail = false, home = false, settingsAction, onManage, onHasProjects }: {
+export function ProjectCatalog({ controller, disabled, currentId, ready = true, rail = false, home = false, settingsAction, onManage, onRemove, removeDisabled, refreshKey = 0, onHasProjects }: {
+  onRemove?: (entry: ProjectCatalogEntry) => void; removeDisabled?: boolean; refreshKey?: number;
   settingsAction?: ReactNode; onManage?: (entry: ProjectCatalogEntry) => void; controller: ProjectEditorController; disabled: boolean; currentId?: string; ready?: boolean; rail?: boolean; home?: boolean; onHasProjects?: (value: boolean) => void;
 }) {
   const { t } = useI18n();
@@ -33,7 +34,7 @@ export function ProjectCatalog({ controller, disabled, currentId, ready = true, 
     }).catch(() => { if (!cancelled && epoch === generation.current) setError(true); })
       .finally(() => { if (!cancelled && epoch === generation.current) setBusy(false); });
     return () => { cancelled = true; };
-  }, [rail, home, ready, service, currentId, disabled]);
+  }, [rail, home, ready, service, currentId, disabled, refreshKey]);
   useEffect(() => { if (!busy && !error) onHasProjects?.(entries.length > 0); }, [entries, busy, error, onHasProjects]);
   if (!service) return null;
   const load = async (cursor: string | null) => {
@@ -70,7 +71,7 @@ export function ProjectCatalog({ controller, disabled, currentId, ready = true, 
           <strong>{entry.canonicalPath.split(/[\\/]/).filter(Boolean).pop() ?? entry.projectId}</strong>
           {entry.projectId === currentId && <small className="m5-project-current">{t("m5.catalog.active")}</small>}
           <span dir="auto">{entry.canonicalPath}</span>
-        </button><details className="m5-project-overflow" onKeyDown={event => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}><summary aria-label={t("m5.catalog.manage")} title={t("m5.catalog.manage")}>⋯</summary><div><button type="button" className="m5-project-manage" disabled={disabled || busy} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); onManage?.(entry); }} title={t("m5.catalog.manage")}>{t("m5.preferences.project")}</button></div></details></li>)}</ul>}
+        </button><details className="m5-project-overflow" onKeyDown={event => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}><summary aria-label={t("m5.catalog.manage")} title={t("m5.catalog.manage")}>⋯</summary><div><button type="button" className="m5-project-manage" disabled={disabled || busy} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); onManage?.(entry); }} title={t("m5.catalog.manage")}>{t("m5.preferences.project")}</button>{onRemove && <button type="button" disabled={removeDisabled || busy} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); onRemove(entry); }}>{t("m5.catalog.remove")}</button>}</div></details></li>)}</ul>}
       {(!rail || !disabled || error) && <div className="m5-project-pagination">{!rail && <button type="button" title={t("m5.catalog.first")} aria-label={t("m5.catalog.first")} disabled={disabled || busy} onClick={() => void load(null)}>{t("m5.catalog.first")}</button>}
         {next && <button type="button" disabled={disabled || busy || error} onClick={() => void load(next)}>{t("m5.catalog.next")}</button>}</div>}
     </div>}

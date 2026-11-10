@@ -1076,6 +1076,63 @@ impl ProjectManager {
         })
     }
 
+    /// Hide metadata only. No source, snapshot, history, or recovery data is deleted.
+    pub fn change_catalog_visibility(
+        &mut self, storage: &mut Storage, project_id: &str, chat_id: Option<&str>,
+        action: &str, request_id: &str,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        let mut project = required_project(storage, project_id)?;
+        #[cfg(any(unix, windows))]
+        if self.application_confirmations.has_pending() {
+            return Err(ProjectFailure::recovery("close the application confirmation before list removal"));
+        }
+
+        if !matches!(project.get("lifecycle").and_then(Value::as_str), Some("opened" | "active" | "abandoned"))
+            || self.application_running() || self.preparation_cancel.is_some() || !self.pending_saves.is_empty()
+            || project.get("application_intent").is_some_and(|intent| !matches!(intent["state"].as_str(), Some("abandoned" | "restored")))
+        { return Err(ProjectFailure::recovery("finish project work or recovery before removing it from lists")); }
+        if project.get("prepared_workspaces").is_some_and(|value| value.as_object().is_none_or(|items| items.values().any(|item| !matches!(item["bindingState"].as_str(), Some("bound" | "abandoned")))) ) {
+            return Err(ProjectFailure::recovery("finish pending workspace preparation before list removal"));
+        }
+        let chats = storage.projection_records("chat")?;
+        if chats.iter().any(|chat| chat.get("project_id").and_then(Value::as_str) == Some(project_id)
+            && (chat.get("state").and_then(Value::as_str) == Some("recoveryRequired")
+                || chat.get("save_sessions").is_some_and(|sessions| sessions.as_object().is_none_or(|items| !items.is_empty())))) {
+            return Err(ProjectFailure::recovery("finish saved chat recovery before list removal"));
+        }
+        let ids: Vec<&str> = chats.iter().filter(|chat| chat.get("project_id").and_then(Value::as_str) == Some(project_id))
+            .filter_map(|chat| chat.get("chat_id").and_then(Value::as_str)).collect();
+        if chat_id.is_some_and(|id| !ids.contains(&id)) { return Err(ProjectFailure::manifest("chat does not belong to project")); }
+        for run in storage.projection_records("run")? {
+            if run.get("chat_id").and_then(Value::as_str).is_some_and(|id| ids.contains(&id))
+                && (!matches!(run.get("state").and_then(Value::as_str), Some("succeeded" | "failed" | "canceled"))
+                    || run.get("recovery").is_some_and(|value| !value.is_null() && value["state"] != "resolved"))
+            { return Err(ProjectFailure::recovery("finish agent execution or recovery before removing list entries")); }
+        }
+        for lock in storage.projection_records("lock")? {
+            if lock.get("project_id").and_then(Value::as_str) == Some(project_id)
+                && (lock.get("poisoned").and_then(Value::as_bool) != Some(false)
+                    || lock.get("recovery_required").and_then(Value::as_bool) != Some(false)
+                    || lock.get("writer_run_id").is_some_and(|value| !value.is_null()))
+            { return Err(ProjectFailure::recovery("project lock needs attention before list removal")); }
+        }
+        match action {
+            "removeProject" => { project.insert("catalog_hidden".into(), json!(true)); }
+            "removeChat" => {
+                let id = chat_id.ok_or_else(|| ProjectFailure::manifest("chat identity missing"))?;
+                let hidden = project.entry("catalog_hidden_chats").or_insert_with(|| json!([])).as_array_mut()
+                    .ok_or_else(|| ProjectFailure::manifest("invalid hidden chat list"))?;
+                if !hidden.iter().any(|value| value == id) { hidden.push(json!(id)); }
+            }
+            "restoreChats" => { project.insert("catalog_hidden_chats".into(), json!([])); }
+            _ => return Err(ProjectFailure::manifest("unknown catalog mutation")),
+        }
+        append_object(storage, "project", project_id, &format!("op_catalog_{request_id}"), request_id, Value::Object(project))?;
+        let mut result = json!({"schemaVersion":1,"action":action,"projectId":project_id});
+        if let Some(id) = chat_id { result["chatId"] = json!(id); }
+        Ok(ProjectAction { result, ..Default::default() })
+    }
+
     /// Detach watchers only; durable snapshots and chat bindings remain reusable.
     pub fn release_project_view(
         &mut self,
@@ -1128,6 +1185,10 @@ impl ProjectManager {
                 append_object(storage, "project", &project_id,
                     &format!("op_project_path_binding_{request_id}"), request_id,
                     Value::Object(existing.clone()))?;
+            }
+            if existing.get("catalog_hidden") == Some(&json!(true)) {
+                existing.insert("catalog_hidden".into(), json!(false));
+                append_object(storage, "project", &project_id, &format!("op_catalog_restore_{request_id}"), request_id, Value::Object(existing.clone()))?;
             }
             let lifecycle = value_string(&existing, "lifecycle")?;
             if lifecycle == "recoveryRequired" {
@@ -5739,7 +5800,7 @@ fn preserve_project_extensions(
         .as_object()
         .cloned()
         .ok_or_else(|| ProjectFailure::manifest("project payload must be an object"))?;
-    for field in ["native_path_binding", "role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews", "application_backups", "application_intent", "application_history"] {
+    for field in ["catalog_hidden", "catalog_hidden_chats", "native_path_binding", "role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews", "application_backups", "application_intent", "application_history"] {
         if field == path_binding::FIELD && object.contains_key(field) {
             continue;
         }

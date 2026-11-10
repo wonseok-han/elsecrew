@@ -62,7 +62,7 @@ impl Storage {
             .prepare(
                 "SELECT CASE WHEN length(CAST(project_id AS BLOB)) <= 128 THEN project_id END, \
              CASE WHEN length(CAST(canonical_path AS BLOB)) <= ?2 THEN canonical_path END \
-             FROM projects WHERE project_id > ?1 ORDER BY project_id LIMIT ?3",
+             FROM projects WHERE project_id > ?1 AND COALESCE(json_extract(projection_json, '$.catalog_hidden'), 0) != 1 ORDER BY project_id LIMIT ?3",
             )
             .map_err(catalog_sql)?;
         let mut rows = statement

@@ -823,3 +823,7 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-guide-popover ol { grid-template-columns: 1fr; gap: 8px; }
 
 .m5-rail-brand { padding: 4px 8px 18px; font-size: 15px; font-weight: 650; color: var(--m5-text); letter-spacing: -.3px; }
+
+.m5-chat-list-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.m5-chat-list-row > .m5-chat-chip { flex: 1; min-width: 0; }
+.m5-chat-remove { flex: 0 0 24px; padding: 2px; background: transparent; border: 0; color: var(--m5-muted); }

@@ -43,6 +43,8 @@ pub(in crate::project) struct PreparedApplication {
 // No serialization or persisted approval: a new owner always starts empty.
 #[allow(dead_code)]
 impl Confirmations {
+    pub(in crate::project) fn has_pending(&self) -> bool { self.pending.is_some() }
+
     pub(in crate::project) fn project_for_token(
         &self,
         token: &str,

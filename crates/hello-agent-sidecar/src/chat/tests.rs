@@ -6525,3 +6525,50 @@ fn app_role_defaults_seed_once_and_survive_reopen() {
         original
     );
 }
+
+#[test]
+fn catalog_removal_hides_and_restores_chat_without_changing_records() {
+    let mut f = Fixture::new();
+    let snapshot = f.snapshot("req_hide_snapshot");
+    let chat = f.create_chat(&snapshot, "keep history", "req_hide_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let before = f.storage.projection_record("chat", chat_id).unwrap();
+    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(chat_id), "removeChat", "req_hide").unwrap();
+    assert!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"].as_array().unwrap().is_empty());
+    assert_eq!(f.storage.projection_record("chat", chat_id).unwrap(), before);
+    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "restoreChats", "req_restore").unwrap();
+    assert_eq!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"][0]["chatId"], chat_id);
+    assert_eq!(f.storage.projection_record("chat", chat_id).unwrap(), before);
+}
+
+#[test]
+fn catalog_removal_refuses_runs_locks_and_nonmember_chat() {
+    let mut f = Fixture::new();
+    let snapshot = f.snapshot("req_guard_snapshot");
+    let chat = f.create_chat(&snapshot, "guard removal", "req_guard_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some("chat_missing"), "removeChat", "req_missing").is_err());
+    let cases: Value = serde_json::from_str(include_str!("../../../../tests/fixtures/m5/g5-v1/cases.json")).unwrap();
+    let mut run = cases["valid"].as_array().unwrap().iter().find(|case| case["name"] == "valid-cancel-transition").unwrap()["value"]["after"].clone();
+    for field in ["chatId", "taskId", "worktreeId", "workspaceIdentity"] { run[field] = chat[field].clone(); }
+    run["runId"] = json!("run_hide_guard");
+    persist_run(&mut f.storage, &run, &snapshot, None, "op_hide_guard").unwrap();
+    let original = run_projection_record(&f.storage, "run_hide_guard").unwrap();
+    for state in ["preparing", "running", "cancelling", "recoveryRequired"] {
+        let mut changed = original.clone(); changed.insert("state".into(), json!(state)); changed["record"]["state"] = json!(state);
+        f.storage.upsert_projection_record("run", "run_hide_guard", &format!("op_hide_{state}"), None, changed).unwrap();
+        assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(chat_id), "removeChat", &format!("req_hide_{state}")).is_err());
+    }
+    let mut unresolved = original.clone(); unresolved.insert("recovery".into(), json!({"state":"unresolved"}));
+    f.storage.upsert_projection_record("run", "run_hide_guard", "op_hide_unresolved", None, unresolved).unwrap();
+    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_hide_unresolved").is_err());
+    f.storage.upsert_projection_record("run", "run_hide_guard", "op_hide_terminal", None, original).unwrap();
+    let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
+    let lock = f.storage.projection_record("lock", &lock_id).unwrap().unwrap();
+    for (field, value) in [("poisoned", json!(true)), ("recovery_required", json!(true)), ("writer_run_id", json!("run_hide_guard"))] {
+        let mut changed = lock.clone(); changed.insert(field.into(), value);
+        f.storage.upsert_projection_record("lock", &lock_id, &format!("op_hide_lock_{field}"), None, changed).unwrap();
+        assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", &format!("req_hide_lock_{field}")).is_err());
+    }
+    assert_eq!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"][0]["chatId"], chat_id);
+}

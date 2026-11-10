@@ -457,3 +457,16 @@ test("설정 변경은 새 revision만 바꾸고 기존 chat role snapshot은 �
   assert.equal(controller.snapshot().settings?.revision, 2); assert.deepEqual(controller.snapshot().chats[0]!.roleSnapshots, before);
   controller.dispose();
 });
+
+test("new chat automatically requests application baseline and does not retry without it", async () => {
+  const bridge = new FakeBridge();
+  const requests: unknown[] = [];
+  Object.assign(bridge, { prepareChatWorkspace: async (input: unknown) => { requests.push(input); throw new Error("source is dirty"); } });
+  const controller = new ChatUiController(bridge as unknown as M5BridgeV3);
+  await controller.openProject("project_a");
+  assert.equal(await controller.createChat({ projectId: "project_a" }, "goal"), null);
+  assert.deepEqual(requests, [{ projectId: "project_a", applicationBaseline: true }]);
+  assert.equal(bridge.created.length, 0);
+  assert.equal(controller.snapshot().error?.messageKey, "m5.chatError.prepare");
+  controller.dispose();
+});

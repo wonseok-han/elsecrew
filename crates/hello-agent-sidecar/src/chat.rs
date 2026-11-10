@@ -630,10 +630,13 @@ impl G5Manager {
     ) -> Result<Value, ProjectFailure> {
         let limit = bounded_limit(limit, G5_PAGE_MAX_ITEMS_V1)?;
         let offset = parse_cursor(cursor)?;
+        let project = project_record(storage, project_id)?;
+        let hidden = project.get("catalog_hidden_chats").and_then(Value::as_array);
         let mut items = storage
             .projection_records("chat")?
             .into_iter()
             .filter(|record| record.get("project_id").and_then(Value::as_str) == Some(project_id))
+            .filter(|record| !hidden.is_some_and(|ids| ids.iter().any(|id| Some(id) == record.get("chat_id"))))
             .filter_map(|record| record.get("record").cloned())
             .collect::<Vec<_>>();
         items.sort_by(|left, right| {

@@ -46,6 +46,9 @@ export type ProjectCatalogRequest =
   | { action: "updateAppRoleDefaults"; expectedRevision: number; roles: readonly RoleProfileV1[] }
   | ({ action: "inspectChatDiscard" } & ChatDiscardAddress)
   | { action: "discardChatWorkspace"; inspection: ChatDiscardInspection; confirmed: true }
+  | { action: "removeProject"; projectId: string }
+  | { action: "restoreChats"; projectId: string }
+  | { action: "removeChat"; projectId: string; chatId: string }
   | { action: "list"; cursor: string | null } | { action: "reopen"; projectId: string } | { action: "releaseView"; projectId: string }
   | { action: "applicationCapabilities" }
   | { action: "inspectApplicationRetirement"; projectId: string; applicationId: string }
@@ -104,6 +107,9 @@ export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "chatApplicationStatus"; chatId: string; status: ApplicationStatus }
   | { schemaVersion: 1; action: "inspectPreparation" | "abandonPreparation"; inspection: PreparationInspection }
   | { schemaVersion: 1; action: "list"; projects: ProjectCatalogEntry[]; nextCursor: string | null }
+  | { schemaVersion: 1; action: "removeProject"; projectId: string }
+  | { schemaVersion: 1; action: "restoreChats"; projectId: string }
+  | { schemaVersion: 1; action: "removeChat"; projectId: string; chatId: string }
   | { schemaVersion: 1; action: "releaseView"; projectId: string }
   | { schemaVersion: 1; action: "reopen"; project: ProjectIdentityV1 };
 
@@ -196,9 +202,9 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
   } else if (request.action === "list") {
     keys(request, ["action", "cursor"]);
     if (request.cursor !== null) id(request.cursor);
-  } else if (request.action === "reopen" || request.action === "releaseView" || request.action === "inspectPreparation" || request.action === "applicationStatus" || request.action === "applicationHistory" || request.action === "applicationPreview" || request.action === "prepareApplicationWorkspace") {
+  } else if (request.action === "removeProject" || request.action === "restoreChats" || request.action === "reopen" || request.action === "releaseView" || request.action === "inspectPreparation" || request.action === "applicationStatus" || request.action === "applicationHistory" || request.action === "applicationPreview" || request.action === "prepareApplicationWorkspace") {
     keys(request, ["action", "projectId"]); id(request.projectId);
-  } else if (request.action === "chatApplicationPreview" || request.action === "chatApplicationStatus") {
+  } else if (request.action === "removeChat" || request.action === "chatApplicationPreview" || request.action === "chatApplicationStatus") {
     keys(request, ["action", "projectId", "chatId"]); id(request.projectId); id(request.chatId);
   } else if (request.action === "abandonPreparation") {
     keys(request, ["action", "inspection"]); validatePreparationInspection(request.inspection);
@@ -361,7 +367,10 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
     if (request.action === "inspectPreparation") {
       if (inspection.projectId !== request.projectId) throw new Error("preparation project mismatch");
     } else if (Object.keys(inspection).some(key => inspection[key as keyof PreparationInspection] !== request.inspection[key as keyof PreparationInspection])) throw new Error("preparation response mismatch");
-  } else if (request.action === "releaseView") {
+  } else if (request.action === "removeChat") {
+    keys(result, ["schemaVersion", "action", "projectId", "chatId"]);
+    if (id(result.projectId) !== request.projectId || id(result.chatId) !== request.chatId) throw new Error("catalog removal identity mismatch");
+  } else if (request.action === "releaseView" || request.action === "removeProject" || request.action === "restoreChats") {
     keys(result, ["schemaVersion", "action", "projectId"]);
     if (id(result.projectId) !== request.projectId) throw new Error("catalog release identity mismatch");
   } else if (request.action === "reopen") {

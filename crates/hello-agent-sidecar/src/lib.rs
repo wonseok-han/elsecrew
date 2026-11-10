@@ -1364,6 +1364,16 @@ impl Sidecar {
                     self.projects.abandon_unstarted_snapshot(&mut self.storage, inspection, &request.request_id)
                         .map(|()| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"abandonPreparation","inspection":inspection}), ..Default::default() })
                 }
+                Some("removeProject" | "removeChat" | "restoreChats") => {
+                    if !self.agent_runtime.owned_run_ids().is_empty() || !self.pending_agent_starts.is_empty() || !self.pending_agent_cancels.is_empty() {
+                        return Ok(HandledRequest::response(error_response(&request, "requestBlocked", "requestBlocked", "list removal requires idle agent execution")));
+                    }
+                    let action = request.params["action"].as_str().unwrap();
+                    let fields: &[&str] = if action == "removeChat" { &["action", "projectId", "chatId"] } else { &["action", "projectId"] };
+                    let params = require_exact_params(&request.params, fields).map_err(invalid_params)?;
+                    let chat_id = if action == "removeChat" { Some(param_string(params, "chatId").map_err(invalid_params)?) } else { None };
+                    self.projects.change_catalog_visibility(&mut self.storage, param_string(params, "projectId").map_err(invalid_params)?, chat_id, action, &request.request_id)
+                }
                 Some("releaseView") => {
                     let params = require_exact_params(&request.params, &["action", "projectId"])
                         .map_err(invalid_params)?;

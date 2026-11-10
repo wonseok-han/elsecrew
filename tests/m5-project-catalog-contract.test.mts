@@ -189,3 +189,16 @@ test("review discard binds the exact inspected chat and requires explicit consen
   assert.throws(() => validateProjectCatalogRequest({...commit,inspection:{...inspection,extra:true}}));
   assert.throws(() => validateProjectCatalogRequest({...request,workspaceIdentity:"../escape"}));
 });
+
+test("list removal binds project and chat identities and rejects extra fields", () => {
+  for (const action of ["removeProject", "restoreChats"] as const) {
+    const request = { action, projectId: "project_a" };
+    assert.doesNotThrow(() => validateProjectCatalogRequest(request));
+    assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, ...request }, request));
+    assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, ...request, projectId: "project_b" }, request));
+    assert.throws(() => validateProjectCatalogRequest({ ...request, deleteFiles: true }));
+  }
+  const request = { action: "removeChat" as const, projectId: "project_a", chatId: "chat_a" };
+  assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, ...request }, request));
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, ...request, chatId: "chat_b" }, request));
+});
