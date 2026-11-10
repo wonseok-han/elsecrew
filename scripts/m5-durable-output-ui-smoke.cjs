@@ -16,7 +16,7 @@ const combined = process.argv.includes('--combined-workload');
 const retentionOnly = packagedQa && process.argv.includes('--file-retention-only');
 const retentionWithOutputDiff = retentionOnly && process.argv.includes('--file-retention-with-output-diff');
 const retentionCycles = process.argv.includes('--file-retention-cycles');
-assert.ok(!retentionCycles || (retentionOnly && !retentionWithOutputDiff), 'Repeated file diagnosis requires file-only retention mode');
+assert.ok(!retentionCycles || retentionOnly, 'Repeated retention diagnosis requires retention-only mode');
 assert.ok(!retentionOnly || !combined, 'Retention-only diagnosis is separate from combined performance');
 // A real foreground surface, not a visibility/throttling override. Limited to
 // the explicitly named QA package; production window policy stays unchanged.
@@ -300,7 +300,7 @@ app.on('browser-window-created', (_event, window) => {
         report.fileRetention.closed = true;
         if (retentionCycles) {
           report.fileRetention.cycles = retainedCycles;
-          report.fileRetention.cycleScope = 'Hidden file-only same-process diagnostic; no forced GC or heap snapshot; not visible combined G6 or leak proof';
+          report.fileRetention.cycleScope = 'Hidden same-process diagnostic; optional stored output and diff; no forced GC or heap snapshot; not visible combined G6 or leak proof';
           await recordRetentionCycle(1);
           for (let cycle = 2; cycle <= 3; cycle++) {
             await setMemoryPhase(`file-cycle-${cycle}-opening`);
@@ -310,6 +310,17 @@ app.on('browser-window-created', (_event, window) => {
             await wait("!![...document.querySelectorAll('.m5-file-row')].find(b => b.title === 'large.txt' && !b.disabled)", 65000);
             await run("[...document.querySelectorAll('.m5-file-row')].find(b => b.title === 'large.txt').click()");
             await wait("!!document.querySelector('.monaco-editor textarea') && !!document.querySelector('.m5-editor-tab-name')", 30000);
+            if (retentionWithOutputDiff) {
+              // Reopen the same stored result; do not start another fixture run.
+              await run("[...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent.trim() === '변경')?.click()");
+              await wait("!![...document.querySelectorAll('.m5-changes button')].find(b => b.textContent === '변경 새로 고침' && !b.disabled)");
+              await run("[...document.querySelectorAll('.m5-changes button')].find(b => b.textContent === '변경 새로 고침').click()");
+              await wait("document.querySelector('.m5-changes')?.textContent.includes('변경 (500)')");
+              await run("[...document.querySelectorAll('.m5-change-row')].find(b => b.title === 'native-diff-fixture/file-000.txt').click()");
+              await wait("document.querySelector('.m5-diff-details')?.textContent.includes('after--')");
+              await wait("!!document.querySelector('.m5-output-scroll article:last-child pre')", 65000);
+              await wait("!![...document.querySelectorAll('button')].find(b => b.textContent === '프로젝트 화면 닫기' && !b.disabled)", 65000);
+            }
             await run("[...document.querySelectorAll('button')].find(b => b.textContent === '프로젝트 화면 닫기' && !b.disabled).click()");
             await wait("!!document.querySelector('.m5-start-action') && !document.querySelector('.monaco-editor')");
             await recordRetentionCycle(cycle);

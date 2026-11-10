@@ -4,6 +4,11 @@
 
 ### 2026-11-10 · by GPT-6
 
+- 직전 소스 감사에서 단순 정리 누락을 찾지 못했으므로 숨김 반복 진단에 기존 output/diff 옵션 결합을 연결했다. 첫 회차의 고정 fake 실행1회와 500파일 diff를 그대로 재사용하고 후속 회차는 저장된 출력·같은 diff만 다시 표시한다. 실제 공급자/추가 실행/새 작업복사본/강제GC는 없다.
+- 파일 전용 반복 결과는 보존하며 혼합 반복은 아직 실측 전이다. 같은 숨김 수명 경로에서 차이를 좁히는 진단일 뿐 가시성·연속4개출력·전체G6 대체가 아니다. 검증은 Node 구문·diff-check, 다음은 이 혼합 반복의 단회 실행과 종료/정리 확인이다. 유휴 기준 변경 및 Windows 추가CI 승인은 아직 대기, 제품코드·안전계약 변경 없음.
+
+### 2026-11-10 · by GPT-6
+
 - 직전 턴은 같은 프로세스 파일 반복 실측363644d6으로 progress였다. 현재 clean checkout에서 diff/출력 수명 코드를 추가 대조했다. editor-state.leaveProjectView는 tabs/tree/diffText/summary를 비우고 epoch를 증가시킨다. chat-state.clearProjectView는 messages/runs/agentRuns와 pending을 비우며 출력 panel cleanup은 abort·timer clear·reader.stop을 호출한다. reader.stop은 구독을 해제한다. 따라서 이 경로에 단순 clear/dispose를 더할 근거는 확인하지 못했다.
 - QA main trace도 모든 이벤트 배열을 유지하는 대신 root thread별 최대 witness/개수만 보존한다. 이 정적 확인은 런타임 누수 부재 또는 종합 잔류 원인 확정이 아니므로 추측성 제품 변경은 하지 않았다. 다음 비교는 출력/diff와 계측 프로세스의 영향이며 첫 로드의 유지량만으로 누수를 단정하지 않는다.
 - 사용자에게 유휴512MiB 채택 여부를 명시적 선택 질문으로 보냈다. 기존 기준·안전 경계는 그대로며 Windows 추가CI 승인은 계속 대기다. 이번 검증은 소스 수명 대조·문서 diff 확인만, 새 빌드/모델/외부 게시 없음.

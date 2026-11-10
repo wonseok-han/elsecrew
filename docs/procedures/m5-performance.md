@@ -330,6 +330,6 @@ macOS QA는 창 표시 및 native 입력 직전에만 app.focus({steal:true})로
 
 ### 같은 프로세스의 파일 수명 반복 진단
 
-QA 패키지에서 `--file-retention-only --file-retention-cycles`를 사용하면 숨겨진 창·동일 앱/sidecar/프로젝트/채팅으로 5MiB 파일을 세 번 열고 프로젝트 화면을 닫는다. 초기 상태와 각 닫기 뒤 60초 대기 및 3초 RSS 관측을 기록한다. 매번 snapshot/채팅을 새로 만들지 않으며 실제 공급자는 실행하지 않는다. `fileRetention.cycles`와 원시 `memory.samples`로 최초 증가와 후속 증가를 구분한다. 수집 오류·잘림·관측 누락은 실패이며 강제GC와 heap snapshot은 사용하지 않는다. 이 옵션은 output/diff 혼합 모드와 결합하지 않는다.
+QA 패키지에서 `--file-retention-only --file-retention-cycles`를 사용하면 숨겨진 창·동일 앱/sidecar/프로젝트/채팅으로 5MiB 파일을 세 번 열고 프로젝트 화면을 닫는다. 초기 상태와 각 닫기 뒤 60초 대기 및 3초 RSS 관측을 기록한다. 매번 snapshot/채팅을 새로 만들지 않으며 실제 공급자는 실행하지 않는다. `fileRetention.cycles`와 원시 `memory.samples`로 최초 증가와 후속 증가를 구분한다. 수집 오류·잘림·관측 누락은 실패이며 강제GC와 heap snapshot은 사용하지 않는다. `--file-retention-with-output-diff`를 함께 지정하면 첫 회차에 가짜 출력1회와 500파일 diff를 준비하고, 후속 회차는 같은 저장된 결과를 다시 표시한다. 추가 실행이나 snapshot 생성 없이 파일/출력/diff 수명을 비교하며 이 혼합 반복 경로의 실제 실행은 아직 남아 있다.
 
 2026-11-10 clean 69a42d6e 패키지에서 실행했다. 초기/닫기1·2·3회 RSS 최대는 335.53/382.12/349.05/333.66MiB로, 이 파일 전용 세 회차에서 지속 증가를 관측하지 않았다. 수집 오류·잘림 없이 정상 종료했고 결과는 `.artifacts/m5-file-retention-cycles-2026-11-10/`에 보존했다. 출력·diff·가시성 부하는 포함하지 않으므로 종합 잔류 문제의 해소는 아니다. 숨겨진 파일 전용 부하이므로 visible combined RSS/입력/G6 통과나 누수 부재를 증명하지 않는다. 정상 종료·PID 부재·DB clean 대조와 임시 파일 정리는 기존 QA 절차를 따른다.
