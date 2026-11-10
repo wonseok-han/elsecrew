@@ -1,6 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
-최신 macOS combined 측정은2026-11-10 idle407.41/peak750.92/잔류증분191.19MiB로idle·잔류 기준 실패다. native 진단 parser는08888d60에서 수정했으나 앱 재측정은 남고 시험 앱/임시 프로젝트는 정리했다. Windows 잠금 수정 후보076e23a0의 추가CI 승인·native 재검증, Windows 제품/패키지 검증과 활성화, 최종G6·출시 결정이 남는다.
+최신 macOS combined 측정(2026-11-10)은 유휴 431.02MiB·최대 742.11MiB·잔류증분 165.59MiB로 유휴/잔류 기준 실패다. 입력 36.5ms와 native 메모리 구성 수집은 이번 단회에서 성공했으며 전체 G6 통과는 아니다. 시험 앱과 임시 프로젝트는 정리했다. Windows 후보 076e23a0의 추가 CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
+
+### 2026-11-10 · by GPT-6
+
+- 직전 시험의 입력 161.3ms 중 전달 전 116.2ms와 같은 시기 renderer long-task 53ms를 확인했다. 원인 코드 결속은 없으므로 특정 제품 결함으로 확정하거나 실패를 제거하지 않았다. 최신 clean 479e739a로 QA OEjM5k를 준비(session78671 exit0)한 뒤 사용자의 새 5분 화면 유지 응답으로 단회 실행했다.
+- session76630/PID11318은 exit1·shutdown accepted. 유휴 431.02MiB >400, 최대 742.11MiB <800, 잔류증분 165.59MiB >120, 입력 36.5ms <50이었다. 이번 단회는 유휴/잔류 FAIL이며 이전 입력 실패나 전체 G6를 덮지 않는다. native main8256/renderer7836/GPU6566구간 수집이 모두 성공했다. main JS heap 약16.0MiB; region의 공유 __TEXT와 Memory Tag253/255 등은 RSS와 직접 합산/차감하지 않으며 tag의 allocator 의미는 추가 출처 확인이 필요하다.
+- 증거: .artifacts/m5-native-complete-combined-2026-11-10/{result,build,cleanup}.json. 관측 PID 전부 부재와 DB clean_shutdown_at 확인 후 fixture fzPSiz와 QA OEjM5k를 삭제했다. 이제 실제 부하의 native 구성으로 원인을 좁힐 수 있으며 다음은 allocator/code/shared 영역 구분과 제품 최적화다. 추가 모델 호출·Windows push는 없고 기존 Windows CI 질문은 대기다.
 
 ### 2026-11-10 · by GPT-6
 
