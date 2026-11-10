@@ -4,6 +4,11 @@ macOS combined 측정은2026-11-10 메모리436/805/잔류증분296MiB로 실패
 
 ### 2026-11-10 · by GPT-6
 
+- 재개 이후 분석→진단구현→QA준비는 progress였으나 Windows 추가 실행 승인과 macOS 추가 시각시험의 현재 화면 가용 응답이 없는 상태는 계속됐다. 이번에는 clean checkout, 후보076e23a0 존재, QA jr5daV BUILT/앱존재를 읽기전용 재확인했으며 새 구현·실행 증거는 없다. 빌드90397은 이미terminal exit0이므로 실행중 시험을 기다리는 상태가 아니다.
+- 다음 증거가 필요한 두 경로 모두 사용자 응답 대기이며 동일빌드/테스트 반복이나 추측성 메모리 수정으로 이를 대체하지 않는다. goal을 blocked로 전환하고 준비물은 보존한다. 현재 native 원인진단5분 화면유지 또는 기존 Windows 추가CI 질문의 응답 후 해당경로를 재개한다. 전체완료는 여전히 미증명이다.
+
+### 2026-11-10 · by GPT-6
+
 - 직전 goal turn은 native 원인진단 구현47748f10으로 progress. clean HEAD에서 별도QA build session90397이exit0/BUILT로 종료됐고 ASAR에 collector 포함을 확인했다. root=/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-output-qa-jr5daV. 앱은 미실행이며 새5분 화면 가용시간 질문을 보냈다. 모델호출/제품out 교체/추가push는 없다.
 - 다음은 해당 앱 --combined-workload --keep-test-visible --retained-native-memory 단회다. 이전 측정의 5분 약속은 소진됐으므로 현재 응답 뒤 실행한다. 기존 V7XtVS와2wFTzY는 이미 정리됐고 준비용QA1개만 남긴다. 결과/프로세스종료/DB clean 확인 뒤 새 임시 산출물도 정리한다. 빌드HEAD 이후 이번 변경은 history뿐이다.
 
