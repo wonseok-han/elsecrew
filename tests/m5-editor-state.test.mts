@@ -1852,3 +1852,22 @@ test("late clean comparison cannot clear a newer draft and digest work is serial
   assert.equal(maximum,1);assert.equal(controller.snapshot().tabs[0]!.text,newer);
   assert.equal(controller.snapshot().tabs[0]!.saveState,"dirty");controller.dispose();
 });
+
+test("tree branch reads do not navigate and reject responses after context disposal", async () => {
+  const bridge = new FakeBridge();
+  const controller = new ProjectEditorController(bridge);
+  try {
+    await controller.chooseProject();
+    const before = controller.snapshot();
+    bridge.getProjectTree = async () => ({projectId:"project_01",parentPath:"src",entries:[],nextCursor:null});
+    const branch = await controller.readTreeBranch("src");
+    assert.equal(branch.parentPath, "src");
+    assert.equal(controller.snapshot(), before);
+    const pending = deferred<TreePageV1>();
+    bridge.getProjectTree = async () => pending.promise;
+    const read = controller.readTreeBranch("late");
+    controller.dispose();
+    pending.resolve({projectId:"project_01",parentPath:"late",entries:[],nextCursor:null});
+    await assert.rejects(read, /Tree context changed/);
+  } finally { controller.dispose(); }
+});

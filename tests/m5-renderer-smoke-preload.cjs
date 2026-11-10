@@ -218,7 +218,7 @@ window.m5 = {
     return {
       projectId: "smoke_project",
       parentPath,
-      entries: parentPath === "src" ? ["example.ts", "sample.rs", "sample.py", "sample.json"].map(name => ({ path: `src/${name}`, name, kind: "file" })) : [{ path: "src", name: "src", kind: "directory" }],
+      entries: parentPath === "src/nested" ? [{path:"src/nested/child.ts",name:"child.ts",kind:"file"}] : parentPath === "src" ? [{path:"src/nested",name:"nested",kind:"directory"}, ...["example.ts", "sample.rs", "sample.py", "sample.json"].map(name => ({ path: `src/${name}`, name, kind: "file" }))] : [{ path: "src", name: "src", kind: "directory" }],
       nextCursor: null,
     };
   },

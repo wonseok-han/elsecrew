@@ -4,6 +4,12 @@
 
 ### 2026-11-10 · by GPT-6
 
+- 폴더 클릭을 현재 목록 안의 펼침/접힘으로 전환했다. 중첩 들여쓰기·펼침 표시·aria-expanded·접은 하위 폴더의 펼침 상태 보존을 제공한다. 폴더별 다음 응답은 해당 위치가 보일 때 이어 읽고 실패 시 수동 재시도한다. 루트 연속 스크롤/행 가상화는 유지한다. 자식 조회는 controller의 project epoch/workspace/action 차단을 재확인하며 탐색 위치나 원본을 바꾸지 않는다.
+- 설정 돌아가기는 프로젝트 선택 시 ‘프로젝트로 돌아가기’, 미선택 시 ‘홈으로’, 앱 기본 역할 편집에서 설정 복귀는 ‘설정으로 돌아가기’로 교정했다. 사이드바 접기는 헤더의 새로고침/추가와 분리해 오른쪽 경계의 책갈피 탭으로 옮겼다.
+- TypeScript/renderer build, controller64개, Chromium2개 PASS. 중첩 펼침/접힘/재개, 현재 위치 유지, 501개 연속 스크롤, 책갈피 경계 배치와 접힘/펼침을 검증했다. 테스트의 이전 버튼 선택자/문구와 fake parentPath를 수정 후 재검증했다. diff check PASS. 설치 반영을 이어간다.
+
+### 2026-11-10 · by GPT-6
+
 - b6fda19c 앱 반영 완료. 기존 앱 정상 종료·패키지 생성·macOS package smoke PASS. 실제 local-audio-notes 화면에서 이전에 중간에서 잘렸던 requirements-transcription.txt 행과 마지막 server.mjs 행이 세로 잘림 없이 보이는 것을 스크린샷으로 확인했다. 원본/인증 변경·모델 호출·main 병합·push 없음.
 
 ### 2026-11-10 · by GPT-6

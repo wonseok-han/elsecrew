@@ -202,8 +202,10 @@ app.whenReady().then(async () => {
     document.querySelector('.m5-app-settings > header button').click();
     await ${waitFor("document.querySelector('.m5-app-settings').hidden", "settings page closed")};
     const rail = document.querySelector('.m5-project-rail');
-    const railToggle = rail.querySelector('.m5-project-rail-header button');
+    const railToggle = rail.querySelector('.m5-rail-bookmark');
     if (rail.getBoundingClientRect().width < 180 || railToggle.getAttribute('aria-expanded') !== 'true') throw new Error('project rail not expanded by default');
+    if (railToggle.closest('.m5-project-rail-header')) throw new Error('collapse mixed with project actions');
+    if (Math.abs(railToggle.getBoundingClientRect().left - rail.getBoundingClientRect().right) > 2) throw new Error('bookmark not on sidebar edge');
     railToggle.click();
     await ${waitFor("document.querySelector('.m5-project-rail').getBoundingClientRect().width < 100", "user collapses project rail")};
     if (rail.getBoundingClientRect().width > 100 || railToggle.getAttribute('aria-expanded') !== 'false') throw new Error('project rail not compact');
@@ -255,7 +257,14 @@ app.whenReady().then(async () => {
     document.querySelector('.m5-app-settings > header button').click();
     await ${waitFor("document.querySelector('.m5-app-settings').hidden", "settings dismissed")};
     document.querySelector('.m5-file-row').click();
-    await ${waitFor("document.querySelector('.m5-breadcrumbs [aria-current=location]')?.textContent === '/ src'", "folder breadcrumb")};
+    await ${waitFor("document.querySelector('.m5-file-row[data-kind=directory]')?.getAttribute('aria-expanded') === 'true' && [...document.querySelectorAll('.m5-file-row')].some(row => row.textContent.includes('example.ts'))", "folder expanded inline")};
+    if (document.querySelector('.m5-breadcrumbs [aria-current=location]')) throw new Error('folder click navigated away');
+    [...document.querySelectorAll('.m5-file-row')].find(row => row.title === 'src/nested').click();
+    await ${waitFor("[...document.querySelectorAll('.m5-file-row')].some(row => row.title === 'src/nested/child.ts')", "nested folder expanded")};
+    document.querySelector('.m5-file-row[title=src]').click();
+    await ${waitFor("document.querySelector('.m5-file-row[title=src]').getAttribute('aria-expanded') === 'false' && !document.querySelector('.m5-file-row[title=\"src/nested/child.ts\"]')", "collapse hides descendants")};
+    document.querySelector('.m5-file-row[title=src]').click();
+    await ${waitFor("[...document.querySelectorAll('.m5-file-row')].some(row => row.title === 'src/nested/child.ts')", "reopen preserves child expansion")};
     document.querySelector('.m5-breadcrumbs .m5-root').click();
     await ${waitFor("document.querySelector('.m5-file-row .m5-tree-name')?.textContent === 'src' && !document.querySelector('.m5-breadcrumbs [aria-current]')", "root breadcrumb")};
     [...document.querySelectorAll('[role=tab]')].find(tab => tab.getAttribute('aria-label') === '파일 패널 끌기' && tab.getClientRects().length > 0).click();
@@ -339,7 +348,7 @@ app.whenReady().then(async () => {
     if (document.querySelector('.m5-role-card input').value !== 'test-model') throw new Error('notice language changed role value');
     settingsLanguage.value = 'ko'; settingsLanguage.dispatchEvent(new Event('change', { bubbles: true }));
     await ${waitFor("document.querySelector('.m5-chat-notice')?.textContent === '저장된 역할과 모델을 다시 불러왔어요.'", "Korean chat status notice restored")};
-    [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '작업대로 돌아가기').click();
+    [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '프로젝트로 돌아가기').click();
     if (document.querySelector('.monaco-editor') !== editorNode) throw new Error('settings reload remounted editor');
     [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '기본 배치로').click();
     await ${waitFor("!document.querySelector('[data-panel=editor]').hidden && document.querySelectorAll('.m5-dock-separator').length === 2", "reset panel visibility")};
@@ -726,7 +735,7 @@ app.whenReady().then(async () => {
     if (document.querySelector('.m5-role-card strong').textContent !== 'Planning') throw new Error('role name is not translated');
     changeSettingsLanguage('ko');
     await ${waitFor("document.querySelector('.m5-settings h2')?.textContent === '역할과 모델'", "Korean role settings")};
-    [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '작업대로 돌아가기').click();
+    [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '프로젝트로 돌아가기').click();
     await ${waitFor("document.querySelector('[aria-label=\"저장하지 않은 설정 확인\"]')", "role close confirmation")};
     changeSettingsLanguage('en');
     await ${waitFor("document.querySelector('.m5-settings [role=alertdialog]')?.textContent.includes('Discard your unsaved role and model settings?')", "English discard confirmation")};
@@ -744,7 +753,7 @@ app.whenReady().then(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(document.querySelector('.m5-settings input'), 'discard-this-model');
     document.querySelector('.m5-settings input').dispatchEvent(new Event('input', {bubbles: true}));
     await ${waitFor("document.querySelector('.m5-settings [role=status]')", "new role draft before explicit discard")};
-    [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '작업대로 돌아가기').click();
+    [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '프로젝트로 돌아가기').click();
     await ${waitFor("document.querySelector('.m5-settings [role=alertdialog]')", "explicit role discard confirmation")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '설정 변경 버리고 닫기').click();
     await ${waitFor("!document.querySelector('.m5-settings')", "role settings closed")};

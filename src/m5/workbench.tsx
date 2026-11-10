@@ -133,9 +133,9 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     if (state.treeNextCursor) void controller.loadNextTreePage();
     else if (state.error?.messageKey === "m5.editorError.tree") void controller.loadTree(state.treeParent);
   }, [controller]);
+  const readTreeBranch = useCallback((path: string, cursor: string | null) => controller.readTreeBranch(path, cursor), [controller]);
   const openTreeEntry = useCallback((entry: TreeEntryV1) => {
     if (entry.kind === "file") void controller.openFile(entry.path);
-    else if (entry.kind === "directory") void controller.loadTree(entry.path);
   }, [controller]);
   const chatController = useMemo(() => new ChatUiController(bridge), [bridge]);
   const { admission, fixtureAvailable } = useStorageAdmission(bridge);
@@ -311,7 +311,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       }} disabled={!admissionReady || chat.switching || settingsOpen || leavingProject || leaveError}
         onResolved={(result, path) => controller.observeCompletedSaveRecovery(result, path)} />}
       {leaveError && <p className="m5-error" role="alert">{t("m5.feedback.leaveError")}</p>}
-      <AppSettings rolesLocked={appDefaultsLoaded && appDefaultsOpen} storage={<BackupStorageUsageView disabled={!admissionReady} />} project={managedProject ? <><p>{managedProject.canonicalPath}</p><PreparationRecovery projectId={managedProject.projectId} disabled={!admissionReady || snapshot.actionBlocked || snapshot.selectionBlocked || Boolean(snapshot.workspace) || settingsOpen || leavingProject || leaveError || !controller.canLeaveProject() || chat.switching} /></> : <p>{t("m5.preferences.chooseProject")}</p>} restartLocked={updatePreparing} open={preferencesOpen} section={preferencesSection} onSection={section => { setPreferencesSection(section); if (!appDefaultsLoaded) setAppDefaultsOpen(false); }} onClose={() => { setPreferencesOpen(false); setAppDefaultsOpen(false); setAppDefaultsLoaded(false); }}
+      <AppSettings hasProject={Boolean(snapshot.project)} rolesLocked={appDefaultsLoaded && appDefaultsOpen} storage={<BackupStorageUsageView disabled={!admissionReady} />} project={managedProject ? <><p>{managedProject.canonicalPath}</p><PreparationRecovery projectId={managedProject.projectId} disabled={!admissionReady || snapshot.actionBlocked || snapshot.selectionBlocked || Boolean(snapshot.workspace) || settingsOpen || leavingProject || leaveError || !controller.canLeaveProject() || chat.switching} /></> : <p>{t("m5.preferences.chooseProject")}</p>} restartLocked={updatePreparing} open={preferencesOpen} section={preferencesSection} onSection={section => { setPreferencesSection(section); if (!appDefaultsLoaded) setAppDefaultsOpen(false); }} onClose={() => { setPreferencesOpen(false); setAppDefaultsOpen(false); setAppDefaultsLoaded(false); }}
         rolesEditor={appDefaultsOpen && <AppRoleDefaultsEditor onLoaded={setAppDefaultsLoaded} disabled={!admissionReady} onClose={() => setAppDefaultsOpen(false)} />}
         disabled={!admissionReady || !window.m5Projects} onRoles={() => setAppDefaultsOpen(true)}>
         <ProviderLogin disabled={!admissionReady} returning={hasSavedProjects} reveal={connectionReveal} />
@@ -401,7 +401,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
                 <button className="m5-root" type="button" title={snapshot.project.root} disabled={!admissionReady || snapshot.actionBlocked || snapshot.treeLoading} onClick={() => void controller.loadTree("")}>{snapshot.project.name}</button>
                 {snapshot.treeParent.split("/").filter(Boolean).map((part, index, parts) => <button key={index} type="button" aria-current={index === parts.length - 1 ? "location" : undefined} disabled={!admissionReady || snapshot.actionBlocked || snapshot.treeLoading} onClick={() => void controller.loadTree(parts.slice(0, index + 1).join("/"))}>/ {part}</button>)}
               </nav>
-              <VirtualFileList key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}:${snapshot.treeParent}`} entries={snapshot.tree} activePath={snapshot.activePath} disabled={!admissionReady || snapshot.actionBlocked} onOpen={openTreeEntry}
+              <VirtualFileList key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}:${snapshot.treeParent}`} readBranch={readTreeBranch} rootPage={snapshot.treePage} entries={snapshot.tree} activePath={snapshot.activePath} disabled={!admissionReady || snapshot.actionBlocked} onOpen={openTreeEntry}
                 hasMore={Boolean(snapshot.treeNextCursor)} loading={snapshot.treeLoading} failed={snapshot.error?.messageKey === "m5.editorError.tree"} onLoadMore={loadMoreTree} />
             </>
           ) : <Empty text={t("m5.navigation.empty")} />}
@@ -478,7 +478,47 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   );
 }
 
-const VirtualFileList = memo(function VirtualFileList({ entries, activePath, disabled, onOpen, hasMore, loading, failed, onLoadMore }: { entries: readonly TreeEntryV1[]; activePath: string | null; disabled: boolean; onOpen: (entry: TreeEntryV1) => void; hasMore: boolean; loading: boolean; failed: boolean; onLoadMore: () => void }) {
+const VirtualFileList = memo(function VirtualFileList({ entries: rootEntries, readBranch, rootPage, activePath, disabled, onOpen, hasMore, loading, failed, onLoadMore }: { entries: readonly TreeEntryV1[]; rootPage: number; readBranch: (path: string, cursor: string | null) => Promise<{entries: readonly TreeEntryV1[]; nextCursor: string | null}>; activePath: string | null; disabled: boolean; onOpen: (entry: TreeEntryV1) => void; hasMore: boolean; loading: boolean; failed: boolean; onLoadMore: () => void }) {
+  type Branch = { entries: readonly TreeEntryV1[]; cursor: string | null; open: boolean; loading: boolean; failed: boolean };
+  const [branches, setBranches] = useState<Record<string, Branch>>({});
+  const branchesRef = useRef(branches);
+  const epoch = useRef(0);
+  const updateBranches = (next: Record<string, Branch>) => { branchesRef.current = next; setBranches(next); };
+  useEffect(() => { if (rootPage === 1) { epoch.current++; updateBranches({}); } }, [rootEntries, rootPage]);
+  useEffect(() => () => { epoch.current++; }, []);
+  const loadBranch = async (path: string) => {
+    const previous = branchesRef.current[path];
+    if (disabled || previous?.loading) return;
+    const generation = epoch.current;
+    updateBranches({ ...branchesRef.current, [path]: { entries: [], cursor: null, open: true, ...previous, loading: true, failed: false } });
+    try {
+      const page = await readBranch(path, previous?.cursor ?? null);
+      if (generation !== epoch.current) return;
+      updateBranches({ ...branchesRef.current, [path]: { ...branchesRef.current[path], entries: [...(previous?.entries ?? []), ...page.entries], cursor: page.nextCursor, loading: false, failed: false } });
+    } catch {
+      if (generation !== epoch.current) return;
+      updateBranches({ ...branchesRef.current, [path]: { ...branchesRef.current[path], loading: false, failed: true } });
+    }
+  };
+  const toggle = (entry: TreeEntryV1) => {
+    if (entry.kind !== "directory") { onOpen(entry); return; }
+    const branch = branchesRef.current[entry.path];
+    if (!branch) { void loadBranch(entry.path); return; }
+    updateBranches({ ...branchesRef.current, [entry.path]: { ...branch, open: !branch.open } });
+  };
+  type Row = TreeEntryV1 & { depth: number; moreFor?: string };
+  const entries: Row[] = [];
+  const append = (children: readonly TreeEntryV1[], depth: number) => {
+    for (const entry of children) {
+      entries.push({ ...entry, depth });
+      const branch = branches[entry.path];
+      if (entry.kind === "directory" && branch?.open) {
+        append(branch.entries, depth + 1);
+        if (branch.cursor || branch.loading || branch.failed) entries.push({ path: entry.path + "/", name: "", kind: "file", depth: depth + 1, moreFor: entry.path });
+      }
+    }
+  };
+  append(rootEntries, 0);
   const [scrollTop, setScrollTop] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
@@ -502,7 +542,7 @@ const VirtualFileList = memo(function VirtualFileList({ entries, activePath, dis
     event.preventDefault();
     const direction = event.key === "ArrowUp" || event.key === "End" ? -1 : 1;
     let next = event.key === "Home" ? 0 : event.key === "End" ? entries.length - 1 : current + direction;
-    while (next >= 0 && next < entries.length && entries[next].kind === "symlink") next += direction;
+    while (next >= 0 && next < entries.length && (entries[next].kind === "symlink" || entries[next].moreFor)) next += direction;
     if (next < 0 || next >= entries.length) return;
     const list = listRef.current;
     if (!list) return;
@@ -512,7 +552,8 @@ const VirtualFileList = memo(function VirtualFileList({ entries, activePath, dis
     requestAnimationFrame(() => list.querySelector<HTMLButtonElement>(`button[data-index="${next}"]`)?.focus());
   }}>
     <div aria-hidden="true" style={{ height: start * rowHeight }} />
-    {entries.slice(start, end).map((entry, index) => <button key={entry.path} data-index={start + index} type="button" className="m5-file-row" data-kind={entry.kind} aria-current={entry.kind === "file" && activePath === entry.path ? "true" : undefined} title={entry.path} onClick={() => onOpen(entry)} disabled={disabled || entry.kind === "symlink"}>
+    {entries.slice(start, end).map((entry, index) => entry.moreFor ? <TreeBranchMore key={entry.path} root={listRef} loading={branches[entry.moreFor].loading} failed={branches[entry.moreFor].failed} disabled={disabled} depth={entry.depth} onLoad={() => void loadBranch(entry.moreFor!)} /> : <button key={entry.path} data-index={start + index} type="button" className="m5-file-row" data-kind={entry.kind} aria-current={entry.kind === "file" && activePath === entry.path ? "true" : undefined} title={entry.path} aria-expanded={entry.kind === "directory" ? Boolean(branches[entry.path]?.open) : undefined} style={{ paddingLeft: 7 + entry.depth * 16 }} onClick={() => toggle(entry)} disabled={disabled || entry.kind === "symlink"}>
+      <span className="m5-tree-chevron" aria-hidden="true">{entry.kind === "directory" ? (branches[entry.path]?.open ? "⌄" : "›") : ""}</span>
       <svg className="m5-file-glyph" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{entry.kind === "directory" ? <path d="M3 7V5a1 1 0 0 1 1-1h5l2 3h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7Z" /> : <><path d="M14 3H5v18h14V8l-5-5Z M14 3v5h5" />{entry.kind === "symlink" ? <path d="m8 16 7-5m-4 0h4v4" /> : <path d="M8 13h8M8 17h6" />}</>}</svg>
       <span className="m5-tree-name">{entry.name}</span>
     </button>)}
@@ -522,6 +563,18 @@ const VirtualFileList = memo(function VirtualFileList({ entries, activePath, dis
     </div>
   </div>;
 });
+
+function TreeBranchMore({ root, loading, failed, disabled, depth, onLoad }: { root: React.RefObject<HTMLDivElement | null>; loading: boolean; failed: boolean; disabled: boolean; depth: number; onLoad: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const { t } = useI18n();
+  useEffect(() => {
+    if (!ref.current || !root.current || loading || failed || disabled) return;
+    const observer = new IntersectionObserver(([entry]) => { if (entry.isIntersecting && root.current!.clientHeight > 0) onLoad(); }, {root: root.current, rootMargin: "160px"});
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [loading, failed, disabled, onLoad, root]);
+  return <div ref={ref} className="m5-tree-branch-more" style={{paddingLeft: 7 + depth * 16}}>{failed ? <button disabled={disabled} onClick={onLoad}>{t("m5.navigation.retry")}</button> : loading ? <span role="status">{t("m5.navigation.loading")}</span> : null}</div>;
+}
 
 function ProjectGuide({ projectId, activeChat, onResume, hasChat, hasOpenFile, disabled, onGoal, onTeam, onConversation, onChanges }: {
   projectId: string; activeChat: ChatRecordV1 | null; onResume: (chatId: string) => void;
@@ -659,7 +712,7 @@ function RoleSettings({ settings, activeChat, disabled, feedback, onSave, onRelo
   const run = async (action: () => Promise<void>) => { setBusy(true); try { await action(); } finally { setBusy(false); } };
   const requestClose = () => { if (!busy && discardAction === null) { if (dirty) setDiscardAction("close"); else onClose(); } };
   return <dialog ref={dialogRef} className="m5-settings m5-settings-dialog" aria-label={t("m5.roles.label")} onCancel={event => { event.preventDefault(); requestClose(); }}>
-    <header><div><p className="m5-eyebrow">{t("m5.roles.version", { revision: settings.revision })}</p><h2>{t(scope === "app" ? "m5.roles.appDefaults" : "m5.shell.roles")}</h2></div><button className="m5-secondary" type="button" disabled={busy || discardAction !== null} onClick={requestClose}>{t(returnToDraft ? "m5.roles.backToDraft" : "m5.roles.back")}</button></header>
+    <header><div><p className="m5-eyebrow">{t("m5.roles.version", { revision: settings.revision })}</p><h2>{t(scope === "app" ? "m5.roles.appDefaults" : "m5.shell.roles")}</h2></div><button className="m5-secondary" type="button" disabled={busy || discardAction !== null} onClick={requestClose}>{t(returnToDraft ? "m5.roles.backToDraft" : scope === "app" ? "m5.roles.backToSettings" : "m5.roles.back")}</button></header>
     <div className="m5-settings-body">
     <section className="m5-settings-scope" aria-label={t("m5.roles.scope")}><span>{t(scope === "app" ? "m5.roles.appScope" : "m5.roles.scope")}</span><strong>{projectName}</strong><p>{t(scope === "app" ? "m5.roles.appDefaultsHelp" : "m5.roles.scopeHelp")}</p></section>
     {feedback}

@@ -454,6 +454,19 @@ export class ProjectEditorController {
     await this.#loadTree(project.id, this.#projectEpoch, parentPath);
   }
 
+  async readTreeBranch(parentPath: string, cursor: string | null = null) {
+    const project = this.#state.project, workspace = this.#state.workspace, epoch = this.#projectEpoch;
+    const check = () => {
+      if (!project || this.#actionBlocked || !this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace)) throw new Error("Tree context changed");
+    };
+    check();
+    const page = workspace
+      ? await this.#workspaceMethods()!.getWorkspaceTree({ ...workspace, parentPath, cursor })
+      : await this.#bridge.getProjectTree({ projectId: project!.id, parentPath, cursor });
+    check();
+    return page;
+  }
+
   async searchFiles(query: string, signal: AbortSignal): Promise<FileSearchResult> {
     const project = this.#state.project, workspace = this.#state.workspace, epoch = this.#projectEpoch;
     const check = () => {
