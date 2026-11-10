@@ -479,7 +479,7 @@ export const en: Record<MessageKey, string> = {
   "m5.chat.followup": "Follow-up message",
   "m5.chat.input": "Additional instructions",
   "m5.chat.placeholder": "Add feedback on the plan or describe what to do next.",
-  "m5.chat.delivery": "Saved to the conversation for the next real run; not sent directly to an agent that is already running.",
+  "m5.chat.delivery": "Saved for the next run. Not sent to an agent already running.",
   "m5.chat.saveError": "Could not confirm whether the message was saved. Your input is preserved. Retrying checks the same message.",
   "m5.chat.details": "Technical details",
   "m5.chat.retryMessage": "Message to check again",

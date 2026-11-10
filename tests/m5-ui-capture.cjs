@@ -107,6 +107,36 @@ app.whenReady().then(async () => {
   await wait("document.querySelector('.m5-timeline') && !document.querySelector('.m5-refresh').disabled");
   await wait("document.querySelector('.m5-project-guide')?.open === false");
   await capture(window, 'product-active-conversation');
+  await window.webContents.executeJavaScript(`(() => {
+    const tools = document.querySelector('.m5-project-tools');
+    if (tools.getBoundingClientRect().height > 45) throw new Error('closed utilities should share a row');
+    const select = document.querySelector('.m5-toolbar-actions select');
+    select.value = 'en'; select.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  await wait("document.querySelector('main').lang === 'en'");
+  window.setContentSize(960, 640);
+  await wait("document.querySelector('.m5-dock').getBoundingClientRect().height > 200");
+  await window.webContents.executeJavaScript(`(() => {
+    if (document.documentElement.scrollWidth > innerWidth) throw new Error('English workbench overflows horizontally');
+    const toggle = document.querySelector('.m5-management-toggle');
+    if (!toggle.getClientRects().length) throw new Error('connection access missing');
+    const composer = document.querySelector('.m5-followup');
+    if (composer.querySelector('button[type=submit]').getBoundingClientRect().bottom > composer.getBoundingClientRect().bottom + 1) throw new Error('followup action requires scrolling at minimum window');
+  })()`);
+  await capture(window, 'product-conversation-english-minimum');
+  window.setContentSize(1440, 1000);
+  await window.webContents.executeJavaScript("window.m5SmokeFailedClaude()");
+  await wait("document.querySelector('.m5-agent-runs details')");
+  await capture(window, 'product-failed-run');
+  await window.webContents.executeJavaScript("document.querySelector('.m5-management-toggle').click()");
+  await wait("document.querySelector('.m5-management-toggle').getAttribute('aria-expanded') === 'true'");
+  await window.webContents.executeJavaScript(`(() => {
+    const panel = document.querySelector('.m5-agent-management');
+    const tools = document.querySelector('.m5-project-tools');
+    if (panel.getBoundingClientRect().width < tools.getBoundingClientRect().width - 2) throw new Error('expanded setup must have full width');
+  })()`);
+  await capture(window, 'product-connection-expanded');
+
   const concept = new BrowserWindow({ width: 1440, height: 1000, show: false, webPreferences: { partition: 'm5-visual', sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
   windows.push(concept);
   for (const name of ['agent-ide', 'guided-start']) {

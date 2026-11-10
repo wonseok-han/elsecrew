@@ -667,3 +667,22 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-agent-runs article { flex-wrap: wrap; color: var(--m5-muted); }
 .m5-chat-review, .m5-message-code { border-color: var(--m5-border-strong); }
 .m5-message-code, .m5-message-code > header { background: var(--m5-bg); }
+
+/* Compact project utilities; expanded setup and guidance keep full width. */
+.m5-project-tools { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 12px; margin-bottom: 4px; }
+.m5-project-tools > .m5-agent-management { flex: 0 1 260px; min-width: 0; margin: 0; }
+.m5-project-tools > .m5-project-guide { flex: 1 1 300px; min-width: 0; margin: 0; }
+.m5-project-tools > .m5-agent-management:has(.m5-management-toggle[aria-expanded="true"]),
+.m5-project-tools > .m5-project-guide[open] { flex-basis: 100%; }
+.m5-project-tools .m5-management-toggle { min-height: 30px; padding: 5px 10px; font-size: 11px; gap: 16px; }
+.m5-project-tools > .m5-project-guide:not([open]) { padding: 7px 10px; }
+.m5-project-tools .m5-management-toggle span { font-size: 11px; }
+.m5-toolbar-project .m5-toolbar-actions { gap: 6px; }
+.m5-toolbar-project .m5-toolbar-actions > button,
+.m5-toolbar-project .m5-toolbar-actions > select { padding: 6px 10px; font-size: 12px; }
+.m5-toolbar-project { padding-top: 0; }
+.m5-workbench > .m5-notice { margin-top: 0; margin-bottom: 8px; padding: 8px 12px; font-size: 12px; }
+
+.m5-followup { gap: 6px; padding: 10px 12px; }
+.m5-followup > label { font-size: 12px; font-weight: 600; }
+.m5-followup > button { padding: 7px 10px; font-size: 12px; }

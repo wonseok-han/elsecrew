@@ -478,7 +478,7 @@ export const ko = {
   "m5.chat.followup": "후속 메시지",
   "m5.chat.input": "추가로 알려줄 내용",
   "m5.chat.placeholder": "계획에 보완할 점이나 다음에 할 일을 적어 주세요.",
-  "m5.chat.delivery": "대화에 저장해요. 진행 중인 에이전트에 바로 전달되지는 않으며, 다음 실제 실행에서 함께 사용해요.",
+  "m5.chat.delivery": "다음 실행에 쓸 내용을 대화에 저장해요. 진행 중인 실행에는 보내지 않아요.",
   "m5.chat.saveError": "저장 여부를 확인하지 못했어요. 입력은 보존했어요. 다시 시도하면 같은 메시지로 확인해요.",
   "m5.chat.details": "기술 정보",
   "m5.chat.retryMessage": "다시 확인할 메시지",

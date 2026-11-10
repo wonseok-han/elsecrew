@@ -292,7 +292,16 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       {!snapshot.project && hasSavedProjects && <ProjectCatalog home ready={admissionReady} controller={controller}
         disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked} />}
       <GitSelectionView disabled={leavingProject || settingsOpen || leaveError} />
+      <div className={snapshot.project ? "m5-project-tools" : "m5-home-tools"}>
       <ProviderLogin disabled={!admissionReady} compact={Boolean(snapshot.project)} returning={hasSavedProjects} reveal={connectionReveal} />
+      {snapshot.project && <ProjectGuide key={snapshot.project.id} hasChat={Boolean(chat.activeChat)}
+        projectId={snapshot.project.id} activeChat={chat.activeChat} onResume={id => void switchChat(id)}
+        hasOpenFile={snapshot.tabs.length > 0 || snapshot.diffVisible}
+        disabled={!admissionReady || !projectDataReady || settingsOpen || snapshot.actionBlocked || chat.preparing || chat.switching}
+        onGoal={() => setNewChatOpen(true)} onTeam={() => openRoleSettings()}
+        onConversation={() => controller.revealConversation()}
+        onChanges={() => { controller.selectPanel("changes"); void controller.refreshChanges(); }} />}
+      </div>
       {snapshot.error && (
         <section className="m5-error" role="alert">
           <strong>{t(snapshot.error.messageKey)}</strong>
@@ -304,13 +313,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       {snapshot.project && !projectDataReady && <section className="m5-notice" role="status">
         {chat.error?.messageKey === "m5.chatError.project" ? <><span>{t("m5.shell.projectRetryHelp")}</span><button type="button" className="m5-secondary" disabled={!admissionReady || settingsOpen} onClick={() => { if (snapshot.project && !chat.activeChat && !chat.settings) void chatController.openProject(snapshot.project.id); }}>{t("m5.feedback.retry")}</button></> : <span>{t("m5.shell.projectLoading")}</span>}
       </section>}
-      {snapshot.project && <ProjectGuide key={snapshot.project.id} hasChat={Boolean(chat.activeChat)}
-        projectId={snapshot.project.id} activeChat={chat.activeChat} onResume={id => void switchChat(id)}
-        hasOpenFile={snapshot.tabs.length > 0 || snapshot.diffVisible}
-        disabled={!admissionReady || !projectDataReady || settingsOpen || snapshot.actionBlocked || chat.preparing || chat.switching}
-        onGoal={() => setNewChatOpen(true)} onTeam={() => openRoleSettings()}
-        onConversation={() => controller.revealConversation()}
-        onChanges={() => { controller.selectPanel("changes"); void controller.refreshChanges(); }} />}
+
       {snapshot.rescanRequired && (
         <section className="m5-rescan" role="status">
           <span>{t("m5.feedback.overflow")}</span>
