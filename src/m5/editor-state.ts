@@ -480,13 +480,14 @@ export class ProjectEditorController {
 
   async #loadTree(projectId: string, epoch: number, parentPath: string, propagate = false, cursor: string | null = null, pageNumber = 1): Promise<void> {
     const generation = ++this.#treeGeneration;
-    this.#set({ treeLoading: true });
+    this.#set({ treeLoading: true, ...(this.#state.error?.messageKey === "m5.editorError.tree" ? { error: null } : {}) });
     try {
       const workspace = this.#state.workspace;
       const page = workspace ? await this.#workspaceMethods()!.getWorkspaceTree({ ...workspace, parentPath, cursor }) : await this.#bridge.getProjectTree({ projectId, parentPath, cursor });
       if (!this.#isCurrent(projectId, epoch) || !sameWorkspace(this.#state.workspace, workspace) || generation !== this.#treeGeneration) return;
-      // The sidecar contract already caps a page at 500. Keep the renderer bounded too.
-      const entries = page.entries.slice(0, MAX_RENDERED_TREE_ENTRIES);
+      // Each response stays bounded; the virtual list renders only visible rows.
+      const incoming = page.entries.slice(0, MAX_RENDERED_TREE_ENTRIES);
+      const entries = cursor === null ? incoming : [...this.#state.tree, ...incoming];
       this.#set({ tree: entries, treeParent: page.parentPath, treeNextCursor: page.nextCursor, treePage: pageNumber, treeLoading: false, rescanRequired: false });
     } catch (error) {
       if (!this.#isCurrent(projectId, epoch) || generation !== this.#treeGeneration) return;

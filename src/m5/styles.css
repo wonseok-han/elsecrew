@@ -293,8 +293,8 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-conflict { margin: 20px; padding: 16px; border: 1px solid #a7515b; border-radius: 8px; background: #312126; color: #ffd7d9; }
 
 .m5-refresh { margin: 10px; padding: 6px 9px; font-size: 12px; }
-.m5-tree-pages { display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 8px; font-size: 12px; }
-.m5-tree-pages button { padding: 5px; font-size: 12px; }
+.m5-tree-more { min-height: 1px; color: var(--m5-muted); font-size: 12px; }
+.m5-tree-more button { padding: 5px; font-size: 12px; }
 .m5-change-row { align-items: center; }
 .m5-change-kind { flex: 0 0 58px; font-size: 11px; font-weight: 700; }
 .m5-kind-added { color: #72d39b; }.m5-kind-modified { color: #91c5ff; }.m5-kind-deleted { color: #fa8d97; }.m5-kind-renamed { color: #d5b5ff; }.m5-kind-binary { color: #f5c95d; }

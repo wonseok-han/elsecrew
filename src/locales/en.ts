@@ -432,6 +432,7 @@ export const en: Record<MessageKey, string> = {
   "m5.navigation.folder": "Current folder path",
   "m5.navigation.pages": "File list pages",
   "m5.navigation.first": "First page",
+  "m5.navigation.retry": "Retry loading files",
   "m5.navigation.loading": "Loading…",
   "m5.navigation.page": "Page {page}",
   "m5.navigation.next": "Next page",

@@ -258,6 +258,25 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-breadcrumbs [aria-current=location]')?.textContent === '/ src'", "folder breadcrumb")};
     document.querySelector('.m5-breadcrumbs .m5-root').click();
     await ${waitFor("document.querySelector('.m5-file-row .m5-tree-name')?.textContent === 'src' && !document.querySelector('.m5-breadcrumbs [aria-current]')", "root breadcrumb")};
+    [...document.querySelectorAll('[role=tab]')].find(tab => tab.getAttribute('aria-label') === '파일 패널 끌기' && tab.getClientRects().length > 0).click();
+    await ${waitFor("document.querySelector('.m5-virtual-file-list').clientHeight > 0", "file pane visible for scrolling")};
+    window.m5SmokeLongTree = true; window.m5SmokeTreeReads = 0;
+    document.querySelector('.m5-breadcrumbs .m5-root').click();
+    await ${waitFor("document.querySelector('.m5-file-row .m5-tree-name')?.textContent === 'file-0000.ts'", "long tree first batch")};
+    if (document.querySelector('.m5-tree-pages')) throw new Error('file pagination remains');
+    const scrollingTree = document.querySelector('.m5-virtual-file-list');
+    scrollingTree.scrollTop = scrollingTree.scrollHeight;
+    scrollingTree.dispatchEvent(new Event('scroll'));
+    await ${waitFor("window.m5SmokeTreeReads === 2 && !document.querySelector('.m5-virtual-file-list').matches('[aria-busy=true]')", "scroll loads next batch")};
+    if (scrollingTree !== document.querySelector('.m5-virtual-file-list') || scrollingTree.scrollTop < 1000) throw new Error('append reset scroll position');
+    scrollingTree.scrollTop = scrollingTree.scrollHeight; scrollingTree.dispatchEvent(new Event('scroll'));
+    await ${waitFor("[...document.querySelectorAll('.m5-file-row')].some(row => row.textContent.includes('file-0500.ts'))", "appended file visible")};
+    if (document.querySelectorAll('.m5-file-row').length > 120) throw new Error('tree virtualization lost');
+    scrollingTree.scrollTop = 0; scrollingTree.dispatchEvent(new Event('scroll'));
+    await ${waitFor("document.querySelector('.m5-file-row .m5-tree-name')?.textContent === 'file-0000.ts'", "previous files retained")};
+    window.m5SmokeLongTree = false;
+    document.querySelector('.m5-breadcrumbs .m5-root').click();
+    await ${waitFor("document.querySelector('.m5-file-row .m5-tree-name')?.textContent === 'src'", "restore tree fixture")};
     document.querySelector('[data-panel=editor] .m5-dock-options summary').click();
     [...document.querySelectorAll('[data-panel=editor] .m5-dock-options button')].find(button => button.textContent === '편집기 패널 접기').click();
     await ${waitFor("document.querySelector('[data-panel=editor]').hidden", "editor hidden before search")};
@@ -674,7 +693,7 @@ app.whenReady().then(async () => {
       selectedChat.focus();
       if (document.activeElement !== selectedChat) throw new Error('chat chip cannot receive keyboard focus');
     } finally { goalLabel.textContent = savedLabel; }
-    if (document.querySelector('.m5-files').getAttribute('aria-label') !== 'Files' || !document.querySelector('.m5-tree-pages').textContent.includes('First page')) throw new Error('file navigation not translated');
+    if (document.querySelector('.m5-files').getAttribute('aria-label') !== 'Files' || document.querySelector('.m5-tree-pages')) throw new Error('file navigation not translated');
     if (JSON.stringify(previousMessages) !== JSON.stringify([...document.querySelectorAll('.m5-message p')].map(node => node.textContent))) throw new Error('language change translated user messages');
     document.querySelector('.m5-followup button').click();
     await ${waitFor("[...document.querySelectorAll('.m5-message p')].some(node => node.textContent === '설명을 추가해 주세요.') && document.querySelector('#m5-followup-text').value === ''", "persisted follow-up visible and input cleared")};

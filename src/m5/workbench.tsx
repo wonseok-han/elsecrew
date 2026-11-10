@@ -128,6 +128,11 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const controller = useMemo(() => new ProjectEditorController(bridge), [bridge]);
   // Draft edits do not change the tree. Keep its callback stable so memo can
   // skip rebuilding up to 120 rows on every keystroke without ignoring props.
+  const loadMoreTree = useCallback(() => {
+    const state = controller.snapshot();
+    if (state.treeNextCursor) void controller.loadNextTreePage();
+    else if (state.error?.messageKey === "m5.editorError.tree") void controller.loadTree(state.treeParent);
+  }, [controller]);
   const openTreeEntry = useCallback((entry: TreeEntryV1) => {
     if (entry.kind === "file") void controller.openFile(entry.path);
     else if (entry.kind === "directory") void controller.loadTree(entry.path);
@@ -396,12 +401,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
                 <button className="m5-root" type="button" title={snapshot.project.root} disabled={!admissionReady || snapshot.actionBlocked || snapshot.treeLoading} onClick={() => void controller.loadTree("")}>{snapshot.project.name}</button>
                 {snapshot.treeParent.split("/").filter(Boolean).map((part, index, parts) => <button key={index} type="button" aria-current={index === parts.length - 1 ? "location" : undefined} disabled={!admissionReady || snapshot.actionBlocked || snapshot.treeLoading} onClick={() => void controller.loadTree(parts.slice(0, index + 1).join("/"))}>/ {part}</button>)}
               </nav>
-              <VirtualFileList key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}:${snapshot.treeParent}:${snapshot.treePage}`} entries={snapshot.tree} activePath={snapshot.activePath} disabled={!admissionReady || snapshot.actionBlocked} onOpen={openTreeEntry} />
-              <nav className="m5-tree-pages" aria-label={t("m5.navigation.pages")}>
-                <button type="button" disabled={!admissionReady || snapshot.treeLoading || snapshot.treePage === 1} onClick={() => void controller.loadTree(snapshot.treeParent)}>{t("m5.navigation.first")}</button>
-                <span>{snapshot.treeLoading ? t("m5.navigation.loading") : t("m5.navigation.page", { page: snapshot.treePage })}</span>
-                <button type="button" disabled={!admissionReady || snapshot.treeLoading || !snapshot.treeNextCursor} onClick={() => void controller.loadNextTreePage()}>{t("m5.navigation.next")}</button>
-              </nav>
+              <VirtualFileList key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}:${snapshot.treeParent}`} entries={snapshot.tree} activePath={snapshot.activePath} disabled={!admissionReady || snapshot.actionBlocked} onOpen={openTreeEntry}
+                hasMore={Boolean(snapshot.treeNextCursor)} loading={snapshot.treeLoading} failed={snapshot.error?.messageKey === "m5.editorError.tree"} onLoadMore={loadMoreTree} />
             </>
           ) : <Empty text={t("m5.navigation.empty")} />}
         </aside>
@@ -477,13 +478,24 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   );
 }
 
-const VirtualFileList = memo(function VirtualFileList({ entries, activePath, disabled, onOpen }: { entries: readonly TreeEntryV1[]; activePath: string | null; disabled: boolean; onOpen: (entry: TreeEntryV1) => void }) {
+const VirtualFileList = memo(function VirtualFileList({ entries, activePath, disabled, onOpen, hasMore, loading, failed, onLoadMore }: { entries: readonly TreeEntryV1[]; activePath: string | null; disabled: boolean; onOpen: (entry: TreeEntryV1) => void; hasMore: boolean; loading: boolean; failed: boolean; onLoadMore: () => void }) {
   const [scrollTop, setScrollTop] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
+  const { t } = useI18n();
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = listRef.current, sentinel = sentinelRef.current;
+    if (!root || !sentinel || disabled || loading || failed || !hasMore) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting && root.clientHeight > 0) onLoadMore();
+    }, { root, rootMargin: "0px 0px 160px 0px" });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [disabled, loading, failed, hasMore, entries.length, onLoadMore]);
   const rowHeight = 32;
   const start = Math.min(Math.max(0, entries.length - 1), Math.max(0, Math.floor(scrollTop / rowHeight) - 8));
   const end = Math.min(entries.length, start + 120);
-  return <div ref={listRef} className="m5-file-list m5-virtual-file-list" style={{ height: Math.min(400, entries.length * rowHeight) }} onScroll={event => setScrollTop(event.currentTarget.scrollTop)} onKeyDown={event => {
+  return <div ref={listRef} className="m5-file-list m5-virtual-file-list" aria-busy={loading} style={{ height: Math.min(400, entries.length * rowHeight + (hasMore || loading || failed ? 32 : 0)) }} onScroll={event => setScrollTop(event.currentTarget.scrollTop)} onKeyDown={event => {
     if (disabled || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
     const current = Number((event.target as HTMLElement).closest<HTMLButtonElement>("button[data-index]")?.dataset.index);
     if (!Number.isInteger(current)) return;
@@ -505,6 +517,9 @@ const VirtualFileList = memo(function VirtualFileList({ entries, activePath, dis
       <span className="m5-tree-name">{entry.name}</span>
     </button>)}
     <div aria-hidden="true" style={{ height: (entries.length - end) * rowHeight }} />
+    <div ref={sentinelRef} className="m5-tree-more">
+      {loading ? <span role="status">{t("m5.navigation.loading")}</span> : failed ? <button type="button" disabled={disabled} onClick={onLoadMore}>{t("m5.navigation.retry")}</button> : null}
+    </div>
   </div>;
 });
 

@@ -431,6 +431,7 @@ export const ko = {
   "m5.navigation.folder": "현재 폴더 경로",
   "m5.navigation.pages": "파일 목록 페이지",
   "m5.navigation.first": "처음으로",
+  "m5.navigation.retry": "목록 다시 불러오기",
   "m5.navigation.loading": "불러오는 중…",
   "m5.navigation.page": "{page}페이지",
   "m5.navigation.next": "다음 목록",

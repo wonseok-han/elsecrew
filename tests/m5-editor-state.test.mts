@@ -250,7 +250,7 @@ test("file search leaves browsing state intact and rejects results after project
   } finally { controller.dispose(); }
 });
 
-test("tree pagination replaces each bounded page and resets on folder navigation", async () => {
+test("tree scrolling appends bounded responses and resets on folder navigation", async () => {
   class PagedBridge extends FakeBridge {
     requests: Array<{ parentPath: string; cursor: string | null }> = [];
     async getProjectTree({ parentPath = "", cursor = null }: { projectId: string; parentPath?: string; cursor?: string | null }): Promise<TreePageV1> {
@@ -261,13 +261,15 @@ test("tree pagination replaces each bounded page and resets on folder navigation
   const bridge = new PagedBridge(); const controller = new ProjectEditorController(bridge);
   try {
     await controller.chooseProject(); await controller.loadNextTreePage();
-    assert.equal(controller.snapshot().tree.length, 500);
-    assert.equal(controller.snapshot().tree[0].name, "page2-0");
+    assert.equal(controller.snapshot().tree.length, 1000);
+    assert.equal(controller.snapshot().tree[0].name, "first-0");
+    assert.equal(controller.snapshot().tree[500].name, "page2-0");
     assert.equal(controller.snapshot().treePage, 2);
     assert.equal(controller.snapshot().treeNextCursor, null);
     await controller.loadNextTreePage(); assert.equal(bridge.requests.length, 2);
     await controller.loadTree("folder");
     assert.equal(controller.snapshot().treePage, 1);
+    assert.equal(controller.snapshot().tree.length, 500);
     assert.deepEqual(bridge.requests.at(-1), { parentPath: "folder", cursor: null });
   } finally { controller.dispose(); }
 });

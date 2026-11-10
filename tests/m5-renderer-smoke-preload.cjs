@@ -206,8 +206,15 @@ window.m5 = {
     selectedPath: "/work/smoke",
     canonicalGitRoot: "/work/smoke",
   }),
-  getProjectTree: async ({ parentPath = "" }) => {
+  getProjectTree: async ({ parentPath = "", cursor = null }) => {
     if (!snapshotCreated) throw new Error("renderer requested the tree before creating its standalone snapshot");
+    if (window.m5SmokeLongTree && parentPath === "") {
+      window.m5SmokeTreeReads = (window.m5SmokeTreeReads ?? 0) + 1;
+      return { projectId: "smoke_project", parentPath, entries: Array.from({length: cursor ? 1 : 500}, (_, i) => {
+        const name = `file-${String((cursor ? 500 : 0) + i).padStart(4, "0")}.ts`;
+        return {path:name,name,kind:"file"};
+      }), nextCursor: cursor ? null : "next-tree" };
+    }
     return {
       projectId: "smoke_project",
       parentPath,
