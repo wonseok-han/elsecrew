@@ -58,6 +58,17 @@ app.whenReady().then(async () => {
   await window.webContents.executeJavaScript("[...document.querySelectorAll('button')].find(b => b.textContent === '역할과 모델').click()");
   await wait("document.querySelector('.m5-settings-dialog')?.open");
   await capture(window, 'product-settings');
+  await window.webContents.executeJavaScript(`(() => {
+    const planning = document.querySelector('#m5-role-panel-planning input');
+    window.roleDraftBeforeNavigation = planning.value;
+    document.querySelector('[aria-controls="m5-role-panel-coding"]').click();
+  })()`);
+  await wait("document.querySelector('#m5-role-panel-coding')?.getClientRects().length > 0 && document.querySelector('#m5-role-panel-planning')?.getClientRects().length === 0");
+  await capture(window, 'product-settings-coding');
+  await window.webContents.executeJavaScript("document.querySelector('[aria-controls=\"m5-role-panel-planning\"]').click()");
+  await wait("document.querySelector('#m5-role-panel-planning')?.getClientRects().length > 0");
+  await window.webContents.executeJavaScript("if (document.querySelector('#m5-role-panel-planning input').value !== roleDraftBeforeNavigation) throw new Error('role navigation lost draft')");
+
   window.setContentSize(960, 640);
   await wait("document.querySelector('.m5-settings-actions').getBoundingClientRect().bottom <= innerHeight");
   await window.webContents.executeJavaScript(`(() => {
