@@ -4,6 +4,12 @@
 
 ### 2026-11-10 · by GPT-6
 
+- 직전 턴은 같은 프로세스 파일 반복 실측363644d6으로 progress였다. 현재 clean checkout에서 diff/출력 수명 코드를 추가 대조했다. editor-state.leaveProjectView는 tabs/tree/diffText/summary를 비우고 epoch를 증가시킨다. chat-state.clearProjectView는 messages/runs/agentRuns와 pending을 비우며 출력 panel cleanup은 abort·timer clear·reader.stop을 호출한다. reader.stop은 구독을 해제한다. 따라서 이 경로에 단순 clear/dispose를 더할 근거는 확인하지 못했다.
+- QA main trace도 모든 이벤트 배열을 유지하는 대신 root thread별 최대 witness/개수만 보존한다. 이 정적 확인은 런타임 누수 부재 또는 종합 잔류 원인 확정이 아니므로 추측성 제품 변경은 하지 않았다. 다음 비교는 출력/diff와 계측 프로세스의 영향이며 첫 로드의 유지량만으로 누수를 단정하지 않는다.
+- 사용자에게 유휴512MiB 채택 여부를 명시적 선택 질문으로 보냈다. 기존 기준·안전 경계는 그대로며 Windows 추가CI 승인은 계속 대기다. 이번 검증은 소스 수명 대조·문서 diff 확인만, 새 빌드/모델/외부 게시 없음.
+
+### 2026-11-10 · by GPT-6
+
 - 직전 턴은 반복 수명 진단69a42d6e로 progress. clean HEAD로 QA를 준비했다. 제한 환경 준비는 fetch실패(JZ6Lka), 다운로드 접근 재시도(session14846)는 BUILT(KWr8oO)였다. 실제 숨김 file-only cycles 실행session27071/PID28148은 exit0·shutdown accepted로 종료했다. 실제 공급자·인증·사용자 프로젝트·화면 가용시간은 사용하지 않았다.
 - 초기 및 세 회차 닫기60초뒤 RSS는335.53→382.12→349.05→333.66MiB다. 매 구간3표본·수집오류/잘림없음. 강제GC/heapsnapshot없이 같은 앱/sidecar/프로젝트/채팅을 재사용했으며 이 파일 경로에서 지속 증가를 관측하지 않았다. 결과는 diagnostic/NOT_READY이며 종합 부하의 잔류165.59MiB 또는G6 실패를 지우지 않는다. 다음 원인분석은 파일 teardown을 반복 수정하기보다 출력·diff·추적 비용의 결합으로 좁힌다.
 - `.artifacts/m5-file-retention-cycles-2026-11-10/{result,build,cleanup}.json`에 증거를 보존했다. 관측PID전부부재·DB clean·shutdown accepted 대조 후 fixtureD0eCKr와 성공/실패QA 두 폴더를 제거했다. 문서/diff 검사 완료. 기준변경·push없음이며 유휴512MiB 제안과 Windows 추가CI 승인은 여전히 대기다.
