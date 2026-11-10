@@ -188,6 +188,7 @@ export const en: Record<MessageKey, string> = {
   "m5.dock.tabs": "Tabbed layout",
   "m5.dock.panels": "Rearrangeable work panels",
   "m5.dock.group": "{panel} group panels",
+  "m5.dock.tabLabel": "{panel}",
   "m5.dock.drag": "Drag {panel} panel",
   "m5.dock.placement": "Place {panel} panel",
   "m5.dock.place": "Place…",

@@ -187,6 +187,7 @@ export const ko = {
   "m5.dock.tabs": "탭 배치",
   "m5.dock.panels": "재배치 가능한 작업 패널",
   "m5.dock.group": "{panel} 그룹 패널",
+  "m5.dock.tabLabel": "{panel}",
   "m5.dock.drag": "{panel} 패널 끌기",
   "m5.dock.placement": "{panel} 패널 배치",
   "m5.dock.place": "배치…",

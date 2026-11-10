@@ -126,6 +126,14 @@ function WorkbenchUnavailable() {
 function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const { lang, t } = useI18n();
   const controller = useMemo(() => new ProjectEditorController(bridge), [bridge]);
+  useEffect(() => {
+    const menus = () => document.querySelectorAll<HTMLDetailsElement>(".m5-project-menu, .m5-project-guide");
+    const outside = (event: PointerEvent) => menus().forEach(menu => { if (!menu.contains(event.target as Node)) menu.open = false; });
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") menus().forEach(menu => { if (menu.open) { menu.open = false; menu.querySelector<HTMLElement>("summary")?.focus(); } }); };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("pointerdown", outside); document.removeEventListener("keydown", escape); };
+  }, []);
   // Draft edits do not change the tree. Keep its callback stable so memo can
   // skip rebuilding up to 120 rows on every keystroke without ignoring props.
   const loadMoreTree = useCallback(() => {
@@ -287,7 +295,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         onConversation={() => controller.revealConversation()}
         onChanges={() => { controller.selectPanel("changes"); void controller.refreshChanges(); }} />}
 
-          {snapshot.project && <details className="m5-project-menu"><summary>{t("m5.preferences.projectMenu")}</summary><div>          {snapshot.project && <button type="button" onClick={() => void controller.chooseProject()} disabled={settingsOpen || !admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked}>
+          {snapshot.project && <details className="m5-project-menu"><summary aria-label={t("m5.preferences.projectMenu")} title={t("m5.preferences.projectMenu")}><svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></summary><div>          {snapshot.project && <button type="button" onClick={() => void controller.chooseProject()} disabled={settingsOpen || !admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked}>
             {t("m5.shell.switch")}
           </button>}
           {snapshot.project && (
@@ -490,7 +498,7 @@ const VirtualFileList = memo(function VirtualFileList({ entries: rootEntries, re
     const previous = branchesRef.current[path];
     if (disabled || previous?.loading) return;
     const generation = epoch.current;
-    updateBranches({ ...branchesRef.current, [path]: { entries: [], cursor: null, open: true, ...previous, loading: true, failed: false } });
+    updateBranches({ ...branchesRef.current, [path]: { ...(previous ?? { entries: [], cursor: null, open: true }), loading: true, failed: false } });
     try {
       const page = await readBranch(path, previous?.cursor ?? null);
       if (generation !== epoch.current) return;
@@ -600,7 +608,7 @@ function ProjectGuide({ projectId, activeChat, onResume, hasChat, hasOpenFile, d
   const step = projectGuideStep(preference, activeChat?.chatId ?? null, activeChat?.state ?? null);
   const beginGoal = () => { savePreference({ ...preference, teamReviewed: true }); onGoal(); };
   return <details className="m5-project-guide" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary>{t("m5.preferences.guide")}</summary><div className="m5-guide-popover">
+    <summary title={t("m5.preferences.guide")}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2l-1.5 1v2m0 2v1"/></svg><span>{t("m5.preferences.guide")}</span></summary><div className="m5-guide-popover">
     <section className="m5-guide-next" aria-label={t("m5.guide.next")}>
       <strong>{t(`m5.guide.step.${step}`)}</strong>
       {step !== "resume" && activeChat && <p>{activeChat.goal} · {t(`m5.chat.state.${activeChat.state}`)}</p>}
