@@ -42,7 +42,12 @@ app.whenReady().then(async () => {
   await window.loadURL('m5visual://m5/index.html');
   await window.webContents.executeJavaScript('window.m5SmokeBlockers = []');
   await wait("document.querySelector('.m5-guided-start') && document.querySelector('.m5-provider-selection input')?.matches(':disabled') === false");
+  await wait("document.querySelector('.m5-home-projects li button')?.getClientRects().length > 0");
   await capture(window, 'product-start');
+  await window.webContents.executeJavaScript("window.m5SmokeCatalogEmpty = true; document.querySelector('.m5-project-rail .m5-project-pagination button').click()");
+  await wait("document.querySelector('.m5-start-steps') && !document.querySelector('.m5-home-projects')");
+  await wait("document.querySelector('.m5-provider-selection input')?.getClientRects().length > 0");
+  await capture(window, 'product-first-visit');
   window.setContentSize(960, 640);
   await wait("document.querySelector('.m5-start-action button').getBoundingClientRect().bottom <= innerHeight");
   await capture(window, 'product-start-minimum');

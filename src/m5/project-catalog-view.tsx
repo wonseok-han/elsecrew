@@ -4,12 +4,12 @@ import type { ProjectEditorController } from "./editor-state.ts";
 import { PreparationRecovery } from "./preparation-recovery-view.tsx";
 import { validateProjectCatalogResult, type ProjectCatalogEntry } from "./contracts/project-catalog-v1.ts";
 
-export function ProjectCatalog({ controller, disabled, currentId, ready = true, rail = false }: {
-  controller: ProjectEditorController; disabled: boolean; currentId?: string; ready?: boolean; rail?: boolean;
+export function ProjectCatalog({ controller, disabled, currentId, ready = true, rail = false, home = false, onHasProjects }: {
+  controller: ProjectEditorController; disabled: boolean; currentId?: string; ready?: boolean; rail?: boolean; home?: boolean; onHasProjects?: (value: boolean) => void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [entries, setEntries] = useState<ProjectCatalogEntry[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -18,10 +18,10 @@ export function ProjectCatalog({ controller, disabled, currentId, ready = true, 
   const generation = useRef(0);
   const inFlight = useRef(false);
   useEffect(() => () => { generation.current++; }, []);
-  useEffect(() => { generation.current++; if (!rail) setOpen(false); }, [disabled, currentId, rail]);
+  useEffect(() => { generation.current++; if (!rail && !home) setOpen(false); }, [disabled, currentId, rail, home]);
   const service = window.m5Projects;
   useEffect(() => {
-    if (!rail || !ready || !service) return;
+    if ((!rail && !home) || !ready || !service) return;
     const epoch = ++generation.current;
     let cancelled = false;
     setOpen(true); setBusy(true); setError(false);
@@ -34,7 +34,8 @@ export function ProjectCatalog({ controller, disabled, currentId, ready = true, 
     }).catch(() => { if (!cancelled && epoch === generation.current) setError(true); })
       .finally(() => { if (!cancelled && epoch === generation.current) setBusy(false); });
     return () => { cancelled = true; };
-  }, [rail, ready, service, currentId, disabled]);
+  }, [rail, home, ready, service, currentId, disabled]);
+  useEffect(() => { if (!busy && !error) onHasProjects?.(entries.length > 0); }, [entries, busy, error, onHasProjects]);
   if (!service) return null;
   const load = async (cursor: string | null) => {
     if (disabled || inFlight.current) return;
@@ -54,12 +55,12 @@ export function ProjectCatalog({ controller, disabled, currentId, ready = true, 
     if (disabled || inFlight.current) return;
     inFlight.current = true; setBusy(true); generation.current++;
     try { await controller.reopenProject(projectId, input => service.request(input)); }
-    finally { inFlight.current = false; setBusy(false); if (!rail) setOpen(false); }
+    finally { inFlight.current = false; setBusy(false); if (!rail && !home) setOpen(false); }
   };
-  return <section className={`m5-project-catalog${rail ? ` m5-project-rail${expanded || error ? " m5-project-rail-expanded" : ""}` : ""}`} aria-label={t("m5.catalog.title")}>
-    {rail ? <header className="m5-project-rail-header"><h2 title={t("m5.catalog.title")}>{t(compact ? "m5.catalog.shortTitle" : "m5.catalog.title")}</h2><button type="button" aria-expanded={expanded || error} disabled={error} title={t(expanded || error ? "m5.catalog.collapse" : "m5.catalog.expand")} aria-label={t(expanded || error ? "m5.catalog.collapse" : "m5.catalog.expand")} onClick={() => setExpanded(value => !value)}>{expanded || error ? "‹" : "›"}</button></header> : <button type="button" className="m5-secondary" disabled={disabled || busy} onClick={() => open ? setOpen(false) : void load(null)} aria-expanded={open}>{t("m5.catalog.title")}</button>}
+  return <section className={`m5-project-catalog${home ? " m5-home-projects" : ""}${rail ? ` m5-project-rail${expanded || error ? " m5-project-rail-expanded" : ""}` : ""}`} aria-label={t("m5.catalog.title")}>
+    {home ? <header className="m5-home-projects-heading"><h2>{t("m5.home.recent")}</h2><span>{t("m5.catalog.order")}</span></header> : rail ? <header className="m5-project-rail-header"><h2 title={t("m5.catalog.title")}>{t(compact ? "m5.catalog.shortTitle" : "m5.catalog.title")}</h2><button type="button" aria-expanded={expanded || error} disabled={error} title={t(expanded || error ? "m5.catalog.collapse" : "m5.catalog.expand")} aria-label={t(expanded || error ? "m5.catalog.collapse" : "m5.catalog.expand")} onClick={() => setExpanded(value => !value)}>{expanded || error ? "‹" : "›"}</button></header> : <button type="button" className="m5-secondary" disabled={disabled || busy} onClick={() => open ? setOpen(false) : void load(null)} aria-expanded={open}>{t("m5.catalog.title")}</button>}
     {open && <div className="m5-project-catalog-list" aria-busy={busy}>
-      {!rail && <p>{t("m5.catalog.order")}</p>}
+      {!rail && !home && <p>{t("m5.catalog.order")}</p>}
       {rail && ready && disabled && <details className="m5-project-switch-help" onToggle={event => { if (event.currentTarget.open) setExpanded(true); }}><summary title={t("m5.catalog.switchTitle")}>{t("m5.catalog.switchTitle")}</summary><p>{t("m5.catalog.switchHelp")}</p></details>}
       {busy && <p role="status" title={t("m5.catalog.busy")}>{t(compact ? "m5.catalog.shortBusy" : "m5.catalog.busy")}</p>}
       {error ? <p role="alert">{t("m5.catalog.error")}</p> : !busy && entries.length === 0 ? <p title={t("m5.catalog.empty")}>{t(compact ? "m5.catalog.shortEmpty" : "m5.catalog.empty")}</p> :

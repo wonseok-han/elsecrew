@@ -134,6 +134,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const admissionReadyRef = useRef(admissionReady);
   admissionReadyRef.current = admissionReady;
   const [goal, setGoal] = useState("");
+  const [hasSavedProjects, setHasSavedProjects] = useState(false);
   const goalInputRef = useRef<HTMLInputElement>(null);
   const newChatDialogRef = useRef<HTMLDialogElement>(null);
   const newChatButtonRef = useRef<HTMLButtonElement>(null);
@@ -248,11 +249,11 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
 
   return (
     <main className={`m5-workbench${window.m5Projects ? " m5-with-project-rail" : ""}`} lang={lang} aria-label={t("m5.shell.label")}>
-      <ProjectCatalog rail ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
+      <ProjectCatalog rail onHasProjects={setHasSavedProjects} ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
       <header className={`m5-toolbar${snapshot.project ? " m5-toolbar-project" : ""}`}>
         <div>
           <p className="m5-eyebrow">{t("m5.shell.eyebrow")}</p>
-          <h1>{snapshot.project?.name ?? t("m5.shell.start")}</h1>
+          <h1>{snapshot.project?.name ?? t(hasSavedProjects ? "m5.home.welcome" : "m5.shell.start")}</h1>
           <p className="m5-subtitle">
             {t(snapshot.project ? "m5.shell.active" : "m5.shell.intro")}
           </p>
@@ -287,9 +288,11 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       {appDefaultsOpen && <AppRoleDefaultsEditor disabled={!admissionReady} onClose={() => setAppDefaultsOpen(false)} />}
       <StorageAdmissionNotice admission={admission} />
       <WorkStatusNotice bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])} />
-      {!snapshot.project && <GuidedStart disabled={!admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked} onChoose={() => void controller.chooseProject()} />}
+      {!snapshot.project && <GuidedStart returning={hasSavedProjects} disabled={!admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked} onChoose={() => void controller.chooseProject()} />}
+      {!snapshot.project && hasSavedProjects && <ProjectCatalog home ready={admissionReady} controller={controller}
+        disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked} />}
       <GitSelectionView disabled={leavingProject || settingsOpen || leaveError} />
-      <ProviderLogin disabled={!admissionReady} compact={Boolean(snapshot.project)} reveal={connectionReveal} />
+      <ProviderLogin disabled={!admissionReady} compact={Boolean(snapshot.project)} returning={hasSavedProjects} reveal={connectionReveal} />
       {snapshot.error && (
         <section className="m5-error" role="alert">
           <strong>{t(snapshot.error.messageKey)}</strong>
@@ -531,13 +534,13 @@ function ProjectGuide({ projectId, activeChat, onResume, hasChat, hasOpenFile, d
   </details>;
 }
 
-function GuidedStart({ disabled, onChoose }: { disabled: boolean; onChoose: () => void }) {
+function GuidedStart({ disabled, onChoose, returning }: { disabled: boolean; onChoose: () => void; returning: boolean }) {
   const { t } = useI18n();
-  return <section className="m5-guided-start" aria-label={t("m5.start.title")}>
-    <div className="m5-start-heading"><h2>{t("m5.start.title")}</h2><p>{t("m5.start.help")}</p></div>
-    <ol className="m5-start-steps">{(["connect", "project", "goal"] as const).map((step, index) => <li key={step}>
+  return <section className={`m5-guided-start${returning ? " m5-guided-returning" : ""}`} aria-label={t("m5.start.title")}>
+    <div className="m5-start-heading"><h2>{t(returning ? "m5.home.continue" : "m5.start.title")}</h2><p>{t(returning ? "m5.home.continueHelp" : "m5.start.help")}</p></div>
+    {!returning && <ol className="m5-start-steps">{(["connect", "project", "goal"] as const).map((step, index) => <li key={step}>
       <span className="m5-start-number" aria-hidden="true">{index + 1}</span><div><h3>{t(`m5.start.${step}`)}</h3><p>{t(`m5.start.${step}Help`)}</p></div>
-    </li>)}</ol>
+    </li>)}</ol>}
     <div className="m5-start-action"><button type="button" onClick={onChoose} disabled={disabled}>{t("m5.shell.choose")}</button><p>{t("m5.start.projectLimit")}</p></div>
   </section>;
 }

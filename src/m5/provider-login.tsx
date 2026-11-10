@@ -10,9 +10,11 @@ import { readLoginDiagnostic, type LoginDiagnostic } from "./provider-login-diag
 
 export type ConnectionReveal = { provider: LoginProvider; sequence: number };
 
-export function ProviderLogin({ disabled, compact = false, reveal }: {disabled: boolean; compact?: boolean; reveal?: ConnectionReveal}) {
+export function ProviderLogin({ disabled, compact: preferCompact = false, returning = false, reveal }: {disabled: boolean; compact?: boolean; returning?: boolean; reveal?: ConnectionReveal}) {
   const { t } = useI18n();
   const [selected, setSelected] = useState(readProviderSelection);
+  const [startedWithoutAgents] = useState(() => readProviderSelection().length === 0);
+  const compact = preferCompact || (returning && !startedWithoutAgents);
   const [selectionExpanded, setSelectionExpanded] = useState(!compact && selected.length === 0);
   useEffect(() => { setSelectionExpanded(!compact && selected.length === 0); }, [compact, selected.length]);
   const [draft, setDraft] = useState<LoginProvider[]>([]);
@@ -63,7 +65,7 @@ export function ProviderLogin({ disabled, compact = false, reveal }: {disabled: 
         onClick={() => navigate(item)}><span aria-hidden="true">{index + 1}</span>{t(`m5.setup.steps.${item}`)}</button>)}
     </nav>}
     <div hidden={!compact && step !== "agents"}>
-    <DeviceCheck compact={compact}/>
+    <DeviceCheck/>
     <details className="m5-provider-selection" open={selectionExpanded} onToggle={event => setSelectionExpanded(event.currentTarget.open)}>
       <summary><strong>{t("m5.setup.agents.title")}</strong><span>{selected.length ? selected.map(p => p === "codex" ? "Codex" : "Claude Code").join(" · ") : t("m5.setup.agents.choose")}</span></summary>
       <p>{t("m5.setup.agents.help")}</p>
@@ -97,7 +99,7 @@ export function ProviderLogin({ disabled, compact = false, reveal }: {disabled: 
     </div>
   </section>;
 }
-function DeviceCheck({ compact }: { compact: boolean }) {
+function DeviceCheck() {
   const { lang, t } = useI18n();
   const [report, setReport] = useState<DeviceReport | null>(null);
   const [busy, setBusy] = useState(false);
@@ -121,7 +123,7 @@ function DeviceCheck({ compact }: { compact: boolean }) {
   }, []);
   if (!window.m5Device) return null;
   const capacity = (bytes: number) => `${new Intl.NumberFormat(lang, { maximumFractionDigits: 1 }).format(bytes / 1024 ** 3)} GiB`;
-  return <details className="m5-device-check" open={compact ? undefined : true}>
+  return <details className="m5-device-check" open={failed || undefined}>
     <summary>{t("m5.device.title")}</summary>
     {busy && <p role="status">{t("m5.device.checking")}</p>}
     {failed && <p role="alert">{t("m5.device.failed")}</p>}
