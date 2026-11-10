@@ -4,6 +4,12 @@
 
 ### 2026-11-10 · by GPT-6
 
+- 사용자 요청에 따라 성능 기준의 타당성을 기존 실측으로 검토했다. 최신 네 combined 진단은 idle407.41~436.23MiB/peak725.09~805.05MiB/잔류증분78.70~296.28MiB이며 서로 다른 계측 빌드의 단회 자료로 정식10회 p95를 대신하지 않는다. 11월2일 rendered 대조군409.59~413.92MiB는 sidecar 없는 별도 진단임을 재확인했다.
+- docs/procedures/m5-performance.md에 미승인 재검토안을 기록했다. 유휴512MiB를 예산 제안으로 권고하되 peak800/입력50ms/안전 기준은 유지하고, 잔류120은 첫 로드 캐시와 반복 누수를 구별하는 같은 프로세스 반복 진단부터 제안했다. 400 불가능·누수 없음·제품합격을 주장하지 않는다. 현재400/800/120 상수와 과거실패는 변경하지 않았다.
+- 검증: 기존 원시 진단·측정 절차 대조, 문서 diff 검사. 새 앱 빌드/모델 호출/화면시험/push 없음. 다음은 유휴 예산 사용자 결정과 잔류 수명 진단이며 Windows 추가CI·최종 통합 검증은 여전히 남는다.
+
+### 2026-11-10 · by GPT-6
+
 - 최신 native 결과의 Memory Tag 의미를 Chromium 공식 page_allocator.h(main blob0711808209459e0e6dda35e75a045b7dd828e92d)에서 확인했다. 253=PartitionAlloc, 254=Chromium, 255=V8 heap pages다. 출처: https://chromium.googlesource.com/chromium/src/+/refs/heads/main/base/allocator/partition_allocator/src/partition_alloc/page_allocator.h . 패키지 Chromium의 정확한 source revision 대조까지 했다는 주장은 하지 않는다.
 - 실제 결과의 renderer tag255 resident69.58MiB/dirty68.1MiB, tag253 resident52.62MiB/dirty44.0MiB; main tag253 resident68.39MiB/dirty29.0MiB와 tag255 resident20.73MiB/dirty20.0MiB를 분리했다. 공유 __TEXT를 더해 ps RSS와 비교하거나 페이지수로 live-object 누수를 단정하지 않는다. .artifacts/m5-native-complete-combined-2026-11-10/allocator-attribution.json에 출처·한계·원시숫자를 보존했다.
 - 이번은 원인 분류를 좁힌 분석이며 제품 최적화/새 runtime PASS는 없다. 다음은 큰 allocator 범주 안에서 실제 유지 객체와 allocator 여유공간을 구분하는 것이다. 강제GC/프로세스 격리 해제/메모리 기준 변경은 하지 않았고 Windows 추가CI는 승인 대기다.
