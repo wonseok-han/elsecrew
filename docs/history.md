@@ -4,6 +4,11 @@
 
 ### 2026-11-10 · by GPT-6
 
+- af76baca 재패키징 후 Info.plist를 직접 확인하니 Electron Packager가 extendInfo의 CFBundleName/CFBundleDisplayName을 내부 package name으로 덮어썼다. 위 설정은 효과가 없어 제거한다. 앞선 “네이티브 메뉴 이름에도 적용”은 시도 기록이며 달성 사실이 아니다. 현재 실제 창/화면 이름은 Elsecrew, 앱 번들/실행파일/네이티브 앱 메뉴는 hello-agent다. 정식 설치 파일 이름 전환에는 패키지 경로·검증 스크립트·업데이트 식별자의 일괄 후속 정리가 필요하다. 프로젝트/인증 저장 위치는 유지한다.
+- 이번 임시 캡처 프로필 3개와 중간 캡처 2세트는 정상 종료 확인 뒤 정리했고 최종 capture-wPyOn4만 보관했다. macOS 패키지 smoke는 9622861a에서 PASS, af76baca 패키지 생성 PASS. 최종 앱 재실행 완료, main/push 없음.
+
+### 2026-11-10 · by GPT-6
+
 - 9622861a 패키지·macOS package smoke PASS. 기존 개발 앱을 정상 종료 후 같은 경로로 교체했고 실제 설치 창 제목 Elsecrew와 사용자 프로젝트 local-audio-notes 보존을 확인했다. 최종 파일/설정 캡처 capture-wPyOn4. 실제 모델 실행·push·main 병합 없음.
 - macOS 네이티브 메뉴 이름에도 적용하도록 CFBundleName을 Elsecrew로 명시했다. 실행 파일/패키지명 hello-agent와 기존 데이터 경로는 호환 목적으로 유지한다. Windows 패키지 명칭·상표/도메인 확인은 별도 미검증이며 이번 macOS 확인을 그 증거로 쓰지 않는다.
 

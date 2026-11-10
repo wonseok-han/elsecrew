@@ -12,7 +12,6 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export default {
   packagerConfig: {
     asar: true,
-    extendInfo: { CFBundleName: "Elsecrew", CFBundleDisplayName: "Elsecrew" },
   },
   makers: [new MakerZIP({}, ["darwin", "win32", "linux"])],
   plugins: [
