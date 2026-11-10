@@ -4,6 +4,11 @@
 
 ### 2026-11-10 · by GPT-6
 
+- 사용자 요청으로 5a1303e5 최신 수정본을 기존 macOS 개발 앱 위치에 반영했다. 기존 앱 정상 종료 후 package 및 package smoke PASS. 재실행한 실제 앱에서 사이드바 Elsecrew/상단 프로젝트명, 연속 패널 테두리, 프로젝트 ⋯ 외부 클릭 닫힘을 확인했다.
+- 실제 네이티브 프로젝트 추가 창을 열고 취소해 오류 배너나 [object Object]가 생기지 않는 것을 확인했다. 기존 local-audio-notes를 다시 열어둠. 원본 파일/인증 변경·모델 실행·강제 종료·main 병합·push 없음. 총괄/커스텀 역할/프로젝트 제거는 이번 설치본에도 미구현 상태다.
+
+### 2026-11-10 · by GPT-6
+
 - 프로젝트 폴더 선택 취소: preload에서 DOMException을 던지고 renderer에서 instanceof Error/AbortError로 판별하던 경계를 제거했다. main의 명시 cancelled 결과를 preload가 null로 반환하고 controller는 상태 변경·snapshot 생성 전에 반환한다. 기존 AbortError 호환 처리는 유지한다. 일반 객체 오류는 문자열 message를 사용하고 없는 경우 고정 진단으로 표시해 [object Object] 노출을 막는다.
 - 프로젝트 헤더의 Elsecrew 문구를 제거하고 사이드바 상단에 독립 브랜드로 표시한다. 접힌 사이드바는 E와 전체 이름 접근성 라벨을 제공한다.
 - 검증: TypeScript·renderer build·controller66개·Electron bridge66개·Chromium2개·diff check PASS. 취소 후 기존 상태 보존, 객체 오류 message, 축소 브랜드/상단 중복 제거를 확인했다. 실제 설치 앱의 네이티브 선택창 재시험 및 재패키징은 아직 남았다. 사용자 프로젝트/인증 변경·모델 호출·push 없음.
