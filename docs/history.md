@@ -4,6 +4,12 @@ Windows CI42315705501은 준비·확인 전달을 통과했으나 실제 반영�
 
 ### 2026-11-10 · by GPT-6
 
+- 사용자 goal active 재개 후 최근 실측을 기준으로 화면 수명을 감사했다. MonacoEditor cleanup은 model/subscription/editor를 해제하고 editor-state leave는 tabs/diff/tree를 비우며 epoch로 늦은 응답을 거절한다. 로컬 Monaco worker service에는 model0개 시 worker 해제가 이미 있다. 이 경로에 임의 terminate/강제GC를 추가할 증거는 찾지 못했다.
+- 저장된 이번 실측의 rendererAllocation은 usedHeap3.0→36.7MiB, totalHeap6.4→46.7MiB, connected DOM151개/editor0/diff0/output0이다. 전체 노드3101/리스너513은 연결성/도달성 없이 누수로 단정하지 않는다. retained renderer RSS289.28MiB와 JS heap의 차이는 native/code/allocator 구분조사가 필요하며, 큰문자열 유지라는 단일 원인으로 좁힐 증거가 없다. .artifacts/m5-combined-output-2026-11-10/retention-analysis.json에 역할별 idle/retained와 판단한계를 저장했다.
+- 이번은 기존 증거 분석이며 새 runtime PASS/메모리 개선은 없다. 다음은 renderer native/allocator와 main의 측정자료 유지 비용을 구분하는 진단이다. Windows 공개승인은 여전히 대기이며 제품기능/초안 보존/400·800·120 기준은 유지한다.
+
+### 2026-11-10 · by GPT-6
+
 - 사용자 현재5분 화면유지 응답으로 준비된 QA(c7e8fa64, 이후 차이는 history뿐)의 combined-workload/keep-test-visible 단회를 실행했다. 제한환경 첫 실행은 로그생성전exit134, 데스크톱 접근 재실행 session88679/PID55931은 terminal exit1·shutdown accepted다. root2wFTzY의 큰파일/500diff/4개실행·4채팅 기록·native char 입력(24.30ms, 물리화면 시간 아님)·원본불변을 관측했지만 최종status/functionalStatus는 FAIL이다.
 - 메모리 idle436.23MiB>400, peak805.05MiB>800, 닫기60초뒤 잔류증분296.28MiB>120로 세 기준 모두 실패했다. retained 총732.52MiB(main215.81/renderer289.28/GPU96.56/network39.81/sidecar37.64/측정utility53.41). 측정기 비용은 차감하지 않으며 단회 QA를 전체G6로 인용하지 않는다. 증거 .artifacts/m5-combined-output-2026-11-10/{result,build,summary}.json.
 - 관측 PID 전부 부재와 DB app_instances clean_shutdown_at을 확인한 뒤 이번 fixture2wFTzY와 QA packageV7XtVS를 삭제했다. 보고서/스크린샷은 보존했다. 다음은 메모리 원인별 최적화이며 Windows 추가CI 승인은 여전히 대기다. 사용자 프로젝트·인증·모델호출·제품out은 사용하지 않았다.
