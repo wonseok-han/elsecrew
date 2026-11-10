@@ -86,12 +86,19 @@ window.m5Diagnostics = {inspect: async () => {
   return {scope:'currentAppSession',claudeCheckpoints:diagnosticReads === 1 ? ['init model'] : []};
 }};
 window.m5SmokeFailedClaude = () => {
-  diagnosticRun = {schemaVersion:1,runId:'smoke_failed_claude',chatId:smokeChat.chatId,
+  diagnosticRun = {schemaVersion:1,runId:diagnosticRun?.runId ?? 'smoke_failed_claude',chatId:smokeChat.chatId,
     taskId:smokeChat.taskId,projectId:smokeChat.projectId,worktreeId:smokeChat.worktreeId,
     workspaceIdentity:smokeChat.workspaceIdentity,selectedProfile:smokeChat.roleSnapshots[1],
     source:'actualAgent',capabilityFingerprint:`sha256:${'0'.repeat(64)}`,state:'failed',
     stage:'implementing',terminationOutcome:'cleanExit',createdAt:smokeChat.createdAt,updatedAt:smokeChat.updatedAt};
   for(const listener of agentRunStateListeners) listener({run:diagnosticRun});
+};
+window.m5SmokeVisualRunning = () => {
+  diagnosticRun = {schemaVersion:1,runId:'agent_run_visual_running',chatId:smokeChat.chatId,taskId:smokeChat.taskId,
+    projectId:smokeChat.projectId,worktreeId:smokeChat.worktreeId,workspaceIdentity:smokeChat.workspaceIdentity,
+    selectedProfile:smokeChat.roleSnapshots[1],source:'actualAgent',capabilityFingerprint:`sha256:${'0'.repeat(64)}`,
+    state:'running',stage:'implementing',terminationOutcome:null,createdAt:smokeChat.createdAt,updatedAt:smokeChat.updatedAt};
+  for (const listener of agentRunStateListeners) listener({run:diagnosticRun});
 };
 // Visual-only state transition; no process or provider request is performed.
 window.m5SmokeVisualChatState = state => {

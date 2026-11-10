@@ -7,7 +7,7 @@ const position = (rect: DockRect): CSSProperties => ({ left: `${rect.x * 100}%`,
 
 export function WorkbenchDock({ children, conversation, chats, reveal, changeCount }: { children: ReactNode[]; conversation?: ReactNode; chats?: ReactNode; reveal?: { panel: DockPanel } | null; changeCount?: number }) {
   const { t } = useI18n();
-  const labels: Record<DockPanel, string> = { files: t("m5.dock.files"), editor: t("m5.dock.editor"), changes: t("m5.dock.changes"), conversation: t("m5.dock.conversation"), chats: t("m5.navigation.chatTitle") };
+  const labels: Record<DockPanel, string> = { files: t("m5.dock.files"), editor: t("m5.dock.editor"), changes: t("m5.dock.changes"), conversation: t("m5.dock.conversation"), chats: t("m5.dock.chats") };
   const placements: Record<DockPlacement, string> = { left: t("m5.dock.left"), right: t("m5.dock.right"), top: t("m5.dock.top"), bottom: t("m5.dock.bottom"), tab: t("m5.dock.tab") };
   const [layout, setLayout] = useState(() => { try { return parseDockLayout(localStorage.getItem(DOCK_STORAGE_KEY)); } catch { return defaultDockLayout(); } });
   const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 820px)").matches);

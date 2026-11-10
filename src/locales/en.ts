@@ -148,6 +148,7 @@ export const en: Record<MessageKey, string> = {
   "m5.dock.files": "Files",
   "m5.dock.editor": "Editor",
   "m5.dock.changes": "Changes",
+  "m5.dock.chats": "Chats",
   "m5.dock.conversation": "Team conversation",
   "m5.dock.left": "Left",
   "m5.dock.right": "Right",

@@ -147,6 +147,7 @@ export const ko = {
   "m5.dock.files": "파일",
   "m5.dock.editor": "편집기",
   "m5.dock.changes": "변경",
+  "m5.dock.chats": "채팅",
   "m5.dock.conversation": "팀 대화",
   "m5.dock.left": "왼쪽",
   "m5.dock.right": "오른쪽",

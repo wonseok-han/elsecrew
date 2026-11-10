@@ -96,6 +96,12 @@ app.whenReady().then(async () => {
   window.setContentSize(1440, 1000);
   await window.webContents.executeJavaScript("[...document.querySelectorAll('.m5-settings button')].find(b => b.textContent === '작업대로 돌아가기').click()");
   await wait("!document.querySelector('.m5-settings-dialog')?.open");
+  await window.webContents.executeJavaScript("document.querySelector('.m5-file-row').click()");
+  await wait("[...document.querySelectorAll('.m5-file-row')].some(b => b.textContent.includes('example.ts'))");
+  await window.webContents.executeJavaScript("[...document.querySelectorAll('.m5-file-row')].find(b => b.textContent.includes('example.ts')).click()");
+  await wait("document.querySelector('.monaco-editor .view-lines')?.textContent.length > 0");
+  await capture(window, 'product-editor');
+
   await window.webContents.executeJavaScript("[...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent.startsWith('변경') && b.getClientRects().length).click()");
   await wait("document.querySelector('.m5-change-row')?.getClientRects().length");
   await window.webContents.executeJavaScript("document.querySelector('.m5-change-row').click()");
@@ -107,6 +113,18 @@ app.whenReady().then(async () => {
   await wait("document.querySelector('.m5-timeline') && !document.querySelector('.m5-refresh').disabled");
   await wait("document.querySelector('.m5-project-guide')?.open === false");
   await capture(window, 'product-active-conversation');
+  await window.webContents.executeJavaScript("window.m5SmokeVisualRunning()");
+  await wait("document.querySelector('.m5-run-actions button:not(:disabled)')");
+  await window.webContents.executeJavaScript(`(() => {
+    if ([...document.querySelectorAll('.m5-actual-controls button')].some(b => !b.disabled)) throw new Error('active run allowed another start');
+    if (!document.querySelector('.m5-run-actions button').getClientRects().length) throw new Error('cancel control hidden');
+    document.querySelector('.m5-timeline').scrollIntoView({block:'start'});
+  })()`);
+  await wait("document.querySelector('.m5-run-actions button').getBoundingClientRect().bottom <= document.querySelector('.m5-conversation-scroll').getBoundingClientRect().bottom");
+  await capture(window, 'product-running');
+  await window.webContents.executeJavaScript("window.m5SmokeFailedClaude()");
+  await wait("!document.querySelector('.m5-run-actions button')");
+
   await window.webContents.executeJavaScript(`(() => {
     const tools = document.querySelector('.m5-project-tools');
     if (tools.getBoundingClientRect().height > 45) throw new Error('closed utilities should share a row');
@@ -120,6 +138,14 @@ app.whenReady().then(async () => {
     if (document.documentElement.scrollWidth > innerWidth) throw new Error('English workbench overflows horizontally');
     const toggle = document.querySelector('.m5-management-toggle');
     if (!toggle.getClientRects().length) throw new Error('connection access missing');
+    for (const tabs of document.querySelectorAll('.m5-dock-group-tabs')) {
+      if (!tabs.getClientRects().length) continue;
+      const bounds = tabs.getBoundingClientRect();
+      for (const button of tabs.querySelectorAll('button')) {
+        const rect = button.getBoundingClientRect();
+        if (rect.left < bounds.left - 1 || rect.right > bounds.right + 1) throw new Error('tab label clipped in minimum window');
+      }
+    }
     const composer = document.querySelector('.m5-followup');
     if (composer.querySelector('button[type=submit]').getBoundingClientRect().bottom > composer.getBoundingClientRect().bottom + 1) throw new Error('followup action requires scrolling at minimum window');
   })()`);

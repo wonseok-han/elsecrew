@@ -703,3 +703,7 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-review-files code { font-size: 12px; overflow-wrap: anywhere; }
 .m5-review-pagination { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 11px; }
 .m5-review-pagination p { flex: 1 1 100%; margin: 0; }
+
+.m5-dock-group-tabs button { padding-inline: 8px; flex-shrink: 0; }
+
+.m5-dock-group-tabs { flex-wrap: wrap; overflow: visible; }
