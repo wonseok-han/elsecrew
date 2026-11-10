@@ -234,6 +234,8 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
       whenReady: () => Promise.resolve(),
       on: () => undefined,
       getPath: () => "/app-data",
+      setName: (name: string) => { assert.equal(name, "Elsecrew"); },
+      setPath: (key: string, value: string) => { assert.equal(key, "userData"); assert.equal(value, "/app-data"); },
       isPackaged: false,
       quit: () => undefined,
     },

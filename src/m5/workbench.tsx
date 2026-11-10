@@ -1,3 +1,5 @@
+import { PreparationRecovery } from "./preparation-recovery-view";
+import { BackupStorageUsageView } from "./backup-storage-usage";
 import { flushSync } from "react-dom";
 import { AppSettings, type SettingsSection } from "./app-settings";
 import { GitSelectionView } from "./git-selection-view.tsx";
@@ -145,6 +147,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appDefaultsOpen, setAppDefaultsOpen] = useState(false);
   const [updatePreparing, setUpdatePreparing] = useState(false);
+  const [managedProject, setManagedProject] = useState<{ projectId: string; canonicalPath: string } | null>(null);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferencesSection, setPreferencesSection] = useState<SettingsSection>("general");
   const [connectionReveal, setConnectionReveal] = useState<ConnectionReveal>();
@@ -259,8 +262,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   };
 
   return (
-    <main inert={updatePreparing} className={`m5-workbench${window.m5Projects ? " m5-with-project-rail" : ""}`} lang={lang} aria-label={t("m5.shell.label")}>
-      <ProjectCatalog rail onHasProjects={setHasSavedProjects} ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
+    <main inert={updatePreparing} className={`m5-workbench${preferencesOpen ? " m5-settings-open" : ""}${window.m5Projects ? " m5-with-project-rail" : ""}`} lang={lang} aria-label={t("m5.shell.label")}>
+      <ProjectCatalog rail onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} onHasProjects={setHasSavedProjects} ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
       <header className={`m5-toolbar${snapshot.project ? " m5-toolbar-project" : ""}`}>
         <div>
           <p className="m5-eyebrow">{t("m5.shell.eyebrow")}</p>
@@ -270,8 +273,15 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           </p>
         </div>
         <div className="m5-toolbar-actions">
+      {snapshot.project && <ProjectGuide key={snapshot.project.id} hasChat={Boolean(chat.activeChat)}
+        projectId={snapshot.project.id} activeChat={chat.activeChat} onResume={id => void switchChat(id)}
+        hasOpenFile={snapshot.tabs.length > 0 || snapshot.diffVisible}
+        disabled={!admissionReady || !projectDataReady || settingsOpen || snapshot.actionBlocked || chat.preparing || chat.switching}
+        onGoal={() => setNewChatOpen(true)} onTeam={() => openRoleSettings()}
+        onConversation={() => controller.revealConversation()}
+        onChanges={() => { controller.selectPanel("changes"); void controller.refreshChanges(); }} />}
           <button type="button" className="m5-secondary m5-open-preferences" disabled={settingsOpen || newChatOpen || appDefaultsOpen} onClick={() => setPreferencesOpen(true)}>{t("m5.preferences.title")}</button>
-          {snapshot.project && <button type="button" onClick={() => void controller.chooseProject()} disabled={settingsOpen || !admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked}>
+          {snapshot.project && <details className="m5-project-menu"><summary>{t("m5.preferences.projectMenu")}</summary><div>          {snapshot.project && <button type="button" onClick={() => void controller.chooseProject()} disabled={settingsOpen || !admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked}>
             {t("m5.shell.switch")}
           </button>}
           {snapshot.project && (
@@ -279,7 +289,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
               {t("m5.shell.close")}
             </button>
           )}
-          {snapshot.project && <button ref={settingsButtonRef} className="m5-secondary" type="button" onClick={() => openRoleSettings()} disabled={!admissionReady || settingsOpen || !projectDataReady || chat.preparing || chat.switching}>{t("m5.shell.roles")}</button>}
+          {snapshot.project && <button ref={settingsButtonRef} className="m5-secondary" type="button" onClick={() => openRoleSettings()} disabled={!admissionReady || settingsOpen || !projectDataReady || chat.preparing || chat.switching}>{t("m5.shell.roles")}</button>}</div></details>}
         </div>
       </header>
 
@@ -295,7 +305,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       }} disabled={!admissionReady || chat.switching || settingsOpen || leavingProject || leaveError}
         onResolved={(result, path) => controller.observeCompletedSaveRecovery(result, path)} />}
       {leaveError && <p className="m5-error" role="alert">{t("m5.feedback.leaveError")}</p>}
-      <AppSettings restartLocked={updatePreparing} open={preferencesOpen} section={preferencesSection} onSection={setPreferencesSection} onClose={() => { setPreferencesOpen(false); setAppDefaultsOpen(false); }}
+      <AppSettings storage={<BackupStorageUsageView disabled={!admissionReady} />} project={managedProject ? <><p>{managedProject.canonicalPath}</p><PreparationRecovery projectId={managedProject.projectId} disabled={!admissionReady || snapshot.actionBlocked || snapshot.selectionBlocked || Boolean(snapshot.workspace) || settingsOpen || leavingProject || leaveError || !controller.canLeaveProject() || chat.switching} /></> : <p>{t("m5.preferences.chooseProject")}</p>} restartLocked={updatePreparing} open={preferencesOpen} section={preferencesSection} onSection={setPreferencesSection} onClose={() => { setPreferencesOpen(false); setAppDefaultsOpen(false); }}
         rolesEditor={appDefaultsOpen && <AppRoleDefaultsEditor disabled={!admissionReady} onClose={() => setAppDefaultsOpen(false)} />}
         disabled={!admissionReady || !window.m5Projects} onRoles={() => setAppDefaultsOpen(true)}>
         <ProviderLogin disabled={!admissionReady} returning={hasSavedProjects} reveal={connectionReveal} />
@@ -303,19 +313,10 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       <StorageAdmissionNotice admission={admission} />
       <WorkStatusNotice bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])} />
       {!snapshot.project && <GuidedStart returning={hasSavedProjects} disabled={!admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked} onChoose={() => void controller.chooseProject()} />}
-      {!snapshot.project && hasSavedProjects && <ProjectCatalog home ready={admissionReady} controller={controller}
+      {!snapshot.project && hasSavedProjects && <ProjectCatalog home onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} ready={admissionReady} controller={controller}
         disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked} />}
       <GitSelectionView disabled={leavingProject || settingsOpen || leaveError} />
-      <div className={snapshot.project ? "m5-project-tools" : "m5-home-tools"}>
-      <button type="button" className="m5-secondary m5-open-agents" onClick={() => { setPreferencesSection("agents"); setPreferencesOpen(true); }}>{t("m5.preferences.agents")}</button>
-      {snapshot.project && <ProjectGuide key={snapshot.project.id} hasChat={Boolean(chat.activeChat)}
-        projectId={snapshot.project.id} activeChat={chat.activeChat} onResume={id => void switchChat(id)}
-        hasOpenFile={snapshot.tabs.length > 0 || snapshot.diffVisible}
-        disabled={!admissionReady || !projectDataReady || settingsOpen || snapshot.actionBlocked || chat.preparing || chat.switching}
-        onGoal={() => setNewChatOpen(true)} onTeam={() => openRoleSettings()}
-        onConversation={() => controller.revealConversation()}
-        onChanges={() => { controller.selectPanel("changes"); void controller.refreshChanges(); }} />}
-      </div>
+
       {snapshot.error && (
         <section className="m5-error" role="alert">
           <strong>{t(snapshot.error.messageKey)}</strong>
@@ -499,7 +500,7 @@ const VirtualFileList = memo(function VirtualFileList({ entries, activePath, dis
   }}>
     <div aria-hidden="true" style={{ height: start * rowHeight }} />
     {entries.slice(start, end).map((entry, index) => <button key={entry.path} data-index={start + index} type="button" className="m5-file-row" data-kind={entry.kind} aria-current={entry.kind === "file" && activePath === entry.path ? "true" : undefined} title={entry.path} onClick={() => onOpen(entry)} disabled={disabled || entry.kind === "symlink"}>
-      <span className="m5-file-glyph" aria-hidden="true">{entry.kind === "directory" ? "▸" : entry.kind === "symlink" ? "↗" : entry.name.includes(".") ? entry.name.split(".").pop()!.slice(0, 4).toUpperCase() : "—"}</span>
+      <svg className="m5-file-glyph" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{entry.kind === "directory" ? <path d="M3 7V5a1 1 0 0 1 1-1h5l2 3h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7Z" /> : <><path d="M14 3H5v18h14V8l-5-5Z M14 3v5h5" />{entry.kind === "symlink" ? <path d="m8 16 7-5m-4 0h4v4" /> : <path d="M8 13h8M8 17h6" />}</>}</svg>
       <span className="m5-tree-name">{entry.name}</span>
     </button>)}
     <div aria-hidden="true" style={{ height: (entries.length - end) * rowHeight }} />
@@ -514,7 +515,7 @@ function ProjectGuide({ projectId, activeChat, onResume, hasChat, hasOpenFile, d
   const [preference, setPreference] = useState(() => { try { return parseProjectGuide(localStorage.getItem(projectGuideKey(projectId))); } catch { return emptyProjectGuide(); } });
   const [saveFailed, setSaveFailed] = useState(false);
   const working = hasOpenFile || hasChat;
-  const [open, setOpen] = useState(!preference.dismissed && !working);
+  const [open, setOpen] = useState(false);
   const savePreference = (next: ProjectGuidePreference) => {
     setPreference(next);
     try { localStorage.setItem(projectGuideKey(projectId), JSON.stringify(next)); setSaveFailed(false); return true; } catch { setSaveFailed(true); return false; }
@@ -530,7 +531,7 @@ function ProjectGuide({ projectId, activeChat, onResume, hasChat, hasOpenFile, d
   const step = projectGuideStep(preference, activeChat?.chatId ?? null, activeChat?.state ?? null);
   const beginGoal = () => { savePreference({ ...preference, teamReviewed: true }); onGoal(); };
   return <details className="m5-project-guide" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary>{t("m5.guide.title")} · {t(`m5.guide.step.${step}`)}</summary>
+    <summary>{t("m5.preferences.guide")}</summary><div className="m5-guide-popover">
     <section className="m5-guide-next" aria-label={t("m5.guide.next")}>
       <strong>{t(`m5.guide.step.${step}`)}</strong>
       {step !== "resume" && activeChat && <p>{activeChat.goal} · {t(`m5.chat.state.${activeChat.state}`)}</p>}
@@ -548,7 +549,7 @@ function ProjectGuide({ projectId, activeChat, onResume, hasChat, hasOpenFile, d
       <li><h3>{t("m5.guide.goal")}</h3><p>{t("m5.guide.goalHelp")}</p><button type="button" disabled={disabled} onClick={onGoal}>{t("m5.navigation.newChat")}</button><button type="button" className="m5-secondary" disabled={disabled} onClick={onTeam}>{t("m5.firstChat.editTeam")}</button></li>
       <li><h3>{t("m5.guide.observe")}</h3><p>{t("m5.guide.observeHelp")}</p><button type="button" className="m5-secondary" disabled={disabled || !hasChat} onClick={onConversation}>{t("m5.guide.openConversation")}</button></li>
       <li><h3>{t("m5.guide.review")}</h3><p>{t("m5.guide.reviewHelp")}</p><button type="button" className="m5-secondary" disabled={disabled || !hasChat} onClick={onChanges}>{t("m5.guide.openChanges")}</button><button type="button" className="m5-secondary" disabled={disabled || !hasChat} onClick={onConversation}>{t("m5.guide.openDecision")}</button></li>
-    </ol></details><p>{t("m5.guide.safety")}</p>
+    </ol></details><p>{t("m5.guide.safety")}</p></div>
   </details>;
 }
 

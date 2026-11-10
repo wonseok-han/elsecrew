@@ -3,7 +3,6 @@ import { RestorationPreview } from "./restoration-preview.tsx";
 import { BackupPreparationRecovery } from "./backup-preparation-recovery.tsx";
 import { ApplicationFailure } from "./application-failure.tsx";
 import { ApplicationRetirement } from "./application-retirement.tsx";
-import { BackupStorageUsageView } from "./backup-storage-usage.tsx";
 import { BackupRetentionView } from "./backup-retention.tsx";
 import { useEffect, useRef, useState } from "react";
 import { validateProjectCatalogResult, type ApplicationPreview, type ApplicationHistoryEntry, type ApplicationStatus, type PreparationInspection, type ProjectCatalogRequest } from "./contracts/project-catalog-v1.ts";
@@ -68,9 +67,14 @@ function PreparationRecoverySession({ projectId, disabled }: { projectId: string
     return () => window.clearTimeout(timer);
   }, [application, disabled, busy, projectId]);
   return <div aria-label={t("m5.prep.title")} aria-busy={busy}>
-    <BackupStorageUsageView disabled={disabled || busy} />
+    <details className="m5-maintenance-group"><summary>{t("m5.preferences.backups")}</summary>
     <BackupRetentionView projectId={projectId} disabled={disabled || busy} />
+    </details>
+    <details className="m5-maintenance-group"><summary>{t("m5.preferences.recovery")}</summary>
     <BackupPreparationRecovery projectId={projectId} disabled={disabled || busy} />
+    </details>
+    <details className="m5-maintenance-group"><summary>{t("m5.preferences.manual")}</summary>
+    <p>{t("m5.preferences.manualHelp")}</p>
     <button type="button" disabled={disabled || busy} onClick={() => setConfirmWorkspace(true)}>{t("m5.application.prepare")}</button>
     {confirmWorkspace && <div role="group" aria-label={t("m5.application.prepare")}>
       <p>{t("m5.application.prepareHelp")}</p>
@@ -89,6 +93,8 @@ function PreparationRecoverySession({ projectId, disabled }: { projectId: string
         {t(`m5.application.${change.kind}`)} <code>{change.path.replace(/[\p{Cc}\p{Cf}]/gu, character => `\\u{${character.codePointAt(0)!.toString(16)}}`)}</code>
       </li>)}</ul>
     </section>}
+    </details>
+    <details className="m5-maintenance-group"><summary>{t("m5.preferences.records")}</summary>
     <button type="button" disabled={disabled || busy} onClick={() => { setInspection(null); void request({ action: "inspectPreparation", projectId }); }}>{t("m5.prep.inspect")}</button>
     <button type="button" disabled={disabled || busy} onClick={() => { setApplication(null); void request({action:"applicationStatus",projectId}); }}>{t("m5.application.inspect")}</button>
     {application && <section aria-label={t("m5.application.inspect")}>
@@ -121,6 +127,7 @@ function PreparationRecoverySession({ projectId, disabled }: { projectId: string
       <button type="button" disabled={disabled || busy} onClick={() => void request({ action: "abandonPreparation", inspection })}>{t("m5.prep.abandon")}</button>
       <button type="button" disabled={busy} onClick={() => setInspection(null)}>{t("m5.prep.back")}</button>
     </div>}
+    </details>
     {message && <p role="status">{t(message === "prepareError" ? "m5.application.prepareError" : message === "previewError" ? "m5.application.previewError" : message === "applicationError" ? "m5.application.error" : `m5.prep.${message}`)}</p>}
   </div>;
 }

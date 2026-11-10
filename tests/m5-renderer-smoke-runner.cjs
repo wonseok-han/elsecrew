@@ -67,8 +67,9 @@ app.whenReady().then(async () => {
     const controlLabel = "프로젝트 선택";
     await ${waitFor("document.querySelector('.m5-open-preferences')", "settings entry")};
     document.querySelector('.m5-open-preferences').click();
-    await ${waitFor("document.querySelector('.m5-app-settings').open", "settings dialog visible")};
-    if (document.title !== 'Hello, Agent') throw new Error('development title leaked');
+    await ${waitFor("!document.querySelector('.m5-app-settings').hidden", "settings dialog visible")};
+    if (document.querySelector('.m5-app-settings').tagName !== 'SECTION' || getComputedStyle(document.querySelector('.m5-toolbar')).display !== 'none') throw new Error('settings is not a full page');
+    if (document.title !== 'Elsecrew') throw new Error('development title leaked');
     if (document.querySelector('.m5-toolbar-actions select')) throw new Error('language still outside settings');
 
     await ${waitFor("document.querySelector('.m5-preferences-row select')", "language control")};
@@ -187,6 +188,8 @@ app.whenReady().then(async () => {
     // Saved projects are now a persistent rail, not a toolbar popover.
     await ${waitFor("document.querySelector('.m5-project-catalog-list li button') && !document.querySelector('.m5-project-catalog-list li button').disabled", "saved project catalog loaded")};
     if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/earlier') throw new Error('catalog first page missing');
+    document.querySelector('.m5-app-settings > header button').click();
+    await ${waitFor("document.querySelector('.m5-app-settings').hidden", "settings page closed")};
     const rail = document.querySelector('.m5-project-rail');
     const railToggle = rail.querySelector('.m5-project-rail-header button');
     if (rail.getBoundingClientRect().width < 180 || railToggle.getAttribute('aria-expanded') !== 'true') throw new Error('project rail not expanded by default');
@@ -202,11 +205,16 @@ app.whenReady().then(async () => {
     if (getComputedStyle(document.querySelector('.m5-project-catalog-list li span')).display === 'none') throw new Error('expanded project path hidden');
     railToggle.click();
     await ${waitFor("document.querySelector('.m5-project-rail').getBoundingClientRect().width < 100", "collapsed project rail")};
-    rail.querySelector('li details summary').click();
-    await ${waitFor("document.querySelector('.m5-project-rail').getBoundingClientRect().width >= 180", "recovery opens full project details")};
+    rail.querySelector('.m5-project-manage').click();
+    await ${waitFor("!document.querySelector('.m5-app-settings').hidden && document.querySelector('.m5-maintenance-group')", "project management page")};
+    document.querySelectorAll('.m5-maintenance-group').forEach(group => group.open = true);
     const recoveryButton = text => [...document.querySelectorAll('[aria-label="프로젝트 시작 실패 복구"] button')].find(b => b.textContent === text);
     recoveryButton('시작 실패 확인').click();
     await ${waitFor("document.querySelector('[aria-label=\"실패한 준비 종료 확인\"]')", "explicit preparation inspection")};
+    document.querySelectorAll('.m5-preferences-layout > nav button')[0].click();
+    await ${waitFor("document.querySelector('.m5-preferences-row').getClientRects().length > 0", "leave project management")};
+    document.querySelectorAll('.m5-preferences-layout > nav button')[4].click();
+    await ${waitFor("document.querySelector('[aria-label=\"실패한 준비 종료 확인\"]')?.getClientRects().length > 0", "project recovery inspection survives navigation")};
     recoveryButton('이 준비 기록 종료').click();
     await ${waitFor("document.querySelector('[aria-label=\"프로젝트 시작 실패 복구\"]').textContent.includes('결과를 확인하지 못했어요')", "lost preparation response")};
     const pendingPreparation = document.querySelector('[aria-label="실패한 준비 종료 확인"]');
@@ -221,18 +229,19 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"프로젝트 시작 실패 복구\"]').textContent.includes('실패한 준비 기록을 종료했어요')", "preparation retry acknowledgment")};
     if (document.querySelector('[aria-label="실패한 준비 종료 확인"]')) throw new Error('completed preparation confirmation retained');
     globalThis.cleanupConsentReport = await (${probeCleanupConsent.toString()})();
+    document.querySelector('.m5-app-settings > header button').click();
+    railToggle.click();
     [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '다음 목록').click();
     await ${waitFor("document.querySelector('.m5-project-catalog-list li span')?.textContent === '/work/smoke'", "next catalog page")};
     if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/smoke') throw new Error('catalog path missing');
     document.querySelector('.m5-project-catalog-list li button').click();
-    document.querySelector('.m5-app-settings > header button').click();
     await ${waitFor("document.querySelector('.m5-file-row')", "project tree")};
-    document.querySelector('.m5-open-agents').click();
-    await ${waitFor("document.querySelector('.m5-app-settings').open", "agent settings reopened")};
+    document.querySelector('.m5-open-preferences').click(); document.querySelectorAll('.m5-preferences-layout > nav button')[2].click();
+    await ${waitFor("!document.querySelector('.m5-app-settings').hidden", "agent settings reopened")};
     await ${waitFor("!document.getElementById('m5-install-details').hidden", "installation controls in settings")};
     await (${probeInstallConsent.toString()})();
     document.querySelector('.m5-app-settings > header button').click();
-    await ${waitFor("!document.querySelector('.m5-app-settings').open", "settings dismissed")};
+    await ${waitFor("document.querySelector('.m5-app-settings').hidden", "settings dismissed")};
     document.querySelector('.m5-file-row').click();
     await ${waitFor("document.querySelector('.m5-breadcrumbs [aria-current=location]')?.textContent === '/ src'", "folder breadcrumb")};
     document.querySelector('.m5-breadcrumbs .m5-root').click();

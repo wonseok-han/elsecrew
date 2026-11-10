@@ -1,4 +1,6 @@
-# Hello, Agent 기술 설계
+# Elsecrew 기술 설계
+
+> 2026-11-10 UI: 표시 이름은 Elsecrew이며 기존 hello-agent 패키지/데이터 경로는 유지한다. 앱 설정은 전체 화면으로 일반·기본 역할·에이전트·저장공간·프로젝트 관리·업데이트를 제공한다. 프로젝트 관리에서 백업/중단 복구/이력/고급 수동 도구를 열며 원본 반영 확인과 작업 보호 조건은 유지한다. 작업대는 단일 상단 메뉴와 파일·편집기·채팅 중심이며 안내는 요청 시 연다. 설정 이동 시 작업대와 공급자 연결 컴포넌트는 유지해 편집/로그인 상태를 보존한다.
 
 > **Windows 추가 데이터 stream 경계(구현, native 검증 전)**: source/backup/writer 관측은 보유 handle의 [FILE_STREAM_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_stream_info)를 확인한다. 현재 archive가 보존하는 유일한 unnamed stream 이외의 named stream·복수 entry·조회 불확실성을 거절하여 조용한 정보 누락을 막는다. stream 없는 directory/빈 파일은 [GetFileInformationByHandleEx EOF 계약](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getfileinformationbyhandleex)으로 처리한다. 추가 stream 복사/복원 지원이나 Windows 활성화 완료를 뜻하지 않는다.
 

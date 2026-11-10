@@ -1,11 +1,10 @@
 import { useI18n } from "../i18n.tsx";
 import { useEffect, useRef, useState } from "react";
 import type { ProjectEditorController } from "./editor-state.ts";
-import { PreparationRecovery } from "./preparation-recovery-view.tsx";
 import { validateProjectCatalogResult, type ProjectCatalogEntry } from "./contracts/project-catalog-v1.ts";
 
-export function ProjectCatalog({ controller, disabled, currentId, ready = true, rail = false, home = false, onHasProjects }: {
-  controller: ProjectEditorController; disabled: boolean; currentId?: string; ready?: boolean; rail?: boolean; home?: boolean; onHasProjects?: (value: boolean) => void;
+export function ProjectCatalog({ controller, disabled, currentId, ready = true, rail = false, home = false, onManage, onHasProjects }: {
+  onManage?: (entry: ProjectCatalogEntry) => void; controller: ProjectEditorController; disabled: boolean; currentId?: string; ready?: boolean; rail?: boolean; home?: boolean; onHasProjects?: (value: boolean) => void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -69,7 +68,7 @@ export function ProjectCatalog({ controller, disabled, currentId, ready = true, 
           <strong>{entry.canonicalPath.split(/[\\/]/).filter(Boolean).pop() ?? entry.projectId}</strong>
           {entry.projectId === currentId && <small className="m5-project-current">{t("m5.catalog.active")}</small>}
           <span dir="auto">{entry.canonicalPath}</span>
-        </button><details onToggle={event => { if (rail && event.currentTarget.open) setExpanded(true); }}><summary title={t("m5.catalog.manage")}>{t("m5.catalog.manage")}</summary><p className="m5-project-full-path" dir="auto">{entry.canonicalPath}</p><PreparationRecovery projectId={entry.projectId} disabled={disabled || busy} /></details></li>)}</ul>}
+        </button><button type="button" className="m5-project-manage" disabled={disabled || busy} onClick={() => onManage?.(entry)} title={t("m5.catalog.manage")}>{t("m5.preferences.manage")}</button></li>)}</ul>}
       {(!rail || !disabled || error) && <div className="m5-project-pagination"><button type="button" title={t("m5.catalog.first")} aria-label={t("m5.catalog.first")} disabled={disabled || busy} onClick={() => void load(null)}>{t(compact ? "m5.catalog.refresh" : "m5.catalog.first")}</button>
         {next && <button type="button" disabled={disabled || busy || error} onClick={() => void load(next)}>{t("m5.catalog.next")}</button>}</div>}
     </div>}

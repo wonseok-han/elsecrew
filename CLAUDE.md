@@ -1,4 +1,4 @@
-# Hello, Agent
+# Elsecrew
 
 터미널을 한 번도 열어보지 않은 비개발자가 Claude Code·Codex를 설치하고, 안전한 첫 프로젝트를 시작한 뒤 계속 관리하도록 돕는 데스크톱 앱. 현재 기본 배포 경로는 Tauri이고, M5는 Electron + React/TypeScript + Monaco renderer와 Rust safety sidecar 전환 골격을 같은 저장소에서 개발한다.
 
@@ -60,7 +60,7 @@
 
 - 에이전트: Claude Code + Codex
 - 플랫폼: macOS + Windows
-- UI: 한국어·영어 전환. 현재 구현 이름은 `Hello, Agent`, M5 새 이름은 개발과 분리해 보류
+- UI: 한국어·영어 전환. 표시 이름은 `Elsecrew`(엘스크루). 기존 hello-agent 패키지 식별자·저장 경로는 데이터/로그인 호환을 위해 유지
 - 현행 구조: 재방문용 홈베이스 + 6단계 위저드(에이전트 → 진단 → 설치 → 로그인 → 프로젝트 → 첫 대화) + macOS M4 `HandoffPilot`
 - M5 현행 구현: Electron + React/TypeScript + Monaco와 Rust sidecar에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·채팅별 standalone snapshot·편집/diff·명시 반영/복원 흐름을 연결했다. macOS Codex·Claude Code의 앱 전용 로그인·모델 조회·실제 실행 adapter와 설치/업데이트 경로가 있으며 기존 터미널 인증을 자동 재사용하지 않는다. fixture 실행과 실제 공급자 실행은 분리한다. 구현 존재와 실제 계정/플랫폼 검증 완료는 구분하며 최신 증거는 `docs/history.md`에서 확인한다.
 - 홈베이스: 프로젝트 폴더 스캔, 에이전트 설치·로그인 상태, 업데이트 확인

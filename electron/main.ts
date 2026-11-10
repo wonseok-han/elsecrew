@@ -104,7 +104,7 @@ const quitCoordinator = new QuitCoordinatorV1({
     const korean = app.getLocale().toLowerCase().startsWith("ko");
     const options: Electron.MessageBoxOptions = {
       type: "warning",
-      title: "Hello, Agent",
+      title: "Elsecrew",
       message: korean ? "아직 안전하게 종료할 수 없어요." : "The app cannot safely close yet.",
       detail: reason === "unavailable"
         ? (korean ? "작업을 관리하는 내부 프로그램과 연결이 끊겨 종료 여부를 확인하지 못했어요. 프로젝트 원본을 변경하거나 에이전트를 다시 실행하지 말고 도움을 요청해 주세요."
@@ -561,6 +561,11 @@ async function createMainWindow() {
     await window.loadURL(`${APP_ORIGIN}/index.html`);
   }
 }
+
+// Keep the existing profile location when changing only the public brand.
+const existingUserData = app.getPath("userData");
+app.setName("Elsecrew");
+app.setPath("userData", existingUserData);
 
 app.whenReady().then(async () => {
   await protocol.handle(APP_SCHEME, serveAppAsset);
