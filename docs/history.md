@@ -4,6 +4,12 @@
 
 ### 2026-11-10 · by GPT-6
 
+- 직전 턴은 혼합 반복 구현eb223790/QA ZnVMop 준비로 progress였다. 실제 hidden file+diff+stored-output 반복을 session1987/PID36811로 실행해 exit0·shutdown accepted를 확인했다. 원래 빌드HEAD 이후 차이는 history뿐이다. 초기/닫기1·2·3 RSS최대323.56/264.03/241.22/241.88MiB, 구간별3표본·수집오류0·잘림없음이었다.
+- 같은 채팅의 fake출력1회와500파일 diff를 재표시한 세 회차에서 지속 증가를 관측하지 않았다. 파일 단독 및 이번 혼합 hidden 진단으로 단순 화면정리 누락 가설은 지지되지 않지만, visible 4개 연속출력/계측비용/운영체제 메모리 회수와 동등하지 않아 종합 잔류 실패를 해결했다고 주장하지 않는다. 추가 speculative clear/GC를 제품에 넣지 않는다.
+- `.artifacts/m5-mixed-retention-cycles-2026-11-10/{result,build,cleanup}.json` 보존 후 관측PID부재·DB clean·shutdown 대조로 fixtureZQG3nW/QA ZnVMop를 삭제했다. 모델·사용자프로젝트·인증·push·기준변경없음. 다음은 유휴 예산 사용자 결정과 실제 가시성 조건의 종합 검증이며 Windows 추가CI는 별도 승인 대기다. diff-check 완료, 전체G6/제품완료는 미증명이다.
+
+### 2026-11-10 · by GPT-6
+
 - 직전 소스 감사에서 단순 정리 누락을 찾지 못했으므로 숨김 반복 진단에 기존 output/diff 옵션 결합을 연결했다. 첫 회차의 고정 fake 실행1회와 500파일 diff를 그대로 재사용하고 후속 회차는 저장된 출력·같은 diff만 다시 표시한다. 실제 공급자/추가 실행/새 작업복사본/강제GC는 없다.
 - 파일 전용 반복 결과는 보존하며 혼합 반복은 아직 실측 전이다. 같은 숨김 수명 경로에서 차이를 좁히는 진단일 뿐 가시성·연속4개출력·전체G6 대체가 아니다. 검증은 Node 구문·diff-check. clean eb223790의 QA package ZnVMop가 session66447 exit0/BUILT로 준비됐으며 아직 미실행이다. 다음은 이 혼합 반복의 단회 실행과 종료/정리 확인이다. 유휴 기준 변경 및 Windows 추가CI 승인은 아직 대기, 제품코드·안전계약 변경 없음.
 
