@@ -46,3 +46,9 @@ test('native unitless region sizes are integer bytes', () => {
   assert.equal(result.groups[0].residentBytes,184+262144);
   assert.throws(() => summarizeRegions(map.replace('2M','2.5')));
 });
+
+test('Electron terabyte virtual reservations remain distinct from resident bytes', () => {
+  const result = summarizeRegions(map.replace('2M 1M 512K 0K','1.3T 0K 0K 0K'));
+  assert.equal(result.groups[0].virtualBytes,Math.round(1.3*1024**4)+1048576);
+  assert.equal(result.groups[0].residentBytes,262144);
+});

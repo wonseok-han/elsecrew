@@ -4,6 +4,12 @@
 
 ### 2026-11-10 · by GPT-6
 
+- 상태 기록4c4cfd25로clean화후QA5dKgzC를 빌드(session48484 exit0)하고 사용자새5분응답으로combined/native진단을실행했다. session44192/PID98234 terminalexit1·shutdownaccepted. idle430.17MiB/peak725.09MiB/잔류78.70MiB로idle만메모리FAIL이고inputPaint161.30ms>50도FAIL이다(전달116.20ms). 단회변동을제품개선으로주장하지않는다. 증거.artifacts/m5-native-fixed-combined-2026-11-10. PID부재/DBclean후fixtureKqueJ0·QA5dKgzC정리.
+- GPU native6611구간은성공했지만main/renderer parse실패였다. 고정parseReason을추가하고화면없는자체Electron about:blank 진단으로Unknown native size를재현했다. 단위1.3T 가상예약 표기가원인임을확인하고T단위를지원했다. resident와virtual을별도유지하며가상예약을실제RSS로해석하지않는다. 회귀5개PASS; 수정후빈Electron main6711/renderer6040구간실제집계성공(session93132 exit0). 진단profile도관측PID부재후정리하고작은로그만보존했다.
+- 이번도제품최적화완료가아니며다음은올바른수집기로실제부하후native구성을확인하고idle/입력지연을개선하는것이다. 5분전체시험대신짧은빈Electron재현으로수집기수정을검증했다. Windows추가CI승인은계속대기, 추가push/모델호출없음.
+
+### 2026-11-10 · by GPT-6
+
 - 사용자 남은 작업 질문에 최신HEAD08888d60/clean 상태와 최신실측·AGENTS 범위를 대조했다. 핵심 작업대 기능 구현과 macOS 일부 실제 실행 증거는 있으나 전체완료는 아니다. 남은 축은①macOS 메모리 원인확정/최적화·종합G6②Windows 전체반영/복원·오류복구 native 검증과 미활성 기능 연결③최종통합/실제공급자·패키지 검증④서명·배포방식/main병합 사용자결정이다. 작은 native PASS를 전체 Windows 완료로 바꾸지 않는다.
 - 상단 요약에 남았던 이전436/805/296MiB 및 이미 삭제된 시험앱의 준비완료 표현을 최신407/751/191MiB/진단파서수정·재측정대기로 교정했다. 이번은 상태정리이며 새기능·시험·push는 없다. 다음 즉시작업은 수정된 진단으로 메모리 원인을 확정하는 것과 승인 후 Windows 후보 시험이다.
 

@@ -6,9 +6,9 @@ function summarizeRegions(text) {
   const groups = new Map();
   let regions = 0;
   const bytes = value => {
-    const match = /^(\d+(?:\.\d+)?)([BKMG])?$/.exec(value);
+    const match = /^(\d+(?:\.\d+)?)([BKMGT])?$/.exec(value);
     assert.ok(match && (match[2] || /^\d+$/.test(match[1])), 'Unknown native size');
-    const result = Math.round(Number(match[1]) * 1024 ** 'BKMG'.indexOf(match[2] ?? 'B'));
+    const result = Math.round(Number(match[1]) * 1024 ** 'BKMGT'.indexOf(match[2] ?? 'B'));
     assert.ok(Number.isSafeInteger(result), 'Native size overflow');
     return result;
   };
@@ -47,6 +47,7 @@ async function collectRetainedNativeMemory(targets, execute = require('node:util
       // Fixed classification and bounded exit metadata only; never stderr,
       // exception text, command strings, raw maps, or process paths.
       report.processes.push({ ...target, startedAt, completedAt: Date.now(), error: 'nativeMapUnavailableOrInvalid', stage,
+        parseReason: stage === 'parse' && ['Native map exceeds bound', 'Unknown native map columns', 'Unknown native size', 'Native size overflow', 'Too many native regions', 'Unknown native region type', 'Too many native region types', 'Native sum overflow', 'No native regions observed'].includes(error?.message) ? error.message : null,
         exitCode: Number.isSafeInteger(error?.code) ? error.code : null,
         timedOut: error?.killed === true && error?.signal === 'SIGTERM',
         permissionDenied: error?.code === 'EPERM' || error?.code === 'EACCES',
