@@ -10,7 +10,7 @@ use hello_agent_protocol::storage_lifetime_v1::{
     STORAGE_COMPACTION_PLAN_MAX_ROWS_PER_STEP_V1,
     STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1,
     STORAGE_LIFETIME_MAX_RETAINED_DEPENDENCY_INPUT_BYTES_PER_STEP_V1,
-    STORAGE_LIFETIME_SCHEMA_VERSION_V10, STORAGE_LIFETIME_SCHEMA_VERSION_V11,
+    STORAGE_LIFETIME_SCHEMA_VERSION_V10, STORAGE_LIFETIME_SCHEMA_VERSION_V11, STORAGE_LIFETIME_SCHEMA_VERSION_V12,
 };
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde_json::{json, Value};
@@ -450,7 +450,7 @@ fn verify_runtime_fences(connection: &Connection) -> Result<(), SidecarError> {
             },
         )
         .map_err(|_| compaction_error())?;
-    if !matches!(facts.0, STORAGE_LIFETIME_SCHEMA_VERSION_V10 | STORAGE_LIFETIME_SCHEMA_VERSION_V11)
+    if !matches!(facts.0, STORAGE_LIFETIME_SCHEMA_VERSION_V10 | STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)
         || !facts.1
         || facts.2 != 0
         || facts.3 != 0

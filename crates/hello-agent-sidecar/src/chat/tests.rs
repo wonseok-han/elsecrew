@@ -6572,3 +6572,49 @@ fn catalog_removal_refuses_runs_locks_and_nonmember_chat() {
     }
     assert_eq!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"][0]["chatId"], chat_id);
 }
+
+#[test]
+fn coordinator_v2_preserves_legacy_snapshot_and_runs_read_only_to_waiting_for_user() {
+    let mut f = Fixture::with_durable_output(true);
+    let old_snapshot = f.snapshot("req_coordinator_old_snapshot");
+    let old = f.create_chat(&old_snapshot, "old goal", "req_coordinator_old_chat");
+    let roles = json!([
+        {"roleId":"coordinator","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"readOnly"},
+        {"roleId":"planning","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"},
+        {"roleId":"design","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"readOnly"},
+        {"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},
+        {"roleId":"review","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"}
+    ]);
+    let settings = f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), "req_coordinator_settings").unwrap();
+    assert_eq!(settings["schemaVersion"], 2);
+    assert!(f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), "req_coordinator_stale").is_err());
+    let mut invalid = roles.clone();
+    invalid[0]["permission"] = json!("workspaceWrite");
+    assert!(f.chats.update_role_settings(&mut f.storage, &f.project_id, 2, invalid, "req_coordinator_write").is_err());
+    let snapshot = f.snapshot("req_coordinator_snapshot");
+    let chat = f.chats.create_chat(&mut f.storage, &f.projects, snapshot["preparationId"].as_str().unwrap(), &f.project_id, snapshot["worktreeId"].as_str().unwrap(), snapshot["workspaceIdentity"].as_str().unwrap(), "Explain this project", 2, "req_coordinator_chat").unwrap().result;
+    assert_eq!(chat["schemaVersion"], 2);
+    assert_eq!(chat["roleSnapshots"], roles);
+    let old_detail = f.chats.get_chat(&f.storage, old["chatId"].as_str().unwrap(), 0, None, 10, false).unwrap();
+    assert_eq!(old_detail["chat"], old);
+    let mut changed = roles.clone();
+    changed[0]["modelSelector"] = json!("future-model");
+    f.chats.update_role_settings(&mut f.storage, &f.project_id, 2, changed, "req_coordinator_edit").unwrap();
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::CleanReadOnly);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let message_id = initial_message_id(&f, chat_id);
+    let started = runtime.start_agent(&mut f.storage, &mut f.projects, AgentRunStartRequestV1 {
+        chat_id: chat_id.into(), role_id: "coordinator".into(), input_message_ids: vec![message_id], expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+    }, "req_coordinator_start").unwrap();
+    let run_id = started.result["runId"].as_str().unwrap();
+    drain_actual_scenario(&mut f, &mut runtime, run_id);
+    let detail = f.chats.get_chat(&f.storage, chat_id, 0, None, 50, true).unwrap();
+    assert_eq!(detail["chat"]["state"], "waitingForUser");
+    assert_eq!(detail["chat"]["roleSnapshots"], roles);
+    let run = f.storage.projection_record("run", run_id).unwrap().unwrap();
+    assert_eq!(run["record"]["selectedProfile"]["roleId"], "coordinator");
+    assert_eq!(run["record"]["selectedProfile"]["permission"], "readOnly");
+    assert_eq!(run["record"]["state"], "succeeded");
+    assert!(detail["messages"].as_array().unwrap().iter().any(|message| message["roleId"] == "coordinator"));
+}

@@ -153,7 +153,7 @@ impl super::Storage {
 }
 
 fn require_output_schema(connection: &rusqlite::Connection) -> Result<(), SidecarError> {
-    if super::storage_schema_version(connection)? != Some(schema::VERSION) {
+    if !matches!(super::storage_schema_version(connection)?, Some(11 | 12)) {
         return Err(invalid("durable output requires storage schema v11"));
     }
     Ok(())
@@ -171,7 +171,7 @@ pub(super) fn sync_run_projection(
         validate_agent_adapter_payload_v1, AgentRunRecordV1,
     };
     let format = projection.get("output_format_version");
-    if super::storage_schema_version(tx)? != Some(schema::VERSION) {
+    if !matches!(super::storage_schema_version(tx)?, Some(11 | 12)) {
         if format.is_some() {
             return Err(invalid("new output run requires schema v11"));
         }

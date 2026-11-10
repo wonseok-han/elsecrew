@@ -624,3 +624,34 @@ test("held start acceptance retains checking but delivered terminal events still
   assert.equal(controller.snapshot().agentStartingRoleId, null);
   controller.dispose();
 });
+
+test("coordinator sends saved followup once, receives durable reply, and never falls back on unavailable capability", async () => {
+  const { coordinatorRoles } = await import("../src/m5/contracts/run-recovery-v1.ts");
+  const bridge = new AgentBridge();
+  bridge.chatA = { ...bridge.chatA, schemaVersion: 2, roleSnapshots: coordinatorRoles(roles) };
+  Object.assign(bridge, { version: 7, appendChatMessage: async (request: { text: string; clientMessageId: string; expectedEventSequence: number }) => {
+    const saved = { ...message(bridge.chatA, request.expectedEventSequence + 1, request.text), messageId: request.clientMessageId, kind: "user", roleId: null, runId: null };
+    bridge.messages.push(saved as TeamMessageV1);
+    return saved;
+  } });
+  bridge.startAgentRun = async input => {
+    bridge.starts.push(input);
+    bridge.chatA = { ...bridge.chatA, state: "waitingForUser" };
+    bridge.messages.push({ ...message(bridge.chatA, bridge.messages.length + 1, "Coordinator response"), roleId: "coordinator" });
+    return { schemaVersion: 1, runId: "agent_run_01", chatId: bridge.chatA.chatId, taskId: bridge.chatA.taskId, projectId: bridge.chatA.projectId, worktreeId: bridge.chatA.worktreeId, workspaceIdentity: bridge.chatA.workspaceIdentity, roleId: "coordinator", capabilityFingerprint: fingerprint, state: "preparing" };
+  };
+  const controller = await open(bridge);
+  controller.editFollowup("Explain the files");
+  await Promise.all([controller.appendFollowup(true, true), controller.appendFollowup(true, true)]);
+  assert.equal(bridge.starts.length, 1);
+  assert.equal((bridge.starts[0] as { roleId: string }).roleId, "coordinator");
+  assert.equal(controller.snapshot().messages.at(-1)?.text, "Coordinator response");
+  assert.equal(controller.snapshot().activeChat?.state, "waitingForUser");
+  bridge.unavailable = true;
+  controller.editFollowup("another question");
+  await controller.appendFollowup(true, true);
+  assert.equal(bridge.starts.length, 1);
+  assert.equal(bridge.fixtureStarts.length, 0);
+  assert.equal(controller.snapshot().messages.at(-1)?.text, "another question");
+  controller.dispose();
+});

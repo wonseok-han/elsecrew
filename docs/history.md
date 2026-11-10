@@ -4,6 +4,13 @@
 
 ### 2026-11-10 · by GPT-6
 
+- 사용자 최우선 요청인 총괄 직접 실행을 구현했다. 새 채팅은 별도 총괄 설정으로 준비/결속 후 실제 adapter를 시작하고 후속 전송은 저장 성공 뒤 총괄을 실행한다. 수동3역할 선택 버튼을 제거했으며 기존 V1 채팅에는 새 총괄 채팅 안내를 제공한다. 역할 모델 편집·응답 표시·waitingForUser·실패 시 무fallback·중복 전송 방지를 연결했다.
+- V1 canonical3 설정/채팅을 보존하고 V2 canonical5(coordinator/planning/design/coding/review)를 추가했다. 첫 새 채팅은 planning의 모델 설정을 총괄/디자인에 복제하며 기존 snapshot은 그대로다. coding 외 읽기 전용과 기존 승인/종료/복구 경계를 유지한다. 자동 위임·임의 역할 편집은 이번 구현 범위가 아니다.
+- 실제 adapter의 가짜 공급자 회귀에서 DB trigger의3역할 제한이 총괄 답변 저장을 막는 결함을 발견했다. V12 원자 이관으로 metadata/해당 trigger만 확장하며 V11 DDL·기록은 보존한다. 독립 검토에서 발견한 V12 compaction prefix 판별 누락2곳과 총괄 설정 저장 버튼/fixture 역할 validator를 수정했다. 이전 앱은 V12 DB를 열 수 없다.
+- 검증: TS71개·TypeScript·renderer build·Chromium2개·Rust protocol66개·durable28개·총괄/이관/압축 이력 회귀3개·diff check 통과. 초기 압축 시험이1000개 정책 임계치 미만이라 진행되지 않아2001개 실제 압축 fixture로 수정했다. 엄격 clippy는 기존 core manual_inspect2건에서 중단됐으며 일반 clippy는 기존 경고와 함께 완료했다. 독립 검토의 차단 항목은 수정/재검토 완료. 설치 반영을 이어간다. 실제 모델 호출·사용자 대화 전송·push 없음. 선택 복원과 채팅 제거 시 파일 탭 전환 문제는 총괄 우선 지시에 따라 미완료로 남겼다.
+
+### 2026-11-10 · by GPT-6
+
 - f35f28bb macOS 설치 앱 반영 완료. 기존 앱 정상 종료·package·package smoke PASS 후 기존 프로젝트/채팅 목록을 열었다. 사용자가 숨긴 채팅은 임의 복원하지 않았으며 복원 중 화면 보존은 임시 Chromium 회귀로 검증했다. 원본/인증/대화 수정·실제 모델 호출 없음. 총괄 실행은 이 설치본에도 미구현이며 수동3역할 UI가 남아 있다.
 
 ### 2026-11-10 · by GPT-6
@@ -181,6 +188,8 @@
 - 위저드 6단계: 에이전트 선택 → 진단 → 설치 → 로그인 → 첫 프로젝트 → 졸업식
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- 2026-11-10 총괄 직접 응답은 V2 canonical5 역할 snapshot + 저장 V12가 필요하다. V1 채팅은 변경하지 않으며 새 채팅부터 총괄 실제 실행/후속 전송을 사용한다. V12는 답변 source-index trigger의 역할 허용 목록만 확장하고 metadata/원장 검증·compaction prefix를 함께 적용한다. 이전 앱으로 다운그레이드 불가. 자동 팀 위임은 아직 별도 미구현이다.
 
 - **2026-11-10 파일 목록 정렬 계약**: 폴더 우선 정렬은 sidecar 생성기와 TS/Rust treePage 검증기·공유 fixture에 함께 적용한다. 불일치는 protocolInvalid로 연결을 끊어 기본값 등 무관 조회도 실패하게 한다. 그룹 순서 외 동일 경로 중복 거부는 유지한다.
 

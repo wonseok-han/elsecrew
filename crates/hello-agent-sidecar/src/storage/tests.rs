@@ -42,7 +42,7 @@ fn durable_fixture_open_migrates_reopens_and_does_not_enable_product_open() {
     {
         let storage = Storage::open_durable_output_for_test(&path).unwrap();
         assert!(storage.uses_durable_output().unwrap());
-        assert_eq!(storage_schema_version(&storage.connection).unwrap(), Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11));
+        assert_eq!(storage_schema_version(&storage.connection).unwrap(), Some(STORAGE_LIFETIME_SCHEMA_VERSION_V12));
     }
     assert!(Storage::open_for_admission(&path, &AtomicBool::new(false)).is_err());
     {
@@ -5580,4 +5580,24 @@ fn table_rows(connection: &Connection, table: &str) -> Vec<Vec<SqlValue>> {
         .expect("query table")
         .collect::<rusqlite::Result<Vec<_>>>()
         .expect("read table")
+}
+
+#[test]
+fn coordinator_schema_v12_migration_rolls_back_cancellation_and_reopens() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("coordinator.sqlite3");
+    let mut storage = Storage::open_for_admission(&path, &AtomicBool::new(false)).unwrap();
+    agent_output::schema::migrate(&mut storage.connection).unwrap();
+    assert_eq!(storage_schema_version(&storage.connection).unwrap(), Some(11));
+    let before = database_snapshot(&storage.connection);
+    let mut checks = 0;
+    assert!(agent_output::schema::migrate_coordinator(&mut storage.connection, &mut || { checks += 1; checks > 1 }).is_err());
+    assert_eq!(database_snapshot(&storage.connection), before);
+    agent_output::schema::migrate_coordinator(&mut storage.connection, &mut || false).unwrap();
+    assert!(storage.coordinator_roles_enabled().unwrap());
+    assert!(agent_output::schema::verify(&storage.connection).is_ok());
+    drop(storage);
+    assert!(Storage::open_for_admission(&path, &AtomicBool::new(false)).is_err());
+    let reopened = Storage::open_for_durable_admission(&path, &AtomicBool::new(false)).unwrap();
+    assert!(reopened.coordinator_roles_enabled().unwrap());
 }

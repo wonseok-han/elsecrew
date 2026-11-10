@@ -7,7 +7,7 @@ import type { M5BridgeV5 } from "./contracts/bridge-v5.ts";
 import type { M5BridgeV6 } from "./contracts/bridge-v6.ts";
 import type { M5BridgeV7 } from "./contracts/bridge-v7.ts";
 import type { M5BridgeV8 } from "./contracts/bridge-v8.ts";
-import { validateChatAppendMessageRequestV1, validateChatAppendMessageTranscriptV1, type ChatAppendMessageRequestV1 } from "./contracts/run-recovery-v1.ts";
+import { coordinatorRoles, validateChatAppendMessageRequestV1, validateChatAppendMessageTranscriptV1, type ChatAppendMessageRequestV1 } from "./contracts/run-recovery-v1.ts";
 
 export interface FollowupDraft {
   text: string;
@@ -58,6 +58,7 @@ export class ChatUiController {
   #agentUnsubscribe: (() => void) | null = null;
   #agentStateUnsubscribe: (() => void) | null = null;
   #disposed = false;
+  #creatingCoordinator = false;
   #generation = 0;
   #pending: { chat: ChatRecordV1; generation: number; messages: TeamMessageV1[]; detail: ChatDetail | null } | null = null;
   #hydrations = new Map<string, Promise<void>>();
@@ -89,10 +90,11 @@ export class ChatUiController {
     this.editFollowup(`${draft?.text ? `${draft.text}\n\n` : ""}${reference}\n`);
     return true;
   }
-  async appendFollowup(admissionReady: boolean): Promise<void> {
+  async appendFollowup(admissionReady: boolean, sendToCoordinator = false, lang: "ko" | "en" = "ko"): Promise<void> {
     const chat = this.#state.activeChat;
     const bridge = this.#bridge;
     const draft = chat && this.#state.followups?.[chat.chatId];
+    if (sendToCoordinator && (chat?.schemaVersion !== 2 || this.#state.agentStartingRoleId || this.#state.agentRuns.some(isAgentActive))) return;
     if (!admissionReady || !chat || (bridge.version !== 7 && bridge.version !== 8) || !draft || draft.sending || !this.canAppendFollowup() || (!draft.request && !draft.text.trim())) return;
     const generation = this.#generation;
     let request: ChatAppendMessageRequestV1;
@@ -116,7 +118,10 @@ export class ChatUiController {
       const latest = this.#state.followups?.[chat.chatId];
       if (latest?.request !== request) return;
       this.#setFollowup(chat.chatId, { text: latest.text === request.text ? "" : latest.text, request: null, sending: false, error: null });
-      if (this.#live(generation) && this.#state.activeChat?.chatId === chat.chatId) this.#onEvent(message);
+      if (this.#live(generation) && this.#state.activeChat?.chatId === chat.chatId) {
+        this.#onEvent(message);
+        if (sendToCoordinator && chat.schemaVersion === 2) await this.startAgent("coordinator", lang);
+      }
     } catch (error) {
       if (this.#disposed) return;
       const latest = this.#state.followups?.[chat.chatId];
@@ -263,6 +268,24 @@ export class ChatUiController {
     }
   }
 
+  async createCoordinatorChat(source: { projectId: string }, goal: string): Promise<ChatRecordV1 | null> {
+    const settings = this.#state.settings;
+    if (this.#creatingCoordinator || !settings || !goal.trim() || settings.projectId !== source.projectId || this.#state.preparing || this.#state.switching || this.isActionBlocked()) return null;
+    const generation = this.#generation;
+    this.#creatingCoordinator = true;
+    try {
+      if (settings.schemaVersion !== 2) {
+        const updated = await this.#bridge.updateProjectRoleSettings({ projectId: source.projectId, expectedRevision: settings.revision, roles: coordinatorRoles(settings.roles) });
+        if (!this.#live(generation) || this.#state.projectId !== source.projectId) return null;
+        this.#set({ settings: updated });
+      }
+      return await this.createChat(source, goal, true);
+    } catch (error) {
+      if (this.#live(generation)) this.#error("m5.chatError.settingsSave", error);
+      return null;
+    } finally { this.#creatingCoordinator = false; }
+  }
+
   async createChat(source: { projectId: string }, goal: string, applicationBaseline = true): Promise<ChatRecordV1 | null> {
     const settings = this.#state.settings;
     if (!settings || this.#state.switching || this.isRecoveryBlocked() || settings.projectId !== source.projectId || !goal.trim() || this.#state.preparing) return null;
@@ -313,7 +336,7 @@ export class ChatUiController {
     await this.#loadRecoveries(detail.chat.chatId, pending.generation);
   }
 
-  async startDemo(roleId: RoleIdV1): Promise<void> {
+  async startDemo(roleId: "planning" | "coding" | "review"): Promise<void> {
     const chat = this.#state.activeChat;
     if (!chat || this.#state.switching || this.#state.activeRunId || this.isActionBlocked()) return;
     const scenario = ({ planning: "planning-success", coding: "coding-success", review: "review-success" } as const)[roleId];

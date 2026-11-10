@@ -10,7 +10,7 @@ pub mod phased_claude;
 use crate::run_recovery_v1::{
     G5_CAPABILITIES_V1, G5_EVENT_PAGE_MAX_ITEMS_V1, G5_ID_MAX_BYTES_V1,
     G5_MODEL_SELECTOR_MAX_BYTES_V1, G5_PERMISSIONS_V1, G5_PUBLIC_MESSAGE_MAX_BYTES_V1,
-    G5_REASONING_EFFORT_MAX_BYTES_V1, G5_ROLE_IDS_V1, G5_RUNTIMES_V1,
+    G5_REASONING_EFFORT_MAX_BYTES_V1, G5_ROLE_IDS_V2, G5_RUNTIMES_V1,
 };
 
 pub const G5A_SCHEMA_VERSION_V1: u64 = 1;
@@ -1247,7 +1247,7 @@ fn validate_capabilities_request(
     match (&request.chat_id, &request.role_id) {
         (Some(chat), Some(role)) => {
             id(chat, "chatId")?;
-            one_of(role, G5_ROLE_IDS_V1, "roleId")?;
+            one_of(role, G5_ROLE_IDS_V2, "roleId")?;
         }
         (None, None) if value.get("chatId").is_none() && value.get("roleId").is_none() => {}
         _ => return fail("chatId and roleId must be supplied together"),
@@ -1284,7 +1284,7 @@ fn validate_capability_snapshot(
         id(&scope.chat_id, "chatId")?;
         id(&scope.worktree_id, "worktreeId")?;
         id(&scope.workspace_identity, "workspaceIdentity")?;
-        one_of(&scope.role_id, G5_ROLE_IDS_V1, "roleId")?;
+        one_of(&scope.role_id, G5_ROLE_IDS_V2, "roleId")?;
     } else if value.get("scope").is_some() {
         return fail("scope must be an object when present");
     }
@@ -1380,7 +1380,7 @@ fn validate_run_start_request(
 ) -> Result<AgentRunStartRequestV1, AgentAdapterContractError> {
     let request: AgentRunStartRequestV1 = from_value(value, "agent run start request")?;
     id(&request.chat_id, "chatId")?;
-    one_of(&request.role_id, G5_ROLE_IDS_V1, "roleId")?;
+    one_of(&request.role_id, G5_ROLE_IDS_V2, "roleId")?;
     if request.input_message_ids.is_empty() || request.input_message_ids.len() > 100 {
         return fail("inputMessageIds must be nonempty and bounded");
     }
@@ -1456,7 +1456,7 @@ fn validate_run_record(value: &Value) -> Result<AgentRunRecordV1, AgentAdapterCo
         "stage",
     )?;
     let expected_stage = match record.selected_profile.role_id.as_str() {
-        "planning" => "planning",
+        "coordinator" | "design" | "planning" => "planning",
         "coding" => "implementing",
         "review" => "verifying",
         _ => return fail("invalid roleId"),
@@ -2385,7 +2385,7 @@ fn validate_discovery(value: &AgentDiscoveryEvidenceV1) -> Result<(), AgentAdapt
 }
 
 fn validate_profile(value: &AgentResolvedProfileV1) -> Result<(), AgentAdapterContractError> {
-    one_of(&value.role_id, G5_ROLE_IDS_V1, "roleId")?;
+    one_of(&value.role_id, G5_ROLE_IDS_V2, "roleId")?;
     one_of(&value.runtime, G5_RUNTIMES_V1, "runtime")?;
     bounded(
         &value.model_selector,
@@ -2468,7 +2468,7 @@ fn validate_run_context(value: &AgentRunContextV1) -> Result<(), AgentAdapterCon
     ] {
         id(entry, name)?;
     }
-    one_of(&value.role_id, G5_ROLE_IDS_V1, "roleId")?;
+    one_of(&value.role_id, G5_ROLE_IDS_V2, "roleId")?;
     fingerprint_digest(&value.capability_fingerprint, "capabilityFingerprint")
 }
 

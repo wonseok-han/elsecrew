@@ -179,6 +179,9 @@ impl G5Manager {
             &json!({"projectId":project_id,"expectedRevision":expected_revision,"roles":roles}),
         )
         .map_err(|error| ProjectFailure::manifest(format!("invalid role settings: {error}")))?;
+        if roles.as_array().is_some_and(|roles| roles.len() == 5) && !storage.coordinator_roles_enabled()? {
+            return Err(ProjectFailure::manifest("coordinator roles require storage V12 admission"));
+        }
         let mut project = project_record(storage, project_id)?;
         let current = project
             .get("role_settings")
@@ -190,7 +193,7 @@ impl G5Manager {
             ));
         }
         let updated = json!({
-            "schemaVersion":1,
+            "schemaVersion":if roles.as_array().is_some_and(|roles| roles.len() == 5) { 2 } else { 1 },
             "projectId":project_id,
             "revision":expected_revision + 1,
             "roles":roles,
@@ -468,7 +471,7 @@ impl G5Manager {
         )?;
         let created = now();
         let chat = json!({
-            "schemaVersion":1,"chatId":chat_id,"taskId":task_id,"projectId":project_id,
+            "schemaVersion":settings["schemaVersion"],"chatId":chat_id,"taskId":task_id,"projectId":project_id,
             "worktreeId":worktree_id,"workspaceIdentity":workspace_identity,"goal":goal,
             "settingsRevision":expected_settings_revision,"roleSnapshots":settings["roles"].clone(),
             "state":"draft","createdAt":created,"updatedAt":created,

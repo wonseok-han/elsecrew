@@ -1,7 +1,7 @@
 import { validateAgentCapabilitiesRequestV1, type AgentCapabilitiesRequestV1 } from "./agent-adapter-v1.ts";
 
 export const MODEL_CHOICES_CHANNEL = "m5:models:v1";
-export type ModelChoicesRequest = AgentCapabilitiesRequestV1 & { runtime: "codex"; chatId: string; roleId: "planning" | "coding" | "review" };
+export type ModelChoicesRequest = AgentCapabilitiesRequestV1 & { runtime: "codex"; chatId: string; roleId: "coordinator" | "design" | "planning" | "coding" | "review" };
 export interface ModelChoicesResult {
   schemaVersion: 1;
   runtime: "codex";

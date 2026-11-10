@@ -5,6 +5,7 @@ use std::fmt::{self, Display};
 
 pub const G5_SCHEMA_VERSION_V1: u64 = 1;
 pub const G5_ROLE_IDS_V1: &[&str] = &["planning", "coding", "review"];
+pub const G5_ROLE_IDS_V2: &[&str] = &["coordinator", "planning", "design", "coding", "review"];
 pub const G5_RUNTIMES_V1: &[&str] = &["codex", "claude-code"];
 pub const G5_PERMISSIONS_V1: &[&str] = &["readOnly", "workspaceWrite"];
 pub const G5_CHAT_STATES_V1: &[&str] = &[
@@ -302,7 +303,7 @@ fn validate_role_profile(value: &Value) -> Result<&Map<String, Value>, G5Contrac
             "permission",
         ],
     )?;
-    let role = one_of(object.get("roleId"), G5_ROLE_IDS_V1, "roleId")?;
+    let role = one_of(object.get("roleId"), G5_ROLE_IDS_V2, "roleId")?;
     one_of(object.get("runtime"), G5_RUNTIMES_V1, "runtime")?;
     bounded_text(
         object.get("modelSelector"),
@@ -340,10 +341,11 @@ fn validate_project_role_settings(value: &Value) -> Result<&Map<String, Value>, 
             "updatedAt",
         ],
     )?;
-    schema(object.get("schemaVersion"))?;
+    let version = object.get("schemaVersion").and_then(Value::as_u64);
+    if !matches!(version, Some(1 | 2)) { return fail("unsupported role schema version"); }
     id(object.get("projectId"), "projectId")?;
     positive(object.get("revision"), "settings revision")?;
-    validate_role_set(object.get("roles"), "roles")?;
+    validate_role_set_version(object.get("roles"), "roles", version)?;
     timestamp(object.get("updatedAt"), "updatedAt")?;
     Ok(object)
 }
@@ -696,7 +698,8 @@ fn validate_chat_record(value: &Value) -> Result<&Map<String, Value>, G5Contract
             "updatedAt",
         ],
     )?;
-    schema(object.get("schemaVersion"))?;
+    let version = object.get("schemaVersion").and_then(Value::as_u64);
+    if !matches!(version, Some(1 | 2)) { return fail("unsupported role schema version"); }
     for field in [
         "chatId",
         "taskId",
@@ -708,7 +711,7 @@ fn validate_chat_record(value: &Value) -> Result<&Map<String, Value>, G5Contract
     }
     bounded_text(object.get("goal"), "goal", G5_GOAL_MAX_BYTES_V1)?;
     positive(object.get("settingsRevision"), "settingsRevision")?;
-    validate_role_set(object.get("roleSnapshots"), "roleSnapshots")?;
+    validate_role_set_version(object.get("roleSnapshots"), "roleSnapshots", version)?;
     one_of(object.get("state"), G5_CHAT_STATES_V1, "chat state")?;
     timestamp(object.get("createdAt"), "createdAt")?;
     timestamp(object.get("updatedAt"), "updatedAt")?;
@@ -917,7 +920,7 @@ fn validate_team_message(value: &Value) -> Result<&Map<String, Value>, G5Contrac
     )?;
     timestamp(object.get("createdAt"), "createdAt")?;
     if kind == "role" {
-        one_of(object.get("roleId"), G5_ROLE_IDS_V1, "roleId")?;
+        one_of(object.get("roleId"), G5_ROLE_IDS_V2, "roleId")?;
         id(object.get("runId"), "runId")?;
     } else {
         if !object.get("roleId").is_some_and(Value::is_null) {
@@ -2213,17 +2216,15 @@ fn validate_profile_resolution(value: &Value) -> Result<&Map<String, Value>, G5C
 }
 
 fn validate_role_set(value: Option<&Value>, name: &str) -> Result<(), G5ContractError> {
-    let roles = array(value, name, G5_ROLE_IDS_V1.len())?;
-    if roles.len() != G5_ROLE_IDS_V1.len() {
-        return fail(format!("{name} must contain exactly three roles"));
-    }
+    validate_role_set_version(value, name, None)
+}
+fn validate_role_set_version(value: Option<&Value>, name: &str, version: Option<u64>) -> Result<(), G5ContractError> {
+    let roles = array(value, name, G5_ROLE_IDS_V2.len())?;
+    let canonical = if version == Some(1) || (version.is_none() && roles.len() == 3) { G5_ROLE_IDS_V1 } else { G5_ROLE_IDS_V2 };
+    if roles.len() != canonical.len() { return fail("invalid versioned role count"); }
     for (index, role) in roles.iter().enumerate() {
         let role = validate_role_profile(role)?;
-        if role.get("roleId").and_then(Value::as_str) != Some(G5_ROLE_IDS_V1[index]) {
-            return fail(format!(
-                "{name} must use canonical planning/coding/review order"
-            ));
-        }
+        if role.get("roleId").and_then(Value::as_str) != Some(canonical[index]) { return fail("invalid versioned role order"); }
     }
     Ok(())
 }

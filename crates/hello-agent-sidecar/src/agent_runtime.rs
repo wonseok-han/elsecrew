@@ -72,6 +72,8 @@ enum ProviderMode {
 pub(crate) enum FakeScenario {
     Clean,
     #[cfg_attr(not(test), allow(dead_code))]
+    CleanReadOnly,
+    #[cfg_attr(not(test), allow(dead_code))]
     NoOutput,
     #[cfg_attr(not(test), allow(dead_code))]
     FinalDelayed,
@@ -2209,7 +2211,7 @@ impl AgentRuntime {
             } else {
                 match requested_state {
                     "succeeded" => {
-                        if active.profile.role_id == "planning" {
+                        if matches!(active.profile.role_id.as_str(), "coordinator" | "design" | "planning") {
                             "waitingForUser"
                         } else {
                             "reviewReady"
@@ -2900,10 +2902,11 @@ fn resolve_prompt(
     storage: &Storage,
     chat_id: &str,
     ids: &[String],
+    role_id: &str,
 ) -> Result<Vec<u8>, ProjectFailure> {
     let selected: HashSet<_> = ids.iter().map(String::as_str).collect();
     let mut found = BTreeMap::new();
-    let mut prompt = Vec::new();
+    let mut prompt = if role_id == "coordinator" { b"You are the project coordinator. Answer the user directly in their language. Inspect the project when needed and explain clearly. You have read-only access: do not change files. For change requests, explain a proposed plan and limitations. Do not claim to have delegated work or changed files. The following is the selected conversation history:\n".to_vec() } else { Vec::new() };
     for message in storage.chat_message_history(chat_id)? {
         if message["messageId"]
             .as_str()
@@ -2943,7 +2946,7 @@ fn agent_run_record(
     created: &str,
 ) -> Result<Value, ProjectFailure> {
     let stage = match profile.role_id.as_str() {
-        "planning" => "planning",
+        "coordinator" | "design" | "planning" => "planning",
         "coding" => "implementing",
         "review" => "verifying",
         _ => return Err(ProjectFailure::manifest("unknown agent role")),
@@ -4169,6 +4172,7 @@ fn now() -> String {
 fn scenario_name(value: FakeScenario) -> &'static str {
     match value {
         FakeScenario::Clean => "clean",
+        FakeScenario::CleanReadOnly => "clean-read-only",
         FakeScenario::NoOutput => "no-output",
         FakeScenario::FinalDelayed => "final-delayed",
         FakeScenario::CancelClean => "cancel-clean",
@@ -4267,6 +4271,7 @@ fn read_bounded_line<R: BufRead>(reader: &mut R) -> Result<Vec<u8>, String> {
 pub(crate) fn run_agent_fixture_launcher(scenario: &str) -> Result<(), SidecarError> {
     if ![
         "clean",
+        "clean-read-only",
         "no-output",
         "final-delayed",
         "cancel-clean",
@@ -4382,7 +4387,7 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
         "handshake-version-mismatch" => handshake["claude_code_version"] = json!("2.1.242"),
         "handshake-model-mismatch" => handshake["model"] = json!("claude-unknown"),
         "handshake-cwd-mismatch" => handshake["cwd"] = json!("/not/managed"),
-        "handshake-permission-mismatch" => handshake["permissionMode"] = json!("readOnly"),
+        "clean-read-only" | "handshake-permission-mismatch" => handshake["permissionMode"] = json!("readOnly"),
         "handshake-tools-mismatch" => handshake["tools"] = json!(["Read"]),
         "handshake-mcp-mismatch" => handshake["mcp_servers"] = json!(["unsafe"]),
         "handshake-plugins-mismatch" => handshake["plugins"] = json!(["unsafe"]),

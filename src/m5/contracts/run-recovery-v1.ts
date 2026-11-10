@@ -18,6 +18,7 @@ import {
 
 export const G5_SCHEMA_VERSION_V1 = 1 as const;
 export const G5_ROLE_IDS_V1 = ["planning", "coding", "review"] as const;
+export const G5_ROLE_IDS_V2 = ["coordinator", "planning", "design", "coding", "review"] as const;
 export const G5_RUNTIMES_V1 = ["codex", "claude-code"] as const;
 export const G5_PERMISSIONS_V1 = ["readOnly", "workspaceWrite"] as const;
 export const G5_CHAT_STATES_V1 = [
@@ -68,7 +69,7 @@ export const G5D_PRODUCT_CAPABILITIES_V1 = [
   "storage.status",
 ] as const;
 
-export type RoleIdV1 = (typeof G5_ROLE_IDS_V1)[number];
+export type RoleIdV1 = (typeof G5_ROLE_IDS_V2)[number];
 export type RuntimeV1 = (typeof G5_RUNTIMES_V1)[number];
 export type PermissionV1 = (typeof G5_PERMISSIONS_V1)[number];
 export type ChatStateV1 = (typeof G5_CHAT_STATES_V1)[number];
@@ -85,7 +86,7 @@ export interface RoleProfileV1 {
 }
 
 export interface ProjectRoleSettingsV1 {
-  schemaVersion: typeof G5_SCHEMA_VERSION_V1;
+  schemaVersion: 1 | 2;
   projectId: string;
   revision: number;
   roles: readonly RoleProfileV1[];
@@ -98,7 +99,7 @@ export interface ProjectRoleSettingsUpdateRequestV1 {
 }
 
 export interface ChatRecordV1 {
-  schemaVersion: typeof G5_SCHEMA_VERSION_V1;
+  schemaVersion: 1 | 2;
   chatId: string;
   taskId: string;
   projectId: string;
@@ -337,7 +338,7 @@ export interface RecoveryResolutionTranscriptV1 {
 export function validateRoleProfileV1(value: unknown): RoleProfileV1 {
   const object = requireObject(value, "role profile");
   exactKeys(object, ["roleId", "runtime", "modelSelector", "reasoningEffort", "permission"]);
-  const roleId = oneOf(object.roleId, G5_ROLE_IDS_V1, "roleId");
+  const roleId = oneOf(object.roleId, G5_ROLE_IDS_V2, "roleId");
   oneOf(object.runtime, G5_RUNTIMES_V1, "runtime");
   boundedText(object.modelSelector, "modelSelector", G5_MODEL_SELECTOR_MAX_BYTES_V1);
   nullableBoundedText(object.reasoningEffort, "reasoningEffort", G5_REASONING_EFFORT_MAX_BYTES_V1);
@@ -350,10 +351,10 @@ export function validateRoleProfileV1(value: unknown): RoleProfileV1 {
 export function validateProjectRoleSettingsV1(value: unknown): ProjectRoleSettingsV1 {
   const object = requireObject(value, "project role settings");
   exactKeys(object, ["schemaVersion", "projectId", "revision", "roles", "updatedAt"]);
-  schema(object.schemaVersion);
+  if (object.schemaVersion !== 1 && object.schemaVersion !== 2) fail("unsupported role schema version");
   requireId(object.projectId, "projectId");
   positiveSequence(object.revision, "settings revision");
-  validateRoleSet(object.roles, "roles");
+  validateRoleSet(object.roles, "roles", object.schemaVersion as 1 | 2);
   timestamp(object.updatedAt, "updatedAt");
   return object as unknown as ProjectRoleSettingsV1;
 }
@@ -534,13 +535,13 @@ export function validateChatRecordV1(value: unknown): ChatRecordV1 {
     "schemaVersion", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "goal",
     "settingsRevision", "roleSnapshots", "state", "createdAt", "updatedAt",
   ]);
-  schema(object.schemaVersion);
+  if (object.schemaVersion !== 1 && object.schemaVersion !== 2) fail("unsupported role schema version");
   for (const field of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) {
     requireId(object[field], field);
   }
   boundedText(object.goal, "goal", G5_GOAL_MAX_BYTES_V1);
   positiveSequence(object.settingsRevision, "settingsRevision");
-  validateRoleSet(object.roleSnapshots, "roleSnapshots");
+  validateRoleSet(object.roleSnapshots, "roleSnapshots", object.schemaVersion as 1 | 2);
   oneOf(object.state, G5_CHAT_STATES_V1, "chat state");
   timestamp(object.createdAt, "createdAt");
   timestamp(object.updatedAt, "updatedAt");
@@ -588,7 +589,7 @@ export function validateTeamMessageV1(value: unknown): TeamMessageV1 {
   boundedText(object.text, "public message text", G5_PUBLIC_MESSAGE_MAX_BYTES_V1);
   timestamp(object.createdAt, "createdAt");
   if (kind === "role") {
-    oneOf(object.roleId, G5_ROLE_IDS_V1, "roleId");
+    oneOf(object.roleId, G5_ROLE_IDS_V2, "roleId");
     requireId(object.runId, "runId");
   } else {
     if (object.roleId !== null) fail("non-role message roleId must be null");
@@ -610,7 +611,7 @@ export function validateRunRecordV1(value: unknown): RunRecordV1 {
   oneOf(object.fixtureScenario, G5_FIXTURE_SCENARIOS_V1, "fixture scenario");
   const state = oneOf(object.state, G5_RUN_STATES_V1, "run state");
   const stage = oneOf(object.stage, G5_RUN_STAGES_V1, "run stage");
-  const expectedStage: Record<RoleIdV1, RunStageV1> = { planning: "planning", coding: "implementing", review: "verifying" };
+  const expectedStage: Record<RoleIdV1, RunStageV1> = { coordinator: "planning", design: "planning", planning: "planning", coding: "implementing", review: "verifying" };
   if (stage !== expectedStage[profile.roleId]) fail("run stage does not match selected role snapshot");
   if (["preparing", "running", "cancelling"].includes(state)) {
     if (object.terminationEvidence !== null) fail("active run cannot have termination evidence");
@@ -1240,10 +1241,10 @@ export function parseG5DProductReadyPayloadV1(value: unknown): ReadyPayloadV1 {
   return parsed;
 }
 
-function validateRoleSet(value: unknown, name: string): readonly RoleProfileV1[] {
-  const roles = array(value, name, G5_ROLE_IDS_V1.length).map(validateRoleProfileV1);
-  if (roles.length !== G5_ROLE_IDS_V1.length) fail(`${name} must contain exactly three roles`);
-  if (roles.some((role, index) => role.roleId !== G5_ROLE_IDS_V1[index])) fail(`${name} must use canonical planning/coding/review order`);
+function validateRoleSet(value: unknown, name: string, version?: 1 | 2): readonly RoleProfileV1[] {
+  const roles = array(value, name, G5_ROLE_IDS_V2.length).map(validateRoleProfileV1);
+  const canonical = version === 1 || (version === undefined && roles.length === 3) ? G5_ROLE_IDS_V1 : G5_ROLE_IDS_V2;
+  if (roles.length !== canonical.length || roles.some((role, index) => role.roleId !== canonical[index])) fail(`${name} must use the canonical versioned role set`);
   return roles;
 }
 
@@ -1312,3 +1313,11 @@ function timestamp(value: unknown, name: string): void {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value)) fail(`${name} must be an RFC 3339 UTC second timestamp`);
 }
 function fail(message: string): never { throw new Error(message); }
+
+/** Explicit seed for a new coordinator conversation; never edits saved chat snapshots. */
+export function coordinatorRoles(roles: readonly RoleProfileV1[]): readonly RoleProfileV1[] {
+  if (roles.some(role => role.roleId === "coordinator")) return roles;
+  const planning = roles.find(role => role.roleId === "planning");
+  if (!planning) throw new Error("Planning profile is missing");
+  return [{ ...planning, roleId: "coordinator", permission: "readOnly" }, roles[0], { ...planning, roleId: "design", permission: "readOnly" }, ...roles.slice(1)];
+}

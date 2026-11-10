@@ -73,12 +73,14 @@ const agentPublicEventListeners = new Set();
 const agentRunStateListeners = new Set();
 let snapshotCreated = false;
 let statusReads = 0;
-const smokeChat = { schemaVersion: 1, chatId: "smoke_chat", taskId: "smoke_task", projectId: "smoke_project", worktreeId: "smoke_chat_worktree", workspaceIdentity: "smoke_chat_identity", goal: "후속 대화 확인", settingsRevision: 1, roleSnapshots: [
+const smokeChat = { schemaVersion: 2, chatId: "smoke_chat", taskId: "smoke_task", projectId: "smoke_project", worktreeId: "smoke_chat_worktree", workspaceIdentity: "smoke_chat_identity", goal: "후속 대화 확인", settingsRevision: 1, roleSnapshots: [
   {roleId:"planning",runtime:"codex",modelSelector:"test-model",reasoningEffort:"medium",permission:"readOnly"},
   {roleId:"coding",runtime:"claude-code",modelSelector:"test-model",reasoningEffort:null,permission:"workspaceWrite"},
   {roleId:"review",runtime:"codex",modelSelector:"test-model",reasoningEffort:null,permission:"readOnly"},
 ], state: "draft", createdAt: "2026-09-14T00:00:00Z", updatedAt: "2026-09-14T00:00:00Z" };
+smokeChat.roleSnapshots = [{...smokeChat.roleSnapshots[0], roleId:'coordinator'}, smokeChat.roleSnapshots[0], {...smokeChat.roleSnapshots[0], roleId:'design'}, ...smokeChat.roleSnapshots.slice(1)];
 window.m5SmokeContextStarts = [];
+window.m5SmokeShortStarts = [];
 const smokeMessages = [{ schemaVersion: 1, messageId: "smoke_initial", chatId: smokeChat.chatId, taskId: smokeChat.taskId, worktreeId: smokeChat.worktreeId, eventSequence: 1, kind: "user", roleId: null, runId: null, text: "처음 요청", createdAt: smokeChat.createdAt }];
 let historyMessageIndex = 0;
 let historyReadFailures = 0;
@@ -92,7 +94,7 @@ window.m5Diagnostics = {inspect: async () => {
 window.m5SmokeFailedClaude = () => {
   diagnosticRun = {schemaVersion:1,runId:diagnosticRun?.runId ?? 'smoke_failed_claude',chatId:smokeChat.chatId,
     taskId:smokeChat.taskId,projectId:smokeChat.projectId,worktreeId:smokeChat.worktreeId,
-    workspaceIdentity:smokeChat.workspaceIdentity,selectedProfile:smokeChat.roleSnapshots[1],
+    workspaceIdentity:smokeChat.workspaceIdentity,selectedProfile:smokeChat.roleSnapshots[3],
     source:'actualAgent',capabilityFingerprint:`sha256:${'0'.repeat(64)}`,state:'failed',
     stage:'implementing',terminationOutcome:'cleanExit',createdAt:smokeChat.createdAt,updatedAt:smokeChat.updatedAt};
   for(const listener of agentRunStateListeners) listener({run:diagnosticRun});
@@ -100,7 +102,7 @@ window.m5SmokeFailedClaude = () => {
 window.m5SmokeVisualRunning = () => {
   diagnosticRun = {schemaVersion:1,runId:'agent_run_visual_running',chatId:smokeChat.chatId,taskId:smokeChat.taskId,
     projectId:smokeChat.projectId,worktreeId:smokeChat.worktreeId,workspaceIdentity:smokeChat.workspaceIdentity,
-    selectedProfile:smokeChat.roleSnapshots[1],source:'actualAgent',capabilityFingerprint:`sha256:${'0'.repeat(64)}`,
+    selectedProfile:smokeChat.roleSnapshots[3],source:'actualAgent',capabilityFingerprint:`sha256:${'0'.repeat(64)}`,
     state:'running',stage:'implementing',terminationOutcome:null,createdAt:smokeChat.createdAt,updatedAt:smokeChat.updatedAt};
   for (const listener of agentRunStateListeners) listener({run:diagnosticRun});
 };
@@ -321,8 +323,13 @@ window.m5 = {
   onChatEvent: (listener) => unsubscribe(chatListeners, listener),
   getAgentCapabilities: async () => ({canStart:true, blockedReason:null, fingerprint:`sha256:${"0".repeat(64)}`}),
   startAgentRun: async (request) => {
+    if (smokeMessages.length <= 100) {
+      if (request.roleId !== "coordinator") throw new Error("expected coordinator");
+      window.m5SmokeShortStarts.push(request);
+      return {runId:"smoke_short_run"};
+    }
     const expected = [smokeMessages[0].messageId, ...smokeMessages.slice(-99).map(message => message.messageId)];
-    if (smokeMessages.length <= 100 || request.chatId !== smokeChat.chatId || request.roleId !== "planning"
+    if (smokeMessages.length <= 100 || request.chatId !== smokeChat.chatId || request.roleId !== "coordinator"
         || JSON.stringify(request.inputMessageIds) !== JSON.stringify(expected)) throw new Error("unexpected long-chat input");
     window.m5SmokeContextStarts.push(request);
     return {schemaVersion:1,runId:"smoke_context_run",chatId:smokeChat.chatId,taskId:smokeChat.taskId,

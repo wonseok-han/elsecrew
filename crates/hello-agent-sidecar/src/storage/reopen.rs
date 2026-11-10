@@ -530,7 +530,7 @@ fn preflight_schema_and_control_rows_plan(connection: &Connection) -> Result<(),
     let expected = match storage_schema_version(connection)? {
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9) => reference_schema_v9()?,
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10) => reference_schema_v10()?,
-        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11) => agent_output::schema::expected_schema()?
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12) => (if storage_schema_version(connection)? == Some(STORAGE_LIFETIME_SCHEMA_VERSION_V12) { agent_output::schema::expected_schema_v12()? } else { agent_output::schema::expected_schema()? })
             .into_iter().map(|(kind, name, table, sql)| (kind, name, table, Some(sql))).collect(),
         _ => return Err(session_error()),
     };

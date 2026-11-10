@@ -685,7 +685,8 @@ fn verify_bounded_storage_runtime_state(connection: &Connection) -> Result<(), S
         }
         hello_agent_protocol::storage_lifetime_v1::STORAGE_LIFETIME_SCHEMA_VERSION_V9
         | hello_agent_protocol::storage_lifetime_v1::STORAGE_LIFETIME_SCHEMA_VERSION_V10
-        | hello_agent_protocol::storage_lifetime_v1::STORAGE_LIFETIME_SCHEMA_VERSION_V11 => {
+        | hello_agent_protocol::storage_lifetime_v1::STORAGE_LIFETIME_SCHEMA_VERSION_V11
+        | hello_agent_protocol::storage_lifetime_v1::STORAGE_LIFETIME_SCHEMA_VERSION_V12 => {
             let unsafe_compaction: bool = connection
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM maintenance_jobs \

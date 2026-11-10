@@ -427,7 +427,7 @@ function validateEvent(object: Record<string, unknown>): EventV1 {
     exactKeys(binding, ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId", "roleId", "capabilityFingerprint"]);
     for (const name of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId"]) requireBoundedId(binding[name], name);
     if (!(binding.runId as string).startsWith("agent_run_")
-      || !["planning", "coding", "review"].includes(String(binding.roleId))
+      || !["coordinator", "planning", "design", "coding", "review"].includes(String(binding.roleId))
       || typeof binding.capabilityFingerprint !== "string" || !/^sha256:[0-9a-f]{64}$/.test(binding.capabilityFingerprint)) fail("invalid output binding");
     if (binding.chatId !== object.chatId || binding.taskId !== object.taskId || binding.runId !== object.runId) {
       fail("output notification binding differs");
@@ -516,7 +516,7 @@ export function validateAgentPublicEventPayloadV1(
   if (!(payload.runId as string).startsWith("agent_run_")) {
     fail("agent public event runId must use the actual-agent run namespace");
   }
-  if (!(["planning", "coding", "review"] as const).includes(payload.roleId as never)) {
+  if (!(["coordinator", "planning", "design", "coding", "review"] as const).includes(payload.roleId as never)) {
     fail("agent public event roleId is invalid");
   }
   if (typeof payload.capabilityFingerprint !== "string" || !/^sha256:[0-9a-f]{64}$/.test(payload.capabilityFingerprint)) {
@@ -562,7 +562,7 @@ export function validateAgentRunStateChangedPayloadV1(
   }
   const profile = requireJsonObject(run.selectedProfile, "agent run state event selectedProfile");
   exactKeys(profile, ["roleId", "runtime", "modelSelector", "reasoningEffort", "permission"]);
-  if (!( ["planning", "coding", "review"] as const).includes(profile.roleId as never)) fail("agent run state event roleId is invalid");
+  if (!( ["coordinator", "planning", "design", "coding", "review"] as const).includes(profile.roleId as never)) fail("agent run state event roleId is invalid");
   if (!( ["codex", "claude-code"] as const).includes(profile.runtime as never)) fail("agent run state event runtime is invalid");
   if (typeof profile.modelSelector !== "string" || profile.modelSelector.trim() === "" || utf8Bytes(profile.modelSelector) > 256) {
     fail("agent run state event modelSelector must be nonempty and bounded");
@@ -579,7 +579,7 @@ export function validateAgentRunStateChangedPayloadV1(
   if (!wireStates.includes(run.state as never)) fail("agent run state event state is not wire-visible");
   const stages = ["planning", "implementing", "verifying"] as const;
   if (!stages.includes(run.stage as never)) fail("agent run state event stage is invalid");
-  const expectedStage = { planning: "planning", coding: "implementing", review: "verifying" } as const;
+  const expectedStage = { coordinator: "planning", design: "planning", planning: "planning", coding: "implementing", review: "verifying" } as const;
   if (run.stage !== expectedStage[profile.roleId as keyof typeof expectedStage]) fail("agent run state event stage does not match selected role snapshot");
   const active = run.state === "running";
   if (active) {

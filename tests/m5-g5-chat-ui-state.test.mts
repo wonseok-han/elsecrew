@@ -485,3 +485,32 @@ test("refreshing chat list preserves selected conversation and its draft", async
   assert.equal(controller.snapshot().chats.length, 3);
   controller.dispose();
 });
+
+test("new coordinator conversation seeds a versioned snapshot and rejects a stale settings revision", async () => {
+  const { coordinatorRoles } = await import("../src/m5/contracts/run-recovery-v1.ts");
+  const bridge = new FakeBridge();
+  let updatedRoles = roles;
+  bridge.updateProjectRoleSettings = async input => {
+    if (input.expectedRevision !== bridge.revision) throw new Error("revision conflict");
+    updatedRoles = input.roles;
+    return {...settings(), schemaVersion:2,revision:++bridge.revision,roles:updatedRoles};
+  };
+  const create = bridge.createChat.bind(bridge);
+  bridge.createChat = async input => ({...await create(input),schemaVersion:2,settingsRevision:input.expectedSettingsRevision,roleSnapshots:updatedRoles});
+  const controller = new ChatUiController(bridge as unknown as M5BridgeV3);
+  controller.start();
+  await controller.openProject("project_a");
+  const old = structuredClone(bridge.chats[0]);
+  const created = await controller.createCoordinatorChat({projectId:"project_a"},"Explain this project");
+  assert.equal(created?.schemaVersion,2);
+  assert.equal(created?.settingsRevision,2);
+  assert.deepEqual(created?.roleSnapshots,coordinatorRoles(roles));
+  assert.deepEqual(bridge.chats.find(item=>item.chatId===old.chatId),old);
+  controller.dispose();
+  const stale = new FakeBridge();
+  const second = new ChatUiController(stale as unknown as M5BridgeV3);
+  second.start(); await second.openProject("project_a"); stale.revision++;
+  assert.equal(await second.createCoordinatorChat({projectId:"project_a"},"question"),null);
+  assert.equal(stale.prepared.length,0);
+  second.dispose();
+});

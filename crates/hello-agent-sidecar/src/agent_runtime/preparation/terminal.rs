@@ -114,7 +114,7 @@ impl RunReservation {
         let updated_chat = updated_chat(
             chat,
             match state {
-                "succeeded" if self.request.role_id == "planning" => "waitingForUser",
+                "succeeded" if matches!(self.request.role_id.as_str(), "coordinator" | "design" | "planning") => "waitingForUser",
                 "succeeded" => "reviewReady",
                 "canceled" => "canceled",
                 "recoveryRequired" => "recoveryRequired",

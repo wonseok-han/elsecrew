@@ -707,3 +707,18 @@ fn v10_writer_chains_immediate_predecessor_for_two_thousand_delete_candidates() 
         .unwrap();
     assert_eq!(facts, (2, 2, 1, first));
 }
+
+#[test]
+fn coordinator_v12_reopens_compacted_v11_and_can_compact_again() {
+    let (_root, path, mut storage) = exact_v10(2001);
+    agent_output::schema::migrate(&mut storage.connection).unwrap();
+    run_to_completion(&mut storage);
+    let count: i64 = storage.connection.query_row("SELECT count(*) FROM ledger_compaction_prefixes", [], |row| row.get(0)).unwrap();
+    assert!(count > 0);
+    drop(storage);
+    let mut upgraded = Storage::open_for_durable_admission(&path, &AtomicBool::new(false)).unwrap();
+    assert!(upgraded.coordinator_roles_enabled().unwrap());
+    run_to_completion(&mut upgraded);
+    drop(upgraded);
+    assert!(Storage::open_for_durable_admission(&path, &AtomicBool::new(false)).is_ok());
+}

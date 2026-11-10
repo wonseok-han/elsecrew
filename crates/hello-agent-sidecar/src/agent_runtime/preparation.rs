@@ -1125,6 +1125,7 @@ impl RunReservation {
                 storage,
                 &self.request.chat_id,
                 &self.request.input_message_ids,
+                &self.request.role_id,
             )? != self.prompt
             || projects.verify_workspace_for_run(storage, &address_from_chat(&self.run)?)?
                 != projection["workspace_manifest"]
@@ -1360,7 +1361,7 @@ impl RunPreparation {
         )
         .map_err(json_failure)?;
         let manifest = projects.verify_workspace_for_run(storage, &address_from_chat(&chat)?)?;
-        let prompt = resolve_prompt(storage, &request.chat_id, &request.input_message_ids)?;
+        let prompt = resolve_prompt(storage, &request.chat_id, &request.input_message_ids, &request.role_id)?;
         Ok(Self {
             request: request.clone(),
             chat,
