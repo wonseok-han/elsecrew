@@ -15,6 +15,8 @@ if (packagedQa) app.setName('Hello Agent Output QA');
 const combined = process.argv.includes('--combined-workload');
 const retentionOnly = packagedQa && process.argv.includes('--file-retention-only');
 const retentionWithOutputDiff = retentionOnly && process.argv.includes('--file-retention-with-output-diff');
+const retentionCycles = process.argv.includes('--file-retention-cycles');
+assert.ok(!retentionCycles || (retentionOnly && !retentionWithOutputDiff), 'Repeated file diagnosis requires file-only retention mode');
 assert.ok(!retentionOnly || !combined, 'Retention-only diagnosis is separate from combined performance');
 // A real foreground surface, not a visibility/throttling override. Limited to
 // the explicitly named QA package; production window policy stays unchanged.
@@ -157,7 +159,7 @@ async function finish(error) {
   // Optional retention diagnosis runs only after all timing/RSS collectors stop.
   // Heap snapshots can trigger GC; never use their values as performance proof.
   if (packagedQa && ((combined && process.argv.includes('--retention-snapshot')
-      && report.combinedWorkload?.retainedStartedAt) || (retentionOnly && report.fileRetention?.closed))) {
+      && report.combinedWorkload?.retainedStartedAt) || (retentionOnly && !retentionCycles && report.fileRetention?.closed))) {
     const debuggerApi = observedWindow?.webContents.debugger;
     const snapshotPath = path.join(root, 'retention.heapsnapshot');
     let fd, attached = false, bytes = 0, overflow = false;
@@ -228,6 +230,26 @@ app.on('browser-window-created', (_event, window) => {
         // Exercise the real bridge, sidecar file reader and editor teardown.
         // Hidden DOM/model readiness is not a paint/latency or RSS gate.
         window.hide();
+        const retainedCycles = [];
+        async function recordRetentionCycle(cycle) {
+          await setMemoryPhase(`file-cycle-${cycle}-settling`);
+          await new Promise(resolve => setTimeout(resolve, 60000));
+          const phase = `file-cycle-${cycle}-retained`;
+          await setMemoryPhase(phase);
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          await memorySampler.drain();
+          const samples = report.memory.samples.filter(sample => sample.phase === phase);
+          assert.ok(samples.length >= 2, 'Repeated retention samples missing');
+          assert.equal(report.memory.errors, 0, 'Repeated retention collection failed');
+          assert.equal(report.memory.truncated, false, 'Repeated retention samples truncated');
+          retainedCycles.push({cycle, phase, samples: samples.length,
+            maximumRssBytes:Math.max(...samples.map(sample => sample.totalBytes))});
+          persist();
+        }
+        if (retentionCycles) {
+          await recordRetentionCycle(0);
+          await setMemoryPhase('file-cycle-1-opening');
+        }
         await wait("window.m5?.version === 8 && [...document.querySelectorAll('button')].some(b => b.textContent === '프로젝트 선택' && !b.disabled)");
         await run(`(async () => {
           const p = await window.m5.openProject();
@@ -276,6 +298,23 @@ app.on('browser-window-created', (_event, window) => {
         await run("[...document.querySelectorAll('button')].find(b => b.textContent === '프로젝트 화면 닫기' && !b.disabled).click()");
         await wait("!!document.querySelector('.m5-start-action') && !document.querySelector('.monaco-editor')");
         report.fileRetention.closed = true;
+        if (retentionCycles) {
+          report.fileRetention.cycles = retainedCycles;
+          report.fileRetention.cycleScope = 'Hidden file-only same-process diagnostic; no forced GC or heap snapshot; not visible combined G6 or leak proof';
+          await recordRetentionCycle(1);
+          for (let cycle = 2; cycle <= 3; cycle++) {
+            await setMemoryPhase(`file-cycle-${cycle}-opening`);
+            await run("[...document.querySelectorAll('button')].find(b => b.textContent === '프로젝트 선택' && !b.disabled).click()");
+            await wait("document.querySelectorAll('.m5-chat-chip').length === 1");
+            await run("document.querySelector('.m5-chat-chip').click()");
+            await wait("!![...document.querySelectorAll('.m5-file-row')].find(b => b.title === 'large.txt' && !b.disabled)", 65000);
+            await run("[...document.querySelectorAll('.m5-file-row')].find(b => b.title === 'large.txt').click()");
+            await wait("!!document.querySelector('.monaco-editor textarea') && !!document.querySelector('.m5-editor-tab-name')", 30000);
+            await run("[...document.querySelectorAll('button')].find(b => b.textContent === '프로젝트 화면 닫기' && !b.disabled).click()");
+            await wait("!!document.querySelector('.m5-start-action') && !document.querySelector('.monaco-editor')");
+            await recordRetentionCycle(cycle);
+          }
+        }
         await finish();
         return;
       }
