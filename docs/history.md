@@ -4,6 +4,15 @@
 
 ### 2026-11-10 · by GPT-6
 
+- 사용자 피드백에 따라 프로젝트 목록의 별도 “관리” 행을 제거하고 이름 옆 ⋯ 메뉴로 이동했다. 새로고침/추가는 목록 헤더의 작은 버튼으로 통합했다. 축소 목록에서 헤더 넘침을 실제 UI 회귀가 발견해 수정했다.
+- 파일 탐색 정렬은 공용 get_tree_from_active에서 directory-first 후 기존 이름순으로 변경했다. 전체 디렉터리를 정렬한 뒤 페이지를 나누므로 프로젝트/채팅 작업 복사본과 여러 페이지 모두 폴더 우선이다. 링크 접근 제한은 변경하지 않았다. 폴더가 한 페이지를 넘고 이름상 앞선 파일이 함께 있는 회귀 1개 PASS. TypeScript/renderer build·Chromium 회귀 2개 PASS, 실제 확장 목록 capture-9GLhpb 확인. 기존 앱 정상 종료 후 패키지 반영을 이어간다.
+
+### 2026-11-10 · by GPT-6
+
+- 사용자 재확인 요청: 기존 설치 app.asar의 renderer 36개 파일이 현재 빌드와 byte-identical이며 제목 Elsecrew를 확인했다. 실행 중인 실제 창도 Elsecrew이고 local-audio-notes가 보존돼 있다. UI 변경은 이미 반영돼 있어 재빌드/재시작은 하지 않았다. 패키지/네이티브 메뉴 이름 전환 잔여 사항은 유지한다.
+
+### 2026-11-10 · by GPT-6
+
 - af76baca 재패키징 후 Info.plist를 직접 확인하니 Electron Packager가 extendInfo의 CFBundleName/CFBundleDisplayName을 내부 package name으로 덮어썼다. 위 설정은 효과가 없어 제거한다. 앞선 “네이티브 메뉴 이름에도 적용”은 시도 기록이며 달성 사실이 아니다. 현재 실제 창/화면 이름은 Elsecrew, 앱 번들/실행파일/네이티브 앱 메뉴는 hello-agent다. 정식 설치 파일 이름 전환에는 패키지 경로·검증 스크립트·업데이트 식별자의 일괄 후속 정리가 필요하다. 프로젝트/인증 저장 위치는 유지한다.
 - 이번 임시 캡처 프로필 3개와 중간 캡처 2세트는 정상 종료 확인 뒤 정리했고 최종 capture-wPyOn4만 보관했다. macOS 패키지 smoke는 9622861a에서 PASS, af76baca 패키지 생성 PASS. 최종 앱 재실행 완료, main/push 없음.
 

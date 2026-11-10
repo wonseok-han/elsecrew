@@ -6034,3 +6034,35 @@ fn watcher_scan_rejects_a_different_root_between_slices() {
     scan.validate_held_paths(&capability).unwrap();
     assert!(scan.validate_held_paths(&replacement).is_err());
 }
+
+#[test]
+fn tree_lists_directories_before_files_across_pages() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    let folder = active.worktree_path.join("ordering");
+    fs::create_dir(&folder).unwrap();
+    fs::write(folder.join("aaa.txt"), b"file").unwrap();
+    for index in 0..=TREE_PAGE_MAX_ENTRIES_V1 {
+        fs::create_dir(folder.join(format!("z-{index:05}"))).unwrap();
+    }
+    let first = fixture
+        .manager
+        .get_tree(&fixture.storage, &fixture.project_id, "ordering", None)
+        .unwrap();
+    let entries = first.result["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), TREE_PAGE_MAX_ENTRIES_V1);
+    assert!(entries.iter().all(|entry| entry["kind"] == "directory"));
+    assert_eq!(entries[0]["name"], "z-00000");
+    let second = fixture
+        .manager
+        .get_tree(
+            &fixture.storage,
+            &fixture.project_id,
+            "ordering",
+            first.result["nextCursor"].as_str(),
+        )
+        .unwrap();
+    assert_eq!(second.result["entries"][0]["kind"], "directory");
+    assert_eq!(second.result["entries"][1]["name"], "aaa.txt");
+    assert!(second.result["nextCursor"].is_null());
+}

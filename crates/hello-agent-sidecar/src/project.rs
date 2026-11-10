@@ -1580,7 +1580,13 @@ impl ProjectManager {
             };
             entries.push((relative, name, kind));
         }
-        entries.sort_by(|left, right| left.0.cmp(&right.0));
+        // Sort the complete directory before slicing pages so folders cannot
+        // appear after files merely because they fell on a later page.
+        entries.sort_by(|left, right| {
+            (left.2 != "directory")
+                .cmp(&(right.2 != "directory"))
+                .then_with(|| left.0.cmp(&right.0))
+        });
         if offset > entries.len() {
             return Err(ProjectFailure::manifest(
                 "tree cursor is outside the current page set",

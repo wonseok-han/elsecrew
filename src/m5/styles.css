@@ -768,3 +768,22 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-project-rail li > .m5-project-manage { display: block; width: 100%; text-align: left; }
 .m5-dock-group-tabs { flex-wrap: nowrap; overflow-x: auto; min-width: 0; }
 .m5-dock-group-tabs > button { flex-shrink: 0; white-space: nowrap; }
+/* Project actions belong to their row; the rail header owns list actions. */
+.m5-project-rail-header { flex-wrap: wrap; margin-bottom: 8px; padding: 0; }
+.m5-project-rail-header h2 { flex: 1; }
+.m5-project-rail-header .m5-project-refresh,
+.m5-project-rail-header .m5-project-add { width: 28px; min-height: 28px; margin: 0; padding: 2px; border: 0; border-radius: 5px; font-size: 18px; }
+.m5-project-rail-header .m5-project-refresh { margin-left: auto; }
+.m5-project-catalog-list li { position: relative; }
+.m5-project-catalog-list li > button { padding-right: 32px; }
+.m5-project-overflow { position: absolute; right: 3px; top: 7px; z-index: 2; }
+.m5-project-overflow > summary { display: grid; place-items: center; list-style: none; cursor: pointer; width: 24px; height: 24px; padding: 0; border-radius: 5px; font-size: 18px; color: var(--m5-muted); }
+.m5-project-overflow > summary::-webkit-details-marker { display: none; }
+.m5-project-overflow > summary:hover, .m5-project-overflow[open] > summary { background: var(--m5-raised); color: var(--m5-text); }
+.m5-project-overflow > div { position: absolute; right: 0; top: 29px; width: 156px; padding: 5px; border: 1px solid var(--m5-border); border-radius: 7px; background: var(--m5-surface); box-shadow: 0 8px 24px #0005; }
+.m5-project-overflow .m5-project-manage { margin: 0; padding: 8px 10px !important; font-size: 12px !important; }
+.m5-project-rail:not(.m5-project-rail-expanded) .m5-project-overflow { right: 0; top: 0; }
+.m5-project-rail:not(.m5-project-rail-expanded) .m5-project-overflow > div { width: 70px; }
+.m5-project-rail:not(.m5-project-rail-expanded) .m5-project-overflow > summary { padding: 0; font-size: 16px; }
+.m5-project-rail:not(.m5-project-rail-expanded) .m5-project-rail-header h2 { flex: 0 0 100%; text-align: center; margin-bottom: 4px; }
+.m5-project-rail:not(.m5-project-rail-expanded) .m5-project-rail-header button { width: 20px; min-width: 20px; min-height: 24px; padding: 0; margin: 0; }
