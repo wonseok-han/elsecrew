@@ -4,6 +4,12 @@
 
 ### 2026-11-10 · by GPT-6
 
+- 사용자 기존 앱 반영 요청으로 clean cd5878c0를 macOS arm64 제품 패키지로 빌드했다. /Applications와 ~/Applications에는 별도 Hello 앱이 없고 기존 대상은 out/hello-agent-darwin-arm64/hello-agent.app이었다. 교체 전 해당 앱/sidecar 실행 없음 확인, Forge live guard를 유지한 package 성공 및 package smoke PASS. 증거 .artifacts/m5-ui-installed-2026-11-10/{package,package-smoke}.log.
+- 같은 경로의 앱을 정상 실행했고 PID44249와 전용 sidecar44253이 새 경로에서 실행됨을 확인했다. 로그인/프로젝트 데이터는 삭제·변경하지 않았으며 모델 호출·사용자 프로젝트 작업은 하지 않았다. 기존 앱을 켜 둔 채 교체하거나 복제 설치본을 추가하지 않았다.
+- 앱 내 업데이트 질문: 현재 Electron main/renderer에 autoUpdater/checkForUpdates 연결이 없다. 기존 Tauri src/App.tsx에는 check/downloadAndInstall/relaunch가 있으나 M5 Electron 앱으로 이관되지 않았다. 공급자 Codex/Claude 설치·업데이트와 앱 자체 업데이트를 구분해 설명했다. 앱 자체 업데이트 구현은 이번 요청 범위에 추가하지 않았다. main 병합/push 없음.
+
+### 2026-11-10 · by GPT-6
+
 - UI 구성 개선 목표 마감: 기준 fabf3422에서 영어 패널 이름 Chats와 좁은 그룹 탭 줄바꿈을 적용했다. 실행 중 합성 상태의 취소 버튼 가시성·추가 실행 차단 및 실제 Monaco 파일 표시를 캡처 검사에 추가했다. 첫 편집기 촬영은 폴더만 선택해 실패했으며 파일 선택을 추가해 해결했다. 기존 앱 실행/원본 보호 계약이나 공급자 구현은 바꾸지 않았다.
 - 완료 대조: 재방문 홈/다중 프로젝트 탐색은 ProjectCatalog home/rail과 재열기 회귀로, 초보자 설치·로그인은 ProviderLogin의 최초 선택·설치·인증 회귀로 확인했다. 프로젝트 역할/모델은 역할 전환과 미저장값/저장 실패 보존으로, 대화는 목표 입력·기록·후속 초안·언어 전환으로 확인했다. 편집/diff는 실제 Monaco 입력·저장·파일 전환·줄 참조로, 사용자 배치는 drag/drop·크기 변경·숨김/복원·영속 배치와 Monaco 동일 인스턴스 검사로 확인했다. 검토 목록의 3개/101개 페이지와 복구 시 실행/후속 지시 제한도 확인했다.
 - 최종 검증: TypeScript·renderer build PASS(기존 큰 chunk 안내 유지), dock/guide/editor/followup 86개 PASS, 실제 Chromium mount 2개 PASS. 마지막 CSS 탭 줄바꿈 이후 build·합성 화면 캡처/탭 경계/가로 넘침/입력 버튼 가시성을 재확인했다. 최종 .artifacts/m5-visual/capture-a5mhRC, Monaco/설정 직접 확인 capture-U7UtBt, 최초/재방문/실행 직접 확인 capture-AgeZOW 및 검토/복구 직접 확인 capture-500vKP를 근거로 한다. UI 변경 전체는 54484912 이후 renderer·문서·시험 범위다.
