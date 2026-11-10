@@ -4,6 +4,12 @@ Windows CI42315705501은 준비·확인 전달을 통과했으나 실제 반영�
 
 ### 2026-11-10 · by GPT-6
 
+- 사용자 현재5분 화면유지 응답으로 준비된 QA(c7e8fa64, 이후 차이는 history뿐)의 combined-workload/keep-test-visible 단회를 실행했다. 제한환경 첫 실행은 로그생성전exit134, 데스크톱 접근 재실행 session88679/PID55931은 terminal exit1·shutdown accepted다. root2wFTzY의 큰파일/500diff/4개실행·4채팅 기록·native char 입력(24.30ms, 물리화면 시간 아님)·원본불변을 관측했지만 최종status/functionalStatus는 FAIL이다.
+- 메모리 idle436.23MiB>400, peak805.05MiB>800, 닫기60초뒤 잔류증분296.28MiB>120로 세 기준 모두 실패했다. retained 총732.52MiB(main215.81/renderer289.28/GPU96.56/network39.81/sidecar37.64/측정utility53.41). 측정기 비용은 차감하지 않으며 단회 QA를 전체G6로 인용하지 않는다. 증거 .artifacts/m5-combined-output-2026-11-10/{result,build,summary}.json.
+- 관측 PID 전부 부재와 DB app_instances clean_shutdown_at을 확인한 뒤 이번 fixture2wFTzY와 QA packageV7XtVS를 삭제했다. 보고서/스크린샷은 보존했다. 다음은 메모리 원인별 최적화이며 Windows 추가CI 승인은 여전히 대기다. 사용자 프로젝트·인증·모델호출·제품out은 사용하지 않았다.
+
+### 2026-11-10 · by GPT-6
+
 - 완료 감사: Windows 전체반영/복원은 CI42315705501 실패이며 수정 후보076e23a0 native 실행이 남고 승인3회는 소진됐다. macOS 종합 성능 입력은 부재/NOT_READY이며 준비된 QA 앱 V7XtVS의 BUILT/파일존재만 재확인했다. 전체 완료를 선언할 증거가 없다.
 - 추가CI 승인 및 현재5분 화면 유지 응답 대기가 연속 goal turn에서 지속됐다. 직전 턴의 QA 빌드는 progress였으나 이제 준비 가능한 동일시험 작업은 끝났고, 승인·측정 없이 안전경계/성능 기준을 바꾸거나 새 빌드를 반복할 이유가 없다. 자동 진행을 blocked(사용자 응답 필요)로 전환한다. 두 기존 질문 중 가능한 쪽의 응답으로 해당 경로를 재개하며 main/제품활성화/모델호출은 수행하지 않는다.
 
