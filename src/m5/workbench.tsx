@@ -127,12 +127,12 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const { lang, t } = useI18n();
   const controller = useMemo(() => new ProjectEditorController(bridge), [bridge]);
   useEffect(() => {
-    const menus = () => document.querySelectorAll<HTMLDetailsElement>(".m5-project-menu, .m5-project-guide");
+    const menus = () => document.querySelectorAll<HTMLDetailsElement>(".m5-project-menu, .m5-project-guide, .m5-project-overflow");
     const outside = (event: PointerEvent) => menus().forEach(menu => { if (!menu.contains(event.target as Node)) menu.open = false; });
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape") menus().forEach(menu => { if (menu.open) { menu.open = false; menu.querySelector<HTMLElement>("summary")?.focus(); } }); };
-    document.addEventListener("pointerdown", outside);
+    document.addEventListener("pointerdown", outside, true);
     document.addEventListener("keydown", escape);
-    return () => { document.removeEventListener("pointerdown", outside); document.removeEventListener("keydown", escape); };
+    return () => { document.removeEventListener("pointerdown", outside, true); document.removeEventListener("keydown", escape); };
   }, []);
   // Draft edits do not change the tree. Keep its callback stable so memo can
   // skip rebuilding up to 120 rows on every keystroke without ignoring props.

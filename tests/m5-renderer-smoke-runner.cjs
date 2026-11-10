@@ -219,6 +219,14 @@ app.whenReady().then(async () => {
     railToggle.click();
     await ${waitFor("document.querySelector('.m5-project-rail').getBoundingClientRect().width < 100", "collapsed project rail")};
     rail.querySelector('.m5-project-overflow > summary').click();
+    const overflow = rail.querySelector('.m5-project-overflow');
+    overflow.querySelector('div').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    if (!overflow.open) throw new Error('inside menu pointer closed popup');
+    const outsideTarget = rail.querySelector('h2');
+    outsideTarget.addEventListener('pointerdown', event => event.stopPropagation(), { once: true });
+    outsideTarget.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    if (overflow.open) throw new Error('outside pointer did not close project popup');
+    overflow.querySelector('summary').click();
     rail.querySelector('.m5-project-manage').click();
     await ${waitFor("!document.querySelector('.m5-app-settings').hidden && document.querySelector('.m5-maintenance-group')", "project management page")};
     if (document.querySelector('.m5-maintenance-group').tagName !== 'SECTION') throw new Error('management sections should be visible without expanding');
