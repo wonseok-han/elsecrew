@@ -1,6 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
-최신 macOS combined 측정(2026-11-10)은 유휴 431.02MiB·최대 742.11MiB·잔류증분 165.59MiB로 유휴/잔류 기준 실패다. 입력 36.5ms와 native 메모리 구성 수집은 이번 단회에서 성공했으며 전체 G6 통과는 아니다. 시험 앱과 임시 프로젝트는 정리했다. Windows 후보 076e23a0의 추가 CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
+최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산 결정, Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
+
+### 2026-11-10 · by GPT-6
+
+- 사용자의 현재5분 화면 유지 응답으로 재개했다. clean1ebf8383 QA2SUgRr를 session49085 exit0/BUILT로 준비하고 visible combined/keep-test-visible를 session62070/PID98796으로 실행했다. session은exit1이며 shutdown accepted, 실제모델/인증/사용자프로젝트 사용없음.
+- 이번 관측은 idle441.58MiB>400만FAIL, peak746.36MiB<800/잔류증분33.34MiB<120/입력29.7ms<50/main35.653ms·renderer55ms<200이다. 마지막 visibility=visible, 최종오류는 idleRssBytes 하나였다. 이전 잔류/입력 실패를 지우거나 단회diagnostic을 전체G6·10회 반복 합격으로 바꾸지 않는다. native진단옵션은 이번에 사용하지 않았고 제품성능 코드 변경 없이 재관측한 값이므로 최적화 효과로 주장하지 않는다.
+- 결과 .artifacts/m5-visible-resume-2026-11-10/{result,build,cleanup}.json 및output.png/dispatch-timing.log 보존. 관측PID전부부재·DB clean·shutdown accepted 대조 후 fixturedn0mLl/QA2SUgRr 삭제했다. 문서 diff-check 완료. 다음은 유휴512MiB 제안 결정 후 동일 기준의 정식 반복·나머지G6 연결이며 Windows 추가CI는 기존 승인 응답 대기다. 기준변경/push없음.
 
 ### 2026-11-10 · by GPT-6
 
