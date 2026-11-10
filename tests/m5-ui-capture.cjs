@@ -46,7 +46,7 @@ app.whenReady().then(async () => {
   await capture(window, 'product-start');
   await window.webContents.executeJavaScript("window.m5SmokeCatalogEmpty = true; document.querySelector('.m5-project-rail .m5-project-pagination button').click()");
   await wait("document.querySelector('.m5-start-steps') && !document.querySelector('.m5-home-projects')");
-  await wait("document.querySelector('.m5-provider-selection input')?.getClientRects().length > 0");
+  await wait("document.querySelector('.m5-open-agents')?.getClientRects().length > 0");
   await capture(window, 'product-first-visit');
   window.setContentSize(960, 640);
   await wait("document.querySelector('.m5-start-action button').getBoundingClientRect().bottom <= innerHeight");
@@ -128,7 +128,7 @@ app.whenReady().then(async () => {
   await window.webContents.executeJavaScript(`(() => {
     const tools = document.querySelector('.m5-project-tools');
     if (tools.getBoundingClientRect().height > 45) throw new Error('closed utilities should share a row');
-    const select = document.querySelector('.m5-toolbar-actions select');
+    const select = document.querySelector('.m5-preferences-row select');
     select.value = 'en'; select.dispatchEvent(new Event('change', { bubbles: true }));
   })()`);
   await wait("document.querySelector('main').lang === 'en'");

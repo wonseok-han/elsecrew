@@ -66,16 +66,18 @@ export function ProviderInstall({ disabled, providers, onBlockChange, onCheck, o
   const canPrepare = !disabled && !busy && !uncertain && status !== null && !active &&
     !["unsupported", "recoveryRequired"].includes(status.state);
   return <section className={`m5-provider-install${compact ? " m5-provider-install-compact" : ""}`} aria-label={t("m5.install.title")}>
-    <header><strong>{t("m5.install.title")}</strong>
+    <header><div className="m5-install-heading"><strong>{t("m5.install.title")}</strong>
+      <p role="status">{status?.provider && <strong>{status.provider === "codex" ? "Codex" : "Claude Code"} · </strong>}
+        {status ? t(`m5.install.state.${status.state}`) : t("m5.install.checking")}</p></div>
+      <div className="m5-install-header-actions">
+      {showDetails && <button className="m5-install-refresh" type="button" disabled={busy} onClick={() => void request({ action: "status" })}>{t("m5.install.refresh")}</button>}
       {compact && <button type="button" aria-expanded={showDetails} aria-controls="m5-install-details" disabled={needsAttention}
         onClick={() => setExpanded(value => !value)}>{t(showDetails ? "m5.install.hideDetails" : "m5.install.showDetails")}</button>}
+      </div>
     </header>
-    <p role="status">{status?.provider && <strong>{status.provider === "codex" ? "Codex" : "Claude Code"} · </strong>}
-      {status ? t(`m5.install.state.${status.state}`) : t("m5.install.checking")}</p>
     <div id="m5-install-details" hidden={!showDetails}>
-    <button type="button" disabled={busy} onClick={() => void request({ action: "status" })}>{t("m5.install.refresh")}</button>
     {uncertain && <p role="alert">{t("m5.install.uncertain")}</p>}
-    <div className="m5-install-actions">{providers.map(provider => <button key={provider} type="button" disabled={!canPrepare}
+    <div className="m5-install-actions m5-install-provider-actions">{providers.map(provider => <button key={provider} type="button" disabled={!canPrepare}
       onClick={() => void request({ action: "prepare", provider })}>{t("m5.install.prepare", { name: provider === "codex" ? "Codex" : "Claude Code" })}</button>)}</div>
     {plan && !uncertain && <form onSubmit={event => {
       event.preventDefault();

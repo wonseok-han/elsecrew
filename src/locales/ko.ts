@@ -1,6 +1,16 @@
 // 한국어 문구 리소스. 이 파일의 키 집합이 다른 언어 파일의 기준이 된다.
 // 보간은 {name} 형태 — t("key", { name }) 로 치환.
 export const ko = {
+  "m5.preferences.title": "설정",
+  "m5.preferences.close": "닫기",
+  "m5.preferences.general": "일반",
+  "m5.preferences.roles": "기본 역할·모델",
+  "m5.preferences.agents": "에이전트 설치·연결",
+  "m5.preferences.updates": "앱 업데이트",
+  "m5.preferences.updateHelp": "Hello, Agent 앱의 새 버전을 확인하고 다운로드해요. 에이전트 설치·업데이트와는 별개예요.",
+  "m5.preferences.checkUpdate": "업데이트 확인",
+  "m5.preferences.updateUnavailable": "이 실행 환경에서는 앱 업데이트를 사용할 수 없어요.",
+  "m5.preferences.updateError": "업데이트 창을 열지 못했어요. 잠시 후 다시 시도해 주세요.",
   "m5.git.inspectTrust": "설치 폴더와 서명자 확인",
   "m5.git.trustFailed": "설치본을 확인하지 못했어요. 내부 서비스 상태와 선택한 Git 설치를 확인해 주세요.",
   "m5.git.publisher": "확인된 서명자",
@@ -677,7 +687,7 @@ export const ko = {
   "m5.firstChat.teamHelp": "위의 ‘역할과 모델’에서 이 프로젝트의 설정을 바꿀 수 있어요. 표시된 설정은 로그인 상태나 모델 사용 가능 여부를 보장하지 않아요.",
   "m5.start.help": "연습용 프로젝트를 따로 만들 필요 없어요. 실제 프로젝트를 고르고, 작은 작업 하나부터 함께 진행해요.",
   "m5.start.connect": "에이전트 준비하기",
-  "m5.start.connectHelp": "아래에서 Codex 또는 Claude Code를 선택하고 설치·로그인 안내를 따라가세요. 파일을 먼저 살펴보고 연결해도 괜찮아요.",
+  "m5.start.connectHelp": "설정의 ‘에이전트 설치·연결’에서 Codex 또는 Claude Code를 선택하고 안내를 따라가세요. 파일을 먼저 살펴보고 연결해도 괜찮아요.",
   "m5.start.project": "프로젝트 선택하기",
   "m5.start.projectHelp": "내 컴퓨터의 프로젝트 폴더를 선택하세요. 전에 열었던 프로젝트는 왼쪽 ‘저장된 프로젝트’에서 이어갈 수 있어요.",
   "m5.start.goal": "작은 목표로 첫 채팅 시작하기",

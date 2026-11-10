@@ -37,7 +37,13 @@ button, input, textarea, select {
 
 .m5-provider-install { margin: 8px 20px; padding: 16px; border: 1px solid #3a414d; border-radius: 12px; background: #202630; color: var(--m5-control-text); }
 .m5-provider-install header, .m5-install-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.m5-provider-install header { justify-content: space-between; }
+.m5-provider-install header { justify-content: space-between; align-items: flex-start; gap: 12px 24px; }
+.m5-install-heading { flex: 1 1 260px; min-width: 0; }
+.m5-provider-install .m5-install-heading > p { margin: 6px 0 0; color: var(--m5-muted, #b8c2ce); font-size: 12px; line-height: 1.6; }
+.m5-install-header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.m5-provider-install .m5-install-refresh { background: transparent; border-color: #3a414d; }
+.m5-install-provider-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 10px; margin-top: 16px; }
+.m5-install-provider-actions > button { min-height: 42px; text-align: left; }
 .m5-provider-install p { margin: 10px 0; }
 .m5-provider-install button { background: var(--m5-control-bg); color: var(--m5-control-text); border: 1px solid #64799f; border-radius: 8px; padding: 8px 12px; }
 .m5-provider-install button:hover:not(:disabled) { background: var(--m5-control-hover); }
@@ -53,7 +59,7 @@ button, input, textarea, select {
 .m5-management-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 12px; border: 1px solid #344253; border-radius: 7px; background: #171e28; color: #d8e0eb; text-align: left; }
 .m5-management-toggle span { color: #b8c7d9; font-size: 12px; }
 .m5-management-toggle:disabled { opacity: 1; cursor: default; }
-.m5-provider-install-compact > p { margin: 4px 0 0; font-size: 12px; color: #b8c2ce; }
+.m5-provider-install-compact .m5-install-heading > p { margin: 4px 0 0; font-size: 12px; color: #b8c2ce; }
 .m5-provider-install-compact header button { padding: 4px 8px; font-size: 12px; }
 .m5-provider-install-compact #m5-install-details:not([hidden]) { margin-top: 12px; padding-top: 12px; border-top: 1px solid #3a414d; }
 
@@ -707,3 +713,22 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-dock-group-tabs button { padding-inline: 8px; flex-shrink: 0; }
 
 .m5-dock-group-tabs { flex-wrap: wrap; overflow: visible; }
+
+.m5-app-settings { width: min(960px, calc(100vw - 48px)); max-height: calc(100dvh - 48px); padding: 0; border: 1px solid #3a414d; border-radius: 14px; background: #171c24; color: var(--m5-control-text, #e7eaf0); box-shadow: 0 24px 80px #0008; }
+.m5-app-settings::backdrop { background: #080b10b8; }
+.m5-app-settings > header { display: flex; justify-content: space-between; align-items: center; padding: 22px 26px; border-bottom: 1px solid #303744; }
+.m5-app-settings h2, .m5-app-settings h3 { margin: 0; }
+.m5-preferences-layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 340px; }
+.m5-preferences-layout > nav { padding: 16px 12px; border-right: 1px solid #303744; display: flex; flex-direction: column; gap: 6px; }
+.m5-preferences-layout > nav button { text-align: left; padding: 11px 12px; border: 0; border-radius: 7px; background: transparent; color: #b9c2d1; font: inherit; cursor: pointer; }
+.m5-preferences-layout > nav button[aria-current] { background: #2b3442; color: #fff; }
+.m5-preferences-content { padding: 24px; min-width: 0; }
+.m5-preferences-content p { color: #b9c2d1; line-height: 1.65; }
+.m5-preferences-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-top: 24px; padding-top: 20px; border-top: 1px solid #303744; }
+.m5-preferences-row select { padding: 8px 12px; border: 1px solid #465266; border-radius: 7px; color: #e7eaf0; background: #202630; }
+.m5-preferences-content .m5-provider-install, .m5-preferences-content .m5-provider-login { margin-left: 0; margin-right: 0; }
+@media (max-width: 700px) {
+  .m5-preferences-layout { grid-template-columns: minmax(0, 1fr); }
+  .m5-preferences-layout > nav { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid #303744; }
+  .m5-preferences-content { padding: 18px; }
+}

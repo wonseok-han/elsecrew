@@ -2,6 +2,16 @@ import type { MessageKey } from "./ko";
 
 // 영어 문구. ko와 동일한 키를 모두 가져야 한다(Record<MessageKey>로 강제).
 export const en: Record<MessageKey, string> = {
+  "m5.preferences.title": "Settings",
+  "m5.preferences.close": "Close",
+  "m5.preferences.general": "General",
+  "m5.preferences.roles": "Default roles & models",
+  "m5.preferences.agents": "Agent setup & connections",
+  "m5.preferences.updates": "App updates",
+  "m5.preferences.updateHelp": "Check for and download a new version of Hello, Agent. Agent installation and updates are managed separately.",
+  "m5.preferences.checkUpdate": "Check for updates",
+  "m5.preferences.updateUnavailable": "App updates are unavailable in this environment.",
+  "m5.preferences.updateError": "Could not open the update dialog. Please try again shortly.",
   "m5.git.inspectTrust": "Inspect installation and publisher",
   "m5.git.trustFailed": "Could not inspect the installation. Check the internal service and selected Git installation.",
   "m5.git.publisher": "Verified publisher",
@@ -678,7 +688,7 @@ export const en: Record<MessageKey, string> = {
   "m5.firstChat.teamHelp": "Use Roles and models above to change this project's settings. These settings do not confirm sign-in or model availability.",
   "m5.start.help": "No separate practice project needed. Choose a real project and start with one small task.",
   "m5.start.connect": "Prepare your agent",
-  "m5.start.connectHelp": "Select Codex or Claude Code below and follow the installation and sign-in guidance. You can also explore your files before connecting.",
+  "m5.start.connectHelp": "Open Settings → Agent setup & connections and follow the installation and sign-in guidance. You can also explore your files before connecting.",
   "m5.start.project": "Choose a project",
   "m5.start.projectHelp": "Choose a project folder on your computer. Use Saved projects on the left to return to a project you opened earlier.",
   "m5.start.goal": "Start your first chat with a small goal",

@@ -196,3 +196,23 @@ function isProjectPickerCancelled(value: unknown): boolean {
 contextBridge.exposeInMainWorld("m5GitSelection", Object.freeze({
   request: async (action: GitSelectionAction) => validateGitSelection(await ipcRenderer.invoke(M5_GIT_SELECTION_CHANNEL, validateGitSelectionAction(action))),
 }));
+
+const M5_APP_UPDATE_CHANNEL = "m5:app-update:open";
+const M5_UPDATE_READINESS = "m5:app-update:readiness";
+const M5_UPDATE_READINESS_REPLY = "m5:app-update:readiness-reply";
+const appUpdateApi = Object.freeze({
+  open: () => ipcRenderer.invoke(M5_APP_UPDATE_CHANNEL),
+  onRestartCheck: (check: () => boolean, resume: () => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, nonce: unknown) => {
+      if (typeof nonce !== "string") return;
+      let ready = false;
+      try { ready = check() === true; } catch { /* Fail closed. */ }
+      void ipcRenderer.invoke(M5_UPDATE_READINESS_REPLY, nonce, ready).catch(() => resume());
+    };
+    ipcRenderer.on(M5_UPDATE_READINESS, listener);
+    const resumeListener = () => resume();
+    ipcRenderer.on("m5:app-update:resume", resumeListener);
+    return () => { ipcRenderer.removeListener(M5_UPDATE_READINESS, listener); ipcRenderer.removeListener("m5:app-update:resume", resumeListener); };
+  },
+});
+contextBridge.exposeInMainWorld("m5AppUpdate", appUpdateApi);

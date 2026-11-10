@@ -2,6 +2,7 @@ import type { M5BridgeV8 } from "./contracts/bridge-v8.ts";
 
 declare global {
   interface Window {
+    readonly m5AppUpdate?: { open(): Promise<void>; onRestartCheck(check: () => boolean, resume: () => void): () => void };
     readonly m5GitSelection?: { request(action: import("./contracts/git-selection-v1.ts").GitSelectionAction): Promise<import("./contracts/git-selection-v1.ts").GitSelection> };
     readonly m5SaveRecovery?: { resolve(input: import("./contracts/save-recovery-v1.ts").SaveRecoveryResolveRequest): Promise<import("./contracts/save-recovery-v1.ts").SaveRecoveryResolveResult>; inspect(input: import("./contracts/workspace-addressing-v1.ts").ChatWorkspaceRefV1): Promise<import("./contracts/save-recovery-v1.ts").SaveRecoveryResult> };
     readonly m5Diagnostics?: { inspect(): Promise<import("./contracts/session-diagnostics-v1.ts").SessionDiagnostics> };

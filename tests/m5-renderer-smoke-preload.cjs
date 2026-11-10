@@ -1,3 +1,7 @@
+window.m5AppUpdate = { open: async () => {}, onRestartCheck: (check, resume) => {
+  window.m5SmokeUpdateCheck = check; window.m5SmokeUpdateResume = resume;
+  return () => { window.m5SmokeUpdateCheck = undefined; window.m5SmokeUpdateResume = undefined; };
+} };
 const listeners = new Set();
 window.m5SmokeAdmissionReturned = false;
 window.m5SmokePrematureInstallReads = 0;

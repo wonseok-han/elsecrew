@@ -394,7 +394,7 @@ function moduleFor(
       },
     };
   }
-  if (specifier === "node:path" || specifier === "node:url") return require(specifier);
+  if (specifier === "node:path" || specifier === "node:url" || specifier === "node:crypto") return require(specifier);
   if (specifier.endsWith("lifecycle-v1.ts")) return { M5_INTERNAL_CHANNELS_V1 };
   if (specifier === "./ipc-channels.ts") {
     return { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS, M5_BRIDGE_V7_CHANNELS, M5_BRIDGE_V8_CHANNELS };
@@ -467,4 +467,22 @@ test("save recovery IPC isolates frames and validates confirmation before reachi
   const result = await resolveSave(harness.currentEvent(),request) as {outcome:string};
   assert.equal(result.outcome,"aborted");
   assert.deepEqual(harness.sidecarCalls,["inspectWorkspaceSaveRecovery","resolveWorkspaceSaveRecovery"]);
+});
+
+test("app update UI IPC rejects foreign frames and renderer-supplied arguments", async () => {
+  const harness = await loadMain();
+  const handler = harness.handlers.get("m5:app-update:open")!;
+  assert.ok(handler);
+  await assertRejectedWithoutSidecar(handler, {sender:{},senderFrame:{}}, harness);
+  await assert.rejects(handler(harness.currentEvent(), { url: "https://untrusted.example" }));
+  assert.deepEqual(harness.sidecarCalls, []);
+});
+
+test("update readiness rejects unsolicited, stale and foreign replies", async () => {
+  const harness = await loadMain();
+  const handler = harness.handlers.get("m5:app-update:readiness-reply")!;
+  assert.ok(handler);
+  await assert.rejects(handler({sender:{},senderFrame:{}}, "fake", true));
+  await assert.rejects(handler(harness.currentEvent(), "stale", true));
+  await assert.rejects(handler(harness.currentEvent(), undefined, true));
 });

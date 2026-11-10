@@ -1,3 +1,5 @@
+import { flushSync } from "react-dom";
+import { AppSettings, type SettingsSection } from "./app-settings";
 import { GitSelectionView } from "./git-selection-view.tsx";
 import { SaveRecoveryView } from "./save-recovery-view.tsx";
 import { chatConnectionTarget, formatChatNotice } from "./chat-notice.ts";
@@ -120,7 +122,7 @@ function WorkbenchUnavailable() {
 }
 
 function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
-  const { lang, setLang, t } = useI18n();
+  const { lang, t } = useI18n();
   const controller = useMemo(() => new ProjectEditorController(bridge), [bridge]);
   // Draft edits do not change the tree. Keep its callback stable so memo can
   // skip rebuilding up to 120 rows on every keystroke without ignoring props.
@@ -142,6 +144,9 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const [applicationBaseline, setApplicationBaseline] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appDefaultsOpen, setAppDefaultsOpen] = useState(false);
+  const [updatePreparing, setUpdatePreparing] = useState(false);
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [preferencesSection, setPreferencesSection] = useState<SettingsSection>("general");
   const [connectionReveal, setConnectionReveal] = useState<ConnectionReveal>();
   const [discardedWorkspaceNotice, setDiscardedWorkspaceNotice] = useState(false);
   const [returnToNewChat, setReturnToNewChat] = useState(false);
@@ -157,6 +162,12 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     () => controller.snapshot(),
   );
   const chat = useSyncExternalStore(chatController.subscribe.bind(chatController), () => chatController.snapshot(), () => chatController.snapshot());
+  useEffect(() => window.m5AppUpdate?.onRestartCheck(() => {
+    const ready = !settingsOpen && !appDefaultsOpen && !newChatOpen && !reloadDraft && !reloadingDraft
+      && !leavingProject && !leaveError && controller.canLeaveProject() && chatController.canLeaveProjectView();
+    if (ready) flushSync(() => setUpdatePreparing(true));
+    return ready;
+  }, () => setUpdatePreparing(false)), [settingsOpen, appDefaultsOpen, newChatOpen, reloadDraft, reloadingDraft, leavingProject, leaveError, controller, chatController]);
   const openDiffFile = useCallback((path: string) => { void controller.openFile(path); }, [controller]);
   const discussDiff = useCallback((path: string, side?: "before" | "after", line?: number) => {
     const current = controller.snapshot();
@@ -248,7 +259,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   };
 
   return (
-    <main className={`m5-workbench${window.m5Projects ? " m5-with-project-rail" : ""}`} lang={lang} aria-label={t("m5.shell.label")}>
+    <main inert={updatePreparing} className={`m5-workbench${window.m5Projects ? " m5-with-project-rail" : ""}`} lang={lang} aria-label={t("m5.shell.label")}>
       <ProjectCatalog rail onHasProjects={setHasSavedProjects} ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
       <header className={`m5-toolbar${snapshot.project ? " m5-toolbar-project" : ""}`}>
         <div>
@@ -259,8 +270,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           </p>
         </div>
         <div className="m5-toolbar-actions">
-          <button type="button" className="m5-secondary" disabled={!admissionReady || !window.m5Projects || settingsOpen || newChatOpen || appDefaultsOpen} onClick={() => setAppDefaultsOpen(true)}>{t("m5.roles.appDefaults")}</button>
-          <select aria-label={t("m5.shell.language")} title={t("m5.shell.languageScope")} value={lang} onChange={event => setLang(event.target.value === "en" ? "en" : "ko")}><option value="ko">한국어</option><option value="en">English</option></select>
+          <button type="button" className="m5-secondary m5-open-preferences" disabled={settingsOpen || newChatOpen || appDefaultsOpen} onClick={() => setPreferencesOpen(true)}>{t("m5.preferences.title")}</button>
           {snapshot.project && <button type="button" onClick={() => void controller.chooseProject()} disabled={settingsOpen || !admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked}>
             {t("m5.shell.switch")}
           </button>}
@@ -277,7 +287,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       {snapshot.notice && <p className="m5-notice" role="status">{snapshot.noticeKey ? t(snapshot.noticeKey) : snapshot.notice}</p>}
       {chat.notice && <p className="m5-notice m5-chat-notice" role="status">{formatChatNotice(chat, lang)}{chatConnectionTarget(chat) && <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => {
         const provider = chatConnectionTarget(chat);
-        if (provider) setConnectionReveal(current => ({ provider, sequence: (current?.sequence ?? 0) + 1 }));
+        if (provider) { setConnectionReveal(current => ({ provider, sequence: (current?.sequence ?? 0) + 1 })); setPreferencesSection("agents"); setPreferencesOpen(true); }
       }}>{t("m5.setup.openConnection", { name: chatConnectionTarget(chat) === "codex" ? "Codex" : "Claude Code" })}</button>}</p>}
       {chat.activeChat && chat.activeChat.state !== "discarded" && <SaveRecoveryView address={{
         chatId: chat.activeChat.chatId, projectId: chat.activeChat.projectId,
@@ -285,7 +295,11 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       }} disabled={!admissionReady || chat.switching || settingsOpen || leavingProject || leaveError}
         onResolved={(result, path) => controller.observeCompletedSaveRecovery(result, path)} />}
       {leaveError && <p className="m5-error" role="alert">{t("m5.feedback.leaveError")}</p>}
-      {appDefaultsOpen && <AppRoleDefaultsEditor disabled={!admissionReady} onClose={() => setAppDefaultsOpen(false)} />}
+      <AppSettings restartLocked={updatePreparing} open={preferencesOpen} section={preferencesSection} onSection={setPreferencesSection} onClose={() => { setPreferencesOpen(false); setAppDefaultsOpen(false); }}
+        rolesEditor={appDefaultsOpen && <AppRoleDefaultsEditor disabled={!admissionReady} onClose={() => setAppDefaultsOpen(false)} />}
+        disabled={!admissionReady || !window.m5Projects} onRoles={() => setAppDefaultsOpen(true)}>
+        <ProviderLogin disabled={!admissionReady} returning={hasSavedProjects} reveal={connectionReveal} />
+      </AppSettings>
       <StorageAdmissionNotice admission={admission} />
       <WorkStatusNotice bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])} />
       {!snapshot.project && <GuidedStart returning={hasSavedProjects} disabled={!admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked} onChoose={() => void controller.chooseProject()} />}
@@ -293,7 +307,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked} />}
       <GitSelectionView disabled={leavingProject || settingsOpen || leaveError} />
       <div className={snapshot.project ? "m5-project-tools" : "m5-home-tools"}>
-      <ProviderLogin disabled={!admissionReady} compact={Boolean(snapshot.project)} returning={hasSavedProjects} reveal={connectionReveal} />
+      <button type="button" className="m5-secondary m5-open-agents" onClick={() => { setPreferencesSection("agents"); setPreferencesOpen(true); }}>{t("m5.preferences.agents")}</button>
       {snapshot.project && <ProjectGuide key={snapshot.project.id} hasChat={Boolean(chat.activeChat)}
         projectId={snapshot.project.id} activeChat={chat.activeChat} onResume={id => void switchChat(id)}
         hasOpenFile={snapshot.tabs.length > 0 || snapshot.diffVisible}

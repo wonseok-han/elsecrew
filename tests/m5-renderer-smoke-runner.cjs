@@ -65,14 +65,22 @@ app.whenReady().then(async () => {
       throw new Error("MonacoEnvironment should be created by the product renderer");
     }
     const controlLabel = "프로젝트 선택";
-    await ${waitFor("document.querySelector('.m5-toolbar-actions select')", "language control")};
+    await ${waitFor("document.querySelector('.m5-open-preferences')", "settings entry")};
+    document.querySelector('.m5-open-preferences').click();
+    await ${waitFor("document.querySelector('.m5-app-settings').open", "settings dialog visible")};
+    if (document.title !== 'Hello, Agent') throw new Error('development title leaked');
+    if (document.querySelector('.m5-toolbar-actions select')) throw new Error('language still outside settings');
+
+    await ${waitFor("document.querySelector('.m5-preferences-row select')", "language control")};
     const chooseLanguage = value => {
-      const select = document.querySelector('.m5-toolbar-actions select');
+      const select = document.querySelector('.m5-preferences-row select');
       select.value = value;
       select.dispatchEvent(new Event('change', {bubbles:true}));
     };
     chooseLanguage('en');
     await ${waitFor("document.querySelector('main').lang === 'en' && document.querySelector('h1').textContent === 'Choose a project to get started'", "English shell")};
+    document.querySelectorAll('.m5-preferences-layout nav button')[2].click();
+    await ${waitFor("document.querySelector('.m5-provider-selection').getClientRects().length > 0", "agent settings visible")};
     const selection = document.querySelector('.m5-provider-selection');
     if (!selection || window.m5SmokeLoginRequests.length !== 0) throw new Error('first-run agents were checked before selection');
     if (!selection.querySelector('button[type=submit]').disabled) throw new Error('empty selection is enabled');
@@ -106,6 +114,12 @@ app.whenReady().then(async () => {
     window.m5SmokeBlockers = [];
     document.querySelector('[aria-label="진행 및 복구 상태"] button').click();
     await ${waitFor("!document.querySelector('[aria-label=\"진행 및 복구 상태\"]')", "cleared status notice")};
+    if (window.m5SmokeUpdateCheck() !== true) throw new Error('clean screen refused update readiness');
+    if (!document.querySelector('main').inert || !document.querySelector('.m5-app-settings').inert) throw new Error('readiness returned before input lock committed');
+    document.querySelector('.m5-preferences-layout > nav button').focus();
+    if (document.activeElement === document.querySelector('.m5-preferences-layout > nav button')) throw new Error('update lock allowed settings focus');
+    window.m5SmokeUpdateResume();
+    await ${waitFor("!document.querySelector('main').inert && !document.querySelector('.m5-app-settings').inert", "failed update restores input")};
     const codexSection = () => document.querySelector('[aria-label="Codex 연결"]');
     const codexButton = text => [...codexSection().querySelectorAll('button')].find(b => b.textContent === text);
     await ${waitFor("document.querySelector('[aria-label=\"Codex 연결\"]').textContent.includes('이 앱에 Codex 로그인이 연결됐어요')", "automatic saved-login restoration")};
@@ -211,20 +225,14 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-project-catalog-list li span')?.textContent === '/work/smoke'", "next catalog page")};
     if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/smoke') throw new Error('catalog path missing');
     document.querySelector('.m5-project-catalog-list li button').click();
+    document.querySelector('.m5-app-settings > header button').click();
     await ${waitFor("document.querySelector('.m5-file-row')", "project tree")};
-    await ${waitFor("document.getElementById('m5-agent-management-content')?.hidden", "setup management collapsed in workbench")};
-    document.querySelector('.m5-management-toggle').click();
-    await ${waitFor("!document.getElementById('m5-agent-management-content').hidden", "setup management explicitly reopened")};
-    await ${waitFor("document.querySelector('.m5-project-guide')?.open === true", "guide initially open before work")};
-    [...document.querySelectorAll('.m5-dock-group-tabs button')].find(button => button.textContent === '파일' && button.getClientRects().length).click();
-    await ${waitFor("document.getElementById('m5-install-details')?.hidden", "installation controls compact in workbench")};
-    const installToggle = document.querySelector('.m5-provider-install header button');
-    if (installToggle.getAttribute('aria-expanded') !== 'false') throw new Error('installation toggle state incorrect');
-    installToggle.click();
-    await ${waitFor("!document.getElementById('m5-install-details').hidden", "installation controls expanded explicitly")};
+    document.querySelector('.m5-open-agents').click();
+    await ${waitFor("document.querySelector('.m5-app-settings').open", "agent settings reopened")};
+    await ${waitFor("!document.getElementById('m5-install-details').hidden", "installation controls in settings")};
     await (${probeInstallConsent.toString()})();
-    installToggle.click();
-    await ${waitFor("document.getElementById('m5-install-details').hidden", "installation controls collapsed after recovery")};
+    document.querySelector('.m5-app-settings > header button').click();
+    await ${waitFor("!document.querySelector('.m5-app-settings').open", "settings dismissed")};
     document.querySelector('.m5-file-row').click();
     await ${waitFor("document.querySelector('.m5-breadcrumbs [aria-current=location]')?.textContent === '/ src'", "folder breadcrumb")};
     document.querySelector('.m5-breadcrumbs .m5-root').click();
@@ -239,7 +247,7 @@ app.whenReady().then(async () => {
     document.querySelector('.m5-file-search button[type=submit]').click();
     await ${waitFor("document.querySelector('.m5-search-results button')?.textContent === 'src/example.ts'", "recursive file search result")};
     if (document.querySelector('.m5-file-row .m5-tree-name').textContent !== 'src') throw new Error('search changed folder navigation');
-    const searchLanguage = document.querySelector('.m5-toolbar-actions select');
+    const searchLanguage = document.querySelector('.m5-preferences-row select');
     searchLanguage.value = 'en'; searchLanguage.dispatchEvent(new Event('change', { bubbles: true }));
     await ${waitFor("document.querySelector('.m5-file-search input')?.getAttribute('aria-label') === 'Find by file name or path'", "English file search")};
     if (fileSearch !== document.querySelector('.m5-file-search input') || fileSearch.value !== 'EXAMPLE.TS' || document.querySelector('.m5-search-results button').textContent !== 'src/example.ts') throw new Error('language switch lost search');
@@ -270,7 +278,7 @@ app.whenReady().then(async () => {
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '새 채팅 설정 저장').click();
     await ${waitFor("document.body.textContent.includes('설정을 저장하지 못했어요') && document.querySelector('.m5-role-card input').value === 'draft-model'", "settings failure preserves draft")};
     const failedSettingsDetails = [...document.querySelectorAll('[role=alert] pre')].map(node => node.textContent).join('|');
-    const settingsLanguage = document.querySelector('.m5-toolbar-actions select');
+    const settingsLanguage = document.querySelector('.m5-preferences-row select');
     settingsLanguage.value = 'en'; settingsLanguage.dispatchEvent(new Event('change', { bubbles: true }));
     await ${waitFor("document.querySelector('.m5-notice')?.textContent === 'Finish role and model settings to continue working with files.'", "English file-operation block notice")};
     await ${waitFor("document.body.textContent.includes('Could not save settings. Your input is preserved.')", "English persisted settings error")};
@@ -425,13 +433,14 @@ app.whenReady().then(async () => {
   if (window.isVisible() || window.isFocused()) throw new Error("synthetic input must not capture desktop focus");
   await window.webContents.executeJavaScript(`(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"저장되지 않은 변경\"]')", "edited draft")};
+    if (window.m5SmokeUpdateCheck() !== false) throw new Error('update restart accepted an unsaved editor draft');
     const reloadButton = () => [...document.querySelectorAll('button')].find(button => button.textContent === '저장된 내용 다시 불러오기');
     reloadButton().click();
     await ${waitFor("document.querySelector('[role=alertdialog]')", "reload confirmation")};
     const confirmation = document.querySelector('[role=alertdialog]');
     const editorBeforeLanguage = document.querySelector('.monaco-editor');
     const draftBeforeLanguage = editorBeforeLanguage.textContent;
-    const editorLanguage = document.querySelector('.m5-toolbar-actions select');
+    const editorLanguage = document.querySelector('.m5-preferences-row select');
     editorLanguage.value = 'en'; editorLanguage.dispatchEvent(new Event('change', { bubbles: true }));
     await ${waitFor("document.querySelector('[role=alertdialog]')?.getAttribute('aria-label') === 'Confirm discarding edits'", "English editor confirmation")};
     if (confirmation !== document.querySelector('[role=alertdialog]') || editorBeforeLanguage !== document.querySelector('.monaco-editor') || editorBeforeLanguage.textContent !== draftBeforeLanguage) throw new Error('language switch lost editor or confirmation');
@@ -460,7 +469,7 @@ app.whenReady().then(async () => {
     const panelStates = () => [...document.querySelectorAll('.m5-dock-slot')].map(node => [node.dataset.panel, node.hidden, node.getAttribute('style')]);
     const originalPanels = JSON.stringify(panelStates());
     for (const language of ['en', 'ko']) {
-      const select = document.querySelector('.m5-toolbar-actions select');
+      const select = document.querySelector('.m5-preferences-row select');
       select.value = language;
       select.dispatchEvent(new Event('change', {bubbles:true}));
       await new Promise(resolve => setTimeout(resolve, 30));
@@ -564,7 +573,7 @@ app.whenReady().then(async () => {
     const next = () => [...document.querySelectorAll('button')].find(button => button.textContent === '다음 변경');
     next().click();
     await ${waitFor("document.querySelector('.m5-diff-pages span').textContent.startsWith('2 /')", "second diff page")};
-    const diffLanguage = document.querySelector('.m5-toolbar-actions select');
+    const diffLanguage = document.querySelector('.m5-preferences-row select');
     const diffContents = document.querySelector('.m5-diff-lines tbody').textContent;
     diffLanguage.value = 'en'; diffLanguage.dispatchEvent(new Event('change', { bubbles: true }));
     await ${waitFor("document.querySelector('.m5-diff-pages span').textContent.startsWith('Page 2 /')", "English diff pagination")};
@@ -619,7 +628,7 @@ app.whenReady().then(async () => {
     document.querySelector('.m5-new-chat-dialog header button').click();
     await ${waitFor("!document.querySelector('.m5-new-chat-dialog').open", "close preserved draft")};
     const selectedChat = document.querySelector('.m5-chat-chip.selected');
-    const languageSelect = document.querySelector('.m5-toolbar-actions select');
+    const languageSelect = document.querySelector('.m5-preferences-row select');
     languageSelect.value = 'en';
     languageSelect.dispatchEvent(new Event('change', {bubbles:true}));
     await ${waitFor("document.querySelector('.m5-followup button')?.textContent === 'Add to conversation' && document.querySelector('.m5-timeline')?.getAttribute('aria-label') === 'Team conversation'", "English team conversation")};
@@ -663,7 +672,7 @@ app.whenReady().then(async () => {
     modelInput.dispatchEvent(new Event('input', {bubbles: true}));
     await ${waitFor("document.querySelector('.m5-settings [role=status]')", "role draft dirty")};
     const changeSettingsLanguage = language => {
-      const select = document.querySelector('.m5-toolbar-actions select');
+      const select = document.querySelector('.m5-preferences-row select');
       select.value = language;
       select.dispatchEvent(new Event('change', {bubbles:true}));
     };
@@ -732,7 +741,7 @@ app.whenReady().then(async () => {
     const originalConfirm = window.confirm;
     let contextPrompt = '';
     window.confirm = text => { contextPrompt = text; return false; };
-    const contextLanguage = document.querySelector('.m5-toolbar-actions select');
+    const contextLanguage = document.querySelector('.m5-preferences-row select');
     contextLanguage.value = 'en'; contextLanguage.dispatchEvent(new Event('change', {bubbles:true}));
     await ${waitFor("[...document.querySelectorAll('.m5-timeline footer button')].some(button => button.textContent === 'Prepare real run · Planning')", "English context run action")};
     [...document.querySelectorAll('.m5-timeline footer button')].find(button => button.textContent === 'Prepare real run · Planning').click();

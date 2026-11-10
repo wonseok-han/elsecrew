@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { installAppUpdateMenu } from "./app-update-menu.ts";
 import { GitPreparationClient, isGitPreparation, WINDOWS_GIT_PREPARATION_ENABLED } from "./git-preparation.ts";
 import { GitSelectionStore } from "./git-selection.ts";
@@ -9,7 +10,7 @@ import { MODEL_CHOICES_CHANNEL, validateModelChoicesRequest } from "../src/m5/co
 import { DEVICE_REPORT_CHANNEL } from "../src/m5/contracts/device-report-v1.ts";
 import { SESSION_DIAGNOSTICS_CHANNEL, classifySessionDiagnostics } from "../src/m5/contracts/session-diagnostics-v1.ts";
 import { readDeviceReport } from "./device-report.ts";
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } from "electron";
 import { LOGIN_CHANNEL, validateLoginRequest, validateLoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
 import { classifyLoginFailure } from "../src/m5/provider-login-diagnostic.ts";
 import { INSTALL_CHANNEL, validateInstallRequest, validateInstallStatus } from "../src/m5/contracts/provider-install-v1.ts";
@@ -69,6 +70,23 @@ let sidecar: SidecarClientV1 | undefined;
 let gitPreparation: GitPreparationClient | undefined;
 const eventCredit = new EventCreditV1((error) => sidecar?.failConsumerTooSlow());
 let pendingUpdateInstall: (() => void) | undefined;
+let updateReadiness: { nonce: string; finish: (ready: boolean) => void } | undefined;
+async function rendererReadyForUpdate(): Promise<boolean> {
+  if (!mainWindow || mainWindow.isDestroyed() || updateReadiness) return false;
+  return new Promise<boolean>((resolve) => {
+    const nonce = randomUUID();
+    const timer = setTimeout(() => finish(false), 5000);
+    const finish = (ready: boolean) => {
+      clearTimeout(timer);
+      updateReadiness = undefined;
+      if (!ready) mainWindow?.webContents.send("m5:app-update:resume");
+      resolve(ready);
+    };
+    updateReadiness = { nonce, finish };
+    try { mainWindow!.webContents.send("m5:app-update:readiness", nonce); }
+    catch { finish(false); }
+  });
+}
 const quitCoordinator = new QuitCoordinatorV1({
   prepareSidecarQuit: () => {
     if (!sidecar) return Promise.reject(new Error("sidecar was not started"));
@@ -347,6 +365,18 @@ async function prepareQuit(): Promise<PrepareQuitResultV1> {
 }
 
 function registerIpcHandlers(): void {
+  ipcMain.handle("m5:app-update:readiness-reply", async (event, nonce: unknown, ready: unknown, ...extra: unknown[]) => {
+    assertCurrentMainFrame(event);
+    if (extra.length || typeof nonce !== "string" || typeof ready !== "boolean" || nonce !== updateReadiness?.nonce) throw new Error("invalid update readiness reply");
+    updateReadiness.finish(ready);
+  });
+  ipcMain.handle("m5:app-update:open", async (event, ...args: unknown[]) => {
+    assertCurrentMainFrame(event);
+    if (args.length !== 0) throw new Error("app update takes no input");
+    const item = Menu.getApplicationMenu()?.getMenuItemById("hello-agent-app-update");
+    if (!item?.enabled) throw new Error("app update is unavailable");
+    await item.click(undefined, undefined, undefined);
+  });
   ipcMain.handle(SESSION_DIAGNOSTICS_CHANNEL, async (event, ...args: unknown[]) => {
     assertCurrentMainFrame(event);
     if (args.length !== 0) throw new Error("session diagnostics takes no input");
@@ -536,9 +566,19 @@ app.whenReady().then(async () => {
   await protocol.handle(APP_SCHEME, serveAppAsset);
   registerIpcHandlers();
   installAppUpdateMenu(async (install) => {
+    if (!await rendererReadyForUpdate()) {
+      const ko = app.getLocale().toLowerCase().startsWith("ko");
+      await dialog.showMessageBox({ type: "info", message: ko ? "편집 중인 내용을 먼저 저장해 주세요." : "Please save your edits first.",
+        detail: ko ? "열린 설정·새 대화를 정리한 뒤 다시 시도해 주세요. 화면 상태를 확인하지 못한 경우에도 업데이트를 적용하지 않아요." : "Finish open settings and new-chat drafts, then try again. Updates are also blocked when the editor state cannot be confirmed." });
+      return false;
+    }
     pendingUpdateInstall = install;
-    try { return (await prepareQuit()).safeToQuit; }
-    finally { pendingUpdateInstall = undefined; }
+    let safe = false;
+    try { safe = (await prepareQuit()).safeToQuit; return safe; }
+    finally {
+      pendingUpdateInstall = undefined;
+      if (!safe && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("m5:app-update:resume");
+    }
   });
   await createMainWindow();
   sidecar ??= startSidecar();
