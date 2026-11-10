@@ -346,6 +346,15 @@ app.whenReady().then(async () => {
     if (document.querySelector('.monaco-editor') !== editorNode) throw new Error('settings reload remounted editor');
     if (document.querySelector('.m5-layout-settings, .m5-dock-options, .m5-dock-visibility') || document.querySelector('[role=tab][draggable=true]')) throw new Error('removed layout controls remain');
     if (document.querySelectorAll('.m5-dock-separator').length !== 2) throw new Error('fixed three columns missing');
+    for (const slot of document.querySelectorAll('.m5-dock-slot:not([hidden])')) {
+      const frame = slot.querySelector('.m5-dock-frame');
+      const heading = slot.querySelector('.m5-dock-heading');
+      const content = slot.querySelector('.m5-dock-content');
+      if (!frame || !frame.contains(heading) || !frame.contains(content)) throw new Error('panel frame does not enclose header and body');
+      const css = getComputedStyle(frame), bounds = frame.getBoundingClientRect();
+      if (['borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth'].some(edge => css[edge] !== '1px')) throw new Error('panel frame is not continuous');
+      if (Math.abs(content.getBoundingClientRect().bottom - (bounds.bottom - 1)) > 1) throw new Error('panel frame does not fill body height');
+    }
     const visibleTab = text => [...document.querySelectorAll('[role=tab]')].find(button => button.textContent.startsWith(text) && button.getClientRects().length);
     visibleTab('변경').click();
     await ${waitFor("!document.querySelector('[data-panel=changes]').hidden", "fixed changes tab")};

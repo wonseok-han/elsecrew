@@ -38,6 +38,7 @@ export function WorkbenchDock({ children, conversation, chats, reveal, changeCou
         const group = groups.find(group => group.panels.includes(id));
         const shown = group?.active === id;
         return <div className="m5-dock-slot" key={id} data-panel={id} hidden={!shown} style={shown && group ? position(group.rect) : { display: "none" }}>
+          <div className="m5-dock-frame">
           <div className="m5-dock-heading">
             <div className="m5-dock-group-tabs" role="tablist" aria-label={t("m5.dock.group", { panel: labels[id] })}>
               {group?.panels.map((tab, index) => <button key={tab} id={`${tabId}-${id}-tab-${tab}`} role="tab" type="button" aria-selected={tab === id} tabIndex={tab === id ? 0 : -1} aria-controls={`${tabId}-content-${tab}`}
@@ -50,6 +51,7 @@ export function WorkbenchDock({ children, conversation, chats, reveal, changeCou
 
           </div>
           <div className="m5-dock-content" id={`${tabId}-content-${id}`} role="tabpanel" aria-labelledby={`${tabId}-${id}-tab-${id}`}>{panels[id]}</div>
+          </div>
         </div>;
       })}
       {separators.map(separator => <div key={separator.path} className={`m5-dock-separator m5-dock-split-${separator.axis}`} style={position(separator.rect)} role="separator" tabIndex={0} aria-label={t(separator.axis === "horizontal" ? "m5.dock.resizeHorizontal" : "m5.dock.resizeVertical")} aria-orientation={separator.axis === "horizontal" ? "vertical" : "horizontal"} aria-valuenow={Math.round(separator.ratio * 100)} aria-valuemin={10} aria-valuemax={90}

@@ -582,8 +582,9 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-agent-management-compact { margin: 0 0 6px; }
 .m5-agent-management-compact .m5-management-toggle { padding: 6px 10px; min-height: 28px; background: transparent; border-color: transparent; font-size: 11px; }
 .m5-agent-management-compact .m5-management-toggle[aria-expanded="true"] { border-color: var(--m5-border); }
-.m5-dock-heading { background: var(--m5-surface); border-color: var(--m5-border); border-radius: 6px 6px 0 0; padding: 2px; }
-.m5-dock-content > .m5-panel, .m5-dock-content > .m5-timeline { border-radius: 0 0 6px 6px; border-color: var(--m5-border); }
+.m5-dock-frame { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; border: 1px solid var(--m5-border); border-radius: 6px; }
+.m5-dock-heading { background: var(--m5-surface); border: 0; border-bottom: 1px solid var(--m5-border); border-radius: 0; padding: 2px; }
+.m5-dock-content > .m5-panel, .m5-dock-content > .m5-timeline { border: 0; border-radius: 0; }
 .m5-dock-count { background: var(--m5-raised); color: var(--m5-muted); }
 .m5-project-rail:not(.m5-project-rail-expanded) { padding-left: 6px; padding-right: 6px; }
 .m5-project-rail:not(.m5-project-rail-expanded) .m5-project-rail-header { padding: 0; gap: 2px; }
