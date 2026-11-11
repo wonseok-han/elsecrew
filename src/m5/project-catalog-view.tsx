@@ -1,3 +1,4 @@
+import { ProviderUsage } from "./provider-usage.tsx";
 import { useI18n } from "../i18n.tsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ProjectEditorController } from "./editor-state.ts";
@@ -117,6 +118,6 @@ export function ProjectCatalog({ railExpanded, onRailExpandedChange, controller,
         {next && <button type="button" disabled={disabled || busy || error} onClick={() => void load(next)}>{t("m5.catalog.next")}</button>}</div>}
     </div>}
 
-    {rail && <footer className="m5-rail-footer">{settingsAction}</footer>}
+    {rail && <footer className="m5-rail-footer"><ProviderUsage disabled={disabled}/>{settingsAction}</footer>}
   </section>;
 }

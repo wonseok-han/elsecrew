@@ -16,7 +16,7 @@ import { classifyLoginFailure } from "../src/m5/provider-login-diagnostic.ts";
 import { INSTALL_CHANNEL, validateInstallRequest, validateInstallStatus } from "../src/m5/contracts/provider-install-v1.ts";
 import { APPROVAL_CHANNEL, validateApprovalRequest, validateApprovalResult } from "../src/m5/contracts/approval-v1.ts";
 import { PROJECT_CATALOG_CHANNEL, validateProjectCatalogRequest, validateProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
-import { mkdirSync, realpathSync, statSync } from "node:fs";
+import { mkdirSync, realpathSync, statSync, readdirSync } from "node:fs";
 import { isAbsolute, join, resolve, sep, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -472,7 +472,20 @@ function registerIpcHandlers(): void {
     const result = await dialog.showOpenDialog(mainWindow!, { properties: ["openDirectory"] });
     if (result.canceled || result.filePaths.length !== 1) return { outcome: "cancelled" };
     if (!sidecar) throw new Error("sidecar was not started");
-    return sidecar.openProject(result.filePaths[0]!);
+    const selected = realpathSync(result.filePaths[0]!);
+    if (process.platform === "darwin" && readdirSync(selected).length === 0) {
+      const identity = statSync(selected, { bigint: true });
+      const ko = app.getLocale().toLowerCase().startsWith("ko");
+      const confirmation = await dialog.showMessageBox(mainWindow!, {
+        type: "question",
+        message: ko ? "이 빈 폴더에서 새 프로젝트를 시작할까요?" : "Start a new project in this empty folder?",
+        detail: `${selected}\n\n${ko ? "변경 내용을 비교하고 되돌릴 수 있도록 이 폴더에 로컬 기록(.git)을 만듭니다. 온라인에 업로드하지 않으며, 에이전트는 별도의 작업 복사본에서 작업합니다." : "Create local history (.git) in this folder so changes can be compared and restored. Nothing is uploaded. Agents work in a separate copy."}`,
+        buttons: ko ? ["프로젝트 시작", "취소"] : ["Start project", "Cancel"], defaultId: 0, cancelId: 1,
+      });
+      if (confirmation.response !== 0) return { outcome: "cancelled" };
+      return sidecar.openProject(selected, `${identity.dev}:${identity.ino}`);
+    }
+    return sidecar.openProject(selected);
   });
   const invoke = <T>(action: (client: SidecarClientV1, input: T) => Promise<unknown>) =>
     async (event: Electron.IpcMainInvokeEvent, input: T) => {

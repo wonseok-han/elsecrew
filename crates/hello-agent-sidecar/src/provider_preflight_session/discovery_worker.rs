@@ -12,6 +12,7 @@ pub(crate) struct Evidence {
 }
 
 pub(crate) struct Completion {
+    pub(crate) display_usage: Option<serde_json::Value>,
     pub(crate) result: Result<Evidence, SidecarError>,
     /// Display-only, never consumed by reservation or launch paths.
     pub(crate) display_models:
@@ -26,6 +27,7 @@ impl Completion {
             result: Err(error),
             cleanup,
             display_models: None,
+            display_usage: None,
         }
     }
 }
@@ -42,6 +44,22 @@ impl DiscoveryWorker {
         effort: String,
         permission: ExpectedPermission,
         workspace: PathBuf,
+    ) -> Result<Self, SidecarError> {
+        Self::spawn_inner(profile, model, effort, permission, workspace, false)
+    }
+    pub(crate) fn spawn_catalog(
+        profile: CodexProfileBinding, model: String, effort: String,
+        permission: ExpectedPermission, workspace: PathBuf,
+    ) -> Result<Self, SidecarError> {
+        Self::spawn_inner(profile, model, effort, permission, workspace, true)
+    }
+    fn spawn_inner(
+        profile: CodexProfileBinding,
+        model: String,
+        effort: String,
+        permission: ExpectedPermission,
+        workspace: PathBuf,
+        include_usage: bool,
     ) -> Result<Self, SidecarError> {
         let cancel = Arc::new(AtomicBool::new(false));
         let signal = cancel.clone();
@@ -71,7 +89,7 @@ impl DiscoveryWorker {
                     model: &model,
                     reasoning_effort: &effort,
                 };
-                match inspect_named_preflight_candidate(
+                match inspect_named_preflight_display_candidate(
                     profile,
                     &executable,
                     &helper,
@@ -79,11 +97,14 @@ impl DiscoveryWorker {
                     permission,
                     &workspace,
                     &signal,
+                    include_usage,
                 ) {
                     Ok(inspection) => {
                         let display_models = inspection.display_models;
+                        let display_usage = inspection.display_usage;
                         let mut completion = match inspection.result {
                             Ok(observation) => Completion {
+                                display_usage: None,
                                 result: Ok(Evidence {
                                     version,
                                     observation,
@@ -96,6 +117,7 @@ impl DiscoveryWorker {
                             Err(error) => Completion::failed(error, Some(inspection.process)),
                         };
                         completion.display_models = display_models;
+                        completion.display_usage = display_usage;
                         completion
                     }
                     Err(error) => Completion::failed(error, None),

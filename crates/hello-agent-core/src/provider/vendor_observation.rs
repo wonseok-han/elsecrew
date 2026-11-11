@@ -16,6 +16,7 @@ pub mod codex_profile_config;
 pub mod codex_isolation_warning;
 pub mod codex_preflight;
 pub mod codex_rpc;
+pub mod account_usage;
 pub mod codex_turn;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -2,7 +2,7 @@ window.m5SmokeModelQueries = [];
 window.m5Models = { request: async input => {
   if (input.chatId || input.roleId) throw new Error("catalog must not require a chat");
   window.m5SmokeModelQueries.push(input.runtime);
-  return { schemaVersion:1, runtime:input.runtime, scope:null, models:[
+  return { schemaVersion:1, runtime:input.runtime, scope:null, usage: input.runtime === "codex" ? {windows:[{id:"primary",usedPercent:31,windowMinutes:300,resetsAt:2000000000}]} : null, models:[
     {modelSelector:"test-model", reasoningEfforts:["medium"]},
     {modelSelector:"new-default", reasoningEfforts:["medium","high"], isDefault:true},
   ] };

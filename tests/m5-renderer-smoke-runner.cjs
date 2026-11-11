@@ -69,6 +69,10 @@ app.whenReady().then(async () => {
     const controlLabel = "프로젝트 선택";
     await ${waitFor("document.querySelector('.m5-open-preferences')", "settings entry")};
     if (!document.querySelector('.m5-rail-footer .m5-open-preferences svg') || document.querySelector('.m5-toolbar .m5-open-preferences')) throw new Error('settings must be a sidebar gear');
+    await ${waitFor("document.querySelector('.m5-provider-usage progress')?.value === 31", "provider usage projection")};
+    document.querySelector('.m5-provider-usage summary').click();
+    if (!document.querySelector('.m5-provider-usage').open || !document.querySelector('.m5-provider-usage').textContent.includes('5시간')) throw new Error('usage windows unavailable');
+    document.querySelector('.m5-provider-usage summary').click();
     document.querySelector('.m5-open-preferences').click();
     await ${waitFor("!document.querySelector('.m5-app-settings').hidden", "settings dialog visible")};
     if (document.querySelector('.m5-app-settings').tagName !== 'SECTION' || getComputedStyle(document.querySelector('.m5-toolbar')).display !== 'none') throw new Error('settings is not a full page');

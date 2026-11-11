@@ -14,6 +14,7 @@ enum Worker {
 }
 pub(super) struct PendingCatalog {
     worker: Worker,
+    usage: Option<serde_json::Value>,
     cleanup_only: bool,
     completion: Option<(
         Result<Vec<CatalogModel>, SidecarError>,
@@ -87,7 +88,7 @@ impl AgentRuntime {
             Ok(if runtime == "codex" {
                 // The catalog is retained even when this probe selector is unavailable.
                 Worker::Codex(
-                    crate::provider_preflight_session::discovery_worker::DiscoveryWorker::spawn(
+                    crate::provider_preflight_session::discovery_worker::DiscoveryWorker::spawn_catalog(
                         crate::provider_profile::CodexProfileBinding::from_storage(storage)?,
                         "catalog-probe".into(),
                         "medium".into(),
@@ -139,6 +140,7 @@ impl AgentRuntime {
             request_id.into(),
             PendingCatalog {
                 worker,
+                usage: None,
                 cleanup_only: false,
                 completion: None,
                 parent,
@@ -205,7 +207,7 @@ impl AgentRuntime {
     pub(crate) fn take_model_catalog(
         &mut self,
         request_id: &str,
-    ) -> Option<Result<Vec<CatalogModel>, SidecarError>> {
+    ) -> Option<Result<(Vec<CatalogModel>, Option<serde_json::Value>), SidecarError>> {
         let pending = self.pending_catalogs.get_mut(request_id)?;
         if pending.cleanup_only {
             return None;
@@ -216,6 +218,7 @@ impl AgentRuntime {
                 Worker::CompletedFixture => return None,
                 Worker::Codex(worker) => {
                     let done = worker.poll()?;
+                    pending.usage = done.display_usage;
                     (
                         done.display_models
                             .ok_or_else(|| done.result.err().unwrap_or_else(failure)),
@@ -267,7 +270,7 @@ impl AgentRuntime {
         if self.preparing_to_quit {
             return Some(Err(failure()));
         }
-        Some(result)
+        Some(result.map(|models| (models, pending.usage)))
     }
 }
 
@@ -291,6 +294,7 @@ mod tests {
                 "query".into(),
                 PendingCatalog {
                     worker: Worker::CompletedFixture,
+                usage: None,
                     cleanup_only: false,
                     parent,
                     root,
@@ -350,6 +354,7 @@ mod tests {
             "query".into(),
             PendingCatalog {
                 worker: Worker::CompletedFixture,
+                usage: None,
                 cleanup_only: false,
                 parent,
                 root,
@@ -386,6 +391,7 @@ mod tests {
             "query".into(),
             PendingCatalog {
                 worker: Worker::CompletedFixture,
+                usage: None,
                 cleanup_only: true,
                 parent,
                 root,
@@ -432,6 +438,7 @@ mod tests {
             "query".into(),
             PendingCatalog {
                 worker: Worker::CompletedFixture,
+                usage: None,
                 cleanup_only: false,
                 parent,
                 root,

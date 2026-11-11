@@ -46,6 +46,7 @@ fn remaining_preflight_budget(budget: Duration, elapsed: Duration, stage: &'stat
 /// Does not create a thread, send user input, or grant runtime execution authority.
 pub(crate) struct ProviderInspection<'a, T = ()> {
     pub(crate) result: Result<T, SidecarError>,
+    pub(crate) display_usage: Option<serde_json::Value>,
     pub(crate) process: LoginProcess<'a>,
     pub(crate) display_models: Option<Vec<hello_agent_core::provider::vendor_observation::codex_preflight::CatalogModel>>,
 }
@@ -116,7 +117,7 @@ pub(crate) fn inspect_codex_version(
         }
         Ok(version)
     });
-    Ok(ProviderInspection { result, process, display_models: None })
+    Ok(ProviderInspection { result, process, display_models: None, display_usage: None })
 }
 
 fn codex_version_arguments(home: &std::path::Path) -> std::io::Result<Vec<std::ffi::OsString>> {
@@ -216,6 +217,19 @@ pub(crate) fn inspect_named_preflight_candidate(
     workspace: &std::path::Path,
     cancel: &AtomicBool,
 ) -> Result<ProviderInspection<'static, NamedProfileObservation>, SidecarError> {
+    inspect_named_preflight_display_candidate(profile, executable, helper, expected, permission, workspace, cancel, false)
+}
+
+pub(crate) fn inspect_named_preflight_display_candidate(
+    profile: crate::provider_profile::CodexProfileBinding,
+    executable: &crate::provider_executable::PinnedExecutable,
+    helper: &crate::provider_executable::PinnedExecutable,
+    expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,
+    permission: ExpectedPermission,
+    workspace: &std::path::Path,
+    cancel: &AtomicBool,
+    include_usage: bool,
+) -> Result<ProviderInspection<'static, NamedProfileObservation>, SidecarError> {
     let home = profile.revalidate()?;
     let mut flow = PreflightExchange::with_named_permission(
         expected,
@@ -225,6 +239,7 @@ pub(crate) fn inspect_named_preflight_candidate(
     )
     .map_err(|_| failure())?;
     flow.require_startup_isolation(workspace).map_err(|_| failure())?;
+    if include_usage { flow.enable_usage_display().map_err(|_| failure())?; }
     if cancel.load(Ordering::Acquire) {
         return Err(failure());
     }
@@ -286,7 +301,8 @@ pub(crate) fn inspect_named_preflight_candidate(
         None
     };
     // Even launch/cleanup errors return the original owner for explicit cleanup.
-    Ok(ProviderInspection { result, process, display_models })
+    let display_usage = display_models.as_ref().and_then(|_| flow.display_usage());
+    Ok(ProviderInspection { result, process, display_models, display_usage })
 }
 
 /// Full candidate includes account/read, model/list and configRequirements/read. This is NOT the approved
@@ -390,7 +406,7 @@ fn inspect_preflight_candidate<'a>(
     };
     let result = launch.and_then(|()| observe_and_close(&mut process, &mut flow, cancel));
     // Even a launch/cleanup error returns its owner for explicit cleanup retries.
-    Ok(ProviderInspection { result, process, display_models: None })
+    Ok(ProviderInspection { result, process, display_models: None, display_usage: None })
 }
 
 /// Invocation-only overrides: never rewrite the user's app-owned login config.

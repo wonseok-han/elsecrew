@@ -12,6 +12,7 @@ pub enum ObservationKind {
     Config,
     Account,
     Models,
+    Usage,
     Requirements,
     PermissionProfiles,
 }
@@ -19,6 +20,7 @@ pub enum ObservationKind {
 #[derive(Debug, Default)]
 pub struct ModelFreeExchange {
     next: usize,
+    usage_pending: bool,
     pending: bool,
     failed: bool,
     include_config_layers: bool,
@@ -31,8 +33,11 @@ fn error() -> ProviderError {
 }
 
 impl ModelFreeExchange {
+    pub fn request_usage_before_models(&mut self) { self.usage_pending = true; }
+
     /// Fixed diagnostic label only; never exposes an observed account/config value.
     pub(super) fn diagnostic_stage(&self) -> &'static str {
+        if self.next == 3 && self.usage_pending { return "account/rateLimits/read"; }
         match self.next {
             0 => "initialize",
             1 => "config/read",
@@ -82,6 +87,7 @@ impl ModelFreeExchange {
     }
     // Keep the existing thread/turn IDs 5/6 unchanged on the same connection.
     fn request_id(&self) -> u64 {
+        if self.next == 3 && self.usage_pending { return 52; }
         if self.next >= 4 {
             50 + (self.next - 4) as u64
         } else {
@@ -105,6 +111,7 @@ impl ModelFreeExchange {
                 serde_json::json!({"includeLayers":self.include_config_layers}),
             ),
             2 => ("account/read", serde_json::json!({"refreshToken":false})),
+            3 if self.usage_pending => ("account/rateLimits/read", serde_json::json!({})),
             3 => (
                 "model/list",
                 serde_json::json!({"limit":256,"includeHidden":false}),
@@ -171,7 +178,13 @@ impl ModelFreeExchange {
         }
         // Validate the entire raw tree before typed parsing or Value projection
         // can erase duplicate keys in nested permission/config objects.
-        input.json().map_err(|_| error())?;
+        let value = input.json().map_err(|_| error())?;
+        // Unsupported display-only quota reads must not disable the model catalog.
+        if self.next == 3 && self.usage_pending && value.get("id").and_then(serde_json::Value::as_u64) == Some(52)
+            && value.get("error").is_some_and(serde_json::Value::is_object) && value.get("result").is_none() {
+            self.usage_pending = false; self.pending = false;
+            return Ok((ObservationKind::Usage, BoundedObservation::new(b"{}".to_vec())?));
+        }
         let reply: Reply = serde_json::from_slice(&input.bytes).map_err(|_| error())?;
         if reply.id != self.request_id() || !reply.result.get().trim_start().starts_with('{') {
             return Err(error());
@@ -193,12 +206,13 @@ impl ModelFreeExchange {
             }
             1 => ObservationKind::Config,
             2 => ObservationKind::Account,
+            3 if self.usage_pending => ObservationKind::Usage,
             3 => ObservationKind::Models,
             4 if self.include_config_layers => ObservationKind::Requirements,
             5 if self.permission_cwd.is_some() => ObservationKind::PermissionProfiles,
             _ => return Err(error()),
         };
-        self.next += 1;
+        if kind == ObservationKind::Usage { self.usage_pending = false; } else { self.next += 1; }
         self.pending = false;
         Ok((kind, result))
     }
@@ -207,6 +221,25 @@ impl ModelFreeExchange {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn optional_usage_read_has_fixed_id_and_failure_preserves_model_catalog() {
+        for unsupported in [false, true] {
+            let mut flow = ModelFreeExchange::with_config_layers();
+            flow.request_usage_before_models();
+            for id in [1, 2, 3, 52, 4, 50] {
+                let text = flow.next_request().unwrap().unwrap();
+                let request: serde_json::Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();
+                assert_eq!(request["id"], id);
+                if id == 52 { assert_eq!(request["method"], "account/rateLimits/read"); }
+                let value = if id == 52 && unsupported { serde_json::json!({"id":id,"error":{"code":-32601,"message":"unsupported"}}) }
+                    else { serde_json::json!({"id":id,"result":{"userAgent":"test"}}) };
+                let (kind, _) = flow.accept(&BoundedObservation::new(serde_json::to_vec(&value).unwrap()).unwrap()).unwrap();
+                if id == 52 { assert_eq!(kind, ObservationKind::Usage); }
+                if id == 4 { assert_eq!(kind, ObservationKind::Models); }
+            }
+            assert!(flow.next_request().unwrap().is_none());
+        }
+    }
     #[test]
     fn named_permissions_opt_in_does_not_change_stable_handshake() {
         let mut named = ModelFreeExchange::with_named_permission_config(std::path::Path::new(

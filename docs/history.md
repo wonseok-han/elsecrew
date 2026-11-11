@@ -3,6 +3,14 @@
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
 ### 2026-11-11 · by GPT-6
+- 기준 HEAD53b65d0a에서 직접 구현: macOS 빈 폴더 선택 시 네이티브 확인 뒤 로컬 Git 초기 기록을 생성하고 기존 프로젝트/독립 snapshot 경로로 연결했다. 폴더 신원·빈 상태를 재검사하고 준비 폴더의 .git을 no-replace/no-follow로 게시한다. 기존 파일을 stage하지 않으며 실패한 준비 폴더는 임의 재귀 삭제하지 않는다. Windows 활성화 없음.
+- 사이드바에 사용량 요약/기간별 사용률·초기화 시각·조회 시각을 추가했다. Codex는 모델 없는 카탈로그 조회에서만 공식 account/rateLimits/read를 추가하며 정상 실행 preflight는 그대로다. 선택 모델 문자열이 조회를 켜던 검토 지적을 explicit catalog-only 경로로 수정했다. 미지원/잘못된 사용량은 0%로 만들지 않는다. Claude의 모델 없는 직접 사용량 조회 경로는 미확인으로 조회 미지원 표시이며 실제 사용률 수집은 후속이다. 공식 출처: https://learn.chatgpt.com/docs/app-server , https://code.claude.com/docs/en/statusline (SDK/비대화 모드 조회와 TUI statusline은 구분).
+- 검증: 빈 폴더→초기 기록→독립 snapshot/원본 보존 및 신원·비어 있지 않은 폴더 거절2개, sidecar model_catalog5개, core232개+doc3개, RPC7개, TS모델/캐시5개, TypeScript/renderer 빌드, Chromium2개 통과. Chromium 최초 제한 환경 실행 SIGABRT는 허용 환경 재실행 통과로 구분한다. 빈 폴더 안전경계/사용량 재검토 차단 없음. 설치본 교체·실제 UI 확인은 다음 단계이며 유료 모델 호출/사용자 프로젝트 변경/main/push 없음.
+
+### 2026-11-11 · by GPT-6
+- Git 없는 로컬 폴더 지원 문의: 현행 project.rs 원본 검증은 .git와 유효 HEAD commit/tree를 요구한다. 원격 GitHub는 필수가 아니지만 일반/빈 폴더 및 최초 커밋 없는 저장소는 현재 지원하지 않는다. 채팅 작업 공간은 원본과 분리한 standalone snapshot이며 단순 shared git worktree와 구분한다. 초보자용 새 폴더/기존 일반 폴더의 앱 안내 기반 로컬 Git 초기화·기준 생성은 후속 제안으로만 설명, 이번 원본 변경/구현 없음.
+
+### 2026-11-11 · by GPT-6
 - 버림 채팅 제거 실패는 실제 공급자 복구 완료값 resolvedAbandoned를 legacy resolved로만 검사한 결함이었다. source_kind별 완료값을 구분하고 나머지 실행/잠금/미해결 복구 검사는 유지했다. 가짜 실제 공급자의 정식 복구 후 버림→숨김→복원 및 기록 불변 회귀 통과, catalog_removal6개 통과. 독립 검토 차단 없음.
 - 상태 알림 띠를 상단 종 아이콘/알림 목록으로 이동했다. 현재 오류·안내·복구 상태와 조치는 보존하며 확인 필요 배지와 화면 읽기 알림, 외부 클릭/Escape 닫기를 유지한다. TypeScript·renderer·Chromium2개 통과, ca1e3c80 설치 후 실제 임시 프로젝트의 버림 채팅1건을 확인창에서 제거했다. 확인창 닫힘·채팅 탭/프로젝트 유지·해당 버림 행 제거와 나머지4개 유지 확인. 상단 종 메뉴의 목록/빈 상태 표시도 확인. 접근성 검토에서 지적된 안내 문구를 버튼 이름/상태 알림에 보완하고 재검토 차단 없음. 과거 모든 알림의 영속 이력은 이번 범위가 아니다.
 

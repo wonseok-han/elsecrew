@@ -450,7 +450,7 @@ export class SidecarClientV1 {
     return this.#request("run.approval", validateApprovalRequest(input)) as Promise<ApprovalResult>;
   }
 
-  openProject(selectedPath: string): Promise<ProjectIdentityV1> { return this.#request("project.open", { selectedPath }) as Promise<ProjectIdentityV1>; }
+  openProject(selectedPath: string, emptyFolderIdentity?: string): Promise<ProjectIdentityV1> { return this.#request("project.open", { selectedPath, ...(emptyFolderIdentity ? { emptyFolderIdentity } : {}) }) as Promise<ProjectIdentityV1>; }
   projectCatalog(input: ProjectCatalogRequest): Promise<ProjectCatalogResult> {
     if (!this.#ready?.capabilities.includes("project.catalog")) return Promise.reject(new Error("project catalog unavailable"));
     return this.#request("project.catalog", validateProjectCatalogRequest(input)) as Promise<ProjectCatalogResult>;

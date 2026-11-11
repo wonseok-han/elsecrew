@@ -4,6 +4,7 @@ type Runtime = ModelChoicesRequest["runtime"];
 const cache = new Map<Runtime, { result: ModelChoicesResult; at: number }>();
 const pending = new Map<Runtime, Promise<ModelChoicesResult>>();
 let queue: Promise<unknown> = Promise.resolve();
+export function catalogCheckedAt(runtime: Runtime) { return cache.get(runtime)?.at; }
 export function cachedModels(runtime: Runtime) { return cache.get(runtime)?.result.models; }
 export function loadModels(runtime: Runtime, request: (input: ModelChoicesRequest) => Promise<ModelChoicesResult>, refresh = false): Promise<ModelChoicesResult> {
   const existing = pending.get(runtime);

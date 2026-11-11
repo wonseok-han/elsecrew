@@ -322,7 +322,7 @@ pub(crate) fn inspect_candidate(
             observed_at: Instant::now(),
         })
     });
-    Ok(ProviderInspection { result, process, display_models })
+    Ok(ProviderInspection { result, process, display_models, display_usage: None })
 }
 
 #[cfg(test)]

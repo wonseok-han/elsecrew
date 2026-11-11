@@ -1427,13 +1427,14 @@ impl Sidecar {
                 _ => return Err(invalid_params("invalid project catalog action".to_owned())),
             },
             "project.open" => {
-                let params = require_exact_params(&request.params, &["selectedPath"])
-                    .map_err(invalid_params)?;
-                self.projects.open_project(
-                    &mut self.storage,
-                    param_string(params, "selectedPath").map_err(invalid_params)?,
-                    &request.request_id,
-                )
+                let initializing = request.params.get("emptyFolderIdentity").is_some();
+                let keys: &[&str] = if initializing { &["selectedPath", "emptyFolderIdentity"] } else { &["selectedPath"] };
+                let params = require_exact_params(&request.params, keys).map_err(invalid_params)?;
+                let selected = param_string(params, "selectedPath").map_err(invalid_params)?;
+                let prepared = if initializing {
+                    self.projects.initialize_empty_project(selected, param_string(params, "emptyFolderIdentity").map_err(invalid_params)?)
+                } else { Ok(()) };
+                prepared.and_then(|()| self.projects.open_project(&mut self.storage, selected, &request.request_id))
             }
             "project.getTree" => {
                 let params =
@@ -2409,8 +2410,8 @@ impl Sidecar {
                     let Some(result) = self.agent_runtime.take_model_catalog(&id) else { continue; };
                     let request = self.pending_agent_capabilities.remove(&id).unwrap();
                     responses.push(match result {
-                        Ok(choices) => success_response(&request, serde_json::json!({
-                            "schemaVersion":1, "runtime":runtime, "scope":null,
+                        Ok((choices, usage)) => success_response(&request, serde_json::json!({
+                            "schemaVersion":1, "runtime":runtime, "scope":null, "usage":usage,
                             "models":choices.into_iter().map(|choice| serde_json::json!({"modelSelector":choice.model,"reasoningEfforts":choice.reasoning_efforts,"isDefault":choice.is_default})).collect::<Vec<_>>()
                         })),
                         Err(error) => error_response(&request, error.kind(), "requestBlocked", error.detail()),

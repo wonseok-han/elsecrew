@@ -6,6 +6,7 @@ export interface ModelChoicesResult {
   schemaVersion: 1;
   runtime: "codex" | "claude-code";
   scope: { chatId: string; roleId: string; worktreeId: string; workspaceIdentity: string } | null;
+  usage?: { windows: { id: "primary" | "secondary"; usedPercent: number; windowMinutes: number | null; resetsAt: number | null }[] } | null;
   models: { modelSelector: string; reasoningEfforts: string[]; isDefault?: boolean }[];
 }
 function fail(): never { throw new Error("invalid model choices"); }
@@ -26,7 +27,21 @@ export function validateModelChoicesRequest(value: unknown): ModelChoicesRequest
 }
 /** Display data only: no canStart, capability fingerprint, or permission grant. */
 export function validateModelChoicesResult(value: unknown, request: ModelChoicesRequest): ModelChoicesResult {
-  const result = object(value, ["schemaVersion", "runtime", "scope", "models"]);
+  const hasUsage = !!value && typeof value === "object" && "usage" in value;
+  const result = object(value, ["schemaVersion", "runtime", "scope", "models", ...(hasUsage ? ["usage"] : [])]);
+  if (result.usage !== undefined && result.usage !== null) {
+    const usage = object(result.usage, ["windows"]);
+    if (!Array.isArray(usage.windows) || usage.windows.length > 2) return fail();
+    const ids = new Set<string>();
+    for (const item of usage.windows) {
+      const window = object(item, ["id", "usedPercent", "windowMinutes", "resetsAt"]);
+      if (window.id !== "primary" && window.id !== "secondary" || ids.has(window.id as string)) return fail();
+      ids.add(window.id as string);
+      if (typeof window.usedPercent !== "number" || !Number.isFinite(window.usedPercent) || window.usedPercent < 0 || window.usedPercent > 100) return fail();
+      if (window.windowMinutes !== null && (!Number.isSafeInteger(window.windowMinutes) || (window.windowMinutes as number) <= 0 || (window.windowMinutes as number) > 525600)) return fail();
+      if (window.resetsAt !== null && (!Number.isSafeInteger(window.resetsAt) || (window.resetsAt as number) < 0 || (window.resetsAt as number) > 253402300799)) return fail();
+    }
+  }
   if (result.schemaVersion !== 1 || result.runtime !== request.runtime) return fail();
   if (request.chatId) {
     const scope = object(result.scope, ["chatId", "roleId", "worktreeId", "workspaceIdentity"]);

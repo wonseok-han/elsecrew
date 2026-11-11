@@ -6108,3 +6108,41 @@ fn catalog_removal_refuses_open_application_confirmation() {
     f.manager.cancel_application_confirmation(&token).unwrap();
     f.manager.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_after_confirmation").unwrap();
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn empty_project_initialization_opens_and_creates_isolated_snapshot() {
+    let mut fixture = Fixture::open();
+    let selected = fixture._root.path().join("new-app");
+    fs::create_dir(&selected).unwrap();
+    let selected = fs::canonicalize(selected).unwrap();
+    let root = open_absolute_directory_capability(&selected).unwrap();
+    let (dev, ino) = capability_directory_identity(&root).unwrap();
+    fixture.manager.initialize_empty_project(selected.to_str().unwrap(), &format!("{dev}:{ino}")).unwrap();
+    assert_eq!(fs::read_dir(&selected).unwrap().count(), 1);
+    assert!(selected.join(".git").is_dir());
+    let opened = fixture.manager.open_project(&mut fixture.storage, selected.to_str().unwrap(), "empty-open").unwrap();
+    let id = opened.result["projectId"].as_str().unwrap();
+    fixture.manager.create_worktree(&mut fixture.storage, id, "empty-copy").unwrap();
+    let active = fixture.manager.validate_active_project(&fixture.storage, id).unwrap();
+    fs::write(active.worktree_path.join("hello.txt"), "new app").unwrap();
+    assert!(!selected.join("hello.txt").exists());
+    assert!(fixture.manager.initialize_empty_project(selected.to_str().unwrap(), &format!("{dev}:{ino}")).is_err());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn empty_project_initialization_rejects_changed_identity_and_nonempty_folder() {
+    let fixture = Fixture::open();
+    let selected = fixture._root.path().join("empty-reject");
+    fs::create_dir(&selected).unwrap();
+    let selected = fs::canonicalize(selected).unwrap();
+    let root = open_absolute_directory_capability(&selected).unwrap();
+    let (dev, ino) = capability_directory_identity(&root).unwrap();
+    assert!(fixture.manager.initialize_empty_project(selected.to_str().unwrap(), "0:0").is_err());
+    assert_eq!(fs::read_dir(&selected).unwrap().count(), 0);
+    fs::write(selected.join("keep.txt"), "keep").unwrap();
+    assert!(fixture.manager.initialize_empty_project(selected.to_str().unwrap(), &format!("{dev}:{ino}")).is_err());
+    assert_eq!(fs::read_dir(&selected).unwrap().count(), 1);
+    assert_eq!(fs::read_to_string(selected.join("keep.txt")).unwrap(), "keep");
+}

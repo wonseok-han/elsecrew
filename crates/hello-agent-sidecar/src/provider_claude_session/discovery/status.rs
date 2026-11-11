@@ -105,5 +105,5 @@ pub(super) fn inspect(
         }
         Ok(observation)
     });
-    Ok(ProviderInspection { result, process, display_models: None })
+    Ok(ProviderInspection { result, process, display_models: None, display_usage: None })
 }

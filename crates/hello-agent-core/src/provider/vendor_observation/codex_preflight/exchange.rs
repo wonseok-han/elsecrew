@@ -47,6 +47,7 @@ pub struct PreflightExchange {
     isolation_warning: Option<super::super::codex_isolation_warning::IsolationWarning>,
     configuration_failure: Option<&'static str>,
     display_models: Option<Vec<super::CatalogModel>>,
+    display_usage: Option<serde_json::Value>,
 }
 
 fn invalid() -> ProviderError {
@@ -114,6 +115,7 @@ impl PreflightExchange {
             isolation_warning: None,
             configuration_failure: None,
             display_models: None,
+            display_usage: None,
         })
     }
 
@@ -148,6 +150,15 @@ impl PreflightExchange {
     /// Display-only alternatives from a validated complete model/list reply.
     /// Available even when the selected model was rejected; does not advance
     /// the exchange, change the selected tuple, or grant start authority.
+    /// Only a display-catalog owner opts in; model names never change RPC authority.
+    pub fn enable_usage_display(&mut self) -> Result<(), ProviderError> {
+        if self.started { return Err(invalid()); }
+        self.rpc.request_usage_before_models();
+        Ok(())
+    }
+
+    pub fn display_usage(&self) -> Option<serde_json::Value> { self.display_usage.clone() }
+
     pub fn display_models(&self) -> Option<&[super::CatalogModel]> {
         self.display_models.as_deref()
     }
@@ -453,6 +464,7 @@ impl PreflightExchange {
             reasoning_effort: &self.effort,
         };
         match kind {
+            ObservationKind::Usage => { self.display_usage = super::super::account_usage::codex(&observation).ok(); }
             ObservationKind::PermissionProfiles => {
                 if self.named_cwd.is_none() {
                     return Err(invalid());
@@ -590,6 +602,24 @@ impl PreflightExchange {
 mod tests {
     use super::*;
     use serde_json::{json, Value};
+
+    #[test]
+    fn model_name_cannot_opt_a_normal_preflight_into_usage_queries() {
+        for opt_in in [false, true] {
+            let mut flow = PreflightExchange::with_named_permission(
+                &ExpectedProfile { model: "catalog-probe", reasoning_effort: "medium" },
+                test_path!("/app/home"), std::path::Path::new(test_path!("/app/workspace")), ExpectedPermission::ReadOnly,
+            ).unwrap();
+            if opt_in { flow.enable_usage_display().unwrap(); }
+            for id in [1, 2, 3] {
+                flow.rpc.next_request().unwrap();
+                let reply = serde_json::json!({"id":id,"result":{"userAgent":"test"}});
+                flow.rpc.accept(&BoundedObservation::new(serde_json::to_vec(&reply).unwrap()).unwrap()).unwrap();
+            }
+            let wire: serde_json::Value = serde_json::from_str(&flow.rpc.next_request().unwrap().unwrap()).unwrap();
+            assert_eq!(wire["method"], if opt_in { "account/rateLimits/read" } else { "model/list" });
+        }
+    }
 
     fn exchange() -> PreflightExchange {
         PreflightExchange::new(
