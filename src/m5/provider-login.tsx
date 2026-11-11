@@ -10,13 +10,14 @@ import { readLoginDiagnostic, type LoginDiagnostic } from "./provider-login-diag
 
 export type ConnectionReveal = { provider: LoginProvider; sequence: number };
 
-export function ProviderLogin({ disabled, compact: preferCompact = false, returning = false, reveal }: {disabled: boolean; compact?: boolean; returning?: boolean; reveal?: ConnectionReveal}) {
+export function ProviderLogin({ disabled, compact: preferCompact = false, returning = false, settingsPage = false, reveal }: {disabled: boolean; compact?: boolean; returning?: boolean; settingsPage?: boolean; reveal?: ConnectionReveal}) {
   const { t } = useI18n();
   const [selected, setSelected] = useState(readProviderSelection);
   const [startedWithoutAgents] = useState(() => readProviderSelection().length === 0);
-  const compact = preferCompact || (returning && !startedWithoutAgents);
-  const [selectionExpanded, setSelectionExpanded] = useState(!compact && selected.length === 0);
-  useEffect(() => { setSelectionExpanded(!compact && selected.length === 0); }, [compact, selected.length]);
+  const compact = !settingsPage && (preferCompact || (returning && !startedWithoutAgents));
+  const SelectionContainer = settingsPage ? "section" : "details";
+  const [selectionExpanded, setSelectionExpanded] = useState(!settingsPage && !compact && selected.length === 0);
+  useEffect(() => { setSelectionExpanded(!settingsPage && !compact && selected.length === 0); }, [settingsPage, compact, selected.length]);
   const [draft, setDraft] = useState<LoginProvider[]>([]);
   const [saveFailed, setSaveFailed] = useState(false);
   const [installBlocked, setInstallBlocked] = useState(Boolean(window.m5Install));
@@ -58,16 +59,16 @@ export function ProviderLogin({ disabled, compact: preferCompact = false, return
     </button>}
     <div id="m5-agent-management-content" hidden={!showManagement}>
     {reveal && <p className="m5-notice">{t("m5.setup.requestedConnection", { name: reveal.provider === "codex" ? "Codex" : "Claude Code" })}</p>}
-    {!compact && <nav className="m5-setup-navigation" aria-label={t("m5.setup.steps.label")}>
+    {!settingsPage && !compact && <nav className="m5-setup-navigation" aria-label={t("m5.setup.steps.label")}>
       {(["agents", "install", "login"] as const).map((item, index) => <button type="button" key={item}
         aria-current={step === item ? "step" : undefined}
         disabled={installBlocked || (item !== "agents" && selected.length === 0)}
         onClick={() => navigate(item)}><span aria-hidden="true">{index + 1}</span>{t(`m5.setup.steps.${item}`)}</button>)}
     </nav>}
-    <div hidden={!compact && step !== "agents"}>
-    <DeviceCheck/>
-    <details className="m5-provider-selection" open={selectionExpanded} onToggle={event => setSelectionExpanded(event.currentTarget.open)}>
-      <summary><strong>{t("m5.setup.agents.title")}</strong><span>{selected.length ? selected.map(p => p === "codex" ? "Codex" : "Claude Code").join(" · ") : t("m5.setup.agents.choose")}</span></summary>
+    <div hidden={!settingsPage && !compact && step !== "agents"}>
+    <DeviceCheck expanded={settingsPage}/>
+    <SelectionContainer className="m5-provider-selection" open={selectionExpanded} onToggle={event => setSelectionExpanded(event.currentTarget.open)}>
+      {settingsPage ? <h4>{t("m5.setup.agents.title")}</h4> : <summary><strong>{t("m5.setup.agents.title")}</strong><span>{selected.length ? selected.map(p => p === "codex" ? "Codex" : "Claude Code").join(" · ") : t("m5.setup.agents.choose")}</span></summary>}
       <p>{t("m5.setup.agents.help")}</p>
       {selected.length === 0 ? <form onSubmit={event => { event.preventDefault(); if (draft.length) select(draft); }}>
         <fieldset disabled={disabled}>
@@ -83,23 +84,24 @@ export function ProviderLogin({ disabled, compact: preferCompact = false, return
         {LOGIN_PROVIDERS.filter(p => !selected.includes(p)).map(provider => <button key={provider} type="button" disabled={disabled} onClick={() => select([...selected,provider])}>{t("m5.setup.agents.add", {name: provider === "codex" ? "Codex" : "Claude Code"})}</button>)}
       </div>}
       {saveFailed && <p role="status">{t("m5.setup.agents.saveFailed")}</p>}
-    </details>
-    {!compact && selected.length > 0 && <button type="button" className="m5-setup-next" disabled={installBlocked} onClick={() => navigate("install")}>{t("m5.setup.steps.toInstall")}</button>}
+    </SelectionContainer>
+    {!settingsPage && !compact && selected.length > 0 && <button type="button" className="m5-setup-next" disabled={installBlocked} onClick={() => navigate("install")}>{t("m5.setup.steps.toInstall")}</button>}
     </div>
     {!selectionExpanded && saveFailed && <p className="m5-notice" role="status">{t("m5.setup.agents.saveFailed")}</p>}
-    <div hidden={!compact && step !== "install" && !installBlocked}>
+    <div hidden={!settingsPage && !compact && step !== "install" && !installBlocked}>
     <ProviderInstall disabled={disabled} providers={selected} compact={compact} onBlockChange={setInstallBlocked} onAttention={setInstallAttention}
       onCheck={provider => { setChecks(current => ({ ...current, [provider]: current[provider] + 1 })); setStep("login"); }}/>
-    {!compact && <div className="m5-setup-next"><p>{t("m5.setup.steps.installHelp")}</p><button type="button" disabled={installBlocked || selected.length === 0} onClick={() => navigate("login")}>{t("m5.setup.steps.toLogin")}</button></div>}
+    {!settingsPage && !compact && <div className="m5-setup-next"><p>{t("m5.setup.steps.installHelp")}</p><button type="button" disabled={installBlocked || selected.length === 0} onClick={() => navigate("login")}>{t("m5.setup.steps.toLogin")}</button></div>}
     </div>
-    <div hidden={!compact && step !== "login" && !loginNeedsAttention}>
-    {LOGIN_PROVIDERS.filter(provider => selected.includes(provider)).map(provider => <ProviderConnection key={`${provider}:${checks[provider]}`} disabled={disabled || installBlocked} provider={provider} onAttention={reportLoginAttention}/>)}
-    {!compact && <p className="m5-setup-next">{t("m5.setup.steps.projectHelp")}</p>}
+    <div hidden={!settingsPage && !compact && step !== "login" && !loginNeedsAttention}>
+    {LOGIN_PROVIDERS.filter(provider => selected.includes(provider)).map(provider => <ProviderConnection key={`${provider}:${checks[provider]}`} disabled={disabled || installBlocked} provider={provider} alwaysExpanded={settingsPage} onAttention={reportLoginAttention}/>)}
+    {!settingsPage && !compact && <p className="m5-setup-next">{t("m5.setup.steps.projectHelp")}</p>}
     </div>
     </div>
   </section>;
 }
-function DeviceCheck() {
+function DeviceCheck({ expanded = false }: { expanded?: boolean }) {
+  const Container = expanded ? "section" : "details";
   const { lang, t } = useI18n();
   const [report, setReport] = useState<DeviceReport | null>(null);
   const [busy, setBusy] = useState(false);
@@ -123,8 +125,8 @@ function DeviceCheck() {
   }, []);
   if (!window.m5Device) return null;
   const capacity = (bytes: number) => `${new Intl.NumberFormat(lang, { maximumFractionDigits: 1 }).format(bytes / 1024 ** 3)} GiB`;
-  return <details className="m5-device-check" open={failed || undefined}>
-    <summary>{t("m5.device.title")}</summary>
+  return <Container className="m5-device-check" open={failed || undefined}>
+    {expanded ? <h4>{t("m5.device.title")}</h4> : <summary>{t("m5.device.title")}</summary>}
     {busy && <p role="status">{t("m5.device.checking")}</p>}
     {failed && <p role="alert">{t("m5.device.failed")}</p>}
     {report && <dl>
@@ -135,9 +137,9 @@ function DeviceCheck() {
     </dl>}
     <p>{t("m5.device.scope")}</p>
     <button type="button" disabled={busy} onClick={() => void inspect()}>{t("m5.device.refresh")}</button>
-  </details>;
+  </Container>;
 }
-function ProviderConnection({ disabled, provider, onAttention }: {disabled: boolean; provider: LoginProvider; onAttention: (provider: LoginProvider, attention: boolean) => void}) {
+function ProviderConnection({ disabled, provider, alwaysExpanded = false, onAttention }: {alwaysExpanded?: boolean; disabled: boolean; provider: LoginProvider; onAttention: (provider: LoginProvider, attention: boolean) => void}) {
   const { lang, t } = useI18n();
   const name = provider === "codex" ? "Codex" : "Claude Code";
   const [status,setStatus] = useState<LoginStatus>({state:"idle",attemptId:null,authUrl:null,error:null});
@@ -191,7 +193,7 @@ function ProviderConnection({ disabled, provider, onAttention }: {disabled: bool
   useEffect(() => {
     onAttention(provider, waiting || recoveryRequired || error || status.state === "failed");
   }, [provider, waiting, recoveryRequired, error, status.state, onAttention]);
-  const canCollapse=status.state === "connected" && !status.error && !error;
+  const canCollapse=!alwaysExpanded && status.state === "connected" && !status.error && !error;
   const showDetails=!canCollapse || expanded;
   const label = t(`m5.login.state.${status.state}`, { name });
   return <section className="m5-provider-login" aria-label={t("m5.login.section", { name })}>

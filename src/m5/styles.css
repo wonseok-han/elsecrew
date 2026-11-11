@@ -890,3 +890,50 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 
 .m5-recovery-history-messages { max-height: 320px; overflow: auto; overflow-wrap: anywhere; }
 .m5-recovery-history-messages article { padding: 12px 0; border-top: 1px solid #39424d; }
+
+/* Settings content uses grouped controls rather than inline maintenance forms. */
+.m5-storage-content { margin-top: 18px; border: 1px solid var(--m5-border-strong); border-radius: 10px; padding: 20px; background: var(--m5-surface); }
+.m5-storage-summary { margin-top: 0; color: var(--m5-text) !important; font-size: 14px !important; font-variant-numeric: tabular-nums; }
+.m5-storage-limit { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--m5-border); }
+.m5-storage-limit label { display: flex; align-items: center; justify-content: space-between; gap: 16px; font-size: 13px; }
+.m5-storage-limit input { width: 100px; min-width: 0; padding: 8px 10px; border: 1px solid var(--m5-border-strong); border-radius: 6px; color: var(--m5-text); background: var(--m5-bg); }
+.m5-storage-consent { display: flex; align-items: flex-start; gap: 10px; margin: 20px 0; font-size: 12px; line-height: 1.7; color: var(--m5-muted); }
+.m5-storage-consent input { flex: none; margin: 4px 0 0; accent-color: var(--m5-action-bg); }
+.m5-storage-actions { display: flex; justify-content: flex-end; }
+.m5-management-projects .m5-project-catalog-list { position: static; width: auto; max-height: none; padding: 0; background: transparent; border: 0; box-shadow: none; }
+.m5-management-projects li > button { padding: 16px; border: 1px solid var(--m5-border); border-radius: 8px; background: var(--m5-surface); }
+.m5-management-projects li > button:hover { background: var(--m5-raised); border-color: var(--m5-border-strong); }
+.m5-preferences-content .m5-agent-management { outline: none; }
+.m5-preferences-content #m5-agent-management-content > div { border: 1px solid var(--m5-border); border-radius: 10px; background: var(--m5-surface); padding: 16px; margin: 18px 0; }
+.m5-preferences-content .m5-device-check, .m5-preferences-content .m5-provider-selection, .m5-preferences-content .m5-provider-install, .m5-preferences-content .m5-provider-login { border: 0; background: transparent; padding: 0; margin: 0; box-shadow: none; }
+.m5-preferences-content .m5-provider-selection, .m5-preferences-content .m5-provider-login + .m5-provider-login { border-top: 1px solid var(--m5-border); padding-top: 18px; margin-top: 18px; }
+.m5-preferences-content h4 { margin: 0 0 12px; font-size: 13px; }
+.m5-preferences-content .m5-provider-login { display: block; }
+.m5-preferences-content .m5-provider-login > div[id] { margin-top: 12px; }
+.m5-project-catalog-list li:has(.m5-project-overflow[open]) { z-index: 30; }
+.m5-project-overflow[open] { z-index: 31; }
+.m5-project-overflow > div { background: var(--m5-raised); border-color: var(--m5-border-strong); box-shadow: 0 10px 28px #0009; }
+.m5-project-overflow > div button { color: var(--m5-text) !important; background: transparent; border: 0; padding: 9px 10px !important; font-size: 12px; border-radius: 4px; }
+.m5-project-overflow > div button:hover { background: var(--m5-surface) !important; }
+.m5-hidden-files { display: flex; align-items: center; gap: 7px; padding: 7px 10px 0; color: var(--m5-muted); font-size: 11px; }
+.m5-hidden-files input { accent-color: var(--m5-action-bg); }
+.m5-editor-head[hidden], .m5-tab-list[hidden] { display: none; }
+.m5-editor-welcome { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 32px; min-height: 220px; color: var(--m5-muted); }
+.m5-welcome-mark { display: grid; place-items: center; width: 58px; height: 58px; border-radius: 16px; border: 1px solid var(--m5-border-strong); background: var(--m5-surface); font-size: 30px; font-weight: 700; color: var(--m5-action-bg); }
+.m5-editor-welcome h2 { color: var(--m5-text); margin: 18px 0 8px; font-size: 24px; }
+.m5-editor-welcome p { font-size: 13px; line-height: 1.7; max-width: 360px; }
+.m5-editor-welcome > span { font-size: 12px; line-height: 1.7; max-width: 360px; }
+.m5-chat-review > summary { cursor: pointer; font-size: 12px; font-weight: 500; color: var(--m5-muted); }
+.m5-chat-review:not([open]) { padding: 10px 12px; margin: 6px 0; border-radius: 6px; }
+.m5-chat-review > header h3 { display: none; }
+.m5-chat-activity { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--m5-border); background: var(--m5-raised); color: var(--m5-text); font-size: 12px; }
+.m5-chat-activity > span:last-child { color: var(--m5-muted); }
+.m5-activity-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--m5-action-bg); flex: none; animation: m5-activity-pulse 1.4s ease-in-out infinite; }
+@keyframes m5-activity-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .m5-activity-dot { animation: none; } }
+.m5-workbench .m5-danger, .m5-project-overflow > div button.m5-danger { background: #402327; color: #ffb4b4 !important; border: 1px solid #815057; }
+.m5-workbench .m5-danger:hover:not(:disabled) { background: #5a2a31 !important; border-color: #b56a73; }
+.m5-workbench .m5-danger:disabled { opacity: .45; }
+.m5-preferences-content .m5-provider-selection:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
+.m5-preferences-content .m5-provider-selection button { background: var(--m5-raised); color: var(--m5-text); border-color: var(--m5-border-strong); }
+.m5-preferences-content .m5-login-account-help { flex-basis: 100%; margin-bottom: 8px; }

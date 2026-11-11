@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.tsx";
 import { FileSearchBusyError, type FileSearchResult } from "./file-search.ts";
 
-export function FileSearch({ disabled, search, open }: {
-  disabled: boolean;
+export function FileSearch({ disabled, search, open, showHidden = false }: {
+  disabled: boolean; showHidden?: boolean;
   search: (query: string, signal: AbortSignal) => Promise<FileSearchResult>;
   open: (path: string) => void;
 }) {
@@ -18,6 +18,7 @@ export function FileSearch({ disabled, search, open }: {
     if (disabled) { stop(); setResult(null); }
     return () => { active.current?.abort(); active.current = null; };
   }, [disabled]);
+  const matches = result?.matches.filter(entry => showHidden || !entry.path.split("/").some(part => part.startsWith("."))) ?? [];
   return <section className="m5-file-search" aria-label={t("m5.search.title")}>
     <form onSubmit={async event => {
       event.preventDefault(); if (disabled || !query.trim()) return;
@@ -37,8 +38,8 @@ export function FileSearch({ disabled, search, open }: {
     {busy && <p role="status">{t("m5.search.busy")}</p>}
     {error && <p role="alert">{t(`m5.search.${error}`)}</p>}
     {result && <>
-      <p role="status">{t("m5.search.count", { count: result.matches.length })}{result.limited ? t("m5.search.limited") : t("m5.search.complete")}</p>
-      <div className="m5-search-results">{result.matches.map(entry => <button key={entry.path} type="button" disabled={disabled} title={entry.path} onClick={() => open(entry.path)}>{entry.path}</button>)}</div>
+      <p role="status">{t("m5.search.count", { count: matches.length })}{result.limited ? t("m5.search.limited") : t("m5.search.complete")}</p>
+      <div className="m5-search-results">{matches.map(entry => <button key={entry.path} type="button" disabled={disabled} title={entry.path} onClick={() => open(entry.path)}>{entry.path}</button>)}</div>
       <button type="button" onClick={() => setResult(null)}>{t("m5.search.close")}</button>
     </>}
   </section>;

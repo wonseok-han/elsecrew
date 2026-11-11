@@ -12,7 +12,7 @@ const settingsIcons: Record<SettingsSection, string> = {
 function SettingsIcon({ section }: { section: SettingsSection }) {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={settingsIcons[section]} /></svg>;
 }
-export function AppSettings({ hasProject, open, section, onSection, onClose, onRoles, disabled, restartLocked, rolesEditor, rolesLocked, storage, project, children }: {
+export function AppSettings({ hasProject, open, section, onSection, onClose, restartLocked, rolesEditor, rolesLocked, storage, project, children }: {
   hasProject: boolean; open: boolean; section: SettingsSection; onSection: (section: SettingsSection) => void;
   onClose: () => void; onRoles: () => void; disabled: boolean; restartLocked: boolean; rolesEditor: ReactNode; rolesLocked: boolean; storage: ReactNode; project: ReactNode; children: ReactNode;
 }) {
@@ -39,7 +39,7 @@ export function AppSettings({ hasProject, open, section, onSection, onClose, onR
         <section hidden={section !== "general"}><h3>{t("m5.preferences.appearance")}</h3>
           <div className="m5-settings-group"><label className="m5-preferences-row"><span><strong>{t("m5.shell.language")}</strong><small>{t("m5.shell.languageScope")}</small></span><select value={lang} onChange={event => setLang(event.target.value === "en" ? "en" : "ko")}><option value="ko">한국어</option><option value="en">English</option></select></label></div></section>
         <section hidden={section !== "roles"}><h3>{t("m5.preferences.roles")}</h3><p className="m5-settings-intro">{t("m5.roles.appDefaultsHelp")}</p>
-          <button type="button" className="m5-secondary" hidden={Boolean(rolesEditor)} disabled={disabled || Boolean(rolesEditor)} onClick={onRoles}>{t("m5.roles.appDefaults")}</button>{rolesEditor}</section>
+          {rolesEditor}</section>
         <section hidden={section !== "agents"}><h3>{t("m5.preferences.agents")}</h3>{children}</section>
         <section hidden={section !== "storage"}><h3>{t("m5.preferences.storage")}</h3>{storage}</section>
         <section hidden={section !== "project"}><h3>{t("m5.preferences.project")}</h3>{project}</section>

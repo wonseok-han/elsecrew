@@ -11,6 +11,7 @@ export function ChatApplicationPreview(props: PreviewProps) {
 
 function ChatApplicationPreviewSession({ projectId, chatId, worktreeId, disabled, onReviewDiff }: PreviewProps) {
   const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
   const [preview, setPreview] = useState<ApplicationPreviewPage | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
@@ -84,7 +85,8 @@ function ChatApplicationPreviewSession({ projectId, chatId, worktreeId, disabled
     } catch { if (generation.current === epoch) setError(true); }
     finally { pending.current = false; setBusy(false); }
   }
-  return <section className="m5-chat-review" aria-label={t("m5.application.chatPreview")} aria-busy={busy}>
+  return <details open={expanded || busy || error || started || restorationOffered || Boolean(application?.running)} onToggle={event => setExpanded(event.currentTarget.open)} className="m5-chat-review" aria-label={t("m5.application.chatPreview")} aria-busy={busy}>
+    <summary>{t("m5.application.reviewTitle")}</summary>
     <header><h3>{t("m5.application.reviewTitle")}</h3>{onReviewDiff && <button type="button" className="m5-secondary" disabled={disabled || busy || started} onClick={onReviewDiff}>{t("m5.application.reviewDiff")}</button>}</header>
     <p className="m5-review-help">{t("m5.application.reviewFlow")}</p>
     {disabled && <p role="status" className="m5-review-help">{t("m5.application.reviewBlocked")}</p>}
@@ -112,5 +114,5 @@ function ChatApplicationPreviewSession({ projectId, chatId, worktreeId, disabled
     }} />}
     {application?.state === "restored" && <p role="status">{t("m5.application.restored")}</p>}
     {restorationOffered && application?.applicationId && ["prepared", "applying", "applied"].includes(application.state) && <RestorationPreview projectId={projectId} applicationId={application.applicationId} disabled={disabled || busy} onStatus={status => setApplication(current => current?.applicationId === status.applicationId ? status : current)} />}
-  </section>;
+  </details>;
 }

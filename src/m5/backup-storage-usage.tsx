@@ -3,7 +3,8 @@ import { useI18n } from "../i18n.tsx";
 import { validateProjectCatalogResult, type BackupStorageUsage } from "./contracts/project-catalog-v1.ts";
 
 export function BackupStorageUsageView({ disabled }: { disabled: boolean }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const capacity = (bytes: number) => `${new Intl.NumberFormat(lang, { maximumFractionDigits: 2 }).format(bytes / 1024 ** 3)} GiB`;
   const [usage, setUsage] = useState<BackupStorageUsage | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -42,15 +43,15 @@ export function BackupStorageUsageView({ disabled }: { disabled: boolean }) {
     finally { pending.current = false; setBusy(false); }
     // No automatic replay after success or failure; inspect the persisted value.
   }
-  return <section aria-label={t("m5.backup.storageTitle")} aria-busy={busy}>
+  return <section className="m5-storage-settings" aria-label={t("m5.backup.storageTitle")} aria-busy={busy}>
     <button type="button" disabled={disabled || busy} onClick={() => void inspect()}>{t("m5.backup.storageTitle")}</button>
-    {usage && <div role="status">
-      <p>{t("m5.backup.storageAmounts", { used: usage.usedBytes.toLocaleString(), limit: usage.limitBytes.toLocaleString(), remaining: usage.remainingBytes.toLocaleString() })}</p>
+    {usage && <div className="m5-storage-content">
+      <p className="m5-storage-summary" role="status">{t("m5.backup.storageAmounts", { used: capacity(usage.usedBytes), limit: capacity(usage.limitBytes), remaining: capacity(usage.remainingBytes) })}</p>
       <p>{t("m5.backup.storageHelp")}</p>
       {usage.remainingBytes === 0 && <p>{t("m5.backup.storageFull")}</p>}
-      <label>{t("m5.backup.limitLabel")} <input type="number" min="1" max="1024" step="1" value={limit} disabled={disabled || busy} onChange={event => { setLimit(event.target.value); setAgreed(false); }} /></label>
-      <label><input type="checkbox" checked={agreed} disabled={disabled || busy} onChange={event => setAgreed(event.target.checked)} />{t("m5.backup.limitConsent")}</label>
-      <button type="button" disabled={disabled || busy || !agreed || !/^\d{1,4}$/.test(limit) || Number(limit) < 1 || Number(limit) > 1024} onClick={() => void changeLimit()}>{t("m5.backup.limitChange")}</button>
+      <div className="m5-storage-limit"><label>{t("m5.backup.limitLabel")} <input type="number" min="1" max="1024" step="1" value={limit} disabled={disabled || busy} onChange={event => { setLimit(event.target.value); setAgreed(false); }} /></label></div>
+      <label className="m5-storage-consent"><input type="checkbox" checked={agreed} disabled={disabled || busy} onChange={event => setAgreed(event.target.checked)} /><span>{t("m5.backup.limitConsent")}</span></label>
+      <div className="m5-storage-actions"><button type="button" disabled={disabled || busy || !agreed || !/^\d{1,4}$/.test(limit) || Number(limit) < 1 || Number(limit) > 1024} onClick={() => void changeLimit()}>{t("m5.backup.limitChange")}</button></div>
     </div>}
     {!usage && !busy && agreed === false && <p>{t("m5.backup.limitInspect")}</p>}
     {changeUnknown && <p role="status">{t("m5.backup.limitUnknown")}</p>}
