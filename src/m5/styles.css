@@ -972,6 +972,10 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 
 /* A collapsed sidebar leaves only its reopen control, never a miniature list. */
 .m5-project-rail:not(.m5-project-rail-expanded) { width: 0; padding: 0; border: 0; overflow: visible; background: transparent; }
-.m5-project-rail:not(.m5-project-rail-expanded) > :not(.m5-rail-bookmark) { display: none; }
+.m5-project-rail:not(.m5-project-rail-expanded) > * { display: none; }
 .m5-project-rail:not(.m5-project-rail-expanded) > .m5-rail-bookmark { left: 12px; }
-.m5-with-project-rail:not(:has(.m5-project-rail-expanded)) > .m5-toolbar { padding-left: 40px; }
+ .m5-toolbar-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.m5-toolbar-title h1 { margin: 0; }
+.m5-workbench .m5-sidebar-reopen { display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 28px; min-height: 0; padding: 4px; margin: 0; border: 0; background: transparent; color: var(--m5-muted); box-shadow: none; }
+.m5-sidebar-reopen svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+.m5-workbench .m5-sidebar-reopen:hover { background: var(--m5-raised); color: var(--m5-text); }

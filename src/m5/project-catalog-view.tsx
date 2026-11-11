@@ -38,13 +38,19 @@ function ProjectMenu({ label, children }: { label: string; children: ReactNode }
   </details>;
 }
 
-export function ProjectCatalog({ controller, disabled, currentId, ready = true, rail = false, home = false, management = false, settingsAction, onManage, onRemove, removeDisabled, refreshKey = 0, onHasProjects }: {
+export function ProjectCatalog({ railExpanded, onRailExpandedChange, controller, disabled, currentId, ready = true, rail = false, home = false, management = false, settingsAction, onManage, onRemove, removeDisabled, refreshKey = 0, onHasProjects }: {
+  railExpanded?: boolean; onRailExpandedChange?: (expanded: boolean) => void;
   onRemove?: (entry: ProjectCatalogEntry) => void; removeDisabled?: boolean; refreshKey?: number;
   settingsAction?: ReactNode; onManage?: (entry: ProjectCatalogEntry) => void; controller: ProjectEditorController; disabled: boolean; currentId?: string; ready?: boolean; rail?: boolean; home?: boolean; management?: boolean; onHasProjects?: (value: boolean) => void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const [expanded, setExpanded] = useState(true);
+  const [localExpanded, setLocalExpanded] = useState(true);
+  const expanded = railExpanded ?? localExpanded;
+  const setExpanded = (value: boolean | ((previous: boolean) => boolean)) => {
+    const next = typeof value === "function" ? value(expanded) : value;
+    setLocalExpanded(next); onRailExpandedChange?.(next);
+  };
   const [entries, setEntries] = useState<ProjectCatalogEntry[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

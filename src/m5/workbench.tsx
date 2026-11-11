@@ -128,6 +128,7 @@ function WorkbenchUnavailable() {
 function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const { lang, t } = useI18n();
   const controller = useMemo(() => new ProjectEditorController(bridge), [bridge]);
+  const [railExpanded, setRailExpanded] = useState(true);
   const [catalogRevision, setCatalogRevision] = useState(0);
   const [removal, setRemoval] = useState<{ projectId: string; chatId?: string; label: string } | null>(null);
   const [removing, setRemoving] = useState(false);
@@ -310,7 +311,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
 
   return (
     <main inert={updatePreparing} className={`m5-workbench${preferencesOpen ? " m5-settings-open" : ""}${window.m5Projects ? " m5-with-project-rail" : ""}`} lang={lang} aria-label={t("m5.shell.label")}>
-      <ProjectCatalog rail refreshKey={catalogRevision} removeDisabled={!canRemove} onRemove={entry => { setRemovalError(false); setRemoval({ projectId: entry.projectId, label: entry.canonicalPath }); }} settingsAction={<button type="button" className="m5-secondary m5-open-preferences" disabled={settingsOpen || newChatOpen || appDefaultsOpen} onClick={() => setPreferencesOpen(true)} title={t("m5.preferences.title")} aria-label={t("m5.preferences.title")}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"><path d="m10 3-.6 2.4-2 .9L5 5.6 3 9l1.8 1.7v2.6L3 15l2 3.4 2.4-.7 2 .9L10 21h4l.6-2.4 2-.9 2.4.7 2-3.4-1.8-1.7v-2.6L21 9l-2-3.4-2.4.7-2-.9L14 3Z"/><circle cx="12" cy="12" r="3"/></svg><span>{t("m5.preferences.title")}</span></button>} onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} onHasProjects={setHasSavedProjects} ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
+      <ProjectCatalog rail railExpanded={railExpanded} onRailExpandedChange={setRailExpanded} refreshKey={catalogRevision} removeDisabled={!canRemove} onRemove={entry => { setRemovalError(false); setRemoval({ projectId: entry.projectId, label: entry.canonicalPath }); }} settingsAction={<button type="button" className="m5-secondary m5-open-preferences" disabled={settingsOpen || newChatOpen || appDefaultsOpen} onClick={() => setPreferencesOpen(true)} title={t("m5.preferences.title")} aria-label={t("m5.preferences.title")}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"><path d="m10 3-.6 2.4-2 .9L5 5.6 3 9l1.8 1.7v2.6L3 15l2 3.4 2.4-.7 2 .9L10 21h4l.6-2.4 2-.9 2.4.7 2-3.4-1.8-1.7v-2.6L21 9l-2-3.4-2.4.7-2-.9L14 3Z"/><circle cx="12" cy="12" r="3"/></svg><span>{t("m5.preferences.title")}</span></button>} onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} onHasProjects={setHasSavedProjects} ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
       <dialog ref={removalDialog} className="m5-discard-dialog" aria-labelledby="m5-remove-title" onCancel={event => { event.preventDefault(); if (!removing) setRemoval(null); }}>
         <h2 id="m5-remove-title">{t("m5.catalog.remove")}</h2>
         <p>{removal?.label}</p><p>{t(removal?.chatId ? "m5.catalog.removeChatHelp" : "m5.catalog.removeHelp")}</p>
@@ -320,7 +321,9 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       </dialog>
       <header className={`m5-toolbar${snapshot.project ? " m5-toolbar-project" : ""}`}>
         <div>
-          <h1>{snapshot.project?.name ?? t(hasSavedProjects ? "m5.home.welcome" : "m5.shell.start")}</h1>
+          <div className="m5-toolbar-title">
+          {!railExpanded && <button type="button" className="m5-sidebar-reopen" onClick={() => setRailExpanded(true)} aria-label={t("m5.catalog.expand")} title={t("m5.catalog.expand")} aria-expanded={false}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>}
+          <h1>{snapshot.project?.name ?? t(hasSavedProjects ? "m5.home.welcome" : "m5.shell.start")}</h1></div>
           <p className="m5-subtitle">
             {t(snapshot.project ? "m5.shell.active" : "m5.shell.intro")}
           </p>
