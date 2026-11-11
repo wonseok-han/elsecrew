@@ -699,6 +699,7 @@ export const en: Record<MessageKey, string> = {
   "m5.connection.disconnect": "Disconnect",
   "m5.connection.off": "Disconnected",
   "m5.connection.retained": "Your login is kept for reconnecting.",
+  "m5.connection.loadFailed": "Could not load connection settings. Try again.",
   "m5.connection.failed": "Could not change the connection. Finish or stop running tasks, checks or login first.",
   "m5.usage.title": "Agent usage",
   "m5.usage.used": "{n}% used",

@@ -698,6 +698,7 @@ export const ko = {
   "m5.connection.disconnect": "연결 해제",
   "m5.connection.off": "연결 안 됨",
   "m5.connection.retained": "로그인은 유지돼요. 다시 연결하면 사용할 수 있어요.",
+  "m5.connection.loadFailed": "연결 상태를 불러오지 못했어요. 다시 확인해 주세요.",
   "m5.connection.failed": "연결 상태를 바꾸지 못했어요. 실행·조회·로그인이 진행 중이면 완료하거나 중단한 뒤 다시 시도하세요.",
   "m5.usage.title": "에이전트 사용량",
   "m5.usage.used": "{n}% 사용",

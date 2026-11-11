@@ -148,11 +148,12 @@ function ProviderConnection({ disabled, provider, alwaysExpanded = false, onAtte
   const [connectionError,setConnectionError] = useState(false);
   const runtime = provider === "codex" ? "codex" : "claude-code";
   useEffect(() => {
+    if (disabled) return;
     let alive = true;
     const load = () => { void readConnections().then(value => { if(alive) { setAppConnected(value[runtime]); setConnectionError(false); } }).catch(() => { if(alive) setConnectionError(true); }); };
     load(); window.addEventListener(CONNECTIONS_CHANGED,load);
     return () => { alive=false; window.removeEventListener(CONNECTIONS_CHANGED,load); };
-  },[runtime]);
+  },[runtime,disabled]);
   const toggleConnection = async () => {
     if(connectionBusy || appConnected === null) return;
     setConnectionBusy(true); setConnectionError(false);
@@ -215,9 +216,10 @@ function ProviderConnection({ disabled, provider, alwaysExpanded = false, onAtte
   const showDetails=!canCollapse || expanded;
   const label = appConnected === true ? t(`m5.login.state.${status.state}`, { name }) : t("m5.connection.off");
   return <section className="m5-provider-login" aria-label={t("m5.login.section", { name })}>
-    <div><strong>{t("m5.login.section", { name })}</strong><p role="status">{label}</p><small>{t("m5.login.separate")}</small></div>
-    <button type="button" disabled={disabled || connectionBusy || appConnected === null || waiting} onClick={()=>void toggleConnection()}>{t(appConnected ? "m5.connection.disconnect" : "m5.connection.connect")}</button>
-    {connectionError && <p role="alert">{t("m5.connection.failed")}{appConnected === null && <button type="button" aria-label={t("m5.device.refresh")} title={t("m5.device.refresh")} onClick={() => window.dispatchEvent(new Event(CONNECTIONS_CHANGED))}>↻</button>}</p>}
+    <div className="m5-connection-heading"><strong>{t("m5.login.section", { name })}</strong><p role="status">{label}</p></div>
+    <button className="m5-connection-toggle" type="button" disabled={disabled || connectionBusy || appConnected === null || waiting} onClick={()=>void toggleConnection()}>{t(appConnected ? "m5.connection.disconnect" : "m5.connection.connect")}</button>
+    <small className="m5-connection-help">{t("m5.login.separate")}</small>
+    {connectionError && <div className="m5-connection-error" role="alert"><span>{t(appConnected === null ? "m5.connection.loadFailed" : "m5.connection.failed")}</span>{appConnected === null && <button type="button" aria-label={t("m5.device.refresh")} title={t("m5.device.refresh")} onClick={() => window.dispatchEvent(new Event(CONNECTIONS_CHANGED))}>↻</button>}</div>}
     {appConnected === false && <small>{t("m5.connection.retained")}</small>}
     {appConnected && canCollapse && <button type="button" aria-expanded={showDetails} aria-controls={`${provider}-connection-details`} onClick={()=>setExpanded(value=>!value)}>{t(showDetails ? "m5.login.hideDetails" : "m5.login.showDetails")}</button>}
     <div id={`${provider}-connection-details`} hidden={!showDetails || appConnected !== true}>

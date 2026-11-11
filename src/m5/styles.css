@@ -831,9 +831,9 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-project-rail-header .m5-rail-action:focus-visible { outline: 2px solid var(--m5-accent, #d89d87); outline-offset: 1px; }
 .m5-project-rail:not(.m5-project-rail-expanded) .m5-project-rail-header .m5-rail-action { flex-basis: 20px; width: 20px; min-width: 20px; }
 .m5-maintenance-group > h4 { margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--m5-text); }
-.m5-rail-footer { margin-top: auto; padding-top: 16px; border-top: 1px solid var(--m5-border); }
-.m5-rail-footer .m5-open-preferences { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: 0; background: transparent; color: var(--m5-muted); text-align: left; }
-.m5-rail-footer .m5-open-preferences svg { flex: 0 0 18px; width: 18px; height: 18px; }
+.m5-rail-footer { margin-top: auto; padding-top: 4px; border-top: 1px solid var(--m5-border); }
+.m5-rail-footer .m5-open-preferences { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; min-height: 30px; margin: 0; padding: 4px 8px; border: 0; background: transparent; color: var(--m5-muted); font-size: 12px; text-align: left; }
+.m5-rail-footer .m5-open-preferences svg { flex: 0 0 16px; width: 16px; height: 16px; }
 .m5-project-rail:not(.m5-project-rail-expanded) .m5-open-preferences { justify-content: center; }
 .m5-project-rail:not(.m5-project-rail-expanded) .m5-open-preferences span { display: none; }
 
@@ -1081,3 +1081,14 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-usage-summary b { font-weight: 500; color: var(--m5-text); }
 .m5-usage-summary + .m5-usage-summary { border-left: 1px solid var(--m5-border); padding-left: 14px; }
 @media(max-width:600px) { .m5-app-statusbar { overflow-x: auto; } .m5-usage-summary { gap: 5px; } }
+
+.m5-workbench > .m5-project-rail { padding-bottom: 4px; }
+
+.m5-preferences-content .m5-provider-login { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px 20px; border-radius: 0; }
+.m5-connection-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.m5-connection-heading p { font-size: 12px; color: var(--m5-muted); }
+.m5-provider-login .m5-connection-toggle { grid-column: 2; grid-row: 1; min-width: 72px; margin: 0; padding: 6px 12px; }
+.m5-provider-login > small, .m5-provider-login > div[id], .m5-provider-login > .m5-connection-error { grid-column: 1 / -1; }
+.m5-provider-login .m5-connection-help { display: block; line-height: 1.6; }
+.m5-provider-login .m5-connection-error { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 4px 0 0; padding: 10px 12px; border-radius: 6px; background: var(--m5-raised); font-size: 12px; line-height: 1.6; }
+.m5-provider-login .m5-connection-error button { flex: 0 0 28px; width: 28px; min-height: 28px; height: 28px; margin: 0; padding: 0; }
