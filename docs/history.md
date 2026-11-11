@@ -4,6 +4,13 @@
 
 ### 2026-11-11 · by GPT-6
 
+- Claude 초기 플러그인 호환 조사 계속(기준 e981b138). 공식 settings-reference의 enabledPlugins는 개별 이름 설정이며 미지정 항목은 공급자 defaultEnabled를 따름을 확인했다(https://code.claude.com/docs/en/settings-reference#enabledplugins). 내장 privacy 모듈을 임의로 비활성화하거나 알려지지 않은 플러그인을 허용하지 않았다.
+- 임시 HOME/가짜 API값/OS network deny/임시 폴더 밖 쓰기 차단으로 모델 통신 없는 초기 관측을2회 시도했다. 첫45초 수집 제한, 후속15초 제한에서 초기 응답을 얻지 못했다. 두 프로세스51981/55196 종료를 ps로 확인했고 임시 폴더를 정리했다. 실제 인증·프로젝트·유료 호출은 사용하지 않았다. 이 실패를 실제 등록 조합의 증거로 보지 않는다.
+- 기존 ‘other builtins’ 진단 중 privacy 단독 또는 security guard와의 조합을 별도 고정 문자열로 구분하도록 core/renderer 진단 계약/시험 수집기를 수정했다. 여전히 거절하며 원문 이름·경로·인증정보를 출력하지 않는다. Rust5개(양쪽 guard 정책에서 거절, 미등록/외부 경로 분리), TS15개, TypeScript, diff check 통과. 호환 해결 자체는 아직 미완료다.
+- 설치 교체를 위한 정상 종료 후 앱 상태 조회에서 재시작된 앱61084/sidecar61089를 확인했으며 추가 정상 종료는 복구 필요로 거절됐다. 강제 종료하지 않았고 새 진단 수정은 설치 전이다. 다음: 이 시험 앱만 종료/교체 승인 후 진단 빌드 반영, 별도 승인된 제한된 실제 초기 연결 관측으로 등록 조합 확정. 이전 유료 시험 승인은 소진 상태며 추가 실제 모델 호출 없음. main 병합/push 없음.
+
+### 2026-11-11 · by GPT-6
+
 - 연결 복구 후 사용자 승인(call_71f16ad95e084be8ad9c1bf079a923a6)의 팀1건/최대12회 시험을 일반 새 채팅→보내기로 실행했다. 실제 Codex 위임→Claude 시작까지 연결됐으나 Claude 초기 연결에서 실패해 자동 재시도 없이 멈췄다. Codex run agent_run_01d7153af01c4bd99d513c368a3ba802 succeeded, Claude run agent_run_06de5599cced40ca873d3a0859a817be failed; 두 기록 모두 cleanExit/processesProvenGone, recovery null, Claude writerLock released를 진단 복사본에서 확인했다. chat_7d3aca62cc8b4f80ba232635db6f0862는 needsAttention/workflow paused다.
 - 실제 UI 연결 진단은 ‘init plugins other builtins / session initialization / session channel’이다. 내장 플러그인 초기 관측의 기존 허용 계약에서 거절된 것으로 범위를 좁혔으나 정확한 등록 조합은 현재 고정 진단만으로 미확정이다. 설치 Claude2.1.322 바이너리의 정적 문자열에서 privacy 등 추가 내장 모듈 존재를 확인했지만 존재를 해당 실행의 등록 증거로 취급하지 않는다. 안전 검사/플러그인 허용 범위는 변경하지 않았다.
 - 임시 원본과 작업 복사본 hello.txt 모두 original 줄이며 파일 수정·최종 취합은 실패했다. 진단 DB 복사본은 확인 즉시 정리했다. 앱/내부 서비스는 종료시키지 않았고 사용자 프로젝트/인증 변경·추가 모델 실행·main 병합/push 없음. 승인된 시험은 실패 시 중단 조건으로 종료됐으며 새 시험 승인은 없다. 다음: 실제 등록 조합을 확인할 수 있는 무과금 진단 또는 제한된 증거 수집을 준비하고 호환 수정/회귀 후 실제 팀 작업을 다시 검증한다. 목표 완료 아님.

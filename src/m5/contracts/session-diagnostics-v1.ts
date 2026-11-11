@@ -7,7 +7,7 @@ const stages = ["start binding", "control initialization", "profile matching", "
   "session state", "session budget", "session tag", "session before init", "session event",
   "init expected", "init shape", "init identity", "init cwd", "init model", "init permission",
   "init tools", "init extensions", "init mcp", "init skills", "init plugins",
-  "init plugins disabled builtins", "init plugins organization guard", "init plugins telemetry",
+  "init plugins disabled builtins", "init plugins organization guard", "init plugins telemetry", "init plugins privacy",
   "init plugins other builtins", "init plugins other registration", "init agents",
   "init plugin errors", "init capabilities"] as const;
 const codexStages = [

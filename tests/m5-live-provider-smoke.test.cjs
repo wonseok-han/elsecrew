@@ -102,12 +102,12 @@ test('new diagnostic groups never export provider payloads', () => {
     'turn stream thread settings','turn stream hook','turn stream model metadata','turn stream warning',
     'turn stream account metadata','turn stream mcp metadata','turn stream moderation metadata'];
   for (const label of labels) child.stderr.emit('data', Buffer.from(`native Codex transport failed at ${label}\n`));
-  for (const suffix of ['disabled builtins','organization guard','telemetry','other builtins','other registration']) {
+  for (const suffix of ['disabled builtins','organization guard','telemetry','privacy','other builtins','other registration']) {
     child.stderr.emit('data', Buffer.from(`native Claude transport failed at init plugins ${suffix}\n`));
   }
   child.stderr.emit('data', Buffer.from('native Claude transport failed at init plugins PRIVATE\nnative Codex transport failed at turn stream warning PRIVATE\n'));
   h.timers.get(240000)();
-  assert.equal(h.evidence().transportCheckpoints.length, 15);
+  assert.equal(h.evidence().transportCheckpoints.length, 16);
   assert.ok(!JSON.stringify(h.evidence()).includes('PRIVATE'));
 });
 

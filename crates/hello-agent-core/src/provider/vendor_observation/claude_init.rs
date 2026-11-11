@@ -149,6 +149,12 @@ pub(super) fn observe_with_guard_policy(
         } else if plugins.iter().all(|plugin| plugin["path"] == "builtin"
             && plugin["source"] == "cc-plugin-telemetry@builtin") {
             "init plugins telemetry"
+        } else if plugins.iter().any(|plugin| plugin["source"] == "cc-plugin-privacy@builtin")
+            && plugins.iter().all(|plugin| plugin["path"] == "builtin"
+                && matches!(plugin["source"].as_str(), Some("cc-plugin-privacy@builtin" | "cc-plugin-sec-default@builtin"))) {
+            // Diagnostic only: this combination remains rejected. Do not disable
+            // a privacy/security module or treat its name as execution authority.
+            "init plugins privacy"
         } else if plugins.iter().all(|plugin| plugin["path"] == "builtin") {
             "init plugins other builtins"
         } else {
@@ -294,6 +300,30 @@ mod tests {
             let mut observed = "";
             assert!(observe_with_stage(&input(&wire), &expected(), &mut observed).is_err());
             assert_eq!(observed, stage);
+        }
+    }
+
+    #[test]
+    fn privacy_diagnostic_never_grants_native_plugin_authority() {
+        let guard = json!({"name":"cc-plugin-sec-default","path":"builtin","source":"cc-plugin-sec-default@builtin"});
+        let privacy = json!({"name":"cc-plugin-privacy","path":"builtin","source":"cc-plugin-privacy@builtin"});
+        for plugins in [json!([privacy.clone()]), json!([guard.clone(), privacy.clone()])] {
+            for opt_in in [false, true] {
+                let mut wire = init();
+                wire["plugins"] = plugins.clone();
+                let mut stage = "";
+                assert!(observe_with_guard_policy(&input(&wire), &expected(), &mut stage, opt_in).is_err());
+                assert_eq!(stage, "init plugins privacy");
+            }
+        }
+        for plugin in [json!({"path":"PRIVATE","source":"cc-plugin-privacy@builtin"}),
+            json!({"path":"builtin","source":"PRIVATE"})] {
+            let mut wire = init();
+            wire["plugins"] = json!([privacy.clone(), plugin]);
+            let mut stage = "";
+            assert!(observe_with_guard_policy(&input(&wire), &expected(), &mut stage, true).is_err());
+            assert!(stage == "init plugins other builtins" || stage == "init plugins other registration");
+            assert!(!stage.contains("PRIVATE"));
         }
     }
 
