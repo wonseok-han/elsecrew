@@ -682,7 +682,14 @@ impl Storage {
         let projection = load_projection(&self.connection)?;
         let input = RecoveryInputV1 {
             previous_app_instance: previous.clone(),
-            runs: projection.runs.into_values().collect(),
+            // Durable actual runs must be recovered by AgentRuntime, which
+            // updates the public record, output seal, chat and writer lock in
+            // one transaction. The legacy top-level-only state rewrite would
+            // violate the durable output binding before that owner can run.
+            runs: projection.runs.into_values().filter(|run| {
+                !(run.get("source_kind").and_then(Value::as_str) == Some("actualAgent")
+                    && run.get("output_format_version").is_some())
+            }).collect(),
             locks: projection.locks.into_values().collect(),
         };
         let recovered = recover_unclean_shutdown_v1(input).map_err(storage_contract_error)?;

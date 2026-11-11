@@ -801,6 +801,47 @@ mod tests {
     }
 
     #[test]
+    fn orchestration_dispatch_reopen_active_durable_run_preserves_recovery_requirement() {
+        let (root, mut sidecar, chat) = service();
+        let response = start(&mut sidecar, &chat);
+        assert!(response.ok);
+        let run_id = response.result.unwrap()["runId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let id = chat["chatId"].as_str().unwrap();
+        let mut ready = sidecar.ready.clone();
+        ready.sidecar_instance_id = "orchestration_crash_reopened".into();
+        drop(sidecar);
+        let binary = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("hello-agent-sidecar");
+        let mut reopened = Sidecar::initialize(
+            root.path().join("data.sqlite3"),
+            ready,
+            AgentRuntime::fake(binary, FakeScenario::OrchestratorFinal),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(reopened.workflow_state(id).unwrap().status, "paused");
+        let run = reopened
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(run["state"], "recoveryRequired");
+        assert_eq!(run["record"]["state"], "recoveryRequired");
+        assert_eq!(run["recovery"]["state"], "unresolved");
+        assert_eq!(run["recovery"]["poisoned"], true);
+        reopened.poll_runtime_events().unwrap();
+        assert_eq!(reopened.storage.projection_records("run").unwrap().len(), 1);
+    }
+
+    #[test]
     fn orchestration_dispatch_queued_cancel_rejects_stale_target_and_never_launches() {
         let (_root, mut sidecar, chat) = service();
         let id = chat["chatId"].as_str().unwrap();

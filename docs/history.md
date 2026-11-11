@@ -4,6 +4,12 @@
 
 ### 2026-11-11 · by GPT-6
 
+- 92a3a82d 패키지와 임시 package smoke는 통과했지만 기존 DB 재열기에서 저장 입장이 실패했다. 원본 DB를 읽기 전용으로 복사해 원인을 재현했다: 일반 비정상 종료 복구가 durable actual run의 최상위 state만 바꾸어 public record/output 결속을 깨뜨렸다. 원본 원장·잠금·인증은 수동 변경하지 않았다. 준비 실패 앱은 정상 종료했다.
+- durable actual run은 일반 복구에서 제외하고 바로 뒤의 AgentRuntime 전용 복구에서 run/chat/output seal/poisoned writer lock을 원자적으로 갱신하도록 수정했다. legacy/fixture 복구는 유지한다. 재시작은 복구 필요/paused를 보존하고 모델을 자동 재실행하지 않는다.
+- 검증: 복사 DB 재현의 수정 후 복구·출력 결속 확인, orchestration14개와 기존 unclean recovery1개·diff check 통과. 독립 검토 차단 지적 없음. 다음: 승인된 설치 앱 교체·실제 DB 준비 완료 확인. 추가 실제 모델 재시험은 미승인이며 협업 완료로 선언하지 않는다.
+
+### 2026-11-11 · by GPT-6
+
 - 승인된 수정본 팀 작업1건은 Codex 위임/정상 종료 후 Claude coding run 예약(preparing)까지 진행했으나 연결이 종료됐다. agent_run_3fb0c4daa3194e5b83272eed416302e4의 cleanExit/processesProvenGone과 child agent_run_0de080828f8841f6ae618bd3aaf172c2 예약을 원장에서 확인했다. 원본 hello.txt는 original이며 추가 모델 재시도 없음. 승인된 시험 앱 PID50529만 종료했다.
 - 원인/수정: 내부 팀원 시작 응답을 renderer에 숨기면서 Electron의 accepted-run registry 등록도 누락했다. 새 agent.teamRunAccepted를 최초 명시 총괄 실행 ID와 같은 채팅/작업 복사본에 결속하고 child 이벤트보다 먼저 전달한다. 중복/미승인 root/주소 불일치/11개 초과 후속 실행을 거부하며 기존 admission·종료·복구 권한은 유지한다. 팀 진행 알림이 공급자 최종 메시지 hydration보다 먼저 도착하면 durable 기록을 다시 읽어 빈 순번을 보충하며 누락을 무시하지 않는다.
 - 검증: Rust orchestration13개(개발/최종 총괄 모두 acceptance 선행), Rust protocol66개, Electron/대화 상태94개, TS protocol4개·TypeScript·diff check 통과. 프로토콜 이벤트 목록 golden2개 초기 실패는 새 이벤트 계약을 반영해 통과했다. 독립 검토 차단 지적 없음. 다음: 수정본 패키지·설치 반영 후 별도 승인된 실제 시험으로 Claude 수정/최종 취합 확인. 실제 협업 완료는 아직 미입증이다.
