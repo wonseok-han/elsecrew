@@ -3,6 +3,12 @@
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
 ### 2026-11-11 · by GPT-6
+- 사용자 승인으로 Claude usage 조회를 활성화했다. 실제 macOS 앱은 .credentials.json이 없고 앱 전용 profile hash 서비스/account=unknown 키체인 항목을 사용했다. 앱 로그인은 env_clear로 USER 없이 실행하므로 이 계정이 생성됨을 비밀값 없는 metadata 조회로 확인했다. OS 사용자명 계정 조회는44(없음). 정확한 앱 서비스+unknown만 읽고 글로벌 서비스 fallback 없음;44만 검증된 프로필 파일 fallback, 다른 키체인 오류는 unavailable. 독립 재검토 활성화 차단 없음.
+- 프로젝트 ⋯ 메뉴도 아래/왼쪽 행을 덮는 배치에서 트리거 오른쪽 옆 top-layer로 변경했다. 공간 부족 때만 왼쪽으로 뒤집고 viewport 안으로 제한하며 외부 클릭/Escape 닫기 유지. 설치본에서 sidebar 밖 독립 메뉴를 확인했다. 사용량 아이콘·비동기 높이 보정 최신본도 함께 설치했다.
+- 검증: 후보 unit5개·TypeScript·Electron 조회 module 타입검사·renderer/Chromium2개·package 통과. 실제 앱에서 Codex7일51%, Claude5시간1%/7일7% 및 reset시각 확인. 유료 모델 호출/원본 변경/로그인 변경 없음. 출처 https://github.com/stablyai/orca/issues/27150 , https://github.com/anthropics/claude-code/issues/79223 (upstream namespace 설명; 앱 항목은 별도 metadata로 검증).
+- 새 사용자 요청: 자동 설치 감지와 앱 사용 연결을 분리하고 명시 연결/해제를 제공한다. 현행 provider-login.tsx는 connected 시 연결 버튼을 disabled 처리하며 별도 해제가 없다. 해제 시 로그인 보존 vs 로그아웃을 질문 중이다. UI만 바꾸지 않고 background 팀 위임·새 실행·사용량 조회의 연결 정책까지 연결할 후속 작업이며 아직 구현되지 않았다. 실행 중 프로세스는 임의 종료하지 않는다. main/push 없음.
+
+### 2026-11-11 · by GPT-6
 - de175e8e 설치본에서 Codex 사용량 실제 표시와 자체 빈 폴더 초기화→프로젝트 열기를 확인했다. 시험 프로젝트는 앱 목록에서 제거했으며 사용자 원본/유료 모델 호출 없음.
 - 사용량 상세를 sidebar를 밀어내는 details에서 native top-layer popover로 전환하고 새로고침은28px 회전 아이콘/tooltip/aria-label로 축소했다. 설치본 실제 화면에서 sidebar 밖 불투명 팝업·아이콘과 Codex49%를 확인했다. CUA 외부 클릭 재확인은 창 접근 오류로 미확인, native auto-popover의 기본 닫기 동작을 사용한다. 조회 후 크기 변화 위치 보정은 추가 구현했다.
 - Claude ‘제공하지 않는다’ 문구는 구현 미연결을 공급자 제약처럼 표현한 오류여서 제거했다. Orca 공식 docs/agents/usage-tracking 및 공식 repo issue27150은 기존 Claude OAuth로 Anthropic api/oauth/usage를 조회한다고 설명한다. 앱 전용 .credentials.json만 읽는 후보는 nofollow·owner0600·single-link·64KiB·profile0700/신원 재검사, 고정 HTTPS GET/redirect 금지/8초 timeout·정규화 표시값만 전달하며 credential 쓰기/갱신/로그/renderer 노출 없음. 추정 Keychain 접근은 독립 검토 지적에 따라 제거했다. main IPC는 고정 unavailable로 신규 인증 읽기/네트워크 기능 비활성, 사용자 활성화 승인 대기다.

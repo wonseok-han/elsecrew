@@ -263,6 +263,8 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-project-context-popup:popover-open')", "top-layer project menu")};
     const menuSurface = overflow.querySelector('div');
     const menuBounds = menuSurface.getBoundingClientRect();
+    const menuAnchor = overflow.querySelector('summary').getBoundingClientRect();
+    if (menuBounds.left < menuAnchor.right || Math.abs(menuBounds.top - menuAnchor.top) > 1) throw new Error('project context must open beside its trigger');
     if (menuBounds.left < 0 || menuBounds.right > innerWidth || menuBounds.bottom > innerHeight || document.elementFromPoint(menuBounds.right - 12, menuBounds.top + 12)?.closest('.m5-project-context-popup') !== menuSurface) throw new Error('project menu clipped by sidebar');
     if (menuSurface.getBoundingClientRect().width < 200 || getComputedStyle(menuSurface).backgroundColor !== 'rgb(48, 52, 59)' || !menuSurface.querySelector('button svg')) throw new Error('context menu needs an opaque distinct surface and icons');
     if (getComputedStyle(rail).userSelect !== 'none') throw new Error('app chrome text is selectable');

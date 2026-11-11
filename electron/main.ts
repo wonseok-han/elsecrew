@@ -393,8 +393,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle(CLAUDE_USAGE_CHANNEL, async (event, ...args: unknown[]) => {
     assertCurrentMainFrame(event);
     if (args.length) throw new Error("usage takes no input");
-    // New credential-read boundary remains disabled pending explicit activation.
-    return validateClaudeUsageResult({state:"unavailable",usage:null,checkedAt:Date.now()});
+    return validateClaudeUsageResult(await claudeUsage.read());
   });
   gitPreparation = new GitPreparationClient(sidecarLaunch(m5DataDirectory()));
   const gitSelection = new GitSelectionStore(m5DataDirectory(), process.platform, app.getPath("userData"));

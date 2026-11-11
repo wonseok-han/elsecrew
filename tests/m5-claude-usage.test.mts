@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validCredentialFile,parseClaudeQuota,queryClaudeQuota,CLAUDE_USAGE_URL} from '../electron/claude-usage.ts';
+import {appClaudeKeychainArgs,keychainFailureState,validCredentialFile,parseClaudeQuota,queryClaudeQuota,CLAUDE_USAGE_URL} from '../electron/claude-usage.ts';
 import {validateClaudeUsageResult} from '../src/m5/contracts/provider-usage-v1.ts';
 test('quota projects only bounded display windows and accepts fractional ISO reset',()=>{
  const usage=parseClaudeQuota({five_hour:{utilization:12.5,resets_at:'2026-11-11T01:00:00.123Z'},seven_day:null,account:'private'});
@@ -34,4 +34,14 @@ test('credential source rejects hard links and non-private files',()=>{
  assert.equal(validCredentialFile({...stat,nlink:2},501),false);
  assert.equal(validCredentialFile({...stat,mode:0o644},501),false);
  assert.equal(validCredentialFile(stat,502),false);
+});
+
+test('Keychain lookup fixes service and app-login account with no global fallback',()=>{
+ const args=appClaudeKeychainArgs('/app/claude-profile-v1');
+ assert.deepEqual(args.slice(0,2),['find-generic-password','-s']);
+ assert.match(args[2],/^Claude Code-credentials-[a-f0-9]{8}$/);
+ assert.deepEqual(args.slice(3),['-a','unknown','-w']);
+ assert.notEqual(args[2],appClaudeKeychainArgs('/other/claude-profile-v1')[2]);
+ assert.equal(keychainFailureState(44),'missing');
+ for(const code of [1,36,'ETIMEDOUT',undefined]) assert.equal(keychainFailureState(code),'unavailable');
 });

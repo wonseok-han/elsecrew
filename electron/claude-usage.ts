@@ -1,4 +1,6 @@
 //! Privileged, read-only quota lookup. Never returns or logs credentials.
+import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
 import { join } from "node:path";
@@ -6,6 +8,24 @@ import type { ClaudeUsageResult, ProviderUsage } from "../src/m5/contracts/provi
 
 export const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const MAX_BYTES = 64 * 1024;
+export function appClaudeKeychainArgs(profile: string): string[] {
+  const suffix = createHash("sha256").update(profile.normalize("NFC")).digest("hex").slice(0, 8);
+  // App login clears USER; Claude stores this isolated profile under its "unknown" account.
+  return ["find-generic-password", "-s", `Claude Code-credentials-${suffix}`, "-a", "unknown", "-w"];
+}
+export function keychainFailureState(code: unknown): "missing" | "unavailable" {
+  return code === 44 ? "missing" : "unavailable";
+}
+async function readKeychain(profile: string): Promise<Buffer | null> {
+  return new Promise((resolve, reject) => {
+    execFile("/usr/bin/security", appClaudeKeychainArgs(profile), {timeout:5000,maxBuffer:MAX_BYTES,encoding:"buffer"}, (error, stdout) => {
+      if (!error) { resolve(stdout); return; }
+      stdout?.fill(0);
+      if (keychainFailureState(error.code) === "missing") resolve(null);
+      else reject(new Error("credential store unavailable"));
+    });
+  });
+}
 export function validCredentialFile(stat: {isFile(): boolean; uid: number; mode: number; size: number; nlink: number}, uid: number | undefined): boolean {
   return stat.isFile() && stat.uid === uid && (stat.mode & 0o777) === 0o600 && stat.nlink === 1 && stat.size <= MAX_BYTES;
 }
@@ -42,9 +62,11 @@ async function profileIdentity(profile: string): Promise<string> {
 }
 async function readScopedCredential(profile: string): Promise<{ accessToken: string; expiresAt: number } | null> {
   const identity = await profileIdentity(profile);
-  let credential: { accessToken: string; expiresAt: number } | null = null;
-  // Read only the dedicated profile, never a global or inferred Keychain item.
-  {
+  const stored = await readKeychain(profile);
+  let credential = stored ? parseCredential(stored) : null;
+  if (stored && !credential) throw new Error("credential unavailable");
+  // File fallback only if the exact app Keychain item does not exist.
+  if (!stored) {
     let file;
     try {
       file = await open(join(profile,".credentials.json"), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);

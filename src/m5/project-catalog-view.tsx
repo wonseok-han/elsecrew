@@ -17,8 +17,11 @@ function ProjectMenu({ label, children }: { label: string; children: ReactNode }
       panel.showPopover();
       const anchor = host.querySelector("summary")!.getBoundingClientRect();
       const bounds = panel.getBoundingClientRect();
-      panel.style.left = `${Math.max(8, Math.min(anchor.right - bounds.width, window.innerWidth - bounds.width - 8))}px`;
-      panel.style.top = `${Math.max(8, Math.min(anchor.bottom + 5, window.innerHeight - bounds.height - 8))}px`;
+      // Open beside the trigger, crossing the rail edge instead of covering its rows.
+      const right = anchor.right + 10;
+      const left = right + bounds.width <= window.innerWidth - 8 ? right : anchor.left - bounds.width - 10;
+      panel.style.left = `${Math.max(8, Math.min(left, window.innerWidth - bounds.width - 8))}px`;
+      panel.style.top = `${Math.max(8, Math.min(anchor.top, window.innerHeight - bounds.height - 8))}px`;
     };
     const outside = (event: PointerEvent) => { if (!host.contains(event.target as Node)) close(); };
     const scroll = (event: Event) => { if (!panel.contains(event.target as Node)) close(); };
