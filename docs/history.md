@@ -4,6 +4,10 @@
 
 ### 2026-11-11 · by GPT-6
 
+- 83b6fb0d 수정본 macOS 패키징·package smoke 통과 후 기존 설치 경로에 반영하고 실제 앱의 준비 완료/프로젝트 목록 표시를 확인했다. 재시작은 팀 작업을 자동 실행하지 않았다. 임시 프로젝트는 다음 승인된 시험에 재사용하도록 보존했다. 실제 Claude 실행·최종 취합은 여전히 미검증이며 추가 모델 실행 없이 재시험 승인을 요청한다. main 병합·push 없음.
+
+### 2026-11-11 · by GPT-6
+
 - 재승인된 팀 작업은 Codex gpt-6.1-sol/medium의 실제 위임 판단·succeeded/cleanExit/processesProvenGone까지 완료했으나 다음 팀 진행 알림에서 sidecar exit70으로 중단됐다. 원장에는 coding 예약 전(step1/run_id null)으로 남았으며 추가 모델 재시도는 하지 않았다. 사용자 승인으로 시험 앱 PID5604만 종료하고 수정본을 반영한다.
 - 결함: orchestration notice가 durable eventSequence를 chat_ledger 통신 seq로 보내 첫 알림부터 순번 gap을 만들었다. 독립적인 단일 알림 stream seq1과 payload의 durable 순번을 분리했다. 실제 ProtocolSession 검사를 통과하는 회귀를 추가해 수정 전 expected1/got2 실패, 수정 후 관련 Rust13개 통과를 확인했다. 원본 hello.txt는 original 그대로다. 다음은 패키지 검증/반영, 별도 재승인 후 실제 위임→팀원→취합을 확인하는 것이다.
 - 기록 롤오버: 11월10일 워크로그 전체를 월별 아카이브로 이동했다. 고정 섹션과 11월11일 당일 기록의 합이300줄을 넘어 날짜 경계 보존을 우선했다. main 병합·push 없음.
