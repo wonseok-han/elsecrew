@@ -192,7 +192,7 @@ h1 { margin: 0; font-size: 22px; }
 .m5-project-catalog-list li button { display: grid; gap: 6px; width: 100%; text-align: left; }
 .m5-project-catalog-list li span { font-size: 12px; color: #b8c2ce; overflow-wrap: anywhere; }
 .m5-project-catalog-list > div { display: flex; flex-wrap: wrap; gap: 8px; }
-.m5-with-project-rail { --m5-project-rail-width: 92px; padding: 12px 12px 12px calc(var(--m5-project-rail-width) + 12px); }
+.m5-with-project-rail { --m5-project-rail-width: 0px; padding: 12px 12px 12px calc(var(--m5-project-rail-width) + 12px); }
 .m5-with-project-rail:has(.m5-project-rail-expanded) { --m5-project-rail-width: 240px; }
 .m5-project-rail { position: fixed; inset: 0 auto 0 0; width: var(--m5-project-rail-width); box-sizing: border-box; padding: 16px 8px; overflow: auto; background: var(--m5-surface); border-right: 1px solid var(--m5-border); display: flex; flex-direction: column; }
 .m5-project-rail h2 { margin: 0 8px 16px; font-size: 14px; }
@@ -969,3 +969,9 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
   position: fixed; inset: auto; margin: 0; max-width: calc(100vw - 16px);
   max-height: calc(100vh - 16px); overflow: auto;
 }
+
+/* A collapsed sidebar leaves only its reopen control, never a miniature list. */
+.m5-project-rail:not(.m5-project-rail-expanded) { width: 0; padding: 0; border: 0; overflow: visible; background: transparent; }
+.m5-project-rail:not(.m5-project-rail-expanded) > :not(.m5-rail-bookmark) { display: none; }
+.m5-project-rail:not(.m5-project-rail-expanded) > .m5-rail-bookmark { left: 12px; }
+.m5-with-project-rail:not(:has(.m5-project-rail-expanded)) > .m5-toolbar { padding-left: 40px; }
