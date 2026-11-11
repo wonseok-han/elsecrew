@@ -3,6 +3,9 @@
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
 ### 2026-11-11 · by GPT-6
+- 사용자 선택에 따라 접힌 sidebar 펼치기를 제목 행에서 제거하고 화면 왼쪽 가장자리12px 책갈피 탭으로 이동했다. 본문/제목 공간을 차지하지 않으며 hover/focus 강조와 클릭 펼치기를 유지한다. TypeScript/renderer build/Chromium2개 통과, 기존 앱 정상 종료. 설치 반영 진행.
+
+### 2026-11-11 · by GPT-6
 - 접힌 sidebar 펼치기 버튼을 fixed 떠 있는 버튼에서 실제 toolbar 제목 행의 무테 sidebar 아이콘으로 이동했다. rail 상태를 부모에서 제어하며 다시 펼치기와 기존 오류 시 펼침을 유지한다. TypeScript/renderer build/Chromium2개 통과, 기존 앱 정상 종료 확인. 44ac0d02 package/package smoke 통과·설치 후 실제 접힌 화면에서 제목 옆 무테 아이콘을 확인했다. main/push 없음.
 
 ### 2026-11-11 · by GPT-6
