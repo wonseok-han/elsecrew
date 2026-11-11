@@ -72,6 +72,9 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-app-statusbar').textContent.includes('Claude') && document.querySelector('.m5-app-statusbar').textContent.includes('연결 안 됨')", "both disconnected summaries")};
     if(document.querySelector('.m5-project-rail .m5-provider-usage')) throw new Error('usage still occupies sidebar');
     const usageHeight = document.querySelector('.m5-provider-usage').getBoundingClientRect().height;
+    const statusTop = document.querySelector('.m5-app-statusbar').getBoundingClientRect().top;
+    const settingsRect = document.querySelector('.m5-open-preferences').getBoundingClientRect();
+    if (document.querySelector('.m5-project-rail').getBoundingClientRect().bottom > statusTop || settingsRect.bottom > statusTop || !document.elementFromPoint(settingsRect.x + settingsRect.width / 2, settingsRect.y + settingsRect.height / 2)?.closest('.m5-open-preferences')) throw new Error('statusbar covers sidebar settings');
     document.querySelector('.m5-usage-trigger').click();
     await ${waitFor("document.querySelector('.m5-provider-usage-content').matches(':popover-open')", "usage top layer")};
     if (document.querySelector('.m5-provider-usage').getBoundingClientRect().height !== usageHeight) throw new Error('usage popup shifted sidebar');
