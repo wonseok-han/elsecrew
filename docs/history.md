@@ -4,6 +4,12 @@
 
 ### 2026-11-11 · by GPT-6
 
+- e0f13b8f macOS 패키지 및 package smoke 통과 후 설치본을 다시 열었다. 불투명 컨텍스트 메뉴의 대비·아이콘·삭제 강조를 실제 화면에서 확인했다. 완료 채팅을 다시 선택해 검토 준비, 세 실행 기록, 개발 보고와 총괄 최종 답변의 영속성을 확인했다.
+- 메시지 본문 위에서 위로 스크롤하여 이전 개발 보고로 이동하고 입력칸은 고정되는 것을 확인했다. UI 선택 방지와 편집 입력 예외는 앞선 renderer smoke로 검증했다. 추가 모델 호출·원본 반영·강제 종료·push는 없었다.
+- 핵심 오케스트레이션의 승인된 실제 Codex→Claude→Codex 위임·작업·보고·취합 검증은 완료했다. 전체 M5 출시 완료와는 구분하며 Windows/누적 성능·출시 검증은 기존 미완료 상태를 유지한다.
+
+### 2026-11-11 · by GPT-6
+
 - 2e9fd3cc macOS package/package smoke 통과 및 설치 후 승인된 임시 팀1건을 일반 새 채팅→보내기로 수행했다. Codex gpt-6.1-sol/medium→Claude opus→Codex gpt-6.1-sol/medium의3회 실행이 모두 succeeded/cleanExit/processesProvenGone, recovery null이다. 최초 타이핑의 한글 누락은 전송 전에 붙여넣기로 교정했다. Claude의 임시 hello.txt 확인/수정 Bash2건만 상세 확인 후 앱에서1회씩 허용했다.
 - chat_893b0867a86645d796bd03f10e32a7d7, 총괄 agent_run_fe74624541e44de9ac885440a3ef408e, 개발 agent_run_a9af74b3b0bb48ea9d2ebd8879a2e7e2, 최종 총괄 agent_run_0d461911e5d948769d9a544bbf2d58dd. 화면에서 위임/개발 보고/최종 답변/검토 준비와 hello.txt 단일 diff를 확인했다. 앱 정상 종료 후 읽기 전용 진단 복사본에서 orchestration_v1.status=completed/step2, chat=reviewReady, run3건, Claude writerLock=released 및 privacy+sec-default 관측을 확인했다. 직접 DB 읽기는 열기 실패하여 종료된 DB의 임시 복사본을 사용했고 즉시 정리했다.
 - 임시 원본 elsecrew-team-live-nq8zo737의 Git 깨끗함 및 hello.txt=original\n, worktree_ec75032554f64fcaa44be90620e9428d의 hello.txt=HELLO_TEAM_ORCHESTRATION_OK\n(28바이트)를 직접 확인했다. 원본 반영·추가 모델 실행·강제 종료·main/push 없음. 핵심 위임→작업→보고→취합의 실제 성공 증거이며 전체 제품/Windows/출시 완료는 아니다.
