@@ -393,7 +393,12 @@ function registerIpcHandlers(): void {
   ipcMain.handle(CLAUDE_USAGE_CHANNEL, async (event, ...args: unknown[]) => {
     assertCurrentMainFrame(event);
     if (args.length) throw new Error("usage takes no input");
-    return validateClaudeUsageResult(await claudeUsage.read());
+    if (!sidecar) throw new Error("sidecar was not started");
+    const before = await sidecar.projectCatalog({action:"getProviderConnections"});
+    if (before.action !== "getProviderConnections" || !before.connections["claude-code"]) return {state:"notConnected",usage:null,checkedAt:Date.now()};
+    const result = await claudeUsage.read();
+    const after = await sidecar.projectCatalog({action:"getProviderConnections"});
+    return validateClaudeUsageResult(after.action === "getProviderConnections" && after.connections["claude-code"] ? result : {state:"notConnected",usage:null,checkedAt:Date.now()});
   });
   gitPreparation = new GitPreparationClient(sidecarLaunch(m5DataDirectory()));
   const gitSelection = new GitSelectionStore(m5DataDirectory(), process.platform, app.getPath("userData"));
@@ -434,7 +439,9 @@ function registerIpcHandlers(): void {
       return gitPreparation!.request(request, () => assertCurrentMainFrame(event));
     }
     if (!sidecar) throw new Error("sidecar was not started");
-    return validateProjectCatalogResult(await sidecar.projectCatalog(request), request);
+    const result = validateProjectCatalogResult(await sidecar.projectCatalog(request), request);
+    if (request.action === "setProviderConnection") claudeUsage.invalidate();
+    return result;
   });
   ipcMain.handle(APPROVAL_CHANNEL, async (event, input: unknown) => {
     assertCurrentMainFrame(event);
@@ -446,6 +453,11 @@ function registerIpcHandlers(): void {
     assertCurrentMainFrame(event);
     if (!sidecar) throw new Error("sidecar was not started");
     const request = validateLoginRequest(input);
+    if (request.action === "start" || request.action === "check" || request.action === "submitCode") {
+      const connected = await sidecar.projectCatalog({action:"getProviderConnections"});
+      const runtime = request.provider === "claude" ? "claude-code" : "codex";
+      if (connected.action !== "getProviderConnections" || !connected.connections[runtime]) throw new Error("providerDisconnected");
+    }
     claudeUsage.invalidate();
     const result = await sidecar.login(request)
       .then(value => validateLoginStatus(value, request.provider))

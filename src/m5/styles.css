@@ -716,8 +716,8 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-dock-group-tabs { flex-wrap: wrap; overflow: visible; }
 
 /* Settings shares the workbench's surface, border and typography tokens. */
-.m5-settings-open > :not(.m5-app-settings) { display: none !important; }
-.m5-workbench.m5-settings-open { padding: 0; }
+.m5-settings-open > :not(.m5-app-settings):not(.m5-app-statusbar) { display: none !important; }
+.m5-workbench.m5-settings-open { padding: 0 0 28px; }
 .m5-app-settings[hidden] { display: none; }
 .m5-app-settings { --m5-settings-nav-width: 224px; display: grid; grid-template-rows: 52px minmax(0, 1fr); width: 100%; height: 100%; min-height: 0; padding: 0; box-sizing: border-box; overflow: hidden; color: var(--m5-text); background: var(--m5-bg); outline: none; }
 .m5-app-settings > header { display: grid; grid-template-columns: var(--m5-settings-nav-width) minmax(0, 1fr); align-items: center; border-bottom: 1px solid var(--m5-border); }
@@ -1070,3 +1070,13 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-usage-refresh[aria-busy="true"] svg { animation: m5-usage-spin 1s linear infinite; }
 @keyframes m5-usage-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .m5-usage-refresh[aria-busy="true"] svg { animation: none; } }
+
+/* Shared application status stays visible independently of the project rail. */
+.m5-workbench { padding-bottom: 34px; }
+.m5-app-statusbar { position: fixed; bottom: 0; left: 0; right: 0; height: 28px; z-index: 90; display: flex; align-items: center; padding: 0 10px; background: var(--m5-surface); border-top: 1px solid var(--m5-border); }
+.m5-app-statusbar .m5-provider-usage { border: 0; }
+.m5-app-statusbar .m5-usage-trigger { min-height: 26px; padding: 2px 6px; gap: 18px; justify-content: flex-start; }
+.m5-usage-summary { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.m5-usage-summary b { font-weight: 500; color: var(--m5-text); }
+.m5-usage-summary + .m5-usage-summary { border-left: 1px solid var(--m5-border); padding-left: 14px; }
+@media(max-width:600px) { .m5-app-statusbar { overflow-x: auto; } .m5-usage-summary { gap: 5px; } }

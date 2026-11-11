@@ -40,6 +40,8 @@ function validateGitTrustInspection(value: unknown): GitTrustInspection {
 }
 export type TeamTaskCancelRequest = ChatDiscardAddress & { action: "cancelTeamTask"; triggerMessageId: string };
 export type ProjectCatalogRequest =
+  | { action: "getProviderConnections" }
+  | { action: "setProviderConnection"; runtime: "codex" | "claude-code"; connected: boolean }
   | TeamTaskCancelRequest
   | { action: "inspectGitTrust" }
   | { action: "confirmGitTrust"; identity: GitTrustIdentity; confirmed: true }
@@ -79,6 +81,7 @@ export type ProjectCatalogRequest =
   | { action: "abandonPreparation"; inspection: PreparationInspection };
 export interface ProjectCatalogEntry { projectId: string; canonicalPath: string }
 export type ProjectCatalogResult =
+  | { schemaVersion: 1; action: "getProviderConnections" | "setProviderConnection"; connections: { codex: boolean; "claude-code": boolean } }
   | { schemaVersion: 1; action: "cancelTeamTask"; chatId: string; triggerMessageId: string; status: "stopping" | "stopped" }
   | { schemaVersion: 1; action: "inspectGitTrust" | "confirmGitTrust"; inspection: GitTrustInspection }
   | { schemaVersion: 1; action: "revokeGitTrust"; revoked: true }
@@ -156,6 +159,11 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
     keys(request, ["action", "identity", "confirmed"]);
     validateGitTrustIdentity(request.identity);
     if (request.confirmed !== true) throw new Error("Git trust requires explicit confirmation");
+  } else if (request.action === "getProviderConnections") {
+    keys(request,["action"]);
+  } else if (request.action === "setProviderConnection") {
+    keys(request,["action","runtime","connected"]);
+    if ((request.runtime !== "codex" && request.runtime !== "claude-code") || typeof request.connected !== "boolean") throw new Error("invalid provider connection");
   } else if (request.action === "getAppRoleDefaults") {
     keys(request, ["action"]);
   } else if (request.action === "updateAppRoleDefaults") {
@@ -232,6 +240,11 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   } else if (request.action === "revokeGitTrust") {
     keys(result, ["schemaVersion", "action", "revoked"]);
     if (result.revoked !== true) throw new Error("Git trust revocation was not confirmed");
+  } else if (request.action === "getProviderConnections" || request.action === "setProviderConnection") {
+    keys(result,["schemaVersion","action","connections"]);
+    const connections=object(result.connections); keys(connections,["codex","claude-code"]);
+    if (typeof connections.codex !== "boolean" || typeof connections["claude-code"] !== "boolean") throw new Error("invalid provider connections");
+    if (request.action === "setProviderConnection" && connections[request.runtime] !== request.connected) throw new Error("connection result mismatch");
   } else if (request.action === "getAppRoleDefaults" || request.action === "updateAppRoleDefaults") {
     keys(result, ["schemaVersion", "action", "settings"]);
     const settings = object(result.settings);

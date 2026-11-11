@@ -1,3 +1,4 @@
+import { readConnections, changeConnection, CONNECTIONS_CHANGED } from "./provider-connections.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { loginErrorMessage } from "./provider-login-message.ts";
@@ -94,7 +95,7 @@ export function ProviderLogin({ disabled, compact: preferCompact = false, return
     {!settingsPage && !compact && <div className="m5-setup-next"><p>{t("m5.setup.steps.installHelp")}</p><button type="button" disabled={installBlocked || selected.length === 0} onClick={() => navigate("login")}>{t("m5.setup.steps.toLogin")}</button></div>}
     </div>
     <div hidden={!settingsPage && !compact && step !== "login" && !loginNeedsAttention}>
-    {LOGIN_PROVIDERS.filter(provider => selected.includes(provider)).map(provider => <ProviderConnection key={`${provider}:${checks[provider]}`} disabled={disabled || installBlocked} provider={provider} alwaysExpanded={settingsPage} onAttention={reportLoginAttention}/>)}
+    {LOGIN_PROVIDERS.filter(provider => settingsPage || selected.includes(provider)).map(provider => <ProviderConnection key={`${provider}:${checks[provider]}`} disabled={disabled || installBlocked} provider={provider} alwaysExpanded={settingsPage} onAttention={reportLoginAttention}/>)}
     {!settingsPage && !compact && <p className="m5-setup-next">{t("m5.setup.steps.projectHelp")}</p>}
     </div>
     </div>
@@ -142,6 +143,23 @@ function DeviceCheck({ expanded = false }: { expanded?: boolean }) {
 function ProviderConnection({ disabled, provider, alwaysExpanded = false, onAttention }: {alwaysExpanded?: boolean; disabled: boolean; provider: LoginProvider; onAttention: (provider: LoginProvider, attention: boolean) => void}) {
   const { lang, t } = useI18n();
   const name = provider === "codex" ? "Codex" : "Claude Code";
+  const [appConnected,setAppConnected] = useState<boolean | null>(null);
+  const [connectionBusy,setConnectionBusy] = useState(false);
+  const [connectionError,setConnectionError] = useState(false);
+  const runtime = provider === "codex" ? "codex" : "claude-code";
+  useEffect(() => {
+    let alive = true;
+    const load = () => { void readConnections().then(value => { if(alive) { setAppConnected(value[runtime]); setConnectionError(false); } }).catch(() => { if(alive) setConnectionError(true); }); };
+    load(); window.addEventListener(CONNECTIONS_CHANGED,load);
+    return () => { alive=false; window.removeEventListener(CONNECTIONS_CHANGED,load); };
+  },[runtime]);
+  const toggleConnection = async () => {
+    if(connectionBusy || appConnected === null) return;
+    setConnectionBusy(true); setConnectionError(false);
+    try { const value=await changeConnection(runtime,!appConnected); setAppConnected(value[runtime]); }
+    catch { setConnectionError(true); }
+    finally {setConnectionBusy(false);}
+  };
   const [status,setStatus] = useState<LoginStatus>({state:"idle",attemptId:null,authUrl:null,error:null});
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState(false);
@@ -165,14 +183,14 @@ function ProviderConnection({ disabled, provider, alwaysExpanded = false, onAtte
   };
   useEffect(() => {
     mounted.current=true;
-    if(disabled) return;
+    if(disabled || appConnected !== true) return;
     if (!checked.current) {
       checked.current=true;
       void request({action:"diagnose",attemptId:crypto.randomUUID()});
     } else void request({action:"status"});
     return () => { mounted.current=false; };
-  },[disabled]);
-  const poll = shouldPollLogin(status.state, error, disabled);
+  },[disabled,appConnected]);
+  const poll = shouldPollLogin(status.state, error, disabled || appConnected !== true);
   useEffect(() => {
     if (!poll) return;
     const timer = window.setInterval(() => void request({action:"status"}), 500);
@@ -181,10 +199,10 @@ function ProviderConnection({ disabled, provider, alwaysExpanded = false, onAtte
   useEffect(() => {
     // Installation is not authentication. Only the existing account check can
     // report a connected account; diagnosis never reads credentials.
-    if (!disabled && status.state === "installed") {
+    if (!disabled && appConnected === true && status.state === "installed") {
       void request({action:"check",attemptId:crypto.randomUUID()});
     }
-  },[disabled,status.state]);
+  },[disabled,appConnected,status.state]);
   useEffect(()=>{setCode("");setCodeError(false);},[status.attemptId,status.state]);
   useEffect(()=>{ if (status.state === "connected") setExpanded(false); },[status.state]);
   const waiting=status.state === "diagnosing" || status.state === "starting" || status.state === "waiting" || status.state === "verifying";
@@ -195,11 +213,14 @@ function ProviderConnection({ disabled, provider, alwaysExpanded = false, onAtte
   }, [provider, waiting, recoveryRequired, error, status.state, onAttention]);
   const canCollapse=!alwaysExpanded && status.state === "connected" && !status.error && !error;
   const showDetails=!canCollapse || expanded;
-  const label = t(`m5.login.state.${status.state}`, { name });
+  const label = appConnected === true ? t(`m5.login.state.${status.state}`, { name }) : t("m5.connection.off");
   return <section className="m5-provider-login" aria-label={t("m5.login.section", { name })}>
     <div><strong>{t("m5.login.section", { name })}</strong><p role="status">{label}</p><small>{t("m5.login.separate")}</small></div>
-    {canCollapse && <button type="button" aria-expanded={showDetails} aria-controls={`${provider}-connection-details`} onClick={()=>setExpanded(value=>!value)}>{t(showDetails ? "m5.login.hideDetails" : "m5.login.showDetails")}</button>}
-    <div id={`${provider}-connection-details`} hidden={!showDetails}>
+    <button type="button" disabled={disabled || connectionBusy || appConnected === null || waiting} onClick={()=>void toggleConnection()}>{t(appConnected ? "m5.connection.disconnect" : "m5.connection.connect")}</button>
+    {connectionError && <p role="alert">{t("m5.connection.failed")}{appConnected === null && <button type="button" aria-label={t("m5.device.refresh")} title={t("m5.device.refresh")} onClick={() => window.dispatchEvent(new Event(CONNECTIONS_CHANGED))}>↻</button>}</p>}
+    {appConnected === false && <small>{t("m5.connection.retained")}</small>}
+    {appConnected && canCollapse && <button type="button" aria-expanded={showDetails} aria-controls={`${provider}-connection-details`} onClick={()=>setExpanded(value=>!value)}>{t(showDetails ? "m5.login.hideDetails" : "m5.login.showDetails")}</button>}
+    <div id={`${provider}-connection-details`} hidden={!showDetails || appConnected !== true}>
     <details className="m5-login-account-help">
       <summary>{t("m5.login.existing.title")}</summary>
       <p>{t("m5.login.existing.help", { name })}</p>

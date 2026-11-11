@@ -69,11 +69,11 @@ app.whenReady().then(async () => {
     const controlLabel = "프로젝트 선택";
     await ${waitFor("document.querySelector('.m5-open-preferences')", "settings entry")};
     if (!document.querySelector('.m5-rail-footer .m5-open-preferences svg') || document.querySelector('.m5-toolbar .m5-open-preferences')) throw new Error('settings must be a sidebar gear');
-    await ${waitFor("document.querySelector('.m5-provider-usage progress')?.value === 31", "provider usage projection")};
+    await ${waitFor("document.querySelector('.m5-app-statusbar').textContent.includes('Claude') && document.querySelector('.m5-app-statusbar').textContent.includes('연결 안 됨')", "both disconnected summaries")};
+    if(document.querySelector('.m5-project-rail .m5-provider-usage')) throw new Error('usage still occupies sidebar');
     const usageHeight = document.querySelector('.m5-provider-usage').getBoundingClientRect().height;
     document.querySelector('.m5-usage-trigger').click();
     await ${waitFor("document.querySelector('.m5-provider-usage-content').matches(':popover-open')", "usage top layer")};
-    if (!document.querySelector('.m5-provider-usage-content').textContent.includes('5시간')) throw new Error('usage windows unavailable');
     if (document.querySelector('.m5-provider-usage').getBoundingClientRect().height !== usageHeight) throw new Error('usage popup shifted sidebar');
     const usageRefresh = document.querySelector('.m5-usage-refresh');
     if (usageRefresh.textContent.trim() || !usageRefresh.querySelector('svg') || usageRefresh.getAttribute('aria-label') !== '새로고침' || usageRefresh.getBoundingClientRect().width > 32) throw new Error('refresh must be a compact labelled icon');
@@ -151,14 +151,19 @@ app.whenReady().then(async () => {
     selection.querySelector('input[type=checkbox]').click();
     await ${waitFor("!document.querySelector('.m5-provider-selection button[type=submit]').disabled", "single agent selection")};
     selection.querySelector('button[type=submit]').click();
+    await ${waitFor("[...document.querySelectorAll('[aria-label=\"Codex connection\"] button')].some(b=>b.textContent==='Connect' && !b.disabled)", "explicit connect available")};
+    if(window.m5SmokeLoginRequests.length) throw new Error('installation selection auto connected a provider');
+    [...document.querySelectorAll('[aria-label="Codex connection"] button')].find(b=>b.textContent==='Connect').click();
     await ${waitFor("document.querySelector('[aria-label=\"Codex connection\"]')?.textContent.includes('Codex is signed in')", "selected provider diagnosed and checked")};
-    if (document.querySelector('[aria-label="Claude Code connection"]') || window.m5SmokeLoginRequests.some(r => r.provider === 'claude')) throw new Error('unselected Claude was checked');
+    if (window.m5SmokeLoginRequests.some(r => r.provider === 'claude')) throw new Error('unselected Claude was checked');
     if (JSON.parse(localStorage.getItem('hello-agent.m5.providers.v1')).providers.join() !== 'codex') throw new Error('single provider selection not saved');
     await ${waitFor("!document.querySelector('.m5-provider-selection').parentElement.hidden", "return to agent selection")};
     [...selection.querySelectorAll('button')].find(b => b.textContent === 'Connect Claude Code too').click();
     await ${waitFor("document.querySelector('[aria-label=\"Claude Code connection\"]')", "second agent added")};
     await ${waitFor("!document.querySelector('[aria-label=\"Claude Code connection\"]').parentElement.hidden", "login step visible")};
     if (!document.querySelector('[aria-label="Codex connection"]') || !document.querySelector('[aria-label="Claude Code connection"]')) throw new Error('provider connection labels are not translated');
+    await ${waitFor("[...document.querySelectorAll('[aria-label=\"Claude Code connection\"] button')].some(b=>b.textContent==='Connect' && !b.disabled)", "Claude explicit connect")};
+    [...document.querySelectorAll('[aria-label="Claude Code connection"] button')].find(b=>b.textContent==='Connect').click();
     if (localStorage.getItem('hello-agent.lang') !== 'en') throw new Error('language choice was not saved');
     chooseLanguage('ko');
     await ${waitFor("document.querySelector('main').lang === 'ko' && document.querySelector('h1').textContent === '이어서 작업하기'", "Korean shell")};
@@ -293,7 +298,7 @@ app.whenReady().then(async () => {
     chooseLanguage('en');
     await ${waitFor("document.querySelector('[aria-label=\\\"Project startup failure recovery\\\"]')?.textContent.includes('Could not verify the outcome.')", "English unknown preparation outcome")};
     if (pendingPreparation !== document.querySelector('[aria-label="Confirm closing failed preparation"]') || pendingPreparation.querySelector('code').textContent !== pendingId) throw new Error('language switch reset preparation confirmation');
-    if (document.querySelector('.m5-project-catalog').getAttribute('aria-label') !== 'Saved projects' || document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/earlier') throw new Error('language switch lost saved project');
+    if (document.querySelector('.m5-project-catalog').getAttribute('aria-label') !== 'Projects' || document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/earlier') throw new Error('language switch lost saved project');
     chooseLanguage('ko');
     await ${waitFor("document.querySelector('[aria-label=\\\"프로젝트 시작 실패 복구\\\"]')?.textContent.includes('결과를 확인하지 못했어요')", "Korean preparation outcome restored")};
     recoveryButton('이 준비 기록 종료').click();
@@ -437,6 +442,9 @@ app.whenReady().then(async () => {
     if (!menu.open || menu.querySelector('summary').textContent.trim()) throw new Error('project menu not compact');
     menu.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape',bubbles:true}));
     if (menu.open) throw new Error('project menu Escape failed');
+    document.querySelector('.m5-usage-trigger').click();
+    await ${waitFor("document.querySelector('.m5-app-statusbar').textContent.includes('Codex') && document.querySelector('.m5-app-statusbar').textContent.includes('31%') && document.querySelector('.m5-app-statusbar').textContent.includes('Claude') && document.querySelector('.m5-app-statusbar').textContent.includes('27%')", "both connected usage windows")};
+    document.querySelector('.m5-usage-trigger').click();
     return { workerCreated: true, dockVerified: true, text: document.body.textContent };
   })()`;
   const result = await window.webContents.executeJavaScript(mountScript).catch(error => {
@@ -948,7 +956,9 @@ app.whenReady().then(async () => {
   }
   await window.loadURL("m5smoke://m5/index.html");
   await window.webContents.executeJavaScript(`(async () => {
-    await ${waitFor("document.querySelector('[aria-label=\"Codex 연결\"]')?.textContent.includes('로그인이 연결됐어요')", "saved agent selection after reload")};
+    await ${waitFor("[...document.querySelectorAll('[aria-label=\"Codex 연결\"] button')].some(button => button.textContent === '연결' && !button.disabled)", "connection preference fixture after reload")};
+    [...document.querySelectorAll('[aria-label="Codex 연결"] button')].find(button => button.textContent === '연결').click();
+    await ${waitFor("document.querySelector('[aria-label=\"Codex 연결\"]')?.textContent.includes('로그인이 연결됐어요')", "saved login after reconnect")};
     if (document.querySelector('.m5-provider-selection form')) throw new Error('saved agent choice was lost');
     if (!document.querySelector('[aria-label="Claude Code 연결"]')) throw new Error('added agent lost after reload');
     await ${waitFor("document.querySelector('.m5-project-rail .m5-project-overflow')", "project removal on home")};

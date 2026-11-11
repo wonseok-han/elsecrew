@@ -994,6 +994,12 @@ impl Sidecar {
         if self.maintenance_poisoned && request.method != "system.status" {
             return Err(maintenance_poisoned_error());
         }
+        if request.method == "provider.login" && matches!(request.params["action"].as_str(), Some("start" | "check" | "submitCode")) && self.agent_runtime.uses_native_providers() {
+            let runtime = if request.params["provider"] == "claude" { "claude-code" } else { "codex" };
+            if self.projects.provider_connections().map_err(|_| SidecarError::new("providerDisconnected","connection settings unavailable"))?[runtime] != true {
+                return Err(SidecarError::new("providerDisconnected","connect the provider in settings first"));
+            }
+        }
         // This single dispatcher serializes admission before any asynchronous
         // login, discovery, native run, or installer worker can be reserved.
         #[cfg(target_os = "macos")]
@@ -1282,6 +1288,26 @@ impl Sidecar {
                     }
                     #[cfg(not(windows))]
                     { return Ok(HandledRequest::response(error_response(&request, "methodUnavailable", "unsupportedCapability", "Windows Git trust is not available on this platform"))); }
+                }
+                Some("getProviderConnections" | "setProviderConnection") => {
+                    let action = request.params["action"].as_str().unwrap();
+                    let connections = if action == "setProviderConnection" {
+                        let params = require_exact_params(&request.params, &["action", "runtime", "connected"]).map_err(invalid_params)?;
+                        let connected = params["connected"].as_bool().ok_or_else(|| invalid_params("invalid connection choice".into()))?;
+                        if !connected && (!self.workflow_chats.is_empty() || !self.agent_runtime.owned_run_ids().is_empty() || !self.pending_agent_starts.is_empty() || !self.pending_agent_capabilities.is_empty() || !self.pending_agent_cancels.is_empty()) {
+                            return Ok(HandledRequest::response(error_response(&request,"providerBusy","requestBlocked","finish or stop provider work before changing connections")));
+                        }
+                        #[cfg(target_os = "macos")]
+                        if !connected && (self.login.blocks_installation(&self.storage) || self.claude_login.blocks_installation(&self.storage)) {
+                            return Ok(HandledRequest::response(error_response(&request,"providerBusy","requestBlocked","finish login before changing connections")));
+                        }
+                        let runtime = param_string(params,"runtime").map_err(invalid_params)?;
+                        self.projects.set_provider_connection(runtime,connected)
+                    } else {
+                        require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
+                        self.projects.provider_connections()
+                    };
+                    connections.map(|connections| project::ProjectAction {result:serde_json::json!({"schemaVersion":1,"action":action,"connections":connections}),..Default::default()})
                 }
                 Some("getAppRoleDefaults") => {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
@@ -2044,8 +2070,20 @@ impl Sidecar {
         launching && self.install.blocks_provider_launch(&self.storage)
     }
 
+    fn require_provider_connection(&self, request: &RequestV1) -> Result<(), SidecarError> {
+        if !self.agent_runtime.uses_native_providers() || !matches!(request.method.as_str(), "run.startAgent" | "agent.getCapabilities" | "agent.getModelChoices") { return Ok(()); }
+        let runtime = if request.method == "run.startAgent" {
+            let chat = self.storage.projection_record("chat", request.params["chatId"].as_str().unwrap_or_default())?.ok_or_else(|| SidecarError::new("invalidParams","missing chat"))?;
+            chat["record"]["roleSnapshots"].as_array().and_then(|roles| roles.iter().find(|r|r["roleId"] == request.params["roleId"])).and_then(|r| r["runtime"].as_str()).unwrap_or_default().to_owned()
+        } else { request.params["runtime"].as_str().unwrap_or_default().to_owned() };
+        let connections = self.projects.provider_connections().map_err(|_| SidecarError::new("providerDisconnected","connection settings unavailable"))?;
+        if connections[&runtime] != true { return Err(SidecarError::new("providerDisconnected","connect the provider in settings before using it")); }
+        Ok(())
+    }
+
     fn handle_agent_request_inner(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
         use hello_agent_protocol::agent_adapter_v1::AgentRunStartRequestV1;
+        self.require_provider_connection(&request)?;
         if request.method == "agent.getModelChoices" {
             if !self.agent_runtime.uses_native_providers() || !matches!(request.params["runtime"].as_str(), Some("codex" | "claude-code")) {
                 return Err(SidecarError::new("agentDiscoveryRejected", "model choices require a native provider context"));

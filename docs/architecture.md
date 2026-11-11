@@ -578,3 +578,6 @@ renderer는 목록을 세션 내 최대60초 재사용하고 같은 공급자 �
 macOS 네이티브 폴더 선택은 비어 있는 폴더에 대해 별도 확인을 받는다. main이 확인한 디렉터리 신원을 sidecar가 다시 검증하고, 앱 준비 폴더 안에서 빈 로컬 Git commit을 만든 뒤 `.git`만 원래 빈 폴더에 배타 게시한다. 원격 저장소 생성이나 업로드는 없으며 이후 채팅은 기존 standalone snapshot을 사용한다. 비어 있지 않은 일반 폴더·최초 commit 없는 기존 저장소의 자동 변환과 Windows 초기화는 지원하지 않는다.
 
 카탈로그 전용 Codex 조회는 모델 호출 없이 `account/rateLimits/read`를 읽고 primary/secondary 기간·사용률·초기화 시각만 화면에 전달한다. 사용량은 표시 정보로 실행 권한을 만들지 않으며, 기존 프로세스 종료 확인 뒤에만 카탈로그와 함께 공개한다. 앱 세션 캐시는 조회 시각과 함께 표시하며 미지원/조회 실패는 잔여량0으로 대체하지 않는다. Claude 사용량 조회는 사용자 승인으로 앱 전용 로그인에서 Anthropic OAuth usage GET을 읽는다. macOS는 정확한 CLAUDE_CONFIG_DIR 기반 service와 앱 login의 정리된 환경에 대응하는 account=unknown만 조회하며 글로벌 기본 서비스는 사용하지 않는다. 해당 항목이 없을 때만 검증된 앱 전용 .credentials.json을 읽는다. 키체인 오류·시간 초과는 로그인 없음으로 오인하지 않는다. 인증정보 쓰기/갱신/로그/renderer 노출은 없고 표시값만60초 캐시한다. 사용량 상세는 sidebar reflow 없는 native top-layer popover이며 새로고침은 tooltip/aria-label이 있는 아이콘이다.
+
+### 앱 사용 연결과 상태표시줄 (2026-11-11)
+앱 사용 동의는 로그인과 분리해 application-settings-v1/provider-connections.json에 공급자별 boolean으로 저장한다. 미설정은 연결 안 됨이며 명시 연결 뒤 로그인 상태를 확인한다. 해제는 인증정보를 보존하고 새 로그인 확인·모델 조회·실행·팀 위임·사용량 조회를 차단한다. 실행/로그인 진행 중 해제는 거절한다. 하단 상태표시줄은 양쪽 공급자의 기간별 사용률 또는 연결 상태를 표시하며 상세는 위쪽 top-layer 팝업으로 연다.

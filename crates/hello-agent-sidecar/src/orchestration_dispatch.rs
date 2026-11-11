@@ -14,6 +14,7 @@ impl Sidecar {
         &mut self,
         request: RequestV1,
     ) -> Result<HandledRequest, SidecarError> {
+        self.require_provider_connection(&request)?;
         if request.method == "run.startAgent" {
             validate_agent_adapter_payload_v1("runStartRequest", &request.params)
                 .map_err(|_| SidecarError::new("invalidParams", "invalid start request"))?;
@@ -502,6 +503,28 @@ mod tests {
             .unwrap()
             .result;
         (root, sidecar, chat)
+    }
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn explicit_provider_connections_block_root_and_team_member_before_reservation() {
+        let (_root,mut sidecar,chat)=service();
+        sidecar.agent_runtime=AgentRuntime::native_candidate();
+        let before=sidecar.storage.projection_record("chat",chat["chatId"].as_str().unwrap()).unwrap();
+        for role in ["coordinator","coding"] {
+            let request=sidecar.workflow_request(format!("req_disconnected_{role}"),"run.startAgent",json!({"chatId":chat["chatId"],"roleId":role,"inputMessageIds":[],"expectedCapabilityFingerprint":"unneeded"}));
+            let error=if role == "coordinator" {sidecar.handle_agent_request(request).err().unwrap()} else {sidecar.handle_agent_request_inner(request).err().unwrap()};
+            assert_eq!(error.kind(),"providerDisconnected");
+        }
+        for runtime in ["codex","claude-code"] {
+            for method in ["agent.getCapabilities","agent.getModelChoices"] {
+                let request=sidecar.workflow_request(format!("req_{runtime}_{}",method.replace('.',"_")),method,json!({"runtime":runtime,"refresh":false}));
+                assert_eq!(sidecar.handle_agent_request_inner(request).err().unwrap().kind(),"providerDisconnected");
+            }
+        }
+        assert!(sidecar.workflow_chats.is_empty());
+        assert!(sidecar.pending_agent_starts.is_empty());
+        assert!(sidecar.pending_agent_capabilities.is_empty());
+        assert_eq!(sidecar.storage.projection_record("chat",chat["chatId"].as_str().unwrap()).unwrap(),before);
     }
     fn start(sidecar: &mut Sidecar, chat: &Value) -> ResponseV1 {
         let id = chat["chatId"].as_str().unwrap();

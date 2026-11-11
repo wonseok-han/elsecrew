@@ -1146,3 +1146,33 @@ fn review_discard_dispatcher_rejects_deferred_native_start_and_cancel() {
         .unwrap()
         .is_empty());
 }
+
+#[test]
+fn explicit_provider_connections_persist_and_gate_native_work_without_auth_changes() {
+    let (_root,path) = database();
+    let runtime = agent_runtime::AgentRuntime::native_candidate();
+    let ready = SidecarSession::new("connection_test".into(), agent_runtime::AgentRuntime::blocked()).ready.clone();
+    let mut sidecar = Sidecar::initialize(path.clone(), ready, runtime, &AtomicBool::new(false)).unwrap();
+    assert_eq!(sidecar.projects.provider_connections().unwrap(), json!({"codex":false,"claude-code":false}));
+    let catalog = request_value("connection_test","catalog_blocked","agent.getModelChoices",json!({"runtime":"codex","refresh":false}));
+    assert_eq!(sidecar.require_provider_connection(&catalog).unwrap_err().kind(),"providerDisconnected");
+    sidecar.projects.set_provider_connection("codex",true).unwrap();
+    assert!(sidecar.require_provider_connection(&catalog).is_ok());
+    sidecar.workflow_chats.insert("synthetic_active".into());
+    let disconnect = request_value("connection_test","disconnect_busy","project.catalog",json!({"action":"setProviderConnection","runtime":"codex","connected":false}));
+    assert!(!sidecar.handle_validated_request(disconnect).unwrap().response.unwrap().ok);
+    assert_eq!(sidecar.projects.provider_connections().unwrap()["codex"],true);
+    sidecar.workflow_chats.clear();
+    let disconnect = request_value("connection_test","disconnect_idle","project.catalog",json!({"action":"setProviderConnection","runtime":"codex","connected":false}));
+    assert!(sidecar.handle_validated_request(disconnect).unwrap().response.unwrap().ok);
+    assert_eq!(sidecar.require_provider_connection(&catalog).unwrap_err().kind(),"providerDisconnected");
+    assert!(sidecar.pending_agent_capabilities.is_empty());
+    assert!(sidecar.agent_runtime.owned_run_ids().is_empty());
+    assert!(!path.parent().unwrap().join("claude-profile-v1/.credentials.json").exists());
+    sidecar.projects.set_provider_connection("claude-code",true).unwrap();
+    drop(sidecar);
+    let ready=SidecarSession::new("reopened_connection".into(),agent_runtime::AgentRuntime::blocked()).ready.clone();
+    let reopened=Sidecar::initialize(path,ready,agent_runtime::AgentRuntime::native_candidate(),&AtomicBool::new(false)).unwrap();
+    assert_eq!(reopened.projects.provider_connections().unwrap()["codex"],false);
+    assert_eq!(reopened.projects.provider_connections().unwrap()["claude-code"],true);
+}

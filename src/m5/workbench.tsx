@@ -1,3 +1,4 @@
+import { ProviderUsage } from "./provider-usage.tsx";
 import { ProjectRecoveryHistory } from "./project-recovery-history-view.tsx";
 import { OrchestrationMessageBody } from "./orchestration-message-body.tsx";
 import { PreparationRecovery } from "./preparation-recovery-view";
@@ -532,6 +533,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           ) : <Empty text={t("m5.editor.chooseProject")} />}
         </aside>
       </WorkbenchDock>}
+      <footer className="m5-app-statusbar" aria-label={t("m5.usage.title")}><ProviderUsage disabled={!admissionReady}/></footer>
     </main>
   );
 }

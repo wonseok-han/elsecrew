@@ -3,6 +3,11 @@
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
 ### 2026-11-11 · by GPT-6
+- 기준 HEAD1b7afde6에서 명시 연결/해제를 직접 구현했다. 로그인 보존과 앱 사용 동의를 분리해 저장하며, 최초 상태는 양쪽 연결 안 됨이다. 연결된 공급자만 로그인 확인·모델 조회·실행/팀 위임·사용량 조회를 허용한다. 실행/로그인 진행 중 해제는 거절하며 인증정보를 삭제하지 않는다. 독립 검토 차단 없음; true 저장 후 재시작 유지 회귀를 보강했다.
+- 사용량을 sidebar에서28px 앱 하단 상태표시줄로 옮겨 Codex·Claude 각각의 기간/사용률 또는 연결 상태를 표시한다. 상세는 위로 펼치는 top-layer 팝업, 새로고침은 아이콘 유지. sidebar ‘저장된 프로젝트’를 ‘프로젝트’로 줄였다.
+- 검증: Rust 연결/위임 차단2개, TS계약/usage6개, TypeScript·renderer 빌드·Chromium2개 통과. 기존 앱 정상 종료 확인. 설치본 교체 후 화면 확인 예정. 실제 모델 호출·인증정보 변경·main/push 없음.
+
+### 2026-11-11 · by GPT-6
 - 사용자 승인으로 Claude usage 조회를 활성화했다. 실제 macOS 앱은 .credentials.json이 없고 앱 전용 profile hash 서비스/account=unknown 키체인 항목을 사용했다. 앱 로그인은 env_clear로 USER 없이 실행하므로 이 계정이 생성됨을 비밀값 없는 metadata 조회로 확인했다. OS 사용자명 계정 조회는44(없음). 정확한 앱 서비스+unknown만 읽고 글로벌 서비스 fallback 없음;44만 검증된 프로필 파일 fallback, 다른 키체인 오류는 unavailable. 독립 재검토 활성화 차단 없음.
 - 프로젝트 ⋯ 메뉴도 아래/왼쪽 행을 덮는 배치에서 트리거 오른쪽 옆 top-layer로 변경했다. 공간 부족 때만 왼쪽으로 뒤집고 viewport 안으로 제한하며 외부 클릭/Escape 닫기 유지. 설치본에서 sidebar 밖 독립 메뉴를 확인했다. 사용량 아이콘·비동기 높이 보정 최신본도 함께 설치했다.
 - 검증: 후보 unit5개·TypeScript·Electron 조회 module 타입검사·renderer/Chromium2개·package 통과. 실제 앱에서 Codex7일51%, Claude5시간1%/7일7% 및 reset시각 확인. 유료 모델 호출/원본 변경/로그인 변경 없음. 출처 https://github.com/stablyai/orca/issues/27150 , https://github.com/anthropics/claude-code/issues/79223 (upstream namespace 설명; 앱 항목은 별도 metadata로 검증).

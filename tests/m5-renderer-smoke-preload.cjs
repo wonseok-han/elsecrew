@@ -1,3 +1,5 @@
+window.m5ClaudeUsage={read:async()=>({state:"available",usage:{windows:[{id:"primary",usedPercent:12,windowMinutes:300,resetsAt:null},{id:"secondary",usedPercent:27,windowMinutes:10080,resetsAt:null}]},checkedAt:Date.now()})};
+let smokeConnections = {codex:false,"claude-code":false};
 window.m5SmokeModelQueries = [];
 window.m5Models = { request: async input => {
   if (input.chatId || input.roleId) throw new Error("catalog must not require a chat");
@@ -21,6 +23,10 @@ window.m5Install = { request: async () => {
 const preparationInspection = { projectId: "earlier_project", worktreeId: "worktree_failed", workspaceIdentity: "workspace_failed", lockId: "lock_worktree_failed", projectRevision: 8, lockRevision: 9 };
 let preparationAttempts = 0;
 window.m5Projects = { request: async (input) => {
+  if(input.action === "getProviderConnections" || input.action === "setProviderConnection") {
+    if(input.action === "setProviderConnection") smokeConnections={...smokeConnections,[input.runtime]:input.connected};
+    return {schemaVersion:1,action:input.action,connections:{...smokeConnections}};
+  }
   if (input.action === "getAppRoleDefaults" && window.m5SmokeDefaultsReady) return {
     schemaVersion:1, action:input.action, settings:{schemaVersion:1, revision:window.m5SmokeDefaultsRevision || 2,
       roles:smokeChat.roleSnapshots.filter(role => ["planning","coding","review"].includes(role.roleId)), updatedAt:smokeChat.updatedAt},
