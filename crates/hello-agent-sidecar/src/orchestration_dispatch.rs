@@ -667,6 +667,64 @@ mod tests {
         );
     }
     #[test]
+    fn orchestration_followups_after_answer_have_valid_transport_sequences() {
+        let (_root, mut sidecar, chat) = service();
+        sidecar
+            .agent_runtime
+            .set_fake_scenario(FakeScenario::OrchestratorFinal);
+        assert!(start(&mut sidecar, &chat).ok);
+        let id = chat["chatId"].as_str().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while sidecar.workflow_state(id).unwrap().status == "running" {
+            sidecar.poll_runtime_events().unwrap();
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let mut session = ProtocolSessionV1::default();
+        session
+            .observe(&EnvelopeV1::Event(EventV1 {
+                protocol_version: PROTOCOL_VERSION,
+                kind: "event".into(),
+                sidecar_instance_id: sidecar.ready.sidecar_instance_id.clone(),
+                stream_id: "system".into(),
+                seq: 1,
+                event: "system.ready".into(),
+                chat_id: None,
+                task_id: None,
+                run_id: None,
+                payload: serde_json::to_value(&sidecar.ready).unwrap(),
+            }))
+            .unwrap();
+        for index in 0..2 {
+            let sequence = sidecar
+                .storage
+                .chat_message_history(id)
+                .unwrap()
+                .last()
+                .unwrap()["eventSequence"]
+                .as_u64()
+                .unwrap();
+            assert!(sequence > 1);
+            let request = json!({"projectId":chat["projectId"],"chatId":chat["chatId"],"taskId":chat["taskId"],
+                "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+                "expectedEventSequence":sequence,"clientMessageId":format!("user_{index:032x}"),"text":"Continue"});
+            let action = sidecar
+                .g5
+                .append_user_message(&mut sidecar.storage, &sidecar.projects, &request)
+                .unwrap();
+            assert_eq!(action.result["eventSequence"], sequence + 1);
+            for event in sidecar.g5_events(action.events) {
+                session.observe(&EnvelopeV1::Event(event)).unwrap();
+            }
+            let retry = sidecar
+                .g5
+                .append_user_message(&mut sidecar.storage, &sidecar.projects, &request)
+                .unwrap();
+            assert!(retry.events.is_empty());
+        }
+    }
+
+    #[test]
     fn orchestration_dispatch_cancel_worker_stops_the_whole_team() {
         let (_root, mut sidecar, chat) = service();
         assert!(start(&mut sidecar, &chat).ok);

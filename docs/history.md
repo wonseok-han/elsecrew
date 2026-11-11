@@ -4,6 +4,12 @@
 
 ### 2026-11-11 · by GPT-6
 
+- 핵심 오케스트레이션 계속 진행(기준 f8f558f2). 실제 답변 뒤 일반 후속 메시지가 durable eventSequence를 통신 seq로 재사용해 연결을 끊는 결함을 fake 실제 adapter+ProtocolSession으로 재현했다(expected1/got4). 사용자 메시지별 단일 stream seq1로 바꾸고 payload의 영속 순번·중복 전송 멱등성·신원 검사는 유지했다.
+- 검증: 수정 전 새 회귀 실패, 수정 후 orchestration15개와 followup6개(겹치는 새 회귀1개 포함) 통과, 비용 진단1개 명시 ignored, diff check 통과. 독립 검토의 최초 notice 경로 지적은 다른 시점 소스에 근거했으며 절대 경로/HEAD 재확인 후 철회, 현재 수정 차단 지적 없음. 실제 모델 호출 없음. 설치본에는 아직 이 후속 전송 수정이 포함되지 않았다.
+- 실제 UI에서 중단 시험 프로젝트의 복구 접근 차단도 확인: catalog reopen이 최신 프로젝트 snapshot의 active manifest를 요구하지만 중단된 child의 manifest는 recoveryRequired다. 원본 폴더는 존재하며 오류는 persisted manifest differs from the canonical snapshot identity다. 현재 frontend도 프로젝트 선택 시 snapshot 생성과 chat 선택 시 editor binding 성공을 요구하므로 읽기 전용 기록/복구 접근을 실행 가능 작업 복사본과 분리해야 한다. 원장·잠금을 수동 삭제하거나 검사를 우회하지 않았다. 이 차단 해소와 별도 승인된 실제 위임→팀원→취합 검증은 미완료다.
+
+### 2026-11-11 · by GPT-6
+
 - 사용자 승인 후 신원을 재확인한 개발 앱 PID71920·전용 sidecar71925만 종료하고 ba967590 상태 표시 수정본을 기존 설치 경로에 반영했다. macOS 패키지·package smoke 통과. 실제 기존 데이터로 준비 완료, 한 줄 상태 표시와 상세 펼침/접힘·상태 다시 확인 버튼 접근을 확인했다.
 - 프로젝트·인증정보·복구 기록은 보존했다. 기존 중단 시험의 복구 필요2건은 그대로이며 이번 UI 수정으로 해결됐다고 주장하지 않는다. 모델 호출·main 병합·push 없음. 다음은 기존 미완료 팀 오케스트레이션 복구/후속 전송 검증과 승인된 범위의 실제 실행 확인이다.
 

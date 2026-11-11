@@ -518,7 +518,7 @@ impl G5Manager {
         }
         Ok(G5Action {
             result: chat.clone(),
-            events: vec![chat_event(&chat, 1, message)],
+            events: vec![chat_event(&chat, message)],
         })
     }
 
@@ -623,7 +623,7 @@ impl G5Manager {
         }
         Ok(G5Action {
             result: message.clone(),
-            events: vec![chat_event(&chat, sequence, message)],
+            events: vec![chat_event(&chat, message)],
         })
     }
 
@@ -1765,13 +1765,15 @@ fn team_message(
     Ok(message)
 }
 
-fn chat_event(chat: &Value, seq: u64, message: Value) -> G5Event {
+fn chat_event(chat: &Value, message: Value) -> G5Event {
     G5Event {
         stream_id: format!(
-            "chat_ledger_{}",
-            chat["chatId"].as_str().unwrap_or_default()
+            "chat_message_{}",
+            message["messageId"].as_str().unwrap_or_default()
         ),
-        seq,
+        // Replies arrive on provider streams, and a chat can be reopened in a
+        // new session. Durable eventSequence is not a contiguous wire counter.
+        seq: 1,
         event: "chat.eventAppended",
         chat_id: chat["chatId"].as_str().map(str::to_string),
         task_id: chat["taskId"].as_str().map(str::to_string),
