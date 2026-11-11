@@ -254,6 +254,9 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-project-rail').getBoundingClientRect().width < 100", "collapsed project rail")};
     rail.querySelector('.m5-project-overflow > summary').click();
     const overflow = rail.querySelector('.m5-project-overflow');
+    const menuSurface = overflow.querySelector('div');
+    if (menuSurface.getBoundingClientRect().width < 200 || getComputedStyle(menuSurface).backgroundColor !== 'rgb(48, 52, 59)' || !menuSurface.querySelector('button svg')) throw new Error('context menu needs an opaque distinct surface and icons');
+    if (getComputedStyle(rail).userSelect !== 'none') throw new Error('app chrome text is selectable');
     overflow.querySelector('div').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
     if (!overflow.open) throw new Error('inside menu pointer closed popup');
     const outsideTarget = rail.querySelector('h2');
@@ -646,6 +649,9 @@ app.whenReady().then(async () => {
         const history = document.querySelector('.m5-conversation-scroll');
         const historyBounds = history.getBoundingClientRect();
         if (historyBounds.height < 1 || composer.height > bounds.height / 2 + 1 || composer.bottom > bounds.bottom + 1 || historyBounds.bottom > composer.top + 1) throw new Error('composer geometry: ' + JSON.stringify({height, bounds: bounds.toJSON(), composer: composer.toJSON(), history: historyBounds.toJSON()}));
+        const messages = document.querySelector('.m5-timeline-list');
+        if (getComputedStyle(messages).overflowY !== 'visible' || getComputedStyle(messages).maxHeight !== 'none') throw new Error('nested message scroll remains');
+        if (getComputedStyle(input).userSelect !== 'text') throw new Error('composer selection was disabled');
         history.scrollTop = history.scrollHeight;
         if (Math.abs(document.querySelector('.m5-followup').getBoundingClientRect().bottom - composer.bottom) > 1) throw new Error('history scrolling moved the composer');
       }

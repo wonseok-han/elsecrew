@@ -937,3 +937,28 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-preferences-content .m5-provider-selection:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
 .m5-preferences-content .m5-provider-selection button { background: var(--m5-raised); color: var(--m5-text); border-color: var(--m5-border-strong); }
 .m5-preferences-content .m5-login-account-help { flex-basis: 100%; margin-bottom: 8px; }
+
+/* Context menus are a distinct, opaque layer above project rows. */
+.m5-project-overflow > div, .m5-project-menu > div {
+  box-sizing: border-box; width: 220px; padding: 6px;
+  background: #30343b; border: 1px solid #626873; border-radius: 9px;
+  box-shadow: 0 16px 40px #0009, 0 2px 8px #0006; color: #f4f5f7;
+}
+.m5-project-rail:not(.m5-project-rail-expanded) .m5-project-overflow > div { width: 220px; right: auto; left: 0; }
+.m5-project-overflow .m5-context-heading { margin: 0 6px 5px; padding: 6px 3px 9px; border-bottom: 1px solid #515761; font-size: 11px; font-weight: 500; color: #c8ccd3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m5-project-overflow > div button, .m5-project-menu > div button {
+  display: flex; align-items: center; gap: 9px; width: 100%; min-height: 34px;
+  margin: 0; padding: 7px 9px !important; border: 0; border-radius: 5px;
+  color: #f4f5f7 !important; background: transparent !important; font-size: 12px !important; font-weight: 500; text-align: left;
+}
+.m5-project-overflow > div button svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.m5-project-overflow > div button:hover:not(:disabled), .m5-project-menu > div button:hover:not(:disabled) { background: #484e58 !important; }
+.m5-project-overflow > div button:focus-visible, .m5-project-menu > div button:focus-visible { outline: 2px solid #e6a18a; outline-offset: -2px; }
+.m5-project-overflow > div button.m5-danger { color: #ff858d !important; border: 0; }
+.m5-project-overflow > div button.m5-danger:hover:not(:disabled) { background: #59333b !important; }
+/* One vertical reading surface for the conversation, not a nested message box. */
+.m5-conversation-scroll .m5-timeline-list, .m5-conversation-scroll .m5-output-scroll { max-height: none; overflow: visible; }
+.m5-conversation-scroll .m5-message-code pre { max-height: none; }
+.m5-timeline > header h2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.m5-workbench { user-select: none; -webkit-user-select: none; }
+.m5-workbench input, .m5-workbench textarea, .m5-workbench [contenteditable="true"], .m5-workbench .monaco-editor, .m5-workbench .monaco-editor * { user-select: text; -webkit-user-select: text; }

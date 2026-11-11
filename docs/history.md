@@ -4,6 +4,14 @@
 
 ### 2026-11-11 · by GPT-6
 
+- 2e9fd3cc macOS package/package smoke 통과 및 설치 후 승인된 임시 팀1건을 일반 새 채팅→보내기로 수행했다. Codex gpt-6.1-sol/medium→Claude opus→Codex gpt-6.1-sol/medium의3회 실행이 모두 succeeded/cleanExit/processesProvenGone, recovery null이다. 최초 타이핑의 한글 누락은 전송 전에 붙여넣기로 교정했다. Claude의 임시 hello.txt 확인/수정 Bash2건만 상세 확인 후 앱에서1회씩 허용했다.
+- chat_893b0867a86645d796bd03f10e32a7d7, 총괄 agent_run_fe74624541e44de9ac885440a3ef408e, 개발 agent_run_a9af74b3b0bb48ea9d2ebd8879a2e7e2, 최종 총괄 agent_run_0d461911e5d948769d9a544bbf2d58dd. 화면에서 위임/개발 보고/최종 답변/검토 준비와 hello.txt 단일 diff를 확인했다. 앱 정상 종료 후 읽기 전용 진단 복사본에서 orchestration_v1.status=completed/step2, chat=reviewReady, run3건, Claude writerLock=released 및 privacy+sec-default 관측을 확인했다. 직접 DB 읽기는 열기 실패하여 종료된 DB의 임시 복사본을 사용했고 즉시 정리했다.
+- 임시 원본 elsecrew-team-live-nq8zo737의 Git 깨끗함 및 hello.txt=original\n, worktree_ec75032554f64fcaa44be90620e9428d의 hello.txt=HELLO_TEAM_ORCHESTRATION_OK\n(28바이트)를 직접 확인했다. 원본 반영·추가 모델 실행·강제 종료·main/push 없음. 핵심 위임→작업→보고→취합의 실제 성공 증거이며 전체 제품/Windows/출시 완료는 아니다.
+- 병행 사용자 UI 요청: 프로젝트 컨텍스트를 명확한 불투명 표면/테두리/그림자/아이콘/삭제 강조로 변경하고 접힌 사이드바에서도220px 폭을 유지한다. 대화·실행 출력의 내부 세로 스크롤을 없애 외부 대화 영역 하나로 통합하고 긴 목표 제목은2줄로 줄인다. 자동 출력 이동과 사용자 스크롤을 구분해 읽는 위치를 보존한다. 앱 UI의 드래그 텍스트 선택은 끄되 편집기/입력은 유지한다.
+- UI 검증: TypeScript/renderer build/Chromium smoke2개 통과. 첫 smoke는 자동 스크롤을 사용자 이동으로 오인하는 오류를 발견해 입력 의도 구분 후 통과했다. 메뉴 표면·폭/아이콘, 내부 스크롤 제거, 고정 입력칸 및 입력 선택 보존을 확인했다. React hook 순서/이벤트 cleanup/키/라벨을 직접 검토했다. 다음: UI 커밋·설치 및 재시작 후 완료 대화 유지 확인.
+
+### 2026-11-11 · by GPT-6
+
 - 사용자 call_54d09a7780954c76a7286fd0912e3dad의 privacy 호환 활성화와 임시 팀1건/최대12회/실패 시 재시도 없음 승인을 확인했다. 승인 도착 전 대기 확인을 중단하고 native 생성자 한 곳을 검토된 builtin guards 정책으로 전환했다. 공식 보호 모듈은 끄지 않고 정확한 등록 및 원장 관측만 확장한다. architecture.md 현행과 proposal 승인 상태를 갱신했다.
 - privacy 단독·sec-default 혼합/역순 입력을 가짜 native owner 통합에 추가해 성공·정렬 원장 관측을 확인했다. 해당 실행/승인/취소/거절 회귀 통과, 활성화 delta 독립 검토 추가 결함 없음. 기존 앱 정상 종료 확인. 다음: 커밋/패키지/설치 후 승인된 실제 팀1건 시험. 유료 호출 승인은 아직 미사용이며 main/push 없음.
 
@@ -199,7 +207,7 @@
 
 - 2026-11-11 모델 설정은 공급자 조회 목록에서 선택한다. 최신 표시가 없는 경우 공급자 기본·추천 모델 사용을 사용자 승인받았다. 저장한 선택은 자동 덮어쓰지 않으며 목록 순서/이름 정렬로 최신을 추정하지 않는다. 조회는 채팅 없이 설정 진입 때 자동 수행하며 세션 캐시를 재사용한다. 원본 프로젝트/실제 prompt를 사용하지 않는다.
 
-- 2026-11-11 사용자 채팅의 상대는 항상 오케스트레이터이며 전송은 단순 ‘보내기’다. 직접 답변 또는 필요한 팀원 위임/결과 회수/최종 정리를 모델이 판단한다. 직접 응답만 구현된 현재 상태는 제품 오케스트레이션 완료가 아니다.
+- 2026-11-11 사용자 채팅의 상대는 항상 오케스트레이터이며 전송은 단순 ‘보내기’다. 직접 답변 또는 필요한 팀원 위임/결과 회수/최종 정리를 모델이 판단한다. 2026-11-11 임시 실제 Codex→Claude→Codex3회에서 작업 복사본 수정·최종 취합·정상 종료를 확인했다. 원본 반영은 자동 수행하지 않는다. Windows/전체 출시 완료와 구분한다.
 
 - 2026-11-10 총괄 직접 응답은 V2 canonical5 역할 snapshot + 저장 V12가 필요하다. V1 채팅은 변경하지 않으며 새 채팅부터 총괄 실제 실행/후속 전송을 사용한다. V12는 답변 source-index trigger의 역할 허용 목록만 확장하고 metadata/원장 검증·compaction prefix를 함께 적용한다. 이전 앱으로 다운그레이드 불가. 자동 팀 위임은11월11일 구현/검증 진행 중이며 설치본 반영·실제 공급자 증거는 최신 기록을 따른다.
 
