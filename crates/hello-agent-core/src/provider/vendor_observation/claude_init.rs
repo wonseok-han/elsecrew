@@ -16,6 +16,7 @@ pub struct ExpectedInit<'a> {
 pub struct InitObservation {
     session_id: String,
     pub organization_guard: bool,
+    pub privacy_guard: bool,
     pub interrupt_receipt: bool,
     pub interrupt_cancel_queued: bool,
 }
@@ -80,6 +81,16 @@ pub(super) fn observe_with_guard_policy(
     stage: &mut &'static str,
     allow_organization_guard: bool,
 ) -> Result<InitObservation, ProviderError> {
+    observe_with_builtin_policy(input, expected, stage, allow_organization_guard, false)
+}
+
+pub(super) fn observe_with_builtin_policy(
+    input: &BoundedObservation,
+    expected: &ExpectedInit<'_>,
+    stage: &mut &'static str,
+    allow_organization_guard: bool,
+    allow_privacy_guard: bool,
+) -> Result<InitObservation, ProviderError> {
     *stage = "init expected";
     // Local syntax only. The owner must bind the real snapshot directory identity.
     let path = std::path::Path::new(expected.cwd);
@@ -127,11 +138,22 @@ pub(super) fn observe_with_guard_policy(
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Guard { name: String, path: String, source: String }
-    let organization_guard = allow_organization_guard && wire.plugins.len() == 1
-        && serde_json::from_str::<Guard>(wire.plugins[0].get()).is_ok_and(|plugin|
-            plugin.name == "cc-plugin-sec-default" && plugin.path == "builtin"
-                && plugin.source == "cc-plugin-sec-default@builtin");
-    if !wire.plugins.is_empty() && !organization_guard {
+    let mut organization_guard = false;
+    let mut privacy_guard = false;
+    let accepted_plugins = wire.plugins.len() <= 2 && wire.plugins.iter().all(|raw| {
+        let Ok(plugin) = serde_json::from_str::<Guard>(raw.get()) else { return false; };
+        if plugin.path != "builtin" { return false; }
+        match (plugin.name.as_str(), plugin.source.as_str()) {
+            ("cc-plugin-sec-default", "cc-plugin-sec-default@builtin") if allow_organization_guard && !organization_guard => {
+                organization_guard = true; true
+            }
+            ("cc-plugin-privacy", "cc-plugin-privacy@builtin") if allow_privacy_guard && !privacy_guard => {
+                privacy_guard = true; true
+            }
+            _ => false,
+        }
+    });
+    if !accepted_plugins {
         // Classify only local labels; never log provider names or paths.
         let plugins: Vec<serde_json::Value> = wire.plugins.iter()
             .map(|raw| serde_json::from_str(raw.get()).unwrap_or(serde_json::Value::Null))
@@ -176,6 +198,7 @@ pub(super) fn observe_with_guard_policy(
     Ok(InitObservation {
         session_id: wire.session_id,
         organization_guard,
+        privacy_guard,
         interrupt_receipt: wire
             .capabilities
             .iter()

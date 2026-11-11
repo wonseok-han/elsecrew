@@ -14,8 +14,14 @@ pub enum Event {
 }
 
 /// Constructed only by a successful system/init observation. Not launch authority.
-pub struct InitReceipt { session_id: String, cwd: String, model: String, organization_guard: bool }
+pub struct InitReceipt { session_id: String, cwd: String, model: String, organization_guard: bool, privacy_guard: bool }
 impl InitReceipt {
+    pub fn observed_builtin_plugins(&self) -> Vec<String> {
+        let mut plugins = Vec::new();
+        if self.privacy_guard { plugins.push("cc-plugin-privacy@builtin".into()); }
+        if self.organization_guard { plugins.push("cc-plugin-sec-default@builtin".into()); }
+        plugins
+    }
     pub fn organization_guard(&self) -> bool { self.organization_guard }
     pub fn session_id(&self) -> &str { &self.session_id }
     pub fn matches(&self, cwd: &str, model: &str) -> bool { self.cwd == cwd && self.model == model }
@@ -33,6 +39,7 @@ pub struct Session {
     failed: bool,
     diagnostic_stage: &'static str,
     allow_organization_guard: bool,
+    allow_privacy_guard: bool,
     budget: ProviderEventBudget,
 }
 
@@ -69,6 +76,7 @@ impl Session {
             failed: false,
             diagnostic_stage: "session state",
             allow_organization_guard: false,
+            allow_privacy_guard: false,
             budget: ProviderEventBudget::LegacyV1,
         }
     }
@@ -77,6 +85,11 @@ impl Session {
     /// Does not authenticate provider registration strings by itself.
     pub fn for_native_organization_guard(expected: &claude_init::ExpectedInit<'_>) -> Self {
         Self { allow_organization_guard: true, ..Self::new(expected) }
+    }
+
+    /// Explicit native policy candidate; production owner must opt in separately.
+    pub fn for_native_builtin_guards(expected: &claude_init::ExpectedInit<'_>) -> Self {
+        Self { allow_organization_guard: true, allow_privacy_guard: true, ..Self::new(expected) }
     }
 
     /// Select before observing initialization; never resets an existing budget.
@@ -124,7 +137,7 @@ impl Session {
                 return Err(invalid());
             }
             let tools: Vec<_> = self.tools.iter().map(String::as_str).collect();
-            let init = claude_init::observe_with_guard_policy(
+            let init = claude_init::observe_with_builtin_policy(
                 input,
                 &claude_init::ExpectedInit {
                     cwd: &self.cwd,
@@ -134,9 +147,10 @@ impl Session {
                 },
                 &mut self.diagnostic_stage,
                 self.allow_organization_guard,
+                self.allow_privacy_guard,
             )?;
             let event = Event::Initialized {
-                receipt: InitReceipt { session_id:init.session_id().into(), cwd:self.cwd.clone(), model:self.model.clone(), organization_guard:init.organization_guard },
+                receipt: InitReceipt { session_id:init.session_id().into(), cwd:self.cwd.clone(), model:self.model.clone(), organization_guard:init.organization_guard, privacy_guard:init.privacy_guard },
                 interrupt_receipt: init.interrupt_receipt,
                 interrupt_cancel_queued: init.interrupt_cancel_queued,
             };
@@ -218,6 +232,33 @@ mod tests {
         )
     }
     #[test]
+    fn native_privacy_candidate_is_exact_and_receipt_bound() {
+        let privacy = json!({"name":"cc-plugin-privacy","path":"builtin","source":"cc-plugin-privacy@builtin"});
+        let guard = json!({"name":"cc-plugin-sec-default","path":"builtin","source":"cc-plugin-sec-default@builtin"});
+        let baseline: serde_json::Value = serde_json::from_slice(&init().bytes).unwrap();
+        for plugins in [json!([privacy.clone()]), json!([guard.clone(), privacy.clone()]), json!([privacy.clone(), guard.clone()])] {
+            let mut wire = baseline.clone(); wire["plugins"] = plugins;
+            assert!(Session::new(&expected()).observe(&input(wire.clone())).is_err());
+            assert!(Session::for_native_organization_guard(&expected()).observe(&input(wire.clone())).is_err());
+            let Event::Initialized { receipt, .. } = Session::for_native_builtin_guards(&expected()).observe(&input(wire.clone())).unwrap() else { panic!() };
+            assert!(receipt.matches(expected().cwd, expected().model));
+            assert_eq!(receipt.observed_builtin_plugins()[0], "cc-plugin-privacy@builtin");
+            assert_eq!(receipt.observed_builtin_plugins().len(), wire["plugins"].as_array().unwrap().len());
+            for (key, value) in [("cwd", json!("/other")), ("model", json!("other")), ("tools", json!(["Read","Write"])), ("mcp_servers", json!([{}])), ("skills", json!(["other"])), ("permissionMode", json!("bypassPermissions")), ("agents", json!(["other"])), ("plugin_errors", json!([{}]))] {
+                let mut altered = wire.clone(); altered[key] = value;
+                assert!(Session::for_native_builtin_guards(&expected()).observe(&input(altered)).is_err(), "{key}");
+            }
+        }
+        let mut extra = privacy.clone(); extra["extra"] = json!(true);
+        let mut wrong_path = privacy.clone(); wrong_path["path"] = json!("/external");
+        let mut wrong_name = privacy.clone(); wrong_name["name"] = json!("other");
+        for plugins in [json!([privacy.clone(), privacy.clone()]), json!([guard.clone(),guard.clone()]), json!([privacy.clone(),guard.clone(),privacy.clone()]), json!([extra]), json!([wrong_path]), json!([wrong_name]), json!([{"name":"cc-plugin-telemetry","path":"builtin","source":"cc-plugin-telemetry@builtin"}])] {
+            let mut wire = baseline.clone(); wire["plugins"] = plugins;
+            assert!(Session::for_native_builtin_guards(&expected()).observe(&input(wire)).is_err());
+        }
+    }
+
+    #[test]
     fn durable_session_budget_must_be_selected_before_init() {
         let mut session = Session::new(&expected())
             .with_output_budget(ProviderEventBudget::DurableV1)
@@ -272,24 +313,39 @@ mod tests {
     }
     #[test]
     fn public_output_and_permission_share_one_initialized_session() {
-        let mut session = Session::new(&expected());
-        session.observe(&init()).unwrap();
-        let output = input(
-            json!({"type":"assistant","uuid":"a","session_id":"s","parent_tool_use_id":null,"message":{"id":"m","role":"assistant","content":[{"type":"text","text":"hello"}]}}),
-        );
-        assert!(matches!(
-            session.observe(&output).unwrap(),
-            Event::Output(claude_events::Projection::Assistant { .. })
-        ));
-        let request = input(
-            json!({"type":"control_request","request_id":"r","request":{"subtype":"can_use_tool","tool_name":"Read","input":{"file_path":"hello.txt"}}}),
-        );
-        assert!(matches!(
-            session.observe(&request).unwrap(),
-            Event::Permission(claude_approval::Observation::Requested(_))
-        ));
-        assert!(session.deny("r", false).is_ok());
-        assert!(session.deny("r", false).is_err());
+        for privacy in [false, true] {
+            let mut session = if privacy {
+                Session::for_native_builtin_guards(&expected())
+            } else {
+                Session::new(&expected())
+            };
+            let mut wire: serde_json::Value = serde_json::from_slice(&init().bytes).unwrap();
+            if privacy {
+                wire["plugins"] = json!([{"name":"cc-plugin-privacy","path":"builtin","source":"cc-plugin-privacy@builtin"}]);
+            }
+            session.observe(&input(wire)).unwrap();
+            let output = input(
+                json!({"type":"assistant","uuid":"a","session_id":"s","parent_tool_use_id":null,"message":{"id":"m","role":"assistant","content":[{"type":"text","text":"hello"}]}}),
+            );
+            assert!(matches!(
+                session.observe(&output).unwrap(),
+                Event::Output(claude_events::Projection::Assistant { .. })
+            ));
+            let request = input(
+                json!({"type":"control_request","request_id":"r","request":{"subtype":"can_use_tool","tool_name":"Read","input":{"file_path":"hello.txt"}}}),
+            );
+            assert!(matches!(
+                session.observe(&request).unwrap(),
+                Event::Permission(claude_approval::Observation::Requested(_))
+            ));
+            assert!(session.deny("r", false).is_ok());
+            assert!(session.deny("r", false).is_err());
+            // A successful init is still not permission to accept a different session.
+            let mut foreign: serde_json::Value = serde_json::from_slice(&output.bytes).unwrap();
+            foreign["session_id"] = json!("foreign-session");
+            assert!(session.observe(&input(foreign)).is_err());
+            assert!(session.is_closed());
+        }
     }
 
     #[test]

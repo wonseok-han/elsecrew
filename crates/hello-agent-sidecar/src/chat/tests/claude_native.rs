@@ -18,6 +18,8 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
     claude_native_cases(&[
         ("success", false),
         ("organization-guard", false),
+        ("privacy", false),
+        ("privacy-with-guard", true),
         ("default-effort", false),
         ("allow", false),
         ("cancel", false),
@@ -106,6 +108,13 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
         if case == "organization-guard" {
             init["plugins"] = json!([{"name":"cc-plugin-sec-default","path":"builtin","source":"cc-plugin-sec-default@builtin"}]);
         }
+        if matches!(case, "privacy" | "privacy-with-guard") {
+            init["plugins"] = json!([{"name":"cc-plugin-privacy","path":"builtin","source":"cc-plugin-privacy@builtin"}]);
+            if case == "privacy-with-guard" {
+                init["plugins"].as_array_mut().unwrap().insert(0, json!({"name":"cc-plugin-sec-default","path":"builtin","source":"cc-plugin-sec-default@builtin"}));
+            }
+        }
+
         let approval = json!({"type":"control_request","request_id":"write_once","request":{
             "subtype":"can_use_tool","tool_name":"Write","tool_use_id":"tool_write","input":{"file_path":format!("{cwd}/new.txt"),"content":"hello"}}});
         let assistant = json!({"type":"assistant","uuid":"answer","session_id":"s","parent_tool_use_id":null,
@@ -237,6 +246,11 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
         if case == "organization-guard" {
             assert_eq!(ended["claude_session_observation"]["observedBuiltinPlugins"], json!(["cc-plugin-sec-default@builtin"]));
         }
+        if matches!(case, "privacy" | "privacy-with-guard") {
+            let mut expected = vec!["cc-plugin-privacy@builtin"];
+            if case == "privacy-with-guard" { expected.push("cc-plugin-sec-default@builtin"); }
+            assert_eq!(ended["claude_session_observation"]["observedBuiltinPlugins"], json!(expected));
+        }
         assert_eq!(
             ended
                 .get("claude_session_observation")
@@ -270,7 +284,7 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             .collect();
         assert_eq!(
             final_text,
-            if matches!(case, "success" | "long" | "organization-guard" | "default-effort" | "allow") {
+            if matches!(case, "success" | "long" | "organization-guard" | "privacy" | "privacy-with-guard" | "default-effort" | "allow") {
                 vec![json!("hello")]
             } else {
                 vec![]

@@ -602,7 +602,7 @@ impl RunReservation {
                             "runId":self.run_id,"workspaceIdentity":self.run["workspaceIdentity"],
                             "capabilityFingerprint":self.run["capabilityFingerprint"],"selectedProfile":self.run["selectedProfile"]});
                         checkpoint = "session persistence";
-                        self.persist_native_running(storage,evidence,Path::new(&workspace),receipt.organization_guard())?;
+                        self.persist_native_running(storage,evidence,Path::new(&workspace),receipt.observed_builtin_plugins())?;
                         checkpoint = "session handler";
                         handle(process, channel, event)?;
                         state.initialized = true;

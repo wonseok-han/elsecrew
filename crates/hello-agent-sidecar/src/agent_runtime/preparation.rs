@@ -797,7 +797,7 @@ impl RunReservation {
                             evidence["workspaceIdentity"] = self.run["workspaceIdentity"].clone();
                             evidence["capabilityFingerprint"] = self.run["capabilityFingerprint"].clone();
                             evidence["selectedProfile"] = self.run["selectedProfile"].clone();
-                            return self.persist_native_running(storage, evidence, cwd, false);
+                            return self.persist_native_running(storage, evidence, cwd, Vec::new());
                         }
                         TextAction::VerifyApprovalBoundary => {
                             return self
@@ -937,7 +937,7 @@ impl RunReservation {
     }
 
     /// A provider-specific verified observation calls this shared atomic transition.
-    fn persist_native_running(&self, storage: &mut Storage, evidence: Value, cwd: &Path, organization_guard: bool) -> Result<(), SidecarError> {
+    fn persist_native_running(&self, storage: &mut Storage, evidence: Value, cwd: &Path, observed_builtin_plugins: Vec<String>) -> Result<(), SidecarError> {
         let failure = || SidecarError::new("agentInputChanged", "native initialization receipt differs");
         let mut projection = actual_run_projection(storage, &self.run_id).map_err(|_| failure())?;
         if !self.matches_current_record(&projection) || projection.contains_key("native_thread_receipt") || self.running_record.get().is_some() { return Err(failure()); }
@@ -955,7 +955,7 @@ impl RunReservation {
             if projection.get("claude_preflight") != Some(&serde_json::to_value(preflight).map_err(|_| failure())?)
                 || projection["native_transport"]["adapter"] != "claude.stream.v2" { return Err(failure()); }
             let session = SessionObservation {
-                observed_builtin_plugins: if organization_guard { vec!["cc-plugin-sec-default@builtin".into()] } else { Vec::new() },
+                observed_builtin_plugins,
                 schema_version:1, run_id:self.run_id.clone(),
                 connection_id:evidence["connectionId"].as_str().ok_or_else(failure)?.into(),
                 preflight_digest:preflight.digest().map_err(|_| failure())?,

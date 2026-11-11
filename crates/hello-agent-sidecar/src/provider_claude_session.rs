@@ -515,7 +515,7 @@ impl ControlInitialization {
             transmitting: false,
             deadline: Instant::now() + Duration::from_secs(10 * 60),
             permissions:
-                hello_agent_core::provider::vendor_observation::claude_session::Session::for_native_organization_guard(
+                hello_agent_core::provider::vendor_observation::claude_session::Session::for_native_builtin_guards(
                     expected,
                 ),
         })

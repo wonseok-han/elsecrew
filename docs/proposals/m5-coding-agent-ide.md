@@ -594,6 +594,14 @@ G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exac
 
 **임시 자료 관측(2026-10-06, 제품 gate 아님)**: 로컬 가짜 API가 반환한 tool_use를 실제 Claude 2.1.287이 실행했을 때 Read 내부 성공/외부 거절과 Bash 내부 읽기·쓰기 성공/외부 거절을 확인했다. 후자는 Read deny 또는 blockReadsOutsideWorkingDirectories의 사전 승인 거절이므로 OS sandbox 자체 증거와 분리한다. [SDK readFile](https://code.claude.com/docs/en/agent-sdk/typescript#what-readfile-can-read)은 Read보다 좁은 범위라 대체 증거로 사용하지 않는다. 개별 도구 거절 뒤에도 최종 result success가 나왔으므로 result success만으로 앱 작업을 성공 처리하지 않는다. 실제 계정·유료 모델·사용자 프로젝트는 이 관측에 사용하지 않았다.
 
+#### Claude 내장 privacy 호환 후보 (2026-11-11 승인)
+
+실제 승인된 실행 진단에서 `init plugins privacy`가 확인됐다. 공식 [privacy README](https://raw.githubusercontent.com/anthropics/claude-code/main/mods/privacy/README.md)를 재조회했다. 이 모듈은 계정 주소와 User-Agent 표식이 함께 포함된 일부 명령을 거절하는 보호 기능이며, 완전한 유출 방지 경계는 아니다. 공개 소스 설명은 설치 바이너리와의 동일성 증명이 아니다.
+
+후보는 서명된 native 공급자 소유 경로에만 `name=cc-plugin-privacy`, `path=builtin`, `source=cc-plugin-privacy@builtin` 정확한 항목과 기존 sec-default 조합을 수용한다. 모듈을 끄거나 포괄적으로 builtin을 신뢰하지 않는다. 추가 필드/외부 경로/다른 이름/중복/세 번째 항목을 거절하며 cwd·모델·권한·도구·MCP·skills·agents 검사는 유지한다. 실제 관측한 두 항목은 receipt에서 정렬된 observedBuiltinPlugins 원장으로 전달하며 보고된 이름 자체를 실행 허가로 쓰지 않는다.
+
+2026-11-11 사용자가 활성화를 승인했다. native 생성자는 `for_native_builtin_guards`로 전환하며 현행 계약은 architecture.md를 따른다. 가짜 native 통합과 실제 제한된 팀 작업의 결과는 history.md에서 확인한다. 실제 유료 실행은 별도 승인 대상이다. 이 후보를 핵심 오케스트레이션 완료 증거로 사용하지 않는다.
+
 #### Claude 내장 조직 guard 호환 방향 (2026-10-19 사용자 승인)
 
 사용자가 공식 내장 guard만 수용하는 호환 구현을 승인했다. 조직 정책 비활성화·유료 재시험은 포함하지 않는다. 아래 후보의 구현/검토를 진행하며 실제 등록 전체 shape와 실제 계정 성공은 별도 검증한다.

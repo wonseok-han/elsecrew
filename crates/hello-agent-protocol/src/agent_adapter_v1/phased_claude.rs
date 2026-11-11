@@ -77,8 +77,9 @@ impl SessionObservation {
         agent_run_id(&self.run_id, "runId")?;
         id(&self.connection_id, "connectionId")?;
         timestamp(&self.observed_at, "observedAt")?;
-        if !self.observed_builtin_plugins.is_empty()
-            && self.observed_builtin_plugins != ["cc-plugin-sec-default@builtin"] {
+        if self.observed_builtin_plugins.len() > 2
+            || self.observed_builtin_plugins.iter().any(|name| !matches!(name.as_str(), "cc-plugin-privacy@builtin" | "cc-plugin-sec-default@builtin"))
+            || self.observed_builtin_plugins.windows(2).any(|pair| pair[0] >= pair[1]) {
             return fail("Claude builtin observations differ");
         }
         if !preflight.credentials_present
@@ -137,7 +138,11 @@ mod tests {
         session.validate_against(&preflight).unwrap();
         let restored: SessionObservation = serde_json::from_value(serde_json::to_value(&session).unwrap()).unwrap();
         assert_eq!(restored.observed_builtin_plugins, session.observed_builtin_plugins);
-        for plugins in [vec!["unknown".into()], vec!["cc-plugin-sec-default@builtin".into(); 2]] {
+        for plugins in [vec!["cc-plugin-privacy@builtin".into()], vec!["cc-plugin-privacy@builtin".into(), "cc-plugin-sec-default@builtin".into()]] {
+            session.observed_builtin_plugins = plugins;
+            assert!(session.validate_against(&preflight).is_ok());
+        }
+        for plugins in [vec!["unknown".into()], vec!["cc-plugin-privacy@builtin".into(); 2], vec!["cc-plugin-sec-default@builtin".into(), "cc-plugin-privacy@builtin".into()], vec!["cc-plugin-sec-default@builtin".into(); 2]] {
             session.observed_builtin_plugins = plugins;
             assert!(session.validate_against(&preflight).is_err());
         }
