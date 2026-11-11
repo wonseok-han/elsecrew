@@ -831,3 +831,22 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
 .m5-chat-navigation > .m5-chat-restore { display: block; width: auto; align-self: flex-start; margin: 8px 0; padding: 4px 6px; min-height: 26px; border: 0; background: transparent; color: var(--m5-muted); font-size: 11px; box-shadow: none; }
 .m5-chat-navigation > .m5-chat-restore:hover:enabled { color: var(--m5-text); background: var(--m5-hover); }
+
+/* One compact status surface leaves the conversation in view. */
+.m5-inline-feedback:empty { display: none; }
+.m5-inline-feedback .m5-notice { margin: 0 0 8px; padding: 4px 10px; border: 0; background: transparent; color: var(--m5-muted, #a6adb7); font-size: 12px; }
+.m5-status-strip { flex: 0 0 auto; min-width: 0; margin: 0 0 8px; border: 1px solid #39424d; border-radius: 6px; background: #1b2026; }
+.m5-status-strip > summary { display: flex; align-items: center; gap: 9px; padding: 8px 12px; cursor: pointer; list-style: none; font-size: 12px; }
+.m5-status-strip > summary::-webkit-details-marker { display: none; }
+.m5-status-indicator { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: #8bb1cc; }
+.m5-status-strip-attention .m5-status-indicator { background: #e3b278; }
+.m5-status-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.m5-status-details-label { flex-shrink: 0; color: #aeb8c5; }
+.m5-status-details-label::after { content: ' ▾'; }
+.m5-status-strip[open] .m5-status-details-label::after { content: ' ▴'; }
+.m5-status-content { max-height: min(32vh, 280px); overflow: auto; padding: 12px; border-top: 1px solid #39424d; font-size: 12px; }
+.m5-status-content > section + section { margin-top: 12px; padding-top: 12px; border-top: 1px solid #39424d; }
+.m5-status-content .m5-error { margin: 0; padding: 0; border: 0; background: transparent; }
+.m5-status-content p { margin: 6px 0; }
+.m5-status-content pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.m5-status-content button { margin-top: 8px; }
