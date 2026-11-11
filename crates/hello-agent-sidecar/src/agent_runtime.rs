@@ -74,6 +74,12 @@ pub(crate) enum FakeScenario {
     #[cfg_attr(not(test), allow(dead_code))]
     CleanReadOnly,
     #[cfg_attr(not(test), allow(dead_code))]
+    OrchestratorDelegate,
+    #[cfg_attr(not(test), allow(dead_code))]
+    OrchestratorFinal,
+    #[cfg_attr(not(test), allow(dead_code))]
+    OrchestratorWorker,
+    #[cfg_attr(not(test), allow(dead_code))]
     NoOutput,
     #[cfg_attr(not(test), allow(dead_code))]
     FinalDelayed,
@@ -503,8 +509,14 @@ impl AgentRuntime {
             || (self.provider == ProviderMode::FakeExact
                 && matches!(
                     self.scenario,
-                    FakeScenario::LongStream | FakeScenario::PacedLongStream
+                    FakeScenario::LongStream | FakeScenario::PacedLongStream | FakeScenario::OrchestratorDelegate | FakeScenario::OrchestratorFinal
                 ))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_fake_scenario(&mut self, scenario: FakeScenario) {
+        assert!(matches!(self.provider, ProviderMode::FakeExact));
+        self.scenario = scenario;
     }
 
     pub(crate) fn fake(executable: PathBuf, scenario: FakeScenario) -> Self {
@@ -1120,7 +1132,7 @@ impl AgentRuntime {
             running_payload.insert("runtime_attestation".into(), attestation_value);
             let running_chat = updated_chat(&chat, "running")?;
             let running_chat_payload =
-                chat_projection_with_record(&chat_projection, &running_chat, None)?;
+                chat_projection_with_record(&actual_chat_projection(storage, &request.chat_id)?, &running_chat, None)?;
             Ok((running_payload, running_chat_payload))
         })();
         let (running_payload, running_chat_payload) = match attestation_projection {
@@ -2906,7 +2918,9 @@ fn resolve_prompt(
 ) -> Result<Vec<u8>, ProjectFailure> {
     let selected: HashSet<_> = ids.iter().map(String::as_str).collect();
     let mut found = BTreeMap::new();
-    let mut prompt = if role_id == "coordinator" { b"You are the project coordinator. Answer the user directly in their language. Inspect the project when needed and explain clearly. You have read-only access: do not change files. For change requests, explain a proposed plan and limitations. Do not claim to have delegated work or changed files. The following is the selected conversation history:\n".to_vec() } else { Vec::new() };
+    let workflow_prompt = crate::orchestration::prompt(storage, chat_id, role_id, ids)?;
+    let orchestrated = workflow_prompt.is_some();
+    let mut prompt = if let Some(prompt) = workflow_prompt { prompt.into_bytes() } else if role_id == "coordinator" { b"You are the project coordinator. Answer the user directly in their language. Inspect the project when needed and explain clearly. You have read-only access: do not change files. For change requests, explain a proposed plan and limitations. Do not claim to have delegated work or changed files. The following is the selected conversation history:\n".to_vec() } else { Vec::new() };
     for message in storage.chat_message_history(chat_id)? {
         if message["messageId"]
             .as_str()
@@ -2924,7 +2938,11 @@ fn resolve_prompt(
                 }
                 continue;
             }
-            prompt.extend_from_slice(text.as_bytes());
+            if orchestrated {
+                prompt.extend_from_slice(&serde_json::to_vec(&json!({"kind":message["kind"],"role":message["roleId"],"text":text})).map_err(json_failure)?);
+            } else {
+                prompt.extend_from_slice(text.as_bytes());
+            }
             prompt.push(b'\n');
         }
     }
@@ -4173,6 +4191,9 @@ fn scenario_name(value: FakeScenario) -> &'static str {
     match value {
         FakeScenario::Clean => "clean",
         FakeScenario::CleanReadOnly => "clean-read-only",
+        FakeScenario::OrchestratorDelegate => "orchestrator-delegate",
+        FakeScenario::OrchestratorFinal => "orchestrator-final",
+        FakeScenario::OrchestratorWorker => "orchestrator-worker",
         FakeScenario::NoOutput => "no-output",
         FakeScenario::FinalDelayed => "final-delayed",
         FakeScenario::CancelClean => "cancel-clean",
@@ -4272,6 +4293,9 @@ pub(crate) fn run_agent_fixture_launcher(scenario: &str) -> Result<(), SidecarEr
     if ![
         "clean",
         "clean-read-only",
+        "orchestrator-delegate",
+        "orchestrator-final",
+        "orchestrator-worker",
         "no-output",
         "final-delayed",
         "cancel-clean",
@@ -4387,7 +4411,7 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
         "handshake-version-mismatch" => handshake["claude_code_version"] = json!("2.1.242"),
         "handshake-model-mismatch" => handshake["model"] = json!("claude-unknown"),
         "handshake-cwd-mismatch" => handshake["cwd"] = json!("/not/managed"),
-        "clean-read-only" | "handshake-permission-mismatch" => handshake["permissionMode"] = json!("readOnly"),
+        "clean-read-only" | "orchestrator-delegate" | "orchestrator-final" | "handshake-permission-mismatch" => handshake["permissionMode"] = json!("readOnly"),
         "handshake-tools-mismatch" => handshake["tools"] = json!(["Read"]),
         "handshake-mcp-mismatch" => handshake["mcp_servers"] = json!(["unsafe"]),
         "handshake-plugins-mismatch" => handshake["plugins"] = json!(["unsafe"]),
@@ -4404,6 +4428,17 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
         return Ok(());
     }
     match scenario {
+        "orchestrator-worker" => {
+            std::fs::write(cwd.join("hello.txt"), b"updated by the isolated fixture worker\n")
+                .map_err(|error| SidecarError::new("fixtureFailure", error.to_string()))?;
+            println!("{}", json!({"type":"final","text":"Updated hello.txt in the isolated work copy."}));
+            println!("{}", json!({"type":"terminal","outcome":"succeeded"}));
+        }
+        "orchestrator-delegate" | "orchestrator-final" => {
+            let text = if scenario == "orchestrator-delegate" { json!({"action":"delegate","role":"coding","instruction":"Update hello.txt in the work copy and report your changes.","summary":"I will ask the developer to inspect it."}) } else { json!({"action":"final","answer":"The developer reported success. Please review the result."}) };
+            println!("{}", json!({"type":"final","text":text.to_string()}));
+            println!("{}", json!({"type":"terminal","outcome":"succeeded"}));
+        }
         "no-output" => {}
         "malformed" => println!("not-json"),
         "oversized" => println!(

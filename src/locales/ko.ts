@@ -569,6 +569,7 @@ export const ko = {
   "m5.roles.help": "모델을 실제로 사용할 수 있는지는 실행 전에 확인해요. 데모는 모델 설치·로그인·실행을 확인하지 않습니다. 이미 만든 채팅은 당시 설정을 그대로 보존해요.",
   "m5.roles.coordinator": "총괄",
   "m5.roles.design": "디자인",
+  "m5.chat.stopTeam": "작업 중단",
   "m5.chat.coordinatorSend": "보내기",
   "m5.chat.legacyCoordinator": "이전 방식으로 만든 채팅입니다. 새 채팅에서 대화를 시작해 주세요. 기존 기록은 그대로 보존됩니다.",
   "m5.roles.planning": "기획",

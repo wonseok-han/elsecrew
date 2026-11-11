@@ -12,6 +12,13 @@ window.m5Install = { request: async () => {
 const preparationInspection = { projectId: "earlier_project", worktreeId: "worktree_failed", workspaceIdentity: "workspace_failed", lockId: "lock_worktree_failed", projectRevision: 8, lockRevision: 9 };
 let preparationAttempts = 0;
 window.m5Projects = { request: async (input) => {
+  if (input.action === "cancelTeamTask") {
+    for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"]) if (input[key] !== smokeChat[key]) throw new Error("wrong team cancellation identity");
+    if (input.triggerMessageId !== [...smokeMessages].reverse().find(m => m.kind === "user").messageId) throw new Error("wrong team task");
+    window.m5SmokeTeamStops.push(input); smokeChat.state = "canceled";
+    return {schemaVersion:1, action:input.action, chatId:input.chatId, triggerMessageId:input.triggerMessageId, status:"stopped"};
+  }
+
   if (input.action === "inspectPreparation" && input.projectId === "earlier_project") return {schemaVersion: 1, action: input.action, inspection: preparationInspection};
   if (input.action === "abandonPreparation") {
     if (JSON.stringify(input.inspection) !== JSON.stringify(preparationInspection)) throw new Error("wrong preparation identity");
@@ -82,6 +89,14 @@ smokeChat.roleSnapshots = [{...smokeChat.roleSnapshots[0], roleId:'coordinator'}
 window.m5SmokeContextStarts = [];
 window.m5SmokeShortStarts = [];
 const smokeMessages = [{ schemaVersion: 1, messageId: "smoke_initial", chatId: smokeChat.chatId, taskId: smokeChat.taskId, worktreeId: smokeChat.worktreeId, eventSequence: 1, kind: "user", roleId: null, runId: null, text: "처음 요청", createdAt: smokeChat.createdAt }];
+window.m5SmokeTeamStops = [];
+window.m5SmokeTeamMessages = () => {
+  for (const [roleId, text] of [["coordinator", JSON.stringify({action:"delegate",role:"coding",instruction:"Inspect files",summary:"개발 담당과 구조를 확인할게요."})], ["coding", "파일 구조를 확인했습니다."], ["coordinator", JSON.stringify({action:"final",answer:"확인한 내용을 정리해 드릴게요."})]]) {
+    const eventSequence = smokeMessages.at(-1).eventSequence + 1;
+    const message = {...smokeMessages[0],kind:"role",roleId,runId:"smoke_team_"+eventSequence,messageId:"team_message_"+eventSequence,eventSequence,text};
+    smokeMessages.push(message); for (const listener of chatListeners) listener(message);
+  }
+};
 let historyMessageIndex = 0;
 let historyReadFailures = 0;
 let diagnosticRun = null;
@@ -108,7 +123,7 @@ window.m5SmokeVisualRunning = () => {
 };
 // Visual-only state transition; no process or provider request is performed.
 window.m5SmokeVisualChatState = state => {
-  if (!['draft', 'reviewReady', 'recoveryRequired'].includes(state)) throw new Error('unexpected visual state');
+  if (!['draft', 'running', 'reviewReady', 'recoveryRequired'].includes(state)) throw new Error('unexpected visual state');
   smokeChat.state = state;
   for (const listener of agentPublicEventListeners) listener({ ...smokeChat, runId:'smoke_failed_claude', roleId:'coding', eventId:'visual_state_' + state, kind:'status', text:'visual state', capabilityFingerprint:`sha256:${'0'.repeat(64)}` });
 };

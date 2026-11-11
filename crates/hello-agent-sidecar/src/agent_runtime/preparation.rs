@@ -1435,6 +1435,7 @@ impl RunPreparation {
             request_id: Some(request_id.into()),
             payload: projection,
         }];
+        if let Some(binding) = crate::orchestration::bind(storage, &self.request, request_id, &run_id)? { upserts.push(binding); }
         if self.profile.permission == "workspaceWrite" {
             upserts.push(acquire_writer_lock(
                 storage, &self.chat, &run_id, request_id,

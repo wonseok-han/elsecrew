@@ -1095,6 +1095,12 @@ impl ProjectManager {
             return Err(ProjectFailure::recovery("finish pending workspace preparation before list removal"));
         }
         let chats = storage.projection_records("chat")?;
+        for chat in &chats {
+            if chat.get("project_id").and_then(Value::as_str) == Some(project_id)
+                && crate::orchestration::load(chat)?.is_some_and(|state| state.status == "running") {
+                return Err(ProjectFailure::recovery("finish team orchestration before list removal"));
+            }
+        }
         if chats.iter().any(|chat| chat.get("project_id").and_then(Value::as_str) == Some(project_id)
             && (chat.get("state").and_then(Value::as_str) == Some("recoveryRequired")
                 || chat.get("save_sessions").is_some_and(|sessions| sessions.as_object().is_none_or(|items| !items.is_empty())))) {

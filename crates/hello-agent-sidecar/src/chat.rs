@@ -533,6 +533,9 @@ impl G5Manager {
             .map_err(|error| ProjectFailure::manifest(error.to_string()))?;
         let chat_id = request["chatId"].as_str().unwrap();
         let mut stored = chat_projection_record(storage, chat_id)?;
+        if crate::orchestration::load(&stored)?.is_some_and(|state| state.status == "running") {
+            return Err(ProjectFailure::recovery("wait for or stop the current team task before sending another message"));
+        }
         let mut chat = stored["record"].clone();
         for field in [
             "projectId",

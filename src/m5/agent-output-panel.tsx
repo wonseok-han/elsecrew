@@ -1,3 +1,4 @@
+import { orchestratorMessage } from "./orchestrator-message.ts";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { AgentOutputReader, type AgentOutputSource } from "./agent-output-reader.ts";
@@ -15,10 +16,10 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-const LiveOutputRow = memo(function LiveOutputRow({ row, truncatedLabel }: {
-  row: OutputDisplayRow; truncatedLabel: string;
+const LiveOutputRow = memo(function LiveOutputRow({ row, truncatedLabel, role }: {
+  row: OutputDisplayRow; truncatedLabel: string; role: string;
 }) {
-  return <article>{row.truncated && <small>{truncatedLabel}</small>}<pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{row.text}</pre></article>;
+  return <article>{row.truncated && <small>{truncatedLabel}</small>}<pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{orchestratorMessage(row.text, role)}</pre></article>;
 });
 
 /** One selected run/window at a time; switching never starts or cancels a run. */
@@ -208,13 +209,13 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
         <p>{t("m5.output.range", { first: visibleHistory.request.afterSequence + 1, last: visibleHistory.nextAfterSequence, total: visibleHistory.request.throughSequence })}</p>
         {visibleHistory.rows.map(row => <article key={row.event.eventId}>
           <small>{row.outputSequence} · {row.itemUpdate ? t(row.itemUpdate.operation === "append" ? "m5.output.append" : "m5.output.complete") : t("m5.output.message")}</small>
-          <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{row.event.text}</pre>
+          <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{orchestratorMessage(row.event.text, run.selectedProfile.roleId)}</pre>
         </article>)}
       </>}
     </>}
     {!historyActive && view?.binding.runId === binding.runId && <>
       {view.hasEarlier && <p>{t("m5.output.window")}</p>}
-      {view.rows.map(row => <LiveOutputRow key={row.key} row={row} truncatedLabel={t("m5.output.truncated")} />)}
+      {view.rows.map(row => <LiveOutputRow key={row.key} row={row} role={run.selectedProfile.roleId} truncatedLabel={t("m5.output.truncated")} />)}
     </>}
     </div>
     {!historyActive && newOutput && <button type="button" onClick={showLatest}>{t("m5.chat.newMessages")}</button>}

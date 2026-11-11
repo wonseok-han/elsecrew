@@ -38,7 +38,9 @@ function validateGitTrustInspection(value: unknown): GitTrustInspection {
   if (typeof inspection.trusted !== "boolean" || inspection.executionEnabled !== false) throw new Error("invalid Git trust inspection");
   return inspection as unknown as GitTrustInspection;
 }
+export type TeamTaskCancelRequest = ChatDiscardAddress & { action: "cancelTeamTask"; triggerMessageId: string };
 export type ProjectCatalogRequest =
+  | TeamTaskCancelRequest
   | { action: "inspectGitTrust" }
   | { action: "confirmGitTrust"; identity: GitTrustIdentity; confirmed: true }
   | { action: "revokeGitTrust" }
@@ -77,6 +79,7 @@ export type ProjectCatalogRequest =
   | { action: "abandonPreparation"; inspection: PreparationInspection };
 export interface ProjectCatalogEntry { projectId: string; canonicalPath: string }
 export type ProjectCatalogResult =
+  | { schemaVersion: 1; action: "cancelTeamTask"; chatId: string; triggerMessageId: string; status: "stopping" | "stopped" }
   | { schemaVersion: 1; action: "inspectGitTrust" | "confirmGitTrust"; inspection: GitTrustInspection }
   | { schemaVersion: 1; action: "revokeGitTrust"; revoked: true }
   | { schemaVersion: 1; action: "getAppRoleDefaults" | "updateAppRoleDefaults"; settings: AppRoleDefaults }
@@ -144,7 +147,10 @@ export function validateChatDiscardInspection(value: unknown): ChatDiscardInspec
 }
 export function validateProjectCatalogRequest(value: unknown): ProjectCatalogRequest {
   const request = object(value);
-  if (request.action === "inspectGitTrust" || request.action === "revokeGitTrust") {
+  if (request.action === "cancelTeamTask") {
+    keys(request, ["action", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "triggerMessageId"]);
+    for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "triggerMessageId"]) id(request[key]);
+  } else if (request.action === "inspectGitTrust" || request.action === "revokeGitTrust") {
     keys(request, ["action"]);
   } else if (request.action === "confirmGitTrust") {
     keys(request, ["action", "identity", "confirmed"]);
@@ -215,7 +221,10 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   const request = validateProjectCatalogRequest(input);
   const result = object(value);
   if (result.schemaVersion !== 1 || result.action !== request.action || new TextEncoder().encode(JSON.stringify(value)).byteLength > 768 * 1024) throw new Error("invalid catalog response envelope");
-  if (request.action === "inspectGitTrust" || request.action === "confirmGitTrust") {
+  if (request.action === "cancelTeamTask") {
+    keys(result, ["schemaVersion", "action", "chatId", "triggerMessageId", "status"]);
+    if (result.chatId !== request.chatId || result.triggerMessageId !== request.triggerMessageId || !["stopping", "stopped"].includes(String(result.status))) throw new Error("team cancellation target mismatch");
+  } else if (request.action === "inspectGitTrust" || request.action === "confirmGitTrust") {
     keys(result, ["schemaVersion", "action", "inspection"]);
     const inspection = validateGitTrustInspection(result.inspection);
     if (request.action === "confirmGitTrust" && (!inspection.trusted ||

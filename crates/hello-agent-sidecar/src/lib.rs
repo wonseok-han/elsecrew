@@ -3,6 +3,8 @@
 //! 실제 유료 agent 실행과 원본 적용은 후속 게이트에서 추가한다.
 
 mod agent_runtime;
+mod orchestration;
+mod orchestration_dispatch;
 mod application_cancel;
 mod dispatch_timing;
 mod chat;
@@ -561,6 +563,9 @@ struct Sidecar {
     pending_agent_starts: BTreeMap<String, PendingAgentStart>,
     maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler,
     maintenance_poisoned: bool,
+    workflow_chats: std::collections::BTreeSet<String>,
+    workflow_requests: BTreeMap<String, (String, String)>,
+    workflow_outbound: Vec<EventV1>,
 }
 
 struct PendingAgentStart {
@@ -939,6 +944,7 @@ impl Sidecar {
         agent_runtime.recover_unclean_runs(&mut storage, &mut projects)?;
         agent_runtime.reconcile_resolved_catalogs(&mut storage, &projects)?;
         g5.recover_unclean_runs(&mut storage, &mut projects)?;
+        orchestration::pause_after_restart(&mut storage).map_err(orchestration_dispatch::failure)?;
         admission_not_cancelled(cancellation)?;
         storage.register_app_instance(&ready)?;
         admission_not_cancelled(cancellation)?;
@@ -960,6 +966,9 @@ impl Sidecar {
             deferred_runtime_error: None,
             pending_agent_capabilities: BTreeMap::new(),
             pending_agent_starts: BTreeMap::new(),
+            workflow_chats: Default::default(),
+            workflow_requests: Default::default(),
+            workflow_outbound: Vec::new(),
             maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler::default(),
             maintenance_poisoned: false,
         })
@@ -989,6 +998,10 @@ impl Sidecar {
                 &request, "providerBusy", "requestBlocked",
                 "installation and provider work cannot overlap; check status or request cancellation",
             )));
+        }
+        if !self.workflow_chats.is_empty() && (matches!(request.method.as_str(), "file.save" | "workspace.file.save")
+            || (request.method == "project.catalog" && matches!(request.params["action"].as_str(), Some("openApplicationConfirmation" | "startApplication" | "restoreApplication" | "discardChatWorkspace" | "retireApplication" | "cleanupBackup")))) {
+            return Ok(HandledRequest::response(error_response(&request, "orchestrationBusy", "requestBlocked", "finish or stop the team task before changing its workspace or applying to the original")));
         }
         if self.projects.application_running()
             && !matches!(request.method.as_str(), "system.status" | "app.prepareQuit")
@@ -1057,6 +1070,9 @@ impl Sidecar {
             };
         }
 
+        if request.method == "project.catalog" && request.params["action"] == "cancelTeamTask" {
+            return self.cancel_team_task(request);
+        }
         let action = match request.method.as_str() {
             "run.approval" => {
                 let result = match self.agent_runtime.approval_request(
@@ -1126,6 +1142,8 @@ impl Sidecar {
                 if !self.prepared_to_quit {
                     self.projects.stop_application();
                     self.projects.stop_watchers();
+                    orchestration::pause_after_restart(&mut self.storage).map_err(orchestration_dispatch::failure)?;
+                    self.workflow_chats.clear();
                     self.prepared_to_quit = true;
                 }
                 self.agent_runtime
@@ -1202,7 +1220,7 @@ impl Sidecar {
                     self.projects.open_application_confirmation(&mut self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "chatId").map_err(invalid_params)?, param_string(params, "fingerprint").map_err(invalid_params)?, &request.request_id)
                 }
                 Some("inspectChatDiscard" | "discardChatWorkspace") => {
-                    if !self.agent_runtime.owned_run_ids().is_empty()
+                    if !self.workflow_chats.is_empty() || !self.agent_runtime.owned_run_ids().is_empty()
                         || !self.pending_agent_starts.is_empty()
                         || !self.pending_agent_cancels.is_empty()
                     {
@@ -1365,7 +1383,7 @@ impl Sidecar {
                         .map(|()| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"abandonPreparation","inspection":inspection}), ..Default::default() })
                 }
                 Some("removeProject" | "removeChat" | "restoreChats") => {
-                    if !self.agent_runtime.owned_run_ids().is_empty() || !self.pending_agent_starts.is_empty() || !self.pending_agent_cancels.is_empty() {
+                    if !self.workflow_chats.is_empty() || !self.agent_runtime.owned_run_ids().is_empty() || !self.pending_agent_starts.is_empty() || !self.pending_agent_cancels.is_empty() {
                         return Ok(HandledRequest::response(error_response(&request, "requestBlocked", "requestBlocked", "list removal requires idle agent execution")));
                     }
                     let action = request.params["action"].as_str().unwrap();
@@ -2021,7 +2039,7 @@ impl Sidecar {
         launching && self.install.blocks_provider_launch(&self.storage)
     }
 
-    fn handle_agent_request(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
+    fn handle_agent_request_inner(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
         use hello_agent_protocol::agent_adapter_v1::AgentRunStartRequestV1;
         if request.method == "agent.getModelChoices" {
             if !self.agent_runtime.uses_native_providers() || request.params["runtime"] != "codex" {
@@ -2085,6 +2103,8 @@ impl Sidecar {
                     ));
                 }
                 self.agent_runtime.request_cancel(&identity)?;
+                orchestration::stop(&mut self.storage, &identity.chat_id, &identity.run_id).map_err(|e| ProjectFailure::manifest(e.detail))?;
+                self.workflow_chats.remove(&identity.chat_id);
                 Ok(identity)
             })();
             return match queued {
@@ -2427,16 +2447,19 @@ impl Sidecar {
             self.pending_agent_cancels.remove(&run_id);
             responses.push(response);
         }
+        self.poll_workflows(&mut responses, &mut events)?;
         self.finish_runtime_poll(responses, events, runtime_error)
     }
 
     fn finish_runtime_poll(&mut self, responses: Vec<ResponseV1>, events: Vec<chat::G5Event>, runtime_error: Option<SidecarError>) -> Result<(Vec<ResponseV1>, Vec<EventV1>), SidecarError> {
-        if responses.is_empty() && events.is_empty() {
+        if responses.is_empty() && events.is_empty() && self.workflow_outbound.is_empty() {
             if let Some(error) = runtime_error { return Err(error); }
         } else {
             self.deferred_runtime_error = runtime_error;
         }
-        Ok((responses, self.g5_events(events)))
+        let mut outward_events = self.g5_events(events);
+        outward_events.append(&mut self.workflow_outbound);
+        Ok((responses, outward_events))
     }
 
     fn maintenance_tick(

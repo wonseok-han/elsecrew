@@ -427,7 +427,11 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 총괄 채팅은 별도 `schemaVersion:2`의 프로젝트 역할 설정/채팅 snapshot을 사용한다. V1은 기존 planning/coding/review 3개 순서를 유지하며, V2는 coordinator/planning/design/coding/review 5개 순서를 검증한다. 새 채팅 생성 시 기존 planning의 provider/model/reasoning을 coordinator/design의 초기값으로 복제하고 revision 충돌을 거부한다. 이전 채팅 snapshot은 수정하지 않는다. 프로젝트 역할 설정에서 총괄 모델을 편집할 수 있다. coordinator/design/planning/review는 읽기 전용이고 coding만 작업 복사본 쓰기를 허용한다.
 
-새 채팅의 사용자 전송은 작업 복사본 준비·채팅 결속 이후 실제 `run.startAgent(coordinator)`를 호출한다. 후속 전송은 메시지의 영속 저장 성공 뒤 같은 경로를 사용하며 로그인/모델 확인 실패 시 다른 모델이나 fixture로 대체하지 않는다. 총괄 지침은 실행 직전 선택된 대화에 붙이며 공급자 신원/권한 attestation을 변경하지 않는다. 완료 시 `waitingForUser`로 전환하고 공개 응답을 대화에 표시한다. V1 채팅은 새 총괄 채팅으로 시작하도록 안내한다. 임의 역할 구성·역할별 사용자 지침·자동 팀 위임은 아직 구현되지 않았다.
+새 채팅의 사용자 전송은 작업 복사본 준비·채팅 결속 이후 실제 `run.startAgent(coordinator)`를 호출한다. 후속 전송은 메시지의 영속 저장 성공 뒤 같은 경로를 사용하며 로그인/모델 확인 실패 시 다른 모델이나 fixture로 대체하지 않는다. 총괄 지침은 실행 직전 선택된 대화에 붙이며 공급자 신원/권한 attestation을 변경하지 않는다. V1 채팅은 새 총괄 채팅으로 시작하도록 안내한다. 임의 역할 구성·역할별 사용자 지침은 아직 구현되지 않았다.
+
+2026-11-11 소스 구현의 `orchestration_v1` chat projection은 선택된 사용자 메시지·팀원 지시/보고·현재 단계/실행을 보존한다. 총괄은 엄격한 JSON final/delegate 중 하나를 반환하며 host가 허용된 역할·문자열 크기·최대12회 실행을 검증한다. 직렬 팀 실행은 각 역할 snapshot의 공급자·모델·권한으로 기존 capability discovery/실행 예약 경로를 통과한다. workflow의 runId를 run/lock과 원자 예약하고, actualAgent 성공/종료 증거 뒤에만 보고를 읽어 다음 단계를 예약한다. 최종 응답은 읽기 작업이면 waitingForUser, coding 실행이 있었다면 reviewReady다. JSON 원문은 영속 증거로 유지하고 대화 화면은 answer/summary를 표시한다.
+
+재시작은 미완료 workflow를 paused로 바꾸며 자동 모델 호출을 하지 않는다. 동일 사용자 메시지는 상태 알림이 추가돼도 자동 재실행하지 않는다. 새 메시지로 명시적으로 이어갈 수 있으며 실행 중 새 메시지는 누락시키지 않고 거부한다. cancelTeamTask는 전체 채팅/작업 복사본/시작 메시지 신원을 확인해 다음 단계를 막고 현재 실행의 기존 취소 절차를 호출한다. stopping 응답은 종료 증거가 아니며 원본 반영·잠금 해제·복구 판정은 기존 소유자의 증거를 기다린다. 실행 중에는 목록 제거/작업 복사본 폐기/수동 저장/원본 반영을 차단한다. 소스 연결과 설치본 반영·실제 공급자 검증 완료는 구분한다.
 
 개발 빌드(debug assertions)의 명시적 `--stdio-agent-fixture long-stream` 및 `paced-long-stream` 모드도 같은 입장 경로를 사용한다. 일반 release 빌드에서는 두 장시간 fixture 인자를 DB open 이전에 거절한다. 명시적 Cargo feature `qa-output-fixtures`를 사용하는 검증용 빌드는 최적화된 코드에서도 이 두 인자를 허용하지만, 일반 `--stdio` 선택은 바꾸지 않는다. 제품 staging은 Cargo artifact의 feature 목록을 확인하여 QA feature가 켜졌거나 목록이 누락된 실행 파일을 복사 전에 거절한다. `scripts/m5-package-output-qa.mjs`는 별도 임시 QA 앱을 만들고 고정된 시험 진입점으로 네 채팅 출력 진단을 실행한다. 사용자/세션/로그 경로를 시험 root로 고정하며 제품 out을 교체하지 않는다. QA 결과는 제품과 바이너리가 다른 진단이고 반복 전체 G6 검증 완료가 아니다. blocked/Windows 및 다른 fixture 모드는 기존 입장을 유지하며 V11/V12를 허용하지 않는다. fixture는 시험용 임시 DB에서 stdio·페이지·화면 통합을 검증하기 위한 것이며 실제 계정 호출을 하지 않는다. V11/V12 시험 DB는 durable admission을 허용하는 모드로 다시 열어야 한다.
 

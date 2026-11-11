@@ -1,3 +1,4 @@
+import { validateProjectCatalogResult, type TeamTaskCancelRequest } from "./contracts/project-catalog-v1.ts";
 import { ko, type MessageKey } from "../locales/ko.ts";
 import { chatNotice, recoveryConfirmation, agentContextConfirmation, type ChatNoticeKey, type ChatNoticeContext } from "./chat-notice.ts";
 type ChatErrorKey = Extract<MessageKey, `m5.chatError.${string}`>;
@@ -94,7 +95,7 @@ export class ChatUiController {
     const chat = this.#state.activeChat;
     const bridge = this.#bridge;
     const draft = chat && this.#state.followups?.[chat.chatId];
-    if (sendToCoordinator && (chat?.schemaVersion !== 2 || this.#state.agentStartingRoleId || this.#state.agentRuns.some(isAgentActive))) return;
+    if (sendToCoordinator && (chat?.schemaVersion !== 2 || chat.state === "running" || this.#state.agentStartingRoleId || this.#state.agentRuns.some(isAgentActive))) return;
     if (!admissionReady || !chat || (bridge.version !== 7 && bridge.version !== 8) || !draft || draft.sending || !this.canAppendFollowup() || (!draft.request && !draft.text.trim())) return;
     const generation = this.#generation;
     let request: ChatAppendMessageRequestV1;
@@ -361,7 +362,7 @@ export class ChatUiController {
 
   async startAgent(roleId: RoleIdV1, lang: "ko" | "en" = "ko"): Promise<void> {
     const chat = this.#state.activeChat; const generation = this.#generation; const bridge = this.#agentBridge();
-    if (!chat || !bridge || this.#state.switching || this.#state.activeRunId || this.#state.agentStartingRoleId || this.#state.agentRuns.some(isAgentActive) || this.isActionBlocked()) {
+    if (!chat || !bridge || (chat.schemaVersion === 2 && chat.state === "running") || this.#state.switching || this.#state.activeRunId || this.#state.agentStartingRoleId || this.#state.agentRuns.some(isAgentActive) || this.isActionBlocked()) {
       if (chat && !bridge) this.#set({ ...chatNotice("m5.chatNotice.unavailable") });
       return;
     }
@@ -411,6 +412,17 @@ export class ChatUiController {
       }
     }
     finally { if (this.#live(generation) && this.#state.activeChat?.chatId === chat.chatId) this.#set({ agentStartingRoleId: null }); }
+  }
+
+  async cancelTeamTask(send: (input: TeamTaskCancelRequest) => Promise<unknown>): Promise<void> {
+    const chat = this.#state.activeChat; const generation = this.#generation;
+    const trigger = [...this.#state.messages].reverse().find(message => message.kind === "user");
+    if (!chat || chat.schemaVersion !== 2 || !trigger || this.#state.switching) return;
+    const input: TeamTaskCancelRequest = { action: "cancelTeamTask", chatId: chat.chatId, taskId: chat.taskId, projectId: chat.projectId, worktreeId: chat.worktreeId, workspaceIdentity: chat.workspaceIdentity, triggerMessageId: trigger.messageId };
+    try {
+      validateProjectCatalogResult(await send(input), input);
+      if (this.#live(generation) && this.#state.activeChat?.chatId === chat.chatId) await this.#hydrateChat(chat, generation);
+    } catch (error) { this.#error("m5.chatError.agentTermination", error); }
   }
 
   async cancelAgentRun(run: AgentRunRecordV1): Promise<void> {
