@@ -588,7 +588,7 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length === 200", "bounded diff page")};
     if (!document.querySelector('[data-panel=editor] .m5-diff-details') || document.querySelector('[data-panel=editor]').hidden) throw new Error('diff did not open in the editor dock');
     if (!document.querySelector('.m5-editor-surface').hidden || document.querySelector('.monaco-editor') !== preservedEditor) throw new Error('review disposed the existing editor');
-    [...document.querySelectorAll('.m5-editor-head button')].find(button => button.textContent === '코드 편집기').click();
+    [...document.querySelectorAll('.m5-diff-actions button')].find(button => button.textContent === '코드 편집기').click();
     await ${waitFor("!document.querySelector('.m5-editor-surface').hidden && !document.querySelector('.m5-diff-details')", "return from review")};
     if (document.querySelector('.monaco-editor') !== preservedEditor) throw new Error('return from review recreated the editor');
     document.querySelector('.m5-change-row').click();
@@ -596,6 +596,9 @@ app.whenReady().then(async () => {
     if (!document.querySelector('.m5-diff-deleted') || !document.querySelector('.m5-diff-added')) throw new Error('missing distinct change rows');
     const wrapToggle = document.querySelector('.m5-diff-wrap input');
     const diffBox = document.querySelector('.m5-diff-lines');
+    if (diffBox.textContent.includes('@@ -')) throw new Error('raw hunk header leaked into comparison');
+    if (!document.querySelector('.m5-diff-source pre').textContent.includes('@@ -')) throw new Error('raw comparison evidence missing');
+    if (document.querySelector('.m5-diff-mode button').getBoundingClientRect().height > 32) throw new Error('comparison toolbar is oversized');
     [...document.querySelectorAll('[role=tab]')].find(button => button.textContent.startsWith('변경') && button.getClientRects().length).click();
     await ${waitFor("!document.querySelector('[data-panel=changes]').hidden", "changes visible for wrap geometry")};
     const changeBadge = document.querySelector('[data-panel=changes] .m5-dock-count');

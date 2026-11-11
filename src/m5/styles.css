@@ -981,3 +981,51 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-workbench .m5-sidebar-reopen:hover { background: var(--m5-raised); color: var(--m5-text); }
 
 .m5-workbench .m5-sidebar-reopen:focus-visible { outline: 2px solid var(--m5-accent); outline-offset: 1px; }
+
+/* Shared editor and comparison chrome: compact controls, uninterrupted code surface. */
+.m5-editor, .m5-editor-surface { background: var(--m5-bg); }
+.m5-tab-list { background: var(--m5-surface); min-height: 34px; }
+.m5-editor-tab > button:first-child, .m5-close-tab { background: transparent; font-size: 12px; }
+.m5-editor-tab:has([aria-selected="true"]) { background: var(--m5-bg); }
+.m5-editor-tab > button[aria-selected="true"] { background: var(--m5-bg); box-shadow: inset 0 2px var(--m5-accent, #e6a18a); }
+.m5-editor-head { min-height: 30px; padding: 2px 12px; background: var(--m5-surface); }
+.m5-editor-head button, .m5-diff-actions button { min-height: 28px; padding: 4px 8px; font-size: 11px; }
+.m5-editor > .m5-diff-details { display: flex; flex-direction: column; overflow: hidden; background: var(--m5-bg); }
+.m5-diff-header { padding: 8px 12px; gap: 8px; background: var(--m5-bg); flex-shrink: 0; }
+.m5-diff-identity { gap: 2px; }
+.m5-diff-identity strong { font-size: 12px; }
+.m5-diff-toolbar { padding: 6px 12px; gap: 8px 12px; border-bottom: 1px solid var(--m5-border); flex-shrink: 0; }
+.m5-diff-mode { padding: 2px; border: 1px solid var(--m5-border); border-radius: 6px; background: var(--m5-bg); }
+.m5-diff-mode button { min-height: 26px; padding: 3px 9px; border: 0; border-radius: 4px; background: transparent; color: var(--m5-muted); font-size: 11px; }
+.m5-diff-wrap, .m5-diff-help { font-size: 11px; }
+.m5-diff-wrap input { width: 14px; height: 14px; margin: 0; }
+.m5-diff-details .m5-diff-lines { flex: 1 1 auto; min-height: 100px; max-height: none; border: 0; background: var(--m5-bg); }
+.m5-diff-lines table { font-size: 13px; line-height: 22px; }
+.m5-diff-lines th { background: var(--m5-surface); color: var(--m5-muted); padding: 4px 8px; font: 10px/20px -apple-system, BlinkMacSystemFont, sans-serif; border-bottom: 1px solid var(--m5-border); }
+.m5-diff-lines td { padding: 0 10px; }
+.m5-diff-lines .m5-diff-metadata { background: var(--m5-surface); color: var(--m5-muted); font-size: 11px; }
+.m5-diff-metadata td { padding-block: 5px; }
+.m5-diff-added { background: #163426; color: #bde6cc; }
+.m5-diff-deleted { background: #392126; color: #e8b9c1; }
+.m5-diff-source { flex-shrink: 0; padding: 6px 12px; border-top: 1px solid var(--m5-border); color: var(--m5-muted); font-size: 11px; }
+.m5-diff-source summary { cursor: pointer; }
+.m5-diff-source pre { max-height: 140px; }
+.m5-diff-pages { flex-shrink: 0; padding: 6px 12px; margin: 0; }
+.m5-change-list .m5-change-row { min-height: 34px; padding: 7px 10px; gap: 10px; border-radius: 5px; }
+.m5-change-row .m5-change-kind { flex: 0 0 32px; font-size: 10px; font-weight: 500; }
+.m5-change-file { display: flex; align-items: baseline; gap: 8px; }
+.m5-change-file strong { flex-shrink: 0; }
+.m5-change-file small { min-width: 0; }
+.m5-file-search input { min-height: 30px; padding: 5px 9px; font-size: 12px; }
+.m5-file-search p { margin: 6px 0 0; font-size: 10px; color: var(--m5-muted); }
+.m5-editor:has(> .m5-diff-details) { display: flex; flex-direction: column; }
+.m5-editor > .m5-diff-details { flex: 1; }
+.m5-editor > .m5-tab-list, .m5-editor > .m5-editor-head { flex-shrink: 0; }
+.m5-diff-header { gap: 6px 12px; }
+.m5-diff-identity { display: flex; align-items: baseline; gap: 8px; flex: 1 1 100px; }
+.m5-diff-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m5-diff-identity span { flex-shrink: 0; }
+.m5-diff-header .m5-diff-toolbar { padding: 0; border: 0; background: transparent; flex: 0 1 auto; }
+.m5-diff-header .m5-diff-actions { margin-left: auto; }
+.m5-dock-group-tabs { min-height: 30px; }
+.m5-dock-group-tabs > button { min-height: 30px; padding: 5px 8px; font-size: 11px; }

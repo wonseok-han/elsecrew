@@ -487,7 +487,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
               </div>
             ))}
           </div>
-          <div hidden={!activeTab && !snapshot.diffVisible} className="m5-editor-head">
+          <div hidden={!activeTab || snapshot.diffVisible} className="m5-editor-head">
             {snapshot.diffVisible && <button type="button" className="m5-secondary" onClick={() => controller.selectPanel("editor")}>{t("m5.editor.title")}</button>}
             <span title={snapshot.diffVisible ? snapshot.diffFile?.path : activeTab?.path}>{(snapshot.diffVisible ? snapshot.diffFile?.path : activeTab?.path) ?? t("m5.editor.select")}</span>
             {!snapshot.diffVisible && activeTab && snapshot.diffSummary?.entries.some(entry => entry.path === activeTab.path) && <button type="button" className="m5-secondary" disabled={!admissionReady || snapshot.actionBlocked} onClick={() => void controller.openDiff(activeTab.path)}>{t("m5.diff.viewSaved")}</button>}
@@ -512,7 +512,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
             if (admissionReadyRef.current && controller.snapshot().activePath === path) void controller.saveActive();
           }} />
           </div>
-              {snapshot.diffVisible && snapshot.diffFile && <DiffDetails descriptor={snapshot.diffFile} text={snapshot.diffText} canOpen={admissionReady && !snapshot.actionBlocked} onOpen={openDiffFile}
+              {snapshot.diffVisible && snapshot.diffFile && <DiffDetails onReturn={() => controller.selectPanel("editor")} descriptor={snapshot.diffFile} text={snapshot.diffText} canOpen={admissionReady && !snapshot.actionBlocked} onOpen={openDiffFile}
                 canDiscuss={admissionReady && !snapshot.actionBlocked && Boolean(snapshot.workspace) && chatController.canAppendFollowup() && !chat.followups?.[chat.activeChat?.chatId ?? ""]?.request}
                 onDiscuss={discussDiff} />}
         </section>
@@ -1068,9 +1068,21 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
       if (cancelled || !host.current) return;
       const current = latest.current;
       let appliedReadOnly = current.readOnly || current.tab.saveState === "saving";
+      monaco.editor.defineTheme("elsecrew", {
+        base: "vs-dark", inherit: true, rules: [],
+        colors: { "editor.background": "#111315", "editor.foreground": "#eceeed",
+          "editorLineNumber.foreground": "#697078", "editorLineNumber.activeForeground": "#c3c7cd",
+          "editorGutter.background": "#111315", "editor.lineHighlightBackground": "#191b1e",
+          "editor.selectionBackground": "#354352", "editor.inactiveSelectionBackground": "#29323b" },
+      });
       const nextEditor = monaco.editor.create(host.current, {
         model: null,
-        theme: "vs-dark",
+        theme: "elsecrew",
+        lineHeight: 22,
+        padding: { top: 12, bottom: 12 },
+        scrollBeyondLastLine: false,
+        lineNumbersMinChars: 4,
+        renderLineHighlight: "gutter",
         automaticLayout: true,
         minimap: { enabled: false },
         fontSize: 13,
@@ -1173,7 +1185,7 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
 
 // Draft/output updates leave the reviewed diff unchanged. Stable callbacks and
 // ordinary shallow comparison skip its rows; context and permission changes still render.
-const DiffDetails = memo(function DiffDetails({ descriptor, text, canOpen, onOpen, canDiscuss, onDiscuss }: { descriptor: NonNullable<ReturnType<ProjectEditorController["snapshot"]>["diffFile"]>; text: string; canOpen: boolean; onOpen: (path: string) => void; canDiscuss: boolean; onDiscuss: (path: string, side?: "before" | "after", line?: number) => void }) {
+const DiffDetails = memo(function DiffDetails({ descriptor, text, canOpen, onOpen, canDiscuss, onDiscuss, onReturn }: { onReturn: () => void; descriptor: NonNullable<ReturnType<ProjectEditorController["snapshot"]>["diffFile"]>; text: string; canOpen: boolean; onOpen: (path: string) => void; canDiscuss: boolean; onDiscuss: (path: string, side?: "before" | "after", line?: number) => void }) {
   const { t } = useI18n();
   const indexed = useMemo(() => diffPages(text), [text]);
   const [page, setPage] = useState(0);
@@ -1182,7 +1194,13 @@ const DiffDetails = memo(function DiffDetails({ descriptor, text, canOpen, onOpe
   useEffect(() => setPage(0), [descriptor, text]);
   const pages = indexed.pageCount;
   const current = Math.min(page, pages - 1);
-  const visible = useMemo(() => indexed.page(current), [indexed, current]);
+  const rawRows = useMemo(() => indexed.page(current), [indexed, current]);
+  // Keep unfamiliar or malformed metadata visible; only move known file headers out of the code view.
+  const visible = useMemo(() => rawRows.filter(row => !rawRows.some(item => item.kind !== "metadata") || row.kind !== "metadata" || !/^(diff --git |index |--- |\+\+\+ )/.test(row.text)), [rawRows]);
+  const metadataLabel = (value: string) => {
+    const match = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(value);
+    return match ? t("m5.diff.section", { before: match[1]!, after: match[2]! }) + match[3] : value;
+  };
   const splitRows = useMemo(() => diffMode === "split" ? splitDiffPage(visible) : [], [visible, diffMode]);
   const lineNumber = (side: "before" | "after", line: number | null) => line !== null && canDiscuss
     ? <button type="button" className="m5-diff-line-reference" title={t("m5.diff.discussLine", { side: t(`m5.diff.${side}`), line })} aria-label={t("m5.diff.discussLine", { side: t(`m5.diff.${side}`), line })} onClick={() => onDiscuss(descriptor.path, side, line)}>{line}</button>
@@ -1191,12 +1209,7 @@ const DiffDetails = memo(function DiffDetails({ descriptor, text, canOpen, onOpe
     <section className="m5-diff-details" aria-label={t("m5.diff.title")}>
       <header className="m5-diff-header">
         <div className="m5-diff-identity"><strong>{descriptor.path}</strong><span>{t(`m5.diff.${descriptor.kind}`)}{descriptor.oldPath ? t("m5.diff.old", { path: descriptor.oldPath }) : ""}</span></div>
-        <div className="m5-diff-actions">
-          <button type="button" className="m5-secondary" disabled={!canDiscuss} onClick={() => onDiscuss(descriptor.path)}>{t("m5.diff.discuss")}</button>
-          {descriptor.kind !== "deleted" && descriptor.worktreeVersion !== null && <button type="button" className="m5-secondary" disabled={!canOpen} onClick={() => onOpen(descriptor.path)}>{t("m5.diff.openEditor")}</button>}
-        </div>
-      </header>
-      {descriptor.kind === "binary" ? <Empty text={t("m5.diff.binaryHelp")} /> : !text ? <Empty text={t("m5.diff.empty")} /> : <>
+        {descriptor.kind !== "binary" && Boolean(text) && <>
         <div className="m5-diff-toolbar">
           <div className="m5-diff-mode" role="group" aria-label={t("m5.diff.displayMode")}>
             <button type="button" aria-pressed={diffMode === "inline"} onClick={() => setDiffMode("inline")}>{t("m5.diff.inline")}</button>
@@ -1205,12 +1218,20 @@ const DiffDetails = memo(function DiffDetails({ descriptor, text, canOpen, onOpe
           <label className="m5-diff-wrap"><input type="checkbox" checked={wrapLines} onChange={event => setWrapLines(event.target.checked)} />{t("m5.diff.wrapLines")}</label>
           <details className="m5-diff-help"><summary>{t("m5.diff.readingHelp")}</summary><p>{t("m5.diff.help")}</p>{canDiscuss && <p>{t("m5.diff.lineHelp")}</p>}</details>
         </div>
+        </>}
+        <div className="m5-diff-actions">
+          {canDiscuss && <button type="button" className="m5-secondary" onClick={() => onDiscuss(descriptor.path)}>{t("m5.diff.discuss")}</button>}
+          <button type="button" className="m5-secondary" onClick={onReturn}>{t("m5.editor.title")}</button>
+          {descriptor.kind !== "deleted" && descriptor.worktreeVersion !== null && <button type="button" className="m5-secondary" disabled={!canOpen} onClick={() => onOpen(descriptor.path)}>{t("m5.diff.editShort")}</button>}
+        </div>
+      </header>
+      {descriptor.kind === "binary" ? <Empty text={t("m5.diff.binaryHelp")} /> : !text ? <Empty text={t("m5.diff.empty")} /> : <>
         <div className={`m5-diff-lines${wrapLines ? " m5-diff-lines-wrapped" : ""}${diffMode === "split" ? " m5-diff-split" : ""}`} tabIndex={0} aria-label={t("m5.diff.comparison")}>
           {diffMode === "split" ? <table>
             <colgroup><col className="m5-diff-number-column" /><col /><col className="m5-diff-number-column" /><col /></colgroup>
             <thead><tr><th scope="colgroup" colSpan={2}>{t("m5.diff.before")}</th><th scope="colgroup" colSpan={2}>{t("m5.diff.after")}</th></tr></thead>
             <tbody>{splitRows.map((row, index) => row.metadata
-              ? <tr key={index} className="m5-diff-metadata"><td colSpan={4}><code>{row.metadata.text}</code></td></tr>
+              ? <tr key={index} className="m5-diff-metadata"><td colSpan={4}><code>{metadataLabel(row.metadata.text)}</code></td></tr>
               : <tr key={index}>
                 <td className={row.before ? `m5-diff-${row.before.kind}` : "m5-diff-absent"}>{lineNumber("before", row.before?.before ?? null)}</td>
                 <td className={`m5-diff-side-code m5-diff-${row.before?.kind ?? "absent"}`}><code>{row.before?.text}</code></td>
@@ -1218,9 +1239,10 @@ const DiffDetails = memo(function DiffDetails({ descriptor, text, canOpen, onOpe
                 <td className={`m5-diff-side-code m5-diff-${row.after?.kind ?? "absent"}`}><code>{row.after?.text}</code></td>
               </tr>)}</tbody>
           </table> : <table><thead><tr><th scope="col">{t("m5.diff.before")}</th><th scope="col">{t("m5.diff.after")}</th><th scope="col">{t("m5.diff.content")}</th></tr></thead><tbody>
-            {visible.map((row, index) => <tr key={current * DIFF_PAGE_ROWS + index} className={`m5-diff-${row.kind}`}><td>{lineNumber("before", row.before)}</td><td>{lineNumber("after", row.after)}</td><td><code>{row.text}</code></td></tr>)}
+            {visible.map((row, index) => <tr key={current * DIFF_PAGE_ROWS + index} className={`m5-diff-${row.kind}`}><td>{lineNumber("before", row.before)}</td><td>{lineNumber("after", row.after)}</td><td><code>{row.kind === "metadata" ? metadataLabel(row.text) : row.text}</code></td></tr>)}
           </tbody></table>}
         </div>
+        <details className="m5-diff-source"><summary>{t("m5.diff.source")}</summary><pre>{rawRows.map(row => row.text).join("\n")}</pre></details>
         {pages > 1 && <nav className="m5-diff-pages" aria-label={t("m5.diff.pages")}>
           <button type="button" disabled={current === 0} onClick={() => setPage(current - 1)}>{t("m5.diff.previous")}</button>
           <span aria-live="polite">{t("m5.diff.page", { page: current + 1, pages, rows: indexed.rowCount })}</span>
@@ -1250,7 +1272,7 @@ function ChangeFileList({ entries, selected, disabled, onOpen }: { entries: read
     <div className="m5-change-list">
       {visible.map(entry => <button key={`${entry.kind}:${entry.path}`} type="button" className="m5-change-row" aria-current={selected === entry.path ? "true" : undefined} title={entry.oldPath ? `${entry.oldPath} → ${entry.path}` : entry.path} onClick={() => onOpen(entry.path)} disabled={disabled}>
         <ChangeKind entry={entry} />
-        <span className="m5-change-file"><strong>{fileName(entry.path)}</strong><small>{entry.path.includes("/") ? entry.path.slice(0, entry.path.lastIndexOf("/")) : "/"}</small></span>
+        <span className="m5-change-file"><strong>{fileName(entry.path)}</strong>{entry.path.includes("/") && <small>{entry.path.slice(0, entry.path.lastIndexOf("/"))}</small>}</span>
       </button>)}
       {matches.length === 0 && <Empty text={t(entries.length === 0 ? "m5.editor.noChanges" : "m5.diff.noMatches")} />}
     </div>
