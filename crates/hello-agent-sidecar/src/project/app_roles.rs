@@ -80,9 +80,15 @@ impl ProjectManager {
     // spanning this read/compare/replace; atomic rename alone is not file CAS.
     pub(crate) fn update_app_role_defaults(
         &self,
+        storage: &crate::storage::Storage,
         expected_revision: u64,
         roles: Value,
     ) -> Result<Value, ProjectFailure> {
+        if roles.as_array().is_some_and(|roles| roles.len() == 5)
+            && !storage.coordinator_roles_enabled()?
+        {
+            return Err(ProjectFailure::manifest("coordinator roles require storage V12 admission"));
+        }
         let current = self.app_role_defaults()?;
         if current["revision"].as_u64() != Some(expected_revision) {
             return Err(ProjectFailure::dirty(
@@ -95,6 +101,11 @@ impl ProjectManager {
             .ok_or_else(|| ProjectFailure::manifest("app defaults revision exhausted"))?;
         let mut value = crate::chat::settings_value("app_defaults", revision);
         value.as_object_mut().unwrap().remove("projectId");
+        value["schemaVersion"] = json!(if roles.as_array().is_some_and(|roles| roles.len() == 5) {
+            2
+        } else {
+            1
+        });
         value["roles"] = roles;
         validate(&value)?;
         if serde_json::to_vec(&value)

@@ -6448,12 +6448,12 @@ fn app_role_defaults_seed_once_and_survive_reopen() {
     roles[0]["modelSelector"] = json!("configured-model");
     let saved = fixture
         .projects
-        .update_app_role_defaults(1, roles.clone())
+        .update_app_role_defaults(&fixture.storage, 1, roles.clone())
         .unwrap();
     assert_eq!(saved["revision"], 2);
     assert!(fixture
         .projects
-        .update_app_role_defaults(1, roles.clone())
+        .update_app_role_defaults(&fixture.storage, 1, roles.clone())
         .is_err());
     assert_eq!(
         fixture
@@ -6490,7 +6490,7 @@ fn app_role_defaults_seed_once_and_survive_reopen() {
     assert_eq!(seeded["revision"], 1);
     fixture
         .projects
-        .update_app_role_defaults(2, defaults["roles"].clone())
+        .update_app_role_defaults(&fixture.storage, 2, defaults["roles"].clone())
         .unwrap();
     assert_eq!(
         fixture
@@ -6617,4 +6617,42 @@ fn coordinator_v2_preserves_legacy_snapshot_and_runs_read_only_to_waiting_for_us
     assert_eq!(run["record"]["selectedProfile"]["permission"], "readOnly");
     assert_eq!(run["record"]["state"], "succeeded");
     assert!(detail["messages"].as_array().unwrap().iter().any(|message| message["roleId"] == "coordinator"));
+}
+
+#[test]
+fn app_defaults_preserve_coordinator_and_four_team_roles() {
+    let mut fixture = Fixture::with_durable_output(true);
+    let original = fixture.projects.app_role_defaults().unwrap();
+    let legacy = original["roles"].as_array().unwrap();
+    let mut coordinator = legacy[0].clone();
+    coordinator["roleId"] = json!("coordinator");
+    let mut design = legacy[0].clone();
+    design["roleId"] = json!("design");
+    design["modelSelector"] = json!("design-model");
+    let roles = json!([coordinator, legacy[0], design, legacy[1], legacy[2]]);
+    let legacy_fixture = Fixture::new();
+    let before = legacy_fixture.projects.app_role_defaults().unwrap();
+    assert!(legacy_fixture.projects.update_app_role_defaults(&legacy_fixture.storage, 1, roles.clone()).is_err());
+    assert_eq!(legacy_fixture.projects.app_role_defaults().unwrap(), before);
+    let saved = fixture
+        .projects
+        .update_app_role_defaults(&fixture.storage, 1, roles.clone())
+        .unwrap();
+    assert_eq!(saved["schemaVersion"], 2);
+    assert_eq!(
+        fixture.projects.app_role_defaults().unwrap()["roles"],
+        roles
+    );
+    let seeded = fixture
+        .chats
+        .default_role_settings(
+            &mut fixture.storage,
+            &fixture.projects,
+            &fixture.project_id,
+            "four_roles_seed",
+        )
+        .unwrap();
+    assert_eq!(seeded["schemaVersion"], 2);
+    assert_eq!(seeded["roles"], roles);
+    validate_g5_payload_v1("projectRoleSettings", &seeded).unwrap();
 }

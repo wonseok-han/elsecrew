@@ -154,7 +154,12 @@ impl G5Manager {
             return Ok(settings.clone());
         }
         let mut settings = settings_value(project_id, 1);
-        settings["roles"] = projects.app_role_defaults()?["roles"].clone();
+        let defaults = projects.app_role_defaults()?;
+        if defaults["schemaVersion"] == 2 && !storage.coordinator_roles_enabled()? {
+            return Err(ProjectFailure::manifest("coordinator roles require storage V12 admission"));
+        }
+        settings["schemaVersion"] = defaults["schemaVersion"].clone();
+        settings["roles"] = defaults["roles"].clone();
         project.insert("role_settings".to_string(), settings.clone());
         storage.upsert_projection_record(
             "project",

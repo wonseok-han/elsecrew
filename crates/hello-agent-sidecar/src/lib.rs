@@ -1290,7 +1290,7 @@ impl Sidecar {
                 Some("updateAppRoleDefaults") => {
                     let params = require_exact_params(&request.params, &["action", "expectedRevision", "roles"]).map_err(invalid_params)?;
                     let revision = params.get("expectedRevision").and_then(Value::as_u64).ok_or_else(|| invalid_params("invalid settings revision".into()))?;
-                    self.projects.update_app_role_defaults(revision, params["roles"].clone()).map(|settings| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"updateAppRoleDefaults","settings":settings}), ..Default::default() })
+                    self.projects.update_app_role_defaults(&self.storage, revision, params["roles"].clone()).map(|settings| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"updateAppRoleDefaults","settings":settings}), ..Default::default() })
                 }
                 Some("backupStorageUsage") => {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;

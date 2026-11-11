@@ -110,16 +110,18 @@ app.whenReady().then(async () => {
     document.querySelector('.m5-preferences-content .m5-notice button').click();
     await ${waitFor("document.querySelector('.m5-settings-inline') && window.m5SmokeModelQueries.includes('codex') && document.querySelector('.m5-role-card select:nth-of-type(1)')", "automatic catalog without project or chat")};
     await ${waitFor("[...document.querySelectorAll('.m5-role-card:not([hidden]) select')][1]?.options.length === 3", "model choices populated")};
+    if ([...document.querySelectorAll('.m5-preferences-layout nav button')].some(button => button.disabled) || document.querySelector('.m5-settings-inline > header button')) throw new Error('role editor traps navigation');
+    if (document.querySelectorAll('.m5-role-navigation button').length !== 5) throw new Error('default team is missing coordinator or four members');
     const initialModel = document.querySelectorAll('.m5-role-card:not([hidden]) select')[1];
     if (initialModel.value !== 'test-model' || initialModel.disabled) throw new Error('catalog replaced or disabled saved model');
-    document.querySelectorAll('.m5-role-navigation button')[1].click();
+    document.querySelectorAll('.m5-role-navigation button')[3].click();
     await ${waitFor("window.m5SmokeModelQueries.includes('claude-code')", "Claude automatic catalog")};
-    document.querySelector('.m5-settings > header button').click();
+    document.querySelectorAll('.m5-preferences-layout nav button')[0].click();
     await ${waitFor("!document.querySelector('.m5-settings-inline')", "close model settings")};
     window.m5SmokeDefaultsRevision = 1;
     document.querySelectorAll('.m5-preferences-layout nav button')[1].click();
     await ${waitFor("document.querySelectorAll('.m5-role-card:not([hidden]) select')[1]?.value === 'new-default'", "initial defaults use provider recommendation")};
-    document.querySelector('.m5-settings > header button').click();
+    document.querySelectorAll('.m5-preferences-layout nav button')[0].click();
     await ${waitFor("document.querySelector('.m5-settings [role=alertdialog]')", "default suggestion remains an unsaved edit")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '설정 변경 버리고 닫기').click();
     await ${waitFor("!document.querySelector('.m5-settings-inline')", "discard suggested defaults")};
@@ -880,16 +882,30 @@ app.whenReady().then(async () => {
     }
     parallelPaintReport.limitations = ['Four synthetic sources; only chat 0 timed. Background chats checked after selection, not painted during input.', 'Two animation frames are a presentation proxy, not a compositor timestamp. No native sidecar transport, packaged startup, or complete G6 gate.'];
     ` : ""}
-    window.m5Projects.request = input => input.action === 'releaseView' ? Promise.reject(new Error('synthetic release failure')) : originalRequest(input);
-    let removalRequests = 0;
-    const failingRequest = window.m5Projects.request;
-    window.m5Projects.request = input => { if (input.action === 'removeChat' || input.action === 'removeProject') removalRequests++; return failingRequest(input); };
+    const listBeforeRemoval = window.m5.listChats;
+    let removalAccepted = false;
+    let removedChatId = null;
+    window.m5Projects.request = async input => {
+      if (input.action === 'releaseView' || input.action === 'reopen') throw new Error('chat removal must not leave project');
+      if (input.action === 'removeChat') {
+        if (!removalAccepted) throw new Error('synthetic rejection');
+        removedChatId = input.chatId;
+        return {schemaVersion:1,action:input.action,projectId:input.projectId,chatId:input.chatId};
+      }
+      return originalRequest(input);
+    };
+    window.m5.listChats = async input => { const page = await listBeforeRemoval(input); return {...page,items:page.items.filter(item => item.chatId !== removedChatId)}; };
+    const preservedConversation = document.querySelector('#m5-followup-text');
+    const removalEditor = document.querySelector('.monaco-editor');
     document.querySelector('.m5-chat-remove').click();
     await ${waitFor("document.querySelector('#m5-remove-title')?.closest('dialog').open", "removal confirmation")};
-    [...document.querySelectorAll('#m5-remove-title ~ .m5-dialog-actions button')].find(button => button.textContent === '목록에서 제거').click();
-    await ${waitFor("[...document.querySelectorAll('[role=alert]')].some(node => node.textContent.includes('파일 감시 해제를 확인하지 못해'))", "failed release blocks leaving")};
-    if (!document.querySelector('#m5-followup-text') || document.querySelector('h1').textContent !== 'smoke') throw new Error('failed release cleared the project');
-    if (removalRequests !== 0) throw new Error('release failure still removed list entry');
+    document.querySelector('#m5-remove-title ~ .m5-dialog-actions .m5-danger').click();
+    await ${waitFor("document.querySelector('#m5-remove-title ~ [role=alert]')", "removal failure stays in project")};
+    if (document.querySelector('#m5-followup-text') !== preservedConversation || document.querySelector('h1').textContent !== 'smoke') throw new Error('rejected removal navigated away');
+    removalAccepted = true;
+    document.querySelector('#m5-remove-title ~ .m5-dialog-actions .m5-danger').click();
+    await ${waitFor("!document.querySelector('#m5-remove-title').closest('dialog').open && !document.querySelector('.m5-chat-remove')", "removed chat disappears without leaving project")};
+    if (!removedChatId || document.querySelector('.monaco-editor') !== removalEditor || document.querySelector('#m5-followup-text') !== preservedConversation || document.querySelector('h1').textContent !== 'smoke') throw new Error('successful removal replaced workspace');
   })()`);
   process.stdout.write(`${JSON.stringify(result)}\n`);
   process.stdout.write(JSON.stringify({ cleanupConsent: await window.webContents.executeJavaScript('globalThis.cleanupConsentReport') }) + '\n');

@@ -12,9 +12,9 @@ const settingsIcons: Record<SettingsSection, string> = {
 function SettingsIcon({ section }: { section: SettingsSection }) {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={settingsIcons[section]} /></svg>;
 }
-export function AppSettings({ hasProject, open, section, onSection, onClose, restartLocked, rolesEditor, rolesLocked, storage, project, children }: {
+export function AppSettings({ hasProject, open, section, onSection, onClose, restartLocked, rolesEditor, storage, project, children }: {
   hasProject: boolean; open: boolean; section: SettingsSection; onSection: (section: SettingsSection) => void;
-  onClose: () => void; onRoles: () => void; disabled: boolean; restartLocked: boolean; rolesEditor: ReactNode; rolesLocked: boolean; storage: ReactNode; project: ReactNode; children: ReactNode;
+  onClose: () => void; onRoles: () => void; disabled: boolean; restartLocked: boolean; rolesEditor: ReactNode; storage: ReactNode; project: ReactNode; children: ReactNode;
 }) {
   const { t, lang, setLang } = useI18n();
   const dialog = useRef<HTMLElement>(null);
@@ -25,14 +25,14 @@ export function AppSettings({ hasProject, open, section, onSection, onClose, res
   }, [open]);
   return <section hidden={!open} tabIndex={-1} inert={restartLocked} ref={dialog} className="m5-app-settings" aria-labelledby="app-settings-title">
     <header>
-      <button type="button" className="m5-settings-return" disabled={rolesLocked} onClick={onClose}>{t(hasProject ? "m5.preferences.close" : "m5.preferences.home")}</button>
+      <button type="button" className="m5-settings-return" onClick={onClose}>{t(hasProject ? "m5.preferences.close" : "m5.preferences.home")}</button>
       <div className="m5-settings-location"><h2 id="app-settings-title">{t("m5.preferences.title")}</h2><span aria-hidden="true">/</span><span>{t(`m5.preferences.${section}`)}</span></div>
     </header>
     <div className="m5-preferences-layout">
       <nav aria-label={t("m5.preferences.title")}>
         <span className="m5-settings-nav-caption">{t("m5.preferences.workspaceGroup")}</span>
         {(["general", "roles", "agents", "storage", "project", "updates"] as const).map(key =>
-          <button key={key} type="button" aria-current={section === key ? "page" : undefined} disabled={rolesLocked} onClick={() => onSection(key)}><SettingsIcon section={key} /><span>{t(`m5.preferences.${key}`)}</span></button>)}
+          <button key={key} type="button" aria-current={section === key ? "page" : undefined} onClick={() => onSection(key)}><SettingsIcon section={key} /><span>{t(`m5.preferences.${key}`)}</span></button>)}
         <div className="m5-settings-brand">Elsecrew<span>{t("m5.preferences.settingsHelp")}</span></div>
       </nav>
       <div className="m5-preferences-content">

@@ -168,7 +168,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appDefaultsOpen, setAppDefaultsOpen] = useState(false);
-  const [appDefaultsLoaded, setAppDefaultsLoaded] = useState(false);
+  const roleNavigation = useRef<((next: () => void) => void) | null>(null);
+  const navigatePreferences = (next: () => void) => roleNavigation.current ? roleNavigation.current(next) : next();
   const [updatePreparing, setUpdatePreparing] = useState(false);
   const [managedProject, setManagedProject] = useState<{ projectId: string; canonicalPath: string } | null>(null);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
@@ -255,7 +256,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     setRemoving(true); setRemovalError(false);
     const wasCurrent = controller.snapshot().project?.id === target.projectId;
     try {
-      if (wasCurrent && !restore) {
+      if (wasCurrent && !restore && !target.chatId) {
         await leaveProject();
         if (controller.snapshot().project) throw new Error("project view could not be released");
       }
@@ -263,12 +264,11 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         : target.chatId ? { action: "removeChat" as const, projectId: target.projectId, chatId: target.chatId }
         : { action: "removeProject" as const, projectId: target.projectId };
       validateProjectCatalogResult(await window.m5Projects.request(input), input);
-      if (!restore) setCatalogRevision(value => value + 1);
+      if (!restore && !target.chatId) setCatalogRevision(value => value + 1);
       setRemoval(null);
-      if (wasCurrent && restore) await chatController.refreshChatList();
-      else if (wasCurrent && target.chatId) {
-        await controller.reopenProject(target.projectId, input => window.m5Projects!.request(input));
-        controller.revealChatList();
+      if (wasCurrent && (restore || target.chatId)) {
+        await chatController.refreshChatList();
+        if (target.chatId) controller.revealChatList();
       }
     } catch { setRemovalError(true); }
     finally { setRemoving(false); }
@@ -352,8 +352,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       }} disabled={!admissionReady || chat.switching || settingsOpen || leavingProject || leaveError}
         onResolved={(result, path) => controller.observeCompletedSaveRecovery(result, path)} />}
       {leaveError && <p className="m5-error" role="alert">{t("m5.feedback.leaveError")}</p>}
-      <AppSettings hasProject={Boolean(snapshot.project)} rolesLocked={appDefaultsLoaded && appDefaultsOpen} storage={<BackupStorageUsageView disabled={!admissionReady} />} project={managedProject ? <><button type="button" className="m5-secondary" onClick={() => setManagedProject(null)}>{t("m5.preferences.projectList")}</button><p>{managedProject.canonicalPath}</p><ProjectRecoveryHistory key={managedProject.projectId} bridge={bridge} projectId={managedProject.projectId} disabled={!admissionReady || leavingProject || leaveError} /><PreparationRecovery projectId={managedProject.projectId} disabled={!admissionReady || snapshot.actionBlocked || snapshot.selectionBlocked || Boolean(snapshot.workspace) || settingsOpen || leavingProject || leaveError || !controller.canLeaveProject() || chat.switching} /></> : <ProjectCatalog management ready={admissionReady && preferencesOpen && preferencesSection === "project"} refreshKey={catalogRevision} controller={controller} disabled={!admissionReady} onManage={setManagedProject} />} restartLocked={updatePreparing} open={preferencesOpen} section={preferencesSection} onSection={section => { setPreferencesSection(section); if (section === "roles") setAppDefaultsOpen(true); else if (!appDefaultsLoaded) setAppDefaultsOpen(false); }} onClose={() => { setPreferencesOpen(false); setPreferencesSection("general"); setAppDefaultsOpen(false); setAppDefaultsLoaded(false); }}
-        rolesEditor={appDefaultsOpen && <AppRoleDefaultsEditor activeChat={chat.activeChat} onLoaded={setAppDefaultsLoaded} disabled={!admissionReady} onClose={() => { setAppDefaultsOpen(false); setPreferencesSection("general"); }} />}
+      <AppSettings hasProject={Boolean(snapshot.project)} storage={<BackupStorageUsageView disabled={!admissionReady} />} project={managedProject ? <><button type="button" className="m5-secondary" onClick={() => setManagedProject(null)}>{t("m5.preferences.projectList")}</button><p>{managedProject.canonicalPath}</p><ProjectRecoveryHistory key={managedProject.projectId} bridge={bridge} projectId={managedProject.projectId} disabled={!admissionReady || leavingProject || leaveError} /><PreparationRecovery projectId={managedProject.projectId} disabled={!admissionReady || snapshot.actionBlocked || snapshot.selectionBlocked || Boolean(snapshot.workspace) || settingsOpen || leavingProject || leaveError || !controller.canLeaveProject() || chat.switching} /></> : <ProjectCatalog management ready={admissionReady && preferencesOpen && preferencesSection === "project"} refreshKey={catalogRevision} controller={controller} disabled={!admissionReady} onManage={setManagedProject} />} restartLocked={updatePreparing} open={preferencesOpen} section={preferencesSection} onSection={section => { if (section !== preferencesSection) navigatePreferences(() => { setPreferencesSection(section); setAppDefaultsOpen(section === "roles"); }); }} onClose={() => navigatePreferences(() => { setPreferencesOpen(false); setPreferencesSection("general"); setAppDefaultsOpen(false); })}
+        rolesEditor={appDefaultsOpen && <AppRoleDefaultsEditor activeChat={chat.activeChat} navigationGuard={roleNavigation} disabled={!admissionReady} onClose={() => { setAppDefaultsOpen(false); setPreferencesSection("general"); }} />}
         disabled={!admissionReady || !window.m5Projects} onRoles={() => setAppDefaultsOpen(true)}>
         <ProviderLogin settingsPage disabled={!admissionReady} returning={hasSavedProjects} reveal={connectionReveal} />
       </AppSettings>
@@ -686,13 +686,14 @@ function GuidedStart({ disabled, onChoose, returning }: { disabled: boolean; onC
   </section>;
 }
 
-function AppRoleDefaultsEditor({ disabled, onClose, onLoaded, activeChat }: { activeChat: ReturnType<ChatUiController["snapshot"]>["activeChat"]; disabled: boolean; onClose: () => void; onLoaded: (loaded: boolean) => void }) {
+type RoleNavigationGuard = { current: ((next: () => void) => void) | null };
+
+function AppRoleDefaultsEditor({ disabled, onClose, navigationGuard, activeChat }: { activeChat: ReturnType<ChatUiController["snapshot"]>["activeChat"]; disabled: boolean; onClose: () => void; navigationGuard: RoleNavigationGuard }) {
   const { t } = useI18n();
   const [settings, setSettings] = useState<ProjectRoleSettingsV1 | null>(null);
   const [error, setError] = useState(false);
   const [saved, setSaved] = useState(false);
   const [errorDetail, setErrorDetail] = useState("");
-  useEffect(() => { onLoaded(Boolean(settings)); return () => onLoaded(false); }, [settings, onLoaded]);
   const mounted = useRef(false);
   const generation = useRef(0);
   const load = useCallback(async () => {
@@ -720,16 +721,16 @@ function AppRoleDefaultsEditor({ disabled, onClose, onLoaded, activeChat }: { ac
     {error && <button type="button" disabled={disabled} onClick={() => void load()}>{t("m5.roles.reload")}</button>}
     {error && <details><summary>{t("m5.feedback.details")}</summary><pre>{errorDetail}</pre></details>}
   </section>;
-  return <RoleSettings scope="app" settings={settings} activeChat={activeChat} disabled={disabled}
+  return <RoleSettings navigationGuard={navigationGuard} scope="app" settings={settings} activeChat={activeChat} disabled={disabled}
     feedback={<>{error && <p role="alert">{t("m5.roles.appDefaultsError")}</p>}{saved && <p role="status">{t("m5.roles.appDefaultsSaved")}</p>}</>}
     onSave={save} onReload={load} onClose={onClose} projectName={t("m5.roles.appDefaults")} />;
 }
 
-function RoleSettings({ settings, disabled, feedback, onSave, onReload, onClose, returnToDraft = false, projectName, scope = "project" }: { scope?: "project" | "app"; settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; activeChat: ReturnType<ChatUiController["snapshot"]>["activeChat"]; disabled: boolean; feedback: ReactNode; onSave: (roles: readonly RoleProfileV1[]) => Promise<void>; onReload: () => Promise<void>; onClose: () => void; returnToDraft?: boolean; projectName: string }) {
+function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, onReload, onClose, returnToDraft = false, projectName, scope = "project" }: { navigationGuard?: RoleNavigationGuard; scope?: "project" | "app"; settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; activeChat: ReturnType<ChatUiController["snapshot"]>["activeChat"]; disabled: boolean; feedback: ReactNode; onSave: (roles: readonly RoleProfileV1[]) => Promise<void>; onReload: () => Promise<void>; onClose: () => void; returnToDraft?: boolean; projectName: string }) {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const [roles, setRoles] = useState<readonly RoleProfileV1[]>(scope === "project" ? coordinatorRoles(settings.roles) : settings.roles);
-  const [selectedRole, setSelectedRole] = useState<RoleProfileV1["roleId"]>(scope === "project" ? "coordinator" : "planning");
+  const [roles, setRoles] = useState<readonly RoleProfileV1[]>(coordinatorRoles(settings.roles));
+  const [selectedRole, setSelectedRole] = useState<RoleProfileV1["roleId"]>("coordinator");
   const [busy, setBusy] = useState(false);
   const [discardAction, setDiscardAction] = useState<"close" | "reload" | null>(null);
   const [choices, setChoices] = useState<Partial<Record<RoleProfileV1["roleId"], ModelChoicesResult["models"]>>>({});
@@ -753,7 +754,7 @@ function RoleSettings({ settings, disabled, feedback, onSave, onReload, onClose,
       setChoices(old => ({ ...old, [role.roleId]: result.models }));
       const defaults = result.models.filter(model => model.isDefault);
       if (defaults.length === 1) setRoles(old => old.map(item => {
-        const initialDefault = scope === "app" && settings.revision === 1 && settings.roles.some(initial => JSON.stringify(initial) === JSON.stringify(item));
+        const initialDefault = scope === "app" && settings.revision === 1 && coordinatorRoles(settings.roles).some(initial => JSON.stringify(initial) === JSON.stringify(item));
         return item.runtime === role.runtime && ((!item.modelSelector && item.roleId === role.roleId) || initialDefault)
           ? { ...item, modelSelector: defaults[0].modelSelector, reasoningEffort: role.runtime === "codex" ? (defaults[0].reasoningEfforts.includes("medium") ? "medium" : defaults[0].reasoningEfforts[0] ?? null) : null } : item;
       }));
@@ -766,20 +767,31 @@ function RoleSettings({ settings, disabled, feedback, onSave, onReload, onClose,
     if (role) void loadChoices(role);
     return () => { choiceEpoch.current++; };
   }, [selectedRole, selectedRuntime, settings]);
-  const dirty = JSON.stringify(roles) !== JSON.stringify(scope === "project" ? coordinatorRoles(settings.roles) : settings.roles);
+  const dirty = JSON.stringify(roles) !== JSON.stringify(coordinatorRoles(settings.roles));
   useEffect(() => {
     const dialog = dialogRef.current;
     dialog?.showModal();
     return () => { dialog?.close(); };
   }, []);
-  useEffect(() => { setRoles(scope === "project" ? coordinatorRoles(settings.roles) : settings.roles); setDiscardAction(null); }, [settings]);
+  useEffect(() => { setRoles(coordinatorRoles(settings.roles)); setDiscardAction(null); }, [settings]);
   const change = (index: number, field: keyof RoleProfileV1, value: string | null) => setRoles((old) => old.map((role, current) => current === index ? { ...role, [field]: value } : role));
-  let valid = roles.length === (scope === "project" ? 5 : 3);
+  let valid = roles.length === 5;
   try { roles.forEach(role => { validateRoleProfileV1(role); if (!role.modelSelector.trim()) valid = false; }); } catch { valid = false; }
   const run = async (action: () => Promise<void>) => { setBusy(true); try { await action(); } finally { setBusy(false); } };
-  const requestClose = () => { if (!busy && discardAction === null) { if (dirty) setDiscardAction("close"); else onClose(); } };
+  const pendingNavigation = useRef<(() => void) | null>(null);
+  const finishClose = () => { const next = pendingNavigation.current; pendingNavigation.current = null; if (next) next(); else onClose(); };
+  useLayoutEffect(() => {
+    if (!navigationGuard) return;
+    navigationGuard.current = next => {
+      if (busy || discardAction !== null) return;
+      if (dirty) { pendingNavigation.current = next; setDiscardAction("close"); }
+      else next();
+    };
+    return () => { navigationGuard.current = null; };
+  }, [navigationGuard, busy, dirty, discardAction]);
+  const requestClose = () => { if (!busy && discardAction === null) { if (dirty) setDiscardAction("close"); else finishClose(); } };
   const content = <>
-    <header><div><p className="m5-eyebrow">{t("m5.roles.version", { revision: settings.revision })}</p><h2>{t(scope === "app" ? "m5.roles.appDefaults" : "m5.shell.roles")}</h2></div><button className="m5-secondary" type="button" disabled={busy || discardAction !== null} onClick={requestClose}>{t(returnToDraft ? "m5.roles.backToDraft" : scope === "app" ? "m5.roles.backToSettings" : "m5.roles.back")}</button></header>
+    {scope !== "app" && <header><div><p className="m5-eyebrow">{t("m5.roles.version", { revision: settings.revision })}</p><h2>{t("m5.shell.roles")}</h2></div><button className="m5-secondary" type="button" disabled={busy || discardAction !== null} onClick={requestClose}>{t(returnToDraft ? "m5.roles.backToDraft" : "m5.roles.back")}</button></header>}
     <div className="m5-settings-body">
     <section className="m5-settings-scope" aria-label={t("m5.roles.scope")}><span>{t(scope === "app" ? "m5.roles.appScope" : "m5.roles.scope")}</span><strong>{projectName}</strong><p>{t(scope === "app" ? "m5.roles.appDefaultsHelp" : "m5.roles.scopeHelp")}</p></section>
     {feedback}
@@ -787,7 +799,7 @@ function RoleSettings({ settings, disabled, feedback, onSave, onReload, onClose,
     {discardAction && <section role="alertdialog" aria-label={t("m5.roles.discardLabel")}>
       <p>{t("m5.roles.discardQuestion")}</p>
       <button type="button" onClick={() => setDiscardAction(null)}>{t("m5.roles.keep")}</button>
-      <button type="button" disabled={disabled || busy} onClick={() => { const action = discardAction; setDiscardAction(null); if (action === "close") onClose(); else void run(onReload); }}>{t(discardAction === "close" ? "m5.roles.discardClose" : "m5.roles.discardReload")}</button>
+      <button type="button" disabled={disabled || busy} onClick={() => { const action = discardAction; setDiscardAction(null); if (action === "close") finishClose(); else void run(onReload); }}>{t(discardAction === "close" ? "m5.roles.discardClose" : "m5.roles.discardReload")}</button>
     </section>}
     <details className="m5-settings-help"><summary>{t("m5.roles.how")}</summary><p>{t("m5.roles.help")}</p></details>
     {choicesError && <p role="alert">{t("m5.roles.choicesError")}</p>}
