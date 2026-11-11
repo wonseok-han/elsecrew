@@ -58,6 +58,10 @@ async function probeInstallConsent() {
     button('Codex 설치 내용 확인').click();
     await wait(() => button('동의하고 설치'));
     if (!button('동의하고 설치').disabled || panel.querySelectorAll('.m5-install-paths li').length !== 2) throw new Error('Codex consent or locations missing');
+    const consentRow = panel.querySelector('.m5-install-consent');
+    const checkRect = consentRow.querySelector('input').getBoundingClientRect();
+    const textRect = consentRow.querySelector('span').getBoundingClientRect();
+    if (checkRect.width > 18 || textRect.left - checkRect.right > 12 || textRect.left < checkRect.right || Math.abs(textRect.top - checkRect.top) > 5) throw new Error('installation checkbox and label are detached');
     button('동의하고 설치').click();
     if (starts) throw new Error('installation without consent');
     panel.querySelector('.m5-provider-install form input').click();

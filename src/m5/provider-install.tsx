@@ -92,8 +92,8 @@ export function ProviderInstall({ disabled, providers, onBlockChange, onCheck, o
       <p>{t("m5.install.scope")}</p>
       <details className="m5-install-paths"><summary>{t("m5.install.locations")}</summary><ul>{plan.writeDirectories.map(path => <li key={path}><code><bdi>{path}</bdi></code></li>)}</ul></details>
       <p>{t("m5.install.expiry")}</p>
-      <label><input type="checkbox" disabled={disabled || busy} checked={consent === plan.planId}
-        onChange={event => setConsent(event.currentTarget.checked ? plan.planId : null)}/>{t("m5.install.consent")}</label>
+      <label className="m5-install-consent"><input type="checkbox" disabled={disabled || busy} checked={consent === plan.planId}
+        onChange={event => setConsent(event.currentTarget.checked ? plan.planId : null)}/><span>{t("m5.install.consent")}</span></label>
       <div className="m5-install-actions"><button type="submit" disabled={disabled || busy || consent !== plan.planId}>{t("m5.install.start")}</button>
         <button type="button" disabled={busy} onClick={() => void request({ action: "dismiss" })}>{t("m5.install.dismiss")}</button></div>
     </form>}

@@ -479,7 +479,7 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-provider-login button { color:#f4f7ff; background:#394d79; border:1px solid #64799f; border-radius:8px; padding:9px 14px; }
 .m5-provider-login button:disabled { opacity:.5; }
 .m5-provider-login form { flex-basis:100%; }
-.m5-provider-login form label { display:block; font-weight:600; }
+.m5-provider-login > div[id$="-connection-details"] > form label { display:block; font-weight:600; }
 .m5-agent-runs article { display: grid; gap: 6px; min-width: 0; padding: 8px 0; }
 .m5-agent-run-heading { display: flex; flex-wrap: wrap; gap: 4px; overflow-wrap: anywhere; }
 .m5-agent-runs article p { margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
@@ -494,7 +494,7 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-output-scroll pre { margin: 0; font: inherit; line-height: 1.6; }
 .m5-agent-run-history { border-top: 1px solid #3b495b; padding-top: 6px; }
 .m5-agent-run-history > div { max-height: 240px; overflow: auto; }
-.m5-provider-login form input { width:min(100%,420px); box-sizing:border-box; padding:10px; margin:8px 8px 8px 0; background:#151a22; color:#e8edf5; border:1px solid #64799f; border-radius:8px; }
+.m5-provider-login > div[id$="-connection-details"] > form input { width:min(100%,420px); box-sizing:border-box; padding:10px; margin:8px 8px 8px 0; background:#151a22; color:#e8edf5; border:1px solid #64799f; border-radius:8px; }
 
 /* Split comparison retains the same bounded page and source line references. */
 .m5-diff-mode { display: flex; gap: 4px; margin: 8px 0; }
@@ -751,7 +751,7 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-preferences-content .m5-provider-install, .m5-preferences-content .m5-provider-login { margin: 12px 0; padding: 16px; border-color: var(--m5-border-strong); border-radius: 10px; background: var(--m5-surface); color: var(--m5-text); }
 .m5-preferences-content .m5-provider-login button, .m5-preferences-content .m5-provider-install button { background: var(--m5-raised); color: var(--m5-text); border-color: var(--m5-border-strong); }
 .m5-preferences-content .m5-provider-login small, .m5-preferences-content .m5-provider-install details { color: var(--m5-muted); }
-.m5-preferences-content .m5-provider-login form input { background: var(--m5-bg); color: var(--m5-text); border-color: var(--m5-border-strong); }
+.m5-preferences-content .m5-provider-login > div[id$="-connection-details"] > form input { background: var(--m5-bg); color: var(--m5-text); border-color: var(--m5-border-strong); }
 .m5-settings-inline { margin: 16px 0 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
 .m5-settings-inline > header { justify-content: flex-end; margin-bottom: 12px; }
 .m5-settings-inline > header > div, .m5-settings-inline .m5-settings-scope { display: none; }
@@ -1111,3 +1111,9 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-install-paths ul { margin: 8px 0; padding-left: 20px; font-size: 12px; }
 
 .m5-preferences-content #m5-agent-management-content > div:empty { display: none; }
+
+.m5-provider-install .m5-install-consent { display: flex; align-items: flex-start; justify-content: flex-start; gap: 8px; margin: 14px 0; font-size: 12px; font-weight: 400; line-height: 1.6; cursor: pointer; }
+.m5-provider-install .m5-install-consent input[type="checkbox"] { flex: 0 0 16px; width: 16px; height: 16px; min-width: 16px; margin: 2px 0 0; padding: 0; accent-color: var(--m5-action-bg); }
+.m5-provider-install .m5-install-consent span { flex: 0 1 auto; min-width: 0; }
+.m5-provider-install form > .m5-install-actions { gap: 8px; margin-top: 14px; }
+.m5-provider-install form > .m5-install-actions button { margin: 0; min-height: 32px; padding: 6px 12px; font-size: 12px; }
