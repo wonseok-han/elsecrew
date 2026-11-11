@@ -4,6 +4,12 @@
 
 ### 2026-11-11 · by GPT-6
 
+- 사용자 승인으로 현재 개발 앱74646·전용 sidecar74651 신원을 재확인 후 종료하고 b34f08ad를 기존 설치 경로에 반영했다. macOS package/package smoke 통과. 실제 설정→시험 프로젝트 관리→대화 기록 조회가 snapshot 열기 실패 없이 동작함을 확인했다.
+- 별도 승인된 agent_run_0de080828f8841f6ae618bd3aaf172c2를 화면 상세 ID로 대조하고 기존 확인창/inspect/CAS/종료 증거 절차로 복구했다. 앱이 종료 확인·작업 복사본 포기 기록 성공을 표시했고 unresolved 조작이 사라졌다. 잠금/원장을 수동 수정하지 않았다. 이후 일반 프로젝트 열기·파일 목록/새 대화 화면 접근도 성공했다.
+- 임시 원본 hello.txt는 original이며 Git 작업 트리는 깨끗하다. 사용자 프로젝트·인증정보 보존, 모델 호출·main 병합·push 없음. 실제 팀 위임→Claude 파일 수정→총괄 취합의 새1건(최대12회, 실패 시 중단)은 아직 미승인/미실행이며 다음 검증이다.
+
+### 2026-11-11 · by GPT-6
+
 - 중단된 최신 채팅 snapshot 때문에 프로젝트 reopen이 막혀도 설정의 프로젝트 관리에서 대화 기록·실제 실행 복구를 직접 조회하는 경로를 추가했다. catalog의 선택 ID를 사용하고 listChats/getChat/inspectAgentRecovery/resolveAgentRecovery만 허용한 별도 helper를 사용한다. 원본/snapshot 검증을 완화하지 않고 editor bind·snapshot 생성·파일 읽기/쓰기·실행 시작을 호출하지 않는다.
 - 실제 복구는 기존 확인 문구, exact identity 재조회와 최신 revision CAS, 프로세스 종료 증거 검사에 맡긴다. identityUnavailable는 조작 불가, 프로젝트/화면 변경 후 응답과 복구 호출은 폐기한다. 성공해도 자동 재개하지 않고 프로젝트 목록으로 돌아가 일반 열기를 거치도록 안내한다. 한국어/영어·대화/메시지 페이지 조회와 제한된 기록 영역을 추가했다.
 - 검증: helper4개, TypeScript/renderer build, Chromium renderer2개 통과. 화면 probe는 snapshot/tree/diff/watch/start/resolve를 호출하면 실패시키고 list/get만으로 보호된 대화/안내가 보이는 것을 검증했다. 초기 probe 문구 불일치와 일반 안내의 첫 요소 선택 충돌은 정확한 안내/범위 선택으로 수정해 재통과했다. 독립 검토 차단 지적 없음. diff check 통과. 설치본은 아직 ba967590이며 이번 변경과 후속 전송738824e8은 설치 반영 전이다.
