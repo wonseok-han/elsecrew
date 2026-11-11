@@ -237,7 +237,7 @@ app.whenReady().then(async () => {
     const railToggle = rail.querySelector('.m5-rail-bookmark');
     if (rail.getBoundingClientRect().width < 180 || railToggle.getAttribute('aria-expanded') !== 'true') throw new Error('project rail not expanded by default');
     if (railToggle.closest('.m5-project-rail-header')) throw new Error('collapse mixed with project actions');
-    if (Math.abs(railToggle.getBoundingClientRect().left - rail.getBoundingClientRect().right) > 2) throw new Error('bookmark not on sidebar edge');
+    if (railToggle.getBoundingClientRect().right > rail.getBoundingClientRect().right || railToggle.getBoundingClientRect().top > 32) throw new Error('sidebar toggle must stay inside top brand row');
     railToggle.click();
     await ${waitFor("document.querySelector('.m5-project-rail').getBoundingClientRect().width < 100", "user collapses project rail")};
     if (rail.getBoundingClientRect().width > 100 || railToggle.getAttribute('aria-expanded') !== 'false') throw new Error('project rail not compact');
