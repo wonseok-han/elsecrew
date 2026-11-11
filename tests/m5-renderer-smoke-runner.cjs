@@ -29,8 +29,9 @@ function waitFor(script, label) {
   return `new Promise((resolve, reject) => {
     const deadline = Date.now() + 7000;
     const timer = setInterval(() => {
-      if (${script}) { clearInterval(timer); resolve(true); }
+      try { if (${script}) { clearInterval(timer); resolve(true); }
       else if (Date.now() > deadline) { clearInterval(timer); reject(new Error(\`renderer smoke timed out: ${label}; body=\${document.body?.innerText?.trim().slice(0, 1000) || "<empty>"}; controls=\${JSON.stringify([...document.querySelectorAll("button")].map((button) => ({ text: button.textContent?.trim(), ariaLabel: button.getAttribute("aria-label"), disabled: button.disabled }))) }\`)); }
+      } catch (error) { clearInterval(timer); reject(error); }
     }, 25);
   })`;
 }
@@ -147,7 +148,7 @@ app.whenReady().then(async () => {
     document.querySelectorAll('.m5-preferences-layout nav button')[2].click();
     await ${waitFor("document.querySelector('.m5-provider-selection').getClientRects().length > 0", "agent settings visible")};
     const selection = document.querySelector('.m5-provider-selection');
-    if (!selection || window.m5SmokeLoginRequests.length !== 0) throw new Error('first-run agents were checked before selection');
+    if (!selection || window.m5SmokeLoginRequests.some(r => !["diagnose", "status"].includes(r.action))) throw new Error('first-run agents were checked before selection');
     if (!selection.querySelector('button[type=submit]').disabled) throw new Error('empty selection is enabled');
     await ${waitFor("!document.querySelector('.m5-provider-selection input').matches(':disabled')", "storage admission before selection")};
     if (window.m5SmokePrematureInstallReads !== 0) throw new Error('installation queried before initial storage admission');
@@ -155,10 +156,10 @@ app.whenReady().then(async () => {
     await ${waitFor("!document.querySelector('.m5-provider-selection button[type=submit]').disabled", "single agent selection")};
     selection.querySelector('button[type=submit]').click();
     await ${waitFor("[...document.querySelectorAll('[aria-label=\"Codex connection\"] button')].some(b=>b.textContent==='Connect' && !b.disabled)", "explicit connect available")};
-    if(window.m5SmokeLoginRequests.length) throw new Error('installation selection auto connected a provider');
+    if(window.m5SmokeLoginRequests.some(r => !["diagnose","status"].includes(r.action))) throw new Error('installation selection auto connected a provider');
     [...document.querySelectorAll('[aria-label="Codex connection"] button')].find(b=>b.textContent==='Connect').click();
     await ${waitFor("document.querySelector('[aria-label=\"Codex connection\"]')?.textContent.includes('Codex is signed in')", "selected provider diagnosed and checked")};
-    if (window.m5SmokeLoginRequests.some(r => r.provider === 'claude')) throw new Error('unselected Claude was checked');
+    if (window.m5SmokeLoginRequests.some(r => r.provider === 'claude' && !['diagnose','status'].includes(r.action))) throw new Error('unselected Claude was checked');
     if (JSON.parse(localStorage.getItem('hello-agent.m5.providers.v1')).providers.join() !== 'codex') throw new Error('single provider selection not saved');
     await ${waitFor("!document.querySelector('.m5-provider-selection').parentElement.hidden", "return to agent selection")};
     [...selection.querySelectorAll('button')].find(b => b.textContent === 'Connect Claude Code too').click();
@@ -240,7 +241,7 @@ app.whenReady().then(async () => {
     window.m5SmokeLoginStatusFailure = false;
     await ${waitFor("!document.querySelector('[aria-label=\"Codex 연결\"] [role=alert]')", "status retry clears transport failure")};
     await ${waitFor("!document.getElementById('codex-connection-details').hidden", "inspected connection stays visible")};
-    await ${waitFor("!document.querySelector('.m5-provider-install').parentElement.hidden", "installation step visible")};
+    await ${waitFor("document.querySelector('#codex-installation-slot button')", "installation step visible")};
     await (${probeInstallConsent.toString()})();
     await ${waitFor("[...document.querySelectorAll('button')].some((button) => !button.disabled && (button.getAttribute('aria-label') === controlLabel || button.textContent?.trim() === controlLabel))", "enabled accessible project-selection control")};
     const projectButton = [...document.querySelectorAll("button")].find((button) => !button.disabled && (button.getAttribute("aria-label") === controlLabel || button.textContent?.trim() === controlLabel));
@@ -317,7 +318,7 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-file-row')", "project tree")};
     document.querySelector('.m5-open-preferences').click(); document.querySelectorAll('.m5-preferences-layout > nav button')[2].click();
     await ${waitFor("!document.querySelector('.m5-app-settings').hidden", "agent settings reopened")};
-    await ${waitFor("!document.getElementById('m5-install-details').hidden", "installation controls in settings")};
+    await ${waitFor("document.getElementById('codex-installation-slot')?.querySelector('button')", "installation controls in settings")};
     await (${probeInstallConsent.toString()})();
     document.querySelector('.m5-app-settings > header button').click();
     await ${waitFor("document.querySelector('.m5-app-settings').hidden", "settings dismissed")};

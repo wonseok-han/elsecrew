@@ -1,8 +1,14 @@
 // Executed inside the existing real Chromium renderer; never runs an installer.
 async function probeInstallConsent() {
-  const panel = document.querySelector('.m5-provider-install');
+  const panel = document.querySelector('.m5-agent-management');
   if (!panel) throw new Error('installation panel missing');
-  const button = text => [...panel.querySelectorAll('button')].find(node => node.textContent === text);
+  const button = text => {
+    if (text === 'Codex 설치 내용 확인' || text === 'Claude Code 설치 내용 확인') {
+      const provider = text.startsWith('Codex') ? 'codex' : 'claude';
+      return panel.querySelector('#' + provider + '-installation-slot .m5-provider-install-inline button');
+    }
+    return [...panel.querySelectorAll('button')].find(node => node.textContent === text || node.getAttribute('aria-label') === text);
+  };
   const wait = async predicate => {
     const deadline = Date.now() + 5000;
     while (!predicate()) {
@@ -48,18 +54,18 @@ async function probeInstallConsent() {
   };
   try {
     button('상태 다시 확인').click();
-    await wait(() => !button('Codex 설치 내용 확인').disabled);
+    await wait(() => !(button('Codex 설치 내용 확인')?.disabled ?? true));
     button('Codex 설치 내용 확인').click();
     await wait(() => button('동의하고 설치'));
-    if (!button('동의하고 설치').disabled || panel.querySelectorAll('li').length !== 2) throw new Error('Codex consent or locations missing');
+    if (!button('동의하고 설치').disabled || panel.querySelectorAll('.m5-install-paths li').length !== 2) throw new Error('Codex consent or locations missing');
     button('동의하고 설치').click();
     if (starts) throw new Error('installation without consent');
-    panel.querySelector('input').click();
+    panel.querySelector('.m5-provider-install form input').click();
     await wait(() => !button('동의하고 설치').disabled);
     button('Claude Code 설치 내용 확인').click();
-    await wait(() => panel.querySelectorAll('li').length === 5);
-    if (panel.querySelector('input').checked || !button('동의하고 설치').disabled) throw new Error('new plan reused consent');
-    panel.querySelector('input').click();
+    await wait(() => panel.querySelectorAll('.m5-install-paths li').length === 5);
+    if (panel.querySelector('.m5-provider-install form input').checked || !button('동의하고 설치').disabled) throw new Error('new plan reused consent');
+    panel.querySelector('.m5-provider-install form input').click();
     await wait(() => !button('동의하고 설치').disabled);
     button('동의하고 설치').click(); button('동의하고 설치').click();
     await wait(() => panel.querySelector('[role=alert]'));
@@ -73,11 +79,13 @@ async function probeInstallConsent() {
       if (document.getElementById('m5-agent-management-content').hidden) throw new Error('uncertain installation hidden by management wrapper');
     }
     await wait(() => button('설치 중단 요청') && !button('설치 중단 요청').disabled);
-    if (starts !== 1 || !button('Codex 설치 내용 확인').disabled) throw new Error('uncertain start repeated or parallel install allowed');
+    if (starts !== 1 || !(button('Codex 설치 내용 확인')?.disabled ?? true)) throw new Error('uncertain start repeated or parallel install allowed');
+    const activePanel = panel.querySelector('.m5-provider-install[data-active]');
+    if (!activePanel || activePanel.querySelector('.m5-install-provider-actions') || !activePanel.querySelector('header .m5-install-stop') || activePanel.querySelector('.m5-install-refresh').getBoundingClientRect().width > 32) throw new Error('active install controls are not compact');
     button('설치 중단 요청').click();
     await wait(() => button('종료 확인된 설치 기록 정리'));
     button('종료 확인된 설치 기록 정리').click();
-    await wait(() => !button('Codex 설치 내용 확인').disabled);
+    await wait(() => !(button('Codex 설치 내용 확인')?.disabled ?? true));
     if (starts !== 1 || cancels !== 1 || recoveries !== 1) throw new Error('installation lifecycle call counts differ');
     if (managementToggle) {
       status = {...idle, state:'installed', operationId, provider:'codex'};
@@ -91,7 +99,7 @@ async function probeInstallConsent() {
   } finally {
     window.m5Install.request = original;
     button('상태 다시 확인').click();
-    await wait(() => panel.textContent.includes('설치 기능이 아직 활성화되지'));
+    await wait(() => button('Codex 설치 내용 확인')?.disabled);
   }
 }
 module.exports = { probeInstallConsent };

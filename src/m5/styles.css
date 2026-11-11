@@ -1092,3 +1092,22 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-provider-login .m5-connection-help { display: block; line-height: 1.6; }
 .m5-provider-login .m5-connection-error { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 4px 0 0; padding: 10px 12px; border-radius: 6px; background: var(--m5-raised); font-size: 12px; line-height: 1.6; }
 .m5-provider-login .m5-connection-error button { flex: 0 0 28px; width: 28px; min-height: 28px; height: 28px; margin: 0; padding: 0; }
+
+.m5-provider-install .m5-install-header-actions { flex-wrap: nowrap; gap: 8px; }
+.m5-provider-install .m5-install-refresh { display: grid; place-items: center; width: 28px; height: 28px; min-height: 28px; padding: 4px; margin: 0; border: 0; }
+.m5-install-refresh svg { width: 16px; height: 16px; }
+.m5-provider-install .m5-install-stop { margin: 0; min-height: 30px; padding: 5px 10px; font-size: 12px; }
+.m5-provider-install[data-active] header { align-items: center; }
+.m5-provider-install[data-active] .m5-install-heading { flex-basis: 200px; }
+.m5-provider-install[data-active] .m5-install-heading > p { display: flex; align-items: center; gap: 4px; }
+.m5-provider-install[data-active] .m5-install-heading > p::before { content: ''; flex: 0 0 6px; height: 6px; margin-right: 4px; border-radius: 50%; background: var(--m5-action-bg); }
+.m5-provider-install .m5-install-provider-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.m5-provider-install .m5-install-provider-actions > button { min-height: 32px; padding: 6px 10px; font-size: 12px; }
+
+.m5-installation-slot { grid-column: 1 / -1; }
+.m5-preferences-content .m5-installation-slot .m5-provider-install { padding: 12px; margin: 4px 0 0; border: 1px solid var(--m5-border); border-radius: 6px; }
+.m5-provider-install-inline { display: flex; gap: 10px; align-items: center; }
+.m5-provider-login .m5-provider-install-inline button { margin: 0; padding: 5px 10px; min-height: 28px; font-size: 12px; }
+.m5-install-paths ul { margin: 8px 0; padding-left: 20px; font-size: 12px; }
+
+.m5-preferences-content #m5-agent-management-content > div:empty { display: none; }
