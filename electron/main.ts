@@ -1,3 +1,5 @@
+import { createClaudeUsageReader } from "./claude-usage.ts";
+import { CLAUDE_USAGE_CHANNEL, validateClaudeUsageResult } from "../src/m5/contracts/provider-usage-v1.ts";
 import { randomUUID } from "node:crypto";
 import { installAppUpdateMenu } from "./app-update-menu.ts";
 import { GitPreparationClient, isGitPreparation, WINDOWS_GIT_PREPARATION_ENABLED } from "./git-preparation.ts";
@@ -387,6 +389,13 @@ function registerIpcHandlers(): void {
     if (!sidecar) throw new Error("sidecar was not started");
     return validateInstallStatus(await sidecar.install(validateInstallRequest(input)));
   });
+  const claudeUsage = createClaudeUsageReader(m5DataDirectory(), net.fetch as typeof fetch);
+  ipcMain.handle(CLAUDE_USAGE_CHANNEL, async (event, ...args: unknown[]) => {
+    assertCurrentMainFrame(event);
+    if (args.length) throw new Error("usage takes no input");
+    // New credential-read boundary remains disabled pending explicit activation.
+    return validateClaudeUsageResult({state:"unavailable",usage:null,checkedAt:Date.now()});
+  });
   gitPreparation = new GitPreparationClient(sidecarLaunch(m5DataDirectory()));
   const gitSelection = new GitSelectionStore(m5DataDirectory(), process.platform, app.getPath("userData"));
   ipcMain.handle(GIT_SELECTION_CHANNEL, async (event, ...args: unknown[]) => {
@@ -438,6 +447,7 @@ function registerIpcHandlers(): void {
     assertCurrentMainFrame(event);
     if (!sidecar) throw new Error("sidecar was not started");
     const request = validateLoginRequest(input);
+    claudeUsage.invalidate();
     const result = await sidecar.login(request)
       .then(value => validateLoginStatus(value, request.provider))
       .catch((error: unknown) => { throw new Error(classifyLoginFailure(error)); });

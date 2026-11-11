@@ -70,9 +70,14 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-open-preferences')", "settings entry")};
     if (!document.querySelector('.m5-rail-footer .m5-open-preferences svg') || document.querySelector('.m5-toolbar .m5-open-preferences')) throw new Error('settings must be a sidebar gear');
     await ${waitFor("document.querySelector('.m5-provider-usage progress')?.value === 31", "provider usage projection")};
-    document.querySelector('.m5-provider-usage summary').click();
-    if (!document.querySelector('.m5-provider-usage').open || !document.querySelector('.m5-provider-usage').textContent.includes('5시간')) throw new Error('usage windows unavailable');
-    document.querySelector('.m5-provider-usage summary').click();
+    const usageHeight = document.querySelector('.m5-provider-usage').getBoundingClientRect().height;
+    document.querySelector('.m5-usage-trigger').click();
+    await ${waitFor("document.querySelector('.m5-provider-usage-content').matches(':popover-open')", "usage top layer")};
+    if (!document.querySelector('.m5-provider-usage-content').textContent.includes('5시간')) throw new Error('usage windows unavailable');
+    if (document.querySelector('.m5-provider-usage').getBoundingClientRect().height !== usageHeight) throw new Error('usage popup shifted sidebar');
+    const usageRefresh = document.querySelector('.m5-usage-refresh');
+    if (usageRefresh.textContent.trim() || !usageRefresh.querySelector('svg') || usageRefresh.getAttribute('aria-label') !== '새로고침' || usageRefresh.getBoundingClientRect().width > 32) throw new Error('refresh must be a compact labelled icon');
+    document.querySelector('.m5-usage-trigger').click();
     document.querySelector('.m5-open-preferences').click();
     await ${waitFor("!document.querySelector('.m5-app-settings').hidden", "settings dialog visible")};
     if (document.querySelector('.m5-app-settings').tagName !== 'SECTION' || getComputedStyle(document.querySelector('.m5-toolbar')).display !== 'none') throw new Error('settings is not a full page');

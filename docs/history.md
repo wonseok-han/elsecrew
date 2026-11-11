@@ -3,6 +3,12 @@
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
 ### 2026-11-11 · by GPT-6
+- de175e8e 설치본에서 Codex 사용량 실제 표시와 자체 빈 폴더 초기화→프로젝트 열기를 확인했다. 시험 프로젝트는 앱 목록에서 제거했으며 사용자 원본/유료 모델 호출 없음.
+- 사용량 상세를 sidebar를 밀어내는 details에서 native top-layer popover로 전환하고 새로고침은28px 회전 아이콘/tooltip/aria-label로 축소했다. 설치본 실제 화면에서 sidebar 밖 불투명 팝업·아이콘과 Codex49%를 확인했다. CUA 외부 클릭 재확인은 창 접근 오류로 미확인, native auto-popover의 기본 닫기 동작을 사용한다. 조회 후 크기 변화 위치 보정은 추가 구현했다.
+- Claude ‘제공하지 않는다’ 문구는 구현 미연결을 공급자 제약처럼 표현한 오류여서 제거했다. Orca 공식 docs/agents/usage-tracking 및 공식 repo issue27150은 기존 Claude OAuth로 Anthropic api/oauth/usage를 조회한다고 설명한다. 앱 전용 .credentials.json만 읽는 후보는 nofollow·owner0600·single-link·64KiB·profile0700/신원 재검사, 고정 HTTPS GET/redirect 금지/8초 timeout·정규화 표시값만 전달하며 credential 쓰기/갱신/로그/renderer 노출 없음. 추정 Keychain 접근은 독립 검토 지적에 따라 제거했다. main IPC는 고정 unavailable로 신규 인증 읽기/네트워크 기능 비활성, 사용자 활성화 승인 대기다.
+- 검증: TS·renderer build·후보 unit4개·Chromium2개(팝업 top-layer/rail 높이 불변/아이콘)·package 통과. 제한 환경 Chromium SIGABRT는 허용 환경 재실행으로 통과했다. 독립 재검토 비활성 후보 차단 없음. 다음: 위치 보정 최신 package 반영, Claude 조회 활성화 결정 및 실제 표시 확인. main/push 없음.
+
+### 2026-11-11 · by GPT-6
 - 기준 HEAD53b65d0a에서 직접 구현: macOS 빈 폴더 선택 시 네이티브 확인 뒤 로컬 Git 초기 기록을 생성하고 기존 프로젝트/독립 snapshot 경로로 연결했다. 폴더 신원·빈 상태를 재검사하고 준비 폴더의 .git을 no-replace/no-follow로 게시한다. 기존 파일을 stage하지 않으며 실패한 준비 폴더는 임의 재귀 삭제하지 않는다. Windows 활성화 없음.
 - 사이드바에 사용량 요약/기간별 사용률·초기화 시각·조회 시각을 추가했다. Codex는 모델 없는 카탈로그 조회에서만 공식 account/rateLimits/read를 추가하며 정상 실행 preflight는 그대로다. 선택 모델 문자열이 조회를 켜던 검토 지적을 explicit catalog-only 경로로 수정했다. 미지원/잘못된 사용량은 0%로 만들지 않는다. Claude의 모델 없는 직접 사용량 조회 경로는 미확인으로 조회 미지원 표시이며 실제 사용률 수집은 후속이다. 공식 출처: https://learn.chatgpt.com/docs/app-server , https://code.claude.com/docs/en/statusline (SDK/비대화 모드 조회와 TUI statusline은 구분).
 - 검증: 빈 폴더→초기 기록→독립 snapshot/원본 보존 및 신원·비어 있지 않은 폴더 거절2개, sidecar model_catalog5개, core232개+doc3개, RPC7개, TS모델/캐시5개, TypeScript/renderer 빌드, Chromium2개 통과. Chromium 최초 제한 환경 실행 SIGABRT는 허용 환경 재실행 통과로 구분한다. 빈 폴더 안전경계/사용량 재검토 차단 없음. 설치본 교체·실제 UI 확인은 다음 단계이며 유료 모델 호출/사용자 프로젝트 변경/main/push 없음.

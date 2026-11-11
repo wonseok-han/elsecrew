@@ -577,4 +577,4 @@ renderer는 목록을 세션 내 최대60초 재사용하고 같은 공급자 �
 
 macOS 네이티브 폴더 선택은 비어 있는 폴더에 대해 별도 확인을 받는다. main이 확인한 디렉터리 신원을 sidecar가 다시 검증하고, 앱 준비 폴더 안에서 빈 로컬 Git commit을 만든 뒤 `.git`만 원래 빈 폴더에 배타 게시한다. 원격 저장소 생성이나 업로드는 없으며 이후 채팅은 기존 standalone snapshot을 사용한다. 비어 있지 않은 일반 폴더·최초 commit 없는 기존 저장소의 자동 변환과 Windows 초기화는 지원하지 않는다.
 
-카탈로그 전용 Codex 조회는 모델 호출 없이 `account/rateLimits/read`를 읽고 primary/secondary 기간·사용률·초기화 시각만 화면에 전달한다. 사용량은 표시 정보로 실행 권한을 만들지 않으며, 기존 프로세스 종료 확인 뒤에만 카탈로그와 함께 공개한다. 앱 세션 캐시는 조회 시각과 함께 표시하며 미지원/조회 실패는 잔여량0으로 대체하지 않는다. Claude의 TUI statusline 사용량과 SDK의 독립 조회를 동일시하지 않으며 현재 Claude 표시값은 조회 미지원이다.
+카탈로그 전용 Codex 조회는 모델 호출 없이 `account/rateLimits/read`를 읽고 primary/secondary 기간·사용률·초기화 시각만 화면에 전달한다. 사용량은 표시 정보로 실행 권한을 만들지 않으며, 기존 프로세스 종료 확인 뒤에만 카탈로그와 함께 공개한다. 앱 세션 캐시는 조회 시각과 함께 표시하며 미지원/조회 실패는 잔여량0으로 대체하지 않는다. Claude는 공급자 미지원으로 단정하지 않는다. 앱 전용 로그인 파일만 읽어 Anthropic OAuth usage GET으로 기간 사용량을 투영하는 후보를 준비했으나 새로운 credential-read 경계 활성화 승인 전까지 IPC는 unavailable을 반환한다. 글로벌 로그인/추정 Keychain 항목은 사용하지 않는다. 사용량 상세는 sidebar reflow 없는 native top-layer popover이며 새로고침은 tooltip/aria-label이 있는 아이콘이다.
