@@ -514,3 +514,18 @@ test("new coordinator conversation seeds a versioned snapshot and rejects a stal
   assert.equal(stale.prepared.length,0);
   second.dispose();
 });
+
+
+test("a workflow notice ahead of a provider final message hydrates the durable gap", async () => {
+  const f = await followupFixture();
+  try {
+    const initial = f.controller.snapshot().messages[0]!;
+    const final = { ...initial, messageId: "provider_final", eventSequence: 2, kind: "role" as const, roleId: "planning" as const, text: "answer" };
+    const notice = { ...initial, messageId: "team_notice", eventSequence: 3, kind: "status" as const, text: "continuing" };
+    f.bridge.getChat = async () => ({ chat: chat("chat_a"), afterEventSequence: 1, messages: [final, notice], runs: [], nextEventSequence: null });
+    f.bridge.emit(notice);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(f.controller.snapshot().messages.map(m => m.eventSequence), [1, 2, 3]);
+    assert.equal(f.controller.snapshot().error, null);
+  } finally { f.controller.dispose(); }
+});

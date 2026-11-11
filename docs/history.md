@@ -4,6 +4,12 @@
 
 ### 2026-11-11 · by GPT-6
 
+- 승인된 수정본 팀 작업1건은 Codex 위임/정상 종료 후 Claude coding run 예약(preparing)까지 진행했으나 연결이 종료됐다. agent_run_3fb0c4daa3194e5b83272eed416302e4의 cleanExit/processesProvenGone과 child agent_run_0de080828f8841f6ae618bd3aaf172c2 예약을 원장에서 확인했다. 원본 hello.txt는 original이며 추가 모델 재시도 없음. 승인된 시험 앱 PID50529만 종료했다.
+- 원인/수정: 내부 팀원 시작 응답을 renderer에 숨기면서 Electron의 accepted-run registry 등록도 누락했다. 새 agent.teamRunAccepted를 최초 명시 총괄 실행 ID와 같은 채팅/작업 복사본에 결속하고 child 이벤트보다 먼저 전달한다. 중복/미승인 root/주소 불일치/11개 초과 후속 실행을 거부하며 기존 admission·종료·복구 권한은 유지한다. 팀 진행 알림이 공급자 최종 메시지 hydration보다 먼저 도착하면 durable 기록을 다시 읽어 빈 순번을 보충하며 누락을 무시하지 않는다.
+- 검증: Rust orchestration13개(개발/최종 총괄 모두 acceptance 선행), Rust protocol66개, Electron/대화 상태94개, TS protocol4개·TypeScript·diff check 통과. 프로토콜 이벤트 목록 golden2개 초기 실패는 새 이벤트 계약을 반영해 통과했다. 독립 검토 차단 지적 없음. 다음: 수정본 패키지·설치 반영 후 별도 승인된 실제 시험으로 Claude 수정/최종 취합 확인. 실제 협업 완료는 아직 미입증이다.
+
+### 2026-11-11 · by GPT-6
+
 - 83b6fb0d 수정본 macOS 패키징·package smoke 통과 후 기존 설치 경로에 반영하고 실제 앱의 준비 완료/프로젝트 목록 표시를 확인했다. 재시작은 팀 작업을 자동 실행하지 않았다. 임시 프로젝트는 다음 승인된 시험에 재사용하도록 보존했다. 실제 Claude 실행·최종 취합은 여전히 미검증이며 추가 모델 실행 없이 재시험 승인을 요청한다. main 병합·push 없음.
 
 ### 2026-11-11 · by GPT-6

@@ -93,6 +93,7 @@ pub const EVENTS_V1: &[&str] = &[
     "agent.publicEvent",
     "agent.outputAvailable",
     "agent.runStateChanged",
+    "agent.teamRunAccepted",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -550,12 +551,15 @@ fn validate_envelope(envelope: &EnvelopeV1) -> Result<(), ProtocolError> {
                 return Err(ProtocolError::new("event payload must be an object"));
             }
             if event.event == "agent.outputAvailable" {
-                let head: agent_adapter_v1::output_pages::OutputHead = serde_json::from_value(event.payload.clone())
-                    .map_err(|_| ProtocolError::new("invalid output notification"))?;
-                head.validate(&head.binding).map_err(|_| ProtocolError::new("invalid output head"))?;
+                let head: agent_adapter_v1::output_pages::OutputHead =
+                    serde_json::from_value(event.payload.clone())
+                        .map_err(|_| ProtocolError::new("invalid output notification"))?;
+                head.validate(&head.binding)
+                    .map_err(|_| ProtocolError::new("invalid output head"))?;
                 if event.chat_id.as_ref() != Some(&head.binding.chat_id)
                     || event.task_id.as_ref() != Some(&head.binding.task_id)
-                    || event.run_id.as_ref() != Some(&head.binding.run_id) {
+                    || event.run_id.as_ref() != Some(&head.binding.run_id)
+                {
                     return Err(ProtocolError::new("output notification binding differs"));
                 }
             }
@@ -576,6 +580,34 @@ fn validate_envelope(envelope: &EnvelopeV1) -> Result<(), ProtocolError> {
                     return Err(ProtocolError::new(
                         "agent.publicEvent envelope identity does not match its payload",
                     ));
+                }
+            }
+            if event.event == "agent.teamRunAccepted" {
+                let payload = event
+                    .payload
+                    .as_object()
+                    .ok_or_else(|| ProtocolError::new("invalid team acceptance"))?;
+                if payload.len() != 2
+                    || !payload.contains_key("rootRunId")
+                    || !payload.contains_key("accepted")
+                {
+                    return Err(ProtocolError::new("invalid team acceptance fields"));
+                }
+                require_id(
+                    payload["rootRunId"].as_str().unwrap_or_default(),
+                    "rootRunId",
+                )?;
+                agent_adapter_v1::validate_agent_adapter_payload_v1(
+                    "runAccepted",
+                    &payload["accepted"],
+                )
+                .map_err(|error| ProtocolError::new(error.to_string()))?;
+                let accepted = &payload["accepted"];
+                if event.chat_id.as_deref() != accepted["chatId"].as_str()
+                    || event.task_id.as_deref() != accepted["taskId"].as_str()
+                    || event.run_id.as_deref() != accepted["runId"].as_str()
+                {
+                    return Err(ProtocolError::new("team acceptance envelope mismatch"));
                 }
             }
             if event.event == "agent.runStateChanged" {

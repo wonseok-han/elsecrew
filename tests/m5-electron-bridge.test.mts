@@ -2042,3 +2042,32 @@ test("save recovery bridge preserves reviewed revision and rejects a mismatched 
   await rejected;
   assert.equal(client.failureCode,"protocolInvalid");
 });
+
+
+test("team runs require an explicitly accepted coordinator root and exact workspace binding", async () => {
+  for (const invalid of [null, "root", "workspace", "duplicate", "budget"] as const) {
+    const { client, child } = createClient();
+    const starting = client.start(); child.stdout.write(`${g5aReadyLine()}\n`); await starting;
+    await hydrateActualAgentRun(client, child);
+    const fp = measuredCapability().fingerprint;
+    const start = client.startAgentRun({ chatId: "chat_01", roleId: "coordinator", inputMessageIds: ["message_01"], expectedCapabilityFingerprint: fp });
+    const req = JSON.parse(child.writes.at(-1)!);
+    child.stdout.write(responseLine(req.requestId, acceptedAgentRun(fp, { roleId: "coordinator" })));
+    await start;
+    const announce = (n: number, overrides: Record<string, unknown> = {}) => {
+      const accepted = acceptedAgentRun(fp, { runId: `agent_run_worker_${n}`, roleId: "coding", ...overrides });
+      child.stdout.write(JSON.stringify({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01",
+        streamId: `team_accept_${n}_${invalid}`, seq: 1, event: "agent.teamRunAccepted",
+        chatId: "chat_01", taskId: "task_01", runId: accepted.runId,
+        payload: { rootRunId: invalid === "root" ? "missing_root" : "agent_run_accepted", accepted } }) + "\n");
+    };
+    announce(0, invalid === "workspace" ? { workspaceIdentity: "workspace_other" } : {});
+    if (invalid === "duplicate") announce(1, {runId: "agent_run_worker_0"});
+    if (invalid === "budget") for (let i=1;i<12;i++) announce(i);
+    if (invalid === null) {
+      child.stdout.write(agentPublicEventLine(agentPublicEvent(fp, { runId: "agent_run_worker_0", roleId: "coding" }), "team_worker_stream"));
+      assert.equal(client.failure, undefined);
+      assert.equal(child.terminations, 0);
+    } else assert.equal(child.terminations, 1, invalid);
+  }
+});

@@ -213,6 +213,33 @@ impl Sidecar {
             self.pause_workflow(&chat, events)?;
             return Ok(kind != "root");
         }
+        if kind == "root" || kind == "start" {
+            let accepted = response.result.as_ref().ok_or_else(|| {
+                SidecarError::new("orchestrationBlocked", "missing accepted team run")
+            })?;
+            if kind == "root" {
+                let run_id = accepted["runId"].as_str().ok_or_else(|| {
+                    SidecarError::new("orchestrationBlocked", "missing root run id")
+                })?;
+                self.workflow_roots.insert(chat.clone(), run_id.into());
+            } else {
+                let root = self.workflow_roots.get(&chat).ok_or_else(|| {
+                    SidecarError::new("orchestrationBlocked", "missing authorized team root")
+                })?;
+                self.workflow_announcements.push(EventV1 {
+                    protocol_version: PROTOCOL_VERSION,
+                    kind: "event".into(),
+                    sidecar_instance_id: self.ready.sidecar_instance_id.clone(),
+                    stream_id: format!("team_accept_{}", Uuid::new_v4().simple()),
+                    seq: 1,
+                    event: "agent.teamRunAccepted".into(),
+                    chat_id: Some(chat.clone()),
+                    task_id: accepted["taskId"].as_str().map(str::to_owned),
+                    run_id: accepted["runId"].as_str().map(str::to_owned),
+                    payload: json!({"rootRunId":root,"accepted":accepted}),
+                });
+            }
+        }
         if kind == "capability" {
             let capability = response.result.as_ref().ok_or_else(|| {
                 SidecarError::new("orchestrationBlocked", "missing capability result")
@@ -506,8 +533,33 @@ mod tests {
             .agent_runtime
             .set_fake_scenario(FakeScenario::OrchestratorWorker);
         let deadline = Instant::now() + Duration::from_secs(30);
+        let root_run = response.result.as_ref().unwrap()["runId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let mut accepted = std::collections::BTreeSet::from([root_run.clone()]);
+        let mut announced = 0;
         loop {
-            sidecar.poll_runtime_events().unwrap();
+            let (responses, events) = sidecar.poll_runtime_events().unwrap();
+            assert!(responses.is_empty(), "internal responses must not escape");
+            for event in events {
+                if event.event == "agent.teamRunAccepted" {
+                    assert_eq!(event.payload["rootRunId"], root_run);
+                    assert!(accepted.insert(event.run_id.clone().unwrap()));
+                    hello_agent_protocol::decode_jsonl(
+                        hello_agent_protocol::encode_jsonl(&EnvelopeV1::Event(event.clone()))
+                            .unwrap()
+                            .as_bytes(),
+                    )
+                    .unwrap();
+                    announced += 1;
+                } else if event.event.starts_with("agent.") {
+                    assert!(
+                        accepted.contains(event.run_id.as_ref().unwrap()),
+                        "child event must follow acceptance"
+                    );
+                }
+            }
             let state = sidecar.workflow_state(id).unwrap();
             if state.role == "coding" && state.run_id.is_some() {
                 sidecar
@@ -522,6 +574,10 @@ mod tests {
             assert!(Instant::now() < deadline, "{state:?}");
             std::thread::sleep(Duration::from_millis(10));
         }
+        assert_eq!(
+            announced, 2,
+            "worker and final coordinator both need admission"
+        );
         let runs = sidecar.storage.projection_records("run").unwrap();
         assert_eq!(runs.len(), 3);
         let worker = runs

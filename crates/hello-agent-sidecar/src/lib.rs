@@ -566,6 +566,8 @@ struct Sidecar {
     workflow_chats: std::collections::BTreeSet<String>,
     workflow_requests: BTreeMap<String, (String, String)>,
     workflow_outbound: Vec<EventV1>,
+    workflow_roots: BTreeMap<String, String>,
+    workflow_announcements: Vec<EventV1>,
 }
 
 struct PendingAgentStart {
@@ -969,6 +971,8 @@ impl Sidecar {
             workflow_chats: Default::default(),
             workflow_requests: Default::default(),
             workflow_outbound: Vec::new(),
+            workflow_roots: Default::default(),
+            workflow_announcements: Vec::new(),
             maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler::default(),
             maintenance_poisoned: false,
         })
@@ -2457,7 +2461,8 @@ impl Sidecar {
         } else {
             self.deferred_runtime_error = runtime_error;
         }
-        let mut outward_events = self.g5_events(events);
+        let mut outward_events = std::mem::take(&mut self.workflow_announcements);
+        outward_events.extend(self.g5_events(events));
         outward_events.append(&mut self.workflow_outbound);
         Ok((responses, outward_events))
     }

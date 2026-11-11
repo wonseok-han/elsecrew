@@ -71,7 +71,8 @@
       "workspace.blob.chunk",
       "agent.publicEvent",
       "agent.outputAvailable",
-      "agent.runStateChanged"
+      "agent.runStateChanged",
+      "agent.teamRunAccepted"
     ],
     "bridgeMethods": ["getSystemStatus", "prepareQuit", "onSidecarEvent"],
     "workspaceEventAddressing": "payload.chatId+projectId+worktreeId+workspaceIdentity"

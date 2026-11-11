@@ -78,6 +78,7 @@ export const EVENTS_V1 = [
   "agent.publicEvent",
   "agent.outputAvailable",
   "agent.runStateChanged",
+  "agent.teamRunAccepted",
 ] as const;
 
 export type MethodV1 = (typeof METHODS_V1)[number];

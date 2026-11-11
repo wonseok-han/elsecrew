@@ -134,6 +134,7 @@ import {
   validateAgentRecoveryResolveRequestV1,
   validateAgentRecoveryResolveResultV1,
   validateAgentRunAcceptedAgainstContextV1,
+  validateAgentRunAcceptedV1,
   validateAgentRunCancelRequestV1,
   validateAgentRunCancelResultV1,
   validateAgentRunStartRequestV1,
@@ -270,6 +271,7 @@ export class SidecarClientV1 {
   readonly #agentOutputListeners = new Set<(head: OutputHead, protocol: EventV1) => void>();
   readonly #workspaceSaves = new Map<string, WorkspaceSaveSessionV1>();
   readonly #preparedWorkspaces = new Map<string, PreparedWorkspaceSessionV1>();
+  readonly #teamRoots = new Map<string, { context: AgentChatContextV1; count: number }>();
   readonly #agentChatContexts = new Map<string, AgentChatContextV1>();
   readonly #activeAgentRuns = new Map<string, AgentRunBindingV1>();
   readonly #seenAgentRuns = new Map<string, SeenAgentRunV1>();
@@ -778,6 +780,20 @@ export class SidecarClientV1 {
         for (const listener of this.#agentOutputListeners) listener(head, envelope);
         return;
       }
+      if (envelope.event === "agent.teamRunAccepted") {
+        if (!this.#agentAdapterNegotiated) throw new Error("team run requires agent negotiation");
+        const notice = strictObject(envelope.payload, ["rootRunId", "accepted"], "team run announcement");
+        const root = typeof notice.rootRunId === "string" ? this.#teamRoots.get(notice.rootRunId) : undefined;
+        if (!root || root.count >= 11) throw new Error("team run lacks an authorized root or exceeds its call budget");
+        const value = validateAgentRunAcceptedV1(notice.accepted);
+        validateAgentRunAcceptedAgainstContextV1(value, {
+          ...root.context, roleId: value.roleId, capabilityFingerprint: value.capabilityFingerprint,
+        });
+        if (value.chatId !== envelope.chatId || value.taskId !== envelope.taskId || value.runId !== envelope.runId) throw new Error("team run envelope identity mismatch");
+        this.#registerAcceptedAgentRun(value);
+        root.count += 1;
+        return;
+      }
       if (envelope.event === "agent.publicEvent") {
         if (!this.#agentAdapterNegotiated) {
           throw new Error("actual-agent public events require the exact planned G5A capability set");
@@ -1049,6 +1065,7 @@ export class SidecarClientV1 {
           capabilityFingerprint: request.expectedCapabilityFingerprint,
         });
         this.#registerAcceptedAgentRun(value);
+        if (request.roleId === "coordinator") this.#teamRoots.set(value.runId, { context: chat, count: 0 });
         return value;
       }
       case "run.cancelAgent": {
@@ -1190,6 +1207,7 @@ export class SidecarClientV1 {
     this.#workspaceSaves.clear();
     this.#preparedWorkspaces.clear();
     this.#agentChatContexts.clear();
+    this.#teamRoots.clear();
     this.#activeAgentRuns.clear();
     this.#seenAgentRuns.clear();
     this.#agentEventIds.clear();

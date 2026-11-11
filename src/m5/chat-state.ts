@@ -476,6 +476,13 @@ export class ChatUiController {
     }
     const chat = this.#state.activeChat;
     if (!chat || !matchesChat(event, chat)) return;
+    const tail = this.#state.messages[this.#state.messages.length - 1]?.eventSequence ?? 0;
+    if (event.eventSequence > tail + 1) {
+      // Provider final messages arrive through durable hydration; a following
+      // team notice can win that race. Fetch the missing ledger, never skip it.
+      this.#hydrateAfterNotification(chat, this.#generation);
+      return;
+    }
     try { this.#set({ messages: mergeMessages(this.#state.messages, [event]) }); } catch (error) { this.#error("m5.chatError.order", error); }
   }
   #onAgentPublicEvent(event: AgentPublicEventV1): void {
