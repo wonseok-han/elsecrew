@@ -1045,3 +1045,13 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-diff-options-panel .m5-diff-toolbar { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
 .m5-diff-options-panel .m5-diff-help { margin: 0; }
 .m5-diff-options-panel > button { width: 100%; margin-top: 10px; text-align: left; }
+.m5-toolbar-actions > .m5-notifications { position: relative; margin: 0; padding: 0; border: 0; background: transparent; overflow: visible; }
+.m5-toolbar-actions > .m5-notifications > summary { position: relative; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border-radius: 5px; color: var(--m5-muted); list-style: none; }
+.m5-notifications > summary::-webkit-details-marker { display: none; }
+.m5-notifications > summary svg { width: 17px; height: 17px; }
+.m5-notifications .m5-status-indicator { position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; }
+.m5-toolbar-actions > .m5-notifications > .m5-status-content { position: absolute; top: 36px; right: 0; z-index: 70; box-sizing: border-box; width: min(400px, 85vw); max-height: 65vh; overflow: auto; padding: 14px; border: 1px solid var(--m5-border-strong); border-radius: 8px; background: var(--m5-raised); color: var(--m5-text); box-shadow: 0 12px 32px #0008; }
+.m5-notifications h3 { margin: 0 0 12px; font-size: 13px; }
+.m5-notifications .m5-inline-feedback:empty { display: none; }
+.m5-notifications .m5-error, .m5-notifications .m5-notice { margin: 8px 0; font-size: 12px; }
+.m5-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

@@ -1122,7 +1122,14 @@ impl ProjectManager {
         for run in storage.projection_records("run")? {
             if run.get("chat_id").and_then(Value::as_str).is_some_and(|id| ids.contains(&id))
                 && (!matches!(run.get("state").and_then(Value::as_str), Some("succeeded" | "failed" | "canceled"))
-                    || run.get("recovery").is_some_and(|value| !value.is_null() && value["state"] != "resolved"))
+                    || run.get("recovery").is_some_and(|value| {
+                        let resolved = if run.get("source_kind").and_then(Value::as_str) == Some("actualAgent") {
+                            "resolvedAbandoned"
+                        } else {
+                            "resolved"
+                        };
+                        !value.is_null() && value["state"] != resolved
+                    }))
             { return Err(ProjectFailure::recovery("finish agent execution or recovery before removing list entries")); }
         }
         for lock in storage.projection_records("lock")? {

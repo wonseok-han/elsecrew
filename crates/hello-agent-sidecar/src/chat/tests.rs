@@ -4737,6 +4737,16 @@ fn provider_terminal_recovery_required_poisons_even_after_clean_exit_until_aband
     assert_eq!(resolved_detail["agentRecovery"], Value::Null);
     assert_eq!(resolved_detail["agentRuns"][0]["state"], "canceled");
     assert_eq!(resolved_detail["chat"]["state"], "discarded");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let before = fixture.storage.projection_record("chat", chat_id).unwrap();
+    let before_run = fixture.storage.projection_record("run", &run_id).unwrap();
+    fixture.projects.change_catalog_visibility(&mut fixture.storage, &fixture.project_id, Some(chat_id), "removeChat", "req_hide_resolved_actual").unwrap();
+    assert!(fixture.chats.list_chats(&fixture.storage, &fixture.project_id, None, 100).unwrap()["items"].as_array().unwrap().is_empty());
+    assert_eq!(fixture.storage.projection_record("chat", chat_id).unwrap(), before);
+    assert_eq!(fixture.storage.projection_record("run", &run_id).unwrap(), before_run);
+    fixture.projects.change_catalog_visibility(&mut fixture.storage, &fixture.project_id, None, "restoreChats", "req_restore_resolved_actual").unwrap();
+    assert_eq!(fixture.chats.list_chats(&fixture.storage, &fixture.project_id, None, 100).unwrap()["items"][0]["state"], "discarded");
+
     fixture
         .projects
         .reopen_project(
