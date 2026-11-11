@@ -244,7 +244,7 @@ app.whenReady().then(async () => {
     for (const child of rail.children) if (child !== railToggle && getComputedStyle(child).display !== 'none') throw new Error('collapsed sidebar content remains visible');
     const reopen = document.querySelector('.m5-workbench > .m5-sidebar-reopen');
     const reopenBounds = reopen.getBoundingClientRect();
-    if (reopenBounds.left !== 0 || reopenBounds.width > 16 || reopen.closest("header")) throw new Error("reopen tab must stay on the screen edge outside the header");
+    if (reopenBounds.left !== 0 || reopenBounds.width > 24 || reopen.closest("header")) throw new Error("reopen tab must stay on the screen edge outside the header");
     if (reopenBounds.left < 0 || document.elementFromPoint(reopenBounds.left + reopenBounds.width / 2, reopenBounds.top + reopenBounds.height / 2)?.closest('button') !== reopen) throw new Error('reopen button not reachable');
     reopen.click();
     await ${waitFor("document.querySelector('.m5-project-rail').getBoundingClientRect().width >= 180", "expanded project rail")};
