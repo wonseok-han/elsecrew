@@ -772,7 +772,7 @@ function RoleSettings({ settings, disabled, feedback, onSave, onReload, onClose,
   try { roles.forEach(role => { validateRoleProfileV1(role); if (!role.modelSelector.trim()) valid = false; }); } catch { valid = false; }
   const run = async (action: () => Promise<void>) => { setBusy(true); try { await action(); } finally { setBusy(false); } };
   const requestClose = () => { if (!busy && discardAction === null) { if (dirty) setDiscardAction("close"); else onClose(); } };
-  return <dialog ref={dialogRef} className="m5-settings m5-settings-dialog" aria-label={t("m5.roles.label")} onCancel={event => { event.preventDefault(); requestClose(); }}>
+  const content = <>
     <header><div><p className="m5-eyebrow">{t("m5.roles.version", { revision: settings.revision })}</p><h2>{t(scope === "app" ? "m5.roles.appDefaults" : "m5.shell.roles")}</h2></div><button className="m5-secondary" type="button" disabled={busy || discardAction !== null} onClick={requestClose}>{t(returnToDraft ? "m5.roles.backToDraft" : scope === "app" ? "m5.roles.backToSettings" : "m5.roles.back")}</button></header>
     <div className="m5-settings-body">
     <section className="m5-settings-scope" aria-label={t("m5.roles.scope")}><span>{t(scope === "app" ? "m5.roles.appScope" : "m5.roles.scope")}</span><strong>{projectName}</strong><p>{t(scope === "app" ? "m5.roles.appDefaultsHelp" : "m5.roles.scopeHelp")}</p></section>
@@ -828,7 +828,10 @@ function RoleSettings({ settings, disabled, feedback, onSave, onReload, onClose,
     <button className="m5-secondary" type="button" disabled={disabled || busy || discardAction !== null} onClick={() => dirty ? setDiscardAction("reload") : void run(onReload)}>{t("m5.roles.reload")}</button>
     <details className="m5-settings-reload-help"><summary>{t("m5.roles.reloadInfo")}</summary><p>{t("m5.roles.reloadHelp")}</p></details>
     </footer>
-  </dialog>;
+  </>;
+  return scope === "app"
+    ? <section className="m5-settings m5-settings-inline" aria-label={t("m5.roles.label")}>{content}</section>
+    : <dialog ref={dialogRef} className="m5-settings m5-settings-dialog" aria-label={t("m5.roles.label")} onCancel={event => { event.preventDefault(); requestClose(); }}>{content}</dialog>;
 }
 
 function FollowupComposer({ controller, chat, admissionReady }: { controller: ChatUiController; chat: ReturnType<ChatUiController["snapshot"]>; admissionReady: boolean }) {

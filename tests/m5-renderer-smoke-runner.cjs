@@ -72,6 +72,12 @@ app.whenReady().then(async () => {
     document.querySelector('.m5-open-preferences').click();
     await ${waitFor("!document.querySelector('.m5-app-settings').hidden", "settings dialog visible")};
     if (document.querySelector('.m5-app-settings').tagName !== 'SECTION' || getComputedStyle(document.querySelector('.m5-toolbar')).display !== 'none') throw new Error('settings is not a full page');
+    const settingsPage = document.querySelector('.m5-app-settings');
+    if (getComputedStyle(settingsPage).backgroundColor !== getComputedStyle(document.querySelector('.m5-workbench')).backgroundColor) throw new Error('settings theme differs from workbench');
+    if (settingsPage.querySelector('header').getBoundingClientRect().height > 56) throw new Error('settings header consumes workspace');
+    const settingsNav = settingsPage.querySelector('nav').getBoundingClientRect();
+    const settingsContent = settingsPage.querySelector('.m5-preferences-content').getBoundingClientRect();
+    if (settingsNav.right > settingsContent.left + 1 || settingsNav.width > 230) throw new Error('settings navigation is not a compact sidebar');
     if (document.title !== 'Elsecrew') throw new Error('development title leaked');
     if (document.querySelector('.m5-toolbar-actions select')) throw new Error('language still outside settings');
 
@@ -89,21 +95,21 @@ app.whenReady().then(async () => {
     if (document.querySelector('.m5-app-settings > header button').disabled) throw new Error('failed defaults traps settings');
     window.m5SmokeDefaultsReady = true;
     document.querySelector('.m5-preferences-content .m5-notice button').click();
-    await ${waitFor("document.querySelector('.m5-settings[open]') && window.m5SmokeModelQueries.includes('codex') && document.querySelector('.m5-role-card select:nth-of-type(1)')", "automatic catalog without project or chat")};
+    await ${waitFor("document.querySelector('.m5-settings-inline') && window.m5SmokeModelQueries.includes('codex') && document.querySelector('.m5-role-card select:nth-of-type(1)')", "automatic catalog without project or chat")};
     await ${waitFor("[...document.querySelectorAll('.m5-role-card:not([hidden]) select')][1]?.options.length === 3", "model choices populated")};
     const initialModel = document.querySelectorAll('.m5-role-card:not([hidden]) select')[1];
     if (initialModel.value !== 'test-model' || initialModel.disabled) throw new Error('catalog replaced or disabled saved model');
     document.querySelectorAll('.m5-role-navigation button')[1].click();
     await ${waitFor("window.m5SmokeModelQueries.includes('claude-code')", "Claude automatic catalog")};
     document.querySelector('.m5-settings > header button').click();
-    await ${waitFor("!document.querySelector('.m5-settings[open]')", "close model settings")};
+    await ${waitFor("!document.querySelector('.m5-settings-inline')", "close model settings")};
     window.m5SmokeDefaultsRevision = 1;
     document.querySelector('.m5-preferences-content > section:nth-child(2) > button').click();
     await ${waitFor("document.querySelectorAll('.m5-role-card:not([hidden]) select')[1]?.value === 'new-default'", "initial defaults use provider recommendation")};
     document.querySelector('.m5-settings > header button').click();
     await ${waitFor("document.querySelector('.m5-settings [role=alertdialog]')", "default suggestion remains an unsaved edit")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '설정 변경 버리고 닫기').click();
-    await ${waitFor("!document.querySelector('.m5-settings[open]')", "discard suggested defaults")};
+    await ${waitFor("!document.querySelector('.m5-settings-inline')", "discard suggested defaults")};
     window.m5SmokeDefaultsRevision = 2;
     document.querySelector('.m5-app-settings > header button').click();
     await ${waitFor("document.querySelector('.m5-app-settings').hidden", "leave failed settings")};
