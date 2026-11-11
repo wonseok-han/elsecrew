@@ -556,6 +556,32 @@ mod tests {
                 .is_some_and(|t| t.contains("ready") || t.contains("reported success"))));
     }
     #[test]
+    fn orchestration_notices_use_transport_sequence_independent_of_durable_history() {
+        let (_root, mut sidecar, chat) = service();
+        let id = chat["chatId"].as_str().unwrap();
+        let mut session = ProtocolSessionV1::default();
+        session
+            .observe(&EnvelopeV1::Event(EventV1 {
+                protocol_version: PROTOCOL_VERSION,
+                kind: "event".into(),
+                sidecar_instance_id: sidecar.ready.sidecar_instance_id.clone(),
+                stream_id: "system".into(),
+                seq: 1,
+                event: "system.ready".into(),
+                chat_id: None,
+                task_id: None,
+                run_id: None,
+                payload: serde_json::to_value(&sidecar.ready).unwrap(),
+            }))
+            .unwrap();
+        for expected in 2..=3 {
+            let event = orchestration::notice(&mut sidecar.storage, id, "Team progress").unwrap();
+            assert_eq!(event.payload["eventSequence"], expected);
+            let wire = sidecar.g5_events(vec![event]).pop().unwrap();
+            session.observe(&EnvelopeV1::Event(wire)).unwrap();
+        }
+    }
+    #[test]
     fn orchestration_dispatch_direct_answer_does_not_start_any_worker() {
         let (_root, mut sidecar, chat) = service();
         sidecar

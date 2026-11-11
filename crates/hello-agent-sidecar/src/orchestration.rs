@@ -518,8 +518,11 @@ pub(crate) fn notice(
         payload,
     )?;
     Ok(crate::chat::G5Event {
-        stream_id: format!("chat_ledger_{chat_id}"),
-        seq,
+        // Durable message sequence includes provider messages emitted on their
+        // own run streams. It is not a contiguous transport sequence. Each
+        // notice has one delivery stream; its payload retains the ledger cursor.
+        stream_id: format!("workflow_notice_{}", message["messageId"].as_str().unwrap()),
+        seq: 1,
         event: "chat.eventAppended",
         chat_id: Some(chat_id.into()),
         task_id: chat["taskId"].as_str().map(str::to_owned),
