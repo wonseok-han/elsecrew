@@ -588,12 +588,15 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length === 200", "bounded diff page")};
     if (!document.querySelector('[data-panel=editor] .m5-diff-details') || document.querySelector('[data-panel=editor]').hidden) throw new Error('diff did not open in the editor dock');
     if (!document.querySelector('.m5-editor-surface').hidden || document.querySelector('.monaco-editor') !== preservedEditor) throw new Error('review disposed the existing editor');
-    [...document.querySelectorAll('.m5-diff-actions button')].find(button => button.textContent === '코드 편집기').click();
+    document.querySelector('.m5-diff-options').open = true;
+    [...document.querySelectorAll('.m5-diff-actions button')].find(button => button.textContent === '이전 편집기로 돌아가기').click();
     await ${waitFor("!document.querySelector('.m5-editor-surface').hidden && !document.querySelector('.m5-diff-details')", "return from review")};
     if (document.querySelector('.monaco-editor') !== preservedEditor) throw new Error('return from review recreated the editor');
     document.querySelector('.m5-change-row').click();
     await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length === 200", "reopened diff")};
     if (!document.querySelector('.m5-diff-deleted') || !document.querySelector('.m5-diff-added')) throw new Error('missing distinct change rows');
+    if (document.querySelector('.m5-diff-header').getBoundingClientRect().height > 42) throw new Error('comparison header is too tall');
+    document.querySelector('.m5-diff-options').open = true;
     const wrapToggle = document.querySelector('.m5-diff-wrap input');
     const diffBox = document.querySelector('.m5-diff-lines');
     if (diffBox.textContent.includes('@@ -')) throw new Error('raw hunk header leaked into comparison');

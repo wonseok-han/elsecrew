@@ -137,7 +137,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   useEffect(() => { if (removal) removalDialog.current?.showModal(); else removalDialog.current?.close(); }, [removal]);
 
   useEffect(() => {
-    const menus = () => document.querySelectorAll<HTMLDetailsElement>(".m5-project-menu, .m5-project-guide, .m5-project-overflow");
+    const menus = () => document.querySelectorAll<HTMLDetailsElement>(".m5-project-menu, .m5-project-guide, .m5-project-overflow, .m5-diff-options");
     const outside = (event: PointerEvent) => menus().forEach(menu => { if (!menu.contains(event.target as Node)) menu.open = false; });
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape") menus().forEach(menu => { if (menu.open) { menu.open = false; menu.querySelector<HTMLElement>("summary")?.focus(); } }); };
     document.addEventListener("pointerdown", outside, true);
@@ -464,7 +464,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         </aside>
 
         <section className="m5-panel m5-editor" aria-label={t("m5.editor.title")}>
-          <div hidden={snapshot.tabs.length === 0} className="m5-tab-list" role="tablist" aria-label={t("m5.editor.tabs")}>
+          <div hidden={snapshot.tabs.length === 0 || snapshot.diffVisible} className="m5-tab-list" role="tablist" aria-label={t("m5.editor.tabs")}>
             {snapshot.tabs.map((tab) => (
               <div className="m5-editor-tab" key={tab.path}>
                 <button type="button" role="tab" title={tab.path} aria-selected={snapshot.activePath === tab.path} tabIndex={snapshot.activePath === tab.path ? 0 : -1}
@@ -1209,20 +1209,20 @@ const DiffDetails = memo(function DiffDetails({ descriptor, text, canOpen, onOpe
     <section className="m5-diff-details" aria-label={t("m5.diff.title")}>
       <header className="m5-diff-header">
         <div className="m5-diff-identity"><strong>{descriptor.path}</strong><span>{t(`m5.diff.${descriptor.kind}`)}{descriptor.oldPath ? t("m5.diff.old", { path: descriptor.oldPath }) : ""}</span></div>
-        {descriptor.kind !== "binary" && Boolean(text) && <>
-        <div className="m5-diff-toolbar">
-          <div className="m5-diff-mode" role="group" aria-label={t("m5.diff.displayMode")}>
-            <button type="button" aria-pressed={diffMode === "inline"} onClick={() => setDiffMode("inline")}>{t("m5.diff.inline")}</button>
-            <button type="button" aria-pressed={diffMode === "split"} onClick={() => setDiffMode("split")}>{t("m5.diff.split")}</button>
-          </div>
-          <label className="m5-diff-wrap"><input type="checkbox" checked={wrapLines} onChange={event => setWrapLines(event.target.checked)} />{t("m5.diff.wrapLines")}</label>
-          <details className="m5-diff-help"><summary>{t("m5.diff.readingHelp")}</summary><p>{t("m5.diff.help")}</p>{canDiscuss && <p>{t("m5.diff.lineHelp")}</p>}</details>
-        </div>
-        </>}
         <div className="m5-diff-actions">
-          {canDiscuss && <button type="button" className="m5-secondary" onClick={() => onDiscuss(descriptor.path)}>{t("m5.diff.discuss")}</button>}
-          <button type="button" className="m5-secondary" onClick={onReturn}>{t("m5.editor.title")}</button>
-          {descriptor.kind !== "deleted" && descriptor.worktreeVersion !== null && <button type="button" className="m5-secondary" disabled={!canOpen} onClick={() => onOpen(descriptor.path)}>{t("m5.diff.editShort")}</button>}
+          {descriptor.kind !== "deleted" && descriptor.worktreeVersion !== null && <button type="button" className="m5-icon-action" title={t("m5.diff.openEditor")} aria-label={t("m5.diff.openEditor")} disabled={!canOpen} onClick={() => onOpen(descriptor.path)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15z"/></svg></button>}
+          <details className="m5-diff-options"><summary title={t("m5.diff.options")} aria-label={t("m5.diff.options")}>⋯</summary><div className="m5-diff-options-panel">
+            {descriptor.kind !== "binary" && Boolean(text) && <div className="m5-diff-toolbar">
+              <div className="m5-diff-mode" role="group" aria-label={t("m5.diff.displayMode")}>
+                <button type="button" aria-pressed={diffMode === "inline"} onClick={() => setDiffMode("inline")}>{t("m5.diff.inline")}</button>
+                <button type="button" aria-pressed={diffMode === "split"} onClick={() => setDiffMode("split")}>{t("m5.diff.split")}</button>
+              </div>
+              <label className="m5-diff-wrap"><input type="checkbox" checked={wrapLines} onChange={event => setWrapLines(event.target.checked)} />{t("m5.diff.wrapLines")}</label>
+              <details className="m5-diff-help"><summary>{t("m5.diff.readingHelp")}</summary><p>{t("m5.diff.help")}</p>{canDiscuss && <p>{t("m5.diff.lineHelp")}</p>}</details>
+            </div>}
+            {canDiscuss && <button type="button" onClick={() => onDiscuss(descriptor.path)}>{t("m5.diff.discuss")}</button>}
+            <button type="button" onClick={onReturn}>{t("m5.diff.returnEditor")}</button>
+          </div></details>
         </div>
       </header>
       {descriptor.kind === "binary" ? <Empty text={t("m5.diff.binaryHelp")} /> : !text ? <Empty text={t("m5.diff.empty")} /> : <>

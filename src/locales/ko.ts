@@ -408,6 +408,8 @@ export const ko = {
   "m5.diff.old": " · 이전: {path}",
   "m5.diff.binaryHelp": "이진 변경은 내용 대신 파일 변경 사실만 보여요.",
   "m5.diff.empty": "표시할 텍스트 변경이 없어요.",
+  "m5.diff.options": "비교 옵션",
+  "m5.diff.returnEditor": "이전 편집기로 돌아가기",
   "m5.diff.editShort": "편집",
   "m5.diff.section": "이전 {before}행 · 이후 {after}행",
   "m5.diff.source": "원본 비교 정보",

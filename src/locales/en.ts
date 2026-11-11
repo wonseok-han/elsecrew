@@ -409,6 +409,8 @@ export const en: Record<MessageKey, string> = {
   "m5.diff.old": " · Previously: {path}",
   "m5.diff.binaryHelp": "Binary changes show that the file changed, not its contents.",
   "m5.diff.empty": "No text changes to display.",
+  "m5.diff.options": "Comparison options",
+  "m5.diff.returnEditor": "Return to previous editor",
   "m5.diff.editShort": "Edit",
   "m5.diff.section": "Before line {before} · After line {after}",
   "m5.diff.source": "Raw comparison details",

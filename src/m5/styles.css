@@ -1029,3 +1029,19 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-diff-header .m5-diff-actions { margin-left: auto; }
 .m5-dock-group-tabs { min-height: 30px; }
 .m5-dock-group-tabs > button { min-height: 30px; padding: 5px 8px; font-size: 11px; }
+/* Only a file identity and icon actions remain above the comparison. */
+.m5-dock-slot[data-panel="editor"] .m5-dock-frame:has(.m5-diff-details) > .m5-dock-heading:has([role="tab"]:only-child) { display: none; }
+.m5-diff-header { flex-wrap: nowrap; min-height: 34px; box-sizing: border-box; padding: 3px 10px; }
+.m5-diff-identity { flex: 1 1 0; min-width: 0; }
+.m5-diff-identity span { font-size: 10px; }
+.m5-diff-actions { flex-wrap: nowrap; flex-shrink: 0; gap: 4px; align-items: center; }
+.m5-diff-actions .m5-icon-action, .m5-diff-options > summary { display: grid; place-items: center; width: 28px; height: 28px; min-height: 28px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--m5-muted); cursor: pointer; list-style: none; }
+.m5-diff-options > summary::-webkit-details-marker { display: none; }
+.m5-icon-action svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.m5-diff-actions .m5-icon-action:hover, .m5-diff-options > summary:hover { background: var(--m5-raised); color: var(--m5-text); }
+.m5-diff-options { position: relative; }
+.m5-diff-options-panel { position: absolute; right: 0; top: 32px; z-index: 50; width: 230px; padding: 12px; border: 1px solid var(--m5-border-strong); border-radius: 8px; background: var(--m5-raised); box-shadow: 0 8px 24px #0008; }
+.m5-diff-options:not([open]) > .m5-diff-options-panel { display: none; }
+.m5-diff-options-panel .m5-diff-toolbar { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
+.m5-diff-options-panel .m5-diff-help { margin: 0; }
+.m5-diff-options-panel > button { width: 100%; margin-top: 10px; text-align: left; }
