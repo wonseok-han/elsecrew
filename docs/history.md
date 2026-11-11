@@ -4,6 +4,12 @@
 
 ### 2026-11-11 · by GPT-6
 
+- 연결 복구 후 사용자 승인(call_71f16ad95e084be8ad9c1bf079a923a6)의 팀1건/최대12회 시험을 일반 새 채팅→보내기로 실행했다. 실제 Codex 위임→Claude 시작까지 연결됐으나 Claude 초기 연결에서 실패해 자동 재시도 없이 멈췄다. Codex run agent_run_01d7153af01c4bd99d513c368a3ba802 succeeded, Claude run agent_run_06de5599cced40ca873d3a0859a817be failed; 두 기록 모두 cleanExit/processesProvenGone, recovery null, Claude writerLock released를 진단 복사본에서 확인했다. chat_7d3aca62cc8b4f80ba232635db6f0862는 needsAttention/workflow paused다.
+- 실제 UI 연결 진단은 ‘init plugins other builtins / session initialization / session channel’이다. 내장 플러그인 초기 관측의 기존 허용 계약에서 거절된 것으로 범위를 좁혔으나 정확한 등록 조합은 현재 고정 진단만으로 미확정이다. 설치 Claude2.1.322 바이너리의 정적 문자열에서 privacy 등 추가 내장 모듈 존재를 확인했지만 존재를 해당 실행의 등록 증거로 취급하지 않는다. 안전 검사/플러그인 허용 범위는 변경하지 않았다.
+- 임시 원본과 작업 복사본 hello.txt 모두 original 줄이며 파일 수정·최종 취합은 실패했다. 진단 DB 복사본은 확인 즉시 정리했다. 앱/내부 서비스는 종료시키지 않았고 사용자 프로젝트/인증 변경·추가 모델 실행·main 병합/push 없음. 승인된 시험은 실패 시 중단 조건으로 종료됐으며 새 시험 승인은 없다. 다음: 실제 등록 조합을 확인할 수 있는 무과금 진단 또는 제한된 증거 수집을 준비하고 호환 수정/회귀 후 실제 팀 작업을 다시 검증한다. 목표 완료 아님.
+
+### 2026-11-11 · by GPT-6
+
 - 사용자 승인에 따라 신원을 확인한 시험 앱85005/전용 sidecar85010만 종료했다(TERM 후 앱만 남아 KILL). HEAD651063b7 패키지/package smoke 통과 후 기존 경로에 반영, 실제 준비 완료/임시 프로젝트 열기/일반 보내기를 확인했다.
 - 승인된 팀1건 재시험은 Codex gpt-6.1-sol/medium 1회가 성공·cleanExit로 종료되고 coding 위임 지시 펼침도 표시됐다. run agent_run_c1449c3276a9445db903a0e83460b6b4, chat_67a9716de7954aa291d886ef29af449b. 다음 단계는 paused이며 Claude run은 생성되지 않았다. live DB의 진단 복사본에서 단일 run/step1 paused를 확인했고 원본 hello.txt는 original, 원본 Git 깨끗함을 확인했다. 임시 진단 복사본은 확인 뒤 정리했다. 자동 재시도 없음, 이전1건 승인은 실패 시 중단 조건으로 종료됐다.
 - 실제 설정 화면에서 Claude providerLoginRecoveryRequired를 확인했다. 사용자 별도 승인으로 기존 ‘연결 잠금 복구’를 실행한 뒤 ‘연결 상태 다시 확인’이 성공해 Codex·Claude 모두 연결됨을 표시했다. 기존 인증은 유지됐고 파일/원장/잠금을 수동 수정하지 않았다. 이로써 이전 종료 거절의 로그인 관리자 차단 원인도 확인됐다.
