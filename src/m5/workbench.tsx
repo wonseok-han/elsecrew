@@ -1,5 +1,5 @@
 import { ProjectRecoveryHistory } from "./project-recovery-history-view.tsx";
-import { orchestratorMessage } from "./orchestrator-message.ts";
+import { OrchestrationMessageBody } from "./orchestration-message-body.tsx";
 import { PreparationRecovery } from "./preparation-recovery-view";
 import { BackupStorageUsageView } from "./backup-storage-usage";
 import { flushSync } from "react-dom";
@@ -30,7 +30,6 @@ import { StorageAdmissionPoller, type AdmissionView } from "./admission-state.ts
 import { resolveM5Bridge, type SupportedM5Bridge } from "./bridge-boundary.ts";
 import { canAbandonAgentRecovery, ChatUiController } from "./chat-state.ts";
 import { WorkbenchDock } from "./workbench-dock.tsx";
-import { MessageBody } from "./message-body.tsx";
 import { ProviderLogin, type ConnectionReveal } from "./provider-login.tsx";
 import { ApprovalCard } from "./approval-card.tsx";
 import { ChatWorkspaceDiscard } from "./chat-workspace-discard.tsx";
@@ -825,7 +824,7 @@ const TeamMessageRow = memo(function TeamMessageRow({ message, roleLabel, messag
   const { t } = useI18n();
   return <article className={`m5-message m5-message-${message.kind}`} data-chat-id={message.chatId} data-run-id={message.runId ?? undefined}>
     <div><strong>{message.kind === "user" ? t("m5.chat.me") : message.roleId ? t(`m5.roles.${message.roleId}`) : t("m5.chat.status")}</strong>{message.roleId && <span> · {roleLabel}</span>}<time>{messageTime.format(new Date(message.createdAt))}</time></div>
-    <MessageBody text={orchestratorMessage(message.text, message.roleId)} />
+    <OrchestrationMessageBody text={message.text} role={message.roleId} />
     {message.runId && <small>{t("m5.chat.runId", { id: message.runId })}</small>}
   </article>;
 });

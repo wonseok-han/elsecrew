@@ -1,6 +1,7 @@
 // 한국어 문구 리소스. 이 파일의 키 집합이 다른 언어 파일의 기준이 된다.
 // 보간은 {name} 형태 — t("key", { name }) 로 치환.
 export const ko = {
+  "m5.chat.delegatedTask": "{role} 담당에게 맡긴 내용",
   "m5.historyRecovery.title": "대화 기록 및 실행 복구",
   "m5.historyRecovery.help": "프로젝트를 열 수 없어도 대화 기록과 중단된 실행을 확인할 수 있어요. 파일을 열거나 새 작업을 실행하지 않아요.",
   "m5.historyRecovery.open": "대화 기록 확인",

@@ -2,6 +2,7 @@ import type { MessageKey } from "./ko";
 
 // 영어 문구. ko와 동일한 키를 모두 가져야 한다(Record<MessageKey>로 강제).
 export const en: Record<MessageKey, string> = {
+  "m5.chat.delegatedTask": "Task delegated to {role}",
   "m5.historyRecovery.title": "Conversation history and run recovery",
   "m5.historyRecovery.help": "View conversations and interrupted runs even when the project cannot open. This does not open files or start work.",
   "m5.historyRecovery.open": "View conversation history",

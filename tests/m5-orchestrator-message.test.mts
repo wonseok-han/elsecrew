@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { orchestratorMessage } from "../src/m5/orchestrator-message.ts";
+import { orchestratorMessage, orchestratorDelegation } from "../src/m5/orchestrator-message.ts";
 
 test("ordinary chat shows the orchestrator answer and delegation summary", () => {
   assert.equal(orchestratorMessage('{"action":"final","answer":"프로젝트 구조를 설명할게요."}', "coordinator"), "프로젝트 구조를 설명할게요.");
@@ -24,4 +24,11 @@ test("team cancellation binds the visible user task and distinguishes stopping f
   assert.deepEqual(validateProjectCatalogResult(result,request),result);
   assert.throws(() => validateProjectCatalogResult({...result,triggerMessageId:"other"},request));
   assert.throws(() => validateProjectCatalogResult({...result,status:"terminated"},request));
+});
+
+test("delegation details expose the exact assigned task only from coordinator messages", () => {
+  const text = JSON.stringify({action:"delegate", role:"design", instruction:"Review layout\nReport tradeoffs", summary:"Design review"});
+  assert.deepEqual(orchestratorDelegation(text, "coordinator"), {role:"design", instruction:"Review layout\nReport tradeoffs"});
+  for (const role of [null, "user", "coding"]) assert.equal(orchestratorDelegation(text, role), null);
+  for (const text of ['{"action":"delegate"}', '{"action":"final","answer":"Done"}', '{"action":"delegate","role":"shell","instruction":"exec","summary":"x"}']) assert.equal(orchestratorDelegation(text, "coordinator"), null);
 });

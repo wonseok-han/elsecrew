@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.tsx";
 import { recoveryConfirmation } from "./chat-notice.ts";
-import { MessageBody } from "./message-body.tsx";
+import { OrchestrationMessageBody } from "./orchestration-message-body.tsx";
 import { isAgentChatDetailPageV1, type AgentChatGetResultV1 } from "./contracts/agent-adapter-v1.ts";
 import type { ChatRecordV1 } from "./contracts/run-recovery-v1.ts";
 import { recoveryChatPage, recoveryHistoryPage, resolveHistoryRecovery, type RecoveryHistoryBridge } from "./project-recovery-history.ts";
@@ -65,7 +65,7 @@ export function ProjectRecoveryHistory({ bridge, projectId, disabled }: { bridge
         {recovery.reason === "processIdentityUnavailable" ? <p>{t("m5.chat.identityUnavailable")}</p> : <button type="button" disabled={disabled || busy} onClick={resolve}>{t("m5.chat.discardAfterTermination")}</button>}
         <details><summary>{t("m5.feedback.details")}</summary><code>{recovery.runId}</code></details>
       </div>}
-      <div className="m5-recovery-history-messages">{detail.messages.map(message => <article key={message.messageId}><small>{message.roleId ?? message.kind}</small><MessageBody text={message.text} /></article>)}</div>
+      <div className="m5-recovery-history-messages">{detail.messages.map(message => <article key={message.messageId}><small>{message.roleId ?? message.kind}</small><OrchestrationMessageBody text={message.text} role={message.roleId} /></article>)}</div>
       {detail.afterEventSequence > 0 && <button type="button" disabled={disabled || busy} onClick={() => void read(detail.chat)}>{t("m5.historyRecovery.first")}</button>}
       {detail.nextEventSequence !== null && <button type="button" disabled={disabled || busy} onClick={() => void read(detail.chat, detail.nextEventSequence!)}>{t("m5.historyRecovery.more")}</button>}
     </section>}
