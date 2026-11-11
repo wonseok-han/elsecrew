@@ -4,6 +4,13 @@
 
 ### 2026-11-11 · by GPT-6
 
+- 중단된 최신 채팅 snapshot 때문에 프로젝트 reopen이 막혀도 설정의 프로젝트 관리에서 대화 기록·실제 실행 복구를 직접 조회하는 경로를 추가했다. catalog의 선택 ID를 사용하고 listChats/getChat/inspectAgentRecovery/resolveAgentRecovery만 허용한 별도 helper를 사용한다. 원본/snapshot 검증을 완화하지 않고 editor bind·snapshot 생성·파일 읽기/쓰기·실행 시작을 호출하지 않는다.
+- 실제 복구는 기존 확인 문구, exact identity 재조회와 최신 revision CAS, 프로세스 종료 증거 검사에 맡긴다. identityUnavailable는 조작 불가, 프로젝트/화면 변경 후 응답과 복구 호출은 폐기한다. 성공해도 자동 재개하지 않고 프로젝트 목록으로 돌아가 일반 열기를 거치도록 안내한다. 한국어/영어·대화/메시지 페이지 조회와 제한된 기록 영역을 추가했다.
+- 검증: helper4개, TypeScript/renderer build, Chromium renderer2개 통과. 화면 probe는 snapshot/tree/diff/watch/start/resolve를 호출하면 실패시키고 list/get만으로 보호된 대화/안내가 보이는 것을 검증했다. 초기 probe 문구 불일치와 일반 안내의 첫 요소 선택 충돌은 정확한 안내/범위 선택으로 수정해 재통과했다. 독립 검토 차단 지적 없음. diff check 통과. 설치본은 아직 ba967590이며 이번 변경과 후속 전송738824e8은 설치 반영 전이다.
+- 다음: 현재 개발 앱 종료·교체, 기존 시험 기록으로 복구 화면 확인과 명시 승인된 안전 복구. 이후 별도 승인된 실제 팀 작업 재시험으로 팀원 수정·최종 취합까지 증명해야 한다. 모델 호출·잠금 수동 삭제·main 병합·push 없음.
+
+### 2026-11-11 · by GPT-6
+
 - 핵심 오케스트레이션 계속 진행(기준 f8f558f2). 실제 답변 뒤 일반 후속 메시지가 durable eventSequence를 통신 seq로 재사용해 연결을 끊는 결함을 fake 실제 adapter+ProtocolSession으로 재현했다(expected1/got4). 사용자 메시지별 단일 stream seq1로 바꾸고 payload의 영속 순번·중복 전송 멱등성·신원 검사는 유지했다.
 - 검증: 수정 전 새 회귀 실패, 수정 후 orchestration15개와 followup6개(겹치는 새 회귀1개 포함) 통과, 비용 진단1개 명시 ignored, diff check 통과. 독립 검토의 최초 notice 경로 지적은 다른 시점 소스에 근거했으며 절대 경로/HEAD 재확인 후 철회, 현재 수정 차단 지적 없음. 실제 모델 호출 없음. 설치본에는 아직 이 후속 전송 수정이 포함되지 않았다.
 - 실제 UI에서 중단 시험 프로젝트의 복구 접근 차단도 확인: catalog reopen이 최신 프로젝트 snapshot의 active manifest를 요구하지만 중단된 child의 manifest는 recoveryRequired다. 원본 폴더는 존재하며 오류는 persisted manifest differs from the canonical snapshot identity다. 현재 frontend도 프로젝트 선택 시 snapshot 생성과 chat 선택 시 editor binding 성공을 요구하므로 읽기 전용 기록/복구 접근을 실행 가능 작업 복사본과 분리해야 한다. 원장·잠금을 수동 삭제하거나 검사를 우회하지 않았다. 이 차단 해소와 별도 승인된 실제 위임→팀원→취합 검증은 미완료다.

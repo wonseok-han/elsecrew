@@ -2,6 +2,16 @@ import type { MessageKey } from "./ko";
 
 // 영어 문구. ko와 동일한 키를 모두 가져야 한다(Record<MessageKey>로 강제).
 export const en: Record<MessageKey, string> = {
+  "m5.historyRecovery.title": "Conversation history and run recovery",
+  "m5.historyRecovery.help": "View conversations and interrupted runs even when the project cannot open. This does not open files or start work.",
+  "m5.historyRecovery.open": "View conversation history",
+  "m5.historyRecovery.empty": "No saved conversations.",
+  "m5.historyRecovery.more": "Next records",
+  "m5.historyRecovery.first": "First records",
+  "m5.historyRecovery.error": "Could not verify the records. Please reload.",
+  "m5.historyRecovery.resolved": "Termination and workspace abandonment were recorded. Reopen from the project list.",
+  "m5.historyRecovery.blocked": "Recovery is not complete. Execution remains restricted; check again.",
+
   "m5.preferences.storage": "Storage",
   "m5.preferences.project": "Project management",
   "m5.preferences.chooseProject": "Choose Manage next to a project in the project list.",

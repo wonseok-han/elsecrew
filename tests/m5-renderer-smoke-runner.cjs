@@ -1,3 +1,5 @@
+const { probeRecoveryHistory } = require("./m5-recovery-history-ui-probe.cjs");
+const recoveryHistoryFixture = JSON.parse(require("node:fs").readFileSync(require("node:path").resolve(__dirname, "fixtures/m5/agent-adapter-v1/g5c-identityless-recovery-cases.json"), "utf8")).valid.find(item => item.name === "identityless-recovery-chat-detail").value;
 const { app, BrowserWindow, net, protocol, session } = require("electron");
 const { resolve, sep } = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -231,6 +233,7 @@ app.whenReady().then(async () => {
     overflow.querySelector('summary').click();
     rail.querySelector('.m5-project-manage').click();
     await ${waitFor("!document.querySelector('.m5-app-settings').hidden && document.querySelector('.m5-maintenance-group')", "project management page")};
+    await (${probeRecoveryHistory.toString()})(${JSON.stringify(recoveryHistoryFixture)});
     if (document.querySelector('.m5-maintenance-group').tagName !== 'SECTION') throw new Error('management sections should be visible without expanding');
     const recoveryButton = text => [...document.querySelectorAll('[aria-label="프로젝트 시작 실패 복구"] button')].find(b => b.textContent === text);
     recoveryButton('시작 실패 확인').click();
@@ -337,7 +340,7 @@ app.whenReady().then(async () => {
     const failedSettingsDetails = [...document.querySelectorAll('[role=alert] pre')].map(node => node.textContent).join('|');
     const settingsLanguage = document.querySelector('.m5-preferences-row select');
     settingsLanguage.value = 'en'; settingsLanguage.dispatchEvent(new Event('change', { bubbles: true }));
-    await ${waitFor("document.querySelector('.m5-notice')?.textContent === 'Finish role and model settings to continue working with files.'", "English file-operation block notice")};
+    await ${waitFor("[...document.querySelectorAll('.m5-inline-feedback .m5-notice')].some(node => node.textContent === 'Finish role and model settings to continue working with files.')", "English file-operation block notice")};
     await ${waitFor("document.body.textContent.includes('Could not save settings. Your input is preserved.')", "English persisted settings error")};
     if (modelField !== document.querySelector('.m5-role-card input') || modelField.value !== 'draft-model' || failedSettingsDetails !== [...document.querySelectorAll('[role=alert] pre')].map(node => node.textContent).join('|')) throw new Error('error translation changed draft or technical details');
     settingsLanguage.value = 'ko'; settingsLanguage.dispatchEvent(new Event('change', { bubbles: true }));

@@ -1,6 +1,16 @@
 // 한국어 문구 리소스. 이 파일의 키 집합이 다른 언어 파일의 기준이 된다.
 // 보간은 {name} 형태 — t("key", { name }) 로 치환.
 export const ko = {
+  "m5.historyRecovery.title": "대화 기록 및 실행 복구",
+  "m5.historyRecovery.help": "프로젝트를 열 수 없어도 대화 기록과 중단된 실행을 확인할 수 있어요. 파일을 열거나 새 작업을 실행하지 않아요.",
+  "m5.historyRecovery.open": "대화 기록 확인",
+  "m5.historyRecovery.empty": "저장된 대화가 없어요.",
+  "m5.historyRecovery.more": "다음 기록",
+  "m5.historyRecovery.first": "처음 기록",
+  "m5.historyRecovery.error": "기록을 확인하지 못했어요. 다시 조회해 주세요.",
+  "m5.historyRecovery.resolved": "종료 확인과 작업 복사본 포기를 기록했어요. 프로젝트 목록에서 다시 열어 주세요.",
+  "m5.historyRecovery.blocked": "아직 복구를 마칠 수 없어요. 실행 제한을 유지하며 다시 확인해 주세요.",
+
   "m5.preferences.storage": "저장공간",
   "m5.preferences.project": "프로젝트 관리",
   "m5.preferences.chooseProject": "프로젝트 목록의 관리 버튼에서 프로젝트를 선택하세요.",

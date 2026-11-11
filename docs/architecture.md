@@ -562,3 +562,5 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 패널 탭은 좁은 그룹에서 줄바꿈해 이름과 선택 진입점을 유지한다. 탭 전환·키보드 크기 조정 시 기존 편집기 인스턴스와 초안은 유지한다. 드래그 재배치·숨김/복원 UI는 제거했다. 검증 범위와 출시와의 경계는 history 최신 기록을 따른다.
 
 팀 실행의 후속 run은 `agent.teamRunAccepted`로 최초 승인된 총괄 run과 같은 채팅/작업 복사본에 결속해 Electron에 먼저 등록한다. 최초 실행 외 후속 등록은 최대11회이며, 그 뒤부터 기존 실제 실행 이벤트 검증을 적용한다. 진행 알림의 통신 순번은 durable 대화 순번과 분리하고, 화면에서 앞선 알림을 받으면 누락 구간을 원장에서 조회한다.
+
+설정의 프로젝트 관리에는 editor와 분리된 대화 기록/실행 복구 조회가 있다. 저장된 프로젝트 ID로 기존 listChats/getChat을 조회하므로 최신 snapshot이 recoveryRequired여도 기록에 접근할 수 있다. 조회는 snapshot 생성·파일 접근·실행을 요청하지 않으며, 복구는 기존 inspect→명시 확인→revision 결속 resolve와 종료 증거 검사를 유지한다. 복구 후 작업 공간을 자동 재사용하지 않는다.

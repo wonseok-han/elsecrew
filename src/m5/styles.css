@@ -850,3 +850,6 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-status-content p { margin: 6px 0; }
 .m5-status-content pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .m5-status-content button { margin-top: 8px; }
+
+.m5-recovery-history-messages { max-height: 320px; overflow: auto; overflow-wrap: anywhere; }
+.m5-recovery-history-messages article { padding: 12px 0; border-top: 1px solid #39424d; }
