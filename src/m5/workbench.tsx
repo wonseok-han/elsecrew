@@ -12,6 +12,7 @@ import { markStartScreenReady } from "./startup-mark.ts";
 import { emptyProjectGuide, parseProjectGuide, projectGuideKey, projectGuideStep, type ProjectGuidePreference } from "./project-guide-state.ts";
 import type { ChatRecordV1 } from "./contracts/run-recovery-v1.ts";
 import { groupRunHistory, runOutcomeNotice } from "./work-status.ts";
+import { cachedModels, loadModels } from "./model-catalog.ts";
 import type { ModelChoicesResult } from "./contracts/model-choices-v1.ts";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type * as Monaco from "monaco-editor/esm/vs/editor/editor.api";
@@ -348,7 +349,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         onResolved={(result, path) => controller.observeCompletedSaveRecovery(result, path)} />}
       {leaveError && <p className="m5-error" role="alert">{t("m5.feedback.leaveError")}</p>}
       <AppSettings hasProject={Boolean(snapshot.project)} rolesLocked={appDefaultsLoaded && appDefaultsOpen} storage={<BackupStorageUsageView disabled={!admissionReady} />} project={managedProject ? <><p>{managedProject.canonicalPath}</p><ProjectRecoveryHistory key={managedProject.projectId} bridge={bridge} projectId={managedProject.projectId} disabled={!admissionReady || leavingProject || leaveError} /><PreparationRecovery projectId={managedProject.projectId} disabled={!admissionReady || snapshot.actionBlocked || snapshot.selectionBlocked || Boolean(snapshot.workspace) || settingsOpen || leavingProject || leaveError || !controller.canLeaveProject() || chat.switching} /></> : <p>{t("m5.preferences.chooseProject")}</p>} restartLocked={updatePreparing} open={preferencesOpen} section={preferencesSection} onSection={section => { setPreferencesSection(section); if (!appDefaultsLoaded) setAppDefaultsOpen(false); }} onClose={() => { setPreferencesOpen(false); setAppDefaultsOpen(false); setAppDefaultsLoaded(false); }}
-        rolesEditor={appDefaultsOpen && <AppRoleDefaultsEditor onLoaded={setAppDefaultsLoaded} disabled={!admissionReady} onClose={() => setAppDefaultsOpen(false)} />}
+        rolesEditor={appDefaultsOpen && <AppRoleDefaultsEditor activeChat={chat.activeChat} onLoaded={setAppDefaultsLoaded} disabled={!admissionReady} onClose={() => setAppDefaultsOpen(false)} />}
         disabled={!admissionReady || !window.m5Projects} onRoles={() => setAppDefaultsOpen(true)}>
         <ProviderLogin disabled={!admissionReady} returning={hasSavedProjects} reveal={connectionReveal} />
       </AppSettings>
@@ -679,7 +680,7 @@ function GuidedStart({ disabled, onChoose, returning }: { disabled: boolean; onC
   </section>;
 }
 
-function AppRoleDefaultsEditor({ disabled, onClose, onLoaded }: { disabled: boolean; onClose: () => void; onLoaded: (loaded: boolean) => void }) {
+function AppRoleDefaultsEditor({ disabled, onClose, onLoaded, activeChat }: { activeChat: ReturnType<ChatUiController["snapshot"]>["activeChat"]; disabled: boolean; onClose: () => void; onLoaded: (loaded: boolean) => void }) {
   const { t } = useI18n();
   const [settings, setSettings] = useState<ProjectRoleSettingsV1 | null>(null);
   const [error, setError] = useState(false);
@@ -713,12 +714,12 @@ function AppRoleDefaultsEditor({ disabled, onClose, onLoaded }: { disabled: bool
     {error && <button type="button" disabled={disabled} onClick={() => void load()}>{t("m5.roles.reload")}</button>}
     {error && <details><summary>{t("m5.feedback.details")}</summary><pre>{errorDetail}</pre></details>}
   </section>;
-  return <RoleSettings scope="app" settings={settings} activeChat={null} disabled={disabled}
+  return <RoleSettings scope="app" settings={settings} activeChat={activeChat} disabled={disabled}
     feedback={<>{error && <p role="alert">{t("m5.roles.appDefaultsError")}</p>}{saved && <p role="status">{t("m5.roles.appDefaultsSaved")}</p>}</>}
     onSave={save} onReload={load} onClose={onClose} projectName={t("m5.roles.appDefaults")} />;
 }
 
-function RoleSettings({ settings, activeChat, disabled, feedback, onSave, onReload, onClose, returnToDraft = false, projectName, scope = "project" }: { scope?: "project" | "app"; settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; activeChat: ReturnType<ChatUiController["snapshot"]>["activeChat"]; disabled: boolean; feedback: ReactNode; onSave: (roles: readonly RoleProfileV1[]) => Promise<void>; onReload: () => Promise<void>; onClose: () => void; returnToDraft?: boolean; projectName: string }) {
+function RoleSettings({ settings, disabled, feedback, onSave, onReload, onClose, returnToDraft = false, projectName, scope = "project" }: { scope?: "project" | "app"; settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; activeChat: ReturnType<ChatUiController["snapshot"]>["activeChat"]; disabled: boolean; feedback: ReactNode; onSave: (roles: readonly RoleProfileV1[]) => Promise<void>; onReload: () => Promise<void>; onClose: () => void; returnToDraft?: boolean; projectName: string }) {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [roles, setRoles] = useState<readonly RoleProfileV1[]>(scope === "project" ? coordinatorRoles(settings.roles) : settings.roles);
@@ -727,24 +728,38 @@ function RoleSettings({ settings, activeChat, disabled, feedback, onSave, onRelo
   const [discardAction, setDiscardAction] = useState<"close" | "reload" | null>(null);
   const [choices, setChoices] = useState<Partial<Record<RoleProfileV1["roleId"], ModelChoicesResult["models"]>>>({});
   const [choicesError, setChoicesError] = useState(false);
+  const [choicesBusy, setChoicesBusy] = useState(false);
   const choiceEpoch = useRef(0);
   useEffect(() => {
     choiceEpoch.current += 1;
     setChoices({}); setChoicesError(false);
     return () => { choiceEpoch.current += 1; };
-  }, [settings, activeChat?.chatId]);
-  const loadChoices = async (role: RoleProfileV1) => {
-    if (!activeChat || !window.m5Models || role.runtime !== "codex") return;
-    const epoch = choiceEpoch.current;
-    setBusy(true); setChoicesError(false);
+  }, [settings]);
+  const loadChoices = async (role: RoleProfileV1, refresh = false) => {
+    if (!window.m5Models) return;
+    const epoch = ++choiceEpoch.current;
+    const cached = cachedModels(role.runtime);
+    if (cached) setChoices(old => ({ ...old, [role.roleId]: cached }));
+    setChoicesBusy(true); setChoicesError(false);
     try {
-      const result = await window.m5Models.request({ runtime: "codex", refresh: true, chatId: activeChat.chatId, roleId: role.roleId });
+      const result = await loadModels(role.runtime, input => window.m5Models!.request(input), refresh);
       if (epoch !== choiceEpoch.current) return;
-      if (result.scope.worktreeId !== activeChat.worktreeId || result.scope.workspaceIdentity !== activeChat.workspaceIdentity) throw new Error("model choice scope changed");
       setChoices(old => ({ ...old, [role.roleId]: result.models }));
+      const defaults = result.models.filter(model => model.isDefault);
+      if (defaults.length === 1) setRoles(old => old.map(item => {
+        const initialDefault = scope === "app" && settings.revision === 1 && settings.roles.some(initial => JSON.stringify(initial) === JSON.stringify(item));
+        return item.runtime === role.runtime && ((!item.modelSelector && item.roleId === role.roleId) || initialDefault)
+          ? { ...item, modelSelector: defaults[0].modelSelector, reasoningEffort: role.runtime === "codex" ? (defaults[0].reasoningEfforts.includes("medium") ? "medium" : defaults[0].reasoningEfforts[0] ?? null) : null } : item;
+      }));
     } catch { if (epoch === choiceEpoch.current) setChoicesError(true); }
-    finally { setBusy(false); }
+    finally { if (epoch === choiceEpoch.current) setChoicesBusy(false); }
   };
+  const selectedRuntime = roles.find(role => role.roleId === selectedRole)?.runtime;
+  useEffect(() => {
+    const role = roles.find(item => item.roleId === selectedRole);
+    if (role) void loadChoices(role);
+    return () => { choiceEpoch.current++; };
+  }, [selectedRole, selectedRuntime, settings]);
   const dirty = JSON.stringify(roles) !== JSON.stringify(scope === "project" ? coordinatorRoles(settings.roles) : settings.roles);
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -777,18 +792,33 @@ function RoleSettings({ settings, activeChat, disabled, feedback, onSave, onRelo
       <span>{role.runtime === "codex" ? "Codex" : "Claude Code"}</span><small>{role.modelSelector || t("m5.roles.chooseModel")}</small></button>)}</nav>
     <div className="m5-role-cards">{roles.map((role, index) => <article key={role.roleId} id={`m5-role-panel-${role.roleId}`} hidden={selectedRole !== role.roleId} className="m5-role-card" aria-labelledby={`m5-role-heading-${role.roleId}`}>
       <strong id={`m5-role-heading-${role.roleId}`}>{t(`m5.roles.${role.roleId}`)}</strong>
-      <label>{t("m5.roles.runtime")}<select disabled={disabled || busy || discardAction !== null} value={role.runtime} onChange={event => change(index, "runtime", event.target.value)}><option value="codex">Codex</option><option value="claude-code">Claude Code</option></select></label>
-      <label>{t("m5.roles.model")}<input disabled={disabled || busy || discardAction !== null} value={role.modelSelector} onChange={event => change(index, "modelSelector", event.target.value)} /></label>
-      <label>{t("m5.roles.reasoning")}<input disabled={disabled || busy || discardAction !== null} value={role.reasoningEffort ?? ""} placeholder={t("m5.roles.default")} onChange={event => change(index, "reasoningEffort", event.target.value || null)} /></label>
+      <label>{t("m5.roles.runtime")}<select disabled={disabled || busy || discardAction !== null} value={role.runtime} onChange={event => {
+        choiceEpoch.current++; setChoices({}); setChoicesError(false);
+        setRoles(old => old.map((item, current) => current === index ? { ...item, runtime: event.target.value as RoleProfileV1["runtime"], modelSelector: "", reasoningEffort: null } : item));
+      }}><option value="codex">Codex</option><option value="claude-code">Claude Code</option></select></label>
+      <label>{t("m5.roles.model")}<select disabled={disabled || busy || discardAction !== null || !choices[role.roleId]?.length} value={role.modelSelector} onChange={event => {
+        const model = choices[role.roleId]?.find(item => item.modelSelector === event.target.value);
+        change(index, "modelSelector", event.target.value);
+        change(index, "reasoningEffort", role.runtime === "codex" ? (model?.reasoningEfforts.includes("medium") ? "medium" : model?.reasoningEfforts[0] ?? null) : null);
+      }}>
+        <option value="">{t("m5.roles.chooseModel")}</option>
+        {role.modelSelector && !choices[role.roleId]?.some(model => model.modelSelector === role.modelSelector) && <option value={role.modelSelector}>{role.modelSelector} · {t("m5.roles.savedModel")}</option>}
+        {choices[role.roleId]?.map(model => <option key={model.modelSelector} value={model.modelSelector}>{model.modelSelector}{model.isDefault ? ` · ${t("m5.roles.providerDefault")}` : ""}</option>)}
+      </select></label>
+      <label>{t("m5.roles.reasoning")}<select disabled={disabled || busy || discardAction !== null || !choices[role.roleId]} value={role.reasoningEffort ?? ""} onChange={event => change(index, "reasoningEffort", event.target.value || null)}>
+        <option value="" disabled={role.runtime === "codex"}>{t("m5.roles.default")}</option>
+        {role.reasoningEffort && !choices[role.roleId]?.find(model => model.modelSelector === role.modelSelector)?.reasoningEfforts.includes(role.reasoningEffort) && <option value={role.reasoningEffort}>{role.reasoningEffort} · {t("m5.roles.savedModel")}</option>}
+        {choices[role.roleId]?.find(model => model.modelSelector === role.modelSelector)?.reasoningEfforts.map(effort => <option key={effort} value={effort}>{effort}</option>)}
+      </select></label>
       <span className="m5-role-permission">{t(role.permission === "readOnly" ? "m5.roles.readOnly" : "m5.roles.write")}</span>
-      {scope === "project" && role.runtime === "codex" && <div className="m5-role-model-tools">
-        <button type="button" className="m5-secondary" disabled={disabled || busy || discardAction !== null || !activeChat || !window.m5Models} onClick={() => void loadChoices(role)}>{t("m5.roles.loadChoices")}</button>
-        {!activeChat && <small>{t("m5.roles.choicesNeedChat")}</small>}
-        {choices[role.roleId] && <label>{t("m5.roles.availableChoices")}<select value="" disabled={disabled || busy || discardAction !== null} onChange={event => { if (event.target.value) change(index, "modelSelector", event.target.value); }}>
-          <option value="">{t("m5.roles.chooseModel")}</option>
-          {choices[role.roleId]!.map(model => <option key={model.modelSelector} value={model.modelSelector}>{model.modelSelector} · {model.reasoningEfforts.join(", ")}</option>)}
-        </select><small>{t("m5.roles.choicesHelp")}</small></label>}
-      </div>}
+      <div className="m5-role-model-tools">
+        <button type="button" className="m5-secondary" disabled={disabled || busy || choicesBusy || discardAction !== null || !window.m5Models} onClick={() => void loadChoices(role, true)}>{t(choicesBusy ? "m5.roles.busy" : "m5.roles.loadChoices")}</button>
+        {choices[role.roleId] && <small>{t("m5.roles.choicesHelp")}</small>}
+      </div>
+      <details><summary>{t("m5.roles.manualModel")}</summary>
+        <label>{t("m5.roles.model")}<input disabled={disabled || busy || discardAction !== null} value={role.modelSelector} onChange={event => change(index, "modelSelector", event.target.value)} /></label>
+        <label>{t("m5.roles.reasoning")}<input disabled={disabled || busy || discardAction !== null} value={role.reasoningEffort ?? ""} onChange={event => change(index, "reasoningEffort", event.target.value || null)} /></label>
+      </details>
       <small className="m5-role-model-help">{t("m5.roles.modelHelp")}</small>
     </article>)}</div></div>
     {!valid && <p role="alert">{t("m5.roles.invalid")}</p>}

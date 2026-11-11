@@ -35,6 +35,7 @@ impl DiscoveryEvidence {
 }
 
 pub(crate) struct Completion {
+    pub(crate) display_models: Option<Vec<hello_agent_core::provider::vendor_observation::codex_preflight::CatalogModel>>,
     pub(crate) result: Result<DiscoveryEvidence, SidecarError>,
     pub(crate) cleanup: Option<LoginProcess<'static>>,
 }
@@ -61,6 +62,7 @@ impl DiscoveryWorker {
                     Ok(executable) => executable,
                     Err(error) => {
                         return Completion {
+                            display_models: None,
                             result: Err(error),
                             cleanup: None,
                         }
@@ -99,6 +101,7 @@ impl DiscoveryWorker {
                     Ok(metadata) => metadata,
                     Err(error) => {
                         return Completion {
+                            display_models: None,
                             result: Err(error),
                             cleanup,
                         }
@@ -117,6 +120,7 @@ impl DiscoveryWorker {
                 ) {
                     Ok(inspection) => match inspection.result {
                         Ok(observation) => Completion {
+                            display_models: inspection.display_models,
                             result: Ok(DiscoveryEvidence {
                                 observation,
                                 executable,
@@ -127,11 +131,13 @@ impl DiscoveryWorker {
                             cleanup: None,
                         },
                         Err(error) => Completion {
+                        display_models: inspection.display_models,
                             result: Err(error),
                             cleanup: Some(inspection.process),
                         },
                     },
                     Err(error) => Completion {
+                        display_models: None,
                         result: Err(error),
                         cleanup: None,
                     },
@@ -162,9 +168,11 @@ impl DiscoveryWorker {
             .unwrap()
             .join()
             .unwrap_or_else(|_| Completion {
+                display_models: None,
                 result: Err(failure()),
                 cleanup: None,
             });
+        if self.cancel.load(Ordering::Acquire) { completion.display_models = None; }
         if self.cancel.load(Ordering::Acquire) && completion.result.is_ok() {
             completion.result = Err(failure());
         }
@@ -185,6 +193,7 @@ impl Drop for DiscoveryWorker {
 
 pub(crate) struct ProfileObservation {
     selector: String,
+    pub(crate) display_models: Vec<hello_agent_core::provider::vendor_observation::codex_preflight::CatalogModel>,
     resolved_model: String,
     effort: Option<String>,
     access: ToolAccess,
@@ -266,6 +275,7 @@ pub(crate) fn inspect_candidate(
     )?;
     admit(workspace, &home, selector, effort, access)?;
     let mut process = LoginProcess::reserve_claude_owned(profile)?;
+    let mut display_models = None;
     let result = (|| {
         command.launch(&mut process, |child, _| {
             executable.revalidate().map_err(std::io::Error::other)?;
@@ -284,16 +294,17 @@ pub(crate) fn inspect_candidate(
         }
         // Catalog plus current mode and hook registration only. system/init
         // target/tool matching still occurs on the actual execution connection.
+        display_models = Some(initialization.exchange.display_models());
         let resolved_model = initialization
             .exchange
             .profile_model(selector, effort)
             .map_err(|_| initialization_failure("model, effort, hooks or permission selection"))?
             .to_owned();
         process.verify_claude_scope(workspace, selector, effort, access)?;
-        Ok(resolved_model)
+        Ok((resolved_model, initialization.exchange.display_models()))
     })();
     let cleanup = process.finish();
-    let result = result.and_then(|resolved_model| {
+    let result = result.and_then(|(resolved_model, display_models)| {
         cleanup?;
         executable.revalidate()?;
         if process.closed_claude_home()? != home || cancel.load(Ordering::Acquire) {
@@ -301,6 +312,7 @@ pub(crate) fn inspect_candidate(
         }
         Ok(ProfileObservation {
             selector: selector.into(),
+            display_models,
             resolved_model,
             effort: effort.map(str::to_owned),
             access,
@@ -310,7 +322,7 @@ pub(crate) fn inspect_candidate(
             observed_at: Instant::now(),
         })
     });
-    Ok(ProviderInspection { result, process, display_models: None })
+    Ok(ProviderInspection { result, process, display_models })
 }
 
 #[cfg(test)]
@@ -319,6 +331,7 @@ mod tests {
     #[test]
     fn observation_is_bound_to_source_snapshot_profile_and_expiry() {
         let mut observation = ProfileObservation {
+            display_models: Vec::new(),
             selector: "opus".into(),
             resolved_model: "claude-model".into(),
             effort: Some("high".into()),

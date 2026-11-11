@@ -356,6 +356,7 @@ pub fn match_model_catalog(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogModel {
     pub model: String,
+    pub is_default: bool,
     pub reasoning_efforts: Vec<String>,
 }
 
@@ -373,6 +374,8 @@ pub fn read_model_catalog(input: &BoundedObservation) -> Result<Vec<CatalogModel
         id: String,
         model: String,
         hidden: bool,
+        #[serde(default)]
+        is_default: bool,
         supported_reasoning_efforts: Vec<Effort>,
     }
     #[derive(Deserialize)]
@@ -415,6 +418,7 @@ pub fn read_model_catalog(input: &BoundedObservation) -> Result<Vec<CatalogModel
         if !model.hidden {
             visible.push(CatalogModel {
                 model: model.model,
+                is_default: model.is_default,
                 reasoning_efforts: efforts.into_iter().collect(),
             });
         }
@@ -546,10 +550,16 @@ mod tests {
             choices,
             vec![CatalogModel {
                 model: "test-model".into(),
+                is_default: false,
                 reasoning_efforts: vec!["medium".into()],
             }]
         );
         assert!(!format!("{choices:?}").contains("PRIVATE"));
+        let mut recommended = catalog();
+        recommended["data"][0]["isDefault"] = json!(true);
+        assert!(read_model_catalog(&input(&recommended)).unwrap()[0].is_default);
+        recommended["data"][0]["isDefault"] = json!("true");
+        assert!(read_model_catalog(&input(&recommended)).is_err());
         let missing = ExpectedProfile {
             model: "obsolete-model",
             reasoning_effort: "medium",

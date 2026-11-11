@@ -564,3 +564,9 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 팀 실행의 후속 run은 `agent.teamRunAccepted`로 최초 승인된 총괄 run과 같은 채팅/작업 복사본에 결속해 Electron에 먼저 등록한다. 최초 실행 외 후속 등록은 최대11회이며, 그 뒤부터 기존 실제 실행 이벤트 검증을 적용한다. 진행 알림의 통신 순번은 durable 대화 순번과 분리하고, 화면에서 앞선 알림을 받으면 누락 구간을 원장에서 조회한다.
 
 설정의 프로젝트 관리에는 editor와 분리된 대화 기록/실행 복구 조회가 있다. 저장된 프로젝트 ID로 기존 listChats/getChat을 조회하므로 최신 snapshot이 recoveryRequired여도 기록에 접근할 수 있다. 조회는 snapshot 생성·파일 접근·실행을 요청하지 않으며, 복구는 기존 inspect→명시 확인→revision 결속 resolve와 종료 증거 검사를 유지한다. 복구 후 작업 공간을 자동 재사용하지 않는다.
+
+### 역할 설정의 모델 목록 (2026-11-11)
+
+설정 화면은 Codex·Claude Code 모델 목록과 추론 수준을 자동 조회한다. `agent.getModelChoices`의 문맥 없는 요청은 `scope: null`인 표시 데이터만 반환하며, 실제 실행 capability/권한을 만들지 않는다. 모델 비용을 쓰는 prompt 없이 기존 공급자 초기화와 종료 확인을 수행하고 앱 전용 빈 임시 source/workspace만 사용한다. 종료 미확인은 조회에 오류를 응답하고 별도 polling 상태에 프로세스·폴더를 함께 보존한다. 종료가 확인된 경우에만 해당 빈 폴더를 정리한다.
+
+renderer는 목록을 세션 내 최대60초 재사용하고 같은 공급자 요청을 병합·다른 공급자 조회를 직렬화한다. 저장된 역할 선택은 유지한다. 공급자가 명시한 유일한 기본값은 빈 모델 선택과 아직 저장하지 않은 앱 기본 설정에만 제안하며, 목록 순서나 모델명 정렬로 최신을 추정하지 않는다. 실제 작업은 매번 기존 실행 사전 검증을 다시 거친다.

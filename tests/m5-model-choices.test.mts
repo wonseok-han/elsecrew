@@ -9,8 +9,13 @@ test("model choices are scoped display data without execution authority", () => 
   assert.deepEqual(validateModelChoicesResult(result(), request), result());
   assert.throws(() => validateModelChoicesResult({ ...result(), canStart: true }, request));
   assert.throws(() => validateModelChoicesResult({ ...result(), scope: { ...result().scope, chatId: "other" } }, request));
-  assert.throws(() => validateModelChoicesRequest({ runtime: "codex", refresh: true }));
-  assert.throws(() => validateModelChoicesRequest({ ...request, runtime: "claude-code" }));
+  const unscoped = validateModelChoicesRequest({ runtime: "codex", refresh: true });
+  assert.equal(validateModelChoicesResult({ ...result(), scope: null }, unscoped).scope, null);
+  assert.throws(() => validateModelChoicesResult(result(), unscoped));
+  assert.throws(() => validateModelChoicesResult({ ...result(), scope: null }, request));
+  const claude = validateModelChoicesRequest({ ...request, runtime: "claude-code" });
+  assert.equal(validateModelChoicesResult({ ...result(), runtime: "claude-code" }, claude).runtime, "claude-code");
+  assert.throws(() => validateModelChoicesResult(result(), claude));
 });
 
 test("model choices reject duplicate, unbounded and raw vendor fields", () => {
@@ -21,3 +26,10 @@ test("model choices reject duplicate, unbounded and raw vendor fields", () => {
   assert.throws(() => validateModelChoicesResult({ ...value, models: [{ modelSelector: "model", reasoningEfforts: ["medium", "medium"] }] }, request));
   assert.deepEqual(validateModelChoicesResult({ ...value, models: [] }, request).models, []);
 });
+
+ test("provider default metadata is bounded and does not fabricate newest ordering", () => {
+  const value = result();
+  const models = [{ ...value.models[0], isDefault: true }];
+  assert.equal(validateModelChoicesResult({ ...value, models }, request).models[0].isDefault, true);
+  assert.throws(() => validateModelChoicesResult({ ...value, models: [{ ...models[0], isDefault: "true" }] }, request));
+ });

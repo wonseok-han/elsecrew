@@ -2046,8 +2046,8 @@ impl Sidecar {
     fn handle_agent_request_inner(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
         use hello_agent_protocol::agent_adapter_v1::AgentRunStartRequestV1;
         if request.method == "agent.getModelChoices" {
-            if !self.agent_runtime.uses_native_providers() || request.params["runtime"] != "codex" {
-                return Err(SidecarError::new("agentDiscoveryRejected", "model choices require a native Codex context"));
+            if !self.agent_runtime.uses_native_providers() || !matches!(request.params["runtime"].as_str(), Some("codex" | "claude-code")) {
+                return Err(SidecarError::new("agentDiscoveryRejected", "model choices require a native provider context"));
             }
             #[cfg(target_os = "macos")]
             return self.defer_agent_capabilities(request);
@@ -2292,7 +2292,9 @@ impl Sidecar {
         }
         let input: hello_agent_protocol::agent_adapter_v1::AgentCapabilitiesRequestV1 = serde_json::from_value(request.params.clone())
             .map_err(|_| SidecarError::new("invalidParams", "invalid scoped discovery request"))?;
-        let discovery = if input.runtime == "claude-code" {
+        let discovery = if request.method == "agent.getModelChoices" && input.chat_id.is_none() && input.role_id.is_none() {
+            self.agent_runtime.begin_model_catalog(&self.storage, &request.request_id, &input.runtime)
+        } else if input.runtime == "claude-code" {
             self.agent_runtime.begin_claude_discovery(&self.storage, &self.projects, &request.request_id, &input)
         } else { self.agent_runtime.begin_scoped_discovery(
             &self.storage,
@@ -2402,12 +2404,31 @@ impl Sidecar {
         let ids: Vec<_> = self.pending_agent_capabilities.keys().cloned().collect();
         for id in ids {
             if self.pending_agent_capabilities[&id].method == "agent.getModelChoices" {
-                let Some(result) = self.agent_runtime.take_scoped_model_choices(&self.storage, &self.projects, &id) else { continue; };
+                let runtime = self.pending_agent_capabilities[&id].params["runtime"].clone();
+                if self.pending_agent_capabilities[&id].params.get("chatId").is_none() {
+                    let Some(result) = self.agent_runtime.take_model_catalog(&id) else { continue; };
+                    let request = self.pending_agent_capabilities.remove(&id).unwrap();
+                    responses.push(match result {
+                        Ok(choices) => success_response(&request, serde_json::json!({
+                            "schemaVersion":1, "runtime":runtime, "scope":null,
+                            "models":choices.into_iter().map(|choice| serde_json::json!({"modelSelector":choice.model,"reasoningEfforts":choice.reasoning_efforts,"isDefault":choice.is_default})).collect::<Vec<_>>()
+                        })),
+                        Err(error) => error_response(&request, error.kind(), "requestBlocked", error.detail()),
+                    });
+                    continue;
+                }
+                let result = if runtime == "claude-code" {
+                    self.agent_runtime.take_claude_discovery(&self.storage, &self.projects, &id)
+                        .map(|result| result.map(|evidence| (evidence.scope, evidence.evidence.observation.display_models)))
+                } else {
+                    self.agent_runtime.take_scoped_model_choices(&self.storage, &self.projects, &id)
+                };
+                let Some(result) = result else { continue; };
                 let request = self.pending_agent_capabilities.remove(&id).unwrap();
                 responses.push(match result {
                     Ok((scope, choices)) => success_response(&request, serde_json::json!({
-                        "schemaVersion":1, "runtime":"codex", "scope":scope,
-                        "models":choices.into_iter().map(|choice| serde_json::json!({"modelSelector":choice.model,"reasoningEfforts":choice.reasoning_efforts})).collect::<Vec<_>>()
+                        "schemaVersion":1, "runtime":runtime, "scope":scope,
+                        "models":choices.into_iter().map(|choice| serde_json::json!({"modelSelector":choice.model,"reasoningEfforts":choice.reasoning_efforts,"isDefault":choice.is_default})).collect::<Vec<_>>()
                     })),
                     Err(error) => error_response(&request, error.kind(), "requestBlocked", error.detail()),
                 });

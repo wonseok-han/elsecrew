@@ -55,6 +55,8 @@ pub(crate) use provider_fence::verify_approved_legacy_fence;
 pub(crate) use provider_fence::verify_resolved_provider_fence;
 #[cfg(target_os = "macos")]
 mod discovery;
+#[cfg(target_os = "macos")]
+mod model_catalog;
 pub(crate) mod preparation;
 mod reap;
 const RECOVERY_RESERVATION_FIELD: &str = "recovery_id_reservation";
@@ -194,6 +196,8 @@ pub(crate) struct AgentRuntime {
     pending_discoveries: HashMap<String, discovery::PendingDiscovery>,
     #[cfg(target_os = "macos")]
     pending_claude_discoveries: HashMap<String, discovery::PendingClaudeDiscovery>,
+    #[cfg(target_os = "macos")]
+    pending_catalogs: HashMap<String, model_catalog::PendingCatalog>,
     preparing_to_quit: bool,
     discovery_cache: HashMap<String, ObservedProvider>,
     observation_counts: HashMap<String, usize>,
@@ -240,6 +244,8 @@ impl AgentRuntime {
             pending_discoveries: HashMap::new(),
             #[cfg(target_os = "macos")]
             pending_claude_discoveries: HashMap::new(),
+            #[cfg(target_os = "macos")]
+            pending_catalogs: HashMap::new(),
             preparing_to_quit: false,
             discovery_cache: HashMap::new(),
             observation_counts: HashMap::new(),
@@ -489,7 +495,8 @@ impl AgentRuntime {
             .chain(self.failed_starts.keys())
             .chain(self.discovery_cleanup.keys())
             .chain(self.pending_discoveries.keys())
-            .chain(self.pending_claude_discoveries.keys());
+            .chain(self.pending_claude_discoveries.keys())
+            .chain(self.pending_catalogs.keys());
         ids.cloned().collect()
     }
 
@@ -537,6 +544,8 @@ impl AgentRuntime {
             pending_discoveries: HashMap::new(),
             #[cfg(target_os = "macos")]
             pending_claude_discoveries: HashMap::new(),
+            #[cfg(target_os = "macos")]
+            pending_catalogs: HashMap::new(),
             preparing_to_quit: false,
             discovery_cache: HashMap::new(),
             observation_counts: HashMap::new(),
@@ -1267,6 +1276,7 @@ impl AgentRuntime {
             self.poll_discoveries(),
             self.poll_claude_discoveries(),
             self.poll_discovery_cleanup(),
+            self.poll_catalog_cleanup(),
             self.poll_claude_starts(storage, projects),
             self.poll_failed_starts(storage, projects),
             self.poll_native(storage, projects),
@@ -1854,6 +1864,8 @@ impl AgentRuntime {
         for pending in self.pending_discoveries.values() {
             pending.worker.cancel();
         }
+        #[cfg(target_os = "macos")]
+        for pending in self.pending_catalogs.values() { pending.cancel(); }
         #[cfg(target_os = "macos")]
         for pending in self.pending_claude_discoveries.values() {
             pending.worker.cancel();

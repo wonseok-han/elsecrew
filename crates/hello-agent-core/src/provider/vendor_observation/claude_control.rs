@@ -180,6 +180,18 @@ impl InitializeExchange {
         Ok(())
     }
 
+    /// Display-only catalog. Never grants execution permission or account entitlement.
+    pub fn display_models(&self) -> Vec<super::codex_preflight::CatalogModel> {
+        if self.state != State::Ready { return Vec::new(); }
+        self.models.iter().map(|entry| super::codex_preflight::CatalogModel {
+            model: entry.value.clone(),
+            is_default: entry.value == "default",
+            reasoning_efforts: if entry.supports_effort == Some(true) {
+                entry.efforts.clone().unwrap_or_default()
+            } else { Vec::new() },
+        }).collect()
+    }
+
     /// Fixed local labels only; never returns provider frame contents.
     pub fn diagnostic_stage(&self) -> &'static str {
         self.diagnostic_stage
@@ -256,6 +268,11 @@ mod tests {
         exchange.request().unwrap();
         exchange.accept_response(&input(&base)).unwrap();
         assert_eq!(exchange.profile_model("opus", None).unwrap(), "claude-opus-test");
+        let choices = exchange.display_models();
+        assert_eq!(choices[0].model, "opus");
+        assert_eq!(choices[0].reasoning_efforts, vec!["low", "high"]);
+        assert!(!choices[0].is_default);
+        assert!(!format!("{choices:?}").contains("SECRET"));
         assert!(exchange.profile_model("other", None).is_err());
         let mut no_effort = base.clone();
         let model = no_effort["response"]["response"]["models"][0].as_object_mut().unwrap();

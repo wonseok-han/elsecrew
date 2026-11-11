@@ -1,3 +1,12 @@
+window.m5SmokeModelQueries = [];
+window.m5Models = { request: async input => {
+  if (input.chatId || input.roleId) throw new Error("catalog must not require a chat");
+  window.m5SmokeModelQueries.push(input.runtime);
+  return { schemaVersion:1, runtime:input.runtime, scope:null, models:[
+    {modelSelector:"test-model", reasoningEfforts:["medium"]},
+    {modelSelector:"new-default", reasoningEfforts:["medium","high"], isDefault:true},
+  ] };
+} };
 window.m5AppUpdate = { open: async () => {}, onRestartCheck: (check, resume) => {
   window.m5SmokeUpdateCheck = check; window.m5SmokeUpdateResume = resume;
   return () => { window.m5SmokeUpdateCheck = undefined; window.m5SmokeUpdateResume = undefined; };
@@ -12,6 +21,10 @@ window.m5Install = { request: async () => {
 const preparationInspection = { projectId: "earlier_project", worktreeId: "worktree_failed", workspaceIdentity: "workspace_failed", lockId: "lock_worktree_failed", projectRevision: 8, lockRevision: 9 };
 let preparationAttempts = 0;
 window.m5Projects = { request: async (input) => {
+  if (input.action === "getAppRoleDefaults" && window.m5SmokeDefaultsReady) return {
+    schemaVersion:1, action:input.action, settings:{schemaVersion:1, revision:window.m5SmokeDefaultsRevision || 2,
+      roles:smokeChat.roleSnapshots.filter(role => ["planning","coding","review"].includes(role.roleId)), updatedAt:smokeChat.updatedAt},
+  };
   if (input.action === "cancelTeamTask") {
     for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"]) if (input[key] !== smokeChat[key]) throw new Error("wrong team cancellation identity");
     if (input.triggerMessageId !== [...smokeMessages].reverse().find(m => m.kind === "user").messageId) throw new Error("wrong team task");
