@@ -1095,18 +1095,28 @@ impl ProjectManager {
             return Err(ProjectFailure::recovery("finish pending workspace preparation before list removal"));
         }
         let chats = storage.projection_records("chat")?;
+        let selected = if action == "removeChat" {
+            let id = chat_id.ok_or_else(|| ProjectFailure::manifest("chat identity missing"))?;
+            Some(chats.iter().find(|chat| chat.get("chat_id").and_then(Value::as_str) == Some(id)
+                && chat.get("project_id").and_then(Value::as_str) == Some(project_id))
+                .ok_or_else(|| ProjectFailure::manifest("chat does not belong to project"))?)
+        } else { None };
+        let selected_worktree = selected.map(|chat| chat.get("worktree_id").and_then(Value::as_str)
+            .ok_or_else(|| ProjectFailure::manifest("chat workspace identity missing"))).transpose()?;
+        let in_scope = |chat: &Map<String, Value>| chat.get("project_id").and_then(Value::as_str) == Some(project_id)
+            && selected.is_none_or(|selected| chat.get("chat_id") == selected.get("chat_id"));
         for chat in &chats {
-            if chat.get("project_id").and_then(Value::as_str) == Some(project_id)
+            if in_scope(chat)
                 && crate::orchestration::load(chat)?.is_some_and(|state| state.status == "running") {
                 return Err(ProjectFailure::recovery("finish team orchestration before list removal"));
             }
         }
-        if chats.iter().any(|chat| chat.get("project_id").and_then(Value::as_str) == Some(project_id)
+        if chats.iter().any(|chat| in_scope(chat)
             && (chat.get("state").and_then(Value::as_str) == Some("recoveryRequired")
                 || chat.get("save_sessions").is_some_and(|sessions| sessions.as_object().is_none_or(|items| !items.is_empty())))) {
             return Err(ProjectFailure::recovery("finish saved chat recovery before list removal"));
         }
-        let ids: Vec<&str> = chats.iter().filter(|chat| chat.get("project_id").and_then(Value::as_str) == Some(project_id))
+        let ids: Vec<&str> = chats.iter().filter(|chat| in_scope(chat))
             .filter_map(|chat| chat.get("chat_id").and_then(Value::as_str)).collect();
         if chat_id.is_some_and(|id| !ids.contains(&id)) { return Err(ProjectFailure::manifest("chat does not belong to project")); }
         for run in storage.projection_records("run")? {
@@ -1117,6 +1127,15 @@ impl ProjectManager {
         }
         for lock in storage.projection_records("lock")? {
             if lock.get("project_id").and_then(Value::as_str) == Some(project_id)
+                && selected_worktree.is_none_or(|worktree| {
+                    // Unknown lock ownership remains blocking; only a positively
+                    // identified sibling workspace can be excluded.
+                    let id = lock.get("lock_id").and_then(Value::as_str);
+                    id == Some(format!("lock_{worktree}").as_str()) || !chats.iter().any(|chat| {
+                        chat.get("project_id").and_then(Value::as_str) == Some(project_id)
+                            && chat.get("worktree_id").and_then(Value::as_str).is_some_and(|other| id == Some(format!("lock_{other}").as_str()))
+                    })
+                })
                 && (lock.get("poisoned").and_then(Value::as_bool) != Some(false)
                     || lock.get("recovery_required").and_then(Value::as_bool) != Some(false)
                     || lock.get("writer_run_id").is_some_and(|value| !value.is_null()))

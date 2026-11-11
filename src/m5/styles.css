@@ -962,3 +962,10 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-timeline > header h2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .m5-workbench { user-select: none; -webkit-user-select: none; }
 .m5-workbench input, .m5-workbench textarea, .m5-workbench [contenteditable="true"], .m5-workbench .monaco-editor, .m5-workbench .monaco-editor * { user-select: text; -webkit-user-select: text; }
+
+/* Top-layer project menus are viewport-positioned, independent of rail clipping. */
+.m5-project-overflow > .m5-project-context-popup,
+.m5-project-rail:not(.m5-project-rail-expanded) .m5-project-overflow > .m5-project-context-popup {
+  position: fixed; inset: auto; margin: 0; max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px); overflow: auto;
+}

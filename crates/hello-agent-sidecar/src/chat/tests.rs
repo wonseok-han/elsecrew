@@ -6542,6 +6542,51 @@ fn catalog_removal_hides_and_restores_chat_without_changing_records() {
 }
 
 #[test]
+fn catalog_removal_of_idle_chat_does_not_hide_sibling_recovery() {
+    let mut f = Fixture::new();
+    let snapshot = f.snapshot("req_sibling_snapshot");
+    let healthy = f.create_chat(&snapshot, "healthy", "req_healthy_chat");
+    let other_snapshot = f.snapshot("req_other_snapshot");
+    let recovery = f.create_chat(&other_snapshot, "recover me", "req_recovery_chat");
+    let healthy_id = healthy["chatId"].as_str().unwrap();
+    let recovery_id = recovery["chatId"].as_str().unwrap();
+    let mut record = f.storage.projection_record("chat", recovery_id).unwrap().unwrap();
+    record.insert("state".into(), json!("recoveryRequired"));
+    record["record"]["state"] = json!("recoveryRequired");
+    f.storage.upsert_projection_record("chat", recovery_id, "op_sibling_recovery", None, record.clone()).unwrap();
+    let record = f.storage.projection_record("chat", recovery_id).unwrap().unwrap();
+    let sibling_lock_id = format!("lock_{}", recovery["worktreeId"].as_str().unwrap());
+    let mut lock = f.storage.projection_record("lock", &sibling_lock_id).unwrap().unwrap();
+    lock.insert("poisoned".into(), json!(true));
+    f.storage.upsert_projection_record("lock", &sibling_lock_id, "op_sibling_poison", None, lock).unwrap();
+    let healthy_lock_id = format!("lock_{}", healthy["worktreeId"].as_str().unwrap());
+    let healthy_lock = f.storage.projection_record("lock", &healthy_lock_id).unwrap().unwrap();
+    let mut unknown = healthy_lock.clone();
+    unknown.insert("lock_id".into(), json!("lock_unknown"));
+    unknown.insert("poisoned".into(), json!(true));
+    f.storage.upsert_projection_record("lock", "lock_unknown", "op_unknown_lock", None, unknown.clone()).unwrap();
+    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(healthy_id), "removeChat", "req_unknown_lock").is_err());
+    unknown.insert("poisoned".into(), json!(false));
+    f.storage.upsert_projection_record("lock", "lock_unknown", "op_unknown_reset", None, unknown).unwrap();
+    let mut shared = record.clone();
+    shared.insert("worktree_id".into(), healthy["worktreeId"].clone());
+    f.storage.upsert_projection_record("chat", recovery_id, "op_shared_workspace", None, shared).unwrap();
+    let mut poisoned = healthy_lock.clone(); poisoned.insert("poisoned".into(), json!(true));
+    f.storage.upsert_projection_record("lock", &healthy_lock_id, "op_shared_poison", None, poisoned).unwrap();
+    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(healthy_id), "removeChat", "req_shared_poison").is_err());
+    f.storage.upsert_projection_record("lock", &healthy_lock_id, "op_shared_reset", None, healthy_lock).unwrap();
+    f.storage.upsert_projection_record("chat", recovery_id, "op_chat_reset", None, record).unwrap();
+    let record = f.storage.projection_record("chat", recovery_id).unwrap().unwrap();
+    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(healthy_id), "removeChat", "req_hide_healthy").unwrap();
+    let page = f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap();
+    assert_eq!(page["items"].as_array().unwrap().len(), 1);
+    assert_eq!(page["items"][0]["chatId"], recovery_id);
+    assert_eq!(f.storage.projection_record("chat", recovery_id).unwrap().unwrap(), record);
+    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(recovery_id), "removeChat", "req_hide_recovery").is_err());
+    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_hide_all").is_err());
+}
+
+#[test]
 fn catalog_removal_refuses_runs_locks_and_nonmember_chat() {
     let mut f = Fixture::new();
     let snapshot = f.snapshot("req_guard_snapshot");

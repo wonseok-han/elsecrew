@@ -3,6 +3,41 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ProjectEditorController } from "./editor-state.ts";
 import { validateProjectCatalogResult, type ProjectCatalogEntry } from "./contracts/project-catalog-v1.ts";
 
+// Keep menus in the browser top layer so scrollable project lists cannot clip them.
+function ProjectMenu({ label, children }: { label: string; children: ReactNode }) {
+  const details = useRef<HTMLDetailsElement>(null);
+  const popup = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const host = details.current!;
+    const panel = popup.current!;
+    const close = () => { host.open = false; panel.hidePopover(); };
+    const toggle = () => {
+      if (!host.open) { panel.hidePopover(); return; }
+      panel.showPopover();
+      const anchor = host.querySelector("summary")!.getBoundingClientRect();
+      const bounds = panel.getBoundingClientRect();
+      panel.style.left = `${Math.max(8, Math.min(anchor.right - bounds.width, window.innerWidth - bounds.width - 8))}px`;
+      panel.style.top = `${Math.max(8, Math.min(anchor.bottom + 5, window.innerHeight - bounds.height - 8))}px`;
+    };
+    const outside = (event: PointerEvent) => { if (!host.contains(event.target as Node)) close(); };
+    const scroll = (event: Event) => { if (!panel.contains(event.target as Node)) close(); };
+    host.addEventListener("toggle", toggle);
+    document.addEventListener("pointerdown", outside, true);
+    document.addEventListener("scroll", scroll, true);
+    window.addEventListener("resize", close);
+    return () => {
+      host.removeEventListener("toggle", toggle);
+      document.removeEventListener("pointerdown", outside, true);
+      document.removeEventListener("scroll", scroll, true);
+      window.removeEventListener("resize", close);
+    };
+  }, []);
+  return <details ref={details} className="m5-project-overflow" onKeyDown={event => { if (event.key === "Escape") { event.currentTarget.open = false; popup.current?.hidePopover(); event.currentTarget.querySelector("summary")?.focus(); } }}>
+    <summary aria-label={label} title={label}>⋯</summary>
+    <div ref={popup} popover="manual" className="m5-project-context-popup">{children}</div>
+  </details>;
+}
+
 export function ProjectCatalog({ controller, disabled, currentId, ready = true, rail = false, home = false, management = false, settingsAction, onManage, onRemove, removeDisabled, refreshKey = 0, onHasProjects }: {
   onRemove?: (entry: ProjectCatalogEntry) => void; removeDisabled?: boolean; refreshKey?: number;
   settingsAction?: ReactNode; onManage?: (entry: ProjectCatalogEntry) => void; controller: ProjectEditorController; disabled: boolean; currentId?: string; ready?: boolean; rail?: boolean; home?: boolean; management?: boolean; onHasProjects?: (value: boolean) => void;
@@ -71,7 +106,7 @@ export function ProjectCatalog({ controller, disabled, currentId, ready = true, 
           <strong>{entry.canonicalPath.split(/[\\/]/).filter(Boolean).pop() ?? entry.projectId}</strong>
           {entry.projectId === currentId && <small className="m5-project-current">{t("m5.catalog.active")}</small>}
           <span dir="auto">{entry.canonicalPath}</span>
-        </button>{!management && <details className="m5-project-overflow" onKeyDown={event => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}><summary aria-label={t("m5.catalog.manage")} title={t("m5.catalog.manage")}>⋯</summary><div><p className="m5-context-heading" title={entry.canonicalPath}>{entry.canonicalPath.split(/[\\/]/).filter(Boolean).pop() ?? entry.projectId}</p><button type="button" className="m5-project-manage" disabled={disabled || busy} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); onManage?.(entry); }} title={t("m5.catalog.manage")}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6m8 4v6"/></svg>{t("m5.preferences.project")}</button>{onRemove && <button className="m5-danger" type="button" disabled={removeDisabled || busy} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); onRemove(entry); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7m4-7v7"/></svg>{t("m5.catalog.remove")}</button>}</div></details>}</li>)}</ul>}
+        </button>{!management && <ProjectMenu label={t("m5.catalog.manage")}> <p className="m5-context-heading" title={entry.canonicalPath}>{entry.canonicalPath.split(/[\\/]/).filter(Boolean).pop() ?? entry.projectId}</p><button type="button" className="m5-project-manage" disabled={disabled || busy} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); onManage?.(entry); }} title={t("m5.catalog.manage")}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6m8 4v6"/></svg>{t("m5.preferences.project")}</button>{onRemove && <button className="m5-danger" type="button" disabled={removeDisabled || busy} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); onRemove(entry); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7m4-7v7"/></svg>{t("m5.catalog.remove")}</button>}</ProjectMenu>}</li>)}</ul>}
       {(!rail || !disabled || error) && <div className="m5-project-pagination">{!rail && <button type="button" title={t("m5.catalog.first")} aria-label={t("m5.catalog.first")} disabled={disabled || busy} onClick={() => void load(null)}>{t("m5.catalog.first")}</button>}
         {next && <button type="button" disabled={disabled || busy || error} onClick={() => void load(next)}>{t("m5.catalog.next")}</button>}</div>}
     </div>}

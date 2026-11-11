@@ -3,6 +3,10 @@
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
 ### 2026-11-11 · by GPT-6
+- 사이드바 컨텍스트를 top-layer popover로 바꿔 스크롤 컨테이너 잘림을 피하고 viewport 경계에 맞췄다. 팀 대화의 중복 diff 진입점을 없애 반영/복원 확인 UI를 변경 탭으로 옮겼다. TypeScript/renderer build 및 Chromium smoke2개 통과(제한 환경 Electron SIGABRT 후 허용된 환경 재검증).
+- 정상 채팅 제거가 sibling recovery에 막히는 범위 결함을 수정했다. 선택 채팅 및 공유 worktree/알 수 없는 lock 차단은 유지하며 다른 workspace의 복구는 보존한다. catalog_removal6개 통과, 독립 검토와 보강 회귀 완료. main/push/모델 호출 없음. 다음: 정상 종료가 완료되지 않은 설치 앱 교체 및 실제 제거 UI 확인. 기존 복구 필요 채팅 자체의 제거 제한은 유지한다.
+
+### 2026-11-11 · by GPT-6
 
 - e0f13b8f macOS 패키지 및 package smoke 통과 후 설치본을 다시 열었다. 불투명 컨텍스트 메뉴의 대비·아이콘·삭제 강조를 실제 화면에서 확인했다. 완료 채팅을 다시 선택해 검토 준비, 세 실행 기록, 개발 보고와 총괄 최종 답변의 영속성을 확인했다.
 - 메시지 본문 위에서 위로 스크롤하여 이전 개발 보고로 이동하고 입력칸은 고정되는 것을 확인했다. UI 선택 방지와 편집 입력 예외는 앞선 renderer smoke로 검증했다. 추가 모델 호출·원본 반영·강제 종료·push는 없었다.

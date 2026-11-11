@@ -254,7 +254,10 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-project-rail').getBoundingClientRect().width < 100", "collapsed project rail")};
     rail.querySelector('.m5-project-overflow > summary').click();
     const overflow = rail.querySelector('.m5-project-overflow');
+    await ${waitFor("document.querySelector('.m5-project-context-popup:popover-open')", "top-layer project menu")};
     const menuSurface = overflow.querySelector('div');
+    const menuBounds = menuSurface.getBoundingClientRect();
+    if (menuBounds.left < 0 || menuBounds.right > innerWidth || menuBounds.bottom > innerHeight || document.elementFromPoint(menuBounds.right - 12, menuBounds.top + 12)?.closest('.m5-project-context-popup') !== menuSurface) throw new Error('project menu clipped by sidebar');
     if (menuSurface.getBoundingClientRect().width < 200 || getComputedStyle(menuSurface).backgroundColor !== 'rgb(48, 52, 59)' || !menuSurface.querySelector('button svg')) throw new Error('context menu needs an opaque distinct surface and icons');
     if (getComputedStyle(rail).userSelect !== 'none') throw new Error('app chrome text is selectable');
     overflow.querySelector('div').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
