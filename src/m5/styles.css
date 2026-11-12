@@ -703,6 +703,10 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-followup { gap: 6px; padding: 10px 12px; }
 .m5-followup > label { font-size: 12px; font-weight: 600; }
 .m5-followup > button { padding: 7px 10px; font-size: 12px; }
+.m5-followup-actions { display: flex; gap: 8px; }
+.m5-followup-actions > button { padding: 7px 10px; font-size: 12px; }
+.m5-followup-actions > button[type="submit"] { flex: 1 1 auto; }
+.m5-followup-actions > .m5-stop-team { flex: 0 0 auto; border-color: #d07a6a; color: #ffb4a6; }
 
 /* Review the affected files before entering the existing confirmation flow. */
 .m5-chat-review { padding: 14px; }
