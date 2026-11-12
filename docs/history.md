@@ -3,6 +3,16 @@
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
 ### 2026-11-12 · by GPT-6
+- 사용자 경로 ~/Downloads/test_todo는 lstat 기준 실제755 폴더이고 항목0개임을 읽기 전용 확인했다. 현행 경로 순회가 모든 ancestor를 readable handle로 열어 선택 폴더 밖의 상위 폴더 읽기까지 요구했다. macOS ancestor만 O_SEARCH|O_NOFOLLOW|O_CLOEXEC openat로 통과하고 leaf의 기존 readable/no-follow 검사는 유지하도록 수정했다. 사용자 실제 EPERM 원인으로 유력하나 해당 폴더 초기화 재시험은 아직 하지 않았다.
+- execute-only ancestor의 선택 폴더 읽기 및 ancestor/leaf symlink 거절1개, 기존 빈 폴더 초기화/snapshot/신원·비어있지않음 거절2개, TypeScript·package·diff 검사 통과. 독립 안전 검토 차단 없음. 앱 정상 종료 후 수정본 교체·실행 완료. test_todo 및 원본/인증정보 변경·모델 호출 없음.
+- 사용자 권한 UX 의견: 프로젝트 추가 시 범위별 동의를 명확히 받는 방향. 앱의 폴더 읽기/복사본 준비 동의, OS의 보호 폴더 권한, 에이전트 명령/편집 승인, 원본 반영 확인은 별개다. blanket bypass 활성화나 권한 확대 승인으로 해석하지 않았다. Claude 공식 permission-modes 문서는 bypassPermissions가 도구 확인을 생략하는 모드라고 설명하며 OS 권한 부여와 구분한다(https://code.claude.com/docs/en/permission-modes). 후속 동의 UI는 아직 구현하지 않았다.
+- 다음: 사용자 다운로드 폴더 재시도로 실제 OS 접근 확인, 필요 시 OS 권한 안내 연결. 전체 디스크 권한 요구/안전 검사 제거 없음. main/push 없음.
+
+### 2026-11-12 · by GPT-6
+- 사용자 빈 폴더 열기 실패 스크린샷의 symlinkEscape / directory component unavailable / EPERM을 조사했다. Electron은 picker 선택을 realpath하고 빈 폴더면 명시 확인·dev/ino를 sidecar에 전달한다. sidecar의 open_real_os_child_dir는 모든 open 오류를 symlinkEscape로 감싸므로 해당 이름만으로 링크 원인이라고 판단할 수 없다. 빈 폴더 기능 미지원으로도 단정할 수 없다.
+- 선택 경로를 사용자에게 요청했다. macOS 보호 폴더 권한 또는 경로 접근 검사 실패 가능성은 미확정이다. 현행 ‘다른 Git 프로젝트’ 일반 안내는 빈 폴더/권한 오류에 부적절하다. 실제 경로 확인 전 사용자 폴더 변경·접근권한 완화·재현 성공 선언 없음. 다음: 정확한 경로와 실패한 구성요소를 확인한 뒤 원인 수정 및 안내 교정.
+
+### 2026-11-12 · by GPT-6
 - 에이전트 설정 카드의 조회를 상태 옆 아이콘 하나로 통합했다. 연결된 공급자는 기존 계정 확인(실행 파일 검사 포함), 미연결 공급자는 인증을 읽지 않는 설치 진단을 사용하고 공용 설치 manager 상태도 갱신한다. 설정 내 설치 새로고침·별도 프로그램 설치 상태 확인 버튼을 제거했다. 설치/로그인 진행 polling·복구 검증은 유지한다. 독립 위저드 설치 화면 조회는 별도 흐름으로 유지한다.
 - TypeScript·renderer build·Chromium2개·package·diff 검사 통과. 기존 앱 정상 종료 후 설치본 반영, 실제 설정에서 Codex·Claude 연결됨과 카드마다 상태 확인1개·설치/업데이트 버튼, 중복 조회 버튼 제거를 확인했다. 모델 호출/로그인 변경/원본 변경/main/push 없음.
 
@@ -111,6 +121,8 @@
 - 위저드 6단계: 에이전트 선택 → 진단 → 설치 → 로그인 → 첫 프로젝트 → 졸업식
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **선택 폴더의 상위 경로 접근(2026-11-12)**: macOS 경로 순회는 ancestor를 검색 전용 O_SEARCH/no-follow handle로 통과하며 선택 leaf만 읽기로 연다. 폴더 선택 동의와 OS 권한, 에이전트 도구 승인은 서로 대체하지 않는다. Downloads/test_todo의 실제 재시도는 미확인이다.
 - **2026-11-11 핵심 팀 실제 성공**: Codex→Claude→Codex3회 모두 성공/cleanExit·프로세스 종료 증거 확인, 임시 복사본 hello.txt 변경·원본 보존·재시작 기록 유지. 채팅 제거는 선택 채팅 범위로 검사하되 동일 workspace/unknown lock과 대상 복구 제한 유지. 상세 증거는11월 아카이브. 전체 M5/Windows/출시 완료는 아님.
 
 - 2026-11-11 Claude privacy 등록 거절은 실제 초기 연결 차단점이다. 공식 privacy README가 확인됐으며 모듈을 끄지 않는 정확한 native 관측 후보를 준비했다. 후속 사용자 승인으로 native 생성자를 전환했다. 설치/실제 성공은 최신 기록을 확인하며 정책/증거는 proposals/m5-coding-agent-ide.md privacy 절을 따른다.

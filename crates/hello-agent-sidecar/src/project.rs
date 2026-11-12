@@ -5929,10 +5929,16 @@ fn open_absolute_directory_capability(path: &Path) -> Result<Dir, ProjectFailure
             "could not open filesystem root capability: {error}"
         ))
     })?;
-    for component in path.components() {
+    let mut components = path.components().peekable();
+    while let Some(component) = components.next() {
         match component {
             std::path::Component::RootDir => {}
             std::path::Component::Normal(name) => {
+                #[cfg(target_os = "macos")]
+                if components.peek().is_some() {
+                    current = open_search_child_dir(&current, name)?;
+                    continue;
+                }
                 current = open_real_os_child_dir(&current, name)?;
             }
             _ => {
@@ -5943,6 +5949,33 @@ fn open_absolute_directory_capability(path: &Path) -> Result<Dir, ProjectFailure
         }
     }
     Ok(current)
+}
+
+// The picker grants access to the selected folder, not permission to list
+// every ancestor (notably Downloads). Retain search-only ancestor handles;
+// the selected root still goes through the normal readable no-follow open.
+#[cfg(target_os = "macos")]
+fn open_search_child_dir(parent: &Dir, name: &OsStr) -> Result<Dir, ProjectFailure> {
+    use std::os::fd::FromRawFd;
+    let name = CString::new(name.as_bytes())
+        .map_err(|_| ProjectFailure::symlink("directory component contains NUL"))?;
+    // SAFETY: name is one path component from Path::components; parent is a
+    // retained directory. O_NOFOLLOW rejects replacement links atomically.
+    let fd = unsafe {
+        libc::openat(parent.as_raw_fd(), name.as_ptr(),
+            libc::O_SEARCH | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+    };
+    if fd < 0 {
+        return Err(ProjectFailure::symlink(format!(
+            "could not traverse directory component {:?}: {}", name, std::io::Error::last_os_error()
+        )));
+    }
+    // SAFETY: successful openat transfers this fresh descriptor to File.
+    let file = unsafe { fs::File::from_raw_fd(fd) };
+    if !file.metadata().map_err(|e| ProjectFailure::symlink(e.to_string()))?.is_dir() {
+        return Err(ProjectFailure::symlink("ancestor is not a directory"));
+    }
+    Ok(Dir::from_std_file(file))
 }
 
 fn open_real_os_child_dir(parent: &Dir, name: &OsStr) -> Result<Dir, ProjectFailure> {

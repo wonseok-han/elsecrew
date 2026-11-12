@@ -164,7 +164,7 @@ export const ko = {
   "m5.chatError.order": "대화 기록 순서를 안전하게 확인하지 못했어요. 다시 열어 주세요.",
   "m5.editorError.reopenProject": "저장된 폴더를 확인하지 못했어요. 원본 폴더를 다시 선택해 주세요. 기존 기록은 삭제되지 않아요.",
   "m5.editor.reselectOriginal": "원본 폴더 다시 선택",
-  "m5.editorError.openProject": "프로젝트를 열지 못했어요. 다른 Git 프로젝트를 선택해 보세요.",
+  "m5.editorError.openProject": "폴더를 열지 못했어요. 접근 권한을 확인한 뒤 프로젝트 폴더를 다시 선택해 주세요.",
   "m5.editorError.workspaceUnavailable": "이 채팅의 작업 복사본을 열 수 없어요.",
   "m5.editorError.identity": "선택한 프로젝트와 채팅 작업 복사본이 맞지 않아요.",
   "m5.editorError.openWorkspace": "채팅 작업 복사본을 열지 못했어요.",

@@ -6146,3 +6146,24 @@ fn empty_project_initialization_rejects_changed_identity_and_nonempty_folder() {
     assert_eq!(fs::read_dir(&selected).unwrap().count(), 1);
     assert_eq!(fs::read_to_string(selected.join("keep.txt")).unwrap(), "keep");
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn selected_directory_uses_search_only_ancestors_and_rejects_links() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let root = tempfile::tempdir().unwrap();
+    let root_path = fs::canonicalize(root.path()).unwrap();
+    let parent = root_path.join("private-parent");
+    let selected = parent.join("selected");
+    fs::create_dir_all(&selected).unwrap();
+    fs::write(selected.join("visible.txt"), "selected content").unwrap();
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o111)).unwrap();
+    let opened = open_absolute_directory_capability(&selected);
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).unwrap();
+    let opened = opened.unwrap();
+    assert_eq!(opened.read_to_string("visible.txt").unwrap(), "selected content");
+    symlink(&parent, root_path.join("linked-parent")).unwrap();
+    assert!(open_absolute_directory_capability(&root_path.join("linked-parent/selected")).is_err());
+    symlink(&selected, root_path.join("linked-leaf")).unwrap();
+    assert!(open_absolute_directory_capability(&root_path.join("linked-leaf")).is_err());
+}

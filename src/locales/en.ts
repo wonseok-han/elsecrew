@@ -165,7 +165,7 @@ export const en: Record<MessageKey, string> = {
   "m5.chatError.order": "Could not safely verify conversation history order. Reopen the conversation.",
   "m5.editorError.reopenProject": "Could not confirm the saved folder. Select the original folder again. Existing history is kept.",
   "m5.editor.reselectOriginal": "Choose original folder",
-  "m5.editorError.openProject": "Could not open the project. Try another Git project.",
+  "m5.editorError.openProject": "Could not open the folder. Check access permissions and select the project folder again.",
   "m5.editorError.workspaceUnavailable": "Cannot open this conversation's working copy.",
   "m5.editorError.identity": "The selected project does not match the conversation's working copy.",
   "m5.editorError.openWorkspace": "Could not open the conversation's working copy.",
