@@ -5,6 +5,8 @@ import { AgentOutputReader, type AgentOutputSource } from "./agent-output-reader
 import { reduceOutputWindow, type OutputDisplayRow, type OutputWindow } from "./agent-output-window.ts";
 import { resolveM5Bridge } from "./bridge-boundary.ts";
 import type { AgentRunRecordV1 } from "./contracts/agent-adapter-v1.ts";
+import type { RoleDefinitionV3 } from "./contracts/run-recovery-v1.ts";
+import { roleLabel } from "./role-names.ts";
 import { decodeOutputPage, type OutputPage, type OutputPageRequest } from "./contracts/agent-output-pages.ts";
 
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -16,15 +18,16 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-const LiveOutputRow = memo(function LiveOutputRow({ row, truncatedLabel, role }: {
-  row: OutputDisplayRow; truncatedLabel: string; role: string;
+const LiveOutputRow = memo(function LiveOutputRow({ row, truncatedLabel, role, team }: {
+  row: OutputDisplayRow; truncatedLabel: string; role: string; team?: readonly string[];
 }) {
-  return <article>{row.truncated && <small>{truncatedLabel}</small>}<pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{orchestratorMessage(row.text, role)}</pre></article>;
+  return <article>{row.truncated && <small>{truncatedLabel}</small>}<pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{orchestratorMessage(row.text, role, team)}</pre></article>;
 });
 
 /** One selected run/window at a time; switching never starts or cancels a run. */
-export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }) {
+export function AgentOutputPanel({ runs, definitions }: { runs: readonly AgentRunRecordV1[]; definitions?: readonly RoleDefinitionV3[] }) {
   const { t } = useI18n();
+  const team = useMemo(() => definitions?.map(definition => definition.roleId), [definitions]);
   const [selected, select] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const orderedRuns = useMemo(() => [...runs].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)), [runs]);
@@ -178,7 +181,7 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
   const visibleHistory = historyActive && historyPage?.request === historyRequest ? historyPage : null;
   return <section className="m5-durable-output" data-run-id={run!.runId} aria-label={t("m5.output.title")}>
     <label className="m5-output-heading"><span>{t("m5.output.title")}</span> {orderedRuns.length > 1 && <select aria-label={t("m5.output.title")} value={run!.runId} onChange={event => select(event.target.value)}>
-      {orderedRuns.map(value => <option key={value.runId} value={value.runId}>{t(`m5.roles.${value.selectedProfile.roleId}`)} · {value.selectedProfile.runtime === "codex" ? "Codex" : "Claude Code"} · {new Date(value.createdAt).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</option>)}
+      {orderedRuns.map(value => <option key={value.runId} value={value.runId}>{roleLabel(value.selectedProfile.roleId, definitions, t)} · {value.selectedProfile.runtime === "codex" ? "Codex" : "Claude Code"} · {new Date(value.createdAt).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</option>)}
     </select>}</label>
     {state === "loading" && <p role="status">{t("m5.output.loading")}</p>}
     {state === "legacy" && <p>{t("m5.output.legacy")}</p>}
@@ -209,13 +212,13 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
         <p>{t("m5.output.range", { first: visibleHistory.request.afterSequence + 1, last: visibleHistory.nextAfterSequence, total: visibleHistory.request.throughSequence })}</p>
         {visibleHistory.rows.map(row => <article key={row.event.eventId}>
           <small>{row.outputSequence} · {row.itemUpdate ? t(row.itemUpdate.operation === "append" ? "m5.output.append" : "m5.output.complete") : t("m5.output.message")}</small>
-          <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{orchestratorMessage(row.event.text, run.selectedProfile.roleId)}</pre>
+          <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{orchestratorMessage(row.event.text, run.selectedProfile.roleId, team)}</pre>
         </article>)}
       </>}
     </>}
     {!historyActive && view?.binding.runId === binding.runId && <>
       {view.hasEarlier && <p>{t("m5.output.window")}</p>}
-      {view.rows.map(row => <LiveOutputRow key={row.key} row={row} role={run.selectedProfile.roleId} truncatedLabel={t("m5.output.truncated")} />)}
+      {view.rows.map(row => <LiveOutputRow key={row.key} row={row} role={run.selectedProfile.roleId} team={team} truncatedLabel={t("m5.output.truncated")} />)}
     </>}
     </div>
     {!historyActive && newOutput && <button type="button" onClick={showLatest}>{t("m5.chat.newMessages")}</button>}

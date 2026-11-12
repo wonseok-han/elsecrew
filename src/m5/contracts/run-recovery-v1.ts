@@ -19,6 +19,21 @@ import {
 export const G5_SCHEMA_VERSION_V1 = 1 as const;
 export const G5_ROLE_IDS_V1 = ["planning", "coding", "review"] as const;
 export const G5_ROLE_IDS_V2 = ["coordinator", "planning", "design", "coding", "review"] as const;
+/** V3 role sets are user-defined: a fixed read-only coordinator plus 1..7 workers. */
+export const G5_ROLE_SCHEMA_VERSION_V3 = 3 as const;
+export const G5_COORDINATOR_ROLE_ID = "coordinator" as const;
+export const G5_ROLES_MAX_V3 = 8;
+export const G5_ROLE_NAME_MAX_BYTES_V3 = 64;
+export const G5_ROLE_RESPONSIBILITY_MAX_BYTES_V3 = 2000;
+export const G5_ROLE_ID_PATTERN_V3 = /^[a-z][a-z0-9-]{1,31}$/;
+/** Locale-independent default team; must equal Rust `G5_DEFAULT_ROLE_DEFINITIONS_V3`. */
+export const G5_DEFAULT_ROLE_DEFINITIONS_V3: readonly RoleDefinitionV3[] = [
+  { roleId: "coordinator", name: "총괄", responsibility: "사용자와 대화하며 요청을 이해하고, 필요한 팀원에게 일을 나눈 뒤 결과를 모아 최종 답변을 정리합니다." },
+  { roleId: "planning", name: "기획", responsibility: "요구사항과 범위, 완료 기준을 정리하고 작업 순서와 위험을 계획합니다." },
+  { roleId: "design", name: "디자인", responsibility: "화면 구성과 사용 흐름, 문구와 상호작용을 설계합니다." },
+  { roleId: "coding", name: "개발", responsibility: "격리된 작업 복사본에서 코드를 작성하고 수정합니다." },
+  { roleId: "review", name: "검증", responsibility: "변경 내용을 검토하고 테스트해 문제와 누락을 보고합니다." },
+];
 export const G5_RUNTIMES_V1 = ["codex", "claude-code"] as const;
 export const G5_PERMISSIONS_V1 = ["readOnly", "workspaceWrite"] as const;
 export const G5_CHAT_STATES_V1 = [
@@ -69,7 +84,9 @@ export const G5D_PRODUCT_CAPABILITIES_V1 = [
   "storage.status",
 ] as const;
 
-export type RoleIdV1 = (typeof G5_ROLE_IDS_V2)[number];
+/** Fixed IDs of the V1/V2 templates; V3 IDs are any `G5_ROLE_ID_PATTERN_V3` match. */
+export type LegacyRoleIdV1 = (typeof G5_ROLE_IDS_V2)[number];
+export type RoleIdV1 = string;
 export type RuntimeV1 = (typeof G5_RUNTIMES_V1)[number];
 export type PermissionV1 = (typeof G5_PERMISSIONS_V1)[number];
 export type ChatStateV1 = (typeof G5_CHAT_STATES_V1)[number];
@@ -85,21 +102,30 @@ export interface RoleProfileV1 {
   permission: PermissionV1;
 }
 
+export interface RoleDefinitionV3 {
+  roleId: RoleIdV1;
+  name: string;
+  responsibility: string;
+}
+
 export interface ProjectRoleSettingsV1 {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   projectId: string;
   revision: number;
   roles: readonly RoleProfileV1[];
+  /** Present exactly when schemaVersion is 3; parallel to `roles`. */
+  roleDefinitions?: readonly RoleDefinitionV3[];
   updatedAt: string;
 }
 export interface ProjectRoleSettingsUpdateRequestV1 {
   projectId: string;
   expectedRevision: number;
   roles: readonly RoleProfileV1[];
+  roleDefinitions?: readonly RoleDefinitionV3[];
 }
 
 export interface ChatRecordV1 {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   chatId: string;
   taskId: string;
   projectId: string;
@@ -108,6 +134,7 @@ export interface ChatRecordV1 {
   goal: string;
   settingsRevision: number;
   roleSnapshots: readonly RoleProfileV1[];
+  roleDefinitions?: readonly RoleDefinitionV3[];
   state: ChatStateV1;
   createdAt: string;
   updatedAt: string;
@@ -338,33 +365,36 @@ export interface RecoveryResolutionTranscriptV1 {
 export function validateRoleProfileV1(value: unknown): RoleProfileV1 {
   const object = requireObject(value, "role profile");
   exactKeys(object, ["roleId", "runtime", "modelSelector", "reasoningEffort", "permission"]);
-  const roleId = oneOf(object.roleId, G5_ROLE_IDS_V2, "roleId");
+  const roleId = requireRoleId(object.roleId, "roleId");
   oneOf(object.runtime, G5_RUNTIMES_V1, "runtime");
   boundedText(object.modelSelector, "modelSelector", G5_MODEL_SELECTOR_MAX_BYTES_V1);
   nullableBoundedText(object.reasoningEffort, "reasoningEffort", G5_REASONING_EFFORT_MAX_BYTES_V1);
   const permission = oneOf(object.permission, G5_PERMISSIONS_V1, "permission");
-  const expected = roleId === "coding" ? "workspaceWrite" : "readOnly";
-  if (permission !== expected) fail(`${roleId} permission must be ${expected}`);
+  if (roleId === G5_COORDINATOR_ROLE_ID && permission !== "readOnly") fail("coordinator permission must be readOnly");
   return object as unknown as RoleProfileV1;
 }
 
 export function validateProjectRoleSettingsV1(value: unknown): ProjectRoleSettingsV1 {
   const object = requireObject(value, "project role settings");
-  exactKeys(object, ["schemaVersion", "projectId", "revision", "roles", "updatedAt"]);
-  if (object.schemaVersion !== 1 && object.schemaVersion !== 2) fail("unsupported role schema version");
+  const v3 = object.schemaVersion === G5_ROLE_SCHEMA_VERSION_V3;
+  exactKeys(object, ["schemaVersion", "projectId", "revision", "roles", ...(v3 ? ["roleDefinitions"] : []), "updatedAt"]);
+  if (object.schemaVersion !== 1 && object.schemaVersion !== 2 && !v3) fail("unsupported role schema version");
   requireId(object.projectId, "projectId");
   positiveSequence(object.revision, "settings revision");
-  validateRoleSet(object.roles, "roles", object.schemaVersion as 1 | 2);
+  if (v3) validateRoleSetV3(object.roles, object.roleDefinitions, "roles");
+  else validateRoleSet(object.roles, "roles", object.schemaVersion as 1 | 2);
   timestamp(object.updatedAt, "updatedAt");
   return object as unknown as ProjectRoleSettingsV1;
 }
 
 export function validateProjectRoleSettingsUpdateRequestV1(value: unknown): ProjectRoleSettingsUpdateRequestV1 {
   const object = requireObject(value, "project role settings update");
-  exactKeys(object, ["projectId", "expectedRevision", "roles"]);
+  const v3 = Object.prototype.hasOwnProperty.call(object, "roleDefinitions");
+  exactKeys(object, ["projectId", "expectedRevision", "roles", ...(v3 ? ["roleDefinitions"] : [])]);
   requireId(object.projectId, "projectId");
   positiveSequence(object.expectedRevision, "expectedRevision");
-  validateRoleSet(object.roles, "roles");
+  if (v3) validateRoleSetV3(object.roles, object.roleDefinitions, "roles");
+  else validateRoleSet(object.roles, "roles");
   return object as unknown as ProjectRoleSettingsUpdateRequestV1;
 }
 
@@ -531,17 +561,19 @@ export function validateChatAppendMessageTranscriptV1(value: unknown): void {
 
 export function validateChatRecordV1(value: unknown): ChatRecordV1 {
   const object = requireObject(value, "chat record");
+  const v3 = object.schemaVersion === G5_ROLE_SCHEMA_VERSION_V3;
   exactKeys(object, [
     "schemaVersion", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "goal",
-    "settingsRevision", "roleSnapshots", "state", "createdAt", "updatedAt",
+    "settingsRevision", "roleSnapshots", ...(v3 ? ["roleDefinitions"] : []), "state", "createdAt", "updatedAt",
   ]);
-  if (object.schemaVersion !== 1 && object.schemaVersion !== 2) fail("unsupported role schema version");
+  if (object.schemaVersion !== 1 && object.schemaVersion !== 2 && !v3) fail("unsupported role schema version");
   for (const field of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) {
     requireId(object[field], field);
   }
   boundedText(object.goal, "goal", G5_GOAL_MAX_BYTES_V1);
   positiveSequence(object.settingsRevision, "settingsRevision");
-  validateRoleSet(object.roleSnapshots, "roleSnapshots", object.schemaVersion as 1 | 2);
+  if (v3) validateRoleSetV3(object.roleSnapshots, object.roleDefinitions, "roleSnapshots");
+  else validateRoleSet(object.roleSnapshots, "roleSnapshots", object.schemaVersion as 1 | 2);
   oneOf(object.state, G5_CHAT_STATES_V1, "chat state");
   timestamp(object.createdAt, "createdAt");
   timestamp(object.updatedAt, "updatedAt");
@@ -559,7 +591,7 @@ export function validateChatTransitionV1(value: unknown): ChatTransitionV1 {
   ] as const) {
     if (before[field] !== after[field]) fail(`chat transition changed ${field}`);
   }
-  if (!sameJson(before.roleSnapshots, after.roleSnapshots)) fail("chat transition changed roleSnapshots");
+  if (!sameJson(before.roleSnapshots, after.roleSnapshots) || !sameJson(before.roleDefinitions ?? null, after.roleDefinitions ?? null)) fail("chat transition changed roleSnapshots");
   const allowed: Record<ChatStateV1, readonly ChatStateV1[]> = {
     draft: ["preparing"],
     preparing: ["running", "stopping", "needsAttention", "recoveryRequired"],
@@ -589,7 +621,7 @@ export function validateTeamMessageV1(value: unknown): TeamMessageV1 {
   boundedText(object.text, "public message text", G5_PUBLIC_MESSAGE_MAX_BYTES_V1);
   timestamp(object.createdAt, "createdAt");
   if (kind === "role") {
-    oneOf(object.roleId, G5_ROLE_IDS_V2, "roleId");
+    requireRoleId(object.roleId, "roleId");
     requireId(object.runId, "runId");
   } else {
     if (object.roleId !== null) fail("non-role message roleId must be null");
@@ -611,8 +643,9 @@ export function validateRunRecordV1(value: unknown): RunRecordV1 {
   oneOf(object.fixtureScenario, G5_FIXTURE_SCENARIOS_V1, "fixture scenario");
   const state = oneOf(object.state, G5_RUN_STATES_V1, "run state");
   const stage = oneOf(object.stage, G5_RUN_STAGES_V1, "run stage");
-  const expectedStage: Record<RoleIdV1, RunStageV1> = { coordinator: "planning", design: "planning", planning: "planning", coding: "implementing", review: "verifying" };
-  if (stage !== expectedStage[profile.roleId]) fail("run stage does not match selected role snapshot");
+  const expectedStage: RunStageV1 | null = profile.roleId === "planning" ? "planning" : profile.roleId === "coding" ? "implementing" : profile.roleId === "review" ? "verifying" : null;
+  if (!expectedStage) fail("unknown selected role snapshot");
+  if (stage !== expectedStage) fail("run stage does not match selected role snapshot");
   if (["preparing", "running", "cancelling"].includes(state)) {
     if (object.terminationEvidence !== null) fail("active run cannot have termination evidence");
   } else {
@@ -660,7 +693,8 @@ export function validateChatCreationTranscriptV1(value: unknown): ChatCreationTr
     }
     if (createdChat.goal !== request.goal) fail("created chat goal mismatch");
     if (createdChat.settingsRevision !== settings.revision) fail("created chat settings revision drift");
-    if (!sameJson(createdChat.roleSnapshots, settings.roles)) fail("created chat did not snapshot exact roles");
+    if (!sameJson(createdChat.roleSnapshots, settings.roles) || createdChat.schemaVersion !== settings.schemaVersion
+      || !sameJson(createdChat.roleDefinitions ?? null, settings.roleDefinitions ?? null)) fail("created chat did not snapshot exact roles");
   }
   const chatIdConflict = createdChat !== null
     && bindings.some((binding) => binding.chatId === createdChat.chatId);
@@ -1025,7 +1059,7 @@ export function validateCancelTerminationRecoveryTranscriptV1(value: unknown): C
   for (const field of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "settingsRevision"] as const) {
     if (beforeChat[field] !== afterChat[field]) fail(`cancel transcript changed chat ${field}`);
   }
-  if (!sameJson(beforeChat.roleSnapshots, afterChat.roleSnapshots) || beforeChat.goal !== afterChat.goal
+  if (!sameJson(beforeChat.roleSnapshots, afterChat.roleSnapshots) || !sameJson(beforeChat.roleDefinitions ?? null, afterChat.roleDefinitions ?? null) || beforeChat.goal !== afterChat.goal
     || beforeRun.runId !== afterRun.runId || beforeRun.fixtureScenario !== afterRun.fixtureScenario
     || !sameJson(beforeRun.selectedProfile, afterRun.selectedProfile)) {
     fail("cancel transcript identity changed");
@@ -1245,6 +1279,29 @@ function validateRoleSet(value: unknown, name: string, version?: 1 | 2): readonl
   const roles = array(value, name, G5_ROLE_IDS_V2.length).map(validateRoleProfileV1);
   const canonical = version === 1 || (version === undefined && roles.length === 3) ? G5_ROLE_IDS_V1 : G5_ROLE_IDS_V2;
   if (roles.length !== canonical.length || roles.some((role, index) => role.roleId !== canonical[index])) fail(`${name} must use the canonical versioned role set`);
+  // Legacy V1/V2 sets keep their exact fixed permission mapping.
+  for (const role of roles) if (role.permission !== (role.roleId === "coding" ? "workspaceWrite" : "readOnly")) fail(`${role.roleId} permission must be fixed in legacy role sets`);
+  return roles;
+}
+
+/** V3: a coordinator first, 1..7 unique workers, and a parallel definition per role. */
+function validateRoleSetV3(value: unknown, definitionsValue: unknown, name: string): readonly RoleProfileV1[] {
+  const roles = array(value, name, G5_ROLES_MAX_V3).map(validateRoleProfileV1);
+  const definitions = array(definitionsValue, "roleDefinitions", G5_ROLES_MAX_V3);
+  if (roles.length < 2 || definitions.length !== roles.length) fail("V3 roles need a coordinator, 1 to 7 workers and one definition per role");
+  const seen = new Set<string>();
+  roles.forEach((role, index) => {
+    if ((index === 0) !== (role.roleId === G5_COORDINATOR_ROLE_ID)) fail("the first V3 role must be the only coordinator");
+    if (seen.has(role.roleId)) fail("V3 roleIds must be unique");
+    seen.add(role.roleId);
+    const definition = requireObject(definitions[index], "role definition");
+    exactKeys(definition, ["roleId", "name", "responsibility"]);
+    if (definition.roleId !== role.roleId) fail("role definition order must match roles");
+    const roleName = boundedText(definition.name, "role name", G5_ROLE_NAME_MAX_BYTES_V3);
+    if (/\p{Cc}/u.test(roleName)) fail("role name cannot contain control characters");
+    const text = definition.responsibility;
+    if (typeof text !== "string" || utf8ByteLength(text) > G5_ROLE_RESPONSIBILITY_MAX_BYTES_V3 || /[^\P{Cc}\n\t]/u.test(text)) fail("role responsibility must be bounded text");
+  });
   return roles;
 }
 
@@ -1279,8 +1336,20 @@ function sameChatIdentity(chat: ChatRecordV1, child: Pick<TeamMessageV1 | RunRec
   if ("workspaceIdentity" in child && child.workspaceIdentity !== chat.workspaceIdentity) fail("workspace identity mismatch");
 }
 
+/** Key-order independent JSON: sidecar serde_json emits object keys sorted, the renderer in insertion order. */
+export function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const object = value as Record<string, unknown>;
+    return `{${Object.keys(object).filter(key => object[key] !== undefined).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(object[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+export function sameJsonValue(left: unknown, right: unknown): boolean {
+  return canonicalJson(left) === canonicalJson(right);
+}
 function sameJson(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return sameJsonValue(left, right);
 }
 
 function array(value: unknown, name: string, maximum: number): unknown[] {
@@ -1299,11 +1368,26 @@ function positiveSequence(value: unknown, name: string): number {
   return result;
 }
 function boundedText(value: unknown, name: string, maximumBytes: number): string {
-  if (typeof value !== "string" || value.trim().length === 0 || new TextEncoder().encode(value).length > maximumBytes) fail(`${name} must be nonempty and bounded`);
+  if (typeof value !== "string" || isBlankText(value) || utf8ByteLength(value) > maximumBytes) fail(`${name} must be nonempty and bounded`);
   return value;
 }
 function nullableBoundedText(value: unknown, name: string, maximumBytes: number): void {
   if (value !== null) boundedText(value, name, maximumBytes);
+}
+/** Rust `str::trim` semantics (Unicode White_Space); unlike JS `trim`, U+FEFF is not blank. */
+export function isBlankText(value: string): boolean { return /^\p{White_Space}*$/u.test(value); }
+export function utf8ByteLength(value: string): number { return new TextEncoder().encode(value).length; }
+
+export function isRoleIdV3(value: unknown): value is string {
+  return typeof value === "string" && G5_ROLE_ID_PATTERN_V3.test(value);
+}
+function requireRoleId(value: unknown, name: string): string {
+  if (!isRoleIdV3(value)) fail(`invalid ${name}`);
+  return value;
+}
+/** Display stage: write permission selects implementation; legacy `review` keeps its verification label. */
+export function stageForProfileV3(profile: Pick<RoleProfileV1, "roleId" | "permission">): RunStageV1 {
+  return profile.permission === "workspaceWrite" ? "implementing" : profile.roleId === "review" ? "verifying" : "planning";
 }
 function oneOf<const Values extends readonly string[]>(value: unknown, values: Values, name: string): Values[number] {
   if (typeof value !== "string" || !values.includes(value)) fail(`invalid ${name}`);
@@ -1320,4 +1404,16 @@ export function coordinatorRoles(roles: readonly RoleProfileV1[]): readonly Role
   const planning = roles.find(role => role.roleId === "planning");
   if (!planning) throw new Error("Planning profile is missing");
   return [{ ...planning, roleId: "coordinator", permission: "readOnly" }, roles[0], { ...planning, roleId: "design", permission: "readOnly" }, ...roles.slice(1)];
+}
+
+/** Default definition for a legacy template ID, or a neutral one for a new role. */
+export function defaultRoleDefinitionV3(roleId: RoleIdV1): RoleDefinitionV3 {
+  return G5_DEFAULT_ROLE_DEFINITIONS_V3.find(definition => definition.roleId === roleId) ?? { roleId, name: roleId, responsibility: "" };
+}
+
+/** Lossless V1/V2 -> V3 view: legacy profiles keep their values and gain default definitions. */
+export function roleSettingsAsV3(settings: Pick<ProjectRoleSettingsV1, "roles" | "roleDefinitions">): { roles: readonly RoleProfileV1[]; roleDefinitions: readonly RoleDefinitionV3[] } {
+  if (settings.roleDefinitions) return { roles: settings.roles, roleDefinitions: settings.roleDefinitions };
+  const roles = coordinatorRoles(settings.roles);
+  return { roles, roleDefinitions: roles.map(role => defaultRoleDefinitionV3(role.roleId)) };
 }

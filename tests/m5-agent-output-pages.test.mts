@@ -18,7 +18,7 @@ test("output notification contains only a bound committed head", () => {
     (value: typeof wire) => { value.payload.committedSequence = -1; },
     (value: typeof wire) => { value.payload.committedSequence = Number.MAX_SAFE_INTEGER + 1; },
     (value: typeof wire) => { value.payload.text = "must not transmit bodies"; },
-    (value: typeof wire) => { value.payload.binding.roleId = "unknown"; },
+    (value: typeof wire) => { value.payload.binding.roleId = "Unknown Role"; },
   ]) {
     const bad = structuredClone(wire); mutation(bad);
     assert.throws(() => decodeJsonl(JSON.stringify(bad)));

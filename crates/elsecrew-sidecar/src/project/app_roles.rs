@@ -4,18 +4,20 @@ use super::*;
 use cap_std::fs::OpenOptionsExt;
 
 const FILE: &str = "role-defaults.json";
-const MAX_BYTES: u64 = 16 * 1024;
+// V3 allows 8 roles with 2000-byte responsibilities; keep the file bounded above that.
+const MAX_BYTES: u64 = 32 * 1024;
 
 fn validate(value: &Value) -> Result<(), ProjectFailure> {
     let mut object = value
         .as_object()
         .cloned()
         .ok_or_else(|| ProjectFailure::manifest("invalid app role defaults"))?;
-    if object.len() != 4
-        || !["schemaVersion", "revision", "roles", "updatedAt"]
-            .iter()
-            .all(|key| object.contains_key(*key))
-    {
+    let expected: &[&str] = if object.get("schemaVersion") == Some(&json!(3)) {
+        &["schemaVersion", "revision", "roles", "roleDefinitions", "updatedAt"]
+    } else {
+        &["schemaVersion", "revision", "roles", "updatedAt"]
+    };
+    if object.len() != expected.len() || !expected.iter().all(|key| object.contains_key(*key)) {
         return Err(ProjectFailure::manifest("invalid app role defaults fields"));
     }
     object.insert("projectId".into(), json!("app_defaults"));
@@ -32,7 +34,9 @@ impl ProjectManager {
         Ok(create_managed_directory(&self.data_root, &self.data_dir, "application-settings-v1")?.1)
     }
 
-    pub(crate) fn app_role_defaults(&self) -> Result<Value, ProjectFailure> {
+    /// Missing defaults fall back to the built-in team: V3 once storage admits
+    /// user-defined authors (V13), otherwise the legacy V1 set.
+    pub(crate) fn app_role_defaults(&self, custom_roles: bool) -> Result<Value, ProjectFailure> {
         let dir = self.role_defaults_directory()?;
         let mut options = CapOpenOptions::new();
         options.read(true).follow(FollowSymlinks::No);
@@ -41,7 +45,11 @@ impl ProjectManager {
         let file = match dir.open_with(FILE, &options) {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let mut value = crate::chat::settings_value("app_defaults", 1);
+                let mut value = if custom_roles {
+                    crate::chat::default_settings_v3("app_defaults", 1)
+                } else {
+                    crate::chat::settings_value("app_defaults", 1)
+                };
                 value.as_object_mut().unwrap().remove("projectId");
                 return Ok(value);
             }
@@ -83,13 +91,11 @@ impl ProjectManager {
         storage: &crate::storage::Storage,
         expected_revision: u64,
         roles: Value,
+        role_definitions: Option<Value>,
     ) -> Result<Value, ProjectFailure> {
-        if roles.as_array().is_some_and(|roles| roles.len() == 5)
-            && !storage.coordinator_roles_enabled()?
-        {
-            return Err(ProjectFailure::manifest("coordinator roles require storage V12 admission"));
-        }
-        let current = self.app_role_defaults()?;
+        let version = crate::chat::role_schema_version(&roles, role_definitions.is_some());
+        crate::chat::require_role_schema_storage(storage, version)?;
+        let current = self.app_role_defaults(storage.custom_roles_enabled()?)?;
         if current["revision"].as_u64() != Some(expected_revision) {
             return Err(ProjectFailure::dirty(
                 "app defaults changed; reload before saving",
@@ -101,12 +107,11 @@ impl ProjectManager {
             .ok_or_else(|| ProjectFailure::manifest("app defaults revision exhausted"))?;
         let mut value = crate::chat::settings_value("app_defaults", revision);
         value.as_object_mut().unwrap().remove("projectId");
-        value["schemaVersion"] = json!(if roles.as_array().is_some_and(|roles| roles.len() == 5) {
-            2
-        } else {
-            1
-        });
+        value["schemaVersion"] = json!(version);
         value["roles"] = roles;
+        if let Some(definitions) = role_definitions {
+            value["roleDefinitions"] = definitions;
+        }
         validate(&value)?;
         if serde_json::to_vec(&value)
             .map_err(|error| ProjectFailure::manifest(error.to_string()))?

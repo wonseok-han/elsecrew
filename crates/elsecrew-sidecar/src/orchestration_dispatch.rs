@@ -6,7 +6,13 @@ use elsecrew_protocol::agent_adapter_v1::{
 };
 use serde_json::json;
 
-fn role_report_title(role: &str) -> String {
+fn role_report_title(role: &str, chat_record: &Value) -> String {
+    // V3 teams carry the user's own role name; template IDs keep Korean labels.
+    if let Some(name) = chat_record["roleDefinitions"].as_array().and_then(|definitions| {
+        definitions.iter().find(|definition| definition["roleId"] == role)
+    }).and_then(|definition| definition["name"].as_str()).map(str::trim).filter(|name| !name.is_empty()) {
+        return name.to_owned();
+    }
     match role {
         "planning" => "기획".into(),
         "design" => "디자인".into(),
@@ -20,8 +26,9 @@ fn role_report_title(role: &str) -> String {
 const ROLE_REPORT_MARKER: &str = "<!-- elsecrew:role-report -->\n";
 
 /// Plain Markdown: heading, the request the coordinator gave, then the report.
-fn role_report_document(role: &str, goal: &str, instruction: &str, run: &Value, text: &str) -> String {
-    let title = role_report_title(role);
+fn role_report_document(role: &str, chat_record: &Value, instruction: &str, run: &Value, text: &str) -> String {
+    let title = role_report_title(role, chat_record);
+    let goal = chat_record["goal"].as_str().unwrap_or_default();
     let profile = &run["selectedProfile"];
     let runtime = if profile["runtime"] == "codex" { "Codex" } else { "Claude Code" };
     let model = profile["modelSelector"].as_str().unwrap_or_default();
@@ -129,8 +136,7 @@ impl Sidecar {
             workspace_identity: field("workspaceIdentity")?,
         };
         let run_id = run["runId"].as_str().unwrap_or_default();
-        let document = role_report_document(role, chat_record["goal"].as_str().unwrap_or_default(),
-            instruction, run, text);
+        let document = role_report_document(role, chat_record, instruction, run, text);
         self.projects.workspace_write_report(
             &mut self.storage, &address, "docs/elsecrew", role, ROLE_REPORT_MARKER, &document,
             &format!("report_{run_id}"),
@@ -423,7 +429,7 @@ impl Sidecar {
                 };
                 let finished_role = state.role.clone();
                 let finished_instruction = state.instruction.clone();
-                if state.finish(run, text).is_err() {
+                if state.finish(run, text, &chat_record["roleSnapshots"]).is_err() {
                     // Distinguish a stopped/failed member from an unusable report or decision.
                     let code = if run["state"] != "succeeded" { "teamMemberNotSucceeded" }
                         else if finals.len() != 1 { "teamReportMissing" } else { "teamDecisionInvalid" };
@@ -501,6 +507,10 @@ mod tests {
     };
 
     fn service() -> (tempfile::TempDir, Sidecar, Value) {
+        service_with(None)
+    }
+    /// `team` replaces the default V2 team with a V3 `(roles, roleDefinitions)` pair.
+    fn service_with(team: Option<(Value, Value)>) -> (tempfile::TempDir, Sidecar, Value) {
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("source");
         std::fs::create_dir(&source).unwrap();
@@ -569,7 +579,8 @@ mod tests {
                 &mut sidecar.storage,
                 project_id,
                 1,
-                json!(roles),
+                team.as_ref().map(|team| team.0.clone()).unwrap_or_else(|| json!(roles)),
+                team.as_ref().map(|team| team.1.clone()),
                 "req_workflow_roles",
             )
             .unwrap();
@@ -1206,5 +1217,86 @@ mod tests {
             sidecar.storage.projection_records("run").unwrap().len(),
             count
         );
+    }
+    fn custom_team(worker: &str) -> (Value, Value) {
+        let profile = |id: &str, permission: &str| json!({"roleId":id,"runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":permission});
+        (
+            json!([profile("coordinator", "readOnly"), profile("research", "readOnly"), profile(worker, "workspaceWrite")]),
+            json!([
+                {"roleId":"coordinator","name":"리드","responsibility":"Plans and delegates."},
+                {"roleId":"research","name":"Researcher","responsibility":"Investigates libraries and reports sources."},
+                {"roleId":worker,"name":"Builder","responsibility":"Edits files in the isolated copy."}
+            ]),
+        )
+    }
+    #[test]
+    fn orchestration_v3_custom_team_delegates_by_snapshot_and_tracks_writer_permission() {
+        let (root, mut sidecar, chat) = service_with(Some(custom_team("builder")));
+        assert_eq!(chat["schemaVersion"], 3);
+        assert_eq!(chat["roleDefinitions"][2]["name"], "Builder");
+        let id = chat["chatId"].as_str().unwrap();
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::OrchestratorDelegateCustom);
+        let response = start(&mut sidecar, &chat);
+        assert!(response.ok, "{response:?}");
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::OrchestratorWorker);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            sidecar.poll_runtime_events().unwrap();
+            let state = sidecar.workflow_state(id).unwrap();
+            if state.role == "builder" && state.run_id.is_some() {
+                sidecar.agent_runtime.set_fake_scenario(FakeScenario::OrchestratorFinal);
+            }
+            if state.status != "running" {
+                assert_eq!(state.status, "completed", "{state:?}");
+                assert!(state.changed, "the workspaceWrite member marks the copy changed");
+                break;
+            }
+            assert!(Instant::now() < deadline, "{state:?}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let runs = sidecar.storage.projection_records("run").unwrap();
+        let worker = runs.iter().find(|run| run["record"]["selectedProfile"]["roleId"] == "builder").unwrap();
+        assert_eq!(worker["record"]["stage"], "implementing");
+        assert_eq!(worker["record"]["selectedProfile"]["permission"], "workspaceWrite");
+        assert_eq!(
+            std::fs::read_to_string(std::path::Path::new(worker["worktree_path"].as_str().unwrap()).join("hello.txt")).unwrap(),
+            "updated by the isolated fixture worker\n"
+        );
+        assert_eq!(std::fs::read_to_string(root.path().join("source/hello.txt")).unwrap(), "original\n");
+        let stored = sidecar.storage.projection_record("chat", id).unwrap().unwrap();
+        assert_eq!(stored["record"]["state"], "reviewReady");
+        assert_eq!(stored["record"]["roleDefinitions"], chat["roleDefinitions"]);
+        // A user-defined author survives the V13 source-index trigger.
+        assert!(sidecar.storage.chat_message_history(id).unwrap().iter().any(|m| m["kind"] == "role" && m["roleId"] == "builder"));
+    }
+    #[test]
+    fn orchestration_v3_prompt_lists_configured_team_names_responsibilities_and_permissions() {
+        let (_root, mut sidecar, chat) = service_with(Some(custom_team("builder")));
+        let id = chat["chatId"].as_str().unwrap();
+        // The coordinator prompt carries the configured team, not the legacy template.
+        let ids: Vec<String> = sidecar.storage.chat_message_history(id).unwrap().iter().filter_map(|m| m["messageId"].as_str().map(str::to_owned)).collect();
+        let input = AgentRunStartRequestV1 { chat_id: id.into(), role_id: "coordinator".into(), input_message_ids: ids.clone(), expected_capability_fingerprint: "sha256:unused".into() };
+        orchestration::begin(&mut sidecar.storage, &input, "prompt-test").unwrap();
+        let prompt = orchestration::prompt(&sidecar.storage, id, "coordinator", &ids).unwrap().unwrap();
+        for expected in ["\"roleId\":\"research\"", "Investigates libraries", "\"name\":\"Builder\"", "\"permission\":\"workspaceWrite\"", "Only members whose permission is workspaceWrite"] {
+            assert!(prompt.contains(expected), "{expected}");
+        }
+        assert!(!prompt.contains("planning|design|coding|review"));
+        assert!(!prompt.contains("Only coding can edit"));
+    }
+    #[test]
+    fn orchestration_v3_rejects_delegation_to_a_role_outside_the_snapshot() {
+        // The fake coordinator delegates to legacy `coding`, which this team does not have.
+        let (_root, mut sidecar, chat) = service_with(Some(custom_team("builder")));
+        let id = chat["chatId"].as_str().unwrap();
+        assert!(start(&mut sidecar, &chat).ok);
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while sidecar.workflow_state(id).unwrap().status == "running" {
+            sidecar.poll_runtime_events().unwrap();
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(sidecar.workflow_state(id).unwrap().status, "paused");
+        assert_eq!(sidecar.storage.projection_records("run").unwrap().len(), 1, "no worker was started");
     }
 }

@@ -78,6 +78,8 @@ pub(crate) enum FakeScenario {
     #[cfg_attr(not(test), allow(dead_code))]
     OrchestratorDelegate,
     #[cfg_attr(not(test), allow(dead_code))]
+    OrchestratorDelegateCustom,
+    #[cfg_attr(not(test), allow(dead_code))]
     OrchestratorFinal,
     #[cfg_attr(not(test), allow(dead_code))]
     OrchestratorWorker,
@@ -520,7 +522,7 @@ impl AgentRuntime {
             || (self.provider == ProviderMode::FakeExact
                 && matches!(
                     self.scenario,
-                    FakeScenario::LongStream | FakeScenario::PacedLongStream | FakeScenario::OrchestratorDelegate | FakeScenario::OrchestratorFinal
+                    FakeScenario::LongStream | FakeScenario::PacedLongStream | FakeScenario::OrchestratorDelegate | FakeScenario::OrchestratorDelegateCustom | FakeScenario::OrchestratorFinal
                 ))
     }
 
@@ -2238,13 +2240,7 @@ impl AgentRuntime {
                 "recoveryRequired"
             } else {
                 match requested_state {
-                    "succeeded" => {
-                        if matches!(active.profile.role_id.as_str(), "coordinator" | "design" | "planning") {
-                            "waitingForUser"
-                        } else {
-                            "reviewReady"
-                        }
-                    }
+                    "succeeded" => succeeded_chat_state(&active.profile.role_id, &active.profile.permission),
                     "canceled" => "canceled",
                     _ => "needsAttention",
                 }
@@ -2970,6 +2966,17 @@ fn resolve_prompt(
     Ok(prompt)
 }
 
+/// Chat state after one successful run, keyed by permission rather than role name:
+/// a writer (or the legacy `review` verification stage) leaves changes to review,
+/// every other read-only role returns to the user. Team workflows override this
+/// with their aggregate `changed` flag when they complete.
+pub(crate) fn succeeded_chat_state(role_id: &str, permission: &str) -> &'static str {
+    match elsecrew_protocol::run_recovery_v1::g5_stage_for_profile_v3(role_id, permission) {
+        "planning" => "waitingForUser",
+        _ => "reviewReady",
+    }
+}
+
 fn agent_run_record(
     run_id: &str,
     chat: &Value,
@@ -2979,12 +2986,7 @@ fn agent_run_record(
     termination: Option<&str>,
     created: &str,
 ) -> Result<Value, ProjectFailure> {
-    let stage = match profile.role_id.as_str() {
-        "coordinator" | "design" | "planning" => "planning",
-        "coding" => "implementing",
-        "review" => "verifying",
-        _ => return Err(ProjectFailure::manifest("unknown agent role")),
-    };
+    let stage = elsecrew_protocol::run_recovery_v1::g5_stage_for_profile_v3(&profile.role_id, &profile.permission);
     let value = json!({"schemaVersion":1,"runId":run_id,"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"selectedProfile":profile,"source":"actualAgent","capabilityFingerprint":fingerprint,"state":state,"stage":stage,"terminationOutcome":termination,"createdAt":created,"updatedAt":now()});
     validate_agent_adapter_payload_v1("runRecord", &value).map_err(contract_failure)?;
     Ok(value)
@@ -4208,6 +4210,7 @@ fn scenario_name(value: FakeScenario) -> &'static str {
         FakeScenario::Clean => "clean",
         FakeScenario::CleanReadOnly => "clean-read-only",
         FakeScenario::OrchestratorDelegate => "orchestrator-delegate",
+        FakeScenario::OrchestratorDelegateCustom => "orchestrator-delegate-custom",
         FakeScenario::OrchestratorFinal => "orchestrator-final",
         FakeScenario::OrchestratorWorker => "orchestrator-worker",
         FakeScenario::OrchestratorDelegatePlanning => "orchestrator-delegate-planning",
@@ -4312,6 +4315,7 @@ pub(crate) fn run_agent_fixture_launcher(scenario: &str) -> Result<(), SidecarEr
         "clean",
         "clean-read-only",
         "orchestrator-delegate",
+        "orchestrator-delegate-custom",
         "orchestrator-final",
         "orchestrator-worker",
         "orchestrator-delegate-planning",
@@ -4431,7 +4435,7 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
         "handshake-version-mismatch" => handshake["claude_code_version"] = json!("2.1.242"),
         "handshake-model-mismatch" => handshake["model"] = json!("claude-unknown"),
         "handshake-cwd-mismatch" => handshake["cwd"] = json!("/not/managed"),
-        "clean-read-only" | "orchestrator-delegate" | "orchestrator-final" | "orchestrator-delegate-planning" | "orchestrator-planner" | "handshake-permission-mismatch" => handshake["permissionMode"] = json!("readOnly"),
+        "clean-read-only" | "orchestrator-delegate" | "orchestrator-delegate-custom" | "orchestrator-final" | "orchestrator-delegate-planning" | "orchestrator-planner" | "handshake-permission-mismatch" => handshake["permissionMode"] = json!("readOnly"),
         "handshake-tools-mismatch" => handshake["tools"] = json!(["Read"]),
         "handshake-mcp-mismatch" => handshake["mcp_servers"] = json!(["unsafe"]),
         "handshake-plugins-mismatch" => handshake["plugins"] = json!(["unsafe"]),
@@ -4463,8 +4467,8 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
             println!("{}", json!({"type":"final","text":text.to_string()}));
             println!("{}", json!({"type":"terminal","outcome":"succeeded"}));
         }
-        "orchestrator-delegate" | "orchestrator-final" => {
-            let text = if scenario == "orchestrator-delegate" { json!({"action":"delegate","role":"coding","instruction":"Update hello.txt in the work copy and report your changes.","summary":"I will ask the developer to inspect it."}) } else { json!({"action":"final","answer":"The developer reported success. Please review the result."}) };
+        "orchestrator-delegate" | "orchestrator-delegate-custom" | "orchestrator-final" => {
+            let text = if scenario == "orchestrator-delegate-custom" { json!({"action":"delegate","role":"builder","instruction":"Update hello.txt in the work copy and report your changes.","summary":"I will ask the builder to do it."}) } else if scenario == "orchestrator-delegate" { json!({"action":"delegate","role":"coding","instruction":"Update hello.txt in the work copy and report your changes.","summary":"I will ask the developer to inspect it."}) } else { json!({"action":"final","answer":"The developer reported success. Please review the result."}) };
             println!("{}", json!({"type":"final","text":text.to_string()}));
             println!("{}", json!({"type":"terminal","outcome":"succeeded"}));
         }

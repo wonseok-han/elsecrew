@@ -722,3 +722,20 @@ fn coordinator_v12_reopens_compacted_v11_and_can_compact_again() {
     drop(upgraded);
     assert!(Storage::open_for_durable_admission(&path, &AtomicBool::new(false)).is_ok());
 }
+
+#[test]
+fn custom_roles_v13_reopens_compacted_v12_and_can_compact_again() {
+    let (_root, path, mut storage) = exact_v10(2001);
+    agent_output::schema::migrate(&mut storage.connection).unwrap();
+    agent_output::schema::migrate_coordinator(&mut storage.connection, &mut || false).unwrap();
+    assert!(!storage.custom_roles_enabled().unwrap());
+    run_to_completion(&mut storage);
+    let count: i64 = storage.connection.query_row("SELECT count(*) FROM ledger_compaction_prefixes", [], |row| row.get(0)).unwrap();
+    assert!(count > 0);
+    drop(storage);
+    let mut upgraded = Storage::open_for_durable_admission(&path, &AtomicBool::new(false)).unwrap();
+    assert!(upgraded.custom_roles_enabled().unwrap());
+    run_to_completion(&mut upgraded);
+    drop(upgraded);
+    assert!(Storage::open_for_durable_admission(&path, &AtomicBool::new(false)).is_ok());
+}

@@ -10,7 +10,7 @@ use elsecrew_protocol::storage_lifetime_v1::{
     STORAGE_COMPACTION_PLAN_MAX_ROWS_PER_STEP_V1,
     STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1,
     STORAGE_LIFETIME_MAX_RETAINED_DEPENDENCY_INPUT_BYTES_PER_STEP_V1,
-    STORAGE_LIFETIME_SCHEMA_VERSION_V10, STORAGE_LIFETIME_SCHEMA_VERSION_V11, STORAGE_LIFETIME_SCHEMA_VERSION_V12,
+    STORAGE_LIFETIME_SCHEMA_VERSION_V10, STORAGE_LIFETIME_SCHEMA_VERSION_V11, STORAGE_LIFETIME_SCHEMA_VERSION_V12, STORAGE_LIFETIME_SCHEMA_VERSION_V13,
 };
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde_json::{json, Value};
@@ -77,6 +77,10 @@ struct StepBudget {
     work: u32,
     primary: usize,
     dependency: usize,
+    /// Set only when a fixed per-step limit (not an integrity check) refused work.
+    exhausted: bool,
+    /// Plan ordinals whose whole per-row work completed inside this budget.
+    rows_completed: u32,
 }
 
 impl StepBudget {
@@ -98,9 +102,14 @@ impl StepBudget {
             || self.primary > PRIMARY_BYTES
             || self.dependency > DEPENDENCY_BYTES
         {
+            self.exhausted = true;
             return Err(compaction_error());
         }
         Ok(())
+    }
+
+    fn complete_row(&mut self) {
+        self.rows_completed = self.rows_completed.saturating_add(1);
     }
 
     fn add_dependency(&mut self, dependency: usize) -> Result<(), SidecarError> {
@@ -450,7 +459,7 @@ fn verify_runtime_fences(connection: &Connection) -> Result<(), SidecarError> {
             },
         )
         .map_err(|_| compaction_error())?;
-    if !matches!(facts.0, STORAGE_LIFETIME_SCHEMA_VERSION_V10 | STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)
+    if !matches!(facts.0, STORAGE_LIFETIME_SCHEMA_VERSION_V10 | STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)
         || !facts.1
         || facts.2 != 0
         || facts.3 != 0
@@ -800,14 +809,24 @@ fn arm_job(
     let step = if cursor.scan_exhausted {
         None
     } else {
-        Some(
-            cursor
-                .after_plan_ordinal
-                .checked_add(STORAGE_COMPACTION_PLAN_MAX_ROWS_PER_STEP_V1)
-                .ok_or_else(compaction_error)?
-                .min(limit),
-        )
+        let widest = cursor
+            .after_plan_ordinal
+            .checked_add(STORAGE_COMPACTION_PLAN_MAX_ROWS_PER_STEP_V1)
+            .ok_or_else(compaction_error)?
+            .min(limit);
+        Some(fitting_step(&transaction, &current, widest)?)
     };
+    write_arm(&transaction, &current.job_id, step)?;
+    let armed = load_exact_job(&transaction, &current.job_id)?;
+    transaction.commit().map_err(|_| compaction_error())?;
+    Ok(armed)
+}
+
+fn write_arm(
+    transaction: &Transaction<'_>,
+    job_id: &str,
+    step: Option<u32>,
+) -> Result<(), SidecarError> {
     let changed = transaction
         .execute(
             "UPDATE maintenance_jobs SET state='running',started_at=coalesce(started_at,?2),\
@@ -815,15 +834,70 @@ fn arm_job(
                '$.storageCompactionV3PrivateState.cursor.stepThroughPlanOrdinal',\
                CASE WHEN ?3 IS NULL THEN json('null') ELSE ?3 END) \
              WHERE job_id=?1 AND state='pending';",
-            params![current.job_id, now(), step],
+            params![job_id, now(), step],
         )
         .map_err(sqlite_error)?;
     if changed != 1 {
         return Err(compaction_error());
     }
-    let armed = load_exact_job(&transaction, &current.job_id)?;
-    transaction.commit().map_err(|_| compaction_error())?;
-    Ok(armed)
+    Ok(())
+}
+
+/// The widest step through `widest` whose exact work fits the fixed per-step
+/// byte budgets. Rows are not uniformly sized (a V3 chat record carries its
+/// role definitions), so a fixed 100-row step can exceed the 1 MiB primary or
+/// 8 MiB dependency budget even though every row is valid. Each candidate is
+/// executed for real inside a savepoint that is always rolled back, so the
+/// accounting is the step's own, not an estimate. Only budget exhaustion
+/// narrows the step; any other refusal arms the unchanged widest step so the
+/// real execution fails closed exactly as before.
+fn fitting_step(
+    transaction: &Transaction<'_>,
+    job: &StorageCompactionJobV3,
+    widest: u32,
+) -> Result<u32, SidecarError> {
+    let after = job.private_state.cursor.after_plan_ordinal;
+    let plan = load_plan(transaction, &job.job_id)?;
+    let mut candidate = widest;
+    while candidate > after {
+        transaction
+            .execute_batch("SAVEPOINT compaction_step_probe;")
+            .map_err(sqlite_error)?;
+        let probe = probe_step(transaction, job, &plan, candidate);
+        transaction
+            .execute_batch(
+                "ROLLBACK TO compaction_step_probe; RELEASE compaction_step_probe;",
+            )
+            .map_err(sqlite_error)?;
+        match probe {
+            Ok(None) => return Ok(candidate),
+            Err(_) => return Ok(widest),
+            Ok(Some(rows_completed)) => {
+                let fitted = after.saturating_add(rows_completed);
+                candidate = if fitted < candidate { fitted } else { candidate - 1 };
+            }
+        }
+    }
+    Ok(widest)
+}
+
+/// `Ok(None)` when the step completes within budget, `Ok(Some(rows))` when only
+/// a fixed budget refused it after `rows` whole rows, and `Err` for any other
+/// refusal.
+fn probe_step(
+    transaction: &Transaction<'_>,
+    job: &StorageCompactionJobV3,
+    plan: &StorageCompactionPlanV1,
+    candidate: u32,
+) -> Result<Option<u32>, SidecarError> {
+    write_arm(transaction, &job.job_id, Some(candidate))?;
+    let armed = load_exact_job(transaction, &job.job_id)?;
+    let mut budget = StepBudget::default();
+    match execute_armed_step(transaction, &armed, plan, &mut budget, &mut |_| false, None) {
+        Ok(()) => Ok(None),
+        Err(_) if budget.exhausted => Ok(Some(budget.rows_completed)),
+        Err(error) => Err(error),
+    }
 }
 
 fn execute_armed_step(
@@ -887,6 +961,9 @@ fn execute_armed_step(
                 budget.add(0, 0)?;
             }
             StorageCompactionPhaseV3::Finalize => return Err(compaction_error()),
+        }
+        if cursor.phase != StorageCompactionPhaseV3::DeletePrefix {
+            budget.complete_row();
         }
     }
 
@@ -1752,6 +1829,7 @@ fn delete_batch(
         if failure == Some(CompactionFailurePoint::AfterAuthorityInsert) {
             return Err(compaction_error());
         }
+        budget.complete_row();
     }
     if start > delete_end {
         budget.add(0, 0)?;

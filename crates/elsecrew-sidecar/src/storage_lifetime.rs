@@ -686,7 +686,8 @@ fn verify_bounded_storage_runtime_state(connection: &Connection) -> Result<(), S
         elsecrew_protocol::storage_lifetime_v1::STORAGE_LIFETIME_SCHEMA_VERSION_V9
         | elsecrew_protocol::storage_lifetime_v1::STORAGE_LIFETIME_SCHEMA_VERSION_V10
         | elsecrew_protocol::storage_lifetime_v1::STORAGE_LIFETIME_SCHEMA_VERSION_V11
-        | elsecrew_protocol::storage_lifetime_v1::STORAGE_LIFETIME_SCHEMA_VERSION_V12 => {
+        | elsecrew_protocol::storage_lifetime_v1::STORAGE_LIFETIME_SCHEMA_VERSION_V12
+        | elsecrew_protocol::storage_lifetime_v1::STORAGE_LIFETIME_SCHEMA_VERSION_V13 => {
             let unsafe_compaction: bool = connection
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM maintenance_jobs \
