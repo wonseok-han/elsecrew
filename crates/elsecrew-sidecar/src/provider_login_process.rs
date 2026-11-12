@@ -55,9 +55,13 @@ impl Reservation {
         let directory = profile.login_lease_directory()?;
         let mut options = OpenOptions::new();
         options.write(true).create_new(true).mode(0o600);
-        let mut file = directory
-            .open_with(profile.pending_name(), &options)
-            .map_err(|_| failure())?;
+        let mut file = match directory.open_with(profile.pending_name(), &options) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(existing_reservation_error(&directory, profile.pending_name()));
+            }
+            Err(_) => return Err(failure()),
+        };
         lock_exclusive(&file)?;
         file.write_all(b"elsecrew provider login pending v1\n")
             .map_err(|_| failure())?;
@@ -166,6 +170,41 @@ pub(crate) fn with_credentials_reserved<T>(
     reservation.record_login_termination()?;
     reservation.release()?;
     result
+}
+
+fn busy() -> SidecarError {
+    SidecarError::new(
+        "providerBusy",
+        "another provider check currently owns this profile; retry after it finishes",
+    )
+}
+
+/// An existing fence is either held by a live owner in this app (login check,
+/// model catalog or run) or left behind by an owner whose exit was never
+/// proven. Only the latter is recovery evidence; live contention is retryable.
+/// The probe never writes, renames or releases the existing reservation.
+fn existing_reservation_error(directory: &Dir, name: &str) -> SidecarError {
+    use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .follow(FollowSymlinks::No)
+        .custom_flags(libc::O_NONBLOCK);
+    let Ok(file) = directory.open_with(name, &options) else {
+        return failure();
+    };
+    if !file.metadata().is_ok_and(|meta| meta.is_file()) {
+        return failure();
+    }
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        return if std::io::Error::last_os_error().raw_os_error() == Some(libc::EWOULDBLOCK) {
+            busy()
+        } else {
+            failure()
+        };
+    }
+    // Lock acquired: no live owner. Dropping the probe releases it unchanged.
+    failure()
 }
 
 fn lock_exclusive(file: &File) -> Result<(), SidecarError> {
@@ -1371,6 +1410,28 @@ mod tests {
         let mut run = LoginProcess::reserve(&binding).unwrap();
         assert!(with_credentials_reserved::<()>(&binding, || panic!("must not enter")).is_err());
         run.finish().unwrap();
+    }
+
+    #[test]
+    fn live_reservation_contention_is_busy_but_an_orphaned_fence_requires_recovery() {
+        let temp = tempfile::tempdir().unwrap();
+        let binding = profile(&temp);
+        // A concurrent owner in this app (e.g. the usage model catalog) holds the
+        // fence: a racing login check must be retryable, not a recovery block.
+        let mut live = LoginProcess::reserve(&binding).unwrap();
+        let contended = LoginProcess::reserve(&binding).err().unwrap();
+        assert_eq!(contended.kind(), "providerBusy");
+        live.finish().unwrap();
+        assert!(!temp.path().join(PENDING).exists());
+        // A fence whose owner is gone (no lock holder) stays recovery evidence
+        // and the probe must leave it untouched.
+        std::fs::write(temp.path().join(PENDING), b"elsecrew provider login pending v1\n").unwrap();
+        let orphaned = LoginProcess::reserve(&binding).err().unwrap();
+        assert_eq!(orphaned.kind(), "providerLoginRecoveryRequired");
+        assert_eq!(
+            std::fs::read(temp.path().join(PENDING)).unwrap(),
+            b"elsecrew provider login pending v1\n"
+        );
     }
 
     fn profile(temp: &tempfile::TempDir) -> CodexProfileBinding {

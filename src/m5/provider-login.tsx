@@ -167,6 +167,8 @@ function ProviderConnection({ disabled, provider, alwaysExpanded = false, onAtte
   const [diagnostic,setDiagnostic] = useState<LoginDiagnostic | null>(null);
   const [expanded,setExpanded] = useState(false);
   const inFlight = useRef(false);
+  const busyRetries = useRef(0);
+  const busyRetryAttempt = useRef<string | null>(null);
   const mounted = useRef(true);
   const checked = useRef(false);
   const recoveryCheck = useRef(false);
@@ -190,6 +192,13 @@ function ProviderConnection({ disabled, provider, alwaysExpanded = false, onAtte
           result = validateLoginStatus(await window.m5Login.request({action:"check",provider,attemptId:crypto.randomUUID()}),provider);
         }
       } else if (!["starting","waiting","verifying"].includes(result.state)) recoveryCheck.current = false;
+      // Another check (for example the usage model query) briefly owns the same
+      // provider profile. That is retryable contention, never recovery evidence.
+      if (input.action !== "cancel" && result.state === "failed" && result.error === "providerBusy" && result.attemptId !== busyRetryAttempt.current && busyRetries.current < 5) {
+        busyRetries.current += 1;
+        busyRetryAttempt.current = result.attemptId;
+        window.setTimeout(() => { if (mounted.current) void request({action:"check",attemptId:crypto.randomUUID()}); }, 1500);
+      } else if (result.state === "connected" || (result.state === "failed" && result.error !== "providerBusy")) busyRetries.current = 0;
       if(mounted.current) { setStatus(result); setError(false); setDiagnostic(null); }
     } catch (failure) { if(mounted.current) { setError(true); setDiagnostic(readLoginDiagnostic(failure)); } }
     finally { inFlight.current=false; if(mounted.current) setBusy(false); }
