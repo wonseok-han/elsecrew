@@ -4620,10 +4620,25 @@ fn sparse_base_over_diff_limit_is_classified_without_loading_blob() {
 }
 
 #[cfg(unix)]
+/// The index check takes no `.git/index.lock` (a provider's own `git status`
+/// may hold it) and, like `write-tree`, ignores intent-to-add entries.
+#[test]
+fn snapshot_index_check_tolerates_index_lock_and_intent_to_add() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    let workspace = fixture.manager.worktree_capability(&active).unwrap();
+    fs::write(active.worktree_path.join(".git/index.lock"), b"").unwrap();
+    fixture.manager.verify_snapshot_repository(&workspace, &active).unwrap();
+    fs::remove_file(active.worktree_path.join(".git/index.lock")).unwrap();
+    fs::write(active.worktree_path.join("planned.txt"), b"later").unwrap();
+    git_raw(&active.worktree_path, ["add", "-N", "planned.txt"]);
+    fixture.manager.verify_snapshot_repository(&workspace, &active).unwrap();
+}
+
 #[test]
 fn concurrent_snapshot_checks_reject_each_repository_invariant_drift() {
     use std::os::unix::fs::PermissionsExt as _;
-    for case in ["head", "symbolic", "object", "index", "remote", "oversized-remote"] {
+    for case in ["head", "symbolic", "object", "index", "ignored-gitlink", "remote", "oversized-remote"] {
         let mut fixture = Fixture::open();
         let active = fixture.create();
         let workspace = fixture.manager.worktree_capability(&active).unwrap();
@@ -4657,6 +4672,13 @@ fn concurrent_snapshot_checks_reject_each_repository_invariant_drift() {
             "index" => {
                 fs::write(active.worktree_path.join("drift.txt"), b"drift").unwrap();
                 git_raw(&active.worktree_path, ["add", "drift.txt"]);
+            }
+            "ignored-gitlink" => {
+                // `.gitmodules` `ignore = all` must not hide a staged gitlink.
+                fs::write(active.worktree_path.join(".gitmodules"),
+                    b"[submodule \"sub\"]\n\tpath = sub\n\turl = ./sub\n\tignore = all\n").unwrap();
+                let gitlink = format!("160000,{},sub", active.base_commit);
+                git_raw(&active.worktree_path, ["update-index", "--add", "--cacheinfo", gitlink.as_str()]);
             }
             "remote" => git_raw(&active.worktree_path, ["remote", "add", "forbidden", "/nonexistent-fixture-remote"]),
             "oversized-remote" => {

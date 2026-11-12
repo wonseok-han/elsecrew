@@ -4478,10 +4478,9 @@ impl ProjectManager {
         if symbolic.status.success() || !symbolic.stdout.is_empty() {
             return Err(ProjectFailure::manifest("snapshot HEAD is not detached"));
         }
-        // write-tree remains serial, after all read-only checks have finished.
-        // write-tree can acquire index.lock even during validation. Background
-        // watchers defer it to the dispatcher so concurrent requests cannot
-        // conflict with it and cancellation cannot leave its lock behind.
+        // The index/base-tree comparison runs after the read-only checks. It no
+        // longer takes index.lock; background watchers still leave it (and the
+        // metadata scan) to the dispatcher's full validation.
         #[cfg(any(unix, windows))]
         let background_watch = self.watch_cancel.is_some();
         #[cfg(not(any(unix, windows)))]
@@ -4520,10 +4519,14 @@ impl ProjectManager {
         // `write-tree` needs that lock, so a provider's own `git status` briefly
         // holding it made run validation fail mid-run (approvals then stopped
         // the team task as "input changed"). Exit 0 = identical, 1 = different;
-        // unmerged or extra entries also differ.
+        // unmerged or extra entries also differ. `--ignore-submodules=none`
+        // stops a `.gitmodules` `ignore = all` from hiding gitlink changes, and
+        // `--ita-invisible-in-index` keeps intent-to-add entries invisible as
+        // `write-tree` did, so the invariant is unchanged.
         let compared = self.git_allow_status_at(
             workspace,
-            ["diff-index", "--cached", "--quiet", active.base_tree.as_str(), "--"],
+            ["diff-index", "--cached", "--quiet", "--ignore-submodules=none", "--ita-invisible-in-index",
+                active.base_tree.as_str(), "--"],
             &[0, 1],
         )?;
         if compared.status.code() != Some(0) {
