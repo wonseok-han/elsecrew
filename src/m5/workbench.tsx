@@ -408,7 +408,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         <form className="m5-new-chat-form" onKeyDown={submitChatShortcut} onSubmit={(event) => { event.preventDefault(); if (admissionReady && projectDataReady && goal.trim() && !chat.preparing && !chat.switching && !chat.preparationApiUnavailable && !(snapshot.workspace && !controller.canLeaveProject()) && (chat.chats.length > 0 || setupConfirmed)) void createChat(); }}>
           <input ref={goalInputRef} aria-label={t("m5.navigation.goal")} value={goal} onChange={(event) => setGoal(event.target.value)} placeholder={t("m5.navigation.goalPlaceholder")} disabled={!admissionReady || chat.preparing} />
           <p className="m5-first-chat-note">{t("m5.application.autoBaseline")}</p>
-          <button type="submit" title="⌘ Enter / Ctrl Enter" aria-keyshortcuts="Meta+Enter Control+Enter" disabled={!admissionReady || !projectDataReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject()) || (chat.chats.length === 0 && !setupConfirmed)}>{t("m5.chat.coordinatorSend")}</button>
+          <button type="submit" title={t("m5.chat.sendShortcut")} aria-keyshortcuts="Enter Meta+Enter Control+Enter" disabled={!admissionReady || !projectDataReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject()) || (chat.chats.length === 0 && !setupConfirmed)}>{t("m5.chat.coordinatorSend")}</button>
         </form>
         {chat.chats.length === 0 ? <section className="m5-first-chat-setup" aria-labelledby="m5-first-chat-setup-heading">
           <h3 id="m5-first-chat-setup-heading">{t("m5.firstChat.setup.title")}</h3>
@@ -884,7 +884,7 @@ function FollowupComposer({ controller, chat, admissionReady }: { controller: Ch
     <div className="m5-followup-actions">
       {/* Stop sits by the always-visible composer so a long conversation never hides it. */}
       {chat.activeChat?.schemaVersion === 2 && chat.activeChat.state === "running" && window.m5Projects && <button type="button" className="m5-secondary m5-stop-team" onClick={() => void controller.cancelTeamTask(input => window.m5Projects!.request(input))}>{t("m5.chat.stopTeam")}</button>}
-      <button type="submit" title="⌘ Enter / Ctrl Enter" aria-keyshortcuts="Meta+Enter Control+Enter" disabled={!allowed || draft?.sending || (!draft?.request && !draft?.text.trim())}>{draft?.sending ? t("m5.chat.saving") : draft?.request ? t("m5.chat.retry") : t("m5.chat.add")}</button>
+      <button type="submit" title={t("m5.chat.sendShortcut")} aria-keyshortcuts="Enter Meta+Enter Control+Enter" disabled={!allowed || draft?.sending || (!draft?.request && !draft?.text.trim())}>{draft?.sending ? t("m5.chat.saving") : draft?.request ? t("m5.chat.retry") : t("m5.chat.add")}</button>
     </div>
     {!allowed && chat.activeChat?.state !== "running" && <p>{t("m5.chat.unavailable")}</p>}
   </form>;

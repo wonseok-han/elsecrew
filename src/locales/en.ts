@@ -654,6 +654,7 @@ export const en: Record<MessageKey, string> = {
   "m5.roles.design": "Design",
   "m5.chat.progress.working": "Working now: {role} ({runtime}) · {state} · {elapsed}",
   "m5.chat.progress.between": "The coordinator is choosing or preparing the next member.",
+  "m5.chat.sendShortcut": "Enter to send · Shift+Enter for a new line",
   "m5.chat.stopTeam": "Stop task",
   "m5.chat.coordinatorSend": "Send",
   "m5.chat.legacyCoordinator": "This chat uses the previous setup. Start a new chat to continue. This history is preserved.",
