@@ -16,7 +16,7 @@ import { markStartScreenReady } from "./startup-mark.ts";
 import { emptyProjectGuide, parseProjectGuide, projectGuideKey, projectGuideStep, type ProjectGuidePreference } from "./project-guide-state.ts";
 import type { ChatRecordV1 } from "./contracts/run-recovery-v1.ts";
 import { groupRunHistory, runOutcomeNotice } from "./work-status.ts";
-import { cachedModels, loadModels } from "./model-catalog.ts";
+import { cachedModels, loadModels, modelLabel } from "./model-catalog.ts";
 import type { ModelChoicesResult } from "./contracts/model-choices-v1.ts";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type * as Monaco from "monaco-editor/esm/vs/editor/editor.api";
@@ -413,13 +413,13 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           <h3 id="m5-first-chat-setup-heading">{t("m5.firstChat.setup.title")}</h3>
           <p>{t("m5.firstChat.setup.help")}</p>
           <h4>{t("m5.firstChat.team")}</h4>
-          {chat.settings && <dl className="m5-new-chat-team">{coordinatorRoles(chat.settings.roles).map(role => <div key={role.roleId}><dt>{t(`m5.roles.${role.roleId}`)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{role.modelSelector}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl>}
+          {chat.settings && <dl className="m5-new-chat-team">{coordinatorRoles(chat.settings.roles).map(role => <div key={role.roleId}><dt>{t(`m5.roles.${role.roleId}`)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{modelLabel(role.runtime, role.modelSelector)}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl>}
           <button type="button" className="m5-secondary" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching} onClick={() => openRoleSettings(true)}>{t("m5.firstChat.editTeam")}</button>
           <p>{t("m5.firstChat.editTeamHelp")}</p>
           <ProjectPermissions key={snapshot.project.id} projectId={snapshot.project.id} disabled={!admissionReady || chat.preparing || chat.switching} />
           <label className="m5-first-chat-confirm"><input type="checkbox" checked={setupConfirmed} disabled={chat.preparing || chat.switching} onChange={event => setSetupConfirmed(event.target.checked)} /><span>{t("m5.firstChat.setup.confirm")}</span></label>
         </section> : <details className="m5-chat-team-details"><summary>{t("m5.firstChat.team")}</summary>
-        {chat.settings && <dl className="m5-new-chat-team">{coordinatorRoles(chat.settings.roles).map(role => <div key={role.roleId}><dt>{t(`m5.roles.${role.roleId}`)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{role.modelSelector}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl>}
+        {chat.settings && <dl className="m5-new-chat-team">{coordinatorRoles(chat.settings.roles).map(role => <div key={role.roleId}><dt>{t(`m5.roles.${role.roleId}`)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{modelLabel(role.runtime, role.modelSelector)}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl>}
         <button type="button" className="m5-secondary" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching} onClick={() => openRoleSettings(true)}>{t("m5.firstChat.editTeam")}</button>
         <p>{t("m5.firstChat.editTeamHelp")}</p>
         </details>}
@@ -443,7 +443,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         <div className="m5-goal-examples">{(["explain", "plan", "readme"] as const).map(example => <button key={example} type="button" className="m5-secondary" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching || goal.trim().length > 0} onClick={() => { setGoal(t(`m5.firstChat.${example}`)); setNewChatOpen(true); }}>
           {t(`m5.firstChat.${example}`)}
         </button>)}</div><p className="m5-first-chat-note">{t("m5.firstChat.exampleHelp")}</p>
-        {chat.settings && <details className="m5-chat-team-details"><summary>{t("m5.firstChat.team")}</summary><dl className="m5-team-preview">{coordinatorRoles(chat.settings.roles).map(role => <div key={role.roleId}><dt>{t(`m5.roles.${role.roleId}`)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{role.modelSelector}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl><p className="m5-first-chat-note">{t("m5.firstChat.teamHelp")}</p></details>}
+        {chat.settings && <details className="m5-chat-team-details"><summary>{t("m5.firstChat.team")}</summary><dl className="m5-team-preview">{coordinatorRoles(chat.settings.roles).map(role => <div key={role.roleId}><dt>{t(`m5.roles.${role.roleId}`)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{modelLabel(role.runtime, role.modelSelector)}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl><p className="m5-first-chat-note">{t("m5.firstChat.teamHelp")}</p></details>}
       </section>} chats={<section className="m5-chat-navigation" aria-label={t("m5.navigation.chats")}>
         <div className="m5-chat-list">{chat.chats.map(item => {
           const selected = chat.activeChat?.chatId === item.chatId;
@@ -838,7 +838,7 @@ function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, o
       }}>
         <option value="">{t("m5.roles.chooseModel")}</option>
         {role.modelSelector && !choices[role.roleId]?.some(model => model.modelSelector === role.modelSelector) && <option value={role.modelSelector}>{role.modelSelector} · {t("m5.roles.savedModel")}</option>}
-        {choices[role.roleId]?.map(model => <option key={model.modelSelector} value={model.modelSelector}>{model.modelSelector}{model.isDefault ? ` · ${t("m5.roles.providerDefault")}` : ""}</option>)}
+        {choices[role.roleId]?.map(model => <option key={model.modelSelector} value={model.modelSelector}>{model.modelSelector}{model.resolvedModel ? ` · ${model.resolvedModel}` : ""}{model.isDefault ? ` · ${t("m5.roles.providerDefault")}` : ""}</option>)}
       </select></label>
       <label>{t("m5.roles.reasoning")}<select disabled={disabled || busy || discardAction !== null || !choices[role.roleId]} value={role.reasoningEffort ?? ""} onChange={event => change(index, "reasoningEffort", event.target.value || null)}>
         <option value="" disabled={role.runtime === "codex"}>{t("m5.roles.default")}</option>

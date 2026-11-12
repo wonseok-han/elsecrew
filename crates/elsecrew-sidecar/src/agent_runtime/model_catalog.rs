@@ -305,6 +305,7 @@ mod tests {
                             model: "model".into(),
                             reasoning_efforts: vec![],
                             is_default: true,
+                            resolved_model: None,
                         }]),
                         None,
                     )),

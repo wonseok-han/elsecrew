@@ -2475,7 +2475,7 @@ impl Sidecar {
                     responses.push(match result {
                         Ok((choices, usage)) => success_response(&request, serde_json::json!({
                             "schemaVersion":1, "runtime":runtime, "scope":null, "usage":usage,
-                            "models":choices.into_iter().map(|choice| serde_json::json!({"modelSelector":choice.model,"reasoningEfforts":choice.reasoning_efforts,"isDefault":choice.is_default})).collect::<Vec<_>>()
+                            "models":choices.into_iter().map(|choice| model_choice_json(choice)).collect::<Vec<_>>()
                         })),
                         Err(error) => error_response(&request, error.kind(), "requestBlocked", error.detail()),
                     });
@@ -2492,7 +2492,7 @@ impl Sidecar {
                 responses.push(match result {
                     Ok((scope, choices)) => success_response(&request, serde_json::json!({
                         "schemaVersion":1, "runtime":runtime, "scope":scope,
-                        "models":choices.into_iter().map(|choice| serde_json::json!({"modelSelector":choice.model,"reasoningEfforts":choice.reasoning_efforts,"isDefault":choice.is_default})).collect::<Vec<_>>()
+                        "models":choices.into_iter().map(|choice| model_choice_json(choice)).collect::<Vec<_>>()
                     })),
                     Err(error) => error_response(&request, error.kind(), "requestBlocked", error.detail()),
                 });
@@ -2853,4 +2853,16 @@ mod unsupported_platform_tests {
         assert!(output.is_empty());
         assert!(!database.exists());
     }
+}
+
+/// Display-only model choice. `resolvedModel` is present only when a provider
+/// alias reports the concrete model it maps to; the selector stays the alias.
+fn model_choice_json(
+    choice: elsecrew_core::provider::vendor_observation::codex_preflight::CatalogModel,
+) -> serde_json::Value {
+    let mut value = serde_json::json!({"modelSelector":choice.model,"reasoningEfforts":choice.reasoning_efforts,"isDefault":choice.is_default});
+    if let Some(resolved) = choice.resolved_model {
+        value["resolvedModel"] = resolved.into();
+    }
+    value
 }

@@ -358,6 +358,8 @@ pub struct CatalogModel {
     pub model: String,
     pub is_default: bool,
     pub reasoning_efforts: Vec<String>,
+    /// Display only: the concrete model a provider alias currently maps to.
+    pub resolved_model: Option<String>,
 }
 
 /// Validate every entry, including hidden entries, before returning visible
@@ -420,6 +422,7 @@ pub fn read_model_catalog(input: &BoundedObservation) -> Result<Vec<CatalogModel
                 model: model.model,
                 is_default: model.is_default,
                 reasoning_efforts: efforts.into_iter().collect(),
+                resolved_model: None,
             });
         }
     }
@@ -552,6 +555,7 @@ mod tests {
                 model: "test-model".into(),
                 is_default: false,
                 reasoning_efforts: vec!["medium".into()],
+                resolved_model: None,
             }]
         );
         assert!(!format!("{choices:?}").contains("PRIVATE"));

@@ -39,6 +39,11 @@ function remember(runtime: Runtime, result: ModelChoicesResult, at: number) {
 }
 export function catalogCheckedAt(runtime: Runtime) { return restore(runtime)?.at; }
 export function cachedModels(runtime: Runtime) { return restore(runtime)?.result.models; }
+/** "opus · claude-opus-5-5" when the provider reported what the alias maps to. */
+export function modelLabel(runtime: Runtime, selector: string): string {
+  const resolved = restore(runtime)?.result.models.find(model => model.modelSelector === selector)?.resolvedModel;
+  return resolved ? `${selector} · ${resolved}` : selector;
+}
 export function loadModels(runtime: Runtime, request: (input: ModelChoicesRequest) => Promise<ModelChoicesResult>, refresh = false): Promise<ModelChoicesResult> {
   const existing = pending.get(runtime);
   if (existing) return existing;

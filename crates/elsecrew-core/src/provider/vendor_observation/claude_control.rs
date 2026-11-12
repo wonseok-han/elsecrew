@@ -189,6 +189,12 @@ impl InitializeExchange {
             reasoning_efforts: if entry.supports_effort == Some(true) {
                 entry.efforts.clone().unwrap_or_default()
             } else { Vec::new() },
+            // Show what an alias such as "opus" resolves to; never a long or
+            // non-identifier vendor string, and nothing when it is the alias.
+            resolved_model: entry.resolved_model.as_ref()
+                .filter(|resolved| *resolved != &entry.value && !resolved.is_empty() && resolved.len() <= 128
+                    && resolved.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'.' | b'[' | b']')))
+                .cloned(),
         }).collect()
     }
 
@@ -270,6 +276,7 @@ mod tests {
         assert_eq!(exchange.profile_model("opus", None).unwrap(), "claude-opus-test");
         let choices = exchange.display_models();
         assert_eq!(choices[0].model, "opus");
+        assert_eq!(choices[0].resolved_model.as_deref(), Some("claude-opus-test"));
         assert_eq!(choices[0].reasoning_efforts, vec!["low", "high"]);
         assert!(!choices[0].is_default);
         assert!(!format!("{choices:?}").contains("SECRET"));
