@@ -2,6 +2,15 @@ import type { MessageKey } from "./ko";
 
 // 영어 문구. ko와 동일한 키를 모두 가져야 한다(Record<MessageKey>로 강제).
 export const en: Record<MessageKey, string> = {
+  "m5.permissions.title": "Work permissions",
+  "m5.permissions.automatic": "Automatic",
+  "m5.permissions.ask": "Ask each time",
+  "m5.permissions.scope": "Choose once for this project’s working copies. Applies to connected agents and team tasks; change it at any time.",
+  "m5.permissions.files": "Allow file reading, search, creation and editing",
+  "m5.permissions.commands": "Allow development, build and test commands in working copies",
+  "m5.permissions.boundary": "Allowed work proceeds without repeated prompts. File protections and execution restrictions remain; applying to the original and out-of-scope requests require separate confirmation.",
+  "m5.permissions.save": "Save for this project",
+  "m5.permissions.error": "Could not load or save permissions. Reopen this project to check.",
   "m5.chat.delegatedTask": "Task delegated to {role}",
   "m5.historyRecovery.title": "Conversation history and run recovery",
   "m5.historyRecovery.help": "View conversations and interrupted runs even when the project cannot open. This does not open files or start work.",

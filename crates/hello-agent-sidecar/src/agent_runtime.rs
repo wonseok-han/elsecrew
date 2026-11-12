@@ -5317,3 +5317,13 @@ fn unsupported_platform_cannot_select_native_provider_mode() {
     assert!(!runtime.uses_native_providers());
     assert!(runtime.owned_run_ids().is_empty());
 }
+
+// Only the existing workspace scope is eligible. Network or wider grants stay interactive.
+fn project_auto_approval(consent: crate::project::automation_permissions::AutomationPermissions, request: &hello_agent_core::provider::vendor_observation::codex_approval::PendingApproval, workspace: &str) -> bool {
+    use hello_agent_core::provider::vendor_observation::codex_approval::Action;
+    if workspace.is_empty() { return false; }
+    match &request.action {
+        Action::FileChange { grant_root } => consent.files && grant_root.as_deref() == Some(workspace),
+        Action::Command { cwd, network, .. } => consent.commands && network.is_none() && cwd.as_deref() == Some(workspace),
+    }
+}

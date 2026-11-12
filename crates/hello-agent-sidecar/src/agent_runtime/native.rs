@@ -599,18 +599,20 @@ impl AgentRuntime {
             let active = self.native.get_mut(&id).unwrap();
             if !active.stopped {
                 let connection = format!("{}:{}", active.stream_id, active.owner.connection_id());
-                // Tool notifications grant no permission. Only an explicit
-                // queued decision can produce a reply; waiting keeps polling.
+                let consent = projects.automation_permissions(storage, &active.identity.project_id).map_err(|_| SidecarError::new("agentApprovalChanged", "project consent unavailable"))?;
+                let workspace = actual_run_projection(storage, &active.identity.run_id).map_err(|_| SidecarError::new("agentApprovalChanged", "run binding unavailable"))?["worktree_path"].as_str().unwrap_or("").to_owned();
                 let advance = active.owner.advance(storage, projects, &mut |storage, action| {
                     match action {
                         TextAction::Public(_) | TextAction::Tool(_) => Ok(()),
                         TextAction::PollApproval { request, decision } => {
-                            *decision = active.approvals.poll(
+                            *decision = if super::project_auto_approval(consent, request, &workspace) {
+                                active.approvals.poll_preapproved(storage, &active.identity, &connection, request)?
+                            } else { active.approvals.poll(
                                 storage,
                                 &active.identity,
                                 &connection,
                                 request,
-                            )?;
+                            )? };
                             Ok(())
                         }
                         _ => Err(SidecarError::new(

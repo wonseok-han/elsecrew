@@ -584,3 +584,7 @@ macOS 네이티브 폴더 선택은 비어 있는 폴더에 대해 별도 확인
 
 ### Claude 사용량 인증 갱신
 macOS에서 사용량 조회가 만료된 access token을 발견하면 기존 Claude 연결 확인 경로가 모델 호출 없이 갱신한다. `provider_claude_refresh`는 앱 전용 Keychain service/account만 사용하고 login/run과 같은 pending fence로 직렬화한다. 고정 공식 OAuth endpoint에 저장된 scope로 요청하며 redirect·proxy를 사용하지 않는다. profile 신원과 기존 저장값을 재확인한 뒤 관련 없는 필드를 보존하여 native Keychain에 저장한다. 실패 시 기존 값을 덮어쓰지 않고, 사용량 조회는 갱신된 저장값을 다시 읽는다. 서버 회전 뒤 로컬 저장 실패는 재로그인이 필요할 수 있다. 기존 파일 기반 credential fallback의 자동 갱신은 지원하지 않는다.
+
+### 프로젝트 사전 작업 권한 (2026-11-12)
+
+`project.catalog`의 `getAutomationPermissions`/`setAutomationPermissions`는 등록된 프로젝트별 파일 작업·명령 실행 동의를 보관한다. 초기값은 모두 false이며 로그인 연결은 동의로 취급하지 않는다. 프로젝트를 열 때 설정하고 이후 해제할 수 있다. 동의는 프로젝트 projection에 기록하고 snapshot 전환 때 보존한다. 각 공급자 요청을 전달할 때 최신 동의를 읽으며 기존 실행 경계/역할/경로 검사를 생략하지 않는다. Claude의 파일·검색·Bash는 기존 admission이 최종 판단한다. Codex는 정확한 작업 복사본 grantRoot 또는 cwd가 있는 요청만 사전 허용 대상이며 네트워크·범위 불명/확장은 개별 확인한다. 원본 반영은 별도 승인 흐름이다.

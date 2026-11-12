@@ -23,7 +23,16 @@ window.m5Install = { request: async () => {
 } };
 const preparationInspection = { projectId: "earlier_project", worktreeId: "worktree_failed", workspaceIdentity: "workspace_failed", lockId: "lock_worktree_failed", projectRevision: 8, lockRevision: 9 };
 let preparationAttempts = 0;
+window.m5SmokePermissions = {};
 window.m5Projects = { request: async (input) => {
+  if(input.action === "getAutomationPermissions" || input.action === "setAutomationPermissions") {
+    if(input.action === "setAutomationPermissions") {
+      if(input.confirmed !== true) throw new Error("missing consent");
+      window.m5SmokePermissions[input.projectId] = {...input.permissions};
+    }
+    return {schemaVersion:1,action:input.action,projectId:input.projectId,permissions:window.m5SmokePermissions[input.projectId] || {files:false,commands:false}};
+  }
+
   if(input.action === "getProviderConnections" || input.action === "setProviderConnection") {
     if(input.action === "setProviderConnection") smokeConnections={...smokeConnections,[input.runtime]:input.connected};
     return {schemaVersion:1,action:input.action,connections:{...smokeConnections}};

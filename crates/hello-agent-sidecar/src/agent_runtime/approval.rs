@@ -120,6 +120,18 @@ impl ApprovalQueue {
         Ok(())
     }
 
+    /// Project consent replaces the per-request click, not delivery-time confinement.
+    pub(super) fn poll_preapproved(&mut self, storage: &mut Storage, identity: &RunIdentity, connection: &str, request: &PendingApproval) -> Result<Option<Decision>, SidecarError> {
+        let decision = self.poll(storage, identity, connection, request)?;
+        if decision.is_some() { return Ok(decision); }
+        let digest = fingerprint(identity, connection, request)?;
+        let (ticket, queued) = self.entries.iter_mut().find(|(ticket, _)| ticket.digest == digest).ok_or_else(failure)?;
+        ticket.inspected = true;
+        ticket.accept = true;
+        *queued = true;
+        self.poll(storage, identity, connection, request)
+    }
+
     pub(super) fn retain_live(
         &mut self,
         identity: &RunIdentity,
@@ -374,6 +386,27 @@ mod tests {
         };
         let request = PendingApproval::parse(&BoundedObservation::new(json!({"id":1,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread","turnId":"turn","itemId":"item","startedAtMs":1,"kind":"command","command":"echo PRIVATE","cwd":"/snapshot"}}).to_string().into_bytes()).unwrap(), "thread", "turn").unwrap();
         (identity, request)
+    }
+
+    #[test]
+    fn project_preapproval_excludes_wider_and_network_requests() {
+        use crate::project::automation_permissions::AutomationPermissions;
+        let (_, mut request) = context();
+        let all = AutomationPermissions {files:true,commands:true};
+        assert!(super::super::project_auto_approval(all, &request, "/snapshot"));
+        assert!(!super::super::project_auto_approval(AutomationPermissions::default(), &request, "/snapshot"));
+        assert!(!super::super::project_auto_approval(all, &request, "/other"));
+        if let Action::Command {network, ..} = &mut request.action {
+            *network = Some(hello_agent_core::provider::vendor_observation::codex_approval::Network {host:"example.test".into(),protocol:"https".into()});
+        }
+        assert!(!super::super::project_auto_approval(all, &request, "/snapshot"));
+        request.action = Action::FileChange {grant_root:Some("/original".into())};
+        assert!(!super::super::project_auto_approval(all, &request, "/snapshot"));
+        request.action = Action::FileChange {grant_root:None};
+        assert!(!super::super::project_auto_approval(all, &request, "/snapshot"));
+        request.action = Action::FileChange {grant_root:Some("/snapshot".into())};
+        assert!(super::super::project_auto_approval(all, &request, "/snapshot"));
+        assert!(!super::super::project_auto_approval(all, &request, ""));
     }
 
     #[test]

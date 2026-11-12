@@ -28,6 +28,7 @@ pub(crate) struct OwnedClaudeRun {
     channel: SessionChannel,
     output: ClaudeOutputState,
     cancel: std::sync::atomic::AtomicBool,
+    user_cancel: std::sync::atomic::AtomicBool,
     approvals: Vec<ClaudePending>,
     tool_admission: Option<ClaudeToolAdmission>,
 }
@@ -215,6 +216,7 @@ impl OwnedClaudeRun {
             channel: channel.take().unwrap(),
             output,
             cancel: std::sync::atomic::AtomicBool::new(false),
+            user_cancel: std::sync::atomic::AtomicBool::new(false),
             approvals: Vec::new(),
             tool_admission: None,
         })
@@ -278,6 +280,7 @@ impl OwnedClaudeRun {
                 "Claude cancel identity differs",
             ));
         }
+        if self.output.completion.is_none() { self.user_cancel.store(true, std::sync::atomic::Ordering::Release); }
         self.cancel
             .store(true, std::sync::atomic::Ordering::Release);
         Ok(())
@@ -294,10 +297,20 @@ impl OwnedClaudeRun {
         ) -> Result<(), SidecarError>,
     ) -> Result<bool, SidecarError> {
         self.approvals.retain(|entry| self.channel.is_permission_pending(&entry.request.request_id));
+        // Consult stored consent at delivery; automatic permission is never queued across polls.
+        let consent = projects.automation_permissions(storage, self.reservation.run["projectId"].as_str().ok_or_else(|| SidecarError::new("agentApprovalChanged", "project binding unavailable"))?).map_err(|_| SidecarError::new("agentApprovalChanged", "project consent unavailable"))?;
+        let auto_allowed = |entry: &ClaudePending| {
+            use hello_agent_core::provider::vendor_observation::claude_approval::ToolTarget;
+            !entry.declined && match entry.request.target() {
+                ToolTarget::File { .. } | ToolTarget::Search { .. } => consent.files,
+                ToolTarget::Shell => consent.commands,
+                ToolTarget::Unsupported => false,
+            }
+        };
         if self.channel.can_queue_reply() {
-            if let Some(index) = self.approvals.iter().position(|entry| entry.declined || entry.accepted) {
+            if let Some(index) = self.approvals.iter().position(|entry| entry.declined || entry.accepted || auto_allowed(entry)) {
                 let entry = self.approvals.remove(index);
-                let reply = if entry.accepted {
+                let reply = if entry.accepted || auto_allowed(&entry) {
                     self.allow_tool_once(storage, projects, &entry.request)
                 } else {
                     self.channel.deny(&mut self.process, &entry.request.request_id, false)
@@ -316,6 +329,7 @@ impl OwnedClaudeRun {
             &mut self.channel,
             &self.cancel,
             &mut self.output,
+            self.user_cancel.load(std::sync::atomic::Ordering::Acquire),
             &mut |process, channel, event| {
                 use hello_agent_core::provider::vendor_observation::claude_approval::Observation;
                 match event {
@@ -555,6 +569,7 @@ impl RunReservation {
         channel: &mut SessionChannel,
         cancel: &std::sync::atomic::AtomicBool,
         state: &mut ClaudeOutputState,
+        user_cancel: bool,
         handle: &mut impl FnMut(
             &mut crate::provider_login_process::LoginProcess<'_>,
             &mut SessionChannel,
@@ -710,7 +725,7 @@ impl RunReservation {
                 projects,
                 process,
                 state.completion.as_ref().unwrap(),
-                cancel.load(std::sync::atomic::Ordering::Acquire),
+                user_cancel,
             )
             .map_err(|_| failure())?;
             state.terminal_saved = true;

@@ -1219,6 +1219,17 @@ impl Sidecar {
                 }
             }),
             "project.catalog" => match request.params.get("action").and_then(Value::as_str) {
+                Some("getAutomationPermissions" | "setAutomationPermissions") => {
+                    let setting = request.params["action"] == "setAutomationPermissions";
+                    let fields: &[&str] = if setting { &["action", "projectId", "permissions", "confirmed"] } else { &["action", "projectId"] };
+                    let params = require_exact_params(&request.params, fields).map_err(invalid_params)?;
+                    let change = if setting {
+                        if params["confirmed"] != true { return Err(invalid_params("permission confirmation required".into())); }
+                        Some(serde_json::from_value::<project::automation_permissions::AutomationPermissions>(params["permissions"].clone()).map_err(|_| invalid_params("invalid automation permissions".into()))?)
+                    } else { None };
+                    self.projects.automation_settings(&mut self.storage, param_string(params,"projectId").map_err(invalid_params)?, change, &request.request_id)
+                }
+
                 Some("cancelApplication") => {
                     let params = require_exact_params(&request.params, &["action", "projectId", "applicationId"]).map_err(invalid_params)?;
                     self.projects.cancel_application(param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "applicationId").map_err(invalid_params)?)

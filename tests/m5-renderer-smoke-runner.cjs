@@ -312,6 +312,18 @@ app.whenReady().then(async () => {
     if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/smoke') throw new Error('catalog path missing');
     document.querySelector('.m5-project-catalog-list li button').click();
     await ${waitFor("document.querySelector('.m5-file-row')", "project tree")};
+    await ${waitFor("document.querySelector('.m5-permission-options input:not(:disabled)')", "project consent available before work")};
+    if (Object.keys(window.m5SmokePermissions).length) throw new Error('permissions silently enabled');
+    document.querySelectorAll('.m5-permission-options input').forEach(input => input.click());
+    document.querySelector('.m5-permission-options button').click();
+    await ${waitFor("window.m5SmokePermissions.smoke_project?.files && window.m5SmokePermissions.smoke_project?.commands && !document.querySelector('.m5-permission-options')", "explicit saved project consent")};
+    document.querySelector('.m5-project-permissions > button').click();
+    await ${waitFor("document.querySelector('.m5-permission-options input:not(:disabled)')", "reopen project permissions")};
+    document.querySelectorAll('.m5-permission-options input').forEach(input => input.click());
+    document.querySelector('.m5-permission-options button').click();
+    await ${waitFor("window.m5SmokePermissions.smoke_project?.files === false && window.m5SmokePermissions.smoke_project?.commands === false && !document.querySelector('.m5-permission-options')", "explicit project permission revoke")};
+    ${process.env.M5_PERMISSIONS_ONLY === "1" ? "return {permissionsVerified:true};" : ""}
+
     document.querySelector('.m5-open-preferences').click(); document.querySelectorAll('.m5-preferences-layout > nav button')[2].click();
     await ${waitFor("!document.querySelector('.m5-app-settings').hidden", "agent settings reopened")};
     await ${waitFor("document.getElementById('codex-installation-slot')?.querySelector('button')", "installation controls in settings")};
@@ -452,6 +464,11 @@ app.whenReady().then(async () => {
     if (line) process.stderr.write(`Synthetic mount statement: ${mountScript.split('\n')[Number(line) - 1]}\n`);
     throw error;
   });
+  if (process.env.M5_PERMISSIONS_ONLY === "1") {
+    process.stdout.write(JSON.stringify(result) + '\n');
+    if (!result.permissionsVerified) throw new Error('permission UI was not verified');
+    window.webContents.debugger.detach(); await window.close(); app.exit(0); return;
+  }
   if (!result.workerCreated || !result.text.includes("example.ts")) throw new Error("Monaco editor or local worker did not mount");
   if (!result.dockVerified) throw new Error("panel layout was not verified");
   if (process.env.M5_MEASURE_RELEASE_LIFETIME === "1") {
@@ -966,6 +983,8 @@ app.whenReady().then(async () => {
     if (!removedChatId || document.querySelector('.monaco-editor') !== removalEditor || document.querySelector('#m5-followup-text') !== preservedConversation || document.querySelector('h1').textContent !== 'smoke') throw new Error('successful removal replaced workspace');
   })()`);
   process.stdout.write(`${JSON.stringify(result)}\n`);
+
+
   process.stdout.write(JSON.stringify({ cleanupConsent: await window.webContents.executeJavaScript('globalThis.cleanupConsentReport') }) + '\n');
   if (process.env.M5_MEASURE_PARALLEL_PAINT === "1") {
     const measurement = await window.webContents.executeJavaScript('globalThis.parallelPaintReport');

@@ -1,6 +1,15 @@
 // 한국어 문구 리소스. 이 파일의 키 집합이 다른 언어 파일의 기준이 된다.
 // 보간은 {name} 형태 — t("key", { name }) 로 치환.
 export const ko = {
+  "m5.permissions.title": "작업 권한",
+  "m5.permissions.automatic": "자동 진행",
+  "m5.permissions.ask": "개별 확인",
+  "m5.permissions.scope": "이 프로젝트의 작업 복사본에서 허용할 범위를 한 번 정하세요. 연결된 에이전트와 팀 작업에 적용되며 언제든 변경할 수 있어요.",
+  "m5.permissions.files": "파일 읽기·검색·생성·편집 허용",
+  "m5.permissions.commands": "작업 복사본에서 개발·빌드·테스트 명령 실행 허용",
+  "m5.permissions.boundary": "허용 범위에서는 반복 확인 없이 진행해요. 기존 파일 보호와 실행 제한은 유지하며, 원본 반영·범위 밖 요청은 별도로 확인해요.",
+  "m5.permissions.save": "이 프로젝트에 저장",
+  "m5.permissions.error": "권한을 확인하거나 저장하지 못했어요. 프로젝트를 다시 열어 확인해 주세요.",
   "m5.chat.delegatedTask": "{role} 담당에게 맡긴 내용",
   "m5.historyRecovery.title": "대화 기록 및 실행 복구",
   "m5.historyRecovery.help": "프로젝트를 열 수 없어도 대화 기록과 중단된 실행을 확인할 수 있어요. 파일을 열거나 새 작업을 실행하지 않아요.",

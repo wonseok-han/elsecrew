@@ -6711,3 +6711,23 @@ fn app_defaults_preserve_coordinator_and_four_team_roles() {
     assert_eq!(seeded["roles"], roles);
     validate_g5_payload_v1("projectRoleSettings", &seeded).unwrap();
 }
+
+#[test]
+fn project_automation_consent_is_explicit_durable_and_revocable() {
+    use crate::project::automation_permissions::AutomationPermissions;
+    let mut f = Fixture::new();
+    let initial = f.projects.automation_permissions(&f.storage, &f.project_id).unwrap();
+    assert!(!initial.files && !initial.commands);
+    assert!(f.projects.automation_permissions(&f.storage, "unknown").is_err());
+    f.projects.automation_settings(&mut f.storage, &f.project_id, Some(AutomationPermissions {files:true,commands:true}), "req_consent").unwrap();
+    let saved = f.projects.automation_permissions(&f.storage, &f.project_id).unwrap();
+    assert!(saved.files && saved.commands);
+    let database = f.storage.path().to_owned();
+    drop(f.storage);
+    f.storage = Storage::open(&database).unwrap();
+    f.projects.automation_settings(&mut f.storage, &f.project_id, Some(AutomationPermissions::default()), "req_revoke_consent").unwrap();
+    assert!(!f.projects.automation_permissions(&f.storage, &f.project_id).unwrap().commands);
+    let database = f.storage.path().to_owned();
+    drop(f.storage);
+    f.storage = Storage::open(&database).unwrap();
+}

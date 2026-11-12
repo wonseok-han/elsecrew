@@ -1128,3 +1128,15 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-install-confirmation .m5-install-actions { justify-content: flex-end; }
 
 .m5-connection-heading .m5-icon-button { width: 28px; height: 28px; min-height: 28px; padding: 0; display: inline-grid; place-items: center; }
+
+.m5-project-permissions { flex: 0 0 auto; padding: 4px 12px; }
+.m5-permission-options { max-width: 680px; padding: 12px; border: 1px solid var(--m5-border); border-radius: 8px; }
+.m5-permission-options label { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+.m5-permission-options input[type="checkbox"] { width: auto; flex: 0 0 auto; }
+.m5-permission-options p { font-size: 13px; line-height: 1.6; }
+
+.m5-approval-card { margin: 12px 0; padding: 14px; border: 1px solid var(--m5-border-strong); border-radius: 10px; background: var(--m5-surface); }
+.m5-approval-card button { margin: 6px 8px 6px 0; }
+.m5-approval-card p { line-height: 1.6; font-size: 13px; }
+.m5-approval-summary { white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 650; }
+.m5-approval-card details pre { max-height: 240px; overflow: auto; }

@@ -14,6 +14,11 @@ fn quoted(value: &Value) -> String {
 }
 
 #[test]
+fn claude_project_consent_auto_approves_and_still_rejects_outside_files() {
+    claude_native_cases(&[("auto", false), ("auto-outside", false)]);
+}
+
+#[test]
 fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init() {
     claude_native_cases(&[
         ("success", false),
@@ -39,6 +44,10 @@ fn claude_durable_native_three_thousand_outputs() {
 fn claude_native_cases(cases: &[(&str, bool)]) {
     for &(case, durable) in cases {
         let mut f = Fixture::with_durable_output(durable);
+        if case.starts_with("auto") {
+            f.projects.automation_settings(&mut f.storage, &f.project_id,
+                Some(crate::project::automation_permissions::AutomationPermissions {files:true,commands:true}), "req_auto_consent").unwrap();
+        }
         let snapshot = f.snapshot("req_claude_snapshot");
         let chat = f.create_exact_claude_chat(&snapshot, "goal", "req_claude_chat");
         let chat_id = chat["chatId"].as_str().unwrap();
@@ -115,8 +124,9 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             }
         }
 
-        let approval = json!({"type":"control_request","request_id":"write_once","request":{
+        let mut approval = json!({"type":"control_request","request_id":"write_once","request":{
             "subtype":"can_use_tool","tool_name":"Write","tool_use_id":"tool_write","input":{"file_path":format!("{cwd}/new.txt"),"content":"hello"}}});
+        if case == "auto-outside" { approval["request"]["input"]["file_path"] = json!("/outside/new.txt"); }
         let assistant = json!({"type":"assistant","uuid":"answer","session_id":"s","parent_tool_use_id":null,
             "message":{"id":"m","role":"assistant","content":[{"type":"text","text":"hello"}]}});
         let mut result = json!({"type":"result","uuid":"result","session_id":"s","subtype":"success","is_error":false,"permission_denials":[],"queued_turn_count":0,"result":"hello","errors":[]});
@@ -124,7 +134,7 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             result.as_object_mut().unwrap().remove("queued_turn_count");
         }
         let mut script = format!("IFS= read -r init || exit 1\nprintf '%s\\n' {}\nIFS= read -r prompt || exit 2\nprintf '%s\\n' {}\n", quoted(&control), quoted(&init));
-        if case == "allow" {
+        if case == "allow" || case.starts_with("auto") {
             script.push_str(&format!("printf '%s\\n' {}\nIFS= read -r reply || exit 3\ncase \"$reply\" in *'\"behavior\":\"allow\"'*) ;; *) exit 4 ;; esac\n", quoted(&approval)));
         }
         if case == "long" {
@@ -173,6 +183,7 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             .unwrap();
         assert!(reserved.is_none() && owned_process.is_none());
         let deadline = Instant::now() + Duration::from_secs(if case == "long" { 660 } else { 15 });
+        if case.starts_with("auto") { assert!(f.projects.automation_permissions(&f.storage, &f.project_id).unwrap().files, "consent survived workspace preparation"); }
         let mut approved = false;
         let mut canceled = false;
         let mut events = Vec::new();
@@ -236,7 +247,7 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             ended["state"],
             match case {
                 "cancel" => "canceled",
-                "bad-init" | "unknown-queue" => "failed",
+                "bad-init" | "unknown-queue" | "auto-outside" => "failed",
                 _ => "succeeded",
             },
             "{case}: {ended:?}"
@@ -284,7 +295,7 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             .collect();
         assert_eq!(
             final_text,
-            if matches!(case, "success" | "long" | "organization-guard" | "privacy" | "privacy-with-guard" | "default-effort" | "allow") {
+            if matches!(case, "success" | "long" | "organization-guard" | "privacy" | "privacy-with-guard" | "default-effort" | "allow" | "auto") {
                 vec![json!("hello")]
             } else {
                 vec![]

@@ -39,7 +39,10 @@ function validateGitTrustInspection(value: unknown): GitTrustInspection {
   return inspection as unknown as GitTrustInspection;
 }
 export type TeamTaskCancelRequest = ChatDiscardAddress & { action: "cancelTeamTask"; triggerMessageId: string };
+export type AutomationPermissions = { files: boolean; commands: boolean };
 export type ProjectCatalogRequest =
+  | { action: "getAutomationPermissions"; projectId: string }
+  | { action: "setAutomationPermissions"; projectId: string; permissions: AutomationPermissions; confirmed: true }
   | { action: "getProviderConnections" }
   | { action: "setProviderConnection"; runtime: "codex" | "claude-code"; connected: boolean }
   | TeamTaskCancelRequest
@@ -81,6 +84,7 @@ export type ProjectCatalogRequest =
   | { action: "abandonPreparation"; inspection: PreparationInspection };
 export interface ProjectCatalogEntry { projectId: string; canonicalPath: string }
 export type ProjectCatalogResult =
+  | { schemaVersion: 1; action: "getAutomationPermissions" | "setAutomationPermissions"; projectId: string; permissions: AutomationPermissions }
   | { schemaVersion: 1; action: "getProviderConnections" | "setProviderConnection"; connections: { codex: boolean; "claude-code": boolean } }
   | { schemaVersion: 1; action: "cancelTeamTask"; chatId: string; triggerMessageId: string; status: "stopping" | "stopped" }
   | { schemaVersion: 1; action: "inspectGitTrust" | "confirmGitTrust"; inspection: GitTrustInspection }
@@ -150,7 +154,14 @@ export function validateChatDiscardInspection(value: unknown): ChatDiscardInspec
 }
 export function validateProjectCatalogRequest(value: unknown): ProjectCatalogRequest {
   const request = object(value);
-  if (request.action === "cancelTeamTask") {
+  if (request.action === "getAutomationPermissions" || request.action === "setAutomationPermissions") {
+    keys(request, request.action === "setAutomationPermissions" ? ["action","projectId","permissions","confirmed"] : ["action","projectId"]);
+    id(request.projectId);
+    if (request.action === "setAutomationPermissions") {
+      const permissions = object(request.permissions); keys(permissions,["files","commands"]);
+      if (typeof permissions.files !== "boolean" || typeof permissions.commands !== "boolean" || request.confirmed !== true) throw new Error("invalid automation consent");
+    }
+  } else if (request.action === "cancelTeamTask") {
     keys(request, ["action", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "triggerMessageId"]);
     for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "triggerMessageId"]) id(request[key]);
   } else if (request.action === "inspectGitTrust" || request.action === "revokeGitTrust") {
@@ -229,7 +240,12 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   const request = validateProjectCatalogRequest(input);
   const result = object(value);
   if (result.schemaVersion !== 1 || result.action !== request.action || new TextEncoder().encode(JSON.stringify(value)).byteLength > 768 * 1024) throw new Error("invalid catalog response envelope");
-  if (request.action === "cancelTeamTask") {
+  if (request.action === "getAutomationPermissions" || request.action === "setAutomationPermissions") {
+    keys(result,["schemaVersion","action","projectId","permissions"]);
+    const permissions = object(result.permissions); keys(permissions,["files","commands"]);
+    if (result.projectId !== request.projectId || typeof permissions.files !== "boolean" || typeof permissions.commands !== "boolean") throw new Error("invalid automation permissions");
+    if (request.action === "setAutomationPermissions" && (permissions.files !== request.permissions.files || permissions.commands !== request.permissions.commands)) throw new Error("automation permission receipt differs");
+  } else if (request.action === "cancelTeamTask") {
     keys(result, ["schemaVersion", "action", "chatId", "triggerMessageId", "status"]);
     if (result.chatId !== request.chatId || result.triggerMessageId !== request.triggerMessageId || !["stopping", "stopped"].includes(String(result.status))) throw new Error("team cancellation target mismatch");
   } else if (request.action === "inspectGitTrust" || request.action === "confirmGitTrust") {
