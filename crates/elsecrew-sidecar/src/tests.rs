@@ -39,6 +39,15 @@ fn runtime_error_survives_a_concurrent_completed_response() {
     assert!(sidecar.deferred_runtime_error.is_none());
 }
 
+
+/// Native discovery is gated on the user's explicit app connection
+/// (`providerDisconnected` otherwise); these tests exercise later rejections.
+fn connect_test_providers(session: &mut SidecarSession) {
+    let AdmissionState::Ready { sidecar, .. } = &mut session.admission else { panic!("admission not ready") };
+    sidecar.projects.set_provider_connection("codex", true).unwrap();
+    sidecar.projects.set_provider_connection("claude-code", true).unwrap();
+}
+
 #[test]
 fn discovery_admission_rejection_keeps_session_available() {
     let (_root, path) = database();
@@ -46,6 +55,7 @@ fn discovery_admission_rejection_keeps_session_available() {
     let mut session = SidecarSession::new(instance.into(), agent_runtime::AgentRuntime::native_candidate());
     session.start_admission(&path);
     wait_until_admitted(&mut session);
+    connect_test_providers(&mut session);
     for (method, runtime) in [
         ("agent.getModelChoices", "codex"),
         ("agent.getCapabilities", "codex"),
@@ -120,6 +130,9 @@ fn discovery_rejection_stdio_returns_error_then_status_and_clean_quit() {
         assert!(Instant::now() < admission_deadline, "storage admission did not finish: {:?}", status.result);
         thread::sleep(Duration::from_millis(10));
     }
+    send("connect", "project.catalog", json!({"action":"setProviderConnection","runtime":"codex","connected":true}));
+    let EnvelopeV1::Response(connected) = next() else { panic!("connection response") };
+    assert!(connected.ok, "{connected:?}");
     send("reject", "agent.getModelChoices", json!({"runtime":"codex","refresh":true,"chatId":"chat_missing","roleId":"coding"}));
     let EnvelopeV1::Response(rejected) = next() else { panic!("rejection response") };
     assert_eq!(rejected.request_id, "reject");
@@ -178,6 +191,7 @@ fn native_session_negotiates_adapter_without_granting_unscoped_execution() {
     session.start_admission(&path);
     wait_until_admitted(&mut session);
     assert!(matches!(session.admission, AdmissionState::Ready { .. }));
+    connect_test_providers(&mut session);
     for runtime in ["codex", "claude-code"] {
         let response = session.handle_request(request_value(instance, runtime, "agent.getCapabilities", json!({"runtime":runtime,"refresh":true}))).unwrap().response.unwrap();
         assert!(response.ok, "{response:?}");

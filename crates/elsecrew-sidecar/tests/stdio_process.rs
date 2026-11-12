@@ -133,6 +133,27 @@ fn binary_ready_status_quit_flow_marks_clean_and_exits_zero() {
     );
     wait_for_storage_ready_reader(&mut stdin, &mut stdout, &ready.sidecar_instance_id, false);
 
+    // A provider the user has not connected is refused with a response; the
+    // sidecar must keep serving (it used to exit on this error).
+    #[cfg(target_os = "macos")]
+    {
+        write_request(&mut stdin, &ready.sidecar_instance_id, "native_disconnected", "agent.getCapabilities",
+            serde_json::json!({"runtime":"codex","refresh":true}));
+        let mut line = String::new();
+        stdout.read_line(&mut line).unwrap();
+        let EnvelopeV1::Response(response) = decode_jsonl(line.as_bytes()).unwrap() else { panic!("disconnected response") };
+        assert!(!response.ok);
+        assert_eq!(response.error.unwrap().code, "providerDisconnected");
+        for (request_id, runtime) in [("connect_codex", "codex"), ("connect_claude", "claude-code")] {
+            write_request(&mut stdin, &ready.sidecar_instance_id, request_id, "project.catalog",
+                serde_json::json!({"action":"setProviderConnection","runtime":runtime,"connected":true}));
+            let mut line = String::new();
+            stdout.read_line(&mut line).unwrap();
+            let EnvelopeV1::Response(response) = decode_jsonl(line.as_bytes()).unwrap() else { panic!("connection response") };
+            assert!(response.ok, "{response:?}");
+        }
+    }
+
     #[cfg(target_os = "macos")]
     for (request_id, method, params, success) in [
         (

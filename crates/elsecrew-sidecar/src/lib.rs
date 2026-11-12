@@ -736,6 +736,11 @@ impl SidecarSession {
             Err(error) if error.kind() == "invalidParams" => Ok(HandledRequest::response(
                 error_response(&request, "invalidParams", "invalidRequest", error.detail()),
             )),
+            // An unconnected provider is an ordinary refusal of this request,
+            // not a broken service: answer it instead of ending the sidecar.
+            Err(error) if error.kind() == "providerDisconnected" => Ok(HandledRequest::response(
+                error_response(&request, "providerDisconnected", "requestBlocked", error.detail()),
+            )),
             other => other,
         }
     }
@@ -984,6 +989,11 @@ impl Sidecar {
         match self.handle_validated_request(request.clone()) {
             Err(error) if error.kind() == "invalidParams" => Ok(HandledRequest::response(
                 error_response(&request, "invalidParams", "invalidRequest", error.detail()),
+            )),
+            // An unconnected provider is an ordinary refusal of this request,
+            // not a broken service: answer it instead of ending the sidecar.
+            Err(error) if error.kind() == "providerDisconnected" => Ok(HandledRequest::response(
+                error_response(&request, "providerDisconnected", "requestBlocked", error.detail()),
             )),
             other => other,
         }
