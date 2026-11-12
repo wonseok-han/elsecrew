@@ -675,7 +675,7 @@ export const en: Record<MessageKey, string> = {
   "m5.login.connected": "Connected",
   "m5.login.start": "Sign in to {name}",
   "m5.login.check": "Check connection again",
-  "m5.login.recovery.help": "Only records with confirmed process termination can be recovered. Credentials are not deleted; the lock stays if evidence is insufficient. Check the connection again after recovery.",
+  "m5.login.recovery.help": "Connection is paused because the previous operation could not be confirmed as ended. Check the connection again after it ends. Your login is retained.",
   "m5.login.recovery.action": "Recover connection lock",
   "m5.login.detail": "Information for support",
   "m5.login.error.recovery": "Could not confirm that the sign-in process ended. New sign-in and safe shutdown are blocked, and recovery records are preserved. Do not delete credentials or force quit. Use the details below to ask for help.",

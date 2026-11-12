@@ -674,7 +674,7 @@ export const ko = {
   "m5.login.connected": "연결됨",
   "m5.login.start": "{name} 로그인",
   "m5.login.check": "연결 상태 다시 확인",
-  "m5.login.recovery.help": "종료가 확인된 기록만 복구해요. 로그인 정보는 지우지 않으며, 증거가 부족하면 잠금을 유지해요. 복구되면 연결 상태를 다시 확인해 주세요.",
+  "m5.login.recovery.help": "이전 작업의 종료를 확인하지 못해 연결을 보류했어요. 작업이 종료된 뒤 상태 확인 버튼으로 다시 확인해 주세요. 로그인 정보는 유지돼요.",
   "m5.login.recovery.action": "연결 잠금 복구",
   "m5.login.detail": "도움 요청용 정보",
   "m5.login.error.recovery": "로그인 프로세스 종료를 확인하지 못했어요. 새 로그인과 안전 종료를 차단하고 복구 기록을 보존했어요. 인증 파일을 지우거나 강제 종료하지 말고 아래 정보로 도움을 요청해 주세요.",
