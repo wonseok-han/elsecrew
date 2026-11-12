@@ -663,6 +663,13 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-chat-team-details > p { line-height: 1.6; }
 .m5-chat-team-details .m5-team-preview { margin-top: 14px; }
 .m5-chat-team-details .m5-new-chat-team { margin: 14px 0; }
+.m5-first-chat-setup { margin-top: 20px; border-top: 1px solid var(--m5-border); padding-top: 14px; font-size: 12px; }
+.m5-first-chat-setup > h3 { margin: 0 0 6px; font-size: 14px; }
+.m5-first-chat-setup > h4 { margin: 14px 0 0; font-size: 12px; }
+.m5-first-chat-setup > p { color: var(--m5-muted); line-height: 1.6; }
+.m5-first-chat-setup .m5-new-chat-team { margin: 10px 0; }
+.m5-first-chat-setup .m5-project-permissions { margin-top: 16px; }
+.m5-first-chat-confirm { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-weight: 600; cursor: pointer; }
 .m5-first-chat { padding: 24px 20px; max-width: 640px; margin: auto; }
 .m5-first-chat h2 { font-size: 21px; letter-spacing: -.4px; }
 .m5-first-chat > p { font-size: 13px; }

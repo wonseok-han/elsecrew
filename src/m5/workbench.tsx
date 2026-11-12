@@ -171,6 +171,10 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const newChatDialogRef = useRef<HTMLDialogElement>(null);
   const newChatButtonRef = useRef<HTMLButtonElement>(null);
   const [newChatOpen, setNewChatOpen] = useState(false);
+  // The first chat of a project must not start before the user has seen the
+  // team (provider/model per role) and the project's access permissions.
+  const [setupConfirmed, setSetupConfirmed] = useState(false);
+  useEffect(() => { if (newChatOpen) setSetupConfirmed(false); }, [newChatOpen]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appDefaultsOpen, setAppDefaultsOpen] = useState(false);
   const roleNavigation = useRef<((next: () => void) => void) | null>(null);
@@ -400,16 +404,25 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         <p>{t("m5.navigation.newChatHelp")}</p>
         {chat.error && <p role="alert" className="m5-error">{t(chat.error.messageKey)}</p>}
         {chat.notice && <p role="status">{formatChatNotice(chat, lang)}</p>}
-        <form className="m5-new-chat-form" onKeyDown={submitChatShortcut} onSubmit={(event) => { event.preventDefault(); if (admissionReady && projectDataReady && goal.trim() && !chat.preparing && !chat.switching && !chat.preparationApiUnavailable && !(snapshot.workspace && !controller.canLeaveProject())) void createChat(); }}>
+        <form className="m5-new-chat-form" onKeyDown={submitChatShortcut} onSubmit={(event) => { event.preventDefault(); if (admissionReady && projectDataReady && goal.trim() && !chat.preparing && !chat.switching && !chat.preparationApiUnavailable && !(snapshot.workspace && !controller.canLeaveProject()) && (chat.chats.length > 0 || setupConfirmed)) void createChat(); }}>
           <input ref={goalInputRef} aria-label={t("m5.navigation.goal")} value={goal} onChange={(event) => setGoal(event.target.value)} placeholder={t("m5.navigation.goalPlaceholder")} disabled={!admissionReady || chat.preparing} />
           <p className="m5-first-chat-note">{t("m5.application.autoBaseline")}</p>
-          <button type="submit" title="⌘ Enter / Ctrl Enter" aria-keyshortcuts="Meta+Enter Control+Enter" disabled={!admissionReady || !projectDataReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject())}>{t("m5.chat.coordinatorSend")}</button>
+          <button type="submit" title="⌘ Enter / Ctrl Enter" aria-keyshortcuts="Meta+Enter Control+Enter" disabled={!admissionReady || !projectDataReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject()) || (chat.chats.length === 0 && !setupConfirmed)}>{t("m5.chat.coordinatorSend")}</button>
         </form>
-        <details className="m5-chat-team-details"><summary>{t("m5.firstChat.team")}</summary>
+        {chat.chats.length === 0 ? <section className="m5-first-chat-setup" aria-labelledby="m5-first-chat-setup-heading">
+          <h3 id="m5-first-chat-setup-heading">{t("m5.firstChat.setup.title")}</h3>
+          <p>{t("m5.firstChat.setup.help")}</p>
+          <h4>{t("m5.firstChat.team")}</h4>
+          {chat.settings && <dl className="m5-new-chat-team">{coordinatorRoles(chat.settings.roles).map(role => <div key={role.roleId}><dt>{t(`m5.roles.${role.roleId}`)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{role.modelSelector}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl>}
+          <button type="button" className="m5-secondary" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching} onClick={() => openRoleSettings(true)}>{t("m5.firstChat.editTeam")}</button>
+          <p>{t("m5.firstChat.editTeamHelp")}</p>
+          <ProjectPermissions key={snapshot.project.id} projectId={snapshot.project.id} disabled={!admissionReady || chat.preparing || chat.switching} />
+          <label className="m5-first-chat-confirm"><input type="checkbox" checked={setupConfirmed} disabled={chat.preparing || chat.switching} onChange={event => setSetupConfirmed(event.target.checked)} /><span>{t("m5.firstChat.setup.confirm")}</span></label>
+        </section> : <details className="m5-chat-team-details"><summary>{t("m5.firstChat.team")}</summary>
         {chat.settings && <dl className="m5-new-chat-team">{coordinatorRoles(chat.settings.roles).map(role => <div key={role.roleId}><dt>{t(`m5.roles.${role.roleId}`)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{role.modelSelector}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl>}
         <button type="button" className="m5-secondary" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching} onClick={() => openRoleSettings(true)}>{t("m5.firstChat.editTeam")}</button>
         <p>{t("m5.firstChat.editTeamHelp")}</p>
-        </details>
+        </details>}
         </dialog>
       </>}
 
