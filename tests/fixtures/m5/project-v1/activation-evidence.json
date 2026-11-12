@@ -1,0 +1,185 @@
+{
+  "schemaVersion": 1,
+  "validator": "snapshotActivationEvidence",
+  "valid": {
+    "manifest": {
+      "schemaVersion": 1,
+      "projectId": "project_01",
+      "canonicalGitRoot": "/fixtures/repository",
+      "worktreeId": "worktree_01",
+      "worktreePath": "/fixtures/workspaces/worktree_01",
+      "workspaceKind": "standaloneSnapshot",
+      "snapshotTransport": "gitBundle",
+      "sourceMutationPolicy": "forbidden",
+      "objectFormat": "sha1",
+      "baseCommit": "0123456789abcdef0123456789abcdef01234567",
+      "baseTree": "89abcdef0123456789abcdef0123456789abcdef",
+      "sourceIdentity": "source_repository_01",
+      "workspaceIdentity": "workspace_snapshot_01",
+      "headMode": "detached",
+      "lifecycle": "active"
+    },
+    "source": {
+      "identity": {
+        "projectId": "project_01",
+        "worktreeId": "worktree_01",
+        "workspaceIdentity": "workspace_snapshot_01",
+        "canonicalGitRoot": "/fixtures/repository",
+        "sourceIdentity": "source_repository_01",
+        "objectFormat": "sha1",
+        "baseCommit": "0123456789abcdef0123456789abcdef01234567",
+        "baseTree": "89abcdef0123456789abcdef0123456789abcdef"
+      },
+      "trace": {
+        "sourceCapability": "readOnly",
+        "sourceLockCount": 0,
+        "sourceWriteCount": 0,
+        "before": {
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "index": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "refs": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "config": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "objects": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "packedRefs": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "entrySet": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "after": {
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "index": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "refs": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "config": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "objects": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "packedRefs": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "entrySet": "1111111111111111111111111111111111111111111111111111111111111111"
+        }
+      }
+    },
+    "workspace": {
+      "identity": {
+        "projectId": "project_01",
+        "worktreeId": "worktree_01",
+        "workspaceIdentity": "workspace_snapshot_01",
+        "canonicalGitRoot": "/fixtures/repository",
+        "sourceIdentity": "source_repository_01",
+        "objectFormat": "sha1",
+        "baseCommit": "0123456789abcdef0123456789abcdef01234567",
+        "baseTree": "89abcdef0123456789abcdef0123456789abcdef"
+      },
+      "invariant": {
+        "workspaceIdentity": "workspace_snapshot_01",
+        "objectFormat": "sha1",
+        "headCommit": "0123456789abcdef0123456789abcdef01234567",
+        "baseCommit": "0123456789abcdef0123456789abcdef01234567",
+        "indexTree": "89abcdef0123456789abcdef0123456789abcdef",
+        "baseTree": "89abcdef0123456789abcdef0123456789abcdef",
+        "remoteCount": 0,
+        "alternatesCount": 0,
+        "sourceRefCount": 0,
+        "sourceAbsolutePathCount": 0,
+        "objectConnectivity": true,
+        "externalManifestIdentity": "workspace_snapshot_01",
+        "gitMarkerIdentity": "workspace_snapshot_01",
+        "databaseIdentity": "workspace_snapshot_01"
+      }
+    },
+    "activation": {
+      "identity": {
+        "projectId": "project_01",
+        "worktreeId": "worktree_01",
+        "workspaceIdentity": "workspace_snapshot_01",
+        "canonicalGitRoot": "/fixtures/repository",
+        "sourceIdentity": "source_repository_01",
+        "objectFormat": "sha1",
+        "baseCommit": "0123456789abcdef0123456789abcdef01234567",
+        "baseTree": "89abcdef0123456789abcdef0123456789abcdef"
+      },
+      "completedPhases": [
+        "recoveryMarkerPersisted",
+        "sourceDigestBefore",
+        "bundleHeaderVerified",
+        "bundleExportStreamed",
+        "sourceDigestAfter",
+        "bundleVerified",
+        "materializationStreamed",
+        "workspaceVerified",
+        "externalManifestPersisted",
+        "gitMarkerPersisted",
+        "workspaceRenamed",
+        "databaseCommitted"
+      ],
+      "activeWorkspaceCount": 0,
+      "proposedLifecycle": "active",
+      "database": {
+        "projectId": "project_01",
+        "worktreeId": "worktree_01",
+        "workspaceIdentity": "workspace_snapshot_01",
+        "canonicalGitRoot": "/fixtures/repository",
+        "sourceIdentity": "source_repository_01",
+        "objectFormat": "sha1",
+        "baseCommit": "0123456789abcdef0123456789abcdef01234567",
+        "baseTree": "89abcdef0123456789abcdef0123456789abcdef"
+      },
+      "externalManifest": {
+        "projectId": "project_01",
+        "worktreeId": "worktree_01",
+        "workspaceIdentity": "workspace_snapshot_01",
+        "canonicalGitRoot": "/fixtures/repository",
+        "sourceIdentity": "source_repository_01",
+        "objectFormat": "sha1",
+        "baseCommit": "0123456789abcdef0123456789abcdef01234567",
+        "baseTree": "89abcdef0123456789abcdef0123456789abcdef"
+      },
+      "gitMarker": {
+        "projectId": "project_01",
+        "worktreeId": "worktree_01",
+        "workspaceIdentity": "workspace_snapshot_01",
+        "canonicalGitRoot": "/fixtures/repository",
+        "sourceIdentity": "source_repository_01",
+        "objectFormat": "sha1",
+        "baseCommit": "0123456789abcdef0123456789abcdef01234567",
+        "baseTree": "89abcdef0123456789abcdef0123456789abcdef"
+      }
+    }
+  },
+  "invalidCases": [
+    {"name":"source-project-id-mismatch","changes":[{"pointer":"/source/identity/projectId","value":"project_02"}]},
+    {"name":"source-worktree-id-mismatch","changes":[{"pointer":"/source/identity/worktreeId","value":"worktree_02"}]},
+    {"name":"source-workspace-identity-mismatch","changes":[{"pointer":"/source/identity/workspaceIdentity","value":"workspace_snapshot_02"}]},
+    {"name":"source-canonical-root-mismatch","changes":[{"pointer":"/source/identity/canonicalGitRoot","value":"/fixtures/repository-other"}]},
+    {"name":"source-identity-mismatch","changes":[{"pointer":"/source/identity/sourceIdentity","value":"source_repository_02"}]},
+    {"name":"source-base-commit-mismatch","changes":[{"pointer":"/source/identity/baseCommit","value":"1111111111111111111111111111111111111111"}]},
+    {"name":"source-base-tree-mismatch","changes":[{"pointer":"/source/identity/baseTree","value":"2222222222222222222222222222222222222222"}]},
+    {
+      "name": "source-object-format-mismatch",
+      "changes": [
+        {"pointer":"/source/identity/objectFormat","value":"sha256"},
+        {"pointer":"/source/identity/baseCommit","value":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        {"pointer":"/source/identity/baseTree","value":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+      ]
+    },
+    {
+      "name": "manifest-a-with-independently-valid-workspace-b-evidence",
+      "changes": [
+        {"pointer":"/workspace/identity/projectId","value":"project_02"},
+        {"pointer":"/workspace/identity/worktreeId","value":"worktree_02"},
+        {"pointer":"/workspace/identity/workspaceIdentity","value":"workspace_snapshot_02"},
+        {"pointer":"/workspace/identity/canonicalGitRoot","value":"/fixtures/repository-other"},
+        {"pointer":"/workspace/identity/sourceIdentity","value":"source_repository_02"},
+        {"pointer":"/workspace/identity/baseCommit","value":"1111111111111111111111111111111111111111"},
+        {"pointer":"/workspace/identity/baseTree","value":"2222222222222222222222222222222222222222"},
+        {"pointer":"/workspace/invariant/workspaceIdentity","value":"workspace_snapshot_02"},
+        {"pointer":"/workspace/invariant/headCommit","value":"1111111111111111111111111111111111111111"},
+        {"pointer":"/workspace/invariant/baseCommit","value":"1111111111111111111111111111111111111111"},
+        {"pointer":"/workspace/invariant/indexTree","value":"2222222222222222222222222222222222222222"},
+        {"pointer":"/workspace/invariant/baseTree","value":"2222222222222222222222222222222222222222"},
+        {"pointer":"/workspace/invariant/externalManifestIdentity","value":"workspace_snapshot_02"},
+        {"pointer":"/workspace/invariant/gitMarkerIdentity","value":"workspace_snapshot_02"},
+        {"pointer":"/workspace/invariant/databaseIdentity","value":"workspace_snapshot_02"}
+      ]
+    },
+    {"name":"activation-trace-identity-mismatch","changes":[{"pointer":"/activation/identity/workspaceIdentity","value":"workspace_snapshot_02"}]},
+    {"name":"database-base-commit-mismatch","changes":[{"pointer":"/activation/database/baseCommit","value":"1111111111111111111111111111111111111111"}]},
+    {"name":"external-manifest-canonical-root-mismatch","changes":[{"pointer":"/activation/externalManifest/canonicalGitRoot","value":"/fixtures/repository-other"}]},
+    {"name":"git-marker-source-identity-mismatch","changes":[{"pointer":"/activation/gitMarker/sourceIdentity","value":"source_repository_02"}]}
+  ]
+}

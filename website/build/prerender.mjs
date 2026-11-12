@@ -15,7 +15,7 @@ const out = resolve(root, "out");
 const host =
   process.env.VERCEL_PROJECT_PRODUCTION_URL ||
   process.env.SITE_HOST ||
-  "hello-agent.dev";
+  "elsecrew.dev";
 
 async function exists(path) {
   try {
@@ -44,7 +44,7 @@ if (response.status !== 200) {
   throw new Error(`prerender: 예상치 못한 상태 코드 ${response.status}`);
 }
 const html = await response.text();
-if (!html.includes("Hello, Agent")) {
+if (!html.includes("Elsecrew")) {
   throw new Error("prerender: 렌더된 HTML에 핵심 문구가 없음");
 }
 

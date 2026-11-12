@@ -1,0 +1,418 @@
+//! Public assistant projection for Claude Code stream-json, not launch authority.
+//! Source: https://code.claude.com/docs/en/agent-sdk/typescript#sdkassistantmessage
+//! The owner must separately handle initialization, tools, and process exit.
+//! Result observations are not proof of completion, empty queues, or child cleanup.
+//! Partial stream events are not emitted here, avoiding duplicate text delivery.
+use super::{BoundedObservation, ProviderError};
+use crate::provider::PROVIDER_PUBLIC_TEXT_MAX_BYTES;
+use serde::Deserialize;
+use serde_json::value::RawValue;
+use std::collections::BTreeSet;
+
+// No Debug: model text may contain user information.
+pub enum Projection {
+    Assistant {
+        item_id: String,
+        text: String,
+        /// The original frame still needs non-public block handling by the owner.
+        has_private_blocks: bool,
+    },
+    Result(ResultObservation),
+    RequiresHandling,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ReportedOutcome {
+    Success,
+    Failure,
+    /// A non-completion reason is not promoted to successful work.
+    RequiresHandling,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct ResultObservation {
+    pub outcome: ReportedOutcome,
+    /// None means the provider did not report queue state, not an empty queue.
+    pub queued_turn_count: Option<u64>,
+    pub permission_denied: bool,
+}
+
+#[derive(Deserialize)]
+struct ResultWire {
+    uuid: String,
+    session_id: String,
+    subtype: String,
+    is_error: bool,
+    terminal_reason: Option<String>,
+    queued_turn_count: Option<u64>,
+    permission_denials: Vec<Box<RawValue>>,
+}
+
+#[derive(Deserialize)]
+struct Tag {
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+#[derive(Deserialize)]
+struct Assistant {
+    uuid: String,
+    session_id: String,
+    parent_tool_use_id: Option<String>,
+    message: Message,
+    error: Option<String>,
+    aborted: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct Message {
+    id: String,
+    role: String,
+    content: Vec<Box<RawValue>>,
+}
+
+fn invalid() -> ProviderError {
+    ProviderError("invalid Claude public event observation".into())
+}
+fn identifier(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 128 && !value.chars().any(char::is_control)
+}
+
+/// One session's bounded public projection. Failure is sticky; no raw frames retained.
+pub struct SessionProjection {
+    budget: crate::provider::ProviderEventBudget,
+    session_id: String,
+    seen: BTreeSet<String>,
+    events: usize,
+    bytes: usize,
+    public_events: usize,
+    public_bytes: usize,
+    failed: bool,
+}
+
+impl SessionProjection {
+    pub fn new(session_id: &str) -> Result<Self, ProviderError> {
+        Self::with_budget(session_id, crate::provider::ProviderEventBudget::LegacyV1)
+    }
+
+    pub fn with_budget(session_id: &str, budget: crate::provider::ProviderEventBudget) -> Result<Self, ProviderError> {
+        if !identifier(session_id) {
+            return Err(invalid());
+        }
+        Ok(Self {
+            budget,
+            session_id: session_id.into(),
+            seen: BTreeSet::new(),
+            events: 0,
+            bytes: 0,
+            public_events: 0,
+            public_bytes: 0,
+            failed: false,
+        })
+    }
+
+    pub fn project(&mut self, input: &BoundedObservation) -> Result<Projection, ProviderError> {
+        if self.failed {
+            return Err(invalid());
+        }
+        let result = self.project_inner(input);
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
+    fn project_inner(&mut self, input: &BoundedObservation) -> Result<Projection, ProviderError> {
+        self.events += 1;
+        self.bytes += input.bytes.len();
+        if self.events > self.budget.internal_events()
+            || self.bytes > self.budget.observation_bytes()
+        {
+            return Err(invalid());
+        }
+        let tag: Tag = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+        if tag.kind == "result" {
+            let wire: ResultWire = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+            if wire.session_id != self.session_id
+                || !identifier(&wire.uuid)
+                || !self.seen.insert(wire.uuid)
+                || wire
+                    .queued_turn_count
+                    .is_some_and(|n| n > 9_007_199_254_740_991)
+            {
+                return Err(invalid());
+            }
+            let outcome = match wire.subtype.as_str() {
+                "success" if wire.is_error => ReportedOutcome::Failure,
+                "success"
+                    if wire
+                        .terminal_reason
+                        .as_deref()
+                        .is_none_or(|r| r == "completed") =>
+                {
+                    ReportedOutcome::Success
+                }
+                "success" => ReportedOutcome::RequiresHandling,
+                "error_max_turns"
+                | "error_during_execution"
+                | "error_max_budget_usd"
+                | "error_max_structured_output_retries" => ReportedOutcome::Failure,
+                _ => return Err(invalid()),
+            };
+            return Ok(Projection::Result(ResultObservation {
+                outcome,
+                queued_turn_count: wire.queued_turn_count,
+                permission_denied: !wire.permission_denials.is_empty(),
+            }));
+        }
+        if tag.kind != "assistant" {
+            return Ok(Projection::RequiresHandling);
+        }
+        let wire: Assistant = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+        // Missing parent scope must not be interpreted as an explicit main-thread null.
+        if input.json()?.get("parent_tool_use_id").is_none()
+            || wire.session_id != self.session_id
+            || !identifier(&wire.uuid)
+            || !identifier(&wire.message.id)
+            || wire.message.role != "assistant"
+            || !self.seen.insert(wire.uuid.clone())
+        {
+            return Err(invalid());
+        }
+        if wire.parent_tool_use_id.is_some() || wire.error.is_some() || wire.aborted == Some(true) {
+            return Ok(Projection::RequiresHandling);
+        }
+        let mut text = String::new();
+        let mut has_private_blocks = false;
+        for raw in wire.message.content {
+            let tag: Tag = serde_json::from_str(raw.get()).map_err(|_| invalid())?;
+            if tag.kind != "text" {
+                has_private_blocks = true;
+                continue;
+            }
+            #[derive(Deserialize)]
+            struct Text {
+                text: String,
+            }
+            let block: Text = serde_json::from_str(raw.get()).map_err(|_| invalid())?;
+            if text.len() + block.text.len() > PROVIDER_PUBLIC_TEXT_MAX_BYTES {
+                return Err(invalid());
+            }
+            text.push_str(&block.text);
+        }
+        if text.is_empty() {
+            return Ok(Projection::RequiresHandling);
+        }
+        self.public_events += 1;
+        self.public_bytes += text.len();
+        if self.public_events > self.budget.public_events()
+            || self.public_bytes > self.budget.public_bytes()
+        {
+            return Err(invalid());
+        }
+        // message.id can repeat across assistant frames; uuid is their delivery identity.
+        Ok(Projection::Assistant {
+            item_id: wire.uuid,
+            text,
+            has_private_blocks,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn durable_session_exceeds_legacy_count_without_retaining_raw_frames() {
+        let mut parser = super::SessionProjection::with_budget("session", crate::provider::ProviderEventBudget::DurableV1).unwrap();
+        for i in 0..3000 {
+            let mut value = frame(&format!("uuid-{i}"));
+            value["session_id"] = serde_json::Value::String("session".into());
+            assert!(parser.project(&observe(&value)).is_ok());
+        }
+        assert_eq!(parser.seen.len(), 3000);
+    }
+    use super::*;
+    use serde_json::{json, Value};
+    fn result() -> Value {
+        json!({"type":"result","uuid":"result-a","session_id":"session-a",
+            "subtype":"success","is_error":false,"permission_denials":[],
+            "result":"DO_NOT_APPEND_AGAIN","errors":["PRIVATE"]})
+    }
+    #[test]
+    fn result_is_a_report_not_public_text_or_queue_and_exit_proof() {
+        let mut parser = SessionProjection::new("session-a").unwrap();
+        match parser.project(&observe(&result())).unwrap() {
+            Projection::Result(observation) => assert_eq!(
+                observation,
+                ResultObservation {
+                    outcome: ReportedOutcome::Success,
+                    queued_turn_count: None,
+                    permission_denied: false,
+                }
+            ),
+            _ => panic!("expected result observation"),
+        }
+        // A session may have another queued turn; observing a result does not close it.
+        assert!(matches!(
+            parser.project(&observe(&frame("uuid-next"))).unwrap(),
+            Projection::Assistant { .. }
+        ));
+        assert!(parser.project(&observe(&result())).is_err());
+    }
+    #[test]
+    fn result_preserves_failure_attention_and_pending_queue_distinctions() {
+        for (patch, expected) in [
+            (json!({"is_error":true}), ReportedOutcome::Failure),
+            (
+                json!({"subtype":"error_max_turns"}),
+                ReportedOutcome::Failure,
+            ),
+            (
+                json!({"subtype":"error_during_execution"}),
+                ReportedOutcome::Failure,
+            ),
+            (
+                json!({"subtype":"error_max_budget_usd"}),
+                ReportedOutcome::Failure,
+            ),
+            (
+                json!({"subtype":"error_max_structured_output_retries"}),
+                ReportedOutcome::Failure,
+            ),
+            (
+                json!({"terminal_reason":"tool_deferred"}),
+                ReportedOutcome::RequiresHandling,
+            ),
+            (
+                json!({"terminal_reason":"new_reason"}),
+                ReportedOutcome::RequiresHandling,
+            ),
+            (
+                json!({"terminal_reason":"completed"}),
+                ReportedOutcome::Success,
+            ),
+        ] {
+            let mut wire = result();
+            wire.as_object_mut()
+                .unwrap()
+                .extend(patch.as_object().unwrap().clone());
+            wire["queued_turn_count"] = json!(2);
+            wire["permission_denials"] = json!([{"tool_input":"SECRET"}]);
+            match SessionProjection::new("session-a")
+                .unwrap()
+                .project(&observe(&wire))
+                .unwrap()
+            {
+                Projection::Result(observation) => {
+                    assert_eq!(observation.outcome, expected);
+                    assert_eq!(observation.queued_turn_count, Some(2));
+                    assert!(observation.permission_denied);
+                    assert!(!format!("{observation:?}").contains("SECRET"));
+                }
+                _ => panic!("expected result observation"),
+            }
+        }
+        for patch in [
+            json!({"session_id":"other"}),
+            json!({"subtype":"unknown"}),
+            json!({"queued_turn_count":-1}),
+            json!({"queued_turn_count":9007199254740992_u64}),
+            json!({"permission_denials":null}),
+            json!({"is_error":null}),
+        ] {
+            let mut wire = result();
+            wire.as_object_mut()
+                .unwrap()
+                .extend(patch.as_object().unwrap().clone());
+            let mut parser = SessionProjection::new("session-a").unwrap();
+            assert!(parser.project(&observe(&wire)).is_err());
+            assert!(parser.project(&observe(&result())).is_err());
+        }
+    }
+    fn frame(uuid: &str) -> Value {
+        json!({"type":"assistant","uuid":uuid,"session_id":"session-a","parent_tool_use_id":null,
+        "message":{"id":"message-shared","role":"assistant","content":[
+            {"type":"thinking","thinking":"PRIVATE"},
+            {"type":"text","text":"공개 답변"},
+            {"type":"tool_use","input":{"token":"SECRET"}}
+        ]}})
+    }
+    fn observe(value: &Value) -> BoundedObservation {
+        BoundedObservation::new(value.to_string().into_bytes()).unwrap()
+    }
+    #[test]
+    fn projects_only_main_assistant_text_and_uses_delivery_identity() {
+        let mut parser = SessionProjection::new("session-a").unwrap();
+        for uuid in ["uuid-a", "uuid-b"] {
+            match parser.project(&observe(&frame(uuid))).unwrap() {
+                Projection::Assistant {
+                    item_id,
+                    text,
+                    has_private_blocks,
+                } => {
+                    assert_eq!(item_id, uuid);
+                    assert_eq!(text, "공개 답변");
+                    assert!(has_private_blocks);
+                }
+                _ => panic!("expected public assistant text"),
+            }
+        }
+        assert!(parser.project(&observe(&frame("uuid-a"))).is_err());
+        assert!(parser.project(&observe(&frame("uuid-c"))).is_err());
+    }
+    #[test]
+    fn does_not_publish_partial_result_error_or_subagent_frames() {
+        for (key, value) in [
+            ("type", json!("stream_event")),
+            ("parent_tool_use_id", json!("tool-a")),
+            ("error", json!("authentication_failed")),
+            ("aborted", json!(true)),
+        ] {
+            let mut input = frame("uuid-a");
+            input[key] = value;
+            assert!(matches!(
+                SessionProjection::new("session-a")
+                    .unwrap()
+                    .project(&observe(&input))
+                    .unwrap(),
+                Projection::RequiresHandling
+            ));
+        }
+    }
+    #[test]
+    fn scope_and_text_budget_fail_without_echoing_private_input() {
+        for case in ["session", "parent", "oversize", "duplicate"] {
+            let mut input = frame("uuid-a");
+            match case {
+                "session" => input["session_id"] = json!("PRIVATE"),
+                "parent" => {
+                    input.as_object_mut().unwrap().remove("parent_tool_use_id");
+                }
+                "oversize" => {
+                    input["message"]["content"] =
+                        json!([{"type":"text","text":"x".repeat(PROVIDER_PUBLIC_TEXT_MAX_BYTES+1)}])
+                }
+                _ => {}
+            }
+            let observation = if case == "duplicate" {
+                BoundedObservation::new(
+                    input
+                        .to_string()
+                        .replacen(
+                            "\"session_id\":",
+                            "\"session_id\":\"PRIVATE\",\"session_id\":",
+                            1,
+                        )
+                        .into_bytes(),
+                )
+                .unwrap()
+            } else {
+                observe(&input)
+            };
+            let mut parser = SessionProjection::new("session-a").unwrap();
+            let error = parser.project(&observation).err().expect("must reject");
+            assert!(!error.to_string().contains("PRIVATE"));
+            assert!(parser.project(&observe(&frame("uuid-b"))).is_err());
+        }
+    }
+}

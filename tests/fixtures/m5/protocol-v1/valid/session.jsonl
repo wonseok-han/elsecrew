@@ -1,0 +1,7 @@
+{"event":"system.ready","kind":"event","payload":{"appSchemaVersion":1,"capabilities":["system.status","app.prepareQuit"],"pid":4242,"platform":"darwin","protocolVersion":1,"sidecarInstanceId":"sidecar_fixture_01","sidecarSchemaVersion":1},"protocolVersion":1,"seq":1,"sidecarInstanceId":"sidecar_fixture_01","streamId":"system"}
+{"kind":"request","method":"system.status","params":{},"protocolVersion":1,"requestId":"req_status_01","sidecarInstanceId":"sidecar_fixture_01"}
+{"kind":"response","ok":true,"protocolVersion":1,"requestId":"req_status_01","result":{"healthy":true},"sidecarInstanceId":"sidecar_fixture_01"}
+{"kind":"request","method":"app.prepareQuit","params":{},"protocolVersion":1,"requestId":"req_quit_01","sidecarInstanceId":"sidecar_fixture_01"}
+{"kind":"response","ok":true,"protocolVersion":1,"requestId":"req_quit_01","result":{"blockers":[],"safeToQuit":true},"sidecarInstanceId":"sidecar_fixture_01"}
+{"chatId":"chat_01","event":"run.event","kind":"event","payload":{"text":"계획을 확인하고 있어요."},"protocolVersion":1,"runId":"run_01","seq":1,"sidecarInstanceId":"sidecar_fixture_01","streamId":"run_stream_01","taskId":"task_01"}
+{"chatId":"chat_01","event":"run.finished","kind":"event","payload":{"status":"completed"},"protocolVersion":1,"runId":"run_01","seq":2,"sidecarInstanceId":"sidecar_fixture_01","streamId":"run_stream_01","taskId":"task_01"}

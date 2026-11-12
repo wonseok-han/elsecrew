@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Hello Agent",
+  "productName": "Elsecrew",
   "version": "0.1.2",
-  "identifier": "com.wonseokhan.helloagent",
+  "identifier": "com.wonseokhan.elsecrew",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Hello, Agent",
+        "title": "Elsecrew",
         "width": 880,
         "height": 700,
         "minWidth": 740,

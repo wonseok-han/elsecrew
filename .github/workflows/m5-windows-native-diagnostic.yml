@@ -1,0 +1,48 @@
+name: M5 Windows native primitives (diagnostic only)
+
+on:
+  push:
+    branches:
+      - codex/m5-windows-native-20261105
+      - codex/m5-windows-supervisor-20261105
+
+permissions:
+  contents: read
+
+jobs:
+  native-primitives:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: 4
+      CARGO_INCREMENTAL: 0
+      RUST_TEST_THREADS: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile and exercise Windows handle, job, and pipe primitives
+        run: cargo test --locked --release -p elsecrew-sidecar --lib project::windows_ -- --nocapture
+      - name: Verify shared Windows handle-inheritance lock
+        run: "cargo test --locked --release -p elsecrew-sidecar --lib process_spawn:: -- --nocapture"
+      - name: Require Windows watcher tests to be compiled
+        shell: pwsh
+        run: |
+          $tests = cargo test --locked --release -p elsecrew-sidecar --lib watch_native_tests -- --list
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $required = @('watcher_scan_rejects_a_different_root_between_slices', 'watcher_scan_descendant_rename_is_blocked_or_revalidated', 'watcher_scan_rejects_wrong_retained_descendant', 'windows_watch_initial_scan_retains_only_a_bounded_slice')
+          foreach ($name in $required) {
+            if (-not ($tests | Select-String -SimpleMatch "project::watch_native_tests::${name}: test")) { throw "Missing Windows regression: $name" }
+          }
+      - name: Verify watcher slice identity regressions
+        run: cargo test --locked --release -p elsecrew-sidecar --lib watcher_scan_ -- --nocapture
+      - name: Verify Windows watcher yields between slices
+        run: cargo test --locked --release -p elsecrew-sidecar --lib windows_watch_initial_scan_retains_only_a_bounded_slice -- --nocapture
+      - name: Record diagnostic scope
+        if: always()
+        shell: pwsh
+        run: |
+          @'
+          Diagnostic only: Windows handle, job, bounded pipe, and watcher primitives.
+          No application activation, packaging, credentials, or model calls.
+          These scoped results do not establish Windows product readiness or release approval.
+          '@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY

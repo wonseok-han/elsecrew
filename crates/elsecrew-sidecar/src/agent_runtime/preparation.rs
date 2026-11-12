@@ -1,0 +1,1457 @@
+//! Shared durable preparation, without spawning or granting provider authority.
+use super::*;
+use elsecrew_core::provider::vendor_observation::codex_preflight::ExpectedPermission;
+#[cfg(target_os = "macos")]
+mod terminal;
+#[allow(dead_code)] // Claude launch admission/owner will call this output bridge.
+#[cfg(target_os = "macos")]
+mod claude;
+#[cfg(target_os = "macos")]
+pub(crate) use claude::OwnedClaudeRun;
+#[cfg(target_os = "macos")]
+pub(crate) use claude::ClaudeToolAdmission;
+#[allow(unused_imports)] // Pending native Claude dispatcher integration.
+#[cfg(target_os = "macos")]
+pub(crate) use claude::ClaudeStart;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CodexLaunchMode {
+    OfflineOuter,
+    ProxiedOuter,
+    NamedTools,
+}
+
+fn codex_permission(profile: &AgentResolvedProfileV1) -> Result<ExpectedPermission, SidecarError> {
+    match (profile.runtime.as_str(), profile.permission.as_str()) {
+        ("codex", "readOnly") => Ok(ExpectedPermission::ReadOnly),
+        ("codex", "workspaceWrite") => Ok(ExpectedPermission::WorkspaceWrite),
+        _ => Err(SidecarError::new(
+            "agentInputChanged",
+            "reserved role permission is unavailable",
+        )),
+    }
+}
+
+pub(crate) struct RunPreparation {
+    request: AgentRunStartRequestV1,
+    pub(super) chat: Value,
+    pub(super) profile: AgentResolvedProfileV1,
+    pub(super) manifest: Value,
+    pub(super) prompt: Vec<u8>,
+}
+
+pub(crate) struct RunReservation {
+    pub(super) run_id: String,
+    pub(super) created: String,
+    pub(super) run: Value,
+    request: AgentRunStartRequestV1,
+    prompt: Vec<u8>,
+    // Set exactly once, only after the atomic thread-receipt/running commit.
+    running_record: std::sync::OnceLock<(Value, Value)>,
+    #[cfg(target_os = "macos")]
+    pub(super) native_provider: Option<super::discovery::NativeProviderContext>,
+    pub(super) claude_preflight: Option<elsecrew_protocol::agent_adapter_v1::phased_claude::Preflight>,
+}
+
+/// No Storage borrow: the dispatcher can service other requests between steps.
+#[cfg(target_os = "macos")]
+pub(crate) struct RunTextState {
+    transport: crate::provider_preflight_session::BoundTextSession,
+    pending_answer: Option<String>,
+    pending_item: Option<elsecrew_protocol::agent_adapter_v1::output_pages::OutputItemUpdate>,
+    completion: Option<
+        Result<
+            elsecrew_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
+            SidecarError,
+        >,
+    >,
+    run_id: String,
+    finished: bool,
+}
+
+/// Long-lived native execution owner. No borrowed Storage or profile remains
+/// across dispatcher requests. Creation does not launch or admit a provider.
+#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(target_os = "macos")]
+pub(crate) struct OwnedTextRun {
+    reservation: RunReservation,
+    process: crate::provider_login_process::LoginProcess<'static>,
+    state: RunTextState,
+    cancel: std::sync::atomic::AtomicBool,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(target_os = "macos")]
+impl OwnedTextRun {
+    pub(super) fn polling_finished(&self) -> bool {
+        self.state.finished
+    }
+
+    pub(super) fn verify_approval_boundary(
+        &mut self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+    ) -> Result<(), SidecarError> {
+        if self.state.finished
+            || self.state.completion.is_some()
+            || !self.state.transport.matches_process(&self.process)
+        {
+            return Err(SidecarError::new(
+                "agentApprovalChanged",
+                "approval owner is no longer current",
+            ));
+        }
+        self.reservation.verify_approval_boundary(
+            storage,
+            projects,
+            &mut self.process,
+            &self.cancel,
+        )
+    }
+    pub(super) fn pending_approvals(
+        &self,
+    ) -> Vec<&elsecrew_core::provider::vendor_observation::codex_approval::PendingApproval> {
+        if self.state.finished
+            || self.state.completion.is_some()
+            || self.cancel.load(std::sync::atomic::Ordering::Acquire)
+            || !self.state.transport.matches_process(&self.process)
+        {
+            return Vec::new();
+        }
+        self.state.transport.pending_approvals()
+    }
+
+    /// Captured from the process owner, never a renderer-supplied stream ID.
+    /// `advance` independently checks the bound session against this process.
+    pub(super) fn connection_id(&self) -> uuid::Uuid {
+        self.process.connection_id()
+    }
+
+    pub(super) fn registration_identity(
+        &self,
+        storage: &Storage,
+        projects: &ProjectManager,
+    ) -> Result<RunIdentity, SidecarError> {
+        if self.state.finished
+            || self.state.run_id != self.reservation.run_id
+            || !self.state.transport.matches_process(&self.process)
+        {
+            return Err(SidecarError::new(
+                "agentInputChanged",
+                "native owner differs",
+            ));
+        }
+        self.reservation
+            .validate_text_input(storage, projects)
+            .map_err(|_| SidecarError::new("agentInputChanged", "native reservation differs"))?;
+        let run = &self.reservation.run;
+        Ok(RunIdentity {
+            chat_id: self.reservation.request.chat_id.clone(),
+            task_id: run["taskId"].as_str().unwrap_or_default().into(),
+            project_id: run["projectId"].as_str().unwrap_or_default().into(),
+            worktree_id: run["worktreeId"].as_str().unwrap_or_default().into(),
+            workspace_identity: run["workspaceIdentity"].as_str().unwrap_or_default().into(),
+            run_id: run["runId"].as_str().unwrap_or_default().into(),
+        })
+    }
+
+    pub(crate) fn from_prepared(
+        reservation: RunReservation,
+        process: crate::provider_login_process::LoginProcess<'static>,
+        state: RunTextState,
+    ) -> Self {
+        Self {
+            reservation,
+            process,
+            state,
+            cancel: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Exact accepted identity only. This queues cancellation; it does not claim
+    /// that cleanup or durable terminal persistence has already completed.
+    pub(crate) fn request_cancel(&self, identity: &RunIdentity) -> Result<(), SidecarError> {
+        let matches = identity_value(identity).as_object().is_some_and(|fields| {
+            fields
+                .iter()
+                .all(|(key, value)| self.reservation.run.get(key) == Some(value))
+        });
+        if !matches
+            || self.state.finished
+            || self.state.run_id != self.reservation.run_id
+            || !self.state.transport.matches_process(&self.process)
+        {
+            return Err(SidecarError::new(
+                "agentInputChanged",
+                "native run identity differs",
+            ));
+        }
+        self.cancel
+            .store(true, std::sync::atomic::Ordering::Release);
+        Ok(())
+    }
+
+    pub(crate) fn advance(
+        &mut self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        on_action: &mut impl FnMut(
+            &mut Storage,
+            crate::provider_preflight_session::TextAction<'_>,
+        ) -> Result<(), SidecarError>,
+    ) -> Result<
+        Option<elsecrew_core::provider::vendor_observation::codex_events::stream::TurnOutcome>,
+        SidecarError,
+    > {
+        self.reservation.advance_text_candidate(
+            storage,
+            projects,
+            &mut self.process,
+            &self.cancel,
+            &mut self.state,
+            on_action,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn closing_for_test(&self) -> bool {
+        self.state.completion.is_some() && !self.state.finished
+    }
+
+    /// Return the original owners when dispatcher registration fails. The text
+    /// session is abandoned; its process still requires explicit cleanup.
+    pub(crate) fn into_cleanup_parts(
+        self,
+    ) -> (
+        RunReservation,
+        crate::provider_login_process::LoginProcess<'static>,
+    ) {
+        (self.reservation, self.process)
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl RunReservation {
+    pub(super) fn bind_provider_fence(
+        &self,
+        storage: &mut Storage,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+    ) -> Result<(), SidecarError> {
+        let failure = || SidecarError::new("agentInputChanged", "provider fence binding differs");
+        let mut projection = actual_run_projection(storage, &self.run_id).map_err(|_| failure())?;
+        if !self.matches_current_record(&projection) || projection.contains_key("provider_run_fence") {
+            return Err(failure());
+        }
+        let receipt = process.bind_run_fence(&self.run_id)?;
+        receipt.validate(&self.run_id, self.run["selectedProfile"]["runtime"].as_str().ok_or_else(failure)?)?;
+        projection.remove("last_event_sequence");
+        projection.insert("provider_run_fence".into(), receipt.to_value());
+        storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run", aggregate_id: self.run_id.clone(),
+            operation_id: format!("op_agent_provider_fence_{}", self.run_id),
+            request_id: None, payload: projection,
+        }]).map(|_| ()).map_err(|_| failure())
+    }
+
+    fn current_record(&self) -> &Value {
+        self.running_record.get().map(|(record, _)| record).unwrap_or(&self.run)
+    }
+
+    fn matches_current_record(&self, projection: &Map<String, Value>) -> bool {
+        projection.get("record") == Some(self.current_record())
+            && projection.get("state") == self.current_record().get("state")
+            && match self.running_record.get() {
+                Some((_, receipt)) => projection.get("native_thread_receipt") == Some(receipt),
+                None => !projection.contains_key("native_thread_receipt"),
+            }
+    }
+
+    /// Recheck the selected discovery observation against durable inputs and
+    /// the actual profile owner immediately before attempting native launch.
+    pub(super) fn verify_named_observation(
+        &self,
+        storage: &Storage,
+        projects: &ProjectManager,
+        process: &crate::provider_login_process::LoginProcess<'_>,
+        observation: &crate::provider_preflight_session::NamedProfileObservation,
+    ) -> Result<(), SidecarError> {
+        let failure = || SidecarError::new("agentInputChanged", "named discovery no longer matches");
+        self.validate_text_input(storage, projects).map_err(|_| failure())?;
+        let profile: AgentResolvedProfileV1 =
+            serde_json::from_value(self.run["selectedProfile"].clone()).map_err(|_| failure())?;
+        let permission = codex_permission(&profile)?;
+        let manifest = projects.verify_workspace_for_run(
+            storage, &address_from_chat(&self.run).map_err(|_| failure())?,
+        ).map_err(|_| failure())?;
+        let workspace = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
+        let expected = elsecrew_core::provider::vendor_observation::codex_preflight::ExpectedProfile {
+            model: &profile.model_selector,
+            reasoning_effort: profile.reasoning_effort.as_deref().ok_or_else(failure)?,
+        };
+        if !observation.matches(&expected, permission, workspace, &process.codex_preflight_home()?) {
+            return Err(failure());
+        }
+        Ok(())
+    }
+
+    /// Incremental startup cleanup and terminal persistence. True authorizes the
+    /// owner to release a confirmed fence separately, without repeating this
+    /// transaction if that release needs another attempt.
+    pub(crate) fn poll_failed_start(
+        &self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+    ) -> Result<bool, SidecarError> {
+        let failure =
+            || SidecarError::new("agentRecoveryRequired", "startup cleanup requires recovery");
+        if !process.matches_startup_run(&self.run_id) {
+            return Err(failure());
+        }
+        if matches!(process.poll_finish(), Ok(false)) {
+            return Ok(false);
+        }
+        let evidence = process.closure_evidence().ok_or_else(failure)?;
+        self.validate_text_input(storage, projects)
+            .map_err(|_| failure())?;
+        let projection = actual_run_projection(storage, &self.run_id).map_err(|_| failure())?;
+        let prior = projection["process_identity_internal"]
+            .as_array()
+            .ok_or_else(failure)?;
+        if prior.iter().any(|item| {
+            !evidence.identities().iter().any(|identity| {
+                item["pid"].as_u64() == Some(identity.pid as u64)
+                    && item["start_us"].as_i64() == Some(identity.start_us)
+            })
+        }) {
+            return Err(failure());
+        }
+        persist_start_failure(
+            storage,
+            projects,
+            &self.run_id,
+            evidence.confirmed(),
+            evidence.identities(),
+            "native startup failed",
+        )
+        .map_err(|_| failure())?;
+        Ok(true)
+    }
+
+    /// Transfer ownership only after launch and transport preparation succeed.
+    /// On every error the caller retains both objects for explicit cleanup and
+    /// recovery persistence; a released process must never be retried here.
+    #[allow(dead_code)] // Dispatcher activation follows the integrated provider gate.
+    pub(crate) fn prepare_named_owner(
+        reservation: &mut Option<Self>,
+        process: &mut Option<crate::provider_login_process::LoginProcess<'static>>,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        executable: &crate::provider_executable::PinnedExecutable,
+        helper: &crate::provider_executable::PinnedExecutable,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<OwnedTextRun, SidecarError> {
+        let failure = || {
+            SidecarError::new(
+                "agentLaunchRejected",
+                "native preparation ownership is missing",
+            )
+        };
+        let pending = reservation.as_ref().ok_or_else(failure)?;
+        let pending_process = process.as_mut().ok_or_else(failure)?;
+        pending_process.retain_fence_before_launch(&pending.run_id)?;
+        pending.bind_provider_fence(storage, pending_process)?;
+        pending.launch_named_codex_candidate(
+            storage,
+            projects,
+            pending_process,
+            executable,
+            helper,
+            cancel,
+        )?;
+        let state = pending.begin_text_candidate(storage, projects, pending_process)?;
+        let mut owner = OwnedTextRun::from_prepared(
+            reservation.take().ok_or_else(failure)?,
+            process.take().ok_or_else(failure)?,
+            state,
+        );
+        // Preserve cancellation racing with setup; registration/poll will drain it.
+        *owner.cancel.get_mut() = cancel.load(std::sync::atomic::Ordering::Acquire);
+        Ok(owner)
+    }
+
+    /// Offline OS-isolated launch candidate only, with no model networking.
+    /// Pins do not supply provider admission. Caller retains failure cleanup.
+    /// Model/effort come from the reserved role, never independent launch arguments.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn launch_codex_candidate(
+        &self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        executable: &crate::provider_executable::PinnedExecutable,
+        helper: &crate::provider_executable::PinnedExecutable,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), SidecarError> {
+        self.launch_codex_with_network(
+            storage,
+            projects,
+            process,
+            (executable, helper),
+            cancel,
+            CodexLaunchMode::OfflineOuter,
+        )
+    }
+
+    /// Internal proxy candidate, not product admission or approval authority.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn launch_proxied_codex_candidate(
+        &self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        executable: &crate::provider_executable::PinnedExecutable,
+        helper: &crate::provider_executable::PinnedExecutable,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), SidecarError> {
+        self.launch_codex_with_network(
+            storage,
+            projects,
+            process,
+            (executable, helper),
+            cancel,
+            CodexLaunchMode::ProxiedOuter,
+        )
+    }
+
+    /// Internal named-tools candidate. Parent is trusted, not OS-offline confined.
+    #[allow(dead_code)] // Product activation follows integrated provider verification.
+    pub(crate) fn launch_named_codex_candidate(
+        &self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        executable: &crate::provider_executable::PinnedExecutable,
+        helper: &crate::provider_executable::PinnedExecutable,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), SidecarError> {
+        self.launch_codex_with_network(
+            storage,
+            projects,
+            process,
+            (executable, helper),
+            cancel,
+            CodexLaunchMode::NamedTools,
+        )
+    }
+
+    fn launch_codex_with_network(
+        &self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        pair: (
+            &crate::provider_executable::PinnedExecutable,
+            &crate::provider_executable::PinnedExecutable,
+        ),
+        cancel: &std::sync::atomic::AtomicBool,
+        mode: CodexLaunchMode,
+    ) -> Result<(), SidecarError> {
+        let (executable, helper) = pair;
+        use crate::provider_runtime_sandbox::WorkspaceAccess;
+        use elsecrew_core::provider::vendor_observation::codex_preflight::{
+            ExpectedPermission, ExpectedProfile,
+        };
+        let failure = || {
+            SidecarError::new(
+                "agentLaunchRejected",
+                "reserved provider launch is unavailable",
+            )
+        };
+        let profile: AgentResolvedProfileV1 =
+            serde_json::from_value(self.run["selectedProfile"].clone()).map_err(|_| failure())?;
+        let permission = codex_permission(&profile)?;
+        if cancel.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(failure());
+        }
+        projects
+            .verify_runtime_file_isolation(
+                storage,
+                &address_from_chat(&self.run).map_err(|_| failure())?,
+            )
+            .map_err(|_| failure())?;
+        self.validate_text_input(storage, projects)
+            .map_err(|_| failure())?;
+        let home = process.codex_preflight_home()?;
+        let verify_profile = || {
+            if mode == CodexLaunchMode::NamedTools {
+                crate::provider_profile::verify_codex_runtime_files(&home, executable)
+            } else {
+                crate::provider_profile::verify_runtime_files(&home)
+            }
+        };
+        verify_profile()?;
+        let expected = ExpectedProfile {
+            model: &profile.model_selector,
+            reasoning_effort: profile.reasoning_effort.as_deref().ok_or_else(failure)?,
+        };
+        executable.revalidate()?;
+        helper.revalidate()?;
+        // Construct the exact invocation before creating any child. The command
+        // starts the existing inert gate; only the identity-recorded owner releases it.
+        let manifest = projects
+            .verify_workspace_for_run(
+                storage,
+                &address_from_chat(&self.run).map_err(|_| failure())?,
+            )
+            .map_err(|_| failure())?;
+        let workspace =
+            std::path::Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
+        let release = |child: &mut Child| {
+            #[cfg(test)]
+            crate::provider_preflight_session::BEFORE_RELEASE.with(|hook| {
+                if let Some(hook) = hook.borrow_mut().take() {
+                    hook();
+                }
+            });
+            executable.revalidate().map_err(std::io::Error::other)?;
+            helper.revalidate().map_err(std::io::Error::other)?;
+            verify_profile().map_err(std::io::Error::other)?;
+            if cancel.load(std::sync::atomic::Ordering::Acquire) {
+                return Err(std::io::Error::other("provider launch canceled"));
+            }
+            crate::provider_login_gate::release(child)
+        };
+        if mode == CodexLaunchMode::NamedTools {
+            let command = crate::provider_preflight_session::vendor_launch::CodexCommand::new(
+                executable.revalidate()?,
+                helper.revalidate()?,
+                &home,
+                workspace,
+                &expected,
+                permission,
+            )?;
+            command.launch(process, |child, identities| {
+                self.record_pre_release(storage, projects, identities)
+                    .map_err(|_| std::io::Error::other("run identity persistence failed"))?;
+                release(child)
+            })?;
+            self.record_released_or_invalidate(storage, process)
+        } else if mode == CodexLaunchMode::ProxiedOuter {
+            let mut args = crate::provider_preflight_session::discovery_arguments(
+                &home, &expected, permission,
+            )
+            .map_err(|_| failure())?;
+            args.extend(["-c".into(), crate::provider_profile::codex_isolation_argument(&home, workspace)
+                .map_err(|_| failure())?]);
+            let command = crate::provider_runtime_sandbox::command_with_model_proxy(
+                executable.revalidate()?,
+                helper.revalidate()?,
+                &args,
+                &home,
+                workspace,
+                match permission {
+                    ExpectedPermission::ReadOnly => WorkspaceAccess::ReadOnly,
+                    ExpectedPermission::WorkspaceWrite => WorkspaceAccess::Write,
+                },
+                std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+                    .map_err(|_| failure())?,
+            )
+            .map_err(|_| failure())?;
+            command.launch_with_identity(process, |child, identities| {
+                self.record_pre_release(storage, projects, identities)
+                    .map_err(|_| std::io::Error::other("run identity persistence failed"))?;
+                release(child)
+            })?;
+            self.record_released_or_invalidate(storage, process)
+        } else {
+            let mut command = crate::provider_preflight_session::offline_discovery_command(
+                executable.revalidate()?,
+                helper.revalidate()?,
+                &home,
+                workspace,
+                &expected,
+                permission,
+            )
+            .map_err(|_| failure())?;
+            self.launch_gated(storage, projects, process, || command.spawn(), release)
+        }
+    }
+
+    /// Internal read-only candidate: inputs come only from this reservation.
+    /// Deltas remain provisional. Completed items use the existing public ledger;
+    /// only a completed turn with confirmed cleanup may publish its final answer.
+    /// The process owner's explicit closure evidence controls terminal persistence.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn run_read_only_text(
+        &self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        cancel: &std::sync::atomic::AtomicBool,
+        on_public: &mut impl FnMut(
+            &mut Storage,
+            elsecrew_core::provider::vendor_observation::codex_events::Projection,
+        ) -> Result<(), SidecarError>,
+    ) -> Result<
+        elsecrew_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
+        SidecarError,
+    > {
+        if self.run["selectedProfile"]["permission"] != "readOnly" {
+            return Err(SidecarError::new(
+                "agentInputChanged",
+                "reserved text input is unavailable",
+            ));
+        }
+        self.run_text_candidate(storage, projects, process, cancel, on_public)
+    }
+
+    /// Internal role-bound transport; tools still require a separate handler.
+    /// This does not admit a provider or grant OS permissions to a process.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn run_text_candidate(
+        &self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        cancel: &std::sync::atomic::AtomicBool,
+        on_public: &mut impl FnMut(
+            &mut Storage,
+            elsecrew_core::provider::vendor_observation::codex_events::Projection,
+        ) -> Result<(), SidecarError>,
+    ) -> Result<
+        elsecrew_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
+        SidecarError,
+    > {
+        self.run_candidate_with_handler(
+            storage,
+            projects,
+            process,
+            cancel,
+            &mut |storage, action| match action {
+                crate::provider_preflight_session::TextAction::Public(event) => {
+                    on_public(storage, event)
+                }
+                _ => Err(SidecarError::new(
+                    "agentInteractionUnavailable",
+                    "tool or approval handler is unavailable",
+                )),
+            },
+        )
+    }
+
+    /// Trusted owner only; caller must enforce admission and bind real user choices.
+    /// The reservation retains input, process, public-ledger and terminal authority.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn run_candidate_with_handler(
+        &self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        cancel: &std::sync::atomic::AtomicBool,
+        on_action: &mut impl FnMut(
+            &mut Storage,
+            crate::provider_preflight_session::TextAction<'_>,
+        ) -> Result<(), SidecarError>,
+    ) -> Result<
+        elsecrew_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
+        SidecarError,
+    > {
+        let mut state = self.begin_text_candidate(storage, projects, process)?;
+        loop {
+            if let Some(outcome) = self
+                .advance_text_candidate(storage, projects, process, cancel, &mut state, on_action)?
+            {
+                return Ok(outcome);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+
+    /// Prepare one resumable run without retaining a borrow of Storage.
+    pub(crate) fn begin_text_candidate(
+        &self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+    ) -> Result<RunTextState, SidecarError> {
+        use elsecrew_core::provider::vendor_observation::codex_preflight::{
+            exchange::PreflightExchange, ExpectedProfile,
+        };
+        let failure =
+            || SidecarError::new("agentInputChanged", "reserved text input is unavailable");
+        let profile: AgentResolvedProfileV1 =
+            serde_json::from_value(self.run["selectedProfile"].clone()).map_err(|_| failure())?;
+        let permission = codex_permission(&profile)?;
+        self.validate_text_input(storage, projects)
+            .map_err(|_| failure())?;
+        // Reject a different owner before the transport acquires cleanup authority.
+        self.observe_process(storage, process)?;
+        let home = process.codex_preflight_home()?;
+        let expected = ExpectedProfile {
+            model: &profile.model_selector,
+            reasoning_effort: profile.reasoning_effort.as_deref().ok_or_else(failure)?,
+        };
+        let text = std::str::from_utf8(&self.prompt).map_err(|_| failure())?;
+        let address = address_from_chat(&self.run).map_err(|_| failure())?;
+        let mut projection = actual_run_projection(storage, &self.run_id).map_err(|_| failure())?;
+        if projection.contains_key("native_transport") { return Err(failure()); }
+        let output_budget = output_budget_from_projection(&projection)?;
+        projection.remove("last_event_sequence");
+        projection.insert("native_transport".into(), json!({
+            "schemaVersion": 1, "adapter": "codex.preflight.v1",
+            "connectionId": process.connection_id().to_string(),
+            "requiresProviderAttestation": self.native_provider.is_some(),
+        }));
+        storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run", aggregate_id: self.run_id.clone(),
+            operation_id: format!("op_agent_native_transport_{}", self.run_id),
+            request_id: None, payload: projection,
+        }]).map_err(|_| failure())?;
+        let workspace =
+            crate::provider_preflight_session::TextWorkspace::new(projects, storage, &address)?;
+        let mut flow = if process.uses_named_scope() {
+            if !process.matches_named_scope(workspace.cwd(), permission) {
+                return Err(failure());
+            }
+            PreflightExchange::with_named_permission(
+                &expected,
+                home.to_str().ok_or_else(failure)?,
+                workspace.cwd(),
+                permission,
+            )
+        } else {
+            PreflightExchange::with_permission(
+                &expected,
+                home.to_str().ok_or_else(failure)?,
+                permission,
+            )
+        }
+        .map_err(|_| failure())?;
+        flow.require_startup_isolation(workspace.cwd()).map_err(|_| failure())?;
+        if !process.retains_run_fence() {
+            process.retain_fence_until_terminal()?;
+        }
+        let transport = crate::provider_preflight_session::BoundTextSession::begin(
+            process, flow, &workspace, text, output_budget,
+        )?;
+        Ok(RunTextState {
+            transport,
+            pending_answer: None,
+            pending_item: None,
+            completion: None,
+            run_id: self.run_id.clone(),
+            finished: false,
+        })
+    }
+
+    /// Advances one protocol or cleanup step, without waiting for the peer or
+    /// through termination grace periods. Filesystem/DB checkpoints remain sync.
+    /// Mismatched owners never acquire authority to finish another process.
+    pub(crate) fn advance_text_candidate(
+        &self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        cancel: &std::sync::atomic::AtomicBool,
+        state: &mut RunTextState,
+        on_action: &mut impl FnMut(
+            &mut Storage,
+            crate::provider_preflight_session::TextAction<'_>,
+        ) -> Result<(), SidecarError>,
+    ) -> Result<
+        Option<elsecrew_core::provider::vendor_observation::codex_events::stream::TurnOutcome>,
+        SidecarError,
+    > {
+        use crate::provider_preflight_session::TextAction;
+        use elsecrew_core::provider::vendor_observation::codex_events::{
+            stream::TurnOutcome, Projection, PublicKind,
+        };
+        let failure =
+            || SidecarError::new("agentInputChanged", "reserved text input is unavailable");
+        if state.finished
+            || state.run_id != self.run_id
+            || !state.transport.matches_process(process)
+        {
+            return Err(failure());
+        }
+        state.finished = true;
+        if state.completion.is_none() {
+            let outcome = state.transport.advance(
+                process,
+                cancel,
+                storage,
+                projects,
+                &mut |storage, process, action| {
+                    let event = match action {
+                        TextAction::ThreadMatched(receipt) => {
+                            self.validate_text_input(storage, projects).map_err(|_| failure())?;
+                            let address = address_from_chat(&self.run).map_err(|_| failure())?;
+                            let manifest = projects.verify_workspace_for_run(storage, &address)
+                                .map_err(|_| failure())?;
+                            let cwd = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
+                            if !receipt.matches(process, cwd) { return Err(failure()); }
+                            self.observe_process(storage, process)?;
+                            let mut evidence = receipt.redacted();
+                            evidence["runId"] = json!(self.run_id);
+                            evidence["workspaceIdentity"] = self.run["workspaceIdentity"].clone();
+                            evidence["capabilityFingerprint"] = self.run["capabilityFingerprint"].clone();
+                            evidence["selectedProfile"] = self.run["selectedProfile"].clone();
+                            return self.persist_native_running(storage, evidence, cwd, Vec::new());
+                        }
+                        TextAction::VerifyApprovalBoundary => {
+                            return self
+                                .verify_approval_boundary(storage, projects, process, cancel);
+                        }
+                        TextAction::ObserveProcess => {
+                            self.observe_process(storage, process)?;
+                            return self
+                                .validate_text_input(storage, projects)
+                                .map_err(|_| failure());
+                        }
+                        TextAction::VerifyWorkspace => return Err(failure()),
+                        TextAction::Public(event) => event,
+                        action => {
+                            self.validate_text_input(storage, projects)
+                                .map_err(|_| failure())?;
+                            return on_action(storage, action);
+                        }
+                    };
+                    use elsecrew_protocol::agent_adapter_v1::output_pages::{OutputItemUpdate, OutputItemOperation, OutputItemChannel};
+                    let update = match &event {
+                        Projection::Delta { kind, item_id, .. } | Projection::Completed { kind, item_id, .. } => Some(OutputItemUpdate {
+                            item_id: item_id.clone(),
+                            channel: if *kind == PublicKind::AgentMessage { OutputItemChannel::Message } else { OutputItemChannel::Plan },
+                            operation: if matches!(&event, Projection::Delta { .. }) { OutputItemOperation::Append } else { OutputItemOperation::Complete },
+                        }),
+                        _ => None,
+                    };
+                    let durable = match (&event, &update) {
+                        (Projection::Delta { text, .. } | Projection::Completed { text, .. }, Some(update)) =>
+                            self.persist_item_progress(storage, update, text.clone())?,
+                        _ => false,
+                    };
+                    // Completed text replaces deltas; never append the same answer twice.
+                    if let Projection::Completed { kind, text, .. } = &event {
+                        match kind {
+                            PublicKind::AgentMessage => {
+                                if let Some(previous) = state.pending_answer.take() {
+                                    if !durable { self.persist_text(storage, "status", previous)?; }
+                                }
+                                state.pending_answer = Some(text.clone());
+                                state.pending_item = if durable { update } else { None };
+                            }
+                            PublicKind::Plan => {
+                                if !durable { self.persist_text(storage, "status", text.clone())?; }
+                            }
+                        }
+                    }
+                    on_action(storage, TextAction::Public(event))
+                },
+            );
+            state.completion = Some(match outcome {
+                Ok(None) => {
+                    state.finished = false;
+                    return Ok(None);
+                }
+                Ok(Some(outcome)) => Ok(outcome),
+                Err(error) => {
+                    // The terminal record intentionally contains no raw provider
+                    // error. Keep a fixed-label transport checkpoint in stderr
+                    // before cleanup consumes the failed session.
+                    eprintln!("native Codex transport failed at {}", state.transport.diagnostic_stage());
+                    Err(error)
+                }
+            });
+        }
+        // Preserve cleanup-before-final and terminal-before-fence-release ordering.
+        let cleanup = process.poll_finish();
+        if self
+            .persist_process_snapshot(storage, &process.tracked_for_cleanup())
+            .is_err()
+        {
+            process.invalidate_cleanup_evidence();
+            state.completion = Some(Err(SidecarError::new(
+                "agentProcessObservationFailed",
+                "cleanup process evidence requires recovery",
+            )));
+        }
+        let cleanup = match cleanup {
+            Ok(false) => {
+                state.finished = false;
+                return Ok(None);
+            }
+            Ok(true) => Ok(()),
+            Err(error) => Err(error),
+        };
+        let outcome = cleanup
+            .and(state.completion.take().ok_or_else(failure)?)
+            .and_then(|outcome| {
+                if cancel.load(std::sync::atomic::Ordering::Acquire) {
+                    Err(failure())
+                } else {
+                    Ok(outcome)
+                }
+            });
+        let result = outcome.and_then(|outcome| {
+            self.validate_text_input(storage, projects)
+                .map_err(|_| failure())?;
+            if let Some(answer) = state.pending_answer.take() {
+                // Durable status completion is already stored; only promote it
+                // to final after the existing process-cleanup proof succeeds.
+                if state.pending_item.is_none() || outcome == TurnOutcome::Completed {
+                self.persist_text_update(
+                    storage,
+                    if outcome == TurnOutcome::Completed {
+                        "final"
+                    } else {
+                        "status"
+                    },
+                    answer,
+                    state.pending_item.as_ref(),
+                )?;
+                }
+            }
+            Ok(outcome)
+        });
+        self.persist_text_terminal(
+            storage,
+            projects,
+            process,
+            &result,
+            cancel.load(std::sync::atomic::Ordering::Acquire),
+        )
+        .map_err(|_| {
+            SidecarError::new(
+                "agentTerminalPersistenceFailed",
+                "execution requires recovery; terminal state was not stored",
+            )
+        })?;
+        if process
+            .closure_evidence()
+            .is_some_and(|evidence| evidence.confirmed())
+        {
+            process.release_after_run_terminal()?;
+        }
+        result.map(Some)
+    }
+
+    /// A provider-specific verified observation calls this shared atomic transition.
+    fn persist_native_running(&self, storage: &mut Storage, evidence: Value, cwd: &Path, observed_builtin_plugins: Vec<String>) -> Result<(), SidecarError> {
+        let failure = || SidecarError::new("agentInputChanged", "native initialization receipt differs");
+        let mut projection = actual_run_projection(storage, &self.run_id).map_err(|_| failure())?;
+        if !self.matches_current_record(&projection) || projection.contains_key("native_thread_receipt") || self.running_record.get().is_some() { return Err(failure()); }
+        let chat_projection = actual_chat_projection(storage, &self.request.chat_id).map_err(|_| failure())?;
+        let profile: AgentResolvedProfileV1 = serde_json::from_value(self.run["selectedProfile"].clone()).map_err(|_| failure())?;
+        let running = agent_run_record(&self.run_id, &chat_projection["record"], &profile,
+            self.run["capabilityFingerprint"].as_str().ok_or_else(failure)?, "running", None, &self.created).map_err(|_| failure())?;
+        let chat = updated_chat(&chat_projection["record"], "running").map_err(|_| failure())?;
+        projection.remove("last_event_sequence");
+        projection.insert("native_thread_receipt".into(), evidence.clone());
+        projection.insert("record".into(), running.clone());
+        projection.insert("state".into(), json!("running"));
+        if let Some(preflight) = &self.claude_preflight {
+            use elsecrew_protocol::agent_adapter_v1::phased_claude::{SessionObservation, SESSION_OBSERVATIONS};
+            if projection.get("claude_preflight") != Some(&serde_json::to_value(preflight).map_err(|_| failure())?)
+                || projection["native_transport"]["adapter"] != "claude.stream.v2" { return Err(failure()); }
+            let session = SessionObservation {
+                observed_builtin_plugins,
+                schema_version:1, run_id:self.run_id.clone(),
+                connection_id:evidence["connectionId"].as_str().ok_or_else(failure)?.into(),
+                preflight_digest:preflight.digest().map_err(|_| failure())?,
+                workspace_identity:preflight.scope.workspace_identity.clone(),
+                resolved_model:preflight.resolved_model.clone(),
+                observed_session_verification:SESSION_OBSERVATIONS.iter().map(|value| (*value).into()).collect(),
+                observed_at:now(),
+            };
+            session.validate_against(preflight).map_err(|_| failure())?;
+            projection.insert("claude_session_observation".into(), serde_json::to_value(session).map_err(|_| failure())?);
+        }
+        if let Some(provider) = &self.native_provider {
+            let (manifest, discovery, attestation) = provider.attest(&running, cwd)?;
+            projection.insert("native_provider_manifest".into(), manifest);
+            projection.insert("provider_discovery".into(), discovery);
+            projection.insert("runtime_attestation".into(), attestation);
+        }
+        super::native_evidence::validate(&projection).map_err(|_| failure())?;
+        storage.upsert_projection_records_atomic(vec![
+            ProjectionUpsert { aggregate_type:"run", aggregate_id:self.run_id.clone(),
+                operation_id:format!("op_agent_native_thread_{}",self.run_id), request_id:None, payload:projection },
+            ProjectionUpsert { aggregate_type:"chat", aggregate_id:self.request.chat_id.clone(),
+                operation_id:format!("op_agent_native_running_chat_{}",self.run_id), request_id:None,
+                payload:chat_projection_with_record(&chat_projection,&chat,None).map_err(|_| failure())? },
+        ]).map_err(|_| failure())?;
+        self.running_record.set((running,evidence)).map_err(|_| failure())?;
+        Ok(())
+    }
+
+    pub(super) fn persist_text(
+        &self,
+        storage: &mut Storage,
+        kind: &str,
+        text: String,
+    ) -> Result<(), SidecarError> {
+        self.persist_text_update(storage, kind, text, None)
+    }
+
+    pub(super) fn persist_item_progress(
+        &self,
+        storage: &mut Storage,
+        update: &elsecrew_protocol::agent_adapter_v1::output_pages::OutputItemUpdate,
+        text: String,
+    ) -> Result<bool, SidecarError> {
+        let projection = actual_run_projection(storage, &self.run_id)
+            .map_err(|_| SidecarError::new("agentInputChanged", "output run is unavailable"))?;
+        if output_budget_from_projection(&projection)? == elsecrew_core::provider::ProviderEventBudget::LegacyV1 {
+            return Ok(false);
+        }
+        self.persist_text_update(storage, "status", text, Some(update))?;
+        Ok(true)
+    }
+
+    pub(super) fn persist_text_update(
+        &self,
+        storage: &mut Storage,
+        kind: &str,
+        text: String,
+        update: Option<&elsecrew_protocol::agent_adapter_v1::output_pages::OutputItemUpdate>,
+    ) -> Result<(), SidecarError> {
+        let event = json!({
+            "schemaVersion":1, "eventId":format!("agent_event_{}", Uuid::new_v4().simple()),
+            "chatId":self.run["chatId"], "taskId":self.run["taskId"],
+            "projectId":self.run["projectId"], "worktreeId":self.run["worktreeId"],
+            "workspaceIdentity":self.run["workspaceIdentity"], "runId":self.run_id,
+            "roleId":self.run["selectedProfile"]["roleId"],
+            "capabilityFingerprint":self.run["capabilityFingerprint"],
+            "kind":kind, "text":text, "createdAt":now()
+        });
+        persist_public_event_item(storage, self.current_record(), &event, update).map_err(|_| {
+            SidecarError::new(
+                "agentOutputPersistenceFailed",
+                "public output could not be stored within the run budget",
+            )
+        })
+    }
+
+    /// A prerequisite to a one-shot decision, never a user decision itself.
+    /// Re-evaluated by the transport before preparing/transmitting an acceptance.
+    pub(crate) fn verify_approval_boundary(
+        &self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), SidecarError> {
+        use crate::provider_runtime_sandbox::WorkspaceAccess;
+        let failure = || {
+            SidecarError::new(
+                "agentApprovalChanged",
+                "approval execution boundary differs",
+            )
+        };
+        if cancel.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(failure());
+        }
+        let address = address_from_chat(&self.run).map_err(|_| failure())?;
+        projects
+            .verify_runtime_file_isolation(storage, &address)
+            .map_err(|_| failure())?;
+        self.validate_text_input(storage, projects)
+            .map_err(|_| failure())?;
+        let profile: AgentResolvedProfileV1 =
+            serde_json::from_value(self.run["selectedProfile"].clone()).map_err(|_| failure())?;
+        let access = match codex_permission(&profile)? {
+            ExpectedPermission::ReadOnly => WorkspaceAccess::ReadOnly,
+            ExpectedPermission::WorkspaceWrite => WorkspaceAccess::Write,
+        };
+        let manifest = projects
+            .verify_workspace_for_run(storage, &address)
+            .map_err(|_| failure())?;
+        let workspace = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
+        if !process.matches_runtime_scope(workspace, access)
+            && !process.matches_named_scope(workspace, codex_permission(&profile)?)
+        {
+            return Err(failure());
+        }
+        let home = process.codex_preflight_home()?;
+        // Named scope above revalidates the selected signed executable and its
+        // vendor helper links. Legacy outer-sandbox scope stays link-free.
+        if !process.uses_named_scope() {
+            crate::provider_profile::verify_runtime_files(&home)?;
+        }
+        self.observe_process(storage, process)?;
+        if cancel.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(failure());
+        }
+        Ok(())
+    }
+
+    fn validate_text_input(
+        &self,
+        storage: &Storage,
+        projects: &ProjectManager,
+    ) -> Result<(), ProjectFailure> {
+        let projection = actual_run_projection(storage, &self.run_id)?;
+        let lock = storage
+            .projection_record(
+                "lock",
+                &format!(
+                    "lock_{}",
+                    self.run["worktreeId"].as_str().unwrap_or_default()
+                ),
+            )?
+            .ok_or_else(|| ProjectFailure::recovery("reserved workspace lock is missing"))?;
+        let writer = if self.run["selectedProfile"]["permission"] == "workspaceWrite" {
+            json!(self.run_id)
+        } else {
+            Value::Null
+        };
+        if lock.get("writer_run_id") != Some(&writer) {
+            return Err(ProjectFailure::recovery("reserved writer changed"));
+        }
+        let chat = actual_chat_projection(storage, &self.request.chat_id)?;
+        let role = chat["record"]["roleSnapshots"]
+            .as_array()
+            .and_then(|roles| {
+                roles
+                    .iter()
+                    .find(|role| role["roleId"] == self.request.role_id)
+            });
+        if !self.matches_current_record(&projection)
+            || !projection["recovery"].is_null()
+            || role != Some(&self.run["selectedProfile"])
+            || address_from_chat(&chat["record"])? != address_from_chat(&self.run)?
+            || resolve_prompt(
+                storage,
+                &self.request.chat_id,
+                &self.request.input_message_ids,
+                &self.request.role_id,
+            )? != self.prompt
+            || projects.verify_workspace_for_run(storage, &address_from_chat(&self.run)?)?
+                != projection["workspace_manifest"]
+        {
+            return Err(ProjectFailure::recovery("reserved text input changed"));
+        }
+        Ok(())
+    }
+
+    /// Keep the run's cumulative process evidence in step with its sole owner.
+    /// A failed observation is never upgraded by a successful evidence write.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn observe_process(
+        &self,
+        storage: &mut Storage,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+    ) -> Result<(), SidecarError> {
+        let (identities, observed) = process.observe_for_run();
+        let saved = self.persist_process_snapshot(storage, &identities);
+        if saved.is_err() || observed.is_err() {
+            process.invalidate_transport();
+            return Err(SidecarError::new(
+                "agentProcessObservationFailed",
+                "run process evidence requires cleanup",
+            ));
+        }
+        Ok(())
+    }
+
+    fn persist_process_snapshot(
+        &self,
+        storage: &mut Storage,
+        identities: &[ProcIdentity],
+    ) -> Result<(), ProjectFailure> {
+        let projection = actual_run_projection(storage, &self.run_id)?;
+        if !self.matches_current_record(&projection)
+            || projection["barrier"]["phase"] != "providerLaunchGate"
+            || projection["barrier"]["releaseGranted"] != true
+            || !projection["recovery"].is_null()
+        {
+            return Err(ProjectFailure::recovery(
+                "run no longer accepts process observations",
+            ));
+        }
+        let prior = projection["process_identity_internal"]
+            .as_array()
+            .ok_or_else(|| ProjectFailure::recovery("run process binding is missing"))?;
+        if prior.is_empty()
+            || prior.iter().any(|item| {
+                !identities.iter().any(|identity| {
+                    item["pid"].as_u64() == Some(identity.pid as u64)
+                        && item["start_us"].as_i64() == Some(identity.start_us)
+                })
+            })
+        {
+            return Err(ProjectFailure::recovery(
+                "process owner differs from reserved run",
+            ));
+        }
+        persist_tracker_snapshot(storage, &self.run_id, identities)
+    }
+
+    /// Keep process ownership with the caller on every failure, including a
+    /// durable-write failure AFTER a successful release. No retry/relaunch here.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn launch_gated(
+        &self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        spawn: impl FnOnce() -> std::io::Result<Child>,
+        release: impl FnOnce(&mut Child) -> std::io::Result<()>,
+    ) -> Result<(), SidecarError> {
+        process.launch_with_identity_barrier(spawn, |child, identities| {
+            self.record_pre_release(storage, projects, identities)
+                .map_err(|_| std::io::Error::other("run identity persistence failed"))?;
+            release(child)
+        })?;
+        self.record_released_or_invalidate(storage, process)
+    }
+
+    fn record_released_or_invalidate(
+        &self,
+        storage: &mut Storage,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+    ) -> Result<(), SidecarError> {
+        self.record_released(storage).map_err(|_| {
+            process.invalidate_transport();
+            SidecarError::new(
+                "agentReleasePersistenceFailed",
+                "released process requires cleanup; run evidence could not be updated",
+            )
+        })
+    }
+
+    fn record_released(&self, storage: &mut Storage) -> Result<(), ProjectFailure> {
+        let mut projection = actual_run_projection(storage, &self.run_id)?;
+        if projection["record"] != self.run
+            || projection["state"] != "preparing"
+            || !projection["recovery"].is_null()
+            || projection["barrier"]["phase"] != "providerLaunchGate"
+            || projection["barrier"]["releaseGranted"] != false
+            || !projection["process_identity_internal"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty())
+        {
+            return Err(ProjectFailure::recovery("run cannot record gate release"));
+        }
+        projection.get_mut("barrier").unwrap()["releaseGranted"] = json!(true);
+        projection.get_mut("barrier").unwrap()["capturedAt"] = json!(now());
+        storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: self.run_id.clone(),
+            operation_id: format!("op_agent_released_{}", self.run_id),
+            request_id: None,
+            payload: projection,
+        }])?;
+        Ok(())
+    }
+
+    /// Record the gated process tree, not a vendor handshake/attestation. The
+    /// caller must use the lifecycle owner's observations, before gate release.
+    #[cfg_attr(not(test), allow(dead_code))] // Native run owner is not enabled yet.
+    pub(crate) fn record_pre_release(
+        &self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        identities: &[ProcIdentity],
+    ) -> Result<(), ProjectFailure> {
+        let mut projection = actual_run_projection(storage, &self.run_id)?;
+        if projection["record"] != self.run
+            || projection["state"] != "preparing"
+            || !projection["barrier"].is_null()
+            || !projection["process_identity_internal"].is_null()
+            || !projection["recovery"].is_null()
+        {
+            return Err(ProjectFailure::recovery(
+                "run no longer accepts pre-release identity",
+            ));
+        }
+        let address = address_from_chat(&self.run)?;
+        projects.verify_runtime_file_isolation(storage, &address)?;
+        let manifest = projects.verify_workspace_for_run(storage, &address)?;
+        if projection["workspace_manifest"] != manifest {
+            return Err(ProjectFailure::recovery(
+                "reserved workspace changed before release",
+            ));
+        }
+        let lock = storage
+            .projection_record("lock", &format!("lock_{}", address.worktree_id))?
+            .ok_or_else(|| ProjectFailure::recovery("reserved workspace lock is missing"))?;
+        let expected_writer = if self.run["selectedProfile"]["permission"] == "workspaceWrite" {
+            json!(self.run_id)
+        } else {
+            Value::Null
+        };
+        if lock.get("writer_run_id") != Some(&expected_writer) {
+            return Err(ProjectFailure::recovery(
+                "reserved writer changed before release",
+            ));
+        }
+        let mut unique = BTreeSet::new();
+        if identities.is_empty()
+            || identities.iter().any(|identity| {
+                identity.pid == 0
+                    || identity.start_us == 0
+                    || !unique.insert((identity.pid, identity.start_us))
+            })
+        {
+            return Err(ProjectFailure::recovery(
+                "invalid observed gated process identities",
+            ));
+        }
+        projection.insert(
+            "process_identity_internal".into(),
+            json!(identities
+                .iter()
+                .map(|identity| json!({"pid":identity.pid,"start_us":identity.start_us}))
+                .collect::<Vec<_>>()),
+        );
+        projection.insert("barrier".into(), json!({
+            "phase":"providerLaunchGate", "releaseGranted":false,
+            "trackedProcesses":identities.iter().map(|identity| process_value(*identity, Path::new("/redacted/agent"), false)).collect::<Vec<_>>(),
+            "capturedAt":now()
+        }));
+        storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: self.run_id.clone(),
+            operation_id: format!("op_agent_identity_{}", self.run_id),
+            request_id: None,
+            payload: projection,
+        }])?;
+        Ok(())
+    }
+}
+
+impl RunPreparation {
+    pub(crate) fn resolve(
+        storage: &Storage,
+        projects: &ProjectManager,
+        request: &AgentRunStartRequestV1,
+    ) -> Result<Self, ProjectFailure> {
+        validate_agent_adapter_payload_v1(
+            "runStartRequest",
+            &serde_json::to_value(request).map_err(json_failure)?,
+        )
+        .map_err(contract_failure)?;
+        let chat = actual_chat_projection(storage, &request.chat_id)?["record"].clone();
+        if !G5_RUN_START_CHAT_STATES_V1.contains(&chat["state"].as_str().unwrap_or_default()) {
+            return Err(ProjectFailure::recovery(
+                "chat state does not allow a new agent run",
+            ));
+        }
+        if storage.projection_records("run")?.iter().any(|run| {
+            run.get("chat_id").and_then(Value::as_str) == Some(request.chat_id.as_str())
+                && run
+                    .get("state")
+                    .and_then(Value::as_str)
+                    .is_some_and(|state| {
+                        ["preparing", "running", "cancelling", "recoveryRequired"].contains(&state)
+                    })
+        }) {
+            return Err(ProjectFailure::recovery(
+                "chat already has an active or poisoned run",
+            ));
+        }
+        let profile = serde_json::from_value(
+            chat["roleSnapshots"]
+                .as_array()
+                .and_then(|roles| roles.iter().find(|role| role["roleId"] == request.role_id))
+                .cloned()
+                .ok_or_else(|| ProjectFailure::manifest("chat role snapshot is missing"))?,
+        )
+        .map_err(json_failure)?;
+        let manifest = projects.verify_workspace_for_run(storage, &address_from_chat(&chat)?)?;
+        let prompt = resolve_prompt(storage, &request.chat_id, &request.input_message_ids, &request.role_id)?;
+        Ok(Self {
+            request: request.clone(),
+            chat,
+            profile,
+            manifest,
+            prompt,
+        })
+    }
+
+    /// Caller must supply freshly admitted provider evidence and own the single
+    /// runtime writer. This does not create an OS sandbox or release a payload.
+    pub(crate) fn reserve(
+        self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        capability: &AgentCapabilitySnapshotV1,
+        request_id: &str,
+    ) -> Result<RunReservation, ProjectFailure> {
+        let current = Self::resolve(storage, projects, &self.request)?;
+        if current.chat != self.chat
+            || current.manifest != self.manifest
+            || current.prompt != self.prompt
+            || serde_json::to_value(&current.profile).map_err(json_failure)?
+                != serde_json::to_value(&self.profile).map_err(json_failure)?
+        {
+            return Err(ProjectFailure::recovery(
+                "run input changed before reservation",
+            ));
+        }
+        validate_agent_adapter_payload_v1(
+            "capabilitySnapshot",
+            &serde_json::to_value(capability).map_err(json_failure)?,
+        )
+        .map_err(contract_failure)?;
+        if preflight_outcome(&self.request, &self.profile, capability) != "started" {
+            return Err(ProjectFailure::manifest(
+                "provider evidence does not admit this run",
+            ));
+        }
+        if let Some(scope) = &capability.scope {
+            if *scope != capability_scope(&self.chat, &self.request.role_id)? {
+                return Err(ProjectFailure::manifest("provider capability scope changed"));
+            }
+        }
+        let run_id = format!("agent_run_{}", Uuid::new_v4().simple());
+        let created = now();
+        let run = agent_run_record(
+            &run_id,
+            &self.chat,
+            &self.profile,
+            &capability.fingerprint,
+            "preparing",
+            None,
+            &created,
+        )?;
+        let mut projection = agent_run_projection(&run, &self.manifest, None, None, Vec::new())?;
+        if storage.uses_durable_output()? {
+            projection.insert("output_format_version".into(), Value::from(1));
+            for key in ["public_events", "public_event_count", "public_text_bytes", "public_ledger_cumulative_snapshot_bytes"] {
+                projection.remove(key);
+            }
+        }
+        projection.insert(
+            RECOVERY_RESERVATION_FIELD.into(),
+            Value::String(new_recovery_id()),
+        );
+        let mut upserts = vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: run_id.clone(),
+            operation_id: format!("op_agent_run_prepare_{request_id}"),
+            request_id: Some(request_id.into()),
+            payload: projection,
+        }];
+        if let Some(binding) = crate::orchestration::bind(storage, &self.request, request_id, &run_id)? { upserts.push(binding); }
+        if self.profile.permission == "workspaceWrite" {
+            upserts.push(acquire_writer_lock(
+                storage, &self.chat, &run_id, request_id,
+            )?);
+        }
+        storage.upsert_projection_records_atomic(upserts)?;
+        Ok(RunReservation {
+            running_record: std::sync::OnceLock::new(),
+            #[cfg(target_os = "macos")]
+            native_provider: None,
+            claude_preflight: None,
+            run_id,
+            created,
+            run,
+            request: self.request,
+            prompt: self.prompt,
+        })
+    }
+}

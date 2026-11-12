@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/elsecrew-core",
+    "crates/elsecrew-protocol",
+    "crates/elsecrew-sidecar",
+    "src-tauri",
+]
+
+# Large provider binaries are hashed before launch, including in the dev app.
+[profile.dev.package.sha2]
+opt-level = 3

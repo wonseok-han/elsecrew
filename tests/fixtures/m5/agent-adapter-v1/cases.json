@@ -1,0 +1,358 @@
+{
+  "valid": [
+    {
+      "name": "codex-capability-refresh-request",
+      "validator": "capabilitiesRequest",
+      "value": {"runtime": "codex", "refresh": true}
+    },
+    {
+      "name": "claude-exact-version-measured-capability",
+      "validator": "capabilitySnapshot",
+      "value": {
+        "schemaVersion": 1, "runtime": "claude-code", "platform": "darwin",
+        "installationState": "installed", "authState": "authenticated",
+        "executable": {"pathDigest": "sha256:claude-path", "fileIdentityDigest": "sha256:claude-file", "cliVersion": "2.1.241"},
+        "models": [{"modelSelector": "claude-opus-5", "reasoningEfforts": [], "permissions": ["readOnly", "workspaceWrite"]}],
+        "discovery": {"source": "exactVersionManifest", "verificationLevel": "measuredExactVersion", "exactCliVersion": "2.1.241", "effectiveModelEvidence": "measuredExactVersion"},
+        "canStart": true, "blockedReason": null, "fingerprint": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3", "observedAt": "2026-08-27T01:00:00Z"
+      }
+    },
+    {
+      "name": "codex-argv-only-cannot-start",
+      "validator": "capabilitySnapshot",
+      "value": {
+        "schemaVersion": 1, "runtime": "codex", "platform": "darwin",
+        "installationState": "installed", "authState": "authenticated",
+        "executable": {"pathDigest": "sha256:codex-path", "fileIdentityDigest": "sha256:codex-file", "cliVersion": "0.149.1"},
+        "models": [{"modelSelector": "gpt-5.6-sol", "reasoningEfforts": ["medium"], "permissions": ["readOnly", "workspaceWrite"]}],
+        "discovery": {"source": "exactVersionManifest", "verificationLevel": "measuredExactVersion", "exactCliVersion": "0.149.1", "effectiveModelEvidence": "argvOnly"},
+        "canStart": false, "blockedReason": "exactModelUnavailable", "fingerprint": "sha256:facffee591b2365c5586251f587c24f34cea11f984f6a51d98654d92c9a257d9", "observedAt": "2026-08-27T01:00:00Z"
+      }
+    },
+    {
+      "name": "unknown-catalog-cannot-start",
+      "validator": "capabilitySnapshot",
+      "value": {
+        "schemaVersion": 1, "runtime": "codex", "platform": "darwin",
+        "installationState": "installed", "authState": "authenticated",
+        "executable": {"pathDigest": "sha256:codex-path", "fileIdentityDigest": "sha256:codex-file", "cliVersion": "0.150.0"},
+        "models": [],
+        "discovery": {"source": "unavailable", "verificationLevel": "unknown", "exactCliVersion": null, "effectiveModelEvidence": "unknown"},
+        "canStart": false, "blockedReason": "capabilityUnknown", "fingerprint": "sha256:8080da6e1a8ee1711610224b877e476b0637aba752b1ebecac6a32ece3433151", "observedAt": "2026-08-27T01:00:00Z"
+      }
+    },
+    {
+      "name": "minimal-server-resolved-start-request",
+      "validator": "runStartRequest",
+      "value": {"chatId": "chat_01", "roleId": "planning", "inputMessageIds": ["message_01"], "expectedCapabilityFingerprint": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"}
+    },
+    {
+      "name": "accepted-run-has-no-fixture-scenario",
+      "validator": "runAccepted",
+      "value": {"schemaVersion": 1, "runId": "agent_run_01", "chatId": "chat_01", "taskId": "task_01", "projectId": "project_01", "worktreeId": "worktree_01", "workspaceIdentity": "workspace_01", "roleId": "planning", "capabilityFingerprint": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3", "state": "preparing"}
+    },
+    {
+      "name": "actual-run-persists-without-fixture-scenario",
+      "validator": "runRecord",
+      "value": {
+        "schemaVersion": 1, "runId": "agent_run_01", "chatId": "chat_01", "taskId": "task_01", "projectId": "project_01", "worktreeId": "worktree_01", "workspaceIdentity": "workspace_01",
+        "selectedProfile": {"roleId": "planning", "runtime": "claude-code", "modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "readOnly"},
+        "source": "actualAgent", "capabilityFingerprint": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3", "state": "running", "stage": "planning",
+        "terminationOutcome": null, "createdAt": "2026-08-27T01:01:00Z", "updatedAt": "2026-08-27T01:02:00Z"
+      }
+    },
+    {
+      "name": "verified-one-shot-start-with-identity-barrier",
+      "validator": "runStartTranscript",
+      "value": {
+        "schemaVersion": 1,
+        "request": {"chatId": "chat_01", "roleId": "planning", "inputMessageIds": ["message_01"], "expectedCapabilityFingerprint": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"},
+        "capability": {
+          "schemaVersion": 1, "runtime": "claude-code", "platform": "darwin",
+          "installationState": "installed", "authState": "authenticated",
+          "executable": {"pathDigest": "sha256:claude-path", "fileIdentityDigest": "sha256:claude-file", "cliVersion": "2.1.241"},
+          "models": [{"modelSelector": "claude-opus-5", "reasoningEfforts": [], "permissions": ["readOnly", "workspaceWrite"]}],
+          "discovery": {"source": "exactVersionManifest", "verificationLevel": "measuredExactVersion", "exactCliVersion": "2.1.241", "effectiveModelEvidence": "measuredExactVersion"},
+          "canStart": true, "blockedReason": null, "fingerprint": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3", "observedAt": "2026-08-27T01:00:00Z"
+        },
+        "resolvedProfile": {"roleId": "planning", "runtime": "claude-code", "modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "readOnly"},
+        "executionMode": {"invocation": "oneShot", "promptTransport": "serverResolvedMessages", "followUp": "nextRun", "resume": "disabled", "activeStdin": false},
+        "runId": "agent_run_01", "preflightOutcome": "started", "persistedRunCount": 1, "spawnCount": 1, "lockCount": 0,
+        "barrier": {
+          "launcherIdentity": {"pid": 4300, "startIdentityDigest": "sha256:launcher-start", "executablePathDigest": "sha256:launcher-path", "observedGone": false},
+          "agentIdentity": {"pid": 4301, "startIdentityDigest": "sha256:agent-start", "executablePathDigest": "sha256:claude-path", "observedGone": false},
+          "trackedProcesses": [
+            {"pid": 4300, "startIdentityDigest": "sha256:launcher-start", "executablePathDigest": "sha256:launcher-path", "observedGone": false},
+            {"pid": 4301, "startIdentityDigest": "sha256:agent-start", "executablePathDigest": "sha256:claude-path", "observedGone": false}
+          ],
+          "treeIdentityDigest": "sha256:tree", "launchSpecDigest": "sha256:launch-spec", "evidenceDigest": "sha256:barrier-evidence",
+          "treeTrackerAttached": true, "runAndLockPersistedBeforeRelease": true, "identityPersistedBeforeRelease": true, "releaseGranted": true,
+          "capturedAt": "2026-08-27T01:01:00Z"
+        }
+      }
+    },
+    {
+      "name": "fingerprint-change-is-preflight-only",
+      "validator": "runStartTranscript",
+      "value": {
+        "schemaVersion": 1,
+        "request": {"chatId": "chat_01", "roleId": "planning", "inputMessageIds": ["message_01"], "expectedCapabilityFingerprint": "sha256:1111111111111111111111111111111111111111111111111111111111111111"},
+        "capability": {
+          "schemaVersion": 1, "runtime": "claude-code", "platform": "darwin", "installationState": "installed", "authState": "authenticated",
+          "executable": {"pathDigest": "sha256:claude-path", "fileIdentityDigest": "sha256:claude-file", "cliVersion": "2.1.241"},
+          "models": [{"modelSelector": "claude-opus-5", "reasoningEfforts": [], "permissions": ["readOnly"]}],
+          "discovery": {"source": "exactVersionManifest", "verificationLevel": "measuredExactVersion", "exactCliVersion": "2.1.241", "effectiveModelEvidence": "measuredExactVersion"},
+          "canStart": true, "blockedReason": null, "fingerprint": "sha256:25f855349bd98909e1d3f1db2e256ad3051d0746b7909e21e3b9834f925059a1", "observedAt": "2026-08-27T01:00:00Z"
+        },
+        "resolvedProfile": {"roleId": "planning", "runtime": "claude-code", "modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "readOnly"},
+        "executionMode": {"invocation": "oneShot", "promptTransport": "serverResolvedMessages", "followUp": "nextRun", "resume": "disabled", "activeStdin": false},
+        "runId": null, "preflightOutcome": "profileChanged", "persistedRunCount": 0, "spawnCount": 0, "lockCount": 0, "barrier": null
+      }
+    },
+    {
+      "name": "bounded-public-status-event",
+      "validator": "publicEvent",
+      "value": {"schemaVersion": 1, "eventId": "agent_event_01", "chatId": "chat_01", "taskId": "task_01", "projectId": "project_01", "worktreeId": "worktree_01", "workspaceIdentity": "workspace_01", "runId": "agent_run_01", "roleId": "planning", "capabilityFingerprint": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3", "kind": "status", "text": "프로젝트 구조를 확인하고 있습니다.", "createdAt": "2026-08-27T01:02:00Z"}
+    },
+    {
+      "name": "clean-process-tree-termination",
+      "validator": "terminationTranscript",
+      "value": {
+        "schemaVersion": 1, "runId": "agent_run_01", "outcome": "cleanExit", "processesProvenGone": true, "poisoned": false,
+        "writerLockState": "released", "chatState": "succeeded",
+        "trackedProcesses": [{"pid": 4301, "startIdentityDigest": "sha256:agent-start", "executablePathDigest": "sha256:claude-path", "observedGone": true}],
+        "evidenceDigest": "sha256:termination", "observedAt": "2026-08-27T01:03:00Z"
+      }
+    },
+    {
+      "name": "uncertain-termination-stays-poisoned",
+      "validator": "terminationTranscript",
+      "value": {
+        "schemaVersion": 1, "runId": "agent_run_02", "outcome": "recoveryRequired", "processesProvenGone": false, "poisoned": true,
+        "writerLockState": "recoveryRequired", "chatState": "recoveryRequired",
+        "trackedProcesses": [{"pid": 4401, "startIdentityDigest": "sha256:agent-start-2", "executablePathDigest": "sha256:claude-path", "observedGone": false}],
+        "evidenceDigest": "sha256:termination-uncertain", "observedAt": "2026-08-27T01:03:00Z"
+      }
+    },
+    {
+      "name": "actual-agent-chat-page-keeps-distinct-ledger",
+      "validator": "agentChatDetailPage",
+      "value": {
+        "chat": {"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면","settingsRevision":1,"roleSnapshots":[{"roleId":"planning","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"gpt-5.6-sol","reasoningEffort":"high","permission":"readOnly"}],"state":"running","createdAt":"2026-08-27T01:00:00Z","updatedAt":"2026-08-27T01:02:00Z"},
+        "afterEventSequence":0,
+        "messages":[{"schemaVersion":1,"messageId":"message_01","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","eventSequence":1,"kind":"role","roleId":"planning","runId":"agent_run_01","text":"계획을 정리했습니다.","createdAt":"2026-08-27T01:02:00Z"}],
+        "runs":[],"nextEventSequence":1,
+        "agentRuns":[{"schemaVersion":1,"runId":"agent_run_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"planning","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"readOnly"},"source":"actualAgent","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"running","stage":"planning","terminationOutcome":null,"createdAt":"2026-08-27T01:01:00Z","updatedAt":"2026-08-27T01:02:00Z"}],
+        "agentRecovery":null
+      }
+    },
+    {
+      "name":"actual-agent-cancel-request-binds-full-identity","validator":"runCancelRequest",
+      "value":{"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01"}
+    },
+    {
+      "name":"actual-agent-clean-cancel-result","validator":"runCancelResult",
+      "value":{"schemaVersion":1,"request":{"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01"},"run":{"schemaVersion":1,"runId":"agent_run_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"planning","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"readOnly"},"source":"actualAgent","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"canceled","stage":"planning","terminationOutcome":"cleanExit","createdAt":"2026-08-27T01:01:00Z","updatedAt":"2026-08-27T01:03:00Z"},"termination":{"schemaVersion":1,"runId":"agent_run_01","outcome":"cleanExit","processesProvenGone":true,"poisoned":false,"writerLockState":"none","chatState":"canceled","trackedProcesses":[{"pid":4301,"startIdentityDigest":"sha256:agent-start","executablePathDigest":"sha256:claude-path","observedGone":true}],"evidenceDigest":"sha256:termination","observedAt":"2026-08-27T01:03:00Z"},"recovery":null,"outcome":"canceled"}
+    },
+    {
+      "name":"actual-agent-uncertain-cancel-persists-poisoned-recovery","validator":"runCancelResult",
+      "value":{"schemaVersion":1,"request":{"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_02"},"run":{"schemaVersion":1,"runId":"agent_run_02","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},"source":"actualAgent","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"recoveryRequired","stage":"implementing","terminationOutcome":"recoveryRequired","createdAt":"2026-08-27T01:01:00Z","updatedAt":"2026-08-27T01:03:00Z"},"termination":{"schemaVersion":1,"runId":"agent_run_02","outcome":"recoveryRequired","processesProvenGone":false,"poisoned":true,"writerLockState":"recoveryRequired","chatState":"recoveryRequired","trackedProcesses":[{"pid":4401,"startIdentityDigest":"sha256:agent-start-2","executablePathDigest":"sha256:claude-path","observedGone":false}],"evidenceDigest":"sha256:termination-uncertain","observedAt":"2026-08-27T01:03:00Z"},"recovery":{"schemaVersion":1,"recoveryId":"agent_recovery_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_02","source":"actualAgent","reason":"cancelUncertain","state":"unresolved","trackedProcesses":[{"observedGone":false,"executablePathDigest":"sha256:claude-path","startIdentityDigest":"sha256:agent-start-2","pid":4401}],"poisoned":true,"revision":1,"createdAt":"2026-08-27T01:03:00Z","resolvedAt":null},"outcome":"recoveryRequired"}
+    },
+    {
+      "name":"workspace-writer-normal-exit-persists-released-lock","validator":"runTerminationPersistence",
+      "value":{"schemaVersion":1,"run":{"schemaVersion":1,"runId":"agent_run_03","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},"source":"actualAgent","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"succeeded","stage":"implementing","terminationOutcome":"cleanExit","createdAt":"2026-08-27T01:01:00Z","updatedAt":"2026-08-27T01:03:00Z"},"termination":{"schemaVersion":1,"runId":"agent_run_03","outcome":"cleanExit","processesProvenGone":true,"poisoned":false,"writerLockState":"released","chatState":"succeeded","trackedProcesses":[{"pid":4501,"startIdentityDigest":"sha256:agent-start-3","executablePathDigest":"sha256:claude-path","observedGone":true}],"evidenceDigest":"sha256:termination-success","observedAt":"2026-08-27T01:03:00Z"}}
+    },
+    {
+      "name":"actual-agent-unresolved-recovery","validator":"recoveryRecord",
+      "value":{"schemaVersion":1,"recoveryId":"agent_recovery_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_02","source":"actualAgent","reason":"cancelUncertain","state":"unresolved","trackedProcesses":[{"pid":4401,"startIdentityDigest":"sha256:agent-start-2","executablePathDigest":"sha256:claude-path","observedGone":false}],"poisoned":true,"revision":1,"createdAt":"2026-08-27T01:03:00Z","resolvedAt":null}
+    },
+    {
+      "name":"actual-agent-recovery-inspect-binds-full-identity","validator":"recoveryInspectRequest",
+      "value":{"recoveryId":"agent_recovery_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_02"}
+    },
+    {
+      "name":"actual-agent-recovery-resolve-request","validator":"recoveryResolveRequest",
+      "value":{"recoveryId":"agent_recovery_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_02","expectedRevision":1,"resolution":"abandon"}
+    },
+    {
+      "name":"actual-agent-recovery-resolves-only-after-process-proof","validator":"recoveryResolveResult",
+      "value":{"schemaVersion":1,"before":{"schemaVersion":1,"recoveryId":"agent_recovery_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_02","source":"actualAgent","reason":"cancelUncertain","state":"unresolved","trackedProcesses":[{"pid":4401,"startIdentityDigest":"sha256:agent-start-2","executablePathDigest":"sha256:claude-path","observedGone":true}],"poisoned":true,"revision":1,"createdAt":"2026-08-27T01:03:00Z","resolvedAt":null},"request":{"recoveryId":"agent_recovery_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_02","expectedRevision":1,"resolution":"abandon"},"after":{"schemaVersion":1,"recoveryId":"agent_recovery_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_02","source":"actualAgent","reason":"cancelUncertain","state":"resolvedAbandoned","trackedProcesses":[{"pid":4401,"startIdentityDigest":"sha256:agent-start-2","executablePathDigest":"sha256:claude-path","observedGone":true}],"poisoned":false,"revision":2,"createdAt":"2026-08-27T01:03:00Z","resolvedAt":"2026-08-27T01:05:00Z"},"outcome":"resolvedAbandoned"}
+    }
+  ],
+  "invalid": [
+    {
+      "name": "actual-run-cannot-use-fixture-scenario", "validator": "runRecord",
+      "value": {
+        "schemaVersion": 1, "runId": "agent_run_01", "chatId": "chat_01", "taskId": "task_01", "projectId": "project_01", "worktreeId": "worktree_01", "workspaceIdentity": "workspace_01",
+        "selectedProfile": {"roleId": "planning", "runtime": "claude-code", "modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "readOnly"},
+        "source": "actualAgent", "capabilityFingerprint": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3", "state": "running", "stage": "planning", "fixtureScenario": "planning-success",
+        "terminationOutcome": null, "createdAt": "2026-08-27T01:01:00Z", "updatedAt": "2026-08-27T01:02:00Z"
+      }
+    },
+    {
+      "name": "optional-wire-fields-must-be-explicit", "validator": "capabilitySnapshot",
+      "value": {
+        "schemaVersion": 1, "runtime": "codex", "platform": "darwin", "installationState": "notInstalled", "authState": "unknown", "executable": null,
+        "models": [], "discovery": {"source": "unavailable", "verificationLevel": "unknown", "exactCliVersion": null, "effectiveModelEvidence": "unknown"},
+        "canStart": false, "fingerprint": "sha256:04b84f19bbf4f0337d29512dff803ac5af2670fd3f46cb8eb8a24a8c88043b73", "observedAt": "2026-08-27T01:00:00Z"
+      }
+    },
+    {
+      "name": "renderer-cannot-supply-launch-fields", "validator": "runStartRequest",
+      "value": {"chatId": "chat_01", "roleId": "coding", "inputMessageIds": ["message_01"], "expectedCapabilityFingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000", "argv": ["--model", "other"], "cwd": "/tmp", "env": {"TOKEN": "secret"}}
+    },
+    {
+      "name": "argv-only-cannot-claim-startable", "validator": "capabilitySnapshot",
+      "value": {
+        "schemaVersion": 1, "runtime": "codex", "platform": "darwin", "installationState": "installed", "authState": "authenticated",
+        "executable": {"pathDigest": "sha256:codex-path", "fileIdentityDigest": "sha256:codex-file", "cliVersion": "0.149.1"},
+        "models": [{"modelSelector": "gpt-5.6-sol", "reasoningEfforts": ["medium"], "permissions": ["readOnly"]}],
+        "discovery": {"source": "exactVersionManifest", "verificationLevel": "measuredExactVersion", "exactCliVersion": "0.149.1", "effectiveModelEvidence": "argvOnly"},
+        "canStart": true, "blockedReason": null, "fingerprint": "sha256:4905e07b09cd9cbbc188bebf109a3834e45921c47b3a1f8d58da1ea9ca8c74e6", "observedAt": "2026-08-27T01:00:00Z"
+      }
+    },
+    {
+      "name": "unknown-catalog-cannot-claim-startable", "validator": "capabilitySnapshot",
+      "value": {
+        "schemaVersion": 1, "runtime": "codex", "platform": "darwin", "installationState": "installed", "authState": "authenticated",
+        "executable": {"pathDigest": "sha256:codex-path", "fileIdentityDigest": "sha256:codex-file", "cliVersion": "0.150.0"},
+        "models": [], "discovery": {"source": "unavailable", "verificationLevel": "unknown", "exactCliVersion": null, "effectiveModelEvidence": "unknown"},
+        "canStart": true, "blockedReason": null, "fingerprint": "sha256:e5013091fc2078cd5770ed619d24a5aa9b57c5196d5c61eb5861b5c73a2a2858", "observedAt": "2026-08-27T01:00:00Z"
+      }
+    },
+    {
+      "name": "fingerprint-mismatch-cannot-start", "validator": "runStartTranscript",
+      "value": {
+        "schemaVersion": 1,
+        "request": {"chatId": "chat_01", "roleId": "planning", "inputMessageIds": ["message_01"], "expectedCapabilityFingerprint": "sha256:1111111111111111111111111111111111111111111111111111111111111111"},
+        "capability": {
+          "schemaVersion": 1, "runtime": "claude-code", "platform": "darwin", "installationState": "installed", "authState": "authenticated",
+          "executable": {"pathDigest": "sha256:claude-path", "fileIdentityDigest": "sha256:claude-file", "cliVersion": "2.1.241"},
+          "models": [{"modelSelector": "claude-opus-5", "reasoningEfforts": [], "permissions": ["readOnly"]}],
+          "discovery": {"source": "exactVersionManifest", "verificationLevel": "measuredExactVersion", "exactCliVersion": "2.1.241", "effectiveModelEvidence": "measuredExactVersion"},
+          "canStart": true, "blockedReason": null, "fingerprint": "sha256:25f855349bd98909e1d3f1db2e256ad3051d0746b7909e21e3b9834f925059a1", "observedAt": "2026-08-27T01:00:00Z"
+        },
+        "resolvedProfile": {"roleId": "planning", "runtime": "claude-code", "modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "readOnly"},
+        "executionMode": {"invocation": "oneShot", "promptTransport": "serverResolvedMessages", "followUp": "nextRun", "resume": "disabled", "activeStdin": false},
+        "runId": "agent_run_bad", "preflightOutcome": "started", "persistedRunCount": 1, "spawnCount": 1, "lockCount": 0,
+        "barrier": null
+      }
+    },
+    {
+      "name": "capability-cannot-contain-secret-or-raw-field", "validator": "capabilitySnapshot",
+      "value": {
+        "schemaVersion": 1, "runtime": "codex", "platform": "darwin", "installationState": "notInstalled", "authState": "unknown", "executable": null,
+        "models": [], "discovery": {"source": "unavailable", "verificationLevel": "unknown", "exactCliVersion": null, "effectiveModelEvidence": "unknown"},
+        "canStart": false, "blockedReason": "notInstalled", "fingerprint": "sha256:7e0338f4f87a9e88aee5527e129cb376ac93e86591a8b39e62c1924e91b8ccb1", "observedAt": "2026-08-27T01:00:00Z", "authToken": "secret", "rawStderr": "debug"
+      }
+    },
+    {
+      "name": "active-stdin-and-resume-forbidden", "validator": "runStartTranscript",
+      "value": {
+        "schemaVersion": 1,
+        "request": {"chatId": "chat_01", "roleId": "planning", "inputMessageIds": ["message_01"], "expectedCapabilityFingerprint": "sha256:77f62ddbded4678c830da8d283fa38edc62068aa4e3b2202176692ca1b23517f"},
+        "capability": {"schemaVersion": 1, "runtime": "codex", "platform": "darwin", "installationState": "notInstalled", "authState": "unknown", "executable": null, "models": [], "discovery": {"source": "unavailable", "verificationLevel": "unknown", "exactCliVersion": null, "effectiveModelEvidence": "unknown"}, "canStart": false, "blockedReason": "notInstalled", "fingerprint": "sha256:77f62ddbded4678c830da8d283fa38edc62068aa4e3b2202176692ca1b23517f", "observedAt": "2026-08-27T01:00:00Z"},
+        "resolvedProfile": {"roleId": "planning", "runtime": "codex", "modelSelector": "gpt-5.6-sol", "reasoningEffort": "medium", "permission": "readOnly"},
+        "executionMode": {"invocation": "oneShot", "promptTransport": "serverResolvedMessages", "followUp": "activeStdin", "resume": "vendorSession", "activeStdin": true},
+        "runId": null, "preflightOutcome": "notInstalled", "persistedRunCount": 0, "spawnCount": 0, "lockCount": 0, "barrier": null
+      }
+    },
+    {
+      "name": "public-reasoning-and-raw-output-forbidden", "validator": "publicEvent",
+      "value": {"schemaVersion": 1, "eventId": "agent_event_02", "chatId": "chat_01", "taskId": "task_01", "projectId": "project_01", "worktreeId": "worktree_01", "workspaceIdentity": "workspace_01", "runId": "agent_run_01", "roleId": "planning", "capabilityFingerprint": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3", "kind": "status", "text": "진행 중", "reasoning": "private chain", "rawJson": {}, "toolArgs": [], "stderr": "raw", "debug": true, "env": {}, "auth": "secret", "prompt": "private", "token": "secret", "createdAt": "2026-08-27T01:02:00Z"}
+    },
+    {
+      "name": "preflight-rejection-cannot-spawn-or-lock", "validator": "runStartTranscript",
+      "value": {
+        "schemaVersion": 1,
+        "request": {"chatId": "chat_01", "roleId": "planning", "inputMessageIds": ["message_01"], "expectedCapabilityFingerprint": "sha256:77f62ddbded4678c830da8d283fa38edc62068aa4e3b2202176692ca1b23517f"},
+        "capability": {"schemaVersion": 1, "runtime": "codex", "platform": "darwin", "installationState": "notInstalled", "authState": "unknown", "executable": null, "models": [], "discovery": {"source": "unavailable", "verificationLevel": "unknown", "exactCliVersion": null, "effectiveModelEvidence": "unknown"}, "canStart": false, "blockedReason": "notInstalled", "fingerprint": "sha256:77f62ddbded4678c830da8d283fa38edc62068aa4e3b2202176692ca1b23517f", "observedAt": "2026-08-27T01:00:00Z"},
+        "resolvedProfile": {"roleId": "planning", "runtime": "codex", "modelSelector": "gpt-5.6-sol", "reasoningEffort": "medium", "permission": "readOnly"},
+        "executionMode": {"invocation": "oneShot", "promptTransport": "serverResolvedMessages", "followUp": "nextRun", "resume": "disabled", "activeStdin": false},
+        "runId": null, "preflightOutcome": "notInstalled", "persistedRunCount": 0, "spawnCount": 1, "lockCount": 1, "barrier": null
+      }
+    },
+    {
+      "name": "started-run-requires-identity-barrier", "validator": "runStartTranscript",
+      "value": {
+        "schemaVersion": 1,
+        "request": {"chatId": "chat_01", "roleId": "planning", "inputMessageIds": ["message_01"], "expectedCapabilityFingerprint": "sha256:b1b89b127e6542a4523a444cfe9ca115abe1ea9ddc845fcb5ff595862057a289"},
+        "capability": {"schemaVersion": 1, "runtime": "claude-code", "platform": "darwin", "installationState": "installed", "authState": "authenticated", "executable": {"pathDigest": "sha256:path", "fileIdentityDigest": "sha256:file", "cliVersion": "2.1.241"}, "models": [{"modelSelector": "claude-opus-5", "reasoningEfforts": [], "permissions": ["readOnly"]}], "discovery": {"source": "exactVersionManifest", "verificationLevel": "measuredExactVersion", "exactCliVersion": "2.1.241", "effectiveModelEvidence": "measuredExactVersion"}, "canStart": true, "blockedReason": null, "fingerprint": "sha256:b1b89b127e6542a4523a444cfe9ca115abe1ea9ddc845fcb5ff595862057a289", "observedAt": "2026-08-27T01:00:00Z"},
+        "resolvedProfile": {"roleId": "planning", "runtime": "claude-code", "modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "readOnly"},
+        "executionMode": {"invocation": "oneShot", "promptTransport": "serverResolvedMessages", "followUp": "nextRun", "resume": "disabled", "activeStdin": false},
+        "runId": "agent_run_01", "preflightOutcome": "started", "persistedRunCount": 1, "spawnCount": 1, "lockCount": 0, "barrier": null
+      }
+    },
+    {
+      "name": "uncertain-termination-cannot-release-poison", "validator": "terminationTranscript",
+      "value": {"schemaVersion": 1, "runId": "agent_run_02", "outcome": "recoveryRequired", "processesProvenGone": false, "poisoned": false, "writerLockState": "released", "chatState": "failed", "trackedProcesses": [{"pid": 4401, "startIdentityDigest": "sha256:start", "executablePathDigest": "sha256:path", "observedGone": false}], "evidenceDigest": "sha256:evidence", "observedAt": "2026-08-27T01:03:00Z"}
+    },
+    {
+      "name":"changed-capability-cannot-reuse-fingerprint","validator":"capabilitySnapshot",
+      "value":{"schemaVersion":1,"runtime":"claude-code","platform":"darwin","installationState":"installed","authState":"authenticated","executable":{"pathDigest":"sha256:claude-path","fileIdentityDigest":"sha256:claude-file","cliVersion":"2.1.242"},"models":[{"modelSelector":"claude-opus-5","reasoningEfforts":[],"permissions":["readOnly","workspaceWrite"]}],"discovery":{"source":"exactVersionManifest","verificationLevel":"measuredExactVersion","exactCliVersion":"2.1.242","effectiveModelEvidence":"measuredExactVersion"},"canStart":true,"blockedReason":null,"fingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","observedAt":"2026-08-27T01:00:00Z"}
+    },
+    {
+      "name":"clean-exit-requires-every-process-gone","validator":"terminationTranscript",
+      "value":{"schemaVersion":1,"runId":"agent_run_01","outcome":"cleanExit","processesProvenGone":true,"poisoned":false,"writerLockState":"released","chatState":"succeeded","trackedProcesses":[{"pid":4301,"startIdentityDigest":"sha256:agent-start","executablePathDigest":"sha256:claude-path","observedGone":false}],"evidenceDigest":"sha256:termination","observedAt":"2026-08-27T01:03:00Z"}
+    },
+    {
+      "name":"termination-rejects-duplicate-process-identity","validator":"terminationTranscript",
+      "value":{"schemaVersion":1,"runId":"agent_run_01","outcome":"cleanExit","processesProvenGone":true,"poisoned":false,"writerLockState":"released","chatState":"succeeded","trackedProcesses":[{"pid":4301,"startIdentityDigest":"sha256:agent-start","executablePathDigest":"sha256:claude-path","observedGone":true},{"pid":4301,"startIdentityDigest":"sha256:agent-start","executablePathDigest":"sha256:other-path","observedGone":true}],"evidenceDigest":"sha256:termination","observedAt":"2026-08-27T01:03:00Z"}
+    },
+    {
+      "name":"actual-agent-role-stage-must-match","validator":"runRecord",
+      "value":{"schemaVersion":1,"runId":"agent_run_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},"source":"actualAgent","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"running","stage":"planning","terminationOutcome":null,"createdAt":"2026-08-27T01:01:00Z","updatedAt":"2026-08-27T01:02:00Z"}
+    },
+    {
+      "name":"workspace-writer-clean-exit-cannot-claim-no-lock","validator":"runTerminationPersistence",
+      "value":{"schemaVersion":1,"run":{"schemaVersion":1,"runId":"agent_run_03","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},"source":"actualAgent","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"succeeded","stage":"implementing","terminationOutcome":"cleanExit","createdAt":"2026-08-27T01:01:00Z","updatedAt":"2026-08-27T01:03:00Z"},"termination":{"schemaVersion":1,"runId":"agent_run_03","outcome":"cleanExit","processesProvenGone":true,"poisoned":false,"writerLockState":"none","chatState":"succeeded","trackedProcesses":[{"pid":4501,"startIdentityDigest":"sha256:agent-start-3","executablePathDigest":"sha256:claude-path","observedGone":true}],"evidenceDigest":"sha256:termination-success","observedAt":"2026-08-27T01:03:00Z"}}
+    },
+    {
+      "name":"workspace-writer-cancel-cannot-claim-no-lock","validator":"runCancelResult",
+      "value":{"schemaVersion":1,"request":{"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_05"},"run":{"schemaVersion":1,"runId":"agent_run_05","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},"source":"actualAgent","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"canceled","stage":"implementing","terminationOutcome":"cleanExit","createdAt":"2026-08-27T01:01:00Z","updatedAt":"2026-08-27T01:03:00Z"},"termination":{"schemaVersion":1,"runId":"agent_run_05","outcome":"cleanExit","processesProvenGone":true,"poisoned":false,"writerLockState":"none","chatState":"canceled","trackedProcesses":[{"pid":4701,"startIdentityDigest":"sha256:agent-start-5","executablePathDigest":"sha256:claude-path","observedGone":true}],"evidenceDigest":"sha256:termination-canceled","observedAt":"2026-08-27T01:03:00Z"},"recovery":null,"outcome":"canceled"}
+    },
+    {
+      "name":"read-only-clean-exit-cannot-claim-released-lock","validator":"runTerminationPersistence",
+      "value":{"schemaVersion":1,"run":{"schemaVersion":1,"runId":"agent_run_04","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"planning","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"readOnly"},"source":"actualAgent","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"failed","stage":"planning","terminationOutcome":"cleanExit","createdAt":"2026-08-27T01:01:00Z","updatedAt":"2026-08-27T01:03:00Z"},"termination":{"schemaVersion":1,"runId":"agent_run_04","outcome":"cleanExit","processesProvenGone":true,"poisoned":false,"writerLockState":"released","chatState":"failed","trackedProcesses":[{"pid":4601,"startIdentityDigest":"sha256:agent-start-4","executablePathDigest":"sha256:claude-path","observedGone":true}],"evidenceDigest":"sha256:termination-failed","observedAt":"2026-08-27T01:03:00Z"}}
+    },
+    {
+      "name":"agent-chat-page-rejects-cross-project-run","validator":"agentChatDetailPage",
+      "value":{"chat":{"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면","settingsRevision":1,"roleSnapshots":[{"roleId":"planning","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"gpt-5.6-sol","reasoningEffort":"high","permission":"readOnly"}],"state":"running","createdAt":"2026-08-27T01:00:00Z","updatedAt":"2026-08-27T01:02:00Z"},"afterEventSequence":0,"messages":[],"runs":[],"nextEventSequence":null,"agentRuns":[{"schemaVersion":1,"runId":"agent_run_01","chatId":"chat_01","taskId":"task_01","projectId":"project_other","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"planning","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"readOnly"},"source":"actualAgent","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"running","stage":"planning","terminationOutcome":null,"createdAt":"2026-08-27T01:01:00Z","updatedAt":"2026-08-27T01:02:00Z"}],"agentRecovery":null}
+    },
+    {
+      "name":"recovery-cannot-resolve-while-process-remains","validator":"recoveryResolveResult",
+      "value":{"schemaVersion":1,"before":{"schemaVersion":1,"recoveryId":"agent_recovery_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_02","source":"actualAgent","reason":"cancelUncertain","state":"unresolved","trackedProcesses":[{"pid":4401,"startIdentityDigest":"sha256:agent-start-2","executablePathDigest":"sha256:claude-path","observedGone":false}],"poisoned":true,"revision":1,"createdAt":"2026-08-27T01:03:00Z","resolvedAt":null},"request":{"recoveryId":"agent_recovery_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_02","expectedRevision":1,"resolution":"abandon"},"after":{"schemaVersion":1,"recoveryId":"agent_recovery_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_02","source":"actualAgent","reason":"cancelUncertain","state":"resolvedAbandoned","trackedProcesses":[{"pid":4401,"startIdentityDigest":"sha256:agent-start-2","executablePathDigest":"sha256:claude-path","observedGone":true}],"poisoned":false,"revision":2,"createdAt":"2026-08-27T01:03:00Z","resolvedAt":"2026-08-27T01:05:00Z"},"outcome":"resolvedAbandoned"}
+    },
+    {
+      "name": "public-event-requires-actual-agent-event-namespace", "validator": "publicEvent",
+      "value": {"schemaVersion":1,"eventId":"event_legacy","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","kind":"status","text":"진행 중","createdAt":"2026-08-27T01:03:00Z"}
+    }
+  ],
+  "bindings": [
+    {
+      "name": "accepted-exact-chat-context", "kind": "accepted", "valid": true,
+      "expected": {"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"},
+      "value": {"schemaVersion":1,"runId":"agent_run_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"preparing"}
+    },
+    {"name":"accepted-cross-chat-invalid","kind":"accepted","valid":false,"expected":{"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"},"value":{"schemaVersion":1,"runId":"agent_run_01","chatId":"chat_other","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"preparing"}},
+    {"name":"accepted-cross-task-invalid","kind":"accepted","valid":false,"expected":{"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"},"value":{"schemaVersion":1,"runId":"agent_run_01","chatId":"chat_01","taskId":"task_other","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"preparing"}},
+    {"name":"accepted-cross-project-invalid","kind":"accepted","valid":false,"expected":{"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"},"value":{"schemaVersion":1,"runId":"agent_run_01","chatId":"chat_01","taskId":"task_01","projectId":"project_other","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"preparing"}},
+    {"name":"accepted-cross-worktree-invalid","kind":"accepted","valid":false,"expected":{"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"},"value":{"schemaVersion":1,"runId":"agent_run_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_other","workspaceIdentity":"workspace_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"preparing"}},
+    {"name":"accepted-cross-workspace-invalid","kind":"accepted","valid":false,"expected":{"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"},"value":{"schemaVersion":1,"runId":"agent_run_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_other","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"preparing"}},
+    {"name":"accepted-cross-role-invalid","kind":"accepted","valid":false,"expected":{"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"},"value":{"schemaVersion":1,"runId":"agent_run_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","roleId":"review","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"preparing"}},
+    {"name":"accepted-cross-fingerprint-invalid","kind":"accepted","valid":false,"expected":{"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"},"value":{"schemaVersion":1,"runId":"agent_run_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","roleId":"planning","capabilityFingerprint":"sha256:1111111111111111111111111111111111111111111111111111111111111111","state":"preparing"}},
+    {
+      "name": "public-event-exact-run-binding", "kind": "publicEvent", "valid": true,
+      "expected": {"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"},
+      "value": {"schemaVersion":1,"eventId":"agent_event_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","kind":"status","text":"진행 중","createdAt":"2026-08-27T01:02:00Z"}
+    },
+    {"name":"public-event-cross-run-invalid","kind":"publicEvent","valid":false,"expected":{"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"},"value":{"schemaVersion":1,"eventId":"agent_event_02","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_other","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","kind":"final","text":"완료","createdAt":"2026-08-27T01:03:00Z"}},
+    {"name":"public-event-cross-chat-invalid","kind":"publicEvent","valid":false,"expected":{"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"},"value":{"schemaVersion":1,"eventId":"agent_event_06","chatId":"chat_other","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","kind":"status","text":"진행 중","createdAt":"2026-08-27T01:03:00Z"}},
+    {"name":"public-event-cross-task-invalid","kind":"publicEvent","valid":false,"expected":{"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"},"value":{"schemaVersion":1,"eventId":"agent_event_07","chatId":"chat_01","taskId":"task_other","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","kind":"status","text":"진행 중","createdAt":"2026-08-27T01:03:00Z"}},
+    {"name":"public-event-cross-worktree-invalid","kind":"publicEvent","valid":false,"expected":{"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"},"value":{"schemaVersion":1,"eventId":"agent_event_08","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_other","workspaceIdentity":"workspace_01","runId":"agent_run_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","kind":"status","text":"진행 중","createdAt":"2026-08-27T01:03:00Z"}},
+    {"name":"public-event-cross-role-invalid","kind":"publicEvent","valid":false,"expected":{"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"},"value":{"schemaVersion":1,"eventId":"agent_event_09","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01","roleId":"review","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","kind":"status","text":"진행 중","createdAt":"2026-08-27T01:03:00Z"}},
+    {"name":"public-event-cross-project-invalid","kind":"publicEvent","valid":false,"expected":{"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"},"value":{"schemaVersion":1,"eventId":"agent_event_03","chatId":"chat_01","taskId":"task_01","projectId":"project_other","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","kind":"question","text":"확인해 주세요.","createdAt":"2026-08-27T01:03:00Z"}},
+    {"name":"public-event-cross-workspace-invalid","kind":"publicEvent","valid":false,"expected":{"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"},"value":{"schemaVersion":1,"eventId":"agent_event_04","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_other","runId":"agent_run_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","kind":"status","text":"진행 중","createdAt":"2026-08-27T01:03:00Z"}},
+    {"name":"public-event-cross-fingerprint-invalid","kind":"publicEvent","valid":false,"expected":{"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01","roleId":"planning","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"},"value":{"schemaVersion":1,"eventId":"agent_event_05","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01","roleId":"planning","capabilityFingerprint":"sha256:1111111111111111111111111111111111111111111111111111111111111111","kind":"status","text":"진행 중","createdAt":"2026-08-27T01:03:00Z"}}
+  ]
+}

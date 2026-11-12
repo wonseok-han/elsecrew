@@ -1,0 +1,192 @@
+{
+  "valid": [
+    {
+      "name": "nested-selection-resolves-to-canonical-git-root",
+      "validator": "projectIdentity",
+      "value": {"schemaVersion":1,"projectId":"project_01","selectedPath":"/fixtures/repository/packages/app","canonicalGitRoot":"/fixtures/repository"}
+    },
+    {
+      "name": "windows-selection-uses-canonical-forward-slashes",
+      "validator": "projectIdentity",
+      "value": {"schemaVersion":1,"projectId":"project_windows_01","selectedPath":"C:/fixtures/repository/packages/app","canonicalGitRoot":"C:/fixtures/repository"}
+    },
+    {
+      "name": "detached-active-standalone-snapshot-manifest-sha1",
+      "validator": "worktreeManifest",
+      "value": {"schemaVersion":1,"projectId":"project_01","canonicalGitRoot":"/fixtures/repository","worktreeId":"worktree_01","worktreePath":"/fixtures/workspaces/worktree_01","workspaceKind":"standaloneSnapshot","snapshotTransport":"gitBundle","sourceMutationPolicy":"forbidden","objectFormat":"sha1","baseCommit":"0123456789abcdef0123456789abcdef01234567","baseTree":"89abcdef0123456789abcdef0123456789abcdef","sourceIdentity":"source_repository_01","workspaceIdentity":"workspace_snapshot_01","headMode":"detached","lifecycle":"active"}
+    },
+    {
+      "name": "standalone-snapshot-manifest-supports-sha256-object-format",
+      "validator": "worktreeManifest",
+      "value": {"schemaVersion":1,"projectId":"project_02","canonicalGitRoot":"/fixtures/repository-sha256","worktreeId":"worktree_02","worktreePath":"/fixtures/workspaces/worktree_02","workspaceKind":"standaloneSnapshot","snapshotTransport":"gitBundle","sourceMutationPolicy":"forbidden","objectFormat":"sha256","baseCommit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","baseTree":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","sourceIdentity":"source_repository_02","workspaceIdentity":"workspace_snapshot_02","headMode":"detached","lifecycle":"active"}
+    },
+    {
+      "name": "standalone-snapshot-has-no-linked-source-metadata",
+      "validator": "standaloneSnapshotInvariant",
+      "value": {"workspaceIdentity":"workspace_snapshot_01","objectFormat":"sha1","headCommit":"0123456789abcdef0123456789abcdef01234567","baseCommit":"0123456789abcdef0123456789abcdef01234567","indexTree":"89abcdef0123456789abcdef0123456789abcdef","baseTree":"89abcdef0123456789abcdef0123456789abcdef","remoteCount":0,"alternatesCount":0,"sourceRefCount":0,"sourceAbsolutePathCount":0,"objectConnectivity":true,"externalManifestIdentity":"workspace_snapshot_01","gitMarkerIdentity":"workspace_snapshot_01","databaseIdentity":"workspace_snapshot_01"}
+    },
+    {
+      "name": "source-remains-byte-identical-under-read-only-capability",
+      "validator": "sourceMutationTrace",
+      "value": {"sourceCapability":"readOnly","sourceLockCount":0,"sourceWriteCount":0,"before":{"head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","index":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","refs":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","config":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","objects":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","packedRefs":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","entrySet":"1111111111111111111111111111111111111111111111111111111111111111"},"after":{"head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","index":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","refs":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","config":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","objects":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","packedRefs":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","entrySet":"1111111111111111111111111111111111111111111111111111111111111111"}}
+    },
+    {
+      "name": "snapshot-streams-at-fixed-limits",
+      "validator": "snapshotSizing",
+      "value": {"bundleBytes":2147483648,"materializedTotalBytes":4294967296,"entryCount":200000,"singleBlobBytes":1073741824,"diskBytesAfterMaterialization":536870912,"streaming":true,"fullAllocation":false}
+    },
+    {
+      "name": "snapshot-disk-after-materialization-accepts-js-safe-max",
+      "validator": "snapshotSizing",
+      "value": {"bundleBytes":1,"materializedTotalBytes":1,"entryCount":1,"singleBlobBytes":1,"diskBytesAfterMaterialization":9007199254740991,"streaming":true,"fullAllocation":false}
+    },
+    {
+      "name": "snapshot-materializes-raw-committed-content-only",
+      "validator": "snapshotMaterialization",
+      "value": {"rawCommittedBlobBytes":true,"preserveGitMode":true,"checkout":false,"filters":false,"eolTransform":false,"encodingTransform":false,"identTransform":false,"exportAttributes":false,"lfsTransform":false,"symlinkPolicy":"noFollow","submodulePolicy":"noInit","rejectCaseCollision":true,"rejectNonUtf8Path":true,"rejectDotGitEntry":true,"rejectAbnormalMode":true}
+    },
+    {
+      "name": "snapshot-activates-only-after-durable-identity",
+      "validator": "snapshotLifecycle",
+      "value": {"phases":["recoveryMarkerPersisted","sourceDigestBefore","bundleHeaderVerified","bundleExportStreamed","sourceDigestAfter","bundleVerified","materializationStreamed","workspaceVerified","externalManifestPersisted","gitMarkerPersisted","workspaceRenamed","databaseCommitted","activated"],"bundleHeader":{"transport":"gitBundle","references":["HEAD"],"prerequisites":[],"selfContainedHead":true},"workspaceIdentity":"workspace_snapshot_01","externalManifestIdentity":"workspace_snapshot_01","gitMarkerIdentity":"workspace_snapshot_01","databaseIdentity":"workspace_snapshot_01","activatedWorkspaceCount":1}
+    },
+    {"name":"corrupt-bundle-activates-nothing","validator":"snapshotFailure","value":{"failureKind":"corruptBundle","activeWorkspaceCount":0,"recoveryMarkerPresent":true}},
+    {"name":"truncated-bundle-activates-nothing","validator":"snapshotFailure","value":{"failureKind":"truncatedBundle","activeWorkspaceCount":0,"recoveryMarkerPresent":true}},
+    {"name":"oversize-bundle-activates-nothing","validator":"snapshotFailure","value":{"failureKind":"oversizeBundle","activeWorkspaceCount":0,"recoveryMarkerPresent":true}},
+    {"name":"shallow-missing-objects-activate-nothing","validator":"snapshotFailure","value":{"failureKind":"shallowMissingObjects","activeWorkspaceCount":0,"recoveryMarkerPresent":true}},
+    {
+      "name": "tree-page-has-opaque-next-cursor",
+      "validator": "treePage",
+      "value": {"projectId":"project_01","parentPath":"src","entries":[{"path":"src/assets","name":"assets","kind":"directory"},{"path":"src/App.tsx","name":"App.tsx","kind":"file"},{"path":"src/link","name":"link","kind":"symlink"}],"nextCursor":"cursor-owned-by-sidecar-opaque-02"}
+    },
+    {
+      "name": "root-tree-page-has-only-direct-child",
+      "validator": "treePage",
+      "value": {"projectId":"project_01","parentPath":"","entries":[{"path":"src","name":"src","kind":"directory"},{"path":"README.md","name":"README.md","kind":"file"}],"nextCursor":null}
+    },
+    {
+      "name": "exact-hello-bytes-produce-canonical-sha256-version",
+      "validator": "fileDigest",
+      "value": {"inputHex":"68656c6c6f","version":"sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"}
+    },
+    {
+      "name": "utf8-read-is-chunked-and-versioned",
+      "validator": "fileRead",
+      "value": {"projectId":"project_01","path":"src/App.tsx","classification":"utf8","byteLength":42,"version":"sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","stream":{"streamId":"stream_read_01","chunkBytes":262144}}
+    },
+    {
+      "name": "binary-read-does-not-expose-text",
+      "validator": "fileRead",
+      "value": {"projectId":"project_01","path":"assets/logo.png","classification":"binary","byteLength":42,"version":"sha256:486ea46224d1bb4fb680f34f7c9ad96a8f24ec88be73ea8e5a6c65260e9cb8a7","stream":null}
+    },
+    {
+      "name": "save-commits-when-version-still-matches",
+      "validator": "saveTranscript",
+      "value": {"begin":{"saveId":"save_01","projectId":"project_01","path":"src/App.tsx","expectedVersion":"sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","totalBytes":5,"encoding":"utf8","chunkBytes":262144},"chunks":[{"saveId":"save_01","seq":1,"text":"hello"}],"commit":{"saveId":"save_01","expectedVersion":"sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","lastSeq":1,"totalBytes":5},"currentVersion":"sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","outcome":"committed"}
+    },
+    {
+      "name": "save-conflicts-when-file-changed",
+      "validator": "saveTranscript",
+      "value": {"begin":{"saveId":"save_02","projectId":"project_01","path":"src/App.tsx","expectedVersion":"sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","totalBytes":5,"encoding":"utf8","chunkBytes":262144},"chunks":[{"saveId":"save_02","seq":1,"text":"hello"}],"commit":{"saveId":"save_02","expectedVersion":"sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","lastSeq":1,"totalBytes":5},"currentVersion":"sha256:486ea46224d1bb4fb680f34f7c9ad96a8f24ec88be73ea8e5a6c65260e9cb8a7","outcome":"dirtyConflict"}
+    },
+    {
+      "name": "diff-summary-surfaces-rename-delete-and-binary",
+      "validator": "diffSummary",
+      "value": {"projectId":"project_01","baseCommit":"0123456789abcdef0123456789abcdef01234567","entries":[{"kind":"added","path":"src/new.ts","binary":false},{"kind":"modified","path":"src/App.tsx","binary":false},{"kind":"deleted","path":"src/old.ts","binary":false},{"kind":"renamed","path":"src/new-name.ts","oldPath":"src/old-name.ts","binary":false},{"kind":"binary","path":"assets/logo.png","binary":true}]}
+    },
+    {
+      "name": "text-diff-is-chunked",
+      "validator": "diffFile",
+      "value": {"projectId":"project_01","kind":"renamed","path":"src/new-name.ts","oldPath":"src/old-name.ts","baseVersion":"sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","worktreeVersion":"sha256:486ea46224d1bb4fb680f34f7c9ad96a8f24ec88be73ea8e5a6c65260e9cb8a7","byteLength":2048,"stream":{"streamId":"stream_diff_01","chunkBytes":262144}}
+    },
+    {
+      "name": "binary-diff-has-no-text-stream",
+      "validator": "diffFile",
+      "value": {"projectId":"project_01","kind":"binary","path":"assets/logo.png","oldPath":null,"baseVersion":"sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","worktreeVersion":"sha256:486ea46224d1bb4fb680f34f7c9ad96a8f24ec88be73ea8e5a6c65260e9cb8a7","byteLength":4096,"stream":null}
+    },
+    {
+      "name": "watch-overflow-forces-full-rescan",
+      "validator": "watchEvent",
+      "value": {"projectId":"project_01","event":"file.changed","paths":[],"rescanRequired":true}
+    },
+    {
+      "name": "project-close-only-abandons",
+      "validator": "projectClose",
+      "value": {"projectId":"project_01","lifecycle":"abandoned","physicallyDeleted":false}
+    },
+    {"name":"manifest-mismatch-blocks","validator":"safetyError","value":{"code":"E_MANIFEST_MISMATCH","kind":"manifestMismatch","detail":"persisted manifest differs from the canonical worktree identity","retryable":false,"outcomeUnknown":false}},
+    {"name":"symlink-escape-blocks","validator":"safetyError","value":{"code":"E_SYMLINK_ESCAPE","kind":"symlinkEscape","detail":"resolved path leaves the canonical worktree root","retryable":false,"outcomeUnknown":false}},
+    {"name":"dirty-conflict-blocks","validator":"safetyError","value":{"code":"E_DIRTY_CONFLICT","kind":"dirtyConflict","detail":"file version changed after the editor read it","retryable":false,"outcomeUnknown":false}},
+    {"name":"recovery-required-blocks","validator":"safetyError","value":{"code":"E_RECOVERY_REQUIRED","kind":"recoveryRequired","detail":"worktree safety state must be resolved before another risky action","retryable":false,"outcomeUnknown":false}},
+    {
+      "name": "g4-ready-advertises-exact-cumulative-capabilities",
+      "validator": "g4Ready",
+      "value": {"protocolVersion":1,"sidecarSchemaVersion":1,"appSchemaVersion":1,"pid":4242,"platform":"darwin","capabilities":["system.status","app.prepareQuit","project.open","project.getTree","project.createWorktree","project.close","file.read","file.save","file.watch","diff.getSummary","diff.getFile"],"sidecarInstanceId":"sidecar_g4_01"}
+    },
+    {
+      "name": "g4-ready-status-keeps-exact-cumulative-capabilities",
+      "validator": "g4Status",
+      "value": {"state":"ready","sidecar":{"protocolVersion":1,"sidecarSchemaVersion":1,"appSchemaVersion":1,"pid":4242,"platform":"darwin","capabilities":["system.status","app.prepareQuit","project.open","project.getTree","project.createWorktree","project.close","file.read","file.save","file.watch","diff.getSummary","diff.getFile"],"sidecarInstanceId":"sidecar_g4_01"},"database":{"health":"healthy","schemaVersion":1},"recoveryRequired":false,"blockerIds":[]}
+    },
+    {
+      "name": "g4-unavailable-status-validates-last-ready-capabilities",
+      "validator": "g4Status",
+      "value": {"state":"unavailable","lastReadySidecar":{"protocolVersion":1,"sidecarSchemaVersion":1,"appSchemaVersion":1,"pid":4242,"platform":"darwin","capabilities":["system.status","app.prepareQuit","project.open","project.getTree","project.createWorktree","project.close","file.read","file.save","file.watch","diff.getSummary","diff.getFile"],"sidecarInstanceId":"sidecar_g4_01"},"database":{"health":"unavailable","schemaVersion":1},"recoveryRequired":false,"blockerIds":[],"error":{"code":"E_SIDECAR_EXIT","kind":"sidecarUnavailable","detail":"sidecar stopped after its last ready identity","retryable":false,"outcomeUnknown":false}}
+    }
+  ],
+  "invalid": [
+    {"name":"relative-git-root","validator":"projectIdentity","value":{"schemaVersion":1,"projectId":"project_01","selectedPath":"repo/src","canonicalGitRoot":"repo"}},
+    {"name":"windows-drive-must-be-uppercase","validator":"projectIdentity","value":{"schemaVersion":1,"projectId":"project_01","selectedPath":"c:/fixtures/repository/src","canonicalGitRoot":"c:/fixtures/repository"}},
+    {"name":"selection-outside-git-root","validator":"projectIdentity","value":{"schemaVersion":1,"projectId":"project_01","selectedPath":"/other/repo","canonicalGitRoot":"/fixtures/repository"}},
+    {"name":"snapshot-inside-original","validator":"worktreeManifest","value":{"schemaVersion":1,"projectId":"project_01","canonicalGitRoot":"/fixtures/repository","worktreeId":"worktree_01","worktreePath":"/fixtures/repository/.workspaces/one","workspaceKind":"standaloneSnapshot","snapshotTransport":"gitBundle","sourceMutationPolicy":"forbidden","objectFormat":"sha1","baseCommit":"0123456789abcdef0123456789abcdef01234567","baseTree":"89abcdef0123456789abcdef0123456789abcdef","sourceIdentity":"source_repository_01","workspaceIdentity":"workspace_snapshot_01","headMode":"detached","lifecycle":"active"}},
+    {"name":"linked-worktree-kind-forbidden","validator":"worktreeManifest","value":{"schemaVersion":1,"projectId":"project_01","canonicalGitRoot":"/fixtures/repository","worktreeId":"worktree_01","worktreePath":"/fixtures/workspaces/worktree_01","workspaceKind":"linkedWorktree","snapshotTransport":"gitBundle","sourceMutationPolicy":"forbidden","objectFormat":"sha1","baseCommit":"0123456789abcdef0123456789abcdef01234567","baseTree":"89abcdef0123456789abcdef0123456789abcdef","sourceIdentity":"source_repository_01","workspaceIdentity":"workspace_snapshot_01","headMode":"detached","lifecycle":"active"}},
+    {"name":"base-oid-length-must-match-object-format","validator":"worktreeManifest","value":{"schemaVersion":1,"projectId":"project_01","canonicalGitRoot":"/fixtures/repository","worktreeId":"worktree_01","worktreePath":"/fixtures/workspaces/worktree_01","workspaceKind":"standaloneSnapshot","snapshotTransport":"gitBundle","sourceMutationPolicy":"forbidden","objectFormat":"sha256","baseCommit":"0123456789abcdef0123456789abcdef01234567","baseTree":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","sourceIdentity":"source_repository_01","workspaceIdentity":"workspace_snapshot_01","headMode":"detached","lifecycle":"active"}},
+    {"name":"standalone-snapshot-rejects-remote","validator":"standaloneSnapshotInvariant","value":{"workspaceIdentity":"workspace_snapshot_01","objectFormat":"sha1","headCommit":"0123456789abcdef0123456789abcdef01234567","baseCommit":"0123456789abcdef0123456789abcdef01234567","indexTree":"89abcdef0123456789abcdef0123456789abcdef","baseTree":"89abcdef0123456789abcdef0123456789abcdef","remoteCount":1,"alternatesCount":0,"sourceRefCount":0,"sourceAbsolutePathCount":0,"objectConnectivity":true,"externalManifestIdentity":"workspace_snapshot_01","gitMarkerIdentity":"workspace_snapshot_01","databaseIdentity":"workspace_snapshot_01"}},
+    {"name":"standalone-snapshot-rejects-identity-mismatch","validator":"standaloneSnapshotInvariant","value":{"workspaceIdentity":"workspace_snapshot_01","objectFormat":"sha1","headCommit":"0123456789abcdef0123456789abcdef01234567","baseCommit":"0123456789abcdef0123456789abcdef01234567","indexTree":"89abcdef0123456789abcdef0123456789abcdef","baseTree":"89abcdef0123456789abcdef0123456789abcdef","remoteCount":0,"alternatesCount":0,"sourceRefCount":0,"sourceAbsolutePathCount":0,"objectConnectivity":true,"externalManifestIdentity":"workspace_snapshot_01","gitMarkerIdentity":"workspace_other","databaseIdentity":"workspace_snapshot_01"}},
+    {"name":"source-digest-change-fails-closed","validator":"sourceMutationTrace","value":{"sourceCapability":"readOnly","sourceLockCount":0,"sourceWriteCount":0,"before":{"head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","index":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","refs":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","config":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","objects":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","packedRefs":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","entrySet":"1111111111111111111111111111111111111111111111111111111111111111"},"after":{"head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","index":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","refs":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","config":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","objects":"2222222222222222222222222222222222222222222222222222222222222222","packedRefs":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","entrySet":"1111111111111111111111111111111111111111111111111111111111111111"}}},
+    {"name":"source-write-capability-fails-closed","validator":"sourceMutationTrace","value":{"sourceCapability":"readOnly","sourceLockCount":0,"sourceWriteCount":1,"before":{"head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","index":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","refs":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","config":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","objects":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","packedRefs":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","entrySet":"1111111111111111111111111111111111111111111111111111111111111111"},"after":{"head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","index":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","refs":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","config":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","objects":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","packedRefs":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","entrySet":"1111111111111111111111111111111111111111111111111111111111111111"}}},
+    {"name":"bundle-over-limit-fails-closed","validator":"snapshotSizing","value":{"bundleBytes":2147483649,"materializedTotalBytes":4294967296,"entryCount":200000,"singleBlobBytes":1073741824,"diskBytesAfterMaterialization":536870912,"streaming":true,"fullAllocation":false}},
+    {"name":"disk-reserve-after-materialization-fails-closed","validator":"snapshotSizing","value":{"bundleBytes":1,"materializedTotalBytes":1,"entryCount":1,"singleBlobBytes":1,"diskBytesAfterMaterialization":536870911,"streaming":true,"fullAllocation":false}},
+    {"name":"snapshot-disk-after-materialization-rejects-js-safe-max-plus-one","validator":"snapshotSizing","value":{"bundleBytes":1,"materializedTotalBytes":1,"entryCount":1,"singleBlobBytes":1,"diskBytesAfterMaterialization":9007199254740992,"streaming":true,"fullAllocation":false}},
+    {"name":"full-allocation-fails-closed","validator":"snapshotSizing","value":{"bundleBytes":1,"materializedTotalBytes":1,"entryCount":1,"singleBlobBytes":1,"diskBytesAfterMaterialization":536870912,"streaming":true,"fullAllocation":true}},
+    {"name":"checkout-filter-materialization-fails-closed","validator":"snapshotMaterialization","value":{"rawCommittedBlobBytes":true,"preserveGitMode":true,"checkout":false,"filters":true,"eolTransform":false,"encodingTransform":false,"identTransform":false,"exportAttributes":false,"lfsTransform":false,"symlinkPolicy":"noFollow","submodulePolicy":"noInit","rejectCaseCollision":true,"rejectNonUtf8Path":true,"rejectDotGitEntry":true,"rejectAbnormalMode":true}},
+    {"name":"case-collision-materialization-fails-closed","validator":"snapshotMaterialization","value":{"rawCommittedBlobBytes":true,"preserveGitMode":true,"checkout":false,"filters":false,"eolTransform":false,"encodingTransform":false,"identTransform":false,"exportAttributes":false,"lfsTransform":false,"symlinkPolicy":"noFollow","submodulePolicy":"noInit","rejectCaseCollision":false,"rejectNonUtf8Path":true,"rejectDotGitEntry":true,"rejectAbnormalMode":true}},
+    {"name":"non-utf8-path-materialization-fails-closed","validator":"snapshotMaterialization","value":{"rawCommittedBlobBytes":true,"preserveGitMode":true,"checkout":false,"filters":false,"eolTransform":false,"encodingTransform":false,"identTransform":false,"exportAttributes":false,"lfsTransform":false,"symlinkPolicy":"noFollow","submodulePolicy":"noInit","rejectCaseCollision":true,"rejectNonUtf8Path":false,"rejectDotGitEntry":true,"rejectAbnormalMode":true}},
+    {"name":"dot-git-entry-materialization-fails-closed","validator":"snapshotMaterialization","value":{"rawCommittedBlobBytes":true,"preserveGitMode":true,"checkout":false,"filters":false,"eolTransform":false,"encodingTransform":false,"identTransform":false,"exportAttributes":false,"lfsTransform":false,"symlinkPolicy":"noFollow","submodulePolicy":"noInit","rejectCaseCollision":true,"rejectNonUtf8Path":true,"rejectDotGitEntry":false,"rejectAbnormalMode":true}},
+    {"name":"abnormal-mode-materialization-fails-closed","validator":"snapshotMaterialization","value":{"rawCommittedBlobBytes":true,"preserveGitMode":true,"checkout":false,"filters":false,"eolTransform":false,"encodingTransform":false,"identTransform":false,"exportAttributes":false,"lfsTransform":false,"symlinkPolicy":"noFollow","submodulePolicy":"noInit","rejectCaseCollision":true,"rejectNonUtf8Path":true,"rejectDotGitEntry":true,"rejectAbnormalMode":false}},
+    {"name":"bundle-prerequisite-is-not-self-contained","validator":"snapshotLifecycle","value":{"phases":["recoveryMarkerPersisted","sourceDigestBefore","bundleHeaderVerified","bundleExportStreamed","sourceDigestAfter","bundleVerified","materializationStreamed","workspaceVerified","externalManifestPersisted","gitMarkerPersisted","workspaceRenamed","databaseCommitted","activated"],"bundleHeader":{"transport":"gitBundle","references":["HEAD"],"prerequisites":["0123456789abcdef0123456789abcdef01234567"],"selfContainedHead":true},"workspaceIdentity":"workspace_snapshot_01","externalManifestIdentity":"workspace_snapshot_01","gitMarkerIdentity":"workspace_snapshot_01","databaseIdentity":"workspace_snapshot_01","activatedWorkspaceCount":1}},
+    {"name":"activation-before-database-commit-fails-closed","validator":"snapshotLifecycle","value":{"phases":["recoveryMarkerPersisted","sourceDigestBefore","bundleHeaderVerified","bundleExportStreamed","sourceDigestAfter","bundleVerified","materializationStreamed","workspaceVerified","externalManifestPersisted","gitMarkerPersisted","workspaceRenamed","activated"],"bundleHeader":{"transport":"gitBundle","references":["HEAD"],"prerequisites":[],"selfContainedHead":true},"workspaceIdentity":"workspace_snapshot_01","externalManifestIdentity":"workspace_snapshot_01","gitMarkerIdentity":"workspace_snapshot_01","databaseIdentity":"workspace_snapshot_01","activatedWorkspaceCount":1}},
+    {"name":"failed-snapshot-cannot-activate","validator":"snapshotFailure","value":{"failureKind":"corruptBundle","activeWorkspaceCount":1,"recoveryMarkerPresent":true}},
+    {"name":"tree-path-traversal","validator":"treePage","value":{"projectId":"project_01","parentPath":"","entries":[{"path":"../secret","name":"secret","kind":"file"}],"nextCursor":null}},
+    {"name":"root-page-cannot-return-nested-entry","validator":"treePage","value":{"projectId":"project_01","parentPath":"","entries":[{"path":"src/App.tsx","name":"App.tsx","kind":"file"}],"nextCursor":null}},
+    {"name":"tree-page-cannot-return-nested-descendant","validator":"treePage","value":{"projectId":"project_01","parentPath":"src","entries":[{"path":"src/nested/App.tsx","name":"App.tsx","kind":"file"}],"nextCursor":null}},
+    {"name":"tree-page-cannot-return-other-parent","validator":"treePage","value":{"projectId":"project_01","parentPath":"src","entries":[{"path":"tests/App.test.ts","name":"App.test.ts","kind":"file"}],"nextCursor":null}},
+    {"name":"hello-bytes-reject-stale-world-digest","validator":"fileDigest","value":{"inputHex":"68656c6c6f","version":"sha256:486ea46224d1bb4fb680f34f7c9ad96a8f24ec88be73ea8e5a6c65260e9cb8a7"}},
+    {"name":"hello-bytes-reject-altered-digest","validator":"fileDigest","value":{"inputHex":"68656c6c6f","version":"sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9825"}},
+    {"name":"file-version-is-not-full-hash","validator":"fileRead","value":{"projectId":"project_01","path":"src/App.tsx","classification":"utf8","byteLength":42,"version":"sha256:abcd","stream":{"streamId":"stream_read_01","chunkBytes":262144}}},
+    {"name":"binary-read-smuggles-text-stream","validator":"fileRead","value":{"projectId":"project_01","path":"assets/logo.png","classification":"binary","byteLength":42,"version":"sha256:486ea46224d1bb4fb680f34f7c9ad96a8f24ec88be73ea8e5a6c65260e9cb8a7","stream":{"streamId":"stream_read_01","chunkBytes":262144}}},
+    {"name":"save-sequence-gap","validator":"saveTranscript","value":{"begin":{"saveId":"save_01","projectId":"project_01","path":"src/App.tsx","expectedVersion":"sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","totalBytes":5,"encoding":"utf8","chunkBytes":262144},"chunks":[{"saveId":"save_01","seq":2,"text":"hello"}],"commit":{"saveId":"save_01","expectedVersion":"sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","lastSeq":1,"totalBytes":5},"currentVersion":"sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","outcome":"committed"}},
+    {"name":"stale-save-claims-commit","validator":"saveTranscript","value":{"begin":{"saveId":"save_02","projectId":"project_01","path":"src/App.tsx","expectedVersion":"sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","totalBytes":5,"encoding":"utf8","chunkBytes":262144},"chunks":[{"saveId":"save_02","seq":1,"text":"hello"}],"commit":{"saveId":"save_02","expectedVersion":"sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","lastSeq":1,"totalBytes":5},"currentVersion":"sha256:486ea46224d1bb4fb680f34f7c9ad96a8f24ec88be73ea8e5a6c65260e9cb8a7","outcome":"committed"}},
+    {"name":"rename-without-old-path","validator":"diffSummary","value":{"projectId":"project_01","baseCommit":"0123456789abcdef0123456789abcdef01234567","entries":[{"kind":"renamed","path":"src/new-name.ts","binary":false}]}},
+    {"name":"binary-diff-smuggles-stream","validator":"diffFile","value":{"projectId":"project_01","kind":"binary","path":"assets/logo.png","oldPath":null,"baseVersion":"sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","worktreeVersion":"sha256:486ea46224d1bb4fb680f34f7c9ad96a8f24ec88be73ea8e5a6c65260e9cb8a7","byteLength":4096,"stream":{"streamId":"stream_diff_01","chunkBytes":262144}}},
+    {"name":"watch-overflow-claims-complete-paths","validator":"watchEvent","value":{"projectId":"project_01","event":"file.changed","paths":["src/App.tsx"],"rescanRequired":true}},
+    {"name":"project-close-physically-deletes","validator":"projectClose","value":{"projectId":"project_01","lifecycle":"abandoned","physicallyDeleted":true}},
+    {"name":"dangerous-error-claims-retryable","validator":"safetyError","value":{"code":"E_MANIFEST_MISMATCH","kind":"manifestMismatch","detail":"manifest mismatch","retryable":true,"outcomeUnknown":false}},
+    {"name":"unknown-field-fails-closed","validator":"projectIdentity","value":{"schemaVersion":1,"projectId":"project_01","selectedPath":"/fixtures/repository","canonicalGitRoot":"/fixtures/repository","trusted":true}},
+    {
+      "name": "g4-ready-rejects-missing-project-capability",
+      "validator": "g4Ready",
+      "value": {"protocolVersion":1,"sidecarSchemaVersion":1,"appSchemaVersion":1,"pid":4242,"platform":"darwin","capabilities":["system.status","app.prepareQuit","project.open","project.getTree","project.createWorktree","project.close","file.read","file.save","file.watch","diff.getSummary"],"sidecarInstanceId":"sidecar_g4_01"}
+    },
+    {
+      "name": "g4-status-rejects-extra-g5-capability",
+      "validator": "g4Status",
+      "value": {"state":"ready","sidecar":{"protocolVersion":1,"sidecarSchemaVersion":1,"appSchemaVersion":1,"pid":4242,"platform":"darwin","capabilities":["system.status","app.prepareQuit","project.open","project.getTree","project.createWorktree","project.close","file.read","file.save","file.watch","diff.getSummary","diff.getFile","chat.create"],"sidecarInstanceId":"sidecar_g4_01"},"database":{"health":"healthy","schemaVersion":1},"recoveryRequired":false,"blockerIds":[]}
+    },
+    {
+      "name": "g4-unavailable-status-rejects-g3-only-last-ready",
+      "validator": "g4Status",
+      "value": {"state":"unavailable","lastReadySidecar":{"protocolVersion":1,"sidecarSchemaVersion":1,"appSchemaVersion":1,"pid":4242,"platform":"darwin","capabilities":["system.status","app.prepareQuit"],"sidecarInstanceId":"sidecar_g3_01"},"database":{"health":"unavailable","schemaVersion":1},"recoveryRequired":false,"blockerIds":[],"error":{"code":"E_SIDECAR_EXIT","kind":"sidecarUnavailable","detail":"sidecar stopped after its last ready identity","retryable":false,"outcomeUnknown":false}}
+    }
+  ]
+}

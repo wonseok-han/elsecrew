@@ -1,0 +1,289 @@
+//! Internal batch lifecycle. Completion requires every bound item, never just
+//! the last writer response. No backup/retained-file deletion occurs here.
+use super::*;
+
+/// The applying fence may exist before a first item or staged file. This path
+/// never infers "unwritten" from matching bytes once any writer journal exists.
+#[allow(dead_code)]
+pub(in crate::project) fn cancel_before_first_write(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    project_id: &str,
+    expected: &Value,
+    request: &str,
+) -> Result<Value, ProjectFailure> {
+    if expected["state"] != "applying"
+        || inspect(storage, project_id)? != *expected
+        || expected.get("completedItems").is_some()
+        || expected.get("restoredItems").is_some()
+        || expected.get("unstartedFrom").is_some()
+        || expected
+            .get("pendingItem")
+            .is_some_and(|item| item["index"] != 0 || item.get("writeJournal").is_some())
+    {
+        return Err(invalid());
+    }
+    let items = inspect_write_items(manager, storage, project_id, expected)?;
+    if let Some(pending) = expected.get("pendingItem") {
+        if items.first() != Some(&pending["item"]) {
+            return Err(invalid());
+        }
+    }
+    for _ in 0..2 {
+        for item in &items {
+            verify_unwritten_item(manager, expected, item)?;
+        }
+    }
+    transition(
+        storage,
+        project_id,
+        expected,
+        "abandoned",
+        "applicationAbandoned",
+        false,
+        request,
+    )
+}
+
+fn verify_batch(
+    manager: &ProjectManager,
+    storage: &Storage,
+    project_id: &str,
+    record: &Value,
+    applied: bool,
+) -> Result<(), ProjectFailure> {
+    let count = record["backup"]["header"]["count"]
+        .as_u64()
+        .ok_or_else(invalid)?;
+    let index = record["pendingItem"]["index"]
+        .as_u64()
+        .ok_or_else(invalid)?;
+    if count == 0 || count > 100_000 {
+        return Err(invalid());
+    }
+    let other = if applied {
+        if index + 1 != count
+            || record.get("restoredItems").is_some()
+            || record.get("unstartedFrom").is_some()
+        {
+            return Err(invalid());
+        }
+        record.get("completedItems")
+    } else {
+        if index != 0
+            || record["completedItems"]
+                .as_array()
+                .is_some_and(|v| !v.is_empty())
+        {
+            return Err(invalid());
+        }
+        record.get("restoredItems")
+    };
+    let empty = Vec::new();
+    let items = match other {
+        Some(value) => value.as_array().ok_or_else(invalid)?,
+        None => &empty,
+    };
+    let written = record
+        .get("unstartedFrom")
+        .and_then(Value::as_u64)
+        .unwrap_or(count);
+    if items.len() as u64 + 1 != written {
+        return Err(invalid());
+    }
+    // Repeat the complete observation to catch changes while walking the batch.
+    // Still not an OS exclusion guarantee against an uncooperative same-UID editor.
+    let archive_items = if written < count {
+        inspect_write_items(manager, storage, project_id, record)?
+    } else {
+        Vec::new()
+    };
+    for _ in 0..2 {
+        for index in written..count {
+            let item = archive_items
+                .get(usize::try_from(index).map_err(|_| invalid())?)
+                .ok_or_else(invalid)?;
+            verify_unwritten_item(manager, record, item)?;
+        }
+        verify_record_pair(manager, record, applied)?;
+        for item in items {
+            let mut selected = record.clone();
+            selected["pendingItem"] = item.clone();
+            verify_record_pair_in_scope(manager, &selected, record, applied)?;
+        }
+    }
+    Ok(())
+}
+
+fn transition(
+    storage: &mut Storage,
+    project_id: &str,
+    expected: &Value,
+    state: &str,
+    phase: &str,
+    locked: bool,
+    request: &str,
+) -> Result<Value, ProjectFailure> {
+    if inspect(storage, project_id)? != *expected {
+        return Err(invalid());
+    }
+    let mut project = required_project(storage, project_id)?;
+    let lock_id = expected["lockId"].as_str().ok_or_else(invalid)?;
+    let mut lock = storage
+        .projection_record("lock", lock_id)?
+        .ok_or_else(invalid)?;
+    let project_revision = project["last_event_sequence"]
+        .as_u64()
+        .ok_or_else(invalid)?;
+    let lock_revision = lock["last_event_sequence"].as_u64().ok_or_else(invalid)?;
+    let id = expected["applicationId"].as_str().ok_or_else(invalid)?;
+    let mut next = expected.clone();
+    next["state"] = json!(state);
+    project.insert("application_intent".into(), next.clone());
+    lock.insert("recovery_required".into(), json!(locked));
+    lock.insert("evidence".into(), json!({"phase":phase,"applicationId":id}));
+    write_pair(
+        storage,
+        &format!("{id}_{phase}"),
+        request,
+        Value::Object(project),
+        Value::Object(lock),
+        &[
+            ("project", project_id, project_revision),
+            ("lock", lock_id, lock_revision),
+        ],
+    )?;
+    Ok(next)
+}
+
+#[allow(dead_code)]
+pub(in crate::project) fn finish(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    project_id: &str,
+    expected: &Value,
+    restored: bool,
+    request: &str,
+) -> Result<Value, ProjectFailure> {
+    if expected["state"] != "applying"
+        || inspect_pending_item(manager, storage, project_id)? != *expected
+    {
+        return Err(invalid());
+    }
+    verify_batch(manager, storage, project_id, expected, !restored)?;
+    transition(
+        storage,
+        project_id,
+        expected,
+        if restored { "restored" } else { "applied" },
+        if restored {
+            "applicationRestored"
+        } else {
+            "applicationApplied"
+        },
+        false,
+        request,
+    )
+}
+
+/// Explicit restore admission for a completed batch. Refuse other live/recovery
+/// work before reacquiring the same lock; a finished record isn't a write grant.
+#[allow(dead_code)]
+pub(in crate::project) fn begin_restore(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    project_id: &str,
+    expected: &Value,
+    request: &str,
+) -> Result<Value, ProjectFailure> {
+    if expected["state"] != "applied"
+        || !storage.blocker_ids()?.is_empty()
+        || inspect_pending_item(manager, storage, project_id)? != *expected
+    {
+        return Err(invalid());
+    }
+    verify_batch(manager, storage, project_id, expected, true)?;
+    backup::space::intent(manager, expected, true)?;
+    transition(
+        storage,
+        project_id,
+        expected,
+        "applying",
+        "applicationWriting",
+        true,
+        request,
+    )
+}
+
+fn verify_unwritten_item(
+    manager: &ProjectManager,
+    record: &Value,
+    item: &Value,
+) -> Result<(), ProjectFailure> {
+    #[cfg(target_os = "macos")]
+    {
+        writer::verify_unwritten_item(manager, record, item)
+    }
+    #[cfg(windows)]
+    {
+        windows_writer::verify_unwritten_item(manager, record, item)
+    }
+}
+fn verify_record_pair(
+    manager: &ProjectManager,
+    record: &Value,
+    applied: bool,
+) -> Result<(), ProjectFailure> {
+    #[cfg(target_os = "macos")]
+    {
+        writer::verify_record_pair(manager, record, applied)
+    }
+    #[cfg(windows)]
+    {
+        let restored =
+            windows_writer::recovery::verify_bound_item_layout(manager, record, &|| Ok(()))?;
+        if restored == applied {
+            return Err(invalid());
+        }
+        Ok(())
+    }
+}
+fn verify_record_pair_in_scope(
+    manager: &ProjectManager,
+    selected: &Value,
+    scope: &Value,
+    applied: bool,
+) -> Result<(), ProjectFailure> {
+    #[cfg(target_os = "macos")]
+    {
+        writer::verify_record_pair_in_scope(manager, selected, scope, applied)
+    }
+    #[cfg(windows)]
+    {
+        // A batch may select only a recorded item, not substitute root, backup,
+        // history, or other fields while reusing an otherwise valid journal.
+        let mut expected = scope.clone();
+        expected["pendingItem"] = selected["pendingItem"].clone();
+        if expected != *selected
+            || !scope[if applied {
+                "completedItems"
+            } else {
+                "restoredItems"
+            }]
+            .as_array()
+            .is_some_and(|items| items.contains(&selected["pendingItem"]))
+        {
+            return Err(invalid());
+        }
+        let restored = windows_writer::recovery::verify_bound_item_layout_in_scope(
+            manager,
+            selected,
+            scope,
+            &|| Ok(()),
+        )?;
+        if restored == applied {
+            return Err(invalid());
+        }
+        Ok(())
+    }
+}

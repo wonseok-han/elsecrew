@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": 1,
+  "contract": {
+    "capabilities": [
+      "workspace.getTree", "workspace.close", "workspace.file.read", "workspace.file.save",
+      "workspace.file.watch", "workspace.diff.getSummary", "workspace.diff.getFile",
+      "workspace.prepareChat", "workspace.abandonPrepared"
+    ],
+    "events": ["workspace.changed", "workspace.blob.chunk"],
+    "bridgeV2Methods": [
+      "getSystemStatus", "prepareQuit", "onSidecarEvent", "openProject", "getProjectTree",
+      "createProjectWorktree", "closeProject", "readFile", "beginFileSave",
+      "appendFileSaveChunk", "commitFileSave", "watchProjectFiles", "getDiffSummary",
+      "getDiffFile", "onProjectEvent"
+    ],
+    "bridgeV3WorkspaceMethods": [
+      "getWorkspaceTree", "closeWorkspace", "readWorkspaceFile", "beginWorkspaceFileSave",
+      "appendWorkspaceFileSaveChunk", "commitWorkspaceFileSave", "watchWorkspaceFiles",
+      "getWorkspaceDiffSummary", "getWorkspaceDiffFile", "onWorkspaceEvent",
+      "prepareChatWorkspace", "abandonPreparedWorkspace"
+    ],
+    "idMaxBytes": 512,
+    "addressing": "explicitChatProjectWorktreeWorkspaceIdentity",
+    "operationResolution": "persistedChatRecordAndActiveSnapshotBeforeOperation",
+    "saveStreamBinding": "everyPhaseEchoesChatWorkspaceAndMatchesPersistedSaveSession",
+    "v2ProjectTreeRequestLine": "{\"kind\":\"request\",\"method\":\"project.getTree\",\"params\":{\"cursor\":null,\"parentPath\":\"src\",\"projectId\":\"project_01\"},\"protocolVersion\":1,\"requestId\":\"req_v2_compat\",\"sidecarInstanceId\":\"sidecar_v2_compat\"}\n"
+  },
+  "casesFile": "cases.json"
+}

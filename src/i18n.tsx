@@ -12,7 +12,7 @@ import { en } from "./locales/en";
 export type Lang = "ko" | "en";
 
 const DICTS: Record<Lang, Record<MessageKey, string>> = { ko, en };
-const STORAGE_KEY = "hello-agent.lang";
+const STORAGE_KEY = "elsecrew.lang";
 
 type Params = Record<string, string | number>;
 
@@ -25,8 +25,12 @@ interface I18nContextValue {
 const I18nContext = createContext<I18nContextValue | null>(null);
 
 function detectInitialLang(): Lang {
-  const saved =
-    typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
+  let saved: string | null = null;
+  try {
+    saved = typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
+  } catch {
+    // Storage can be unavailable; language selection must not prevent startup.
+  }
   if (saved === "ko" || saved === "en") return saved;
   const nav = typeof navigator !== "undefined" ? navigator.language : "en";
   return nav.toLowerCase().startsWith("ko") ? "ko" : "en";

@@ -1,0 +1,199 @@
+{
+  "schemaVersion": 1,
+  "storageSchemaVersion": 7,
+  "protocolVersion": 1,
+  "payloadSchemaVersion": 1,
+  "migration": {
+    "file": "migration-v6-to-v7.sql",
+    "predecessorMigrationFile": "../storage-v6/migration-v5-to-v6.sql",
+    "predecessorMigrationMutationAllowed": false,
+    "fromVersion": 6,
+    "toVersion": 7,
+    "mode": "additiveCompactionTablesAndOneTimeVersionedDeleteGuardsNoDataDeletion",
+    "preflight": {
+      "schema": "exactStorageV6",
+      "admissibleMaterializationPairs": [
+        "ready+absent", "pending+absent", "pending+pending", "pending+failed"
+      ],
+      "rejectedMaterializationPairs": ["pending+attempting"],
+      "maintenanceRequirement": "noPendingOrRunningLosslessCompaction",
+      "deleteAuthorityRequirement": "storageV7AuthorityObjectsAbsent",
+      "partialExtraOrUnknownSchema": "failClosedBeforeMutation",
+      "mapping": [
+        "materializationStatePreserved", "materializationJobPreservedByteExact",
+        "completedAndFailedMaintenanceHistoryPreserved", "existingRowsNotBackfilled",
+        "existingLedgerAndDerivedRowsNotDeleted"
+      ],
+      "timing": "beforeAnyDdlOrMutation"
+    },
+    "idempotency": "exactStorageV7NoOpBeforeMigrationSql",
+    "partialExtraOrUnsafeState": "failClosedBeforeMutation",
+    "historyBackfill": "none",
+    "tablesAdded": [
+      "ledger_compaction_prefixes", "frozen_message_sources",
+      "ledger_compaction_delete_authority"
+    ],
+    "tablesRebuilt": ["storage_schema_meta"],
+    "indexesAdded": [
+      "ledger_compaction_prefixes_latest", "frozen_message_sources_chat_sequence",
+      "maintenance_jobs_single_running_lossless_compaction"
+    ],
+    "triggersAdded": [
+      "ledger_compaction_prefixes_require_exact_anchor",
+      "ledger_compaction_prefixes_append_only_update",
+      "ledger_compaction_prefixes_append_only_delete",
+      "frozen_message_sources_require_exact_source",
+      "frozen_message_sources_append_only_update",
+      "frozen_message_sources_append_only_delete",
+      "event_source_index_rejects_frozen_message_reuse",
+      "ledger_compaction_delete_authority_require_exact_tuple",
+      "ledger_compaction_delete_authority_no_update",
+      "ledger_compaction_delete_authority_delete_after_source",
+      "events_consume_exact_v7_delete_authority",
+      "ledger_baselines_compaction_immutable_update",
+      "ledger_baselines_compaction_immutable_delete"
+    ],
+    "triggersVersionReplaced": [
+      "events_are_append_only_delete", "event_source_index_append_only_delete"
+    ],
+    "runtimeGuardDdlAllowed": false,
+    "existingRowsDeleted": false,
+    "preservedTables": [
+      "schema_meta", "app_instances", "events", "projects", "chats", "runs", "locks",
+      "ledger_baselines", "operation_receipts", "chat_messages", "prepared_workspaces",
+      "maintenance_jobs", "lifetime_materialization_job", "event_source_index"
+    ],
+    "preservedArtifacts": [
+      "operationReceipts", "chatMessages", "preparedWorkspaces", "ledgerBaselines",
+      "projections", "standaloneSnapshotFiles"
+    ],
+    "downgradePolicy": "openQuestion"
+  },
+  "losslessCompaction": {
+    "schemaVersion": 1,
+    "casesFile": "cases.json",
+    "activation": {
+      "productExecutionEnabled": false,
+      "automaticSchedulingEnabled": false,
+      "actualDeleteEnabledBeforeC1Consumer": false,
+      "wireStatusOrControlEnabled": false
+    },
+    "guardVersioning": {
+      "schemaVersion": 7,
+      "migrationReplacement": "oneTimeExactV6ToV7Transaction",
+      "runtimeDropRecreate": "forbidden",
+      "deleteBatchDdl": "forbidden",
+      "deleteBatchMechanism": "durableRunningJobPlusEphemeralExactAuthorityRows"
+    },
+    "prefix": {
+      "table": "ledger_compaction_prefixes",
+      "identity": "appendOnlyPrefixIdAndAggregateDeletedThroughUnique",
+      "range": "aggregateSequenceOneThroughDeletedThroughContinuousOnly",
+      "anchor": "exactSameAggregateAtDeletedThroughPlusOneRemainsInEventsAndSourceIndex",
+      "baseline": "immutableSameAggregateAtDeletedThroughWithExactDigest",
+      "progression": "newPrefixStrictlyExtendsLatestVerifiedPrefix",
+      "appInstance": "forbidden",
+      "proof": "boundedPreDeleteAndPostDeleteEquivalenceBeforePrefixInsert"
+    },
+    "frozenMessageSource": {
+      "table": "frozen_message_sources",
+      "whenRequired": "beforeDeletingAnyEventThatIntroducedMessage",
+      "fields": [
+        "messageId", "sourceEventRowid", "sourceEventId", "sourceOperationId",
+        "chatId", "sourceAggregateSequence", "durableSequence",
+        "canonicalMessageJson", "messageDigest", "frozenAt"
+      ],
+      "binding": "exactEventSourceIndexIntroductionAndExactChatMessage",
+      "appendOnly": true,
+      "messageIdReuse": "forbiddenForeverWhileFrozenRecordExists"
+    },
+    "deleteAuthority": {
+      "table": "ledger_compaction_delete_authority",
+      "jobState": "running",
+      "maxExactTuples": 100,
+      "globalAuthorityOwner": "oneRunningJobAtATime",
+      "identity": "eventRowidEventIdOperationIdAndAggregateTupleExact",
+      "prefixBound": "sameAggregateSequenceAtOrBelowDeletedThrough",
+      "introducedMessage": "requiresExactFrozenMessageSource",
+      "appInstance": "forbidden",
+      "sourceIndexDeleteBeforeEventDelete": true,
+      "eventDeleteConsumesAuthority": true,
+      "mustBeEmptyBeforeCommit": true,
+      "mustBeEmptyOnOpen": true,
+      "updates": "forbidden"
+    },
+    "cursor": {
+      "schemaVersion": 1,
+      "phases": [
+        "freezeMessages", "verifyPrefix", "authorizeDelete", "deletePrefix",
+        "verifyEquivalence", "finalize"
+      ],
+      "columns": [
+        "cutoffEventRowid", "phase", "afterEventRowid", "scanExhausted"
+      ],
+      "keyset": "eventRowidGreaterThanAfterAndAtOrBelowCutoffOrderByEventRowidLimit100",
+      "phaseTransition": "exhaustedCurrentThenNextAtZeroUnexhausted",
+      "callerConfigurable": false,
+      "maxRowsPerBatch": 100,
+      "unboundedScanOrTransaction": "forbidden"
+    },
+    "lifecycle": {
+      "durableTable": "maintenance_jobs",
+      "jobKind": "losslessCompaction",
+      "runningUniqueness": "schemaPartialUniqueBeforeAuthority",
+      "c1Consumer": "requiresExactSchemaGuardNeverApplicationOnlyCheck",
+      "arm": "pendingToRunningSentinelCommittedBeforeDeleteBatch",
+      "batchSuccess": "runningToPendingWithAdvancedCursorSameDeleteTransaction",
+      "cancelBeforeArm": "pendingUnchangedNoAuthority",
+      "cancelAfterArm": "rollbackDeleteBatchLeavesRunningSentinelFailClosed",
+      "commitUncertain": "reopenPendingAdvancedMeansCommittedRunningMeansManualRecoveryRequired",
+      "terminalSuccess": "authorityEmptyAndEquivalenceVerifiedThenSucceeded",
+      "terminalFailure": "rollbackBatchThenRunningToFailedWithSanitizedEvidence",
+      "automaticRetryRunning": false
+    },
+    "deletion": {
+      "aggregateRule": "retainOneExactAnchorPerCompactedAggregate",
+      "eligible": "onlyContiguousVerifiedPrefixBeforeAnchor",
+      "appInstance": "never",
+      "unchangedTables": [
+        "operation_receipts", "chat_messages", "prepared_workspaces", "ledger_baselines",
+        "projects", "chats", "runs", "locks", "app_instances"
+      ],
+      "snapshotFiles": "neverMutated",
+      "checkpointOrVacuumRequiredForSuccess": false
+    },
+    "equivalence": {
+      "maxRowsPerBatch": 100,
+      "before": [
+        "baselinePlusTailReplaysCurrentProjection",
+        "operationReceiptsClassifyEveryDeletedOperation",
+        "introducedMessagesHaveFrozenSources",
+        "namespaceDecisionsMatchLegacyActualRecovery"
+      ],
+      "after": [
+        "anchorPlusTailReplaysCurrentProjection",
+        "preservedArtifactsByteExact",
+        "deletedOperationsRemainDuplicateOrConflictByReceipt",
+        "deletedIntroducedMessageIdsRemainReserved"
+      ],
+      "failure": "rollbackWholeAtMost100RowDeleteBatch",
+      "finalization": "exactEmptyAuthorityQueryThenSucceededSameTransaction"
+    },
+    "replay": {
+      "deletedOperationAuthority": "operationReceiptsCanonicalPayloadAndIdentity",
+      "duplicate": "exactCanonicalReceiptMatchIsDuplicateNoOp",
+      "conflict": "sameOperationIdAnyImmutableDifferenceIsConflict",
+      "namespaces": ["legacy", "actualAgent", "recovery"],
+      "namespaceDecisionEquality": true,
+      "deletedMessageIntroduction": "frozenMessageSourceReservesMessageId"
+    },
+    "queryPlanAcceptance": {
+      "mode": "exactExplainQueryPlanDetail",
+      "prefixLatest": "SEARCH ledger_compaction_prefixes USING INDEX ledger_compaction_prefixes_latest (aggregate_type=? AND aggregate_id=?)",
+      "deleteBatch": "SEARCH event_source_index USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)",
+      "authorityEmpty": "SCAN ledger_compaction_delete_authority USING COVERING INDEX sqlite_autoindex_ledger_compaction_delete_authority_1",
+      "frozenMessage": "SEARCH frozen_message_sources USING INDEX sqlite_autoindex_frozen_message_sources_1 (message_id=?)",
+      "reject": ["USE TEMP B-TREE", "SCAN events", "SCAN event_source_index"]
+    }
+  }
+}

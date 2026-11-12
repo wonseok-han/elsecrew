@@ -1,0 +1,133 @@
+{
+  "v3MigrationCases": [
+    { "name": "pending receipts", "v3State": "pending", "v3Phase": "receipts", "afterEventRowid": 3, "v4State": "pending", "v4Phase": "receipts", "afterScanRowid": 3, "scanExhausted": false },
+    { "name": "pending messages", "v3State": "pending", "v3Phase": "messages", "afterEventRowid": 3, "v4State": "pending", "v4Phase": "messages", "afterScanRowid": 3, "scanExhausted": false },
+    { "name": "pending workspaces", "v3State": "pending", "v3Phase": "workspaces", "afterEventRowid": 3, "v4State": "pending", "v4Phase": "workspaces", "afterScanRowid": 3, "scanExhausted": false },
+    { "name": "pending baselines", "v3State": "pending", "v3Phase": "baselines", "afterEventRowid": 3, "v4State": "pending", "v4Phase": "baselines", "afterScanRowid": 3, "scanExhausted": false },
+    { "name": "verify maps to verifySource", "v3State": "pending", "v3Phase": "verify", "afterEventRowid": 3, "v4State": "pending", "v4Phase": "verifySource", "afterScanRowid": 3, "scanExhausted": false },
+    { "name": "failed receipts remains failed", "v3State": "failed", "v3Phase": "receipts", "afterEventRowid": 3, "v4State": "failed", "v4Phase": "receipts", "afterScanRowid": 3, "scanExhausted": false },
+    { "name": "failed messages remains failed", "v3State": "failed", "v3Phase": "messages", "afterEventRowid": 3, "v4State": "failed", "v4Phase": "messages", "afterScanRowid": 3, "scanExhausted": false },
+    { "name": "failed workspaces remains failed", "v3State": "failed", "v3Phase": "workspaces", "afterEventRowid": 3, "v4State": "failed", "v4Phase": "workspaces", "afterScanRowid": 3, "scanExhausted": false },
+    { "name": "failed baselines remains failed", "v3State": "failed", "v3Phase": "baselines", "afterEventRowid": 3, "v4State": "failed", "v4Phase": "baselines", "afterScanRowid": 3, "scanExhausted": false },
+    { "name": "failed verify remains failed", "v3State": "failed", "v3Phase": "verify", "afterEventRowid": 3, "v4State": "failed", "v4Phase": "verifySource", "afterScanRowid": 3, "scanExhausted": false }
+  ],
+  "v3AbsentMigrationCases": [
+    { "name": "pending absent", "materializationState": "pending" },
+    { "name": "ready absent", "materializationState": "ready" }
+  ],
+  "removedLifecycleOperations": ["markScanExhausted"],
+  "validCursors": [
+    { "name": "initial receipts", "value": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 0, "scanExhausted": false } },
+    { "name": "verifySource remains cutoff bounded", "value": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "verifySource", "afterScanRowid": 20, "scanExhausted": false } },
+    { "name": "derived receipt rowid can exceed event cutoff", "value": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "verifyReceipts", "afterScanRowid": 900, "scanExhausted": false } },
+    { "name": "derived baseline rowid can exceed event cutoff", "value": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "verifyBaselines", "afterScanRowid": 901, "scanExhausted": false } }
+  ],
+  "invalidCursors": [
+    { "name": "legacy cursor column is rejected", "value": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "receipts", "afterEventRowid": 0 } },
+    { "name": "event phase cannot exceed cutoff", "value": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "messages", "afterScanRowid": 21, "scanExhausted": false } },
+    { "name": "verifySource cannot exceed cutoff", "value": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "verifySource", "afterScanRowid": 21, "scanExhausted": false } },
+    { "name": "unsafe derived rowid", "value": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "verifyReceipts", "afterScanRowid": 9007199254740992, "scanExhausted": false } },
+    { "name": "unknown phase", "value": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "verify", "afterScanRowid": 0, "scanExhausted": false } }
+  ],
+  "validCursorTransitions": [
+    { "name": "create starts receipts", "previous": null, "next": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 0, "scanExhausted": false } },
+    { "name": "event batch advances", "previous": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 0, "scanExhausted": false }, "next": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 10, "scanExhausted": false } },
+    { "name": "verifySource exhausted advances", "previous": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "verifySource", "afterScanRowid": 20, "scanExhausted": true }, "next": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "verifyReceipts", "afterScanRowid": 0, "scanExhausted": false } },
+    { "name": "derived exhausted advances phase", "previous": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "verifyReceipts", "afterScanRowid": 900, "scanExhausted": true }, "next": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "verifyMessages", "afterScanRowid": 0, "scanExhausted": false } }
+  ],
+  "invalidCursorTransitions": [
+    { "name": "event phase cannot advance before cutoff", "previous": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 10, "scanExhausted": false }, "next": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "messages", "afterScanRowid": 0, "scanExhausted": false } },
+    { "name": "phase cannot skip", "previous": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "verifySource", "afterScanRowid": 20, "scanExhausted": false }, "next": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "verifyMessages", "afterScanRowid": 0, "scanExhausted": false } },
+    { "name": "derived cursor zero cannot skip without exhaustion", "previous": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "verifyReceipts", "afterScanRowid": 0, "scanExhausted": false }, "next": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "verifyMessages", "afterScanRowid": 0, "scanExhausted": false } },
+    { "name": "batch cannot change cutoff", "previous": { "schemaVersion": 2, "cutoffEventRowid": 20, "phase": "verifyReceipts", "afterScanRowid": 900, "scanExhausted": false }, "next": { "schemaVersion": 2, "cutoffEventRowid": 21, "phase": "verifyReceipts", "afterScanRowid": 901, "scanExhausted": false } }
+  ],
+  "validPayloadBatches": [
+    { "name": "exact 100 rows", "value": [10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485,10485] },
+    { "name": "exact one MiB", "value": [1048576] }
+  ],
+  "invalidPayloadBatches": [
+    { "name": "over one MiB", "value": [1048577] }
+  ],
+  "validJobs": [
+    { "name": "pending runnable", "value": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:00:00Z", "completedAt": null } },
+    { "name": "attempting durable sentinel", "value": { "singleton": 1, "jobId": "lifetime-v4", "state": "attempting", "cutoffEventRowid": 20, "phase": "verifyReceipts", "afterScanRowid": 900, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:01:00Z", "completedAt": null } },
+    { "name": "failed durable terminal", "value": { "singleton": 1, "jobId": "lifetime-v4", "state": "failed", "cutoffEventRowid": 20, "phase": "verifyReceipts", "afterScanRowid": 900, "scanExhausted": false, "failureKind": "contractValidation", "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:02:00Z", "completedAt": "2026-08-28T10:02:00Z" } }
+  ],
+  "invalidJobs": [
+    { "name": "scan exhaustion must be boolean", "value": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 0, "scanExhausted": 1, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:00:00Z", "completedAt": null } },
+    { "name": "attempting cannot carry failure", "value": { "singleton": 1, "jobId": "lifetime-v4", "state": "attempting", "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 0, "scanExhausted": false, "failureKind": "database", "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:01:00Z", "completedAt": null } },
+    { "name": "failed requires completion", "value": { "singleton": 1, "jobId": "lifetime-v4", "state": "failed", "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 0, "scanExhausted": false, "failureKind": "database", "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:01:00Z", "completedAt": null } }
+  ],
+  "validPairs": [
+    { "name": "ready absent", "value": { "materializationState": "ready", "job": null } },
+    { "name": "pending absent", "value": { "materializationState": "pending", "job": null } },
+    { "name": "pending pending", "value": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:00:00Z", "completedAt": null } } },
+    { "name": "pending attempting structural", "value": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "attempting", "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:01:00Z", "completedAt": null } } },
+    { "name": "pending failed structural", "value": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "failed", "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 0, "scanExhausted": false, "failureKind": "database", "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:02:00Z", "completedAt": "2026-08-28T10:02:00Z" } } }
+  ],
+  "invalidPairs": [
+    { "name": "ready cannot have job", "value": { "materializationState": "ready", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:00:00Z", "completedAt": null } } },
+    { "name": "legacy materializing meta rejected", "value": { "materializationState": "materializing", "job": null } },
+    { "name": "legacy failed meta rejected", "value": { "materializationState": "failed", "job": null } }
+  ],
+  "runnableReopenPairs": [0, 1, 2],
+  "failClosedReopenPairs": [3, 4],
+  "validLifecycleTransitions": [
+    { "name": "create", "operation": "create", "previous": { "materializationState": "pending", "job": null }, "next": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:00:00Z", "completedAt": null } } },
+    { "name": "arm commits attempting", "operation": "arm", "previous": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:00:00Z", "completedAt": null } }, "next": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "attempting", "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:01:00Z", "completedAt": null } } },
+    { "name": "batch success atomically advances", "operation": "batchSuccess", "previous": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "attempting", "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:01:00Z", "completedAt": null } }, "next": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 10, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:02:00Z", "completedAt": null } } },
+    { "name": "persisted exhausted phase advances and resets proof", "operation": "phaseAdvance", "previous": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 10, "scanExhausted": true, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:03:00Z", "completedAt": null } }, "next": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "messages", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:04:00Z", "completedAt": null } } },
+    { "name": "cancel restores pending cursor", "operation": "cancel", "previous": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "attempting", "cutoffEventRowid": 20, "phase": "verifyReceipts", "afterScanRowid": 900, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:01:00Z", "completedAt": null } }, "next": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "verifyReceipts", "afterScanRowid": 900, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:02:00Z", "completedAt": null } } },
+    { "name": "failure commits failed after rollback", "operation": "fail", "previous": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "attempting", "cutoffEventRowid": 20, "phase": "verifyReceipts", "afterScanRowid": 900, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:01:00Z", "completedAt": null } }, "next": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "failed", "cutoffEventRowid": 20, "phase": "verifyReceipts", "afterScanRowid": 900, "scanExhausted": false, "failureKind": "contractValidation", "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:02:00Z", "completedAt": "2026-08-28T10:02:00Z" } } },
+    { "name": "failure record unavailable leaves attempting", "operation": "failureRecordUnavailable", "previous": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "attempting", "cutoffEventRowid": 20, "phase": "verifyReceipts", "afterScanRowid": 900, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:01:00Z", "completedAt": null } }, "next": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "attempting", "cutoffEventRowid": 20, "phase": "verifyReceipts", "afterScanRowid": 900, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:01:00Z", "completedAt": null } } },
+    { "name": "final publication", "operation": "finalPublish", "previous": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "verifyBaselines", "afterScanRowid": 901, "scanExhausted": true, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:03:00Z", "completedAt": null } }, "next": { "materializationState": "ready", "job": null } },
+    { "name": "max rowid reset", "operation": "finalReset", "previous": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "verifyBaselines", "afterScanRowid": 901, "scanExhausted": true, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:03:00Z", "completedAt": null } }, "next": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 21, "phase": "receipts", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:04:00Z", "completedAt": null } } }
+  ],
+  "invalidLifecycleTransitions": [
+    { "name": "batch cannot skip arm", "operation": "batchSuccess", "previous": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:00:00Z", "completedAt": null } }, "next": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 10, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:02:00Z", "completedAt": null } } },
+    { "name": "cancel cannot advance cursor", "operation": "cancel", "previous": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "attempting", "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:01:00Z", "completedAt": null } }, "next": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "receipts", "afterScanRowid": 10, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:02:00Z", "completedAt": null } } },
+    { "name": "direct lifecycle input cannot set exhaustion", "operation": "phaseAdvance", "previous": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "verifyReceipts", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:02:00Z", "completedAt": null } }, "next": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "verifyReceipts", "afterScanRowid": 0, "scanExhausted": true, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:03:00Z", "completedAt": null } } },
+    { "name": "derived cursor zero cannot skip chain", "operation": "phaseAdvance", "previous": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "verifyReceipts", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:02:00Z", "completedAt": null } }, "next": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "verifyMessages", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:03:00Z", "completedAt": null } } },
+    { "name": "batch success cannot forge exhaustion", "operation": "batchSuccess", "previous": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "attempting", "cutoffEventRowid": 20, "phase": "verifyReceipts", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:02:00Z", "completedAt": null } }, "next": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "verifyReceipts", "afterScanRowid": 1, "scanExhausted": true, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:03:00Z", "completedAt": null } } },
+    { "name": "final cannot run from verifySource", "operation": "finalPublish", "previous": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "verifySource", "afterScanRowid": 20, "scanExhausted": true, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:03:00Z", "completedAt": null } }, "next": { "materializationState": "ready", "job": null } },
+    { "name": "final requires exhausted baselines", "operation": "finalPublish", "previous": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v4", "state": "pending", "cutoffEventRowid": 20, "phase": "verifyBaselines", "afterScanRowid": 901, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T10:00:00Z", "updatedAt": "2026-08-28T10:03:00Z", "completedAt": null } }, "next": { "materializationState": "ready", "job": null } }
+  ],
+  "validVerificationEvidence": [
+    { "name": "source exact", "value": { "phase": "verifySource", "cutoffEventRowid": 20, "scannedRowids": [1,20], "exactExpectedArtifacts": true, "currentProjectionEquivalent": true, "sequenceEquivalent": true, "sourceBacked": true, "noSourceLessExtra": true, "deterministic": true, "digestValid": true, "newestBaselinePresent": true } },
+    { "name": "derived extra-free", "value": { "phase": "verifyReceipts", "cutoffEventRowid": 20, "scannedRowids": [900], "exactExpectedArtifacts": true, "currentProjectionEquivalent": true, "sequenceEquivalent": true, "sourceBacked": true, "noSourceLessExtra": true, "deterministic": true, "digestValid": true, "newestBaselinePresent": true } },
+    { "name": "historical exact baseline allowed", "value": { "phase": "verifyBaselines", "cutoffEventRowid": 20, "scannedRowids": [901], "exactExpectedArtifacts": true, "currentProjectionEquivalent": true, "sequenceEquivalent": true, "sourceBacked": true, "noSourceLessExtra": true, "deterministic": true, "digestValid": true, "newestBaselinePresent": true } }
+  ],
+  "invalidVerificationEvidence": [
+    { "name": "source-less derived extra rejected", "value": { "phase": "verifyReceipts", "cutoffEventRowid": 20, "scannedRowids": [900], "exactExpectedArtifacts": true, "currentProjectionEquivalent": true, "sequenceEquivalent": true, "sourceBacked": false, "noSourceLessExtra": false, "deterministic": true, "digestValid": true, "newestBaselinePresent": true } },
+    { "name": "newest baseline missing", "value": { "phase": "verifyBaselines", "cutoffEventRowid": 20, "scannedRowids": [901], "exactExpectedArtifacts": true, "currentProjectionEquivalent": true, "sequenceEquivalent": true, "sourceBacked": true, "noSourceLessExtra": true, "deterministic": true, "digestValid": true, "newestBaselinePresent": false } },
+    { "name": "source verification past cutoff", "value": { "phase": "verifySource", "cutoffEventRowid": 20, "scannedRowids": [21], "exactExpectedArtifacts": true, "currentProjectionEquivalent": true, "sequenceEquivalent": true, "sourceBacked": true, "noSourceLessExtra": true, "deterministic": true, "digestValid": true, "newestBaselinePresent": true } }
+  ],
+  "executionModels": {
+    "valid": [
+      { "name": "verify commit then cancel", "verifyBatchCommitted": true, "outcome": "Suspended", "finalPublicationSameCall": false },
+      { "name": "pre-final cancel", "verifyBatchCommitted": false, "outcome": "Suspended", "finalPublicationSameCall": false }
+    ],
+    "invalid": [
+      { "name": "committed verify cannot continue to final", "verifyBatchCommitted": true, "outcome": "Suspended", "finalPublicationSameCall": true }
+    ]
+  },
+  "invalidPreflightMutations": [
+    { "name": "unsafe pair admitted", "path": ["admissiblePairs", "0"], "replacement": "ready+pending" },
+    { "name": "migration trusts predecessor exhaustion", "path": ["migrationMappings", "3"], "replacement": "scanExhaustedPreserved" },
+    { "name": "attempting made runnable", "path": ["reopenRunnablePairs", "2"], "replacement": "pending+attempting" },
+    { "name": "preflight after mutation", "path": ["timing"], "replacement": "afterDdl" }
+  ],
+  "invalidPolicyMutations": [
+    { "name": "limit changed", "path": ["scan", "limitSql"], "replacement": "LIMIT 101" },
+    { "name": "payload guard changed", "path": ["guards", "maxCanonicalPayloadBytesPerBatch"], "replacement": 1048577 },
+    { "name": "offset allowed", "path": ["scan", "forbiddenWithinBatch", "0"], "replacement": "COUNT" },
+    { "name": "one transaction wording restored", "path": ["transaction", "wordingRevision"], "replacement": "oneBatchOneTransaction" },
+    { "name": "caller given exhaustion authority", "path": ["cursor", "scanExhaustedMutationAuthority"], "replacement": "callerSuppliedJson" },
+    { "name": "public proof input restored", "path": ["cursor", "scanExhaustedProofBoundary"], "replacement": "publicJsonWitness" },
+    { "name": "nonempty batch may forge exhaustion", "path": ["transaction", "nonemptyBatchScanExhausted"], "replacement": true },
+    { "name": "phase may skip exhaustion proof", "path": ["cursor", "phaseTransition"], "replacement": "nextAtZero" },
+    { "name": "attempting auto retries", "path": ["transaction", "reopenAttempting"], "replacement": "retry" },
+    { "name": "final scans artifacts", "path": ["finalPublication", "forbiddenWork", "0"], "replacement": "none" },
+    { "name": "cleanup enabled", "path": ["activation", "cleanupEnabled"], "replacement": true }
+  ]
+}

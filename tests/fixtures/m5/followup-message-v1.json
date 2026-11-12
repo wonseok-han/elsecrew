@@ -1,0 +1,25 @@
+{
+  "request": {
+    "projectId": "project_a",
+    "chatId": "chat_a",
+    "taskId": "task_a",
+    "worktreeId": "worktree_a",
+    "workspaceIdentity": "workspace_a",
+    "clientMessageId": "user_0123456789abcdef0123456789abcdef",
+    "expectedEventSequence": 3,
+    "text": "버튼 설명도 추가해 주세요."
+  },
+  "message": {
+    "schemaVersion": 1,
+    "messageId": "user_0123456789abcdef0123456789abcdef",
+    "chatId": "chat_a",
+    "taskId": "task_a",
+    "worktreeId": "worktree_a",
+    "eventSequence": 4,
+    "kind": "user",
+    "roleId": null,
+    "runId": null,
+    "text": "버튼 설명도 추가해 주세요.",
+    "createdAt": "2026-09-14T00:00:00Z"
+  }
+}

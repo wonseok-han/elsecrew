@@ -1,0 +1,178 @@
+{
+  "schemaVersion": 1,
+  "storageSchemaVersion": 8,
+  "protocolVersion": 1,
+  "payloadSchemaVersion": 1,
+  "migration": {
+    "file": "migration-v7-to-v8.sql",
+    "predecessorMigrationFile": "../storage-v7/migration-v6-to-v7.sql",
+    "predecessorMigrationMutationAllowed": false,
+    "fromVersion": 7,
+    "toVersion": 8,
+    "mode": "additiveFrozenOperationSourceAndVersionedDependentGuardsNoDataDeletion",
+    "preflight": {
+      "schema": "exactStorageV7",
+      "requiredLedgerState": "uncompactedOnly",
+      "admissibleMaterializationPairs": [
+        "ready+absent", "pending+absent", "pending+pending", "pending+failed"
+      ],
+      "rejectedMaterializationPairs": ["pending+attempting"],
+      "maintenanceRequirement": "noPendingOrRunningLosslessCompaction",
+      "emptyTables": [
+        "ledger_compaction_prefixes", "frozen_message_sources",
+        "ledger_compaction_delete_authority"
+      ],
+      "targetObjectRequirement": "storageV8ObjectsAbsent",
+      "partialExtraOrTamperedSchema": "failClosedBeforeMutation",
+      "mapping": [
+        "materializationPairPreservedByteExact",
+        "terminalMaintenanceHistoryPreservedByteExact",
+        "allExistingRowsAndTriggersPreservedExceptNamedVersionedGuards",
+        "existingHistoryNotBackfilled"
+      ],
+      "timing": "beforeAnyDdlOrMutation"
+    },
+    "idempotency": "exactStorageV8NoOpBeforeMigrationSql",
+    "historyBackfill": "none",
+    "tablesAdded": ["frozen_operation_sources"],
+    "tablesRebuilt": ["storage_schema_meta"],
+    "indexesAdded": [
+      "frozen_operation_sources_source_rowid",
+      "frozen_operation_sources_source_event",
+      "frozen_operation_sources_aggregate"
+    ],
+    "triggersAdded": [
+      "frozen_operation_sources_require_exact_live_source",
+      "frozen_operation_sources_append_only_update",
+      "frozen_operation_sources_append_only_delete",
+      "operation_receipts_compaction_immutable_update",
+      "operation_receipts_compaction_immutable_delete"
+    ],
+    "triggersVersionReplaced": [
+      "ledger_compaction_prefixes_require_exact_anchor",
+      "frozen_message_sources_require_exact_source",
+      "ledger_compaction_delete_authority_require_exact_tuple"
+    ],
+    "runtimeGuardDdlAllowed": false,
+    "existingRowsDeleted": false,
+    "preservedTables": [
+      "schema_meta", "app_instances", "events", "projects", "chats", "runs", "locks",
+      "ledger_baselines", "operation_receipts", "chat_messages", "prepared_workspaces",
+      "maintenance_jobs", "lifetime_materialization_job", "event_source_index",
+      "ledger_compaction_prefixes", "frozen_message_sources",
+      "ledger_compaction_delete_authority"
+    ],
+    "downgradePolicy": "openQuestion"
+  },
+  "frozenOperationSources": {
+    "schemaVersion": 1,
+    "casesFile": "cases.json",
+    "table": "frozen_operation_sources",
+    "identity": "operationIdPrimaryKey",
+    "allowedAggregateTypes": ["project", "chat", "run", "lock"],
+    "appInstance": "forbidden",
+    "requestId": "nullableAndExcludedFromDuplicateConflictAuthority",
+    "sourceAuthority": "exactLiveEventAndExactSourceIndex",
+    "receiptRole": "immutableCrossCheckNeverSourceReconstruction",
+    "consumerIntegration": "requiredBeforeAnyProductActivation",
+    "immutableFields": [
+      "operationId", "sourceEventRowid", "sourceEventId", "requestId",
+      "aggregateType", "aggregateId", "aggregateSequence", "eventType",
+      "payloadSchemaVersion", "canonicalPayloadJson", "canonicalPayloadDigest",
+      "eventTimestamp", "canonicalRecordJson", "recordDigest", "frozenAt"
+    ],
+    "payloadDigest": {
+      "algorithm": "sha256",
+      "format": "lowercaseHex64",
+      "sqlAuthority": "exactImmutableReceiptCrossCheck",
+      "consumerValidation": "recomputeBeforeInsert"
+    },
+    "recordDigest": {
+      "schemaVersion": 1,
+      "algorithm": "sha256",
+      "format": "lowercaseHex64",
+      "canonicalEnvelope": "canonicalJsonV1AllFieldsExceptRecordDigest",
+      "sqlAuthority": "exactCanonicalEnvelopeTextAndDigestShape",
+      "consumerValidation": "recomputeBeforeInsertRequired",
+      "reopenValidation": "boundedVerifyOperationsBeforeRunnable"
+    },
+    "appendOnly": true,
+    "receiptMutation": "updateAndDeleteForbidden",
+    "dependentGuards": [
+      "prefixAnchorRequiresFrozenOperation",
+      "frozenMessageRequiresSameFrozenOperation",
+      "deleteAuthorityRequiresSameFrozenOperation"
+    ],
+    "queryPlanAcceptance": {
+      "mode": "exactExplainQueryPlanDetail",
+      "sourceEventRowid": "SEARCH frozen_operation_sources USING COVERING INDEX frozen_operation_sources_source_rowid (source_event_rowid=?)",
+      "operationId": "SEARCH frozen_operation_sources USING PRIMARY KEY (operation_id=?)",
+      "aggregateTuple": "SEARCH frozen_operation_sources USING COVERING INDEX frozen_operation_sources_aggregate (aggregate_type=? AND aggregate_id=? AND aggregate_sequence=?)",
+      "reject": ["SCAN frozen_operation_sources", "USE TEMP B-TREE"]
+    }
+  },
+  "runtimeSourceAuthority": {
+    "schemaVersion": 1,
+    "liveEvent": "exactLiveEventPlusSourceIndexPlusReceipt",
+    "deletedEvent": "exactFrozenOperationPlusReceipt",
+    "receiptOnly": "failClosed",
+    "requestIdComparison": "excluded",
+    "deletedIntroducingMessageIdReuse": "rejectedByPreservedV7FrozenMessageGuard",
+    "deletedOperationDuplicateConflict": "frozenOperationPlusReceiptExactV1Semantics",
+    "chatPredecessor": "frozenOperationCanonicalPayloadNeverReceiptSelfReconstruction",
+    "namespaces": ["legacy", "actualAgent", "recovery"],
+    "namespaceDecisionEquality": true
+  },
+  "compactionV2": {
+    "schemaVersion": 2,
+    "activation": {
+      "productExecutionEnabled": false,
+      "actualDeleteEnabled": false,
+      "automaticSchedulingEnabled": false,
+      "wireEnabled": false
+    },
+    "privateDurableState": {
+      "location": "maintenance_jobs.cutoff_json.storageCompactionV2PrivateState",
+      "schemaVersion": 1,
+      "fields": ["schemaVersion", "cursor", "operationsVerified", "equivalenceVerified"],
+      "writer": "sidecarOnlySameTransaction",
+      "publicInput": "forbidden"
+    },
+    "cursor": {
+      "schemaVersion": 2,
+      "phases": [
+        "freezeOperations", "freezeMessages", "verifyPrefix", "authorizeDelete",
+        "deletePrefix", "verifyOperations", "verifyEquivalence", "finalize"
+      ],
+      "keyset": "eventRowidGreaterThanAfterAndAtOrBelowCutoffOrderByEventRowidLimit100",
+      "maxRowsPerBatch": 100,
+      "maxCanonicalPayloadBytesPerBatch": 1048576,
+      "scanExhaustedMutationAuthority": "sidecarPrivateExactEmptyKeysetQuerySameTransaction",
+      "scanExhaustedProofBoundary": "implementationOwnedNotRepresentableAsPublicJsonOrWire",
+      "durablePrivateResult": "scanExhaustedPersistedInMaintenanceJobCutoffJsonOnlyAfterPrivateTransaction",
+      "publicProgressInput": "positiveBoundedRowsAndBytesNoExhaustionAuthority",
+      "phaseTransition": "durablePrivateExhaustionThenExactNextAtZeroAndFalse",
+      "callerConfigurable": false
+    },
+    "lifecycle": {
+      "arm": "pendingToRunningSentinelCommittedBeforeBatch",
+      "batchSuccess": "runningToPendingWithCursorAndEmptyAuthoritySameTransaction",
+      "cancelBeforeArm": "pendingUnchanged",
+      "cancelAfterArm": "rollbackLeavesRunningSentinel",
+      "commitUncertain": "runningRequiresManualRecoveryPendingAdvancedMeansCommitted",
+      "runtimeGuardDdl": "forbidden",
+      "terminalSuccessMutationAuthority": "sidecarPrivateBoundedOperationsAndEquivalenceVerificationSameTransaction",
+      "terminalSuccessProofBoundary": "implementationOwnedNotRepresentableAsPublicJsonOrWire",
+      "durablePrivateResult": "verifiedBooleansAndSucceededPersistedInMaintenanceJobSamePrivateTransaction",
+      "publicCompleteTransition": "alwaysRejected"
+    },
+    "operationVerification": {
+      "everyAuthorizedDeleteHasFrozenOperation": true,
+      "deletedOperationReplayUsesFrozenOperationAndReceipt": true,
+      "receiptOnlyRejected": true,
+      "chatPredecessorUsesFrozenCanonicalPayload": true,
+      "publicBooleanAuthority": "forbidden",
+      "durablePrivateResult": "operationsVerifiedAndEquivalenceVerifiedPersistedOnlyBySidecarSameTransaction"
+    }
+  }
+}

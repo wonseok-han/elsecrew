@@ -1,0 +1,198 @@
+{
+  "valid": [
+    {
+      "name": "never compacted with available pressure facts",
+      "request": { "schemaVersion": 1 },
+      "response": {
+        "schemaVersion": 1,
+        "collectedAt": "2026-08-28T02:00:00Z",
+        "database": {
+          "logicalBytes": 1048576,
+          "physicalBytes": 786432,
+          "walBytes": 65536
+        },
+        "ledgerTail": {
+          "eventCount": 184,
+          "payloadBytes": 524288
+        },
+        "snapshotAggregates": {
+          "count": 7,
+          "payloadBytes": 131072
+        },
+        "pressureFacts": {
+          "collectionStatus": "available",
+          "volumeCapacityBytes": 1000000000,
+          "volumeAvailableBytes": 600000000
+        },
+        "compaction": {
+          "lastAttemptStatus": "neverRun",
+          "lastAttemptedAt": null,
+          "lastSuccessfulAt": null
+        },
+        "physicalCleanup": {
+          "enabled": false,
+          "reason": "userPolicyNotConfigured"
+        }
+      }
+    },
+    {
+      "name": "failed compaction preserves the earlier successful time without pressure facts",
+      "request": { "schemaVersion": 1 },
+      "response": {
+        "schemaVersion": 1,
+        "collectedAt": "2026-08-28T03:00:00Z",
+        "database": {
+          "logicalBytes": 2097152,
+          "physicalBytes": 2097152,
+          "walBytes": 0
+        },
+        "ledgerTail": {
+          "eventCount": 41,
+          "payloadBytes": 180224
+        },
+        "snapshotAggregates": {
+          "count": 11,
+          "payloadBytes": 262144
+        },
+        "pressureFacts": {
+          "collectionStatus": "unavailable",
+          "volumeCapacityBytes": null,
+          "volumeAvailableBytes": null
+        },
+        "compaction": {
+          "lastAttemptStatus": "failed",
+          "lastAttemptedAt": "2026-08-28T02:59:00Z",
+          "lastSuccessfulAt": "2026-08-27T22:00:00Z"
+        },
+        "physicalCleanup": {
+          "enabled": false,
+          "reason": "userPolicyNotConfigured"
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "request rejects an unknown field",
+      "target": "request",
+      "value": { "schemaVersion": 1, "cleanup": true }
+    },
+    {
+      "name": "request rejects the wrong schema version",
+      "target": "request",
+      "value": { "schemaVersion": 2 }
+    },
+    {
+      "name": "response rejects an absolute path leak",
+      "target": "response",
+      "value": {
+        "schemaVersion": 1,
+        "collectedAt": "2026-08-28T02:00:00Z",
+        "database": { "logicalBytes": 1, "physicalBytes": 1, "walBytes": 0, "absolutePath": "/Users/example/storage.sqlite3" },
+        "ledgerTail": { "eventCount": 1, "payloadBytes": 1 },
+        "snapshotAggregates": { "count": 0, "payloadBytes": 0 },
+        "pressureFacts": { "collectionStatus": "unavailable", "volumeCapacityBytes": null, "volumeAvailableBytes": null },
+        "compaction": { "lastAttemptStatus": "neverRun", "lastAttemptedAt": null, "lastSuccessfulAt": null },
+        "physicalCleanup": { "enabled": false, "reason": "userPolicyNotConfigured" }
+      }
+    },
+    {
+      "name": "response rejects raw provider text",
+      "target": "response",
+      "value": {
+        "schemaVersion": 1,
+        "collectedAt": "2026-08-28T02:00:00Z",
+        "database": { "logicalBytes": 1, "physicalBytes": 1, "walBytes": 0 },
+        "ledgerTail": { "eventCount": 1, "payloadBytes": 1, "rawProviderText": "secret" },
+        "snapshotAggregates": { "count": 0, "payloadBytes": 0 },
+        "pressureFacts": { "collectionStatus": "unavailable", "volumeCapacityBytes": null, "volumeAvailableBytes": null },
+        "compaction": { "lastAttemptStatus": "neverRun", "lastAttemptedAt": null, "lastSuccessfulAt": null },
+        "physicalCleanup": { "enabled": false, "reason": "userPolicyNotConfigured" }
+      }
+    },
+    {
+      "name": "response rejects a missing ledger byte fact",
+      "target": "response",
+      "value": {
+        "schemaVersion": 1,
+        "collectedAt": "2026-08-28T02:00:00Z",
+        "database": { "logicalBytes": 1, "physicalBytes": 1, "walBytes": 0 },
+        "ledgerTail": { "eventCount": 1 },
+        "snapshotAggregates": { "count": 0, "payloadBytes": 0 },
+        "pressureFacts": { "collectionStatus": "unavailable", "volumeCapacityBytes": null, "volumeAvailableBytes": null },
+        "compaction": { "lastAttemptStatus": "neverRun", "lastAttemptedAt": null, "lastSuccessfulAt": null },
+        "physicalCleanup": { "enabled": false, "reason": "userPolicyNotConfigured" }
+      }
+    },
+    {
+      "name": "response rejects a fractional byte count",
+      "target": "response",
+      "value": {
+        "schemaVersion": 1,
+        "collectedAt": "2026-08-28T02:00:00Z",
+        "database": { "logicalBytes": 1.5, "physicalBytes": 1, "walBytes": 0 },
+        "ledgerTail": { "eventCount": 1, "payloadBytes": 1 },
+        "snapshotAggregates": { "count": 0, "payloadBytes": 0 },
+        "pressureFacts": { "collectionStatus": "unavailable", "volumeCapacityBytes": null, "volumeAvailableBytes": null },
+        "compaction": { "lastAttemptStatus": "neverRun", "lastAttemptedAt": null, "lastSuccessfulAt": null },
+        "physicalCleanup": { "enabled": false, "reason": "userPolicyNotConfigured" }
+      }
+    },
+    {
+      "name": "response rejects partial pressure facts",
+      "target": "response",
+      "value": {
+        "schemaVersion": 1,
+        "collectedAt": "2026-08-28T02:00:00Z",
+        "database": { "logicalBytes": 1, "physicalBytes": 1, "walBytes": 0 },
+        "ledgerTail": { "eventCount": 1, "payloadBytes": 1 },
+        "snapshotAggregates": { "count": 0, "payloadBytes": 0 },
+        "pressureFacts": { "collectionStatus": "available", "volumeCapacityBytes": 100, "volumeAvailableBytes": null },
+        "compaction": { "lastAttemptStatus": "neverRun", "lastAttemptedAt": null, "lastSuccessfulAt": null },
+        "physicalCleanup": { "enabled": false, "reason": "userPolicyNotConfigured" }
+      }
+    },
+    {
+      "name": "response rejects inconsistent successful compaction times",
+      "target": "response",
+      "value": {
+        "schemaVersion": 1,
+        "collectedAt": "2026-08-28T02:00:00Z",
+        "database": { "logicalBytes": 1, "physicalBytes": 1, "walBytes": 0 },
+        "ledgerTail": { "eventCount": 1, "payloadBytes": 1 },
+        "snapshotAggregates": { "count": 0, "payloadBytes": 0 },
+        "pressureFacts": { "collectionStatus": "unavailable", "volumeCapacityBytes": null, "volumeAvailableBytes": null },
+        "compaction": { "lastAttemptStatus": "succeeded", "lastAttemptedAt": "2026-08-28T01:00:00Z", "lastSuccessfulAt": "2026-08-28T01:00:01Z" },
+        "physicalCleanup": { "enabled": false, "reason": "userPolicyNotConfigured" }
+      }
+    },
+    {
+      "name": "response rejects physical cleanup activation",
+      "target": "response",
+      "value": {
+        "schemaVersion": 1,
+        "collectedAt": "2026-08-28T02:00:00Z",
+        "database": { "logicalBytes": 1, "physicalBytes": 1, "walBytes": 0 },
+        "ledgerTail": { "eventCount": 1, "payloadBytes": 1 },
+        "snapshotAggregates": { "count": 0, "payloadBytes": 0 },
+        "pressureFacts": { "collectionStatus": "unavailable", "volumeCapacityBytes": null, "volumeAvailableBytes": null },
+        "compaction": { "lastAttemptStatus": "neverRun", "lastAttemptedAt": null, "lastSuccessfulAt": null },
+        "physicalCleanup": { "enabled": true, "reason": "userPolicyNotConfigured" }
+      }
+    },
+    {
+      "name": "response rejects failed compaction whose last success is in the future",
+      "target": "response",
+      "value": {
+        "schemaVersion": 1,
+        "collectedAt": "2026-08-28T04:00:00Z",
+        "database": { "logicalBytes": 1, "physicalBytes": 1, "walBytes": 0 },
+        "ledgerTail": { "eventCount": 1, "payloadBytes": 1 },
+        "snapshotAggregates": { "count": 0, "payloadBytes": 0 },
+        "pressureFacts": { "collectionStatus": "unavailable", "volumeCapacityBytes": null, "volumeAvailableBytes": null },
+        "compaction": { "lastAttemptStatus": "failed", "lastAttemptedAt": "2026-08-28T03:00:00Z", "lastSuccessfulAt": "2026-08-28T03:00:01Z" },
+        "physicalCleanup": { "enabled": false, "reason": "userPolicyNotConfigured" }
+      }
+    }
+  ]
+}

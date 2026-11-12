@@ -10,7 +10,7 @@ export interface SavedProject {
   lastOpenedAt: number;
 }
 
-const FILE = "hello-agent.json";
+const FILE = "elsecrew.json";
 const PROJECTS_KEY = "projects";
 const BASE_DIR_KEY = "baseDir";
 

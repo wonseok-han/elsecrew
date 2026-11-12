@@ -1,0 +1,598 @@
+{
+  "validCursors": [
+    {
+      "name": "initial empty receipts scan",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 0,
+        "phase": "receipts",
+        "afterEventRowid": 0
+      }
+    },
+    {
+      "name": "resumable workspaces scan",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "workspaces",
+        "afterEventRowid": 100
+      }
+    },
+    {
+      "name": "verify starts as a bounded scan",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "verify",
+        "afterEventRowid": 0
+      }
+    },
+    {
+      "name": "verify resumes as a bounded scan",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "verify",
+        "afterEventRowid": 100
+      }
+    },
+    {
+      "name": "reserved compact marker starts at zero",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "compact",
+        "afterEventRowid": 0
+      }
+    }
+  ],
+  "validTransitions": [
+    {
+      "name": "absent job creates pending receipts cursor",
+      "previous": null,
+      "next": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "receipts",
+        "afterEventRowid": 0
+      }
+    },
+    {
+      "name": "receipt batch advances within frozen cutoff",
+      "previous": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "receipts",
+        "afterEventRowid": 0
+      },
+      "next": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "receipts",
+        "afterEventRowid": 100
+      }
+    },
+    {
+      "name": "completed receipts reset messages to zero",
+      "previous": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "receipts",
+        "afterEventRowid": 250
+      },
+      "next": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "messages",
+        "afterEventRowid": 0
+      }
+    },
+    {
+      "name": "append between phases keeps frozen cutoff",
+      "previous": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "messages",
+        "afterEventRowid": 100
+      },
+      "next": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "messages",
+        "afterEventRowid": 200
+      }
+    },
+    {
+      "name": "completed baselines reset verify to zero",
+      "previous": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "baselines",
+        "afterEventRowid": 250
+      },
+      "next": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "verify",
+        "afterEventRowid": 0
+      }
+    },
+    {
+      "name": "verify is batchable under the same cursor",
+      "previous": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "verify",
+        "afterEventRowid": 0
+      },
+      "next": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "verify",
+        "afterEventRowid": 100
+      }
+    },
+    {
+      "name": "compact marker requires completed verify",
+      "previous": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "verify",
+        "afterEventRowid": 250
+      },
+      "next": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "compact",
+        "afterEventRowid": 0
+      }
+    },
+    {
+      "name": "append after verify restarts catch-up at observed cutoff",
+      "previous": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "verify",
+        "afterEventRowid": 250
+      },
+      "next": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 300,
+        "phase": "receipts",
+        "afterEventRowid": 0
+      }
+    }
+  ],
+  "validPayloadBatches": [
+    {
+      "name": "empty batch",
+      "value": []
+    },
+    {
+      "name": "one source at exact byte limit",
+      "value": [1048576]
+    },
+    {
+      "name": "multiple sources at exact summed byte limit",
+      "value": [524288, 262144, 262144]
+    }
+  ],
+  "invalidCursors": [
+    {
+      "name": "malformed cursor has unknown field",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 10,
+        "phase": "receipts",
+        "afterEventRowid": 0,
+        "offset": 0
+      }
+    },
+    {
+      "name": "invalid phase",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 10,
+        "phase": "cleanup",
+        "afterEventRowid": 0
+      }
+    },
+    {
+      "name": "after rowid exceeds cutoff",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 10,
+        "phase": "messages",
+        "afterEventRowid": 11
+      }
+    },
+    {
+      "name": "negative after rowid",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 10,
+        "phase": "verify",
+        "afterEventRowid": -1
+      }
+    },
+    {
+      "name": "reserved compact marker has nonzero progress",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 10,
+        "phase": "compact",
+        "afterEventRowid": 9
+      }
+    },
+    {
+      "name": "unsafe cutoff rowid",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 9007199254740992,
+        "phase": "receipts",
+        "afterEventRowid": 0
+      }
+    },
+    {
+      "name": "unsafe after rowid",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 9007199254740991,
+        "phase": "receipts",
+        "afterEventRowid": 9007199254740992
+      }
+    },
+    {
+      "name": "caller cannot override row limit",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 10,
+        "phase": "receipts",
+        "afterEventRowid": 0,
+        "maxSourceRowsPerBatch": 10
+      }
+    },
+    {
+      "name": "caller cannot override payload limit",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 10,
+        "phase": "receipts",
+        "afterEventRowid": 0,
+        "maxCanonicalSourcePayloadBytesPerBatch": 2048
+      }
+    }
+  ],
+  "invalidTransitions": [
+    {
+      "name": "initial cursor cannot skip receipts",
+      "previous": null,
+      "next": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "messages",
+        "afterEventRowid": 0
+      }
+    },
+    {
+      "name": "same phase cannot commit no progress",
+      "previous": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "receipts",
+        "afterEventRowid": 100
+      },
+      "next": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "receipts",
+        "afterEventRowid": 100
+      }
+    },
+    {
+      "name": "phase cannot advance before cutoff",
+      "previous": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "receipts",
+        "afterEventRowid": 100
+      },
+      "next": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "messages",
+        "afterEventRowid": 0
+      }
+    },
+    {
+      "name": "phase transition cannot skip order",
+      "previous": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "receipts",
+        "afterEventRowid": 250
+      },
+      "next": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "workspaces",
+        "afterEventRowid": 0
+      }
+    },
+    {
+      "name": "next phase must reset after rowid",
+      "previous": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "messages",
+        "afterEventRowid": 250
+      },
+      "next": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "workspaces",
+        "afterEventRowid": 1
+      }
+    },
+    {
+      "name": "append cannot change cutoff mid phase",
+      "previous": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "messages",
+        "afterEventRowid": 100
+      },
+      "next": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 300,
+        "phase": "messages",
+        "afterEventRowid": 200
+      }
+    },
+    {
+      "name": "catch-up requires completed verify",
+      "previous": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "verify",
+        "afterEventRowid": 200
+      },
+      "next": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 300,
+        "phase": "receipts",
+        "afterEventRowid": 0
+      }
+    },
+    {
+      "name": "compact cannot start before verify",
+      "previous": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "baselines",
+        "afterEventRowid": 250
+      },
+      "next": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "compact",
+        "afterEventRowid": 0
+      }
+    },
+    {
+      "name": "reserved compact cannot advance",
+      "previous": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "compact",
+        "afterEventRowid": 0
+      },
+      "next": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 300,
+        "phase": "receipts",
+        "afterEventRowid": 0
+      }
+    }
+  ],
+  "invalidPayloadBatches": [
+    {
+      "name": "more than 100 source rows",
+      "value": [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0
+      ]
+    },
+    {
+      "name": "single source exceeds 1 MiB",
+      "value": [1048577]
+    },
+    {
+      "name": "summed source payload exceeds 1 MiB",
+      "value": [524289, 524288]
+    }
+  ],
+  "futureSidecarRegression": {
+    "name": "ready append catch-up ready",
+    "steps": [
+      "materializeReady",
+      "appendAndInvalidateReadyToPendingSameTransaction",
+      "separateCatchUpVerification",
+      "publishReady"
+    ]
+  },
+  "invalidPolicyMutations": [
+    {
+      "name": "row guard cannot be overridden",
+      "path": ["guards", "maxSourceRowsPerBatch"],
+      "replacement": 101
+    },
+    {
+      "name": "limits are not caller configurable",
+      "path": ["guards", "callerConfigurable"],
+      "replacement": true
+    },
+    {
+      "name": "verify uses the same batch guards",
+      "path": ["guards", "appliesToPhases"],
+      "replacement": ["receipts", "messages", "workspaces", "baselines"]
+    },
+    {
+      "name": "offset scan is forbidden",
+      "path": ["scan", "offsetAllowed"],
+      "replacement": true
+    },
+    {
+      "name": "artifacts cannot derive from live projections",
+      "path": ["source", "artifactAuthority"],
+      "replacement": "liveProjectionTables"
+    },
+    {
+      "name": "live projections are final equivalence only",
+      "path": ["source", "liveProjectionUse"],
+      "replacement": "materializationSource"
+    },
+    {
+      "name": "unbounded source collection is forbidden",
+      "path": ["source", "unboundedCollectionAllowed"],
+      "replacement": true
+    },
+    {
+      "name": "committed progress cannot be running",
+      "path": ["transaction", "committedProgressState"],
+      "replacement": "running"
+    },
+    {
+      "name": "implementation cannot commit running",
+      "path": ["transaction", "implementationMayCommitRunning"],
+      "replacement": true
+    },
+    {
+      "name": "suspended is exact in-memory outcome",
+      "path": ["cancellation", "outcome"],
+      "replacement": "suspended"
+    },
+    {
+      "name": "only one active lifetime job",
+      "path": ["job", "maximumActiveJobs"],
+      "replacement": 2
+    },
+    {
+      "name": "suspended cannot be durable maintenance state",
+      "path": ["job", "activeStates"],
+      "replacement": ["pending", "running", "suspended"]
+    },
+    {
+      "name": "materializing is storage meta not maintenance state",
+      "path": ["job", "persistedMaintenanceJobFailClosedStates"],
+      "replacement": ["running", "materializing"]
+    },
+    {
+      "name": "failed maintenance job is terminal history",
+      "path": ["job", "failedMaintenanceJobRole"],
+      "replacement": "activeResumableJob"
+    },
+    {
+      "name": "schema has no active-job unique constraint",
+      "path": ["job", "sqlUniqueConstraintPresent"],
+      "replacement": true
+    },
+    {
+      "name": "transaction boundary must validate active identity",
+      "path": ["job", "transactionBoundaryValidation"],
+      "replacement": "trustSqlUniqueConstraint"
+    },
+    {
+      "name": "second lifetime job cannot be created",
+      "path": ["job", "secondJobCreationAllowedWhenAnyLifetimeJobExists"],
+      "replacement": true
+    },
+    {
+      "name": "append reuses succeeded lifetime job",
+      "path": ["job", "appendReactivation"],
+      "replacement": "createSecondPendingJob"
+    },
+    {
+      "name": "batch commit must include pending cursor",
+      "path": ["job", "batchCommit"],
+      "replacement": "derivedRowsOnly"
+    },
+    {
+      "name": "failure record must follow rollback separately",
+      "path": ["job", "postRollbackFailureRecord"],
+      "replacement": "sameFailedTransaction"
+    },
+    {
+      "name": "automatic retry stays forbidden",
+      "path": ["job", "automaticRetryEnabled"],
+      "replacement": true
+    },
+    {
+      "name": "derived preparation batches may persist",
+      "path": ["rollback", "derivedPreparationBatchesMayPersist"],
+      "replacement": false
+    },
+    {
+      "name": "source mutation requires atomic rollback",
+      "path": ["rollback", "sourceLedgerMutationAtomicRollbackRequired"],
+      "replacement": false
+    },
+    {
+      "name": "compaction trigger change requires atomic rollback",
+      "path": ["rollback", "compactionTriggerChangeAtomicRollbackRequired"],
+      "replacement": false
+    },
+    {
+      "name": "ready invalidation stays in append transaction",
+      "path": ["append", "readyInvalidation"],
+      "replacement": "separateTransaction"
+    },
+    {
+      "name": "ready publication stays separate",
+      "path": ["append", "readyPublication"],
+      "replacement": "sameAppendTransaction"
+    },
+    {
+      "name": "ready regression sequence stays exact",
+      "path": ["append", "readyRegressionSequence"],
+      "replacement": [
+        "materializeReady",
+        "appendAndInvalidateReadyToPendingSameTransaction",
+        "publishReady"
+      ]
+    },
+    {
+      "name": "final publication must check max event rowid",
+      "path": ["finalPublication", "prerequisites"],
+      "replacement": [
+        "exactDerivedCompletenessAndEquivalence",
+        "liveProjectionEqualsCutoffReconstruction",
+        "boundedSqlKeysetEvidence"
+      ]
+    },
+    {
+      "name": "final publication cannot collect unbounded evidence",
+      "path": ["finalPublication", "unboundedCollectionAllowed"],
+      "replacement": true
+    },
+    {
+      "name": "changed max rowid can never publish ready",
+      "path": ["finalPublication", "maxRowidChanged"],
+      "replacement": "publishReadyAndCatchUpLater"
+    },
+    {
+      "name": "materialization cannot delete ledger rows",
+      "path": ["activation", "ledgerDeletionEnabled"],
+      "replacement": true
+    }
+  ]
+}

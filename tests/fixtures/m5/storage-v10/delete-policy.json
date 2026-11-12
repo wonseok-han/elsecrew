@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "generation": "storageCompactionDeleteTransactionV1",
+  "storageSchema": {
+    "fromVersion": 9,
+    "toVersion": 10,
+    "precondition": "exactV9NoPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
+    "sqlPreflight": "beginImmediateExactCanonicalSqlDefinitionsAndLedgerStateRaiseRollbackBeforePersistentDdl",
+    "mode": "replaceDeleteAuthorityGuardAndAddAtomicBatchCompletionGuard",
+    "existingRowsDeleted": false
+  },
+  "schemaIdentity": {
+    "version": 10,
+    "source": "exactV1ThroughV10MigrationResult",
+    "comparison": "exactTypeNameTableNameCanonicalSqlSha256",
+    "persistentObjects": 76,
+    "definitionsFile": "schema-identity.json",
+    "definitionsRequired": "allPersistentObjectsExact",
+    "sqliteAutoindexesExcluded": true
+  },
+  "privateState": {
+    "schemaVersion": 3,
+    "cursorSchemaVersion": 3,
+    "phases": [
+      "planEligibility", "freezeOperations", "freezeMessages", "verifyPrefix",
+      "authorizeDelete", "deletePrefix", "verifyOperations", "verifyEquivalence",
+      "releasePlan", "finalize"
+    ],
+    "phaseOrderChanged": false,
+    "flagsChanged": false
+  },
+  "authorizeDelete": {
+    "mode": "boundedReadOnlyFinalWitness",
+    "authorityInsert": "forbidden",
+    "sourceMutation": "forbidden"
+  },
+  "deletePrefix": {
+    "onlyMutationPhase": true,
+    "arm": "runningV3WithStepThroughPlanOrdinal",
+    "planInterval": "openAfterPlanOrdinalThroughClosedStepThroughPlanOrdinal",
+    "maxRows": 100,
+    "authorityOrdinal": "oneBasedContiguousWithinArmedBatch",
+    "authorityPlanBinding": "planOrdinalEqualsAfterPlanOrdinalPlusAuthorityOrdinal",
+    "source": "exactLiveEventAndSourceIndexMatchImmutableDeletePlanRow",
+    "prefix": "exactCurrentPlanPrefix",
+    "outsideInterval": "rejected"
+  },
+  "transaction": {
+    "steps": [
+      "insertCompleteContiguousAuthorityBatch",
+      "deleteMatchingSourceIndexRows",
+      "deleteMatchingEventRowsAndConsumeAuthority",
+      "advanceCursorAndReturnPending"
+    ],
+    "sameTransactionRequired": true,
+    "execution": "finalAuthorityInsertTriggersCompleteSourceDeleteAuthorityCleanupAndCursorAdvance",
+    "sourceIndexDeletionRequiresCompleteBatch": true,
+    "eventDeletionRequiresCompleteBatchAndAbsentSourceIndex": true,
+    "pendingRequiresEveryArmedPlanSourceAndIndexAbsent": true,
+    "pendingRequiresEmptyAuthority": true,
+    "malformedPartialOrWrongOrdinal": "rollbackNoMutation"
+  },
+  "preservation": {
+    "releasePlanAndFinalize": "unchanged",
+    "idleAndSucceededV9Rows": "preserved",
+    "publicD1WireAndCapability": "unchanged"
+  },
+  "activation": {
+    "contractOnly": true,
+    "runtimeWriterImplemented": false,
+    "productExecutionEnabled": false,
+    "automaticSchedulingEnabled": false,
+    "publicWireChanged": false
+  }
+}

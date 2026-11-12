@@ -1,0 +1,278 @@
+{
+  "migrationMatrix": {
+    "admissiblePairs": [
+      "ready+absent", "pending+absent", "pending+pending", "pending+failed"
+    ],
+    "rejectedPairs": ["pending+attempting"],
+    "allowedMaintenanceStates": ["succeeded", "failed"],
+    "rejectedMaintenanceStates": ["pending", "running"],
+    "newTableInitialCounts": {
+      "ledger_compaction_prefixes": 0,
+      "frozen_message_sources": 0,
+      "ledger_compaction_delete_authority": 0
+    }
+  },
+  "runningJobGuard": {
+    "index": "maintenance_jobs_single_running_lossless_compaction",
+    "predicate": "job_kind='losslessCompaction' AND state='running'",
+    "maximumRows": 1,
+    "insertSecondRunning": "uniqueConstraintRejectedBeforeAuthority",
+    "updateSecondPendingToRunning": "uniqueConstraintRejectedBeforeAuthority",
+    "c1Consumer": "exactSchemaGuardRequiredNotApplicationOnly"
+  },
+  "validPrefixes": [
+    {
+      "name": "chat prefix one retains sequence two anchor",
+      "value": {
+        "prefixId": "prefix_chat_1_1",
+        "aggregateType": "chat",
+        "aggregateId": "chat_1",
+        "deletedThroughSequence": 1,
+        "anchorEventRowid": 4,
+        "anchorEventId": "evt_chat_2",
+        "anchorOperationId": "op_chat_2",
+        "anchorAggregateSequence": 2,
+        "baselineId": "baseline_chat_1_1",
+        "baselineProjectionDigest": "digest-chat-1",
+        "createdAt": "2026-09-01T09:00:00Z",
+        "verifiedAt": "2026-09-01T09:00:01Z"
+      }
+    }
+  ],
+  "invalidPrefixMutations": [
+    { "name": "app instance prefix", "path": ["aggregateType"], "replacement": "app_instance" },
+    { "name": "zero deleted through", "path": ["deletedThroughSequence"], "replacement": 0 },
+    { "name": "anchor is not successor", "path": ["anchorAggregateSequence"], "replacement": 3 },
+    { "name": "missing prefix id", "path": ["prefixId"], "replacement": "" },
+    { "name": "unsafe rowid", "path": ["anchorEventRowid"], "replacement": 9007199254740992 }
+  ],
+  "validFrozenMessageSources": [
+    {
+      "name": "message A introduction frozen",
+      "value": {
+        "messageId": "message_a",
+        "sourceEventRowid": 2,
+        "sourceEventId": "evt_chat_1",
+        "sourceOperationId": "op_chat_1",
+        "chatId": "chat_1",
+        "sourceAggregateSequence": 1,
+        "durableSequence": 1,
+        "canonicalMessageJson": "{\"messageId\":\"message_a\"}",
+        "messageDigest": "digest-message-a",
+        "frozenAt": "2026-09-01T09:00:00Z"
+      }
+    }
+  ],
+  "invalidFrozenMessageMutations": [
+    { "name": "empty message id", "path": ["messageId"], "replacement": "" },
+    { "name": "zero source rowid", "path": ["sourceEventRowid"], "replacement": 0 },
+    { "name": "zero durable sequence", "path": ["durableSequence"], "replacement": 0 },
+    { "name": "empty chat id", "path": ["chatId"], "replacement": "" },
+    { "name": "empty digest", "path": ["messageDigest"], "replacement": "" }
+  ],
+  "validAuthorityBatch": [
+    {
+      "jobId": "compact_1",
+      "ordinal": 1,
+      "prefixId": "prefix_chat_1_1",
+      "prefixDeletedThroughSequence": 1,
+      "eventRowid": 2,
+      "eventId": "evt_chat_1",
+      "operationId": "op_chat_1",
+      "aggregateType": "chat",
+      "aggregateId": "chat_1",
+      "aggregateSequence": 1,
+      "introducedMessageId": "message_a",
+      "frozenMessageId": "message_a",
+      "authorizedAt": "2026-09-01T09:01:00Z"
+    },
+    {
+      "jobId": "compact_1",
+      "ordinal": 2,
+      "prefixId": "prefix_project_1_1",
+      "prefixDeletedThroughSequence": 1,
+      "eventRowid": 1,
+      "eventId": "evt_project_1",
+      "operationId": "op_project_1",
+      "aggregateType": "project",
+      "aggregateId": "project_1",
+      "aggregateSequence": 1,
+      "introducedMessageId": null,
+      "frozenMessageId": null,
+      "authorizedAt": "2026-09-01T09:01:00Z"
+    }
+  ],
+  "invalidAuthorityMutations": [
+    { "name": "ordinal zero", "path": ["0", "ordinal"], "replacement": 0 },
+    { "name": "ordinal over limit", "path": ["0", "ordinal"], "replacement": 101 },
+    { "name": "event after prefix", "path": ["0", "aggregateSequence"], "replacement": 2 },
+    { "name": "app instance delete", "path": ["0", "aggregateType"], "replacement": "app_instance" },
+    { "name": "message not frozen", "path": ["0", "frozenMessageId"], "replacement": null },
+    { "name": "different running job", "path": ["1", "jobId"], "replacement": "compact_other" }
+  ],
+  "validCursorTransitions": [
+    {
+      "name": "initial freeze messages cursor",
+      "previous": null,
+      "next": {
+        "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "freezeMessages",
+        "afterEventRowid": 0, "scanExhausted": false
+      }
+    },
+    {
+      "name": "same phase bounded progress",
+      "previous": {
+        "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "freezeMessages",
+        "afterEventRowid": 0, "scanExhausted": false
+      },
+      "next": {
+        "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "freezeMessages",
+        "afterEventRowid": 2, "scanExhausted": false
+      }
+    },
+    {
+      "name": "exhausted phase advances",
+      "previous": {
+        "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "freezeMessages",
+        "afterEventRowid": 2, "scanExhausted": true
+      },
+      "next": {
+        "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "verifyPrefix",
+        "afterEventRowid": 0, "scanExhausted": false
+      }
+    }
+  ],
+  "invalidCursors": [
+    { "name": "unbounded cutoff", "value": { "schemaVersion": 1, "cutoffEventRowid": 9007199254740992, "phase": "freezeMessages", "afterEventRowid": 0, "scanExhausted": false } },
+    { "name": "unknown phase", "value": { "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "compactAll", "afterEventRowid": 0, "scanExhausted": false } },
+    { "name": "cursor beyond cutoff", "value": { "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "deletePrefix", "afterEventRowid": 7, "scanExhausted": false } }
+  ],
+  "invalidCursorTransitions": [
+    {
+      "name": "phase advances before exhaustion",
+      "previous": { "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "freezeMessages", "afterEventRowid": 2, "scanExhausted": false },
+      "next": { "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "verifyPrefix", "afterEventRowid": 0, "scanExhausted": false }
+    },
+    {
+      "name": "phase skip",
+      "previous": { "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "freezeMessages", "afterEventRowid": 2, "scanExhausted": true },
+      "next": { "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "authorizeDelete", "afterEventRowid": 0, "scanExhausted": false }
+    },
+    {
+      "name": "same phase cursor regression",
+      "previous": { "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "freezeMessages", "afterEventRowid": 2, "scanExhausted": false },
+      "next": { "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "freezeMessages", "afterEventRowid": 1, "scanExhausted": false }
+    },
+    {
+      "name": "cutoff changes",
+      "previous": { "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "freezeMessages", "afterEventRowid": 2, "scanExhausted": false },
+      "next": { "schemaVersion": 1, "cutoffEventRowid": 7, "phase": "freezeMessages", "afterEventRowid": 3, "scanExhausted": false }
+    }
+  ],
+  "validLifecycleTransitions": [
+    {
+      "name": "arm persists running sentinel",
+      "operation": "arm",
+      "previous": { "jobId": "compact_1", "state": "pending", "cursor": { "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "deletePrefix", "afterEventRowid": 0, "scanExhausted": false }, "authorityCount": 0, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
+      "next": { "jobId": "compact_1", "state": "running", "cursor": { "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "deletePrefix", "afterEventRowid": 0, "scanExhausted": false }, "authorityCount": 0, "equivalenceVerified": false, "failureKind": null, "completedAt": null }
+    },
+    {
+      "name": "bounded delete batch commits pending progress",
+      "operation": "batchSuccess",
+      "previous": { "jobId": "compact_1", "state": "running", "cursor": { "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "deletePrefix", "afterEventRowid": 0, "scanExhausted": false }, "authorityCount": 1, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
+      "next": { "jobId": "compact_1", "state": "pending", "cursor": { "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "deletePrefix", "afterEventRowid": 2, "scanExhausted": false }, "authorityCount": 0, "equivalenceVerified": false, "failureKind": null, "completedAt": null }
+    },
+    {
+      "name": "cancel before arm is byte zero",
+      "operation": "cancelBeforeArm",
+      "previous": { "jobId": "compact_1", "state": "pending", "cursor": { "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "verifyPrefix", "afterEventRowid": 0, "scanExhausted": false }, "authorityCount": 0, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
+      "next": { "jobId": "compact_1", "state": "pending", "cursor": { "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "verifyPrefix", "afterEventRowid": 0, "scanExhausted": false }, "authorityCount": 0, "equivalenceVerified": false, "failureKind": null, "completedAt": null }
+    },
+    {
+      "name": "cancel after arm leaves sentinel",
+      "operation": "cancelAfterArm",
+      "previous": { "jobId": "compact_1", "state": "running", "cursor": { "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "deletePrefix", "afterEventRowid": 0, "scanExhausted": false }, "authorityCount": 0, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
+      "next": { "jobId": "compact_1", "state": "running", "cursor": { "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "deletePrefix", "afterEventRowid": 0, "scanExhausted": false }, "authorityCount": 0, "equivalenceVerified": false, "failureKind": null, "completedAt": null }
+    },
+    {
+      "name": "verified empty authority completes",
+      "operation": "complete",
+      "previous": { "jobId": "compact_1", "state": "pending", "cursor": { "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "finalize", "afterEventRowid": 0, "scanExhausted": true }, "authorityCount": 0, "equivalenceVerified": true, "failureKind": null, "completedAt": null },
+      "next": { "jobId": "compact_1", "state": "succeeded", "cursor": { "schemaVersion": 1, "cutoffEventRowid": 6, "phase": "finalize", "afterEventRowid": 0, "scanExhausted": true }, "authorityCount": 0, "equivalenceVerified": true, "failureKind": null, "completedAt": "2026-09-01T09:05:00Z" }
+    }
+  ],
+  "invalidLifecycleMutations": [
+    { "name": "arm without running sentinel", "caseIndex": 0, "path": ["next", "state"], "replacement": "pending" },
+    { "name": "batch leaves authority", "caseIndex": 1, "path": ["next", "authorityCount"], "replacement": 1 },
+    { "name": "cancel after arm hides running", "caseIndex": 3, "path": ["next", "state"], "replacement": "pending" },
+    { "name": "complete without equivalence", "caseIndex": 4, "path": ["previous", "equivalenceVerified"], "replacement": false },
+    { "name": "complete with authority", "caseIndex": 4, "path": ["previous", "authorityCount"], "replacement": 1 }
+  ],
+  "equivalenceCases": {
+    "valid": {
+      "baselineTailBefore": true,
+      "anchorTailAfter": true,
+      "preservedArtifactsByteExact": true,
+      "receiptReplayEquivalent": true,
+      "namespaceDecisionsEquivalent": true,
+      "frozenMessageIdsReserved": true,
+      "authorityEmpty": true,
+      "rowsInBatch": 1
+    },
+    "invalidFields": [
+      "baselineTailBefore", "anchorTailAfter", "preservedArtifactsByteExact",
+      "receiptReplayEquivalent", "namespaceDecisionsEquivalent",
+      "frozenMessageIdsReserved", "authorityEmpty"
+    ],
+    "invalidRowsInBatch": [0, 101]
+  },
+  "replayNamespaces": [
+    { "namespace": "legacy", "duplicate": "duplicateNoOp", "conflict": "conflict" },
+    { "namespace": "actualAgent", "duplicate": "duplicateNoOp", "conflict": "conflict" },
+    { "namespace": "recovery", "duplicate": "duplicateNoOp", "conflict": "conflict" }
+  ],
+  "messageReuse": {
+    "frozenMessageId": "message_a",
+    "sameIntroduction": "duplicateNoOp",
+    "differentIntroduction": "conflict",
+    "newSourceInsert": "uniqueConstraintRejected"
+  },
+  "queryPlans": [
+    {
+      "name": "prefixLatest",
+      "sql": "EXPLAIN QUERY PLAN SELECT prefix_id FROM ledger_compaction_prefixes WHERE aggregate_type='chat' AND aggregate_id='chat_1' ORDER BY deleted_through_sequence DESC LIMIT 1",
+      "detail": "SEARCH ledger_compaction_prefixes USING INDEX ledger_compaction_prefixes_latest (aggregate_type=? AND aggregate_id=?)"
+    },
+    {
+      "name": "deleteBatch",
+      "sql": "EXPLAIN QUERY PLAN SELECT event_rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence FROM event_source_index WHERE event_rowid>0 AND event_rowid<=6 ORDER BY event_rowid LIMIT 100",
+      "detail": "SEARCH event_source_index USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)"
+    },
+    {
+      "name": "authorityEmpty",
+      "sql": "EXPLAIN QUERY PLAN SELECT 1 FROM ledger_compaction_delete_authority LIMIT 1",
+      "detail": "SCAN ledger_compaction_delete_authority USING COVERING INDEX sqlite_autoindex_ledger_compaction_delete_authority_1"
+    },
+    {
+      "name": "frozenMessage",
+      "sql": "EXPLAIN QUERY PLAN SELECT source_event_id FROM frozen_message_sources WHERE message_id='message_a'",
+      "detail": "SEARCH frozen_message_sources USING INDEX sqlite_autoindex_frozen_message_sources_1 (message_id=?)"
+    }
+  ],
+  "invalidPreflightMutations": [
+    { "name": "attempting admitted", "path": ["admissibleMaterializationPairs", "0"], "replacement": "pending+attempting" },
+    { "name": "active maintenance admitted", "path": ["maintenanceRequirement"], "replacement": "anyState" },
+    { "name": "authority anomaly ignored", "path": ["deleteAuthorityRequirement"], "replacement": "ignoreExisting" },
+    { "name": "preflight after ddl", "path": ["timing"], "replacement": "afterDdl" }
+  ],
+  "invalidPolicyMutations": [
+    { "name": "product delete enabled", "path": ["activation", "actualDeleteEnabledBeforeC1Consumer"], "replacement": true },
+    { "name": "runtime guard ddl allowed", "path": ["guardVersioning", "runtimeDropRecreate"], "replacement": "allowed" },
+    { "name": "running uniqueness application only", "path": ["lifecycle", "runningUniqueness"], "replacement": "applicationOnly" },
+    { "name": "c1 ignores schema guard", "path": ["lifecycle", "c1Consumer"], "replacement": "applicationCheck" },
+    { "name": "batch over one hundred", "path": ["deleteAuthority", "maxExactTuples"], "replacement": 101 },
+    { "name": "app instance allowed", "path": ["deletion", "appInstance"], "replacement": "allowed" },
+    { "name": "authority finalization not empty", "path": ["equivalence", "finalization"], "replacement": "commitWithRows" },
+    { "name": "snapshot files mutable", "path": ["deletion", "snapshotFiles"], "replacement": "rewrite" }
+  ]
+}

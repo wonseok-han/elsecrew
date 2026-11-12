@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 1,
+  "storageSchemaVersion": 4,
+  "protocolVersion": 1,
+  "payloadSchemaVersion": 1,
+  "migration": {
+    "file": "migration-v3-to-v4.sql",
+    "predecessorMigrationFile": "../storage-v3/migration-v2-to-v3.sql",
+    "predecessorMigrationMutationAllowed": false,
+    "fromVersion": 3,
+    "toVersion": 4,
+    "mode": "exactV3AndAdmissiblePairPreflightThenTransactionalMetaAndJobRebuild",
+    "preflight": {
+      "schema": "exactStorageV3",
+      "admissiblePairs": [
+        "ready+absent",
+        "pending+absent",
+        "pending+pending",
+        "pending+failed"
+      ],
+      "migrationMappings": [
+        "pendingPhasesSameName",
+        "verifyToVerifySource",
+        "afterEventRowidToAfterScanRowid",
+        "scanExhaustedFalse",
+        "failedPreserved",
+        "attemptingImpossibleInV3"
+      ],
+      "reopenRunnablePairs": [
+        "ready+absent",
+        "pending+absent",
+        "pending+pending"
+      ],
+      "reopenFailClosedPairs": [
+        "pending+attempting",
+        "pending+failed"
+      ],
+      "timing": "beforeAnyDdlOrMutation"
+    },
+    "idempotency": "exactStorageV4NoOpBeforeMigrationSql",
+    "partialExtraOrUnsafePair": "failClosedBeforeMutation",
+    "tablesAdded": [],
+    "tablesRebuilt": [
+      "storage_schema_meta",
+      "lifetime_materialization_job"
+    ],
+    "preservedTables": [
+      "schema_meta",
+      "app_instances",
+      "events",
+      "projects",
+      "chats",
+      "runs",
+      "locks",
+      "ledger_baselines",
+      "operation_receipts",
+      "chat_messages",
+      "prepared_workspaces",
+      "maintenance_jobs"
+    ],
+    "preservedIndexes": [
+      "chats_identity_project",
+      "ledger_baselines_cutoff",
+      "operation_receipts_aggregate_sequence",
+      "chat_messages_chat_sequence",
+      "prepared_workspaces_project_state",
+      "maintenance_jobs_status_created"
+    ],
+    "preservedTriggers": [
+      "events_are_append_only_update",
+      "events_are_append_only_delete"
+    ],
+    "downgradePolicy": "openQuestion"
+  },
+  "boundedVerification": {
+    "schemaVersion": 2,
+    "casesFile": "cases.json",
+    "guards": {
+      "maxRowsPerBatch": 100,
+      "maxCanonicalPayloadBytesPerBatch": 1048576,
+      "callerConfigurable": false,
+      "appliesToPhases": [
+        "receipts",
+        "messages",
+        "workspaces",
+        "baselines",
+        "verifySource",
+        "verifyReceipts",
+        "verifyMessages",
+        "verifyWorkspaces",
+        "verifyBaselines"
+      ]
+    },
+    "cursor": {
+      "schemaVersion": 2,
+      "column": "after_scan_rowid",
+      "phases": [
+        "receipts",
+        "messages",
+        "workspaces",
+        "baselines",
+        "verifySource",
+        "verifyReceipts",
+        "verifyMessages",
+        "verifyWorkspaces",
+        "verifyBaselines"
+      ],
+      "eventRowidPhases": [
+        "receipts",
+        "messages",
+        "workspaces",
+        "baselines",
+        "verifySource"
+      ],
+      "derivedTableRowidPhases": [
+        "verifyReceipts",
+        "verifyMessages",
+        "verifyWorkspaces",
+        "verifyBaselines"
+      ],
+      "phaseStartAfterScanRowid": 0,
+      "phaseStartScanExhausted": false,
+      "eventRowidBound": "afterScanRowidLessThanOrEqualToCutoff",
+      "derivedRowidBound": "jsSafeUnsignedIndependentOfCutoff",
+      "scanExhaustedMutationAuthority": "sidecarPrivateExactEmptyKeysetQuerySameTransaction",
+      "scanExhaustedProofBoundary": "implementationOwnedAndTestedInSidecarNotRepresentableAsPublicJson",
+      "phaseTransition": "scanExhaustedTrueThenExactNextAtZeroAndFalse"
+    },
+    "scan": {
+      "sourcePredicate": "rowid > afterScanRowid AND rowid <= cutoffEventRowid",
+      "derivedPredicate": "rowid > afterScanRowid",
+      "orderBy": "rowid",
+      "limitSql": "LIMIT 100",
+      "forbiddenWithinBatch": [
+        "OFFSET",
+        "COUNT",
+        "window",
+        "GROUP BY",
+        "unboundedFullTableScan"
+      ]
+    },
+    "transaction": {
+      "wordingRevision": "shortArmTransactionThenOneBoundedBatchTransaction",
+      "arm": "pendingToAttemptingCommittedBeforeBatch",
+      "success": "derivedRowsCursorAndAttemptingToPendingAtomic",
+      "nonemptyBatchScanExhausted": false,
+      "emptyBatchScanExhausted": "sidecarPrivateExactEmptyKeysetQuerySameTransaction",
+      "cancellation": "rollbackBatchOrSavepointThenCommitAttemptingToPending",
+      "terminalValidationFailure": "rollbackBatchThenCommitAttemptingToFailed",
+      "failureRecordUnavailable": "durableAttemptingSentinelReopenRefusesRetryOrSuccess",
+      "reopenAttempting": "failClosedNonRunnable",
+      "reopenFailed": "failClosedNonRunnable"
+    },
+    "verification": {
+      "verifySource": "eachEventAtOrBelowCutoffHasExactArtifactsCurrentProjectionAndSequence",
+      "verifyDerived": "eachDerivedRowHasExactSourceBackingAndNoSourceLessExtra",
+      "derivedPhaseTables": {
+        "verifyReceipts": "operation_receipts",
+        "verifyMessages": "chat_messages",
+        "verifyWorkspaces": "prepared_workspaces",
+        "verifyBaselines": "ledger_baselines"
+      },
+      "historicalBaseline": "allowedWhenDeterministicDigestValidAndSourceBacked",
+      "newestBaseline": "requiredForEveryCompactableAggregate"
+    },
+    "cancellation": {
+      "afterCommittedVerifyBatch": "returnSuspended",
+      "finalPublicationInSameCall": false,
+      "committedBatchWinsScope": "committedBatchTransactionOnly"
+    },
+    "finalPublication": {
+      "beforeBegin": "cancelReturnsSuspendedNoMutation",
+      "transaction": "shortBeginImmediateOnly",
+      "preconditions": [
+        "exactMetaJobPairAndCursor",
+        "verifyBaselinesTableEndProvedByExactEmptyKeysetBatch",
+        "scanExhaustedTrue",
+        "maxEventRowidEqualsCutoff",
+        "cancelBeforeMutation",
+        "precommitCancel"
+      ],
+      "mutation": "deleteJobAndSetMetaReady",
+      "forbiddenWork": [
+        "artifactScan",
+        "tableScan",
+        "count"
+      ],
+      "maxRowidChanged": "pendingReceiptsObservedCutoffAfterScanRowidZero"
+    },
+    "activation": {
+      "cleanupEnabled": false,
+      "deletionEnabled": false,
+      "compactionEnabled": false,
+      "wireEnabled": false,
+      "schedulerEnabled": false
+    }
+  }
+}

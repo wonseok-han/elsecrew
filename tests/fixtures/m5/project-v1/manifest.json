@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": 1,
+  "contract": {
+    "capabilities": [
+      "system.status",
+      "app.prepareQuit",
+      "project.open",
+      "project.getTree",
+      "project.createWorktree",
+      "project.close",
+      "file.read",
+      "file.save",
+      "file.watch",
+      "diff.getSummary",
+      "diff.getFile"
+    ],
+    "bridgeMethods": [
+      "getSystemStatus",
+      "prepareQuit",
+      "onSidecarEvent",
+      "openProject",
+      "getProjectTree",
+      "createProjectWorktree",
+      "closeProject",
+      "readFile",
+      "beginFileSave",
+      "appendFileSaveChunk",
+      "commitFileSave",
+      "watchProjectFiles",
+      "getDiffSummary",
+      "getDiffFile",
+      "onProjectEvent"
+    ],
+    "treePageMaxEntries": 500,
+    "textChunkMaxBytes": 262144,
+    "fileMaxBytes": 5242880,
+    "fileVersionAlgorithm": "sha256",
+    "fileVersionPrefix": "sha256:",
+    "fileVersionDigestInput": "exactFileBytes",
+    "canonicalPathFormat": "absoluteRealPathForwardSlashesUppercaseWindowsDrive",
+    "worktreeHeadMode": "detached",
+    "workspaceKind": "standaloneSnapshot",
+    "snapshotTransport": "gitBundle",
+    "sourceMutationPolicy": "forbidden",
+    "worktreeLifecycles": ["active", "abandoned", "recoveryRequired"],
+    "snapshotLimits": {
+      "bundleMaxBytes": 2147483648,
+      "materializedTotalMaxBytes": 4294967296,
+      "entriesMax": 200000,
+      "singleBlobMaxBytes": 1073741824,
+      "diskReserveBytes": 536870912,
+      "streamingRequired": true,
+      "fullAllocationForbidden": true
+    },
+    "snapshotCreationPhases": [
+      "recoveryMarkerPersisted",
+      "sourceDigestBefore",
+      "bundleHeaderVerified",
+      "bundleExportStreamed",
+      "sourceDigestAfter",
+      "bundleVerified",
+      "materializationStreamed",
+      "workspaceVerified",
+      "externalManifestPersisted",
+      "gitMarkerPersisted",
+      "workspaceRenamed",
+      "databaseCommitted",
+      "activated"
+    ],
+    "snapshotFailureKinds": ["corruptBundle", "truncatedBundle", "oversizeBundle", "shallowMissingObjects"],
+    "materialization": {
+      "blobSource": "rawCommittedBytes",
+      "modeSource": "committedTreeMode",
+      "symlinkPolicy": "noFollow",
+      "submodulePolicy": "noInit",
+      "forbiddenTransforms": ["checkout", "filter", "eol", "encoding", "ident", "exportAttributes", "lfs"],
+      "failClosedEntries": ["caseCollision", "nonUtf8Path", "dotGitEntry", "abnormalMode"]
+    },
+    "threatModel": {
+      "protected": ["selectedRootPathSwap", "managedTargetPathSwap", "ordinaryConcurrentSourceChange"],
+      "requiredChecks": ["exportedBaseCommit", "exportedBaseTree", "objectFormat", "sourceDigestBeforeAfter"],
+      "outOfBoundary": ["activelyMaliciousSameUserEntryMutationInsideHeldSourceDirectoryDuringExport"]
+    },
+    "platformSupport": {"macos":"contracted","windows":"unsupportedUntilSeparateGate"},
+    "projectCloseLifecycle": "abandoned",
+    "projectClosePhysicallyDeletes": false,
+    "treeCursorSemantics": "opaque",
+    "saveConcurrency": "expectedVersionMustEqualCurrentVersion",
+    "watchOverflow": "rescanRequired",
+    "safetyErrorKinds": [
+      "manifestMismatch",
+      "symlinkEscape",
+      "dirtyConflict",
+      "recoveryRequired"
+    ]
+  },
+  "casesFile": "cases.json",
+  "activationEvidenceFile": "activation-evidence.json",
+  "generatedCases": [
+    {"name":"tree-page-at-limit","validator":"treePage","entryCount":500,"expectedValid":true},
+    {"name":"tree-page-over-limit","validator":"treePage","entryCount":501,"expectedValid":false},
+    {"name":"text-chunk-at-limit","validator":"saveTranscript","textBytes":262144,"expectedValid":true},
+    {"name":"text-chunk-over-limit","validator":"saveTranscript","textBytes":262145,"expectedValid":false},
+    {"name":"utf8-at-file-limit","validator":"fileClassification","byteLength":5242880,"utf8Valid":true,"classification":"utf8","expectedValid":true},
+    {"name":"binary-at-file-limit","validator":"fileClassification","byteLength":5242880,"utf8Valid":false,"classification":"binary","expectedValid":true},
+    {"name":"over-file-limit","validator":"fileClassification","byteLength":5242881,"utf8Valid":true,"classification":"tooLarge","expectedValid":true},
+    {"name":"over-file-limit-claimed-utf8","validator":"fileClassification","byteLength":5242881,"utf8Valid":true,"classification":"utf8","expectedValid":false}
+  ]
+}

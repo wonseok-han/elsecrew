@@ -1,0 +1,61 @@
+name: M5 package diagnostic (unsigned)
+
+# Opt-in only: manual dispatch, or an explicitly approved diagnostic-branch push.
+# This does not publish a release or establish G6 readiness.
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/m5-windows-diagnostic-20261102]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Branch-only bootstrap avoids requiring a main merge for Windows proof.
+        os: ${{ fromJSON(github.event_name == 'push' && '["windows-latest"]' || '["macos-latest", "windows-latest"]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: 4
+      CARGO_INCREMENTAL: 0
+      RUST_TEST_THREADS: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pnpm install --frozen-lockfile
+      - name: TypeScript check
+        run: pnpm exec tsc --noEmit
+      - name: Frontend and bridge contract regressions
+        run: pnpm test
+      - name: M5 core regressions
+        id: rust_core
+        run: cargo test --locked --release -p elsecrew-core
+      - name: M5 protocol regressions
+        id: rust_protocol
+        if: ${{ !cancelled() && (steps.rust_core.outcome == 'success' || steps.rust_core.outcome == 'failure') }}
+        run: cargo test --locked --release -p elsecrew-protocol
+      - name: M5 sidecar regressions
+        if: ${{ !cancelled() && (steps.rust_protocol.outcome == 'success' || steps.rust_protocol.outcome == 'failure') }}
+        run: cargo test --locked --release -p elsecrew-sidecar
+      - name: Build unsigned Electron ZIP with release sidecar
+        run: pnpm m5:make
+      - name: Verify packaged assets, fuses and sidecar protocol
+        run: node --experimental-strip-types scripts/m5-electron-package-smoke.mjs
+      - name: Upload unsigned diagnostic package
+        uses: actions/upload-artifact@v4
+        with:
+          name: m5-unsigned-diagnostic-${{ matrix.os }}-${{ github.sha }}
+          path: out/make/zip/**/*.zip
+          if-no-files-found: error
+          retention-days: 3

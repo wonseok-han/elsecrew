@@ -1,0 +1,287 @@
+//! Reported config provenance only. Not proof that startup hooks never ran.
+use super::{invalid, match_config, ExpectedPermission, ExpectedProfile, WorkspaceWriteConfig};
+use crate::provider::{BoundedObservation, ProviderError};
+use serde::Deserialize;
+use serde_json::value::RawValue;
+
+pub(super) fn match_layers(
+    input: &BoundedObservation,
+    profile: &ExpectedProfile<'_>,
+    home: &str,
+    permission: ExpectedPermission,
+) -> Result<(), ProviderError> {
+    #[derive(Deserialize)]
+    struct Response {
+        layers: Vec<Layer>,
+        config: Effective,
+    }
+    #[derive(Deserialize)]
+    struct Effective {
+        features: Features,
+    }
+    #[derive(Deserialize)]
+    struct Features {
+        hooks: bool,
+        apps: bool,
+        plugins: bool,
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct FlagFeatures {
+        hooks: bool,
+        apps: bool,
+        plugins: bool,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Layer {
+        name: Source,
+        config: Box<RawValue>,
+        #[serde(default)]
+        disabled_reason: Option<String>,
+    }
+    #[derive(Deserialize)]
+    #[serde(tag = "type", deny_unknown_fields)]
+    enum Source {
+        #[serde(rename = "sessionFlags")]
+        Flags,
+        #[serde(rename = "user")]
+        User {
+            file: String,
+            profile: Option<String>,
+        },
+        #[serde(rename = "system")]
+        System { file: String },
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Flags {
+        model: String,
+        model_provider: String,
+        model_reasoning_effort: String,
+        approval_policy: String,
+        sandbox_mode: String,
+        features: FlagFeatures,
+        sandbox_workspace_write: Option<WorkspaceWriteConfig>,
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Empty {}
+    let response: Response = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+    if response.layers.len() != 3
+        || response.config.features.hooks
+        || response.config.features.apps
+        || response.config.features.plugins
+    {
+        return Err(invalid());
+    }
+    let mut seen = [false; 3];
+    // Preserve recursive duplicate-key rejection before normalizing the new
+    // isolation flag. Value deserialization alone would retain the last key.
+    let effective = input.json()?;
+    for layer in response.layers {
+        if layer.disabled_reason.is_some() {
+            return Err(invalid());
+        }
+        let index = match layer.name {
+            Source::Flags => {
+                // Preserve the old deny-unknown contract, including explicit null.
+                if permission == ExpectedPermission::ReadOnly
+                    && serde_json::from_str::<serde_json::Value>(layer.config.get())
+                        .map_err(|_| invalid())?
+                        .get("sandbox_workspace_write")
+                        .is_some()
+                {
+                    return Err(invalid());
+                }
+                let mut flags: serde_json::Value =
+                    serde_json::from_str(layer.config.get()).map_err(|_| invalid())?;
+                super::super::codex_profile_config::strip_isolation_flag(
+                    &mut flags, &effective["config"], &[std::path::Path::new(home)],
+                ).map_err(|_| invalid())?;
+                let config: Flags = serde_json::from_value(flags).map_err(|_| invalid())?;
+                if config.model != profile.model
+                    || config.model_provider != "openai"
+                    || config.model_reasoning_effort != profile.reasoning_effort
+                    || config.approval_policy != "on-request"
+                    || config.sandbox_mode != permission.sandbox_mode()
+                    || config.features.hooks
+                    || config.features.apps
+                    || config.features.plugins
+                    || match permission {
+                        ExpectedPermission::ReadOnly => config.sandbox_workspace_write.is_some(),
+                        ExpectedPermission::WorkspaceWrite => !config
+                            .sandbox_workspace_write
+                            .as_ref()
+                            .is_some_and(WorkspaceWriteConfig::matches),
+                    }
+                {
+                    return Err(invalid());
+                }
+                0
+            }
+            Source::User { file, profile } => {
+                if file != format!("{home}/config.toml") || profile.is_some() {
+                    return Err(invalid());
+                }
+                let flags = effective["layers"].as_array().ok_or_else(invalid)?.iter()
+                    .find(|candidate| candidate["name"]["type"] == "sessionFlags")
+                    .ok_or_else(invalid)?;
+                if !super::super::codex_profile_config::ProfileConfig::matches_observed_bytes(
+                    layer.config.get().as_bytes(), &flags["config"], &effective["config"], std::path::Path::new(home),
+                ) {
+                    return Err(invalid());
+                }
+                1
+            }
+            Source::System { file } => {
+                if file != "/etc/codex/config.toml" {
+                    return Err(invalid());
+                }
+                let _: Empty = serde_json::from_str(layer.config.get()).map_err(|_| invalid())?;
+                2
+            }
+        };
+        if std::mem::replace(&mut seen[index], true) {
+            return Err(invalid());
+        }
+    }
+    match_config(input, profile, permission)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn only_exact_reported_profile_layers_match() {
+        let config = json!({"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only","features":{"hooks":false,"apps":false,"plugins":false}});
+        let base = json!({"config":config,"layers":[{"name":{"type":"sessionFlags"},"config":config},{"name":{"type":"user","file":"/app/profile/config.toml"},"config":{"cli_auth_credentials_store":"file"}},{"name":{"type":"system","file":"/etc/codex/config.toml"},"config":{}}]});
+        for (key, value, other) in [
+            ("model", "\"test-model\"", "\"other\""),
+            ("hooks", "false", "true"),
+        ] {
+            for wrong_first in [true, false] {
+                let original = format!("\"{key}\":{value}");
+                let duplicate = if wrong_first {
+                    format!("\"{key}\":{other},{original}")
+                } else {
+                    format!("{original},\"{key}\":{other}")
+                };
+                let raw = base.to_string().replace(&original, &duplicate);
+                let input = BoundedObservation::new(raw.into_bytes()).unwrap();
+                assert!(match_layers(&input, &ExpectedProfile {
+                    model: "test-model", reasoning_effort: "medium",
+                }, "/app/profile", ExpectedPermission::ReadOnly).is_err());
+            }
+        }
+        for raw_projects in [
+            "\"projects\":{},\"projects\":null,",
+            "\"projects\":null,\"projects\":{},",
+        ] {
+            let raw = base.to_string().replace("\"model\":", &format!("{raw_projects}\"model\":"));
+            let input = BoundedObservation::new(raw.into_bytes()).unwrap();
+            assert!(match_layers(&input, &ExpectedProfile {
+                model: "test-model", reasoning_effort: "medium",
+            }, "/app/profile", ExpectedPermission::ReadOnly).is_err());
+        }
+        for case in [
+            "valid",
+            "missing",
+            "project",
+            "system-hook",
+            "foreign-user",
+            "disabled",
+            "duplicate",
+            "extra-flag",
+            "wrong-model",
+            "effective-hooks",
+            "flag-hooks",
+            "missing-hooks",
+            "null-write",
+        ] {
+            let mut value = base.clone();
+            match case {
+                "missing" => {
+                    value.as_object_mut().unwrap().remove("layers");
+                }
+                "project" => {
+                    value["layers"][2]["name"] = json!({"type":"project","dotCodexFolder":"/other"})
+                }
+                "system-hook" => value["layers"][2]["config"] = json!({"hooks":{}}),
+                "foreign-user" => value["layers"][1]["name"]["file"] = json!("/other/config.toml"),
+                "disabled" => value["layers"][0]["disabledReason"] = json!("ignored"),
+                "duplicate" => value["layers"][2] = value["layers"][1].clone(),
+                "extra-flag" => value["layers"][0]["config"]["mcp_servers"] = json!({}),
+                "wrong-model" => value["layers"][0]["config"]["model"] = json!("other"),
+                "effective-hooks" => value["config"]["features"]["hooks"] = json!(true),
+                "flag-hooks" => value["layers"][0]["config"]["features"]["hooks"] = json!(true),
+                "missing-hooks" => value["config"]["features"] = json!({}),
+                "null-write" => {
+                    value["layers"][0]["config"]["sandbox_workspace_write"] =
+                        serde_json::Value::Null
+                }
+                _ => {}
+            }
+            let input = BoundedObservation::new(value.to_string().into_bytes()).unwrap();
+            assert_eq!(
+                match_layers(
+                    &input,
+                    &ExpectedProfile {
+                        model: "test-model",
+                        reasoning_effort: "medium"
+                    },
+                    "/app/profile",
+                    ExpectedPermission::ReadOnly,
+                )
+                .is_ok(),
+                case == "valid",
+                "{case}"
+            );
+        }
+        for feature in ["apps", "plugins"] {
+            for pointer in ["/config/features", "/layers/0/config/features"] {
+                for replacement in [Some(json!(true)), Some(json!(null)), None] {
+                    let mut value = base.clone();
+                    let features = value.pointer_mut(pointer).unwrap().as_object_mut().unwrap();
+                    match replacement {
+                        Some(value) => {
+                            features.insert(feature.into(), value);
+                        }
+                        None => {
+                            features.remove(feature);
+                        }
+                    }
+                    let input = BoundedObservation::new(value.to_string().into_bytes()).unwrap();
+                    assert!(
+                        match_layers(
+                            &input,
+                            &ExpectedProfile {
+                                model: "test-model",
+                                reasoning_effort: "medium"
+                            },
+                            "/app/profile",
+                            ExpectedPermission::ReadOnly
+                        )
+                        .is_err(),
+                        "{pointer}/{feature}"
+                    );
+                }
+            }
+            let wire = base.to_string().replace(
+                &format!("\"{feature}\":false"),
+                &format!("\"{feature}\":false,\"{feature}\":false"),
+            );
+            assert!(match_layers(
+                &BoundedObservation::new(wire.into_bytes()).unwrap(),
+                &ExpectedProfile {
+                    model: "test-model",
+                    reasoning_effort: "medium"
+                },
+                "/app/profile",
+                ExpectedPermission::ReadOnly
+            )
+            .is_err());
+        }
+    }
+}

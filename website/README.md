@@ -1,6 +1,6 @@
-# Hello, Agent website
+# Elsecrew website
 
-Hello, Agent 데스크톱 앱을 소개하는 한국어 랜딩 페이지입니다. 데스크톱 앱과 의존성·빌드·배포가 분리되어 있으며, Vinext와 OpenAI Sites를 통해 Cloudflare Worker 호환 결과물을 만듭니다.
+Elsecrew 데스크톱 앱을 소개하는 한국어 랜딩 페이지입니다. 데스크톱 앱과 의존성·빌드·배포가 분리되어 있으며, Vinext와 OpenAI Sites를 통해 Cloudflare Worker 호환 결과물을 만듭니다.
 
 ## 로컬 실행
 
@@ -36,13 +36,13 @@ npm run lint   # ESLint 검사
 | `public/og.png` | 링크 공유 미리보기 이미지 |
 | `tests/rendered-html.test.mjs` | 프로덕션 렌더링 회귀 테스트 |
 | `.openai/hosting.json` | OpenAI Sites 호스팅 설정 |
-| `../brand/hello-agent-mark.svg` | 웹과 데스크톱 앱이 공유하는 브랜드 마크 원본 |
+| `../brand/elsecrew-mark.svg` | 웹과 데스크톱 앱이 공유하는 브랜드 마크 원본 |
 
 ## 수정할 때
 
 - 제품 기능이나 현재 지원 범위가 바뀌면 루트 `README.md`, `docs/history.md`, 웹사이트 문구를 함께 대조합니다.
 - 주요 문구나 섹션 내비게이션을 바꾸면 `tests/rendered-html.test.mjs`의 검증도 갱신합니다.
-- 브랜드 마크는 `../brand/hello-agent-mark.svg`를 원본으로 유지하고 파생 아이콘만 각 플랫폼 형식으로 생성합니다.
+- 브랜드 마크는 `../brand/elsecrew-mark.svg`를 원본으로 유지하고 파생 아이콘만 각 플랫폼 형식으로 생성합니다.
 - 배포 전에는 `npm test`와 `npm run lint`를 모두 통과시킵니다.
 
 ## 배포

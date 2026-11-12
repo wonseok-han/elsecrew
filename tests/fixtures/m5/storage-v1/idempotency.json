@@ -1,0 +1,82 @@
+{
+  "existing": [
+    {
+      "event_id": "evt_durable_01",
+      "operation_id": "op_durable_01",
+      "request_id": "req_first_process_01",
+      "aggregate_type": "run",
+      "aggregate_id": "run_durable_01",
+      "aggregate_sequence": 1,
+      "event_type": "run.upserted",
+      "payload_schema_version": 1,
+      "canonical_json_payload": "{\"run_id\":\"run_durable_01\",\"state\":\"preparing\"}",
+      "timestamp": "2026-08-25T02:00:00Z"
+    }
+  ],
+  "cases": [
+    {
+      "name": "new operation appends",
+      "incoming": {
+        "event_id": "evt_durable_02",
+        "operation_id": "op_durable_02",
+        "request_id": "req_second_process_01",
+        "aggregate_type": "run",
+        "aggregate_id": "run_durable_01",
+        "aggregate_sequence": 2,
+        "event_type": "run.upserted",
+        "payload_schema_version": 1,
+        "canonical_json_payload": "{\"run_id\":\"run_durable_01\",\"state\":\"running\"}",
+        "timestamp": "2026-08-25T02:00:01Z"
+      },
+      "expected": "append"
+    },
+    {
+      "name": "same immutable record is a no-op across request IDs",
+      "incoming": {
+        "event_id": "evt_durable_01",
+        "operation_id": "op_durable_01",
+        "request_id": "req_after_restart_99",
+        "aggregate_type": "run",
+        "aggregate_id": "run_durable_01",
+        "aggregate_sequence": 1,
+        "event_type": "run.upserted",
+        "payload_schema_version": 1,
+        "canonical_json_payload": "{\"run_id\":\"run_durable_01\",\"state\":\"preparing\"}",
+        "timestamp": "2026-08-25T02:00:00Z"
+      },
+      "expected": "duplicateNoOp"
+    },
+    {
+      "name": "same operation with altered payload conflicts",
+      "incoming": {
+        "event_id": "evt_durable_01",
+        "operation_id": "op_durable_01",
+        "request_id": "req_after_restart_100",
+        "aggregate_type": "run",
+        "aggregate_id": "run_durable_01",
+        "aggregate_sequence": 1,
+        "event_type": "run.upserted",
+        "payload_schema_version": 1,
+        "canonical_json_payload": "{\"run_id\":\"run_durable_01\",\"state\":\"completed\"}",
+        "timestamp": "2026-08-25T02:00:00Z"
+      },
+      "expected": "conflict"
+    },
+    {
+      "name": "same operation with altered aggregate and event conflicts",
+      "incoming": {
+        "event_id": "evt_durable_01",
+        "operation_id": "op_durable_01",
+        "request_id": "req_after_restart_101",
+        "aggregate_type": "lock",
+        "aggregate_id": "lock_durable_01",
+        "aggregate_sequence": 1,
+        "event_type": "lock.upserted",
+        "payload_schema_version": 1,
+        "canonical_json_payload": "{\"lock_id\":\"lock_durable_01\",\"poisoned\":false,\"recovery_required\":false}",
+        "timestamp": "2026-08-25T02:00:00Z"
+      },
+      "expected": "conflict"
+    }
+  ]
+}

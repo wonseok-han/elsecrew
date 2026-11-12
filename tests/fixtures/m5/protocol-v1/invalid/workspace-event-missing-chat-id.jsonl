@@ -1,0 +1,1 @@
+{"event":"workspace.changed","kind":"event","payload":{"event":"file.changed","paths":[],"projectId":"project_01","rescanRequired":true,"workspaceIdentity":"workspace_01","worktreeId":"worktree_01"},"protocolVersion":1,"seq":1,"sidecarInstanceId":"sidecar_fixture_01","streamId":"workspace_stream_01"}

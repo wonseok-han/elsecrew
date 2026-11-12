@@ -1,0 +1,1926 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>M5 Agent IDE Concept</title>
+<style>:root{color-scheme:light dark;background:light-dark(rgb(255 255 255), rgb(24 24 24))}html,body{margin:0}body{box-sizing:border-box;padding:1rem;background:inherit}iframe{display:block;width:100%;height:calc(100vh - 2rem);margin:0 auto;border:0}</style>
+</head>
+<body>
+<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" title="M5 Agent IDE Concept" srcdoc="&lt;!doctype html&gt;
+&lt;html lang=&quot;ko&quot;&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;meta name=&quot;referrer&quot; content=&quot;no-referrer&quot;&gt;
+&lt;meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27; &#x27;unsafe-eval&#x27; &#x27;wasm-unsafe-eval&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src &#x27;unsafe-inline&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src &#x27;none&#x27;; object-src &#x27;none&#x27;; base-uri &#x27;none&#x27;; form-action &#x27;none&#x27;&quot;&gt;
+&lt;title&gt;M5 Agent IDE Concept&lt;/title&gt;
+&lt;style&gt;:root {
+  color-scheme: light dark;
+  background-color: var(
+    --background,
+    var(--color-background-primary, light-dark(rgb(255 255 255), rgb(24 24 24)))
+  ) !important;
+
+  /* Agent-facing contract; keep in sync with SKILL.md. */
+  --background: var(
+    --color-background-primary,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --card: color-mix(in oklab, var(--foreground) 5%, var(--background));
+  --card-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --popover: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255), rgb(45 45 45))
+  );
+  --popover-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --primary: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --primary-foreground: var(
+    --color-text-inverse,
+    light-dark(rgb(255 255 255), rgb(13 13 13))
+  );
+  --secondary: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%))
+  );
+  --secondary-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --muted-foreground: var(
+    --color-text-secondary,
+    light-dark(rgb(26 28 31 / 49.4%), rgb(255 255 255 / 49.8%))
+  );
+  --accent: var(
+    --color-background-info,
+    light-dark(rgb(229 242 255), rgb(13 39 63))
+  );
+  --accent-foreground: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --destructive: var(
+    --color-text-warning,
+    light-dark(rgb(226 85 7), rgb(255 133 73))
+  );
+  --border: var(
+    --color-border-secondary,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+  --input: var(
+    --color-border-primary,
+    light-dark(
+      rgb(26 28 31 / 11.8%),
+      color-mix(in oklab, rgb(0 0 0) 10%, transparent)
+    )
+  );
+  --ring: var(
+    --color-ring-primary,
+    light-dark(rgb(51 156 255), rgb(131 195 255 / 76%))
+  );
+  --font-size-base: var(--font-text-md-size, 14px);
+  --blue: light-dark(rgb(51 156 255), rgb(51 156 255));
+  --orange: light-dark(rgb(226 85 7), rgb(251 106 34));
+  --green: light-dark(rgb(0 162 64), rgb(64 201 119));
+  --red: light-dark(rgb(224 46 42), rgb(255 103 100));
+  --purple: light-dark(rgb(146 79 247), rgb(173 123 249));
+  --yellow: light-dark(rgb(255 195 0), rgb(255 210 64));
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(243 136 59), rgb(245 154 86));
+  --viz-series-3: light-dark(rgb(93 201 119), rgb(116 213 139));
+  --viz-series-4: light-dark(rgb(235 119 177), rgb(240 143 192));
+  --viz-series-5: light-dark(rgb(155 121 236), rgb(170 145 239));
+  --viz-series-6: light-dark(rgb(58 185 177), rgb(90 203 194));
+
+  /* Internal implementation variables; not part of the agent contract. */
+  --font-sans: -apple-system, system-ui, &quot;Segoe UI&quot;, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;,
+    monospace;
+  --font-size-normal: max(11px, var(--font-size-base));
+  --font-size-tooltip: calc(var(--font-size-base) - 1px);
+  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
+  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
+  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
+  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
+  --font-weight-normal: 430;
+  --font-weight-medium: 500;
+  --line-height-normal: calc(var(--font-size-normal) * 1.5);
+  --line-height-tooltip: calc(var(--font-size-tooltip) * 1.4285714286);
+  --line-height-small: calc(var(--font-size-small) + 4px);
+  --radius: var(--border-radius-lg, 12.5px);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --checkmark-image: url(&quot;data:image/svg+xml,%3Csvg xmlns=&#x27;http://www.w3.org/2000/svg&#x27; viewBox=&#x27;0 0 17 17&#x27;%3E%3Cpath d=&#x27;M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z&#x27;/%3E%3C/svg%3E&quot;);
+
+  /* Legacy aliases; not part of the current agent contract. */
+  --viz-bg: transparent;
+  --viz-panel: var(--card);
+  --viz-border: var(--border);
+  --viz-text: var(--foreground);
+  --viz-muted: var(--muted-foreground);
+  --viz-accent: var(--primary);
+  --viz-accent-text: var(--primary-foreground);
+  --viz-accent-bg: var(--accent);
+  --viz-font-size: var(--font-size-base);
+  --viz-warning: var(--destructive);
+}
+
+:root[data-theme=&quot;light&quot;] {
+  color-scheme: light;
+}
+
+:root[data-theme=&quot;dark&quot;] {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html &gt; body {
+  /* Preserve MCP aliases for older inline renderers without creating :root cycles. */
+  --color-background-primary: var(
+    --background,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --color-text-primary: var(
+    --foreground,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --color-border-secondary: var(
+    --border,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+
+  margin: 0;
+  padding: 5px;
+  color: var(--foreground);
+  background: transparent !important;
+  font-family: var(--font-sans) !important;
+  font-size: var(--font-size-normal);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+}
+
+a {
+  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
+  cursor: pointer;
+  font-weight: var(--font-weight-medium, 500);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+a:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.5px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin-block: 0;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+
+b,
+strong,
+th {
+  font-weight: var(--font-weight-medium);
+}
+
+code:not(pre code) {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  word-break: break-word;
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--foreground);
+  font: inherit;
+  text-align: start;
+}
+
+.table :is(th, td) {
+  padding-block: 10px;
+  padding-inline: 0 24px;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+}
+
+.table-responsive &gt; .table :is(th, td) {
+  overflow-wrap: break-word;
+}
+
+.table :is(th, td):last-child {
+  padding-inline-end: 0;
+}
+
+.table :is(caption, thead th) {
+  font-weight: 600;
+}
+
+.table thead th {
+  padding-block: 8px;
+  border-bottom-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+}
+
+.table tbody tr:last-child :is(th, td) {
+  border-bottom: 0;
+}
+
+.table.table-sm :is(th, td) {
+  padding-block: 6px;
+}
+
+.table.table-sm :is(th, td):not(:last-child) {
+  padding-inline-end: 16px;
+}
+
+.table :is(.text-end, [align=&quot;right&quot;]) {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.table :is(.text-center, [align=&quot;center&quot;]) {
+  text-align: center;
+}
+
+.table .text-nowrap {
+  white-space: nowrap;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent !important;
+}
+
+.card {
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  border-radius: var(--radius-2xl);
+  corner-shape: superellipse(1.5);
+  color: var(--card-foreground);
+  background: var(--card);
+}
+
+#widget &gt; :not(.card, .progress) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(
+    20rem,
+    var(--tooltip-available-width, calc(100vw - 10px)),
+    calc(100vw - 10px)
+  );
+  max-height: min(
+    var(--tooltip-available-height, calc(100vh - 10px)),
+    calc(100vh - 10px)
+  );
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: none;
+  font-size: var(--font-size-tooltip);
+  line-height: var(--line-height-tooltip);
+  overflow-wrap: break-word;
+  white-space: normal;
+  pointer-events: none;
+  user-select: none;
+}
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
+  gap: 10px;
+}
+
+.viz-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-stat-value {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+.viz-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.progress {
+  display: flex;
+  height: 6px;
+  margin-block: calc((var(--line-height-normal, 1.5em) - 6px) / 2);
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+}
+
+.progress-bar {
+  height: 100%;
+  flex-shrink: 0;
+  border: 0;
+  background: var(--viz-series-1);
+}
+
+.viz-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+small,
+.text-small,
+.viz-badge {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+.text-muted {
+  color: var(--muted-foreground);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-controls &gt; .form-label {
+  display: grid;
+  min-width: min(100%, 260px);
+  flex: 1 1 280px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 0;
+}
+
+.viz-controls &gt; .form-label &gt; :is(.form-control, .form-range, .form-select) {
+  grid-column: 1 / -1;
+}
+
+.btn,
+.form-check-input,
+.form-control,
+.form-range,
+.form-select {
+  font: inherit;
+}
+
+.btn {
+  appearance: button;
+  display: inline-flex;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: var(--cursor-interaction, pointer);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.btn:is(.btn-block, .viz-tile) {
+  inline-size: 100%;
+}
+
+.btn.viz-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+a.btn {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn-primary {
+  border-color: transparent;
+  color: var(--primary-foreground);
+  background: var(--foreground);
+  background-clip: padding-box;
+}
+
+.btn-primary .text-muted {
+  color: color-mix(in srgb, var(--primary-foreground) 50%, transparent);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent);
+  background-clip: padding-box;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.btn-ghost:not(:disabled):hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+[data-lucide] {
+  stroke-width: 1.6;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--foreground);
+}
+
+.form-control {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.form-control::placeholder {
+  color: var(--muted-foreground);
+}
+
+.form-control[type=&quot;file&quot;] {
+  padding: 0;
+  overflow: hidden;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control[type=&quot;file&quot;]::file-selector-button {
+  min-height: 26px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--input);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: inherit;
+  font: inherit;
+}
+
+.form-control[type=&quot;file&quot;]:not(:disabled):hover::file-selector-button {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-control-color[type=&quot;color&quot;] {
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 4px);
+  corner-shape: superellipse(1.5);
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.form-control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 32px 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background-color: var(--secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-select:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-select:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-check {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-check-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--input);
+  color: var(--primary-foreground);
+  background-color: transparent;
+  cursor: var(--cursor-interaction, default);
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;] {
+  border-color: var(--input);
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background-color: var(--secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input:not(:disabled):not(:checked):hover {
+  background-color: var(--card);
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input[type=&quot;checkbox&quot;]:checked::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-foreground);
+  content: &quot;&quot;;
+  mask: var(--checkmark-image) center / 12px 12px no-repeat;
+}
+
+.form-check-input[type=&quot;radio&quot;] {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.form-check-input[type=&quot;radio&quot;]:checked {
+  border: 2px solid var(--primary);
+  background:
+    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
+    var(--primary);
+}
+
+.form-check:not(.form-switch) .form-check-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+}
+
+.form-switch .form-check-input:disabled,
+.form-switch .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-check-label {
+  color: var(--foreground);
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-switch .form-check-input {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+  box-shadow: var(--shadow-sm);
+  content: &quot;&quot;;
+  transform: translate(2px, -50%);
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input:checked {
+  background: var(--primary);
+}
+
+.form-switch .form-check-input:checked::before {
+  transform: translate(14px, -50%);
+}
+
+.form-switch .form-check-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 28px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border: 0;
+  accent-color: var(--primary);
+  background: linear-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 7%, transparent)
+    )
+    center / 100% 2px no-repeat;
+}
+
+.form-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-webkit-slider-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-moz-range-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.btn:not(.btn-primary, .viz-tile):is(
+  [aria-pressed=&quot;true&quot;],
+  [aria-selected=&quot;true&quot;],
+  .is-selected
+) {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.btn.viz-tile:is([aria-pressed=&quot;true&quot;], [aria-selected=&quot;true&quot;], .is-selected) {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+#widget &gt; svg {
+  width: 100%;
+}
+
+/* Model-authored chart rules can otherwise stretch icons after these styles load. */
+svg.lucide {
+  display: block;
+  width: 16px !important;
+  height: 16px !important;
+  flex: none;
+  margin: 0 !important;
+  stroke-width: 1.6;
+}
+
+.text-warning,
+.text-destructive {
+  color: var(--destructive);
+}
+
+html&gt;body{padding:0}&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div id=&quot;m5-agent-ide-concept&quot;&gt;
+  &lt;style&gt;
+    #m5-agent-ide-concept {
+      color-scheme: light dark;
+      width: 100%;
+      color: light-dark(#222426, #e9ecef);
+      font-family: Inter, Pretendard, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;
+    }
+    #m5-agent-ide-concept * { box-sizing: border-box; }
+    #m5-agent-ide-concept button,
+    #m5-agent-ide-concept input,
+    #m5-agent-ide-concept select,
+    #m5-agent-ide-concept textarea { font: inherit; }
+    #m5-agent-ide-concept .m5-window {
+      width: 100%;
+      height: min(720px, 82vh);
+      min-height: 620px;
+      overflow: hidden;
+      border: 1px solid light-dark(#d8dadd, #34383e);
+      border-radius: 12px;
+      background: light-dark(#f7f7f8, #17191c);
+      box-shadow: 0 18px 48px light-dark(rgba(24, 28, 33, .14), rgba(0, 0, 0, .42));
+      display: grid;
+      grid-template-rows: 46px minmax(0, 1fr) 28px;
+    }
+    #m5-agent-ide-concept .m5-titlebar {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr) 220px;
+      align-items: center;
+      border-bottom: 1px solid light-dark(#dedfe2, #30343a);
+      background: light-dark(#f2f2f3, #202226);
+      padding: 0 14px;
+    }
+    #m5-agent-ide-concept .m5-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 13px; }
+    #m5-agent-ide-concept .m5-mark { width: 20px; height: 20px; border-radius: 6px; background: #ee795f; display: grid; place-items: center; color: white; font-size: 11px; }
+    #m5-agent-ide-concept .m5-project {
+      justify-self: center;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 220px;
+      justify-content: center;
+      color: light-dark(#4c5056, #c3c7cc);
+      font-size: 12px;
+    }
+    #m5-agent-ide-concept .m5-project strong { color: light-dark(#23262a, #f2f3f4); font-weight: 650; }
+    #m5-agent-ide-concept .m5-title-actions { justify-self: end; display: flex; align-items: center; gap: 10px; }
+    #m5-agent-ide-concept .m5-layout-reset { border: 0; background: transparent; color: light-dark(#70757c, #959ca4); cursor: pointer; font-size: 9px; padding: 5px; }
+    #m5-agent-ide-concept .m5-layout-reset:hover { color: light-dark(#2e3237, #e4e7ea); }
+    #m5-agent-ide-concept .m5-safe { display: flex; gap: 7px; align-items: center; font-size: 11px; color: light-dark(#3b7057, #84d2a8); }
+    #m5-agent-ide-concept .m5-safe-dot { width: 7px; height: 7px; border-radius: 50%; background: #49a477; box-shadow: 0 0 0 3px rgba(73,164,119,.13); }
+    #m5-agent-ide-concept .m5-shell { min-height: 0; display: grid; grid-template-columns: 76px 224px minmax(340px, 1fr) 310px; }
+    #m5-agent-ide-concept .m5-pane { position: relative; min-width: 0; transition: opacity .14s ease; }
+    #m5-agent-ide-concept .m5-pane.m5-dragging { opacity: .42; }
+    #m5-agent-ide-concept .m5-pane.m5-drop-target::after { content: &quot;여기에 놓기&quot;; position: absolute; z-index: 15; inset: 6px; display: grid; place-items: center; border: 2px dashed #ee795f; border-radius: 8px; background: light-dark(rgba(255,245,242,.9), rgba(42,30,28,.91)); color: light-dark(#a94735, #ff9b85); font-size: 11px; font-weight: 700; pointer-events: none; }
+    #m5-agent-ide-concept .m5-pane.m5-drop-after::after { border-left-width: 7px; }
+    #m5-agent-ide-concept .m5-pane.m5-drop-before::after { border-right-width: 7px; }
+    #m5-agent-ide-concept .m5-grip { flex: 0 0 auto; width: 22px; border: 0; background: transparent; color: light-dark(#9a9fa5, #6f767e); cursor: grab; font-size: 13px; padding: 0; user-select: none; touch-action: none; }
+    #m5-agent-ide-concept .m5-grip:active { cursor: grabbing; }
+    #m5-agent-ide-concept .m5-projects {
+      min-height: 0;
+      border-right: 1px solid light-dark(#d7d9dc, #30343a);
+      background: light-dark(#e9eaec, #181a1d);
+      display: grid;
+      grid-template-rows: 38px minmax(0, 1fr) 88px;
+      padding: 0 7px;
+    }
+    #m5-agent-ide-concept .m5-projects-title {
+      display: grid;
+      place-items: center;
+      color: light-dark(#7b8086, #858c94);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+    #m5-agent-ide-concept .m5-project-list { overflow: auto; }
+    #m5-agent-ide-concept .m5-project-item {
+      position: relative;
+      width: 100%;
+      border: 0;
+      background: transparent;
+      color: light-dark(#62676d, #9da3aa);
+      padding: 6px 2px 8px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 8px;
+      display: grid;
+      justify-items: center;
+      gap: 4px;
+      margin-bottom: 3px;
+    }
+    #m5-agent-ide-concept .m5-project-item:hover { background: light-dark(#dfe1e3, #25282c); }
+    #m5-agent-ide-concept .m5-project-item[aria-current=&quot;true&quot;] { background: light-dark(#d8dade, #292c31); color: light-dark(#24272b, #eef0f2); }
+    #m5-agent-ide-concept .m5-project-item[aria-current=&quot;true&quot;]::before { content: &quot;&quot;; position: absolute; left: -7px; top: 13px; width: 3px; height: 28px; border-radius: 0 3px 3px 0; background: #ee795f; }
+    #m5-agent-ide-concept .m5-project-icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: light-dark(#f8f8f9, #34383e); border: 1px solid light-dark(#d2d5d8, #41464d); color: light-dark(#3f444a, #e4e7ea); font-size: 10px; font-weight: 760; }
+    #m5-agent-ide-concept .m5-project-item[aria-current=&quot;true&quot;] .m5-project-icon { border-color: light-dark(#eca28f, #a85747); background: light-dark(#fff5f2, #402821); color: light-dark(#b84e39, #ff9a83); }
+    #m5-agent-ide-concept .m5-project-alert { position: absolute; top: 4px; right: 5px; min-width: 14px; height: 14px; padding: 0 3px; display: grid; place-items: center; border-radius: 7px; background: #e9a13a; color: #fff; font-size: 7px; font-weight: 800; border: 2px solid light-dark(#e9eaec, #181a1d); }
+    #m5-agent-ide-concept .m5-rail-actions { align-self: end; display: grid; justify-items: center; gap: 5px; padding-bottom: 7px; }
+    #m5-agent-ide-concept .m5-add-project,
+    #m5-agent-ide-concept .m5-settings-button { width: 36px; height: 32px; border: 1px dashed light-dark(#c4c7cb, #464b52); background: transparent; color: light-dark(#6d7278, #a5abb2); border-radius: 8px; cursor: pointer; font-size: 16px; }
+    #m5-agent-ide-concept .m5-settings-button { border-style: solid; font-size: 13px; }
+    #m5-agent-ide-concept .m5-settings-button[aria-current=&quot;true&quot;] { border-color: light-dark(#eca28f, #a85747); background: light-dark(#fff5f2, #402821); color: light-dark(#b84e39, #ff9a83); }
+    #m5-agent-ide-concept .m5-settings-context { font-weight: 680; color: light-dark(#23262a, #f2f3f4); }
+    #m5-agent-ide-concept .m5-settings {
+      display: none;
+      min-width: 0;
+      min-height: 0;
+      background: light-dark(#f8f8f9, #17191c);
+      grid-template-columns: 190px minmax(0, 1fr);
+    }
+    #m5-agent-ide-concept .m5-shell.m5-settings-open { grid-template-columns: 76px minmax(0, 1fr); }
+    #m5-agent-ide-concept .m5-shell.m5-settings-open .m5-pane { display: none; }
+    #m5-agent-ide-concept .m5-shell.m5-settings-open .m5-settings { display: grid; }
+    #m5-agent-ide-concept .m5-settings-nav { border-right: 1px solid light-dark(#dedfe2, #30343a); background: light-dark(#f0f1f2, #1d1f22); padding: 15px 10px; }
+    #m5-agent-ide-concept .m5-settings-nav-title { color: light-dark(#858a91, #858c94); font-size: 9px; text-transform: uppercase; letter-spacing: .07em; padding: 0 8px 8px; }
+    #m5-agent-ide-concept .m5-settings-nav-item { width: 100%; border: 0; background: transparent; color: light-dark(#575c62, #adb3ba); text-align: left; border-radius: 6px; padding: 8px 9px; margin-bottom: 2px; cursor: pointer; font-size: 10px; }
+    #m5-agent-ide-concept .m5-settings-nav-item[aria-current=&quot;true&quot;] { background: light-dark(#e1e3e5, #292c31); color: light-dark(#24272b, #eef0f2); font-weight: 680; }
+    #m5-agent-ide-concept .m5-settings-main { min-width: 0; overflow: auto; padding: 27px 32px 34px; color: light-dark(#222426, #e9ecef); }
+    #m5-agent-ide-concept .m5-settings-head { display: flex; align-items: start; justify-content: space-between; gap: 20px; border-bottom: 1px solid light-dark(#e0e2e4, #30343a); padding-bottom: 17px; margin-bottom: 17px; }
+    #m5-agent-ide-concept .m5-settings-head h2 { margin: 0 0 6px; font-size: 17px; font-weight: 700; }
+    #m5-agent-ide-concept .m5-settings-head p { margin: 0; color: light-dark(#73787f, #969da5); font-size: 10px; }
+    #m5-agent-ide-concept .m5-settings-scope { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 8px 14px; border-bottom: 1px solid light-dark(#e3e5e7, #2d3136); }
+    #m5-agent-ide-concept .m5-scope-control { display: flex; align-items: center; gap: 9px; min-width: 0; }
+    #m5-agent-ide-concept .m5-scope-label { color: light-dark(#73787f, #969da5); font-size: 9px; white-space: nowrap; }
+    #m5-agent-ide-concept .m5-scope-select { min-width: 170px; }
+    #m5-agent-ide-concept .m5-scope-summary { color: light-dark(#596069, #aeb5bd); font-size: 9px; text-align: right; }
+    #m5-agent-ide-concept .m5-scope-summary strong { color: light-dark(#b55742, #ff9a83); font-weight: 680; }
+    #m5-agent-ide-concept .m5-role-table { width: 100%; border-collapse: collapse; }
+    #m5-agent-ide-concept .m5-role-table th { color: light-dark(#858a91, #858c94); font-size: 9px; font-weight: 600; text-align: left; padding: 8px; border-bottom: 1px solid light-dark(#e3e5e7, #2d3136); }
+    #m5-agent-ide-concept .m5-role-table td { padding: 10px 8px; border-bottom: 1px solid light-dark(#e7e8ea, #292d31); color: light-dark(#30343a, #d8dde2); font-size: 10px; }
+    #m5-agent-ide-concept .m5-role-table td:first-child { font-weight: 680; }
+    #m5-agent-ide-concept .m5-role-table tr[data-role] { cursor: pointer; }
+    #m5-agent-ide-concept .m5-role-table tr[data-role]:hover { background: light-dark(#f0f1f2, #202328); }
+    #m5-agent-ide-concept .m5-role-table tr[data-role][aria-selected=&quot;true&quot;] { background: light-dark(#fff4f0, #2f2421); }
+    #m5-agent-ide-concept .m5-role-name { color: inherit; font-weight: 680; }
+    #m5-agent-ide-concept .m5-setting-select { min-width: 100px; border: 1px solid light-dark(#c9cdd1, #464c54); background-color: light-dark(#fff, #25292e); color: light-dark(#24282d, #eef1f4); -webkit-text-fill-color: light-dark(#24282d, #eef1f4); border-radius: 6px; padding: 6px 8px; font-size: 10px; }
+    #m5-agent-ide-concept .m5-setting-select option { background-color: light-dark(#fff, #25292e); color: light-dark(#24282d, #eef1f4); }
+    #m5-agent-ide-concept .m5-safety-profile { color: light-dark(#397155, #83cfa6); }
+    #m5-agent-ide-concept .m5-settings-note { margin-top: 18px; padding: 10px 12px; border-left: 3px solid #e4a343; background: light-dark(#fff8ec, #2e281d); color: light-dark(#745421, #d6bb84); font-size: 10px; line-height: 1.5; }
+    #m5-agent-ide-concept .m5-role-editor { margin-top: 18px; border-top: 1px solid light-dark(#e0e2e4, #30343a); padding-top: 15px; }
+    #m5-agent-ide-concept .m5-role-editor-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 11px; }
+    #m5-agent-ide-concept .m5-role-editor-head strong { font-size: 11px; }
+    #m5-agent-ide-concept .m5-role-fields { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 12px; }
+    #m5-agent-ide-concept .m5-role-field { display: grid; gap: 5px; color: light-dark(#73787f, #969da5); font-size: 9px; }
+    #m5-agent-ide-concept .m5-role-input,
+    #m5-agent-ide-concept .m5-role-instructions { width: 100%; border: 1px solid light-dark(#c9cdd1, #464c54); background-color: light-dark(#fff, #25292e); color: light-dark(#24282d, #eef1f4); -webkit-text-fill-color: light-dark(#24282d, #eef1f4); caret-color: light-dark(#24282d, #eef1f4); border-radius: 6px; padding: 7px 8px; font-size: 10px; }
+    #m5-agent-ide-concept .m5-role-instructions { min-height: 65px; resize: vertical; line-height: 1.45; }
+    #m5-agent-ide-concept .m5-role-rule { margin-top: 9px; color: light-dark(#4f765f, #87c8a2); font-size: 9px; }
+    #m5-agent-ide-concept .m5-left,
+    #m5-agent-ide-concept .m5-agent { min-height: 0; background: light-dark(#f3f3f4, #1d1f22); }
+    #m5-agent-ide-concept .m5-left { border-right: 1px solid light-dark(#dedfe2, #30343a); display: grid; grid-template-rows: 42px minmax(0, 1fr) 46px; }
+    #m5-agent-ide-concept .m5-left:not(.m5-chat-tab) { grid-template-rows: 42px minmax(0, 1fr); }
+    #m5-agent-ide-concept .m5-left-tabs { display: grid; grid-template-columns: 20px repeat(3, 1fr); padding: 6px 8px 0; gap: 3px; border-bottom: 1px solid light-dark(#dedfe2, #30343a); }
+    #m5-agent-ide-concept .m5-tab-btn {
+      border: 0;
+      background: transparent;
+      color: light-dark(#6a6f76, #9da3aa);
+      font-size: 11px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      padding: 7px 3px 9px;
+    }
+    #m5-agent-ide-concept .m5-tab-btn[aria-selected=&quot;true&quot;] { color: light-dark(#222426, #f0f1f2); border-bottom-color: #ee795f; font-weight: 650; }
+    #m5-agent-ide-concept .m5-left-body { overflow: auto; padding: 10px 8px; }
+    #m5-agent-ide-concept .m5-panel[hidden] { display: none; }
+    #m5-agent-ide-concept .m5-tab-count { display: inline-grid; min-width: 15px; height: 15px; place-items: center; margin-left: 3px; border-radius: 8px; background: light-dark(#e1e3e5, #33373c); color: light-dark(#5d636a, #b8bec5); font-size: 8px; }
+    #m5-agent-ide-concept .m5-tab-btn[aria-selected=&quot;true&quot;] .m5-tab-count { background: light-dark(#ffe8e1, #4a2d27); color: light-dark(#b84e39, #ff9a83); }
+    #m5-agent-ide-concept .m5-section-title { font-size: 10px; color: light-dark(#8b9097, #7f868e); text-transform: uppercase; letter-spacing: .07em; padding: 4px 8px 7px; }
+    #m5-agent-ide-concept .m5-chat-item,
+    #m5-agent-ide-concept .m5-file-item {
+      width: 100%;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+      border-radius: 7px;
+      padding: 9px 9px;
+      margin-bottom: 3px;
+    }
+    #m5-agent-ide-concept .m5-chat-item:hover,
+    #m5-agent-ide-concept .m5-file-item:hover { background: light-dark(#e8e9eb, #282b2f); }
+    #m5-agent-ide-concept .m5-chat-item[aria-current=&quot;true&quot;] { background: light-dark(#e3e4e7, #2a2d31); }
+    #m5-agent-ide-concept .m5-chat-top { display: flex; align-items: center; justify-content: space-between; gap: 7px; font-size: 12px; font-weight: 620; }
+    #m5-agent-ide-concept .m5-chat-meta { margin-top: 5px; display: flex; align-items: center; gap: 6px; color: light-dark(#777c83, #969da5); font-size: 10px; }
+    #m5-agent-ide-concept .m5-state-dot { width: 6px; height: 6px; border-radius: 50%; background: #e5a33e; }
+    #m5-agent-ide-concept .m5-state-dot.running { background: #559fe0; }
+    #m5-agent-ide-concept .m5-state-dot.done { background: #49a477; }
+    #m5-agent-ide-concept .m5-count { color: #ee795f; font-size: 10px; }
+    #m5-agent-ide-concept .m5-new-chat { margin: 7px 8px; border: 1px solid light-dark(#d5d7da, #3a3e44); background: light-dark(#fbfbfc, #25282c); color: inherit; border-radius: 7px; cursor: pointer; font-size: 11px; font-weight: 650; }
+    #m5-agent-ide-concept .m5-browser-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 7px 10px; border-bottom: 1px solid light-dark(#e0e2e4, #30343a); margin-bottom: 7px; }
+    #m5-agent-ide-concept .m5-browser-head strong { font-size: 10px; font-weight: 680; }
+    #m5-agent-ide-concept .m5-browser-head span { min-width: 0; overflow: hidden; color: light-dark(#858a91, #858c94); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+    #m5-agent-ide-concept .m5-tree { font-size: 10px; }
+    #m5-agent-ide-concept .m5-tree-row { width: 100%; min-height: 29px; display: grid; grid-template-columns: 13px 22px minmax(0, 1fr) auto; align-items: center; gap: 3px; border: 0; border-radius: 5px; background: transparent; color: light-dark(#4e5359, #c7ccd1); padding: 3px 6px; text-align: left; cursor: pointer; }
+    #m5-agent-ide-concept .m5-tree-row:hover { background: light-dark(#e8e9eb, #282b2f); }
+    #m5-agent-ide-concept .m5-tree-row[aria-current=&quot;true&quot;] { background: light-dark(#e1e3e5, #2a2d31); color: light-dark(#24272b, #f0f2f4); }
+    #m5-agent-ide-concept .m5-tree-row.indent { padding-left: 19px; grid-template-columns: 13px 22px minmax(0, 1fr) auto; }
+    #m5-agent-ide-concept .m5-tree-chevron { color: light-dark(#93989e, #747b83); font-size: 9px; }
+    #m5-agent-ide-concept .m5-file-glyph { width: 19px; height: 17px; display: grid; place-items: center; border-radius: 4px; background: light-dark(#e7edf7, #27374c); color: light-dark(#39679c, #8ebbf1); font-size: 6px; font-weight: 760; letter-spacing: -.02em; }
+    #m5-agent-ide-concept .m5-file-glyph.folder { background: light-dark(#f4ead5, #443b26); color: light-dark(#8d681e, #e0bc67); font-size: 9px; }
+    #m5-agent-ide-concept .m5-file-glyph.rust { background: light-dark(#f5e7df, #452f28); color: light-dark(#9b5337, #e99b79); }
+    #m5-agent-ide-concept .m5-file-glyph.json { background: light-dark(#ecebdc, #353626); color: light-dark(#737329, #c7c978); }
+    #m5-agent-ide-concept .m5-tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #m5-agent-ide-concept .m5-file-state { width: 6px; height: 6px; border-radius: 50%; background: #e5a33e; }
+    #m5-agent-ide-concept .m5-change-overview { padding: 2px 7px 11px; border-bottom: 1px solid light-dark(#e0e2e4, #30343a); margin-bottom: 7px; }
+    #m5-agent-ide-concept .m5-change-overview-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    #m5-agent-ide-concept .m5-change-overview strong { font-size: 11px; font-weight: 680; }
+    #m5-agent-ide-concept .m5-diff-total { display: flex; gap: 6px; font: 9px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    #m5-agent-ide-concept .m5-added { color: light-dark(#26724c, #79cfa0); }
+    #m5-agent-ide-concept .m5-removed { color: light-dark(#a1424b, #e77a83); }
+    #m5-agent-ide-concept .m5-review-meter { height: 3px; margin-top: 8px; border-radius: 2px; background: light-dark(#dedfe2, #34383e); overflow: hidden; }
+    #m5-agent-ide-concept .m5-review-meter span { display: block; width: 33%; height: 100%; background: #ee795f; }
+    #m5-agent-ide-concept .m5-change-overview-note { display: flex; justify-content: space-between; margin-top: 5px; color: light-dark(#858a91, #858c94); font-size: 8px; }
+    #m5-agent-ide-concept .m5-change-row { width: 100%; display: grid; grid-template-columns: 4px minmax(0, 1fr) auto; gap: 8px; align-items: center; border: 0; border-radius: 6px; background: transparent; color: inherit; padding: 7px 7px 7px 4px; margin-bottom: 2px; text-align: left; cursor: pointer; }
+    #m5-agent-ide-concept .m5-change-row:hover { background: light-dark(#e8e9eb, #282b2f); }
+    #m5-agent-ide-concept .m5-change-row[aria-current=&quot;true&quot;] { background: light-dark(#e1e3e5, #2a2d31); }
+    #m5-agent-ide-concept .m5-change-stripe { width: 3px; height: 28px; border-radius: 2px; background: #e5a33e; }
+    #m5-agent-ide-concept .m5-change-stripe.added { background: #49a477; }
+    #m5-agent-ide-concept .m5-change-file { min-width: 0; }
+    #m5-agent-ide-concept .m5-change-file strong { display: block; overflow: hidden; color: light-dark(#30343a, #d8dde2); font-size: 10px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    #m5-agent-ide-concept .m5-change-file span { display: block; margin-top: 2px; color: light-dark(#858a91, #858c94); font-size: 8px; }
+    #m5-agent-ide-concept .m5-change-stat { display: flex; gap: 4px; font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    #m5-agent-ide-concept .m5-editor { min-width: 0; min-height: 0; display: grid; grid-template-rows: 39px 40px minmax(0, 1fr) 58px; background: light-dark(#ffffff, #15171a); }
+    #m5-agent-ide-concept .m5-editor-tabs { display: flex; align-items: stretch; border-bottom: 1px solid light-dark(#e1e2e4, #2d3136); overflow: hidden; }
+    #m5-agent-ide-concept .m5-editor-tab { border: 0; border-right: 1px solid light-dark(#e1e2e4, #2d3136); background: light-dark(#f4f4f5, #1e2024); color: light-dark(#61666c, #a8aeb5); padding: 0 14px; cursor: pointer; font-size: 11px; }
+    #m5-agent-ide-concept .m5-editor-tab[aria-selected=&quot;true&quot;] { background: light-dark(#ffffff, #15171a); color: inherit; box-shadow: inset 0 2px #ee795f; }
+    #m5-agent-ide-concept .m5-editor-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 13px; border-bottom: 1px solid light-dark(#ebebed, #292d31); }
+    #m5-agent-ide-concept .m5-file-title { font-size: 11px; color: light-dark(#4d5258, #c5cad0); }
+    #m5-agent-ide-concept .m5-file-title strong { color: inherit; font-weight: 680; }
+    #m5-agent-ide-concept .m5-view-toggle { display: flex; align-items: center; gap: 4px; }
+    #m5-agent-ide-concept .m5-small-btn { border: 1px solid light-dark(#d9dbde, #393d43); background: transparent; color: light-dark(#62676e, #aeb4ba); border-radius: 5px; padding: 4px 7px; font-size: 10px; cursor: pointer; }
+    #m5-agent-ide-concept .m5-small-btn.active { background: light-dark(#ededee, #292c31); color: inherit; }
+    #m5-agent-ide-concept .m5-code { overflow: auto; padding: 14px 0 20px; font: 11px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    #m5-agent-ide-concept .m5-code-line { display: grid; grid-template-columns: 37px 37px 18px minmax(max-content, 1fr); min-height: 19px; padding-right: 18px; white-space: pre; }
+    #m5-agent-ide-concept .m5-line-no { color: light-dark(#a5a9ae, #666d75); text-align: right; padding-right: 9px; user-select: none; }
+    #m5-agent-ide-concept .m5-sign { text-align: center; user-select: none; }
+    #m5-agent-ide-concept .m5-code-line.removed { background: light-dark(#fff0f0, #321f22); }
+    #m5-agent-ide-concept .m5-code-line.removed .m5-sign { color: #d75b64; }
+    #m5-agent-ide-concept .m5-code-line.added { background: light-dark(#edf9f1, #183026); }
+    #m5-agent-ide-concept .m5-code-line.added .m5-sign { color: #49a477; }
+    #m5-agent-ide-concept .m5-code-line.context { color: light-dark(#454a50, #cbd0d5); }
+    #m5-agent-ide-concept .m5-key { color: light-dark(#7b4fb3, #c49aef); }
+    #m5-agent-ide-concept .m5-string { color: light-dark(#a45629, #e4a47f); }
+    #m5-agent-ide-concept .m5-reviewbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 12px; border-top: 1px solid light-dark(#dddfe1, #30343a); background: light-dark(#f6f6f7, #1f2226); }
+    #m5-agent-ide-concept .m5-review-summary { min-width: 0; font-size: 10px; color: light-dark(#686d73, #a9afb6); }
+    #m5-agent-ide-concept .m5-review-summary strong { color: light-dark(#25282c, #f0f1f2); font-size: 11px; }
+    #m5-agent-ide-concept .m5-actions { flex-shrink: 0; display: flex; gap: 5px; }
+    #m5-agent-ide-concept .m5-action { white-space: nowrap; border: 1px solid light-dark(#d3d5d8, #3b4046); background: light-dark(#ffffff, #292c31); color: inherit; border-radius: 6px; padding: 7px 8px; font-size: 9px; font-weight: 650; cursor: pointer; }
+    #m5-agent-ide-concept .m5-action.primary { border-color: #df654d; background: #ee795f; color: #fff; }
+    #m5-agent-ide-concept .m5-agent { border-left: 1px solid light-dark(#dedfe2, #30343a); display: grid; grid-template-rows: 69px minmax(0, 1fr) auto; }
+    #m5-agent-ide-concept .m5-agent-head { padding: 9px 13px 8px; border-bottom: 1px solid light-dark(#dedfe2, #30343a); }
+    #m5-agent-ide-concept .m5-agent-title { display: flex; justify-content: space-between; gap: 8px; align-items: center; font-size: 12px; font-weight: 680; }
+    #m5-agent-ide-concept .m5-role { display: flex; align-items: center; gap: 6px; color: light-dark(#686e75, #aeb4bb); font-size: 9px; margin-top: 6px; }
+    #m5-agent-ide-concept .m5-team-dot { width: 6px; height: 6px; border-radius: 50%; background: #49a477; box-shadow: 0 0 0 2px rgba(73,164,119,.12); }
+    #m5-agent-ide-concept .m5-agent-body { overflow: auto; padding: 13px 12px 18px; }
+    #m5-agent-ide-concept .m5-user-message { margin: 0 0 15px 34px; }
+    #m5-agent-ide-concept .m5-message-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; color: light-dark(#858a91, #858c94); font-size: 8px; }
+    #m5-agent-ide-concept .m5-message-meta strong { color: light-dark(#50565d, #c7ccd2); font-size: 9px; font-weight: 650; }
+    #m5-agent-ide-concept .m5-user-bubble { padding: 9px 10px; background: light-dark(#e6e8ea, #2b2e33); border-radius: 8px 8px 2px 8px; color: light-dark(#303338, #e4e7ea); font-size: 10px; line-height: 1.5; }
+    #m5-agent-ide-concept .m5-team-message { display: grid; grid-template-columns: 27px minmax(0, 1fr); gap: 7px; margin-bottom: 13px; }
+    #m5-agent-ide-concept .m5-team-avatar { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 7px; background: light-dark(#ebe7f6, #342e49); color: light-dark(#62519e, #c0adff); font-size: 8px; font-weight: 760; }
+    #m5-agent-ide-concept .m5-team-avatar.dev { background: light-dark(#e3edf7, #26384a); color: light-dark(#386c9d, #89baf0); }
+    #m5-agent-ide-concept .m5-team-message-body { min-width: 0; }
+    #m5-agent-ide-concept .m5-team-bubble { padding: 9px 10px; border: 1px solid light-dark(#dedfe3, #353940); border-radius: 3px 8px 8px 8px; background: light-dark(#f8f8f9, #22252a); color: light-dark(#3d4248, #d3d7dc); font-size: 10px; line-height: 1.5; }
+    #m5-agent-ide-concept .m5-team-bubble p { margin: 0; }
+    #m5-agent-ide-concept .m5-team-bubble p + p { margin-top: 7px; }
+    #m5-agent-ide-concept .m5-team-tag { color: light-dark(#6f757c, #999fa7); font-size: 8px; }
+    #m5-agent-ide-concept .m5-team-tag.plan { color: light-dark(#62519e, #c0adff); }
+    #m5-agent-ide-concept .m5-team-tag.dev { color: light-dark(#386c9d, #89baf0); }
+    #m5-agent-ide-concept .m5-handoff { display: flex; align-items: center; gap: 7px; margin: -3px 0 10px 12px; padding-left: 28px; color: light-dark(#7d8289, #8d949c); font-size: 8px; }
+    #m5-agent-ide-concept .m5-handoff::before { content: &quot;&quot;; width: 16px; border-top: 1px solid light-dark(#cfd2d6, #434850); }
+    #m5-agent-ide-concept .m5-feasibility { margin-top: 8px; padding: 7px 8px; border-left: 2px solid #e5a33e; background: light-dark(#fff8ec, #2d281e); color: light-dark(#745421, #d6bb84); font-size: 9px; }
+    #m5-agent-ide-concept .m5-revised { margin-top: 8px; color: light-dark(#4d6658, #9dc8af); font-size: 9px; }
+    #m5-agent-ide-concept .m5-result-checks { margin-top: 8px; padding-top: 7px; border-top: 1px solid light-dark(#e2e4e6, #373b41); color: light-dark(#397155, #83cfa6); font-size: 9px; line-height: 1.6; }
+    #m5-agent-ide-concept .m5-team-state { display: flex; align-items: center; gap: 6px; margin: 5px 0 13px 34px; color: light-dark(#7d8289, #8d949c); font-size: 8px; }
+    #m5-agent-ide-concept .m5-team-state span:first-child { width: 6px; height: 6px; border-radius: 50%; background: #49a477; }
+    #m5-agent-ide-concept .m5-details { margin-top: 10px; font-size: 9px; color: light-dark(#6f747b, #9ba1a8); border-top: 1px dashed light-dark(#d4d6d9, #393d43); padding-top: 8px; }
+    #m5-agent-ide-concept .m5-composer { border-top: 1px solid light-dark(#dedfe2, #30343a); padding: 10px 11px 11px; background: light-dark(#f5f5f6, #202226); }
+    #m5-agent-ide-concept .m5-composer-box { display: grid; grid-template-columns: 1fr auto; gap: 7px; align-items: end; border: 1px solid light-dark(#d6d8db, #3a3e44); border-radius: 8px; background: light-dark(#ffffff, #292c31); padding: 7px; }
+    #m5-agent-ide-concept .m5-composer-hint { margin: 6px 2px 0; color: light-dark(#858a91, #858c94); font-size: 8px; }
+    #m5-agent-ide-concept textarea { resize: none; min-height: 40px; border: 0; outline: 0; background: transparent; color: inherit; font-size: 10px; line-height: 1.4; }
+    #m5-agent-ide-concept .m5-send { border: 0; border-radius: 6px; background: #ee795f; color: white; width: 28px; height: 28px; cursor: pointer; }
+    #m5-agent-ide-concept .m5-statusbar { display: flex; align-items: center; justify-content: space-between; padding: 0 11px; border-top: 1px solid light-dark(#dedfe2, #30343a); background: light-dark(#eeeeef, #22252a); color: light-dark(#71767c, #9299a1); font-size: 9px; }
+    #m5-agent-ide-concept .m5-toast { position: absolute; left: 50%; bottom: 42px; transform: translateX(-50%) translateY(8px); opacity: 0; pointer-events: none; background: light-dark(#25282c, #f0f1f2); color: light-dark(#fff, #24272b); padding: 8px 12px; border-radius: 7px; font-size: 10px; transition: .2s ease; box-shadow: 0 8px 24px rgba(0,0,0,.2); }
+    #m5-agent-ide-concept .m5-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    #m5-agent-ide-concept .m5-wrap { position: relative; }
+    @media (max-width: 820px) {
+      #m5-agent-ide-concept .m5-window { height: 760px; }
+      #m5-agent-ide-concept .m5-titlebar { grid-template-columns: 1fr auto; }
+      #m5-agent-ide-concept .m5-project { display: none; }
+      #m5-agent-ide-concept .m5-shell { grid-template-columns: 68px 190px minmax(0, 1fr); }
+      #m5-agent-ide-concept .m5-agent { display: none; }
+    }
+  &lt;/style&gt;
+  &lt;div class=&quot;m5-wrap&quot;&gt;
+    &lt;div class=&quot;m5-window&quot; role=&quot;application&quot; aria-label=&quot;M5 코딩 에이전트 IDE 디자인 시안&quot;&gt;
+      &lt;header class=&quot;m5-titlebar&quot;&gt;
+        &lt;div class=&quot;m5-brand&quot;&gt;&lt;span class=&quot;m5-mark&quot;&gt;M5&lt;/span&gt;&lt;span&gt;작업대&lt;/span&gt;&lt;/div&gt;
+        &lt;div class=&quot;m5-project&quot;&gt;&lt;span class=&quot;m5-work-context&quot;&gt;프로젝트&lt;/span&gt;&lt;strong class=&quot;m5-work-context&quot;&gt;elsecrew&lt;/strong&gt;&lt;span class=&quot;m5-work-context&quot;&gt;›&lt;/span&gt;&lt;span class=&quot;m5-work-context&quot;&gt;로그인 오류 고치기&lt;/span&gt;&lt;span class=&quot;m5-settings-context&quot; hidden&gt;설정&lt;/span&gt;&lt;/div&gt;
+        &lt;div class=&quot;m5-title-actions&quot;&gt;&lt;button class=&quot;m5-layout-reset&quot; id=&quot;m5-layout-reset&quot;&gt;레이아웃 초기화&lt;/button&gt;&lt;div class=&quot;m5-safe&quot;&gt;&lt;span class=&quot;m5-safe-dot&quot;&gt;&lt;/span&gt;&lt;span&gt;격리된 작업 공간&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;
+      &lt;/header&gt;
+
+      &lt;main class=&quot;m5-shell&quot;&gt;
+        &lt;aside class=&quot;m5-projects&quot; aria-label=&quot;프로젝트 목록&quot;&gt;
+          &lt;div class=&quot;m5-projects-title&quot;&gt;프로젝트&lt;/div&gt;
+          &lt;div class=&quot;m5-project-list&quot;&gt;
+            &lt;button class=&quot;m5-project-item&quot; aria-current=&quot;true&quot; data-project=&quot;elsecrew&quot; aria-label=&quot;elsecrew 프로젝트&quot;&gt;
+              &lt;span class=&quot;m5-project-icon&quot;&gt;HA&lt;/span&gt;&lt;span&gt;Agent&lt;/span&gt;&lt;span class=&quot;m5-project-alert&quot;&gt;2&lt;/span&gt;
+            &lt;/button&gt;
+            &lt;button class=&quot;m5-project-item&quot; aria-current=&quot;false&quot; data-project=&quot;portfolio&quot; aria-label=&quot;portfolio 프로젝트&quot;&gt;
+              &lt;span class=&quot;m5-project-icon&quot;&gt;PO&lt;/span&gt;&lt;span&gt;Portfolio&lt;/span&gt;&lt;span class=&quot;m5-project-alert&quot;&gt;1&lt;/span&gt;
+            &lt;/button&gt;
+            &lt;button class=&quot;m5-project-item&quot; aria-current=&quot;false&quot; data-project=&quot;shop-api&quot; aria-label=&quot;shop-api 프로젝트&quot;&gt;
+              &lt;span class=&quot;m5-project-icon&quot;&gt;SA&lt;/span&gt;&lt;span&gt;Shop API&lt;/span&gt;
+            &lt;/button&gt;
+            &lt;button class=&quot;m5-project-item&quot; aria-current=&quot;false&quot; data-project=&quot;notes&quot; aria-label=&quot;notes 프로젝트&quot;&gt;
+              &lt;span class=&quot;m5-project-icon&quot;&gt;NO&lt;/span&gt;&lt;span&gt;Notes&lt;/span&gt;
+            &lt;/button&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;m5-rail-actions&quot;&gt;&lt;button class=&quot;m5-add-project&quot; aria-label=&quot;프로젝트 추가&quot;&gt;＋&lt;/button&gt;&lt;button class=&quot;m5-settings-button&quot; aria-label=&quot;설정 열기&quot; aria-current=&quot;false&quot;&gt;⚙&lt;/button&gt;&lt;/div&gt;
+        &lt;/aside&gt;
+        &lt;aside class=&quot;m5-left m5-pane m5-chat-tab&quot; data-pane=&quot;context&quot;&gt;
+          &lt;nav class=&quot;m5-left-tabs&quot; aria-label=&quot;왼쪽 패널&quot;&gt;
+            &lt;button class=&quot;m5-grip&quot; data-drag-pane=&quot;context&quot; aria-label=&quot;채팅·파일 패널 이동&quot;&gt;⠿&lt;/button&gt;
+            &lt;button class=&quot;m5-tab-btn&quot; data-panel=&quot;chats&quot; aria-selected=&quot;true&quot;&gt;채팅&lt;/button&gt;
+            &lt;button class=&quot;m5-tab-btn&quot; data-panel=&quot;files&quot; aria-selected=&quot;false&quot;&gt;파일&lt;/button&gt;
+            &lt;button class=&quot;m5-tab-btn&quot; data-panel=&quot;changes&quot; aria-selected=&quot;false&quot;&gt;&lt;span&gt;변경&lt;/span&gt;&lt;span class=&quot;m5-tab-count m5-change-tab-count&quot;&gt;3&lt;/span&gt;&lt;/button&gt;
+          &lt;/nav&gt;
+          &lt;div class=&quot;m5-left-body&quot;&gt;
+            &lt;section class=&quot;m5-panel&quot; data-panel-content=&quot;chats&quot;&gt;
+              &lt;div class=&quot;m5-section-title&quot;&gt;오늘&lt;/div&gt;
+              &lt;button class=&quot;m5-chat-item&quot; aria-current=&quot;true&quot; data-chat=&quot;login&quot;&gt;
+                &lt;div class=&quot;m5-chat-top&quot;&gt;&lt;span&gt;로그인 오류 고치기&lt;/span&gt;&lt;span class=&quot;m5-count&quot;&gt;검토 필요&lt;/span&gt;&lt;/div&gt;
+                &lt;div class=&quot;m5-chat-meta&quot;&gt;&lt;span class=&quot;m5-state-dot&quot;&gt;&lt;/span&gt;&lt;span&gt;코딩 · Claude Code&lt;/span&gt;&lt;/div&gt;
+              &lt;/button&gt;
+              &lt;button class=&quot;m5-chat-item&quot; aria-current=&quot;false&quot; data-chat=&quot;home&quot;&gt;
+                &lt;div class=&quot;m5-chat-top&quot;&gt;&lt;span&gt;홈 화면 정리&lt;/span&gt;&lt;span&gt;•••&lt;/span&gt;&lt;/div&gt;
+                &lt;div class=&quot;m5-chat-meta&quot;&gt;&lt;span class=&quot;m5-state-dot running&quot;&gt;&lt;/span&gt;&lt;span&gt;기획 · Codex&lt;/span&gt;&lt;/div&gt;
+              &lt;/button&gt;
+              &lt;button class=&quot;m5-chat-item&quot; aria-current=&quot;false&quot; data-chat=&quot;tests&quot;&gt;
+                &lt;div class=&quot;m5-chat-top&quot;&gt;&lt;span&gt;설치 테스트 확인&lt;/span&gt;&lt;/div&gt;
+                &lt;div class=&quot;m5-chat-meta&quot;&gt;&lt;span class=&quot;m5-state-dot done&quot;&gt;&lt;/span&gt;&lt;span&gt;검토 · Codex&lt;/span&gt;&lt;/div&gt;
+              &lt;/button&gt;
+              &lt;div class=&quot;m5-section-title&quot; style=&quot;margin-top:12px&quot;&gt;이전&lt;/div&gt;
+              &lt;button class=&quot;m5-chat-item&quot; aria-current=&quot;false&quot; data-chat=&quot;doctor&quot;&gt;
+                &lt;div class=&quot;m5-chat-top&quot;&gt;&lt;span&gt;오류 문구 쉽게 바꾸기&lt;/span&gt;&lt;/div&gt;
+                &lt;div class=&quot;m5-chat-meta&quot;&gt;&lt;span class=&quot;m5-state-dot done&quot;&gt;&lt;/span&gt;&lt;span&gt;반영 완료&lt;/span&gt;&lt;/div&gt;
+              &lt;/button&gt;
+            &lt;/section&gt;
+            &lt;section class=&quot;m5-panel m5-tree&quot; data-panel-content=&quot;files&quot; hidden&gt;
+              &lt;div class=&quot;m5-browser-head&quot;&gt;&lt;strong&gt;elsecrew&lt;/strong&gt;&lt;span&gt;m5/coding-agent-ide&lt;/span&gt;&lt;/div&gt;
+              &lt;button class=&quot;m5-tree-row&quot; aria-expanded=&quot;true&quot;&gt;&lt;span class=&quot;m5-tree-chevron&quot;&gt;⌄&lt;/span&gt;&lt;span class=&quot;m5-file-glyph folder&quot;&gt;▰&lt;/span&gt;&lt;span class=&quot;m5-tree-name&quot;&gt;src&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/button&gt;
+              &lt;button class=&quot;m5-tree-row indent&quot; aria-current=&quot;true&quot; data-file=&quot;App.tsx&quot;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&quot;m5-file-glyph&quot;&gt;TSX&lt;/span&gt;&lt;span class=&quot;m5-tree-name&quot;&gt;App.tsx&lt;/span&gt;&lt;span class=&quot;m5-file-state&quot; aria-label=&quot;수정됨&quot;&gt;&lt;/span&gt;&lt;/button&gt;
+              &lt;button class=&quot;m5-tree-row indent&quot; aria-current=&quot;false&quot; data-file=&quot;doctor.ts&quot;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&quot;m5-file-glyph&quot;&gt;TS&lt;/span&gt;&lt;span class=&quot;m5-tree-name&quot;&gt;doctor.ts&lt;/span&gt;&lt;span class=&quot;m5-file-state&quot; aria-label=&quot;수정됨&quot;&gt;&lt;/span&gt;&lt;/button&gt;
+              &lt;button class=&quot;m5-tree-row indent&quot; aria-current=&quot;false&quot; data-file=&quot;store.ts&quot;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&quot;m5-file-glyph&quot;&gt;TS&lt;/span&gt;&lt;span class=&quot;m5-tree-name&quot;&gt;store.ts&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/button&gt;
+              &lt;button class=&quot;m5-tree-row&quot; aria-expanded=&quot;true&quot;&gt;&lt;span class=&quot;m5-tree-chevron&quot;&gt;⌄&lt;/span&gt;&lt;span class=&quot;m5-file-glyph folder&quot;&gt;▰&lt;/span&gt;&lt;span class=&quot;m5-tree-name&quot;&gt;src-tauri&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/button&gt;
+              &lt;button class=&quot;m5-tree-row indent&quot; aria-current=&quot;false&quot; data-file=&quot;login.rs&quot;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&quot;m5-file-glyph rust&quot;&gt;RS&lt;/span&gt;&lt;span class=&quot;m5-tree-name&quot;&gt;src/login.rs&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/button&gt;
+              &lt;button class=&quot;m5-tree-row indent&quot; aria-current=&quot;false&quot; data-file=&quot;error.rs&quot;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&quot;m5-file-glyph rust&quot;&gt;RS&lt;/span&gt;&lt;span class=&quot;m5-tree-name&quot;&gt;src/error.rs&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/button&gt;
+              &lt;button class=&quot;m5-tree-row&quot; aria-current=&quot;false&quot; data-file=&quot;package.json&quot;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&quot;m5-file-glyph json&quot;&gt;{ }&lt;/span&gt;&lt;span class=&quot;m5-tree-name&quot;&gt;package.json&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/button&gt;
+            &lt;/section&gt;
+            &lt;section class=&quot;m5-panel&quot; data-panel-content=&quot;changes&quot; hidden&gt;
+              &lt;div class=&quot;m5-change-overview&quot;&gt;
+                &lt;div class=&quot;m5-change-overview-top&quot;&gt;&lt;strong&gt;3개 파일&lt;/strong&gt;&lt;span class=&quot;m5-diff-total&quot;&gt;&lt;span class=&quot;m5-added&quot;&gt;+24&lt;/span&gt;&lt;span class=&quot;m5-removed&quot;&gt;−2&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;
+                &lt;div class=&quot;m5-review-meter&quot; aria-label=&quot;검토 진행 3개 중 1개&quot;&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+                &lt;div class=&quot;m5-change-overview-note&quot;&gt;&lt;span&gt;검토 진행&lt;/span&gt;&lt;span&gt;1 / 3&lt;/span&gt;&lt;/div&gt;
+              &lt;/div&gt;
+              &lt;div class=&quot;m5-section-title&quot;&gt;작업 중인 변경&lt;/div&gt;
+              &lt;button class=&quot;m5-change-row&quot; aria-current=&quot;true&quot; data-file=&quot;App.tsx&quot;&gt;&lt;span class=&quot;m5-change-stripe&quot;&gt;&lt;/span&gt;&lt;span class=&quot;m5-change-file&quot;&gt;&lt;strong&gt;App.tsx&lt;/strong&gt;&lt;span&gt;src · 검토 중&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;m5-change-stat&quot;&gt;&lt;span class=&quot;m5-added&quot;&gt;+18&lt;/span&gt;&lt;span class=&quot;m5-removed&quot;&gt;−2&lt;/span&gt;&lt;/span&gt;&lt;/button&gt;
+              &lt;button class=&quot;m5-change-row&quot; aria-current=&quot;false&quot; data-file=&quot;doctor.ts&quot;&gt;&lt;span class=&quot;m5-change-stripe&quot;&gt;&lt;/span&gt;&lt;span class=&quot;m5-change-file&quot;&gt;&lt;strong&gt;doctor.ts&lt;/strong&gt;&lt;span&gt;src · 아직 안 봄&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;m5-change-stat&quot;&gt;&lt;span class=&quot;m5-added&quot;&gt;+4&lt;/span&gt;&lt;/span&gt;&lt;/button&gt;
+              &lt;button class=&quot;m5-change-row&quot; aria-current=&quot;false&quot; data-file=&quot;auth.test.ts&quot;&gt;&lt;span class=&quot;m5-change-stripe added&quot;&gt;&lt;/span&gt;&lt;span class=&quot;m5-change-file&quot;&gt;&lt;strong&gt;auth.test.ts&lt;/strong&gt;&lt;span&gt;tests · 새 파일&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;m5-change-stat&quot;&gt;&lt;span class=&quot;m5-added&quot;&gt;+2&lt;/span&gt;&lt;/span&gt;&lt;/button&gt;
+            &lt;/section&gt;
+          &lt;/div&gt;
+          &lt;button class=&quot;m5-new-chat&quot;&gt;＋ 새 채팅&lt;/button&gt;
+        &lt;/aside&gt;
+
+        &lt;section class=&quot;m5-editor m5-pane&quot; data-pane=&quot;editor&quot;&gt;
+          &lt;div class=&quot;m5-editor-tabs&quot;&gt;
+            &lt;button class=&quot;m5-grip&quot; data-drag-pane=&quot;editor&quot; aria-label=&quot;코드·diff 패널 이동&quot;&gt;⠿&lt;/button&gt;
+            &lt;button class=&quot;m5-editor-tab&quot; aria-selected=&quot;true&quot;&gt;App.tsx&amp;nbsp; &lt;span style=&quot;color:#e5a33e&quot;&gt;●&lt;/span&gt;&lt;/button&gt;
+            &lt;button class=&quot;m5-editor-tab&quot; aria-selected=&quot;false&quot;&gt;doctor.ts&lt;/button&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;m5-editor-head&quot;&gt;
+            &lt;div class=&quot;m5-file-title&quot;&gt;&lt;strong id=&quot;m5-current-file&quot;&gt;src/App.tsx&lt;/strong&gt; · 변경 전과 비교&lt;/div&gt;
+            &lt;div class=&quot;m5-view-toggle&quot;&gt;
+              &lt;button class=&quot;m5-small-btn active&quot; data-view=&quot;inline&quot;&gt;한 화면&lt;/button&gt;
+              &lt;button class=&quot;m5-small-btn&quot; data-view=&quot;split&quot;&gt;나란히&lt;/button&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;m5-code&quot; aria-label=&quot;App.tsx 코드 변경 내용&quot;&gt;
+            &lt;div class=&quot;m5-code-line context&quot;&gt;&lt;span class=&quot;m5-line-no&quot;&gt;118&lt;/span&gt;&lt;span class=&quot;m5-line-no&quot;&gt;118&lt;/span&gt;&lt;span class=&quot;m5-sign&quot;&gt;&lt;/span&gt;&lt;span&gt;  &lt;span class=&quot;m5-key&quot;&gt;const&lt;/span&gt; handleLogin = &lt;span class=&quot;m5-key&quot;&gt;async&lt;/span&gt; () =&amp;gt; {&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;m5-code-line context&quot;&gt;&lt;span class=&quot;m5-line-no&quot;&gt;119&lt;/span&gt;&lt;span class=&quot;m5-line-no&quot;&gt;119&lt;/span&gt;&lt;span class=&quot;m5-sign&quot;&gt;&lt;/span&gt;&lt;span&gt;    setLoginState(&lt;span class=&quot;m5-string&quot;&gt;&quot;checking&quot;&lt;/span&gt;);&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;m5-code-line removed&quot;&gt;&lt;span class=&quot;m5-line-no&quot;&gt;120&lt;/span&gt;&lt;span class=&quot;m5-line-no&quot;&gt;&lt;/span&gt;&lt;span class=&quot;m5-sign&quot;&gt;−&lt;/span&gt;&lt;span&gt;    &lt;span class=&quot;m5-key&quot;&gt;await&lt;/span&gt; invoke(&lt;span class=&quot;m5-string&quot;&gt;&quot;check_login&quot;&lt;/span&gt;);&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;m5-code-line removed&quot;&gt;&lt;span class=&quot;m5-line-no&quot;&gt;121&lt;/span&gt;&lt;span class=&quot;m5-line-no&quot;&gt;&lt;/span&gt;&lt;span class=&quot;m5-sign&quot;&gt;−&lt;/span&gt;&lt;span&gt;    setLoginState(&lt;span class=&quot;m5-string&quot;&gt;&quot;ready&quot;&lt;/span&gt;);&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;m5-code-line added&quot;&gt;&lt;span class=&quot;m5-line-no&quot;&gt;&lt;/span&gt;&lt;span class=&quot;m5-line-no&quot;&gt;120&lt;/span&gt;&lt;span class=&quot;m5-sign&quot;&gt;+&lt;/span&gt;&lt;span&gt;    &lt;span class=&quot;m5-key&quot;&gt;try&lt;/span&gt; {&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;m5-code-line added&quot;&gt;&lt;span class=&quot;m5-line-no&quot;&gt;&lt;/span&gt;&lt;span class=&quot;m5-line-no&quot;&gt;121&lt;/span&gt;&lt;span class=&quot;m5-sign&quot;&gt;+&lt;/span&gt;&lt;span&gt;      &lt;span class=&quot;m5-key&quot;&gt;await&lt;/span&gt; invoke(&lt;span class=&quot;m5-string&quot;&gt;&quot;check_login&quot;&lt;/span&gt;);&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;m5-code-line added&quot;&gt;&lt;span class=&quot;m5-line-no&quot;&gt;&lt;/span&gt;&lt;span class=&quot;m5-line-no&quot;&gt;122&lt;/span&gt;&lt;span class=&quot;m5-sign&quot;&gt;+&lt;/span&gt;&lt;span&gt;      setLoginState(&lt;span class=&quot;m5-string&quot;&gt;&quot;ready&quot;&lt;/span&gt;);&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;m5-code-line added&quot;&gt;&lt;span class=&quot;m5-line-no&quot;&gt;&lt;/span&gt;&lt;span class=&quot;m5-line-no&quot;&gt;123&lt;/span&gt;&lt;span class=&quot;m5-sign&quot;&gt;+&lt;/span&gt;&lt;span&gt;    } &lt;span class=&quot;m5-key&quot;&gt;catch&lt;/span&gt; (error) {&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;m5-code-line added&quot;&gt;&lt;span class=&quot;m5-line-no&quot;&gt;&lt;/span&gt;&lt;span class=&quot;m5-line-no&quot;&gt;124&lt;/span&gt;&lt;span class=&quot;m5-sign&quot;&gt;+&lt;/span&gt;&lt;span&gt;      setDoctorIssue(explainLoginError(error));&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;m5-code-line added&quot;&gt;&lt;span class=&quot;m5-line-no&quot;&gt;&lt;/span&gt;&lt;span class=&quot;m5-line-no&quot;&gt;125&lt;/span&gt;&lt;span class=&quot;m5-sign&quot;&gt;+&lt;/span&gt;&lt;span&gt;      setLoginState(&lt;span class=&quot;m5-string&quot;&gt;&quot;needsHelp&quot;&lt;/span&gt;);&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;m5-code-line added&quot;&gt;&lt;span class=&quot;m5-line-no&quot;&gt;&lt;/span&gt;&lt;span class=&quot;m5-line-no&quot;&gt;126&lt;/span&gt;&lt;span class=&quot;m5-sign&quot;&gt;+&lt;/span&gt;&lt;span&gt;    }&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;m5-code-line context&quot;&gt;&lt;span class=&quot;m5-line-no&quot;&gt;122&lt;/span&gt;&lt;span class=&quot;m5-line-no&quot;&gt;127&lt;/span&gt;&lt;span class=&quot;m5-sign&quot;&gt;&lt;/span&gt;&lt;span&gt;  };&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;m5-code-line context&quot;&gt;&lt;span class=&quot;m5-line-no&quot;&gt;123&lt;/span&gt;&lt;span class=&quot;m5-line-no&quot;&gt;128&lt;/span&gt;&lt;span class=&quot;m5-sign&quot;&gt;&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;m5-code-line context&quot;&gt;&lt;span class=&quot;m5-line-no&quot;&gt;124&lt;/span&gt;&lt;span class=&quot;m5-line-no&quot;&gt;129&lt;/span&gt;&lt;span class=&quot;m5-sign&quot;&gt;&lt;/span&gt;&lt;span&gt;  &lt;span class=&quot;m5-key&quot;&gt;return&lt;/span&gt; (&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;m5-reviewbar&quot;&gt;
+            &lt;div class=&quot;m5-review-summary&quot;&gt;&lt;strong&gt;3개 파일 변경&lt;/strong&gt;&lt;br&gt;테스트 18개 통과 · 원본에는 아직 반영되지 않음&lt;/div&gt;
+            &lt;div class=&quot;m5-actions&quot;&gt;
+              &lt;button class=&quot;m5-action&quot; data-action=&quot;discard&quot;&gt;버리기&lt;/button&gt;
+              &lt;button class=&quot;m5-action&quot; data-action=&quot;revise&quot;&gt;수정 요청&lt;/button&gt;
+              &lt;button class=&quot;m5-action primary&quot; data-action=&quot;apply&quot;&gt;반영하기&lt;/button&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/section&gt;
+
+        &lt;aside class=&quot;m5-agent m5-pane&quot; data-pane=&quot;agent&quot;&gt;
+          &lt;div class=&quot;m5-agent-head&quot;&gt;
+            &lt;div class=&quot;m5-agent-title&quot;&gt;&lt;span style=&quot;display:flex;align-items:center;gap:4px&quot;&gt;&lt;button class=&quot;m5-grip&quot; data-drag-pane=&quot;agent&quot; aria-label=&quot;에이전트 채팅 패널 이동&quot;&gt;⠿&lt;/button&gt;&lt;span id=&quot;m5-chat-title&quot;&gt;로그인 오류 고치기&lt;/span&gt;&lt;/span&gt;&lt;button class=&quot;m5-small-btn&quot; id=&quot;m5-detail-toggle&quot; aria-expanded=&quot;false&quot;&gt;자세히&lt;/button&gt;&lt;/div&gt;
+            &lt;div class=&quot;m5-role&quot;&gt;&lt;span class=&quot;m5-team-dot&quot;&gt;&lt;/span&gt;&lt;span id=&quot;m5-role-label&quot;&gt;팀 대화 · 기획 Codex → 개발 Claude Code&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;m5-agent-body&quot;&gt;
+            &lt;div class=&quot;m5-user-message&quot;&gt;
+              &lt;div class=&quot;m5-message-meta&quot;&gt;&lt;strong&gt;나&lt;/strong&gt;&lt;span&gt;오후 2:14&lt;/span&gt;&lt;/div&gt;
+              &lt;div class=&quot;m5-user-bubble&quot; id=&quot;m5-goal&quot;&gt;로그인이 만료됐을 때 막다른 화면 대신 다시 로그인할 수 있게 고쳐줘.&lt;/div&gt;
+            &lt;/div&gt;
+            &lt;article class=&quot;m5-team-message&quot;&gt;
+              &lt;div class=&quot;m5-team-avatar&quot;&gt;기획&lt;/div&gt;
+              &lt;div class=&quot;m5-team-message-body&quot;&gt;
+                &lt;div class=&quot;m5-message-meta&quot;&gt;&lt;strong&gt;기획&lt;/strong&gt;&lt;span class=&quot;m5-team-tag plan&quot;&gt;Codex · Sol · medium&lt;/span&gt;&lt;/div&gt;
+                &lt;div class=&quot;m5-team-bubble&quot;&gt;&lt;p&gt;로그인 실패가 막다른 화면으로 이어지는 경로를 확인했습니다. 재로그인 행동을 같은 화면에 두고 오류 문구를 쉬운 안내로 바꾸겠습니다.&lt;/p&gt;&lt;p class=&quot;m5-team-tag&quot;&gt;계획 3단계 · 파일은 아직 수정하지 않음&lt;/p&gt;&lt;/div&gt;
+              &lt;/div&gt;
+            &lt;/article&gt;
+            &lt;div class=&quot;m5-handoff&quot;&gt;개발 역할에게 가능성 검토 요청&lt;/div&gt;
+            &lt;article class=&quot;m5-team-message&quot;&gt;
+              &lt;div class=&quot;m5-team-avatar dev&quot;&gt;개발&lt;/div&gt;
+              &lt;div class=&quot;m5-team-message-body&quot;&gt;
+                &lt;div class=&quot;m5-message-meta&quot;&gt;&lt;strong&gt;개발&lt;/strong&gt;&lt;span class=&quot;m5-team-tag dev&quot;&gt;Claude Code · Opus 5&lt;/span&gt;&lt;/div&gt;
+                &lt;div class=&quot;m5-team-bubble&quot;&gt;&lt;p&gt;구현 가능합니다. 다만 App.tsx만 바꾸면 같은 문제가 다시 생겨도 잡아내지 못합니다.&lt;/p&gt;&lt;div class=&quot;m5-feasibility&quot;&gt;가능 · doctor 오류 분류와 재로그인 테스트를 계획에 추가하는 게 안전합니다.&lt;/div&gt;&lt;/div&gt;
+              &lt;/div&gt;
+            &lt;/article&gt;
+            &lt;div class=&quot;m5-handoff&quot;&gt;기획 역할이 개발 의견을 반영&lt;/div&gt;
+            &lt;article class=&quot;m5-team-message&quot;&gt;
+              &lt;div class=&quot;m5-team-avatar&quot;&gt;기획&lt;/div&gt;
+              &lt;div class=&quot;m5-team-message-body&quot;&gt;
+                &lt;div class=&quot;m5-message-meta&quot;&gt;&lt;strong&gt;기획&lt;/strong&gt;&lt;span class=&quot;m5-team-tag plan&quot;&gt;Codex · Sol · medium&lt;/span&gt;&lt;/div&gt;
+                &lt;div class=&quot;m5-team-bubble&quot;&gt;&lt;p&gt;동의합니다. 오류 분류와 재로그인 테스트를 포함하도록 작업 범위를 수정했습니다.&lt;/p&gt;&lt;div class=&quot;m5-revised&quot;&gt;✓ 수정된 계획을 개발 역할에 다시 전달&lt;/div&gt;&lt;/div&gt;
+              &lt;/div&gt;
+            &lt;/article&gt;
+            &lt;article class=&quot;m5-team-message&quot;&gt;
+              &lt;div class=&quot;m5-team-avatar dev&quot;&gt;개발&lt;/div&gt;
+              &lt;div class=&quot;m5-team-message-body&quot;&gt;
+                &lt;div class=&quot;m5-message-meta&quot;&gt;&lt;strong&gt;개발&lt;/strong&gt;&lt;span class=&quot;m5-team-tag dev&quot;&gt;Claude Code · Opus 5&lt;/span&gt;&lt;/div&gt;
+                &lt;div class=&quot;m5-team-bubble&quot;&gt;&lt;p&gt;수정된 계획대로 구현과 확인을 마쳤습니다. 원본 프로젝트에는 아직 반영하지 않았습니다.&lt;/p&gt;&lt;div class=&quot;m5-result-checks&quot;&gt;✓ 프런트 테스트 18개 통과&lt;br&gt;✓ 3개 파일 변경&lt;br&gt;✓ 종료와 격리 공간 확인 완료&lt;/div&gt;&lt;/div&gt;
+              &lt;/div&gt;
+            &lt;/article&gt;
+            &lt;div class=&quot;m5-team-state&quot;&gt;&lt;span&gt;&lt;/span&gt;&lt;span&gt;팀 대화 완료 · 사용자 검토 대기&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;m5-details&quot; id=&quot;m5-details&quot; hidden&gt;기획: run_plan_04c1 · 개발: run_build_08f2&lt;br&gt;worktree: m5-pilots/08f2 · 종료 확인: confirmed&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;m5-composer&quot;&gt;
+            &lt;div class=&quot;m5-composer-box&quot;&gt;
+              &lt;textarea aria-label=&quot;팀에게 추가 지시&quot; placeholder=&quot;팀에게 수정할 점을 알려주세요…&quot;&gt;&lt;/textarea&gt;
+              &lt;button class=&quot;m5-send&quot; aria-label=&quot;추가 지시 보내기&quot;&gt;↑&lt;/button&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;m5-composer-hint&quot;&gt;다음 안전한 단계에서 관련 역할에게 전달됩니다&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/aside&gt;
+        &lt;section class=&quot;m5-settings&quot; aria-label=&quot;설정 화면&quot;&gt;
+          &lt;nav class=&quot;m5-settings-nav&quot; aria-label=&quot;설정 항목&quot;&gt;
+            &lt;div class=&quot;m5-settings-nav-title&quot;&gt;설정&lt;/div&gt;
+            &lt;button class=&quot;m5-settings-nav-item&quot; aria-current=&quot;true&quot;&gt;역할과 모델&lt;/button&gt;
+            &lt;button class=&quot;m5-settings-nav-item&quot; aria-current=&quot;false&quot;&gt;에이전트와 계정&lt;/button&gt;
+            &lt;button class=&quot;m5-settings-nav-item&quot; aria-current=&quot;false&quot;&gt;프로젝트 기본값&lt;/button&gt;
+            &lt;button class=&quot;m5-settings-nav-item&quot; aria-current=&quot;false&quot;&gt;화면과 레이아웃&lt;/button&gt;
+            &lt;button class=&quot;m5-settings-nav-item&quot; aria-current=&quot;false&quot;&gt;튜토리얼과 도움&lt;/button&gt;
+            &lt;button class=&quot;m5-settings-nav-item&quot; aria-current=&quot;false&quot;&gt;개발자 도구&lt;/button&gt;
+          &lt;/nav&gt;
+          &lt;div class=&quot;m5-settings-main&quot;&gt;
+            &lt;div class=&quot;m5-settings-head&quot;&gt;
+              &lt;div&gt;&lt;h2&gt;역할과 모델&lt;/h2&gt;&lt;p&gt;앱 기본값을 만들고, 프로젝트마다 필요한 역할과 모델만 다르게 설정합니다.&lt;/p&gt;&lt;/div&gt;
+              &lt;div style=&quot;display:flex;gap:6px&quot;&gt;&lt;button class=&quot;m5-small-btn&quot; id=&quot;m5-add-role&quot;&gt;＋ 새 역할&lt;/button&gt;&lt;button class=&quot;m5-small-btn&quot; id=&quot;m5-settings-close&quot;&gt;작업대로 돌아가기&lt;/button&gt;&lt;/div&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;m5-settings-scope&quot;&gt;
+              &lt;label class=&quot;m5-scope-control&quot;&gt;&lt;span class=&quot;m5-scope-label&quot;&gt;설정 적용 대상&lt;/span&gt;&lt;select class=&quot;m5-setting-select m5-scope-select&quot; id=&quot;m5-role-scope&quot; aria-label=&quot;역할과 모델 설정 적용 대상&quot;&gt;&lt;option value=&quot;default&quot;&gt;앱 기본값&lt;/option&gt;&lt;option value=&quot;elsecrew&quot; selected&gt;elsecrew · 프로젝트&lt;/option&gt;&lt;option value=&quot;portfolio&quot;&gt;portfolio · 프로젝트&lt;/option&gt;&lt;option value=&quot;shop-api&quot;&gt;shop-api · 프로젝트&lt;/option&gt;&lt;option value=&quot;notes&quot;&gt;notes · 프로젝트&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;
+              &lt;span class=&quot;m5-scope-summary&quot; id=&quot;m5-scope-summary&quot;&gt;&lt;strong&gt;elsecrew 전용 설정&lt;/strong&gt; · 앱 기본값에서 2개 변경&lt;/span&gt;
+            &lt;/div&gt;
+            &lt;table class=&quot;m5-role-table&quot;&gt;
+              &lt;thead&gt;&lt;tr&gt;&lt;th&gt;역할&lt;/th&gt;&lt;th&gt;에이전트&lt;/th&gt;&lt;th&gt;모델&lt;/th&gt;&lt;th&gt;추론&lt;/th&gt;&lt;th&gt;안전 범위&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+              &lt;tbody&gt;
+                &lt;tr data-role=&quot;planning&quot; aria-selected=&quot;true&quot;&gt;&lt;td class=&quot;m5-role-name&quot;&gt;기획&lt;/td&gt;&lt;td&gt;&lt;select class=&quot;m5-setting-select&quot; aria-label=&quot;기획 에이전트&quot;&gt;&lt;option&gt;Codex&lt;/option&gt;&lt;option&gt;Claude Code&lt;/option&gt;&lt;/select&gt;&lt;/td&gt;&lt;td&gt;&lt;select class=&quot;m5-setting-select&quot; aria-label=&quot;기획 모델&quot;&gt;&lt;option&gt;Sol&lt;/option&gt;&lt;option&gt;Opus 5&lt;/option&gt;&lt;/select&gt;&lt;/td&gt;&lt;td&gt;&lt;select class=&quot;m5-setting-select&quot; aria-label=&quot;기획 추론 수준&quot;&gt;&lt;option&gt;medium&lt;/option&gt;&lt;option&gt;high&lt;/option&gt;&lt;/select&gt;&lt;/td&gt;&lt;td class=&quot;m5-safety-profile&quot;&gt;읽기 전용&lt;/td&gt;&lt;/tr&gt;
+                &lt;tr data-role=&quot;coding&quot; aria-selected=&quot;false&quot;&gt;&lt;td class=&quot;m5-role-name&quot;&gt;코딩&lt;/td&gt;&lt;td&gt;&lt;select class=&quot;m5-setting-select&quot; aria-label=&quot;코딩 에이전트&quot;&gt;&lt;option&gt;Claude Code&lt;/option&gt;&lt;option&gt;Codex&lt;/option&gt;&lt;/select&gt;&lt;/td&gt;&lt;td&gt;&lt;select class=&quot;m5-setting-select&quot; aria-label=&quot;코딩 모델&quot;&gt;&lt;option&gt;Opus 5&lt;/option&gt;&lt;option&gt;Sol&lt;/option&gt;&lt;/select&gt;&lt;/td&gt;&lt;td&gt;&lt;select class=&quot;m5-setting-select&quot; aria-label=&quot;코딩 추론 수준&quot;&gt;&lt;option&gt;기본값&lt;/option&gt;&lt;option&gt;high&lt;/option&gt;&lt;/select&gt;&lt;/td&gt;&lt;td class=&quot;m5-safety-profile&quot;&gt;격리 공간 쓰기&lt;/td&gt;&lt;/tr&gt;
+                &lt;tr data-role=&quot;review&quot; aria-selected=&quot;false&quot;&gt;&lt;td class=&quot;m5-role-name&quot;&gt;검토&lt;/td&gt;&lt;td&gt;&lt;select class=&quot;m5-setting-select&quot; aria-label=&quot;검토 에이전트&quot;&gt;&lt;option&gt;Codex&lt;/option&gt;&lt;option&gt;Claude Code&lt;/option&gt;&lt;/select&gt;&lt;/td&gt;&lt;td&gt;&lt;select class=&quot;m5-setting-select&quot; aria-label=&quot;검토 모델&quot;&gt;&lt;option&gt;Sol&lt;/option&gt;&lt;option&gt;Opus 5&lt;/option&gt;&lt;/select&gt;&lt;/td&gt;&lt;td&gt;&lt;select class=&quot;m5-setting-select&quot; aria-label=&quot;검토 추론 수준&quot;&gt;&lt;option&gt;high&lt;/option&gt;&lt;option&gt;medium&lt;/option&gt;&lt;/select&gt;&lt;/td&gt;&lt;td class=&quot;m5-safety-profile&quot;&gt;읽기 전용&lt;/td&gt;&lt;/tr&gt;
+              &lt;/tbody&gt;
+            &lt;/table&gt;
+            &lt;div class=&quot;m5-role-editor&quot;&gt;
+              &lt;div class=&quot;m5-role-editor-head&quot;&gt;&lt;strong&gt;&lt;span id=&quot;m5-role-editor-name&quot;&gt;기획&lt;/span&gt; 역할 편집&lt;/strong&gt;&lt;span style=&quot;color:light-dark(#73787f,#969da5);font-size:9px&quot;&gt;변경은 자동 저장&lt;/span&gt;&lt;/div&gt;
+              &lt;div class=&quot;m5-role-fields&quot;&gt;
+                &lt;label class=&quot;m5-role-field&quot;&gt;역할 이름&lt;input class=&quot;m5-role-input&quot; id=&quot;m5-role-name-input&quot; value=&quot;기획&quot;&gt;&lt;/label&gt;
+                &lt;label class=&quot;m5-role-field&quot;&gt;책임과 지침&lt;textarea class=&quot;m5-role-instructions&quot; id=&quot;m5-role-instructions&quot;&gt;요구사항을 쉬운 말로 정리하고, 구현 전에 선택지와 위험을 비교합니다. 파일은 읽을 수 있지만 수정하지 않습니다.&lt;/textarea&gt;&lt;/label&gt;
+              &lt;/div&gt;
+              &lt;div class=&quot;m5-role-rule&quot;&gt;역할 지침은 안전 범위를 넓힐 수 없습니다. 쓰기·적용·외부 전송 권한은 별도 안전 계약이 우선합니다.&lt;/div&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;m5-settings-note&quot;&gt;&lt;span id=&quot;m5-scope-note&quot;&gt;여기서 바꾼 내용은 elsecrew의 새 채팅에만 적용됩니다.&lt;/span&gt; 선택한 모델을 사용할 수 없으면 실행 전에 알려드리며, 사용자 확인 없이 다른 모델로 바꾸지 않습니다.&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/section&gt;
+      &lt;/main&gt;
+
+      &lt;footer class=&quot;m5-statusbar&quot;&gt;&lt;span&gt;&lt;span id=&quot;m5-status-project&quot;&gt;elsecrew&lt;/span&gt; · worktree/auth-repair&lt;/span&gt;&lt;span&gt;변경 +24 −2 · 안전 확인됨&lt;/span&gt;&lt;/footer&gt;
+    &lt;/div&gt;
+    &lt;div class=&quot;m5-toast&quot; role=&quot;status&quot; aria-live=&quot;polite&quot;&gt;&lt;/div&gt;
+  &lt;/div&gt;
+  &lt;script&gt;
+    (() =&gt; {
+      const root = document.getElementById(&#x27;m5-agent-ide-concept&#x27;);
+      const tabs = [...root.querySelectorAll(&#x27;.m5-tab-btn&#x27;)];
+      const panels = [...root.querySelectorAll(&#x27;[data-panel-content]&#x27;)];
+      const toast = root.querySelector(&#x27;.m5-toast&#x27;);
+      let toastTimer;
+      const showToast = (message) =&gt; {
+        toast.textContent = message;
+        toast.classList.add(&#x27;show&#x27;);
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() =&gt; toast.classList.remove(&#x27;show&#x27;), 1700);
+      };
+      tabs.forEach((tab) =&gt; tab.addEventListener(&#x27;click&#x27;, () =&gt; {
+        tabs.forEach((item) =&gt; item.setAttribute(&#x27;aria-selected&#x27;, String(item === tab)));
+        panels.forEach((panel) =&gt; { panel.hidden = panel.dataset.panelContent !== tab.dataset.panel; });
+        root.querySelector(&#x27;.m5-left&#x27;).classList.toggle(&#x27;m5-chat-tab&#x27;, tab.dataset.panel === &#x27;chats&#x27;);
+        root.querySelector(&#x27;.m5-new-chat&#x27;).hidden = tab.dataset.panel !== &#x27;chats&#x27;;
+      }));
+      const chatData = {
+        login: [&#x27;로그인 오류 고치기&#x27;, &#x27;팀 대화 · 기획 Codex → 개발 Claude Code&#x27;, &#x27;로그인이 만료됐을 때 막다른 화면 대신 다시 로그인할 수 있게 고쳐줘.&#x27;],
+        home: [&#x27;홈 화면 정리&#x27;, &#x27;기획 단독 · Codex · Sol · medium&#x27;, &#x27;처음 돌아온 사용자가 다음에 무엇을 해야 하는지 홈 화면을 정리해줘.&#x27;],
+        tests: [&#x27;설치 테스트 확인&#x27;, &#x27;검토 단독 · Codex · Sol · high&#x27;, &#x27;Windows 설치 테스트가 놓치는 위험이 없는지 검토해줘.&#x27;],
+        doctor: [&#x27;오류 문구 쉽게 바꾸기&#x27;, &#x27;팀 대화 · 기획 Codex → 개발 Claude Code&#x27;, &#x27;네트워크 오류 문구를 코딩을 모르는 사람도 이해하게 바꿔줘.&#x27;]
+      };
+      const projectData = {
+        &#x27;elsecrew&#x27;: [&#x27;elsecrew&#x27;, &#x27;로그인 오류 고치기&#x27;, &#x27;변경 3&#x27;, &#x27;2개의 확인할 작업&#x27;],
+        &#x27;portfolio&#x27;: [&#x27;portfolio&#x27;, &#x27;소개 화면 다듬기&#x27;, &#x27;변경 1&#x27;, &#x27;1개의 확인할 작업&#x27;],
+        &#x27;shop-api&#x27;: [&#x27;shop-api&#x27;, &#x27;결제 API 문서화&#x27;, &#x27;변경 0&#x27;, &#x27;모든 작업이 정리됨&#x27;],
+        &#x27;notes&#x27;: [&#x27;notes&#x27;, &#x27;검색 기능 계획&#x27;, &#x27;변경 0&#x27;, &#x27;새 작업을 시작할 수 있음&#x27;]
+      };
+      let currentProject = &#x27;elsecrew&#x27;;
+      root.querySelectorAll(&#x27;.m5-project-item&#x27;).forEach((item) =&gt; item.addEventListener(&#x27;click&#x27;, () =&gt; {
+        root.querySelectorAll(&#x27;.m5-project-item&#x27;).forEach((other) =&gt; other.setAttribute(&#x27;aria-current&#x27;, String(other === item)));
+        currentProject = item.dataset.project;
+        const data = projectData[item.dataset.project];
+        root.querySelector(&#x27;.m5-project strong&#x27;).textContent = data[0];
+        root.querySelector(&#x27;.m5-project span:last-child&#x27;).textContent = data[1];
+        root.querySelector(&#x27;#m5-status-project&#x27;).textContent = data[0];
+        root.querySelector(&#x27;.m5-browser-head strong&#x27;).textContent = data[0];
+        root.querySelector(&#x27;.m5-change-tab-count&#x27;).textContent = data[2].replace(&#x27;변경 &#x27;, &#x27;&#x27;);
+        setSettingsOpen(false);
+        showToast(data[0] + &#x27; · &#x27; + data[3]);
+      }));
+      root.querySelector(&#x27;.m5-add-project&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; showToast(&#x27;폴더를 골라 새 프로젝트를 추가합니다&#x27;));
+      const settingsButton = root.querySelector(&#x27;.m5-settings-button&#x27;);
+      const settingsScreen = root.querySelector(&#x27;.m5-settings&#x27;);
+      const setSettingsOpen = (open) =&gt; {
+        workspace.classList.toggle(&#x27;m5-settings-open&#x27;, open);
+        settingsScreen.setAttribute(&#x27;aria-hidden&#x27;, String(!open));
+        settingsButton.setAttribute(&#x27;aria-current&#x27;, String(open));
+        root.querySelector(&#x27;#m5-layout-reset&#x27;).hidden = open;
+        root.querySelectorAll(&#x27;.m5-work-context&#x27;).forEach((item) =&gt; { item.hidden = open; });
+        root.querySelector(&#x27;.m5-settings-context&#x27;).hidden = !open;
+        if (open) applyScope(currentProject);
+      };
+      settingsButton.addEventListener(&#x27;click&#x27;, () =&gt; setSettingsOpen(settingsButton.getAttribute(&#x27;aria-current&#x27;) !== &#x27;true&#x27;));
+      root.querySelector(&#x27;#m5-settings-close&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; setSettingsOpen(false));
+      root.querySelectorAll(&#x27;.m5-settings-nav-item&#x27;).forEach((item) =&gt; item.addEventListener(&#x27;click&#x27;, () =&gt; {
+        root.querySelectorAll(&#x27;.m5-settings-nav-item&#x27;).forEach((other) =&gt; other.setAttribute(&#x27;aria-current&#x27;, String(other === item)));
+        if (item.textContent !== &#x27;역할과 모델&#x27;) showToast(item.textContent + &#x27; 설정 화면&#x27;);
+      }));
+      const roleData = {
+        planning: { name: &#x27;기획&#x27;, instructions: &#x27;요구사항을 쉬운 말로 정리하고, 구현 전에 선택지와 위험을 비교합니다. 파일은 읽을 수 있지만 수정하지 않습니다.&#x27; },
+        coding: { name: &#x27;코딩&#x27;, instructions: &#x27;승인된 계획에 따라 격리된 작업 공간에서 코드를 수정하고 테스트합니다. 원본 프로젝트에는 직접 반영하지 않습니다.&#x27; },
+        review: { name: &#x27;검토&#x27;, instructions: &#x27;변경 내용과 테스트 결과를 독립적으로 확인하고, 위험과 빠진 부분을 구체적으로 설명합니다. 파일은 수정하지 않습니다.&#x27; }
+      };
+      const scopeSelect = root.querySelector(&#x27;#m5-role-scope&#x27;);
+      const scopeSummary = root.querySelector(&#x27;#m5-scope-summary&#x27;);
+      const scopeNote = root.querySelector(&#x27;#m5-scope-note&#x27;);
+      const scopeConfigs = {
+        default: {
+          planning: [&#x27;Codex&#x27;, &#x27;Sol&#x27;, &#x27;medium&#x27;], coding: [&#x27;Codex&#x27;, &#x27;Sol&#x27;, &#x27;기본값&#x27;], review: [&#x27;Codex&#x27;, &#x27;Sol&#x27;, &#x27;high&#x27;]
+        },
+        &#x27;elsecrew&#x27;: {
+          planning: [&#x27;Codex&#x27;, &#x27;Sol&#x27;, &#x27;medium&#x27;], coding: [&#x27;Claude Code&#x27;, &#x27;Opus 5&#x27;, &#x27;기본값&#x27;], review: [&#x27;Codex&#x27;, &#x27;Sol&#x27;, &#x27;high&#x27;]
+        },
+        portfolio: {
+          planning: [&#x27;Claude Code&#x27;, &#x27;Opus 5&#x27;, &#x27;high&#x27;], coding: [&#x27;Claude Code&#x27;, &#x27;Opus 5&#x27;, &#x27;기본값&#x27;], review: [&#x27;Codex&#x27;, &#x27;Sol&#x27;, &#x27;high&#x27;]
+        },
+        &#x27;shop-api&#x27;: {
+          planning: [&#x27;Codex&#x27;, &#x27;Sol&#x27;, &#x27;high&#x27;], coding: [&#x27;Claude Code&#x27;, &#x27;Opus 5&#x27;, &#x27;high&#x27;], review: [&#x27;Codex&#x27;, &#x27;Sol&#x27;, &#x27;high&#x27;]
+        },
+        notes: {
+          planning: [&#x27;Codex&#x27;, &#x27;Sol&#x27;, &#x27;medium&#x27;], coding: [&#x27;Codex&#x27;, &#x27;Sol&#x27;, &#x27;기본값&#x27;], review: [&#x27;Codex&#x27;, &#x27;Sol&#x27;, &#x27;medium&#x27;]
+        }
+      };
+      const scopeChanges = { &#x27;elsecrew&#x27;: 2, portfolio: 3, &#x27;shop-api&#x27;: 3, notes: 1 };
+      const applyScope = (scope) =&gt; {
+        scopeSelect.value = scope;
+        const config = scopeConfigs[scope];
+        root.querySelectorAll(&#x27;tr[data-role]&#x27;).forEach((row) =&gt; {
+          const values = config[row.dataset.role];
+          row.querySelectorAll(&#x27;select&#x27;).forEach((select, index) =&gt; { select.value = values[index]; });
+        });
+        if (scope === &#x27;default&#x27;) {
+          scopeSummary.textContent = &#x27;새 프로젝트가 처음 사용하는 앱 기본값&#x27;;
+          scopeNote.textContent = &#x27;여기서 바꾼 내용은 별도 설정이 없는 프로젝트에 적용됩니다.&#x27;;
+        } else {
+          scopeSummary.textContent = scope + &#x27; 전용 설정 · 앱 기본값에서 &#x27; + scopeChanges[scope] + &#x27;개 변경&#x27;;
+          scopeNote.textContent = &#x27;여기서 바꾼 내용은 &#x27; + scope + &#x27;의 새 채팅에만 적용됩니다.&#x27;;
+        }
+      };
+      scopeSelect.addEventListener(&#x27;change&#x27;, () =&gt; {
+        applyScope(scopeSelect.value);
+        showToast(scopeSelect.value === &#x27;default&#x27; ? &#x27;앱 기본값을 편집합니다&#x27; : scopeSelect.value + &#x27;의 역할 설정을 편집합니다&#x27;);
+      });
+      root.querySelectorAll(&#x27;tr[data-role]&#x27;).forEach((row) =&gt; row.addEventListener(&#x27;click&#x27;, (event) =&gt; {
+        if (event.target.closest(&#x27;select&#x27;)) return;
+        root.querySelectorAll(&#x27;tr[data-role]&#x27;).forEach((other) =&gt; other.setAttribute(&#x27;aria-selected&#x27;, String(other === row)));
+        const role = roleData[row.dataset.role];
+        root.querySelector(&#x27;#m5-role-editor-name&#x27;).textContent = role.name;
+        root.querySelector(&#x27;#m5-role-name-input&#x27;).value = role.name;
+        root.querySelector(&#x27;#m5-role-instructions&#x27;).value = role.instructions;
+      }));
+      root.querySelector(&#x27;#m5-add-role&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; {
+        root.querySelector(&#x27;#m5-role-editor-name&#x27;).textContent = &#x27;새&#x27;;
+        root.querySelector(&#x27;#m5-role-name-input&#x27;).value = &#x27;&#x27;;
+        root.querySelector(&#x27;#m5-role-instructions&#x27;).value = &#x27;&#x27;;
+        root.querySelector(&#x27;#m5-role-name-input&#x27;).focus();
+        showToast(&#x27;새 역할의 이름과 책임을 정해주세요&#x27;);
+      });
+      root.querySelectorAll(&#x27;.m5-chat-item&#x27;).forEach((item) =&gt; item.addEventListener(&#x27;click&#x27;, () =&gt; {
+        root.querySelectorAll(&#x27;.m5-chat-item&#x27;).forEach((other) =&gt; other.setAttribute(&#x27;aria-current&#x27;, String(other === item)));
+        const data = chatData[item.dataset.chat];
+        root.querySelector(&#x27;#m5-chat-title&#x27;).textContent = data[0];
+        root.querySelector(&#x27;#m5-role-label&#x27;).textContent = data[1];
+        root.querySelector(&#x27;#m5-goal&#x27;).textContent = data[2];
+      }));
+      root.querySelectorAll(&#x27;[data-file]&#x27;).forEach((item) =&gt; item.addEventListener(&#x27;click&#x27;, () =&gt; {
+        const filePaths = { &#x27;App.tsx&#x27;: &#x27;src/App.tsx&#x27;, &#x27;doctor.ts&#x27;: &#x27;src/doctor.ts&#x27;, &#x27;store.ts&#x27;: &#x27;src/store.ts&#x27;, &#x27;login.rs&#x27;: &#x27;src-tauri/src/login.rs&#x27;, &#x27;error.rs&#x27;: &#x27;src-tauri/src/error.rs&#x27;, &#x27;package.json&#x27;: &#x27;package.json&#x27;, &#x27;auth.test.ts&#x27;: &#x27;tests/auth.test.ts&#x27; };
+        root.querySelectorAll(&#x27;[data-file]&#x27;).forEach((other) =&gt; other.setAttribute(&#x27;aria-current&#x27;, String(other.dataset.file === item.dataset.file)));
+        root.querySelector(&#x27;#m5-current-file&#x27;).textContent = filePaths[item.dataset.file];
+        showToast(item.dataset.file + &#x27; 파일을 열었습니다&#x27;);
+      }));
+      root.querySelectorAll(&#x27;[data-view]&#x27;).forEach((button) =&gt; button.addEventListener(&#x27;click&#x27;, () =&gt; {
+        root.querySelectorAll(&#x27;[data-view]&#x27;).forEach((other) =&gt; other.classList.toggle(&#x27;active&#x27;, other === button));
+        showToast(button.dataset.view === &#x27;split&#x27; ? &#x27;나란히 비교 보기&#x27; : &#x27;한 화면에서 비교 보기&#x27;);
+      }));
+      const workspace = root.querySelector(&#x27;.m5-shell&#x27;);
+      const panes = [...root.querySelectorAll(&#x27;.m5-pane&#x27;)];
+      const defaultPaneOrder = [&#x27;context&#x27;, &#x27;editor&#x27;, &#x27;agent&#x27;];
+      let draggedPane = null;
+      let pointerStart = null;
+      let pointerTarget = null;
+      const clearDropState = () =&gt; panes.forEach((pane) =&gt; pane.classList.remove(&#x27;m5-dragging&#x27;, &#x27;m5-drop-target&#x27;, &#x27;m5-drop-before&#x27;, &#x27;m5-drop-after&#x27;));
+      const movePane = (target, side) =&gt; {
+        if (!draggedPane || !target || draggedPane === target) return;
+        if (side === &#x27;before&#x27;) workspace.insertBefore(draggedPane, target);
+        else workspace.insertBefore(draggedPane, target.nextSibling);
+        const movedName = { context: &#x27;채팅·파일&#x27;, editor: &#x27;코드·diff&#x27;, agent: &#x27;에이전트 채팅&#x27; }[draggedPane.dataset.pane];
+        showToast(movedName + &#x27; 패널 배치를 저장했습니다&#x27;);
+      };
+      const updateDropTarget = (clientX, clientY) =&gt; {
+        if (!pointerStart || !draggedPane) return;
+        if (Math.hypot(clientX - pointerStart.x, clientY - pointerStart.y) &lt; 7) return;
+        draggedPane.classList.add(&#x27;m5-dragging&#x27;);
+        const target = document.elementFromPoint(clientX, clientY)?.closest(&#x27;.m5-pane&#x27;);
+        panes.forEach((other) =&gt; other.classList.remove(&#x27;m5-drop-target&#x27;, &#x27;m5-drop-before&#x27;, &#x27;m5-drop-after&#x27;));
+        if (!target || target === draggedPane) { pointerTarget = null; return; }
+        const bounds = target.getBoundingClientRect();
+        const side = clientX &lt; bounds.left + bounds.width / 2 ? &#x27;before&#x27; : &#x27;after&#x27;;
+        pointerTarget = { pane: target, side };
+        target.classList.add(&#x27;m5-drop-target&#x27;, side === &#x27;before&#x27; ? &#x27;m5-drop-before&#x27; : &#x27;m5-drop-after&#x27;);
+      };
+      const finishPointerDrop = () =&gt; {
+        if (pointerTarget) movePane(pointerTarget.pane, pointerTarget.side);
+        clearDropState();
+        draggedPane = null;
+        pointerStart = null;
+        pointerTarget = null;
+      };
+      root.querySelectorAll(&#x27;[data-drag-pane]&#x27;).forEach((grip) =&gt; {
+        grip.addEventListener(&#x27;dragstart&#x27;, (event) =&gt; {
+          draggedPane = root.querySelector(&#x27;[data-pane=&quot;&#x27; + grip.dataset.dragPane + &#x27;&quot;]&#x27;);
+          draggedPane.classList.add(&#x27;m5-dragging&#x27;);
+          event.dataTransfer.effectAllowed = &#x27;move&#x27;;
+          event.dataTransfer.setData(&#x27;text/plain&#x27;, grip.dataset.dragPane);
+        });
+        grip.addEventListener(&#x27;dragend&#x27;, () =&gt; {
+          clearDropState();
+          draggedPane = null;
+        });
+        grip.addEventListener(&#x27;pointerdown&#x27;, (event) =&gt; {
+          draggedPane = root.querySelector(&#x27;[data-pane=&quot;&#x27; + grip.dataset.dragPane + &#x27;&quot;]&#x27;);
+          pointerStart = { x: event.clientX, y: event.clientY };
+          pointerTarget = null;
+          grip.setPointerCapture(event.pointerId);
+        });
+        grip.addEventListener(&#x27;pointermove&#x27;, (event) =&gt; {
+          updateDropTarget(event.clientX, event.clientY);
+        });
+        grip.addEventListener(&#x27;pointerup&#x27;, () =&gt; {
+          finishPointerDrop();
+        });
+        grip.addEventListener(&#x27;mousedown&#x27;, (event) =&gt; {
+          event.preventDefault();
+          draggedPane = root.querySelector(&#x27;[data-pane=&quot;&#x27; + grip.dataset.dragPane + &#x27;&quot;]&#x27;);
+          pointerStart = { x: event.clientX, y: event.clientY };
+          pointerTarget = null;
+          const onMove = (moveEvent) =&gt; updateDropTarget(moveEvent.clientX, moveEvent.clientY);
+          const onUp = () =&gt; {
+            document.removeEventListener(&#x27;mousemove&#x27;, onMove);
+            document.removeEventListener(&#x27;mouseup&#x27;, onUp);
+            finishPointerDrop();
+          };
+          document.addEventListener(&#x27;mousemove&#x27;, onMove);
+          document.addEventListener(&#x27;mouseup&#x27;, onUp);
+        });
+        grip.addEventListener(&#x27;keydown&#x27;, (event) =&gt; {
+          if (!event.altKey || ![&#x27;ArrowLeft&#x27;, &#x27;ArrowRight&#x27;].includes(event.key)) return;
+          event.preventDefault();
+          const currentPane = root.querySelector(&#x27;[data-pane=&quot;&#x27; + grip.dataset.dragPane + &#x27;&quot;]&#x27;);
+          const currentOrder = [...root.querySelectorAll(&#x27;.m5-pane&#x27;)];
+          const index = currentOrder.indexOf(currentPane);
+          const nextIndex = event.key === &#x27;ArrowLeft&#x27; ? index - 1 : index + 1;
+          if (nextIndex &lt; 0 || nextIndex &gt;= currentOrder.length) return;
+          draggedPane = currentPane;
+          movePane(currentOrder[nextIndex], event.key === &#x27;ArrowLeft&#x27; ? &#x27;before&#x27; : &#x27;after&#x27;);
+          draggedPane = null;
+        });
+      });
+      panes.forEach((pane) =&gt; {
+        pane.addEventListener(&#x27;dragover&#x27;, (event) =&gt; {
+          if (!draggedPane || draggedPane === pane) return;
+          event.preventDefault();
+          panes.forEach((other) =&gt; other.classList.remove(&#x27;m5-drop-target&#x27;, &#x27;m5-drop-before&#x27;, &#x27;m5-drop-after&#x27;));
+          const bounds = pane.getBoundingClientRect();
+          const side = event.clientX &lt; bounds.left + bounds.width / 2 ? &#x27;before&#x27; : &#x27;after&#x27;;
+          pane.dataset.dropSide = side;
+          pane.classList.add(&#x27;m5-drop-target&#x27;, side === &#x27;before&#x27; ? &#x27;m5-drop-before&#x27; : &#x27;m5-drop-after&#x27;);
+        });
+        pane.addEventListener(&#x27;drop&#x27;, (event) =&gt; {
+          event.preventDefault();
+          if (!draggedPane || draggedPane === pane) return;
+          const side = pane.dataset.dropSide || &#x27;before&#x27;;
+          movePane(pane, side);
+          clearDropState();
+          draggedPane = null;
+        });
+      });
+      root.querySelector(&#x27;#m5-layout-reset&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; {
+        defaultPaneOrder.forEach((name) =&gt; workspace.appendChild(root.querySelector(&#x27;[data-pane=&quot;&#x27; + name + &#x27;&quot;]&#x27;)));
+        showToast(&#x27;기본 레이아웃으로 돌아왔습니다&#x27;);
+      });
+      const detailsButton = root.querySelector(&#x27;#m5-detail-toggle&#x27;);
+      const details = root.querySelector(&#x27;#m5-details&#x27;);
+      detailsButton.addEventListener(&#x27;click&#x27;, () =&gt; {
+        details.hidden = !details.hidden;
+        detailsButton.setAttribute(&#x27;aria-expanded&#x27;, String(!details.hidden));
+      });
+      root.querySelectorAll(&#x27;[data-action]&#x27;).forEach((button) =&gt; button.addEventListener(&#x27;click&#x27;, () =&gt; {
+        const messages = { apply: &#x27;반영 전 최종 확인 단계로 이동합니다&#x27;, revise: &#x27;수정 요청을 이어서 작성할 수 있어요&#x27;, discard: &#x27;버리기 전 영향 범위를 확인합니다&#x27; };
+        showToast(messages[button.dataset.action]);
+      }));
+      root.querySelector(&#x27;.m5-new-chat&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; showToast(&#x27;프로젝트와 역할을 고르는 새 채팅을 엽니다&#x27;));
+      root.querySelector(&#x27;.m5-send&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; {
+        const input = root.querySelector(&#x27;textarea&#x27;);
+        showToast(input.value.trim() ? &#x27;후속 지시를 안전한 다음 단계에 전달합니다&#x27; : &#x27;먼저 수정할 점을 입력해주세요&#x27;);
+      });
+    })();
+  &lt;/script&gt;
+&lt;/div&gt;
+
+&lt;script src=&quot;https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  if (window.FloatingUIDOM == null) {
+    return;
+  }
+  const { autoUpdate, computePosition, flip, offset, shift, size } =
+    window.FloatingUIDOM;
+  const tooltipPlacements = new Set([&quot;top&quot;, &quot;right&quot;, &quot;bottom&quot;, &quot;left&quot;]);
+  const tooltipId = `codex-visualization-tooltip-${
+    window.crypto?.randomUUID?.() ?? Date.now().toString(36)
+  }`;
+  const tooltipGap = 5;
+  const hoverDelay = 700;
+  const skipDelay = 300;
+  let activeTrigger = null;
+  let pendingTrigger = null;
+  let tooltip = null;
+  let openTimeout = null;
+  let autoUpdateCleanup = null;
+  let positionRequest = 0;
+  let skipDelayUntil = 0;
+
+  const getTrigger = (target) =&gt;
+    target?.nodeType === Node.ELEMENT_NODE
+      ? target.closest(&quot;[data-tooltip]&quot;)
+      : null;
+  const containsTarget = (trigger, target) =&gt;
+    target?.nodeType != null &amp;&amp; trigger.contains(target);
+  const getContent = (trigger) =&gt;
+    trigger.getAttribute(&quot;data-tooltip&quot;)?.trim() ?? &quot;&quot;;
+  const getPlacement = (trigger) =&gt; {
+    const placement = trigger.getAttribute(&quot;data-tooltip-placement&quot;);
+    return tooltipPlacements.has(placement) ? placement : &quot;top&quot;;
+  };
+  const getTooltip = () =&gt; {
+    if (tooltip == null) {
+      tooltip = document.createElement(&quot;div&quot;);
+      tooltip.id = tooltipId;
+      tooltip.className = &quot;tooltip&quot;;
+      tooltip.setAttribute(&quot;role&quot;, &quot;tooltip&quot;);
+    }
+    return tooltip;
+  };
+  const setDescribedBy = (trigger, described) =&gt; {
+    const ids = new Set(
+      (trigger.getAttribute(&quot;aria-describedby&quot;) ?? &quot;&quot;)
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    if (described) {
+      ids.add(tooltipId);
+    } else {
+      ids.delete(tooltipId);
+    }
+    if (ids.size === 0) {
+      trigger.removeAttribute(&quot;aria-describedby&quot;);
+    } else {
+      trigger.setAttribute(&quot;aria-describedby&quot;, [...ids].join(&quot; &quot;));
+    }
+  };
+  const clearOpenTimeout = () =&gt; {
+    if (openTimeout != null) {
+      window.clearTimeout(openTimeout);
+      openTimeout = null;
+    }
+    pendingTrigger = null;
+  };
+  const closeTooltip = (activateSkipDelay = true) =&gt; {
+    clearOpenTimeout();
+    positionRequest += 1;
+    autoUpdateCleanup?.();
+    autoUpdateCleanup = null;
+    if (activeTrigger == null) {
+      return;
+    }
+    setDescribedBy(activeTrigger, false);
+    activeTrigger = null;
+    tooltip?.remove();
+    if (activateSkipDelay) {
+      skipDelayUntil = Date.now() + skipDelay;
+    }
+  };
+  const updatePosition = (trigger, floating) =&gt; {
+    const request = ++positionRequest;
+    void computePosition(trigger, floating, {
+      middleware: [
+        offset(tooltipGap),
+        flip({ padding: tooltipGap }),
+        shift({ padding: tooltipGap }),
+        size({
+          padding: tooltipGap,
+          apply({ availableHeight, availableWidth, elements }) {
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-width&quot;,
+              `${Math.max(0, availableWidth)}px`,
+            );
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-height&quot;,
+              `${Math.max(0, availableHeight)}px`,
+            );
+          },
+        }),
+      ],
+      placement: getPlacement(trigger),
+      strategy: &quot;fixed&quot;,
+    })
+      .then(({ x, y }) =&gt; {
+        if (activeTrigger !== trigger || request !== positionRequest) {
+          return;
+        }
+        const scale = window.devicePixelRatio || 1;
+        floating.style.transform = `translate(${Math.round(x * scale) / scale}px, ${Math.round(y * scale) / scale}px)`;
+        floating.style.visibility = &quot;visible&quot;;
+      })
+      .catch(() =&gt; {
+        if (activeTrigger === trigger &amp;&amp; request === positionRequest) {
+          closeTooltip(false);
+        }
+      });
+  };
+  const openTooltip = (trigger) =&gt; {
+    const content = getContent(trigger);
+    if (!trigger.isConnected || content.length === 0) {
+      return;
+    }
+    clearOpenTimeout();
+    if (activeTrigger === trigger) {
+      return;
+    }
+    closeTooltip();
+    const floating = getTooltip();
+    floating.textContent = content;
+    floating.style.visibility = &quot;hidden&quot;;
+    floating.style.transform = &quot;translate(0, 0)&quot;;
+    document.body.appendChild(floating);
+    activeTrigger = trigger;
+    setDescribedBy(trigger, true);
+    autoUpdateCleanup = autoUpdate(trigger, floating, () =&gt; {
+      updatePosition(trigger, floating);
+    });
+  };
+  const requestOpen = (trigger, immediate = false) =&gt; {
+    if (
+      getContent(trigger).length === 0 ||
+      activeTrigger === trigger ||
+      pendingTrigger === trigger
+    ) {
+      return;
+    }
+    clearOpenTimeout();
+    pendingTrigger = trigger;
+    const delay =
+      immediate || activeTrigger != null || Date.now() &lt; skipDelayUntil
+        ? 0
+        : hoverDelay;
+    if (delay === 0) {
+      openTooltip(trigger);
+      return;
+    }
+    openTimeout = window.setTimeout(() =&gt; {
+      openTimeout = null;
+      pendingTrigger = null;
+      openTooltip(trigger);
+    }, delay);
+  };
+  const handlePointerOpen = (event) =&gt; {
+    if (event.pointerType === &quot;touch&quot;) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    requestOpen(trigger);
+  };
+  const handleLeave = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const handleFocusIn = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger?.matches(&quot;:focus-visible&quot;)) {
+      requestOpen(trigger, true);
+    }
+  };
+  const handleKeyDown = (event) =&gt; {
+    if (event.key === &quot;Escape&quot;) {
+      closeTooltip();
+    }
+  };
+  const handleContextMenu = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const destroy = () =&gt; {
+    closeTooltip(false);
+    document.removeEventListener(&quot;pointerover&quot;, handlePointerOpen);
+    document.removeEventListener(&quot;pointerout&quot;, handleLeave);
+    document.removeEventListener(&quot;focusin&quot;, handleFocusIn);
+    document.removeEventListener(&quot;focusout&quot;, handleLeave);
+    document.removeEventListener(&quot;keydown&quot;, handleKeyDown);
+    document.removeEventListener(&quot;contextmenu&quot;, handleContextMenu);
+    tooltip = null;
+  };
+
+  document.addEventListener(&quot;pointerover&quot;, handlePointerOpen);
+  document.addEventListener(&quot;pointerout&quot;, handleLeave);
+  document.addEventListener(&quot;focusin&quot;, handleFocusIn);
+  document.addEventListener(&quot;focusout&quot;, handleLeave);
+  document.addEventListener(&quot;keydown&quot;, handleKeyDown);
+  document.addEventListener(&quot;contextmenu&quot;, handleContextMenu);
+  window.addEventListener(&quot;pagehide&quot;, destroy, { once: true });
+})();
+&lt;/script&gt;
+&lt;script id=&quot;codex-visualization-lucide&quot; async src=&quot;https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  const initialize = () =&gt; {
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+  };
+  if (globalThis.lucide != null) {
+    initialize();
+    return;
+  }
+  document
+    .getElementById(&quot;codex-visualization-lucide&quot;)
+    ?.addEventListener(&quot;load&quot;, initialize, { once: true });
+})();
+&lt;/script&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe>
+</body>
+</html>

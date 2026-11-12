@@ -55,7 +55,7 @@ const faqs = [
   {
     question: "내 비밀번호나 대화가 앱에 저장되나요?",
     answer:
-      "아니요. 로그인은 Claude와 ChatGPT의 공식 화면에서 진행하며 Hello, Agent는 비밀번호나 인증 토큰을 저장하지 않아요.",
+      "아니요. 로그인은 Claude와 ChatGPT의 공식 화면에서 진행하며 Elsecrew는 비밀번호나 인증 토큰을 저장하지 않아요.",
   },
 ] as const;
 
@@ -70,20 +70,20 @@ function BrandMark() {
 
 function ProductPreview() {
   return (
-    <div className="product-preview" aria-label="Hello, Agent 앱 화면 미리보기">
+    <div className="product-preview" aria-label="Elsecrew 앱 화면 미리보기">
       <div className="window-bar">
         <div className="window-dots" aria-hidden="true">
           <i />
           <i />
           <i />
         </div>
-        <span>Hello, Agent</span>
+        <span>Elsecrew</span>
         <span className="window-spacer" />
       </div>
       <div className="preview-body dashboard-preview">
         <div className="preview-heading">
           <div>
-            <p className="preview-eyebrow">HELLO, AGENT</p>
+            <p className="preview-eyebrow">Elsecrew</p>
             <h2>내 에이전트</h2>
           </div>
           <span className="preview-ready">● 모두 준비됨</span>
@@ -131,9 +131,9 @@ export default function Home() {
   return (
     <main>
       <header className="site-header">
-        <a className="brand" href="#top" aria-label="Hello, Agent 처음으로">
+        <a className="brand" href="#top" aria-label="Elsecrew 처음으로">
           <BrandMark />
-          <span>Hello, Agent</span>
+          <span>Elsecrew</span>
         </a>
         <nav aria-label="주요 메뉴">
           <a href="#homebase">설치 후에도</a>
@@ -157,7 +157,7 @@ export default function Home() {
             <em>코딩 에이전트</em>는 쓸 수 있어요.
           </h1>
           <p className="hero-description">
-            설치부터 로그인, 안전한 첫 프로젝트까지. Hello, Agent가 어려운
+            설치부터 로그인, 안전한 첫 프로젝트까지. Elsecrew가 어려운
             설정을 대신하고, 이후에도 프로젝트와 에이전트 상태를 한곳에서
             챙겨드립니다.
           </p>
@@ -192,7 +192,7 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="problem-strip" aria-label="Hello, Agent가 해결하는 문제">
+      <section className="problem-strip" aria-label="Elsecrew가 해결하는 문제">
         <p>명령어 복사</p>
         <span aria-hidden="true">×</span>
         <p>PATH 설정</p>
@@ -278,7 +278,7 @@ export default function Home() {
             <p className="section-kicker light">처음이니까 더 조심스럽게</p>
             <h2>내 파일과 계정을 먼저 생각했어요.</h2>
             <p>
-              코딩 에이전트는 강력한 도구입니다. 그래서 Hello, Agent는 처음부터
+              코딩 에이전트는 강력한 도구입니다. 그래서 Elsecrew는 처음부터
               안전한 범위 안에서 시작하도록 기본 설정을 챙깁니다.
             </p>
             <ul>
@@ -358,7 +358,7 @@ export default function Home() {
 
       <section className="download-section" id="download">
         <div>
-          <p className="section-kicker light">Hello, Agent 0.1</p>
+          <p className="section-kicker light">Elsecrew 0.1</p>
           <h2>첫 베타를 지금 받을 수 있어요.</h2>
           <p>
             macOS와 Windows용 설치 파일을 GitHub 릴리스에서 내려받으세요.
@@ -379,7 +379,7 @@ export default function Home() {
       <footer>
         <a className="brand footer-brand" href="#top">
           <BrandMark />
-          <span>Hello, Agent</span>
+          <span>Elsecrew</span>
         </a>
         <p>코딩 에이전트와의 첫 만남을 더 쉽게.</p>
         <a

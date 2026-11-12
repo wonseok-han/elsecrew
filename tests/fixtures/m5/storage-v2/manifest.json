@@ -1,0 +1,281 @@
+{
+  "schemaVersion": 1,
+  "storageSchemaVersion": 2,
+  "protocolVersion": 1,
+  "wire": {
+    "method": "storage.status",
+    "payloadSchemaVersion": 1,
+    "bridgeVersion": 6,
+    "bridgeMethod": "getStorageStatus",
+    "advertisedBeforeD1": false,
+    "dispatchableBeforeD1": false,
+    "casesFile": "status-cases.json"
+  },
+  "migration": {
+    "file": "migration-v1-to-v2.sql",
+    "fromVersion": 1,
+    "toVersion": 2,
+    "mode": "additiveDdlIndexesMetadataOnly",
+    "tables": [
+      "storage_schema_meta",
+      "ledger_baselines",
+      "operation_receipts",
+      "chat_messages",
+      "prepared_workspaces",
+      "maintenance_jobs"
+    ],
+    "indexes": [
+      "chats_identity_project",
+      "ledger_baselines_cutoff",
+      "operation_receipts_aggregate_sequence",
+      "chat_messages_chat_sequence",
+      "prepared_workspaces_project_state",
+      "maintenance_jobs_status_created"
+    ],
+    "existingTablesPreserved": [
+      "schema_meta",
+      "app_instances",
+      "events",
+      "projects",
+      "chats",
+      "runs",
+      "locks"
+    ],
+    "existingEventsDeleted": false,
+    "existingProjectionColumnsChanged": false,
+    "startupReadyBeforeMaterialization": true,
+    "materializationTrigger": "idleAfterSidecarHandshakeReady",
+    "materializationStateReadyRequired": false,
+    "downgradePolicy": "openQuestion"
+  },
+  "batching": {
+    "schemaVersion": 1,
+    "casesFile": "batching-cases.json",
+    "guards": {
+      "maxSourceRowsPerBatch": 100,
+      "maxCanonicalSourcePayloadBytesPerBatch": 1048576,
+      "singleSourcePayloadOversize": "contractError",
+      "callerConfigurable": false,
+      "appliesToPhases": [
+        "receipts",
+        "messages",
+        "workspaces",
+        "baselines",
+        "verify"
+      ]
+    },
+    "cursor": {
+      "schemaVersion": 1,
+      "phases": [
+        "receipts",
+        "messages",
+        "workspaces",
+        "baselines",
+        "verify",
+        "compact"
+      ],
+      "scanPhases": [
+        "receipts",
+        "messages",
+        "workspaces",
+        "baselines",
+        "verify"
+      ],
+      "phaseStartAfterEventRowid": 0,
+      "samePhaseProgress": "strictlyIncreasingWithinFrozenCutoff",
+      "phaseTransition": "currentAtCutoffThenNextPhaseAfterZero",
+      "compact": "reservedDisabledAfterVerifyCompletionOnly"
+    },
+    "scan": {
+      "predicate": "rowid > afterEventRowid AND rowid <= cutoffEventRowid",
+      "orderBy": "rowid",
+      "offsetAllowed": false
+    },
+    "source": {
+      "artifactAuthority": "eventsAtOrBelowFrozenCutoffOnly",
+      "workspaceAndBaselineSource": "eventProjectionSnapshotsAtOrBelowFrozenCutoff",
+      "repeatedProjectionSnapshots": "idempotent",
+      "liveProjectionUse": "finalCatchUpEquivalenceOnlyAfterMaxEventRowidEqualsCutoff",
+      "unboundedCollectionAllowed": false
+    },
+    "transaction": {
+      "cadence": "oneBatchOneBeginImmediatePerIdleTurn",
+      "committedDerivedRowsMayPersist": true,
+      "committedProgressState": "pending",
+      "implementationMayCommitRunning": false
+    },
+    "cancellation": {
+      "beforeBegin": "noMutation",
+      "checks": [
+        "beforeEachSourceRow",
+        "afterEachSourceRow",
+        "immediatelyPrecommit"
+      ],
+      "duringTransaction": "rollbackCurrentBatch",
+      "outcome": "Suspended",
+      "crash": "rollbackCurrentBatchResumePrecedingCommittedPendingCursor",
+      "committedBatchWinsAfterFinalPrecommitCheck": true
+    },
+    "job": {
+      "table": "maintenance_jobs",
+      "jobKind": "losslessCompaction",
+      "cursorColumn": "cutoff_json",
+      "cursorEncoding": "canonicalJsonCursorSchemaVersion1",
+      "maximumActiveJobs": 1,
+      "activeStates": [
+        "pending",
+        "running"
+      ],
+      "resumableState": "pending",
+      "inMemoryOnlyOutcome": "Suspended",
+      "persistedMaintenanceJobFailClosedStates": [
+        "running"
+      ],
+      "terminalMaintenanceJobStates": [
+        "succeeded",
+        "failed"
+      ],
+      "failedMaintenanceJobRole": "terminalHistoryNoAutomaticRetry",
+      "storageMetaFailClosedStates": [
+        "materializing",
+        "failed"
+      ],
+      "materializingLocation": "storage_schema_meta.materialization_state",
+      "sqlUniqueConstraintPresent": false,
+      "singleSqliteOwnerRequired": true,
+      "transactionSerialization": "beginImmediate",
+      "transactionBoundaryValidation": "zeroOrOneActiveExactPendingJobIdentityAndValidCursor",
+      "secondJobCreationAllowedWhenAnyLifetimeJobExists": false,
+      "initialTransition": "absentToPendingCursor",
+      "appendReactivation": "succeededToPendingSameJobCursorInAppendTransaction",
+      "batchCommit": "derivedRowsAndAdvancedPendingCursorAtomic",
+      "cancellationOrCurrentFailure": "rollbackLeavesPriorPendingCursor",
+      "finalPublicationTransition": "pendingToSucceeded",
+      "postRollbackFailureRecord": "optionalSeparateBestEffortCreateOrUpdateSanitizedFailedTransaction",
+      "automaticRetryEnabled": false
+    },
+    "append": {
+      "readyInvalidation": "pendingInSameAppendTransaction",
+      "readyPublication": "separateAtomicCatchUpVerificationTransaction",
+      "appendDuringMaterialization": "frozenCutoffUnchangedUntilFinalCatchUp",
+      "readyRegressionSequence": [
+        "materializeReady",
+        "appendAndInvalidateReadyToPendingSameTransaction",
+        "separateCatchUpVerification",
+        "publishReady"
+      ]
+    },
+    "finalPublication": {
+      "transaction": "separateBeginImmediate",
+      "prerequisites": [
+        "maxEventRowidEqualsCutoff",
+        "exactDerivedCompletenessAndEquivalence",
+        "liveProjectionEqualsCutoffReconstruction",
+        "boundedSqlKeysetEvidence"
+      ],
+      "maxRowidChanged": "remainPendingStartOrContinueCatchUpAtObservedCutoffNeverPublishReady",
+      "unboundedCollectionAllowed": false
+    },
+    "rollback": {
+      "derivedPreparationBatchesMayPersist": true,
+      "sourceLedgerMutationAtomicRollbackRequired": true,
+      "compactionTriggerChangeAtomicRollbackRequired": true
+    },
+    "activation": {
+      "ledgerDeletionEnabled": false,
+      "automaticSchedulingEnabled": false,
+      "compactionImplementationEnabled": false,
+      "statusWireEnabled": false
+    }
+  },
+  "compaction": {
+    "mode": "losslessInternalOnly",
+    "steps": [
+      "beginImmediate",
+      "freezeCutoff",
+      "materializeOperationReceipts",
+      "materializeChatMessagesAndPreparedWorkspaces",
+      "materializeLedgerBaselines",
+      "verifyBaselineTailProjectionEquivalent",
+      "verifyOperationDuplicateConflictEquivalent",
+      "verifyNamespaceAndRecoveryEquivalent",
+      "deleteVerifiedLedgerCutoff",
+      "verifyAppendOnlyGuardRestored",
+      "commit",
+      "checkpointBestEffort"
+    ],
+    "baselineTailReplayEquivalent": true,
+    "oldOperationDuplicateConflictPreserved": true,
+    "actualLegacyNamespacePreserved": true,
+    "failureRollbackRequired": true,
+    "failureRollbackScope": {
+      "derivedPreparationBatchesMayPersist": true,
+      "sourceLedgerMutationAtomicRollbackRequired": true,
+      "compactionTriggerChangeAtomicRollbackRequired": true
+    },
+    "logicalDeleteBeforeVerification": false,
+    "vacuumIsLogicalSuccessCriterion": false,
+    "physicalCleanupEnabled": false,
+    "cleanupCandidateApiEnabled": false,
+    "cleanupActionApiEnabled": false,
+    "operationReceiptsImmutable": true,
+    "chatMessagesImmutable": true,
+    "operationReceipt": {
+      "casesFile": "operation-receipt-cases.json",
+      "immutableFields": [
+        "operationId",
+        "eventId",
+        "aggregateType",
+        "aggregateId",
+        "aggregateSequence",
+        "eventType",
+        "payloadSchemaVersion",
+        "canonicalPayloadJson",
+        "canonicalPayloadDigestAlgorithm",
+        "canonicalPayloadDigestVersion",
+        "canonicalPayloadDigestFormat",
+        "canonicalPayloadDigest",
+        "eventTimestamp"
+      ],
+      "requestIdComparison": "ignoredLikeStorageV1",
+      "payloadComparison": "exactCanonicalJson",
+      "digest": {
+        "algorithm": "sha256",
+        "version": 1,
+        "format": "lowercaseHex64",
+        "role": "integrityCheckNotEqualitySubstitute",
+        "writerMustRecompute": true
+      }
+    },
+    "neverCleanupStates": [
+      "activeRun",
+      "cancellingRun",
+      "recoveryRequiredRun",
+      "unresolvedRecovery",
+      "poisonedLock",
+      "writerLock",
+      "pendingIntent",
+      "pendingSaveSession",
+      "incompleteOperation",
+      "activeWorkspace",
+      "boundWorkspace",
+      "roleSettings",
+      "userChatHistory",
+      "userEvidence",
+      "identityMismatch",
+      "orphanOrSymlinkUnknown"
+    ]
+  },
+  "publicStatusPrivacy": {
+    "allowedContent": "aggregateCountsBytesAndMaintenanceStateOnly",
+    "forbiddenFields": [
+      "rawChatText",
+      "rawProviderText",
+      "rawReasoning",
+      "prompt",
+      "token",
+      "auth",
+      "absolutePath"
+    ]
+  }
+}

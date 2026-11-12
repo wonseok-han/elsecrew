@@ -17,6 +17,8 @@ const KNOWN_KINDS = [
   "notfound",
   "permission",
   "disk",
+  "auth",
+  "notgit",
   "generic",
 ];
 
@@ -74,6 +76,18 @@ const PATTERNS: { match: RegExp; kind: string }[] = [
     kind: "permission",
   },
   { match: /no space|enospc|disk (is )?full/i, kind: "disk" },
+  // 에이전트 로그인이 풀렸다. **해결책이 분명한 상황**이라 반드시 그렇게 말해 줘야 한다 —
+  // 실사용에서 이 메시지를 버려서 사용자가 이유도 모른 채 막혔다.
+  {
+    match: /oauth|unauthorized|401|not logged ?in|authenticat|token .*(revoked|expired)/i,
+    kind: "auth",
+  },
+  // 파일럿이 안전한 작업 사본을 만들지 못했다. 화면을 그린 뒤 폴더가 바뀌면(TOCTOU)
+  // 사전 판정을 통과하고도 여기로 온다 — 그때도 영문 원문을 보여 주지 않는다.
+  {
+    match: /must be a git repository|not a git repository|pilot source/i,
+    kind: "notgit",
+  },
 ];
 
 type Source = string | string[] | null | undefined;

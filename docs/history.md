@@ -1,23 +1,362 @@
 # 작업 이력 (Hello, Agent)
 
-> 여러 코딩 에이전트(Claude Code, Codex)가 **번갈아 작업**할 때 컨텍스트를 이어받기 위한 워크로그다.
->
-> **세션 시작**: 아래 "핵심 결정·발견"과 "작업 규칙"을 읽고, 워크로그 맨 위 엔트리로 현재 상태를 파악한다.
-> **세션 종료**: 코드 변경이 없어도 프로젝트에 영향을 주는 분석·결정·검증·외부 작업을 했다면 워크로그 맨 위에 새 엔트리를 추가한다(최신이 위). 헤더는 `### YYYY-MM-DD · by <모델명>` 형식으로 **작업한 모델을 구체적으로** 적는다(예: `by Claude Opus 4.8`, `by GPT-5 Codex`). 한 날 여러 모델이 작업했으면 엔트리를 나눈다. 재사용할 만한 새 결정·발견은 "핵심 결정·발견"에도 반영한다. **엔트리는 덮어쓰지 말고 계속 쌓는다.**
+최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
----
+### 2026-11-12 · by GPT-6
+- 사용자 명시 승인으로 m5/coding-agent-ide 전체를 PR로 main에 통합한다. 기준 abd075dc에서 원격 main 대비1488개 커밋·714개 파일 변경을 확인했다. 이번 통합은 출시/gate 완료가 아니며 기존 테스트26실패·팀 실행 중단·채팅 영구 삭제·동적 역할 및 플랫폼/출시 미검증은 유지한다. GitHub 저장소 이름은 병합 후 사용자가 변경한다.
+
+### 2026-11-12 · by GPT-6
+- 사용자 별도 승인 후 정상 종료되지 않던 구 hello-agent 앱과 해당 bundle 하위 보조 프로세스만 종료하고 out/hello-agent-darwin-arm64를 제거했다(약315MB). 새 Elsecrew.app 존재를 재확인했다. /Applications 및 ~/Applications에서 별도 구 앱은 발견되지 않았다. 원본 프로젝트·기존 앱 데이터/로그인·새 Elsecrew 데이터는 변경하지 않았다.
+
+### 2026-11-12 · by GPT-6
+- 사용자 승인으로 새 데이터 기반 Elsecrew 전면 리브랜딩: npm/Cargo crate·binary/import·DB·환경변수·Electron/Tauri 식별자·브랜드 자산·현재 문서/CI/scripts/tests/웹사이트 이름을 통일했다. 기존 앱 데이터/로그인 자동 이전·삭제 없음. 원격 저장소 이름은 사용자가 추후 변경하므로 기존 GitHub URL과 과거 워크로그/아카이브는 보존한다.
+- 검증: TypeScript·Rust release workspace check·이름/패키지 검사35개·macOS package/smoke 통과. 실제 Elsecrew.app의 표시/실행파일 Elsecrew·bundle com.wonseokhan.elsecrew와 빈 프로젝트/연결 안 됨 초기 화면 확인. 전체 npm720개 중694성공26실패는 변경 전HEAD 비교에서도 같은26개 실패다. 원래 팀 실행 중단/채팅 영구 삭제/동적 역할 미완료는 이번 이름 변경으로 해결됐다고 주장하지 않는다.
+- 저장공간 정리: 재생성 가능한 target 빌드 캐시(처음 약12GB 및 재빌드 산출물)와 이번 비교용 임시 checkout을 정리했다. 실행 중인 기존 앱/원본 프로젝트/옛 채팅·로그인/검증 증거는 보존한다. main 병합·push·GitHub 저장소 이름 변경·모델 실행 없음.
+### 2026-11-12 · by GPT-6
+- 사용자 실패 실행 beb888b3aa314f7f92cd3003f9f4ca43을 앱 화면과 DB/해당 Claude 세션 기록으로 읽기 전용 대조했다. 03:15:00Z 준비→03:15:10Z 세션 검증/모델 claude-opus-5-5→03:15:20Z failed/cleanExit, processesProvenGone=true·writer released·recovery=null. 공개 출력은 0건이다.
+- 같은 세션 c9375a02-00d1-4c18-a2a9-8ce5dfc90b4a에서 Bash 성공 뒤 작업 복사본 index.html Read가 is_error=true와 사용자 거절/중단 문구를 받았다. 이 문구만으로 실제 사용자의 거절 클릭을 입증할 수 없다. 앱 자동 승인 경계 실패·공급자 제어/취소 등 정확한 발생 지점은 현행 원장에 저장되지 않아 미확정이다. 로그인/모델 초기 연결 실패로 진단하지 않는다.
+- 실제 앱의 연결 진단 버튼도 남은 단계 없음으로 표시됐다. 현행 terminal 저장은 error kind/detail을 버리고 failed로 축약하며 approval delivery 오류도 원인 기록 없이 종료한다. 실행별 고정 실패 단계/원인 보존과 무과금 재현이 다음 작업이다. 이번은 진단이며 수정 완료가 아니다. 모델 재시도·설정/프로젝트/인증 변경·앱 종료 없음.
+
+### 2026-11-12 · by GPT-6
+- 미완료 기능 후속 파동(기준131f8111): 작업 복사본 물리 정리 API/설정 선택 목록을 구현했다. 이미 버린 채팅의 앱 전용 복사본만 대상이며 정식 종료·잠금·manifest·snapshot 검증, 영속 pending 기록→동일 루트 quarantine 이동→nofollow 삭제→완료 기록으로 재개한다. 원본·채팅 기록·복구 백업은 보존한다. Windows는 정리 가능으로 노출하지 않는다.
+- 권한 설정의 큰 상단 박스를 제거하고 프로젝트 관리에 상시 펼친 설정 행으로 옮겼다. 변경 없는 저장 버튼은 비활성이다. 우상단 프로젝트 메뉴를 제거하고 사이드바의 해당 프로젝트 메뉴로 역할·모델/프로젝트 닫기를 옮겼다. 프로젝트 전환은 목록 선택을 사용한다.
+- 현재 검증: 원본/채팅 보존·DB 재열기, root symlink/poison 거절, intent/rename/delete 중단 재개, pending manifest 변경 거절 Rust4개 통과. 계약2개·TypeScript 통과. 독립 검토의 초기 discarded 검증/재개 manifest 누락은 수정·재검토했고 macOS 차단 없음. 권한 설정 이동/저장/철회·정리 선택/복구 항목 비활성/명시 최종 확인 Electron 검사도 통과했다. 8d92c908 macOS 패키지 빌드·설치본 재실행을 완료했다. 실제 화면에서 우상단 프로젝트 메뉴 제거·사이드바 메뉴 통합과 프로젝트 권한 설정 행/변경 없는 저장 비활성, 저장공간 정리 진입점을 확인했다. 기존 사용자 권한은 변경하지 않았고 실제 정리 실행은 하지 않았다.
+- 남은 구현은 채팅 본문/출력 실제 삭제를 위한 원장·compaction 이관과 사용자 정의 역할의 실제 실행 연결이다. 이번 복사본 정리를 채팅 내용 삭제로 표시하지 않는다. 실제 사용자 데이터 삭제/모델 실행/main/push 없음.
+
+### 2026-11-12 · by GPT-6
+- 사용자 확정: 연결/프로젝트 열기 시 미리 허용 범위를 정하고 그 범위 안에서는 반복 승인 없이 자동 작업해야 한다. 프로젝트별 파일 작업·개발 명령 허용을 명시 저장하는 화면과 catalog API, durable project projection을 추가했다. 미설정은 false이며 로그인으로 허용을 추정하지 않는다. snapshot 전환의 preserve_project_extensions에도 권한을 보존하며 매 tool 전달 때 다시 읽어 해제도 적용한다.
+- Claude는 기존 allow_tool_once/admission을 그대로 통과하는 요청만 자동 처리한다. Codex는 명시된 작업 복사본과 동일한 grantRoot/cwd만 자동 허용하며 network·누락/외부 root는 개별 확인한다. 원본 반영·경로 보호·역할 권한·실행/종료 증거는 유지한다. 독립 검토에서 발견한 Codex 누락 grantRoot 자동 허용 후보는 수정했고 재검토 차단 없음.
+- 권한 요청은 최신 대화 하단으로 이동하고 긴 입력 본문은 상세 보기로 접었다. 사용자 제시 canceled 실행 2f717b9c는 종료/잠금 해제까지 확인됐지만 과거 직접 취소 원인은 기록만으로 특정하지 못했다. 내부 승인 검증 실패의 cancel flag와 명시 취소를 분리해 오류가 사용자 취소로 표시되지 않도록 수정했다. 기존 실행 기록은 변경하지 않았다.
+- 검증: TS 계약24개, 프로젝트 persistence/reopen/revoke 및 관련 Rust12개, Codex 범위 회귀1개, Claude 자동 승인/외부 경로 차단1개와 기존 native 시나리오 회귀1개 통과. TypeScript/renderer build 통과. 범용 화면 검사는 이전 루트 버튼 제거에 따른 구형 검사 경로에서 실패; 이번 권한 화면 전용 Electron 검사(초기 미허용·저장·철회)도 통과했다. 4a7acad4 macOS 패키지 빌드와 설치본 재실행 통과. 실제 test_todo 화면에서 새 권한 옵션 두 개가 미선택으로 표시됨을 확인했고 실제 프로젝트 허용은 저장하지 않았다. 앞선 헤더 커서·하단 추적·중복 루트 제거 수정도 포함한다. 실제 모델 재실행·사용자 프로젝트 파일 변경 없음.
+- 저장공간 정리/채팅 실제 내용 삭제는 이 파동과 별개로 여전히 미완료이며 안전한 물리 정리·저장소 이관 구현이 남는다. main/push 없음.
+
+### 2026-11-12 · by GPT-6
+- 사용자 반복 권한 요청 불편을 확인했다. 실제 Claude 실행은 default permission mode이며 preparation/claude.rs에서 모든 Requested/ToolCheck를 수동 승인 대기열에 넣고 acceptOnce만 지원한다. 따라서 작업 복사본의 Write도 매번 멈추는 것은 현행 앱 정책이며 연결 장애가 아니다.
+- 개선 방향은 실행 범위에 한정된 작업 복사본 파일 편집 허용과 요청별 경계 재검증이다. 임의 Bash·외부 경로·원본 반영까지 묶어 허용하지 않는다. 자동 허용 구현/활성화는 아직 없으며 기존 안전 계약 변경 검토가 필요하다. 권한 요청 카드의 대화 하단 배치는 소스 수정 중이다.
+- 저장공간 정리 독립 조사 결과: abandoned 복사본도 현재 물리 삭제되지 않는다. 새 정리 작업에는 대상 신원 재검증·중단 복구가 필요하고, 채팅 내용은 append-only replay/compaction 참조 때문에 단순 DB 삭제로 처리할 수 없다. 숨김을 실제 삭제로 표시하지 않으며 실제 내용 삭제 이관/구현은 여전히 미완료다. 사용자 데이터 삭제·모델 실행 없음.
+
+### 2026-11-12 · by GPT-6
+- 파일 영역 test_todo 표시는 단순 제목이 아니라 loadTree("")를 호출하는 기존 breadcrumb root 버튼이었다. 앞선 제목 설명을 정정한다. 루트에서는 중복 breadcrumb를 숨겼고 하위 경로가 있는 경우의 복귀 기능은 유지했다. 트리 폴더 펼치기는 유지한다.
+- 사용자 저장공간 정리 요구도 인계: 앱 소유 작업 복사본/임시 데이터와 채팅 기록을 사용자가 선택해 함께 삭제하는 방향을 선택했다. 현행 removeChat은 숨김만 수행하고 discard는 abandoned 상태만 기록하며 실제 작업 복사본 삭제는 없다. 복구·반영 원장과 참조를 보존하는 정리/채팅 삭제 구현은 아직 미완료다. 실제 데이터 삭제는 하지 않았다.
+- 이번 변경은 UI 표시만 수정; TypeScript/diff 검사 후 로컬 커밋한다. 설치본 미반영. main/push 없음.
+
+### 2026-11-12 · by GPT-6
+- 대화 스크롤을 위로 올리면 historyStart가 고정되고 다시 맨 아래로 내려와도 null 조건 때문에 자동 추적이 재개되지 않던 오류를 수정했다. 하단 도달 시 최신 페이지/추적 상태를 복구하고 새 메시지 버튼을 해제한다. 프로그램에 의한 스크롤만으로 추적을 끄지 않으며 키보드 사용자 스크롤 감지도 탐색 키로 제한했다.
+- 실제 Chromium 회귀에 출력 높이 증가→위쪽 읽기 유지→하단 복귀→추가 출력 자동 추적과 버튼 비표시를 추가했다. 화면검사2개·TypeScript·renderer build·diff 검사 통과. 설치본은 아직 미반영이며 직전 헤더 커서 수정과 함께 다음 갱신에 포함한다. 모델 실행·main/push 없음.
+
+### 2026-11-12 · by GPT-6
+- 중앙 패널 헤더의 grab 커서는 제거된 패널 드래그 기능의 CSS 잔여였다. dock handle/tab/group-tab의 커서를 default로 교정했다. 실제 크기 조절 경계의 resize 커서와 탭 클릭/키보드 전환은 유지한다.
+- CSS diff 및 git diff --check 확인. CSS만 바뀌어 별도 기능 테스트는 반복하지 않았다. 설치본 미반영; 다음 앱 갱신에 포함한다. main/push 없음.
+
+### 2026-11-12 · by GPT-6
+- f4ac1f22 패키지 빌드 통과, 설치본 재실행과 기존 프로젝트 목록 로딩을 확인했다. 직전 응답/작업상태 하단 배치도 포함한다. 추가 Rust protocol 회귀19개 통과. 실제 모델 재실행은 하지 않았으며 전체 팀 작업 성공 여부는 미검증이다. 기존 중단 채팅/기록은 보존했다.
+
+### 2026-11-12 · by GPT-6
+- test_todo 재시도 기록을 읽기 전용 확인: 총괄 e4987631은 succeeded, 기획 2cf81007은 실행/인증 검증 후 failed/cleanExit·processesProvenGone=true·recovery=null이다. 위임 자체는 성공했고 기획 출력은 `##`/` 확인`/` 결과` 세 조각에서 끊겼다. raw 거절 조각/실패 checkpoint는 없어 당시 직접 원인을 확정하지 않았다.
+- 동일한 출력 뒤 newline-only 조각을 저장하는 회귀에서 storageInvalid/invalid public output event를 재현했다. Rust/TS 공개 이벤트 검증의 status에 한해 공백/줄바꿈 조각을 보존한다. 빈 문자열·blank final/question 거절, 기존 바이트/건수/identity 제한은 유지한다. 수정 후 출력 저장/page 재읽기5개·TS계약11개·TypeScript 통과, 독립 검토 차단 없음. 실제 모델 재시험 없이 이 결함의 재현/수정만 확인했다.
+- 기존 앱 정상 종료; 응답 하단 배치와 함께 패키지 반영을 진행한다. 원본/인증정보 수정·자동 재실행·main/push 없음.
+
+### 2026-11-12 · by GPT-6
+- 응답 준비/팀 작업 상태와 실제 실행 출력(AgentRuns)을 대화 헤더 위쪽에서 대화 내역 다음으로 이동했다. 기존 messagesRef 영역 안에 배치해 출력 높이 변화도 기존 최신 대화 추적 ResizeObserver가 관찰하며 사용자의 과거 내역 탐색 동작은 유지한다.
+- TypeScript·diff 검사 통과. 실제 앱에서 test_todo 팀 작업 진행 중을 확인해 종료/패키지 교체하지 않았다. 수정은 소스에만 반영; 진행 작업 종료 후 설치본 갱신이 남는다. 모델 실행·사용자 작업 중단·main/push 없음.
+
+### 2026-11-12 · by GPT-6
+- 사용자 설치본 반영 요청으로 기존 Elsecrew 정상 종료 후 b97fc558 패키지 빌드 성공, out/hello-agent-darwin-arm64/hello-agent.app 재실행·초기화 완료와 기존 프로젝트 목록을 실제 화면에서 확인했다. Command/Control+Enter와 직전 역할 배분 지침 교정이 포함된다. 유료 실행을 유발하는 실제 메시지 전송은 하지 않았다. 프로젝트/로그인 데이터 삭제·강제 종료·main/push 없음.
+
+### 2026-11-12 · by GPT-6
+- 새 채팅과 후속 입력에서 Command+Enter/Control+Enter 전송을 연결했다. 기존 활성 전송 버튼을 통해 동일한 준비/실행/빈 입력 제한을 유지하고 IME 조합·키 반복은 무시한다. 일반 Enter의 기존 동작(후속 입력 줄바꿈)은 유지하며 버튼 tooltip/접근성 단축키도 추가했다.
+- 검증: 단축키/비활성 버튼/한글 조합/반복 키 회귀 2개 및 TypeScript 통과. 설치본 교체와 실제 모델 실행은 하지 않았다. 다음 설치본 갱신에 포함. main/push 없음.
+
+### 2026-11-12 · by GPT-6
+- 사용자 재확정: 총괄+기획/디자인/개발/검증은 초기 팀 템플릿이며, 사용자 정의 역할/컨텍스트에 따라 총괄이 필요 업무·의존 순서를 판단하는 제품이다. 직전 고정 기본 순서 prompt는 기존11월10~11일 확정 요구와 어긋나므로 제거하고 구성된 팀의 책임·컨텍스트·미충족 선행조건·기존 보고에 따른 배분 지침으로 교정했다. 작은 앱이라는 이유로 선행 업무를 생략하지 않되 모든 역할을 강제 호출하지 않는다.
+- 실제 코드 확인: orchestration decision/load와 실행 계약은 여전히 coordinator/planning/design/coding/review를 허용하는 고정 역할이다. prompt 변경만으로 사용자 정의 팀을 구현 완료했다고 주장하지 않는다. 제안서에 확정 방향과 동적 ID/역할 설명·권한 분리/채팅 snapshot·호환 이관/설정 및 표시 연결의 남은 범위를 명시했다. 현재 턴은 방향 교정과 prompt 수정이며 동적 역할 계약 구현·설치본 교체·실제 모델 실행은 하지 않았다.
+- 검증: orchestration 회귀 5개 통과, git diff --check 통과. main/push 없음.
+
+### 2026-11-12 · by GPT-6
+- bbc1b2a4 패키지 통과·설치본 실행 후 기존 test_todo 채팅을 읽기 전용으로 다시 열었다. 단일 실행의 selector/원시ID·처음/최신 버튼이 사라지고 출력 제목/본문만 표시됨을 실제 화면에서 확인했다. 과거 중단 메시지는 역사 기록으로 보존된다. 실제 모델 재실행·원본 반영 없음. 기획/디자인 기본 지침의 모델 이행 및 해당 중단의 실제 재시험은 하지 않았다.
+
+### 2026-11-12 · by GPT-6
+- 사용자 test_todo 팀 중단을 DB 읽기 전용/실제 화면으로 확인: 총괄 run agent_run_17c9ef1d1f1d4c9bb389f8b8305ea1f8은 succeeded/cleanExit·종료 증거 있음, workflow는 step1/coding/paused/run_id 없음이며 개발 실행 기록은 없다. 당시 내부 admission 오류는 일반 pause 문구로 소실돼 정확한 원인은 확정하지 않았다. Claude admission의 원본 경로 검사에 Downloads ancestor readable-open이 남아 있어 project 경로와 동일한 O_SEARCH/no-follow ancestor 방식으로 교정했다. leaf readable·신원·symlink 거절은 유지한다.
+- 내부 capability/시작 오류를 raw detail 대신 허용된 원인별 문구(접근 권한·연결 해제·인증·모델·사용 중 등)로 채팅에 남기도록 수정했다. 자동 재시작·기존 paused 기록 조작 없음. 새 앱에 대한 총괄 지침을 기획→디자인→개발→검증 기본 순서/기존 보고 재사용/생략 사유 설명으로 보완했다. 기존은 ‘필요한 일만 위임’이었으며 role 배열 순서는 실행 순서가 아니었다. 이번은 모델 지침이고 강제 state gate는 아니다.
+- 출력 UI는 단일 실행 selector/raw run ID를 숨기고 짧은 출력의 처음/최신 탐색 버튼을 제거했다. 생략된 과거 출력이 있을 때만 탐색 표시, history에서만 최신 복귀. 간격/선택 입력 테마를 정리하고 QA selector를 실행 identity data 속성으로 교체했다.
+- 검증: TypeScript·renderer build·Chromium2개, 경로 nofollow/검색 전용1개, orchestration16개, 오류 원인 보존/비밀 detail 비노출1개 통과. 독립 안전 검토 차단 없음. 앱 정상 종료; 설치본 반영을 이어간다. 실제 모델/사용자 프로젝트 쓰기/중단 작업 재실행/main/push 없음. 정확한 과거 중단 원인 및 새 기본 순서의 실제 모델 이행은 미검증이다.
+
+### 2026-11-12 · by GPT-6
+- c162e82e macOS 패키지 빌드 통과. 기존 앱 정상 종료 후 설치본 교체·실행했고, 만료된 앱 전용 Claude 인증의 모델 없는 자동 갱신과 실제 usage GET이 성공했다. 하단/상세에서 Claude5시간1%·7일7%, 조회10:09:05·각 reset시각을 확인했다. Codex7일64%도 표시됐다. 재로그인·모델 호출·사용자 프로젝트 쓰기·main/push 없음.
+- 이로써 앞선 ‘갱신 구현 필요/설치본 미반영’ TODO를 완료했다. 기존 만료 토큰은 앱의 정식 연결 확인 경로로 갱신·저장됐으며 로그인 반복을 사용자에게 요구하지 않았다. 파일 기반 credential fallback 자동 갱신 및 Windows 활성화는 이번 범위 밖이다.
+
+### 2026-11-12 · by GPT-6
+- 사용자 ‘필요하면 구현’ 지시에 따라 Claude 만료 인증 갱신을 실제 구현했다. 공식 설치 CLI2.1.322의 고정 OAuth endpoint/client 및 refresh 응답 형식을 정적으로 확인했다. sidecar가 앱 전용 Keychain/unknown 계정만 읽고 같은 login/run pending fence 아래 모델 없는 HTTPS 갱신을 수행한다. redirect/proxy 없음·20초/64KiB 제한·기존 scopes만 요청·비밀값 renderer/argv/log 노출 없음. 저장 전 profile/기존 Keychain bytes 재확인, 관련 없는 credential 필드 보존, native Keychain 저장을 사용한다.
+- 사용량 만료 시 기존 check 경로로 갱신 후 저장된 인증을 다시 읽어 GET한다. 로그인 상태 polling의 무차별 cache 무효화를 없애고 연결된 새 attempt에서만 갱신한다. 동시 사용량 조회 singleflight와 generation 변경 후 재조회 유지. 네트워크/응답 실패는 기존 저장값을 덮어쓰지 않으며 서버가 이미 refresh token을 회전한 후 저장이 실패한 경우 재로그인이 필요할 수 있다.
+- 검증: 갱신 projection4개, 공유 fence1개, Claude 관련25개 통과/1개 기존 ignored, TS usage7개, renderer 및 usage module TypeScript 통과. 독립 안전 검토 차단 없음. 실제 앱은 정상 종료했으며 수정본 패키징·실제 모델 없는 사용량 확인을 이어간다. 모델 호출/원본 변경/main/push 없음.
+
+### 2026-11-12 · by GPT-6
+- Claude 연결 성공/사용량 로그인 안내 불일치 조사: 앱 전용 profile hash·unknown Keychain 항목의 비밀값을 출력/저장/전송하지 않고 존재·만료 metadata만 확인했다. access/refresh token은 존재하며 expiresAt=2026-11-11T09:44:52.560Z로 만료됐다. usage reader는 이 시각에서 expired를 반환하고, CLI auth status 연결 확인은 저장 로그인 존재를 반환하므로 두 상태가 다를 수 있다. 사용자 인증정보 변경/모델 호출 없음.
+- 로그인 성공 상태 전환 후 usage cache 화면을 재조회하는 이벤트를 연결했다. 기존에는 앱 사용 연결 변경에만 반응해 실제 OAuth 성공 뒤 이전 expired 화면이 남을 수 있었다. 만료 안내를 로그인 전체 실패와 구분했다. TypeScript·renderer·usage unit5개/Chromium2개 통과, 로그인 성공 후 usage 재조회 회귀 포함. 이번 수정은 이미 만료된 토큰의 갱신 구현이 아니며 설치본은 아직 미반영이다.
+- 남은 핵심: 사용량용 access token 갱신. 현행 사용량 기능은 명시 승인된 read-only 경계여서 임의 refresh-token POST/Keychain 쓰기나 모델 실행을 추가하지 않았다. 공식 CLI의 모델 없는 갱신 경로 또는 직렬화/원자 저장을 갖춘 별도 갱신 설계·검토가 필요하다. 공개 upstream 이슈의 auth status 갱신 문제는 참고 보고이며 로컬 실행 증거로 취급하지 않는다. main/push 없음.
+
+### 2026-11-12 · by GPT-6
+- 사용자 경로 ~/Downloads/test_todo는 lstat 기준 실제755 폴더이고 항목0개임을 읽기 전용 확인했다. 현행 경로 순회가 모든 ancestor를 readable handle로 열어 선택 폴더 밖의 상위 폴더 읽기까지 요구했다. macOS ancestor만 O_SEARCH|O_NOFOLLOW|O_CLOEXEC openat로 통과하고 leaf의 기존 readable/no-follow 검사는 유지하도록 수정했다. 사용자 실제 EPERM 원인으로 유력하나 해당 폴더 초기화 재시험은 아직 하지 않았다.
+- execute-only ancestor의 선택 폴더 읽기 및 ancestor/leaf symlink 거절1개, 기존 빈 폴더 초기화/snapshot/신원·비어있지않음 거절2개, TypeScript·package·diff 검사 통과. 독립 안전 검토 차단 없음. 앱 정상 종료 후 수정본 교체·실행 완료. test_todo 및 원본/인증정보 변경·모델 호출 없음.
+- 사용자 권한 UX 의견: 프로젝트 추가 시 범위별 동의를 명확히 받는 방향. 앱의 폴더 읽기/복사본 준비 동의, OS의 보호 폴더 권한, 에이전트 명령/편집 승인, 원본 반영 확인은 별개다. blanket bypass 활성화나 권한 확대 승인으로 해석하지 않았다. Claude 공식 permission-modes 문서는 bypassPermissions가 도구 확인을 생략하는 모드라고 설명하며 OS 권한 부여와 구분한다(https://code.claude.com/docs/en/permission-modes). 후속 동의 UI는 아직 구현하지 않았다.
+- 다음: 사용자 다운로드 폴더 재시도로 실제 OS 접근 확인, 필요 시 OS 권한 안내 연결. 전체 디스크 권한 요구/안전 검사 제거 없음. main/push 없음.
+
+### 2026-11-12 · by GPT-6
+- 사용자 빈 폴더 열기 실패 스크린샷의 symlinkEscape / directory component unavailable / EPERM을 조사했다. Electron은 picker 선택을 realpath하고 빈 폴더면 명시 확인·dev/ino를 sidecar에 전달한다. sidecar의 open_real_os_child_dir는 모든 open 오류를 symlinkEscape로 감싸므로 해당 이름만으로 링크 원인이라고 판단할 수 없다. 빈 폴더 기능 미지원으로도 단정할 수 없다.
+- 선택 경로를 사용자에게 요청했다. macOS 보호 폴더 권한 또는 경로 접근 검사 실패 가능성은 미확정이다. 현행 ‘다른 Git 프로젝트’ 일반 안내는 빈 폴더/권한 오류에 부적절하다. 실제 경로 확인 전 사용자 폴더 변경·접근권한 완화·재현 성공 선언 없음. 다음: 정확한 경로와 실패한 구성요소를 확인한 뒤 원인 수정 및 안내 교정.
+
+### 2026-11-12 · by GPT-6
+- 에이전트 설정 카드의 조회를 상태 옆 아이콘 하나로 통합했다. 연결된 공급자는 기존 계정 확인(실행 파일 검사 포함), 미연결 공급자는 인증을 읽지 않는 설치 진단을 사용하고 공용 설치 manager 상태도 갱신한다. 설정 내 설치 새로고침·별도 프로그램 설치 상태 확인 버튼을 제거했다. 설치/로그인 진행 polling·복구 검증은 유지한다. 독립 위저드 설치 화면 조회는 별도 흐름으로 유지한다.
+- TypeScript·renderer build·Chromium2개·package·diff 검사 통과. 기존 앱 정상 종료 후 설치본 반영, 실제 설정에서 Codex·Claude 연결됨과 카드마다 상태 확인1개·설치/업데이트 버튼, 중복 조회 버튼 제거를 확인했다. 모델 호출/로그인 변경/원본 변경/main/push 없음.
+
+### 2026-11-12 · by GPT-6
+- 사용자 승인 후 PID29470/29490의 경로·부모 신원을 재확인했다. TERM으로 서비스는 종료됐고 앱은 남아 승인 범위의 앱에만 KILL을 보냈으며 둘 다 종료 확인했다. 8d875cda package 통과 후 개발 설치본 교체·재실행 완료.
+- 실제 설정 화면에서 Codex·Claude 모두 로그인 연결됨, 상태 옆 조회 아이콘과 연결 해제 버튼을 확인했다. 별도 연결 잠금 복구 버튼 없음. 이는 계정 확인/화면 증거이며 모델 실행 검증은 아니다. 프로젝트·인증정보·복구 파일 수동 삭제 및 모델 호출/main/push 없음.
+
+### 2026-11-12 · by GPT-6
+- 사용자 승인으로 연결 상태 확인에 기존 종료 증거 검증 복구를 통합했다. check당 복구는 최대1회, 성공 idle 뒤 계정 재확인1회만 허용하며 불확실 응답/실패는 재시도하지 않는다. 별도 연결 잠금 복구 버튼을 제거하고 제한 안내를 유지했다. 연결 상태 옆28px 조회 아이콘을 추가하고 진단/초기 상태 확인 중 로그인 취소가 번쩍이던 표시를 제거했다. 인증 대기/검증 단계 취소는 유지한다.
+- TypeScript·renderer·Chromium2개 통과. 회귀는 증거 부족 시 시작 차단, 자동 재시도 없음, 사용자의 다음 조회에서 검증 복구 후 계정 재확인, OAuth 자동 시작 없음 확인. 기존 텍스트 버튼 선택자 실패는 aria-label 선택자로 교정했다. 독립 검토 차단 없음. Rust 종료·파일/원장 검증 변경 없음.
+- 설치본 교체 전 정상 종료를 요청했으나 현재 Codex 복구 필요 상태로 거절됐다. 실행 앱29470/전용 sidecar29490은 유지했고 강제 종료·잠금 수동 삭제·실제 모델 실행은 하지 않았다. 수정본 앱 교체는 해당 앱 종료 승인 후 남는다. main/push 없음.
+
+### 2026-11-12 · by GPT-6
+- 연결 잠금 복구 필요성을 코드로 검토했다. provider-login UI는 providerLoginRecoveryRequired 오류일 때만 버튼을 표시한다. backend는 로그인 종료 기록·배타 잠금·파일 신원·기록 프로세스 종료를 검증하며, 실제 실행의 잠금은 별도 원장의 복구 완료까지 대조한다. 프로세스가 안 보인다는 이유만으로 제거하지 않는다.
+- 판단/제안: 중복 실행과 불확실한 종료를 막는 내부 잠금은 유지해야 한다. 별도 사용자 기능인 ‘연결 잠금 복구’는 필수 UX가 아니며 연결 재시도에 검증 가능한 잔여 잠금 정리를 통합하고, 검증 불가 상태만 문제 해결 안내로 노출하는 방향이 적절하다. 자동 복구는 현행 명시 복구 계약 변경이므로 이번에는 활성화/코드 변경하지 않았다. 사용자 확인만으로 종료 증거를 대체하지 않는다.
+- 검증: 관련 UI·recover_confirmed_login·recover_bound_run 정적 확인. 런타임 시험/잠금 삭제/로그인/모델 호출 없음. 다음: 자동 정리 가능 상태와 유지할 차단 상태를 구분한 구현 및 회귀 검토.
+
+### 2026-11-12 · by GPT-6
+- 기준 HEAD bfbb5724에서 사용자 승인에 따라 설치 동의 checkbox를 제거하고 공급자별 작은 확인 대화상자로 변경했다. 변경 범위·폴더 상세를 확인한 뒤 취소 또는 설치·업데이트로 확정한다. 최종 버튼만 현재 planId를 제출하며 만료·대상 검사·중복 제출 방지·응답 불명 시 자동 재시도 금지는 유지한다.
+- TypeScript·renderer build·Chromium2개(취소 시 시작0건, 공급자/계획 교체, 중복 제출 및 불명 응답 회귀)·package·diff 검사 통과. 읽기 전용 독립 검토 차단 없음. 기존 앱 정상 종료 후 설치본 반영, 실제 Claude 확인창의 중앙 배치·checkbox 없음·두 버튼과 취소 후 양쪽 기본 카드 복귀를 확인했다. Codex 준비는 오류 상태여서 해당 실제 확인창 검증은 하지 못했다. 실제 설치·로그인·모델 실행 없음.
+- 다음: 기존 설치 준비 오류는 별도 진단 대상이며 이번 UI 검증을 공급자 설치 성공으로 해석하지 않는다. main 병합/push 없음.
 
 ## 프로젝트 요약 (고정)
-
-터미널을 한 번도 안 열어본 비개발자를 **코딩 에이전트(Claude Code·Codex)가 굴러가는 상태까지** 데려다주는 데스크톱 GUI 앱. Tauri 2 + React 19 + TypeScript + pnpm, Rust는 최소한(설치·감지·로그인·실행)만.
-
+터미널을 한 번도 안 열어본 비개발자를 **코딩 에이전트(Claude Code·Codex)가 굴러가는 상태까지** 데려다주는 데스크톱 GUI 앱. 현재 배포 경로는 Tauri 2 + React 19이고, M5는 Electron + React/TypeScript + Monaco와 Rust sidecar의 별도 작업대 골격으로 전환 중이다.
 - 기획 원본: `~/Library/CloudStorage/OneDrive-개인/ObsidianVault/오픈소스/아이디어/후보/에이전트-스타터.md`
-- 레포: https://github.com/wonseok-han/hello-agent (로컬 폴더명은 `agent-starter` 유지 — 경로 참조 때문)
+- 레포: https://github.com/wonseok-han/hello-agent (로컬 폴더도 `~/projects/hello-agent`로 변경 완료 — 2026-08-12 확인)
 - 위저드 6단계: 에이전트 선택 → 진단 → 설치 → 로그인 → 첫 프로젝트 → 졸업식
-- 주요 모듈: `agent.rs`(에이전트 레시피) · `detect.rs` · `install.rs` · `login.rs` · `project.rs` · `editor.rs`
-
+- 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **사용자 정의 팀(2026-11-12 재확정)**: 기본5역할은 템플릿이다. 총괄은 사용자가 구성한 역할 설명/컨텍스트와 요청의 선행조건으로 배분한다. 고정 순차 pipeline은 제품 방향이 아니며 현재 실행의 고정 role enum은 남은 구현 제약이다.
+
+- **Claude 사용량 인증(2026-11-12)**: CLI auth status의 저장 로그인 존재와 OAuth access-token 유효성은 다르다. 만료 시 check가 앱 전용 Keychain의 갱신을 같은 provider pending fence 아래 수행하며 사용량은 갱신 후 다시 읽는다. 단순 인증 존재를 사용량 인증 유효성으로 해석하지 않는다.
+
+- **선택 폴더의 상위 경로 접근(2026-11-12)**: macOS 경로 순회는 ancestor를 검색 전용 O_SEARCH/no-follow handle로 통과하며 선택 leaf만 읽기로 연다. 폴더 선택 동의와 OS 권한, 에이전트 도구 승인은 서로 대체하지 않는다. Downloads/test_todo의 실제 재시도는 미확인이다.
+- **2026-11-11 핵심 팀 실제 성공**: Codex→Claude→Codex3회 모두 성공/cleanExit·프로세스 종료 증거 확인, 임시 복사본 hello.txt 변경·원본 보존·재시작 기록 유지. 채팅 제거는 선택 채팅 범위로 검사하되 동일 workspace/unknown lock과 대상 복구 제한 유지. 상세 증거는11월 아카이브. 전체 M5/Windows/출시 완료는 아님.
+
+- 2026-11-11 Claude privacy 등록 거절은 실제 초기 연결 차단점이다. 공식 privacy README가 확인됐으며 모듈을 끄지 않는 정확한 native 관측 후보를 준비했다. 후속 사용자 승인으로 native 생성자를 전환했다. 설치/실제 성공은 최신 기록을 확인하며 정책/증거는 proposals/m5-coding-agent-ide.md privacy 절을 따른다.
+
+- 2026-11-11 모델 설정은 공급자 조회 목록에서 선택한다. 최신 표시가 없는 경우 공급자 기본·추천 모델 사용을 사용자 승인받았다. 저장한 선택은 자동 덮어쓰지 않으며 목록 순서/이름 정렬로 최신을 추정하지 않는다. 조회는 채팅 없이 설정 진입 때 자동 수행하며 세션 캐시를 재사용한다. 원본 프로젝트/실제 prompt를 사용하지 않는다.
+
+- 2026-11-11 사용자 채팅의 상대는 항상 오케스트레이터이며 전송은 단순 ‘보내기’다. 직접 답변 또는 필요한 팀원 위임/결과 회수/최종 정리를 모델이 판단한다. 2026-11-11 임시 실제 Codex→Claude→Codex3회에서 작업 복사본 수정·최종 취합·정상 종료를 확인했다. 원본 반영은 자동 수행하지 않는다. Windows/전체 출시 완료와 구분한다.
+
+- 2026-11-10 총괄 직접 응답은 V2 canonical5 역할 snapshot + 저장 V12가 필요하다. V1 채팅은 변경하지 않으며 새 채팅부터 총괄 실제 실행/후속 전송을 사용한다. V12는 답변 source-index trigger의 역할 허용 목록만 확장하고 metadata/원장 검증·compaction prefix를 함께 적용한다. 이전 앱으로 다운그레이드 불가. 자동 팀 위임은11월11일 구현/검증 진행 중이며 설치본 반영·실제 공급자 증거는 최신 기록을 따른다.
+
+- **2026-11-10 파일 목록 정렬 계약**: 폴더 우선 정렬은 sidecar 생성기와 TS/Rust treePage 검증기·공유 fixture에 함께 적용한다. 불일치는 protocolInvalid로 연결을 끊어 기본값 등 무관 조회도 실패하게 한다. 그룹 순서 외 동일 경로 중복 거부는 유지한다.
+
+- **2026-11-10 설정·정리:** 앱 공통 설정은 언어/기본 역할·모델/에이전트/앱 업데이트로 통합, 프로젝트 역할은 별도다. 더미30개는 활성 목록에서 제거하고 약20MB를 retired-test-projects-20261110-131013에 보관했다. 업데이트 배포는 GitHub Releases+update.electronjs.org로 확정됐으나 서명/실제 배포 미완료로 비활성이다.
+- **2026-11-10 제품 요구/경쟁 확인:** Electron 앱 자체 업데이트는 필수이며 네이티브 메뉴·다운로드·안전 종료 후 설치 소스 연결을 구현했다. 서명된 배포 피드 미설정으로 비활성이고 실제 업데이트 검증은 미완료다. Orca 공식 orchestration은 이종 공급자 worker 감독을 문서화하므로 해당 기능 부재를 차별화 근거로 쓰지 않는다. 우리 M5의 사용자 역할별 실행과 제품 AI coordinator 구현은 구분한다. 상세는 M5 제안서 말미.
+- **원본/관리폴더 겹침(2026-11-06)**: snapshot 생성은 source 내부 managed root를 준비기록/폴더생성 전에 거절해야 한다. durable Windows 비교는 native verbatim/protocol 혼용을 피하되 원본 삭제 후 standalone view를 위해 원본 재open은 요구하지 않는다. 로컬 회귀/독립 검토를 통과한 별도수정이며 Windows native 추가확인은 남는다.
+- **Windows 전체 통합 진단 후보(2026-11-06)**: d1071b95까지 명시 설치Git/임시 프로젝트의 선택·동의·실행·철회와 snapshot→review/token→scheduler 반영/복원→SQLite재열기 opt-in을 연결했다. 테스트 전용 manager Git허용은 제품에 컴파일되지 않으며 독립 검토 차단결함없음. native 실행은 아직 미확인, 새 CI 공개 범위 승인이 필요하다. 이전75 PASS에 포함하지 않는다.
+- **Windows 일반 파일 재관측(2026-11-06)**: cap-primitives3.4.6의 maybe_dir는 일반 파일에도 FILE_SHARE_DELETE를 제거한다. retained DELETE handle과 병존하는 writer read-only rebind는 부모 상대 native FILE_OPEN/share7/no-follow 및 열린 객체 종류/신원 검사를 사용한다. mutation 보호 handle은 유지한다. CI42155540808에서 전용 회귀 포함75개 통과; 전체 반영/복원 거래 검증과 구분한다.
+- **Windows 생성 폴더 재관측(2026-11-06)**: DELETE-capable creation handle을 유지한 상태의 generic directory reopen은 sharing 위반을 낼 수 있다. 부모handle 상대 read-only FILE_OPEN/share7/no-follow+full identity로 재관측하고 기존 creation pin·lease·flush·receipt 비교는 유지한다. CI42154541724에서 stage/new-directory 회귀 포함74개 진단 통과; 전체 Windows 제품 활성화 근거로 확장하지 않는다.
+- **Windows Git 설치 신뢰 정책 승인(2026-11-06)**: 사용자가 선택한 설치 폴더와 OS 검증 서명자를 보여준 뒤 명시 동의하는 방식으로 확정했다. 같은 설치본의 서명 없는 DLL을 수용하되 실행마다 재검사하고 root/서명자 변경은 재동의한다. 버전/파일 digest 고정은 하지 않는다. 이 승인은 Windows 제품 활성화·추가CI/push 승인이 아니다. 후속 Git admission·baseline receipt·review/confirmation·before archive·pre-write intent·취소 가능한 원본 관측은 구현 checkpoint이며 Windows native 검증 전이다. 일반 파일 writer/명시 restore·archive cleanup·제품 scheduler 내부 연결은 구현 checkpoint다. directory/추가 metadata·원본 잔여 파일 처리와 native 검증은 미완료다. 제품 gate는 닫혀 있다. 최신 상세는 현재 워크로그와11월 아카이브에서 확인한다.
+- **Windows Git 의존 DLL 서명(2026-11-06)**: [공식 이슈6491](https://github.com/git-for-windows/git/issues/6491)에서 유지보수자는 모든 배포 DLL 서명을 제공하지 않는다고 설명했다. 모든 의존 DLL에 Authenticode를 요구하는 방식은 정상 설치본 호환성을 보장하지 못한다. 주 실행 파일의 검증된 signer 추출을 구현했으나 배포자 정책·설치본/의존성 신뢰·실제 로드 결속은 미완료이고 제품 gate는 유지한다.
+- **Windows 저장/복구 native45 PASS(2026-11-06)**: 공개6e079a9/tree77dd9ad3, CI42129091905에서44 native+1 직접 호출 차단 통과. 통합02657f7/9a62344와 같은 소스 수정이다. Win32 상대 rename87은 동기 handle의 NtSetInformationFile class10으로, 이미 동일한 보안 descriptor의 불필요한 재적용은 exact-equal/recheck 경로로 수정했다. 4개 파일/DB 재열기 fixture가 통과했지만 Windows Git admission·실제 프로세스 재시작·제품 활성화·출시는 별도다. 이번 승인3회는 모두 사용했다.
+- **Windows Git 제공 확정(2026-11-06)**: 사용자 설치 Git을 사용한다. 앱 포함 MinGit은 채택하지 않았다. 명시 설치 위치·실행 파일/의존성·업데이트 후 재확인과 기존 config/hook/filter 격리가 필요하며 PATH 첫 git.exe 자동 신뢰나 제품 activation 승인이 아니다.
+- **Windows replacement 계약 정정(2026-11-05)**: 앞선 expected-ID CAS 부재 blocker는 기존 atomic rename/관측 충돌 검사와 별도 보장을 혼동한 것으로 독립 검토자가 철회했다. macOS workspace save도 leaf CAS가 아니며 hostile same-user 동시 편집의 OS 완전배제 보장이 아니다. Windows save는 경로 결속·전후 ID/내용 검사와 replaceIntent/replaced 기록으로 연결했으나 ACL·namespace durability·cleanup/복구/native가 미완료라 제품 admission은 계속 닫혀 있다. 원본 apply/restore에 새 승인을 추가하거나 보존 계약을 약화하지 않는다.
+- **Windows native34 PASS(2026-11-05 최신)**: CI41988529910/0a7efd5에서 lease/image/GUID 실행·공용 reader·종료 supervisor·spawn/watcher34개 통과. 첫41987756587의1FAIL은 fixture의 별도 directory handle 수명으로 수정했다. 통합 수정2812429. 현재 batch3회 중2회 사용·1회 남음. 실제 Git 설치본/저장·복구·background watcher 종단 실행/제품G6 합격은 아니다.
+- **Windows save guard 충돌(2026-11-05)**: 기존 DirectoryLease에서 교체 대상 자체를 guard로 잡으면 의도한 replace도 막힌다. 마지막에 pin을 풀어 해결하지 않는다. 별도 guard의 durable intent/ID/cleanup과 handle-relative replace·durability/복구를 묶어야 하며 제안서 §12에 조건을 기록했다. Windows 저장·cleanup·명시 복구 및 재열기 fixture는 구현됐으나 native 검증/제품 admission은 차단 상태다.
+- **Watcher 현재 구조(2026-11-05)**: Unix/Windows 모두 한 background 검증 job과 한 bounded scan slice를 순환한다. 완료 뒤 현재 stream/active/root/.git 결속과 metadata/tree 재검증을 유지한다. Windows 연결은 native 미검증·실제 Git 차단 상태이고 과거 동기 Windows 설명보다 이 구현 상태를 우선한다. 실측 UI 지연 PASS는 별도다.
+- **Windows 내부 Git 제공 방식(2026-11-06 확정)**: 사용자 설치 Git을 사용한다. MinGit 번들은 채택하지 않았다. 선택한 설치 폴더·OS 검증 서명자를 표시하고 명시 동의하며 매 실행 재검사한다. Codex/Claude 설치 정책과 별개이고 Windows 제품 실행은 아직 비활성이다. 제안·출처는 `docs/proposals/m5-coding-agent-ide.md` §12.
+- **Windows 자손 supervisor(2026-11-05, scoped native PASS)**: a7c0674의 상시 Unsupported 봉쇄 뒤 creator-thread DEBUG_PROCESS 추적을 구현했다. 생성 이벤트를 계속하기 전 handle 복제·EXIT 계속 후 모든 signal·root signal·누적 Job 수 일치·active0이 완료 조건이다. 중첩 debugger 누락/상한/오류는 실패이며 Job 밖의 외부 broker는 보장 범위가 아니다. 3a02b76/CI41980701769에서 기존 실제 child signal 회귀와 native20·spawn1·watcher4 합계25개가 PASS했다. 전체 제품 PASS가 아니며 Windows admission은 닫혀 있다.
+- **Windows Job 종료 판정 반증(2026-11-05)**: 실제 CI41977646539에서 parent signal+Job active0/terminate(true) 뒤에도 별도 보유 자손 handle은 WAIT_TIMEOUT이었다. 기존 completed()/terminate()를 모든 자손 종료 증거로 인용하지 않는다. 임의 지연·카운트 완화로 해결하지 않으며 native gate는 닫아 둔다. 동일 실행의 disk capacity 회귀는 PASS, 전체16PASS1FAIL·watcher skipped다.
+- **Windows CWD lease 초안(2026-11-05, native 미검증)**: 모든 경로 성분과 기존 직접 child를 delete 공유 없이 보유해 nonempty를 유지하고 전체 ID/부모 결속을 검증하는 기반을 구현했다. 일반적인 공유 잠금만으로 속성 변경을 막는다는 주장은 하지 않는다. name-surrogate와 directory-bit tag 구분·실행 파일 권한·GUID CWD native 호환이 남아 있다. typed Family/Transport 연결과 armed pin의 성공/실패 소유권은 구현했으나 native 미검증이며 실제 Git/제품 admission에는 연결하지 않았다.
+- **Windows CWD 공유 잠금의 한계(2026-11-05)**: deny-share-write/delete만으로 reparse 불변을 증명하지 않는다. attribute 접근은 공유 제한과 별개이며 MS-FSA는 FILE_WRITE_ATTRIBUTES로 reparse 설정을 허용한다. CWD admission은 미완료이고 Windows gate는 유지한다.
+- **Windows 프로세스 연결 조건(2026-11-05)**: Job 생성 시 결속과 제한 시간/취소 가능한 stdio transport 기반은 scoped native 검증을 통과했으나 실제 Git에는 아직 미연결이다. stdio가 없으면 STARTF_USESTDHANDLES를 켜지 않으며, 지정 시 임시 복제 핸들+HANDLE_LIST만 전달한다. 공통 spawn 잠금의 경합 회귀는 통과했다. CWD 권한·Git 호출 연결과 제품 native 묶음 검증 전에는 Windows gate를 열지 않는다. Drop의 Job close는 종료 요청이며 부모 signal과 active-process 0만으로는 전체 종료 증거가 되지 않는다(11/05 native 반증 참조).
+- **기존 원본 경로 재확인 (2026-11-02)**: 과거 경로 철자는 source_identity로도 복원할 수 없다. native 폴더 선택으로만 `native_path_binding`을 보강하며 catalog reopen/원본 접근은 없는 표식을 자동 생성하지 않는다. 재선택은 기존 snapshot과 복구 상태를 보존한다.
+- **2026-11-02 Windows 경로 fixture**: host 절대경로와 canonical wire 경로는 구분한다. 실행 41394071830에서 core 226·protocol 65·sidecar 313 PASS, 마지막 fixture 1개는 수정 후 focused 실행 41399404281에서 PASS했다. 최신 전체 suite 단일 재실행/Windows 제품 합격은 아니다. 원장 테스트에 native 역슬래시 경로를 넣지 않으며 제품 검증·실제 공급자 차단은 유지한다.
+- **Windows 컴파일과 제품 준비 구분 (2026-11-02)**: macOS native owner를 cfg로 분리해도 Windows G4/stdio는 DB·ready 전에 unsupportedPlatform으로 차단된다. 공통 영수증 검증은 플랫폼 독립으로 유지한다. Windows CI를 녹색으로 만들려고 패키지 smoke의 ready 조건을 낮추지 않으며, Windows의 실제 안전 경로 구현·검증·활성화가 별도로 남는다.
+- **Windows 체크아웃 바이트 (2026-11-02)**: 첫 원격 CI에서 core.autocrlf 변환으로 golden 해시·SQL manifest·JSONL 동일 바이트 검사가 실패했다. `.gitattributes`는 소스 LF, `tests/fixtures/** -text`로 의도된 원본 바이트를 보존한다. 테스트의 호스트 경로와 macOS 모의 inventory를 구분한다. 로컬 수정 PASS를 Windows 실행 증거로 대체하지 않는다.
+- **main 지연 귀속 주의(2026-11-02 eleventh)**: Chromium284ms와 달리 live/history/generation Node timer는42ms 이하다. retained 보조 진단638ms는 trace 종료/보고까지 포함한다. 측정기 종료 비용 가설을 먼저 최소 시험으로 분리하고, 다른 시계/측정의 값을 직접 동일시하거나 기존FAIL을 차감하지 않는다. 출력 재파싱 최적화만으로200ms/400MiB 문제가 해결되지는 않았다.
+- **현재 인계(2026-11-02, Undo 수정)**: 저장 내용으로 되돌려도 dirty가 남던 결함을 비동기 파일버전 비교로 수정했다. 원문 추가 보관 없이 경로 대기열·단일 digest·정확한 탭/세대 검사를 사용한다. controller62/작업복사본10/TypeScript/독립 검토 PASS, 2faed62 실제 QA에서도 Undo 복원을 확인했다. 단일 combined 시험은 입력798.1ms와 main trace 불완전으로 FAIL이다. 이후 main 수집기는 제한된 스레드별 전체 집계로 수정하고19개 검사·독립 검토를 통과했으나 eighth 실제 실행에서도 수집 완결성을 확인했다. 다만 main294.538ms·idle448.703MiB 실패이며 입력19.9ms는 단일 관측이다. 이 trial 메모리만 기준 내이며 반복 합격은 아니다. 관련 시험 앱/프로필은 종료 확인 후 모두 삭제했다. 실제 모델 호출 승인 잔여 없음. 유휴400MiB/G6/Windows/출시는 계속 미완료다. 최신 세부 워크로그는 [11월](archive/history-2026-11.md)을 먼저 확인한다.
+- **누적 Node 검사 최신 증거(2026-11-02)**: 깨끗한803b937의 npm test635 PASS/실패·스킵0 및 src TypeScript PASS. 이전11개 focused 수정 이후 전체 재검사 공백 해소. Rust/패키지/G6/Windows/출시까지 합격한 결과는 아니다. 원문은 `.artifacts/m5-regression-2026-11-02/consolidated-node/`.
+- **통신 버퍼 보유 해소(2026-11-02)**: 완결stdout 뒤 빈 view와 잘린stderr tail의 큰 backing allocation 보유를 제거했다. bridge64회귀·독립 검토PASS. 큰I/O 후 잔류 문제 수정이며cold idle400MiB 달성 증거가 아니다.
+- **초기 메모리 조사(2026-11-02)**: 유휴400MiB 기준 유지. 같은 정적 화면도 큰 비용이며 software rendering/spellcheck/ready-to-show는 개선 근거 없음. 레이어5개에 명백한 불필요 승격 없음. 손실 없는 memory-infra 통계에서 renderer tile pool72.4375MiB 중 free55.0625MiB 확인(할당 통계≠RSS 절감량). 초기 paint를 DOM mount 뒤로 늦춘 대조도 RSS 개선이 없어 기각했다. Blink 타일 예산32MiB로 실제 할당을 줄여도 RSS가 개선되지 않아 이 후보도 제품에 미적용이다. 상세·증거는 최신 워크로그.
+- **2026-11-02 사용자 확정 — 메모리 기준 유지**: macOS 유휴400MiB와 추가 최적화를 선택했다.512MiB 상향은 승인되지 않았다. 부하800MiB·잔류증분120MiB 및 전체 검증 요건도 유지한다.
+- **2026-11-02 통합 QA 메모리 정정**: second/third combined 결과의 idle phase에는 프로젝트 준비 비용이 섞였다. 해당 idle/잔류증분은 순수 유휴/회수 근거가 아니다. 생성 프로세스 분리와 준비 phase 분리는 별개 수정이며 마지막 phase 수정 후 재측정 필요. 일반 제품10/30 RSS 실패는 유지한다.
+- **2026-11-02 실제 공급자 상태 갱신**: 0843105 패키지에서 Codex 자체 파일 수정 succeeded·cleanExit 및 실행 중 취소 canceled·cleanExit를 확인했다. 둘 다 processesProvenGone=true이고 원본 불변이다. 앞선 Claude 자체 수정·취소 성공과 함께 기본 실제 실행 증거를 확보했다. 이전 checking UI 정체는 이번에 재현되지 않았으나 원인 미확정이며 전체 복구/G6/Windows/출시 합격과 구분한다. 아래10/30의 미완료 파일 수정·취소 항목은 이 결과로 갱신한다.
+- **2026-10-30 실제 공급자 최신 상태**: Claude 자체 파일수정·취소 성공. Codex는 da52055의 text_elements 생략 호환 수정 후에도 수정/중단 시험이 `turn stream item started`에서 failed·cleanExit로 끝났고 중단 클릭에는 도달하지 못했다. 원본/복사본 불변, 승인된 최신2회 소진. 단계명은 Electron 로그 폴더 last-provider-checkpoints.json에 민감 원문 없이 보존된다. 후속 승인 진단1회는 user echo shape 거절로 좁혀졌고 소진됐다. 공통 lifecycle timestamp 수정2c06e79 후 재시험1회에서 실제 응답은 표시됐으나 다음 moderation metadata 알림에서 failed·cleanExit다. 승인 소진이며 82f7c77 후속 시험에서 짧은 응답은 succeeded·cleanExit로 통과했다. 파일 수정도 복사본에서 이뤄졌으나 diff 알림에서 failed·cleanExit여서 취소는 미실행이다. 실패 상태가 UI에 반영되지 않은 별도 결함도 조사 중이다. 추가 모델 호출은 새 승인 대상이다. 증거 .artifacts/m5-codex-two-2026-10-30, 상세 과거 기록은 10월 아카이브. G6/Windows/출시는 미완료다.
+- **2026-10-29 일반 discard 연결**: X34law FakeExact actual adapter의 sidecar–작업대 합동 PASS와 독립 검토 뒤 임시 gate를 제거했다. 실제 공급자/일반 설치 패키지/전체G6 합격은 별도다. 기존 gated 체크포인트 기록은 당시 상태로 보존한다.
+- **2026-10-29 앱 기본 역할 경계**: 앱 기본값은 프로젝트 role_settings 최초 초기화 때만 복사한다. 기존 프로젝트·chat roleSnapshots에는 소급하지 않으며, 기본값 파일이 손상돼도 이미 초기화한 프로젝트는 독립적으로 사용한다. 실제 모델 가용성은 계속 실행 전 별도 검증한다.
+- **2026-10-29 일반 discard 완료 재개**: 응답 유실 후 dialog가 재생성돼도 inspect가 exact discard_receipt를 돌려주어 중복 쓰기 없이 재개한다. workspace watcher 제거만으로 project watcher는 종료되지 않으므로 완료 후 releaseView 응답을 확인한 뒤 화면을 비운다. 현재 기능은 gated checkpoint이며 아직 일반 앱에 활성화하지 않았다.
+- **2026-10-29 현재 QA 인계**: watcher 읽기 비동기화79daaa9 후 단회/반복 본1~4 지연은100ms 이내였지만 본5의 latest clipping으로 eSjVnl은FAIL이다. 7db103f 진단3회는 재현되지 않았다. 내부 scroll은bottom/창visible였으며 부모좌표·trusted입력 진단으로 원인 확인이 남는다. 이를 전체G6 합격으로 보지 않는다.
+- **2026-10-29 감시 검증 동시성**: Git `write-tree`는 검증에서도 index.lock을 만든다. watcher 백그라운드와 요청이 동시에 실행하면 실제 충돌하므로 dispatcher에서 순차 수행한다. worker는 취소 가능한 고정 읽기 자식만 담당하고 metadata/인덱스/스캔은 완료 후 최신 결속·held FD 신원 재확인 뒤 수행한다. watcher 결과는 실행 권한이 아니다.
+- **2026-10-27 현재 인계**: macOS V11 시작 이관은 사용자 승인 후01d2f19로 활성화했고 해당패키지PASS(059a42f 기록). 전체 sidecar 667PASS/9FAIL/43ignored에서 나온 9실패는 관련 focused 재검사로 해소했다. 변경 후 전체 suite 재실행 결과는 아니다. release기준검사는579.71초PASS이며 remote동시검사8baf58e 후 debug3,000출력도413.27초PASS다. 관련6회귀/독립검토PASS를유지하며G6전체성능증거는아니다. 최신상세는현재워크로그와10월아카이브. G6/실계정/Windows/출시는미완료.
+- **2026-10-23 장시간 단일 실행 방향 승인**: 4채팅×각3,000개 공개 이벤트를 여러 짧은 run이나 사용자 메시지로 대체하지 않는다. 출력 저장·조회·전송·표시 계약부터 재설계한다. 구현 전 제안과 L1~L5 순서는 `proposals/m5-long-running-agent-streams.md`; 수치·새 버전은 아직 미확정이며 제품 활성화/성능 합격을 뜻하지 않는다.
+- **과거 Codex 단건 복구 완료(2026-10-22)**: 사용자 명시 위험 수용 승인 후 test-only ignored 도구로 원장 배타 잠금·완료/manifest·정확 파일 신원·기록 프로세스 Gone을 재검증해107바이트 codex-login.pending1건을 제거했다. 감사 기록은 앱 데이터에 보존한다. 일반 legacy 자동 복구나 소급 binding 생성은 아니며 실제 로그인/모델 성공은 별도 확인해야 한다.
+- **공급자 잠금과 원장 복구의 분리(2026-10-21)**: 새 run은 pending 파일과 원장에 run ID/nonce/파일·디렉터리 신원을 결속하고 명시 복구에서 종료 기록·프로세스 소멸·abandoned manifest를 함께 확인한다. 이 구현은64860d2 패키지에 반영됐다. 과거 Codex107바이트 pending은 canceled/resolvedAbandoned/cleanExit인 원장의3개 PID+시작시각과 일치하지만 결속이 없어 자동 해제하지 않는다. 일반 연결 잠금 복구 버튼으로 이 과거 파일이 해결된다고 안내하지 않는다.
+- **격리 경고의 수용 범위(2026-10-21)**: configWarning의 알려진 격리 설명은 설정 조회 대기 중에만 보류하고 실제 disabled project layer와 대조한다. initialized 이후 모든 응답 대기를 허용하면 계정/모델 조회 단계에서 대조 없이 수용하는 구멍이 생기므로 config/read 전용 pending 조건을 사용한다. 이 처리와 실제 사용자 프로필 입장 승인은 별개다.
+- **Codex hook 대조 보완(2026-10-20)**: 세션 생성만으로는 비교군 hook이 실행되지 않았다. 별도 승인된 무인증·OS 네트워크 차단 첫 작업 요청 뒤 비교군의 hook 시작/완료·표시 파일 생성과 격리군의 hooks 빈 목록·표시 파일 부재를 대조 확인했다. 종료 확인·임시 정리까지 PASS이며 실제 모델 응답 성공은 아니다. 제품 trust 입장/경고 처리 활성화는 별도 미완료다.
+- **Codex 격리 시험과 연결 입장의 구분(2026-10-20)**: named config/read는 cwd를 명시해야 해당 프로젝트 설정을 관측한다. 임시 trusted 프로젝트에서 invocation-only untrusted override의 sentinel 미로드를 대조 확인했지만 configWarning도 발생한다. 시험 전용 경고 후 관측을 제품 경고 무시 권한으로 재사용하지 않는다. 실제 trust-bearing 프로필 차단은 유지 중이며 인증 삭제/재로그인 문제가 아니라 설정 호환 후속이다.
+- **실제 공급자 최신 상태(2026-10-19)**: Claude 작은 응답·도구 수정·권한 대기 중 취소는 확인했다. Codex gpt-6.1-sol 파일 수정은 recoveryRequired로 끝났으며 사용자 승인 뒤 앱이 종료 확인→취소됨/복사본 abandoned로 복구했다. 해당 복사본108K는 물리적으로 남아 있으며 자동 삭제 완료가 아니다. Codex 수정 재시험은 새 승인 필요, 기존 중단1회 승인은 미사용이다. G6/400MiB 메모리/Windows/출시는 미완료다. 상세 최신 워크로그는 [10월 아카이브](archive/history-2026-10.md)에 같은 날짜 전체를 보존했다.
+- **압축 이후 채팅 읽기(2026-10-16)**: 압축은 source events를 제거해도 chat_messages에 본문을 보존한다. 화면과 실제 에이전트 입력은 보존 table+남은 source를 함께 읽어야 한다. 페이지 필터 전 전체1..durable_event_sequence 연속성과 복사본 일치를 검사하며 source만 읽으면 기존 대화가 누락된다.
+- **native 전송 수치의 visibility 한계(2026-10-15)**: mcy4lx은 hiddenTransitions1/final:hidden이었다. 타이머 기반 부하 전송 자체가 숨김 제한을 받을 수 있으므로659건/180초를 제품 단독 처리량으로 인용하지 않는다. hEC8SO는 visible 선행 대기부터 실패해 전송 미시작이다. probe는 이제 숨김을 실패로 중단하며 제품 background throttling을 끄거나 실패 표본을 재활성화해 통과시키지 않는다.
+- **follow-up 비용 진단(2026-10-15)**:64건 작은 자체 fixture에서 공개 append60~85ms와 별도 workspace 검사60~88ms, idempotent retry0.1ms 미만을 관측했다. verify_workspace는 매번 Git HEAD/index/fsck/remotes/metadata를 확인한다. 공개 user-message append는 provider stream과 다른 경로이며 이 결과는12000 provider event 처리량이나 패키지 지연 원인 확정이 아니다. 안전 검사 생략/캐시 없이 Git 비용과 IPC/원장 확장 비용을 분리한다.
+- **동시 메시지 증거 범위(2026-10-13)**: NNe0ks의 실제 renderer 합성4채팅12000개/60초 시험은 선택 chat0 전체3000개 관측·최대35.4ms 및 네 채팅 최신200개 전환 일치를 확인했다. background3000개 전체를 화면에서 관측하거나 native 원장/공급자/패키지 G6를 검증한 것은 아니다. actual-agent 실행당256개 제한을 부하 시험 편의로 완화하지 않는다.
+- **첫 diff stat 초기화(2026-10-13)**: read-tree 뒤 raw materialize한 snapshot은 stat 정보가 비어 첫 diff에 파일 재확인 비용이 몰렸다. unpublished staging에서 고정 update-index -q --ignore-submodules --refresh 후 기준 트리 검증을 유지한다. 원본 인덱스 불변/동일 길이 편집 감지·필터 미실행 회귀와 독립 APPROVE, 단일 packaged firstTree966→272ms 관측을 확보했다. 반복p95·메모리400MiB 기준은 별도 미완료다.
+- **분할 감시 핸들 재결속(2026-10-13)**: Unix watcher는128단계씩 진행하지만 다음 회차에 보관된 자식 핸들을 그대로 믿지 않는다. 현재 root에서 모든 보관 prefix를 재열어 dev/ino를 대조하고 교체는 rescan/폐기한다. 초기 다회차 수집 완료도 rescan을 알린다. non-Unix는 종전 동기 스캔 유지. 감시는 stdio 응답 후/idle poll에서만 진행하며 요청 응답 직전 중복 poll은 제거했다. 반복 성능 문제·전체 watcher 합계 시간 상한은 미해결이다.
+- **백업 디렉터리 flock 수명(2026-10-13)**: 설치 journal과 마찬가지로 backup Dir close만으로는 concurrent fork/dup의 OFD 잠금 잔류를 막지 못한다. 생성·조회·예산·정리 모두 성공 취득 전용 ArchiveLock의 Drop LOCK_UN으로 소유자 수명을 끝낸다. duplicateFD 수정 전 FAIL/후 PASS·shared/error 경로·backup24·독립 APPROVE를 확보했다. 이는 잠금 수명 수정이며 동의/원장/복구점 보호/삭제 조건은 그대로다.
+- **반영 응답 유실/취소 경합 UI(2026-10-13)**: start 응답만으로 ID를 정하면 접수 응답 유실 뒤 조회·취소가 막힌다. 시작 전 chat-scoped baseline과 다른 새 ID만 채택하고 known ID는 exact 유지한다. 준비 취소 성공만으로 화면을 초기화하지 않으며 진행 요청 종료 뒤 같은 scope에 새 intent가 없음을 확인해야 새 검토로 복귀한다. 합성 React/Chromium 회귀로 검증하며 실제 source write 증거와 구분한다.
+- **설치 journal 잠금 수명(2026-10-13)**: flock은 descriptor 하나가 아니라 open-file-description에 남는다. concurrent fork/dup의 핸들이 남으면 단순 drop 뒤 inspect가 잠김으로 거부될 수 있어 InstallJournal::Drop에서 명시 LOCK_UN한다. duplicateFD 회귀의 수정 전 FAIL/후 PASS와 독립 APPROVE를 확보했다. 이는 소유자의 잠금 해제일 뿐 journal/fence 삭제나 설치 완료·프로세스 종료 추정이 아니다. 기존 pending/이력과 명시 복구 조건을 유지한다.
+- **설치 활성화 경계(2026-10-13)**: deny-default/제한 read·exec·DNS/443와 기존 shared-file admission·새 file-link 거절로 이전 blocker2건은 독립 정적 재검토에서 해소됐다. OS toy probe와 실제 임시 HOME의 Claude2.1.296/Codex0.162.1 신규 설치+재설치도 통과했다. TLS literal 보완의 검토 후 사용자 명시 승인으로 macOS enabled=true를 연결했으며944bba1 활성화 diff 독립 재검토도 APPROVE다. 이 경로는 hostile same-UID 외부 프로세스가 마지막 경로 재검증 뒤 교체하는 공격까지 완전히 보장하지 않는다. 실제 사용자 HOME·다른 OS/버전·로그인/모델 성공으로 확대하지 않는다.
+- **설치/기기 진단 연결(2026-10-13)**: d8b131d는 읽기 전용 OS/CPU/RAM/userData 여유 공간 표시만 연결했다(설치 준비/실행 가능 판정 아님). Codex 선택기는 기존 bundle→레거시 ~/.local/bin 직접 pair→공식 ~/.codex/packages/standalone 링크의 concrete pair 순서이며 기존 서명/no-follow/identity 검증을 유지한다. 465901d의 test-only helper 참조는 수정하고 일반 cargo check·독립 정적 검토를 통과했다. 전체 자동 설치 worker/launcher 회귀/실제 설치 및 기기 UI 검증은 미완료다.
+- **Claude 실제 시험 선행 조건(2026-10-13 재확인)**: 새 사용자 로그인 확인/Claude1회 승인 뒤 G5cuDY에서도 자기 check의 idle/error null로 종료했다. 모델 실행0회/원본 불변/정상 종료이며 실제 모델1회 승인은 미사용이다. 앱 전용 Claude 재로그인 완료 통지 전 동일 자동 시험을 반복하지 않는다. 자격증명 부재의 근본 원인은 미확정이며 오류 검증을 우회하지 않는다.
+- **개발 저장공간 관리(2026-10-13 사용자 지시)**: 시험마다 큰 합성 프로젝트와 userdata를 무기한 남기지 않는다. 프로세스 종료 확인 뒤 JSON/로그/스크린샷을 남기고 재생성 가능한 fixture를 정리한다. 실패 재현 데이터는 필요한 것만 한정 보관한다. Rust 개발 빌드는 CARGO_INCREMENTAL=0 우선, 빌드 중 캐시 삭제 금지. 사용자 프로젝트·인증·제품 복구 백업은 이 정리 대상이 아니다.
+- **2026-10-13 native 대형 diff 최신 결과**: 초기46Z4Lw의 목록9892ms·첫 파일9983ms 초과 이후 요청 단위 Git batch 재사용을 적용했다. b6a68d1의 수동 조회 공유는 반복 시험에서236/500개 stale 목록을 만들어 철회했다. 매번 새 조회＋summary generation 적용 후 SOlVal은 준비1회/측정10회 전부 정상 종료, p95 목록1155.3ms·첫 파일816.6ms로 기준 이내다. 개발 빌드 diagnostic/NOT_READY이며 packaged G6 합격은 아니다.
+- **2026-10-13 macOS 명시 정리 활성화 승인**: 공개 경로·중단 후 DB 재열기·합성 UI 동의/응답 유실 검증과 독립 APPROVE 후 사용자가 제품 활성화를 별도로 승인했다. application_cleanup_enabled는 macOS에서만 true다. 이전 승인 대기는 해소됐으며 current terminal 복구점 보호·명시 retirement/별도 정리·자동 삭제 없음·원본/잠금/이력 보존 계약은 유지한다. 실제 사용자 백업을 이 개발 작업에서 삭제하지 않는다.
+- **2026-10-13 대형 프로젝트 최신 단일 관측**: 084ceae batch sync 반영 debug sidecar의 h5k4N8 native UI는 1만 파일에서 편집/저장/diff·반영 확인 취소·두 채팅·정상 종료까지 PASS했다. snapshot33.4초/treeRoot977ms/expand75ms다. 아래 이전 실패를 최신 실행 결과로 반복하지 않되, 단일 diagnostic을 반복 성능/G6 합격으로 확대하지 않는다.
+- **2026-10-13 대형 프로젝트 현황**: Unix Git 파이프는 poll 준비 상태 대기로 변경(b08eddf), 파일/채팅 감시 한도 초과는 exact `watching:false,rescanRequired:true`를 양쪽 UI에 전달(c4fb3bf/60fccd8). 기존 실제10000파일 시험에서 snapshot53초·treeRoot1534ms(1000ms 초과), 편집/저장/diff 성공 뒤 반영 확인15초 대기 실패. 전체 성공 아님. 현재 성능 수집기·RSS 초과·Claude 실제 작업·Windows/출시 증거가 남으며 진단 PASS를 G6로 확대하지 않는다.
+- **최신 실제 응답 성공 범위(2026-10-13, c5dde79)**: 974Ab5에서 Codex gpt-6.1-sol medium planning1회 succeeded/cleanExit/응답 확인, 원본 불변/앱 정상 종료. Claude는 요청 ID 결속된 로그인 검사에서 idle로 실행 못 함. 전체 시험 FAIL이며 아래 이전 Codex requirements 차단은 최신 작은 planning 경로에서는 해소됐다. 다른 쓰기/복구/Windows/제품 완료로 확장하지 않는다.
+- **최신 실연결 차단(2026-10-13, e89bde5)**: W4SUaF는 두 로그인 유지·Codex 모델 선택 뒤 configRequirements/read 및 Claude start discovery differs에서 차단됐다. RUN_ACCEPTED 없음, 임시 원본 불변/정상 종료. 현재 Claude 링크2.1.296이며 이전2.1.293 관측을 현재 동작으로 가정하지 않는다. 10월8일 account/plugins 실패보다 앞 단계의 최신 증거다.
+- **Claude 내장 mod와 safe-mode(2026-10-08, 승인 2026-10-19)**: 공식 mods overview는 safe-mode/bare/disableAllHooks가 내장 mod를 끄지 않는다고 명시한다. e5324bd 패키지 시험에서 init plugins organization guard를 관측했다. 사용자 승인으로 서명 검증 native 연결의 정확한 단일 조직 guard만 수용하는 소스 구현을 진행했다. generic/fixture와 다른 plugin은 계속 거절한다. 조직 정책을 우회하는 임의 disable 또는 builtin 표시만으로 허용 금지. 실제 전체 shape·실계정 성공·최신 패키지는 미검증이다.
+- **Claude safe-mode 내장 플러그인(2026-10-08)**: 서명된2.1.293의 빈 임시 프로필/가짜 API/도구 없음에서도 init plugins가 cc-plugin-agents-md@builtin·cc-plugin-plugin-authoring@builtin을 보고했다. 공식 enabledPlugins에서 두 ID를 false로 지정하면 빈 배열이 된다(5ikQWQ→7D0mvz). 제품은 이를 명시 비활성화하며 알 수 없는 플러그인 거절은 유지한다. 실제 계정 성공·다른 버전 보장을 뜻하지 않는다.
+- **실제 연결 최신 관측(2026-10-08, 548c4f8)**: 두 로그인/모델 조회 및 실행 접수는 가능하나 실제 응답은 실패한다. 승인된 각1회 WD8GdD 시험에서 Codex turn stream account metadata, Claude init plugins other builtins 경계 실패·둘 다 cleanExit, 임시 원본 불변/앱 정상 종료를 확인했다. 이는 구체 payload 원인 확정이나 제품 완료가 아니다. 추가 실제 실행 승인은 소진됐으며 무계정2.1.293 plugins 제거 결과를 실계정 성공으로 대체하지 않는다.
+- **모델 선택과 실행 권한 분리(2026-10-07)**: Codex의 bounded catalog 표시값은 종료 확정·exe/helper/home 재검증 뒤 agent.getModelChoices/m5Models로 전달한다. 채팅/역할/workspace 결속과 단발 소비를 유지하고, 실행 경로는 여전히 선택 tuple의 새 preflight를 요구한다. 역할 화면은 projectId/revision/chatId로 remount해 이전 채팅 응답 유입을 막는다. 기능 코드f1a135c, 실제 목록 조회·안전 회귀는 최신 워크로그 참조.
+- **Claude 내부 소켓 호환성(2026-10-07)**: profile/tmp/srt-mux-PID-seq.sock은 실행 중 생성·종료 후 제거되는 unix socket으로 관측됐고 공식 anthropics/sandbox-runtime mux-proxy.ts의 내부 HTTP proxy와 일치한다. 일반 scanner는 계속 거절한다. 추적 Claude parent와 전용 tmp에 결속하는 제한적 예외는 사용자 승인 대기이며 일반 소켓/링크 허용 승인이 아니다.
+- **실계정 연결 재검증(2026-10-07, 415a155 시점)**: 두 provider의 앱 전용 로그인은 connected이나 실제 작업 준비는 실패한다. 최신 Codex는 선택 모델의 catalog 부재, Claude는 runtime 특수 파일 거절로 목표 전달 전에 중단된다. login 성공을 실행 성공으로 취급하지 않는다. 승인된 모델 목표는 아직0회이며 임시 원본은 불변이다. 최신 시험 session60083은 shutdown accepted/exit1(연결 FAIL)로 정상 종료했고 main 산출물에도 반복 unavailable 알림 억제가 반영됐다. 이전 초기화·잔류 창 기록은 당시 상태다.
+- **현재 M5 마감 상태(2026-10-07, 5209128 이후)**: macOS 합성 실제 UI에서 시작 안내/설정 저장·재열기/두 채팅·편집·diff/원본 반영·renderer reload·복원 PASS. 585bea4에서 별도 앱 프로세스 정상 재시작 후 두 채팅의 저장 파일 분리와 원본 불변도 확인했다. 파일 목록은120행 가상화, 설정 modal/첫 목표/최신 대화 따라가기는 연결됐으나 전체 시안 마감과 실제 모델 종단 검증·Windows/G6/출시는 미완료다. 편집기 dispose는 미완료 stream을 끝내고 늦은 descriptor를 무시한다. 최신07:10 synthetic 메모리 idle406.8/peak884.4MiB는 FAIL,60초 잔류delta13.3MiB는 기준 이내며 heap 감소만으로 누수 여부를 단정하지 않는다. 아래 과거 실측보다 이 최신 상태를 우선한다.
+- **macOS 원본 writer 활성화(2026-10-07)**: 신규 archive/after staging의 device별 disk-free reserve, 순차 rename 복구 allowance, 쓰기 직전 재검사 및 archive 취소 검사를 연결했다. 공간·취소 독립 차단은 해소했고 macOS source_writes_enabled=true다. 합성 실제 UI의 편집→diff→원본 반영→복원→두 채팅 전환 PASS. 삭제/기록 정리는 별도 application_cleanup_enabled=false이며 실제 계정/사용자 프로젝트·Windows/출시 합격과 구분한다.
+- **재시작·원본 반영 준비 실측(2026-10-07)**: 합성 userData의 앱 재시작/저장 프로젝트·채팅·편집 보존, baseline 포함 채팅의 검토/확인 취소·원본 불변 UI PASS. 원본 writer의 내부 application28/backup10 통합은 통과했지만 제품 source_writes_enabled=false와 활성화 전 독립 검토는 별도다.
+- **메시지 snapshot과 새 메시지 구분(2026-10-07)**: metadata-only chat 원장 이벤트는 last_message를 보존한다. get_chat은 연속된 완전 동일 snapshot만 합쳐 공개 메시지 순서를 유지한다. 저장 후 두 채팅 전환/재열기 및 사본 분리 실제 UI PASS로 직전 미완료를 해소했다. 시험 창 background throttling 해제는 제품 변경이 아니다.
+- **자신의 저장 알림(2026-10-07)**: file.changed는 외부 변경의 확정 증거가 아니다. saving 중 알림을 저장 결과 뒤 현재 버전과 대조하고 clean 버전 일치도 안내 없이 소비한다. explicit conflict는 즉시 보호한다. 늦은 읽기는 epoch/workspace/baseVersion뿐 아니라 blocked gate도 다시 확인한다. 실제 저장/diff는 진전했으나 두 번째 채팅 편집기 표시 검증은 미완료다.
+- **실제 편집 IPC 정합성(2026-10-07)**: tree 루트 빈 경로만 허용하고 파일 경로의 빈 값/탈출은 계속 거절한다. ChatRecord에서 IPC workspace 주소 네 필드만 추출해야 하며 workspace 저장 chunk/commit은 V2와 달리 saveId를 응답해야 한다. 격리 실제 UI에서 편집·저장·diff 목록/원본 불변 확인; 자신의 저장 후 외부 변경 안내가 남는 감시 UX는 후속이다.
+- **macOS native 제품 연결(2026-10-07)**: 일반 --stdio의 전역 blocked를 macOS에서 해제하고 scoped native dispatcher를 선택한다. 시작별 입장·관측·도구 승인·종료/복구 검사는 유지하며 비-macOS G4 차단은 유지한다. native capability는 fixture와 독립된 고정 목록이다. 이전 비활성 기록은 당시 상태이며 현재 코드 연결/무계정 stdio 검증과 실제 계정/모델·패키지/UI 합격은 구분한다.
+- **native/fixture 기능 분리(2026-10-07)**: native ready/status는 기존 agent baseline에서 run.startFixture를 제외한 별도 exact 계약이다. native 세션은 새 fixture 시작을 sidecar/Electron에서 거절하고 작업대에서 숨긴다. 과거 원장용 cancel/recovery는 유지한다. 이 분리만으로 일반 --stdio 활성화 또는 실제 계정/모델 검증을 완료한 것은 아니다.
+- **Claude 추론 기본값(2026-10-07)**: reasoningEffort=null은 공급자 기본값 요청이며 --effort를 생략한다. 실제 적용 수준을 관측한 값이나 medium으로 치환하지 않는다. 명시 수준의 catalog 지원 검사와 null/명시값 역할·범위·요청 정책 결속은 별도로 유지한다.
+- **Claude 보장 범위 승인(2026-10-07)**: 공식 공급자 보호를 신뢰하고 요청 정책/실제 세션 관측을 분리한다. 관측 불가능한 config·관리 설정 불변성은 런타임 증거로 만들지 않는다. control 초기화 뒤 목표를 보내고 system/init을 검증한 뒤 도구를 허용한다. 이 설계 결정 대기는 해소됐으나 제품 활성화·계정/유료 시험·전체 완료 승인과 다르다. 구체 계약은 제안서 §6.9의 사용자 확정 항목, 구현은 phased_claude 기록에서 시작한다.
+- **실제 실행 연결의 현재 경계(2026-10-07)**: Codex/Claude scoped 조회·fresh 예약·시작 dispatcher와 Claude 정책 Admission·단계별 원장·상세 확인 후 단발 승인 후보를 연결했다. Claude 버전·앱 프로필 인증·모델 관측은 분리하고 scope/역할/전체 30초 수명에 결속한다. 제품은 아직 blocked이며 누적/독립 안전 검증과 활성화가 남는다. 초기화 성공이나 credential 존재를 실제 유료 모델 성공으로 취급하지 않는다. 원문은 월간 아카이브에 보존한다.
+- **서명 검사 실행 환경 주의(2026-10-06 정정)**: 제한 환경의 codesign invalid signature만으로 설치본 손상을 판정하지 않는다. 같은 공식 Claude 2.1.291 다운로드가 제한 밖에서 통과했고 기존 Claude 2.1.287·standalone Codex·ChatGPT.app 내장 Codex도 strict/all-architectures 검사를 모두 통과했다. 이전 서명 장애 및 재설치 필요 판단은 철회한다. 공식 복구는 사용자 승인됐지만 불필요한 설치/종료는 수행하지 않았다. 제품 서명 검사는 유지하며 우회·재서명·고정 해시 등록으로 대체하지 않는다.
+- **Claude shell sandbox와 파일 도구 구분(2026-10-06)**: 공식 sandboxing 문서상 sandbox는 셸 도구에만 적용되고 Read/Edit/Write는 권한 규칙을 따른다. 기본 셸 읽기는 광범위하며 can_use_tool 콜백이 모든 호출을 가로채지도 않는다. Claude native owner는 연결됐지만 strict shell 인자만으로 전체 target/credential 보호를 주장하지 않는다. 가짜 API/sentinel의 내부 도구 성공·외부 셸 OS 거절 관측은 scripts/m5-claude-tool-probe.mjs로 재현 가능하며 관리 정책/reload/전체 제품 gate를 대체하지 않는다.
+- **Claude 권한 통신(2026-10-06)**: SDK can_use_tool은 --permission-prompt-tool stdio로 control 요청을 받는다. 옵션만으로 모든 도구가 콜백을 거친다고 보장하지 않으며 allow 규칙/권한 모드의 우회와 실행 격리 검증은 별도다. 후보 인자와 거절 IO가 연결됐으나 제품 실행/UI 활성화 증거는 아니다.
+- **Claude safe-mode 경계(2026-10-06)**: 공식 CLI의 safe-mode는 bare와 달리 구독 인증을 유지하지만 관리 정책 hook 등 일부 동작은 제외하지 않는다. 인자 구성만으로 실행 admission/OS 격리를 입증하지 않는다. 앱 프로필로 실제 실행할 때 생성되는 파일과 권한 응답·종료 검증은 여전히 후속이다.
+- **Claude init의 관측 한계(2026-10-06)**: 일반 system/init의 effort 누락은 유지되며 사전 control initialize의 모델별 effort 지원·resolvedModel/default mode/hooks 등록을 별도로 대조한다. 무계정 초기화에도 모델 목록이 나오므로 인증은 고정 auth status 조회로 분리했다. 초기화/첫 프롬프트·실행 owner는 연결했지만 이 관측은 OS 격리·관리 정책 불변성 증거가 아니다.
+- **Claude 공개 출력 계약(2026-10-06)**: SDK assistant frame은 message.id가 반복될 수 있어 uuid로 구분한다. main-session text만 공개하고 검증된 init receipt/running 상태를 원자 저장하며 result 이후 실제 종료·terminal 저장까지 owner가 유지된다. 오류를 finished로 오판하지 않도록 native poll을 수정했다. 제품 실제 모델 실행은 아직 비활성이며 fake/parser/컴파일 통과를 실사용 증거로 사용하지 않는다.
+- **백업 목록의 정리 상태(2026-10-06)**: backupRetention은 연결 이유와 별도로 cleanupState를 반환한다. deleted는 영속 정리 기록이며 파일 부재의 새 관측이 아니다. 별도 inspectBackupCleanup에서 실제 파일을 대조하고, 정리 후에도 이력은 보존한다. 제품 삭제는 여전히 비활성이다.
+- **복구점 종료 후보(2026-10-06)**: 완료된 현재 기록을 project/lock CAS로 과거 이력에 보존하는 내부 경로와 확인 IPC/UI를 연결했다. 원본·백업 파일/잠금은 변경하지 않으며 종료 뒤 별도 확인으로 과거 백업을 정리한다. 제품 기본값은 비활성, 통합·독립 검토 전이다.
+- **백업 보존 조회(2026-10-01)**: backupRetention은 현재/과거 기록의 review·파일 이름 연결을 UI에 표시한다. 파일 검증/삭제 권한은 아니며, 삭제는 staging 파일 검증과 intent 복사본을 함께 다루는 영속 삭제 계약이 필요하다. 삭제 기능은 미구현이다.
+- **종료된 준비 정리 후보(2026-10-06)**: 참조 없는 abandoned 준비 파일의 pending/deleted 영속 정리와 명시 확인 IPC/UI를 연결했다. 제품 삭제는 검증 전 비활성이다. 현재/과거 복구 백업과 소유 기록 없는 파일은 정리 대상이 아니며 전체 복원 지점 삭제 완료를 뜻하지 않는다.
+- **정리 후보 확장(2026-10-06 후속)**: 현재 복구가 참조하지 않는 ready 백업 및 원본 백업이 정확히 일치하는 terminal 과거 이력을 명시 정리 후보에 포함했다. 파일 삭제 시 해당 백업 복원을 포기하고 이력/삭제 기록은 남긴다. 제품 삭제는 아직 비활성이고 현재 복구점/고아 파일은 미지원이다.
+- **복원 예산 UI 후보(2026-10-01)**: 앱 전체 사용량 조회와 명시 예산 변경(기본5GiB, 정수1~1024GiB)을 IPC/UI에 연결했다. application-settings-v1의 원자 설정과 archive flock을 공유하며 기존 백업 자동 삭제는 없다. 통합 검증 전 구현이며 원본 writer 활성화·삭제 기능 완료를 뜻하지 않는다.
+- **named 권한 조회 계약(2026-10-06)**: 정상 서명된 앱 내장 Codex 0.159.2에서 generate-json-schema --experimental로 상세 계약을 확보했다. permissionProfile/list는 cwd/cursor/limit, 응답은 data[{id,allowed,description?}]/nextCursor다. 기존 named RPC 후보에 cwd와 조회를 연결했고 complete page의 유일한 요청 ID/allowed=true를 대조한다. 선택 허용은 실제 filesystem/network 보호 증거가 아니며 named 설정/thread/turn·owner 연결은 아직 남는다. 제한 환경 서명 오류를 설치 손상 차단으로 반복하지 않는다.
+- **구현 우선 운영(2026-10-01 사용자 지시)**: 매 작업 검증 대신 남은 기능 전체 연결 후 통합 검증·순차 버그 수정을 진행한다. 미검증 구현 체크포인트 커밋은 가능하지만 제품 완료/gate PASS가 아니다. 실제 실행 활성화·계정/유료/사용자 프로젝트·출시 경계는 유지하며 설치본 장애와 독립적인 기능 구현은 계속한다. 루트 지침의 같은 제목 절이 과거 검증 빈도 규칙보다 우선한다.
+- **실행 격리 전환 승인(2026-10-01, 10-06 정정)**: §6.9의 서명된 공급자 부모 신뢰와 공식 도구 sandbox 분담/무계정 임시 자료 시험은 사용자 승인 완료다. 이전 정책 입력 대기를 반복하지 않는다. 당시 제한 환경의 서명 오류로 시험을 중단했으나 10-06 제한 밖 검사는 통과했다. 설치 손상이라는 판단은 철회하며 제품 활성화·실제 계정/유료 모델 승인과 구분한다. 정상 서명 설치본의 도구 보호/종료 검증은 남는다.
+- **Claude 로그인 업데이트 입장(2026-09-30)**: 고정275/270 버전/SHA 목록 대신 공식 native launcher가 가리키는 versions/X.Y.Z 실파일을 Anthropic 서명으로 검증한다. 공식 링크는 bin 밖 절대경로이므로 cap_std의 read_link가 아닌 read_link_contents 후 고정 target 검증을 사용한다. launcher 자체는 실행하지 않고 현재 선택한 실파일을 bind한다. 설치2.1.285 읽기 전용 검증 통과는 계정 인증/모델 실행 완료가 아니다. npm/Homebrew/custom launcher 경로는 별도다.
+- **Codex 로그인 업데이트 입장(2026-09-30)**: 로그인·진단은 고정 bundle native 후보의 Apple anchor/OpenAI Team2DC432GLL2/exact CLI·helper identifier 서명으로 입장한다. release SHA 목록은 이 경로에서 제거했고 실행 중 교체 감지용 digest는 유지한다. 새 코드 경로의 설치본 검사는 CLI/helper 수락·잘못된 identifier/다른 공급자 거절을 확인했으나 계정/모델을 호출하지 않았다. Claude와 actual runtime의 pin/호환 전환은 남으며 모든 upstream 파괴적 변경 호환을 보장하지 않는다.
+- **복원 예산 내부 연결(2026-09-30)**: 반영 백업 생성은 앱 데이터 루트의 모든 archive 일반 파일을 합산해 기본5GiB 내 write만 허용한다. 고아/abandoned도 포함하고 directory flock으로 협력 작성자를 직렬화한다. 기존 파일 자동 삭제 없음. preparing 예약 뒤 한도 실패 시 명시 복구가 필요할 수 있다. 제품 원본 writer·복원/정리/예산 설정 UI는 별도 미구현이며 이 내부 제한으로 전체 반영 기능 완료를 주장하지 않는다.
+- **1·3 승인과 오프라인 실측(2026-09-30)**: 오프라인 설치 CLI/가짜 sentinel 시험과 원본 반영 외부 편집 중지·보존형 충돌 중단/복원5GiB·자동 삭제 없음 정책은 사용자 승인 완료다. 아래 승인 대기는 과거 상태다. 시험은 설정 조회까지 성공했으나 현재 outer sandbox와 vendor 내부 sandbox 조합에서 exit71로 실패해 실제 도구 격리 성공은 미입증이다. 업데이트 대응 adapter와 격리 책임을 함께 해결해야 하며 같은 승인을 반복 요청하지 않는다.
+- **업데이트 호환 우선(2026-09-30 사용자 확정)**: 공급자 정상 업데이트를 exact 실행 파일 SHA-256 미등록이라는 이유로 차단하는 정책은 제품 방향에서 제외한다. 구버전 고정/중복 전용 설치로 이를 대체하지 않는다. 이전 앱 전용 설치 A/B 권고·선택 요청은 철회됐으며 제안서 §5.1.1의 신뢰/기능 호환 분리와 공식 adapter 방향으로 재설계한다. 코드의 기존 pin은 아직 남아 있고 검증 없이 제거하지 않는다. 아래 설치 공급 결정 대기 기록은 당시 상태다.
+- **M5 설치 공급 불일치(2026-09-30)**: 레거시 Codex standalone 최신 설치와 M5의 pinned 앱 번들 CLI/helper admission은 호환을 보장하지 않는다. 앱 전용 검증 버전 설치 vs 기존 설치 사용 정책은 제안서 §5.1.1의 사용자 결정 대기다. 사전 진단의 후보 부재를 시스템 전체 미설치로 단정하거나 latest 설치 성공을 사용 가능으로 표시하지 않는다.
+- **M5 현재 후속(2026-10-01)**: macOS 일반 파일/링크 순차 반영·역복원·완료 잠금 해제·부분 취소·완료 이력 보존은 내부 미검증 구현이다. 제품에는 읽기 전용 반영 상태 조회만 연결했고 쓰기는 열지 않았다. 원본 보호 조건/5GiB 예산은 승인 완료다. 디렉터리·staging 실패 복구·공개 반영/이력 선택·실제 공급자 활성화·Windows/G6/출시와 통합 검증이 남는다. 내부 구현을 앱 완료로 인용하지 않는다.
+- **대규모 snapshot 생성 비용 관측(2026-09-30)**: 101개 작업 복사본 회귀의 진행 중 1초 CPU sample에서 append_event의 전체 원장 replay/JSON 검증을 관측했다. storage.rs:append_event_with_failure도 매 append 후 전체 events를 재로드·replay한다. 검사 정지를 의미하지 않으며, 기존 보존/중복/충돌 계약을 유지하는 성능 개선은 별도 설계·검증해야 한다. 단일 debug sample을 배포판 성능 수치로 인용하지 않는다.
+- **채팅별 검토 대상(2026-09-30)**: 각 chat descriptor 슬롯과 exact task/workspace/chat revision·lock 신원/revision을 결속한다. 다른 chat의 active 포인터로 바뀌어도 원래 manifest를 검증하며 chat/lock 변경은 옛 검토를 무효화한다. 세 원장 revision CAS와 미소유 lock을 요구하고 아직 승인/쓰기 권위는 없다.
+- **A2 ReviewPlan 후보(2026-09-30)**: receipt로 검증된 source/snapshot 변화·신원을 읽기 전용으로 묶는다. 최신 descriptor는 project 원장 CAS로 게시하고 재시작 시 현재 파일에서 재구성/대조한다. untracked·경로 충돌·미지원 권한과 승인 상태/superseded ID는 거절한다. 과거 파일 내용 보관이나 승인/쓰기 권위는 아니며 chat/task 확인 수명과 A3~A5는 남는다.
+- **snapshot 준비 복구(2026-09-30)**: snapshot_recovery는 version1 beforeSnapshotExport만 두 revision의 트랜잭션 CAS로 원자 폐기한다. project.catalog와 저장 프로젝트 UI의 명시 확인/종료에 연결했고 exact 영속 완료 evidence에만 응답 유실 재확인을 허용한다. legacy/실행 시작/파일 존재/chat 또는 run 결속은 거절한다. 시작 이후의 불확실 종료 복구는 별도 남는다.
+- **Unix Git 대기 한도(2026-09-30)**: fixed Git stream stdin/stdout/stderr/exit에 명령별120초 deadline을 공유한다. stderr 완료까지 unreaped leader를 유지하고 오류는 그룹 종료·최대2초 direct reap을 시도한다. pipe 보유 자손의 무한 대기는 닫았지만 escaped/비중단 전체 tree 종료 증거는 아니며 Windows fallback에도 적용되지 않는다.
+- **A1 원장/생성 결속 후보(2026-09-30)**: source_baselines[worktreeId]는 불변 descriptor를 게시·조회하며 close/open에서 보존한다. 내부 ApplicationCandidate 생성3회·재시작 검증을 통과했고 활성화는 최신 원장 extension을 보존한다. DB 게시 실패는 artifact와 잠금을 남긴다. 공개 생성 활성화·시작 이후 복구·누적 크기/압축은 남고 아래 receipt 게시/생성 미구현 기록은 이 내부 후보 추가로 갱신한다.
+- **A1 receipt 저장 후보(2026-09-30)**: opaque ReceiptStore만 전용 source-baselines-v1에 불변 파일을 쓸 수 있다. 항목별 streaming과 encoded64MiB 한도·fsync·재검증을 제공하지만 descriptor 원장 게시/실제 snapshot 생성 연결은 미구현이다. 원장 descriptor 없는 legacy를 파일만으로 승격하지 않는다. 이전 raw blob 항목의 영속 receipt 없음은 내부 파일 후보 추가로 갱신하되 writer 권위는 여전히 없다.
+- **A1 raw blob 비교 후보(2026-09-30)**: capture_clean_baseline은 index/HEAD와 raw 파일 상태를 묶고 blob SHA-256 및 Git object OID를 직접 대조한다. ordinary byte/mode/link drift·missing object·root 경로 교체와 필터 미실행 회귀를 통과했다. 지금은 내부 반환값만 있고 영속 receipt나 writer 권위는 없으며, 기존 Git helper의 시간/자손 수명 제한을 제품 활성화 전에 닫아야 한다.
+- **A1 index 비교 함정(2026-09-30)**: mode/OID/path만으로는 HEAD의 빈 파일에 대한 intent-to-add를 구분하지 못한다. cached-only diff-index와 명시 외부 converter 차단을 더하고 dirty exit1을 dirtyConflict로 분류한다. split index는 별도 shared image가 필요해 거절하고 sparse-index·full-index sparse·assume-unchanged도 현재 내부 후보에서 거절한다. 실제 raw blob 동등성·receipt 결속 전에는 적용 권위가 아니다.
+- **원본 baseline 내부 후보(2026-09-30)**: project/application.rs는 root .git만 제외한 raw inventory를 bounded/no-follow로 읽는다. ignored/임시 이름과 nested .git도 포함하며 identity와 내용 변경을 구분한다. 읽기로 바뀔 수 있는 atime은 무변경 보장에서 제외한다. 두 pass 일치·집중 회귀·독립 검토는 HEAD/index/영속 receipt 또는 원본 writer 활성화의 증거가 아니다. 상세와 한도는 proposals/m5-change-application.md A1을 따른다.
+- **고정 CLI의 권한 계약(2026-09-29)**: SHA 3e11ccc…aca5a의 일반 SandboxPolicy에는 최신 문서의 restricted read 필드가 없다. `generate-ts --experimental`에서 named permissions와 activePermissionProfile을 확인했으나 runtime 유효 권한/OS 강제는 아직 미검증이다. beta permissions와 기존 sandbox_mode를 혼용하면 안 된다. 별도 도구 scratch의 synthetic OS 격리는 PASS지만 vendor tool routing 분리는 미구현이다.
+- **내부 일회 허용과 제품 활성화 경계(2026-09-29)**: core는 accept bytes를 생성하지 않고 순서만 예약한다. private sidecar transport가 inspected live ticket·현재 예약/격리/취소·원자 intent 뒤 일회 accept를 전송하며 부분 전송도 재검증한다. toy 6case와 독립 검토는 통과했으나 공개 accept/native start는 미활성이다. PROFILE 전체 읽기/쓰기가 vendor 자손에 상속되므로 인증/profile 도구 격리가 다음 활성화 차단 조건이며 기존 snapshot 보호와 혼동하지 않는다.
+- **승인 상세 조회(2026-09-29)**: 기본 요약과 별도로 명시 inspect만 live ticket/실행/연결에 결속된 상세를 일시 반환한다. 원장/채팅에는 저장하지 않으며 평문 표시 때 C0/C1·전체 Cf를 escape한다. 상세 열람은 추가 권한 허용이 아니며 제품 native 활성화는 별도다. 아래 유형 표시 당시의 상세 미지원 상태를 이 구현으로 갱신한다.
+- **권한 요청 요약(2026-09-29)**: 공개 승인 pending은 `{approvalId,kind}`만 반환한다. 고정4유형 표시는 raw 행위/host/명령 원문 공개나 허용 권한이 아니며, 구체적 허용 결정을 위한 정보/경계는 별도 구현 대상이다.
+- **승인 UI 경계(2026-09-29)**: run.approval은 opaque 대기 ID 조회와 명시 거절만 제공하며 receipt의 queued는 접수일 뿐 wire 전달 증거가 아니다. exact suffix·실행 신원·현재 frame을 검증하고 만료 요청 오류는 세션 전체를 종료하지 않는다. 카드의 허용 기능/요청 상세/실제 provider 활성화는 아직 없으며 이 부분 구현을 앱 완료로 주장하지 않는다.
+- **native 승인 live 대기열(2026-09-29)**: 자동 거절은 명시적 거절 접수 방식으로 교체했다. 조회/응답과 매 advance 뒤 실제 미응답 stream 집합을 대조하며 취소/완료/서버 해제 뒤 ticket을 제거한다. 요청 ID는 프로세스 로컬이며 원장만으로 복원하지 않는다. 내부 조회/거절은 exact 실행 신원과 예약 입력을 재검증한다. 공개 UI/IPC와 허용은 후속이다.
+- **승인 연결 신원 보강(2026-09-29)**: 아래 초기 승인 의도 기록의 후속 조건 중 실제 process UUID 결속은 완료했다. dispatcher stream과 LoginProcess UUID를 함께 사용하며 BoundTextSession의 매 advance 신원 검증을 유지한다. UI/직전 권한 재검증/허용 연결은 여전히 남는다.
+- **승인 의도 기록(2026-09-29, 내부 후보)**: native 자동 거절은 실행 신원·dispatcher stream·thread/turn/request/item/시각·내용 digest에 묶인 일회성 ticket을 원자 저장한 뒤 전송한다. 원장은 최대128개 opaque 의도이며 전달/수행 성공이나 승인 권한이 아니다. 저장 실패는 무전송·정리로 처리하고 terminal/recovery에서도 기록을 보존한다. 독립 검토 scoped PASS. 실제 허용 경로는 process transport UUID의 추가 결속·직전 권한 재검증·UI 연결이 필요하며 AcceptOnce는 여전히 차단된다.
+- **프록시 실행 원장 결합(2026-09-29)**: RunReservation의 내부 proxied launch는 기존 offline 경로와 입력/pin/profile 검증을 공유한다. identity 기록 전에 gate를 열지 않으며 release 저장 실패는 transport/broker 중단 후 owner cleanup으로 처리한다. toy10경로 통과는 제품 admission이나 실제 모델 작업의 증거가 아니다.
+- **격리 조회 CA 해결(2026-09-29)**: 기존 account id3 실패는 OS 공개 CA 파일을 fixed env/exact read로 명시한 뒤 실제5 RPC·cleanup 통과했다. CONNECT/auth/upstream은 동작하며 키체인/Mach 권한 또는 TLS검증 해제는 필요하지 않았다. 아래 격리 조회 차이 기록은 수정 전 증거다. 사설 사용자 CA·실제turn·domain-fronting·제품 활성화까지 검증된 것은 아니다.
+- **격리 조회 차이(2026-09-29)**: 실제 앱 프로필의 비격리 full preflight는5 RPC 통과하지만 OS sandbox+proxy 후보는id1/2 뒤 account id3 단계에서 거절된다. 두 경로 모두 종료/cleanup 확인이며 기존 로그인 실패로 단정하지 않는다. 다음은 계정 응답의 비밀 없는 구조 진단이고, proxy CONNECT 성공이나 제품 활성화는 아직 증명되지 않았다.
+- **중계/실행 소유권 결합(2026-09-29)**: ModelProxyCommand가 Broker를 LoginProcess에 이동하고 proxy secret은 고정 환경으로만 전달한다. owner tick으로 처리하며 종료/무효화 때 stop, 불확실 Drop은 listener만 보존하고 Broker의 연결/작업/인증 객체는 drop한다. 중계 실패는 프로세스 종료 증거가 아니다. native 환경 호환성·제품 admission은 아직 미확인이다.
+- **Broker/DNS 연결(2026-09-29, 미활성)**: fixed destination DNS 결과를 모두 검증하고 숫자 주소에만 연결한다. DNS/연결 작업자는 전역8개이며 취소된 정지 resolver도 실제 종료까지 슬롯을 점유한다. Broker는8연결·600초/128MiB aggregate이며 stop 때 listener를 drop하지 않는다. 제품 process lease 결합·native 호환성은 후속, 실제 공급자나 TLS/domain-fronting 검증으로 사용하지 않는다.
+- **모델 중계 transport(2026-09-29, 내부)**: Relay는 preconnected socket2개·방향별8KiB·128MiB/600초를 소유하고 EOF half-close/역압·취소·오류·Drop을 처리한다. 로컬 소켓 회귀만 검증했으며 broker/DNS/동시 연결 제한·process lease 결합은 후속이다. TLS peer identity나 경로 접근 권한을 검증한 것으로 사용하지 않는다.
+- **모델 중계 입장(2026-09-29, 제품 미연결)**: provider_model_proxy는 per-run Basic credential과 bounded CONNECT framing만 검증한다. 정확 authority/Host·단회 소비·8KiB/5초를 적용하며 실제 curl의 로컬 요청은 통과했다. upstream DNS/public IP·TLS 내부 목적지·relay 예산·native 모델 호환성은 별도다. 이 parser를 실행 권한 또는 완성된 네트워크 격리로 사용하지 않는다.
+- **macOS 종료/회수 경합(2026-09-29)**: identity Gone과 Child::try_wait의 종료 결과 준비는 동시에 보장되지 않는다. LoginProcess는 confirmed tree에서 Ok(None)이면 원래 8초 종료 예산 내 pending을 유지하며 root 회수까지 fence/listener를 놓지 않는다. 동기 재시도는 TreeTracker::terminate의 fresh 관측을 유지해야 cached failure로 생존 프로세스 정리를 건너뛰지 않는다. 실패 receipt/integrity 오류를 재시도로 성공 승격하지 않는다.
+- **중계 endpoint 소유권(2026-09-29)**: loopback tcp4 단일 포트 정책만으로 listener 신원 수명이 보장되지 않는다. opaque command가 listener를 lifecycle owner에 옮기도록 수정했고, 종료 확인 전 보유·불확실 Drop 시 sidecar 종료까지 descriptor 보존을 검사했다. 상류 broker 인증/목적지/실제 모델 통신은 아직 미완료이며 제품 활성화에 사용할 수 없다. cat 자연 종료 cleanup 실패 1회는 원인 미확정으로 남긴다.
+- **native 시간 예산 분리(2026-09-29)**: 이전 전체30초 toy 제한을 연결/thread 준비30초와 turn queue 생성부터 총10분으로 분리했다. 도구·승인 대기 포함, 활동 갱신 없음, 취소·sticky failure·기존 cleanup 경계 유지. 실제 모델 장시간 실측/제품 활성화는 아직 별도다.
+- **stale helper 보존 복구 완료(2026-09-29)**: exact 옛 tmp helper 디렉터리를 `codex-stale-helper-preserved-ec5db708-c8c2-4683-8dfd-72c926603381`로 inode 그대로 보존했다. 현재 앱 profile 전체 runtime 파일 검사가 통과하며 기존 stale 링크는 더 이상 차단이 아니다. 명시 복구만 구현했고 자동 허용/링크 scanner 완화는 없다. 정상 vendor helper의 실행 수명과 제품 활성화 검증은 별도 남는다.
+- **stale helper 차단 실측(2026-09-29)**: 실제 앱 tmp의 codex-execve-wrapper는 사라진 옛 번들 경로를 가리킨다. 고정 CLI offline 임시 프로필 재현에서 초기화/설정 조회와 cleanup은 성공하지만 dangling helper가 남아 recursive runtime scanner는 계속 거절했다. 로그인 잠금과 별개이며 재로그인/재부팅을 요구하지 않는다. 실제 임시 artifact의 보존 복구는 아직 실행하지 않았다.
+- **plugins 실행 입장 갱신(2026-09-29)**: blanket 존재 거절 대신 hooks/apps/plugins=false의 명시 argv·effective/sessionFlags 검사 + 기존 전체 profile 재귀 scanner + macOS PROFILE/plugins read/write deny를 결합했다. OS 캐시 차단 probe·고정 CLI offline config·앱 프로필5 RPC가 통과했다. 실제 tmp helper symlink와 네트워크/도구·관리 설정 전체 입장은 별도다. toy 실행 회귀의 cleanup 실패 2회는 재검사에서 재현되지 않았으나 원인 미확정으로 남긴다. 이전 plugins 존재 거절 설명은 당시 임시 조건이며 현행은 architecture를 따른다.
+- **native dispatcher 소유권 연결(2026-09-29)**: 내부 등록 목록을 공통 poll/취소/quit에 연결해 임시 프로세스의 정상·취소·종료·DB 실패 복구를 통과했다. 준비 상태는 wire running으로 바꾸지 않으며 native start/capability는 미활성이다. 이 파동의 sidecar 라이브러리 누적 결과는 421 PASS/9 ignored/729.68초이며 과거 fixture의 id50 누락도 수정됐다. 실제 공급자 활성화·격리·모델 통신/도구 UI와 혼동하지 않는다.
+- **앱 프로필 조회 최종 통과(2026-09-29)**: plugins 캐시를 로그인/조회에서 검증해 허용하고 native 실행에서는 명시 거절하도록 분리했다. 기존 v2 종료 증거 API로 복구한 뒤 실제 5 RPC preflight가 matched/termination/cleanup 모두 true로 통과했다. 아래 과거 plugins 잠금/requirements 미확인 상태는 해소됐다. 이 결과는 실제 작업 실행 활성화나 plugin 격리 증명이 아니며 runtime blocked는 유지된다.
+- **계정 preflight 진전/새 프로필 경계(2026-09-29)**: 계정 응답 전 account/updated+emittedAtMs를 bounded 단1회 처리해 실제 account/model 대조를 통과했다. 마지막 requirements 단계 뒤 vendor plugins 생성으로 profile cleanup이 실패했다. 새 pending에는 locked-v2 종료 증거가 있으므로 legacy/reboot 이슈로 회귀하지 않는다. 플러그인 자동 생성/격리와 프로필 admission이 다음 조사이며 현재 plugins/pending은 보존한다.
+- **legacy 잠금 수동 복구 완료(2026-09-29)**: 사용자 명시 승인으로 개발 앱을 정상 종료하고 exact legacy pending을 원본 inode/hash 그대로 `.preserved-20260929-168613811`로 보존했다. 재부팅은 하지 않았다. 후속 실제 model-free 검사에서는 대조 실패가 남았지만 프로세스 종료·cleanup 모두 confirmed이며 활성 pending은 없다. 과거 재부팅/승인 대기를 현재 차단으로 반복하지 않는다. 다음 원인은 preflight 응답의 단계별 불일치이며 인증 실패라고 아직 단정하지 않는다.
+- **관리 정책 조회 후보(2026-09-29)**: full preflight는 고정 configRequirements/read(id 50)의 explicit requirements:null까지 받아야 observations가 일치한다. 객체/누락/중복/미지 응답은 거절하며 configuration-only는 기존 2 RPC를 유지한다. 이는 공식 vendor 보고 검증이며 inaccessible MDM visibility/실제 계정 검사 성공/제품 admission 증거는 아니다. 현행 경계는 architecture의 관리 정책 조회 항목에 기록한다.
+- **종료/잠금 진단 분리(2026-09-29)**: ProcessClosureEvidence.termination_confirmed는 추적한 프로세스 종료/reap와 증거 저장까지 확인한 진단값이다. 프로필·예약 검증까지 통과한 confirmed를 대신해 실행/잠금 해제 권한으로 쓰지 않는다. 과거 pending은 이 증거가 없으므로 PID가 없다는 사실로 confirmed를 재구성하지 않는다.
+- **로그인 종료 표시(2026-09-29)**: 새 로그인/조회는 clean 종료 뒤 profile 재검증 전에 pending 마지막 줄에 login-processes-terminated-v1을 fsync한다. native run의 terminal 보류에는 쓰지 않으며 표시만으로 자동 해제하지 않는다. legacy pending에 소급해 표시를 붙이지 않는다.
+- **명시적 복구 갱신(2026-09-29)**: 후속 구현은 flock owner와 locked-v2 종료 표시만 복구 대상으로 삼는다. v1 표시도 자동 승격하지 않는다. UI recover는 제한된 기록/메타데이터·OS Gone·capability 검증 후만 해제하며, 실제 현재 legacy pending은 여전히 미해결이다.
+- **현재 legacy 잠금 복구 체크포인트(2026-09-29)**: 동일 날짜의 재부팅 전 증거 워크로그에 boot UUID와 pending inode/시간/hash를 보존했다. 다른 부팅 세션과 정확한 파일 신원 재확인 전에는 해제하지 않는다. 사용자에게 Mac 재부팅을 요청했으며 아직 완료 증거는 없다.
+- **실제 offline 설정 호환성 PASS, MDM 검증은 미완료(2026-09-29)**: 현재 exact CLI/helper의 config-only 검사는 기존 정책에서 `Failed to synchronize managed preferences`로 실패했으나 opendirectoryd.libinfo Mach 조회 한 항목 추가로 PASS/2.49초다. 다른 설정/Mach/공유 메모리 허용은 제거했고 config 원문 불변·auth 미생성·cleanup confirmed를 확인했다. 독립 검토는 이 변경에 scoped PASS이나, inaccessible MDM layer가 upstream에서 생략되는 false PASS 위험은 닫히지 않았다. 관리 정책 가시성/명시적 거절 확인 전 제품 admission 근거로 사용하지 않으며 runtime은 blocked 유지다.
+- **종료 대기와 완료 응답 분리(2026-09-28)**: native 예약 실행은 통신 결과를 보관하고 poll_finish로 종료를 단계 진행한다. 대기 중 receipt/final/terminal/fence 해제는 없고 완료 후 기존 원자 저장 순서를 유지한다. run.cancelAgent 결과는 종료 증거를 요구하므로 취소 접수 flag로 대신할 수 없다. 공통 stdio의 지연 완료 응답을 fixture runtime에 연결해 검증했으며 native owner 등록은 남는다. 비정상 Drop fallback은 아직 동기식이다.
+- **코딩용 OS 쓰기 경계 후보(2026-09-28)**: 같은 deny-default builder의 Write 모드는 작업 사본 일반 파일을 허용하되 Git/agent 제어 경로와 profile config를 보호한다. CLI/helper는 HOME/작업 사본 밖이어야 한다. 저장된 역할이 native argv·OS 모드·preflight 기대 권한을 함께 정하며 별도 renderer 인자는 없다. writer terminal은 run/chat/잠금을 원자 기록하고 불확실 종료/저장 실패는 잠금을 유지한다. 실제 공급자·도구/승인·네트워크 입장을 대신하지 않는다.
+- **Codex 실행 profile 입장(2026-09-28)**: 기존 snapshot scanner를 runtime HOME 전체에 재사용해 spawn 전·release 직전 중첩 파일의 nlink=1·실제 directory 조건을 확인한다. 로그인 규칙 자체를 강화해 기존 연결을 깨뜨리지 않으며 파일/인증 내용은 변경하지 않는다. OS sandbox와 적대적 동시 교체 보호는 별도다.
+- **deny-default 로컬 정책 후보(2026-09-28)**: opt-in probe에서 지정 폴더 쓰기/읽기·자식 실행은 통과, 원본/보호 설정 변경과 외부 hardlink 생성·loopback TCP는 거절됐다. 시스템 로더가 루트 디렉터리 자체 읽기를 요구해 `(literal "/")`만 추가했다. broad root 읽기/쓰기 허용이 아니며 실제 vendor/Mach/인증/모델 통신 호환성은 미검증이다. 테스트 정책만 존재하며 제안서 §6.8을 따른다.
+- **외부 경로 sandbox만으로 원본 보호 불충분(2026-09-28)**: 임시 fixture의 macOS `macos_sandbox_probe`에서 기존 writable descriptor와 hardlink로 sandbox 밖 원본 변경을 재현했다. 직접/심볼릭 링크/자손 쓰기와 실행 중 hardlink 생성은 차단됐다. probe exit 0은 기제 관측 완료이지 안전 gate PASS가 아니며 제품에 적용된 정책이 아니다. 기존 핸들·inode 공유·IPC 경계가 포함된 입장/실행 정책이 필요하다. 제안서 §6.8 참조.
+- **공유 vendor gate의 fd 상속 차단(2026-09-28)**: 고정 셸이 payload release 전 0/1/2 외 inherited fd를 닫는다. 임시 원본의 non-CLOEXEC fd 누출을 먼저 재현하고 낮은/높은 fd 및 부모 보존·기존 로그인/실행 회귀·독립 검토로 수정 확인했다. hardlink 및 전체 sandbox 보장으로 확대 해석하지 않는다.
+- **실제 실행 원장 통합 파동 검토 통과(2026-09-28, 기준 `e738340`)**: 공통 RunPreparation이 메시지/역할/snapshot 해석과 run/recovery/writer 예약을 담당한다. RunReservation은 gate 전 신원 저장·release 기록·누적 자손 갱신과 예약 입력의 text 통신·공개 원장·explicit 종료 증거에 따른 terminal/복구 저장을 연결한다. 임시 snapshot/SQLite/toy pipe와 DB 재오픈 회귀 및 독립 정적 검토 PASS다. 누적 라이브러리 증거와 후속 변경의 집중 회귀를 조합하며 전체 최신 소스 누적 재실행으로 주장하지 않는다. native provider 입장·workspace-write OS 격리·도구/승인·제품 caller는 여전히 미완료다. 가짜 공급자 증거로 실제 provider·유료 모델·제품 활성화를 주장하지 않는다. 상세는 현재 및 월간 archive의 2026-09-28 기록이다.
+- **승인은 snapshot 보호를 대체하지 않는다(2026-09-28)**: Codex requestApproval에는 sandbox 밖 실행/추가 쓰기가 포함될 수 있다. cwd·item 신원 일치나 사용자 클릭만으로 원본 보호를 증명하지 못한다. 현재 미활성 후보의 AcceptOnce builder는 거절하도록 수정했고 decline/cancel만 준비한다. workspace-write의 독립 권한 검증을 먼저 구현하며 관리 정책 우회/원본 직접 쓰기 경로로 대체하지 않는다.
+- **Codex 격리 미입증 조건(2026-09-28)**: HOME/CODEX_HOME 분리와 CLI 모델/권한 override는 시스템/회사 관리 layer 및 전역 hook 배제 증명이 아니다. 내부 full preflight는 includeLayers=true로 정확한 flags/user/빈 system 출처와 hooks=false를 대조한다(default RPC는 false 유지). 조회는 startup 부작용 이후의 관측이다. 빈 임시 환경의 무모델 thread 실측과 미신뢰 hook/MCP 표시 미생성은 통과했지만 신뢰/관리/plugin 및 프로젝트 입장 격리는 별도 남는다. 관리 정책을 우회하지 않는다. remoteControl/status/changed는 exact opt-out으로 억제하고 예상 밖 수신 frame은 계속 거절한다.
+- **최신 로그인 복원(2026-09-28)**: Codex 0.158.0-alpha.2.1의 signed nested native CLI와 helper exact pair를 직접 실행해 Claude 2.1.275와 함께 실제 앱 재시작 복원을 확인했다. `codex-cli/bin/codex`는 shell wrapper이므로 native 신뢰 판정과 혼동하지 않는다. 아래 과거 항목의 Claude 복원 대기는 해소됐다. 실제 모델 실행/출력은 여전히 별도다.
+- **Claude 사용자 인증 통과(2026-09-15)**: 키체인 HOME 수정 후 사용자가 연결 성공을 확인했다. 아래 이전 항목의 사용자 인증 완료 대기는 해소됐으며 Claude 재시작 복원·독립 안전 검토는 남는다. 사용자 보고와 직접 화면 관찰은 구분한다.
+- **로그인 환경·업데이트 함정(2026-09-15)**: Claude 앱 전용 HOME에서는 macOS 기본 키체인 조회가 실패하므로 OS HOME을 유지하고 CLAUDE_CONFIG_DIR로 앱 인증 namespace를 분리하도록 수정했다. Codex SHA-256 드리프트 차단은 새 0.154.0-alpha.6.2 exact pair·동일 로그인 규격 검증으로 대응했고 실제 재시작 연결 복원이 통과했다. 향후 미검증 업데이트는 계속 차단하며 로그인 유지 실패·설치 불일치·복구 잠금을 UI에서 구분한다.
+- **Claude 연결 코드 전달(2026-09-15)**: 브라우저 반환 코드의 UI/IPC/stdin 경로를 구현했다. 현재 Claude 로그인 시도에 한 번만 제출하고 verifying 이후 fresh 상태 조회·종료 확인으로 성공을 판단한다. 가짜 코드 회귀는 통과했으나 실제 사용자 인증 완료·복원과 독립 안전 검토는 남는다. 이메일 확인 번호가 아니라 마지막 브라우저 화면의 연결 코드를 사용한다.
+- **제품 로그인 연결(2026-09-14)**: Codex 0.153.4 exact pinned 쌍의 앱 전용 사용자 인증(`8eb6129`)과 후속 check-only 실제 재시작 복원을 각각 확인했다. Claude 2.1.270은 별도 config/Keychain namespace·manager·fence·버튼을 구현하고 빈 profile 조회/URL 생성·취소를 확인했으나 사용자 인증 완료와 이번 변경의 독립 검토는 남는다. provider별 종료 잠금과 URL allowlist를 분리하고 원래 터미널 인증은 보존한다. 모델 실행 준비 증거가 아니며 cleanup 불확실성은 자동 해제하지 않는다. 상세 현행 구조는 architecture 로그인 항목을 따른다.
+- **CLI 버전 드리프트(2026-09-14 후속)**: 현재 ChatGPT.app 번들의 Codex는 0.153.4다. 앞선 0.149.1 관측은 당시 증거이며 현 설치 버전으로 재인용하지 않는다. 로그인 schema 20파일 비교에서 Bedrock 인증 추가 2파일 차이가 있고 chatgpt 분기는 동일하다. `scripts/m5-codex-login-schema.mjs`로 생성 schema와 의존 타입을 오프라인 대조할 수 있지만 결과는 실제 provider/version 활성화 권위가 아니다.
+- **로그인 불확실 종료 fence(2026-09-14, 내부 owner 미활성)**: app-data의 `codex-login.pending` 존재는 내용이 비었거나 손상돼도 새 내부 로그인 예약을 차단한다. 자동 삭제/기록 PID 재사용은 하지 않는다. 파일에는 프로세스 신원만 남기며 explicit cleanup의 tree 종료·root 회수·증거 저장 확인 전에는 해제하지 않는다. 제품 launcher/초기화/IPC·수동 복구 연결은 별도 남는다.
+- **실제 agent 별도 로그인 승인(2026-09-14)**: 기존 사용자 터미널 설정/인증을 보존하는 앱 전용 환경에 별도 로그인하도록 구현한다. 인증정보 복사·공유 keyring 자동 fallback·유료 모델 smoke는 이 승인에 포함하지 않는다. 로그인 방식 선택은 더 이상 답변 대기가 아니며 실제 구현/검증과 구분한다.
+- **압축 계획 해제 후 chat 검증(2026-09-14)**: plan ordinals 1..1000은 release 중 삭제되고 완료 후 anchor 1001만 남는다. release cursor 이하의 직전 행은 exact frozen source에서 검증해야 한다. plan 행 부재를 모든 단계에서 허용하는 fallback은 금지한다. 실제 product admission 실패는 plan_v9 transition 조회였고 구형 closure의 prefix 조회라는 초기 정적 추정은 이 실패 원인으로 확인되지 않았다.
+- **편집 초안 복구(2026-09-14)**: 재읽기는 사용자 확인 시의 정확한 tab 객체와 완료 시 프로젝트/작업 복사본·차단 상태를 대조한 뒤에만 초안을 교체한다. 실패하면 보존하고 파일은 쓰지 않는다. Monaco의 프로그램적 내용 동기화도 change 알림을 내므로 같은 텍스트는 dirty로 바꾸지 않는다.
+- **2026-09-14 실제 CLI 관측 경계**: Codex 0.149.1의 모델 없는 app-server 초기화/config/account 조회와 Claude 2.1.269 인증 상태 조회는 성공했다. 설정 격리·모델 가용성·actual provider 실행 권위는 아직 증명하지 못했다. 원문 인증/설정은 보존하지 않는다. 최신 후보 계약은 제안서 §6.7이다.
+- **2026-09-14 작업대 배치**: 파일·편집기·변경·팀 대화의 가로 순서/폭은 사용자 조절 및 로컬 저장 가능하다. 전체 시안/상하 분할 도킹 완료는 아니며 실행 안전 계약은 그대로다.
+- **G6 성능 도구와 실제 완료 경계(2026-09-14)**: `m5:measure:performance`는 공급된 측정 JSON만 판정하고 `m5:measure:sidecar-startup`은 현재 release sidecar의 생성된 빈 DB warm 시작을 직접 측정한다. `d97ee56`에서 10회 shell/storage p95 3.863/52.596ms PASS. `7832348`의 `m5:measure:renderer`는 합성 bridge·실제 Monaco로 대형 파일/diff·500개 페이지 탐색의 10회 측정을 통과했다(파일 표시 p95 75.9ms, 입력 32.3ms). 추가 `f4def74`의 `--memory` 실측은 Electron subtree idle 약 409.73 MiB와 한 회차 tree/diff 약 3.38초로 FAIL이며 원인 미확정이다. packaged startup·실제 stream·전체 제품 메모리·경합·종료 수집이 남아 있어 `m5:test:performance`와 G6는 미완료다. 입력 형식·측정 의미는 `procedures/m5-performance.md`를 따른다.
+- **Astra 직접 개발 우선(2026-09-14, 승인 경계 갱신 2026-09-28)**: 메인은 현재 사용자 선택 `gpt-6-astra`와 추론 설정을 따른다. 단일 기능은 직접 구현·검증하며 의무 역할 분할/worktree를 생략할 수 있다. 읽기 전용 독립 검토자 1명과 같은 검토자의 수정 재검토는 상시 승인돼 범위 설명 뒤 바로 호출한다. 구현 위임·추가 검토자 병렬 투입은 별도 승인 전에 대기한다. 과거 의무 위임 규칙보다 AGENTS.md의 `개발 방식 선택`과 운영 절차 §1이 우선한다. 검토 합격·실제 계정/유료 실행·main 병합/push를 자동 승인한 것은 아니다.
+- **부분 RSS 재측정(2026-09-14)**: idle에서 테스트용 5 MiB 텍스트 생성을 분리한 `dfe12bd`의 Electron subtree 측정은 idle/peak/60초 잔류 356.70/761.73/110.125 MiB와 GUI 시간 기준 PASS다. 실제 sidecar/agent는 제외하므로 전체 제품 RSS/G6 완료로 사용하지 않는다. 앞선 `f4def74` FAIL 증거도 유지한다.
+- **G5D storage lifetime activation 정책(2026-09-08 사용자 승인)**: automatic lossless compaction의 유일한 trigger는 retained boundary 이후 exact safe prefix 1,000 ledger events다. 기존 안전 제외·완전 materialization·exact 전후 동등성이 선행하며 source event/index만 논리 삭제하고 사용자 chat/message/evidence, recovery, workspace, snapshot, baseline, projection, receipt와 물리 cleanup은 보존한다. empty-authority pending만 admission exact 검증 뒤 재개하고 running/non-empty/commit 불명은 변경 없이 fail-closed한다. ready 이후 치명 maintenance 오류는 wire 상태를 추가하지 않고 sidecar 종료로 다음 verifying admission에 넘긴다. 단일 event-loop SQLite writer, ready-only bounded tick, work 100/primary 1 MiB/retained+dependency 8 MiB를 유지한다. V10은 `authorizeDelete`를 read-only witness로 두고 `deletePrefix`의 exact armed interval에서만 완전 authority batch와 source index/event 삭제·authority cleanup·cursor 전진을 한 transaction으로 결속한다. V10 contract fixture만으로 runtime writer 활성화나 readiness를 주장하지 않는다.
+- **큰 snapshot 처리와 제품 준비 시간은 별개(2026-09-03)**: 개발 중인 새 전역 경로는 실제 생산 101-workspace DB의 보존 복사본(607 source rows)을 172,685 calls/약 98.288초에 복원·ready 재검증했다. 30,000-call 테스트 guard 실패는 무진행이 아니라 예상 횟수 부족이었다. 이 내부 정확성 관측은 3초 제품 ready 충족이나 startup/admission 활성화가 아니다. 제품 시간·1 MiB fresh/8 MiB retained+fresh/100 work·100 frozen-operation fence는 유지한다. 실패한 생성 테스트와 보존본 replay 성공을 구분하고 원본 DB는 `/tmp/g5d-production-evidence.NX3udd/manifest.md`의 SHA로 고정한다.
+- **큰 snapshot 새 경로와 제품 경계(2026-09-03)**: §16 private 동일 연결 전역 검증→index 선행 catch-up→ready coverage는 기존 V1/제품 verifier와 별도다. historical live/frozen workspace를 검증한 뒤 member별 COMMIT하며 durable partial offset 없이 source 처음부터 멱등 재시작한다. 실제 생성101의 보존 DB는 172,685 calls/98.288초에 완료해 3초 제품 목표를 충족하지 못한다. `ReadyVerified`를 제품 admission으로 인용하지 않으며 독립 리뷰·정상 생산 통합 QA와 제품 연결/성능은 별도다.
+- **pnpm worktree 설치 재사용 함정(2026-09-03, 09-09 config surface 정정)**: bundled pnpm은 script 실행 전 기본 자동 install을 수행한다. 동일 lockfile이어도 workspace-state의 절대 project 경로가 다르면 shared node_modules symlink를 따라 root 설치본을 재생성할 수 있다. 이를 명시적으로 끌 때 repository `.npmrc`의 kebab-case key는 pnpm 11.25에서 무효였고, `pnpm-workspace.yaml`의 `verifyDepsBeforeRun: false`와 child `pnpm_config_verify_deps_before_run=false`를 함께 쓴다. 손상 시 잠금 파일 그대로 offline frozen install과 필요한 Electron 캐시 복구를 사용하며 네트워크 실패 반복·lock 변경으로 우회하지 않는다.
+- **G5D QA evidence의 신뢰 경계(2026-09-09)**: harness evidence의 atomic leaf/inode checkpoint는 trusted local checkout 또는 isolated CI에서 accidental/substitution failure를 fail-closed로 기록하는 보강일 뿐 제품 저장 경계가 아니다. same-UID hostile parent rename race, publication 뒤 변조, signing/remote provenance는 이 helper가 보장하지 않으며 별도 보안/CI provenance 범위다.
+- **큰 source catch-up 정책 경계(2026-09-03 승인)**: 기존 protocol batch/workspace source 검사·exact `single_source_payload_oversize == "contractError"`·storage-v2/v3 golden은 개별 source 1 MiB 초과 거부를 유지한다. 사용자는 §16의 새 분할 경로에 한해 호출당 1 MiB fresh/8 MiB retained+fresh/100 work로 큰 기록을 처리하는 확장을 승인했다. 기존 V1 계약을 덮어쓰지 않고 새 경로·중단/재시작 회귀로 구분하며 제품 활성화는 구현·검증 뒤 별도 완료한다.
+- **G6 staging 경로(2026-09-03)**: Cargo target 위치는 환경·config·target triple에 따라 달라진다. staging은 build JSON의 해당 manifest/bin executable을 쓰며 root/target 또는 PATH fallback을 하지 않는다. 실제 artifact 없는 성공 exit만으로 이전 binary를 복사하지 않는다.
+- **M5 G6 Electron main boundary regression(2026-09-03)**: `main.ts`의 registered callback은 VM-transpiled test로 검증한다. IPC는 current `BrowserWindow.webContents`의 exact main frame와 credential-free configured app/dev origin만 허용하며, rejected sender/frame/origin은 sidecar action 전에 실패한다. `app://m5` asset은 credential/port/query/fragment, encoded dot/slash/backslash, malformed percent, POSIX·Windows absolute path와 missing/non-file를 404로 거부하고 external fetch를 하지 않는다. 이 Node fake 증거는 실제 Electron/packaged renderer security, signing/fuses, Windows device 또는 전체 G6 gate가 아니다.
+- **S3 한 행 호환성의 범위(2026-09-03)**: projection은 losing duplicate와 overlay 이전 값까지 문법 검증한 뒤 serde의 마지막 duplicate·루트 typed sequence와 exact-row SQLite의 첫 duplicate/evidence 표현을 각각 보존해야 한다. 긴 projection 숫자의 입력 길이를 S2 canonical 24-byte 출력 한계로 제한하지 않는다. S3의 재개 가능한 숫자 state/최대 33-byte 내부 Number 재구성 및 보존 parsed Number 예산은 이 구분을 지킨다. 한 행 의미/mirror 결과는 글로벌 source/provenance/admission 권위가 아니다.
+- **실제 provider wire 재확인(2026-09-03)**: 로컬 Codex 0.149.1/Claude 2.1.258은 현재 fake exact manifest와 다르다. Codex app-server schema의 thread-start 유효 설정은 후보 증거이며 실제 runtime/설정 격리 검증이 아니다. Claude init의 MCP/plugin 객체와 fake `configIsolation` 차이를 별도 adapter에서 해결해야 한다. `--bare`는 구독 OAuth를 사용하지 않으므로 인증 재사용 대체로 임의 적용하지 않는다. 공식 출처·후속 경계는 `proposals/m5-coding-agent-ide.md` §6.7.
+- **M5 G6 package-size 증거 도구(2026-09-03)**: `m5-package-metrics.mjs`는 macOS arm64의 unpacked ≤350 MiB와 compressed ≤200 MiB를 supplied directory/regular archive의 exact logical bytes로만 측정한다. symlink target은 세지거나 따라가지 않으며 Electron executable·`app.asar`·ASAR 밖 staged sidecar layout을 요구한다. Windows x64/arm64는 측정값을 내도 threshold 없는 `NOT_READY`다. filesystem walk는 atomic snapshot이 아니므로 metadata change를 발견하면 `NOT_READY`; report도 local-only이며 signing/freshness/runtime/G6 완료 증거가 아니다.
+- **S2 canonical source는 의미/admission 증거가 아니다(2026-09-03)**: 새 scanner는 schema bootstrap을 제외한 호출당 fresh main+key 재읽기 1 MiB, retained+fresh 8 MiB, work 100을 유지한다. 전체 key를 보관하지 않고 adjacent source span을 decoded UTF-8 byte로 비교한다. pending decoded byte 뒤의 다음 조각도 함께 읽되 작은 잔여 예산을 필요한 반대편에 예약해야 교대 대량 재읽기/무진전 오류를 피한다. 숫자 24-byte는 현재 serde/zmij canonical 출력 image 근거이며 관대한 projection 입력 상한으로 재사용하면 안 된다. 관련 회귀/실측은 `storage/tests/reopen_canonical.rs`와 S2 evidence manifest에 있다.
+- **S2 legacy oracle은 R3A 단독이 아니다(2026-09-03)**: 실제 정상 V8 fixture에서 indexed JSON duplicate의 첫 값이 틀리고 마지막만 맞거나 lock evidence key순서/escape가 한쪽만 다르면 private R3A는 허용해도 legacy SQLite mirror·Storage reopen은 거부한다. 반대로 동일 duplicate/정상 마지막 nonindexed 값/공백/typed sequence overlay는 수락된다. `storage::tests::reopen_oracles::s2_legacy_oracle*` 6개가 실제 DB 43사례를 고정하므로 S2 의미 동등성은 serde map과 SQLite mirror를 함께 보존해야 한다.
+- **R3C-S1 구현 통합(2026-09-03)**: `00f54d9`의 private `RawColumnSession`을 관련 검증·단일 독립 리뷰 뒤 반영했다. 호출당 조각 1 MiB/retained+fresh encoded 입력 8 MiB로 읽고 UTF-8·길이·SHA만 완료한다. canonical/의미/provenance/admission 증거가 아니며 S2 이후 검증과 제품 연결·파동 누적 QA는 남는다. 현행 구조는 `architecture.md`, 원본 검증·소스 동일성은 `/tmp/g5d-r3cs1-evidence.ympdQJ/`를 확인한다.
+- **간소화 운영 확정(2026-09-03 사용자 승인)**: 기능/결함 단위의 관련 검사와 독립 리뷰 1명을 기본으로 하고 누적 QA·최종 gate는 최신 통합 파동 마감에 수행한다. 수정 후에는 영향 범위만 재검증하며 신규 공용 계약 없는 helper마다 별도 설계 심의·전체 검증을 요구하지 않는다. 기존 계약의 중복 빈도/담당 배치만 대체하며 필수 안전 시나리오와 제품 활성화/출시 게이트는 유지한다. 상세는 `procedures/multi-agent-orchestration.md` §1.1이다.
+- **Cargo 테스트 실행 파일 경로(2026-09-03)**: shared `CARGO_TARGET_DIR`에서 repo-relative `target/debug` 가정은 process-gate 19개를 실행 전 실패시켰다. test executable의 `<target>/<profile>/deps` 부모에서 sidecar를 찾고 `--lib` 테스트 전 같은 worktree/target/profile의 명시적 bin build로 freshness를 확인한다. 경로 수리 뒤 원래 실패 19개와 추가 locator 회귀가 통과했다. 이는 S1·전체 G5D 완료와 구분한다.
+- **QA 저부하 즉시 적용(2026-09-02 사용자 승인)**: 고부하 Cargo/sidecar 테스트를 사용자 요청으로 종료했고 다음 실행은 하네스 및 직접 Cargo 모두 compile/test 병렬 최대 4로 제한한다. 무거운 검증은 컴퓨터당 하나만 실행한다. focused 회귀와 통합 마감 누적 gate를 구분하되 필수 안전 검증은 생략하지 않는다. 낮은 우선순위는 best-effort이며 CPU 절대 상한은 아니다. 자세한 실행 규칙은 `procedures/multi-agent-orchestration.md` §13.1이다.
+- **S2 oracle 분리(2026-09-02)**: legacy product는 canonical source/replay, serde projection 의미 비교, SQLite mirror를 모두 요구한다. R3A는 parsed final map/evidence를 비교해 첫 duplicate를 보는 SQLite 추출과 evidence `json(...)` 표현 비교를 그대로 재현하지 않는다. primitive 차이와 source 대조는 했지만 정상 V8 fixture의 전체 acceptance 재현은 아직이다. 기존 제품 검사는 유지하며 §13의 세 oracle·후속 회귀를 닫기 전 R3A 단독 결과를 제품 동등성으로 인용하지 않는다.
+- **Cargo test fixture binary 경로(2026-09-03)**: `chat::tests`가 repo-relative `target/debug`를 가정하면 shared `CARGO_TARGET_DIR`에서 process-gate 19개가 실행 전 실패한다. test executable의 `<target>/<profile>/deps` 부모에서 동일 profile의 sidecar만 찾고, `--lib` 검증 전 같은 worktree/target/profile의 명시적 bin build로 freshness를 확인한다. 관련 수리는 테스트 전용이며 기존 S1 미완료/full exit 143과 구분한다.
+- **R3C-S1 raw bytes는 의미 검증이 아니다(2026-09-02)**: 새 private bytes session은 고정 source 주소/expected identity/epoch/byte 길이 아래 fragment별 UTF-8와 SHA를 끝까지 계산한다. ≤1 MiB fresh fragment + ≤8 MiB retained/fresh encoded 입력이며 start source metadata도 예산에 포함한다. schema bootstrap은 같은 BEGIN 안의 별도 비용이고 SQLite slicing 내부 메모리/전체 ready 시간 상한은 미입증이다. 빈 TEXT의 SQLite substr NULL과 retained UTF-8 carry 때문에 다음 호출이 무진행이 되는 경계를 회귀로 고정했다. §10 큰 정상 run source의 raw transport 성공은 기존 R3B 거부 해제나 canonical/admission 성공이 아니므로 S2 및 제품 연결 계약을 생략하지 않는다.
+- **R3C 큰 기록 처리 순서(2026-09-02)**: V8 byte transport → canonical oracle 동등성 → projection/파생 의미 비교 → 동일 연결의 쓰기 권위 순서로 나눈다. §12 S1은 fragment 1 MiB/retained+fresh 8 MiB 내 UTF-8·길이·해시 정보만 제공하며 기존 verifier·제품 fence·입력 정책을 바꾸지 않는다. historical workspace catch-up은 source sequence 없는 row 때문에 단순 latest-only 조건 변경으로 해결하지 않는다. 상세 계약은 `proposals/m5-storage-reopen-verification.md` §11–12다.
+- **개발 worktree 정리(2026-09-02)**: 완료 기능의 통합·최종 QA/gate 직후, 다음 worktree 생성 전에 정리를 점검한다. branch SHA/통합 동등성·dirty/untracked/ignored 증거·사용 process를 확인하고 필요한 증거를 외부 보존한 뒤 승인 범위에서 비강제 제거한다. branch/commit은 보존하며 진행·미확인 작업은 유지한다. 최초 정리에서 58개를 제거하고 18개를 유지했다. 상세는 `procedures/multi-agent-orchestration.md` §5.1과 `.artifacts/worktree-cleanup/2026-09-02/approved-plan.json`이다.
+- **R3C snapshot 호환성 재현(2026-09-02, 테스트 전용)**: 정상 public text/event/누적 snapshot 예산을 통과한 ASCII 16 × 64 KiB 및 역슬래시 9 × 64 KiB의 일반 run+chat atomic writes와 Storage reopen은 성공하지만, 저장된 run canonical BLOB이 1 MiB를 초과해 전체 private R3B ledger 검증은 거부한다. 작은 16-event 대조군은 전체 완료한다. exact test `agent_runtime::budget_tests::budget_valid_actual_run_snapshot_exceeds_reopen_primary`가 양 경로와 exact source row byte preflight/무변경을 구분해 고정한다. provider-less pre-G5C readable shape일 뿐 현재 provider 검증이나 제품 admission 증거가 아니며, §9/§10의 저장 표현·검증 단위·기존 기록 호환 정책을 정하기 전 제품 연결/예산 변경은 하지 않는다.
+- **R3C 제품 연결 전 호환성(2026-09-02)**: 기존 actual-agent의 정상 public text 최대량과 metadata를 담은 단일 run snapshot은 private verifier의 1 MiB primary cap을 넘을 수 있다. project의 prepared-workspace map도 abandoned를 보존하며 전체 개수/byte cap 없이 누적되는 별도 정상 생산 경로다. 또한 pending의 raw-source 읽기 검증은 chat mutation의 indexed predecessor 요구를 대체하지 않는다. snapshot/이전 기록 호환과 검증 후 index catch-up·복구 순서를 별도 계약/fixture로 닫기 전 제품 admission을 활성화하거나 기존 100-operation fence를 해제하지 않는다. §10의 run persistence/Storage reopen/private R3B 재현은 `73b2d61`의 독립 통합 QA와 최종 gate까지 통과했다. project 경계 재현·Sidecar startup/recovery·제품 활성화는 미실행이다. 상세는 `proposals/m5-storage-reopen-verification.md` §9다.
+- **R3B 후속 호환·유일성(2026-09-02)**: pending에서 index/normalized message가 없더라도 메시지 도입 ID 전역 유일성은 기존 protocol 요구다. 이를 포함한 §8 내부 R3B는 `e5f9f01`에서 독립 통합 QA·최종 gate를 완료했다. historical pending workspace의 읽기 검증과 실제 catch-up은 별개이며 현행 bounded workspace materializer의 갱신 전 latest-only source 대조는 정상 과거 row도 거부할 수 있다. 이 미해결 catch-up과 R3C 호환성은 `proposals/m5-storage-reopen-verification.md` §7.5·§9, 테스트 전용 재현 계약은 §10을 따른다.
+- **pnpm 복원과 누적 검증 환경(2026-09-02)**: stale node_modules metadata만으로 설치 성공을 판단하지 않는다. frozen lockfile/ignore-scripts/공급망 정책을 유지한 복원 뒤 하네스와 동일한 `CI=1`로 확인한 build·누적 `g5d-bounded-storage`가 `d4c3751`·`63ab510`에서 PASS했다. 격리 환경의 Electron runtime fetch 실패와 더 넓은 core/protocol lint 실패는 scoped 성공과 별도 기록한다. 자동 install/CI 정규화 차이는 관찰했지만 package 소실 원인을 전부 입증한 것은 아니므로 임의 설정 변경이나 정책 완화로 해결했다고 주장하지 않는다.
+- **R3B 내부 derived-record 경계(2026-09-02)**: private 정보성 mode는 R2/R3A 뒤 전체 derived table과 ready 양방향 coverage를 검증한다. index-empty pending receipt/baseline은 raw tuple을 먼저 찾고, indexed 여부와 무관하게 모든 live introduction을 frozen identity와 비교한다. 추가 global raw scan은 unindexed introduction에만 필요하다. historical pending workspace 수락은 기존 catch-up 결함 해결이 아니다. retained outer+fresh dependency가 새 호출에도 8 MiB를 넘으면 terminal failure지만 이번 호출의 이미 소비한 입력 때문에 넘는 경우는 Pending일 수 있다. 실패 batch 안에서 검증한 행과 COMMIT된 진행을 테스트에서 혼동하지 않는다.
+- **R3A 내부 ledger/projection 경계(2026-09-02)**: compacted DB는 R2 closure와 R3A를 같은 세션/변경 감지 epoch에서 검증한다. pending의 누락 source index는 exact live predecessor에서 필요한 사실을 구성해 허용하지만 존재하는 index는 항상 결속하며 ready의 누락은 거부한다. latest source와 다섯 projection의 양방향 일치는 global derived-record/R3B 또는 startup/admission/R3C 완료 증거가 아니다. phase-local typed app-instance 1 MiB는 canonical JSON source 1 MiB와 동일한 크기 정의가 아니므로 용량 positive-control을 혼동하지 않는다.
+- **R3 startup/admission의 추가 경계(2026-09-02)**: pending materialization은 일부 파생 기록 미생성이 정상이며 ready는 검증 의무이지 proof가 아니다. 현행 startup의 복구 쓰기보다 앞선 read-only semantic preflight가 필요하다. SQLite 전체 integrity/FK 검사와 Electron ready 3초는 batch 예산과 별개다. 둘을 몰래 완화하지 않고 R3A/B/C와 사용자 결정이 필요한 변경을 `proposals/m5-storage-reopen-verification.md` §7에 분리한다.
+- **R2 내부 closure 구현 경계(2026-09-02)**: `start_compaction_closure`의 3-phase 결과는 admission이 아니며 product >100 거부를 해제하지 않는다. 각 행의 고정 dependency graph 전체를 먼저 byte-preflight하므로 뒤늦은 oversized dependency도 무한 Pending으로 남지 않는다. TeamMessage 64 KiB text cap과 메시지 단계의 1 MiB 합계 예산을 혼동하지 않는다. 후기 corruption fixture는 frozen message 삽입 순서를 source rowid로 고정해야 실제 100행 이후 위치를 보장할 수 있다.
+- **R2 내부 검증 구현·범위(2026-09-02)**: `9327bcd`의 같은 connection 세션이 operations→prefixes→frozen messages를 다회 처리한다. 삭제 frozen source↔정확한 sequence prefix/baseline, 삭제 chat introduction↔frozen message↔해당 normalized message가 대상이다. 참조되지 않는 정상 historical baseline을 금지하지 않으며 전체 derived-table replay와 제품 admission은 R3에 남긴다. chat의 동일 durable sequence는 null-or-same snapshot이 허용된다는 protocol 규칙을 보존한다. 상세 계약은 `proposals/m5-storage-reopen-verification.md` §6, 현행 구현은 `architecture.md`를 확인한다.
+- **V8 operation 검증 전구체는 admission이 아니다(2026-09-02)**: `storage::reopen` 내부 세션은 mutable connection borrow + 매 batch의 transaction-under-lock `data_version` 비교로 frozen operation만 다회 검증한다(100행·canonical 1 MiB·별도 raw closure 8 MiB). 완료·취소·실패는 재사용하지 않으며 durable cursor/proof를 쓰지 않는다. prefix/message/replay/integrity와 product activation은 별도 게이트이고 제품의 100개 초과 재오픈 거부는 유지한다. 같은 프로세스라도 별도 SQLite 연결의 commit은 외부 변경이며 production exclusive-lock 정책을 느슨하게 바꾸지 않는다.
+- **M5 G5D storage lifetime(2026-09-01, exact schema v8)**: 실제 provider 활성화 전 SQLite 전체 수명 stop condition을 G6에서 분리해 G5D로 진행한다. exact predecessor schema를 mutation 전에 검증하는 additive v1→v8 chain은 원장과 기존 compaction history를 보존한다. V6는 source event에 exact 결속된 append-only `event_source_index`와 16단계 lifetime cursor를 두고, V7/V8은 future compaction prefix·message·operation provenance와 sidecar-private completion proof를 추가한다. 명시 호출형 worker는 모든 source/table scan을 rowid keyset `LIMIT 100`, canonical payload 합계 1 MiB로 제한하며 cancellation·commit 불확실성을 fail-closed로 보존한다. terminal compacted V8 read/replay는 frozen operation과 receipt·baseline·retained anchor를 교차 검증해 duplicate/conflict·chat predecessor·후속 append/materializer 의미를 유지하지만, 현재 frozen operation 100개까지만 재오픈하고 101번째는 무변경 거부한다. 실제 compaction writer/delete, 100개 초과 durable reopen proof, startup/background scheduling, 제품 wire/status, checkpoint/VACUUM, cleanup·retention threshold는 아직 비활성이다
+- **M5 G5C actual recovery 원자성(2026-08-27)**: recovery ID는 run 준비 시 writer lock과 같은 transaction에 random UUIDv4로 예약해 모든 후속 recovery가 재사용하며 run ID에서 파생하지 않는다. process identity 없는 재시작은 `processIdentityUnavailable` unresolved recovery와 poisoned lock을 공개하되 resolve로 폐기할 수 없다. actual abandon은 SQLite intent → exact/idempotent manifest abandon → manifest 재검증 뒤 atomic DB finalize의 restart-reconcilable saga이고, 어느 단계든 identity/digest가 다르거나 상태가 불명확하면 writer를 해제하지 않는다. SQLite와 filesystem의 원자성을 주장하지 않는다
+- **M5 G5C provider 활성화 전 계약(2026-08-27)**: provider manifest는 executable binary만이 아니라 필수 helper까지 포함한 closure digest, exact model/reasoning/permission tuple, provider별 auth/event parser ID, managed cwd·no-secret env·no-fallback policy를 canonical digest로 묶는다. persisted discovery에는 raw stdout/stderr·token·prompt·email·org·raw auth hash를 넣지 않으며, attestation은 accepted run/profile의 run·fingerprint·workspace·runtime·model·reasoning·permission을 exact 결속하고 derivation이 정의되지 않은 session digest는 저장하지 않는다. Claude는 `system:init`의 version/model/cwd/permission/tools/MCP/plugins/config를 전부 handshake·runtime attestation으로 검증한 뒤에만 public event를 허용하고, internal Public도 기존 G5B 256-event·1 MiB text budget 안에서만 허용한다. Codex가 argv 또는 unknown catalog만 제공하면 `canStart=false`다. 이 계약은 fake-only internal boundary이고 공개 G5/G5A/G5B wire·V4/V5를 바꾸지 않는다. SQLite 전체 lifetime/retention/compaction은 실제 provider 활성화 전 별도 stop condition이다
 - **마일스톤**: M0~M3, 홈베이스·프로젝트 디스크 스캔·에이전트 상태/업데이트, 주요 실패 경로 닥터, 한·영 콘텐츠까지 구현. 남음: 실제 실패 경로와 macOS/Windows 출시 후보 실기기 검증, 정식 배포(코드 서명)
 - **PATH**: macOS/Windows 인스톨러 둘 다 PATH를 스스로 등록 안 함 → `ensure_path`가 직접(`~/.zshrc` / Windows 사용자 PATH 레지스트리). 위저드는 절대경로 실행이라 PATH 비의존
 - **로그인 자동 감지**: 브라우저 세션이 있으면 확인 코드 없이 자동 승인으로 끝나는 경로가 있어, 대기 중 `auth status` 폴링으로 완료를 잡는다
@@ -35,336 +374,56 @@
 - **닥터 적용 범위**: 구조화 오류를 network/checksum/notfound/permission/disk/generic으로 해석해 i18n 문구와 재시도를 제공. 진단·설치·로그인·프로젝트 생성·첫 대화와 홈의 상태/업데이트·프로젝트 스캔 실패에 적용
 - **홈베이스**: 프로젝트가 있거나 설치·로그인된 에이전트가 있으면 홈으로 진입. 기준 폴더 바로 아래에서 `.claude`/`CLAUDE.md`/`AGENTS.md` 표식을 스캔하고, 에이전트 상태와 업데이트를 표시
 - **릴리스 게이트**: `.github/workflows/ci.yml`에서 데스크톱 macOS·Windows 빌드/테스트/격리 설치와 소개 웹사이트 빌드·렌더·린트를 검증. 사람 확인 항목과 미서명 베타/정식 서명 기준은 `docs/release-checklist.md`를 단일 체크리스트로 사용
-
+- **M4 파일럿 완료(2026-08-24)**: S1·S2·§7.10 구현과 교차 검토를 마쳤고, §7.6A 사용자 실사용을 통과해 **가설 A(사용자가 에이전트 사이를 직접 중계하지 않아도 된다)가 성립**했다. §7.6B 품질·비용 비교, Windows 자손 회수, 재작업 루프·다역할 같은 고비용 확장은 보류/후속이며 M4 완료 조건이 아니다. `main`에는 미병합
+- **M5 설계 방향(2026-08-24, G4 격리 방식 2026-08-25 갱신)**: 기존 M0~M4는 최초 설정·튜토리얼로 유지하고, 이후 여러 영속 채팅, 프로젝트별 역할·에이전트·모델, 원본과 분리된 standalone snapshot, 명확한 diff와 실제 코드 편집을 갖춘 초보자용 agent-first IDE로 확장한다. 한 채팅은 변경 목표·작업 복사본 하나를 소유하고 역할 왕복을 한 팀 대화에 기록한다. **M5 기술 기준선은 Electron + React/TypeScript + Monaco 셸과 기존 Rust 안전 코어 sidecar**이며 Tauri와 동시 구현하지 않는다. SQLite 이벤트 원장+projection, 앱 종료 시 안전 중단, 첫 적용은 전체 작업 복사본+복원 지점, macOS 우선 실행을 기준으로 한다. 새 이름은 개발과 분리해 보류한다. 통합 브랜치는 `m5/coding-agent-ide`; `main` 병합은 전체 완료 뒤 사용자 승인 사항
+- **M5 직접 유사 제품 Cebus 발견(2026-08-24)**: `cebus-ai/cebus`는 여러 AI 모델의 단일 대화, 역할별 모델 배정, 채널·스레드, CLI·웹·VS Code 표면을 이미 제공해 M5 구상과 직접 겹친다. M5 벤치마크에 포함하고, 초보자 안전·원본과 분리된 standalone snapshot·명시적 diff 검토와 복구 루프를 차별점으로 검증한다
+- **멀티 에이전트 저장소 운영(2026-08-25)**: 큰 구현은 오케스트레이터 1명이 통합 브랜치를 소유하고, 최대 3명의 쓰기 구현 담당이 별도 branch/worktree와 겹치지 않는 파일 소유권으로 작업한다. 계약을 먼저 고정한 뒤 파동식으로 병렬화하며, 독립 코드 리뷰와 최신 통합 commit QA를 통과한 변경만 통합한다. Codex 프로젝트 역할·모델·sandbox는 `.codex/config.toml`과 `.codex/agents/*.toml`, 상세 실행 절차는 `docs/procedures/multi-agent-orchestration.md`가 기준이다
+- **M5 기계 검증 하네스(2026-08-25)**: `scripts/m5-harness.mjs`가 로컬과 macOS/Windows CI의 단일 검증 진입점이다. `baseline`은 기존 회귀를 실제 실행하고 G1~G6는 앞 단계를 누적한다. 필수 script가 없으면 `NOT_READY`/exit 2로 실패하며, versioned JSON 증거를 `.artifacts/m5-harness/`에 남긴다. 예약 script와 판정 규칙은 `docs/procedures/multi-agent-orchestration.md` §13이 기준이다
+- **M5 G5 실행·복구 계약(2026-08-26)**: chat 생성은 verified active standalone snapshot과 전역 1:1 worktree/workspace binding을 요구한다. fixture run은 macOS에서만 exact chat role snapshot으로 시작하며 planning/review는 read-only, coding만 writer lock을 갖고, 첫 버전은 동일 chat/worktree/workspace의 역할 run을 하나씩 직렬 실행한다. `stopping`을 포함한 chat 상태는 명시적 전이표를 따르며 completed/canceled/discarded/recoveryRequired는 terminal이다. `recoveryRequired`인 chat/run/workspace lock/unresolved recovery는 모든 새 run을 막고, process identity 소멸 증명 뒤 abandon한 snapshot/workspace/chat은 재사용하지 않는다. protocol framing은 v1을 유지하고 공개 bridge는 additive `M5BridgeV3`다
+- **M5 G1 Rust core 추출(2026-08-25)**: 루트 Cargo workspace와 단일 `Cargo.lock`을 기준으로 삼고, `crates/hello-agent-core`에 `Agent`·`AppError`·프로세스 트리 F1~F8·Claude/Codex 실행 계약을 Tauri/Electron/Node/SQLite/UI 의존 없이 옮겼다. 기존 Tauri 모듈 경로는 좁은 re-export shim으로 유지해 `handoff.rs`·`orchestration.rs` 동작을 바꾸지 않는다. `crates/hello-agent-sidecar`는 후속 protocol/SQLite 게이트 전까지 compile-only 골격이다
+- **M5 커밋·통합 자동 승인(2026-08-25)**: 작업 계약 범위 안의 기능 worktree 원자적 구현·테스트·리뷰 수정 커밋과, 독립 리뷰 및 해당 하네스·QA를 통과한 commit의 `m5/coding-agent-ide` 통합은 사용자에게 매번 다시 묻지 않는다. push, `main` 병합, 범위 밖 변경, 안전 불변식·확정 결정 변경, 실제 유료 에이전트·사용자 프로젝트·파괴적 시험과 외부 게시는 계속 별도 승인 사항이다
+- **M5 G1 공급망 차단(2026-08-25)**: Electron Forge stable `7.11.2`가 Git SHA 기반 `@electron/node-gyp`을 전이 의존성으로 요구해 pnpm 11의 기본 `blockExoticSubdeps`에 차단된다. 전역 예외는 안전 계약 변경이므로 자동 적용하지 않았고, Electron scaffold는 별도 worktree의 미커밋 상태로 보존했다
+- **M5 G1 Electron Forge 8 스파이크(2026-08-25)**: Forge `8.0.0-alpha.10`과 모든 Forge plugin을 exact pin, Electron `43.4.0`·Vite `8.2.2`·Fuses `2.1.3`을 사용해 strict pnpm lock과 macOS arm64 ASAR package를 확인했다. Forge 호환을 위한 hoisted layout은 `pnpm-workspace.yaml`의 `nodeLinker: hoisted` 단일 설정이며 공급망 예외가 아니다. Electron `44.0.0`은 release-age 예외를 자동 요구해 쓰지 않았다. renderer는 고정 `app://m5`이고 sandboxed/isolated window와 version-only preload를 유지한다
+- **M5 G2 protocol v1 계약(2026-08-25)**: `hello-agent-protocol`과 `src/m5/contracts`가 같은 언어 중립 golden fixture를 사용해 UTF-8 JSONL v1, 1 MiB control line, `{ text }`만 허용하는 256 KiB `blob.chunk`, 실행별 request ID 유일성, JS와 호환되는 `seq` 상한 `2^53-1`, `system.ready` 단일 handshake, `app.prepareQuit`, 구조화 오류와 outcome 불명 시 자동 재시도 금지를 고정한다. 세션의 첫 envelope는 반드시 `system.ready`이며 그 전 request/response/event와 중복 ready는 모두 fail-closed다. 공개 `M5BridgeV1`은 system status·prepare quit·sidecar event 구독만 선언하며 범용 IPC/preload wiring은 없다. SQLite·실제 sidecar 전송은 G3 범위다
+- **M5 G3 Rust sidecar·SQLite 경계(2026-08-25)**: production sidecar argv는 `--stdio` 하나로 고정하고 DB 경로·환경 override를 받지 않는다. Electron main이 `userData/com.wonseokhan.helloagent/m5`를 생성·정규화해 spawn cwd로 주면 sidecar도 그 cwd를 canonicalize하고 고정 파일명 `hello-agent.sqlite3`만 붙인다. sidecar는 bundled SQLite 단일 owner이며 모든 연결의 FK 활성화·검증, transactional migration, integrity/replay/recovery를 통과한 뒤에만 ready를 보낸다. stdout은 bounded JSONL protocol 전용이고 pre-ready 오류는 stderr+exit 70이다
+- **M5 G3 Electron-sidecar 수명주기(2026-08-25)**: Electron main은 packaged sidecar를 ASAR 밖 고정 경로에서 한 번만 실행하고 3초 ready, bounded framing, instance/response identity, pending 요청을 fail-closed로 관리하며 자동 restart/retry하지 않는다. preload는 `system.status`·`app.prepareQuit`·sidecar event의 고정 channel만 top-level 허용 origin에 노출한다. 정상 종료는 single-flight `app.prepareQuit` 안전 응답 뒤에만 허용하고, G3 capability는 이 두 method뿐이다. 프로젝트·채팅·실행·파일 API는 G4 이후다
+- **M5 G4 계약 경계(2026-08-25, standalone snapshot으로 갱신)**: protocol v1의 예약 project/file/diff method·event와 SQLite schema v1은 유지하고, G2 golden fixture와 `M5BridgeV1`은 불변으로 둔 채 project lifecycle fixture와 `M5BridgeV2`를 사용한다. 명시적 canonical Git root, 읽기 전용 source capability, self-contained Git bundle과 raw committed bytes로 만드는 앱 data 아래 detached standalone snapshot+manifest, hash 기반 optimistic save, chunked file/diff, watcher overflow의 `rescanRequired`, dirty draft 보존을 계약으로 고정한다. `project.createWorktree`·`createProjectWorktree`·`worktreeId/path`는 protocol v1 호환 이름일 뿐 linked worktree를 뜻하지 않는다. G4 `project.close`는 물리 삭제가 아니라 watcher 중단+영속 `abandoned`이며 실제 agent/chat/run과 원본 적용은 범위 밖이다. Windows G4는 별도 안전 게이트 전까지 지원하지 않는다
+- **M5 G5 계약 경계(2026-08-26)**: protocol framing·SQLite schema v1과 G4 `M5BridgeV2`는 유지하고 additive `M5BridgeV3`를 사용한다. 한 Chat은 명시적 `projectId`·`worktreeId`·`workspaceIdentity`와 1:1이며 생성 시 프로젝트 역할 설정 revision과 `planning/coding/review`의 runtime·정확한 model selector·nullable reasoning·고정 permission을 snapshot한다. public TeamMessage는 hidden reasoning을 저장하지 않고 durable chat event sequence를 protocol stream seq와 분리한다. fixture writer는 run+workspace lock commit 뒤 spawn하며 동일 worktree writer를 직렬화하고, 불확실한 종료는 lock을 유지한 `recoveryRequired`, 해결 v1은 자손 소멸 증명 뒤 abandon-only다. `run.startAgentSmoke`는 예약만 유지하고 capability에 광고하지 않으며 Windows/실제 유료 실행은 별도 게이트 전까지 비활성이다
+- **M5 G5A actual-agent 경계(2026-08-27)**: 기존 G5 fixture ledger/handshake는 불변이고 actual 실행은 additive Bridge V4의 별도 `agentRuns` ledger와 typed start/cancel/recovery 계약을 사용한다. renderer는 경로·argv·model·env·cwd·prompt를 주입할 수 없고 sidecar가 immutable chat role snapshot과 SHA-256 capability fingerprint로 exact profile을 해석한다. machine-readable 또는 exact-version 실측 capability가 아니거나 effective model 증거가 `argvOnly`이면 `canStart=false`다. v1은 one-shot/`nextRun`만 허용하며 process identity release barrier, 모든 자손 소멸, permission별 writer-lock 종료, 공개 `status/question/final`, 불확실 종료의 poisoned recovery를 TypeScript/Rust 공용 golden이 fail-closed 검증한다. 전용 `--stdio-agent-fixture`의 fake launcher→normalized `agent.publicEvent`→Electron fixed V4 IPC→renderer durable `chat.get` hydration 수직 흐름은 구현됐고 raw/private carrier와 legacy/actual recovery 원장은 분리된다. 일반 제품 `--stdio`는 exact G5를 유지하므로 실제 Claude Code/Codex CLI·인증·모델 출력은 아직 미연결·미검증이다
+- **M5 G5 fixture 수직 흐름 완료(2026-08-26)**: 프로젝트 역할 설정은 revision CAS, 기존 채팅은 생성 당시 role snapshot 불변이다. `workspace.prepareChat`은 매번 새 unbound standalone snapshot을 만들고 `chat.create`가 settings·최초 메시지와 exact preparation을 원자 bind하며, 실패 정리는 네 ID가 모두 맞는 준비만 terminal abandon한다. 모든 채팅 workspace/save는 `chatId/projectId/worktreeId/workspaceIdentity`와 `saveId`를 교차 검증한다. macOS 결정적 fixture의 공개 팀 타임라인, clean/uncertain 취소, process-tree 복구, poisoned lock과 `prepareQuit` blocker가 Electron/preload/UI까지 연결돼 exact `014bd987`의 누적 하네스 PASS·독립 QA `G5_READY`를 받았다. 실제 Claude Code/Codex adapter·인증·사용자 프로젝트·Windows는 검증하지 않았다
+- **M5 G4 CLI worktree capability 차단(2026-08-25)**: macOS Git CLI의 `worktree add`는 target이 존재하면 거부하고, held directory의 `/dev/fd/N/.git` 하위 탐색도 `ENOENT`라 검증 뒤 교체 가능한 source·target 경로 문자열 없이 두 filesystem capability를 동시에 묶을 수 없었다. source Git root나 managed target을 ambient path로 넘기면 실행 직전 symlink swap으로 외부 repo filter 실행·admin write 또는 외부 worktree 생성이 가능하다. 이 경계를 수용하거나 사후 검사로 덮지 않는다. 실제 linked worktree를 유지할 native Git 구현과 안전한 detached local clone/snapshot은 제품·안전 계약이 다른 대안이므로 사용자 결정 전 G4 Rust 통합을 중단한다
+- **M4 Claude 실행 계약(2026-08-19 실측, CLI `2.1.235`)**: 읽기 전용을 강제하는 것은 **`--tools` 허용목록**뿐이다. `--disallowed-tools`는 거부목록이라 `Task`·`ToolSearch` 등 23개를 남기고 **거부 증거도 안 남긴다**. `--setting-sources project`는 **대상 프로젝트 설정을 로드해** 권한을 `bypassPermissions`로 승격시키고 훅·MCP를 실행시키므로 안전 정책이 아니다 → **`--setting-sources ''`** 를 쓴다. `--safe-mode`는 훅·MCP·스킬만 끄고 **권한 승격은 못 막는다**. `--permission-mode dontAsk`는 자동 승인이 아니라 거부 게이트이며 `permission_denials`로 기계 판독 가능한 증거를 남긴다. **작업 폴더 경계와 사후 빈 diff는 예방책이 아니라 사후 확인 수단**이다(경계는 복제본 *안* 쓰기를 허용한다). 실행 형식은 **`--output-format stream-json --verbose` 고정**이고 `system:init`을 fail-closed로 검증한다(`tools` 집합 일치·`permissionMode`·`mcp_servers`·`plugins`·`model`·`cwd`·`session_id`). ⚠️ **`--json-schema`는 요청하지 않은 `StructuredOutput` 도구를 주입**하므로 기대 도구 집합은 4개다. §7.10 파일럿은 **macOS 전용**(Windows 종료 계약 미실측). 상세는 `proposals/m4-orchestration.md` §7.10.1.2
+- **Claude CLI 프로세스 트리·종료(2026-08-19 실측, Codex 2차 검토 반영)**: Bash 도구 자식은 **부모 프로세스 그룹에 없고 별도 세션 리더**(`Ss`)다. 그룹 `TERM`으로 죽는 것은 Claude 자체 정리 동작일 뿐이라, **루트에 `SIGKILL`을 보내면 자손이 남는다**(15초까지 생존 확인). **종료 성공은 신호 결과가 아니라 관측으로만 판정한다** — 한 번이라도 관측한 **`(pid, 시작 시각)` 신원을 누적 추적**하고 **누적 집합 전체의 소멸을 확인**해야 성공이다. ⚠️ **루트 기준 ppid 트리 순회는 오판한다** — 부모가 먼저 죽으면 자손이 `ppid=1`로 재부모화돼 트리에서 사라지고, 살아 있는데 빈 집합으로 보인다(C6로 재현). 열거는 **살아 있는 모든 추적 대상**에서 출발한다. **PID 재사용(신원 불일치)과 조회 실패는 `poisoned`**. `killpg`의 **`EPERM`은 성공도 소멸 증거도 아니다**(좀비만 남은 그룹에서도 난다). **확인 불가는 곧 `poisoned`** — 실행과 복제본을 함께 표시하고 자동 인계·재사용을 차단하며 해소는 명시적 복구/폐기뿐. `run_in_background` 때문에 **정상 종료 경로에서도** 회수가 필요하다. 상세는 `proposals/m4-orchestration.md` §7.10.1.2 ⑤
+- **M4 §7.10 최소 자동 인계 — 구현·검토·실사용 완료**: `proctree.rs`(종료 계약, F1~F8), `claude_pilot.rs`(실행 계약 + `system:init` fail-closed), `handoff.rs`(사용자 1회 입력 → 계획 → **앱이 인계** → 구현), `App.tsx`의 macOS 전용 `HandoffPilot`으로 구성된다. 신원 조회는 `libc::proc_pidinfo(PROC_PIDTBSDINFO)`를 쓴다. 통합 테스트는 `#[ignore]`이며 **`env -i`로 돌리면 인증이 사라져 실패**한다
+- **M4 자동 인계의 중단·잠금·결과 계약(2026-08-20, Codex 4차 반려로 확정)**: 취소 깃발은 **실행이 아니라 슬롯(`HandoffSession`)이 소유**한다 — 실행이 만들면 준비 중(복제본 만드는 동안) 누른 중단이 실행 시작으로 지워진다. **stdout 읽기 루프 안에서 취소를 확인하면 안 된다** — 한 줄도 출력하지 않는 실행에서는 그 검사에 영영 닿지 못하므로 읽기를 별도 스레드로 옮기고 소유자가 폴링한다. Codex 구간 취소는 `cancel_handoff`가 직접 전달하되 **슬롯 예약 직전의 취소**를 놓치므로 `CancelBridge`가 닿을 때까지 재시도한다(접으라는 신호는 취소 확인 **뒤에** 받아야 마지막 순간의 취소를 흘리지 않는다). 증거 파일은 **자식보다 먼저** 만든다 — 띄운 뒤 실패하면 프로세스와 감시 스레드가 주인 없이 남는다. **종료 확인 실패 뒤에는 어떤 blocking 대기도 하지 않는다**(`wait()`·`join()` 모두). 잠금은 **3상태**다(`none`/`persisted`/`sessionOnly`) — 디스크 표시 저장에 실패했는데 잠갔다고 보고하면 재시작 후 오염된 복제본이 다시 쓰인다. 변경 파일 목록은 **`git diff --name-status -z -M`** 에서 읽는다 — 패치 본문의 `+++ b/…`는 **삭제·이름만 변경·바이너리에 나타나지 않아** "바뀐 게 없다"는 거짓말이 된다. 완료 화면의 결과는 **구현 단계 최종 메시지**이고 계획 요약은 *하려던 것*으로 분리한다. `init` 모델 검증은 부분 문자열이 아니라 **실측 허용값 완전 일치**다(`contains("sonnet")`는 `claude-sonnet-5-evil`을 통과시킨다). 상세는 `proposals/m4-orchestration.md` §7.10·§9
+- **pid는 식별자가 아니다 — 조회·집합·신호 어디서든(2026-08-20, Codex 5차 반려)**: 종료 추적의 누적 집합을 pid로 키잡으면 소멸을 확인한 pid를 새 자손이 재사용할 때 **편입이 막히고**, 옛 신원은 `Gone`이라 이후 조회에서도 건너뛰어 **살아 있는 자손을 아무도 보지 않는 채 `Confirmed`** 가 난다. 키는 `(pid, start_us)` 전체여야 한다(F7). 같은 실수가 **테스트 하네스에도** 있었다 — 가짜 `signal`이 pid로 첫 항목을 찾아 같은 pid를 쓰던 죽은 프로세스에 신호를 보냈다. 또한 **실행 중 관측 오류는 영구히 기억해야 한다** — 일시적 열거 실패·신원 불일치가 종료 시점에 사라져 있어도, 그 회차에 생겼다 사라진 자손이 있었는지 알 수 없으므로 소멸을 주장할 근거가 없다(F8). 상세는 `proposals/m4-orchestration.md` §7.10.1.2 ⑤
+- **프런트 테스트는 `node --test` + 노드 타입 제거로 돌린다(2026-08-21)**: 앱에는 테스트 프레임워크가 없었지만 `website/`가 이미 `node --test`를 쓴다. 같은 방식에 `--experimental-strip-types`(Node 22.18)를 얹어 `.ts` 순수 모듈을 그대로 임포트한다. `npm test` → `tests/*.test.mts`. **UI 렌더링이 아니라 순수 상태 전이만** 테스트한다 — 그래서 프레임워크가 필요 없다
+- **비Git 프로젝트를 푸는 길: "되돌릴 수 있게 준비하기"(2026-08-24)**: `create_first_project`가 `git init`을 하지 않아 **앱이 만든 프로젝트가 전부** 파일럿 대상이 못 됐다. 안내만 남기면 비개발자는 못 푼다. 동의를 받고 `git init` + **첫 복원 지점 커밋**을 한다 — `git init`만으로는 부족하다(커밋이 없으면 `rev-parse HEAD` 실패). 원본을 건드리는 유일한 동작이라 **동의 없이 실행 금지**, 기존 저장소 이력 불변, **다른 저장소 안의 폴더는 거부**(중첩 저장소가 사용자 이력을 어지럽힌다), 커밋 신원은 **그 커밋에만** 주입(`git config` 불변). 새 프로젝트는 처음부터 준비하되 **실패해도 프로젝트 생성은 성공**으로 둔다
+- **`serde_json`에서 `null`은 "없음"이 아니다(2026-08-24 실사용 사고)**: `event.get("structured_output")`은 값이 JSON `null`이어도 `Some(Value::Null)`을 준다. `or_else` 대체 경로도, `let Some(..) else` 오류 보고도 **전부 건너뛴다.** 실사용에서 이것 때문에 인증 만료 원인을 잃었다. 없을 수도 있는 필드는 `.filter(|v| !v.is_null())`로 걸러 낼 것
+- **에이전트 실패는 CLI가 말해 준 원인을 버리지 않는다(2026-08-24)**: 계획이 없다는 이유로 `"run produced no structured plan"`으로 덮어쓰면 **해결책이 분명한 상황(로그인 만료)에서도 사용자가 막다른 길에 선다.** `result` 텍스트를 그대로 전하고 닥터가 분류한다(`auth` 추가). 멈춘 화면은 닥터를 거쳐 쉬운 말로 이유를 보여주고 영문 원문은 상세 안에만 둔다
+- **"할 일 없음"은 사고가 아니라 되묻기다(2026-08-24)**: 인사말만 넣으면 계획 역할이 `steps: []` + 이유를 돌려준다(실측) — **별도 의도 분류기가 필요 없다.** 이걸 실패 화면으로 보내면 초보자는 자기가 망가뜨린 줄 안다. `HandoffStage::NeedsGoal`로 분리해 "무엇을 바꿀지 알려주세요"로 되묻는다
+- **serde `rename_all`은 변형 이름만 바꾼다 — 필드는 `rename_all_fields`(2026-08-24 실사용 사고)**: `#[serde(tag="state", rename_all="camelCase")]`를 단 enum의 **struct 변형 안 필드는 그대로 snake_case로 나간다**. `run_id`가 그대로 나가 화면의 `started.runId`가 `undefined`가 됐고, 그 값을 다음 `invoke`에 넘기니 **키가 통째로 사라져** `command run_handoff missing required key runId`로 터졌다. **JS에서 값이 `undefined`면 키 자체가 없어진다** — 이게 조용한 실패의 정체다. `install.rs`의 `InstallEvent`는 이미 `rename_all_fields`를 달고 있었다(올바른 예). ⚠️ `login.rs`의 `LoginEvent`는 아직 안 달았지만 필드가 전부 한 단어(`url`·`line`·`success`)라 지금은 무해하다 — **여러 단어 필드를 추가하는 순간 같은 사고가 난다**. 구조체는 해당 없음(`rename_all`이 필드에 적용된다)
+- **TypeScript 인터페이스는 손으로 적은 것이라 백엔드 모양을 검증하지 못한다(2026-08-24)**: 위 사고에서 TS는 `{ state: "ready"; runId: string }`이라고 선언했지만 백엔드는 `run_id`를 보냈고, 컴파일은 통과했다. 그래서 **화면이 읽는 키 이름 자체를 Rust 테스트로 못 박는다**(`the_start_reply_uses_the_key_names_the_screen_reads` 등). 경계를 넘는 새 타입을 만들면 같은 방식으로 키를 고정할 것
+- **"설치됨"이 "쓸 수 있음"은 아니다(2026-08-24)**: 버전이 최신이어도 설치가 온전하지 않을 수 있다(Codex 셸 호스트 누락). 그런데 홈의 에이전트 버튼은 **미설치·미로그인·업데이트 있음** 세 경우에만 떠서, 망가진 최신 설치는 **아무 버튼도 없이 막다른 길**이 됐다. `AgentStatus.needs_repair`로 판정해 "고치기"를 노출한다. 새 에이전트를 붙일 때 **그 에이전트가 온전하다는 조건**을 `installation_is_complete`에 적을 것
+- **Codex CLI 0.149.1 실측 — 앱이 쓰던 계약이 깨졌다(2026-08-24)**: ⚠️ **`approval_policy = "untrusted"`는 이제 거부된다**(`no longer supported; remove this setting`). 파일럿 인자와 앱의 안전 프리셋 양쪽에 있었고, 프리셋 쪽은 **신규 사용자의 Codex를 통째로 망가뜨린다**(유효값: `on-failure`·`on-request`·`granular`·`never`). `codex exec`에서 승인 정책 자체가 사라져 **경계는 `--sandbox` 하나**다. ⚠️ **릴리스는 `codex`와 `codex-code-mode-host`를 별도 자산으로 배포**하는데 앱은 앞의 것만 받아, 설치된 Codex가 **셸 명령을 하나도 실행하지 못했다**. 이때 파일이 안 생기니 **"샌드박스가 막았다"로 오판하기 쉽다** — 실제로 첫 실측이 그렇게 나왔다. 실측 결과: `--sandbox read-only`는 진짜로 쓰기를 막고(`EXIT=1`, `operation not permitted`), `--output-schema`로 구조화 계획이 나온다
+- **Codex 계획 역할 계약은 Claude보다 약하다 — 숨기지 않는다(2026-08-24)**: Codex는 `thread.started{thread_id}`만 주고 **어떤 샌드박스·도구로 떴는지 이벤트로 알려주지 않는다.** 그래서 Claude의 `system:init` fail-closed 검증에 대응하는 것이 **없다**. argv 통제 + 실측된 샌드박스 + 사후 빈 diff에 기대며, 마지막은 예방책이 아니라 사후 확인이다. 거부된 도구 호출(`permission_denials`)도 기계 판독 불가. 상세는 `src-tauri/src/codex_pilot.rs` 머리말
+- **파일럿 대상은 사용자가 명시적으로 고른다(2026-08-24, §7.6A 1차 실사용 A5 실패)**: 홈이 `projects[0]`을 말없이 대상으로 삼아 비Git 프로젝트에 작업이 갔고, 사용자는 시작 뒤에야 영문 오류를 봤다. **`projects.find(p => p.pilotEligible)`도 같은 잘못**이다 — 여전히 사용자가 고르지 않는다. 쓸 수 있는지는 **누르기 전에** 알려 준다: `scan_projects`가 `pilotEligible`을 싣고, 그 판정은 실행과 **같은 함수**(`can_copy_pilot_source`)를 쓴다(복제본이 Git 클론이라 비Git은 불가). 다만 그것은 **표시용일 뿐 권한 경계가 아니다** — 최종 거절은 언제나 `prepare_pilot_copy`이고(TOCTOU), 그 실패도 닥터 `notgit`으로 지역화해 보여 준다. 원문은 "자세히 보기" 안에만
+- **화면의 실행 추적은 순수 모듈이 정한다(2026-08-21, Codex 8차 반려)**: `src/handoffRun.ts`. 따라가는 실행 ID와 보류된 중단을 ref 두 개로 굴리면 경합이 난다 — 끝난 실행 ID가 남으면 다음 실행의 예약 대기 중 중단이 "실행 중"으로 오인돼 **죽은 슬롯으로 나가고**(무동작) 새 실행은 그대로 진행된다. 규칙 둘: **`begin_handoff` 호출 전에 이전 ID를 버린다**, **실행이 끝나면 비운다**(결과·막힘·오류 모든 경로). 방어가 하나뿐이면 다른 하나가 사라질 때 조용히 뚫리므로 둘 다 테스트로 고정한다
+- **잠긴 복제본은 새 실행을 시작하기 전에 치운다(2026-08-20, Codex 7차 반려)**: 파일럿 슬롯은 하나뿐이다. 잠긴 A가 슬롯을 쥔 채 새 B를 만들면 B의 실행은 거부되고 화면에는 B만 보인다 — **B를 아무리 정리해도 슬롯은 A의 것이라 안 풀려 후속 실행이 영영 거부된다.** 그래서 `begin_handoff`가 **사본을 만들기 전에** 막고 A의 경로·사유·잠금 상태를 돌려준다. 증거 경로는 **"저장된 파일"만** 보고한다(`Option` + `is_file()`) — 없는 파일의 경로를 "저장된 기록 위치"로 주면 사용자는 열리지 않는 경로를 들고 도움을 요청하게 된다. `FailureContext`는 **경로가 정해지는 즉시** 만들어야 증거 생성 도중의 부분 실패에서 이미 생긴 파일을 잃지 않는다. `PoisonedRun`도 종료 오류와 표시 저장 오류를 나눠 든다
+- **테스트 함정 2개(2026-08-20)**: `std::sync::Mutex` 가드를 쥔 채 같은 락을 다시 잡으면 **데드락**이다(`session.slot()` 후 `session.release()`). 그리고 실패 주입에 "경로를 폴더로 선점"하는 기법을 쓸 때 존재 확인은 `exists()`가 아니라 **`is_file()`** 이어야 한다 — 폴더가 파일로 세어진다
+- **실행 실패도 결과와 같은 무게로 실어 나른다(2026-08-20, Codex 6차 반려)**: `execute_pilot`은 `Result<PilotRun, PilotFailure>`다. 오류를 문자열로 줄이면 **이미 만들어진 증거 경로가 그 지점에서 사라져** 화면에 폐기·복구 수단이 남지 않는다. `PilotFailure`는 `error`·`run_id`·`workspace_path`·`evidence`·`poisoned`·`marker_error`를 싣는다. **`poisoned`(무엇이 잘못됐나)와 `marker_error`(왜 잠금을 저장 못 했나)는 다른 사실**이라 절대 합치지 않는다 — 합치면 화면의 "표시를 저장하지 못한 이유"에 종료 오류가 나온다. 그리고 **파일럿 슬롯은 하나뿐이므로 슬롯의 오염 상태를 볼 때는 반드시 복제본 경로를 대조한다** — 대조하지 않으면 남의 오염이 멀쩡한 복제본을 잠그고, 폐기해도 슬롯이 풀리지 않아 실행이 영영 막힌다
+- **파일럿 복제본 폐기는 두 경로다(2026-08-20)**: `discard_codex_pilot`은 **`poisoned` 표시가 있는 복제본만** 받는다. 인계 화면의 "결과 버리기"는 정상 완료·단순 취소·`sessionOnly`도 버릴 수 있어야 하므로 전용 `discard_handoff_workspace`를 쓴다. 두 경로 모두 **폐기 = 영구 `abandoned` 표시**이며 파일을 지우지 않는다(증거는 복제본 밖에 있고, 표시가 붙으면 다시 실행 대상이 되지 못한다). 임의 폴더 폐기를 막는 것은 파일럿 루트 포함 여부와 매니페스트 검증이다
+- **Claude CLI `2.1.237`에서도 실행 계약이 그대로 통과했다(2026-08-20)**: 계약을 실측한 `2.1.235`에서 패치 판올림이 있었지만 도구 집합·`dontAsk`·`claude-sonnet-5`가 모두 동일했다. 정확 일치 목록이 판올림마다 부서지지는 않는다는 첫 관측 — 다만 깨지면 목록을 넓히는 게 아니라 **재실측**이 답이다
+- **함정: `/dev/urandom`을 `std::fs::read`로 읽지 말 것.** 끝없는 스트림이라 프로세스가 멈춘다. `read_exact`로 필요한 바이트만 읽는다
+- **M4 S2 (Codex 파일럿 실행 경계) — 통과**: 실행기(`d2dec6d`)와 수동 경계 시나리오 실측 모두 **Codex 교차 검토를 통과**했다(§7.9·§8). 앱 데이터 `m4-pilots/` 아래에 만든 매니페스트 있는 Git 복제본만 대상으로 삼고, Codex 파일럿은 사용자 config·rules를 무시한 `workspace-write + untrusted` 고정 정책을 쓴다. 자동 승인·bypass·추가 쓰기 폴더는 금지한다. 경계는 *"복제본 + 임시 디렉터리"* 이며 비임시 경로 쓰기는 커널이 거부함을 종료 코드로 확인했다. Unix 그룹 `TERM` → `KILL`, Windows `taskkill` 실패 판정, child 부착 전후의 취소 실패 처리와 `poisoned` 영속화까지 자동 테스트를 통과했다. **남은 별건 2가지**: Windows CI 확인, 그리고 좀비만 남은 그룹에서 `killpg`가 `EPERM`을 반환하는 건에 대한 `tree_is_gone`/`signal_ok` 오판 검토(§7.10.1.2 ③ T1). UI는 여전히 열지 않는다.
 ## 작업 규칙 (고정)
-
 - **워크로그 필수 범위**: 구현뿐 아니라 버그 분석, 코드 리뷰, 우선순위 결정, GitHub/배포 같은 외부 변경도 다음 작업자에게 의미가 있으면 이 문서에 기록. 최종 응답 전 `git diff -- docs/history.md`로 기록 여부 확인
 - **커밋·push 전 반드시 사용자 승인**을 받는다 (이 프로젝트 관행)
 - `git`은 scm_breeze 충돌(`_safe_eval` 오류)로 **`/usr/bin/git` 절대경로** 사용. 커밋 메시지는 임시 파일 방식(HEREDOC 미동작), Co-Authored-By 트레일러 포함
 - **검증**: `pnpm build`(tsc+vite) · `cargo test --manifest-path src-tauri/Cargo.toml` · 네트워크 격리 E2E는 `-- --ignored` · push 시 CI(macOS/Windows)
-- 실행: `pnpm tauri dev`(개발) / `pnpm tauri build`(설치 파일). Rust 1.85+ (edition 2024)
+- 실행: `pnpm tauri dev`(개발) / `pnpm tauri build`(설치 파일). Rust 1.85+ 권장, 실제 crate edition은 **2021**
 - 초보자(비개발자) 대상 — 모든 문구는 전문용어 없이 쉬운 한국어. ".md도 IDE도 모르는 사람" 기준으로 검토
-
 ---
+지난 워크로그: [11월](archive/history-2026-11.md) · [10월](archive/history-2026-10.md) · [9월](archive/history-2026-09.md) · [8월](archive/history-2026-08.md) · [7월](archive/history-2026-07.md).
 
-## 워크로그 (최신이 위)
-
-### 2026-07-23 · by Claude Opus 4.8
-
-**추가 작업 — v0.1.2 범프 (자동 업데이터 첫 탑재 릴리스)**
-- 업데이터 배선이 CI에서 완전 검증됨(build-macos/windows가 서명 env로 통과) → v0.1.2로 범프. tauri.conf.json·package.json·Cargo.toml·Cargo.lock 동기화
-- 이 버전이 **업데이터를 처음 담은 릴리스**. 태그 push하면 서명된 latest.json이 릴리스에 올라가 이후 버전부터 앱이 자동 업데이트. v0.1.0/v0.1.1 사용자는 v0.1.2를 한 번 수동 설치해야 함
-- **결과**: v0.1.2(`a453dc9`) 릴리스 빌드 macOS·Windows 성공. 자산에 `latest.json` + 각 업데이터 아티팩트 `.sig`(서명) 첨부. `latest.json` 검증: version 0.1.2, 7개 플랫폼 항목 전부 서명 포함, URL이 v0.1.2 자산을 정확히 가리킴 → 자동 업데이터 완전 작동 확인. 릴리스 노트 작성(자동 업데이트 강조). **draft 상태 — 공개는 사용자 결정 대기**
-
-**버그 수정 — 웹사이트 네비게이션 반복 시 먹통**
-- 증상: 앵커 네비게이션(#homebase 등)을 빠르게 왔다갔다 여러 번 누르면 페이지가 멈춤
-- 원인: page.tsx는 커스텀 JS 없는 순수 서버 컴포넌트 → JS 문제 아님. **sticky `.site-header`의 `backdrop-filter: blur(18px) saturate(150%)`** 가 `scroll-behavior: smooth`와 겹쳐, 반복 스크롤 중 매 프레임 blur 재계산으로 컴포지터가 과부하되어 멈춤
-- 수정(`website/app/globals.css`): sticky 헤더 배경을 거의 불투명(0.88→0.96)으로 올리고 `backdrop-filter`(webkit 포함) 제거. `.trust-chip`의 blur(8px)도 제거(배경 0.92→0.96, 비sticky라 부차적). 배경이 이미 불투명해 시각 변화는 미미
-- 검증: `npm test` 2 pass, `npm run lint` 클린, prerender OK. 테스트가 의존하는 `.site-header{position:sticky; top:0}`·`scroll-padding-top` 유지
-
-**추가 작업 — 인앱 자동 업데이터 구현 (tauri-plugin-updater, 무료 서명)**
-- 배경: v0.1.x 사용자는 새 버전 받으려면 수동 재다운로드뿐 → 앱이 스스로 업데이트하도록. 업데이터 서명 키는 무료(ed25519), 유료 코드 서명과 무관
-- Rust: `Cargo.toml`에 `tauri-plugin-updater`·`tauri-plugin-process` 추가, `lib.rs`에 플러그인 등록
-- 설정: `tauri.conf.json` bundle에 `createUpdaterArtifacts: true`, `plugins.updater`(endpoints=releases/latest/download/latest.json, pubkey=**자리표시자 REPLACE_WITH_UPDATER_PUBLIC_KEY**). `capabilities/default.json`에 `updater:default`·`process:default`
-- 프론트: `@tauri-apps/plugin-updater`·`plugin-process` 설치. `AppUpdateBanner` 컴포넌트(시작 시 `check()` → 있으면 배너 → `downloadAndInstall()`+`relaunch()`) 헤더 밑에 배치. `appUpdate.*` i18n ko/en, `.app-update-banner` CSS
-- CI: `release.yml`에 `TAURI_SIGNING_PRIVATE_KEY`·`_PASSWORD` env 추가(있으면 tauri-action이 업데이터 서명 + latest.json 생성·업로드)
-- 검증: `pnpm build`·`cargo check` 통과
-- 키 생성 완료(사용자, 빈 비밀번호). 공개 키를 `~/.tauri/hello-agent-updater.key.pub`에서 읽어 tauri.conf.json pubkey에 **반영 완료**(개인 키는 미접근). 개인 키는 저장소 밖 `~/.tauri/`에 보관
-- **남은 수동 단계(사용자)**: GitHub 시크릿 2개 등록 — `TAURI_SIGNING_PRIVATE_KEY`(개인 키 파일 내용), `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`(빈 값). 그다음 v0.1.2 범프·태그 push하면 서명된 latest.json이 릴리스에 올라가 자동 업데이트 활성화
-- **함정: 소급 안 됨** — v0.1.1까지는 업데이터가 없어 latest.json 확인 불가. 업데이터 첫 탑재 버전(v0.1.2)은 사용자가 한 번 수동 설치해야 이후부터 자동 업데이트됨
-- **CI 실패·수정(발견)**: `createUpdaterArtifacts: true` + pubkey면 `tauri build`가 **서명을 강제** → ci.yml의 build-macos/build-windows가 "public key는 있는데 private key 없음"으로 실패. 시크릿을 저장소에 등록한 뒤 **ci.yml의 두 build 스텝에도 `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` env 추가**로 해결. (test 잡은 `cargo test`뿐이라 무관, 통과). release.yml은 원래 env를 넣어둠
-
-**추가 작업 — v0.1.1 릴리스 준비 (버전 범프)**
-- 사용 팁 기능을 담아 v0.1.1로 배포하려고 버전을 3곳 모두 올림: `src-tauri/tauri.conf.json`(파일명 기준)·`package.json`·`src-tauri/Cargo.toml` → `0.1.1`, `Cargo.lock`도 `cargo update -p hello-agent`로 동기화
-- 배포 흐름: 커밋·push 후 `v0.1.1` 태그 push → release.yml이 초안 릴리스 빌드(태그·push는 분류기 차단이라 사용자가 `!`로 실행)
-- 릴리스 노트는 초안 생성 후 gh release edit로 작성 예정(사용 팁 추가 강조)
-- **문서 버전 하드코딩 제거**: 다운로드 링크는 이미 `releases/latest`라 버전 무관. 유일하게 버전이 박혀 있던 README 문구("첫 베타 v0.1.0")를 "베타 버전이 공개되어 있어요 + 최신"으로 바꿔 릴리스마다 문서 수정 불필요하게 함. 웹사이트 page.tsx는 원래 버전 무관 문구라 무변경(0.145.0은 목업 속 가짜 Codex 버전)
-- **결과**: v0.1.1 태그(`d086ce4`) 릴리스 빌드 **macOS·Windows 성공**. `0.1.1` .dmg/.exe/.msi + app.tar.gz 첨부. 릴리스 노트 작성(사용 팁 강조, v0.1.1 다운로드 링크). 사용자 승인으로 **공개 완료**
-- **함정 발견·수정 — prerelease와 releases/latest**: `releases/latest`는 **정식(비-prerelease) 최신만** 가리킴. v0.1.0·v0.1.1이 모두 prerelease라 문서의 latest 링크가 `/releases` 목록으로 튕겼음 → 두 릴리스 모두 `--prerelease=false`로 끄고 `release.yml`의 `prerelease: true`→`false`로 변경. 확인: API `isLatest=true`(v0.1.1), `releases/latest`→`/tag/v0.1.1` 정상. 베타 표시는 버전·노트로 대체
-
-**논의 — 앱 자동 업데이트(다음 작업 후보)**
-- 사용자 질문: v0.1.0 받은 사람이 v0.1.1로 어떻게 업데이트? 현재는 **수동 재다운로드만 가능**(앱 본체는 자기 업데이트 기능 없음. 홈의 "업데이트"는 Claude/Codex 에이전트 대상이지 앱 본체가 아님)
-- 해결책: `tauri-plugin-updater`. 업데이터 서명 키는 **무료**(ed25519, 유료 코드 서명과 별개). 릴리스가 이미 `app.tar.gz`(업데이터 번들) 생성 중이라 절반 준비됨. 플러그인+키+`latest.json` 설정+앱 체크 로직만 추가하면 됨
-- 함정: (1) 소급 안 됨 — v0.1.0/v0.1.1 사용자는 업데이터 첫 탑재 버전(예 v0.1.2)까지 한 번 수동 설치 필요, 이후 자동. (2) macOS 미서명이면 업데이트 후 첫 실행 경고 재발 가능(기능엔 무관)
-
-**추가 작업 — 초보자용 "코딩 에이전트 사용 팁" 추가 (졸업식 + 홈)**
-- 배경: 온보딩 끝난 비개발자가 "그래서 뭘 어떻게 시키지?"에서 다시 막히는 게 제품 최대 공백. 사용자 제안으로 팁 추가, 위치는 두 곳 다 합의
-- `src/App.tsx`: 재사용 컴포넌트 `UsageTips` 신설. **졸업식** 성공 화면 next-guide 뒤에 인라인(`agent` prop 전달), **홈** 하단에 접이식 `<details className="tips-card">` 카드로 배치
-- 팁 구성: ①예시 프롬프트 3(복사용) ②알아두면 좋은 것 3 ③**에이전트별 특징** ④**컨텍스트 파일**(CLAUDE.md·AGENTS.md에 규칙 적어두면 매번 참고). 졸업식은 해당 에이전트만, 홈은 둘 다 표시
-- **에이전트 특징 문구는 실제 화면 용어를 그대로 사용**(Claude=`auto mode`, Codex=`goal`) + 괄호로 한국어 뜻. 사용자 피드백: "자동 승인/목표"로 의역하면 실제 버튼을 못 찾아 애매함
-- i18n: `tips.*`·`tips.agent.{claude-code,codex}`·`tips.context.*`·`home.tips.title` 키를 ko/en 양쪽에 추가(tsc가 MessageKey 정합성 검증). 전문용어 없이 비개발자 눈높이
-- CSS(`src/App.css`): 팁 카드·예시 칩·접이식 스타일 추가. **예시 프롬프트는 복사해서 쓰는 것이라 `user-select` 예외 목록에 `.tips-examples li` 추가**(전역 user-select:none 때문에 안 그러면 복사 불가)
-- 참고: `ProjectInfo`엔 agent 필드가 없음 → 졸업식은 `GraduationStep`의 `agent` prop을 사용
-- 검증: `pnpm build`(tsc+vite) 통과. 아직 커밋 안 함(사용자 승인 대기)
-
-**한 일 — README 현행화 커밋·push, 정식 배포(코드 서명) 경로 정리**
-- 앞선 Codex의 README 보완 변경(루트·웹사이트 README + 이력)을 한 커밋으로 묶어 커밋·push (`1e59690`). 세 파일을 함께 묶은 이유는 history 최신 엔트리가 바로 그 README 작업 기록이라 코드+이력이 한 단위이기 때문
-- push 후 CI 끝까지 감시: website / build-macos / build-windows / test(macOS·Windows) **전부 success**
-- 사용자 질문("정식버전은 어떻게? 뭘 등록?")에 정식 배포 경로 분석 제공
-
-**정식 배포(코드 서명) 정리 — 다음 작업자 참고**
-- **macOS**: Apple Developer Program 등록($99/년) → Developer ID 서명 → notarization(공증) → staple. 최신 macOS는 우클릭>열기 우회도 조여지는 추세라 사실상 필수
-- **Windows**: OV($100~300/년) 또는 EV($300~600+/년) 코드사인 인증서. 2023년부터 키는 하드웨어 토큰/HSM 의무 → CI 자동 서명은 클라우드 HSM(예: Azure Trusted Signing ~$10/월) 필요. EV는 SmartScreen 경고 즉시 제거
-- **배포 채널**: GitHub Releases 추천(무료, 현 CI가 이미 .dmg/.exe 아티팩트 생성). `tauri-plugin-updater`로 앱 내 자동 업데이트 가능. **Mac App Store는 샌드박스 필수라 "다른 CLI를 설치하는 앱" 성격상 부적합 — 비추천**
-- **제안한 단계**: (1) 무료 미서명 GitHub Releases = 베타/지인용, (2) macOS 서명·공증부터($99), (3) Windows 인증서+Azure Trusted Signing. 서명 자리를 잡아둘 릴리스 워크플로(태그 push→빌드→릴리스 생성)는 미착수(사용자 결정 대기)
-
-**추가 작업 — GitHub Releases 자동 배포 워크플로 신설(`.github/workflows/release.yml`)**
-- 사용자가 "GitHub 릴리즈가 맞는 방향" 확정 → `v*` 태그 push 시 빌드하는 릴리스 워크플로 추가
-- `tauri-apps/tauri-action`으로 빌드+릴리스 생성/업로드 일원화. macOS는 `--target universal-apple-darwin`(Intel·Apple Silicon 공용 .dmg), Windows는 기본(.exe). 매트릭스 두 잡이 같은 tagName으로 한 릴리스에 아티팩트를 누적
-- `releaseDraft: true` + `prerelease: true` → 초안으로 올라가 사람이 검토 후 공개. 미완성 공개 방지
-- **서명은 자리만 확보**: Apple 시크릿(APPLE_CERTIFICATE/…/APPLE_TEAM_ID)을 env로 연결해둠. 시크릿이 비면 미서명 빌드, 채우면 코드 변경 없이 서명·공증 켜짐
-- 아직 태그 미발행 → 실제 릴리스는 돌지 않음. YAML 문법만 로컬 검증(python yaml.safe_load 통과). 아직 커밋 안 함(사용자 승인 대기)
-
-**추가 작업 — 소개 웹사이트 Vercel 배포 문제 진단·해결(prerender 방식)**
-- 증상: 사용자가 Vercel에 배포(프리셋 Vite) 성공했으나 페이지가 안 뜸
-- **근본 원인**: `website`는 표준 Next가 아니라 **vinext**(Vite+Cloudflare Worker) 앱. 빌드 산출물 `dist/`에 **`index.html`이 없음** — HTML은 요청 때 `dist/server/index.js`(Worker)가 SSR로 생성. Vercel 정적 서빙엔 렌더할 서버가 없어 빈 화면. (`dist/server/wrangler.json`도 자동 생성돼 Cloudflare 배포는 원래 준비돼 있음)
-- 사용자가 "모든 게 Vercel에 있다"며 Vercel 유지 원함 → **prerender 방식** 채택: 페이지가 완전 정적(next/image·데이터패칭 없음, 유일 동적요소는 `layout.tsx`의 `headers()` 기반 og 절대 URL)이라 안전
-- 신설 `website/build/prerender.mjs`: 빌드 후 Worker를 1회 `fetch("/")` 실행해 완성 HTML을 `out/index.html`로 저장 + `dist/client/`(assets·og.png) 복사 + `app/{icon,apple-icon}.png`를 정적 경로로 복사. 호스트는 `VERCEL_PROJECT_PRODUCTION_URL`(빌드 시 주입)→`SITE_HOST`→기본값
-- 신설 `website/vercel.json`: `framework: null`, installCommand는 CI와 동일한 rolldown optional-deps 우회(`rm -f package-lock.json && npm install`), buildCommand `npm run build && node build/prerender.mjs`, outputDirectory `out`
-- **검증(로컬)**: 전체 체인 `npm run build`(exit 0) → prerender(exit 0, 29KB HTML). HTML이 참조하는 `/assets/*.js·css` 5개 전부 `out/`에 실존, og 절대 URL·title·아이콘 정상. `npm run lint` 클린(eslint config가 `out/**`·`build/**` 무시), `npm test` 2 pass. `out/`·`dist/`는 이미 gitignore
-- 미검증: 실제 Vercel 빌드 컨테이너에서의 재현(push 후 확인 필요)
-
-**추가 작업 — 첫 릴리스(v0.1.0) 실행, macOS 서명 실패 → 수정**
-- 사용자가 Vercel 배포 성공 확인 후 릴리스 진행. `v0.1.0` 태그 push로 release.yml 첫 실행(태그·push는 auto-mode 분류기가 차단 → 사용자가 `!`로 직접 실행)
-- 결과: **Windows 성공**(초안 릴리스에 `.exe`·`.msi` 첨부), **macOS 실패**
-- **실패 원인**: release.yml에 `APPLE_*` env를 빈 시크릿으로라도 넘겼더니 tauri가 서명을 시도 → `security import: failed to import keychain certificate`. 인증서 없는데 서명 경로가 켜진 것
-- **수정**: env 블록에서 `APPLE_*` 6개를 제거(빈 값도 넘기지 않음)해 미서명으로 빌드되게 함. 서명 켜는 방법은 주석으로 명시. YAML 검증 통과
-- **주의(핵심 발견)**: 미서명 배포 시 `APPLE_*` env는 아예 넘기지 말 것. 빈 문자열이라도 존재하면 tauri가 서명을 시도하다 실패. Windows는 서명 env가 없어 미서명으로 정상 빌드됨
-- 재실행 주의: 워크플로 파일은 **태그가 가리키는 커밋** 기준으로 실행됨 → 수정본을 적용하려면 v0.1.0 태그를 새 커밋으로 재지정(delete+recreate) 후 재push해야 함. 기존 초안 릴리스는 tauri-action이 같은 tagName으로 재사용
-
-**재실행 결과 — 성공 ✅**
-- 수정본(`84201b2`)으로 v0.1.0 태그 재지정·push → 워크플로 재실행. **macOS·Windows 둘 다 success**
-- 초안(draft·prerelease) 릴리스 `v0.1.0`에 아티팩트 4개 첨부: `Hello.Agent_0.1.0_universal.dmg`(6.6MB)·`Hello.Agent_universal.app.tar.gz`·`Hello.Agent_0.1.0_x64-setup.exe`(2.3MB)·`Hello.Agent_0.1.0_x64_en-US.msi`(3.4MB)
-- 릴리스 파이프라인 **첫 통과 검증 완료**. 이후 릴리스는 `vX.Y.Z` 태그 push만 하면 됨(단, tauri.conf.json version과 태그 일치)
-- 미공개 상태: 초안이라 GitHub Releases에서 사람이 직접 Publish해야 공개됨
-
-**공개(Publish) 완료 ✅ — v0.1.0 정식 라이브**
-- 릴리스 노트 작성: 6단계 온보딩·홈베이스 소개 + 다운로드 표(실제 파일 링크) + 미서명 경고 우회법(macOS 우클릭>열기/시스템 설정, Windows 추가 정보>실행). `gh release edit`로 적용
-- **다운로드 링크 주의(발견)**: 초안 상태의 자산 URL은 `.../download/untagged-<hash>/...` 형태 → Publish하면 `.../download/v0.1.0/...`로 바뀜. 그래서 노트 링크는 처음부터 `v0.1.0` 정식 형태로 작성(초안일 땐 404, 공개 후 동작)
-- 사용자 승인으로 공개: `gh release edit v0.1.0 --draft=false`. `draft=false, prerelease=true`. dmg 다운로드 링크 HEAD 200 확인
-- 공개 URL: https://github.com/wonseok-han/hello-agent/releases/tag/v0.1.0
-
-**다음 할 일**
-- [ ] 웹사이트 다운로드 섹션·README의 GitHub 링크를 실제 릴리스(v0.1.0 다운로드)로 반영
-- [ ] Apple Developer / Windows 코드사인 인증서 등록 여부 결정 → 시크릿 채우고 release.yml에 APPLE_* env 복원해 서명 활성화
-- [ ] (미커밋) 이 이력 업데이트 커밋·push 대기
-- [ ] 첫 릴리스 시 `v0.1.0` 태그 push → 초안 릴리스 확인 후 공개. 릴리스 워크플로 실제 통과 검증(현재 미검증, 태그 발행해야 실행됨)
-- [ ] Apple Developer / Windows 코드사인 인증서 등록 여부 결정 → 시크릿 채워 서명 활성화
-- [ ] (참고) Vercel 대신 Cloudflare Workers도 `npm run build` 후 `wrangler deploy`로 즉시 가능(SSR·이미지 최적화 유지). prerender는 정적화라 `/_vinext/image` 런타임 최적화는 포기(현재 페이지는 미사용이라 무영향)
-
-### 2026-07-23 · by GPT-5 Codex
-
-**한 일 — 프로젝트와 소개 웹사이트 README 보완**
-- 루트 README의 오래된 한국어 단일 지원 표기를 한·영 지원으로 바로잡고, 공개 다운로드 전 베타 준비 상태를 명시
-- 온보딩 이후 프로젝트 자동 발견, 에이전트 상태·업데이트, 오류 복구를 제품 핵심 기능으로 추가
-- 데스크톱 앱의 개발 요구 사항, 실제 설치 E2E, CI 검증 범위와 작업 이력 문서 링크를 보강
-- 웹사이트 README에 Node 요구 버전, 명령별 역할, 파일 구조, 수정 시 동기화 원칙, 렌더링 테스트와 OpenAI Sites 배포 구조를 정리
-
-**검증**
-- 두 README의 명령·지원 범위·배포 설명을 `package.json`, `website/package.json`, CI, Sites 설정, 최신 워크로그와 대조
-- 웹사이트 README에 기록한 페이지·아이콘·공유 이미지·테스트·호스팅 설정 파일의 실제 존재 확인
-- `website/`의 `npm test`: 빌드 및 렌더링 테스트 2 passed
-- `website/`의 `npm run lint` 통과
-
-**다음 할 일**
-- [ ] 깨끗한 macOS·Windows 환경에서 출시 후보를 검증한 뒤 공개 다운로드 링크와 설치 안내 추가
-- [ ] 첫 베타 배포 시 웹사이트 README에 실제 배포 주소와 운영 절차 기록
-
-### 2026-07-22 · by GPT-5 Codex
-
-**한 일 — 출시 검증 자동화와 체크리스트 보강**
-- 실제 공식 배포 파일을 내려받는 격리 설치 E2E를 네트워크 허용 환경에서 실행해 Claude Code와 Codex의 임시 HOME 설치, PATH 반영, 버전 확인까지 검증
-- 소개 웹사이트가 데스크톱 앱 CI에서 빠져 있던 공백을 보완: Ubuntu에서 `npm ci` → 빌드·렌더링 테스트 → ESLint를 실행하는 `website` job 추가
-- `docs/release-checklist.md` 신설: 자동 검증, 깨끗한 macOS/Windows 계정, 네트워크·권한·잘못된 기준 폴더 등 닥터 실패 경로, 미서명 베타와 정식 서명 배포 게이트를 한곳에 정리
-- README 문서 목록에 릴리스 체크리스트 연결
-
-**검증**
-- `cargo test --manifest-path src-tauri/Cargo.toml isolated_install -- --ignored --nocapture`: 2 passed — Claude Code 2.1.217, Codex CLI 0.145.0 설치·검증
-- `cargo test --manifest-path src-tauri/Cargo.toml`: 15 passed, 0 failed, 6 ignored
-- `pnpm build` 통과
-- `website/`의 `npm test`: 빌드 및 렌더링 테스트 2 passed
-- `website/`의 `npm run lint` 통과
-
-**다음 할 일**
-- [ ] `docs/release-checklist.md`에 따라 네트워크 단절·권한 오류·잘못된 기준 폴더 닥터 UI를 실기기에서 확인
-- [ ] Actions가 만든 DMG·NSIS 설치 파일을 깨끗한 macOS 계정과 Windows 기기에서 전체 검증
-- [ ] 미서명 제한 베타 또는 macOS 공증·Windows 코드 서명을 포함한 정식 배포 방식 결정 후 첫 릴리스
-
-### 2026-07-22 · by GPT-5 Codex
-
-**한 일 — 홈베이스와 오류 복구 흐름 보완**
-- 진단·로그인·프로젝트 생성의 원시 오류 표시를 `DoctorCard`로 교체하고 재시도 제공
-- 홈의 에이전트 상태 확인·업데이트 실패도 설정 화면 이동 대신 인라인 닥터로 원인과 재시도 표시
-- 기준 폴더가 없거나 읽을 수 없을 때 빈 프로젝트 목록으로 숨기지 않고 닥터·재시도·다른 폴더 선택 제공
-- 준비된 에이전트가 하나면 홈의 `새 프로젝트`에서 프로젝트 단계로 직행하고, 둘 다 준비됐으면 선택 후 직행
-- 선택 언어를 프로젝트 생성과 첫 대화 명령에 전달해 `CLAUDE.md`/`AGENTS.md` 초보자 안내, Codex 안전 설정 주석, 첫 환영 인사를 한·영으로 생성
-- `agent.rs`·`login.rs`·`editor.rs`·`project.rs`의 사용자에게 노출될 수 있는 기술 오류를 영어 상세 정보로 통일
-- pnpm 11에서 무시되는 `package.json`의 중복 `onlyBuiltDependencies`를 제거하고 기존 `pnpm-workspace.yaml`의 `allowBuilds`만 사용
-- README와 기술 설계를 실제 홈 진입·스캔·영속성·i18n 동작에 맞게 갱신
-
-**검증**
-- `pnpm build` 통과
-- `cargo test --manifest-path src-tauri/Cargo.toml`: 15 passed, 0 failed, 6 ignored
-- `pnpm tauri build --debug --bundles app` 통과, macOS `Hello Agent.app` 번들 생성
-- 언어별 초보자 안내 생성과 존재하지 않는 기준 폴더 오류 분류 테스트 추가
-
-**다음 할 일**
-- [ ] 네트워크 단절·권한 오류·잘못된 기준 폴더를 실기기에서 만들어 닥터 UI 확인
-- [ ] 깨끗한 macOS 계정과 Windows 기기에서 출시 후보 전체 흐름 검증
-- [ ] 코드 서명·배포 방식 결정 후 첫 베타 릴리스
-
-### 2026-07-22 · by GPT-5 Codex
-
-**한 일 — 프로젝트 기억과 에이전트 인계 규칙 보강**
-- 최신 코드와 워크로그를 대조해 다음 우선순위를 정리: ① 진단·로그인·홈 전체에 닥터 적용 ② 재방문 새 프로젝트 흐름 단축 ③ 첫 대화/원시 오류 i18n ④ 프로젝트 스캔 실패 구분 ⑤ 출시 후보 실기기 검증
-- `CLAUDE.md`와 `AGENTS.md`를 최신 홈베이스 구조·코드 지도·검증 명령·비자명한 함정에 맞게 갱신
-- 코드 변경이 없는 분석·결정·검증·외부 작업도 `docs/history.md` 기록 대상임을 시작/작업 중/종료 체크리스트로 명시
-- 두 에이전트 안내 파일을 `.gitignore`에서 제거해 저장소를 통해 공유되도록 변경
-- 상단 `핵심 결정·발견`의 오래된 백엔드 오류·닥터 적용 범위를 실제 코드 기준으로 교정
-
-**다음 할 일**
-- [ ] 진단·로그인·홈의 설정/업데이트 실패에 `DoctorCard` 적용 및 실제 실패 경로 검증
-- [ ] 홈의 `새 프로젝트`에서 준비된 에이전트를 미리 선택하고 완료 단계 단축
-- [ ] 첫 대화 프롬프트와 남은 Rust 한국어 상세 오류 i18n 정리
-- [ ] macOS/Windows 출시 후보 설치 시나리오 검증
-
-### 2026-07-22 · by GPT-5 Codex
-
-**한 일 — 오늘 앱 고도화 내용을 소개 웹사이트에 반영**
-- 메인 앱 미리보기를 에이전트 선택 화면에서 `내 에이전트`·`내 프로젝트` 홈 화면으로 교체
-- 프로젝트 자동 발견, 설치·로그인 상태 확인, 에이전트 업데이트를 소개하는 `설치 후에도` 섹션 추가
-- 이미 설치한 사용자와 재방문 사용자를 설명하도록 히어로·FAQ·검색/Open Graph 설명 갱신
-- 웹사이트 `npm test`(빌드 + 렌더링 테스트)와 `npm run lint` 통과
-
-### 2026-07-22 · by Claude Opus 4.8 (5)
-
-**한 일 — 프로젝트 목록을 앱 기억→디스크 스캔 기반으로 (사용자 지적)**
-- 문제: 홈 목록이 store(앱 기억)에서만 왔음 → 디스크에 폴더가 있어도 앱이 안 만든 것이면 "프로젝트 없음"
-- `project.rs`: `scan_projects(base)` — 기준 폴더 하위에서 에이전트 표식(`.claude`/`CLAUDE.md`→클로드, `AGENTS.md`→코덱스)이 있는 폴더를 발견해 목록화. `default_projects_dir`(기본 Documents). `create_first_project`에 `base` 인자 추가(새 프로젝트가 기준 폴더에 생성)
-- 기준 폴더를 사용자가 지정: `tauri-plugin-dialog` 추가, 홈에 "이 폴더에서 찾는 중 + 폴더 바꾸기"(디렉터리 선택). store에 `baseDir` 저장
-- store.ts: `getBaseDir/setBaseDir/lastOpenedMap`. 목록은 스캔 결과 + store의 최근 사용 시각으로 정렬. "목록에서 지우기"는 제거(목록=디스크 실제 폴더라 의미 안 맞음)
-- **실기기 검증**: store 비운 상태에서 `~/Documents/my-first-project`(AGENTS.md)가 코덱스 프로젝트로 자동 인식·표시. cargo test 12개 + pnpm build 통과
-
-### 2026-07-22 · by Claude Opus 4.8 (4)
-
-**한 일 — 홈 진입 조건 개선 + 레이아웃 수정 (사용자 요청)**
-- 홈 진입 조건: 저장된 프로젝트가 있거나 **에이전트가 이미 설치·로그인돼 있으면** 홈으로(온보딩 위저드 건너뜀). 둘 다 아니면 위저드. `isAnyAgentReady()`가 agent_status로 판정. 실기기: 프로젝트 0인데 claude 준비돼 있어 홈 직행 확인
-- 레이아웃: 헤더 하단 여백이 위저드의 `.steps` margin에만 의존해 홈 뷰에서 패널이 타이틀에 붙던 문제 → `.header{margin-bottom}` + `.steps` top margin 제거로 두 뷰 일관화
-
-### 2026-07-22 · by Claude Opus 4.8 (3)
-
-**한 일 — 고도화: 상주 에이전트 상태 + 업데이트 알림 (홈베이스의 "재방문 이유")**
-- `src-tauri/src/status.rs` 신설 — `agent_status`(설치·버전·로그인, 로컬 빠름) + `latest_agent_version`(네트워크). 최신 버전: Claude=`downloads.claude.ai/.../stable`, Codex=`github.com/.../releases/latest` 리다이렉트 최종 URL에서 semver 추출(api.github.com은 60회/시 제한이라 회피)
-- 홈에 "내 에이전트" 패널(`AgentRow`): 각 에이전트 설치/로그인/업데이트 상태를 한눈에. 미설치·미로그인→"설정하기"(위저드 진단부터, 자동 스킵), 업데이트 가능→"업데이트"(인라인 install_agent). 최신 확인은 백그라운드(느림/오프라인이면 조용히 무시)
-- 프론트 semver 비교(`isNewer`), `detect::agent_version`/`login::is_logged_in` pub(crate) 노출
-- **실기기 검증**: 홈에서 클로드="설치됨·2.1.216"(최신) 정상 렌더. cargo test 11개 + pnpm build 통과
-- **감지 갭 수정**(사용자 지적): OpenAI가 Codex.app→ChatGPT.app 통합으로 CLI 경로 이동 → 코덱스가 "미설치"로 잘못 표시됨. `agent.rs` Codex 후보를 `/Applications/{ChatGPT,Codex}.app/...` 여러 개로 확장. 실기기에서 `ChatGPT.app/.../codex` 0.145.0 감지 확인. 교훈: 앱 번들 경로 단일 하드코딩은 벤더 변경에 취약
-
-**다음 할 일**
-- [ ] 업데이트/설정 실패 시 홈에서 DoctorCard 노출(현재는 설정 화면으로 유도만)
-- [ ] 재방문 "새 프로젝트"에서 에이전트 미리 선택
-- [ ] 첫 대화 프롬프트 한국어 고정(콘텐츠 i18n)
-- [ ] 레시피 외부화(agent.rs → 원격 JSON)
-
-### 2026-07-22 · by Claude Opus 4.8 (2)
-
-**한 일 — 고도화 ②③: 영속성 + 홈베이스("일회성 도구" 탈출)**
-- `docs/architecture.md §3` 재설계 — 단일 선형 위저드 → 뷰 라우팅(홈/위저드) 홈베이스. 앱 실행 시 저장된 프로젝트 있으면 홈, 없으면 온보딩 위저드
-- 영속성: `tauri-plugin-store` 추가(Rust 등록 + `store:default` capability + JS `@tauri-apps/plugin-store`). `src/store.ts`가 프로젝트 목록을 앱 데이터 디렉터리 JSON에 저장(경로·에이전트·이름·생성/최근사용). 에이전트 설치·로그인 상태는 저장 안 하고 매번 실시간 감지
-- `App.tsx`에 `view` 라우팅 + `HomeView`(프로젝트 카드: 열기/목록에서 지우기, 새 프로젝트, 최근순 정렬). `ProjectStep`이 생성 시 `saveProject`, 졸업식에 "내 프로젝트 →" 링크
-- **실기기 검증 완료**: store에 샘플 심고 재실행 → 홈 화면·프로젝트 카드 정상 렌더 확인. cargo test 10개 + pnpm build 통과. 테스트 데이터 정리함
-- 주의: 앱 바이너리명이 rename 후 **`hello-agent`** (pgrep/스크린샷 시 옛 이름 agent-starter 아님)
-
-**다음 할 일**
-- [ ] 상주 닥터(홈에서 재진단) + 에이전트 업데이트 알림 — 홈베이스의 "재방문 이유" 완성
-- [ ] 재방문 "새 프로젝트"에서 에이전트 미리 선택(현재는 위저드가 install/login만 자동 스킵)
-- [ ] 첫 대화 프롬프트 한국어 고정(콘텐츠 i18n)
-- [ ] 레시피 외부화(agent.rs → 원격 JSON)
-
-### 2026-07-22 · by Claude Opus 4.8
-
-**한 일 — 고도화 착수(기술부채 정리 ①): 백엔드 에러 구조화**
-- `src-tauri/src/error.rs` 신설 — `AppError { kind, detail }` + `ErrorKind`(network/checksum/not-found/permission/disk/generic). 모든 커맨드가 `Result<T, String>` → `Result<T, AppError>`로 전환
-- 원인을 아는 지점은 명시적 kind(예: curl 실패→network, tar 실패→checksum), io 에러는 `AppError::classify`로 원문(영어) 기반 분류. **에러 detail이 더는 한국어 프로즈가 아니라 영어 기술 텍스트** → 영어 모드에서 "자세한 내용"도 영어
-- 프론트 `doctor.ts`: `diagnoseError`(kind 우선, generic이면 로그 정규식 보완) + `toAppError`(객체/문자열 수용). `DoctorCard`가 문자열 대신 `AppError`를 받음
-- 검증: cargo test 10개 통과(에러 분류 단위테스트 포함), pnpm build 통과. 해피패스(Ok) 구조 불변이라 런타임 리스크 낮음, 실제 에러 경로는 실기기 검증 대기
-
-**다음 할 일**
-- [ ] 영속성 계층(tauri-plugin-store) → 홈베이스의 전제
-- [ ] 홈 화면 + 재방문 흐름(일회성 탈출) — App.tsx를 뷰 라우팅으로
-- [ ] 상주 닥터 + 에이전트 업데이트 알림
-- [ ] 첫 대화 프롬프트가 한국어 고정 — 영어 사용자에게 한국어 인사(콘텐츠 i18n, 별건)
-- [ ] 레시피 외부화(agent.rs → 원격 JSON)
-
-### 2026-07-21 · by GPT-5 Codex
-
-**한 일**
-- GitHub 저장소 About 설명을 비개발자용 Claude Code·Codex 설치 도우미라는 제품 성격이 드러나도록 작성
-- 제품·기술 스택·지원 플랫폼 중심의 GitHub 토픽 13개 등록
-
-### 2026-07-21 · by GPT-5 Codex
-
-**한 일**
-- 웹사이트 헤더의 코랄 브랜드 마크를 `brand/hello-agent-mark.svg` 정식 원본으로 제작
-- Tauri 아이콘 생성기를 사용해 macOS `.icns`, Windows `.ico`, PNG·Appx 아이콘 세트를 새 브랜드 마크로 교체
-- 웹사이트에 일반 파비콘(`app/icon.png`)과 Apple 터치 아이콘(`app/apple-icon.png`) 적용
-
-**다음 할 일**
-- [ ] 실제 macOS Dock·Windows 시작 메뉴에서 작은 크기 가독성 확인
-
-### 2026-07-21 · by Claude Opus 4.8
-
-**한 일**
-- 경량 i18n(한/영) 도입 — react-i18next 없이 자체 Context/훅(`useI18n`), `locales/{ko,en}.ts` 리소스 분리, 헤더 언어 토글, 시스템 언어 초기값 + localStorage 저장. 실기기 영어 렌더링 확인
-- M3 닥터 MVP — 에러·로그를 프론트에서 패턴 해석해 초보자용 원인·해결책을 i18n으로 표시 + 재시도(`DoctorCard`, `src/doctor.ts`). network/checksum/notfound/permission/disk 분류, 설치·졸업식 단계 적용, 패턴 매칭 6/6 검증
-
-**다음 할 일**
-- [ ] 로그인 단계에도 닥터 적용(네트워크 에러) — 현재 설치·졸업식만
-- [ ] 백엔드 에러 i18n — Rust 에러 한국어 하드코딩, 영어 모드 "자세한 내용" 원문은 한국어. 완전 대응은 에러 구조화 필요
-- [ ] macOS `.dmg` / Windows 실기기 설치 테스트
-- [ ] 정식 배포 — 코드 서명, Intel용 universal 빌드
-
-### 2026-07-21 · by GPT-5 Codex
-
-**한 일**
-- `website/`에 Hello, Agent 소개용 독립 랜딩 페이지 구축
-- 앱의 Pretendard·중성 배경·코랄 포인트를 이어받은 반응형 디자인 구현
-- 실제 제품 선택 화면을 HTML/CSS로 재현하고 6단계 흐름·안전 원칙·지원 에이전트·FAQ·베타 CTA 구성
-- 링크 공유용 전용 OG 이미지와 요청 호스트 기반 Open Graph·X 메타데이터 추가
-- OpenAI Sites/Cloudflare Worker 호환 배포 설정과 서버 렌더링 테스트 정리
-- 헤더를 sticky 내비게이션으로 변경하고 모바일에서도 섹션 메뉴가 유지되도록 개선
-- `npm test`(배포 빌드 + 렌더링)와 `npm run lint` 통과
-
-**다음 할 일**
-- [ ] 사용자 승인 후 Sites에 첫 비공개 버전 배포
-- [ ] 실제 베타 릴리스가 나오면 GitHub 진행 상황 CTA를 OS별 다운로드 버튼으로 교체
-
-### 2026-07-21 · by Claude Opus 4.8
-
-**한 일**
-- M2: 에이전트 추상화(`agent.rs`) + Codex 조기 편입, 요금제/로그인 방식 안내, 안전 프리셋(설정 파일 수준)
-- Codex 데스크톱 앱 번들 CLI 감지 추가 (`/Applications/Codex.app/...`)
-- 편집기(커서·VS Code) 감지 → "그 편집기로 폴더 열기" + **에이전트 확장 자동 설치**
-- 첫 프로젝트 기본 이름 `my-first-project`로, 졸업식 "다음에 이렇게" 안내를 파일(.md) 대신 앱 UI로 이동
-- 프로젝트명 변경: `agent-starter` → **Hello, Agent** (레포 rename `hello-agent`, 번들 `Hello Agent`, 식별자 `com.wonseokhan.helloagent`). 리모트 URL·CI 배지·내부 문자열까지 일괄 반영
-- CI에 `build-macos` 잡 추가 → macOS `.dmg` + Windows `.exe` 둘 다 Actions artifact로 생성 (그린 확인)
-- 이 워크로그(`docs/history.md`) 도입
-
-**다음 할 일**
-- [ ] macOS `.dmg` 실제 설치 테스트 (Actions `macos-installer` artifact → 설치 → "확인되지 않은 개발자" 흐름 체감)
-- [ ] 언어 선택(i18n 한/영) — UI 문구 하드코딩 상태, 이름은 고정하고 텍스트만 리소스 분리
-- [ ] Windows 실기기 검증 — Codex 앱 감지·편집기 확장(.cmd 경로)은 macOS로만 검증됨
-- [ ] 미로그인→로그인 실플로우(클로드) — 키체인 전역이라 이 머신 재현 불가, 별도 계정/VM 필요
-- [ ] M3 닥터 (에러 해석·자동 수정)
-- [ ] 정식 배포 — 코드 서명 결정, Intel용 universal 빌드, GitHub Release
-
-### 2026-07-16 · by Claude Fable 5
-
-**한 일**
-- Tauri 2 + React 19 스캐폴드, 기술 설계 문서·다이어그램
-- M0 검증: 환경 감지 / 무인 설치(+PATH 반영, 격리 E2E) / 브라우저 로그인 — 4가지 가정 전부 통과, Electron 전환 불필요
-- M1 위저드 완성: 진단 → 설치 → 로그인 → 첫 프로젝트 → 졸업식(첫 대화)
-- CI 구축(macOS/Windows 테스트 + 격리 E2E + Windows 번들). PSModulePath 함정·로그인 자동 승인 등 실전 버그 수정
-- UI 디자인 패스(Pretendard, 코랄 액센트). Windows 실기기 로그인 플로우 확인
-
-**다음 할 일** → 2026-07-21 엔트리로 이어짐
+2026-11-11 워크로그는 `docs/archive/history-2026-11.md`로 이동했다.

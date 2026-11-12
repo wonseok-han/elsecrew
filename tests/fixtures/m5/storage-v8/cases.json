@@ -1,0 +1,268 @@
+{
+  "migrationMatrix": {
+    "admissiblePairs": [
+      "ready+absent", "pending+absent", "pending+pending", "pending+failed"
+    ],
+    "rejectedPairs": ["pending+attempting"],
+    "allowedMaintenanceStates": ["succeeded", "failed"],
+    "rejectedMaintenanceStates": ["pending", "running"],
+    "requiredEmptyV7Tables": [
+      "ledger_compaction_prefixes", "frozen_message_sources",
+      "ledger_compaction_delete_authority"
+    ],
+    "newTableInitialCounts": { "frozen_operation_sources": 0 },
+    "historyBackfillRows": 0
+  },
+  "validFrozenOperationSources": [
+    {
+      "name": "project operation frozen from exact live event",
+      "value": {
+        "operationId": "op_project_1",
+        "sourceEventRowid": 1,
+        "sourceEventId": "evt_project_1",
+        "requestId": null,
+        "aggregateType": "project",
+        "aggregateId": "project_1",
+        "aggregateSequence": 1,
+        "eventType": "project.upserted",
+        "payloadSchemaVersion": 1,
+        "canonicalPayloadJson": "{\"canonical_path\":\"/fixture/v6\",\"project_id\":\"project_1\"}",
+        "canonicalPayloadDigest": "5cfd7717fe69e1c41a58a3cea244fe2b1a6f7a844204721e8e572851837d69da",
+        "eventTimestamp": "2026-08-28T13:00:00Z",
+        "canonicalRecordJson": "{\"aggregateId\":\"project_1\",\"aggregateSequence\":1,\"aggregateType\":\"project\",\"canonicalPayloadDigest\":\"5cfd7717fe69e1c41a58a3cea244fe2b1a6f7a844204721e8e572851837d69da\",\"canonicalPayloadJson\":\"{\\\"canonical_path\\\":\\\"/fixture/v6\\\",\\\"project_id\\\":\\\"project_1\\\"}\",\"eventTimestamp\":\"2026-08-28T13:00:00Z\",\"eventType\":\"project.upserted\",\"frozenAt\":\"2026-09-01T10:00:00Z\",\"operationId\":\"op_project_1\",\"payloadSchemaVersion\":1,\"recordSchemaVersion\":1,\"requestId\":null,\"sourceEventId\":\"evt_project_1\",\"sourceEventRowid\":1}",
+        "recordDigest": "cf85864b3f8c2ae5f28111c2f1a72dd44cff1a678136f44db48aab421ccd5b57",
+        "frozenAt": "2026-09-01T10:00:00Z"
+      }
+    }
+  ],
+  "invalidFrozenOperationMutations": [
+    { "name": "operation identity tamper", "path": ["operationId"], "replacement": "op_other" },
+    { "name": "source rowid tamper", "path": ["sourceEventRowid"], "replacement": 2 },
+    { "name": "source event id tamper", "path": ["sourceEventId"], "replacement": "evt_other" },
+    { "name": "request id tamper", "path": ["requestId"], "replacement": "request_other" },
+    { "name": "aggregate type tamper", "path": ["aggregateType"], "replacement": "app_instance" },
+    { "name": "aggregate id tamper", "path": ["aggregateId"], "replacement": "project_other" },
+    { "name": "aggregate sequence tamper", "path": ["aggregateSequence"], "replacement": 2 },
+    { "name": "event type tamper", "path": ["eventType"], "replacement": "project.deleted" },
+    { "name": "payload schema tamper", "path": ["payloadSchemaVersion"], "replacement": 2 },
+    { "name": "payload tamper", "path": ["canonicalPayloadJson"], "replacement": "{}" },
+    { "name": "payload digest tamper", "path": ["canonicalPayloadDigest"], "replacement": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+    { "name": "event timestamp tamper", "path": ["eventTimestamp"], "replacement": "2026-09-01T10:00:00Z" },
+    { "name": "canonical record tamper", "path": ["canonicalRecordJson"], "replacement": "{}" },
+    { "name": "record digest tamper", "path": ["recordDigest"], "replacement": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+    { "name": "frozen timestamp tamper", "path": ["frozenAt"], "replacement": "not-a-timestamp" }
+  ],
+  "bindingTamperCases": [
+    "receiptEventId", "receiptEventType", "receiptEventTimestamp",
+    "payloadAndDigestTogether", "aggregateAndOperationTogether",
+    "sourceIndexIdentity", "receiptOnly", "appInstance"
+  ],
+  "runtimeAuthorityCases": {
+    "valid": [
+      {
+        "name": "live event uses live source and receipt",
+        "value": {
+          "aggregateType": "project",
+          "eventPresent": true, "liveSourceIndexPresent": true,
+          "frozenOperationPresent": false, "receiptPresent": true,
+          "liveSourceMatches": true, "frozenOperationMatches": false,
+          "receiptMatches": true, "chatPredecessorSource": null
+        }
+      },
+      {
+        "name": "deleted event uses frozen operation and receipt",
+        "value": {
+          "aggregateType": "chat",
+          "eventPresent": false, "liveSourceIndexPresent": false,
+          "frozenOperationPresent": true, "receiptPresent": true,
+          "liveSourceMatches": false, "frozenOperationMatches": true,
+          "receiptMatches": true, "chatPredecessorSource": "frozenOperationCanonicalPayload"
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "name": "receipt only cannot authorize deleted event",
+        "value": {
+          "aggregateType": "chat",
+          "eventPresent": false, "liveSourceIndexPresent": false,
+          "frozenOperationPresent": false, "receiptPresent": true,
+          "liveSourceMatches": false, "frozenOperationMatches": false,
+          "receiptMatches": true, "chatPredecessorSource": "receipt"
+        }
+      },
+      {
+        "name": "live event missing source index",
+        "value": {
+          "aggregateType": "project",
+          "eventPresent": true, "liveSourceIndexPresent": false,
+          "frozenOperationPresent": true, "receiptPresent": true,
+          "liveSourceMatches": false, "frozenOperationMatches": true,
+          "receiptMatches": true, "chatPredecessorSource": null
+        }
+      },
+      {
+        "name": "deleted chat cannot omit frozen predecessor payload",
+        "value": {
+          "aggregateType": "chat",
+          "eventPresent": false, "liveSourceIndexPresent": false,
+          "frozenOperationPresent": true, "receiptPresent": true,
+          "liveSourceMatches": false, "frozenOperationMatches": true,
+          "receiptMatches": true, "chatPredecessorSource": null
+        }
+      }
+    ]
+  },
+  "validCursorTransitionsV2": [
+    {
+      "name": "starts freeze operations",
+      "previous": null,
+      "next": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 0, "scanExhausted": false },
+      "evidence": null
+    },
+    {
+      "name": "bounded source progress",
+      "previous": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 0, "scanExhausted": false },
+      "next": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 2, "scanExhausted": false },
+      "evidence": { "rowsInBatch": 2, "canonicalPayloadBytes": 1024 }
+    },
+    {
+      "name": "exhausted advances one phase",
+      "previous": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 2, "scanExhausted": true },
+      "next": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeMessages", "afterEventRowid": 0, "scanExhausted": false },
+      "evidence": null
+    }
+  ],
+  "invalidCursorTransitionsV2": [
+    {
+      "name": "caller cannot forge exact-empty exhaustion",
+      "previous": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 2, "scanExhausted": false },
+      "next": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 2, "scanExhausted": true },
+      "evidence": { "rowsInBatch": 0, "canonicalPayloadBytes": 0, "exactEmptyQuery": true }
+    },
+    {
+      "name": "batch over one hundred",
+      "previous": { "schemaVersion": 2, "cutoffEventRowid": 200, "phase": "freezeOperations", "afterEventRowid": 0, "scanExhausted": false },
+      "next": { "schemaVersion": 2, "cutoffEventRowid": 200, "phase": "freezeOperations", "afterEventRowid": 101, "scanExhausted": false },
+      "evidence": { "rowsInBatch": 101, "canonicalPayloadBytes": 1000 }
+    },
+    {
+      "name": "payload over one mebibyte",
+      "previous": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 0, "scanExhausted": false },
+      "next": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 1, "scanExhausted": false },
+      "evidence": { "rowsInBatch": 1, "canonicalPayloadBytes": 1048577 }
+    },
+    {
+      "name": "skips verify operations",
+      "previous": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "deletePrefix", "afterEventRowid": 6, "scanExhausted": true },
+      "next": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "verifyEquivalence", "afterEventRowid": 0, "scanExhausted": false },
+      "evidence": null
+    }
+  ],
+  "validLifecycleTransitionsV2": [
+    {
+      "name": "pending arm commits running sentinel",
+      "operation": "arm",
+      "previous": { "jobId": "compact_v8", "state": "pending", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 0, "scanExhausted": false }, "authorityCount": 0, "operationsVerified": false, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
+      "next": { "jobId": "compact_v8", "state": "running", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 0, "scanExhausted": false }, "authorityCount": 0, "operationsVerified": false, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
+      "evidence": null
+    },
+    {
+      "name": "batch commit empties authority and advances cursor",
+      "operation": "batchSuccess",
+      "previous": { "jobId": "compact_v8", "state": "running", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "deletePrefix", "afterEventRowid": 0, "scanExhausted": false }, "authorityCount": 2, "operationsVerified": false, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
+      "next": { "jobId": "compact_v8", "state": "pending", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "deletePrefix", "afterEventRowid": 2, "scanExhausted": false }, "authorityCount": 0, "operationsVerified": false, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
+      "evidence": { "rowsInBatch": 2, "canonicalPayloadBytes": 0 }
+    },
+    {
+      "name": "cancel before arm leaves pending unchanged",
+      "operation": "cancelBeforeArm",
+      "previous": { "jobId": "compact_v8", "state": "pending", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 0, "scanExhausted": false }, "authorityCount": 0, "operationsVerified": false, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
+      "next": { "jobId": "compact_v8", "state": "pending", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 0, "scanExhausted": false }, "authorityCount": 0, "operationsVerified": false, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
+      "evidence": null
+    },
+    {
+      "name": "cancel after arm leaves running sentinel",
+      "operation": "cancelAfterArm",
+      "previous": { "jobId": "compact_v8", "state": "running", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 0, "scanExhausted": false }, "authorityCount": 0, "operationsVerified": false, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
+      "next": { "jobId": "compact_v8", "state": "running", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 0, "scanExhausted": false }, "authorityCount": 0, "operationsVerified": false, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
+      "evidence": null
+    },
+    {
+      "name": "uncertain commit may leave running sentinel",
+      "operation": "commitUncertain",
+      "previous": { "jobId": "compact_v8", "state": "running", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 0, "scanExhausted": false }, "authorityCount": 0, "operationsVerified": false, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
+      "next": { "jobId": "compact_v8", "state": "running", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 0, "scanExhausted": false }, "authorityCount": 0, "operationsVerified": false, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
+      "evidence": null
+    },
+    {
+      "name": "uncertain commit may observe committed pending cursor",
+      "operation": "commitUncertain",
+      "previous": { "jobId": "compact_v8", "state": "running", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "deletePrefix", "afterEventRowid": 0, "scanExhausted": false }, "authorityCount": 2, "operationsVerified": false, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
+      "next": { "jobId": "compact_v8", "state": "pending", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "deletePrefix", "afterEventRowid": 2, "scanExhausted": false }, "authorityCount": 0, "operationsVerified": false, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
+      "evidence": { "rowsInBatch": 2, "canonicalPayloadBytes": 0 }
+    }
+  ],
+  "invalidLifecycleMutationsV2": [
+    { "name": "arm creates authority", "caseIndex": 0, "path": ["next", "authorityCount"], "replacement": 1 },
+    { "name": "batch leaves authority", "caseIndex": 1, "path": ["next", "authorityCount"], "replacement": 1 },
+    { "name": "cancel after arm clears sentinel", "caseIndex": 3, "path": ["next", "state"], "replacement": "pending" }
+  ],
+  "invalidLifecycleTransitionsV2": [
+    {
+      "name": "caller cannot mint final verification booleans",
+      "operation": "complete",
+      "previous": { "jobId": "compact_v8", "state": "pending", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "finalize", "afterEventRowid": 6, "scanExhausted": true }, "authorityCount": 0, "operationsVerified": false, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
+      "next": { "jobId": "compact_v8", "state": "succeeded", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "finalize", "afterEventRowid": 6, "scanExhausted": true }, "authorityCount": 0, "operationsVerified": true, "equivalenceVerified": true, "failureKind": null, "completedAt": "2026-09-01T10:10:00Z" },
+      "evidence": null
+    }
+  ],
+  "privateEquivalenceCasesV2": {
+    "valid": { "rowsInBatch": 100, "operationsVerified": true, "baselineTailBefore": true, "anchorTailAfter": true, "preservedArtifactsByteExact": true, "receiptReplayEquivalent": true, "namespaceDecisionsEquivalent": true, "frozenMessageIdsReserved": true, "authorityEmpty": true },
+    "invalidFields": ["operationsVerified", "baselineTailBefore", "anchorTailAfter", "preservedArtifactsByteExact", "receiptReplayEquivalent", "namespaceDecisionsEquivalent", "frozenMessageIdsReserved", "authorityEmpty"],
+    "invalidRowsInBatch": [0, 101]
+  },
+  "namespaceReplay": [
+    { "namespace": "legacy", "duplicate": "duplicateNoOp", "conflict": "conflict" },
+    { "namespace": "actualAgent", "duplicate": "duplicateNoOp", "conflict": "conflict" },
+    { "namespace": "recovery", "duplicate": "duplicateNoOp", "conflict": "conflict" }
+  ],
+  "preservedV7MessageReuse": {
+    "deletedIntroducingEvent": "frozenMessageIdentityRemainsReserved",
+    "newIntroduction": "uniqueConstraintRejected"
+  },
+  "queryPlans": [
+    {
+      "name": "sourceEventRowid",
+      "sql": "EXPLAIN QUERY PLAN SELECT operation_id FROM frozen_operation_sources WHERE source_event_rowid=1",
+      "detail": "SEARCH frozen_operation_sources USING COVERING INDEX frozen_operation_sources_source_rowid (source_event_rowid=?)"
+    },
+    {
+      "name": "operationId",
+      "sql": "EXPLAIN QUERY PLAN SELECT source_event_rowid FROM frozen_operation_sources WHERE operation_id='op_project_1'",
+      "detail": "SEARCH frozen_operation_sources USING PRIMARY KEY (operation_id=?)"
+    },
+    {
+      "name": "aggregateTuple",
+      "sql": "EXPLAIN QUERY PLAN SELECT operation_id FROM frozen_operation_sources WHERE aggregate_type='project' AND aggregate_id='project_1' AND aggregate_sequence=1",
+      "detail": "SEARCH frozen_operation_sources USING COVERING INDEX frozen_operation_sources_aggregate (aggregate_type=? AND aggregate_id=? AND aggregate_sequence=?)"
+    }
+  ],
+  "invalidPreflightMutations": [
+    { "name": "compacted predecessor admitted", "path": ["requiredLedgerState"], "replacement": "any" },
+    { "name": "attempting admitted", "path": ["admissibleMaterializationPairs", "0"], "replacement": "pending+attempting" },
+    { "name": "active maintenance admitted", "path": ["maintenanceRequirement"], "replacement": "any" },
+    { "name": "preflight after ddl", "path": ["timing"], "replacement": "afterDdl" }
+  ],
+  "invalidPolicyMutations": [
+    { "name": "receipt becomes source", "target": "frozenOperationSources", "path": ["receiptRole"], "replacement": "sourceAuthority" },
+    { "name": "request id compared", "target": "runtimeSourceAuthority", "path": ["requestIdComparison"], "replacement": "included" },
+    { "name": "receipt predecessor", "target": "runtimeSourceAuthority", "path": ["chatPredecessor"], "replacement": "receipt" },
+    { "name": "product delete enabled", "target": "compactionV2", "path": ["activation", "actualDeleteEnabled"], "replacement": true },
+    { "name": "unbounded batch", "target": "compactionV2", "path": ["cursor", "maxRowsPerBatch"], "replacement": 1000 },
+    { "name": "caller receives exhaustion authority", "target": "compactionV2", "path": ["cursor", "scanExhaustedProofBoundary"], "replacement": "publicJsonWitness" },
+    { "name": "public complete may finalize", "target": "compactionV2", "path": ["lifecycle", "publicCompleteTransition"], "replacement": "allowed" },
+    { "name": "caller boolean becomes verification authority", "target": "compactionV2", "path": ["operationVerification", "publicBooleanAuthority"], "replacement": "allowed" },
+    { "name": "private durable state exposed as public input", "target": "compactionV2", "path": ["privateDurableState", "publicInput"], "replacement": "allowed" }
+  ]
+}

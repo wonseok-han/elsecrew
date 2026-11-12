@@ -1,0 +1,339 @@
+{
+  "migrationMatrix": {
+    "jobStates": ["pending", "attempting", "failed"],
+    "v5Phases": [
+      "receipts", "messages", "workspaces", "baselines", "verifySource",
+      "verifyProjects", "verifyChats", "verifyRuns", "verifyLocks", "verifyAppInstances",
+      "verifyReceipts", "verifyMessages", "verifyWorkspaces", "verifyBaselines"
+    ],
+    "presentJobMapping": "indexSourceZeroUnexhausted",
+    "stateIdentityTimestampsFailureEvidence": "preserve",
+    "absentMappings": [
+      { "from": "ready+absent", "to": "pending+absent" },
+      { "from": "pending+absent", "to": "pending+absent" }
+    ],
+    "historyBackfillRows": 0
+  },
+  "phaseOrder": [
+    "indexSource", "verifySourceIndex",
+    "receipts", "messages", "workspaces", "baselines", "verifySource",
+    "verifyProjects", "verifyChats", "verifyRuns", "verifyLocks", "verifyAppInstances",
+    "verifyReceipts", "verifyMessages", "verifyWorkspaces", "verifyBaselines"
+  ],
+  "sourceIndex": {
+    "columns": [
+      "event_rowid", "event_id", "operation_id", "aggregate_type", "aggregate_id",
+      "aggregate_sequence", "introduced_message_id", "chat_durable_sequence",
+      "chat_snapshot_message_id"
+    ],
+    "sourceEvents": [
+      {
+        "name": "project source",
+        "eventRowid": 1,
+        "event": {
+          "event_id": "evt_project_1",
+          "operation_id": "op_project_1",
+          "request_id": null,
+          "aggregate_type": "project",
+          "aggregate_id": "project_1",
+          "aggregate_sequence": 1,
+          "event_type": "project.upserted",
+          "payload_schema_version": 1,
+          "canonical_json_payload": "{\"canonical_path\":\"/fixture/v6\",\"project_id\":\"project_1\"}",
+          "timestamp": "2026-08-28T13:00:00Z"
+        }
+      },
+      {
+        "name": "chat source with public message",
+        "eventRowid": 2,
+        "event": {
+          "event_id": "evt_chat_1",
+          "operation_id": "op_chat_1",
+          "request_id": null,
+          "aggregate_type": "chat",
+          "aggregate_id": "chat_1",
+          "aggregate_sequence": 1,
+          "event_type": "chat.upserted",
+          "payload_schema_version": 1,
+          "canonical_json_payload": "{\"durable_event_sequence\":1,\"last_message\":{\"schemaVersion\":1,\"messageId\":\"message_a\",\"chatId\":\"chat_1\",\"taskId\":\"task_1\",\"worktreeId\":\"worktree_1\",\"eventSequence\":1,\"kind\":\"user\",\"roleId\":null,\"runId\":null,\"text\":\"A\",\"createdAt\":\"2026-08-28T13:00:01Z\"}}",
+          "timestamp": "2026-08-28T13:00:01Z"
+        }
+      },
+      {
+        "name": "project source revision",
+        "eventRowid": 3,
+        "event": {
+          "event_id": "evt_project_2",
+          "operation_id": "op_project_2",
+          "request_id": null,
+          "aggregate_type": "project",
+          "aggregate_id": "project_1",
+          "aggregate_sequence": 2,
+          "event_type": "project.upserted",
+          "payload_schema_version": 1,
+          "canonical_json_payload": "{\"canonical_path\":\"/fixture/v6\",\"project_id\":\"project_1\"}",
+          "timestamp": "2026-08-28T13:00:02Z"
+        }
+      },
+      {
+        "name": "chat source repeats message A",
+        "eventRowid": 4,
+        "event": {
+          "event_id": "evt_chat_2",
+          "operation_id": "op_chat_2",
+          "request_id": null,
+          "aggregate_type": "chat",
+          "aggregate_id": "chat_1",
+          "aggregate_sequence": 2,
+          "event_type": "chat.upserted",
+          "payload_schema_version": 1,
+          "canonical_json_payload": "{\"durable_event_sequence\":1,\"last_message\":{\"schemaVersion\":1,\"messageId\":\"message_a\",\"chatId\":\"chat_1\",\"taskId\":\"task_1\",\"worktreeId\":\"worktree_1\",\"eventSequence\":1,\"kind\":\"user\",\"roleId\":null,\"runId\":null,\"text\":\"A\",\"createdAt\":\"2026-08-28T13:00:01Z\"}}",
+          "timestamp": "2026-08-28T13:00:03Z"
+        }
+      },
+      {
+        "name": "chat source null snapshot",
+        "eventRowid": 5,
+        "event": {
+          "event_id": "evt_chat_3",
+          "operation_id": "op_chat_3",
+          "request_id": null,
+          "aggregate_type": "chat",
+          "aggregate_id": "chat_1",
+          "aggregate_sequence": 3,
+          "event_type": "chat.upserted",
+          "payload_schema_version": 1,
+          "canonical_json_payload": "{\"durable_event_sequence\":1,\"last_message\":null}",
+          "timestamp": "2026-08-28T13:00:04Z"
+        }
+      },
+      {
+        "name": "chat source introduces message B",
+        "eventRowid": 6,
+        "event": {
+          "event_id": "evt_chat_4",
+          "operation_id": "op_chat_4",
+          "request_id": null,
+          "aggregate_type": "chat",
+          "aggregate_id": "chat_1",
+          "aggregate_sequence": 4,
+          "event_type": "chat.upserted",
+          "payload_schema_version": 1,
+          "canonical_json_payload": "{\"durable_event_sequence\":2,\"last_message\":{\"schemaVersion\":1,\"messageId\":\"message_b\",\"chatId\":\"chat_1\",\"taskId\":\"task_1\",\"worktreeId\":\"worktree_1\",\"eventSequence\":2,\"kind\":\"role\",\"roleId\":\"coding\",\"runId\":\"run_1\",\"text\":\"B\",\"createdAt\":\"2026-08-28T13:00:05Z\"}}",
+          "timestamp": "2026-08-28T13:00:05Z"
+        }
+      }
+    ],
+    "validRows": [
+      {
+        "name": "project source without message",
+        "value": [1, "evt_project_1", "op_project_1", "project", "project_1", 1, null, null, null]
+      },
+      {
+        "name": "chat source introduces message A",
+        "value": [2, "evt_chat_1", "op_chat_1", "chat", "chat_1", 1, "message_a", 1, "message_a"]
+      },
+      {
+        "name": "chat source repeats message A without introducing it",
+        "value": [4, "evt_chat_2", "op_chat_2", "chat", "chat_1", 2, null, 1, "message_a"]
+      },
+      {
+        "name": "chat source keeps durable state with null snapshot",
+        "value": [5, "evt_chat_3", "op_chat_3", "chat", "chat_1", 3, null, 1, null]
+      },
+      {
+        "name": "chat source introduces message B",
+        "value": [6, "evt_chat_4", "op_chat_4", "chat", "chat_1", 4, "message_b", 2, "message_b"]
+      }
+    ],
+    "invalidBindingFields": [
+      "eventRowid", "eventId", "operationId", "aggregateType", "aggregateId",
+      "aggregateSequence", "introducedMessageId", "chatDurableSequence",
+      "chatSnapshotMessageId", "crossEventMix"
+    ],
+    "duplicateConflicts": [
+      "event_rowid", "event_id", "operation_id", "aggregateTuple", "introduced_message_id"
+    ],
+    "mutationGuards": ["insert", "update", "delete"],
+    "validTransitions": [
+      { "name": "first message A from synthetic zero", "currentEventRowid": 2, "predecessorEventRowid": null, "lookup": "syntheticZero" },
+      { "name": "repeat message A", "currentEventRowid": 4, "predecessorEventRowid": 2, "lookup": "indexedExactPredecessor" },
+      { "name": "null snapshot keeps durable state", "currentEventRowid": 5, "predecessorEventRowid": 4, "lookup": "indexedExactPredecessor" },
+      { "name": "second message B after null snapshot", "currentEventRowid": 6, "predecessorEventRowid": 5, "lookup": "indexedExactPredecessor" }
+    ],
+    "invalidTransitions": [
+      "durableDecrease", "durableJump", "increaseWithoutValidTeamMessage",
+      "unchangedWithChangedSnapshotMessageId", "doubleIntroduction",
+      "wrongMessageEventSequence", "wrongMessageChatId", "wrongIntroducedMessageId",
+      "unchangedSnapshotWrongChatId", "unchangedSnapshotWrongEventSequence",
+      "predecessorSnapshotWrongChatId", "predecessorSnapshotWrongEventSequence",
+      "missingExactPredecessorSourceIndex", "rawPredecessorEventFallback",
+      "illegalFirstDurableJump", "scanOrSortPredecessorLookup"
+    ]
+  },
+  "queryPlans": [
+    {
+      "name": "indexSource",
+      "sql": "EXPLAIN QUERY PLAN SELECT rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,canonical_json_payload FROM events WHERE rowid>0 AND rowid<=20 ORDER BY rowid LIMIT 100",
+      "detail": "SEARCH events USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)"
+    },
+    {
+      "name": "verifySourceIndex",
+      "sql": "EXPLAIN QUERY PLAN SELECT event_rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,introduced_message_id,chat_durable_sequence,chat_snapshot_message_id FROM event_source_index WHERE event_rowid>0 AND event_rowid<=20 ORDER BY event_rowid LIMIT 100",
+      "detail": "SEARCH event_source_index USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)"
+    },
+    {
+      "name": "latestAggregate",
+      "sql": "EXPLAIN QUERY PLAN SELECT event_rowid FROM event_source_index WHERE aggregate_type='project' AND aggregate_id='project_1' ORDER BY event_rowid DESC LIMIT 1",
+      "detail": "SEARCH event_source_index USING COVERING INDEX event_source_index_aggregate_latest (aggregate_type=? AND aggregate_id=?)"
+    },
+    {
+      "name": "introducedMessageIdentity",
+      "sql": "EXPLAIN QUERY PLAN SELECT event_rowid FROM event_source_index WHERE introduced_message_id='message_a'",
+      "detail": "SEARCH event_source_index USING COVERING INDEX event_source_index_message_unique (introduced_message_id=?)"
+    },
+    {
+      "name": "indexedPredecessor",
+      "sql": "EXPLAIN QUERY PLAN SELECT event_rowid,chat_durable_sequence,chat_snapshot_message_id FROM event_source_index WHERE aggregate_type='chat' AND aggregate_id='chat_1' AND aggregate_sequence=3",
+      "detail": "SEARCH event_source_index USING INDEX sqlite_autoindex_event_source_index_3 (aggregate_type=? AND aggregate_id=? AND aggregate_sequence=?)"
+    },
+    {
+      "name": "payloadByRowid",
+      "sql": "EXPLAIN QUERY PLAN SELECT canonical_json_payload FROM events WHERE rowid=1",
+      "detail": "SEARCH events USING INTEGER PRIMARY KEY (rowid=?)"
+    }
+  ],
+  "workspaceProvenance": {
+    "projectId": "project_1",
+    "canonicalPayload": "{\"canonical_path\":\"/fixture/v6\",\"project_id\":\"project_1\"}",
+    "payloadBytes": 57,
+    "maxPayloadBytes": 1048576,
+    "comparison": "rustExactCanonicalProjectPayloadAndWorkspaceProjectId",
+    "removalsLegal": false,
+    "stopWhen": "aggregateRemovalOrTombstoneBecomesLegalUntilSourceIndexSemanticsAreVersioned"
+  },
+  "reopenPairs": {
+    "valid": [
+      { "name": "ready absent", "value": { "materializationState": "ready", "job": null } },
+      { "name": "pending absent", "value": { "materializationState": "pending", "job": null } },
+      { "name": "pending runnable", "value": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v6", "state": "pending", "cutoffEventRowid": 20, "phase": "indexSource", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T13:00:00Z", "updatedAt": "2026-08-28T13:01:00Z", "completedAt": null } } }
+    ],
+    "failClosed": [
+      { "name": "attempting sentinel", "value": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v6", "state": "attempting", "cutoffEventRowid": 20, "phase": "indexSource", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T13:00:00Z", "updatedAt": "2026-08-28T13:01:00Z", "completedAt": null } } },
+      { "name": "failed terminal", "value": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v6", "state": "failed", "cutoffEventRowid": 20, "phase": "indexSource", "afterScanRowid": 0, "scanExhausted": false, "failureKind": "contractValidation", "createdAt": "2026-08-28T13:00:00Z", "updatedAt": "2026-08-28T13:02:00Z", "completedAt": "2026-08-28T13:02:00Z" } } }
+    ]
+  },
+  "validLifecycleOperations": [
+    "create", "arm", "batchSuccess", "phaseAdvance", "cancel", "fail",
+    "failureRecordUnavailable", "finalPublish", "catchUpReset", "append"
+  ],
+  "invalidPreflightMutations": [
+    {
+      "name": "ready history trusted",
+      "path": ["migrationMappings", "0"],
+      "replacement": "readyAbsentPreserved"
+    },
+    {
+      "name": "present job progress trusted",
+      "path": ["migrationMappings", "2"],
+      "replacement": "presentJobPositionPreserved"
+    },
+    {
+      "name": "attempting made runnable",
+      "path": ["reopenRunnablePairs", "2"],
+      "replacement": "pending+attempting"
+    },
+    {
+      "name": "preflight after mutation",
+      "path": ["timing"],
+      "replacement": "afterDdl"
+    }
+  ],
+  "invalidPolicyMutations": [
+    {
+      "name": "source index phase skipped",
+      "path": ["cursor", "phases", "0"],
+      "replacement": "verifySourceIndex"
+    },
+    {
+      "name": "history backfilled during migration",
+      "path": ["sourceIndex", "historyBackfillByMigration"],
+      "replacement": true
+    },
+    {
+      "name": "source event foreign keys omitted",
+      "path": ["sourceIndex", "foreignKeys", "0"],
+      "replacement": "none"
+    },
+    {
+      "name": "cross-event mix accepted",
+      "path": ["sourceIndex", "separateForeignKeyCrossEventMix"],
+      "replacement": "allowed"
+    },
+    {
+      "name": "message introduction transition relaxed",
+      "path": ["sourceIndex", "introductionTransition", "message"],
+      "replacement": "snapshotMessageMeansIntroduced"
+    },
+    {
+      "name": "predecessor found by latest scan and sort",
+      "path": ["sourceIndex", "predecessorLookup", "indexed"],
+      "replacement": "latestAggregateScanAndSort"
+    },
+    {
+      "name": "indexed predecessor snapshot provenance trusted without source",
+      "path": ["sourceIndex", "predecessorLookup", "indexedNonNullSnapshotProvenance"],
+      "replacement": "trustImmutableIndexRow"
+    },
+    {
+      "name": "raw predecessor event fallback accepted",
+      "path": ["sourceIndex", "predecessorLookup", "rawPredecessorEventFallback"],
+      "replacement": "allowed"
+    },
+    {
+      "name": "message uniqueness relaxed",
+      "path": ["sourceIndex", "introducedMessageUniqueIndex"],
+      "replacement": "none"
+    },
+    {
+      "name": "indexed append cannot be replayed exactly",
+      "path": ["sourceIndex", "indexSourceWrite"],
+      "replacement": "insertOnly"
+    },
+    {
+      "name": "append index split transaction",
+      "path": ["appendAtomicity", "transaction"],
+      "replacement": "laterTransaction"
+    },
+    {
+      "name": "workspace provenance scans events",
+      "path": ["workspaceProvenance", "lookup"],
+      "replacement": "fullEventsScan"
+    },
+    {
+      "name": "removal stop condition omitted",
+      "path": ["workspaceProvenance", "stopWhen"],
+      "replacement": "continue"
+    },
+    {
+      "name": "query plan accepts scan",
+      "path": ["queryPlanAcceptance", "reject", "0"],
+      "replacement": "allowed"
+    },
+    {
+      "name": "catch up skips source indexing",
+      "path": ["maxEventRowidFence", "greater"],
+      "replacement": "sameSingletonPendingReceiptsNewCutoffZeroUnexhaustedNoFailure"
+    },
+    {
+      "name": "source index counted as snapshot aggregate",
+      "path": ["snapshotAggregates", "excludedProjectionTables", "1"],
+      "replacement": "none"
+    },
+    {
+      "name": "cleanup enabled",
+      "path": ["activation", "cleanupEnabled"],
+      "replacement": true
+    }
+  ]
+}

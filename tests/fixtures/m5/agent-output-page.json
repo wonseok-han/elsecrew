@@ -1,0 +1,37 @@
+{
+  "request": {
+    "formatVersion": 1,
+    "binding": {
+      "chatId": "chat_01",
+      "taskId": "task_01",
+      "projectId": "project_01",
+      "worktreeId": "worktree_01",
+      "workspaceIdentity": "workspace_01",
+      "runId": "agent_run_01",
+      "roleId": "planning",
+      "capabilityFingerprint": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"
+    },
+    "afterSequence": 2999,
+    "throughSequence": 3000,
+    "limit": 100
+  },
+  "rows": [{
+    "outputSequence": 3000,
+    "event": {
+      "schemaVersion": 1,
+      "eventId": "agent_event_3000",
+      "chatId": "chat_01",
+      "taskId": "task_01",
+      "projectId": "project_01",
+      "worktreeId": "worktree_01",
+      "workspaceIdentity": "workspace_01",
+      "runId": "agent_run_01",
+      "roleId": "planning",
+      "capabilityFingerprint": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3",
+      "kind": "final",
+      "text": "완료 — done",
+      "createdAt": "2026-10-23T01:02:00Z"
+    }
+  }],
+  "nextAfterSequence": 3000
+}
