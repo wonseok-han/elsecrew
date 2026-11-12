@@ -1,3 +1,4 @@
+import { submitChatShortcut } from "./chat-submit-shortcut.ts";
 import { ProviderUsage } from "./provider-usage.tsx";
 import { ProjectRecoveryHistory } from "./project-recovery-history-view.tsx";
 import { OrchestrationMessageBody } from "./orchestration-message-body.tsx";
@@ -404,10 +405,10 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         <p>{t("m5.navigation.newChatHelp")}</p>
         {chat.error && <p role="alert" className="m5-error">{t(chat.error.messageKey)}</p>}
         {chat.notice && <p role="status">{formatChatNotice(chat, lang)}</p>}
-        <form className="m5-new-chat-form" onSubmit={(event) => { event.preventDefault(); if (admissionReady && projectDataReady && goal.trim() && !chat.preparing && !chat.switching && !chat.preparationApiUnavailable && !(snapshot.workspace && !controller.canLeaveProject())) void createChat(); }}>
+        <form className="m5-new-chat-form" onKeyDown={submitChatShortcut} onSubmit={(event) => { event.preventDefault(); if (admissionReady && projectDataReady && goal.trim() && !chat.preparing && !chat.switching && !chat.preparationApiUnavailable && !(snapshot.workspace && !controller.canLeaveProject())) void createChat(); }}>
           <input ref={goalInputRef} aria-label={t("m5.navigation.goal")} value={goal} onChange={(event) => setGoal(event.target.value)} placeholder={t("m5.navigation.goalPlaceholder")} disabled={!admissionReady || chat.preparing} />
           <p className="m5-first-chat-note">{t("m5.application.autoBaseline")}</p>
-          <button type="submit" disabled={!admissionReady || !projectDataReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject())}>{t("m5.chat.coordinatorSend")}</button>
+          <button type="submit" title="⌘ Enter / Ctrl Enter" aria-keyshortcuts="Meta+Enter Control+Enter" disabled={!admissionReady || !projectDataReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject())}>{t("m5.chat.coordinatorSend")}</button>
         </form>
         <details className="m5-chat-team-details"><summary>{t("m5.firstChat.team")}</summary>
         {chat.settings && <dl className="m5-new-chat-team">{coordinatorRoles(chat.settings.roles).map(role => <div key={role.roleId}><dt>{t(`m5.roles.${role.roleId}`)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{role.modelSelector}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl>}
@@ -864,13 +865,13 @@ function FollowupComposer({ controller, chat, admissionReady }: { controller: Ch
   const { t, lang } = useI18n();
   const draft = chat.followups?.[chat.activeChat!.chatId];
   const allowed = admissionReady && chat.activeChat?.schemaVersion === 2 && chat.activeChat.state !== "running" && controller.canAppendFollowup() && !chat.agentStartingRoleId && !chat.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state));
-  return <form className="m5-followup" aria-label={t("m5.chat.followup")} onSubmit={event => { event.preventDefault(); void controller.appendFollowup(admissionReady, true, lang); }}>
+  return <form className="m5-followup" onKeyDown={submitChatShortcut} aria-label={t("m5.chat.followup")} onSubmit={event => { event.preventDefault(); void controller.appendFollowup(admissionReady, true, lang); }}>
     <label htmlFor="m5-followup-text">{t("m5.chat.input")}</label>
     <textarea id="m5-followup-text" value={draft?.text ?? ""} onChange={event => controller.editFollowup(event.target.value)} placeholder={t("m5.chat.placeholder")} rows={3} />
     <p>{t("m5.chat.delivery")}</p>
     {draft?.error && <div role="alert"><p>{t("m5.chat.saveError")}</p><details><summary>{t("m5.chat.details")}</summary><pre>{draft.error}</pre></details></div>}
     {draft?.request && !draft.sending && <details><summary>{t("m5.chat.retryMessage")}</summary><p>{draft.request.text}</p></details>}
-    <button type="submit" disabled={!allowed || draft?.sending || (!draft?.request && !draft?.text.trim())}>{draft?.sending ? t("m5.chat.saving") : draft?.request ? t("m5.chat.retry") : t("m5.chat.add")}</button>
+    <button type="submit" title="⌘ Enter / Ctrl Enter" aria-keyshortcuts="Meta+Enter Control+Enter" disabled={!allowed || draft?.sending || (!draft?.request && !draft?.text.trim())}>{draft?.sending ? t("m5.chat.saving") : draft?.request ? t("m5.chat.retry") : t("m5.chat.add")}</button>
     {!allowed && <p>{t("m5.chat.unavailable")}</p>}
   </form>;
 }
