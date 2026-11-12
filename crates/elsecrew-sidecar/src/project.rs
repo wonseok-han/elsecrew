@@ -2065,8 +2065,9 @@ impl ProjectManager {
         let (relative_path, created) = chosen
             .ok_or_else(|| ProjectFailure::manifest("no free report file name is available"))?;
         let result = self.replace_report_text(storage, address, &active, &relative_path, text, request_id);
-        if result.is_err() && created {
+        if result.as_ref().is_err_and(|error| !error.outcome_unknown) && created {
             // Leave no empty placeholder behind when the replacement never committed.
+            // An unknown commit outcome keeps the work copy untouched for recovery.
             if let Ok((parent, name)) = open_parent_capability(&worktree, &relative_path) {
                 if parent.metadata(&name).is_ok_and(|meta| meta.is_file() && meta.len() == 0) {
                     let _ = parent.remove_file(&name);
