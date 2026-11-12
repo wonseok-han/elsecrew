@@ -521,6 +521,31 @@ mod tests {
     }
 
     #[test]
+    fn streamed_whitespace_round_trips_without_stopping_the_answer() {
+        use hello_agent_protocol::agent_adapter_v1::output_pages::{OutputItemChannel, OutputItemOperation};
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(SCHEMA).unwrap();
+        let fixture = fixture();
+        let binding = fixture.request.binding;
+        let tx = db.transaction().unwrap();
+        begin(&tx, &binding).unwrap();
+        let update = OutputItemUpdate { item_id: "answer".into(), operation: OutputItemOperation::Append, channel: OutputItemChannel::Message };
+        let mut event = fixture.rows[0].event.clone();
+        event.kind = "status".into();
+        let chunks = ["##", " 확인", " 결과", "\n\n", "내용", " ", "끝"];
+        for (index, chunk) in chunks.iter().enumerate() {
+            event.event_id = format!("agent_event_chunk{index}");
+            event.text = (*chunk).into();
+            append_item(&tx, &binding, index as u64 + 1, &serde_json::to_value(&event).unwrap(), 1024, Some(&update)).unwrap();
+        }
+        let request = OutputPageRequest { format_version: OUTPUT_FORMAT_VERSION, binding, after_sequence: 0, through_sequence: chunks.len() as u64, limit: 20 };
+        let output = page(&tx, &request).unwrap();
+        assert_eq!(output.rows.iter().map(|row| row.event.text.as_str()).collect::<String>(), chunks.concat());
+        let encoded = serde_json::to_vec(&output).unwrap();
+        decode_output_page(&encoded, &request).unwrap();
+    }
+
+    #[test]
     fn item_update_round_trips_with_output_body() {
         use hello_agent_protocol::agent_adapter_v1::output_pages::{OutputItemChannel, OutputItemOperation};
         let mut db = Connection::open_in_memory().unwrap();

@@ -1586,7 +1586,15 @@ pub fn validate_agent_public_event_v1(
     agent_event_id(&event.event_id, "eventId")?;
     validate_run_binding(&binding_from_event(&event))?;
     one_of(&event.kind, AGENT_PUBLIC_EVENT_KINDS_V1, "kind")?;
-    bounded(&event.text, "text", G5_PUBLIC_MESSAGE_MAX_BYTES_V1)?;
+    // Stream progress can consist solely of spacing between tokens. Final
+    // answers/questions still require meaningful text; byte bounds are unchanged.
+    if event.kind == "status" {
+        if event.text.is_empty() || event.text.len() > G5_PUBLIC_MESSAGE_MAX_BYTES_V1 {
+            return fail("status text must be nonempty and bounded");
+        }
+    } else {
+        bounded(&event.text, "text", G5_PUBLIC_MESSAGE_MAX_BYTES_V1)?;
+    }
     timestamp(&event.created_at, "createdAt")?;
     Ok(event)
 }

@@ -347,3 +347,14 @@ function resolveJsonPointer(rootValue: unknown, pointer: string): unknown {
     return (value as Record<string, unknown>)[key];
   }, rootValue);
 }
+
+
+test("stream spacing survives public validation while empty answers stay invalid", () => {
+  const page = JSON.parse(readFileSync(resolve("tests/fixtures/m5/agent-output-page.json"), "utf8"));
+  const event = { ...page.rows[0].event, kind: "status", text: "\n\n" };
+  assert.equal(validateAgentPublicEventV1(event).text, "\n\n");
+  assert.equal(validateAgentPublicEventV1({ ...event, text: " " }).text, " ");
+  for (const candidate of [{ ...event, text: "" }, { ...event, kind: "final" }, { ...event, kind: "question" }, { ...event, text: " ".repeat(262145) }]) {
+    assert.throws(() => validateAgentPublicEventV1(candidate));
+  }
+});

@@ -527,7 +527,8 @@ export function validateAgentPublicEventPayloadV1(
     fail("agent public event kind is invalid");
   }
   if (
-    typeof payload.text !== "string" || payload.text.trim() === "" ||
+    typeof payload.text !== "string" || payload.text.length === 0 ||
+    (payload.kind !== "status" && payload.text.trim() === "") ||
     utf8Bytes(payload.text) > 64 * 1024
   ) {
     fail("agent public event text must be nonempty and bounded");
