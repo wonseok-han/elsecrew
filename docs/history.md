@@ -3,6 +3,9 @@
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
 ### 2026-11-12 · by GPT-6
+- bbc1b2a4 패키지 통과·설치본 실행 후 기존 test_todo 채팅을 읽기 전용으로 다시 열었다. 단일 실행의 selector/원시ID·처음/최신 버튼이 사라지고 출력 제목/본문만 표시됨을 실제 화면에서 확인했다. 과거 중단 메시지는 역사 기록으로 보존된다. 실제 모델 재실행·원본 반영 없음. 기획/디자인 기본 지침의 모델 이행 및 해당 중단의 실제 재시험은 하지 않았다.
+
+### 2026-11-12 · by GPT-6
 - 사용자 test_todo 팀 중단을 DB 읽기 전용/실제 화면으로 확인: 총괄 run agent_run_17c9ef1d1f1d4c9bb389f8b8305ea1f8은 succeeded/cleanExit·종료 증거 있음, workflow는 step1/coding/paused/run_id 없음이며 개발 실행 기록은 없다. 당시 내부 admission 오류는 일반 pause 문구로 소실돼 정확한 원인은 확정하지 않았다. Claude admission의 원본 경로 검사에 Downloads ancestor readable-open이 남아 있어 project 경로와 동일한 O_SEARCH/no-follow ancestor 방식으로 교정했다. leaf readable·신원·symlink 거절은 유지한다.
 - 내부 capability/시작 오류를 raw detail 대신 허용된 원인별 문구(접근 권한·연결 해제·인증·모델·사용 중 등)로 채팅에 남기도록 수정했다. 자동 재시작·기존 paused 기록 조작 없음. 새 앱에 대한 총괄 지침을 기획→디자인→개발→검증 기본 순서/기존 보고 재사용/생략 사유 설명으로 보완했다. 기존은 ‘필요한 일만 위임’이었으며 role 배열 순서는 실행 순서가 아니었다. 이번은 모델 지침이고 강제 state gate는 아니다.
 - 출력 UI는 단일 실행 selector/raw run ID를 숨기고 짧은 출력의 처음/최신 탐색 버튼을 제거했다. 생략된 과거 출력이 있을 때만 탐색 표시, history에서만 최신 복귀. 간격/선택 입력 테마를 정리하고 QA selector를 실행 identity data 속성으로 교체했다.
