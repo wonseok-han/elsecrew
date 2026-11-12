@@ -6795,6 +6795,56 @@ fn custom_roles_v3_seed_update_snapshot_and_legacy_gate() {
     assert!(legacy.projects.update_app_role_defaults(&legacy.storage, 1, roles, Some(definitions)).is_err());
 }
 
+/// A V3 chat record carries its role definitions, so one chat event can be far
+/// larger than a fixed 100-row compaction step's byte budget allows. Compaction
+/// must narrow the armed step to what fits instead of failing the whole job.
+#[test]
+fn compaction_fits_large_v3_chat_records_into_bounded_steps() {
+    use crate::storage_lifetime::compaction_writer::{CompactionStepResult, CompactionTarget};
+    let mut f = Fixture::with_durable_output(true);
+    f.chats.default_role_settings(&mut f.storage, &f.projects, &f.project_id, "req_big_v3_seed").unwrap();
+    let ids = ["coordinator", "planning", "design", "coding", "review", "research", "writing", "support"];
+    let roles: Vec<Value> = ids.iter().map(|id| json!({"roleId":id,"runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"})).collect();
+    let definitions: Vec<Value> = ids.iter().map(|id| json!({"roleId":id,"name":id,"responsibility":"r".repeat(elsecrew_protocol::run_recovery_v1::G5_ROLE_RESPONSIBILITY_MAX_BYTES_V3)})).collect();
+    f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, json!(roles), Some(json!(definitions)), "req_big_v3_roles").unwrap();
+    let snapshot = f.snapshot("req_big_v3_snapshot");
+    let chat = f.chats.create_chat(&mut f.storage, &f.projects, snapshot["preparationId"].as_str().unwrap(), &f.project_id, snapshot["worktreeId"].as_str().unwrap(), snapshot["workspaceIdentity"].as_str().unwrap(), "Long V3 chat", 2, "req_big_v3_chat").unwrap().result;
+    let chat_id = chat["chatId"].as_str().unwrap().to_string();
+    let record = chat_projection_record(&f.storage, &chat_id).unwrap()["record"].clone();
+    assert!(serde_json::to_vec(&record).unwrap().len() > 16_000, "fixture must exceed the fixed-step budget");
+    for index in 0..1000 {
+        persist_chat_state(&mut f.storage, &record, &format!("op_big_v3_{index}")).unwrap();
+    }
+    let materialize = |storage: &mut Storage| {
+        while storage.materialization_requires_work().unwrap() {
+            storage.run_materialization_scheduler_step().unwrap();
+        }
+    };
+    materialize(&mut f.storage);
+    f.storage.checkpoint().unwrap();
+    let target = CompactionTarget { aggregate_type: "chat".into(), aggregate_id: chat_id.clone() };
+    let mut narrowed = false;
+    let mut finalized = false;
+    for _ in 0..5000 {
+        match f.storage.run_compaction_scheduler_step(&target).unwrap() {
+            CompactionStepResult::Finalized { .. } => {
+                finalized = true;
+                break;
+            }
+            CompactionStepResult::ArmedWorked { after_plan_ordinal, .. } => {
+                narrowed |= after_plan_ordinal % 100 != 0 && after_plan_ordinal != 1001;
+            }
+            _ => {}
+        }
+    }
+    assert!(finalized, "large V3 chat compaction did not finalize");
+    assert!(narrowed, "steps must have been narrowed below the fixed row maximum");
+    let database = f.storage.path().to_owned();
+    drop(f.storage);
+    f.storage = Storage::open_durable_output_for_test(&database).unwrap();
+    assert_eq!(f.chats.get_chat(&f.storage, &chat_id, 0, None, 10, false).unwrap()["chat"]["roleDefinitions"], json!(definitions));
+}
+
 /// Position of a role in a chat snapshot; durable fixtures now seed the V3 default team.
 fn role_index(chat: &Value, role_id: &str) -> usize {
     chat["roleSnapshots"].as_array().unwrap().iter().position(|role| role["roleId"] == role_id).unwrap()
