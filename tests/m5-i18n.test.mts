@@ -24,9 +24,11 @@ test("language choice survives restart and unavailable storage falls back to sys
 test("both dictionaries cover the workbench shell and admission keys", () => {
   const keys = Object.keys(ko).filter(key => key.startsWith("m5.")) as (keyof typeof ko)[];
   assert.ok(keys.length >= 16);
+  // Brand names and placeholder-only labels are language-neutral by design.
+  const languageNeutral = new Set<string>(["m5.shell.eyebrow", "m5.dock.tabLabel"]);
   for (const key of keys) {
     assert.ok(ko[key].length > 0);
     assert.ok(en[key].length > 0);
-    assert.notEqual(en[key], ko[key]);
+    if (!languageNeutral.has(key)) assert.notEqual(en[key], ko[key], key);
   }
 });

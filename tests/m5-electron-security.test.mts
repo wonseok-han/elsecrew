@@ -12,6 +12,7 @@ import * as modelChoicesContract from "../src/m5/contracts/model-choices-v1.ts";
 import * as deviceReportContract from "../src/m5/contracts/device-report-v1.ts";
 import * as sessionDiagnosticsContract from "../src/m5/contracts/session-diagnostics-v1.ts";
 import * as loginDiagnostic from "../src/m5/provider-login-diagnostic.ts";
+import * as usageContract from "../src/m5/contracts/provider-usage-v1.ts";
 import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS, M5_BRIDGE_V7_CHANNELS, M5_BRIDGE_V8_CHANNELS } from "../electron/ipc-channels.ts";
 
 const require = createRequire(import.meta.url);
@@ -30,10 +31,16 @@ test("login opens a validated browser URL only in main and never on cancel", asy
   assert.ok(handler);
   const response = await handler(harness.currentEvent(), { action: "start", attemptId: "test" }) as {authUrl: unknown};
   assert.equal(response.authUrl, null);
-  assert.deepEqual(harness.sidecarCalls, ["login", "openExternal"]);
+  assert.deepEqual(harness.sidecarCalls, ["projectCatalog", "login", "openExternal"]);
   await handler(harness.currentEvent(), { action: "cancel", attemptId: "test" });
-  assert.deepEqual(harness.sidecarCalls, ["login", "openExternal", "login"]);
+  assert.deepEqual(harness.sidecarCalls, ["projectCatalog", "login", "openExternal", "login"]);
   await assertRejectedWithoutSidecar(handler, {sender: {}, senderFrame: {}}, harness);
+
+  // A provider the user has not connected in the app must not start a login attempt.
+  harness.providerConnections.codex = false;
+  harness.sidecarCalls.length = 0;
+  await assert.rejects(handler(harness.currentEvent(), { action: "start", attemptId: "test" }), /providerDisconnected/);
+  assert.deepEqual(harness.sidecarCalls, ["projectCatalog"]);
 });
 
 test("approval IPC rejects foreign frames and cannot grant acceptance", async () => {
@@ -228,6 +235,7 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
   const protocolHandlers = new Map<string, (request: { url: string }) => Promise<Response>>();
   const netFetches: string[] = [];
   const sidecarCalls: string[] = [];
+  const providerConnections: Record<"claude-code" | "codex", boolean> = {"claude-code": true, codex: true};
   const files = new Set([resolve("/app/.vite/renderer/main_window/index.html")]);
   const electron = {
     app: {
@@ -268,6 +276,11 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
     async getAgentOutputHead() { sidecarCalls.push("getAgentOutputHead"); return null; }
     async getAgentOutputPage() { sidecarCalls.push("getAgentOutputPage"); return { rows: [] }; }
     async start() {}
+    async projectCatalog(request: {action: string}) {
+      sidecarCalls.push("projectCatalog");
+      if (request.action !== "getProviderConnections") throw new Error("unexpected catalog action in main security harness");
+      return {action: "getProviderConnections", connections: {"claude-code": providerConnections["claude-code"], codex: providerConnections.codex}};
+    }
     async login() {
       sidecarCalls.push("login");
       return {state: "waiting", attemptId: "test", authUrl: "https://auth.openai.com/authorize?state=private", error: null};
@@ -333,6 +346,7 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
     netFetches,
     protocolHandlers,
     sidecarCalls,
+    providerConnections,
     window,
     currentEvent: () => ({ sender: window.webContents, senderFrame: window.webContents.mainFrame }),
   };
@@ -350,6 +364,15 @@ function moduleFor(
 ) {
   if (specifier === "electron") return fakes.electron;
   if (specifier === "./app-update-menu.ts") return { installAppUpdateMenu() {} };
+  // Usage reads touch the app keychain and network; the security harness only
+  // needs the reader to exist and must fail loudly if a handler reaches it.
+  if (specifier === "./claude-usage.ts") return {
+    createClaudeUsageReader: () => ({
+      read: async () => { throw new Error("unexpected usage read in main security harness"); },
+      invalidate: () => undefined,
+    }),
+  };
+  if (specifier.endsWith("provider-usage-v1.ts")) return usageContract;
   if (specifier.endsWith("git-selection-v1.ts")) return gitSelectionContract;
   if (specifier === "./git-selection.ts") return {
     GitSelectionStore: class {
@@ -390,6 +413,7 @@ function moduleFor(
     return {
       mkdirSync: () => undefined,
       realpathSync: (path: string) => path,
+      readdirSync: () => { throw new Error("unexpected directory listing in main security harness"); },
       statSync: (path: string) => {
         if (!fakes.files.has(path)) throw new Error("missing test asset");
         return { isFile: () => true };

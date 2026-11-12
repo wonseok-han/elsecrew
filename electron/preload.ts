@@ -1,4 +1,4 @@
-import { CLAUDE_USAGE_CHANNEL, validateClaudeUsageResult } from "../src/m5/contracts/provider-usage-v1.ts";
+import { CLAUDE_USAGE_CHANNEL as M5_CLAUDE_USAGE_CHANNEL, validateClaudeUsageResult } from "../src/m5/contracts/provider-usage-v1.ts";
 import { GIT_SELECTION_CHANNEL as M5_GIT_SELECTION_CHANNEL, validateGitSelectionAction, validateGitSelection, type GitSelectionAction } from "../src/m5/contracts/git-selection-v1.ts";
 import { SAVE_RECOVERY_RESOLVE_CHANNEL as M5_SAVE_RECOVERY_RESOLVE_CHANNEL, validateSaveRecoveryResolveRequest, validateSaveRecoveryResolveResult } from "../src/m5/contracts/save-recovery-v1.ts";
 import { SAVE_RECOVERY_CHANNEL as M5_SAVE_RECOVERY_CHANNEL, validateSaveRecoveryRequest, validateSaveRecoveryResult } from "../src/m5/contracts/save-recovery-v1.ts";
@@ -219,5 +219,5 @@ const appUpdateApi = Object.freeze({
 contextBridge.exposeInMainWorld("m5AppUpdate", appUpdateApi);
 
 contextBridge.exposeInMainWorld("m5ClaudeUsage", Object.freeze({
-  read: async () => validateClaudeUsageResult(await ipcRenderer.invoke(CLAUDE_USAGE_CHANNEL)),
+  read: async () => validateClaudeUsageResult(await ipcRenderer.invoke(M5_CLAUDE_USAGE_CHANNEL)),
 }));

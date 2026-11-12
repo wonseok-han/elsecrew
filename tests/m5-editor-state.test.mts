@@ -818,7 +818,7 @@ test("picker AbortError는 상태를 바꾸지 않는 조용한 취소이고 ope
   const storedError = failedController.snapshot().error!;
   assert.equal(storedError.messageKey, "m5.editorError.openProject");
   assert.equal(ko[storedError.messageKey], storedError.message);
-  assert.equal(en[storedError.messageKey], "Could not open the project. Try another Git project.");
+  assert.equal(en[storedError.messageKey], "Could not open the folder. Check access permissions and select the project folder again.");
   assert.equal(failedController.snapshot().error, storedError, "display language must not require another controller operation");
   assert.equal(storedError.technicalDetail, "E_NOT_GIT /tmp/not-a-project");
   cancelledController.dispose();

@@ -82,7 +82,7 @@ for (const delayedGate of [null, "admission", "saving"]) test(`Monaco keeps curr
     loadMonaco: () => loader,
   };
   context.useLayoutEffect = context.useEffect;
-  const resolveMonaco = () => resolveLoader({ KeyMod: { CtrlCmd: 2048 }, KeyCode: { KeyS: 49 }, editor: { createModel: (value: string) => { text = value; return model; }, create: (_host: unknown, options: { readOnly: boolean }) => { editorCreates++; readOnly = options.readOnly; return editor; } } });
+  const resolveMonaco = () => resolveLoader({ KeyMod: { CtrlCmd: 2048 }, KeyCode: { KeyS: 49 }, editor: { defineTheme() {}, createModel: (value: string) => { text = value; return model; }, create: (_host: unknown, options: { readOnly: boolean }) => { editorCreates++; readOnly = options.readOnly; return editor; } } });
   runInNewContext(compiled, context);
   const render = async (locked: boolean, saveState: string, value = "original") => {
     cursor = 0; pending = [];
@@ -187,6 +187,7 @@ for (const failure of ["load", "editor", "action"]) test(`Monaco preserves draft
       loads++;
       if (fail && failure === "load") throw new Error("chunk unavailable");
       return { KeyMod: { CtrlCmd: 2048 }, KeyCode: { KeyS: 49 }, editor: {
+        defineTheme() {},
         createModel: (value: string) => {
           text = value;
           return { getValue: () => text, setValue: (next: string) => { text = next; },
