@@ -2,6 +2,16 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — custom roles worker
+- 범위: worktree `.worktrees/custom-roles`, 브랜치 `feature/ade-custom-roles`(기준 f8672e5f). 사용자 정의 팀 역할을 실제 실행에 연결했다. push·병합·실제 공급자/사용자 데이터·패키징 없음.
+- 계약: Rust/TS 역할 집합 V3(총괄 첫 자리·읽기 전용, 팀원1~7, ID `^[a-z][a-z0-9-]{1,31}$`, 이름≤64B·맡은 일≤2000B)와 `roleDefinitions`를 프로젝트 설정·앱 기본값·채팅 기록·갱신 요청에 추가했다. 단독 프로필은 이름으로 권한을 유도하지 않고, V1/V2 집합은 기존 고정 권한까지 정확히 검증한다. agent adapter·protocol event·출력 binding·팀 메시지의 고정 5ID 목록을 형식 검사로 바꾸고 stage 일치는 권한 기준으로 바꿨다. 공유 fixture `planning-cannot-write`는 V3에서 더 이상 거절 사유가 아니어서 `coordinator-cannot-write`와 legacy 집합 권한 사례로 대체했다.
+- 저장: V12→V13 원자 이관(답변 작성자 trigger만 교체, 취소 시 롤백, durable admission 경로에 연결)과 모든 V11|V12 수용 지점에 V13을 추가했다. V3 설정 저장은 V13 필요, V13에서 앱 기본값 파일이 없으면 기본 5역할 V3를 시드한다. 앱 기본값 파일 상한 32KiB.
+- 실행: 단일 실행 성공 상태·stage를 권한 기준 helper로 바꾸고(V1/V2 결과 동일), workflow `changed`를 위임 역할의 workspaceWrite로 판정, 위임 대상은 채팅 snapshot 소속·비총괄만 허용(저장 workflow 재검증 포함). 총괄 prompt에 팀원 id·이름·맡은 일·권한을 싣고 “Only coding can edit” 문구를 제거했다. V2/V3 채팅만 총괄 workflow를 탄다.
+- 화면: 역할 설정에서 팀원 추가/삭제, 이름·맡은 일·권한·실행 환경·모델 편집, 총괄 삭제 불가, 변경 없으면 저장 비활성. 메시지·실행·출력·복구 기록·팀 미리보기는 저장 이름을 보여 주고 템플릿 기본 이름이면 번역을 쓴다. V1 프로젝트는 첫 총괄 채팅 생성 때 V3 기본 팀으로 올린다. ko/en 키는 `m5.roles.review` 바로 뒤 한 블록.
+- 검증: `cargo test -p elsecrew-protocol` 67/67. sidecar lib 전체 765 통과/5 실패/43 ignored: 실패 중 `codex_durable_native_{delivery_and_cancel,three_thousand_outputs}`는 durable fixture가 V3 기본 팀을 시드하면서 V1 위치 index를 쓰던 시험 문제였고 roleId 기준 조회로 고친 뒤 재실행 2/2 통과. 나머지 `tests::discovery_admission_rejection_keeps_session_available`·`discovery_rejection_stdio_returns_error_then_status_and_clean_quit`·`native_session_negotiates_adapter_without_granting_unscoped_execution`와 통합 `stdio_process::binary_ready_status_quit_flow_marks_clean_and_exits_zero`(15/16)는 역할 처리 이전의 공급자 연결 gate(`providerDisconnected`, eb724a0a)에서 실패해 이번 변경과 무관한 기존 실패로 추정한다(기준 커밋 재실행은 안 함). 신규: storage V13 이관/재열기·V12 compaction 후 V13, chat V3 시드/갱신/스냅샷/재열기/V12 거절, orchestration V3 위임·prompt·snapshot 밖 거절 모두 통과. `tsc --noEmit` 통과, `npm test` 727/727(신규 `tests/m5-custom-roles.test.mts` 포함). renderer smoke(`tests/m5-renderer-mount-smoke.mts`)는 기본 팀5역할 확인 구간까지 통과하나 이후 `.m5-root` 클릭에서 실패하며 기준 커밋 f8672e5f도 동일하게 실패(기존 결함). 그 뒤의 역할 설정 smoke 구간과 실제 역할 추가→총괄 위임 UI·Electron 패키지·실제 공급자·실사용 DB 이관은 미검증이다. 데이터 이관·권한 경계 변경이므로 독립 검토가 필요하다(미실시).
+- 로컬 커밋: 25e277f9(계약), 6e4bf47f(저장 V13), 602220c6(sidecar 실행/위임), 1622ab83(화면), 7656c24d(역할 탐색 배치·smoke 선택자), 이 문서 커밋. push·병합 없음.
+- 다음: 독립 검토, 실제 앱에서 역할 추가→총괄 위임 UI 확인, 채팅 내용 영구 삭제 작업은 V14로 이어 쌓기.
+
 ### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5)
 - Orca 인계로 이어받아 워킹 트리가 직전 GPT-6 기록과 일치함을 확인했다(AGENTS/CLAUDE byte 일치, diff check 통과).
 - 사용자 승인으로 feature/ade 변경을 로컬 커밋 3개로 나눴다: da86cbeb(CI 설치 파일 경로·저장소 URL), 8a6dbcdb(실행별 Claude 실패 단계/코드 보존·표시와 회귀/화면 검사 스크립트), 그 뒤 문서 커밋(개발용 커스텀 역할 제거·AGENTS/CLAUDE·작업 기록). 커밋 전 추가 테스트는 다시 돌리지 않았고 이전 검증 증거를 그대로 쓴다. push·main 병합·CI 재실행·설치본 반영·실제 공급자 시험은 하지 않았다.
@@ -166,6 +176,7 @@
 - **Claude 실패 진단(2026-11-12)**: 새 terminal run.failure는 허용된 단계/원인 코드만 보존하며 기존 실패 원인은 추정하지 않는다. fixture Bash→Read 정상 경로는 통과했고 전달 오류 주입의 재시작 보존도 확인했다. 과거 사용자 실행의 직접 원인과 설치본/실제 공급자 재시험은 별도 미확인이다.
 
 - **사용자 정의 팀(2026-11-12 재확정)**: 기본5역할은 템플릿이다. 총괄은 사용자가 구성한 역할 설명/컨텍스트와 요청의 선행조건으로 배분한다. 고정 순차 pipeline은 제품 방향이 아니며 현재 실행의 고정 role enum은 남은 구현 제약이다.
+- **사용자 정의 역할 V3·저장 V13(2026-11-12, feature/ade-custom-roles)**: 역할 집합 `schemaVersion:3`은 5키 프로필 배열 + 같은 순서의 `roleDefinitions{roleId,name,responsibility}`이며 총괄(읽기 전용) + 팀원1~7명이다. 이름과 실행 권한은 분리돼 팀원 권한은 자유 선택, stage/채팅 상태/변경 판정은 `permission` 기준(`review`만 표시상 verifying 유지). V1/V2 기록은 고정 ID·권한 그대로 정확히 검증하고 다시 쓰지 않는다. 저장 V13은 V12 답변 작성자 IN 목록을 role ID 형식 검사로 바꾼 것뿐이며 V3 설정은 V13에서만 저장된다. 채팅 내용 영구 삭제 등 다음 schema는 V14로 쌓는다. 상세는 architecture.md “사용자 정의 팀 역할 V3”.
 
 - **Claude 사용량 인증(2026-11-12)**: CLI auth status의 저장 로그인 존재와 OAuth access-token 유효성은 다르다. 만료 시 check가 앱 전용 Keychain의 갱신을 같은 provider pending fence 아래 수행하며 사용량은 갱신 후 다시 읽는다. 단순 인증 존재를 사용량 인증 유효성으로 해석하지 않는다.
 
