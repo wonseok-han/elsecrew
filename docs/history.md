@@ -3,6 +3,14 @@
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
 ### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5)
+- 프런트 검사 26실패 해소(75774a56): main 보안 harness에 사용량 reader·디렉터리 조회·연결 조회 fake를 추가하고 미연결 공급자는 로그인을 시작하지 않는 검사를 보강했다. preload 사용량 채널은 M5_ 별칭으로 고정 채널 검사를 유지했다. 오래된 기대값(팀 수락 event 추가, 언어 중립 문구, 폴더 열기 문구, Monaco defineTheme)만 갱신했다. npm test 720/720 PASS. Cargo.lock은 이름 변경 후 정렬만 바뀌어 별도 커밋(f8672e5f). `pnpm test:harness` baseline PASS(프런트 빌드·720·Tauri Rust105).
+- Windows CI 기준선 실패의 유력 원인: Node가 `.cmd`를 shell 없이 spawn하지 못해(EINVAL) frontend-build가 0.2초 만에 실패하고 오류가 로그에 안 찍혔다. harness가 Windows `.cmd`만 shell로 실행하고 spawn 오류를 출력하게 했다. **CI 재실행 전이라 미확인**(push 필요).
+- 새 패키지(이 worktree `out/`) package smoke PASS, 격리 프로필로 시작 화면 정상 확인 후 정상 종료.
+- 실제 재시험 준비 중 Codex 로그인/종료 차단 결함을 발견·수정(1609d5c2, 336f42bc): 연결 직후 하단 사용량 표시의 Codex 모델 목록 조회와 연결 화면의 로그인 확인이 같은 `codex-login.pending` fence를 동시에 예약해, 진 쪽이 EEXIST를 `providerLoginRecoveryRequired`로 보고 로그인·앱 종료가 막혔다(남은 프로세스 없음, 격리 인스턴스에서 m5:models 오류로 재현). fence를 staging 파일에서 잠금·header 기록 후 hard_link로 원자 게시하고, 기존 fence는 잠금 probe로 live 소유자면 `providerBusy`(재시도), 소유자 없는 고아면 기존대로 recovery로 둔다. 로그인 화면은 busy 확인을 최대5회 자동 재시도한다. 관련 Rust69·TS 로그인 검사 PASS, 상시 승인 읽기 전용 검토 1차 B1(생성-잠금 사이 창으로 빈 고아 fence 생성) 지적 → 원자 게시로 수정 → 재검토 차단사항 없음. 남은 비차단: crash 잔여 staging 파일 미정리, ENOENT/inode 불일치 busy 분기 결정적 테스트 없음.
+- 사용자 지시: 실제 시험 공급자 배치는 기획만 Codex, 나머지 역할은 Claude Code(Codex 사용량 제약). 사용자 요청으로 병렬 진행: worktree `.worktrees/custom-roles`(feature/ade-custom-roles, 사용자 정의 역할 V3·저장 V13)와 `.worktrees/chat-erasure`(feature/ade-chat-erasure, 채팅 영구 삭제 설계·구현, 스키마 V14 예정)를 구현 담당 각1명에게 맡겼다. 공유 Cargo target으로 무거운 빌드를 직렬화한다.
+- 다음: 사용자가 실행 중인 새 앱(이전 연결 시 막힌 recovery 상태)을 정상 종료하면 수정 포함 패키지 재생성 → Claude/Codex 재연결 → 앱 전용 임시 프로젝트에서 실제 팀 작업 1회. 병렬 브랜치 통합·독립 검토·누적 검사, CI 재실행(push 승인 필요)이 남는다. 커밋은 feature/ade 로컬만, push/main 병합 없음.
+
+### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5)
 - Orca 인계로 이어받아 워킹 트리가 직전 GPT-6 기록과 일치함을 확인했다(AGENTS/CLAUDE byte 일치, diff check 통과).
 - 사용자 승인으로 feature/ade 변경을 로컬 커밋 3개로 나눴다: da86cbeb(CI 설치 파일 경로·저장소 URL), 8a6dbcdb(실행별 Claude 실패 단계/코드 보존·표시와 회귀/화면 검사 스크립트), 그 뒤 문서 커밋(개발용 커스텀 역할 제거·AGENTS/CLAUDE·작업 기록). 커밋 전 추가 테스트는 다시 돌리지 않았고 이전 검증 증거를 그대로 쓴다. push·main 병합·CI 재실행·설치본 반영·실제 공급자 시험은 하지 않았다.
 - 다음: 설치본 반영 확인, 필요하면 별도 승인을 받아 실제 Claude 재시험, 프런트 검사26실패·Windows 기준선·채팅 영구 삭제·사용자 정의 역할 연결은 그대로 남아 있다.
@@ -162,6 +170,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **공급자 fence 경합(2026-11-12)**: 로그인 확인·모델 목록·실행이 같은 `*-login.pending`을 공유한다. 기존 fence가 live 소유자에게 잠겨 있으면 `providerBusy`(재시도)이고, 잠금 없는 고아만 recovery 증거다. fence는 staging 잠금 후 hard_link로만 게시해 이름이 잠기지 않은 inode를 가리키는 순간이 없다. 사용량 표시는 연결 변경 시 Codex 모델 조회를 즉시 실행하므로 로그인 확인과 동시 실행될 수 있다.
 - **2026-11-12 main 통합 이후**: PR #1 병합 b6e2de81 및 GitHub `elsecrew` 이름 변경 완료. 이후 최신 main 기반 기능 브랜치에서 작업하며 추가 main 병합/push는 별도 승인이다. CI43150190399 실패는 제품 완료가 아님; Tauri 빌드 성공과 artifact 업로드 실패를 구분한다.
 - **Claude 실패 진단(2026-11-12)**: 새 terminal run.failure는 허용된 단계/원인 코드만 보존하며 기존 실패 원인은 추정하지 않는다. fixture Bash→Read 정상 경로는 통과했고 전달 오류 주입의 재시작 보존도 확인했다. 과거 사용자 실행의 직접 원인과 설치본/실제 공급자 재시험은 별도 미확인이다.
 
