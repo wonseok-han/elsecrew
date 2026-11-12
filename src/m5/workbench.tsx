@@ -943,22 +943,33 @@ function TeamTimeline({ controller, chat, admissionReady, fixtureAvailable, onCo
     if (!list) return;
     let userScroll = false;
     const markScroll = () => { userScroll = true; };
+    const markKey = (event: KeyboardEvent) => {
+      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) markScroll();
+    };
     const markPointer = (event: PointerEvent) => { if (event.target === list) userScroll = true; };
     const onScroll = () => {
-      if (list.clientHeight === 0 || !userScroll) return;
-      userScroll = false;
+      if (list.clientHeight === 0) return;
       const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight <= 32;
-      if (!atBottom && historyStart === null) { followLatest.current = false; setHistoryStart(messageStart); }
-      else if (atBottom && historyStart === null) { followLatest.current = true; setNewMessages(false); }
+      // Reaching the bottom resumes following, including after reading history.
+      // Programmatic scrolling must not turn following off.
+      if (atBottom) {
+        followLatest.current = true;
+        setHistoryStart(null);
+        setNewMessages(false);
+      } else if (userScroll && historyStart === null) {
+        followLatest.current = false;
+        setHistoryStart(messageStart);
+      }
+      userScroll = false;
     };
     list.addEventListener("scroll", onScroll);
     list.addEventListener("wheel", markScroll, { passive: true });
-    list.addEventListener("keydown", markScroll);
+    list.addEventListener("keydown", markKey);
     list.addEventListener("pointerdown", markPointer);
     return () => {
       list.removeEventListener("scroll", onScroll);
       list.removeEventListener("wheel", markScroll);
-      list.removeEventListener("keydown", markScroll);
+      list.removeEventListener("keydown", markKey);
       list.removeEventListener("pointerdown", markPointer);
     };
   }, [historyStart, messageStart]);

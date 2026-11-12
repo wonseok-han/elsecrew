@@ -677,6 +677,33 @@ app.whenReady().then(async () => {
         const messages = document.querySelector('.m5-timeline-list');
         if (getComputedStyle(messages).overflowY !== 'visible' || getComputedStyle(messages).maxHeight !== 'none') throw new Error('nested message scroll remains');
         if (getComputedStyle(input).userSelect !== 'text') throw new Error('composer selection was disabled');
+        const growth = document.createElement('div');
+        growth.style.height = '2000px';
+        messages.append(growth);
+        const settleScroll = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        try {
+          await settleScroll();
+          history.scrollTop = history.scrollHeight;
+          history.dispatchEvent(new Event('scroll'));
+          await settleScroll();
+          history.dispatchEvent(new WheelEvent('wheel', {deltaY: -300}));
+          history.scrollTop = Math.max(0, history.scrollTop - 300);
+          history.dispatchEvent(new Event('scroll'));
+          await settleScroll();
+          const readingTop = history.scrollTop;
+          growth.style.height = '2300px';
+          await settleScroll();
+          if (Math.abs(history.scrollTop - readingTop) > 2) throw new Error('new output interrupted history reading');
+          history.dispatchEvent(new WheelEvent('wheel', {deltaY: 3000}));
+          history.scrollTop = history.scrollHeight;
+          history.dispatchEvent(new Event('scroll'));
+          await settleScroll();
+          growth.style.height = '2600px';
+          await settleScroll();
+          if (history.scrollHeight - history.scrollTop - history.clientHeight > 32) throw new Error('bottom return did not resume live output following');
+          if (document.querySelector('.m5-new-messages')) throw new Error('latest button remains while following');
+        } finally { growth.remove(); }
+
         history.scrollTop = history.scrollHeight;
         if (Math.abs(document.querySelector('.m5-followup').getBoundingClientRect().bottom - composer.bottom) > 1) throw new Error('history scrolling moved the composer');
       }
