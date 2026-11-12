@@ -4516,8 +4516,17 @@ impl ProjectManager {
     }
 
     fn verify_snapshot_tree(&self, workspace: &Dir, active: &ActiveProject) -> Result<(), ProjectFailure> {
-        let tree_output = self.git_at(workspace, ["write-tree"])?;
-        if trim_output(&tree_output)? != active.base_tree {
+        // Compare the index with the base tree without taking `.git/index.lock`.
+        // `write-tree` needs that lock, so a provider's own `git status` briefly
+        // holding it made run validation fail mid-run (approvals then stopped
+        // the team task as "input changed"). Exit 0 = identical, 1 = different;
+        // unmerged or extra entries also differ.
+        let compared = self.git_allow_status_at(
+            workspace,
+            ["diff-index", "--cached", "--quiet", active.base_tree.as_str(), "--"],
+            &[0, 1],
+        )?;
+        if compared.status.code() != Some(0) {
             return Err(ProjectFailure::manifest("snapshot index differs from its base tree"));
         }
         Ok(())

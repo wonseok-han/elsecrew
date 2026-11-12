@@ -18,6 +18,14 @@ fn claude_project_consent_auto_approves_and_still_rejects_outside_files() {
     claude_native_cases(&[("auto", false), ("auto-outside", false), ("auto-read", false), ("auto-read", true), ("auto-read-failure", true)]);
 }
 
+/// Real Claude, after an allowed Bash call, runs child processes and writes
+/// into the copy (a new file, its own `.claude/.cc-writes`, `git status`)
+/// before asking for the next tool. The next approval must still be delivered.
+#[test]
+fn claude_auto_read_after_real_bash_side_effects() {
+    claude_native_cases(&[("auto-read-mutate", true), ("auto-read-index-lock", true)]);
+}
+
 #[test]
 fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init() {
     claude_native_cases(&[
@@ -143,6 +151,14 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             let bash = json!({"type":"control_request","request_id":"bash_once","request":{
                 "subtype":"can_use_tool","tool_name":"Bash","tool_use_id":"tool_bash","input":{"command":"ls","description":"list fixture"}}});
             script.push_str(&format!("printf '%s\\n' {}\nIFS= read -r reply || exit 3\ncase \"$reply\" in *'\"behavior\":\"allow\"'*) ;; *) exit 4 ;; esac\n", quoted(&bash)));
+        }
+        if case == "auto-read-index-lock" {
+            // A concurrent provider `git status` briefly owns the index lock while
+            // the next approval is validated.
+            script.push_str("( : > .git/index.lock; /bin/sleep 3; /bin/rm -f .git/index.lock ) &\n/bin/sleep 0.3\n");
+        }
+        if case == "auto-read-mutate" {
+            script.push_str("/bin/mkdir -p .claude && : > .claude/.cc-writes && printf 'draft' > draft.html && /usr/bin/git status --porcelain >/dev/null 2>&1; /bin/sleep 1\n");
         }
         if case == "allow" || case.starts_with("auto") {
             script.push_str(&format!("printf '%s\\n' {}\nIFS= read -r reply || exit 3\ncase \"$reply\" in *'\"behavior\":\"allow\"'*) ;; *) exit 4 ;; esac\n", quoted(&approval)));
@@ -316,7 +332,7 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             .collect();
         assert_eq!(
             final_text,
-            if matches!(case, "success" | "long" | "organization-guard" | "privacy" | "privacy-with-guard" | "default-effort" | "allow" | "auto" | "auto-read") {
+            if matches!(case, "success" | "long" | "organization-guard" | "privacy" | "privacy-with-guard" | "default-effort" | "allow" | "auto" | "auto-read" | "auto-read-mutate" | "auto-read-index-lock") {
                 vec![json!("hello")]
             } else {
                 vec![]
