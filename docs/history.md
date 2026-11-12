@@ -3,6 +3,9 @@
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
 ### 2026-11-12 · by GPT-6
+- f4ac1f22 패키지 빌드 통과, 설치본 재실행과 기존 프로젝트 목록 로딩을 확인했다. 직전 응답/작업상태 하단 배치도 포함한다. 추가 Rust protocol 회귀19개 통과. 실제 모델 재실행은 하지 않았으며 전체 팀 작업 성공 여부는 미검증이다. 기존 중단 채팅/기록은 보존했다.
+
+### 2026-11-12 · by GPT-6
 - test_todo 재시도 기록을 읽기 전용 확인: 총괄 e4987631은 succeeded, 기획 2cf81007은 실행/인증 검증 후 failed/cleanExit·processesProvenGone=true·recovery=null이다. 위임 자체는 성공했고 기획 출력은 `##`/` 확인`/` 결과` 세 조각에서 끊겼다. raw 거절 조각/실패 checkpoint는 없어 당시 직접 원인을 확정하지 않았다.
 - 동일한 출력 뒤 newline-only 조각을 저장하는 회귀에서 storageInvalid/invalid public output event를 재현했다. Rust/TS 공개 이벤트 검증의 status에 한해 공백/줄바꿈 조각을 보존한다. 빈 문자열·blank final/question 거절, 기존 바이트/건수/identity 제한은 유지한다. 수정 후 출력 저장/page 재읽기5개·TS계약11개·TypeScript 통과, 독립 검토 차단 없음. 실제 모델 재시험 없이 이 결함의 재현/수정만 확인했다.
 - 기존 앱 정상 종료; 응답 하단 배치와 함께 패키지 반영을 진행한다. 원본/인증정보 수정·자동 재실행·main/push 없음.
