@@ -7,6 +7,8 @@ const running = (status: InstallStatus | null) => status !== null &&
   ["starting", "downloading", "installing", "verifying", "stopping"].includes(status.state);
 
 /** One installation manager is shared by both providers. Never replay a start on transport failure. */
+export const INSTALL_STATUS_REFRESH = "m5-install-status-refresh";
+
 export function ProviderInstall({ disabled, providers, onBlockChange, onCheck, onAttention, compact = false, integrated = false, slotsRevision = "" }: {
   disabled: boolean; providers: InstallProvider[]; onBlockChange: (blocked: boolean) => void;
   onCheck: (provider: InstallProvider) => void; compact?: boolean;
@@ -50,6 +52,11 @@ export function ProviderInstall({ disabled, providers, onBlockChange, onCheck, o
     // Existing active/uncertain polling below still tracks owned operations.
     if (!disabled) void request({ action: "status" });
   }, [disabled, request]);
+  useEffect(() => {
+    const refresh = () => { void request({action:"status"}); };
+    window.addEventListener(INSTALL_STATUS_REFRESH, refresh);
+    return () => window.removeEventListener(INSTALL_STATUS_REFRESH, refresh);
+  }, [request]);
   const active = running(status);
   const poll = active || uncertain;
   useEffect(() => {
@@ -73,7 +80,7 @@ export function ProviderInstall({ disabled, providers, onBlockChange, onCheck, o
       <div className="m5-install-header-actions">
     {active && status?.operationId && <button className="m5-install-stop" type="button" disabled={busy || uncertain || status.cancelRequested || status.state === "stopping"}
       onClick={() => void request({ action: "cancel", operationId: status.operationId! })}>{t(status.cancelRequested ? "m5.install.canceling" : "m5.install.cancel")}</button>}
-      {showDetails && <button className="m5-install-refresh" type="button" disabled={busy} aria-label={t("m5.install.refresh")} title={t("m5.install.refresh")} onClick={() => void request({ action: "status" })}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2 5M20 7l-3 3"/></svg></button>}
+      {showDetails && !integrated && <button className="m5-install-refresh" type="button" disabled={busy} aria-label={t("m5.install.refresh")} title={t("m5.install.refresh")} onClick={() => void request({ action: "status" })}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2 5M20 7l-3 3"/></svg></button>}
       {compact && !active && <button type="button" aria-expanded={showDetails} aria-controls="m5-install-details" disabled={needsAttention}
         onClick={() => setExpanded(value => !value)}>{t(showDetails ? "m5.install.hideDetails" : "m5.install.showDetails")}</button>}
       </div>
@@ -111,7 +118,6 @@ export function ProviderInstall({ disabled, providers, onBlockChange, onCheck, o
     const ownsDetails = status?.provider === provider && (active || Boolean(plan) || Boolean(status.error) || status.state === "installed" || status.state === "recoveryRequired");
     return createPortal(ownsDetails ? panel : <div className="m5-provider-install-inline">
       <button type="button" disabled={!canPrepare} onClick={() => void request({action:"prepare",provider})}>{t("m5.install.manage")}</button>
-      <button className="m5-install-refresh" type="button" disabled={busy} aria-label={t("m5.install.refresh")} title={t("m5.install.refresh")} onClick={() => void request({action:"status"})}>↻</button>
       {uncertain && <p role="alert">{t("m5.install.uncertain")}</p>}
     </div>, slot, provider);
   })}</>;

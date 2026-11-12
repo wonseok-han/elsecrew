@@ -53,7 +53,7 @@ async function probeInstallConsent() {
     return structuredClone(status);
   };
   try {
-    button('상태 다시 확인').click();
+    window.dispatchEvent(new Event('m5-install-status-refresh'));
     await wait(() => !(button('Codex 설치 내용 확인')?.disabled ?? true));
     button('Codex 설치 내용 확인').click();
     await wait(() => panel.querySelector('.m5-install-confirmation')?.open);
@@ -79,7 +79,7 @@ async function probeInstallConsent() {
     await wait(() => button('설치 중단 요청') && !button('설치 중단 요청').disabled);
     if (starts !== 1 || !(button('Codex 설치 내용 확인')?.disabled ?? true)) throw new Error('uncertain start repeated or parallel install allowed');
     const activePanel = panel.querySelector('.m5-provider-install[data-active]');
-    if (!activePanel || activePanel.querySelector('.m5-install-provider-actions') || !activePanel.querySelector('header .m5-install-stop') || activePanel.querySelector('.m5-install-refresh').getBoundingClientRect().width > 32) throw new Error('active install controls are not compact');
+    if (!activePanel || activePanel.querySelector('.m5-install-provider-actions') || !activePanel.querySelector('header .m5-install-stop') || activePanel.querySelector('.m5-install-refresh')) throw new Error('active install controls are not compact');
     button('설치 중단 요청').click();
     await wait(() => button('종료 확인된 설치 기록 정리'));
     button('종료 확인된 설치 기록 정리').click();
@@ -87,7 +87,7 @@ async function probeInstallConsent() {
     if (starts !== 1 || cancels !== 1 || recoveries !== 1) throw new Error('installation lifecycle call counts differ');
     if (managementToggle) {
       status = {...idle, state:'installed', operationId, provider:'codex'};
-      button('상태 다시 확인').click();
+      window.dispatchEvent(new Event('m5-install-status-refresh'));
       await wait(() => !managementToggle.disabled);
       managementToggle.click();
       await wait(() => document.getElementById('m5-agent-management-content').hidden);
@@ -96,7 +96,7 @@ async function probeInstallConsent() {
     }
   } finally {
     window.m5Install.request = original;
-    button('상태 다시 확인').click();
+    window.dispatchEvent(new Event('m5-install-status-refresh'));
     await wait(() => button('Codex 설치 내용 확인')?.disabled);
   }
 }
