@@ -456,10 +456,10 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
             <>
               <label className="m5-hidden-files"><input type="checkbox" checked={showHiddenFiles} onChange={event => setShowHiddenFiles(event.target.checked)} />{t("m5.files.showHidden")}</label>
               <FileSearch showHidden={showHiddenFiles} key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}`} disabled={!admissionReady || snapshot.actionBlocked} search={(query, signal) => controller.searchFiles(query, signal)} open={path => { void controller.openFile(path); }} />
-              <nav className="m5-breadcrumbs" aria-label={t("m5.navigation.folder")}>
+              {snapshot.treeParent && <nav className="m5-breadcrumbs" aria-label={t("m5.navigation.folder")}>
                 <button className="m5-root" type="button" title={snapshot.project.root} disabled={!admissionReady || snapshot.actionBlocked || snapshot.treeLoading} onClick={() => void controller.loadTree("")}>{snapshot.project.name}</button>
                 {snapshot.treeParent.split("/").filter(Boolean).map((part, index, parts) => <button key={index} type="button" aria-current={index === parts.length - 1 ? "location" : undefined} disabled={!admissionReady || snapshot.actionBlocked || snapshot.treeLoading} onClick={() => void controller.loadTree(parts.slice(0, index + 1).join("/"))}>/ {part}</button>)}
-              </nav>
+              </nav>}
               <VirtualFileList showHidden={showHiddenFiles} key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}:${snapshot.treeParent}`} readBranch={readTreeBranch} rootPage={snapshot.treePage} entries={snapshot.tree} activePath={snapshot.activePath} disabled={!admissionReady || snapshot.actionBlocked} onOpen={openTreeEntry}
                 hasMore={Boolean(snapshot.treeNextCursor)} loading={snapshot.treeLoading} failed={snapshot.error?.messageKey === "m5.editorError.tree"} onLoadMore={loadMoreTree} />
             </>
