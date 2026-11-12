@@ -2,6 +2,12 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — 실사용 시험·팀 중단 원인·통합
+- 실사용 시험에서 개발 Claude가 `approvalDelivery/inputChanged`로 실패: 권한 전달마다 하는 작업 복사본 검증의 `git write-tree`가 `.git/index.lock`을 요구해 공급자 `git status`와 충돌. 재현 뒤 `git diff-index --cached --quiet --ignore-submodules=none --ita-invisible-in-index`로 교체(8e780fd8·3663095c, 독립 검토 B1 반영 후 차단 없음). test_todo 중단(Bash 뒤 Read 실패)과 같은 계열로 판단하나 과거 실행의 동일 원인은 추정이다.
+- 같은 시각 sidecar가 종료되며 materialization 작업이 `attempting`으로 남아 다음 시작 admission이 거절(앱 열림 불가). 복사본에서 `pending`으로 되돌려 전체 검증 통과를 확인한 뒤 사용자 승인으로 실제 DB를 백업(`m5-backup-before-materialization-repair-20261112`)하고 1행만 복구, 정상 admission 확인. admission 실패 kind를 stderr에 남김(b3af8c83).
+- 추가 구현(각 검사 통과): 보고서 `docs/elsecrew/<역할>.md` 저장(FIFO·사용자 파일 보호·실패 정리, 독립 검토 차단 없음), 멈춤 원인 코드·상태 갱신, 진행 중 팀원 표시, 실행 순번·시간, 첫 채팅 팀·권한 확인, 모델 목록 저장·실제 모델명, 연결=로그인 일원화, 연결 안 된 공급자 조회 시 sidecar 종료 수정, 설정 선택 영역 제거, Codex fence 경합 busy 처리. 채팅 영구 삭제 병합(bf9bae43). 사용자 정의 역할 병합은 V13+삭제 뒤 compaction 실패로 `integration/custom-roles`(d8d6383c)에 보류, 작업자 수정 중. 다른 세션이 같은 worktree에서 병합을 두 번 커밋했고 리뷰어가 cd 실패로 이 저장소에 임시 커밋(복구 확인)했다.
+- 다음: V13 수정 후 역할 병합·누적 검사, 단일 실행 실패가 sidecar 전체 종료로 번지는 경로·`attempting` 자동 재검증 재개·sidecar 사망 시 종료 허용·종료 원인의 고정 식별자 기록. 실제 시험 계속(기획만 Codex). push·main 병합 없음.
+
 ### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — 채팅 영구 삭제 브랜치 병합 마무리
 - 멈춘 병합 `feature/ade-chat-erasure`(5a097d27) → `feature/ade`를 `git merge --continue`로 완료했다(병합 커밋 bf9bae43, 로컬만·push 없음). 멈춘 이유: 충돌은 이미 해결·스테이징돼 있었고 커밋 단계만 남아 있었다. 미병합 파일·충돌 표식·hook 없음을 확인하고 내용은 고치지 않았다.
 - 검증: `git diff --check` 통과, `tsc --noEmit` 통과, `tests/m5-chat-erasure.test.mts` 3/3 통과. Rust erasure 테스트는 같은 worktree의 다른 세션이 cargo check/test를 실행 중이어서(무거운 실행은 한 번에 하나) 중복으로 돌리지 않았다. 병합 결과의 Rust 검증 결과는 그 세션의 기록으로 확인해야 한다.
@@ -193,6 +199,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **작업 복사본 검증과 Git 잠금(2026-11-12)**: 실행 중 검증은 `.git/index.lock`을 잡지 않아야 한다(공급자가 자체 git 명령으로 잠금 보유 가능). `attempting` materialization이 남으면 admission이 fail-closed로 거절하며, 복구는 백업 뒤 `pending`으로 되돌려 정밀 재검증을 통과시키는 것이다. 다른 세션·리뷰어는 이 worktree에서 쓰기 금지, `cd` 대신 `git -C`.
 - **공급자 fence 경합(2026-11-12)**: 로그인 확인·모델 목록·실행이 같은 `*-login.pending`을 공유한다. 기존 fence가 live 소유자에게 잠겨 있으면 `providerBusy`(재시도)이고, 잠금 없는 고아만 recovery 증거다. fence는 staging 잠금 후 hard_link로만 게시해 이름이 잠기지 않은 inode를 가리키는 순간이 없다. 사용량 표시는 연결 변경 시 Codex 모델 조회를 즉시 실행하므로 로그인 확인과 동시 실행될 수 있다.
 - **2026-11-12 main 통합 이후**: PR #1 병합 b6e2de81 및 GitHub `elsecrew` 이름 변경 완료. 이후 최신 main 기반 기능 브랜치에서 작업하며 추가 main 병합/push는 별도 승인이다. CI43150190399 실패는 제품 완료가 아님; Tauri 빌드 성공과 artifact 업로드 실패를 구분한다.
 - **Claude 실패 진단(2026-11-12)**: 새 terminal run.failure는 허용된 단계/원인 코드만 보존하며 기존 실패 원인은 추정하지 않는다. fixture Bash→Read 정상 경로는 통과했고 전달 오류 주입의 재시작 보존도 확인했다. 과거 사용자 실행의 직접 원인과 설치본/실제 공급자 재시험은 별도 미확인이다.
