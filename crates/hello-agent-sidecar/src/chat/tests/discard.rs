@@ -459,3 +459,89 @@ fn review_discard_dispatcher_rejects_owned_fake_actual_run_without_mutation() {
     assert_eq!(before, after);
     assert_eq!(bytes, after_bytes);
 }
+
+#[test]
+#[cfg(unix)]
+fn selected_workspace_cleanup_preserves_original_and_chat_after_reopen() {
+    let mut f = Fixture::new();
+    let (chat,address,revision) = ready(&mut f);
+    let manifest = f.projects.verify_workspace(&f.storage,&address).unwrap();
+    let path = std::path::PathBuf::from(manifest["worktreePath"].as_str().unwrap());
+    assert!(f.projects.cleanup_workspace(&mut f.storage,&address.chat_id,"req_too_early").is_err());
+    f.chats.discard_workspace(&mut f.storage,&mut f.projects,&address,chat["taskId"].as_str().unwrap(),revision,"req_cleanup_discard").unwrap();
+    let history = f.storage.chat_message_history(&address.chat_id).unwrap();
+    let entries = f.projects.workspace_cleanup_list(&f.storage).unwrap().result;
+    assert_eq!(entries["entries"][0]["eligible"],true);
+    // A symlink inside the selected copy must never traverse/delete its target.
+    std::os::unix::fs::symlink(&f.source,path.join("outside-link")).unwrap();
+    f.projects.cleanup_workspace(&mut f.storage,&address.chat_id,"req_cleanup").unwrap();
+    assert!(!path.exists());
+    assert_eq!(fs::read(f.source.join("src/value.txt")).unwrap(),b"base");
+    assert_eq!(f.storage.chat_message_history(&address.chat_id).unwrap(),history);
+    assert_eq!(f.projects.workspace_cleanup_list(&f.storage).unwrap().result["entries"],json!([]));
+    let database = f.storage.path().to_path_buf(); drop(f.storage);
+    let mut reopened = Storage::open(&database).unwrap();
+    assert_eq!(reopened.chat_message_history(&address.chat_id).unwrap(),history);
+    f.projects.cleanup_workspace(&mut reopened,&address.chat_id,"req_repeat_cleanup").unwrap();
+}
+
+#[test]
+#[cfg(unix)]
+fn selected_workspace_cleanup_rejects_poisoned_lock_and_replaced_root() {
+    let mut f = Fixture::new();
+    let (chat,address,revision) = ready(&mut f);
+    let manifest = f.projects.verify_workspace(&f.storage,&address).unwrap();
+    let path = std::path::PathBuf::from(manifest["worktreePath"].as_str().unwrap());
+    f.chats.discard_workspace(&mut f.storage,&mut f.projects,&address,chat["taskId"].as_str().unwrap(),revision,"req_cleanup_discard").unwrap();
+    let lock_id = format!("lock_{}",address.worktree_id);
+    let mut lock = f.storage.projection_record("lock",&lock_id).unwrap().unwrap();
+    lock.insert("poisoned".into(),json!(true));
+    f.storage.upsert_projection_record("lock",&lock_id,"op_cleanup_poison",None,lock.clone()).unwrap();
+    assert!(f.projects.cleanup_workspace(&mut f.storage,&address.chat_id,"req_poison_cleanup").is_err());
+    assert!(path.exists());
+    lock.insert("poisoned".into(),json!(false));
+    f.storage.upsert_projection_record("lock",&lock_id,"op_cleanup_unpoison",None,lock).unwrap();
+    let moved = path.with_extension("held"); fs::rename(&path,&moved).unwrap();
+    std::os::unix::fs::symlink(&f.source,&path).unwrap();
+    assert!(f.projects.cleanup_workspace(&mut f.storage,&address.chat_id,"req_symlink_cleanup").is_err());
+    assert_eq!(fs::read(f.source.join("src/value.txt")).unwrap(),b"base");
+}
+
+#[test]
+#[cfg(unix)]
+fn selected_workspace_cleanup_resumes_interrupted_intent_rename_and_deletion() {
+    for stage in 1..=3 {
+        let mut f = Fixture::new();
+        let (chat,address,revision) = ready(&mut f);
+        let manifest = f.projects.verify_workspace(&f.storage,&address).unwrap();
+        let path = std::path::PathBuf::from(manifest["worktreePath"].as_str().unwrap());
+        f.chats.discard_workspace(&mut f.storage,&mut f.projects,&address,chat["taskId"].as_str().unwrap(),revision,"req_discard").unwrap();
+        crate::project::workspace_cleanup::interrupt_at(stage);
+        assert!(f.projects.cleanup_workspace(&mut f.storage,&address.chat_id,"req_interrupted").is_err());
+        let database = f.storage.path().to_path_buf(); drop(f.storage);
+        let mut reopened = Storage::open(&database).unwrap();
+        assert_eq!(f.projects.workspace_cleanup_list(&reopened).unwrap().result["entries"][0]["pending"],true);
+        f.projects.cleanup_workspace(&mut reopened,&address.chat_id,"req_resume").unwrap();
+        assert!(!path.exists());
+        assert_eq!(fs::read(f.source.join("src/value.txt")).unwrap(),b"base");
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn selected_workspace_cleanup_pending_manifest_change_is_rejected() {
+    let mut f = Fixture::new();
+    let (chat,address,revision) = ready(&mut f);
+    let original = f.projects.verify_workspace(&f.storage,&address).unwrap();
+    let path = std::path::PathBuf::from(original["worktreePath"].as_str().unwrap());
+    f.chats.discard_workspace(&mut f.storage,&mut f.projects,&address,chat["taskId"].as_str().unwrap(),revision,"req_discard").unwrap();
+    crate::project::workspace_cleanup::interrupt_at(1);
+    assert!(f.projects.cleanup_workspace(&mut f.storage,&address.chat_id,"req_intent").is_err());
+    let manifests = path.parent().unwrap().parent().unwrap().join("worktree-manifests-v1").join(format!("{}.json",address.worktree_id));
+    let mut changed: Value = serde_json::from_slice(&fs::read(&manifests).unwrap()).unwrap();
+    changed["lifecycle"] = json!("active");
+    fs::write(&manifests,serde_json::to_vec(&changed).unwrap()).unwrap();
+    assert!(f.projects.cleanup_workspace(&mut f.storage,&address.chat_id,"req_bad_resume").is_err());
+    assert!(path.exists());
+    assert_eq!(fs::read(f.source.join("src/value.txt")).unwrap(),b"base");
+}

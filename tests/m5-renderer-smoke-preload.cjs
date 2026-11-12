@@ -24,7 +24,15 @@ window.m5Install = { request: async () => {
 const preparationInspection = { projectId: "earlier_project", worktreeId: "worktree_failed", workspaceIdentity: "workspace_failed", lockId: "lock_worktree_failed", projectRevision: 8, lockRevision: 9 };
 let preparationAttempts = 0;
 window.m5SmokePermissions = {};
+window.m5CleanupCalls = [];
 window.m5Projects = { request: async (input) => {
+  if (input.action === "workspaceCleanupList") return {schemaVersion:1,action:input.action,entries:[{chatId:"chat_cleanup",projectId:"smoke_project",title:"Discarded sample",eligible:true,pending:false},{chatId:"chat_blocked",projectId:"smoke_project",title:"Recovery required",eligible:false,pending:false}].filter(item=>!window.m5CleanupCalls.includes(item.chatId))};
+  if (input.action === "cleanupWorkspace") {
+    if (!input.confirmed || input.chatId !== "chat_cleanup") throw new Error("cleanup blocked");
+    window.m5CleanupCalls.push(input.chatId);
+    return {schemaVersion:1,action:input.action,chatId:input.chatId,deleted:true};
+  }
+
   if(input.action === "getAutomationPermissions" || input.action === "setAutomationPermissions") {
     if(input.action === "setAutomationPermissions") {
       if(input.confirmed !== true) throw new Error("missing consent");

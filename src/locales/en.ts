@@ -2,6 +2,18 @@ import type { MessageKey } from "./ko";
 
 // 영어 문구. ko와 동일한 키를 모두 가져야 한다(Record<MessageKey>로 강제).
 export const en: Record<MessageKey, string> = {
+  "m5.cleanup.title": "Clean up working copies",
+  "m5.cleanup.help": "Select discarded working copies to delete. Original projects, conversations and recovery backups are preserved.",
+  "m5.cleanup.inspect": "Find cleanup items",
+  "m5.cleanup.empty": "No working copies to clean up.",
+  "m5.cleanup.pending": "Interrupted cleanup · can resume",
+  "m5.cleanup.ready": "Discarded working copy",
+  "m5.cleanup.blocked": "Execution or recovery needs attention",
+  "m5.cleanup.selected": "Clean up {count} selected",
+  "m5.cleanup.confirm": "Permanently delete files in the selected working copies. Conversation records remain, but these files cannot be restored.",
+  "m5.cleanup.cancel": "Cancel",
+  "m5.cleanup.erase": "Delete permanently",
+  "m5.cleanup.error": "Cleanup could not finish. Reload the list to check its state.",
   "m5.permissions.title": "Work permissions",
   "m5.permissions.automatic": "Automatic",
   "m5.permissions.ask": "Ask each time",

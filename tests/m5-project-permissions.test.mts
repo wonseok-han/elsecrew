@@ -10,3 +10,14 @@ test("project permission requires explicit complete consent and matching receipt
  assert.throws(()=>validateProjectCatalogResult({...result,projectId:"project_b"},request));
  assert.throws(()=>validateProjectCatalogResult({...result,permissions:{files:true,commands:true}},request));
 });
+
+test("workspace cleanup requires exact selection and permanent-delete consent", () => {
+ const request={action:"cleanupWorkspace" as const,chatId:"chat_a",confirmed:true as const};
+ assert.deepEqual(validateProjectCatalogRequest(request),request);
+ assert.throws(()=>validateProjectCatalogRequest({...request,confirmed:false}));
+ assert.throws(()=>validateProjectCatalogRequest({...request,path:"/source"}));
+ const result={schemaVersion:1,action:request.action,chatId:"chat_a",deleted:true};
+ assert.deepEqual(validateProjectCatalogResult(result,request),result);
+ assert.throws(()=>validateProjectCatalogResult({...result,chatId:"chat_b"},request));
+ assert.throws(()=>validateProjectCatalogResult({...result,deleted:false},request));
+});

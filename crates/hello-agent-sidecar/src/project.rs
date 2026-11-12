@@ -1,4 +1,5 @@
 pub(crate) mod automation_permissions;
+pub(crate) mod workspace_cleanup;
 // Requires native Windows recovery QA and explicit product activation.
 pub(crate) const WINDOWS_SAVE_RECOVERY_MUTATIONS_ENABLED: bool = false;
 // Installation consent is not product activation; native integration review remains required.
@@ -336,6 +337,7 @@ struct WatchState {
 
 enum WorkspaceLockAdmission {
     Ready,
+    Cleanup,
     #[cfg(windows)]
     SaveRecovery(String),
 }
@@ -3648,7 +3650,8 @@ impl ProjectManager {
                 ));
             }
         }
-        if chat.get("state").and_then(Value::as_str) == Some("discarded") {
+        if chat.get("state").and_then(Value::as_str) == Some("discarded")
+            && !(matches!(admission, WorkspaceLockAdmission::Cleanup) && lifecycle == "abandoned") {
             return Err(ProjectFailure::recovery(
                 "discarded chat workspace cannot be reused",
             ));
@@ -3721,7 +3724,7 @@ impl ProjectManager {
             .projection_record("lock", &active.lock_id)?
             .ok_or_else(|| ProjectFailure::manifest("workspace lock projection is missing"))?;
         match admission {
-            WorkspaceLockAdmission::Ready => {
+            WorkspaceLockAdmission::Ready | WorkspaceLockAdmission::Cleanup => {
                 if lock.get("poisoned").and_then(Value::as_bool) != Some(false)
                     || lock.get("recovery_required").and_then(Value::as_bool) != Some(false)
                 {
@@ -5835,7 +5838,7 @@ fn preserve_project_extensions(
         .as_object()
         .cloned()
         .ok_or_else(|| ProjectFailure::manifest("project payload must be an object"))?;
-    for field in ["automation_permissions_v1", "catalog_hidden", "catalog_hidden_chats", "native_path_binding", "role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews", "application_backups", "application_intent", "application_history"] {
+    for field in ["automation_permissions_v1", "workspace_cleanup_v1", "catalog_hidden", "catalog_hidden_chats", "native_path_binding", "role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews", "application_backups", "application_intent", "application_history"] {
         if field == path_binding::FIELD && object.contains_key(field) {
             continue;
         }

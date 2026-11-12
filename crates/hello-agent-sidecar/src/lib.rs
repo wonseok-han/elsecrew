@@ -1219,6 +1219,18 @@ impl Sidecar {
                 }
             }),
             "project.catalog" => match request.params.get("action").and_then(Value::as_str) {
+                Some("workspaceCleanupList") => {
+                    require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
+                    self.projects.workspace_cleanup_list(&self.storage)
+                }
+                Some("cleanupWorkspace") => {
+                    let params = require_exact_params(&request.params, &["action", "chatId", "confirmed"]).map_err(invalid_params)?;
+                    if params["confirmed"] != true || self.g5.cleanup_blocked() || !self.workflow_chats.is_empty() || !self.agent_runtime.owned_run_ids().is_empty() || !self.pending_agent_starts.is_empty() || !self.pending_agent_cancels.is_empty() {
+                        return Err(invalid_params("cleanup requires explicit confirmation and idle execution".into()));
+                    }
+                    self.projects.cleanup_workspace(&mut self.storage, param_string(params,"chatId").map_err(invalid_params)?, &request.request_id)
+                }
+
                 Some("getAutomationPermissions" | "setAutomationPermissions") => {
                     let setting = request.params["action"] == "setAutomationPermissions";
                     let fields: &[&str] = if setting { &["action", "projectId", "permissions", "confirmed"] } else { &["action", "projectId"] };

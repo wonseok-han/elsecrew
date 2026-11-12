@@ -40,7 +40,10 @@ function validateGitTrustInspection(value: unknown): GitTrustInspection {
 }
 export type TeamTaskCancelRequest = ChatDiscardAddress & { action: "cancelTeamTask"; triggerMessageId: string };
 export type AutomationPermissions = { files: boolean; commands: boolean };
+export interface WorkspaceCleanupEntry { chatId: string; projectId: string; title: string; eligible: boolean; pending: boolean }
 export type ProjectCatalogRequest =
+  | { action: "workspaceCleanupList" }
+  | { action: "cleanupWorkspace"; chatId: string; confirmed: true }
   | { action: "getAutomationPermissions"; projectId: string }
   | { action: "setAutomationPermissions"; projectId: string; permissions: AutomationPermissions; confirmed: true }
   | { action: "getProviderConnections" }
@@ -84,6 +87,8 @@ export type ProjectCatalogRequest =
   | { action: "abandonPreparation"; inspection: PreparationInspection };
 export interface ProjectCatalogEntry { projectId: string; canonicalPath: string }
 export type ProjectCatalogResult =
+  | { schemaVersion: 1; action: "workspaceCleanupList"; entries: WorkspaceCleanupEntry[] }
+  | { schemaVersion: 1; action: "cleanupWorkspace"; chatId: string; deleted: true }
   | { schemaVersion: 1; action: "getAutomationPermissions" | "setAutomationPermissions"; projectId: string; permissions: AutomationPermissions }
   | { schemaVersion: 1; action: "getProviderConnections" | "setProviderConnection"; connections: { codex: boolean; "claude-code": boolean } }
   | { schemaVersion: 1; action: "cancelTeamTask"; chatId: string; triggerMessageId: string; status: "stopping" | "stopped" }
@@ -154,7 +159,12 @@ export function validateChatDiscardInspection(value: unknown): ChatDiscardInspec
 }
 export function validateProjectCatalogRequest(value: unknown): ProjectCatalogRequest {
   const request = object(value);
-  if (request.action === "getAutomationPermissions" || request.action === "setAutomationPermissions") {
+  if (request.action === "workspaceCleanupList") {
+    keys(request,["action"]);
+  } else if (request.action === "cleanupWorkspace") {
+    keys(request,["action","chatId","confirmed"]); id(request.chatId);
+    if (request.confirmed !== true) throw new Error("cleanup confirmation required");
+  } else if (request.action === "getAutomationPermissions" || request.action === "setAutomationPermissions") {
     keys(request, request.action === "setAutomationPermissions" ? ["action","projectId","permissions","confirmed"] : ["action","projectId"]);
     id(request.projectId);
     if (request.action === "setAutomationPermissions") {
@@ -240,7 +250,20 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   const request = validateProjectCatalogRequest(input);
   const result = object(value);
   if (result.schemaVersion !== 1 || result.action !== request.action || new TextEncoder().encode(JSON.stringify(value)).byteLength > 768 * 1024) throw new Error("invalid catalog response envelope");
-  if (request.action === "getAutomationPermissions" || request.action === "setAutomationPermissions") {
+  if (request.action === "workspaceCleanupList") {
+    keys(result,["schemaVersion","action","entries"]);
+    if (!Array.isArray(result.entries) || result.entries.length > 200) throw new Error("invalid cleanup list");
+    const seen = new Set<string>();
+    for (const raw of result.entries) {
+      const entry = object(raw); keys(entry,["chatId","projectId","title","eligible","pending"]);
+      id(entry.chatId); id(entry.projectId);
+      if (typeof entry.title !== "string" || entry.title.length > 10000 || typeof entry.eligible !== "boolean" || typeof entry.pending !== "boolean" || seen.has(entry.chatId as string)) throw new Error("invalid cleanup entry");
+      seen.add(entry.chatId as string);
+    }
+  } else if (request.action === "cleanupWorkspace") {
+    keys(result,["schemaVersion","action","chatId","deleted"]);
+    if (result.chatId !== request.chatId || result.deleted !== true) throw new Error("cleanup receipt mismatch");
+  } else if (request.action === "getAutomationPermissions" || request.action === "setAutomationPermissions") {
     keys(result,["schemaVersion","action","projectId","permissions"]);
     const permissions = object(result.permissions); keys(permissions,["files","commands"]);
     if (result.projectId !== request.projectId || typeof permissions.files !== "boolean" || typeof permissions.commands !== "boolean") throw new Error("invalid automation permissions");

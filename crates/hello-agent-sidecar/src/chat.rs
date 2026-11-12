@@ -66,6 +66,7 @@ struct RunCompletion<'a> {
 }
 
 impl G5Manager {
+    pub(crate) fn cleanup_blocked(&self) -> bool { self.preparing_to_quit || !self.active.is_empty() }
     pub fn recover_unclean_runs(
         &self,
         storage: &mut Storage,

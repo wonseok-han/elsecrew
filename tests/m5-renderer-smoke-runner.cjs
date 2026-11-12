@@ -312,16 +312,27 @@ app.whenReady().then(async () => {
     if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/smoke') throw new Error('catalog path missing');
     document.querySelector('.m5-project-catalog-list li button').click();
     await ${waitFor("document.querySelector('.m5-file-row')", "project tree")};
-    await ${waitFor("document.querySelector('.m5-permission-options input:not(:disabled)')", "project consent available before work")};
+    if (document.querySelector('.m5-project-menu') || document.querySelector('.m5-workbench > .m5-project-permissions')) throw new Error('project controls clutter the header');
+    document.querySelector('.m5-project-manage').click();
+    await ${waitFor("document.querySelector('.m5-permission-options input:not(:disabled)')", "project permissions in settings")};
     if (Object.keys(window.m5SmokePermissions).length) throw new Error('permissions silently enabled');
+    if (!document.querySelector('.m5-project-permissions button').disabled) throw new Error('unchanged consent save enabled');
     document.querySelectorAll('.m5-permission-options input').forEach(input => input.click());
-    document.querySelector('.m5-permission-options button').click();
-    await ${waitFor("window.m5SmokePermissions.smoke_project?.files && window.m5SmokePermissions.smoke_project?.commands && !document.querySelector('.m5-permission-options')", "explicit saved project consent")};
-    document.querySelector('.m5-project-permissions > button').click();
-    await ${waitFor("document.querySelector('.m5-permission-options input:not(:disabled)')", "reopen project permissions")};
+    document.querySelector('.m5-project-permissions button').click();
+    await ${waitFor("Object.values(window.m5SmokePermissions).some(p => p.files && p.commands) && document.querySelector('.m5-project-permissions button').disabled", "explicit saved project consent")};
     document.querySelectorAll('.m5-permission-options input').forEach(input => input.click());
-    document.querySelector('.m5-permission-options button').click();
-    await ${waitFor("window.m5SmokePermissions.smoke_project?.files === false && window.m5SmokePermissions.smoke_project?.commands === false && !document.querySelector('.m5-permission-options')", "explicit project permission revoke")};
+    document.querySelector('.m5-project-permissions button').click();
+    await ${waitFor("Object.values(window.m5SmokePermissions).some(p => p.files === false && p.commands === false) && document.querySelector('.m5-project-permissions button').disabled", "explicit project permission revoke")};
+    document.querySelectorAll('.m5-preferences-layout > nav button')[3].click();
+    document.querySelector('.m5-cleanup-settings > button').click();
+    await ${waitFor("document.querySelectorAll('.m5-cleanup-settings input').length === 2", "cleanup items")};
+    if (!document.querySelectorAll('.m5-cleanup-settings input')[1].disabled) throw new Error('recovery cleanup selectable');
+    document.querySelector('.m5-cleanup-settings input').click();
+    document.querySelector('.m5-cleanup-settings > .m5-danger').click();
+    if (window.m5CleanupCalls.length) throw new Error('cleanup ran before final consent');
+    await ${waitFor("document.querySelector('.m5-cleanup-confirm .m5-danger')", "cleanup confirmation")};
+    document.querySelector('.m5-cleanup-confirm .m5-danger').click();
+    await ${waitFor("window.m5CleanupCalls.length === 1 && document.querySelectorAll('.m5-cleanup-settings input').length === 1", "selected cleanup receipt")};
     ${process.env.M5_PERMISSIONS_ONLY === "1" ? "return {permissionsVerified:true};" : ""}
 
     document.querySelector('.m5-open-preferences').click(); document.querySelectorAll('.m5-preferences-layout > nav button')[2].click();

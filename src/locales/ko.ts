@@ -1,6 +1,18 @@
 // 한국어 문구 리소스. 이 파일의 키 집합이 다른 언어 파일의 기준이 된다.
 // 보간은 {name} 형태 — t("key", { name }) 로 치환.
 export const ko = {
+  "m5.cleanup.title": "작업 복사본 정리",
+  "m5.cleanup.help": "이미 버린 작업 복사본만 선택해 삭제해요. 원본 프로젝트·채팅 기록·복구 백업은 보존돼요.",
+  "m5.cleanup.inspect": "정리할 항목 찾기",
+  "m5.cleanup.empty": "정리할 작업 복사본이 없어요.",
+  "m5.cleanup.pending": "중단된 정리 · 다시 진행 가능",
+  "m5.cleanup.ready": "버린 작업 복사본",
+  "m5.cleanup.blocked": "실행·복구 상태를 먼저 확인해야 해요",
+  "m5.cleanup.selected": "선택한 {count}개 정리",
+  "m5.cleanup.confirm": "선택한 작업 복사본의 파일을 영구 삭제합니다. 채팅 기록은 남지만 이 복사본의 파일은 되돌릴 수 없어요.",
+  "m5.cleanup.cancel": "취소",
+  "m5.cleanup.erase": "영구 삭제",
+  "m5.cleanup.error": "정리를 완료하지 못했어요. 항목을 다시 조회해 상태를 확인하세요.",
   "m5.permissions.title": "작업 권한",
   "m5.permissions.automatic": "자동 진행",
   "m5.permissions.ask": "개별 확인",
