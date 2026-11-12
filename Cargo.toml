@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/hello-agent-core",
-    "crates/hello-agent-protocol",
-    "crates/hello-agent-sidecar",
+    "crates/elsecrew-core",
+    "crates/elsecrew-protocol",
+    "crates/elsecrew-sidecar",
     "src-tauri",
 ]
 

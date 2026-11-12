@@ -15,7 +15,7 @@ const mode = process.argv[2];
 assert.ok(process.argv.length === 3 && ['--diff', '--tree-file', '--memory-diff', '--memory-file-diff'].includes(mode));
 const memoryMode = mode === '--memory-diff' || mode === '--memory-file-diff';
 const repo = fileURLToPath(new URL('..', import.meta.url));
-const output = fs.mkdtempSync(path.join(os.tmpdir(), 'hello-agent-packaged-performance-'));
+const output = fs.mkdtempSync(path.join(os.tmpdir(), 'elsecrew-packaged-performance-'));
 const git = (...args) => execFileSync('/usr/bin/git', args, {cwd:repo, encoding:'utf8'}).trim();
 const report = {schemaVersion:1, diagnostic:true, gateEligible:false, status:'RUNNING',
   head:git('rev-parse', 'HEAD'), gitStatusBefore:git('status', '--porcelain'),
@@ -45,7 +45,7 @@ async function trial(index) {
   assert.ok(!termination.error && termination.signal === null && [1,2].includes(termination.code), 'Collector process did not terminate normally');
   assert.equal(typeof root, 'string');
   assert.equal(path.dirname(fs.realpathSync(root)), fs.realpathSync(os.tmpdir()));
-  assert.match(path.basename(root), /^hello-agent-packaged-ui-[A-Za-z0-9]+$/);
+  assert.match(path.basename(root), /^elsecrew-packaged-ui-[A-Za-z0-9]+$/);
   const result = JSON.parse(fs.readFileSync(path.join(root, 'result.json'), 'utf8'));
   assert.equal(result.root, root);
   const sample = {index, warmup:index === 0, termination, result};

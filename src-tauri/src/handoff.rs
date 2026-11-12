@@ -35,12 +35,12 @@ use std::time::Duration;
 use tauri::{Emitter, State};
 
 /// 증거는 전부 복제본 **밖**에 둔다 — 에이전트가 자기 증거를 고칠 수 없게 한다.
-const PLAN_EVENTS_SUFFIX: &str = ".hello-agent-plan.events.jsonl";
-const PLAN_STDERR_SUFFIX: &str = ".hello-agent-plan.stderr.log";
-const PLAN_DIFF_SUFFIX: &str = ".hello-agent-plan.diff";
+const PLAN_EVENTS_SUFFIX: &str = ".elsecrew-plan.events.jsonl";
+const PLAN_STDERR_SUFFIX: &str = ".elsecrew-plan.stderr.log";
+const PLAN_DIFF_SUFFIX: &str = ".elsecrew-plan.diff";
 /// 계획 역할의 구조화 출력·스키마. Codex 계획 경로에서만 쓴다
-const PLAN_LAST_MESSAGE_SUFFIX: &str = ".hello-agent-plan.last-message.txt";
-const PLAN_SCHEMA_SUFFIX: &str = ".hello-agent-plan.schema.json";
+const PLAN_LAST_MESSAGE_SUFFIX: &str = ".elsecrew-plan.last-message.txt";
+const PLAN_SCHEMA_SUFFIX: &str = ".elsecrew-plan.schema.json";
 
 /// 실행 중 후손 신원을 누적하는 간격. 짧을수록 §7.10.1.2 ⑤의 잔여 빈틈이 줄어든다.
 const OBSERVE_INTERVAL_MS: u64 = 250;

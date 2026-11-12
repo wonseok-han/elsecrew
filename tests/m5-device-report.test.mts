@@ -24,7 +24,7 @@ test("device inspection is read-only and preserves unknown on inaccessible locat
   const observed = await readDeviceReport(tmpdir());
   assert.ok(observed.memoryBytes > 0);
   assert.ok(observed.availableBytes === null || observed.availableBytes >= 0);
-  const absent = await readDeviceReport(join(tmpdir(), `hello-agent-absent-${randomUUID()}`));
+  const absent = await readDeviceReport(join(tmpdir(), `elsecrew-absent-${randomUUID()}`));
   assert.equal(absent.availableBytes, null);
   assert.deepEqual(Object.keys(absent).sort(), Object.keys(report).sort());
 });

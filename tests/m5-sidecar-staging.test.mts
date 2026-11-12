@@ -16,8 +16,8 @@ const script = readFileSync(scriptUrl, "utf8")
 function artifact(executable: unknown, overrides: Record<string, unknown> = {}) {
   return {
     reason: "compiler-artifact",
-    manifest_path: resolve(root, "crates", "hello-agent-sidecar", "Cargo.toml"),
-    target: { name: "hello-agent-sidecar", kind: ["bin"] },
+    manifest_path: resolve(root, "crates", "elsecrew-sidecar", "Cargo.toml"),
+    target: { name: "elsecrew-sidecar", kind: ["bin"] },
     profile: { test: false, debug_assertions: false },
     features: [],
     executable,
@@ -27,7 +27,7 @@ function artifact(executable: unknown, overrides: Record<string, unknown> = {}) 
 
 test("production staging rejects QA or missing feature evidence before writing", () => {
   for (const features of [["qa-output-fixtures"], undefined, null, "qa-output-fixtures"]) {
-    const result = stage({ messages: [artifact("/qa/release/hello-agent-sidecar", { features })] });
+    const result = stage({ messages: [artifact("/qa/release/elsecrew-sidecar", { features })] });
     assert.ok(result.error);
     assert.deepEqual(result.writes, []);
   }
@@ -76,31 +76,31 @@ function stage(options: {
 }
 
 for (const [name, executable, env] of [
-  ["default target", resolve(root, "target/release/hello-agent-sidecar"), {}],
-  ["shared environment target", "/shared build/release/hello-agent-sidecar", { CARGO_TARGET_DIR: "/shared build" }],
-  ["configured target triple", "/configured target/aarch64-apple-darwin/release/hello-agent-sidecar", {}],
+  ["default target", resolve(root, "target/release/elsecrew-sidecar"), {}],
+  ["shared environment target", "/shared build/release/elsecrew-sidecar", { CARGO_TARGET_DIR: "/shared build" }],
+  ["configured target triple", "/configured target/aarch64-apple-darwin/release/elsecrew-sidecar", {}],
 ] as const) {
   test(`sidecar staging uses Cargo's exact executable for ${name}`, () => {
     const result = stage({ messages: [artifact(executable)], env });
     assert.equal(result.error, undefined);
     assert.deepEqual(result.writes, [
       ["mkdir", resolve("/stage resources/sidecar"), { recursive: true }],
-      ["copy", executable, resolve("/stage resources/sidecar/hello-agent-sidecar")],
-      ["chmod", resolve("/stage resources/sidecar/hello-agent-sidecar"), 0o755],
+      ["copy", executable, resolve("/stage resources/sidecar/elsecrew-sidecar")],
+      ["chmod", resolve("/stage resources/sidecar/elsecrew-sidecar"), 0o755],
     ]);
     assert.deepEqual(result.calls, [["cargo", [
-      "build", "--locked", "--release", "-p", "hello-agent-sidecar", "--bin", "hello-agent-sidecar", "--message-format=json-render-diagnostics",
+      "build", "--locked", "--release", "-p", "elsecrew-sidecar", "--bin", "elsecrew-sidecar", "--message-format=json-render-diagnostics",
     ], { cwd: root, stdio: ["inherit", "pipe", "inherit"], encoding: "utf8" }]]);
   });
 }
 
 test("sidecar staging ignores unrelated artifacts and accepts fresh cached output", () => {
-  const executable = "/shared/release/hello-agent-sidecar";
+  const executable = "/shared/release/elsecrew-sidecar";
   const result = stage({ messages: [
     { reason: "compiler-message", message: { rendered: "a warning" } },
     artifact("/wrong-package", { manifest_path: "/dependency/Cargo.toml" }),
     artifact("/wrong-name", { target: { name: "other", kind: ["bin"] } }),
-    artifact("/wrong-kind", { target: { name: "hello-agent-sidecar", kind: ["lib"] } }),
+    artifact("/wrong-kind", { target: { name: "elsecrew-sidecar", kind: ["lib"] } }),
     artifact("/test-harness", { profile: { test: true } }),
     artifact(executable, { fresh: true }),
     { reason: "build-finished", success: true },
@@ -110,17 +110,17 @@ test("sidecar staging ignores unrelated artifacts and accepts fresh cached outpu
 });
 
 test("sidecar staging preserves Windows destination naming without chmod", () => {
-  const result = stage({ platform: "win32", messages: [artifact("/cross/release/hello-agent-sidecar.exe")] });
+  const result = stage({ platform: "win32", messages: [artifact("/cross/release/elsecrew-sidecar.exe")] });
   assert.equal(result.error, undefined);
   assert.deepEqual(result.writes, [
     ["mkdir", resolve("/stage resources/sidecar"), { recursive: true }],
-    ["copy", "/cross/release/hello-agent-sidecar.exe", resolve("/stage resources/sidecar/hello-agent-sidecar.exe")],
+    ["copy", "/cross/release/elsecrew-sidecar.exe", resolve("/stage resources/sidecar/elsecrew-sidecar.exe")],
   ]);
 });
 
 test("sidecar staging rejects fixture-capable debug assertions and unknown profiles", () => {
   for (const profile of [{ test: false, debug_assertions: true }, { test: false }]) {
-    const result = stage({ messages: [artifact("/overridden/release/hello-agent-sidecar", { profile })] });
+    const result = stage({ messages: [artifact("/overridden/release/elsecrew-sidecar", { profile })] });
     assert.ok(result.error);
     assert.equal(result.writes.length, 0);
   }
@@ -128,7 +128,7 @@ test("sidecar staging rejects fixture-capable debug assertions and unknown profi
 
 test("sidecar staging never copies an artifact after Cargo failure or spawn error", () => {
   for (const failure of [{ status: 101 }, { status: null }, { error: new Error("spawn cargo ENOENT") }]) {
-    const result = stage({ ...failure, messages: [artifact("/stale/hello-agent-sidecar")] });
+    const result = stage({ ...failure, messages: [artifact("/stale/elsecrew-sidecar")] });
     assert.ok(result.error);
     assert.deepEqual(result.writes, []);
   }
@@ -143,8 +143,8 @@ test("sidecar staging rejects absent, ambiguous or invalid executable artifacts 
     [artifact(null)],
     [artifact(42)],
     [artifact("")],
-    [artifact("relative/hello-agent-sidecar")],
-    [artifact("/wrong-kind-type", { target: { name: "hello-agent-sidecar", kind: "bin" } })],
+    [artifact("relative/elsecrew-sidecar")],
+    [artifact("/wrong-kind-type", { target: { name: "elsecrew-sidecar", kind: "bin" } })],
   ]) {
     const result = stage({ messages });
     assert.match(String(result.error), /exactly one executable artifact/);
@@ -157,15 +157,15 @@ test("sidecar staging rejects absent, ambiguous or invalid executable artifacts 
 
 // Exercise drive-qualified paths even when this suite runs on macOS.
 test("sidecar staging uses Windows path semantics and exact Cargo source", () => {
-  const source = "C:\\cargo cache\\release\\hello-agent-sidecar.exe";
+  const source = "C:\\cargo cache\\release\\elsecrew-sidecar.exe";
   const result = stage({
     platform: "win32", windowsPaths: true, resources: "C:\\stage resources",
-    messages: [artifact(source, { manifest_path: "C:\\repo\\crates\\hello-agent-sidecar\\Cargo.toml" })],
+    messages: [artifact(source, { manifest_path: "C:\\repo\\crates\\elsecrew-sidecar\\Cargo.toml" })],
   });
   assert.equal(result.error, undefined);
   assert.deepEqual(result.writes, [
     ["mkdir", "C:\\stage resources\\sidecar", { recursive: true }],
-    ["copy", source, "C:\\stage resources\\sidecar\\hello-agent-sidecar.exe"],
+    ["copy", source, "C:\\stage resources\\sidecar\\elsecrew-sidecar.exe"],
   ]);
   assert.equal(result.calls[0][2].cwd, "C:\\repo");
 });

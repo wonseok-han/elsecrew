@@ -39,7 +39,7 @@ function cleanGit(_root: string, args: string[]) {
 }
 
 function withFixture(run: (root: string) => void) {
-  const root = mkdtempSync(join(tmpdir(), "hello-agent-m5-g5d-storage-"));
+  const root = mkdtempSync(join(tmpdir(), "elsecrew-m5-g5d-storage-"));
   try {
     run(root);
   } finally {

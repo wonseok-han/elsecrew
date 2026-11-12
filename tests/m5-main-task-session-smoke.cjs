@@ -6,7 +6,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const dense = process.argv.includes('--dense-trace');
 assert.deepEqual(process.argv.slice(2), dense ? ['--dense-trace'] : []);
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hello-agent-main-trace-session-'));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'elsecrew-main-trace-session-'));
 app.setPath('userData', path.join(root, 'userdata'));
 const report = {dense, markers:[], root, pid:process.pid, diagnostic:true, gateEligible:false, status:'RUNNING'};
 const persist = () => fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify(report,null,2)+'\n');

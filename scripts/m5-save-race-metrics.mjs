@@ -66,7 +66,7 @@ async function main() {
   const repo = fileURLToPath(new URL('..', import.meta.url));
   const git = (...args) => execFileSync('/usr/bin/git', args, {cwd:repo, encoding:'utf8'}).trim();
   const source = () => ({head:git('rev-parse', 'HEAD'), gitStatus:git('status', '--porcelain')});
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), terminationMode ? 'hello-agent-termination-metrics-' : 'hello-agent-save-race-metrics-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), terminationMode ? 'elsecrew-termination-metrics-' : 'elsecrew-save-race-metrics-'));
   const report = {schemaVersion:1, diagnostic:true, gateEligible:false, status:'RUNNING',
     sourceBefore:source(), measuredAt:new Date().toISOString(), priority:lowerQaPriority(),
     mode:terminationMode ? 'fixture-termination' : 'save-races',
@@ -81,7 +81,7 @@ async function main() {
   let logError;
   log.on('error', error => { logError = String(error); });
   let pending = '', parseFailure, observations = [];
-  const args = ['test', '--release', '--locked', '-p', 'hello-agent-sidecar', '--test', 'stdio_process',
+  const args = ['test', '--release', '--locked', '-p', 'elsecrew-sidecar', '--test', 'stdio_process',
     ...(terminationMode ? ['binary_cancel_', '--', '--test-threads=1', '--nocapture']
       : ['binary_workspace_save_races_preserve_external_bytes_across_two_chats', '--', '--exact', '--ignored', '--nocapture'])];
   const expectedEvidence = terminationMode ? 'fixture-cancel-external-process-observation' : 'native-workspace-save-races';

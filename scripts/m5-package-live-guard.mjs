@@ -21,5 +21,5 @@ export function assertPackageNotRunning(directory, { platform = process.platform
     if (!match) throw new Error('Invalid process inventory; packaging was not started.');
     if ([...roots].some(root => match[2] === root || match[2].startsWith(root + sep))) owners.push(Number(match[1]));
   }
-  if (owners.length) throw new Error(`Close Hello, Agent normally before packaging. Output is in use by PID(s): ${owners.join(', ')}. No process was terminated.`);
+  if (owners.length) throw new Error(`Close Elsecrew normally before packaging. Output is in use by PID(s): ${owners.join(', ')}. No process was terminated.`);
 }

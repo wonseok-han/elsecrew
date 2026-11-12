@@ -1108,7 +1108,7 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
         saveAction = null;
         nextEditor.updateOptions({ ariaLabel: latest.current.labels.name });
         saveAction = nextEditor.addAction({
-          id: "hello-agent.save-file",
+          id: "elsecrew.save-file",
           label: latest.current.labels.save,
           keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
           contextMenuGroupId: "9_cutcopypaste",

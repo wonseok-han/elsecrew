@@ -159,7 +159,7 @@ function g5dAgentReadyLine() {
 }
 
 test("native handshake excludes fixture execution and preserves storage status", async () => {
-  const rust = readFileSync(new URL("../crates/hello-agent-protocol/src/agent_adapter_v1.rs", import.meta.url), "utf8");
+  const rust = readFileSync(new URL("../crates/elsecrew-protocol/src/agent_adapter_v1.rs", import.meta.url), "utf8");
   const nativeList = rust.match(/pub const G5D_NATIVE_CAPABILITIES_V1: &\[&str\] = &\[([\s\S]*?)\];/)?.[1];
   assert.ok(nativeList);
   assert.deepEqual([...nativeList.matchAll(/"([^"]+)"/g)].map(match => match[1]), [...G5D_NATIVE_CAPABILITIES_V1]);
@@ -1728,10 +1728,10 @@ test("main, preload, and package boundary retain fixed channels, origin checks, 
     "event.senderFrame !== event.sender.mainFrame",
     "isAllowedNavigation(event.senderFrame.url)",
     "process.resourcesPath",
-    "hello-agent-sidecar",
+    "elsecrew-sidecar",
     "args: [\"--stdio\"]",
     "app.getPath(\"userData\")",
-    "com.wonseokhan.helloagent",
+    "com.wonseokhan.elsecrew",
     "app.on(\"before-quit\"",
     "quitCoordinator.handleBeforeQuit()",
   ]) assert.ok(main.includes(required), `missing ${required}`);

@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify the previously failed ledger fixture only
-        run: cargo test --locked --release -p hello-agent-sidecar --lib agent_runtime::budget_tests::budget_valid_actual_run_snapshot_exceeds_reopen_primary -- --exact
+        run: cargo test --locked --release -p elsecrew-sidecar --lib agent_runtime::budget_tests::budget_valid_actual_run_snapshot_exceeds_reopen_primary -- --exact
       - name: Record diagnostic scope
         shell: pwsh
         run: |

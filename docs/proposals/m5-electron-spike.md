@@ -87,13 +87,13 @@ src/
   m5/                   # 새 작업대 renderer entry와 화면
   ...                   # 기존 M0~M4 React 화면; M5.0 동안 동결
 crates/
-  hello-agent-core/     # Tauri/Electron을 모르는 안전·도메인 코어
-  hello-agent-sidecar/  # stdio protocol, SQLite, adapter 조합
+  elsecrew-core/     # Tauri/Electron을 모르는 안전·도메인 코어
+  elsecrew-sidecar/  # stdio protocol, SQLite, adapter 조합
 src-tauri/              # 현재 앱 host; M5.0 동안 회귀 수정 외 기능 추가 금지
 tests/fixtures/m5/      # 생성기와 작은 고정 fixture
 ```
 
-루트에 Cargo workspace를 만들고 `src-tauri`, `hello-agent-core`, `hello-agent-sidecar`를 구성원으로 둔다. 전환 중 기존 Tauri 앱이 사라지지는 않지만 **새 M5 기능은 Electron 경로에만 구현**한다. Electron 기준선이 합격하면 별도 사용자 승인 아래 기본 개발/배포 명령을 Electron으로 전환하고, 그 뒤 Tauri host 제거 계획을 세운다.
+루트에 Cargo workspace를 만들고 `src-tauri`, `elsecrew-core`, `elsecrew-sidecar`를 구성원으로 둔다. 전환 중 기존 Tauri 앱이 사라지지는 않지만 **새 M5 기능은 Electron 경로에만 구현**한다. Electron 기준선이 합격하면 별도 사용자 승인 아래 기본 개발/배포 명령을 Electron으로 전환하고, 그 뒤 Tauri host 제거 계획을 세운다.
 
 ### 4.1 Rust 추출 경계
 
@@ -105,7 +105,7 @@ tests/fixtures/m5/      # 생성기와 작은 고정 fixture
 4. sidecar는 같은 core를 호출하고 JSONL 이벤트로 변환한다.
 5. `handoff`/`orchestration`의 Tauri 의존 구간은 수직 슬라이스에 필요한 순서대로만 추출한다. 대규모 선행 리팩터링은 하지 않는다.
 
-core crate에는 `tauri`, Electron/Node 개념, SQLite UI projection을 넣지 않는다. `hello-agent-sidecar`만 프로토콜과 SQLite를 소유한다.
+core crate에는 `tauri`, Electron/Node 개념, SQLite UI projection을 넣지 않는다. `elsecrew-sidecar`만 프로토콜과 SQLite를 소유한다.
 
 ## 5. 프로세스와 신뢰 경계
 

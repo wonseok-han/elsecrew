@@ -23,7 +23,7 @@ import {
 /** 실사용에서 실제로 있었던 목록 모양 — 첫 프로젝트가 Git이 아니다. */
 const PROJECTS: PilotCandidate[] = [
   { path: "/p/notes", pilotEligible: false }, // CLAUDE.md만 있고 .git 없음
-  { path: "/p/hello-agent", pilotEligible: true },
+  { path: "/p/elsecrew", pilotEligible: true },
   { path: "/p/scratch", pilotEligible: false },
 ];
 
@@ -74,7 +74,7 @@ test("화면이 처음 뜰 때 대상이 자동으로 정해지지 않는다", (
  * 사용자는 시작을 누른 뒤에야 영문 오류를 봤다.
  *
  * `projects[0]`을 `projects.find(p => p.pilotEligible)`로 바꾸는 것도 답이 아니다 —
- * 그러면 이 테스트는 통과하지만 사용자는 여전히 **자기가 고르지 않은** `/p/hello-agent`에
+ * 그러면 이 테스트는 통과하지만 사용자는 여전히 **자기가 고르지 않은** `/p/elsecrew`에
  * 작업을 맡기게 된다. 그래서 "무엇도 고르지 않는다"를 확인한다.
  */
 test("첫 프로젝트가 비Git이어도 뒤의 Git 프로젝트가 대신 골라지지 않는다", () => {
@@ -85,7 +85,7 @@ test("첫 프로젝트가 비Git이어도 뒤의 Git 프로젝트가 대신 골�
   assert.notEqual(home.target, "/p/notes", "비Git 프로젝트가 자동 선택됐다");
   assert.notEqual(
     home.target,
-    "/p/hello-agent",
+    "/p/elsecrew",
     "사용자가 고르지 않은 프로젝트가 자동 선택됐다",
   );
 });
@@ -118,17 +118,17 @@ test("Git 저장소인 프로젝트는 명시적으로 고른 뒤 실행할 수 
   const home = new HomeDouble();
   home.goal = "인사말을 더 친근하게 바꿔 줘";
 
-  home.pick("/p/hello-agent");
+  home.pick("/p/elsecrew");
 
-  assert.equal(home.target, "/p/hello-agent");
+  assert.equal(home.target, "/p/elsecrew");
   assert.equal(home.startEnabled, true);
   home.start();
-  assert.deepEqual(home.calls, ["begin_handoff:/p/hello-agent"]);
+  assert.deepEqual(home.calls, ["begin_handoff:/p/elsecrew"]);
 });
 
 test("목표를 적기 전에는 시작할 수 없다", () => {
   const home = new HomeDouble();
-  home.pick("/p/hello-agent");
+  home.pick("/p/elsecrew");
 
   assert.equal(home.startEnabled, false, "빈 목표로 시작할 수 있다");
   home.goal = "   ";
@@ -142,24 +142,24 @@ test("목표를 적기 전에는 시작할 수 없다", () => {
 test("고른 프로젝트가 자격을 잃으면 선택을 놓는다", () => {
   // 사용자가 고른 뒤 그 폴더의 .git이 사라졌다
   const after: PilotCandidate[] = [
-    { path: "/p/hello-agent", pilotEligible: false },
+    { path: "/p/elsecrew", pilotEligible: false },
   ];
 
   assert.equal(
-    retainTarget(after, "/p/hello-agent"),
+    retainTarget(after, "/p/elsecrew"),
     null,
     "자격을 잃은 프로젝트를 계속 붙잡고 있다",
   );
 });
 
 test("고른 프로젝트가 목록에서 사라지면 선택을 놓는다", () => {
-  assert.equal(retainTarget([], "/p/hello-agent"), null);
+  assert.equal(retainTarget([], "/p/elsecrew"), null);
 });
 
 test("새로고침해도 멀쩡한 선택은 유지된다", () => {
   assert.equal(
-    retainTarget(PROJECTS, "/p/hello-agent"),
-    "/p/hello-agent",
+    retainTarget(PROJECTS, "/p/elsecrew"),
+    "/p/elsecrew",
     "새로고침마다 선택이 풀리면 쓸 수 없다",
   );
   assert.equal(retainTarget(PROJECTS, null), null);

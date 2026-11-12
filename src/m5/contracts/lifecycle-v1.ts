@@ -20,14 +20,14 @@ export const M5_INTERNAL_CHANNELS_V1 = {
 
 export const M5_DATA_DIRECTORY_V1 = {
   base: "userData",
-  segments: ["com.wonseokhan.helloagent", "m5"] as const,
-  sqliteFile: "hello-agent.sqlite3",
+  segments: ["com.wonseokhan.elsecrew", "m5"] as const,
+  sqliteFile: "elsecrew.sqlite3",
   separateFromLegacyTauriStore: true,
 } as const;
 
 export const M5_PRODUCTION_SIDECAR_V1 = {
   base: "process.resourcesPath",
-  relativeSegments: ["sidecar", "hello-agent-sidecar"] as const,
+  relativeSegments: ["sidecar", "elsecrew-sidecar"] as const,
   windowsSuffix: ".exe",
   argv: ["--stdio"] as const,
   shell: false,

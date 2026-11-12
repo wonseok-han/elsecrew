@@ -705,7 +705,7 @@ test("storage-v2 golden migration is additive and preserves v1 rows byte-for-byt
   assert.equal(manifest.migration.materializationStateReadyRequired, false);
   assert.equal(manifest.migration.downgradePolicy, "openQuestion");
 
-  const temporaryRoot = mkdtempSync(join(tmpdir(), "hello-agent-g5d-contract-"));
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "elsecrew-g5d-contract-"));
   const database = new DatabaseSync(join(temporaryRoot, "storage.sqlite3"), {
     enableForeignKeyConstraints: false,
   });
@@ -869,7 +869,7 @@ test("storage-v3 adds a dedicated singleton without aliasing compaction history"
     "lifetime_materialization_job",
   ]);
 
-  const temporaryRoot = mkdtempSync(join(tmpdir(), "hello-agent-g5d-v3-contract-"));
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "elsecrew-g5d-v3-contract-"));
   const database = new DatabaseSync(join(temporaryRoot, "storage.sqlite3"), {
     enableForeignKeyConstraints: false,
   });
@@ -1070,7 +1070,7 @@ test("storage-v4 rebuilds only lifetime metadata and maps every admissible v3 st
     manifestV4.migration.preflight,
   );
 
-  const temporaryRoot = mkdtempSync(join(tmpdir(), "hello-agent-g5d-v4-contract-"));
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "elsecrew-g5d-v4-contract-"));
   const migrationV3 = readFileSync(resolve(rootV4, manifestV4.migration.predecessorMigrationFile), "utf8");
   const migrationV4 = readFileSync(resolve(rootV4, manifestV4.migration.file), "utf8");
   try {
@@ -1360,7 +1360,7 @@ test("storage-v5 migrates every v4 state and phase without mutating preserved st
     manifestV5.migration.preflight,
   );
 
-  const temporaryRoot = mkdtempSync(join(tmpdir(), "hello-agent-g5d-v5-contract-"));
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "elsecrew-g5d-v5-contract-"));
   const migrationV3 = readFileSync(resolve(rootV3, manifestV3.migration.file), "utf8");
   const migrationV4 = readFileSync(resolve(rootV4, manifestV4.migration.file), "utf8");
   const migrationV5 = readFileSync(resolve(rootV5, manifestV5.migration.file), "utf8");
@@ -1634,7 +1634,7 @@ test("storage-v6 migration creates an empty guarded source index and resets ever
   assert.deepEqual(v6Cases.phaseOrder, [...STORAGE_LIFETIME_PHASES_V4]);
 
   const migrationV6 = readFileSync(resolve(rootV6, manifestV6.migration.file), "utf8");
-  const temporaryRoot = mkdtempSync(join(tmpdir(), "hello-agent-storage-v6-"));
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "elsecrew-storage-v6-"));
   try {
     const reference = createExactStorageV5Database(join(temporaryRoot, "reference.db"), false);
     const exactV5 = schemaSignature(reference);
@@ -1770,7 +1770,7 @@ test("storage-v6 migration creates an empty guarded source index and resets ever
 
 test("storage-v6 source index enforces exact identity, append-only guards, and atomic rollback", () => {
   const migrationV6 = readFileSync(resolve(rootV6, manifestV6.migration.file), "utf8");
-  const temporaryRoot = mkdtempSync(join(tmpdir(), "hello-agent-storage-v6-index-"));
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "elsecrew-storage-v6-index-"));
   try {
     const database = createExactStorageV5Database(join(temporaryRoot, "index.db"), false);
     const exactV5 = schemaSignature(database);
@@ -2228,7 +2228,7 @@ test("storage-v6 freezes 16 bounded phases, indexed provenance, and exact query 
   assert.throws(() => assertExactQueryPlanKeys(
     declaredQueryPlanKeys, [...fixtureQueryPlanKeys, "undeclaredPlan"],
   ));
-  const temporaryRoot = mkdtempSync(join(tmpdir(), "hello-agent-storage-v6-plan-"));
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "elsecrew-storage-v6-plan-"));
   try {
     const database = createExactStorageV5Database(join(temporaryRoot, "plan.db"), false);
     applyExactStorageV6Migration(database, migrationV6, schemaSignature(database), null);
@@ -2362,7 +2362,7 @@ test("storage-v7 freezes bounded lossless compaction without enabling product de
 
   const migrationV6 = readFileSync(resolve(rootV6, manifestV6.migration.file), "utf8");
   const migrationV7 = readFileSync(resolve(rootV7, manifestV7.migration.file), "utf8");
-  const temporaryRoot = mkdtempSync(join(tmpdir(), "hello-agent-storage-v7-"));
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "elsecrew-storage-v7-"));
   try {
     const reference = createExactStorageV5Database(join(temporaryRoot, "reference.db"), false);
     applyExactStorageV6Migration(reference, migrationV6, schemaSignature(reference), null);
@@ -2779,7 +2779,7 @@ test("storage-v8 freezes operation provenance without activating product deletio
   assert.match(migrationV8, /consumer must independently recompute/i);
   assert.doesNotMatch(migrationV8, /DELETE FROM events\s*;/i);
   assert.doesNotMatch(migrationV8, /VACUUM/i);
-  const temporaryRoot = mkdtempSync(join(tmpdir(), "hello-agent-storage-v8-"));
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "elsecrew-storage-v8-"));
   try {
     const reference = createExactStorageV5Database(join(temporaryRoot, "reference.db"), false);
     applyExactStorageV6Migration(reference, migrationV6, schemaSignature(reference), null);

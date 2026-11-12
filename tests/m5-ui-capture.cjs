@@ -6,7 +6,7 @@ const { mkdirSync, mkdtempSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const root = resolve(__dirname, '..');
 const renderer = resolve(root, '.vite/renderer/main_window');
-const userData = mkdtempSync(resolve(tmpdir(), 'hello-agent-ui-capture-'));
+const userData = mkdtempSync(resolve(tmpdir(), 'elsecrew-ui-capture-'));
 app.setPath('userData', userData);
 protocol.registerSchemesAsPrivileged([{ scheme: 'm5visual', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 let output;

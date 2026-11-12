@@ -60,7 +60,7 @@
 
 - 에이전트: Claude Code + Codex
 - 플랫폼: macOS + Windows
-- UI: 한국어·영어 전환. 표시 이름은 `Elsecrew`(엘스크루). 기존 hello-agent 패키지 식별자·저장 경로는 데이터/로그인 호환을 위해 유지
+- UI: 한국어·영어 전환. 표시 이름은 `Elsecrew`(엘스크루). 패키지·앱 식별자·저장 경로도 Elsecrew로 통일. 2026-11-12 사용자 결정으로 새 앱 데이터를 사용하며 기존 앱 데이터는 자동 이전/삭제하지 않음
 - 현행 구조: 재방문용 홈베이스 + 6단계 위저드(에이전트 → 진단 → 설치 → 로그인 → 프로젝트 → 첫 대화) + macOS M4 `HandoffPilot`
 - M5 현행 구현: Electron + React/TypeScript + Monaco와 Rust sidecar에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·채팅별 standalone snapshot·편집/diff·명시 반영/복원 흐름을 연결했다. macOS Codex·Claude Code의 앱 전용 로그인·모델 조회·실제 실행 adapter와 설치/업데이트 경로가 있으며 기존 터미널 인증을 자동 재사용하지 않는다. fixture 실행과 실제 공급자 실행은 분리한다. 구현 존재와 실제 계정/플랫폼 검증 완료는 구분하며 최신 증거는 `docs/history.md`에서 확인한다.
 - 홈베이스: 프로젝트 폴더 스캔, 에이전트 설치·로그인 상태, 업데이트 확인
@@ -74,7 +74,7 @@
 - `src/store.ts`: 기준 폴더와 프로젝트 최근 사용 시각 저장
 - `src-tauri/src/agent.rs`: 에이전트별 설치·감지·로그인 레시피
 - `src-tauri/src/{detect,install,login,project,status,editor,error}.rs`: 시스템 기능
-- `crates/hello-agent-{core,protocol,sidecar}`: 공용 Rust 안전 코어·계약, SQLite·snapshot·채팅·fixture 및 실제 공급자 adapter, 로그인/설치·실행/종료·반영/복원·백업 관리 sidecar
+- `crates/elsecrew-{core,protocol,sidecar}`: 공용 Rust 안전 코어·계약, SQLite·snapshot·채팅·fixture 및 실제 공급자 adapter, 로그인/설치·실행/종료·반영/복원·백업 관리 sidecar
 - `electron/`: Electron main/preload, 고정 typed IPC와 sidecar 수명주기·패키징
 - `src/m5/`, `src/m5/contracts/`: Monaco 채팅 작업대와 V1~V7 bridge·프로젝트/채팅/실행/복구·저장 수명·정규화 event·실제 공급자 및 변경 반영 계약
 - `website/`: 별도 Vinext/OpenAI Sites 소개 웹사이트

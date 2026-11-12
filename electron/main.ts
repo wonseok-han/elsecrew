@@ -144,7 +144,7 @@ function rendererDirectory() {
 function m5DataDirectory(): string {
   const candidate = resolve(
     app.getPath("userData"),
-    "com.wonseokhan.helloagent",
+    "com.wonseokhan.elsecrew",
     "m5",
   );
   mkdirSync(candidate, { recursive: true });
@@ -157,14 +157,14 @@ function sidecarLaunch(dataDirectory: string): SidecarLaunchV1 {
       command: join(
         process.resourcesPath,
         "sidecar",
-        `hello-agent-sidecar${process.platform === "win32" ? ".exe" : ""}`,
+        `elsecrew-sidecar${process.platform === "win32" ? ".exe" : ""}`,
       ),
       args: ["--stdio"],
       cwd: dataDirectory,
     };
   }
   return {
-    command: resolve(__dirname, "..", "..", "target", "debug", `hello-agent-sidecar${process.platform === "win32" ? ".exe" : ""}`),
+    command: resolve(__dirname, "..", "..", "target", "debug", `elsecrew-sidecar${process.platform === "win32" ? ".exe" : ""}`),
     args: ["--stdio"],
     cwd: dataDirectory,
   };
@@ -375,7 +375,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle("m5:app-update:open", async (event, ...args: unknown[]) => {
     assertCurrentMainFrame(event);
     if (args.length !== 0) throw new Error("app update takes no input");
-    const item = Menu.getApplicationMenu()?.getMenuItemById("hello-agent-app-update");
+    const item = Menu.getApplicationMenu()?.getMenuItemById("elsecrew-app-update");
     if (!item?.enabled) throw new Error("app update is unavailable");
     await item.click(undefined, undefined, undefined);
   });
@@ -614,7 +614,7 @@ async function createMainWindow() {
   }
 }
 
-// Keep the existing profile location when changing only the public brand.
+// Fresh Elsecrew profile: do not import the retired application data.
 const existingUserData = app.getPath("userData");
 app.setName("Elsecrew");
 app.setPath("userData", existingUserData);

@@ -48,13 +48,13 @@ test("macOS arm64 package metrics fail when either exact-byte threshold is excee
 
 test("missing required package evidence, wrong kinds, and invalid ZIP signatures are NOT_READY", async () => {
   await withFixture(async (fixture) => {
-    await unlink(resolve(fixture.package, "hello-agent.app/Contents/Resources/sidecar/hello-agent-sidecar"));
+    await unlink(resolve(fixture.package, "Elsecrew.app/Contents/Resources/sidecar/elsecrew-sidecar"));
     const report = await collectPackageMetrics({ platform: "darwin", arch: "arm64", ...fixture });
     assert.equal(report.status, "NOT_READY");
     assert.equal(report.reasons[0]?.code, "unreadable");
   });
   await withFixture(async (fixture) => {
-    const sidecar = resolve(fixture.package, "hello-agent.app/Contents/Resources/sidecar/hello-agent-sidecar");
+    const sidecar = resolve(fixture.package, "Elsecrew.app/Contents/Resources/sidecar/elsecrew-sidecar");
     await unlink(sidecar);
     await mkdir(sidecar);
     const report = await collectPackageMetrics({ platform: "darwin", arch: "arm64", ...fixture });
@@ -78,9 +78,9 @@ test("missing required package evidence, wrong kinds, and invalid ZIP signatures
 
 test("each required product asset must be non-empty", async () => {
   for (const relativePath of [
-    "hello-agent.app/Contents/MacOS/hello-agent",
-    "hello-agent.app/Contents/Resources/app.asar",
-    "hello-agent.app/Contents/Resources/sidecar/hello-agent-sidecar",
+    "Elsecrew.app/Contents/MacOS/Elsecrew",
+    "Elsecrew.app/Contents/Resources/app.asar",
+    "Elsecrew.app/Contents/Resources/sidecar/elsecrew-sidecar",
   ]) {
     await withFixture(async (fixture) => {
       await truncate(resolve(fixture.package, relativePath), 0);
@@ -94,26 +94,26 @@ test("each required product asset must be non-empty", async () => {
 test("fixed package-layout parents cannot be symlinks to external assets", async () => {
   const cases = [
     {
-      parent: "hello-agent.app",
+      parent: "Elsecrew.app",
       files: [
-        ["Contents/MacOS/hello-agent", "external executable"],
+        ["Contents/MacOS/Elsecrew", "external executable"],
         ["Contents/Resources/app.asar", "external asar"],
-        ["Contents/Resources/sidecar/hello-agent-sidecar", "external sidecar"],
+        ["Contents/Resources/sidecar/elsecrew-sidecar", "external sidecar"],
       ],
     },
     {
-      parent: "hello-agent.app/Contents",
+      parent: "Elsecrew.app/Contents",
       files: [
-        ["MacOS/hello-agent", "external executable"],
+        ["MacOS/Elsecrew", "external executable"],
         ["Resources/app.asar", "external asar"],
-        ["Resources/sidecar/hello-agent-sidecar", "external sidecar"],
+        ["Resources/sidecar/elsecrew-sidecar", "external sidecar"],
       ],
     },
     {
-      parent: "hello-agent.app/Contents/Resources",
+      parent: "Elsecrew.app/Contents/Resources",
       files: [
         ["app.asar", "external asar"],
-        ["sidecar/hello-agent-sidecar", "external sidecar"],
+        ["sidecar/elsecrew-sidecar", "external sidecar"],
       ],
     },
   ] as const;
@@ -202,7 +202,7 @@ test("CLI exits 0/1/2 for PASS/FAIL/NOT_READY and writes JSON only", async () =>
 });
 
 async function withFixture(run: (fixture: { package: string; archive: string }, temporaryDirectory: string) => Promise<void>) {
-  const temporaryDirectory = await mkdtemp(resolve(tmpdir(), "hello-agent-m5-package-metrics-"));
+  const temporaryDirectory = await mkdtemp(resolve(tmpdir(), "elsecrew-m5-package-metrics-"));
   try {
     await run(await makeMacFixture(temporaryDirectory), temporaryDirectory);
   } finally {
@@ -211,25 +211,25 @@ async function withFixture(run: (fixture: { package: string; archive: string }, 
 }
 
 async function makeMacFixture(temporaryDirectory: string) {
-  const packageDirectory = resolve(temporaryDirectory, "hello-agent-darwin-arm64");
+  const packageDirectory = resolve(temporaryDirectory, "Elsecrew-darwin-arm64");
   await writeFixtureFiles(packageDirectory, [
-    ["hello-agent.app/Contents/MacOS/hello-agent", "executable"],
-    ["hello-agent.app/Contents/Resources/app.asar", "asar"],
-    ["hello-agent.app/Contents/Resources/sidecar/hello-agent-sidecar", "sidecar"],
+    ["Elsecrew.app/Contents/MacOS/Elsecrew", "executable"],
+    ["Elsecrew.app/Contents/Resources/app.asar", "asar"],
+    ["Elsecrew.app/Contents/Resources/sidecar/elsecrew-sidecar", "sidecar"],
   ]);
-  const archive = resolve(temporaryDirectory, "hello-agent-darwin-arm64.zip");
+  const archive = resolve(temporaryDirectory, "Elsecrew-darwin-arm64.zip");
   await writeFile(archive, Buffer.from([0x50, 0x4b, 0x03, 0x04]));
   return { package: packageDirectory, archive };
 }
 
 async function makeWindowsFixture(temporaryDirectory: string) {
-  const packageDirectory = resolve(temporaryDirectory, "hello-agent-win32-x64");
+  const packageDirectory = resolve(temporaryDirectory, "elsecrew-win32-x64");
   await writeFixtureFiles(packageDirectory, [
-    ["hello-agent.exe", "executable"],
+    ["Elsecrew.exe", "executable"],
     ["resources/app.asar", "asar"],
-    ["resources/sidecar/hello-agent-sidecar.exe", "sidecar"],
+    ["resources/sidecar/elsecrew-sidecar.exe", "sidecar"],
   ]);
-  const archive = resolve(temporaryDirectory, "hello-agent-win32-x64.zip");
+  const archive = resolve(temporaryDirectory, "elsecrew-win32-x64.zip");
   await writeFile(archive, Buffer.from([0x50, 0x4b, 0x03, 0x04]));
   return { package: packageDirectory, archive };
 }

@@ -8,8 +8,8 @@ if (!resourcesDirectory) throw new Error("usage: node scripts/m5-stage-sidecar.m
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const suffix = process.platform === "win32" ? ".exe" : "";
-const binary = `hello-agent-sidecar${suffix}`;
-const build = spawnSync("cargo", ["build", "--locked", "--release", "-p", "hello-agent-sidecar", "--bin", "hello-agent-sidecar", "--message-format=json-render-diagnostics"], {
+const binary = `elsecrew-sidecar${suffix}`;
+const build = spawnSync("cargo", ["build", "--locked", "--release", "-p", "elsecrew-sidecar", "--bin", "elsecrew-sidecar", "--message-format=json-render-diagnostics"], {
   cwd: root,
   stdio: ["inherit", "pipe", "inherit"],
   encoding: "utf8",
@@ -22,8 +22,8 @@ if (build.status !== 0 || build.error) {
 // target triples. Never fall back to a possibly stale root/target executable.
 const artifacts = (build.stdout ?? "").split(/\r?\n/).filter((line) => line.trim()).map((line) => JSON.parse(line)).filter((message) =>
   message?.reason === "compiler-artifact"
-  && message.manifest_path === resolve(root, "crates", "hello-agent-sidecar", "Cargo.toml")
-  && message.target?.name === "hello-agent-sidecar"
+  && message.manifest_path === resolve(root, "crates", "elsecrew-sidecar", "Cargo.toml")
+  && message.target?.name === "elsecrew-sidecar"
   && Array.isArray(message.target.kind) && message.target.kind.includes("bin")
   && message.profile?.test === false
   && message.profile?.debug_assertions === false

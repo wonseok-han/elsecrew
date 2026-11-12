@@ -66,11 +66,11 @@ test("activation V4 rejects false runtime flags and every relaxed frozen invaria
 
 test("activation V4 proof references exist in the integrated focused Rust suites", () => {
   const writerSource = readFileSync(
-    resolve("crates/hello-agent-sidecar/src/storage/tests/compaction_writer_v10.rs"),
+    resolve("crates/elsecrew-sidecar/src/storage/tests/compaction_writer_v10.rs"),
     "utf8",
   );
   const sessionSource = readFileSync(
-    resolve("crates/hello-agent-sidecar/src/tests.rs"),
+    resolve("crates/elsecrew-sidecar/src/tests.rs"),
     "utf8",
   );
 

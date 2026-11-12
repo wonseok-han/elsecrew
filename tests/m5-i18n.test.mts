@@ -8,7 +8,7 @@ import { en } from "../src/locales/en.ts";
 
 const source = ts.createSourceFile("i18n.tsx", readFileSync(new URL("../src/i18n.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const fn = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "detectInitialLang")!;
-const compiled = ts.transpileModule(`const STORAGE_KEY = 'hello-agent.lang';\n${fn.getText(source)}\nglobalThis.detect = detectInitialLang;`, {}).outputText;
+const compiled = ts.transpileModule(`const STORAGE_KEY = 'elsecrew.lang';\n${fn.getText(source)}\nglobalThis.detect = detectInitialLang;`, {}).outputText;
 
 test("language choice survives restart and unavailable storage falls back to system locale", () => {
   for (const [saved, locale, expected] of [["en", "ko-KR", "en"], ["ko", "en-US", "ko"], [null, "ko-KR", "ko"], ["unknown", "fr-FR", "en"]]) {

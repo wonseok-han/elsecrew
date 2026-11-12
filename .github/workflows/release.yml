@@ -68,7 +68,7 @@ jobs:
           #     APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "Hello, Agent ${{ github.ref_name }}"
+          releaseName: "Elsecrew ${{ github.ref_name }}"
           releaseBody: |
             터미널 없이 코딩 에이전트를 설치·설정하도록 돕는 데스크톱 앱입니다.
 

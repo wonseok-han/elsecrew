@@ -5,25 +5,25 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFile, execFileSync } = require('node:child_process');
 const { processTreeMemory, summarizeMemory } = require('./m5-process-memory.cjs');
-const discardFlow = process.env.HELLO_AGENT_SMOKE_DISCARD === '1';
-const measureMemory = process.env.HELLO_AGENT_SMOKE_MEMORY === '1';
-const idleOnly = process.env.HELLO_AGENT_SMOKE_IDLE_ONLY === '1';
-const nativeInput = process.env.HELLO_AGENT_SMOKE_NATIVE_INPUT === '1';
+const discardFlow = process.env.ELSECREW_SMOKE_DISCARD === '1';
+const measureMemory = process.env.ELSECREW_SMOKE_MEMORY === '1';
+const idleOnly = process.env.ELSECREW_SMOKE_IDLE_ONLY === '1';
+const nativeInput = process.env.ELSECREW_SMOKE_NATIVE_INPUT === '1';
 if (idleOnly && !measureMemory) throw new Error('Idle-only diagnostic requires memory mode');
-const largeFile = process.env.HELLO_AGENT_SMOKE_LARGE_FILE === '1';
-const largeTree = process.env.HELLO_AGENT_SMOKE_LARGE_TREE === '1';
-const largeDiff = process.env.HELLO_AGENT_SMOKE_LARGE_DIFF === '1';
+const largeFile = process.env.ELSECREW_SMOKE_LARGE_FILE === '1';
+const largeTree = process.env.ELSECREW_SMOKE_LARGE_TREE === '1';
+const largeDiff = process.env.ELSECREW_SMOKE_LARGE_DIFF === '1';
 if (nativeInput && (measureMemory || largeFile || largeTree || largeDiff)) throw new Error('Native input is a separate manual diagnostic scenario');
-if (idleOnly && (largeFile || largeTree || largeDiff || process.env.HELLO_AGENT_SMOKE_APPLY === '1')) throw new Error('Idle-only diagnostic cannot include project scenarios');
-if (largeDiff && (measureMemory || largeFile || largeTree || process.env.HELLO_AGENT_SMOKE_APPLY === '1')) throw new Error('Large diff is a separate diagnostic scenario');
-if (discardFlow && (measureMemory || idleOnly || nativeInput || largeFile || largeTree || largeDiff || process.env.HELLO_AGENT_SMOKE_APPLY === '1')) throw new Error('Discard is a separate synthetic integration scenario');
+if (idleOnly && (largeFile || largeTree || largeDiff || process.env.ELSECREW_SMOKE_APPLY === '1')) throw new Error('Idle-only diagnostic cannot include project scenarios');
+if (largeDiff && (measureMemory || largeFile || largeTree || process.env.ELSECREW_SMOKE_APPLY === '1')) throw new Error('Large diff is a separate diagnostic scenario');
+if (discardFlow && (measureMemory || idleOnly || nativeInput || largeFile || largeTree || largeDiff || process.env.ELSECREW_SMOKE_APPLY === '1')) throw new Error('Discard is a separate synthetic integration scenario');
 if (discardFlow) {
   const cp = require('node:child_process');
   const assert = require('node:assert/strict');
   const originalSpawn = cp.spawn;
   cp.spawn = function(command, args, options) {
-    if (typeof command === 'string' && path.basename(command) === 'hello-agent-sidecar') {
-      assert.equal(command, path.resolve(__dirname, '../target/debug/hello-agent-sidecar'));
+    if (typeof command === 'string' && path.basename(command) === 'elsecrew-sidecar') {
+      assert.equal(command, path.resolve(__dirname, '../target/debug/elsecrew-sidecar'));
       assert.deepEqual(args, ['--stdio']);
       return Reflect.apply(originalSpawn, this, [command, ['--stdio-agent-fixture', 'clean'], options]);
     }
@@ -81,7 +81,7 @@ function sampleMemory() {
   return memoryPending;
 }
 if (process.platform !== 'darwin') throw new Error('This native UI smoke currently supports macOS only');
-const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hello-agent-project-ui-'));
+const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'elsecrew-project-ui-'));
 const repoRoot = path.resolve(__dirname, '..');
 const source = path.join(root, 'project');
 fs.mkdirSync(source);
@@ -429,7 +429,7 @@ app.on('browser-window-created', (_event, window) => {
       await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='확인 취소').click()`);
       await wait(`!Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='확인 취소')`);
       if(fs.readFileSync(path.join(source,'hello.txt'),'utf8')!=='original\n') throw new Error('preview cancellation changed source');
-      if (process.env.HELLO_AGENT_SMOKE_APPLY === '1') {
+      if (process.env.ELSECREW_SMOKE_APPLY === '1') {
         await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='이 변경 묶음으로 확인 준비').click()`);
         await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='백업 후 원본에 반영')`);
         await run(`Array.from(document.querySelectorAll('label')).find(e=>e.textContent.includes('원본 파일을 변경하는 작업')).querySelector('input').click()`);
@@ -437,7 +437,7 @@ app.on('browser-window-created', (_event, window) => {
         await wait(`document.body.innerText.includes('기록된 변경 묶음의 반영이 완료됐어요.')`);
         if(fs.readFileSync(path.join(source,'hello.txt'),'utf8')!=='edited in snapshot\noriginal\n') throw new Error('application did not write reviewed source');
         console.log(JSON.stringify({stage:'APPLIED',root}));
-        if (process.env.HELLO_AGENT_SMOKE_RELOAD === '1') {
+        if (process.env.ELSECREW_SMOKE_RELOAD === '1') {
           await new Promise(resolve => { window.webContents.once('did-finish-load', resolve); window.webContents.reload(); });
           await wait(`document.querySelector('.m5-project-rail .m5-project-catalog-list li > button')&&!document.querySelector('.m5-project-rail .m5-project-catalog-list li > button').disabled`);
           await run(`document.querySelector('.m5-project-catalog-list li > button').click()`);

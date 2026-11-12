@@ -32,7 +32,7 @@ export async function seedPackagedProject(binary, root, userData, env, largeProj
     execFileSync('/usr/bin/git', args, {cwd, env: {...env, GIT_CONFIG_NOSYSTEM:'1', GIT_CONFIG_GLOBAL:'/dev/null', GIT_CONFIG_COUNT:'0'}});
   }
   }
-  const directory = path.join(userData, 'com.wonseokhan.helloagent/m5');
+  const directory = path.join(userData, 'com.wonseokhan.elsecrew/m5');
   fs.mkdirSync(directory, {recursive: true});
   const child = spawn(binary, ['--stdio'], {cwd: directory, env, stdio:['pipe','pipe','pipe']});
   console.log(JSON.stringify({stage:'SEED_STARTED', pid:child.pid, root}));

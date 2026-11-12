@@ -20,7 +20,7 @@ import React from 'react'; import {createRoot} from 'react-dom/client';
 import {I18nProvider} from '${repo}/src/i18n.tsx';
 import {ChatWorkspaceDiscard} from '${repo}/src/m5/chat-workspace-discard.tsx';
 import '${repo}/src/m5/styles.css';
-localStorage.setItem('hello-agent.lang','ko');
+localStorage.setItem('elsecrew.lang','ko');
 const chat=${JSON.stringify(chat)};
 const inspection={chatId:chat.chatId,taskId:chat.taskId,projectId:chat.projectId,worktreeId:chat.worktreeId,workspaceIdentity:chat.workspaceIdentity,chatRevision:7};
 const metrics=window.discardMetrics={requests:0,messages:0,releases:0,completed:0};

@@ -1,6 +1,6 @@
 import type { LoginProvider } from "./contracts/provider-login-v1.ts";
 
-export const PROVIDER_SELECTION_KEY = "hello-agent.m5.providers.v1";
+export const PROVIDER_SELECTION_KEY = "elsecrew.m5.providers.v1";
 export const LOGIN_PROVIDERS: readonly LoginProvider[] = ["codex", "claude"];
 
 // This is a UI preference, never executable admission or authentication proof.

@@ -10,7 +10,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 if (process.platform !== 'darwin') throw new Error('Native project measurement requires macOS');
 const diffOnly = process.argv.length === 3 && process.argv[2] === '--diff';
 if (process.argv.length !== 2 && !diffOnly) throw new Error('Usage: m5-native-project-metrics.mjs [--diff]');
-const output = fs.mkdtempSync(path.join(os.tmpdir(), 'hello-agent-native-metrics-'));
+const output = fs.mkdtempSync(path.join(os.tmpdir(), 'elsecrew-native-metrics-'));
 const git = (...args) => execFileSync('/usr/bin/git', args, { cwd: repo, encoding: 'utf8' }).trim();
 const report = {
   schemaVersion: 1, diagnostic: true, gateEligible: false, status: 'RUNNING',
@@ -29,11 +29,11 @@ async function trial(index) {
   const log = fs.createWriteStream(path.join(output, `trial-${index}.log`));
   const env = { ...process.env };
   // Do not inherit source writes, reload, or memory scenarios into this run.
-  for (const key of Object.keys(env)) if (key.startsWith('HELLO_AGENT_SMOKE_')) delete env[key];
-  if (diffOnly) env.HELLO_AGENT_SMOKE_LARGE_DIFF = '1';
+  for (const key of Object.keys(env)) if (key.startsWith('ELSECREW_SMOKE_')) delete env[key];
+  if (diffOnly) env.ELSECREW_SMOKE_LARGE_DIFF = '1';
   else {
-    env.HELLO_AGENT_SMOKE_LARGE_TREE = '1';
-    env.HELLO_AGENT_SMOKE_LARGE_FILE = '1';
+    env.ELSECREW_SMOKE_LARGE_TREE = '1';
+    env.ELSECREW_SMOKE_LARGE_FILE = '1';
   }
   delete env.ELECTRON_RUN_AS_NODE;
   let pending = '';

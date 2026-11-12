@@ -34,7 +34,7 @@ const launch = {pid:process.pid,parentPid:process.ppid,startedAt:new Date().toIS
 const root = resolve(__dirname, '..');
 const renderer = resolve(root, '.vite/renderer/main_window');
 const staticMarkup = isStaticProduct ? readFileSync(resolve(root, '.artifacts/m5-performance/idle-static.html'), 'utf8') : undefined;
-const userData = mkdtempSync(resolve(tmpdir(), 'hello-agent-idle-memory-'));
+const userData = mkdtempSync(resolve(tmpdir(), 'elsecrew-idle-memory-'));
 app.setPath('userData', userData);
 protocol.registerSchemesAsPrivileged([{ scheme: 'm5idle', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 let window;

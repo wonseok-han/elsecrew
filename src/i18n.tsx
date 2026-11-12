@@ -12,7 +12,7 @@ import { en } from "./locales/en";
 export type Lang = "ko" | "en";
 
 const DICTS: Record<Lang, Record<MessageKey, string>> = { ko, en };
-const STORAGE_KEY = "hello-agent.lang";
+const STORAGE_KEY = "elsecrew.lang";
 
 type Params = Record<string, string | number>;
 

@@ -22,7 +22,7 @@ jobs:
       - name: Require compiled save and recovery regressions
         shell: pwsh
         run: |
-          $tests = cargo test --locked --release -p hello-agent-sidecar --lib -- --list
+          $tests = cargo test --locked --release -p elsecrew-sidecar --lib -- --list
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $required = @(
             'project::windows_replace::tests::replacement_is_relative_to_pinned_parent_and_preserves_guard',
@@ -61,18 +61,18 @@ jobs:
             if (-not ($tests | Select-String -SimpleMatch "${name}: test")) { throw "Missing regression: $name" }
           }
       - name: Exercise native Windows primitives and save helpers
-        run: cargo test --locked --release -p hello-agent-sidecar --lib project::windows_ -- --nocapture
+        run: cargo test --locked --release -p elsecrew-sidecar --lib project::windows_ -- --nocapture
       - name: Reject unactivated recovery through the request dispatcher
-        run: cargo test --locked --release -p hello-agent-sidecar --lib save_recovery_dispatch_tests::windows_save_recovery_gate_rejects_direct_confirmed_requests -- --exact --nocapture
+        run: cargo test --locked --release -p elsecrew-sidecar --lib save_recovery_dispatch_tests::windows_save_recovery_gate_rejects_direct_confirmed_requests -- --exact --nocapture
       - name: Exercise installed Git admission and generated application roundtrip
         shell: pwsh
         run: |
           $gitCommand = Get-Command git.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
-          $env:HELLO_AGENT_WINDOWS_TEST_GIT = $gitCommand.Source
-          Write-Host "Selected runner Git: $env:HELLO_AGENT_WINDOWS_TEST_GIT"
-          cargo test --locked --release -p hello-agent-sidecar --lib project::windows_git_installation::integration_tests::selected_git_trust_runs_bounded_version_and_stdin_then_revokes -- --ignored --exact --nocapture --test-threads=1
+          $env:ELSECREW_WINDOWS_TEST_GIT = $gitCommand.Source
+          Write-Host "Selected runner Git: $env:ELSECREW_WINDOWS_TEST_GIT"
+          cargo test --locked --release -p elsecrew-sidecar --lib project::windows_git_installation::integration_tests::selected_git_trust_runs_bounded_version_and_stdin_then_revokes -- --ignored --exact --nocapture --test-threads=1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --locked --release -p hello-agent-sidecar --lib project::windows_application_integration_tests::confirmed_multi_item_apply_and_restore_through_scheduler_and_ledger -- --ignored --exact --nocapture --test-threads=1
+          cargo test --locked --release -p elsecrew-sidecar --lib project::windows_application_integration_tests::confirmed_multi_item_apply_and_restore_through_scheduler_and_ledger -- --ignored --exact --nocapture --test-threads=1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Record limits
         if: always()

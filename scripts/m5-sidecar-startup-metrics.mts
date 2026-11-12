@@ -74,7 +74,7 @@ async function trial(binary: string, directory: string) {
     assert.deepEqual(parsePrepareQuitResult(await request("app.prepareQuit")), { blockers: [], safeToQuit: true });
     child.stdin.end();
     await Promise.race([closed, deadline]);
-    const db = new DatabaseSync(resolve(directory, "hello-agent.sqlite3"), { readOnly: true });
+    const db = new DatabaseSync(resolve(directory, "elsecrew.sqlite3"), { readOnly: true });
     try {
       assert.equal(typeof db.prepare("SELECT clean_shutdown_at FROM app_instances WHERE sidecar_instance_id = ?").get(ready.sidecarInstanceId)?.clean_shutdown_at, "string");
     } finally { db.close(); }
@@ -102,9 +102,9 @@ try {
   report.head = git(["rev-parse", "HEAD"]); report.gitStatusBefore = git(["status", "--porcelain"]); report.dirtyBefore = report.gitStatusBefore !== "";
   assert.ok(diagnostic || !report.dirtyBefore, "clean checkout required");
   lowerQaPriority();
-  const build = spawnSync("cargo", ["build", ...(diagnostic ? [] : ["--release"]), "--locked", "-p", "hello-agent-sidecar", "--bin", "hello-agent-sidecar", "--message-format=json"], { cwd: root, env: { ...qaEnvironment(), CARGO_INCREMENTAL: "0" }, encoding: "utf8", timeout: 120000, maxBuffer: 8 * 1024 * 1024 });
+  const build = spawnSync("cargo", ["build", ...(diagnostic ? [] : ["--release"]), "--locked", "-p", "elsecrew-sidecar", "--bin", "elsecrew-sidecar", "--message-format=json"], { cwd: root, env: { ...qaEnvironment(), CARGO_INCREMENTAL: "0" }, encoding: "utf8", timeout: 120000, maxBuffer: 8 * 1024 * 1024 });
   assert.equal(build.status, 0, "sidecar build failed");
-  const binaries = build.stdout.trim().split("\n").map((line) => JSON.parse(line)).filter((value) => value.reason === "compiler-artifact" && value.target?.name === "hello-agent-sidecar" && value.target.kind.includes("bin") && value.executable).map((value) => value.executable);
+  const binaries = build.stdout.trim().split("\n").map((line) => JSON.parse(line)).filter((value) => value.reason === "compiler-artifact" && value.target?.name === "elsecrew-sidecar" && value.target.kind.includes("bin") && value.executable).map((value) => value.executable);
   assert.equal(binaries.length, 1, "expected exact Cargo executable");
   const binary = binaries[0];
   report.binarySha256 = createHash("sha256").update(await readFile(binary)).digest("hex");
@@ -113,7 +113,7 @@ try {
   assert.equal(machine.status, 0); report.environment.machine = machine.stdout.trim();
   const rust = spawnSync("rustc", ["--version"], { encoding: "utf8" });
   assert.equal(rust.status, 0); report.environment.rust = rust.stdout.trim();
-  directory = await mkdtemp(resolve(tmpdir(), "hello-agent-startup-metrics-"));
+  directory = await mkdtemp(resolve(tmpdir(), "elsecrew-startup-metrics-"));
   report.temporaryDirectory = directory;
   await trial(binary, directory); // Bootstrap/migration excluded from warm samples.
   report.warmup = await trial(binary, directory);

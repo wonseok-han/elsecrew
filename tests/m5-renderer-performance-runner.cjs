@@ -9,7 +9,7 @@ const { summarizeHeapSampling } = require("../scripts/m5-heap-sampling.cjs");
 const { createHash } = require("node:crypto");
 const { readFileSync } = require("node:fs");
 const { cpus, totalmem, release, tmpdir } = require("node:os");
-const userData = mkdtempSync(resolve(tmpdir(), "hello-agent-renderer-perf-"));
+const userData = mkdtempSync(resolve(tmpdir(), "elsecrew-renderer-perf-"));
 const { buildPerformancePreload } = require('./m5-performance-preload-build.cjs');
 app.setPath("userData", userData);
 const root = resolve(__dirname, "..");

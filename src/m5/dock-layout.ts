@@ -2,7 +2,7 @@ export const PANEL_IDS = ["files", "editor", "changes", "conversation", "chats"]
 export type DockPanel = typeof PANEL_IDS[number];
 export type DockNode = { type: "tabs"; panels: DockPanel[]; active: DockPanel } | { type: "split"; axis: "horizontal" | "vertical"; ratio: number; first: DockNode; second: DockNode };
 export interface DockLayout { version: 2; order: DockPanel[]; widths: Record<DockPanel, number>; hidden?: DockPanel[]; hiddenBeforeFocus?: DockPanel[]; direction?: "horizontal" | "vertical"; tabbed?: boolean; activeTab?: DockPanel; tree?: DockNode }
-export const DOCK_STORAGE_KEY = "hello-agent.m5.dock.v1";
+export const DOCK_STORAGE_KEY = "elsecrew.m5.dock.v1";
 export function defaultDockLayout(): DockLayout {
   return {
     version: 2, order: [...PANEL_IDS],

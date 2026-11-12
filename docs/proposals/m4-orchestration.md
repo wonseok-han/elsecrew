@@ -544,7 +544,7 @@ M4가 존재할 이유 자체다. 사용자가 목표를 한 번 말하면 앱�
 
 - **기계 검증이 가능해야** 1차 지표(성공 조건 충족)를 사람 판단 없이 잰다.
 - **한 사람이 20분 안에 리뷰할 수 있어야** 품질 체크리스트가 실제로 채워진다.
-- 이 제품 저장소(`hello-agent`)는 쓰지 않는다 — 크기도 크고, 결과가 제품 코드에 섞이면 되돌리기 어렵다.
+- 이 제품 저장소(`elsecrew`)는 쓰지 않는다 — 크기도 크고, 결과가 제품 코드에 섞이면 되돌리기 어렵다.
 
 **과제 4개** — 기계 검증 3 + 사람 판정 1. 유형을 섞은 이유는 교차 벤더의 이점이 유형별로 다르게 나타날 것으로 보기 때문이다.
 
@@ -869,7 +869,7 @@ Claude의 차단 2건은 모두 타당하다. 기존 설계를 유지하면서 �
 
 | 산출물 | 경로 | 비고 |
 | --- | --- | --- |
-| 이벤트 스트림 | `<루트>/.<복제본>.hello-agent-pilot.events.jsonl` | 스트리밍하며 바로 기록 — 메모리에 쌓지 않음 |
+| 이벤트 스트림 | `<루트>/.<복제본>.elsecrew-pilot.events.jsonl` | 스트리밍하며 바로 기록 — 메모리에 쌓지 않음 |
 | 최종 메시지 | `…last-message.txt` | 중단 시 Codex가 못 쓰므로 빈 파일로 경로 계약 유지 |
 | 변경 패치 | `…diff` | `git add -N` 후 `git diff <시작 커밋>` — **새로 생긴 파일도 포함** |
 
@@ -1172,7 +1172,7 @@ type RecoveryProbe = fn(Option<u32>) -> TreeLiveness;
 
 **명시적 탈출구 — 작업공간 폐기 정책**
 
-`Unknown`에서 영원히 잠기지 않도록 `discard_codex_pilot(confirm_discard_workspace: bool)`을 추가했다. 확인 플래그 없이는 거부하며, 실행 시 복제본에 **폐기 표시**(`.hello-agent-pilot.abandoned`)를 남기고 슬롯을 연다. `validate_pilot_workspace`가 이 표시를 보면 *"abandoned after a failed cancellation and cannot be reused"* 로 거부하므로 **그 복제본은 두 번 다시 실행 대상이 되지 못한다.** 증거 파일은 그대로 보존된다.
+`Unknown`에서 영원히 잠기지 않도록 `discard_codex_pilot(confirm_discard_workspace: bool)`을 추가했다. 확인 플래그 없이는 거부하며, 실행 시 복제본에 **폐기 표시**(`.elsecrew-pilot.abandoned`)를 남기고 슬롯을 연다. `validate_pilot_workspace`가 이 표시를 보면 *"abandoned after a failed cancellation and cannot be reused"* 로 거부하므로 **그 복제본은 두 번 다시 실행 대상이 되지 못한다.** 증거 파일은 그대로 보존된다.
 
 **신규 테스트 3건** — 판정을 주입 가능하게 만들어 **macOS에서도 Windows 규칙을 고정**한다.
 
@@ -1196,7 +1196,7 @@ poisoned 상태를 **디스크에 영속화**해 재시작으로 보호가 사�
 
 | 시점 | 동작 |
 | --- | --- |
-| 종료 실패 **즉시** | 파일럿 루트에 `.hello-agent-pilot.poisoned` 기록(pid·오류·경로를 JSON으로). 복제본 **밖**이라 남은 프로세스가 지울 수 없다 |
+| 종료 실패 **즉시** | 파일럿 루트에 `.elsecrew-pilot.poisoned` 기록(pid·오류·경로를 JSON으로). 복제본 **밖**이라 남은 프로세스가 지울 수 없다 |
 | `validate_pilot_workspace` | `.poisoned` 또는 `.abandoned`가 있으면 거부 — **새 세션에서도** 막힌다 |
 | 검증된 `Gone` 복구 | `.poisoned`를 **제거**하고 메모리 슬롯도 해제 → 복제본을 다시 쓸 수 있다 |
 | 명시적 폐기 | `.abandoned`를 남기고 `.poisoned`를 대체 → **영구히** 재사용 불가 |
@@ -1809,7 +1809,7 @@ F1은 이번 회차에 **`poisoned` 판정의 존재 이유**가 된 결함이�
 
 #### 7.10.2 초보자용 화면 계약 — **오케스트레이션을 노출하지 않는다**
 
-> 🧭 **Hello, Agent는 워크플로 도구가 아니다.** 이 제품의 사용자는 터미널을 열어본 적 없는
+> 🧭 **Elsecrew는 워크플로 도구가 아니다.** 이 제품의 사용자는 터미널을 열어본 적 없는
 > 비개발자다(§`현재 제품 범위`). 내부에서 Claude→Codex가 돌더라도, **그 구조를 사용자가
 > 이해하거나 조작해야 하는 순간 이 제품은 실패한다.** 자동 인계의 가치는 *"사용자가 전달자에서
 > 빠지는 것"*(§5.2 가설 A)이지 *"사용자가 파이프라인을 운전하는 것"* 이 아니다.

@@ -24,7 +24,7 @@ function harness(catalogOnly = false, autoFinish = true, projectUi = false, sele
   };
   const context = vm.createContext({
     __dirname: path.resolve(__dirname, '../scripts'),
-    process: {platform:'darwin',env:{HELLO_AGENT_APPROVED_LIVE_SMOKE:'1',HELLO_AGENT_LIVE_USER_DATA:'/synthetic/userdata',HELLO_AGENT_LIVE_MODEL_CHOICES_ONLY:catalogOnly?'1':'0',HELLO_AGENT_LIVE_PROVIDER:selectedProvider}},
+    process: {platform:'darwin',env:{ELSECREW_APPROVED_LIVE_SMOKE:'1',ELSECREW_LIVE_USER_DATA:'/synthetic/userdata',ELSECREW_LIVE_MODEL_CHOICES_ONLY:catalogOnly?'1':'0',ELSECREW_LIVE_PROVIDER:selectedProvider}},
     console: {log() {}},
     setTimeout(callback, delay) { timers.set(delay, callback); return delay; },
     clearTimeout(id) { timers.delete(id); },
@@ -67,7 +67,7 @@ test('login evidence is correlated to its own completed check', () => {
 test('transport diagnostics collect only fixed sidecar labels across chunks', () => {
   const h = harness(false, false);
   const options = {stdio:'pipe'};
-  const child = h.childProcess.spawn('/synthetic/hello-agent-sidecar', ['--stdio'], options);
+  const child = h.childProcess.spawn('/synthetic/elsecrew-sidecar', ['--stdio'], options);
   assert.equal(child, h.spawned[0].child);
   assert.equal(h.spawned[0].args[2], options);
   child.stderr.emit('data', Buffer.from('PRIVATE_TOKEN\nnative Codex transport failed at turn sta'));
@@ -97,7 +97,7 @@ test('a single approved provider produces explicitly scoped evidence', () => {
 
 test('new diagnostic groups never export provider payloads', () => {
   const h = harness(false, false);
-  const child = h.childProcess.spawn('/synthetic/hello-agent-sidecar', []);
+  const child = h.childProcess.spawn('/synthetic/elsecrew-sidecar', []);
   const labels = ['turn stream diff metadata','turn stream plan metadata','turn stream thread name',
     'turn stream thread settings','turn stream hook','turn stream model metadata','turn stream warning',
     'turn stream account metadata','turn stream mcp metadata','turn stream moderation metadata'];

@@ -224,7 +224,7 @@ R3B 구현은 exact 통합 `e5f9f01c397f3482975a231621ee5b16aa4381e8`에서 누�
 ### 10.1 기준·소유·금지 영역
 
 - 기준 코드는 R3B 통합 `e5f9f01c397f3482975a231621ee5b16aa4381e8`이다. 실제 기능 branch는 이 계약을 포함한 최신 clean 통합 commit에서 생성하며 exact SHA를 작업 계약·검증 manifest에 기록한다.
-- 단일 Rust 담당은 `crates/hello-agent-sidecar/src/agent_runtime.rs`의 기존 `#[cfg(test)] mod budget_tests`와 자기 branch의 `docs/history.md`만 소유한다. production helper는 그대로 호출하며 접근 범위를 늘리지 않는다.
+- 단일 Rust 담당은 `crates/elsecrew-sidecar/src/agent_runtime.rs`의 기존 `#[cfg(test)] mod budget_tests`와 자기 branch의 `docs/history.md`만 소유한다. production helper는 그대로 호출하며 접근 범위를 늘리지 않는다.
 - production 코드·visibility·schema/protocol/golden·의존성/lockfile·Storage open/append/recovery·예산·기존 100-operation fence·Electron ready 시간은 변경 금지다. 소유 밖 수정이나 정책 결정이 필요하면 구현을 멈추고 보고한다.
 - 임시 DB만 사용한다. 실제 provider 실행·로그인·사용자 DB/프로젝트·Git 작업 복사본·ProjectManager·Windows·파괴적 시험은 하지 않는다.
 
@@ -258,10 +258,10 @@ public event 하나마다 전체 run 배열 snapshot과 대응하는 유효한 T
 새 진단은 아래 exact test 하나 안에서 세 사례를 구분해 검증한다. 각 focused 명령은 실행한 test가 정확히 하나인지 확인하고 raw log·실제 종료 코드를 남긴다.
 
 ```bash
-cargo test -p hello-agent-sidecar --locked --lib agent_runtime::budget_tests::budget_valid_actual_run_snapshot_exceeds_reopen_primary -- --exact --nocapture
-cargo test -p hello-agent-sidecar --locked --lib agent_runtime::budget_tests::valid_public_ledgers_reach_count_and_text_boundaries_but_reject_plus_one -- --exact --nocapture
-cargo clippy -p hello-agent-sidecar --locked --all-targets --no-deps -- -D warnings
-rustfmt --edition 2021 --check crates/hello-agent-sidecar/src/agent_runtime.rs
+cargo test -p elsecrew-sidecar --locked --lib agent_runtime::budget_tests::budget_valid_actual_run_snapshot_exceeds_reopen_primary -- --exact --nocapture
+cargo test -p elsecrew-sidecar --locked --lib agent_runtime::budget_tests::valid_public_ledgers_reach_count_and_text_boundaries_but_reject_plus_one -- --exact --nocapture
+cargo clippy -p elsecrew-sidecar --locked --all-targets --no-deps -- -D warnings
+rustfmt --edition 2021 --check crates/elsecrew-sidecar/src/agent_runtime.rs
 ```
 
 diff check·exact feature commit 독립 코드 리뷰와 최신 통합 commit의 독립 focused QA를 수행한다. production diff가 없다는 사실과 상속한 R3B 누적 QA를 명시하며 테스트 전용 변경의 범위를 넘어가면 전체 재검증 계획을 다시 정한다. main 병합·push는 하지 않는다.

@@ -29,7 +29,7 @@ if (require.main === module) {
     const report = await observe(Number(process.argv[2]), Number(process.argv[3]), process.argv[4],
       () => execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,rss='], { encoding: 'utf8', timeout: 5000, maxBuffer: 4 * 1024 * 1024 }),
       ms => new Promise(resolve => setTimeout(resolve, ms)));
-    const directory = mkdtempSync(join(tmpdir(), 'hello-agent-rss-observation-'));
+    const directory = mkdtempSync(join(tmpdir(), 'elsecrew-rss-observation-'));
     const evidence = join(directory, 'observation.json');
     writeFileSync(evidence, JSON.stringify(report, null, 2), { flag: 'wx', mode: 0o600 });
     console.log(JSON.stringify({ status: report.status, diagnostic: true, gateEligible: false, evidence,

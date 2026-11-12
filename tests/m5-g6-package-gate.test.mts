@@ -17,14 +17,14 @@ test("G6 package gate uses only the exact Forge package and ZIP paths", () => {
   const artifacts = expectedPackageArtifacts({ root: "/repo", platform: "darwin", arch: "arm64", version: "0.1.2" });
 
   assert.deepEqual(artifacts, {
-    packageDirectory: resolve("/repo/out/hello-agent-darwin-arm64"),
-    archive: resolve("/repo/out/make/zip/darwin/arm64/hello-agent-darwin-arm64-0.1.2.zip"),
+    packageDirectory: resolve("/repo/out/Elsecrew-darwin-arm64"),
+    archive: resolve("/repo/out/make/zip/darwin/arm64/Elsecrew-darwin-arm64-0.1.2.zip"),
     requiredOutputs: [
-      "/repo/out/hello-agent-darwin-arm64",
-      "/repo/out/hello-agent-darwin-arm64/hello-agent.app/Contents/MacOS/hello-agent",
-      "/repo/out/hello-agent-darwin-arm64/hello-agent.app/Contents/Resources/app.asar",
-      "/repo/out/hello-agent-darwin-arm64/hello-agent.app/Contents/Resources/sidecar/hello-agent-sidecar",
-      "/repo/out/make/zip/darwin/arm64/hello-agent-darwin-arm64-0.1.2.zip",
+      "/repo/out/Elsecrew-darwin-arm64",
+      "/repo/out/Elsecrew-darwin-arm64/Elsecrew.app/Contents/MacOS/Elsecrew",
+      "/repo/out/Elsecrew-darwin-arm64/Elsecrew.app/Contents/Resources/app.asar",
+      "/repo/out/Elsecrew-darwin-arm64/Elsecrew.app/Contents/Resources/sidecar/elsecrew-sidecar",
+      "/repo/out/make/zip/darwin/arm64/Elsecrew-darwin-arm64-0.1.2.zip",
     ].map(path => resolve(path)),
   });
 });
@@ -178,7 +178,7 @@ test("G6 package gate rejects stale package assets before smoke or make", () => 
     rmSync(sidecarDirectory, { recursive: true });
     const external = resolve(root, "external-sidecar");
     mkdirSync(external);
-    writeFileSync(resolve(external, "hello-agent-sidecar"), "external fixture");
+    writeFileSync(resolve(external, "elsecrew-sidecar"), "external fixture");
     symlinkSync(external, sidecarDirectory);
     const calls: string[][] = [];
     const outcome = runWithSuccessfulCommands(root, artifacts, calls);
@@ -302,7 +302,7 @@ function runWithSuccessfulCommands(root: string, artifacts: ReturnType<typeof ex
 }
 
 function withFixture(run: (fixture: { root: string; artifacts: ReturnType<typeof expectedPackageArtifacts> }) => void) {
-  const root = mkdtempSync(resolve(tmpdir(), "hello-agent-m5-g6-package-"));
+  const root = mkdtempSync(resolve(tmpdir(), "elsecrew-m5-g6-package-"));
   try {
     writeFileSync(resolve(root, "package.json"), JSON.stringify({ version: "0.1.2" }));
     const artifacts = expectedPackageArtifacts({ root, platform: "darwin", arch: "arm64", version: "0.1.2" });

@@ -11,7 +11,7 @@ const { createLiveOutputLatency } = require('./m5-live-output-latency.cjs');
 const { observeStdio } = require('./m5-stdio-observer.cjs');
 const { summarizeOutputGeneration } = require('./m5-output-generation.cjs');
 if (process.platform !== 'darwin' || app.isPackaged !== packagedQa) throw new Error('Output diagnostic build mode differs');
-if (packagedQa) app.setName('Hello Agent Output QA');
+if (packagedQa) app.setName('Elsecrew Output QA');
 const combined = process.argv.includes('--combined-workload');
 const retentionOnly = packagedQa && process.argv.includes('--file-retention-only');
 const retentionWithOutputDiff = retentionOnly && process.argv.includes('--file-retention-with-output-diff');
@@ -25,7 +25,7 @@ const combinedWorkload = combined ? require('./m5-combined-output-workload.cjs')
 const live = combined || packagedQa || process.argv.includes('--live');
 const paced = live || process.argv.includes('--paced');
 const repo = path.resolve(__dirname, '..');
-const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hello-agent-output-ui-'));
+const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'elsecrew-output-ui-'));
 const source = path.join(root, 'project');
 const userData = path.join(root, 'userdata');
 fs.mkdirSync(source); fs.mkdirSync(userData);
@@ -62,14 +62,14 @@ const report = { schemaVersion: 1, diagnostic: true, gateEligible: false, root, 
 const persist = () => fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify(report, null, 2));
 persist();
 const spawn = cp.spawn;
-const expectedBinary = packagedQa ? path.join(process.resourcesPath, 'sidecar/hello-agent-sidecar') : path.join(repo, 'target/debug/hello-agent-sidecar');
+const expectedBinary = packagedQa ? path.join(process.resourcesPath, 'sidecar/elsecrew-sidecar') : path.join(repo, 'target/debug/elsecrew-sidecar');
 let child;
 let transportObserver;
 cp.spawn = function(command, args, options) {
-  if (typeof command === 'string' && path.basename(command) === 'hello-agent-sidecar') {
+  if (typeof command === 'string' && path.basename(command) === 'elsecrew-sidecar') {
     assert.equal(command, expectedBinary);
     assert.deepEqual(args, ['--stdio']);
-    assert.equal(fs.realpathSync(options.cwd), fs.realpathSync(path.join(userData, 'com.wonseokhan.helloagent', 'm5')));
+    assert.equal(fs.realpathSync(options.cwd), fs.realpathSync(path.join(userData, 'com.wonseokhan.elsecrew', 'm5')));
     assert.equal(child, undefined, 'unexpected second sidecar');
     child = Reflect.apply(spawn, this, [command, ['--stdio-agent-fixture', paced ? 'paced-long-stream' : 'long-stream'], options]);
     if (packagedQa) {
@@ -272,7 +272,7 @@ app.on('browser-window-created', (_event, window) => {
         if (retentionWithOutputDiff) {
           const chat = await run('retentionChat');
           assert.match(chat.worktreeId, /^worktree_[a-zA-Z0-9_]+$/);
-          const workspaceRoot = fs.realpathSync(path.join(userData, 'com.wonseokhan.helloagent/m5/worktrees-v1'));
+          const workspaceRoot = fs.realpathSync(path.join(userData, 'com.wonseokhan.elsecrew/m5/worktrees-v1'));
           const workspace = fs.realpathSync(path.join(workspaceRoot, chat.worktreeId));
           assert.ok(workspace.startsWith(workspaceRoot + path.sep));
           report.fileRetention.diffFixture = require('../tests/m5-native-diff-fixture.cjs').change(workspace);

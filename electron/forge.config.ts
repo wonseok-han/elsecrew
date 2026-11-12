@@ -12,6 +12,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export default {
   packagerConfig: {
     asar: true,
+    appBundleId: "com.wonseokhan.elsecrew",
   },
   makers: [new MakerZIP({}, ["darwin", "win32", "linux"])],
   plugins: [
@@ -38,7 +39,7 @@ export default {
   ],
   hooks: {
     prePackage: async (_config: unknown, platform: string, arch: string) => {
-      assertPackageNotRunning(resolve(root, "out", `hello-agent-${platform}-${arch}`));
+      assertPackageNotRunning(resolve(root, "out", `Elsecrew-${platform}-${arch}`));
     },
     packageAfterCopy: async (_config: unknown, buildPath: string) => {
       const resourcesDirectory = resolve(buildPath, "..");

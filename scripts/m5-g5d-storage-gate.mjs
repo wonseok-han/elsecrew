@@ -70,7 +70,7 @@ function cargoTest(id, filter) {
   return {
     id,
     command: "cargo",
-    args: ["test", "-p", "hello-agent-sidecar", "--locked", filter],
+    args: ["test", "-p", "elsecrew-sidecar", "--locked", filter],
   };
 }
 

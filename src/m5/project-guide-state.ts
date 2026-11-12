@@ -12,7 +12,7 @@ export function parseProjectGuide(raw: string | null): ProjectGuidePreference {
     return value;
   } catch { return emptyProjectGuide(); }
 }
-export function projectGuideKey(projectId: string): string { return `hello-agent.m5.guide.v1:${encodeURIComponent(projectId)}`; }
+export function projectGuideKey(projectId: string): string { return `elsecrew.m5.guide.v1:${encodeURIComponent(projectId)}`; }
 export function projectGuideStep(preference: ProjectGuidePreference, activeChatId: string | null, state: ChatStateV1 | null): "team" | "goal" | "resume" | "observe" | "review" | "attention" | "recovery" {
   if (preference.chatId && preference.chatId !== activeChatId) return "resume";
   if (activeChatId) {

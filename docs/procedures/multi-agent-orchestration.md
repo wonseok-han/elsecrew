@@ -284,7 +284,7 @@ Windows agent 실행은 별도 종료 계약 전까지 비활성화 상태를 �
 macOS/Linux에서 작업 계약에 지정된 집중 회귀를 직접 실행하는 예:
 
 ```bash
-CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 nice -n 10 cargo test -p hello-agent-sidecar --locked <작업_계약의_테스트_필터>
+CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 nice -n 10 cargo test -p elsecrew-sidecar --locked <작업_계약의_테스트_필터>
 ```
 
 PowerShell에서는 `$env:CARGO_BUILD_JOBS='4'; $env:RUST_TEST_THREADS='4'` 설정 뒤 지정된 명령을 실행한다. `nice` 예제를 Windows 지원 증거로 사용하지 않는다.

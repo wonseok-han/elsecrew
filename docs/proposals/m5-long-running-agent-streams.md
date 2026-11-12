@@ -13,8 +13,8 @@
 
 | 지점 | 현재 제약 | 재설계 책임 |
 | --- | --- | --- |
-| `crates/hello-agent-protocol/src/lib.rs` | run당 공개256개/본문1MiB/누적 snapshot16MiB, 세션 event ID8,192개 | v1 제한 보존, 새 출력 저장/전송 capability와 별도 예산 |
-| `hello-agent-core/src/provider.rs`, `provider/vendor_observation/{codex_events,claude_events}.rs` | 내부1,024·공개256 이벤트 및 누적 observation byte 제한 | 새 capability에 결속된 incremental parser/관측 예산; 실제 두 공급자와 fake 경로를 모두 포함 |
+| `crates/elsecrew-protocol/src/lib.rs` | run당 공개256개/본문1MiB/누적 snapshot16MiB, 세션 event ID8,192개 | v1 제한 보존, 새 출력 저장/전송 capability와 별도 예산 |
+| `elsecrew-core/src/provider.rs`, `provider/vendor_observation/{codex_events,claude_events}.rs` | 내부1,024·공개256 이벤트 및 누적 observation byte 제한 | 새 capability에 결속된 incremental parser/관측 예산; 실제 두 공급자와 fake 경로를 모두 포함 |
 | `agent_runtime.rs`의 `PublicEventBatch::push`, `persist_public_event_record`, budget/projection 검사 | 과거 `public_events` 배열을 복제하고 누적 snapshot 계산 | append-only row와 작은 run head로 분리 |
 | `storage.rs` 및 storage admission/replay | 기존 event 원장과 projection 의미 검증 | 새 출력 이벤트 형식·head·페이지의 transaction/replay 검증 추가 |
 | `electron/sidecar-client.ts` | 세션 전체 eventId Set, stream/run 신원 보관 | 순서 watermark와 bounded replay 창; 종료된 신원 수명 명시 |
@@ -121,7 +121,7 @@ L1/L3의 공급자 범위에는 core parser와 Codex/Claude observation adapter�
 
 ## 11. 구현 체크포인트
 
-- L1 일부: `crates/hello-agent-protocol/src/agent_adapter_v1/output_pages.rs`에 독립 출력 형식 버전1, 요청 결속·연속 순서·페이지100개/512KiB 검증 초안을 추가했다. 기존 public event의 단일 항목 검증을 재사용하며 전체 v1 원장256개 제한은 변경하지 않는다.
+- L1 일부: `crates/elsecrew-protocol/src/agent_adapter_v1/output_pages.rs`에 독립 출력 형식 버전1, 요청 결속·연속 순서·페이지100개/512KiB 검증 초안을 추가했다. 기존 public event의 단일 항목 검증을 재사용하며 전체 v1 원장256개 제한은 변경하지 않는다.
 - 아직 capability 광고·wire method 등록·저장 schema 변경·runtime 연결은 없다. 페이지 검사기는 요청 watermark가 실제 commit됐다는 증거가 아니며 저장 계층에서 별도로 검증해야 한다. cross-page event ID 유일성은 영속 원장의 책임이다. TS 대응·golden fixture·head/구독 계약·L1 독립 검토가 남아 있다.
 - 후속 체크포인트: `src/m5/contracts/agent-output-pages.ts`의 TS 대응과 `tests/fixtures/m5/agent-output-page.json` 공유 fixture를 추가했다. Rust/TS 모두 같은 마지막3,000번째 page를 검증하는 회귀를 작성했으며 이 추가분은 다음 계약 연결과 묶어서 실행한다. head/구독·저장 계약과 L1 독립 검토는 계속 남는다.
 - 후속 체크포인트: Rust/TS `OutputHead`는 run 결속·committedSequence·sealed를 포함한다. sealed는 출력 폐쇄이지 종료/성공 증거가 아니다. `src/m5/agent-output-reader.ts`는 구독 완료 후 catch-up, dirty 알림 병합, 단일 page 소비, head 재조회와 stop 경계를 구현했다. source는 구독 등록 완료를 보장하고 abort에 응답해야 하며 호출자가 정기 reconciliation과 새 연결의 reader 재생성을 담당한다. 아직 실제 IPC source/화면/저장소에 연결되지 않았고 관련 회귀는 작성 상태다.

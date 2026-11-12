@@ -4,7 +4,7 @@ import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const APP_NAME = "hello-agent";
+const APP_NAME = "Elsecrew";
 
 export function expectedPackageArtifacts({ root: repository, platform, arch, version }) {
   const packageDirectory = resolve(repository, "out", `${APP_NAME}-${platform}-${arch}`);
@@ -13,12 +13,12 @@ export function expectedPackageArtifacts({ root: repository, platform, arch, ver
     ? [
       `${APP_NAME}.app/Contents/MacOS/${APP_NAME}`,
       `${APP_NAME}.app/Contents/Resources/app.asar`,
-      `${APP_NAME}.app/Contents/Resources/sidecar/hello-agent-sidecar`,
+      `${APP_NAME}.app/Contents/Resources/sidecar/elsecrew-sidecar`,
     ]
     : [
       `${APP_NAME}.exe`,
       "resources/app.asar",
-      "resources/sidecar/hello-agent-sidecar.exe",
+      "resources/sidecar/elsecrew-sidecar.exe",
     ];
   return {
     packageDirectory,

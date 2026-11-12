@@ -36,7 +36,7 @@ test("renderer smoke preload exposes the complete V7 bridge with ready admission
 });
 
 test("packaged renderer build mounts lazy Monaco and creates a local worker in Chromium", { timeout: 20_000 }, () => {
-  const temporaryRoot = mkdtempSync(resolve(tmpdir(), "hello-agent-renderer-test-"));
+  const temporaryRoot = mkdtempSync(resolve(tmpdir(), "elsecrew-renderer-test-"));
   const result = spawnSync(electronPath, ["tests/m5-renderer-smoke-runner.cjs"], {
     cwd: resolve("."),
     encoding: "utf8",

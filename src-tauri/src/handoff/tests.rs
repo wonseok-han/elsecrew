@@ -10,7 +10,7 @@ use std::time::Instant;
 
 fn temp_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "hello-agent-handoff-{name}-{}-{}",
+        "elsecrew-handoff-{name}-{}-{}",
         std::process::id(),
         orchestration::new_run_id()
     ));
@@ -1656,7 +1656,7 @@ fn both_agents_share_one_supervisor() {
 fn codex_planning_leg_runs_end_to_end() {
     use std::process::Command;
 
-    let base = std::env::temp_dir().join(format!("hello-agent-codex-plan-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!("elsecrew-codex-plan-{}", std::process::id()));
     let source = base.join("source");
     let root = base.join("pilots");
     let _ = std::fs::remove_dir_all(&base);
@@ -1738,7 +1738,7 @@ fn codex_planning_leg_runs_end_to_end() {
 fn claude_planning_leg_runs_end_to_end() {
     use std::process::Command;
 
-    let base = std::env::temp_dir().join(format!("hello-agent-e2e-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!("elsecrew-e2e-{}", std::process::id()));
     let source = base.join("source");
     let root = base.join("pilots");
     let _ = std::fs::remove_dir_all(&base);
@@ -1840,7 +1840,7 @@ fn handoff_vertical_slice_runs_end_to_end() {
     use std::process::Command;
     use std::sync::Mutex as StdMutex;
 
-    let base = std::env::temp_dir().join(format!("hello-agent-slice-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!("elsecrew-slice-{}", std::process::id()));
     let source = base.join("source");
     let root = base.join("pilots");
     let _ = std::fs::remove_dir_all(&base);

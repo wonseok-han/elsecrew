@@ -11,16 +11,16 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Manager, State};
 
-const PILOT_MANIFEST_SUFFIX: &str = ".hello-agent-pilot.json";
+const PILOT_MANIFEST_SUFFIX: &str = ".elsecrew-pilot.json";
 /// 증거 파일은 모두 복제본 **밖**(앱 전용 루트)에 둔다. 에이전트가 자기 증거를 고칠 수 없게 한다.
-const PILOT_EVENTS_SUFFIX: &str = ".hello-agent-pilot.events.jsonl";
-const PILOT_LAST_MESSAGE_SUFFIX: &str = ".hello-agent-pilot.last-message.txt";
-const PILOT_STDERR_SUFFIX: &str = ".hello-agent-pilot.stderr.log";
-const PILOT_DIFF_SUFFIX: &str = ".hello-agent-pilot.diff";
+const PILOT_EVENTS_SUFFIX: &str = ".elsecrew-pilot.events.jsonl";
+const PILOT_LAST_MESSAGE_SUFFIX: &str = ".elsecrew-pilot.last-message.txt";
+const PILOT_STDERR_SUFFIX: &str = ".elsecrew-pilot.stderr.log";
+const PILOT_DIFF_SUFFIX: &str = ".elsecrew-pilot.diff";
 /// 종료 실패 후 폐기된 복제본 표시. 붙으면 **영구히** 실행 대상이 되지 못한다.
-const PILOT_ABANDONED_SUFFIX: &str = ".hello-agent-pilot.abandoned";
+const PILOT_ABANDONED_SUFFIX: &str = ".elsecrew-pilot.abandoned";
 /// 종료 실패 즉시 디스크에 남기는 표시. **앱을 재시작해도** 이 복제본을 막는다.
-const PILOT_POISONED_SUFFIX: &str = ".hello-agent-pilot.poisoned";
+const PILOT_POISONED_SUFFIX: &str = ".elsecrew-pilot.poisoned";
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -516,9 +516,9 @@ fn commit_restore_point(project: &Path, korean: bool) -> Result<(), String> {
     }
 
     let message = if korean {
-        "첫 복원 지점 (Hello, Agent)"
+        "첫 복원 지점 (Elsecrew)"
     } else {
-        "First restore point (Hello, Agent)"
+        "First restore point (Elsecrew)"
     };
     let mut command = Command::new(git_program());
     command.current_dir(project);
@@ -529,9 +529,9 @@ fn commit_restore_point(project: &Path, korean: bool) -> Result<(), String> {
     {
         command.args([
             "-c",
-            "user.name=Hello, Agent",
+            "user.name=Elsecrew",
             "-c",
-            "user.email=hello-agent@localhost",
+            "user.email=elsecrew@localhost",
         ]);
     }
     let committed = command
@@ -1789,7 +1789,7 @@ mod tests {
     use super::*;
 
     fn unique_temp(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("hello-agent-{name}-{}", std::process::id()))
+        std::env::temp_dir().join(format!("elsecrew-{name}-{}", std::process::id()))
     }
 
     /// 실행 중인 파일럿 대역. macOS·Windows CI 어디서나 돌아야 하므로 플랫폼별로 고른다.
@@ -1848,7 +1848,7 @@ mod tests {
         assert!(Command::new(git_program())
             .args([
                 "-c",
-                "user.name=Hello Agent Test",
+                "user.name=Elsecrew Test",
                 "-c",
                 "user.email=test@example.invalid",
                 "commit",
@@ -2052,7 +2052,7 @@ mod tests {
         assert!(Command::new(git_program())
             .args([
                 "-c",
-                "user.name=Hello Agent Test",
+                "user.name=Elsecrew Test",
                 "-c",
                 "user.email=test@example.invalid",
                 "commit",
@@ -2086,7 +2086,7 @@ mod tests {
         assert!(Command::new(git_program())
             .args([
                 "-c",
-                "user.name=Hello Agent Test",
+                "user.name=Elsecrew Test",
                 "-c",
                 "user.email=test@example.invalid",
                 "commit",
@@ -3249,7 +3249,7 @@ mod tests {
         assert!(Command::new(git_program())
             .args([
                 "-c",
-                "user.name=Hello Agent Test",
+                "user.name=Elsecrew Test",
                 "-c",
                 "user.email=test@example.invalid",
                 "commit",
@@ -3379,7 +3379,7 @@ mod tests {
         let root = base.join("pilots");
         // 임시 경로 예외를 피하려고 일부러 홈 아래를 겨냥한다
         let canary = crate::detect::home_dir().join(format!(
-            ".hello-agent-s2-outside-{}.txt",
+            ".elsecrew-s2-outside-{}.txt",
             std::process::id()
         ));
         std::fs::remove_file(&canary).ok();
@@ -3416,9 +3416,9 @@ mod tests {
         let (base, _source, pilot, handle) = boundary_fixture("boundary-temp");
         let root = base.join("pilots");
         let temp_canary =
-            std::env::temp_dir().join(format!("hello-agent-s2-temp-{}.txt", std::process::id()));
+            std::env::temp_dir().join(format!("elsecrew-s2-temp-{}.txt", std::process::id()));
         let home_canary = crate::detect::home_dir().join(format!(
-            ".hello-agent-s2-temp-control-{}.txt",
+            ".elsecrew-s2-temp-control-{}.txt",
             std::process::id()
         ));
         std::fs::remove_file(&temp_canary).ok();

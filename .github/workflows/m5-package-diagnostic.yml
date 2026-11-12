@@ -40,14 +40,14 @@ jobs:
         run: pnpm test
       - name: M5 core regressions
         id: rust_core
-        run: cargo test --locked --release -p hello-agent-core
+        run: cargo test --locked --release -p elsecrew-core
       - name: M5 protocol regressions
         id: rust_protocol
         if: ${{ !cancelled() && (steps.rust_core.outcome == 'success' || steps.rust_core.outcome == 'failure') }}
-        run: cargo test --locked --release -p hello-agent-protocol
+        run: cargo test --locked --release -p elsecrew-protocol
       - name: M5 sidecar regressions
         if: ${{ !cancelled() && (steps.rust_protocol.outcome == 'success' || steps.rust_protocol.outcome == 'failure') }}
-        run: cargo test --locked --release -p hello-agent-sidecar
+        run: cargo test --locked --release -p elsecrew-sidecar
       - name: Build unsigned Electron ZIP with release sidecar
         run: pnpm m5:make
       - name: Verify packaged assets, fuses and sidecar protocol

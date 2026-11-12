@@ -1,6 +1,6 @@
 # 릴리스 체크리스트
 
-Hello, Agent의 설치 파일을 베타 또는 정식 버전으로 배포하기 전에 확인할 항목이다. 자동 테스트가 통과해도 깨끗한 사용자 환경에서만 발견되는 설치·로그인·보안 경고 문제는 별도로 확인한다.
+Elsecrew의 설치 파일을 베타 또는 정식 버전으로 배포하기 전에 확인할 항목이다. 자동 테스트가 통과해도 깨끗한 사용자 환경에서만 발견되는 설치·로그인·보안 경고 문제는 별도로 확인한다.
 
 ## 1. 자동 검증
 
@@ -76,7 +76,7 @@ Hello, Agent의 설치 파일을 베타 또는 정식 버전으로 배포하기 
 
 ## 6. M5 Electron 후보의 추가 게이트
 
-macOS 패키징 전에는 실행 중인 해당 `out/hello-agent-<platform>-<arch>` 앱을 정상 종료한다. Forge `prePackage`는 해당 경로의 앱/sidecar/helper 실행 파일을 OS 목록에서 발견하거나 목록 확인에 실패하면 교체를 거절한다. 자동 종료는 하지 않으며, 검사 이후 새로 실행되는 경쟁까지 막는 OS 잠금은 아니므로 빌드 동안 그 앱을 다시 열지 않는다.
+macOS 패키징 전에는 실행 중인 해당 `out/elsecrew-<platform>-<arch>` 앱을 정상 종료한다. Forge `prePackage`는 해당 경로의 앱/sidecar/helper 실행 파일을 OS 목록에서 발견하거나 목록 확인에 실패하면 교체를 거절한다. 자동 종료는 하지 않으며, 검사 이후 새로 실행되는 경쟁까지 막는 OS 잠금은 아니므로 빌드 동안 그 앱을 다시 열지 않는다.
 
 위 Tauri 배포 기록을 Electron 후보의 합격으로 대신하지 않는다. 현재 상태는 `history.md`·`architecture.md`, 수치는 `proposals/m5-electron-spike.md` §9–13과 `procedures/m5-performance.md`를 따른다. 아래는 남은 증거 요구이며 완료 표시가 아니다.
 
@@ -96,12 +96,12 @@ macOS 패키징 전에는 실행 중인 해당 `out/hello-agent-<platform>-<arch
 
 ### M5 Windows 설치된 Git 입장·입출력 진단
 
-제품 활성화와 별도로, Windows에서 `HELLO_AGENT_WINDOWS_TEST_GIT`에 시험할 설치본의 `git.exe` 절대 경로를 명시하고 아래 opt-in 검사를 실행한다. 사용자 저장소·앱의 기존 선택/동의 기록은 사용하지 않는다.
+제품 활성화와 별도로, Windows에서 `ELSECREW_WINDOWS_TEST_GIT`에 시험할 설치본의 `git.exe` 절대 경로를 명시하고 아래 opt-in 검사를 실행한다. 사용자 저장소·앱의 기존 선택/동의 기록은 사용하지 않는다.
 
 ```powershell
 $env:CARGO_BUILD_JOBS = '4'
 $env:RUST_TEST_THREADS = '4'
-cargo test --locked --release -p hello-agent-sidecar --lib selected_git_trust_runs_bounded_version_and_stdin_then_revokes -- --ignored --nocapture --test-threads=1
+cargo test --locked --release -p elsecrew-sidecar --lib selected_git_trust_runs_bounded_version_and_stdin_then_revokes -- --ignored --nocapture --test-threads=1
 ```
 
 자체 임시 앱 데이터에서 선택 → 서명자/설치 폴더 확인 → 미동의 실행 거절 → 명시 동의 → 매 실행 재검사 → `--version` 및 `hash-object --stdin` → 동의 철회 후 실행 거절을 검사한다. 실제 실행은 제품의 실행 파일/의존 DLL 관측·고정 환경·보호된 작업 폴더·프로세스 종료 경로를 사용한다. 내용 해시 명령은 객체를 저장하지 않으며 네트워크·모델 호출도 하지 않는다. 성공 시 임시 자료를 정리한다. 이 검사 후보는 아직 Windows에서 실행하지 않았으며 프로젝트 전체 반영/복원·패키지 UI·출시 합격 증거가 아니다. 검사가 동의를 만들어 사용하는 대상은 임시 데이터뿐이며 일반 앱의 실행 gate는 그대로 비활성이다.

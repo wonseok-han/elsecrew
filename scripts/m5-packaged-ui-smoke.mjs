@@ -42,13 +42,13 @@ const diagnosticLanguage = process.argv.length === 3
   : undefined;
 const projectFlow = nativeChatStream || largeDiff || largeProject || (process.argv.length === 3 && process.argv[2] === '--project');
 assert.ok(process.argv.length === 2 || projectFlow || diagnosticLanguage || startupSeries || deferredCdp || noCdp || mainTraceDiagnostic, 'Only fixed diagnostic scenarios are accepted');
-const bundle = path.join(repo, 'out/hello-agent-darwin-arm64/hello-agent.app/Contents');
-const executable = path.join(bundle, 'MacOS/hello-agent');
+const bundle = path.join(repo, 'out/Elsecrew-darwin-arm64/Elsecrew.app/Contents');
+const executable = path.join(bundle, 'MacOS/Elsecrew');
 const resources = path.join(bundle, 'Resources');
-for (const file of [executable, path.join(resources, 'app.asar'), path.join(resources, 'sidecar/hello-agent-sidecar')]) {
+for (const file of [executable, path.join(resources, 'app.asar'), path.join(resources, 'sidecar/elsecrew-sidecar')]) {
   assert.ok(fs.lstatSync(file).isFile(), 'Package is missing a regular artifact');
 }
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hello-agent-packaged-ui-'));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'elsecrew-packaged-ui-'));
 const userData = path.join(root, 'userdata');
 fs.mkdirSync(userData, {mode: 0o700});
 const git = (...args) => execFileSync('/usr/bin/git', args, {cwd: repo, encoding: 'utf8'}).trim();
@@ -57,7 +57,7 @@ const report = {
   root, head: git('rev-parse', 'HEAD'), gitStatusBefore: git('status', '--porcelain'),
   measuredAt: new Date().toISOString(), packagedApp: true, userData,
   asarSha256: createHash('sha256').update(fs.readFileSync(path.join(resources, 'app.asar'))).digest('hex'),
-  sidecarSha256: createHash('sha256').update(fs.readFileSync(path.join(resources, 'sidecar/hello-agent-sidecar'))).digest('hex'),
+  sidecarSha256: createHash('sha256').update(fs.readFileSync(path.join(resources, 'sidecar/elsecrew-sidecar'))).digest('hex'),
   limitations: ['Single cold startup with migration and loopback CDP instrumentation.',
     'No native keyboard/focus, models, stress fixtures or whole G6 evidence.',
     'RSS retains observed descendants after reparenting using second-resolution ps start times; unseen short-lived children and same-second PID reuse remain unverified.'],
@@ -72,7 +72,7 @@ delete env.ELECTRON_RUN_AS_NODE;
 delete env.NODE_OPTIONS;
 if (projectFlow || noCdpProject) {
   try {
-    report.project = await seedPackagedProject(path.join(resources, 'sidecar/hello-agent-sidecar'), root, userData, env, largeProject, largeDiff);
+    report.project = await seedPackagedProject(path.join(resources, 'sidecar/elsecrew-sidecar'), root, userData, env, largeProject, largeDiff);
     persist();
   } catch (error) {
     report.status = 'FAIL'; report.error = String(error); persist();
@@ -208,7 +208,7 @@ try {
   if (resume) assert.notEqual(report.sidecarInstanceId, report.previousSidecarInstanceId, 'Restart must create a new sidecar instance');
   report.storageObservedMs = performance.now() - started;
   // The database must exist under our explicit profile before further probes.
-  const database = path.join(userData, 'com.wonseokhan.helloagent/m5/hello-agent.sqlite3');
+  const database = path.join(userData, 'com.wonseokhan.elsecrew/m5/elsecrew.sqlite3');
   assert.ok(fs.lstatSync(database).isFile(), 'Packaged app did not use the isolated profile');
   report.ui = await until(() => evaluate(`(() => {
     const root = document.querySelector('#root');
@@ -317,7 +317,7 @@ try {
         report.largeProject = await evaluate(`(${probeLargeProject.toString()})(${JSON.stringify(report.project.projectId)})`);
         if (report.largeProject.failedMetrics.length) report.error = `Large project limits exceeded: ${report.largeProject.failedMetrics.join(', ')}`;
       }
-      const worktrees = path.join(userData, 'com.wonseokhan.helloagent/m5/worktrees-v1');
+      const worktrees = path.join(userData, 'com.wonseokhan.elsecrew/m5/worktrees-v1');
       const matches = fs.readdirSync(worktrees, {withFileTypes:true})
         .filter(entry => entry.isDirectory() && fs.existsSync(path.join(worktrees, entry.name, 'native-diff-fixture')))
         .map(entry => path.join(worktrees, entry.name));
@@ -488,7 +488,7 @@ finally {
   clearTimeout(exitTimer);
   if (exit?.code === 0 && exit.signal === null) {
     try {
-      const db = new DatabaseSync(path.join(userData, 'com.wonseokhan.helloagent/m5/hello-agent.sqlite3'), {readOnly: true});
+      const db = new DatabaseSync(path.join(userData, 'com.wonseokhan.elsecrew/m5/elsecrew.sqlite3'), {readOnly: true});
       try {
         if (noCdp) {
           const instances = db.prepare('SELECT sidecar_instance_id, clean_shutdown_at FROM app_instances').all();
@@ -540,7 +540,7 @@ if (startupSeries) {
       assert.equal(git('rev-parse', 'HEAD'), report.head);
       assert.equal(git('status', '--porcelain'), report.gitStatusBefore);
       assert.equal(createHash('sha256').update(fs.readFileSync(path.join(resources, 'app.asar'))).digest('hex'), report.asarSha256);
-      assert.equal(createHash('sha256').update(fs.readFileSync(path.join(resources, 'sidecar/hello-agent-sidecar'))).digest('hex'), report.sidecarSha256);
+      assert.equal(createHash('sha256').update(fs.readFileSync(path.join(resources, 'sidecar/elsecrew-sidecar'))).digest('hex'), report.sidecarSha256);
       const live = new Set(execFileSync('/bin/ps', ['-axo', 'pid='], {encoding:'utf8'}).trim().split(/\s+/).map(Number));
       assert.ok([previous.pid, ...previous.memory.flatMap(row => row.processes.map(process => process.pid))].every(pid => !live.has(pid)), 'Previous observed process still live');
       const current = {...report, status:'RUNNING', measuredAt:new Date().toISOString(), memory:[], shutdown:'pending',

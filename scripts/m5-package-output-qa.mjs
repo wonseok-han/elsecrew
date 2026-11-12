@@ -15,7 +15,7 @@ assert.equal(process.arch, 'arm64');
 assert.equal(process.argv.length, 2, 'No runtime overrides accepted');
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const require = createRequire(import.meta.url);
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hello-agent-output-qa-'));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'elsecrew-output-qa-'));
 const source = path.join(root, 'source');
 fs.mkdirSync(source);
 const git = (...args) => execFileSync('/usr/bin/git', args, {cwd:repo, encoding:'utf8'}).trim();
@@ -28,22 +28,22 @@ const report = {diagnostic:true, gateEligible:false, status:'BUILDING', root,
 const persist = () => fs.writeFileSync(path.join(root,'build.json'), JSON.stringify(report,null,2));
 persist(); console.log(JSON.stringify({stage:'QA_BUILD_STARTED', root}));
 try {
-  const cargo = spawnSync('cargo', ['build','--locked','--release','-p','hello-agent-sidecar',
-    '--bin','hello-agent-sidecar','--features','qa-output-fixtures','--message-format=json-render-diagnostics'],
+  const cargo = spawnSync('cargo', ['build','--locked','--release','-p','elsecrew-sidecar',
+    '--bin','elsecrew-sidecar','--features','qa-output-fixtures','--message-format=json-render-diagnostics'],
   {cwd:repo, encoding:'utf8', maxBuffer:16*1024*1024,
     env:{...process.env,CARGO_BUILD_JOBS:'4',CARGO_INCREMENTAL:'0'}});
   fs.writeFileSync(path.join(root,'cargo.log'), cargo.stderr ?? '');
   assert.ok(!cargo.error && cargo.status === 0, 'QA sidecar build failed');
   const artifacts = cargo.stdout.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line)).filter(value =>
-    value.reason === 'compiler-artifact' && value.manifest_path === path.join(repo,'crates/hello-agent-sidecar/Cargo.toml')
-    && value.target?.name === 'hello-agent-sidecar' && value.target.kind.includes('bin')
+    value.reason === 'compiler-artifact' && value.manifest_path === path.join(repo,'crates/elsecrew-sidecar/Cargo.toml')
+    && value.target?.name === 'elsecrew-sidecar' && value.target.kind.includes('bin')
     && value.profile?.test === false && value.profile.debug_assertions === false);
   assert.equal(artifacts.length,1);
   const artifact = artifacts[0];
   assert.ok(artifact.features?.includes('qa-output-fixtures') && path.isAbsolute(artifact.executable));
   // Copy before any later Cargo invocation can replace the resolved binary.
   const sidecarDirectory = path.join(root,'sidecar'); fs.mkdirSync(sidecarDirectory);
-  const sidecar = path.join(sidecarDirectory,'hello-agent-sidecar');
+  const sidecar = path.join(sidecarDirectory,'elsecrew-sidecar');
   fs.copyFileSync(artifact.executable,sidecar); fs.chmodSync(sidecar,0o755);
   report.sidecarSha256 = hash(sidecar);
   const external = ['electron', ...builtinModules, ...builtinModules.map(name => `node:${name}`)];
@@ -63,9 +63,9 @@ try {
     fs.copyFileSync(path.join(repo,'tests',name),path.join(source,'tests',name));
   fs.writeFileSync(path.join(source,'.vite/build/qa-main.cjs'),
     "require('../../scripts/m5-durable-output-ui-smoke.cjs').runOutputSmoke(true);\n");
-  fs.writeFileSync(path.join(source,'package.json'),JSON.stringify({name:'hello-agent-output-qa',
+  fs.writeFileSync(path.join(source,'package.json'),JSON.stringify({name:'elsecrew-output-qa',
     version:'0.0.0',main:'.vite/build/qa-main.cjs',private:true}));
-  const apps = await packager({dir:source,out:path.join(root,'app'),name:'Hello Agent Output QA',
+  const apps = await packager({dir:source,out:path.join(root,'app'),name:'Elsecrew Output QA',
     platform:'darwin',arch:'arm64',electronVersion:require('electron/package.json').version,
     asar:true,overwrite:false,prune:false,extraResource:[sidecarDirectory]});
   assert.equal(apps.length,1);

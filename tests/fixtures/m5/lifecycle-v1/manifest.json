@@ -8,13 +8,13 @@
   "capabilities": ["system.status", "app.prepareQuit"],
   "dataDirectory": {
     "base": "userData",
-    "segments": ["com.wonseokhan.helloagent", "m5"],
-    "sqliteFile": "hello-agent.sqlite3",
+    "segments": ["com.wonseokhan.elsecrew", "m5"],
+    "sqliteFile": "elsecrew.sqlite3",
     "separateFromLegacyTauriStore": true
   },
   "productionSidecar": {
     "base": "process.resourcesPath",
-    "relativeSegments": ["sidecar", "hello-agent-sidecar"],
+    "relativeSegments": ["sidecar", "elsecrew-sidecar"],
     "windowsSuffix": ".exe",
     "argv": ["--stdio"],
     "shell": false,

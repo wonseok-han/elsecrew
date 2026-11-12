@@ -1,0 +1,6733 @@
+use super::test_binary::sidecar_binary_for_test_executable;
+use super::*;
+use crate::agent_runtime::{
+    AgentRuntime, FakeScenario, RecoveryResolutionFailurePoint, RunIdentity,
+};
+use elsecrew_core::agent_adapter::MAX_AGENT_EVENT_BYTES;
+use elsecrew_protocol::agent_adapter_v1::AgentRunStartRequestV1;
+use elsecrew_protocol::project_v1::sha256_file_version_v1;
+use std::fs;
+use std::process::Command;
+use tempfile::TempDir;
+
+mod claude_native;
+mod durable_output;
+
+#[test]
+fn legacy_cancel_returns_exact_durable_run_outside_chat_page() {
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_cancel_page_snapshot");
+    let chat = fixture.create_chat(&snapshot, "cancel page", "req_cancel_page_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let cases: Value = serde_json::from_str(include_str!("../../../../tests/fixtures/m5/g5-v1/cases.json")).unwrap();
+    let mut run = cases["valid"].as_array().unwrap().iter()
+        .find(|case| case["name"] == "valid-cancel-transition").unwrap()["value"]["after"].clone();
+    for field in ["chatId", "taskId", "worktreeId", "workspaceIdentity"] {
+        run[field] = chat[field].clone();
+    }
+    let run_id = "run_target";
+    run["runId"] = json!(run_id);
+    persist_run(&mut fixture.storage, &run, &snapshot, None, "op_cancel_target").unwrap();
+    let projection = run_projection_record(&fixture.storage, run_id).unwrap();
+    for index in 0..51 {
+        let id = format!("run_0000_{index:03}");
+        let mut previous = projection.clone();
+        previous["record"]["runId"] = json!(id);
+        previous["run_id"] = json!(id);
+        fixture.storage.upsert_projection_record(
+            "run", &id, &format!("op_old_{index}"), None, previous,
+        ).unwrap();
+    }
+    let page = fixture.chats.get_chat(&fixture.storage, chat_id, 0, None, 1, false).unwrap();
+    assert!(!page["runs"].as_array().unwrap().iter().any(|run| run["runId"] == run_id));
+    let canceled = legacy_cancel_result(&fixture.storage, run_id, "canceled").unwrap();
+    assert_eq!(canceled["runId"], run_id);
+    assert_eq!(canceled["run"], run_projection_record(&fixture.storage, run_id).unwrap()["record"]);
+    assert_eq!(canceled["run"]["state"], canceled["outcome"]);
+    assert_eq!(canceled["run"]["terminationEvidence"]["processesProvenGone"], true);
+}
+
+#[test]
+fn workspace_watchers_progress_fairly_one_per_poll() {
+    let mut fixture = Fixture::new();
+    let mut chats = Vec::new();
+    for index in 0..4 {
+        let snapshot = fixture.snapshot(&format!("req_fair_snapshot_{index}"));
+        let chat = fixture.create_chat(&snapshot, "watch fairness", &format!("req_fair_chat_{index}"));
+        fixture.projects.workspace_watch(&fixture.storage, &address_from_chat(&chat).unwrap()).unwrap();
+        let root = std::path::Path::new(snapshot["worktreePath"].as_str().unwrap());
+        fs::write(root.join("src/value.txt"), b"changed value").unwrap();
+        chats.push(chat["chatId"].as_str().unwrap().to_string());
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for _ in 0..4 {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let events = loop {
+            let events = fixture.projects.poll_watchers(&fixture.storage);
+            if !events.is_empty() { break events; }
+            assert!(std::time::Instant::now() < deadline, "watch validation timed out");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        };
+        assert_eq!(events.len(), 1, "one watcher must not monopolize the next turn");
+        let id = events[0].payload["chatId"].as_str().unwrap().to_string();
+        assert!(seen.insert(id), "a watcher was repeated before its peers");
+    }
+    assert_eq!(seen, chats.into_iter().collect());
+    for _ in 0..4 {
+        assert!(fixture.projects.poll_watchers(&fixture.storage).is_empty());
+    }
+}
+
+#[test]
+fn oversized_workspace_watch_preserves_address_and_requests_rescan() {
+    let mut f = Fixture::new();
+    let snapshot = f.snapshot("req_watch_large_snapshot");
+    let chat = f.create_chat(&snapshot, "large watch", "req_watch_large_chat");
+    let address = address_from_chat(&chat).unwrap();
+    assert_eq!(
+        f.projects.workspace_watch(&f.storage, &address).unwrap().result,
+        json!({"watching":true})
+    );
+    let root = std::path::Path::new(snapshot["worktreePath"].as_str().unwrap());
+    let overflow = root.join("overflow");
+    fs::create_dir(&overflow).unwrap();
+    for index in 0..=10_000 {
+        fs::write(overflow.join(format!("{index:05}")), b"").unwrap();
+    }
+    let action = f.projects.workspace_watch(&f.storage, &address).unwrap();
+    let mut events = action.watch_events;
+    if cfg!(unix) {
+        assert_eq!(action.result, json!({"watching":true}));
+        assert!(events.is_empty());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while std::time::Instant::now() < deadline {
+            events = f.projects.poll_watchers(&f.storage);
+            if !events.is_empty() { break; }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    } else {
+        assert_eq!(action.result, json!({"watching":false,"rescanRequired":true}));
+    }
+    assert_eq!(events.len(), 1);
+    for field in ["chatId", "projectId", "worktreeId", "workspaceIdentity"] {
+        assert_eq!(events[0].payload[field], chat[field]);
+    }
+    assert_eq!(events[0].payload["rescanRequired"], true);
+    assert!(f.projects.poll_watchers(&f.storage).is_empty());
+    fs::remove_dir_all(&overflow).unwrap();
+    assert_eq!(
+        f.projects.workspace_watch(&f.storage, &address).unwrap().result,
+        json!({"watching":true})
+    );
+}
+
+#[test]
+fn project_application_fence_blocks_other_chat_runs_before_reservation() {
+    use crate::agent_runtime::preparation::RunPreparation;
+    let mut f = Fixture::new();
+    let first = f.snapshot("req_intent_first");
+    let fixture_chat = f.create_chat(&first, "fixture goal", "req_intent_fixture_chat");
+    let second = f.snapshot("req_intent_second");
+    let native_chat = f.create_exact_claude_chat(&second, "native goal", "req_intent_native_chat");
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let chat_id = native_chat["chatId"].as_str().unwrap();
+    let request = AgentRunStartRequestV1 {
+        chat_id: chat_id.to_owned(),
+        role_id: "coding".into(),
+        input_message_ids: vec![initial_message_id(&f, chat_id)],
+        expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+    };
+    let stale = RunPreparation::resolve(&f.storage, &f.projects, &request).unwrap();
+    let mut project = project_record(&f.storage, &f.project_id).unwrap();
+    project.insert(
+        "application_intent".into(),
+        json!({"state":"prepared","binding":{"worktreeId":first["worktreeId"]}}),
+    );
+    f.storage
+        .upsert_projection_record(
+            "project",
+            &f.project_id,
+            "op_test_application_fence",
+            None,
+            project,
+        )
+        .unwrap();
+    let before_runs = f.storage.projection_records("run").unwrap();
+    let before_locks = f.storage.projection_records("lock").unwrap();
+    assert!(RunPreparation::resolve(&f.storage, &f.projects, &request).is_err());
+    assert!(stale
+        .reserve(
+            &mut f.storage,
+            &f.projects,
+            &serde_json::from_value(capability).unwrap(),
+            "req_intent_stale_reserve"
+        )
+        .is_err());
+    let error = f
+        .chats
+        .start_fixture(
+            &mut f.storage,
+            &mut f.projects,
+            fixture_chat["chatId"].as_str().unwrap(),
+            "planning",
+            "planning-success",
+            "req_intent_fixture_run",
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, "recoveryRequired");
+    assert_eq!(f.storage.projection_records("run").unwrap(), before_runs);
+    assert_eq!(f.storage.projection_records("lock").unwrap(), before_locks);
+    let mut project = project_record(&f.storage, &f.project_id).unwrap();
+    project["application_intent"]["state"] = json!("abandoned");
+    f.storage
+        .upsert_projection_record(
+            "project",
+            &f.project_id,
+            "op_test_application_release",
+            None,
+            project,
+        )
+        .unwrap();
+    assert!(RunPreparation::resolve(&f.storage, &f.projects, &request).is_ok());
+}
+
+struct Fixture {
+    _root: TempDir,
+    source: std::path::PathBuf,
+    storage: Storage,
+    projects: ProjectManager,
+    chats: G5Manager,
+    project_id: String,
+}
+
+impl Fixture {
+    fn new() -> Self {
+        Self::with_durable_output(false)
+    }
+
+    fn with_durable_output(durable: bool) -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let data = root.path().join("data");
+        fs::create_dir_all(source.join("src")).unwrap();
+        fs::create_dir_all(&data).unwrap();
+        fs::write(source.join("src/value.txt"), b"base").unwrap();
+        git(&source, &["init", "-q"]);
+        git(&source, &["add", "."]);
+        git(
+            &source,
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-q",
+                "-m",
+                "fixture",
+            ],
+        );
+        let database = data.join("elsecrew.sqlite3");
+        let mut storage = if durable {
+            Storage::open_durable_output_for_test(&database).unwrap()
+        } else {
+            Storage::open(&database).unwrap()
+        };
+        let mut projects = ProjectManager::new(&database).unwrap();
+        let opened = projects
+            .open_project(&mut storage, source.to_str().unwrap(), "req_open")
+            .unwrap();
+        let project_id = opened.result["projectId"].as_str().unwrap().to_string();
+        Self {
+            _root: root,
+            source,
+            storage,
+            projects,
+            chats: G5Manager::default(),
+            project_id,
+        }
+    }
+
+    fn snapshot(&mut self, request: &str) -> Value {
+        let prepared = self
+            .chats
+            .prepare_chat_workspace(
+                &mut self.storage,
+                &mut self.projects,
+                &self.project_id,
+                request,
+            )
+            .unwrap()
+            .result;
+        let mut snapshot = prepared["manifest"].clone();
+        snapshot["preparationId"] = prepared["preparationId"].clone();
+        snapshot
+    }
+
+    fn create_chat(&mut self, snapshot: &Value, goal: &str, request: &str) -> Value {
+        self.chats
+            .default_role_settings(&mut self.storage, &self.projects, &self.project_id, request)
+            .unwrap();
+        self.chats
+            .create_chat(
+                &mut self.storage,
+                &self.projects,
+                snapshot["preparationId"].as_str().unwrap(),
+                &self.project_id,
+                snapshot["worktreeId"].as_str().unwrap(),
+                snapshot["workspaceIdentity"].as_str().unwrap(),
+                goal,
+                1,
+                request,
+            )
+            .unwrap()
+            .result
+    }
+
+    fn create_exact_claude_chat(&mut self, snapshot: &Value, goal: &str, request: &str) -> Value {
+        self.chats
+            .default_role_settings(&mut self.storage, &self.projects, &self.project_id, request)
+            .unwrap();
+        self.chats
+            .update_role_settings(
+                &mut self.storage,
+                &self.project_id,
+                1,
+                json!([
+                    {"roleId":"planning","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"},
+                    {"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},
+                    {"roleId":"review","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"}
+                ]),
+                &format!("{request}_exact_roles"),
+            )
+            .unwrap();
+        self.chats
+            .create_chat(
+                &mut self.storage,
+                &self.projects,
+                snapshot["preparationId"].as_str().unwrap(),
+                &self.project_id,
+                snapshot["worktreeId"].as_str().unwrap(),
+                snapshot["workspaceIdentity"].as_str().unwrap(),
+                goal,
+                2,
+                request,
+            )
+            .unwrap()
+            .result
+    }
+}
+
+#[test]
+fn reserved_run_identity_is_persisted_before_gate_release_and_storage_failure_blocks_payload() {
+    use crate::{
+        agent_runtime::preparation::RunPreparation, provider_login_process::LoginProcess,
+        provider_profile::CodexProfileBinding,
+    };
+    use std::ffi::OsStr;
+    for failure in ["none", "identity", "release-record", "tree-record"] {
+        let fail_store = failure == "identity";
+        let fail_release_record = failure == "release-record";
+        let fail_tree_record = failure == "tree-record";
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_gate_snapshot");
+        let chat = fixture.create_exact_claude_chat(&snapshot, "goal", "req_gate_chat");
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+        let value = runtime.get_capabilities("claude-code", true).unwrap();
+        let request = AgentRunStartRequestV1 {
+            chat_id: chat_id.into(),
+            role_id: "coding".into(),
+            input_message_ids: vec![initial_message_id(&fixture, chat_id)],
+            expected_capability_fingerprint: value["fingerprint"].as_str().unwrap().into(),
+        };
+        let reservation = RunPreparation::resolve(&fixture.storage, &fixture.projects, &request)
+            .unwrap()
+            .reserve(
+                &mut fixture.storage,
+                &fixture.projects,
+                &serde_json::from_value(value).unwrap(),
+                "req_gate_reserve",
+            )
+            .unwrap();
+        let profile = CodexProfileBinding::from_storage(&fixture.storage).unwrap();
+        let home = profile.revalidate().unwrap();
+        let marker = fixture._root.path().join("payload-ran");
+        if fail_store {
+            fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER test_reject_identity BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_agent_identity_%' BEGIN SELECT RAISE(ABORT, 'injected identity persistence failure'); END;").unwrap();
+        }
+        if fail_release_record {
+            fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER test_reject_release BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_agent_released_%' BEGIN SELECT RAISE(ABORT, 'injected release persistence failure'); END;").unwrap();
+        }
+        let mut process = LoginProcess::reserve(&profile).unwrap();
+        let mut release_called = false;
+        let result = reservation.launch_gated(
+            &mut fixture.storage,
+            &fixture.projects,
+            &mut process,
+            || {
+                crate::provider_login_gate::command(
+                    std::path::Path::new("/bin/sh"),
+                    &[
+                        OsStr::new("-c"),
+                        OsStr::new(
+                            "/bin/sleep 30 & printf ran > \"$1\"; printf ready; IFS= read -r hold",
+                        ),
+                        OsStr::new("toy-vendor"),
+                        marker.as_os_str(),
+                    ],
+                    &home,
+                )?
+                .spawn()
+            },
+            |child| {
+                assert!(!marker.exists());
+                release_called = true;
+                crate::provider_login_gate::release(child)
+            },
+        );
+        assert_eq!(result.is_ok(), !fail_store && !fail_release_record);
+        assert_eq!(release_called, !fail_store);
+        if fail_release_record {
+            assert!(process.begin_preflight().is_err());
+        }
+        if !fail_store {
+            let recorded = fixture.storage.projection_records("run").unwrap();
+            let root = process.root_for_test();
+            assert_eq!(recorded[0]["process_identity_internal"][0]["pid"], root.pid);
+            assert_eq!(
+                recorded[0]["process_identity_internal"][0]["start_us"],
+                root.start_us
+            );
+            assert_eq!(
+                recorded[0]["barrier"]["releaseGranted"],
+                !fail_release_record
+            );
+            assert_eq!(recorded[0]["state"], "preparing");
+            // Observe the toy payload without sending any model input.
+            use std::sync::atomic::AtomicBool;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while !marker.exists() && std::time::Instant::now() < deadline {
+                if !fail_release_record {
+                    process.poll(&AtomicBool::new(false)).unwrap();
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert!(marker.exists());
+        }
+        if !fail_store && !fail_release_record {
+            if fail_tree_record {
+                fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER test_reject_tree BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_agent_tree_%' BEGIN SELECT RAISE(ABORT, 'injected tree persistence failure'); END;").unwrap();
+            }
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            loop {
+                let observed = reservation.observe_process(&mut fixture.storage, &mut process);
+                let records = fixture.storage.projection_records("run").unwrap();
+                let tracked = records[0]["process_identity_internal"]
+                    .as_array()
+                    .unwrap()
+                    .len();
+                if fail_tree_record && observed.is_err() {
+                    assert_eq!(tracked, 1);
+                    assert!(process.begin_preflight().is_err());
+                    break;
+                }
+                observed.unwrap();
+                if !fail_tree_record && tracked > 1 {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "child observation did not reach ledger"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+        process.finish().unwrap();
+        assert_eq!(marker.exists(), !fail_store);
+        if fail_store {
+            fixture
+                .storage
+                .connection_for_test()
+                .execute_batch("DROP TRIGGER test_reject_identity;")
+                .unwrap();
+        }
+        if fail_release_record {
+            fixture
+                .storage
+                .connection_for_test()
+                .execute_batch("DROP TRIGGER test_reject_release;")
+                .unwrap();
+        }
+        if fail_tree_record {
+            fixture
+                .storage
+                .connection_for_test()
+                .execute_batch("DROP TRIGGER test_reject_tree;")
+                .unwrap();
+        }
+        let before = fixture.storage.projection_records("run").unwrap();
+        assert_eq!(before[0]["process_identity_internal"].is_null(), fail_store);
+        AgentRuntime::blocked()
+            .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+            .unwrap();
+        let after = fixture.storage.projection_records("run").unwrap();
+        assert_eq!(
+            after[0]["recovery"]["reason"],
+            if fail_store {
+                "processIdentityUnavailable"
+            } else {
+                "uncleanShutdown"
+            }
+        );
+        assert_eq!(
+            after[0]["recovery"]["trackedProcesses"]
+                .as_array()
+                .unwrap()
+                .is_empty(),
+            fail_store
+        );
+        assert!(LoginProcess::reserve(&profile).is_ok());
+    }
+}
+
+#[test]
+fn actual_run_preparation_reserves_once_and_is_visible_to_restart_recovery() {
+    use crate::agent_runtime::preparation::RunPreparation;
+    for role in ["coding", "review"] {
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_prepared_snapshot");
+        let chat = fixture.create_exact_claude_chat(&snapshot, "goal", "req_prepared_chat");
+        let chat_id = chat["chatId"].as_str().unwrap();
+        if role == "review" {
+            let mut saved = fixture
+                .storage
+                .projection_record("chat", chat_id)
+                .unwrap()
+                .unwrap();
+            let review = &mut saved["record"]["roleSnapshots"][2];
+            review["runtime"] = json!("claude-code");
+            review["modelSelector"] = json!("claude-opus-5");
+            review["reasoningEffort"] = Value::Null;
+            fixture
+                .storage
+                .upsert_projection_record("chat", chat_id, "op_test_review_role", None, saved)
+                .unwrap();
+        }
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        let request = AgentRunStartRequestV1 {
+            chat_id: chat_id.into(),
+            role_id: role.into(),
+            input_message_ids: vec![initial_message_id(&fixture, chat_id)],
+            expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+        };
+        let capability = serde_json::from_value(capability).unwrap();
+        let first = RunPreparation::resolve(&fixture.storage, &fixture.projects, &request).unwrap();
+        let stale = RunPreparation::resolve(&fixture.storage, &fixture.projects, &request).unwrap();
+        first
+            .reserve(
+                &mut fixture.storage,
+                &fixture.projects,
+                &capability,
+                "req_reserve_first",
+            )
+            .unwrap();
+        assert!(stale
+            .reserve(
+                &mut fixture.storage,
+                &fixture.projects,
+                &capability,
+                "req_reserve_stale"
+            )
+            .is_err());
+        let runs = fixture.storage.projection_records("run").unwrap();
+        assert_eq!(runs.len(), 1);
+        let run = &runs[0];
+        assert_eq!(run["source_kind"], "actualAgent");
+        assert_eq!(run["state"], "preparing");
+        assert!(run["recovery_id_reservation"].as_str().is_some());
+        assert!(run["process_identity_internal"].is_null());
+        let lock_id = format!("lock_{}", snapshot["worktreeId"].as_str().unwrap());
+        let lock = fixture
+            .storage
+            .projection_record("lock", &lock_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            lock["writer_run_id"],
+            if role == "coding" {
+                run["run_id"].clone()
+            } else {
+                Value::Null
+            }
+        );
+        // No child was spawned. Startup recovery must still discover this reservation.
+        AgentRuntime::blocked()
+            .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+            .unwrap();
+        let recovered = fixture.storage.projection_records("run").unwrap();
+        assert_eq!(
+            recovered[0]["recovery"]["reason"],
+            "processIdentityUnavailable"
+        );
+        assert_eq!(
+            recovered[0]["recovery"]["recoveryId"],
+            run["recovery_id_reservation"]
+        );
+        assert_eq!(recovered[0]["state"], "recoveryRequired");
+    }
+}
+
+#[test]
+fn phased_claude_restart_rejects_changed_evidence_and_preserves_valid_records() {
+    use crate::agent_runtime::preparation::RunPreparation;
+    use elsecrew_protocol::agent_adapter_v1::phased_claude::{Preflight, SessionObservation, SESSION_OBSERVATIONS};
+    let mut f = Fixture::new();
+    let snapshot = f.snapshot("req_phase_snapshot");
+    let chat = f.create_exact_claude_chat(&snapshot, "goal", "req_phase_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let request = AgentRunStartRequestV1 {
+        chat_id: chat_id.into(), role_id: "coding".into(),
+        input_message_ids: vec![initial_message_id(&f, chat_id)],
+        expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+    };
+    RunPreparation::resolve(&f.storage, &f.projects, &request).unwrap()
+        .reserve(&mut f.storage, &f.projects, &serde_json::from_value(capability).unwrap(), "req_phase_reserve").unwrap();
+    // Synthetic already-initialized projection: no provider or model is run.
+    let mut saved = f.storage.projection_records("run").unwrap().remove(0);
+    let run_id = saved["run_id"].as_str().unwrap().to_owned();
+    saved.insert("state".into(), json!("running"));
+    saved.get_mut("record").unwrap()["state"] = json!("running");
+    let record = saved["record"].clone();
+    let connection = uuid::Uuid::new_v4().to_string();
+    let digest = format!("sha256:{}", "a".repeat(64));
+    let preflight: Preflight = serde_json::from_value(json!({
+        "schemaVersion":1,"scope":{"chatId":chat_id,"roleId":"coding",
+            "worktreeId":record["worktreeId"],"workspaceIdentity":record["workspaceIdentity"]},
+        "profile":record["selectedProfile"],"executable":{"pathDigest":digest,"fileIdentityDigest":digest,"cliVersion":"2.1.287"},
+        "requestedLaunchPolicyDigest":digest,"resolvedModel":"claude-opus-5","credentialsPresent":true,"observedAt":record["createdAt"],
+    })).unwrap();
+    let session = SessionObservation {
+        observed_builtin_plugins: Vec::new(),
+        schema_version:1,run_id:run_id.clone(),connection_id:connection.clone(),
+        preflight_digest:preflight.digest().unwrap(),workspace_identity:preflight.scope.workspace_identity.clone(),
+        resolved_model:preflight.resolved_model.clone(),observed_at:preflight.observed_at.clone(),
+        observed_session_verification:SESSION_OBSERVATIONS.iter().map(|v| (*v).into()).collect(),
+    };
+    saved.insert("native_transport".into(), json!({"schemaVersion":1,"adapter":"claude.stream.v2","connectionId":connection,"requiresProviderAttestation":false}));
+    saved.insert("native_thread_receipt".into(), json!({"schemaVersion":1,"connectionId":connection,
+        "threadDigest":digest,"runId":run_id,"workspaceIdentity":record["workspaceIdentity"],
+        "capabilityFingerprint":record["capabilityFingerprint"],"selectedProfile":record["selectedProfile"]}));
+    saved.insert("claude_preflight".into(), serde_json::to_value(preflight).unwrap());
+    saved.insert("claude_session_observation".into(), serde_json::to_value(session).unwrap());
+    for (index, field) in ["claude_preflight", "claude_session_observation"].iter().enumerate() {
+        for remove in [false, true] {
+            let mut changed = saved.clone();
+            if remove { changed.remove(*field); }
+            else { changed.get_mut(*field).unwrap()["resolvedModel"] = json!("different-model"); }
+            f.storage.upsert_projection_record("run", &run_id, &format!("op_phase_bad_{index}_{remove}"), None, changed).unwrap();
+            let before = f.storage.projection_records("run").unwrap();
+            let locks = f.storage.projection_records("lock").unwrap();
+            let error = AgentRuntime::blocked().recover_unclean_runs(&mut f.storage, &mut f.projects).unwrap_err();
+            assert_eq!(error.kind(), "recoveryInvalid");
+            assert_eq!(f.storage.projection_records("run").unwrap(), before);
+            assert_eq!(f.storage.projection_records("lock").unwrap(), locks);
+        }
+    }
+    f.storage.upsert_projection_record("run", &run_id, "op_phase_valid", None, saved.clone()).unwrap();
+    AgentRuntime::blocked().recover_unclean_runs(&mut f.storage, &mut f.projects).unwrap();
+    let recovered = f.storage.projection_records("run").unwrap().remove(0);
+    assert_eq!(recovered["state"], "recoveryRequired");
+    for field in ["claude_preflight", "claude_session_observation"] { assert_eq!(recovered[field], saved[field]); }
+    AgentRuntime::blocked().recover_unclean_runs(&mut f.storage, &mut f.projects).unwrap();
+    assert_eq!(f.storage.projection_records("run").unwrap()[0], recovered);
+}
+
+#[test]
+fn actual_run_preparation_rejects_foreign_input_and_stale_evidence_without_writes() {
+    use crate::agent_runtime::preparation::RunPreparation;
+    for case in ["foreign", "fingerprint", "closed"] {
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_reject_snapshot");
+        let other_snapshot = fixture.snapshot("req_foreign_snapshot");
+        let other = fixture.create_chat(&other_snapshot, "foreign goal", "req_foreign_chat");
+        let chat = fixture.create_exact_claude_chat(&snapshot, "goal", "req_reject_chat");
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+        let value = runtime.get_capabilities("claude-code", true).unwrap();
+        let request = AgentRunStartRequestV1 {
+            chat_id: chat_id.into(),
+            role_id: "coding".into(),
+            input_message_ids: vec![initial_message_id(
+                &fixture,
+                if case == "foreign" {
+                    other["chatId"].as_str().unwrap()
+                } else {
+                    chat_id
+                },
+            )],
+            expected_capability_fingerprint: if case == "fingerprint" {
+                format!("sha256:{}", "0".repeat(64))
+            } else {
+                value["fingerprint"].as_str().unwrap().into()
+            },
+        };
+        let before_runs = fixture.storage.projection_records("run").unwrap();
+        let prepared = RunPreparation::resolve(&fixture.storage, &fixture.projects, &request);
+        if case == "foreign" {
+            assert!(prepared.is_err());
+        } else {
+            let prepared = prepared.unwrap();
+            if case == "closed" {
+                fixture
+                    .projects
+                    .workspace_close(&fixture.storage, &address_from_chat(&chat).unwrap())
+                    .unwrap();
+            }
+            let before_locks = fixture.storage.projection_records("lock").unwrap();
+            assert!(prepared
+                .reserve(
+                    &mut fixture.storage,
+                    &fixture.projects,
+                    &serde_json::from_value(value).unwrap(),
+                    "req_reject_reserve"
+                )
+                .is_err());
+            assert_eq!(
+                fixture.storage.projection_records("lock").unwrap(),
+                before_locks
+            );
+        }
+        assert_eq!(
+            fixture.storage.projection_records("run").unwrap(),
+            before_runs
+        );
+    }
+}
+
+#[test]
+fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
+    text_candidate_cases(false, false, false);
+}
+
+#[test]
+fn reserved_interactions_preserve_ledger_and_reject_role_changes() {
+    text_candidate_cases(false, true, false);
+}
+
+#[test]
+#[ignore = "macOS outer sandbox required; temporary toy CLI only, no account or network"]
+fn text_candidate_os_isolated_native_lifecycle() {
+    text_candidate_cases(true, false, false);
+}
+
+#[test]
+#[ignore = "macOS outer sandbox and local listener; toy CLI only, no account/upstream"]
+fn text_candidate_os_isolated_proxied_lifecycle() {
+    text_candidate_cases(true, false, true);
+}
+
+fn text_candidate_cases(offline_native: bool, interactions: bool, proxied: bool) {
+    text_candidate_cases_selected(offline_native, interactions, proxied, None);
+}
+
+#[test]
+#[ignore = "focused diagnosis; covered by reserved_interactions matrix"]
+fn native_dispatcher_approval_round_trip() {
+    text_candidate_cases_selected(false, true, false, Some("bound-handler-runtime"));
+}
+
+#[test]
+#[ignore = "macOS outer sandbox and local listener; toy acceptance only, no account/upstream"]
+fn native_confined_acceptance_round_trip() {
+    for case in [
+        "bound-native-accept",
+        "bound-native-accept-write",
+        "bound-native-accept-approval-store",
+        "bound-native-accept-approval-cancel",
+        "bound-native-accept-after-cancel",
+        "bound-native-accept-after-role",
+    ] {
+        text_candidate_cases_selected(true, true, true, Some(case));
+    }
+}
+
+fn text_candidate_cases_selected(
+    offline_native: bool,
+    interactions: bool,
+    proxied: bool,
+    selected: Option<&str>,
+) {
+    text_candidate_cases_with_output(offline_native, interactions, proxied, selected, false);
+}
+
+#[test]
+fn codex_durable_native_delivery_and_cancel() {
+    for case in ["bound", "bound-handler-runtime", "bound-handler-runtime-cancel"] {
+        text_candidate_cases_with_output(false, case != "bound", false, Some(case), true);
+    }
+}
+
+#[test]
+fn codex_durable_native_three_thousand_outputs() {
+    text_candidate_cases_with_output(false, false, false, Some("bound-long"), true);
+}
+
+fn text_candidate_cases_with_output(
+    offline_native: bool,
+    interactions: bool,
+    proxied: bool,
+    selected: Option<&str>,
+    durable: bool,
+) {
+    use crate::provider_login_process::LoginProcess;
+    use crate::provider_preflight_session::{run_text_and_close, TextWorkspace};
+    use crate::provider_profile::CodexProfileBinding;
+    use elsecrew_core::provider::vendor_observation::{
+        codex_events::{stream::TurnOutcome, Projection},
+        codex_preflight::{exchange::PreflightExchange, ExpectedProfile},
+    };
+    use std::{process::Stdio, sync::atomic::AtomicBool};
+    'cases: for failure in [
+        "none",
+        "sink",
+        "observer",
+        "idle-success",
+        "idle-observer",
+        "bound",
+        "bound-long",
+        "bound-handler",
+        "bound-handler-role",
+        "bound-handler-cancel",
+        "bound-handler-restart",
+        "bound-handler-cleanup-save",
+        "bound-handler-runtime",
+        "bound-handler-runtime-cancel",
+        "bound-handler-runtime-quit",
+        "bound-handler-runtime-terminal",
+        "bound-handler-runtime-approval-store",
+        "bound-handler-runtime-approval-cancel",
+        "bound-native",
+        "bound-native-accept",
+        "bound-native-accept-write",
+        "bound-native-accept-approval-store",
+        "bound-native-accept-approval-cancel",
+        "bound-native-accept-after-cancel",
+        "bound-native-accept-after-role",
+        "bound-native-write",
+        "bound-native-hardlink",
+        "bound-native-profile-hardlink",
+        "bound-native-gate-profile",
+        "bound-native-gate-cli",
+        "bound-native-gate-helper",
+        "bound-native-gate-cancel",
+        "bound-native-identity-persist",
+        "bound-native-release-persist",
+        "bound-role",
+        "bound-write",
+        "bound-write-mismatch",
+        "bound-input",
+        "bound-persist",
+        "bound-sink",
+        "bound-cleanup",
+        "bound-writer-cleanup",
+        "bound-interrupted",
+        "bound-multiple",
+        "bound-terminal",
+        "bound-writer-terminal",
+        "bound-cancel",
+    ] {
+        if selected.is_some_and(|selected| selected != failure) {
+            continue;
+        }
+        if !proxied && failure.starts_with("bound-native-") && failure.ends_with("-persist") {
+            continue;
+        }
+        if if proxied {
+            !failure.starts_with("bound-native")
+        } else {
+            matches!(failure, "bound-native" | "bound-native-write") != offline_native
+        } {
+            continue;
+        }
+        let accepting = failure.starts_with("bound-native-accept");
+        // Acceptance requires sealed model-proxy launch provenance. Those
+        // scenarios belong to native_confined_acceptance_round_trip, not the
+        // ordinary unconfined interaction/decline matrix.
+        if accepting && !proxied {
+            continue;
+        }
+        if (failure.starts_with("bound-handler") || accepting) != interactions {
+            continue;
+        }
+        let writer = matches!(
+            failure,
+            "bound-native-write"
+                | "bound-native-accept-write"
+                | "bound-writer-cleanup"
+                | "bound-writer-terminal"
+        );
+        // The 3,000-row case has a dedicated durable-output test. Legacy
+        // snapshots retain their existing bounded public-event contract.
+        if failure == "bound-long" && !durable {
+            continue;
+        }
+        let long_output = failure == "bound-long";
+        let failure = match failure {
+            "bound-long" => "bound",
+            "bound-writer-cleanup" => "bound-cleanup",
+            "bound-writer-terminal" => "bound-terminal",
+            value => value,
+        };
+        let fail_sink = matches!(failure, "sink" | "bound-sink");
+        let success = matches!(
+            failure,
+            "none"
+                | "idle-success"
+                | "bound"
+                | "bound-handler"
+                | "bound-native"
+                | "bound-native-write"
+                | "bound-interrupted"
+                | "bound-multiple"
+        );
+        let mut fixture = Fixture::with_durable_output(durable);
+        let snapshot = fixture.snapshot("req_sink_snapshot");
+        let chat = fixture.create_chat(&snapshot, "goal", "req_sink_chat");
+        let address = address_from_chat(&chat).unwrap();
+        let mut reservation = if failure.starts_with("bound") {
+            // Synthetic admitted evidence only, never a real Codex discovery result.
+            let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+            let mut capability: elsecrew_protocol::agent_adapter_v1::AgentCapabilitySnapshotV1 =
+                serde_json::from_value(runtime.get_capabilities("claude-code", true).unwrap())
+                    .unwrap();
+            capability.runtime = "codex".into();
+            capability.models[0].model_selector = "test-model".into();
+            capability.models[0].reasoning_efforts = vec!["medium".into()];
+            capability.fingerprint =
+                elsecrew_protocol::agent_adapter_v1::compute_agent_capability_fingerprint_v1(
+                    &capability,
+                )
+                .unwrap();
+            let mut saved = fixture
+                .storage
+                .projection_record("chat", &address.chat_id)
+                .unwrap()
+                .unwrap();
+            let coding = writer || failure == "bound-write-mismatch";
+            let role = &mut saved["record"]["roleSnapshots"][if coding { 1 } else { 2 }];
+            role["runtime"] = json!("codex");
+            role["modelSelector"] = json!("test-model");
+            role["reasoningEffort"] = json!("medium");
+            if writer
+                || matches!(
+                    failure,
+                    "bound-write" | "bound-write-mismatch" | "bound-native-write"
+                )
+            {
+                role["permission"] = json!("workspaceWrite");
+            }
+            fixture
+                .storage
+                .upsert_projection_record("chat", &address.chat_id, "op_bound_role", None, saved)
+                .unwrap();
+            let request = AgentRunStartRequestV1 {
+                chat_id: address.chat_id.clone(),
+                role_id: if coding { "coding" } else { "review" }.into(),
+                input_message_ids: vec![initial_message_id(&fixture, &address.chat_id)],
+                expected_capability_fingerprint: capability.fingerprint.clone(),
+            };
+            Some(
+                crate::agent_runtime::preparation::RunPreparation::resolve(
+                    &fixture.storage,
+                    &fixture.projects,
+                    &request,
+                )
+                .unwrap()
+                .reserve(
+                    &mut fixture.storage,
+                    &fixture.projects,
+                    &capability,
+                    "req_bound_reserve",
+                )
+                .unwrap(),
+            )
+        } else {
+            None
+        };
+        let profile = CodexProfileBinding::from_storage(&fixture.storage).unwrap();
+        let home = profile.revalidate().unwrap();
+        let mut settings = json!({"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only","features":{"hooks":false,"apps":false,"plugins":false}});
+        // The toy provider must report the same invocation isolation evidence
+        // as the reserved product path; omitted projects is no longer valid.
+        settings["projects"] = elsecrew_core::provider::vendor_observation::codex_profile_config::ProfileConfig::parse(
+            b"cli_auth_credentials_store='file'\n",
+        ).unwrap().isolated_projects(&[
+            &home, std::path::Path::new(snapshot["worktreePath"].as_str().unwrap()),
+        ]).unwrap();
+        let mut sandbox = json!({"type":"readOnly","networkAccess":false});
+        if writer {
+            settings["sandbox_mode"] = json!("workspace-write");
+            settings["sandbox_workspace_write"] = json!({"writable_roots":[],"network_access":false,"exclude_tmpdir_env_var":true,"exclude_slash_tmp":true});
+            sandbox = json!({"type":"workspaceWrite","writableRoots":[],"networkAccess":false,"excludeTmpdirEnvVar":true,"excludeSlashTmp":true});
+        }
+        let messages = [
+            json!({"id":1,"result":{"userAgent":"test","codexHome":home,"platformFamily":"unix","platformOs":"macos"}}),
+            json!({"id":2,"result":{"config":settings,"layers":[
+                {"name":{"type":"sessionFlags"},"config":settings},
+                {"name":{"type":"user","file":home.join("config.toml")},"config":{"cli_auth_credentials_store":"file"}},
+                {"name":{"type":"system","file":"/etc/codex/config.toml"},"config":{}}
+            ]}}),
+            json!({"id":3,"result":{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}}),
+            json!({"id":4,"result":{"data":[{"id":"test-model","model":"test-model","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"medium"}]}],"nextCursor":null}}),
+            json!({"id":5,"result":{"thread":{"id":"thread-test"},"model":"test-model","modelProvider":"openai","cwd":snapshot["worktreePath"],"instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":sandbox,"reasoningEffort":"medium"}}),
+            json!({"id":6,"result":{"turn":{"id":"t1","status":"inProgress","items":[],"error":null}}}),
+        ];
+        let mut replies: Vec<String> = messages.iter().map(Value::to_string).collect();
+        replies[4].push_str(
+            "\n{\"method\":\"thread/started\",\"params\":{\"thread\":{\"id\":\"thread-test\"}}}",
+        );
+        for event in [
+            json!({"method":"turn/started","params":{"threadId":"thread-test","turn":{"id":"t1","status":"inProgress","items":[],"error":null}}}),
+            json!({"method":"item/started","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"agentMessage","id":"a1","text":""}}}),
+            json!({"method":"item/agentMessage/delta","params":{"threadId":"thread-test","turnId":"t1","itemId":"a1","delta":"hello"}}),
+            json!({"method":"item/completed","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"agentMessage","id":"a1","text":"hello"}}}),
+            json!({"method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"t1","status":if failure == "bound-interrupted" {"interrupted"} else {"completed"},"items":[],"error":null}}}),
+        ] {
+            replies[5].push('\n');
+            replies[5].push_str(&event.to_string());
+        }
+        if failure == "bound-multiple" {
+            let (preceding, finished) = replies[5].rsplit_once('\n').unwrap();
+            let mut expanded = preceding.to_owned();
+            for event in [
+                json!({"method":"item/started","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"agentMessage","id":"a2","text":""}}}),
+                json!({"method":"item/completed","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"agentMessage","id":"a2","text":"world"}}}),
+                json!({"method":"item/started","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"plan","id":"p1","text":""}}}),
+                json!({"method":"item/completed","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"plan","id":"p1","text":"plan"}}}),
+            ] {
+                expanded.push('\n');
+                expanded.push_str(&event.to_string());
+            }
+            expanded.push('\n');
+            expanded.push_str(finished);
+            replies[5] = expanded;
+        }
+        if long_output {
+            assert!(durable);
+            let (preceding, finished) = replies[5].rsplit_once('\n').unwrap();
+            let mut expanded = preceding.to_owned();
+            // One initial delta + 2,998 completed items + final promotion = 3,000 rows.
+            for index in 2..=2998 {
+                for method in ["item/started", "item/completed"] {
+                    let event = json!({"method":method,"params":{"threadId":"thread-test","turnId":"t1",
+                        "item":{"type":"agentMessage","id":format!("a{index}"),"text":if method == "item/started" {""} else {"hello"}}}});
+                    expanded.push('\n');
+                    expanded.push_str(&event.to_string());
+                }
+            }
+            expanded.push('\n');
+            expanded.push_str(finished);
+            replies[5] = expanded;
+        }
+        let handler = failure.starts_with("bound-handler") || accepting;
+        if handler {
+            let lines: Vec<_> = replies[5].lines().map(str::to_owned).collect();
+            let tool = json!({"type":"commandExecution","id":"c1","command":"echo test","cwd":snapshot["worktreePath"],"status":"inProgress"});
+            replies[5] = format!(
+                "{}\n{}\n{}\n{}",
+                lines[0],
+                lines[1],
+                json!({"method":"item/started","params":{"threadId":"thread-test","turnId":"t1","item":tool}}),
+                json!({"id":40,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread-test","turnId":"t1","itemId":"c1","startedAtMs":1,"kind":"command"}})
+            );
+            let mut completed = tool;
+            completed["status"] = json!("declined");
+            if accepting {
+                completed["status"] = json!("completed");
+                completed["exitCode"] = json!(0);
+            }
+            replies.push(format!("{}\n{}\n{}",
+                json!({"method":"serverRequest/resolved","params":{"threadId":"thread-test","requestId":40}}),
+                json!({"method":"item/completed","params":{"threadId":"thread-test","turnId":"t1","item":completed}}),
+                lines[2..].join("\n")));
+        }
+        replies.insert(
+            4,
+            json!({"id":50,"result":{"requirements":null}}).to_string(),
+        );
+        let flow = PreflightExchange::new(
+            &ExpectedProfile {
+                model: "test-model",
+                reasoning_effort: "medium",
+            },
+            home.to_str().unwrap(),
+        )
+        .unwrap();
+        let mut process = LoginProcess::reserve_codex_owned(
+            CodexProfileBinding::from_storage(&fixture.storage).unwrap(),
+        )
+        .unwrap();
+        let evidence_root = if failure.starts_with("bound-native") {
+            let scratch = home.join("tmp");
+            std::fs::create_dir(&scratch).unwrap();
+            scratch
+        } else {
+            fixture._root.path().to_path_buf()
+        };
+        let received = evidence_root.join("received-protocol");
+        let responded = fixture._root.path().join("sent-first-response");
+        let captured = evidence_root.join("captured-requests");
+        let native_argv = evidence_root.join("native-argv");
+        let reply_files: Vec<_> = if long_output {
+            replies.iter().enumerate().map(|(index, body)| {
+                let path = evidence_root.join(format!("long-reply-{index}.jsonl"));
+                fs::write(&path, format!("{body}\n")).unwrap();
+                path
+            }).collect()
+        } else { Vec::new() };
+        let spawn = || {
+            if long_output {
+                return Command::new("/bin/sh").args(["-c",
+                    "first=yes; for file in \"$@\"; do IFS= read -r line || exit 2; printf '%s\\n' \"$line\" >> \"$CAPTURED\"; printf received > \"$RECEIVED\"; /bin/cat \"$file\" || exit 4; if test \"$first\" = yes; then IFS= read -r initialized || exit 3; first=no; fi; done; IFS= read -r hold", "long-peer"])
+                    .args(&reply_files).env_clear().env("CAPTURED", &captured).env("RECEIVED", &received)
+                    .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn();
+            }
+            Command::new("/bin/sh")
+            .args(["-c", "first=yes; for reply in \"$@\"; do IFS= read -r line || exit 2; printf '%s\\n' \"$line\" >> \"$CAPTURED\"; printf received > \"$RECEIVED\"; if test \"$first\" = yes; then if test \"$DELAY\" = yes; then /bin/sleep 0.6; fi; printf sent > \"$RESPONDED\"; fi; printf '%s\\n' \"$reply\"; if test \"$first\" = yes; then IFS= read -r initialized || exit 3; first=no; fi; done; if test \"$HOLD_AFTER_RUN\" = yes; then exec /bin/sleep 30; fi; IFS= read -r hold", "snapshot-peer"])
+            .args(&replies).env_clear().env("CAPTURED", &captured).env("RECEIVED", &received).env("RESPONDED", &responded).env("HOLD_AFTER_RUN", if failure == "bound-handler" {"yes"} else {"no"}).env("DELAY", if failure.starts_with("idle-") {"yes"} else {"no"}).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()
+        };
+        if let Some(reservation) = &reservation {
+            if failure.starts_with("bound-native") {
+                use crate::provider_executable::PinnedExecutable;
+                use sha2::{Digest, Sha256};
+                use std::os::unix::fs::PermissionsExt;
+                let quote = |value: &str| format!("'{}'", value.replace('\'', "'\\''"));
+                let workspace_file =
+                    std::path::Path::new(snapshot["worktreePath"].as_str().unwrap())
+                        .join("src/value.txt");
+                let source_file = fixture.source.join("src/value.txt");
+                let mut denied_operations = format!(
+                    "if (printf changed > {}) 2>/dev/null; then exit 71; fi\nif /bin/cat {} >/dev/null 2>&1; then exit 72; fi\nif (printf changed > {}) 2>/dev/null; then exit 73; fi\n/bin/cat {} >/dev/null || exit 74\n",
+                    quote(workspace_file.to_str().unwrap()), quote(source_file.to_str().unwrap()),
+                    quote(home.join("config.toml").to_str().unwrap()), quote(workspace_file.to_str().unwrap()),
+                );
+                if writer {
+                    // A toy provider writes only after it receives turn/start.
+                    denied_operations = format!(
+                        "if /bin/cat {} >/dev/null 2>&1; then exit 72; fi\nif (printf changed > {}) 2>/dev/null; then exit 73; fi\nif (printf changed > {}) 2>/dev/null; then exit 75; fi\n",
+                        quote(source_file.to_str().unwrap()),
+                        quote(home.join("config.toml").to_str().unwrap()),
+                        quote(workspace_file.parent().unwrap().parent().unwrap().join(".git/config").to_str().unwrap()),
+                    );
+                }
+                let edit = if writer {
+                    format!("case \"$line\" in *'\"method\":\"turn/start\"'*) printf changed > {} || exit 76;; esac\n", quote(workspace_file.to_str().unwrap()))
+                } else {
+                    String::new()
+                };
+                let script = format!(
+                    "#!/bin/sh\n{denied_operations}printf '%s\\n' \"$@\" > {}\nfirst=yes\nfor reply in {}; do\nIFS= read -r line || exit 2\n{edit}printf '%s\\n' \"$line\" >> {}\nprintf received > {}\nprintf '%s\\n' \"$reply\"\nif test \"$first\" = yes; then IFS= read -r initialized || exit 3; first=no; fi\ndone\nIFS= read -r hold\n",
+                    quote(native_argv.to_str().unwrap()),
+                    replies.iter().map(|value| quote(value)).collect::<Vec<_>>().join(" "),
+                    quote(captured.to_str().unwrap()), quote(received.to_str().unwrap()),
+                );
+                let native_root = fixture._root.path().canonicalize().unwrap();
+                let cli_path = native_root.join("toy-cli");
+                let helper_path = native_root.join("toy-helper");
+                std::fs::write(&cli_path, &script).unwrap();
+                std::fs::write(&helper_path, b"#!/bin/sh\nexit 0\n").unwrap();
+                for path in [&cli_path, &helper_path] {
+                    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+                }
+                let cli =
+                    PinnedExecutable::open(&cli_path, Sha256::digest(script.as_bytes()).into())
+                        .unwrap();
+                let helper = PinnedExecutable::open(
+                    &helper_path,
+                    Sha256::digest(b"#!/bin/sh\nexit 0\n").into(),
+                )
+                .unwrap();
+                // Pre-launch rejects leave the same fresh owner/run untouched.
+                let launch = if proxied {
+                    crate::agent_runtime::preparation::RunReservation::launch_proxied_codex_candidate
+                } else {
+                    crate::agent_runtime::preparation::RunReservation::launch_codex_candidate
+                };
+                assert!(launch(
+                    reservation,
+                    &mut fixture.storage,
+                    &fixture.projects,
+                    &mut process,
+                    &cli,
+                    &helper,
+                    &AtomicBool::new(true),
+                )
+                .is_err());
+                for (path, original) in [
+                    (&cli_path, script.as_bytes()),
+                    (&helper_path, b"#!/bin/sh\nexit 0\n".as_slice()),
+                ] {
+                    std::fs::write(path, b"changed").unwrap();
+                    assert!(launch(
+                        reservation,
+                        &mut fixture.storage,
+                        &fixture.projects,
+                        &mut process,
+                        &cli,
+                        &helper,
+                        &AtomicBool::new(false),
+                    )
+                    .is_err());
+                    assert!(fixture.storage.projection_records("run").unwrap()[0]
+                        ["process_identity_internal"]
+                        .is_null());
+                    std::fs::write(path, original).unwrap();
+                }
+                let launch_cancel = std::sync::Arc::new(AtomicBool::new(false));
+                if failure == "bound-native-hardlink" {
+                    std::fs::hard_link(
+                        fixture.source.join("src/value.txt"),
+                        std::path::Path::new(snapshot["worktreePath"].as_str().unwrap())
+                            .join(".git/shared-source"),
+                    )
+                    .unwrap();
+                }
+                if failure == "bound-native-profile-hardlink" {
+                    std::fs::hard_link(
+                        fixture.source.join("src/value.txt"),
+                        home.join("tmp/shared-source"),
+                    )
+                    .unwrap();
+                }
+                if failure.starts_with("bound-native-gate-") {
+                    let cli_path = cli_path.clone();
+                    let helper_path = helper_path.clone();
+                    let canceled = launch_cancel.clone();
+                    let home = home.clone();
+                    let source = fixture.source.join("src/value.txt");
+                    crate::provider_preflight_session::BEFORE_RELEASE.with(|hook| {
+                        *hook.borrow_mut() = Some(Box::new(move || match failure {
+                            "bound-native-gate-cli" => {
+                                std::fs::write(cli_path, b"changed").unwrap()
+                            }
+                            "bound-native-gate-helper" => {
+                                std::fs::write(helper_path, b"changed").unwrap()
+                            }
+                            "bound-native-gate-profile" => {
+                                std::fs::hard_link(source, home.join("tmp/shared-source")).unwrap();
+                            }
+                            _ => canceled.store(true, std::sync::atomic::Ordering::Release),
+                        }));
+                    });
+                }
+                if failure == "bound-native-identity-persist" {
+                    fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER test_reject_identity BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_agent_identity_%' BEGIN SELECT RAISE(ABORT, 'injected identity persistence failure'); END;").unwrap();
+                }
+                if failure == "bound-native-release-persist" {
+                    fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER test_reject_release BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_agent_released_%' BEGIN SELECT RAISE(ABORT, 'injected release persistence failure'); END;").unwrap();
+                }
+                let launched = launch(
+                    reservation,
+                    &mut fixture.storage,
+                    &fixture.projects,
+                    &mut process,
+                    &cli,
+                    &helper,
+                    &launch_cancel,
+                );
+                if failure.ends_with("-persist") {
+                    assert!(launched.is_err());
+                    assert!(process.begin_preflight().is_err());
+                    assert!(LoginProcess::reserve(&profile).is_err());
+                    let run = &fixture.storage.projection_records("run").unwrap()[0];
+                    if failure == "bound-native-identity-persist" {
+                        assert!(run["process_identity_internal"].is_null());
+                        assert!(!native_argv.exists());
+                    } else {
+                        assert_eq!(run["barrier"]["releaseGranted"], false);
+                        assert!(!run["process_identity_internal"]
+                            .as_array()
+                            .unwrap()
+                            .is_empty());
+                    }
+                    process.finish().unwrap();
+                    assert!(process
+                        .closure_evidence()
+                        .is_some_and(|receipt| receipt.confirmed()));
+                    assert!(!received.exists());
+                    AgentRuntime::blocked()
+                        .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+                        .unwrap();
+                    assert_eq!(
+                        fixture.storage.projection_records("run").unwrap()[0]["state"],
+                        "recoveryRequired"
+                    );
+                    continue;
+                }
+                if !matches!(failure, "bound-native" | "bound-native-write") && !accepting {
+                    assert!(launched.is_err());
+                    crate::provider_preflight_session::BEFORE_RELEASE
+                        .with(|hook| assert!(hook.borrow().is_none()));
+                    assert!(!native_argv.exists());
+                    let run = &fixture.storage.projection_records("run").unwrap()[0];
+                    if matches!(
+                        failure,
+                        "bound-native-hardlink" | "bound-native-profile-hardlink"
+                    ) {
+                        assert!(run["barrier"].is_null());
+                        assert!(run["process_identity_internal"].is_null());
+                        process.finish().unwrap();
+                        assert_eq!(
+                            fs::read(fixture.source.join("src/value.txt")).unwrap(),
+                            b"base"
+                        );
+                        continue;
+                    }
+                    assert_eq!(run["barrier"]["releaseGranted"], false);
+                    assert!(!run["process_identity_internal"]
+                        .as_array()
+                        .unwrap()
+                        .is_empty());
+                    assert!(LoginProcess::reserve(&profile).is_err());
+                    process.finish().unwrap();
+                    assert!(!received.exists());
+                    assert!(!native_argv.exists());
+                    AgentRuntime::blocked()
+                        .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+                        .unwrap();
+                    assert_eq!(
+                        fixture.storage.projection_records("run").unwrap()[0]["state"],
+                        "recoveryRequired"
+                    );
+                    continue;
+                }
+                launched.unwrap();
+                assert!(reservation
+                    .verify_approval_boundary(
+                        &mut fixture.storage,
+                        &fixture.projects,
+                        &mut process,
+                        &AtomicBool::new(true)
+                    )
+                    .is_err());
+                let checked = reservation.verify_approval_boundary(
+                    &mut fixture.storage,
+                    &fixture.projects,
+                    &mut process,
+                    &AtomicBool::new(false),
+                );
+                assert_eq!(
+                    checked.is_ok(),
+                    proxied,
+                    "approval boundary requires sealed proxy launch"
+                );
+                if proxied {
+                    let lock_id = format!("lock_{}", address.worktree_id);
+                    let saved = fixture
+                        .storage
+                        .projection_record("lock", &lock_id)
+                        .unwrap()
+                        .unwrap();
+                    let mut changed = saved.clone();
+                    changed["writer_run_id"] = if writer {
+                        Value::Null
+                    } else {
+                        fixture.storage.projection_records("run").unwrap()[0]["record"]["runId"]
+                            .clone()
+                    };
+                    fixture
+                        .storage
+                        .upsert_projection_record(
+                            "lock",
+                            &lock_id,
+                            "op_test_changed_writer",
+                            None,
+                            changed,
+                        )
+                        .unwrap();
+                    assert!(reservation
+                        .verify_approval_boundary(
+                            &mut fixture.storage,
+                            &fixture.projects,
+                            &mut process,
+                            &AtomicBool::new(false)
+                        )
+                        .is_err());
+                    fixture
+                        .storage
+                        .upsert_projection_record(
+                            "lock",
+                            &lock_id,
+                            "op_test_restored_writer",
+                            None,
+                            saved,
+                        )
+                        .unwrap();
+                    reservation
+                        .verify_approval_boundary(
+                            &mut fixture.storage,
+                            &fixture.projects,
+                            &mut process,
+                            &AtomicBool::new(false),
+                        )
+                        .unwrap();
+                }
+            } else {
+                // Toy peer cannot act until its first request; release has no payload.
+                reservation
+                    .launch_gated(
+                        &mut fixture.storage,
+                        &fixture.projects,
+                        &mut process,
+                        spawn,
+                        |_| Ok(()),
+                    )
+                    .unwrap();
+            }
+            if matches!(failure, "bound-role" | "bound-input") {
+                let mut saved = fixture
+                    .storage
+                    .projection_record("chat", &address.chat_id)
+                    .unwrap()
+                    .unwrap();
+                if failure == "bound-input" {
+                    saved["last_message"]["text"] = json!("different goal");
+                } else {
+                    saved["record"]["roleSnapshots"][2]["modelSelector"] = json!("changed-model");
+                }
+                fixture
+                    .storage
+                    .upsert_projection_record(
+                        "chat",
+                        &address.chat_id,
+                        "op_changed_role",
+                        None,
+                        saved,
+                    )
+                    .unwrap();
+            }
+        } else {
+            process.launch(spawn).unwrap();
+        }
+        if failure == "bound-persist" {
+            fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER test_reject_public_chat BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_agent_public_chat_%' BEGIN SELECT RAISE(ABORT, 'injected public chat persistence failure'); END;").unwrap();
+        }
+        if failure == "bound-cleanup" {
+            process.inject_uncertain_cleanup_once();
+        }
+        if failure == "bound-terminal" {
+            fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER test_reject_terminal_chat BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_agent_native_chat_terminal_%' BEGIN SELECT RAISE(ABORT, 'injected terminal persistence failure'); END;").unwrap();
+        }
+        let mut writes = 0;
+        let output_started = std::time::Instant::now();
+        let observations = std::cell::Cell::new(0);
+        let observed_idle_child = std::cell::Cell::new(false);
+        let has_reservation = reservation.is_some();
+        let mut sink = |storage: &mut Storage, event| {
+            assert!(has_reservation || observations.get() > 0);
+            if fail_sink {
+                return Err(SidecarError::new(
+                    "testSinkFailed",
+                    "injected storage sink failure",
+                ));
+            }
+            let text = match event {
+                Projection::Delta { text, .. } | Projection::Completed { text, .. } => text,
+                _ => panic!("unexpected projection"),
+            };
+            writes += 1;
+            if long_output {
+                assert_eq!(text, "hello");
+                if writes % 500 == 0 {
+                    eprintln!("long native output: {writes} callbacks in {:?}", output_started.elapsed());
+                }
+                // Production persists each item in the output ledger before
+                // this callback. Do not add thousands of synthetic chat
+                // snapshots that every input validation must replay.
+                if writes > 1 { return Ok(()); }
+            }
+            // Synthetic sink verifies ownership/writes, not the actual-agent event contract.
+            let mut record = storage
+                .projection_record("chat", &address.chat_id)?
+                .unwrap();
+            record.insert("candidate_test_output".into(), json!(text));
+            storage.upsert_projection_record(
+                "chat",
+                &address.chat_id,
+                &format!("op_sink_{writes}"),
+                None,
+                record,
+            )?;
+            Ok(())
+        };
+        let mut observer = |storage: &mut Storage, process: &mut LoginProcess<'_>| {
+            observations.set(observations.get() + 1);
+            let (identities, observed) = process.observe_for_run();
+            observed?;
+            assert!(!identities.is_empty());
+            if received.exists() && !responded.exists() && identities.len() > 1 {
+                observed_idle_child.set(true);
+            }
+            if failure == "observer" || (failure == "idle-observer" && observed_idle_child.get()) {
+                return Err(SidecarError::new(
+                    "testObserverFailed",
+                    "injected run observation sink failure",
+                ));
+            }
+            let mut saved = storage
+                .projection_record("chat", &address.chat_id)?
+                .unwrap();
+            saved.insert(
+                "candidate_test_observations".into(),
+                json!(observations.get()),
+            );
+            storage.upsert_projection_record(
+                "chat",
+                &address.chat_id,
+                &format!("op_observe_{}", observations.get()),
+                None,
+                saved,
+            )?;
+            Ok(())
+        };
+        let result = if let Some(reserved) = reservation.take() {
+            let (result, restored) = if handler {
+                let cancel = AtomicBool::new(false);
+                let mut state = reserved
+                    .begin_text_candidate(&mut fixture.storage, &fixture.projects, &mut process)
+                    .unwrap();
+                // A second dispatcher request must not lend a different process
+                // to this live session, or acquire cleanup authority over it.
+                let other_root = tempfile::tempdir().unwrap();
+                let other_storage = crate::Storage::open(
+                    &other_root
+                        .path()
+                        .canonicalize()
+                        .unwrap()
+                        .join("elsecrew.sqlite3"),
+                )
+                .unwrap();
+                let mut other = LoginProcess::reserve_codex_owned(
+                    CodexProfileBinding::from_storage(&other_storage).unwrap(),
+                )
+                .unwrap();
+                assert!(reserved
+                    .advance_text_candidate(
+                        &mut fixture.storage,
+                        &mut fixture.projects,
+                        &mut other,
+                        &cancel,
+                        &mut state,
+                        &mut |_, _| panic!("foreign process callback"),
+                    )
+                    .is_err());
+                assert!(other.closure_evidence().is_none());
+                other.finish().unwrap();
+                let run = fixture.storage.projection_records("run").unwrap()[0]["record"].clone();
+                let identity = crate::agent_runtime::RunIdentity {
+                    chat_id: address.chat_id.clone(),
+                    task_id: run["taskId"].as_str().unwrap().into(),
+                    project_id: address.project_id.clone(),
+                    worktree_id: address.worktree_id.clone(),
+                    workspace_identity: address.workspace_identity.clone(),
+                    run_id: run["runId"].as_str().unwrap().into(),
+                };
+                let mut cleanup_child = if matches!(
+                    failure,
+                    "bound-handler-restart" | "bound-handler-cleanup-save"
+                ) {
+                    // A synthetic descendant discovery exactly at the first cleanup
+                    // round, backed by an owned real toy process. Core F2 separately
+                    // checks OS-table descendant discovery during termination.
+                    let child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+                    let child_identity =
+                        elsecrew_core::proctree::identity_of(child.id()).unwrap();
+                    process.inject_cleanup_identity_once(child_identity);
+                    assert_eq!(
+                        fixture.storage.projection_records("run").unwrap()[0]
+                            ["process_identity_internal"]
+                            .as_array()
+                            .unwrap()
+                            .len(),
+                        1
+                    );
+                    if failure == "bound-handler-cleanup-save" {
+                        fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER test_reject_cleanup_tree BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_agent_tree_%' BEGIN SELECT RAISE(ABORT, 'injected cleanup tree persistence failure'); END;").unwrap();
+                    }
+                    Some(child)
+                } else {
+                    None
+                };
+                let mut owned = crate::agent_runtime::preparation::OwnedTextRun::from_prepared(
+                    reserved, process, state,
+                );
+                // Every address component is required; no unrelated request may cancel.
+                for field in 0..6 {
+                    let mut foreign = identity.clone();
+                    match field {
+                        0 => foreign.chat_id.push_str("-other"),
+                        1 => foreign.task_id.push_str("-other"),
+                        2 => foreign.project_id.push_str("-other"),
+                        3 => foreign.worktree_id.push_str("-other"),
+                        4 => foreign.workspace_identity.push_str("-other"),
+                        _ => foreign.run_id.push_str("-other"),
+                    }
+                    assert!(owned.request_cancel(&foreign).is_err());
+                }
+                if failure.starts_with("bound-handler-runtime") || accepting {
+                    let mut slot = Some(owned);
+                    let mut quitting = AgentRuntime::blocked();
+                    quitting.prepare_quit(&mut fixture.storage, &mut fixture.projects);
+                    assert!(quitting
+                        .register_native_candidate(&fixture.storage, &fixture.projects, &mut slot)
+                        .is_err());
+                    assert!(
+                        slot.is_some(),
+                        "rejected registration retains caller ownership"
+                    );
+                    let mut runtime = AgentRuntime::blocked();
+                    runtime
+                        .register_native_candidate(&fixture.storage, &fixture.projects, &mut slot)
+                        .unwrap();
+                    assert!(slot.is_none());
+                    assert!(runtime.has_active_run(&identity.run_id));
+                    assert_eq!(runtime.owned_run_ids(), vec![identity.run_id.clone()]);
+                    assert!(runtime
+                        .cancel_result(&fixture.storage, &identity)
+                        .unwrap()
+                        .is_none());
+                    let mut foreign = identity.clone();
+                    foreign.workspace_identity.push_str("-other");
+                    assert!(runtime.request_cancel(&foreign).is_err());
+                    assert!(runtime.cancel_result(&fixture.storage, &foreign).is_err());
+                    if failure == "bound-handler-runtime-cancel" {
+                        runtime.request_cancel(&identity).unwrap();
+                    } else if failure.ends_with("-quit") {
+                        runtime.prepare_quit(&mut fixture.storage, &mut fixture.projects);
+                    } else if failure.ends_with("-terminal") {
+                        fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER test_reject_native_terminal BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_agent_native_chat_terminal_%' BEGIN SELECT RAISE(ABORT, 'injected terminal persistence failure'); END;").unwrap();
+                    } else if failure.ends_with("-approval-store") {
+                        fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER test_reject_approval BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_approval_%' BEGIN SELECT RAISE(ABORT, 'injected approval persistence failure'); END;").unwrap();
+                    }
+                    let mut emitted = Vec::new();
+                    // Enclose the production 30s preparation and 8s cleanup
+                    // budgets. Never shorten the product's allowed lifecycle.
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(40);
+                    loop {
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "native dispatcher timeout: {failure}; run state={:?}, pending query={:?}",
+                            fixture.storage.projection_record("run", &identity.run_id).unwrap().map(|run| run["state"].clone()),
+                            runtime.pending_native_approvals(&fixture.storage, &fixture.projects, &identity)
+                        );
+                        match runtime.poll(&mut fixture.storage, &mut fixture.projects) {
+                            Ok(events) => emitted.extend(events),
+                            Err(error) => {
+                                assert!(failure.ends_with("-terminal"), "{}", error.detail);
+                                assert!(runtime.has_active_run(&identity.run_id));
+                                assert!(LoginProcess::reserve(&profile).is_err());
+                                let run = fixture
+                                    .storage
+                                    .projection_record("run", &identity.run_id)
+                                    .unwrap()
+                                    .unwrap();
+                                assert_eq!(run["state"], "running", "{failure}");
+                                assert!(run["native_thread_receipt"].is_object());
+                                drop(runtime);
+                                let recovery = AgentRuntime::blocked();
+                                recovery
+                                    .recover_unclean_runs(
+                                        &mut fixture.storage,
+                                        &mut fixture.projects,
+                                    )
+                                    .unwrap();
+                                assert_eq!(
+                                    fixture
+                                        .storage
+                                        .projection_record("run", &identity.run_id)
+                                        .unwrap()
+                                        .unwrap()["state"],
+                                    "recoveryRequired"
+                                );
+                                continue 'cases;
+                            }
+                        }
+                        if !runtime.has_active_run(&identity.run_id) {
+                            break;
+                        }
+                        if failure != "bound-handler-runtime-cancel" && !failure.ends_with("-quit")
+                        {
+                            // No automatic reply: the owner waits until an exact
+                            // caller identity submits this live opaque ticket.
+                            if let Ok(ids) = runtime.pending_native_approvals(
+                                &fixture.storage,
+                                &fixture.projects,
+                                &identity,
+                            ) {
+                                for id in ids {
+                                    if failure == "bound-handler-runtime" {
+                                        for _ in 0..3 {
+                                            emitted.extend(
+                                                runtime
+                                                    .poll(
+                                                        &mut fixture.storage,
+                                                        &mut fixture.projects,
+                                                    )
+                                                    .unwrap(),
+                                            );
+                                            assert_eq!(
+                                                runtime
+                                                    .pending_native_approvals(
+                                                        &fixture.storage,
+                                                        &fixture.projects,
+                                                        &identity
+                                                    )
+                                                    .unwrap(),
+                                                vec![id.clone()]
+                                            );
+                                        }
+                                    }
+                                    if failure.ends_with("-approval-cancel") {
+                                        runtime.request_cancel(&identity).unwrap();
+                                        assert!(runtime
+                                            .decline_native_approval(
+                                                &fixture.storage,
+                                                &fixture.projects,
+                                                &identity,
+                                                &id
+                                            )
+                                            .is_err());
+                                        continue;
+                                    }
+                                    assert!(!fs::read_to_string(&captured)
+                                        .unwrap()
+                                        .contains("\"decision\""));
+                                    assert!(runtime
+                                        .decline_native_approval(
+                                            &fixture.storage,
+                                            &fixture.projects,
+                                            &foreign,
+                                            &id
+                                        )
+                                        .is_err());
+                                    let public_identity = json!({"chatId":identity.chat_id,"taskId":identity.task_id,"projectId":identity.project_id,"worktreeId":identity.worktree_id,"workspaceIdentity":identity.workspace_identity,"runId":identity.run_id});
+                                    let listing = runtime
+                                        .approval_request(
+                                            &mut fixture.storage,
+                                            &fixture.projects,
+                                            &json!({"action":"list","identity":public_identity}),
+                                        )
+                                        .unwrap();
+                                    assert_eq!(
+                                        listing["pending"],
+                                        json!([{"approvalId":id,"kind":"command"}])
+                                    );
+                                    let before_inspection = fixture
+                                        .storage
+                                        .projection_record("run", &identity.run_id)
+                                        .unwrap();
+                                    if accepting {
+                                        assert!(runtime
+                                            .approval_request(
+                                                &mut fixture.storage,
+                                                &fixture.projects,
+                                                &json!({"action":"acceptOnce","identity":public_identity,"approvalId":id})
+                                            )
+                                            .is_err());
+                                    }
+                                    let detail = runtime.approval_request(&mut fixture.storage, &fixture.projects, &json!({"action":"inspect","identity":public_identity,"approvalId":id})).unwrap();
+                                    assert_eq!(detail["inspection"]["approvalId"], id);
+                                    assert_eq!(detail["inspection"]["command"], "echo test");
+                                    if failure == "bound-handler-runtime" {
+                                        let error = runtime
+                                            .accept_native_approval_once(
+                                                &mut fixture.storage,
+                                                &fixture.projects,
+                                                &identity,
+                                                &id,
+                                            )
+                                            .unwrap_err();
+                                        assert_eq!(error.kind, "agentApprovalChanged");
+                                    }
+                                    assert_eq!(
+                                        fixture
+                                            .storage
+                                            .projection_record("run", &identity.run_id)
+                                            .unwrap(),
+                                        before_inspection
+                                    );
+                                    if accepting {
+                                        runtime
+                                            .approval_request(
+                                                &mut fixture.storage,
+                                                &fixture.projects,
+                                                &json!({"action":"acceptOnce","identity":public_identity,"approvalId":id}),
+                                            )
+                                            .unwrap_or_else(|error| {
+                                                panic!("approval acceptance failed for {failure}: {error:?}")
+                                            });
+                                        assert!(runtime
+                                            .accept_native_approval_once(
+                                                &mut fixture.storage,
+                                                &fixture.projects,
+                                                &identity,
+                                                &id
+                                            )
+                                            .is_err());
+                                        if failure.ends_with("-after-cancel") {
+                                            runtime.request_cancel(&identity).unwrap();
+                                        }
+                                        if failure.ends_with("-after-role") {
+                                            let mut changed = fixture
+                                                .storage
+                                                .projection_record("chat", &address.chat_id)
+                                                .unwrap()
+                                                .unwrap();
+                                            changed["record"]["roleSnapshots"][2]
+                                                ["modelSelector"] = json!("changed-after-accept");
+                                            fixture
+                                                .storage
+                                                .upsert_projection_record(
+                                                    "chat",
+                                                    &address.chat_id,
+                                                    "op_role_after_accept",
+                                                    None,
+                                                    changed,
+                                                )
+                                                .unwrap();
+                                        }
+                                    } else {
+                                        let receipt = runtime
+                                        .approval_request(
+                                            &mut fixture.storage,
+                                            &fixture.projects,
+                                            &json!({"action":"decline","approvalId":id,"identity":{
+                                                "chatId":identity.chat_id,"taskId":identity.task_id,"projectId":identity.project_id,
+                                                "worktreeId":identity.worktree_id,"workspaceIdentity":identity.workspace_identity,"runId":identity.run_id
+                                            }}),
+                                        )
+                                        .unwrap();
+                                        assert_eq!(receipt["queued"], id);
+                                        assert_eq!(receipt["pending"], json!([]));
+                                    }
+                                    assert!(runtime
+                                        .decline_native_approval(
+                                            &fixture.storage,
+                                            &fixture.projects,
+                                            &identity,
+                                            &id
+                                        )
+                                        .is_err());
+                                }
+                            }
+                        }
+                        assert!(runtime
+                            .cancel_result(&fixture.storage, &identity)
+                            .unwrap()
+                            .is_none());
+                        std::thread::sleep(std::time::Duration::from_millis(2));
+                    }
+                    for (index, event) in emitted.iter().enumerate() {
+                        assert_eq!(event.seq, index as u64 + 1);
+                        assert_eq!(event.stream_id, emitted[0].stream_id);
+                        assert_eq!(event.run_id.as_deref(), Some(identity.run_id.as_str()));
+                    }
+                    let canceled = failure.ends_with("-cancel") || failure.ends_with("-quit");
+                    let run = fixture
+                        .storage
+                        .projection_record("run", &identity.run_id)
+                        .unwrap()
+                        .unwrap();
+                    if failure.ends_with("-approval-store") || failure.ends_with("-after-role") {
+                        assert_eq!(run["state"], "failed");
+                        assert!(run.get("approval_intents_internal").is_none());
+                        assert!(!fs::read_to_string(&captured)
+                            .unwrap()
+                            .contains("\"decision\""));
+                        continue 'cases;
+                    }
+                    if !canceled {
+                        let intents = run["approval_intents_internal"].as_array().unwrap();
+                        assert_eq!(intents.len(), 1);
+                        assert_eq!(
+                            intents[0]["decision"],
+                            if accepting { "acceptOnce" } else { "decline" }
+                        );
+                        if accepting {
+                            assert!(fs::read_to_string(&captured)
+                                .unwrap()
+                                .contains("\"decision\":\"accept\""));
+                        }
+                        assert_eq!(intents[0]["state"], "intentRecorded");
+                        assert!(!intents[0].to_string().contains("echo test"));
+                    }
+                    if accepting && canceled {
+                        assert!(!fs::read_to_string(&captured)
+                            .unwrap()
+                            .contains("\"decision\":\"accept\""));
+                    }
+                    assert_eq!(
+                        run["state"],
+                        if canceled { "canceled" } else { "succeeded" }
+                    );
+                    assert_eq!(emitted.last().unwrap().event, "agent.runStateChanged");
+                    assert_eq!(emitted.last().unwrap().payload["run"], run["record"]);
+                    if canceled {
+                        assert_eq!(
+                            runtime
+                                .cancel_result(&fixture.storage, &identity)
+                                .unwrap()
+                                .unwrap()["outcome"],
+                            "canceled"
+                        );
+                    } else if durable {
+                        assert!(!emitted.iter().any(|event| event.event == "agent.publicEvent"));
+                        let output = durable_output::read_all(&mut fixture.storage, &run["record"]);
+                        assert_eq!(output.last().unwrap()["kind"], "final");
+                        assert_eq!(output.last().unwrap()["text"], "hello");
+                    } else {
+                        assert!(emitted
+                            .iter()
+                            .any(|event| event.event == "agent.publicEvent"
+                                && event.payload["kind"] == "final"));
+                    }
+                    assert!(runtime
+                        .poll(&mut fixture.storage, &mut fixture.projects)
+                        .unwrap()
+                        .is_empty());
+                    let mut reusable = LoginProcess::reserve(&profile).unwrap();
+                    reusable.finish().unwrap();
+                    continue 'cases;
+                }
+                let cancel_between_steps = std::cell::Cell::new(false);
+                let mut action = |storage: &mut crate::Storage, action: crate::provider_preflight_session::TextAction<'_>| {
+                        use crate::provider_preflight_session::TextAction;
+                        match action {
+                            TextAction::Public(event) => sink(storage, event),
+                            TextAction::Tool(tool) => { assert_eq!(tool.item_id, "c1"); Ok(()) },
+                            TextAction::PollApproval { request, decision } => {
+                                assert_eq!(request.item_id, "c1");
+                                if failure == "bound-handler-cancel" {
+                                    cancel_between_steps.set(true);
+                                    return Ok(());
+                                }
+                                if failure == "bound-handler-role" {
+                                    let mut chat = storage.projection_record("chat", &address.chat_id)?.unwrap();
+                                    chat["record"]["roleSnapshots"][2]["modelSelector"] = json!("changed-model");
+                                    storage.upsert_projection_record("chat", &address.chat_id, "op_approval_role_changed", None, chat)?;
+                                }
+                                *decision = Some(elsecrew_core::provider::vendor_observation::codex_approval::Decision::Decline);
+                                Ok(())
+                            }
+                            _ => panic!("owner checkpoint escaped reserved"),
+                        }
+                };
+                let mut steps = 0;
+                let mut closing_steps = 0;
+                let outcome = loop {
+                    steps += 1;
+                    // No mutable Storage borrow survives advance: other requests
+                    // can inspect the original chat while the agent is waiting.
+                    assert!(fixture
+                        .storage
+                        .projection_record("chat", &address.chat_id)
+                        .unwrap()
+                        .is_some());
+                    match owned.advance(&mut fixture.storage, &mut fixture.projects, &mut action) {
+                        Ok(Some(outcome)) => break Ok(outcome),
+                        Err(error) => break Err(error),
+                        Ok(None) => {
+                            if owned.closing_for_test() {
+                                closing_steps += 1;
+                                let run = &fixture.storage.projection_records("run").unwrap()[0];
+                                // Initialization is already durable. Cleanup
+                                // cannot rewind it or publish terminal early.
+                                assert_eq!(run["state"], "running", "{failure}");
+                                assert!(run["native_thread_receipt"].is_object());
+                                assert!(run["termination"].is_null());
+                                assert!(!run["public_events"]
+                                    .as_array()
+                                    .unwrap()
+                                    .iter()
+                                    .any(|event| event["kind"] == "final"));
+                                assert!(LoginProcess::reserve(&profile).is_err());
+                                if failure == "bound-handler-restart" {
+                                    let before = fixture.storage.projection_records("run").unwrap();
+                                    let identities =
+                                        before[0]["process_identity_internal"].as_array().unwrap();
+                                    assert_eq!(identities.len(), 2);
+                                    assert!(identities
+                                        .iter()
+                                        .any(|item| item["pid"]
+                                            == cleanup_child.as_ref().unwrap().id()));
+                                    // Discard volatile execution state without a terminal
+                                    // transaction. Drop cleans only our test children;
+                                    // the durable DB is exactly the crash-at-yield image.
+                                    drop(owned);
+                                    cleanup_child.as_mut().unwrap().wait().unwrap();
+                                    assert_eq!(
+                                        fixture.storage.projection_records("run").unwrap(),
+                                        before
+                                    );
+                                    let database =
+                                        fixture._root.path().join("data/elsecrew.sqlite3");
+                                    drop(fixture.storage);
+                                    fixture.storage = Storage::open(&database).unwrap();
+                                    fixture.projects = ProjectManager::new(&database).unwrap();
+                                    let runtime = AgentRuntime::blocked();
+                                    runtime
+                                        .recover_unclean_runs(
+                                            &mut fixture.storage,
+                                            &mut fixture.projects,
+                                        )
+                                        .unwrap();
+                                    runtime.validate_persisted_runs(&fixture.storage).unwrap();
+                                    let recovered =
+                                        fixture.storage.projection_records("run").unwrap();
+                                    assert_eq!(recovered[0]["state"], "recoveryRequired");
+                                    assert_eq!(
+                                        recovered[0]["process_identity_internal"],
+                                        before[0]["process_identity_internal"]
+                                    );
+                                    assert_eq!(
+                                        recovered[0]["recovery"]["trackedProcesses"]
+                                            .as_array()
+                                            .unwrap()
+                                            .len(),
+                                        2
+                                    );
+                                    assert!(LoginProcess::reserve(&profile).is_err());
+                                    continue 'cases;
+                                }
+                            }
+                            if cancel_between_steps.get() {
+                                owned.request_cancel(&identity).unwrap();
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(2));
+                        }
+                    }
+                };
+                assert!(steps > 10);
+                if failure == "bound-handler" {
+                    assert!(
+                        closing_steps > 0,
+                        "cleanup must yield before terminal persistence"
+                    );
+                }
+                assert!(owned
+                    .advance(
+                        &mut fixture.storage,
+                        &mut fixture.projects,
+                        &mut |_, _| panic!("terminal replay callback"),
+                    )
+                    .is_err());
+                assert!(owned.request_cancel(&identity).is_err());
+                let (restored, returned_process) = owned.into_cleanup_parts();
+                process = returned_process;
+                if failure == "bound-handler-cleanup-save" {
+                    assert!(outcome.is_err());
+                    assert!(!process.closure_evidence().unwrap().confirmed());
+                    let run = &fixture.storage.projection_records("run").unwrap()[0];
+                    assert_eq!(run["state"], "recoveryRequired");
+                    assert_eq!(
+                        run["recovery"]["trackedProcesses"]
+                            .as_array()
+                            .unwrap()
+                            .len(),
+                        2
+                    );
+                    assert!(LoginProcess::reserve(&profile).is_err());
+                    cleanup_child.as_mut().unwrap().wait().unwrap();
+                    continue 'cases;
+                }
+                (outcome, restored)
+            } else {
+                let outcome = if writer || failure == "bound-write-mismatch" {
+                    reserved.run_text_candidate(
+                        &mut fixture.storage,
+                        &mut fixture.projects,
+                        &mut process,
+                        &AtomicBool::new(false),
+                        &mut sink,
+                    )
+                } else {
+                    reserved.run_read_only_text(
+                        &mut fixture.storage,
+                        &mut fixture.projects,
+                        &mut process,
+                        &AtomicBool::new(failure == "bound-cancel"),
+                        &mut sink,
+                    )
+                };
+                (outcome, reserved)
+            };
+            reservation = Some(restored);
+            result
+        } else {
+            let mut workspace =
+                TextWorkspace::new(&fixture.projects, &mut fixture.storage, &address).unwrap();
+            run_text_and_close(
+                &mut process,
+                flow,
+                &AtomicBool::new(false),
+                &mut workspace,
+                "goal",
+                &mut sink,
+                &mut observer,
+            )
+        };
+        if !success {
+            assert!(result.is_err());
+            assert_eq!(
+                writes,
+                if matches!(
+                    failure,
+                    "bound-persist" | "bound-cleanup" | "bound-terminal"
+                ) {
+                    2
+                } else {
+                    0
+                }
+            );
+        } else {
+            assert_eq!(
+                result.unwrap_or_else(|error| {
+                    let closure = process
+                        .closure_evidence()
+                        .map(|evidence| (evidence.termination_confirmed(), evidence.confirmed()));
+                    panic!("{failure}: {error:?}; closure(termination,profile)={closure:?}")
+                }),
+                if failure == "bound-interrupted" {
+                    TurnOutcome::Interrupted
+                } else {
+                    TurnOutcome::Completed
+                }
+            );
+            assert_eq!(writes, if long_output { 2999 } else if failure == "bound-multiple" { 4 } else { 2 });
+        }
+        let stored = fixture
+            .storage
+            .projection_record("chat", &address.chat_id)
+            .unwrap()
+            .unwrap();
+        let last_message = fixture
+            .storage
+            .aggregate_event_payloads("chat", &address.chat_id)
+            .unwrap()
+            .into_iter()
+            .rev()
+            .find_map(|value| {
+                value
+                    .get("last_message")
+                    .filter(|message| !message.is_null())
+                    .cloned()
+            })
+            .unwrap();
+        assert_eq!(
+            stored.get("candidate_test_output"),
+            (success
+                || matches!(
+                    failure,
+                    "bound-persist" | "bound-cleanup" | "bound-terminal"
+                ))
+            .then_some(&json!(if failure == "bound-multiple" {
+                "plan"
+            } else {
+                "hello"
+            }))
+        );
+        assert_eq!(
+            received.exists(),
+            !matches!(
+                failure,
+                "observer" | "bound-role" | "bound-write" | "bound-input" | "bound-cancel"
+            )
+        );
+        if failure.starts_with("idle-") {
+            assert!(observed_idle_child.get());
+        }
+        if failure == "bound-write-mismatch" {
+            let requests = fs::read_to_string(&captured).unwrap();
+            assert!(!requests.contains("thread/start"));
+            assert!(!requests.contains("turn/start"));
+        }
+        if handler {
+            let requests: Vec<Value> = fs::read_to_string(&captured)
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            let replies: Vec<_> = requests
+                .iter()
+                .filter(|value| value.get("result").is_some())
+                .collect();
+            if failure == "bound-handler" {
+                assert_eq!(
+                    replies,
+                    vec![&json!({"id":40,"result":{"decision":"decline"}})]
+                );
+            } else {
+                assert!(replies.is_empty());
+            }
+        }
+        if failure == "idle-observer" {
+            assert!(!responded.exists());
+        }
+        if success && reservation.is_none() {
+            assert!(observations.get() > 10);
+        }
+        if matches!(
+            failure,
+            "bound" | "bound-handler" | "bound-native" | "bound-native-write"
+        ) {
+            let requests: Vec<Value> = fs::read_to_string(&captured)
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            let turn = requests
+                .iter()
+                .find(|value| value["method"] == "turn/start")
+                .unwrap();
+            assert_eq!(turn["params"]["input"][0]["text"], "goal\n");
+            let thread = requests
+                .iter()
+                .find(|value| value["method"] == "thread/start")
+                .unwrap();
+            assert_eq!(thread["params"]["model"], "test-model");
+            assert_eq!(
+                thread["params"]["sandbox"],
+                if writer {
+                    "workspace-write"
+                } else {
+                    "read-only"
+                }
+            );
+            if writer {
+                assert_eq!(
+                    thread["params"]["config"]["sandbox_workspace_write"],
+                    settings["sandbox_workspace_write"]
+                );
+            }
+            let run = &fixture.storage.projection_records("run").unwrap()[0];
+            assert_eq!(run["barrier"]["releaseGranted"], true);
+            assert!(!run["process_identity_internal"]
+                .as_array()
+                .unwrap()
+                .is_empty());
+            let output = if durable {
+                durable_output::read_all(&mut fixture.storage, &run["record"])
+            } else { run["public_events"].as_array().unwrap().clone() };
+            assert_eq!(output.last().unwrap()["kind"], "final");
+            assert_eq!(output.last().unwrap()["text"], "hello");
+            if !durable { assert_eq!(output.len(), 1); }
+            if long_output {
+                assert_eq!(output.len(), 3000);
+                assert!(output.iter().all(|event| event["text"] == "hello"));
+            }
+            assert_eq!(last_message["kind"], "role");
+            assert_eq!(last_message["text"], "hello");
+            assert_eq!(
+                last_message["roleId"],
+                if writer { "coding" } else { "review" }
+            );
+            if matches!(failure, "bound-native" | "bound-native-write") {
+                assert_eq!(
+                    fs::read(fixture.source.join("src/value.txt")).unwrap(),
+                    b"base"
+                );
+                assert_eq!(
+                    fs::read(
+                        std::path::Path::new(snapshot["worktreePath"].as_str().unwrap())
+                            .join("src/value.txt")
+                    )
+                    .unwrap(),
+                    if writer {
+                        b"changed".as_slice()
+                    } else {
+                        b"base".as_slice()
+                    }
+                );
+                let args = fs::read_to_string(&native_argv).unwrap();
+                // Independently enumerate both launch roots and every ancestor;
+                // do not relax the exact argv assertion for invocation isolation.
+                let workspace = std::path::Path::new(snapshot["worktreePath"].as_str().unwrap());
+                let mut paths = std::collections::BTreeSet::new();
+                for root in [&home, workspace] {
+                    for ancestor in root.ancestors() {
+                        paths.insert(ancestor.to_str().unwrap());
+                    }
+                }
+                let entries = paths
+                    .iter()
+                    .map(|path| {
+                        format!(
+                            "{}={{trust_level=\"untrusted\"}}",
+                            serde_json::to_string(path).unwrap()
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let isolation = format!("projects={{{entries}}}");
+                let actual_args = args.lines().collect::<Vec<_>>();
+                assert_eq!(&actual_args[actual_args.len() - 2..], ["-c", isolation.as_str()]);
+                if writer {
+                    assert!(args.contains("sandbox_mode=\"workspace-write\"\n"));
+                    for setting in [
+                        "writable_roots=[]",
+                        "network_access=false",
+                        "exclude_tmpdir_env_var=true",
+                        "exclude_slash_tmp=true",
+                    ] {
+                        assert!(args.contains(&format!("sandbox_workspace_write.{setting}\n")));
+                    }
+                } else {
+                    assert_eq!(
+                        args.lines().collect::<Vec<_>>(),
+                        vec![
+                            "app-server",
+                            "--listen",
+                            "stdio://",
+                            "-c",
+                            "model=\"test-model\"",
+                            "-c",
+                            "model_reasoning_effort=\"medium\"",
+                            "-c",
+                            "model_provider=\"openai\"",
+                            "-c",
+                            "approval_policy=\"on-request\"",
+                            "-c",
+                            "sandbox_mode=\"read-only\"",
+                            "-c",
+                            "features.hooks=false",
+                            "-c",
+                            "features.apps=false",
+                            "-c",
+                            "features.plugins=false",
+                            "-c",
+                            isolation.as_str(),
+                        ]
+                    );
+                }
+            }
+        }
+        if matches!(failure, "bound-persist" | "bound-sink" | "bound-cleanup") {
+            let run = &fixture.storage.projection_records("run").unwrap()[0];
+            assert!(run["public_events"].as_array().unwrap().is_empty());
+            assert_eq!(last_message["text"], "goal");
+        }
+        if failure == "bound-interrupted" {
+            let run = &fixture.storage.projection_records("run").unwrap()[0];
+            assert_eq!(run["public_events"].as_array().unwrap().len(), 1);
+            assert_eq!(run["public_events"][0]["kind"], "status");
+            assert_eq!(last_message["kind"], "status");
+        }
+        if failure == "bound-multiple" {
+            let run = &fixture.storage.projection_records("run").unwrap()[0];
+            let events = run["public_events"].as_array().unwrap();
+            assert_eq!(
+                events
+                    .iter()
+                    .map(|event| (
+                        event["kind"].as_str().unwrap(),
+                        event["text"].as_str().unwrap()
+                    ))
+                    .collect::<Vec<_>>(),
+                vec![("status", "hello"), ("status", "plan"), ("final", "world")]
+            );
+            assert_eq!(last_message["text"], "world");
+        }
+        if matches!(
+            failure,
+            "bound"
+                | "bound-native"
+                | "bound-native-write"
+                | "bound-write-mismatch"
+                | "bound-handler"
+                | "bound-handler-role"
+                | "bound-handler-cancel"
+                | "bound-multiple"
+                | "bound-persist"
+                | "bound-sink"
+                | "bound-interrupted"
+                | "bound-cleanup"
+                | "bound-cancel"
+        ) {
+            let runs = fixture.storage.projection_records("run").unwrap();
+            let run = &runs[0];
+            assert_eq!(
+                run["state"],
+                match failure {
+                    "bound" | "bound-handler" | "bound-native" | "bound-native-write"
+                    | "bound-multiple" => "succeeded",
+                    "bound-interrupted" | "bound-cancel" | "bound-handler-cancel" => "canceled",
+                    "bound-cleanup" => "recoveryRequired",
+                    _ => "failed",
+                }
+            );
+            assert_eq!(
+                run["termination"]["processesProvenGone"],
+                failure != "bound-cleanup"
+            );
+            if failure == "bound-cleanup" {
+                assert_eq!(
+                    run["recovery"]["recoveryId"],
+                    run["recovery_id_reservation"]
+                );
+                assert!(fixture
+                    .projects
+                    .verify_workspace(&fixture.storage, &address)
+                    .is_err());
+            } else {
+                assert!(run["recovery"].is_null());
+                assert!(run["termination"]["trackedProcesses"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|item| item["observedGone"] == true));
+            }
+            AgentRuntime::blocked()
+                .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+                .unwrap();
+            assert_eq!(fixture.storage.projection_records("run").unwrap(), runs);
+        }
+        // Rejection before claiming the protocol leaves cleanup with the caller.
+        if writer || failure == "bound-write-mismatch" {
+            let lock = fixture
+                .storage
+                .projection_record("lock", &format!("lock_{}", address.worktree_id))
+                .unwrap()
+                .unwrap();
+            let retained = matches!(failure, "bound-cleanup" | "bound-terminal");
+            assert_eq!(lock["writer_run_id"].is_null(), !retained);
+            assert_eq!(lock["poisoned"], failure == "bound-cleanup");
+            if failure != "bound-terminal" {
+                let run = &fixture.storage.projection_records("run").unwrap()[0];
+                assert_eq!(
+                    run["termination"]["writerLockState"],
+                    if retained {
+                        "recoveryRequired"
+                    } else {
+                        "released"
+                    }
+                );
+            }
+        }
+        if matches!(failure, "bound-role" | "bound-write" | "bound-input") {
+            process.finish().unwrap();
+        }
+        if matches!(failure, "bound-cleanup" | "bound-terminal") {
+            assert!(LoginProcess::reserve(&profile).is_err());
+            assert!(process.finish().is_err());
+        } else {
+            assert!(LoginProcess::reserve(&profile).is_ok());
+        }
+        if matches!(
+            failure,
+            "bound"
+                | "bound-native"
+                | "bound-native-write"
+                | "bound-write-mismatch"
+                | "bound-terminal"
+                | "bound-cleanup"
+        ) {
+            let before = fixture.storage.projection_records("run").unwrap();
+            if failure == "bound-terminal" {
+                assert_eq!(before[0]["state"], "running");
+                assert!(before[0]["native_thread_receipt"].is_object());
+                assert!(before[0]["termination"].is_null());
+                assert_ne!(stored["state"], "reviewReady");
+                fixture
+                    .storage
+                    .connection_for_test()
+                    .execute_batch("DROP TRIGGER test_reject_terminal_chat;")
+                    .unwrap();
+            }
+            let database = fixture._root.path().join("data/elsecrew.sqlite3");
+            drop(fixture.storage);
+            fixture.storage = if durable { Storage::open_durable_output_for_test(&database).unwrap() }
+                else { Storage::open(&database).unwrap() };
+            fixture.projects = ProjectManager::new(&database).unwrap();
+            let runtime = AgentRuntime::blocked();
+            runtime
+                .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+                .unwrap();
+            runtime.validate_persisted_runs(&fixture.storage).unwrap();
+            let after = fixture.storage.projection_records("run").unwrap();
+            if failure == "bound-terminal" {
+                assert_eq!(after[0]["state"], "recoveryRequired");
+                assert_eq!(
+                    after[0]["recovery"]["recoveryId"],
+                    before[0]["recovery_id_reservation"]
+                );
+                assert_eq!(after[0]["public_events"], before[0]["public_events"]);
+                // Reopening the ledger never silently removes a retained profile fence.
+                assert!(LoginProcess::reserve(&profile).is_err());
+            } else {
+                assert_eq!(after, before);
+            }
+        }
+        assert_eq!(
+            fs::read(fixture.source.join("src/value.txt")).unwrap(),
+            b"base"
+        );
+    }
+}
+
+#[test]
+fn text_candidate_requires_durable_chat_snapshot_and_rechecks_marker() {
+    use crate::provider_preflight_session::TextWorkspace;
+    let mut fixture = Fixture::new();
+    let first = fixture.snapshot("req_text_first");
+    let second = fixture.snapshot("req_text_second");
+    let chat = fixture.create_chat(&first, "goal", "req_text_chat");
+    let address = address_from_chat(&chat).unwrap();
+    let binding = TextWorkspace::new(&fixture.projects, &mut fixture.storage, &address).unwrap();
+    binding.revalidate().unwrap();
+    drop(binding);
+    let mut other = address.clone();
+    other.worktree_id = second["worktreeId"].as_str().unwrap().into();
+    other.workspace_identity = second["workspaceIdentity"].as_str().unwrap().into();
+    assert!(TextWorkspace::new(&fixture.projects, &mut fixture.storage, &other).is_err());
+    let mut missing = address.clone();
+    missing.chat_id = "missing_chat".into();
+    assert!(TextWorkspace::new(&fixture.projects, &mut fixture.storage, &missing).is_err());
+    let binding = TextWorkspace::new(&fixture.projects, &mut fixture.storage, &address).unwrap();
+    let marker = std::path::Path::new(first["worktreePath"].as_str().unwrap())
+        .join(".git/elsecrew-snapshot-v1.json");
+    let original = fs::read(&marker).unwrap();
+    fs::write(&marker, b"{}").unwrap();
+    assert!(binding.revalidate().is_err());
+    fs::write(&marker, original).unwrap();
+    binding.revalidate().unwrap();
+    drop(binding);
+    fixture
+        .projects
+        .workspace_close(&fixture.storage, &address)
+        .unwrap();
+    assert!(TextWorkspace::new(&fixture.projects, &mut fixture.storage, &address).is_err());
+    assert_eq!(
+        fs::read(fixture.source.join("src/value.txt")).unwrap(),
+        b"base"
+    );
+}
+
+#[test]
+fn production_prepared_workspace_snapshot_persists_more_than_one_hundred_members() {
+    let mut fixture = Fixture::new();
+    let mut snapshots = Vec::new();
+    for index in 0..101 {
+        snapshots.push(fixture.snapshot(&format!("req_workspace_snapshot_{index}")));
+    }
+    let project = project_record(&fixture.storage, &fixture.project_id).unwrap();
+    let prepared = project["prepared_workspaces"].as_object().unwrap();
+    assert_eq!(prepared.len(), 101);
+    for snapshot in &snapshots {
+        let preparation_id = snapshot["preparationId"].as_str().unwrap();
+        let record = &prepared[preparation_id];
+        assert_eq!(record["preparationId"], preparation_id);
+        assert_eq!(record["bindingState"], "unbound");
+        assert_eq!(record["boundChatId"], Value::Null);
+        let mut manifest = snapshot.clone();
+        manifest.as_object_mut().unwrap().remove("preparationId");
+        assert_eq!(record["manifest"], manifest);
+        let workspace = std::path::Path::new(manifest["worktreePath"].as_str().unwrap());
+        assert_eq!(fs::read(workspace.join("src/value.txt")).unwrap(), b"base");
+    }
+    assert_eq!(
+        fs::read(fixture.source.join("src/value.txt")).unwrap(),
+        b"base"
+    );
+
+    let database = fixture._root.path().join("data/elsecrew.sqlite3");
+    fixture.storage.checkpoint().unwrap();
+    drop(fixture.chats);
+    drop(fixture.projects);
+    drop(fixture.storage);
+    // Keep the TempDir alive, but release every production handle before a
+    // read-only reopen, before the private maintenance path below can mutate
+    // derived records. Product startup readiness is a separate gate.
+    let before = fs::read(&database).unwrap();
+    let connection = rusqlite::Connection::open_with_flags(
+        &database,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let (stored_json, sequence): (String, i64) = connection
+        .query_row(
+            "SELECT projection_json,last_event_sequence FROM projects WHERE project_id=?1",
+            [&fixture.project_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    let mut stored: Value = serde_json::from_str(&stored_json).unwrap();
+    // Match load_json_projection: the sequence lives in its typed
+    // column, not in the stored projection JSON.
+    stored["last_event_sequence"] = Value::from(sequence);
+    assert!(
+        stored == Value::Object(project),
+        "persisted project with typed sequence differs from the live projection"
+    );
+    let (event_count, project_count, last_rowid): (i64, i64, i64) = connection
+        .query_row(
+            "SELECT count(*),sum(aggregate_type='project'),max(rowid) FROM events",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    // One project.open event, then prepare lock/project, export-start lock,
+    // pre-activation, active project/lock, and the G5 preparation-map upsert.
+    assert_eq!(event_count, 1 + 7 * 101);
+    assert_eq!(project_count, 1 + 4 * 101);
+    assert_eq!(sequence, project_count);
+    let mut previous_rowid = 0;
+    let mut canonical_bytes = 0_i64;
+    let mut latest_source_bytes = 0_i64;
+    for (index, snapshot) in snapshots.iter().enumerate() {
+        let (rowid, source_sequence, payload, bytes): (i64, i64, String, i64) = connection
+            .query_row(
+                "SELECT rowid,aggregate_sequence,canonical_json_payload,\
+                 length(CAST(canonical_json_payload AS BLOB)) FROM events \
+                 WHERE operation_id=?1 AND aggregate_type='project' AND aggregate_id=?2",
+                rusqlite::params![
+                    format!("op_workspace_prepare_chat_req_workspace_snapshot_{index}"),
+                    fixture.project_id,
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert!(rowid > previous_rowid);
+        assert_eq!(source_sequence, 1 + 4 * (index as i64 + 1));
+        assert_eq!(bytes as usize, payload.len());
+        let source: Value = serde_json::from_str(&payload).unwrap();
+        let members = source["prepared_workspaces"].as_object().unwrap();
+        assert_eq!(members.len(), index + 1);
+        assert_eq!(
+            members[snapshot["preparationId"].as_str().unwrap()]["manifest"]["workspaceIdentity"],
+            snapshot["workspaceIdentity"]
+        );
+        previous_rowid = rowid;
+        canonical_bytes += bytes;
+        latest_source_bytes = bytes;
+    }
+    assert_eq!(previous_rowid, last_rowid);
+    drop(connection);
+    assert_eq!(fs::read(&database).unwrap(), before);
+    let mut connection = rusqlite::Connection::open(&database).unwrap();
+    connection.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+    let source_digest = |connection: &rusqlite::Connection| {
+        use sha2::{Digest, Sha256};
+        let mut digest = Sha256::new();
+        let mut statement=connection.prepare("SELECT rowid,event_id,operation_id,request_id,aggregate_type,aggregate_id,aggregate_sequence,event_type,payload_schema_version,canonical_json_payload,timestamp FROM events ORDER BY rowid").unwrap();
+        let columns = statement.column_count();
+        let mut rows = statement.query([]).unwrap();
+        while let Some(row) = rows.next().unwrap() {
+            for column in 0..columns {
+                use rusqlite::types::ValueRef;
+                match row.get_ref(column).unwrap() {
+                    ValueRef::Null => digest.update([0]),
+                    ValueRef::Integer(value) => {
+                        digest.update([1]);
+                        digest.update(value.to_be_bytes());
+                    }
+                    ValueRef::Text(value) => {
+                        digest.update([2]);
+                        digest.update((value.len() as u64).to_be_bytes());
+                        digest.update(value);
+                    }
+                    other => panic!("unexpected ledger type {other:?}"),
+                }
+            }
+        }
+        <[u8; 32]>::from(digest.finalize())
+    };
+    let source_before = source_digest(&connection);
+    use crate::storage::reopen::snapshot::{ReopenMaintenanceSession, ReopenMaintenanceStep};
+    let mut session = ReopenMaintenanceSession::start(&mut connection).unwrap();
+    let mut calls = 0;
+    loop {
+        calls += 1;
+        // The earlier 607-source fixture completed in 172,685 calls;
+        // the export-start lock adds one source per snapshot (708 total).
+        // This is a test hang guard, not a per-call or product startup budget.
+        assert!(calls < 400_000);
+        let (usage, done) = match session.step(&mut || false).unwrap() {
+            ReopenMaintenanceStep::Pending(usage) => (usage, false),
+            ReopenMaintenanceStep::ReadyVerified(usage) => (usage, true),
+            ReopenMaintenanceStep::Cancelled => panic!("unexpected cancellation"),
+        };
+        assert!(usage.fragment_bytes <= 1024 * 1024);
+        assert!(usage.encoded_bytes() <= 8 * 1024 * 1024);
+        assert!(usage.work_units <= 100);
+        if done {
+            break;
+        }
+    }
+    drop(session);
+    assert_eq!(source_digest(&connection), source_before);
+    assert_eq!(
+        connection
+            .query_row("SELECT count(*) FROM prepared_workspaces", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        101
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT materialization_state FROM storage_schema_meta",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+        "ready"
+    );
+    eprintln!("production workspace global/catch-up/ready calls={calls} source_sha256={source_before:02x?}");
+    eprintln!("production workspaces=101 project_sources={project_count} total_sources={event_count} last_source_rowid={last_rowid} preparation_source_bytes={canonical_bytes} latest_source_bytes={latest_source_bytes}");
+}
+
+#[test]
+fn multiple_snapshots_and_chats_remain_explicitly_addressed() {
+    let mut fixture = Fixture::new();
+    let first = fixture.snapshot("req_snapshot_a");
+    let second = fixture.snapshot("req_snapshot_b");
+    assert_ne!(first["worktreeId"], second["worktreeId"]);
+    assert_ne!(first["workspaceIdentity"], second["workspaceIdentity"]);
+
+    let chat_a = fixture.create_chat(&first, "first goal", "req_chat_a");
+    let chat_b = fixture.create_chat(&second, "second goal", "req_chat_b");
+    let address_a = address_from_chat(&chat_a).unwrap();
+    let address_b = address_from_chat(&chat_b).unwrap();
+
+    let read_a = fixture
+        .projects
+        .workspace_read_file(&fixture.storage, &address_a, "src/value.txt")
+        .unwrap();
+    let read_b = fixture
+        .projects
+        .workspace_read_file(&fixture.storage, &address_b, "src/value.txt")
+        .unwrap();
+    assert_eq!(read_a.streams[0].chunks, vec!["base"]);
+    assert_eq!(read_b.streams[0].chunks, vec!["base"]);
+
+    let aliased = WorkspaceAddress {
+        chat_id: address_a.chat_id.clone(),
+        project_id: address_b.project_id.clone(),
+        worktree_id: address_b.worktree_id.clone(),
+        workspace_identity: address_b.workspace_identity.clone(),
+    };
+    assert_eq!(
+        fixture
+            .projects
+            .workspace_read_file(&fixture.storage, &aliased, "src/value.txt")
+            .unwrap_err()
+            .kind,
+        "manifestMismatch"
+    );
+
+    fixture
+        .projects
+        .workspace_close(&fixture.storage, &address_a)
+        .unwrap();
+    assert_eq!(
+        fixture
+            .projects
+            .workspace_read_file(&fixture.storage, &address_a, "src/value.txt")
+            .unwrap_err()
+            .kind,
+        "recoveryRequired"
+    );
+    fixture
+        .projects
+        .workspace_read_file(&fixture.storage, &address_b, "src/value.txt")
+        .unwrap();
+    assert_eq!(
+        fs::read(fixture.source.join("src/value.txt")).unwrap(),
+        b"base"
+    );
+}
+
+#[test]
+fn followup_append_preserves_save_sessions_and_refuses_recovery_state() {
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_followup_state_snapshot");
+    let chat = fixture.create_chat(&snapshot, "original", "req_followup_state_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let request = followup_request(&chat, 1, "user_0123456789abcdef0123456789abcdef");
+    let mut stored = chat_projection_record(&fixture.storage, chat_id).unwrap();
+    stored.insert("save_sessions".into(), json!([]));
+    fixture
+        .storage
+        .upsert_projection_record("chat", chat_id, "op_followup_save_sessions", None, stored)
+        .unwrap();
+    fixture
+        .chats
+        .append_user_message(&mut fixture.storage, &fixture.projects, &request)
+        .unwrap();
+    let stored = chat_projection_record(&fixture.storage, chat_id).unwrap();
+    assert_eq!(stored["save_sessions"], json!([]));
+    let mut blocked = stored;
+    blocked.insert("state".into(), json!("recoveryRequired"));
+    blocked.get_mut("record").unwrap()["state"] = json!("recoveryRequired");
+    fixture
+        .storage
+        .upsert_projection_record("chat", chat_id, "op_followup_recovery", None, blocked)
+        .unwrap();
+    let next = followup_request(&chat, 2, "user_abcdef0123456789abcdef0123456789");
+    assert!(fixture
+        .chats
+        .append_user_message(&mut fixture.storage, &fixture.projects, &next)
+        .is_err());
+    assert!(fixture
+        .storage
+        .retained_chat_message(next["clientMessageId"].as_str().unwrap())
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn save_continuations_reject_cross_chat_and_preserve_other_workspace() {
+    let mut fixture = Fixture::new();
+    let first = fixture.snapshot("req_save_snapshot_a");
+    let second = fixture.snapshot("req_save_snapshot_b");
+    let chat_a = fixture.create_chat(&first, "save a", "req_save_chat_a");
+    let chat_b = fixture.create_chat(&second, "save b", "req_save_chat_b");
+    let address_a = address_from_chat(&chat_a).unwrap();
+    let address_b = address_from_chat(&chat_b).unwrap();
+    let expected = sha256_file_version_v1(b"base");
+    let begin = fixture
+        .projects
+        .workspace_begin_save(
+            &mut fixture.storage,
+            &address_a,
+            "src/value.txt",
+            &expected,
+            5,
+            "utf8",
+        )
+        .unwrap();
+    let save_id = begin.result["saveId"].as_str().unwrap();
+    assert_eq!(
+        fixture
+            .projects
+            .workspace_append_save_chunk(&fixture.storage, &address_b, save_id, 1, "other")
+            .unwrap_err()
+            .kind,
+        "manifestMismatch"
+    );
+    let chunk = fixture
+        .projects
+        .workspace_append_save_chunk(&fixture.storage, &address_a, save_id, 1, "after")
+        .unwrap();
+    assert_eq!(chunk.result, json!({"saveId": save_id, "acceptedSeq": 1}));
+    let commit = fixture
+        .projects
+        .workspace_commit_save(
+            &mut fixture.storage,
+            &address_a,
+            save_id,
+            &expected,
+            1,
+            5,
+            "req_save_commit",
+        )
+        .unwrap();
+    assert_eq!(
+        commit.result,
+        json!({"saveId": save_id, "outcome": "committed", "version": sha256_file_version_v1(b"after")})
+    );
+    let detail = fixture
+        .chats
+        .get_chat(&fixture.storage, &address_a.chat_id, 0, None, 50, true)
+        .unwrap();
+    assert_eq!(detail["messages"].as_array().unwrap().len(), 1);
+    assert_eq!(detail["messages"][0]["eventSequence"], 1);
+    let b = fixture
+        .projects
+        .workspace_read_file(&fixture.storage, &address_b, "src/value.txt")
+        .unwrap();
+    assert_eq!(b.streams[0].chunks, vec!["base"]);
+    assert_eq!(
+        fs::read(fixture.source.join("src/value.txt")).unwrap(),
+        b"base"
+    );
+}
+
+#[test]
+fn settings_are_snapshotted_and_global_workspace_aliases_are_rejected() {
+    let mut fixture = Fixture::new();
+    let first = fixture.snapshot("req_settings_snapshot_a");
+    let chat = fixture.create_chat(&first, "stable settings", "req_settings_chat_a");
+    let roles = json!([
+        {"roleId":"planning","runtime":"codex","modelSelector":"different","reasoningEffort":"medium","permission":"readOnly"},
+        {"roleId":"coding","runtime":"claude-code","modelSelector":"opus","reasoningEffort":null,"permission":"workspaceWrite"},
+        {"roleId":"review","runtime":"codex","modelSelector":"sol","reasoningEffort":"high","permission":"readOnly"}
+    ]);
+    fixture
+        .chats
+        .update_role_settings(
+            &mut fixture.storage,
+            &fixture.project_id,
+            1,
+            roles,
+            "req_settings_update",
+        )
+        .unwrap();
+    let stored = fixture
+        .storage
+        .projection_record("chat", chat["chatId"].as_str().unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored["record"]["settingsRevision"], 1);
+    assert_eq!(stored["record"]["roleSnapshots"][0]["modelSelector"], "sol");
+    let error = fixture
+        .chats
+        .create_chat(
+            &mut fixture.storage,
+            &fixture.projects,
+            first["preparationId"].as_str().unwrap(),
+            &fixture.project_id,
+            first["worktreeId"].as_str().unwrap(),
+            first["workspaceIdentity"].as_str().unwrap(),
+            "alias",
+            2,
+            "req_alias",
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, "manifestMismatch");
+}
+
+#[test]
+fn chat_ledger_pages_keep_durable_sequence_separate_from_wire_streams() {
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_ledger_snapshot");
+    let chat = fixture.create_chat(&snapshot, "persist me", "req_ledger_chat");
+    let detail = fixture
+        .chats
+        .get_chat(
+            &fixture.storage,
+            chat["chatId"].as_str().unwrap(),
+            0,
+            None,
+            50,
+            false,
+        )
+        .unwrap();
+    assert_eq!(detail["messages"][0]["eventSequence"], 1);
+    assert_eq!(detail["messages"][0]["text"], "persist me");
+    validate_g5_payload_v1("chatDetailPage", &detail).unwrap();
+}
+
+fn followup_request(chat: &Value, sequence: u64, id: &str) -> Value {
+    json!({"projectId":chat["projectId"],"chatId":chat["chatId"],"taskId":chat["taskId"],
+        "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+        "expectedEventSequence":sequence,"clientMessageId":id,"text":"후속 지시"})
+}
+
+/// Explicit local diagnostic, not a G6 benchmark or a timing assertion. Uses only
+/// disposable fixture data and never launches a provider or reads credentials.
+#[test]
+#[ignore = "local follow-up cost attribution; run release with --nocapture"]
+fn followup_cost_attribution() {
+    use std::time::Instant;
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_cost_snapshot");
+    let chat = fixture.create_chat(&snapshot, "cost diagnostic", "req_cost_chat");
+    let address = address_from_chat(&chat).unwrap();
+    for index in 0..64u64 {
+        let request = followup_request(&chat, index + 1, &format!("user_{index:032x}"));
+        // Measure the unchanged admission independently. Do not subtract this
+        // sample from append: cache/scheduling effects make that unjustified.
+        let started = Instant::now();
+        fixture.projects.verify_workspace(&fixture.storage, &address).unwrap();
+        let workspace_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let started = Instant::now();
+        let appended = fixture.chats
+            .append_user_message(&mut fixture.storage, &fixture.projects, &request).unwrap();
+        let append_ms = started.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(appended.result["eventSequence"], index + 2);
+        assert_eq!(appended.events.len(), 1);
+        let started = Instant::now();
+        let retry = fixture.chats
+            .append_user_message(&mut fixture.storage, &fixture.projects, &request).unwrap();
+        let retry_ms = started.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(retry.result, appended.result);
+        assert!(retry.events.is_empty());
+        eprintln!("{}", json!({"diagnostic":"followupCost", "sample":index,
+            "workspaceMs":workspace_ms,"appendMs":append_ms,"retryMs":retry_ms}));
+    }
+}
+
+#[test]
+fn followup_retry_survives_actual_source_compaction_and_reopen() {
+    use crate::storage_lifetime::compaction_writer::{CompactionStepResult, CompactionTarget};
+    use elsecrew_protocol::storage_lifetime_v1::StorageCompactionPhaseV3;
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_followup_compact_snapshot");
+    let chat = fixture.create_chat(&snapshot, "original", "req_followup_compact_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let request = followup_request(&chat, 1, "user_0123456789abcdef0123456789abcdef");
+    let first = fixture
+        .chats
+        .append_user_message(&mut fixture.storage, &fixture.projects, &request)
+        .unwrap();
+    // Keep the two durable messages, but reach the real 1,000-source-event threshold.
+    for index in 0..999 {
+        persist_chat_state(
+            &mut fixture.storage,
+            &chat,
+            &format!("op_followup_compact_{index}"),
+        )
+        .unwrap();
+    }
+    for _ in 0..20_000 {
+        if !fixture.storage.materialization_requires_work().unwrap() {
+            break;
+        }
+        fixture
+            .storage
+            .run_materialization_scheduler_step()
+            .unwrap();
+    }
+    assert!(!fixture.storage.materialization_requires_work().unwrap());
+    fixture.storage.checkpoint().unwrap();
+    let database = fixture.storage.path().to_path_buf();
+    drop(fixture.storage);
+    fixture.storage =
+        Storage::open_for_admission(&database, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+    let target = CompactionTarget {
+        aggregate_type: "chat".into(),
+        aggregate_id: chat_id.into(),
+    };
+    let mut finalized = false;
+    let mut partial_reopen_checked = false;
+    for _ in 0..1000 {
+        let step = fixture
+            .storage
+            .run_compaction_scheduler_step(&target)
+            .unwrap();
+        if let CompactionStepResult::ArmedWorked {
+            phase: StorageCompactionPhaseV3::ReleasePlan,
+            after_plan_ordinal,
+            ..
+        } = &step
+        {
+            if !partial_reopen_checked && (1..1000).contains(after_plan_ordinal) {
+                fixture.storage.checkpoint().unwrap();
+                drop(fixture.storage);
+                assert_compacted_chat_missing_row_rejected(
+                    &database,
+                    chat_id,
+                    "frozen_operation_sources",
+                    *after_plan_ordinal,
+                );
+                assert_compacted_chat_missing_row_rejected(
+                    &database,
+                    chat_id,
+                    "storage_compaction_plan_rows",
+                    *after_plan_ordinal + 1,
+                );
+                fixture.storage = Storage::open_for_admission(
+                    &database,
+                    &std::sync::atomic::AtomicBool::new(false),
+                )
+                .unwrap();
+                partial_reopen_checked = true;
+            }
+        }
+        if matches!(step, CompactionStepResult::Finalized { .. }) {
+            finalized = true;
+            break;
+        }
+    }
+    assert!(finalized, "real compaction did not finalize");
+    assert!(
+        partial_reopen_checked,
+        "partial release boundary was not exercised"
+    );
+    let database = fixture.storage.path().to_path_buf();
+    let before = chat_projection_record(&fixture.storage, chat_id).unwrap();
+    fixture.storage.checkpoint().unwrap();
+    drop(fixture.storage);
+    let inspection = rusqlite::Connection::open_with_flags(
+        &database,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let remaining: i64 = inspection
+        .query_row(
+            "SELECT count(*) FROM events WHERE operation_id=?1",
+            [format!(
+                "op_followup_{}",
+                request["clientMessageId"].as_str().unwrap()
+            )],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(remaining, 0, "retry must not rely on the fresh source row");
+    drop(inspection);
+    assert_compacted_chat_missing_row_rejected(
+        &database,
+        chat_id,
+        "frozen_operation_sources",
+        1000,
+    );
+    let mut reopened =
+        Storage::open_for_admission(&database, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+    let history = fixture.chats.get_chat(&reopened, chat_id, 0, None, 50, true).unwrap();
+    let messages = history["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0]["text"], "original");
+    assert_eq!(messages[1], first.result);
+    assert!(crate::agent_runtime::preparation::RunPreparation::resolve(
+        &reopened, &fixture.projects,
+        &elsecrew_protocol::agent_adapter_v1::AgentRunStartRequestV1 {
+            chat_id: chat_id.to_owned(), role_id: "planning".into(),
+            input_message_ids: messages.iter().map(|message| message["messageId"].as_str().unwrap().to_owned()).collect(),
+            expected_capability_fingerprint: format!("sha256:{}", "0".repeat(64)),
+        },
+    ).is_ok());
+    let replay = fixture
+        .chats
+        .append_user_message(&mut reopened, &fixture.projects, &request)
+        .unwrap();
+    assert_eq!(replay.result, first.result);
+    assert!(replay.events.is_empty());
+    assert_eq!(chat_projection_record(&reopened, chat_id).unwrap(), before);
+    let tail = fixture.chats.append_user_message(&mut reopened, &fixture.projects,
+        &followup_request(&chat, 2, "user_fedcba9876543210fedcba9876543210")).unwrap();
+    let current = fixture.chats.get_chat(&reopened, chat_id, 0, None, 50, true).unwrap();
+    assert_eq!(current["messages"].as_array().unwrap().len(), 3);
+    assert_eq!(current["messages"][0], messages[0]);
+    assert_eq!(current["messages"][1], messages[1]);
+    assert_eq!(current["messages"][2], tail.result);
+}
+
+fn assert_compacted_chat_missing_row_rejected(
+    database: &std::path::Path,
+    chat_id: &str,
+    table: &str,
+    sequence: u32,
+) {
+    // A released plan predecessor must still have a valid frozen source. Preserve
+    // the schema while injecting corruption into a separate disposable database.
+    assert!(matches!(
+        table,
+        "frozen_operation_sources" | "storage_compaction_plan_rows"
+    ));
+    let copy_root = tempfile::tempdir().unwrap();
+    let damaged = copy_root.path().join("missing-predecessor.sqlite3");
+    fs::copy(database, &damaged).unwrap();
+    let connection = rusqlite::Connection::open(&damaged).unwrap();
+    let triggers: Vec<(String, String)> = connection
+        .prepare("SELECT name,sql FROM sqlite_schema WHERE type='trigger' AND tbl_name=?1")
+        .unwrap()
+        .query_map([table], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    for (name, _) in &triggers {
+        connection
+            .execute_batch(&format!("DROP TRIGGER \"{}\"", name.replace('"', "\"\"")))
+            .unwrap();
+    }
+    assert_eq!(connection.execute(
+        &format!("DELETE FROM {table} WHERE aggregate_type='chat' AND aggregate_id=?1 AND aggregate_sequence=?2"),
+        rusqlite::params![chat_id, sequence],
+    ).unwrap(), 1);
+    for (_, sql) in triggers {
+        connection.execute_batch(&sql).unwrap();
+    }
+    connection
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .unwrap();
+    drop(connection);
+    let error =
+        match Storage::open_for_admission(&damaged, &std::sync::atomic::AtomicBool::new(false)) {
+            Ok(_) => panic!("missing frozen predecessor was accepted"),
+            Err(error) => error,
+        };
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+}
+
+#[test]
+fn followup_append_is_durable_and_retries_without_new_event() {
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_followup_snapshot");
+    let chat = fixture.create_chat(&snapshot, "original", "req_followup_chat");
+    let request = followup_request(&chat, 1, "user_0123456789abcdef0123456789abcdef");
+    let original =
+        chat_projection_record(&fixture.storage, chat["chatId"].as_str().unwrap()).unwrap();
+    let first = fixture
+        .chats
+        .append_user_message(&mut fixture.storage, &fixture.projects, &request)
+        .unwrap();
+    assert_eq!(first.events.len(), 1);
+    assert_eq!(first.result["eventSequence"], 2);
+    let retry = fixture
+        .chats
+        .append_user_message(&mut fixture.storage, &fixture.projects, &request)
+        .unwrap();
+    assert_eq!(retry.result, first.result);
+    assert!(retry.events.is_empty());
+    let current =
+        chat_projection_record(&fixture.storage, chat["chatId"].as_str().unwrap()).unwrap();
+    assert!(!fixture
+        .storage
+        .append_followup_checked(
+            chat["chatId"].as_str().unwrap(),
+            "op_interleaved_followup",
+            &original,
+            current.clone()
+        )
+        .unwrap());
+    assert_eq!(
+        chat_projection_record(&fixture.storage, chat["chatId"].as_str().unwrap()).unwrap(),
+        current
+    );
+    for _ in 0..10_000 {
+        if !fixture.storage.materialization_requires_work().unwrap() {
+            break;
+        }
+        fixture
+            .storage
+            .run_materialization_scheduler_step()
+            .unwrap();
+    }
+    assert!(!fixture.storage.materialization_requires_work().unwrap());
+    let materialized_retry = fixture
+        .chats
+        .append_user_message(&mut fixture.storage, &fixture.projects, &request)
+        .unwrap();
+    assert_eq!(materialized_retry.result, first.result);
+    assert!(materialized_retry.events.is_empty());
+    let detail = fixture
+        .chats
+        .get_chat(
+            &fixture.storage,
+            chat["chatId"].as_str().unwrap(),
+            0,
+            None,
+            50,
+            false,
+        )
+        .unwrap();
+    assert_eq!(detail["messages"].as_array().unwrap().len(), 2);
+    assert_eq!(detail["chat"]["state"], "draft");
+    assert_eq!(detail["chat"]["roleSnapshots"], chat["roleSnapshots"]);
+    let database = fixture._root.path().join("data/elsecrew.sqlite3");
+    drop(fixture.storage);
+    let mut reopened = Storage::open(&database).unwrap();
+    let replay = fixture
+        .chats
+        .append_user_message(&mut reopened, &fixture.projects, &request)
+        .unwrap();
+    assert_eq!(replay.result, first.result);
+    assert!(replay.events.is_empty());
+    assert_eq!(
+        fs::read(fixture.source.join("src/value.txt")).unwrap(),
+        b"base"
+    );
+}
+
+#[test]
+fn followup_rejects_id_reuse_identity_drift_and_stale_sequence_without_mutation() {
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_followup_reject_snapshot");
+    let chat = fixture.create_chat(&snapshot, "original", "req_followup_reject_chat");
+    let request = followup_request(&chat, 1, "user_0123456789abcdef0123456789abcdef");
+    fixture
+        .chats
+        .append_user_message(&mut fixture.storage, &fixture.projects, &request)
+        .unwrap();
+    let before =
+        chat_projection_record(&fixture.storage, chat["chatId"].as_str().unwrap()).unwrap();
+    for field in ["text", "taskId", "workspaceIdentity"] {
+        let mut invalid = request.clone();
+        invalid[field] = json!("other");
+        assert!(fixture
+            .chats
+            .append_user_message(&mut fixture.storage, &fixture.projects, &invalid)
+            .is_err());
+    }
+    let stale = followup_request(&chat, 1, "user_abcdef0123456789abcdef0123456789");
+    assert!(fixture
+        .chats
+        .append_user_message(&mut fixture.storage, &fixture.projects, &stale)
+        .is_err());
+    assert_eq!(
+        chat_projection_record(&fixture.storage, chat["chatId"].as_str().unwrap()).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn unavailable_exact_profile_never_persists_or_spawns_a_run() {
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_unavailable_snapshot");
+    fixture
+        .chats
+        .default_role_settings(&mut fixture.storage, &fixture.projects, &fixture.project_id, "req_defaults")
+        .unwrap();
+    let roles = json!([
+        {"roleId":"planning","runtime":"codex","modelSelector":"unavailable","reasoningEffort":"medium","permission":"readOnly"},
+        {"roleId":"coding","runtime":"claude-code","modelSelector":"opus","reasoningEffort":null,"permission":"workspaceWrite"},
+        {"roleId":"review","runtime":"codex","modelSelector":"sol","reasoningEffort":"high","permission":"readOnly"}
+    ]);
+    fixture
+        .chats
+        .update_role_settings(
+            &mut fixture.storage,
+            &fixture.project_id,
+            1,
+            roles,
+            "req_unavailable_settings",
+        )
+        .unwrap();
+    let chat = fixture
+        .chats
+        .create_chat(
+            &mut fixture.storage,
+            &fixture.projects,
+            snapshot["preparationId"].as_str().unwrap(),
+            &fixture.project_id,
+            snapshot["worktreeId"].as_str().unwrap(),
+            snapshot["workspaceIdentity"].as_str().unwrap(),
+            "no fallback",
+            2,
+            "req_unavailable_chat",
+        )
+        .unwrap()
+        .result;
+    let before = fixture.storage.projection_records("run").unwrap().len();
+    let error = fixture
+        .chats
+        .start_fixture(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            chat["chatId"].as_str().unwrap(),
+            "planning",
+            "planning-success",
+            "req_unavailable_run",
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, "manifestMismatch");
+    assert_eq!(
+        fixture.storage.projection_records("run").unwrap().len(),
+        before
+    );
+}
+
+#[test]
+fn failed_b_creation_and_exact_abandon_leave_bound_a_fully_active() {
+    let mut fixture = Fixture::new();
+    let snapshot_a = fixture.snapshot("req_cleanup_snapshot_a");
+    let chat_a = fixture.create_chat(&snapshot_a, "bound a", "req_cleanup_chat_a");
+    let address_a = address_from_chat(&chat_a).unwrap();
+    let snapshot_b = fixture.snapshot("req_cleanup_snapshot_b");
+    let failed = fixture
+        .chats
+        .create_chat(
+            &mut fixture.storage,
+            &fixture.projects,
+            snapshot_b["preparationId"].as_str().unwrap(),
+            &fixture.project_id,
+            snapshot_b["worktreeId"].as_str().unwrap(),
+            snapshot_b["workspaceIdentity"].as_str().unwrap(),
+            "must not bind",
+            99,
+            "req_cleanup_chat_b_failed",
+        )
+        .unwrap_err();
+    assert_eq!(failed.kind, "dirtyConflict");
+    let project = project_record(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(
+        project["prepared_workspaces"][snapshot_b["preparationId"].as_str().unwrap()]
+            ["bindingState"],
+        "unbound"
+    );
+    assert!(fixture
+        .chats
+        .abandon_prepared_workspace(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            snapshot_b["preparationId"].as_str().unwrap(),
+            &fixture.project_id,
+            snapshot_b["worktreeId"].as_str().unwrap(),
+            "workspace_wrong_alias",
+            "req_cleanup_wrong_abandon_b",
+        )
+        .is_err());
+    let project = project_record(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(
+        project["prepared_workspaces"][snapshot_b["preparationId"].as_str().unwrap()]
+            ["bindingState"],
+        "unbound"
+    );
+    let abandoned = fixture
+        .chats
+        .abandon_prepared_workspace(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            snapshot_b["preparationId"].as_str().unwrap(),
+            &fixture.project_id,
+            snapshot_b["worktreeId"].as_str().unwrap(),
+            snapshot_b["workspaceIdentity"].as_str().unwrap(),
+            "req_cleanup_abandon_b",
+        )
+        .unwrap();
+    assert_eq!(abandoned.result["bindingState"], "abandoned");
+    assert!(fixture
+        .chats
+        .abandon_prepared_workspace(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            snapshot_b["preparationId"].as_str().unwrap(),
+            &fixture.project_id,
+            snapshot_b["worktreeId"].as_str().unwrap(),
+            snapshot_b["workspaceIdentity"].as_str().unwrap(),
+            "req_cleanup_duplicate_abandon_b",
+        )
+        .is_err());
+    fixture
+        .projects
+        .workspace_get_tree(&fixture.storage, &address_a, "", None)
+        .unwrap();
+    let expected = sha256_file_version_v1(b"base");
+    let begin = fixture
+        .projects
+        .workspace_begin_save(
+            &mut fixture.storage,
+            &address_a,
+            "src/value.txt",
+            &expected,
+            4,
+            "utf8",
+        )
+        .unwrap();
+    let save_id = begin.result["saveId"].as_str().unwrap();
+    fixture
+        .projects
+        .workspace_append_save_chunk(&fixture.storage, &address_a, save_id, 1, "kept")
+        .unwrap();
+    fixture
+        .projects
+        .workspace_commit_save(
+            &mut fixture.storage,
+            &address_a,
+            save_id,
+            &expected,
+            1,
+            4,
+            "req_cleanup_save_a",
+        )
+        .unwrap();
+    assert_eq!(
+        fixture
+            .projects
+            .workspace_read_file(&fixture.storage, &address_a, "src/value.txt")
+            .unwrap()
+            .streams[0]
+            .chunks,
+        vec!["kept"]
+    );
+    assert_eq!(
+        fs::read(fixture.source.join("src/value.txt")).unwrap(),
+        b"base"
+    );
+    assert!(fixture
+        .chats
+        .abandon_prepared_workspace(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            snapshot_a["preparationId"].as_str().unwrap(),
+            &fixture.project_id,
+            snapshot_a["worktreeId"].as_str().unwrap(),
+            snapshot_a["workspaceIdentity"].as_str().unwrap(),
+            "req_cleanup_late_abandon_a",
+        )
+        .is_err());
+    fixture
+        .projects
+        .workspace_read_file(&fixture.storage, &address_a, "src/value.txt")
+        .unwrap();
+}
+
+#[test]
+fn duplicate_chat_identity_rolls_back_and_keeps_new_preparation_unbound() {
+    let mut fixture = Fixture::new();
+    let snapshot_a = fixture.snapshot("req_duplicate_snapshot_a");
+    let chat_a = fixture.create_chat(&snapshot_a, "chat a", "req_duplicate_chat_a");
+    let snapshot_b = fixture.snapshot("req_duplicate_snapshot_b");
+    let before = fixture.storage.projection_records("chat").unwrap().len();
+    let error = fixture
+        .chats
+        .create_chat_inner(
+            &mut fixture.storage,
+            &fixture.projects,
+            snapshot_b["preparationId"].as_str().unwrap(),
+            &fixture.project_id,
+            snapshot_b["worktreeId"].as_str().unwrap(),
+            snapshot_b["workspaceIdentity"].as_str().unwrap(),
+            "duplicate id",
+            1,
+            "req_duplicate_chat_b",
+            chat_a["chatId"].as_str(),
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, "manifestMismatch");
+    assert_eq!(
+        fixture.storage.projection_records("chat").unwrap().len(),
+        before
+    );
+    let project = project_record(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(
+        project["prepared_workspaces"][snapshot_b["preparationId"].as_str().unwrap()]
+            ["bindingState"],
+        "unbound"
+    );
+}
+
+#[test]
+fn injected_bind_crash_rolls_back_preparation_and_initial_message_together() {
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_crash_snapshot");
+    fixture
+        .chats
+        .default_role_settings(
+            &mut fixture.storage,
+            &fixture.projects,
+            &fixture.project_id,
+            "req_crash_settings",
+        )
+        .unwrap();
+    let settings =
+        project_record(&fixture.storage, &fixture.project_id).unwrap()["role_settings"].clone();
+    let created = now();
+    let chat = json!({
+        "schemaVersion":1,"chatId":"chat_injected_crash","taskId":"task_injected_crash",
+        "projectId":fixture.project_id,"worktreeId":snapshot["worktreeId"],
+        "workspaceIdentity":snapshot["workspaceIdentity"],"goal":"rollback together",
+        "settingsRevision":1,"roleSnapshots":settings["roles"],"state":"draft",
+        "createdAt":created,"updatedAt":created,
+    });
+    let message = team_message(&chat, 1, "user", None, None, "rollback together").unwrap();
+    let payload = chat_projection(&chat, Some(message), 1).unwrap();
+    let error = fixture
+        .storage
+        .bind_prepared_chat_atomic_with_failure(
+            ChatBindInput {
+                preparation_id: snapshot["preparationId"].as_str().unwrap().to_string(),
+                project_id: fixture.project_id.clone(),
+                worktree_id: snapshot["worktreeId"].as_str().unwrap().to_string(),
+                workspace_identity: snapshot["workspaceIdentity"].as_str().unwrap().to_string(),
+                expected_settings_revision: 1,
+                chat_id: "chat_injected_crash".to_string(),
+                request_id: "req_crash_bind".to_string(),
+                chat_payload: payload,
+            },
+            crate::storage::ChatBindFailurePoint::AfterPreparationBindBeforeChat,
+        )
+        .unwrap_err();
+    assert_eq!(error.kind(), "injectedFailure");
+    assert!(fixture
+        .storage
+        .projection_record("chat", "chat_injected_crash")
+        .unwrap()
+        .is_none());
+    let project = project_record(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(
+        project["prepared_workspaces"][snapshot["preparationId"].as_str().unwrap()]["bindingState"],
+        "unbound"
+    );
+}
+
+fn git(path: &std::path::Path, args: &[&str]) {
+    let output = Command::new("/usr/bin/git")
+        .arg("-C")
+        .arg(path)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn sidecar_binary() -> std::path::PathBuf {
+    // Cargo puts this test executable in <target>/<profile>/deps, including
+    // custom target directories and target triples. Do not assume repo/target.
+    let test_executable = std::env::current_exe().expect("current Cargo test executable");
+    let binary = sidecar_binary_for_test_executable(&test_executable);
+    assert!(
+        binary.is_file(),
+        "sidecar binary missing at {}: build it with `cargo build -p elsecrew-sidecar --locked --bin elsecrew-sidecar` using the same CARGO_TARGET_DIR, profile and target as this test",
+        binary.display()
+    );
+    binary
+}
+
+fn initial_message_id(fixture: &Fixture, chat_id: &str) -> String {
+    fixture
+        .chats
+        .get_chat(&fixture.storage, chat_id, 0, None, 10, false)
+        .unwrap()["messages"][0]["messageId"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+fn start_exact_actual_scenario(
+    fixture: &mut Fixture,
+    scenario: FakeScenario,
+    request: &str,
+) -> (AgentRuntime, Value, String) {
+    let snapshot = fixture.snapshot(&format!("{request}_snapshot"));
+    let chat = fixture.create_exact_claude_chat(
+        &snapshot,
+        "provider boundary fixture",
+        &format!("{request}_chat"),
+    );
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let message_id = initial_message_id(fixture, chat_id);
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let started = runtime
+        .start_agent(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            AgentRunStartRequestV1 {
+                chat_id: chat_id.into(),
+                role_id: "coding".into(),
+                input_message_ids: vec![message_id],
+                expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+            },
+            &format!("{request}_start"),
+        )
+        .unwrap();
+    let run_id = started.result["runId"].as_str().unwrap().to_string();
+    (runtime, chat, run_id)
+}
+
+fn drain_actual_scenario(
+    fixture: &mut Fixture,
+    runtime: &mut AgentRuntime,
+    run_id: &str,
+) -> Vec<G5Event> {
+    let mut events = Vec::new();
+    for _ in 0..300 {
+        events.extend(
+            runtime
+                .poll(&mut fixture.storage, &mut fixture.projects)
+                .unwrap(),
+        );
+        if fixture
+            .storage
+            .projection_record("run", run_id)
+            .unwrap()
+            .unwrap()["record"]["state"]
+            != "running"
+        {
+            return events;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    panic!("actual provider fixture did not reach a durable terminal state")
+}
+
+fn identityless_recovery_fixture(request: &str) -> (Fixture, AgentRuntime, Value, String) {
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot(&format!("{request}_snapshot"));
+    let chat = fixture.create_exact_claude_chat(
+        &snapshot,
+        "identityless recovery",
+        &format!("{request}_chat"),
+    );
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let message_id = initial_message_id(&fixture, chat_id);
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::SpawnFailure);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    runtime
+        .start_agent(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            AgentRunStartRequestV1 {
+                chat_id: chat_id.into(),
+                role_id: "coding".into(),
+                input_message_ids: vec![message_id],
+                expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+            },
+            &format!("{request}_start"),
+        )
+        .unwrap_err();
+    let mut run = fixture
+        .storage
+        .projection_records("run")
+        .unwrap()
+        .into_iter()
+        .find(|projection| projection["source_kind"] == "actualAgent")
+        .unwrap();
+    let run_id = format!("agent_run_crash_{}", uuid::Uuid::new_v4().simple());
+    run.remove("last_event_sequence");
+    run["run_id"] = Value::String(run_id.clone());
+    run["record"]["runId"] = Value::String(run_id.clone());
+    run["state"] = Value::String("preparing".into());
+    run["record"]["state"] = Value::String("preparing".into());
+    run["record"]["terminationOutcome"] = Value::Null;
+    run["termination"] = Value::Null;
+    run["recovery"] = Value::Null;
+    run["barrier"] = Value::Null;
+    run["process_identity_internal"] = Value::Null;
+
+    let mut durable_chat = fixture
+        .storage
+        .projection_record("chat", chat_id)
+        .unwrap()
+        .unwrap();
+    durable_chat.remove("last_event_sequence");
+    durable_chat["state"] = Value::String("running".into());
+    durable_chat["record"]["state"] = Value::String("running".into());
+    let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
+    let mut lock = fixture
+        .storage
+        .projection_record("lock", &lock_id)
+        .unwrap()
+        .unwrap();
+    lock.remove("last_event_sequence");
+    lock["writer_run_id"] = Value::String(run_id.clone());
+    lock["poisoned"] = Value::Bool(false);
+    lock["recovery_required"] = Value::Bool(false);
+    fixture
+        .storage
+        .upsert_projection_records_atomic(vec![
+            ProjectionUpsert {
+                aggregate_type: "run",
+                aggregate_id: run_id.clone(),
+                operation_id: format!("op_{request}_crash_run"),
+                request_id: None,
+                payload: run,
+            },
+            ProjectionUpsert {
+                aggregate_type: "chat",
+                aggregate_id: chat_id.into(),
+                operation_id: format!("op_{request}_crash_chat"),
+                request_id: None,
+                payload: durable_chat,
+            },
+            ProjectionUpsert {
+                aggregate_type: "lock",
+                aggregate_id: lock_id,
+                operation_id: format!("op_{request}_crash_lock"),
+                request_id: None,
+                payload: lock,
+            },
+        ])
+        .unwrap();
+    runtime = AgentRuntime::blocked();
+    runtime
+        .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+        .unwrap();
+    (fixture, runtime, chat, run_id)
+}
+
+fn durable_provider_recovery_fixture(request: &str) -> (Fixture, Value, String) {
+    let mut fixture = Fixture::new();
+    let (mut runtime, chat, run_id) = start_exact_actual_scenario(
+        &mut fixture,
+        FakeScenario::ProviderTerminalRecoveryRequired,
+        request,
+    );
+    drain_actual_scenario(&mut fixture, &mut runtime, &run_id);
+    (fixture, chat, run_id)
+}
+
+#[test]
+fn actual_agent_preflight_rejects_unknown_or_drifted_capability_with_zero_run_and_lock() {
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_agent_blocked_snapshot");
+    let chat = fixture.create_chat(&snapshot, "blocked agent", "req_agent_blocked_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let message_id = initial_message_id(&fixture, chat_id);
+    let before_runs = fixture.storage.projection_records("run").unwrap().len();
+    let before_lock = fixture
+        .storage
+        .projection_record(
+            "lock",
+            &format!("lock_{}", chat["worktreeId"].as_str().unwrap()),
+        )
+        .unwrap()
+        .unwrap();
+    let mut runtime = AgentRuntime::blocked();
+    let capability = runtime.get_capabilities("codex", false).unwrap();
+    let error = runtime
+        .start_agent(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            AgentRunStartRequestV1 {
+                chat_id: chat_id.to_string(),
+                role_id: "planning".into(),
+                input_message_ids: vec![message_id.clone()],
+                expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+            },
+            "req_agent_blocked",
+        )
+        .unwrap_err();
+    assert!(error.detail.contains("before run, spawn, or lock"));
+    assert_eq!(
+        fixture.storage.projection_records("run").unwrap().len(),
+        before_runs
+    );
+    assert_eq!(
+        fixture
+            .storage
+            .projection_record(
+                "lock",
+                &format!("lock_{}", chat["worktreeId"].as_str().unwrap())
+            )
+            .unwrap()
+            .unwrap(),
+        before_lock
+    );
+
+    let mut fake = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+    let exact = fake.get_capabilities("claude-code", true).unwrap();
+    assert_eq!(exact["canStart"], cfg!(target_os = "macos"));
+    let error = fake
+        .start_agent(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            AgentRunStartRequestV1 {
+                chat_id: chat_id.to_string(),
+                role_id: "coding".into(),
+                input_message_ids: vec![message_id],
+                expected_capability_fingerprint: exact["fingerprint"].as_str().unwrap().into(),
+            },
+            "req_agent_drifted",
+        )
+        .unwrap_err();
+    assert!(error.detail.contains("exactModelUnavailable"));
+    assert_eq!(
+        fixture.storage.projection_records("run").unwrap().len(),
+        before_runs
+    );
+    assert_eq!(
+        fixture
+            .storage
+            .projection_record(
+                "lock",
+                &format!("lock_{}", chat["worktreeId"].as_str().unwrap())
+            )
+            .unwrap()
+            .unwrap(),
+        before_lock
+    );
+}
+
+#[test]
+fn g5c_capability_cache_refresh_and_fresh_start_observation_fail_closed() {
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+    let cached = runtime.get_capabilities("claude-code", false).unwrap();
+    assert_eq!(runtime.observation_count("claude-code"), 1);
+    assert_eq!(
+        runtime.get_capabilities("claude-code", false).unwrap(),
+        cached
+    );
+    assert_eq!(runtime.observation_count("claude-code"), 1);
+    assert_eq!(
+        runtime.get_capabilities("claude-code", true).unwrap()["canStart"],
+        cfg!(target_os = "macos")
+    );
+    assert_eq!(runtime.observation_count("claude-code"), 2);
+
+    for (scenario, expected) in [
+        (
+            FakeScenario::DiscoveryMissingHelper,
+            "installationIncomplete",
+        ),
+        (
+            FakeScenario::DiscoveryUnknownVersion,
+            "installationIncomplete",
+        ),
+        (FakeScenario::DiscoveryUnknownAuth, "notAuthenticated"),
+    ] {
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        assert_eq!(capability["canStart"], false);
+        assert_eq!(capability["blockedReason"], expected);
+    }
+
+    let mut codex = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+    let capability = codex.get_capabilities("codex", true).unwrap();
+    assert_eq!(capability["canStart"], false);
+    assert_eq!(capability["blockedReason"], "exactModelUnavailable");
+
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_g5c_fingerprint_snapshot");
+    let chat = fixture.create_exact_claude_chat(
+        &snapshot,
+        "fingerprint drift",
+        "req_g5c_fingerprint_chat",
+    );
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let message_id = initial_message_id(&fixture, chat_id);
+    let before_runs = fixture.storage.projection_records("run").unwrap().len();
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+    let error = runtime
+        .start_agent(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            AgentRunStartRequestV1 {
+                chat_id: chat_id.into(),
+                role_id: "coding".into(),
+                input_message_ids: vec![message_id],
+                expected_capability_fingerprint: format!("sha256:{}", "0".repeat(64)),
+            },
+            "req_g5c_fingerprint_start",
+        )
+        .unwrap_err();
+    assert!(error.detail.contains("profileChanged"));
+    assert_eq!(
+        fixture.storage.projection_records("run").unwrap().len(),
+        before_runs
+    );
+
+    for scenario in [
+        FakeScenario::DiscoveryStaleClosure,
+        FakeScenario::DiscoveryProfileDrift,
+    ] {
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_g5c_drift_snapshot");
+        let chat =
+            fixture.create_exact_claude_chat(&snapshot, "fresh discovery", "req_g5c_drift_chat");
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(&fixture, chat_id);
+        let before_runs = fixture.storage.projection_records("run").unwrap().len();
+        let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
+        let before_lock = fixture
+            .storage
+            .projection_record("lock", &lock_id)
+            .unwrap()
+            .unwrap();
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
+        let cached = runtime.get_capabilities("claude-code", false).unwrap();
+        assert_eq!(cached["canStart"], cfg!(target_os = "macos"));
+        let error = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "coding".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: cached["fingerprint"].as_str().unwrap().into(),
+                },
+                "req_g5c_drift_start",
+            )
+            .unwrap_err();
+        assert!(error.detail.contains("before run, spawn, or lock"));
+        assert_eq!(runtime.observation_count("claude-code"), 2);
+        assert_eq!(
+            fixture.storage.projection_records("run").unwrap().len(),
+            before_runs
+        );
+        assert_eq!(
+            fixture
+                .storage
+                .projection_record("lock", &lock_id)
+                .unwrap()
+                .unwrap(),
+            before_lock
+        );
+    }
+}
+
+#[test]
+fn g5c_each_claude_handshake_mismatch_and_attestation_failure_emit_nothing() {
+    for scenario in [
+        FakeScenario::HandshakeBeforePublic,
+        FakeScenario::HandshakeVersionMismatch,
+        FakeScenario::HandshakeModelMismatch,
+        FakeScenario::HandshakeCwdMismatch,
+        FakeScenario::HandshakePermissionMismatch,
+        FakeScenario::HandshakeToolsMismatch,
+        FakeScenario::HandshakeMcpMismatch,
+        FakeScenario::HandshakePluginsMismatch,
+        FakeScenario::HandshakeConfigMismatch,
+        FakeScenario::AttestationPersistenceFailure,
+        FakeScenario::ProviderAuthFailure,
+    ] {
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_g5c_handshake_snapshot");
+        let chat =
+            fixture.create_exact_claude_chat(&snapshot, "handshake gate", "req_g5c_handshake_chat");
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(&fixture, chat_id);
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        let error = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "coding".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: capability["fingerprint"]
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                },
+                "req_g5c_handshake_start",
+            )
+            .unwrap_err();
+        assert!(
+            error.detail.contains("handshake") || error.detail.contains("attestation"),
+            "{}",
+            error.detail
+        );
+        let run = fixture
+            .storage
+            .projection_records("run")
+            .unwrap()
+            .into_iter()
+            .find(|run| run["source_kind"] == "actualAgent")
+            .unwrap();
+        assert_eq!(run["record"]["state"], "failed");
+        assert!(run.get("runtime_attestation").is_none());
+        assert!(run["public_events"].as_array().unwrap().is_empty());
+        assert!(!runtime.has_active_run(run["run_id"].as_str().unwrap()));
+        let lock = fixture
+            .storage
+            .projection_record(
+                "lock",
+                &format!("lock_{}", chat["worktreeId"].as_str().unwrap()),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(lock["writer_run_id"], Value::Null);
+        assert_eq!(lock["poisoned"], false);
+        let serialized = serde_json::to_string(&run).unwrap().to_lowercase();
+        for forbidden in [
+            "private@example.invalid",
+            "private-org",
+            "private-token",
+            "must-not-escape",
+        ] {
+            assert!(!serialized.contains(forbidden));
+            assert!(!error.detail.to_lowercase().contains(forbidden));
+        }
+    }
+}
+
+#[test]
+fn actual_agent_pre_release_failures_are_terminal_and_release_writer_after_reopen() {
+    use elsecrew_core::proctree::{ProbeResult, ProcIdentity, ProcTable, SystemProcTable};
+    for scenario in [
+        FakeScenario::SpawnFailure,
+        FakeScenario::IdentityFailure,
+        FakeScenario::ObserveFailure,
+        FakeScenario::ReleaseFailure,
+    ] {
+        let mut fixture = Fixture::new();
+        let database = fixture._root.path().join("data/elsecrew.sqlite3");
+        let snapshot = fixture.snapshot("req_pre_release_snapshot");
+        let chat = fixture.create_exact_claude_chat(
+            &snapshot,
+            "pre-release failure",
+            "req_pre_release_chat",
+        );
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(&fixture, chat_id);
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        let error = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "coding".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: capability["fingerprint"]
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                },
+                "req_pre_release_failure",
+            )
+            .unwrap_err();
+        assert!(error.detail.contains("failure"));
+        let actual = fixture
+            .storage
+            .projection_records("run")
+            .unwrap()
+            .into_iter()
+            .find(|run| run["source_kind"] == "actualAgent")
+            .unwrap();
+        let actual_run_id = actual["run_id"].as_str().unwrap().to_string();
+        assert_eq!(actual["record"]["state"], "failed");
+        assert_eq!(actual["pre_release_failure"]["processesProvenGone"], true);
+        if scenario == FakeScenario::ReleaseFailure {
+            assert_eq!(actual["barrier"]["releaseGranted"], false);
+        }
+        assert!(actual["process_identity_internal"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|value| matches!(
+                SystemProcTable.probe(ProcIdentity {
+                    pid: value["pid"].as_u64().unwrap() as u32,
+                    start_us: value["start_us"].as_i64().unwrap(),
+                }),
+                ProbeResult::Gone
+            )));
+        let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
+        let lock = fixture
+            .storage
+            .projection_record("lock", &lock_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(lock["writer_run_id"], Value::Null);
+        assert_eq!(lock["poisoned"], false);
+        drop(runtime);
+        let Fixture {
+            _root: root_guard,
+            storage,
+            projects,
+            chats,
+            ..
+        } = fixture;
+        drop(storage);
+        drop(projects);
+        drop(chats);
+        let reopened = Storage::open(&database).unwrap();
+        let lock = reopened
+            .projection_record("lock", &lock_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(lock["writer_run_id"], Value::Null);
+        assert_eq!(lock["recovery_required"], false);
+        let run = reopened
+            .projection_record("run", &actual_run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(run["record"]["state"], "failed");
+        if scenario == FakeScenario::ReleaseFailure {
+            assert_eq!(run["barrier"]["releaseGranted"], false);
+        }
+        drop(reopened);
+        drop(root_guard);
+    }
+}
+
+#[test]
+fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_distinct() {
+    let executable = sidecar_binary();
+    assert!(
+        executable.is_file(),
+        "build the sidecar binary for process gate"
+    );
+    let mut fixture = Fixture::new();
+    let database = fixture._root.path().join("data/elsecrew.sqlite3");
+    let snapshot = fixture.snapshot("req_agent_clean_snapshot");
+    let chat = fixture.create_exact_claude_chat(&snapshot, "clean agent", "req_agent_clean_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let message_id = initial_message_id(&fixture, chat_id);
+    let mut runtime = AgentRuntime::fake(executable, FakeScenario::Clean);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let started = runtime
+        .start_agent(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            AgentRunStartRequestV1 {
+                chat_id: chat_id.into(),
+                role_id: "coding".into(),
+                input_message_ids: vec![message_id],
+                expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+            },
+            "req_agent_clean",
+        )
+        .unwrap();
+    assert!(
+        started.events.is_empty(),
+        "accepted response must precede all public events"
+    );
+    for field in [
+        "chatId",
+        "taskId",
+        "projectId",
+        "worktreeId",
+        "workspaceIdentity",
+    ] {
+        assert_eq!(started.result[field], chat[field]);
+    }
+    assert_eq!(started.result["roleId"], "coding");
+    assert_eq!(
+        started.result["capabilityFingerprint"],
+        capability["fingerprint"]
+    );
+    let run_id = started.result["runId"].as_str().unwrap().to_string();
+    let preparing = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(preparing["source_kind"], "actualAgent");
+    assert_eq!(
+        preparing["barrier"]["runAndLockPersistedBeforeRelease"],
+        true
+    );
+    assert_eq!(preparing["barrier"]["identityPersistedBeforeRelease"], true);
+    assert_eq!(preparing["barrier"]["releaseGranted"], true);
+    assert_eq!(
+        preparing["barrier"]["trackedProcesses"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(preparing["provider_discovery"]["providerId"], "claude-code");
+    assert_eq!(preparing["provider_discovery"]["canStart"], true);
+    assert_eq!(preparing["runtime_attestation"]["runId"], run_id);
+    assert_eq!(
+        preparing["runtime_attestation"]["capabilityFingerprint"],
+        capability["fingerprint"]
+    );
+    assert_eq!(
+        preparing["runtime_attestation"]["workspaceIdentity"],
+        chat["workspaceIdentity"]
+    );
+    assert_eq!(
+        preparing["runtime_attestation"]["effectiveProfile"]["modelSelector"],
+        "claude-opus-5"
+    );
+    let provider_evidence = serde_json::to_string(&json!({
+        "discovery":preparing["provider_discovery"],
+        "attestation":preparing["runtime_attestation"]
+    }))
+    .unwrap()
+    .to_lowercase();
+    for forbidden in [
+        "private@example.invalid",
+        "private-org",
+        "private-token",
+        "token-never-persist",
+        "prompt",
+        "email",
+        "organization",
+    ] {
+        assert!(!provider_evidence.contains(forbidden));
+    }
+    let mut wire_events = Vec::new();
+    for _ in 0..100 {
+        wire_events.extend(
+            runtime
+                .poll(&mut fixture.storage, &mut fixture.projects)
+                .unwrap(),
+        );
+        if fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap()["record"]["state"]
+            .as_str()
+            .expect("persisted run state")
+            != "running"
+        {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(wire_events.len(), 5);
+    for (index, event) in wire_events.iter().enumerate() {
+        assert_eq!(event.seq, (index + 1) as u64);
+        assert_eq!(event.chat_id.as_deref(), Some(chat_id));
+        assert_eq!(event.task_id.as_deref(), chat["taskId"].as_str());
+        assert_eq!(event.run_id.as_deref(), Some(run_id.as_str()));
+    }
+    assert_eq!(wire_events[0].event, "agent.runStateChanged");
+    assert_eq!(wire_events[0].payload["run"]["state"], "running");
+    assert_eq!(wire_events[4].event, "agent.runStateChanged");
+    assert_eq!(wire_events[4].payload["run"]["state"], "succeeded");
+    for event in &wire_events[1..4] {
+        assert_eq!(event.event, "agent.publicEvent");
+        assert_eq!(event.payload["chatId"], chat["chatId"]);
+        assert_eq!(event.payload["taskId"], chat["taskId"]);
+        assert_eq!(event.payload["projectId"], chat["projectId"]);
+        assert_eq!(event.payload["worktreeId"], chat["worktreeId"]);
+        assert_eq!(
+            event.payload["workspaceIdentity"],
+            chat["workspaceIdentity"]
+        );
+        assert_eq!(event.payload["runId"], run_id);
+        assert_eq!(event.payload["roleId"], "coding");
+        assert_eq!(
+            event.payload["capabilityFingerprint"],
+            capability["fingerprint"]
+        );
+        elsecrew_protocol::agent_adapter_v1::validate_agent_adapter_payload_v1(
+            "publicEvent",
+            &event.payload,
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        wire_events[1..4]
+            .iter()
+            .map(|event| event.payload["kind"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["status", "question", "final"]
+    );
+    let terminal = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(terminal["record"]["state"], "succeeded");
+    assert_eq!(terminal["termination"]["processesProvenGone"], true);
+    let public_events = terminal["public_events"].as_array().unwrap();
+    assert_eq!(terminal["public_event_count"], public_events.len() as u64);
+    assert_eq!(
+        terminal["public_text_bytes"],
+        public_events
+            .iter()
+            .map(|event| event["text"].as_str().unwrap().len() as u64)
+            .sum::<u64>()
+    );
+    assert_eq!(
+        terminal["public_ledger_cumulative_snapshot_bytes"],
+        elsecrew_protocol::agent_adapter_v1::agent_public_ledger_cumulative_snapshot_bytes_v1(
+            public_events
+        )
+        .unwrap() as u64
+    );
+    runtime
+        .validate_persisted_runs(&fixture.storage)
+        .expect("durable counters validate after run completion");
+    AgentRuntime::blocked()
+        .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+        .expect("terminal run recovery scan is a no-op");
+    assert_eq!(
+        fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap(),
+        terminal,
+        "already terminal actual run must not be rewritten"
+    );
+    let serialized = serde_json::to_string(&terminal).unwrap();
+    assert!(!serialized.contains("token-never-persist"));
+    assert!(!serialized.contains("\"type\":\"reasoning\""));
+    assert!(terminal["public_events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|event| {
+            ["status", "question", "final"].contains(&event["kind"].as_str().unwrap_or_default())
+        }));
+    assert!(terminal["public_events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|event| {
+            event["chatId"] == chat["chatId"]
+                && event["taskId"] == chat["taskId"]
+                && event["projectId"] == chat["projectId"]
+                && event["worktreeId"] == chat["worktreeId"]
+                && event["workspaceIdentity"] == chat["workspaceIdentity"]
+                && event["runId"] == run_id
+                && event["roleId"] == "coding"
+                && event["capabilityFingerprint"] == capability["fingerprint"]
+        }));
+    let current_g5_detail = fixture
+        .chats
+        .get_chat(&fixture.storage, chat_id, 0, None, 10, false)
+        .unwrap();
+    assert!(current_g5_detail.get("agentRuns").is_none());
+    assert!(current_g5_detail.get("agentRecovery").is_none());
+    assert!(current_g5_detail["runs"].as_array().unwrap().is_empty());
+    let g5a_detail = fixture
+        .chats
+        .get_chat(&fixture.storage, chat_id, 0, None, 10, true)
+        .unwrap();
+    assert_eq!(g5a_detail["agentRuns"][0]["state"], "succeeded");
+    assert_eq!(g5a_detail["agentRecovery"], Value::Null);
+    assert_eq!(g5a_detail["messages"].as_array().unwrap().len(), 4);
+    elsecrew_protocol::agent_adapter_v1::validate_agent_adapter_payload_v1(
+        "agentChatDetailPage",
+        &g5a_detail,
+    )
+    .unwrap();
+    drop(runtime);
+    let Fixture {
+        _root: root_guard,
+        storage,
+        projects,
+        chats,
+        ..
+    } = fixture;
+    drop(storage);
+    drop(projects);
+    drop(chats);
+    let reopened = Storage::open(&database).expect("reopen durable agent ledger");
+    AgentRuntime::blocked()
+        .validate_persisted_runs(&reopened)
+        .expect("reopened durable counters validate");
+    drop(reopened);
+    drop(root_guard);
+}
+
+#[test]
+fn no_output_and_delayed_final_emit_running_then_terminal_from_durable_state() {
+    for scenario in [FakeScenario::NoOutput, FakeScenario::FinalDelayed] {
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_agent_terminal_snapshot");
+        let chat = fixture.create_exact_claude_chat(
+            &snapshot,
+            "terminal notification",
+            "req_agent_terminal_chat",
+        );
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(&fixture, chat_id);
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        let started = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "coding".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: capability["fingerprint"]
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                },
+                "req_agent_terminal",
+            )
+            .unwrap();
+        let run_id = started.result["runId"].as_str().unwrap().to_string();
+        let mut wire = Vec::new();
+        let mut saw_final_while_running = false;
+        for _ in 0..150 {
+            let polled = runtime
+                .poll(&mut fixture.storage, &mut fixture.projects)
+                .unwrap();
+            if polled.iter().any(|event| event.payload["kind"] == "final") {
+                saw_final_while_running = fixture
+                    .storage
+                    .projection_record("run", &run_id)
+                    .unwrap()
+                    .unwrap()["record"]["state"]
+                    == "running";
+            }
+            wire.extend(polled);
+            if fixture
+                .storage
+                .projection_record("run", &run_id)
+                .unwrap()
+                .unwrap()["record"]["state"]
+                != "running"
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(wire.first().unwrap().event, "agent.runStateChanged");
+        assert_eq!(wire.first().unwrap().payload["run"]["state"], "running");
+        assert_eq!(wire.last().unwrap().event, "agent.runStateChanged");
+        assert_eq!(wire.last().unwrap().payload["run"]["state"], "succeeded");
+        assert_eq!(
+            wire.iter().map(|event| event.seq).collect::<Vec<_>>(),
+            (1..=wire.len() as u64).collect::<Vec<_>>()
+        );
+        if scenario == FakeScenario::NoOutput {
+            assert_eq!(wire.len(), 2, "zero output still has both state events");
+        } else {
+            assert!(saw_final_while_running, "final is not terminal evidence");
+        }
+    }
+}
+
+#[test]
+fn public_text_plus_one_is_not_stored_or_emitted_and_cleanly_fails_run() {
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_agent_budget_snapshot");
+    let chat = fixture.create_exact_claude_chat(&snapshot, "event budget", "req_agent_budget_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let message_id = initial_message_id(&fixture, chat_id);
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let started = runtime
+        .start_agent(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            AgentRunStartRequestV1 {
+                chat_id: chat_id.into(),
+                role_id: "coding".into(),
+                input_message_ids: vec![message_id],
+                expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+            },
+            "req_agent_budget",
+        )
+        .unwrap();
+    let run_id = started.result["runId"].as_str().unwrap().to_string();
+    let mut projection = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    let events = (0..16)
+        .map(|index| {
+            json!({"schemaVersion":1,"eventId":format!("agent_event_budget_{index}"),"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,"roleId":"coding","capabilityFingerprint":capability["fingerprint"],"kind":"status","text":"x".repeat(64 * 1024),"createdAt":projection["record"]["updatedAt"]})
+        })
+        .collect::<Vec<_>>();
+    let cumulative =
+        elsecrew_protocol::agent_adapter_v1::agent_public_ledger_cumulative_snapshot_bytes_v1(
+            &events,
+        )
+        .unwrap();
+    assert!(
+        cumulative
+            <= elsecrew_protocol::AGENT_PUBLIC_LEDGER_CUMULATIVE_SNAPSHOT_BYTES_PER_RUN_MAX_V1
+    );
+    let event_count = events.len();
+    projection.insert("public_events".into(), Value::Array(events));
+    projection.insert("public_event_count".into(), Value::from(event_count as u64));
+    projection.insert(
+        "public_text_bytes".into(),
+        Value::from(elsecrew_protocol::AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1 as u64),
+    );
+    projection.insert(
+        "public_ledger_cumulative_snapshot_bytes".into(),
+        Value::from(cumulative as u64),
+    );
+    fixture
+        .storage
+        .upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: run_id.clone(),
+            operation_id: "op_test_agent_budget_boundary".into(),
+            request_id: None,
+            payload: projection,
+        }])
+        .unwrap();
+    let emitted = runtime
+        .poll(&mut fixture.storage, &mut fixture.projects)
+        .unwrap();
+    assert_eq!(
+        emitted
+            .iter()
+            .filter(|event| event.event == "agent.publicEvent")
+            .count(),
+        0
+    );
+    assert_eq!(emitted[0].payload["run"]["state"], "running");
+    assert_eq!(emitted.last().unwrap().payload["run"]["state"], "failed");
+    let terminal = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        terminal["public_text_bytes"],
+        elsecrew_protocol::AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1 as u64
+    );
+    assert_eq!(terminal["record"]["state"], "failed");
+    assert_eq!(terminal["termination"]["outcome"], "cleanExit");
+    assert_eq!(terminal["termination"]["processesProvenGone"], true);
+}
+
+#[test]
+fn real_provider_drain_accepts_exact_public_text_boundaries_before_rejecting_plus_one() {
+    for (scenario, expected_events, expected_state) in [
+        (FakeScenario::PublicTextExact, 1_u64, "succeeded"),
+        (FakeScenario::PublicAggregateExact, 16_u64, "succeeded"),
+        (FakeScenario::PublicAggregatePlusOne, 16_u64, "failed"),
+    ] {
+        let mut fixture = Fixture::new();
+        let (mut runtime, _chat, run_id) =
+            start_exact_actual_scenario(&mut fixture, scenario, "req_raw_boundary");
+        let wire = drain_actual_scenario(&mut fixture, &mut runtime, &run_id);
+        let terminal = fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(terminal["record"]["state"], expected_state);
+        assert_eq!(terminal["public_event_count"], expected_events);
+        assert_eq!(
+            terminal["public_text_bytes"],
+            expected_events * MAX_AGENT_EVENT_BYTES as u64
+        );
+        assert_eq!(
+            terminal["public_events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|event| event["text"].as_str().unwrap().len())
+                .collect::<Vec<_>>(),
+            vec![MAX_AGENT_EVENT_BYTES; expected_events as usize]
+        );
+        assert_eq!(
+            wire.iter()
+                .filter(|event| event.event == "agent.publicEvent")
+                .count(),
+            expected_events as usize
+        );
+        assert_eq!(wire.last().unwrap().payload["run"]["state"], expected_state);
+    }
+}
+
+#[test]
+fn provider_terminal_recovery_required_poisons_even_after_clean_exit_until_abandon() {
+    let mut fixture = Fixture::new();
+    let (mut runtime, chat, run_id) = start_exact_actual_scenario(
+        &mut fixture,
+        FakeScenario::ProviderTerminalRecoveryRequired,
+        "req_provider_recovery",
+    );
+    let wire = drain_actual_scenario(&mut fixture, &mut runtime, &run_id);
+    assert_eq!(
+        wire.last().unwrap().payload["run"]["state"],
+        "recoveryRequired"
+    );
+
+    let run = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(run["record"]["state"], "recoveryRequired");
+    assert_eq!(run["termination"]["outcome"], "recoveryRequired");
+    assert_eq!(run["termination"]["processesProvenGone"], false);
+    assert!(run["termination"]["trackedProcesses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|process| process["observedGone"] == true));
+    assert_eq!(run["termination"]["poisoned"], true);
+    assert_eq!(run["recovery"]["state"], "unresolved");
+    assert_eq!(run["recovery"]["source"], "actualAgent");
+    assert_eq!(
+        run["recovery"]["recoveryId"],
+        run["recovery_id_reservation"]
+    );
+    let durable_chat = fixture
+        .storage
+        .projection_record("chat", chat["chatId"].as_str().unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(durable_chat["record"]["state"], "recoveryRequired");
+    let lock = fixture
+        .storage
+        .projection_record(
+            "lock",
+            &format!("lock_{}", chat["worktreeId"].as_str().unwrap()),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(lock["writer_run_id"], run_id);
+    assert_eq!(lock["poisoned"], true);
+    assert_eq!(lock["recovery_required"], true);
+    assert_eq!(
+        fixture
+            .projects
+            .workspace_read_file(
+                &fixture.storage,
+                &address_from_chat(&chat).unwrap(),
+                "src/value.txt",
+            )
+            .unwrap_err()
+            .kind,
+        "recoveryRequired"
+    );
+    assert!(!fixture.storage.blocker_ids().unwrap().is_empty());
+    assert!(fixture
+        .chats
+        .list_recoveries(&fixture.storage, None, 10)
+        .unwrap()["items"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
+    let detail = fixture
+        .chats
+        .get_chat(
+            &fixture.storage,
+            chat["chatId"].as_str().unwrap(),
+            0,
+            None,
+            50,
+            true,
+        )
+        .unwrap();
+    elsecrew_protocol::agent_adapter_v1::validate_agent_adapter_payload_v1(
+        "agentChatDetailPage",
+        &detail,
+    )
+    .unwrap();
+    let recovery = detail["agentRecovery"].clone();
+    assert_eq!(recovery, run["recovery"]);
+    assert_eq!(recovery["chatId"], chat["chatId"]);
+    assert_eq!(recovery["taskId"], chat["taskId"]);
+    assert_eq!(recovery["projectId"], chat["projectId"]);
+    assert_eq!(recovery["worktreeId"], chat["worktreeId"]);
+    assert_eq!(recovery["workspaceIdentity"], chat["workspaceIdentity"]);
+    assert_eq!(recovery["runId"], run_id);
+    assert_eq!(recovery["revision"], 1);
+    let request = json!({
+        "recoveryId":recovery["recoveryId"],"chatId":chat["chatId"],
+        "taskId":chat["taskId"],"projectId":chat["projectId"],
+        "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+        "runId":run_id,"expectedRevision":1,"resolution":"abandon"
+    });
+    let inspect_request = json!({
+        "recoveryId":recovery["recoveryId"],"chatId":chat["chatId"],
+        "taskId":chat["taskId"],"projectId":chat["projectId"],
+        "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+        "runId":run_id
+    });
+    assert_eq!(
+        runtime
+            .inspect_recovery(&fixture.storage, &inspect_request)
+            .unwrap()["state"],
+        "unresolved"
+    );
+    let resolved = runtime
+        .resolve_recovery(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            &request,
+            "req_provider_recovery_resolve",
+        )
+        .unwrap();
+    assert_eq!(resolved["outcome"], "resolvedAbandoned");
+    let lock = fixture
+        .storage
+        .projection_record(
+            "lock",
+            &format!("lock_{}", chat["worktreeId"].as_str().unwrap()),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(lock["writer_run_id"], Value::Null);
+    assert_eq!(lock["poisoned"], false);
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+    let resolved_detail = fixture
+        .chats
+        .get_chat(
+            &fixture.storage,
+            chat["chatId"].as_str().unwrap(),
+            0,
+            None,
+            50,
+            true,
+        )
+        .unwrap();
+    assert_eq!(resolved_detail["agentRecovery"], Value::Null);
+    assert_eq!(resolved_detail["agentRuns"][0]["state"], "canceled");
+    assert_eq!(resolved_detail["chat"]["state"], "discarded");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let before = fixture.storage.projection_record("chat", chat_id).unwrap();
+    let before_run = fixture.storage.projection_record("run", &run_id).unwrap();
+    fixture.projects.change_catalog_visibility(&mut fixture.storage, &fixture.project_id, Some(chat_id), "removeChat", "req_hide_resolved_actual").unwrap();
+    assert!(fixture.chats.list_chats(&fixture.storage, &fixture.project_id, None, 100).unwrap()["items"].as_array().unwrap().is_empty());
+    assert_eq!(fixture.storage.projection_record("chat", chat_id).unwrap(), before);
+    assert_eq!(fixture.storage.projection_record("run", &run_id).unwrap(), before_run);
+    fixture.projects.change_catalog_visibility(&mut fixture.storage, &fixture.project_id, None, "restoreChats", "req_restore_resolved_actual").unwrap();
+    assert_eq!(fixture.chats.list_chats(&fixture.storage, &fixture.project_id, None, 100).unwrap()["items"][0]["state"], "discarded");
+
+    fixture
+        .projects
+        .reopen_project(
+            &mut fixture.storage,
+            chat["projectId"].as_str().unwrap(),
+            "req_reopen_after_actual_abandon",
+        )
+        .expect("resolved recovery must not strand the project catalog");
+    elsecrew_protocol::agent_adapter_v1::validate_agent_adapter_payload_v1(
+        "agentChatDetailPage",
+        &resolved_detail,
+    )
+    .unwrap();
+}
+
+#[test]
+fn recovery_finalize_preserves_other_catalog_snapshot_and_rejects_identity_drift() {
+    for other_snapshot in [true, false] {
+        let (mut fixture, chat, run_id) =
+            durable_provider_recovery_fixture("req_catalog_recovery_guard");
+        let project_id = chat["projectId"].as_str().unwrap();
+        let mut project = fixture.storage.projection_record("project", project_id)
+            .unwrap().unwrap();
+        project.remove("last_event_sequence");
+        if other_snapshot {
+            project.insert("worktree_id".into(), json!("worktree_other_catalog"));
+        }
+        project.insert("workspace_identity".into(), json!("workspace_other_catalog"));
+        fixture.storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "project",
+            aggregate_id: project_id.into(),
+            operation_id: "op_test_catalog_identity_drift".into(),
+            request_id: None,
+            payload: project,
+        }]).unwrap();
+        let before = fixture.storage.projection_record("project", project_id).unwrap();
+        let run = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+        let request = json!({
+            "recoveryId":run["recovery"]["recoveryId"],"chatId":chat["chatId"],
+            "taskId":chat["taskId"],"projectId":chat["projectId"],
+            "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+            "runId":run_id,"expectedRevision":1,"resolution":"abandon"
+        });
+        let result = AgentRuntime::blocked().resolve_recovery(
+            &mut fixture.storage, &mut fixture.projects, &request,
+            "req_catalog_recovery_resolve",
+        );
+        if other_snapshot {
+            assert_eq!(result.unwrap()["outcome"], "resolvedAbandoned");
+        } else {
+            assert_eq!(result.unwrap_err().kind, "manifestMismatch");
+            let run = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+            assert_eq!(run["recovery"]["state"], "unresolved");
+            assert!(!fixture.storage.blocker_ids().unwrap().is_empty());
+        }
+        assert_eq!(fixture.storage.projection_record("project", project_id).unwrap(), before);
+    }
+}
+
+#[test]
+fn recovery_reconciles_historical_catalog_only_with_matching_completion_evidence() {
+    for variant in [
+        "matching",
+        "otherSnapshot",
+        "identityDrift",
+        "protectedLock",
+        "manifestDrift",
+    ] {
+        let (mut fixture, chat, run_id) =
+            durable_provider_recovery_fixture("req_historical_catalog");
+        let project_id = chat["projectId"].as_str().unwrap();
+        let mut old_project = fixture
+            .storage
+            .projection_record("project", project_id)
+            .unwrap()
+            .unwrap();
+        old_project.remove("last_event_sequence");
+        let run = fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap();
+        let request = json!({
+            "recoveryId":run["recovery"]["recoveryId"],"chatId":chat["chatId"],
+            "taskId":chat["taskId"],"projectId":chat["projectId"],
+            "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+            "runId":run_id,"expectedRevision":1,"resolution":"abandon"
+        });
+        let mut runtime = AgentRuntime::blocked();
+        assert_eq!(
+            runtime
+                .resolve_recovery(
+                    &mut fixture.storage,
+                    &mut fixture.projects,
+                    &request,
+                    "req_historical_catalog_resolve",
+                )
+                .unwrap()["outcome"],
+            "resolvedAbandoned"
+        );
+        // Reproduce the older resolver: all completion evidence persisted, but
+        // the catalog still points at the snapshot as active.
+        if variant == "otherSnapshot" {
+            old_project.insert("worktree_id".into(), json!("worktree_newer"));
+        } else if variant == "identityDrift" {
+            old_project.insert("workspace_identity".into(), json!("workspace_wrong"));
+        }
+        fixture
+            .storage
+            .upsert_projection_records_atomic(vec![ProjectionUpsert {
+                aggregate_type: "project",
+                aggregate_id: project_id.into(),
+                operation_id: "op_test_restore_historical_catalog".into(),
+                request_id: None,
+                payload: old_project,
+            }])
+            .unwrap();
+        if variant == "protectedLock" {
+            let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
+            let mut lock = fixture
+                .storage
+                .projection_record("lock", &lock_id)
+                .unwrap()
+                .unwrap();
+            lock.remove("last_event_sequence");
+            lock.insert("poisoned".into(), json!(true));
+            fixture
+                .storage
+                .upsert_projection_records_atomic(vec![ProjectionUpsert {
+                    aggregate_type: "lock",
+                    aggregate_id: lock_id,
+                    operation_id: "op_test_protect_historical_lock".into(),
+                    request_id: None,
+                    payload: lock,
+                }])
+                .unwrap();
+        }
+        let manifest_path = fixture
+            ._root
+            .path()
+            .join("data/worktree-manifests-v1")
+            .join(format!("{}.json", chat["worktreeId"].as_str().unwrap()));
+        if variant == "manifestDrift" {
+            let mut manifest: Value =
+                serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+            manifest["lifecycle"] = json!("active");
+            fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        }
+        let before_manifest = fs::read(&manifest_path).unwrap();
+        let before_project = fixture
+            .storage
+            .projection_record("project", project_id)
+            .unwrap();
+        let before_run = fixture.storage.projection_records("run").unwrap();
+        let before_chat = fixture.storage.projection_records("chat").unwrap();
+        let before_lock = fixture.storage.projection_records("lock").unwrap();
+        let result = runtime.reconcile_resolved_catalogs(&mut fixture.storage, &fixture.projects);
+        if variant == "matching" {
+            result.unwrap();
+            let after = fixture
+                .storage
+                .projection_record("project", project_id)
+                .unwrap();
+            assert_eq!(after.as_ref().unwrap()["lifecycle"], "abandoned");
+            runtime
+                .reconcile_resolved_catalogs(&mut fixture.storage, &fixture.projects)
+                .unwrap();
+            assert_eq!(
+                fixture
+                    .storage
+                    .projection_record("project", project_id)
+                    .unwrap(),
+                after
+            );
+            fixture
+                .projects
+                .reopen_project(
+                    &mut fixture.storage,
+                    project_id,
+                    "req_reopen_historical_catalog",
+                )
+                .unwrap();
+        } else {
+            if variant == "otherSnapshot" {
+                result.unwrap();
+            } else {
+                assert_eq!(result.unwrap_err().kind, "recoveryInvalid");
+            }
+            assert_eq!(
+                fixture
+                    .storage
+                    .projection_record("project", project_id)
+                    .unwrap(),
+                before_project
+            );
+        }
+        assert_eq!(
+            fixture.storage.projection_records("run").unwrap(),
+            before_run
+        );
+        assert_eq!(
+            fixture.storage.projection_records("chat").unwrap(),
+            before_chat
+        );
+        assert_eq!(
+            fixture.storage.projection_records("lock").unwrap(),
+            before_lock
+        );
+        assert_eq!(fs::read(&manifest_path).unwrap(), before_manifest);
+    }
+}
+
+#[test]
+fn recovery_reservations_are_random_per_run_and_identityless_restart_is_immutable() {
+    let (mut fixture, mut runtime, chat, run_id) =
+        identityless_recovery_fixture("req_identityless_a");
+    let run = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    let recovery = run["recovery"].clone();
+    let recovery_id = recovery["recoveryId"].as_str().unwrap().to_string();
+    assert_eq!(run["recovery_id_reservation"], recovery_id);
+    assert_eq!(recovery["reason"], "processIdentityUnavailable");
+    assert_eq!(recovery["trackedProcesses"], json!([]));
+    assert!(!recovery_id.contains(&run_id));
+    assert_eq!(recovery_id.len(), "agent_recovery_".len() + 32);
+    let detail = fixture
+        .chats
+        .get_chat(
+            &fixture.storage,
+            chat["chatId"].as_str().unwrap(),
+            0,
+            None,
+            50,
+            true,
+        )
+        .unwrap();
+    elsecrew_protocol::agent_adapter_v1::validate_agent_adapter_payload_v1(
+        "agentChatDetailPage",
+        &detail,
+    )
+    .unwrap();
+    assert_eq!(detail["agentRecovery"], recovery);
+
+    let request = json!({
+        "recoveryId":recovery_id,"chatId":chat["chatId"],"taskId":chat["taskId"],
+        "projectId":chat["projectId"],"worktreeId":chat["worktreeId"],
+        "workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,
+        "expectedRevision":2,"resolution":"abandon"
+    });
+    let stale = runtime
+        .resolve_recovery(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            &request,
+            "req_identityless_stale",
+        )
+        .unwrap();
+    assert_eq!(stale["outcome"], "revisionConflict");
+    let before_records = fixture.storage.projection_records("run").unwrap();
+    let manifest_path = fixture
+        ._root
+        .path()
+        .join("data/worktree-manifests-v1")
+        .join(format!("{}.json", chat["worktreeId"].as_str().unwrap()));
+    let before_manifest = fs::read(&manifest_path).unwrap();
+    let mut matching = request;
+    matching["expectedRevision"] = Value::from(1);
+    let outcome = runtime
+        .resolve_recovery(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            &matching,
+            "req_identityless_matching",
+        )
+        .unwrap();
+    assert_eq!(outcome["outcome"], "identityUnavailable");
+    assert_eq!(outcome["after"], Value::Null);
+    assert_eq!(
+        fixture.storage.projection_records("run").unwrap(),
+        before_records
+    );
+    assert_eq!(fs::read(&manifest_path).unwrap(), before_manifest);
+    runtime
+        .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+        .unwrap();
+    assert_eq!(
+        fixture
+            .storage
+            .projection_record("run", matching["runId"].as_str().unwrap())
+            .unwrap()
+            .unwrap()["recovery"]["recoveryId"],
+        matching["recoveryId"]
+    );
+
+    let (mut fixture_b, runtime_b, _, run_id_b) =
+        identityless_recovery_fixture("req_identityless_b");
+    let run_b = fixture_b
+        .storage
+        .projection_record("run", &run_id_b)
+        .unwrap()
+        .unwrap();
+    assert_ne!(run_b["recovery_id_reservation"], matching["recoveryId"]);
+    assert!(!run_b["recovery_id_reservation"]
+        .as_str()
+        .unwrap()
+        .contains(&run_id_b));
+
+    let mut legacy = fixture_b
+        .storage
+        .projection_records("run")
+        .unwrap()
+        .into_iter()
+        .find(|projection| {
+            projection["source_kind"] == "actualAgent"
+                && projection["run_id"] != run_id_b
+                && projection["recovery"].is_null()
+        })
+        .unwrap();
+    let legacy_run_id = legacy["run_id"].as_str().unwrap().to_string();
+    legacy.remove("last_event_sequence");
+    legacy.remove("recovery_id_reservation");
+    fixture_b
+        .storage
+        .upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: legacy_run_id.clone(),
+            operation_id: "op_test_remove_legacy_reservation".into(),
+            request_id: None,
+            payload: legacy,
+        }])
+        .unwrap();
+    runtime_b
+        .reserve_legacy_recovery_for_test(&mut fixture_b.storage, &legacy_run_id, true)
+        .unwrap_err();
+    assert!(fixture_b
+        .storage
+        .projection_record("run", &legacy_run_id)
+        .unwrap()
+        .unwrap()
+        .get("recovery_id_reservation")
+        .is_none());
+    let retried = runtime_b
+        .reserve_legacy_recovery_for_test(&mut fixture_b.storage, &legacy_run_id, false)
+        .unwrap();
+    let legacy_recovery_id = retried["recovery_id_reservation"].as_str().unwrap();
+    assert_eq!(legacy_recovery_id.len(), "agent_recovery_".len() + 32);
+    assert!(!legacy_recovery_id.contains(&legacy_run_id));
+}
+
+#[test]
+fn startup_backfills_pre_g5c_recovery_ids_without_replacing_public_records() {
+    let (mut unresolved_fixture, unresolved_chat, unresolved_run_id) =
+        durable_provider_recovery_fixture("req_legacy_unresolved_recovery");
+    let mut unresolved_projection = unresolved_fixture
+        .storage
+        .projection_record("run", &unresolved_run_id)
+        .unwrap()
+        .unwrap();
+    let unresolved_recovery = unresolved_projection["recovery"].clone();
+    let unresolved_recovery_id = unresolved_recovery["recoveryId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    unresolved_projection.remove("last_event_sequence");
+    unresolved_projection.remove("recovery_id_reservation");
+    unresolved_fixture
+        .storage
+        .upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: unresolved_run_id.clone(),
+            operation_id: "op_test_pre_g5c_unresolved_recovery".into(),
+            request_id: None,
+            payload: unresolved_projection,
+        }])
+        .unwrap();
+
+    let mut unresolved_runtime = AgentRuntime::blocked();
+    unresolved_runtime
+        .recover_unclean_runs(
+            &mut unresolved_fixture.storage,
+            &mut unresolved_fixture.projects,
+        )
+        .unwrap();
+    unresolved_runtime
+        .validate_persisted_runs(&unresolved_fixture.storage)
+        .unwrap();
+    let backfilled_unresolved = unresolved_fixture
+        .storage
+        .projection_record("run", &unresolved_run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        backfilled_unresolved["recovery_id_reservation"],
+        unresolved_recovery_id
+    );
+    assert_eq!(backfilled_unresolved["recovery"], unresolved_recovery);
+    let unresolved_inspect = json!({
+        "recoveryId":unresolved_recovery_id,"chatId":unresolved_chat["chatId"],
+        "taskId":unresolved_chat["taskId"],"projectId":unresolved_chat["projectId"],
+        "worktreeId":unresolved_chat["worktreeId"],
+        "workspaceIdentity":unresolved_chat["workspaceIdentity"],"runId":unresolved_run_id
+    });
+    assert_eq!(
+        unresolved_runtime
+            .inspect_recovery(&unresolved_fixture.storage, &unresolved_inspect)
+            .unwrap(),
+        unresolved_recovery
+    );
+    let mut unresolved_resolve = unresolved_inspect;
+    unresolved_resolve["expectedRevision"] = Value::from(1);
+    unresolved_resolve["resolution"] = Value::String("abandon".into());
+    let resolved_from_legacy = unresolved_runtime
+        .resolve_recovery(
+            &mut unresolved_fixture.storage,
+            &mut unresolved_fixture.projects,
+            &unresolved_resolve,
+            "req_resolve_pre_g5c_unresolved",
+        )
+        .unwrap();
+    assert_eq!(resolved_from_legacy["outcome"], "resolvedAbandoned");
+    assert_eq!(
+        resolved_from_legacy["after"]["recoveryId"],
+        unresolved_recovery_id
+    );
+
+    let (mut resolved_fixture, resolved_chat, resolved_run_id) =
+        durable_provider_recovery_fixture("req_legacy_resolved_recovery");
+    let mut resolved_runtime = AgentRuntime::blocked();
+    let unresolved = resolved_fixture
+        .storage
+        .projection_record("run", &resolved_run_id)
+        .unwrap()
+        .unwrap()["recovery"]
+        .clone();
+    let resolved_recovery_id = unresolved["recoveryId"].as_str().unwrap().to_string();
+    let resolve_request = json!({
+        "recoveryId":resolved_recovery_id,"chatId":resolved_chat["chatId"],
+        "taskId":resolved_chat["taskId"],"projectId":resolved_chat["projectId"],
+        "worktreeId":resolved_chat["worktreeId"],
+        "workspaceIdentity":resolved_chat["workspaceIdentity"],"runId":resolved_run_id,
+        "expectedRevision":1,"resolution":"abandon"
+    });
+    let resolved_result = resolved_runtime
+        .resolve_recovery(
+            &mut resolved_fixture.storage,
+            &mut resolved_fixture.projects,
+            &resolve_request,
+            "req_prepare_pre_g5c_resolved",
+        )
+        .unwrap();
+    assert_eq!(resolved_result["outcome"], "resolvedAbandoned");
+    let resolved_recovery = resolved_result["after"].clone();
+    let mut resolved_projection = resolved_fixture
+        .storage
+        .projection_record("run", &resolved_run_id)
+        .unwrap()
+        .unwrap();
+    resolved_projection.remove("last_event_sequence");
+    resolved_projection.remove("recovery_id_reservation");
+    resolved_fixture
+        .storage
+        .upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: resolved_run_id.clone(),
+            operation_id: "op_test_pre_g5c_resolved_recovery".into(),
+            request_id: None,
+            payload: resolved_projection,
+        }])
+        .unwrap();
+
+    resolved_runtime
+        .recover_unclean_runs(
+            &mut resolved_fixture.storage,
+            &mut resolved_fixture.projects,
+        )
+        .unwrap();
+    resolved_runtime
+        .validate_persisted_runs(&resolved_fixture.storage)
+        .unwrap();
+    let backfilled_resolved = resolved_fixture
+        .storage
+        .projection_record("run", &resolved_run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        backfilled_resolved["recovery_id_reservation"],
+        resolved_recovery_id
+    );
+    assert_eq!(backfilled_resolved["recovery"], resolved_recovery);
+    let resolved_inspect = json!({
+        "recoveryId":resolved_recovery_id,"chatId":resolved_chat["chatId"],
+        "taskId":resolved_chat["taskId"],"projectId":resolved_chat["projectId"],
+        "worktreeId":resolved_chat["worktreeId"],
+        "workspaceIdentity":resolved_chat["workspaceIdentity"],"runId":resolved_run_id
+    });
+    assert_eq!(
+        resolved_runtime
+            .inspect_recovery(&resolved_fixture.storage, &resolved_inspect)
+            .unwrap(),
+        resolved_recovery
+    );
+    let mut repeat_resolve = resolved_inspect;
+    repeat_resolve["expectedRevision"] = Value::from(1);
+    repeat_resolve["resolution"] = Value::String("abandon".into());
+    let before_repeat = resolved_fixture
+        .storage
+        .projection_record("run", &resolved_run_id)
+        .unwrap()
+        .unwrap();
+    let repeat_error = resolved_runtime
+        .resolve_recovery(
+            &mut resolved_fixture.storage,
+            &mut resolved_fixture.projects,
+            &repeat_resolve,
+            "req_repeat_pre_g5c_resolved",
+        )
+        .unwrap_err();
+    assert_eq!(repeat_error.kind, "manifestMismatch");
+    assert!(repeat_error
+        .detail
+        .contains("only unresolved recovery can be resolved"));
+    assert_eq!(
+        resolved_fixture
+            .storage
+            .projection_record("run", &resolved_run_id)
+            .unwrap()
+            .unwrap(),
+        before_repeat
+    );
+}
+
+#[test]
+fn recovery_abandon_saga_reconciles_each_crash_boundary_and_mismatch_stays_poisoned() {
+    let (mut fixture, chat, run_id) = durable_provider_recovery_fixture("req_saga_intent_fail");
+    let run = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    let recovery = run["recovery"].clone();
+    let request = json!({
+        "recoveryId":recovery["recoveryId"],"chatId":chat["chatId"],
+        "taskId":chat["taskId"],"projectId":chat["projectId"],
+        "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+        "runId":run_id,"expectedRevision":1,"resolution":"abandon"
+    });
+    let manifest_path = fixture
+        ._root
+        .path()
+        .join("data/worktree-manifests-v1")
+        .join(format!("{}.json", chat["worktreeId"].as_str().unwrap()));
+    let manifest_before = fs::read(&manifest_path).unwrap();
+    AgentRuntime::blocked()
+        .resolve_recovery_with_failure(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            &request,
+            "req_saga_intent_fail",
+            RecoveryResolutionFailurePoint::BeforeIntentCommit,
+        )
+        .unwrap_err();
+    let unchanged = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    assert!(unchanged.get("recovery_resolution_intent").is_none());
+    assert_eq!(unchanged["recovery"]["state"], "unresolved");
+    assert_eq!(fs::read(&manifest_path).unwrap(), manifest_before);
+
+    for (failure, finalized_before_response) in [
+        (
+            RecoveryResolutionFailurePoint::AfterIntentBeforeFilesystem,
+            false,
+        ),
+        (
+            RecoveryResolutionFailurePoint::AfterFilesystemBeforeFinalize,
+            false,
+        ),
+        (RecoveryResolutionFailurePoint::BeforeFinalizeCommit, false),
+        (
+            RecoveryResolutionFailurePoint::AfterFinalizeBeforeResponse,
+            true,
+        ),
+    ] {
+        let request_name = format!("req_saga_{failure:?}");
+        let (mut fixture, chat, run_id) = durable_provider_recovery_fixture(&request_name);
+        let run = fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap();
+        let recovery = run["recovery"].clone();
+        let request = json!({
+            "recoveryId":recovery["recoveryId"],"chatId":chat["chatId"],
+            "taskId":chat["taskId"],"projectId":chat["projectId"],
+            "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+            "runId":run_id,"expectedRevision":1,"resolution":"abandon"
+        });
+        let mut runtime = AgentRuntime::blocked();
+        runtime
+            .resolve_recovery_with_failure(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                &request,
+                &request_name,
+                failure,
+            )
+            .unwrap_err();
+        let interrupted = fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap();
+        if finalized_before_response {
+            assert_eq!(interrupted["record"]["state"], "canceled");
+            assert!(interrupted.get("recovery_resolution_intent").is_none());
+        } else {
+            assert_eq!(interrupted["recovery"]["state"], "unresolved");
+            assert!(interrupted["recovery_resolution_intent"].is_object());
+        }
+        runtime
+            .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+            .unwrap();
+        let finalized = fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(finalized["record"]["state"], "canceled");
+        assert_eq!(finalized["recovery"]["state"], "resolvedAbandoned");
+        assert!(finalized.get("recovery_resolution_intent").is_none());
+        fixture
+            .projects
+            .reopen_project(
+                &mut fixture.storage,
+                chat["projectId"].as_str().unwrap(),
+                "req_reopen_after_recovery_saga",
+            )
+            .expect("reconciled recovery must also retire the catalog snapshot");
+        let lock = fixture
+            .storage
+            .projection_record(
+                "lock",
+                &format!("lock_{}", chat["worktreeId"].as_str().unwrap()),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(lock["writer_run_id"], Value::Null);
+        assert_eq!(lock["poisoned"], false);
+    }
+
+    let (mut fixture, chat, run_id) = durable_provider_recovery_fixture("req_saga_mismatch");
+    let recovery = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap()["recovery"]
+        .clone();
+    let request = json!({
+        "recoveryId":recovery["recoveryId"],"chatId":chat["chatId"],
+        "taskId":chat["taskId"],"projectId":chat["projectId"],
+        "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+        "runId":run_id,"expectedRevision":1,"resolution":"abandon"
+    });
+    let mut runtime = AgentRuntime::blocked();
+    runtime
+        .resolve_recovery_with_failure(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            &request,
+            "req_saga_mismatch_intent",
+            RecoveryResolutionFailurePoint::AfterIntentBeforeFilesystem,
+        )
+        .unwrap_err();
+    let manifest_path = fixture
+        ._root
+        .path()
+        .join("data/worktree-manifests-v1")
+        .join(format!("{}.json", chat["worktreeId"].as_str().unwrap()));
+    let mut manifest: Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest["baseCommit"] = Value::String("0".repeat(40));
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    assert!(runtime
+        .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+        .unwrap_err()
+        .detail()
+        .contains("manifest differs"));
+    let poisoned = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(poisoned["recovery"]["state"], "unresolved");
+    assert!(poisoned["recovery_resolution_intent"].is_object());
+    let lock = fixture
+        .storage
+        .projection_record(
+            "lock",
+            &format!("lock_{}", chat["worktreeId"].as_str().unwrap()),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(lock["writer_run_id"], run_id);
+    assert_eq!(lock["poisoned"], true);
+}
+
+#[test]
+fn agent_recovery_discovery_rejects_ambiguity_identity_and_cardinality_drift() {
+    let (mut fixture, chat, run_id) = durable_provider_recovery_fixture("req_recovery_ambiguous");
+    let mut duplicate = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    duplicate.remove("last_event_sequence");
+    let duplicate_run_id = "agent_run_duplicate_recovery";
+    duplicate["run_id"] = Value::String(duplicate_run_id.into());
+    duplicate["record"]["runId"] = Value::String(duplicate_run_id.into());
+    duplicate["recovery"]["runId"] = Value::String(duplicate_run_id.into());
+    duplicate["recovery"]["recoveryId"] = Value::String("agent_recovery_duplicate_recovery".into());
+    fixture
+        .storage
+        .upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: duplicate_run_id.into(),
+            operation_id: "op_duplicate_actual_recovery".into(),
+            request_id: None,
+            payload: duplicate,
+        }])
+        .unwrap();
+    assert!(fixture
+        .chats
+        .get_chat(
+            &fixture.storage,
+            chat["chatId"].as_str().unwrap(),
+            0,
+            None,
+            50,
+            true,
+        )
+        .unwrap_err()
+        .detail
+        .contains("multiple unresolved"));
+
+    let (mut fixture, chat, run_id) = durable_provider_recovery_fixture("req_recovery_identity");
+    let mut mismatch = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    mismatch.remove("last_event_sequence");
+    mismatch["recovery"]["workspaceIdentity"] = Value::String("workspace_mismatch".into());
+    fixture
+        .storage
+        .upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: run_id.clone(),
+            operation_id: "op_mismatched_actual_recovery".into(),
+            request_id: None,
+            payload: mismatch,
+        }])
+        .unwrap();
+    assert!(fixture
+        .chats
+        .get_chat(
+            &fixture.storage,
+            chat["chatId"].as_str().unwrap(),
+            0,
+            None,
+            50,
+            true,
+        )
+        .unwrap_err()
+        .detail
+        .contains("identity differs"));
+
+    let (mut fixture, chat, run_id) = durable_provider_recovery_fixture("req_recovery_cardinality");
+    let mut missing = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    missing.remove("last_event_sequence");
+    missing["recovery"] = Value::Null;
+    fixture
+        .storage
+        .upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: run_id,
+            operation_id: "op_missing_actual_recovery".into(),
+            request_id: None,
+            payload: missing,
+        }])
+        .unwrap();
+    assert!(fixture
+        .chats
+        .get_chat(
+            &fixture.storage,
+            chat["chatId"].as_str().unwrap(),
+            0,
+            None,
+            50,
+            true,
+        )
+        .unwrap_err()
+        .detail
+        .contains("cardinality differ"));
+}
+
+#[test]
+fn provider_terminal_failed_stays_non_poisoned_failed() {
+    let mut fixture = Fixture::new();
+    let (mut runtime, chat, run_id) = start_exact_actual_scenario(
+        &mut fixture,
+        FakeScenario::ProviderTerminalFailed,
+        "req_provider_failed",
+    );
+    let wire = drain_actual_scenario(&mut fixture, &mut runtime, &run_id);
+    assert_eq!(wire.last().unwrap().payload["run"]["state"], "failed");
+    let run = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(run["record"]["state"], "failed");
+    assert_eq!(run["termination"]["outcome"], "cleanExit");
+    assert_eq!(run["termination"]["poisoned"], false);
+    assert_eq!(run["recovery"], Value::Null);
+    let lock = fixture
+        .storage
+        .projection_record(
+            "lock",
+            &format!("lock_{}", chat["worktreeId"].as_str().unwrap()),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(lock["writer_run_id"], Value::Null);
+    assert_eq!(lock["poisoned"], false);
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+}
+
+#[test]
+fn poll_observe_and_wait_failures_propagate_after_fail_closed_recovery_persistence() {
+    for scenario in [
+        FakeScenario::PollObserveFailure,
+        FakeScenario::PollWaitFailure,
+    ] {
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_agent_poll_failure_snapshot");
+        let chat = fixture.create_exact_claude_chat(
+            &snapshot,
+            "poll failure",
+            "req_agent_poll_failure_chat",
+        );
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(&fixture, chat_id);
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        let started = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "coding".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: capability["fingerprint"]
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                },
+                "req_agent_poll_failure",
+            )
+            .unwrap();
+        let run_id = started.result["runId"].as_str().unwrap();
+        let events = runtime
+            .poll(&mut fixture.storage, &mut fixture.projects)
+            .expect("the already collected running event must be delivered first");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event, "agent.runStateChanged");
+        assert_eq!(events[0].payload["run"]["state"], "running");
+        let error = runtime
+            .poll(&mut fixture.storage, &mut fixture.projects)
+            .expect_err("deferred poll failure must reach the stdio owner");
+        assert_eq!(error.kind(), "agentRuntimeFailure");
+        let terminal = fixture
+            .storage
+            .projection_record("run", run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(terminal["record"]["state"], "recoveryRequired");
+        assert_eq!(terminal["termination"]["processesProvenGone"], false);
+        assert_eq!(terminal["recovery"]["state"], "unresolved");
+    }
+}
+
+#[test]
+fn corrupted_durable_counter_and_terminal_state_construction_errors_propagate() {
+    for corrupt_counter in [true, false] {
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_agent_persist_failure_snapshot");
+        let chat = fixture.create_exact_claude_chat(
+            &snapshot,
+            "persistence failure",
+            "req_agent_persist_failure_chat",
+        );
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(&fixture, chat_id);
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::NoOutput);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        let started = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "coding".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: capability["fingerprint"]
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                },
+                "req_agent_persist_failure",
+            )
+            .unwrap();
+        let run_id = started.result["runId"].as_str().unwrap().to_string();
+        if corrupt_counter {
+            let mut projection = fixture
+                .storage
+                .projection_record("run", &run_id)
+                .unwrap()
+                .unwrap();
+            projection.insert("public_event_count".into(), Value::from(1));
+            fixture
+                .storage
+                .upsert_projection_records_atomic(vec![ProjectionUpsert {
+                    aggregate_type: "run",
+                    aggregate_id: run_id.clone(),
+                    operation_id: "op_test_agent_counter_corrupt".into(),
+                    request_id: None,
+                    payload: projection,
+                }])
+                .unwrap();
+            assert!(runtime.validate_persisted_runs(&fixture.storage).is_err());
+        } else {
+            let mut projection = fixture
+                .storage
+                .projection_record("chat", chat_id)
+                .unwrap()
+                .unwrap();
+            projection["record"]["chatId"] = Value::String(String::new());
+            fixture
+                .storage
+                .upsert_projection_records_atomic(vec![ProjectionUpsert {
+                    aggregate_type: "chat",
+                    aggregate_id: chat_id.into(),
+                    operation_id: "op_test_agent_chat_corrupt".into(),
+                    request_id: None,
+                    payload: projection,
+                }])
+                .unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let first = runtime.poll(&mut fixture.storage, &mut fixture.projects);
+        let error = match first {
+            Err(error) => error,
+            Ok(events) => {
+                assert!(!events.is_empty(), "only collected events may defer an error");
+                runtime.poll(&mut fixture.storage, &mut fixture.projects)
+                    .expect_err("deferred poll persistence/construction failure must propagate")
+            }
+        };
+        assert_eq!(error.kind(), "agentRuntimeFailure");
+        assert!(
+            error.detail().contains("counter")
+                || error.detail().contains("count does not match")
+                || error.detail().contains("agent run record")
+                || error.detail().contains("identity differs")
+                || error.detail().contains("chatId"),
+            "{}",
+            error.detail()
+        );
+    }
+}
+
+#[test]
+fn terminal_construction_and_upsert_failures_keep_active_until_restart_poison_recovery() {
+    terminal_failure_cases(false);
+}
+
+#[test]
+fn deferred_cancel_never_reports_completion_after_terminal_persistence_failure() {
+    terminal_failure_cases(true);
+}
+
+fn terminal_failure_cases(cancel: bool) {
+    for scenario in [
+        FakeScenario::TerminalConstructionFailure,
+        FakeScenario::TerminalUpsertFailure,
+    ] {
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_agent_terminal_failure_snapshot");
+        let chat = fixture.create_exact_claude_chat(
+            &snapshot,
+            "terminal failure ownership",
+            "req_agent_terminal_failure_chat",
+        );
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(&fixture, chat_id);
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        let started = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "coding".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: capability["fingerprint"]
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                },
+                "req_agent_terminal_failure",
+            )
+            .unwrap();
+        let run_id = started.result["runId"].as_str().unwrap().to_string();
+        let identity = RunIdentity {
+            chat_id: chat_id.into(),
+            task_id: chat["taskId"].as_str().unwrap().into(),
+            project_id: chat["projectId"].as_str().unwrap().into(),
+            worktree_id: chat["worktreeId"].as_str().unwrap().into(),
+            workspace_identity: chat["workspaceIdentity"].as_str().unwrap().into(),
+            run_id: run_id.clone(),
+        };
+        if cancel {
+            runtime.request_cancel(&identity).unwrap();
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let error = loop {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "terminal failure must propagate"
+            );
+            match runtime.poll(&mut fixture.storage, &mut fixture.projects) {
+                Ok(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
+                Err(error) => break error,
+            }
+        };
+        assert_eq!(error.kind(), "agentRuntimeFailure");
+        assert!(runtime.has_active_run(&run_id));
+        assert!(runtime
+            .cancel_result(&fixture.storage, &identity)
+            .unwrap()
+            .is_none());
+        let durable = fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(durable["record"]["state"], "running");
+        assert_eq!(durable["termination"], Value::Null);
+        let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
+        let lock = fixture
+            .storage
+            .projection_record("lock", &lock_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(lock["writer_run_id"], run_id);
+        assert_eq!(lock["poisoned"], false);
+        drop(runtime);
+
+        AgentRuntime::blocked()
+            .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+            .unwrap();
+        let recovered = fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(recovered["record"]["state"], "recoveryRequired");
+        assert_eq!(recovered["recovery"]["state"], "unresolved");
+        let lock = fixture
+            .storage
+            .projection_record("lock", &lock_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(lock["writer_run_id"], run_id);
+        assert_eq!(lock["poisoned"], true);
+        assert_eq!(lock["recovery_required"], true);
+    }
+}
+
+#[test]
+fn live_text_and_cumulative_counter_undercounts_block_append_and_recover_poisoned() {
+    for counter in [
+        "public_text_bytes",
+        "public_ledger_cumulative_snapshot_bytes",
+    ] {
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_agent_live_counter_snapshot");
+        let chat = fixture.create_exact_claude_chat(
+            &snapshot,
+            "live counter drift",
+            "req_agent_live_counter_chat",
+        );
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(&fixture, chat_id);
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::FinalDelayed);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        let started = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "coding".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: capability["fingerprint"]
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                },
+                "req_agent_live_counter",
+            )
+            .unwrap();
+        let run_id = started.result["runId"].as_str().unwrap().to_string();
+        let before = loop {
+            let emitted = runtime
+                .poll(&mut fixture.storage, &mut fixture.projects)
+                .unwrap();
+            let projection = fixture
+                .storage
+                .projection_record("run", &run_id)
+                .unwrap()
+                .unwrap();
+            if projection["public_event_count"].as_u64().unwrap_or(0) > 0 {
+                assert!(emitted
+                    .iter()
+                    .any(|event| event.event == "agent.publicEvent"));
+                break projection;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        let durable_event_count = before["public_event_count"].as_u64().unwrap();
+        let mut drifted = before;
+        let exact = drifted[counter].as_u64().unwrap();
+        assert!(exact > 0);
+        drifted.insert(counter.into(), Value::from(exact - 1));
+        fixture
+            .storage
+            .upsert_projection_records_atomic(vec![ProjectionUpsert {
+                aggregate_type: "run",
+                aggregate_id: run_id.clone(),
+                operation_id: format!("op_test_agent_{counter}_drift"),
+                request_id: None,
+                payload: drifted,
+            }])
+            .unwrap();
+        let error = runtime
+            .poll(&mut fixture.storage, &mut fixture.projects)
+            .expect_err("live durable counter drift must fail before append");
+        assert_eq!(error.kind(), "agentRuntimeFailure");
+        assert!(runtime.has_active_run(&run_id));
+        let unchanged = fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(unchanged["public_event_count"], durable_event_count);
+        drop(runtime);
+
+        AgentRuntime::blocked()
+            .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+            .unwrap();
+        let recovered = fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(recovered["record"]["state"], "recoveryRequired");
+        assert_eq!(recovered["recovery"]["state"], "unresolved");
+        assert_eq!(recovered["public_event_count"], durable_event_count);
+        AgentRuntime::blocked()
+            .validate_persisted_runs(&fixture.storage)
+            .unwrap();
+        let lock = fixture
+            .storage
+            .projection_record(
+                "lock",
+                &format!("lock_{}", chat["worktreeId"].as_str().unwrap()),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(lock["poisoned"], true);
+        assert_eq!(lock["recovery_required"], true);
+    }
+}
+
+#[test]
+fn fake_agent_cancel_uncertain_poison_survives_and_is_abandon_only() {
+    let executable = sidecar_binary();
+    assert!(
+        executable.is_file(),
+        "build the sidecar binary for process gate"
+    );
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_agent_uncertain_snapshot");
+    let chat =
+        fixture.create_exact_claude_chat(&snapshot, "uncertain agent", "req_agent_uncertain_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let message_id = initial_message_id(&fixture, chat_id);
+    let mut runtime = AgentRuntime::fake(executable, FakeScenario::CancelUncertain);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let started = runtime
+        .start_agent(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            AgentRunStartRequestV1 {
+                chat_id: chat_id.into(),
+                role_id: "coding".into(),
+                input_message_ids: vec![message_id],
+                expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+            },
+            "req_agent_uncertain",
+        )
+        .unwrap();
+    let run_id = started.result["runId"].as_str().unwrap().to_string();
+    let identity = RunIdentity {
+        chat_id: chat_id.into(),
+        task_id: chat["taskId"].as_str().unwrap().into(),
+        project_id: chat["projectId"].as_str().unwrap().into(),
+        worktree_id: chat["worktreeId"].as_str().unwrap().into(),
+        workspace_identity: chat["workspaceIdentity"].as_str().unwrap().into(),
+        run_id: run_id.clone(),
+    };
+    let canceled = runtime
+        .cancel(&mut fixture.storage, &mut fixture.projects, &identity)
+        .unwrap();
+    assert_eq!(canceled.events.len(), 2);
+    assert_eq!(canceled.events[0].event, "agent.runStateChanged");
+    assert_eq!(canceled.events[0].payload["run"]["state"], "running");
+    assert_eq!(canceled.events[1].event, "agent.runStateChanged");
+    assert_eq!(
+        canceled.events[1].payload["run"]["state"],
+        "recoveryRequired"
+    );
+    assert_eq!(canceled.result["outcome"], "recoveryRequired");
+    assert_eq!(
+        canceled.result["termination"]["writerLockState"],
+        "recoveryRequired"
+    );
+    let recovery = canceled.result["recovery"].clone();
+    assert!(fixture
+        .chats
+        .list_recoveries(&fixture.storage, None, 10)
+        .unwrap()["items"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(fixture
+        .chats
+        .inspect_recovery(&fixture.storage, recovery["recoveryId"].as_str().unwrap())
+        .unwrap_err()
+        .detail
+        .contains("missing"));
+    assert!(fixture
+        .chats
+        .mark_recovery_resolved(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            recovery["recoveryId"].as_str().unwrap(),
+            1,
+            "abandon",
+            "req_legacy_cross_ledger",
+        )
+        .unwrap_err()
+        .detail
+        .contains("missing"));
+    assert_eq!(
+        fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap()["recovery"],
+        recovery
+    );
+    // A provider fence is a separate durable resource. Bind this fake run's
+    // observed identities without launching a real provider or using an account.
+    let profile = crate::provider_claude_profile::ClaudeProfileBinding::from_storage(&fixture.storage).unwrap();
+    let mut owner = crate::provider_login_process::LoginProcess::reserve_claude_owned(profile).unwrap();
+    owner.retain_fence_before_launch(&run_id).unwrap();
+    let binding = owner.bind_run_fence(&run_id).unwrap();
+    let fence_path = fixture.storage.path().parent().unwrap().join("claude-login.pending");
+    let mut projection = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    {
+        use std::io::Write;
+        let mut fence = fs::OpenOptions::new().append(true).open(&fence_path).unwrap();
+        for process in projection["process_identity_internal"].as_array().unwrap() {
+            writeln!(fence, "{} {}", process["pid"], process["start_us"]).unwrap();
+        }
+        fence.sync_all().unwrap();
+    }
+    projection.remove("last_event_sequence");
+    projection.insert("provider_run_fence".into(), binding.to_value());
+    fixture.storage.upsert_projection_records_atomic(vec![crate::storage::ProjectionUpsert {
+        aggregate_type:"run", aggregate_id:run_id.clone(), operation_id:"test_bind_recovery_fence".into(), request_id:None, payload:projection,
+    }]).unwrap();
+    owner.finish().unwrap();
+    let mut login = crate::provider_login_manager::LoginManager::claude();
+    let recover_request = json!({"provider":"claude","action":"recover","attemptId":"bound-fence-repair"});
+    let fence_bytes = fs::read(&fence_path).unwrap();
+    // A live lock owner and an unresolved run each independently block release.
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover_request, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired");
+    drop(owner);
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover_request, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired");
+    assert_eq!(fs::read(&fence_path).unwrap(), fence_bytes);
+    let resolved = runtime.resolve_recovery(&mut fixture.storage,&mut fixture.projects,&json!({"recoveryId":recovery["recoveryId"],"chatId":identity.chat_id,"taskId":identity.task_id,"projectId":identity.project_id,"worktreeId":identity.worktree_id,"workspaceIdentity":identity.workspace_identity,"runId":identity.run_id,"expectedRevision":1,"resolution":"abandon"}),"req_agent_resolve").unwrap();
+    assert_eq!(resolved["outcome"], "resolvedAbandoned");
+    // Model the durable terminal-commit / fence-release restart boundary.
+    // No live owner or in-memory login result may authorize the later unlink.
+    let database = fixture.storage.path().to_path_buf();
+    drop(runtime);
+    drop(login);
+    drop(fixture.chats);
+    drop(fixture.projects);
+    drop(fixture.storage);
+    fixture.storage = Storage::open(&database).unwrap();
+    fixture.projects = ProjectManager::new(&database).unwrap();
+    fixture.chats = G5Manager::default();
+    let mut login = crate::provider_login_manager::LoginManager::claude();
+    assert_eq!(fs::read(&fence_path).unwrap(), fence_bytes);
+    let terminal = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    assert_eq!(terminal["provider_run_fence"], binding.to_value());
+    for case in ["nonce", "state", "gone", "identities"] {
+        let mut invalid = terminal.clone();
+        invalid.remove("last_event_sequence");
+        match case {
+            "nonce" => invalid.get_mut("provider_run_fence").unwrap()["nonce"] = uuid::Uuid::new_v4().to_string().into(),
+            "state" => invalid.get_mut("record").unwrap()["state"] = "running".into(),
+            "gone" => invalid.get_mut("termination").unwrap()["processesProvenGone"] = false.into(),
+            "identities" => { invalid.insert("process_identity_internal".into(), json!([])); },
+            _ => unreachable!(),
+        }
+        fixture.storage.upsert_projection_records_atomic(vec![crate::storage::ProjectionUpsert {
+            aggregate_type:"run", aggregate_id:run_id.clone(), operation_id:format!("test_bad_fence_{case}"), request_id:None, payload:invalid,
+        }]).unwrap();
+        assert_eq!(login.request_with_projects(&fixture.storage, &recover_request, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired", "{case}");
+        assert_eq!(fs::read(&fence_path).unwrap(), fence_bytes, "{case}");
+    }
+    let mut restored = terminal.clone();
+    restored.remove("last_event_sequence");
+    fixture.storage.upsert_projection_records_atomic(vec![crate::storage::ProjectionUpsert {
+        aggregate_type:"run", aggregate_id:run_id.clone(), operation_id:"test_restore_fence_record".into(), request_id:None, payload:restored,
+    }]).unwrap();
+    let terminal = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover_request, &fixture.projects).unwrap()["state"], "idle");
+    assert!(!fence_path.exists());
+    assert_eq!(fixture.storage.projection_record("run", &run_id).unwrap().unwrap(), terminal);
+    let lock = fixture
+        .storage
+        .projection_record(
+            "lock",
+            &format!("lock_{}", chat["worktreeId"].as_str().unwrap()),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(lock["poisoned"], false);
+    assert_eq!(lock["writer_run_id"], Value::Null);
+}
+
+#[test]
+fn actual_recovery_api_rejects_legacy_fixture_ledger() {
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_legacy_recovery_snapshot");
+    let chat = fixture.create_chat(&snapshot, "legacy recovery", "req_legacy_recovery_chat");
+    let run_id = "agent_run_legacy_cross_ledger".to_string();
+    let recovery = json!({"recoveryId":"agent_recovery_legacy_cross_ledger","chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,"revision":1,"state":"unresolved"});
+    fixture
+        .storage
+        .upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: run_id.clone(),
+            operation_id: "op_legacy_cross_ledger".into(),
+            request_id: None,
+            payload: json!({"run_id":run_id,"chat_id":chat["chatId"],"state":"recoveryRequired","worktree_path":snapshot["worktreePath"],"record":{"runId":run_id},"recovery":recovery})
+                .as_object()
+                .unwrap()
+                .clone(),
+        }])
+        .unwrap();
+    let listed = fixture
+        .chats
+        .list_recoveries(&fixture.storage, None, 10)
+        .unwrap();
+    let recovery = listed["items"][0].clone();
+    let request = json!({"recoveryId":recovery["recoveryId"],"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id});
+    let mut actual = AgentRuntime::blocked();
+    assert!(actual
+        .inspect_recovery(&fixture.storage, &request)
+        .unwrap_err()
+        .detail
+        .contains("missing"));
+    let mut resolve = request;
+    resolve["expectedRevision"] = Value::from(1);
+    resolve["resolution"] = Value::String("abandon".into());
+    assert!(actual
+        .resolve_recovery(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            &resolve,
+            "req_actual_cross_ledger"
+        )
+        .unwrap_err()
+        .detail
+        .contains("missing"));
+    assert_eq!(
+        fixture
+            .chats
+            .inspect_recovery(&fixture.storage, recovery["recoveryId"].as_str().unwrap())
+            .unwrap()["runId"],
+        run_id
+    );
+}
+
+#[test]
+fn fake_agent_clean_cancel_releases_writer_and_malformed_or_oversize_fail_closed() {
+    let executable = sidecar_binary();
+    for scenario in [
+        FakeScenario::CancelClean,
+        FakeScenario::Malformed,
+        FakeScenario::Oversized,
+        FakeScenario::ProviderTerminalMalformed,
+    ] {
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_agent_failure_snapshot");
+        let chat = fixture.create_exact_claude_chat(
+            &snapshot,
+            "agent failure gate",
+            "req_agent_failure_chat",
+        );
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(&fixture, chat_id);
+        let (runtime_name, role_id) = ("claude-code", "coding");
+        let mut runtime = AgentRuntime::fake(executable.clone(), scenario);
+        let capability = runtime.get_capabilities(runtime_name, true).unwrap();
+        let started = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: role_id.into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: capability["fingerprint"]
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                },
+                "req_agent_failure",
+            )
+            .unwrap();
+        let run_id = started.result["runId"].as_str().unwrap().to_string();
+        if scenario == FakeScenario::CancelClean {
+            let identity = RunIdentity {
+                chat_id: chat_id.into(),
+                task_id: chat["taskId"].as_str().unwrap().into(),
+                project_id: chat["projectId"].as_str().unwrap().into(),
+                worktree_id: chat["worktreeId"].as_str().unwrap().into(),
+                workspace_identity: chat["workspaceIdentity"].as_str().unwrap().into(),
+                run_id: run_id.clone(),
+            };
+            let result = runtime
+                .cancel(&mut fixture.storage, &mut fixture.projects, &identity)
+                .unwrap();
+            assert_eq!(result.result["outcome"], "canceled");
+            assert_eq!(result.events.len(), 2);
+            assert_eq!(result.events[0].payload["run"]["state"], "running");
+            assert_eq!(result.events[1].payload["run"]["state"], "canceled");
+            let lock = fixture
+                .storage
+                .projection_record(
+                    "lock",
+                    &format!("lock_{}", chat["worktreeId"].as_str().unwrap()),
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(lock["writer_run_id"], Value::Null);
+            assert_eq!(lock["poisoned"], false);
+        } else {
+            for _ in 0..100 {
+                let _ = runtime
+                    .poll(&mut fixture.storage, &mut fixture.projects)
+                    .unwrap();
+                if fixture
+                    .storage
+                    .projection_record("run", &run_id)
+                    .unwrap()
+                    .unwrap()["record"]["state"]
+                    .as_str()
+                    .expect("persisted run state")
+                    != "running"
+                {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            let terminal = fixture
+                .storage
+                .projection_record("run", &run_id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                terminal["record"]["state"], "failed",
+                "scenario {scenario:?}, termination: {}",
+                terminal["termination"]
+            );
+            assert_eq!(terminal["termination"]["processesProvenGone"], true);
+        }
+    }
+}
+
+#[test]
+fn control_launcher_child_has_no_descendant_before_release_and_tree_is_gone_afterward() {
+    use elsecrew_core::proctree::{identity_of, ProbeResult, ProcTable, SystemProcTable};
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::process::Stdio;
+    let mut launcher = Command::new(sidecar_binary())
+        .args(["--agent-fixture-launcher", "clean"])
+        .env_clear()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let launcher_identity = identity_of(launcher.id()).unwrap();
+    let mut reader = BufReader::new(launcher.stdout.take().unwrap());
+    let mut ready = String::new();
+    reader.read_line(&mut ready).unwrap();
+    let child_pid: u32 = ready
+        .trim()
+        .strip_prefix("ready:")
+        .unwrap()
+        .parse()
+        .unwrap();
+    let child_identity = identity_of(child_pid).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    assert!(
+        !SystemProcTable
+            .list()
+            .unwrap()
+            .iter()
+            .any(|entry| entry.ppid == child_pid),
+        "waiting child must not create descendants before release"
+    );
+    launcher.stdin.take().unwrap().write_all(b"run\n").unwrap();
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+    assert!(launcher.wait().unwrap().success());
+    assert!(output.contains("\"type\":\"final\""));
+    assert!(matches!(
+        SystemProcTable.probe(child_identity),
+        ProbeResult::Gone
+    ));
+    assert!(matches!(
+        SystemProcTable.probe(launcher_identity),
+        ProbeResult::Gone
+    ));
+}
+
+#[test]
+fn dynamic_grandchild_is_durable_and_blocks_recovery_until_every_identity_is_gone() {
+    use elsecrew_core::proctree::{
+        ProbeResult, ProcIdentity, ProcTable, SystemProcTable, TreeSignal,
+    };
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_descendant_snapshot");
+    let chat =
+        fixture.create_exact_claude_chat(&snapshot, "durable descendant", "req_descendant_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let message_id = initial_message_id(&fixture, chat_id);
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Descendant);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let started = runtime
+        .start_agent(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            AgentRunStartRequestV1 {
+                chat_id: chat_id.into(),
+                role_id: "coding".into(),
+                input_message_ids: vec![message_id],
+                expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+            },
+            "req_descendant_start",
+        )
+        .unwrap();
+    let run_id = started.result["runId"].as_str().unwrap().to_string();
+    let mut projection = Map::new();
+    for _ in 0..100 {
+        let _ = runtime
+            .poll(&mut fixture.storage, &mut fixture.projects)
+            .unwrap();
+        projection = fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap();
+        if projection["process_identity_internal"]
+            .as_array()
+            .is_some_and(|items| items.len() >= 3)
+        {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let internal = projection["process_identity_internal"]
+        .as_array()
+        .cloned()
+        .unwrap();
+    assert!(internal.len() >= 3, "grandchild identity must be durable");
+    projection["state"] = Value::String("recoveryRequired".into());
+    fixture
+        .storage
+        .upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: run_id.clone(),
+            operation_id: "op_test_descendant_crash".into(),
+            request_id: None,
+            payload: projection,
+        }])
+        .unwrap();
+    drop(runtime);
+    let recovered = AgentRuntime::blocked();
+    recovered
+        .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+        .unwrap();
+    let run = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    let recovery = run["recovery"].clone();
+    assert!(recovery["trackedProcesses"].as_array().unwrap().len() >= 3);
+    let request = json!({"recoveryId":recovery["recoveryId"],"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,"expectedRevision":1,"resolution":"abandon"});
+    let mut recovered = recovered;
+    assert_eq!(
+        recovered
+            .resolve_recovery(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                &request,
+                "req_descendant_alive"
+            )
+            .unwrap()["outcome"],
+        "processesRemain"
+    );
+    for value in &internal {
+        let _ = SystemProcTable.signal(value["pid"].as_u64().unwrap() as u32, TreeSignal::Kill);
+    }
+    for _ in 0..100 {
+        if internal.iter().all(|value| {
+            matches!(
+                SystemProcTable.probe(ProcIdentity {
+                    pid: value["pid"].as_u64().unwrap() as u32,
+                    start_us: value["start_us"].as_i64().unwrap(),
+                }),
+                ProbeResult::Gone
+            )
+        }) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(
+        recovered
+            .resolve_recovery(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                &request,
+                "req_descendant_gone"
+            )
+            .unwrap()["outcome"],
+        "resolvedAbandoned"
+    );
+}
+
+mod discard;
+
+#[test]
+fn app_role_defaults_seed_once_and_survive_reopen() {
+    let mut fixture = Fixture::new();
+    let original = fixture
+        .chats
+        .default_role_settings(
+            &mut fixture.storage,
+            &fixture.projects,
+            &fixture.project_id,
+            "defaults_original",
+        )
+        .unwrap();
+    let defaults = fixture.projects.app_role_defaults().unwrap();
+    let mut roles = defaults["roles"].clone();
+    roles[0]["modelSelector"] = json!("configured-model");
+    let saved = fixture
+        .projects
+        .update_app_role_defaults(&fixture.storage, 1, roles.clone())
+        .unwrap();
+    assert_eq!(saved["revision"], 2);
+    assert!(fixture
+        .projects
+        .update_app_role_defaults(&fixture.storage, 1, roles.clone())
+        .is_err());
+    assert_eq!(
+        fixture
+            .chats
+            .default_role_settings(
+                &mut fixture.storage,
+                &fixture.projects,
+                &fixture.project_id,
+                "defaults_again"
+            )
+            .unwrap(),
+        original
+    );
+    let other = Fixture::new();
+    let opened = fixture
+        .projects
+        .open_project(
+            &mut fixture.storage,
+            other.source.to_str().unwrap(),
+            "open_other_defaults",
+        )
+        .unwrap();
+    let other_id = opened.result["projectId"].as_str().unwrap();
+    let seeded = fixture
+        .chats
+        .default_role_settings(
+            &mut fixture.storage,
+            &fixture.projects,
+            other_id,
+            "defaults_new",
+        )
+        .unwrap();
+    assert_eq!(seeded["roles"], roles);
+    assert_eq!(seeded["revision"], 1);
+    fixture
+        .projects
+        .update_app_role_defaults(&fixture.storage, 2, defaults["roles"].clone())
+        .unwrap();
+    assert_eq!(
+        fixture
+            .chats
+            .default_role_settings(
+                &mut fixture.storage,
+                &fixture.projects,
+                other_id,
+                "defaults_stable"
+            )
+            .unwrap(),
+        seeded
+    );
+    let reopened = ProjectManager::new(fixture.storage.path()).unwrap();
+    assert_eq!(reopened.app_role_defaults().unwrap()["revision"], 3);
+    let file = fixture
+        ._root
+        .path()
+        .join("data/application-settings-v1/role-defaults.json");
+    fs::write(file, b"invalid").unwrap();
+    assert!(reopened.app_role_defaults().is_err());
+    assert_eq!(
+        fixture
+            .chats
+            .default_role_settings(
+                &mut fixture.storage,
+                &fixture.projects,
+                &fixture.project_id,
+                "defaults_corrupt_existing"
+            )
+            .unwrap(),
+        original
+    );
+}
+
+#[test]
+fn catalog_removal_hides_and_restores_chat_without_changing_records() {
+    let mut f = Fixture::new();
+    let snapshot = f.snapshot("req_hide_snapshot");
+    let chat = f.create_chat(&snapshot, "keep history", "req_hide_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let before = f.storage.projection_record("chat", chat_id).unwrap();
+    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(chat_id), "removeChat", "req_hide").unwrap();
+    assert!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"].as_array().unwrap().is_empty());
+    assert_eq!(f.storage.projection_record("chat", chat_id).unwrap(), before);
+    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "restoreChats", "req_restore").unwrap();
+    assert_eq!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"][0]["chatId"], chat_id);
+    assert_eq!(f.storage.projection_record("chat", chat_id).unwrap(), before);
+}
+
+#[test]
+fn catalog_removal_of_idle_chat_does_not_hide_sibling_recovery() {
+    let mut f = Fixture::new();
+    let snapshot = f.snapshot("req_sibling_snapshot");
+    let healthy = f.create_chat(&snapshot, "healthy", "req_healthy_chat");
+    let other_snapshot = f.snapshot("req_other_snapshot");
+    let recovery = f.create_chat(&other_snapshot, "recover me", "req_recovery_chat");
+    let healthy_id = healthy["chatId"].as_str().unwrap();
+    let recovery_id = recovery["chatId"].as_str().unwrap();
+    let mut record = f.storage.projection_record("chat", recovery_id).unwrap().unwrap();
+    record.insert("state".into(), json!("recoveryRequired"));
+    record["record"]["state"] = json!("recoveryRequired");
+    f.storage.upsert_projection_record("chat", recovery_id, "op_sibling_recovery", None, record.clone()).unwrap();
+    let record = f.storage.projection_record("chat", recovery_id).unwrap().unwrap();
+    let sibling_lock_id = format!("lock_{}", recovery["worktreeId"].as_str().unwrap());
+    let mut lock = f.storage.projection_record("lock", &sibling_lock_id).unwrap().unwrap();
+    lock.insert("poisoned".into(), json!(true));
+    f.storage.upsert_projection_record("lock", &sibling_lock_id, "op_sibling_poison", None, lock).unwrap();
+    let healthy_lock_id = format!("lock_{}", healthy["worktreeId"].as_str().unwrap());
+    let healthy_lock = f.storage.projection_record("lock", &healthy_lock_id).unwrap().unwrap();
+    let mut unknown = healthy_lock.clone();
+    unknown.insert("lock_id".into(), json!("lock_unknown"));
+    unknown.insert("poisoned".into(), json!(true));
+    f.storage.upsert_projection_record("lock", "lock_unknown", "op_unknown_lock", None, unknown.clone()).unwrap();
+    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(healthy_id), "removeChat", "req_unknown_lock").is_err());
+    unknown.insert("poisoned".into(), json!(false));
+    f.storage.upsert_projection_record("lock", "lock_unknown", "op_unknown_reset", None, unknown).unwrap();
+    let mut shared = record.clone();
+    shared.insert("worktree_id".into(), healthy["worktreeId"].clone());
+    f.storage.upsert_projection_record("chat", recovery_id, "op_shared_workspace", None, shared).unwrap();
+    let mut poisoned = healthy_lock.clone(); poisoned.insert("poisoned".into(), json!(true));
+    f.storage.upsert_projection_record("lock", &healthy_lock_id, "op_shared_poison", None, poisoned).unwrap();
+    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(healthy_id), "removeChat", "req_shared_poison").is_err());
+    f.storage.upsert_projection_record("lock", &healthy_lock_id, "op_shared_reset", None, healthy_lock).unwrap();
+    f.storage.upsert_projection_record("chat", recovery_id, "op_chat_reset", None, record).unwrap();
+    let record = f.storage.projection_record("chat", recovery_id).unwrap().unwrap();
+    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(healthy_id), "removeChat", "req_hide_healthy").unwrap();
+    let page = f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap();
+    assert_eq!(page["items"].as_array().unwrap().len(), 1);
+    assert_eq!(page["items"][0]["chatId"], recovery_id);
+    assert_eq!(f.storage.projection_record("chat", recovery_id).unwrap().unwrap(), record);
+    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(recovery_id), "removeChat", "req_hide_recovery").is_err());
+    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_hide_all").is_err());
+}
+
+#[test]
+fn catalog_removal_refuses_runs_locks_and_nonmember_chat() {
+    let mut f = Fixture::new();
+    let snapshot = f.snapshot("req_guard_snapshot");
+    let chat = f.create_chat(&snapshot, "guard removal", "req_guard_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some("chat_missing"), "removeChat", "req_missing").is_err());
+    let cases: Value = serde_json::from_str(include_str!("../../../../tests/fixtures/m5/g5-v1/cases.json")).unwrap();
+    let mut run = cases["valid"].as_array().unwrap().iter().find(|case| case["name"] == "valid-cancel-transition").unwrap()["value"]["after"].clone();
+    for field in ["chatId", "taskId", "worktreeId", "workspaceIdentity"] { run[field] = chat[field].clone(); }
+    run["runId"] = json!("run_hide_guard");
+    persist_run(&mut f.storage, &run, &snapshot, None, "op_hide_guard").unwrap();
+    let original = run_projection_record(&f.storage, "run_hide_guard").unwrap();
+    for state in ["preparing", "running", "cancelling", "recoveryRequired"] {
+        let mut changed = original.clone(); changed.insert("state".into(), json!(state)); changed["record"]["state"] = json!(state);
+        f.storage.upsert_projection_record("run", "run_hide_guard", &format!("op_hide_{state}"), None, changed).unwrap();
+        assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(chat_id), "removeChat", &format!("req_hide_{state}")).is_err());
+    }
+    let mut unresolved = original.clone(); unresolved.insert("recovery".into(), json!({"state":"unresolved"}));
+    f.storage.upsert_projection_record("run", "run_hide_guard", "op_hide_unresolved", None, unresolved).unwrap();
+    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_hide_unresolved").is_err());
+    f.storage.upsert_projection_record("run", "run_hide_guard", "op_hide_terminal", None, original).unwrap();
+    let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
+    let lock = f.storage.projection_record("lock", &lock_id).unwrap().unwrap();
+    for (field, value) in [("poisoned", json!(true)), ("recovery_required", json!(true)), ("writer_run_id", json!("run_hide_guard"))] {
+        let mut changed = lock.clone(); changed.insert(field.into(), value);
+        f.storage.upsert_projection_record("lock", &lock_id, &format!("op_hide_lock_{field}"), None, changed).unwrap();
+        assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", &format!("req_hide_lock_{field}")).is_err());
+    }
+    assert_eq!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"][0]["chatId"], chat_id);
+}
+
+#[test]
+fn coordinator_v2_preserves_legacy_snapshot_and_runs_read_only_to_waiting_for_user() {
+    let mut f = Fixture::with_durable_output(true);
+    let old_snapshot = f.snapshot("req_coordinator_old_snapshot");
+    let old = f.create_chat(&old_snapshot, "old goal", "req_coordinator_old_chat");
+    let roles = json!([
+        {"roleId":"coordinator","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"readOnly"},
+        {"roleId":"planning","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"},
+        {"roleId":"design","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"readOnly"},
+        {"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},
+        {"roleId":"review","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"}
+    ]);
+    let settings = f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), "req_coordinator_settings").unwrap();
+    assert_eq!(settings["schemaVersion"], 2);
+    assert!(f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), "req_coordinator_stale").is_err());
+    let mut invalid = roles.clone();
+    invalid[0]["permission"] = json!("workspaceWrite");
+    assert!(f.chats.update_role_settings(&mut f.storage, &f.project_id, 2, invalid, "req_coordinator_write").is_err());
+    let snapshot = f.snapshot("req_coordinator_snapshot");
+    let chat = f.chats.create_chat(&mut f.storage, &f.projects, snapshot["preparationId"].as_str().unwrap(), &f.project_id, snapshot["worktreeId"].as_str().unwrap(), snapshot["workspaceIdentity"].as_str().unwrap(), "Explain this project", 2, "req_coordinator_chat").unwrap().result;
+    assert_eq!(chat["schemaVersion"], 2);
+    assert_eq!(chat["roleSnapshots"], roles);
+    let old_detail = f.chats.get_chat(&f.storage, old["chatId"].as_str().unwrap(), 0, None, 10, false).unwrap();
+    assert_eq!(old_detail["chat"], old);
+    let mut changed = roles.clone();
+    changed[0]["modelSelector"] = json!("future-model");
+    f.chats.update_role_settings(&mut f.storage, &f.project_id, 2, changed, "req_coordinator_edit").unwrap();
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::CleanReadOnly);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let message_id = initial_message_id(&f, chat_id);
+    let started = runtime.start_agent(&mut f.storage, &mut f.projects, AgentRunStartRequestV1 {
+        chat_id: chat_id.into(), role_id: "coordinator".into(), input_message_ids: vec![message_id], expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+    }, "req_coordinator_start").unwrap();
+    let run_id = started.result["runId"].as_str().unwrap();
+    drain_actual_scenario(&mut f, &mut runtime, run_id);
+    let detail = f.chats.get_chat(&f.storage, chat_id, 0, None, 50, true).unwrap();
+    assert_eq!(detail["chat"]["state"], "waitingForUser");
+    assert_eq!(detail["chat"]["roleSnapshots"], roles);
+    let run = f.storage.projection_record("run", run_id).unwrap().unwrap();
+    assert_eq!(run["record"]["selectedProfile"]["roleId"], "coordinator");
+    assert_eq!(run["record"]["selectedProfile"]["permission"], "readOnly");
+    assert_eq!(run["record"]["state"], "succeeded");
+    assert!(detail["messages"].as_array().unwrap().iter().any(|message| message["roleId"] == "coordinator"));
+}
+
+#[test]
+fn app_defaults_preserve_coordinator_and_four_team_roles() {
+    let mut fixture = Fixture::with_durable_output(true);
+    let original = fixture.projects.app_role_defaults().unwrap();
+    let legacy = original["roles"].as_array().unwrap();
+    let mut coordinator = legacy[0].clone();
+    coordinator["roleId"] = json!("coordinator");
+    let mut design = legacy[0].clone();
+    design["roleId"] = json!("design");
+    design["modelSelector"] = json!("design-model");
+    let roles = json!([coordinator, legacy[0], design, legacy[1], legacy[2]]);
+    let legacy_fixture = Fixture::new();
+    let before = legacy_fixture.projects.app_role_defaults().unwrap();
+    assert!(legacy_fixture.projects.update_app_role_defaults(&legacy_fixture.storage, 1, roles.clone()).is_err());
+    assert_eq!(legacy_fixture.projects.app_role_defaults().unwrap(), before);
+    let saved = fixture
+        .projects
+        .update_app_role_defaults(&fixture.storage, 1, roles.clone())
+        .unwrap();
+    assert_eq!(saved["schemaVersion"], 2);
+    assert_eq!(
+        fixture.projects.app_role_defaults().unwrap()["roles"],
+        roles
+    );
+    let seeded = fixture
+        .chats
+        .default_role_settings(
+            &mut fixture.storage,
+            &fixture.projects,
+            &fixture.project_id,
+            "four_roles_seed",
+        )
+        .unwrap();
+    assert_eq!(seeded["schemaVersion"], 2);
+    assert_eq!(seeded["roles"], roles);
+    validate_g5_payload_v1("projectRoleSettings", &seeded).unwrap();
+}
+
+#[test]
+fn project_automation_consent_is_explicit_durable_and_revocable() {
+    use crate::project::automation_permissions::AutomationPermissions;
+    let mut f = Fixture::new();
+    let initial = f.projects.automation_permissions(&f.storage, &f.project_id).unwrap();
+    assert!(!initial.files && !initial.commands);
+    assert!(f.projects.automation_permissions(&f.storage, "unknown").is_err());
+    f.projects.automation_settings(&mut f.storage, &f.project_id, Some(AutomationPermissions {files:true,commands:true}), "req_consent").unwrap();
+    let saved = f.projects.automation_permissions(&f.storage, &f.project_id).unwrap();
+    assert!(saved.files && saved.commands);
+    let database = f.storage.path().to_owned();
+    drop(f.storage);
+    f.storage = Storage::open(&database).unwrap();
+    f.projects.automation_settings(&mut f.storage, &f.project_id, Some(AutomationPermissions::default()), "req_revoke_consent").unwrap();
+    assert!(!f.projects.automation_permissions(&f.storage, &f.project_id).unwrap().commands);
+    let database = f.storage.path().to_owned();
+    drop(f.storage);
+    f.storage = Storage::open(&database).unwrap();
+}

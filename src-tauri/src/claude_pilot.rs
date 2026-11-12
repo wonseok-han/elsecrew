@@ -1,1 +1,1 @@
-pub(crate) use hello_agent_core::claude_pilot::*;
+pub(crate) use elsecrew_core::claude_pilot::*;

@@ -153,7 +153,7 @@ test("SQLite v1 migration이 7개 테이블과 durable operation ledger를 고�
 });
 
 test("모든 SQLite connection이 foreign_keys를 직접 켜고 1을 검증한 뒤에만 저장한다", () => {
-  const temporaryRoot = mkdtempSync(join(tmpdir(), "hello-agent-g3-fk-"));
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "elsecrew-g3-fk-"));
   const databasePath = join(temporaryRoot, "storage.sqlite3");
   try {
     const migrationConnection = new DatabaseSync(databasePath, {

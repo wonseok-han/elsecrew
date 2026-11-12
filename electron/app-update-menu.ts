@@ -22,7 +22,7 @@ export function installAppUpdateMenu(restart: (install: () => void) => Promise<b
   const controller = new AppUpdateController(autoUpdater, restart, refresh);
   function refresh(): void {
     const menu = Menu.getApplicationMenu();
-    const item = menu?.getMenuItemById("hello-agent-app-update");
+    const item = menu?.getMenuItemById("elsecrew-app-update");
     if (item) {
       item.label = labels[controller.state];
       item.enabled = !busy && !["checking", "downloading", "restarting"].includes(controller.state);
@@ -33,7 +33,7 @@ export function installAppUpdateMenu(restart: (install: () => void) => Promise<b
     { role: "fileMenu" }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" },
   ]);
   const updateMenu = Menu.buildFromTemplate([{
-    id: "hello-agent-app-update", label: labels[controller.state],
+    id: "elsecrew-app-update", label: labels[controller.state],
     click: async () => {
       if (busy) return;
       busy = true; refresh();

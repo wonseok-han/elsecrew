@@ -347,7 +347,7 @@ function App() {
           </button>
         </div>
         <p className="eyebrow">{t("app.eyebrow")}</p>
-        <h1>Hello, Agent</h1>
+        <h1>Elsecrew</h1>
         <p className="tagline">{t("app.tagline")}</p>
       </header>
 
@@ -529,7 +529,7 @@ function AgentRow({ id, onSetup }: { id: AgentId; onSetup: () => void }) {
   );
 }
 
-// Hello, Agent 앱 자체의 자동 업데이트 배너. 시작 시 새 버전을 확인하고, 있으면
+// Elsecrew 앱 자체의 자동 업데이트 배너. 시작 시 새 버전을 확인하고, 있으면
 // 한 번의 클릭으로 내려받아 설치·재시작한다(홈의 에이전트 업데이트와는 별개다).
 function AppUpdateBanner() {
   const { t } = useI18n();

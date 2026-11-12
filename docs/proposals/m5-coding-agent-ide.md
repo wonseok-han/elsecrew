@@ -43,7 +43,7 @@ M5의 목적은 기능 목록을 한꺼번에 확정하는 것이 아니라, **�
 8. 기획·코딩·검토 같은 **역할마다 에이전트 런타임, 모델, 추론 수준을 설정**할 수 있어야 한다. 예: `기획 = Codex / Sol / medium`, `코딩 = Claude Code / Opus 5`.
 9. 에이전트 작업은 원본 Git 저장소를 쓰지 않는 **원본과 분리된 작업 복사본(standalone snapshot)** 으로 격리하고, 변경 파일과 줄 diff를 명확히 보여 준다.
 10. IDE이므로 파일 탐색과 **실제 코드 편집**은 M5 완료 범위에 포함한다. 다만 VS Code의 모든 기능을 복제하지는 않는다.
-11. `Hello, Agent`라는 제품명은 M5의 성격에 맞는 새 이름으로 바꾼다. 새 이름과 변경 범위는 별도 결정한다.
+11. `Elsecrew`라는 제품명은 M5의 성격에 맞는 새 이름으로 바꾼다. 새 이름과 변경 범위는 별도 결정한다.
 12. M5 통합 브랜치는 `m5/coding-agent-ide`다. Claude·Codex 기능 브랜치는 이 브랜치로만 합치며, `main` 병합은 M5 전체 완료·검증 뒤 사용자 승인 사항이다.
 13. 온보딩의 첫 팀 작업은 별도 샘플이 아니라 **사용자가 명시적으로 고른 실제 프로젝트와 실제 목표**에서 진행한다. 사용자는 격리 작업·팀 대화·diff 검토를 별도 연습이 아니라 실제 일을 하며 자연스럽게 익힌다.
 14. 초보자를 위한 **에이전트 선택 → 기기 진단 → 설치 → 로그인 → 연결 확인** 단계를 유지한다. `에이전트 연결`은 설치·로그인을 생략하는 새 단계가 아니라, 이 절차가 끝나 실제로 사용할 수 있음을 확인한 결과다.
@@ -90,7 +90,7 @@ M0~M3 위저드·홈 + M4 HandoffPilot  →  M5 코딩 에이전트 작업대
 
 ### 2.4 이름 변경
 
-**확정**: `Hello, Agent`는 M5 제품 정의에 맞는 새 이름으로 바꾼다.
+**확정**: `Elsecrew`는 M5 제품 정의에 맞는 새 이름으로 바꾼다.
 
 **확정**: 이름을 먼저 짓고 제품을 맞추지 않는다. 작명은 M5.0 개발과 분리해 보류하며, 제품 셸과 첫 수직 루프가 실제로 동작한 뒤 다시 검토한다.
 
@@ -497,7 +497,7 @@ G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exac
 - **Claude 후보**: 공식 [headless](https://code.claude.com/docs/en/headless)는 `-p`/stream-json과 system/init·assistant/result 흐름을 설명한다. [SDKSystemMessage](https://code.claude.com/docs/en/agent-sdk/typescript#sdksystemmessage)의 MCP/plugin 항목은 객체이며 기존 fake의 문자열 배열과 다르다. 기존 fake 전용 `configIsolation: managedOnly`를 실제 wire가 제공한다고 가정하지 않는다. 로컬 help의 `--safe-mode`·`--restricted`·설정/MCP 제한 옵션을 버전별 isolation 후보로 검증해야 한다. `--bare`는 구독 OAuth를 읽지 않으므로 기존 로그인 재사용의 대체로 몰래 선택하지 않는다.
 - **공통 연결 순서**: 버전 고정 offline wire 회귀→provider별 실제 설정·모델/권한의 실행 전 검증→공개 메시지만 정규화→같은 snapshot/run 원장·취소/종료/복구 연결→사용자 승인 macOS smoke다. private reasoning/tool raw output·토큰·auth 원문은 채팅이나 durable public evidence에 넣지 않는다. vendor 결과 수신과 자손 소멸 관측을 구분하고 기존 poisoned/복구 계약을 유지한다.
 
-이번 확인은 공식 문서, 로컬 version/help, Codex schema 생성까지만 수행했다. 모델 요청·로그인/인증 조회·사용자 프로젝트 실행은 없었다. local schema는 `/tmp/hello-agent-provider-schema.3kFDdj`에 있으며 이 경로는 제품 의존성이 아니다. CLI 선택·인증 격리의 최종 구현 방식과 실제 smoke 승인은 남아 있다.
+이번 확인은 공식 문서, 로컬 version/help, Codex schema 생성까지만 수행했다. 모델 요청·로그인/인증 조회·사용자 프로젝트 실행은 없었다. local schema는 `/tmp/elsecrew-provider-schema.3kFDdj`에 있으며 이 경로는 제품 의존성이 아니다. CLI 선택·인증 격리의 최종 구현 방식과 실제 smoke 승인은 남아 있다.
 
 **2026-09-03 승인 후 로그인 상태 관측**: 사용자는 모델 호출 없는 상태 조회를 승인했다. `/private/tmp`에서 exact CLI의 `codex login status`는 exit 0/ChatGPT credentials present였고, `claude auth status --json`은 격리 환경 exit 1/false와 자격 증명 접근 허용 환경 exit 0/true·claude.ai로 달랐다. 격리 환경의 false를 전역 미로그인으로 단정하지 않는다. 결과는 boolean/분류/exit만 남겼고 계정 식별자·토큰·원문 출력은 저장하지 않았다. 이는 로그인 정보 관측이며 토큰의 실제 요청 유효성·모델 가용성·설정 격리·제품 연결 성공 증거가 아니다. [Codex 공식 CLI reference](https://developers.openai.com/codex/cli/reference/#codex-login)도 status exit 0을 credentials present로 설명한다. 새 로그인·토큰 발급·모델 요청·사용자 프로젝트 실행은 하지 않았다.
 
@@ -546,7 +546,7 @@ G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exac
 
 실제 쓰기 역할을 열기 전, 공급자 내부 sandbox 설정 대조와 앱이 강제하는 원본 보호를 구분한다. [OpenAI 공식 보안 문서](https://learn.chatgpt.com/docs/agent-approvals-security)는 macOS 명령 실행에 Seatbelt를 사용하며 승인 정책과 sandbox를 별개로 설명한다. 이는 우리 앱의 app-server 전체 startup·상속 자원·원본 보호 증명은 아니다.
 
-`tests/macos_sandbox_probe.rs`는 임시 파일만 사용하는 opt-in OS 기제 실험이다. 실행: `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo test -p hello-agent-sidecar --test macos_sandbox_probe -- --ignored --nocapture`. 이미 sandbox 안인 환경에서는 `sandbox_apply: Operation not permitted`로 실패할 수 있으며 이를 성공이나 제품 fallback 조건으로 처리하지 않는다.
+`tests/macos_sandbox_probe.rs`는 임시 파일만 사용하는 opt-in OS 기제 실험이다. 실행: `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo test -p elsecrew-sidecar --test macos_sandbox_probe -- --ignored --nocapture`. 이미 sandbox 안인 환경에서는 `sandbox_apply: Operation not permitted`로 실패할 수 있으며 이를 성공이나 제품 fallback 조건으로 처리하지 않는다.
 
 2026-09-28 로컬 관측은 다음과 같다. broad allow/default + 경로별 write 제한은 작업 폴더 쓰기를 허용하고 외부 직접/심볼릭 링크/부모 경로/자식 프로세스 쓰기·외부 삭제/이동·실행 중 외부 hardlink 생성을 거절했다. 그러나 **sandbox 진입 전 열린 writable descriptor와 기존 hardlink로 원본 파일을 변경할 수 있었다.** 출력 `standalone_source_protection_candidate=false`가 판정이며 테스트 프로세스 exit 0은 이 정책의 제품 합격이 아니다. 외부 네트워크·Mach IPC·실제 vendor 호환성은 검증하지 않았다. 현재 제품에 이 정책을 적용하지 않는다.
 

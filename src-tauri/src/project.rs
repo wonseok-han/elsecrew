@@ -171,12 +171,12 @@ const CLAUDE_SAFE_SETTINGS: &str = r#"{
 ///
 /// **실제 경계는 `sandbox_mode`다**(§7.10.1.2와 같은 원칙 — 실측된 것만 경계로 센다).
 /// `on-request`의 구체적 동작은 아직 실측하지 않았다.
-const CODEX_SAFE_CONFIG_KO: &str = "# Hello, Agent가 만든 초보자 안전 설정
+const CODEX_SAFE_CONFIG_KO: &str = "# Elsecrew가 만든 초보자 안전 설정
 approval_policy = \"on-request\"
 sandbox_mode = \"workspace-write\"
 ";
 
-const CODEX_SAFE_CONFIG_EN: &str = "# Beginner-safe defaults created by Hello, Agent
+const CODEX_SAFE_CONFIG_EN: &str = "# Beginner-safe defaults created by Elsecrew
 approval_policy = \"on-request\"
 sandbox_mode = \"workspace-write\"
 ";
@@ -381,7 +381,7 @@ mod tests {
     #[test]
     fn scanned_projects_carry_whether_the_pilot_can_use_them() {
         let base = std::env::temp_dir().join(format!(
-            "hello-agent-scan-eligible-{}-{}",
+            "elsecrew-scan-eligible-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -431,7 +431,7 @@ mod tests {
     fn create_claude_project_with_safety_preset() {
         let base = std::env::temp_dir().join(format!("ha-base-{}", std::process::id()));
         std::fs::create_dir_all(&base).unwrap();
-        let name = format!("hello-agent-테스트-{}", std::process::id());
+        let name = format!("elsecrew-테스트-{}", std::process::id());
         let base_s = Some(base.display().to_string());
         let info = create(
             Agent::ClaudeCode,
@@ -608,7 +608,7 @@ mod tests {
     #[test]
     #[ignore = "claude 로그인 + 사용량 소모"]
     fn first_chat_on_this_machine() {
-        let home = std::env::temp_dir().join(format!("hello-agent-chat-{}", std::process::id()));
+        let home = std::env::temp_dir().join(format!("elsecrew-chat-{}", std::process::id()));
         std::fs::create_dir_all(&home).unwrap();
         let reply = tauri::async_runtime::block_on(run_first_chat(
             "claude-code".into(),

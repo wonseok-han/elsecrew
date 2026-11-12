@@ -181,7 +181,7 @@ mod tests {
     #[test]
     fn a_codex_without_its_shell_host_needs_repair() {
         let dir = std::env::temp_dir().join(format!(
-            "hello-agent-repair-{}-{}",
+            "elsecrew-repair-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

@@ -26,7 +26,7 @@
 
 ## 작업 복사본 준비 비용 분리
 
-`CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 cargo test --release -p hello-agent-sidecar --lib large_snapshot_phase_diagnostic -- --ignored --nocapture`는 기본 임시 fixture에1만 파일·1천 폴더 및5MiB 파일을 추가하고 source open, baseline capture, bundle export, baseline 재검증, snapshot 초기화, materialize+sync의 시간을 각각 출력한다. 추가 tree 루트까지 새 디렉터리는1001개다. 성공 시 TempDir가 생성 데이터를 정리한다.
+`CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 cargo test --release -p elsecrew-sidecar --lib large_snapshot_phase_diagnostic -- --ignored --nocapture`는 기본 임시 fixture에1만 파일·1천 폴더 및5MiB 파일을 추가하고 source open, baseline capture, bundle export, baseline 재검증, snapshot 초기화, materialize+sync의 시간을 각각 출력한다. 추가 tree 루트까지 새 디렉터리는1001개다. 성공 시 TempDir가 생성 데이터를 정리한다.
 
 이는 private 단계 비용 비교용이며 전체 create 경로의 원장/manifest/receipt 게시·안전 검사 순서나 UI 준비 시간의 대체물이 아니다. `diagnostic=true`, `gateEligible=false`를 유지한다. 기본 테스트에서 ignored이며 실제 계정·사용자 프로젝트·모델 호출은 사용하지 않는다. 단계별 지연을 확인하기 전 안전 검사 생략이나 동기화 완화를 근거 없이 적용하지 않는다.
 
@@ -70,7 +70,7 @@ renderer는 저장소 admission ready·빈 시작 화면·선택 차단 해제 �
 
 ### 앱 전체 재시작 후 저장 채팅 확인
 
-`node_modules/.bin/electron scripts/m5-project-reopen-smoke.cjs <앞선 project-ui 시험 폴더>`는 별도 Electron 프로세스로 이전 합성 시험의 userData를 다시 연다. OS 임시 폴더 바로 아래의 `hello-agent-project-ui-*`이며 앞선 `result.json`이 PASS/종료 accepted이고 원본이 복원된 경우만 받는다. 임의 사용자 프로젝트나 실제 앱 데이터 경로를 주지 않는다.
+`node_modules/.bin/electron scripts/m5-project-reopen-smoke.cjs <앞선 project-ui 시험 폴더>`는 별도 Electron 프로세스로 이전 합성 시험의 userData를 다시 연다. OS 임시 폴더 바로 아래의 `elsecrew-project-ui-*`이며 앞선 `result.json`이 PASS/종료 accepted이고 원본이 복원된 경우만 받는다. 임의 사용자 프로젝트나 실제 앱 데이터 경로를 주지 않는다.
 
 저장 프로젝트를 선택해 `Improve hello`와 `Second task`의 작업 복사본을 Monaco로 다시 열고 각각 저장된 편집/원래 내용이 유지되는지 확인한다. 새 폴더 선택·에이전트 실행은 하지 않는다. `reopen-result.json`은 정상 종료 수락 뒤에만 PASS가 되며 `reopen.png`를 함께 보존한다. 이는 정상 종료 후 프로젝트/채팅/파일 영속성 시험이며 강제 종료 복구, 실제 계정 로그인 유지, 실행 중인 에이전트 재시작의 증거는 아니다. 최신 `.vite/build`와 debug sidecar를 먼저 준비한다.
 
@@ -78,9 +78,9 @@ renderer는 저장소 admission ready·빈 시작 화면·선택 차단 해제 �
 
 macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sidecar를 먼저 빌드한 뒤 `pnpm m5:smoke:project-ui`로 실행한다. 스크립트 자체는 빌드하지 않으므로 오래된 산출물의 PASS를 최신 코드 증거로 쓰지 않는다. 실행할 때마다 임시 Git 프로젝트와 독립 userData를 만들며 사용자 프로젝트·선택된 에이전트·인증 정보를 사용하지 않는다. 실제 Electron/native sidecar를 통해 채팅 생성, Monaco 편집/저장, diff, 원본 불변, 반영 확인 취소, 두 채팅 사본 분리를 확인한다.
 
-- `HELLO_AGENT_SMOKE_APPLY=1 pnpm m5:smoke:project-ui`: 스크립트가 생성한 프로젝트만 명시 확인 UI로 적용 후 복원한다.
-- `HELLO_AGENT_SMOKE_NATIVE_INPUT=1 pnpm m5:smoke:project-ui`: 잠금 해제된 Mac에서 시험 창을 직접 활성화하고, `WAITING_FOR_NATIVE_INPUT` 뒤 편집기에 `edited in snapshot`을 입력한다. 포커스/입력을 각각 최대45초 기다리며 자동 insertText를 사용하지 않는다. 결과의 `inputMethod`로 기본 자동 삽입과 구분한다. 화면 잠금/입력 미확인은 실패로 보존하며 시험이 창을 활성화하지 못했다는 사실만으로 제품 입력 결함이라고 단정하지 않는다.
-- 위 설정에 `HELLO_AGENT_SMOKE_RELOAD=1`을 함께 주면 적용 후 renderer reload→저장 프로젝트/채팅 재선택→복원 경로를 포함한다. 전체 앱 재시작 검증은 아니다.
+- `ELSECREW_SMOKE_APPLY=1 pnpm m5:smoke:project-ui`: 스크립트가 생성한 프로젝트만 명시 확인 UI로 적용 후 복원한다.
+- `ELSECREW_SMOKE_NATIVE_INPUT=1 pnpm m5:smoke:project-ui`: 잠금 해제된 Mac에서 시험 창을 직접 활성화하고, `WAITING_FOR_NATIVE_INPUT` 뒤 편집기에 `edited in snapshot`을 입력한다. 포커스/입력을 각각 최대45초 기다리며 자동 insertText를 사용하지 않는다. 결과의 `inputMethod`로 기본 자동 삽입과 구분한다. 화면 잠금/입력 미확인은 실패로 보존하며 시험이 창을 활성화하지 못했다는 사실만으로 제품 입력 결함이라고 단정하지 않는다.
+- 위 설정에 `ELSECREW_SMOKE_RELOAD=1`을 함께 주면 적용 후 renderer reload→저장 프로젝트/채팅 재선택→복원 경로를 포함한다. 전체 앱 재시작 검증은 아니다.
 - 시작 화면의 빈 dock 부재, 목표 예시의 입력만 채우기/기존 초안 보호, 역할 설정 modal의 Escape→계속 편집→폐기·닫기/포커스 복원, 저장 후 재열기 및 원래 모델 복원도 같은 실행에서 확인한다. `START_AND_SETTINGS`는 중간 단계이며 마지막 PASS가 전체 시나리오 결과다. 저장 실패 주입과 메시지 스크롤은 별도 회귀가 필요하다.
 - 이 시각 검증은 앱 창을 표시하고 포커스를 가져온다. macOS에서는 window가 visible이어도 renderer가 hidden인 상태가 관측돼 Monaco 표시/캡처가 멈춘 적이 있어, 재진입 편집 전 창을 다시 활성화한다. `SECOND_CHAT_WINDOW`의 창/페이지 가시성 진단과 renderer 오류를 함께 기록한다. 제품의 background 정책은 변경하지 않는다.
 - PASS/FAIL JSON과 screenshot 경로를 출력하고 실패는 종료 코드1이다. 임시 프로젝트/userData는 성공·실패 모두 증거 확인을 위해 보존하며 자동 삭제하지 않는다. 이 실행은 실제 공급자·Windows·G6 합격을 대신하지 않는다.
@@ -89,7 +89,7 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 ### Native 대형 diff 진단
 
-`HELLO_AGENT_SMOKE_LARGE_DIFF=1 pnpm m5:smoke:project-ui`는 별도의500파일/20000변경 줄/10MiB Git diff 시나리오다. 임시 원본을 commit하고 앱이 만든 유일한 격리 snapshot의 fixture 파일만 변경한다. Git patch의 실제 byte/변경 줄/파일 개수를 검증하며 원본 Git 상태가 깨끗한지 확인한다. 실제 sidecar와 renderer를 거친 변경 목록·첫 파일 두 frame 관측을2000/1500ms와 비교한 뒤 정상 종료한다. 이 모드에서는 기존 두 채팅/반영 흐름을 실행하지 않으며 다른 대형/메모리/원본 적용 옵션과 결합하지 않는다. 결과는 `largeDiff`, `scenario:nativeLargeDiffOnly`로 구분한다. 단일 개발 빌드 진단이며 packaged/반복 p95/G6 합격을 뜻하지 않는다.
+`ELSECREW_SMOKE_LARGE_DIFF=1 pnpm m5:smoke:project-ui`는 별도의500파일/20000변경 줄/10MiB Git diff 시나리오다. 임시 원본을 commit하고 앱이 만든 유일한 격리 snapshot의 fixture 파일만 변경한다. Git patch의 실제 byte/변경 줄/파일 개수를 검증하며 원본 Git 상태가 깨끗한지 확인한다. 실제 sidecar와 renderer를 거친 변경 목록·첫 파일 두 frame 관측을2000/1500ms와 비교한 뒤 정상 종료한다. 이 모드에서는 기존 두 채팅/반영 흐름을 실행하지 않으며 다른 대형/메모리/원본 적용 옵션과 결합하지 않는다. 결과는 `largeDiff`, `scenario:nativeLargeDiffOnly`로 구분한다. 단일 개발 빌드 진단이며 packaged/반복 p95/G6 합격을 뜻하지 않는다.
 
 ### Native 프로젝트 반복 수집
 
@@ -101,9 +101,9 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 저장공간 관리: native 반복 collector는 앱 종료와 `shutdown=accepted`, 저장된 결과 일치를 확인한 뒤 각 합성 시험의 `project`/`userdata`만 정리한다. 첫 실패 데이터 한 건은 재현용으로 남긴다. 모든 회차의 JSON·로그·스크린샷과 FAIL 판정은 보존하며, 삭제를 거절하거나 실패하면 다음 앱을 시작하지 않는다. 이 정책은 실제 계정 시험, 제품 백업, 별도 renderer 측정기에는 적용하지 않는다.
 
-결과는 새 OS 임시 `hello-agent-native-metrics-*`의 measurement.json과 각 trial 로그에 남긴다. 실제 앱 종료를 기다린 뒤 다음 실행을 시작하며 종료 미확정/비정상 종료면 중단한다. 강제 종료나 증거 삭제는 하지 않는다. 정상 종료한 실패 표본도 제외하지 않고10회에 포함하며, 누락 수치의 p95는 null이다. 준비 실행 실패도 전체 FAIL로 남긴다.10개 값의 nearest-rank p95는 최대값이다. 기준 초과/흐름 실패는 exit1, 모두 통과해도 개발 빌드 진단이므로 NOT_READY/exit2다. 이 명령은 packaged·전체 RSS·stream·save race·종료 안전성 측정을 대신하지 않으며 `m5:test:performance` 게이트를 열지 않는다.
+결과는 새 OS 임시 `elsecrew-native-metrics-*`의 measurement.json과 각 trial 로그에 남긴다. 실제 앱 종료를 기다린 뒤 다음 실행을 시작하며 종료 미확정/비정상 종료면 중단한다. 강제 종료나 증거 삭제는 하지 않는다. 정상 종료한 실패 표본도 제외하지 않고10회에 포함하며, 누락 수치의 p95는 null이다. 준비 실행 실패도 전체 FAIL로 남긴다.10개 값의 nearest-rank p95는 최대값이다. 기준 초과/흐름 실패는 exit1, 모두 통과해도 개발 빌드 진단이므로 NOT_READY/exit2다. 이 명령은 packaged·전체 RSS·stream·save race·종료 안전성 측정을 대신하지 않으며 `m5:test:performance` 게이트를 열지 않는다.
 
-`HELLO_AGENT_SMOKE_LARGE_TREE=1 pnpm m5:smoke:project-ui`는 실제 임시 Git 프로젝트에 1,000폴더/10,000파일의 `aaa-tree` 하위 트리를 추가한다. 기존 시험용 hello.txt 및 선택적 large.txt는 이 숫자 밖이며 `controlFiles`로 별도 기록한다. 실제 sidecar→파일 패널에서 하위 트리 첫 페이지와 한 폴더를 열고 두 animation frame까지 관측한다. `largeTree` 결과에 시간·가상 목록 DOM 수를 보존하고 1,000/250ms·500노드 초과를 실패 처리한다. 원본 snapshot 생성 시간은 treeRootMs에 포함하지 않는다. 단일 개발 실행·첫 페이지 진단이며 packaged/10회 p95·전체 탐색/G6 합격을 대체하지 않는다. 큰 파일/메모리 옵션과 결합할 수 있다.
+`ELSECREW_SMOKE_LARGE_TREE=1 pnpm m5:smoke:project-ui`는 실제 임시 Git 프로젝트에 1,000폴더/10,000파일의 `aaa-tree` 하위 트리를 추가한다. 기존 시험용 hello.txt 및 선택적 large.txt는 이 숫자 밖이며 `controlFiles`로 별도 기록한다. 실제 sidecar→파일 패널에서 하위 트리 첫 페이지와 한 폴더를 열고 두 animation frame까지 관측한다. `largeTree` 결과에 시간·가상 목록 DOM 수를 보존하고 1,000/250ms·500노드 초과를 실패 처리한다. 원본 snapshot 생성 시간은 treeRootMs에 포함하지 않는다. 단일 개발 실행·첫 페이지 진단이며 packaged/10회 p95·전체 탐색/G6 합격을 대체하지 않는다. 큰 파일/메모리 옵션과 결합할 수 있다.
 
 대형 트리 모드의 최초 snapshot 및 새 채팅 생성 관측은 최대65초, 전체 시험은5분으로 제한한다. 이는 시험이15초에 먼저 quit을 요청하던 문제를 피하기 위한 관측 창이며 제품의60초 snapshot timeout이나 트리 성능 기준을 늘리지 않는다. 최초 프로젝트 선택→트리 표시 시간은 `SNAPSHOT_READY` 및 `largeTree.snapshotReadyMs`로 별도 보존한다.
 
@@ -149,9 +149,9 @@ RSS 원인 분리용으로 관측 앞뒤의 [CDP 프로세스 종류](https://ch
 
 격리 userData로 실행한 시험 앱의 PID를 확인한 뒤 `node scripts/m5-observe-process-memory.cjs PID 40 idle`을 실행하면250ms 간격40표본을 수집한다. `idle|loaded|retained` 표시는 관측자가 확인한 화면 단계이며 자동 판정하지 않는다. 앱을 실행/종료/변경하지 않고 원시 PID별 RSS를 새 OS 임시 폴더의 observation.json에 보존한다. 수집 오류는 부분 표본을 남기고 실패한다. `OBSERVED`/exit0은 수집 완료일 뿐 성능 PASS가 아니며 `diagnostic:true`, `gateEligible:false`다. 현재 자손만 관측하고 PID 재사용/부모 이탈을 검증하지 않으므로 실제 에이전트 전체 프로세스 게이트를 대신하지 않는다.
 
-`HELLO_AGENT_SMOKE_LARGE_FILE=1`을 추가하면 별도 생성 프로세스가 동일한 UTF-8 5MiB/100,000줄 fixture를 실제 Git 프로젝트에 넣는다. 실제 sidecar 읽기→Monaco 본문/입력 요소→두 frame 관측까지 renderer 시계로 재며 결과의 `largeFile.fileEditableMs`에 기록한다. 1,500ms 초과는 진단 실패다. 파일 생성용 캐시를 측정 앱의 main에 남기지 않는다. `HELLO_AGENT_SMOKE_MEMORY=1`과 결합하면 해당 파일 열기와 기존 두 채팅 흐름을 RSS 범위에 포함한다. 단일 관측이며 packaged/10회 p95/실제 입력 paint/4 stream 증거는 아니므로 `diagnostic:true`, `gateEligible:false`를 유지한다.
+`ELSECREW_SMOKE_LARGE_FILE=1`을 추가하면 별도 생성 프로세스가 동일한 UTF-8 5MiB/100,000줄 fixture를 실제 Git 프로젝트에 넣는다. 실제 sidecar 읽기→Monaco 본문/입력 요소→두 frame 관측까지 renderer 시계로 재며 결과의 `largeFile.fileEditableMs`에 기록한다. 1,500ms 초과는 진단 실패다. 파일 생성용 캐시를 측정 앱의 main에 남기지 않는다. `ELSECREW_SMOKE_MEMORY=1`과 결합하면 해당 파일 열기와 기존 두 채팅 흐름을 RSS 범위에 포함한다. 단일 관측이며 packaged/10회 p95/실제 입력 paint/4 stream 증거는 아니므로 `diagnostic:true`, `gateEligible:false`를 유지한다.
 
-`HELLO_AGENT_SMOKE_MEMORY=1 HELLO_AGENT_SMOKE_APPLY=1 HELLO_AGENT_SMOKE_RELOAD=1 pnpm m5:smoke:project-ui`는 기존 실제 UI 시나리오에 250ms RSS 수집을 추가한다. 시작 화면에서 1초 idle을 수집한 뒤 생성 프로젝트 편집/반영/reload/복원/두 채팅을 실행하고 프로젝트 화면을 정상적으로 닫아 60초 뒤 잔류량을 기록한다. 제품 GC 설정이나 캐시를 변경하지 않는다.
+`ELSECREW_SMOKE_MEMORY=1 ELSECREW_SMOKE_APPLY=1 ELSECREW_SMOKE_RELOAD=1 pnpm m5:smoke:project-ui`는 기존 실제 UI 시나리오에 250ms RSS 수집을 추가한다. 시작 화면에서 1초 idle을 수집한 뒤 생성 프로젝트 편집/반영/reload/복원/두 채팅을 실행하고 프로젝트 화면을 정상적으로 닫아 60초 뒤 잔류량을 기록한다. 제품 GC 설정이나 캐시를 변경하지 않는다.
 
 결과는 해당 시험 임시 폴더의 `memory.json`에 원시 PID별 표본과 함께 저장한다. 현재 Electron root의 자손인 sidecar도 합산하지만, 부모를 이탈한 프로세스와 실제 에이전트는 관측 범위 밖이다. 400/800/120MiB 기준 초과는 FAIL로 실행을 끝내며 기준 이내도 메모리 보고서는 `NOT_READY`, `diagnostic:true`, `gateEligible:false`다. 바깥 UI 시나리오의 PASS와 성능 보고서 판정을 구분한다. 작은 파일·한 차례 UI 흐름이므로 대형 파일/4 stream·전체 G6의 대체 증거로 사용하지 않는다. 샘플러 실패나 시나리오 중단 시 불완전 표본과 오류를 보존한다.
 
@@ -171,17 +171,17 @@ clean `m5/coding-agent-ide`에서 `pnpm run m5:measure:sidecar-startup`을 실�
 
 ### Native 저장 경합 관측
 
-종료 관측은 `node scripts/m5-save-race-metrics.mjs --termination`으로 같은 수집기를 사용한다. 기존 `binary_cancel_` 두 시험을 release/locked·직렬 실행해 정상 중단과 불확실 종료/명시 복구의 JSON을 모두 요구한다. 관측 자손2개 이상·별도 세션 자손1개 이상·관측 생존0·불확실 상태 보고·정상 종료를 대조하며 한쪽 누락/중복/값 불일치는 FAIL이다. libtest가 JSON 앞에 붙이는 정확한 두 시험 이름만 허용한다. OS 임시 `hello-agent-termination-metrics-*`에 원시 로그와 관측을 보존하며 정상 자료도 NOT_READY/exit2다. 대상은 시험 전용 프로세스이고 실제 공급자/사용자 앱은 실행하지 않는다. 독립적으로 재부모화된 orphan 전체, 실제 공급자 및 전체 G6 종료 안전성의 증거는 아니며 외부 관측기도 제품과 같은 OS probe 구현을 공유한다.
+종료 관측은 `node scripts/m5-save-race-metrics.mjs --termination`으로 같은 수집기를 사용한다. 기존 `binary_cancel_` 두 시험을 release/locked·직렬 실행해 정상 중단과 불확실 종료/명시 복구의 JSON을 모두 요구한다. 관측 자손2개 이상·별도 세션 자손1개 이상·관측 생존0·불확실 상태 보고·정상 종료를 대조하며 한쪽 누락/중복/값 불일치는 FAIL이다. libtest가 JSON 앞에 붙이는 정확한 두 시험 이름만 허용한다. OS 임시 `elsecrew-termination-metrics-*`에 원시 로그와 관측을 보존하며 정상 자료도 NOT_READY/exit2다. 대상은 시험 전용 프로세스이고 실제 공급자/사용자 앱은 실행하지 않는다. 독립적으로 재부모화된 orphan 전체, 실제 공급자 및 전체 G6 종료 안전성의 증거는 아니며 외부 관측기도 제품과 같은 OS probe 구현을 공유한다.
 
-`node scripts/m5-save-race-metrics.mjs`는 아래 기존 시험 하나를 release/locked로 실행하고 OS 임시 `hello-agent-save-race-metrics-*`의 `cargo.log`와 `measurement.json`에 보존한다. 전후 Git HEAD/status, Cargo 종료, 정확히 하나의 완료 관측,100개 순서·두 채팅 교대·개별 보존/충돌/대조 저장 결과를 검사한다. Rust 동시 실행은4 이하이며 다른 무거운 시험과 동시에 실행하지 않는다. 정상 관측도 partial diagnostic이므로 NOT_READY/exit2이고 실패는 exit1이다. 프로세스를 시간 초과로 강제 종료하거나 실패 fixture를 자동 삭제하지 않는다. 전체 G6용 canonical measurement.json을 생성하지 않는다.
+`node scripts/m5-save-race-metrics.mjs`는 아래 기존 시험 하나를 release/locked로 실행하고 OS 임시 `elsecrew-save-race-metrics-*`의 `cargo.log`와 `measurement.json`에 보존한다. 전후 Git HEAD/status, Cargo 종료, 정확히 하나의 완료 관측,100개 순서·두 채팅 교대·개별 보존/충돌/대조 저장 결과를 검사한다. Rust 동시 실행은4 이하이며 다른 무거운 시험과 동시에 실행하지 않는다. 정상 관측도 partial diagnostic이므로 NOT_READY/exit2이고 실패는 exit1이다. 프로세스를 시간 초과로 강제 종료하거나 실패 fixture를 자동 삭제하지 않는다. 전체 G6용 canonical measurement.json을 생성하지 않는다.
 
-`CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 CARGO_INCREMENTAL=0 cargo test -p hello-agent-sidecar --locked -j4 --test stdio_process binary_workspace_save_races_preserve_external_bytes_across_two_chats -- --ignored --nocapture`는 생성한 Git 프로젝트와 실제 `--stdio` sidecar에서 두 채팅의 `workspace.file.save` begin/chunk/commit을 실행한다. 100회 동안 두 사본을 번갈아 선택하고 begin 또는 chunk 이후 외부 내용을 써 commit 충돌을 유도한다. 각 충돌의 명시 응답·외부 바이트 보존·다른 채팅/원본 불변을 검사한 뒤, 최신 버전으로 정상 저장되는지 대조한다.
+`CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 CARGO_INCREMENTAL=0 cargo test -p elsecrew-sidecar --locked -j4 --test stdio_process binary_workspace_save_races_preserve_external_bytes_across_two_chats -- --ignored --nocapture`는 생성한 Git 프로젝트와 실제 `--stdio` sidecar에서 두 채팅의 `workspace.file.save` begin/chunk/commit을 실행한다. 100회 동안 두 사본을 번갈아 선택하고 begin 또는 chunk 이후 외부 내용을 써 commit 충돌을 유도한다. 각 충돌의 명시 응답·외부 바이트 보존·다른 채팅/원본 불변을 검사한 뒤, 최신 버전으로 정상 저장되는지 대조한다.
 
 정상 종료 뒤 출력하는 `native-workspace-save-races` JSON에는100개 개별 관측과 overwrite/미보고 충돌/교차 채팅 쓰기 카운터를 남긴다. 실패한 assertion은 테스트 실패로 남으며 완료 JSON을 만들지 않는다. 성공한 임시 프로젝트/DB는 종료 확인 후 정리하고 실패 데이터는 진단용으로 보존한다. 일반 검사에서는 ignored이며 명시 실행한다. 이는 commit 전 제어된 순서의 실제 프로토콜 관측이고, packaged UI·에이전트 동시 쓰기·모든 OS 스케줄링 경합의 증거는 아니므로 diagnostic=true/gateEligible=false다. 전체 G6 수집기의 대체물이 아니다.
 
 ### 단일 채팅 renderer 입력 스트림 진단
 
-종료 관측은 `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 CARGO_INCREMENTAL=0 cargo test -p hello-agent-sidecar --locked -j4 --test stdio_process binary_cancel_ -- --nocapture`로 실행한다. 기존 취소 fixture의 leaf는 `setsid`로 별도 OS 세션에 진입한다. 시험 프로세스는 취소 전 부모/leaf의 PID·시작 시각과 leaf의 세션 ID를 확인하고, 취소 후 각 신원 소멸과 sidecar 정상 종료를 검사한다. uncertain 시나리오의 복구 전 quit 차단도 유지한다. 실제 공급자·독립적으로 재부모화된 orphan·packaged 통합은 검증하지 않으며 core OS probe를 공유한다. 결과는 diagnostic=true/gateEligible=false다.
+종료 관측은 `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 CARGO_INCREMENTAL=0 cargo test -p elsecrew-sidecar --locked -j4 --test stdio_process binary_cancel_ -- --nocapture`로 실행한다. 기존 취소 fixture의 leaf는 `setsid`로 별도 OS 세션에 진입한다. 시험 프로세스는 취소 전 부모/leaf의 PID·시작 시각과 leaf의 세션 ID를 확인하고, 취소 후 각 신원 소멸과 sidecar 정상 종료를 검사한다. uncertain 시나리오의 복구 전 quit 차단도 유지한다. 실제 공급자·독립적으로 재부모화된 orphan·packaged 통합은 검증하지 않으며 core OS probe를 공유한다. 결과는 diagnostic=true/gateEligible=false다.
 
 현재 renderer를 빌드한 뒤 `M5_MEASURE_MESSAGE_PAINT=1 M5_RENDERER_DIR="$PWD/.vite/renderer/main_window" node_modules/.bin/electron tests/m5-renderer-smoke-runner.cjs`로 기존 합성 화면 회귀에50회/초·3000메시지 관측을 추가할 수 있다. 관측은 renderer performance.now 발송 시각부터 메시지 DOM이 연속 두 animation frame에 나타날 때까지다. 지연된 발송은 schedulingDelayMs로 보존하며 매 메시지 표본·미관측 ID·최대값을 독립 userData의 message-paint.json에 저장한다.
 
@@ -253,7 +253,7 @@ clean checkout에서 `pnpm run m5:measure:renderer`를 실행한다. 현재 prod
 
 ### 최적화된 장시간 출력 QA 빌드 경계
 
-`hello-agent-sidecar`의 명시적 Cargo feature `qa-output-fixtures`는 release 최적화를 유지하면서 `--stdio-agent-fixture long-stream`과 `paced-long-stream`을 시험하기 위한 진입점이다. 기본 feature는 아니며 일반 release의 거절 경계와 `--stdio` 실제 공급자 선택은 유지한다. 제품 staging은 이 feature를 포함한 Cargo 산출물을 거절한다.
+`elsecrew-sidecar`의 명시적 Cargo feature `qa-output-fixtures`는 release 최적화를 유지하면서 `--stdio-agent-fixture long-stream`과 `paced-long-stream`을 시험하기 위한 진입점이다. 기본 feature는 아니며 일반 release의 거절 경계와 `--stdio` 실제 공급자 선택은 유지한다. 제품 staging은 이 feature를 포함한 Cargo 산출물을 거절한다.
 
 후속 수집기는 별도 QA 앱 경로와 임시 userData를 사용하고 제품 `out` 앱을 교체하지 않아야 한다. renderer/main 원본 및 설정 차이를 기록하고, QA 실행 파일을 제품과 동일한 바이너리라고 주장하지 않는다. 단일 run 3,000개·4채팅·실제 발행 간격·전체 기록 대조·보이는 채팅의 paint·숨김/미관측 구분·정상 종료·임시 데이터 정리를 함께 수집해야 한다. `node scripts/m5-package-output-qa.mjs`는 fresh 임시 root에 QA 앱을 제작한다(자동 실행하지 않음). 출력된 build.json의 appDirectory 아래 앱을 실행하면 고정 QA main이 네 채팅 long-stream 진단을 수행한다. 결과와 build 메타데이터를 함께 보존하고 정상 종료/관측 PID 부재/DB clean 확인 후 생성한 QA 앱과 fixture root를 정리한다. 아래 반복 수집기도 전체 G6 수집을 대체하지 않으며 결과는 diagnostic/gateEligible:false다.
 
@@ -263,7 +263,7 @@ QA 출력 결과의 `generationSummary`는4개 run의 전체12,000 persisted row
 
 clean checkout에서 `node scripts/m5-repeat-output-qa.mjs`를 실행하면 QA 앱을 한 번 빌드하고 준비1회+측정10회를 순차 실행한다. 각 회차의 source HEAD/상태와 app.asar/sidecar 지문을 대조하며 전체 생성 기록 요약을 원시 row에서 다시 계산한다. 실제 관측된 지연 초과는 버리지 않고 측정10회의 최대값에 포함한다. 숨김·잘림·누락은 중단 사유이며 실패 회차를 자동 재시도하거나 제외하지 않는다.
 
-결과는 임시 `hello-agent-output-series-*`의 series.json과 trial별 JSON/PNG/log에 남는다. 각 fixture는 정상 종료 응답, 관측 PID 부재, DB clean 표시를 대조한 뒤에만 삭제한다. 종료가 불명확하면 앱을 강제 종료하지 않고 QA 패키지와 fixture를 보존한다. 확실히 종료한 fixture는 측정 실패에도 정리하고 작은 증거를 남긴다. QA 패키지는 모든 회차와 집계가 NOT_READY로 끝난 경우에만 자동 정리한다. 실패·중단 때는 원인 확인을 위해 패키지와 build.json을 보존한다.
+결과는 임시 `elsecrew-output-series-*`의 series.json과 trial별 JSON/PNG/log에 남는다. 각 fixture는 정상 종료 응답, 관측 PID 부재, DB clean 표시를 대조한 뒤에만 삭제한다. 종료가 불명확하면 앱을 강제 종료하지 않고 QA 패키지와 fixture를 보존한다. 확실히 종료한 fixture는 측정 실패에도 정리하고 작은 증거를 남긴다. QA 패키지는 모든 회차와 집계가 NOT_READY로 끝난 경우에만 자동 정리한다. 실패·중단 때는 원인 확인을 위해 패키지와 build.json을 보존한다.
 
 이 수집기는 QA artifact·표본 live latency·생성 timestamp·샘플 RSS 진단이다. 모든 행 receipt/paint·닫기 후 retained memory·다른 G6 workload를 대체하지 않으며 기준 이내여도 NOT_READY/exit2다. 관측 실패나 집계 기준 초과는 FAIL/exit1이다.
 

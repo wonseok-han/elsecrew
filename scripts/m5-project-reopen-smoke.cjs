@@ -7,7 +7,7 @@ const candidate = process.argv[2];
 if (!candidate || process.platform !== 'darwin') throw new Error('macOS generated fixture path required');
 const root = fs.realpathSync(candidate);
 const temporaryRoot = fs.realpathSync(os.tmpdir());
-if (path.dirname(root) !== temporaryRoot || !path.basename(root).startsWith('hello-agent-project-ui-')) throw new Error('Not a generated UI fixture');
+if (path.dirname(root) !== temporaryRoot || !path.basename(root).startsWith('elsecrew-project-ui-')) throw new Error('Not a generated UI fixture');
 const resultPath = path.join(root, 'result.json');
 if (!fs.lstatSync(resultPath).isFile() || fs.statSync(resultPath).size > 1024 * 1024) throw new Error('Invalid prior evidence');
 const previous = JSON.parse(fs.readFileSync(resultPath, 'utf8'));

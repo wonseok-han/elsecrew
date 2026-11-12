@@ -12,7 +12,7 @@ const { tmpdir } = require("node:os");
 
 // The normal parent test owns this root and removes it after confirmed exit.
 // Standalone diagnostic runs retain their evidence in the default temp root.
-const userData = mkdtempSync(resolve(process.env.M5_SMOKE_TEMP_ROOT || tmpdir(), "hello-agent-renderer-smoke-"));
+const userData = mkdtempSync(resolve(process.env.M5_SMOKE_TEMP_ROOT || tmpdir(), "elsecrew-renderer-smoke-"));
 app.setPath("userData", userData);
 
 const rendererDirectory = resolve(process.env.M5_RENDERER_DIR || "");
@@ -160,7 +160,7 @@ app.whenReady().then(async () => {
     [...document.querySelectorAll('[aria-label="Codex connection"] button')].find(b=>b.textContent==='Connect').click();
     await ${waitFor("document.querySelector('[aria-label=\"Codex connection\"]')?.textContent.includes('Codex is signed in')", "selected provider diagnosed and checked")};
     if (window.m5SmokeLoginRequests.some(r => r.provider === 'claude' && !['diagnose','status'].includes(r.action))) throw new Error('unselected Claude was checked');
-    if (JSON.parse(localStorage.getItem('hello-agent.m5.providers.v1')).providers.join() !== 'codex') throw new Error('single provider selection not saved');
+    if (JSON.parse(localStorage.getItem('elsecrew.m5.providers.v1')).providers.join() !== 'codex') throw new Error('single provider selection not saved');
     await ${waitFor("!document.querySelector('.m5-provider-selection').parentElement.hidden", "return to agent selection")};
     [...selection.querySelectorAll('button')].find(b => b.textContent === 'Connect Claude Code too').click();
     await ${waitFor("document.querySelector('[aria-label=\"Claude Code connection\"]')", "second agent added")};
@@ -168,7 +168,7 @@ app.whenReady().then(async () => {
     if (!document.querySelector('[aria-label="Codex connection"]') || !document.querySelector('[aria-label="Claude Code connection"]')) throw new Error('provider connection labels are not translated');
     await ${waitFor("[...document.querySelectorAll('[aria-label=\"Claude Code connection\"] button')].some(b=>b.textContent==='Connect' && !b.disabled)", "Claude explicit connect")};
     [...document.querySelectorAll('[aria-label="Claude Code connection"] button')].find(b=>b.textContent==='Connect').click();
-    if (localStorage.getItem('hello-agent.lang') !== 'en') throw new Error('language choice was not saved');
+    if (localStorage.getItem('elsecrew.lang') !== 'en') throw new Error('language choice was not saved');
     chooseLanguage('ko');
     await ${waitFor("document.querySelector('main').lang === 'ko' && document.querySelector('h1').textContent === '이어서 작업하기'", "Korean shell")};
     await ${waitFor("document.querySelector('[aria-label=\"진행 및 복구 상태\"] code')?.textContent === 'lock:before_chat'", "pre-chat lock notice")};
@@ -507,7 +507,7 @@ app.whenReady().then(async () => {
   await window.webContents.executeJavaScript(`(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"저장되지 않은 변경\"]')", "draft before responsive transition")};
     globalThis.narrowEditor = document.querySelector('.monaco-editor');
-    globalThis.wideLayout = localStorage.getItem('hello-agent.m5.dock.v1');
+    globalThis.wideLayout = localStorage.getItem('elsecrew.m5.dock.v1');
   })()`);
   window.setSize(760, 640);
   await window.webContents.executeJavaScript(`(async () => {
@@ -518,12 +518,12 @@ app.whenReady().then(async () => {
     tab('편집기').click();
     await ${waitFor("!document.querySelector('[data-panel=editor]').hidden", "narrow editor selected")};
     if (globalThis.narrowEditor !== document.querySelector('.monaco-editor') || !document.querySelector('[aria-label="저장되지 않은 변경"]')) throw new Error('responsive tabs lost draft or editor');
-    if (localStorage.getItem('hello-agent.m5.dock.v1') !== globalThis.wideLayout) throw new Error('narrow tabs overwrote wide layout');
+    if (localStorage.getItem('elsecrew.m5.dock.v1') !== globalThis.wideLayout) throw new Error('narrow tabs overwrote wide layout');
   })()`);
   window.setSize(960, 640);
   await window.webContents.executeJavaScript(`(async () => {
     await ${waitFor("!document.querySelector('.m5-dock-narrow-note') && document.querySelectorAll('.m5-dock-separator').length === 2", "wide layout restored")};
-    if (globalThis.narrowEditor !== document.querySelector('.monaco-editor') || localStorage.getItem('hello-agent.m5.dock.v1') !== globalThis.wideLayout || !document.querySelector('[aria-label="저장되지 않은 변경"]')) throw new Error('wide restoration lost layout or draft');
+    if (globalThis.narrowEditor !== document.querySelector('.monaco-editor') || localStorage.getItem('elsecrew.m5.dock.v1') !== globalThis.wideLayout || !document.querySelector('[aria-label="저장되지 않은 변경"]')) throw new Error('wide restoration lost layout or draft');
     delete globalThis.narrowEditor; delete globalThis.wideLayout;
   })()`);
   if (window.isVisible() || window.isFocused()) throw new Error("synthetic input must not capture desktop focus");
@@ -561,7 +561,7 @@ app.whenReady().then(async () => {
   await window.webContents.executeJavaScript(`(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"저장되지 않은 변경\"]')", "shortcut dirty draft")};
     const originalEditor = document.querySelector('.monaco-editor');
-    const savedLayout = localStorage.getItem('hello-agent.m5.dock.v1');
+    const savedLayout = localStorage.getItem('elsecrew.m5.dock.v1');
     const panelStates = () => [...document.querySelectorAll('.m5-dock-slot')].map(node => [node.dataset.panel, node.hidden, node.getAttribute('style')]);
     const originalPanels = JSON.stringify(panelStates());
     for (const language of ['en', 'ko']) {
@@ -570,7 +570,7 @@ app.whenReady().then(async () => {
       select.dispatchEvent(new Event('change', {bubbles:true}));
       await new Promise(resolve => setTimeout(resolve, 30));
       const dirtyLabel = language === 'en' ? 'Unsaved changes' : '저장되지 않은 변경';
-      if (localStorage.getItem('hello-agent.m5.dock.v1') !== savedLayout || JSON.stringify(panelStates()) !== originalPanels) throw new Error('language switch changed dock layout');
+      if (localStorage.getItem('elsecrew.m5.dock.v1') !== savedLayout || JSON.stringify(panelStates()) !== originalPanels) throw new Error('language switch changed dock layout');
       if (document.querySelector('main').lang !== language || document.querySelector('.monaco-editor') !== originalEditor || ![...document.querySelectorAll('[aria-label]')].some(node => node.getAttribute('aria-label') === dirtyLabel)) throw new Error('language switch lost the active editor draft');
     }
     document.querySelector('.monaco-editor textarea').focus();
@@ -836,9 +836,9 @@ app.whenReady().then(async () => {
     const guide = document.querySelector('.m5-project-guide');
     if (!guide.open) guide.querySelector('summary').click();
     await ${waitFor("document.querySelector('.m5-guide-next strong')?.textContent === '진행 확인'", "guide follows actual draft chat")};
-    if (JSON.parse(localStorage.getItem('hello-agent.m5.guide.v1:smoke_project')).chatId !== 'smoke_chat') throw new Error('guide did not pin first chat');
+    if (JSON.parse(localStorage.getItem('elsecrew.m5.guide.v1:smoke_project')).chatId !== 'smoke_chat') throw new Error('guide did not pin first chat');
     [...guide.querySelectorAll('button')].find(button => button.textContent === '안내 접고 직접 진행').click();
-    await ${waitFor("!document.querySelector('.m5-project-guide').open && JSON.parse(localStorage.getItem('hello-agent.m5.guide.v1:smoke_project')).dismissed", "guide dismissal persisted")};
+    await ${waitFor("!document.querySelector('.m5-project-guide').open && JSON.parse(localStorage.getItem('elsecrew.m5.guide.v1:smoke_project')).dismissed", "guide dismissal persisted")};
     leave.click();
     await ${waitFor("!document.querySelector('#m5-followup-text') && document.querySelector('h1').textContent === '이어서 작업하기'", "project and chat view cleared")};
     [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '처음부터 다시 확인').click();

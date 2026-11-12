@@ -41,7 +41,7 @@ function prepareFileInGenerator(source) {
   return {fileBytes:5242880, fileLines:100000};
 }
 async function mount(run, userData, chat) {
-  const root = fs.realpathSync(path.join(userData, 'com.wonseokhan.helloagent/m5/worktrees-v1'));
+  const root = fs.realpathSync(path.join(userData, 'com.wonseokhan.elsecrew/m5/worktrees-v1'));
   assert.match(chat.worktreeId, /^worktree_[a-zA-Z0-9_]+$/);
   const snapshot = fs.realpathSync(path.join(root, chat.worktreeId));
   assert.ok(snapshot.startsWith(root + path.sep), 'QA snapshot escaped its temporary root');

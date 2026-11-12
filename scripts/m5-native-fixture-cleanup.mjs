@@ -13,7 +13,7 @@ export function cleanupCompletedNativeFixture(sample) {
   }
   const root = result.root;
   if (typeof root !== 'string' || !path.isAbsolute(root)
-    || !/^hello-agent-project-ui-[a-zA-Z0-9]{6}$/.test(path.basename(root))
+    || !/^elsecrew-project-ui-[a-zA-Z0-9]{6}$/.test(path.basename(root))
     || fs.realpathSync(path.dirname(root)) !== fs.realpathSync(os.tmpdir())) {
     throw new Error('Native fixture cleanup target is outside the synthetic temp namespace');
   }

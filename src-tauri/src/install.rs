@@ -110,9 +110,9 @@ fn install_via_vendor_script(
     let script_dir = home.join(".claude");
     std::fs::create_dir_all(&script_dir).map_err(|e| AppError::classify(e.to_string()))?;
     let (url, script_name) = if cfg!(windows) {
-        (CLAUDE_SCRIPT_URL_WINDOWS, "hello-agent-install.ps1")
+        (CLAUDE_SCRIPT_URL_WINDOWS, "elsecrew-install.ps1")
     } else {
-        (CLAUDE_SCRIPT_URL_UNIX, "hello-agent-install.sh")
+        (CLAUDE_SCRIPT_URL_UNIX, "elsecrew-install.sh")
     };
     let script = script_dir.join(script_name);
     let status = crate::detect::command(&curl_path())
@@ -157,7 +157,7 @@ fn install_via_github_tarball(
     phase("download");
     let target = codex_target()?;
     let url = format!("{CODEX_RELEASE_BASE}/codex-{target}.tar.gz");
-    let cache = home.join(".cache").join("hello-agent");
+    let cache = home.join(".cache").join("elsecrew");
     std::fs::create_dir_all(&cache).map_err(|e| AppError::classify(e.to_string()))?;
     let tarball = cache.join("codex.tar.gz");
 
@@ -430,7 +430,7 @@ fn ensure_path(home: &Path) -> Result<Option<String>, AppError> {
         }
     }
     let zshrc = home.join(".zshrc");
-    let snippet = "\n# Added by Hello, Agent so coding agents are available in the terminal\nexport PATH=\"$HOME/.local/bin:$PATH\"\n";
+    let snippet = "\n# Added by Elsecrew so coding agents are available in the terminal\nexport PATH=\"$HOME/.local/bin:$PATH\"\n";
     use std::io::Write;
     let mut f = std::fs::OpenOptions::new()
         .create(true)
@@ -479,7 +479,7 @@ mod tests {
     use std::sync::Mutex;
 
     fn isolated_install(agent: Agent, tag: &str) -> (PathBuf, InstallResult) {
-        let home = std::env::temp_dir().join(format!("hello-agent-{tag}-{}", std::process::id()));
+        let home = std::env::temp_dir().join(format!("elsecrew-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&home).unwrap();
         let events = Mutex::new(Vec::new());
         let result = run_install(agent, &home, &|e| {

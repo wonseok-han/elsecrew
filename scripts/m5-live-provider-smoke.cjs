@@ -3,13 +3,13 @@ const { app, dialog } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-if (process.env.HELLO_AGENT_APPROVED_LIVE_SMOKE !== '1') throw new Error('Explicit live-run approval required');
-const selectedProvider = process.env.HELLO_AGENT_LIVE_PROVIDER;
+if (process.env.ELSECREW_APPROVED_LIVE_SMOKE !== '1') throw new Error('Explicit live-run approval required');
+const selectedProvider = process.env.ELSECREW_LIVE_PROVIDER;
 if (selectedProvider && !['codex', 'claude'].includes(selectedProvider)) throw new Error('Unknown live provider selection');
 const providers = selectedProvider ? [selectedProvider] : ['codex', 'claude'];
-const userData = process.env.HELLO_AGENT_LIVE_USER_DATA;
+const userData = process.env.ELSECREW_LIVE_USER_DATA;
 if (!userData || !path.isAbsolute(userData) || !fs.statSync(userData).isDirectory()) throw new Error('Existing app userData required');
-const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hello-agent-live-'));
+const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'elsecrew-live-'));
 const source = path.join(root, 'project');
 fs.mkdirSync(source);
 fs.writeFileSync(path.join(source, 'hello.txt'), 'original\n');
@@ -31,7 +31,7 @@ const childProcess = require('node:child_process');
 const originalSpawn = childProcess.spawn;
 childProcess.spawn = function (...args) {
   const child = Reflect.apply(originalSpawn, this, args);
-  if (typeof args[0] === 'string' && path.basename(args[0]) === 'hello-agent-sidecar') {
+  if (typeof args[0] === 'string' && path.basename(args[0]) === 'elsecrew-sidecar') {
     let tail = '';
     child.stderr?.on('data', chunk => {
       const text = tail + chunk.toString('utf8');
@@ -48,7 +48,7 @@ childProcess.spawn = function (...args) {
   return child;
 };
 // Separate read-only probe: a catalog PASS must never imply a model-run PASS.
-const catalogOnly = process.env.HELLO_AGENT_LIVE_MODEL_CHOICES_ONLY === '1';
+const catalogOnly = process.env.ELSECREW_LIVE_MODEL_CHOICES_ONLY === '1';
 let finished = false;
 const timer = setTimeout(() => finish('timeout'), 240000);
 function finish(error) {
@@ -99,7 +99,7 @@ app.on('browser-window-created', (_event, window) => {
         // The mounted login panel diagnoses and checks automatically. Let that
         // owner finish before issuing the runner's explicit request.
         await wait(`window.m5Login.request({action:'status',provider:${JSON.stringify(provider)}}).then(s=>!['installed','diagnosing','starting','verifying'].includes(s.state))`);
-        if (process.env.HELLO_AGENT_APPROVED_LOGIN_RECOVERY === provider) {
+        if (process.env.ELSECREW_APPROVED_LOGIN_RECOVERY === provider) {
           const recovery = await run(`window.m5Login.request({action:'recover',provider:${JSON.stringify(provider)},attemptId:crypto.randomUUID()}).then(s=>({state:s.state,error:s.error}))`);
           console.log(JSON.stringify({stage:'LOGIN_RECOVERY',provider,...recovery}));
         }
@@ -119,7 +119,7 @@ app.on('browser-window-created', (_event, window) => {
       await wait(`document.querySelector('.m5-new-chat-button:not(:disabled)')!==null`);
       await run(`document.querySelector('.m5-new-chat-button').click()`);
       await wait(`document.querySelector('.m5-new-chat-dialog')?.matches(':modal')`);
-      await run(`(()=>{const e=document.querySelector('.m5-new-chat-form > input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,'Reply exactly HELLO_AGENT_SMOKE_OK. Do not use tools, read or write files, or execute commands. This is a connectivity test.');e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+      await run(`(()=>{const e=document.querySelector('.m5-new-chat-form > input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,'Reply exactly ELSECREW_SMOKE_OK. Do not use tools, read or write files, or execute commands. This is a connectivity test.');e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
       await wait(`!document.querySelector('.m5-new-chat-form button[type=submit]').disabled`);
       await run(`document.querySelector('.m5-new-chat-form button[type=submit]').click()`);
       await wait(`document.querySelector('.m5-timeline h2')?.textContent.startsWith('Reply exactly')`);
@@ -130,7 +130,7 @@ app.on('browser-window-created', (_event, window) => {
         outcomes.push({provider:'codex',state:'catalogObserved',models:catalog.models});
         return finish();
       }
-      const testModel = process.env.HELLO_AGENT_LIVE_CODEX_MODEL;
+      const testModel = process.env.ELSECREW_LIVE_CODEX_MODEL;
       if (testModel) {
         // Explicit test input, never a product default/fallback. Only this
         // runner's newly generated project gets new role settings and chat.
@@ -144,7 +144,7 @@ app.on('browser-window-created', (_event, window) => {
           const updated=await window.m5.updateProjectRoleSettings({projectId,expectedRevision:settings.revision,roles});
           const prepared=await window.m5.prepareChatWorkspace({projectId});
           const manifest=prepared.manifest;
-          const chat=await window.m5.createChat({preparationId:prepared.preparationId,projectId,worktreeId:manifest.worktreeId,workspaceIdentity:manifest.workspaceIdentity,goal:'Reply exactly HELLO_AGENT_SMOKE_OK. Do not use tools, read or write files, or execute commands. This is a connectivity test.',expectedSettingsRevision:updated.revision});
+          const chat=await window.m5.createChat({preparationId:prepared.preparationId,projectId,worktreeId:manifest.worktreeId,workspaceIdentity:manifest.workspaceIdentity,goal:'Reply exactly ELSECREW_SMOKE_OK. Do not use tools, read or write files, or execute commands. This is a connectivity test.',expectedSettingsRevision:updated.revision});
           return chat.chatId;
         })()`);
         console.log(JSON.stringify({stage:'TEST_MODEL_SELECTED',provider:'codex',model:testModel,reasoningEffort:'medium',generatedProjectOnly:true}));
@@ -164,7 +164,7 @@ app.on('browser-window-created', (_event, window) => {
           for(let i=0;i<900;i++){
             const detail=await run(`window.m5.getChat({chatId:${JSON.stringify(chatId)},cursor:null,limit:50,afterEventSequence:0})`);
             const record=detail.agentRuns?.find(r=>r.runId===accepted.runId);
-            if(record && ['succeeded','failed','canceled','recoveryRequired'].includes(record.state)){terminal={provider,runId:accepted.runId,chatId,state:record.state,stage:record.stage,terminationOutcome:record.terminationOutcome,responseObserved:detail.messages.some(m=>m.runId===accepted.runId && m.kind==='role' && m.text.includes('HELLO_AGENT_SMOKE_OK'))};break;}
+            if(record && ['succeeded','failed','canceled','recoveryRequired'].includes(record.state)){terminal={provider,runId:accepted.runId,chatId,state:record.state,stage:record.stage,terminationOutcome:record.terminationOutcome,responseObserved:detail.messages.some(m=>m.runId===accepted.runId && m.kind==='role' && m.text.includes('ELSECREW_SMOKE_OK'))};break;}
             await new Promise(r=>setTimeout(r,100));
           }
           outcomes.push(terminal??{provider,runId:accepted.runId,chatId,state:'timeout'});

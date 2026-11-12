@@ -6,7 +6,7 @@ import test from 'node:test';
 import { cleanupCompletedNativeFixture } from '../scripts/m5-native-fixture-cleanup.mjs';
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hello-agent-project-ui-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'elsecrew-project-ui-'));
   fs.mkdirSync(path.join(root, 'project'));
   fs.mkdirSync(path.join(root, 'userdata'));
   fs.writeFileSync(path.join(root, 'project', 'hello.txt'), 'synthetic');

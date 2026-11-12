@@ -19,8 +19,8 @@ import {I18nProvider} from '${repo}/src/i18n.tsx';
 import {ProviderLogin} from '${repo}/src/m5/provider-login.tsx';
 import {chatConnectionTarget,chatNotice} from '${repo}/src/m5/chat-notice.ts';
 import '${repo}/src/m5/styles.css';
-localStorage.setItem('hello-agent.lang','ko');
-localStorage.setItem('hello-agent.m5.providers.v1',JSON.stringify({version:1,providers:['codex']}));
+localStorage.setItem('elsecrew.lang','ko');
+localStorage.setItem('elsecrew.m5.providers.v1',JSON.stringify({version:1,providers:['codex']}));
 window.requests=[];
 window.m5Login={request:async request=>{window.requests.push(request);return {state:'connected',attemptId:null,authUrl:null,error:null};}};
 function App(){const [reveal,setReveal]=useState();return <>
@@ -46,7 +46,7 @@ try {
  await wait("!document.querySelector('#m5-agent-management-content').hidden && document.querySelector('.m5-provider-selection').open && document.activeElement.classList.contains('m5-agent-management')");
  if(!await run("document.querySelector('.m5-provider-selection').innerText.includes('Claude Code')"))throw Error('missing provider selection');
  if(await run('JSON.stringify(window.requests)')!==initial)throw Error('reveal invoked login');
- if(await run("localStorage.getItem('hello-agent.m5.providers.v1')")!==JSON.stringify({version:1,providers:['codex']}))throw Error('selection changed');
+ if(await run("localStorage.getItem('elsecrew.m5.providers.v1')")!==JSON.stringify({version:1,providers:['codex']}))throw Error('selection changed');
  await run("document.querySelector('.m5-management-toggle').click()");
  await wait("document.querySelector('#m5-agent-management-content').hidden");
  await run("document.getElementById('codex').click()");

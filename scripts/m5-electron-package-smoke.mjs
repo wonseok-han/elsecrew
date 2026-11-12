@@ -11,7 +11,7 @@ import { listPackage } from "@electron/asar";
 import { FuseState, FuseV1Options, FuseVersion, getCurrentFuseWire } from "@electron/fuses";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const appName = "hello-agent";
+const appName = "Elsecrew";
 const packageDirectory = resolve(root, "out", `${appName}-${process.platform}-${process.arch}`);
 const appBundle = resolve(packageDirectory, `${appName}.app`);
 const executable = process.platform === "darwin"
@@ -21,8 +21,8 @@ const asar = process.platform === "darwin"
   ? resolve(appBundle, "Contents", "Resources", "app.asar")
   : resolve(packageDirectory, "resources", "app.asar");
 const sidecar = process.platform === "darwin"
-  ? resolve(appBundle, "Contents", "Resources", "sidecar", "hello-agent-sidecar")
-  : resolve(packageDirectory, "resources", "sidecar", `hello-agent-sidecar${process.platform === "win32" ? ".exe" : ""}`);
+  ? resolve(appBundle, "Contents", "Resources", "sidecar", "elsecrew-sidecar")
+  : resolve(packageDirectory, "resources", "sidecar", `elsecrew-sidecar${process.platform === "win32" ? ".exe" : ""}`);
 const storageStatusD1Manifest = JSON.parse(await readFile(resolve(root, "tests/fixtures/m5/storage-status-d1/manifest.json"), "utf8"));
 const { G5D_NATIVE_CAPABILITIES_V1 } = await import("../src/m5/contracts/agent-adapter-v1.ts");
 const expectedProductCapabilities = process.platform === "darwin"
@@ -79,14 +79,14 @@ for (const file of ["/.vite/build/main.cjs", "/.vite/build/preload.cjs", "/.vite
 assert.ok(files.some((file) => /^\/\.vite\/renderer\/main_window\/assets\/.+\.js$/.test(file)), "missing packaged renderer JavaScript");
 assert.ok(files.some((file) => /^\/\.vite\/renderer\/main_window\/assets\/.+\.css$/.test(file)), "missing packaged renderer CSS");
 assert.ok(files.some((file) => /^\/\.vite\/renderer\/main_window\/assets\/editor\.worker-.+\.js$/.test(file)), "missing packaged Monaco editor worker");
-assert.ok(!files.some((file) => file.includes("hello-agent-sidecar")), "sidecar must remain outside app.asar");
+assert.ok(!files.some((file) => file.includes("elsecrew-sidecar")), "sidecar must remain outside app.asar");
 
 await smokePackagedSidecar(sidecar);
 
 console.log(`PASS M5 Electron package smoke: ${process.platform}-${process.arch}`);
 
 async function smokePackagedSidecar(binary) {
-  const dataDirectory = await mkdtemp(resolve(tmpdir(), "hello-agent-m5-packaged-sidecar-"));
+  const dataDirectory = await mkdtemp(resolve(tmpdir(), "elsecrew-m5-packaged-sidecar-"));
   const child = spawn(binary, ["--stdio"], {
     cwd: dataDirectory,
     env: process.env,
@@ -314,7 +314,7 @@ async function request(lines, child, sidecarInstanceId, requestId, method, timeo
 }
 
 function assertCleanMarker(dataDirectory, sidecarInstanceId) {
-  const database = new DatabaseSync(resolve(dataDirectory, "hello-agent.sqlite3"), { readOnly: true });
+  const database = new DatabaseSync(resolve(dataDirectory, "elsecrew.sqlite3"), { readOnly: true });
   try {
     const marker = database.prepare(
       "SELECT clean_shutdown_at FROM app_instances WHERE sidecar_instance_id = ?",

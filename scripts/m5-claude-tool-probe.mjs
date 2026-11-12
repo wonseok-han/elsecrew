@@ -9,7 +9,7 @@ if(process.platform!=='darwin'||process.argv.length!==4||process.argv[2]!=='--ru
  console.error('Usage (macOS, separately approved): --run /absolute/signed/claude');process.exit(2);
 }
 execFileSync('/usr/bin/codesign',['--verify','--strict','--all-architectures','-R','=anchor apple generic and certificate leaf[subject.OU] = "Q6L2SF6YDW" and identifier "com.anthropic.claude-code"',executable],{timeout:15000,stdio:'pipe'});
-const root=mkdtempSync('/private/tmp/hello-agent-claude-tools-');
+const root=mkdtempSync('/private/tmp/elsecrew-claude-tools-');
 console.log(JSON.stringify({kind:'probeDirectory',root}));
 for(const part of ['home','profile','workspace','source','tmp'])mkdirSync(`${root}/${part}`,{mode:0o700,recursive:true});
 writeFileSync(`${root}/workspace/inside.txt`,'SYNTHETIC_INSIDE');

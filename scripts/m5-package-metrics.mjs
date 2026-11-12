@@ -3,7 +3,7 @@
  *
  * Usage:
  *   node scripts/m5-package-metrics.mjs --platform darwin --arch arm64 \
- *     --package /path/to/hello-agent-darwin-arm64 --archive /path/to/HelloAgent-darwin-arm64.zip
+ *     --package /path/to/Elsecrew-darwin-arm64 --archive /path/to/Elsecrew-darwin-arm64.zip
  *
  * The supplied package is never modified or launched. `unpackedBytes` is the
  * sum of regular-file byte lengths plus symlink link-text byte lengths; it
@@ -166,15 +166,15 @@ function initialReport(platform, arch, packagePath, archivePath) {
 function expectedLayout(platform) {
   if (platform === "darwin") {
     return [
-      "hello-agent.app/Contents/MacOS/hello-agent",
-      "hello-agent.app/Contents/Resources/app.asar",
-      "hello-agent.app/Contents/Resources/sidecar/hello-agent-sidecar",
+      "Elsecrew.app/Contents/MacOS/Elsecrew",
+      "Elsecrew.app/Contents/Resources/app.asar",
+      "Elsecrew.app/Contents/Resources/sidecar/elsecrew-sidecar",
     ];
   }
   return [
-    "hello-agent.exe",
+    "Elsecrew.exe",
     "resources/app.asar",
-    "resources/sidecar/hello-agent-sidecar.exe",
+    "resources/sidecar/elsecrew-sidecar.exe",
   ];
 }
 

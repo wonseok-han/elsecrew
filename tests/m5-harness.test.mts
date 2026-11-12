@@ -109,11 +109,11 @@ test("하네스가 M5 게이트와 canonical·cumulative 준비 상태를 기계
 test("독립 wrapper의 Rust 범위는 유지하고 cumulative alias는 정확한 Node 파일만 실행한다", () => {
   const scripts = (JSON.parse(readFileSync(resolve("package.json"), "utf8")) as { scripts: Record<string, string> }).scripts;
   assert.equal(scripts["m5:test:core"], "cargo test --workspace --manifest-path Cargo.toml --locked");
-  assert.match(scripts["m5:test:contracts"], /cargo test -p hello-agent-protocol/);
-  assert.match(scripts["m5:test:storage"], /cargo test -p hello-agent-sidecar --locked/);
-  assert.match(scripts["m5:test:project"], /cargo test -p hello-agent-sidecar --locked project::/);
-  assert.match(scripts["m5:test:run-recovery"], /cargo test -p hello-agent-sidecar --locked/);
-  assert.match(scripts["m5:test:bounded-storage"], /hello-agent-protocol --locked storage_lifetime_v1/);
+  assert.match(scripts["m5:test:contracts"], /cargo test -p elsecrew-protocol/);
+  assert.match(scripts["m5:test:storage"], /cargo test -p elsecrew-sidecar --locked/);
+  assert.match(scripts["m5:test:project"], /cargo test -p elsecrew-sidecar --locked project::/);
+  assert.match(scripts["m5:test:run-recovery"], /cargo test -p elsecrew-sidecar --locked/);
+  assert.match(scripts["m5:test:bounded-storage"], /elsecrew-protocol --locked storage_lifetime_v1/);
   assert.equal(scripts["m5:test:contracts:node"], "node --test --experimental-strip-types tests/m5-protocol-contract.test.mts");
   assert.equal(scripts["m5:test:storage:node"], "node --test --experimental-strip-types tests/m5-g3-contract.test.mts tests/m5-electron-bridge.test.mts");
   assert.equal(scripts["m5:test:project:node"], "node --test --experimental-strip-types tests/m5-g4-contract.test.mts tests/m5-electron-bridge.test.mts");

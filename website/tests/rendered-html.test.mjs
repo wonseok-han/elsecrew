@@ -8,8 +8,8 @@ async function render() {
   const { default: worker } = await import(workerUrl.href);
 
   return worker.fetch(
-    new Request("https://hello-agent.test/", {
-      headers: { accept: "text/html", host: "hello-agent.test" },
+    new Request("https://elsecrew.test/", {
+      headers: { accept: "text/html", host: "elsecrew.test" },
     }),
     {
       ASSETS: {
@@ -23,14 +23,14 @@ async function render() {
   );
 }
 
-test("renders the Hello, Agent landing page", async () => {
+test("renders the Elsecrew landing page", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
   assert.match(html, /<html[^>]*lang="ko"/i);
-  assert.match(html, /Hello, Agent/);
+  assert.match(html, /Elsecrew/);
   assert.match(html, /터미널을 몰라도/);
   assert.match(html, /버튼을 따라가는 6단계/);
   assert.match(html, /내 코딩 작업의 쉬운 출발점/);
@@ -40,7 +40,7 @@ test("renders the Hello, Agent landing page", async () => {
   assert.match(html, /Codex/);
   assert.match(html, /자주 묻는 질문/);
   assert.match(html, /github\.com\/wonseok-han\/hello-agent/);
-  assert.match(html, /https:\/\/hello-agent\.test\/og\.png/);
+  assert.match(html, /https:\/\/elsecrew\.test\/og\.png/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
 

@@ -3,6 +3,15 @@
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
 ### 2026-11-12 · by GPT-6
+- 사용자 승인으로 새 데이터 기반 Elsecrew 전면 리브랜딩: npm/Cargo crate·binary/import·DB·환경변수·Electron/Tauri 식별자·브랜드 자산·현재 문서/CI/scripts/tests/웹사이트 이름을 통일했다. 기존 앱 데이터/로그인 자동 이전·삭제 없음. 원격 저장소 이름은 사용자가 추후 변경하므로 기존 GitHub URL과 과거 워크로그/아카이브는 보존한다.
+- 검증: TypeScript·Rust release workspace check·이름/패키지 검사35개·macOS package/smoke 통과. 실제 Elsecrew.app의 표시/실행파일 Elsecrew·bundle com.wonseokhan.elsecrew와 빈 프로젝트/연결 안 됨 초기 화면 확인. 전체 npm720개 중694성공26실패는 변경 전HEAD 비교에서도 같은26개 실패다. 원래 팀 실행 중단/채팅 영구 삭제/동적 역할 미완료는 이번 이름 변경으로 해결됐다고 주장하지 않는다.
+- 저장공간 정리: 재생성 가능한 target 빌드 캐시(처음 약12GB 및 재빌드 산출물)와 이번 비교용 임시 checkout을 정리했다. 실행 중인 기존 앱/원본 프로젝트/옛 채팅·로그인/검증 증거는 보존한다. main 병합·push·GitHub 저장소 이름 변경·모델 실행 없음.
+### 2026-11-12 · by GPT-6
+- 사용자 실패 실행 beb888b3aa314f7f92cd3003f9f4ca43을 앱 화면과 DB/해당 Claude 세션 기록으로 읽기 전용 대조했다. 03:15:00Z 준비→03:15:10Z 세션 검증/모델 claude-opus-5-5→03:15:20Z failed/cleanExit, processesProvenGone=true·writer released·recovery=null. 공개 출력은 0건이다.
+- 같은 세션 c9375a02-00d1-4c18-a2a9-8ce5dfc90b4a에서 Bash 성공 뒤 작업 복사본 index.html Read가 is_error=true와 사용자 거절/중단 문구를 받았다. 이 문구만으로 실제 사용자의 거절 클릭을 입증할 수 없다. 앱 자동 승인 경계 실패·공급자 제어/취소 등 정확한 발생 지점은 현행 원장에 저장되지 않아 미확정이다. 로그인/모델 초기 연결 실패로 진단하지 않는다.
+- 실제 앱의 연결 진단 버튼도 남은 단계 없음으로 표시됐다. 현행 terminal 저장은 error kind/detail을 버리고 failed로 축약하며 approval delivery 오류도 원인 기록 없이 종료한다. 실행별 고정 실패 단계/원인 보존과 무과금 재현이 다음 작업이다. 이번은 진단이며 수정 완료가 아니다. 모델 재시도·설정/프로젝트/인증 변경·앱 종료 없음.
+
+### 2026-11-12 · by GPT-6
 - 미완료 기능 후속 파동(기준131f8111): 작업 복사본 물리 정리 API/설정 선택 목록을 구현했다. 이미 버린 채팅의 앱 전용 복사본만 대상이며 정식 종료·잠금·manifest·snapshot 검증, 영속 pending 기록→동일 루트 quarantine 이동→nofollow 삭제→완료 기록으로 재개한다. 원본·채팅 기록·복구 백업은 보존한다. Windows는 정리 가능으로 노출하지 않는다.
 - 권한 설정의 큰 상단 박스를 제거하고 프로젝트 관리에 상시 펼친 설정 행으로 옮겼다. 변경 없는 저장 버튼은 비활성이다. 우상단 프로젝트 메뉴를 제거하고 사이드바의 해당 프로젝트 메뉴로 역할·모델/프로젝트 닫기를 옮겼다. 프로젝트 전환은 목록 선택을 사용한다.
 - 현재 검증: 원본/채팅 보존·DB 재열기, root symlink/poison 거절, intent/rename/delete 중단 재개, pending manifest 변경 거절 Rust4개 통과. 계약2개·TypeScript 통과. 독립 검토의 초기 discarded 검증/재개 manifest 누락은 수정·재검토했고 macOS 차단 없음. 권한 설정 이동/저장/철회·정리 선택/복구 항목 비활성/명시 최종 확인 Electron 검사도 통과했다. 8d92c908 macOS 패키지 빌드·설치본 재실행을 완료했다. 실제 화면에서 우상단 프로젝트 메뉴 제거·사이드바 메뉴 통합과 프로젝트 권한 설정 행/변경 없는 저장 비활성, 저장공간 정리 진입점을 확인했다. 기존 사용자 권한은 변경하지 않았고 실제 정리 실행은 하지 않았다.

@@ -15,7 +15,7 @@ assert.deepEqual(process.argv.slice(2), combined ? ['--combined-workload'] : [])
 const repo=fileURLToPath(new URL('..',import.meta.url));
 const git=(...args)=>execFileSync('/usr/bin/git',args,{cwd:repo,encoding:'utf8'}).trim();
 assert.equal(git('status','--porcelain'),'','Commit the measurement source first');
-const output=fs.mkdtempSync(path.join(os.tmpdir(),'hello-agent-output-series-'));
+const output=fs.mkdtempSync(path.join(os.tmpdir(),'elsecrew-output-series-'));
 const report={diagnostic:true,gateEligible:false,status:'RUNNING',head:git('rev-parse','HEAD'),
   workload:combined ? 'large-file-diff-four-streams' : 'four-streams',
   warmupRuns:1,measuredRuns:10,trials:[],limitations:[
@@ -64,14 +64,14 @@ try {
   const built=await run(process.execPath,['scripts/m5-package-output-qa.mjs'],path.join(output,'build.log'),message=>{
     if(message.stage==='QA_BUILD_STARTED'){assert.equal(qaRoot,undefined);qaRoot=message.root;}
   });
-  assert.equal(built.code,0);ownedRoot(qaRoot,'hello-agent-output-qa-');
+  assert.equal(built.code,0);ownedRoot(qaRoot,'elsecrew-output-qa-');
   const build=JSON.parse(fs.readFileSync(path.join(qaRoot,'build.json'),'utf8'));
   assert.equal(build.status,'BUILT');assert.equal(build.head,report.head);assert.equal(build.gitStatus,'');
   appDirectory=build.appDirectory;
   assert.ok(fs.realpathSync(appDirectory).startsWith(fs.realpathSync(qaRoot)+path.sep));
-  const contents=path.join(appDirectory,'Hello Agent Output QA.app/Contents');
-  const executable=path.join(contents,'MacOS/Hello Agent Output QA');
-  const asar=path.join(contents,'Resources/app.asar'),sidecar=path.join(contents,'Resources/sidecar/hello-agent-sidecar');
+  const contents=path.join(appDirectory,'Elsecrew Output QA.app/Contents');
+  const executable=path.join(contents,'MacOS/Elsecrew Output QA');
+  const asar=path.join(contents,'Resources/app.asar'),sidecar=path.join(contents,'Resources/sidecar/elsecrew-sidecar');
   const hashes={asar:hash(asar),sidecar:hash(sidecar)};
   assert.equal(hashes.sidecar,build.sidecarSha256);report.build=build;report.hashes=hashes;persist();
   for(let index=0;index<=10;index++) {
@@ -81,7 +81,7 @@ try {
     const termination=await run(executable,combined ? ['--combined-workload'] : [],path.join(destination,'trial.log'),message=>{
       if(message.stage==='STARTED'){assert.equal(root,undefined);root=message.root;}
     });
-    ownedRoot(root,'hello-agent-output-ui-');
+    ownedRoot(root,'elsecrew-output-ui-');
     const result=JSON.parse(fs.readFileSync(path.join(root,'result.json'),'utf8'));
     assert.equal(result.root,root);
     const trial={index,warmup:index===0,termination,status:result.status};report.trials.push(trial);persist();
@@ -91,7 +91,7 @@ try {
     const observed=new Set([termination.pid,...result.memory.samples.flatMap(row=>row.processes.map(p=>p.pid))]);
     const live=new Set(execFileSync('/bin/ps',['-axo','pid='],{encoding:'utf8'}).trim().split(/\s+/).map(Number));
     assert.ok([...observed].every(pid=>!live.has(pid)),'Observed process live; fixture retained');
-    const db=new DatabaseSync(path.join(root,'userdata/com.wonseokhan.helloagent/m5/hello-agent.sqlite3'),{readOnly:true});
+    const db=new DatabaseSync(path.join(root,'userdata/com.wonseokhan.elsecrew/m5/elsecrew.sqlite3'),{readOnly:true});
     try{const rows=db.prepare('SELECT clean_shutdown_at FROM app_instances').all();assert.ok(rows.length&&rows.every(row=>row.clean_shutdown_at));}finally{db.close();}
     fs.writeFileSync(path.join(destination,'cleanup.json'),JSON.stringify({root,observedPids:[...observed],cleanShutdown:true}));
     fs.rmSync(root,{recursive:true});trial.fixtureCleaned=true;persist();
@@ -118,7 +118,7 @@ try {
 }catch(error){report.status='FAIL';report.error=String(error);}
 finally{
   if(qaRoot&&qaCleanupSafe)try{
-    ownedRoot(qaRoot,'hello-agent-output-qa-');
+    ownedRoot(qaRoot,'elsecrew-output-qa-');
     fs.copyFileSync(path.join(qaRoot,'build.json'),path.join(output,'build.json'));
     fs.rmSync(qaRoot,{recursive:true});report.qaPackageCleaned=true;
   }catch(error){report.status='FAIL';report.cleanupError=String(error);}

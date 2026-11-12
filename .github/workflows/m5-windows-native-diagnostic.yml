@@ -21,22 +21,22 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Compile and exercise Windows handle, job, and pipe primitives
-        run: cargo test --locked --release -p hello-agent-sidecar --lib project::windows_ -- --nocapture
+        run: cargo test --locked --release -p elsecrew-sidecar --lib project::windows_ -- --nocapture
       - name: Verify shared Windows handle-inheritance lock
-        run: "cargo test --locked --release -p hello-agent-sidecar --lib process_spawn:: -- --nocapture"
+        run: "cargo test --locked --release -p elsecrew-sidecar --lib process_spawn:: -- --nocapture"
       - name: Require Windows watcher tests to be compiled
         shell: pwsh
         run: |
-          $tests = cargo test --locked --release -p hello-agent-sidecar --lib watch_native_tests -- --list
+          $tests = cargo test --locked --release -p elsecrew-sidecar --lib watch_native_tests -- --list
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $required = @('watcher_scan_rejects_a_different_root_between_slices', 'watcher_scan_descendant_rename_is_blocked_or_revalidated', 'watcher_scan_rejects_wrong_retained_descendant', 'windows_watch_initial_scan_retains_only_a_bounded_slice')
           foreach ($name in $required) {
             if (-not ($tests | Select-String -SimpleMatch "project::watch_native_tests::${name}: test")) { throw "Missing Windows regression: $name" }
           }
       - name: Verify watcher slice identity regressions
-        run: cargo test --locked --release -p hello-agent-sidecar --lib watcher_scan_ -- --nocapture
+        run: cargo test --locked --release -p elsecrew-sidecar --lib watcher_scan_ -- --nocapture
       - name: Verify Windows watcher yields between slices
-        run: cargo test --locked --release -p hello-agent-sidecar --lib windows_watch_initial_scan_retains_only_a_bounded_slice -- --nocapture
+        run: cargo test --locked --release -p elsecrew-sidecar --lib windows_watch_initial_scan_retains_only_a_bounded_slice -- --nocapture
       - name: Record diagnostic scope
         if: always()
         shell: pwsh
