@@ -1,4 +1,4 @@
-//! Privileged, read-only quota lookup. Never returns or logs credentials.
+//! Privileged quota lookup; expired credentials renew through the sidecar login fence. Never returns or logs credentials.
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
@@ -105,26 +105,41 @@ export async function queryClaudeQuota(token: string, fetcher: typeof fetch, now
     } finally { await reader.cancel(); }
   } catch { return failed("unavailable"); }
 }
-export function createClaudeUsageReader(dataDirectory: string, fetcher: typeof fetch) {
+export async function queryClaudeQuotaWithRenewal(
+  read: () => Promise<{accessToken:string;expiresAt:number} | null>,
+  fetcher: typeof fetch,
+  renew?: () => Promise<boolean>,
+): Promise<ClaudeUsageResult> {
+  const failed = (state: ClaudeUsageResult["state"]): ClaudeUsageResult => ({state,usage:null,checkedAt:Date.now()});
+  let auth = await read();
+  if (!auth) return failed("notConnected");
+  if (auth.expiresAt <= Date.now()) {
+    if (!renew || !await renew()) return failed("expired");
+    auth = await read();
+    if (!auth || auth.expiresAt <= Date.now()) return failed("expired");
+  }
+  return queryClaudeQuota(auth.accessToken, fetcher);
+}
+
+export function createClaudeUsageReader(dataDirectory: string, fetcher: typeof fetch, renew?: () => Promise<boolean>) {
   let pending: Promise<ClaudeUsageResult> | undefined;
   let cached: ClaudeUsageResult | undefined;
   let epoch = 0;
+  let pendingEpoch = 0;
   return {
     invalidate() { cached = undefined; epoch++; },
     read(): Promise<ClaudeUsageResult> {
-      if (pending) return pending;
+      if (pending) return pendingEpoch === epoch ? pending : pending.then(() => this.read());
       if (cached && Date.now() - cached.checkedAt < 60_000) return Promise.resolve(cached);
       const startedEpoch = epoch;
+      pendingEpoch = epoch;
       pending = (async (): Promise<ClaudeUsageResult> => {
         const unavailable: ClaudeUsageResult = {state:"unavailable",usage:null,checkedAt:Date.now()};
         if (process.platform !== "darwin") return unavailable;
         try {
           const profile = join(dataDirectory,"claude-profile-v1");
           const identity = await profileIdentity(profile);
-          const auth = await readScopedCredential(profile);
-          if (!auth) return {...unavailable,state:"notConnected"};
-          if (auth.expiresAt <= Date.now()) return {...unavailable,state:"expired"};
-          const result = await queryClaudeQuota(auth.accessToken,fetcher);
+          const result = await queryClaudeQuotaWithRenewal(() => readScopedCredential(profile), fetcher, renew);
           if (identity !== await profileIdentity(profile) || startedEpoch !== epoch) return unavailable;
           return result;
         } catch { return unavailable; }

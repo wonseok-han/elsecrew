@@ -58,6 +58,11 @@ pub(crate) fn run(
             return Err(failure());
         }
     }
+    if cancel.load(Ordering::Acquire) {
+        publish("canceled", None, None);
+        return Ok(());
+    }
+    crate::provider_claude_refresh::refresh_if_expired(profile)?;
     let (bytes, exit) = command(profile, &executable, cancel, true, publish)?;
     if cancel.load(Ordering::Acquire) {
         publish("canceled", None, None);

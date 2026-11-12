@@ -15,6 +15,8 @@ mod process_spawn;
 #[cfg(target_os = "macos")]
 mod provider_claude_login;
 #[cfg(target_os = "macos")]
+mod provider_claude_refresh;
+#[cfg(target_os = "macos")]
 mod provider_claude_profile;
 #[cfg(unix)]
 #[allow(dead_code)] // Pin validation is not vendor activation or signature admission.

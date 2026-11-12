@@ -153,6 +153,21 @@ impl Reservation {
     }
 }
 
+/// Model-free credential work shares the provider fence with login and runs.
+/// No child is launched: completion of the closure proves all work has ended.
+pub(crate) fn with_credentials_reserved<T>(
+    profile: &dyn LoginProfile,
+    work: impl FnOnce() -> Result<T, SidecarError>,
+) -> Result<T, SidecarError> {
+    profile.revalidate()?;
+    let mut reservation = Reservation::create(profile)?;
+    let result = work();
+    profile.revalidate()?;
+    reservation.record_login_termination()?;
+    reservation.release()?;
+    result
+}
+
 fn lock_exclusive(file: &File) -> Result<(), SidecarError> {
     if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         return Err(failure());
@@ -1340,6 +1355,23 @@ mod tests {
     use hello_agent_core::proctree::{ProbeResult, ProcEntry, TreeSignal};
     use hello_agent_core::provider::vendor_observation::codex_login::LoginExchange;
     use std::process::{Command, Stdio};
+
+    #[test]
+    fn credential_renewal_fence_excludes_runs_and_releases_on_network_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let binding = profile(&temp);
+        let result: Result<(), SidecarError> = with_credentials_reserved(&binding, || {
+            assert!(LoginProcess::reserve(&binding).is_err());
+            assert!(with_credentials_reserved(&binding, || Ok(())).is_err());
+            Err(SidecarError::new("providerLoginFailed", "synthetic failure"))
+        });
+        assert!(result.is_err());
+        assert!(!temp.path().join(PENDING).exists());
+        with_credentials_reserved(&binding, || Ok(())).unwrap();
+        let mut run = LoginProcess::reserve(&binding).unwrap();
+        assert!(with_credentials_reserved::<()>(&binding, || panic!("must not enter")).is_err());
+        run.finish().unwrap();
+    }
 
     fn profile(temp: &tempfile::TempDir) -> CodexProfileBinding {
         let path = temp

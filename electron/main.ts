@@ -389,7 +389,20 @@ function registerIpcHandlers(): void {
     if (!sidecar) throw new Error("sidecar was not started");
     return validateInstallStatus(await sidecar.install(validateInstallRequest(input)));
   });
-  const claudeUsage = createClaudeUsageReader(m5DataDirectory(), net.fetch as typeof fetch);
+  const claudeUsage = createClaudeUsageReader(m5DataDirectory(), net.fetch as typeof fetch, async () => {
+    if (!sidecar) return false;
+    const attemptId = randomUUID();
+    try {
+      // Existing login admission/fence serializes renewal with Claude work.
+      let status = validateLoginStatus(await sidecar.login({provider:"claude", action:"check", attemptId}), "claude");
+      const deadline = Date.now() + 30_000;
+      while (status.attemptId === attemptId && ["starting", "verifying"].includes(status.state) && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        status = validateLoginStatus(await sidecar.login({provider:"claude", action:"status"}), "claude");
+      }
+      return status.attemptId === attemptId && status.state === "connected" && status.error === null;
+    } catch { return false; }
+  });
   ipcMain.handle(CLAUDE_USAGE_CHANNEL, async (event, ...args: unknown[]) => {
     assertCurrentMainFrame(event);
     if (args.length) throw new Error("usage takes no input");
@@ -449,6 +462,7 @@ function registerIpcHandlers(): void {
     const request = validateApprovalRequest(input);
     return validateApprovalResult(await sidecar.approval(request), request);
   });
+  let lastClaudeConnectedAttempt: string | null = null;
   ipcMain.handle(LOGIN_CHANNEL, async (event, input: unknown) => {
     assertCurrentMainFrame(event);
     if (!sidecar) throw new Error("sidecar was not started");
@@ -458,10 +472,14 @@ function registerIpcHandlers(): void {
       const runtime = request.provider === "claude" ? "claude-code" : "codex";
       if (connected.action !== "getProviderConnections" || !connected.connections[runtime]) throw new Error("providerDisconnected");
     }
-    claudeUsage.invalidate();
+    if (request.provider === "claude" && !["status", "diagnose"].includes(request.action)) claudeUsage.invalidate();
     const result = await sidecar.login(request)
       .then(value => validateLoginStatus(value, request.provider))
       .catch((error: unknown) => { throw new Error(classifyLoginFailure(error)); });
+    if (request.provider === "claude" && result.state === "connected" && result.attemptId !== lastClaudeConnectedAttempt) {
+      lastClaudeConnectedAttempt = result.attemptId;
+      claudeUsage.invalidate();
+    }
     if (result.authUrl && request.action !== "cancel") {
       try { await shell.openExternal(result.authUrl); }
       catch {

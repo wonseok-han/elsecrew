@@ -3,6 +3,11 @@
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
 ### 2026-11-12 · by GPT-6
+- 사용자 ‘필요하면 구현’ 지시에 따라 Claude 만료 인증 갱신을 실제 구현했다. 공식 설치 CLI2.1.322의 고정 OAuth endpoint/client 및 refresh 응답 형식을 정적으로 확인했다. sidecar가 앱 전용 Keychain/unknown 계정만 읽고 같은 login/run pending fence 아래 모델 없는 HTTPS 갱신을 수행한다. redirect/proxy 없음·20초/64KiB 제한·기존 scopes만 요청·비밀값 renderer/argv/log 노출 없음. 저장 전 profile/기존 Keychain bytes 재확인, 관련 없는 credential 필드 보존, native Keychain 저장을 사용한다.
+- 사용량 만료 시 기존 check 경로로 갱신 후 저장된 인증을 다시 읽어 GET한다. 로그인 상태 polling의 무차별 cache 무효화를 없애고 연결된 새 attempt에서만 갱신한다. 동시 사용량 조회 singleflight와 generation 변경 후 재조회 유지. 네트워크/응답 실패는 기존 저장값을 덮어쓰지 않으며 서버가 이미 refresh token을 회전한 후 저장이 실패한 경우 재로그인이 필요할 수 있다.
+- 검증: 갱신 projection4개, 공유 fence1개, Claude 관련25개 통과/1개 기존 ignored, TS usage7개, renderer 및 usage module TypeScript 통과. 독립 안전 검토 차단 없음. 실제 앱은 정상 종료했으며 수정본 패키징·실제 모델 없는 사용량 확인을 이어간다. 모델 호출/원본 변경/main/push 없음.
+
+### 2026-11-12 · by GPT-6
 - Claude 연결 성공/사용량 로그인 안내 불일치 조사: 앱 전용 profile hash·unknown Keychain 항목의 비밀값을 출력/저장/전송하지 않고 존재·만료 metadata만 확인했다. access/refresh token은 존재하며 expiresAt=2026-11-11T09:44:52.560Z로 만료됐다. usage reader는 이 시각에서 expired를 반환하고, CLI auth status 연결 확인은 저장 로그인 존재를 반환하므로 두 상태가 다를 수 있다. 사용자 인증정보 변경/모델 호출 없음.
 - 로그인 성공 상태 전환 후 usage cache 화면을 재조회하는 이벤트를 연결했다. 기존에는 앱 사용 연결 변경에만 반응해 실제 OAuth 성공 뒤 이전 expired 화면이 남을 수 있었다. 만료 안내를 로그인 전체 실패와 구분했다. TypeScript·renderer·usage unit5개/Chromium2개 통과, 로그인 성공 후 usage 재조회 회귀 포함. 이번 수정은 이미 만료된 토큰의 갱신 구현이 아니며 설치본은 아직 미반영이다.
 - 남은 핵심: 사용량용 access token 갱신. 현행 사용량 기능은 명시 승인된 read-only 경계여서 임의 refresh-token POST/Keychain 쓰기나 모델 실행을 추가하지 않았다. 공식 CLI의 모델 없는 갱신 경로 또는 직렬화/원자 저장을 갖춘 별도 갱신 설계·검토가 필요하다. 공개 upstream 이슈의 auth status 갱신 문제는 참고 보고이며 로컬 실행 증거로 취급하지 않는다. main/push 없음.
@@ -126,6 +131,8 @@
 - 위저드 6단계: 에이전트 선택 → 진단 → 설치 → 로그인 → 첫 프로젝트 → 졸업식
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Claude 사용량 인증(2026-11-12)**: CLI auth status의 저장 로그인 존재와 OAuth access-token 유효성은 다르다. 만료 시 check가 앱 전용 Keychain의 갱신을 같은 provider pending fence 아래 수행하며 사용량은 갱신 후 다시 읽는다. 단순 인증 존재를 사용량 인증 유효성으로 해석하지 않는다.
 
 - **선택 폴더의 상위 경로 접근(2026-11-12)**: macOS 경로 순회는 ancestor를 검색 전용 O_SEARCH/no-follow handle로 통과하며 선택 leaf만 읽기로 연다. 폴더 선택 동의와 OS 권한, 에이전트 도구 승인은 서로 대체하지 않는다. Downloads/test_todo의 실제 재시도는 미확인이다.
 - **2026-11-11 핵심 팀 실제 성공**: Codex→Claude→Codex3회 모두 성공/cleanExit·프로세스 종료 증거 확인, 임시 복사본 hello.txt 변경·원본 보존·재시작 기록 유지. 채팅 제거는 선택 채팅 범위로 검사하되 동일 workspace/unknown lock과 대상 복구 제한 유지. 상세 증거는11월 아카이브. 전체 M5/Windows/출시 완료는 아님.

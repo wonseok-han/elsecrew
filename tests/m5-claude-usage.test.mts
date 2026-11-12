@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {appClaudeKeychainArgs,keychainFailureState,validCredentialFile,parseClaudeQuota,queryClaudeQuota,CLAUDE_USAGE_URL} from '../electron/claude-usage.ts';
+import {queryClaudeQuotaWithRenewal,appClaudeKeychainArgs,keychainFailureState,validCredentialFile,parseClaudeQuota,queryClaudeQuota,CLAUDE_USAGE_URL} from '../electron/claude-usage.ts';
 import {validateClaudeUsageResult} from '../src/m5/contracts/provider-usage-v1.ts';
 test('quota projects only bounded display windows and accepts fractional ISO reset',()=>{
  const usage=parseClaudeQuota({five_hour:{utilization:12.5,resets_at:'2026-11-11T01:00:00.123Z'},seven_day:null,account:'private'});
@@ -44,4 +44,19 @@ test('Keychain lookup fixes service and app-login account with no global fallbac
  assert.notEqual(args[2],appClaudeKeychainArgs('/other/claude-profile-v1')[2]);
  assert.equal(keychainFailureState(44),'missing');
  for(const code of [1,36,'ETIMEDOUT',undefined]) assert.equal(keychainFailureState(code),'unavailable');
+});
+
+test('expired usage renews once then rereads saved credentials before GET', async()=>{
+ let reads=0,renewals=0;
+ const result=await queryClaudeQuotaWithRenewal(async()=> (++reads===1 ? {accessToken:'expired',expiresAt:1} : {accessToken:'renewed',expiresAt:Date.now()+60000}),async(_url,init)=>{
+  assert.equal(new Headers(init?.headers).get('Authorization'),'Bearer renewed');return Response.json({five_hour:{utilization:3,resets_at:null}});
+ },async()=>{renewals++;return true;});
+ assert.equal(result.state,'available');assert.equal(reads,2);assert.equal(renewals,1);
+});
+test('failed or ineffective renewal never sends expired credentials or loops',async()=>{
+ for(const success of [false,true]){
+  let renewals=0;
+  const result=await queryClaudeQuotaWithRenewal(async()=>({accessToken:'expired',expiresAt:1}),async()=>{throw Error('must not fetch');},async()=>{renewals++;return success;});
+  assert.equal(result.state,'expired');assert.equal(renewals,1);
+ }
 });
