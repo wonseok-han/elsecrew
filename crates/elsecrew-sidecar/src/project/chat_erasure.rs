@@ -29,10 +29,25 @@ fn checkpoint(stage: u8) -> Result<(), ProjectFailure> {
     Ok(())
 }
 
+#[cfg(test)]
+thread_local! { static BUSY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+#[cfg(test)]
+pub(crate) fn simulate_busy(busy: bool) {
+    BUSY.with(|value| value.set(busy));
+}
+
+const DENIED: &str = "chat erasure requires a discarded, idle chat without unresolved recovery";
+
+/// Permanent property of the stored chat (withdraws a `pending` request).
 fn denied() -> ProjectFailure {
-    ProjectFailure::recovery(
-        "chat erasure requires a discarded, idle chat without unresolved recovery",
-    )
+    ProjectFailure::recovery(DENIED)
+}
+fn is_denial(failure: &ProjectFailure) -> bool {
+    failure.detail == DENIED
+}
+/// Transient sidecar state; a `pending` request is kept for a later retry.
+fn busy() -> ProjectFailure {
+    ProjectFailure::recovery("chat erasure waits for applying, saving or preparation to finish")
 }
 
 /// Chats whose content was rewritten (`redacted`/`erased`) stay out of chat lists
@@ -51,12 +66,18 @@ fn job_state(project: &Map<String, Value>, chat_id: &str) -> Option<String> {
 
 impl ProjectManager {
     /// The same blockers as list removal and copy cleanup; any doubt denies.
+    fn erasure_busy(&self) -> bool {
+        #[cfg(test)]
+        if BUSY.with(std::cell::Cell::get) {
+            return true;
+        }
+        self.application_running() || self.preparation_cancel.is_some() || !self.pending_saves.is_empty()
+    }
+
+    /// Durable eligibility only. `denied()` is permanent; other errors (storage
+    /// reads, invalid team state) are treated as transient by the retry path.
     fn erasure_chat(&self, storage: &Storage, chat_id: &str) -> Result<String, ProjectFailure> {
-        if !cfg!(unix)
-            || self.application_running()
-            || self.preparation_cancel.is_some()
-            || !self.pending_saves.is_empty()
-        {
+        if !cfg!(unix) {
             return Err(denied());
         }
         let chat = storage.projection_record("chat", chat_id)?.ok_or_else(denied)?;
@@ -101,14 +122,11 @@ impl ProjectManager {
             } else {
                 &run["record"]["terminationEvidence"]
             };
-            let recovery = run.get("recovery").filter(|value| !value.is_null());
-            let resolved = recovery.is_some_and(|value| {
-                matches!(value["state"].as_str(), Some("resolved" | "resolvedAbandoned"))
-            });
-            // A resolved recovery is the termination authority for that run.
+            // Termination evidence is always required; a recovery must be resolvedAbandoned
+            // (the only resolved protocol state) and never substitutes for that evidence.
             if !matches!(run["state"].as_str(), Some("succeeded" | "failed" | "canceled"))
-                || (recovery.is_some() && !resolved)
-                || !(evidence["processesProvenGone"] == true || resolved)
+                || evidence["processesProvenGone"] != true
+                || run.get("recovery").is_some_and(|value| !value.is_null() && value["state"] != "resolvedAbandoned")
             {
                 return Err(denied());
             }
@@ -132,7 +150,8 @@ impl ProjectManager {
             let eligible = match state.as_deref() {
                 Some("redacted") => cfg!(unix),
                 _ => {
-                    self.erasure_chat(storage, id).is_ok()
+                    !self.erasure_busy()
+                        && self.erasure_chat(storage, id).is_ok()
                         && storage.chat_erasure_precheck(id, project_id).is_ok()
                 }
             };
@@ -174,6 +193,9 @@ impl ProjectManager {
             return Ok(done());
         }
         if state.is_none() {
+            if self.erasure_busy() {
+                return Err(busy());
+            }
             if self.erasure_chat(storage, chat_id)? != project_id {
                 return Err(denied());
             }
@@ -200,14 +222,18 @@ impl ProjectManager {
         if state.as_deref() == Some("pending") {
             // A pending request whose chat became ineligible (classification,
             // compaction, recovery, ...) is withdrawn instead of lingering.
+            if self.erasure_busy() {
+                return Err(busy()); // keep `pending`
+            }
             let refused = match self.erasure_chat(storage, chat_id) {
-                Ok(owner) if owner == project_id => storage
-                    .chat_erasure_precheck(chat_id, &project_id)
-                    .err()
-                    .filter(crate::storage::chat_erasure::is_erasure_refusal)
-                    .map(ProjectFailure::from),
+                Ok(owner) if owner == project_id => match storage.chat_erasure_precheck(chat_id, &project_id) {
+                    Ok(()) => None,
+                    Err(error) if crate::storage::chat_erasure::is_erasure_refusal(&error) => Some(error.into()),
+                    Err(error) => return Err(error.into()), // transient: keep `pending`
+                },
                 Ok(_) => Some(denied()),
-                Err(error) => Some(error),
+                Err(error) if is_denial(&error) => Some(error),
+                Err(error) => return Err(error), // transient: keep `pending`
             };
             if let Some(error) = refused {
                 withdraw_pending(storage, &project_id, chat_id, request_id)?;

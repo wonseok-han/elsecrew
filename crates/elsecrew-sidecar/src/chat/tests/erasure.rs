@@ -259,17 +259,11 @@ fn content_copied_into_a_retained_field_is_refused_before_any_record() {
     assert_eq!(erasure_state(&f, &chat_id), Value::Null);
 }
 
-/// A run that went through recovery resolution keeps `recovery_resolution_intent`
-/// in its historical payloads; it must be classified, not block erasure.
-#[test]
-fn chat_with_resolved_run_recovery_history_is_erased() {
-    let mut f = Fixture::new();
-    let path = f.storage.path().to_path_buf();
-    drop(f.storage);
-    f.storage = Storage::open_for_admission(&path, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+/// Actual run that went through recovery and `resolvedAbandoned` (call on V10 storage).
+fn resolved_recovery_chat(f: &mut Fixture) -> (String, String) {
     let (mut runtime, chat, run_id) =
-        start_exact_actual_scenario(&mut f, FakeScenario::ProviderTerminalRecoveryRequired, "req_erase_recovery");
-    drain_actual_scenario(&mut f, &mut runtime, &run_id);
+        start_exact_actual_scenario(f, FakeScenario::ProviderTerminalRecoveryRequired, "req_erase_recovery");
+    drain_actual_scenario(f, &mut runtime, &run_id);
     let recovery = f.storage.projection_record("run", &run_id).unwrap().unwrap()["recovery"].clone();
     let request = json!({
         "recoveryId":recovery["recoveryId"],"chatId":chat["chatId"],"taskId":chat["taskId"],
@@ -278,7 +272,21 @@ fn chat_with_resolved_run_recovery_history_is_erased() {
         "expectedRevision":recovery["revision"],"resolution":"abandon"
     });
     runtime.resolve_recovery(&mut f.storage, &mut f.projects, &request, "req_erase_recovery_resolve").unwrap();
-    let chat_id = chat["chatId"].as_str().unwrap().to_string();
+    let run = f.storage.projection_record("run", &run_id).unwrap().unwrap();
+    assert_eq!(run["recovery"]["state"], "resolvedAbandoned");
+    assert_eq!(run["termination"]["processesProvenGone"], true, "resolution records termination evidence");
+    (chat["chatId"].as_str().unwrap().to_string(), run_id)
+}
+
+/// A run that went through recovery resolution keeps `recovery_resolution_intent`
+/// in its historical payloads; it must be classified, not block erasure.
+#[test]
+fn chat_with_resolved_run_recovery_history_is_erased() {
+    let mut f = Fixture::new();
+    let path = f.storage.path().to_path_buf();
+    drop(f.storage);
+    f.storage = Storage::open_for_admission(&path, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+    let (chat_id, run_id) = resolved_recovery_chat(&mut f);
     let intent_seen: bool = f.storage.connection_for_test().query_row(
         "SELECT EXISTS(SELECT 1 FROM events WHERE aggregate_type='run' AND aggregate_id=?1 \
          AND json_type(canonical_json_payload,'$.recovery_resolution_intent') IS NOT NULL)",
@@ -291,6 +299,81 @@ fn chat_with_resolved_run_recovery_history_is_erased() {
     drop(f.storage);
     f.storage = Storage::open_for_admission(&path, &std::sync::atomic::AtomicBool::new(false)).unwrap();
     assert_erased_history(&f.storage, &f.chats, &chat_id);
+}
+
+/// A resolved recovery never substitutes for termination evidence, and only the
+/// protocol state `resolvedAbandoned` counts as resolved.
+#[test]
+fn resolved_recovery_without_termination_evidence_is_refused() {
+    for case in ["noEvidence", "nonProtocolState"] {
+        let mut f = Fixture::new();
+        let path = f.storage.path().to_path_buf();
+        drop(f.storage);
+        f.storage = Storage::open_for_admission(&path, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+        let (chat_id, run_id) = resolved_recovery_chat(&mut f);
+        let mut run = f.storage.projection_record("run", &run_id).unwrap().unwrap();
+        if case == "noEvidence" {
+            run.get_mut("termination").unwrap()["processesProvenGone"] = json!(false);
+        } else {
+            run.get_mut("recovery").unwrap()["state"] = json!("resolved");
+        }
+        f.storage.upsert_projection_record("run", &run_id, &format!("op_tamper_{case}"), None, run).unwrap();
+        materialize(&mut f.storage);
+        let project_id = f.project_id.clone();
+        assert!(f.storage.chat_erasure_precheck(&chat_id, &project_id).is_err(), "{case}: storage eligibility");
+        let before = ledger_snapshot(&f.storage);
+        assert!(f.projects.erase_chat_content(&mut f.storage, &chat_id, "req_tampered").is_err(), "{case}");
+        assert_eq!(ledger_snapshot(&f.storage), before, "{case}: nothing recorded");
+        assert_eq!(erasure_state(&f, &chat_id), Value::Null);
+    }
+}
+
+/// Transient sidecar state (applying, saving, preparation) keeps a `pending`
+/// request; the retry then completes.
+#[test]
+fn transient_busy_retry_keeps_pending_request() {
+    let mut f = Fixture::with_durable_output(true);
+    let chat_id = discarded_chat(&mut f, GOAL, "req_busy");
+    materialize(&mut f.storage);
+    interrupt_at(1);
+    assert!(f.projects.erase_chat_content(&mut f.storage, &chat_id, "req_busy_first").is_err());
+    assert_eq!(erasure_state(&f, &chat_id), "pending");
+    crate::project::chat_erasure::simulate_busy(true);
+    let error = f.projects.erase_chat_content(&mut f.storage, &chat_id, "req_busy_retry").unwrap_err();
+    crate::project::chat_erasure::simulate_busy(false);
+    assert!(format!("{error:?}").contains("waits for"), "{error:?}");
+    assert_eq!(erasure_state(&f, &chat_id), "pending", "transient refusal must not withdraw");
+    assert_eq!(f.storage.chat_message_history(&chat_id).unwrap()[0]["text"], GOAL);
+    f.projects.erase_chat_content(&mut f.storage, &chat_id, "req_busy_done").unwrap();
+    assert_eq!(erasure_state(&f, &chat_id), "erased");
+    assert_erased_history(&f.storage, &f.chats, &chat_id);
+}
+
+/// A refusal discovered inside the rewrite transaction (after the guard triggers
+/// were dropped) rolls back and withdraws the request.
+#[test]
+fn in_transaction_refusal_rolls_back_and_withdraws_pending() {
+    let mut f = Fixture::with_durable_output(true);
+    let chat_id = discarded_chat(&mut f, GOAL, "req_in_tx");
+    materialize(&mut f.storage);
+    interrupt_at(1);
+    assert!(f.projects.erase_chat_content(&mut f.storage, &chat_id, "req_in_tx_first").is_err());
+    assert_eq!(erasure_state(&f, &chat_id), "pending");
+    let before = ledger_snapshot(&f.storage);
+    crate::storage::chat_erasure::inject_refusal_in_transaction();
+    let error = f.projects.erase_chat_content(&mut f.storage, &chat_id, "req_in_tx_retry").unwrap_err();
+    assert!(format!("{error:?}").contains("injected in-transaction refusal"), "{error:?}");
+    let after = ledger_snapshot(&f.storage);
+    assert_eq!(after.1, before.1, "guard triggers and schema restored");
+    // Only the withdrawal record was appended; no content row changed.
+    assert_eq!(after.0[..before.0.len()], before.0[..]);
+    assert_eq!(after.0.len(), before.0.len() + 1);
+    assert_eq!(erasure_state(&f, &chat_id), Value::Null);
+    assert_eq!(f.storage.chat_message_history(&chat_id).unwrap()[0]["text"], GOAL);
+    assert!(f.chats.list_chats(&f.storage, &f.project_id, None, 50).unwrap()["items"]
+        .as_array().unwrap().iter().any(|item| item["chatId"] == chat_id.as_str()));
+    reopen!(f);
+    assert_eq!(f.storage.chat_message_history(&chat_id).unwrap()[0]["text"], GOAL);
 }
 
 /// A `pending` request whose chat is compacted before the retry is withdrawn:

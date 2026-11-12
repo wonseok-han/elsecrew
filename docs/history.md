@@ -2,6 +2,10 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — 채팅 내용 영구 삭제 작업자(재검토 반영)
+- 재검토: 차단 결함 없음, `pending` 고착 해소 확인. 요청 2건 반영: ① 직전에 넣은 "해결된 복구가 종료 증거를 대신" 예외를 되돌렸다. 프로젝트·저장소 자격 모두 `processesProvenGone=true` 필수, 복구가 있으면 `resolvedAbandoned`만 허용(`"resolved"`는 프로토콜 상태가 아님). `resolvedAbandoned` 경로가 종료 증거를 함께 기록함을 테스트로 확인했다. ② 재시도 분기에서 sidecar 일시 상태(반영 실행·대기 저장·준비 취소)와 저장소 읽기/I/O 오류는 `pending` 유지, 분류·압축·자격의 영구 거절만 철회한다.
+- 검증(전용 target): erasure Rust 11개 통과(추가: 증거 없는 resolvedAbandoned·비프로토콜 `resolved` 거절과 무기록, 일시 busy 재시도 시 `pending` 유지 후 완료, 재작성 transaction 내부 거절 시 ROLLBACK·trigger 원복·철회·목록 재노출). 변경은 erasure 모듈·테스트·문서에 한정돼 전체 sidecar 재실행은 하지 않았다(직전 768 통과/기존 3 실패). merge/push·실제 데이터·모델 없음.
+
 ### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — 채팅 내용 영구 삭제 작업자(독립 검토 반영)
 - 독립 검토: 저장 무결성(trigger 일시 제거·재생성, schema identity, 검증기, 비압축 채팅 사본 완전성) 차단 없음. 차단 1건(채팅이 `pending`에 영구히 갇힘)을 3dfd8115에서 수정했다: `recovery_resolution_intent`(ID·revision·추적 프로세스·예상 manifest/digest만, 실제 정의 확인)를 보존 키로 분류. 분류·압축·자격·잔존 검사를 쓰기 없는 dry run으로 `pending` 기록 **전에** 수행하고, 같은 검사를 재작성 transaction 안에서 trigger 제거 전에 다시 한다(§2 1~5·7 재검사, sidecar 유휴는 호출 측). 재시도가 거절되면 `pending`을 철회하고 일시 오류는 유지한다. `pending`은 채팅 목록에서 숨기지 않는다. 해결된 복구가 있는 실행은 종료 증거 대신 그 해결을 종료 권한으로 인정한다.
 - 비차단 반영: 확인 문구·설계 문서가 공급자 세션 기록을 "앱 밖"이 아니라 앱 소유 공급자 프로필 폴더 안의 미삭제 사본으로, 이 버전 이전에 SQLite 빈 공간으로 풀린 조각이 남을 수 있음을 고지한다. `chatErasureList` 전체 dry run 비용을 문서에 적었다.

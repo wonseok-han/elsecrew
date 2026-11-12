@@ -73,6 +73,14 @@ pub(crate) struct ChatErasureCommit {
     pub project_payload: Map<String, Value>,
 }
 
+#[cfg(test)]
+thread_local! { static INJECT_REFUSAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+/// Test-only: refuse inside the rewrite transaction after the guard triggers dropped.
+#[cfg(test)]
+pub(crate) fn inject_refusal_in_transaction() {
+    INJECT_REFUSAL.with(|value| value.set(true));
+}
+
 fn denied(detail: &str) -> SidecarError {
     SidecarError::new("chatErasureDenied", detail)
 }
@@ -459,17 +467,17 @@ fn verify_eligibility(tx: &Transaction<'_>, chat_id: &str, project_id: &str, run
     for run_id in runs {
         let run = projection_object(tx, "SELECT projection_json FROM runs WHERE run_id=?1", run_id)?
             .ok_or_else(|| denied("run is missing"))?;
-        let recovery = run.get("recovery").filter(|value| !value.is_null());
-        let resolved = recovery.is_some_and(|value| matches!(value["state"].as_str(), Some("resolved" | "resolvedAbandoned")));
         let evidence = if run.get("source_kind") == Some(&json!("actualAgent")) {
             run.get("termination")
         } else {
             run.get("record").and_then(|record| record.get("terminationEvidence"))
         };
         let proven_gone = evidence.and_then(|value| value.get("processesProvenGone")) == Some(&json!(true));
+        let unresolved = run.get("recovery")
+            .is_some_and(|value| !value.is_null() && value.get("state") != Some(&json!("resolvedAbandoned")));
         if !matches!(run.get("state").and_then(Value::as_str), Some("succeeded" | "failed" | "canceled"))
-            || (recovery.is_some() && !resolved)
-            || !(proven_gone || resolved)
+            || !proven_gone
+            || unresolved
         {
             return Err(denied("chat run or recovery needs attention"));
         }
@@ -543,6 +551,10 @@ impl Storage {
             transaction.execute_batch(&format!("DROP TRIGGER {name};")).map_err(sqlite_error)?;
         }
         let (runs, rewrite) = plan_erasure(&transaction, &commit.chat_id, &commit.project_id, true)?;
+        #[cfg(test)]
+        if INJECT_REFUSAL.with(|value| value.replace(false)) {
+            return Err(denied("injected in-transaction refusal"));
+        }
 
         // Replay the rewritten ledger; projections are exactly the latest payloads.
         let mut events = load_events(&transaction)?;

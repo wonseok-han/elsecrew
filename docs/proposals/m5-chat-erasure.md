@@ -16,7 +16,7 @@
 
 1. 채팅 projection과 record의 상태가 모두 `discarded`다. (v1은 버린 채팅만. `completed` 등 다른 종료 상태는 후속 범위. 버린 채팅은 후속 입력·실행·작업 복사본 재사용이 이미 차단돼 있다.)
 2. 팀 작업(`orchestration_v1`)이 `running`이 아니고, `save_sessions`가 비어 있다.
-3. 채팅의 모든 실행이 `succeeded|failed|canceled`이고 미해결 복구가 없다(`resolved`/`resolvedAbandoned`만 허용). 종료 증거 `processesProvenGone=true` 또는 해결된 복구 중 하나가 있어야 한다(해결된 복구가 그 실행의 종료 권한이다).
+3. 채팅의 모든 실행이 `succeeded|failed|canceled`이고 종료 증거 `processesProvenGone=true`가 있다. 복구 기록이 있으면 프로토콜의 해결 상태 `resolvedAbandoned`여야 한다. 해결된 복구가 종료 증거를 대신하지 않는다(현재 `resolvedAbandoned` 경로는 종료 증거를 함께 기록한다).
 4. 해당 작업 복사본 잠금이 `writer_run_id=null`, `poisoned=false`, `recovery_required=false`다(잠금이 없으면 허용).
 5. 프로젝트에 진행 중인 반영(`application_intent`가 `abandoned` 외)·대기 저장이 없다.
 6. sidecar가 유휴다: 활성 실행·팀 작업·대기 시작/취소·반영 실행·종료 준비가 없다(작업 복사본 정리와 동일한 IPC 게이트).
@@ -69,7 +69,7 @@ trigger를 transaction 안에서 잠시 내리는 것은 DB 수준 방어선을 
 ```
 
 - A: 자격 확인과 저장소 dry run(§2 끝)을 통과한 뒤에만 `pending`과 요청 시각을 append. 거절되면 아무것도 기록하지 않는다. `pending`은 내용이 그대로이므로 채팅 목록에서 숨기지 않는다.
-- B: §4 전체가 원자적이다. 중간 종료 시 `pending`으로 남고 원장은 원래 그대로다. 재시도는 자격·dry run을 다시 검사하며, 그 사이 채팅이 분류 불가·압축·부적격이 되어 **거절**되면 `pending`을 철회(기록 제거)해 일반 버린 채팅으로 되돌린다. I/O·쓰기 충돌 같은 일시 오류는 `pending`을 유지한다.
+- B: §4 전체가 원자적이다. 중간 종료 시 `pending`으로 남고 원장은 원래 그대로다. 재시도는 자격·dry run을 다시 검사하며, 그 사이 채팅이 분류 불가·압축·부적격이 되어 **거절**되면 `pending`을 철회(기록 제거)해 일반 버린 채팅으로 되돌린다. 반영 실행 중·대기 저장·준비 취소 중(sidecar 상태)이나 저장소 읽기·I/O·쓰기 충돌 같은 일시 오류는 `pending`을 유지한다. 철회는 분류·압축·자격(영구 거절)일 때만 하며, 재작성 transaction 안에서 발견된 거절도 ROLLBACK 뒤 같은 방식으로 철회한다.
 - C: `secure_delete=ON`(§6)로 쓴 뒤 `PRAGMA wal_checkpoint(TRUNCATE)`가 busy 없이 끝나고 WAL 파일 길이가 0인지 확인한다. 실패하면 `redacted`로 남고 완료라고 말하지 않는다.
 - D: `erased`와 완료 시각을 append. 응답은 이 commit 뒤에만 `erased:true`를 돌려준다.
 - 멱등: `erased`는 즉시 같은 결과를 반환하고, `redacted`는 C부터, `pending`은 B부터 재개한다. `pending`/`redacted` 상태의 재개 판단은 원장 내용이 아니라 상태 필드로 한다.
