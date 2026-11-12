@@ -373,7 +373,7 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-dock-slot > .m5-panel, .m5-dock-slot > .m5-timeline { flex: 1; min-width: 0; margin: 0; overflow: auto; }
 .m5-dock-heading { display: flex; align-items: center; gap: 3px; padding: 4px; background: #202a37; border: 1px solid #3b495b; border-bottom: 0; border-radius: 8px 8px 0 0; }
 .m5-dock-heading button { padding: 4px 6px; font-size: 12px; }
-.m5-dock-handle { flex: 1; text-align: left; cursor: grab; }
+.m5-dock-handle { flex: 1; text-align: left; cursor: default; }
 .m5-dock-separator { cursor: col-resize; touch-action: none; border-radius: 4px; background: transparent; }
 .m5-dock-separator:hover, .m5-dock-separator:focus-visible { background: #91c5ff; outline: none; }
 .m5-panels.m5-dock { gap: 0; }
@@ -390,7 +390,7 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-dock-visibility button { padding: 5px 10px; background: #202a37; color: var(--m5-muted); }
 .m5-dock-visibility button[aria-pressed="true"] { color: #e4f1ff; border-color: #91c5ff; }
 .m5-dock-tabs { display: flex; gap: 4px; padding: 4px 8px 0; border-bottom: 1px solid #3b495b; }
-.m5-dock-tabs button { border-radius: 6px 6px 0 0; background: #202a37; color: var(--m5-muted); cursor: grab; }
+.m5-dock-tabs button { border-radius: 6px 6px 0 0; background: #202a37; color: var(--m5-muted); cursor: default; }
 .m5-dock-tabs button[aria-selected="true"] { color: #e4f1ff; border-bottom: 2px solid #91c5ff; background: var(--m5-surface); }
 .m5-panels.m5-dock-tree { position: relative; display: block; flex: 1 0 300px; height: auto; min-height: 300px; }
 .m5-dock-tree .m5-dock-slot { position: absolute; box-sizing: border-box; padding: 4px; min-height: 0; overflow: hidden; }
@@ -405,7 +405,7 @@ button:disabled { cursor: not-allowed; opacity: .52; }
   .m5-new-chat-team { grid-template-columns: 1fr; }
   .m5-dock-group-tabs button { padding: 6px 8px; }
 }
-.m5-dock-group-tabs button { cursor: grab; background: #202a37; color: var(--m5-muted); white-space: nowrap; }
+.m5-dock-group-tabs button { cursor: default; background: #202a37; color: var(--m5-muted); white-space: nowrap; }
 .m5-dock-group-tabs button[aria-selected="true"] { background: var(--m5-surface); color: #e4f1ff; box-shadow: inset 0 -2px #91c5ff; }
 .m5-dock-count { display: inline-block; min-width: 1.5em; margin-left: 6px; padding: 1px 4px; border-radius: 8px; background: #34465c; color: #e4f1ff; font-size: 10px; font-variant-numeric: tabular-nums; }
 .m5-dock-heading select { max-width: 86px; padding: 4px; background: #202a37; color: #d8e0eb; border: 1px solid #3b495b; border-radius: 4px; }
