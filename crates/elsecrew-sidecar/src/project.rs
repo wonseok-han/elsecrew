@@ -84,7 +84,6 @@ use crate::{AppendOutcome, SidecarError, Storage};
 use cap_fs_ext::OsMetadataExt;
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt, OpenOptionsMaybeDirExt};
 use cap_std::ambient_authority;
-#[cfg(windows)]
 use cap_std::fs::OpenOptionsExt as _;
 #[cfg(unix)]
 use cap_std::fs::PermissionsExt;
@@ -2016,42 +2015,78 @@ impl ProjectManager {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     /// App-owned write of a read-only role's report into the chat working copy.
-    /// Agents stay read-only; the app creates the file (no-follow, exclusive)
-    /// and replaces it through the editor's staged, version-checked save path.
+    /// Agents stay read-only; the app creates the file (no-follow, exclusive,
+    /// non-blocking opens) and replaces it through the editor's staged,
+    /// version-checked save path. A file the app did not write (no `marker`
+    /// first line) is never replaced: the next free `<stem>-N.md` is used.
     /// The original project is never touched: applying it remains a review step.
     pub(crate) fn workspace_write_report(
         &mut self,
         storage: &mut Storage,
         address: &WorkspaceAddress,
+        directory: &str,
+        stem: &str,
+        marker: &str,
+        text: &str,
+        request_id: &str,
+    ) -> Result<String, ProjectFailure> {
+        let total = text.len() as u64;
+        if total == 0 || total > FILE_MAX_BYTES_V1 || !text.starts_with(marker) {
+            return Err(ProjectFailure::manifest("report must be marked non-empty UTF-8 within the file limit"));
+        }
+        let active = self.validate_workspace_address(storage, address)?;
+        let worktree = self.worktree_capability(&active)?;
+        create_parent_directories(&worktree, &format!("{directory}/{stem}.md"))?;
+        let mut chosen = None;
+        for index in 1..=9 {
+            let relative_path = if index == 1 { format!("{directory}/{stem}.md") } else { format!("{directory}/{stem}-{index}.md") };
+            validate_relative_path(&relative_path, false)?;
+            let (parent, name) = open_parent_capability(&worktree, &relative_path)?;
+            let mut options = CapOpenOptions::new();
+            options.write(true).create_new(true).follow(FollowSymlinks::No);
+            match parent.open_with(&name, &options) {
+                Ok(_) => { chosen = Some((relative_path, true)); break; }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    // Only a regular file that starts with the app's marker is ours.
+                    let mut head = vec![0_u8; marker.len()];
+                    let ours = open_real_file_at(&parent, &name)
+                        .and_then(|mut file| file.read_exact(&mut head).map_err(|error| {
+                            ProjectFailure::manifest(format!("could not inspect report file: {error}"))
+                        }))
+                        .is_ok_and(|()| head == marker.as_bytes());
+                    if ours { chosen = Some((relative_path, false)); break; }
+                }
+                Err(error) => {
+                    return Err(ProjectFailure::recovery(format!("could not create report file: {error}")))
+                }
+            }
+        }
+        let (relative_path, created) = chosen
+            .ok_or_else(|| ProjectFailure::manifest("no free report file name is available"))?;
+        let result = self.replace_report_text(storage, address, &active, &relative_path, text, request_id);
+        if result.is_err() && created {
+            // Leave no empty placeholder behind when the replacement never committed.
+            if let Ok((parent, name)) = open_parent_capability(&worktree, &relative_path) {
+                if parent.metadata(&name).is_ok_and(|meta| meta.is_file() && meta.len() == 0) {
+                    let _ = parent.remove_file(&name);
+                }
+            }
+        }
+        result.map(|()| relative_path)
+    }
+
+    fn replace_report_text(
+        &mut self,
+        storage: &mut Storage,
+        address: &WorkspaceAddress,
+        active: &ActiveProject,
         relative_path: &str,
         text: &str,
         request_id: &str,
     ) -> Result<(), ProjectFailure> {
-        validate_relative_path(relative_path, false)?;
         let total = text.len() as u64;
-        if total == 0 || total > FILE_MAX_BYTES_V1 {
-            return Err(ProjectFailure::manifest("report must be non-empty UTF-8 within the file limit"));
-        }
-        let active = self.validate_workspace_address(storage, address)?;
-        let worktree = self.worktree_capability(&active)?;
-        create_parent_directories(&worktree, relative_path)?;
-        {
-            let (parent, name) = open_parent_capability(&worktree, relative_path)?;
-            let mut options = CapOpenOptions::new();
-            options.write(true).create_new(true).follow(FollowSymlinks::No);
-            match parent.open_with(&name, &options) {
-                Ok(_) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(error) => {
-                    return Err(ProjectFailure::recovery(format!(
-                        "could not create report file: {error}"
-                    )))
-                }
-            }
-        }
-        let current = self.read_file_from_active(&active, &address.project_id, relative_path)?;
+        let current = self.read_file_from_active(active, &address.project_id, relative_path)?;
         if current.result["classification"] != "utf8" {
             return Err(ProjectFailure::manifest("an existing non-text report file is not replaced"));
         }
@@ -2064,17 +2099,32 @@ impl ProjectManager {
             .as_str()
             .ok_or_else(|| ProjectFailure::recovery("report save omitted its identity"))?
             .to_owned();
-        let mut seq = 0;
-        let mut rest = text;
-        while !rest.is_empty() {
-            let mut end = rest.len().min(MAX_TEXT_CHUNK_BYTES);
-            while !rest.is_char_boundary(end) {
-                end -= 1;
+        let staged = (|| {
+            let mut seq = 0;
+            let mut rest = text;
+            while !rest.is_empty() {
+                let mut end = rest.len().min(MAX_TEXT_CHUNK_BYTES);
+                while !rest.is_char_boundary(end) {
+                    end -= 1;
+                }
+                seq += 1;
+                self.workspace_append_save_chunk(storage, address, &save_id, seq, &rest[..end])?;
+                rest = &rest[end..];
             }
-            seq += 1;
-            self.workspace_append_save_chunk(storage, address, &save_id, seq, &rest[..end])?;
-            rest = &rest[end..];
-        }
+            Ok(seq)
+        })();
+        let seq = match staged {
+            Ok(seq) => seq,
+            Err(error) => {
+                // Nothing was committed: release the in-memory save, its staging
+                // file and its durable session so cleanup and removal stay unblocked.
+                if let Some(pending) = self.pending_saves.remove(&save_id) {
+                    remove_capability_temp(&self.save_staging_dir, pending.staging_name);
+                }
+                let _ = self.persist_workspace_save_session(storage, address, &save_id, false);
+                return Err(error);
+            }
+        };
         let committed = self.workspace_commit_save(storage, address, &save_id, &version, seq, total, request_id)?;
         if committed.result["outcome"] != "committed" {
             return Err(ProjectFailure::manifest("report save did not commit"));
@@ -2082,6 +2132,7 @@ impl ProjectManager {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn workspace_commit_save(
         &mut self,
         storage: &mut Storage,
@@ -6059,6 +6110,9 @@ fn open_real_os_child_dir(parent: &Dir, name: &OsStr) -> Result<Dir, ProjectFail
         .read(true)
         .follow(FollowSymlinks::No)
         .maybe_dir(true);
+    // A FIFO planted where a directory is expected must not block the dispatcher.
+    #[cfg(unix)]
+    options.custom_flags(libc::O_NONBLOCK);
     #[cfg(windows)]
     options.custom_flags(windows_fs::OPEN_REPARSE_POINT);
     let opened = parent.open_with(component, &options).map_err(|error| {
@@ -6128,6 +6182,10 @@ fn open_real_file_at(parent: &Dir, name: &str) -> Result<CapFile, ProjectFailure
     }
     let mut options = CapOpenOptions::new();
     options.read(true).follow(FollowSymlinks::No);
+    // Regular files ignore O_NONBLOCK; a FIFO then fails the type check below
+    // instead of blocking the single-threaded dispatcher on open.
+    #[cfg(unix)]
+    options.custom_flags(libc::O_NONBLOCK);
     #[cfg(windows)]
     options.custom_flags(windows_fs::OPEN_REPARSE_POINT);
     let opened = parent.open_with(name, &options).map_err(|error| {

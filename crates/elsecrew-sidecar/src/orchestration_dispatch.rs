@@ -16,6 +16,9 @@ fn role_report_title(role: &str) -> String {
     }
 }
 
+/// First line of every app-written report; files without it are never replaced.
+const ROLE_REPORT_MARKER: &str = "<!-- elsecrew:role-report -->\n";
+
 /// Plain Markdown: heading, the request the coordinator gave, then the report.
 fn role_report_document(role: &str, goal: &str, instruction: &str, run: &Value, text: &str) -> String {
     let title = role_report_title(role);
@@ -23,7 +26,7 @@ fn role_report_document(role: &str, goal: &str, instruction: &str, run: &Value, 
     let runtime = if profile["runtime"] == "codex" { "Codex" } else { "Claude Code" };
     let model = profile["modelSelector"].as_str().unwrap_or_default();
     let updated = run["updatedAt"].as_str().unwrap_or_default();
-    let mut document = format!("# {title} 보고서\n\n- 채팅 목표: {}\n- 작성: {runtime} · {model} · {updated}\n",
+    let mut document = format!("{ROLE_REPORT_MARKER}# {title} 보고서\n\n- 채팅 목표: {}\n- 작성: {runtime} · {model} · {updated}\n",
         goal.lines().next().unwrap_or_default());
     if !instruction.trim().is_empty() {
         document.push_str(&format!("\n## 총괄의 요청\n\n{}\n", instruction.trim()));
@@ -121,9 +124,9 @@ impl Sidecar {
         let document = role_report_document(role, chat_record["goal"].as_str().unwrap_or_default(),
             instruction, run, text);
         self.projects.workspace_write_report(
-            &mut self.storage, &address, &format!("docs/elsecrew/{role}.md"), &document,
+            &mut self.storage, &address, "docs/elsecrew", role, ROLE_REPORT_MARKER, &document,
             &format!("report_{run_id}"),
-        )
+        ).map(|_| ())
     }
 
     pub(super) fn cancel_team_task(
@@ -774,7 +777,7 @@ mod tests {
             .unwrap();
         let worktree = std::path::Path::new(planner["worktree_path"].as_str().unwrap());
         let report = std::fs::read_to_string(worktree.join("docs/elsecrew/planning.md")).unwrap();
-        assert!(report.starts_with("# 기획 보고서\n"), "{report}");
+        assert!(report.starts_with("<!-- elsecrew:role-report -->\n# 기획 보고서\n"), "{report}");
         assert!(report.contains("Write a short plan for the todo page."));
         assert!(report.contains("3. Keep the list after reload"));
         // The original project is untouched; the report is a reviewable change.
@@ -785,6 +788,42 @@ mod tests {
         );
         // The coordinator never gets a report file.
         assert!(!worktree.join("docs/elsecrew/coordinator.md").exists());
+    }
+    use std::os::unix::fs::FileTypeExt;
+    #[test]
+    fn report_never_blocks_on_a_fifo_or_replaces_a_file_the_app_did_not_write() {
+        let (_root, mut sidecar, chat) = service();
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::OrchestratorDelegatePlanning);
+        let response = start(&mut sidecar, &chat);
+        assert!(response.ok, "{response:?}");
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::OrchestratorPlanner);
+        let id = chat["chatId"].as_str().unwrap();
+        let root_run = response.result.as_ref().unwrap()["runId"].as_str().unwrap().to_owned();
+        let projection = sidecar.storage.projection_record("run", &root_run).unwrap().unwrap();
+        let worktree = std::path::PathBuf::from(projection["worktree_path"].as_str().unwrap());
+        let reports = worktree.join("docs/elsecrew");
+        std::fs::create_dir_all(&reports).unwrap();
+        let fifo = std::ffi::CString::new(reports.join("planning.md").to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        std::fs::write(reports.join("planning-2.md"), "my own notes\n").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            sidecar.poll_runtime_events().unwrap();
+            let state = sidecar.workflow_state(id).unwrap();
+            if state.role == "planning" && state.run_id.is_some() {
+                sidecar.agent_runtime.set_fake_scenario(FakeScenario::OrchestratorFinal);
+            }
+            if state.status != "running" {
+                assert_eq!(state.status, "completed", "{state:?}");
+                break;
+            }
+            assert!(Instant::now() < deadline, "{state:?}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(std::fs::symlink_metadata(reports.join("planning.md")).unwrap().file_type().is_fifo());
+        assert_eq!(std::fs::read_to_string(reports.join("planning-2.md")).unwrap(), "my own notes\n");
+        let report = std::fs::read_to_string(reports.join("planning-3.md")).unwrap();
+        assert!(report.starts_with("<!-- elsecrew:role-report -->\n"), "{report}");
     }
     #[test]
     fn orchestration_notices_use_transport_sequence_independent_of_durable_history() {
