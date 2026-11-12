@@ -880,6 +880,7 @@ function FollowupComposer({ controller, chat, admissionReady }: { controller: Ch
     <p>{t("m5.chat.delivery")}</p>
     {draft?.error && <div role="alert"><p>{t("m5.chat.saveError")}</p><details><summary>{t("m5.chat.details")}</summary><pre>{draft.error}</pre></details></div>}
     {draft?.request && !draft.sending && <details><summary>{t("m5.chat.retryMessage")}</summary><p>{draft.request.text}</p></details>}
+    {chat.activeChat?.state === "running" && <TeamProgress runs={chat.agentRuns} />}
     <div className="m5-followup-actions">
       {/* Stop sits by the always-visible composer so a long conversation never hides it. */}
       {chat.activeChat?.schemaVersion === 2 && chat.activeChat.state === "running" && window.m5Projects && <button type="button" className="m5-secondary m5-stop-team" onClick={() => void controller.cancelTeamTask(input => window.m5Projects!.request(input))}>{t("m5.chat.stopTeam")}</button>}
@@ -887,6 +888,23 @@ function FollowupComposer({ controller, chat, admissionReady }: { controller: Ch
     </div>
     {!allowed && chat.activeChat?.state !== "running" && <p>{t("m5.chat.unavailable")}</p>}
   </form>;
+}
+
+/** Who is working right now, so "team task running" never hides the active member. */
+function TeamProgress({ runs }: { runs: ReturnType<ChatUiController["snapshot"]>["agentRuns"] }) {
+  const { t } = useI18n();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
+  const active = [...runs].reverse().find(run => ["preparing", "running", "cancelling"].includes(run.state));
+  if (!active) return <p className="m5-team-progress" role="status">{t("m5.chat.progress.between")}</p>;
+  const started = Date.parse(active.createdAt);
+  const seconds = Number.isFinite(started) ? Math.max(0, Math.round((now - started) / 1000)) : null;
+  const elapsed = seconds === null ? "" : seconds >= 60 ? t("m5.run.duration.minutes", { m: Math.floor(seconds / 60), s: seconds % 60 }) : t("m5.run.duration.seconds", { s: seconds });
+  return <p className="m5-team-progress" role="status">{t("m5.chat.progress.working", {
+    role: t(`m5.roles.${active.selectedProfile.roleId}`),
+    runtime: active.selectedProfile.runtime === "codex" ? "Codex" : "Claude Code",
+    state: t(`m5.run.${active.state}`), elapsed,
+  })}</p>;
 }
 
 const TeamMessageRow = memo(function TeamMessageRow({ message, roleLabel, messageTime }: {
