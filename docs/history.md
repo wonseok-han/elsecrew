@@ -2,6 +2,11 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — 채팅 영구 삭제 브랜치 병합 마무리
+- 멈춘 병합 `feature/ade-chat-erasure`(5a097d27) → `feature/ade`를 `git merge --continue`로 완료했다(병합 커밋 bf9bae43, 로컬만·push 없음). 멈춘 이유: 충돌은 이미 해결·스테이징돼 있었고 커밋 단계만 남아 있었다. 미병합 파일·충돌 표식·hook 없음을 확인하고 내용은 고치지 않았다.
+- 검증: `git diff --check` 통과, `tsc --noEmit` 통과, `tests/m5-chat-erasure.test.mts` 3/3 통과. Rust erasure 테스트는 같은 worktree의 다른 세션이 cargo check/test를 실행 중이어서(무거운 실행은 한 번에 하나) 중복으로 돌리지 않았다. 병합 결과의 Rust 검증 결과는 그 세션의 기록으로 확인해야 한다.
+- 다음: 병합 후 누적 검사(Rust workspace·npm test), V13 통합 시 erasure 허용 schema 버전에 13 추가(위 엔트리 참조).
+
 ### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — 채팅 내용 영구 삭제 작업자(재검토 반영)
 - 재검토: 차단 결함 없음, `pending` 고착 해소 확인. 요청 2건 반영: ① 직전에 넣은 "해결된 복구가 종료 증거를 대신" 예외를 되돌렸다. 프로젝트·저장소 자격 모두 `processesProvenGone=true` 필수, 복구가 있으면 `resolvedAbandoned`만 허용(`"resolved"`는 프로토콜 상태가 아님). `resolvedAbandoned` 경로가 종료 증거를 함께 기록함을 테스트로 확인했다. ② 재시도 분기에서 sidecar 일시 상태(반영 실행·대기 저장·준비 취소)와 저장소 읽기/I/O 오류는 `pending` 유지, 분류·압축·자격의 영구 거절만 철회한다.
 - 검증(전용 target): erasure Rust 11개 통과(추가: 증거 없는 resolvedAbandoned·비프로토콜 `resolved` 거절과 무기록, 일시 busy 재시도 시 `pending` 유지 후 완료, 재작성 transaction 내부 거절 시 ROLLBACK·trigger 원복·철회·목록 재노출). 변경은 erasure 모듈·테스트·문서에 한정돼 전체 sidecar 재실행은 하지 않았다(직전 768 통과/기존 3 실패). merge/push·실제 데이터·모델 없음.
