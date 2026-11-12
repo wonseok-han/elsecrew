@@ -15,6 +15,7 @@
 | **M5 잔여 워크트리 대조** | [`archive/m5-worktree-reconciliation-2026-09.md`](archive/m5-worktree-reconciliation-2026-09.md) | 9개 초안의 현행 구현 대응·보존 커밋·이식한 회귀 |
 | **M5 변경 반영·복원 계약 초안** | [`proposals/m5-change-application.md`](proposals/m5-change-application.md) | 원본 비교·검토 묶음·복원 지점·적용/복구 구현 순서; 아직 제품 동작 아님 |
 | **M5 장시간 단일 실행 출력 계약 초안** | [`proposals/m5-long-running-agent-streams.md`](proposals/m5-long-running-agent-streams.md) | 사용자 승인 방향에 따른 append-only 출력·페이지 조회·재접속·이관·자원 예산과 단계별 구현; 아직 제품 동작 아님 |
+| **M5 채팅 내용 영구 삭제 계약 초안** | [`proposals/m5-chat-erasure.md`](proposals/m5-chat-erasure.md) | 버린 채팅의 본문·출력 삭제 자격·지우는/남기는 범위·원장 일관 재작성·중단 재개·화면 흐름; 아직 제품 동작 아님 |
 
 > ⚠️ **`proposals/`는 구현된 것이 아니다.** 여기 있는 내용을 현재 동작으로 인용하지 말 것. 이 경계가 이 분류의 존재 이유다.
 

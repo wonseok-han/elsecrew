@@ -2,6 +2,24 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — 채팅 내용 영구 삭제 작업자(재검토 반영)
+- 재검토: 차단 결함 없음, `pending` 고착 해소 확인. 요청 2건 반영: ① 직전에 넣은 "해결된 복구가 종료 증거를 대신" 예외를 되돌렸다. 프로젝트·저장소 자격 모두 `processesProvenGone=true` 필수, 복구가 있으면 `resolvedAbandoned`만 허용(`"resolved"`는 프로토콜 상태가 아님). `resolvedAbandoned` 경로가 종료 증거를 함께 기록함을 테스트로 확인했다. ② 재시도 분기에서 sidecar 일시 상태(반영 실행·대기 저장·준비 취소)와 저장소 읽기/I/O 오류는 `pending` 유지, 분류·압축·자격의 영구 거절만 철회한다.
+- 검증(전용 target): erasure Rust 11개 통과(추가: 증거 없는 resolvedAbandoned·비프로토콜 `resolved` 거절과 무기록, 일시 busy 재시도 시 `pending` 유지 후 완료, 재작성 transaction 내부 거절 시 ROLLBACK·trigger 원복·철회·목록 재노출). 변경은 erasure 모듈·테스트·문서에 한정돼 전체 sidecar 재실행은 하지 않았다(직전 768 통과/기존 3 실패). merge/push·실제 데이터·모델 없음.
+
+### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — 채팅 내용 영구 삭제 작업자(독립 검토 반영)
+- 독립 검토: 저장 무결성(trigger 일시 제거·재생성, schema identity, 검증기, 비압축 채팅 사본 완전성) 차단 없음. 차단 1건(채팅이 `pending`에 영구히 갇힘)을 3dfd8115에서 수정했다: `recovery_resolution_intent`(ID·revision·추적 프로세스·예상 manifest/digest만, 실제 정의 확인)를 보존 키로 분류. 분류·압축·자격·잔존 검사를 쓰기 없는 dry run으로 `pending` 기록 **전에** 수행하고, 같은 검사를 재작성 transaction 안에서 trigger 제거 전에 다시 한다(§2 1~5·7 재검사, sidecar 유휴는 호출 측). 재시도가 거절되면 `pending`을 철회하고 일시 오류는 유지한다. `pending`은 채팅 목록에서 숨기지 않는다. 해결된 복구가 있는 실행은 종료 증거 대신 그 해결을 종료 권한으로 인정한다.
+- 비차단 반영: 확인 문구·설계 문서가 공급자 세션 기록을 "앱 밖"이 아니라 앱 소유 공급자 프로필 폴더 안의 미삭제 사본으로, 이 버전 이전에 SQLite 빈 공간으로 풀린 조각이 남을 수 있음을 고지한다. `chatErasureList` 전체 dry run 비용을 문서에 적었다.
+- 검증(전용 target `/private/tmp/elsecrew-erasure-target`): erasure Rust 8개 통과(추가: 복구 해결 이력 실행 채팅 삭제, 보존 필드 잔존 시 기록 없이 거절, 분류 불가 필드 시 기록 없이 거절, `pending` 뒤 압축되면 재시도 거절·철회·목록 재노출·내용 보존). TypeScript·계약 테스트3 통과. 전체 sidecar lib 768 통과/3 실패/43 ignored — 실패 3개는 이전과 같은 공급자 연결 게이트(`providerDisconnected`, f1a135c7 이전 코드) 테스트다. 실제 데이터·모델·패키징·Electron 화면 검사·merge/push 없음.
+
+### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — 채팅 내용 영구 삭제 작업자
+- 브랜치 `feature/ade-chat-erasure`(기준 f8672e5f, worktree `.worktrees/chat-erasure`). 설계 `docs/proposals/m5-chat-erasure.md`를 먼저 커밋하고 구현했다. 대상은 **버린(discarded) 채팅만**이며 목표·메시지·팀 지시/보고·실행 출력 본문을 고정 표지 `[erased]`로 바꾸고 ID·시각·상태·실행/종료 증거는 남긴다.
+- 방식: schema 버전을 올리지 않는다. 한 `BEGIN IMMEDIATE` 안에서 수정 금지 trigger 3개(events/receipts/baselines UPDATE)를 캡처 SQL과 함께 내렸다 그대로 재생성하고, 이벤트·receipt(digest)·baseline(digest)·`chat_messages`(digest)·chat/run projection·출력 원장(`text_bytes`)·legacy `public_events`(카운터)를 같은 결정적 함수로 다시 쓴 뒤 버전별 schema identity를 재검증하고 commit한다. 기존 재열기/재생/materialization/compaction 검증 코드는 바꾸지 않았다. 분류되지 않은 payload 키가 있으면 거절한다. 압축 흔적(frozen/prefix/plan)이 있는 채팅은 v1에서 거절한다.
+- 상태 `chat_erasure_v1`(프로젝트 원장 확장): pending → redacted(원자 재작성과 같은 transaction) → WAL `TRUNCATE` 성공·길이 0 확인 → erased. 응답 `erased:true`는 마지막 기록 뒤에만 반환한다. 연결 설정에 `PRAGMA secure_delete=ON`을 전역으로 추가했다(성능 영향 미측정). 삭제된 채팅은 채팅 목록과 숨김 복원에서 제외된다. IPC는 기존 `project.catalog`의 `chatErasureList`/`eraseChatContent`(확인·유휴 게이트)이며 설정 → 저장공간에 선택·확인·진행 화면과 ko/en 문구를 추가했다. Windows는 자격 없음으로만 표시한다.
+- 검증(임시 DB만): erasure Rust 5개 통과 — 실제 fake Claude 실행 출력(V12 출력 원장)·후속 메시지가 있는 채팅 삭제 후 표식 문자열이 DB+WAL 바이트에 없음, 대조 채팅 보존, 전체 admission 재열기 2회 뒤에도 없음/목록 제외/멱등; 단계1~3 중단 후 재시작·재개; 버리지 않은 채팅·분류 안 된 필드 거절 시 trigger·schema·내용 원복; 삭제 후 다른 채팅 실제 compaction 완료·재열기, 압축된 채팅 거절; V10 legacy `public_events`·카운터. sidecar lib 전체 765 통과/3 실패/43 ignored — 실패 3개(`tests::discovery_*`, `native_session_negotiates_*`)는 기존 공급자 연결 게이트의 `providerDisconnected`로 이번 변경과 무관해 보이나 기준 커밋 재실행으로 확인하지는 않았다. `cargo check --workspace` 경고 없음, TypeScript 통과, npm 723/723 통과(새 계약·문구 테스트3 포함), `git diff --check` 통과.
+- 한계 발견: `secure_delete`를 끈 상태에서도 위 바이트 검사가 통과했다. 즉 테스트는 빈 공간 0 채움을 입증하지 못하며 `secure_delete`는 방어선일 뿐 검증된 보장이 아니다. 실제 사용자 데이터·실제 모델·패키징·설치본 반영·Electron 화면 검사는 하지 않았다. 독립 검토 전이며 데이터 삭제 경계라 검토가 필요하다.
+- 함정: 공유 `CARGO_TARGET_DIR`에서 worktree가 다르면 workspace 상대 경로 때문에 `elsecrew-sidecar` 산출물 hash가 같아 서로 덮어쓴다(다른 작업자의 테스트 바이너리가 실행됨). 이번 검증은 `--target aarch64-apple-darwin`으로 산출물을 분리했다.
+- 남은 일: 독립 검토, V13 통합 시 `storage/chat_erasure.rs`의 `ERASURE_SCHEMA_VERSIONS`·`verify_schema_identity_for_erasure`에 13 추가, 공급자 자체 세션 기록 삭제, 압축된 긴 채팅·`completed` 채팅 지원, 기능 도입 전 SQLite 빈 공간 잔존 정리, Electron 화면 검사.
+
 ### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5)
 - 프런트 검사 26실패 해소(75774a56): main 보안 harness에 사용량 reader·디렉터리 조회·연결 조회 fake를 추가하고 미연결 공급자는 로그인을 시작하지 않는 검사를 보강했다. preload 사용량 채널은 M5_ 별칭으로 고정 채널 검사를 유지했다. 오래된 기대값(팀 수락 event 추가, 언어 중립 문구, 폴더 열기 문구, Monaco defineTheme)만 갱신했다. npm test 720/720 PASS. Cargo.lock은 이름 변경 후 정렬만 바뀌어 별도 커밋(f8672e5f). `pnpm test:harness` baseline PASS(프런트 빌드·720·Tauri Rust105).
 - Windows CI 기준선 실패의 유력 원인: Node가 `.cmd`를 shell 없이 spawn하지 못해(EINVAL) frontend-build가 0.2초 만에 실패하고 오류가 로그에 안 찍혔다. harness가 Windows `.cmd`만 shell로 실행하고 spawn 오류를 출력하게 했다. **CI 재실행 전이라 미확인**(push 필요).
@@ -173,6 +191,8 @@
 - **공급자 fence 경합(2026-11-12)**: 로그인 확인·모델 목록·실행이 같은 `*-login.pending`을 공유한다. 기존 fence가 live 소유자에게 잠겨 있으면 `providerBusy`(재시도)이고, 잠금 없는 고아만 recovery 증거다. fence는 staging 잠금 후 hard_link로만 게시해 이름이 잠기지 않은 inode를 가리키는 순간이 없다. 사용량 표시는 연결 변경 시 Codex 모델 조회를 즉시 실행하므로 로그인 확인과 동시 실행될 수 있다.
 - **2026-11-12 main 통합 이후**: PR #1 병합 b6e2de81 및 GitHub `elsecrew` 이름 변경 완료. 이후 최신 main 기반 기능 브랜치에서 작업하며 추가 main 병합/push는 별도 승인이다. CI43150190399 실패는 제품 완료가 아님; Tauri 빌드 성공과 artifact 업로드 실패를 구분한다.
 - **Claude 실패 진단(2026-11-12)**: 새 terminal run.failure는 허용된 단계/원인 코드만 보존하며 기존 실패 원인은 추정하지 않는다. fixture Bash→Read 정상 경로는 통과했고 전달 오류 주입의 재시작 보존도 확인했다. 과거 사용자 실행의 직접 원인과 설치본/실제 공급자 재시험은 별도 미확인이다.
+
+- **채팅 내용 삭제(2026-11-12, 구현·독립 검토 전)**: G5D 검증기가 원천에서 사본을 재유도해 byte/digest를 비교하므로 "표지 행 예외" 대신 모든 사본을 한 transaction에서 같은 결정적 치환으로 다시 쓴다(`storage/chat_erasure.rs`). schema 버전은 그대로이며 지원 버전 목록은 그 파일 한 곳이다. `VACUUM`은 `events` rowid를 바꿀 수 있어 쓰지 않는다. 의도(`pending`) 기록 전 쓰기 없는 dry run이 필수이며, 거절된 `pending`은 철회한다(갇힘 방지). 실행/채팅 payload에 새 최상위 키를 추가하면 `storage/chat_erasure.rs` 분류 목록에도 추가해야 삭제가 거절되지 않는다. 공유 target 디렉터리에서 다른 worktree와 sidecar 산출물이 충돌하므로 병렬 작업 중에는 `--target`으로 분리한다. 계약: `docs/proposals/m5-chat-erasure.md`.
 
 - **사용자 정의 팀(2026-11-12 재확정)**: 기본5역할은 템플릿이다. 총괄은 사용자가 구성한 역할 설명/컨텍스트와 요청의 선행조건으로 배분한다. 고정 순차 pipeline은 제품 방향이 아니며 현재 실행의 고정 role enum은 남은 구현 제약이다.
 
