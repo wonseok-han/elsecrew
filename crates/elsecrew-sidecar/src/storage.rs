@@ -18,7 +18,7 @@ use elsecrew_protocol::storage_lifetime_v1::{
     validate_storage_lifetime_reopen_pair_v3, validate_storage_lifetime_reopen_pair_v4,
     FrozenOperationSourceV1, OperationReceiptV2, StorageStatusV1,
     STORAGE_LIFETIME_SCHEMA_VERSION_V1, STORAGE_LIFETIME_SCHEMA_VERSION_V10,
-    STORAGE_LIFETIME_SCHEMA_VERSION_V11, STORAGE_LIFETIME_SCHEMA_VERSION_V12,
+    STORAGE_LIFETIME_SCHEMA_VERSION_V11, STORAGE_LIFETIME_SCHEMA_VERSION_V12, STORAGE_LIFETIME_SCHEMA_VERSION_V13,
     STORAGE_LIFETIME_SCHEMA_VERSION_V3, STORAGE_LIFETIME_SCHEMA_VERSION_V4,
     STORAGE_LIFETIME_SCHEMA_VERSION_V5, STORAGE_LIFETIME_SCHEMA_VERSION_V6,
     STORAGE_LIFETIME_SCHEMA_VERSION_V7, STORAGE_LIFETIME_SCHEMA_VERSION_V8,
@@ -170,13 +170,18 @@ impl Storage {
         Self::open_for_durable_admission(path, &NEVER_CANCELLED)
     }
 
+    /// V3 user-defined role sets need the V13 author-format trigger.
+    pub(crate) fn custom_roles_enabled(&self) -> Result<bool, SidecarError> {
+        Ok(storage_schema_version(&self.connection)? == Some(STORAGE_LIFETIME_SCHEMA_VERSION_V13))
+    }
+
     pub(crate) fn coordinator_roles_enabled(&self) -> Result<bool, SidecarError> {
-        Ok(storage_schema_version(&self.connection)? == Some(STORAGE_LIFETIME_SCHEMA_VERSION_V12))
+        Ok(matches!(storage_schema_version(&self.connection)?, Some(STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)))
     }
 
     pub(crate) fn uses_durable_output(&self) -> Result<bool, SidecarError> {
         self.ensure_writes_admitted()?;
-        Ok(matches!(storage_schema_version(&self.connection)?, Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)))
+        Ok(matches!(storage_schema_version(&self.connection)?, Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)))
     }
 
     /// Inject cancellation at migration checkpoints without admitting writes.
@@ -202,7 +207,7 @@ impl Storage {
         let mut storage = Self::open_inner(path, cancellation, StorageOpenMode::DurableAdmission)?;
         storage.writes_admitted = false;
         ensure_admission_not_cancelled(cancellation)?;
-        if !matches!(storage_schema_version(&storage.connection)?, Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)) {
+        if !matches!(storage_schema_version(&storage.connection)?, Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)) {
             // Verify the old ledger before committing its forward-only schema upgrade.
             let mut session = reopen::snapshot::ReopenMaintenanceSession::start_for_admission(
                 &mut storage.connection,
@@ -224,6 +229,7 @@ impl Storage {
                 &mut || cancellation.load(Ordering::Acquire))?;
         }
         agent_output::schema::migrate_coordinator(&mut storage.connection, &mut || cancellation.load(Ordering::Acquire))?;
+        agent_output::schema::migrate_custom_roles(&mut storage.connection, &mut || cancellation.load(Ordering::Acquire))?;
         agent_output::schema::verify_admission(&mut storage.connection,
             &mut || cancellation.load(Ordering::Acquire))?;
         ensure_admission_not_cancelled(cancellation)?;
@@ -424,7 +430,7 @@ impl Storage {
                 }
                 verify_schema_v10(&connection)?;
             }
-            Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)
+            Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)
                 if matches!(mode, StorageOpenMode::DurableAdmission) => {
                 agent_output::schema::verify(&connection)?;
             }
@@ -452,7 +458,7 @@ impl Storage {
                 storage_schema_version(&connection)?,
                 Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
                     | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
-                    | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)
+                    | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)
             );
         if !exact_plan_admission {
             verify_projection_replay(&connection)?;
@@ -3917,7 +3923,7 @@ pub(crate) fn load_v8_verified_frozen_event(
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
-            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)
+            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)
     ) {
         return Ok(None);
     }
@@ -3956,7 +3962,7 @@ pub(crate) fn load_v8_verified_frozen_message_event(
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
-            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)
+            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)
     ) {
         return Ok(None);
     }
@@ -4333,7 +4339,7 @@ fn replay_storage_ledger(
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
-            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)
+            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)
     ) {
         return replay_ledger_v1(events).map_err(storage_contract_error);
     }
@@ -4410,7 +4416,7 @@ fn load_verified_compaction_seeds(
     }
     let prefixes = if matches!(
         storage_schema_version(connection)?,
-        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9) | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10) | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9) | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10) | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)
     ) {
         let mut statement = connection
             .prepare(
@@ -4496,7 +4502,7 @@ fn classify_storage_operation(
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
             | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
-            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)
+            | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)
     ) {
         return classify_operation_v1(existing_events, incoming).map_err(storage_contract_error);
     }
@@ -4779,7 +4785,7 @@ fn insert_event(transaction: &Transaction<'_>, event: &LedgerEventV1) -> Result<
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9) => {
             insert_v6_source_index_and_invalidate_ready(transaction, event)?;
         }
-        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10 | STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12) => {
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10 | STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13) => {
             insert_v6_source_index_and_invalidate_ready(transaction, event)?;
         }
         None
@@ -4811,7 +4817,7 @@ fn verify_append_runtime_state(connection: &Connection) -> Result<(), SidecarErr
             verify_append_materialization_pair(connection)?;
             verify_v9_append_runtime_state(connection)
         }
-        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10 | STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12) => {
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10 | STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13) => {
             verify_append_materialization_pair(connection)?;
             verify_v9_append_runtime_state(connection)
         }

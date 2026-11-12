@@ -42,7 +42,7 @@ fn durable_fixture_open_migrates_reopens_and_does_not_enable_product_open() {
     {
         let storage = Storage::open_durable_output_for_test(&path).unwrap();
         assert!(storage.uses_durable_output().unwrap());
-        assert_eq!(storage_schema_version(&storage.connection).unwrap(), Some(STORAGE_LIFETIME_SCHEMA_VERSION_V12));
+        assert_eq!(storage_schema_version(&storage.connection).unwrap(), Some(STORAGE_LIFETIME_SCHEMA_VERSION_V13));
     }
     assert!(Storage::open_for_admission(&path, &AtomicBool::new(false)).is_err());
     {
@@ -5600,4 +5600,59 @@ fn coordinator_schema_v12_migration_rolls_back_cancellation_and_reopens() {
     assert!(Storage::open_for_admission(&path, &AtomicBool::new(false)).is_err());
     let reopened = Storage::open_for_durable_admission(&path, &AtomicBool::new(false)).unwrap();
     assert!(reopened.coordinator_roles_enabled().unwrap());
+}
+
+fn custom_role_chat_event(sequence: u64, role_id: &str) -> LedgerEventV1 {
+    let mut message = team_message("chat_v13", &format!("message_v13_{sequence}"), sequence);
+    message["kind"] = json!("role");
+    message["roleId"] = json!(role_id);
+    message["runId"] = json!("run_v13");
+    event(
+        &format!("evt_v13_{sequence}"),
+        &format!("op_v13_{sequence}"),
+        "chat",
+        "chat_v13",
+        sequence,
+        materializable_chat_payload("chat_v13", "project_v13", sequence, message),
+        "2026-11-12T01:00:00Z",
+    )
+}
+
+#[test]
+fn custom_role_schema_v13_migration_relaxes_only_author_format_and_reopens() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("custom-roles.sqlite3");
+    let mut storage = Storage::open_for_admission(&path, &AtomicBool::new(false)).unwrap();
+    agent_output::schema::migrate(&mut storage.connection).unwrap();
+    // V11 cannot skip directly to V13.
+    assert!(agent_output::schema::migrate_custom_roles(&mut storage.connection, &mut || false).is_err());
+    agent_output::schema::migrate_coordinator(&mut storage.connection, &mut || false).unwrap();
+    assert!(!storage.custom_roles_enabled().unwrap());
+    storage.append_event(&event("evt_v13_project", "op_v13_project", "project", "project_v13", 1,
+        json!({"canonical_path":"/fixture/v13","project_id":"project_v13"}), "2026-11-12T00:59:00Z")).unwrap();
+    // V12 still rejects a user-defined author but accepts a legacy one.
+    assert!(storage.append_event(&custom_role_chat_event(1, "research")).is_err());
+    assert_eq!(storage.append_event(&custom_role_chat_event(1, "coding")).unwrap(), AppendOutcome::Committed);
+    let before = database_snapshot(&storage.connection);
+    let mut checks = 0;
+    assert!(agent_output::schema::migrate_custom_roles(&mut storage.connection, &mut || { checks += 1; checks > 1 }).is_err());
+    assert_eq!(database_snapshot(&storage.connection), before);
+    agent_output::schema::migrate_custom_roles(&mut storage.connection, &mut || false).unwrap();
+    assert!(storage.custom_roles_enabled().unwrap());
+    assert!(storage.coordinator_roles_enabled().unwrap());
+    assert!(agent_output::schema::verify(&storage.connection).is_ok());
+    // Idempotent; a second call is a no-op.
+    agent_output::schema::migrate_custom_roles(&mut storage.connection, &mut || false).unwrap();
+    for invalid in ["Research", "r", "re search", "1research", "re_search", &"r".repeat(33)] {
+        assert!(storage.append_event(&custom_role_chat_event(2, invalid)).is_err(), "{invalid}");
+    }
+    assert_eq!(storage.append_event(&custom_role_chat_event(2, "research")).unwrap(), AppendOutcome::Committed);
+    assert_eq!(storage.append_event(&custom_role_chat_event(3, &format!("r{}", "-".repeat(31)))).unwrap(), AppendOutcome::Committed);
+    drop(storage);
+    assert!(Storage::open_for_admission(&path, &AtomicBool::new(false)).is_err());
+    let reopened = Storage::open_for_durable_admission(&path, &AtomicBool::new(false)).unwrap();
+    assert!(reopened.custom_roles_enabled().unwrap());
+    drop(reopened);
+    let reopened = Storage::open_for_durable_admission(&path, &AtomicBool::new(false)).unwrap();
+    assert_eq!(storage_schema_version(&reopened.connection).unwrap(), Some(STORAGE_LIFETIME_SCHEMA_VERSION_V13));
 }
