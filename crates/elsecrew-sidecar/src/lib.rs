@@ -1336,12 +1336,13 @@ impl Sidecar {
                 }
                 Some("getAppRoleDefaults") => {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
-                    self.projects.app_role_defaults().map(|settings| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"getAppRoleDefaults","settings":settings}), ..Default::default() })
+                    self.storage.custom_roles_enabled().map_err(|error| ProjectFailure::manifest(error.detail)).and_then(|custom| self.projects.app_role_defaults(custom)).map(|settings| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"getAppRoleDefaults","settings":settings}), ..Default::default() })
                 }
                 Some("updateAppRoleDefaults") => {
-                    let params = require_exact_params(&request.params, &["action", "expectedRevision", "roles"]).map_err(invalid_params)?;
+                    let keys: &[&str] = if request.params.get("roleDefinitions").is_some() { &["action", "expectedRevision", "roles", "roleDefinitions"] } else { &["action", "expectedRevision", "roles"] };
+                    let params = require_exact_params(&request.params, keys).map_err(invalid_params)?;
                     let revision = params.get("expectedRevision").and_then(Value::as_u64).ok_or_else(|| invalid_params("invalid settings revision".into()))?;
-                    self.projects.update_app_role_defaults(&self.storage, revision, params["roles"].clone()).map(|settings| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"updateAppRoleDefaults","settings":settings}), ..Default::default() })
+                    self.projects.update_app_role_defaults(&self.storage, revision, params["roles"].clone(), params.get("roleDefinitions").cloned()).map(|settings| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"updateAppRoleDefaults","settings":settings}), ..Default::default() })
                 }
                 Some("backupStorageUsage") => {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
@@ -1862,11 +1863,13 @@ impl Sidecar {
                     }
                 }
                 "project.updateRoleSettings" => {
-                    let params = require_exact_params(
-                        &request.params,
-                        &["projectId", "expectedRevision", "roles"],
-                    )
-                    .map_err(ProjectFailure::manifest)?;
+                    let keys: &[&str] = if request.params.get("roleDefinitions").is_some() {
+                        &["projectId", "expectedRevision", "roles", "roleDefinitions"]
+                    } else {
+                        &["projectId", "expectedRevision", "roles"]
+                    };
+                    let params = require_exact_params(&request.params, keys)
+                        .map_err(ProjectFailure::manifest)?;
                     chat::G5Action {
                         result: self.g5.update_role_settings(
                             &mut self.storage,
@@ -1874,6 +1877,7 @@ impl Sidecar {
                             param_u64(params, "expectedRevision")
                                 .map_err(ProjectFailure::manifest)?,
                             params.get("roles").cloned().unwrap_or(Value::Null),
+                            params.get("roleDefinitions").cloned(),
                             &request.request_id,
                         )?,
                         ..chat::G5Action::default()

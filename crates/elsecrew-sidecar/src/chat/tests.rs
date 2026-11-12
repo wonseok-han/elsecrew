@@ -298,7 +298,7 @@ impl Fixture {
                     {"roleId":"planning","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"},
                     {"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},
                     {"roleId":"review","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"}
-                ]),
+                ]), None,
                 &format!("{request}_exact_roles"),
             )
             .unwrap();
@@ -506,7 +506,8 @@ fn actual_run_preparation_reserves_once_and_is_visible_to_restart_recovery() {
                 .projection_record("chat", chat_id)
                 .unwrap()
                 .unwrap();
-            let review = &mut saved["record"]["roleSnapshots"][2];
+            let review_index = role_index(&saved["record"], "review");
+            let review = &mut saved["record"]["roleSnapshots"][review_index];
             review["runtime"] = json!("claude-code");
             review["modelSelector"] = json!("claude-opus-5");
             review["reasoningEffort"] = Value::Null;
@@ -919,7 +920,8 @@ fn text_candidate_cases_with_output(
                 .unwrap()
                 .unwrap();
             let coding = writer || failure == "bound-write-mismatch";
-            let role = &mut saved["record"]["roleSnapshots"][if coding { 1 } else { 2 }];
+            let role_position = role_index(&saved["record"], if coding { "coding" } else { "review" });
+            let role = &mut saved["record"]["roleSnapshots"][role_position];
             role["runtime"] = json!("codex");
             role["modelSelector"] = json!("test-model");
             role["reasoningEffort"] = json!("medium");
@@ -1398,7 +1400,8 @@ fn text_candidate_cases_with_output(
                 if failure == "bound-input" {
                     saved["last_message"]["text"] = json!("different goal");
                 } else {
-                    saved["record"]["roleSnapshots"][2]["modelSelector"] = json!("changed-model");
+                    let review_index = role_index(&saved["record"], "review");
+                    saved["record"]["roleSnapshots"][review_index]["modelSelector"] = json!("changed-model");
                 }
                 fixture
                     .storage
@@ -1788,7 +1791,8 @@ fn text_candidate_cases_with_output(
                                                 .projection_record("chat", &address.chat_id)
                                                 .unwrap()
                                                 .unwrap();
-                                            changed["record"]["roleSnapshots"][2]
+                                            let review_index = role_index(&changed["record"], "review");
+                                            changed["record"]["roleSnapshots"][review_index]
                                                 ["modelSelector"] = json!("changed-after-accept");
                                             fixture
                                                 .storage
@@ -1918,7 +1922,8 @@ fn text_candidate_cases_with_output(
                                 }
                                 if failure == "bound-handler-role" {
                                     let mut chat = storage.projection_record("chat", &address.chat_id)?.unwrap();
-                                    chat["record"]["roleSnapshots"][2]["modelSelector"] = json!("changed-model");
+                                    let review_index = role_index(&chat["record"], "review");
+                                    chat["record"]["roleSnapshots"][review_index]["modelSelector"] = json!("changed-model");
                                     storage.upsert_projection_record("chat", &address.chat_id, "op_approval_role_changed", None, chat)?;
                                 }
                                 *decision = Some(elsecrew_core::provider::vendor_observation::codex_approval::Decision::Decline);
@@ -2874,7 +2879,7 @@ fn settings_are_snapshotted_and_global_workspace_aliases_are_rejected() {
             &mut fixture.storage,
             &fixture.project_id,
             1,
-            roles,
+            roles, None,
             "req_settings_update",
         )
         .unwrap();
@@ -3285,7 +3290,7 @@ fn unavailable_exact_profile_never_persists_or_spawns_a_run() {
             &mut fixture.storage,
             &fixture.project_id,
             1,
-            roles,
+            roles, None,
             "req_unavailable_settings",
         )
         .unwrap();
@@ -6453,17 +6458,17 @@ fn app_role_defaults_seed_once_and_survive_reopen() {
             "defaults_original",
         )
         .unwrap();
-    let defaults = fixture.projects.app_role_defaults().unwrap();
+    let defaults = fixture.projects.app_role_defaults(false).unwrap();
     let mut roles = defaults["roles"].clone();
     roles[0]["modelSelector"] = json!("configured-model");
     let saved = fixture
         .projects
-        .update_app_role_defaults(&fixture.storage, 1, roles.clone())
+        .update_app_role_defaults(&fixture.storage, 1, roles.clone(), None)
         .unwrap();
     assert_eq!(saved["revision"], 2);
     assert!(fixture
         .projects
-        .update_app_role_defaults(&fixture.storage, 1, roles.clone())
+        .update_app_role_defaults(&fixture.storage, 1, roles.clone(), None)
         .is_err());
     assert_eq!(
         fixture
@@ -6500,7 +6505,7 @@ fn app_role_defaults_seed_once_and_survive_reopen() {
     assert_eq!(seeded["revision"], 1);
     fixture
         .projects
-        .update_app_role_defaults(&fixture.storage, 2, defaults["roles"].clone())
+        .update_app_role_defaults(&fixture.storage, 2, defaults["roles"].clone(), None)
         .unwrap();
     assert_eq!(
         fixture
@@ -6515,13 +6520,13 @@ fn app_role_defaults_seed_once_and_survive_reopen() {
         seeded
     );
     let reopened = ProjectManager::new(fixture.storage.path()).unwrap();
-    assert_eq!(reopened.app_role_defaults().unwrap()["revision"], 3);
+    assert_eq!(reopened.app_role_defaults(false).unwrap()["revision"], 3);
     let file = fixture
         ._root
         .path()
         .join("data/application-settings-v1/role-defaults.json");
     fs::write(file, b"invalid").unwrap();
-    assert!(reopened.app_role_defaults().is_err());
+    assert!(reopened.app_role_defaults(false).is_err());
     assert_eq!(
         fixture
             .chats
@@ -6640,12 +6645,12 @@ fn coordinator_v2_preserves_legacy_snapshot_and_runs_read_only_to_waiting_for_us
         {"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},
         {"roleId":"review","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"}
     ]);
-    let settings = f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), "req_coordinator_settings").unwrap();
+    let settings = f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), None, "req_coordinator_settings").unwrap();
     assert_eq!(settings["schemaVersion"], 2);
-    assert!(f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), "req_coordinator_stale").is_err());
+    assert!(f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), None, "req_coordinator_stale").is_err());
     let mut invalid = roles.clone();
     invalid[0]["permission"] = json!("workspaceWrite");
-    assert!(f.chats.update_role_settings(&mut f.storage, &f.project_id, 2, invalid, "req_coordinator_write").is_err());
+    assert!(f.chats.update_role_settings(&mut f.storage, &f.project_id, 2, invalid, None, "req_coordinator_write").is_err());
     let snapshot = f.snapshot("req_coordinator_snapshot");
     let chat = f.chats.create_chat(&mut f.storage, &f.projects, snapshot["preparationId"].as_str().unwrap(), &f.project_id, snapshot["worktreeId"].as_str().unwrap(), snapshot["workspaceIdentity"].as_str().unwrap(), "Explain this project", 2, "req_coordinator_chat").unwrap().result;
     assert_eq!(chat["schemaVersion"], 2);
@@ -6654,7 +6659,7 @@ fn coordinator_v2_preserves_legacy_snapshot_and_runs_read_only_to_waiting_for_us
     assert_eq!(old_detail["chat"], old);
     let mut changed = roles.clone();
     changed[0]["modelSelector"] = json!("future-model");
-    f.chats.update_role_settings(&mut f.storage, &f.project_id, 2, changed, "req_coordinator_edit").unwrap();
+    f.chats.update_role_settings(&mut f.storage, &f.project_id, 2, changed, None, "req_coordinator_edit").unwrap();
     let chat_id = chat["chatId"].as_str().unwrap();
     let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::CleanReadOnly);
     let capability = runtime.get_capabilities("claude-code", true).unwrap();
@@ -6677,7 +6682,7 @@ fn coordinator_v2_preserves_legacy_snapshot_and_runs_read_only_to_waiting_for_us
 #[test]
 fn app_defaults_preserve_coordinator_and_four_team_roles() {
     let mut fixture = Fixture::with_durable_output(true);
-    let original = fixture.projects.app_role_defaults().unwrap();
+    let original = fixture.projects.app_role_defaults(false).unwrap();
     let legacy = original["roles"].as_array().unwrap();
     let mut coordinator = legacy[0].clone();
     coordinator["roleId"] = json!("coordinator");
@@ -6686,16 +6691,16 @@ fn app_defaults_preserve_coordinator_and_four_team_roles() {
     design["modelSelector"] = json!("design-model");
     let roles = json!([coordinator, legacy[0], design, legacy[1], legacy[2]]);
     let legacy_fixture = Fixture::new();
-    let before = legacy_fixture.projects.app_role_defaults().unwrap();
-    assert!(legacy_fixture.projects.update_app_role_defaults(&legacy_fixture.storage, 1, roles.clone()).is_err());
-    assert_eq!(legacy_fixture.projects.app_role_defaults().unwrap(), before);
+    let before = legacy_fixture.projects.app_role_defaults(false).unwrap();
+    assert!(legacy_fixture.projects.update_app_role_defaults(&legacy_fixture.storage, 1, roles.clone(), None).is_err());
+    assert_eq!(legacy_fixture.projects.app_role_defaults(false).unwrap(), before);
     let saved = fixture
         .projects
-        .update_app_role_defaults(&fixture.storage, 1, roles.clone())
+        .update_app_role_defaults(&fixture.storage, 1, roles.clone(), None)
         .unwrap();
     assert_eq!(saved["schemaVersion"], 2);
     assert_eq!(
-        fixture.projects.app_role_defaults().unwrap()["roles"],
+        fixture.projects.app_role_defaults(false).unwrap()["roles"],
         roles
     );
     let seeded = fixture
@@ -6730,4 +6735,63 @@ fn project_automation_consent_is_explicit_durable_and_revocable() {
     let database = f.storage.path().to_owned();
     drop(f.storage);
     f.storage = Storage::open(&database).unwrap();
+}
+
+#[test]
+fn custom_roles_v3_seed_update_snapshot_and_legacy_gate() {
+    let mut f = Fixture::with_durable_output(true);
+    // Missing app defaults on V13 storage seed the default V3 team.
+    let seeded = f.chats.default_role_settings(&mut f.storage, &f.projects, &f.project_id, "req_v3_seed").unwrap();
+    assert_eq!(seeded["schemaVersion"], 3);
+    let ids: Vec<_> = seeded["roles"].as_array().unwrap().iter().map(|role| role["roleId"].as_str().unwrap().to_owned()).collect();
+    assert_eq!(ids, ["coordinator", "planning", "design", "coding", "review"]);
+    assert_eq!(seeded["roleDefinitions"][0]["name"], "총괄");
+    validate_g5_payload_v1("projectRoleSettings", &seeded).unwrap();
+    // A custom team: renamed read-only planning may write, new roles are allowed.
+    let profile = |id: &str, permission: &str| json!({"roleId":id,"runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":permission});
+    let roles = json!([profile("coordinator", "readOnly"), profile("research", "readOnly"), profile("planning", "workspaceWrite")]);
+    let definitions = json!([
+        {"roleId":"coordinator","name":"리드","responsibility":"Delegates."},
+        {"roleId":"research","name":"리서치","responsibility":"Investigates."},
+        {"roleId":"planning","name":"Implementer","responsibility":"Edits the copy.\nRuns checks."}
+    ]);
+    // Definitions are required for non-legacy role sets and must follow role order.
+    assert!(f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), None, "req_v3_missing_definitions").is_err());
+    let mut reordered = definitions.clone();
+    reordered.as_array_mut().unwrap().swap(1, 2);
+    assert!(f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), Some(reordered), "req_v3_reordered").is_err());
+    let updated = f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, roles.clone(), Some(definitions.clone()), "req_v3_update").unwrap();
+    assert_eq!(updated["schemaVersion"], 3);
+    assert_eq!(updated["revision"], 2);
+    let snapshot = f.snapshot("req_v3_snapshot");
+    let chat = f.chats.create_chat(&mut f.storage, &f.projects, snapshot["preparationId"].as_str().unwrap(), &f.project_id, snapshot["worktreeId"].as_str().unwrap(), snapshot["workspaceIdentity"].as_str().unwrap(), "Investigate then build", 2, "req_v3_chat").unwrap().result;
+    assert_eq!(chat["schemaVersion"], 3);
+    assert_eq!(chat["roleSnapshots"], roles);
+    assert_eq!(chat["roleDefinitions"], definitions);
+    // Later setting changes do not retrofit the chat snapshot.
+    f.chats.update_role_settings(&mut f.storage, &f.project_id, 2, seeded["roles"].clone(), Some(seeded["roleDefinitions"].clone()), "req_v3_restore").unwrap();
+    let detail = f.chats.get_chat(&f.storage, chat["chatId"].as_str().unwrap(), 0, None, 10, false).unwrap();
+    assert_eq!(detail["chat"]["roleDefinitions"], definitions);
+    // V3 settings and chat snapshots survive a durable reopen with full ledger verification.
+    let database = f.storage.path().to_owned();
+    drop(f.storage);
+    f.storage = Storage::open_durable_output_for_test(&database).unwrap();
+    assert!(f.storage.custom_roles_enabled().unwrap());
+    let reopened = f.chats.get_chat(&f.storage, chat["chatId"].as_str().unwrap(), 0, None, 10, false).unwrap();
+    assert_eq!(reopened["chat"], detail["chat"]);
+    assert_eq!(f.chats.default_role_settings(&mut f.storage, &f.projects, &f.project_id, "req_v3_reopen").unwrap()["revision"], 3);
+    // App defaults accept V3 and remain bounded.
+    let saved = f.projects.update_app_role_defaults(&f.storage, 1, roles.clone(), Some(definitions.clone())).unwrap();
+    assert_eq!(saved["schemaVersion"], 3);
+    assert_eq!(f.projects.app_role_defaults(true).unwrap()["roleDefinitions"], definitions);
+    // Storage below V13 rejects V3 role sets before writing anything.
+    let mut legacy = Fixture::new();
+    legacy.chats.default_role_settings(&mut legacy.storage, &legacy.projects, &legacy.project_id, "req_legacy_seed").unwrap();
+    assert!(legacy.chats.update_role_settings(&mut legacy.storage, &legacy.project_id, 1, roles.clone(), Some(definitions.clone()), "req_legacy_v3").is_err());
+    assert!(legacy.projects.update_app_role_defaults(&legacy.storage, 1, roles, Some(definitions)).is_err());
+}
+
+/// Position of a role in a chat snapshot; durable fixtures now seed the V3 default team.
+fn role_index(chat: &Value, role_id: &str) -> usize {
+    chat["roleSnapshots"].as_array().unwrap().iter().position(|role| role["roleId"] == role_id).unwrap()
 }

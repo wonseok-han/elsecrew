@@ -155,12 +155,18 @@ impl G5Manager {
             return Ok(settings.clone());
         }
         let mut settings = settings_value(project_id, 1);
-        let defaults = projects.app_role_defaults()?;
+        let defaults = projects.app_role_defaults(storage.custom_roles_enabled()?)?;
         if defaults["schemaVersion"] == 2 && !storage.coordinator_roles_enabled()? {
             return Err(ProjectFailure::manifest("coordinator roles require storage V12 admission"));
         }
+        if defaults["schemaVersion"] == 3 && !storage.custom_roles_enabled()? {
+            return Err(ProjectFailure::manifest("custom roles require storage V13 admission"));
+        }
         settings["schemaVersion"] = defaults["schemaVersion"].clone();
         settings["roles"] = defaults["roles"].clone();
+        if let Some(definitions) = defaults.get("roleDefinitions") {
+            settings["roleDefinitions"] = definitions.clone();
+        }
         project.insert("role_settings".to_string(), settings.clone());
         storage.upsert_projection_record(
             "project",
@@ -178,16 +184,17 @@ impl G5Manager {
         project_id: &str,
         expected_revision: u64,
         roles: Value,
+        role_definitions: Option<Value>,
         request_id: &str,
     ) -> Result<Value, ProjectFailure> {
-        validate_g5_payload_v1(
-            "projectRoleSettingsUpdate",
-            &json!({"projectId":project_id,"expectedRevision":expected_revision,"roles":roles}),
-        )
-        .map_err(|error| ProjectFailure::manifest(format!("invalid role settings: {error}")))?;
-        if roles.as_array().is_some_and(|roles| roles.len() == 5) && !storage.coordinator_roles_enabled()? {
-            return Err(ProjectFailure::manifest("coordinator roles require storage V12 admission"));
+        let mut request = json!({"projectId":project_id,"expectedRevision":expected_revision,"roles":roles});
+        if let Some(definitions) = &role_definitions {
+            request["roleDefinitions"] = definitions.clone();
         }
+        validate_g5_payload_v1("projectRoleSettingsUpdate", &request)
+            .map_err(|error| ProjectFailure::manifest(format!("invalid role settings: {error}")))?;
+        let version = role_schema_version(&roles, role_definitions.is_some());
+        require_role_schema_storage(storage, version)?;
         let mut project = project_record(storage, project_id)?;
         let current = project
             .get("role_settings")
@@ -198,13 +205,16 @@ impl G5Manager {
                 "project role settings changed; reload before saving",
             ));
         }
-        let updated = json!({
-            "schemaVersion":if roles.as_array().is_some_and(|roles| roles.len() == 5) { 2 } else { 1 },
+        let mut updated = json!({
+            "schemaVersion":version,
             "projectId":project_id,
             "revision":expected_revision + 1,
             "roles":roles,
             "updatedAt":now(),
         });
+        if let Some(definitions) = role_definitions {
+            updated["roleDefinitions"] = definitions;
+        }
         validate_g5_payload_v1("projectRoleSettings", &updated).map_err(|error| {
             ProjectFailure::manifest(format!(
                 "updated role settings violate the contract: {error}"
@@ -482,6 +492,10 @@ impl G5Manager {
             "settingsRevision":expected_settings_revision,"roleSnapshots":settings["roles"].clone(),
             "state":"draft","createdAt":created,"updatedAt":created,
         });
+        let mut chat = chat;
+        if let Some(definitions) = settings.get("roleDefinitions") {
+            chat["roleDefinitions"] = definitions.clone();
+        }
         validate_g5_payload_v1("chatRecord", &chat)
             .map_err(|error| ProjectFailure::manifest(format!("invalid created chat: {error}")))?;
         let message = team_message(&chat, 1, "user", None, None, goal)?;
@@ -1593,6 +1607,48 @@ pub fn run_fixture_child(scenario: &str) -> Result<(), SidecarError> {
 
 pub fn run_fixture_leaf() {
     std::thread::sleep(Duration::from_secs(30));
+}
+
+/// Role-set schema of an already contract-validated update.
+pub(crate) fn role_schema_version(roles: &Value, has_definitions: bool) -> u64 {
+    if has_definitions {
+        3
+    } else if roles.as_array().is_some_and(|roles| roles.len() == 5) {
+        2
+    } else {
+        1
+    }
+}
+
+/// V2 coordinator authors need storage V12+, user-defined V3 authors need V13.
+pub(crate) fn require_role_schema_storage(storage: &Storage, version: u64) -> Result<(), ProjectFailure> {
+    if version == 2 && !storage.coordinator_roles_enabled()? {
+        return Err(ProjectFailure::manifest("coordinator roles require storage V12 admission"));
+    }
+    if version == 3 && !storage.custom_roles_enabled()? {
+        return Err(ProjectFailure::manifest("custom roles require storage V13 admission"));
+    }
+    Ok(())
+}
+
+/// Default V3 team: the legacy five template profiles with locale-independent definitions.
+pub(crate) fn default_settings_v3(project_id: &str, revision: u64) -> Value {
+    use elsecrew_protocol::run_recovery_v1::G5_DEFAULT_ROLE_DEFINITIONS_V3;
+    let legacy = settings_value(project_id, revision);
+    let planning = legacy["roles"][0].clone();
+    let mut coordinator = planning.clone();
+    coordinator["roleId"] = json!("coordinator");
+    let mut design = planning.clone();
+    design["roleId"] = json!("design");
+    let roles = json!([coordinator, planning, design, legacy["roles"][1], legacy["roles"][2]]);
+    let definitions: Vec<Value> = G5_DEFAULT_ROLE_DEFINITIONS_V3
+        .iter()
+        .map(|(role_id, name, responsibility)| json!({"roleId":role_id,"name":name,"responsibility":responsibility}))
+        .collect();
+    json!({
+        "schemaVersion":3,"projectId":project_id,"revision":revision,
+        "roles":roles,"roleDefinitions":definitions,"updatedAt":now(),
+    })
 }
 
 pub(crate) fn settings_value(project_id: &str, revision: u64) -> Value {
