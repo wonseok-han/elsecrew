@@ -483,7 +483,11 @@ export class ChatUiController {
       this.#hydrateAfterNotification(chat, this.#generation);
       return;
     }
-    try { this.#set({ messages: mergeMessages(this.#state.messages, [event]) }); } catch (error) { this.#error("m5.chatError.order", error); }
+    try { this.#set({ messages: mergeMessages(this.#state.messages, [event]) }); } catch (error) { this.#error("m5.chatError.order", error); return; }
+    // Team status notices (continue, paused, finished) accompany chat state
+    // changes that have no run event of their own; reload so the header and
+    // stop button never keep showing "running" after the team stopped.
+    if (event.kind === "status") this.#hydrateAfterNotification(chat, this.#generation);
   }
   #onAgentPublicEvent(event: AgentPublicEventV1): void {
     this.#hydrateForAgentRun(event);

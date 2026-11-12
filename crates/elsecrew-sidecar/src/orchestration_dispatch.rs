@@ -35,6 +35,14 @@ fn role_report_document(role: &str, goal: &str, instruction: &str, run: &Value, 
     document
 }
 
+/// Plain reason plus the fixed cause code, so a stopped team task always
+/// says why. Only identifier-shaped codes are shown; never raw details.
+fn workflow_failure_message(code: &str) -> String {
+    let code = if !code.is_empty() && code.len() <= 64
+        && code.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-' | b'.')) { code } else { "unknown" };
+    format!("{} (원인 코드: {code})", workflow_failure_reason(code))
+}
+
 pub(super) fn failure(error: ProjectFailure) -> SidecarError {
     SidecarError::new("orchestrationBlocked", error.detail)
 }
@@ -255,13 +263,6 @@ impl Sidecar {
             .map_err(failure)?
             .ok_or_else(|| SidecarError::new("orchestrationBlocked", "missing workflow"))
     }
-    fn pause_workflow(
-        &mut self,
-        chat: &str,
-        events: &mut Vec<chat::G5Event>,
-    ) -> Result<(), SidecarError> {
-        self.pause_workflow_reason(chat, events, "실행 결과와 연결 상태를 확인해 주세요.")
-    }
     fn pause_workflow_reason(
         &mut self, chat: &str, events: &mut Vec<chat::G5Event>, reason: &str,
     ) -> Result<(), SidecarError> {
@@ -284,8 +285,8 @@ impl Sidecar {
             return Ok(false);
         };
         if !response.ok {
-            let reason = workflow_failure_reason(response.error.as_ref().map(|e| e.code.as_str()).unwrap_or("unknown"));
-            self.pause_workflow_reason(&chat, events, reason)?;
+            let reason = workflow_failure_message(response.error.as_ref().map(|e| e.code.as_str()).unwrap_or("unknown"));
+            self.pause_workflow_reason(&chat, events, &reason)?;
             return Ok(kind != "root");
         }
         if kind == "root" || kind == "start" {
@@ -327,7 +328,7 @@ impl Sidecar {
                 || capability["scope"]["chatId"] != chat
                 || capability["scope"]["roleId"] != state.role
             {
-                self.pause_workflow_reason(&chat, events, workflow_failure_reason(capability["blockedReason"].as_str().unwrap_or("unknown")))?;
+                self.pause_workflow_reason(&chat, events, &workflow_failure_message(capability["blockedReason"].as_str().unwrap_or("unknown")))?;
                 return Ok(true);
             }
             let request=self.workflow_request(state.request_id.clone(),"run.startAgent",json!({"chatId":chat,"roleId":state.role,"inputMessageIds":state.input_ids,"expectedCapabilityFingerprint":capability["fingerprint"]}));
@@ -340,9 +341,9 @@ impl Sidecar {
                         self.workflow_response(&response, events)?;
                     }
                 }
-                Err(_) => {
+                Err(error) => {
                     self.workflow_requests.remove(&state.request_id);
-                    self.pause_workflow(&chat, events)?;
+                    self.pause_workflow_reason(&chat, events, &workflow_failure_message(error.kind()))?;
                 }
             }
         }
@@ -377,7 +378,7 @@ impl Sidecar {
                     continue;
                 }
                 let Some(projection) = self.storage.projection_record("run", &run_id)? else {
-                    self.pause_workflow(&chat, events)?;
+                    self.pause_workflow_reason(&chat, events, &workflow_failure_message("teamRunMissing"))?;
                     continue;
                 };
                 let run = &projection["record"];
@@ -405,7 +406,7 @@ impl Sidecar {
                         && (projection["termination"]["processesProvenGone"] != true
                             || !projection["recovery"].is_null()))
                 {
-                    self.pause_workflow(&chat, events)?;
+                    self.pause_workflow_reason(&chat, events, &workflow_failure_message("teamRunUnconfirmed"))?;
                     continue;
                 }
                 let messages = self.storage.chat_message_history(&chat)?;
@@ -423,7 +424,10 @@ impl Sidecar {
                 let finished_role = state.role.clone();
                 let finished_instruction = state.instruction.clone();
                 if state.finish(run, text).is_err() {
-                    self.pause_workflow(&chat, events)?;
+                    // Distinguish a stopped/failed member from an unusable report or decision.
+                    let code = if run["state"] != "succeeded" { "teamMemberNotSucceeded" }
+                        else if finals.len() != 1 { "teamReportMissing" } else { "teamDecisionInvalid" };
+                    self.pause_workflow_reason(&chat, events, &workflow_failure_message(code))?;
                     continue;
                 }
                 // Read-only members (planning, design, review, …) cannot write.
@@ -479,7 +483,7 @@ impl Sidecar {
                 }
                 Err(error) => {
                     self.workflow_requests.remove(&id);
-                    self.pause_workflow_reason(&chat, events, workflow_failure_reason(error.kind()))?;
+                    self.pause_workflow_reason(&chat, events, &workflow_failure_message(error.kind()))?;
                 }
             }
         }
