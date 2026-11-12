@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../i18n";
 import { validateInstallStatus, type InstallProvider, type InstallRequest, type InstallStatus } from "./contracts/provider-install-v1.ts";
 
@@ -19,7 +19,6 @@ export function ProviderInstall({ disabled, providers, onBlockChange, onCheck, o
   const [status, setStatus] = useState<InstallStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(false);
-  const [consent, setConsent] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const mounted = useRef(false);
   const inFlight = useRef(false);
@@ -33,11 +32,9 @@ export function ProviderInstall({ disabled, providers, onBlockChange, onCheck, o
       if (!mounted.current) return;
       setStatus(next);
       setUncertain(false);
-      // A new plan always needs new consent, including after an ambiguous reply.
-      if (input.action !== "status") setConsent(null);
       onBlockChange(running(next) || next.state === "recoveryRequired" || next.state === "awaitingConsent");
     } catch {
-      if (mounted.current) { setUncertain(true); setConsent(null); onBlockChange(true); }
+      if (mounted.current) { setUncertain(true); onBlockChange(true); }
     } finally {
       inFlight.current = false;
       if (mounted.current) setBusy(false);
@@ -85,18 +82,16 @@ export function ProviderInstall({ disabled, providers, onBlockChange, onCheck, o
     {uncertain && <p role="alert">{t("m5.install.uncertain")}</p>}
     {!integrated && !active && <div className="m5-install-actions m5-install-provider-actions">{providers.map(provider => <button key={provider} type="button" disabled={!canPrepare}
       onClick={() => void request({ action: "prepare", provider })}>{t("m5.install.prepare", { name: provider === "codex" ? "Codex" : "Claude Code" })}</button>)}</div>}
-    {plan && !uncertain && !active && <form onSubmit={event => {
+    {plan && !uncertain && !active && <InstallConfirmation title={t("m5.install.confirmTitle", {name: plan.provider === "codex" ? "Codex" : "Claude Code"})} busy={busy} onDismiss={() => void request({action:"dismiss"})}><form onSubmit={event => {
       event.preventDefault();
-      if (!disabled && !busy && consent === plan.planId) void request({ action: "start", provider: plan.provider, planId: plan.planId });
+      if (!disabled && !busy && !uncertain) void request({ action: "start", provider: plan.provider, planId: plan.planId });
     }}>
       <p>{t("m5.install.scope")}</p>
       <details className="m5-install-paths"><summary>{t("m5.install.locations")}</summary><ul>{plan.writeDirectories.map(path => <li key={path}><code><bdi>{path}</bdi></code></li>)}</ul></details>
       <p>{t("m5.install.expiry")}</p>
-      <label className="m5-install-consent"><input type="checkbox" disabled={disabled || busy} checked={consent === plan.planId}
-        onChange={event => setConsent(event.currentTarget.checked ? plan.planId : null)}/><span>{t("m5.install.consent")}</span></label>
-      <div className="m5-install-actions"><button type="submit" disabled={disabled || busy || consent !== plan.planId}>{t("m5.install.start")}</button>
-        <button type="button" disabled={busy} onClick={() => void request({ action: "dismiss" })}>{t("m5.install.dismiss")}</button></div>
-    </form>}
+      <div className="m5-install-actions"><button type="button" autoFocus disabled={busy} onClick={() => void request({ action: "dismiss" })}>{t("m5.install.dismiss")}</button>
+        <button type="submit" disabled={disabled || busy}>{t("m5.install.start")}</button></div>
+    </form></InstallConfirmation>}
 
     {status?.state === "installed" && status.provider && !uncertain && <button type="button" disabled={disabled || busy}
       onClick={() => onCheck(status.provider!)}>{t("m5.install.checkLogin")}</button>}
@@ -120,4 +115,16 @@ export function ProviderInstall({ disabled, providers, onBlockChange, onCheck, o
       {uncertain && <p role="alert">{t("m5.install.uncertain")}</p>}
     </div>, slot, provider);
   })}</>;
+}
+
+function InstallConfirmation({title, busy, onDismiss, children}: {title: string; busy: boolean; onDismiss: () => void; children: ReactNode}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const element = dialog.current;
+    element?.showModal();
+    return () => element?.close();
+  }, []);
+  return <dialog ref={dialog} className="m5-install-confirmation" aria-labelledby="m5-install-confirm-title" onCancel={event => {event.preventDefault(); if (!busy) onDismiss();}}>
+    <h3 id="m5-install-confirm-title">{title}</h3>{children}
+  </dialog>;
 }
