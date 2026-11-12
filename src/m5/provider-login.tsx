@@ -1,3 +1,4 @@
+import { loadModels } from "./model-catalog.ts";
 import { readConnections, changeConnection, CONNECTIONS_CHANGED, PROVIDER_AUTH_CHANGED } from "./provider-connections.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
@@ -262,6 +263,9 @@ function ProviderConnection({ disabled, provider, alwaysExpanded = false, onAtte
   useEffect(()=>{ if (status.state === "connected") {
     setExpanded(false);
     window.dispatchEvent(new Event(PROVIDER_AUTH_CHANGED));
+    // Keep the display-only model list ready for role screens; a fresh saved
+    // list is reused, so this does not query the provider on every check.
+    if (window.m5Models) void loadModels(runtime, input => window.m5Models!.request(input)).catch(() => undefined);
   } },[status.state]);
   const waiting=status.state === "diagnosing" || status.state === "starting" || status.state === "waiting" || status.state === "verifying";
   const recoveryRequired=status.error === "providerLoginRecoveryRequired";
