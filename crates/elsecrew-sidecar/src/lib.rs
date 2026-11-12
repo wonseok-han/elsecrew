@@ -725,9 +725,16 @@ impl SidecarSession {
                     sidecar: Box::new(sidecar),
                 }
             }
-            Ok(Err(_)) | Err(_) => AdmissionState::Failed {
-                completed_at: now_utc(),
-            },
+            Ok(Err(error)) => {
+                // Fixed kind only: a failed admission otherwise leaves no cause.
+                eprintln!("storage admission failed: {}", error.kind());
+                if std::env::var_os("ELSECREW_DEBUG_ADMISSION").is_some() { eprintln!("storage admission detail: {}", error.detail()); }
+                AdmissionState::Failed { completed_at: now_utc() }
+            }
+            Err(_) => {
+                eprintln!("storage admission failed: workerPanicked");
+                AdmissionState::Failed { completed_at: now_utc() }
+            }
         };
     }
 
