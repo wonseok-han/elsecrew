@@ -3,6 +3,9 @@
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
 ### 2026-11-12 · by GPT-6
+- 사용자 명시 승인으로 m5/coding-agent-ide 전체를 PR로 main에 통합한다. 기준 abd075dc에서 원격 main 대비1488개 커밋·714개 파일 변경을 확인했다. 이번 통합은 출시/gate 완료가 아니며 기존 테스트26실패·팀 실행 중단·채팅 영구 삭제·동적 역할 및 플랫폼/출시 미검증은 유지한다. GitHub 저장소 이름은 병합 후 사용자가 변경한다.
+
+### 2026-11-12 · by GPT-6
 - 사용자 별도 승인 후 정상 종료되지 않던 구 hello-agent 앱과 해당 bundle 하위 보조 프로세스만 종료하고 out/hello-agent-darwin-arm64를 제거했다(약315MB). 새 Elsecrew.app 존재를 재확인했다. /Applications 및 ~/Applications에서 별도 구 앱은 발견되지 않았다. 원본 프로젝트·기존 앱 데이터/로그인·새 Elsecrew 데이터는 변경하지 않았다.
 
 ### 2026-11-12 · by GPT-6
