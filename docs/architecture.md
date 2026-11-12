@@ -588,3 +588,7 @@ macOS에서 사용량 조회가 만료된 access token을 발견하면 기존 Cl
 ### 프로젝트 사전 작업 권한 (2026-11-12)
 
 `project.catalog`의 `getAutomationPermissions`/`setAutomationPermissions`는 등록된 프로젝트별 파일 작업·명령 실행 동의를 보관한다. 초기값은 모두 false이며 로그인 연결은 동의로 취급하지 않는다. 프로젝트를 열 때 설정하고 이후 해제할 수 있다. 동의는 프로젝트 projection에 기록하고 snapshot 전환 때 보존한다. 각 공급자 요청을 전달할 때 최신 동의를 읽으며 기존 실행 경계/역할/경로 검사를 생략하지 않는다. Claude의 파일·검색·Bash는 기존 admission이 최종 판단한다. Codex는 정확한 작업 복사본 grantRoot 또는 cwd가 있는 요청만 사전 허용 대상이며 네트워크·범위 불명/확장은 개별 확인한다. 원본 반영은 별도 승인 흐름이다.
+
+### 실행별 Claude 실패 진단 (2026-11-12)
+
+새 Claude terminal 기록은 선택적 `failure: {stage, code}`를 run record 안에 저장한다. Rust/TypeScript 검증기는 고정된 코드 목록만 받으며 raw provider error·인증정보·경로는 수용하지 않는다. 최초 실패는 종료 정리 오류와 구분해 보존하고 run/chat/lock의 기존 terminal 거래에 포함한다. 승인 전달뿐 아니라 저장된 프로젝트 권한 조회 실패도 종료 확인 경로로 들어간다. 화면은 출력이 없어도 해당 실행의 실패 단계를 표시한다. 기존 기록의 필드 부재는 그대로 허용하며 과거 원인을 복원한 것으로 표시하지 않는다. 이것은 새 실행의 진단 기능이며 과거 중단 원인의 규명이나 실제 공급자 검증 완료를 뜻하지 않는다.

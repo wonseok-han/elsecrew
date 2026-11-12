@@ -17,6 +17,7 @@ pub(crate) struct ClaudeOutputState {
     pending_item: Option<elsecrew_protocol::agent_adapter_v1::output_pages::OutputItemUpdate>,
     completion: Option<Result<TurnOutcome, SidecarError>>,
     terminal_saved: bool,
+    failure: Option<Value>,
     finished: bool,
 }
 
@@ -296,29 +297,11 @@ impl OwnedClaudeRun {
             Event,
         ) -> Result<(), SidecarError>,
     ) -> Result<bool, SidecarError> {
-        self.approvals.retain(|entry| self.channel.is_permission_pending(&entry.request.request_id));
-        // Consult stored consent at delivery; automatic permission is never queued across polls.
-        let consent = projects.automation_permissions(storage, self.reservation.run["projectId"].as_str().ok_or_else(|| SidecarError::new("agentApprovalChanged", "project binding unavailable"))?).map_err(|_| SidecarError::new("agentApprovalChanged", "project consent unavailable"))?;
-        let auto_allowed = |entry: &ClaudePending| {
-            use elsecrew_core::provider::vendor_observation::claude_approval::ToolTarget;
-            !entry.declined && match entry.request.target() {
-                ToolTarget::File { .. } | ToolTarget::Search { .. } => consent.files,
-                ToolTarget::Shell => consent.commands,
-                ToolTarget::Unsupported => false,
-            }
-        };
-        if self.channel.can_queue_reply() {
-            if let Some(index) = self.approvals.iter().position(|entry| entry.declined || entry.accepted || auto_allowed(entry)) {
-                let entry = self.approvals.remove(index);
-                let reply = if entry.accepted || auto_allowed(&entry) {
-                    self.allow_tool_once(storage, projects, &entry.request)
-                } else {
-                    self.channel.deny(&mut self.process, &entry.request.request_id, false)
-                };
-                if let Err(error) = reply {
-                    self.output.completion = Some(Err(error));
-                    self.cancel.store(true, std::sync::atomic::Ordering::Release);
-                }
+        if self.output.completion.is_none() {
+            if let Err(error) = self.deliver_approval(storage, projects) {
+                self.output.note_failure("approvalDelivery", &error);
+                self.output.completion = Some(Err(error));
+                self.cancel.store(true, std::sync::atomic::Ordering::Release);
             }
         }
         let approvals = &mut self.approvals;
@@ -346,6 +329,32 @@ impl OwnedClaudeRun {
                 }
             },
         )
+    }
+
+    fn deliver_approval(&mut self, storage: &mut Storage, projects: &ProjectManager) -> Result<(), SidecarError> {
+        self.approvals.retain(|entry| self.channel.is_permission_pending(&entry.request.request_id));
+        // Consult stored consent at delivery; automatic permission is never queued across polls.
+        let consent = projects.automation_permissions(storage, self.reservation.run["projectId"].as_str().ok_or_else(|| SidecarError::new("agentApprovalChanged", "project binding unavailable"))?).map_err(|_| SidecarError::new("agentApprovalChanged", "project consent unavailable"))?;
+        let auto_allowed = |entry: &ClaudePending| {
+            use elsecrew_core::provider::vendor_observation::claude_approval::ToolTarget;
+            !entry.declined && match entry.request.target() {
+                ToolTarget::File { .. } | ToolTarget::Search { .. } => consent.files,
+                ToolTarget::Shell => consent.commands,
+                ToolTarget::Unsupported => false,
+            }
+        };
+        if self.channel.can_queue_reply() {
+            if let Some(index) = self.approvals.iter().position(|entry| entry.declined || entry.accepted || auto_allowed(entry)) {
+                let entry = self.approvals.remove(index);
+                let reply = if entry.accepted || auto_allowed(&entry) {
+                    self.allow_tool_once(storage, projects, &entry.request)
+                } else {
+                    self.channel.deny(&mut self.process, &entry.request.request_id, false)
+                };
+                reply?;
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn into_cleanup_parts(
@@ -555,6 +564,7 @@ impl RunReservation {
             pending_item: None,
             completion: None,
             terminal_saved: false,
+            failure: None,
             finished: false,
         })
     }
@@ -584,12 +594,12 @@ impl RunReservation {
             return Err(failure());
         }
         if state.completion.is_none() {
-            let mut checkpoint = "session input";
+            let mut checkpoint = "sessionInput";
             let next = self
                 .validate_text_input(storage, projects)
                 .map_err(|_| failure())
                 .and_then(|_| {
-                    checkpoint = "session channel";
+                    checkpoint = "sessionChannel";
                     channel.advance(process, cancel, &mut |owner| {
                         self.observe_process(storage, owner)
                     })
@@ -598,7 +608,7 @@ impl RunReservation {
                 match event {
                     None => {}
                     Some(event @ Event::Initialized { .. }) => {
-                        checkpoint = "session receipt";
+                        checkpoint = "sessionInitialization";
                         if state.initialized {
                             return Err(failure());
                         }
@@ -608,7 +618,7 @@ impl RunReservation {
                         if let Some(preflight) = &self.claude_preflight {
                             if !receipt.matches(&workspace, &preflight.resolved_model) { return Err(failure()); }
                         }
-                        checkpoint = "session process observation";
+                        checkpoint = "sessionInitialization";
                         self.observe_process(storage, process)?;
                         // Retain the existing field name for both provider sessions.
                         // This digest identifies the session; it is not an executable allowlist.
@@ -616,9 +626,9 @@ impl RunReservation {
                             "threadDigest":format!("sha256:{:x}",Sha256::digest(receipt.session_id().as_bytes())),
                             "runId":self.run_id,"workspaceIdentity":self.run["workspaceIdentity"],
                             "capabilityFingerprint":self.run["capabilityFingerprint"],"selectedProfile":self.run["selectedProfile"]});
-                        checkpoint = "session persistence";
+                        checkpoint = "sessionInitialization";
                         self.persist_native_running(storage,evidence,Path::new(&workspace),receipt.observed_builtin_plugins())?;
-                        checkpoint = "session handler";
+                        checkpoint = "sessionInitialization";
                         handle(process, channel, event)?;
                         state.initialized = true;
                     }
@@ -633,6 +643,7 @@ impl RunReservation {
                         }
                         use elsecrew_protocol::agent_adapter_v1::output_pages::{OutputItemUpdate, OutputItemOperation, OutputItemChannel};
                         let update = OutputItemUpdate { item_id, operation: OutputItemOperation::Complete, channel: OutputItemChannel::Message };
+                        checkpoint = "outputPersistence";
                         let durable = self.persist_item_progress(storage, &update, text.clone())?;
                         if let Some(previous) = state.pending_answer.replace(text) {
                             if !durable { self.persist_text(storage, "status", previous)?; }
@@ -652,6 +663,7 @@ impl RunReservation {
                         }
                         // Missing queue state is unknown, not zero. Result alone
                         // does not release the process fence or mark success.
+                        checkpoint = "providerResult";
                         state.completion = Some(
                             if result.outcome == ReportedOutcome::Success
                                 && result.queued_turn_count == Some(0)
@@ -666,7 +678,7 @@ impl RunReservation {
                             },
                         );
                     }
-                    Some(event) => handle(process, channel, event)?,
+                    Some(event) => { checkpoint = "eventHandling"; handle(process, channel, event)?; },
                 }
                 Ok(())
             });
@@ -675,7 +687,14 @@ impl RunReservation {
                 if !state.initialized {
                     eprintln!("native Claude transport failed at {checkpoint}");
                 }
+                state.note_failure(checkpoint, &error);
                 state.completion = Some(Err(error));
+            }
+        }
+        if state.failure.is_none() {
+            if let Some(Err(error)) = &state.completion {
+                let error = error.clone();
+                state.note_failure("providerResult", &error);
             }
         }
         if state.completion.is_none() {
@@ -688,15 +707,15 @@ impl RunReservation {
                 .is_err()
         {
             process.invalidate_cleanup_evidence();
-            state.completion = Some(Err(SidecarError::new(
-                "agentProcessObservationFailed",
-                "Claude cleanup evidence requires recovery",
-            )));
+            let error = SidecarError::new("agentProcessObservationFailed", "Claude cleanup evidence requires recovery");
+            state.note_failure("cleanup", &error);
+            state.completion = Some(Err(error));
         }
         if matches!(cleanup, Ok(false)) {
             return Ok(false);
         }
         if let Err(error) = cleanup {
+            state.note_failure("cleanup", &error);
             state.completion = Some(Err(error));
         }
         if !state.terminal_saved {
@@ -715,6 +734,7 @@ impl RunReservation {
                     };
                     if state.pending_item.is_none() || kind == "final" {
                     if let Err(error) = self.persist_text_update(storage, kind, answer, state.pending_item.as_ref()) {
+                        state.note_failure("outputPersistence", &error);
                         state.completion = Some(Err(error));
                     }
                     }
@@ -726,6 +746,7 @@ impl RunReservation {
                 process,
                 state.completion.as_ref().unwrap(),
                 user_cancel,
+                state.failure.as_ref(),
             )
             .map_err(|_| failure())?;
             state.terminal_saved = true;
@@ -739,5 +760,23 @@ impl RunReservation {
         }
         state.finished = true;
         Ok(true)
+    }
+}
+
+impl ClaudeOutputState {
+    fn note_failure(&mut self, stage: &'static str, error: &SidecarError) {
+        // First failure wins: cleanup must not erase the initiating cause.
+        if self.failure.is_some() { return; }
+        let code = match error.kind() {
+            "agentApprovalChanged" => "approvalUnavailable",
+            "agentInputChanged" => "inputChanged",
+            "providerPreflightFailed" => "boundaryRejected",
+            "storageInvalid" | "storageUnavailable" | "agentOutputPersistenceFailed" => "storageFailed",
+            "agentProcessObservationFailed" => "processObservationFailed",
+            "agentExecutionFailed" => "providerRejected",
+            "providerTransportFailed" => "transportFailed",
+            _ => "unknown",
+        };
+        self.failure = Some(json!({"stage":stage,"code":code}));
     }
 }

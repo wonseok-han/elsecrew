@@ -278,7 +278,12 @@ export interface AgentRunAcceptedV1 extends AgentRunBindingV1 {
   state: "preparing";
 }
 
+export interface AgentRunFailureV1 {
+  stage: "approvalDelivery" | "sessionInput" | "sessionChannel" | "sessionInitialization" | "outputPersistence" | "providerResult" | "eventHandling" | "cleanup";
+  code: "boundaryRejected" | "approvalUnavailable" | "inputChanged" | "storageFailed" | "processObservationFailed" | "providerRejected" | "transportFailed" | "unknown";
+}
 export interface AgentRunRecordV1 {
+  failure?: AgentRunFailureV1;
   schemaVersion: 1;
   runId: string;
   chatId: string;
@@ -547,7 +552,7 @@ export function validateAgentRunRecordV1(value: unknown): AgentRunRecordV1 {
   const object = exactObject(value, [
     "schemaVersion", "runId", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "selectedProfile",
     "source", "capabilityFingerprint", "state", "stage", "terminationOutcome", "createdAt", "updatedAt",
-  ], "agent run record");
+  ], "agent run record", ["failure"]);
   schema(object.schemaVersion);
   agentRunId(object.runId, "runId");
   for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) id(object[key], key);
@@ -561,6 +566,12 @@ export function validateAgentRunRecordV1(value: unknown): AgentRunRecordV1 {
   const termination = object.terminationOutcome === null
     ? null
     : oneOf(object.terminationOutcome, ["cleanExit", "recoveryRequired"] as const, "terminationOutcome");
+  if ("failure" in object) {
+    const failure = exactObject(object.failure, ["stage", "code"], "run failure");
+    if (!["failed", "recoveryRequired"].includes(state)) fail("failure diagnostic requires a failed run");
+    oneOf(failure.stage, ["approvalDelivery", "sessionInput", "sessionChannel", "sessionInitialization", "outputPersistence", "providerResult", "eventHandling", "cleanup"] as const, "failure stage");
+    oneOf(failure.code, ["boundaryRejected", "approvalUnavailable", "inputChanged", "storageFailed", "processObservationFailed", "providerRejected", "transportFailed", "unknown"] as const, "failure code");
+  }
   timestamp(object.createdAt, "createdAt");
   timestamp(object.updatedAt, "updatedAt");
   if (["preparing", "running", "cancelling"].includes(state) !== (termination === null)) fail("active and terminal run evidence must agree");
@@ -1499,11 +1510,11 @@ function assertSameRecoveryIdentity(
   if (expected.recoveryId !== actual.recoveryId) fail(`${name} changed recoveryId`);
 }
 
-function exactObject(value: unknown, keys: readonly string[], name: string): Record<string, unknown> {
+function exactObject(value: unknown, keys: readonly string[], name: string, optional: readonly string[] = []): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) fail(`${name} must be an object`);
   const object = value as Record<string, unknown>;
   const actual = Object.keys(object).sort();
-  const expected = [...keys].sort();
+  const expected = [...keys, ...optional.filter(key => key in object)].sort();
   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) fail(`${name} has unknown or missing fields`);
   return object;
 }

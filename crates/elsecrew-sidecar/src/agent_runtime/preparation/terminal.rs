@@ -10,6 +10,7 @@ impl RunReservation {
         process: &crate::provider_login_process::LoginProcess<'_>,
         result: &Result<TurnOutcome, SidecarError>,
         cancel_requested: bool,
+        failure: Option<&Value>,
     ) -> Result<(), ProjectFailure> {
         let evidence = process
             .closure_evidence()
@@ -100,7 +101,7 @@ impl RunReservation {
                 "terminal workspace binding changed",
             ));
         }
-        let run = agent_run_record(
+        let mut run = agent_run_record(
             &self.run_id,
             chat,
             &profile,
@@ -111,6 +112,10 @@ impl RunReservation {
             Some(outcome),
             &self.created,
         )?;
+        if matches!(state, "failed" | "recoveryRequired") {
+            if let Some(failure) = failure { run["failure"] = failure.clone(); }
+        }
+        validate_agent_adapter_payload_v1("runRecord", &run).map_err(contract_failure)?;
         let updated_chat = updated_chat(
             chat,
             match state {

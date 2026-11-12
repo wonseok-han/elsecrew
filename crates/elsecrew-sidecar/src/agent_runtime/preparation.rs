@@ -920,6 +920,7 @@ impl RunReservation {
             process,
             &result,
             cancel.load(std::sync::atomic::Ordering::Acquire),
+            None,
         )
         .map_err(|_| {
             SidecarError::new(

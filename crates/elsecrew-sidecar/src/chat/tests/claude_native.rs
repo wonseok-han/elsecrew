@@ -15,7 +15,7 @@ fn quoted(value: &Value) -> String {
 
 #[test]
 fn claude_project_consent_auto_approves_and_still_rejects_outside_files() {
-    claude_native_cases(&[("auto", false), ("auto-outside", false)]);
+    claude_native_cases(&[("auto", false), ("auto-outside", false), ("auto-read", false), ("auto-read", true), ("auto-read-failure", true)]);
 }
 
 #[test]
@@ -127,6 +127,11 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
         let mut approval = json!({"type":"control_request","request_id":"write_once","request":{
             "subtype":"can_use_tool","tool_name":"Write","tool_use_id":"tool_write","input":{"file_path":format!("{cwd}/new.txt"),"content":"hello"}}});
         if case == "auto-outside" { approval["request"]["input"]["file_path"] = json!("/outside/new.txt"); }
+        if case.starts_with("auto-read") {
+            fs::write(std::path::Path::new(cwd).join("index.html"), b"fixture").unwrap();
+            approval["request"]["tool_name"] = json!("Read");
+            approval["request"]["input"] = json!({"file_path":format!("{cwd}/index.html")});
+        }
         let assistant = json!({"type":"assistant","uuid":"answer","session_id":"s","parent_tool_use_id":null,
             "message":{"id":"m","role":"assistant","content":[{"type":"text","text":"hello"}]}});
         let mut result = json!({"type":"result","uuid":"result","session_id":"s","subtype":"success","is_error":false,"permission_denials":[],"queued_turn_count":0,"result":"hello","errors":[]});
@@ -134,6 +139,11 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             result.as_object_mut().unwrap().remove("queued_turn_count");
         }
         let mut script = format!("IFS= read -r init || exit 1\nprintf '%s\\n' {}\nIFS= read -r prompt || exit 2\nprintf '%s\\n' {}\n", quoted(&control), quoted(&init));
+        if case.starts_with("auto-read") {
+            let bash = json!({"type":"control_request","request_id":"bash_once","request":{
+                "subtype":"can_use_tool","tool_name":"Bash","tool_use_id":"tool_bash","input":{"command":"ls","description":"list fixture"}}});
+            script.push_str(&format!("printf '%s\\n' {}\nIFS= read -r reply || exit 3\ncase \"$reply\" in *'\"behavior\":\"allow\"'*) ;; *) exit 4 ;; esac\n", quoted(&bash)));
+        }
         if case == "allow" || case.starts_with("auto") {
             script.push_str(&format!("printf '%s\\n' {}\nIFS= read -r reply || exit 3\ncase \"$reply\" in *'\"behavior\":\"allow\"'*) ;; *) exit 4 ;; esac\n", quoted(&approval)));
         }
@@ -171,6 +181,7 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
         let mut reserved = Some(reservation);
         let mut owned_process = Some(process);
         let mut runtime = AgentRuntime::native_candidate();
+        let inject_read_failure = case == "auto-read-failure";
         runtime
             .register_claude_start(
                 &f.storage,
@@ -178,7 +189,12 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
                 &mut reserved,
                 &mut owned_process,
                 Box::new(move |process| admission.process(process)),
-                Box::new(move |process, request| tool_admission.tool(process, request)),
+                Box::new(move |process, request| {
+                    if inject_read_failure && request.tool_name == "Read" {
+                        return Err(SidecarError::new("agentApprovalChanged", "PRIVATE token /secret/path"));
+                    }
+                    tool_admission.tool(process, request)
+                }),
             )
             .unwrap();
         assert!(reserved.is_none() && owned_process.is_none());
@@ -247,11 +263,16 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             ended["state"],
             match case {
                 "cancel" => "canceled",
-                "bad-init" | "unknown-queue" | "auto-outside" => "failed",
+                "bad-init" | "unknown-queue" | "auto-outside" | "auto-read-failure" => "failed",
                 _ => "succeeded",
             },
             "{case}: {ended:?}"
         );
+        if case == "auto-read-failure" {
+            assert_eq!(ended["record"]["failure"], json!({"stage":"approvalDelivery","code":"approvalUnavailable"}));
+            assert!(!serde_json::to_string(&ended).unwrap().contains("PRIVATE"));
+            assert!(!serde_json::to_string(&ended).unwrap().contains("/secret/path"));
+        }
         assert_eq!(ended["native_transport"]["adapter"], "claude.stream.v2");
         assert!(ended["claude_preflight"].is_object());
         if case == "organization-guard" {
@@ -295,7 +316,7 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             .collect();
         assert_eq!(
             final_text,
-            if matches!(case, "success" | "long" | "organization-guard" | "privacy" | "privacy-with-guard" | "default-effort" | "allow" | "auto") {
+            if matches!(case, "success" | "long" | "organization-guard" | "privacy" | "privacy-with-guard" | "default-effort" | "allow" | "auto" | "auto-read") {
                 vec![json!("hello")]
             } else {
                 vec![]

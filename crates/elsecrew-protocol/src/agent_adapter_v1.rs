@@ -494,6 +494,8 @@ pub struct AgentRunAcceptedV1 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct AgentRunRecordV1 {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<AgentRunFailureV1>,
     pub schema_version: u64,
     pub run_id: String,
     pub chat_id: String,
@@ -509,6 +511,14 @@ pub struct AgentRunRecordV1 {
     pub termination_outcome: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// Fixed diagnostic codes only; provider text and paths are never public.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AgentRunFailureV1 {
+    pub stage: String,
+    pub code: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1470,6 +1480,14 @@ fn validate_run_record(value: &Value) -> Result<AgentRunRecordV1, AgentAdapterCo
             &["cleanExit", "recoveryRequired"],
             "terminationOutcome",
         )?;
+    }
+    if value.get("failure").is_some_and(Value::is_null) { return fail("failure diagnostic cannot be null"); }
+    if let Some(failure) = &record.failure {
+        if !matches!(record.state.as_str(), "failed" | "recoveryRequired") {
+            return fail("failure diagnostic requires a failed run");
+        }
+        one_of(&failure.stage, &["approvalDelivery", "sessionInput", "sessionChannel", "sessionInitialization", "outputPersistence", "providerResult", "eventHandling", "cleanup"], "failure stage")?;
+        one_of(&failure.code, &["boundaryRejected", "approvalUnavailable", "inputChanged", "storageFailed", "processObservationFailed", "providerRejected", "transportFailed", "unknown"], "failure code")?;
     }
     timestamp(&record.created_at, "createdAt")?;
     timestamp(&record.updated_at, "updatedAt")?;

@@ -1000,7 +1000,7 @@ function SessionDiagnosticsHelp({ runtime }: { runtime: string }) {
   </div>;
 }
 
-function AgentRuns({ runs }: { runs: ReturnType<ChatUiController["snapshot"]>["agentRuns"] }) {
+export function AgentRuns({ runs }: { runs: ReturnType<ChatUiController["snapshot"]>["agentRuns"] }) {
   const { t } = useI18n();
   if (runs.length === 0) return null;
   const { current, previous } = groupRunHistory(runs);
@@ -1013,6 +1013,7 @@ function AgentRuns({ runs }: { runs: ReturnType<ChatUiController["snapshot"]>["a
         <span> · {t(`m5.run.${run.state}`)}</span>
         </div>
         {notice && <p>{t(notice)}</p>}
+        {run.failure && <p role="alert">{t(`m5.run.failure.${run.failure.stage}`)} <code>{run.failure.stage}/{run.failure.code}</code></p>}
         <details><summary>{t("m5.run.details")}</summary>
           <p>{t("m5.chat.runId", { id: run.runId })}</p>
           <p>{t(`m5.run.exit.${run.terminationOutcome ?? "unknown"}`)}</p>
