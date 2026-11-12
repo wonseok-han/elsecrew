@@ -51,6 +51,9 @@ pub(crate) mod catalog;
 #[allow(dead_code)]
 pub(crate) mod agent_output;
 
+// Selected chat content erasure (docs/proposals/m5-chat-erasure.md).
+pub(crate) mod chat_erasure;
+
 const MIGRATION_V1: &str = include_str!("../../../tests/fixtures/m5/storage-v1/migration.sql");
 const MIGRATION_V2: &str =
     include_str!("../../../tests/fixtures/m5/storage-v2/migration-v1-to-v2.sql");
@@ -1547,6 +1550,17 @@ fn configure_connection(connection: &Connection) -> Result<(), SidecarError> {
         return Err(SidecarError::new(
             "foreignKeysDisabled",
             format!("PRAGMA foreign_keys verification returned {enabled}"),
+        ));
+    }
+    // Freed cells/pages are zeroed so erased or superseded content does not
+    // linger in SQLite free space (docs/proposals/m5-chat-erasure.md §6).
+    let secure_delete: i64 = connection
+        .query_row("PRAGMA secure_delete = ON;", [], |row| row.get(0))
+        .map_err(sqlite_error)?;
+    if secure_delete != 1 {
+        return Err(SidecarError::new(
+            "databaseOwnershipFailed",
+            format!("SQLite secure_delete verification returned {secure_delete}"),
         ));
     }
     let locking_mode: String = connection

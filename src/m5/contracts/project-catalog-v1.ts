@@ -41,9 +41,13 @@ function validateGitTrustInspection(value: unknown): GitTrustInspection {
 export type TeamTaskCancelRequest = ChatDiscardAddress & { action: "cancelTeamTask"; triggerMessageId: string };
 export type AutomationPermissions = { files: boolean; commands: boolean };
 export interface WorkspaceCleanupEntry { chatId: string; projectId: string; title: string; eligible: boolean; pending: boolean }
+/** docs/proposals/m5-chat-erasure.md: erased chats are omitted; preview is a bounded goal excerpt. */
+export interface ChatErasureEntry { chatId: string; projectId: string; preview: string; eligible: boolean; state: "none" | "pending" | "redacted" }
 export type ProjectCatalogRequest =
   | { action: "workspaceCleanupList" }
   | { action: "cleanupWorkspace"; chatId: string; confirmed: true }
+  | { action: "chatErasureList" }
+  | { action: "eraseChatContent"; chatId: string; confirmed: true }
   | { action: "getAutomationPermissions"; projectId: string }
   | { action: "setAutomationPermissions"; projectId: string; permissions: AutomationPermissions; confirmed: true }
   | { action: "getProviderConnections" }
@@ -89,6 +93,8 @@ export interface ProjectCatalogEntry { projectId: string; canonicalPath: string 
 export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "workspaceCleanupList"; entries: WorkspaceCleanupEntry[] }
   | { schemaVersion: 1; action: "cleanupWorkspace"; chatId: string; deleted: true }
+  | { schemaVersion: 1; action: "chatErasureList"; entries: ChatErasureEntry[] }
+  | { schemaVersion: 1; action: "eraseChatContent"; chatId: string; erased: true }
   | { schemaVersion: 1; action: "getAutomationPermissions" | "setAutomationPermissions"; projectId: string; permissions: AutomationPermissions }
   | { schemaVersion: 1; action: "getProviderConnections" | "setProviderConnection"; connections: { codex: boolean; "claude-code": boolean } }
   | { schemaVersion: 1; action: "cancelTeamTask"; chatId: string; triggerMessageId: string; status: "stopping" | "stopped" }
@@ -164,6 +170,11 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
   } else if (request.action === "cleanupWorkspace") {
     keys(request,["action","chatId","confirmed"]); id(request.chatId);
     if (request.confirmed !== true) throw new Error("cleanup confirmation required");
+  } else if (request.action === "chatErasureList") {
+    keys(request,["action"]);
+  } else if (request.action === "eraseChatContent") {
+    keys(request,["action","chatId","confirmed"]); id(request.chatId);
+    if (request.confirmed !== true) throw new Error("erasure confirmation required");
   } else if (request.action === "getAutomationPermissions" || request.action === "setAutomationPermissions") {
     keys(request, request.action === "setAutomationPermissions" ? ["action","projectId","permissions","confirmed"] : ["action","projectId"]);
     id(request.projectId);
@@ -263,6 +274,21 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   } else if (request.action === "cleanupWorkspace") {
     keys(result,["schemaVersion","action","chatId","deleted"]);
     if (result.chatId !== request.chatId || result.deleted !== true) throw new Error("cleanup receipt mismatch");
+  } else if (request.action === "chatErasureList") {
+    keys(result,["schemaVersion","action","entries"]);
+    if (!Array.isArray(result.entries) || result.entries.length > 200) throw new Error("invalid erasure list");
+    const seen = new Set<string>();
+    for (const raw of result.entries) {
+      const entry = object(raw); keys(entry,["chatId","projectId","preview","eligible","state"]);
+      id(entry.chatId); id(entry.projectId);
+      if (typeof entry.preview !== "string" || [...entry.preview].length > 160 || typeof entry.eligible !== "boolean"
+        || !["none","pending","redacted"].includes(entry.state as string) || seen.has(entry.chatId as string)) throw new Error("invalid erasure entry");
+      seen.add(entry.chatId as string);
+    }
+  } else if (request.action === "eraseChatContent") {
+    // Completion is reported only after the durable `erased` record (no partial success).
+    keys(result,["schemaVersion","action","chatId","erased"]);
+    if (result.chatId !== request.chatId || result.erased !== true) throw new Error("erasure receipt mismatch");
   } else if (request.action === "getAutomationPermissions" || request.action === "setAutomationPermissions") {
     keys(result,["schemaVersion","action","projectId","permissions"]);
     const permissions = object(result.permissions); keys(permissions,["files","commands"]);

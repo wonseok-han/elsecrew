@@ -1230,6 +1230,18 @@ impl Sidecar {
                     }
                     self.projects.cleanup_workspace(&mut self.storage, param_string(params,"chatId").map_err(invalid_params)?, &request.request_id)
                 }
+                Some("chatErasureList") => {
+                    require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
+                    self.projects.chat_erasure_list(&self.storage)
+                }
+                Some("eraseChatContent") => {
+                    // Same explicit-confirmation and idle gate as copy cleanup (docs/proposals/m5-chat-erasure.md).
+                    let params = require_exact_params(&request.params, &["action", "chatId", "confirmed"]).map_err(invalid_params)?;
+                    if params["confirmed"] != true || self.g5.cleanup_blocked() || !self.workflow_chats.is_empty() || !self.agent_runtime.owned_run_ids().is_empty() || !self.pending_agent_starts.is_empty() || !self.pending_agent_cancels.is_empty() {
+                        return Err(invalid_params("chat erasure requires explicit confirmation and idle execution".into()));
+                    }
+                    self.projects.erase_chat_content(&mut self.storage, param_string(params,"chatId").map_err(invalid_params)?, &request.request_id)
+                }
 
                 Some("getAutomationPermissions" | "setAutomationPermissions") => {
                     let setting = request.params["action"] == "setAutomationPermissions";

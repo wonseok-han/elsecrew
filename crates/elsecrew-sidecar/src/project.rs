@@ -1,5 +1,6 @@
 pub(crate) mod automation_permissions;
 pub(crate) mod workspace_cleanup;
+pub(crate) mod chat_erasure;
 // Requires native Windows recovery QA and explicit product activation.
 pub(crate) const WINDOWS_SAVE_RECOVERY_MUTATIONS_ENABLED: bool = false;
 // Installation consent is not product activation; native integration review remains required.
@@ -5838,7 +5839,7 @@ fn preserve_project_extensions(
         .as_object()
         .cloned()
         .ok_or_else(|| ProjectFailure::manifest("project payload must be an object"))?;
-    for field in ["automation_permissions_v1", "workspace_cleanup_v1", "catalog_hidden", "catalog_hidden_chats", "native_path_binding", "role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews", "application_backups", "application_intent", "application_history"] {
+    for field in ["automation_permissions_v1", "workspace_cleanup_v1", chat_erasure::FIELD, "catalog_hidden", "catalog_hidden_chats", "native_path_binding", "role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews", "application_backups", "application_intent", "application_history"] {
         if field == path_binding::FIELD && object.contains_key(field) {
             continue;
         }
