@@ -1,6 +1,32 @@
-# 작업 이력 (Hello, Agent)
+# 작업 이력 (Elsecrew)
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
+
+### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5)
+- Orca 인계로 이어받아 워킹 트리가 직전 GPT-6 기록과 일치함을 확인했다(AGENTS/CLAUDE byte 일치, diff check 통과).
+- 사용자 승인으로 feature/ade 변경을 로컬 커밋 3개로 나눴다: da86cbeb(CI 설치 파일 경로·저장소 URL), 8a6dbcdb(실행별 Claude 실패 단계/코드 보존·표시와 회귀/화면 검사 스크립트), 그 뒤 문서 커밋(개발용 커스텀 역할 제거·AGENTS/CLAUDE·작업 기록). 커밋 전 추가 테스트는 다시 돌리지 않았고 이전 검증 증거를 그대로 쓴다. push·main 병합·CI 재실행·설치본 반영·실제 공급자 시험은 하지 않았다.
+- 다음: 설치본 반영 확인, 필요하면 별도 승인을 받아 실제 Claude 재시험, 프런트 검사26실패·Windows 기준선·채팅 영구 삭제·사용자 정의 역할 연결은 그대로 남아 있다.
+
+### 2026-11-12 · by GPT-6
+- AGENTS/CLAUDE 최신성 재점검: 서로 동일했지만 Tauri 중심/전환 골격 설명, 병합 전 M5 브랜치 지시와 특정 메인 모델 고정이 남아 있었다. 현재 Electron 작업대·총괄/팀 제품 방향·미완료 기능·512MiB 예산·main 이후 기능 브랜치 기준으로 함께 교정했다. 과거 통합 규칙은 현행 지시에서 제거했고 기존 로컬 커밋 승인 범위를 확대하지 않았다.
+- 고정 역할 제거와 현재 모델/추론 상속을 개발 방식에 반영하고 실제 package.json의 Electron 패키지/smoke·workspace Rust 검사 명령을 추가했다. 두 파일 byte 일치·명령 존재·git diff --check 확인. 문서만 갱신했으며 앱/테스트 전체 통과·커밋/push는 주장하지 않는다.
+
+### 2026-11-12 · by GPT-6
+- 사용자 승인으로 개발용 커스텀 서브에이전트 설정 정리 완료: 사용자 공통 등록12개/역할 파일12개와 프로젝트 역할8개·고정 모델/추론/동시 실행 config를 제거했다. 원본은 `/Users/wonseok-han/.codex/config-backups/subagents-20261112-130810`에 백업했다. 공통 multi_agent 기능·기존 기타 설정은 보존했다.
+- AGENTS/CLAUDE·문서 색인·작업 절차를 기본 에이전트 읽기 전용 검토1명/현재 모델·추론 상속으로 맞췄다. 기존 독립 검토 상시 승인과 추가 위임 승인 경계는 유지하며 Elsecrew 제품의 팀 역할은 변경하지 않았다. 현재 세션에 이미 로드된 역할 목록은 즉시 갱신됐다고 주장하지 않는다; 새 세션/앱 재시작 후 반영 확인 대상이다.
+- 검증: TOML 변경 전후 구조 비교로 custom agents 외 사용자 설정 불변 확인, 백업 byte 대조 후 대상만 삭제. 문서 일치·diff 및 Codex 설정 로드를 확인한다. 코드 테스트/모델 호출/커밋/push 없음.
+
+### 2026-11-12 · by GPT-6
+- 사용자 요청으로 개발용 서브에이전트 설정을 읽기 전용 점검했다. 사용자 공통 config에는 custom role12개와 multi_agent=true/동시16 설정, 프로젝트 config에는 enabled/동시3/기본gpt-5.6-terra 설정, 프로젝트 역할 파일8개가 있다. 파일 값이며 실제 우선순위/적용 동시 한도를 검증한 것은 아니다.
+- 현행 직접 개발 방식에서 다수 고정 역할/모델 프리셋은 필수가 아니며 정리 후보로 판단한다. 서브에이전트 기능 자체와 독립 검토자 호출 규칙, Elsecrew 제품 내부 팀 역할은 서로 별개다. 이번은 필요성 설명이며 설정 삭제/기능 비활성화/상시 검토 승인 변경은 하지 않았다.
+
+### 2026-11-12 · by GPT-6
+- 인계 대조: 현재 작업 위치는 Orca `elsecrew/ADE-개발`, 깨끗한 `feature/ade`에서 시작했으며 HEAD는 병합 commit b6e2de81이다. GitHub PR #1의 main 병합과 원격 main 동일 HEAD, 저장소 이름 `wonseok-han/elsecrew` 및 origin 변경 완료를 확인했다. 아래 과거 “PR로 통합한다”는 계획은 이미 수행됐다. 인계의 문서 전용6e946b20은 이 checkout에 없어 직접 읽지 못했으며 사용자 인계와 GitHub 병합 증거로 보완했다. AGENTS/CLAUDE에 병합 이후 기능 브랜치 작업 및 별도 main/push 승인 경계를 같은 내용으로 명시했다.
+- CI43150190399는 실패: macOS/Windows Tauri 빌드는 성공했으나 artifact 경로가 옛 src-tauri/target을 가리켜 업로드 실패, macOS 기준선은 프런트 검사 실패, Windows 기준선은 frontend-build 시작 직후 실패(상세 원인 미확정), website는 성공이다. 업로드 경로를 workspace target으로 교정했다. README/웹사이트/웹 검사/Tauri 업데이트 URL은 실제 변경된 저장소명으로 갱신; Electron 배포 feed는 여전히 비활성이다. 추가 CI/push/릴리스 없음.
+- Claude 실패 원인 보존 구현: 선택적 run.failure의 고정 stage/code만 Rust/TS 계약으로 허용하고 terminal run·chat·lock과 원자 저장한다. raw error detail·토큰·파일 경로는 넣지 않으며 최초 원인을 cleanup 오류가 덮지 않는다. 기존 기록은 수정하지 않는다. 승인 전달 오류의 원인 유실을 수정하고, 프로젝트 권한 조회 오류가 종료 기록 경로 밖으로 빠지던 흐름을 같은 실패·cleanup 경로로 연결하고, completion 이후 새 도구 승인 전달을 중단한다. 화면은 실행별 실패 단계/코드를 출력 건수와 무관하게 보여주며 일반 로그인/모델 재설정 권고를 제거했다.
+- 검증: TypeScript, TS 계약/작업상태15개, Rust 공유 계약1개, Claude 자동 허용5시나리오(Bash→Read legacy/durable 성공, Read 전달 실패 주입, 외부 경로 거절 포함), 기존 native12시나리오 통과. 실패 코드·비밀 detail 비노출·DB 재열기 보존을 확인했다. Electron 합성 화면 검사 PASS 및 정상 종료/남은 PID0; `.artifacts/m5-run-failure/m5-run-failure-rsf6Hw/` 증거와 재현 스크립트 `scripts/m5-run-failure-ui.mjs`를 남겼다. 읽기 전용 독립 검토 및 공유 계약 사례/권한 조회 오류 경로 재검토는 차단사항 없음.
+- 과거 실행 beb888b3…/세션 c9375a02…만 읽기 전용으로 다시 대조했다. Bash는 목록 조회였으며 Read 대상은 현재 작업 복사본 내 일반 파일(nlink1)이다. 실제 사용자 거절은 입증되지 않았다. 정상 fixture Bash→Read는 성공하므로 당시 중단의 정확한 원인을 재현·해결했다고 주장하지 않는다. 이번 수정은 원인 유실/오류 처리 결함에 대한 것이다.
+- 다음: 새 진단 포함 설치본 반영과 필요 시 별도 승인된 실제 재시험으로 과거 중단 원인을 특정한다. 현재 설치본 미반영, 실제 모델/사용자 프로젝트 쓰기/데이터 삭제 없음. 전체 검사26실패의 해소·Windows 기준선 원인·동적 역할·채팅 본문 영구 삭제·성능/출시는 여전히 미완료다. 변경은 feature/ade 워킹 트리에만 있고 커밋/main 병합/push 없음.
 
 ### 2026-11-12 · by GPT-6
 - 사용자 명시 승인으로 m5/coding-agent-ide 전체를 PR로 main에 통합한다. 기준 abd075dc에서 원격 main 대비1488개 커밋·714개 파일 변경을 확인했다. 이번 통합은 출시/gate 완료가 아니며 기존 테스트26실패·팀 실행 중단·채팅 영구 삭제·동적 역할 및 플랫폼/출시 미검증은 유지한다. GitHub 저장소 이름은 병합 후 사용자가 변경한다.
@@ -133,8 +159,11 @@
 - 기획 원본: `~/Library/CloudStorage/OneDrive-개인/ObsidianVault/오픈소스/아이디어/후보/에이전트-스타터.md`
 - 레포: https://github.com/wonseok-han/hello-agent (로컬 폴더도 `~/projects/hello-agent`로 변경 완료 — 2026-08-12 확인)
 - 위저드 6단계: 에이전트 선택 → 진단 → 설치 → 로그인 → 첫 프로젝트 → 졸업식
-- 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
+- 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **2026-11-12 main 통합 이후**: PR #1 병합 b6e2de81 및 GitHub `elsecrew` 이름 변경 완료. 이후 최신 main 기반 기능 브랜치에서 작업하며 추가 main 병합/push는 별도 승인이다. CI43150190399 실패는 제품 완료가 아님; Tauri 빌드 성공과 artifact 업로드 실패를 구분한다.
+- **Claude 실패 진단(2026-11-12)**: 새 terminal run.failure는 허용된 단계/원인 코드만 보존하며 기존 실패 원인은 추정하지 않는다. fixture Bash→Read 정상 경로는 통과했고 전달 오류 주입의 재시작 보존도 확인했다. 과거 사용자 실행의 직접 원인과 설치본/실제 공급자 재시험은 별도 미확인이다.
 
 - **사용자 정의 팀(2026-11-12 재확정)**: 기본5역할은 템플릿이다. 총괄은 사용자가 구성한 역할 설명/컨텍스트와 요청의 선행조건으로 배분한다. 고정 순차 pipeline은 제품 방향이 아니며 현재 실행의 고정 role enum은 남은 구현 제약이다.
 
