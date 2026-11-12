@@ -28,7 +28,7 @@ export const en: Record<MessageKey, string> = {
   "m5.erasure.confirmTitle": "This cannot be undone",
   "m5.erasure.confirmErased": "Erased: the conversation goal, your and team messages, team instructions and reports, run output text",
   "m5.erasure.confirmKept": "Kept: conversation number, times and state, run and shutdown records, working copy files (delete them with working copy cleanup)",
-  "m5.erasure.confirmOutside": "Copies outside the app are not erased: session records kept by Claude Code or Codex, backups and system snapshots",
+  "m5.erasure.confirmOutside": "Not erased: session records Claude Code or Codex keep in the app's own provider profile folders, old text fragments already freed inside the app records before this version, backups and system snapshots",
   "m5.erasure.cancel": "Cancel",
   "m5.erasure.erase": "Erase permanently",
   "m5.erasure.progress": "{done} of {total} erased",

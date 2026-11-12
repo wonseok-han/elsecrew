@@ -221,25 +221,115 @@ fn ineligible_chats_are_rejected_without_mutation() {
     assert_eq!(erasure_state(&f, &live_id), Value::Null);
     assert!(f.projects.erase_chat_content(&mut f.storage, "chat_missing", "req_missing").is_err());
 
-    // Discarded, but an unclassified field could hold content: the storage
-    // transaction must roll back the rewrite, the guard-trigger drop and the record.
+    // Discarded, but an unclassified field could hold content: the full dry run
+    // refuses before any durable request exists (nothing recorded, nothing hidden).
     let chat_id = discarded_chat(&mut f, GOAL, "req_unknown");
     let mut payload = chat_projection_record(&f.storage, &chat_id).unwrap();
     payload.insert("unclassified_note".into(), json!(GOAL));
     f.storage.upsert_projection_record("chat", &chat_id, "op_unknown_field", None, payload).unwrap();
     materialize(&mut f.storage);
+    let entry = f.projects.chat_erasure_list(&f.storage).unwrap().result["entries"]
+        .as_array().unwrap().iter().find(|entry| entry["chatId"] == chat_id.as_str()).cloned().unwrap();
+    assert_eq!(entry["eligible"], false);
     let before = ledger_snapshot(&f.storage);
     let error = f.projects.erase_chat_content(&mut f.storage, &chat_id, "req_unknown_erase").unwrap_err();
     assert!(format!("{error:?}").contains("not classified"), "{error:?}");
-    let after = ledger_snapshot(&f.storage);
-    assert_eq!(after.1, before.1, "guard triggers and schema must be restored");
-    // Only the durable `pending` intent was appended; no content row changed.
-    assert_eq!(after.0[..before.0.len()], before.0[..]);
-    assert_eq!(after.0.len(), before.0.len() + 1);
-    assert_eq!(erasure_state(&f, &chat_id), "pending");
+    assert_eq!(ledger_snapshot(&f.storage), before, "a refused request must not record anything");
+    assert_eq!(erasure_state(&f, &chat_id), Value::Null);
     assert_eq!(f.storage.chat_message_history(&chat_id).unwrap()[0]["text"], GOAL);
     reopen!(f);
     assert_eq!(f.storage.chat_message_history(&chat_id).unwrap()[0]["text"], GOAL);
+}
+
+#[test]
+fn content_copied_into_a_retained_field_is_refused_before_any_record() {
+    let mut f = Fixture::with_durable_output(true);
+    // The goal equals a retained identifier, so the leftover scan must refuse.
+    let snapshot = f.snapshot("req_leftover_snapshot");
+    let worktree = snapshot["worktreeId"].as_str().unwrap().to_string();
+    assert!(worktree.len() >= 12);
+    let chat = f.create_chat(&snapshot, &worktree, "req_leftover_chat");
+    let chat_id = chat["chatId"].as_str().unwrap().to_string();
+    discard(&mut f, &chat_id);
+    materialize(&mut f.storage);
+    let before = ledger_snapshot(&f.storage);
+    let error = f.projects.erase_chat_content(&mut f.storage, &chat_id, "req_leftover").unwrap_err();
+    assert!(format!("{error:?}").contains("unclassified field"), "{error:?}");
+    assert_eq!(ledger_snapshot(&f.storage), before);
+    assert_eq!(erasure_state(&f, &chat_id), Value::Null);
+}
+
+/// A run that went through recovery resolution keeps `recovery_resolution_intent`
+/// in its historical payloads; it must be classified, not block erasure.
+#[test]
+fn chat_with_resolved_run_recovery_history_is_erased() {
+    let mut f = Fixture::new();
+    let path = f.storage.path().to_path_buf();
+    drop(f.storage);
+    f.storage = Storage::open_for_admission(&path, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+    let (mut runtime, chat, run_id) =
+        start_exact_actual_scenario(&mut f, FakeScenario::ProviderTerminalRecoveryRequired, "req_erase_recovery");
+    drain_actual_scenario(&mut f, &mut runtime, &run_id);
+    let recovery = f.storage.projection_record("run", &run_id).unwrap().unwrap()["recovery"].clone();
+    let request = json!({
+        "recoveryId":recovery["recoveryId"],"chatId":chat["chatId"],"taskId":chat["taskId"],
+        "projectId":chat["projectId"],"worktreeId":chat["worktreeId"],
+        "workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,
+        "expectedRevision":recovery["revision"],"resolution":"abandon"
+    });
+    runtime.resolve_recovery(&mut f.storage, &mut f.projects, &request, "req_erase_recovery_resolve").unwrap();
+    let chat_id = chat["chatId"].as_str().unwrap().to_string();
+    let intent_seen: bool = f.storage.connection_for_test().query_row(
+        "SELECT EXISTS(SELECT 1 FROM events WHERE aggregate_type='run' AND aggregate_id=?1 \
+         AND json_type(canonical_json_payload,'$.recovery_resolution_intent') IS NOT NULL)",
+        [&run_id], |row| row.get(0)).unwrap();
+    assert!(intent_seen, "fixture must carry recovery intent history");
+    materialize(&mut f.storage);
+    f.projects.erase_chat_content(&mut f.storage, &chat_id, "req_erase_recovered").unwrap();
+    assert_erased_history(&f.storage, &f.chats, &chat_id);
+    assert!(!contains(&database_bytes(&f.storage), "provider boundary fixture"));
+    drop(f.storage);
+    f.storage = Storage::open_for_admission(&path, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+    assert_erased_history(&f.storage, &f.chats, &chat_id);
+}
+
+/// A `pending` request whose chat is compacted before the retry is withdrawn:
+/// the chat becomes an ordinary visible discarded chat with its content intact.
+#[test]
+fn pending_request_is_withdrawn_when_the_chat_was_compacted() {
+    use crate::storage_lifetime::compaction_writer::{CompactionStepResult, CompactionTarget};
+    let mut f = Fixture::with_durable_output(true);
+    let chat_id = discarded_chat(&mut f, GOAL, "req_pending_compact");
+    materialize(&mut f.storage);
+    interrupt_at(1);
+    assert!(f.projects.erase_chat_content(&mut f.storage, &chat_id, "req_pending_first").is_err());
+    assert_eq!(erasure_state(&f, &chat_id), "pending");
+    let visible = |f: &Fixture| f.chats.list_chats(&f.storage, &f.project_id, None, 50).unwrap()["items"]
+        .as_array().unwrap().iter().any(|item| item["chatId"] == chat_id.as_str());
+    assert!(visible(&f), "pending keeps content and must stay visible");
+    let record = chat_projection_record(&f.storage, &chat_id).unwrap()["record"].clone();
+    for index in 0..1000 {
+        persist_chat_state(&mut f.storage, &record, &format!("op_pending_compact_{index}")).unwrap();
+    }
+    materialize(&mut f.storage);
+    f.storage.checkpoint().unwrap();
+    reopen!(f);
+    let target = CompactionTarget { aggregate_type: "chat".into(), aggregate_id: chat_id.clone() };
+    let mut finalized = false;
+    for _ in 0..2000 {
+        if matches!(f.storage.run_compaction_scheduler_step(&target).unwrap(), CompactionStepResult::Finalized { .. }) {
+            finalized = true;
+            break;
+        }
+    }
+    assert!(finalized, "pending chat compaction did not finalize");
+    let error = f.projects.erase_chat_content(&mut f.storage, &chat_id, "req_pending_retry").unwrap_err();
+    assert!(format!("{error:?}").contains("compact"), "{error:?}");
+    assert_eq!(erasure_state(&f, &chat_id), Value::Null, "refused pending request must be withdrawn");
+    assert!(visible(&f));
+    assert_eq!(f.storage.chat_message_history(&chat_id).unwrap()[0]["text"], GOAL);
+    reopen!(f);
+    assert_eq!(erasure_state(&f, &chat_id), Value::Null);
 }
 
 #[test]

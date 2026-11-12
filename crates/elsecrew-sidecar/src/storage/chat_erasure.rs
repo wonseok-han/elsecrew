@@ -54,6 +54,9 @@ const RUN_RETAINED_KEYS: &[&str] = &[
     "runtime_attestation", "native_thread_receipt", "native_transport",
     "native_provider_manifest", "claude_preflight", "claude_session_observation",
     "approval_intents_internal", "provider_run_fence", "recovery_id_reservation",
+    // Recovery abandon intent: identities, revision, tracked processes and the
+    // expected workspace manifest/digest only (agent_runtime.rs RECOVERY_INTENT_FIELD).
+    "recovery_resolution_intent",
     "public_event_count",
 ];
 const RUN_CONTENT_KEYS: &[&str] = &[
@@ -269,7 +272,7 @@ struct Rewrite {
     needles: BTreeSet<String>,
 }
 
-fn rewrite_events(tx: &Transaction<'_>, chat_id: &str, runs: &[String]) -> Result<Rewrite, SidecarError> {
+fn rewrite_events(tx: &Transaction<'_>, chat_id: &str, runs: &[String], apply: bool) -> Result<Rewrite, SidecarError> {
     let mut rewrite = Rewrite { payloads: BTreeMap::new(), written: Vec::new(), needles: BTreeSet::new() };
     let mut targets = vec![("chat".to_string(), chat_id.to_string())];
     targets.extend(runs.iter().map(|run| ("run".to_string(), run.clone())));
@@ -286,7 +289,7 @@ fn rewrite_events(tx: &Transaction<'_>, chat_id: &str, runs: &[String]) -> Resul
         };
         for (rowid, event_id, operation_id, sequence, raw) in rows {
             let redacted = redact_event_payload(aggregate_type, &raw, &mut rewrite.needles)?;
-            if redacted != raw {
+            if apply && redacted != raw {
                 let changed = tx.execute(
                     "UPDATE events SET canonical_json_payload=?1 WHERE rowid=?2 AND event_id=?3",
                     params![redacted, rowid, event_id],
@@ -297,16 +300,17 @@ fn rewrite_events(tx: &Transaction<'_>, chat_id: &str, runs: &[String]) -> Resul
             let digest = sha256_file_version_v1(redacted.as_bytes())
                 .strip_prefix("sha256:").map(str::to_owned)
                 .ok_or_else(|| invalid("digest encoding invalid"))?;
-            tx.execute(
+            if apply { tx.execute(
                 "UPDATE operation_receipts SET canonical_payload_json=?1, canonical_payload_digest=?2 \
                  WHERE operation_id=?3 AND event_id=?4 AND aggregate_type=?5 AND aggregate_id=?6 \
                  AND aggregate_sequence=?7",
                 params![redacted, digest, operation_id, event_id, aggregate_type, aggregate_id, sql_i64(sequence)?],
-            ).map_err(sqlite_error)?;
+            ).map_err(sqlite_error)?; }
             rewrite.written.push(redacted.clone());
             rewrite.payloads.insert((aggregate_type.clone(), aggregate_id.clone(), sequence), redacted);
         }
-        // Every receipt of the aggregate must correspond to a rewritten live event.
+        // Every receipt of the aggregate must correspond to a live event (before or
+        // after the rewrite: receipts are exact copies, so the query holds in both).
         let stale: i64 = tx.query_row(
             "SELECT count(*) FROM operation_receipts r WHERE r.aggregate_type=?1 AND r.aggregate_id=?2 \
              AND NOT EXISTS(SELECT 1 FROM events e WHERE e.operation_id=r.operation_id \
@@ -316,12 +320,12 @@ fn rewrite_events(tx: &Transaction<'_>, chat_id: &str, runs: &[String]) -> Resul
         if stale != 0 {
             return Err(denied("receipt without a live source blocks erasure"));
         }
-        rewrite_baselines(tx, aggregate_type, aggregate_id, &mut rewrite)?;
+        rewrite_baselines(tx, aggregate_type, aggregate_id, &mut rewrite, apply)?;
     }
     Ok(rewrite)
 }
 
-fn rewrite_baselines(tx: &Transaction<'_>, aggregate_type: &str, aggregate_id: &str, rewrite: &mut Rewrite) -> Result<(), SidecarError> {
+fn rewrite_baselines(tx: &Transaction<'_>, aggregate_type: &str, aggregate_id: &str, rewrite: &mut Rewrite, apply: bool) -> Result<(), SidecarError> {
     let rows: Vec<(String, u64)> = {
         let mut statement = tx.prepare(
             "SELECT baseline_id,cutoff_aggregate_sequence FROM ledger_baselines \
@@ -337,16 +341,16 @@ fn rewrite_baselines(tx: &Transaction<'_>, aggregate_type: &str, aggregate_id: &
             .get(&(aggregate_type.to_string(), aggregate_id.to_string(), cutoff))
             .cloned()
             .ok_or_else(|| denied("baseline without a live source blocks erasure"))?;
-        tx.execute(
+        if apply { tx.execute(
             "UPDATE ledger_baselines SET canonical_projection_json=?1, projection_digest=?2 WHERE baseline_id=?3",
             params![payload, sha256_file_version_v1(payload.as_bytes()), baseline_id],
-        ).map_err(sqlite_error)?;
+        ).map_err(sqlite_error)?; }
         rewrite.written.push(payload);
     }
     Ok(())
 }
 
-fn rewrite_messages(tx: &Transaction<'_>, chat_id: &str, rewrite: &mut Rewrite) -> Result<(), SidecarError> {
+fn rewrite_messages(tx: &Transaction<'_>, chat_id: &str, rewrite: &mut Rewrite, apply: bool) -> Result<(), SidecarError> {
     let rows: Vec<(String, String)> = {
         let mut statement = tx.prepare("SELECT message_id,canonical_message_json FROM chat_messages WHERE chat_id=?1")
             .map_err(sqlite_error)?;
@@ -357,16 +361,16 @@ fn rewrite_messages(tx: &Transaction<'_>, chat_id: &str, rewrite: &mut Rewrite) 
         let mut message: Value = serde_json::from_str(&raw).map_err(|_| invalid("retained message invalid"))?;
         redact_message(&mut message, &mut rewrite.needles)?;
         let canonical = canonical_json_v1(message).map_err(storage_contract_error)?;
-        tx.execute(
+        if apply { tx.execute(
             "UPDATE chat_messages SET canonical_message_json=?1, message_digest=?2 WHERE message_id=?3",
             params![canonical, sha256_file_version_v1(canonical.as_bytes()), message_id],
-        ).map_err(sqlite_error)?;
+        ).map_err(sqlite_error)?; }
         rewrite.written.push(canonical);
     }
     Ok(())
 }
 
-fn rewrite_outputs(tx: &Transaction<'_>, runs: &[String]) -> Result<(), SidecarError> {
+fn rewrite_outputs(tx: &Transaction<'_>, runs: &[String], apply: bool) -> Result<(), SidecarError> {
     if !matches!(storage_schema_version(tx)?, Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)) {
         return Ok(());
     }
@@ -386,29 +390,135 @@ fn rewrite_outputs(tx: &Transaction<'_>, runs: &[String]) -> Result<(), SidecarE
             }
             total += event.text.len() as u64;
             let json = serde_json::to_string(&event).map_err(|_| invalid("output encoding failed"))?;
-            tx.execute("UPDATE run_output_records SET event_json=?1 WHERE rowid=?2", params![json, rowid])
-                .map_err(sqlite_error)?;
+            if apply {
+                tx.execute("UPDATE run_output_records SET event_json=?1 WHERE rowid=?2", params![json, rowid])
+                    .map_err(sqlite_error)?;
+            }
         }
-        tx.execute(
-            "UPDATE run_output_heads SET text_bytes=?1 WHERE run_id=?2",
-            params![sql_i64(total)?, run_id],
-        ).map_err(sqlite_error)?;
+        if apply {
+            tx.execute(
+                "UPDATE run_output_heads SET text_bytes=?1 WHERE run_id=?2",
+                params![sql_i64(total)?, run_id],
+            ).map_err(sqlite_error)?;
+        }
     }
     Ok(())
+}
+
+/// Fail closed if any original content string (>= LEFTOVER_SCAN_MIN_BYTES, raw
+/// or JSON-escaped) survived in a rewritten row, i.e. sits in a retained field.
+fn scan_leftovers(rewrite: &Rewrite) -> Result<(), SidecarError> {
+    let needles: Vec<(String, String)> = rewrite
+        .needles
+        .iter()
+        .filter(|needle| needle.len() >= LEFTOVER_SCAN_MIN_BYTES)
+        .take(LEFTOVER_SCAN_MAX_NEEDLES)
+        .map(|needle| {
+            let escaped = serde_json::to_string(needle).unwrap_or_default();
+            (needle.clone(), escaped.trim_matches('"').to_string())
+        })
+        .collect();
+    for row in &rewrite.written {
+        if needles.iter().any(|(raw, escaped)| row.contains(raw.as_str()) || row.contains(escaped.as_str())) {
+            return Err(denied("content was copied into an unclassified field"));
+        }
+    }
+    Ok(())
+}
+
+fn projection_object(tx: &Transaction<'_>, sql: &str, id: &str) -> Result<Option<Map<String, Value>>, SidecarError> {
+    let raw: Option<String> = tx.query_row(sql, [id], |row| row.get(0)).optional().map_err(sqlite_error)?;
+    raw.map(|raw| serde_json::from_str(&raw).map_err(|_| invalid("projection is not an object"))).transpose()
+}
+
+/// Durable part of the eligibility contract (design §2 items 1-5), re-checked in
+/// the same transaction as the rewrite. Sidecar idleness (item 6) is enforced by
+/// the caller on the single event loop before this call.
+fn verify_eligibility(tx: &Transaction<'_>, chat_id: &str, project_id: &str, runs: &[String]) -> Result<(), SidecarError> {
+    let chat = projection_object(tx, "SELECT projection_json FROM chats WHERE chat_id=?1", chat_id)?
+        .ok_or_else(|| denied("chat is missing"))?;
+    let workflow_running = chat.get("orchestration_v1").and_then(|value| value.get("status"))
+        .is_some_and(|status| status == "running");
+    if chat.get("state") != Some(&json!("discarded"))
+        || chat.get("record").and_then(|record| record.get("state")) != Some(&json!("discarded"))
+        || chat.get("project_id") != Some(&json!(project_id))
+        || workflow_running
+        || chat.get("save_sessions").is_some_and(|sessions| sessions.as_object().is_none_or(|items| !items.is_empty()))
+    {
+        return Err(denied("chat is not an idle discarded chat"));
+    }
+    let worktree = chat.get("worktree_id").and_then(Value::as_str).ok_or_else(|| denied("chat worktree is missing"))?;
+    if let Some(lock) = projection_object(tx, "SELECT projection_json FROM locks WHERE lock_id=?1", &format!("lock_{worktree}"))? {
+        if lock.get("writer_run_id").is_some_and(|value| !value.is_null())
+            || lock.get("poisoned") != Some(&json!(false))
+            || lock.get("recovery_required") != Some(&json!(false))
+        {
+            return Err(denied("chat workspace lock needs attention"));
+        }
+    }
+    for run_id in runs {
+        let run = projection_object(tx, "SELECT projection_json FROM runs WHERE run_id=?1", run_id)?
+            .ok_or_else(|| denied("run is missing"))?;
+        let recovery = run.get("recovery").filter(|value| !value.is_null());
+        let resolved = recovery.is_some_and(|value| matches!(value["state"].as_str(), Some("resolved" | "resolvedAbandoned")));
+        let evidence = if run.get("source_kind") == Some(&json!("actualAgent")) {
+            run.get("termination")
+        } else {
+            run.get("record").and_then(|record| record.get("terminationEvidence"))
+        };
+        let proven_gone = evidence.and_then(|value| value.get("processesProvenGone")) == Some(&json!(true));
+        if !matches!(run.get("state").and_then(Value::as_str), Some("succeeded" | "failed" | "canceled"))
+            || (recovery.is_some() && !resolved)
+            || !(proven_gone || resolved)
+        {
+            return Err(denied("chat run or recovery needs attention"));
+        }
+    }
+    let project = projection_object(tx, "SELECT projection_json FROM projects WHERE project_id=?1", project_id)?
+        .ok_or_else(|| denied("project is missing"))?;
+    if project.get("application_intent").is_some_and(|value| !value.is_null() && value["state"] != "abandoned") {
+        return Err(denied("project application is in progress"));
+    }
+    Ok(())
+}
+
+/// Classify, redact and leftover-scan every copy. With `apply=false` nothing is
+/// written: the same refusals surface before any durable request state exists.
+fn plan_erasure(tx: &Transaction<'_>, chat_id: &str, project_id: &str, apply: bool) -> Result<(Vec<String>, Rewrite), SidecarError> {
+    storage_schema_version(tx)?
+        .filter(|version| ERASURE_SCHEMA_VERSIONS.contains(version))
+        .ok_or_else(|| denied("storage schema version does not support chat erasure"))?;
+    let owner: Option<String> = tx
+        .query_row("SELECT project_id FROM chats WHERE chat_id=?1", [chat_id], |row| row.get(0))
+        .optional()
+        .map_err(sqlite_error)?;
+    if owner.as_deref() != Some(project_id) {
+        return Err(denied("chat does not belong to the project"));
+    }
+    let runs = target_runs(tx, chat_id)?;
+    reject_compaction_artifacts(tx, chat_id)?;
+    verify_eligibility(tx, chat_id, project_id, &runs)?;
+    let mut rewrite = rewrite_events(tx, chat_id, &runs, apply)?;
+    rewrite_messages(tx, chat_id, &mut rewrite, apply)?;
+    rewrite_outputs(tx, &runs, apply)?;
+    scan_leftovers(&rewrite)?;
+    Ok((runs, rewrite))
+}
+
+/// Refusals that are properties of the stored chat (not transient I/O or races).
+pub(crate) fn is_erasure_refusal(error: &SidecarError) -> bool {
+    error.kind == "chatErasureDenied"
 }
 
 impl Storage {
     /// Read-only storage-side eligibility (ownership and compaction state). The
     /// write path repeats every check inside its own transaction.
-    pub(crate) fn chat_erasure_precheck(&self, chat_id: &str) -> Result<(), SidecarError> {
+    pub(crate) fn chat_erasure_precheck(&self, chat_id: &str, project_id: &str) -> Result<(), SidecarError> {
         self.ensure_writes_admitted()?;
         let transaction = Transaction::new_unchecked(&self.connection, TransactionBehavior::Deferred)
             .map_err(sqlite_error)?;
-        storage_schema_version(&transaction)?
-            .filter(|version| ERASURE_SCHEMA_VERSIONS.contains(version))
-            .ok_or_else(|| denied("storage schema version does not support chat erasure"))?;
-        target_runs(&transaction, chat_id)?;
-        reject_compaction_artifacts(&transaction, chat_id)
+        // Full in-memory dry run: classification, compaction, eligibility, leftovers.
+        plan_erasure(&transaction, chat_id, project_id, false).map(|_| ())
         // Dropping the read transaction rolls it back.
     }
 
@@ -426,22 +536,13 @@ impl Storage {
             .ok_or_else(|| denied("storage schema version does not support chat erasure"))?;
         verify_schema_identity_for_erasure(&transaction)?;
         verify_append_runtime_state(&transaction)?;
-        let owner: Option<String> = transaction
-            .query_row("SELECT project_id FROM chats WHERE chat_id=?1", [&commit.chat_id], |row| row.get(0))
-            .optional()
-            .map_err(sqlite_error)?;
-        if owner.as_deref() != Some(commit.project_id.as_str()) {
-            return Err(denied("chat does not belong to the project"));
-        }
-        let runs = target_runs(&transaction, &commit.chat_id)?;
-        reject_compaction_artifacts(&transaction, &commit.chat_id)?;
+        // Refuse before touching the guard triggers; the identical plan then applies.
+        plan_erasure(&transaction, &commit.chat_id, &commit.project_id, false)?;
         let triggers = capture_triggers(&transaction)?;
         for (name, _) in GUARDED_UPDATE_TRIGGERS {
             transaction.execute_batch(&format!("DROP TRIGGER {name};")).map_err(sqlite_error)?;
         }
-        let mut rewrite = rewrite_events(&transaction, &commit.chat_id, &runs)?;
-        rewrite_messages(&transaction, &commit.chat_id, &mut rewrite)?;
-        rewrite_outputs(&transaction, &runs)?;
+        let (runs, rewrite) = plan_erasure(&transaction, &commit.chat_id, &commit.project_id, true)?;
 
         // Replay the rewritten ledger; projections are exactly the latest payloads.
         let mut events = load_events(&transaction)?;
@@ -495,23 +596,6 @@ impl Storage {
         events.push(event.clone());
         projection = replay_storage_ledger(&transaction, &events)?;
         write_projection(&transaction, &event, &projection)?;
-
-        // Fail closed if any original content string survived in a rewritten row.
-        let needles: Vec<(String, String)> = rewrite
-            .needles
-            .iter()
-            .filter(|needle| needle.len() >= LEFTOVER_SCAN_MIN_BYTES)
-            .take(LEFTOVER_SCAN_MAX_NEEDLES)
-            .map(|needle| {
-                let escaped = serde_json::to_string(needle).unwrap_or_default();
-                (needle.clone(), escaped.trim_matches('"').to_string())
-            })
-            .collect();
-        for row in &rewrite.written {
-            if needles.iter().any(|(raw, escaped)| row.contains(raw.as_str()) || row.contains(escaped.as_str())) {
-                return Err(denied("content was copied into an unclassified field"));
-            }
-        }
 
         for sql in &triggers {
             transaction.execute_batch(sql).map_err(sqlite_error)?;

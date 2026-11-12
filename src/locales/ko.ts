@@ -27,7 +27,7 @@ export const ko = {
   "m5.erasure.confirmTitle": "되돌릴 수 없어요",
   "m5.erasure.confirmErased": "지우는 것: 대화 목표, 내 메시지와 팀 메시지, 팀 지시·보고, 실행 출력 본문",
   "m5.erasure.confirmKept": "남는 것: 대화 번호·시각·상태, 실행·종료 기록, 작업 복사본 파일(작업 복사본 정리로 따로 삭제)",
-  "m5.erasure.confirmOutside": "앱 밖의 사본은 지우지 않아요: Claude Code·Codex가 따로 보관한 세션 기록, 백업과 시스템 스냅샷",
+  "m5.erasure.confirmOutside": "지우지 않는 것: Claude Code·Codex가 앱 전용 공급자 프로필 폴더에 남긴 자체 세션 기록, 이 버전 이전에 앱 기록의 빈 공간으로 풀린 옛 내용 조각, 백업과 시스템 스냅샷",
   "m5.erasure.cancel": "취소",
   "m5.erasure.erase": "영구 삭제",
   "m5.erasure.progress": "{done}/{total}개 삭제 완료",

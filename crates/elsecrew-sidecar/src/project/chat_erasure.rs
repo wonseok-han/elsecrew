@@ -35,9 +35,14 @@ fn denied() -> ProjectFailure {
     )
 }
 
-/// Erased chats stay out of chat lists even after hidden chats are restored.
+/// Chats whose content was rewritten (`redacted`/`erased`) stay out of chat lists
+/// even after hidden chats are restored. `pending` still has its content and
+/// stays visible, so a refused or abandoned request never hides a chat.
 pub(crate) fn erasure_recorded(project: &Map<String, Value>, chat_id: &Value) -> bool {
-    chat_id.as_str().is_some_and(|id| project.get(FIELD).and_then(|jobs| jobs.get(id)).is_some())
+    chat_id.as_str().is_some_and(|id| {
+        project.get(FIELD).and_then(|jobs| jobs.get(id)).and_then(|job| job.get("state"))
+            .is_some_and(|state| state == "redacted" || state == "erased")
+    })
 }
 
 fn job_state(project: &Map<String, Value>, chat_id: &str) -> Option<String> {
@@ -96,12 +101,14 @@ impl ProjectManager {
             } else {
                 &run["record"]["terminationEvidence"]
             };
+            let recovery = run.get("recovery").filter(|value| !value.is_null());
+            let resolved = recovery.is_some_and(|value| {
+                matches!(value["state"].as_str(), Some("resolved" | "resolvedAbandoned"))
+            });
+            // A resolved recovery is the termination authority for that run.
             if !matches!(run["state"].as_str(), Some("succeeded" | "failed" | "canceled"))
-                || evidence["processesProvenGone"] != true
-                || run.get("recovery").is_some_and(|value| {
-                    !value.is_null()
-                        && !matches!(value["state"].as_str(), Some("resolved" | "resolvedAbandoned"))
-                })
+                || (recovery.is_some() && !resolved)
+                || !(evidence["processesProvenGone"] == true || resolved)
             {
                 return Err(denied());
             }
@@ -126,7 +133,7 @@ impl ProjectManager {
                 Some("redacted") => cfg!(unix),
                 _ => {
                     self.erasure_chat(storage, id).is_ok()
-                        && storage.chat_erasure_precheck(id).is_ok()
+                        && storage.chat_erasure_precheck(id, project_id).is_ok()
                 }
             };
             let preview: String = chat["record"]["goal"]
@@ -170,7 +177,8 @@ impl ProjectManager {
             if self.erasure_chat(storage, chat_id)? != project_id {
                 return Err(denied());
             }
-            storage.chat_erasure_precheck(chat_id)?;
+            // Full dry run first: a refused chat leaves no durable request at all.
+            storage.chat_erasure_precheck(chat_id, &project_id)?;
             let mut project = project.clone();
             project
                 .entry(FIELD)
@@ -190,8 +198,20 @@ impl ProjectManager {
         }
         checkpoint(1)?;
         if state.as_deref() == Some("pending") {
-            if self.erasure_chat(storage, chat_id)? != project_id {
-                return Err(denied());
+            // A pending request whose chat became ineligible (classification,
+            // compaction, recovery, ...) is withdrawn instead of lingering.
+            let refused = match self.erasure_chat(storage, chat_id) {
+                Ok(owner) if owner == project_id => storage
+                    .chat_erasure_precheck(chat_id, &project_id)
+                    .err()
+                    .filter(crate::storage::chat_erasure::is_erasure_refusal)
+                    .map(ProjectFailure::from),
+                Ok(_) => Some(denied()),
+                Err(error) => Some(error),
+            };
+            if let Some(error) = refused {
+                withdraw_pending(storage, &project_id, chat_id, request_id)?;
+                return Err(error);
             }
             let mut project = registered_project(storage, &project_id)?;
             let sequence = project
@@ -205,14 +225,23 @@ impl ProjectManager {
                 .ok_or_else(denied)?;
             job.insert("state".into(), json!("redacted"));
             job.insert("redactedAt".into(), json!(now_timestamp()));
-            storage.redact_chat_content(ChatErasureCommit {
+            let committed = storage.redact_chat_content(ChatErasureCommit {
                 chat_id: chat_id.to_owned(),
                 project_id: project_id.clone(),
                 expected_project_sequence: sequence,
                 project_operation_id: format!("op_chat_erasure_redact_{request_id}"),
                 request_id: request_id.to_owned(),
                 project_payload: project,
-            })?;
+            });
+            match committed {
+                Ok(()) => {}
+                Err(error) if crate::storage::chat_erasure::is_erasure_refusal(&error) => {
+                    withdraw_pending(storage, &project_id, chat_id, request_id)?;
+                    return Err(error.into());
+                }
+                // Transient (I/O, conflicting write): keep `pending` for a retry.
+                Err(error) => return Err(error.into()),
+            }
             state = Some("redacted".into());
         }
         if state.as_deref() != Some("redacted") {
@@ -241,6 +270,24 @@ impl ProjectManager {
         )?;
         Ok(done())
     }
+}
+
+/// Remove a `pending` request (content untouched) so the chat is an ordinary
+/// discarded chat again. Never applies to `redacted`/`erased`.
+fn withdraw_pending(storage: &mut Storage, project_id: &str, chat_id: &str, request_id: &str) -> Result<(), ProjectFailure> {
+    let mut project = registered_project(storage, project_id)?;
+    if job_state(&project, chat_id).as_deref() != Some("pending") {
+        return Err(denied());
+    }
+    project.get_mut(FIELD).and_then(Value::as_object_mut).ok_or_else(denied)?.remove(chat_id);
+    append_object(
+        storage,
+        "project",
+        project_id,
+        &format!("op_chat_erasure_withdraw_{request_id}"),
+        request_id,
+        Value::Object(project),
+    )
 }
 
 fn now_timestamp() -> String {
