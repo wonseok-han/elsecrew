@@ -69,7 +69,9 @@ export function ProviderLogin({ disabled, compact: preferCompact = false, return
     </nav>}
     <div hidden={!settingsPage && !compact && step !== "agents"}>
     <DeviceCheck expanded={settingsPage}/>
-    <SelectionContainer className="m5-provider-selection" open={selectionExpanded} onToggle={event => setSelectionExpanded(event.currentTarget.open)}>
+    {/* Settings already lists every agent with its own connect button; the
+        guided-setup selection would only add a second, unsynced choice. */}
+    {!settingsPage && <SelectionContainer className="m5-provider-selection" open={selectionExpanded} onToggle={event => setSelectionExpanded(event.currentTarget.open)}>
       {settingsPage ? <h4>{t("m5.setup.agents.title")}</h4> : <summary><strong>{t("m5.setup.agents.title")}</strong><span>{selected.length ? selected.map(p => p === "codex" ? "Codex" : "Claude Code").join(" · ") : t("m5.setup.agents.choose")}</span></summary>}
       <p>{t("m5.setup.agents.help")}</p>
       {selected.length === 0 ? <form onSubmit={event => { event.preventDefault(); if (draft.length) select(draft); }}>
@@ -86,7 +88,7 @@ export function ProviderLogin({ disabled, compact: preferCompact = false, return
         {LOGIN_PROVIDERS.filter(p => !selected.includes(p)).map(provider => <button key={provider} type="button" disabled={disabled} onClick={() => select([...selected,provider])}>{t("m5.setup.agents.add", {name: provider === "codex" ? "Codex" : "Claude Code"})}</button>)}
       </div>}
       {saveFailed && <p role="status">{t("m5.setup.agents.saveFailed")}</p>}
-    </SelectionContainer>
+    </SelectionContainer>}
     {!settingsPage && !compact && selected.length > 0 && <button type="button" className="m5-setup-next" disabled={installBlocked} onClick={() => navigate("install")}>{t("m5.setup.steps.toInstall")}</button>}
     </div>
     {!selectionExpanded && saveFailed && <p className="m5-notice" role="status">{t("m5.setup.agents.saveFailed")}</p>}
