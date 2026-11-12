@@ -2,6 +2,8 @@ import type { SystemStatusG5DV1 } from "./contracts/lifecycle-g5d-v1.ts";
 import type { AgentRunRecordV1 } from "./contracts/agent-adapter-v1.ts";
 
 /** Collapse only older confirmed terminal records, never live/recovery work. */
+const chronological = (a: AgentRunRecordV1, b: AgentRunRecordV1) =>
+  Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.runId.localeCompare(b.runId);
 export function groupRunHistory(runs: readonly AgentRunRecordV1[]) {
   const ordered = [...runs].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   const current: AgentRunRecordV1[] = [];
@@ -11,7 +13,20 @@ export function groupRunHistory(runs: readonly AgentRunRecordV1[]) {
       && run.terminationOutcome === "cleanExit";
     (index > 0 && closed ? previous : current).push(run);
   });
+  // Finished runs read top to bottom in the order the team worked.
+  previous.reverse();
   return { current, previous };
+}
+
+/** 1-based position of each run in the chat, oldest first, for "#n" labels. */
+export function runOrder(runs: readonly AgentRunRecordV1[]): Map<string, number> {
+  return new Map([...runs].sort(chronological).map((run, index) => [run.runId, index + 1]));
+}
+
+/** Whole seconds between start and last update; null when unknown. */
+export function runDurationSeconds(run: Pick<AgentRunRecordV1, "createdAt" | "updatedAt">): number | null {
+  const start = Date.parse(run.createdAt), end = Date.parse(run.updatedAt);
+  return Number.isFinite(start) && Number.isFinite(end) && end >= start ? Math.round((end - start) / 1000) : null;
 }
 
 /** Display only. A clean exit is not a successful task or permission to apply. */

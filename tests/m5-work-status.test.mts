@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { groupRunHistory, runOutcomeNotice, summarizeWorkStatus } from "../src/m5/work-status.ts";
+import { groupRunHistory, runDurationSeconds, runOrder, runOutcomeNotice, summarizeWorkStatus } from "../src/m5/work-status.ts";
 import type { AgentRunRecordV1 } from "../src/m5/contracts/agent-adapter-v1.ts";
 import type { SystemStatusG5DV1 } from "../src/m5/contracts/lifecycle-g5d-v1.ts";
 
@@ -49,4 +49,17 @@ test("work status rejects contradictory state and bounds technical rendering", (
   assert.equal(summary.ids.length, 20);
   assert.equal(summary.omitted, 5);
   assert(summary.ids.every(id => id.length <= 160 && !id.includes("\u202e")));
+});
+
+test("finished runs read oldest first with a stable chat-wide order and duration", () => {
+  const run = (id: string, minute: number) => ({runId:id,state:"succeeded",terminationOutcome:"cleanExit",
+    createdAt:`2026-11-12T05:0${minute}:00Z`,updatedAt:`2026-11-12T05:0${minute}:45Z`}) as AgentRunRecordV1;
+  const runs = [run("coordinator-2", 3), run("coordinator-1", 1), run("planning", 2), run("coding", 4)];
+  const grouped = groupRunHistory(runs);
+  assert.deepEqual(grouped.current.map(r => r.runId), ["coding"]);
+  assert.deepEqual(grouped.previous.map(r => r.runId), ["coordinator-1", "planning", "coordinator-2"]);
+  const order = runOrder(runs);
+  assert.deepEqual(["coordinator-1", "planning", "coordinator-2", "coding"].map(id => order.get(id)), [1, 2, 3, 4]);
+  assert.equal(runDurationSeconds(runs[0]), 45);
+  assert.equal(runDurationSeconds({createdAt:"bad", updatedAt:"2026-11-12T05:00:00Z"}), null);
 });

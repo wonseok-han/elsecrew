@@ -482,6 +482,14 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-provider-login > div[id$="-connection-details"] > form label { display:block; font-weight:600; }
 .m5-agent-runs article { display: grid; gap: 6px; min-width: 0; padding: 8px 0; }
 .m5-agent-run-heading { display: flex; flex-wrap: wrap; gap: 4px; overflow-wrap: anywhere; }
+.m5-agent-run-heading { align-items: center; gap: 6px; }
+.m5-run-order { font-variant-numeric: tabular-nums; color: var(--m5-muted); min-width: 2.2em; }
+.m5-run-meta { color: var(--m5-muted); font-size: 12px; }
+.m5-run-state { padding: 1px 6px; border-radius: 999px; font-size: 11px; border: 1px solid #526176; }
+.m5-run-state-succeeded { color: #8fdc9b; border-color: #3d7a49; }
+.m5-run-state-failed, .m5-run-state-recoveryRequired { color: #ffb4a6; border-color: #a5544a; }
+.m5-run-state-canceled { color: #e5c07b; border-color: #8a6d35; }
+.m5-run-state-running, .m5-run-state-preparing, .m5-run-state-cancelling { color: #91c5ff; border-color: #3e6a9a; }
 .m5-agent-runs article p { margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
 .m5-agent-runs summary { cursor: pointer; color: inherit; padding: 4px 0; }
 .m5-agent-runs summary:focus-visible { outline: 2px solid #91c5ff; outline-offset: 2px; }

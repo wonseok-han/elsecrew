@@ -15,7 +15,7 @@ import { AgentOutputPanel } from "./agent-output-panel.tsx";
 import { markStartScreenReady } from "./startup-mark.ts";
 import { emptyProjectGuide, parseProjectGuide, projectGuideKey, projectGuideStep, type ProjectGuidePreference } from "./project-guide-state.ts";
 import type { ChatRecordV1 } from "./contracts/run-recovery-v1.ts";
-import { groupRunHistory, runOutcomeNotice } from "./work-status.ts";
+import { groupRunHistory, runOutcomeNotice, runOrder, runDurationSeconds } from "./work-status.ts";
 import { cachedModels, loadModels, modelLabel } from "./model-catalog.ts";
 import type { ModelChoicesResult } from "./contracts/model-choices-v1.ts";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
@@ -1018,16 +1018,22 @@ function SessionDiagnosticsHelp({ runtime }: { runtime: string }) {
 }
 
 export function AgentRuns({ runs }: { runs: ReturnType<ChatUiController["snapshot"]>["agentRuns"] }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   if (runs.length === 0) return null;
   const { current, previous } = groupRunHistory(runs);
+  const order = runOrder(runs);
+  const clock = new Intl.DateTimeFormat(lang === "ko" ? "ko-KR" : "en-US", { hour: "numeric", minute: "2-digit" });
   const renderRun = (run: typeof runs[number]) => {
       const notice = runOutcomeNotice(run);
+      const seconds = runDurationSeconds(run);
+      const started = Date.parse(run.createdAt);
       return <article key={run.runId}>
         <div className="m5-agent-run-heading">
-        <span>{t(`m5.roles.${run.selectedProfile.roleId}`)}</span>{" "}
-        <span>{run.selectedProfile.runtime === "codex" ? "Codex" : "Claude Code"} · {run.selectedProfile.modelSelector}{run.selectedProfile.reasoningEffort ? ` · ${run.selectedProfile.reasoningEffort}` : ""}</span>
-        <span> · {t(`m5.run.${run.state}`)}</span>
+        <span className="m5-run-order">{t("m5.run.order", { n: order.get(run.runId) ?? 0 })}</span>
+        <strong>{t(`m5.roles.${run.selectedProfile.roleId}`)}</strong>
+        <span className={`m5-run-state m5-run-state-${run.state}`}>{t(`m5.run.${run.state}`)}</span>
+        <span className="m5-run-meta">{Number.isFinite(started) ? clock.format(new Date(started)) : ""}{seconds !== null ? ` · ${seconds >= 60 ? t("m5.run.duration.minutes", { m: Math.floor(seconds / 60), s: seconds % 60 }) : t("m5.run.duration.seconds", { s: seconds })}` : ""}</span>
+        <span className="m5-run-meta">{run.selectedProfile.runtime === "codex" ? "Codex" : "Claude Code"} · {run.selectedProfile.modelSelector}{run.selectedProfile.reasoningEffort ? ` · ${run.selectedProfile.reasoningEffort}` : ""}</span>
         </div>
         {notice && <p>{t(notice)}</p>}
         {run.failure && <p role="alert">{t(`m5.run.failure.${run.failure.stage}`)} <code>{run.failure.stage}/{run.failure.code}</code></p>}
