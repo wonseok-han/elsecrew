@@ -2,6 +2,15 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — 채팅 내용 영구 삭제 작업자
+- 브랜치 `feature/ade-chat-erasure`(기준 f8672e5f, worktree `.worktrees/chat-erasure`). 설계 `docs/proposals/m5-chat-erasure.md`를 먼저 커밋하고 구현했다. 대상은 **버린(discarded) 채팅만**이며 목표·메시지·팀 지시/보고·실행 출력 본문을 고정 표지 `[erased]`로 바꾸고 ID·시각·상태·실행/종료 증거는 남긴다.
+- 방식: schema 버전을 올리지 않는다. 한 `BEGIN IMMEDIATE` 안에서 수정 금지 trigger 3개(events/receipts/baselines UPDATE)를 캡처 SQL과 함께 내렸다 그대로 재생성하고, 이벤트·receipt(digest)·baseline(digest)·`chat_messages`(digest)·chat/run projection·출력 원장(`text_bytes`)·legacy `public_events`(카운터)를 같은 결정적 함수로 다시 쓴 뒤 버전별 schema identity를 재검증하고 commit한다. 기존 재열기/재생/materialization/compaction 검증 코드는 바꾸지 않았다. 분류되지 않은 payload 키가 있으면 거절한다. 압축 흔적(frozen/prefix/plan)이 있는 채팅은 v1에서 거절한다.
+- 상태 `chat_erasure_v1`(프로젝트 원장 확장): pending → redacted(원자 재작성과 같은 transaction) → WAL `TRUNCATE` 성공·길이 0 확인 → erased. 응답 `erased:true`는 마지막 기록 뒤에만 반환한다. 연결 설정에 `PRAGMA secure_delete=ON`을 전역으로 추가했다(성능 영향 미측정). 삭제된 채팅은 채팅 목록과 숨김 복원에서 제외된다. IPC는 기존 `project.catalog`의 `chatErasureList`/`eraseChatContent`(확인·유휴 게이트)이며 설정 → 저장공간에 선택·확인·진행 화면과 ko/en 문구를 추가했다. Windows는 자격 없음으로만 표시한다.
+- 검증(임시 DB만): erasure Rust 5개 통과 — 실제 fake Claude 실행 출력(V12 출력 원장)·후속 메시지가 있는 채팅 삭제 후 표식 문자열이 DB+WAL 바이트에 없음, 대조 채팅 보존, 전체 admission 재열기 2회 뒤에도 없음/목록 제외/멱등; 단계1~3 중단 후 재시작·재개; 버리지 않은 채팅·분류 안 된 필드 거절 시 trigger·schema·내용 원복; 삭제 후 다른 채팅 실제 compaction 완료·재열기, 압축된 채팅 거절; V10 legacy `public_events`·카운터. sidecar lib 전체 765 통과/3 실패/43 ignored — 실패 3개(`tests::discovery_*`, `native_session_negotiates_*`)는 기존 공급자 연결 게이트의 `providerDisconnected`로 이번 변경과 무관해 보이나 기준 커밋 재실행으로 확인하지는 않았다. `cargo check --workspace` 경고 없음, TypeScript 통과, npm 723/723 통과(새 계약·문구 테스트3 포함), `git diff --check` 통과.
+- 한계 발견: `secure_delete`를 끈 상태에서도 위 바이트 검사가 통과했다. 즉 테스트는 빈 공간 0 채움을 입증하지 못하며 `secure_delete`는 방어선일 뿐 검증된 보장이 아니다. 실제 사용자 데이터·실제 모델·패키징·설치본 반영·Electron 화면 검사는 하지 않았다. 독립 검토 전이며 데이터 삭제 경계라 검토가 필요하다.
+- 함정: 공유 `CARGO_TARGET_DIR`에서 worktree가 다르면 workspace 상대 경로 때문에 `elsecrew-sidecar` 산출물 hash가 같아 서로 덮어쓴다(다른 작업자의 테스트 바이너리가 실행됨). 이번 검증은 `--target aarch64-apple-darwin`으로 산출물을 분리했다.
+- 남은 일: 독립 검토, V13 통합 시 `storage/chat_erasure.rs`의 `ERASURE_SCHEMA_VERSIONS`·`verify_schema_identity_for_erasure`에 13 추가, 공급자 자체 세션 기록 삭제, 압축된 긴 채팅·`completed` 채팅 지원, 기능 도입 전 SQLite 빈 공간 잔존 정리, Electron 화면 검사.
+
 ### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5)
 - Orca 인계로 이어받아 워킹 트리가 직전 GPT-6 기록과 일치함을 확인했다(AGENTS/CLAUDE byte 일치, diff check 통과).
 - 사용자 승인으로 feature/ade 변경을 로컬 커밋 3개로 나눴다: da86cbeb(CI 설치 파일 경로·저장소 URL), 8a6dbcdb(실행별 Claude 실패 단계/코드 보존·표시와 회귀/화면 검사 스크립트), 그 뒤 문서 커밋(개발용 커스텀 역할 제거·AGENTS/CLAUDE·작업 기록). 커밋 전 추가 테스트는 다시 돌리지 않았고 이전 검증 증거를 그대로 쓴다. push·main 병합·CI 재실행·설치본 반영·실제 공급자 시험은 하지 않았다.
@@ -164,6 +173,8 @@
 
 - **2026-11-12 main 통합 이후**: PR #1 병합 b6e2de81 및 GitHub `elsecrew` 이름 변경 완료. 이후 최신 main 기반 기능 브랜치에서 작업하며 추가 main 병합/push는 별도 승인이다. CI43150190399 실패는 제품 완료가 아님; Tauri 빌드 성공과 artifact 업로드 실패를 구분한다.
 - **Claude 실패 진단(2026-11-12)**: 새 terminal run.failure는 허용된 단계/원인 코드만 보존하며 기존 실패 원인은 추정하지 않는다. fixture Bash→Read 정상 경로는 통과했고 전달 오류 주입의 재시작 보존도 확인했다. 과거 사용자 실행의 직접 원인과 설치본/실제 공급자 재시험은 별도 미확인이다.
+
+- **채팅 내용 삭제(2026-11-12, 구현·독립 검토 전)**: G5D 검증기가 원천에서 사본을 재유도해 byte/digest를 비교하므로 "표지 행 예외" 대신 모든 사본을 한 transaction에서 같은 결정적 치환으로 다시 쓴다(`storage/chat_erasure.rs`). schema 버전은 그대로이며 지원 버전 목록은 그 파일 한 곳이다. `VACUUM`은 `events` rowid를 바꿀 수 있어 쓰지 않는다. 공유 target 디렉터리에서 다른 worktree와 sidecar 산출물이 충돌하므로 병렬 작업 중에는 `--target`으로 분리한다. 계약: `docs/proposals/m5-chat-erasure.md`.
 
 - **사용자 정의 팀(2026-11-12 재확정)**: 기본5역할은 템플릿이다. 총괄은 사용자가 구성한 역할 설명/컨텍스트와 요청의 선행조건으로 배분한다. 고정 순차 pipeline은 제품 방향이 아니며 현재 실행의 고정 role enum은 남은 구현 제약이다.
 
