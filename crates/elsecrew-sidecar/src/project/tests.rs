@@ -4619,7 +4619,6 @@ fn sparse_base_over_diff_limit_is_classified_without_loading_blob() {
     assert_eq!(file.result["byteLength"], DIFF_MAX_BYTES as u64 + 1);
 }
 
-#[cfg(unix)]
 /// The index check takes no `.git/index.lock` (a provider's own `git status`
 /// may hold it) and, like `write-tree`, ignores intent-to-add entries.
 #[test]
@@ -4635,6 +4634,7 @@ fn snapshot_index_check_tolerates_index_lock_and_intent_to_add() {
     fixture.manager.verify_snapshot_repository(&workspace, &active).unwrap();
 }
 
+#[cfg(unix)]
 #[test]
 fn concurrent_snapshot_checks_reject_each_repository_invariant_drift() {
     use std::os::unix::fs::PermissionsExt as _;
