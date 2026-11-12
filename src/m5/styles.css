@@ -601,6 +601,10 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-settings-help p { line-height: 1.7; max-width: 740px; }
 .m5-role-workspace { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 24px; margin: 18px 0; align-items: start; }
 .m5-role-navigation { display: grid; gap: 6px; }
+.m5-role-sidebar { display: grid; gap: 10px; align-content: start; min-width: 0; }
+.m5-role-team-tools { display: grid; gap: 4px; }
+.m5-role-team-tools small { font-size: 11px; color: var(--m5-muted); }
+.m5-role-card textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; min-width: 0; border: 1px solid var(--m5-border-strong); border-radius: 6px; padding: 7px 8px; background: var(--m5-bg); color: var(--m5-text); }
 .m5-role-navigation button { display: grid; text-align: left; gap: 5px; background: transparent; border-color: transparent; padding: 12px; min-width: 0; }
 .m5-role-navigation button[aria-pressed="true"] { background: var(--m5-raised); border-color: var(--m5-border-strong); box-shadow: inset 2px 0 var(--m5-action-bg); }
 .m5-role-navigation strong { font-size: 13px; font-weight: 550; }

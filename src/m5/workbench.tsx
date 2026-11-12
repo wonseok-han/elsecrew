@@ -821,13 +821,17 @@ function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, o
     <details className="m5-settings-help"><summary>{t("m5.roles.how")}</summary><p>{t("m5.roles.help")}</p><p>{t("m5.roles.teamHelp")}</p></details>
     {choicesError && <p role="alert">{t("m5.roles.choicesError")}</p>}
     <div className="m5-role-workspace">
+    <div className="m5-role-sidebar">
     <nav className="m5-role-navigation" aria-label={t("m5.roles.selectRole")}>{roles.map(role => <button
       key={role.roleId} type="button" aria-pressed={selectedRole === role.roleId} aria-controls={`m5-role-panel-${role.roleId}`}
       onClick={() => setSelectedRole(role.roleId)}><strong>{label(role.roleId)}</strong>
       <span>{role.runtime === "codex" ? "Codex" : "Claude Code"}</span><small>{role.modelSelector || t("m5.roles.chooseModel")}</small></button>)}
+    </nav>
+    <div className="m5-role-team-tools">
       <button type="button" className="m5-secondary" disabled={editing || !canAddWorker(team)} onClick={add}>{t("m5.roles.add")}</button>
       <small>{t("m5.roles.limit", { max: G5_ROLES_MAX_V3 - 1 })}</small>
-    </nav>
+    </div>
+    </div>
     <div className="m5-role-cards">{roles.map(role => {
       const definition = team.roleDefinitions.find(item => item.roleId === role.roleId);
       const coordinator = role.roleId === "coordinator";
