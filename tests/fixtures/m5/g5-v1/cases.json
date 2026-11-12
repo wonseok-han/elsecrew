@@ -320,6 +320,8 @@
     {"name":"v3-update-definitions-follow-roles","baseValidName":"project-settings-update-v3","validator":"projectRoleSettingsUpdate","changes":[{"pointer":"/roleDefinitions/3/roleId","value":"other"}],"expectedValid":false},
     {"name":"v3-chat-record-requires-definitions","baseValidName":"chat-record-v3-custom-roles","validator":"chatRecord","changes":[{"pointer":"/schemaVersion","value":2}],"expectedValid":false},
     {"name":"custom-role-message-id-is-bounded","baseValidName":"custom-role-team-message","validator":"teamMessage","changes":[{"pointer":"/roleId","value":"R"}],"expectedValid":false},
+    {"name":"v3-role-name-bom-is-not-blank-in-rust-or-ts","baseValidName":"project-settings-v3-custom-roles","validator":"projectRoleSettings","changes":[{"pointer":"/roleDefinitions/1/name","value":"\ufeff"}],"expectedValid":true},
+    {"name":"v3-role-name-unicode-space-is-blank","baseValidName":"project-settings-v3-custom-roles","validator":"projectRoleSettings","changes":[{"pointer":"/roleDefinitions/1/name","value":"\u3000"}],"expectedValid":false},
     {"name":"project-settings-requires-exact-role-set","baseValidName":"project-settings","validator":"projectRoleSettings","changes":[{"pointer":"/roles/2/roleId","value":"planning"}],"expectedValid":false},
     {"name":"chat-page-rejects-cross-chat-run","baseValidName":"chat-page-explicit-identity-and-sequence","validator":"chatDetailPage","changes":[{"pointer":"/runs/0/chatId","value":"chat_other"}],"expectedValid":false},
     {"name":"writer-run-profile-cannot-drift-from-chat-snapshot","baseValidName":"atomic-writer-start","validator":"writerStart","changes":[{"pointer":"/persistedRun/selectedProfile/modelSelector","value":"different-model"}],"expectedValid":false},

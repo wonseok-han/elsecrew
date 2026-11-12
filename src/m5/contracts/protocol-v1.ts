@@ -585,8 +585,9 @@ export function validateAgentRunStateChangedPayloadV1(
   if (!wireStates.includes(run.state as never)) fail("agent run state event state is not wire-visible");
   const stages = ["planning", "implementing", "verifying"] as const;
   if (!stages.includes(run.stage as never)) fail("agent run state event stage is invalid");
-  // Write permission selects implementation; read-only runs are planning or verifying.
-  if ((profile.permission === "workspaceWrite") !== (run.stage === "implementing")) fail("agent run state event stage does not match selected role snapshot");
+  // The stage is derived from permission (legacy `review` keeps verifying); mirrors `stageForProfileV3`.
+  const expectedStage = profile.permission === "workspaceWrite" ? "implementing" : profile.roleId === "review" ? "verifying" : "planning";
+  if (run.stage !== expectedStage) fail("agent run state event stage does not match selected role snapshot");
   const active = run.state === "running";
   if (active) {
     if (run.terminationOutcome !== null) fail("active and terminal run evidence must agree");

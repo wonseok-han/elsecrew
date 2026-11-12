@@ -6780,6 +6780,9 @@ fn custom_roles_v3_seed_update_snapshot_and_legacy_gate() {
     let reopened = f.chats.get_chat(&f.storage, chat["chatId"].as_str().unwrap(), 0, None, 10, false).unwrap();
     assert_eq!(reopened["chat"], detail["chat"]);
     assert_eq!(f.chats.default_role_settings(&mut f.storage, &f.projects, &f.project_id, "req_v3_reopen").unwrap()["revision"], 3);
+    // Fixture scenarios are keyed by fixed V1 role names and never run in a V3 chat.
+    #[cfg(target_os = "macos")]
+    assert!(f.chats.start_fixture(&mut f.storage, &mut f.projects, chat["chatId"].as_str().unwrap(), "planning", "planning-success", "req_v3_fixture").err().unwrap().detail.contains("legacy fixed-role"));
     // App defaults accept V3 and remain bounded.
     let saved = f.projects.update_app_role_defaults(&f.storage, 1, roles.clone(), Some(definitions.clone())).unwrap();
     assert_eq!(saved["schemaVersion"], 3);

@@ -1266,6 +1266,27 @@ fn validate_capabilities_request(
 }
 
 #[test]
+fn agent_run_stage_is_exactly_derived_from_permission() {
+    let line = include_str!("../../../tests/fixtures/m5/protocol-v1/valid/agent-run-state-changed.jsonl").lines().last().unwrap();
+    let base: Value = serde_json::from_str::<Value>(line).unwrap()["payload"]["run"].clone();
+    let case = |role: &str, permission: &str, stage: &str| {
+        let mut run = base.clone();
+        run["selectedProfile"]["roleId"] = Value::String(role.into());
+        run["selectedProfile"]["permission"] = Value::String(permission.into());
+        run["stage"] = Value::String(stage.into());
+        validate_agent_adapter_payload_v1("runRecord", &run).is_ok()
+    };
+    assert!(case("planning", "readOnly", "planning"));
+    assert!(case("research", "readOnly", "planning"));
+    assert!(case("review", "readOnly", "verifying"));
+    assert!(case("planning", "workspaceWrite", "implementing"));
+    assert!(!case("planning", "readOnly", "verifying"), "read-only non-review roles are planning only");
+    assert!(!case("review", "readOnly", "planning"));
+    assert!(!case("builder", "workspaceWrite", "planning"));
+    assert!(!case("coordinator", "workspaceWrite", "implementing"));
+}
+
+#[test]
 fn capability_query_scope_requires_both_non_null_identifiers() {
     use serde_json::json;
     for value in [
@@ -1466,14 +1487,13 @@ fn validate_run_record(value: &Value) -> Result<AgentRunRecordV1, AgentAdapterCo
         "stage",
     )?;
     role_id(&record.selected_profile.role_id)?;
-    // Write permission selects implementation; read-only runs may be labelled
-    // planning or verifying (legacy `review`), never implementing.
-    let stage_matches = if record.selected_profile.permission == "workspaceWrite" {
-        record.stage == "implementing"
-    } else {
-        matches!(record.stage.as_str(), "planning" | "verifying")
-    };
-    if !stage_matches {
+    // The stage is derived from permission (legacy `review` keeps verifying).
+    if record.stage
+        != crate::run_recovery_v1::g5_stage_for_profile_v3(
+            &record.selected_profile.role_id,
+            &record.selected_profile.permission,
+        )
+    {
         return fail("agent run stage does not match selected role snapshot");
     }
     if let Some(outcome) = &record.termination_outcome {

@@ -16,6 +16,7 @@ import {
   G5_PUBLIC_MESSAGE_MAX_BYTES_V1,
   G5_REASONING_EFFORT_MAX_BYTES_V1,
   isRoleIdV3,
+  stageForProfileV3,
   G5_RUN_STAGES_V1,
   G5_RUN_STATES_V1,
   G5_RUNTIMES_V1,
@@ -561,8 +562,8 @@ export function validateAgentRunRecordV1(value: unknown): AgentRunRecordV1 {
   fingerprintDigest(object.capabilityFingerprint, "capabilityFingerprint");
   const state = oneOf(object.state, G5_RUN_STATES_V1, "state");
   const stage = oneOf(object.stage, G5_RUN_STAGES_V1, "stage");
-  // Write permission selects implementation; read-only runs are planning or verifying.
-  if (profile.permission === "workspaceWrite" ? stage !== "implementing" : stage === "implementing") fail("agent run stage does not match selected role snapshot");
+  // The stage is derived from permission (legacy `review` keeps verifying).
+  if (stage !== stageForProfileV3(profile)) fail("agent run stage does not match selected role snapshot");
   const termination = object.terminationOutcome === null
     ? null
     : oneOf(object.terminationOutcome, ["cleanExit", "recoveryRequired"] as const, "terminationOutcome");

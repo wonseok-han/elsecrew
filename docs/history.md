@@ -2,6 +2,13 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — custom roles worker (독립 검토 반영)
+- 독립 검토(안전 차단 결함 없음)의 필수 1건과 권장 5건을 `feature/ade-custom-roles`에 반영했다. push·병합·실데이터 없음.
+- [필수] 앱 기본값 저장 성공이 오류로 보이던 결함: sidecar serde_json은 객체 키를 알파벳순으로 내보내는데 결과 검증이 `roleDefinitions`를 `JSON.stringify`로 비교했다. 키 순서와 무관한 `canonicalJson`/`sameJsonValue`로 바꾸고 역할 수 일치도 확인한다. 계약 내부 `sameJson`과 화면 변경 감지(`sameTeam`)도 같은 비교를 쓴다. sidecar 키 순서 응답 회귀 시험 추가.
+- [권장] V3 채팅의 fixture 실행 거절(템플릿 ID라도 권한이 다를 수 있음), 실행 기록 stage를 `g5_stage_for_profile_v3`/`stageForProfileV3`와 정확히 일치하도록 좁힘(Rust adapter·TS adapter·protocol event), 모델 목록 상태를 `Map`으로 바꿔 `constructor` 같은 역할 ID 안전, 이름 칸에 UTF-8 바이트 수 표시·초과 시 오류 표시(새 키 `m5.roles.nameBytes`), TS 빈칸 판정을 Rust `str::trim`과 같은 Unicode White_Space 기준으로 맞춤(U+FEFF는 빈칸 아님, 공유 fixture에 사례 추가).
+- 검증(전용 target dir): `elsecrew-protocol` 68/68. sidecar lib 767 통과/3 실패/43 ignored, `stdio_process` 15/16. 실패 4건은 앞 기록과 같은 공급자 연결 gate(`providerDisconnected`) 기존 실패로 추정하며, 이번에는 `codex_durable_native_three_thousand_outputs`도 전체 실행에서 통과했다. `tsc --noEmit` 통과, `npm test` 729/729. 주의: 공유 fixture를 읽는 node 시험은 worktree를 cwd로 실행해야 한다(`npm test --prefix <worktree>`); 다른 cwd에서 실행하면 그 checkout의 fixture를 읽는다.
+- 남은 일: 실제 화면에서 역할 추가→총괄 위임 확인, 렌더러 smoke의 기존 `.m5-root` 실패 이후 구간, 설치본 V13 이관.
+
 ### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — custom roles worker
 - 범위: worktree `.worktrees/custom-roles`, 브랜치 `feature/ade-custom-roles`(기준 f8672e5f). 사용자 정의 팀 역할을 실제 실행에 연결했다. push·병합·실제 공급자/사용자 데이터·패키징 없음.
 - 계약: Rust/TS 역할 집합 V3(총괄 첫 자리·읽기 전용, 팀원1~7, ID `^[a-z][a-z0-9-]{1,31}$`, 이름≤64B·맡은 일≤2000B)와 `roleDefinitions`를 프로젝트 설정·앱 기본값·채팅 기록·갱신 요청에 추가했다. 단독 프로필은 이름으로 권한을 유도하지 않고, V1/V2 집합은 기존 고정 권한까지 정확히 검증한다. agent adapter·protocol event·출력 binding·팀 메시지의 고정 5ID 목록을 형식 검사로 바꾸고 stage 일치는 권한 기준으로 바꿨다. 공유 fixture `planning-cannot-write`는 V3에서 더 이상 거절 사유가 아니어서 `coordinator-cannot-write`와 legacy 집합 권한 사례로 대체했다.

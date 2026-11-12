@@ -855,6 +855,11 @@ impl G5Manager {
             &json!({"chatId":chat_id,"roleId":role_id,"scenario":scenario}),
         )
         .map_err(|error| ProjectFailure::manifest(format!("invalid fixture run: {error}")))?;
+        // Fixture scenarios are keyed by the fixed V1 role names; a V3 team may
+        // reuse those IDs with other permissions, so it never runs fixtures.
+        if chat["schemaVersion"].as_u64() == Some(elsecrew_protocol::run_recovery_v1::G5_ROLE_SCHEMA_VERSION_V3) {
+            return Err(ProjectFailure::manifest("fixture runs require a legacy fixed-role chat"));
+        }
         let state = chat["state"].as_str().unwrap_or_default();
         if !G5_RUN_START_CHAT_STATES_V1.contains(&state) {
             return Err(ProjectFailure::recovery(

@@ -643,9 +643,9 @@ export function validateRunRecordV1(value: unknown): RunRecordV1 {
   oneOf(object.fixtureScenario, G5_FIXTURE_SCENARIOS_V1, "fixture scenario");
   const state = oneOf(object.state, G5_RUN_STATES_V1, "run state");
   const stage = oneOf(object.stage, G5_RUN_STAGES_V1, "run stage");
-  const expectedStage: Partial<Record<RoleIdV1, RunStageV1>> = { planning: "planning", coding: "implementing", review: "verifying" };
-  if (!expectedStage[profile.roleId]) fail("unknown selected role snapshot");
-  if (stage !== expectedStage[profile.roleId]) fail("run stage does not match selected role snapshot");
+  const expectedStage: RunStageV1 | null = profile.roleId === "planning" ? "planning" : profile.roleId === "coding" ? "implementing" : profile.roleId === "review" ? "verifying" : null;
+  if (!expectedStage) fail("unknown selected role snapshot");
+  if (stage !== expectedStage) fail("run stage does not match selected role snapshot");
   if (["preparing", "running", "cancelling"].includes(state)) {
     if (object.terminationEvidence !== null) fail("active run cannot have termination evidence");
   } else {
@@ -1300,7 +1300,7 @@ function validateRoleSetV3(value: unknown, definitionsValue: unknown, name: stri
     const roleName = boundedText(definition.name, "role name", G5_ROLE_NAME_MAX_BYTES_V3);
     if (/\p{Cc}/u.test(roleName)) fail("role name cannot contain control characters");
     const text = definition.responsibility;
-    if (typeof text !== "string" || new TextEncoder().encode(text).length > G5_ROLE_RESPONSIBILITY_MAX_BYTES_V3 || /[^\P{Cc}\n\t]/u.test(text)) fail("role responsibility must be bounded text");
+    if (typeof text !== "string" || utf8ByteLength(text) > G5_ROLE_RESPONSIBILITY_MAX_BYTES_V3 || /[^\P{Cc}\n\t]/u.test(text)) fail("role responsibility must be bounded text");
   });
   return roles;
 }
@@ -1336,8 +1336,20 @@ function sameChatIdentity(chat: ChatRecordV1, child: Pick<TeamMessageV1 | RunRec
   if ("workspaceIdentity" in child && child.workspaceIdentity !== chat.workspaceIdentity) fail("workspace identity mismatch");
 }
 
+/** Key-order independent JSON: sidecar serde_json emits object keys sorted, the renderer in insertion order. */
+export function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const object = value as Record<string, unknown>;
+    return `{${Object.keys(object).filter(key => object[key] !== undefined).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(object[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+export function sameJsonValue(left: unknown, right: unknown): boolean {
+  return canonicalJson(left) === canonicalJson(right);
+}
 function sameJson(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return sameJsonValue(left, right);
 }
 
 function array(value: unknown, name: string, maximum: number): unknown[] {
@@ -1356,12 +1368,16 @@ function positiveSequence(value: unknown, name: string): number {
   return result;
 }
 function boundedText(value: unknown, name: string, maximumBytes: number): string {
-  if (typeof value !== "string" || value.trim().length === 0 || new TextEncoder().encode(value).length > maximumBytes) fail(`${name} must be nonempty and bounded`);
+  if (typeof value !== "string" || isBlankText(value) || utf8ByteLength(value) > maximumBytes) fail(`${name} must be nonempty and bounded`);
   return value;
 }
 function nullableBoundedText(value: unknown, name: string, maximumBytes: number): void {
   if (value !== null) boundedText(value, name, maximumBytes);
 }
+/** Rust `str::trim` semantics (Unicode White_Space); unlike JS `trim`, U+FEFF is not blank. */
+export function isBlankText(value: string): boolean { return /^\p{White_Space}*$/u.test(value); }
+export function utf8ByteLength(value: string): number { return new TextEncoder().encode(value).length; }
+
 export function isRoleIdV3(value: unknown): value is string {
   return typeof value === "string" && G5_ROLE_ID_PATTERN_V3.test(value);
 }

@@ -636,6 +636,7 @@ export const ko = {
   "m5.roles.coding": "개발",
   "m5.roles.review": "검증",
   "m5.roles.name": "역할 이름",
+  "m5.roles.nameBytes": "{count}/{max}바이트 · 한글은 한 글자에 3바이트예요.",
   "m5.roles.responsibility": "맡은 일과 참고할 내용",
   "m5.roles.responsibilityPlaceholder": "예: 화면 문구를 쉽게 다듬고, 사용자가 헷갈릴 부분을 알려줘요.",
   "m5.roles.responsibilityHelp": "총괄은 이 이름과 설명을 보고 일을 맡길 팀원을 골라요. 최대 {max}바이트까지 쓸 수 있어요.",

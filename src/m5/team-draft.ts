@@ -1,5 +1,5 @@
 import {
-  G5_COORDINATOR_ROLE_ID, G5_ROLES_MAX_V3, roleSettingsAsV3, validateProjectRoleSettingsUpdateRequestV1,
+  G5_COORDINATOR_ROLE_ID, G5_ROLES_MAX_V3, roleSettingsAsV3, sameJsonValue, validateProjectRoleSettingsUpdateRequestV1,
   type ProjectRoleSettingsV1, type RoleDefinitionV3, type RoleProfileV1,
 } from "./contracts/run-recovery-v1.ts";
 
@@ -11,7 +11,7 @@ export function teamDraftFrom(settings: Pick<ProjectRoleSettingsV1, "roles" | "r
 }
 
 export function sameTeam(left: TeamDraft, right: TeamDraft): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return sameJsonValue(left, right);
 }
 
 /** First unused `member-N`; IDs are opaque and never derived from user text. */

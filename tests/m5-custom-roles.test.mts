@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  G5_DEFAULT_ROLE_DEFINITIONS_V3, isRoleIdV3, roleSettingsAsV3, stageForProfileV3,
+  G5_DEFAULT_ROLE_DEFINITIONS_V3, isBlankText, isRoleIdV3, roleSettingsAsV3, stageForProfileV3, utf8ByteLength,
   validateChatRecordV1, validateProjectRoleSettingsUpdateRequestV1, validateProjectRoleSettingsV1,
   type RoleProfileV1,
 } from "../src/m5/contracts/run-recovery-v1.ts";
@@ -100,4 +100,36 @@ test("team drafts add and remove workers but keep the coordinator and at least o
   for (let index = 0; index < 10; index += 1) full = addWorker(full, `R${index}`);
   assert.equal(full.roles.length, 8);
   assert.ok(isValidTeamDraft(full));
+});
+
+test("app defaults result accepts sidecar key order but rejects changed values or role counts", () => {
+  const { roles, roleDefinitions } = roleSettingsAsV3({ roles: legacyRoles });
+  const request = { action: "updateAppRoleDefaults", expectedRevision: 1, roles, roleDefinitions } as const;
+  // serde_json without preserve_order emits object keys alphabetically.
+  const sorted = (value: Record<string, unknown>) => Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]]));
+  const settings = sorted({ schemaVersion: 3, revision: 2, roles: roles.map(role => sorted({ ...role })), roleDefinitions: roleDefinitions.map(item => sorted({ ...item })), updatedAt: "2026-11-12T00:00:00Z" });
+  assert.deepEqual(Object.keys((settings.roleDefinitions as Record<string, unknown>[])[0]), ["name", "responsibility", "roleId"]);
+  const result = { action: "updateAppRoleDefaults", schemaVersion: 1, settings };
+  assert.deepEqual(validateProjectCatalogResult(result, request), result);
+  const changed = (settings.roleDefinitions as Record<string, unknown>[]).map((item, index) => index === 2 ? { ...item, responsibility: "other" } : item);
+  assert.throws(() => validateProjectCatalogResult({ ...result, settings: { ...settings, roleDefinitions: changed } }, request), /differs from request/);
+  const extraRoles = [...roles, profile("extra")];
+  const extraDefinitions = [...roleDefinitions, { roleId: "extra", name: "Extra", responsibility: "" }];
+  assert.throws(() => validateProjectCatalogResult({ ...result, settings: { ...settings, roles: extraRoles, roleDefinitions: extraDefinitions } }, request), /differs from request/);
+  // Draft dirty checks ignore key order as well.
+  assert.ok(sameTeam({ roles, roleDefinitions }, { roles: roles.map(role => sorted({ ...role }) as unknown as RoleProfileV1), roleDefinitions: roleDefinitions.map(item => sorted({ ...item }) as unknown as typeof item) }));
+});
+
+test("blank text follows Rust trim semantics and prototype-like role IDs stay plain data", () => {
+  assert.ok(isBlankText(" \t\n　"));
+  assert.ok(!isBlankText("﻿"), "U+FEFF is not Unicode White_Space, as in Rust str::trim");
+  const { roles, roleDefinitions } = roleSettingsAsV3({ roles: legacyRoles });
+  const withBom = roleDefinitions.map((item, index) => index === 1 ? { ...item, name: "﻿" } : item);
+  validateProjectRoleSettingsV1({ schemaVersion: 3, projectId: "p", revision: 1, roles, roleDefinitions: withBom, updatedAt: "2026-11-12T00:00:00Z" });
+  assert.equal(utf8ByteLength("기획"), 6);
+  const draft = addWorker(teamDraftFrom({ roles: [profile("coordinator"), profile("constructor")], roleDefinitions: [{ roleId: "coordinator", name: "Lead", responsibility: "" }, { roleId: "constructor", name: "Builder", responsibility: "" }] }), "New");
+  assert.ok(isValidTeamDraft(draft));
+  assert.equal(roleLabel("constructor", draft.roleDefinitions, key => key), "Builder");
+  assert.equal(roleLabel("toString", undefined, key => key), "toString");
+  assert.equal(stageForProfileV3({ roleId: "constructor", permission: "readOnly" }), "planning");
 });

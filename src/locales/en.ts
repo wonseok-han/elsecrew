@@ -637,6 +637,7 @@ export const en: Record<MessageKey, string> = {
   "m5.roles.coding": "Development",
   "m5.roles.review": "Verification",
   "m5.roles.name": "Role name",
+  "m5.roles.nameBytes": "{count}/{max} bytes · some characters use more than one byte.",
   "m5.roles.responsibility": "Responsibility and context",
   "m5.roles.responsibilityPlaceholder": "e.g. Simplify on-screen wording and point out anything confusing for users.",
   "m5.roles.responsibilityHelp": "The coordinator reads this name and description to decide whom to assign. Up to {max} bytes.",

@@ -30,7 +30,7 @@ import {
 import type { DiffEntryV1 } from "./contracts/diff-v1.ts";
 import type { TreeEntryV1 } from "./contracts/project-v1.ts";
 import type { M5BridgeV6 } from "./contracts/bridge-v6.ts";
-import { G5_ROLES_MAX_V3, G5_ROLE_NAME_MAX_BYTES_V3, G5_ROLE_RESPONSIBILITY_MAX_BYTES_V3, roleSettingsAsV3, type RoleDefinitionV3, type RoleProfileV1, type ProjectRoleSettingsV1 } from "./contracts/run-recovery-v1.ts";
+import { G5_ROLES_MAX_V3, G5_ROLE_NAME_MAX_BYTES_V3, G5_ROLE_RESPONSIBILITY_MAX_BYTES_V3, isBlankText, roleSettingsAsV3, utf8ByteLength as nameBytes, type RoleDefinitionV3, type RoleProfileV1, type ProjectRoleSettingsV1 } from "./contracts/run-recovery-v1.ts";
 import { addWorker, canAddWorker, canRemoveWorker, isValidTeamDraft, removeWorker, sameTeam, teamDraftFrom, updateDefinition, updateProfile, type TeamDraft } from "./team-draft.ts";
 import { roleLabel } from "./role-names.ts";
 import { StorageAdmissionPoller, type AdmissionView } from "./admission-state.ts";
@@ -741,25 +741,26 @@ function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, o
   const [selectedRole, setSelectedRole] = useState<RoleProfileV1["roleId"]>("coordinator");
   const [busy, setBusy] = useState(false);
   const [discardAction, setDiscardAction] = useState<"close" | "reload" | null>(null);
-  const [choices, setChoices] = useState<Partial<Record<RoleProfileV1["roleId"], ModelChoicesResult["models"]>>>({});
+  // Role IDs are user-visible opaque strings; a Map avoids prototype keys such as `constructor`.
+  const [choices, setChoices] = useState<ReadonlyMap<string, ModelChoicesResult["models"]>>(() => new Map());
   const [choicesError, setChoicesError] = useState(false);
   const [choicesBusy, setChoicesBusy] = useState(false);
   const choiceEpoch = useRef(0);
   useEffect(() => {
     choiceEpoch.current += 1;
-    setChoices({}); setChoicesError(false);
+    setChoices(new Map()); setChoicesError(false);
     return () => { choiceEpoch.current += 1; };
   }, [settings]);
   const loadChoices = async (role: RoleProfileV1, refresh = false) => {
     if (!window.m5Models) return;
     const epoch = ++choiceEpoch.current;
     const cached = cachedModels(role.runtime);
-    if (cached) setChoices(old => ({ ...old, [role.roleId]: cached }));
+    if (cached) setChoices(old => new Map(old).set(role.roleId, cached));
     setChoicesBusy(true); setChoicesError(false);
     try {
       const result = await loadModels(role.runtime, input => window.m5Models!.request(input), refresh);
       if (epoch !== choiceEpoch.current) return;
-      setChoices(old => ({ ...old, [role.roleId]: result.models }));
+      setChoices(old => new Map(old).set(role.roleId, result.models));
       const defaults = result.models.filter(model => model.isDefault);
       if (defaults.length === 1) setTeam(old => ({ ...old, roles: old.roles.map(item => {
         const initialDefault = scope === "app" && settings.revision === 1 && initial.roles.some(start => JSON.stringify(start) === JSON.stringify(item));
@@ -837,25 +838,26 @@ function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, o
       const coordinator = role.roleId === "coordinator";
       return <article key={role.roleId} id={`m5-role-panel-${role.roleId}`} hidden={selectedRole !== role.roleId} className="m5-role-card" aria-labelledby={`m5-role-heading-${role.roleId}`}>
       <strong id={`m5-role-heading-${role.roleId}`}>{label(role.roleId)}</strong>
-      <label>{t("m5.roles.name")}<input disabled={editing} value={definition?.name ?? ""} maxLength={G5_ROLE_NAME_MAX_BYTES_V3} onChange={event => define(role.roleId, "name", event.target.value)} /></label>
+      <label>{t("m5.roles.name")}<input disabled={editing} value={definition?.name ?? ""} aria-invalid={nameBytes(definition?.name ?? "") > G5_ROLE_NAME_MAX_BYTES_V3 || isBlankText(definition?.name ?? "")} onChange={event => define(role.roleId, "name", event.target.value)} /></label>
+      <small className={nameBytes(definition?.name ?? "") > G5_ROLE_NAME_MAX_BYTES_V3 ? "m5-error" : undefined}>{t("m5.roles.nameBytes", { count: nameBytes(definition?.name ?? ""), max: G5_ROLE_NAME_MAX_BYTES_V3 })}</small>
       <label>{t("m5.roles.responsibility")}<textarea disabled={editing} rows={3} value={definition?.responsibility ?? ""} placeholder={t("m5.roles.responsibilityPlaceholder")} onChange={event => define(role.roleId, "responsibility", event.target.value)} /></label>
       <small>{t(coordinator ? "m5.roles.coordinatorHelp" : "m5.roles.responsibilityHelp", { max: G5_ROLE_RESPONSIBILITY_MAX_BYTES_V3 })}</small>
       <label>{t("m5.roles.runtime")}<select disabled={editing} value={role.runtime} onChange={event => {
-        choiceEpoch.current++; setChoices({}); setChoicesError(false);
+        choiceEpoch.current++; setChoices(new Map()); setChoicesError(false);
         setTeam(old => updateProfile(old, role.roleId, { runtime: event.target.value as RoleProfileV1["runtime"], modelSelector: "", reasoningEffort: null }));
       }}><option value="codex">Codex</option><option value="claude-code">Claude Code</option></select></label>
-      <label>{t("m5.roles.model")}<select disabled={editing || !choices[role.roleId]?.length} value={role.modelSelector} onChange={event => {
-        const model = choices[role.roleId]?.find(item => item.modelSelector === event.target.value);
+      <label>{t("m5.roles.model")}<select disabled={editing || !choices.get(role.roleId)?.length} value={role.modelSelector} onChange={event => {
+        const model = choices.get(role.roleId)?.find(item => item.modelSelector === event.target.value);
         setTeam(old => updateProfile(old, role.roleId, { modelSelector: event.target.value, reasoningEffort: role.runtime === "codex" ? (model?.reasoningEfforts.includes("medium") ? "medium" : model?.reasoningEfforts[0] ?? null) : null }));
       }}>
         <option value="">{t("m5.roles.chooseModel")}</option>
-        {role.modelSelector && !choices[role.roleId]?.some(model => model.modelSelector === role.modelSelector) && <option value={role.modelSelector}>{role.modelSelector} · {t("m5.roles.savedModel")}</option>}
-        {choices[role.roleId]?.map(model => <option key={model.modelSelector} value={model.modelSelector}>{model.modelSelector}{model.isDefault ? ` · ${t("m5.roles.providerDefault")}` : ""}</option>)}
+        {role.modelSelector && !choices.get(role.roleId)?.some(model => model.modelSelector === role.modelSelector) && <option value={role.modelSelector}>{role.modelSelector} · {t("m5.roles.savedModel")}</option>}
+        {choices.get(role.roleId)?.map(model => <option key={model.modelSelector} value={model.modelSelector}>{model.modelSelector}{model.isDefault ? ` · ${t("m5.roles.providerDefault")}` : ""}</option>)}
       </select></label>
-      <label>{t("m5.roles.reasoning")}<select disabled={editing || !choices[role.roleId]} value={role.reasoningEffort ?? ""} onChange={event => change(role.roleId, "reasoningEffort", event.target.value || null)}>
+      <label>{t("m5.roles.reasoning")}<select disabled={editing || !choices.get(role.roleId)} value={role.reasoningEffort ?? ""} onChange={event => change(role.roleId, "reasoningEffort", event.target.value || null)}>
         <option value="" disabled={role.runtime === "codex"}>{t("m5.roles.default")}</option>
-        {role.reasoningEffort && !choices[role.roleId]?.find(model => model.modelSelector === role.modelSelector)?.reasoningEfforts.includes(role.reasoningEffort) && <option value={role.reasoningEffort}>{role.reasoningEffort} · {t("m5.roles.savedModel")}</option>}
-        {choices[role.roleId]?.find(model => model.modelSelector === role.modelSelector)?.reasoningEfforts.map(effort => <option key={effort} value={effort}>{effort}</option>)}
+        {role.reasoningEffort && !choices.get(role.roleId)?.find(model => model.modelSelector === role.modelSelector)?.reasoningEfforts.includes(role.reasoningEffort) && <option value={role.reasoningEffort}>{role.reasoningEffort} · {t("m5.roles.savedModel")}</option>}
+        {choices.get(role.roleId)?.find(model => model.modelSelector === role.modelSelector)?.reasoningEfforts.map(effort => <option key={effort} value={effort}>{effort}</option>)}
       </select></label>
       {coordinator
         ? <span className="m5-role-permission">{t("m5.roles.readOnly")}</span>
@@ -865,7 +867,7 @@ function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, o
         </select></label>}
       <div className="m5-role-model-tools">
         <button type="button" className="m5-secondary" disabled={editing || choicesBusy || !window.m5Models} onClick={() => void loadChoices(role, true)}>{t(choicesBusy ? "m5.roles.busy" : "m5.roles.loadChoices")}</button>
-        {choices[role.roleId] && <small>{t("m5.roles.choicesHelp")}</small>}
+        {choices.get(role.roleId) && <small>{t("m5.roles.choicesHelp")}</small>}
       </div>
       <details><summary>{t("m5.roles.manualModel")}</summary>
         <label>{t("m5.roles.model")}<input disabled={editing} value={role.modelSelector} onChange={event => change(role.roleId, "modelSelector", event.target.value)} /></label>
