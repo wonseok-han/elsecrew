@@ -37,6 +37,9 @@ export function ProviderUsage({ disabled }: { disabled: boolean }) {
             } else if(runtime === "claude-code" && window.m5ClaudeUsage) {
               const result=await window.m5ClaudeUsage.read();
               entry={...result,failed:result.state!=="available"};
+              // Keep the display model list ready for role screens. A fresh
+              // remembered list is reused, so this rarely queries the provider.
+              if (window.m5Models) void loadModels(runtime,input=>window.m5Models!.request(input)).catch(()=>undefined);
             } else entry={usage:null,checkedAt:Date.now(),failed:true};
           }
         } catch { entry={usage:null,checkedAt:Date.now(),failed:true}; }
