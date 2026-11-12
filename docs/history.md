@@ -2,6 +2,12 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — 사용자 정의 역할 브랜치 병합 마무리
+- 멈춘 병합 `feature/ade-custom-roles`(88a46989) → `feature/ade`를 완료했다(로컬 병합 커밋만, push 없음). 충돌 4파일은 앞 세션이 표식 없이 해결해 둔 상태였고, 양쪽 diff와 대조해 그대로 유지했다: `agent_runtime.rs`(planning fixture + custom delegate fixture·권한 기준 stage 합집합), `orchestration_dispatch.rs`(역할 보고서 + V3 snapshot 위임, 보고서 제목은 `roleDefinitions` 이름 우선), `workbench.tsx`(첫 채팅 확인·진행 표시·입력창 옆 중지 버튼 + V3 역할 이름·편집, V3 판정 `schemaVersion !== 1`).
+- 병합 정합 수정: 앞 엔트리가 남긴 TODO대로 `storage/chat_erasure.rs` 허용 schema에 V13을 추가한 미스테이징 변경을 병합 커밋에 포함했다(없으면 V13 이관 DB에서 삭제 거절·출력 본문 잔존). history는 custom roles 엔트리 2개가 그 작업을 시작시킨 엔트리 아래에 놓여 있어 최신순 위치로 옮기기만 했다(내용 동일). `project/tests.rs`의 `#[cfg(unix)]` 위치 변경은 병합과 무관한 작업 트리 변경이라 포함하지 않았다.
+- 검증: `git diff --check` 통과, `tsc --noEmit` 통과, `npm test` 735/735. Rust 테스트는 이 세션에서 실행하지 않았다(사용자 결정: 전체 시간이 길어 기다리지 않음). 같은 worktree의 다른 세션이 `cargo test --workspace`(target `/private/tmp/elsecrew-main-target`)를 돌리며 sidecar 테스트 바이너리가 실행 단계에 들어간 것만 확인했다 — 컴파일 성공의 간접 증거일 뿐 테스트 통과 증거는 아니다.
+- 다음: 병합 관련 Rust 테스트(orchestration V3·chat erasure·agent_runtime) 확인. history.md가 500줄을 넘어 아카이브 롤오버 필요. V3 `roleDefinitions`(이름·맡은 일)는 채팅 삭제 대상이 아니라 record에 남는다 — 사용자 입력 내용으로 볼지 결정 필요. 병합 후 누적 검사·독립 검토.
+
 ### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — 채팅 영구 삭제 브랜치 병합 마무리
 - 멈춘 병합 `feature/ade-chat-erasure`(5a097d27) → `feature/ade`를 `git merge --continue`로 완료했다(병합 커밋 bf9bae43, 로컬만·push 없음). 멈춘 이유: 충돌은 이미 해결·스테이징돼 있었고 커밋 단계만 남아 있었다. 미병합 파일·충돌 표식·hook 없음을 확인하고 내용은 고치지 않았다.
 - 검증: `git diff --check` 통과, `tsc --noEmit` 통과, `tests/m5-chat-erasure.test.mts` 3/3 통과. Rust erasure 테스트는 같은 worktree의 다른 세션이 cargo check/test를 실행 중이어서(무거운 실행은 한 번에 하나) 중복으로 돌리지 않았다. 병합 결과의 Rust 검증 결과는 그 세션의 기록으로 확인해야 한다.
@@ -24,6 +30,23 @@
 - 한계 발견: `secure_delete`를 끈 상태에서도 위 바이트 검사가 통과했다. 즉 테스트는 빈 공간 0 채움을 입증하지 못하며 `secure_delete`는 방어선일 뿐 검증된 보장이 아니다. 실제 사용자 데이터·실제 모델·패키징·설치본 반영·Electron 화면 검사는 하지 않았다. 독립 검토 전이며 데이터 삭제 경계라 검토가 필요하다.
 - 함정: 공유 `CARGO_TARGET_DIR`에서 worktree가 다르면 workspace 상대 경로 때문에 `elsecrew-sidecar` 산출물 hash가 같아 서로 덮어쓴다(다른 작업자의 테스트 바이너리가 실행됨). 이번 검증은 `--target aarch64-apple-darwin`으로 산출물을 분리했다.
 - 남은 일: 독립 검토, V13 통합 시 `storage/chat_erasure.rs`의 `ERASURE_SCHEMA_VERSIONS`·`verify_schema_identity_for_erasure`에 13 추가, 공급자 자체 세션 기록 삭제, 압축된 긴 채팅·`completed` 채팅 지원, 기능 도입 전 SQLite 빈 공간 잔존 정리, Electron 화면 검사.
+
+### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — custom roles worker (독립 검토 반영)
+- 독립 검토(안전 차단 결함 없음)의 필수 1건과 권장 5건을 `feature/ade-custom-roles`에 반영했다. push·병합·실데이터 없음.
+- [필수] 앱 기본값 저장 성공이 오류로 보이던 결함: sidecar serde_json은 객체 키를 알파벳순으로 내보내는데 결과 검증이 `roleDefinitions`를 `JSON.stringify`로 비교했다. 키 순서와 무관한 `canonicalJson`/`sameJsonValue`로 바꾸고 역할 수 일치도 확인한다. 계약 내부 `sameJson`과 화면 변경 감지(`sameTeam`)도 같은 비교를 쓴다. sidecar 키 순서 응답 회귀 시험 추가.
+- [권장] V3 채팅의 fixture 실행 거절(템플릿 ID라도 권한이 다를 수 있음), 실행 기록 stage를 `g5_stage_for_profile_v3`/`stageForProfileV3`와 정확히 일치하도록 좁힘(Rust adapter·TS adapter·protocol event), 모델 목록 상태를 `Map`으로 바꿔 `constructor` 같은 역할 ID 안전, 이름 칸에 UTF-8 바이트 수 표시·초과 시 오류 표시(새 키 `m5.roles.nameBytes`), TS 빈칸 판정을 Rust `str::trim`과 같은 Unicode White_Space 기준으로 맞춤(U+FEFF는 빈칸 아님, 공유 fixture에 사례 추가).
+- 검증(전용 target dir): `elsecrew-protocol` 68/68. sidecar lib 767 통과/3 실패/43 ignored, `stdio_process` 15/16. 실패 4건은 앞 기록과 같은 공급자 연결 gate(`providerDisconnected`) 기존 실패로 추정하며, 이번에는 `codex_durable_native_three_thousand_outputs`도 전체 실행에서 통과했다. `tsc --noEmit` 통과, `npm test` 729/729. 주의: 공유 fixture를 읽는 node 시험은 worktree를 cwd로 실행해야 한다(`npm test --prefix <worktree>`); 다른 cwd에서 실행하면 그 checkout의 fixture를 읽는다.
+- 남은 일: 실제 화면에서 역할 추가→총괄 위임 확인, 렌더러 smoke의 기존 `.m5-root` 실패 이후 구간, 설치본 V13 이관.
+
+### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — custom roles worker
+- 범위: worktree `.worktrees/custom-roles`, 브랜치 `feature/ade-custom-roles`(기준 f8672e5f). 사용자 정의 팀 역할을 실제 실행에 연결했다. push·병합·실제 공급자/사용자 데이터·패키징 없음.
+- 계약: Rust/TS 역할 집합 V3(총괄 첫 자리·읽기 전용, 팀원1~7, ID `^[a-z][a-z0-9-]{1,31}$`, 이름≤64B·맡은 일≤2000B)와 `roleDefinitions`를 프로젝트 설정·앱 기본값·채팅 기록·갱신 요청에 추가했다. 단독 프로필은 이름으로 권한을 유도하지 않고, V1/V2 집합은 기존 고정 권한까지 정확히 검증한다. agent adapter·protocol event·출력 binding·팀 메시지의 고정 5ID 목록을 형식 검사로 바꾸고 stage 일치는 권한 기준으로 바꿨다. 공유 fixture `planning-cannot-write`는 V3에서 더 이상 거절 사유가 아니어서 `coordinator-cannot-write`와 legacy 집합 권한 사례로 대체했다.
+- 저장: V12→V13 원자 이관(답변 작성자 trigger만 교체, 취소 시 롤백, durable admission 경로에 연결)과 모든 V11|V12 수용 지점에 V13을 추가했다. V3 설정 저장은 V13 필요, V13에서 앱 기본값 파일이 없으면 기본 5역할 V3를 시드한다. 앱 기본값 파일 상한 32KiB.
+- 실행: 단일 실행 성공 상태·stage를 권한 기준 helper로 바꾸고(V1/V2 결과 동일), workflow `changed`를 위임 역할의 workspaceWrite로 판정, 위임 대상은 채팅 snapshot 소속·비총괄만 허용(저장 workflow 재검증 포함). 총괄 prompt에 팀원 id·이름·맡은 일·권한을 싣고 “Only coding can edit” 문구를 제거했다. V2/V3 채팅만 총괄 workflow를 탄다.
+- 화면: 역할 설정에서 팀원 추가/삭제, 이름·맡은 일·권한·실행 환경·모델 편집, 총괄 삭제 불가, 변경 없으면 저장 비활성. 메시지·실행·출력·복구 기록·팀 미리보기는 저장 이름을 보여 주고 템플릿 기본 이름이면 번역을 쓴다. V1 프로젝트는 첫 총괄 채팅 생성 때 V3 기본 팀으로 올린다. ko/en 키는 `m5.roles.review` 바로 뒤 한 블록.
+- 검증(공유 CARGO_TARGET_DIR에서 다른 worktree와 같은 artifact hash로 덮어써질 수 있다는 통합 담당 공지에 따라, 전용 target dir로 HEAD f22fb81b를 다시 돌린 결과만 증거로 쓴다. 공유 dir 결과는 미검증 처리): `cargo test -p elsecrew-protocol` 67/67. sidecar lib 766 통과/4 실패/43 ignored, 통합 `stdio_process` 15/16. 신규 시험(storage V13 이관/재열기·V12 compaction 후 V13, chat V3 시드/갱신/스냅샷/재열기/V12 거절, orchestration V3 위임·prompt·snapshot 밖 거절) 모두 통과. 실패 중 `codex_durable_native_three_thousand_outputs`는 전체 병렬 실행에서 약600초 뒤 transport 실패였고 단독 재실행에서 `codex_durable_native_*` 2/2 통과(455초, 부하 민감으로 추정). 나머지 `tests::discovery_admission_rejection_keeps_session_available`·`discovery_rejection_stdio_returns_error_then_status_and_clean_quit`·`native_session_negotiates_adapter_without_granting_unscoped_execution`와 `stdio_process::binary_ready_status_quit_flow_marks_clean_and_exits_zero`는 역할 처리 이전의 공급자 연결 gate(`providerDisconnected`, eb724a0a)에서 실패해 이번 변경과 무관한 기존 실패로 추정한다(기준 커밋 재실행은 안 함). durable fixture가 V3 기본 팀을 시드하므로 V1 위치 index를 쓰던 시험은 roleId 조회로 바꿨다. `tsc --noEmit` 통과, `npm test` 727/727(신규 `tests/m5-custom-roles.test.mts` 포함). renderer smoke(`tests/m5-renderer-mount-smoke.mts`)는 기본 팀5역할 확인 구간까지 통과하나 이후 `.m5-root` 클릭에서 실패하며 기준 커밋 f8672e5f도 동일하게 실패(기존 결함). 그 뒤의 역할 설정 smoke 구간과 실제 역할 추가→총괄 위임 UI·Electron 패키지·실제 공급자·실사용 DB 이관은 미검증이다. 데이터 이관·권한 경계 변경이므로 독립 검토가 필요하다(미실시).
+- 로컬 커밋: 25e277f9(계약), 6e4bf47f(저장 V13), 602220c6(sidecar 실행/위임), 1622ab83(화면), 7656c24d(역할 탐색 배치·smoke 선택자), f22fb81b(문서), 재검증 기록 커밋. push·병합 없음.
+- 다음: 독립 검토, 실제 앱에서 역할 추가→총괄 위임 UI 확인, 채팅 내용 영구 삭제 작업은 V14로 이어 쌓기.
 
 ### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5)
 - 프런트 검사 26실패 해소(75774a56): main 보안 harness에 사용량 reader·디렉터리 조회·연결 조회 fake를 추가하고 미연결 공급자는 로그인을 시작하지 않는 검사를 보강했다. preload 사용량 채널은 M5_ 별칭으로 고정 채널 검사를 유지했다. 오래된 기대값(팀 수락 event 추가, 언어 중립 문구, 폴더 열기 문구, Monaco defineTheme)만 갱신했다. npm test 720/720 PASS. Cargo.lock은 이름 변경 후 정렬만 바뀌어 별도 커밋(f8672e5f). `pnpm test:harness` baseline PASS(프런트 빌드·720·Tauri Rust105).
@@ -200,6 +223,8 @@
 - **채팅 내용 삭제(2026-11-12, 구현·독립 검토 전)**: G5D 검증기가 원천에서 사본을 재유도해 byte/digest를 비교하므로 "표지 행 예외" 대신 모든 사본을 한 transaction에서 같은 결정적 치환으로 다시 쓴다(`storage/chat_erasure.rs`). schema 버전은 그대로이며 지원 버전 목록은 그 파일 한 곳이다. `VACUUM`은 `events` rowid를 바꿀 수 있어 쓰지 않는다. 의도(`pending`) 기록 전 쓰기 없는 dry run이 필수이며, 거절된 `pending`은 철회한다(갇힘 방지). 실행/채팅 payload에 새 최상위 키를 추가하면 `storage/chat_erasure.rs` 분류 목록에도 추가해야 삭제가 거절되지 않는다. 공유 target 디렉터리에서 다른 worktree와 sidecar 산출물이 충돌하므로 병렬 작업 중에는 `--target`으로 분리한다. 계약: `docs/proposals/m5-chat-erasure.md`.
 
 - **사용자 정의 팀(2026-11-12 재확정)**: 기본5역할은 템플릿이다. 총괄은 사용자가 구성한 역할 설명/컨텍스트와 요청의 선행조건으로 배분한다. 고정 순차 pipeline은 제품 방향이 아니며 현재 실행의 고정 role enum은 남은 구현 제약이다.
+- **공유 Cargo target 주의(2026-11-12)**: 여러 worktree가 같은 CARGO_TARGET_DIR를 쓰면 `elsecrew-sidecar`/`elsecrew-protocol` artifact hash가 같아 서로의 빌드를 덮어쓸 수 있다(`--target`만으로도 다른 worktree 산출물로 컴파일된 사례 확인). 병렬 worktree 검증은 전용 target dir을 쓴다.
+- **사용자 정의 역할 V3·저장 V13(2026-11-12, feature/ade-custom-roles)**: 역할 집합 `schemaVersion:3`은 5키 프로필 배열 + 같은 순서의 `roleDefinitions{roleId,name,responsibility}`이며 총괄(읽기 전용) + 팀원1~7명이다. 이름과 실행 권한은 분리돼 팀원 권한은 자유 선택, stage/채팅 상태/변경 판정은 `permission` 기준(`review`만 표시상 verifying 유지). V1/V2 기록은 고정 ID·권한 그대로 정확히 검증하고 다시 쓰지 않는다. 저장 V13은 V12 답변 작성자 IN 목록을 role ID 형식 검사로 바꾼 것뿐이며 V3 설정은 V13에서만 저장된다. 채팅 내용 영구 삭제 등 다음 schema는 V14로 쌓는다. 상세는 architecture.md “사용자 정의 팀 역할 V3”.
 
 - **Claude 사용량 인증(2026-11-12)**: CLI auth status의 저장 로그인 존재와 OAuth access-token 유효성은 다르다. 만료 시 check가 앱 전용 Keychain의 갱신을 같은 provider pending fence 아래 수행하며 사용량은 갱신 후 다시 읽는다. 단순 인증 존재를 사용량 인증 유효성으로 해석하지 않는다.
 

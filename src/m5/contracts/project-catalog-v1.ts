@@ -1,4 +1,4 @@
-import { validateChatRecordV1, validateProjectRoleSettingsV1, validateProjectRoleSettingsUpdateRequestV1, type ProjectRoleSettingsV1, type RoleProfileV1, type ChatRecordV1 } from "./run-recovery-v1.ts";
+import { sameJsonValue, validateChatRecordV1, validateProjectRoleSettingsV1, validateProjectRoleSettingsUpdateRequestV1, type ProjectRoleSettingsV1, type RoleProfileV1, type RoleDefinitionV3, type ChatRecordV1 } from "./run-recovery-v1.ts";
 import { validateProjectIdentityV1, type ProjectIdentityV1 } from "./project-v1.ts";
 
 export const PROJECT_CATALOG_METHOD = "project.catalog";
@@ -57,7 +57,7 @@ export type ProjectCatalogRequest =
   | { action: "confirmGitTrust"; identity: GitTrustIdentity; confirmed: true }
   | { action: "revokeGitTrust" }
   | { action: "getAppRoleDefaults" }
-  | { action: "updateAppRoleDefaults"; expectedRevision: number; roles: readonly RoleProfileV1[] }
+  | { action: "updateAppRoleDefaults"; expectedRevision: number; roles: readonly RoleProfileV1[]; roleDefinitions?: readonly RoleDefinitionV3[] }
   | ({ action: "inspectChatDiscard" } & ChatDiscardAddress)
   | { action: "discardChatWorkspace"; inspection: ChatDiscardInspection; confirmed: true }
   | { action: "removeProject"; projectId: string }
@@ -199,8 +199,9 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
   } else if (request.action === "getAppRoleDefaults") {
     keys(request, ["action"]);
   } else if (request.action === "updateAppRoleDefaults") {
-    keys(request, ["action", "expectedRevision", "roles"]);
-    validateProjectRoleSettingsUpdateRequestV1({projectId: "app_defaults", expectedRevision: request.expectedRevision, roles: request.roles});
+    const v3 = Object.prototype.hasOwnProperty.call(request, "roleDefinitions");
+    keys(request, ["action", "expectedRevision", "roles", ...(v3 ? ["roleDefinitions"] : [])]);
+    validateProjectRoleSettingsUpdateRequestV1({projectId: "app_defaults", expectedRevision: request.expectedRevision, roles: request.roles, ...(v3 ? { roleDefinitions: request.roleDefinitions } : {})});
   } else if (request.action === "inspectChatDiscard") {
     keys(request, ["action", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"]);
     for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"]) id(request[key]);
@@ -313,8 +314,11 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   } else if (request.action === "getAppRoleDefaults" || request.action === "updateAppRoleDefaults") {
     keys(result, ["schemaVersion", "action", "settings"]);
     const settings = object(result.settings);
-    keys(settings, ["schemaVersion", "revision", "roles", "updatedAt"]);
+    keys(settings, ["schemaVersion", "revision", "roles", ...(settings.schemaVersion === 3 ? ["roleDefinitions"] : []), "updatedAt"]);
     validateProjectRoleSettingsV1({...settings, projectId: "app_defaults"});
+    // Sidecar JSON keys come back sorted; compare values, not key order.
+    if (request.action === "updateAppRoleDefaults" && (!sameJsonValue(request.roleDefinitions ?? null, settings.roleDefinitions ?? null)
+      || !Array.isArray(settings.roles) || settings.roles.length !== request.roles.length)) throw new Error("app defaults result differs from request");
     if (request.action === "updateAppRoleDefaults" && (settings.revision !== request.expectedRevision + 1 || !request.roles.every((role, index) => (["roleId", "runtime", "modelSelector", "reasoningEffort", "permission"] as const).every(key => role[key] === (settings.roles as readonly RoleProfileV1[])[index]?.[key])))) throw new Error("app defaults result differs from request");
   } else if (request.action === "inspectChatDiscard") {
     keys(result, ["schemaVersion", "action", "inspection"]);

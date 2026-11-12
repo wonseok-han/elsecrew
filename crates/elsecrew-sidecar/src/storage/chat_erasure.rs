@@ -23,6 +23,7 @@ pub(crate) const ERASURE_SCHEMA_VERSIONS: &[u32] = &[
     STORAGE_LIFETIME_SCHEMA_VERSION_V10,
     STORAGE_LIFETIME_SCHEMA_VERSION_V11,
     STORAGE_LIFETIME_SCHEMA_VERSION_V12,
+    STORAGE_LIFETIME_SCHEMA_VERSION_V13,
 ];
 
 /// The only immutability triggers that block the narrowly scoped UPDATEs below.
@@ -187,7 +188,7 @@ fn redact_event_payload(
 fn verify_schema_identity_for_erasure(connection: &Connection) -> Result<(), SidecarError> {
     match storage_schema_version(connection)? {
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10) => verify_schema_v10(connection).map(|_| ()),
-        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12) => {
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13) => {
             agent_output::schema::verify(connection).map(|_| ())
         }
         _ => Err(denied("storage schema version does not support chat erasure")),
@@ -379,7 +380,9 @@ fn rewrite_messages(tx: &Transaction<'_>, chat_id: &str, rewrite: &mut Rewrite, 
 }
 
 fn rewrite_outputs(tx: &Transaction<'_>, runs: &[String], apply: bool) -> Result<(), SidecarError> {
-    if !matches!(storage_schema_version(tx)?, Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12)) {
+    // Output tables exist from V11 on; every newer schema must be listed here
+    // or erasure would silently leave output text behind.
+    if !matches!(storage_schema_version(tx)?, Some(STORAGE_LIFETIME_SCHEMA_VERSION_V11 | STORAGE_LIFETIME_SCHEMA_VERSION_V12 | STORAGE_LIFETIME_SCHEMA_VERSION_V13)) {
         return Ok(());
     }
     for run_id in runs {

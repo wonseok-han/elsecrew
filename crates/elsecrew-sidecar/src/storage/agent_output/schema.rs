@@ -82,14 +82,68 @@ pub(in crate::storage) fn expected_schema_v12() -> Result<Vec<Identity>, Sidecar
         if kind == "trigger" && name == "event_source_index_requires_exact_event" {
             let old = "IN ('planning', 'coding', 'review')";
             if sql.matches(old).count() != 1 { return Err(invalid("unexpected role source trigger")); }
-            *sql = sql.replace(old, "IN ('coordinator', 'planning', 'design', 'coding', 'review')");
+            *sql = sql.replace(old, ROLE_LIST_V12);
         }
     }
     Ok(expected)
 }
 
+const ROLE_LIST_V12: &str = "IN ('coordinator', 'planning', 'design', 'coding', 'review')";
+/// V13 role authors are user-defined; SQLite only enforces the bounded ID format
+/// `^[a-z][a-z0-9-]{1,31}$` (membership is checked against the chat snapshot in Rust).
+const ROLE_FORMAT_V13: &str = "GLOB '[a-z][a-z0-9-]*'
+                                  AND json_type(source.canonical_json_payload, '$.last_message.roleId') = 'text'
+                                  AND length(json_extract(source.canonical_json_payload, '$.last_message.roleId')) BETWEEN 2 AND 32
+                                  AND json_extract(source.canonical_json_payload, '$.last_message.roleId') NOT GLOB '*[^a-z0-9-]*'";
+
+/// V13 only replaces the V12 author role list with a bounded format check.
+pub(in crate::storage) fn expected_schema_v13() -> Result<Vec<Identity>, SidecarError> {
+    let mut expected = expected_schema_v12()?;
+    for (kind, name, _, sql) in &mut expected {
+        if kind == "table" && name == "storage_schema_meta" {
+            *sql = sql.replace("storage_schema_version = 12", "storage_schema_version = 13");
+        }
+        if kind == "trigger" && name == "event_source_index_requires_exact_event" {
+            if sql.matches(ROLE_LIST_V12).count() != 1 { return Err(invalid("unexpected role source trigger")); }
+            *sql = sql.replace(ROLE_LIST_V12, ROLE_FORMAT_V13);
+        }
+    }
+    Ok(expected)
+}
+
+pub(in crate::storage) fn expected_schema_for(version: Option<u32>) -> Result<Vec<Identity>, SidecarError> {
+    match version {
+        Some(11) => expected_schema(),
+        Some(12) => expected_schema_v12(),
+        Some(13) => expected_schema_v13(),
+        _ => Err(invalid("unsupported output schema version")),
+    }
+}
+
+/// V12 -> V13. Historical rows and every other object stay byte-identical.
+pub(in crate::storage) fn migrate_custom_roles(connection: &mut Connection, cancelled: &mut impl FnMut() -> bool) -> Result<(), SidecarError> {
+    match super::super::storage_schema_version(connection)? {
+        Some(13) => return Ok(()),
+        Some(12) => {}
+        _ => return Err(invalid("custom role migration requires storage V12")),
+    }
+    if cancelled() { return Err(invalid("custom role migration cancelled")); }
+    let expected = expected_schema_v13()?;
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(sqlite_error)?;
+    verify(&tx)?;
+    let (materialization, migrated_at): (String, String) = tx.query_row("SELECT materialization_state,migrated_at FROM storage_schema_meta WHERE singleton=1", [], |row| Ok((row.get(0)?,row.get(1)?))).map_err(sqlite_error)?;
+    let trigger = expected.iter().find(|row| row.1 == "event_source_index_requires_exact_event").ok_or_else(|| invalid("missing role trigger"))?;
+    tx.execute_batch("DROP TRIGGER event_source_index_requires_exact_event; DROP TABLE storage_schema_meta;").map_err(sqlite_error)?;
+    tx.execute_batch(&META.replace("storage_schema_version = 11", "storage_schema_version = 13")).map_err(sqlite_error)?;
+    tx.execute("INSERT INTO storage_schema_meta VALUES (1,13,1,'ready',?1,?2)", params![materialization,migrated_at]).map_err(sqlite_error)?;
+    tx.execute_batch(&trigger.3).map_err(sqlite_error)?;
+    verify(&tx)?;
+    if cancelled() { return Err(invalid("custom role migration cancelled")); }
+    tx.commit().map_err(sqlite_error)
+}
+
 pub(in crate::storage) fn migrate_coordinator(connection: &mut Connection, cancelled: &mut impl FnMut() -> bool) -> Result<(), SidecarError> {
-    if super::super::storage_schema_version(connection)? == Some(12) { return Ok(()); }
+    if matches!(super::super::storage_schema_version(connection)?, Some(12 | 13)) { return Ok(()); }
     if cancelled() { return Err(invalid("coordinator migration cancelled")); }
     let expected = expected_schema_v12()?;
     let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(sqlite_error)?;
@@ -107,7 +161,7 @@ pub(in crate::storage) fn migrate_coordinator(connection: &mut Connection, cance
 
 pub(in crate::storage) fn verify(connection: &Connection) -> Result<String, SidecarError> {
     let expected_version = super::super::storage_schema_version(connection)?.ok_or_else(|| invalid("missing schema version"))?;
-    let expected = if expected_version == 12 { expected_schema_v12()? } else { expected_schema()? };
+    let expected = expected_schema_for(Some(expected_version))?;
     // Bound schema input before String decoding; an extra object is an error.
     let mut statement = connection.prepare("SELECT CASE WHEN length(CAST(type AS BLOB))<=64 AND length(CAST(name AS BLOB))<=256 AND length(CAST(tbl_name AS BLOB))<=256 AND length(CAST(sql AS BLOB))<=65536 THEN 1 ELSE 0 END, type,name,tbl_name, CASE WHEN length(CAST(sql AS BLOB))<=65536 THEN sql ELSE NULL END FROM sqlite_schema WHERE name NOT LIKE 'sqlite_autoindex%' ORDER BY type,name LIMIT ?1").map_err(sqlite_error)?;
     let mut rows = statement
@@ -144,7 +198,7 @@ pub(in crate::storage) fn verify(connection: &Connection) -> Result<String, Side
     let foreign_keys: bool = connection
         .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
         .map_err(sqlite_error)?;
-    if version != expected_version || !matches!(version, 11 | 12)
+    if version != expected_version || !matches!(version, 11 | 12 | 13)
         || protocol != 1
         || state != "ready"
         || !timestamp_valid

@@ -432,3 +432,36 @@ fn apply_json_pointer(root: &mut Value, pointer: &str, value: Value) {
         _ => panic!("invalid fixture pointer {pointer}"),
     }
 }
+
+#[test]
+fn v3_role_ids_stage_and_legacy_permissions_are_separate() {
+    for valid in ["qa", "coordinator", "ui-design", "a1", &format!("a{}", "b".repeat(31))] {
+        assert!(is_g5_role_id_v3(valid), "{valid}");
+    }
+    for invalid in ["", "a", "1a", "-a", "Qa", "q a", "q_a", "한글", &format!("a{}", "b".repeat(32))] {
+        assert!(!is_g5_role_id_v3(invalid), "{invalid}");
+    }
+    assert_eq!(g5_stage_for_profile_v3("planning", "workspaceWrite"), "implementing");
+    assert_eq!(g5_stage_for_profile_v3("coding", "readOnly"), "planning");
+    assert_eq!(g5_stage_for_profile_v3("review", "readOnly"), "verifying");
+    assert_eq!(g5_stage_for_profile_v3("qa", "readOnly"), "planning");
+    let profile = |role: &str, permission: &str| serde_json::json!({"roleId":role,"runtime":"codex","modelSelector":"m","reasoningEffort":null,"permission":permission});
+    // Standalone profiles no longer derive permission from the name.
+    assert!(validate_g5_payload_v1("roleProfile", &profile("planning", "workspaceWrite")).is_ok());
+    assert!(validate_g5_payload_v1("roleProfile", &profile("coordinator", "workspaceWrite")).is_err());
+    // Stored V2 sets still require the exact fixed mapping.
+    let ids = ["coordinator", "planning", "design", "coding", "review"];
+    let mut roles: Vec<_> = ids.iter().map(|id| profile(id, if *id == "coding" { "workspaceWrite" } else { "readOnly" })).collect();
+    let settings = |roles: &Vec<Value>| serde_json::json!({"schemaVersion":2,"projectId":"p","revision":1,"roles":roles,"updatedAt":"2026-11-12T00:00:00Z"});
+    assert!(validate_g5_payload_v1("projectRoleSettings", &settings(&roles)).is_ok());
+    roles[3]["permission"] = serde_json::json!("readOnly");
+    assert!(validate_g5_payload_v1("projectRoleSettings", &settings(&roles)).is_err());
+    // V3 default seed is internally valid.
+    let definitions: Vec<_> = G5_DEFAULT_ROLE_DEFINITIONS_V3.iter().map(|(id, name, text)| serde_json::json!({"roleId":id,"name":name,"responsibility":text})).collect();
+    roles[3]["permission"] = serde_json::json!("workspaceWrite");
+    let v3 = serde_json::json!({"schemaVersion":3,"projectId":"p","revision":1,"roles":roles,"roleDefinitions":definitions,"updatedAt":"2026-11-12T00:00:00Z"});
+    assert!(validate_g5_payload_v1("projectRoleSettings", &v3).is_ok());
+    let mut missing = v3.clone();
+    missing.as_object_mut().unwrap().remove("roleDefinitions");
+    assert!(validate_g5_payload_v1("projectRoleSettings", &missing).is_err());
+}

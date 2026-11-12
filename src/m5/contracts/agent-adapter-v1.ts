@@ -15,7 +15,8 @@ import {
   G5_PERMISSIONS_V1,
   G5_PUBLIC_MESSAGE_MAX_BYTES_V1,
   G5_REASONING_EFFORT_MAX_BYTES_V1,
-  G5_ROLE_IDS_V2,
+  isRoleIdV3,
+  stageForProfileV3,
   G5_RUN_STAGES_V1,
   G5_RUN_STATES_V1,
   G5_RUNTIMES_V1,
@@ -456,7 +457,7 @@ export function validateAgentCapabilitiesRequestV1(value: unknown): AgentCapabil
   if (typeof object.refresh !== "boolean") fail("refresh must be boolean");
   if (scoped) {
     id(object.chatId, "chatId");
-    oneOf(object.roleId, G5_ROLE_IDS_V2, "roleId");
+    roleId(object.roleId);
   }
   return object as unknown as AgentCapabilitiesRequestV1;
 }
@@ -471,7 +472,7 @@ export function validateAgentCapabilitySnapshotV1(value: unknown): AgentCapabili
   if (scoped) {
     const scope = exactObject(object.scope, ["chatId", "roleId", "worktreeId", "workspaceIdentity"], "capability scope");
     for (const key of ["chatId", "worktreeId", "workspaceIdentity"]) id(scope[key], key);
-    oneOf(scope.roleId, G5_ROLE_IDS_V2, "roleId");
+    roleId(scope.roleId);
   }
   schema(object.schemaVersion);
   oneOf(object.runtime, G5_RUNTIMES_V1, "runtime");
@@ -518,7 +519,7 @@ export function computeAgentCapabilityFingerprintV1(snapshot: AgentCapabilitySna
 export function validateAgentRunStartRequestV1(value: unknown): AgentRunStartRequestV1 {
   const object = exactObject(value, ["chatId", "roleId", "inputMessageIds", "expectedCapabilityFingerprint"], "agent run start request");
   id(object.chatId, "chatId");
-  oneOf(object.roleId, G5_ROLE_IDS_V2, "roleId");
+  roleId(object.roleId);
   const messageIds = array(object.inputMessageIds, "inputMessageIds", 100);
   if (messageIds.length === 0) fail("inputMessageIds must not be empty");
   for (const [index, messageId] of messageIds.entries()) id(messageId, `inputMessageIds[${index}]`);
@@ -561,8 +562,8 @@ export function validateAgentRunRecordV1(value: unknown): AgentRunRecordV1 {
   fingerprintDigest(object.capabilityFingerprint, "capabilityFingerprint");
   const state = oneOf(object.state, G5_RUN_STATES_V1, "state");
   const stage = oneOf(object.stage, G5_RUN_STAGES_V1, "stage");
-  const expectedStage: Record<RoleIdV1, RunStageV1> = { coordinator: "planning", design: "planning", planning: "planning", coding: "implementing", review: "verifying" };
-  if (stage !== expectedStage[profile.roleId]) fail("agent run stage does not match selected role snapshot");
+  // The stage is derived from permission (legacy `review` keeps verifying).
+  if (stage !== stageForProfileV3(profile)) fail("agent run stage does not match selected role snapshot");
   const termination = object.terminationOutcome === null
     ? null
     : oneOf(object.terminationOutcome, ["cleanExit", "recoveryRequired"] as const, "terminationOutcome");
@@ -1262,13 +1263,18 @@ function validateDiscovery(value: unknown): AgentDiscoveryEvidenceV1 {
   return object as unknown as AgentDiscoveryEvidenceV1;
 }
 
+function roleId(value: unknown): void {
+  if (!isRoleIdV3(value)) fail("invalid roleId");
+}
+
 function validateProfile(value: unknown): AgentResolvedProfileV1 {
   const object = exactObject(value, ["roleId", "runtime", "modelSelector", "reasoningEffort", "permission"], "resolved profile");
-  oneOf(object.roleId, G5_ROLE_IDS_V2, "roleId");
+  roleId(object.roleId);
   oneOf(object.runtime, G5_RUNTIMES_V1, "runtime");
   bounded(object.modelSelector, "modelSelector", G5_MODEL_SELECTOR_MAX_BYTES_V1);
   if (object.reasoningEffort !== null) bounded(object.reasoningEffort, "reasoningEffort", G5_REASONING_EFFORT_MAX_BYTES_V1);
   oneOf(object.permission, G5_PERMISSIONS_V1, "permission");
+  if (object.roleId === "coordinator" && object.permission !== "readOnly") fail("coordinator permission must be readOnly");
   return object as unknown as AgentResolvedProfileV1;
 }
 
@@ -1452,7 +1458,7 @@ export function validateAgentRunBindingV1(value: unknown): AgentRunBindingV1 {
 
 function validateAgentRunContextFieldsV1(object: Record<string, unknown>): void {
   for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) id(object[key], key);
-  oneOf(object.roleId, G5_ROLE_IDS_V2, "roleId");
+  roleId(object.roleId);
   fingerprintDigest(object.capabilityFingerprint, "capabilityFingerprint");
 }
 
