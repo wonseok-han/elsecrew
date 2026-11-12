@@ -10,7 +10,7 @@ pub mod phased_claude;
 use crate::run_recovery_v1::{
     G5_CAPABILITIES_V1, G5_EVENT_PAGE_MAX_ITEMS_V1, G5_ID_MAX_BYTES_V1,
     G5_MODEL_SELECTOR_MAX_BYTES_V1, G5_PERMISSIONS_V1, G5_PUBLIC_MESSAGE_MAX_BYTES_V1,
-    G5_REASONING_EFFORT_MAX_BYTES_V1, G5_ROLE_IDS_V2, G5_RUNTIMES_V1,
+    G5_REASONING_EFFORT_MAX_BYTES_V1, G5_RUNTIMES_V1,
 };
 
 pub const G5A_SCHEMA_VERSION_V1: u64 = 1;
@@ -1257,7 +1257,7 @@ fn validate_capabilities_request(
     match (&request.chat_id, &request.role_id) {
         (Some(chat), Some(role)) => {
             id(chat, "chatId")?;
-            one_of(role, G5_ROLE_IDS_V2, "roleId")?;
+            role_id(role)?;
         }
         (None, None) if value.get("chatId").is_none() && value.get("roleId").is_none() => {}
         _ => return fail("chatId and roleId must be supplied together"),
@@ -1279,7 +1279,7 @@ fn capability_query_scope_requires_both_non_null_identifiers() {
         json!({"runtime":"codex","refresh":true,"roleId":"coding"}),
         json!({"runtime":"codex","refresh":true,"chatId":null,"roleId":null}),
         json!({"runtime":"codex","refresh":true,"chatId":"","roleId":"coding"}),
-        json!({"runtime":"codex","refresh":true,"chatId":"chat-a","roleId":"unknown"}),
+        json!({"runtime":"codex","refresh":true,"chatId":"chat-a","roleId":"Unknown Role"}),
     ] {
         assert!(validate_capabilities_request(&value).is_err());
     }
@@ -1294,7 +1294,7 @@ fn validate_capability_snapshot(
         id(&scope.chat_id, "chatId")?;
         id(&scope.worktree_id, "worktreeId")?;
         id(&scope.workspace_identity, "workspaceIdentity")?;
-        one_of(&scope.role_id, G5_ROLE_IDS_V2, "roleId")?;
+        role_id(&scope.role_id)?;
     } else if value.get("scope").is_some() {
         return fail("scope must be an object when present");
     }
@@ -1390,7 +1390,7 @@ fn validate_run_start_request(
 ) -> Result<AgentRunStartRequestV1, AgentAdapterContractError> {
     let request: AgentRunStartRequestV1 = from_value(value, "agent run start request")?;
     id(&request.chat_id, "chatId")?;
-    one_of(&request.role_id, G5_ROLE_IDS_V2, "roleId")?;
+    role_id(&request.role_id)?;
     if request.input_message_ids.is_empty() || request.input_message_ids.len() > 100 {
         return fail("inputMessageIds must be nonempty and bounded");
     }
@@ -1465,13 +1465,15 @@ fn validate_run_record(value: &Value) -> Result<AgentRunRecordV1, AgentAdapterCo
         crate::run_recovery_v1::G5_RUN_STAGES_V1,
         "stage",
     )?;
-    let expected_stage = match record.selected_profile.role_id.as_str() {
-        "coordinator" | "design" | "planning" => "planning",
-        "coding" => "implementing",
-        "review" => "verifying",
-        _ => return fail("invalid roleId"),
+    role_id(&record.selected_profile.role_id)?;
+    // Write permission selects implementation; read-only runs may be labelled
+    // planning or verifying (legacy `review`), never implementing.
+    let stage_matches = if record.selected_profile.permission == "workspaceWrite" {
+        record.stage == "implementing"
+    } else {
+        matches!(record.stage.as_str(), "planning" | "verifying")
     };
-    if record.stage != expected_stage {
+    if !stage_matches {
         return fail("agent run stage does not match selected role snapshot");
     }
     if let Some(outcome) = &record.termination_outcome {
@@ -2411,7 +2413,7 @@ fn validate_discovery(value: &AgentDiscoveryEvidenceV1) -> Result<(), AgentAdapt
 }
 
 fn validate_profile(value: &AgentResolvedProfileV1) -> Result<(), AgentAdapterContractError> {
-    one_of(&value.role_id, G5_ROLE_IDS_V2, "roleId")?;
+    role_id(&value.role_id)?;
     one_of(&value.runtime, G5_RUNTIMES_V1, "runtime")?;
     bounded(
         &value.model_selector,
@@ -2422,6 +2424,9 @@ fn validate_profile(value: &AgentResolvedProfileV1) -> Result<(), AgentAdapterCo
         bounded(effort, "reasoningEffort", G5_REASONING_EFFORT_MAX_BYTES_V1)?;
     }
     one_of(&value.permission, G5_PERMISSIONS_V1, "permission")?;
+    if value.role_id == crate::run_recovery_v1::G5_COORDINATOR_ROLE_ID && value.permission != "readOnly" {
+        return fail("coordinator permission must be readOnly");
+    }
     Ok(())
 }
 
@@ -2494,7 +2499,7 @@ fn validate_run_context(value: &AgentRunContextV1) -> Result<(), AgentAdapterCon
     ] {
         id(entry, name)?;
     }
-    one_of(&value.role_id, G5_ROLE_IDS_V2, "roleId")?;
+    role_id(&value.role_id)?;
     fingerprint_digest(&value.capability_fingerprint, "capabilityFingerprint")
 }
 
@@ -2827,6 +2832,13 @@ fn contract_json(error: serde_json::Error) -> AgentAdapterContractError {
 fn schema(value: u64) -> Result<(), AgentAdapterContractError> {
     if value != G5A_SCHEMA_VERSION_V1 {
         return fail("schemaVersion must be 1");
+    }
+    Ok(())
+}
+
+fn role_id(value: &str) -> Result<(), AgentAdapterContractError> {
+    if !crate::run_recovery_v1::is_g5_role_id_v3(value) {
+        return fail("invalid roleId");
     }
     Ok(())
 }
