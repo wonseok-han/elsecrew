@@ -53,19 +53,37 @@ struct Reservation {
 impl Reservation {
     fn create(profile: &dyn LoginProfile) -> Result<Self, SidecarError> {
         let directory = profile.login_lease_directory()?;
+        let name = profile.pending_name();
+        // Publish the fence atomically: the pending name only ever refers to an
+        // inode that is already exclusively locked and carries its header, so a
+        // concurrent probe can never mistake a half-created fence for an orphan.
+        let staging = format!(".{name}.{}.staging", uuid::Uuid::new_v4().simple());
         let mut options = OpenOptions::new();
         options.write(true).create_new(true).mode(0o600);
-        let mut file = match directory.open_with(profile.pending_name(), &options) {
-            Ok(file) => file,
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                return Err(existing_reservation_error(&directory, profile.pending_name()));
-            }
-            Err(_) => return Err(failure()),
-        };
-        lock_exclusive(&file)?;
-        file.write_all(b"elsecrew provider login pending v1\n")
+        let mut file = directory
+            .open_with(&staging, &options)
             .map_err(|_| failure())?;
-        file.sync_all().map_err(|_| failure())?;
+        let staged = (|| {
+            lock_exclusive(&file)?;
+            file.write_all(b"elsecrew provider login pending v1\n")
+                .map_err(|_| failure())?;
+            file.sync_all().map_err(|_| failure())
+        })();
+        if let Err(error) = staged {
+            let _ = directory.remove_file(&staging);
+            return Err(error);
+        }
+        if let Err(error) = directory.hard_link(&staging, &directory, name) {
+            let _ = directory.remove_file(&staging);
+            return Err(if error.kind() == std::io::ErrorKind::AlreadyExists {
+                existing_reservation_error(&directory, name)
+            } else {
+                failure()
+            });
+        }
+        // If the staging name cannot be removed the fence keeps nlink 2, every
+        // later verify fails, and dropping this owner leaves recovery evidence.
+        directory.remove_file(&staging).map_err(|_| failure())?;
         sync_directory(&directory)?;
         Ok(Self {
             name: profile.pending_name(),
@@ -190,8 +208,11 @@ fn existing_reservation_error(directory: &Dir, name: &str) -> SidecarError {
         .read(true)
         .follow(FollowSymlinks::No)
         .custom_flags(libc::O_NONBLOCK);
-    let Ok(file) = directory.open_with(name, &options) else {
-        return failure();
+    let file = match directory.open_with(name, &options) {
+        Ok(file) => file,
+        // The owner released the fence between our create attempt and this probe.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return busy(),
+        Err(_) => return failure(),
     };
     if !file.metadata().is_ok_and(|meta| meta.is_file()) {
         return failure();
@@ -203,8 +224,17 @@ fn existing_reservation_error(directory: &Dir, name: &str) -> SidecarError {
             failure()
         };
     }
-    // Lock acquired: no live owner. Dropping the probe releases it unchanged.
-    failure()
+    // Lock acquired. If the name no longer refers to this inode the owner
+    // released it while we opened; otherwise no live owner exists and the fence
+    // stays as recovery evidence. Dropping the probe releases it unchanged.
+    let (Ok(held), current) = (file.metadata(), directory.symlink_metadata(name)) else {
+        return failure();
+    };
+    match current {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => busy(),
+        Ok(current) if held.nlink() == 0 || current.dev() != held.dev() || current.ino() != held.ino() => busy(),
+        _ => failure(),
+    }
 }
 
 fn lock_exclusive(file: &File) -> Result<(), SidecarError> {
@@ -1432,6 +1462,22 @@ mod tests {
             std::fs::read(temp.path().join(PENDING)).unwrap(),
             b"elsecrew provider login pending v1\n"
         );
+        // The probe released its lock: an explicit lock attempt still succeeds.
+        let probe = std::fs::File::open(temp.path().join(PENDING)).unwrap();
+        assert_eq!(unsafe { libc::flock(probe.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }, 0);
+        drop(probe);
+        std::fs::remove_file(temp.path().join(PENDING)).unwrap();
+        // Repeated contention never leaves staging files or an unlocked fence.
+        let mut live = LoginProcess::reserve(&binding).unwrap();
+        for _ in 0..20 {
+            assert_eq!(LoginProcess::reserve(&binding).err().unwrap().kind(), "providerBusy");
+        }
+        live.finish().unwrap();
+        let leftovers: Vec<_> = std::fs::read_dir(temp.path()).unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains("pending"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
     }
 
     fn profile(temp: &tempfile::TempDir) -> CodexProfileBinding {
