@@ -32,3 +32,14 @@ test("delegation details expose the exact assigned task only from coordinator me
   for (const role of [null, "user", "coding"]) assert.equal(orchestratorDelegation(text, role), null);
   for (const text of ['{"action":"delegate"}', '{"action":"final","answer":"Done"}', '{"action":"delegate","role":"shell","instruction":"exec","summary":"x"}']) assert.equal(orchestratorDelegation(text, "coordinator"), null);
 });
+
+test("V3 delegation presentation accepts only the chat's own configured roles", () => {
+  const text = JSON.stringify({action:"delegate", role:"research", instruction:"Compare libraries", summary:"리서치 팀원에게 맡길게요."});
+  const team = ["coordinator", "research", "builder"];
+  assert.equal(orchestratorMessage(text, "coordinator", team), "리서치 팀원에게 맡길게요.");
+  assert.deepEqual(orchestratorDelegation(text, "coordinator", team), {role:"research", instruction:"Compare libraries"});
+  // Legacy chats keep the fixed template; a custom ID outside the team stays raw text.
+  assert.equal(orchestratorMessage(text, "coordinator"), text);
+  assert.equal(orchestratorDelegation(text, "coordinator", ["coordinator", "builder"]), null);
+  assert.equal(orchestratorDelegation(JSON.stringify({action:"delegate", role:"coordinator", instruction:"x", summary:"y"}), "coordinator", team), null);
+});
