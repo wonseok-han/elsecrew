@@ -2,6 +2,11 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — 채팅 내용 영구 삭제 작업자(독립 검토 반영)
+- 독립 검토: 저장 무결성(trigger 일시 제거·재생성, schema identity, 검증기, 비압축 채팅 사본 완전성) 차단 없음. 차단 1건(채팅이 `pending`에 영구히 갇힘)을 3dfd8115에서 수정했다: `recovery_resolution_intent`(ID·revision·추적 프로세스·예상 manifest/digest만, 실제 정의 확인)를 보존 키로 분류. 분류·압축·자격·잔존 검사를 쓰기 없는 dry run으로 `pending` 기록 **전에** 수행하고, 같은 검사를 재작성 transaction 안에서 trigger 제거 전에 다시 한다(§2 1~5·7 재검사, sidecar 유휴는 호출 측). 재시도가 거절되면 `pending`을 철회하고 일시 오류는 유지한다. `pending`은 채팅 목록에서 숨기지 않는다. 해결된 복구가 있는 실행은 종료 증거 대신 그 해결을 종료 권한으로 인정한다.
+- 비차단 반영: 확인 문구·설계 문서가 공급자 세션 기록을 "앱 밖"이 아니라 앱 소유 공급자 프로필 폴더 안의 미삭제 사본으로, 이 버전 이전에 SQLite 빈 공간으로 풀린 조각이 남을 수 있음을 고지한다. `chatErasureList` 전체 dry run 비용을 문서에 적었다.
+- 검증(전용 target `/private/tmp/elsecrew-erasure-target`): erasure Rust 8개 통과(추가: 복구 해결 이력 실행 채팅 삭제, 보존 필드 잔존 시 기록 없이 거절, 분류 불가 필드 시 기록 없이 거절, `pending` 뒤 압축되면 재시도 거절·철회·목록 재노출·내용 보존). TypeScript·계약 테스트3 통과. 전체 sidecar lib 768 통과/3 실패/43 ignored — 실패 3개는 이전과 같은 공급자 연결 게이트(`providerDisconnected`, f1a135c7 이전 코드) 테스트다. 실제 데이터·모델·패키징·Electron 화면 검사·merge/push 없음.
+
 ### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — 채팅 내용 영구 삭제 작업자
 - 브랜치 `feature/ade-chat-erasure`(기준 f8672e5f, worktree `.worktrees/chat-erasure`). 설계 `docs/proposals/m5-chat-erasure.md`를 먼저 커밋하고 구현했다. 대상은 **버린(discarded) 채팅만**이며 목표·메시지·팀 지시/보고·실행 출력 본문을 고정 표지 `[erased]`로 바꾸고 ID·시각·상태·실행/종료 증거는 남긴다.
 - 방식: schema 버전을 올리지 않는다. 한 `BEGIN IMMEDIATE` 안에서 수정 금지 trigger 3개(events/receipts/baselines UPDATE)를 캡처 SQL과 함께 내렸다 그대로 재생성하고, 이벤트·receipt(digest)·baseline(digest)·`chat_messages`(digest)·chat/run projection·출력 원장(`text_bytes`)·legacy `public_events`(카운터)를 같은 결정적 함수로 다시 쓴 뒤 버전별 schema identity를 재검증하고 commit한다. 기존 재열기/재생/materialization/compaction 검증 코드는 바꾸지 않았다. 분류되지 않은 payload 키가 있으면 거절한다. 압축 흔적(frozen/prefix/plan)이 있는 채팅은 v1에서 거절한다.
@@ -174,7 +179,7 @@
 - **2026-11-12 main 통합 이후**: PR #1 병합 b6e2de81 및 GitHub `elsecrew` 이름 변경 완료. 이후 최신 main 기반 기능 브랜치에서 작업하며 추가 main 병합/push는 별도 승인이다. CI43150190399 실패는 제품 완료가 아님; Tauri 빌드 성공과 artifact 업로드 실패를 구분한다.
 - **Claude 실패 진단(2026-11-12)**: 새 terminal run.failure는 허용된 단계/원인 코드만 보존하며 기존 실패 원인은 추정하지 않는다. fixture Bash→Read 정상 경로는 통과했고 전달 오류 주입의 재시작 보존도 확인했다. 과거 사용자 실행의 직접 원인과 설치본/실제 공급자 재시험은 별도 미확인이다.
 
-- **채팅 내용 삭제(2026-11-12, 구현·독립 검토 전)**: G5D 검증기가 원천에서 사본을 재유도해 byte/digest를 비교하므로 "표지 행 예외" 대신 모든 사본을 한 transaction에서 같은 결정적 치환으로 다시 쓴다(`storage/chat_erasure.rs`). schema 버전은 그대로이며 지원 버전 목록은 그 파일 한 곳이다. `VACUUM`은 `events` rowid를 바꿀 수 있어 쓰지 않는다. 공유 target 디렉터리에서 다른 worktree와 sidecar 산출물이 충돌하므로 병렬 작업 중에는 `--target`으로 분리한다. 계약: `docs/proposals/m5-chat-erasure.md`.
+- **채팅 내용 삭제(2026-11-12, 구현·독립 검토 전)**: G5D 검증기가 원천에서 사본을 재유도해 byte/digest를 비교하므로 "표지 행 예외" 대신 모든 사본을 한 transaction에서 같은 결정적 치환으로 다시 쓴다(`storage/chat_erasure.rs`). schema 버전은 그대로이며 지원 버전 목록은 그 파일 한 곳이다. `VACUUM`은 `events` rowid를 바꿀 수 있어 쓰지 않는다. 의도(`pending`) 기록 전 쓰기 없는 dry run이 필수이며, 거절된 `pending`은 철회한다(갇힘 방지). 실행/채팅 payload에 새 최상위 키를 추가하면 `storage/chat_erasure.rs` 분류 목록에도 추가해야 삭제가 거절되지 않는다. 공유 target 디렉터리에서 다른 worktree와 sidecar 산출물이 충돌하므로 병렬 작업 중에는 `--target`으로 분리한다. 계약: `docs/proposals/m5-chat-erasure.md`.
 
 - **사용자 정의 팀(2026-11-12 재확정)**: 기본5역할은 템플릿이다. 총괄은 사용자가 구성한 역할 설명/컨텍스트와 요청의 선행조건으로 배분한다. 고정 순차 pipeline은 제품 방향이 아니며 현재 실행의 고정 role enum은 남은 구현 제약이다.
 
