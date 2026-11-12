@@ -3,6 +3,10 @@
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
 ### 2026-11-12 · by GPT-6
+- c162e82e macOS 패키지 빌드 통과. 기존 앱 정상 종료 후 설치본 교체·실행했고, 만료된 앱 전용 Claude 인증의 모델 없는 자동 갱신과 실제 usage GET이 성공했다. 하단/상세에서 Claude5시간1%·7일7%, 조회10:09:05·각 reset시각을 확인했다. Codex7일64%도 표시됐다. 재로그인·모델 호출·사용자 프로젝트 쓰기·main/push 없음.
+- 이로써 앞선 ‘갱신 구현 필요/설치본 미반영’ TODO를 완료했다. 기존 만료 토큰은 앱의 정식 연결 확인 경로로 갱신·저장됐으며 로그인 반복을 사용자에게 요구하지 않았다. 파일 기반 credential fallback 자동 갱신 및 Windows 활성화는 이번 범위 밖이다.
+
+### 2026-11-12 · by GPT-6
 - 사용자 ‘필요하면 구현’ 지시에 따라 Claude 만료 인증 갱신을 실제 구현했다. 공식 설치 CLI2.1.322의 고정 OAuth endpoint/client 및 refresh 응답 형식을 정적으로 확인했다. sidecar가 앱 전용 Keychain/unknown 계정만 읽고 같은 login/run pending fence 아래 모델 없는 HTTPS 갱신을 수행한다. redirect/proxy 없음·20초/64KiB 제한·기존 scopes만 요청·비밀값 renderer/argv/log 노출 없음. 저장 전 profile/기존 Keychain bytes 재확인, 관련 없는 credential 필드 보존, native Keychain 저장을 사용한다.
 - 사용량 만료 시 기존 check 경로로 갱신 후 저장된 인증을 다시 읽어 GET한다. 로그인 상태 polling의 무차별 cache 무효화를 없애고 연결된 새 attempt에서만 갱신한다. 동시 사용량 조회 singleflight와 generation 변경 후 재조회 유지. 네트워크/응답 실패는 기존 저장값을 덮어쓰지 않으며 서버가 이미 refresh token을 회전한 후 저장이 실패한 경우 재로그인이 필요할 수 있다.
 - 검증: 갱신 projection4개, 공유 fence1개, Claude 관련25개 통과/1개 기존 ignored, TS usage7개, renderer 및 usage module TypeScript 통과. 독립 안전 검토 차단 없음. 실제 앱은 정상 종료했으며 수정본 패키징·실제 모델 없는 사용량 확인을 이어간다. 모델 호출/원본 변경/main/push 없음.
