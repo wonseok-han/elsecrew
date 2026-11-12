@@ -3,6 +3,12 @@
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
 ### 2026-11-12 · by GPT-6
+- 사용자 test_todo 팀 중단을 DB 읽기 전용/실제 화면으로 확인: 총괄 run agent_run_17c9ef1d1f1d4c9bb389f8b8305ea1f8은 succeeded/cleanExit·종료 증거 있음, workflow는 step1/coding/paused/run_id 없음이며 개발 실행 기록은 없다. 당시 내부 admission 오류는 일반 pause 문구로 소실돼 정확한 원인은 확정하지 않았다. Claude admission의 원본 경로 검사에 Downloads ancestor readable-open이 남아 있어 project 경로와 동일한 O_SEARCH/no-follow ancestor 방식으로 교정했다. leaf readable·신원·symlink 거절은 유지한다.
+- 내부 capability/시작 오류를 raw detail 대신 허용된 원인별 문구(접근 권한·연결 해제·인증·모델·사용 중 등)로 채팅에 남기도록 수정했다. 자동 재시작·기존 paused 기록 조작 없음. 새 앱에 대한 총괄 지침을 기획→디자인→개발→검증 기본 순서/기존 보고 재사용/생략 사유 설명으로 보완했다. 기존은 ‘필요한 일만 위임’이었으며 role 배열 순서는 실행 순서가 아니었다. 이번은 모델 지침이고 강제 state gate는 아니다.
+- 출력 UI는 단일 실행 selector/raw run ID를 숨기고 짧은 출력의 처음/최신 탐색 버튼을 제거했다. 생략된 과거 출력이 있을 때만 탐색 표시, history에서만 최신 복귀. 간격/선택 입력 테마를 정리하고 QA selector를 실행 identity data 속성으로 교체했다.
+- 검증: TypeScript·renderer build·Chromium2개, 경로 nofollow/검색 전용1개, orchestration16개, 오류 원인 보존/비밀 detail 비노출1개 통과. 독립 안전 검토 차단 없음. 앱 정상 종료; 설치본 반영을 이어간다. 실제 모델/사용자 프로젝트 쓰기/중단 작업 재실행/main/push 없음. 정확한 과거 중단 원인 및 새 기본 순서의 실제 모델 이행은 미검증이다.
+
+### 2026-11-12 · by GPT-6
 - c162e82e macOS 패키지 빌드 통과. 기존 앱 정상 종료 후 설치본 교체·실행했고, 만료된 앱 전용 Claude 인증의 모델 없는 자동 갱신과 실제 usage GET이 성공했다. 하단/상세에서 Claude5시간1%·7일7%, 조회10:09:05·각 reset시각을 확인했다. Codex7일64%도 표시됐다. 재로그인·모델 호출·사용자 프로젝트 쓰기·main/push 없음.
 - 이로써 앞선 ‘갱신 구현 필요/설치본 미반영’ TODO를 완료했다. 기존 만료 토큰은 앱의 정식 연결 확인 경로로 갱신·저장됐으며 로그인 반복을 사용자에게 요구하지 않았다. 파일 기반 credential fallback 자동 갱신 및 Windows 활성화는 이번 범위 밖이다.
 

@@ -293,12 +293,26 @@ pub(super) fn open_absolute_directory(path: &Path) -> Result<Dir, SidecarError> 
     }
     let mut current =
         Dir::open_ambient_dir("/", cap_std::ambient_authority()).map_err(|_| failure())?;
-    for component in path.components() {
+    let mut components = path.components().peekable();
+    while let Some(component) = components.next() {
         let name = match component {
             Component::RootDir => continue,
             Component::Normal(name) => name,
             _ => return Err(failure()),
         };
+        #[cfg(target_os = "macos")]
+        if components.peek().is_some() {
+            use std::os::{fd::{AsRawFd, FromRawFd}, unix::ffi::OsStrExt};
+            let name = std::ffi::CString::new(name.as_bytes()).map_err(|_| failure())?;
+            // Search ancestors without requiring permission to list Downloads.
+            // Each component remains no-follow and held by a directory handle.
+            let fd = unsafe { libc::openat(current.as_raw_fd(), name.as_ptr(), libc::O_SEARCH | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
+            if fd < 0 { return Err(failure()); }
+            let file = unsafe { std::fs::File::from_raw_fd(fd) };
+            if !file.metadata().map_err(|_| failure())?.is_dir() { return Err(failure()); }
+            current = Dir::from_std_file(file);
+            continue;
+        }
         let mut options = OpenOptions::new();
         options
             .read(true)
@@ -708,6 +722,23 @@ mod tests {
         std::fs::rename(&path, canonical.join("retained-profile")).unwrap();
         let _replacement = prepare_codex_profile(&root(&temp)).unwrap();
         assert!(binding.revalidate().is_err());
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn selected_directory_traverses_search_only_ancestor_without_following_links() {
+        let temp = tempfile::tempdir().unwrap();
+        let parent = temp.path().canonicalize().unwrap().join("protected");
+        std::fs::create_dir_all(parent.join("selected")).unwrap();
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o111)).unwrap();
+        let result = open_absolute_directory(&parent.join("selected"));
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(result.is_ok());
+        let alias = parent.with_file_name("alias");
+        symlink(&parent, &alias).unwrap();
+        assert!(open_absolute_directory(&alias.join("selected")).is_err());
+        symlink(parent.join("selected"), parent.join("leaf-link")).unwrap();
+        assert!(open_absolute_directory(&parent.join("leaf-link")).is_err());
     }
 
     #[test]

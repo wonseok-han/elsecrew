@@ -176,14 +176,14 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
   if (!binding) return null;
   const historyActive = historyRequest?.binding.runId === binding.runId;
   const visibleHistory = historyActive && historyPage?.request === historyRequest ? historyPage : null;
-  return <section className="m5-durable-output" aria-label={t("m5.output.title")}>
-    <label>{t("m5.output.title")} <select value={run!.runId} onChange={event => select(event.target.value)}>
-      {orderedRuns.map(value => <option key={value.runId} value={value.runId}>{t(`m5.roles.${value.selectedProfile.roleId}`)} · {value.runId}</option>)}
-    </select></label>
+  return <section className="m5-durable-output" data-run-id={run!.runId} aria-label={t("m5.output.title")}>
+    <label className="m5-output-heading"><span>{t("m5.output.title")}</span> {orderedRuns.length > 1 && <select aria-label={t("m5.output.title")} value={run!.runId} onChange={event => select(event.target.value)}>
+      {orderedRuns.map(value => <option key={value.runId} value={value.runId}>{t(`m5.roles.${value.selectedProfile.roleId}`)} · {value.selectedProfile.runtime === "codex" ? "Codex" : "Claude Code"} · {new Date(value.createdAt).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</option>)}
+    </select>}</label>
     {state === "loading" && <p role="status">{t("m5.output.loading")}</p>}
     {state === "legacy" && <p>{t("m5.output.legacy")}</p>}
     {state === "failed" && <p role="alert">{t("m5.output.failed")} <button onClick={() => setRetry(value => value + 1)}>{t("m5.output.retry")}</button></p>}
-    {view?.binding.runId === binding.runId && <nav aria-label={t("m5.output.history")}>
+    {view?.binding.runId === binding.runId && (view.hasEarlier || historyActive) && <nav aria-label={t("m5.output.history")}>
       <button type="button" disabled={view.cursor === 0 || (historyActive && historyState === "loading")}
         onClick={() => setHistoryRequest({ formatVersion: 1, binding, afterSequence: 0,
           throughSequence: historyActive ? historyRequest!.throughSequence : view.cursor, limit: 100 })}>{t("m5.output.first")}</button>
@@ -191,7 +191,7 @@ export function AgentOutputPanel({ runs }: { runs: readonly AgentRunRecordV1[] }
         <button type="button" disabled={!visibleHistory || historyState !== "ready" || visibleHistory.nextAfterSequence >= historyRequest!.throughSequence}
           onClick={() => setHistoryRequest({ ...historyRequest!, afterSequence: visibleHistory!.nextAfterSequence })}>{t("m5.output.next")}</button>
       </>}
-      <button type="button" disabled={view.cursor === 0} onClick={showLatest}>{t("m5.chat.latest")}</button>
+      {historyActive && <button type="button" onClick={showLatest}>{t("m5.chat.latest")}</button>}
     </nav>}
     <div ref={outputRef} className="m5-output-scroll" tabIndex={0} aria-label={t("m5.output.title")}
       onScroll={event => {

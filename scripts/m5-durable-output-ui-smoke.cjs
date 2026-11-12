@@ -418,11 +418,11 @@ app.on('browser-window-created', (_event, window) => {
       mainPhaseProbe?.phase('live-output');
       if (live) for (let index = 0; index < 4; index++) {
         if (combined && index === 0) {
-          await wait("document.querySelector('.m5-durable-output select')?.value === outputSmokeRuns[0].runId && document.querySelector('.m5-timeline h2')?.textContent === 'Output stream 0'");
+          await wait("document.querySelector('.m5-durable-output')?.dataset.runId === outputSmokeRuns[0].runId && document.querySelector('.m5-timeline h2')?.textContent === 'Output stream 0'");
         } else {
         if (combined) await run("[...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent.trim() === '채팅').click()");
         await run(`[...document.querySelectorAll('.m5-chat-chip')].find(b => b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}').click()`);
-        await wait(`document.querySelector('.m5-durable-output select')?.value === outputSmokeRuns[${index}].runId &&
+        await wait(`document.querySelector('.m5-durable-output')?.dataset.runId === outputSmokeRuns[${index}].runId &&
           [...document.querySelectorAll('.m5-chat-chip')].some(b => b.getAttribute('aria-current') === 'true' && !b.disabled && b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}')`);
         }
         await wait("!!document.querySelector('.m5-output-scroll article:last-child pre')");
@@ -503,7 +503,7 @@ app.on('browser-window-created', (_event, window) => {
         await run(`[...document.querySelectorAll('.m5-chat-chip')].find(b => b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}').click()`);
         // Every chat has identical output text. Wait for the selected run and the
         // async chat load, not just rows that may still belong to the prior chat.
-        await wait(`document.querySelector('.m5-durable-output select')?.value === outputSmokeRuns[${index}].runId &&
+        await wait(`document.querySelector('.m5-durable-output')?.dataset.runId === outputSmokeRuns[${index}].runId &&
           [...document.querySelectorAll('.m5-chat-chip')].some(b => b.getAttribute('aria-current') === 'true' && !b.disabled && b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}')`);
         await wait("[...document.querySelectorAll('.m5-output-scroll article pre')].length === 200 && document.querySelector('.m5-output-scroll article:last-child pre')?.textContent?.split(' [')[0] === 'output 3000'", 240000);
         const visible = await run("[...document.querySelectorAll('.m5-output-scroll article pre')].map(e => e.textContent.split(' [')[0])");

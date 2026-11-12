@@ -9,6 +9,17 @@ use serde_json::json;
 pub(super) fn failure(error: ProjectFailure) -> SidecarError {
     SidecarError::new("orchestrationBlocked", error.detail)
 }
+fn workflow_failure_reason(code: &str) -> &'static str {
+    match code {
+        "providerProfileUnavailable" => "다음 담당을 시작하기 위한 폴더 접근 확인에 실패했어요. 프로젝트와 앱 데이터 폴더의 접근 권한을 확인해 주세요.",
+        "providerDisconnected" => "다음 담당의 에이전트가 연결 해제되어 있어요. 설정에서 연결해 주세요.",
+        "notAuthenticated" | "authExpired" => "다음 담당의 로그인을 확인하지 못했어요. 설정에서 연결 상태를 확인해 주세요.",
+        "notInstalled" | "providerExecutableMissing" => "다음 담당의 에이전트 설치를 확인하지 못했어요.",
+        "providerBusy" | "providerLoginRecoveryRequired" => "다음 담당의 연결이 다른 작업에서 사용 중이거나 종료 확인이 필요해요.",
+        "exactModelUnavailable" | "unsupportedProfile" => "다음 담당에 저장된 모델을 사용할 수 없어요. 역할 설정의 모델을 확인해 주세요.",
+        _ => "담당 에이전트의 실행 준비 또는 결과를 확인하지 못했어요. 연결 상태와 역할 설정을 확인해 주세요.",
+    }
+}
 impl Sidecar {
     pub(super) fn handle_agent_request(
         &mut self,
@@ -192,13 +203,18 @@ impl Sidecar {
         chat: &str,
         events: &mut Vec<chat::G5Event>,
     ) -> Result<(), SidecarError> {
+        self.pause_workflow_reason(chat, events, "실행 결과와 연결 상태를 확인해 주세요.")
+    }
+    fn pause_workflow_reason(
+        &mut self, chat: &str, events: &mut Vec<chat::G5Event>, reason: &str,
+    ) -> Result<(), SidecarError> {
         let mut state = self.workflow_state(chat)?;
         if state.status != "canceled" {
             state.status = "paused".into();
         }
         orchestration::save(&mut self.storage, chat, &state).map_err(failure)?;
         self.workflow_chats.remove(chat);
-        events.push(orchestration::notice(&mut self.storage,chat,"팀 작업을 멈췄어요. 실행 결과와 연결 상태를 확인한 뒤 새 메시지로 이어가세요. 이미 실행한 작업은 자동으로 반복하지 않아요.").map_err(failure)?);
+        events.push(orchestration::notice(&mut self.storage,chat,&format!("팀 작업을 멈췄어요. {reason} 이미 실행한 작업은 자동으로 반복하지 않아요.")).map_err(failure)?);
         Ok(())
     }
     /// Returns true for internal responses: they never escape onto the renderer IPC channel.
@@ -211,7 +227,8 @@ impl Sidecar {
             return Ok(false);
         };
         if !response.ok {
-            self.pause_workflow(&chat, events)?;
+            let reason = workflow_failure_reason(response.error.as_ref().map(|e| e.code.as_str()).unwrap_or("unknown"));
+            self.pause_workflow_reason(&chat, events, reason)?;
             return Ok(kind != "root");
         }
         if kind == "root" || kind == "start" {
@@ -253,7 +270,7 @@ impl Sidecar {
                 || capability["scope"]["chatId"] != chat
                 || capability["scope"]["roleId"] != state.role
             {
-                self.pause_workflow(&chat, events)?;
+                self.pause_workflow_reason(&chat, events, workflow_failure_reason(capability["blockedReason"].as_str().unwrap_or("unknown")))?;
                 return Ok(true);
             }
             let request=self.workflow_request(state.request_id.clone(),"run.startAgent",json!({"chatId":chat,"roleId":state.role,"inputMessageIds":state.input_ids,"expectedCapabilityFingerprint":capability["fingerprint"]}));
@@ -385,9 +402,9 @@ impl Sidecar {
                         self.workflow_response(&response, events)?;
                     }
                 }
-                Err(_) => {
+                Err(error) => {
                     self.workflow_requests.remove(&id);
-                    self.pause_workflow(&chat, events)?;
+                    self.pause_workflow_reason(&chat, events, workflow_failure_reason(error.kind()))?;
                 }
             }
         }
@@ -504,6 +521,29 @@ mod tests {
             .result;
         (root, sidecar, chat)
     }
+    #[test]
+    fn orchestration_admission_failure_keeps_actionable_reason_without_raw_detail() {
+        let (_root, mut sidecar, chat) = service();
+        let id = chat["chatId"].as_str().unwrap();
+        let input = AgentRunStartRequestV1 {
+            chat_id:id.into(), role_id:"coordinator".into(),
+            input_message_ids:sidecar.storage.chat_message_history(id).unwrap().iter().filter_map(|v|v["messageId"].as_str().map(str::to_owned)).collect(),
+            expected_capability_fingerprint:"sha256:unused".into(),
+        };
+        orchestration::begin(&mut sidecar.storage, &input, "reason-test").unwrap();
+        let request = sidecar.workflow_request("reason-cap".into(), "agent.getCapabilities", json!({}));
+        sidecar.workflow_requests.insert(request.request_id.clone(), (id.into(), "capability".into()));
+        let response = error_response(&request, "providerProfileUnavailable", "requestBlocked", "secret/path/token");
+        let mut events = Vec::new();
+        assert!(sidecar.workflow_response(&response, &mut events).unwrap());
+        assert_eq!(sidecar.workflow_state(id).unwrap().status, "paused");
+        let messages = sidecar.storage.chat_message_history(id).unwrap();
+        let text = messages.last().unwrap()["text"].as_str().unwrap();
+        assert!(text.contains("폴더 접근"));
+        assert!(!text.contains("secret"));
+        assert!(sidecar.storage.projection_records("run").unwrap().is_empty());
+    }
+
     #[test]
     #[cfg(target_os = "macos")]
     fn explicit_provider_connections_block_root_and_team_member_before_reservation() {
