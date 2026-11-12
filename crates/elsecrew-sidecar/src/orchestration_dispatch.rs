@@ -6,6 +6,32 @@ use elsecrew_protocol::agent_adapter_v1::{
 };
 use serde_json::json;
 
+fn role_report_title(role: &str) -> String {
+    match role {
+        "planning" => "기획".into(),
+        "design" => "디자인".into(),
+        "review" => "검증".into(),
+        "coding" => "개발".into(),
+        other => other.into(),
+    }
+}
+
+/// Plain Markdown: heading, the request the coordinator gave, then the report.
+fn role_report_document(role: &str, goal: &str, instruction: &str, run: &Value, text: &str) -> String {
+    let title = role_report_title(role);
+    let profile = &run["selectedProfile"];
+    let runtime = if profile["runtime"] == "codex" { "Codex" } else { "Claude Code" };
+    let model = profile["modelSelector"].as_str().unwrap_or_default();
+    let updated = run["updatedAt"].as_str().unwrap_or_default();
+    let mut document = format!("# {title} 보고서\n\n- 채팅 목표: {}\n- 작성: {runtime} · {model} · {updated}\n",
+        goal.lines().next().unwrap_or_default());
+    if !instruction.trim().is_empty() {
+        document.push_str(&format!("\n## 총괄의 요청\n\n{}\n", instruction.trim()));
+    }
+    document.push_str(&format!("\n## {title} 결과\n\n{}\n", text.trim_end()));
+    document
+}
+
 pub(super) fn failure(error: ProjectFailure) -> SidecarError {
     SidecarError::new("orchestrationBlocked", error.detail)
 }
@@ -70,6 +96,34 @@ impl Sidecar {
             }
         }
         handled
+    }
+
+    /// Writes `docs/elsecrew/<roleId>.md` in the chat's working copy through the
+    /// app-owned save path. The original project is only changed by an explicit
+    /// apply after review.
+    fn save_role_report(
+        &mut self,
+        chat_record: &Value,
+        run: &Value,
+        role: &str,
+        instruction: &str,
+        text: &str,
+    ) -> Result<(), ProjectFailure> {
+        let field = |key: &str| chat_record[key].as_str().map(str::to_owned)
+            .ok_or_else(|| ProjectFailure::recovery("chat record omitted its workspace identity"));
+        let address = crate::project::WorkspaceAddress {
+            chat_id: field("chatId")?,
+            project_id: field("projectId")?,
+            worktree_id: field("worktreeId")?,
+            workspace_identity: field("workspaceIdentity")?,
+        };
+        let run_id = run["runId"].as_str().unwrap_or_default();
+        let document = role_report_document(role, chat_record["goal"].as_str().unwrap_or_default(),
+            instruction, run, text);
+        self.projects.workspace_write_report(
+            &mut self.storage, &address, &format!("docs/elsecrew/{role}.md"), &document,
+            &format!("report_{run_id}"),
+        )
     }
 
     pub(super) fn cancel_team_task(
@@ -363,11 +417,29 @@ impl Sidecar {
                 } else {
                     ""
                 };
+                let finished_role = state.role.clone();
+                let finished_instruction = state.instruction.clone();
                 if state.finish(run, text).is_err() {
                     self.pause_workflow(&chat, events)?;
                     continue;
                 }
+                // Read-only members (planning, design, review, …) cannot write.
+                // Keep their deliverable as a reviewable document in the working copy.
+                let mut report_failed = false;
+                if finished_role != "coordinator"
+                    && run["state"] == "succeeded"
+                    && run["selectedProfile"]["permission"] == "readOnly"
+                {
+                    match self.save_role_report(&chat_record, run, &finished_role, &finished_instruction, text) {
+                        Ok(()) => state.changed = true,
+                        Err(_) => report_failed = true,
+                    }
+                }
                 orchestration::save(&mut self.storage, &chat, &state).map_err(failure)?;
+                if report_failed {
+                    events.push(orchestration::notice(&mut self.storage, &chat,
+                        "역할 보고서를 파일로 저장하지 못했어요. 보고 내용은 이 대화에 그대로 남아 있어요.").map_err(failure)?);
+                }
                 let notice = match state.status.as_str() {
                     "completed" => "답변을 마쳤어요.",
                     "canceled" => "팀 작업을 중단했어요.",
@@ -673,6 +745,46 @@ mod tests {
             && m["text"]
                 .as_str()
                 .is_some_and(|t| t.contains("ready") || t.contains("reported success"))));
+    }
+    #[test]
+    fn read_only_member_report_is_saved_as_a_reviewable_document_in_the_work_copy() {
+        let (root, mut sidecar, chat) = service();
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::OrchestratorDelegatePlanning);
+        let response = start(&mut sidecar, &chat);
+        assert!(response.ok, "{response:?}");
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::OrchestratorPlanner);
+        let id = chat["chatId"].as_str().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            sidecar.poll_runtime_events().unwrap();
+            let state = sidecar.workflow_state(id).unwrap();
+            if state.role == "planning" && state.run_id.is_some() {
+                sidecar.agent_runtime.set_fake_scenario(FakeScenario::OrchestratorFinal);
+            }
+            if state.status != "running" {
+                assert_eq!(state.status, "completed", "{state:?}");
+                break;
+            }
+            assert!(Instant::now() < deadline, "{state:?}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let runs = sidecar.storage.projection_records("run").unwrap();
+        let planner = runs.iter()
+            .find(|run| run["record"]["selectedProfile"]["roleId"] == "planning")
+            .unwrap();
+        let worktree = std::path::Path::new(planner["worktree_path"].as_str().unwrap());
+        let report = std::fs::read_to_string(worktree.join("docs/elsecrew/planning.md")).unwrap();
+        assert!(report.starts_with("# 기획 보고서\n"), "{report}");
+        assert!(report.contains("Write a short plan for the todo page."));
+        assert!(report.contains("3. Keep the list after reload"));
+        // The original project is untouched; the report is a reviewable change.
+        assert!(!root.path().join("source/docs").exists());
+        assert_eq!(
+            sidecar.storage.projection_record("chat", id).unwrap().unwrap()["record"]["state"],
+            "reviewReady"
+        );
+        // The coordinator never gets a report file.
+        assert!(!worktree.join("docs/elsecrew/coordinator.md").exists());
     }
     #[test]
     fn orchestration_notices_use_transport_sequence_independent_of_durable_history() {

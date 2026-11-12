@@ -2017,6 +2017,71 @@ impl ProjectManager {
     }
 
     #[allow(clippy::too_many_arguments)]
+    /// App-owned write of a read-only role's report into the chat working copy.
+    /// Agents stay read-only; the app creates the file (no-follow, exclusive)
+    /// and replaces it through the editor's staged, version-checked save path.
+    /// The original project is never touched: applying it remains a review step.
+    pub(crate) fn workspace_write_report(
+        &mut self,
+        storage: &mut Storage,
+        address: &WorkspaceAddress,
+        relative_path: &str,
+        text: &str,
+        request_id: &str,
+    ) -> Result<(), ProjectFailure> {
+        validate_relative_path(relative_path, false)?;
+        let total = text.len() as u64;
+        if total == 0 || total > FILE_MAX_BYTES_V1 {
+            return Err(ProjectFailure::manifest("report must be non-empty UTF-8 within the file limit"));
+        }
+        let active = self.validate_workspace_address(storage, address)?;
+        let worktree = self.worktree_capability(&active)?;
+        create_parent_directories(&worktree, relative_path)?;
+        {
+            let (parent, name) = open_parent_capability(&worktree, relative_path)?;
+            let mut options = CapOpenOptions::new();
+            options.write(true).create_new(true).follow(FollowSymlinks::No);
+            match parent.open_with(&name, &options) {
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => {
+                    return Err(ProjectFailure::recovery(format!(
+                        "could not create report file: {error}"
+                    )))
+                }
+            }
+        }
+        let current = self.read_file_from_active(&active, &address.project_id, relative_path)?;
+        if current.result["classification"] != "utf8" {
+            return Err(ProjectFailure::manifest("an existing non-text report file is not replaced"));
+        }
+        let version = current.result["version"]
+            .as_str()
+            .ok_or_else(|| ProjectFailure::recovery("report file version is unavailable"))?
+            .to_owned();
+        let begin = self.workspace_begin_save(storage, address, relative_path, &version, total, "utf8")?;
+        let save_id = begin.result["saveId"]
+            .as_str()
+            .ok_or_else(|| ProjectFailure::recovery("report save omitted its identity"))?
+            .to_owned();
+        let mut seq = 0;
+        let mut rest = text;
+        while !rest.is_empty() {
+            let mut end = rest.len().min(MAX_TEXT_CHUNK_BYTES);
+            while !rest.is_char_boundary(end) {
+                end -= 1;
+            }
+            seq += 1;
+            self.workspace_append_save_chunk(storage, address, &save_id, seq, &rest[..end])?;
+            rest = &rest[end..];
+        }
+        let committed = self.workspace_commit_save(storage, address, &save_id, &version, seq, total, request_id)?;
+        if committed.result["outcome"] != "committed" {
+            return Err(ProjectFailure::manifest("report save did not commit"));
+        }
+        Ok(())
+    }
+
     pub fn workspace_commit_save(
         &mut self,
         storage: &mut Storage,

@@ -82,6 +82,10 @@ pub(crate) enum FakeScenario {
     #[cfg_attr(not(test), allow(dead_code))]
     OrchestratorWorker,
     #[cfg_attr(not(test), allow(dead_code))]
+    OrchestratorDelegatePlanning,
+    #[cfg_attr(not(test), allow(dead_code))]
+    OrchestratorPlanner,
+    #[cfg_attr(not(test), allow(dead_code))]
     NoOutput,
     #[cfg_attr(not(test), allow(dead_code))]
     FinalDelayed,
@@ -4206,6 +4210,8 @@ fn scenario_name(value: FakeScenario) -> &'static str {
         FakeScenario::OrchestratorDelegate => "orchestrator-delegate",
         FakeScenario::OrchestratorFinal => "orchestrator-final",
         FakeScenario::OrchestratorWorker => "orchestrator-worker",
+        FakeScenario::OrchestratorDelegatePlanning => "orchestrator-delegate-planning",
+        FakeScenario::OrchestratorPlanner => "orchestrator-planner",
         FakeScenario::NoOutput => "no-output",
         FakeScenario::FinalDelayed => "final-delayed",
         FakeScenario::CancelClean => "cancel-clean",
@@ -4308,6 +4314,8 @@ pub(crate) fn run_agent_fixture_launcher(scenario: &str) -> Result<(), SidecarEr
         "orchestrator-delegate",
         "orchestrator-final",
         "orchestrator-worker",
+        "orchestrator-delegate-planning",
+        "orchestrator-planner",
         "no-output",
         "final-delayed",
         "cancel-clean",
@@ -4423,7 +4431,7 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
         "handshake-version-mismatch" => handshake["claude_code_version"] = json!("2.1.242"),
         "handshake-model-mismatch" => handshake["model"] = json!("claude-unknown"),
         "handshake-cwd-mismatch" => handshake["cwd"] = json!("/not/managed"),
-        "clean-read-only" | "orchestrator-delegate" | "orchestrator-final" | "handshake-permission-mismatch" => handshake["permissionMode"] = json!("readOnly"),
+        "clean-read-only" | "orchestrator-delegate" | "orchestrator-final" | "orchestrator-delegate-planning" | "orchestrator-planner" | "handshake-permission-mismatch" => handshake["permissionMode"] = json!("readOnly"),
         "handshake-tools-mismatch" => handshake["tools"] = json!(["Read"]),
         "handshake-mcp-mismatch" => handshake["mcp_servers"] = json!(["unsafe"]),
         "handshake-plugins-mismatch" => handshake["plugins"] = json!(["unsafe"]),
@@ -4444,6 +4452,15 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
             std::fs::write(cwd.join("hello.txt"), b"updated by the isolated fixture worker\n")
                 .map_err(|error| SidecarError::new("fixtureFailure", error.to_string()))?;
             println!("{}", json!({"type":"final","text":"Updated hello.txt in the isolated work copy."}));
+            println!("{}", json!({"type":"terminal","outcome":"succeeded"}));
+        }
+        "orchestrator-planner" => {
+            println!("{}", json!({"type":"final","text":"1. Add a task input\n2. Mark tasks done\n3. Keep the list after reload"}));
+            println!("{}", json!({"type":"terminal","outcome":"succeeded"}));
+        }
+        "orchestrator-delegate-planning" => {
+            let text = json!({"action":"delegate","role":"planning","instruction":"Write a short plan for the todo page.","summary":"I will ask the planner first."});
+            println!("{}", json!({"type":"final","text":text.to_string()}));
             println!("{}", json!({"type":"terminal","outcome":"succeeded"}));
         }
         "orchestrator-delegate" | "orchestrator-final" => {
