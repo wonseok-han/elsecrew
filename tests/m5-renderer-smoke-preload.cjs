@@ -1,4 +1,5 @@
-window.m5ClaudeUsage={read:async()=>({state:"available",usage:{windows:[{id:"primary",usedPercent:12,windowMinutes:300,resetsAt:null},{id:"secondary",usedPercent:27,windowMinutes:10080,resetsAt:null}]},checkedAt:Date.now()})};
+window.m5SmokeClaudeUsageReads = 0;
+window.m5ClaudeUsage={read:async()=>{window.m5SmokeClaudeUsageReads++;return ({state:"available",usage:{windows:[{id:"primary",usedPercent:12,windowMinutes:300,resetsAt:null},{id:"secondary",usedPercent:27,windowMinutes:10080,resetsAt:null}]},checkedAt:Date.now()});}};
 let smokeConnections = {codex:false,"claude-code":false};
 window.m5SmokeModelQueries = [];
 window.m5Models = { request: async input => {

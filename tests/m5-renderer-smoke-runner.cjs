@@ -210,6 +210,7 @@ app.whenReady().then(async () => {
     await ${waitFor("[...document.querySelectorAll('button')].some(b => b.textContent === 'Claude Code 로그인' && !b.disabled)", "retry Claude login")};
     [...document.querySelectorAll('button')].find(b => b.textContent === 'Claude Code 로그인').click();
     await ${waitFor("document.querySelector('#claude-connection-code')", "connection code input")};
+    const usageReadsBeforeLogin = window.m5SmokeClaudeUsageReads;
     const codeInput = document.querySelector('#claude-connection-code');
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(codeInput,'synthetic#state');
     codeInput.dispatchEvent(new Event('input',{bubbles:true}));
@@ -222,6 +223,7 @@ app.whenReady().then(async () => {
     [...document.querySelectorAll('button')].find(b => b.textContent === '연결 확인').click();
     await ${waitFor("document.querySelector('[aria-label=\"Claude Code 연결\"]').textContent.includes('이 앱에 Claude Code 로그인이 연결됐어요')", "Claude code accepted")};
     if (document.querySelector('#claude-connection-code')) throw new Error('submitted code input was retained');
+    await ${waitFor("window.m5SmokeClaudeUsageReads > usageReadsBeforeLogin", "usage refresh after successful login")};
     await ${waitFor("!document.getElementById('codex-connection-details').hidden && !document.getElementById('claude-connection-details').hidden", "both signed-in controls visible")};
     await new Promise(resolve => setTimeout(resolve, 600));
     const idleReads = window.m5SmokeLoginRequests.length;

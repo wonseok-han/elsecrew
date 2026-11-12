@@ -1,4 +1,4 @@
-import { readConnections, changeConnection, CONNECTIONS_CHANGED } from "./provider-connections.ts";
+import { readConnections, changeConnection, CONNECTIONS_CHANGED, PROVIDER_AUTH_CHANGED } from "./provider-connections.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { loginErrorMessage } from "./provider-login-message.ts";
@@ -217,7 +217,10 @@ function ProviderConnection({ disabled, provider, alwaysExpanded = false, onAtte
     }
   },[disabled,appConnected,status.state]);
   useEffect(()=>{setCode("");setCodeError(false);},[status.attemptId,status.state]);
-  useEffect(()=>{ if (status.state === "connected") setExpanded(false); },[status.state]);
+  useEffect(()=>{ if (status.state === "connected") {
+    setExpanded(false);
+    window.dispatchEvent(new Event(PROVIDER_AUTH_CHANGED));
+  } },[status.state]);
   const waiting=status.state === "diagnosing" || status.state === "starting" || status.state === "waiting" || status.state === "verifying";
   const recoveryRequired=status.error === "providerLoginRecoveryRequired";
   const profileCompatibilityRequired=status.error === "providerProfileIsolationRequired";

@@ -713,7 +713,7 @@ export const ko = {
   "m5.usage.checked": "확인: {time}",
   "m5.usage.loading": "확인 중…",
   "m5.usage.unavailable": "사용량을 확인할 수 없어요.",
-  "m5.usage.expired": "로그인 상태를 확인해 주세요.",
+  "m5.usage.expired": "사용량 조회 인증이 만료됐어요. 저장된 로그인과는 별도로 갱신이 필요해요.",
   "m5.usage.notConnected": "이 앱의 Claude 연결을 확인해 주세요.",
   "m5.usage.retryLater": "잠시 후 다시 확인해 주세요.",
   "m5.usage.refresh": "새로고침",

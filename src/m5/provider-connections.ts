@@ -1,4 +1,5 @@
 import { validateProjectCatalogResult } from './contracts/project-catalog-v1.ts';
+export const PROVIDER_AUTH_CHANGED = 'm5-provider-auth-changed';
 export const CONNECTIONS_CHANGED = 'm5-provider-connections-changed';
 export type Connections = {codex:boolean;'claude-code':boolean};
 export async function readConnections(): Promise<Connections> {

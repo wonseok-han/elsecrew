@@ -3,6 +3,11 @@
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
 ### 2026-11-12 · by GPT-6
+- Claude 연결 성공/사용량 로그인 안내 불일치 조사: 앱 전용 profile hash·unknown Keychain 항목의 비밀값을 출력/저장/전송하지 않고 존재·만료 metadata만 확인했다. access/refresh token은 존재하며 expiresAt=2026-11-11T09:44:52.560Z로 만료됐다. usage reader는 이 시각에서 expired를 반환하고, CLI auth status 연결 확인은 저장 로그인 존재를 반환하므로 두 상태가 다를 수 있다. 사용자 인증정보 변경/모델 호출 없음.
+- 로그인 성공 상태 전환 후 usage cache 화면을 재조회하는 이벤트를 연결했다. 기존에는 앱 사용 연결 변경에만 반응해 실제 OAuth 성공 뒤 이전 expired 화면이 남을 수 있었다. 만료 안내를 로그인 전체 실패와 구분했다. TypeScript·renderer·usage unit5개/Chromium2개 통과, 로그인 성공 후 usage 재조회 회귀 포함. 이번 수정은 이미 만료된 토큰의 갱신 구현이 아니며 설치본은 아직 미반영이다.
+- 남은 핵심: 사용량용 access token 갱신. 현행 사용량 기능은 명시 승인된 read-only 경계여서 임의 refresh-token POST/Keychain 쓰기나 모델 실행을 추가하지 않았다. 공식 CLI의 모델 없는 갱신 경로 또는 직렬화/원자 저장을 갖춘 별도 갱신 설계·검토가 필요하다. 공개 upstream 이슈의 auth status 갱신 문제는 참고 보고이며 로컬 실행 증거로 취급하지 않는다. main/push 없음.
+
+### 2026-11-12 · by GPT-6
 - 사용자 경로 ~/Downloads/test_todo는 lstat 기준 실제755 폴더이고 항목0개임을 읽기 전용 확인했다. 현행 경로 순회가 모든 ancestor를 readable handle로 열어 선택 폴더 밖의 상위 폴더 읽기까지 요구했다. macOS ancestor만 O_SEARCH|O_NOFOLLOW|O_CLOEXEC openat로 통과하고 leaf의 기존 readable/no-follow 검사는 유지하도록 수정했다. 사용자 실제 EPERM 원인으로 유력하나 해당 폴더 초기화 재시험은 아직 하지 않았다.
 - execute-only ancestor의 선택 폴더 읽기 및 ancestor/leaf symlink 거절1개, 기존 빈 폴더 초기화/snapshot/신원·비어있지않음 거절2개, TypeScript·package·diff 검사 통과. 독립 안전 검토 차단 없음. 앱 정상 종료 후 수정본 교체·실행 완료. test_todo 및 원본/인증정보 변경·모델 호출 없음.
 - 사용자 권한 UX 의견: 프로젝트 추가 시 범위별 동의를 명확히 받는 방향. 앱의 폴더 읽기/복사본 준비 동의, OS의 보호 폴더 권한, 에이전트 명령/편집 승인, 원본 반영 확인은 별개다. blanket bypass 활성화나 권한 확대 승인으로 해석하지 않았다. Claude 공식 permission-modes 문서는 bypassPermissions가 도구 확인을 생략하는 모드라고 설명하며 OS 권한 부여와 구분한다(https://code.claude.com/docs/en/permission-modes). 후속 동의 UI는 아직 구현하지 않았다.

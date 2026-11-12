@@ -1,4 +1,4 @@
-import { readConnections, CONNECTIONS_CHANGED, type Connections } from "./provider-connections.ts";
+import { readConnections, CONNECTIONS_CHANGED, PROVIDER_AUTH_CHANGED, type Connections } from "./provider-connections.ts";
 import type { ClaudeUsageResult } from "./contracts/provider-usage-v1.ts";
 import { useEffect, useId, useRef, useState } from "react";
 import { useI18n } from "../i18n.tsx";
@@ -50,7 +50,8 @@ export function ProviderUsage({ disabled }: { disabled: boolean }) {
   useEffect(() => {
     const changed=()=>{generation.current++;setEntries({});setConnectionRevision(value=>value+1);void readConnections().then(value=>{if(mounted.current)setConnections(value);}).catch(()=>{});};
     window.addEventListener(CONNECTIONS_CHANGED,changed);
-    return()=>window.removeEventListener(CONNECTIONS_CHANGED,changed);
+    window.addEventListener(PROVIDER_AUTH_CHANGED,changed);
+    return()=>{window.removeEventListener(CONNECTIONS_CHANGED,changed);window.removeEventListener(PROVIDER_AUTH_CHANGED,changed);};
   },[]);
   const positionPopup = () => {
     const anchor = trigger.current?.getBoundingClientRect();

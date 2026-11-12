@@ -714,7 +714,7 @@ export const en: Record<MessageKey, string> = {
   "m5.usage.checked": "Checked: {time}",
   "m5.usage.loading": "Checking…",
   "m5.usage.unavailable": "Usage unavailable.",
-  "m5.usage.expired": "Check your login status.",
+  "m5.usage.expired": "Usage authorization has expired. It needs renewal even though your login may still be saved.",
   "m5.usage.notConnected": "Check the Claude connection in this app.",
   "m5.usage.retryLater": "Try again shortly.",
   "m5.usage.refresh": "Refresh",
