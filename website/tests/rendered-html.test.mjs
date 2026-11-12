@@ -39,7 +39,7 @@ test("renders the Elsecrew landing page", async () => {
   assert.match(html, /Claude Code/);
   assert.match(html, /Codex/);
   assert.match(html, /자주 묻는 질문/);
-  assert.match(html, /github\.com\/wonseok-han\/hello-agent/);
+  assert.match(html, /github\.com\/wonseok-han\/elsecrew/);
   assert.match(html, /https:\/\/elsecrew\.test\/og\.png/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });

@@ -168,7 +168,7 @@ export default function Home() {
             </a>
             <a
               className="button secondary"
-              href="https://github.com/wonseok-han/hello-agent"
+              href="https://github.com/wonseok-han/elsecrew"
               target="_blank"
               rel="noreferrer"
             >
@@ -367,7 +367,7 @@ export default function Home() {
         </div>
         <a
           className="button download-button"
-          href="https://github.com/wonseok-han/hello-agent/releases/latest"
+          href="https://github.com/wonseok-han/elsecrew/releases/latest"
           target="_blank"
           rel="noreferrer"
         >
@@ -383,7 +383,7 @@ export default function Home() {
         </a>
         <p>코딩 에이전트와의 첫 만남을 더 쉽게.</p>
         <a
-          href="https://github.com/wonseok-han/hello-agent"
+          href="https://github.com/wonseok-han/elsecrew"
           target="_blank"
           rel="noreferrer"
         >

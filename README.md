@@ -2,11 +2,11 @@
 
 > 터미널을 한 번도 안 열어본 사람을 **코딩 에이전트가 굴러가는 상태까지** 데려다주는 데스크톱 앱
 
-[![CI](https://github.com/wonseok-han/hello-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/wonseok-han/hello-agent/actions/workflows/ci.yml)
+[![CI](https://github.com/wonseok-han/elsecrew/actions/workflows/ci.yml/badge.svg)](https://github.com/wonseok-han/elsecrew/actions/workflows/ci.yml)
 
 코딩 에이전트(Claude Code, Codex)를 쓰고 싶지만 **설치·설정 단계에서 막히는** 비개발자를 위한 도우미예요. 검은 터미널 창을 열 필요 없이, 버튼을 따라 누르기만 하면 첫 대화까지 도달합니다. 설치가 끝난 뒤에도 프로젝트와 에이전트 상태를 한곳에서 관리할 수 있습니다.
 
-> **베타 버전이 공개되어 있어요.** [Releases](https://github.com/wonseok-han/hello-agent/releases/latest)에서 최신 macOS(`.dmg`)·Windows(`.exe`/`.msi`) 설치 파일을 받을 수 있습니다. 아직 코드 서명 전이라 처음 실행할 때 한 번만 보안 허용이 필요합니다(자세한 안내는 릴리스 노트 참고).
+> **베타 버전이 공개되어 있어요.** [Releases](https://github.com/wonseok-han/elsecrew/releases/latest)에서 최신 macOS(`.dmg`)·Windows(`.exe`/`.msi`) 설치 파일을 받을 수 있습니다. 아직 코드 서명 전이라 처음 실행할 때 한 번만 보안 허용이 필요합니다(자세한 안내는 릴리스 노트 참고).
 
 ## 무엇을 해 주나요
 

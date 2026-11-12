@@ -39,7 +39,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/wonseok-han/hello-agent/releases/latest/download/latest.json"
+        "https://github.com/wonseok-han/elsecrew/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE2NTYwNDg4RDExRjQyNUIKUldSYlFoL1JpQVJXcHFWU3JuZUF0K3R0bHBzdlRwYnE2enBzSUswN0xYMHI0YUMraE9Jb3phaVkK"
     }
