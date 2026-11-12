@@ -157,7 +157,14 @@ function ProviderConnection({ disabled, provider, alwaysExpanded = false, onAtte
   const toggleConnection = async () => {
     if(connectionBusy || appConnected === null) return;
     setConnectionBusy(true); setConnectionError(false);
-    try { const value=await changeConnection(runtime,!appConnected); setAppConnected(value[runtime]); }
+    const connecting = !appConnected;
+    try {
+      const value=await changeConnection(runtime,!appConnected);
+      // Connecting is one step for the user: if the account check that follows
+      // finds no app login, the browser sign-in starts automatically.
+      loginAfterConnect.current = connecting && value[runtime] === true;
+      setAppConnected(value[runtime]);
+    }
     catch { setConnectionError(true); }
     finally {setConnectionBusy(false);}
   };
@@ -167,6 +174,7 @@ function ProviderConnection({ disabled, provider, alwaysExpanded = false, onAtte
   const [diagnostic,setDiagnostic] = useState<LoginDiagnostic | null>(null);
   const [expanded,setExpanded] = useState(false);
   const inFlight = useRef(false);
+  const loginAfterConnect = useRef(false);
   const busyRetries = useRef(0);
   const busyRetryAttempt = useRef<string | null>(null);
   const checkAttempt = useRef<string | null>(null);
@@ -238,6 +246,18 @@ function ProviderConnection({ disabled, provider, alwaysExpanded = false, onAtte
       void request({action:"check",attemptId:crypto.randomUUID()});
     }
   },[disabled,appConnected,status.state]);
+  useEffect(() => {
+    if (!loginAfterConnect.current || disabled || appConnected !== true) return;
+    if (status.state === "idle" && status.attemptId !== null) {
+      loginAfterConnect.current = false;
+      // Let the finished check release its worker slot before starting login.
+      window.setTimeout(() => { if (mounted.current) void request({action:"start",attemptId:crypto.randomUUID()}); }, 300);
+      return;
+    }
+    // A busy check is retried and may still end idle; keep waiting for it.
+    if (status.state === "failed" && status.error === "providerBusy") return;
+    if (["connected","failed","unsupported","canceled"].includes(status.state)) loginAfterConnect.current = false;
+  },[disabled,appConnected,status.state,status.attemptId]);
   useEffect(()=>{setCode("");setCodeError(false);},[status.attemptId,status.state]);
   useEffect(()=>{ if (status.state === "connected") {
     setExpanded(false);
