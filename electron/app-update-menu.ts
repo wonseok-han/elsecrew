@@ -1,10 +1,10 @@
-import { app, autoUpdater, dialog, Menu, MenuItem } from "electron";
+import { app, dialog, Menu, MenuItem } from "electron";
 import { AppUpdateController, type UpdateState } from "./app-update.ts";
+import { removeStaleUpdates, SelfUpdater } from "./self-update.ts";
+import { platformKey, UPDATE_FEED_URL } from "./update-manifest.ts";
 
-// Release-owned configuration. Enable only with a signed macOS distribution and
-// its reviewed HTTPS feed; the current development ZIP is intentionally disabled.
-const RELEASE_FEED: string | null = null;
-const SIGNED_UPDATE_PACKAGE = false;
+// Updates come from the project's own signed release manifest (no paid code
+// signing). Only packaged builds on supported platforms use the channel.
 
 export function installAppUpdateMenu(restart: (install: () => void) => Promise<boolean>): void {
   const ko = app.getLocale().toLowerCase().startsWith("ko");
@@ -19,7 +19,7 @@ export function installAppUpdateMenu(restart: (install: () => void) => Promise<b
     error: ko ? "업데이트 실패 — 다시 확인…" : "Update failed — retry…",
   };
   let busy = false;
-  const controller = new AppUpdateController(autoUpdater, restart, refresh);
+  const controller = new AppUpdateController(new SelfUpdater(), restart, refresh);
   function refresh(): void {
     const menu = Menu.getApplicationMenu();
     const item = menu?.getMenuItemById("elsecrew-app-update");
@@ -39,9 +39,9 @@ export function installAppUpdateMenu(restart: (install: () => void) => Promise<b
       busy = true; refresh();
       try {
         if (controller.state === "unavailable") {
-          await dialog.showMessageBox({ type: "info", message: ko ? "앱 업데이트 배포를 준비 중이에요." : "App update distribution is not ready yet.",
-            detail: ko ? `현재 버전: ${app.getVersion()}\n이 개발 앱은 서명된 업데이트 배포 경로가 아직 없어 자동으로 교체할 수 없어요. 에이전트 업데이트와는 별도 기능이에요.`
-              : `Current version: ${app.getVersion()}\nThis development build has no signed update channel yet. App updates are separate from agent updates.` });
+          await dialog.showMessageBox({ type: "info", message: ko ? "이 실행에서는 앱 업데이트를 쓸 수 없어요." : "App updates are not available in this build.",
+            detail: ko ? `현재 버전: ${app.getVersion()}\n배포된 Elsecrew(macOS·Windows)에서만 새 버전을 받아 교체해요. 에이전트 업데이트와는 별도 기능이에요.`
+              : `Current version: ${app.getVersion()}\nOnly released Elsecrew builds for macOS and Windows download and install new versions. App updates are separate from agent updates.` });
         } else if (controller.state === "ready") {
           const answer = await dialog.showMessageBox({ type: "question", message: ko ? "업데이트를 적용하고 다시 시작할까요?" : "Install the update and restart?",
             detail: ko ? "편집 중인 내용을 먼저 저장하세요. 진행 중인 작업의 안전한 종료를 확인할 수 없으면 재시작하지 않아요." : "Save your edits first. Restart is blocked if safe task shutdown cannot be confirmed.",
@@ -59,5 +59,7 @@ export function installAppUpdateMenu(restart: (install: () => void) => Promise<b
   // Preserve the existing platform menus and their standard editing shortcuts.
   menu.append(new MenuItem({ label: ko ? "앱 업데이트" : "App Update", submenu: updateMenu }));
   Menu.setApplicationMenu(menu);
-  controller.configure(RELEASE_FEED, app.isPackaged && process.platform === "darwin" && SIGNED_UPDATE_PACKAGE);
+  const updatable = app.isPackaged && platformKey(process.platform, process.arch) !== null;
+  controller.configure(UPDATE_FEED_URL, updatable);
+  if (updatable) removeStaleUpdates();
 }

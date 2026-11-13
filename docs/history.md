@@ -2,6 +2,32 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 유료 서명 없는 배포와 자체 업데이터
+- 사용자 결정: 코드 서명·공증은 비용 때문에 하지 않는다. 옛 Tauri와 같은 원리로 앱은 미서명, 업데이트 목록만 프로젝트 키로 서명한다. 배포 대상은 macOS(arm64·x64)와 Windows x64이고, Release는 초안으로 만든다.
+- 이전 방식(옛 Tauri `release.yml`): 코드 서명 없음, 업데이트 아티팩트만 `TAURI_SIGNING_PRIVATE_KEY`로 서명, tag push로 Release 초안 생성.
+- 구현:
+  - `electron/update-manifest.ts`: Ed25519 서명 envelope `{schemaVersion, manifest(base64 정확 바이트), signature}`를 검증한다. 형식은 키 집합을 정확히 맞추고, 버전 x.y.z는 숫자로 비교해 다운그레이드를 막는다. 플랫폼은 darwin-arm64·darwin-x64·win32-x64 셋만 받는다. 다운로드 주소는 `github.com/wonseok-han/elsecrew/releases/download/v{version}/{name}`으로 앱이 직접 만든다. feed는 64KiB, 패키지는 1GiB까지다.
+  - `electron/self-update.ts`: AppUpdateController가 쓰는 NativeUpdater를 구현하므로 메뉴·설정 버튼·안전 종료 게이트는 그대로다. 확인 단계에서 다음을 모두 끝낸다.
+    - 교체 가능 위치 확인: App Translocation이거나 상위 폴더에 쓸 수 없으면 거절
+    - 여유 공간 확인
+    - 앱 옆 `.elsecrew-update-{version}`에 다운로드: 크기·sha256 확인, 시간 제한
+    - 압축 해제: macOS는 Info.plist의 bundle id와 version 확인, Windows는 Elsecrew.exe 확인
+    - helper 준비
+  - `quitAndInstall`은 helper만 띄우고 항상 종료한다. helper는 앱 번들·설치 폴더의 모든 프로세스가 끝나기를 기다려 교체하고 재실행한다. 실패하면 되돌리고 재실행한다. Windows helper는 `-EncodedCommand`로 실행한다.
+  - 공개키는 앱에 내장했다. 비밀키는 저장소 밖 `~/.config/elsecrew/update-signing-key.pem`(600)에 생성했다. GitHub Secret `ELSECREW_UPDATE_PRIVATE_KEY` 등록은 사용자가 해야 한다.
+  - `.github/workflows/release.yml`(새로 작성): `v*` tag → 태그와 package.json 버전 일치 확인 → `pnpm m5:make`(macOS x64는 arm 러너에서 `CARGO_BUILD_TARGET=x86_64-apple-darwin` 교차 빌드) → `scripts/m5-release-manifest.mjs`로 latest.json 서명 → `gh release create --draft`. 전역 권한은 read이고, release job만 contents:write와 `environment: release`(필수 승인자 설정 권장)다.
+- 독립 검토(1명, 2회):
+  - 1차: 차단 2건(설치 시작 실패 시 '종료 준비 완료' 상태로 앱이 계속 실행됨, Windows 교체 실패 가능성)과 권고(권한·시간 제한·쓰기 오류·PowerShell 경로)를 반영했다.
+  - 2차: 차단 없음. 높은 권고 4건을 반영했다.
+    - 남은 프로세스 때문에 시간이 초과되면 재실행하지 않는다(sidecar 중복 방지).
+    - 프로세스 확인을 `ps`+`grep -F` 고정 문자열로 바꿨다.
+    - 검증한 앱은 `payload` 이름으로 보관하고(LaunchServices 노출 방지), 다른 버전과 오래된 스테이징은 정리한다.
+    - 비밀키를 `release` environment 전용으로 두도록 체크리스트에 적었다.
+  - 낮은 권고(Windows 정리 실패·작업 폴더, macOS는 open 성공 시에만 백업 삭제, `persist-credentials: false`)도 반영했다.
+  - 남은 권고: action SHA 고정, 확인 단계 뒤 앱 이동 같은 드문 경우.
+- 검증: 업데이트 목록 테스트 3개(스크립트 서명 → 앱 검증 왕복, 변조·다른 키·잘못된 이름·플랫폼 거절, 버전 비교)와 프런트 720 통과, Electron 번들 빌드 통과. 로컬 `pnpm m5:make`로 `Elsecrew-darwin-arm64-0.1.2.zip`(최상위 `Elsecrew.app`, bundle id와 version 확인)을 만들었다. macOS helper는 공백·한글·괄호·대괄호 경로에서 교체 성공, 실패 시 복원, 번들 내 잔여 프로세스 대기(3초), 정리를 실제로 확인했다.
+- 미검증: 실제 GitHub Actions 실행(태그 push는 사용자 승인 대상), Windows helper와 ZIP 구조, 실제 원격 feed로 하는 업데이트 전 과정.
+
 ### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 레거시(옛 Tauri 앱·M0~M4) 정리
 - 사용자 결정: Elsecrew로 컨셉을 바꿨으므로 옛 기록과 옛 Tauri 앱 코드를 제거한다. 소개 웹사이트(`website/`)는 Elsecrew 사이트로 다시 만들 예정이라 그대로 둔다. 지운 것은 모두 Git 기록에서 되살릴 수 있다.
 - 코드:

@@ -1,0 +1,114 @@
+name: Release
+
+# Pushing a version tag (vX.Y.Z, matching package.json) builds unsigned
+# Elsecrew packages, signs the update feed with the project's Ed25519 key and
+# creates a DRAFT GitHub Release. Installed apps see the update only after the
+# draft is published (they read releases/latest/download/latest.json).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, platform: darwin, arch: arm64, rustTarget: "" }
+          - { os: macos-latest, platform: darwin, arch: x64, rustTarget: x86_64-apple-darwin }
+          - { os: windows-latest, platform: win32, arch: x64, rustTarget: "" }
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_BUILD_JOBS: 4
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rustTarget }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.platform }}-${{ matrix.arch }}
+
+      - name: 태그와 앱 버전 일치 확인
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          test "v${version}" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} != package.json v${version}"; exit 1; }
+
+      - name: 패키지(ZIP) 만들기
+        shell: bash
+        env:
+          RUST_TARGET: ${{ matrix.rustTarget }}
+        run: |
+          # Intel macOS is cross-built on the Apple Silicon runner.
+          if [ -n "$RUST_TARGET" ]; then export CARGO_BUILD_TARGET="$RUST_TARGET"; fi
+          pnpm m5:make --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: elsecrew-${{ matrix.platform }}-${{ matrix.arch }}
+          path: out/make/zip/**/*.zip
+          if-no-files-found: error
+
+  release:
+    needs: package
+    runs-on: ubuntu-latest
+    # Signing the feed is code execution on every installed app. Configure the
+    # `release` environment with required reviewers so a person approves it.
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 업데이트 목록(latest.json) 서명
+        env:
+          ELSECREW_UPDATE_PRIVATE_KEY: ${{ secrets.ELSECREW_UPDATE_PRIVATE_KEY }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mapfile -t zips < <(find dist -name '*.zip' | sort)
+          node scripts/m5-release-manifest.mjs --version "$version" --out dist/latest.json "${zips[@]}"
+
+      - name: GitHub Release 초안 만들기
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mapfile -t zips < <(find dist -name '*.zip' | sort)
+          cat > notes.md <<EOF
+          Elsecrew ${version}
+
+          - macOS: \`Elsecrew-darwin-arm64-${version}.zip\` (Apple Silicon), \`Elsecrew-darwin-x64-${version}.zip\` (Intel)
+          - Windows: \`Elsecrew-win32-x64-${version}.zip\` (화면·저장만 지원, 실제 에이전트 실행은 준비 중)
+
+          코드 서명 전이라 처음 실행할 때 한 번 보안 허용이 필요합니다. macOS는 앱을 Control-클릭 → 열기, Windows는 '추가 정보 → 실행'을 누르세요. 이후 업데이트는 앱이 서명된 업데이트 목록을 확인해 직접 받아 교체합니다.
+          EOF
+          gh release create "$GITHUB_REF_NAME" --draft --title "Elsecrew ${version}" --notes-file notes.md "${zips[@]}" dist/latest.json

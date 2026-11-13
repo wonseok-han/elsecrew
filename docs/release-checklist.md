@@ -11,8 +11,16 @@ Elsecrew의 설치 파일을 베타 또는 정식 버전으로 배포하기 전�
 - [ ] `pnpm m5:package:smoke` (패키지 생성 + 기동 smoke)
 - [ ] `website/`에서 `npm ci`, `npm test`, `npm run lint`
 - [ ] GitHub Actions의 macOS·Windows 기준선 하네스 통과
+- [ ] Release 초안의 ZIP 3개와 `latest.json`이 모두 올라왔고, 이전 버전 앱에서 '업데이트 확인 → 재시작'으로 새 버전이 열림
 
-현재 저장소에는 Elsecrew 설치 파일을 만드는 배포 workflow가 없다(옛 Tauri `release.yml`은 2026-11-13에 제거). 배포 전에 Electron 배포 workflow와 서명 방식을 먼저 정한다.
+### 배포 방식 (코드 서명·공증 없음)
+
+- 앱은 유료 코드 서명·공증 없이 배포한다. 처음 설치할 때만 macOS Gatekeeper·Windows SmartScreen 허용이 필요하다.
+- 업데이트는 프로젝트 Ed25519 키로 서명한 `latest.json`으로 검증한다. 공개키는 `electron/update-manifest.ts`에 들어 있고, 비밀키는 저장소 밖에 둔다(최초 생성 위치: 관리자 컴퓨터 `~/.config/elsecrew/update-signing-key.pem`).
+- 최초 1회: GitHub 저장소 Settings → Environments에 `release` 환경을 만들고 필수 승인자(Required reviewers)와 배포 규칙(`v*` 태그만)을 설정한다. 그 환경의 Environment secrets에 `ELSECREW_UPDATE_PRIVATE_KEY`로 비밀키 PEM 전체를 등록한다(저장소 전체 비밀값으로 두지 않는다). 환경을 만들지 않으면 보호 규칙 없이 자동 생성되어 승인 없이 서명된다. 키를 바꾸면 이미 설치된 앱은 새 업데이트를 받지 못하므로 공개키를 바꾼 버전을 수동 설치로 먼저 배포해야 한다.
+- 배포: `package.json`의 `version`을 올리고 커밋한 뒤 같은 값의 태그(`vX.Y.Z`)를 push한다. `.github/workflows/release.yml`이 macOS arm64·x64와 Windows x64 ZIP을 만들고, `latest.json`에 서명한 뒤 GitHub Release **초안**을 만든다.
+- 초안 내용과 파일을 확인한 뒤 '게시'를 누르면 그때부터 설치된 앱이 업데이트를 받는다(`releases/latest/download/latest.json`). 태그 push와 게시는 사용자 승인 대상이다.
+- 앱이 다운로드 폴더에서 바로 실행되는 macOS 임시 격리(App Translocation) 상태나 앱 폴더에 쓸 수 없는 위치에서는 업데이트를 받지 않는다. 사용자는 앱을 응용 프로그램 폴더로 옮겨 실행해야 한다.
 
 ## 2. 깨끗한 기기 검증
 
