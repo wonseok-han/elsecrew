@@ -1,6 +1,6 @@
 # Elsecrew
 
-비개발자도 GUI에서 Claude Code·Codex와 대화하며 여러 프로젝트의 개발 작업을 관리하는 agent-first 데스크톱 앱. 현재 개발 중심은 Electron + React/TypeScript + Monaco와 Rust safety sidecar의 M5 작업대다. 기존 Tauri 설치 도우미와 CI 빌드 경로도 저장소에 남아 있다. M5는 PR #1로 main에 통합됐지만 제품 완료·출시 승인을 뜻하지 않는다.
+비개발자도 GUI에서 Claude Code·Codex와 대화하며 여러 프로젝트의 개발 작업을 관리하는 agent-first 데스크톱 앱. 현재 개발 중심은 Electron + React/TypeScript + Monaco와 Rust safety sidecar의 M5 작업대다. 옛 Tauri 설치 도우미(M0~M4)는 2026-11-13에 저장소에서 제거했다(필요하면 Git 기록에서 확인). M5는 PR #1로 main에 통합됐지만 제품 완료·출시 승인을 뜻하지 않는다.
 
 ## 응답 언어 — 최우선
 
@@ -44,7 +44,7 @@
 - **고정 섹션**(`프로젝트 요약`·`핵심 결정·발견`·`작업 규칙`)은 옮기지 않는다. 옮기기 전에 재사용할 결정·함정이 `핵심 결정·발견`에 반영돼 있는지 확인한다 — 반영돼 있으면 아카이브를 열 일이 없다.
 - 날짜별로 **파일을 쪼개지 않는다.** 현재 진실이 흩어져 조회 비용만 커진다. 날짜별 조회는 `git log -- docs/history.md`로 한다.
 
-**워크로그와 설계 문서의 경계**: 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 한 주제의 설계 심의가 길어지면(토론 왕복·철회·정정이 여러 엔트리에 얽히면) 워크로그에 쌓지 말고 전용 설계 문서로 옮기고, 워크로그에는 결론 요약과 포인터만 남긴다. 예: `docs/proposals/m4-orchestration.md`
+**워크로그와 설계 문서의 경계**: 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 한 주제의 설계 심의가 길어지면(토론 왕복·철회·정정이 여러 엔트리에 얽히면) 워크로그에 쌓지 말고 전용 설계 문서로 옮기고, 워크로그에는 결론 요약과 포인터만 남긴다. 예: `docs/proposals/m5-change-application.md`
 
 ### 문서를 새로 만들 때
 
@@ -53,7 +53,7 @@
 | 분류 | 위치 | 무엇을 주장하나 |
 | --- | --- | --- |
 | 작업 기억 | `docs/history.md` | 무엇이 일어났나 |
-| 현행 사실 | `docs/architecture.md`, `docs/diagrams/` | 지금 시스템이 어떻게 생겼나 |
+| 현행 사실 | `docs/architecture.md` | 지금 시스템이 어떻게 생겼나 |
 | 실행 절차 | `docs/release-checklist.md` | 할 때 따라 하는 순서 |
 | **제안(아직 사실 아님)** | `docs/proposals/` | 앞으로 이럴 수도 있다 |
 | 지난 기록 | `docs/archive/` | 당시엔 사실이었다 |
@@ -68,21 +68,14 @@
 - 에이전트: Claude Code + Codex
 - 플랫폼: macOS + Windows
 - UI: 한국어·영어 전환. 표시 이름은 `Elsecrew`(엘스크루). 패키지·앱 식별자·저장 경로도 Elsecrew로 통일. 2026-11-12 사용자 결정으로 새 앱 데이터를 사용하며 기존 앱 데이터는 자동 이전/삭제하지 않음
-- 기존 Tauri 구조: 재방문용 홈베이스 + 6단계 위저드(에이전트 → 진단 → 설치 → 로그인 → 프로젝트 → 첫 대화) + macOS M4 `HandoffPilot`
 - M5 현행 구현: Electron + React/TypeScript + Monaco와 Rust sidecar에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·채팅별 standalone snapshot·편집/diff·명시 반영/복원 흐름을 연결했다. macOS Codex·Claude Code의 앱 전용 로그인·모델 조회·실제 실행 adapter와 설치/업데이트 경로가 있으며 기존 터미널 인증을 자동 재사용하지 않는다. fixture 실행과 실제 공급자 실행은 분리한다. 구현 존재와 실제 계정/플랫폼 검증 완료는 구분하며 최신 증거는 `docs/history.md`에서 확인한다.
-- 제품 방향: 사용자는 총괄과 대화하고 총괄이 직접 답하거나 필요한 팀원에게 위임한다. 기본 총괄·기획·디자인·개발·검증은 초기 템플릿이며 사용자 정의 역할의 실제 실행 연결은 아직 미완료다. 작업은 채팅별 복사본에서 수행하고 원본 반영은 diff 검토 뒤 명시적으로 승인한다.
-- 남은 핵심 작업: 과거 Claude 팀 중단의 직접 원인 규명, 채팅 내용 영구 삭제, 사용자 정의 역할 실행 연결, 기존 검사 실패·Windows·성능·업데이트 배포 검증. 실패 단계/원인 코드 보존은 소스와 fixture/UI에서 검증했으나 설치본·실제 공급자 재시험과 구분한다.
-- 기존 홈베이스: 프로젝트 폴더 스캔, 에이전트 설치·로그인 상태, 업데이트 확인
-- 상태: M0~M3와 주요 오류 복구, M4 파일럿 완료. M5 G1~G5 macOS fixture gate `G5_READY`, G5A `G5A_READY`, G5B `G5B_READY`, G5C `G5C_READY` 기록은 유지한다. macOS 자체 임시 프로젝트에서 Claude와 Codex의 실제 파일 수정·취소 및 정상 종료를 확인했다. Codex의 짧은 응답 실행도 성공했다. 공급자 호환 결함과 UI 상태 전달의 최신 증거는 docs/history.md에서 확인한다. 이 증거를 두 공급자의 전체 실행·복구 검증 완료로 보지 않는다. G6 전체 성능 검증(유휴 메모리 예산은 사용자 승인으로512MiB, 과거400MiB 기준 FAIL 보존), Windows 안전/패키지 검증, 출시 후보 검증과 서명/배포 결정이 남는다. Windows 실제 에이전트 실행은 비활성이다.
+- 제품 방향: 사용자는 총괄과 대화하고 총괄이 직접 답하거나 필요한 팀원에게 위임한다. 기본 총괄·기획·디자인·개발·검증은 초기 템플릿이며 사용자가 역할을 추가·변경할 수 있다(V3 역할, 저장 schema V13). 화면에서는 작업 단위를 '작업', 작업 복사본을 '작업 공간'이라 부른다. 작업은 작업마다 분리된 작업 공간에서 수행하고 원본 반영은 diff 검토 뒤 명시적으로 승인한다.
+- 남은 핵심 작업: Windows 실제 에이전트 실행·안전 검증, G6 성능 검증, Electron 배포 workflow·서명/공증과 출시 후보 검증, 소개 웹사이트(`website/`)를 Elsecrew 기준으로 재개발. 최신 미완료 항목은 `docs/history.md`를 우선한다.
+- 상태: M5 G1~G5 macOS fixture gate `G5_READY`, G5A~G5C 기록은 유지한다. macOS에서 Claude와 Codex의 실제 파일 수정·취소·정상 종료와 실제 팀 작업을 확인했으나 두 공급자의 전체 실행·복구 검증 완료로 보지 않는다. G6 전체 성능(유휴 메모리 예산 512MiB), Windows 안전/패키지 검증, 출시 후보 검증과 서명/배포 결정이 남는다. Windows 실제 에이전트 실행은 비활성이다.
 
 ## 코드 지도
 
-- `src/App.tsx`: 최상위 홈/위저드 라우팅과 화면 컴포넌트
 - `src/i18n.tsx`, `src/locales/{ko,en}.ts`: 경량 i18n. 새 키는 ko/en 양쪽에 추가
-- `src/doctor.ts`: 구조화 오류를 초보자용 원인·해결책으로 변환
-- `src/store.ts`: 기준 폴더와 프로젝트 최근 사용 시각 저장
-- `src-tauri/src/agent.rs`: 에이전트별 설치·감지·로그인 레시피
-- `src-tauri/src/{detect,install,login,project,status,editor,error}.rs`: 시스템 기능
 - `crates/elsecrew-{core,protocol,sidecar}`: 공용 Rust 안전 코어·계약, SQLite·snapshot·채팅·fixture 및 실제 공급자 adapter, 로그인/설치·실행/종료·반영/복원·백업 관리 sidecar
 - `electron/`: Electron main/preload, 고정 typed IPC와 sidecar 수명주기·패키징
 - `src/m5/`, `src/m5/contracts/`: Monaco 채팅 작업대와 V1~V7 bridge·프로젝트/채팅/실행/복구·저장 수명·정규화 event·실제 공급자 및 변경 반영 계약
@@ -91,7 +84,6 @@
 - `scripts/m5-harness.mjs`: 기준선과 M5 G1~G6의 누적 기계 검증·JSON 증거 단일 진입점
 - `docs/architecture.md`: 기술 설계
 - `docs/history.md`: 현재 상태와 작업 인계의 기준
-- `docs/proposals/m4-orchestration.md`: 완료된 M4 파일럿의 설계·검토·철회 기록. M4를 다룰 때 §9 `철회된 주장`을 먼저 확인한다
 - `docs/proposals/m5-coding-agent-ide.md`: M5 제품 방향·안전 계약·열린 결정의 제안 문서. 현재 구현과 게이트는 `docs/architecture.md`·`docs/history.md`에서 확인한다
 - `docs/proposals/m5-{agent-ide,guided-start}-concept.html`: 작업대와 처음 시작하기 인터랙티브 검토 시안
 
@@ -101,7 +93,6 @@
 - 안전 기본값을 우선하며 기존 사용자 설정 파일을 덮어쓰지 않는다.
 - Rust 오류는 `AppError { kind, detail }`로 전달한다. 사용자 설명은 프론트 i18n, `detail`은 도움 요청용 기술 정보로 분리한다.
 - OpenAI 앱 번들 경로는 바뀔 수 있다. Codex CLI 감지는 `/Applications/{ChatGPT,Codex}.app/...` 후보 방식을 유지한다.
-- 프로젝트 스캔은 현재 기준 폴더의 바로 아래 하위 폴더만 검사한다.
 - `scm_breeze`의 `_safe_eval` 오류가 나면 `/usr/bin/git`, `/bin/ls`, `/usr/bin/find`처럼 절대경로를 사용한다.
 
 ## 구현 우선·최종 통합 검증 (2026-10-01 사용자 지시)
@@ -143,12 +134,10 @@
 ## 검증 명령
 
 ```bash
-pnpm build
-npm test                       # 프런트 순수 로직 (node --test)
-cargo test --manifest-path src-tauri/Cargo.toml
-pnpm test:harness              # 위 세 검증 + diff check를 실행하고 JSON 증거 저장
-pnpm tauri build              # 기존 Tauri 앱
-pnpm m5:test:core             # Rust workspace 검사
+pnpm build                    # 타입 검사 + 화면 빌드
+npm test                      # 프런트 단위 (node --test)
+pnpm test:harness             # 위 검증 + 공용 Rust 코어 테스트 + diff check, JSON 증거 저장
+pnpm m5:test:core             # Rust workspace 전체 테스트
 pnpm m5:package               # Electron 패키지 생성
 pnpm m5:package:smoke         # Electron 패키지 생성 + smoke
 
@@ -157,9 +146,8 @@ npm test
 npm run lint
 ```
 
-- 네트워크 격리 설치 E2E: `cargo test --manifest-path src-tauri/Cargo.toml isolated_install -- --ignored --nocapture`
 - M5 게이트 목록: `pnpm harness:list`; 최종 누적 게이트: `pnpm test:m5` (`NOT_READY`는 종료 코드 2이며 합격이 아님)
-- Rust 1.85+ 권장. `src-tauri/Cargo.toml`의 실제 edition은 **2021**이다(포맷 검사 시 `rustfmt --edition 2021`)
+- Rust 1.85+ 권장. 직접 Cargo를 쓸 때는 `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4` 이하를 지킨다.
 
 ## Git 작업 규칙
 
@@ -169,4 +157,4 @@ npm run lint
 - 사용자 변경과 무관한 파일을 임의로 스테이징하거나 되돌리지 않는다.
 - 로컬 커밋은 사용자 승인 범위를 따른다. 기존 M5의 작업 단위 구현·검증·기록 커밋 상시 승인은 해당 범위에서만 사용하며, 범위 밖 작업·안전 불변식 변경·실제 계정 시험·외부 게시의 승인을 추정하지 않는다.
 - main에 직접 커밋하거나 병합하지 않는다. main 병합 및 모든 브랜치의 push는 별도 사용자 승인이 필요하며 PR #1 승인은 이미 수행한 병합에만 적용된다.
-- `m5/coding-agent-ide`는 병합 전 개발 이력, `m4/orchestration`은 완료된 M4 파일럿 기준선이다. 명시적인 별도 지시 없이 후속 작업의 분기·통합 대상으로 사용하지 않는다.
+- `m5/coding-agent-ide`는 병합 전 개발 이력이다. 명시적인 별도 지시 없이 후속 작업의 분기·통합 대상으로 사용하지 않는다.

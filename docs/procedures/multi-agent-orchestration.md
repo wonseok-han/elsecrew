@@ -91,7 +91,6 @@ owns:
   - pnpm-lock.yaml
 mustNotTouch:
   - crates/**
-  - src-tauri/**
   - src/m5/**
 dependsOn:
   - protocol-fixture-v1

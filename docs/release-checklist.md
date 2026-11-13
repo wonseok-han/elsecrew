@@ -5,53 +5,50 @@ Elsecrew의 설치 파일을 베타 또는 정식 버전으로 배포하기 전�
 ## 1. 자동 검증
 
 - [ ] 루트 `pnpm install --frozen-lockfile`
-- [ ] `pnpm build`
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml`
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml isolated_install -- --ignored --nocapture`
+- [ ] `pnpm build` (타입 검사 + 화면 빌드)
+- [ ] `npm test` (프런트 단위)
+- [ ] `pnpm m5:test:core` (Rust workspace 전체)
+- [ ] `pnpm m5:package:smoke` (패키지 생성 + 기동 smoke)
 - [ ] `website/`에서 `npm ci`, `npm test`, `npm run lint`
-- [ ] GitHub Actions의 macOS·Windows 테스트와 설치 파일 빌드가 모두 통과
-- [ ] Actions에서 `macos-installer` DMG와 `windows-installer` EXE를 내려받을 수 있음
+- [ ] GitHub Actions의 macOS·Windows 기준선 하네스 통과
 
-격리 설치 E2E는 공식 배포처에서 실제 파일을 내려받으므로 네트워크와 벤더 서비스 상태에 영향을 받는다. 실패하면 앱 회귀인지 외부 장애인지 로그로 구분한다.
+현재 저장소에는 Elsecrew 설치 파일을 만드는 배포 workflow가 없다(옛 Tauri `release.yml`은 2026-11-13에 제거). 배포 전에 Electron 배포 workflow와 서명 방식을 먼저 정한다.
 
 ## 2. 깨끗한 기기 검증
 
-가능하면 기존 Claude Code·Codex·Node·개발용 PATH 설정이 없는 새 OS 사용자 또는 초기화한 가상 머신에서 진행한다.
+가능하면 기존 Claude Code·Codex 로그인과 개발용 설정이 없는 새 OS 사용자 또는 초기화한 가상 머신에서 진행한다.
 
 ### 공통 흐름
 
 - [ ] 앱 첫 실행과 한국어·영어 전환
-- [ ] Claude Code와 Codex를 각각 선택해 진단 → 설치 → 로그인 → 프로젝트 생성 → 첫 대화 완료
-- [ ] 앱을 종료하고 다시 열었을 때 홈으로 진입하고 프로젝트를 자동 발견
-- [ ] 에이전트 설치·로그인·업데이트 상태가 실제 상태와 일치
-- [ ] `CLAUDE.md` 또는 `AGENTS.md`와 첫 대화가 선택 언어로 생성
-- [ ] 앱 아이콘이 설치 화면, 앱 목록, Dock 또는 시작 메뉴의 작은 크기에서도 식별 가능
+- [ ] 설정 › 에이전트 설치·연결에서 Codex와 Claude Code를 각각 설치·연결(로그인)
+- [ ] 프로젝트 추가 → 역할 모델 선택 → 첫 작업 보내기 → 팀 대화와 결과 확인
+- [ ] 변경 비교 확인 후 원본 반영과 되돌리기
+- [ ] 앱을 종료하고 다시 열었을 때 프로젝트·작업·역할 설정이 그대로 남음
+- [ ] 알림(작업 완료·확인 필요·작업 중단)과 앱이 뒤에 있을 때 macOS 배너
+- [ ] 앱 아이콘이 앱 목록, Dock 또는 시작 메뉴의 작은 크기에서도 식별 가능
 
 ### macOS
 
-- [ ] Actions의 DMG로 설치하고 앱 실행
-- [ ] 미서명 베타라면 Gatekeeper 경고 후 시스템 보안 설정에서 사용자가 허용해 실행 가능
-- [ ] 새 터미널에서 `claude --version`과 `codex --version` 실행 가능
+- [ ] 패키지로 설치하고 실행. 미서명 베타라면 Gatekeeper 경고 후 사용자가 허용해 실행 가능
 - [ ] Apple Silicon에서 전체 흐름 완료
-- [ ] Intel 지원이 필요하면 별도 Intel 또는 universal 번들에서 같은 흐름 완료
+- [ ] Intel 지원이 필요하면 별도 Intel 또는 universal 패키지에서 같은 흐름 완료
 
 ### Windows
 
-- [ ] Actions의 NSIS EXE로 설치하고 앱 실행
-- [ ] 미서명 베타라면 SmartScreen 경고 후 사용자가 명시적으로 실행 가능
-- [ ] 새 PowerShell에서 `claude --version`과 `codex --version` 실행 가능
-- [ ] 사용자 PATH 레지스트리 반영 후 로그아웃 없이 새 셸에서 명령 실행 가능
-- [ ] 한글과 공백이 포함된 사용자명·프로젝트 경로에서 전체 흐름 완료
+- [ ] 패키지로 설치하고 실행. 미서명 베타라면 SmartScreen 경고 후 사용자가 명시적으로 실행 가능
+- [ ] 한글과 공백이 포함된 사용자명·프로젝트 경로에서 화면·sidecar 흐름 확인
+- [ ] 실제 에이전트 실행은 자손 프로세스 안전 구현 전까지 비활성 상태로 남아 있음
 
-## 3. 실패 경로와 닥터
+## 3. 실패 경로
 
-각 항목은 원시 오류만 노출하지 않고 쉬운 원인 설명, 해결 방법, 재시도 또는 폴더 변경 동작을 제공해야 한다.
+각 항목은 원시 오류만 노출하지 않고 쉬운 원인 설명과 다음 행동(재시도, 다른 폴더 선택 등)을 제공해야 한다.
 
-- [ ] 네트워크를 끊고 설치·로그인·업데이트 시도 → 네트워크 닥터
-- [ ] 존재하지 않는 기준 폴더 선택 또는 폴더 삭제 후 재실행 → 폴더 없음 닥터
-- [ ] 읽기·쓰기 권한이 없는 기준 폴더에서 스캔·프로젝트 생성 → 권한 닥터
-- [ ] 여유 공간이 부족한 환경에서 설치·프로젝트 생성 → 저장 공간 닥터
-- [ ] 잘못된 체크섬 또는 손상된 설치 파일을 테스트 환경에서 주입 → 파일 손상 닥터
+- [ ] 네트워크를 끊고 설치·연결·작업 실행 시도
+- [ ] 프로젝트 폴더를 지우거나 옮긴 뒤 다시 열기
+- [ ] 쓰기 권한이 없는 폴더를 프로젝트로 추가
+- [ ] 여유 공간이 부족한 환경에서 작업 공간 준비
+- [ ] 실행 중인 작업이 있는 상태에서 작업·프로젝트 지우기, 앱 종료
 - [ ] 문제를 해소한 뒤 재시도로 정상 흐름 복귀
 
 ## 4. 배포 결정
@@ -74,13 +71,13 @@ Elsecrew의 설치 파일을 베타 또는 정식 버전으로 배포하기 전�
 
 릴리스 후보를 확인한 날짜, 커밋 SHA, OS 버전과 아키텍처, 설치 파일 이름, 통과·실패 항목을 `docs/history.md`에 남긴다. 실패를 우회했다면 우회 방법도 함께 기록한다.
 
-## 6. M5 Electron 후보의 추가 게이트
+## 6. 추가 게이트
 
 macOS 패키징 전에는 실행 중인 해당 `out/elsecrew-<platform>-<arch>` 앱을 정상 종료한다. Forge `prePackage`는 해당 경로의 앱/sidecar/helper 실행 파일을 OS 목록에서 발견하거나 목록 확인에 실패하면 교체를 거절한다. 자동 종료는 하지 않으며, 검사 이후 새로 실행되는 경쟁까지 막는 OS 잠금은 아니므로 빌드 동안 그 앱을 다시 열지 않는다.
 
-위 Tauri 배포 기록을 Electron 후보의 합격으로 대신하지 않는다. 현재 상태는 `history.md`·`architecture.md`, 수치는 `proposals/m5-electron-spike.md` §9–13과 `procedures/m5-performance.md`를 따른다. 아래는 남은 증거 요구이며 완료 표시가 아니다.
+현재 상태는 `history.md`·`architecture.md`, 수치는 `proposals/m5-electron-spike.md` §9–13과 `procedures/m5-performance.md`를 따른다. 아래는 남은 증거 요구이며 완료 표시가 아니다.
 
-원격 검증 준비: `.github/workflows/m5-package-diagnostic.yml`은 수동 macOS/Windows 진단과 `codex/m5-windows-diagnostic-20261102` 전용 브랜치 push의 Windows 진단을 제공한다. 일반 브랜치/main push는 이 workflow를 실행하지 않는다. 기본 브랜치에 파일이 없는 초기 상태에서는 사용자 승인 후 전용 브랜치에 게시해 Windows 검증을 시작할 수 있다. 현재 저장소는 공개이므로 게시하는 M5 코드/문서와 진단 artifact도 공개 범위임을 승인 전에 알린다. 미서명 진단 ZIP은3일만 보관하며 release 게시·실제 계정/모델 호출은 하지 않는다. push/원격 실행은 사용자 승인 뒤 수행한다. 이 작업의 성공만으로 Windows UI/자손 안전·서명·G6/출시 합격을 주장하지 않는다. 기존 Tauri CI/배포와 별개다.
+원격 검증 준비: `.github/workflows/m5-package-diagnostic.yml`은 수동 macOS/Windows 진단과 `codex/m5-windows-diagnostic-20261102` 전용 브랜치 push의 Windows 진단을 제공한다. 일반 브랜치/main push는 이 workflow를 실행하지 않는다. 기본 브랜치에 파일이 없는 초기 상태에서는 사용자 승인 후 전용 브랜치에 게시해 Windows 검증을 시작할 수 있다. 현재 저장소는 공개이므로 게시하는 M5 코드/문서와 진단 artifact도 공개 범위임을 승인 전에 알린다. 미서명 진단 ZIP은3일만 보관하며 release 게시·실제 계정/모델 호출은 하지 않는다. push/원격 실행은 사용자 승인 뒤 수행한다. 이 작업의 성공만으로 Windows UI/자손 안전·서명·G6/출시 합격을 주장하지 않는다.
 
 - [ ] 최신 후보의 여러 프로젝트·영속 채팅·역할 설정·코드 편집/diff·반영/복원·재시작을 패키징 앱에서 확인하고 전체 시안 비교 결과를 기록
 - [ ] macOS 실제 에이전트 입력·출력·명시 중단·자손 소멸 확인; Codex planning 1회 성공을 쓰기·승인·복구 전체 합격으로 확대하지 않음

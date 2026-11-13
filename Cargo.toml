@@ -4,7 +4,6 @@ members = [
     "crates/elsecrew-core",
     "crates/elsecrew-protocol",
     "crates/elsecrew-sidecar",
-    "src-tauri",
 ]
 
 # Large provider binaries are hashed before launch, including in the dev app.

@@ -18,14 +18,14 @@ const baselineCommands = [
   {
     id: "rust-regression",
     command: "cargo",
-    args: ["test", "--manifest-path", "src-tauri/Cargo.toml"],
+    args: ["test", "--locked", "-p", "elsecrew-core", "-p", "elsecrew-protocol"],
   },
 ];
 
 const gates = [
   {
     id: "baseline",
-    description: "현재 Tauri/React/Rust 기준선 회귀",
+    description: "Electron 화면·프런트 단위·공용 Rust 코어 기준선 회귀",
     scripts: [],
     cumulativeScripts: [],
   },

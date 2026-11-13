@@ -175,171 +175,33 @@
 
 > 2026-09-30 준비 복구: `project/snapshot_recovery.rs`는 version1 `beforeSnapshotExport` 준비만 내부 inspect/abandon으로 처리한다. project/lock 준비를 원자 저장하고 export 직전 `snapshotExportStarting`을 영속화한다. exact 신원·managed 파일 부재·chat/run 미결속 검사 뒤 Immediate 트랜잭션에서 두 revision을 다시 대조하여 project 폐기와 잠금 해제를 원자 저장한다. 파일은 삭제하지 않으며 legacy/이미 시작된 기록은 거절한다. 공개 IPC/UI와 응답 유실 처리는 아직 연결되지 않았다.
 
-> 대상 독자: 이 프로젝트에 기여하는 개발자. 제품 배경·시장 조사는 기획 문서(Obsidian) 참고.
-> 다이어그램: [시스템 구성](diagrams/architecture.excalidraw) · [위저드 플로우](diagrams/wizard-flow.excalidraw)
+> 대상 독자: 이 프로젝트에 기여하는 개발자. 옛 Tauri 설치 도우미(M0~M4)는 2026-11-13에 저장소에서 제거했다. 당시 설계는 Git 기록에서 확인한다.
 
-> 내부 실행 연결: `RunReservation::launch_proxied_codex_candidate`는 예약 역할/스냅샷에서만 실행 설정을 유도하며 원장에 process identity를 저장한 뒤 opaque proxy command의 gate를 해제한다. 해제 후 원장 저장 실패는 transport/broker를 중단하고 cleanup owner를 유지한다. 기존 offline candidate는 그대로 유지되며 어느 경로도 제품 실행 입장 권한을 제공하지 않는다.
+## 1. 시스템 구성
 
-> 2026-09-29 진단 상태: 내부 `inspect_proxied_preflight_candidate`의 실제 설치 CLI 격리 조회는 고정 OS CA 파일을 명시한 뒤 5 RPC·종료/cleanup을 통과했다. 모델 중계 경로만 root 소유·일반 파일·그룹/타인 쓰기 불가·1MiB 이하의 `/private/etc/ssl/cert.pem`을 확인하고 exact read 허용 및 `CODEX_CA_CERTIFICATE`로 전달한다. TLS 검증 비활성화나 키체인/Mach 접근 추가는 없다. 사용자 키체인의 별도 사설 CA 지원은 이 증거에 포함하지 않는다. WorkspaceAccess::ReadOnly는 workspace 쓰기 제한이지 profile 인증/캐시 불변 보장이 아니다. 실제 유료 turn·TLS/domain-fronting 경계·제품 활성화는 별도 미완료다.
-
-## 1. 목표와 비목표
-
-**목표**: 터미널을 열어본 적 없는 사용자가 앱 더블클릭 → 안내를 따라가기만 하면 Claude Code 또는 Codex가 동작하는 상태(첫 대화 성공)까지 도달하고, 이후 프로젝트와 에이전트 상태를 한곳에서 관리한다.
-
-**비목표 (MVP 기준)**:
-- ~~크로스 에이전트 지원 — 2단계~~ → **2026-07-16 스코프 변경**: Codex를 조기 편입 (위저드 0단계에서 에이전트 선택). Gemini CLI 등 추가 확장은 여전히 2단계
-- ~~영어 UI — 2단계~~ → 한국어·영어 전환 구현 완료
-- 임베디드 터미널 — 터미널 노출 0이 원칙, 닥터 기능도 해석된 한국어로만 표시
-- Linux 지원
-
-## 2. 시스템 구성
-
-M5 앱 자체 업데이트의 소스 연결은 `electron/app-update{,-menu}.ts`와 main 수명주기에 있다. 네이티브 앱 메뉴에서 명시적으로 확인·다운로드하고, 다운로드 완료 후 저장 안내/재시작 동의를 받아 기존 sidecar 안전 종료 확인이 성공한 경우에만 Electron `quitAndInstall`을 호출한다. 복구 차단·종료 오류는 설치 권한이 아니다. 현재 고정 배포 피드=null·서명 패키지 플래그=false이며 개발 앱에는 배포 준비 안내만 표시한다. 서명된 macOS 배포물·HTTPS 피드·실제 이전 버전→새 버전 시험은 미완료이고 Windows ZIP 자동 업데이트는 활성화하지 않는다. 공급자 설치/업데이트와 별도 기능이다. [Electron 공식 요구사항](https://www.electronjs.org/docs/latest/api/auto-updater)을 따른다.
-
-현재 배포 앱은 Tauri이고, M5 전환 골격은 같은 저장소에서 별도 Electron 진입점과 공용 Rust 안전 코어로 구성된다. 아직 Electron이 기본 실행·배포 경로를 대체하지는 않았다.
+Elsecrew는 비개발자가 Claude Code·Codex 팀과 대화하며 프로젝트 작업을 맡기는 데스크톱 앱이다.
 
 ```
-[React 위저드 UI (WebView)] ←invoke/이벤트→ [Tauri Core (Rust)] → [OS 셸·파일시스템·PATH]
-                                    ↑
-                          [설치 레시피 (JSON 데이터)]
-
-[M5 React + Monaco] → [typed preload] → [Electron main] ⇄ JSONL v1 ⇄ [Rust sidecar]
-       app://m5              sandboxed        │                              ├─ SQLite v1
-                                               └─ 앱 수명주기                 ├─ standalone snapshot
-                                                                              └─ elsecrew-core
+[React/TypeScript + Monaco 화면 (Electron renderer)]
+        ↕ 고정 typed IPC (preload)
+[Electron main: 창·메뉴·sidecar 수명주기·업데이트]
+        ↕ protocol v1 (stdio JSON 줄)
+[Rust safety sidecar: SQLite 원장·프로젝트/작업 공간·팀 실행·로그인/설치·반영/복원]
+        ↕ 고정 실행 계약
+[Claude Code · Codex (사용자 컴퓨터에 설치된 공급자 CLI)]
 ```
 
-| 레이어 | 역할 | 기술 |
-|---|---|---|
-| 위저드 UI | 단계 표시, 쉬운 한국어 안내, 선택 분기 | React 19 + TS, 상태 머신 |
-| Tauri Core | 환경 감지, 명령 실행, PATH 조작, 진행 이벤트 발행 | Rust + Tauri 2 플러그인(shell, os, fs) |
-| 레시피 | "무엇을 어떻게 설치·검증하는가"를 코드가 아닌 데이터로 정의 | JSON (앱 동봉, 추후 원격 갱신) |
+| 계층 | 위치 | 책임 |
+| --- | --- | --- |
+| 화면 | `src/m5/`, `src/locales/` | 작업대(작업·파일·변경·팀 대화), 설정, 알림, 한국어·영어 문구 |
+| 계약 | `src/m5/contracts/`, `crates/elsecrew-protocol` | 화면·main·sidecar 사이 메시지와 저장 형식의 정확한 검증 |
+| Electron | `electron/` | 창, preload bridge, sidecar 실행·종료, 패키징·업데이트 |
+| 안전 코어 | `crates/elsecrew-core` | 공급자 감지·실행 계약·프로세스 트리·오류 형식 |
+| sidecar | `crates/elsecrew-sidecar` | 저장(원장·투영·압축), 작업 공간 snapshot, 팀 오케스트레이션, 실제 공급자 실행, 원본 반영·복원 |
 
-**Rust 최소화 원칙**: 설치·감지 로직의 오케스트레이션은 프론트(TS)에서 레시피를 해석하며 진행하고, Rust는 Tauri 플러그인이 못 하는 것(레지스트리 조작, PATH 파일 수정 등)에만 커스텀 커맨드를 만든다. M0에서 이 경계를 확정한다.
+원칙: 작업은 원본과 분리된 작업 공간(snapshot)에서만 하고, 원본 반영은 변경을 검토한 뒤 사용자가 명시적으로 승인한다. 상세한 현재 동작은 아래 절과 `history.md`의 `핵심 결정·발견`을 따른다.
 
-## 3. 앱 구조: 홈베이스 + 위저드 상태 머신
-
-**"일회성 도구" 탈출 (2026-07-22 도입)**: 앱은 단일 선형 위저드가 아니라 **뷰가 여럿인 홈베이스**다. 편집기가 못 하는 것(고장 시 재진단, 안전한 새 프로젝트 시작, 업데이트 알림)을 제공해 재방문 이유를 만든다.
-
-```
-앱 실행
-  ├─ 프로젝트 발견 또는 준비된 에이전트 있음 → 홈
-  │                                           ├─ 프로젝트 카드 → 폴더 열기
-  │                                           ├─ "새 프로젝트" → 준비된 단계 건너뛰기
-  │                                           └─ 상태·업데이트·스캔 실패 → 인라인 닥터
-  ├─ 기준 폴더 스캔 실패 → 홈에서 원인·재시도·다른 폴더 선택
-  └─ 프로젝트와 준비된 에이전트 모두 없음 → 위저드(첫 온보딩)
-```
-
-최상위 뷰 라우팅: `home | wizard | ...`. `App.tsx`가 `view` 상태로 분기하고, 위저드는 지금의 6단계 컴포넌트를 그대로 재사용한다.
-
-### 위저드 상태 머신
-
-6단계 선형 흐름(에이전트 선택 → 진단 → 설치 → 로그인 → 첫 프로젝트 → 졸업식) + 실패 시 닥터 분기. 각 단계는 `idle → running → success | failed`.
-
-```
-에이전트 → 진단 → 설치 → 로그인 → 첫 프로젝트 → 졸업식
-   └─(실패)→ 닥터(kind별 원인·해결) → 해당 단계 재시도
-```
-
-**재방문 단축**: 설치·로그인된 에이전트가 하나면 "새 프로젝트"에서 바로 프로젝트 단계로 직행한다. 둘 다 준비됐으면 에이전트만 고른 뒤 프로젝트 단계로 이동한다.
-
-### 영속성 (홈베이스의 전제)
-
-프로젝트 목록의 진실은 사용자가 고른 기준 폴더의 **실제 디스크 상태**다. `scan_projects`가 바로 아래 하위 폴더의 `.claude`/`CLAUDE.md`/`AGENTS.md` 표식을 찾는다. `tauri-plugin-store`는 다음 보조 정보만 앱 설정 디렉터리 JSON에 저장한다.
-
-- `baseDir`: 프로젝트를 찾을 기준 폴더
-- `projects[]`: 경로별 생성·최근 사용 시각 — 스캔 결과 정렬용이며 목록 원본이 아님
-- 언어 선택은 `localStorage`의 `elsecrew.lang`에 저장
-
-에이전트 설치·로그인 상태는 저장하지 않고 **매번 실시간 감지**한다(사용자가 앱 밖에서 바꿀 수 있으므로 — 진실은 항상 시스템).
-
-- **진단**: OS/아키텍처, Node 유무(참고용), 기존 Claude Code 설치·버전, PATH 상태 감지. 이미 설치된 사용자는 설치 단계를 건너뛴다.
-- **설치**: 네이티브 인스톨러 실행(macOS: `curl | sh` 스크립트, Windows: PowerShell 스크립트)을 앱이 대행. 출력을 스트리밍으로 받아 진행률·상태 문구로 변환해 표시.
-- **로그인**: `claude auth login --claudeai`를 백그라운드 실행 → CLI가 브라우저를 열고 대비용 URL도 출력 → 사용자가 브라우저 로그인 후 받은 확인 코드를 앱 입력창에 붙여넣으면 stdin으로 전달 → `claude auth status --json`으로 완료 확인 (M0에서 검증됨, §7).
-- **첫 프로젝트**: `~/Documents/내-첫-프로젝트` 등 안전한 위치에 폴더 생성 → 안전 프리셋 적용 → 에이전트 실행 확인.
-- **졸업식**: 첫 대화 1회 성공을 확인시키고 "이제 혼자 쓸 수 있다" 상태로 종료.
-
-각 단계의 실행 내용은 레시피가 정의하므로, UI는 레시피 스텝의 종류(check/run/verify/choice)만 알면 된다.
-
-## 4. 레시피 스키마 (초안)
-
-설치 방식 변경(리스크: 벤더의 잦은 변경)에 대응하기 위한 구조.
-
-**현 구현 (2026-07-16)**: `src-tauri/src/agent.rs`의 타입化 레시피 — 에이전트별 설치 방법(클로드: 공식 스크립트 / 코덱스: GitHub 릴리즈 바이너리), 감지 후보 경로, 로그인·상태·첫 대화 명령을 enum으로 정의. 새 에이전트는 이 파일 확장으로 추가한다. 아래 JSON 외부화는 원격 갱신(앱 업데이트 없이 레시피 수정)이 필요해지는 시점에 진행.
-
-```jsonc
-{
-  "id": "claude-code",
-  "version": 1,
-  "platforms": {
-    "darwin": {
-      "detect": [ { "type": "command", "run": "claude --version", "parse": "semver" } ],
-      "install": [
-        { "type": "download-script", "url": "https://claude.ai/install.sh", "checksum": null },
-        { "type": "run", "script": "install.sh", "progressPatterns": { "다운로드": "Downloading" } }
-      ],
-      "path": { "candidates": ["~/.local/bin"], "profile": "~/.zprofile" },
-      "verify": [ { "type": "command", "run": "claude --version" } ],
-      "errors": [
-        { "match": "command not found", "explain": "설치는 됐지만 컴퓨터가 위치를 몰라요", "fix": "path-refresh" }
-      ]
-    },
-    "win32": { /* PowerShell 기반 동형 구조 */ }
-  }
-}
-```
-
-핵심 아이디어: `errors[]`가 닥터 기능의 지식 베이스를 겸한다. 삽질 사례 분류(기획 문서 A~G)에서 수집한 에러 패턴을 여기에 축적한다.
-
-## 5. 플랫폼별 전략
-
-| 항목 | macOS | Windows |
-|---|---|---|
-| 설치 실행 | `sh` 스크립트 (사용자 권한) | PowerShell 스크립트, ExecutionPolicy 우회 필요 여부 확인 |
-| PATH 반영 | `~/.zprofile`에 추가 + **앱 내 프로세스는 자체 env 갱신** (터미널 재시작 개념 자체를 없앰) | 사용자 환경변수(레지스트리 `HKCU\Environment`) + `WM_SETTINGCHANGE` 브로드캐스트 |
-| 셸 선택 혼란 | 해당 없음 (zsh 고정) | 앱이 대행하므로 사용자에게 노출 안 함 |
-| 검증 | `claude --version` 절대경로 실행 | 동일 |
-
-원칙: **PATH가 안 잡혀도 앱은 절대경로로 실행할 수 있어야 한다.** PATH 설정은 "나중에 사용자가 직접 터미널을 열 때"를 위한 것이고, 위저드 진행 자체는 PATH에 의존하지 않는다.
-
-## 6. 안전·보안 설계
-
-- **Tauri capabilities 최소화**: shell 실행은 레시피가 정의한 명령 패턴만 허용 목록에 등록. 임의 명령 실행 API를 프론트에 노출하지 않는다.
-- **안전 프리셋**: 첫 프로젝트에 적용하는 Claude Code 설정 기본값 — 자동 승인 비활성, 작업 폴더 격리(프로젝트 폴더 밖 접근 시 확인). "11GB 삭제 사건" 류의 사고 방지가 목적.
-- **다운로드 무결성**: 인스톨러 스크립트는 공식 URL 고정. 체크섬 제공 시 검증 (M1 검토).
-- **개인정보**: 앱은 계정 정보·토큰을 저장하지 않는다. 인증은 전적으로 Claude Code 자체 플로우에 위임.
-
-## 7. M0에서 검증할 가정 (실패 시 설계 변경)
-
-| # | 가정 | 실패 시 |
-|---|---|---|
-| 1 | Tauri shell 플러그인으로 인스톨러 스크립트를 실행하고 stdout/stderr를 실시간 스트리밍할 수 있다 | Rust 커스텀 커맨드로 대체, 그래도 안 되면 Electron 전환 검토 |
-| 2 | 설치 직후 앱 프로세스에서 절대경로로 `claude --version` 실행이 된다 | PATH 반영 방식 재설계 |
-| 3 | 로그인을 앱에서 트리거하고 완료를 감지할 수 있다 (`claude setup-token`의 비대화형 활용 또는 설정 파일 폴링) | "로그인은 안내만 하고 완료 확인은 검증 명령으로 대체"로 다운그레이드 |
-| 4 | Windows에서 동일 흐름이 PowerShell로 재현된다 | Windows 전용 레시피 분기 확대 |
-
-### 검증 현황 (2026-07-16)
-
-- **가정 1 — 검증됨 (설계 일부 변경)**: shell 플러그인 대신 처음부터 Rust 커스텀 커맨드(`install.rs`)로 구현. HOME 오버라이드·스트리밍·프로파일 수정이 모두 필요해 Rust 쪽이 자연스러웠음. stdout/stderr 실시간 스트리밍(Channel) 동작 확인.
-- **가정 2 — 검증됨**: 임시 HOME 격리 설치에서 `~/.local/bin/claude --version` 절대경로 실행 성공 (2.1.211).
-- **추가 발견**: 공식 install.sh는 셸 프로파일이 없으면 PATH를 건드리지 않고 안내문만 출력 → PATH 반영은 앱이 직접 수행해야 함 (`ensure_path`가 `~/.zshrc`에 추가, §5 원칙대로 위저드 진행은 PATH 비의존).
-- **가정 3 — 검증됨 (예상보다 단순)**: CLI 2.1.x가 `claude auth login/logout/status`를 공식 제공. `auth status --json`이 로그인 여부·이메일·요금제를 구조화해 반환하고, `auth login`은 TTY 없이도 로그인 URL을 출력하고 확인 코드를 stdin으로 받는다. setup-token·설정 파일 폴링 같은 우회가 불필요.
-- **추가 발견**: macOS 자격증명은 키체인(사용자 전역)에 저장되어 HOME 격리로는 로그아웃 상태를 재현할 수 없음. 미로그인 → 로그인 완료 플로우의 최종 확인은 별도 macOS 계정 또는 VM에서 필요 (실계정 logout은 사용자 세션을 끊으므로 개발 머신에서 금지).
-- **가정 4 — 검증됨 (CI, 2026-07-16)**: GitHub Actions `windows-latest` 격리 E2E에서 install.ps1 무인 실행 → `claude.exe` 절대경로 검증까지 통과. Windows 인스톨러도 macOS처럼 PATH를 등록하지 않아 `ensure_path`가 사용자 PATH(HKCU 레지스트리)에 직접 추가하며, 실제 등록 성공 확인. 함정 하나: 부모 프로세스의 `PSModulePath`가 pwsh 7 경로로 오염되면 PowerShell 5.1이 기본 cmdlet을 못 찾음 → 자식 실행 시 해당 변수 제거로 해결. Windows GUI 위저드는 실기기 수동 테스트로 확인 (2026-07-16): 설치·미로그인→로그인 플로우 동작. 이때 발견 — 브라우저에 기존 세션이 있으면 확인 코드 없이 자동 승인되는 경로가 있어, 로그인 완료를 status 폴링으로 감지하도록 수정.
-
-## 8. M4 자동 인계 파일럿 (macOS)
-
-홈의 `HandoffPilot`은 사용자가 명시적으로 고른 Git 프로젝트를 앱 데이터 아래의 폐기 가능한 복제본으로 준비한 뒤, 읽기 전용 계획 역할과 구현 역할을 순차 실행한다. 사용자는 목표를 한 번 입력하고 앱 안에서 진행 상태·결과·변경 파일을 확인한다.
-
-- `handoff.rs`: 단일 실행 슬롯, 역할 간 자동 인계, 쉬운 결과·복구 상태
-- `claude_pilot.rs` / `codex_pilot.rs`: 에이전트별 고정 실행 계약과 증거 보존
-- `proctree.rs`: `(pid, 시작 시각)` 누적 신원으로 Claude 자손 소멸을 확인하며, 확인 불가는 실행과 복제본을 `poisoned`로 잠금
-- `orchestration.rs`: 매니페스트가 있는 격리 복제본만 준비·실행·폐기
-
-파일럿은 macOS에서만 노출한다. Windows 자손 회수는 별도 게이트이며, §7.6B 품질·비용 비교와 재작업 루프·다역할 확장은 구현되지 않았다. 상세한 결정·철회·실측 근거는 `proposals/m4-orchestration.md`에 있다.
-
-## 9. M5 G1~G5D 전환 골격·채팅 작업대
+## 2. M5 작업대 구현 기록 (G1~G5D)
 
 ### 현재 검증 경계 (2026-11-02)
 
@@ -378,7 +240,7 @@ Electron main은 현재 main window의 main frame과 정확한 허용 origin만 
 
 M5는 `Electron + React/TypeScript + Monaco + Rust sidecar` 골격, 언어 중립 protocol v1, SQLite 수명주기, macOS standalone snapshot 작업대, 기존 G5 fixture 실행·복구와 테스트 전용 G5A~G5C fake actual-agent의 normalized public/terminal event·자원 예산·provider 발견/실행 전 검증·재시작 안전 복구 수직 흐름까지 구현됐다. G5D는 기존 v1 원장을 보존하면서 제품 admission의 exact storage schema v10 전환, append-only source index와 bounded lifetime materialization, V9 resume witness, V10 lossless compaction writer와 ready-only cooperative scheduler까지 연결했다. 기존 Tauri 위저드와 M4 파일럿은 계속 동작하며 Electron은 아직 기본 실행·배포 경로를 대체하지 않는다.
 
-- `crates/elsecrew-core`: Tauri/Electron을 모르는 `Agent`·`AppError`·프로세스 트리 F1~F8·Claude/Codex 실행 계약. 기존 Tauri 모듈은 좁은 re-export shim으로 이 코어를 사용한다
+- `crates/elsecrew-core`: 화면 기술을 모르는 `Agent`·`AppError`·프로세스 트리 F1~F8·Claude/Codex 실행 계약
 - **stdio 진행 공정성**: 입력이 없으면 100ms timeout에서 runtime/watch를 진행하고, 요청이 계속 오더라도 마지막 poll 이후 100ms 이상이면 응답·직접 이벤트 뒤에 한 번 진행한다. accepted/응답 선행 순서를 유지하며 요청 경로에서는 safeToQuit 이후 새 poll을 하지 않는다. 요청 handler·cleanup 자체의 비차단 보장은 별도다.
 - **여러 채팅 감시 공정성**: 한 poll에서는 정렬된 감시 키의 순환 순서로 한 watcher만 처리한다. 마지막 키가 삭제돼도 다음 키로 전진하고 끝에서는 처음으로 돌아간다. 전체 중지 시 순환 커서도 비운다. 매 선택마다 기존 Git/manifest/lock/capability 검증과 스캔 경로 재결속을 수행하며 캐시로 대체하지 않는다. 감시가 많으면 개별 변경 알림 간격은 늘어나지만 한 poll에서 모든 채팅의 Git 검사를 연달아 수행하지 않는다. 단일 Git 검사의 벽시계 상한·정식 메시지 성능 통과를 보장하는 것은 아니다.
 - **Unix 감시 검증 작업 분리**: 한 번에 하나의 소유된 worker가 고정 Git 읽기 명령만 실행한다. 완료 후 dispatcher가 현재 manifest/lock/채팅 결속·ActiveProject 값과 보관한 작업 폴더/.git FD의 dev/ino를 다시 대조하고, Git metadata·인덱스 검증과 스캔을 수행한다. `write-tree`는 index.lock을 만들 수 있어 worker에서 실행하지 않는다. 감시 교체/삭제의 이전 결과는 버리며 중지/종료는 취소 flag로 Git pipe/exit 대기를 끊고 worker를 join한다. 다른 파일·실행 요청은 기존 전체 동기 검증을 유지한다. 감시 결과는 실행/쓰기 권한 캐시가 아니다. metadata/스캔과 인덱스 검사는 여전히 dispatcher에서 수행되므로 전체 비차단 또는 성능 합격을 뜻하지 않는다.
@@ -444,7 +306,7 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 전체 native 장시간 실행, 실제 화면 자원 예산, 기존 DB 이관과 최종 안전 검토를 마쳐야 제품 활성화를 판단할 수 있다. 최신 시험 결과와 남은 게이트는 `history.md`가 기준이다.
 
-## 10. 미해결 사항
+## 3. 미해결 사항
 
 - **승인 직전 경계 후보**: 예약 owner의 `verify_approval_boundary`가 취소·현재 불변 role/input·writer 소유권·snapshot/파일 분리·exact 격리 launch scope·앱 profile·프로세스 관측 원장을 함께 검사한다. 파일 분리 스캔을 Git 검증보다 먼저 수행한다. TextSession의 AcceptOnce 제안은 이 callback을 거쳐야 하며 이후 전송마다 재검증하도록 묶었다. 일반 text-only 경로는 거절한다. Core의 실제 AcceptOnce 직렬화는 아직 차단되어 있어 이 전제 연결을 허용 기능 완료로 보지 않는다.
 
