@@ -48,6 +48,9 @@ import { requestEditorSave } from "./editor-actions.ts";
 import { languageFor } from "./editor-language.ts";
 import { ProjectCatalog } from "./project-catalog-view.tsx";
 import { WorkStatusNotice } from "./work-status-view.tsx";
+import { NotificationBell } from "./notification-bell.tsx";
+import { startNotificationFeed, type NotificationFeedBridge } from "./notification-feed.ts";
+import { NotificationCenter, osNotificationsEnabled, type AppNotification } from "./notifications.ts";
 import { validateProjectCatalogResult } from "./contracts/project-catalog-v1.ts";
 
 type MonacoApi = typeof Monaco;
@@ -264,20 +267,27 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       // Keep chat actions locked when watcher release cannot be confirmed.
     } finally { setLeavingProject(false); }
   };
-  const canRemove = admissionReady && !settingsOpen && !newChatOpen && !snapshot.actionBlocked && !snapshot.selectionBlocked && controller.canLeaveProject() && chatController.canLeaveProjectView() && !chat.loadingMoreChats && !removing;
+  // Removing from the list is the user's call; running work is stopped first.
+  const canRemove = admissionReady && !settingsOpen && !newChatOpen && !removing;
   const changeList = async (target: { projectId: string; chatId?: string }, restore = false) => {
     if (!canRemove || !window.m5Projects) return;
     setRemoving(true); setRemovalError(false);
     const wasCurrent = controller.snapshot().project?.id === target.projectId;
     try {
-      if (wasCurrent && !restore && !target.chatId) {
-        await leaveProject();
-        if (controller.snapshot().project) throw new Error("project view could not be released");
-      }
       const input = restore ? { action: "restoreChats" as const, projectId: target.projectId }
         : target.chatId ? { action: "removeChat" as const, projectId: target.projectId, chatId: target.chatId }
         : { action: "removeProject" as const, projectId: target.projectId };
+      // The sidecar hides the entry and stops what still runs there; then the
+      // open view closes even if those runs are still winding down.
       validateProjectCatalogResult(await window.m5Projects.request(input), input);
+      if (!restore) notifications.removeFor(target.projectId, target.chatId);
+      if (wasCurrent && !restore && !target.chatId && controller.snapshot().project?.id === target.projectId) {
+        await window.m5Projects.request({ action: "releaseView", projectId: target.projectId }).catch(() => undefined);
+        if (controller.snapshot().project?.id === target.projectId) {
+          chatController.clearProjectView(true);
+          controller.leaveProjectView(true);
+        }
+      }
       if (!restore && !target.chatId) setCatalogRevision(value => value + 1);
       setRemoval(null);
       if (wasCurrent && (restore || target.chatId)) {
@@ -295,6 +305,36 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     await chatController.commitPrepared(candidate.chatId, bound);
     controller.setActionBlocked(chatController.isActionBlocked());
   };
+  // Notifications: a per-viewer list of finished, waiting and stopped tasks.
+  const notifications = useMemo(() => new NotificationCenter(), []);
+  const [pendingOpen, setPendingOpen] = useState<{ projectId: string; chatId: string } | null>(null);
+  const openNotification = (item: AppNotification) => {
+    if (controller.snapshot().project?.id === item.projectId) {
+      if (chat.activeChat?.chatId !== item.chatId) void switchChat(item.chatId);
+      return;
+    }
+    if (!window.m5Projects) return;
+    setPendingOpen({ projectId: item.projectId, chatId: item.chatId });
+    void controller.reopenProject(item.projectId, input => window.m5Projects!.request(input));
+  };
+  const openNotificationRef = useRef(openNotification);
+  openNotificationRef.current = openNotification;
+  useEffect(() => {
+    if (pendingOpen && chat.projectId === pendingOpen.projectId && chat.chats.some(item => item.chatId === pendingOpen.chatId)) {
+      setPendingOpen(null);
+      if (chat.activeChat?.chatId !== pendingOpen.chatId) void switchChat(pendingOpen.chatId);
+    }
+  }, [pendingOpen, chat.projectId, chat.chats]);
+  useEffect(() => startNotificationFeed(bridge as unknown as NotificationFeedBridge, notifications, window.m5Approval, id => {
+    // A macOS banner only while the app is in the background.
+    if (document.hasFocus() || !osNotificationsEnabled() || typeof Notification === "undefined") return;
+    const item = notifications.snapshot().find(entry => entry.id === id);
+    if (!item) return;
+    try {
+      const banner = new Notification(t(`m5.notifications.kind.${item.kind}`), { body: item.text ? `${item.goal}\n${item.text}` : item.goal });
+      banner.onclick = () => { window.focus(); notifications.markRead(item.id); openNotificationRef.current(item); };
+    } catch { /* banners are optional */ }
+  }), [bridge, notifications]);
   const createChat = async () => {
     if (!snapshot.project) return;
     controller.setActionBlocked(true, { key: "m5.editorNotice.newChat" });
@@ -343,6 +383,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           </p>
         </div>
         <div className="m5-toolbar-actions">
+      <NotificationBell center={notifications} onOpen={openNotification} />
       <WorkStatusNotice feedbackTitle={chat.notice ? formatChatNotice(chat, lang) : snapshot.notice ? (snapshot.noticeKey ? t(snapshot.noticeKey) : snapshot.notice) : discardedWorkspaceNotice && !snapshot.project ? t("m5.discard.done") : undefined} hasFeedback={Boolean(chat.notice || snapshot.notice || (discardedWorkspaceNotice && !snapshot.project))} bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])}
         errorTitle={chat.error ? t(chat.error.messageKey) : snapshot.error ? t(snapshot.error.messageKey) : undefined}
         feedback={<>      {!chat.notice && !snapshot.notice && discardedWorkspaceNotice && !snapshot.project && <p className="m5-notice" role="status">{t("m5.discard.done")}</p>}

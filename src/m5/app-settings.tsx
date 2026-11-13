@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../i18n";
+import { osNotificationsEnabled, setOsNotificationsEnabled } from "./notifications.ts";
 export type SettingsSection = "general" | "roles" | "agents" | "storage" | "project";
 const settingsIcons: Record<SettingsSection, string> = {
   general: "M4 7h16M4 17h16M8 4v6M16 14v6",
@@ -19,6 +20,7 @@ export function AppSettings({ hasProject, open, section, onSection, onClose, res
   const dialog = useRef<HTMLElement>(null);
   const [updateError, setUpdateError] = useState(false);
   const [updateBusy, setUpdateBusy] = useState(false);
+  const [osBanners, setOsBanners] = useState(() => osNotificationsEnabled());
   useEffect(() => {
     if (open) dialog.current?.focus();
   }, [open]);
@@ -39,6 +41,7 @@ export function AppSettings({ hasProject, open, section, onSection, onClose, res
         <section hidden={section !== "general"}><h3>{t("m5.preferences.general")}</h3>
           <div className="m5-settings-group">
             <label className="m5-preferences-row"><span><strong>{t("m5.shell.language")}</strong><small>{t("m5.shell.languageScope")}</small></span><select value={lang} onChange={event => setLang(event.target.value === "en" ? "en" : "ko")}><option value="ko">한국어</option><option value="en">English</option></select></label>
+            <label className="m5-preferences-row"><span><strong>{t("m5.notifications.osBanner")}</strong><small>{t("m5.notifications.osBannerHelp")}</small></span><input type="checkbox" checked={osBanners} onChange={event => { setOsBanners(event.target.checked); setOsNotificationsEnabled(event.target.checked); }} /></label>
             <div className="m5-preferences-row"><span><strong>{t("m5.preferences.updates")}</strong><small>{t("m5.preferences.updateHelp")}</small></span>
               <button type="button" className="m5-secondary" disabled={!window.m5AppUpdate || updateBusy} onClick={async () => {
                 setUpdateError(false); setUpdateBusy(true);

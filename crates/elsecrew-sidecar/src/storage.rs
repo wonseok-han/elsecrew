@@ -844,22 +844,45 @@ impl Storage {
 
     pub fn blocker_ids(&self) -> Result<Vec<String>, SidecarError> {
         let projection = load_projection(&self.connection)?;
-        let mut blockers = BTreeSet::new();
-        for (run_id, run) in projection.runs {
-            if run
-                .get("state")
-                .and_then(Value::as_str)
-                .is_some_and(|state| {
-                    ["preparing", "running", "cancelling", "recoveryRequired"].contains(&state)
+        // A task or project the user removed from the list keeps its records,
+        // but its leftover recovery no longer holds up quitting or other
+        // projects. Live runs still count until they end. Re-adding the folder
+        // makes the entry, and its recovery, visible again.
+        let hidden_chat = |chat_id: &str| {
+            projection.chats.get(chat_id).is_some_and(|chat| {
+                let project = chat.get("project_id").and_then(Value::as_str).and_then(|id| projection.projects.get(id));
+                project.is_some_and(|project| {
+                    project.get("catalog_hidden").and_then(Value::as_bool) == Some(true)
+                        || project.get("catalog_hidden_chats").and_then(Value::as_array).is_some_and(|ids| ids.iter().any(|id| id == chat_id))
                 })
-            {
+            })
+        };
+        // A workspace counts as hidden only when every task using it is.
+        let hidden_worktree = |project_id: Option<&str>, worktree: Option<&str>| {
+            let users: Vec<&String> = projection.chats.iter()
+                .filter(|(_, chat)| worktree.is_some() && chat.get("worktree_id").and_then(Value::as_str) == worktree)
+                .map(|(chat_id, _)| chat_id)
+                .collect();
+            project_id.and_then(|id| projection.projects.get(id)).is_some_and(|project| project.get("catalog_hidden").and_then(Value::as_bool) == Some(true))
+                || (!users.is_empty() && users.iter().all(|chat_id| hidden_chat(chat_id)))
+        };
+        let mut blockers = BTreeSet::new();
+        for (run_id, run) in &projection.runs {
+            let Some(state) = run.get("state").and_then(Value::as_str) else { continue };
+            let live = ["preparing", "running", "cancelling"].contains(&state);
+            let leftover = state == "recoveryRequired"
+                && !run.get("chat_id").and_then(Value::as_str).is_some_and(hidden_chat);
+            if live || leftover {
                 blockers.insert(format!("run:{run_id}"));
             }
         }
-        for (lock_id, lock) in projection.locks {
-            let poisoned = required_bool(&lock, "poisoned")?;
-            let recovery_required = required_bool(&lock, "recovery_required")?;
-            if poisoned || recovery_required {
+        for (lock_id, lock) in &projection.locks {
+            let poisoned = required_bool(lock, "poisoned")?;
+            let recovery_required = required_bool(lock, "recovery_required")?;
+            let worktree = lock_id.strip_prefix("lock_");
+            if (poisoned || recovery_required)
+                && !hidden_worktree(lock.get("project_id").and_then(Value::as_str), worktree)
+            {
                 blockers.insert(format!("lock:{lock_id}"));
             }
         }

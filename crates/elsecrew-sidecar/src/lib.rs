@@ -1468,14 +1468,22 @@ impl Sidecar {
                         .map(|()| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"abandonPreparation","inspection":inspection}), ..Default::default() })
                 }
                 Some("removeProject" | "removeChat" | "restoreChats") => {
-                    if !self.workflow_chats.is_empty() || !self.agent_runtime.owned_run_ids().is_empty() || !self.pending_agent_starts.is_empty() || !self.pending_agent_cancels.is_empty() {
-                        return Ok(HandledRequest::response(error_response(&request, "requestBlocked", "requestBlocked", "list removal requires idle agent execution")));
-                    }
                     let action = request.params["action"].as_str().unwrap();
                     let fields: &[&str] = if action == "removeChat" { &["action", "projectId", "chatId"] } else { &["action", "projectId"] };
                     let params = require_exact_params(&request.params, fields).map_err(invalid_params)?;
                     let chat_id = if action == "removeChat" { Some(param_string(params, "chatId").map_err(invalid_params)?) } else { None };
-                    self.projects.change_catalog_visibility(&mut self.storage, param_string(params, "projectId").map_err(invalid_params)?, chat_id, action, &request.request_id)
+                    let project_id = param_string(params, "projectId").map_err(invalid_params)?;
+                    // Removal is the user's call: hide it, then stop what still
+                    // runs in that scope. Nothing on disk is deleted.
+                    let changed = self.projects.change_catalog_visibility(&mut self.storage, project_id, chat_id, action, &request.request_id);
+                    if changed.is_ok() && action != "restoreChats" {
+                        // Hidden is the user's result; a stop that could not be
+                        // recorded leaves the runs to their ordinary owners.
+                        if let Err(error) = self.stop_sessions_for_removal(project_id, chat_id) {
+                            eprintln!("list removal could not stop every session: {}", error.kind);
+                        }
+                    }
+                    changed
                 }
                 Some("releaseView") => {
                     let params = require_exact_params(&request.params, &["action", "projectId"])

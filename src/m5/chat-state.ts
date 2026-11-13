@@ -181,8 +181,9 @@ export class ChatUiController {
       && !Object.values(this.#state.followups ?? {}).some(draft => draft.sending);
   }
 
-  clearProjectView(): boolean {
-    if (!this.canLeaveProjectView()) return false;
+  /** `force` closes the view even while runs are still stopping (list removal). */
+  clearProjectView(force = false): boolean {
+    if (this.#disposed || (!force && !this.canLeaveProjectView())) return false;
     this.#generation++;
     this.#pending = null;
     this.#set({ projectId: null, settings: null, chats: [], nextChatCursor: null, loadingMoreChats: false,

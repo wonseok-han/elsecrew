@@ -6105,13 +6105,28 @@ fn catalog_removal_preserves_source_and_restores_after_selection() {
 }
 
 #[test]
-fn catalog_removal_rejects_recovery_and_keeps_visibility() {
+fn catalog_removal_hides_a_project_that_still_needs_recovery() {
+    // Hiding is the user's call; the recovery record itself is untouched.
     let mut f = Fixture::open();
     let mut project = required_project(&f.storage, &f.project_id).unwrap();
     project.insert("lifecycle".into(), json!("recoveryRequired"));
     append_object(&mut f.storage, "project", &f.project_id, "op_test_recovery", "req_test_recovery", Value::Object(project)).unwrap();
-    assert!(f.manager.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_hide").is_err());
-    assert_eq!(f.manager.list_saved_projects(&f.storage, None).unwrap().result["projects"].as_array().unwrap().len(), 1);
+    f.manager.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_hide").unwrap();
+    assert!(f.manager.list_saved_projects(&f.storage, None).unwrap().result["projects"].as_array().unwrap().is_empty());
+    assert_eq!(required_project(&f.storage, &f.project_id).unwrap()["lifecycle"], "recoveryRequired");
+}
+
+#[test]
+fn catalog_removal_waits_only_for_a_half_written_original() {
+    let mut f = Fixture::open();
+    for (state, allowed) in [("applying", false), ("prepared", true), ("applied", true)] {
+        let mut project = required_project(&f.storage, &f.project_id).unwrap();
+        project.insert("catalog_hidden".into(), json!(false));
+        project.insert("application_intent".into(), json!({"state": state}));
+        append_object(&mut f.storage, "project", &f.project_id, &format!("op_intent_{state}"), &format!("req_intent_{state}"), Value::Object(project)).unwrap();
+        let result = f.manager.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", &format!("req_hide_{state}"));
+        assert_eq!(result.is_ok(), allowed, "{state}");
+    }
 }
 
 #[cfg(unix)]

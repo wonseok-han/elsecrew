@@ -250,6 +250,73 @@ impl Sidecar {
         }
     }
 
+    /// Removing a task or project from the list is the user's decision. Stop
+    /// what is still running in that scope first: a running team stops before
+    /// its next step and an active agent run is asked to cancel. Termination
+    /// proof keeps arriving through the ordinary run owner afterwards.
+    pub(super) fn stop_sessions_for_removal(
+        &mut self,
+        project_id: &str,
+        chat_id: Option<&str>,
+    ) -> Result<(), ProjectFailure> {
+        let mut first_error = None;
+        for chat in self.storage.projection_records("chat")? {
+            let Some(id) = chat.get("chat_id").and_then(Value::as_str).map(str::to_owned) else { continue };
+            if chat.get("project_id").and_then(Value::as_str) != Some(project_id)
+                || chat_id.is_some_and(|wanted| wanted != id)
+            {
+                continue;
+            }
+            // One task that cannot be stopped must not leave the others running.
+            if let Err(error) = self.stop_one_for_removal(&id) {
+                first_error.get_or_insert(error);
+            }
+            self.workflow_chats.remove(&id);
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    fn stop_one_for_removal(&mut self, id: &str) -> Result<(), ProjectFailure> {
+        let Some(mut payload) = self.storage.projection_record("chat", id)? else { return Ok(()) };
+        let field = |payload: &Map<String, Value>, key: &str| payload["record"][key].as_str().unwrap_or_default().to_owned();
+        let identity = |payload: &Map<String, Value>, run_id: &str| agent_runtime::RunIdentity {
+            chat_id: id.to_owned(),
+            task_id: field(payload, "taskId"),
+            project_id: field(payload, "projectId"),
+            worktree_id: field(payload, "worktreeId"),
+            workspace_identity: field(payload, "workspaceIdentity"),
+            run_id: run_id.to_owned(),
+        };
+        let mut stopping = false;
+        for run in self.storage.projection_records("run")? {
+            let Some(run_id) = run.get("run_id").and_then(Value::as_str) else { continue };
+            if run.get("chat_id").and_then(Value::as_str) == Some(id) && self.agent_runtime.has_active_run(run_id) {
+                // Best effort: a run already winding down may refuse a second
+                // cancel, and the team below must still stop.
+                stopping |= self.agent_runtime.request_cancel(&identity(&payload, run_id)).is_ok();
+            }
+        }
+        if let Some(mut state) = orchestration::load(&payload)? {
+            if state.status == "running" {
+                state.status = "canceled".into();
+                orchestration::put(&mut payload, &state)?;
+                if !stopping && payload["record"]["state"] != "recoveryRequired" {
+                    payload["record"]["state"] = json!("canceled");
+                    payload.insert("state".into(), json!("canceled"));
+                }
+                self.storage.upsert_projection_record(
+                    "chat",
+                    id,
+                    &format!("op_workflow_remove_{}", Uuid::new_v4().simple()),
+                    None,
+                    payload,
+                )?;
+                orchestration::notice(&mut self.storage, id, "목록에서 지워 팀 작업을 중단했어요.")?;
+            }
+        }
+        Ok(())
+    }
+
     fn workflow_request(&self, id: String, method: &str, params: Value) -> RequestV1 {
         RequestV1 {
             protocol_version: PROTOCOL_VERSION,
@@ -954,6 +1021,41 @@ mod tests {
     }
 
     #[test]
+    fn removing_a_running_task_stops_its_team_and_run_then_hides_it() {
+        let (_root, mut sidecar, chat) = service();
+        assert!(start(&mut sidecar, &chat).ok);
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::CancelClean);
+        let id = chat["chatId"].as_str().unwrap();
+        let project_id = chat["projectId"].as_str().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let run_id = loop {
+            sidecar.poll_runtime_events().unwrap();
+            let state = sidecar.workflow_state(id).unwrap();
+            if let Some(run_id) = state.run_id.filter(|run_id| sidecar.agent_runtime.has_active_run(run_id)) {
+                break run_id;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let request = sidecar.workflow_request(
+            "req_remove_running".into(),
+            "project.catalog",
+            json!({"action":"removeChat","projectId":project_id,"chatId":id}),
+        );
+        let response = sidecar.handle_request(request).unwrap().response.unwrap();
+        assert!(response.ok, "{:?}", response.error);
+        assert_eq!(sidecar.workflow_state(id).unwrap().status, "canceled");
+        assert!(sidecar.g5.list_chats(&sidecar.storage, project_id, None, 100).unwrap()["items"].as_array().unwrap().is_empty());
+        // The run ends through its ordinary owner with real termination proof.
+        while !sidecar.agent_runtime.owned_run_ids().is_empty() {
+            sidecar.poll_runtime_events().unwrap();
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(sidecar.storage.projection_record("run", &run_id).unwrap().unwrap()["record"]["state"], "canceled");
+    }
+
+    #[test]
     fn orchestration_dispatch_cancel_worker_stops_the_whole_team() {
         let (_root, mut sidecar, chat) = service();
         assert!(start(&mut sidecar, &chat).ok);
@@ -1051,16 +1153,6 @@ mod tests {
             .append_user_message(&mut sidecar.storage, &sidecar.projects, &append)
             .is_err());
         assert_eq!(sidecar.storage.chat_message_history(id).unwrap().len(), 1);
-        assert!(sidecar
-            .projects
-            .change_catalog_visibility(
-                &mut sidecar.storage,
-                chat["projectId"].as_str().unwrap(),
-                Some(id),
-                "removeChat",
-                "req_hidden"
-            )
-            .is_err());
         let mut ready = sidecar.ready.clone();
         ready.sidecar_instance_id = "orchestration_reopened".into();
         drop(sidecar);

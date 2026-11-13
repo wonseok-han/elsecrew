@@ -1211,3 +1211,26 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-project-permissions .m5-storage-actions { margin-top: 16px; }
 .m5-project-permissions [role=alert] { margin: 12px 0 0; }
 .m5-first-chat-setup .m5-project-permissions { margin: 16px 0; }
+/* Notifications: a bell with an unread count and a newest-first list. */
+.m5-notification-bell { position: relative; }
+.m5-notification-bell > summary { position: relative; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; color: var(--m5-muted); cursor: pointer; list-style: none; }
+.m5-notification-bell > summary::-webkit-details-marker { display: none; }
+.m5-notification-bell > summary:hover, .m5-notification-bell[open] > summary { background: var(--m5-raised); color: var(--m5-text); }
+.m5-notification-bell > summary svg { width: 18px; height: 18px; }
+.m5-notification-count { position: absolute; top: 2px; right: 1px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--m5-action-bg); color: var(--m5-action-text); font-size: 10px; line-height: 16px; font-weight: 600; text-align: center; }
+.m5-notification-panel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 40; width: min(380px, calc(100vw - 32px)); max-height: min(70vh, 520px); overflow: auto; border: 1px solid var(--m5-border-strong); border-radius: 12px; background: var(--m5-surface); box-shadow: 0 16px 48px #0008; }
+.m5-notification-panel > header { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--m5-border); background: var(--m5-surface); }
+.m5-notification-panel h3 { margin: 0; font-size: 14px; }
+.m5-notification-panel ul { margin: 0; padding: 6px; list-style: none; }
+.m5-notification-empty { margin: 0; padding: 24px 16px; color: var(--m5-muted); font-size: 12px; text-align: center; }
+.m5-notification-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; width: 100%; padding: 10px 12px; border: 0; border-radius: 8px; background: transparent; color: var(--m5-text); text-align: left; cursor: pointer; }
+.m5-notification-item:hover { background: var(--m5-raised); }
+.m5-notification-kind { grid-column: 1; font-size: 11px; font-weight: 600; color: var(--m5-muted); }
+.m5-notification-item time { grid-column: 2; grid-row: 1; font-size: 11px; color: var(--m5-muted); }
+.m5-notification-item strong { grid-column: 1 / -1; font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m5-notification-text { grid-column: 1 / -1; font-size: 12px; line-height: 1.5; color: var(--m5-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.m5-notification-unread .m5-notification-kind::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 3px; background: var(--m5-action-bg); vertical-align: 1px; }
+.m5-notification-done .m5-notification-kind { color: #8fd6a4; }
+.m5-notification-attention .m5-notification-kind { color: #f0b86e; }
+.m5-notification-stopped .m5-notification-kind { color: #f29b9b; }
+.m5-status-notice > summary .m5-status-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 360px; }

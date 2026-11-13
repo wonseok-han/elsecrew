@@ -6558,7 +6558,7 @@ fn catalog_removal_hides_and_restores_chat_without_changing_records() {
 }
 
 #[test]
-fn catalog_removal_of_idle_chat_does_not_hide_sibling_recovery() {
+fn catalog_removal_hides_any_chat_or_project_and_leaves_records_intact() {
     let mut f = Fixture::new();
     let snapshot = f.snapshot("req_sibling_snapshot");
     let healthy = f.create_chat(&snapshot, "healthy", "req_healthy_chat");
@@ -6569,69 +6569,78 @@ fn catalog_removal_of_idle_chat_does_not_hide_sibling_recovery() {
     let mut record = f.storage.projection_record("chat", recovery_id).unwrap().unwrap();
     record.insert("state".into(), json!("recoveryRequired"));
     record["record"]["state"] = json!("recoveryRequired");
-    f.storage.upsert_projection_record("chat", recovery_id, "op_sibling_recovery", None, record.clone()).unwrap();
-    let record = f.storage.projection_record("chat", recovery_id).unwrap().unwrap();
-    let sibling_lock_id = format!("lock_{}", recovery["worktreeId"].as_str().unwrap());
-    let mut lock = f.storage.projection_record("lock", &sibling_lock_id).unwrap().unwrap();
+    f.storage.upsert_projection_record("chat", recovery_id, "op_sibling_recovery", None, record).unwrap();
+    let lock_id = format!("lock_{}", recovery["worktreeId"].as_str().unwrap());
+    let mut lock = f.storage.projection_record("lock", &lock_id).unwrap().unwrap();
     lock.insert("poisoned".into(), json!(true));
-    f.storage.upsert_projection_record("lock", &sibling_lock_id, "op_sibling_poison", None, lock).unwrap();
-    let healthy_lock_id = format!("lock_{}", healthy["worktreeId"].as_str().unwrap());
-    let healthy_lock = f.storage.projection_record("lock", &healthy_lock_id).unwrap().unwrap();
-    let mut unknown = healthy_lock.clone();
-    unknown.insert("lock_id".into(), json!("lock_unknown"));
-    unknown.insert("poisoned".into(), json!(true));
-    f.storage.upsert_projection_record("lock", "lock_unknown", "op_unknown_lock", None, unknown.clone()).unwrap();
-    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(healthy_id), "removeChat", "req_unknown_lock").is_err());
-    unknown.insert("poisoned".into(), json!(false));
-    f.storage.upsert_projection_record("lock", "lock_unknown", "op_unknown_reset", None, unknown).unwrap();
-    let mut shared = record.clone();
-    shared.insert("worktree_id".into(), healthy["worktreeId"].clone());
-    f.storage.upsert_projection_record("chat", recovery_id, "op_shared_workspace", None, shared).unwrap();
-    let mut poisoned = healthy_lock.clone(); poisoned.insert("poisoned".into(), json!(true));
-    f.storage.upsert_projection_record("lock", &healthy_lock_id, "op_shared_poison", None, poisoned).unwrap();
-    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(healthy_id), "removeChat", "req_shared_poison").is_err());
-    f.storage.upsert_projection_record("lock", &healthy_lock_id, "op_shared_reset", None, healthy_lock).unwrap();
-    f.storage.upsert_projection_record("chat", recovery_id, "op_chat_reset", None, record).unwrap();
+    f.storage.upsert_projection_record("lock", &lock_id, "op_sibling_poison", None, lock).unwrap();
     let record = f.storage.projection_record("chat", recovery_id).unwrap().unwrap();
+    // Removal is the user's call: recovery, poisoned locks and siblings never block it.
     f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(healthy_id), "removeChat", "req_hide_healthy").unwrap();
     let page = f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap();
     assert_eq!(page["items"].as_array().unwrap().len(), 1);
     assert_eq!(page["items"][0]["chatId"], recovery_id);
+    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(recovery_id), "removeChat", "req_hide_recovery").unwrap();
+    assert!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"].as_array().unwrap().is_empty());
+    // Hiding never rewrites the chat's own record.
     assert_eq!(f.storage.projection_record("chat", recovery_id).unwrap().unwrap(), record);
-    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(recovery_id), "removeChat", "req_hide_recovery").is_err());
-    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_hide_all").is_err());
+    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_hide_all").unwrap();
+    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some("chat_missing"), "removeChat", "req_missing").is_err());
 }
 
 #[test]
-fn catalog_removal_refuses_runs_locks_and_nonmember_chat() {
+fn catalog_removal_hides_despite_unfinished_runs_and_held_locks() {
     let mut f = Fixture::new();
     let snapshot = f.snapshot("req_guard_snapshot");
     let chat = f.create_chat(&snapshot, "guard removal", "req_guard_chat");
     let chat_id = chat["chatId"].as_str().unwrap();
-    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some("chat_missing"), "removeChat", "req_missing").is_err());
     let cases: Value = serde_json::from_str(include_str!("../../../../tests/fixtures/m5/g5-v1/cases.json")).unwrap();
     let mut run = cases["valid"].as_array().unwrap().iter().find(|case| case["name"] == "valid-cancel-transition").unwrap()["value"]["after"].clone();
     for field in ["chatId", "taskId", "worktreeId", "workspaceIdentity"] { run[field] = chat[field].clone(); }
     run["runId"] = json!("run_hide_guard");
     persist_run(&mut f.storage, &run, &snapshot, None, "op_hide_guard").unwrap();
     let original = run_projection_record(&f.storage, "run_hide_guard").unwrap();
-    for state in ["preparing", "running", "cancelling", "recoveryRequired"] {
-        let mut changed = original.clone(); changed.insert("state".into(), json!(state)); changed["record"]["state"] = json!(state);
-        f.storage.upsert_projection_record("run", "run_hide_guard", &format!("op_hide_{state}"), None, changed).unwrap();
-        assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(chat_id), "removeChat", &format!("req_hide_{state}")).is_err());
-    }
-    let mut unresolved = original.clone(); unresolved.insert("recovery".into(), json!({"state":"unresolved"}));
-    f.storage.upsert_projection_record("run", "run_hide_guard", "op_hide_unresolved", None, unresolved).unwrap();
-    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_hide_unresolved").is_err());
-    f.storage.upsert_projection_record("run", "run_hide_guard", "op_hide_terminal", None, original).unwrap();
+    let mut running = original.clone(); running.insert("state".into(), json!("running")); running["record"]["state"] = json!("running");
+    f.storage.upsert_projection_record("run", "run_hide_guard", "op_hide_running", None, running.clone()).unwrap();
     let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
-    let lock = f.storage.projection_record("lock", &lock_id).unwrap().unwrap();
-    for (field, value) in [("poisoned", json!(true)), ("recovery_required", json!(true)), ("writer_run_id", json!("run_hide_guard"))] {
-        let mut changed = lock.clone(); changed.insert(field.into(), value);
-        f.storage.upsert_projection_record("lock", &lock_id, &format!("op_hide_lock_{field}"), None, changed).unwrap();
-        assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", &format!("req_hide_lock_{field}")).is_err());
-    }
-    assert_eq!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"][0]["chatId"], chat_id);
+    let mut lock = f.storage.projection_record("lock", &lock_id).unwrap().unwrap();
+    lock.insert("writer_run_id".into(), json!("run_hide_guard"));
+    f.storage.upsert_projection_record("lock", &lock_id, "op_hide_lock", None, lock).unwrap();
+    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(chat_id), "removeChat", "req_hide_running").unwrap();
+    assert!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"].as_array().unwrap().is_empty());
+    // The run keeps its own record; its owner still decides how it ends.
+    let kept = run_projection_record(&f.storage, "run_hide_guard").unwrap();
+    assert_eq!((&kept["state"], &kept["record"]), (&running["state"], &running["record"]));
+    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_hide_project").unwrap();
+}
+
+#[test]
+fn hidden_leftover_recovery_stops_blocking_but_live_runs_still_do() {
+    let mut f = Fixture::new();
+    let snapshot = f.snapshot("req_blocker_snapshot");
+    let chat = f.create_chat(&snapshot, "blocker", "req_blocker_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let cases: Value = serde_json::from_str(include_str!("../../../../tests/fixtures/m5/g5-v1/cases.json")).unwrap();
+    let mut run = cases["valid"].as_array().unwrap().iter().find(|case| case["name"] == "valid-cancel-transition").unwrap()["value"]["after"].clone();
+    for field in ["chatId", "taskId", "worktreeId", "workspaceIdentity"] { run[field] = chat[field].clone(); }
+    run["runId"] = json!("run_blocker");
+    persist_run(&mut f.storage, &run, &snapshot, None, "op_blocker").unwrap();
+    let original = run_projection_record(&f.storage, "run_blocker").unwrap();
+    let with_state = |state: &str| { let mut changed = original.clone(); changed.insert("state".into(), json!(state)); changed["record"]["state"] = json!(state); changed };
+    f.storage.upsert_projection_record("run", "run_blocker", "op_blocker_recovery", None, with_state("recoveryRequired")).unwrap();
+    let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
+    let mut lock = f.storage.projection_record("lock", &lock_id).unwrap().unwrap();
+    lock.insert("poisoned".into(), json!(true));
+    f.storage.upsert_projection_record("lock", &lock_id, "op_blocker_lock", None, lock).unwrap();
+    let blockers = f.storage.blocker_ids().unwrap();
+    assert!(blockers.contains(&"run:run_blocker".to_string()) && blockers.contains(&format!("lock:{lock_id}")));
+    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(chat_id), "removeChat", "req_blocker_hide").unwrap();
+    assert!(f.storage.blocker_ids().unwrap().is_empty(), "a removed task's leftover recovery must not hold up quitting");
+    f.storage.upsert_projection_record("run", "run_blocker", "op_blocker_running", None, with_state("running")).unwrap();
+    assert!(f.storage.blocker_ids().unwrap().contains(&"run:run_blocker".to_string()), "a live run still counts until it ends");
+    f.storage.upsert_projection_record("run", "run_blocker", "op_blocker_recovery_again", None, with_state("recoveryRequired")).unwrap();
+    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "restoreChats", "req_blocker_restore").unwrap();
+    assert!(f.storage.blocker_ids().unwrap().contains(&"run:run_blocker".to_string()), "showing the task again shows its recovery again");
 }
 
 #[test]

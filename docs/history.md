@@ -2,6 +2,20 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 목록 지우기는 항상 허용, 순수 알림 기능
+- 사용자 결정 1(목록 지우기): 작업·프로젝트 지우기는 사용자 의지이므로 항상 가능해야 한다. 그 범위의 세션은 종료한다. 종료 확인이 안 돼도 그냥 지운다. 지우기는 기존처럼 목록 숨김이며 디스크 데이터는 지우지 않는다.
+  - sidecar: 앱 전체 유휴 조건과 준비 중·복구 필요·저장 세션·실행 비종결·잠금·lifecycle 차단을 없앴다. 남긴 거절은 원본 반영 중(`application_running`), 반쯤 쓰인 원본(`application_intent.state == "applying"`), 반영 확인 창 세 가지다(원본 보호).
+  - 숨김에 성공하면 `stop_sessions_for_removal`이 채팅마다 따로 처리해 하나가 실패해도 계속 진행한다. 활성 run에는 best-effort `request_cancel`을 보내고, running 팀 작업은 canceled로 바꾼 뒤 notice를 남기고 `workflow_chats`에서 뺀다. stop 실패는 로그만 남기고 성공으로 응답한다.
+  - `blocker_ids`: 숨긴 프로젝트·채팅에 속한 `recoveryRequired` run과 오염되거나 복구가 필요한 잠금은 앱 종료와 다른 프로젝트의 반영을 막지 않는다. 잠금은 그 작업 공간을 쓰는 채팅이 모두 숨겨졌을 때만 제외한다. preparing·running·cancelling run은 계속 막는다. 다시 표시하면 다시 막는다. 원본 반영 단계는 대상 작업 공간 잠금을 직접 재확인하므로 안전 판단이 유지된다(검토자 확인).
+  - UI: `canRemove`를 다른 창이 열려 있거나 지우는 중일 때로 줄였다. 현재 프로젝트를 지우면 숨김 → releaseView → 채팅 뷰와 편집기 뷰를 강제로 닫는다(대상 id 재확인, 저장 안 한 편집은 버림). 지운 작업·프로젝트의 알림도 목록에서 뺀다.
+  - 독립 검토 2회: 1차 차단 3건(취소 실패 시 정리 중단, 숨김 뒤 오류 응답, 숨긴 복구가 종료와 다른 반영을 막음)을 반영했다. 2차에서 내 수정(`#snapshotCreationBlocked` 초기화)이 프로젝트 선택을 영구히 막는다는 차단 1건이 나와 되돌렸다.
+  - 미반영 권고: v1 채팅의 시작 대기 run, 선택 중인 채팅을 지워도 화면 유지, 중단 notice 이벤트 미전달. 숨긴 프로젝트의 미확인 프로세스가 있어도 다른 프로젝트 반영이 진행되는 점은 에이전트가 작업 복사본 밖을 쓰지 못한다는 기존 격리 전제에 기댄다.
+- 사용자 결정 2(알림): 종 아이콘은 순수 알림이다.
+  - 알림 대상: 작업 완료·답변 도착(총괄 run 성공 뒤 채팅이 waitingForUser·completed·reviewReady), 확인 필요(공개 이벤트 question, 이번 세션에서 실행 중으로 본 run의 승인 대기를 2초 간격 조회), 중단·실패(run failed·recoveryRequired, 팀 일시정지 status 메시지와 채팅 needsAttention·recoveryRequired).
+  - 목록: 최신순, 안 읽은 개수, 누르면 그 작업으로 이동(다른 프로젝트면 reopen 후 전환), 모두 읽음. 이 컴퓨터의 localStorage에 최근 50개를 보관한다(`notifications.ts`, `notification-feed.ts`, `notification-bell.tsx`).
+  - 앱이 포커스가 아닐 때는 macOS 배너를 띄운다(설정 › 일반에서 끄기). 기존 종에 있던 안내·오류·작업 상태는 내용이 있을 때만 보이는 상단 안내 띠로 옮겼다(`진행 및 복구 상태` 구역은 유지).
+- 검증: tsc 통과, 프런트741(새 `m5-notifications` 4개 포함) 통과, renderer smoke·권한UI 통과, 알림 화면 캡처 확인. Rust 전체(--no-fail-fast) protocol69·sidecar lib793·stdio 통합16 통과(실패 0).
+
 ### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 응답 언어 규칙 명문화
 - 사용자 지시: 응답을 한국어로만 하도록 `CLAUDE.md`와 `AGENTS.md`의 맨 앞(인계 규칙 앞)에 `응답 언어 — 최우선` 절을 같은 내용으로 추가했다. 모든 사용자 메시지는 첫 문장부터 한국어로 쓴다. 영어 도구 출력이나 하위 보고의 언어를 따라가지 않는다. 식별자·명령·경로·원문 오류 인용만 원문을 유지한다. 하위 에이전트에게도 한국어 보고를 지시한다.
 

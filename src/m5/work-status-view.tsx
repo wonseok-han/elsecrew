@@ -36,14 +36,16 @@ export function WorkStatusNotice({ bridge, ready, refreshKey, feedback, errors, 
   }, [bridge, ready, refreshKey, refresh]);
   const hasWorkStatus = ready && bridge.version >= 6 && (summary !== null || failed);
   const attention = Boolean(errorTitle || failed || hasWorkStatus);
-  return <details className={`m5-status-strip m5-notifications${attention ? " m5-status-strip-attention" : ""}`}>
-    <summary title={t("m5.notifications.title")} aria-label={`${t("m5.notifications.title")}${errorTitle || feedbackTitle ? ` · ${errorTitle || feedbackTitle}` : attention ? ` · ${t("m5.notifications.attention")}` : ""}`}>
-      <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
-      {(attention || hasFeedback) && <span className="m5-status-indicator" aria-hidden="true" />}
-      <span className="m5-sr-only" role="status">{errorTitle || feedbackTitle || (failed ? t("m5.work.failed") : hasWorkStatus ? t("m5.work.active") : "")}</span>
+  // App notices, errors and recovery status: shown only while there is one.
+  // Task notifications live in the bell (`NotificationBell`).
+  if (!attention && !hasFeedback) return null;
+  const label = errorTitle || feedbackTitle || (failed ? t("m5.work.failed") : t("m5.work.active"));
+  return <details className={`m5-status-strip m5-status-notice${attention ? " m5-status-strip-attention" : ""}`}>
+    <summary title={label} aria-label={`${t("m5.statusStrip.title")} · ${label}`}>
+      <span className="m5-status-indicator" aria-hidden="true" />
+      <span className="m5-status-label" role="status">{label}</span>
     </summary>
-    <div className="m5-status-content"><h3>{t("m5.notifications.title")}</h3>
-      {!attention && !hasFeedback && <p>{t("m5.notifications.empty")}</p>}
+    <div className="m5-status-content"><h3>{t("m5.statusStrip.title")}</h3>
       {errors}
       <div className="m5-inline-feedback">{feedback}</div>
       {hasWorkStatus && <section aria-label={t("m5.work.title")} aria-busy={busy}>

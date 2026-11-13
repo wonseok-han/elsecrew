@@ -717,8 +717,9 @@ export class ProjectEditorController {
   }
 
   /** Leave the view without abandoning the durable snapshot or its chat. */
-  leaveProjectView(): boolean {
-    if (this.#disposed || this.#actionBlocked || this.#snapshotCreation || this.#snapshotCreationBlocked || !this.canLeaveProject()) return false;
+  /** `discardDrafts` closes even with unsaved edits or pending work (list removal). */
+  leaveProjectView(discardDrafts = false): boolean {
+    if (this.#disposed || (!discardDrafts && (this.#actionBlocked || this.#snapshotCreation || this.#snapshotCreationBlocked || !this.canLeaveProject()))) return false;
     this.#selectionGeneration++;
     this.#projectEpoch++;
     this.#saveGenerations.clear();
