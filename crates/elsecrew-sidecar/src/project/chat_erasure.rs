@@ -143,6 +143,9 @@ impl ProjectManager {
             }
             let project_id = chat["project_id"].as_str().ok_or_else(denied)?;
             let project = registered_project(storage, project_id)?;
+            if super::project_deletion::is_deleted(&project) || super::project_deletion::deleted_chat(&project, id) {
+                continue;
+            }
             let state = job_state(&project, id);
             if state.as_deref() == Some("erased") {
                 continue;

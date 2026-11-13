@@ -1,3 +1,219 @@
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 프로젝트·작업 '삭제'와 같은 폴더 새로 시작
+- 사용자 보고:
+  - 빈 폴더를 프로젝트로 추가했는데 목록이 바로 갱신되지 않았다.
+  - 폴더를 지우고 같은 경로·이름으로 다시 만들어 추가하자 예전 작업이 남아 있었다.
+- 원인:
+  - 프로젝트 ID가 경로 해시라서, '목록에서 제거'가 숨기기만 한 항목이 같은 경로를 다시 추가하면 되살아났다.
+  - 목록은 열린 프로젝트가 바뀔 때만 다시 불러왔다. 격리 재현에서 빈 폴더 추가와 제거 후 재추가는 정상이었으므로, 예전 기록이 있는 프로젝트를 여는 과정이 중간에 멈춘 경우로 추정한다.
+- 사용자 결정:
+  - 삭제는 숨기기·복원 없이 모두 삭제한다.
+  - 같은 경로를 다시 추가하면 항상 새로 시작한다.
+  - 원본 폴더는 지우지 않는다.
+- 구현:
+  - `e0e876fe`: 프로젝트 추가를 시도할 때마다(성공 여부 무관) 목록을 다시 불러온다.
+  - 삭제(설계: `docs/proposals/m5-project-deletion.md`, 현행 요약: architecture '삭제'):
+    - `project.catalog`의 `deleteProject`/`deleteChat`(confirmed 필수)/`finishDeletions`를 추가하고 `removeProject`/`removeChat`/`restoreChats`를 없앴다.
+    - 원장 행은 지우지 않는다. 삭제 표지(`canonical_path=deleted:<id>`, `project_deletion_v1`, `chat_deletion_v1`)를 남기고, 실행 종료가 증명되면 앱 소유 작업 공간·manifest·기준 기록 파일을 지운다.
+    - 새 모듈은 `project/project_deletion.rs`다.
+  - 같은 폴더를 다시 추가하면 `project_id_by_path`로 살아 있는 프로젝트를 찾는다. 없으면 `fresh_project_id`(경로 해시 → 세대 해시)로 새 ID를 만든다. 예전 숨김 프로젝트는 다시 추가할 때 삭제로 전환한다.
+  - 최신 작업은 프로젝트의 현재 복사본을 같이 쓴다.
+    - 실행이 끝났으면 `close_project`로 복사본을 닫고 `projectClosed`로 알려, 화면이 프로젝트를 다시 열게 한다.
+    - 실행 중이면 나중에 닫는다. 이때 화면이 그 프로젝트를 보고 있지 않을 때만 닫는다.
+  - 화면:
+    - '목록에서 제거'를 '삭제'로 바꾸고 영구 삭제를 안내한다.
+    - '제거한 작업 다시 표시'를 없앴다.
+    - 열린 작업을 삭제하면 프로젝트를 다시 연다.
+    - 삭제 직후 2·8·30초 뒤와 앱 시작 때 `finishDeletions`를 부른다.
+- 독립 검토(1명, 2회):
+  - 1차 차단 B1: 최신 작업 삭제 시 프로젝트 자체 복사본까지 지워져 프로젝트를 다시 열 수 없었다.
+  - 1차 차단 B2: 프로젝트 삭제 뒤 설정의 '버린 작업 정리' 목록 전체가 오류였다.
+  - 두 건을 고치고 회귀 테스트를 추가했다.
+  - 2차: 차단 없음. 반영한 권고는 다음과 같다.
+    - 삭제된 프로젝트에서 미뤄진 작업 삭제가 영구 대기로 남던 문제
+    - prepared workspace를 비교할 때 키를 잘못 쓰던 문제
+    - 삭제된 작업에 정리 동작을 직접 호출하면 거절
+    - 최신 작업 삭제 뒤 지운 파일이 프로젝트 화면에 보이던 문제 → 복사본 닫기
+    - 삭제 가능 조건과 문구, 주석과 이름
+- 검증:
+  - 삭제·정리·내용삭제 Rust 58개를 통과했다. 프로젝트 삭제 뒤 저장소 admission 재검증(`open_for_admission`)과 같은 폴더를 새 ID로 여는 것을 포함한다.
+  - 프런트 720, 화면 smoke 68을 통과했다.
+  - 전체 Rust: protocol 69, sidecar lib 796, stdio 통합 16을 모두 통과했다(실패 0).
+- 남은 한계(설계 §6):
+  - 삭제된 작업의 본문이 원장에 남는다. 다음 단계는 삭제할 때 chat_erasure를 적용하는 것이다.
+  - 반영 백업과 공급자 세션 파일은 지우지 않는다.
+  - 복구가 필요한 작업 공간이 삭제 뒤 영구 대기로 남아도 화면에서 볼 수 없다.
+  - Windows는 파일 삭제를 하지 않는다.
+  - 예전 `catalog_hidden_chats`는 삭제로 옮기지 않았다.
+
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 설정 정리 실행(Orca·herdr 비교 후속)
+- 사용자 지시: 직전 조사에서 추천한 순서대로 전부 진행.
+- '대화' 표현 정리: 작업 단위를 가리키던 '대화'는 '작업'으로, 메시지 넘김·개수는 '메시지'로 바꿨다(ko·en). 작업 안의 대화 패널 이름 '팀 대화'와 공급자 자체 대화 내역 안내는 그대로 둔다.
+- 군더더기 제거:
+  - 설정 메뉴의 '환경 설정' 제목과 브랜드 문구를 빼고, 일반 > 앱 업데이트에 현재 버전을 표시했다(`__ELSECREW_VERSION__`, renderer vite define).
+  - 역할 이름 바이트 표시는 한도의 75%를 넘을 때만 보인다(빈 칸은 유지해 카드 정렬 보존).
+  - '모델 목록 새로고침'은 역할마다 두지 않고 팀 도구에 하나만 둔다(선택한 역할 기준). '다시 불러오기 안내' 접힘은 툴팁으로 줄였다.
+  - 에이전트 연결 안내 문구는 카드마다 반복하지 않고 설정 상단에 한 번만 둔다.
+- 프로젝트 단위 수동 반영 제거:
+  - '고급 · 수동 작업 공간'(새 작업 공간 준비, 원본 반영 미리보기)을 화면에서 지웠다.
+  - 브리지 계약(`project-catalog-v1.ts`)과 sidecar 요청 경로(`lib.rs`)에서 `prepareApplicationWorkspace`·`applicationPreview`를 제거해 이제 거절된다.
+  - 미리보기 경로 검증은 `validatePreviewBody`로 분리해 `applicationPreviewPage`·`chatApplicationPreview`가 공유한다.
+  - 내부 `prepare_application_workspace`는 새 작업 생성(chat.rs)이 계속 쓴다. `application_preview`는 `#[cfg(all(test, not(windows)))]` 테스트 전용이 됐다.
+- 프로젝트 설정: '프로젝트 관리'를 '프로젝트 설정'으로 바꿨다.
+  - 프로젝트가 열려 있으면 그 프로젝트를 바로 보여 준다. 다른 프로젝트를 열거나 설정을 닫으면 선택을 초기화한다.
+  - 작업 권한 아래 접힌 '문제 해결'에 작업 기록·백업·중단 복구·반영 기록을 모았다.
+- 저장공간: '작업 공간 정리'와 '작업 내용 영구 삭제'를 '버린 작업 정리' 카드 하나로 합쳤다(`discarded-work-cleanup.tsx`).
+  - 찾기 버튼 하나가 두 목록을 함께 부르고, 진행 중에는 비활성·'확인하는 중…'으로 표시한다.
+  - 선택, 최종 확인, 건별 처리와 epoch 가드는 각 자식에 그대로 유지했다.
+- herdr식 작업 목록 상태 점: 진행 중은 파랑(깜빡임, 동작 줄이기 설정 시 정지), 확인 필요는 주황, 완료·검토 준비는 초록이다.
+- 독립 검토(1명):
+  - 제품 차단 결함 없음.
+  - 검증 차단 1건: smoke가 옛 영어 문구 'Reload conversation history'를 기다림. 고쳤다.
+  - 반영한 권고: 열린 프로젝트가 바뀔 때 설정의 관리 대상 초기화, `#[cfg]`를 테스트 모듈 조건과 맞춤, 찾기 버튼 진행 표시, smoke에서 '문제 해결'을 펼친 뒤 조작.
+  - 남긴 권고: `applicationPreviewPage`가 아직 `chatId:null`(프로젝트 단위, 읽기 전용)을 받는다. `restorationPreview` 검증이 이를 재사용하므로 별도 정리가 필요하다. 다시 불러오기 안내는 툴팁뿐이다(되돌리기 전 확인 절차는 있음).
+- 검증:
+  - 통과: 타입 검사, 프런트 720, 화면 smoke(`pnpm m5:test:editor`, 68·전체 renderer smoke 포함), `git diff --check`.
+  - Rust: protocol 69 통과, sidecar lib 792 통과·1 실패. 실패한 `provider_login_gate::...vendor_gate_does_not_inherit_unrelated_writable_descriptors`는 단독 재실행에서 통과해 병렬 실행 중 간헐 실패로 본다.
+  - 격리 데이터로 설정 다섯 화면을 실제 실행해 캡처로 확인했다.
+  - 미확인: 상태 점은 작업이 있는 화면을 캡처하지 못해 CSS로만 확인했다. 설치본 패키지는 다시 만들지 않았다.
+- 패키지: 같은 날 `pnpm m5:package:smoke`로 `out/Elsecrew-darwin-arm64/Elsecrew.app`(0.1.2, 124a0039 기준, 자체 업데이터 포함)을 다시 만들었고 smoke PASS다. 배포된 Release가 없어 앱 안의 '업데이트 확인'은 새 버전을 찾지 못하는 것이 정상이다.
+- 다음 할 일: `applicationPreviewPage` 프로젝트 단위(`chatId:null`) 경로 정리 여부 결정, 새 패키지로 설정 화면·작업 목록 상태 점 실사용 확인.
+
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 설정 정리 후보 조사(Orca·herdr 비교)
+- 현재 설정 5개 섹션을 격리된 앱 데이터로 실제 실행해 캡처했다(코드 변경 없음). 참고: Orca 설정 문서 https://orca.dev/docs/settings (앱 전체 설정과 저장소별 'Repository' 설정을 나눔), herdr는 상태 표시·알림 위주이고 설정은 테마·알림 정도만 둔다.
+- 삭제·통합 후보(사용자 결정 대기):
+  - 프로젝트 관리의 '고급 · 수동 작업 공간'(prepareApplicationWorkspace·반영 미리보기): 작업(채팅) 중심 흐름 이전의 수동 반영 경로다.
+  - '반영·복원 및 진단 기록'의 시작 실패 확인·반영 기록·이전 이력: 문제 해결 한 곳으로 접는다.
+  - 저장공간의 '작업 공간 정리'와 '대화 내용 영구 삭제'를 하나로 합친다.
+  - 역할 편집기의 바이트 표시, 역할마다 반복되는 '모델 목록 새로고침', 설정 메뉴의 브랜드 문구와 '환경 설정' 캡션.
+  - 에이전트 카드에서 반복되는 안내 문구.
+- 발견: '채팅→작업' 용어 변경 뒤에도 '대화 내용 영구 삭제', '대화 기록 및 실행 복구', '팀 대화', '새 대화를 시작합니다' 같은 '대화' 표현이 남아 있다.
+- 발견: 개발 실행(`.vite` main)은 `target/debug/elsecrew-sidecar`를 쓰는데, 이 checkout에는 `target/`이 없어 처음 실행에서 '작업 공간을 아직 열 수 없어요'가 났다. `cargo build -p elsecrew-sidecar` 뒤 정상 동작했다.
+
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 유료 서명 없는 배포와 자체 업데이터
+- 사용자 결정: 코드 서명·공증은 비용 때문에 하지 않는다. 옛 Tauri와 같은 원리로 앱은 미서명, 업데이트 목록만 프로젝트 키로 서명한다. 배포 대상은 macOS(arm64·x64)와 Windows x64이고, Release는 초안으로 만든다.
+- 이전 방식(옛 Tauri `release.yml`): 코드 서명 없음, 업데이트 아티팩트만 `TAURI_SIGNING_PRIVATE_KEY`로 서명, tag push로 Release 초안 생성.
+- 구현:
+  - `electron/update-manifest.ts`: Ed25519 서명 envelope `{schemaVersion, manifest(base64 정확 바이트), signature}`를 검증한다. 형식은 키 집합을 정확히 맞추고, 버전 x.y.z는 숫자로 비교해 다운그레이드를 막는다. 플랫폼은 darwin-arm64·darwin-x64·win32-x64 셋만 받는다. 다운로드 주소는 `github.com/wonseok-han/elsecrew/releases/download/v{version}/{name}`으로 앱이 직접 만든다. feed는 64KiB, 패키지는 1GiB까지다.
+  - `electron/self-update.ts`: AppUpdateController가 쓰는 NativeUpdater를 구현하므로 메뉴·설정 버튼·안전 종료 게이트는 그대로다. 확인 단계에서 다음을 모두 끝낸다.
+    - 교체 가능 위치 확인: App Translocation이거나 상위 폴더에 쓸 수 없으면 거절
+    - 여유 공간 확인
+    - 앱 옆 `.elsecrew-update-{version}`에 다운로드: 크기·sha256 확인, 시간 제한
+    - 압축 해제: macOS는 Info.plist의 bundle id와 version 확인, Windows는 Elsecrew.exe 확인
+    - helper 준비
+  - `quitAndInstall`은 helper만 띄우고 항상 종료한다. helper는 앱 번들·설치 폴더의 모든 프로세스가 끝나기를 기다려 교체하고 재실행한다. 실패하면 되돌리고 재실행한다. Windows helper는 `-EncodedCommand`로 실행한다.
+  - 공개키는 앱에 내장했다. 비밀키는 저장소 밖 `~/.config/elsecrew/update-signing-key.pem`(600)에 생성했다. GitHub Secret `ELSECREW_UPDATE_PRIVATE_KEY` 등록은 사용자가 해야 한다.
+  - `.github/workflows/release.yml`(새로 작성): `v*` tag → 태그와 package.json 버전 일치 확인 → `pnpm m5:make`(macOS x64는 arm 러너에서 `CARGO_BUILD_TARGET=x86_64-apple-darwin` 교차 빌드) → `scripts/m5-release-manifest.mjs`로 latest.json 서명 → `gh release create --draft`. 전역 권한은 read이고, release job만 contents:write와 `environment: release`(필수 승인자 설정 권장)다.
+- 독립 검토(1명, 2회):
+  - 1차: 차단 2건(설치 시작 실패 시 '종료 준비 완료' 상태로 앱이 계속 실행됨, Windows 교체 실패 가능성)과 권고(권한·시간 제한·쓰기 오류·PowerShell 경로)를 반영했다.
+  - 2차: 차단 없음. 높은 권고 4건을 반영했다.
+    - 남은 프로세스 때문에 시간이 초과되면 재실행하지 않는다(sidecar 중복 방지).
+    - 프로세스 확인을 `ps`+`grep -F` 고정 문자열로 바꿨다.
+    - 검증한 앱은 `payload` 이름으로 보관하고(LaunchServices 노출 방지), 다른 버전과 오래된 스테이징은 정리한다.
+    - 비밀키를 `release` environment 전용으로 두도록 체크리스트에 적었다.
+  - 낮은 권고(Windows 정리 실패·작업 폴더, macOS는 open 성공 시에만 백업 삭제, `persist-credentials: false`)도 반영했다.
+  - 남은 권고: action SHA 고정, 확인 단계 뒤 앱 이동 같은 드문 경우.
+- 검증: 업데이트 목록 테스트 3개(스크립트 서명 → 앱 검증 왕복, 변조·다른 키·잘못된 이름·플랫폼 거절, 버전 비교)와 프런트 720 통과, Electron 번들 빌드 통과. 로컬 `pnpm m5:make`로 `Elsecrew-darwin-arm64-0.1.2.zip`(최상위 `Elsecrew.app`, bundle id와 version 확인)을 만들었다. macOS helper는 공백·한글·괄호·대괄호 경로에서 교체 성공, 실패 시 복원, 번들 내 잔여 프로세스 대기(3초), 정리를 실제로 확인했다.
+- 미검증: 실제 GitHub Actions 실행(태그 push는 사용자 승인 대상), Windows helper와 ZIP 구조, 실제 원격 feed로 하는 업데이트 전 과정.
+- 사용자 결정(같은 날): 아직 개발 중이므로 첫 배포(버전 올림·push·tag), GitHub `release` environment·secret 등록, Windows 검증은 나중으로 미룬다. 배포 경로는 구현만 된 상태이며 실제 Release는 없다.
+
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 레거시(옛 Tauri 앱·M0~M4) 정리
+- 사용자 결정: Elsecrew로 컨셉을 바꿨으므로 옛 기록과 옛 Tauri 앱 코드를 제거한다. 소개 웹사이트(`website/`)는 Elsecrew 사이트로 다시 만들 예정이라 그대로 둔다. 지운 것은 모두 Git 기록에서 되살릴 수 있다.
+- 코드:
+  - 지움: `src-tauri/`, `src/{App.tsx,App.css,main.tsx,doctor.ts,handoffRun.ts,handoffTarget.ts,store.ts,assets}`, 루트 `index.html`·`vite.config.ts`·`public/`·`tsconfig.node.json`, 테스트 3개(doctor-pilot·handoff-run·handoff-target), `.github/workflows/release.yml`(옛 Tauri 배포).
+  - 문구: `m5.` 접두사가 아닌 옛 화면 키 258개를 ko·en에서 제거해 924개씩 남았다.
+  - `package.json`: Tauri 스크립트와 패키지 7개를 지웠고, `build`는 `tsc && vite build --config electron/vite.renderer.config.ts`로 바꿨다. pnpm 잠금 파일에서 Tauri 관련 184줄이 빠졌다.
+  - Rust: workspace에서 `src-tauri`를 뺐다. `Cargo.lock`은 543→213 패키지로 줄기만 했고 버전 변경은 없다.
+  - CI·하네스: CI의 Tauri 설치 파일 빌드와 설치 E2E를 지웠다. 하네스 기준선의 Rust 검사는 `cargo test --locked -p elsecrew-core -p elsecrew-protocol`로 바꿨다.
+- 문서:
+  - 지움: archive 7~10월분과 9월 worktree 대조, `proposals/m4-orchestration.md`, `diagrams/`(옛 agent-starter 구성도와 위저드 흐름도).
+  - 남김: `proposals/m5-electron-spike.md`. 처음엔 지웠으나 성능 측정 절차와 배포 체크리스트가 지금도 §9–13 수치 합격선을 참조해 되살렸다.
+  - 다시 씀: `architecture.md`의 옛 §1–8을 현재 시스템 구성 요약으로 바꿨다(605→467줄). `release-checklist.md` §1–4, 루트 `README.md`, `docs/README.md` 색인도 Elsecrew 기준으로 바꿨다.
+  - `CLAUDE.md`·`AGENTS.md`: 옛 Tauri·홈베이스·코드 지도·검증 명령·M4 브랜치 언급을 정리하고 두 파일을 같은 내용으로 유지했다. '핵심 결정·발견'에서는 옛 Tauri·M4 파일럿 전용 항목 16개를 지웠다. Claude·Codex CLI 실측처럼 지금 코드에도 쓰이는 발견은 남겼다.
+- 검증: `pnpm build` 통과, 프런트717 통과(옛 테스트 3파일·24개 제거), Rust core·protocol 테스트 통과, sidecar `--locked` 빌드 통과, `git diff --check` 통과.
+- 다음: Electron 배포 workflow·서명 방식 결정(현재 자동 배포 경로 없음), `website/` Elsecrew 기준 재개발.
+
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 목록 지우기는 항상 허용, 순수 알림 기능
+- 사용자 결정 1(목록 지우기): 작업·프로젝트 지우기는 사용자 의지이므로 항상 가능해야 한다. 그 범위의 세션은 종료한다. 종료 확인이 안 돼도 그냥 지운다. 지우기는 기존처럼 목록 숨김이며 디스크 데이터는 지우지 않는다.
+  - sidecar: 앱 전체 유휴 조건과 준비 중·복구 필요·저장 세션·실행 비종결·잠금·lifecycle 차단을 없앴다. 남긴 거절은 원본 반영 중(`application_running`), 반쯤 쓰인 원본(`application_intent.state == "applying"`), 반영 확인 창 세 가지다(원본 보호).
+  - 숨김에 성공하면 `stop_sessions_for_removal`이 채팅마다 따로 처리해 하나가 실패해도 계속 진행한다. 활성 run에는 best-effort `request_cancel`을 보내고, running 팀 작업은 canceled로 바꾼 뒤 notice를 남기고 `workflow_chats`에서 뺀다. stop 실패는 로그만 남기고 성공으로 응답한다.
+  - `blocker_ids`: 숨긴 프로젝트·채팅에 속한 `recoveryRequired` run과 오염되거나 복구가 필요한 잠금은 앱 종료와 다른 프로젝트의 반영을 막지 않는다. 잠금은 그 작업 공간을 쓰는 채팅이 모두 숨겨졌을 때만 제외한다. preparing·running·cancelling run은 계속 막는다. 다시 표시하면 다시 막는다. 원본 반영 단계는 대상 작업 공간 잠금을 직접 재확인하므로 안전 판단이 유지된다(검토자 확인).
+  - UI: `canRemove`를 다른 창이 열려 있거나 지우는 중일 때로 줄였다. 현재 프로젝트를 지우면 숨김 → releaseView → 채팅 뷰와 편집기 뷰를 강제로 닫는다(대상 id 재확인, 저장 안 한 편집은 버림). 지운 작업·프로젝트의 알림도 목록에서 뺀다.
+  - 독립 검토 2회: 1차 차단 3건(취소 실패 시 정리 중단, 숨김 뒤 오류 응답, 숨긴 복구가 종료와 다른 반영을 막음)을 반영했다. 2차에서 내 수정(`#snapshotCreationBlocked` 초기화)이 프로젝트 선택을 영구히 막는다는 차단 1건이 나와 되돌렸다.
+  - 미반영 권고: v1 채팅의 시작 대기 run, 선택 중인 채팅을 지워도 화면 유지, 중단 notice 이벤트 미전달. 숨긴 프로젝트의 미확인 프로세스가 있어도 다른 프로젝트 반영이 진행되는 점은 에이전트가 작업 복사본 밖을 쓰지 못한다는 기존 격리 전제에 기댄다.
+- 사용자 결정 2(알림): 종 아이콘은 순수 알림이다.
+  - 알림 대상: 작업 완료·답변 도착(총괄 run 성공 뒤 채팅이 waitingForUser·completed·reviewReady), 확인 필요(공개 이벤트 question, 이번 세션에서 실행 중으로 본 run의 승인 대기를 2초 간격 조회), 중단·실패(run failed·recoveryRequired, 팀 일시정지 status 메시지와 채팅 needsAttention·recoveryRequired).
+  - 목록: 최신순, 안 읽은 개수, 누르면 그 작업으로 이동(다른 프로젝트면 reopen 후 전환), 모두 읽음. 이 컴퓨터의 localStorage에 최근 50개를 보관한다(`notifications.ts`, `notification-feed.ts`, `notification-bell.tsx`).
+  - 앱이 포커스가 아닐 때는 macOS 배너를 띄운다(설정 › 일반에서 끄기). 기존 종에 있던 안내·오류·작업 상태는 내용이 있을 때만 보이는 상단 안내 띠로 옮겼다(`진행 및 복구 상태` 구역은 유지).
+- 검증: tsc 통과, 프런트741(새 `m5-notifications` 4개 포함) 통과, renderer smoke·권한UI 통과, 알림 화면 캡처 확인. Rust 전체(--no-fail-fast) protocol69·sidecar lib793·stdio 통합16 통과(실패 0).
+
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 응답 언어 규칙 명문화
+- 사용자 지시: 응답을 한국어로만 하도록 `CLAUDE.md`와 `AGENTS.md`의 맨 앞(인계 규칙 앞)에 `응답 언어 — 최우선` 절을 같은 내용으로 추가했다. 모든 사용자 메시지는 첫 문장부터 한국어로 쓴다. 영어 도구 출력이나 하위 보고의 언어를 따라가지 않는다. 식별자·명령·경로·원문 오류 인용만 원문을 유지한다. 하위 에이전트에게도 한국어 보고를 지시한다.
+
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 실제 시험 중단 `providerExecutableChanged` 원인과 수정
+- 증상: todo 앱 시험 중 11:33(KST)에 '팀 작업을 멈췄어요 (원인 코드: providerExecutableChanged)'로 멈췄다. 기획(Codex) 실행은 성공했고, 총괄(Claude Code) 2단계 준비 중 run이 생기기 전에 실패했다. 같은 Claude Code로 실행한 11:30 총괄 1단계는 성공했다.
+- 원인: `PinnedExecutable`이 서명 검증 때 실행 파일의 모든 상위 디렉터리(…/claude/versions, `~`, `/Users`, `/`)의 전체 stamp(len, nlink, mtime, ctime 포함)를 기록했다. 실행 직전 `revalidate()`도 같은 기준으로 비교했다. 홈 폴더는 셸 캐시와 설정 파일 쓰기로 mtime/ctime이 수시로 바뀌므로 간헐적으로 '실행 파일이 바뀜'으로 오판했다. Codex도 `/Applications` 변화로 같은 위험이 있다.
+- 수정(`provider_executable.rs`):
+  - 서명 검증 구간은 엄격 비교를 유지한다(swap-and-restore 방어). 그 엄격 재검증만 실패했을 때 처음부터 최대 3회 재시도하고, open이나 서명 실패는 즉시 반환한다.
+  - 공개 `revalidate()`는 실행 파일의 dev/ino/digest/전체 stamp를 엄격히 본다. 상위 디렉터리는 `ancestor_identity`(dev, ino, mode, uid)만 본다.
+  - 테스트: 무관한 항목 추가·삭제는 통과하고 상위 디렉터리 mode 변경은 거부되는지 확인한다.
+- 독립 검토: 차단 없음. 권고 2건(재시도 범위, 테스트 마지막 단계 무효)은 반영했다. 남은 권고: 실행 후 사후 탐지가 약해졌다(같은 UID가 상위 디렉터리를 rename으로 바꿨다가 되돌리는 공격은 원래 위협 모델 밖). 홈 아래 구간만 엄격히 유지하는 대안은 Claude 자동 업데이트가 `versions`에 파일을 추가할 때 다시 중단을 부르므로 택하지 않았다.
+- 검증: provider_executable 6 통과, 설치된 Codex 서명 확인(ignored 테스트 수동 실행) 통과. provider/agent_runtime/claude_native/codex 필터 193은 재시도 범위를 좁히기 전 코드에서 통과했다.
+
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 목록에 없는 모델은 '미선택'으로, 권한 카드 간격, 실행 중 표시
+- 사용자 지적: 저장된 `sol`이 역할 목록에 그대로 보였고, "목록에 없으면 그냥 미선택이면 된다, 그 값이 왜 있어야 하나"라고 했다. `sol`은 초기 fixture가 기본값으로 저장한 가짜 이름이다.
+  - sidecar `without_placeholder_models`: V3 설정을 읽을 때(`default_role_settings`의 저장값 반환, `app_role_defaults` 파일 읽기, 준비 단계의 읽기 전용 판정) `sol`을 `""`/null로 읽는다. V1/V2 fixture 집합은 그대로 둔다.
+  - 단위 테스트 팀과 smoke·stdio 테스트의 Codex 모델은 실제처럼 보이지 않는 `fixture-codex`로 바꿨다.
+  - UI `hasUsableModel(runtime, selector, models)`: 공급자의 마지막 목록에 없는 모델을 '모델 미선택'으로 취급한다. 역할 목록, 모델 선택 값, 팀 요약, 새 작업 차단 조건에 적용했다. 목록을 한 번도 받지 못했으면 저장값을 믿고 최종 판단은 실행 전 검사에 맡긴다.
+  - 직전에 넣은 '지금 목록에 없음' 표시, 역할별 안내 상자, 추천 버튼은 없앴다. 팀 단위 '비어 있거나 목록에 없는 모델을 추천 모델로 바꾸기'(초안만 변경)만 남겼다.
+- 작업 권한(`ProjectPermissions`)을 한 장의 카드로 정리했다. 안쪽 여백 20px, 옵션 묶음, 설명과 저장 버튼 사이 간격을 줬다. 설정 › 프로젝트 관리와 첫 작업 준비 화면에서 캡처로 확인했다.
+- 실행 중 표시가 'Codex · 모델 · 추론 · Codex'로 실행 환경을 두 번 붙이던 것을 '역할 이름 · Codex · 모델 · 추론'으로 바꿨다.
+- 검증: tsc 통과, 프런트737 통과, renderer smoke·권한UI 통과. Rust는 새 테스트 `saved_placeholder_sol_reads_as_unselected_in_v3_only`를 포함한 영향 범위(sidecar lib 26개 필터, stdio `binary_fresh_b`)만 다시 돌려 통과했다. 직전 전체 실행 결과는 바로 앞 엔트리를 본다.
+
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 내장 기본 팀의 모델 제거(미선택 상태 도입)
+- 사용자 결정: 내장 기본 팀에 모델을 심지 않는다. V3 `default_settings_v3`은 모든 역할을 `modelSelector:""`·`reasoningEffort:null`로 둔다. 레거시 V1 `settings_value`(fixture `sol`)는 V12 이하 저장소와 fixture 데모용으로 남겼다. 이미 저장된 사용자 설정은 바꾸지 않는다.
+- 계약: V3 역할 설정(`projectRoleSettings`·`projectRoleSettingsUpdate`)에서만 빈 모델을 허용하고, 이때 reasoningEffort는 null이어야 한다. roleProfile 단일 검증·chatRecord roleSnapshots·실행 계열·V1/V2 설정은 계속 모델이 있어야 한다. Rust `validate_role_profile_with`/`validate_role_set_v3(.., allow_unselected)`과 TS `validateRoleProfileV1(value, allowUnselected)`를 맞췄다. TS 레거시 경로의 `.map(validateRoleProfileV1)`은 배열 인덱스가 두 번째 인자로 들어가 빈 모델을 허용할 수 있어서 화살표 함수로 바꿨다.
+- sidecar: `has_unselected_model`이 있으면 `prepare_chat_workspace_with_baseline`에서 스냅샷을 만들기 전에 읽기 전용으로 판정해 `dirtyConflict`로 거절한다. `create_chat`도 같은 조건으로 거절한다. 단위 테스트는 thread-local `ProductDefaultsForTest`로 제품 기본값을 명시적으로 켤 때만 미선택 팀을 쓰고, 그 밖에는 예전 완전한 팀(`complete_default_roles_for_test`)을 쓴다.
+- UI: 미선택 역할이 있으면 새 작업 보내기를 막고 '모델을 고르지 않은 역할이 있어요: …'를 안내한다. 팀 요약은 '모델 미선택'으로 보인다. 역할 편집기에 '비어 있는 모델을 추천 모델로 채우기'를 추가했다. 공급자 isDefault가 정확히 1개일 때만 초안을 채우고, 없으면 안내한다. 직접 입력에서 모델을 지우면 reasoning도 비운다.
+- smoke: 실제 sidecar로 도는 스크립트(`m5-packaged-ui-smoke`, `m5-project-ui-smoke`, `m5-durable-output-ui-smoke`)는 프로젝트를 열기 전에 `scripts/m5-smoke-complete-team.cjs`로 앱 기본값에 시험용 팀을 저장한다. 이 세 스크립트는 문법 검사만 했고 실행은 하지 않았다. stdio 통합 테스트 `binary_fresh_b_*`는 모델을 채운 뒤 revision 2로 생성한다.
+- 독립 검토(1명, 읽기 전용): 빈 모델이 chat·run·ledger·erasure로 새는 경로 없음. 차단으로 지적된 smoke 경로는 위처럼 고쳤다. 권고 반영: 추천 채우기 실패 안내, 수동 입력 정합. 미반영 권고: 이전 빌드로 되돌리면 빈 모델 설정을 읽지 못함(다운그레이드 미지원), 이미 연 프로젝트는 앱 기본값을 나중에 바꿔도 다시 심지 않음(기존 계약), `chat.settings` 로딩 중에는 UI 차단 대신 sidecar 거절에 의존.
+- 검증: tsc 통과, 프런트737(새 `m5-unselected-model` 포함) 통과, renderer smoke·권한UI 통과. Rust protocol69·sidecar lib788·stdio 통합16 통과(전체 --no-fail-fast 실행 뒤 실패 2건을 고치고 해당 테스트만 재실행).
+
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — '채팅'을 '작업'으로, Codex 목록에 없는 저장 모델 안내
+- 사용자 결정: 목표·작업 공간·팀·변경을 묶는 단위를 화면에서 '채팅' 대신 '작업'(EN Task)으로 부른다. ko 112개와 en 102개 문구를 바꿨다. 같은 범위에서 '작업 복사본'은 '작업 공간'(EN working copy를 workspace로)으로 통일했다. 대화 자체는 '대화'·'팀 대화'(EN conversation)로 남겼다. 내부 식별자·IPC·저장 키·데이터는 그대로이므로 이관이 필요 없다. `login.claude.hint`(실제 채팅 서비스 의미)는 유지했다. 어색해진 문장은 손으로 다듬었다(예: 파일 편집 일시 중지, 대화 기록, 목록 조회는 에이전트를 실행하지 않음).
+- 발견: 내장 기본 역할(`crates/elsecrew-sidecar/src/chat.rs` `settings_value`/`default_settings_v3`)이 Codex 모델을 fixture 시절 이름 `sol`로 심는다. 실제 Codex 목록(app-server model/list)에는 `gpt-6.1-sol`(isDefault)·`gpt-6-sol`·`gpt-5.6-sol` 같은 전체 이름만 있다. 실행 전 `match_model_catalog`는 정확히 일치해야 하므로 기본값 그대로의 Codex 역할은 실행이 막힌다. 화면은 이를 '저장된 값'으로만 보여 줬다.
+- 수정(UI): 목록을 불러왔는데 저장된 모델이 없으면 '지금 목록에 없음'으로 표시하고 안내 문구를 보인다. 공급자의 isDefault 모델이 있으면 '추천 모델(…)로 바꾸기' 버튼을 준다. 버튼은 초안만 바꾸고 저장은 사용자가 명시적으로 한다(자동 변경 금지 원칙 유지). 모델 선택 로직은 `pickModel`로 합쳤다.
+- 남은 판단: 기본 seed의 `sol`을 바꿀지(예: 미선택으로 두고 첫 작업 전에 고르게 하기)는 fixture·Rust 테스트 다수에 영향을 주므로 별도 결정이 필요하다.
+- 검증: tsc 통과, 프런트735 통과, renderer mount smoke·권한UI·monaco 옵션 10 통과. 테스트와 probe의 화면 문구를 새 용어로 갱신했다. 실제 Codex 목록에서 새 안내가 뜨는지는 화면으로 아직 확인하지 않았다(사용자 앱 실행 중이라 재패키징 보류).
+
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 화면 smoke 복구·권한 화면 버그 2건·패키지
+- 실제 앱 데이터를 V13 이관 전에 통째로 백업했다: `~/Library/Application Support/Elsecrew-backup-before-v13-20261113`(167파일, SHA-256 전부 일치). 이후 `pnpm m5:package:smoke`로 패키지를 다시 만들었고 PASS다(`out/Elsecrew-darwin-arm64`). 새 패키지를 처음 실행하면 실제 데이터가 V13으로 바뀐다.
+- `tests/m5-renderer-mount-smoke.mts`를 현재 UI에 맞춰 끝까지 PASS시켰다. 고친 어긋남은 다음과 같다.
+  - 루트 경로 버튼 대신, 감시 넘침 이벤트 뒤의 '다시 확인'으로 트리를 다시 읽는다(preload에 `onProjectEvent`·`m5SmokeRescan` 추가).
+  - 역할 화면은 첫 채팅 패널에서 연다. 프로젝트 메뉴는 레일의 ⋯ 메뉴다. 설정 권한 선택자는 `.m5-app-settings`로 한정했다.
+  - 모델 입력은 V3 이름 칸이 아닌 '고급·모델 직접 지정' 칸을 쓴다. 중단 버튼은 `button.m5-stop-team`, 보내기 버튼은 `[type=submit]`로 찾는다.
+  - 가짜 프로젝트 목록은 페이지 확인 뒤 첫 페이지에 열린 프로젝트도 넣는다. 레일은 프로젝트가 열려 있는 동안 잠겨 다음 페이지로 갈 수 없기 때문이다.
+  - diff 언어 전환 비교는 번역되는 구간 머리말을 빼고 코드 줄만 비교한다.
+- smoke가 찾은 실제 버그 2건을 고쳤다.
+  - (1) 설정 › 프로젝트 관리에서 `ProjectPermissions`와 `ProjectRecoveryHistory`가 같은 React key를 써서, 다시 그릴 때 '작업 권한'이 두 번 나오고 하나는 반응하지 않았다. key에 `permissions:`·`history:` 접두사를 붙였다.
+  - (2) 권한 체크박스 두 개를 연달아 바꾸면 이전 draft를 기준으로 덮어써 앞의 선택이 사라질 수 있었다. 함수형 갱신으로 바꿨다.
+- 검증: tsc 통과, 프런트735·권한UI/editor-state67 통과, renderer mount smoke PASS, native large-diff smoke PASS(앞 커밋), 패키지 smoke PASS.
+- 발견(미수정): 레일은 프로젝트가 열려 있으면 잠겨 페이지를 넘길 수 없다. 현재 프로젝트가 첫 페이지(최대 50개)에 없으면 레일 ⋯ 메뉴의 '프로젝트 화면 닫기'에 닿을 수 없다. 50개를 넘는 경우에만 드러나므로 후속으로 남긴다.
+- 정리: Spotlight에 Elsecrew가 2개 잡혀 사용자가 예전 빌드(`~/projects/hello-agent/out`, 11-12 12:35, 구 저장소 경로)를 실행하고 있었다. 사용자 승인으로 그 `out`(315MB, gitignore된 빌드 결과물)을 삭제해 현재 패키지 하나만 남겼다. 예전 앱 실행 뒤 상태로 두 번째 백업 `Elsecrew-backup-before-v13-20261113-2`(167파일 해시 일치)도 받았다.
+- 개발 잔여물 정리(사용자 승인): 끝난 작업의 cargo target 2개(`/private/tmp/elsecrew-roles-integration-target`, scratchpad `target-custom-roles`)를 지웠다. 병합 완료된 `.worktrees` 3개는 `git worktree remove`로 지웠고 브랜치는 보존했다. 실제 데이터 사본(dbcopy·m5copy·sj), smoke/tour 임시 폴더, `/private/tmp/elsecrew-*` 메모 파일도 지웠다. 이후 사용자 결정으로 구 저장소 클론 `~/projects/hello-agent` 전체(원격·현 저장소에 없는 로컬 커밋 123개·브랜치 114개·stash 3개 포함)를 영구 삭제했다. 빌드 캐시 `/private/tmp/elsecrew-main-target`과 앱 백업 2개는 유지했다. Data 볼륨 여유 517→524GiB.
+- 다음: 사용자 실제 시험(V13 이관 확인, 기획만 Codex). 기존 남은 과제는 그대로다. push·main 병합은 하지 않았다.
+
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 변경 화면 스크롤 불러오기·설정 정리·간격
+- 변경 비교(diff)를 200줄 단위 페이지 버튼 방식에서, 스크롤하면 다음 200줄을 이어서 붙이는 방식으로 바꿨다(IntersectionObserver 표지 + 같은 동작의 키보드용 버튼). 변경 파일 목록(100개 단위)도 같은 방식으로 바꿨다. 팀 대화 200개 단위 이전/다음 버튼은 그대로 두었다.
+- 설정 정리(herdr·Orca 벤치마크): 업데이트를 '일반'에 합쳐 섹션을 5개로 줄였다(순서·인덱스 0~4는 유지). 설정에서는 기기 정보 카드('이 컴퓨터 확인')를 빼고 첫 설정에만 남겼다. 프로젝트 관리의 '처음부터 다시 확인'은 다음 페이지로 넘어간 경우에만 보인다. 저장공간의 세 기능은 각각 카드로 묶었고 복원 데이터 용량에 제목과 설명을 붙였다. 간격 기준은 페이지 제목 18px, 카드 안쪽 여백 20px, 카드 사이 24px, 모서리 12px다. 역할 화면은 '역할 추가'와 안내 문구를 한 줄에 두고 카드와 간격을 띄웠다.
+- 검증: tsc 통과, 프런트735 통과. 실제 sidecar와 격리 데이터로 화면을 캡처해 변경 600줄 스크롤 불러오기와 설정 5개 화면을 확인했다. native large-diff smoke(500파일·스크롤 불러오기·필터·편집기 왕복)는 PASS다. probe의 아이콘 버튼 탐색과 diff 복귀 조건을 현재 UI에 맞췄다.
+- 발견: `tests/m5-renderer-mount-smoke.mts`(m5:test:editor)는 11-12 UI 변경 이후 이미 어긋나 있었다. 설정의 에이전트 선택 제거와 연결 즉시 로그인 흐름에 맞춰 두 곳을 고쳤으나, `7396da9b`(루트에서 파일 경로 표시 숨김) 이후 `.m5-root` 클릭으로 트리를 다시 읽는 단계(runner 340행)에서 멈춘다. 그 뒤의 diff 스크롤 단계는 이 smoke로는 검증되지 않았으므로 별도 수리가 필요하다.
+- 다음: 위 smoke 수리. 그 밖에 기존 남은 과제(백업 → 패키지 → 실제 시험, sidecar 종료 경로 등)는 그대로다. push·main 병합은 하지 않았다.
+
+### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — 통합 상태 요약(세부는 11월 아카이브)
+- feature/ade에 채팅 영구 삭제(bf9bae43)와 사용자 정의 역할 V3·저장 V13·compaction 단계 폭 조정(integration/custom-roles c949d995)을 사용자 승인으로 병합했다. 세 갈래 모두 독립 검토 차단 없음. 병합 뒤 TS·프런트735·protocol68·sidecar 영향 범위139 통과, 전체 Rust 누적 검사는 시험 뒤로 미뤘다.
+- 실사용 팀 중단 원인(작업 복사본 검증의 git index.lock 충돌)을 수정했고, 중단 직후 남은 `attempting` materialization 때문에 열리지 않던 앱 데이터를 백업 후 복구했다. 다음 패키지 실행 시 실제 데이터가 V13으로 이관되므로 실행 전 전체 백업이 필요하다.
+- 다음: 백업 → 패키지 → 실제 시험(기획만 Codex). 남은 과제: 단일 실행 실패의 sidecar 전체 종료 경로, `attempting`/멈춘 compaction `running` job의 안전한 자동 재개, sidecar 사망 시 종료 허용, 종료 원인 고정 식별자 기록, compaction probe의 작업량 2~3배 측정, 전체 Rust·Windows·성능·출시 검증. push·main 병합 없음.
+
 ### 2026-11-12 · by Claude Opus 5.5 (claude-opus-5-5) — 실사용 시험·팀 중단 원인·통합
 - 실사용 시험에서 개발 Claude가 `approvalDelivery/inputChanged`로 실패: 권한 전달마다 하는 작업 복사본 검증의 `git write-tree`가 `.git/index.lock`을 요구해 공급자 `git status`와 충돌. 재현 뒤 `git diff-index --cached --quiet --ignore-submodules=none --ita-invisible-in-index`로 교체(8e780fd8·3663095c, 독립 검토 B1 반영 후 차단 없음). test_todo 중단(Bash 뒤 Read 실패)과 같은 계열로 판단하나 과거 실행의 동일 원인은 추정이다.
 - 같은 시각 sidecar가 종료되며 materialization 작업이 `attempting`으로 남아 다음 시작 admission이 거절(앱 열림 불가). 복사본에서 `pending`으로 되돌려 전체 검증 통과를 확인한 뒤 사용자 승인으로 실제 DB를 백업(`m5-backup-before-materialization-repair-20261112`)하고 1행만 복구, 정상 admission 확인. admission 실패 kind를 stderr에 남김(b3af8c83).

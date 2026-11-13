@@ -92,6 +92,10 @@ impl ProjectManager {
             return Err(denied());
         }
         let project = required_project(storage, &address.project_id)?;
+        // A deleted task's files belong to project deletion now.
+        if project_deletion::deleted_chat(&project, chat_id) {
+            return Err(denied());
+        }
         if project.get("prepared_workspaces").is_some_and(|value| {
             value.as_object().is_none_or(|items| {
                 items.values().any(|item| {
@@ -171,8 +175,14 @@ impl ProjectManager {
             if chat["state"] != "discarded" {
                 continue;
             }
-            let checked = self.cleanup_chat(storage, id);
             let project_id = chat["project_id"].as_str().ok_or_else(denied)?;
+            // Deleted projects and tasks are gone from every list; their files
+            // follow through project deletion instead.
+            let registered = registered_project(storage, project_id)?;
+            if project_deletion::is_deleted(&registered) || project_deletion::deleted_chat(&registered, id) {
+                continue;
+            }
+            let checked = self.cleanup_chat(storage, id);
             let project = required_project(storage, project_id)?;
             let job = project
                 .get("workspace_cleanup_v1")
@@ -334,7 +344,7 @@ impl ProjectManager {
 }
 
 #[cfg(unix)]
-fn walk(dir: &Dir, erase: bool, depth: usize, count: &mut usize) -> Result<(), ProjectFailure> {
+pub(super) fn walk(dir: &Dir, erase: bool, depth: usize, count: &mut usize) -> Result<(), ProjectFailure> {
     if depth > 64 {
         return Err(denied());
     }

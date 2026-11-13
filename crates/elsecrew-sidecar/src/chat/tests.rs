@@ -4746,12 +4746,10 @@ fn provider_terminal_recovery_required_poisons_even_after_clean_exit_until_aband
     let chat_id = chat["chatId"].as_str().unwrap();
     let before = fixture.storage.projection_record("chat", chat_id).unwrap();
     let before_run = fixture.storage.projection_record("run", &run_id).unwrap();
-    fixture.projects.change_catalog_visibility(&mut fixture.storage, &fixture.project_id, Some(chat_id), "removeChat", "req_hide_resolved_actual").unwrap();
+    fixture.projects.delete_chat(&mut fixture.storage, &fixture.project_id, chat_id, "req_delete_resolved_actual").unwrap();
     assert!(fixture.chats.list_chats(&fixture.storage, &fixture.project_id, None, 100).unwrap()["items"].as_array().unwrap().is_empty());
     assert_eq!(fixture.storage.projection_record("chat", chat_id).unwrap(), before);
     assert_eq!(fixture.storage.projection_record("run", &run_id).unwrap(), before_run);
-    fixture.projects.change_catalog_visibility(&mut fixture.storage, &fixture.project_id, None, "restoreChats", "req_restore_resolved_actual").unwrap();
-    assert_eq!(fixture.chats.list_chats(&fixture.storage, &fixture.project_id, None, 100).unwrap()["items"][0]["state"], "discarded");
 
     fixture
         .projects
@@ -6543,22 +6541,86 @@ fn app_role_defaults_seed_once_and_survive_reopen() {
 }
 
 #[test]
-fn catalog_removal_hides_and_restores_chat_without_changing_records() {
+fn deleting_the_latest_chat_closes_the_project_copy_it_shares() {
     let mut f = Fixture::new();
-    let snapshot = f.snapshot("req_hide_snapshot");
-    let chat = f.create_chat(&snapshot, "keep history", "req_hide_chat");
+    let snapshot = f.snapshot("req_latest_snapshot");
+    let chat = f.create_chat(&snapshot, "latest", "req_latest_chat");
     let chat_id = chat["chatId"].as_str().unwrap();
-    let before = f.storage.projection_record("chat", chat_id).unwrap();
-    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(chat_id), "removeChat", "req_hide").unwrap();
-    assert!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"].as_array().unwrap().is_empty());
-    assert_eq!(f.storage.projection_record("chat", chat_id).unwrap(), before);
-    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "restoreChats", "req_restore").unwrap();
-    assert_eq!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"][0]["chatId"], chat_id);
-    assert_eq!(f.storage.projection_record("chat", chat_id).unwrap(), before);
+    let worktree_id = chat["worktreeId"].as_str().unwrap();
+    let path = std::path::PathBuf::from(f.storage.projection_record("lock", &format!("lock_{worktree_id}")).unwrap().unwrap()["worktree_path"].as_str().unwrap());
+    let deleted = f.projects.delete_chat(&mut f.storage, &f.project_id, chat_id, "req_latest_delete").unwrap();
+    assert_eq!(deleted.result["projectClosed"], true, "the project's copy was that task's workspace");
+    assert_eq!(f.projects.finish_deletions(&mut f.storage, "req_latest_finish").unwrap(), 0);
+    assert!(!path.exists(), "the deleted task's files are gone at once");
+    // The project reopens from the original and gets a fresh copy.
+    f.projects.reopen_project(&mut f.storage, &f.project_id, "req_latest_reopen").unwrap();
+    f.snapshot("req_latest_next_snapshot");
+    // Deleting the project afterwards leaves nothing pending.
+    f.projects.delete_project(&mut f.storage, &f.project_id, "req_latest_project_delete").unwrap();
+    assert_eq!(f.projects.finish_deletions(&mut f.storage, "req_latest_project_finish").unwrap(), 0);
+    assert_eq!(f.projects.finish_deletions(&mut f.storage, "req_latest_project_finish_again").unwrap(), 0);
 }
 
 #[test]
-fn catalog_removal_hides_any_chat_or_project_and_leaves_records_intact() {
+fn deleting_a_chat_removes_its_workspace_and_never_shows_it_again() {
+    let mut f = Fixture::new();
+    let snapshot = f.snapshot("req_delete_snapshot");
+    let chat = f.create_chat(&snapshot, "delete me", "req_delete_chat");
+    // A newer snapshot means the deleted task no longer shares the project's.
+    f.snapshot("req_delete_newer_snapshot");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let worktree_id = chat["worktreeId"].as_str().unwrap();
+    let path = std::path::PathBuf::from(f.storage.projection_record("lock", &format!("lock_{worktree_id}")).unwrap().unwrap()["worktree_path"].as_str().unwrap());
+    assert!(path.exists());
+    let before = f.storage.projection_record("chat", chat_id).unwrap();
+    f.projects.delete_chat(&mut f.storage, &f.project_id, chat_id, "req_delete").unwrap();
+    assert!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"].as_array().unwrap().is_empty());
+    assert_eq!(f.storage.projection_record("chat", chat_id).unwrap(), before, "the ledger keeps its own record");
+    assert_eq!(f.projects.finish_deletions(&mut f.storage, "req_finish").unwrap(), 0);
+    assert!(!path.exists(), "the task's workspace is gone");
+    // Deleting again and finishing again are no-ops.
+    f.projects.delete_chat(&mut f.storage, &f.project_id, chat_id, "req_delete_again").unwrap();
+    assert_eq!(f.projects.finish_deletions(&mut f.storage, "req_finish_again").unwrap(), 0);
+    assert!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn deleting_a_project_removes_every_app_owned_workspace() {
+    let mut f = Fixture::new();
+    let first = f.snapshot("req_project_delete_snapshot");
+    let chat = f.create_chat(&first, "one", "req_project_delete_chat");
+    let paths: Vec<std::path::PathBuf> = f.storage.projection_records("lock").unwrap().iter()
+        .filter(|lock| lock["project_id"] == json!(f.project_id))
+        .map(|lock| std::path::PathBuf::from(lock["worktree_path"].as_str().unwrap()))
+        .filter(|path| path.exists()).collect();
+    assert!(!paths.is_empty());
+    // A discarded task in the deleted project must not break the storage lists.
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let mut discarded = f.storage.projection_record("chat", chat_id).unwrap().unwrap();
+    discarded.insert("state".into(), json!("discarded"));
+    discarded["record"]["state"] = json!("discarded");
+    f.storage.upsert_projection_record("chat", chat_id, "op_project_delete_discarded", None, discarded).unwrap();
+    f.projects.delete_project(&mut f.storage, &f.project_id, "req_project_delete").unwrap();
+    assert!(f.projects.workspace_cleanup_list(&f.storage).unwrap().result["entries"].as_array().unwrap().is_empty());
+    assert!(f.projects.chat_erasure_list(&f.storage).unwrap().result["entries"].as_array().unwrap().is_empty());
+    assert_eq!(f.projects.finish_deletions(&mut f.storage, "req_project_finish").unwrap(), 0);
+    assert!(paths.iter().all(|path| !path.exists()), "snapshots and task copies are gone");
+    let project = f.storage.projection_record("project", &f.project_id).unwrap().unwrap();
+    assert_eq!(project["project_deletion_v1"]["state"], "deleted");
+    assert!(f.storage.projection_record("chat", chat["chatId"].as_str().unwrap()).unwrap().is_some());
+    // The tombstoned ledger still passes full reopen verification, and the
+    // same folder then opens as a fresh project.
+    f.storage.checkpoint().unwrap();
+    let database = f.storage.path().to_path_buf();
+    drop(f.storage);
+    f.storage = Storage::open_for_admission(&database, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+    f.projects = ProjectManager::new(&database).unwrap();
+    let reopened = f.projects.open_project(&mut f.storage, f.source.to_str().unwrap(), "req_project_readd").unwrap();
+    assert_ne!(reopened.result["projectId"], json!(f.project_id));
+}
+
+#[test]
+fn deleting_any_chat_or_project_leaves_ledger_records_intact() {
     let mut f = Fixture::new();
     let snapshot = f.snapshot("req_sibling_snapshot");
     let healthy = f.create_chat(&snapshot, "healthy", "req_healthy_chat");
@@ -6576,20 +6638,24 @@ fn catalog_removal_hides_any_chat_or_project_and_leaves_records_intact() {
     f.storage.upsert_projection_record("lock", &lock_id, "op_sibling_poison", None, lock).unwrap();
     let record = f.storage.projection_record("chat", recovery_id).unwrap().unwrap();
     // Removal is the user's call: recovery, poisoned locks and siblings never block it.
-    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(healthy_id), "removeChat", "req_hide_healthy").unwrap();
+    f.projects.delete_chat(&mut f.storage, &f.project_id, healthy_id, "req_hide_healthy").unwrap();
     let page = f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap();
     assert_eq!(page["items"].as_array().unwrap().len(), 1);
     assert_eq!(page["items"][0]["chatId"], recovery_id);
-    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(recovery_id), "removeChat", "req_hide_recovery").unwrap();
+    f.projects.delete_chat(&mut f.storage, &f.project_id, recovery_id, "req_hide_recovery").unwrap();
     assert!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"].as_array().unwrap().is_empty());
     // Hiding never rewrites the chat's own record.
     assert_eq!(f.storage.projection_record("chat", recovery_id).unwrap().unwrap(), record);
-    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_hide_all").unwrap();
-    assert!(f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some("chat_missing"), "removeChat", "req_missing").is_err());
+    assert!(f.projects.delete_chat(&mut f.storage, &f.project_id, "chat_missing", "req_missing").is_err());
+    f.projects.delete_project(&mut f.storage, &f.project_id, "req_hide_all").unwrap();
+    // A poisoned workspace that needs recovery is never erased behind the user's back.
+    assert!(f.projects.finish_deletions(&mut f.storage, "req_finish_poisoned").unwrap() >= 1);
+    let poisoned = f.storage.projection_record("lock", &lock_id).unwrap().unwrap();
+    assert!(std::path::Path::new(poisoned["worktree_path"].as_str().unwrap()).exists());
 }
 
 #[test]
-fn catalog_removal_hides_despite_unfinished_runs_and_held_locks() {
+fn deleting_despite_unfinished_runs_waits_with_the_files() {
     let mut f = Fixture::new();
     let snapshot = f.snapshot("req_guard_snapshot");
     let chat = f.create_chat(&snapshot, "guard removal", "req_guard_chat");
@@ -6606,16 +6672,20 @@ fn catalog_removal_hides_despite_unfinished_runs_and_held_locks() {
     let mut lock = f.storage.projection_record("lock", &lock_id).unwrap().unwrap();
     lock.insert("writer_run_id".into(), json!("run_hide_guard"));
     f.storage.upsert_projection_record("lock", &lock_id, "op_hide_lock", None, lock).unwrap();
-    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(chat_id), "removeChat", "req_hide_running").unwrap();
+    f.projects.delete_chat(&mut f.storage, &f.project_id, chat_id, "req_hide_running").unwrap();
     assert!(f.chats.list_chats(&f.storage, &f.project_id, None, 100).unwrap()["items"].as_array().unwrap().is_empty());
     // The run keeps its own record; its owner still decides how it ends.
     let kept = run_projection_record(&f.storage, "run_hide_guard").unwrap();
     assert_eq!((&kept["state"], &kept["record"]), (&running["state"], &running["record"]));
-    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "removeProject", "req_hide_project").unwrap();
+    f.projects.delete_project(&mut f.storage, &f.project_id, "req_hide_project").unwrap();
+    // Files wait until the run has provably exited.
+    assert_eq!(f.projects.finish_deletions(&mut f.storage, "req_finish_running").unwrap(), 2);
+    let held = f.storage.projection_record("lock", &lock_id).unwrap().unwrap();
+    assert!(std::path::Path::new(held["worktree_path"].as_str().unwrap()).exists());
 }
 
 #[test]
-fn hidden_leftover_recovery_stops_blocking_but_live_runs_still_do() {
+fn deleted_leftover_recovery_stops_blocking_but_live_runs_still_do() {
     let mut f = Fixture::new();
     let snapshot = f.snapshot("req_blocker_snapshot");
     let chat = f.create_chat(&snapshot, "blocker", "req_blocker_chat");
@@ -6634,13 +6704,10 @@ fn hidden_leftover_recovery_stops_blocking_but_live_runs_still_do() {
     f.storage.upsert_projection_record("lock", &lock_id, "op_blocker_lock", None, lock).unwrap();
     let blockers = f.storage.blocker_ids().unwrap();
     assert!(blockers.contains(&"run:run_blocker".to_string()) && blockers.contains(&format!("lock:{lock_id}")));
-    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, Some(chat_id), "removeChat", "req_blocker_hide").unwrap();
-    assert!(f.storage.blocker_ids().unwrap().is_empty(), "a removed task's leftover recovery must not hold up quitting");
+    f.projects.delete_chat(&mut f.storage, &f.project_id, chat_id, "req_blocker_hide").unwrap();
+    assert!(f.storage.blocker_ids().unwrap().is_empty(), "a deleted task's leftover recovery must not hold up quitting");
     f.storage.upsert_projection_record("run", "run_blocker", "op_blocker_running", None, with_state("running")).unwrap();
     assert!(f.storage.blocker_ids().unwrap().contains(&"run:run_blocker".to_string()), "a live run still counts until it ends");
-    f.storage.upsert_projection_record("run", "run_blocker", "op_blocker_recovery_again", None, with_state("recoveryRequired")).unwrap();
-    f.projects.change_catalog_visibility(&mut f.storage, &f.project_id, None, "restoreChats", "req_blocker_restore").unwrap();
-    assert!(f.storage.blocker_ids().unwrap().contains(&"run:run_blocker".to_string()), "showing the task again shows its recovery again");
 }
 
 #[test]

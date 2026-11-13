@@ -1462,23 +1462,42 @@ impl Sidecar {
                     self.projects.abandon_unstarted_snapshot(&mut self.storage, inspection, &request.request_id)
                         .map(|()| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"abandonPreparation","inspection":inspection}), ..Default::default() })
                 }
-                Some("removeProject" | "removeChat" | "restoreChats") => {
+                Some("deleteProject" | "deleteChat") => {
+                    // Deleting is the user's call (docs/proposals/m5-project-deletion.md):
+                    // record it, stop what still runs there, then remove the
+                    // app-owned files once those runs have provably exited.
                     let action = request.params["action"].as_str().unwrap();
-                    let fields: &[&str] = if action == "removeChat" { &["action", "projectId", "chatId"] } else { &["action", "projectId"] };
+                    let fields: &[&str] = if action == "deleteChat" { &["action", "projectId", "chatId", "confirmed"] } else { &["action", "projectId", "confirmed"] };
                     let params = require_exact_params(&request.params, fields).map_err(invalid_params)?;
-                    let chat_id = if action == "removeChat" { Some(param_string(params, "chatId").map_err(invalid_params)?) } else { None };
+                    if params["confirmed"] != true { return Err(invalid_params("deletion requires explicit confirmation".into())); }
                     let project_id = param_string(params, "projectId").map_err(invalid_params)?;
-                    // Removal is the user's call: hide it, then stop what still
-                    // runs in that scope. Nothing on disk is deleted.
-                    let changed = self.projects.change_catalog_visibility(&mut self.storage, project_id, chat_id, action, &request.request_id);
-                    if changed.is_ok() && action != "restoreChats" {
-                        // Hidden is the user's result; a stop that could not be
-                        // recorded leaves the runs to their ordinary owners.
+                    let chat_id = if action == "deleteChat" { Some(param_string(params, "chatId").map_err(invalid_params)?) } else { None };
+                    let deleted = match chat_id {
+                        Some(chat_id) => self.projects.delete_chat(&mut self.storage, project_id, chat_id, &request.request_id),
+                        None => self.projects.delete_project(&mut self.storage, project_id, &request.request_id),
+                    };
+                    if deleted.is_ok() {
+                        // A stop that could not be recorded leaves the runs to
+                        // their ordinary owners; deletion waits for their exit.
                         if let Err(error) = self.stop_sessions_for_removal(project_id, chat_id) {
-                            eprintln!("list removal could not stop every session: {}", error.kind);
+                            eprintln!("deletion could not stop every session: {}", error.kind);
+                        }
+                        if self.deletion_idle() {
+                            if let Err(error) = self.projects.finish_deletions(&mut self.storage, &request.request_id) {
+                                eprintln!("deletion files are still pending: {}", error.kind);
+                            }
                         }
                     }
-                    changed
+                    deleted
+                }
+                Some("finishDeletions") => {
+                    require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
+                    let pending = if self.deletion_idle() {
+                        self.projects.finish_deletions(&mut self.storage, &request.request_id)
+                    } else {
+                        self.projects.pending_deletions(&self.storage)
+                    };
+                    pending.map(|pending| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"finishDeletions","pending":pending}), ..Default::default() })
                 }
                 Some("releaseView") => {
                     let params = require_exact_params(&request.params, &["action", "projectId"])

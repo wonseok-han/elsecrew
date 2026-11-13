@@ -272,33 +272,46 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   // Adding a folder can reveal a hidden or new catalog entry even when opening
   // it then stops (recovery, busy agent); refresh the lists after every attempt.
   const addProject = () => controller.chooseProject().finally(() => setCatalogRevision(value => value + 1));
-  // Removing from the list is the user's call; running work is stopped first.
-  const canRemove = admissionReady && !settingsOpen && !newChatOpen && !removing;
-  const changeList = async (target: { projectId: string; chatId?: string }, restore = false) => {
+  // Deleting is the user's call; running work is stopped first.
+  const canRemove = admissionReady && !settingsOpen && !newChatOpen && !removing && !leavingProject && !chat.switching && !chat.preparing;
+  // Files go once the stopped runs have provably exited; ask again shortly
+  // after a deletion and once at startup.
+  const finishDeletions = useCallback(() => {
+    if (!window.m5Projects) return;
+    const input = { action: "finishDeletions" as const };
+    void window.m5Projects.request(input).then(raw => validateProjectCatalogResult(raw, input)).catch(() => undefined);
+  }, []);
+  useEffect(() => { if (admissionReady) finishDeletions(); }, [admissionReady, finishDeletions]);
+  const deleteTarget = async (target: { projectId: string; chatId?: string }) => {
     if (!canRemove || !window.m5Projects) return;
     setRemoving(true); setRemovalError(false);
     const wasCurrent = controller.snapshot().project?.id === target.projectId;
+    const wasActiveChat = Boolean(target.chatId) && chat.activeChat?.chatId === target.chatId;
     try {
-      const input = restore ? { action: "restoreChats" as const, projectId: target.projectId }
-        : target.chatId ? { action: "removeChat" as const, projectId: target.projectId, chatId: target.chatId }
-        : { action: "removeProject" as const, projectId: target.projectId };
-      // The sidecar hides the entry and stops what still runs there; then the
-      // open view closes even if those runs are still winding down.
-      validateProjectCatalogResult(await window.m5Projects.request(input), input);
-      if (!restore) notifications.removeFor(target.projectId, target.chatId);
-      if (wasCurrent && !restore && !target.chatId && controller.snapshot().project?.id === target.projectId) {
+      const input = target.chatId ? { action: "deleteChat" as const, projectId: target.projectId, chatId: target.chatId, confirmed: true as const }
+        : { action: "deleteProject" as const, projectId: target.projectId, confirmed: true as const };
+      // The sidecar records the deletion and stops what still runs there; then
+      // the open view closes even if those runs are still winding down.
+      const result = validateProjectCatalogResult(await window.m5Projects.request(input), input);
+      // Deleting the latest task closes the project's own copy (it was that
+      // task's workspace); the project then reopens from the original.
+      const projectClosed = result.action === "deleteChat" && result.projectClosed;
+      notifications.removeFor(target.projectId, target.chatId);
+      if (wasCurrent && (!target.chatId || wasActiveChat || projectClosed) && controller.snapshot().project?.id === target.projectId) {
         await window.m5Projects.request({ action: "releaseView", projectId: target.projectId }).catch(() => undefined);
         if (controller.snapshot().project?.id === target.projectId) {
           chatController.clearProjectView(true);
           controller.leaveProjectView(true);
         }
-      }
-      if (!restore && !target.chatId) setCatalogRevision(value => value + 1);
-      setRemoval(null);
-      if (wasCurrent && (restore || target.chatId)) {
+        // A deleted task leaves its project open on the project's own files.
+        if (wasActiveChat || projectClosed) await controller.reopenProject(target.projectId, request => window.m5Projects!.request(request)).catch(() => undefined);
+      } else if (wasCurrent && target.chatId) {
         await chatController.refreshChatList();
-        if (target.chatId) controller.revealChatList();
+        controller.revealChatList();
       }
+      if (!target.chatId) setCatalogRevision(value => value + 1);
+      setRemoval(null);
+      for (const delay of [2_000, 8_000, 30_000]) window.setTimeout(finishDeletions, delay);
     } catch { setRemovalError(true); }
     finally { setRemoving(false); }
   };
@@ -375,7 +388,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         <p>{removal?.label}</p><p>{t(removal?.chatId ? "m5.catalog.removeChatHelp" : "m5.catalog.removeHelp")}</p>
         {removalError && <p role="alert">{t("m5.catalog.removeError")}</p>}
         <div className="m5-dialog-actions"><button type="button" disabled={removing} onClick={() => setRemoval(null)}>{t("m5.editor.cancel")}</button>
-        <button type="button" className="m5-danger" disabled={!canRemove} onClick={() => removal && void changeList(removal)}>{t("m5.catalog.remove")}</button></div>
+        <button type="button" className="m5-danger" disabled={!canRemove} onClick={() => removal && void deleteTarget(removal)}>{t("m5.catalog.remove")}</button></div>
       </dialog>
       {!railExpanded && <button type="button" className="m5-sidebar-reopen" onClick={() => setRailExpanded(true)} aria-label={t("m5.catalog.expand")} title={t("m5.catalog.expand")} aria-expanded={false}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>}
       <header className={`m5-toolbar${snapshot.project ? " m5-toolbar-project" : ""}`}>
@@ -509,7 +522,6 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
             <span className="m5-chat-goal">{item.goal}</span><span className={changed ? "m5-chat-update" : `m5-chat-status m5-chat-status-${state}`}>{status}</span>
           </button><button type="button" className="m5-chat-remove" title={t("m5.catalog.remove")} aria-label={t("m5.catalog.removeChat", { goal: item.goal })} disabled={!canRemove} onClick={() => { setRemovalError(false); setRemoval({ projectId: item.projectId, chatId: item.chatId, label: item.goal }); }}>×</button></div>;
         })}</div>
-        <button type="button" className="m5-chat-restore" disabled={!canRemove} onClick={() => snapshot.project && void changeList({ projectId: snapshot.project.id }, true)}>{t("m5.catalog.restoreChats")}</button>
         {removalError && !removal && <p role="alert">{t("m5.catalog.removeError")}</p>}
         {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats || removing} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? t("m5.navigation.loadingChats") : t("m5.navigation.moreChats")}</button>}
         <button ref={newChatButtonRef} type="button" className="m5-new-chat-button" disabled={!admissionReady || !projectDataReady || settingsOpen || chat.preparing || chat.switching} onClick={() => setNewChatOpen(true)}>{t("m5.navigation.newChat")}</button>

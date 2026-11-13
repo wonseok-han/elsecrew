@@ -935,18 +935,7 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-agent-runs').textContent.includes('문제가 없다는 뜻은 아니에요')", "empty diagnostic is inconclusive")};
     if (window.m5SmokeContextStarts.length !== 1) throw new Error('diagnostic inspection started an agent');
     const originalRequest = window.m5Projects.request;
-    let restoreRequests = 0;
-    window.m5Projects.request = input => {
-      if (input.action === 'restoreChats') { restoreRequests++; return Promise.resolve({ schemaVersion: 1, action: input.action, projectId: input.projectId }); }
-      if (input.action === 'releaseView' || input.action === 'reopen') throw new Error('restore must not leave project');
-      return originalRequest(input);
-    };
-    const retainedEditor = document.querySelector('.monaco-editor');
-    const retainedConversation = document.querySelector('#m5-followup-text');
-    document.querySelector('.m5-chat-restore').click();
-    await ${waitFor("!document.querySelector('.m5-chat-restore').disabled", "restore completes without navigation")};
-    if (restoreRequests !== 1 || retainedEditor !== document.querySelector('.monaco-editor') || retainedConversation !== document.querySelector('#m5-followup-text') || document.querySelector('h1').textContent !== 'smoke') throw new Error('restore replaced workspace surface');
-    window.m5Projects.request = originalRequest;
+    if (document.querySelector('.m5-chat-restore')) throw new Error('deleted tasks must not offer a restore');
 
     ${process.env.M5_MEASURE_PARALLEL_PAINT === "1" ? `
     window.m5Projects.request = originalRequest;
@@ -985,11 +974,11 @@ app.whenReady().then(async () => {
     let removalAccepted = false;
     let removedChatId = null;
     window.m5Projects.request = async input => {
-      if (input.action === 'releaseView' || input.action === 'reopen') throw new Error('chat removal must not leave project');
-      if (input.action === 'removeChat') {
+      if (input.action === 'deleteChat') {
+        if (input.confirmed !== true) throw new Error('chat deletion without confirmation');
         if (!removalAccepted) throw new Error('synthetic rejection');
         removedChatId = input.chatId;
-        return {schemaVersion:1,action:input.action,projectId:input.projectId,chatId:input.chatId};
+        return {schemaVersion:1,action:input.action,projectId:input.projectId,chatId:input.chatId,projectClosed:true};
       }
       return originalRequest(input);
     };
@@ -1003,8 +992,8 @@ app.whenReady().then(async () => {
     if (document.querySelector('#m5-followup-text') !== preservedConversation || document.querySelector('h1').textContent !== 'smoke') throw new Error('rejected removal navigated away');
     removalAccepted = true;
     document.querySelector('#m5-remove-title ~ .m5-dialog-actions .m5-danger').click();
-    await ${waitFor("!document.querySelector('#m5-remove-title').closest('dialog').open && !document.querySelector('.m5-chat-remove')", "removed chat disappears without leaving project")};
-    if (!removedChatId || document.querySelector('.monaco-editor') !== removalEditor || document.querySelector('#m5-followup-text') !== preservedConversation || document.querySelector('h1').textContent !== 'smoke') throw new Error('successful removal replaced workspace');
+    await ${waitFor("!document.querySelector('#m5-remove-title').closest('dialog').open && !document.querySelector('.m5-chat-remove') && document.querySelector('h1')?.textContent === 'smoke'", "deleted chat disappears and its project stays open")};
+    if (!removedChatId) throw new Error('chat deletion not persisted');
   })()`);
   process.stdout.write(`${JSON.stringify(result)}\n`);
 
@@ -1035,20 +1024,20 @@ app.whenReady().then(async () => {
     const catalogRequest = window.m5Projects.request;
     let removed = false;
     window.m5Projects.request = async input => {
-      if (input.action === 'removeProject') { if (input.projectId !== 'earlier_project') throw new Error('wrong removal target'); removed = true; window.m5SmokeCatalogEmpty = true; return {schemaVersion:1, action:input.action, projectId:input.projectId}; }
+      if (input.action === 'deleteProject') { if (input.projectId !== 'earlier_project' || input.confirmed !== true) throw new Error('wrong deletion target'); removed = true; window.m5SmokeCatalogEmpty = true; return {schemaVersion:1, action:input.action, projectId:input.projectId}; }
       return catalogRequest(input);
     };
     document.querySelector('.m5-project-rail .m5-project-overflow summary').click();
-    [...document.querySelectorAll('.m5-project-rail .m5-project-overflow button')].find(button => button.textContent === '목록에서 제거').click();
+    [...document.querySelectorAll('.m5-project-rail .m5-project-overflow button')].find(button => button.textContent === '삭제').click();
     await ${waitFor("document.querySelector('#m5-remove-title')?.closest('dialog').open", "remove project confirmation")};
     const dialog = document.querySelector('#m5-remove-title').closest('dialog');
     if (parseFloat(getComputedStyle(dialog.querySelector('.m5-dialog-actions')).gap) < 8) throw new Error('removal buttons need spacing');
     [...dialog.querySelectorAll('button')].find(button => button.textContent === '취소').click();
     if (removed) throw new Error('cancelled project removal mutated catalog');
     document.querySelector('.m5-project-rail .m5-project-overflow summary').click();
-    [...document.querySelectorAll('.m5-project-rail .m5-project-overflow button')].find(button => button.textContent === '목록에서 제거').click();
+    [...document.querySelectorAll('.m5-project-rail .m5-project-overflow button')].find(button => button.textContent === '삭제').click();
     await ${waitFor("document.querySelector('#m5-remove-title')?.closest('dialog').open", "reopen removal confirmation")};
-    [...dialog.querySelectorAll('button')].find(button => button.textContent === '목록에서 제거').click();
+    [...dialog.querySelectorAll('button')].find(button => button.textContent === '삭제').click();
     await ${waitFor("!document.querySelector('.m5-project-rail .m5-project-overflow')", "project removed from catalog")};
     if (!removed) throw new Error('project removal not persisted');
 

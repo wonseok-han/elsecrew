@@ -680,6 +680,7 @@ impl G5Manager {
             .filter(|record| record.get("project_id").and_then(Value::as_str) == Some(project_id))
             .filter(|record| !hidden.is_some_and(|ids| ids.iter().any(|id| Some(id) == record.get("chat_id"))))
             .filter(|record| !record.get("chat_id").is_some_and(|id| crate::project::chat_erasure::erasure_recorded(&project, id)))
+            .filter(|record| !record.get("chat_id").and_then(Value::as_str).is_some_and(|id| crate::project::project_deletion::deleted_chat(&project, id)))
             .filter_map(|record| record.get("record").cloned())
             .collect::<Vec<_>>();
         items.sort_by(|left, right| {

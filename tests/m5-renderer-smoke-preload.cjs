@@ -63,6 +63,7 @@ window.m5Projects = { request: async (input) => {
     if (++preparationAttempts === 1) throw new Error("synthetic response loss");
     return {schemaVersion: 1, action: input.action, inspection: preparationInspection};
   }
+  if (input.action === "finishDeletions") return {schemaVersion: 1, action: input.action, pending: 0};
   if (input.action === "releaseView" && input.projectId === "smoke_project") return {schemaVersion: 1, action: "releaseView", projectId: input.projectId};
   if (input.action === "list" && window.m5SmokeCatalogEmpty) return {schemaVersion:1, action:"list", projects:[], nextCursor:null};
   if (input.action === "list") return input.cursor === null

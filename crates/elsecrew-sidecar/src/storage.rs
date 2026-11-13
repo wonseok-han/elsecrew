@@ -844,16 +844,17 @@ impl Storage {
 
     pub fn blocker_ids(&self) -> Result<Vec<String>, SidecarError> {
         let projection = load_projection(&self.connection)?;
-        // A task or project the user removed from the list keeps its records,
-        // but its leftover recovery no longer holds up quitting or other
-        // projects. Live runs still count until they end. Re-adding the folder
-        // makes the entry, and its recovery, visible again.
+        // A deleted task or project keeps its ledger records, but its leftover
+        // recovery no longer holds up quitting or other projects. Live runs
+        // still count until they end. Re-adding the folder starts a fresh
+        // project, so deleted entries never become visible again.
         let hidden_chat = |chat_id: &str| {
             projection.chats.get(chat_id).is_some_and(|chat| {
                 let project = chat.get("project_id").and_then(Value::as_str).and_then(|id| projection.projects.get(id));
                 project.is_some_and(|project| {
                     project.get("catalog_hidden").and_then(Value::as_bool) == Some(true)
                         || project.get("catalog_hidden_chats").and_then(Value::as_array).is_some_and(|ids| ids.iter().any(|id| id == chat_id))
+                        || project.get("chat_deletion_v1").and_then(|jobs| jobs.get(chat_id)).is_some()
                 })
             })
         };

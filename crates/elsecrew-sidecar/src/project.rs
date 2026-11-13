@@ -1,6 +1,7 @@
 pub(crate) mod automation_permissions;
 pub(crate) mod workspace_cleanup;
 pub(crate) mod chat_erasure;
+pub(crate) mod project_deletion;
 // Requires native Windows recovery QA and explicit product activation.
 pub(crate) const WINDOWS_SAVE_RECOVERY_MUTATIONS_ENABLED: bool = false;
 // Installation consent is not product activation; native integration review remains required.
@@ -1032,7 +1033,9 @@ impl ProjectManager {
         let path = storage
             .project_catalog_path(project_id)?
             .ok_or_else(|| ProjectFailure::manifest("saved project was not found"))?;
-        if project_id_for_root(&path) != project_id {
+        // IDs start as a hash of the path but a re-added folder gets a fresh
+        // one; deleted projects carry a marker instead of a path.
+        if path.starts_with("deleted:") || storage.project_id_by_path(&path)?.as_deref() != Some(project_id) {
             return Err(ProjectFailure::manifest("saved project ID and root differ"));
         }
         let selected = canonical_existing_directory(Path::new(&path))?;
@@ -1083,55 +1086,6 @@ impl ProjectManager {
         })
     }
 
-    /// Hide metadata only. No source, snapshot, history, or recovery data is deleted.
-    pub fn change_catalog_visibility(
-        &mut self, storage: &mut Storage, project_id: &str, chat_id: Option<&str>,
-        action: &str, request_id: &str,
-    ) -> Result<ProjectAction, ProjectFailure> {
-        let mut project = required_project(storage, project_id)?;
-        #[cfg(any(unix, windows))]
-        if self.application_confirmations.has_pending() {
-            return Err(ProjectFailure::recovery("close the application confirmation before list removal"));
-        }
-
-        // Only a write into the user's original files stays exclusive; it ends
-        // in seconds and must not be cut off. Everything else is the user's call:
-        // running sessions were already asked to stop, and hiding deletes nothing.
-        if self.application_running()
-            // Only a write that stopped half-way leaves the original partly changed.
-            || project.get("application_intent").is_some_and(|intent| intent["state"] == "applying")
-        {
-            return Err(ProjectFailure::recovery("finish or undo the update of the original files first"));
-        }
-        let chats = storage.projection_records("chat")?;
-        let selected = if action == "removeChat" {
-            let id = chat_id.ok_or_else(|| ProjectFailure::manifest("chat identity missing"))?;
-            Some(chats.iter().find(|chat| chat.get("chat_id").and_then(Value::as_str) == Some(id)
-                && chat.get("project_id").and_then(Value::as_str) == Some(project_id))
-                .ok_or_else(|| ProjectFailure::manifest("chat does not belong to project"))?)
-        } else { None };
-        let in_scope = |chat: &Map<String, Value>| chat.get("project_id").and_then(Value::as_str) == Some(project_id)
-            && selected.is_none_or(|selected| chat.get("chat_id") == selected.get("chat_id"));
-        let ids: Vec<&str> = chats.iter().filter(|chat| in_scope(chat))
-            .filter_map(|chat| chat.get("chat_id").and_then(Value::as_str)).collect();
-        if chat_id.is_some_and(|id| !ids.contains(&id)) { return Err(ProjectFailure::manifest("chat does not belong to project")); }
-        match action {
-            "removeProject" => { project.insert("catalog_hidden".into(), json!(true)); }
-            "removeChat" => {
-                let id = chat_id.ok_or_else(|| ProjectFailure::manifest("chat identity missing"))?;
-                let hidden = project.entry("catalog_hidden_chats").or_insert_with(|| json!([])).as_array_mut()
-                    .ok_or_else(|| ProjectFailure::manifest("invalid hidden chat list"))?;
-                if !hidden.iter().any(|value| value == id) { hidden.push(json!(id)); }
-            }
-            "restoreChats" => { project.insert("catalog_hidden_chats".into(), json!([])); }
-            _ => return Err(ProjectFailure::manifest("unknown catalog mutation")),
-        }
-        append_object(storage, "project", project_id, &format!("op_catalog_{request_id}"), request_id, Value::Object(project))?;
-        let mut result = json!({"schemaVersion":1,"action":action,"projectId":project_id});
-        if let Some(id) = chat_id { result["chatId"] = json!(id); }
-        Ok(ProjectAction { result, ..Default::default() })
-    }
-
     /// Detach watchers only; durable snapshots and chat bindings remain reusable.
     pub fn release_project_view(
         &mut self,
@@ -1168,7 +1122,19 @@ impl ProjectManager {
         }
         let canonical_text = canonical_protocol_path(&source.canonical_root)?;
         let selected_text = canonical_protocol_path(selected)?;
-        let project_id = project_id_for_root(&canonical_text);
+        // A folder that belonged to a deleted project starts over under a new
+        // ID. Projects hidden by the old "remove from list" are deleted now.
+        let mut found = storage.project_id_by_path(&canonical_text)?;
+        if let Some(id) = found.clone() {
+            if registered_project(storage, &id)?.get("catalog_hidden") == Some(&json!(true)) {
+                self.delete_project(storage, &id, request_id)?;
+                found = None;
+            }
+        }
+        let project_id = match found {
+            Some(id) => id,
+            None => fresh_project_id(storage, &canonical_text)?,
+        };
 
         if let Some(mut existing) = storage.projection_record("project", &project_id)? {
             if existing.contains_key(path_binding::FIELD) {
@@ -1184,10 +1150,6 @@ impl ProjectManager {
                 append_object(storage, "project", &project_id,
                     &format!("op_project_path_binding_{request_id}"), request_id,
                     Value::Object(existing.clone()))?;
-            }
-            if existing.get("catalog_hidden") == Some(&json!(true)) {
-                existing.insert("catalog_hidden".into(), json!(false));
-                append_object(storage, "project", &project_id, &format!("op_catalog_restore_{request_id}"), request_id, Value::Object(existing.clone()))?;
             }
             let lifecycle = value_string(&existing, "lifecycle")?;
             if lifecycle == "recoveryRequired" {
@@ -5809,6 +5771,18 @@ fn project_id_for_root(root: &str) -> String {
     sha256_file_version_v1(root.as_bytes()).replacen("sha256:", "project_", 1)
 }
 
+/// The path hash for a folder seen first; a later generation once that ID
+/// belongs to a deleted project.
+fn fresh_project_id(storage: &Storage, root: &str) -> Result<String, ProjectFailure> {
+    let first = project_id_for_root(root);
+    if storage.projection_record("project", &first)?.is_none() { return Ok(first); }
+    for generation in 1..10_000u32 {
+        let candidate = sha256_file_version_v1(format!("{root}\0{generation}").as_bytes()).replacen("sha256:", "project_", 1);
+        if storage.projection_record("project", &candidate)?.is_none() { return Ok(candidate); }
+    }
+    Err(ProjectFailure::manifest("no free project identity for this folder"))
+}
+
 fn project_identity(project_id: &str, selected: &str, root: &str) -> Value {
     json!({
         "schemaVersion":PROJECT_SCHEMA_VERSION_V1,
@@ -5930,7 +5904,7 @@ fn preserve_project_extensions(
         .as_object()
         .cloned()
         .ok_or_else(|| ProjectFailure::manifest("project payload must be an object"))?;
-    for field in ["automation_permissions_v1", "workspace_cleanup_v1", chat_erasure::FIELD, "catalog_hidden", "catalog_hidden_chats", "native_path_binding", "role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews", "application_backups", "application_intent", "application_history"] {
+    for field in ["automation_permissions_v1", "workspace_cleanup_v1", chat_erasure::FIELD, project_deletion::CHAT_FIELD, project_deletion::PROJECT_FIELD, "catalog_hidden", "catalog_hidden_chats", "native_path_binding", "role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews", "application_backups", "application_intent", "application_history"] {
         if field == path_binding::FIELD && object.contains_key(field) {
             continue;
         }

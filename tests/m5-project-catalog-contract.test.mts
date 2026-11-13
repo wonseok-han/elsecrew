@@ -187,15 +187,20 @@ test("review discard binds the exact inspected chat and requires explicit consen
   assert.throws(() => validateProjectCatalogRequest({...request,workspaceIdentity:"../escape"}));
 });
 
-test("list removal binds project and chat identities and rejects extra fields", () => {
-  for (const action of ["removeProject", "restoreChats"] as const) {
-    const request = { action, projectId: "project_a" };
-    assert.doesNotThrow(() => validateProjectCatalogRequest(request));
-    assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, ...request }, request));
-    assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, ...request, projectId: "project_b" }, request));
-    assert.throws(() => validateProjectCatalogRequest({ ...request, deleteFiles: true }));
-  }
-  const request = { action: "removeChat" as const, projectId: "project_a", chatId: "chat_a" };
-  assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, ...request }, request));
-  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, ...request, chatId: "chat_b" }, request));
+test("deletion binds project and chat identities, needs confirmation and rejects extra fields", () => {
+  const project = { action: "deleteProject" as const, projectId: "project_a", confirmed: true as const };
+  assert.doesNotThrow(() => validateProjectCatalogRequest(project));
+  assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, action: "deleteProject", projectId: "project_a" }, project));
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "deleteProject", projectId: "project_b" }, project));
+  assert.throws(() => validateProjectCatalogRequest({ ...project, confirmed: false }));
+  assert.throws(() => validateProjectCatalogRequest({ action: "deleteProject", projectId: "project_a" }));
+  assert.throws(() => validateProjectCatalogRequest({ ...project, deleteSource: true }));
+  const chat = { action: "deleteChat" as const, projectId: "project_a", chatId: "chat_a", confirmed: true as const };
+  assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, action: "deleteChat", projectId: "project_a", chatId: "chat_a", projectClosed: false }, chat));
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "deleteChat", projectId: "project_a", chatId: "chat_b", projectClosed: false }, chat));
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "deleteChat", projectId: "project_a", chatId: "chat_a" }, chat));
+  const finish = { action: "finishDeletions" as const };
+  assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, action: "finishDeletions", pending: 2 }, finish));
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "finishDeletions", pending: -1 }, finish));
+  for (const retired of ["removeProject", "restoreChats"]) assert.throws(() => validateProjectCatalogRequest({ action: retired, projectId: "project_a" }));
 });

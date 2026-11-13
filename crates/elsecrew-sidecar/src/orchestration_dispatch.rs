@@ -250,10 +250,18 @@ impl Sidecar {
         }
     }
 
-    /// Removing a task or project from the list is the user's decision. Stop
-    /// what is still running in that scope first: a running team stops before
-    /// its next step and an active agent run is asked to cancel. Termination
-    /// proof keeps arriving through the ordinary run owner afterwards.
+    /// The same idle gate as workspace cleanup: nothing may still be starting,
+    /// running or cancelling anywhere while app-owned files are removed.
+    pub(super) fn deletion_idle(&self) -> bool {
+        !self.g5.cleanup_blocked() && self.workflow_chats.is_empty() && self.agent_runtime.owned_run_ids().is_empty()
+            && self.pending_agent_starts.is_empty() && self.pending_agent_cancels.is_empty()
+    }
+
+    /// Deleting a task or project is the user's decision. Stop what is still
+    /// running in that scope first: a running team stops before its next step
+    /// and an active agent run is asked to cancel. Termination proof keeps
+    /// arriving through the ordinary run owner afterwards.
+
     pub(super) fn stop_sessions_for_removal(
         &mut self,
         project_id: &str,
@@ -1021,7 +1029,7 @@ mod tests {
     }
 
     #[test]
-    fn removing_a_running_task_stops_its_team_and_run_then_hides_it() {
+    fn deleting_a_running_task_stops_its_team_and_run_then_drops_it_from_the_list() {
         let (_root, mut sidecar, chat) = service();
         assert!(start(&mut sidecar, &chat).ok);
         sidecar.agent_runtime.set_fake_scenario(FakeScenario::CancelClean);
@@ -1040,7 +1048,7 @@ mod tests {
         let request = sidecar.workflow_request(
             "req_remove_running".into(),
             "project.catalog",
-            json!({"action":"removeChat","projectId":project_id,"chatId":id}),
+            json!({"action":"deleteChat","projectId":project_id,"chatId":id,"confirmed":true}),
         );
         let response = sidecar.handle_request(request).unwrap().response.unwrap();
         assert!(response.ok, "{:?}", response.error);
