@@ -16,6 +16,7 @@
 - 검증: tsc 통과, 프런트735·권한UI/editor-state67 통과, renderer mount smoke PASS, native large-diff smoke PASS(앞 커밋), 패키지 smoke PASS.
 - 발견(미수정): 레일은 프로젝트가 열려 있으면 잠겨 페이지를 넘길 수 없다. 현재 프로젝트가 첫 페이지(최대 50개)에 없으면 레일 ⋯ 메뉴의 '프로젝트 화면 닫기'에 닿을 수 없다. 50개를 넘는 경우에만 드러나므로 후속으로 남긴다.
 - 정리: Spotlight에 Elsecrew가 2개 잡혀 사용자가 예전 빌드(`~/projects/hello-agent/out`, 11-12 12:35, 구 저장소 경로)를 실행하고 있었다. 사용자 승인으로 그 `out`(315MB, gitignore된 빌드 결과물)을 삭제해 현재 패키지 하나만 남겼다. 예전 앱 실행 뒤 상태로 두 번째 백업 `Elsecrew-backup-before-v13-20261113-2`(167파일 해시 일치)도 받았다.
+- 개발 잔여물 정리(사용자 승인): 끝난 작업의 cargo target 2개(`/private/tmp/elsecrew-roles-integration-target`, scratchpad `target-custom-roles`)를 지웠다. 병합 완료된 `.worktrees` 3개는 `git worktree remove`로 지웠고 브랜치는 보존했다. 실제 데이터 사본(dbcopy·m5copy·sj), smoke/tour 임시 폴더, `/private/tmp/elsecrew-*` 메모 파일도 지웠다. 이후 사용자 결정으로 구 저장소 클론 `~/projects/hello-agent` 전체(원격·현 저장소에 없는 로컬 커밋 123개·브랜치 114개·stash 3개 포함)를 영구 삭제했다. 빌드 캐시 `/private/tmp/elsecrew-main-target`과 앱 백업 2개는 유지했다. Data 볼륨 여유 517→524GiB.
 - 다음: 사용자 실제 시험(V13 이관 확인, 기획만 Codex). 기존 남은 과제는 그대로다. push·main 병합은 하지 않았다.
 
 ### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 변경 화면 스크롤 불러오기·설정 정리·간격
