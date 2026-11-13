@@ -91,21 +91,43 @@ impl PinnedExecutable {
         })
     }
 
+    /// Unrelated writes in a shared ancestor (a home folder) can disturb the
+    /// strict window around verification; each retry re-verifies from scratch.
     #[cfg(any(test, target_os = "macos"))]
     fn open_authenticated(
         path: &Path,
-        authenticate: impl FnOnce(&Path) -> Result<(), SidecarError>,
+        mut authenticate: impl FnMut(&Path) -> Result<(), SidecarError>,
     ) -> Result<Self, SidecarError> {
-        let held = open_file(path)?;
-        let original = signature_stamp(&held.metadata().map_err(|_| failure())?);
+        // Only a disturbed strict window is retried; a missing file or a
+        // failed signature is final and is not re-run.
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            match Self::open_authenticated_once(path, &mut authenticate) {
+                Ok(pinned) => return Ok(pinned),
+                Err((error, window_disturbed)) if !window_disturbed || attempt == 3 => return Err(error),
+                Err(_) => {}
+            }
+        }
+    }
+
+    #[cfg(any(test, target_os = "macos"))]
+    /// `Err((error, true))` only when the strict post-verification check failed.
+    fn open_authenticated_once(
+        path: &Path,
+        authenticate: &mut impl FnMut(&Path) -> Result<(), SidecarError>,
+    ) -> Result<Self, (SidecarError, bool)> {
+        let fatal = |error| (error, false);
+        let held = open_file(path).map_err(fatal)?;
+        let original = signature_stamp(&held.metadata().map_err(|_| (failure(), false))?);
         let mut ancestors = Vec::new();
-        for ancestor in path.parent().ok_or_else(failure)?.ancestors() {
-            let dir = signature_directory(ancestor)?;
-            let stamp = signature_stamp(&dir.dir_metadata().map_err(|_| failure())?);
+        for ancestor in path.parent().ok_or_else(|| (failure(), false))?.ancestors() {
+            let dir = signature_directory(ancestor).map_err(fatal)?;
+            let stamp = signature_stamp(&dir.dir_metadata().map_err(|_| (failure(), false))?);
             ancestors.push((ancestor.to_owned(), dir, stamp));
         }
-        let digest = hash(&held)?;
-        authenticate(path)?;
+        let digest = hash(&held).map_err(fatal)?;
+        authenticate(path).map_err(fatal)?;
         let value = Self {
             path: path.into(),
             held,
@@ -115,8 +137,9 @@ impl PinnedExecutable {
                 ancestors,
             }),
         };
-        // Reject replacement or in-place mutation across signature verification.
-        value.revalidate()?;
+        // Reject replacement or in-place mutation across signature verification,
+        // including a swap-and-restore that only an ancestor's change times reveal.
+        value.revalidate_with(true).map_err(|error| (error, true))?;
         Ok(value)
     }
 
@@ -140,7 +163,16 @@ impl PinnedExecutable {
 
     /// Point-in-time path-to-handle and content check. Does not protect against
     /// hostile same-UID mutation after returning; never treat this as fd-exec.
+    ///
+    /// Once verification bound the held bytes to the signature, the file's
+    /// identity, bytes and stamp decide. Ancestors must stay the same
+    /// directories with the same mode and owner; entries added elsewhere in
+    /// them (a home folder changes constantly) are not a change of this path.
     pub(crate) fn revalidate(&self) -> Result<&Path, SidecarError> {
+        self.revalidate_with(false)
+    }
+
+    fn revalidate_with(&self, strict_ancestors: bool) -> Result<&Path, SidecarError> {
         let current = open_file(&self.path)?;
         let old = self.held.metadata().map_err(|_| failure())?;
         let new = current.metadata().map_err(|_| failure())?;
@@ -153,6 +185,7 @@ impl PinnedExecutable {
             {
                 return Err(failure());
             }
+            let compare = |stamp: SignatureStamp| if strict_ancestors { stamp } else { ancestor_identity(stamp) };
             for (path, dir, initial) in &binding.ancestors {
                 let held = signature_stamp(&dir.dir_metadata().map_err(|_| failure())?);
                 let linked = signature_stamp(
@@ -160,13 +193,20 @@ impl PinnedExecutable {
                         .dir_metadata()
                         .map_err(|_| failure())?,
                 );
-                if held != *initial || linked != *initial {
+                if compare(held) != compare(*initial) || compare(linked) != compare(*initial) {
                     return Err(failure());
                 }
             }
         }
         Ok(&self.path)
     }
+}
+
+/// The same directory (device, inode) with the same mode and owner; size,
+/// link count and change times move whenever unrelated entries do.
+#[cfg(any(test, target_os = "macos"))]
+fn ancestor_identity(stamp: SignatureStamp) -> SignatureStamp {
+    (stamp.0, stamp.1, 0, stamp.3, stamp.4, 0, 0, 0, 0, 0)
 }
 
 #[cfg(any(test, target_os = "macos"))]
@@ -294,8 +334,9 @@ mod tests {
         Sha256::digest(b"test executable bytes").into()
     }
 
-    // Other parallel fixtures can change a shared temp ancestor. The production
-    // check deliberately rejects that observation; only positive controls retry.
+    // Other parallel fixtures can change a shared temp ancestor. The strict
+    // window around verification rejects that observation (and retries at most
+    // three times); positive controls retry further here.
     fn stable_authenticated_fixture(path: &Path) -> PinnedExecutable {
         for _ in 0..32 {
             if let Ok(pin) = PinnedExecutable::open_authenticated(path, |_| Ok(())) {
@@ -356,6 +397,26 @@ mod tests {
         })
         .is_err());
         assert!(reached);
+    }
+
+    #[test]
+    fn unrelated_ancestor_entries_do_not_invalidate_a_verified_pin_but_replacement_does() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let nested = root.join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        let file = candidate(&nested);
+        let pin = stable_authenticated_fixture(&file);
+        // A home folder gains and loses files all the time.
+        std::fs::write(root.join("unrelated"), b"x").unwrap();
+        std::fs::write(nested.join("sibling"), b"x").unwrap();
+        std::fs::create_dir(nested.join("subdir")).unwrap();
+        std::fs::remove_file(root.join("unrelated")).unwrap();
+        pin.revalidate().unwrap();
+        // A changed mode on an ancestor still invalidates.
+        std::fs::set_permissions(&nested, std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(pin.revalidate().is_err());
+        std::fs::set_permissions(&nested, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     #[cfg(target_os = "macos")]

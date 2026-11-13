@@ -2,6 +2,16 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 실제 시험 중단 `providerExecutableChanged` 원인과 수정
+- 증상: todo 앱 시험 중 11:33(KST)에 '팀 작업을 멈췄어요 (원인 코드: providerExecutableChanged)'로 멈췄다. 기획(Codex) 실행은 성공했고, 총괄(Claude Code) 2단계 준비 중 run이 생기기 전에 실패했다. 같은 Claude Code로 실행한 11:30 총괄 1단계는 성공했다.
+- 원인: `PinnedExecutable`이 서명 검증 때 실행 파일의 모든 상위 디렉터리(…/claude/versions, `~`, `/Users`, `/`)의 전체 stamp(len, nlink, mtime, ctime 포함)를 기록했다. 실행 직전 `revalidate()`도 같은 기준으로 비교했다. 홈 폴더는 셸 캐시와 설정 파일 쓰기로 mtime/ctime이 수시로 바뀌므로 간헐적으로 '실행 파일이 바뀜'으로 오판했다. Codex도 `/Applications` 변화로 같은 위험이 있다.
+- 수정(`provider_executable.rs`):
+  - 서명 검증 구간은 엄격 비교를 유지한다(swap-and-restore 방어). 그 엄격 재검증만 실패했을 때 처음부터 최대 3회 재시도하고, open이나 서명 실패는 즉시 반환한다.
+  - 공개 `revalidate()`는 실행 파일의 dev/ino/digest/전체 stamp를 엄격히 본다. 상위 디렉터리는 `ancestor_identity`(dev, ino, mode, uid)만 본다.
+  - 테스트: 무관한 항목 추가·삭제는 통과하고 상위 디렉터리 mode 변경은 거부되는지 확인한다.
+- 독립 검토: 차단 없음. 권고 2건(재시도 범위, 테스트 마지막 단계 무효)은 반영했다. 남은 권고: 실행 후 사후 탐지가 약해졌다(같은 UID가 상위 디렉터리를 rename으로 바꿨다가 되돌리는 공격은 원래 위협 모델 밖). 홈 아래 구간만 엄격히 유지하는 대안은 Claude 자동 업데이트가 `versions`에 파일을 추가할 때 다시 중단을 부르므로 택하지 않았다.
+- 검증: provider_executable 6 통과, 설치된 Codex 서명 확인(ignored 테스트 수동 실행) 통과. provider/agent_runtime/claude_native/codex 필터 193은 재시도 범위를 좁히기 전 코드에서 통과했다.
+
 ### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 목록에 없는 모델은 '미선택'으로, 권한 카드 간격, 실행 중 표시
 - 사용자 지적: 저장된 `sol`이 역할 목록에 그대로 보였고, "목록에 없으면 그냥 미선택이면 된다, 그 값이 왜 있어야 하나"라고 했다. `sol`은 초기 fixture가 기본값으로 저장한 가짜 이름이다.
   - sidecar `without_placeholder_models`: V3 설정을 읽을 때(`default_role_settings`의 저장값 반환, `app_role_defaults` 파일 읽기, 준비 단계의 읽기 전용 판정) `sol`을 `""`/null로 읽는다. V1/V2 fixture 집합은 그대로 둔다.
