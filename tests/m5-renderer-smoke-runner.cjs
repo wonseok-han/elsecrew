@@ -146,25 +146,17 @@ app.whenReady().then(async () => {
     chooseLanguage('en');
     await ${waitFor("document.querySelector('main').lang === 'en' && document.querySelector('#app-settings-title').textContent === 'Settings'", "English shell")};
     document.querySelectorAll('.m5-preferences-layout nav button')[2].click();
-    await ${waitFor("document.querySelector('.m5-provider-selection').getClientRects().length > 0", "agent settings visible")};
-    const selection = document.querySelector('.m5-provider-selection');
-    if (!selection || window.m5SmokeLoginRequests.some(r => !["diagnose", "status"].includes(r.action))) throw new Error('first-run agents were checked before selection');
-    if (!selection.querySelector('button[type=submit]').disabled) throw new Error('empty selection is enabled');
-    await ${waitFor("!document.querySelector('.m5-provider-selection input').matches(':disabled')", "storage admission before selection")};
-    if (window.m5SmokePrematureInstallReads !== 0) throw new Error('installation queried before initial storage admission');
-    selection.querySelector('input[type=checkbox]').click();
-    await ${waitFor("!document.querySelector('.m5-provider-selection button[type=submit]').disabled", "single agent selection")};
-    selection.querySelector('button[type=submit]').click();
+    // Settings lists every agent with its own Connect button; the guided
+    // selection step belongs to first setup only.
+    await ${waitFor("document.querySelector('[aria-label=\"Codex connection\"]')?.getClientRects().length > 0", "agent settings visible")};
+    if (document.querySelector('.m5-app-settings .m5-provider-selection')) throw new Error('settings repeated the first-setup agent selection');
+    if (document.querySelector('.m5-app-settings .m5-device-check')) throw new Error('settings repeated the first-setup device check');
+    if (window.m5SmokeLoginRequests.some(r => !["diagnose", "status"].includes(r.action))) throw new Error('agents were checked before an explicit connect');
     await ${waitFor("[...document.querySelectorAll('[aria-label=\"Codex connection\"] button')].some(b=>b.textContent==='Connect' && !b.disabled)", "explicit connect available")};
-    if(window.m5SmokeLoginRequests.some(r => !["diagnose","status"].includes(r.action))) throw new Error('installation selection auto connected a provider');
+    if (window.m5SmokePrematureInstallReads !== 0) throw new Error('installation queried before initial storage admission');
     [...document.querySelectorAll('[aria-label="Codex connection"] button')].find(b=>b.textContent==='Connect').click();
     await ${waitFor("document.querySelector('[aria-label=\"Codex connection\"]')?.textContent.includes('Codex is signed in')", "selected provider diagnosed and checked")};
-    if (window.m5SmokeLoginRequests.some(r => r.provider === 'claude' && !['diagnose','status'].includes(r.action))) throw new Error('unselected Claude was checked');
-    if (JSON.parse(localStorage.getItem('elsecrew.m5.providers.v1')).providers.join() !== 'codex') throw new Error('single provider selection not saved');
-    await ${waitFor("!document.querySelector('.m5-provider-selection').parentElement.hidden", "return to agent selection")};
-    [...selection.querySelectorAll('button')].find(b => b.textContent === 'Connect Claude Code too').click();
-    await ${waitFor("document.querySelector('[aria-label=\"Claude Code connection\"]')", "second agent added")};
-    await ${waitFor("!document.querySelector('[aria-label=\"Claude Code connection\"]').parentElement.hidden", "login step visible")};
+    if (window.m5SmokeLoginRequests.some(r => r.provider === 'claude' && !['diagnose','status'].includes(r.action))) throw new Error('unrequested Claude was checked');
     if (!document.querySelector('[aria-label="Codex connection"]') || !document.querySelector('[aria-label="Claude Code connection"]')) throw new Error('provider connection labels are not translated');
     await ${waitFor("[...document.querySelectorAll('[aria-label=\"Claude Code connection\"] button')].some(b=>b.textContent==='Connect' && !b.disabled)", "Claude explicit connect")};
     [...document.querySelectorAll('[aria-label="Claude Code connection"] button')].find(b=>b.textContent==='Connect').click();
@@ -201,8 +193,10 @@ app.whenReady().then(async () => {
     codexButton('연결 상태 다시 확인').click();
     await ${waitFor("document.querySelector('[aria-label=\"Codex 연결\"]').textContent.includes('이 앱에 Codex 로그인이 연결됐어요')", "verified cleanup resumes credential check")};
     if (window.m5SmokeLoginRequests.filter(r=>r.action==='recover').length !== 2 || window.m5SmokeLoginRequests.some(r=>r.provider==='codex' && r.action==='start')) throw new Error('recovery retried or started OAuth');
-    await ${waitFor("[...document.querySelectorAll('button')].some(b => b.textContent === 'Claude Code 로그인' && !b.disabled)", "enabled Claude login button")};
-    [...document.querySelectorAll('button')].find(b => b.textContent === 'Claude Code 로그인').click();
+    // Connecting an agent that is not signed in starts its login right away;
+    // the login button only remains for a later retry.
+    await ${waitFor("[...document.querySelectorAll('button')].some(b => (b.textContent === 'Claude Code 로그인' || b.textContent === '로그인 취소') && !b.disabled)", "Claude login started or offered")};
+    [...document.querySelectorAll('button')].find(b => b.textContent === 'Claude Code 로그인' && !b.disabled)?.click();
     await ${waitFor("[...document.querySelectorAll('button')].some(b => b.textContent === '로그인 취소' && !b.disabled)", "login waiting and cancellation")};
     [...document.querySelectorAll('button')].find(b => b.textContent === '로그인 취소').click();
     await ${waitFor("document.querySelector('[aria-label=\"Claude Code 연결\"]').textContent.includes('로그인을 취소했어요')", "canceled Claude login feedback")};
@@ -669,22 +663,23 @@ app.whenReady().then(async () => {
     wrapToggle.click();
     await ${waitFor("document.querySelector('.m5-diff-lines-wrapped')", "diff wrapping restored")};
     if (originalDiffStyle === null) diffBox.removeAttribute('style'); else diffBox.setAttribute('style', originalDiffStyle);
-    const next = () => [...document.querySelectorAll('button')].find(button => button.textContent === '다음 변경');
-    next().click();
-    await ${waitFor("document.querySelector('.m5-diff-pages span').textContent.startsWith('2 /')", "second diff page")};
+    // Later lines load while scrolling; the marker button requests the same block.
+    if (document.querySelector('.m5-diff-lines').textContent.includes('+line 401')) throw new Error('diff loaded every block up front');
+    const more = () => document.querySelector('.m5-diff-lines .m5-load-more button');
+    if (!more()?.textContent.includes('변경 더 보기')) throw new Error('diff load marker missing');
+    more().click();
+    await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length > 200", "second diff block")};
     const diffLanguage = document.querySelector('.m5-preferences-row select');
     const diffContents = document.querySelector('.m5-diff-lines tbody').textContent;
     diffLanguage.value = 'en'; diffLanguage.dispatchEvent(new Event('change', { bubbles: true }));
-    await ${waitFor("document.querySelector('.m5-diff-pages span').textContent.startsWith('Page 2 /')", "English diff pagination")};
-    if (document.querySelector('.m5-diff-lines tbody').textContent !== diffContents) throw new Error('language switch changed diff contents or page');
-    if (!document.querySelector('.m5-diff-wrap').textContent.includes('Wrap long lines')) throw new Error('diff wrap label not translated');
+    await ${waitFor("document.querySelector('.m5-diff-wrap').textContent.includes('Wrap long lines')", "English diff labels")};
+    if (document.querySelector('.m5-diff-lines tbody').textContent !== diffContents) throw new Error('language switch changed diff contents');
     diffLanguage.value = 'ko'; diffLanguage.dispatchEvent(new Event('change', { bubbles: true }));
-    await ${waitFor("document.querySelector('.m5-diff-pages span').textContent.startsWith('2 /')", "Korean diff restored")};
-    next().click();
-    await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length === 3", "last diff page")};
-    if (!next().disabled || !document.querySelector('.m5-diff-lines').textContent.includes('+line 401')) throw new Error('last diff lines missing');
+    await ${waitFor("document.querySelector('.m5-diff-wrap').textContent.includes('긴 줄')", "Korean diff restored")};
+    while (more()) { const count = document.querySelectorAll('.m5-diff-lines tbody tr').length; more().click(); await new Promise(resolve => { const tick = () => document.querySelectorAll('.m5-diff-lines tbody tr').length > count ? resolve() : setTimeout(tick, 20); tick(); }); }
+    if (!document.querySelector('.m5-diff-lines').textContent.includes('+line 401')) throw new Error('last diff lines missing');
     document.querySelector('.m5-change-row').click();
-    await ${waitFor("document.querySelector('.m5-diff-pages span').textContent.startsWith('1 /')", "reopened diff resets page")};
+    await ${waitFor("!document.querySelector('.m5-diff-lines').textContent.includes('+line 401')", "reopened diff starts at the top block")};
     document.querySelector('.m5-chat-chip').click();
     await ${waitFor("document.querySelector('.m5-followup button:not(:disabled)') || document.querySelector('#m5-followup-text')", "follow-up composer")};
     globalThis.applicationResponseLossReport = await (${probeApplicationResponseLoss.toString()})();

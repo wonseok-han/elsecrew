@@ -57,6 +57,7 @@ export function ProjectCatalog({ onCloseProject, closeDisabled, onRoles, rolesDi
   };
   const [entries, setEntries] = useState<ProjectCatalogEntry[]>([]);
   const [next, setNext] = useState<string | null>(null);
+  const [paged, setPaged] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   const compact = rail && !expanded && !error;
@@ -91,7 +92,7 @@ export function ProjectCatalog({ onCloseProject, closeDisabled, onRoles, rolesDi
       const result = validateProjectCatalogResult(await service.request(input), input);
       if (epoch !== generation.current) return;
       if (result.action !== "list") throw new Error("unexpected project catalog response");
-      setEntries(result.projects); setNext(result.nextCursor);
+      setEntries(result.projects); setNext(result.nextCursor); setPaged(cursor !== null);
     } catch {
       if (epoch === generation.current) setError(true);
     } finally { inFlight.current = false; setBusy(false); }
@@ -117,7 +118,7 @@ export function ProjectCatalog({ onCloseProject, closeDisabled, onRoles, rolesDi
           {entry.projectId === currentId && <small className="m5-project-current">{t("m5.catalog.active")}</small>}
           <span dir="auto">{entry.canonicalPath}</span>
         </button>{!management && <ProjectMenu label={t("m5.catalog.manage")}> <p className="m5-context-heading" title={entry.canonicalPath}>{entry.canonicalPath.split(/[\\/]/).filter(Boolean).pop() ?? entry.projectId}</p><button type="button" className="m5-project-manage" disabled={!ready || busy} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); onManage?.(entry); }} title={t("m5.catalog.manage")}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6m8 4v6"/></svg>{t("m5.preferences.project")}</button>{entry.projectId === currentId && onRoles && <button type="button" disabled={rolesDisabled || busy} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); onRoles(); }}>{t("m5.shell.roles")}</button>}{entry.projectId === currentId && onCloseProject && <button type="button" disabled={closeDisabled || busy} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); onCloseProject(); }}>{t("m5.shell.close")}</button>}{onRemove && <button className="m5-danger" type="button" disabled={removeDisabled || busy} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); onRemove(entry); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7m4-7v7"/></svg>{t("m5.catalog.remove")}</button>}</ProjectMenu>}</li>)}</ul>}
-      {(!rail || !disabled || error) && <div className="m5-project-pagination">{!rail && <button type="button" title={t("m5.catalog.first")} aria-label={t("m5.catalog.first")} disabled={disabled || busy} onClick={() => void load(null)}>{t("m5.catalog.first")}</button>}
+      {(!rail || !disabled || error) && <div className="m5-project-pagination">{!rail && (!management || paged || error) && <button type="button" title={t("m5.catalog.first")} aria-label={t("m5.catalog.first")} disabled={disabled || busy} onClick={() => void load(null)}>{t("m5.catalog.first")}</button>}
         {next && <button type="button" disabled={disabled || busy || error} onClick={() => void load(next)}>{t("m5.catalog.next")}</button>}</div>}
     </div>}
 

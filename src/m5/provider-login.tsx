@@ -68,7 +68,8 @@ export function ProviderLogin({ disabled, compact: preferCompact = false, return
         onClick={() => navigate(item)}><span aria-hidden="true">{index + 1}</span>{t(`m5.setup.steps.${item}`)}</button>)}
     </nav>}
     <div hidden={!settingsPage && !compact && step !== "agents"}>
-    <DeviceCheck expanded={settingsPage}/>
+    {/* Device facts help the first setup; settings keeps only what can be changed. */}
+    {!settingsPage && <DeviceCheck/>}
     {/* Settings already lists every agent with its own connect button; the
         guided-setup selection would only add a second, unsynced choice. */}
     {!settingsPage && <SelectionContainer className="m5-provider-selection" open={selectionExpanded} onToggle={event => setSelectionExpanded(event.currentTarget.open)}>

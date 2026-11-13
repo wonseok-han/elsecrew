@@ -317,7 +317,7 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-diff-added { background: #153d2d; color: #bcf5d0; }
 .m5-diff-deleted { background: #49242d; color: #ffd0d6; }
 .m5-diff-metadata { background: #202a36; color: #b8c9e3; }
-.m5-diff-pages, .m5-change-pages { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; }
+.m5-diff-pages { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; }
 .m5-diff-details p { color: var(--m5-muted); font-size: 12px; }.m5-diff-details pre { max-height: 260px; overflow: auto; white-space: pre-wrap; color: #d8e0eb; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 .m5-chat-strip, .m5-timeline, .m5-settings { margin: 0 0 14px; border: 1px solid var(--m5-border); border-radius: 10px; background: var(--m5-surface); }
@@ -1162,3 +1162,39 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-approval-card p { line-height: 1.6; font-size: 13px; }
 .m5-approval-summary { white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 650; }
 .m5-approval-card details pre { max-height: 240px; overflow: auto; }
+/* Scroll-loaded lists: the marker sits after the last row and doubles as a button. */
+.m5-load-more { display: flex; justify-content: center; padding: 12px; }
+.m5-load-more button { font-size: 12px; }
+/* Settings rhythm (benchmarked against Orca's settings pages): a clear page
+   title, cards with 20px insides, 24px between cards, and no control touching
+   the next heading. */
+.m5-preferences-content > section > h3 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+.m5-preferences-content > section > .m5-settings-intro { margin: 0 0 24px; font-size: 13px; }
+.m5-preferences-content > section > h3 + .m5-settings-group,
+.m5-preferences-content > section > h3 + .m5-settings-inline,
+.m5-preferences-content > section > h3 + .m5-cleanup-settings,
+.m5-preferences-content > section > h3 + .m5-agent-management { margin: 20px 0 0; }
+.m5-settings-group { border-radius: 12px; padding: 0 20px; }
+.m5-preferences-content > section > p[role] { margin: 12px 4px 0; }
+.m5-preferences-content .m5-cleanup-settings,
+.m5-preferences-content .m5-storage-settings { padding: 20px; border: 1px solid var(--m5-border-strong); border-radius: 12px; background: var(--m5-surface); }
+.m5-preferences-content .m5-cleanup-settings + .m5-cleanup-settings,
+.m5-preferences-content .m5-cleanup-settings + .m5-storage-settings { margin-top: 24px; }
+.m5-preferences-content .m5-cleanup-settings h3,
+.m5-preferences-content .m5-storage-settings h3 { margin: 0 0 6px; font-size: 14px; }
+.m5-preferences-content .m5-cleanup-settings .m5-settings-intro,
+.m5-preferences-content .m5-storage-settings .m5-settings-intro { margin: 0 0 16px; }
+.m5-preferences-content .m5-cleanup-settings .m5-settings-group { margin: 16px 0; background: var(--m5-bg); }
+.m5-preferences-content .m5-cleanup-settings > button + button,
+.m5-preferences-content .m5-cleanup-settings > p[role] { margin-top: 12px; }
+.m5-preferences-content .m5-cleanup-confirm { margin-top: 16px; padding: 16px; border: 1px solid var(--m5-border); border-radius: 8px; }
+.m5-preferences-content .m5-cleanup-confirm .m5-storage-actions { gap: 8px; }
+.m5-preferences-content .m5-storage-content { margin-top: 16px; padding: 16px 0 0; border: 0; border-top: 1px solid var(--m5-border); border-radius: 0; background: transparent; }
+.m5-preferences-content .m5-storage-settings > p { margin: 12px 0 0; }
+.m5-preferences-content .m5-project-pagination { display: flex; gap: 8px; margin-top: 16px; }
+/* Role editor: team tools sit on their own line with room before the card. */
+.m5-settings-inline .m5-role-team-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 0 0 20px; }
+.m5-settings-inline .m5-role-team-tools button { flex: none; }
+.m5-settings-inline .m5-role-card > small { align-self: end; padding-bottom: 10px; color: var(--m5-muted); line-height: 1.5; }
+.m5-settings-inline .m5-role-model-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.m5-settings-inline > .m5-settings-body > [role="alert"], .m5-settings-inline > .m5-settings-body > [role="status"] { margin: 0 0 16px; }

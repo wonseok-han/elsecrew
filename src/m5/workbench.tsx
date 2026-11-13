@@ -1275,13 +1275,14 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
 const DiffDetails = memo(function DiffDetails({ descriptor, text, canOpen, onOpen, canDiscuss, onDiscuss, onReturn }: { onReturn: () => void; descriptor: NonNullable<ReturnType<ProjectEditorController["snapshot"]>["diffFile"]>; text: string; canOpen: boolean; onOpen: (path: string) => void; canDiscuss: boolean; onDiscuss: (path: string, side?: "before" | "after", line?: number) => void }) {
   const { t } = useI18n();
   const indexed = useMemo(() => diffPages(text), [text]);
-  const [page, setPage] = useState(0);
+  // Pages are read as the reader scrolls; rows already shown stay in place.
+  const [loaded, setLoaded] = useState(1);
   const [wrapLines, setWrapLines] = useState(true);
   const [diffMode, setDiffMode] = useState<"inline" | "split">("inline");
-  useEffect(() => setPage(0), [descriptor, text]);
+  useEffect(() => setLoaded(1), [descriptor, text]);
   const pages = indexed.pageCount;
-  const current = Math.min(page, pages - 1);
-  const rawRows = useMemo(() => indexed.page(current), [indexed, current]);
+  const shown = Math.min(loaded, pages);
+  const rawRows = useMemo(() => Array.from({ length: shown }, (_, index) => indexed.page(index)).flat(), [indexed, shown]);
   // Keep unfamiliar or malformed metadata visible; only move known file headers out of the code view.
   const visible = useMemo(() => rawRows.filter(row => !rawRows.some(item => item.kind !== "metadata") || row.kind !== "metadata" || !/^(diff --git |index |--- |\+\+\+ )/.test(row.text)), [rawRows]);
   const metadataLabel = (value: string) => {
@@ -1326,15 +1327,11 @@ const DiffDetails = memo(function DiffDetails({ descriptor, text, canOpen, onOpe
                 <td className={`m5-diff-side-code m5-diff-${row.after?.kind ?? "absent"}`}><code>{row.after?.text}</code></td>
               </tr>)}</tbody>
           </table> : <table><thead><tr><th scope="col">{t("m5.diff.before")}</th><th scope="col">{t("m5.diff.after")}</th><th scope="col">{t("m5.diff.content")}</th></tr></thead><tbody>
-            {visible.map((row, index) => <tr key={current * DIFF_PAGE_ROWS + index} className={`m5-diff-${row.kind}`}><td>{lineNumber("before", row.before)}</td><td>{lineNumber("after", row.after)}</td><td><code>{row.kind === "metadata" ? metadataLabel(row.text) : row.text}</code></td></tr>)}
+            {visible.map((row, index) => <tr key={index} className={`m5-diff-${row.kind}`}><td>{lineNumber("before", row.before)}</td><td>{lineNumber("after", row.after)}</td><td><code>{row.kind === "metadata" ? metadataLabel(row.text) : row.text}</code></td></tr>)}
           </tbody></table>}
+          {shown < pages && <LoadMore key={shown} label={t("m5.diff.loadingMore", { shown: shown * DIFF_PAGE_ROWS, rows: indexed.rowCount })} onReach={() => setLoaded(shown + 1)} />}
         </div>
         <details className="m5-diff-source"><summary>{t("m5.diff.source")}</summary><pre>{rawRows.map(row => row.text).join("\n")}</pre></details>
-        {pages > 1 && <nav className="m5-diff-pages" aria-label={t("m5.diff.pages")}>
-          <button type="button" disabled={current === 0} onClick={() => setPage(current - 1)}>{t("m5.diff.previous")}</button>
-          <span aria-live="polite">{t("m5.diff.page", { page: current + 1, pages, rows: indexed.rowCount })}</span>
-          <button type="button" disabled={current === pages - 1} onClick={() => setPage(current + 1)}>{t("m5.diff.next")}</button>
-        </nav>}
       </>}
     </section>
   );
@@ -1343,17 +1340,15 @@ const DiffDetails = memo(function DiffDetails({ descriptor, text, canOpen, onOpe
 function ChangeFileList({ entries, selected, disabled, onOpen }: { entries: readonly DiffEntryV1[]; selected?: string; disabled: boolean; onOpen: (path: string) => void }) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
-  const [page, setPage] = useState(0);
+  const [loaded, setLoaded] = useState(1);
   const needle = query.trim().toLowerCase();
   const matches = useMemo(() => entries.filter(entry => !needle || entry.path.toLowerCase().includes(needle) || entry.oldPath?.toLowerCase().includes(needle)), [entries, needle]);
   const pageSize = 100;
-  const currentPage = Math.min(page, Math.max(0, Math.ceil(matches.length / pageSize) - 1));
-  const start = currentPage * pageSize;
-  const visible = matches.slice(start, start + pageSize);
-  useEffect(() => setPage(0), [entries]);
+  const visible = matches.slice(0, loaded * pageSize);
+  useEffect(() => setLoaded(1), [entries]);
   return <>
     {entries.length > 0 && <section className="m5-file-search" aria-label={t("m5.diff.filter")}>
-      <input type="search" aria-label={t("m5.diff.filter")} placeholder={t("m5.diff.filter")} value={query} maxLength={256} disabled={disabled} onChange={event => { setQuery(event.target.value); setPage(0); }} onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); setQuery(""); setPage(0); } }} />
+      <input type="search" aria-label={t("m5.diff.filter")} placeholder={t("m5.diff.filter")} value={query} maxLength={256} disabled={disabled} onChange={event => { setQuery(event.target.value); setLoaded(1); }} onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); setQuery(""); setLoaded(1); } }} />
       <p role="status">{t("m5.diff.fileCount", { shown: matches.length, total: entries.length })}</p>
     </section>}
     <div className="m5-change-list">
@@ -1362,12 +1357,8 @@ function ChangeFileList({ entries, selected, disabled, onOpen }: { entries: read
         <span className="m5-change-file"><strong>{fileName(entry.path)}</strong>{entry.path.includes("/") && <small>{entry.path.slice(0, entry.path.lastIndexOf("/"))}</small>}</span>
       </button>)}
       {matches.length === 0 && <Empty text={t(entries.length === 0 ? "m5.editor.noChanges" : "m5.diff.noMatches")} />}
+      {visible.length < matches.length && <LoadMore key={visible.length} label={t("m5.diff.fileRange", { last: visible.length, total: matches.length })} onReach={() => setLoaded(loaded + 1)} />}
     </div>
-    {matches.length > pageSize && <nav className="m5-change-pages" aria-label={t("m5.diff.filePages")}>
-      <button type="button" disabled={disabled || currentPage === 0} onClick={() => setPage(currentPage - 1)}>{t("m5.diff.previous")}</button>
-      <span>{t("m5.diff.fileRange", { first: start + 1, last: start + visible.length, total: matches.length })}</span>
-      <button type="button" disabled={disabled || start + visible.length >= matches.length} onClick={() => setPage(currentPage + 1)}>{t("m5.diff.next")}</button>
-    </nav>}
   </>;
 }
 
@@ -1379,6 +1370,22 @@ function ChangeKind({ entry }: { entry: DiffEntryV1 }) {
 function fileName(path: string): string {
   const parts = path.split("/");
   return parts[parts.length - 1] ?? path;
+}
+
+/** Loads the next block when it scrolls into view; remounted per block so a
+ * still-visible marker asks again. The button keeps keyboard readers moving. */
+function LoadMore({ label, onReach }: { label: string; onReach: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const reach = useRef(onReach);
+  reach.current = onReach;
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); reach.current(); } }, { rootMargin: "240px 0px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  return <div ref={ref} className="m5-load-more"><button type="button" className="m5-secondary" onClick={() => reach.current()}>{label}</button></div>;
 }
 
 function Empty({ text }: { text: string }) {

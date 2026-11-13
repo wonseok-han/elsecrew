@@ -44,6 +44,7 @@ export function BackupStorageUsageView({ disabled }: { disabled: boolean }) {
     // No automatic replay after success or failure; inspect the persisted value.
   }
   return <section className="m5-storage-settings" aria-label={t("m5.backup.storageTitle")} aria-busy={busy}>
+    <h3>{t("m5.backup.sectionTitle")}</h3><p className="m5-settings-intro">{t("m5.backup.sectionHelp")}</p>
     <button type="button" disabled={disabled || busy} onClick={() => void inspect()}>{t("m5.backup.storageTitle")}</button>
     {usage && <div className="m5-storage-content">
       <p className="m5-storage-summary" role="status">{t("m5.backup.storageAmounts", { used: capacity(usage.usedBytes), limit: capacity(usage.limitBytes), remaining: capacity(usage.remainingBytes) })}</p>
