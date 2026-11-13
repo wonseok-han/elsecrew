@@ -774,9 +774,9 @@ app.whenReady().then(async () => {
     if (goalInput !== document.querySelector('.m5-new-chat-form input') || goalInput.value !== '새 목표 초안' || goalInput.getAttribute('aria-label') !== 'New task goal') throw new Error('language change lost goal draft or label');
     if (selectedChat !== document.querySelector('.m5-chat-chip.selected')) throw new Error('language change changed selected chat');
     window.m5SmokeFailHistoryRefresh();
-    await ${waitFor("[...document.querySelectorAll('.m5-error button')].some(button => button.textContent === 'Reload task history')", "history refresh error retry")};
-    [...document.querySelectorAll('.m5-error button')].find(button => button.textContent === 'Reload task history').click();
-    await ${waitFor("![...document.querySelectorAll('.m5-error button')].some(button => button.textContent === 'Reload task history')", "history refresh recovered")};
+    await ${waitFor("[...document.querySelectorAll('.m5-notice-toast-error button')].some(button => button.textContent === 'Reload task history')", "history refresh error retry")};
+    [...document.querySelectorAll('.m5-notice-toast-error button')].find(button => button.textContent === 'Reload task history').click();
+    await ${waitFor("![...document.querySelectorAll('.m5-notice-toast-error button')].some(button => button.textContent === 'Reload task history')", "history refresh recovered")};
     if (window.m5SmokeContextStarts.length !== 0 || input.value !== '설명을 추가해 주세요.') throw new Error('history retry started an agent or lost draft');
     // Layout-only fixture: exercise a long title at the product minimum window
     // size without changing stored chat data or the selected conversation.

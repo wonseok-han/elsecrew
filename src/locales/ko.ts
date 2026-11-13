@@ -311,9 +311,9 @@ export const ko = {
   "m5.catalog.next": "다음 목록",
   "m5.work.title": "진행 및 복구 상태",
   "m5.work.failed": "작업 상태를 다시 확인해야 해요.",
-  "m5.work.active": "진행 중이거나 종료 확인이 필요한 작업이 있어요.",
+  "m5.work.active": "멈췄거나 끝나기를 기다리는 작업이 있어요.",
   "m5.work.error": "상태를 불러오지 못했어요. 이전 표시만으로 종료됐다고 판단하지 마세요.",
-  "m5.work.help": "진행 중인 작업은 끝날 때까지 기다려 주세요. 작업이 끝났는데도 계속 표시되면 해당 작업의 복구 안내를 확인해 주세요. 작업을 만들기 전에 실패했다면 프로젝트 설정의 ‘문제 해결’에서 시작 실패를 확인하세요. 복구가 거절되면 아래 확인 정보를 함께 전달해 주세요.",
+  "m5.work.help": "실행 중이면 끝날 때까지 기다려 주세요. 계속 남아 있으면 그 작업을 열어 복구 안내를 따라 주세요. 그 전까지는 일부 기능(로그인·모델 조회 등)이 막힐 수 있어요.",
   "m5.work.safety": "이 화면은 상태만 확인하며, 잠금이나 작업 파일을 삭제하지 않아요. 앱을 다시 열거나 재부팅하면 해결된다고 단정할 수 없어요.",
   "m5.work.details": "도움 요청용 확인 정보 · {count}건",
   "m5.work.stale": " · 이전 조회",
@@ -443,6 +443,8 @@ export const ko = {
   "m5.diff.empty": "표시할 텍스트 변경이 없어요.",
   "m5.notifications.empty": "새 알림이 없어요.",
   "m5.notifications.dismiss": "안내 닫기",
+  "m5.notifications.problem": "확인이 필요한 상태가 있어요",
+  "m5.notifications.problemNotice": "확인이 필요한 작업이 있어요. 알림 종을 눌러 확인해 주세요.",
   "m5.notifications.unread": "새 알림 {count}개",
   "m5.notifications.markAllRead": "모두 읽음",
   "m5.notifications.kind.done": "작업 완료",
@@ -853,6 +855,8 @@ export const ko = {
   "m5.admission.preparing": "작업 공간을 안전하게 준비하고 있어요.",
   "m5.admission.help": "앱을 다시 열어 보세요. 계속되면 도움을 요청해 주세요. 기존 프로젝트 파일은 바꾸지 않았어요.",
   "m5.admission.wait": "프로젝트와 작업은 곧 사용할 수 있어요. 이 동안에는 변경을 만들거나 저장하지 않아요.",
+  "m5.admission.stopped": "앱의 작업 처리가 멈췄어요.",
+  "m5.admission.stoppedHelp": "진행 중이던 작업은 더 이어지지 않아요. 앱을 종료한 뒤 다시 열어 주세요. 다시 열면 멈춘 작업의 상태와 복구 안내를 볼 수 있어요. 기존 프로젝트 파일은 바꾸지 않았어요.",
 
 
 

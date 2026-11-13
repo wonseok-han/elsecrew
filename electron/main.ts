@@ -124,6 +124,30 @@ const quitCoordinator = new QuitCoordinatorV1({
     if (mainWindow && !mainWindow.isDestroyed()) await dialog.showMessageBox(mainWindow, options);
     else await dialog.showMessageBox(options);
   },
+  confirmUncleanQuit: async (reason) => {
+    const korean = app.getLocale().toLowerCase().startsWith("ko");
+    const options: Electron.MessageBoxOptions = {
+      type: "warning",
+      title: "Elsecrew",
+      message: reason === "unavailable"
+        ? (korean ? "작업 처리 프로그램이 멈춰 정리 상태를 확인하지 못했어요." : "The task service stopped, so cleanup could not be confirmed.")
+        : (korean ? "정리되지 않은 작업 기록이 남아 있어요." : "Some stopped work has not been cleaned up yet."),
+      detail: (reason === "unavailable"
+        ? (korean
+          ? "지금 종료해도 기록은 그대로 남아요. 다음에 앱을 열면 멈춘 작업과 원본 반영 상태를 확인하고 복구 안내를 보여 줘요."
+          : "Closing now keeps the records. The next time you open the app it checks the stopped work and any update of your original files, and shows how to recover.")
+          + `\n\n${korean ? "진단 코드" : "Diagnostic code"}: ${sidecar?.failureCode ?? "shutdownUnconfirmed"}`
+        : (korean
+          ? "지금 종료해도 기록은 그대로 남고, 다음에 앱을 열면 멈춘 작업과 복구 안내를 다시 볼 수 있어요. 앱으로 돌아가면 멈춘 작업의 복구만 할 수 있어요."
+          : "Closing now keeps those records, and the next time you open the app you will see the stopped work and how to recover it. If you return to the app, only recovering the stopped work is available.")),
+      buttons: korean ? ["앱으로 돌아가기", "그래도 종료"] : ["Return to app", "Quit anyway"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    };
+    const shown = mainWindow && !mainWindow.isDestroyed() ? await dialog.showMessageBox(mainWindow, options) : await dialog.showMessageBox(options);
+    return shown.response === 1;
+  },
 });
 
 protocol.registerSchemesAsPrivileged([

@@ -1221,9 +1221,26 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-first-chat-setup .m5-project-permissions { margin: 16px 0; }
 /* Notifications: a bell with an unread count and a newest-first list. */
 .m5-notification-bell { position: relative; }
-/* Progress notices sit under the bell and fade; problems keep the status strip. */
+/* Progress and errors sit under the bell; anything that still needs attention is
+   the first card inside it and marks the bell with "!". */
+.m5-notification-count-shifted { right: auto !important; left: -6px; }
+.m5-notification-alert { background: #f4b453 !important; color: #1b1405 !important; font-weight: 700; }
+.m5-bell-problem { margin: 0 12px 10px; padding: 12px 14px; border: 1px solid rgba(244, 180, 83, .45); border-radius: 10px; background: rgba(244, 180, 83, .08); font-size: 12px; line-height: 1.55; }
+.m5-bell-problem > strong { display: block; color: var(--m5-text); font-size: 13px; }
+.m5-bell-problem > p { margin: 6px 0 8px; color: var(--m5-muted); }
+.m5-bell-problem details { margin: 0 0 8px; color: var(--m5-muted); }
+.m5-bell-problem details summary { cursor: pointer; }
+.m5-bell-problem ul { margin: 6px 0 0; padding-left: 18px; }
+.m5-bell-problem code { font-size: 11px; word-break: break-all; }
+.m5-notice-toast-error { align-items: flex-start; border-color: rgba(240, 113, 103, .55); }
+.m5-notice-toast-error > div { flex: 1; min-width: 0; display: grid; gap: 8px; }
+.m5-notice-toast-error strong { color: var(--m5-text); font-weight: 600; }
+.m5-notice-toast-error details summary { cursor: pointer; color: var(--m5-muted); }
+.m5-notice-toast-error pre { max-height: 160px; overflow: auto; margin: 6px 0 0; white-space: pre-wrap; font-size: 11px; }
+.m5-notice-toast-error .m5-secondary { justify-self: start; }
 .m5-bell-area { position: relative; display: flex; align-items: center; }
-.m5-notice-toast { position: absolute; top: calc(100% + 8px); right: 0; z-index: 40; display: flex; align-items: center; gap: 10px; width: max-content; max-width: min(420px, 70vw); padding: 10px 10px 10px 14px; border: 1px solid var(--m5-border-strong); border-radius: 10px; background: var(--m5-surface); color: var(--m5-text); font-size: 12px; line-height: 1.5; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); animation: m5-toast-in .16s ease-out; }
+.m5-toast-stack { position: absolute; top: calc(100% + 8px); right: 0; z-index: 40; display: grid; justify-items: end; gap: 8px; }
+.m5-notice-toast { display: flex; align-items: center; gap: 10px; width: max-content; max-width: min(420px, 70vw); padding: 10px 10px 10px 14px; border: 1px solid var(--m5-border-strong); border-radius: 10px; background: var(--m5-surface); color: var(--m5-text); font-size: 12px; line-height: 1.5; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); animation: m5-toast-in .16s ease-out; }
 .m5-notice-toast > span { flex: 1; min-width: 0; }
 .m5-notice-toast > .m5-secondary { flex: none; font-size: 12px; }
 .m5-notice-toast-close { flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--m5-muted); font-size: 16px; line-height: 1; cursor: pointer; }

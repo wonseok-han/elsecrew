@@ -2922,6 +2922,11 @@ fn active_run_limit_reached(active_runs: usize) -> bool {
     active_runs >= AGENT_ACTIVE_RUNS_PER_SESSION_MAX_V1
 }
 
+/// Below the providers' 64 KiB prompt bound, leaving room for JSON escaping.
+const PROMPT_BUDGET_BYTES: usize = 56 * 1024;
+/// Both providers reject an initial prompt above 64 KiB.
+const PROMPT_HARD_MAX_BYTES: usize = 63 * 1024;
+
 fn resolve_prompt(
     storage: &Storage,
     chat_id: &str,
@@ -2932,6 +2937,7 @@ fn resolve_prompt(
     let mut found = BTreeMap::new();
     let workflow_prompt = crate::orchestration::prompt(storage, chat_id, role_id, ids)?;
     let orchestrated = workflow_prompt.is_some();
+    let mut lines: Vec<Vec<u8>> = Vec::new();
     let mut prompt = if let Some(prompt) = workflow_prompt { prompt.into_bytes() } else if role_id == "coordinator" { b"You are the project coordinator. Answer the user directly in their language. Inspect the project when needed and explain clearly. You have read-only access: do not change files. For change requests, explain a proposed plan and limitations. Do not claim to have delegated work or changed files. The following is the selected conversation history:\n".to_vec() } else { Vec::new() };
     for message in storage.chat_message_history(chat_id)? {
         if message["messageId"]
@@ -2950,18 +2956,41 @@ fn resolve_prompt(
                 }
                 continue;
             }
-            if orchestrated {
-                prompt.extend_from_slice(&serde_json::to_vec(&json!({"kind":message["kind"],"role":message["roleId"],"text":text})).map_err(json_failure)?);
+            let mut line = if orchestrated {
+                serde_json::to_vec(&json!({"kind":message["kind"],"role":message["roleId"],"text":text})).map_err(json_failure)?
             } else {
-                prompt.extend_from_slice(text.as_bytes());
-            }
-            prompt.push(b'\n');
+                text.as_bytes().to_vec()
+            };
+            line.push(b'\n');
+            lines.push(line);
         }
     }
     if found.len() != selected.len() {
         return Err(ProjectFailure::manifest(
             "input message identity is missing or belongs to another chat",
         ));
+    }
+    // Providers take one prompt under 64 KiB. Keep the first request and as
+    // many of the latest messages as fit, and say that the middle was left out.
+    let total: usize = prompt.len() + lines.iter().map(Vec::len).sum::<usize>();
+    if total > PROMPT_BUDGET_BYTES && lines.len() > 1 {
+        const NOTE: &[u8] = b"[Earlier messages were left out to fit the prompt size limit.]\n";
+        let mut room = PROMPT_BUDGET_BYTES.saturating_sub(prompt.len() + lines[0].len() + NOTE.len());
+        let mut tail = Vec::new();
+        for line in lines[1..].iter().rev() {
+            if line.len() > room { break; }
+            room -= line.len();
+            tail.push(line);
+        }
+        prompt.extend_from_slice(&lines[0]);
+        if tail.len() < lines.len() - 1 { prompt.extend_from_slice(NOTE); }
+        for line in tail.into_iter().rev() { prompt.extend_from_slice(line); }
+    } else {
+        for line in &lines { prompt.extend_from_slice(line); }
+    }
+    // Refuse here, before any provider start, rather than fail mid-launch.
+    if prompt.len() > PROMPT_HARD_MAX_BYTES {
+        return Err(ProjectFailure::manifest("the prompt for this run is too large even after shortening"));
     }
     Ok(prompt)
 }

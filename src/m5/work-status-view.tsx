@@ -1,13 +1,17 @@
 import { useI18n } from "../i18n.tsx";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SupportedM5Bridge } from "./bridge-boundary.ts";
 import type { M5BridgeV6 } from "./contracts/bridge-v6.ts";
 import { summarizeWorkStatus, type WorkStatusSummary } from "./work-status.ts";
 
-/** Read-only status: no automatic cancellation, lock release, or recovery mutation. */
-export function WorkStatusNotice({ bridge, ready, refreshKey, errors, errorTitle }: {
-  bridge: SupportedM5Bridge; ready: boolean; refreshKey: string;
-  errors?: ReactNode; errorTitle?: string;
+/**
+ * Read-only status of work that still holds the app (a run to finish or to
+ * confirm stopped). It lives at the top of the bell panel and reports whether
+ * there is anything, so the bell can show a warning mark.
+ * No automatic cancellation, lock release, or recovery mutation.
+ */
+export function WorkStatusPanel({ bridge, ready, refreshKey, onAttention }: {
+  bridge: SupportedM5Bridge; ready: boolean; refreshKey: string; onAttention: (attention: boolean) => void;
 }) {
   const { t } = useI18n();
   const [summary, setSummary] = useState<WorkStatusSummary | null>(null);
@@ -34,29 +38,17 @@ export function WorkStatusNotice({ bridge, ready, refreshKey, errors, errorTitle
     inFlight.current = request;
     return () => { current = false; };
   }, [bridge, ready, refreshKey, refresh]);
-  const hasWorkStatus = ready && bridge.version >= 6 && (summary !== null || failed);
-  const attention = Boolean(errorTitle || failed || hasWorkStatus);
-  // Problems only: errors and work that still holds the app. Progress notices
-  // show under the bell and task notifications live in its list.
+  const attention = ready && bridge.version >= 6 && (summary !== null || failed);
+  useEffect(() => { onAttention(attention); }, [attention, onAttention]);
   if (!attention) return null;
-  const label = errorTitle || (failed ? t("m5.work.failed") : t("m5.work.active"));
-  return <details className={`m5-status-strip m5-status-notice${attention ? " m5-status-strip-attention" : ""}`}>
-    <summary title={label} aria-label={`${t("m5.statusStrip.title")} · ${label}`}>
-      <span className="m5-status-indicator" aria-hidden="true" />
-      <span className="m5-status-label" role="status">{label}</span>
-    </summary>
-    <div className="m5-status-content"><h3>{t("m5.statusStrip.title")}</h3>
-      {errors}
-      {hasWorkStatus && <section aria-label={t("m5.work.title")} aria-busy={busy}>
-        <strong>{failed ? t("m5.work.failed") : t("m5.work.active")}</strong>
-        <p>{failed ? t("m5.work.error") : t("m5.work.help")}</p>
-        <p>{t("m5.work.safety")}</p>
-        {summary && <details><summary>{t("m5.work.details", { count: summary.total })}{failed ? t("m5.work.stale") : ""}</summary>
-          <ul>{summary.ids.map((id, index) => <li key={index}><code>{id}</code></li>)}</ul>
-          {summary.omitted > 0 && <p>{t("m5.work.omitted", { count: summary.omitted })}</p>}
-        </details>}
-        <button type="button" className="m5-secondary" disabled={busy} onClick={() => setRefresh(value => value + 1)}>{busy ? t("m5.work.busy") : t("m5.work.refresh")}</button>
-      </section>}
-    </div>
-  </details>;
+  return <section className="m5-bell-problem" aria-label={t("m5.work.title")} aria-busy={busy}>
+    <strong>{failed ? t("m5.work.failed") : t("m5.work.active")}</strong>
+    <p>{failed ? t("m5.work.error") : t("m5.work.help")}</p>
+    {summary && <details><summary>{t("m5.work.details", { count: summary.total })}{failed ? t("m5.work.stale") : ""}</summary>
+      <p>{t("m5.work.safety")}</p>
+      <ul>{summary.ids.map((id, index) => <li key={index}><code>{id}</code></li>)}</ul>
+      {summary.omitted > 0 && <p>{t("m5.work.omitted", { count: summary.omitted })}</p>}
+    </details>}
+    <button type="button" className="m5-secondary" disabled={busy} onClick={() => setRefresh(value => value + 1)}>{busy ? t("m5.work.busy") : t("m5.work.refresh")}</button>
+  </section>;
 }

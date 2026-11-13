@@ -46,7 +46,7 @@ import { FileSearch } from "./file-search-view.tsx";
 import { requestEditorSave } from "./editor-actions.ts";
 import { languageFor } from "./editor-language.ts";
 import { ProjectCatalog } from "./project-catalog-view.tsx";
-import { WorkStatusNotice } from "./work-status-view.tsx";
+import { WorkStatusPanel } from "./work-status-view.tsx";
 import { NotificationBell } from "./notification-bell.tsx";
 import { startNotificationFeed, type NotificationFeedBridge } from "./notification-feed.ts";
 import { NotificationCenter, osNotificationsEnabled, type AppNotification } from "./notifications.ts";
@@ -112,9 +112,10 @@ function useStorageAdmission(bridge: SupportedM5Bridge): { admission: AdmissionV
 function StorageAdmissionNotice({ admission }: { admission: AdmissionView }) {
   const { t } = useI18n();
   if (admission === "ready") return null;
-  return <section className={admission === "failed" ? "m5-admission m5-admission-failed" : "m5-admission"} role="status">
-    <strong>{t(admission === "failed" ? "m5.admission.failed" : "m5.admission.preparing")}</strong>
-    <p>{t(admission === "failed" ? "m5.admission.help" : "m5.admission.wait")}</p>
+  const failed = admission === "failed" || admission === "stopped";
+  return <section className={failed ? "m5-admission m5-admission-failed" : "m5-admission"} role={failed ? "alert" : "status"}>
+    <strong>{t(admission === "stopped" ? "m5.admission.stopped" : admission === "failed" ? "m5.admission.failed" : "m5.admission.preparing")}</strong>
+    <p>{t(admission === "stopped" ? "m5.admission.stoppedHelp" : admission === "failed" ? "m5.admission.help" : "m5.admission.wait")}</p>
   </section>;
 }
 
@@ -186,6 +187,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const navigatePreferences = (next: () => void) => roleNavigation.current ? roleNavigation.current(next) : next();
   const [updatePreparing, setUpdatePreparing] = useState(false);
   const [managedProject, setManagedProject] = useState<{ projectId: string; canonicalPath: string } | null>(null);
+  // Work that still holds the app (shown inside the bell, marked on it).
+  const [workAttention, setWorkAttention] = useState(false);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferencesSection, setPreferencesSection] = useState<SettingsSection>("general");
   const [connectionReveal, setConnectionReveal] = useState<ConnectionReveal>();
@@ -401,24 +404,23 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           </p>
         </div>
         <div className="m5-toolbar-actions">
-      {/* What the app is doing right now goes under the bell; the strip below is only for problems. */}
-      <NotificationBell center={notifications} onOpen={openNotification} notice={chat.notice ? { text: formatChatNotice(chat, lang), action: chatConnectionTarget(chat) ? <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => {
+      {/* Everything about what is happening lives with the bell: progress and
+          errors under it, anything that still needs attention inside it. */}
+      <NotificationBell center={notifications} onOpen={openNotification} hasProblem={workAttention}
+        problem={<WorkStatusPanel bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])} onAttention={setWorkAttention} />}
+        errors={[snapshot.error ? { title: t(snapshot.error.messageKey), key: `snapshot:${snapshot.error.messageKey}:${snapshot.error.technicalDetail ?? ""}`, body: <>
+          {snapshot.error.messageKey === "m5.editorError.reopenProject" && <button type="button" className="m5-secondary" disabled={settingsOpen || !admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} onClick={() => void addProject()}>{t("m5.editor.reselectOriginal")}</button>}
+          <details><summary>{t("m5.feedback.details")}</summary><pre>{snapshot.error.technicalDetail}</pre></details></> }
+          : null, chat.error ? { title: t(chat.error.messageKey), key: `chat:${chat.error.messageKey}:${chat.error.detail ?? ""}`, body: <>
+          {chat.activeChat && chat.error.retryChatId === chat.activeChat.chatId && <button type="button" className="m5-secondary" disabled={!admissionReady || chat.switching} onClick={() => void chatController.retryHistory()}>{t("m5.chat.reloadHistory")}</button>}
+          <details><summary>{t("m5.feedback.details")}</summary><pre>{chat.error.detail}</pre></details></> }
+          : null].filter(error => error !== null)}
+        notice={chat.notice ? { text: formatChatNotice(chat, lang), action: chatConnectionTarget(chat) ? <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => {
         const provider = chatConnectionTarget(chat);
         if (provider) { setConnectionReveal(current => ({ provider, sequence: (current?.sequence ?? 0) + 1 })); setPreferencesSection("agents"); setPreferencesOpen(true); }
       }}>{t("m5.setup.openConnection", { name: chatConnectionTarget(chat) === "codex" ? "Codex" : "Claude Code" })}</button> : undefined }
         : snapshot.notice ? { text: snapshot.noticeKey ? t(snapshot.noticeKey) : snapshot.notice }
         : discardedWorkspaceNotice && !snapshot.project ? { text: t("m5.discard.done") } : null} />
-      <WorkStatusNotice bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])}
-        errorTitle={chat.error ? t(chat.error.messageKey) : snapshot.error ? t(snapshot.error.messageKey) : undefined}
-        errors={<>      {snapshot.error && (
-        <section className="m5-error" role="alert">
-          <strong>{t(snapshot.error.messageKey)}</strong>
-          {snapshot.error.messageKey === "m5.editorError.reopenProject" && <button type="button" className="m5-secondary" disabled={settingsOpen || !admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} onClick={() => void addProject()}>{t("m5.editor.reselectOriginal")}</button>}
-          <details><summary>{t("m5.feedback.details")}</summary><pre>{snapshot.error.technicalDetail}</pre></details>
-        </section>
-      )}
-      {chat.error && <section className="m5-error" role="alert"><strong>{t(chat.error.messageKey)}</strong><details><summary>{t("m5.feedback.details")}</summary><pre>{chat.error.detail}</pre></details>{chat.activeChat && chat.error.retryChatId === chat.activeChat.chatId && <button type="button" disabled={!admissionReady || chat.switching} onClick={() => void chatController.retryHistory()}>{t("m5.chat.reloadHistory")}</button>}</section>}
-</>} />
 
       {snapshot.project && <ProjectGuide key={snapshot.project.id} hasChat={Boolean(chat.activeChat)}
         projectId={snapshot.project.id} activeChat={chat.activeChat} onResume={id => void switchChat(id)}

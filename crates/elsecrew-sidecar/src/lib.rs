@@ -1198,7 +1198,11 @@ impl Sidecar {
                 #[cfg(not(target_os = "macos"))]
                 let login_blockers: Vec<String> = Vec::new();
                 let login_stopped = login_blockers.is_empty();
-                let runtime_blockers = self.agent_runtime.owned_run_ids();
+                // Live work is listed by bare ID, apart from the stored `run:`
+                // and `lock:` records: the app may close over stored records
+                // only (the next start recovers them), never over live work.
+                let mut runtime_blockers = self.agent_runtime.owned_run_ids();
+                runtime_blockers.extend(self.g5.active_run_ids());
                 if blockers.is_empty()
                     && login_stopped
                     && runtime_blockers.is_empty()

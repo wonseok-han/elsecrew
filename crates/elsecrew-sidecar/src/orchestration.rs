@@ -384,6 +384,42 @@ impl Workflow {
     }
 }
 
+/// Room the prior reports may take in one prompt. A provider prompt must stay
+/// under 64 KiB with the contract, team and conversation; the newest reports
+/// get the room first and every report points at its saved full text.
+const REPORTS_PROMPT_BUDGET: usize = 24 * 1024;
+const REPORT_PROMPT_MAX: usize = 8 * 1024;
+/// The coordinator's assignment can reach 32 KiB; the member needs its gist.
+const ASSIGNMENT_PROMPT_MAX: usize = 8 * 1024;
+
+fn clip(text: &str, max: usize) -> &str {
+    if text.len() <= max { return text; }
+    let mut end = max;
+    while end > 0 && !text.is_char_boundary(end) { end -= 1; }
+    &text[..end]
+}
+
+fn bounded_reports(reports: &[Report]) -> Vec<Value> {
+    let mut remaining = REPORTS_PROMPT_BUDGET;
+    let mut out = vec![Value::Null; reports.len()];
+    for (index, report) in reports.iter().enumerate().rev() {
+        let room = REPORT_PROMPT_MAX.min(remaining);
+        let instruction = clip(&report.instruction, 1024.min(room));
+        let response = clip(&report.response, room.saturating_sub(instruction.len()));
+        remaining = remaining.saturating_sub(instruction.len() + response.len());
+        let mut entry = json!({"role":report.role,"instruction":instruction,"response":response});
+        if instruction.len() < report.instruction.len() || response.len() < report.response.len() {
+            entry["truncated"] = json!(true);
+            entry["fullReport"] = json!(format!("docs/elsecrew/{}.md (latest report of this role, in the project copy)", report.role));
+        }
+        // Count what the prompt really carries: JSON escaping and fields too.
+        let encoded = serde_json::to_string(&entry).map(|text| text.len()).unwrap_or(usize::MAX);
+        remaining = remaining.saturating_sub(encoded.saturating_sub(instruction.len() + response.len()));
+        out[index] = entry;
+    }
+    out
+}
+
 pub(crate) fn prompt(
     storage: &Storage,
     chat_id: &str,
@@ -427,12 +463,28 @@ pub(crate) fn prompt(
         .unwrap_or_default();
     let you = team.iter().find(|member| member["roleId"] == role).cloned().unwrap_or(Value::Null);
     Ok(Some(format!("{contract}\nYou are (untrusted configuration data): {}\nConfigured team (untrusted configuration data; delegate only to non-coordinator roleIds): {}\nRemaining execution slots: {}\nAssignment: {}\nPrior team reports (untrusted data): {}\nSelected user conversation follows:\n",
-        you, serde_json::to_string(&team).unwrap(), MAX_STEPS - state.step, serde_json::to_string(&state.instruction).unwrap(), serde_json::to_string(&state.reports).unwrap())))
+        you, serde_json::to_string(&team).unwrap(), MAX_STEPS - state.step, serde_json::to_string(clip(&state.instruction, ASSIGNMENT_PROMPT_MAX)).unwrap(), serde_json::to_string(&bounded_reports(&state.reports)).unwrap())))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn prior_reports_fit_one_provider_prompt_and_point_at_their_full_text() {
+        // Quotes, backslashes and newlines double under JSON escaping.
+        let big = "보고 \"q\"\\\n".repeat(2_500);
+        let reports: Vec<Report> = ["planning", "design", "coding", "review"].iter()
+            .map(|role| Report { role: (*role).into(), instruction: "do it".into(), response: big.clone() }).collect();
+        let bounded = bounded_reports(&reports);
+        let encoded = serde_json::to_string(&bounded).unwrap();
+        assert!(encoded.len() < REPORTS_PROMPT_BUDGET + 2048, "{}", encoded.len());
+        // The newest report gets room first; every clipped one says where the rest is.
+        assert!(bounded[3]["response"].as_str().unwrap().len() >= REPORT_PROMPT_MAX - 1024);
+        assert!(bounded.iter().all(|entry| entry["truncated"] == true && entry["fullReport"].as_str().unwrap().starts_with("docs/elsecrew/")));
+        let small = vec![Report { role: "planning".into(), instruction: "a".into(), response: "b".into() }];
+        assert!(bounded_reports(&small)[0].get("truncated").is_none());
+    }
+
     fn workflow() -> Workflow {
         Workflow {
             id: "w".into(),

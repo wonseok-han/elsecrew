@@ -1,12 +1,23 @@
 import type { PrepareQuitResultV1 } from "../src/m5/contracts/protocol-v1.ts";
 
-export type ExitKindV1 = "clean" | "uncleanStartupFailure";
+export type ExitKindV1 = "clean" | "uncleanStartupFailure" | "uncleanUserConfirmed";
+
+/** Recovery the ledger already keeps (`run:`/`lock:` from storage). Unlike a
+ * live run, login or install, it survives a restart, so it never needs to
+ * keep the app open: the next start simply shows it again. */
+export function onlyStoredRecovery(blockers: readonly string[]): boolean {
+  return blockers.length > 0 && blockers.every((blocker) => blocker.startsWith("run:") || blocker.startsWith("lock:"));
+}
 
 export interface QuitCoordinatorOptionsV1 {
   prepareSidecarQuit(): Promise<PrepareQuitResultV1>;
   failedBeforeReady(): boolean;
   allowProcessExit(kind: ExitKindV1): void;
   notifyQuitBlocked?(reason: "recoveryRequired" | "unavailable"): void | Promise<void>;
+  /** Asked when nothing is live any more (only stored recovery, or the task
+   * service already stopped). True lets the app close without a clean mark,
+   * so the next start runs recovery. */
+  confirmUncleanQuit?(reason: "storedRecovery" | "unavailable"): Promise<boolean>;
 }
 
 /** Main-owned only: renderer calls cannot turn an unavailable startup into clean exit. */
@@ -54,6 +65,11 @@ export class QuitCoordinatorV1 {
     }
   }
 
+  #allowUnclean(): void {
+    this.#exitAllowed = true;
+    this.#options.allowProcessExit("uncleanUserConfirmed");
+  }
+
   handleBeforeQuit(): void {
     if (this.#exitAllowed) return;
     if (this.#options.failedBeforeReady()) {
@@ -66,12 +82,21 @@ export class QuitCoordinatorV1 {
     this.#handlingBeforeQuit = true;
     void this.prepareQuit().then(
       async (result) => {
-        if (!result.safeToQuit) await this.#options.notifyQuitBlocked?.("recoveryRequired");
+        if (result.safeToQuit) return;
+        if (onlyStoredRecovery(result.blockers) && await this.#options.confirmUncleanQuit?.("storedRecovery")) {
+          this.#allowUnclean();
+          return;
+        }
+        if (!onlyStoredRecovery(result.blockers)) await this.#options.notifyQuitBlocked?.("recoveryRequired");
       },
       async () => {
         // No raw provider error or credential-bearing stderr reaches the dialog.
-        // A disconnected sidecar is not restarted in this session. Rechecking
-        // shutdown must not repeatedly interrupt the user with the same modal.
+        // A disconnected sidecar is not restarted in this session; nothing of
+        // it is left to wait for, so the user may still close the app.
+        if (this.#options.confirmUncleanQuit) {
+          if (await this.#options.confirmUncleanQuit("unavailable")) this.#allowUnclean();
+          return;
+        }
         if (!this.#unavailableNotified) {
           await this.#options.notifyQuitBlocked?.("unavailable");
           this.#unavailableNotified = true;

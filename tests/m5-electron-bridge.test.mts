@@ -1362,6 +1362,36 @@ test("G5 recovery-ready status stays connected for recovery APIs and unsafe quit
   assert.deepEqual(exits, []);
 });
 
+test("only stored recovery or a stopped task service lets the user choose to quit without a clean mark", async () => {
+  const flush = async () => { for (let index = 0; index < 6; index += 1) await Promise.resolve(); };
+  const run = async (prepare: () => Promise<{ safeToQuit: boolean; blockers: string[] }>, answer: boolean) => {
+    const exits: string[] = [];
+    const asked: string[] = [];
+    const blocked: string[] = [];
+    const coordinator = new QuitCoordinatorV1({
+      prepareSidecarQuit: prepare,
+      failedBeforeReady: () => false,
+      allowProcessExit: (kind) => exits.push(kind),
+      notifyQuitBlocked: (reason) => { blocked.push(reason); },
+      confirmUncleanQuit: async (reason) => { asked.push(reason); return answer; },
+    });
+    coordinator.handleBeforeQuit();
+    await flush();
+    return { exits, asked, blocked, allowed: coordinator.exitAllowed };
+  };
+  // Stored recovery only: the user may quit; a later start recovers.
+  assert.deepEqual(await run(async () => ({ safeToQuit: false, blockers: ["run:agent_run_1", "lock:lock_w"] }), true),
+    { exits: ["uncleanUserConfirmed"], asked: ["storedRecovery"], blocked: [], allowed: true });
+  assert.deepEqual(await run(async () => ({ safeToQuit: false, blockers: ["run:agent_run_1"] }), false),
+    { exits: [], asked: ["storedRecovery"], blocked: [], allowed: false });
+  // Live work still blocks without an offer.
+  assert.deepEqual(await run(async () => ({ safeToQuit: false, blockers: ["run:agent_run_1", "agent_run_2"] }), true),
+    { exits: [], asked: [], blocked: ["recoveryRequired"], allowed: false });
+  // The task service is gone: nothing is left to wait for.
+  assert.deepEqual(await run(async () => { throw new Error("sidecar exited"); }, true),
+    { exits: ["uncleanUserConfirmed"], asked: ["unavailable"], blocked: [], allowed: true });
+});
+
 test("one quit waits for both login workers to confirm cleanup", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const exits: string[] = [];

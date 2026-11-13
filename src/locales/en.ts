@@ -312,9 +312,9 @@ export const en: Record<MessageKey, string> = {
   "m5.catalog.next": "Next page",
   "m5.work.title": "Progress and recovery status",
   "m5.work.failed": "Work status needs to be checked again.",
-  "m5.work.active": "Some work is running or awaiting termination verification.",
+  "m5.work.active": "A task is still running or stopped and needs checking.",
   "m5.work.error": "Could not load status. Do not infer termination from the previous display.",
-  "m5.work.help": "Wait for running work to finish. If this remains after it finishes, check that task's recovery instructions. For failures before a task was created, check startup failures under Troubleshooting in project settings. If recovery is rejected, include the details below when asking for help.",
+  "m5.work.help": "If it is running, wait for it to finish. If this stays, open that task and follow its recovery steps. Until then some features (sign-in, model list) may be blocked.",
   "m5.work.safety": "This screen only checks status; it does not delete locks or working files. Reopening the app or rebooting is not guaranteed to resolve the issue.",
   "m5.work.details": "Support details · {count} items",
   "m5.work.stale": " · Previous check",
@@ -444,6 +444,8 @@ export const en: Record<MessageKey, string> = {
   "m5.diff.empty": "No text changes to display.",
   "m5.notifications.empty": "No new notifications.",
   "m5.notifications.dismiss": "Dismiss",
+  "m5.notifications.problem": "Something needs your attention",
+  "m5.notifications.problemNotice": "Something needs your attention. Open the bell to see it.",
   "m5.notifications.unread": "{count} new notifications",
   "m5.notifications.markAllRead": "Mark all read",
   "m5.notifications.kind.done": "Task finished",
@@ -854,6 +856,8 @@ export const en: Record<MessageKey, string> = {
   "m5.admission.preparing": "Preparing your workspace safely.",
   "m5.admission.help": "Reopen the app. If this continues, ask for help. Your existing project files have not been changed.",
   "m5.admission.wait": "Projects and tasks will be available shortly. Changes cannot be made or saved while preparation is in progress.",
+  "m5.admission.stopped": "The app stopped processing work.",
+  "m5.admission.stoppedHelp": "Work in progress will not continue. Quit and reopen the app; you will then see the state of the stopped work and how to recover it. Your existing project files have not been changed.",
 
 
 

@@ -66,6 +66,11 @@ struct RunCompletion<'a> {
 }
 
 impl G5Manager {
+    /// Fixture runs this session still owns (live processes, not stored records).
+    pub fn active_run_ids(&self) -> Vec<String> {
+        self.active.keys().cloned().collect()
+    }
+
     pub(crate) fn cleanup_blocked(&self) -> bool { self.preparing_to_quit || !self.active.is_empty() }
     pub fn recover_unclean_runs(
         &self,
