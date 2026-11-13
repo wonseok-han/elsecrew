@@ -1824,6 +1824,23 @@ fn binary_fresh_b_failure_and_exact_abandon_preserve_bound_a() {
         "project.getRoleSettings",
         serde_json::json!({"projectId":project_id}),
     );
+    let EnvelopeV1::Response(settings) = receive_envelope(&envelopes) else {
+        panic!("settings")
+    };
+    let settings = settings.result.unwrap();
+    // The built-in V3 team names no model; a chat needs every role filled.
+    let roles: Vec<serde_json::Value> = settings["roles"].as_array().unwrap().iter().map(|role| {
+        let mut role = role.clone();
+        let codex = role["runtime"] == "codex";
+        role["modelSelector"] = serde_json::json!(if codex { "sol" } else { "opus" });
+        role["reasoningEffort"] = if codex { serde_json::json!("medium") } else { serde_json::Value::Null };
+        role
+    }).collect();
+    let mut update = serde_json::json!({"projectId":project_id,"expectedRevision":1,"roles":roles});
+    if let Some(definitions) = settings.get("roleDefinitions") {
+        update["roleDefinitions"] = definitions.clone();
+    }
+    write_request(&mut stdin, &ready.sidecar_instance_id, "req_ab_settings_models", "project.updateRoleSettings", update);
     assert!(matches!(receive_envelope(&envelopes), EnvelopeV1::Response(response) if response.ok));
     let prepared_a = prepare_workspace(
         &mut stdin,
@@ -1841,7 +1858,7 @@ fn binary_fresh_b_failure_and_exact_abandon_preserve_bound_a() {
             "preparationId":prepared_a["preparationId"],"projectId":project_id,
             "worktreeId":prepared_a["manifest"]["worktreeId"],
             "workspaceIdentity":prepared_a["manifest"]["workspaceIdentity"],
-            "goal":"bound a","expectedSettingsRevision":1,
+            "goal":"bound a","expectedSettingsRevision":2,
         }),
     );
     let EnvelopeV1::Response(chat_a) = receive_envelope(&envelopes) else {

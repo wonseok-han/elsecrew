@@ -2,6 +2,7 @@
 // Requires current .vite/build, renderer and target/debug sidecar artifacts.
 function runOutputSmoke(packagedQa = false) {
 const { app, dialog, powerMonitor } = require('electron');
+const completeAppDefaultTeam = require('./m5-smoke-complete-team.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const cp = require('node:child_process');
@@ -252,6 +253,7 @@ app.on('browser-window-created', (_event, window) => {
         }
         await wait("window.m5?.version === 8 && [...document.querySelectorAll('button')].some(b => b.textContent === '프로젝트 선택' && !b.disabled)");
         await run(`(async () => {
+          await ${completeAppDefaultTeam};
           const p = await window.m5.openProject();
           let settings = await window.m5.getProjectRoleSettings({projectId:p.projectId});
           if (${retentionWithOutputDiff}) settings = await window.m5.updateProjectRoleSettings({projectId:p.projectId,
@@ -379,6 +381,7 @@ app.on('browser-window-created', (_event, window) => {
       report.mainTraceTiming.workloadRequestedAt = Date.now();
       await run(`(async () => {
         const api = window.m5;
+        await ${completeAppDefaultTeam};
         const project = await api.openProject();
         const settings = await api.getProjectRoleSettings({projectId:project.projectId});
         const roles = settings.roles.map(role => role.roleId === 'coding'

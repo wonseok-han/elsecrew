@@ -338,6 +338,15 @@ fn role_id<'a>(value: Option<&'a Value>, name: &str) -> Result<&'a str, G5Contra
 }
 
 fn validate_role_profile(value: &Value) -> Result<&Map<String, Value>, G5ContractError> {
+    validate_role_profile_with(value, false)
+}
+
+/// Saved V3 role settings may leave a model unselected (`""`, no reasoning
+/// effort) until the user picks one; chats and runs never accept that.
+fn validate_role_profile_with(
+    value: &Value,
+    allow_unselected: bool,
+) -> Result<&Map<String, Value>, G5ContractError> {
     let object = object(value, "role profile")?;
     exact_keys(
         object,
@@ -351,11 +360,18 @@ fn validate_role_profile(value: &Value) -> Result<&Map<String, Value>, G5Contrac
     )?;
     let role = role_id(object.get("roleId"), "roleId")?;
     one_of(object.get("runtime"), G5_RUNTIMES_V1, "runtime")?;
-    bounded_text(
-        object.get("modelSelector"),
-        "modelSelector",
-        G5_MODEL_SELECTOR_MAX_BYTES_V1,
-    )?;
+    let unselected = allow_unselected && object.get("modelSelector").and_then(Value::as_str) == Some("");
+    if unselected {
+        if !object.get("reasoningEffort").is_some_and(Value::is_null) {
+            return fail("an unselected model cannot carry a reasoning effort");
+        }
+    } else {
+        bounded_text(
+            object.get("modelSelector"),
+            "modelSelector",
+            G5_MODEL_SELECTOR_MAX_BYTES_V1,
+        )?;
+    }
     if !object.get("reasoningEffort").is_some_and(Value::is_null) {
         bounded_text(
             object.get("reasoningEffort"),
@@ -382,7 +398,7 @@ fn validate_project_role_settings(value: &Value) -> Result<&Map<String, Value>, 
     id(object.get("projectId"), "projectId")?;
     positive(object.get("revision"), "settings revision")?;
     if version == Some(G5_ROLE_SCHEMA_VERSION_V3) {
-        validate_role_set_v3(object, "roles")?;
+        validate_role_set_v3(object, "roles", true)?;
     } else {
         validate_role_set_version(object.get("roles"), "roles", version)?;
     }
@@ -400,7 +416,7 @@ fn validate_project_role_settings_update(value: &Value) -> Result<(), G5Contract
     id(object.get("projectId"), "projectId")?;
     positive(object.get("expectedRevision"), "expectedRevision")?;
     if object.contains_key("roleDefinitions") {
-        validate_role_set_v3(object, "roles")
+        validate_role_set_v3(object, "roles", true)
     } else {
         validate_role_set(object.get("roles"), "roles")
     }
@@ -761,7 +777,7 @@ fn validate_chat_record(value: &Value) -> Result<&Map<String, Value>, G5Contract
     bounded_text(object.get("goal"), "goal", G5_GOAL_MAX_BYTES_V1)?;
     positive(object.get("settingsRevision"), "settingsRevision")?;
     if version == Some(G5_ROLE_SCHEMA_VERSION_V3) {
-        validate_role_set_v3(object, "roleSnapshots")?;
+        validate_role_set_v3(object, "roleSnapshots", false)?;
     } else {
         validate_role_set_version(object.get("roleSnapshots"), "roleSnapshots", version)?;
     }
@@ -2295,7 +2311,11 @@ fn validate_role_set_version(value: Option<&Value>, name: &str, version: Option<
 }
 
 /// V3: `roles` (or `roleSnapshots`) plus a parallel `roleDefinitions` array.
-fn validate_role_set_v3(object: &Map<String, Value>, name: &str) -> Result<(), G5ContractError> {
+fn validate_role_set_v3(
+    object: &Map<String, Value>,
+    name: &str,
+    allow_unselected: bool,
+) -> Result<(), G5ContractError> {
     let roles = array(object.get(name), name, G5_ROLES_MAX_V3)?;
     let definitions = array(object.get("roleDefinitions"), "roleDefinitions", G5_ROLES_MAX_V3)?;
     if roles.len() < 2 || definitions.len() != roles.len() {
@@ -2303,7 +2323,7 @@ fn validate_role_set_v3(object: &Map<String, Value>, name: &str) -> Result<(), G
     }
     let mut seen = HashSet::new();
     for (index, (role, definition)) in roles.iter().zip(definitions).enumerate() {
-        let role = validate_role_profile(role)?;
+        let role = validate_role_profile_with(role, allow_unselected)?;
         let id = string(role.get("roleId"), "roleId")?;
         if (index == 0) != (id == G5_COORDINATOR_ROLE_ID) {
             return fail("the first V3 role must be the only coordinator");

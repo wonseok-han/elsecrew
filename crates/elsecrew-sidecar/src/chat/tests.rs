@@ -6849,3 +6849,27 @@ fn compaction_fits_large_v3_chat_records_into_bounded_steps() {
 fn role_index(chat: &Value, role_id: &str) -> usize {
     chat["roleSnapshots"].as_array().unwrap().iter().position(|role| role["roleId"] == role_id).unwrap()
 }
+
+#[test]
+fn built_in_team_names_no_model_and_incomplete_teams_cannot_prepare_a_chat() {
+    let _product = crate::chat::ProductDefaultsForTest::enable();
+    let defaults = crate::chat::default_settings_v3("app_defaults", 1);
+    assert!(defaults["roles"].as_array().unwrap().iter().all(|role| role["modelSelector"] == "" && role["reasoningEffort"].is_null()));
+    assert!(crate::chat::has_unselected_model(&defaults));
+    drop(_product);
+
+    // V3 settings (and so unselected models) need V13 storage.
+    let mut fixture = Fixture::with_durable_output(true);
+    let project_id = fixture.project_id.clone();
+    let settings = fixture.chats.default_role_settings(&mut fixture.storage, &fixture.projects, &project_id, "req_defaults").unwrap();
+    assert!(!crate::chat::has_unselected_model(&settings));
+    let mut roles = crate::chat::complete_default_roles_for_test();
+    roles[2]["modelSelector"] = json!("");
+    roles[2]["reasoningEffort"] = Value::Null;
+    let definitions = defaults["roleDefinitions"].clone();
+    fixture.chats.update_role_settings(&mut fixture.storage, &project_id, 1, roles, Some(definitions), "req_unselected").unwrap();
+    let before = super::prepared_workspace_records(&fixture.storage).unwrap().len();
+    let refused = fixture.chats.prepare_chat_workspace(&mut fixture.storage, &mut fixture.projects, &project_id, "req_refused").unwrap_err();
+    assert_eq!(refused.kind, "dirtyConflict");
+    assert_eq!(super::prepared_workspace_records(&fixture.storage).unwrap().len(), before, "no snapshot may be prepared for an incomplete team");
+}

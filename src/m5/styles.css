@@ -1200,3 +1200,5 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-settings-inline > .m5-settings-body > [role="alert"], .m5-settings-inline > .m5-settings-body > [role="status"] { margin: 0 0 16px; }
 .m5-role-model-missing { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 0; padding: 10px 12px; border: 1px solid var(--m5-border-strong); border-radius: 8px; color: var(--m5-text); font-size: 12px; line-height: 1.5; }
 .m5-role-model-missing span { flex: 1 1 260px; }
+.m5-team-unselected { margin: 8px 0 0; padding: 10px 12px; border: 1px solid var(--m5-border-strong); border-radius: 8px; color: var(--m5-text); font-size: 12px; line-height: 1.5; }
+.m5-team-unselected { margin: 8px 0 0; padding: 10px 12px; border: 1px solid var(--m5-border-strong); border-radius: 8px; color: var(--m5-text); font-size: 12px; line-height: 1.5; }

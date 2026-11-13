@@ -251,6 +251,17 @@ impl G5Manager {
         application_baseline: bool,
     ) -> Result<G5Action, ProjectFailure> {
         let before = project_record(storage, project_id)?;
+        // Refuse before any snapshot exists: a team without models could never
+        // bind it, and the unbound copy would only become cleanup work.
+        let unselected = match before.get("role_settings") {
+            Some(settings) => has_unselected_model(settings),
+            None => has_unselected_model(&projects.app_role_defaults(storage.custom_roles_enabled()?)?),
+        };
+        if unselected {
+            return Err(ProjectFailure::dirty(
+                "every role needs a model before a chat workspace is prepared",
+            ));
+        }
         let action = if application_baseline {
             projects.prepare_application_workspace(storage, project_id, request_id)?;
             // Reuse only the just-created active snapshot; normal preparation
@@ -464,6 +475,11 @@ impl G5Manager {
         if settings.get("revision").and_then(Value::as_u64) != Some(expected_settings_revision) {
             return Err(ProjectFailure::dirty(
                 "project role settings changed before chat creation",
+            ));
+        }
+        if has_unselected_model(&settings) {
+            return Err(ProjectFailure::dirty(
+                "every role needs a model before a chat is created",
             ));
         }
         let chat_id = match forced_chat_id {
@@ -1646,7 +1662,25 @@ pub(crate) fn default_settings_v3(project_id: &str, revision: u64) -> Value {
     coordinator["roleId"] = json!("coordinator");
     let mut design = planning.clone();
     design["roleId"] = json!("design");
-    let roles = json!([coordinator, planning, design, legacy["roles"][1], legacy["roles"][2]]);
+    let mut roles = json!([coordinator, planning, design, legacy["roles"][1], legacy["roles"][2]]);
+    // The built-in team names no model: provider catalogs change, and a seeded
+    // name that is not listed can never pass the exact pre-run check. The user
+    // picks each model before the first task (see `has_unselected_model`).
+    #[cfg(test)]
+    let unselected = PRODUCT_DEFAULTS_FOR_TEST.with(std::cell::Cell::get);
+    #[cfg(not(test))]
+    let unselected = true;
+    if unselected {
+        for role in roles.as_array_mut().into_iter().flatten() {
+            role["modelSelector"] = json!("");
+            role["reasoningEffort"] = Value::Null;
+        }
+    } else {
+        #[cfg(test)]
+        {
+            roles = complete_default_roles_for_test();
+        }
+    }
     let definitions: Vec<Value> = G5_DEFAULT_ROLE_DEFINITIONS_V3
         .iter()
         .map(|(role_id, name, responsibility)| json!({"roleId":role_id,"name":name,"responsibility":responsibility}))
@@ -1654,6 +1688,50 @@ pub(crate) fn default_settings_v3(project_id: &str, revision: u64) -> Value {
     json!({
         "schemaVersion":3,"projectId":project_id,"revision":revision,
         "roles":roles,"roleDefinitions":definitions,"updatedAt":now(),
+    })
+}
+
+// Unit tests that exercise chats keep the complete team the built-in default
+// used to seed; a test opts into the product's model-less default explicitly.
+#[cfg(test)]
+thread_local! {
+    static PRODUCT_DEFAULTS_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(crate) struct ProductDefaultsForTest;
+
+#[cfg(test)]
+impl ProductDefaultsForTest {
+    pub(crate) fn enable() -> Self {
+        PRODUCT_DEFAULTS_FOR_TEST.with(|flag| flag.set(true));
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for ProductDefaultsForTest {
+    fn drop(&mut self) {
+        PRODUCT_DEFAULTS_FOR_TEST.with(|flag| flag.set(false));
+    }
+}
+
+/// The team the built-in default used to seed, for unit tests that need one.
+#[cfg(test)]
+pub(crate) fn complete_default_roles_for_test() -> Value {
+    json!([
+        {"roleId":"coordinator","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"},
+        {"roleId":"planning","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"},
+        {"roleId":"design","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"},
+        {"roleId":"coding","runtime":"claude-code","modelSelector":"opus","reasoningEffort":null,"permission":"workspaceWrite"},
+        {"roleId":"review","runtime":"codex","modelSelector":"sol","reasoningEffort":"high","permission":"readOnly"}
+    ])
+}
+
+/// Saved settings may leave a model unselected; chats snapshot only complete teams.
+pub(crate) fn has_unselected_model(settings: &Value) -> bool {
+    settings["roles"].as_array().is_some_and(|roles| {
+        roles.iter().any(|role| role["modelSelector"].as_str().is_none_or(str::is_empty))
     })
 }
 

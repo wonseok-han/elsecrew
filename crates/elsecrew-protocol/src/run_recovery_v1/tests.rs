@@ -465,3 +465,29 @@ fn v3_role_ids_stage_and_legacy_permissions_are_separate() {
     missing.as_object_mut().unwrap().remove("roleDefinitions");
     assert!(validate_g5_payload_v1("projectRoleSettings", &missing).is_err());
 }
+
+#[test]
+fn saved_v3_settings_may_leave_a_model_unselected_but_chats_may_not() {
+    let unselected = |role: &str, permission: &str| serde_json::json!({"roleId":role,"runtime":"codex","modelSelector":"","reasoningEffort":null,"permission":permission});
+    let roles = serde_json::json!([
+        unselected("coordinator", "readOnly"), unselected("planning", "readOnly"), unselected("design", "readOnly"),
+        unselected("coding", "workspaceWrite"), unselected("review", "readOnly"),
+    ]);
+    let definitions: Vec<Value> = G5_DEFAULT_ROLE_DEFINITIONS_V3.iter()
+        .map(|(id, name, responsibility)| serde_json::json!({"roleId":id,"name":name,"responsibility":responsibility}))
+        .collect();
+    let at = "2026-11-13T00:00:00Z";
+    let settings = serde_json::json!({"schemaVersion":3,"projectId":"p","revision":1,"roles":roles,"roleDefinitions":definitions,"updatedAt":at});
+    assert!(validate_g5_payload_v1("projectRoleSettings", &settings).is_ok());
+    let mut effort = settings.clone();
+    effort["roles"][1]["reasoningEffort"] = serde_json::json!("medium");
+    assert!(validate_g5_payload_v1("projectRoleSettings", &effort).is_err());
+    let mut blank = settings.clone();
+    blank["roles"][1]["modelSelector"] = serde_json::json!("  ");
+    assert!(validate_g5_payload_v1("projectRoleSettings", &blank).is_err());
+    assert!(validate_g5_payload_v1("roleProfile", &roles[1]).is_err());
+    let chat = serde_json::json!({"schemaVersion":3,"chatId":"c","taskId":"t","projectId":"p","worktreeId":"w","workspaceIdentity":"i","goal":"g","settingsRevision":1,"roleSnapshots":roles,"roleDefinitions":definitions,"state":"draft","createdAt":at,"updatedAt":at});
+    assert!(validate_g5_payload_v1("chatRecord", &chat).is_err());
+    let legacy = serde_json::json!({"schemaVersion":1,"projectId":"p","revision":1,"roles":[unselected("planning","readOnly"),unselected("coding","workspaceWrite"),unselected("review","readOnly")],"updatedAt":at});
+    assert!(validate_g5_payload_v1("projectRoleSettings", &legacy).is_err());
+}

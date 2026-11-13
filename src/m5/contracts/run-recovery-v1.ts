@@ -362,12 +362,18 @@ export interface RecoveryResolutionTranscriptV1 {
   outcome: "resolvedAbandoned" | "processesRemain" | "revisionConflict";
 }
 
-export function validateRoleProfileV1(value: unknown): RoleProfileV1 {
+/**
+ * Saved V3 role settings may leave a model unselected (`""`, no reasoning
+ * effort) until the user picks one; chats and runs never accept that.
+ */
+export function validateRoleProfileV1(value: unknown, allowUnselected = false): RoleProfileV1 {
   const object = requireObject(value, "role profile");
   exactKeys(object, ["roleId", "runtime", "modelSelector", "reasoningEffort", "permission"]);
   const roleId = requireRoleId(object.roleId, "roleId");
   oneOf(object.runtime, G5_RUNTIMES_V1, "runtime");
-  boundedText(object.modelSelector, "modelSelector", G5_MODEL_SELECTOR_MAX_BYTES_V1);
+  if (allowUnselected && object.modelSelector === "") {
+    if (object.reasoningEffort !== null) fail("an unselected model cannot carry a reasoning effort");
+  } else boundedText(object.modelSelector, "modelSelector", G5_MODEL_SELECTOR_MAX_BYTES_V1);
   nullableBoundedText(object.reasoningEffort, "reasoningEffort", G5_REASONING_EFFORT_MAX_BYTES_V1);
   const permission = oneOf(object.permission, G5_PERMISSIONS_V1, "permission");
   if (roleId === G5_COORDINATOR_ROLE_ID && permission !== "readOnly") fail("coordinator permission must be readOnly");
@@ -381,7 +387,7 @@ export function validateProjectRoleSettingsV1(value: unknown): ProjectRoleSettin
   if (object.schemaVersion !== 1 && object.schemaVersion !== 2 && !v3) fail("unsupported role schema version");
   requireId(object.projectId, "projectId");
   positiveSequence(object.revision, "settings revision");
-  if (v3) validateRoleSetV3(object.roles, object.roleDefinitions, "roles");
+  if (v3) validateRoleSetV3(object.roles, object.roleDefinitions, "roles", true);
   else validateRoleSet(object.roles, "roles", object.schemaVersion as 1 | 2);
   timestamp(object.updatedAt, "updatedAt");
   return object as unknown as ProjectRoleSettingsV1;
@@ -393,7 +399,7 @@ export function validateProjectRoleSettingsUpdateRequestV1(value: unknown): Proj
   exactKeys(object, ["projectId", "expectedRevision", "roles", ...(v3 ? ["roleDefinitions"] : [])]);
   requireId(object.projectId, "projectId");
   positiveSequence(object.expectedRevision, "expectedRevision");
-  if (v3) validateRoleSetV3(object.roles, object.roleDefinitions, "roles");
+  if (v3) validateRoleSetV3(object.roles, object.roleDefinitions, "roles", true);
   else validateRoleSet(object.roles, "roles");
   return object as unknown as ProjectRoleSettingsUpdateRequestV1;
 }
@@ -1276,7 +1282,7 @@ export function parseG5DProductReadyPayloadV1(value: unknown): ReadyPayloadV1 {
 }
 
 function validateRoleSet(value: unknown, name: string, version?: 1 | 2): readonly RoleProfileV1[] {
-  const roles = array(value, name, G5_ROLE_IDS_V2.length).map(validateRoleProfileV1);
+  const roles = array(value, name, G5_ROLE_IDS_V2.length).map(role => validateRoleProfileV1(role));
   const canonical = version === 1 || (version === undefined && roles.length === 3) ? G5_ROLE_IDS_V1 : G5_ROLE_IDS_V2;
   if (roles.length !== canonical.length || roles.some((role, index) => role.roleId !== canonical[index])) fail(`${name} must use the canonical versioned role set`);
   // Legacy V1/V2 sets keep their exact fixed permission mapping.
@@ -1285,8 +1291,8 @@ function validateRoleSet(value: unknown, name: string, version?: 1 | 2): readonl
 }
 
 /** V3: a coordinator first, 1..7 unique workers, and a parallel definition per role. */
-function validateRoleSetV3(value: unknown, definitionsValue: unknown, name: string): readonly RoleProfileV1[] {
-  const roles = array(value, name, G5_ROLES_MAX_V3).map(validateRoleProfileV1);
+function validateRoleSetV3(value: unknown, definitionsValue: unknown, name: string, allowUnselected = false): readonly RoleProfileV1[] {
+  const roles = array(value, name, G5_ROLES_MAX_V3).map(role => validateRoleProfileV1(role, allowUnselected));
   const definitions = array(definitionsValue, "roleDefinitions", G5_ROLES_MAX_V3);
   if (roles.length < 2 || definitions.length !== roles.length) fail("V3 roles need a coordinator, 1 to 7 workers and one definition per role");
   const seen = new Set<string>();

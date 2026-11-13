@@ -206,6 +206,7 @@ app.on('browser-window-created', (_event, window) => {
         await run(`Array.from(document.querySelectorAll('.m5-settings-dialog button')).find(b=>b.textContent==='작업대로 돌아가기').click()`);
         await wait(`!document.querySelector('.m5-settings-dialog')`);
       }
+      await run(require('./m5-smoke-complete-team.cjs'));
       const snapshotStarted = performance.now();
       await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='프로젝트 선택').click()`);
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent.includes('hello.txt'))`, largeTree ? 65000 : 15000);

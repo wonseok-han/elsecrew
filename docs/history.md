@@ -2,6 +2,15 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 내장 기본 팀의 모델 제거(미선택 상태 도입)
+- 사용자 결정: 내장 기본 팀에 모델을 심지 않는다. V3 `default_settings_v3`은 모든 역할을 `modelSelector:""`·`reasoningEffort:null`로 둔다. 레거시 V1 `settings_value`(fixture `sol`)는 V12 이하 저장소와 fixture 데모용으로 남겼다. 이미 저장된 사용자 설정은 바꾸지 않는다.
+- 계약: V3 역할 설정(`projectRoleSettings`·`projectRoleSettingsUpdate`)에서만 빈 모델을 허용하고, 이때 reasoningEffort는 null이어야 한다. roleProfile 단일 검증·chatRecord roleSnapshots·실행 계열·V1/V2 설정은 계속 모델이 있어야 한다. Rust `validate_role_profile_with`/`validate_role_set_v3(.., allow_unselected)`과 TS `validateRoleProfileV1(value, allowUnselected)`를 맞췄다. TS 레거시 경로의 `.map(validateRoleProfileV1)`은 배열 인덱스가 두 번째 인자로 들어가 빈 모델을 허용할 수 있어서 화살표 함수로 바꿨다.
+- sidecar: `has_unselected_model`이 있으면 `prepare_chat_workspace_with_baseline`에서 스냅샷을 만들기 전에 읽기 전용으로 판정해 `dirtyConflict`로 거절한다. `create_chat`도 같은 조건으로 거절한다. 단위 테스트는 thread-local `ProductDefaultsForTest`로 제품 기본값을 명시적으로 켤 때만 미선택 팀을 쓰고, 그 밖에는 예전 완전한 팀(`complete_default_roles_for_test`)을 쓴다.
+- UI: 미선택 역할이 있으면 새 작업 보내기를 막고 '모델을 고르지 않은 역할이 있어요: …'를 안내한다. 팀 요약은 '모델 미선택'으로 보인다. 역할 편집기에 '비어 있는 모델을 추천 모델로 채우기'를 추가했다. 공급자 isDefault가 정확히 1개일 때만 초안을 채우고, 없으면 안내한다. 직접 입력에서 모델을 지우면 reasoning도 비운다.
+- smoke: 실제 sidecar로 도는 스크립트(`m5-packaged-ui-smoke`, `m5-project-ui-smoke`, `m5-durable-output-ui-smoke`)는 프로젝트를 열기 전에 `scripts/m5-smoke-complete-team.cjs`로 앱 기본값에 시험용 팀을 저장한다. 이 세 스크립트는 문법 검사만 했고 실행은 하지 않았다. stdio 통합 테스트 `binary_fresh_b_*`는 모델을 채운 뒤 revision 2로 생성한다.
+- 독립 검토(1명, 읽기 전용): 빈 모델이 chat·run·ledger·erasure로 새는 경로 없음. 차단으로 지적된 smoke 경로는 위처럼 고쳤다. 권고 반영: 추천 채우기 실패 안내, 수동 입력 정합. 미반영 권고: 이전 빌드로 되돌리면 빈 모델 설정을 읽지 못함(다운그레이드 미지원), 이미 연 프로젝트는 앱 기본값을 나중에 바꿔도 다시 심지 않음(기존 계약), `chat.settings` 로딩 중에는 UI 차단 대신 sidecar 거절에 의존.
+- 검증: tsc 통과, 프런트737(새 `m5-unselected-model` 포함) 통과, renderer smoke·권한UI 통과. Rust protocol69·sidecar lib788·stdio 통합16 통과(전체 --no-fail-fast 실행 뒤 실패 2건을 고치고 해당 테스트만 재실행).
+
 ### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — '채팅'을 '작업'으로, Codex 목록에 없는 저장 모델 안내
 - 사용자 결정: 목표·작업 공간·팀·변경을 묶는 단위를 화면에서 '채팅' 대신 '작업'(EN Task)으로 부른다. ko 112개와 en 102개 문구를 바꿨다. 같은 범위에서 '작업 복사본'은 '작업 공간'(EN working copy를 workspace로)으로 통일했다. 대화 자체는 '대화'·'팀 대화'(EN conversation)로 남겼다. 내부 식별자·IPC·저장 키·데이터는 그대로이므로 이관이 필요 없다. `login.claude.hint`(실제 채팅 서비스 의미)는 유지했다. 어색해진 문장은 손으로 다듬었다(예: 파일 편집 일시 중지, 대화 기록, 목록 조회는 에이전트를 실행하지 않음).
 - 발견: 내장 기본 역할(`crates/elsecrew-sidecar/src/chat.rs` `settings_value`/`default_settings_v3`)이 Codex 모델을 fixture 시절 이름 `sol`로 심는다. 실제 Codex 목록(app-server model/list)에는 `gpt-6.1-sol`(isDefault)·`gpt-6-sol`·`gpt-5.6-sol` 같은 전체 이름만 있다. 실행 전 `match_model_catalog`는 정확히 일치해야 하므로 기본값 그대로의 Codex 역할은 실행이 막힌다. 화면은 이를 '저장된 값'으로만 보여 줬다.
