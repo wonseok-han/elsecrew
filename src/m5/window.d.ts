@@ -1,6 +1,8 @@
 import type { M5BridgeV8 } from "./contracts/bridge-v8.ts";
 
 declare global {
+  /** Injected by the renderer Vite config; absent in unit tests. */
+  const __ELSECREW_VERSION__: string;
   interface Window {
     readonly m5AppUpdate?: { open(): Promise<void>; onRestartCheck(check: () => boolean, resume: () => void): () => void };
     readonly m5GitSelection?: { request(action: import("./contracts/git-selection-v1.ts").GitSelectionAction): Promise<import("./contracts/git-selection-v1.ts").GitSelection> };

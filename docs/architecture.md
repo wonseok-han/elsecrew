@@ -1,6 +1,6 @@
 # Elsecrew 기술 설계
 
-> 2026-11-10 UI: 표시 이름은 Elsecrew다. 2026-11-12 리브랜딩으로 패키지/앱 식별자와 데이터 경로도 Elsecrew로 변경했으며 사용자 결정에 따라 새 데이터로 시작한다. 기존 앱 데이터는 자동 이전하거나 삭제하지 않는다. 앱 설정은 전체 화면으로 일반·기본 역할·에이전트·저장공간·프로젝트 관리·업데이트를 제공한다. 프로젝트 관리에서 백업/중단 복구/이력/고급 수동 도구를 열며 원본 반영 확인과 작업 보호 조건은 유지한다. 작업대는 단일 상단 메뉴와 파일·편집기·채팅 중심이며 안내는 요청 시 연다. 설정 이동 시 작업대와 공급자 연결 컴포넌트는 유지해 편집/로그인 상태를 보존한다.
+> 2026-11-10 UI: 표시 이름은 Elsecrew다. 2026-11-12 리브랜딩으로 패키지/앱 식별자와 데이터 경로도 Elsecrew로 변경했으며 사용자 결정에 따라 새 데이터로 시작한다. 기존 앱 데이터는 자동 이전하거나 삭제하지 않는다. 앱 설정은 전체 화면으로 일반(언어·OS 알림·앱 업데이트와 현재 버전)·기본 역할·에이전트·저장공간·프로젝트 설정을 제공한다. 저장공간의 '버린 작업 정리' 카드 하나가 작업 공간 파일 정리와 작업 내용 영구 삭제를 함께 찾되, 각각의 선택·최종 확인·건별 처리는 따로 유지한다. 프로젝트 설정은 열린 프로젝트를 먼저 보여 주며 작업 권한 아래 접힌 '문제 해결'에 작업 기록/실행 복구·백업·중단 복구·반영 기록을 둔다. 2026-11-13 프로젝트 단위 수동 반영(`prepareApplicationWorkspace`·`applicationPreview`)은 화면·브리지·sidecar 요청 경로에서 제거했다(내부 `prepare_application_workspace`는 새 작업 생성이 계속 사용). 원본 반영 확인과 작업 보호 조건은 유지한다. 작업대는 단일 상단 메뉴와 파일·편집기·채팅 중심이며 안내는 요청 시 연다. 설정 이동 시 작업대와 공급자 연결 컴포넌트는 유지해 편집/로그인 상태를 보존한다.
 
 > **Windows 추가 데이터 stream 경계(구현, native 검증 전)**: source/backup/writer 관측은 보유 handle의 [FILE_STREAM_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_stream_info)를 확인한다. 현재 archive가 보존하는 유일한 unnamed stream 이외의 named stream·복수 entry·조회 불확실성을 거절하여 조용한 정보 누락을 막는다. stream 없는 directory/빈 파일은 [GetFileInformationByHandleEx EOF 계약](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getfileinformationbyhandleex)으로 처리한다. 추가 stream 복사/복원 지원이나 Windows 활성화 완료를 뜻하지 않는다.
 
@@ -427,7 +427,7 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 팀 실행의 후속 run은 `agent.teamRunAccepted`로 최초 승인된 총괄 run과 같은 채팅/작업 복사본에 결속해 Electron에 먼저 등록한다. 최초 실행 외 후속 등록은 최대11회이며, 그 뒤부터 기존 실제 실행 이벤트 검증을 적용한다. 진행 알림의 통신 순번은 durable 대화 순번과 분리하고, 화면에서 앞선 알림을 받으면 누락 구간을 원장에서 조회한다.
 
-설정의 프로젝트 관리에는 editor와 분리된 대화 기록/실행 복구 조회가 있다. 저장된 프로젝트 ID로 기존 listChats/getChat을 조회하므로 최신 snapshot이 recoveryRequired여도 기록에 접근할 수 있다. 조회는 snapshot 생성·파일 접근·실행을 요청하지 않으며, 복구는 기존 inspect→명시 확인→revision 결속 resolve와 종료 증거 검사를 유지한다. 복구 후 작업 공간을 자동 재사용하지 않는다.
+설정의 프로젝트 설정 '문제 해결'에는 editor와 분리된 작업 기록/실행 복구 조회가 있다. 저장된 프로젝트 ID로 기존 listChats/getChat을 조회하므로 최신 snapshot이 recoveryRequired여도 기록에 접근할 수 있다. 조회는 snapshot 생성·파일 접근·실행을 요청하지 않으며, 복구는 기존 inspect→명시 확인→revision 결속 resolve와 종료 증거 검사를 유지한다. 복구 후 작업 공간을 자동 재사용하지 않는다.
 
 ### 역할 설정의 모델 목록 (2026-11-11)
 

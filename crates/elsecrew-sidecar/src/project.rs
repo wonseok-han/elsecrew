@@ -834,6 +834,8 @@ impl ProjectManager {
             Err(ProjectFailure::recovery("application workspace unavailable on this platform"))
         }
     }
+    /// Only the baseline tests still read the project-level preview.
+    #[cfg(all(test, not(windows)))]
     pub(crate) fn application_preview(&self, storage: &Storage, project_id: &str) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(any(unix, windows))]
         {

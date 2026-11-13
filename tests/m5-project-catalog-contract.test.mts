@@ -104,15 +104,12 @@ test("chat preview cannot return another chat's result", () => {
   assert.throws(() => validateProjectCatalogRequest({ ...request, worktreePath: "/private" }));
 });
 
-test("application workspace preparation binds explicit project without paths", () => {
-  const request = { action: "prepareApplicationWorkspace" as const, projectId: "project_a" };
-  assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, ...request, worktreeId: "worktree_a" }, request));
-  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, ...request, projectId: "other", worktreeId: "worktree_a" }, request));
-  assert.throws(() => validateProjectCatalogRequest({ ...request, path: "/tmp/project" }));
+test("the retired manual application actions are rejected at the bridge", () => {
+  for (const action of ["prepareApplicationWorkspace", "applicationPreview"]) assert.throws(() => validateProjectCatalogRequest({ action, projectId: "project_a" }));
 });
 
 test("application preview binds project, relative paths and explicit truncation", () => {
-  const request = { action: "applicationPreview" as const, projectId: "project_a" };
+  const request = { action: "chatApplicationPreview" as const, projectId: "project_a", chatId: "chat_a" };
   const preview = { worktreeId: "worktree_a", total: 1, changes: [{ path: "src/file.ts", kind: "modified" }] };
   const result = { schemaVersion: 1, ...request, preview };
   assert.doesNotThrow(() => validateProjectCatalogResult(result, request));

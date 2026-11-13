@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.tsx";
 import { validateProjectCatalogResult, type WorkspaceCleanupEntry } from "./contracts/project-catalog-v1.ts";
 
-export function WorkspaceCleanup({ disabled }: { disabled: boolean }) {
+/** Workspace-file half of Settings → Storage → discarded work; the parent's single find button bumps `loadKey`. */
+export function WorkspaceCleanup({ disabled, loadKey, onBusy }: { disabled: boolean; loadKey: number; onBusy?: (busy: boolean) => void }) {
   const { t } = useI18n();
   const [entries, setEntries] = useState<WorkspaceCleanupEntry[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -13,6 +14,8 @@ export function WorkspaceCleanup({ disabled }: { disabled: boolean }) {
   const epoch = useRef(0);
   const pending = useRef(false);
   useEffect(() => { epoch.current++; setEntries([]); setSelected([]); setConfirm(false); setLoaded(false); return () => { epoch.current++; }; },[disabled]);
+  useEffect(() => { if (loadKey > 0) void load(); }, [loadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { onBusy?.(busy); }, [busy, onBusy]);
   async function load() {
     if (disabled || pending.current || !window.m5Projects) return;
     const generation = epoch.current;
@@ -38,9 +41,9 @@ export function WorkspaceCleanup({ disabled }: { disabled: boolean }) {
     } catch { if (generation === epoch.current) setError(true); }
     finally { pending.current = false; setBusy(false); setConfirm(false); }
   }
-  return <section className="m5-cleanup-settings" aria-busy={busy}>
-    <h3>{t("m5.cleanup.title")}</h3><p className="m5-settings-intro">{t("m5.cleanup.help")}</p>
-    <button type="button" disabled={disabled || busy} onClick={() => void load()}>{t("m5.cleanup.inspect")}</button>
+  if (!loaded && !error) return null;
+  return <div className="m5-cleanup-part m5-workspace-cleanup" aria-busy={busy}>
+    <h4>{t("m5.cleanup.title")}</h4>
     {loaded && !entries.length && <p role="status">{t("m5.cleanup.empty")}</p>}
     {!!entries.length && <div className="m5-settings-group">{entries.map(entry => <label className="m5-preferences-row" key={entry.chatId}>
       <span><strong>{entry.title}</strong><small>{t(entry.pending ? "m5.cleanup.pending" : entry.eligible ? "m5.cleanup.ready" : "m5.cleanup.blocked")}</small></span>
@@ -49,5 +52,5 @@ export function WorkspaceCleanup({ disabled }: { disabled: boolean }) {
     {!!selected.length && !confirm && <button className="m5-danger" type="button" disabled={disabled || busy} onClick={() => setConfirm(true)}>{t("m5.cleanup.selected",{count:selected.length})}</button>}
     {confirm && <div className="m5-cleanup-confirm"><p>{t("m5.cleanup.confirm")}</p><div className="m5-storage-actions"><button type="button" disabled={busy} onClick={() => setConfirm(false)}>{t("m5.cleanup.cancel")}</button><button className="m5-danger" type="button" disabled={disabled || busy} onClick={() => void erase()}>{t("m5.cleanup.erase")}</button></div></div>}
     {error && <p role="alert">{t("m5.cleanup.error")}</p>}
-  </section>;
+  </div>;
 }

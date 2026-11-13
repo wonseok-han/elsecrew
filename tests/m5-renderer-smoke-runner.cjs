@@ -276,8 +276,10 @@ app.whenReady().then(async () => {
     overflow.querySelector('summary').click();
     rail.querySelector('.m5-project-manage').click();
     await ${waitFor("!document.querySelector('.m5-app-settings').hidden && document.querySelector('.m5-maintenance-group')", "project management page")};
+    if (document.querySelector('.m5-troubleshooting').open) throw new Error('troubleshooting should start folded');
+    document.querySelector('.m5-troubleshooting > summary').click();
+    await ${waitFor("document.querySelector('.m5-maintenance-group')?.getClientRects().length > 0", "troubleshooting expanded")};
     await (${probeRecoveryHistory.toString()})(${JSON.stringify(recoveryHistoryFixture)});
-    if (document.querySelector('.m5-maintenance-group').tagName !== 'SECTION') throw new Error('management sections should be visible without expanding');
     const recoveryButton = text => [...document.querySelectorAll('[aria-label="프로젝트 시작 실패 복구"] button')].find(b => b.textContent === text);
     recoveryButton('시작 실패 확인').click();
     await ${waitFor("document.querySelector('[aria-label=\"실패한 준비 종료 확인\"]')", "explicit preparation inspection")};
@@ -323,14 +325,14 @@ app.whenReady().then(async () => {
     await ${waitFor("Object.values(window.m5SmokePermissions).some(p => p.files === false && p.commands === false) && document.querySelector('.m5-app-settings .m5-project-permissions button').disabled", "explicit project permission revoke")};
     document.querySelectorAll('.m5-preferences-layout > nav button')[3].click();
     document.querySelector('.m5-cleanup-settings > button').click();
-    await ${waitFor("document.querySelectorAll('.m5-cleanup-settings input').length === 2", "cleanup items")};
-    if (!document.querySelectorAll('.m5-cleanup-settings input')[1].disabled) throw new Error('recovery cleanup selectable');
-    document.querySelector('.m5-cleanup-settings input').click();
-    document.querySelector('.m5-cleanup-settings > .m5-danger').click();
+    await ${waitFor("document.querySelectorAll('.m5-workspace-cleanup input').length === 2", "cleanup items")};
+    if (!document.querySelectorAll('.m5-workspace-cleanup input')[1].disabled) throw new Error('recovery cleanup selectable');
+    document.querySelector('.m5-workspace-cleanup input').click();
+    document.querySelector('.m5-workspace-cleanup > .m5-danger').click();
     if (window.m5CleanupCalls.length) throw new Error('cleanup ran before final consent');
-    await ${waitFor("document.querySelector('.m5-cleanup-confirm .m5-danger')", "cleanup confirmation")};
-    document.querySelector('.m5-cleanup-confirm .m5-danger').click();
-    await ${waitFor("window.m5CleanupCalls.length === 1 && document.querySelectorAll('.m5-cleanup-settings input').length === 1", "selected cleanup receipt")};
+    await ${waitFor("document.querySelector('.m5-workspace-cleanup .m5-cleanup-confirm .m5-danger')", "cleanup confirmation")};
+    document.querySelector('.m5-workspace-cleanup .m5-cleanup-confirm .m5-danger').click();
+    await ${waitFor("window.m5CleanupCalls.length === 1 && document.querySelectorAll('.m5-workspace-cleanup input').length === 1", "selected cleanup receipt")};
     ${process.env.M5_PERMISSIONS_ONLY === "1" ? "return {permissionsVerified:true};" : ""}
 
     document.querySelector('.m5-open-preferences').click(); document.querySelectorAll('.m5-preferences-layout > nav button')[2].click();
@@ -772,9 +774,9 @@ app.whenReady().then(async () => {
     if (goalInput !== document.querySelector('.m5-new-chat-form input') || goalInput.value !== '새 목표 초안' || goalInput.getAttribute('aria-label') !== 'New task goal') throw new Error('language change lost goal draft or label');
     if (selectedChat !== document.querySelector('.m5-chat-chip.selected')) throw new Error('language change changed selected chat');
     window.m5SmokeFailHistoryRefresh();
-    await ${waitFor("[...document.querySelectorAll('.m5-error button')].some(button => button.textContent === 'Reload conversation history')", "history refresh error retry")};
-    [...document.querySelectorAll('.m5-error button')].find(button => button.textContent === 'Reload conversation history').click();
-    await ${waitFor("![...document.querySelectorAll('.m5-error button')].some(button => button.textContent === 'Reload conversation history')", "history refresh recovered")};
+    await ${waitFor("[...document.querySelectorAll('.m5-error button')].some(button => button.textContent === 'Reload task history')", "history refresh error retry")};
+    [...document.querySelectorAll('.m5-error button')].find(button => button.textContent === 'Reload task history').click();
+    await ${waitFor("![...document.querySelectorAll('.m5-error button')].some(button => button.textContent === 'Reload task history')", "history refresh recovered")};
     if (window.m5SmokeContextStarts.length !== 0 || input.value !== '설명을 추가해 주세요.') throw new Error('history retry started an agent or lost draft');
     // Layout-only fixture: exercise a long title at the product minimum window
     // size without changing stored chat data or the selected conversation.
@@ -868,15 +870,15 @@ app.whenReady().then(async () => {
     window.m5SmokeAppendMessages(450);
     await ${waitFor("document.querySelectorAll('.m5-message').length === 200 && [...document.querySelectorAll('.m5-message p')].at(-1)?.textContent === 'history message 450'", "bounded latest conversation page")};
     const historyButton = label => [...document.querySelectorAll('.m5-timeline nav button')].find(button => button.textContent === label);
-    historyButton('이전 대화').click();
+    historyButton('이전 메시지').click();
     await ${waitFor("[...document.querySelectorAll('.m5-message p')].at(-1)?.textContent === 'history message 250'", "older conversation page")};
     const oldPage = [...document.querySelectorAll('.m5-message p')].map(node => node.textContent);
     window.m5SmokeAppendMessages(1);
     await ${waitFor("document.querySelector('.m5-new-messages')", "new message notice while reading history")};
     if (JSON.stringify(oldPage) !== JSON.stringify([...document.querySelectorAll('.m5-message p')].map(node => node.textContent))) throw new Error('new message moved the older page');
-    historyButton('이전 대화').click();
+    historyButton('이전 메시지').click();
     await ${waitFor("document.querySelector('.m5-message p')?.textContent === '처음 요청'", "first conversation page still reachable")};
-    historyButton('최신 대화').click();
+    historyButton('최신 메시지').click();
     await ${waitFor("document.querySelectorAll('.m5-message').length === 200 && [...document.querySelectorAll('.m5-message p')].at(-1)?.textContent === 'history message 451' && !document.querySelector('.m5-new-messages')", "return to latest conversation page")};
     ${process.env.M5_MEASURE_MESSAGE_PAINT === "1" ? `globalThis.messagePaintReport = await (${measureMessagePaint.toString()})({ emit: () => window.m5SmokeAppendMessages(1)[0], visible: () => [...document.querySelectorAll('.m5-message p')].map(node => node.textContent) });` : ""}
     const originalConfirm = window.confirm;
@@ -902,11 +904,11 @@ app.whenReady().then(async () => {
     await ${waitFor("window.m5SmokeContextStarts.length === 1", "approved bounded context")};
     await ${waitFor("document.querySelector('#m5-followup-text')?.value === ''", "approved context run settled")};
     if (!contextPrompt.includes('처음 요청과 최근 99개') || window.m5SmokeContextStarts[0].inputMessageIds.length !== 100) throw new Error('context scope or language mismatch');
-    historyButton('이전 대화').click();
+    historyButton('이전 메시지').click();
     await ${waitFor("[...document.querySelectorAll('.m5-message p')].at(-1)?.textContent === 'history message 253'", "context run older history page")};
-    historyButton('이전 대화').click();
+    historyButton('이전 메시지').click();
     await ${waitFor("document.querySelector('.m5-message p')?.textContent === '처음 요청'", "full history retained after bounded run")};
-    historyButton('최신 대화').click();
+    historyButton('최신 메시지').click();
     window.confirm = originalConfirm;
     window.m5SmokeTeamMessages();
     await ${waitFor("[...document.querySelectorAll('.m5-message p')].some(node => node.textContent === '확인한 내용을 정리해 드릴게요.')", "orchestrator synthesized answer")};

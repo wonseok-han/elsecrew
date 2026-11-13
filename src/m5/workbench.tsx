@@ -1,5 +1,4 @@
-import { WorkspaceCleanup } from "./workspace-cleanup.tsx";
-import { ChatErasure } from "./chat-erasure.tsx";
+import { DiscardedWorkCleanup } from "./discarded-work-cleanup.tsx";
 import { ProjectPermissions } from "./project-permissions.tsx";
 import { submitChatShortcut } from "./chat-submit-shortcut.ts";
 import { ProviderUsage } from "./provider-usage.tsx";
@@ -203,6 +202,9 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     () => controller.snapshot(),
     () => controller.snapshot(),
   );
+  // Settings shows the open project first; a project picked earlier must not
+  // linger once another project is opened.
+  useEffect(() => { setManagedProject(null); }, [snapshot.project?.id]);
   const chat = useSyncExternalStore(chatController.subscribe.bind(chatController), () => chatController.snapshot(), () => chatController.snapshot());
   // The built-in team names no model; a task starts only once every role has one.
   const unselectedRoles = chat.settings ? (() => { const team = roleSettingsAsV3(chat.settings); return team.roles.filter(role => !hasUsableModel(role.runtime, role.modelSelector)).map(role => roleLabel(role.roleId, team.roleDefinitions, t)); })() : [];
@@ -422,7 +424,10 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       }} disabled={!admissionReady || chat.switching || settingsOpen || leavingProject || leaveError}
         onResolved={(result, path) => controller.observeCompletedSaveRecovery(result, path)} />}
       {leaveError && <p className="m5-error" role="alert">{t("m5.feedback.leaveError")}</p>}
-      <AppSettings hasProject={Boolean(snapshot.project)} storage={<><WorkspaceCleanup disabled={!admissionReady} /><ChatErasure disabled={!admissionReady} /><BackupStorageUsageView disabled={!admissionReady} /></>} project={managedProject ? <><button type="button" className="m5-secondary" onClick={() => setManagedProject(null)}>{t("m5.preferences.projectList")}</button><p>{managedProject.canonicalPath}</p><ProjectPermissions key={`permissions:${managedProject.projectId}`} projectId={managedProject.projectId} disabled={!admissionReady} /><ProjectRecoveryHistory key={`history:${managedProject.projectId}`} bridge={bridge} projectId={managedProject.projectId} disabled={!admissionReady || leavingProject || leaveError} /><PreparationRecovery projectId={managedProject.projectId} disabled={!admissionReady || snapshot.actionBlocked || snapshot.selectionBlocked || Boolean(snapshot.workspace) || settingsOpen || leavingProject || leaveError || !controller.canLeaveProject() || chat.switching} /></> : <ProjectCatalog management ready={admissionReady && preferencesOpen && preferencesSection === "project"} refreshKey={catalogRevision} controller={controller} disabled={!admissionReady} onManage={setManagedProject} />} restartLocked={updatePreparing} open={preferencesOpen} section={preferencesSection} onSection={section => { if (section !== preferencesSection) navigatePreferences(() => { setPreferencesSection(section); setAppDefaultsOpen(section === "roles"); }); }} onClose={() => navigatePreferences(() => { setPreferencesOpen(false); setPreferencesSection("general"); setAppDefaultsOpen(false); })}
+      <AppSettings hasProject={Boolean(snapshot.project)} storage={<><DiscardedWorkCleanup disabled={!admissionReady} /><BackupStorageUsageView disabled={!admissionReady} /></>} project={managedProject ? <><button type="button" className="m5-secondary" onClick={() => setManagedProject(null)}>{t("m5.preferences.projectList")}</button><p className="m5-managed-project"><strong>{managedProject.canonicalPath.split(/[\\/]/).filter(Boolean).pop() ?? managedProject.projectId}</strong><span title={managedProject.canonicalPath}>{managedProject.canonicalPath}</span></p><ProjectPermissions key={`permissions:${managedProject.projectId}`} projectId={managedProject.projectId} disabled={!admissionReady} /><details className="m5-troubleshooting"><summary>{t("m5.preferences.troubleshoot")}</summary><p className="m5-settings-intro">{t("m5.preferences.troubleshootHelp")}</p><ProjectRecoveryHistory key={`history:${managedProject.projectId}`} bridge={bridge} projectId={managedProject.projectId} disabled={!admissionReady || leavingProject || leaveError} /><PreparationRecovery projectId={managedProject.projectId} disabled={!admissionReady || snapshot.actionBlocked || snapshot.selectionBlocked || Boolean(snapshot.workspace) || settingsOpen || leavingProject || leaveError || !controller.canLeaveProject() || chat.switching} /></details></> : <ProjectCatalog management ready={admissionReady && preferencesOpen && preferencesSection === "project"} refreshKey={catalogRevision} controller={controller} disabled={!admissionReady} onManage={setManagedProject} />} restartLocked={updatePreparing} open={preferencesOpen} section={preferencesSection} onSection={section => { if (section !== preferencesSection) navigatePreferences(() => {
+        // Like Orca's per-repository page: with a project open, its settings come first.
+        if (section === "project" && !managedProject && snapshot.project) setManagedProject({ projectId: snapshot.project.id, canonicalPath: snapshot.project.root });
+        setPreferencesSection(section); setAppDefaultsOpen(section === "roles"); }); }} onClose={() => navigatePreferences(() => { setPreferencesOpen(false); setPreferencesSection("general"); setAppDefaultsOpen(false); setManagedProject(null); })}
         rolesEditor={appDefaultsOpen && <AppRoleDefaultsEditor activeChat={chat.activeChat} navigationGuard={roleNavigation} disabled={!admissionReady} onClose={() => { setAppDefaultsOpen(false); setPreferencesSection("general"); }} />}
         disabled={!admissionReady || !window.m5Projects} onRoles={() => setAppDefaultsOpen(true)}>
         <ProviderLogin settingsPage disabled={!admissionReady} returning={hasSavedProjects} reveal={connectionReveal} />
@@ -921,6 +926,7 @@ function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, o
     <div className="m5-role-team-tools">
       <button type="button" className="m5-secondary" disabled={editing || !canAddWorker(team)} onClick={add}>{t("m5.roles.add")}</button>
       {roles.some(role => !usable(role)) && <button type="button" className="m5-secondary" disabled={editing || choicesBusy || !window.m5Models} onClick={() => void fillRecommended()}>{t("m5.roles.fillRecommended")}</button>}
+      <button type="button" className="m5-secondary" disabled={editing || choicesBusy || !window.m5Models || !roles.some(role => role.roleId === selectedRole)} onClick={() => { const role = roles.find(item => item.roleId === selectedRole); if (role) void loadChoices(role, true); }}>{t(choicesBusy ? "m5.roles.busy" : "m5.roles.loadChoices")}</button>
       {fillMissed && <small role="status">{t("m5.roles.fillMissed")}</small>}
       <small>{t("m5.roles.limit", { max: G5_ROLES_MAX_V3 - 1 })}</small>
     </div>
@@ -931,7 +937,9 @@ function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, o
       return <article key={role.roleId} id={`m5-role-panel-${role.roleId}`} hidden={selectedRole !== role.roleId} className="m5-role-card" aria-labelledby={`m5-role-heading-${role.roleId}`}>
       <strong id={`m5-role-heading-${role.roleId}`}>{label(role.roleId)}</strong>
       <label>{t("m5.roles.name")}<input disabled={editing} value={definition?.name ?? ""} aria-invalid={nameBytes(definition?.name ?? "") > G5_ROLE_NAME_MAX_BYTES_V3 || isBlankText(definition?.name ?? "")} onChange={event => define(role.roleId, "name", event.target.value)} /></label>
-      <small className={nameBytes(definition?.name ?? "") > G5_ROLE_NAME_MAX_BYTES_V3 ? "m5-error" : undefined}>{t("m5.roles.nameBytes", { count: nameBytes(definition?.name ?? ""), max: G5_ROLE_NAME_MAX_BYTES_V3 })}</small>
+      {/* The byte budget only matters near the limit (Korean uses 3 bytes a letter);
+          the empty cell keeps the two-column card grid aligned. */}
+      <small className={nameBytes(definition?.name ?? "") > G5_ROLE_NAME_MAX_BYTES_V3 ? "m5-error" : undefined}>{nameBytes(definition?.name ?? "") > G5_ROLE_NAME_MAX_BYTES_V3 * 0.75 ? t("m5.roles.nameBytes", { count: nameBytes(definition?.name ?? ""), max: G5_ROLE_NAME_MAX_BYTES_V3 }) : ""}</small>
       <label>{t("m5.roles.responsibility")}<textarea disabled={editing} rows={3} value={definition?.responsibility ?? ""} placeholder={t("m5.roles.responsibilityPlaceholder")} onChange={event => define(role.roleId, "responsibility", event.target.value)} /></label>
       <small>{t(coordinator ? "m5.roles.coordinatorHelp" : "m5.roles.responsibilityHelp", { max: G5_ROLE_RESPONSIBILITY_MAX_BYTES_V3 })}</small>
       <label>{t("m5.roles.runtime")}<select disabled={editing} value={role.runtime} onChange={event => {
@@ -954,10 +962,6 @@ function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, o
           <option value="readOnly">{t("m5.roles.permissionReadOnly")}</option>
           <option value="workspaceWrite">{t("m5.roles.permissionWrite")}</option>
         </select></label>}
-      <div className="m5-role-model-tools">
-        <button type="button" className="m5-secondary" disabled={editing || choicesBusy || !window.m5Models} onClick={() => void loadChoices(role, true)}>{t(choicesBusy ? "m5.roles.busy" : "m5.roles.loadChoices")}</button>
-        {choices.get(role.roleId) && <small>{t("m5.roles.choicesHelp")}</small>}
-      </div>
       <details><summary>{t("m5.roles.manualModel")}</summary>
         <label>{t("m5.roles.model")}<input disabled={editing} value={role.modelSelector} onChange={event => { const modelSelector = event.target.value; setTeam(old => updateProfile(old, role.roleId, modelSelector ? { modelSelector } : { modelSelector, reasoningEffort: null })); }} /></label>
         <label>{t("m5.roles.reasoning")}<input disabled={editing} value={role.reasoningEffort ?? ""} onChange={event => change(role.roleId, "reasoningEffort", event.target.value || null)} /></label>
@@ -969,8 +973,7 @@ function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, o
     </div>
     <footer className="m5-settings-actions">
     <button type="button" disabled={editing || !valid || !dirty} onClick={() => void run(() => onSave(team.roles, team.roleDefinitions))}>{t(busy ? "m5.roles.busy" : scope === "app" ? "m5.roles.appSave" : "m5.roles.save")}</button>
-    <button className="m5-secondary" type="button" disabled={editing} onClick={() => dirty ? setDiscardAction("reload") : void run(onReload)}>{t("m5.roles.reload")}</button>
-    <details className="m5-settings-reload-help"><summary>{t("m5.roles.reloadInfo")}</summary><p>{t("m5.roles.reloadHelp")}</p></details>
+    <button className="m5-secondary" type="button" title={t("m5.roles.reloadHelp")} disabled={editing} onClick={() => dirty ? setDiscardAction("reload") : void run(onReload)}>{t("m5.roles.reload")}</button>
     </footer>
   </>;
   return scope === "app"

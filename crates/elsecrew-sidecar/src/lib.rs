@@ -1436,14 +1436,9 @@ impl Sidecar {
                     let params = require_exact_params(&request.params, &["action", "projectId", "chatId"]).map_err(invalid_params)?;
                     self.projects.chat_application_preview(&self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "chatId").map_err(invalid_params)?)
                 }
-                Some("prepareApplicationWorkspace") => {
-                    let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
-                    self.projects.prepare_application_workspace(&mut self.storage, param_string(params, "projectId").map_err(invalid_params)?, &request.request_id)
-                }
-                Some("applicationPreview") => {
-                    let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
-                    self.projects.application_preview(&self.storage, param_string(params, "projectId").map_err(invalid_params)?)
-                }
+                // `prepareApplicationWorkspace` and `applicationPreview` (the manual,
+                // project-level application flow) were retired on 2026-11-13; a
+                // task's own workspace and review page replace them.
                 Some("applicationHistory") => {
                     let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
                     self.projects.application_history(&self.storage, param_string(params, "projectId").map_err(invalid_params)?)

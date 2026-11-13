@@ -4,7 +4,7 @@ import { validateProjectCatalogResult, type ChatErasureEntry } from "./contracts
 
 /** Settings → storage: explicit, selected chat content erasure (docs/proposals/m5-chat-erasure.md).
  *  An item is shown as done only after the sidecar returns the durable `erased:true` receipt. */
-export function ChatErasure({ disabled }: { disabled: boolean }) {
+export function ChatErasure({ disabled, loadKey, onBusy }: { disabled: boolean; loadKey: number; onBusy?: (busy: boolean) => void }) {
   const { t } = useI18n();
   const [entries, setEntries] = useState<ChatErasureEntry[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -16,6 +16,8 @@ export function ChatErasure({ disabled }: { disabled: boolean }) {
   const epoch = useRef(0);
   const pending = useRef(false);
   useEffect(() => { epoch.current++; setEntries([]); setSelected([]); setConfirm(false); setLoaded(false); setProgress(null); return () => { epoch.current++; }; }, [disabled]);
+  useEffect(() => { if (loadKey > 0) void load(); }, [loadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { onBusy?.(busy); }, [busy, onBusy]);
   async function load() {
     if (disabled || pending.current || !window.m5Projects) return;
     const generation = epoch.current;
@@ -48,9 +50,9 @@ export function ChatErasure({ disabled }: { disabled: boolean }) {
     finally { pending.current = false; setBusy(false); setConfirm(false); }
   }
   const status = (entry: ChatErasureEntry) => t(entry.state === "pending" ? "m5.erasure.pending" : entry.state === "redacted" ? "m5.erasure.redacted" : entry.eligible ? "m5.erasure.ready" : "m5.erasure.blocked");
-  return <section className="m5-cleanup-settings m5-erasure-settings" aria-busy={busy}>
-    <h3>{t("m5.erasure.title")}</h3><p className="m5-settings-intro">{t("m5.erasure.help")}</p>
-    <button type="button" disabled={disabled || busy} onClick={() => void load()}>{t("m5.erasure.inspect")}</button>
+  if (!loaded && !error) return null;
+  return <div className="m5-cleanup-part m5-erasure-settings" aria-busy={busy}>
+    <h4>{t("m5.erasure.title")}</h4><p className="m5-settings-intro">{t("m5.erasure.help")}</p>
     {loaded && !entries.length && <p role="status">{t("m5.erasure.empty")}</p>}
     {!!entries.length && <div className="m5-settings-group">{entries.map(entry => <label className="m5-preferences-row" key={entry.chatId}>
       <span><strong dir="auto">{entry.preview || t("m5.erasure.untitled")}</strong><small>{status(entry)}</small></span>
@@ -64,5 +66,5 @@ export function ChatErasure({ disabled }: { disabled: boolean }) {
     </div>}
     {progress && <p role="status">{t("m5.erasure.progress", { done: progress.done, total: progress.total })}</p>}
     {error && <p role="alert">{t("m5.erasure.error")}</p>}
-  </section>;
+  </div>;
 }

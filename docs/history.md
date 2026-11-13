@@ -2,6 +2,38 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 설정 정리 실행(Orca·herdr 비교 후속)
+- 사용자 지시: 직전 조사에서 추천한 순서대로 전부 진행.
+- '대화' 표현 정리: 작업 단위를 가리키던 '대화'는 '작업'으로, 메시지 넘김·개수는 '메시지'로 바꿨다(ko·en). 작업 안의 대화 패널 이름 '팀 대화'와 공급자 자체 대화 내역 안내는 그대로 둔다.
+- 군더더기 제거:
+  - 설정 메뉴의 '환경 설정' 제목과 브랜드 문구를 빼고, 일반 > 앱 업데이트에 현재 버전을 표시했다(`__ELSECREW_VERSION__`, renderer vite define).
+  - 역할 이름 바이트 표시는 한도의 75%를 넘을 때만 보인다(빈 칸은 유지해 카드 정렬 보존).
+  - '모델 목록 새로고침'은 역할마다 두지 않고 팀 도구에 하나만 둔다(선택한 역할 기준). '다시 불러오기 안내' 접힘은 툴팁으로 줄였다.
+  - 에이전트 연결 안내 문구는 카드마다 반복하지 않고 설정 상단에 한 번만 둔다.
+- 프로젝트 단위 수동 반영 제거:
+  - '고급 · 수동 작업 공간'(새 작업 공간 준비, 원본 반영 미리보기)을 화면에서 지웠다.
+  - 브리지 계약(`project-catalog-v1.ts`)과 sidecar 요청 경로(`lib.rs`)에서 `prepareApplicationWorkspace`·`applicationPreview`를 제거해 이제 거절된다.
+  - 미리보기 경로 검증은 `validatePreviewBody`로 분리해 `applicationPreviewPage`·`chatApplicationPreview`가 공유한다.
+  - 내부 `prepare_application_workspace`는 새 작업 생성(chat.rs)이 계속 쓴다. `application_preview`는 `#[cfg(all(test, not(windows)))]` 테스트 전용이 됐다.
+- 프로젝트 설정: '프로젝트 관리'를 '프로젝트 설정'으로 바꿨다.
+  - 프로젝트가 열려 있으면 그 프로젝트를 바로 보여 준다. 다른 프로젝트를 열거나 설정을 닫으면 선택을 초기화한다.
+  - 작업 권한 아래 접힌 '문제 해결'에 작업 기록·백업·중단 복구·반영 기록을 모았다.
+- 저장공간: '작업 공간 정리'와 '작업 내용 영구 삭제'를 '버린 작업 정리' 카드 하나로 합쳤다(`discarded-work-cleanup.tsx`).
+  - 찾기 버튼 하나가 두 목록을 함께 부르고, 진행 중에는 비활성·'확인하는 중…'으로 표시한다.
+  - 선택, 최종 확인, 건별 처리와 epoch 가드는 각 자식에 그대로 유지했다.
+- herdr식 작업 목록 상태 점: 진행 중은 파랑(깜빡임, 동작 줄이기 설정 시 정지), 확인 필요는 주황, 완료·검토 준비는 초록이다.
+- 독립 검토(1명):
+  - 제품 차단 결함 없음.
+  - 검증 차단 1건: smoke가 옛 영어 문구 'Reload conversation history'를 기다림. 고쳤다.
+  - 반영한 권고: 열린 프로젝트가 바뀔 때 설정의 관리 대상 초기화, `#[cfg]`를 테스트 모듈 조건과 맞춤, 찾기 버튼 진행 표시, smoke에서 '문제 해결'을 펼친 뒤 조작.
+  - 남긴 권고: `applicationPreviewPage`가 아직 `chatId:null`(프로젝트 단위, 읽기 전용)을 받는다. `restorationPreview` 검증이 이를 재사용하므로 별도 정리가 필요하다. 다시 불러오기 안내는 툴팁뿐이다(되돌리기 전 확인 절차는 있음).
+- 검증:
+  - 통과: 타입 검사, 프런트 720, 화면 smoke(`pnpm m5:test:editor`, 68·전체 renderer smoke 포함), `git diff --check`.
+  - Rust: protocol 69 통과, sidecar lib 792 통과·1 실패. 실패한 `provider_login_gate::...vendor_gate_does_not_inherit_unrelated_writable_descriptors`는 단독 재실행에서 통과해 병렬 실행 중 간헐 실패로 본다.
+  - 격리 데이터로 설정 다섯 화면을 실제 실행해 캡처로 확인했다.
+  - 미확인: 상태 점은 작업이 있는 화면을 캡처하지 못해 CSS로만 확인했다. 설치본 패키지는 다시 만들지 않았다.
+- 다음 할 일: `applicationPreviewPage` 프로젝트 단위(`chatId:null`) 경로 정리 여부 결정, 업데이터 포함 패키지 재생성.
+
 ### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 설정 정리 후보 조사(Orca·herdr 비교)
 - 현재 설정 5개 섹션을 격리된 앱 데이터로 실제 실행해 캡처했다(코드 변경 없음). 참고: Orca 설정 문서 https://orca.dev/docs/settings (앱 전체 설정과 저장소별 'Repository' 설정을 나눔), herdr는 상태 표시·알림 위주이고 설정은 테마·알림 정도만 둔다.
 - 삭제·통합 후보(사용자 결정 대기):
@@ -146,6 +178,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **설정 구조와 수동 반영 폐지(2026-11-13)**: 프로젝트 단위 수동 반영(`prepareApplicationWorkspace`·`applicationPreview`)은 화면·브리지·sidecar 요청에서 제거됐다. 원본 반영은 작업(채팅) 단위 미리보기·확인 흐름만 쓴다. 복구·진단 도구는 프로젝트 설정의 접힌 '문제 해결'에 있다. 개발 실행은 `target/debug/elsecrew-sidecar`가 필요하다(`cargo build -p elsecrew-sidecar`). `provider_login_gate` descriptor 테스트는 병렬 실행에서 간헐 실패할 수 있다.
 - **작업 복사본 검증과 Git 잠금(2026-11-12)**: 실행 중 검증은 `.git/index.lock`을 잡지 않아야 한다(공급자가 자체 git 명령으로 잠금 보유 가능). `attempting` materialization이 남으면 admission이 fail-closed로 거절하며, 복구는 백업 뒤 `pending`으로 되돌려 정밀 재검증을 통과시키는 것이다. 다른 세션·리뷰어는 이 worktree에서 쓰기 금지, `cd` 대신 `git -C`.
 - **공급자 fence 경합(2026-11-12)**: 로그인 확인·모델 목록·실행이 같은 `*-login.pending`을 공유한다. 기존 fence가 live 소유자에게 잠겨 있으면 `providerBusy`(재시도)이고, 잠금 없는 고아만 recovery 증거다. fence는 staging 잠금 후 hard_link로만 게시해 이름이 잠기지 않은 inode를 가리키는 순간이 없다. 사용량 표시는 연결 변경 시 Codex 모델 조회를 즉시 실행하므로 로그인 확인과 동시 실행될 수 있다.
 - **2026-11-12 main 통합 이후**: PR #1 병합 b6e2de81 및 GitHub `elsecrew` 이름 변경 완료. 이후 최신 main 기반 기능 브랜치에서 작업하며 추가 main 병합/push는 별도 승인이다. CI43150190399 실패는 제품 완료가 아님; Tauri 빌드 성공과 artifact 업로드 실패를 구분한다.

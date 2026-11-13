@@ -85,9 +85,7 @@ export type ProjectCatalogRequest =
   | { action: "applicationStatus"; projectId: string }
   | { action: "chatApplicationStatus"; projectId: string; chatId: string }
   | { action: "applicationHistory"; projectId: string }
-  | { action: "applicationPreview"; projectId: string }
   | { action: "chatApplicationPreview"; projectId: string; chatId: string }
-  | { action: "prepareApplicationWorkspace"; projectId: string }
   | { action: "abandonPreparation"; inspection: PreparationInspection };
 export interface ProjectCatalogEntry { projectId: string; canonicalPath: string }
 export type ProjectCatalogResult =
@@ -121,8 +119,6 @@ export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "cancelApplicationConfirmation"; confirmationId: string }
   | { schemaVersion: 1; action: "applicationPreviewPage"; projectId: string; chatId: string | null; page: ApplicationPreviewPage }
   | { schemaVersion: 1; action: "chatApplicationPreview"; projectId: string; chatId: string; preview: ApplicationPreview }
-  | { schemaVersion: 1; action: "prepareApplicationWorkspace"; projectId: string; worktreeId: string }
-  | { schemaVersion: 1; action: "applicationPreview"; projectId: string; preview: ApplicationPreview }
   | { schemaVersion: 1; action: "applicationHistory"; projectId: string; entries: ApplicationHistoryEntry[] }
   | { schemaVersion: 1; action: "applicationStatus"; status: ApplicationStatus }
   | { schemaVersion: 1; action: "chatApplicationStatus"; chatId: string; status: ApplicationStatus }
@@ -249,7 +245,7 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
   } else if (request.action === "list") {
     keys(request, ["action", "cursor"]);
     if (request.cursor !== null) id(request.cursor);
-  } else if (request.action === "removeProject" || request.action === "restoreChats" || request.action === "reopen" || request.action === "releaseView" || request.action === "inspectPreparation" || request.action === "applicationStatus" || request.action === "applicationHistory" || request.action === "applicationPreview" || request.action === "prepareApplicationWorkspace") {
+  } else if (request.action === "removeProject" || request.action === "restoreChats" || request.action === "reopen" || request.action === "releaseView" || request.action === "inspectPreparation" || request.action === "applicationStatus" || request.action === "applicationHistory") {
     keys(request, ["action", "projectId"]); id(request.projectId);
   } else if (request.action === "removeChat" || request.action === "chatApplicationPreview" || request.action === "chatApplicationStatus") {
     keys(request, ["action", "projectId", "chatId"]); id(request.projectId); id(request.chatId);
@@ -258,6 +254,19 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
   } else throw new Error("invalid project catalog action");
   return request as ProjectCatalogRequest;
 }
+/** One page of changes: bounded, relative, unique paths with a known kind. */
+function validatePreviewBody(value: unknown): void {
+  const preview = object(value);
+  keys(preview, ["worktreeId", "total", "changes"]); id(preview.worktreeId);
+  if (!Number.isSafeInteger(preview.total) || (preview.total as number) < 0 || (preview.total as number) > 100000 || !Array.isArray(preview.changes) || preview.changes.length !== Math.min(100, preview.total as number)) throw new Error("invalid preview bounds");
+  const seen = new Set<string>();
+  for (const raw of preview.changes) {
+    const change = object(raw); keys(change, ["path", "kind"]);
+    if (typeof change.path !== "string" || !change.path || new TextEncoder().encode(change.path).byteLength > 4096 || change.path.includes("\0") || change.path.split("/").some(part => !part || part === "." || part === "..") || seen.has(change.path) || !["added", "modified", "deleted"].includes(String(change.kind))) throw new Error("invalid preview path");
+    seen.add(change.path);
+  }
+}
+
 export function validateProjectCatalogResult(value: unknown, input: ProjectCatalogRequest): ProjectCatalogResult {
   const request = validateProjectCatalogRequest(input);
   const result = object(value);
@@ -407,24 +416,12 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
     if (page.offset !== request.offset || !Number.isSafeInteger(page.total) || (page.total as number) < request.offset || (page.total as number) > 100000 || typeof page.fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(page.fingerprint) || (request.fingerprint !== null && page.fingerprint !== request.fingerprint) || !Array.isArray(page.changes) || page.changes.length !== Math.min(100, (page.total as number) - request.offset)) throw new Error("review page mismatch");
     // Reuse the exact path/kind and bounded-list validator without treating a
     // later page as the first page of the complete change set.
-    validateProjectCatalogResult({schemaVersion:1,action:"applicationPreview",projectId:request.projectId,preview:{worktreeId:page.worktreeId,total:page.changes.length,changes:page.changes}}, {action:"applicationPreview",projectId:request.projectId});
-  } else if (request.action === "prepareApplicationWorkspace") {
-    keys(result, ["schemaVersion", "action", "projectId", "worktreeId"]);
-    if (id(result.projectId) !== request.projectId) throw new Error("prepared application project mismatch");
-    id(result.worktreeId);
-  } else if (request.action === "applicationPreview" || request.action === "chatApplicationPreview") {
-    keys(result, request.action === "chatApplicationPreview" ? ["schemaVersion", "action", "projectId", "chatId", "preview"] : ["schemaVersion", "action", "projectId", "preview"]);
-    if (request.action === "chatApplicationPreview" && id(result.chatId) !== request.chatId) throw new Error("preview chat mismatch");
+    validatePreviewBody({ worktreeId: page.worktreeId, total: page.changes.length, changes: page.changes });
+  } else if (request.action === "chatApplicationPreview") {
+    keys(result, ["schemaVersion", "action", "projectId", "chatId", "preview"]);
+    if (id(result.chatId) !== request.chatId) throw new Error("preview chat mismatch");
     if (id(result.projectId) !== request.projectId) throw new Error("preview project mismatch");
-    const preview = object(result.preview);
-    keys(preview, ["worktreeId", "total", "changes"]); id(preview.worktreeId);
-    if (!Number.isSafeInteger(preview.total) || (preview.total as number) < 0 || (preview.total as number) > 100000 || !Array.isArray(preview.changes) || preview.changes.length !== Math.min(100, preview.total as number)) throw new Error("invalid preview bounds");
-    const seen = new Set<string>();
-    for (const raw of preview.changes) {
-      const change = object(raw); keys(change, ["path", "kind"]);
-      if (typeof change.path !== "string" || !change.path || new TextEncoder().encode(change.path).byteLength > 4096 || change.path.includes("\0") || change.path.split("/").some(part => !part || part === "." || part === "..") || seen.has(change.path) || !["added", "modified", "deleted"].includes(String(change.kind))) throw new Error("invalid preview path");
-      seen.add(change.path);
-    }
+    validatePreviewBody(result.preview);
   } else if (request.action === "applicationHistory") {
     keys(result, ["schemaVersion", "action", "projectId", "entries"]);
     if (id(result.projectId) !== request.projectId || !Array.isArray(result.entries) || result.entries.length > 1000) throw new Error("invalid application history");

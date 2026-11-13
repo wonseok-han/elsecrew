@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../i18n";
 import { osNotificationsEnabled, setOsNotificationsEnabled } from "./notifications.ts";
+const appVersion = typeof __ELSECREW_VERSION__ === "string" ? __ELSECREW_VERSION__ : "";
 export type SettingsSection = "general" | "roles" | "agents" | "storage" | "project";
 const settingsIcons: Record<SettingsSection, string> = {
   general: "M4 7h16M4 17h16M8 4v6M16 14v6",
@@ -31,10 +32,8 @@ export function AppSettings({ hasProject, open, section, onSection, onClose, res
     </header>
     <div className="m5-preferences-layout">
       <nav aria-label={t("m5.preferences.title")}>
-        <span className="m5-settings-nav-caption">{t("m5.preferences.workspaceGroup")}</span>
         {(["general", "roles", "agents", "storage", "project"] as const).map(key =>
           <button key={key} type="button" aria-current={section === key ? "page" : undefined} onClick={() => onSection(key)}><SettingsIcon section={key} /><span>{t(`m5.preferences.${key}`)}</span></button>)}
-        <div className="m5-settings-brand">Elsecrew<span>{t("m5.preferences.settingsHelp")}</span></div>
       </nav>
       <div className="m5-preferences-content">
         {/* Updates live with the other app-wide choices; a section of one button read as empty. */}
@@ -42,7 +41,7 @@ export function AppSettings({ hasProject, open, section, onSection, onClose, res
           <div className="m5-settings-group">
             <label className="m5-preferences-row"><span><strong>{t("m5.shell.language")}</strong><small>{t("m5.shell.languageScope")}</small></span><select value={lang} onChange={event => setLang(event.target.value === "en" ? "en" : "ko")}><option value="ko">한국어</option><option value="en">English</option></select></label>
             <label className="m5-preferences-row"><span><strong>{t("m5.notifications.osBanner")}</strong><small>{t("m5.notifications.osBannerHelp")}</small></span><input type="checkbox" checked={osBanners} onChange={event => { setOsBanners(event.target.checked); setOsNotificationsEnabled(event.target.checked); }} /></label>
-            <div className="m5-preferences-row"><span><strong>{t("m5.preferences.updates")}</strong><small>{t("m5.preferences.updateHelp")}</small></span>
+            <div className="m5-preferences-row"><span><strong>{t("m5.preferences.updates")}</strong><small>{appVersion ? t("m5.preferences.currentVersion", { version: appVersion }) : t("m5.preferences.updateHelp")}</small></span>
               <button type="button" className="m5-secondary" disabled={!window.m5AppUpdate || updateBusy} onClick={async () => {
                 setUpdateError(false); setUpdateBusy(true);
                 try { await window.m5AppUpdate?.open(); } catch { setUpdateError(true); } finally { setUpdateBusy(false); }

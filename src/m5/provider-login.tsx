@@ -99,6 +99,7 @@ export function ProviderLogin({ disabled, compact: preferCompact = false, return
     {!settingsPage && !compact && <div className="m5-setup-next"><p>{t("m5.setup.steps.installHelp")}</p><button type="button" disabled={installBlocked || selected.length === 0} onClick={() => navigate("login")}>{t("m5.setup.steps.toLogin")}</button></div>}
     </div>
     <div hidden={!settingsPage && !compact && step !== "login" && !loginNeedsAttention}>
+    {settingsPage && <p className="m5-settings-intro">{t("m5.login.settingsIntro")}</p>}
     {LOGIN_PROVIDERS.filter(provider => settingsPage || selected.includes(provider)).map(provider => <ProviderConnection key={`${provider}:${checks[provider]}`} disabled={disabled || installBlocked} provider={provider} alwaysExpanded={settingsPage} onAttention={reportLoginAttention}/>)}
     {!settingsPage && !compact && <p className="m5-setup-next">{t("m5.setup.steps.projectHelp")}</p>}
     </div>
@@ -282,10 +283,11 @@ function ProviderConnection({ disabled, provider, alwaysExpanded = false, onAtte
   return <section className="m5-provider-login" aria-label={t("m5.login.section", { name })}>
     <div className="m5-connection-heading"><strong>{t("m5.login.section", { name })}</strong><p role="status">{label}</p>{<button type="button" className="m5-icon-button" aria-label={t("m5.login.check")} title={t("m5.login.check")} disabled={disabled||busy||waiting||!window.m5Login} onClick={()=>{ window.dispatchEvent(new Event(INSTALL_STATUS_REFRESH)); void request({action:appConnected ? "check" : "diagnose",attemptId:crypto.randomUUID()}); }}>↻</button>}{["installed","connected"].includes(status.state) && <small>{t("m5.install.detected")}</small>}</div>
     <button className="m5-connection-toggle" type="button" disabled={disabled || connectionBusy || appConnected === null || waiting} onClick={()=>void toggleConnection()}>{t(appConnected ? "m5.connection.disconnect" : "m5.connection.connect")}</button>
-    <small className="m5-connection-help">{t("m5.login.separate")}</small>
+    {/* Settings explains this once above both agents instead of on each card. */}
+    {!alwaysExpanded && <small className="m5-connection-help">{t("m5.login.separate")}</small>}
     {connectionError && <div className="m5-connection-error" role="alert"><span>{t(appConnected === null ? "m5.connection.loadFailed" : "m5.connection.failed")}</span>{appConnected === null && <button type="button" aria-label={t("m5.device.refresh")} title={t("m5.device.refresh")} onClick={() => window.dispatchEvent(new Event(CONNECTIONS_CHANGED))}>↻</button>}</div>}
     {alwaysExpanded && <div className="m5-installation-slot" id={`${provider}-installation-slot`}/>}
-    {appConnected === false && <small>{t("m5.connection.retained")}</small>}
+    {appConnected === false && !alwaysExpanded && <small>{t("m5.connection.retained")}</small>}
     {appConnected && canCollapse && <button type="button" aria-expanded={showDetails} aria-controls={`${provider}-connection-details`} onClick={()=>setExpanded(value=>!value)}>{t(showDetails ? "m5.login.hideDetails" : "m5.login.showDetails")}</button>}
     <div id={`${provider}-connection-details`} hidden={!showDetails || appConnected !== true}>
     <details className="m5-login-account-help">

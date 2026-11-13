@@ -5,7 +5,7 @@ import { ApplicationFailure } from "./application-failure.tsx";
 import { ApplicationRetirement } from "./application-retirement.tsx";
 import { BackupRetentionView } from "./backup-retention.tsx";
 import { useEffect, useRef, useState } from "react";
-import { validateProjectCatalogResult, type ApplicationPreview, type ApplicationHistoryEntry, type ApplicationStatus, type PreparationInspection, type ProjectCatalogRequest } from "./contracts/project-catalog-v1.ts";
+import { validateProjectCatalogResult, type ApplicationHistoryEntry, type ApplicationStatus, type PreparationInspection, type ProjectCatalogRequest } from "./contracts/project-catalog-v1.ts";
 
 export function PreparationRecovery({ projectId, disabled }: { projectId: string; disabled: boolean }) {
   return <PreparationRecoverySession key={projectId} projectId={projectId} disabled={disabled} />;
@@ -16,16 +16,12 @@ function PreparationRecoverySession({ projectId, disabled }: { projectId: string
   const [inspection, setInspection] = useState<PreparationInspection | null>(null);
   const [application, setApplication] = useState<ApplicationStatus | null>(null);
   const [history, setHistory] = useState<ApplicationHistoryEntry[] | null>(null);
-  const [preview, setPreview] = useState<ApplicationPreview | null>(null);
-  const [confirmWorkspace, setConfirmWorkspace] = useState(false);
-  const [createdWorkspace, setCreatedWorkspace] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<"" | "done" | "unknown" | "error" | "applicationError" | "previewError" | "prepareError" | "retired">("");
+  const [message, setMessage] = useState<"" | "done" | "unknown" | "error" | "applicationError" | "retired">("");
   const epoch = useRef(0);
   const pending = useRef(false);
   useEffect(() => {
-    epoch.current++; setInspection(null); setApplication(null); setHistory(null); setPreview(null); setMessage("");
-    setConfirmWorkspace(false); setCreatedWorkspace(null);
+    epoch.current++; setInspection(null); setApplication(null); setHistory(null); setMessage("");
     return () => { epoch.current++; };
   }, [projectId, disabled]);
   const request = async (input: ProjectCatalogRequest) => {
@@ -44,10 +40,6 @@ function PreparationRecoverySession({ projectId, disabled }: { projectId: string
         if (epoch.current === generation && refreshed.action === "applicationStatus") setApplication(refreshed.status);
       }
       else if (result.action === "applicationHistory") setHistory(result.entries);
-      else if (result.action === "applicationPreview") setPreview(result.preview);
-      else if (result.action === "prepareApplicationWorkspace") {
-        setCreatedWorkspace(result.worktreeId); setPreview(null); setInspection(null);
-      }
       else if (result.action === "abandonPreparation") {
         setInspection(null);
         setMessage("done");
@@ -56,8 +48,6 @@ function PreparationRecoverySession({ projectId, disabled }: { projectId: string
       if (epoch.current === generation && (input.action === "applicationStatus" || input.action === "cancelApplication")) setApplication(null);
       if (epoch.current === generation) setMessage(input.action === "abandonPreparation"
         ? "unknown"
-        : input.action === "prepareApplicationWorkspace" ? "prepareError"
-        : input.action === "applicationPreview" ? "previewError"
         : input.action === "applicationStatus" || input.action === "applicationHistory" || input.action === "cancelApplication" ? "applicationError" : "error");
     } finally { pending.current = false; setBusy(false); }
   };
@@ -72,27 +62,6 @@ function PreparationRecoverySession({ projectId, disabled }: { projectId: string
     </section>
     <section className="m5-maintenance-group"><h4>{t("m5.preferences.recovery")}</h4>
     <BackupPreparationRecovery projectId={projectId} disabled={disabled || busy} />
-    </section>
-    <section className="m5-maintenance-group"><h4>{t("m5.preferences.manual")}</h4>
-    <p>{t("m5.preferences.manualHelp")}</p>
-    <button type="button" disabled={disabled || busy} onClick={() => setConfirmWorkspace(true)}>{t("m5.application.prepare")}</button>
-    {confirmWorkspace && <div role="group" aria-label={t("m5.application.prepare")}>
-      <p>{t("m5.application.prepareHelp")}</p>
-      <button type="button" disabled={disabled || busy} onClick={() => { setConfirmWorkspace(false); setCreatedWorkspace(null); setPreview(null); void request({ action: "prepareApplicationWorkspace", projectId }); }}>{t("m5.application.prepareConfirm")}</button>
-      <button type="button" disabled={busy} onClick={() => setConfirmWorkspace(false)}>{t("m5.prep.back")}</button>
-    </div>}
-    {createdWorkspace && <p role="status">{t("m5.application.preparedWorkspace")} <code>{createdWorkspace}</code></p>}
-    <button type="button" disabled={disabled || busy} onClick={() => { setPreview(null); void request({ action: "applicationPreview", projectId }); }}>{t("m5.application.preview")}</button>
-    {preview && <section aria-label={t("m5.application.preview")}>
-      <p>{t("m5.application.previewHelp")}</p>
-      <p>{t("m5.application.workspace")} <code>{preview.worktreeId}</code></p>
-      <p>{t("m5.application.total")} {preview.total}</p>
-      {preview.total === 0 && <p>{t("m5.application.noChanges")}</p>}
-      {preview.total > preview.changes.length && <p>{t("m5.application.previewPartial")}</p>}
-      <ul>{preview.changes.map(change => <li key={change.path}>
-        {t(`m5.application.${change.kind}`)} <code>{change.path.replace(/[\p{Cc}\p{Cf}]/gu, character => `\\u{${character.codePointAt(0)!.toString(16)}}`)}</code>
-      </li>)}</ul>
-    </section>}
     </section>
     <section className="m5-maintenance-group"><h4>{t("m5.preferences.records")}</h4>
     <button type="button" disabled={disabled || busy} onClick={() => { setInspection(null); void request({ action: "inspectPreparation", projectId }); }}>{t("m5.prep.inspect")}</button>
@@ -128,6 +97,6 @@ function PreparationRecoverySession({ projectId, disabled }: { projectId: string
       <button type="button" disabled={busy} onClick={() => setInspection(null)}>{t("m5.prep.back")}</button>
     </div>}
     </section>
-    {message && <p role="status">{t(message === "prepareError" ? "m5.application.prepareError" : message === "previewError" ? "m5.application.previewError" : message === "applicationError" ? "m5.application.error" : `m5.prep.${message}`)}</p>}
+    {message && <p role="status">{t(message === "applicationError" ? "m5.application.error" : `m5.prep.${message}`)}</p>}
   </div>;
 }

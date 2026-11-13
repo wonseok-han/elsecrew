@@ -17,7 +17,7 @@ exports.probeRecoveryHistory = async function probeRecoveryHistory(detail) {
     };
     window.m5.getChat = async () => { calls.push('getChat'); return detail; };
     const button = text => [...document.querySelectorAll('button')].find(node => node.textContent === text);
-    button('대화 기록 확인').click();
+    button('작업 기록 확인').click();
     await wait(() => button(detail.chat.goal));
     button(detail.chat.goal).click();
     await wait(() => document.querySelector('.m5-recovery-history-messages'));
