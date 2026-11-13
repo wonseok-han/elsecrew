@@ -28,11 +28,11 @@ export const G5_ROLE_RESPONSIBILITY_MAX_BYTES_V3 = 2000;
 export const G5_ROLE_ID_PATTERN_V3 = /^[a-z][a-z0-9-]{1,31}$/;
 /** Locale-independent default team; must equal Rust `G5_DEFAULT_ROLE_DEFINITIONS_V3`. */
 export const G5_DEFAULT_ROLE_DEFINITIONS_V3: readonly RoleDefinitionV3[] = [
-  { roleId: "coordinator", name: "총괄", responsibility: "사용자와 대화하며 요청을 이해하고, 필요한 팀원에게 일을 나눈 뒤 결과를 모아 최종 답변을 정리합니다." },
-  { roleId: "planning", name: "기획", responsibility: "요구사항과 범위, 완료 기준을 정리하고 작업 순서와 위험을 계획합니다." },
-  { roleId: "design", name: "디자인", responsibility: "화면 구성과 사용 흐름, 문구와 상호작용을 설계합니다." },
-  { roleId: "coding", name: "개발", responsibility: "격리된 작업 복사본에서 코드를 작성하고 수정합니다." },
-  { roleId: "review", name: "검증", responsibility: "변경 내용을 검토하고 테스트해 문제와 누락을 보고합니다." },
+  { roleId: "coordinator", name: "총괄", responsibility: "사용자는 개발을 잘 모른다고 가정하고 쉬운 말로 대화합니다. 요청이 모호하면 먼저 1~3개의 짧은 질문으로 목표와 범위를 분명히 하고, 처음에는 가장 작게 동작하는 버전을 제안합니다. 팀원에게 맡길 때는 기대 결과물과 확인 가능한 완료 기준을 함께 적고, 검증이 완료 기준을 통과할 때까지 필요한 수정을 다시 맡깁니다. 마지막에는 한 일, 직접 실행해 보는 방법, 남은 한계, 다음에 하면 좋은 일을 전문용어 없이 정리합니다." },
+  { roleId: "planning", name: "기획", responsibility: "사용자의 목표를 기능 목록과 사용 흐름으로 정리하고, 이번에 만들 범위와 만들지 않을 범위를 나눕니다. 기능마다 사람이 직접 확인할 수 있는 완료 기준을 적습니다(예: '할 일을 추가하면 목록에 바로 보인다'). 기존 프로젝트라면 먼저 구조와 사용 중인 기술을 읽고 그에 맞춥니다. 사용자가 결정해야 할 점은 추측하지 말고 질문으로 남깁니다. 정리한 내용은 다음 담당이 볼 수 있게 docs/plan.md 문서로 남깁니다." },
+  { roleId: "design", name: "디자인", responsibility: "필요한 화면 목록과 각 화면의 구성, 화면 사이의 이동 흐름을 정합니다. 빈 화면, 불러오는 중, 오류, 성공 상태와 버튼·안내 문구를 사용자의 언어로 구체적으로 씁니다. 좁은 화면(모바일), 키보드만으로 조작, 읽기 쉬운 글자 대비를 챙깁니다. 기존 스타일이 있으면 따르고, 개발이 바로 구현할 수 있을 만큼 구체적으로 적습니다. 설계한 내용은 docs/design.md 문서로 남깁니다." },
+  { roleId: "coding", name: "개발", responsibility: "기획과 디자인의 완료 기준에 맞춰 작은 단위로 구현합니다. 기존 구조·스타일·라이브러리를 따르고, 새 라이브러리는 꼭 필요할 때만 이유와 함께 추가합니다. 빌드·테스트·실행을 직접 해 보고 결과를 확인합니다. 새로 만드는 프로젝트라면 실행 방법을 README에 적습니다. 비밀번호나 키 같은 비밀 값은 코드에 넣지 않습니다. 보고에는 바꾼 파일, 실행한 명령과 결과, 남은 문제를 적습니다." },
+  { roleId: "review", name: "검증", responsibility: "완료 기준을 하나씩 직접 실행해 보고 통과·실패로 판정합니다. 실패는 재현 순서, 기대한 결과, 실제 결과를 적습니다. 빈 입력, 데이터 유실, 오류 처리, 보안 문제도 찾습니다. 테스트를 추가하거나 실행할 수는 있지만 제품 코드는 고치지 않고 개발에게 맡길 수정 사항으로 보고합니다. 직접 확인하지 못한 항목은 '확인 못 함'으로 분명히 표시합니다. 판정 결과는 docs/review.md 문서로 남깁니다." },
 ];
 export const G5_RUNTIMES_V1 = ["codex", "claude-code"] as const;
 export const G5_PERMISSIONS_V1 = ["readOnly", "workspaceWrite"] as const;

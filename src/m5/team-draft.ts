@@ -33,7 +33,7 @@ export function addWorker(draft: TeamDraft, name: string): TeamDraft {
   const roleId = nextWorkerId(draft);
   const base = draft.roles[0];
   return {
-    roles: [...draft.roles, { roleId, runtime: base.runtime, modelSelector: base.modelSelector, reasoningEffort: base.reasoningEffort, permission: "readOnly" }],
+    roles: [...draft.roles, { roleId, runtime: base.runtime, modelSelector: base.modelSelector, reasoningEffort: base.reasoningEffort, permission: "workspaceWrite" }],
     roleDefinitions: [...draft.roleDefinitions, { roleId, name, responsibility: "" }],
   };
 }

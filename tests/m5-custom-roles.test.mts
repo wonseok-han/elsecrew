@@ -88,10 +88,11 @@ test("team drafts add and remove workers but keep the coordinator and at least o
   assert.equal(nextWorkerId(draft), "member-1");
   const added = addWorker(draft, "New role 2");
   assert.equal(added.roles[2].roleId, "member-1");
-  assert.equal(added.roles[2].permission, "readOnly");
+  assert.equal(added.roles[2].permission, "workspaceWrite", "new members may write in the isolated copy by default");
   assert.ok(isValidTeamDraft(added));
   assert.ok(!sameTeam(added, draft));
-  const writer = updateProfile(added, "member-1", { permission: "workspaceWrite" });
+  assert.equal(updateProfile(added, "member-1", { permission: "readOnly" }).roles[2].permission, "readOnly");
+  const writer = added;
   assert.equal(writer.roles[2].permission, "workspaceWrite");
   assert.equal(updateProfile(writer, "coordinator", { permission: "workspaceWrite" }).roles[0].permission, "readOnly");
   assert.ok(!isValidTeamDraft(updateDefinition(writer, "member-1", { name: " " })));

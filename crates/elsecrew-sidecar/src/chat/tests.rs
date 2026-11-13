@@ -6932,6 +6932,14 @@ fn built_in_team_names_no_model_and_incomplete_teams_cannot_prepare_a_chat() {
     let defaults = crate::chat::default_settings_v3("app_defaults", 1);
     assert!(defaults["roles"].as_array().unwrap().iter().all(|role| role["modelSelector"] == "" && role["reasoningEffort"].is_null()));
     assert!(crate::chat::has_unselected_model(&defaults));
+    // 2026-11-13 defaults: design and review on Codex, the rest on Claude Code;
+    // everyone but the coordinator writes in the isolated copy.
+    let pick = |id: &str| defaults["roles"].as_array().unwrap().iter().find(|role| role["roleId"] == id).unwrap().clone();
+    for (id, runtime, permission) in [("coordinator", "claude-code", "readOnly"), ("planning", "claude-code", "workspaceWrite"),
+        ("design", "codex", "workspaceWrite"), ("coding", "claude-code", "workspaceWrite"), ("review", "codex", "workspaceWrite")] {
+        assert_eq!((pick(id)["runtime"].as_str().unwrap(), pick(id)["permission"].as_str().unwrap()), (runtime, permission), "{id}");
+    }
+    elsecrew_protocol::run_recovery_v1::validate_g5_payload_v1("projectRoleSettings", &defaults).unwrap();
     drop(_product);
 
     // V3 settings (and so unselected models) need V13 storage.

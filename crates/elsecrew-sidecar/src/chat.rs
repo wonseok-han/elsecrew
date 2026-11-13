@@ -1675,6 +1675,13 @@ pub(crate) fn default_settings_v3(project_id: &str, revision: u64) -> Value {
         for role in roles.as_array_mut().into_iter().flatten() {
             role["modelSelector"] = json!("");
             role["reasoningEffort"] = Value::Null;
+            // Defaults (2026-11-13 user decision): design and review on Codex,
+            // everyone else on Claude Code; every member but the read-only
+            // coordinator may write in the isolated copy (review runs the app
+            // and tests and reports product fixes instead of making them).
+            let runtime = match role["roleId"].as_str() { Some("design" | "review") => "codex", _ => "claude-code" };
+            role["runtime"] = json!(runtime);
+            role["permission"] = json!(if role["roleId"] == "coordinator" { "readOnly" } else { "workspaceWrite" });
         }
     } else {
         #[cfg(test)]
