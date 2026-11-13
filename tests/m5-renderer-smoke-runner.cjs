@@ -421,7 +421,7 @@ app.whenReady().then(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(modelField,'draft-model');
     modelField.dispatchEvent(new Event('input',{bubbles:true}));
     await ${waitFor("document.querySelector('.m5-role-card details input').value === 'draft-model'", "model draft")};
-    [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '새 채팅 설정 저장').click();
+    [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '새 작업 설정 저장').click();
     await ${waitFor("document.body.textContent.includes('설정을 저장하지 못했어요') && document.querySelector('.m5-role-card details input').value === 'draft-model'", "settings failure preserves draft")};
     const failedSettingsDetails = [...document.querySelectorAll('[role=alert] pre')].map(node => node.textContent).join('|');
     const settingsLanguage = document.querySelector('.m5-preferences-row select');
@@ -758,7 +758,7 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-new-chat-dialog').open", "new chat draft dialog")};
     [...document.querySelectorAll('.m5-new-chat-dialog button')].find(button => button.textContent === '이 프로젝트의 역할·모델 바꾸기').click();
     await ${waitFor("document.querySelector('.m5-settings-dialog')?.open && !document.querySelector('.m5-new-chat-dialog').open", "draft to project settings without overlapping modals")};
-    [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '작성 중인 새 채팅으로 돌아가기').click();
+    [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '작성 중인 새 작업으로 돌아가기').click();
     await ${waitFor("document.querySelector('.m5-new-chat-dialog').open && !document.querySelector('.m5-settings-dialog')", "return to preserved draft")};
     if (goalInput.value !== '새 목표 초안' || document.activeElement !== goalInput) throw new Error('role settings lost goal draft or focus');
     document.querySelector('.m5-new-chat-dialog header button').click();
@@ -769,7 +769,7 @@ app.whenReady().then(async () => {
     languageSelect.dispatchEvent(new Event('change', {bubbles:true}));
     await ${waitFor("document.querySelector('.m5-followup button[type=submit]')?.textContent === 'Send' && document.querySelector('.m5-timeline')?.getAttribute('aria-label') === 'Team conversation'", "English team conversation")};
     if (input !== document.querySelector('#m5-followup-text') || input.value !== '설명을 추가해 주세요.') throw new Error('language change lost follow-up draft');
-    if (goalInput !== document.querySelector('.m5-new-chat-form input') || goalInput.value !== '새 목표 초안' || goalInput.getAttribute('aria-label') !== 'New conversation goal') throw new Error('language change lost goal draft or label');
+    if (goalInput !== document.querySelector('.m5-new-chat-form input') || goalInput.value !== '새 목표 초안' || goalInput.getAttribute('aria-label') !== 'New task goal') throw new Error('language change lost goal draft or label');
     if (selectedChat !== document.querySelector('.m5-chat-chip.selected')) throw new Error('language change changed selected chat');
     window.m5SmokeFailHistoryRefresh();
     await ${waitFor("[...document.querySelectorAll('.m5-error button')].some(button => button.textContent === 'Reload conversation history')", "history refresh error retry")};

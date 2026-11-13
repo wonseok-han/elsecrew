@@ -128,7 +128,7 @@ for (const delayedGate of [null, "admission", "saving"]) test(`Monaco keeps curr
   await render(false, "dirty", "latest editable draft");
   assert.equal(editorCreates, 1);
   assert.equal(actionDisposals, 1);
-  assert.equal(saveAction.label, "Save to working copy");
+  assert.equal(saveAction.label, "Save to workspace");
   assert.equal(accessibleName, "test.txt code editor");
   assert.equal(text, "latest editable draft");
   saveAction.run();

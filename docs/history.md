@@ -2,6 +2,13 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — '채팅'을 '작업'으로, Codex 목록에 없는 저장 모델 안내
+- 사용자 결정: 목표·작업 공간·팀·변경을 묶는 단위를 화면에서 '채팅' 대신 '작업'(EN Task)으로 부른다. ko 112개와 en 102개 문구를 바꿨다. 같은 범위에서 '작업 복사본'은 '작업 공간'(EN working copy를 workspace로)으로 통일했다. 대화 자체는 '대화'·'팀 대화'(EN conversation)로 남겼다. 내부 식별자·IPC·저장 키·데이터는 그대로이므로 이관이 필요 없다. `login.claude.hint`(실제 채팅 서비스 의미)는 유지했다. 어색해진 문장은 손으로 다듬었다(예: 파일 편집 일시 중지, 대화 기록, 목록 조회는 에이전트를 실행하지 않음).
+- 발견: 내장 기본 역할(`crates/elsecrew-sidecar/src/chat.rs` `settings_value`/`default_settings_v3`)이 Codex 모델을 fixture 시절 이름 `sol`로 심는다. 실제 Codex 목록(app-server model/list)에는 `gpt-6.1-sol`(isDefault)·`gpt-6-sol`·`gpt-5.6-sol` 같은 전체 이름만 있다. 실행 전 `match_model_catalog`는 정확히 일치해야 하므로 기본값 그대로의 Codex 역할은 실행이 막힌다. 화면은 이를 '저장된 값'으로만 보여 줬다.
+- 수정(UI): 목록을 불러왔는데 저장된 모델이 없으면 '지금 목록에 없음'으로 표시하고 안내 문구를 보인다. 공급자의 isDefault 모델이 있으면 '추천 모델(…)로 바꾸기' 버튼을 준다. 버튼은 초안만 바꾸고 저장은 사용자가 명시적으로 한다(자동 변경 금지 원칙 유지). 모델 선택 로직은 `pickModel`로 합쳤다.
+- 남은 판단: 기본 seed의 `sol`을 바꿀지(예: 미선택으로 두고 첫 작업 전에 고르게 하기)는 fixture·Rust 테스트 다수에 영향을 주므로 별도 결정이 필요하다.
+- 검증: tsc 통과, 프런트735 통과, renderer mount smoke·권한UI·monaco 옵션 10 통과. 테스트와 probe의 화면 문구를 새 용어로 갱신했다. 실제 Codex 목록에서 새 안내가 뜨는지는 화면으로 아직 확인하지 않았다(사용자 앱 실행 중이라 재패키징 보류).
+
 ### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 화면 smoke 복구·권한 화면 버그 2건·패키지
 - 실제 앱 데이터를 V13 이관 전에 통째로 백업했다: `~/Library/Application Support/Elsecrew-backup-before-v13-20261113`(167파일, SHA-256 전부 일치). 이후 `pnpm m5:package:smoke`로 패키지를 다시 만들었고 PASS다(`out/Elsecrew-darwin-arm64`). 새 패키지를 처음 실행하면 실제 데이터가 V13으로 바뀐다.
 - `tests/m5-renderer-mount-smoke.mts`를 현재 UI에 맞춰 끝까지 PASS시켰다. 고친 어긋남은 다음과 같다.

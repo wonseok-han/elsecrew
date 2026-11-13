@@ -815,6 +815,10 @@ function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, o
   }, [navigationGuard, busy, dirty, discardAction]);
   const requestClose = () => { if (!busy && discardAction === null) { if (dirty) setDiscardAction("close"); else finishClose(); } };
   const label = (roleId: string) => roleLabel(roleId, team.roleDefinitions, t);
+  const pickModel = (role: RoleProfileV1, selector: string) => {
+    const model = choices.get(role.roleId)?.find(item => item.modelSelector === selector);
+    setTeam(old => updateProfile(old, role.roleId, { modelSelector: selector, reasoningEffort: role.runtime === "codex" ? (model?.reasoningEfforts.includes("medium") ? "medium" : model?.reasoningEfforts[0] ?? null) : null }));
+  };
   const add = () => {
     const next = addWorker(team, t("m5.roles.newRoleName", { number: team.roles.length }));
     if (next === team) return;
@@ -860,14 +864,23 @@ function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, o
         choiceEpoch.current++; setChoices(new Map()); setChoicesError(false);
         setTeam(old => updateProfile(old, role.roleId, { runtime: event.target.value as RoleProfileV1["runtime"], modelSelector: "", reasoningEffort: null }));
       }}><option value="codex">Codex</option><option value="claude-code">Claude Code</option></select></label>
-      <label>{t("m5.roles.model")}<select disabled={editing || !choices.get(role.roleId)?.length} value={role.modelSelector} onChange={event => {
-        const model = choices.get(role.roleId)?.find(item => item.modelSelector === event.target.value);
-        setTeam(old => updateProfile(old, role.roleId, { modelSelector: event.target.value, reasoningEffort: role.runtime === "codex" ? (model?.reasoningEfforts.includes("medium") ? "medium" : model?.reasoningEfforts[0] ?? null) : null }));
-      }}>
+      <label>{t("m5.roles.model")}<select disabled={editing || !choices.get(role.roleId)?.length} value={role.modelSelector} onChange={event => pickModel(role, event.target.value)}>
         <option value="">{t("m5.roles.chooseModel")}</option>
-        {role.modelSelector && !choices.get(role.roleId)?.some(model => model.modelSelector === role.modelSelector) && <option value={role.modelSelector}>{role.modelSelector} · {t("m5.roles.savedModel")}</option>}
+        {role.modelSelector && !choices.get(role.roleId)?.some(model => model.modelSelector === role.modelSelector) && <option value={role.modelSelector}>{role.modelSelector} · {t(choices.get(role.roleId)?.length ? "m5.roles.missingModel" : "m5.roles.savedModel")}</option>}
         {choices.get(role.roleId)?.map(model => <option key={model.modelSelector} value={model.modelSelector}>{model.modelSelector}{model.resolvedModel ? ` · ${model.resolvedModel}` : ""}{model.isDefault ? ` · ${t("m5.roles.providerDefault")}` : ""}</option>)}
       </select></label>
+      {(() => {
+        // A saved name the provider no longer lists cannot pass the pre-run
+        // check. Say so, and offer the provider's own recommendation; the
+        // draft changes only on click and still needs an explicit save.
+        const listed = choices.get(role.roleId);
+        if (!listed?.length || !role.modelSelector || listed.some(model => model.modelSelector === role.modelSelector)) return null;
+        const recommended = listed.find(model => model.isDefault);
+        return <p className="m5-role-model-missing" role="status">
+          <span>{t("m5.roles.missingModelHelp", { model: role.modelSelector, runtime: role.runtime === "codex" ? "Codex" : "Claude Code" })}</span>
+          {recommended && <button type="button" className="m5-secondary" disabled={editing} onClick={() => pickModel(role, recommended.modelSelector)}>{t("m5.roles.useRecommended", { model: recommended.resolvedModel ?? recommended.modelSelector })}</button>}
+        </p>;
+      })()}
       <label>{t("m5.roles.reasoning")}<select disabled={editing || !choices.get(role.roleId)} value={role.reasoningEffort ?? ""} onChange={event => change(role.roleId, "reasoningEffort", event.target.value || null)}>
         <option value="" disabled={role.runtime === "codex"}>{t("m5.roles.default")}</option>
         {role.reasoningEffort && !choices.get(role.roleId)?.find(model => model.modelSelector === role.modelSelector)?.reasoningEfforts.includes(role.reasoningEffort) && <option value={role.reasoningEffort}>{role.reasoningEffort} · {t("m5.roles.savedModel")}</option>}

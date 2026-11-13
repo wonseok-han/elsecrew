@@ -420,7 +420,7 @@ app.on('browser-window-created', (_event, window) => {
         if (combined && index === 0) {
           await wait("document.querySelector('.m5-durable-output')?.dataset.runId === outputSmokeRuns[0].runId && document.querySelector('.m5-timeline h2')?.textContent === 'Output stream 0'");
         } else {
-        if (combined) await run("[...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent.trim() === '채팅').click()");
+        if (combined) await run("[...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent.trim() === '작업').click()");
         await run(`[...document.querySelectorAll('.m5-chat-chip')].find(b => b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}').click()`);
         await wait(`document.querySelector('.m5-durable-output')?.dataset.runId === outputSmokeRuns[${index}].runId &&
           [...document.querySelectorAll('.m5-chat-chip')].some(b => b.getAttribute('aria-current') === 'true' && !b.disabled && b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}')`);

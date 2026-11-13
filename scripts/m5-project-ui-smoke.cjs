@@ -318,7 +318,7 @@ app.on('browser-window-created', (_event, window) => {
       await wait(`document.querySelector('.m5-settings-dialog')?.matches(':modal')`);
       if (await run(`document.querySelector('.m5-role-card input').value!==${JSON.stringify(originalModel)}`)) throw new Error('discarded role draft persisted');
       await fill(modelInput, 'ui-smoke-saved');
-      await clickText('새 채팅 설정 저장', '.m5-settings-dialog');
+      await clickText('새 작업 설정 저장', '.m5-settings-dialog');
       await wait(`!Array.from(document.querySelectorAll('.m5-settings-dialog [role=status]')).some(e=>e.textContent==='저장하지 않은 설정 변경이 있어요.')&&!Array.from(document.querySelectorAll('.m5-settings-dialog button')).some(b=>b.textContent==='처리 중…')`);
       await clickText('작업대로 돌아가기', '.m5-settings-dialog');
       await wait(`!document.querySelector('.m5-settings-dialog')`);
@@ -326,7 +326,7 @@ app.on('browser-window-created', (_event, window) => {
       await wait(`document.querySelector('.m5-settings-dialog')?.matches(':modal')`);
       if (await run(`document.querySelector('.m5-role-card input').value!=='ui-smoke-saved'`)) throw new Error('saved role model not preserved');
       await fill(modelInput, originalModel);
-      await clickText('새 채팅 설정 저장', '.m5-settings-dialog');
+      await clickText('새 작업 설정 저장', '.m5-settings-dialog');
       await wait(`!Array.from(document.querySelectorAll('.m5-settings-dialog [role=status]')).some(e=>e.textContent==='저장하지 않은 설정 변경이 있어요.')&&!Array.from(document.querySelectorAll('.m5-settings-dialog button')).some(b=>b.textContent==='처리 중…')`);
       await clickText('작업대로 돌아가기', '.m5-settings-dialog');
       await wait(`!document.querySelector('.m5-settings-dialog')`);
@@ -413,7 +413,7 @@ app.on('browser-window-created', (_event, window) => {
       if(!files.some(file=>fs.readFileSync(file,'utf8')==='edited in snapshot\noriginal\n')) throw new Error('saved snapshot content missing');
       const followupReview = await run(`(${require('../tests/m5-diff-followup-probe.cjs').toString()})()`);
       console.log(JSON.stringify({stage:'DIFF_FOLLOWUP_REVIEW',...followupReview}));
-      await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='이 채팅의 반영 전 변경 목록 보기').click()`);
+      await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='이 작업의 반영 전 변경 목록 보기').click()`);
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='이 변경 묶음으로 확인 준비'&&!b.disabled)`);
       const confirmationStarted = performance.now();
       confirmationReport = {status:'pending',diagnostic:true,gateEligible:false};
