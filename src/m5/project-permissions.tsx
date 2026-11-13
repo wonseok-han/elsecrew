@@ -40,8 +40,8 @@ export function ProjectPermissions({ projectId, disabled }: { projectId: string;
     <h3>{t("m5.permissions.title")}</h3>
     <p className="m5-settings-intro">{t("m5.permissions.scope")}</p>
     <div className="m5-settings-group m5-permission-options">
-      <label className="m5-preferences-row"><span>{t("m5.permissions.files")}</span><input type="checkbox" checked={draft.files} disabled={disabled || busy || !saved} onChange={e => setDraft({ ...draft, files: e.target.checked })} /></label>
-      <label className="m5-preferences-row"><span>{t("m5.permissions.commands")}</span><input type="checkbox" checked={draft.commands} disabled={disabled || busy || !saved} onChange={e => setDraft({ ...draft, commands: e.target.checked })} /></label>
+      <label className="m5-preferences-row"><span>{t("m5.permissions.files")}</span><input type="checkbox" checked={draft.files} disabled={disabled || busy || !saved} onChange={e => { const files = e.target.checked; setDraft(current => ({ ...current, files })); }} /></label>
+      <label className="m5-preferences-row"><span>{t("m5.permissions.commands")}</span><input type="checkbox" checked={draft.commands} disabled={disabled || busy || !saved} onChange={e => { const commands = e.target.checked; setDraft(current => ({ ...current, commands })); }} /></label>
     </div>
     <p className="m5-settings-intro">{t("m5.permissions.boundary")}</p>
     <div className="m5-storage-actions"><button type="button" disabled={disabled || busy || !dirty} onClick={() => void save()}>{t("m5.permissions.save")}</button></div>

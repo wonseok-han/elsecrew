@@ -65,7 +65,9 @@ window.m5Projects = { request: async (input) => {
   if (input.action === "releaseView" && input.projectId === "smoke_project") return {schemaVersion: 1, action: "releaseView", projectId: input.projectId};
   if (input.action === "list" && window.m5SmokeCatalogEmpty) return {schemaVersion:1, action:"list", projects:[], nextCursor:null};
   if (input.action === "list") return input.cursor === null
-    ? {schemaVersion: 1, action: "list", projects: [{projectId: "earlier_project", canonicalPath: "/work/earlier"}], nextCursor: "earlier_project"}
+    // After pagination is checked, the first page also lists the open project so
+    // its rail ⋯ menu (where closing lives) is reachable while the rail is locked.
+    ? {schemaVersion: 1, action: "list", projects: [{projectId: "earlier_project", canonicalPath: "/work/earlier"}, ...(window.m5SmokeCatalogListsCurrent ? [{projectId: "smoke_project", canonicalPath: "/work/smoke"}] : [])], nextCursor: window.m5SmokeCatalogListsCurrent ? "smoke_project" : "earlier_project"}
     : {schemaVersion: 1, action: "list", projects: [{projectId: "smoke_project", canonicalPath: "/work/smoke"}], nextCursor: null};
   if (input.action !== "reopen" || input.projectId !== "smoke_project") throw new Error("unexpected catalog selection");
   return {schemaVersion: 1, action: "reopen", project: {schemaVersion: 1, projectId: "smoke_project", selectedPath: "/work/smoke", canonicalGitRoot: "/work/smoke"}};
@@ -174,6 +176,12 @@ window.m5SmokeEnableParallelChats = () => {
   const { parallelChatFixture } = require("./m5-parallel-chat-fixture.cjs");
   parallelPaint = parallelChatFixture(smokeChat, message => { for (const listener of chatListeners) listener(message); });
   return parallelPaint.chats;
+};
+// The tree has no root button at the top level any more; an overflowing watch
+// is the real path that offers a full reload ("다시 확인").
+const projectListeners = new Set();
+window.m5SmokeRescan = () => {
+  for (const listener of projectListeners) listener({ projectId: "smoke_project", event: "file.changed", paths: [], rescanRequired: true });
 };
 window.m5SmokeEmitParallelRound = () => {
   if (!parallelPaint) throw new Error("parallel paint fixture not enabled");
@@ -336,7 +344,7 @@ window.m5 = {
     for (const listener of listeners) listener({ protocolVersion: 1, kind: "event", sidecarInstanceId: "smoke_sidecar", streamId: "smoke_diff", seq: 1, event: "blob.chunk", payload: { text } });
     return { projectId: "smoke_project", path: "src/example.ts", kind: "modified", oldPath: null, baseVersion: "sha256:" + "a".repeat(64), worktreeVersion: "sha256:" + "b".repeat(64), byteLength: text.length, stream: { streamId: "smoke_diff", chunkBytes: 262144 } };
   },
-  onProjectEvent: () => () => {},
+  onProjectEvent: (listener) => unsubscribe(projectListeners, listener),
   getWorkspaceTree: async (input) => ({ ...input, entries: [], nextCursor: null }),
   closeWorkspace: unexpected("closeWorkspace"),
   readWorkspaceFile: unexpected("readWorkspaceFile"),

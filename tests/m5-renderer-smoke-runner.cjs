@@ -304,19 +304,23 @@ app.whenReady().then(async () => {
     [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '다음 목록').click();
     await ${waitFor("document.querySelector('.m5-project-catalog-list li span')?.textContent === '/work/smoke'", "next catalog page")};
     if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/smoke') throw new Error('catalog path missing');
+    window.m5SmokeCatalogListsCurrent = true;
     document.querySelector('.m5-project-catalog-list li button').click();
     await ${waitFor("document.querySelector('.m5-file-row')", "project tree")};
     if (document.querySelector('.m5-project-menu') || document.querySelector('.m5-workbench > .m5-project-permissions')) throw new Error('project controls clutter the header');
-    document.querySelector('.m5-project-manage').click();
-    await ${waitFor("document.querySelector('.m5-permission-options input:not(:disabled)')", "project permissions in settings")};
+    // The rail reloads after opening a project; manage the open project once listed.
+    await ${waitFor("[...document.querySelectorAll('.m5-project-catalog-list li')].some(item => item.textContent.includes('/work/smoke') && item.querySelector('.m5-project-manage'))", "open project listed in rail")};
+    [...document.querySelectorAll('.m5-project-catalog-list li')].find(item => item.textContent.includes('/work/smoke')).querySelector('.m5-project-manage').click();
+    await ${waitFor("document.querySelector('.m5-app-settings .m5-permission-options input:not(:disabled)')", "project permissions in settings")};
     if (Object.keys(window.m5SmokePermissions).length) throw new Error('permissions silently enabled');
-    if (!document.querySelector('.m5-project-permissions button').disabled) throw new Error('unchanged consent save enabled');
-    document.querySelectorAll('.m5-permission-options input').forEach(input => input.click());
-    document.querySelector('.m5-project-permissions button').click();
-    await ${waitFor("Object.values(window.m5SmokePermissions).some(p => p.files && p.commands) && document.querySelector('.m5-project-permissions button').disabled", "explicit saved project consent")};
-    document.querySelectorAll('.m5-permission-options input').forEach(input => input.click());
-    document.querySelector('.m5-project-permissions button').click();
-    await ${waitFor("Object.values(window.m5SmokePermissions).some(p => p.files === false && p.commands === false) && document.querySelector('.m5-project-permissions button').disabled", "explicit project permission revoke")};
+    if (document.querySelectorAll('.m5-app-settings .m5-project-permissions').length !== 1) throw new Error('project permissions rendered more than once');
+    if (!document.querySelector('.m5-app-settings .m5-project-permissions button').disabled) throw new Error('unchanged consent save enabled');
+    document.querySelectorAll('.m5-app-settings .m5-permission-options input').forEach(input => input.click());
+    document.querySelector('.m5-app-settings .m5-project-permissions button').click();
+    await ${waitFor("Object.values(window.m5SmokePermissions).some(p => p.files && p.commands) && document.querySelector('.m5-app-settings .m5-project-permissions button').disabled", "explicit saved project consent")};
+    document.querySelectorAll('.m5-app-settings .m5-permission-options input').forEach(input => input.click());
+    document.querySelector('.m5-app-settings .m5-project-permissions button').click();
+    await ${waitFor("Object.values(window.m5SmokePermissions).some(p => p.files === false && p.commands === false) && document.querySelector('.m5-app-settings .m5-project-permissions button').disabled", "explicit project permission revoke")};
     document.querySelectorAll('.m5-preferences-layout > nav button')[3].click();
     document.querySelector('.m5-cleanup-settings > button').click();
     await ${waitFor("document.querySelectorAll('.m5-cleanup-settings input').length === 2", "cleanup items")};
@@ -336,8 +340,14 @@ app.whenReady().then(async () => {
     document.querySelector('.m5-app-settings > header button').click();
     await ${waitFor("document.querySelector('.m5-app-settings').hidden", "settings dismissed")};
     if (!document.querySelector('.m5-editor-welcome') || document.querySelector('.m5-editor-head').getClientRects().length) throw new Error('empty editor repeats header');
+    const reloadTree = async () => {
+      window.m5SmokeRescan();
+      await ${waitFor("document.querySelector('.m5-rescan button')", "tree reload offered")};
+      document.querySelector('.m5-rescan button').click();
+      await ${waitFor("!document.querySelector('.m5-rescan')", "tree reloaded")};
+    };
     window.m5SmokeHiddenTree = true;
-    document.querySelector('.m5-root').click();
+    await reloadTree();
     await new Promise(resolve => setTimeout(resolve, 100));
     if (document.querySelector('.m5-file-row[title=".git"]')) throw new Error('hidden directory visible by default');
     document.querySelector('.m5-hidden-files input').click();
@@ -354,7 +364,7 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-file-row[title=src]').getAttribute('aria-expanded') === 'false' && !document.querySelector('.m5-file-row[title=\"src/nested/child.ts\"]')", "collapse hides descendants")};
     document.querySelector('.m5-file-row[title=src]').click();
     await ${waitFor("[...document.querySelectorAll('.m5-file-row')].some(row => row.title === 'src/nested/child.ts')", "reopen preserves child expansion")};
-    document.querySelector('.m5-breadcrumbs .m5-root').click();
+    await reloadTree();
     await ${waitFor("document.querySelector('.m5-file-row .m5-tree-name')?.textContent === 'src' && !document.querySelector('.m5-breadcrumbs [aria-current]')", "root breadcrumb")};
     [...document.querySelectorAll('[role=tab]')].find(tab => tab.getAttribute('aria-label') === '파일' && tab.getClientRects().length > 0).click();
     await ${waitFor("document.querySelector('.m5-virtual-file-list').clientHeight > 0", "file pane visible for scrolling")};
@@ -363,7 +373,7 @@ app.whenReady().then(async () => {
     const paneBottom = filePane.getBoundingClientRect().bottom;
     if (Math.abs(paneBottom - fileViewport.getBoundingClientRect().bottom) > 3) throw new Error('file viewport leaves unused panel height');
     window.m5SmokeLongTree = true; window.m5SmokeTreeReads = 0;
-    document.querySelector('.m5-breadcrumbs .m5-root').click();
+    await reloadTree();
     await ${waitFor("document.querySelector('.m5-file-row .m5-tree-name')?.textContent === 'file-0000.ts'", "long tree first batch")};
     if (document.querySelector('.m5-tree-pages')) throw new Error('file pagination remains');
     const scrollingTree = document.querySelector('.m5-virtual-file-list');
@@ -377,7 +387,7 @@ app.whenReady().then(async () => {
     scrollingTree.scrollTop = 0; scrollingTree.dispatchEvent(new Event('scroll'));
     await ${waitFor("document.querySelector('.m5-file-row .m5-tree-name')?.textContent === 'file-0000.ts'", "previous files retained")};
     window.m5SmokeLongTree = false;
-    document.querySelector('.m5-breadcrumbs .m5-root').click();
+    await reloadTree();
     await ${waitFor("document.querySelector('.m5-file-row .m5-tree-name')?.textContent === 'src'", "restore tree fixture")};
     const fileSearch = document.querySelector('[aria-label="파일 이름 또는 경로 찾기"]');
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(fileSearch, 'EXAMPLE.TS');
@@ -405,7 +415,7 @@ app.whenReady().then(async () => {
     if (document.querySelector('.monaco-editor') !== editorNode) throw new Error('file navigation remounted Monaco');
     if (!document.querySelector('.m5-project-guide').open) throw new Error('file navigation closed explicitly reopened guide');
     document.querySelector('.m5-project-guide summary').click();
-    [...document.querySelectorAll('button')].find(button => button.textContent === '역할과 모델').click();
+    [...document.querySelectorAll('button')].find(button => ['이 프로젝트의 역할·모델 바꾸기', '역할과 모델'].includes(button.textContent) && !button.disabled).click();
     await ${waitFor("document.querySelectorAll('.m5-role-card').length === 5", "role settings")};
     const modelField = document.querySelector('.m5-role-card details input');
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(modelField,'draft-model');
@@ -454,9 +464,10 @@ app.whenReady().then(async () => {
     separator.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true}));
     await ${waitFor("Number(document.querySelector('.m5-dock-separator').getAttribute('aria-valuenow')) > before", "keyboard resize")};
     if (document.querySelector('.monaco-editor') !== editorNode) throw new Error('tabs or resizing remounted editor');
-    const menu = document.querySelector('.m5-project-menu');
+    // Project actions live in the rail's per-project overflow (⋯) menu.
+    const menu = document.querySelector('.m5-project-overflow');
     menu.querySelector('summary').click();
-    if (!menu.open || menu.querySelector('summary').textContent.trim()) throw new Error('project menu not compact');
+    if (!menu.open || menu.querySelector('summary').textContent.trim() !== '⋯' || !menu.querySelector('summary').getAttribute('aria-label')) throw new Error('project menu not compact');
     menu.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape',bubbles:true}));
     if (menu.open) throw new Error('project menu Escape failed');
     document.querySelector('.m5-usage-trigger').click();
@@ -667,16 +678,18 @@ app.whenReady().then(async () => {
     if (document.querySelector('.m5-diff-lines').textContent.includes('+line 401')) throw new Error('diff loaded every block up front');
     const more = () => document.querySelector('.m5-diff-lines .m5-load-more button');
     if (!more()?.textContent.includes('변경 더 보기')) throw new Error('diff load marker missing');
-    more().click();
-    await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length > 200", "second diff block")};
+    // A still-visible marker may append the next block by itself; load every
+    // block first so the language check compares a settled table.
+    while (more()) { const count = document.querySelectorAll('.m5-diff-lines tbody tr').length; more().click(); await new Promise(resolve => { const tick = () => document.querySelectorAll('.m5-diff-lines tbody tr').length > count ? resolve() : setTimeout(tick, 20); tick(); }); }
     const diffLanguage = document.querySelector('.m5-preferences-row select');
-    const diffContents = document.querySelector('.m5-diff-lines tbody').textContent;
+    // Section headers are translated labels; the code rows must stay identical.
+    const diffCode = () => [...document.querySelectorAll('.m5-diff-lines tbody tr:not(.m5-diff-metadata)')].map(row => row.textContent).join('|');
+    const diffContents = diffCode();
     diffLanguage.value = 'en'; diffLanguage.dispatchEvent(new Event('change', { bubbles: true }));
     await ${waitFor("document.querySelector('.m5-diff-wrap').textContent.includes('Wrap long lines')", "English diff labels")};
-    if (document.querySelector('.m5-diff-lines tbody').textContent !== diffContents) throw new Error('language switch changed diff contents');
+    if (diffCode() !== diffContents) throw new Error('language switch changed diff contents');
     diffLanguage.value = 'ko'; diffLanguage.dispatchEvent(new Event('change', { bubbles: true }));
     await ${waitFor("document.querySelector('.m5-diff-wrap').textContent.includes('긴 줄')", "Korean diff restored")};
-    while (more()) { const count = document.querySelectorAll('.m5-diff-lines tbody tr').length; more().click(); await new Promise(resolve => { const tick = () => document.querySelectorAll('.m5-diff-lines tbody tr').length > count ? resolve() : setTimeout(tick, 20); tick(); }); }
     if (!document.querySelector('.m5-diff-lines').textContent.includes('+line 401')) throw new Error('last diff lines missing');
     document.querySelector('.m5-change-row').click();
     await ${waitFor("!document.querySelector('.m5-diff-lines').textContent.includes('+line 401')", "reopened diff starts at the top block")};
@@ -736,7 +749,7 @@ app.whenReady().then(async () => {
     }
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, '설명을 추가해 주세요.');
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    await ${waitFor("!document.querySelector('.m5-followup button').disabled", "enabled follow-up submit")};
+    await ${waitFor("!document.querySelector('.m5-followup button[type=submit]').disabled", "enabled follow-up submit")};
     const previousMessages = [...document.querySelectorAll('.m5-message p')].map(node => node.textContent);
     const goalInput = document.querySelector('.m5-new-chat-form input');
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(goalInput, '새 목표 초안');
@@ -754,7 +767,7 @@ app.whenReady().then(async () => {
     const languageSelect = document.querySelector('.m5-preferences-row select');
     languageSelect.value = 'en';
     languageSelect.dispatchEvent(new Event('change', {bubbles:true}));
-    await ${waitFor("document.querySelector('.m5-followup button')?.textContent === 'Send' && document.querySelector('.m5-timeline')?.getAttribute('aria-label') === 'Team conversation'", "English team conversation")};
+    await ${waitFor("document.querySelector('.m5-followup button[type=submit]')?.textContent === 'Send' && document.querySelector('.m5-timeline')?.getAttribute('aria-label') === 'Team conversation'", "English team conversation")};
     if (input !== document.querySelector('#m5-followup-text') || input.value !== '설명을 추가해 주세요.') throw new Error('language change lost follow-up draft');
     if (goalInput !== document.querySelector('.m5-new-chat-form input') || goalInput.value !== '새 목표 초안' || goalInput.getAttribute('aria-label') !== 'New conversation goal') throw new Error('language change lost goal draft or label');
     if (selectedChat !== document.querySelector('.m5-chat-chip.selected')) throw new Error('language change changed selected chat');
@@ -778,19 +791,23 @@ app.whenReady().then(async () => {
     } finally { goalLabel.textContent = savedLabel; }
     if (document.querySelector('.m5-files').getAttribute('aria-label') !== 'Files' || document.querySelector('.m5-tree-pages')) throw new Error('file navigation not translated');
     if (JSON.stringify(previousMessages) !== JSON.stringify([...document.querySelectorAll('.m5-message p')].map(node => node.textContent))) throw new Error('language change translated user messages');
-    document.querySelector('.m5-followup button').click();
+    document.querySelector('.m5-followup button[type=submit]').click();
     await ${waitFor("[...document.querySelectorAll('.m5-message p')].some(node => node.textContent === '설명을 추가해 주세요.') && document.querySelector('#m5-followup-text').value === ''", "persisted follow-up visible and input cleared")};
     await ${waitFor("window.m5SmokeShortStarts.length === 1", "followup sends coordinator without role selection")};
     if ([...document.querySelectorAll('.m5-message p')].filter(node => node.textContent === '설명을 추가해 주세요.').length !== 1) throw new Error('duplicate follow-up message');
     languageSelect.value = 'ko';
     languageSelect.dispatchEvent(new Event('change', {bubbles:true}));
-    await ${waitFor("document.querySelector('.m5-followup button')?.textContent === '보내기'", "Korean team conversation restored")};
-    const leave = [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '프로젝트 화면 닫기');
+    await ${waitFor("document.querySelector('.m5-followup button[type=submit]')?.textContent === '보내기'", "Korean team conversation restored")};
+    // Closing now lives in the current project's ⋯ menu in the rail; the
+    // synthetic catalog lists the current project on its second page.
+    const findLeave = () => [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '프로젝트 화면 닫기');
+    await ${waitFor("[...document.querySelectorAll('button')].some(button => button.textContent.trim() === '프로젝트 화면 닫기')", "current project menu listed")};
+    const leave = findLeave();
     if (!leave || leave.disabled) throw new Error('cannot leave idle project');
-    [...document.querySelectorAll('.m5-toolbar-actions button')].find(button => button.textContent === '역할과 모델').click();
+    [...document.querySelectorAll('button')].find(button => ['이 프로젝트의 역할·모델 바꾸기', '역할과 모델'].includes(button.textContent) && !button.disabled).click();
     await ${waitFor("document.querySelector('.m5-settings')", "role settings open")};
     if (!leave.disabled) throw new Error('leaving must protect open role settings');
-    const modelInput = document.querySelector('.m5-settings input');
+    const modelInput = document.querySelector('.m5-settings .m5-role-card details input');
     const originalModel = modelInput.value;
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(modelInput, 'unsaved-model');
     modelInput.dispatchEvent(new Event('input', {bubbles: true}));
@@ -802,7 +819,7 @@ app.whenReady().then(async () => {
     };
     changeSettingsLanguage('en');
     await ${waitFor("document.querySelector('.m5-settings h2')?.textContent === 'Roles and models'", "English role settings")};
-    if (document.querySelector('.m5-settings input') !== modelInput || modelInput.value !== 'unsaved-model' || !leave.disabled) throw new Error('language switch lost or unlocked role settings draft');
+    if (document.querySelector('.m5-settings .m5-role-card details input') !== modelInput || modelInput.value !== 'unsaved-model' || !leave.disabled) throw new Error('language switch lost or unlocked role settings draft');
     if (document.querySelector('.m5-role-card strong').textContent !== 'Coordinator') throw new Error('role name is not translated');
     changeSettingsLanguage('ko');
     await ${waitFor("document.querySelector('.m5-settings h2')?.textContent === '역할과 모델'", "Korean role settings")};
@@ -815,14 +832,14 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"저장하지 않은 설정 확인\"]')", "Korean discard confirmation retained")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '설정 계속 편집').click();
     await ${waitFor("!document.querySelector('.m5-settings [role=alertdialog]')", "role draft retained")};
-    if (document.querySelector('.m5-settings input').value !== 'unsaved-model') throw new Error('cancel lost role draft');
+    if (document.querySelector('.m5-settings .m5-role-card details input').value !== 'unsaved-model') throw new Error('cancel lost role draft');
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '저장된 설정 다시 불러오기').click();
     await ${waitFor("document.querySelector('.m5-settings [role=alertdialog]')", "role reload confirmation")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '설정 변경 버리고 다시 불러오기').click();
     await ${waitFor("![...document.querySelectorAll('.m5-settings [role=status]')].some(node => node.textContent === '저장하지 않은 설정 변경이 있어요.') && !document.querySelector('.m5-settings [role=alertdialog]')", "role settings restored")};
-    if (document.querySelector('.m5-settings input').value !== originalModel) throw new Error('role reload did not restore saved model');
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(document.querySelector('.m5-settings input'), 'discard-this-model');
-    document.querySelector('.m5-settings input').dispatchEvent(new Event('input', {bubbles: true}));
+    if (document.querySelector('.m5-settings .m5-role-card details input').value !== originalModel) throw new Error('role reload did not restore saved model');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(document.querySelector('.m5-settings .m5-role-card details input'), 'discard-this-model');
+    document.querySelector('.m5-settings .m5-role-card details input').dispatchEvent(new Event('input', {bubbles: true}));
     await ${waitFor("document.querySelector('.m5-settings [role=status]')", "new role draft before explicit discard")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '프로젝트로 돌아가기').click();
     await ${waitFor("document.querySelector('.m5-settings [role=alertdialog]')", "explicit role discard confirmation")};
@@ -838,9 +855,9 @@ app.whenReady().then(async () => {
     await ${waitFor("!document.querySelector('#m5-followup-text') && document.querySelector('h1').textContent === '이어서 작업하기'", "project and chat view cleared")};
     [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '처음부터 다시 확인').click();
     await ${waitFor("document.querySelector('.m5-project-catalog-list li span')?.textContent === '/work/earlier'", "catalog reopened")};
-    [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '다음 목록').click();
-    await ${waitFor("document.querySelector('.m5-project-catalog-list li span')?.textContent === '/work/smoke'", "saved project available again")};
-    document.querySelector('.m5-project-catalog-list li button').click();
+    // The synthetic first page now also lists the saved project (see preload).
+    await ${waitFor("[...document.querySelectorAll('.m5-project-catalog-list li span')].some(span => span.textContent === '/work/smoke')", "saved project available again")};
+    [...document.querySelectorAll('.m5-project-catalog-list li')].find(item => item.querySelector('span')?.textContent === '/work/smoke').querySelector('button').click();
     await ${waitFor("document.querySelector('.m5-chat-chip')", "saved chat available again")};
     if (document.querySelector('.m5-project-guide').open) throw new Error('dismissed guide reopened automatically');
     document.querySelector('.m5-project-guide > summary').click();
@@ -867,21 +884,21 @@ app.whenReady().then(async () => {
     window.confirm = text => { contextPrompt = text; return false; };
     const contextLanguage = document.querySelector('.m5-preferences-row select');
     contextLanguage.value = 'en'; contextLanguage.dispatchEvent(new Event('change', {bubbles:true}));
-    await ${waitFor("document.querySelector('.m5-followup button')?.textContent === 'Send'", "English context run action")};
+    await ${waitFor("document.querySelector('.m5-followup button[type=submit]')?.textContent === 'Send'", "English context run action")};
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(document.querySelector('#m5-followup-text'), 'Continue reviewing the project');
     document.querySelector('#m5-followup-text').dispatchEvent(new Event('input', {bubbles:true}));
-    await ${waitFor("!document.querySelector('.m5-followup button').disabled", "context message enabled")};
-    document.querySelector('.m5-followup button').click();
+    await ${waitFor("!document.querySelector('.m5-followup button[type=submit]').disabled", "context message enabled")};
+    document.querySelector('.m5-followup button[type=submit]').click();
     await ${waitFor("contextPrompt.includes('latest 99 messages')", "English context confirmation")};
     await ${waitFor("document.querySelector('#m5-followup-text')?.value === ''", "canceled context run settled")};
     if (window.m5SmokeContextStarts.length !== 0) throw new Error('canceled context started an agent');
     contextLanguage.value = 'ko'; contextLanguage.dispatchEvent(new Event('change', {bubbles:true}));
-    await ${waitFor("document.querySelector('.m5-followup button')?.textContent === '보내기'", "Korean context run action")};
+    await ${waitFor("document.querySelector('.m5-followup button[type=submit]')?.textContent === '보내기'", "Korean context run action")};
     window.confirm = text => { contextPrompt = text; return true; };
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(document.querySelector('#m5-followup-text'), '이어서 설명해 주세요');
     document.querySelector('#m5-followup-text').dispatchEvent(new Event('input', {bubbles:true}));
-    await ${waitFor("!document.querySelector('.m5-followup button').disabled", "Korean context message enabled")};
-    document.querySelector('.m5-followup button').click();
+    await ${waitFor("!document.querySelector('.m5-followup button[type=submit]').disabled", "Korean context message enabled")};
+    document.querySelector('.m5-followup button[type=submit]').click();
     await ${waitFor("window.m5SmokeContextStarts.length === 1", "approved bounded context")};
     await ${waitFor("document.querySelector('#m5-followup-text')?.value === ''", "approved context run settled")};
     if (!contextPrompt.includes('처음 요청과 최근 99개') || window.m5SmokeContextStarts[0].inputMessageIds.length !== 100) throw new Error('context scope or language mismatch');
@@ -896,11 +913,11 @@ app.whenReady().then(async () => {
     if (document.querySelector('.m5-timeline-list').textContent.includes('"action":"delegate"')) throw new Error('raw orchestration decision leaked into normal conversation');
     if (![...document.querySelectorAll('.m5-message p')].some(node => node.textContent === '개발 담당과 구조를 확인할게요.')) throw new Error('delegation summary missing');
     window.m5SmokeVisualChatState('running');
-    await ${waitFor("[...document.querySelectorAll('.m5-timeline button')].some(button => button.textContent === '작업 중단')", "stop task between team steps")};
+    await ${waitFor("[...document.querySelectorAll('button.m5-stop-team')].some(button => button.textContent === '작업 중단')", "stop task between team steps")};
     if (!document.querySelector('.m5-chat-activity[role=status]')?.textContent.includes('진행 중')) throw new Error('team activity indicator missing between steps');
-    if (!document.querySelector('.m5-followup button').disabled) throw new Error('queued workflow permits a competing send');
-    [...document.querySelectorAll('.m5-timeline button')].find(button => button.textContent === '작업 중단').click();
-    await ${waitFor("window.m5SmokeTeamStops.length === 1 && ![...document.querySelectorAll('.m5-timeline button')].some(button => button.textContent === '작업 중단')", "queued team cancellation applied")};
+    if (!document.querySelector('.m5-followup button[type=submit]').disabled) throw new Error('queued workflow permits a competing send');
+    [...document.querySelectorAll('button.m5-stop-team')].find(button => button.textContent === '작업 중단').click();
+    await ${waitFor("window.m5SmokeTeamStops.length === 1 && ![...document.querySelectorAll('button.m5-stop-team')].some(button => button.textContent === '작업 중단')", "queued team cancellation applied")};
     window.m5SmokeVisualChatState('draft');
     window.m5SmokeFailedClaude();
     await ${waitFor("document.querySelector('.m5-agent-runs details')", "failed Claude run details")};
@@ -936,9 +953,8 @@ app.whenReady().then(async () => {
     window.m5SmokeEnableParallelChats();
     [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '처음부터 다시 확인').click();
     await ${waitFor("document.querySelector('.m5-project-catalog-list li span')?.textContent === '/work/earlier'", "parallel catalog reset")};
-    [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '다음 목록').click();
-    await ${waitFor("document.querySelector('.m5-project-catalog-list li span')?.textContent === '/work/smoke'", "parallel project available")};
-    document.querySelector('.m5-project-catalog-list li button').click();
+    await ${waitFor("[...document.querySelectorAll('.m5-project-catalog-list li span')].some(span => span.textContent === '/work/smoke')", "parallel project available")};
+    [...document.querySelectorAll('.m5-project-catalog-list li')].find(item => item.querySelector('span')?.textContent === '/work/smoke').querySelector('button').click();
     await ${waitFor("document.querySelectorAll('.m5-chat-chip').length === 4", "four chats listed")};
     document.querySelector('.m5-chat-chip').click();
     await ${waitFor("document.querySelector('#m5-followup-text')", "parallel chat selected")};
