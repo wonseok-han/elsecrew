@@ -2,6 +2,9 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 응답 언어 규칙 명문화
+- 사용자 지시: 응답을 한국어로만 하도록 `CLAUDE.md`와 `AGENTS.md`의 맨 앞(인계 규칙 앞)에 `응답 언어 — 최우선` 절을 같은 내용으로 추가했다. 모든 사용자 메시지는 첫 문장부터 한국어로 쓴다. 영어 도구 출력이나 하위 보고의 언어를 따라가지 않는다. 식별자·명령·경로·원문 오류 인용만 원문을 유지한다. 하위 에이전트에게도 한국어 보고를 지시한다.
+
 ### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 실제 시험 중단 `providerExecutableChanged` 원인과 수정
 - 증상: todo 앱 시험 중 11:33(KST)에 '팀 작업을 멈췄어요 (원인 코드: providerExecutableChanged)'로 멈췄다. 기획(Codex) 실행은 성공했고, 총괄(Claude Code) 2단계 준비 중 run이 생기기 전에 실패했다. 같은 Claude Code로 실행한 11:30 총괄 1단계는 성공했다.
 - 원인: `PinnedExecutable`이 서명 검증 때 실행 파일의 모든 상위 디렉터리(…/claude/versions, `~`, `/Users`, `/`)의 전체 stamp(len, nlink, mtime, ctime 포함)를 기록했다. 실행 직전 `revalidate()`도 같은 기준으로 비교했다. 홈 폴더는 셸 캐시와 설정 파일 쓰기로 mtime/ctime이 수시로 바뀌므로 간헐적으로 '실행 파일이 바뀜'으로 오판했다. Codex도 `/Applications` 변화로 같은 위험이 있다.
