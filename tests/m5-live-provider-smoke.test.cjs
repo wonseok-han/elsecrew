@@ -33,7 +33,7 @@ function harness(catalogOnly = false, autoFinish = true, projectUi = false, sele
       if (name === 'electron') return {app,dialog:{}};
       if (name === 'node:fs') return {
         statSync: () => ({isDirectory: () => true}),
-        mkdtempSync: () => '/synthetic/run', mkdirSync() {}, realpathSync: value => value === '/synthetic/userdata' ? '/synthetic/resolved-userdata' : value,
+        mkdtempSync: () => '/synthetic/run', mkdirSync() {}, realpathSync: Object.assign(value => value === '/synthetic/userdata' ? '/synthetic/resolved-userdata' : value, { native: value => value === '/synthetic/userdata' ? '/synthetic/resolved-userdata' : value }),
         writeFileSync(file, value) { if (file.endsWith('result.json')) evidence = JSON.parse(value); },
       };
       if (name === 'node:child_process') return childProcess;

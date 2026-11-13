@@ -412,7 +412,7 @@ function moduleFor(
   if (specifier === "node:fs") {
     return {
       mkdirSync: () => undefined,
-      realpathSync: (path: string) => path,
+      realpathSync: Object.assign((path: string) => path, { native: (path: string) => path }),
       readdirSync: () => { throw new Error("unexpected directory listing in main security harness"); },
       statSync: (path: string) => {
         if (!fakes.files.has(path)) throw new Error("missing test asset");

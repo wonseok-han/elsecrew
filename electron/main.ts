@@ -148,7 +148,9 @@ function m5DataDirectory(): string {
     "m5",
   );
   mkdirSync(candidate, { recursive: true });
-  return realpathSync(candidate);
+  // The OS spelling: a development run's userData is the lowercase package name,
+  // and the app-only Claude login is keyed by this exact path string.
+  return realpathSync.native(candidate);
 }
 
 function sidecarLaunch(dataDirectory: string): SidecarLaunchV1 {
