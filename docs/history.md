@@ -32,7 +32,8 @@
   - Rust: protocol 69 통과, sidecar lib 792 통과·1 실패. 실패한 `provider_login_gate::...vendor_gate_does_not_inherit_unrelated_writable_descriptors`는 단독 재실행에서 통과해 병렬 실행 중 간헐 실패로 본다.
   - 격리 데이터로 설정 다섯 화면을 실제 실행해 캡처로 확인했다.
   - 미확인: 상태 점은 작업이 있는 화면을 캡처하지 못해 CSS로만 확인했다. 설치본 패키지는 다시 만들지 않았다.
-- 다음 할 일: `applicationPreviewPage` 프로젝트 단위(`chatId:null`) 경로 정리 여부 결정, 업데이터 포함 패키지 재생성.
+- 패키지: 같은 날 `pnpm m5:package:smoke`로 `out/Elsecrew-darwin-arm64/Elsecrew.app`(0.1.2, 124a0039 기준, 자체 업데이터 포함)을 다시 만들었고 smoke PASS다. 배포된 Release가 없어 앱 안의 '업데이트 확인'은 새 버전을 찾지 못하는 것이 정상이다.
+- 다음 할 일: `applicationPreviewPage` 프로젝트 단위(`chatId:null`) 경로 정리 여부 결정, 새 패키지로 설정 화면·작업 목록 상태 점 실사용 확인.
 
 ### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 설정 정리 후보 조사(Orca·herdr 비교)
 - 현재 설정 5개 섹션을 격리된 앱 데이터로 실제 실행해 캡처했다(코드 변경 없음). 참고: Orca 설정 문서 https://orca.dev/docs/settings (앱 전체 설정과 저장소별 'Repository' 설정을 나눔), herdr는 상태 표시·알림 위주이고 설정은 테마·알림 정도만 둔다.
