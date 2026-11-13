@@ -269,6 +269,9 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       // Keep chat actions locked when watcher release cannot be confirmed.
     } finally { setLeavingProject(false); }
   };
+  // Adding a folder can reveal a hidden or new catalog entry even when opening
+  // it then stops (recovery, busy agent); refresh the lists after every attempt.
+  const addProject = () => controller.chooseProject().finally(() => setCatalogRevision(value => value + 1));
   // Removing from the list is the user's call; running work is stopped first.
   const canRemove = admissionReady && !settingsOpen && !newChatOpen && !removing;
   const changeList = async (target: { projectId: string; chatId?: string }, restore = false) => {
@@ -366,7 +369,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
 
   return (
     <main inert={updatePreparing} className={`m5-workbench${preferencesOpen ? " m5-settings-open" : ""}${window.m5Projects ? " m5-with-project-rail" : ""}`} lang={lang} aria-label={t("m5.shell.label")}>
-      <ProjectCatalog onCloseProject={() => void leaveProject()} closeDisabled={!admissionReady || settingsOpen || leavingProject || leaveError || !controller.canLeaveProject() || !chatController.canLeaveProjectView()} onRoles={() => openRoleSettings()} rolesDisabled={!admissionReady || settingsOpen || !projectDataReady || chat.preparing || chat.switching} rail railExpanded={railExpanded} onRailExpandedChange={setRailExpanded} refreshKey={catalogRevision} removeDisabled={!canRemove} onRemove={entry => { setRemovalError(false); setRemoval({ projectId: entry.projectId, label: entry.canonicalPath }); }} settingsAction={<button type="button" className="m5-secondary m5-open-preferences" disabled={settingsOpen || newChatOpen || appDefaultsOpen} onClick={() => setPreferencesOpen(true)} title={t("m5.preferences.title")} aria-label={t("m5.preferences.title")}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"><path d="m10 3-.6 2.4-2 .9L5 5.6 3 9l1.8 1.7v2.6L3 15l2 3.4 2.4-.7 2 .9L10 21h4l.6-2.4 2-.9 2.4.7 2-3.4-1.8-1.7v-2.6L21 9l-2-3.4-2.4.7-2-.9L14 3Z"/><circle cx="12" cy="12" r="3"/></svg><span>{t("m5.preferences.title")}</span></button>} onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} onHasProjects={setHasSavedProjects} ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
+      <ProjectCatalog onCloseProject={() => void leaveProject()} closeDisabled={!admissionReady || settingsOpen || leavingProject || leaveError || !controller.canLeaveProject() || !chatController.canLeaveProjectView()} onRoles={() => openRoleSettings()} rolesDisabled={!admissionReady || settingsOpen || !projectDataReady || chat.preparing || chat.switching} rail onAdd={addProject} railExpanded={railExpanded} onRailExpandedChange={setRailExpanded} refreshKey={catalogRevision} removeDisabled={!canRemove} onRemove={entry => { setRemovalError(false); setRemoval({ projectId: entry.projectId, label: entry.canonicalPath }); }} settingsAction={<button type="button" className="m5-secondary m5-open-preferences" disabled={settingsOpen || newChatOpen || appDefaultsOpen} onClick={() => setPreferencesOpen(true)} title={t("m5.preferences.title")} aria-label={t("m5.preferences.title")}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"><path d="m10 3-.6 2.4-2 .9L5 5.6 3 9l1.8 1.7v2.6L3 15l2 3.4 2.4-.7 2 .9L10 21h4l.6-2.4 2-.9 2.4.7 2-3.4-1.8-1.7v-2.6L21 9l-2-3.4-2.4.7-2-.9L14 3Z"/><circle cx="12" cy="12" r="3"/></svg><span>{t("m5.preferences.title")}</span></button>} onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} onHasProjects={setHasSavedProjects} ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
       <dialog ref={removalDialog} className="m5-discard-dialog" aria-labelledby="m5-remove-title" onCancel={event => { event.preventDefault(); if (!removing) setRemoval(null); }}>
         <h2 id="m5-remove-title">{t("m5.catalog.remove")}</h2>
         <p>{removal?.label}</p><p>{t(removal?.chatId ? "m5.catalog.removeChatHelp" : "m5.catalog.removeHelp")}</p>
@@ -398,7 +401,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         errors={<>      {snapshot.error && (
         <section className="m5-error" role="alert">
           <strong>{t(snapshot.error.messageKey)}</strong>
-          {snapshot.error.messageKey === "m5.editorError.reopenProject" && <button type="button" className="m5-secondary" disabled={settingsOpen || !admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} onClick={() => void controller.chooseProject()}>{t("m5.editor.reselectOriginal")}</button>}
+          {snapshot.error.messageKey === "m5.editorError.reopenProject" && <button type="button" className="m5-secondary" disabled={settingsOpen || !admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} onClick={() => void addProject()}>{t("m5.editor.reselectOriginal")}</button>}
           <details><summary>{t("m5.feedback.details")}</summary><pre>{snapshot.error.technicalDetail}</pre></details>
         </section>
       )}
@@ -433,7 +436,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         <ProviderLogin settingsPage disabled={!admissionReady} returning={hasSavedProjects} reveal={connectionReveal} />
       </AppSettings>
       <StorageAdmissionNotice admission={admission} />
-      {!snapshot.project && <GuidedStart returning={hasSavedProjects} disabled={!admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked} onChoose={() => void controller.chooseProject()} />}
+      {!snapshot.project && <GuidedStart returning={hasSavedProjects} disabled={!admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked} onChoose={() => void addProject()} />}
       {!snapshot.project && hasSavedProjects && <ProjectCatalog home refreshKey={catalogRevision} removeDisabled={!canRemove} onRemove={entry => { setRemovalError(false); setRemoval({ projectId: entry.projectId, label: entry.canonicalPath }); }} onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} ready={admissionReady} controller={controller}
         disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked} />}
       <GitSelectionView disabled={leavingProject || settingsOpen || leaveError} />
