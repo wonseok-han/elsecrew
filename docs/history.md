@@ -2,6 +2,17 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 진행 안내는 알림 종 아래로, 상단 띠는 문제만
+- 사용자 지적: 문제가 아닌 진행 안내('총괄 역할의 Claude Code 준비 상태를 확인하고 있어요')가 상단 패널에 제목과 본문으로 두 번 떴다. 원래 기준인 '내부 상태는 문제일 때만 상단 안내'와 맞지 않았다.
+- 변경:
+  - `WorkStatusNotice`(상단 띠)는 오류와 앱을 붙잡은 작업 상태만 보여 준다(`feedback`/`hasFeedback`/`feedbackTitle` 제거).
+  - `chat.notice`, `snapshot.notice`, 작업 공간 사용 종료 안내는 `NotificationBell`의 `notice` 일시 안내(`.m5-notice-toast`)로 옮겼다. 6초 뒤 사라지고, '연결 설정 열기' 같은 버튼이 있으면 닫을 때까지 남는다. 알림 목록에는 쌓지 않는다.
+- 검증: 타입 검사, 프런트 720, 화면 smoke 68(선택자를 `.m5-notice-toast > span`으로 바꿈)을 통과했다. 격리 실행에서 프로젝트 화면을 닫았을 때 종 아래 안내만 뜨고 상단 띠가 없는 것을 캡처로 확인했다.
+- 키체인 조사(결정 대기):
+  - 패키지를 새로 만들 때마다 미서명 sidecar의 서명 값이 바뀌어 `Claude Code-credentials-f97f5bae` 항목의 허용 앱 목록이 늘어난다. 지금 sidecar 항목이 8개이고 유효한 것은 1개다. 항목 수 자체는 늘지 않는다.
+  - 예전 프로필 경로 항목 4개(`0475b3cb`, `682ea00a`, `a41582ed`, `c82938a8`, hello-agent 포함)가 남아 있다.
+  - 제안: 정리(삭제는 사용자 승인), sidecar가 토큰을 읽을 때도 `/usr/bin/security`를 사용하게 변경.
+
 ### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 현재 상태 요약(11-12·11-13 세부는 11월 아카이브)
 - 워크로그가 500줄을 넘어 11-12·11-13 엔트리 전체를 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(같은 날짜는 쪼개지 않음). 재사용할 결정은 아래 `핵심 결정·발견`에 있다.
 - 현재 상태(`feature/ade`, push 없음):

@@ -443,6 +443,7 @@ export const en: Record<MessageKey, string> = {
   "m5.diff.binaryHelp": "Binary changes show that the file changed, not its contents.",
   "m5.diff.empty": "No text changes to display.",
   "m5.notifications.empty": "No new notifications.",
+  "m5.notifications.dismiss": "Dismiss",
   "m5.notifications.unread": "{count} new notifications",
   "m5.notifications.markAllRead": "Mark all read",
   "m5.notifications.kind.done": "Task finished",

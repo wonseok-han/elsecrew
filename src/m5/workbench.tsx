@@ -401,16 +401,15 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           </p>
         </div>
         <div className="m5-toolbar-actions">
-      <NotificationBell center={notifications} onOpen={openNotification} />
-      <WorkStatusNotice feedbackTitle={chat.notice ? formatChatNotice(chat, lang) : snapshot.notice ? (snapshot.noticeKey ? t(snapshot.noticeKey) : snapshot.notice) : discardedWorkspaceNotice && !snapshot.project ? t("m5.discard.done") : undefined} hasFeedback={Boolean(chat.notice || snapshot.notice || (discardedWorkspaceNotice && !snapshot.project))} bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])}
-        errorTitle={chat.error ? t(chat.error.messageKey) : snapshot.error ? t(snapshot.error.messageKey) : undefined}
-        feedback={<>      {!chat.notice && !snapshot.notice && discardedWorkspaceNotice && !snapshot.project && <p className="m5-notice" role="status">{t("m5.discard.done")}</p>}
-      {!chat.notice && snapshot.notice && <p className="m5-notice" role="status">{snapshot.noticeKey ? t(snapshot.noticeKey) : snapshot.notice}</p>}
-      {chat.notice && <p className="m5-notice m5-chat-notice" role="status">{formatChatNotice(chat, lang)}{chatConnectionTarget(chat) && <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => {
+      {/* What the app is doing right now goes under the bell; the strip below is only for problems. */}
+      <NotificationBell center={notifications} onOpen={openNotification} notice={chat.notice ? { text: formatChatNotice(chat, lang), action: chatConnectionTarget(chat) ? <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => {
         const provider = chatConnectionTarget(chat);
         if (provider) { setConnectionReveal(current => ({ provider, sequence: (current?.sequence ?? 0) + 1 })); setPreferencesSection("agents"); setPreferencesOpen(true); }
-      }}>{t("m5.setup.openConnection", { name: chatConnectionTarget(chat) === "codex" ? "Codex" : "Claude Code" })}</button>}</p>}
-</>}
+      }}>{t("m5.setup.openConnection", { name: chatConnectionTarget(chat) === "codex" ? "Codex" : "Claude Code" })}</button> : undefined }
+        : snapshot.notice ? { text: snapshot.noticeKey ? t(snapshot.noticeKey) : snapshot.notice }
+        : discardedWorkspaceNotice && !snapshot.project ? { text: t("m5.discard.done") } : null} />
+      <WorkStatusNotice bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])}
+        errorTitle={chat.error ? t(chat.error.messageKey) : snapshot.error ? t(snapshot.error.messageKey) : undefined}
         errors={<>      {snapshot.error && (
         <section className="m5-error" role="alert">
           <strong>{t(snapshot.error.messageKey)}</strong>

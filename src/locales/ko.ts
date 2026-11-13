@@ -442,6 +442,7 @@ export const ko = {
   "m5.diff.binaryHelp": "이진 변경은 내용 대신 파일 변경 사실만 보여요.",
   "m5.diff.empty": "표시할 텍스트 변경이 없어요.",
   "m5.notifications.empty": "새 알림이 없어요.",
+  "m5.notifications.dismiss": "안내 닫기",
   "m5.notifications.unread": "새 알림 {count}개",
   "m5.notifications.markAllRead": "모두 읽음",
   "m5.notifications.kind.done": "작업 완료",

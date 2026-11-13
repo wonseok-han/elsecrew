@@ -1221,6 +1221,15 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-first-chat-setup .m5-project-permissions { margin: 16px 0; }
 /* Notifications: a bell with an unread count and a newest-first list. */
 .m5-notification-bell { position: relative; }
+/* Progress notices sit under the bell and fade; problems keep the status strip. */
+.m5-bell-area { position: relative; display: flex; align-items: center; }
+.m5-notice-toast { position: absolute; top: calc(100% + 8px); right: 0; z-index: 40; display: flex; align-items: center; gap: 10px; width: max-content; max-width: min(420px, 70vw); padding: 10px 10px 10px 14px; border: 1px solid var(--m5-border-strong); border-radius: 10px; background: var(--m5-surface); color: var(--m5-text); font-size: 12px; line-height: 1.5; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); animation: m5-toast-in .16s ease-out; }
+.m5-notice-toast > span { flex: 1; min-width: 0; }
+.m5-notice-toast > .m5-secondary { flex: none; font-size: 12px; }
+.m5-notice-toast-close { flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--m5-muted); font-size: 16px; line-height: 1; cursor: pointer; }
+.m5-notice-toast-close:hover { background: var(--m5-raised); color: var(--m5-text); }
+@keyframes m5-toast-in { from { opacity: 0; transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .m5-notice-toast { animation: none; } }
 .m5-notification-bell > summary { position: relative; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; color: var(--m5-muted); cursor: pointer; list-style: none; }
 .m5-notification-bell > summary::-webkit-details-marker { display: none; }
 .m5-notification-bell > summary:hover, .m5-notification-bell[open] > summary { background: var(--m5-raised); color: var(--m5-text); }

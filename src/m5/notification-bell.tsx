@@ -1,4 +1,4 @@
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useI18n } from "../i18n.tsx";
 import type { AppNotification, NotificationCenter } from "./notifications.ts";
 
@@ -12,8 +12,34 @@ function relativeTime(at: string, lang: string, now: number): string {
   return format.format(Math.round(seconds / 86400), "day");
 }
 
+export interface BellNotice { text: string; action?: ReactNode }
+
+/**
+ * A short notice about what the app is doing right now ("checking…", "done").
+ * It shows under the bell instead of the problem strip, fades on its own, and
+ * stays only while it carries an action. It is not kept in the bell's list.
+ */
+function NoticeToast({ notice }: { notice: BellNotice | null }) {
+  const { t } = useI18n();
+  const [hidden, setHidden] = useState<string | null>(null);
+  const text = notice?.text ?? null;
+  const sticky = Boolean(notice?.action);
+  useEffect(() => {
+    setHidden(null);
+    if (!text || sticky) return;
+    const timer = window.setTimeout(() => setHidden(text), 6000);
+    return () => window.clearTimeout(timer);
+  }, [text, sticky]);
+  if (!notice || hidden === notice.text) return null;
+  return <div className="m5-notice-toast" role="status" aria-live="polite">
+    <span dir="auto">{notice.text}</span>
+    {notice.action}
+    <button type="button" className="m5-notice-toast-close" aria-label={t("m5.notifications.dismiss")} title={t("m5.notifications.dismiss")} onClick={() => setHidden(notice.text)}>×</button>
+  </div>;
+}
+
 /** The bell: newest first, an unread count, and a click that opens the task. */
-export function NotificationBell({ center, onOpen }: { center: NotificationCenter; onOpen: (item: AppNotification) => void }) {
+export function NotificationBell({ center, onOpen, notice = null }: { center: NotificationCenter; onOpen: (item: AppNotification) => void; notice?: BellNotice | null }) {
   const { t, lang } = useI18n();
   const items = useSyncExternalStore(center.subscribe, () => center.snapshot(), () => center.snapshot());
   const unread = items.filter(item => !item.read).length;
@@ -24,7 +50,7 @@ export function NotificationBell({ center, onOpen }: { center: NotificationCente
     return () => document.removeEventListener("pointerdown", close, true);
   }, []);
   const now = Date.now();
-  return <details ref={details} className="m5-notification-bell" onKeyDown={event => { if (event.key === "Escape" && details.current) details.current.open = false; }}>
+  return <div className="m5-bell-area"><details ref={details} className="m5-notification-bell" onKeyDown={event => { if (event.key === "Escape" && details.current) details.current.open = false; }}>
     <summary title={t("m5.notifications.title")} aria-label={unread ? t("m5.notifications.unread", { count: unread }) : t("m5.notifications.title")}>
       <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
       {unread > 0 && <span className="m5-notification-count" aria-hidden="true">{unread > 9 ? "9+" : unread}</span>}
@@ -46,5 +72,5 @@ export function NotificationBell({ center, onOpen }: { center: NotificationCente
         </li>)}
       </ul>}
     </div>
-  </details>;
+  </details><NoticeToast notice={notice} /></div>;
 }

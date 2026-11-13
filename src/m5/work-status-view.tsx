@@ -5,9 +5,9 @@ import type { M5BridgeV6 } from "./contracts/bridge-v6.ts";
 import { summarizeWorkStatus, type WorkStatusSummary } from "./work-status.ts";
 
 /** Read-only status: no automatic cancellation, lock release, or recovery mutation. */
-export function WorkStatusNotice({ bridge, ready, refreshKey, feedback, errors, errorTitle, hasFeedback = false, feedbackTitle }: {
+export function WorkStatusNotice({ bridge, ready, refreshKey, errors, errorTitle }: {
   bridge: SupportedM5Bridge; ready: boolean; refreshKey: string;
-  feedback?: ReactNode; errors?: ReactNode; errorTitle?: string; hasFeedback?: boolean; feedbackTitle?: string;
+  errors?: ReactNode; errorTitle?: string;
 }) {
   const { t } = useI18n();
   const [summary, setSummary] = useState<WorkStatusSummary | null>(null);
@@ -36,10 +36,10 @@ export function WorkStatusNotice({ bridge, ready, refreshKey, feedback, errors, 
   }, [bridge, ready, refreshKey, refresh]);
   const hasWorkStatus = ready && bridge.version >= 6 && (summary !== null || failed);
   const attention = Boolean(errorTitle || failed || hasWorkStatus);
-  // App notices, errors and recovery status: shown only while there is one.
-  // Task notifications live in the bell (`NotificationBell`).
-  if (!attention && !hasFeedback) return null;
-  const label = errorTitle || feedbackTitle || (failed ? t("m5.work.failed") : t("m5.work.active"));
+  // Problems only: errors and work that still holds the app. Progress notices
+  // show under the bell and task notifications live in its list.
+  if (!attention) return null;
+  const label = errorTitle || (failed ? t("m5.work.failed") : t("m5.work.active"));
   return <details className={`m5-status-strip m5-status-notice${attention ? " m5-status-strip-attention" : ""}`}>
     <summary title={label} aria-label={`${t("m5.statusStrip.title")} · ${label}`}>
       <span className="m5-status-indicator" aria-hidden="true" />
@@ -47,7 +47,6 @@ export function WorkStatusNotice({ bridge, ready, refreshKey, feedback, errors, 
     </summary>
     <div className="m5-status-content"><h3>{t("m5.statusStrip.title")}</h3>
       {errors}
-      <div className="m5-inline-feedback">{feedback}</div>
       {hasWorkStatus && <section aria-label={t("m5.work.title")} aria-busy={busy}>
         <strong>{failed ? t("m5.work.failed") : t("m5.work.active")}</strong>
         <p>{failed ? t("m5.work.error") : t("m5.work.help")}</p>
