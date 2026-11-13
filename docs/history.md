@@ -27,6 +27,7 @@
   - 남은 권고: action SHA 고정, 확인 단계 뒤 앱 이동 같은 드문 경우.
 - 검증: 업데이트 목록 테스트 3개(스크립트 서명 → 앱 검증 왕복, 변조·다른 키·잘못된 이름·플랫폼 거절, 버전 비교)와 프런트 720 통과, Electron 번들 빌드 통과. 로컬 `pnpm m5:make`로 `Elsecrew-darwin-arm64-0.1.2.zip`(최상위 `Elsecrew.app`, bundle id와 version 확인)을 만들었다. macOS helper는 공백·한글·괄호·대괄호 경로에서 교체 성공, 실패 시 복원, 번들 내 잔여 프로세스 대기(3초), 정리를 실제로 확인했다.
 - 미검증: 실제 GitHub Actions 실행(태그 push는 사용자 승인 대상), Windows helper와 ZIP 구조, 실제 원격 feed로 하는 업데이트 전 과정.
+- 사용자 결정(같은 날): 아직 개발 중이므로 첫 배포(버전 올림·push·tag), GitHub `release` environment·secret 등록, Windows 검증은 나중으로 미룬다. 배포 경로는 구현만 된 상태이며 실제 Release는 없다.
 
 ### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 레거시(옛 Tauri 앱·M0~M4) 정리
 - 사용자 결정: Elsecrew로 컨셉을 바꿨으므로 옛 기록과 옛 Tauri 앱 코드를 제거한다. 소개 웹사이트(`website/`)는 Elsecrew 사이트로 다시 만들 예정이라 그대로 둔다. 지운 것은 모두 Git 기록에서 되살릴 수 있다.
