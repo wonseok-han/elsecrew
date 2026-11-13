@@ -1198,7 +1198,16 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-settings-inline .m5-role-card > small { align-self: end; padding-bottom: 10px; color: var(--m5-muted); line-height: 1.5; }
 .m5-settings-inline .m5-role-model-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
 .m5-settings-inline > .m5-settings-body > [role="alert"], .m5-settings-inline > .m5-settings-body > [role="status"] { margin: 0 0 16px; }
-.m5-role-model-missing { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 0; padding: 10px 12px; border: 1px solid var(--m5-border-strong); border-radius: 8px; color: var(--m5-text); font-size: 12px; line-height: 1.5; }
-.m5-role-model-missing span { flex: 1 1 260px; }
 .m5-team-unselected { margin: 8px 0 0; padding: 10px 12px; border: 1px solid var(--m5-border-strong); border-radius: 8px; color: var(--m5-text); font-size: 12px; line-height: 1.5; }
 .m5-team-unselected { margin: 8px 0 0; padding: 10px 12px; border: 1px solid var(--m5-border-strong); border-radius: 8px; color: var(--m5-text); font-size: 12px; line-height: 1.5; }
+.m5-role-navigation small.m5-role-model-warning { color: #f0b86e; }
+/* Project permissions: one card with room between heading, options and notes. */
+.m5-project-permissions { margin: 24px 0; padding: 20px; border: 1px solid var(--m5-border-strong); border-radius: 12px; background: var(--m5-surface); }
+.m5-project-permissions h3 { margin: 0 0 6px; font-size: 14px; }
+.m5-project-permissions > .m5-settings-intro { margin: 0 0 16px; font-size: 12px; line-height: 1.6; color: var(--m5-muted); }
+.m5-project-permissions .m5-permission-options { margin: 0 0 16px; padding: 0 16px; background: var(--m5-bg); }
+.m5-project-permissions .m5-permission-options .m5-preferences-row { min-height: 0; padding: 12px 0; }
+.m5-project-permissions .m5-permission-options .m5-preferences-row > span { font-size: 13px; }
+.m5-project-permissions .m5-storage-actions { margin-top: 16px; }
+.m5-project-permissions [role=alert] { margin: 12px 0 0; }
+.m5-first-chat-setup .m5-project-permissions { margin: 16px 0; }

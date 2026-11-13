@@ -1832,7 +1832,7 @@ fn binary_fresh_b_failure_and_exact_abandon_preserve_bound_a() {
     let roles: Vec<serde_json::Value> = settings["roles"].as_array().unwrap().iter().map(|role| {
         let mut role = role.clone();
         let codex = role["runtime"] == "codex";
-        role["modelSelector"] = serde_json::json!(if codex { "sol" } else { "opus" });
+        role["modelSelector"] = serde_json::json!(if codex { "fixture-codex" } else { "opus" });
         role["reasoningEffort"] = if codex { serde_json::json!("medium") } else { serde_json::Value::Null };
         role
     }).collect();

@@ -6,7 +6,7 @@ module.exports = `(async () => {
   const current = (await projects.request({ action: 'getAppRoleDefaults' })).settings;
   const roles = current.roles.map(role => role.modelSelector ? role : {
     ...role,
-    modelSelector: role.runtime === 'codex' ? 'sol' : 'opus',
+    modelSelector: role.runtime === 'codex' ? 'fixture-codex' : 'opus',
     reasoningEffort: role.runtime === 'codex' ? 'medium' : null,
   });
   if (roles.every((role, index) => role === current.roles[index])) return false;

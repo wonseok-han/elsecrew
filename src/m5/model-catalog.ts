@@ -39,6 +39,14 @@ function remember(runtime: Runtime, result: ModelChoicesResult, at: number) {
 }
 export function catalogCheckedAt(runtime: Runtime) { return restore(runtime)?.at; }
 export function cachedModels(runtime: Runtime) { return restore(runtime)?.result.models; }
+/**
+ * A role has a usable model when one is saved and the provider's last known
+ * list includes it. Anything else reads as "no model selected"; before any
+ * list is known a saved name is trusted (the pre-run check still decides).
+ */
+export function hasUsableModel(runtime: Runtime, selector: string, models: readonly { modelSelector: string }[] | undefined = cachedModels(runtime)): boolean {
+  return Boolean(selector) && (!models?.length || models.some(model => model.modelSelector === selector));
+}
 /** "opus · claude-opus-5-5" when the provider reported what the alias maps to. */
 export function modelLabel(runtime: Runtime, selector: string): string {
   const resolved = restore(runtime)?.result.models.find(model => model.modelSelector === selector)?.resolvedModel;

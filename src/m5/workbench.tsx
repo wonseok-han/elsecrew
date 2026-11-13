@@ -17,7 +17,7 @@ import { markStartScreenReady } from "./startup-mark.ts";
 import { emptyProjectGuide, parseProjectGuide, projectGuideKey, projectGuideStep, type ProjectGuidePreference } from "./project-guide-state.ts";
 import type { ChatRecordV1 } from "./contracts/run-recovery-v1.ts";
 import { groupRunHistory, runOutcomeNotice, runOrder, runDurationSeconds } from "./work-status.ts";
-import { cachedModels, loadModels, modelLabel } from "./model-catalog.ts";
+import { cachedModels, hasUsableModel, loadModels, modelLabel } from "./model-catalog.ts";
 import type { ModelChoicesResult } from "./contracts/model-choices-v1.ts";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type * as Monaco from "monaco-editor/esm/vs/editor/editor.api";
@@ -202,7 +202,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   );
   const chat = useSyncExternalStore(chatController.subscribe.bind(chatController), () => chatController.snapshot(), () => chatController.snapshot());
   // The built-in team names no model; a task starts only once every role has one.
-  const unselectedRoles = chat.settings ? (() => { const team = roleSettingsAsV3(chat.settings); return team.roles.filter(role => !role.modelSelector).map(role => roleLabel(role.roleId, team.roleDefinitions, t)); })() : [];
+  const unselectedRoles = chat.settings ? (() => { const team = roleSettingsAsV3(chat.settings); return team.roles.filter(role => !hasUsableModel(role.runtime, role.modelSelector)).map(role => roleLabel(role.roleId, team.roleDefinitions, t)); })() : [];
   useEffect(() => window.m5AppUpdate?.onRestartCheck(() => {
     const ready = !settingsOpen && !appDefaultsOpen && !newChatOpen && !reloadDraft && !reloadingDraft
       && !leavingProject && !leaveError && controller.canLeaveProject() && chatController.canLeaveProjectView();
@@ -419,13 +419,13 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           <h3 id="m5-first-chat-setup-heading">{t("m5.firstChat.setup.title")}</h3>
           <p>{t("m5.firstChat.setup.help")}</p>
           <h4>{t("m5.firstChat.team")}</h4>
-          {chat.settings && <dl className="m5-new-chat-team">{roleSettingsAsV3(chat.settings).roles.map(role => <div key={role.roleId}><dt>{roleLabel(role.roleId, roleSettingsAsV3(chat.settings!).roleDefinitions, t)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{role.modelSelector ? modelLabel(role.runtime, role.modelSelector) : t("m5.roles.unselectedModel")}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl>}
+          {chat.settings && <dl className="m5-new-chat-team">{roleSettingsAsV3(chat.settings).roles.map(role => <div key={role.roleId}><dt>{roleLabel(role.roleId, roleSettingsAsV3(chat.settings!).roleDefinitions, t)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{hasUsableModel(role.runtime, role.modelSelector) ? modelLabel(role.runtime, role.modelSelector) : t("m5.roles.unselectedModel")}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl>}
           <button type="button" className="m5-secondary" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching} onClick={() => openRoleSettings(true)}>{t("m5.firstChat.editTeam")}</button>
           <p>{t("m5.firstChat.editTeamHelp")}</p>
           <ProjectPermissions key={snapshot.project.id} projectId={snapshot.project.id} disabled={!admissionReady || chat.preparing || chat.switching} />
           <label className="m5-first-chat-confirm"><input type="checkbox" checked={setupConfirmed} disabled={chat.preparing || chat.switching} onChange={event => setSetupConfirmed(event.target.checked)} /><span>{t("m5.firstChat.setup.confirm")}</span></label>
         </section> : <details className="m5-chat-team-details"><summary>{t("m5.firstChat.team")}</summary>
-        {chat.settings && <dl className="m5-new-chat-team">{roleSettingsAsV3(chat.settings).roles.map(role => <div key={role.roleId}><dt>{roleLabel(role.roleId, roleSettingsAsV3(chat.settings!).roleDefinitions, t)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{role.modelSelector ? modelLabel(role.runtime, role.modelSelector) : t("m5.roles.unselectedModel")}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl>}
+        {chat.settings && <dl className="m5-new-chat-team">{roleSettingsAsV3(chat.settings).roles.map(role => <div key={role.roleId}><dt>{roleLabel(role.roleId, roleSettingsAsV3(chat.settings!).roleDefinitions, t)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{hasUsableModel(role.runtime, role.modelSelector) ? modelLabel(role.runtime, role.modelSelector) : t("m5.roles.unselectedModel")}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl>}
         <button type="button" className="m5-secondary" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching} onClick={() => openRoleSettings(true)}>{t("m5.firstChat.editTeam")}</button>
         <p>{t("m5.firstChat.editTeamHelp")}</p>
         </details>}
@@ -449,7 +449,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         <div className="m5-goal-examples">{(["explain", "plan", "readme"] as const).map(example => <button key={example} type="button" className="m5-secondary" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching || goal.trim().length > 0} onClick={() => { setGoal(t(`m5.firstChat.${example}`)); setNewChatOpen(true); }}>
           {t(`m5.firstChat.${example}`)}
         </button>)}</div><p className="m5-first-chat-note">{t("m5.firstChat.exampleHelp")}</p>
-        {chat.settings && <details className="m5-chat-team-details"><summary>{t("m5.firstChat.team")}</summary><dl className="m5-team-preview">{roleSettingsAsV3(chat.settings).roles.map(role => <div key={role.roleId}><dt>{roleLabel(role.roleId, roleSettingsAsV3(chat.settings!).roleDefinitions, t)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{role.modelSelector ? modelLabel(role.runtime, role.modelSelector) : t("m5.roles.unselectedModel")}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl><p className="m5-first-chat-note">{t("m5.firstChat.teamHelp")}</p></details>}
+        {chat.settings && <details className="m5-chat-team-details"><summary>{t("m5.firstChat.team")}</summary><dl className="m5-team-preview">{roleSettingsAsV3(chat.settings).roles.map(role => <div key={role.roleId}><dt>{roleLabel(role.roleId, roleSettingsAsV3(chat.settings!).roleDefinitions, t)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{hasUsableModel(role.runtime, role.modelSelector) ? modelLabel(role.runtime, role.modelSelector) : t("m5.roles.unselectedModel")}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl><p className="m5-first-chat-note">{t("m5.firstChat.teamHelp")}</p></details>}
       </section>} chats={<section className="m5-chat-navigation" aria-label={t("m5.navigation.chats")}>
         <div className="m5-chat-list">{chat.chats.map(item => {
           const selected = chat.activeChat?.chatId === item.chatId;
@@ -788,24 +788,28 @@ function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, o
     } catch { if (epoch === choiceEpoch.current) setChoicesError(true); }
     finally { if (epoch === choiceEpoch.current) setChoicesBusy(false); }
   };
-  // One click fills every role still without a model with its provider's
+  const usable = (role: RoleProfileV1) => hasUsableModel(role.runtime, role.modelSelector, choices.get(role.roleId) ?? cachedModels(role.runtime));
+  // One click gives every role without a usable model its provider's
   // recommendation. Only the draft changes; saving stays explicit.
   const fillRecommended = async () => {
     if (!window.m5Models) return;
     const epoch = ++choiceEpoch.current;
     setChoicesBusy(true); setChoicesError(false); setFillMissed(false);
     try {
-      const runtimes = [...new Set(team.roles.filter(role => !role.modelSelector).map(role => role.runtime))];
-      const recommended = new Map<RoleProfileV1["runtime"], { modelSelector: string; reasoningEfforts: readonly string[] }>();
-      for (const runtime of runtimes) {
-        const defaults = (await loadModels(runtime, input => window.m5Models!.request(input))).models.filter(model => model.isDefault);
-        if (defaults.length === 1) recommended.set(runtime, defaults[0]!);
+      const catalogs = new Map<RoleProfileV1["runtime"], readonly { modelSelector: string; isDefault?: boolean; reasoningEfforts: readonly string[] }[]>();
+      for (const runtime of new Set(team.roles.map(role => role.runtime))) {
+        catalogs.set(runtime, (await loadModels(runtime, input => window.m5Models!.request(input))).models);
       }
       if (epoch !== choiceEpoch.current) return;
-      // A provider without exactly one recommendation leaves its roles empty; say so.
-      setFillMissed(runtimes.some(runtime => !recommended.has(runtime)));
+      const needs = (role: RoleProfileV1) => !role.modelSelector || !catalogs.get(role.runtime)!.some(model => model.modelSelector === role.modelSelector);
+      const recommended = (runtime: RoleProfileV1["runtime"]) => {
+        const defaults = catalogs.get(runtime)!.filter(model => model.isDefault);
+        return defaults.length === 1 ? defaults[0] : undefined;
+      };
+      // A provider without exactly one recommendation leaves its roles as they are; say so.
+      setFillMissed(team.roles.some(role => needs(role) && !recommended(role.runtime)));
       setTeam(old => ({ ...old, roles: old.roles.map(item => {
-        const model = item.modelSelector ? undefined : recommended.get(item.runtime);
+        const model = needs(item) ? recommended(item.runtime) : undefined;
         return model ? { ...item, modelSelector: model.modelSelector, reasoningEffort: item.runtime === "codex" ? (model.reasoningEfforts.includes("medium") ? "medium" : model.reasoningEfforts[0] ?? null) : null } : item;
       }) }));
     } catch { if (epoch === choiceEpoch.current) setChoicesError(true); }
@@ -871,11 +875,11 @@ function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, o
     <nav className="m5-role-navigation" aria-label={t("m5.roles.selectRole")}>{roles.map(role => <button
       key={role.roleId} type="button" aria-pressed={selectedRole === role.roleId} aria-controls={`m5-role-panel-${role.roleId}`}
       onClick={() => setSelectedRole(role.roleId)}><strong>{label(role.roleId)}</strong>
-      <span>{role.runtime === "codex" ? "Codex" : "Claude Code"}</span><small>{role.modelSelector || t("m5.roles.chooseModel")}</small></button>)}
+      <span>{role.runtime === "codex" ? "Codex" : "Claude Code"}</span><small className={usable(role) ? undefined : "m5-role-model-warning"}>{usable(role) ? role.modelSelector : t("m5.roles.unselectedModel")}</small></button>)}
     </nav>
     <div className="m5-role-team-tools">
       <button type="button" className="m5-secondary" disabled={editing || !canAddWorker(team)} onClick={add}>{t("m5.roles.add")}</button>
-      {roles.some(role => !role.modelSelector) && <button type="button" className="m5-secondary" disabled={editing || choicesBusy || !window.m5Models} onClick={() => void fillRecommended()}>{t("m5.roles.fillRecommended")}</button>}
+      {roles.some(role => !usable(role)) && <button type="button" className="m5-secondary" disabled={editing || choicesBusy || !window.m5Models} onClick={() => void fillRecommended()}>{t("m5.roles.fillRecommended")}</button>}
       {fillMissed && <small role="status">{t("m5.roles.fillMissed")}</small>}
       <small>{t("m5.roles.limit", { max: G5_ROLES_MAX_V3 - 1 })}</small>
     </div>
@@ -893,23 +897,11 @@ function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, o
         choiceEpoch.current++; setChoices(new Map()); setChoicesError(false);
         setTeam(old => updateProfile(old, role.roleId, { runtime: event.target.value as RoleProfileV1["runtime"], modelSelector: "", reasoningEffort: null }));
       }}><option value="codex">Codex</option><option value="claude-code">Claude Code</option></select></label>
-      <label>{t("m5.roles.model")}<select disabled={editing || !choices.get(role.roleId)?.length} value={role.modelSelector} onChange={event => pickModel(role, event.target.value)}>
+      <label>{t("m5.roles.model")}<select disabled={editing || !choices.get(role.roleId)?.length} value={usable(role) ? role.modelSelector : ""} onChange={event => pickModel(role, event.target.value)}>
         <option value="">{t("m5.roles.chooseModel")}</option>
-        {role.modelSelector && !choices.get(role.roleId)?.some(model => model.modelSelector === role.modelSelector) && <option value={role.modelSelector}>{role.modelSelector} · {t(choices.get(role.roleId)?.length ? "m5.roles.missingModel" : "m5.roles.savedModel")}</option>}
+        {usable(role) && !choices.get(role.roleId)?.some(model => model.modelSelector === role.modelSelector) && <option value={role.modelSelector}>{role.modelSelector} · {t("m5.roles.savedModel")}</option>}
         {choices.get(role.roleId)?.map(model => <option key={model.modelSelector} value={model.modelSelector}>{model.modelSelector}{model.resolvedModel ? ` · ${model.resolvedModel}` : ""}{model.isDefault ? ` · ${t("m5.roles.providerDefault")}` : ""}</option>)}
       </select></label>
-      {(() => {
-        // A saved name the provider no longer lists cannot pass the pre-run
-        // check. Say so, and offer the provider's own recommendation; the
-        // draft changes only on click and still needs an explicit save.
-        const listed = choices.get(role.roleId);
-        if (!listed?.length || !role.modelSelector || listed.some(model => model.modelSelector === role.modelSelector)) return null;
-        const recommended = listed.find(model => model.isDefault);
-        return <p className="m5-role-model-missing" role="status">
-          <span>{t("m5.roles.missingModelHelp", { model: role.modelSelector, runtime: role.runtime === "codex" ? "Codex" : "Claude Code" })}</span>
-          {recommended && <button type="button" className="m5-secondary" disabled={editing} onClick={() => pickModel(role, recommended.modelSelector)}>{t("m5.roles.useRecommended", { model: recommended.resolvedModel ?? recommended.modelSelector })}</button>}
-        </p>;
-      })()}
       <label>{t("m5.roles.reasoning")}<select disabled={editing || !choices.get(role.roleId)} value={role.reasoningEffort ?? ""} onChange={event => change(role.roleId, "reasoningEffort", event.target.value || null)}>
         <option value="" disabled={role.runtime === "codex"}>{t("m5.roles.default")}</option>
         {role.reasoningEffort && !choices.get(role.roleId)?.find(model => model.modelSelector === role.modelSelector)?.reasoningEfforts.includes(role.reasoningEffort) && <option value={role.reasoningEffort}>{role.reasoningEffort} · {t("m5.roles.savedModel")}</option>}
@@ -1086,7 +1078,7 @@ function TeamTimeline({ controller, chat, admissionReady, fixtureAvailable, onCo
   const activity = actualActive ? t(`m5.run.${actualActive.state}`) : startingActual ? t("m5.chat.waitingResponse") : chat.activeChat?.state === "running" ? t("m5.chat.teamWorking") : null;
   const blocked = controller.isActionBlocked();
   const identityUnavailable = chat.agentRecovery !== null && !canAbandonAgentRecovery(chat.agentRecovery);
-return <section className="m5-timeline" aria-label={t("m5.chat.title")}><header><div><p className="m5-eyebrow">{t("m5.chat.title")} · {t(`m5.chat.state.${chat.activeChat!.state}`)}</p><h2 title={chat.activeChat!.goal}>{chat.activeChat!.goal}</h2></div><div className="m5-run-actions">{fixtureActive && <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => void controller.cancelRun()}>{t("m5.chat.cancelDemo")}</button>}{actualActive && <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => void controller.cancelAgentRun(actualActive)}>{t("m5.chat.cancelActual")}</button>}</div></header>{chat.activeChat?.state === "discarded" && !controller.isRecoveryBlocked() && <section className="m5-notice"><p>{t("m5.chat.discardedHelp")}</p></section>}{controller.isRecoveryBlocked() && <section className="m5-error"><strong>{t("m5.chat.recovery")}</strong><p>{identityUnavailable ? t("m5.chat.identityUnavailable") : t("m5.chat.blocked")}</p>{chat.recoveries.filter((item) => item.state === "unresolved").map((item) => <button key={item.recoveryId} type="button" disabled={!admissionReady} onClick={() => void controller.abandonRecovery(item, lang)}>{t("m5.chat.discard")}</button>)}</section>}{chat.agentRecovery && <section className="m5-error">{identityUnavailable ? <><strong>{t("m5.chat.protected")}</strong><p>{t("m5.chat.protectedHelp")}</p></> : <><strong>{t("m5.chat.termination")}</strong><p>{t("m5.chat.terminationHelp")}</p><button type="button" disabled={!admissionReady || chat.agentRecoveryResolving} onClick={() => void controller.abandonAgentRecovery(lang)}>{chat.agentRecoveryResolving ? t("m5.chat.checkingTermination") : t("m5.chat.discardAfterTermination")}</button></>}</section>}{chat.messages.length > 200 && <nav className="m5-diff-pages" aria-label={t("m5.chat.messages")}><button type="button" disabled={messageStart === 0} onClick={() => moveHistory(messageStart - 200)}>{t("m5.chat.older")}</button><span>{t("m5.chat.range", { first: messageStart + 1, last: messageStart + visibleMessages.length, total: chat.messages.length })}</span><button type="button" disabled={messageStart + 200 >= chat.messages.length} onClick={() => moveHistory(messageStart + 200)}>{t("m5.chat.newer")}</button><button type="button" disabled={historyStart === null} onClick={showLatest}>{t("m5.chat.latest")}</button></nav>}<div ref={messagesRef} className="m5-timeline-list" tabIndex={0} aria-label={t("m5.chat.messages")}>{visibleMessages.map((message) => <TeamMessageRow key={message.messageId} message={message} roleLabel={message.roleId ? profileLabel(chat.activeChat!, message.roleId) : ""} messageTime={messageTime} definitions={chat.activeChat!.roleDefinitions} />)}<AgentRuns runs={chat.agentRuns} definitions={chat.activeChat?.roleDefinitions} />{activity && <div className="m5-chat-activity" role="status"><span className="m5-activity-dot" aria-hidden="true"/><strong>{activity}</strong>{actualActive && <span>{profileLabel(chat.activeChat!, actualActive.selectedProfile.roleId)} · {actualActive.selectedProfile.runtime === "codex" ? "Codex" : "Claude Code"}</span>}</div>}{actualActive && admissionReady && !blocked && <ApprovalCard key={actualActive.runId} identity={{chatId:actualActive.chatId,taskId:actualActive.taskId,projectId:actualActive.projectId,worktreeId:actualActive.worktreeId,workspaceIdentity:actualActive.workspaceIdentity,runId:actualActive.runId}} onCancel={() => { if ((chat.activeChat?.schemaVersion ?? 1) !== 1 && window.m5Projects) void controller.cancelTeamTask(input => window.m5Projects!.request(input)); else void controller.cancelAgentRun(actualActive); }} />}</div>{newMessages && <button type="button" className="m5-secondary m5-new-messages" onClick={showLatest}>{t("m5.chat.newMessages")}</button>}<footer className="m5-execution-footer"><div className="m5-demo-controls">{fixtureAvailable && <span>{t("m5.chat.demoHelp")}</span>}{fixtureAvailable && (["planning", "coding", "review"] as const).map((role) => <button key={`demo-${role}`} type="button" disabled={!admissionReady || fixtureActive || Boolean(actualActive) || startingActual || blocked} onClick={() => void controller.startDemo(role)}>{t("m5.chat.demo", { role: t(`m5.roles.${role}`) })}</button>)}</div><div className="m5-actual-controls">{chat.activeChat?.schemaVersion === 1 && <div><p>{t("m5.chat.legacyCoordinator")}</p><button type="button" disabled={!admissionReady || fixtureActive || Boolean(actualActive) || startingActual || blocked} onClick={onCoordinatorChat}>{t("m5.navigation.newChat")}</button></div>}</div></footer></section>;
+return <section className="m5-timeline" aria-label={t("m5.chat.title")}><header><div><p className="m5-eyebrow">{t("m5.chat.title")} · {t(`m5.chat.state.${chat.activeChat!.state}`)}</p><h2 title={chat.activeChat!.goal}>{chat.activeChat!.goal}</h2></div><div className="m5-run-actions">{fixtureActive && <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => void controller.cancelRun()}>{t("m5.chat.cancelDemo")}</button>}{actualActive && <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => void controller.cancelAgentRun(actualActive)}>{t("m5.chat.cancelActual")}</button>}</div></header>{chat.activeChat?.state === "discarded" && !controller.isRecoveryBlocked() && <section className="m5-notice"><p>{t("m5.chat.discardedHelp")}</p></section>}{controller.isRecoveryBlocked() && <section className="m5-error"><strong>{t("m5.chat.recovery")}</strong><p>{identityUnavailable ? t("m5.chat.identityUnavailable") : t("m5.chat.blocked")}</p>{chat.recoveries.filter((item) => item.state === "unresolved").map((item) => <button key={item.recoveryId} type="button" disabled={!admissionReady} onClick={() => void controller.abandonRecovery(item, lang)}>{t("m5.chat.discard")}</button>)}</section>}{chat.agentRecovery && <section className="m5-error">{identityUnavailable ? <><strong>{t("m5.chat.protected")}</strong><p>{t("m5.chat.protectedHelp")}</p></> : <><strong>{t("m5.chat.termination")}</strong><p>{t("m5.chat.terminationHelp")}</p><button type="button" disabled={!admissionReady || chat.agentRecoveryResolving} onClick={() => void controller.abandonAgentRecovery(lang)}>{chat.agentRecoveryResolving ? t("m5.chat.checkingTermination") : t("m5.chat.discardAfterTermination")}</button></>}</section>}{chat.messages.length > 200 && <nav className="m5-diff-pages" aria-label={t("m5.chat.messages")}><button type="button" disabled={messageStart === 0} onClick={() => moveHistory(messageStart - 200)}>{t("m5.chat.older")}</button><span>{t("m5.chat.range", { first: messageStart + 1, last: messageStart + visibleMessages.length, total: chat.messages.length })}</span><button type="button" disabled={messageStart + 200 >= chat.messages.length} onClick={() => moveHistory(messageStart + 200)}>{t("m5.chat.newer")}</button><button type="button" disabled={historyStart === null} onClick={showLatest}>{t("m5.chat.latest")}</button></nav>}<div ref={messagesRef} className="m5-timeline-list" tabIndex={0} aria-label={t("m5.chat.messages")}>{visibleMessages.map((message) => <TeamMessageRow key={message.messageId} message={message} roleLabel={message.roleId ? profileLabel(chat.activeChat!, message.roleId) : ""} messageTime={messageTime} definitions={chat.activeChat!.roleDefinitions} />)}<AgentRuns runs={chat.agentRuns} definitions={chat.activeChat?.roleDefinitions} />{activity && <div className="m5-chat-activity" role="status"><span className="m5-activity-dot" aria-hidden="true"/><strong>{activity}</strong>{actualActive && <span>{roleLabel(actualActive.selectedProfile.roleId, chat.activeChat!.roleDefinitions, t)} · {profileLabel(chat.activeChat!, actualActive.selectedProfile.roleId)}</span>}</div>}{actualActive && admissionReady && !blocked && <ApprovalCard key={actualActive.runId} identity={{chatId:actualActive.chatId,taskId:actualActive.taskId,projectId:actualActive.projectId,worktreeId:actualActive.worktreeId,workspaceIdentity:actualActive.workspaceIdentity,runId:actualActive.runId}} onCancel={() => { if ((chat.activeChat?.schemaVersion ?? 1) !== 1 && window.m5Projects) void controller.cancelTeamTask(input => window.m5Projects!.request(input)); else void controller.cancelAgentRun(actualActive); }} />}</div>{newMessages && <button type="button" className="m5-secondary m5-new-messages" onClick={showLatest}>{t("m5.chat.newMessages")}</button>}<footer className="m5-execution-footer"><div className="m5-demo-controls">{fixtureAvailable && <span>{t("m5.chat.demoHelp")}</span>}{fixtureAvailable && (["planning", "coding", "review"] as const).map((role) => <button key={`demo-${role}`} type="button" disabled={!admissionReady || fixtureActive || Boolean(actualActive) || startingActual || blocked} onClick={() => void controller.startDemo(role)}>{t("m5.chat.demo", { role: t(`m5.roles.${role}`) })}</button>)}</div><div className="m5-actual-controls">{chat.activeChat?.schemaVersion === 1 && <div><p>{t("m5.chat.legacyCoordinator")}</p><button type="button" disabled={!admissionReady || fixtureActive || Boolean(actualActive) || startingActual || blocked} onClick={onCoordinatorChat}>{t("m5.navigation.newChat")}</button></div>}</div></footer></section>;
 }
 
 function SessionDiagnosticsHelp({ runtime }: { runtime: string }) {

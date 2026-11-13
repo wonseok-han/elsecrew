@@ -79,7 +79,7 @@ impl ProjectManager {
         let value: Value = serde_json::from_slice(&bytes)
             .map_err(|error| ProjectFailure::manifest(error.to_string()))?;
         validate(&value)?;
-        Ok(value)
+        Ok(crate::chat::without_placeholder_models(value))
     }
 
     // Product calls hold Storage's exclusive ownership of the one fixed database

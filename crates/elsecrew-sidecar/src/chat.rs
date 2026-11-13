@@ -152,7 +152,7 @@ impl G5Manager {
     ) -> Result<Value, ProjectFailure> {
         let mut project = project_record(storage, project_id)?;
         if let Some(settings) = project.get("role_settings") {
-            return Ok(settings.clone());
+            return Ok(without_placeholder_models(settings.clone()));
         }
         let mut settings = settings_value(project_id, 1);
         let defaults = projects.app_role_defaults(storage.custom_roles_enabled()?)?;
@@ -254,7 +254,7 @@ impl G5Manager {
         // Refuse before any snapshot exists: a team without models could never
         // bind it, and the unbound copy would only become cleanup work.
         let unselected = match before.get("role_settings") {
-            Some(settings) => has_unselected_model(settings),
+            Some(settings) => has_unselected_model(&without_placeholder_models(settings.clone())),
             None => has_unselected_model(&projects.app_role_defaults(storage.custom_roles_enabled()?)?),
         };
         if unselected {
@@ -1720,12 +1720,27 @@ impl Drop for ProductDefaultsForTest {
 #[cfg(test)]
 pub(crate) fn complete_default_roles_for_test() -> Value {
     json!([
-        {"roleId":"coordinator","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"},
-        {"roleId":"planning","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"},
-        {"roleId":"design","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"},
+        {"roleId":"coordinator","runtime":"codex","modelSelector":"fixture-codex","reasoningEffort":"medium","permission":"readOnly"},
+        {"roleId":"planning","runtime":"codex","modelSelector":"fixture-codex","reasoningEffort":"medium","permission":"readOnly"},
+        {"roleId":"design","runtime":"codex","modelSelector":"fixture-codex","reasoningEffort":"medium","permission":"readOnly"},
         {"roleId":"coding","runtime":"claude-code","modelSelector":"opus","reasoningEffort":null,"permission":"workspaceWrite"},
-        {"roleId":"review","runtime":"codex","modelSelector":"sol","reasoningEffort":"high","permission":"readOnly"}
+        {"roleId":"review","runtime":"codex","modelSelector":"fixture-codex","reasoningEffort":"high","permission":"readOnly"}
     ])
+}
+
+/// Early builds seeded the fixture placeholder `sol`, which no provider lists,
+/// into V3 settings. Read it as unselected so the user simply picks a model;
+/// legacy V1/V2 fixture sets keep it for the demo runtime.
+pub(crate) fn without_placeholder_models(mut settings: Value) -> Value {
+    if settings["schemaVersion"] == 3 {
+        for role in settings["roles"].as_array_mut().into_iter().flatten() {
+            if role["modelSelector"] == "sol" {
+                role["modelSelector"] = json!("");
+                role["reasoningEffort"] = Value::Null;
+            }
+        }
+    }
+    settings
 }
 
 /// Saved settings may leave a model unselected; chats snapshot only complete teams.

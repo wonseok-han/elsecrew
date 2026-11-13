@@ -6749,7 +6749,7 @@ fn custom_roles_v3_seed_update_snapshot_and_legacy_gate() {
     assert_eq!(seeded["roleDefinitions"][0]["name"], "총괄");
     validate_g5_payload_v1("projectRoleSettings", &seeded).unwrap();
     // A custom team: renamed read-only planning may write, new roles are allowed.
-    let profile = |id: &str, permission: &str| json!({"roleId":id,"runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":permission});
+    let profile = |id: &str, permission: &str| json!({"roleId":id,"runtime":"codex","modelSelector":"fixture-codex","reasoningEffort":"medium","permission":permission});
     let roles = json!([profile("coordinator", "readOnly"), profile("research", "readOnly"), profile("planning", "workspaceWrite")]);
     let definitions = json!([
         {"roleId":"coordinator","name":"리드","responsibility":"Delegates."},
@@ -6804,7 +6804,7 @@ fn compaction_fits_large_v3_chat_records_into_bounded_steps() {
     let mut f = Fixture::with_durable_output(true);
     f.chats.default_role_settings(&mut f.storage, &f.projects, &f.project_id, "req_big_v3_seed").unwrap();
     let ids = ["coordinator", "planning", "design", "coding", "review", "research", "writing", "support"];
-    let roles: Vec<Value> = ids.iter().map(|id| json!({"roleId":id,"runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"})).collect();
+    let roles: Vec<Value> = ids.iter().map(|id| json!({"roleId":id,"runtime":"codex","modelSelector":"fixture-codex","reasoningEffort":"medium","permission":"readOnly"})).collect();
     let definitions: Vec<Value> = ids.iter().map(|id| json!({"roleId":id,"name":id,"responsibility":"r".repeat(elsecrew_protocol::run_recovery_v1::G5_ROLE_RESPONSIBILITY_MAX_BYTES_V3)})).collect();
     f.chats.update_role_settings(&mut f.storage, &f.project_id, 1, json!(roles), Some(json!(definitions)), "req_big_v3_roles").unwrap();
     let snapshot = f.snapshot("req_big_v3_snapshot");
@@ -6872,4 +6872,24 @@ fn built_in_team_names_no_model_and_incomplete_teams_cannot_prepare_a_chat() {
     let refused = fixture.chats.prepare_chat_workspace(&mut fixture.storage, &mut fixture.projects, &project_id, "req_refused").unwrap_err();
     assert_eq!(refused.kind, "dirtyConflict");
     assert_eq!(super::prepared_workspace_records(&fixture.storage).unwrap().len(), before, "no snapshot may be prepared for an incomplete team");
+}
+
+#[test]
+fn saved_placeholder_sol_reads_as_unselected_in_v3_only() {
+    let mut fixture = Fixture::with_durable_output(true);
+    let project_id = fixture.project_id.clone();
+    fixture.chats.default_role_settings(&mut fixture.storage, &fixture.projects, &project_id, "req_seed").unwrap();
+    // Early builds stored the fixture name `sol`; no provider lists it.
+    let mut roles = crate::chat::complete_default_roles_for_test();
+    roles[1]["modelSelector"] = json!("sol");
+    let definitions = crate::chat::default_settings_v3("app_defaults", 1)["roleDefinitions"].clone();
+    fixture.chats.update_role_settings(&mut fixture.storage, &project_id, 1, roles, Some(definitions), "req_sol").unwrap();
+    let read = fixture.chats.default_role_settings(&mut fixture.storage, &fixture.projects, &project_id, "req_read").unwrap();
+    assert_eq!(read["roles"][1]["modelSelector"], "");
+    assert!(read["roles"][1]["reasoningEffort"].is_null());
+    assert_eq!(read["roles"][0]["modelSelector"], "fixture-codex");
+    assert!(fixture.chats.prepare_chat_workspace(&mut fixture.storage, &mut fixture.projects, &project_id, "req_refused").is_err());
+    // Legacy V1/V2 fixture sets keep `sol` for the demo runtime.
+    let legacy = crate::chat::settings_value("p", 1);
+    assert_eq!(crate::chat::without_placeholder_models(legacy.clone()), legacy);
 }

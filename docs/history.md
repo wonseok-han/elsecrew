@@ -2,6 +2,16 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 목록에 없는 모델은 '미선택'으로, 권한 카드 간격, 실행 중 표시
+- 사용자 지적: 저장된 `sol`이 역할 목록에 그대로 보였고, "목록에 없으면 그냥 미선택이면 된다, 그 값이 왜 있어야 하나"라고 했다. `sol`은 초기 fixture가 기본값으로 저장한 가짜 이름이다.
+  - sidecar `without_placeholder_models`: V3 설정을 읽을 때(`default_role_settings`의 저장값 반환, `app_role_defaults` 파일 읽기, 준비 단계의 읽기 전용 판정) `sol`을 `""`/null로 읽는다. V1/V2 fixture 집합은 그대로 둔다.
+  - 단위 테스트 팀과 smoke·stdio 테스트의 Codex 모델은 실제처럼 보이지 않는 `fixture-codex`로 바꿨다.
+  - UI `hasUsableModel(runtime, selector, models)`: 공급자의 마지막 목록에 없는 모델을 '모델 미선택'으로 취급한다. 역할 목록, 모델 선택 값, 팀 요약, 새 작업 차단 조건에 적용했다. 목록을 한 번도 받지 못했으면 저장값을 믿고 최종 판단은 실행 전 검사에 맡긴다.
+  - 직전에 넣은 '지금 목록에 없음' 표시, 역할별 안내 상자, 추천 버튼은 없앴다. 팀 단위 '비어 있거나 목록에 없는 모델을 추천 모델로 바꾸기'(초안만 변경)만 남겼다.
+- 작업 권한(`ProjectPermissions`)을 한 장의 카드로 정리했다. 안쪽 여백 20px, 옵션 묶음, 설명과 저장 버튼 사이 간격을 줬다. 설정 › 프로젝트 관리와 첫 작업 준비 화면에서 캡처로 확인했다.
+- 실행 중 표시가 'Codex · 모델 · 추론 · Codex'로 실행 환경을 두 번 붙이던 것을 '역할 이름 · Codex · 모델 · 추론'으로 바꿨다.
+- 검증: tsc 통과, 프런트737 통과, renderer smoke·권한UI 통과. Rust는 새 테스트 `saved_placeholder_sol_reads_as_unselected_in_v3_only`를 포함한 영향 범위(sidecar lib 26개 필터, stdio `binary_fresh_b`)만 다시 돌려 통과했다. 직전 전체 실행 결과는 바로 앞 엔트리를 본다.
+
 ### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 내장 기본 팀의 모델 제거(미선택 상태 도입)
 - 사용자 결정: 내장 기본 팀에 모델을 심지 않는다. V3 `default_settings_v3`은 모든 역할을 `modelSelector:""`·`reasoningEffort:null`로 둔다. 레거시 V1 `settings_value`(fixture `sol`)는 V12 이하 저장소와 fixture 데모용으로 남겼다. 이미 저장된 사용자 설정은 바꾸지 않는다.
 - 계약: V3 역할 설정(`projectRoleSettings`·`projectRoleSettingsUpdate`)에서만 빈 모델을 허용하고, 이때 reasoningEffort는 null이어야 한다. roleProfile 단일 검증·chatRecord roleSnapshots·실행 계열·V1/V2 설정은 계속 모델이 있어야 한다. Rust `validate_role_profile_with`/`validate_role_set_v3(.., allow_unselected)`과 TS `validateRoleProfileV1(value, allowUnselected)`를 맞췄다. TS 레거시 경로의 `.map(validateRoleProfileV1)`은 배열 인덱스가 두 번째 인자로 들어가 빈 모델을 허용할 수 있어서 화살표 함수로 바꿨다.
