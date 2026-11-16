@@ -12,7 +12,17 @@ function relativeTime(at: string, lang: string, now: number): string {
   return format.format(Math.round(seconds / 86400), "day");
 }
 
-export interface BellNotice { text: string; action?: ReactNode }
+/** How the notice reads at a glance: still working, done, or stopped short. */
+export type BellNoticeTone = "info" | "progress" | "success" | "warning";
+export interface BellNotice { text: string; action?: ReactNode; tone?: BellNoticeTone }
+
+function NoticeIcon({ tone }: { tone: BellNoticeTone }) {
+  if (tone === "progress") return <span className="m5-notice-toast-spinner" aria-hidden="true" />;
+  const path = tone === "success" ? "M5 12.5l4.5 4.5L19 7.5"
+    : tone === "warning" ? "M12 4l9 16H3L12 4zM12 10v4.5M12 17.5v.01"
+    : "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v5M12 8v.01";
+  return <svg className="m5-notice-toast-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={path} /></svg>;
+}
 /** An error from what the user just did: stays until dismissed, details fold. */
 export interface BellError { title: string; body?: ReactNode; /** What makes a later, different error show again after dismissing. */ key?: string }
 
@@ -46,7 +56,9 @@ function NoticeToast({ notice }: { notice: BellNotice }) {
   const { t } = useI18n();
   const [dismissed, dismiss] = useDismissed(notice.text, Boolean(notice.action));
   if (dismissed) return null;
-  return <div className="m5-notice-toast" role="status" aria-live="polite">
+  const tone = notice.tone ?? "info";
+  return <div className={`m5-notice-toast m5-notice-toast-${tone}`} role="status" aria-live="polite">
+    <NoticeIcon tone={tone} />
     <span dir="auto">{notice.text}</span>
     {notice.action}
     <button type="button" className="m5-notice-toast-close" aria-label={t("m5.notifications.dismiss")} title={t("m5.notifications.dismiss")} onClick={dismiss}>×</button>
@@ -77,7 +89,7 @@ export function NotificationBell({ center, onOpen, notice = null, errors = [], p
     if (hasProblem && !hadProblem.current) setProblemNotice(value => value + 1);
     hadProblem.current = hasProblem;
   }, [hasProblem]);
-  const shownNotice = notice ?? (hasProblem && problemNotice > 0 ? { text: t("m5.notifications.problemNotice") } : null);
+  const shownNotice: BellNotice | null = notice ?? (hasProblem && problemNotice > 0 ? { text: t("m5.notifications.problemNotice"), tone: "warning" } : null);
   return <div className="m5-bell-area"><details ref={details} className="m5-notification-bell" onKeyDown={event => { if (event.key === "Escape" && details.current) details.current.open = false; }}>
     <summary title={hasProblem ? t("m5.notifications.problem") : t("m5.notifications.title")} aria-label={[hasProblem ? t("m5.notifications.problem") : null, unread ? t("m5.notifications.unread", { count: unread }) : t("m5.notifications.title")].filter(Boolean).join(" · ")}>
       <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>

@@ -1242,11 +1242,18 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-toast-stack { position: absolute; top: calc(100% + 8px); right: 0; z-index: 40; display: grid; justify-items: end; gap: 8px; }
 .m5-notice-toast { display: flex; align-items: center; gap: 10px; width: max-content; max-width: min(420px, 70vw); padding: 10px 10px 10px 14px; border: 1px solid var(--m5-border-strong); border-radius: 10px; background: var(--m5-surface); color: var(--m5-text); font-size: 12px; line-height: 1.5; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); animation: m5-toast-in .16s ease-out; }
 .m5-notice-toast > span { flex: 1; min-width: 0; }
+/* Status notices: a colored edge and icon so they stand out from the dark chrome. */
+.m5-notice-toast-info, .m5-notice-toast-progress, .m5-notice-toast-success, .m5-notice-toast-warning { --m5-toast-tone: #8fb3e6; gap: 12px; padding: 12px 10px 12px 14px; border-color: color-mix(in srgb, var(--m5-toast-tone) 55%, transparent); background: color-mix(in srgb, var(--m5-toast-tone) 12%, var(--m5-raised)); box-shadow: inset 3px 0 var(--m5-toast-tone), 0 10px 28px rgba(0, 0, 0, .45); font-size: 13px; }
+.m5-notice-toast-progress { --m5-toast-tone: var(--m5-action-bg); }
+.m5-notice-toast-success { --m5-toast-tone: #7cc79a; }
+.m5-notice-toast-warning { --m5-toast-tone: #e8c06a; }
+.m5-notice-toast-icon { flex: none; width: 18px; height: 18px; color: var(--m5-toast-tone); }
+.m5-notice-toast-spinner { flex: none; width: 14px; height: 14px; margin: 2px; border: 2px solid color-mix(in srgb, var(--m5-toast-tone) 30%, transparent); border-top-color: var(--m5-toast-tone); border-radius: 50%; animation: m5-usage-spin .8s linear infinite; }
 .m5-notice-toast > .m5-secondary { flex: none; font-size: 12px; }
 .m5-notice-toast-close { flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--m5-muted); font-size: 16px; line-height: 1; cursor: pointer; }
 .m5-notice-toast-close:hover { background: var(--m5-raised); color: var(--m5-text); }
 @keyframes m5-toast-in { from { opacity: 0; transform: translateY(-4px); } }
-@media (prefers-reduced-motion: reduce) { .m5-notice-toast { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .m5-notice-toast, .m5-notice-toast-spinner { animation: none; } }
 .m5-notification-bell > summary { position: relative; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; color: var(--m5-muted); cursor: pointer; list-style: none; }
 .m5-notification-bell > summary::-webkit-details-marker { display: none; }
 .m5-notification-bell > summary:hover, .m5-notification-bell[open] > summary { background: var(--m5-raised); color: var(--m5-text); }

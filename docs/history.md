@@ -2,6 +2,15 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — 상태 알림 토스트를 눈에 띄게
+- 사용자 보고: "총괄 역할의 Claude Code 준비 상태를 확인하고 있어요" 토스트가 어두운 화면에 묻혀 잘 보이지 않는다.
+- 처리:
+  - `BellNotice`에 `tone`(info·progress·success·warning)을 추가했다.
+  - 토스트에 상태 색의 왼쪽 띠·옅은 배경·테두리와 아이콘을 붙이고, 글자를 13px로 키웠다. 아이콘은 확인 중이면 회전 표시, 접수되면 체크, 막히면 경고다.
+  - 채팅 알림 키로 tone을 고른다(`chatNoticeTone`: checking→progress, ready→success, blocked→warning). '확인이 필요한 작업' 알림은 warning이다.
+  - 동작 줄이기 설정에서는 회전을 멈춘다.
+- 검증: `pnpm build`, `npm test` 730 통과. 실제 화면 확인은 사용자 dev 앱(HMR)에서 한다.
+
 ### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — 다시 켜도 프로젝트가 안 뜨던 문제(중단된 정리 작업)·실패한 실행 하나가 엔진을 끊던 문제
 - 사용자 보고: 앞선 멈춤 뒤 앱과 로컬 서버를 끄고 다시 켰다. 그러자 "작업 공간을 아직 열 수 없어요. 앱을 다시 열어 보세요"만 보이고, 프로젝트 목록이 비어 추가도 할 수 없었다.
 - 원인 1(확정):

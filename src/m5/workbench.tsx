@@ -47,7 +47,7 @@ import { requestEditorSave } from "./editor-actions.ts";
 import { languageFor } from "./editor-language.ts";
 import { ProjectCatalog } from "./project-catalog-view.tsx";
 import { WorkStatusPanel } from "./work-status-view.tsx";
-import { NotificationBell } from "./notification-bell.tsx";
+import { NotificationBell, type BellNoticeTone } from "./notification-bell.tsx";
 import { startNotificationFeed, type NotificationFeedBridge } from "./notification-feed.ts";
 import { NotificationCenter, osNotificationsEnabled, type AppNotification } from "./notifications.ts";
 import { validateProjectCatalogResult } from "./contracts/project-catalog-v1.ts";
@@ -109,6 +109,13 @@ function useStorageAdmission(bridge: SupportedM5Bridge, onRecovered: () => void)
     return () => { active = false; poller.stop(); };
   }, [bridge]);
   return { admission, fixtureAvailable };
+}
+
+function chatNoticeTone(key: string | undefined): BellNoticeTone {
+  if (key === "m5.agentNotice.checking") return "progress";
+  if (key === "m5.agentNotice.ready") return "success";
+  if (key === "m5.agentNotice.blocked") return "warning";
+  return "info";
 }
 
 function StorageAdmissionNotice({ admission }: { admission: AdmissionView }) {
@@ -437,7 +444,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           {chat.activeChat && chat.error.retryChatId === chat.activeChat.chatId && <button type="button" className="m5-secondary" disabled={!admissionReady || chat.switching} onClick={() => void chatController.retryHistory()}>{t("m5.chat.reloadHistory")}</button>}
           <details><summary>{t("m5.feedback.details")}</summary><pre>{chat.error.detail}</pre></details></> }
           : null].filter(error => error !== null)}
-        notice={chat.notice ? { text: formatChatNotice(chat, lang), action: chatConnectionTarget(chat) ? <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => {
+        notice={chat.notice ? { text: formatChatNotice(chat, lang), tone: chatNoticeTone(chat.noticeKey), action: chatConnectionTarget(chat) ? <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => {
         const provider = chatConnectionTarget(chat);
         if (provider) { setConnectionReveal(current => ({ provider, sequence: (current?.sequence ?? 0) + 1 })); setPreferencesSection("agents"); setPreferencesOpen(true); }
       }}>{t("m5.setup.openConnection", { name: chatConnectionTarget(chat) === "codex" ? "Codex" : "Claude Code" })}</button> : undefined }
