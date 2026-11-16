@@ -47,7 +47,7 @@ async function probeCleanupConsent() {
       ['retireApplication', '현재 복구점 종료 내용 확인', '현재 복구점 종료 내용 확인', '복구점 종료하고 이력에 보존'],
     ]) {
       if (action === 'retireApplication') {
-        button(recovery, '반영·복원 기록 확인').click();
+        button(recovery, '다시 확인').click();
         await wait(() => button(recovery, inspect));
       }
       const scope = recovery.querySelector('section[aria-label="' + section + '"]');

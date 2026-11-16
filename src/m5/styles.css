@@ -1268,3 +1268,11 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-notification-attention .m5-notification-kind { color: #f0b86e; }
 .m5-notification-stopped .m5-notification-kind { color: #f29b9b; }
 .m5-status-notice > summary .m5-status-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 360px; }
+.m5-recovery-check { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.m5-recovery-check > p { margin: 0; color: var(--m5-muted); }
+.m5-recovery-check > button { margin: 0; }
+.m5-recovery-item { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--m5-border); border-radius: 10px; background: var(--m5-surface); }
+.m5-recovery-item > h5 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
+.m5-recovery-item > p, .m5-recovery-item > div > p { margin: 4px 0; }
+.m5-maintenance-group > details { margin-top: 10px; }
+.m5-maintenance-group > details > summary { cursor: pointer; font-size: 13px; }

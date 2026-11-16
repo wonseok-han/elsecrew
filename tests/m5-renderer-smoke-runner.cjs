@@ -281,8 +281,8 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-maintenance-group')?.getClientRects().length > 0", "troubleshooting expanded")};
     await (${probeRecoveryHistory.toString()})(${JSON.stringify(recoveryHistoryFixture)});
     const recoveryButton = text => [...document.querySelectorAll('[aria-label="프로젝트 시작 실패 복구"] button')].find(b => b.textContent === text);
-    recoveryButton('시작 실패 확인').click();
-    await ${waitFor("document.querySelector('[aria-label=\"실패한 준비 종료 확인\"]')", "explicit preparation inspection")};
+    // The page checks for an interrupted start by itself.
+    await ${waitFor("document.querySelector('[aria-label=\"실패한 준비 종료 확인\"]')", "automatic preparation inspection")};
     document.querySelectorAll('.m5-preferences-layout > nav button')[0].click();
     await ${waitFor("document.querySelector('.m5-preferences-row').getClientRects().length > 0", "leave project management")};
     document.querySelectorAll('.m5-preferences-layout > nav button')[4].click();

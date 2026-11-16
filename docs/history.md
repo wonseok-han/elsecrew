@@ -2,6 +2,44 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — 작업마다 독립 복사본·멈춘 작업 삭제로 정리·'문제 해결' 자동 점검
+- 배경: 앱이 멈춘 뒤 프로젝트가 열리지 않았고(manifestMismatch), Claude 연결도 `providerLoginRecoveryRequired`로 막혔다.
+  - 원인 1: 새 작업 복사본이 프로젝트의 현재 복사본 지정까지 바꿨다. 그래서 그 작업의 실행이 멈춰 manifest가 `recoveryRequired`가 되자 프로젝트 열기가 실패했다.
+  - 원인 2: 앱 데이터의 `claude-login.pending`이 멈춘 실행(`agent_run_fce7…`)에 묶여 있었다. 기록된 프로세스는 이미 없었지만 그 실행의 복구가 해결돼야 잠금이 풀린다.
+  - 원인 3: 새 복사본 생성은 전역 blocker가 하나라도 있으면 거절했다.
+- 사용자 결정: 작업별 작업 공간과 작업 삭제로 멈춘 작업이 프로젝트를 깨지 않게 한다. 문제 해결의 "반영·복원 및 진단 기록"과 "중단된 백업 준비 확인" 버튼은 없앤다.
+- 변경(sidecar):
+  - `project.rs`의 `create_worktree_inner`.
+    - `FreshChat`과 새 `ChatApplicationCandidate`는 작업 복사본을 만든 뒤 프로젝트 지정을 원래 프로젝트 복사본으로 되돌린다(`restore_project_copy`, 원래 복사본이 `validate_active_project`를 통과할 때만).
+    - 프로젝트가 작업 복사본을 가리키는 예전 데이터라면 `ReuseActive`도 재사용하지 않고 새 프로젝트 복사본을 만든다(`is_task_copy`).
+  - 기준선 작업은 `prepare_chat_application_workspace`로 자기 복사본을 받는다. 기존 `prepare_application_workspace`는 테스트 전용이 됐다.
+  - `snapshot_export_blockers`: 작업에 속한 run·잠금은 새 복사본 생성을 막지 않는다. 다만 반영 잠금(evidence `applicationId`), 잠금 기록이 없는 경우, 작업 소유가 아닌 잠금은 계속 막는다. 또 `application_intent`가 applied/restored/abandoned가 아니면 생성을 거절한다.
+  - `settle_deleted_work`(삭제 직후와 `finishDeletions`):
+    1. 삭제된 작업과 삭제된 프로젝트의 작업에 남은 실행 복구를 `recovery.resolveAgent`와 같은 증명으로 해결한다.
+    2. 파일을 지우기 전에 로그인 잠금을 기존 recover와 같은 증명으로 푼다(`LoginManager::release_bound_fence`).
+    3. 그래도 남은 잠금이 가리키는 작업 공간 파일은 `finish_deletions_keeping`으로 보존한다. 잠금 해제 증명이 그 manifest를 읽기 때문이다.
+  - `inspectPreparation`은 멈춘 준비가 없으면 `inspection:null`을 정상 응답한다.
+- 변경(화면):
+  - '문제 해결'은 열 때 반영 상태·끝나지 않은 백업 준비·멈춘 시작 준비를 자동 조회하고 실제 항목만 카드로 보여 준다. "다시 확인" 버튼이 있고, 조회에 실패하면 '확인하지 못했어요'로 표시한다. 지난 반영 이력은 접힌 항목으로 옮겼다.
+  - Claude 연결 보류 안내는 "멈춘 작업을 삭제하면 자동 정리"로 바꿨다. 같은 내용의 경고 문단은 숨기고 진단 코드는 펼침으로 남겼다.
+- 독립 검토(읽기 전용 1명):
+  - 차단 1건을 고쳤다(B1: 복구 해결 직후 파일 삭제로 manifest가 사라져 로그인 잠금이 영구히 남음).
+  - 중요 3건을 고쳤다(삭제 프로젝트 포함, 반영 잠금 유지, 자동 점검의 거짓 '문제 없음').
+  - 경미 M2~M6도 고쳤다.
+  - 재검토: 차단·중요 결함은 없었다. B1 순서(해결 → 잠금 해제 → 파일 삭제, 실패 시 보존), `release_bound_fence`에 부작용이 없음, I2 보강이 applied 이후 새 작업을 막지 않음을 확인했다.
+  - 재검토 경미 N1(점검 도중 화면이 바뀌면 결과가 버려져 상태 문구가 비는 문제)은 한 번 더 점검하도록 고쳤다.
+  - N2(백업 조회 오류 때 문구 차이)와 N4(삭제 → 복구 해결 → 잠금 해제 → 파일 삭제를 잇는 통합 테스트 없음)는 남았다.
+  - N5: 로그인 안내가 '작업 삭제'를 권하는데, 삭제하면 그 작업의 미반영 변경도 사라진다. 사용자 확인이 필요하다.
+- 남은 것:
+  - M1: `persist_active`와 `restore_project_copy`가 서로 다른 원장 이벤트라, 그 사이에 크래시가 나면 프로젝트 복사본 하나가 고아로 남는다(디스크만 낭비).
+  - M7: 프로젝트 단위 반영 경로(`applicationPreviewPage` chatId:null)는 기준선이 없어 항상 거절된다. 계약 정리가 필요하다.
+  - 삭제된 프로젝트에서 복구 해결·잠금 해제 증명이 통과하는지는 확인하지 않았다.
+  - 실제 앱에서 사용자의 현재 막힌 상태를 푸는 것(프로젝트 열기 → 멈춘 작업 삭제 → 새로고침)은 아직 확인하지 않았다.
+- 검증:
+  - sidecar 전체 nextest: 1차 815 통과, 검토 반영 뒤 817 통과(46 skipped, nice -n 15, 약 6.6분).
+  - `pnpm build` 통과, `npm test` 722 통과, `m5:test:editor` 68 통과(렌더러 스모크·복구/정리 프로브 포함, N1 수정 뒤 재실행), 권한 UI 스모크 통과.
+  - 새 Rust 테스트 3개: 작업별 복사본, 작업 잠금 제외·반영 잠금 차단, sign-in hold 작업 공간 보류.
+
 ### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — Claude 토큰 읽기를 `/usr/bin/security`로(키체인 재허용 반복 해소)
 - 사용자 결정: 패키지마다 키체인 허용을 다시 묻는 문제를 고친다.
 - 변경(`provider_claude_refresh.rs`): sidecar가 앱 전용 Claude 로그인(`Claude Code-credentials-<hash>`)을 읽을 때 `security_framework` 대신 `/usr/bin/security find-generic-password … -w`를 쓴다(새 함수 `read_app_credentials`). 이 도구는 서명이 고정이라 '항상 허용' 한 번이 빌드가 바뀌어도 유지된다. 출력 크기를 제한하고, 실패하면 버퍼를 지운다. 비밀값은 argv가 아니라 pipe로만 오간다. exit 44는 항목 없음으로 처리한다.
@@ -154,6 +192,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **작업마다 독립 복사본(2026-11-16)**: 새 작업 복사본은 프로젝트의 현재 복사본 지정을 바꾸지 않는다(`restore_project_copy`). 작업에 속한 복구는 새 복사본 생성을 막지 않지만, 반영 잠금(`applicationId`)과 진행 중인 `application_intent`는 막는다. 공급자 로그인 잠금은 실행에 묶이며, 해제 증명이 그 작업 공간의 manifest를 읽는다. 그래서 잠금이 남은 작업 공간 파일은 지우면 안 된다(`finish_deletions_keeping`).
 - **삭제는 삭제 표지 + 파일 삭제(2026-11-13)**: 원장은 append-only이고 재생 검증을 하므로 이벤트 행은 지우지 않는다(DELETE trigger 6개, 압축 흔적, UNIQUE `canonical_path`). 프로젝트 ID는 더 이상 경로 해시와 같다고 가정하지 않는다(`project_id_by_path`, `fresh_project_id`). 최신 작업의 작업 공간은 프로젝트 현재 복사본과 같은 경우가 많으므로, 그대로 지우면 프로젝트가 깨진다. 설계는 `docs/proposals/m5-project-deletion.md`.
 - **설정 구조와 수동 반영 폐지(2026-11-13)**: 프로젝트 단위 수동 반영(`prepareApplicationWorkspace`·`applicationPreview`)은 화면·브리지·sidecar 요청에서 제거됐다. 원본 반영은 작업(채팅) 단위 미리보기·확인 흐름만 쓴다. 복구·진단 도구는 프로젝트 설정의 접힌 '문제 해결'에 있다. 개발 실행은 `target/debug/elsecrew-sidecar`가 필요하다(`cargo build -p elsecrew-sidecar`). `provider_login_gate` descriptor 테스트는 병렬 실행에서 간헐 실패할 수 있다.
 - **작업 복사본 검증과 Git 잠금(2026-11-12)**: 실행 중 검증은 `.git/index.lock`을 잡지 않아야 한다(공급자가 자체 git 명령으로 잠금 보유 가능). `attempting` materialization이 남으면 admission이 fail-closed로 거절하며, 복구는 백업 뒤 `pending`으로 되돌려 정밀 재검증을 통과시키는 것이다. 다른 세션·리뷰어는 이 worktree에서 쓰기 금지, `cd` 대신 `git -C`.

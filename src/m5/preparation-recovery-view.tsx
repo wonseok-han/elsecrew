@@ -17,11 +17,45 @@ function PreparationRecoverySession({ projectId, disabled }: { projectId: string
   const [application, setApplication] = useState<ApplicationStatus | null>(null);
   const [history, setHistory] = useState<ApplicationHistoryEntry[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [backupsFound, setBackupsFound] = useState(false);
+  const [unverified, setUnverified] = useState(false);
+  const [backupsKey, setBackupsKey] = useState(0);
   const [message, setMessage] = useState<"" | "done" | "unknown" | "error" | "applicationError" | "retired">("");
   const epoch = useRef(0);
   const pending = useRef(false);
+  const [checked, setChecked] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  // Look for real problems on open instead of asking the user which record to
+  // inspect. Every query here is read-only; each action still needs a click.
+  // A view change while a request is on its way checks once more after it.
+  const recheck = useRef(false);
+  const check = async () => {
+    if (pending.current) { recheck.current = true; return; }
+    if (disabled || !window.m5Projects) return;
+    const generation = epoch.current;
+    pending.current = true; setBusy(true); setMessage(""); setInspection(null); setApplication(null); setUnverified(false);
+    try {
+      const status = { action: "applicationStatus" as const, projectId };
+      try {
+        const result = validateProjectCatalogResult(await window.m5Projects.request(status), status);
+        if (epoch.current === generation && result.action === "applicationStatus") setApplication(result.status);
+      } catch { if (epoch.current === generation) setMessage("applicationError"); }
+      const preparation = { action: "inspectPreparation" as const, projectId };
+      try {
+        const result = validateProjectCatalogResult(await window.m5Projects.request(preparation), preparation);
+        if (epoch.current === generation && result.action === "inspectPreparation") setInspection(result.inspection);
+      } catch { if (epoch.current === generation) setUnverified(true); }
+    } finally {
+      pending.current = false; setBusy(false);
+      if (epoch.current === generation) setChecked(true);
+      if (recheck.current) { recheck.current = false; void check(); }
+    }
+  };
   useEffect(() => {
-    epoch.current++; setInspection(null); setApplication(null); setHistory(null); setMessage("");
+    epoch.current++; setInspection(null); setApplication(null); setHistory(null); setMessage(""); setChecked(false); setHistoryOpen(false);
+    // A request still on its way keeps the buttons busy; its answer belongs
+    // to the old view and is ignored. "Check again" looks once more.
+    if (!disabled) void check();
     return () => { epoch.current++; };
   }, [projectId, disabled]);
   const request = async (input: ProjectCatalogRequest) => {
@@ -49,24 +83,26 @@ function PreparationRecoverySession({ projectId, disabled }: { projectId: string
       if (epoch.current === generation) setMessage(input.action === "abandonPreparation"
         ? "unknown"
         : input.action === "applicationStatus" || input.action === "applicationHistory" || input.action === "cancelApplication" ? "applicationError" : "error");
-    } finally { pending.current = false; setBusy(false); }
+    } finally {
+      pending.current = false; setBusy(false);
+      if (recheck.current) { recheck.current = false; void check(); }
+    }
   };
   useEffect(() => {
     if (!application?.running || disabled || busy) return;
     const timer = window.setTimeout(() => { void request({ action: "applicationStatus", projectId }); }, 1000);
     return () => window.clearTimeout(timer);
   }, [application, disabled, busy, projectId]);
+  const hasApplication = Boolean(application && application.state !== "none");
   return <div aria-label={t("m5.prep.title")} aria-busy={busy}>
-    <section className="m5-maintenance-group"><h4>{t("m5.preferences.backups")}</h4>
-    <BackupRetentionView projectId={projectId} disabled={disabled || busy} />
-    </section>
     <section className="m5-maintenance-group"><h4>{t("m5.preferences.recovery")}</h4>
-    <BackupPreparationRecovery projectId={projectId} disabled={disabled || busy} />
-    </section>
-    <section className="m5-maintenance-group"><h4>{t("m5.preferences.records")}</h4>
-    <button type="button" disabled={disabled || busy} onClick={() => { setInspection(null); void request({ action: "inspectPreparation", projectId }); }}>{t("m5.prep.inspect")}</button>
-    <button type="button" disabled={disabled || busy} onClick={() => { setApplication(null); void request({action:"applicationStatus",projectId}); }}>{t("m5.application.inspect")}</button>
-    {application && <section aria-label={t("m5.application.inspect")}>
+    <div className="m5-recovery-check">
+      <p role="status">{busy ? t("m5.prep.checking") : !checked ? "" : unverified || message === "applicationError" ? t("m5.prep.unverified") : !hasApplication && !inspection && !backupsFound ? t("m5.prep.clear") : t("m5.prep.found")}</p>
+      <button type="button" className="m5-secondary" disabled={disabled || busy} onClick={() => { setBackupsKey(key => key + 1); void check(); }}>{t("m5.prep.recheck")}</button>
+    </div>
+    <BackupPreparationRecovery key={backupsKey} projectId={projectId} disabled={disabled || busy} onFound={setBackupsFound} />
+    {application && hasApplication && <section className="m5-recovery-item" aria-label={t("m5.application.latest")}>
+      <h5>{t("m5.application.latest")}</h5>
       <div role="status">
         <p>{t(application.running ? "m5.application.running" : application.state === "prepared" || application.state === "applying" ? "m5.application.interrupted" : `m5.application.${application.state}`)}</p>
         {application.currentIndex !== null && <p>{t("m5.application.item")} {application.currentIndex + 1} / {application.total}</p>}
@@ -80,7 +116,19 @@ function PreparationRecoverySession({ projectId, disabled }: { projectId: string
         setApplication(current => current?.applicationId === status.applicationId ? status : current);
       }} />}
     </section>}
-    <button type="button" disabled={disabled || busy} onClick={() => { setHistory(null); void request({ action: "applicationHistory", projectId }); }}>{t("m5.application.history")}</button>
+    {inspection && <div className="m5-recovery-item" role="group" aria-label={t("m5.prep.confirm")}>
+      <p>{t("m5.prep.help")}</p>
+      <code>{inspection.worktreeId}</code>
+      <button type="button" disabled={disabled || busy} onClick={() => void request({ action: "abandonPreparation", inspection })}>{t("m5.prep.abandon")}</button>
+    </div>}
+    </section>
+    <section className="m5-maintenance-group"><h4>{t("m5.preferences.backups")}</h4>
+    <BackupRetentionView projectId={projectId} disabled={disabled || busy} />
+    <details open={historyOpen} onToggle={event => {
+      const open = (event.currentTarget as HTMLDetailsElement).open;
+      setHistoryOpen(open);
+      if (open && history === null) void request({ action: "applicationHistory", projectId });
+    }}><summary>{t("m5.application.history")}</summary>
     {history && <section aria-label={t("m5.application.history")}>
       <p>{t("m5.application.historyHelp")}</p>
       {history.length === 0 ? <p role="status">{t("m5.application.historyEmpty")}</p> : <ul>
@@ -90,12 +138,7 @@ function PreparationRecoverySession({ projectId, disabled }: { projectId: string
         </details></li>)}
       </ul>}
     </section>}
-    {inspection && <div role="group" aria-label={t("m5.prep.confirm")}>
-      <p>{t("m5.prep.help")}</p>
-      <code>{inspection.worktreeId}</code>
-      <button type="button" disabled={disabled || busy} onClick={() => void request({ action: "abandonPreparation", inspection })}>{t("m5.prep.abandon")}</button>
-      <button type="button" disabled={busy} onClick={() => setInspection(null)}>{t("m5.prep.back")}</button>
-    </div>}
+    </details>
     </section>
     {message && <p role="status">{t(message === "applicationError" ? "m5.application.error" : `m5.prep.${message}`)}</p>}
   </div>;

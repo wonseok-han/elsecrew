@@ -1457,8 +1457,17 @@ impl Sidecar {
                 }
                 Some("inspectPreparation") => {
                     let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
-                    self.projects.inspect_unstarted_snapshot(&self.storage, param_string(params, "projectId").map_err(invalid_params)?)
-                        .map(|inspection| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"inspectPreparation","inspection":inspection}), ..Default::default() })
+                    let project_id = param_string(params, "projectId").map_err(invalid_params)?;
+                    // A project that is not stuck mid-preparation has nothing to
+                    // close: say so plainly instead of failing.
+                    let stuck = self.storage.projection_record("project", project_id)?
+                        .is_some_and(|project| project.get("lifecycle").and_then(serde_json::Value::as_str) == Some("recoveryRequired"));
+                    if stuck {
+                        self.projects.inspect_unstarted_snapshot(&self.storage, project_id)
+                            .map(|inspection| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"inspectPreparation","inspection":inspection}), ..Default::default() })
+                    } else {
+                        Ok(project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"inspectPreparation","inspection":null}), ..Default::default() })
+                    }
                 }
                 Some("abandonPreparation") => {
                     let params = require_exact_params(&request.params, &["action", "inspection"]).map_err(invalid_params)?;
@@ -1487,7 +1496,8 @@ impl Sidecar {
                             eprintln!("deletion could not stop every session: {}", error.kind);
                         }
                         if self.deletion_idle() {
-                            if let Err(error) = self.projects.finish_deletions(&mut self.storage, &request.request_id) {
+                            let kept = self.settle_deleted_work(&request.request_id);
+                            if let Err(error) = self.projects.finish_deletions_keeping(&mut self.storage, &request.request_id, &kept) {
                                 eprintln!("deletion files are still pending: {}", error.kind);
                             }
                         }
@@ -1497,7 +1507,8 @@ impl Sidecar {
                 Some("finishDeletions") => {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
                     let pending = if self.deletion_idle() {
-                        self.projects.finish_deletions(&mut self.storage, &request.request_id)
+                        let kept = self.settle_deleted_work(&request.request_id);
+                        self.projects.finish_deletions_keeping(&mut self.storage, &request.request_id, &kept)
                     } else {
                         self.projects.pending_deletions(&self.storage)
                     };

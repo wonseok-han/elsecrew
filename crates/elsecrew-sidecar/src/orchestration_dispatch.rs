@@ -257,6 +257,77 @@ impl Sidecar {
             && self.pending_agent_starts.is_empty() && self.pending_agent_cancels.is_empty()
     }
 
+    /// A deleted task (or every task of a deleted project) can leave a run
+    /// that stopped without a clean finish, for example when the app quit
+    /// mid-run. Settle it the same way as the troubleshooting "discard":
+    /// only when every recorded process is provably gone. Then release a
+    /// provider sign-in hold bound to such a run while its workspace evidence
+    /// still exists. Returns the workspaces a remaining hold still refers to;
+    /// their files must wait. Anything unproven stays and is retried later.
+    pub(super) fn settle_deleted_work(&mut self, request_id: &str) -> std::collections::BTreeSet<String> {
+        if self.deletion_idle() && !self.projects.deletion_busy() {
+            self.resolve_deleted_recoveries(request_id);
+        }
+        let mut kept = std::collections::BTreeSet::new();
+        for name in ["claude-login.pending", "codex-login.pending"] {
+            let Some(run_id) = self.fence_bound_run(name) else { continue };
+            let released = if name.starts_with("claude") {
+                self.claude_login.release_bound_fence(&self.storage, &self.projects)
+            } else {
+                self.login.release_bound_fence(&self.storage, &self.projects)
+            };
+            if released { continue; }
+            if let Some(worktree) = self.storage.projection_record("run", &run_id).ok().flatten()
+                .and_then(|run| run["record"]["worktreeId"].as_str().map(str::to_owned))
+            {
+                kept.insert(worktree);
+            }
+        }
+        kept
+    }
+
+    /// The run a sign-in hold file is bound to, if any. Read only to keep its
+    /// workspace; the release itself re-verifies the file exactly.
+    fn fence_bound_run(&self, name: &str) -> Option<String> {
+        let path = self.storage.path().parent()?.join(name);
+        let metadata = std::fs::symlink_metadata(&path).ok()?;
+        if !metadata.is_file() || metadata.len() > 16 * 1024 { return None; }
+        let text = std::fs::read_to_string(&path).ok()?;
+        let encoded = text.lines().nth(1)?.strip_prefix("run-binding-v1 ")?;
+        let value: Value = serde_json::from_str(encoded).ok()?;
+        value["runId"].as_str().map(str::to_owned)
+    }
+
+    fn resolve_deleted_recoveries(&mut self, request_id: &str) {
+        let Ok(runs) = self.storage.projection_records("run") else { return };
+        let mut index = 0usize;
+        for run in runs {
+            if run.get("source_kind").and_then(Value::as_str) != Some("actualAgent") { continue; }
+            let recovery = match run.get("recovery") {
+                Some(recovery) if recovery["state"] == "unresolved" => recovery.clone(),
+                _ => continue,
+            };
+            let (Some(project_id), Some(chat_id)) = (recovery["projectId"].as_str(), recovery["chatId"].as_str()) else { continue };
+            let Some(project) = self.storage.projection_record("project", project_id).ok().flatten() else { continue };
+            if !(project::project_deletion::is_deleted(&project) || project::project_deletion::deleted_chat(&project, chat_id)) { continue; }
+            // Older data: the project view may still sit on this task's copy.
+            // Settling would close that copy under an open view; wait.
+            if project.get("worktree_id") == Some(&recovery["worktreeId"]) && self.projects.project_view_open(project_id) { continue; }
+            index += 1;
+            let request = json!({
+                "recoveryId":recovery["recoveryId"],"chatId":recovery["chatId"],"taskId":recovery["taskId"],
+                "projectId":recovery["projectId"],"worktreeId":recovery["worktreeId"],
+                "workspaceIdentity":recovery["workspaceIdentity"],"runId":recovery["runId"],
+                "expectedRevision":recovery["revision"],"resolution":"abandon",
+            });
+            match self.agent_runtime.resolve_recovery(&mut self.storage, &mut self.projects, &request, &format!("{request_id}_settle_{index}")) {
+                Ok(result) if result["outcome"] == "resolvedAbandoned" => {}
+                Ok(result) => eprintln!("deleted task recovery is still waiting: {}", result["outcome"].as_str().unwrap_or("unknown")),
+                Err(error) => eprintln!("deleted task recovery is still waiting: {}", error.kind),
+            }
+        }
+    }
+
     /// Deleting a task or project is the user's decision. Stop what is still
     /// running in that scope first: a running team stops before its next step
     /// and an active agent run is asked to cancel. Termination proof keeps

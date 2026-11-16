@@ -122,7 +122,8 @@ export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "applicationHistory"; projectId: string; entries: ApplicationHistoryEntry[] }
   | { schemaVersion: 1; action: "applicationStatus"; status: ApplicationStatus }
   | { schemaVersion: 1; action: "chatApplicationStatus"; chatId: string; status: ApplicationStatus }
-  | { schemaVersion: 1; action: "inspectPreparation" | "abandonPreparation"; inspection: PreparationInspection }
+  | { schemaVersion: 1; action: "inspectPreparation"; inspection: PreparationInspection | null }
+  | { schemaVersion: 1; action: "abandonPreparation"; inspection: PreparationInspection }
   | { schemaVersion: 1; action: "list"; projects: ProjectCatalogEntry[]; nextCursor: string | null }
   | { schemaVersion: 1; action: "deleteProject"; projectId: string }
   | { schemaVersion: 1; action: "deleteChat"; projectId: string; chatId: string; projectClosed: boolean }
@@ -459,6 +460,8 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
     if (status.currentIndex !== null && (!Number.isSafeInteger(status.currentIndex) || (status.currentIndex as number) < 0 || (status.currentIndex as number) >= (status.total as number))) throw new Error("invalid application cursor");
   } else if (request.action === "inspectPreparation" || request.action === "abandonPreparation") {
     keys(result, ["schemaVersion", "action", "inspection"]);
+    // null: the project has no interrupted start at all (a normal answer).
+    if (request.action === "inspectPreparation" && result.inspection === null) return result as ProjectCatalogResult;
     const inspection = validatePreparationInspection(result.inspection);
     if (request.action === "inspectPreparation") {
       if (inspection.projectId !== request.projectId) throw new Error("preparation project mismatch");

@@ -48,6 +48,34 @@ impl LoginManager {
         self.request_inner(storage, params, Some(projects))
     }
 
+    /// After a deleted task's stopped run was settled, release a sign-in hold
+    /// bound to that run while its workspace evidence still exists. Uses the
+    /// same proof as the explicit "recover" action; a failed proof changes
+    /// nothing and the user can still check again later.
+    pub(crate) fn release_bound_fence(&mut self, storage: &Storage, projects: &crate::project::ProjectManager) -> bool {
+        self.reap_finished();
+        if self.worker.is_some() {
+            return false;
+        }
+        let result = if self.claude {
+            crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage).and_then(|profile| {
+                crate::provider_login_process::recover_confirmed_login(&profile)
+                    .or_else(|error| recover_bound(&profile, storage, Some(projects), error))
+            })
+        } else {
+            CodexProfileBinding::from_storage(storage).and_then(|profile| {
+                crate::provider_login_process::recover_confirmed_login(&profile)
+                    .or_else(|error| recover_bound(&profile, storage, Some(projects), error))
+            })
+        };
+        let released = result.is_ok();
+        if released {
+            *self.view.lock().unwrap_or_else(|e| e.into_inner()) =
+                json!({"state":"idle","attemptId":self.attempt,"authUrl":null,"error":null});
+        }
+        released
+    }
+
     fn request_inner(
         &mut self, storage: &Storage, params: &Value, projects: Option<&crate::project::ProjectManager>,
     ) -> Result<Value, SidecarError> {

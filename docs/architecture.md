@@ -153,7 +153,7 @@
 
 > 적용 입장 직렬화 전제: fixture 시작과 native `RunPreparation::reserve`는 단일 runtime의 `&mut Storage`를 동기적으로 보유한 동안 project intent를 재검사하고 run을 기록한다. 그 사이 scheduler yield/외부 callback은 없고 SQLite EXCLUSIVE 연결이 별도 연결의 쓰기를 거절한다. 사전 resolve 결과만으로 예약하지 않는다. 따라서 현재 앱 내부에서 intent 게시가 검사와 예약 사이에 끼어들 수 없으며, 다중 DB writer나 비동기 예약으로 바꿀 때에는 project revision을 포함한 atomic admission으로 다시 설계해야 한다. 이는 파일 시스템의 외부 작성자 배제를 뜻하지 않는다.
 
-> 적용 전 원자 잠금(내부): `review/intent.rs::begin`은 세션의 PreparedApplication을 소비하고 project.application_intent(prepared)와 해당 workspace lock(recovery_required=true, applicationPrepared evidence)을 project/lock/chat revision CAS로 함께 저장한다. 기존 blocker 경로가 새 snapshot 생성을 막고, fixture/native 실행 공통 검증은 해당 project의 진행 중 intent가 있으면 다른 chat의 실행도 예약 전에 거절한다. 기존 준비된 run도 reserve/release 시 재검사한다. 다른 프로젝트의 실행이나 모든 snapshot 편집을 전역 차단한다고 주장하지 않는다. 이는 앱 내부 배타 경계이며 다른 snapshot의 모든 편집이나 동일 UID 외부 작성자를 막는 OS 잠금은 아니다. 재시작 inspect는 exact intent/lock 신원·phase·경로·flags를 확인한다. `abandon_unwritten`은 prepared에서만 기록 종료와 같은 잠금 해제를 원자 수행하며 파일은 변경하지 않는다. 실제 writer는 첫 쓰기 전에 영속 phase를 반드시 변경해야 하며 현재 source writer/쓰기 직전 OS 경합 보호·restore/UI는 아직 없다.
+> 적용 전 원자 잠금(내부): `review/intent.rs::begin`은 세션의 PreparedApplication을 소비하고 project.application_intent(prepared)와 해당 workspace lock(recovery_required=true, applicationPrepared evidence)을 project/lock/chat revision CAS로 함께 저장한다. 기존 blocker 경로(작업 잠금 제외 뒤에도 `applicationId` 잠금은 유지)와 `application_intent` 검사가 새 snapshot 생성을 막고, fixture/native 실행 공통 검증은 해당 project의 진행 중 intent가 있으면 다른 chat의 실행도 예약 전에 거절한다. 기존 준비된 run도 reserve/release 시 재검사한다. 다른 프로젝트의 실행이나 모든 snapshot 편집을 전역 차단한다고 주장하지 않는다. 이는 앱 내부 배타 경계이며 다른 snapshot의 모든 편집이나 동일 UID 외부 작성자를 막는 OS 잠금은 아니다. 재시작 inspect는 exact intent/lock 신원·phase·경로·flags를 확인한다. `abandon_unwritten`은 prepared에서만 기록 종료와 같은 잠금 해제를 원자 수행하며 파일은 변경하지 않는다. 실제 writer는 첫 쓰기 전에 영속 phase를 반드시 변경해야 하며 현재 source writer/쓰기 직전 OS 경합 보호·restore/UI는 아직 없다.
 
 > 확인→백업 준비 결속(내부): `Confirmations::prepare_backup`은 일회용 token을 소비하고 exact 검토를 다시 연 뒤 새 백업을 준비하거나 ready 백업을 재검증해 재사용한다. preparing의 자동 복구는 하지 않는다. 결과는 serialize/clone 불가능한 `PreparedApplication`으로 동일 owner generation과 최초 만료 시각에 묶인다. cancel·새 open(실패 포함)·새 owner는 무효이며 consume은 generation을 한 번 소비하고 current review와 ready archive/record를 다시 검사한다. 긴 백업/최종 검증 후에도 만료를 검사한다. 반환은 적용 transaction의 입력 후보이며 project-wide 배타 잠금·적용 intent·쓰기 직전 검증을 대신하지 않는다. 공개 UI/IPC 연결과 source writer는 남는다.
 
@@ -226,7 +226,11 @@ Elsecrew는 비개발자가 Claude Code·Codex 팀과 대화하며 프로젝트 
 - **삭제(2026-11-13, 옛 '목록에서 제거' 대체)**: 프로젝트나 작업 삭제는 숨기기가 아니라 삭제다. 상세 설계는 `docs/proposals/m5-project-deletion.md`에 있다.
   - 원장 행은 지우지 않는다. 프로젝트는 `canonical_path`를 `deleted:<id>` 표지로 바꾸고 `catalog_hidden`과 `project_deletion_v1`을 기록한다. 작업은 프로젝트 확장 `chat_deletion_v1`을 기록한다.
   - 실행 중인 세션을 멈춘 뒤, 실행 종료가 증명되고 sidecar가 유휴일 때 `finishDeletions`가 앱 소유 작업 공간·manifest·기준 기록 파일을 지운다. 화면은 삭제 직후 2·8·30초 뒤와 시작할 때 재시도한다.
-  - 최신 작업은 프로젝트의 현재 복사본을 같이 쓴다. 그 실행이 끝났으면 복사본을 닫아(`projectClosed`) 프로젝트를 원본에서 다시 열게 한다.
+  - (2026-11-16) 작업마다 자기 복사본을 갖고 프로젝트 화면은 자기 복사본을 따로 쓴다. 새 작업 복사본(`FreshChat`·`ChatApplicationCandidate`)을 만든 뒤 프로젝트 지정은 원래 프로젝트 복사본으로 되돌린다(`restore_project_copy`). 예전 데이터처럼 프로젝트가 작업 복사본을 가리키면 프로젝트 열기(`ReuseActive`)가 그 복사본을 재사용하지 않고 새 프로젝트 복사본을 만든다. 그래서 멈춘 작업이 프로젝트 열기를 막지 않는다.
+  - 새 복사본 생성의 전역 복구 차단(`snapshot_export_blockers`)은 작업에 속한 run·잠금을 제외한다. 복사본 생성은 원본을 읽기만 하고 작업의 실행은 자기 복사본에만 쓰기 때문이다. 작업에 속하지 않은 잠금(중단된 프로젝트 복사본 생성 등)과 원본 반영을 지키는 잠금(evidence에 `applicationId`)은 계속 막는다. 또 `application_intent`가 applied/restored/abandoned가 아니면(반영 준비·진행 중) 새 복사본을 만들지 않는다.
+  - 예전 데이터에서 프로젝트가 삭제된 작업의 복사본을 가리키면, 실행이 끝났을 때 복사본을 닫아(`projectClosed`) 프로젝트를 원본에서 다시 열게 한다.
+  - 삭제된 작업(삭제된 프로젝트의 작업 포함)의 미해결 실행 복구는 삭제 직후와 `finishDeletions` 때 `settle_deleted_work`가 '작업 공간 버리기'와 같은 `recovery.resolveAgent` 경로로 해결한다. 기록된 프로세스가 모두 사라졌음이 증명될 때만 해결한다. 이어서 파일을 지우기 전에 그 실행에 묶인 공급자 로그인 잠금(`*-login.pending`)을 기존 recover와 같은 증명으로 풀고(`release_bound_fence`), 아직 남은 잠금이 가리키는 작업 공간 파일은 지우지 않는다(`finish_deletions_keeping`). 잠금 해제 증명이 그 작업 공간의 manifest를 읽기 때문이다. 증명할 수 없으면 그대로 두고 다음 호출에서 다시 시도한다.
+  - 프로젝트 설정의 '문제 해결'은 열 때 반영 상태·끝나지 않은 백업 준비·멈춘 시작 준비를 자동으로 읽기 전용 조회하고 실제 항목만 보여 준다. `inspectPreparation`은 프로젝트가 `recoveryRequired`가 아니면 `inspection:null`을 정상 응답한다. 조회 실패는 '문제 없음'이 아니라 '확인하지 못했어요'로 표시한다.
   - 같은 폴더를 다시 추가하면 새 프로젝트 ID로 시작한다. 예전 숨김 항목은 다시 추가할 때 삭제로 전환한다.
   - 원본 폴더, 반영 백업, 공급자 자체 세션 파일, 원장 안의 본문은 지우지 않는다.
   - 원본 반영 중, 반쯤 쓴 원본, 반영 확인창이 열려 있으면 거절한다.

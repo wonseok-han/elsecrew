@@ -268,10 +268,9 @@ impl G5Manager {
             ));
         }
         let action = if application_baseline {
-            projects.prepare_application_workspace(storage, project_id, request_id)?;
-            // Reuse only the just-created active snapshot; normal preparation
-            // remains fresh and existing snapshots are never retrofitted.
-            projects.create_worktree(storage, project_id, request_id)?
+            // A fresh clean-source copy of the task's own; the project keeps
+            // its own copy and existing snapshots are never retrofitted.
+            projects.prepare_chat_application_workspace(storage, project_id, request_id)?
         } else {
             projects.prepare_chat_workspace(storage, project_id, request_id)?
         };

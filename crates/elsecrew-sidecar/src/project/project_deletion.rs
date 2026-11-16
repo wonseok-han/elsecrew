@@ -232,13 +232,24 @@ impl ProjectManager {
         Err(denied("workspace deletion is not available on this platform yet"))
     }
 
-    fn deletion_busy(&self) -> bool {
+    pub(crate) fn project_view_open(&self, project_id: &str) -> bool {
+        self.watchers.contains_key(project_id)
+    }
+
+    pub(crate) fn deletion_busy(&self) -> bool {
         self.application_running() || self.preparation_cancel.is_some() || !self.pending_saves.is_empty()
     }
 
     /// Finishes every pending deletion it can; the rest stay pending for the
     /// next call. Returns how many are still pending.
+    #[cfg(test)]
     pub(crate) fn finish_deletions(&mut self, storage: &mut Storage, request_id: &str) -> Result<usize, ProjectFailure> {
+        self.finish_deletions_keeping(storage, request_id, &std::collections::BTreeSet::new())
+    }
+
+    /// `kept` names workspaces whose files must stay for now: a provider
+    /// sign-in hold still bound to a run there proves its release from them.
+    pub(crate) fn finish_deletions_keeping(&mut self, storage: &mut Storage, request_id: &str, kept: &std::collections::BTreeSet<String>) -> Result<usize, ProjectFailure> {
         if self.deletion_busy() { return Ok(self.pending_deletions(storage)?); }
         let mut index = 0usize;
         for project in storage.projection_records("project")? {
@@ -249,7 +260,7 @@ impl ProjectManager {
                 let chats: Vec<String> = storage.projection_records("chat")?.iter()
                     .filter(|chat| chat.get("project_id").and_then(Value::as_str) == Some(&project_id))
                     .filter_map(|chat| chat.get("chat_id").and_then(Value::as_str).map(str::to_owned)).collect();
-                let quiet = worktrees.iter().try_for_each(|id| self.worktree_is_quiet(storage, id, &chats));
+                let quiet = worktrees.iter().try_for_each(|id| if kept.contains(id) { Err(denied("a sign-in hold still refers to this workspace")) } else { self.worktree_is_quiet(storage, id, &chats) });
                 if quiet.is_ok() && worktrees.iter().try_for_each(|id| self.remove_worktree_files(id)).is_ok() {
                     let mut done = registered_project(storage, &project_id)?;
                     done[PROJECT_FIELD]["state"] = json!("deleted");
@@ -264,6 +275,7 @@ impl ProjectManager {
             for (chat_id, worktree) in pending {
                 let removed = match worktree.as_deref() {
                     None => Ok(()),
+                    Some(id) if kept.contains(id) => Err(denied("a sign-in hold still refers to this workspace")),
                     Some(id) if self.worktree_still_used(storage, &project, id, &chat_id)? => Err(denied("the workspace is still in use")),
                     Some(id) => self.worktree_is_quiet(storage, id, std::slice::from_ref(&chat_id)).and_then(|()| {
                         if Self::is_project_copy(&registered_project(storage, &project_id)?, id) {

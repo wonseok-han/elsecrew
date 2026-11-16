@@ -258,6 +258,30 @@ enum SnapshotCreation {
     #[cfg(any(unix, windows))]
     #[allow(dead_code)]
     ApplicationCandidate,
+    // A task's own clean-source copy: records the baseline like
+    // `ApplicationCandidate` but, like `FreshChat`, never becomes the
+    // project's own copy.
+    #[cfg(any(unix, windows))]
+    ChatApplicationCandidate,
+}
+
+impl SnapshotCreation {
+    fn captures_baseline(self) -> bool {
+        #[cfg(any(unix, windows))]
+        { matches!(self, Self::ApplicationCandidate | Self::ChatApplicationCandidate) }
+        #[cfg(not(any(unix, windows)))]
+        { false }
+    }
+
+    /// Each task works in a copy of its own. The project keeps its own copy
+    /// for the project view, so a task that stops badly never stops the
+    /// project from opening.
+    fn keeps_project_copy(self) -> bool {
+        #[cfg(any(unix, windows))]
+        { matches!(self, Self::FreshChat | Self::ChatApplicationCandidate) }
+        #[cfg(not(any(unix, windows)))]
+        { matches!(self, Self::FreshChat) }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -811,6 +835,7 @@ impl ProjectManager {
             Err(ProjectFailure::recovery("chat application preview unavailable on this platform"))
         }
     }
+    #[cfg(test)]
     pub(crate) fn prepare_application_workspace(&mut self, storage: &mut Storage, project_id: &str, request_id: &str) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(any(unix, windows))]
         {
@@ -828,6 +853,25 @@ impl ProjectManager {
                 result: serde_json::json!({"schemaVersion":1,"action":"prepareApplicationWorkspace","projectId":project_id,"worktreeId":active.worktree_id}),
                 ..Default::default()
             })
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = (storage, project_id, request_id);
+            Err(ProjectFailure::recovery("application workspace unavailable on this platform"))
+        }
+    }
+    /// A task's own clean-source copy. The project keeps its own copy.
+    pub(crate) fn prepare_chat_application_workspace(&mut self, storage: &mut Storage, project_id: &str, request_id: &str) -> Result<ProjectAction, ProjectFailure> {
+        #[cfg(any(unix, windows))]
+        {
+            // Reject unsupported/dirty input before reserving a recovery lock.
+            let project = required_project(storage, project_id)?;
+            let source = self.open_source_repository(Path::new(value_string(&project, "canonical_path")?))?;
+            #[cfg(unix)]
+            application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)?;
+            #[cfg(windows)]
+            windows_git_baseline::capture_windows_clean_baseline(self, &source)?;
+            self.create_worktree_inner(storage, project_id, request_id, None, None, SnapshotCreation::ChatApplicationCandidate)
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -1257,19 +1301,34 @@ impl ProjectManager {
         creation: SnapshotCreation,
     ) -> Result<ProjectAction, ProjectFailure> {
         let project = required_project(storage, project_id)?;
-        if !storage.blocker_ids()?.is_empty() {
+        if !snapshot_export_blockers(storage)?.is_empty() {
             return Err(ProjectFailure::recovery(
                 "durable recovery blockers must be resolved before another snapshot export",
             ));
         }
+        if project.get("application_intent").is_some_and(|intent| {
+            !matches!(intent["state"].as_str(), Some("applied" | "restored" | "abandoned"))
+        }) {
+            return Err(ProjectFailure::recovery(
+                "an unfinished update of the original must be resolved before another snapshot export",
+            ));
+        }
         let lifecycle = value_string(&project, "lifecycle")?;
-        if lifecycle == "active" && creation == SnapshotCreation::ReuseActive {
+        // Older projects pointed at the latest task's copy. The project view
+        // never reuses a task's copy: it gets a copy of its own instead.
+        let task_copy = is_task_copy(storage, &project)?;
+        if lifecycle == "active" && creation == SnapshotCreation::ReuseActive && !task_copy {
             let active = self.validate_active_project(storage, project_id)?;
             return Ok(ProjectAction {
                 result: manifest_value(&active, "active")?,
                 ..ProjectAction::default()
             });
         }
+        let project_copy = (creation.keeps_project_copy()
+            && lifecycle == "active"
+            && !task_copy
+            && self.validate_active_project(storage, project_id).is_ok())
+        .then(|| project.clone());
         if lifecycle == "recoveryRequired" {
             return Err(ProjectFailure::recovery(
                 "snapshot creation was interrupted and cannot be retried automatically",
@@ -1375,13 +1434,13 @@ impl ProjectManager {
         launching["evidence"]["phase"] = json!("snapshotExportStarting");
         append_object(storage, "lock", &lock_id, &format!("op_snapshot_launch_{worktree_id}"), request_id, launching)?;
         #[cfg(unix)]
-        let baseline = if creation == SnapshotCreation::ApplicationCandidate {
+        let baseline = if creation.captures_baseline() {
             Some(application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)?)
         } else {
             None
         };
         #[cfg(windows)]
-        let raw_source = if creation == SnapshotCreation::ApplicationCandidate {
+        let raw_source = if creation.captures_baseline() {
             Some(windows_git_baseline::capture_windows_clean_baseline(self, &source)?)
         } else { None };
         let bundle_bytes = self.export_bundle(&source.git_dir, &staging)?;
@@ -1535,6 +1594,9 @@ impl ProjectManager {
         .map_err(|error| ProjectFailure::manifest(format!("snapshot sizing failed: {error}")))?;
 
         self.persist_active(storage, &active, &project, request_id)?;
+        if let Some(view) = &project_copy {
+            restore_project_copy(storage, &active, view, request_id)?;
+        }
         Ok(ProjectAction {
             result: manifest,
             ..ProjectAction::default()
@@ -5935,6 +5997,88 @@ fn preserve_project_extensions(
         }
     }
     Ok(Value::Object(object))
+}
+
+/// True when the project's current copy is (or is about to become) a task's
+/// copy rather than the project's own.
+fn is_task_copy(storage: &Storage, project: &Map<String, Value>) -> Result<bool, ProjectFailure> {
+    let Some(worktree_id) = project.get("worktree_id").and_then(Value::as_str) else { return Ok(false) };
+    if project.get("prepared_workspaces").and_then(Value::as_object).is_some_and(|items| {
+        items.values().any(|item| item["manifest"]["worktreeId"] == worktree_id)
+    }) {
+        return Ok(true);
+    }
+    Ok(storage.projection_records("chat")?.iter().any(|chat| {
+        chat.get("worktree_id").and_then(Value::as_str) == Some(worktree_id)
+    }))
+}
+
+/// Recovery that belongs to a task stays inside that task's own copy. A new
+/// copy only reads the original folder, so it waits only for the rest
+/// (for example an interrupted copy that is not a task's).
+fn snapshot_export_blockers(storage: &Storage) -> Result<Vec<String>, ProjectFailure> {
+    let blockers = storage.blocker_ids()?;
+    if blockers.is_empty() {
+        return Ok(blockers);
+    }
+    let task_worktrees: BTreeSet<String> = storage
+        .projection_records("chat")?
+        .iter()
+        .filter_map(|chat| chat.get("worktree_id").and_then(Value::as_str).map(str::to_owned))
+        .collect();
+    let mut remaining = Vec::new();
+    for id in blockers {
+        let task_owned = if let Some(run_id) = id.strip_prefix("run:") {
+            storage.projection_record("run", run_id)?.is_some_and(|run| {
+                run.get("chat_id").and_then(Value::as_str).is_some()
+            })
+        } else if let Some(lock_id) = id.strip_prefix("lock:") {
+            // A lock that guards an update of the original folder keeps
+            // blocking: the original may be half written.
+            let guards_original = storage.projection_record("lock", lock_id)?.is_none_or(|lock| {
+                lock.get("evidence").and_then(|evidence| evidence.get("applicationId")).is_some()
+            });
+            !guards_original
+                && lock_id
+                    .strip_prefix("lock_")
+                    .is_some_and(|worktree| task_worktrees.contains(worktree))
+        } else {
+            false
+        };
+        if !task_owned {
+            remaining.push(id);
+        }
+    }
+    Ok(remaining)
+}
+
+/// Points the project back at its own copy after a task copy was made.
+fn restore_project_copy(
+    storage: &mut Storage,
+    created: &ActiveProject,
+    view: &Map<String, Value>,
+    request_id: &str,
+) -> Result<(), ProjectFailure> {
+    let mut current = required_project(storage, &created.project_id)?;
+    for field in [
+        "canonical_path", "selected_path", "base_commit", "base_tree", "object_format",
+        "source_identity", "workspace_identity", "worktree_id", "worktree_path",
+        "manifest_path", "lock_id",
+    ] {
+        match view.get(field) {
+            Some(value) => { current.insert(field.to_owned(), value.clone()); }
+            None => { current.remove(field); }
+        }
+    }
+    current.insert("lifecycle".to_owned(), json!("active"));
+    append_object(
+        storage,
+        "project",
+        &created.project_id,
+        &format!("op_worktree_keep_project_copy_{}", created.worktree_id),
+        request_id,
+        Value::Object(current),
+    )
 }
 
 fn required_project(

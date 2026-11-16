@@ -70,6 +70,8 @@ test("preparation recovery binds exact identity and safe revisions", () => {
   assert.doesNotThrow(() => validateProjectCatalogRequest(request));
   assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, ...request }, request));
   assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, action: "inspectPreparation", inspection }, { action: "inspectPreparation", projectId: "project_a" }));
+  assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, action: "inspectPreparation", inspection: null }, { action: "inspectPreparation", projectId: "project_a" }));
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "abandonPreparation", inspection: null }, { action: "abandonPreparation", inspection }));
   for (const patch of [{ lockId: "other" }, { projectRevision: 0 }, { lockRevision: 1.5 }, { lockRevision: Number.MAX_SAFE_INTEGER + 1 }, { path: "/other" }, { workspaceIdentity: "../escape" }]) {
     assert.throws(() => validateProjectCatalogRequest({ ...request, inspection: { ...inspection, ...patch } }));
   }

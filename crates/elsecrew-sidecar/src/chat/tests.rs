@@ -6992,3 +6992,68 @@ fn saved_placeholder_sol_reads_as_unselected_in_v3_only() {
     let legacy = crate::chat::settings_value("p", 1);
     assert_eq!(crate::chat::without_placeholder_models(legacy.clone()), legacy);
 }
+
+#[test]
+fn each_task_gets_its_own_copy_and_the_project_keeps_its_own() {
+    let mut fixture = Fixture::new();
+    // The first task arrives before any project view: it is the older shape
+    // where the project pointed at a task's copy.
+    let first = fixture.snapshot("req_first_task");
+    fixture.create_chat(&first, "first", "req_first_chat");
+    let project = fixture.storage.projection_record("project", &fixture.project_id).unwrap().unwrap();
+    assert_eq!(project["worktree_id"], first["worktreeId"]);
+    // Opening the project view never reuses that task's copy.
+    let view = fixture.projects.create_worktree(&mut fixture.storage, &fixture.project_id, "req_view").unwrap().result;
+    assert_ne!(view["worktreeId"], first["worktreeId"]);
+    // A later task gets a fresh copy; the project keeps pointing at its own.
+    let second = fixture.snapshot("req_second_task");
+    fixture.create_chat(&second, "second", "req_second_chat");
+    assert_ne!(second["worktreeId"], view["worktreeId"]);
+    let project = fixture.storage.projection_record("project", &fixture.project_id).unwrap().unwrap();
+    assert_eq!(project["worktree_id"], view["worktreeId"]);
+    assert_eq!(project["lifecycle"], "active");
+    let again = fixture.projects.create_worktree(&mut fixture.storage, &fixture.project_id, "req_view_again").unwrap().result;
+    assert_eq!(again, view);
+    // The task copy itself stays valid through its own address.
+    fixture.projects.verify_unbound_workspace(&fixture.storage, &fixture.project_id, second["worktreeId"].as_str().unwrap(), second["workspaceIdentity"].as_str().unwrap()).unwrap();
+}
+
+#[test]
+fn a_stuck_task_does_not_block_new_copies_but_an_update_of_the_original_does() {
+    let mut fixture = Fixture::new();
+    fixture.projects.create_worktree(&mut fixture.storage, &fixture.project_id, "req_view").unwrap();
+    let task = fixture.snapshot("req_task");
+    fixture.create_chat(&task, "stuck", "req_task_chat");
+    let lock_id = format!("lock_{}", task["worktreeId"].as_str().unwrap());
+    let mut lock = fixture.storage.projection_record("lock", &lock_id).unwrap().unwrap();
+    lock.insert("recovery_required".into(), json!(true));
+    fixture.storage.upsert_projection_record("lock", &lock_id, "op_test_stuck_task", Some("req_stuck"), lock.clone()).unwrap();
+    assert!(!fixture.storage.blocker_ids().unwrap().is_empty());
+    // The stuck task's own recovery stays inside its copy.
+    fixture.snapshot("req_next_task");
+    fixture.projects.create_worktree(&mut fixture.storage, &fixture.project_id, "req_view_again").unwrap();
+    // A lock guarding an update of the original keeps blocking.
+    lock.insert("evidence".into(), json!({"phase":"applicationPrepared","applicationId":format!("application_{}", "a".repeat(32))}));
+    fixture.storage.upsert_projection_record("lock", &lock_id, "op_test_application_lock", Some("req_app"), lock).unwrap();
+    let refused = fixture.chats.prepare_chat_workspace(&mut fixture.storage, &mut fixture.projects, &fixture.project_id, "req_refused_task").unwrap_err();
+    assert_eq!(refused.kind, "recoveryRequired");
+    assert!(refused.detail.contains("snapshot export"));
+}
+
+#[test]
+fn a_workspace_a_sign_in_hold_refers_to_waits_for_its_release() {
+    let mut f = Fixture::new();
+    f.projects.create_worktree(&mut f.storage, &f.project_id, "req_hold_view").unwrap();
+    let snapshot = f.snapshot("req_hold_snapshot");
+    let chat = f.create_chat(&snapshot, "held", "req_hold_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let worktree_id = chat["worktreeId"].as_str().unwrap().to_owned();
+    let path = std::path::PathBuf::from(f.storage.projection_record("lock", &format!("lock_{worktree_id}")).unwrap().unwrap()["worktree_path"].as_str().unwrap());
+    let deleted = f.projects.delete_chat(&mut f.storage, &f.project_id, chat_id, "req_hold_delete").unwrap();
+    assert_eq!(deleted.result["projectClosed"], false, "the project keeps its own copy");
+    let kept = std::collections::BTreeSet::from([worktree_id]);
+    assert_eq!(f.projects.finish_deletions_keeping(&mut f.storage, "req_hold_finish", &kept).unwrap(), 1);
+    assert!(path.exists(), "the release still needs this workspace's evidence");
+    assert_eq!(f.projects.finish_deletions_keeping(&mut f.storage, "req_hold_finish_released", &Default::default()).unwrap(), 0);
+    assert!(!path.exists());
+}
