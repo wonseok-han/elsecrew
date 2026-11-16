@@ -18,7 +18,7 @@ import { classifyLoginFailure } from "../src/m5/provider-login-diagnostic.ts";
 import { INSTALL_CHANNEL, validateInstallRequest, validateInstallStatus } from "../src/m5/contracts/provider-install-v1.ts";
 import { APPROVAL_CHANNEL, validateApprovalRequest, validateApprovalResult } from "../src/m5/contracts/approval-v1.ts";
 import { PROJECT_CATALOG_CHANNEL, validateProjectCatalogRequest, validateProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
-import { mkdirSync, realpathSync, statSync, readdirSync } from "node:fs";
+import { mkdirSync, realpathSync, statSync, readdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve, sep, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -365,10 +365,60 @@ function startSidecar(): SidecarClientV1 {
     eventCredit.deliver(event, () => window.webContents.send(M5_BRIDGE_V8_CHANNELS.agentOutputAvailable,
       { event: head, streamId: event.streamId, seq: event.seq }));
   });
+  watchEngineFailure(client);
   void client.start().catch(() => {
-    // getSystemStatus exposes a structured unavailable state. There is no restart or retry.
+    // getSystemStatus exposes a structured unavailable state. A failure after
+    // the engine once worked is restarted by `watchEngineFailure`.
   });
   return client;
+}
+
+// An engine that stops while in use is started again rather than asking the
+// person to quit and reopen the app. Bounded so a failure that repeats right
+// away is not retried forever; the screen then shows that the engine stopped.
+const ENGINE_RESTART_WINDOW_MS = 5 * 60_000;
+const ENGINE_RESTART_LIMIT = 3;
+const engineRestarts: number[] = [];
+
+function watchEngineFailure(client: SidecarClientV1): void {
+  client.onFailure(code => {
+    const now = Date.now();
+    while (engineRestarts.length && now - engineRestarts[0]! > ENGINE_RESTART_WINDOW_MS) engineRestarts.shift();
+    const restart = client === sidecar && !quitCoordinator.exitAllowed && !client.failedBeforeReady
+      && engineRestarts.length < ENGINE_RESTART_LIMIT;
+    void recordEngineFailure(client, code, restart);
+    if (!restart) return;
+    engineRestarts.push(now);
+    void (async () => {
+      // Never two engines on one database: wait until the old one has ended.
+      if (!(await client.waitForExit(10_000))) return;
+      if (client !== sidecar || quitCoordinator.exitAllowed) return;
+      eventCredit.reset();
+      // The screen notices the new engine by itself and refreshes when nothing
+      // unsaved would be lost (see the admission poller). A run the old engine
+      // left unfinished then shows up as needing recovery.
+      sidecar = startSidecar();
+    })();
+  });
+}
+
+/** Fixed labels only: the failure code, exit code/signal and the code location
+ * of a Rust panic. No paths, payloads, provider output or credentials. */
+async function recordEngineFailure(client: SidecarClientV1, code: string, restarting: boolean): Promise<void> {
+  await client.waitForExit(2_000);
+  // The engine's own last words, and the app's reason when it is the app that
+  // refused something (for example a protocol budget on its side).
+  const detail = `${client.technicalDetail}\n${client.failure?.message ?? ""}`;
+  const panic = /panicked at ((?:crates|src)\/[\w./-]+\.rs:\d+:\d+)/.exec(detail)?.[1] ?? null;
+  // Fixed engine messages only (protocol budgets, ordering, quit): never paths or payloads.
+  const reason = [...detail.matchAll(/(session budget exceeded|expected seq \d+, got \d+|was reused within a session|stdin closed before app\.prepareQuit|stdin reader stopped|storage maintenance (?:is )?poisoned)/g)].at(-1)?.[1] ?? null;
+  const body = JSON.stringify({ schemaVersion: 1, at: new Date().toISOString(), code, exit: client.exitDetail, panic, reason, restarting }) + "\n";
+  try {
+    const directory = app.getPath("logs");
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    writeFileSync(join(directory, "last-engine-failure.json"), body, { mode: 0o600 });
+  } catch { /* diagnostics never block the app */ }
+  console.error(`m5: engine stopped (${code}, exit ${client.exitDetail ?? "unknown"}${panic ? `, panic at ${panic}` : ""}${reason ? `, ${reason}` : ""})${restarting ? ", restarting" : ""}`);
 }
 
 async function getSystemStatus(): Promise<SystemStatusV1 | SystemStatusG5DV1> {
@@ -633,6 +683,15 @@ async function createMainWindow() {
     if (eventCredit.outstanding !== 0) sidecar?.failRendererDisconnected();
     else eventCredit.resetIfEmpty();
   });
+  // A page that reloads or navigates never acknowledges what was sent to the
+  // previous page, and nothing can listen until the new one has loaded: hold
+  // deliveries in between and start the credit afresh. The page reads its
+  // state anew, so what was not delivered meanwhile is not lost.
+  window.webContents.on("did-start-navigation", (details: { isMainFrame?: boolean; isSameDocument?: boolean }) => {
+    if (details?.isMainFrame && !details.isSameDocument) eventCredit.pause();
+  });
+  window.webContents.on("did-finish-load", () => eventCredit.resume());
+  window.webContents.on("did-fail-load", () => eventCredit.resume());
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     await window.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   } else {

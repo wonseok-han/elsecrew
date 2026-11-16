@@ -859,8 +859,11 @@ export const en: Record<MessageKey, string> = {
   "m5.admission.preparing": "Preparing your workspace safely.",
   "m5.admission.help": "Reopen the app. If this continues, ask for help. Your existing project files have not been changed.",
   "m5.admission.wait": "Projects and tasks will be available shortly. Changes cannot be made or saved while preparation is in progress.",
-  "m5.admission.stopped": "The app stopped processing work.",
-  "m5.admission.stoppedHelp": "Work in progress will not continue. Quit and reopen the app; you will then see the state of the stopped work and how to recover it. Your existing project files have not been changed.",
+  "m5.admission.stopped": "The app briefly stopped processing work.",
+  "m5.admission.restarted": "Work processing restarted.",
+  "m5.admission.restartedHelp": "The screen was left as is because there are unsaved edits. Save them, then refresh. Stopped work can be cleaned up from the task list after refreshing.",
+  "m5.admission.refresh": "Refresh",
+  "m5.admission.stoppedHelp": "It is restarting by itself. The screen will refresh shortly, and stopped work can be cleaned up from the task list. Your existing project files have not been changed. If this screen is still here after a minute, reopen the app.",
 
 
 

@@ -739,17 +739,8 @@ impl SidecarSession {
     }
 
     fn handle_request(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
-        match self.handle_validated_request(request.clone()) {
-            Err(error) if error.kind() == "invalidParams" => Ok(HandledRequest::response(
-                error_response(&request, "invalidParams", "invalidRequest", error.detail()),
-            )),
-            // An unconnected provider is an ordinary refusal of this request,
-            // not a broken service: answer it instead of ending the sidecar.
-            Err(error) if error.kind() == "providerDisconnected" => Ok(HandledRequest::response(
-                error_response(&request, "providerDisconnected", "requestBlocked", error.detail()),
-            )),
-            other => other,
-        }
+        let result = self.handle_validated_request(request.clone());
+        answer_failed_request(&request, result)
     }
 
     fn handle_validated_request(
@@ -770,9 +761,10 @@ impl SidecarSession {
                         serde_json::to_value(self.system_status()?).map_err(json_error)?,
                     )));
                 }
-                let handled = sidecar.handle_request(request)?;
+                let handled = sidecar.handle_request(request);
+                // Whatever the outcome, mirror what the engine durably marked.
                 self.safe_to_quit = sidecar.safe_to_quit;
-                Ok(handled)
+                handled
             }
             AdmissionState::NotStarted { .. } | AdmissionState::Verifying(_) => {
                 self.handle_not_ready_request(request, StorageAdmissionStateV1::Verifying)
@@ -2856,6 +2848,50 @@ fn admission_blocked_response(request: &RequestV1, state: StorageAdmissionStateV
             outcome_unknown: Some(false),
         }),
     }
+}
+
+/// One request that fails is answered as failed; it never ends the whole
+/// engine. Ending it would stop every running task of every project and leave
+/// them needing recovery, for something that concerned only this request.
+/// Each part of the engine keeps its own state safe (ledger transactions,
+/// locks, recovery records); a failed request has changed nothing it could
+/// not prove.
+///
+/// Only failures known to stay within the request are answered. Any other
+/// kind (ledger, projection or run-state integrity, or one not listed here)
+/// still ends the engine; the app then starts it again and recovery runs on
+/// the stored state, as after a crash.
+fn answer_failed_request(request: &RequestV1, result: Result<HandledRequest, SidecarError>) -> Result<HandledRequest, SidecarError> {
+    const REQUEST_SCOPED: &[&str] = &[
+        "agentInputChanged", "agentDiscoveryRejected", "agentApprovalChanged", "agentLaunchRejected",
+        "agentRegistrationRejected", "orchestrationBlocked", "operationConflict", "checkpointBusy",
+        "storageReadFailed", "storageStatusUnavailable", "chatErasureDenied", "invalidPreparation",
+        "invalidArguments", "unsupportedPlatform", "unsupportedMethod", "hookProbeFailed",
+        "configProbeFailed", "agentOutputStorageFull",
+    ];
+    let scoped = |kind: &str| REQUEST_SCOPED.contains(&kind) || kind.starts_with("provider");
+    match result {
+        Ok(handled) => Ok(handled),
+        Err(error) if error.kind() == "invalidParams" => Ok(HandledRequest::response(
+            error_response(request, "invalidParams", "invalidRequest", nonempty(error.detail(), error.kind())),
+        )),
+        // An unconnected provider is an ordinary refusal of this request.
+        Err(error) if error.kind() == "providerDisconnected" => Ok(HandledRequest::response(
+            error_response(request, "providerDisconnected", "requestBlocked", nonempty(error.detail(), error.kind())),
+        )),
+        Err(error) if !scoped(error.kind()) => Err(error),
+        Err(error) => {
+            eprintln!("request {} failed: {}", request.method, error.kind());
+            Ok(HandledRequest::response(error_response(
+                request, error.kind(), "requestBlocked", nonempty(error.detail(), error.kind()),
+            )))
+        }
+    }
+}
+
+/// The app rejects an error without detail as a broken protocol.
+fn nonempty<'a>(detail: &'a str, kind: &'a str) -> &'a str {
+    if detail.trim().is_empty() { kind } else { detail }
 }
 
 fn error_response(request: &RequestV1, code: &str, kind: &str, detail: &str) -> ResponseV1 {

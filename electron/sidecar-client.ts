@@ -298,6 +298,9 @@ export class SidecarClientV1 {
   readonly #onDiagnosticTail: ((tail: string) => void) | undefined;
   readonly #onTransportProgress: ((method: string, requestId: string | null, phase: string) => void) | undefined;
   #terminationAttempted = false;
+  readonly #failureListeners = new Set<(code: NonNullable<SidecarClientV1["failureCode"]>) => void>();
+  #exited = false;
+  readonly #exitListeners = new Set<() => void>();
 
   constructor(
     launch: SidecarLaunchV1,
@@ -351,7 +354,11 @@ export class SidecarClientV1 {
       process.stderr.on("data", (chunk: Buffer) => this.#onStderr(Buffer.from(chunk)));
       process.once("error", (error: unknown) => this.#fail(asError(error, "sidecar failed to start"), "processError"));
       process.once("exit", (code: unknown, signal: unknown) => {
+        this.#exitDetail = `${String(code ?? "null")}/${String(signal ?? "none")}`;
         this.#fail(new Error(`sidecar exited (${String(code ?? "null")}, ${String(signal ?? "none")})`), "processExit");
+        this.#exited = true;
+        for (const listener of this.#exitListeners) listener();
+        this.#exitListeners.clear();
       });
     } catch (error) {
       this.#fail(asError(error, "sidecar failed to start"), "processError");
@@ -369,6 +376,25 @@ export class SidecarClientV1 {
 
   /** Fixed local classification only; never includes provider output or credentials. */
   get failureCode() { return this.#failureCode; }
+
+  #exitDetail: string | null = null;
+  /** Exit code and signal of the engine process once it ended ("code/signal"). */
+  get exitDetail(): string | null { return this.#exitDetail; }
+
+  /** Called once when the engine fails, with the fixed failure code. */
+  onFailure(listener: (code: NonNullable<SidecarClientV1["failureCode"]>) => void): void {
+    this.#failureListeners.add(listener);
+  }
+
+  /** Resolves true once the engine process has ended, or false after the timeout. */
+  waitForExit(timeoutMs: number): Promise<boolean> {
+    if (this.#exited) return Promise.resolve(true);
+    return new Promise(resolve => {
+      const timer = setTimeout(() => { this.#exitListeners.delete(done); resolve(false); }, timeoutMs);
+      const done = () => { clearTimeout(timer); resolve(true); };
+      this.#exitListeners.add(done);
+    });
+  }
 
   failConsumerTooSlow(): void { this.#fail(new Error("consumerTooSlow: renderer event credit exhausted"), "consumerTooSlow"); }
   failRendererDisconnected(): void { this.#fail(new Error("rendererDisconnected: renderer delivery ended before acknowledgement"), "rendererDisconnected"); }
@@ -622,8 +648,10 @@ export class SidecarClientV1 {
     };
 
     try {
-      this.#session.observe(request);
+      // Encode before the session records the request: a request that cannot
+      // be sent must not stay pending in the session.
       const encoded = encodeJsonl(request);
+      this.#session.observe(request);
       return new Promise<unknown>((resolve, reject) => {
         this.#pending.set(requestId, {
           method,
@@ -638,8 +666,9 @@ export class SidecarClientV1 {
         });
       });
     } catch (error) {
-      this.#fail(asError(error, "invalid sidecar request"), "requestInvalid");
-      return Promise.reject(this.#failure);
+      // Nothing was written: refuse this request only, the engine is fine.
+      this.#pending.delete(requestId);
+      return Promise.reject(asError(error, "invalid sidecar request"));
     }
   }
 
@@ -1216,6 +1245,10 @@ export class SidecarClientV1 {
     this.#streams.clear();
     this.#streamBytes = 0;
     this.#terminateOnce();
+    for (const listener of this.#failureListeners) {
+      try { listener(code); } catch { /* a listener never changes the reported failure */ }
+    }
+    this.#failureListeners.clear();
   }
 
   #terminateOnce(): void {

@@ -158,33 +158,37 @@ const chatListeners = new Set<Parameters<M5BridgeV6["onChatEvent"]>[0]>();
 const agentPublicEventListeners = new Set<Parameters<M5BridgeV6["onAgentPublicEvent"]>[0]>();
 const agentRunStateChangedListeners = new Set<Parameters<M5BridgeV6["onAgentRunStateChanged"]>[0]>();
 const agentOutputListeners = new Set<(head: OutputHead) => void>();
-ipcRenderer.on(M5_BRIDGE_V8_CHANNELS.agentOutputAvailable, (_event, payload: { event: OutputHead; streamId: string; seq: number }) => {
+// Acknowledge delivery in every case. The credit only paces delivery; an event
+// that fails its check or a listener that throws must not leave the credit
+// queue stuck, which would make the very next acknowledgement look
+// out of order and stop the whole engine.
+function delivered(payload: Pick<EventV1, "streamId" | "seq">, handle: () => void): void {
+  try { handle(); }
+  catch (error) { console.error("m5: renderer could not handle a sidecar event", error); }
+  finally { acknowledge(payload); }
+}
+ipcRenderer.on(M5_BRIDGE_V8_CHANNELS.agentOutputAvailable, (_event, payload: { event: OutputHead; streamId: string; seq: number }) => delivered(payload, () => {
   const head = validateOutputHead(payload.event, payload.event.binding);
   for (const listener of agentOutputListeners) listener(head);
-  acknowledge(payload);
-});
-ipcRenderer.on(M5_INTERNAL_CHANNELS_V1.sidecarEvent, (_event, payload: EventV1) => { for (const listener of sidecarListeners) listener(payload); acknowledge(payload); });
-ipcRenderer.on(M5_BRIDGE_V2_CHANNELS.projectEvent, (_event, payload: { event: Parameters<M5BridgeV6["onProjectEvent"]>[0] extends (event: infer T) => unknown ? T : never; streamId: string; seq: number }) => { for (const listener of projectListeners) listener(payload.event); acknowledge(payload); });
-ipcRenderer.on(M5_BRIDGE_V3_CHANNELS.workspaceEvent, (_event, payload: { event: unknown; streamId: string; seq: number }) => {
+}));
+ipcRenderer.on(M5_INTERNAL_CHANNELS_V1.sidecarEvent, (_event, payload: EventV1) => delivered(payload, () => { for (const listener of sidecarListeners) listener(payload); }));
+ipcRenderer.on(M5_BRIDGE_V2_CHANNELS.projectEvent, (_event, payload: { event: Parameters<M5BridgeV6["onProjectEvent"]>[0] extends (event: infer T) => unknown ? T : never; streamId: string; seq: number }) => delivered(payload, () => { for (const listener of projectListeners) listener(payload.event); }));
+ipcRenderer.on(M5_BRIDGE_V3_CHANNELS.workspaceEvent, (_event, payload: { event: unknown; streamId: string; seq: number }) => delivered(payload, () => {
   const workspaceEvent = validateWorkspaceEventV1(payload.event);
   for (const listener of workspaceListeners) listener(workspaceEvent);
-  acknowledge(payload);
-});
-ipcRenderer.on(M5_BRIDGE_V3_CHANNELS.chatEvent, (_event, payload: { event: unknown; streamId: string; seq: number }) => {
+}));
+ipcRenderer.on(M5_BRIDGE_V3_CHANNELS.chatEvent, (_event, payload: { event: unknown; streamId: string; seq: number }) => delivered(payload, () => {
   const message = validateTeamMessageV1(payload.event);
   for (const listener of chatListeners) listener(message);
-  acknowledge(payload);
-});
-ipcRenderer.on(M5_BRIDGE_V4_CHANNELS.agentPublicEvent, (_event, payload: { event: unknown; streamId: string; seq: number }) => {
+}));
+ipcRenderer.on(M5_BRIDGE_V4_CHANNELS.agentPublicEvent, (_event, payload: { event: unknown; streamId: string; seq: number }) => delivered(payload, () => {
   const agentPublicEvent = validateAgentPublicEventV1(payload.event);
   for (const listener of agentPublicEventListeners) listener(agentPublicEvent);
-  acknowledge(payload);
-});
-ipcRenderer.on(M5_BRIDGE_V5_CHANNELS.agentRunStateChanged, (_event, payload: { event: unknown; streamId: string; seq: number }) => {
+}));
+ipcRenderer.on(M5_BRIDGE_V5_CHANNELS.agentRunStateChanged, (_event, payload: { event: unknown; streamId: string; seq: number }) => delivered(payload, () => {
   const stateChanged = validateAgentRunStateChangedV1(payload.event);
   for (const listener of agentRunStateChangedListeners) listener(stateChanged);
-  acknowledge(payload);
-});
+}));
 function subscribe<T>(listeners: Set<(event: T) => void>, listener: (event: T) => void): () => void { listeners.add(listener); return () => listeners.delete(listener); }
 function acknowledge(event: Pick<EventV1, "streamId" | "seq">): void { ipcRenderer.send(M5_BRIDGE_V2_CHANNELS.eventAck, { streamId: event.streamId, seq: event.seq }); }
 

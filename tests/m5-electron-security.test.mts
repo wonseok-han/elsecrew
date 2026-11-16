@@ -273,6 +273,10 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
     onAgentPublicEvent() {}
     onAgentRunStateChanged() {}
     onAgentOutputAvailable() {}
+    onFailure() {}
+    async waitForExit() { return true; }
+    exitDetail = null;
+    failedBeforeReady = false;
     async getAgentOutputHead() { sidecarCalls.push("getAgentOutputHead"); return null; }
     async getAgentOutputPage() { sidecarCalls.push("getAgentOutputPage"); return { rows: [] }; }
     async start() {}

@@ -1735,7 +1735,10 @@ test("renderer event credit bounds stalled delivery and drains only exact acknow
   credit.deliver(event(MAX_IN_FLIGHT_EVENTS + 1), () => { sent += 1; });
   assert.equal(sent, MAX_IN_FLIGHT_EVENTS); assert.match(failure?.message ?? "", /consumerTooSlow/);
   let normalFailure: Error | undefined; const normal = new EventCreditV1((error) => { normalFailure = error; }); normal.deliver(event(1), () => {}); normal.acknowledge({ streamId: "credit", seq: 1 }); normal.deliver(event(2), () => {}); assert.equal(normalFailure, undefined);
-  normal.acknowledge({ streamId: "credit", seq: 1 }); assert.match(normalFailure?.message ?? "", /consumerTooSlow/);
+  // A repeated acknowledgement of an already drained event drains nothing (it
+  // is stale, e.g. from a page that was replaced); skipping ahead still fails.
+  normal.acknowledge({ streamId: "credit", seq: 1 }); assert.equal(normalFailure, undefined); assert.equal(normal.outstanding, 1);
+  normal.acknowledge({ streamId: "credit", seq: 3 }); assert.match(normalFailure?.message ?? "", /consumerTooSlow/);
 });
 
 test("renderer close/reopen credit lifecycle fails only with unacknowledged delivery", () => {
@@ -2100,4 +2103,76 @@ test("team runs require an explicitly accepted coordinator root and exact worksp
       assert.equal(child.terminations, 0);
     } else assert.equal(child.terminations, 1, invalid);
   }
+});
+
+test("an engine failure is reported once to listeners and its process end can be awaited", async () => {
+  const { child, client } = createClient();
+  const codes: string[] = [];
+  client.onFailure(code => codes.push(code));
+  const starting = client.start();
+  child.stdout.write("not-json\n");
+  await assert.rejects(starting);
+  assert.deepEqual(codes, ["protocolInvalid"]);
+  assert.equal(await client.waitForExit(10), false, "still running until its exit arrives");
+  const exited = client.waitForExit(1_000);
+  child.emit("exit", 0, "SIGTERM");
+  assert.equal(await exited, true);
+  assert.equal(client.exitDetail, "0/SIGTERM");
+  assert.equal(await client.waitForExit(10), true);
+  client.failRendererDisconnected();
+  assert.deepEqual(codes, ["protocolInvalid"], "later failures do not report again");
+});
+
+test("event credit ignores acknowledgements of a replaced engine and starts clean after reset", () => {
+  let failure: Error | undefined; const credit = new EventCreditV1((error) => { failure = error; });
+  const event = (streamId: string, seq: number) => ({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId, seq, event: "blob.chunk", payload: { text: "" } } as EventV1);
+  credit.deliver(event("old", 1), () => {});
+  credit.reset();
+  assert.equal(credit.outstanding, 0);
+  credit.acknowledge({ streamId: "old", seq: 1 });
+  assert.equal(failure, undefined, "a late acknowledgement from before the restart is stale, not a failure");
+  credit.deliver(event("new", 1), () => {});
+  credit.acknowledge({ streamId: "new", seq: 2 });
+  assert.match(failure?.message ?? "", /out-of-order/, "order is still checked within a live stream");
+});
+
+test("the renderer acknowledges every delivered event even when handling it fails", () => {
+  const preload = readFileSync(new URL("../electron/preload.ts", import.meta.url), "utf8");
+  assert.match(preload, /try \{ handle\(\); \}\s*catch \(error\) \{[^}]*\}\s*finally \{ acknowledge\(payload\); \}/);
+  for (const channel of ["agentOutputAvailable", "sidecarEvent", "projectEvent", "workspaceEvent", "chatEvent", "agentPublicEvent", "agentRunStateChanged"]) {
+    const line = preload.split("\n").find(text => text.startsWith("ipcRenderer.on(") && text.includes(`.${channel},`));
+    assert.ok(line?.includes("=> delivered(payload"), channel);
+  }
+  assert.equal((preload.match(/acknowledge\(payload\)/g) ?? []).length, 1, "only the shared finally acknowledges");
+  const main = readFileSync(new URL("../electron/main.ts", import.meta.url), "utf8");
+  assert.match(main, /watchEngineFailure\(client\);/);
+  assert.match(main, /waitForExit\(10_000\)/);
+  assert.match(main, /ENGINE_RESTART_LIMIT = 3/);
+  assert.doesNotMatch(main, /webContents\.reload\(\)/, "the screen refreshes itself only when nothing unsaved would be lost");
+  assert.match(main, /did-start-navigation[\s\S]{0,200}eventCredit\.pause\(\)/);
+  assert.match(main, /did-finish-load", \(\) => eventCredit\.resume\(\)/);
+});
+
+test("event credit holds deliveries while the page reloads and ignores stale acknowledgements", () => {
+  let failure: Error | undefined; const credit = new EventCreditV1((error) => { failure = error; });
+  const event = (seq: number) => ({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "s", seq, event: "blob.chunk", payload: { text: "" } } as EventV1);
+  let sent = 0;
+  credit.deliver(event(1), () => { sent += 1; });
+  credit.pause();
+  credit.deliver(event(2), () => { sent += 1; });
+  credit.acknowledge({ streamId: "s", seq: 1 });
+  assert.equal(sent, 1, "nothing is sent while the page loads");
+  assert.equal(credit.outstanding, 0);
+  credit.resume();
+  credit.deliver(event(3), () => { sent += 1; });
+  credit.deliver(event(4), () => { sent += 1; });
+  credit.acknowledge({ streamId: "s", seq: 2 });
+  assert.equal(failure, undefined, "an acknowledgement older than the oldest outstanding event is stale");
+  credit.acknowledge({ streamId: "s", seq: 3 });
+  credit.acknowledge({ streamId: "s", seq: 4 });
+  assert.equal(credit.outstanding, 0);
+  assert.equal(failure, undefined);
+  credit.deliver(event(5), () => {});
+  credit.acknowledge({ streamId: "s", seq: 6 });
+  assert.match(failure?.message ?? "", /out-of-order/, "skipping ahead is still refused");
 });

@@ -10,8 +10,9 @@ import { summarizeWorkStatus, type WorkStatusSummary } from "./work-status.ts";
  * there is anything, so the bell can show a warning mark.
  * No automatic cancellation, lock release, or recovery mutation.
  */
-export function WorkStatusPanel({ bridge, ready, refreshKey, onAttention }: {
+export function WorkStatusPanel({ bridge, ready, refreshKey, onAttention, liveRunIds = [] }: {
   bridge: SupportedM5Bridge; ready: boolean; refreshKey: string; onAttention: (attention: boolean) => void;
+  liveRunIds?: readonly string[];
 }) {
   const { t } = useI18n();
   const [summary, setSummary] = useState<WorkStatusSummary | null>(null);
@@ -31,13 +32,13 @@ export function WorkStatusPanel({ bridge, ready, refreshKey, onAttention }: {
       try {
         const status = await (bridge as M5BridgeV6).getSystemStatus();
         if (!current) return;
-        setSummary(summarizeWorkStatus(status)); setFailed(false);
+        setSummary(summarizeWorkStatus(status, liveRunIds)); setFailed(false);
       } catch { if (current) setFailed(true); }
       finally { if (current) setBusy(false); }
     })();
     inFlight.current = request;
     return () => { current = false; };
-  }, [bridge, ready, refreshKey, refresh]);
+  }, [bridge, ready, refreshKey, refresh, liveRunIds.join(" ")]);
   const attention = ready && bridge.version >= 6 && (summary !== null || failed);
   useEffect(() => { onAttention(attention); }, [attention, onAttention]);
   if (!attention) return null;

@@ -62,7 +62,47 @@ test("an engine that stops after admission turns the screen to failed instead of
   next?.();
   await Promise.resolve(); await Promise.resolve();
   assert.deepEqual(states, ["checking", "ready", "stopped"]);
-  assert.equal(scheduled, undefined, "a failure is final until the app restarts");
+  assert.ok(scheduled, "it keeps looking for the engine the app starts again");
+});
+
+test("when the restarted engine is ready, the screen recovers once", async () => {
+  let alive = true;
+  let scheduled: (() => void) | undefined;
+  const states: string[] = [];
+  let recovered = 0;
+  const poller = new StorageAdmissionPoller(
+    async () => { if (!alive) throw new Error("sidecar exited"); return status("ready"); },
+    (state) => states.push(state),
+    { set: (callback) => { scheduled = callback; return 1 as unknown as ReturnType<typeof setTimeout>; }, clear: () => { scheduled = undefined; } },
+    () => { recovered += 1; },
+  );
+  const tick = async () => { const next = scheduled; scheduled = undefined; next?.(); await Promise.resolve(); await Promise.resolve(); };
+  poller.start();
+  await Promise.resolve(); await Promise.resolve();
+  alive = false;
+  await tick();
+  await tick();
+  assert.equal(recovered, 0);
+  alive = true;
+  await tick();
+  assert.deepEqual(states, ["checking", "ready", "stopped", "stopped", "ready"]);
+  assert.equal(recovered, 1);
+  await tick();
+  assert.equal(recovered, 1, "recovery is reported once");
+});
+
+test("an engine that never became ready is not waited for", async () => {
+  let scheduled: (() => void) | undefined;
+  const states: string[] = [];
+  const poller = new StorageAdmissionPoller(
+    async () => { throw new Error("no engine"); },
+    (state) => states.push(state),
+    { set: (callback) => { scheduled = callback; return 1 as unknown as ReturnType<typeof setTimeout>; }, clear: () => { scheduled = undefined; } },
+  );
+  poller.start();
+  await Promise.resolve(); await Promise.resolve();
+  assert.deepEqual(states, ["checking", "failed"]);
+  assert.equal(scheduled, undefined);
 });
 
 test("G5D admission poller cancels scheduled and in-flight updates on unmount", async () => {

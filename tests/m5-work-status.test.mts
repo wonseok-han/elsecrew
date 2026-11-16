@@ -63,3 +63,11 @@ test("finished runs read oldest first with a stable chat-wide order and duration
   assert.equal(runDurationSeconds(runs[0]), 45);
   assert.equal(runDurationSeconds({createdAt:"bad", updatedAt:"2026-11-12T05:00:00Z"}), null);
 });
+
+test("work that is running normally is not something to check", () => {
+  assert.equal(summarizeWorkStatus(status(["run:agent_run_a"]), ["agent_run_a"]), null);
+  const summary = summarizeWorkStatus(status(["run:agent_run_a", "run:agent_run_b", "lock:lock_x"]), ["agent_run_a"]);
+  assert.deepEqual(summary?.ids, ["run:agent_run_b", "lock:lock_x"]);
+  assert.equal(summary?.total, 2);
+  assert.equal(summarizeWorkStatus(status(["run:agent_run_b"]), [])?.total, 1);
+});

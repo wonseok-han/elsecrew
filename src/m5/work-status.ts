@@ -42,15 +42,19 @@ export function runOutcomeNotice(run: Pick<AgentRunRecordV1, "state" | "terminat
 export interface WorkStatusSummary { total: number; ids: string[]; omitted: number }
 
 /** System blockers include live runs, not just failed runs. Never infer death here. */
-export function summarizeWorkStatus(status: SystemStatusG5DV1): WorkStatusSummary | null {
+/** `liveRunIds`: runs the screen knows are still working normally. They hold
+ * the app too, but a run doing its job is not something to check. */
+export function summarizeWorkStatus(status: SystemStatusG5DV1, liveRunIds: readonly string[] = []): WorkStatusSummary | null {
   if (status.storageAdmission.state !== "ready") throw new Error("storage is not ready");
   if (!Array.isArray(status.blockerIds) || status.blockerIds.some(id => typeof id !== "string" || !id)
     || new Set(status.blockerIds).size !== status.blockerIds.length
     || status.recoveryRequired !== (status.blockerIds.length > 0)) throw new Error("invalid blocker summary");
-  if (!status.blockerIds.length) return null;
+  const live = new Set(liveRunIds.map(id => `run:${id}`));
+  const blockers = status.blockerIds.filter(id => !live.has(id));
+  if (!blockers.length) return null;
   return {
-    total: status.blockerIds.length,
-    ids: status.blockerIds.slice(0, 20).map(id => id.replace(/[\p{Cc}\p{Cf}]/gu, "�").slice(0, 160)),
-    omitted: Math.max(0, status.blockerIds.length - 20),
+    total: blockers.length,
+    ids: blockers.slice(0, 20).map(id => id.replace(/[\p{Cc}\p{Cf}]/gu, "�").slice(0, 160)),
+    omitted: Math.max(0, blockers.length - 20),
   };
 }

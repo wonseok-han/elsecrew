@@ -89,7 +89,9 @@ function loadMonaco(): Promise<MonacoApi> {
 }
 
 /** Poll rather than subscribe: G5D deliberately adds no public storage-admission event. */
-function useStorageAdmission(bridge: SupportedM5Bridge): { admission: AdmissionView; fixtureAvailable: boolean } {
+function useStorageAdmission(bridge: SupportedM5Bridge, onRecovered: () => void): { admission: AdmissionView; fixtureAvailable: boolean } {
+  const recovered = useRef(onRecovered);
+  recovered.current = onRecovered;
   const [admission, setAdmission] = useState<AdmissionView>(() => bridge.version >= 6 ? "checking" : "ready");
   const [fixtureAvailable, setFixtureAvailable] = useState(bridge.version < 6);
   useEffect(() => {
@@ -102,7 +104,7 @@ function useStorageAdmission(bridge: SupportedM5Bridge): { admission: AdmissionV
       const status = await v6.getSystemStatus!();
       if (active) setFixtureAvailable(status.sidecar.capabilities.includes("run.startFixture") && !status.sidecar.capabilities.includes("run.startAgent"));
       return status;
-    }, setAdmission);
+    }, setAdmission, undefined, () => recovered.current());
     poller.start();
     return () => { active = false; poller.stop(); };
   }, [bridge]);
@@ -166,7 +168,20 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     if (entry.kind === "file") void controller.openFile(entry.path);
   }, [controller]);
   const chatController = useMemo(() => new ChatUiController(bridge), [bridge]);
-  const { admission, fixtureAvailable } = useStorageAdmission(bridge);
+  // A new engine is running after the old one stopped. Refresh so everything
+  // shown comes from it, unless that would lose something not yet saved.
+  const [engineRestarted, setEngineRestarted] = useState(false);
+  // Run states on screen still come from the old engine and mean nothing
+  // here; only what the person typed or left open counts.
+  const engineRecovered = () => {
+    const current = chatController.snapshot();
+    const typing = goal.trim() !== "" || Object.values(current.followups ?? {}).some(draft => Boolean(draft?.text?.trim()) || Boolean(draft?.sending));
+    const untouched = !settingsOpen && !appDefaultsOpen && !newChatOpen && !reloadDraft && !reloadingDraft
+      && !leavingProject && !leaveError && !typing && controller.canLeaveProject();
+    if (untouched) window.location.reload();
+    else setEngineRestarted(true);
+  };
+  const { admission, fixtureAvailable } = useStorageAdmission(bridge, engineRecovered);
   const admissionReady = admission === "ready";
   const admissionReadyRef = useRef(admissionReady);
   admissionReadyRef.current = admissionReady;
@@ -209,6 +224,13 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   // linger once another project is opened.
   useEffect(() => { setManagedProject(null); }, [snapshot.project?.id]);
   const chat = useSyncExternalStore(chatController.subscribe.bind(chatController), () => chatController.snapshot(), () => chatController.snapshot());
+  // Runs the latest read of the open task confirmed to be working normally.
+  // They are not "something to check": only stopped or unconfirmed work raises
+  // the bell's warning. Events alone never hide a run, since one that failed
+  // its check could leave a stopped run looking live.
+  const liveRunIds = useMemo(() => chat.agentRuns
+    .filter(run => ["preparing", "running", "cancelling"].includes(run.state))
+    .map(run => run.runId).sort(), [chat.agentRuns]);
   // The built-in team names no model; a task starts only once every role has one.
   const unselectedRoles = chat.settings ? (() => { const team = roleSettingsAsV3(chat.settings); return team.roles.filter(role => !hasUsableModel(role.runtime, role.modelSelector)).map(role => roleLabel(role.roleId, team.roleDefinitions, t)); })() : [];
   useEffect(() => window.m5AppUpdate?.onRestartCheck(() => {
@@ -407,7 +429,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       {/* Everything about what is happening lives with the bell: progress and
           errors under it, anything that still needs attention inside it. */}
       <NotificationBell center={notifications} onOpen={openNotification} hasProblem={workAttention}
-        problem={<WorkStatusPanel bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])} onAttention={setWorkAttention} />}
+        problem={<WorkStatusPanel bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])} liveRunIds={liveRunIds} onAttention={setWorkAttention} />}
         errors={[snapshot.error ? { title: t(snapshot.error.messageKey), key: `snapshot:${snapshot.error.messageKey}:${snapshot.error.technicalDetail ?? ""}`, body: <>
           {snapshot.error.messageKey === "m5.editorError.reopenProject" && <button type="button" className="m5-secondary" disabled={settingsOpen || !admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} onClick={() => void addProject()}>{t("m5.editor.reselectOriginal")}</button>}
           <details><summary>{t("m5.feedback.details")}</summary><pre>{snapshot.error.technicalDetail}</pre></details></> }
@@ -450,6 +472,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         <ProviderLogin settingsPage disabled={!admissionReady} returning={hasSavedProjects} reveal={connectionReveal} />
       </AppSettings>
       <StorageAdmissionNotice admission={admission} />
+      {engineRestarted && <section className="m5-admission" role="status"><strong>{t("m5.admission.restarted")}</strong><p>{t("m5.admission.restartedHelp")}</p><button type="button" className="m5-secondary" onClick={() => window.location.reload()}>{t("m5.admission.refresh")}</button></section>}
       {!snapshot.project && <GuidedStart returning={hasSavedProjects} disabled={!admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked} onChoose={() => void addProject()} />}
       {!snapshot.project && hasSavedProjects && <ProjectCatalog home refreshKey={catalogRevision} removeDisabled={!canRemove} onRemove={entry => { setRemovalError(false); setRemoval({ projectId: entry.projectId, label: entry.canonicalPath }); }} onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} ready={admissionReady} controller={controller}
         disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked} />}

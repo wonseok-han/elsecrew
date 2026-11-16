@@ -1190,3 +1190,31 @@ fn explicit_provider_connections_persist_and_gate_native_work_without_auth_chang
     assert_eq!(reopened.projects.provider_connections().unwrap()["codex"],false);
     assert_eq!(reopened.projects.provider_connections().unwrap()["claude-code"],true);
 }
+
+#[test]
+fn one_failed_request_is_answered_and_never_ends_the_engine() {
+    let request = request_value("sidecar_failed_request", "req_failed", "recovery.resolveAgent", json!({}));
+    for (kind, code, category) in [
+        ("invalidParams", "invalidParams", "invalidRequest"),
+        ("providerDisconnected", "providerDisconnected", "requestBlocked"),
+        ("operationConflict", "operationConflict", "requestBlocked"),
+        ("providerLoginFailed", "providerLoginFailed", "requestBlocked"),
+    ] {
+        let handled = answer_failed_request(&request, Err(SidecarError::new(kind, "detail"))).expect("answered, not ended");
+        let response = handled.response.expect("answered");
+        assert!(!response.ok, "{kind}");
+        let error = response.error.expect("error");
+        assert_eq!((error.code.as_str(), error.kind.as_str()), (code, category), "{kind}");
+        assert_eq!(response.request_id, "req_failed");
+    }
+    let ok = HandledRequest::response(success_response(&request, json!({"fine":true})));
+    assert!(answer_failed_request(&request, Ok(ok)).unwrap().response.unwrap().ok);
+    // A failure without detail still gets one: the app treats an empty detail as a broken protocol.
+    let empty = answer_failed_request(&request, Err(SidecarError::new("operationConflict", ""))).unwrap();
+    assert_eq!(empty.response.unwrap().error.unwrap().detail, "operationConflict");
+    // Failures that mean stored state can no longer be trusted still end the engine.
+    // So does any kind not known to stay within the request.
+    for kind in ["projectionInvalid", "databaseFailure", "agentRuntimeFailure", "storageMaintenancePoisoned", "integrityFailed", "injectedFailure", "jsonFailure", "somethingNew"] {
+        assert_eq!(answer_failed_request(&request, Err(SidecarError::new(kind, "x"))).err().map(|error| error.kind().to_owned()), Some(kind.to_owned()));
+    }
+}
