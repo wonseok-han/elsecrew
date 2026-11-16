@@ -59,6 +59,22 @@ fn stamp(m: &Metadata) -> [i128; 9] {
     ]
 }
 
+/// Device numbers are assigned when a volume is mounted and can change after a
+/// restart of the computer, while inode numbers stay. Every identity of the
+/// original's files that is recorded, or compared with a recorded one, leaves
+/// the device number out (as 0). Live comparisons within one moment keep
+/// using `stamp`, which includes it.
+pub(super) fn recorded_identity(m: &Metadata) -> (u64, u64, u64) {
+    (0, m.ino(), m.nlink())
+}
+
+/// `stamp` without the device number, for values that are recorded.
+pub(super) fn recorded_stamp(m: &Metadata) -> [i128; 9] {
+    let mut recorded = stamp(m);
+    recorded[0] = 0;
+    recorded
+}
+
 fn open(root: &Dir, name: &str, directory: bool) -> Result<File, ProjectFailure> {
     let name = CString::new(name).map_err(|_| failure())?;
     let flags = libc::O_RDONLY
@@ -100,7 +116,7 @@ fn capture_once_checked(
     check()?;
     let metadata = root.dir_metadata().map_err(|_| failure())?;
     let mut inventory = SourceInventory {
-        root_stamp: stamp(&metadata),
+        root_stamp: recorded_stamp(&metadata),
         entries: BTreeMap::new(),
     };
     let mut budget = Budget {
@@ -261,7 +277,7 @@ fn scan(
             .insert(
                 path,
                 Entry {
-                    identity: (meta.dev(), meta.ino(), meta.nlink()),
+                    identity: recorded_identity(&meta),
                     kind,
                     mode: meta.mode(),
                     size,

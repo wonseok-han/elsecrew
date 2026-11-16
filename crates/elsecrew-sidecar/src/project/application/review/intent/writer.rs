@@ -3,6 +3,7 @@
 //! External editors must be stopped. On uncertainty preserve both names and lock.
 use super::*;
 use crate::project::application::{open, stamp};
+use crate::project::without_device;
 use crate::project::{open_absolute_directory_capability, sync_capability_directory};
 use cap_std::fs::{Dir, File, MetadataExt};
 use std::ffi::CString;
@@ -43,7 +44,7 @@ fn image(dir: &Dir, name: &str) -> Result<Value, ProjectFailure> {
         // Child creation changes directory link counts and timestamps. Its
         // identity is stable; exact child membership is checked separately.
         return Ok(
-            json!({"kind":2,"mode":meta.mode(),"size":0,"digest":vec![0u8;32],"identity":[meta.dev(),meta.ino(),0]}),
+            json!({"kind":2,"mode":meta.mode(),"size":0,"digest":vec![0u8;32],"identity":[0,meta.ino(),0]}),
         );
     }
     if meta.file_type().is_symlink() && meta.nlink() == 1 {
@@ -53,7 +54,7 @@ fn image(dir: &Dir, name: &str) -> Result<Value, ProjectFailure> {
         }
         let digest: [u8; 32] = Sha256::digest(&bytes).into();
         return Ok(
-            json!({"kind":3,"mode":meta.mode(),"size":bytes.len(),"digest":digest,"identity":[meta.dev(),meta.ino(),meta.nlink()]}),
+            json!({"kind":3,"mode":meta.mode(),"size":bytes.len(),"digest":digest,"identity":[0,meta.ino(),meta.nlink()]}),
         );
     }
     if !meta.is_file() || meta.nlink() != 1 || meta.len() > super::super::super::MAX_BYTES {
@@ -85,7 +86,7 @@ fn image(dir: &Dir, name: &str) -> Result<Value, ProjectFailure> {
     }
     let digest: [u8; 32] = hash.finalize().into();
     Ok(
-        json!({"kind":1,"mode":meta.mode(),"size":count,"digest":digest,"identity":[meta.dev(),meta.ino(),meta.nlink()]}),
+        json!({"kind":1,"mode":meta.mode(),"size":count,"digest":digest,"identity":[0,meta.ino(),meta.nlink()]}),
     )
 }
 
@@ -158,7 +159,7 @@ pub(super) fn verify_unwritten_item(
             _ => return Err(invalid()),
         }
     }
-    if image(&dir, leaf)? != item["before"] {
+    if image(&dir, leaf)? != without_device(&item["before"]) {
         return Err(invalid());
     }
     Ok(())
@@ -232,8 +233,8 @@ fn bound_parent_in_scope(
         )?,
     )?;
     let meta = dir.dir_metadata().map_err(|_| invalid())?;
-    if journal["rootIdentity"] != json!([root.dev(), root.ino()])
-        || journal["parentIdentity"] != json!([meta.dev(), meta.ino()])
+    if without_device(&journal["rootIdentity"]) != json!([0, root.ino()])
+        || without_device(&journal["parentIdentity"]) != json!([0, meta.ino()])
     {
         return Err(invalid());
     }
@@ -257,8 +258,8 @@ fn pair_matches(
         return Err(invalid());
     }
     let (target, saved) = if applied { (new, old) } else { (old, new) };
-    Ok(image(dir, leaf)? == *target
-        && image(dir, j["retainedName"].as_str().ok_or_else(invalid)?)? == *saved)
+    Ok(image(dir, leaf)? == without_device(target)
+        && image(dir, j["retainedName"].as_str().ok_or_else(invalid)?)? == without_device(saved))
 }
 
 pub(super) fn verify_record_pair(
@@ -329,14 +330,14 @@ pub(super) fn cancel_reserved_staging(
         return Err(invalid());
     }
     let (dir, leaf) = bound_parent(manager, expected)?;
-    if image(&dir, &leaf)? != expected["pendingItem"]["item"]["before"] {
+    if image(&dir, &leaf)? != without_device(&expected["pendingItem"]["item"]["before"]) {
         return Err(invalid());
     }
     let saved = j["retainedName"].as_str().ok_or_else(invalid)?;
     let partial = image(&dir, saved)?;
     sync_capability_directory(&dir)?;
     let (fresh, fresh_leaf) = bound_parent(manager, expected)?;
-    if image(&fresh, &fresh_leaf)? != expected["pendingItem"]["item"]["before"]
+    if image(&fresh, &fresh_leaf)? != without_device(&expected["pendingItem"]["item"]["before"])
         || image(&fresh, saved)? != partial
     {
         return Err(invalid());
@@ -565,7 +566,7 @@ pub(super) fn write_item_cancellable(
     );
     let root = open_absolute_directory_capability(root_path)?;
     let root_identity = root.dir_metadata().map_err(|_| invalid())?;
-    if observation["rootIdentity"] != json!([root_identity.dev(), root_identity.ino()]) {
+    if without_device(&observation["rootIdentity"]) != json!([0, root_identity.ino()]) {
         return Err(invalid());
     }
     let path = item["path"].as_str().ok_or_else(invalid)?;
@@ -574,8 +575,8 @@ pub(super) fn write_item_cancellable(
     backup::space::writer_parent(&dir, item["after"]["size"].as_u64().unwrap_or(0))?;
     let retained = format!(".elsecrew-apply-{}", Uuid::new_v4().simple());
     let mut journal = json!({"version":1,"phase":"reserved","retainedName":retained,
-        "rootIdentity":[root_identity.dev(),root_identity.ino()],
-        "parentIdentity":[parent_identity.dev(),parent_identity.ino()],"stagedImage":null});
+        "rootIdentity":[0,root_identity.ino()],
+        "parentIdentity":[0,parent_identity.ino()],"stagedImage":null});
     let mut current = publish(storage, project_id, expected, journal.clone(), request)?;
     if !item["after"].is_null() {
         let snapshot = open_absolute_directory_capability(Path::new(
@@ -657,8 +658,8 @@ pub(super) fn write_item_cancellable(
     let linked = linked_parent.dir_metadata().map_err(|_| invalid())?;
     if (linked_root.dev(), linked_root.ino()) != (root_identity.dev(), root_identity.ino())
         || (linked.dev(), linked.ino()) != (parent_identity.dev(), parent_identity.ino())
-        || image(&dir, &leaf)? != item["before"]
-        || image(&dir, &retained)? != journal["stagedImage"]
+        || image(&dir, &leaf)? != without_device(&item["before"])
+        || image(&dir, &retained)? != without_device(&journal["stagedImage"])
     {
         return Err(invalid());
     }
@@ -696,7 +697,7 @@ pub(super) fn write_item_cancellable(
     // A post-rename conflict never triggers destructive cleanup or automatic undo.
     let after = image(&dir, &leaf)?;
     let before = image(&dir, &retained)?;
-    if after != journal["stagedImage"] || before != item["before"] {
+    if after != without_device(&journal["stagedImage"]) || before != without_device(&item["before"]) {
         return Err(invalid());
     }
     let check = parent(&open_absolute_directory_capability(root_path)?, path)?

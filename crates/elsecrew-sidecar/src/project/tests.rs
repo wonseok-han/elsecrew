@@ -6418,3 +6418,104 @@ fn a_project_folder_that_lost_its_repository_never_lets_a_parent_repository_stan
     assert!(PathBuf::from(view["worktreePath"].as_str().unwrap()).is_dir());
     fs::rename(parent.join(".git"), fixture.source.join(".git")).unwrap();
 }
+
+#[test]
+fn recorded_identities_compare_without_device_numbers() {
+    let image = json!({"kind":1,"mode":0o100644,"size":3,"digest":[1,2],"identity":[16777230,42,1]});
+    assert_eq!(without_device(&image)["identity"], json!([0, 42, 1]));
+    assert_eq!(without_device(&image)["digest"], image["digest"]);
+    assert_eq!(without_device(&json!([16777230, 7])), json!([0, 7]));
+    assert_eq!(without_device(&json!([5, 6, 7, 8, 9, 10, 11, 12, 13]))[0], json!(0));
+    assert_eq!(without_device(&Value::Null), Value::Null);
+    // Values without a device slot are left alone.
+    let windows = json!({"fileId":"abc","observation":{"x":1}});
+    assert_eq!(without_device(&windows), windows);
+    // Only identity shapes are touched.
+    assert_eq!(without_device(&json!([5, 6, 7, 8])), json!([5, 6, 7, 8]));
+}
+
+#[cfg(unix)]
+#[test]
+fn source_receipts_record_no_device_numbers_and_older_ones_still_match_after_a_restart() {
+    use application::git_baseline::raw_baseline::{
+        capture_clean_baseline,
+        receipt::{self, BaselineReceipt},
+    };
+    use std::os::unix::fs::MetadataExt;
+    let mut fixture = source_index_fixture();
+    fixture.manager.open_project(&mut fixture.storage, fixture.source.to_str().unwrap(), "req_device_receipt").unwrap();
+    let source = fixture.manager.open_source_repository(&fixture.source).unwrap();
+    let baseline = capture_clean_baseline(&fixture.manager, &source).unwrap();
+    let active = fixture.create();
+    let store = receipt::ReceiptStore::open(&fixture.manager).unwrap();
+    let recorded = receipt::persist(&store, &active, &baseline).unwrap();
+    let path = fixture.manager.data_root.join("source-baselines-v1").join(format!("{}.source-baseline-v1.json", active.worktree_id));
+    let written: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let entries = written["rawEntries"].as_array().unwrap();
+    assert!(!entries.is_empty());
+    for entry in entries {
+        assert_eq!(entry[4][0], "0", "a device number was recorded: {entry}");
+    }
+    assert_eq!(written["rootStamp"][0], "0");
+    receipt::verify(&store, &active, &capture_clean_baseline(&fixture.manager, &source).unwrap(), Some(&recorded)).unwrap();
+
+    // A receipt written by the previous version (with this boot's device number).
+    let device = fs::metadata(&fixture.source).unwrap().dev();
+    assert_ne!(device, 0);
+    let as_bound = |bytes: &[u8]| BaselineReceipt::from_value(&json!({
+        "schemaVersion":1,"digest":format!("sha256:{:x}", Sha256::digest(bytes)),"length":bytes.len(),
+    })).unwrap();
+    let current = capture_clean_baseline(&fixture.manager, &source).unwrap();
+    // Written this boot, or before a restart gave the volume another number:
+    // both still match, because the number written in the receipt is used.
+    for device in [device, device + 1] {
+        let legacy = receipt::legacy_bytes_for_test(&active, &current, device);
+        assert_ne!(legacy, fs::read(&path).unwrap());
+        // Rewritten in place: the receipt file keeps its identity.
+        fs::OpenOptions::new().write(true).truncate(true).open(&path).unwrap().write_all(&legacy).unwrap();
+        receipt::verify(&store, &active, &current, Some(&as_bound(&legacy))).unwrap();
+        // Any other difference is still refused.
+        fs::write(fixture.source.join("untracked-after-restart.txt"), b"x").unwrap();
+        let changed = capture_clean_baseline(&fixture.manager, &source).unwrap();
+        assert!(receipt::verify(&store, &active, &changed, Some(&as_bound(&legacy))).is_err(), "device {device}");
+        fs::remove_file(fixture.source.join("untracked-after-restart.txt")).unwrap();
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn an_update_of_the_original_can_be_restored_after_a_restart_renumbered_the_volume() {
+    use application::review::{confirmation::Confirmations, intent, ReviewTarget};
+    let (mut f, review) = prepared_edit_fixture();
+    let mut owner = Confirmations::default();
+    let (token, _) = owner.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review).unwrap();
+    let grant = owner.prepare_backup(&f.manager, &mut f.storage, &token, "req_renumber_backup").unwrap();
+    let prepared = intent::begin(&f.manager, &mut f.storage, &mut owner, grant, "req_renumber_begin").unwrap();
+    let applying = intent::mark_write_started(&f.manager, &mut f.storage, &f.project_id, &prepared, "req_renumber_start").unwrap();
+    let pending = intent::record_first_item(&f.manager, &mut f.storage, &f.project_id, &applying, "req_renumber_pending").unwrap();
+    let applied = intent::writer::write_first_regular_item(&f.manager, &mut f.storage, &f.project_id, &pending, "req_renumber_apply").unwrap();
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"updated");
+    // Nothing recorded carries a device number.
+    let journal = &applied["pendingItem"]["writeJournal"];
+    assert_eq!(journal["rootIdentity"][0], 0);
+    assert_eq!(journal["parentIdentity"][0], 0);
+    assert_eq!(journal["stagedImage"]["identity"][0], 0);
+    assert_eq!(applied["pendingItem"]["item"]["before"]["identity"][0], 0);
+    // The record as an older version wrote it before a restart gave the
+    // volume another device number.
+    let mut renumbered = applied.clone();
+    for key in ["rootIdentity", "parentIdentity"] {
+        renumbered["pendingItem"]["writeJournal"][key][0] = json!(7_777_777);
+    }
+    renumbered["pendingItem"]["writeJournal"]["stagedImage"]["identity"][0] = json!(7_777_777);
+    let mut project = required_project(&f.storage, &f.project_id).unwrap();
+    project.insert("application_intent".into(), renumbered.clone());
+    f.storage.upsert_projection_record("project", &f.project_id, "op_test_renumbered_intent", None, project).unwrap();
+    assert_eq!(
+        intent::writer::inspect_regular_outcome(&f.manager, &f.storage, &f.project_id).unwrap()["comparison"],
+        "matchesAppliedPair"
+    );
+    let restored = intent::writer::restore_first_regular_item(&f.manager, &mut f.storage, &f.project_id, &renumbered, "req_renumber_restore").unwrap();
+    assert_eq!(restored["pendingItem"]["writeJournal"]["phase"], "restored");
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+}

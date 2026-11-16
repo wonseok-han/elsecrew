@@ -2,6 +2,20 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — 재부팅 뒤 원본 반영·복원이 거절되던 문제(장치 번호)
+- 사용자 지시: 직전 엔트리의 남은 위험 1번(원본 반영 쪽 기록의 장치 번호)부터 고친다.
+- 문제: macOS의 장치 번호(`st_dev`)는 마운트할 때 정해져 재부팅 뒤 바뀔 수 있다(이 PC에서 실제 확인). 원본 반영 쪽 기록이 이 번호를 저장하고 재시작 뒤 정확히 비교했다. 그래서 재부팅 전에 만든 작업은 '원본 반영' 미리보기가 거절되고, 이미 반영한 변경의 '복원'도 거절될 수 있었다. 반영 도중 멈춘 경우에는 프로젝트가 '반영 중'으로 굳어 삭제도 막혔다.
+- 변경(sidecar): 원칙은 '기록하거나 기록과 비교하는 원본 파일 신원에서는 장치 번호를 빼고, 같은 순간의 실시간 비교는 그대로 둔다'이다.
+  - `application.rs`: `recorded_identity`·`recorded_stamp`·`without_device`를 추가했다. 원본 목록의 항목 신원과 루트 stamp를 장치 0으로 기록한다.
+  - 영향받는 기록: 기준 기록(영수증), 검토 기록의 `snapshotDigest`, 백업 archive의 `before`, 반영 journal(`rootIdentity`·`parentIdentity`·`stagedImage`), 원본 관찰 기록, 백업 파일 정리 신원, 작업 공간 정리 job의 폴더 신원.
+  - 저장된 값과의 비교는 `without_device`로 장치 원소를 무시한다. 업데이트 전에 쓴 journal·archive·정리 job도 그대로 통과한다.
+  - 영수증은 바이트 비교라 예전 형식을 영수증에 적힌 장치 번호로 다시 만들어 비교한다(`matches_legacy`). 영수증 바이트는 원장 digest로 결속돼 있으므로 새 신뢰를 들이지 않고, 재부팅 뒤에도 기존 작업의 반영 미리보기가 동작한다. 예전 검토 기록은 다시 검토해야 한다.
+  - `without_device`는 플랫폼 공용(`project.rs`)이고 신원 모양(길이 2·3·9 배열, `identity`가 있는 이미지)만 바꾼다. 처음에는 macOS 전용 모듈에 둬서 Windows 빌드가 깨졌다(검토 차단 1건, 수정). Windows 대상 컴파일은 이 PC에 대상이 없어 확인하지 못했다.
+  - 손대지 않음: 공급자 실행 파일 신원 digest, `stale_helper`, 저장 중 임시 파일의 부모 신원(모두 한 실행 안의 비교). Windows는 별도 신원(파일 ID)이다.
+- 테스트(새로 추가): `recorded_identities_compare_without_device_numbers`, `source_receipts_record_no_device_numbers_and_older_ones_match_until_a_restart`, `an_update_of_the_original_can_be_restored_after_a_restart_renumbered_the_volume`(journal의 장치 번호를 바꾼 기록으로 확인·복원 성공), `selected_workspace_cleanup_resumes_after_a_restart_renumbered_the_volume`.
+- 독립 검토(읽기 전용 1명): macOS에서 기록·비교 쌍 누락 없음, 원본 보호의 실질적 약화 없음. 차단 1건(`without_device`를 macOS 전용 모듈에 둬서 Windows 빌드 실패)은 플랫폼 공용으로 옮겨 고쳤다. 경미 2건 중 예전 영수증 호환은 영수증에 적힌 장치 번호를 쓰도록 개선했다. 남은 경미: 원본이 외장 볼륨의 루트이면 재시작을 넘는 루트 신원이 inode뿐이다(Git 신원·내용 digest가 함께 맞아야 쓰므로 위험은 낮다, 필요하면 볼륨 UUID).
+- 검증: Rust 작업공간 전체 nextest 1135 통과(최종 코드, `nice -n 15`). 새 테스트 4개 포함.
+
 ### 2026-11-16 · by Claude Fable 5.2 (claude-fable-5-2) — 영구히 막힌 Claude 로그인 잠금 해소·복사 실패 자동 되돌리기
 - 배경: 직전 엔트리의 수정 뒤에도 사용자의 Claude 연결은 `providerLoginRecoveryRequired`로 막혀 있었다. 앱 데이터를 임시 복사본으로 읽어 보니 직전 엔트리의 가정이 틀렸다.
   - 멈춘 실행(`agent_run_fce7…`)은 이미 `canceled`·`resolvedAbandoned`였고, 그 프로젝트는 삭제가 끝나(`project_deletion_v1.state=deleted`) 작업 공간과 manifest가 지워져 있었다. "프로젝트를 열어 멈춘 작업을 삭제"할 대상이 없었다.
@@ -132,7 +146,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **장치 번호는 재부팅 뒤 바뀐다(2026-11-16)**: macOS의 `st_dev`는 마운트할 때 정해진다. 재시작을 넘겨 저장·비교하는 신원에는 inode(와 내용 digest)를 쓰고 장치 번호는 일관성만 본다. 로그인 잠금 결합은 고쳤고, 원본 반영 기록(`intent/writer.rs`)에는 같은 문제가 남아 있다. 앱 데이터 조사는 DB를 임시 폴더로 복사해 읽는다(실행 중인 앱의 DB는 잠겨 있다).
+- **장치 번호는 재부팅 뒤 바뀐다(2026-11-16)**: macOS의 `st_dev`는 마운트할 때 정해진다. 재시작을 넘겨 저장·비교하는 신원에는 inode(와 내용 digest)를 쓰고 장치 번호는 일관성만 본다. 로그인 잠금 결합과 원본 반영 쪽 기록(영수증·journal·archive·정리 job)은 고쳤다. 기록에는 0을 쓰고, 저장된 값과 비교할 때는 `without_device`로 장치 원소를 무시한다. 앱 데이터 조사는 DB를 임시 폴더로 복사해 읽는다(실행 중인 앱의 DB는 잠겨 있다).
 - **로그인 잠금 해제의 증거(2026-11-16)**: 해제는 '결합된 실행이 원장에서 끝났음'을 증명해야 하며 프로세스 소멸만으로는 풀지 않는다(기존 불변식 유지). 작업 공간 증거는 manifest 또는 원장의 삭제 완료 기록 중 하나다.
 - **작업마다 독립 복사본(2026-11-16)**: 새 작업 복사본은 프로젝트의 현재 복사본 지정을 바꾸지 않는다(`persist_task_copy_active`, 활성화와 한 번에 기록). 작업에 속한 복구는 새 복사본 생성을 막지 않지만, 반영 잠금(`applicationId`)과 진행 중인 `application_intent`는 막는다. 공급자 로그인 잠금은 실행에 묶이며, 해제 증명이 그 작업 공간의 manifest를 읽는다. 그래서 잠금이 남은 작업 공간 파일은 지우면 안 된다(`finish_deletions_keeping`).
 - **삭제는 삭제 표지 + 파일 삭제(2026-11-13)**: 원장은 append-only이고 재생 검증을 하므로 이벤트 행은 지우지 않는다(DELETE trigger 6개, 압축 흔적, UNIQUE `canonical_path`). 프로젝트 ID는 더 이상 경로 해시와 같다고 가정하지 않는다(`project_id_by_path`, `fresh_project_id`). 최신 작업의 작업 공간은 프로젝트 현재 복사본과 같은 경우가 많으므로, 그대로 지우면 프로젝트가 깨진다. 설계는 `docs/proposals/m5-project-deletion.md`.

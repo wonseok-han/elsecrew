@@ -6323,6 +6323,23 @@ fn registered_project(storage: &Storage, project_id: &str) -> Result<Map<String,
         .ok_or_else(|| ProjectFailure::manifest("project identity is not durably registered"))
 }
 
+/// A recorded identity of one of the original's files as it compares now.
+/// Only for these shapes: a file image (`{.., "identity": [device, inode,
+/// links]}`), an identity pair `[device, inode]`, an identity triple, or a
+/// nine-element stamp whose first element is the device. Records written
+/// before device numbers were left out still carry the number of that time,
+/// and a restart of the computer can change it. Anything else is unchanged.
+pub(crate) fn without_device(value: &Value) -> Value {
+    let mut value = value.clone();
+    let slot = if value.is_object() { value.get_mut("identity") } else { Some(&mut value) };
+    if let Some(items) = slot.and_then(|slot| slot.as_array_mut()) {
+        if matches!(items.len(), 2 | 3 | 9) && items[0].is_number() {
+            items[0] = json!(0);
+        }
+    }
+    value
+}
+
 fn required_revision(record: &Map<String, Value>) -> Result<u64, ProjectFailure> {
     record
         .get("last_event_sequence")

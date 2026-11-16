@@ -1,5 +1,5 @@
 //! Raw committed-blob comparison, without checkout/filter/textconv transformations.
-use super::super::{capture_once_checked, failure, stamp, Entry, SourceInventory, MAX_BYTES};
+use super::super::{capture_once_checked, failure, recorded_stamp, Entry, SourceInventory, MAX_BYTES};
 use super::{capture_index_baseline, GitIndexBaseline};
 use crate::project::{
     open_absolute_directory_capability, validated_oid, ProjectFailure, ProjectManager,
@@ -63,7 +63,7 @@ fn verify_root_path(
     raw: &SourceInventory,
 ) -> Result<(), ProjectFailure> {
     let root = open_absolute_directory_capability(&source.canonical_root)?;
-    if stamp(&root.dir_metadata().map_err(|_| failure())?) != raw.root_stamp {
+    if recorded_stamp(&root.dir_metadata().map_err(|_| failure())?) != raw.root_stamp {
         return Err(ProjectFailure::dirty(
             "source root path no longer names the captured directory",
         ));

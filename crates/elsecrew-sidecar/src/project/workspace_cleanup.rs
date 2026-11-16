@@ -254,11 +254,13 @@ impl ProjectManager {
             {
                 return Err(denied());
             }
-            serde_json::from_value::<(u64, u64)>(job["identity"].clone()).map_err(|_| denied())?
+            serde_json::from_value::<(u64, u64)>(job["identity"].clone()).map_err(|_| denied())?.1
         } else {
             self.verify_cleanup_copy(storage, &address)?;
             let root = open_real_child_dir(&self.worktrees_dir, &address.worktree_id)?;
-            let identity = capability_directory_identity(&root)?;
+            // Only the inode is recorded: a device number can change when the
+            // computer restarts, while the job may resume after that.
+            let identity = capability_directory_identity(&root)?.1;
             // Preflight bounds and no-follow traversal before any deletion intent.
             walk(&root, false, 0, &mut 0)?;
             let jobs = project
@@ -266,7 +268,7 @@ impl ProjectManager {
                 .or_insert_with(|| json!({}))
                 .as_object_mut()
                 .ok_or_else(denied)?;
-            jobs.insert(chat_id.into(),json!({"state":"pending","worktreeId":address.worktree_id,"quarantine":quarantine,"identity":identity,"manifest":manifest}));
+            jobs.insert(chat_id.into(),json!({"state":"pending","worktreeId":address.worktree_id,"quarantine":quarantine,"identity":[0, identity],"manifest":manifest}));
             append_object(
                 storage,
                 "project",
@@ -282,7 +284,7 @@ impl ProjectManager {
         match self.worktrees_dir.symlink_metadata(&address.worktree_id) {
             Ok(_) => {
                 let root = open_real_child_dir(&self.worktrees_dir, &address.worktree_id)?;
-                if capability_directory_identity(&root)? != identity
+                if capability_directory_identity(&root)?.1 != identity
                     || self.worktrees_dir.symlink_metadata(&quarantine).is_ok()
                 {
                     return Err(denied());
@@ -299,7 +301,8 @@ impl ProjectManager {
         match self.worktrees_dir.symlink_metadata(&quarantine) {
             Ok(_) => {
                 let root = open_real_child_dir(&self.worktrees_dir, &quarantine)?;
-                if capability_directory_identity(&root)? != identity {
+                let held = capability_directory_identity(&root)?;
+                if held.1 != identity {
                     return Err(denied());
                 }
                 walk(&root, true, 0, &mut 0)?;
@@ -307,7 +310,7 @@ impl ProjectManager {
                 if capability_directory_identity(&open_real_child_dir(
                     &self.worktrees_dir,
                     &quarantine,
-                )?)? != identity
+                )?)? != held
                 {
                     return Err(denied());
                 }

@@ -233,6 +233,19 @@ fn encode_checked(
     baseline: &SourceBaseline,
     check: &dyn Fn() -> Result<(), ProjectFailure>,
 ) -> Result<Vec<u8>, ProjectFailure> {
+    encode_with_device(active, baseline, check, None)
+}
+
+/// `legacy_device` re-creates a receipt as it was written before device
+/// numbers were left out of recorded identities: that device number stood in
+/// every file identity and in the root stamp.
+#[cfg(unix)]
+fn encode_with_device(
+    active: &ActiveProject,
+    baseline: &SourceBaseline,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+    legacy_device: Option<u64>,
+) -> Result<Vec<u8>, ProjectFailure> {
     check()?;
     if baseline.source_root != canonical_protocol_path_without_existing(&active.canonical_git_root)?
         || baseline.source_identity != active.source_identity
@@ -286,7 +299,7 @@ fn encode_checked(
                 e.mode,
                 e.size.to_string(),
                 [
-                    e.identity.0.to_string(),
+                    legacy_device.unwrap_or(e.identity.0).to_string(),
                     e.identity.1.to_string(),
                     e.identity.2.to_string()
                 ],
@@ -301,7 +314,11 @@ fn encode_checked(
     output
         .write_all(b"],\"rootStamp\":")
         .map_err(|_| invalid())?;
-    serde_json::to_writer(&mut output, &baseline.raw.root_stamp.map(|v| v.to_string()))
+    let mut root_stamp = baseline.raw.root_stamp;
+    if let Some(device) = legacy_device {
+        root_stamp[0] = i128::from(device);
+    }
+    serde_json::to_writer(&mut output, &root_stamp.map(|v| v.to_string()))
         .map_err(|_| invalid())?;
     output
         .write_all(b",\"schemaVersion\":1}")
@@ -403,11 +420,40 @@ fn verify_checked(
         || stamp(&before) != stamp(&file.metadata().map_err(|_| invalid())?)
         || stamp(&before) != stamp(&root.symlink_metadata(&name).map_err(|_| invalid())?)
         || format!("sha256:{:x}", Sha256::digest(&bytes)) != recorded.digest
-        || bytes != encode_checked(active, current, check)?
+        || (bytes != encode_checked(active, current, check)? && !matches_legacy(&bytes, active, current, check)?)
     {
         return Err(invalid());
     }
     Ok(())
+}
+
+/// The receipt bytes as written before device numbers were left out.
+#[cfg(all(test, unix))]
+pub(in crate::project) fn legacy_bytes_for_test(
+    active: &ActiveProject,
+    baseline: &SourceBaseline,
+    device: u64,
+) -> Vec<u8> {
+    encode_with_device(active, baseline, &|| Ok(()), Some(device)).unwrap()
+}
+
+/// A receipt written before device numbers were left out carries the device
+/// number of that time in its root stamp. It is re-created with exactly that
+/// number and must match byte for byte. The bytes are bound to the ledger by
+/// their digest, so reading the number from them adds no trust; the effect is
+/// that the device number is ignored, also after a restart of the computer.
+#[cfg(unix)]
+fn matches_legacy(
+    bytes: &[u8],
+    active: &ActiveProject,
+    current: &SourceBaseline,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<bool, ProjectFailure> {
+    let Ok(written) = serde_json::from_slice::<serde_json::Value>(bytes) else { return Ok(false) };
+    let Some(device) = written["rootStamp"][0].as_str().and_then(|text| text.parse::<u64>().ok()) else {
+        return Ok(false);
+    };
+    Ok(device != 0 && bytes == encode_with_device(active, current, check, Some(device))?)
 }
 
 #[cfg(windows)]

@@ -545,3 +545,27 @@ fn selected_workspace_cleanup_pending_manifest_change_is_rejected() {
     assert!(path.exists());
     assert_eq!(fs::read(f.source.join("src/value.txt")).unwrap(),b"base");
 }
+
+#[test]
+#[cfg(unix)]
+fn selected_workspace_cleanup_resumes_after_a_restart_renumbered_the_volume() {
+    for stage in [1, 2] {
+        let mut f = Fixture::new();
+        let (chat,address,revision) = ready(&mut f);
+        let manifest = f.projects.verify_workspace(&f.storage,&address).unwrap();
+        let path = std::path::PathBuf::from(manifest["worktreePath"].as_str().unwrap());
+        f.chats.discard_workspace(&mut f.storage,&mut f.projects,&address,chat["taskId"].as_str().unwrap(),revision,"req_discard").unwrap();
+        crate::project::workspace_cleanup::interrupt_at(stage);
+        assert!(f.projects.cleanup_workspace(&mut f.storage,&address.chat_id,"req_interrupted").is_err());
+        // The job as an older version recorded it, with a device number the
+        // volume no longer has after a restart.
+        let mut project = f.storage.projection_record("project",&address.project_id).unwrap().unwrap();
+        let job = &mut project.get_mut("workspace_cleanup_v1").unwrap()[address.chat_id.as_str()];
+        assert_eq!(job["identity"][0], 0, "no device number is recorded");
+        job["identity"][0] = json!(7_777_777);
+        f.storage.upsert_projection_record("project",&address.project_id,"op_test_renumbered_cleanup",None,project).unwrap();
+        f.projects.cleanup_workspace(&mut f.storage,&address.chat_id,"req_resume").unwrap();
+        assert!(!path.exists(), "stage {stage}");
+        assert_eq!(fs::read(f.source.join("src/value.txt")).unwrap(),b"base");
+    }
+}
