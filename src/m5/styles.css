@@ -1248,12 +1248,12 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-notice-toast-success { --m5-toast-tone: #7cc79a; }
 .m5-notice-toast-warning { --m5-toast-tone: #e8c06a; }
 .m5-notice-toast-icon { flex: none; width: 18px; height: 18px; color: var(--m5-toast-tone); }
-.m5-notice-toast-spinner { flex: none; width: 14px; height: 14px; margin: 2px; border: 2px solid color-mix(in srgb, var(--m5-toast-tone) 30%, transparent); border-top-color: var(--m5-toast-tone); border-radius: 50%; animation: m5-usage-spin .8s linear infinite; }
+.m5-notice-toast > .m5-notice-toast-spinner { flex: 0 0 14px; box-sizing: border-box; width: 14px; height: 14px; min-width: 0; margin: 2px; border: 2px solid color-mix(in srgb, var(--m5-toast-tone) 30%, transparent); border-top-color: var(--m5-toast-tone); border-radius: 50%; animation: m5-usage-spin .8s linear infinite; }
 .m5-notice-toast > .m5-secondary { flex: none; font-size: 12px; }
 .m5-notice-toast-close { flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--m5-muted); font-size: 16px; line-height: 1; cursor: pointer; }
 .m5-notice-toast-close:hover { background: var(--m5-raised); color: var(--m5-text); }
 @keyframes m5-toast-in { from { opacity: 0; transform: translateY(-4px); } }
-@media (prefers-reduced-motion: reduce) { .m5-notice-toast, .m5-notice-toast-spinner { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .m5-notice-toast, .m5-notice-toast > .m5-notice-toast-spinner { animation: none; } }
 .m5-notification-bell > summary { position: relative; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; color: var(--m5-muted); cursor: pointer; list-style: none; }
 .m5-notification-bell > summary::-webkit-details-marker { display: none; }
 .m5-notification-bell > summary:hover, .m5-notification-bell[open] > summary { background: var(--m5-raised); color: var(--m5-text); }
