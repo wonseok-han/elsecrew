@@ -237,6 +237,7 @@ impl SessionChannel {
         self.permissions.is_permission_pending(request_id)
     }
     pub(crate) fn can_queue_reply(&self) -> bool { !self.transmitting && !self.permissions.is_closed() }
+    pub(crate) fn cwd(&self) -> &std::path::Path { &self.cwd }
 
     pub(crate) fn matches_role(&self, model: &str, access: ToolAccess) -> bool {
         self.requested_model == model && self.cwd.to_str().is_some_and(|cwd| self.permissions.matches_expected(
@@ -801,7 +802,7 @@ mod tests {
         }});
         let expected = serde_json::json!({"type":"control_response","response":{
             "subtype":"success","request_id":"permission_a","response":{
-                "behavior":"deny","message":"Tool request declined by the application user.","interrupt":false
+                "behavior":"deny","message":"Tool request not allowed: declined by the application user, or outside the permissions or working directory of this role (stay inside it, read only files that exist, keep out of .git, .claude, .codex and .agents). Continue without it.","interrupt":false
             }
         }});
         let cancelled =

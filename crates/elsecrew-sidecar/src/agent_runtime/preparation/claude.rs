@@ -343,10 +343,22 @@ impl OwnedClaudeRun {
                 ToolTarget::Unsupported => false,
             }
         };
+        // A request outside the role's tool boundary (a file that does not
+        // exist, a path outside the workspace or in `.git`, a write or command
+        // from a read-only role) is refused on its own, without asking the
+        // person: the agent is told no and carries on. Only a session that no
+        // longer matches its run still ends the run.
+        let access = match self.reservation.run["selectedProfile"]["permission"].as_str() {
+            Some("workspaceWrite") => crate::provider_claude_session::ToolAccess::Edit,
+            _ => crate::provider_claude_session::ToolAccess::ReadOnly,
+        };
+        let cwd = self.channel.cwd().to_path_buf();
+        let within = |entry: &ClaudePending| crate::provider_claude_session::admission::tool_policy(&cwd, access, &entry.request).is_ok();
         if self.channel.can_queue_reply() {
-            if let Some(index) = self.approvals.iter().position(|entry| entry.declined || entry.accepted || auto_allowed(entry)) {
+            if let Some(index) = self.approvals.iter().position(|entry| entry.declined || entry.accepted || auto_allowed(entry) || !within(entry)) {
                 let entry = self.approvals.remove(index);
-                let reply = if entry.accepted || auto_allowed(&entry) {
+                let within = within(&entry);
+                let reply = if within && (entry.accepted || auto_allowed(&entry)) {
                     self.allow_tool_once(storage, projects, &entry.request)
                 } else {
                     self.channel.deny(&mut self.process, &entry.request.request_id, false)

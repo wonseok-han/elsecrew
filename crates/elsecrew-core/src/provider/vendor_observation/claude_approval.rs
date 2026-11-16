@@ -8,6 +8,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 pub const PRE_TOOL_CALLBACK: &str = "elsecrew_pre_tool";
+/// What the agent reads when one tool request is refused, by the person or by
+/// the role's boundary: enough to carry on instead of retrying the same call.
+pub const DENIAL_GUIDANCE: &str = "Tool request not allowed: declined by the application user, or outside the permissions or working directory of this role (stay inside it, read only files that exist, keep out of .git, .claude, .codex and .agents). Continue without it.";
 
 #[derive(Default)]
 pub struct Permissions {
@@ -236,9 +239,9 @@ impl Permissions {
         let pending = self.pending.remove(request_id).ok_or_else(invalid)?;
         let response = if pending.hook {
             json!({"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
-                "permissionDecisionReason":"Tool execution has not passed the application boundary check."}})
+                "permissionDecisionReason":DENIAL_GUIDANCE}})
         } else {
-            json!({"behavior":"deny","message":"Tool request declined by the application user.","interrupt":interrupt})
+            json!({"behavior":"deny","message":DENIAL_GUIDANCE,"interrupt":interrupt})
         };
         let frame = json!({"type":"control_response","response":{
             "subtype":"success","request_id":request_id,

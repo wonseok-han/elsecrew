@@ -113,61 +113,73 @@ impl Admission {
         process: &mut LoginProcess<'_>,
         request: &elsecrew_core::provider::vendor_observation::claude_approval::Request,
     ) -> Result<(), SidecarError> {
-        use elsecrew_core::provider::vendor_observation::claude_approval::ToolTarget;
         self.process(process)?;
-        match request.target() {
-            ToolTarget::File { path, writes } => {
-                if *writes && self.access == ToolAccess::ReadOnly {
-                    return Err(failure());
-                }
-                inspect_snapshot_file(&self.workspace, path, request.tool_name == "Write")
+        tool_policy(&self.workspace, self.access, request)
+    }
+}
+
+/// Whether one tool request stays inside the role's tool boundary: the path
+/// shape inside the workspace and the role's access. A request outside it is
+/// that request's refusal, not a broken session (see the run owner). This is a
+/// snapshot observation, not a grant; delivery still runs the full admission.
+pub(crate) fn tool_policy(
+    workspace: &Path,
+    access: ToolAccess,
+    request: &elsecrew_core::provider::vendor_observation::claude_approval::Request,
+) -> Result<(), SidecarError> {
+    use elsecrew_core::provider::vendor_observation::claude_approval::ToolTarget;
+    match request.target() {
+        ToolTarget::File { path, writes } => {
+            if *writes && access == ToolAccess::ReadOnly {
+                return Err(failure());
             }
-            ToolTarget::Search { path } => {
-                let path = Path::new(path);
-                let full = if path.is_absolute() {
-                    path.to_owned()
-                } else {
-                    self.workspace.join(path)
-                };
-                let relative = full.strip_prefix(&self.workspace).map_err(|_| failure())?;
-                if relative.components().any(|part| match part {
-                    std::path::Component::Normal(name) => [".git", ".claude", ".codex", ".agents"]
-                        .iter()
-                        .any(|blocked| name == *blocked),
-                    std::path::Component::CurDir => false,
-                    _ => true,
-                }) {
-                    return Err(failure());
-                }
-                // No symlink-root traversal. Recursive traversal remains subject
-                // to the official restricted file-tool policy, not this check.
-                match open_absolute_directory(&full) {
-                    Ok(_) => Ok(()),
-                    Err(_) if request.tool_name == "Grep" => inspect_snapshot_file(
-                        &self.workspace,
-                        path.to_str().ok_or_else(failure)?,
-                        false,
-                    ),
-                    Err(error) => Err(error),
-                }
-            }
-            ToolTarget::Shell => {
-                let input: serde_json::Value =
-                    serde_json::from_str(request.inspect_input()).map_err(|_| failure())?;
-                if self.access != ToolAccess::Edit
-                    || !matches!(
-                        input.get("dangerouslyDisableSandbox"),
-                        None | Some(serde_json::Value::Bool(false))
-                    )
-                {
-                    return Err(failure());
-                }
-                // Explicit user decision; official sandbox stays enabled by the
-                // fixed launch request. Never a whole-process confinement claim.
-                Ok(())
-            }
-            ToolTarget::Unsupported => Err(failure()),
+            inspect_snapshot_file(workspace, path, request.tool_name == "Write")
         }
+        ToolTarget::Search { path } => {
+            let path = Path::new(path);
+            let full = if path.is_absolute() {
+                path.to_owned()
+            } else {
+                workspace.join(path)
+            };
+            let relative = full.strip_prefix(workspace).map_err(|_| failure())?;
+            if relative.components().any(|part| match part {
+                std::path::Component::Normal(name) => [".git", ".claude", ".codex", ".agents"]
+                    .iter()
+                    .any(|blocked| name == *blocked),
+                std::path::Component::CurDir => false,
+                _ => true,
+            }) {
+                return Err(failure());
+            }
+            // No symlink-root traversal. Recursive traversal remains subject
+            // to the official restricted file-tool policy, not this check.
+            match open_absolute_directory(&full) {
+                Ok(_) => Ok(()),
+                Err(_) if request.tool_name == "Grep" => inspect_snapshot_file(
+                    workspace,
+                    path.to_str().ok_or_else(failure)?,
+                    false,
+                ),
+                Err(error) => Err(error),
+            }
+        }
+        ToolTarget::Shell => {
+            let input: serde_json::Value =
+                serde_json::from_str(request.inspect_input()).map_err(|_| failure())?;
+            if access != ToolAccess::Edit
+                || !matches!(
+                    input.get("dangerouslyDisableSandbox"),
+                    None | Some(serde_json::Value::Bool(false))
+                )
+            {
+                return Err(failure());
+            }
+            // Explicit user decision; official sandbox stays enabled by the
+            // fixed launch request. Never a whole-process confinement claim.
+            Ok(())
+        }
+        ToolTarget::Unsupported => Err(failure()),
     }
 }
 

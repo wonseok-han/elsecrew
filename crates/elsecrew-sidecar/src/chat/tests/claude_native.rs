@@ -15,7 +15,7 @@ fn quoted(value: &Value) -> String {
 
 #[test]
 fn claude_project_consent_auto_approves_and_still_rejects_outside_files() {
-    claude_native_cases(&[("auto", false), ("auto-outside", false), ("auto-read", false), ("auto-read", true), ("auto-read-failure", true)]);
+    claude_native_cases(&[("auto", false), ("auto-outside", false), ("auto-missing", false), ("auto-missing-hook", false), ("auto-read", false), ("auto-read", true), ("auto-read-failure", true)]);
 }
 
 /// Real Claude, after an allowed Bash call, runs child processes and writes
@@ -135,6 +135,18 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
         let mut approval = json!({"type":"control_request","request_id":"write_once","request":{
             "subtype":"can_use_tool","tool_name":"Write","tool_use_id":"tool_write","input":{"file_path":format!("{cwd}/new.txt"),"content":"hello"}}});
         if case == "auto-outside" { approval["request"]["input"]["file_path"] = json!("/outside/new.txt"); }
+        // The real incident: a planner reads a file the empty project lacks.
+        if case == "auto-missing" {
+            approval["request"]["tool_name"] = json!("Read");
+            approval["request"]["input"] = json!({"file_path":format!("{cwd}/README.md")});
+        }
+        // Real Claude checks every tool through the PreToolUse hook first.
+        if case == "auto-missing-hook" {
+            approval = json!({"type":"control_request","request_id":"hook_once","request":{
+                "subtype":"hook_callback","callback_id":elsecrew_core::provider::vendor_observation::claude_approval::PRE_TOOL_CALLBACK,
+                "tool_use_id":"tool_read","input":{"session_id":"s","cwd":cwd,"hook_event_name":"PreToolUse",
+                    "tool_name":"Read","tool_use_id":"tool_read","tool_input":{"file_path":format!("{cwd}/README.md")}}}});
+        }
         if case.starts_with("auto-read") {
             fs::write(std::path::Path::new(cwd).join("index.html"), b"fixture").unwrap();
             approval["request"]["tool_name"] = json!("Read");
@@ -161,7 +173,13 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             script.push_str("/bin/mkdir -p .claude && : > .claude/.cc-writes && printf 'draft' > draft.html && /usr/bin/git status --porcelain >/dev/null 2>&1; /bin/sleep 1\n");
         }
         if case == "allow" || case.starts_with("auto") {
-            script.push_str(&format!("printf '%s\\n' {}\nIFS= read -r reply || exit 3\ncase \"$reply\" in *'\"behavior\":\"allow\"'*) ;; *) exit 4 ;; esac\n", quoted(&approval)));
+            // A request outside the boundary is refused on its own and the run goes on.
+            let expected = match case {
+                "auto-outside" | "auto-missing" => r#""behavior":"deny""#,
+                "auto-missing-hook" => r#""permissionDecision":"deny""#,
+                _ => r#""behavior":"allow""#,
+            };
+            script.push_str(&format!("printf '%s\\n' {}\nIFS= read -r reply || exit 3\ncase \"$reply\" in *'{expected}'*) ;; *) exit 4 ;; esac\n", quoted(&approval)));
         }
         if case == "long" {
             let path = f._root.path().join("claude-long-output.jsonl");
@@ -279,7 +297,7 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             ended["state"],
             match case {
                 "cancel" => "canceled",
-                "bad-init" | "unknown-queue" | "auto-outside" | "auto-read-failure" => "failed",
+                "bad-init" | "unknown-queue" | "auto-read-failure" => "failed",
                 _ => "succeeded",
             },
             "{case}: {ended:?}"
@@ -332,7 +350,7 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             .collect();
         assert_eq!(
             final_text,
-            if matches!(case, "success" | "long" | "organization-guard" | "privacy" | "privacy-with-guard" | "default-effort" | "allow" | "auto" | "auto-read" | "auto-read-mutate" | "auto-read-index-lock") {
+            if matches!(case, "success" | "long" | "organization-guard" | "privacy" | "privacy-with-guard" | "default-effort" | "allow" | "auto" | "auto-outside" | "auto-missing" | "auto-missing-hook" | "auto-read" | "auto-read-mutate" | "auto-read-index-lock") {
                 vec![json!("hello")]
             } else {
                 vec![]

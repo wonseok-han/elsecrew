@@ -2,6 +2,36 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — 정책 밖 도구 요청 하나가 실행 전체를 끝내던 문제
+- 사용자 보고: 기획 실행(Claude Code, 읽기 전용)이 56초 만에 "도구 사용 허용을 전달하는 중 멈췄습니다. `approvalDelivery/boundaryRejected`"로 실패했다. "왜 이리 자주 중단되지"라는 질문이었다.
+- 원인(코드 확인): 프로젝트의 파일·명령 자동 허용이 켜져 있으면 `deliver_approval`이 요청을 `allow_tool_once`로 보낸다. 그런데 경로·권한 검사(`inspect_snapshot_file`, `Admission::tool`)가 다음 경우를 `providerPreflightFailed`로 판정했고, 이것이 `note_failure("approvalDelivery")` → 실행 실패로 이어졌다.
+  - 존재하지 않는 파일의 Read(빈 프로젝트에서 README 등을 찾는 흔한 동작)
+  - 작업 공간 밖 경로나 `.git`·`.claude` 경로
+  - 읽기 전용 역할의 쓰기·명령
+- 실제 요청 내용은 출력 기록이 없어 확정하지 못했다(추정: 빈 프로젝트의 없는 파일 Read). 앱 데이터 복사본으로 확인한 사실은 consent files/commands=true, 출력 기록 0건이다.
+- 처리:
+  - `Admission::tool`의 정책 부분을 `admission::tool_policy(workspace, access, request)`로 추출했다.
+  - `deliver_approval`은 정책 밖 요청을 사용자 확인 없이 그 요청만 거절(deny)하고, 실행은 계속된다. 허용은 정책 안일 때만 하며, 기존 전체 admission 재검사는 유지한다. 세션·프로세스·역할 불일치는 종전대로 실행을 끝낸다.
+  - 에이전트에게 가는 거절 문구를 중립화했다(사용자 거절 또는 역할의 권한·작업 폴더 밖, 계속 진행하라는 안내).
+  - 테스트: `auto-outside`(밖 쓰기)는 이제 deny 후 succeeded다. 새 `auto-missing`(없는 README.md Read)도 deny 후 succeeded다.
+- 발견(미변경, 사용자 결정 필요): Claude 세션 채널에 10분 고정 마감이 있다(`SessionChannel.deadline`, `provider_claude_session.rs` ~517). Codex 쪽 `TURN_BUDGET`과 모델 프록시 `MAX_LIFETIME`도 600초다. 그래서 10분을 넘는 실행은 실패로 끝난다.
+- 독립 검토(1명): 차단 없음.
+  - 거절 대상은 원래 허용될 수 없던 요청뿐이다. 근거는 다음과 같다.
+    - `channel.cwd`와 Admission workspace는 같은 manifest 경로다.
+    - access는 `verify_claude_launch`가 일치를 강제한다.
+    - allow 경로의 전체 재검사는 유지된다.
+  - queue·hook deny 의미·`approval_request` 계약과도 충돌하지 않는다.
+  - 반영:
+    - I1: 실제 Claude는 도구를 PreToolUse hook으로 먼저 묻는다. 그래서 hook 거절 사유와 일반 거절 문구를 한 상수 `DENIAL_GUIDANCE`로 합쳤고, hook 형태 테스트 `auto-missing-hook`을 추가했다.
+    - M3: 문구에 `.claude`·`.codex`·`.agents`도 적었다.
+  - 남김:
+    - I2: 읽기 전용 역할 fixture에서의 쓰기·명령 거절, `.git` 검색 거절, consent 꺼짐일 때 카드 없이 거절, 거절 직후 다음 요청 허용 테스트가 없다.
+    - M1: 거절 이력이 사용자에게 보이지 않는다.
+    - M2: 같은 요청을 반복하면 1024 요청 한도나 10분 마감에 걸린다.
+    - M4: 대기 요청마다 poll 때 경로를 검사한다.
+    - M5: Codex 쪽 "처리 하나가 실행을 끝내는" 경로가 있다. 위치는 `provider_preflight_session/incremental.rs:288-309`, `agent_runtime/native.rs:616-624`다. Codex는 경로를 앱이 검사하지 않아 같은 사고는 아닐 것으로 본다(추정).
+- 검증: sidecar `claude`·`approval` 필터 47 통과, core `claude` 63 통과.
+
 ### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — 상태 알림 토스트를 눈에 띄게
 - 사용자 보고: "총괄 역할의 Claude Code 준비 상태를 확인하고 있어요" 토스트가 어두운 화면에 묻혀 잘 보이지 않는다.
 - 처리:
@@ -217,6 +247,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **정책 밖 도구 요청은 그 요청만 거절한다(2026-11-16)**: Claude 도구 요청이 역할의 경계(작업 공간 안·존재하는 파일·`.git` 등 제외·읽기 전용은 쓰기/명령 불가) 밖이면, `deliver_approval`이 사용자 확인 없이 그 요청만 deny하고 실행은 계속된다. 세션·프로세스·역할 불일치만 실행을 끝낸다. 에이전트용 거절 문구는 `claude_approval::DENIAL_GUIDANCE` 하나다. Claude 세션은 10분 고정 마감이 있다(미변경).
 - **중단된 정리 작업은 다음 시작에서 이어 간다(2026-11-16)**: materialization의 'attempting'은 arm만 커밋된 상태이고, batch 쓰기와 'pending' 복귀는 한 트랜잭션이다. 그래서 새 엔진의 admission에서는 'pending'으로 되돌린다(`release_interrupted_attempt`). 'failed'만 계속 거부한다. 엔진이 앱 데이터를 열지 못하면 `~/Library/Logs/Elsecrew/last-engine-admission-failure.json`의 `reason`(kind)로 확인한다(멈춘 원인 기록 `last-engine-failure.json`을 덮지 않는다). `Storage::open`(Legacy·옛 스키마 이전 v6/v7)은 여전히 attempting을 거부한다. 자세한 위치는 `ELSECREW_DEBUG_ADMISSION=1`로 엔진을 띄워 복사본에서 재현한다. Rust 실행 기록에 필드를 추가하면 TS의 실행 상태 이벤트 검증기(`protocol-v1.ts`)도 함께 고친다. 빠뜨리면 이벤트 하나가 엔진 연결을 끊는다.
 - **엔진은 요청 하나·이벤트 하나 때문에 죽지 않는다(2026-11-16)**: 요청 처리 오류는 그 요청의 오류 응답이다(무결성 계열만 종료). 화면은 이벤트를 받으면 처리 결과와 관계없이 ack한다. 사용 중 멈춘 엔진은 Electron이 다시 띄우고, 화면은 저장 안 된 편집이 없을 때만 스스로 새로 고친다. 원인 진단은 `~/Library/Logs/Elsecrew/last-engine-failure.json`. 개발 중 테스트 빌드는 `target/debug/elsecrew-sidecar`를 교체하므로, 개발 앱은 빌드 뒤 다시 켜야 새 코드를 쓴다.
 - **장치 번호는 재부팅 뒤 바뀐다(2026-11-16)**: macOS의 `st_dev`는 마운트할 때 정해진다. 재시작을 넘겨 저장·비교하는 신원에는 inode(와 내용 digest)를 쓰고 장치 번호는 일관성만 본다. 로그인 잠금 결합과 원본 반영 쪽 기록(영수증·journal·archive·정리 job)은 고쳤다. 기록에는 0을 쓰고, 저장된 값과 비교할 때는 `without_device`로 장치 원소를 무시한다. 앱 데이터 조사는 DB를 임시 폴더로 복사해 읽는다(실행 중인 앱의 DB는 잠겨 있다).
