@@ -2,6 +2,14 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — Claude 토큰 읽기를 `/usr/bin/security`로(키체인 재허용 반복 해소)
+- 사용자 결정: 패키지마다 키체인 허용을 다시 묻는 문제를 고친다.
+- 변경(`provider_claude_refresh.rs`): sidecar가 앱 전용 Claude 로그인(`Claude Code-credentials-<hash>`)을 읽을 때 `security_framework` 대신 `/usr/bin/security find-generic-password … -w`를 쓴다(새 함수 `read_app_credentials`). 이 도구는 서명이 고정이라 '항상 허용' 한 번이 빌드가 바뀌어도 유지된다. 출력 크기를 제한하고, 실패하면 버퍼를 지운다. 비밀값은 argv가 아니라 pipe로만 오간다. exit 44는 항목 없음으로 처리한다.
+- 남는 것:
+  - 만료된 토큰을 갱신할 때 쓰는 `set_generic_password`는 sidecar가 직접 하므로, 그때는 새 빌드마다 한 번 물을 수 있다(드묾).
+  - 앱의 사용량 조회(Electron)는 이미 같은 도구를 쓴다.
+- 검증: Claude 로그인·갱신 관련 sidecar 테스트 29개를 통과했다. 실제 키체인 동작은 사용자 재연결 뒤 확인한다(앱 전용 항목은 지운 상태).
+
 ### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — 테스트 속도 개선과 출력마다 git을 띄우던 제품 성능 문제
 - 사용자 지적은 '테스트가 너무 느리다'였다. 사용자 결정은 두 가지다. ① 작업 중에는 영향받는 테스트만, 전체는 마감 때 한 번 돌린다. ③ 느린 테스트를 찾아 고친다. ② 스레드 상한(4) 상향은 보류한다.
 - 측정: 공식 미리 빌드된 `cargo-nextest` 0.9.151로 잰 결과 882개, 합계 약 5,000 test-초, 4스레드 기준 21.5분이었다. 60초를 넘는 16개가 절반 이상을 차지했다(최장 578초).

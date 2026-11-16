@@ -137,6 +137,32 @@ fn renewed(
     Ok(Some(bytes))
 }
 
+/// Reads the app-only Claude login through macOS's own `security` tool. This
+/// sidecar is unsigned, so every new build is a new program to the keychain
+/// and a direct read asked again (adding another allow-list entry each time).
+/// `/usr/bin/security` keeps one signature, so one "Always Allow" lasts. Only
+/// renewing an expired token still writes from this process. `None` when the
+/// item does not exist. The secret travels on a private pipe, never in argv.
+fn read_app_credentials(service: &str) -> Result<Option<Vec<u8>>, SidecarError> {
+    let output = std::process::Command::new("/usr/bin/security")
+        .args(["find-generic-password", "-s", service, "-a", "unknown", "-w"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map_err(|_| failure())?;
+    let mut bytes = output.stdout;
+    match output.status.code() {
+        Some(0) => {}
+        // errSecItemNotFound as the tool reports it.
+        Some(44) => { bytes.fill(0); return Ok(None); }
+        _ => { bytes.fill(0); return Err(failure()); }
+    }
+    // `-w` prints the secret followed by one newline.
+    if bytes.last() == Some(&b'\n') { bytes.pop(); }
+    if bytes.is_empty() || bytes.len() > MAX_BYTES { bytes.fill(0); return Err(failure()); }
+    Ok(Some(bytes))
+}
+
 pub(crate) fn refresh_if_expired(profile: &ClaudeProfileBinding) -> Result<(), SidecarError> {
     crate::provider_login_process::with_credentials_reserved(profile, || {
         let path = profile.revalidate()?;
@@ -145,13 +171,11 @@ pub(crate) fn refresh_if_expired(profile: &ClaudeProfileBinding) -> Result<(), S
             Sha256::digest(path.to_string_lossy().nfc().collect::<String>().as_bytes())
         );
         let service = format!("Claude Code-credentials-{}", &hash[..8]);
-        let mut original =
-            match security_framework::passwords::get_generic_password(&service, "unknown") {
-                Ok(bytes) => bytes,
-                // No app keychain login yet: let the official auth status report idle.
-                Err(e) if e.code() == -25300 => return Ok(()),
-                Err(_) => return Err(failure()),
-            };
+        let mut original = match read_app_credentials(&service)? {
+            Some(bytes) => bytes,
+            // No app keychain login yet: let the official auth status report idle.
+            None => return Ok(()),
+        };
         let result = (|| {
             let replacement = renewed(&original, now()?, |body| {
                 let client = reqwest::blocking::Client::builder()
@@ -186,9 +210,7 @@ pub(crate) fn refresh_if_expired(profile: &ClaudeProfileBinding) -> Result<(), S
                     if profile.revalidate()? != path {
                         return Err(failure());
                     }
-                    let mut current =
-                        security_framework::passwords::get_generic_password(&service, "unknown")
-                            .map_err(|_| failure())?;
+                    let mut current = read_app_credentials(&service)?.ok_or_else(failure)?;
                     let same = current == original;
                     current.fill(0);
                     if !same {
