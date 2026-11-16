@@ -2,6 +2,8 @@ import { sha256FileVersionV1 } from "./file-v1.ts";
 import {
   AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1,
   AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1,
+  AGENT_RUN_FAILURE_CODES_V1,
+  AGENT_RUN_FAILURE_STAGES_V1,
   METHODS_V1,
   validateAgentPublicEventPayloadV1,
   validateAgentRunStateChangedPayloadV1,
@@ -570,8 +572,8 @@ export function validateAgentRunRecordV1(value: unknown): AgentRunRecordV1 {
   if ("failure" in object) {
     const failure = exactObject(object.failure, ["stage", "code"], "run failure");
     if (!["failed", "recoveryRequired"].includes(state)) fail("failure diagnostic requires a failed run");
-    oneOf(failure.stage, ["approvalDelivery", "sessionInput", "sessionChannel", "sessionInitialization", "outputPersistence", "providerResult", "eventHandling", "cleanup"] as const, "failure stage");
-    oneOf(failure.code, ["boundaryRejected", "approvalUnavailable", "inputChanged", "storageFailed", "processObservationFailed", "providerRejected", "transportFailed", "unknown"] as const, "failure code");
+    oneOf(failure.stage, AGENT_RUN_FAILURE_STAGES_V1, "failure stage");
+    oneOf(failure.code, AGENT_RUN_FAILURE_CODES_V1, "failure code");
   }
   timestamp(object.createdAt, "createdAt");
   timestamp(object.updatedAt, "updatedAt");

@@ -2176,3 +2176,43 @@ test("event credit holds deliveries while the page reloads and ignores stale ack
   credit.acknowledge({ streamId: "s", seq: 6 });
   assert.match(failure?.message ?? "", /out-of-order/, "skipping ahead is still refused");
 });
+
+test("a run that failed with a failure diagnostic is delivered and never ends the engine", async () => {
+  const { client, child } = createClient();
+  const started = client.start(); child.stdout.write(`${g5aReadyLine()}\n`); await started;
+  await hydrateActualAgentRun(client, child);
+  const delivered: unknown[] = [];
+  client.onAgentRunStateChanged((event) => delivered.push(event));
+  const failed = structuredClone(g5bFixture("succeeded-state-notifies-hydration")) as { run: Record<string, unknown> };
+  failed.run = { ...failed.run, state: "failed", failure: { stage: "providerResult", code: "transportFailed" } };
+  child.stdout.write(agentRunStateChangedLine(failed, "agent_run_01_stream", 1));
+  assert.equal(delivered.length, 1);
+  assert.equal(child.terminations, 0);
+  assert.equal(client.failure, undefined);
+
+  const recovery = createClient();
+  const opened = recovery.client.start(); recovery.child.stdout.write(`${g5aReadyLine()}\n`); await opened;
+  await hydrateActualAgentRun(recovery.client, recovery.child);
+  const needsRecovery = structuredClone(g5bFixture("succeeded-state-notifies-hydration")) as { run: Record<string, unknown> };
+  needsRecovery.run = { ...needsRecovery.run, state: "recoveryRequired", terminationOutcome: "recoveryRequired", failure: { stage: "cleanup", code: "unknown" } };
+  recovery.child.stdout.write(agentRunStateChangedLine(needsRecovery, "agent_run_01_stream", 1));
+  assert.equal(recovery.child.terminations, 0);
+
+  for (const [name, run] of [
+    ["running", { state: "running", terminationOutcome: null, failure: { stage: "providerResult", code: "transportFailed" } }],
+    ["unknown code", { state: "failed", failure: { stage: "providerResult", code: "networkGone" } }],
+    ["extra key", { state: "failed", failure: { stage: "providerResult", code: "transportFailed", detail: "x" } }],
+    ["null", { state: "failed", failure: null }],
+    ["missing code", { state: "failed", failure: { stage: "providerResult" } }],
+    ["unknown stage", { state: "failed", failure: { stage: "network", code: "transportFailed" } }],
+  ] as const) {
+    const invalid = createClient();
+    const begun = invalid.client.start(); invalid.child.stdout.write(`${g5aReadyLine()}\n`); await begun;
+    await hydrateActualAgentRun(invalid.client, invalid.child);
+    const payload = structuredClone(g5bFixture("succeeded-state-notifies-hydration")) as { run: Record<string, unknown> };
+    payload.run = { ...payload.run, ...run };
+    invalid.child.stdout.write(agentRunStateChangedLine(payload, "agent_run_01_stream", 1));
+    assert.equal(invalid.child.terminations, 1, `${name} failure diagnostic must stay rejected`);
+    assert.match(invalid.client.failure?.message ?? "", /failure|field: detail/, `${name} is refused for its failure diagnostic`);
+  }
+});

@@ -1445,6 +1445,31 @@ pub(crate) struct ReopenMaintenanceSession<'connection> {
     force_no_progress_once: bool,
 }
 
+/// A materialization batch is armed (`attempting`) in its own commit, and
+/// every writer then stores its rows together with the return to `pending` in
+/// one transaction (a cancelled or failed batch rolls back before it touches
+/// the marker). A marker still `attempting` when a new engine is admitted, on
+/// its exclusive connection, therefore names a batch that never committed: the
+/// engine stopped between the arm and the batch. Return it to `pending`, as an
+/// in-session cancellation does after its rollback, instead of refusing the
+/// database for good. A `failed` job stays refused. The release commits with
+/// the session start even if a later admission step refuses the database: the
+/// marker it removes was already false. `Storage::open` (legacy and old-schema
+/// migrations) keeps refusing an `attempting` job.
+fn release_interrupted_attempt(
+    tx: &Transaction<'_>,
+    materialization: &str,
+) -> Result<(), SidecarError> {
+    verify_v6_materialization_snapshot(tx, materialization, false)?;
+    tx.execute(
+        "UPDATE lifetime_materialization_job SET state='pending',updated_at=?1 \
+         WHERE singleton=1 AND state='attempting';",
+        [Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)],
+    )
+    .map_err(|_| session_error())?;
+    Ok(())
+}
+
 #[derive(Clone, Copy)]
 enum ReopenStartContext {
     Legacy,
@@ -1502,6 +1527,9 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
                 }
             }
         };
+        if !matches!(context, ReopenStartContext::Legacy) {
+            release_interrupted_attempt(&tx, &materialization)?;
+        }
         verify_v6_materialization_snapshot(&tx, &materialization, true)?;
         closure::reject_hidden_rowids(&tx)?;
         projection::reject_hidden_rowids(&tx)?;
@@ -1719,7 +1747,8 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
                 tx.rollback().map_err(|_| session_error())?;
                 if was_armed {
                     // We confirmed rollback of our own attempt before clearing
-                    // its marker. An error/unknown COMMIT never takes this path.
+                    // its marker. An error/unknown COMMIT never takes this path here; a
+                    // later admission releases it (`release_interrupted_attempt`).
                     let SnapshotProgress::Catchup(catchup) = &progress else {
                         return Err(session_error());
                     };

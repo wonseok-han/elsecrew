@@ -5656,3 +5656,79 @@ fn custom_role_schema_v13_migration_relaxes_only_author_format_and_reopens() {
     let reopened = Storage::open_for_durable_admission(&path, &AtomicBool::new(false)).unwrap();
     assert_eq!(storage_schema_version(&reopened.connection).unwrap(), Some(STORAGE_LIFETIME_SCHEMA_VERSION_V13));
 }
+
+/// A durable database with one materialization batch armed and never run, as
+/// the engine leaves it when it stops between the arm and the batch commit.
+fn interrupted_materialization(path: &std::path::Path) {
+    let mut storage = Storage::open_for_durable_admission(path, &AtomicBool::new(false)).unwrap();
+    storage.append_event(&event("evt_i_project", "op_i_project", "project", "project_i", 1,
+        json!({"canonical_path":"/fixture/interrupted","project_id":"project_i"}), "2026-11-16T00:00:00Z")).unwrap();
+    let mut armed = false;
+    for _ in 0..32 {
+        match storage.materialize_lifetime_batch_for_test(
+            &mut crate::storage_lifetime::NeverCancel,
+            Some(crate::storage_lifetime::BatchMaterializationFailurePoint::AfterArmCommit),
+        ) {
+            Err(_) => { armed = true; break; }
+            Ok(crate::storage_lifetime::LifetimeMaterializationBatchResult::Completed { .. }) => break,
+            Ok(_) => {}
+        }
+    }
+    assert!(armed, "a batch must be armed");
+    let state: String = storage.connection
+        .query_row("SELECT state FROM lifetime_materialization_job WHERE singleton=1", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(state, "attempting");
+}
+
+#[test]
+fn admission_resumes_a_materialization_batch_the_engine_stopped_in() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("interrupted.sqlite3");
+    interrupted_materialization(&path);
+    // Before: every later start refused the database for good.
+    let mut reopened = Storage::open_for_durable_admission(&path, &AtomicBool::new(false))
+        .expect("an interrupted batch never committed and must not block the app");
+    let state: Option<String> = reopened.connection
+        .query_row("SELECT state FROM lifetime_materialization_job WHERE singleton=1", [], |row| row.get(0))
+        .optional()
+        .unwrap();
+    assert_ne!(state.as_deref(), Some("attempting"));
+    let mut completed = false;
+    for _ in 0..64 {
+        if let crate::storage_lifetime::LifetimeMaterializationBatchResult::Completed { .. } =
+            reopened.run_materialization_scheduler_step().unwrap()
+        {
+            completed = true;
+            break;
+        }
+    }
+    assert!(completed, "the resumed work finishes");
+    drop(reopened);
+    drop(Storage::open_for_durable_admission(&path, &AtomicBool::new(false)).unwrap());
+}
+
+#[test]
+fn admission_still_refuses_a_failed_materialization() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("failed.sqlite3");
+    interrupted_materialization(&path);
+    {
+        let connection = Connection::open(&path).unwrap();
+        connection.execute(
+            "UPDATE lifetime_materialization_job SET state='failed',failure_kind='validationFailed',\
+             completed_at=updated_at WHERE singleton=1",
+            [],
+        ).unwrap();
+    }
+    let error = Storage::open_for_durable_admission(&path, &AtomicBool::new(false))
+        .err()
+        .expect("a failed materialization stays refused");
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+    assert_eq!(error.detail(), "storage lifetime materialization state is invalid");
+    let connection = Connection::open(&path).unwrap();
+    let state: String = connection
+        .query_row("SELECT state FROM lifetime_materialization_job WHERE singleton=1", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(state, "failed");
+}

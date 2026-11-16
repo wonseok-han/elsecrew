@@ -426,11 +426,37 @@ async function getSystemStatus(): Promise<SystemStatusV1 | SystemStatusG5DV1> {
   // here rather than permanently presenting that startup race as unavailable.
   if (!sidecar) sidecar = startSidecar();
   try {
-    await sidecar.start();
-    return await sidecar.getSystemStatus();
+    const client = sidecar;
+    await client.start();
+    const status = await client.getSystemStatus();
+    if ("storageAdmission" in status && status.storageAdmission.state === "failed") recordAdmissionFailure(client);
+    return status;
   } catch (error) {
     return unavailableStatus(error);
   }
+}
+
+const admissionFailuresRecorded = new WeakSet<SidecarClientV1>();
+
+/** The engine refused to open the app data. It keeps running, so nothing else
+ * records why: keep its fixed failure kind (never paths or payloads). */
+function recordAdmissionFailure(client: SidecarClientV1): void {
+  if (admissionFailuresRecorded.has(client)) return;
+  admissionFailuresRecorded.add(client);
+  // Its stderr line travels on another pipe than the status answer.
+  setTimeout(() => writeAdmissionFailure(client), 500);
+}
+
+function writeAdmissionFailure(client: SidecarClientV1): void {
+  const reason = [...client.technicalDetail.matchAll(/storage admission failed: (\w+)/g)].at(-1)?.[1] ?? null;
+  const body = JSON.stringify({ schemaVersion: 1, at: new Date().toISOString(), code: "storageAdmissionFailed", exit: null, panic: null, reason, restarting: false }) + "\n";
+  try {
+    const directory = app.getPath("logs");
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    // Its own file: a restart after a crash must not overwrite why the engine first stopped.
+    writeFileSync(join(directory, "last-engine-admission-failure.json"), body, { mode: 0o600 });
+  } catch { /* diagnostics never block the app */ }
+  console.error(`m5: engine could not open the app data (${reason ?? "unknown"})`);
 }
 
 async function prepareQuit(): Promise<PrepareQuitResultV1> {

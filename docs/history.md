@@ -2,6 +2,39 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — 다시 켜도 프로젝트가 안 뜨던 문제(중단된 정리 작업)·실패한 실행 하나가 엔진을 끊던 문제
+- 사용자 보고: 앞선 멈춤 뒤 앱과 로컬 서버를 끄고 다시 켰다. 그러자 "작업 공간을 아직 열 수 없어요. 앱을 다시 열어 보세요"만 보이고, 프로젝트 목록이 비어 추가도 할 수 없었다.
+- 원인 1(확정):
+  - 엔진 시작(admission)이 `storageSchemaMismatch`("storage lifetime materialization state is invalid")로 매번 실패했다.
+  - 실제 데이터의 복사본(로그인 프로필 제외)을 sandbox(`/Users` 아래 쓰기 금지, 네트워크 금지)에서 디버그 엔진으로 열어 재현했다. 임시 계측(backtrace)으로 경로를 특정했다: `ReopenMaintenanceSession::start_for_admission` → `verify_v6_materialization_snapshot(reopen=true)` → `validate_storage_lifetime_reopen_pair_v4`가 'attempting' job을 거부했다.
+  - DB 상태: meta=`pending`, job=`attempting`/`indexSource`, 생성·갱신 시각은 05:58:16Z(14:58 KST, 앞선 멈춤 시각)였다.
+  - 정리 작업(materialization)은 arm('attempting')을 별도로 커밋하고, 다음 단계에서 행 쓰기와 'pending' 복귀를 한 트랜잭션으로 커밋한다. 그 사이에 엔진이 멈추면 이 표시가 남아 이후 모든 시작이 거부됐다.
+- 처리 1: `storage/reopen/snapshot.rs`의 `release_interrupted_attempt`.
+  - 새 엔진의 admission(V8Admission·Admission, EXCLUSIVE 연결)에서 쌍을 reopen=false로 먼저 검증한다.
+  - 'attempting'을 'pending'으로 되돌린다. 세션 안 취소의 rollback 뒤 처리와 같다.
+  - 'failed'는 계속 거부한다.
+  - 회귀 테스트: `admission_resumes_a_materialization_batch_the_engine_stopped_in`(수정을 빼면 실패함을 확인), `admission_still_refuses_a_failed_materialization`.
+  - 복사본 재검증: 수정 후 `system.status`가 약 10초 만에 `ready`가 됐고, 정리 작업도 이어서 진행됐다.
+- 원인 2(로그 확인):
+  - Rust 실행 기록의 선택 필드 `failure`{stage, code}는 8a6dbcdb(11-12)에 추가됐다. 그런데 Electron의 실행 상태 이벤트 검증기(`validateAgentRunStateChangedPayloadV1`)는 이 필드를 모르는 키로 거부했다.
+  - 그래서 실행이 실패 진단과 함께 끝나면(예: 인터넷 끊김) 이벤트 하나가 `protocolInvalid`로 엔진 연결 전체를 끊었다. dev 터미널에 `unknown protocol field: failure` 스택이 반복돼 있었다.
+  - 앞선 "앱의 작업 처리가 멈췄어요"의 유력한 직접 원인이다(사용자가 인터넷이 끊겼다고 함).
+  - 그 멈춤이 정리 작업 중간에 일어나 원인 1로 이어진 것으로 본다(추정).
+- 처리 2: 이벤트 검증기가 `failure`를 Rust와 같은 규칙으로 허용한다.
+  - 규칙: 정확히 stage·code 두 키, failed/recoveryRequired일 때만, null 거부.
+  - 목록은 `AGENT_RUN_FAILURE_{STAGES,CODES}_V1`로 record 검증기와 공유한다.
+  - 테스트: 실패 진단이 붙은 이벤트는 전달되고 엔진을 끊지 않는다. running·모르는 코드·추가 키는 계속 거부한다.
+- 진단: 엔진이 앱 데이터를 열지 못하면 main이 stderr의 고정 kind를 `last-engine-admission-failure.json`에 남긴다. 멈춘 원인 기록(`last-engine-failure.json`)을 덮지 않도록 파일을 나눴다. 이전에는 엔진이 살아 있어 아무 기록도 남지 않았다.
+- 독립 검토(1명): 차단 없음. 'attempting'과 커밋된 batch 결과가 공존하는 경로는 없다고 확인했다. 확인한 범위는 두 writer(`storage_lifetime.rs`의 arm/`run_bounded_batch`, `catchup.rs`의 step), phase 3 `write_pending`, data_version epoch, EXCLUSIVE 잠금이다.
+  - I1: 사고 DB job_id가 `lifetime_…`이라 테스트(storage_lifetime writer, `AfterArmCommit`)와 같은 writer다. catch-up writer가 admission 도중 멈춘 경우의 테스트는 남긴다.
+  - 반영: M2(release는 뒤 단계가 거부해도 커밋됨 — 주석), M3(옛 주석·핵심 결정에 대체 표시), M4(진단 파일 분리), M6(failed 거부의 kind·무변경 검사), M7(null·code 누락·잘못된 stage 거부, recoveryRequired 허용, 거부 사유 검사).
+  - 남김: M1(옛 스키마 v6/v7 이전 경로의 attempting은 계속 거부 — 새 앱 데이터 정책상 영향 낮음), M5(stderr가 500ms보다 늦으면 reason이 null).
+- 검증:
+  - Rust `storage` 필터 300 통과.
+  - `pnpm build` 통과, `npm test` 730 통과.
+  - Electron 보안·브리지·admission 96 통과.
+- 사용자 조치: 앱(dev 서버 포함)을 종료하고 `pnpm m5:dev`로 다시 켜면 새 엔진이 쓰인다. 실제 데이터 원본은 이번 진단에서 쓰지 않았다(복사본만 사용, 복사본은 scratchpad에서 삭제).
+
 ### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — 앱이 멈추면 스스로 다시 시작, 요청 하나로 엔진이 죽지 않게
 - 사용자 보고: 로컬 실행 중 팀 작업(기획 실행) 도중 "확인이 필요한 작업이 있어요" 알림을 눌렀다. 이어서 "앱의 작업 처리가 멈췄어요 … 앱을 종료한 뒤 다시 열어 주세요" 배너가 나왔다. 사이드카 프로세스는 사라져 있었다.
 - 조사:
@@ -174,13 +207,14 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **중단된 정리 작업은 다음 시작에서 이어 간다(2026-11-16)**: materialization의 'attempting'은 arm만 커밋된 상태이고, batch 쓰기와 'pending' 복귀는 한 트랜잭션이다. 그래서 새 엔진의 admission에서는 'pending'으로 되돌린다(`release_interrupted_attempt`). 'failed'만 계속 거부한다. 엔진이 앱 데이터를 열지 못하면 `~/Library/Logs/Elsecrew/last-engine-admission-failure.json`의 `reason`(kind)로 확인한다(멈춘 원인 기록 `last-engine-failure.json`을 덮지 않는다). `Storage::open`(Legacy·옛 스키마 이전 v6/v7)은 여전히 attempting을 거부한다. 자세한 위치는 `ELSECREW_DEBUG_ADMISSION=1`로 엔진을 띄워 복사본에서 재현한다. Rust 실행 기록에 필드를 추가하면 TS의 실행 상태 이벤트 검증기(`protocol-v1.ts`)도 함께 고친다. 빠뜨리면 이벤트 하나가 엔진 연결을 끊는다.
 - **엔진은 요청 하나·이벤트 하나 때문에 죽지 않는다(2026-11-16)**: 요청 처리 오류는 그 요청의 오류 응답이다(무결성 계열만 종료). 화면은 이벤트를 받으면 처리 결과와 관계없이 ack한다. 사용 중 멈춘 엔진은 Electron이 다시 띄우고, 화면은 저장 안 된 편집이 없을 때만 스스로 새로 고친다. 원인 진단은 `~/Library/Logs/Elsecrew/last-engine-failure.json`. 개발 중 테스트 빌드는 `target/debug/elsecrew-sidecar`를 교체하므로, 개발 앱은 빌드 뒤 다시 켜야 새 코드를 쓴다.
 - **장치 번호는 재부팅 뒤 바뀐다(2026-11-16)**: macOS의 `st_dev`는 마운트할 때 정해진다. 재시작을 넘겨 저장·비교하는 신원에는 inode(와 내용 digest)를 쓰고 장치 번호는 일관성만 본다. 로그인 잠금 결합과 원본 반영 쪽 기록(영수증·journal·archive·정리 job)은 고쳤다. 기록에는 0을 쓰고, 저장된 값과 비교할 때는 `without_device`로 장치 원소를 무시한다. 앱 데이터 조사는 DB를 임시 폴더로 복사해 읽는다(실행 중인 앱의 DB는 잠겨 있다).
 - **로그인 잠금 해제의 증거(2026-11-16)**: 해제는 '결합된 실행이 원장에서 끝났음'을 증명해야 하며 프로세스 소멸만으로는 풀지 않는다(기존 불변식 유지). 작업 공간 증거는 manifest 또는 원장의 삭제 완료 기록 중 하나다.
 - **작업마다 독립 복사본(2026-11-16)**: 새 작업 복사본은 프로젝트의 현재 복사본 지정을 바꾸지 않는다(`persist_task_copy_active`, 활성화와 한 번에 기록). 작업에 속한 복구는 새 복사본 생성을 막지 않지만, 반영 잠금(`applicationId`)과 진행 중인 `application_intent`는 막는다. 공급자 로그인 잠금은 실행에 묶이며, 해제 증명이 그 작업 공간의 manifest를 읽는다. 그래서 잠금이 남은 작업 공간 파일은 지우면 안 된다(`finish_deletions_keeping`).
 - **삭제는 삭제 표지 + 파일 삭제(2026-11-13)**: 원장은 append-only이고 재생 검증을 하므로 이벤트 행은 지우지 않는다(DELETE trigger 6개, 압축 흔적, UNIQUE `canonical_path`). 프로젝트 ID는 더 이상 경로 해시와 같다고 가정하지 않는다(`project_id_by_path`, `fresh_project_id`). 최신 작업의 작업 공간은 프로젝트 현재 복사본과 같은 경우가 많으므로, 그대로 지우면 프로젝트가 깨진다. 설계는 `docs/proposals/m5-project-deletion.md`.
 - **설정 구조와 수동 반영 폐지(2026-11-13)**: 프로젝트 단위 수동 반영(`prepareApplicationWorkspace`·`applicationPreview`)은 화면·브리지·sidecar 요청에서 제거됐다. 원본 반영은 작업(채팅) 단위 미리보기·확인 흐름만 쓴다. 복구·진단 도구는 프로젝트 설정의 접힌 '문제 해결'에 있다. 개발 실행은 `target/debug/elsecrew-sidecar`가 필요하다(`cargo build -p elsecrew-sidecar`). `provider_login_gate` descriptor 테스트는 병렬 실행에서 간헐 실패할 수 있다.
-- **작업 복사본 검증과 Git 잠금(2026-11-12)**: 실행 중 검증은 `.git/index.lock`을 잡지 않아야 한다(공급자가 자체 git 명령으로 잠금 보유 가능). `attempting` materialization이 남으면 admission이 fail-closed로 거절하며, 복구는 백업 뒤 `pending`으로 되돌려 정밀 재검증을 통과시키는 것이다. 다른 세션·리뷰어는 이 worktree에서 쓰기 금지, `cd` 대신 `git -C`.
+- **작업 복사본 검증과 Git 잠금(2026-11-12)**: 실행 중 검증은 `.git/index.lock`을 잡지 않아야 한다(공급자가 자체 git 명령으로 잠금 보유 가능). `attempting` materialization이 남으면 admission이 fail-closed로 거절하며, 복구는 백업 뒤 `pending`으로 되돌려 정밀 재검증을 통과시키는 것이다(2026-11-16부터 admission이 이 되돌림을 스스로 한다 — 위 항목으로 대체). 다른 세션·리뷰어는 이 worktree에서 쓰기 금지, `cd` 대신 `git -C`.
 - **공급자 fence 경합(2026-11-12)**: 로그인 확인·모델 목록·실행이 같은 `*-login.pending`을 공유한다. 기존 fence가 live 소유자에게 잠겨 있으면 `providerBusy`(재시도)이고, 잠금 없는 고아만 recovery 증거다. fence는 staging 잠금 후 hard_link로만 게시해 이름이 잠기지 않은 inode를 가리키는 순간이 없다. 사용량 표시는 연결 변경 시 Codex 모델 조회를 즉시 실행하므로 로그인 확인과 동시 실행될 수 있다.
 - **2026-11-12 main 통합 이후**: PR #1 병합 b6e2de81 및 GitHub `elsecrew` 이름 변경 완료. 이후 최신 main 기반 기능 브랜치에서 작업하며 추가 main 병합/push는 별도 승인이다. CI43150190399 실패는 제품 완료가 아님; Tauri 빌드 성공과 artifact 업로드 실패를 구분한다.
 - **Claude 실패 진단(2026-11-12)**: 새 terminal run.failure는 허용된 단계/원인 코드만 보존하며 기존 실패 원인은 추정하지 않는다. fixture Bash→Read 정상 경로는 통과했고 전달 오류 주입의 재시작 보존도 확인했다. 과거 사용자 실행의 직접 원인과 설치본/실제 공급자 재시험은 별도 미확인이다.

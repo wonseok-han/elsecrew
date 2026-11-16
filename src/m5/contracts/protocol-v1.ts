@@ -542,6 +542,10 @@ export function validateAgentPublicEventPayloadV1(
   return payload as unknown as { chatId: string; taskId: string; runId: string };
 }
 
+/** Mirrors the Rust run record's optional failure diagnostic. */
+export const AGENT_RUN_FAILURE_STAGES_V1 = ["approvalDelivery", "sessionInput", "sessionChannel", "sessionInitialization", "outputPersistence", "providerResult", "eventHandling", "cleanup"] as const;
+export const AGENT_RUN_FAILURE_CODES_V1 = ["boundaryRejected", "approvalUnavailable", "inputChanged", "storageFailed", "processObservationFailed", "providerRejected", "transportFailed", "unknown"] as const;
+
 export function validateAgentRunStateChangedPayloadV1(
   value: unknown,
 ): { eventId: string; run: Record<string, unknown> & { chatId: string; taskId: string; runId: string; selectedProfile: Record<string, unknown> & { roleId: string }; capabilityFingerprint: string } } {
@@ -556,7 +560,7 @@ export function validateAgentRunStateChangedPayloadV1(
   exactKeys(run, [
     "schemaVersion", "runId", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity",
     "selectedProfile", "source", "capabilityFingerprint", "state", "stage", "terminationOutcome",
-    "createdAt", "updatedAt",
+    "createdAt", "updatedAt", "failure",
   ]);
   if (run.schemaVersion !== 1) fail("agent run record schemaVersion must be 1");
   for (const name of ["runId", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) {
@@ -596,6 +600,15 @@ export function validateAgentRunStateChangedPayloadV1(
   }
   if ((run.state === "recoveryRequired") !== (run.terminationOutcome === "recoveryRequired")) {
     fail("recoveryRequired run must keep recovery termination evidence");
+  }
+  // A run that failed carries where and how (for example the network dropped).
+  if ("failure" in run) {
+    const failure = requireJsonObject(run.failure, "agent run state event failure");
+    exactKeys(failure, ["stage", "code"]);
+    if (!["stage", "code"].every((key) => key in failure)) fail("agent run state event failure is incomplete");
+    if (run.state !== "failed" && run.state !== "recoveryRequired") fail("failure diagnostic requires a failed run");
+    if (!AGENT_RUN_FAILURE_STAGES_V1.includes(failure.stage as never)) fail("agent run state event failure stage is invalid");
+    if (!AGENT_RUN_FAILURE_CODES_V1.includes(failure.code as never)) fail("agent run state event failure code is invalid");
   }
   for (const name of ["createdAt", "updatedAt"] as const) {
     if (typeof run[name] !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(run[name] as string)) {
