@@ -242,14 +242,7 @@ impl ProjectManager {
 
     /// Finishes every pending deletion it can; the rest stay pending for the
     /// next call. Returns how many are still pending.
-    #[cfg(test)]
     pub(crate) fn finish_deletions(&mut self, storage: &mut Storage, request_id: &str) -> Result<usize, ProjectFailure> {
-        self.finish_deletions_keeping(storage, request_id, &std::collections::BTreeSet::new())
-    }
-
-    /// `kept` names workspaces whose files must stay for now: a provider
-    /// sign-in hold still bound to a run there proves its release from them.
-    pub(crate) fn finish_deletions_keeping(&mut self, storage: &mut Storage, request_id: &str, kept: &std::collections::BTreeSet<String>) -> Result<usize, ProjectFailure> {
         if self.deletion_busy() { return Ok(self.pending_deletions(storage)?); }
         let mut index = 0usize;
         for project in storage.projection_records("project")? {
@@ -260,7 +253,7 @@ impl ProjectManager {
                 let chats: Vec<String> = storage.projection_records("chat")?.iter()
                     .filter(|chat| chat.get("project_id").and_then(Value::as_str) == Some(&project_id))
                     .filter_map(|chat| chat.get("chat_id").and_then(Value::as_str).map(str::to_owned)).collect();
-                let quiet = worktrees.iter().try_for_each(|id| if kept.contains(id) { Err(denied("a sign-in hold still refers to this workspace")) } else { self.worktree_is_quiet(storage, id, &chats) });
+                let quiet = worktrees.iter().try_for_each(|id| self.worktree_is_quiet(storage, id, &chats));
                 if quiet.is_ok() && worktrees.iter().try_for_each(|id| self.remove_worktree_files(id)).is_ok() {
                     let mut done = registered_project(storage, &project_id)?;
                     done[PROJECT_FIELD]["state"] = json!("deleted");
@@ -275,7 +268,6 @@ impl ProjectManager {
             for (chat_id, worktree) in pending {
                 let removed = match worktree.as_deref() {
                     None => Ok(()),
-                    Some(id) if kept.contains(id) => Err(denied("a sign-in hold still refers to this workspace")),
                     Some(id) if self.worktree_still_used(storage, &project, id, &chat_id)? => Err(denied("the workspace is still in use")),
                     Some(id) => self.worktree_is_quiet(storage, id, std::slice::from_ref(&chat_id)).and_then(|()| {
                         if Self::is_project_copy(&registered_project(storage, &project_id)?, id) {
@@ -297,6 +289,29 @@ impl ProjectManager {
             }
         }
         self.pending_deletions(storage)
+    }
+
+    /// True when the app itself removed this workspace through a deletion:
+    /// the ledger lists it for deletion and nothing of it is left on disk. The
+    /// removal only ever starts after every run there has provably ended, so
+    /// this stands in for the workspace's own manifest where that is gone for
+    /// good (also while another workspace of the same deletion still waits).
+    pub(crate) fn workspace_removed_by_deletion(&self, storage: &Storage, address: &WorkspaceAddress) -> Result<bool, ProjectFailure> {
+        if !valid_worktree_id(&address.worktree_id) { return Ok(false); }
+        let Some(project) = storage.projection_record("project", &address.project_id)? else { return Ok(false) };
+        let listed = |state: &Value| state == "pending" || state == "deleted";
+        let by_project = project.get(PROJECT_FIELD).is_some_and(|job| {
+            listed(&job["state"])
+                && job["worktrees"].as_array().is_some_and(|ids| ids.iter().any(|id| id == address.worktree_id.as_str()))
+        });
+        let by_chat = project.get(CHAT_FIELD).and_then(|jobs| jobs.get(address.chat_id.as_str())).is_some_and(|job| {
+            listed(&job["state"]) && job["worktreeId"] == address.worktree_id.as_str()
+        });
+        if !(by_project || by_chat) { return Ok(false); }
+        let gone = |dir: &Dir, name: &str| matches!(dir.symlink_metadata(name), Err(error) if error.kind() == std::io::ErrorKind::NotFound);
+        Ok(gone(&self.worktrees_dir, &address.worktree_id)
+            && gone(&self.worktrees_dir, &format!("delete_{}", address.worktree_id))
+            && gone(&self.manifests_dir, &format!("{}.json", address.worktree_id)))
     }
 
     pub(crate) fn pending_deletions(&self, storage: &Storage) -> Result<usize, ProjectFailure> {

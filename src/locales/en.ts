@@ -746,7 +746,7 @@ export const en: Record<MessageKey, string> = {
   "m5.login.connected": "Connected",
   "m5.login.start": "Sign in to {name}",
   "m5.login.check": "Check connection again",
-  "m5.login.recovery.help": "A task that was running when the app stopped has not been cleaned up yet, so the connection is on hold. Delete that task from the list: once its run is confirmed to have ended, it is cleaned up automatically. Then press refresh to check again. Your login is kept.",
+  "m5.login.recovery.help": "A task that was running when the app stopped has not been cleaned up yet, so the connection is on hold. Open the task marked 'Recovery required' in the task list and choose 'Check termination and discard workspace', or delete that task: once its run is confirmed to have ended, the connection opens again by itself. Either way, changes in that task that were not yet applied to the original can no longer be used. If you already did this, or there is no such task, press refresh. If nothing changes, pass on the details below and ask for help. Your login is kept.",
   "m5.login.recovery.action": "Recover connection lock",
   "m5.login.detail": "Information for support",
   "m5.login.error.recovery": "Could not confirm that the sign-in process ended. New sign-in and safe shutdown are blocked, and recovery records are preserved. Do not delete credentials or force quit. Use the details below to ask for help.",

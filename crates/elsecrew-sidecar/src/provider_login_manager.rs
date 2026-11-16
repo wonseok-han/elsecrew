@@ -70,8 +70,12 @@ impl LoginManager {
         };
         let released = result.is_ok();
         if released {
-            *self.view.lock().unwrap_or_else(|e| e.into_inner()) =
-                json!({"state":"idle","attemptId":self.attempt,"authUrl":null,"error":null});
+            // Only a view that was showing this very hold is cleared; any
+            // other state (for example "connected") stays what it was.
+            let mut view = self.view.lock().unwrap_or_else(|e| e.into_inner());
+            if view["error"] == "providerLoginRecoveryRequired" {
+                *view = json!({"state":"idle","attemptId":self.attempt,"authUrl":null,"error":null});
+            }
         }
         released
     }

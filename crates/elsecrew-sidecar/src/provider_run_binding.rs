@@ -22,14 +22,23 @@ pub(crate) struct RunFenceBinding {
 }
 
 impl RunFenceBinding {
+    /// Whether the fence file found now is the one this receipt was written
+    /// for. Inode numbers are the durable part of the identity. A device
+    /// number is assigned when a volume is mounted and can differ after a
+    /// restart of the computer, so it is only checked for consistency: the
+    /// file and its directory share a device exactly when they did at bind
+    /// time. A copied or recreated file gets other inode numbers and fails.
     #[cfg(target_os = "macos")]
-    pub(crate) fn file_identity(&self) -> (u64, u64, u64, u64) {
-        (
-            self.device,
-            self.inode,
-            self.directory_device,
-            self.directory_inode,
-        )
+    pub(crate) fn matches_file(
+        &self,
+        device: u64,
+        inode: u64,
+        directory_device: u64,
+        directory_inode: u64,
+    ) -> bool {
+        self.inode == inode
+            && self.directory_inode == directory_inode
+            && (self.device == self.directory_device) == (device == directory_device)
     }
 
     pub(crate) fn run_id(&self) -> &str {
@@ -95,6 +104,26 @@ impl RunFenceBinding {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_renumbered_device_still_names_the_same_file_but_other_inodes_never_do() {
+        let receipt = RunFenceBinding::from_value(&json!({
+            "schemaVersion": 1, "runId": "run-bound", "provider": "codex",
+            "nonce": "12345678-1234-4234-8234-123456789abc",
+            "device": 16777230, "inode": 2, "directoryDevice": 16777230, "directoryInode": 3,
+        }))
+        .unwrap();
+        assert!(receipt.matches_file(16777230, 2, 16777230, 3));
+        // A restart of the computer can mount the same volume under another number.
+        assert!(receipt.matches_file(16777231, 2, 16777231, 3));
+        // The file and its directory can never sit on different devices.
+        assert!(!receipt.matches_file(16777231, 2, 16777230, 3));
+        // A copied or recreated file or directory has another inode.
+        assert!(!receipt.matches_file(16777230, 4, 16777230, 3));
+        assert!(!receipt.matches_file(16777230, 2, 16777230, 5));
+        assert!(!receipt.matches_file(16777231, 4, 16777231, 3));
+    }
 
     #[test]
     fn persisted_receipt_validation_needs_no_native_process_owner() {

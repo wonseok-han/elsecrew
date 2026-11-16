@@ -3,7 +3,7 @@ import { useI18n } from "../i18n.tsx";
 import { validateProjectCatalogResult, type BackupPreparation } from "./contracts/project-catalog-v1.ts";
 
 /** Lists unfinished backup preparations on its own and shows only what it finds. */
-export function BackupPreparationRecovery({ projectId, disabled, onFound }: { projectId: string; disabled: boolean; onFound?: (found: boolean) => void }) {
+export function BackupPreparationRecovery({ projectId, disabled, onFound, onUnverified, onChecked }: { projectId: string; disabled: boolean; onFound?: (found: boolean) => void; onUnverified?: (failed: boolean) => void; onChecked?: () => void }) {
   const { t } = useI18n();
   const [entries, setEntries] = useState<BackupPreparation[] | null>(null);
   const [selected, setSelected] = useState<BackupPreparation | null>(null);
@@ -18,8 +18,8 @@ export function BackupPreparationRecovery({ projectId, disabled, onFound }: { pr
   useEffect(() => {
     if (!disabled && !loaded.current) { loaded.current = true; void run(); }
   }, [disabled]);
-  // A failed look is not "nothing found": the parent must not say all clear.
-  useEffect(() => { onFound?.(Boolean(entries && entries.length > 0) || message === "error"); }, [entries, message]);
+  // A failed look is not "nothing found": the parent says it could not check.
+  useEffect(() => { onFound?.(Boolean(entries && entries.length > 0)); onUnverified?.(message === "error"); }, [entries, message]);
   async function run(entry?: BackupPreparation) {
     if (disabled || pending.current || !window.m5Projects) return;
     const generation = epoch.current;
@@ -31,7 +31,11 @@ export function BackupPreparationRecovery({ projectId, disabled, onFound }: { pr
       if (result.action === "backupPreparations") setEntries(result.entries);
       else if (result.action === "abandonBackupPreparation") setMessage("done");
     } catch { if (epoch.current === generation) setMessage("error"); }
-    finally { pending.current = false; setBusy(false); }
+    finally {
+      pending.current = false; setBusy(false);
+      // The first look has an answer (or failed): the parent may sum up now.
+      if (!entry && epoch.current === generation) onChecked?.();
+    }
   }
   if (!message && !selected && (!entries || entries.length === 0)) return null;
   return <section className="m5-recovery-item" aria-label={t("m5.backup.title")} aria-busy={busy}>

@@ -4,8 +4,10 @@ use serde_json::{json, Value};
 
 pub(crate) use crate::provider_run_binding::RunFenceBinding;
 
-/// Explicit recovery only. The verifier must prove the exact durable run is
-/// terminal before unlink; disappearance of processes alone is insufficient.
+/// Recovery by proof only, whether the user asks for it or the app retries it
+/// (at start, after a run was settled). The verifier must prove the exact
+/// durable run is terminal before unlink; disappearance of processes alone is
+/// insufficient.
 pub(crate) fn recover_bound_run(
     profile: &dyn LoginProfile,
     verify_terminal: impl FnOnce(&RunFenceBinding, &BTreeSet<ProcIdentity>) -> Result<(), SidecarError>,
@@ -55,9 +57,7 @@ pub(crate) fn recover_bound_run(
     };
     binding.validate(binding.run_id(), runtime)?;
     let dir_meta = directory.dir_metadata().map_err(|_| failure())?;
-    if (meta.dev(), meta.ino(), dir_meta.dev(), dir_meta.ino())
-        != binding.file_identity()
-    {
+    if !binding.matches_file(meta.dev(), meta.ino(), dir_meta.dev(), dir_meta.ino()) {
         return Err(failure());
     }
     let mut recorded = BTreeSet::new();

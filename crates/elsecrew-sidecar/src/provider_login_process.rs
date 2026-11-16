@@ -244,7 +244,8 @@ fn lock_exclusive(file: &File) -> Result<(), SidecarError> {
     Ok(())
 }
 
-/// Explicit recovery only. Legacy/uncertain records remain fenced.
+/// Recovery by proof only (asked for by the user or retried by the app).
+/// Legacy/uncertain records remain fenced.
 /// A v2 marker proves the writer held the same exclusive lock until it exited.
 pub(crate) fn recover_confirmed_login(profile: &dyn LoginProfile) -> Result<(), SidecarError> {
     use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
@@ -1516,7 +1517,7 @@ mod tests {
     #[test]
     fn bound_run_recovery_rejects_unsafe_or_unfinished_fences() {
         use std::os::unix::fs::{symlink, PermissionsExt};
-        for case in ["live", "nonce", "inode", "directory", "provider", "run", "duplicate", "partial", "legacy", "permissions", "symlink"] {
+        for case in ["live", "nonce", "inode", "directory", "device", "provider", "run", "duplicate", "partial", "legacy", "permissions", "symlink"] {
             let temp = tempfile::tempdir().unwrap();
             let binding_profile = profile(&temp);
             let mut process = LoginProcess::reserve(&binding_profile).unwrap();
@@ -1533,6 +1534,8 @@ mod tests {
                 "nonce" => value["nonce"] = uuid::Uuid::new_v4().to_string().into(),
                 "inode" => value["inode"] = (value["inode"].as_u64().unwrap() + 1).into(),
                 "directory" => value["directoryInode"] = (value["directoryInode"].as_u64().unwrap() + 1).into(),
+                // Only one of the two device numbers differs: not a renumbered volume.
+                "device" => value["device"] = (value["device"].as_u64().unwrap() + 1).into(),
                 "provider" => value["provider"] = "claude-code".into(),
                 "run" => value["runId"] = "another-run".into(),
                 _ => {},

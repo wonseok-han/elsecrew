@@ -3125,8 +3125,20 @@ fn application_snapshot_creation_keeps_failures_fenced_without_downgrade() {
             )
             .is_err());
         let project = required_project(&fixture.storage, &fixture.project_id).unwrap();
-        assert_eq!(project["lifecycle"], "recoveryRequired");
-        assert!(!fixture.storage.blocker_ids().unwrap().is_empty());
+        if scenario == "dirty" {
+            // Refused before anything was unpacked and with no helper left
+            // running: the preparation is undone, never downgraded to a copy
+            // without a baseline, and nothing is left to recover.
+            assert_eq!(project["lifecycle"], "opened");
+            assert!(!project.contains_key("worktree_id"));
+            assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+            assert_eq!(fs::read_dir(&fixture.manager.worktrees_root).unwrap().count(), 0);
+            assert_eq!(fs::read_dir(&fixture.manager.manifests_root).unwrap().count(), 0);
+        } else {
+            // Later failures stay fenced exactly as before.
+            assert_eq!(project["lifecycle"], "recoveryRequired");
+            assert!(!fixture.storage.blocker_ids().unwrap().is_empty());
+        }
         assert!(fixture
             .manager
             .inspect_unstarted_snapshot(&fixture.storage, &fixture.project_id)
@@ -4293,7 +4305,15 @@ fn case_colliding_committed_paths_fail_closed_before_activation() {
         .unwrap_err();
     assert_eq!(failure.kind, "manifestMismatch");
     assert!(failure.detail.contains("case-colliding"));
-    assert!(!storage.blocker_ids().unwrap().is_empty());
+    // Refused before activation and undone: the project is not left stuck and
+    // other projects are not blocked. Trying again is refused the same way.
+    assert!(storage.blocker_ids().unwrap().is_empty());
+    assert_eq!(required_project(&storage, project_id).unwrap()["lifecycle"], "opened");
+    let again = manager
+        .create_worktree(&mut storage, project_id, "req_case_create_again")
+        .unwrap_err();
+    assert!(again.detail.contains("case-colliding"));
+    assert!(storage.blocker_ids().unwrap().is_empty());
     assert!(fs::read_dir(data.join(WORKTREE_DIRECTORY))
         .unwrap()
         .all(|entry| entry
@@ -5254,13 +5274,18 @@ fn managed_root_swap_before_bound_git_never_touches_external_or_registers_worktr
         },
     );
     let error = result.unwrap_err();
+    // The refused preparation is undone instead of being left behind as
+    // recovery work; the error itself still says what went wrong.
     assert_eq!(error.kind, "recoveryRequired");
+    assert!(error.detail.contains("nothing needs recovery"), "{}", error.detail);
     assert_eq!(fs::read(external.join("sentinel")).unwrap(), b"external");
     assert_eq!(fs::read_dir(&external).unwrap().count(), 1);
     assert_eq!(
         git_bytes_raw(&fixture.source, ["worktree", "list", "--porcelain"]),
         before_registration
     );
+    assert_eq!(required_project(&fixture.storage, &fixture.project_id).unwrap()["lifecycle"], "opened");
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
     fs::remove_file(&managed).unwrap();
     fs::rename(&moved, &managed).unwrap();
 }
@@ -6226,4 +6251,170 @@ fn selected_directory_uses_search_only_ancestors_and_rejects_links() {
     assert!(open_absolute_directory_capability(&root_path.join("linked-parent/selected")).is_err());
     symlink(&selected, root_path.join("linked-leaf")).unwrap();
     assert!(open_absolute_directory_capability(&root_path.join("linked-leaf")).is_err());
+}
+
+#[test]
+fn a_copy_whose_original_changed_meanwhile_is_dropped_and_can_simply_be_retried() {
+    // First open of a project: no copy exists yet.
+    let mut fixture = Fixture::open();
+    let opened = required_project(&fixture.storage, &fixture.project_id).unwrap();
+    let marker = fixture.source.join(".git/another-tool-was-here");
+    let error = fixture
+        .manager
+        .create_worktree_with_pre_export_hook(&mut fixture.storage, &fixture.project_id, "req_changed_first", || {
+            fs::write(&marker, b"x").unwrap();
+        })
+        .unwrap_err();
+    assert!(error.detail.contains("changed during snapshot export"), "{}", error.detail);
+    assert!(error.detail.contains("nothing needs recovery"), "{}", error.detail);
+    let mut restored = required_project(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(restored["lifecycle"], "opened");
+    restored.remove("last_event_sequence");
+    let mut expected = opened.clone();
+    expected.remove("last_event_sequence");
+    assert_eq!(restored, expected);
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+    let leftovers = |fixture: &Fixture| fs::read_dir(&fixture.manager.worktrees_root).unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with(".creating"))
+        .count();
+    assert_eq!(leftovers(&fixture), 0);
+    // Nothing needs recovery: the same request simply works now.
+    let view = fixture.manager.create_worktree(&mut fixture.storage, &fixture.project_id, "req_changed_first_retry").unwrap().result;
+
+    // A task copy: the project keeps pointing at its own copy throughout.
+    fs::remove_file(&marker).unwrap();
+    let error = fixture
+        .manager
+        .prepare_chat_workspace_with_pre_export_hook(&mut fixture.storage, &fixture.project_id, "req_changed_task", || {
+            fs::write(&marker, b"x").unwrap();
+        })
+        .unwrap_err();
+    assert!(error.detail.contains("nothing needs recovery"), "{}", error.detail);
+    let project = required_project(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(project["lifecycle"], "active");
+    assert_eq!(project["worktree_id"], view["worktreeId"]);
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+    assert_eq!(leftovers(&fixture), 0);
+    assert_eq!(fixture.manager.create_worktree(&mut fixture.storage, &fixture.project_id, "req_changed_view").unwrap().result, view);
+    let task = fixture.manager.prepare_chat_workspace(&mut fixture.storage, &fixture.project_id, "req_changed_task_retry").unwrap().result;
+    assert_ne!(task["worktreeId"], view["worktreeId"]);
+    assert_eq!(required_project(&fixture.storage, &fixture.project_id).unwrap()["worktree_id"], view["worktreeId"]);
+
+    // Another Git command busy in the original right before the copy starts.
+    let busy = fixture.source.join(".git/index.lock");
+    fs::write(&busy, b"").unwrap();
+    let error = fixture.manager.prepare_chat_workspace(&mut fixture.storage, &fixture.project_id, "req_busy_task").unwrap_err();
+    assert_eq!(error.kind, "dirtyConflict", "{}", error.detail);
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+    assert_eq!(leftovers(&fixture), 0);
+    fs::remove_file(&busy).unwrap();
+    fixture.manager.prepare_chat_workspace(&mut fixture.storage, &fixture.project_id, "req_busy_task_retry").unwrap();
+
+    // The whole history replays cleanly when the app starts again.
+    let database = fixture.storage.path().to_path_buf();
+    drop(fixture.manager);
+    drop(fixture.storage);
+    let storage = Storage::open(&database).unwrap();
+    assert!(storage.blocker_ids().unwrap().is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn saving_a_file_in_the_original_while_a_task_copy_is_made_is_undone_and_retried() {
+    let mut fixture = source_index_fixture();
+    fixture.manager.open_project(&mut fixture.storage, fixture.source.to_str().unwrap(), "req_saved_open").unwrap();
+    let view = fixture.manager.create_worktree(&mut fixture.storage, &fixture.project_id, "req_saved_view").unwrap().result;
+    let edited = fixture.source.join("src/edit.txt");
+    let clean = fs::read(&edited).unwrap();
+    // The user (or an editor) saves a tracked file right when the copy starts.
+    let error = fixture
+        .manager
+        .prepare_chat_application_workspace_with_pre_export_hook(&mut fixture.storage, &fixture.project_id, "req_saved_task", || {
+            fs::write(&edited, b"being edited").unwrap();
+        })
+        .unwrap_err();
+    assert_eq!(error.kind, "dirtyConflict", "{}", error.detail);
+    assert!(error.detail.contains("nothing needs recovery"), "{}", error.detail);
+    let project = required_project(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(project["lifecycle"], "active");
+    assert_eq!(project["worktree_id"], view["worktreeId"]);
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+    assert!(fs::read_dir(&fixture.manager.worktrees_root).unwrap().all(|entry| {
+        !entry.unwrap().file_name().to_string_lossy().ends_with(".creating")
+    }));
+    assert_eq!(fs::read(&edited).unwrap(), b"being edited", "the original is never touched");
+    // Once the original is clean again the same request simply works.
+    fs::write(&edited, &clean).unwrap();
+    let task = fixture
+        .manager
+        .prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_saved_task_retry")
+        .unwrap()
+        .result;
+    assert_ne!(task["worktreeId"], view["worktreeId"]);
+    let project = required_project(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(project["worktree_id"], view["worktreeId"]);
+    assert!(project["source_baselines"].get(task["worktreeId"].as_str().unwrap()).is_some());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_new_commit_in_the_original_does_not_stop_new_tasks() {
+    let mut fixture = source_index_fixture();
+    fixture.manager.open_project(&mut fixture.storage, fixture.source.to_str().unwrap(), "req_commit_open").unwrap();
+    let view = fixture.manager.create_worktree(&mut fixture.storage, &fixture.project_id, "req_commit_view").unwrap().result;
+    let first = git_text(&fixture.source, ["rev-parse", "HEAD"]);
+    // The usual loop: changes land in the original and get committed there.
+    fs::write(fixture.source.join("src/edit.txt"), b"applied and committed").unwrap();
+    git_raw(&fixture.source, ["add", "."]);
+    git_raw(&fixture.source, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "-m", "next"]);
+    let second = git_text(&fixture.source, ["rev-parse", "HEAD"]);
+    assert_ne!(first, second);
+    // New tasks start from the original as it is now, with or without a baseline.
+    let plain = fixture.manager.prepare_chat_workspace(&mut fixture.storage, &fixture.project_id, "req_commit_task").unwrap().result;
+    let baseline = fixture.manager.prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_commit_baseline_task").unwrap().result;
+    for task in [&plain, &baseline] {
+        assert_eq!(task["baseCommit"], second.as_str());
+        assert_eq!(
+            fs::read(PathBuf::from(task["worktreePath"].as_str().unwrap()).join("src/edit.txt")).unwrap(),
+            b"applied and committed"
+        );
+    }
+    // The project keeps its own (older) copy and stays openable.
+    let project = required_project(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(project["worktree_id"], view["worktreeId"]);
+    assert_eq!(project["base_commit"], first.as_str());
+    assert!(project["source_baselines"].get(baseline["worktreeId"].as_str().unwrap()).is_some());
+    fixture.manager.reopen_project(&mut fixture.storage, &fixture.project_id, "req_commit_reopen").unwrap();
+    assert_eq!(fixture.manager.create_worktree(&mut fixture.storage, &fixture.project_id, "req_commit_view_again").unwrap().result, view);
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+}
+
+#[test]
+fn a_project_folder_that_lost_its_repository_never_lets_a_parent_repository_stand_in() {
+    let mut fixture = Fixture::open();
+    let view = fixture.manager.create_worktree(&mut fixture.storage, &fixture.project_id, "req_parent_view").unwrap().result;
+    let before = required_project(&fixture.storage, &fixture.project_id).unwrap();
+    // The folder's own `.git` is gone and the folder above is a repository.
+    let parent = fixture.source.parent().unwrap().to_path_buf();
+    fs::rename(fixture.source.join(".git"), parent.join(".git")).unwrap();
+    for (request, baseline) in [("req_parent_task", false), ("req_parent_baseline_task", true)] {
+        let refused = if baseline {
+            fixture.manager.prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, request)
+        } else {
+            fixture.manager.prepare_chat_workspace(&mut fixture.storage, &fixture.project_id, request)
+        }
+        .unwrap_err();
+        assert!(refused.detail.contains("no longer the root"), "{}", refused.detail);
+        // Refused before anything was recorded or copied.
+        assert_eq!(required_project(&fixture.storage, &fixture.project_id).unwrap(), before);
+        assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+    }
+    assert_eq!(
+        fs::read_dir(&fixture.manager.worktrees_root).unwrap().count(),
+        1,
+        "only the project's own copy exists"
+    );
+    assert!(PathBuf::from(view["worktreePath"].as_str().unwrap()).is_dir());
+    fs::rename(parent.join(".git"), fixture.source.join(".git")).unwrap();
 }

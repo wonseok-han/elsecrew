@@ -964,7 +964,7 @@ impl Sidecar {
         admission_not_cancelled(cancellation)?;
         storage.register_app_instance(&ready)?;
         admission_not_cancelled(cancellation)?;
-        Ok(Self {
+        let mut sidecar = Self {
             storage,
             #[cfg(target_os = "macos")]
             login: provider_login_manager::LoginManager::default(),
@@ -989,7 +989,12 @@ impl Sidecar {
             workflow_announcements: Vec::new(),
             maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler::default(),
             maintenance_poisoned: false,
-        })
+        };
+        // A provider sign-in hold left by a run that has since durably ended
+        // (for example it was settled just before the app closed) is released
+        // before the first provider request can trip over it.
+        sidecar.release_settled_fences();
+        Ok(sidecar)
     }
 
     fn handle_request(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
@@ -1496,8 +1501,7 @@ impl Sidecar {
                             eprintln!("deletion could not stop every session: {}", error.kind);
                         }
                         if self.deletion_idle() {
-                            let kept = self.settle_deleted_work(&request.request_id);
-                            if let Err(error) = self.projects.finish_deletions_keeping(&mut self.storage, &request.request_id, &kept) {
+                            if let Err(error) = self.settle_deleted_work(&request.request_id) {
                                 eprintln!("deletion files are still pending: {}", error.kind);
                             }
                         }
@@ -1507,8 +1511,7 @@ impl Sidecar {
                 Some("finishDeletions") => {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
                     let pending = if self.deletion_idle() {
-                        let kept = self.settle_deleted_work(&request.request_id);
-                        self.projects.finish_deletions_keeping(&mut self.storage, &request.request_id, &kept)
+                        self.settle_deleted_work(&request.request_id)
                     } else {
                         self.projects.pending_deletions(&self.storage)
                     };
@@ -2324,6 +2327,11 @@ impl Sidecar {
                 )))
             }
         };
+        // Settling a stopped run is what a provider sign-in hold bound to it
+        // was waiting for: release it now instead of on a later manual check.
+        if request.method == "recovery.resolveAgent" && action.result["outcome"] == "resolvedAbandoned" {
+            self.release_settled_fences();
+        }
         Ok(HandledRequest {
             response: Some(ResponseV1 {
                 protocol_version: PROTOCOL_VERSION,

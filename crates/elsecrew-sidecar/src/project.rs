@@ -842,7 +842,7 @@ impl ProjectManager {
             // Reject unsupported/dirty input before reserving a recovery lock.
             // Creation captures again under its durable launch fence.
             let project = required_project(storage, project_id)?;
-            let source = self.open_source_repository(Path::new(value_string(&project, "canonical_path")?))?;
+            let source = self.open_project_source(&project)?;
             #[cfg(unix)]
             application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)?;
             #[cfg(windows)]
@@ -860,13 +860,28 @@ impl ProjectManager {
             Err(ProjectFailure::recovery("application workspace unavailable on this platform"))
         }
     }
+    /// Opens the original of a saved project and insists that the saved
+    /// folder is still the root of its own Git repository. Looking for a
+    /// repository walks up through parent folders, so a project folder that
+    /// lost its `.git` must never let a parent folder's repository stand in.
+    fn open_project_source(&self, project: &Map<String, Value>) -> Result<SourceRepository, ProjectFailure> {
+        let saved = value_string(project, "canonical_path")?;
+        let source = self.open_source_repository(Path::new(saved))?;
+        if canonical_protocol_path(&source.canonical_root)? != saved {
+            return Err(ProjectFailure::manifest(
+                "saved project folder is no longer the root of its Git repository",
+            ));
+        }
+        Ok(source)
+    }
+
     /// A task's own clean-source copy. The project keeps its own copy.
     pub(crate) fn prepare_chat_application_workspace(&mut self, storage: &mut Storage, project_id: &str, request_id: &str) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(any(unix, windows))]
         {
             // Reject unsupported/dirty input before reserving a recovery lock.
             let project = required_project(storage, project_id)?;
-            let source = self.open_source_repository(Path::new(value_string(&project, "canonical_path")?))?;
+            let source = self.open_project_source(&project)?;
             #[cfg(unix)]
             application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)?;
             #[cfg(windows)]
@@ -1201,7 +1216,13 @@ impl ProjectManager {
                     "project has durable recovery state from an interrupted snapshot operation",
                 ));
             }
-            if lifecycle == "active" {
+            // Older data: the project still points at a task's copy. That copy
+            // is the task's own business (it may even need recovery) and must
+            // not stop the project from opening. Such a project is opened
+            // afresh below: the original's current state is recorded and the
+            // pointer is dropped, so `create_worktree` gives the project view a
+            // copy of its own. The task keeps its copy through its own address.
+            if lifecycle == "active" && !is_task_copy(storage, &existing)? {
                 let active = self.validate_active_project(storage, &project_id)?;
                 if active.canonical_git_root != source.canonical_root {
                     return Err(ProjectFailure::manifest(
@@ -1291,6 +1312,48 @@ impl ProjectManager {
         )
     }
 
+    #[cfg(test)]
+    fn prepare_chat_workspace_with_pre_export_hook<F>(
+        &mut self,
+        storage: &mut Storage,
+        project_id: &str,
+        request_id: &str,
+        mut hook: F,
+    ) -> Result<ProjectAction, ProjectFailure>
+    where
+        F: FnMut(),
+    {
+        self.create_worktree_inner(
+            storage,
+            project_id,
+            request_id,
+            None,
+            Some(&mut hook),
+            SnapshotCreation::FreshChat,
+        )
+    }
+
+    #[cfg(all(test, unix))]
+    fn prepare_chat_application_workspace_with_pre_export_hook<F>(
+        &mut self,
+        storage: &mut Storage,
+        project_id: &str,
+        request_id: &str,
+        mut hook: F,
+    ) -> Result<ProjectAction, ProjectFailure>
+    where
+        F: FnMut(),
+    {
+        self.create_worktree_inner(
+            storage,
+            project_id,
+            request_id,
+            None,
+            Some(&mut hook),
+            SnapshotCreation::ChatApplicationCandidate,
+        )
+    }
+
     fn create_worktree_inner(
         &mut self,
         storage: &mut Storage,
@@ -1340,18 +1403,22 @@ impl ProjectManager {
             ));
         }
 
-        let source =
-            self.open_source_repository(Path::new(value_string(&project, "canonical_path")?))?;
-        for (field, actual) in [
-            ("base_commit", source.base_commit.as_str()),
-            ("base_tree", source.base_tree.as_str()),
-            ("object_format", source.object_format.as_str()),
-            ("source_identity", source.source_identity.as_str()),
-        ] {
-            if project.get(field).and_then(Value::as_str) != Some(actual) {
-                return Err(ProjectFailure::manifest(
-                    "source identity changed after project.open",
-                ));
+        let source = self.open_project_source(&project)?;
+        // The project's own copy must be what `project.open` recorded. A
+        // task's copy is made from the original as it is now (new commits
+        // included) and carries its own base in its manifest and receipt.
+        if !creation.keeps_project_copy() {
+            for (field, actual) in [
+                ("base_commit", source.base_commit.as_str()),
+                ("base_tree", source.base_tree.as_str()),
+                ("object_format", source.object_format.as_str()),
+                ("source_identity", source.source_identity.as_str()),
+            ] {
+                if project.get(field).and_then(Value::as_str) != Some(actual) {
+                    return Err(ProjectFailure::manifest(
+                        "source identity changed after project.open",
+                    ));
+                }
             }
         }
 
@@ -1374,6 +1441,14 @@ impl ProjectManager {
             ));
         }
         let lock_id = format!("lock_{worktree_id}");
+        // Taken before anything is recorded: another Git command busy in the
+        // original is an ordinary "try again", with nothing to undo.
+        let before = source_digest(&source.git_dir)?;
+        if before.lock_count != 0 {
+            return Err(ProjectFailure::dirty(
+                "another Git command is working in the original; nothing was prepared",
+            ));
+        }
         let worktree_text = canonical_protocol_path_without_existing(&worktree_path)?;
         let root_text = canonical_protocol_path(&source.canonical_root)?;
         let manifest_text = canonical_protocol_path_without_existing(&manifest_path)?;
@@ -1413,42 +1488,59 @@ impl ProjectManager {
             ));
         }
 
-        self.worktrees_dir
-            .create_dir(&staging_name)
-            .map_err(|error| {
-                ProjectFailure::recovery(format!(
-                    "could not create managed snapshot staging child: {error}"
-                ))
-            })?;
-        let staging = open_real_child_dir(&self.worktrees_dir, &staging_name)?;
-        let before = source_digest(&source.git_dir)?;
-        if before.lock_count != 0 {
-            return Err(ProjectFailure::recovery(
-                "source Git directory contains lock files before snapshot export",
-            ));
+        // Until the copy is handed over for activation, everything made so far
+        // lives in one staging folder that is never used again once dropped
+        // (its name is new every time), and nothing is written to the
+        // original. Each helper Git command has ended, or its whole process
+        // group has been stopped, whenever one of these steps returns. So a
+        // failure here is undone on the spot (see `fail_unfinished_copy`)
+        // instead of leaving the project needing recovery. The injected
+        // failure points model the app dying and keep their durable state.
+        let mut held_staging: Option<Dir> = None;
+        macro_rules! undo {
+            ($step:expr) => {
+                match $step {
+                    Ok(value) => value,
+                    Err(error) => {
+                        return Err(self.fail_unfinished_copy(
+                            storage, &project, &lock_id, &workspace_identity, &staging_name,
+                            held_staging.as_ref(), request_id, error,
+                        ))
+                    }
+                }
+            };
         }
+        undo!(self.worktrees_dir.create_dir(&staging_name).map_err(|error| {
+            ProjectFailure::recovery(format!(
+                "could not create managed snapshot staging child: {error}"
+            ))
+        }));
+        let staging = undo!(open_real_child_dir(&self.worktrees_dir, &staging_name));
+        held_staging = Some(undo!(staging.try_clone().map_err(|error| {
+            ProjectFailure::recovery(format!("could not retain snapshot staging: {error}"))
+        })));
         if let Some(hook) = &mut pre_export_hook {
             hook();
         }
         let mut launching = preparation_lock;
         launching["evidence"]["phase"] = json!("snapshotExportStarting");
-        append_object(storage, "lock", &lock_id, &format!("op_snapshot_launch_{worktree_id}"), request_id, launching)?;
+        undo!(append_object(storage, "lock", &lock_id, &format!("op_snapshot_launch_{worktree_id}"), request_id, launching));
         #[cfg(unix)]
         let baseline = if creation.captures_baseline() {
-            Some(application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)?)
+            Some(undo!(application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)))
         } else {
             None
         };
         #[cfg(windows)]
         let raw_source = if creation.captures_baseline() {
-            Some(windows_git_baseline::capture_windows_clean_baseline(self, &source)?)
+            Some(undo!(windows_git_baseline::capture_windows_clean_baseline(self, &source)))
         } else { None };
-        let bundle_bytes = self.export_bundle(&source.git_dir, &staging)?;
-        let after = source_digest(&source.git_dir)?;
+        let bundle_bytes = undo!(self.export_bundle(&source.git_dir, &staging));
+        let after = undo!(source_digest(&source.git_dir));
         if before != after || after.lock_count != 0 {
-            return Err(ProjectFailure::recovery(
+            undo!(Err(ProjectFailure::recovery(
                 "source Git identity changed during snapshot export",
-            ));
+            )));
         }
         if failure == Some(WorktreeFailurePoint::AfterBundleBeforeMaterialization) {
             return Err(ProjectFailure::recovery(
@@ -1458,28 +1550,34 @@ impl ProjectManager {
 
         #[cfg(unix)]
         if let Some(expected) = &baseline {
-            if *expected != application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)? {
-                return Err(ProjectFailure::dirty("source baseline changed during snapshot export"));
+            if *expected != undo!(application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)) {
+                undo!(Err(ProjectFailure::dirty("source baseline changed during snapshot export")));
             }
         }
 
         #[cfg(windows)]
         if let Some(expected) = &raw_source {
-            let observed = windows_git_baseline::capture_windows_clean_baseline(self, &source)?;
+            let observed = undo!(windows_git_baseline::capture_windows_clean_baseline(self, &source));
             if *expected != observed {
-                return Err(ProjectFailure::dirty("Windows source changed during snapshot export"));
+                undo!(Err(ProjectFailure::dirty("Windows source changed during snapshot export")));
             }
         }
 
-        self.initialize_snapshot_repository(&staging, &source)?;
-        let mut stats = self.materialize_snapshot(&staging, &source)?;
+        // Unpacking refuses what the copy cannot hold (paths that differ only
+        // in case, too many or too large files): the same every time, so it
+        // must not leave the project stuck either.
+        undo!(self.initialize_snapshot_repository(&staging, &source));
+        let mut stats = undo!(self.materialize_snapshot(&staging, &source));
         stats.bundle_bytes = bundle_bytes;
-        let disk_bytes_after = available_space(&staging)?;
+        let disk_bytes_after = undo!(available_space(&staging));
         if disk_bytes_after < SNAPSHOT_DISK_RESERVE_BYTES_V1 {
-            return Err(ProjectFailure::recovery(
+            undo!(Err(ProjectFailure::recovery(
                 "snapshot materialization would violate the 512 MiB disk reserve",
-            ));
+            )));
         }
+        // From here on the copy gets durable pieces outside its staging folder
+        // (receipt, manifest, final name): those failures stay fenced.
+        drop(held_staging);
 
         let active = ActiveProject {
             project_id: project_id.to_string(),
@@ -1593,9 +1691,11 @@ impl ProjectManager {
         )
         .map_err(|error| ProjectFailure::manifest(format!("snapshot sizing failed: {error}")))?;
 
-        self.persist_active(storage, &active, &project, request_id)?;
-        if let Some(view) = &project_copy {
-            restore_project_copy(storage, &active, view, request_id)?;
+        match &project_copy {
+            // One write: the task copy turns active and the project keeps
+            // pointing at its own copy. No moment in between can be left behind.
+            Some(view) => self.persist_task_copy_active(storage, &active, view, request_id)?,
+            None => self.persist_active(storage, &active, &project, request_id)?,
         }
         Ok(ProjectAction {
             result: manifest,
@@ -3481,16 +3581,159 @@ impl ProjectManager {
             &active.lock_id,
             &format!("op_worktree_active_lock_{}", active.worktree_id),
             request_id,
-            json!({
-                "lock_id":active.lock_id,
-                "project_id":active.project_id,
-                "writer_run_id":Value::Null,
-                "worktree_path":canonical_protocol_path(&active.worktree_path)?,
-                "poisoned":false,"recovery_required":false,
-                "evidence":{"phase":"activated","manifest":canonical_protocol_path_without_existing(&active.manifest_path)?,
-                    "workspace_identity":active.workspace_identity},
-            }),
+            activated_lock(active)?,
         )?;
+        Ok(())
+    }
+
+    /// A copy failed before it was handed over for activation: the original
+    /// changed or was busy meanwhile, a helper Git command failed, the copy
+    /// cannot hold what the original contains, or the disk ran short. The
+    /// half-made copy is dropped and the project goes back to where it was.
+    /// Returns the error to report: the original one, with a note that nothing
+    /// needs recovery. If the rollback cannot be recorded, the durable
+    /// recovery state stays exactly as before and the error is unchanged.
+    #[allow(clippy::too_many_arguments)]
+    fn fail_unfinished_copy(
+        &self,
+        storage: &mut Storage,
+        previous: &Map<String, Value>,
+        lock_id: &str,
+        workspace_identity: &str,
+        staging_name: &str,
+        staging: Option<&Dir>,
+        request_id: &str,
+        mut original: ProjectFailure,
+    ) -> ProjectFailure {
+        if self
+            .abandon_unfinished_copy(storage, previous, lock_id, workspace_identity, staging_name, staging, request_id)
+            .is_ok()
+        {
+            original.detail.push_str("; the unfinished copy was dropped and nothing needs recovery");
+        }
+        original
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn abandon_unfinished_copy(
+        &self,
+        storage: &mut Storage,
+        previous: &Map<String, Value>,
+        lock_id: &str,
+        workspace_identity: &str,
+        staging_name: &str,
+        staging: Option<&Dir>,
+        request_id: &str,
+    ) -> Result<(), ProjectFailure> {
+        let project_id = value_string(previous, "project_id")?.to_owned();
+        let mut project = required_project(storage, &project_id)?;
+        let mut lock = storage
+            .projection_record("lock", lock_id)?
+            .ok_or_else(|| ProjectFailure::recovery("preparation lock missing"))?;
+        // Only the exact preparation this call made is ever rolled back, and
+        // only while it has not been handed over for activation.
+        let phase = lock.get("evidence").and_then(|evidence| evidence["phase"].as_str());
+        if project.get("lifecycle") != Some(&json!("recoveryRequired"))
+            || project.get("lock_id") != Some(&json!(lock_id))
+            || project.get("workspace_identity") != Some(&json!(workspace_identity))
+            || !matches!(phase, Some("beforeSnapshotExport" | "snapshotExportStarting"))
+            || lock["evidence"]["workspace_identity"] != workspace_identity
+            || lock.get("project_id") != Some(&json!(project_id))
+            || lock.get("recovery_required") != Some(&json!(true))
+            || lock.get("poisoned") != Some(&json!(false))
+            || lock.get("writer_run_id") != Some(&Value::Null)
+        {
+            return Err(ProjectFailure::recovery("preparation changed before its rollback"));
+        }
+        let expected = [
+            ("project", project_id.as_str(), required_revision(&project)?),
+            ("lock", lock_id, required_revision(&lock)?),
+        ];
+        for field in [
+            "canonical_path", "selected_path", "base_commit", "base_tree", "object_format",
+            "source_identity", "workspace_identity", "lifecycle", "worktree_id", "worktree_path",
+            "manifest_path", "lock_id",
+        ] {
+            match previous.get(field) {
+                Some(value) => { project.insert(field.to_owned(), value.clone()); }
+                None => { project.remove(field); }
+            }
+        }
+        lock.insert("recovery_required".into(), json!(false));
+        lock.insert(
+            "evidence".into(),
+            json!({"phase":"abandonedUnfinishedCopy","request_id":request_id,"workspace_identity":workspace_identity}),
+        );
+        snapshot_recovery::write_pair(
+            storage,
+            &format!("snapshot_abandon_unfinished_{lock_id}"),
+            request_id,
+            Value::Object(project),
+            Value::Object(lock),
+            &expected,
+        )?;
+        // The ledger no longer refers to the half-made copy; removing its
+        // files is housekeeping and may be left to a later cleanup. Erase
+        // through the handle this call opened, and remove the name only while
+        // it still names that very folder.
+        #[cfg(unix)]
+        if let Some(staging) = staging {
+            if workspace_cleanup::walk(staging, true, 0, &mut 0).is_ok()
+                && open_real_child_dir(&self.worktrees_dir, staging_name)
+                    .and_then(|named| Ok(capability_directory_identity(&named)? == capability_directory_identity(staging)?))
+                    .unwrap_or(false)
+            {
+                let _ = self.worktrees_dir.remove_dir(staging_name);
+                let _ = sync_capability_directory(&self.worktrees_dir);
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = (staging_name, staging);
+        Ok(())
+    }
+
+    /// The last step of a task copy: its lock turns active and the project
+    /// record points back at the project's own copy, in one ledger write.
+    fn persist_task_copy_active(
+        &self,
+        storage: &mut Storage,
+        created: &ActiveProject,
+        view: &Map<String, Value>,
+        request_id: &str,
+    ) -> Result<(), ProjectFailure> {
+        let mut project = required_project(storage, &created.project_id)?;
+        for field in [
+            "canonical_path", "selected_path", "base_commit", "base_tree", "object_format",
+            "source_identity", "workspace_identity", "worktree_id", "worktree_path",
+            "manifest_path", "lock_id",
+        ] {
+            match view.get(field) {
+                Some(value) => { project.insert(field.to_owned(), value.clone()); }
+                None => { project.remove(field); }
+            }
+        }
+        project.insert("lifecycle".to_owned(), json!("active"));
+        let lock = activated_lock(created)?
+            .as_object()
+            .cloned()
+            .ok_or_else(|| ProjectFailure::manifest("lock payload must be an object"))?;
+        // All or nothing: a conflicting operation identity is an error here.
+        storage.upsert_projection_records_atomic(vec![
+            crate::storage::ProjectionUpsert {
+                aggregate_type: "project",
+                aggregate_id: created.project_id.clone(),
+                operation_id: format!("op_worktree_keep_project_copy_{}", created.worktree_id),
+                request_id: Some(request_id.to_owned()),
+                payload: project,
+            },
+            crate::storage::ProjectionUpsert {
+                aggregate_type: "lock",
+                aggregate_id: created.lock_id.clone(),
+                operation_id: format!("op_worktree_active_lock_{}", created.worktree_id),
+                request_id: Some(request_id.to_owned()),
+                payload: lock,
+            },
+        ])?;
         Ok(())
     }
 
@@ -6052,33 +6295,17 @@ fn snapshot_export_blockers(storage: &Storage) -> Result<Vec<String>, ProjectFai
     Ok(remaining)
 }
 
-/// Points the project back at its own copy after a task copy was made.
-fn restore_project_copy(
-    storage: &mut Storage,
-    created: &ActiveProject,
-    view: &Map<String, Value>,
-    request_id: &str,
-) -> Result<(), ProjectFailure> {
-    let mut current = required_project(storage, &created.project_id)?;
-    for field in [
-        "canonical_path", "selected_path", "base_commit", "base_tree", "object_format",
-        "source_identity", "workspace_identity", "worktree_id", "worktree_path",
-        "manifest_path", "lock_id",
-    ] {
-        match view.get(field) {
-            Some(value) => { current.insert(field.to_owned(), value.clone()); }
-            None => { current.remove(field); }
-        }
-    }
-    current.insert("lifecycle".to_owned(), json!("active"));
-    append_object(
-        storage,
-        "project",
-        &created.project_id,
-        &format!("op_worktree_keep_project_copy_{}", created.worktree_id),
-        request_id,
-        Value::Object(current),
-    )
+/// The lock record of a freshly activated copy.
+fn activated_lock(active: &ActiveProject) -> Result<Value, ProjectFailure> {
+    Ok(json!({
+        "lock_id":active.lock_id,
+        "project_id":active.project_id,
+        "writer_run_id":Value::Null,
+        "worktree_path":canonical_protocol_path(&active.worktree_path)?,
+        "poisoned":false,"recovery_required":false,
+        "evidence":{"phase":"activated","manifest":canonical_protocol_path_without_existing(&active.manifest_path)?,
+            "workspace_identity":active.workspace_identity},
+    }))
 }
 
 fn required_project(
@@ -6094,6 +6321,13 @@ fn required_project(
 fn registered_project(storage: &Storage, project_id: &str) -> Result<Map<String, Value>, ProjectFailure> {
     storage.projection_record("project", project_id)?
         .ok_or_else(|| ProjectFailure::manifest("project identity is not durably registered"))
+}
+
+fn required_revision(record: &Map<String, Value>) -> Result<u64, ProjectFailure> {
+    record
+        .get("last_event_sequence")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| ProjectFailure::manifest("record revision missing"))
 }
 
 fn value_string<'a>(record: &'a Map<String, Value>, name: &str) -> Result<&'a str, ProjectFailure> {

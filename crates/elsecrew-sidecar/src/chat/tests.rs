@@ -7016,6 +7016,14 @@ fn each_task_gets_its_own_copy_and_the_project_keeps_its_own() {
     assert_eq!(again, view);
     // The task copy itself stays valid through its own address.
     fixture.projects.verify_unbound_workspace(&fixture.storage, &fixture.project_id, second["worktreeId"].as_str().unwrap(), second["workspaceIdentity"].as_str().unwrap()).unwrap();
+    // The whole history replays cleanly when the app starts again.
+    let database = fixture.storage.path().to_path_buf();
+    drop(fixture.projects);
+    drop(fixture.storage);
+    fixture.storage = Storage::open(&database).unwrap();
+    fixture.projects = ProjectManager::new(&database).unwrap();
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+    assert_eq!(fixture.projects.create_worktree(&mut fixture.storage, &fixture.project_id, "req_view_after_restart").unwrap().result, view);
 }
 
 #[test]
@@ -7040,20 +7048,304 @@ fn a_stuck_task_does_not_block_new_copies_but_an_update_of_the_original_does() {
     assert!(refused.detail.contains("snapshot export"));
 }
 
+/// A fake Claude run that could not prove its end (so it needs recovery) with
+/// a real provider sign-in hold bound to it. No provider, account or model.
+#[cfg(target_os = "macos")]
+struct StoppedRunWithHold {
+    runtime: AgentRuntime,
+    identity: RunIdentity,
+    binding: crate::provider_run_binding::RunFenceBinding,
+    fence_path: std::path::PathBuf,
+}
+
+#[cfg(target_os = "macos")]
+impl StoppedRunWithHold {
+    fn new(fixture: &mut Fixture, tag: &str) -> Self {
+        let executable = sidecar_binary();
+        assert!(executable.is_file(), "build the sidecar binary for process gate");
+        let snapshot = fixture.snapshot(&format!("req_{tag}_snapshot"));
+        let chat = fixture.create_exact_claude_chat(&snapshot, tag, &format!("req_{tag}_chat"));
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(fixture, chat_id);
+        let mut runtime = AgentRuntime::fake(executable, FakeScenario::CancelUncertain);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        let started = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "coding".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+                },
+                &format!("req_{tag}_start"),
+            )
+            .unwrap();
+        let run_id = started.result["runId"].as_str().unwrap().to_string();
+        let identity = RunIdentity {
+            chat_id: chat_id.into(),
+            task_id: chat["taskId"].as_str().unwrap().into(),
+            project_id: chat["projectId"].as_str().unwrap().into(),
+            worktree_id: chat["worktreeId"].as_str().unwrap().into(),
+            workspace_identity: chat["workspaceIdentity"].as_str().unwrap().into(),
+            run_id: run_id.clone(),
+        };
+        let canceled = runtime.cancel(&mut fixture.storage, &mut fixture.projects, &identity).unwrap();
+        assert_eq!(canceled.result["outcome"], "recoveryRequired");
+        let profile = crate::provider_claude_profile::ClaudeProfileBinding::from_storage(&fixture.storage).unwrap();
+        let mut owner = crate::provider_login_process::LoginProcess::reserve_claude_owned(profile).unwrap();
+        owner.retain_fence_before_launch(&run_id).unwrap();
+        let binding = owner.bind_run_fence(&run_id).unwrap();
+        let fence_path = fixture.storage.path().parent().unwrap().join("claude-login.pending");
+        let mut projection = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+        {
+            use std::io::Write;
+            let mut fence = fs::OpenOptions::new().append(true).open(&fence_path).unwrap();
+            for process in projection["process_identity_internal"].as_array().unwrap() {
+                writeln!(fence, "{} {}", process["pid"], process["start_us"]).unwrap();
+            }
+            fence.sync_all().unwrap();
+        }
+        projection.remove("last_event_sequence");
+        projection.insert("provider_run_fence".into(), binding.to_value());
+        fixture.storage.upsert_projection_records_atomic(vec![crate::storage::ProjectionUpsert {
+            aggregate_type: "run", aggregate_id: run_id, operation_id: format!("test_bind_{tag}_fence"), request_id: None, payload: projection,
+        }]).unwrap();
+        owner.finish().unwrap();
+        drop(owner);
+        Self { runtime, identity, binding, fence_path }
+    }
+
+    fn resolve(&mut self, fixture: &mut Fixture, request_id: &str) {
+        let identity = &self.identity;
+        let recovery_id = fixture.storage.projection_record("run", &identity.run_id).unwrap().unwrap()["recovery"]["recoveryId"].clone();
+        let resolved = self.runtime.resolve_recovery(&mut fixture.storage, &mut fixture.projects, &json!({
+            "recoveryId":recovery_id,"chatId":identity.chat_id,"taskId":identity.task_id,"projectId":identity.project_id,
+            "worktreeId":identity.worktree_id,"workspaceIdentity":identity.workspace_identity,"runId":identity.run_id,
+            "expectedRevision":1,"resolution":"abandon",
+        }), request_id).unwrap();
+        assert_eq!(resolved["outcome"], "resolvedAbandoned");
+    }
+
+    /// Records the hold as if it had been written before a restart of the
+    /// computer under which the volume got another device number.
+    fn renumber_device(&mut self, fixture: &mut Fixture) {
+        let mut renumbered = self.binding.to_value();
+        for field in ["device", "directoryDevice"] {
+            renumbered[field] = (renumbered[field].as_u64().unwrap() + 1).into();
+        }
+        let text = fs::read_to_string(&self.fence_path).unwrap();
+        let old_line = format!("run-binding-v1 {}", serde_json::to_string(&self.binding.to_value()).unwrap());
+        let new_line = format!("run-binding-v1 {}", serde_json::to_string(&renumbered).unwrap());
+        assert!(text.contains(&old_line));
+        {
+            // Rewritten in place: the file keeps its inode.
+            use std::io::Write;
+            let mut fence = fs::OpenOptions::new().write(true).truncate(true).open(&self.fence_path).unwrap();
+            fence.write_all(text.replace(&old_line, &new_line).as_bytes()).unwrap();
+            fence.sync_all().unwrap();
+        }
+        let mut projection = fixture.storage.projection_record("run", &self.identity.run_id).unwrap().unwrap();
+        projection.remove("last_event_sequence");
+        projection.insert("provider_run_fence".into(), renumbered.clone());
+        fixture.storage.upsert_projection_records_atomic(vec![crate::storage::ProjectionUpsert {
+            aggregate_type: "run", aggregate_id: self.identity.run_id.clone(), operation_id: "test_renumber_fence_device".into(), request_id: None, payload: projection,
+        }]).unwrap();
+        self.binding = crate::provider_run_binding::RunFenceBinding::from_value(&renumbered).unwrap();
+    }
+}
+
+#[cfg(target_os = "macos")]
 #[test]
-fn a_workspace_a_sign_in_hold_refers_to_waits_for_its_release() {
-    let mut f = Fixture::new();
-    f.projects.create_worktree(&mut f.storage, &f.project_id, "req_hold_view").unwrap();
-    let snapshot = f.snapshot("req_hold_snapshot");
-    let chat = f.create_chat(&snapshot, "held", "req_hold_chat");
+fn a_sign_in_hold_is_released_after_its_task_or_project_was_deleted_and_the_computer_restarted() {
+    let recover = json!({"provider":"claude","action":"recover","attemptId":"deleted-hold"});
+    for whole_project in [true, false] {
+        let mut fixture = Fixture::new();
+        // The project view has its own copy, so the task below has one of its own.
+        fixture.projects.create_worktree(&mut fixture.storage, &fixture.project_id, "req_deleted_hold_view").unwrap();
+        let mut stopped = StoppedRunWithHold::new(&mut fixture, "deleted_hold");
+        let mut login = crate::provider_login_manager::LoginManager::claude();
+        // Unsettled: nothing releases the hold, with or without a restart.
+        assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired");
+        stopped.resolve(&mut fixture, "req_deleted_hold_resolve");
+        // The user then deleted the task or the whole project, and its files
+        // were removed before anything released the hold.
+        if whole_project {
+            fixture.projects.delete_project(&mut fixture.storage, &fixture.project_id, "req_deleted_hold_delete").unwrap();
+        } else {
+            fixture.projects.delete_chat(&mut fixture.storage, &fixture.project_id, &stopped.identity.chat_id, "req_deleted_hold_delete").unwrap();
+        }
+        assert_eq!(fixture.projects.finish_deletions(&mut fixture.storage, "req_deleted_hold_finish").unwrap(), 0);
+        let data = fixture.storage.path().parent().unwrap().to_path_buf();
+        let workspace = data.join("worktrees-v1").join(&stopped.identity.worktree_id);
+        let manifest = data.join("worktree-manifests-v1").join(format!("{}.json", stopped.identity.worktree_id));
+        assert!(!workspace.exists() && !manifest.exists());
+        stopped.renumber_device(&mut fixture);
+        let held = fs::read(&stopped.fence_path).unwrap();
+        // Anything of the workspace back on disk is not a finished deletion.
+        fs::create_dir(&workspace).unwrap();
+        assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired", "{whole_project}");
+        assert_eq!(fs::read(&stopped.fence_path).unwrap(), held);
+        fs::remove_dir(&workspace).unwrap();
+        assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["state"], "idle", "{whole_project}");
+        assert!(!stopped.fence_path.exists());
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_sign_in_hold_survives_a_device_renumbering_only_with_the_same_inodes() {
+    let recover = json!({"provider":"claude","action":"recover","attemptId":"renumbered-hold"});
+    let mut fixture = Fixture::new();
+    let mut stopped = StoppedRunWithHold::new(&mut fixture, "renumbered_hold");
+    stopped.resolve(&mut fixture, "req_renumbered_hold_resolve");
+    stopped.renumber_device(&mut fixture);
+    let mut login = crate::provider_login_manager::LoginManager::claude();
+    // A copy of the hold file is another file, whatever it says inside.
+    let copy = stopped.fence_path.with_extension("copy");
+    fs::copy(&stopped.fence_path, &copy).unwrap();
+    let original = stopped.fence_path.with_extension("original");
+    fs::rename(&stopped.fence_path, &original).unwrap();
+    fs::rename(&copy, &stopped.fence_path).unwrap();
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired");
+    assert!(stopped.fence_path.exists());
+    fs::remove_file(&stopped.fence_path).unwrap();
+    fs::rename(&original, &stopped.fence_path).unwrap();
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["state"], "idle");
+    assert!(!stopped.fence_path.exists());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_deletion_cut_short_and_a_sign_in_hold_never_wait_for_each_other() {
+    let recover = json!({"provider":"claude","action":"recover","attemptId":"cut-short"});
+    let mut fixture = Fixture::new();
+    fixture.projects.create_worktree(&mut fixture.storage, &fixture.project_id, "req_cut_view").unwrap();
+    let mut stopped = StoppedRunWithHold::new(&mut fixture, "cut_short");
+    stopped.resolve(&mut fixture, "req_cut_resolve");
+    fixture.projects.delete_chat(&mut fixture.storage, &fixture.project_id, &stopped.identity.chat_id, "req_cut_delete").unwrap();
+    // The app stopped in the middle of removing the files: the manifest is
+    // gone, the ledger still says the deletion is pending.
+    let data = fixture.storage.path().parent().unwrap().to_path_buf();
+    fs::remove_file(data.join("worktree-manifests-v1").join(format!("{}.json", stopped.identity.worktree_id))).unwrap();
+    let mut login = crate::provider_login_manager::LoginManager::claude();
+    // Neither proof exists yet, so the hold stays for now ...
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired");
+    assert!(stopped.fence_path.exists());
+    // ... and the deletion does not wait for it: it finishes, and that
+    // finished deletion is then the proof the hold needs.
+    assert_eq!(fixture.projects.finish_deletions(&mut fixture.storage, "req_cut_finish").unwrap(), 0);
+    assert!(!data.join("worktrees-v1").join(&stopped.identity.worktree_id).exists());
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["state"], "idle");
+    assert!(!stopped.fence_path.exists());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_sign_in_hold_left_by_a_run_that_ended_on_its_own_is_released() {
+    let recover = json!({"provider":"claude","action":"recover","attemptId":"ended-hold"});
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_ended_snapshot");
+    let chat = fixture.create_exact_claude_chat(&snapshot, "ended", "req_ended_chat");
     let chat_id = chat["chatId"].as_str().unwrap();
-    let worktree_id = chat["worktreeId"].as_str().unwrap().to_owned();
-    let path = std::path::PathBuf::from(f.storage.projection_record("lock", &format!("lock_{worktree_id}")).unwrap().unwrap()["worktree_path"].as_str().unwrap());
-    let deleted = f.projects.delete_chat(&mut f.storage, &f.project_id, chat_id, "req_hold_delete").unwrap();
-    assert_eq!(deleted.result["projectClosed"], false, "the project keeps its own copy");
-    let kept = std::collections::BTreeSet::from([worktree_id]);
-    assert_eq!(f.projects.finish_deletions_keeping(&mut f.storage, "req_hold_finish", &kept).unwrap(), 1);
-    assert!(path.exists(), "the release still needs this workspace's evidence");
-    assert_eq!(f.projects.finish_deletions_keeping(&mut f.storage, "req_hold_finish_released", &Default::default()).unwrap(), 0);
-    assert!(!path.exists());
+    let message_id = initial_message_id(&fixture, chat_id);
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let started = runtime
+        .start_agent(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            AgentRunStartRequestV1 {
+                chat_id: chat_id.into(),
+                role_id: "coding".into(),
+                input_message_ids: vec![message_id],
+                expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+            },
+            "req_ended_start",
+        )
+        .unwrap();
+    let run_id = started.result["runId"].as_str().unwrap().to_string();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while runtime.has_active_run(&run_id) {
+        assert!(std::time::Instant::now() < deadline, "the fake run must end on its own");
+        runtime.poll(&mut fixture.storage, &mut fixture.projects).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let ended = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    assert_eq!(ended["record"]["state"], "succeeded");
+    assert_eq!(ended["recovery"], Value::Null);
+    assert_eq!(ended["termination"]["processesProvenGone"], true);
+    // The app stopped right after the run's ending was recorded and before its
+    // owner removed the hold: bind the hold the owner would have held.
+    let profile = crate::provider_claude_profile::ClaudeProfileBinding::from_storage(&fixture.storage).unwrap();
+    let mut owner = crate::provider_login_process::LoginProcess::reserve_claude_owned(profile).unwrap();
+    owner.retain_fence_before_launch(&run_id).unwrap();
+    let binding = owner.bind_run_fence(&run_id).unwrap();
+    let fence_path = fixture.storage.path().parent().unwrap().join("claude-login.pending");
+    {
+        use std::io::Write;
+        let mut fence = fs::OpenOptions::new().append(true).open(&fence_path).unwrap();
+        for process in ended["process_identity_internal"].as_array().unwrap() {
+            writeln!(fence, "{} {}", process["pid"], process["start_us"]).unwrap();
+        }
+        fence.sync_all().unwrap();
+    }
+    let bind = |fixture: &mut Fixture, operation: &str, change: &dyn Fn(&mut Map<String, Value>)| {
+        let mut projection = ended.clone();
+        projection.remove("last_event_sequence");
+        projection.insert("provider_run_fence".into(), binding.to_value());
+        change(&mut projection);
+        fixture.storage.upsert_projection_records_atomic(vec![crate::storage::ProjectionUpsert {
+            aggregate_type: "run", aggregate_id: run_id.clone(), operation_id: operation.into(), request_id: None, payload: projection,
+        }]).unwrap();
+    };
+    owner.finish().unwrap();
+    drop(owner);
+    let mut login = crate::provider_login_manager::LoginManager::claude();
+    let held = fs::read(&fence_path).unwrap();
+    // Without the owner's proof that every process was gone, nothing is released.
+    bind(&mut fixture, "test_ended_unproven", &|projection| {
+        projection.get_mut("termination").unwrap()["processesProvenGone"] = false.into();
+    });
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired");
+    bind(&mut fixture, "test_ended_running", &|projection| {
+        projection.get_mut("record").unwrap()["state"] = "running".into();
+    });
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired");
+    assert_eq!(fs::read(&fence_path).unwrap(), held);
+    bind(&mut fixture, "test_ended_bound", &|_| {});
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover, &fixture.projects).unwrap()["state"], "idle");
+    assert!(!fence_path.exists());
+    // The task itself is untouched and stays usable.
+    assert_ne!(fixture.storage.projection_record("chat", chat_id).unwrap().unwrap()["record"]["state"], "discarded");
+}
+
+#[test]
+fn a_project_that_still_points_at_a_stopped_task_copy_opens_and_gets_its_own_copy() {
+    // Older data: the latest task's copy is also the project's current copy.
+    let mut fixture = Fixture::new();
+    let task = fixture.snapshot("req_legacy_task");
+    fixture.create_chat(&task, "legacy", "req_legacy_chat");
+    let worktree_id = task["worktreeId"].as_str().unwrap();
+    assert_eq!(fixture.storage.projection_record("project", &fixture.project_id).unwrap().unwrap()["worktree_id"], worktree_id);
+    // That task then stopped badly: its copy needs recovery.
+    let manifest_path = fixture.storage.path().parent().unwrap().join("worktree-manifests-v1").join(format!("{worktree_id}.json"));
+    let mut manifest: Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest["lifecycle"] = json!("recoveryRequired");
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    // Meanwhile the original moved on by a commit.
+    git(&fixture.source, &["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-q", "-m", "later"]);
+    let head = String::from_utf8(Command::new("/usr/bin/git").arg("-C").arg(&fixture.source).args(["rev-parse", "HEAD"]).output().unwrap().stdout).unwrap();
+    // The project still opens (the screen reopens it, then asks for its copy).
+    fixture.projects.reopen_project(&mut fixture.storage, &fixture.project_id, "req_legacy_reopen").unwrap();
+    let view = fixture.projects.create_worktree(&mut fixture.storage, &fixture.project_id, "req_legacy_view").unwrap().result;
+    assert_ne!(view["worktreeId"], worktree_id);
+    assert_eq!(view["lifecycle"], "active");
+    assert_eq!(view["baseCommit"], head.trim());
+    let project = fixture.storage.projection_record("project", &fixture.project_id).unwrap().unwrap();
+    assert_eq!(project["worktree_id"], view["worktreeId"]);
+    // From now on the ordinary path applies.
+    fixture.projects.reopen_project(&mut fixture.storage, &fixture.project_id, "req_legacy_reopen_again").unwrap();
+    assert_eq!(fixture.projects.create_worktree(&mut fixture.storage, &fixture.project_id, "req_legacy_view_again").unwrap().result, view);
 }

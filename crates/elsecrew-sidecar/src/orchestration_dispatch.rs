@@ -260,42 +260,53 @@ impl Sidecar {
     /// A deleted task (or every task of a deleted project) can leave a run
     /// that stopped without a clean finish, for example when the app quit
     /// mid-run. Settle it the same way as the troubleshooting "discard":
-    /// only when every recorded process is provably gone. Then release a
-    /// provider sign-in hold bound to such a run while its workspace evidence
-    /// still exists. Returns the workspaces a remaining hold still refers to;
-    /// their files must wait. Anything unproven stays and is retried later.
-    pub(super) fn settle_deleted_work(&mut self, request_id: &str) -> std::collections::BTreeSet<String> {
+    /// only when every recorded process is provably gone. Then finish the
+    /// pending deletions and release provider sign-in holds whose bound run
+    /// has durably ended. A hold is tried before and after the files go: its
+    /// proof accepts the workspace's manifest or, once that is removed, the
+    /// ledger's record of the finished deletion, so neither waits for the
+    /// other. Anything unproven stays and is retried on a later call.
+    /// Returns how many deletions are still pending.
+    pub(super) fn settle_deleted_work(&mut self, request_id: &str) -> Result<usize, ProjectFailure> {
         if self.deletion_idle() && !self.projects.deletion_busy() {
             self.resolve_deleted_recoveries(request_id);
         }
-        let mut kept = std::collections::BTreeSet::new();
-        for name in ["claude-login.pending", "codex-login.pending"] {
-            let Some(run_id) = self.fence_bound_run(name) else { continue };
-            let released = if name.starts_with("claude") {
-                self.claude_login.release_bound_fence(&self.storage, &self.projects)
-            } else {
-                self.login.release_bound_fence(&self.storage, &self.projects)
-            };
-            if released { continue; }
-            if let Some(worktree) = self.storage.projection_record("run", &run_id).ok().flatten()
-                .and_then(|run| run["record"]["worktreeId"].as_str().map(str::to_owned))
-            {
-                kept.insert(worktree);
-            }
-        }
-        kept
+        self.release_settled_fences();
+        let pending = self.projects.finish_deletions(&mut self.storage, request_id);
+        self.release_settled_fences();
+        pending
     }
 
-    /// The run a sign-in hold file is bound to, if any. Read only to keep its
-    /// workspace; the release itself re-verifies the file exactly.
-    fn fence_bound_run(&self, name: &str) -> Option<String> {
-        let path = self.storage.path().parent()?.join(name);
-        let metadata = std::fs::symlink_metadata(&path).ok()?;
-        if !metadata.is_file() || metadata.len() > 16 * 1024 { return None; }
-        let text = std::fs::read_to_string(&path).ok()?;
-        let encoded = text.lines().nth(1)?.strip_prefix("run-binding-v1 ")?;
-        let value: Value = serde_json::from_str(encoded).ok()?;
-        value["runId"].as_str().map(str::to_owned)
+    /// Releases each provider sign-in hold whose bound run has durably ended
+    /// (the same proof as the "recover" action; nothing is inferred from a
+    /// missing process alone).
+    #[cfg(target_os = "macos")]
+    pub(super) fn release_settled_fences(&mut self) {
+        for name in ["claude-login.pending", "codex-login.pending"] {
+            if !self.fence_is_run_bound(name) { continue; }
+            if name.starts_with("claude") {
+                self.claude_login.release_bound_fence(&self.storage, &self.projects);
+            } else {
+                self.login.release_bound_fence(&self.storage, &self.projects);
+            }
+        }
+    }
+
+    /// Provider sign-in holds exist only where the app runs providers itself.
+    #[cfg(not(target_os = "macos"))]
+    pub(super) fn release_settled_fences(&mut self) {}
+
+    /// Whether a sign-in hold file exists and names a run. A quick look only,
+    /// to skip the common case of no hold; the release re-verifies everything.
+    #[cfg(target_os = "macos")]
+    fn fence_is_run_bound(&self, name: &str) -> bool {
+        let Some(path) = self.storage.path().parent().map(|parent| parent.join(name)) else { return false };
+        let Ok(metadata) = std::fs::symlink_metadata(&path) else { return false };
+        metadata.is_file()
+            && metadata.len() <= 16 * 1024
+            && std::fs::read_to_string(&path).is_ok_and(|text| {
+                text.lines().nth(1).is_some_and(|line| line.starts_with("run-binding-v1 "))
+            })
     }
 
     fn resolve_deleted_recoveries(&mut self, request_id: &str) {
@@ -657,6 +668,10 @@ mod tests {
     }
     /// `team` replaces the default V2 team with a V3 `(roles, roleDefinitions)` pair.
     fn service_with(team: Option<(Value, Value)>) -> (tempfile::TempDir, Sidecar, Value) {
+        service_named(team, "data.sqlite3")
+    }
+    /// Provider profiles (and so sign-in holds) need the app's real database name.
+    fn service_named(team: Option<(Value, Value)>, database: &str) -> (tempfile::TempDir, Sidecar, Value) {
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("source");
         std::fs::create_dir(&source).unwrap();
@@ -693,7 +708,7 @@ mod tests {
             .ready
             .clone();
         let mut sidecar = Sidecar::initialize(
-            root.path().join("data.sqlite3"),
+            root.path().join(database),
             ready,
             runtime,
             &AtomicBool::new(false),
@@ -1132,6 +1147,146 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(sidecar.storage.projection_record("run", &run_id).unwrap().unwrap()["record"]["state"], "canceled");
+    }
+
+    /// Binds a real provider sign-in hold to a run the fake runtime left
+    /// needing recovery. No provider, account or model is involved.
+    #[cfg(target_os = "macos")]
+    fn bind_claude_hold(sidecar: &mut Sidecar, run_id: &str) -> std::path::PathBuf {
+        use std::io::Write;
+        let profile = crate::provider_claude_profile::ClaudeProfileBinding::from_storage(&sidecar.storage).unwrap();
+        let mut owner = crate::provider_login_process::LoginProcess::reserve_claude_owned(profile).unwrap();
+        owner.retain_fence_before_launch(run_id).unwrap();
+        let binding = owner.bind_run_fence(run_id).unwrap();
+        let fence_path = sidecar.storage.path().parent().unwrap().join("claude-login.pending");
+        let mut projection = sidecar.storage.projection_record("run", run_id).unwrap().unwrap();
+        let mut fence = std::fs::OpenOptions::new().append(true).open(&fence_path).unwrap();
+        for process in projection["process_identity_internal"].as_array().unwrap() {
+            writeln!(fence, "{} {}", process["pid"], process["start_us"]).unwrap();
+        }
+        fence.sync_all().unwrap();
+        projection.remove("last_event_sequence");
+        projection.insert("provider_run_fence".into(), binding.to_value());
+        sidecar.storage.upsert_projection_records_atomic(vec![crate::storage::ProjectionUpsert {
+            aggregate_type: "run", aggregate_id: run_id.into(), operation_id: "test_bind_hold".into(), request_id: None, payload: projection,
+        }]).unwrap();
+        owner.finish().unwrap();
+        fence_path
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn deleting_a_stopped_task_or_project_settles_it_frees_its_sign_in_hold_and_removes_its_files() {
+        for whole_project in [false, true] {
+            let (_root, mut sidecar, chat, run_id, fence_path) = stopped_run_with_hold();
+            let id = chat["chatId"].as_str().unwrap();
+            let project_id = chat["projectId"].as_str().unwrap();
+            let worktree_id = chat["worktreeId"].as_str().unwrap();
+            let data = sidecar.storage.path().parent().unwrap().to_path_buf();
+            let workspace = data.join("worktrees-v1").join(worktree_id);
+            let manifest = data.join("worktree-manifests-v1").join(format!("{worktree_id}.json"));
+            assert!(workspace.is_dir() && manifest.is_file() && fence_path.is_file());
+            // While the task exists, nothing settles it behind the user's back.
+            let request = sidecar.workflow_request("req_stopped_idle_finish".into(), "project.catalog", json!({"action":"finishDeletions"}));
+            assert!(sidecar.handle_request(request).unwrap().response.unwrap().ok);
+            assert_eq!(sidecar.storage.projection_record("run", &run_id).unwrap().unwrap()["recovery"]["state"], "unresolved");
+            assert!(fence_path.is_file());
+            let params = if whole_project {
+                json!({"action":"deleteProject","projectId":project_id,"confirmed":true})
+            } else {
+                json!({"action":"deleteChat","projectId":project_id,"chatId":id,"confirmed":true})
+            };
+            let request = sidecar.workflow_request("req_stopped_delete".into(), "project.catalog", params);
+            let response = sidecar.handle_request(request).unwrap().response.unwrap();
+            assert!(response.ok, "{:?}", response.error);
+            let request = sidecar.workflow_request("req_stopped_finish".into(), "project.catalog", json!({"action":"finishDeletions"}));
+            let response = sidecar.handle_request(request).unwrap().response.unwrap();
+            assert_eq!(response.result.unwrap()["pending"], 0, "{whole_project}");
+            let settled = sidecar.storage.projection_record("run", &run_id).unwrap().unwrap();
+            assert_eq!(settled["record"]["state"], "canceled", "{whole_project}");
+            assert_eq!(settled["recovery"]["state"], "resolvedAbandoned", "{whole_project}");
+            assert!(!fence_path.exists(), "the sign-in hold is free again ({whole_project})");
+            assert!(!workspace.exists() && !manifest.exists(), "{whole_project}");
+            assert!(sidecar.storage.blocker_ids().unwrap().is_empty());
+        }
+    }
+
+    /// A service whose first run was told to stop but could not prove its end,
+    /// with a real sign-in hold bound to that run.
+    #[cfg(target_os = "macos")]
+    fn stopped_run_with_hold() -> (tempfile::TempDir, Sidecar, Value, String, std::path::PathBuf) {
+        let (root, mut sidecar, chat) = service_named(None, elsecrew_protocol::lifecycle_v1::SQLITE_FILE_V1);
+        assert!(start(&mut sidecar, &chat).ok);
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::CancelUncertain);
+        let id = chat["chatId"].as_str().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let run_id = loop {
+            sidecar.poll_runtime_events().unwrap();
+            let state = sidecar.workflow_state(id).unwrap();
+            if let Some(run_id) = state.run_id.filter(|run_id| sidecar.agent_runtime.has_active_run(run_id)) {
+                break run_id;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let field = |key: &str| chat[key].as_str().unwrap().to_owned();
+        sidecar.agent_runtime.request_cancel(&agent_runtime::RunIdentity {
+            chat_id: field("chatId"), task_id: field("taskId"), project_id: field("projectId"),
+            worktree_id: field("worktreeId"), workspace_identity: field("workspaceIdentity"), run_id: run_id.clone(),
+        }).unwrap();
+        while !sidecar.agent_runtime.owned_run_ids().is_empty() {
+            sidecar.poll_runtime_events().unwrap();
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let stopped = sidecar.storage.projection_record("run", &run_id).unwrap().unwrap();
+        assert_eq!(stopped["record"]["state"], "recoveryRequired");
+        assert_eq!(stopped["recovery"]["state"], "unresolved");
+        let fence_path = bind_claude_hold(&mut sidecar, &run_id);
+        (root, sidecar, chat, run_id, fence_path)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn resolve_request(sidecar: &Sidecar, run_id: &str) -> Value {
+        let recovery = sidecar.storage.projection_record("run", run_id).unwrap().unwrap()["recovery"].clone();
+        json!({
+            "recoveryId":recovery["recoveryId"],"chatId":recovery["chatId"],"taskId":recovery["taskId"],
+            "projectId":recovery["projectId"],"worktreeId":recovery["worktreeId"],
+            "workspaceIdentity":recovery["workspaceIdentity"],"runId":recovery["runId"],
+            "expectedRevision":recovery["revision"],"resolution":"abandon",
+        })
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn discarding_a_stopped_task_frees_its_sign_in_hold_at_once() {
+        let (_root, mut sidecar, _chat, run_id, fence_path) = stopped_run_with_hold();
+        let params = resolve_request(&sidecar, &run_id);
+        let request = sidecar.workflow_request("req_discard_stopped".into(), "recovery.resolveAgent", params);
+        let response = sidecar.handle_request(request).unwrap().response.unwrap();
+        assert!(response.ok, "{:?}", response.error);
+        assert_eq!(response.result.unwrap()["outcome"], "resolvedAbandoned");
+        assert!(!fence_path.exists(), "no separate connection check is needed");
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn a_sign_in_hold_of_a_settled_run_is_freed_when_the_app_starts() {
+        let (root, mut sidecar, _chat, run_id, fence_path) = stopped_run_with_hold();
+        // Settled without the release that normally follows (as when the app
+        // stopped in between, or an older version settled it).
+        let params = resolve_request(&sidecar, &run_id);
+        let resolved = sidecar.agent_runtime.resolve_recovery(&mut sidecar.storage, &mut sidecar.projects, &params, "req_settle_only").unwrap();
+        assert_eq!(resolved["outcome"], "resolvedAbandoned");
+        assert!(fence_path.is_file());
+        let database = sidecar.storage.path().to_path_buf();
+        drop(sidecar);
+        let binary = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("elsecrew-sidecar");
+        let ready = SidecarSession::new("orchestration_restart".into(), AgentRuntime::blocked()).ready.clone();
+        let restarted = Sidecar::initialize(database, ready, AgentRuntime::fake(binary, FakeScenario::OrchestratorDelegate), &AtomicBool::new(false)).unwrap();
+        assert!(!fence_path.exists(), "the hold is gone before any provider request");
+        assert!(restarted.storage.blocker_ids().unwrap().is_empty());
+        drop(root);
     }
 
     #[test]

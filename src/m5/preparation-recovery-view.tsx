@@ -19,6 +19,8 @@ function PreparationRecoverySession({ projectId, disabled }: { projectId: string
   const [busy, setBusy] = useState(false);
   const [backupsFound, setBackupsFound] = useState(false);
   const [unverified, setUnverified] = useState(false);
+  const [backupsUnverified, setBackupsUnverified] = useState(false);
+  const [backupsChecked, setBackupsChecked] = useState(false);
   const [backupsKey, setBackupsKey] = useState(0);
   const [message, setMessage] = useState<"" | "done" | "unknown" | "error" | "applicationError" | "retired">("");
   const epoch = useRef(0);
@@ -97,10 +99,10 @@ function PreparationRecoverySession({ projectId, disabled }: { projectId: string
   return <div aria-label={t("m5.prep.title")} aria-busy={busy}>
     <section className="m5-maintenance-group"><h4>{t("m5.preferences.recovery")}</h4>
     <div className="m5-recovery-check">
-      <p role="status">{busy ? t("m5.prep.checking") : !checked ? "" : unverified || message === "applicationError" ? t("m5.prep.unverified") : !hasApplication && !inspection && !backupsFound ? t("m5.prep.clear") : t("m5.prep.found")}</p>
-      <button type="button" className="m5-secondary" disabled={disabled || busy} onClick={() => { setBackupsKey(key => key + 1); void check(); }}>{t("m5.prep.recheck")}</button>
+      <p role="status">{busy ? t("m5.prep.checking") : !(checked && backupsChecked) ? "" : unverified || backupsUnverified || message === "applicationError" ? t("m5.prep.unverified") : !hasApplication && !inspection && !backupsFound ? t("m5.prep.clear") : t("m5.prep.found")}</p>
+      <button type="button" className="m5-secondary" disabled={disabled || busy} onClick={() => { setBackupsChecked(false); setBackupsKey(key => key + 1); void check(); }}>{t("m5.prep.recheck")}</button>
     </div>
-    <BackupPreparationRecovery key={backupsKey} projectId={projectId} disabled={disabled || busy} onFound={setBackupsFound} />
+    <BackupPreparationRecovery key={backupsKey} projectId={projectId} disabled={disabled || busy} onFound={setBackupsFound} onUnverified={setBackupsUnverified} onChecked={() => setBackupsChecked(true)} />
     {application && hasApplication && <section className="m5-recovery-item" aria-label={t("m5.application.latest")}>
       <h5>{t("m5.application.latest")}</h5>
       <div role="status">
