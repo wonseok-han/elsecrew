@@ -2,6 +2,31 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — 테스트 속도 개선과 출력마다 git을 띄우던 제품 성능 문제
+- 사용자 지적은 '테스트가 너무 느리다'였다. 사용자 결정은 두 가지다. ① 작업 중에는 영향받는 테스트만, 전체는 마감 때 한 번 돌린다. ③ 느린 테스트를 찾아 고친다. ② 스레드 상한(4) 상향은 보류한다.
+- 측정: 공식 미리 빌드된 `cargo-nextest` 0.9.151로 잰 결과 882개, 합계 약 5,000 test-초, 4스레드 기준 21.5분이었다. 60초를 넘는 16개가 절반 이상을 차지했다(최장 578초).
+- 원인 1(CPU):
+  - 샘플링해 보니 serde_json·BTreeMap 등 제네릭 코드가 `elsecrew_protocol` 안에서 디버그로 실행되고 있었다.
+  - `Cargo.toml`에 dev/test 프로필 최적화를 추가했다: 외부 의존성 전체 `opt-level=2`, `elsecrew-protocol`·`elsecrew-core` `opt-level=2`. 우리 sidecar 코드는 디버그로 남는다.
+  - 결과(부하 있는 상태): 578→301초, 406→141초, 116→29초.
+- 원인 2(제품 성능):
+  - Codex·Claude 출력 처리에서 이벤트마다 `validate_text_input` → `verify_snapshot_repository`가 git 4개(`fsck --connectivity-only` 포함)를 띄웠다.
+  - 출력이 많은 긴 실행은 Codex 턴 예산 10분에 걸릴 수 있었다. `codex_durable_native_three_thousand_outputs`가 부하 아래에서 600초에 실패한 것이 이 증상이다.
+- 수정(독립 검토 3회):
+  - 시작, 프롬프트 전송, 승인, registration, Codex 성공 판정, Claude 성공 결과는 항상 git을 포함한 전체 검사를 한다.
+  - 출력 스트리밍 세 지점(Codex `ObserveProcess`·default, Claude 출력 주기)만 `validate_text_input_streaming`을 쓴다. 이 함수는 5초 안의 git 결과를 재사용한다.
+  - git 없는 `verify_workspace_binding_for_run`은 매번 수행한다(application gate, 바인딩, Ready 잠금, 디스크 manifest active, 디렉터리, marker). 그래서 작업 공간이 닫혀 manifest가 abandoned가 되면 즉시 실패한다.
+  - 실패하면 캐시를 비운다. 잠금은 git 검사 중에 잡지 않는다.
+  - 검토 지적: 1차 B1(Codex 성공 판정이 캐시를 탐)과 R1(바인딩까지 생략), 3차 C1(Claude 성공이 캐시를 탐)을 모두 반영했다.
+  - 회귀 테스트로 `streaming_workspace_check_skips_only_git_and_still_catches_a_closed_workspace`를 추가했다.
+  - 결과: Codex 3,000 출력 테스트 600초 실패 → 237초 통과(부하 있음). 재부팅 뒤 낮은 우선순위로 재면 Codex 3,000 출력은 419초에서 44초로, Claude 3,000 출력은 159초에서 33초로 줄었다. Claude·Codex·텍스트 후보 관련 41개를 통과했다.
+- 운영: PC가 버벅여 사용자가 재부팅했다. 이후 테스트는 `nice -n 15`로 낮은 우선순위로 돌린다. 전체 테스트(약 20분)는 사용자가 PC를 쓰지 않는 시점에 돌린다.
+- 관찰: `parallel_agent_streams::four_chat_durable_streams_page_twelve_thousand_outputs`는 sidecar 응답 3초 제한이 높은 PC 부하(Teams가 CPU 560%) 아래에서 한 번 실패했다. 단독 실행에서는 47초에 통과했다.
+- 남은 권고:
+  - 캐시 의미론의 `RunReservation` 단위 테스트(5초 안 HEAD 변경 시 streaming은 통과하고 경계는 실패하는지)
+  - Claude 성공 직전 검사가 실패했을 때 진단 checkpoint 이름
+  - 무거운 통합 테스트를 별도 단계로 분리할지 여부(보류)
+
 ### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 상태 표시를 알림 종으로 통일·저장된 복구만 남으면 종료 허용
 - 사용자 지적:
   - '진행 중이거나 종료 확인이 필요한 작업' 패널이 여전히 같은 문장을 반복하는 상단 띠였다.

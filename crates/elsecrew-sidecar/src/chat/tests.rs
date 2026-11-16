@@ -6541,6 +6541,21 @@ fn app_role_defaults_seed_once_and_survive_reopen() {
 }
 
 #[test]
+fn streaming_workspace_check_skips_only_git_and_still_catches_a_closed_workspace() {
+    let mut f = Fixture::new();
+    let snapshot = f.snapshot("req_bind_snapshot");
+    let chat = f.create_chat(&snapshot, "bind", "req_bind_chat");
+    let field = |key: &str| chat[key].as_str().unwrap().to_owned();
+    let address = WorkspaceAddress { chat_id: field("chatId"), project_id: field("projectId"), worktree_id: field("worktreeId"), workspace_identity: field("workspaceIdentity") };
+    let full = f.projects.verify_workspace_for_run(&f.storage, &address).unwrap();
+    assert_eq!(f.projects.verify_workspace_binding_for_run(&f.storage, &address).unwrap(), full);
+    // Closing the workspace (manifest abandoned) fails the Git-free check at once.
+    f.projects.close_project(&mut f.storage, &f.project_id, "req_bind_close").unwrap();
+    assert!(f.projects.verify_workspace_binding_for_run(&f.storage, &address).is_err());
+    assert!(f.projects.verify_workspace_for_run(&f.storage, &address).is_err());
+}
+
+#[test]
 fn deleting_the_latest_chat_closes_the_project_copy_it_shares() {
     let mut f = Fixture::new();
     let snapshot = f.snapshot("req_latest_snapshot");

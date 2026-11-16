@@ -596,7 +596,7 @@ impl RunReservation {
         if state.completion.is_none() {
             let mut checkpoint = "sessionInput";
             let next = self
-                .validate_text_input(storage, projects)
+                .validate_text_input_streaming(storage, projects)
                 .map_err(|_| failure())
                 .and_then(|_| {
                     checkpoint = "sessionChannel";
@@ -669,7 +669,12 @@ impl RunReservation {
                                 && result.queued_turn_count == Some(0)
                                 && !result.permission_denied
                             {
-                                Ok(TurnOutcome::Completed)
+                                // Success is a boundary: verify in full (with Git),
+                                // never on the streaming check's recent result.
+                                match self.validate_text_input(storage, projects) {
+                                    Ok(()) => Ok(TurnOutcome::Completed),
+                                    Err(_) => Err(SidecarError::new("agentInputChanged", "Claude workspace changed before success")),
+                                }
                             } else {
                                 Err(SidecarError::new(
                                     "agentExecutionFailed",

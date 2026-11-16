@@ -9,3 +9,17 @@ members = [
 # Large provider binaries are hashed before launch, including in the dev app.
 [profile.dev.package.sha2]
 opt-level = 3
+
+# Dependencies (SQLite, JSON, hashing, ...) build optimized even in dev and
+# test builds; this crate's own code stays debuggable. The heavy ledger tests
+# spend most of their time inside these libraries.
+[profile.dev.package."*"]
+opt-level = 2
+
+# The ledger's canonical JSON and validation live here; generic serde/BTreeMap
+# code is instantiated in these crates, so they need optimizing too.
+[profile.dev.package.elsecrew-protocol]
+opt-level = 2
+
+[profile.dev.package.elsecrew-core]
+opt-level = 2

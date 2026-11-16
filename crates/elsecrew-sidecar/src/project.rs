@@ -3881,13 +3881,35 @@ impl ProjectManager {
 
     /// Point-in-time admission. Reservation callers recheck while synchronously
     /// holding the sole mutable Storage owner through commit (EXCLUSIVE SQLite).
-    /// Do not cache this result across a scheduler yield as execution authority.
+    /// Do not cache this result across a scheduler yield as execution authority;
+    /// the one bounded exception is the per-event streaming check, which reuses
+    /// only the Git part for a few seconds (`verify_workspace_binding_for_run`).
     pub(crate) fn verify_workspace_for_run(
         &self,
         storage: &Storage,
         address: &WorkspaceAddress,
     ) -> Result<Value, ProjectFailure> {
-        let project = required_project(storage, &address.project_id)?;
+        self.ensure_no_unfinished_application(storage, &address.project_id)?;
+        self.verify_workspace(storage, address)
+    }
+
+    /// `verify_workspace_for_run` without the Git repository checks: the
+    /// application gate, chat binding, ready lock, active manifest and the
+    /// workspace directory are still verified on every call.
+    pub(crate) fn verify_workspace_binding_for_run(
+        &self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+    ) -> Result<Value, ProjectFailure> {
+        self.ensure_no_unfinished_application(storage, &address.project_id)?;
+        let active = self.validate_workspace_address_binding(storage, address)?;
+        self.worktree_capability(&active)?;
+        manifest_value(&active, "active")
+    }
+
+    /// The ledger part of `verify_workspace_for_run`, without the Git checks.
+    pub(crate) fn ensure_no_unfinished_application(&self, storage: &Storage, project_id: &str) -> Result<(), ProjectFailure> {
+        let project = required_project(storage, project_id)?;
         if project
             .get("application_intent")
             .is_some_and(|intent| intent["state"] != "abandoned")
@@ -3896,7 +3918,7 @@ impl ProjectManager {
                 "project has an unfinished source application",
             ));
         }
-        self.verify_workspace(storage, address)
+        Ok(())
     }
 
     /// Point-in-time file admission, not a sandbox or protection against a hostile

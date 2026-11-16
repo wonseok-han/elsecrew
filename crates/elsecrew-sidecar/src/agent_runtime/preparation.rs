@@ -51,7 +51,17 @@ pub(crate) struct RunReservation {
     #[cfg(target_os = "macos")]
     pub(super) native_provider: Option<super::discovery::NativeProviderContext>,
     pub(super) claude_preflight: Option<elsecrew_protocol::agent_adapter_v1::phased_claude::Preflight>,
+    /// When the Git-level workspace check last passed for this run.
+    workspace_checked: std::sync::Mutex<Option<std::time::Instant>>,
 }
+
+/// The Git part of the workspace check spawns four git processes (one is
+/// `fsck --connectivity-only`). Running it on every streamed event made long
+/// turns spend most of their time in git and could exhaust the turn budget.
+/// Only the per-event streaming checks reuse a Git result this recent; the
+/// ledger, binding, manifest and lock checks still run every time, and every
+/// boundary (start, prompt, approval, terminal success) checks in full.
+const WORKSPACE_RECHECK: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// No Storage borrow: the dispatcher can service other requests between steps.
 #[cfg(target_os = "macos")]
@@ -806,13 +816,13 @@ impl RunReservation {
                         TextAction::ObserveProcess => {
                             self.observe_process(storage, process)?;
                             return self
-                                .validate_text_input(storage, projects)
+                                .validate_text_input_streaming(storage, projects)
                                 .map_err(|_| failure());
                         }
                         TextAction::VerifyWorkspace => return Err(failure()),
                         TextAction::Public(event) => event,
                         action => {
-                            self.validate_text_input(storage, projects)
+                            self.validate_text_input_streaming(storage, projects)
                                 .map_err(|_| failure())?;
                             return on_action(storage, action);
                         }
@@ -1087,10 +1097,29 @@ impl RunReservation {
         Ok(())
     }
 
+    /// Full check, including Git: every boundary uses this.
     fn validate_text_input(
         &self,
         storage: &Storage,
         projects: &ProjectManager,
+    ) -> Result<(), ProjectFailure> {
+        self.validate_text_input_with(storage, projects, false)
+    }
+
+    /// Per streamed event: may reuse a Git check from the last few seconds.
+    pub(super) fn validate_text_input_streaming(
+        &self,
+        storage: &Storage,
+        projects: &ProjectManager,
+    ) -> Result<(), ProjectFailure> {
+        self.validate_text_input_with(storage, projects, true)
+    }
+
+    fn validate_text_input_with(
+        &self,
+        storage: &Storage,
+        projects: &ProjectManager,
+        reuse_git: bool,
     ) -> Result<(), ProjectFailure> {
         let projection = actual_run_projection(storage, &self.run_id)?;
         let lock = storage
@@ -1128,12 +1157,30 @@ impl RunReservation {
                 &self.request.input_message_ids,
                 &self.request.role_id,
             )? != self.prompt
-            || projects.verify_workspace_for_run(storage, &address_from_chat(&self.run)?)?
-                != projection["workspace_manifest"]
         {
             return Err(ProjectFailure::recovery("reserved text input changed"));
         }
-        Ok(())
+        let address = address_from_chat(&self.run)?;
+        let checked_at = *self.workspace_checked.lock().map_err(|_| ProjectFailure::recovery("workspace check state is unavailable"))?;
+        let recent = reuse_git && checked_at.is_some_and(|at| at.elapsed() < WORKSPACE_RECHECK);
+        // Binding, manifest lifecycle, lock and directory: always. Git: unless recent.
+        let manifest = if recent {
+            projects.verify_workspace_binding_for_run(storage, &address)
+        } else {
+            projects.verify_workspace_for_run(storage, &address)
+        };
+        // Hold the lock only to record the outcome, never across the git checks.
+        let mut checked = self.workspace_checked.lock().map_err(|_| ProjectFailure::recovery("workspace check state is unavailable"))?;
+        match manifest {
+            Ok(manifest) if manifest == projection["workspace_manifest"] => {
+                if !recent { *checked = Some(std::time::Instant::now()); }
+                Ok(())
+            }
+            other => {
+                *checked = None;
+                other.and(Err(ProjectFailure::recovery("reserved text input changed")))
+            }
+        }
     }
 
     /// Keep the run's cumulative process evidence in step with its sole owner.
@@ -1444,6 +1491,7 @@ impl RunPreparation {
         }
         storage.upsert_projection_records_atomic(upserts)?;
         Ok(RunReservation {
+            workspace_checked: std::sync::Mutex::new(None),
             running_record: std::sync::OnceLock::new(),
             #[cfg(target_os = "macos")]
             native_provider: None,
