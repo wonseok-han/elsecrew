@@ -9,10 +9,11 @@ use elsecrew_core::provider::vendor_observation::{
 };
 use std::collections::VecDeque;
 
+// Bounds only connection/thread preparation. Once the turn is queued there is
+// no wall-clock bound (2026-11-17 user decision): a coding turn may run for
+// hours and may wait on the user. Cancel, quit cleanup and the output budgets
+// remain the bounds.
 const PREFLIGHT_BUDGET: Duration = Duration::from_secs(30);
-// A coding turn includes tool execution and approval waiting, not just handshake
-// I/O. Keep a hard total bound; activity must never restart this timer.
-const TURN_BUDGET: Duration = Duration::from_secs(10 * 60);
 
 /// Constructible only in this transport, after the owner boundary callbacks.
 /// No Clone/Debug/Deserialize and no public constructor.
@@ -114,30 +115,29 @@ impl TextSession {
         })
     }
 
-    fn remaining(&self, cancel: &AtomicBool) -> Result<Duration, SidecarError> {
-        self.remaining_at(Instant::now(), cancel)
+    fn ensure_open(&self, cancel: &AtomicBool) -> Result<(), SidecarError> {
+        self.ensure_open_at(Instant::now(), cancel)
     }
 
-    fn remaining_at(&self, now: Instant, cancel: &AtomicBool) -> Result<Duration, SidecarError> {
+    fn ensure_open_at(&self, now: Instant, cancel: &AtomicBool) -> Result<(), SidecarError> {
         if cancel.load(Ordering::Acquire) {
             return Err(failure());
         }
-        let (started, budget) = self
-            .turn_started
-            .map_or((self.started, PREFLIGHT_BUDGET), |started| {
-                (started, TURN_BUDGET)
-            });
-        budget
-            .checked_sub(now.saturating_duration_since(started))
+        if self.turn_started.is_some() {
+            return Ok(());
+        }
+        PREFLIGHT_BUDGET
+            .checked_sub(now.saturating_duration_since(self.started))
             .filter(|remaining| !remaining.is_zero())
+            .map(|_| ())
             .ok_or_else(|| SidecarError::new(
                 "providerPreflightFailed",
-                format!("Codex {} deadline reached at {}", if self.turn_started.is_some() { "turn" } else { "preflight" }, self.diagnostic_stage),
+                format!("Codex preflight deadline reached at {}", self.diagnostic_stage),
             ))
     }
 
-    fn begin_turn_budget(&mut self, now: Instant, cancel: &AtomicBool) -> Result<(), SidecarError> {
-        self.remaining_at(now, cancel)?;
+    fn begin_turn(&mut self, now: Instant, cancel: &AtomicBool) -> Result<(), SidecarError> {
+        self.ensure_open_at(now, cancel)?;
         if self.turn_started.is_some() {
             return Err(failure());
         }
@@ -160,7 +160,7 @@ impl TextSession {
             Stage::Starting(_) => "turn start",
             Stage::Streaming(_) => "turn stream",
         };
-        self.remaining(cancel)?;
+        self.ensure_open(cancel)?;
         if self.transmitting || !self.outgoing.is_empty() {
             if self.requires_approval_boundary {
                 on_action(process, TextAction::VerifyApprovalBoundary)?;
@@ -168,7 +168,7 @@ impl TextSession {
             // Recheck authority after yielding, before every possible partial write.
             on_action(process, TextAction::VerifyWorkspace)?;
             on_action(process, TextAction::ObserveProcess)?;
-            self.remaining(cancel)?;
+            self.ensure_open(cancel)?;
             if !self.transmitting {
                 process.queue_native(self.outgoing.pop_front().ok_or_else(failure)?)?;
                 self.transmitting = true;
@@ -178,7 +178,7 @@ impl TextSession {
             })? {
                 self.transmitting = false;
             }
-            self.remaining(cancel)?;
+            self.ensure_open(cancel)?;
             self.stage = Some(stage);
             return Ok(None);
         }
@@ -218,15 +218,15 @@ impl TextSession {
                         // Persistence failure is sticky and occurs before any
                         // frame containing the user's input is even queued.
                         on_action(process, TextAction::ThreadMatched(&receipt))?;
-                        self.remaining(cancel)?;
+                        self.ensure_open(cancel)?;
                         let mut turn = flow.into_text_turn(&self.text)
                             .and_then(|turn| turn.with_output_budget(self.output_budget))
                             .map_err(|_| failure())?;
                         self.outgoing.push_back(NativeFrame::Turn(
                             turn.take_frame().map_err(|_| failure())?,
                         ));
-                        self.remaining(cancel)?;
-                        self.begin_turn_budget(Instant::now(), cancel)?;
+                        self.ensure_open(cancel)?;
+                        self.begin_turn(Instant::now(), cancel)?;
                         self.stage = Some(Stage::Starting(turn));
                         return Ok(None);
                     }
@@ -276,7 +276,7 @@ impl TextSession {
                         self.diagnostic_stage = stream.diagnostic_stage();
                         failure()
                     })?;
-                    self.remaining(cancel)?;
+                    self.ensure_open(cancel)?;
                     match observed {
                         Observed::Public(value) => on_action(process, TextAction::Public(value))?,
                         Observed::ItemStarted | Observed::Private => {}
@@ -307,7 +307,7 @@ impl TextSession {
                             }
                             on_action(process, TextAction::VerifyWorkspace)?;
                             on_action(process, TextAction::ObserveProcess)?;
-                            self.remaining(cancel)?;
+                            self.ensure_open(cancel)?;
                             let frame = if matches!(decision, elsecrew_core::provider::vendor_observation::codex_approval::Decision::AcceptOnce) {
                                 stream.reserve_approval_response(&request.request_id).map_err(|_| failure())?;
                                 use elsecrew_core::provider::vendor_observation::codex_approval::RequestId;
@@ -327,7 +327,7 @@ impl TextSession {
                 Stage::Streaming(stream)
             }
         };
-        self.remaining(cancel)?;
+        self.ensure_open(cancel)?;
         self.stage = Some(next);
         Ok(None)
     }
@@ -341,7 +341,7 @@ mod tests {
     use std::process::{Command, Stdio};
 
     #[test]
-    fn turn_budget_is_separate_bounded_and_cannot_be_refreshed() {
+    fn turn_has_no_wall_clock_bound_and_cannot_be_restarted() {
         let make = || {
             let flow = PreflightExchange::new(
                 &ExpectedProfile {
@@ -356,36 +356,34 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let mut expired = make();
         assert!(expired
-            .begin_turn_budget(expired.started + PREFLIGHT_BUDGET, &cancel)
+            .begin_turn(expired.started + PREFLIGHT_BUDGET, &cancel)
             .is_err());
         assert!(expired.turn_started.is_none());
         let mut session = make();
         let turn = session.started + Duration::from_secs(29);
-        session.begin_turn_budget(turn, &cancel).unwrap();
-        // Crossing the old 30s session deadline is valid during the actual turn.
-        assert_eq!(
-            session
-                .remaining_at(turn + Duration::from_secs(31), &cancel)
-                .unwrap(),
-            Duration::from_secs(569)
-        );
+        session.begin_turn(turn, &cancel).unwrap();
+        // Crossing the 30s preparation bound is valid during the actual turn,
+        // and a turn may run for hours (tools, user approval waits).
+        session
+            .ensure_open_at(turn + Duration::from_secs(31), &cancel)
+            .unwrap();
+        session
+            .ensure_open_at(turn + Duration::from_secs(24 * 60 * 60), &cancel)
+            .unwrap();
         assert!(session
-            .begin_turn_budget(turn + Duration::from_secs(32), &cancel)
+            .begin_turn(turn + Duration::from_secs(32), &cancel)
             .is_err());
         assert_eq!(session.turn_started, Some(turn));
-        session.diagnostic_stage = "turn stream";
-        assert_eq!(session.remaining_at(turn + TURN_BUDGET, &cancel).unwrap_err().detail(),
-            "Codex turn deadline reached at turn stream");
         cancel.store(true, Ordering::Release);
         assert!(session
-            .remaining_at(turn + Duration::from_secs(1), &cancel)
+            .ensure_open_at(turn + Duration::from_secs(1), &cancel)
             .is_err());
         assert_eq!(session.turn_started, Some(turn));
     }
 
     #[test]
     fn stalled_peer_yields_and_failed_session_cannot_resume_or_release_owner() {
-        for case in ["cancel", "deadline", "turn-deadline", "handler"] {
+        for case in ["cancel", "deadline", "handler"] {
             let temp = tempfile::tempdir().unwrap();
             let root = temp.path().canonicalize().unwrap();
             let storage = crate::Storage::open(&root.join("elsecrew.sqlite3")).unwrap();
@@ -438,7 +436,6 @@ mod tests {
             match case {
                 "cancel" => cancel.store(true, Ordering::Release),
                 "deadline" => session.started = Instant::now() - Duration::from_secs(31),
-                "turn-deadline" => session.turn_started = Some(Instant::now() - TURN_BUDGET),
                 _ => {
                     // Force the next observation checkpoint without changing the transport.
                     std::thread::sleep(Duration::from_millis(110));

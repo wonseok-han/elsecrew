@@ -166,7 +166,9 @@ pub(crate) struct SessionChannel {
     session_model: String,
     prompt_attempted: bool,
     transmitting: bool,
-    deadline: Instant,
+    // No wall-clock bound (2026-11-17 user decision): a coding session may run
+    // for hours and may wait on the user. Cancel, quit cleanup and the
+    // per-session request/event budgets remain the bounds.
     permissions: elsecrew_core::provider::vendor_observation::claude_session::Session,
 }
 
@@ -289,7 +291,6 @@ impl SessionChannel {
             if self.permissions.is_closed()
                 || self.connection != process.connection_id()
                 || cancel.load(Ordering::Acquire)
-                || Instant::now() >= self.deadline
             {
                 return Err(failure());
             }
@@ -328,7 +329,6 @@ impl SessionChannel {
         let result = (|| {
             if self.prompt_attempted
                 || self.transmitting
-                || Instant::now() >= self.deadline
                 || self.permissions.is_closed()
                 || process.connection_id() != self.connection
                 || cancel.load(Ordering::Acquire)
@@ -381,11 +381,11 @@ impl SessionChannel {
         admit: &mut impl FnMut(&mut LoginProcess<'_>, &elsecrew_core::provider::vendor_observation::claude_approval::Request) -> Result<(), SidecarError>,
     ) -> Result<(), SidecarError> {
         if !self.can_queue_reply() || process.connection_id() != self.connection
-            || Instant::now() >= self.deadline || cancel.load(Ordering::Acquire)
+            || cancel.load(Ordering::Acquire)
             || !self.is_permission_pending(&request.request_id)
         { self.permissions.close(); return Err(failure()); }
         admit(process, request)?;
-        if Instant::now() >= self.deadline || cancel.load(Ordering::Acquire) {
+        if cancel.load(Ordering::Acquire) {
             self.permissions.close(); return Err(failure());
         }
         let reply = self.permissions.allow_once(request).map_err(|_| failure())?;
@@ -401,10 +401,7 @@ impl SessionChannel {
         request_id: &str,
         interrupt: bool,
     ) -> Result<(), SidecarError> {
-        if process.connection_id() != self.connection
-            || self.transmitting
-            || Instant::now() >= self.deadline
-        {
+        if process.connection_id() != self.connection || self.transmitting {
             self.permissions.close();
             return Err(failure());
         }
@@ -514,7 +511,6 @@ impl ControlInitialization {
             session_model: expected.model.into(),
             prompt_attempted: false,
             transmitting: false,
-            deadline: Instant::now() + Duration::from_secs(10 * 60),
             permissions:
                 elsecrew_core::provider::vendor_observation::claude_session::Session::for_native_builtin_guards(
                     expected,
@@ -884,15 +880,15 @@ mod tests {
             {
                 return Err(failure());
             }
-            // Expiry closes the channel; moving the clock bound cannot reopen it.
-            permissions.deadline = Instant::now();
+            // Cancel closes the channel; clearing the flag cannot reopen it.
+            cancel.store(true, Ordering::Release);
             if permissions
                 .advance(&mut process, &cancel, &mut |_| Ok(()))
                 .is_ok()
             {
                 return Err(failure());
             }
-            permissions.deadline = Instant::now() + Duration::from_secs(60);
+            cancel.store(false, Ordering::Release);
             if permissions
                 .advance(&mut process, &cancel, &mut |_| Ok(()))
                 .is_ok()

@@ -1,3 +1,240 @@
+### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — 정책 밖 도구 요청 하나가 실행 전체를 끝내던 문제
+- 사용자 보고: 기획 실행(Claude Code, 읽기 전용)이 56초 만에 "도구 사용 허용을 전달하는 중 멈췄습니다. `approvalDelivery/boundaryRejected`"로 실패했다. "왜 이리 자주 중단되지"라는 질문이었다.
+- 원인(코드 확인): 프로젝트의 파일·명령 자동 허용이 켜져 있으면 `deliver_approval`이 요청을 `allow_tool_once`로 보낸다. 그런데 경로·권한 검사(`inspect_snapshot_file`, `Admission::tool`)가 다음 경우를 `providerPreflightFailed`로 판정했고, 이것이 `note_failure("approvalDelivery")` → 실행 실패로 이어졌다.
+  - 존재하지 않는 파일의 Read(빈 프로젝트에서 README 등을 찾는 흔한 동작)
+  - 작업 공간 밖 경로나 `.git`·`.claude` 경로
+  - 읽기 전용 역할의 쓰기·명령
+- 실제 요청 내용은 출력 기록이 없어 확정하지 못했다(추정: 빈 프로젝트의 없는 파일 Read). 앱 데이터 복사본으로 확인한 사실은 consent files/commands=true, 출력 기록 0건이다.
+- 처리:
+  - `Admission::tool`의 정책 부분을 `admission::tool_policy(workspace, access, request)`로 추출했다.
+  - `deliver_approval`은 정책 밖 요청을 사용자 확인 없이 그 요청만 거절(deny)하고, 실행은 계속된다. 허용은 정책 안일 때만 하며, 기존 전체 admission 재검사는 유지한다. 세션·프로세스·역할 불일치는 종전대로 실행을 끝낸다.
+  - 에이전트에게 가는 거절 문구를 중립화했다(사용자 거절 또는 역할의 권한·작업 폴더 밖, 계속 진행하라는 안내).
+  - 테스트: `auto-outside`(밖 쓰기)는 이제 deny 후 succeeded다. 새 `auto-missing`(없는 README.md Read)도 deny 후 succeeded다.
+- 발견(미변경, 사용자 결정 필요): Claude 세션 채널에 10분 고정 마감이 있다(`SessionChannel.deadline`, `provider_claude_session.rs` ~517). Codex 쪽 `TURN_BUDGET`과 모델 프록시 `MAX_LIFETIME`도 600초다. 그래서 10분을 넘는 실행은 실패로 끝난다.
+- 독립 검토(1명): 차단 없음.
+  - 거절 대상은 원래 허용될 수 없던 요청뿐이다. 근거는 다음과 같다.
+    - `channel.cwd`와 Admission workspace는 같은 manifest 경로다.
+    - access는 `verify_claude_launch`가 일치를 강제한다.
+    - allow 경로의 전체 재검사는 유지된다.
+  - queue·hook deny 의미·`approval_request` 계약과도 충돌하지 않는다.
+  - 반영:
+    - I1: 실제 Claude는 도구를 PreToolUse hook으로 먼저 묻는다. 그래서 hook 거절 사유와 일반 거절 문구를 한 상수 `DENIAL_GUIDANCE`로 합쳤고, hook 형태 테스트 `auto-missing-hook`을 추가했다.
+    - M3: 문구에 `.claude`·`.codex`·`.agents`도 적었다.
+  - 남김:
+    - I2: 읽기 전용 역할 fixture에서의 쓰기·명령 거절, `.git` 검색 거절, consent 꺼짐일 때 카드 없이 거절, 거절 직후 다음 요청 허용 테스트가 없다.
+    - M1: 거절 이력이 사용자에게 보이지 않는다.
+    - M2: 같은 요청을 반복하면 1024 요청 한도나 10분 마감에 걸린다.
+    - M4: 대기 요청마다 poll 때 경로를 검사한다.
+    - M5: Codex 쪽 "처리 하나가 실행을 끝내는" 경로가 있다. 위치는 `provider_preflight_session/incremental.rs:288-309`, `agent_runtime/native.rs:616-624`다. Codex는 경로를 앱이 검사하지 않아 같은 사고는 아닐 것으로 본다(추정).
+- 검증: sidecar `claude`·`approval` 필터 47 통과, core `claude` 63 통과.
+
+### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — 상태 알림 토스트를 눈에 띄게
+- 사용자 보고: "총괄 역할의 Claude Code 준비 상태를 확인하고 있어요" 토스트가 어두운 화면에 묻혀 잘 보이지 않는다.
+- 처리:
+  - `BellNotice`에 `tone`(info·progress·success·warning)을 추가했다.
+  - 토스트에 상태 색의 왼쪽 띠·옅은 배경·테두리와 아이콘을 붙이고, 글자를 13px로 키웠다. 아이콘은 확인 중이면 회전 표시, 접수되면 체크, 막히면 경고다.
+  - 채팅 알림 키로 tone을 고른다(`chatNoticeTone`: checking→progress, ready→success, blocked→warning). '확인이 필요한 작업' 알림은 warning이다.
+  - 동작 줄이기 설정에서는 회전을 멈춘다.
+- 검증: `pnpm build`, `npm test` 730 통과.
+- 후속 수정: 사용자 화면에서 회전 표시가 거대한 타원으로 나왔다. 회전 표시도 `span`이라 글자 칸 규칙 `.m5-notice-toast > span { flex: 1 }`(더 높은 우선순위)에 걸려 남는 너비를 모두 차지했다. 선택자를 `.m5-notice-toast > .m5-notice-toast-spinner`로 올리고 크기를 고정했다(동작 줄이기 규칙도 같은 선택자). headless Chrome으로 실제 CSS를 렌더링해 세 tone 모두 정상인지 확인했다. 교훈: 스타일 변경은 커밋 전에 렌더링으로 확인한다.
+
+### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — 다시 켜도 프로젝트가 안 뜨던 문제(중단된 정리 작업)·실패한 실행 하나가 엔진을 끊던 문제
+- 사용자 보고: 앞선 멈춤 뒤 앱과 로컬 서버를 끄고 다시 켰다. 그러자 "작업 공간을 아직 열 수 없어요. 앱을 다시 열어 보세요"만 보이고, 프로젝트 목록이 비어 추가도 할 수 없었다.
+- 원인 1(확정):
+  - 엔진 시작(admission)이 `storageSchemaMismatch`("storage lifetime materialization state is invalid")로 매번 실패했다.
+  - 실제 데이터의 복사본(로그인 프로필 제외)을 sandbox(`/Users` 아래 쓰기 금지, 네트워크 금지)에서 디버그 엔진으로 열어 재현했다. 임시 계측(backtrace)으로 경로를 특정했다: `ReopenMaintenanceSession::start_for_admission` → `verify_v6_materialization_snapshot(reopen=true)` → `validate_storage_lifetime_reopen_pair_v4`가 'attempting' job을 거부했다.
+  - DB 상태: meta=`pending`, job=`attempting`/`indexSource`, 생성·갱신 시각은 05:58:16Z(14:58 KST, 앞선 멈춤 시각)였다.
+  - 정리 작업(materialization)은 arm('attempting')을 별도로 커밋하고, 다음 단계에서 행 쓰기와 'pending' 복귀를 한 트랜잭션으로 커밋한다. 그 사이에 엔진이 멈추면 이 표시가 남아 이후 모든 시작이 거부됐다.
+- 처리 1: `storage/reopen/snapshot.rs`의 `release_interrupted_attempt`.
+  - 새 엔진의 admission(V8Admission·Admission, EXCLUSIVE 연결)에서 쌍을 reopen=false로 먼저 검증한다.
+  - 'attempting'을 'pending'으로 되돌린다. 세션 안 취소의 rollback 뒤 처리와 같다.
+  - 'failed'는 계속 거부한다.
+  - 회귀 테스트: `admission_resumes_a_materialization_batch_the_engine_stopped_in`(수정을 빼면 실패함을 확인), `admission_still_refuses_a_failed_materialization`.
+  - 복사본 재검증: 수정 후 `system.status`가 약 10초 만에 `ready`가 됐고, 정리 작업도 이어서 진행됐다.
+- 원인 2(로그 확인):
+  - Rust 실행 기록의 선택 필드 `failure`{stage, code}는 8a6dbcdb(11-12)에 추가됐다. 그런데 Electron의 실행 상태 이벤트 검증기(`validateAgentRunStateChangedPayloadV1`)는 이 필드를 모르는 키로 거부했다.
+  - 그래서 실행이 실패 진단과 함께 끝나면(예: 인터넷 끊김) 이벤트 하나가 `protocolInvalid`로 엔진 연결 전체를 끊었다. dev 터미널에 `unknown protocol field: failure` 스택이 반복돼 있었다.
+  - 앞선 "앱의 작업 처리가 멈췄어요"의 유력한 직접 원인이다(사용자가 인터넷이 끊겼다고 함).
+  - 그 멈춤이 정리 작업 중간에 일어나 원인 1로 이어진 것으로 본다(추정).
+- 처리 2: 이벤트 검증기가 `failure`를 Rust와 같은 규칙으로 허용한다.
+  - 규칙: 정확히 stage·code 두 키, failed/recoveryRequired일 때만, null 거부.
+  - 목록은 `AGENT_RUN_FAILURE_{STAGES,CODES}_V1`로 record 검증기와 공유한다.
+  - 테스트: 실패 진단이 붙은 이벤트는 전달되고 엔진을 끊지 않는다. running·모르는 코드·추가 키는 계속 거부한다.
+- 진단: 엔진이 앱 데이터를 열지 못하면 main이 stderr의 고정 kind를 `last-engine-admission-failure.json`에 남긴다. 멈춘 원인 기록(`last-engine-failure.json`)을 덮지 않도록 파일을 나눴다. 이전에는 엔진이 살아 있어 아무 기록도 남지 않았다.
+- 독립 검토(1명): 차단 없음. 'attempting'과 커밋된 batch 결과가 공존하는 경로는 없다고 확인했다. 확인한 범위는 두 writer(`storage_lifetime.rs`의 arm/`run_bounded_batch`, `catchup.rs`의 step), phase 3 `write_pending`, data_version epoch, EXCLUSIVE 잠금이다.
+  - I1: 사고 DB job_id가 `lifetime_…`이라 테스트(storage_lifetime writer, `AfterArmCommit`)와 같은 writer다. catch-up writer가 admission 도중 멈춘 경우의 테스트는 남긴다.
+  - 반영: M2(release는 뒤 단계가 거부해도 커밋됨 — 주석), M3(옛 주석·핵심 결정에 대체 표시), M4(진단 파일 분리), M6(failed 거부의 kind·무변경 검사), M7(null·code 누락·잘못된 stage 거부, recoveryRequired 허용, 거부 사유 검사).
+  - 남김: M1(옛 스키마 v6/v7 이전 경로의 attempting은 계속 거부 — 새 앱 데이터 정책상 영향 낮음), M5(stderr가 500ms보다 늦으면 reason이 null).
+- 검증:
+  - Rust `storage` 필터 300 통과.
+  - `pnpm build` 통과, `npm test` 730 통과.
+  - Electron 보안·브리지·admission 96 통과.
+- 사용자 조치: 앱(dev 서버 포함)을 종료하고 `pnpm m5:dev`로 다시 켜면 새 엔진이 쓰인다. 실제 데이터 원본은 이번 진단에서 쓰지 않았다(복사본만 사용, 복사본은 scratchpad에서 삭제).
+
+### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — 앱이 멈추면 스스로 다시 시작, 요청 하나로 엔진이 죽지 않게
+- 사용자 보고: 로컬 실행 중 팀 작업(기획 실행) 도중 "확인이 필요한 작업이 있어요" 알림을 눌렀다. 이어서 "앱의 작업 처리가 멈췄어요 … 앱을 종료한 뒤 다시 열어 주세요" 배너가 나왔다. 사이드카 프로세스는 사라져 있었다.
+- 조사:
+  - 사이드카 stderr는 파일로 남지 않아 직접 원인은 확정하지 못했다(Electron 메모리에만 있음).
+  - `last-transport-progress.json` 기준 마지막 통신은 14:57:30이다.
+  - 같은 시각 내 테스트 빌드가 `target/debug/elsecrew-sidecar`를 교체했다(14:56:42). 실행 중 프로세스는 옛 inode를 쓰므로 원인으로 보지 않는다(추정).
+- 코드에서 찾은 '하나 때문에 전체가 멈추는' 경로와 처리:
+  1. preload가 이벤트 검증·처리 뒤에 ack를 보냈다. 예외가 나면 ack가 빠지고, 다음 ack가 out-of-order로 판정돼 `consumerTooSlow` → 사이드카 종료로 이어졌다. → `delivered()`로 항상 `finally`에서 ack한다.
+  2. Rust stdio 루프가 요청 하나의 Err를 `?`로 받아 프로세스를 끝냈다(승인·로그인·시작 실패 등). → `answer_failed_request`가 그 요청의 오류 응답으로 돌려준다. 장부·투영·실행 상태의 무결성 계열 kind만 종전처럼 종료한다. 빈 detail은 kind로 채운다(Electron이 빈 detail을 protocolInvalid로 끊음). `safe_to_quit` 동기화는 결과와 무관하게 한다.
+  3. Electron `#request`가 인코딩 실패(쓰기 전)에 엔진 전체를 끊었다. → 그 요청만 거부한다. 인코딩을 세션 기록보다 먼저 한다.
+  4. 엔진이 한 번 멈추면 재시작이 없었다. → main의 `watchEngineFailure`가 사용 중 멈춘 엔진을 옛 프로세스 종료 확인 뒤 다시 띄운다(5분에 3회까지, 종료 허용 중·ready 전 실패는 제외). 화면의 admission poller가 멈춘 뒤에도 3초마다 확인하고, 새 엔진이 준비되면 저장 안 된 편집이 없을 때만 새로 고친다. 편집이 있으면 '저장 후 새로 고침' 안내를 보여 준다. 화면 이동 때는 이벤트 크레딧을 비우고, 교체된 엔진의 늦은 ack(대기 큐 없는 stream)는 무시한다.
+  5. 정상 실행 중인 작업도 "확인이 필요한 작업"으로 알렸다. → 최근 `chat.get`이 live라고 한 실행의 `run:<id>`는 알림 대상에서 뺀다(이벤트만으로는 빼지 않음).
+- 진단: 멈추면 `~/Library/Logs/Elsecrew/last-engine-failure.json`에 실패 코드, exit code/signal, Rust panic 위치, 고정 문구 원인(세션 예산 초과·순서 오류 등)을 남긴다. 경로·내용·자격 증명은 남기지 않는다.
+- 독립 검토(1명):
+  - 1차: 차단 1건(자동 reload가 저장 안 한 편집을 버림)과 중요 6건. 차단과 I1~I3, I6 일부, M3·M4를 반영했다.
+  - 2차: 차단 없음, 중요 3건을 모두 반영했다.
+    - 재시작 뒤 새로 고침 판단은 실행 상태를 보지 않는다(옛 엔진 기준이라 영영 막혔음). 대신 입력 중인 목표·후속 메시지 초안, 열린 설정·새 대화 창·역할 초안, 저장 안 한 편집을 본다.
+    - 화면이 로드되는 동안에는 이벤트 전달을 멈춘다(`pause`/`resume`, `did-start-navigation`→`did-finish-load`). 가장 오래된 대기 이벤트보다 앞선 ack는 지난 것으로 무시한다.
+    - 요청 오류 중 응답으로 돌려주는 것은 요청 범위 허용 목록(`provider*`와 명시 목록)뿐이다. 그 밖의 kind는 종전대로 엔진을 끝낸다.
+  - 2차 경미(남김): 재시작하지 않는 경우에도 배너가 '다시 시작하는 중'이라고 말한다(N1). 상태 조회가 한 번 일시 실패해도 재시작으로 오인할 수 있다(N2). Rust 테스트는 매핑 함수 단위다(N4). N3(앱 쪽 실패 메시지도 원인 문구 검사)은 반영했다.
+- 남은 것:
+  - 세션 누적 예산: 검토자가 원인 후보로 지목했다(추정). 양쪽(`ProtocolSessionV1`)이 한 세션에서 실제 에이전트 eventId 8192개, runId·agent streamId 각 1024개, 프로토콜 streamId 4096개를 넘으면 엔진을 끝내고, 끝난 실행·스트림을 정리하지 않는다. 다음 재발 때 `last-engine-failure.json`의 `reason`으로 확인한 뒤 정리 방식을 정한다.
+  - 응답 검증 실패(`protocolInvalid`)가 엔진 전체를 끊는 경로.
+  - 이벤트 처리 실패 시 해당 채팅 재동기화.
+  - 재시작이 일어나지 않을 때의 상태 코드(지금 문구는 '다시 시작하는 중'), 종료되지 않는 옛 엔진의 SIGKILL 재시도.
+  - 종료 진행 중 재시작의 안내 어긋남, 재시작 흐름 통합 테스트.
+- 검증: `pnpm build`, `npm test` 729 통과, `m5:test:editor` 68 통과, 권한 UI 스모크 통과, electron 코드 tsc(임시 설정, node 모듈 해석 오류 제외) 오류 없음. Rust 작업공간 전체 nextest 1136 통과(최종 코드).
+
+### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — 재부팅 뒤 원본 반영·복원이 거절되던 문제(장치 번호)
+- 사용자 지시: 직전 엔트리의 남은 위험 1번(원본 반영 쪽 기록의 장치 번호)부터 고친다.
+- 문제: macOS의 장치 번호(`st_dev`)는 마운트할 때 정해져 재부팅 뒤 바뀔 수 있다(이 PC에서 실제 확인). 원본 반영 쪽 기록이 이 번호를 저장하고 재시작 뒤 정확히 비교했다. 그래서 재부팅 전에 만든 작업은 '원본 반영' 미리보기가 거절되고, 이미 반영한 변경의 '복원'도 거절될 수 있었다. 반영 도중 멈춘 경우에는 프로젝트가 '반영 중'으로 굳어 삭제도 막혔다.
+- 변경(sidecar): 원칙은 '기록하거나 기록과 비교하는 원본 파일 신원에서는 장치 번호를 빼고, 같은 순간의 실시간 비교는 그대로 둔다'이다.
+  - `application.rs`: `recorded_identity`·`recorded_stamp`·`without_device`를 추가했다. 원본 목록의 항목 신원과 루트 stamp를 장치 0으로 기록한다.
+  - 영향받는 기록: 기준 기록(영수증), 검토 기록의 `snapshotDigest`, 백업 archive의 `before`, 반영 journal(`rootIdentity`·`parentIdentity`·`stagedImage`), 원본 관찰 기록, 백업 파일 정리 신원, 작업 공간 정리 job의 폴더 신원.
+  - 저장된 값과의 비교는 `without_device`로 장치 원소를 무시한다. 업데이트 전에 쓴 journal·archive·정리 job도 그대로 통과한다.
+  - 영수증은 바이트 비교라 예전 형식을 영수증에 적힌 장치 번호로 다시 만들어 비교한다(`matches_legacy`). 영수증 바이트는 원장 digest로 결속돼 있으므로 새 신뢰를 들이지 않고, 재부팅 뒤에도 기존 작업의 반영 미리보기가 동작한다. 예전 검토 기록은 다시 검토해야 한다.
+  - `without_device`는 플랫폼 공용(`project.rs`)이고 신원 모양(길이 2·3·9 배열, `identity`가 있는 이미지)만 바꾼다. 처음에는 macOS 전용 모듈에 둬서 Windows 빌드가 깨졌다(검토 차단 1건, 수정). Windows 대상 컴파일은 이 PC에 대상이 없어 확인하지 못했다.
+  - 손대지 않음: 공급자 실행 파일 신원 digest, `stale_helper`, 저장 중 임시 파일의 부모 신원(모두 한 실행 안의 비교). Windows는 별도 신원(파일 ID)이다.
+- 테스트(새로 추가): `recorded_identities_compare_without_device_numbers`, `source_receipts_record_no_device_numbers_and_older_ones_match_until_a_restart`, `an_update_of_the_original_can_be_restored_after_a_restart_renumbered_the_volume`(journal의 장치 번호를 바꾼 기록으로 확인·복원 성공), `selected_workspace_cleanup_resumes_after_a_restart_renumbered_the_volume`.
+- 독립 검토(읽기 전용 1명): macOS에서 기록·비교 쌍 누락 없음, 원본 보호의 실질적 약화 없음. 차단 1건(`without_device`를 macOS 전용 모듈에 둬서 Windows 빌드 실패)은 플랫폼 공용으로 옮겨 고쳤다. 경미 2건 중 예전 영수증 호환은 영수증에 적힌 장치 번호를 쓰도록 개선했다. 남은 경미: 원본이 외장 볼륨의 루트이면 재시작을 넘는 루트 신원이 inode뿐이다(Git 신원·내용 digest가 함께 맞아야 쓰므로 위험은 낮다, 필요하면 볼륨 UUID).
+- 검증: Rust 작업공간 전체 nextest 1135 통과(최종 코드, `nice -n 15`). 새 테스트 4개 포함.
+
+### 2026-11-16 · by Claude Fable 5.2 (claude-fable-5-2) — 영구히 막힌 Claude 로그인 잠금 해소·복사 실패 자동 되돌리기
+- 배경: 직전 엔트리의 수정 뒤에도 사용자의 Claude 연결은 `providerLoginRecoveryRequired`로 막혀 있었다. 앱 데이터를 임시 복사본으로 읽어 보니 직전 엔트리의 가정이 틀렸다.
+  - 멈춘 실행(`agent_run_fce7…`)은 이미 `canceled`·`resolvedAbandoned`였고, 그 프로젝트는 삭제가 끝나(`project_deletion_v1.state=deleted`) 작업 공간과 manifest가 지워져 있었다. "프로젝트를 열어 멈춘 작업을 삭제"할 대상이 없었다.
+  - 원인 1: 로그인 잠금 결합(`RunFenceBinding`)이 장치 번호를 정확히 비교했다. 사용자가 재부팅한 뒤 같은 볼륨의 `st_dev`가 16777230에서 16777231로 바뀌어(inode는 동일) 해제가 항상 거절됐다.
+  - 원인 2: 해제 검증(`verify_completion`)이 작업 공간 manifest 파일을 읽는데, 삭제 흐름이 그 파일을 이미 지웠다.
+- 변경(sidecar, 로그인 잠금):
+  - `RunFenceBinding::matches_file`: 파일·폴더 inode는 정확히, 장치 번호는 '파일과 폴더가 같은 장치인지'의 일관성만 비교한다.
+  - `verify_completion`이 받는 실행의 끝이 두 형태가 됐다.
+    - 멈춘 실행을 나중에 정리한 경우(기존). 작업 공간 증거로 manifest 외에 삭제 완료 기록도 받는다(`workspace_removed_by_deletion`: 원장 `deleted` + 작업 공간·격리 폴더·manifest가 디스크에 없음).
+    - 실행이 스스로 끝나 소유자가 프로세스 소멸을 증명했지만 잠금을 지우기 전에 앱이 멈춘 경우(신규). 복구 기록이 없고 `cleanExit`·`processesProvenGone`이어야 한다.
+    - projection에 항목이 없을 때 인덱싱으로 패닉하지 않게 `get`으로 읽는다.
+  - 해제 시도 시점을 늘렸다(`release_settled_fences`): 사이드카 시작 직후, `recovery.resolveAgent`가 `resolvedAbandoned`를 돌려준 직후, 삭제 정리(파일 삭제 앞뒤). 증명은 기존 recover와 같고, 프로세스가 사라진 것만으로는 풀지 않는다.
+  - 삭제가 잠금을 기다리던 `kept`(`finish_deletions_keeping`)는 없앴다. 삭제 완료 기록이 증거가 되므로 서로 기다릴 이유가 없고, 남겨 두면 'manifest만 지워진 채 멈춘 삭제'에서 교착이 났다.
+  - 자동 해제에 성공해도 로그인 화면 상태는 그 잠금 오류를 보여 주던 경우에만 `idle`로 바꾼다.
+  - 직전 커밋의 `settle_deleted_work`가 macOS 전용 필드(`login`·`claude_login`)를 조건 없이 써서 다른 플랫폼 빌드가 깨질 수 있었다. macOS 전용으로 나눴다(Windows 대상 컴파일은 이 PC에서 확인하지 못했다).
+- 변경(sidecar, 복사본 생성과 프로젝트 열기):
+  - `persist_task_copy_active`: 작업 복사본 활성화와 '프로젝트 지정 유지'를 한 번의 원장 기록으로 쓴다(직전 엔트리의 M1 해소).
+  - `fail_unfinished_copy`·`abandon_unfinished_copy`: 복사본 생성이 '활성화 넘기기 전' 구간(준비 기록 직후부터 풀어 놓기 끝과 디스크 여유 검사까지)에서 실패하면 준비를 스스로 되돌린다. 만든 것은 staging 폴더 하나뿐이고 되돌린 staging은 다시 쓰이지 않으며 원본에는 쓰지 않는다. 오류는 원래 종류 그대로이고 상세에 '복구할 것이 없다'는 문구가 붙는다. 예전에는 프로젝트가 복구 필요로 굳고 전역 차단이 남았으며 앱 안에 출구가 없었다(원본을 저장한 경우, IDE가 `.git`을 건드린 경우, 대소문자만 다른 경로가 있는 저장소 등).
+  - 원본에 Git 잠금 파일이 있으면 아무것도 기록하기 전에 거절한다(`before` 디제스트를 준비 기록 앞으로 옮김).
+  - 작업 복사본은 원본의 현재 HEAD로 만든다. 프로젝트 레코드의 기준 커밋과 비교하는 검사는 프로젝트 자신의 복사본에만 남겼다. 예전에는 원본에 커밋이 하나라도 생기면 그 프로젝트에서 새 작업을 만들 수 없었고, 작업별 복사본 이후로는 프로젝트를 닫아 갱신하던 우회로도 없어졌다.
+  - `open_verified_source`: 프로젝트가 작업 복사본을 가리키는 예전 데이터이면 새로 연 것처럼 기록한다(원본의 현재 신원, 지정 비움). 직전 커밋은 `createWorktree`만 고쳐서 화면이 먼저 부르는 `reopen`에서 여전히 막혔고, 원본에 새 커밋이 있으면 열리지 않는 회귀도 있었다.
+- 기대를 바꾼 기존 테스트 3개(동작 변경이므로 기록):
+  - `application_snapshot_creation_keeps_failures_fenced_without_downgrade`의 "dirty" 시나리오: 복구 필요로 남는 대신 되돌려진 상태(`opened`, 차단 없음, 작업 공간·manifest 없음)를 기대한다. 기준선 없는 복사본으로 격하하지 않는다는 본래 불변식은 그대로다. "publication"·"activation"은 종전대로 남는다.
+  - `case_colliding_committed_paths_fail_closed_before_activation`: 거절은 그대로이고, 차단이 남는 대신 되돌려진 상태와 '다시 해도 같은 거절'을 기대한다.
+  - `managed_root_swap_before_bound_git_never_touches_external_or_registers_worktree`: 오류 종류와 외부 미접촉 단언은 그대로이고, 되돌려진 상태 단언을 추가했다.
+- 변경(화면): Claude 연결 보류 안내를 실제 동작에 맞췄다. 백업 준비 조회의 실패·완료를 부모가 알고 요약 문구를 낸다(직전 엔트리의 N2).
+- 독립 검토(읽기 전용 1명, 같은 검토자):
+  - 1차: 차단 없음. 중요 3건 중 2건을 이번에 고쳤다(되돌리기가 흔한 실패를 놓침, 예전 데이터 프로젝트가 여전히 안 열림). 나머지 1건(아래 '장치 번호')은 다음 작업으로 분리했다. 경미 항목(교착, 화면 상태, 잠금 검사 위치, 도달하지 않는 분기, 주석·문서)도 반영했다.
+  - 2차: 차단 없음. 중요 3건을 모두 고쳤다(예전 데이터 프로젝트가 원본에 새 커밋이 있으면 안 열림, 새 커밋 뒤 새 작업 생성 불가, 저장소 내용 한계 실패가 프로젝트를 굳힘). 경미 항목(staging 삭제를 쥔 핸들로, 오류 종류 유지, 근거 문장, 삭제 증거의 pending 허용)도 반영했다.
+  - 3차: 차단 없음. 다섯 가지 판단(작업 복사본의 기준 커밋 비교 제외, 예전 지정을 비우는 열기, 풀어 놓기 실패 되돌리기, staging 핸들, 삭제 증거의 pending 허용)은 코드와 맞다는 확인을 받았다. 새 중요 1건을 고쳤다: 기준 커밋 비교를 빼면서 '저장된 폴더가 여전히 그 저장소의 루트인지' 확인도 함께 빠져, 프로젝트 폴더의 `.git`이 사라지고 상위 폴더가 저장소이면 엉뚱한 저장소를 복사하다 굳을 수 있었다. `open_project_source`로 모든 복사본 생성과 사전 검사에 루트 확인을 되돌렸다.
+  - 남긴 경미 항목: Windows는 되돌릴 때 `.creating` 폴더를 지우지 않는다(지금은 Windows Git 실행이 꺼져 있어 도달하지 않음, 켜기 전에 구현 필요). 매번 같은 이유로 거절되는 저장소는 시도할 때마다 내보내기와 풀어 놓기를 끝까지 한 뒤 거절한다(사전 검사는 선택 사항).
+- 새로 확인한 위험(이번에 고치지 않음, 우선순위 순):
+  1. 장치 번호를 저장해 정확히 비교하는 곳이 원본 반영 쪽에 더 있다. 기준선 영수증(`receipt.rs`의 `rawEntries` 신원과 `rootStamp`), 백업 항목의 `before.identity`, 반영 기록(`intent/writer.rs`의 `image`·`rootIdentity`·`parentIdentity`), 정리 작업의 `workspace_cleanup_v1.identity`다. 재부팅으로 장치 번호가 바뀌면 그 전에 만든 작업의 '원본 반영' 미리보기와 완료된 반영의 '복원'이 거절될 수 있고, 반영 도중 멈춘 경우에는 프로젝트가 '반영 중'으로 굳는다. 수정 방향은 영속 형태에서 장치 번호를 빼는 것이다(inode·내용은 그대로).
+  2. 활성화 단계에서 실패했거나 앱이 죽어 멈춘 복사본 준비는 여전히 앱 안에서 종료할 방법이 없다. 그 프로젝트는 열리지 않고 모든 프로젝트의 새 복사본 생성이 막힌다. 빠져나오는 방법은 프로젝트 삭제 후 다시 추가다.
+  3. 실행에 묶이지 않은 로그인·조회 도중의 고아 잠금(헤더만 있거나 종료 표지가 없음)과 프로세스 신원을 기록하기 전에 멈춘 실행(`processIdentityUnavailable`)은 풀 증거가 없다. 재부팅을 증거로 쓰는 방식(부팅 세션 식별자 기록)이 후보이며 불변식 변경이라 사용자 결정이 필요하다.
+  4. 멈춘 작업은 '버리기'나 삭제로만 정리된다(작업 공간 보존 불가). 앱이 죽어도 작업을 이어가게 하려면 복구 계약(`exact abandon만 허용`)을 바꿔야 하므로 사용자 결정이 필요하다.
+  5. 프로젝트 화면의 복사본은 원본에 새 커밋이 생겨도 예전 커밋에 머문다(작업은 새 HEAD로 만들어진다). 언제 새로 만들지와 화면에서 편집한 내용의 처리는 사용자 결정이 필요하다.
+- 검증(기준 HEAD 93c1f948 위 작업 트리, 별도 빌드 폴더 `target/wip` 사용):
+  - Rust 작업공간 전체 nextest: 최종 코드 기준 1131 통과(46 skipped, `nice -n 15`, 약 8분).
+  - `pnpm build` 통과, `npm test` 722 통과, `m5:test:editor` 68 통과, 권한 UI 스모크 통과(화면 변경 뒤 재실행).
+  - 실제 데이터 확인(읽기 전용): 앱 DB 복사본에 새 해제 검증을 돌려 `agent_run_fce7…`의 잠금이 풀리는 조건임을 확인했다. 실제 잠금 파일의 신원 비교와 기록된 프로세스(86009) 소멸도 통과했다. 임시 테스트와 복사본은 지웠다. 실제 앱에서 풀리는 것은 사용자가 앱을 다시 켜서 확인해야 한다.
+  - 새 테스트: 장치 번호 일관성, 삭제·재부팅 재현 해제, 복사된 잠금 파일 거절, 삭제 중단과 잠금이 서로 기다리지 않음, 스스로 끝난 실행의 잠금 해제, 예전 데이터 프로젝트 열기(원본 새 커밋 포함), 새 커밋 뒤 새 작업 생성, 저장소를 잃은 프로젝트 폴더 거절, 복사 도중 원본 변경·저장 되돌리기, 삭제→정리→해제→파일 삭제 통합(작업·프로젝트), 정리 직후 해제, 사이드카 시작 시 해제.
+- 워크로그가 500줄을 넘어 11-13 엔트리 6개를 `docs/archive/history-2026-11.md` 맨 위로 옮겼다. 고정 섹션만 약 300줄이라 300줄 목표에는 못 미친다(고정 섹션을 줄이는 것은 별도 판단).
+- 다음 할 일(옮긴 요약에서 이어받음):
+  - 위 위험 1~5
+  - 삭제된 작업 본문을 삭제할 때 chat_erasure 적용, 삭제 대기 상태 표시, Windows 파일 삭제
+  - `applicationPreviewPage` 프로젝트 단위 경로 정리
+  - 살아 있는 실행과 저장 기록을 sidecar 결과 필드로 구분, 복구가 막힌 이유를 모델 조회 화면에 표시
+  - 사용자: 앱 재시작 후 Claude 연결 확인과 재로그인(앱 전용 키체인 항목은 지운 상태), 재패키징
+  - Windows 실제 검증, G6 성능, website 재개발
+
+### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — 작업마다 독립 복사본·멈춘 작업 삭제로 정리·'문제 해결' 자동 점검
+- 배경: 앱이 멈춘 뒤 프로젝트가 열리지 않았고(manifestMismatch), Claude 연결도 `providerLoginRecoveryRequired`로 막혔다.
+  - 원인 1: 새 작업 복사본이 프로젝트의 현재 복사본 지정까지 바꿨다. 그래서 그 작업의 실행이 멈춰 manifest가 `recoveryRequired`가 되자 프로젝트 열기가 실패했다.
+  - 원인 2: 앱 데이터의 `claude-login.pending`이 멈춘 실행(`agent_run_fce7…`)에 묶여 있었다. 기록된 프로세스는 이미 없었지만 그 실행의 복구가 해결돼야 잠금이 풀린다.
+  - 원인 3: 새 복사본 생성은 전역 blocker가 하나라도 있으면 거절했다.
+- 사용자 결정: 작업별 작업 공간과 작업 삭제로 멈춘 작업이 프로젝트를 깨지 않게 한다. 문제 해결의 "반영·복원 및 진단 기록"과 "중단된 백업 준비 확인" 버튼은 없앤다.
+- 변경(sidecar):
+  - `project.rs`의 `create_worktree_inner`.
+    - `FreshChat`과 새 `ChatApplicationCandidate`는 작업 복사본을 만든 뒤 프로젝트 지정을 원래 프로젝트 복사본으로 되돌린다(`restore_project_copy`, 원래 복사본이 `validate_active_project`를 통과할 때만).
+    - 프로젝트가 작업 복사본을 가리키는 예전 데이터라면 `ReuseActive`도 재사용하지 않고 새 프로젝트 복사본을 만든다(`is_task_copy`).
+  - 기준선 작업은 `prepare_chat_application_workspace`로 자기 복사본을 받는다. 기존 `prepare_application_workspace`는 테스트 전용이 됐다.
+  - `snapshot_export_blockers`: 작업에 속한 run·잠금은 새 복사본 생성을 막지 않는다. 다만 반영 잠금(evidence `applicationId`), 잠금 기록이 없는 경우, 작업 소유가 아닌 잠금은 계속 막는다. 또 `application_intent`가 applied/restored/abandoned가 아니면 생성을 거절한다.
+  - `settle_deleted_work`(삭제 직후와 `finishDeletions`):
+    1. 삭제된 작업과 삭제된 프로젝트의 작업에 남은 실행 복구를 `recovery.resolveAgent`와 같은 증명으로 해결한다.
+    2. 파일을 지우기 전에 로그인 잠금을 기존 recover와 같은 증명으로 푼다(`LoginManager::release_bound_fence`).
+    3. 그래도 남은 잠금이 가리키는 작업 공간 파일은 `finish_deletions_keeping`으로 보존한다. 잠금 해제 증명이 그 manifest를 읽기 때문이다.
+  - `inspectPreparation`은 멈춘 준비가 없으면 `inspection:null`을 정상 응답한다.
+- 변경(화면):
+  - '문제 해결'은 열 때 반영 상태·끝나지 않은 백업 준비·멈춘 시작 준비를 자동 조회하고 실제 항목만 카드로 보여 준다. "다시 확인" 버튼이 있고, 조회에 실패하면 '확인하지 못했어요'로 표시한다. 지난 반영 이력은 접힌 항목으로 옮겼다.
+  - Claude 연결 보류 안내는 "멈춘 작업을 삭제하면 자동 정리"로 바꿨다. 같은 내용의 경고 문단은 숨기고 진단 코드는 펼침으로 남겼다.
+- 독립 검토(읽기 전용 1명):
+  - 차단 1건을 고쳤다(B1: 복구 해결 직후 파일 삭제로 manifest가 사라져 로그인 잠금이 영구히 남음).
+  - 중요 3건을 고쳤다(삭제 프로젝트 포함, 반영 잠금 유지, 자동 점검의 거짓 '문제 없음').
+  - 경미 M2~M6도 고쳤다.
+  - 재검토: 차단·중요 결함은 없었다. B1 순서(해결 → 잠금 해제 → 파일 삭제, 실패 시 보존), `release_bound_fence`에 부작용이 없음, I2 보강이 applied 이후 새 작업을 막지 않음을 확인했다.
+  - 재검토 경미 N1(점검 도중 화면이 바뀌면 결과가 버려져 상태 문구가 비는 문제)은 한 번 더 점검하도록 고쳤다.
+  - N2(백업 조회 오류 때 문구 차이)와 N4(삭제 → 복구 해결 → 잠금 해제 → 파일 삭제를 잇는 통합 테스트 없음)는 남았다.
+  - N5: 로그인 안내가 '작업 삭제'를 권하는데, 삭제하면 그 작업의 미반영 변경도 사라진다. 사용자 확인이 필요하다.
+- 남은 것:
+  - M1: `persist_active`와 `restore_project_copy`가 서로 다른 원장 이벤트라, 그 사이에 크래시가 나면 프로젝트 복사본 하나가 고아로 남는다(디스크만 낭비).
+  - M7: 프로젝트 단위 반영 경로(`applicationPreviewPage` chatId:null)는 기준선이 없어 항상 거절된다. 계약 정리가 필요하다.
+  - 삭제된 프로젝트에서 복구 해결·잠금 해제 증명이 통과하는지는 확인하지 않았다.
+  - 실제 앱에서 사용자의 현재 막힌 상태를 푸는 것(프로젝트 열기 → 멈춘 작업 삭제 → 새로고침)은 아직 확인하지 않았다.
+- 검증:
+  - sidecar 전체 nextest: 1차 815 통과, 검토 반영 뒤 817 통과(46 skipped, nice -n 15, 약 6.6분).
+  - `pnpm build` 통과, `npm test` 722 통과, `m5:test:editor` 68 통과(렌더러 스모크·복구/정리 프로브 포함, N1 수정 뒤 재실행), 권한 UI 스모크 통과.
+  - 새 Rust 테스트 3개: 작업별 복사본, 작업 잠금 제외·반영 잠금 차단, sign-in hold 작업 공간 보류.
+
+### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — Claude 토큰 읽기를 `/usr/bin/security`로(키체인 재허용 반복 해소)
+- 사용자 결정: 패키지마다 키체인 허용을 다시 묻는 문제를 고친다.
+- 변경(`provider_claude_refresh.rs`): sidecar가 앱 전용 Claude 로그인(`Claude Code-credentials-<hash>`)을 읽을 때 `security_framework` 대신 `/usr/bin/security find-generic-password … -w`를 쓴다(새 함수 `read_app_credentials`). 이 도구는 서명이 고정이라 '항상 허용' 한 번이 빌드가 바뀌어도 유지된다. 출력 크기를 제한하고, 실패하면 버퍼를 지운다. 비밀값은 argv가 아니라 pipe로만 오간다. exit 44는 항목 없음으로 처리한다.
+- 남는 것:
+  - 만료된 토큰을 갱신할 때 쓰는 `set_generic_password`는 sidecar가 직접 하므로, 그때는 새 빌드마다 한 번 물을 수 있다(드묾).
+  - 앱의 사용량 조회(Electron)는 이미 같은 도구를 쓴다.
+- 검증: Claude 로그인·갱신 관련 sidecar 테스트 29개를 통과했다. 실제 키체인 동작은 사용자 재연결 뒤 확인한다(앱 전용 항목은 지운 상태).
+
+### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — 테스트 속도 개선과 출력마다 git을 띄우던 제품 성능 문제
+- 사용자 지적은 '테스트가 너무 느리다'였다. 사용자 결정은 두 가지다. ① 작업 중에는 영향받는 테스트만, 전체는 마감 때 한 번 돌린다. ③ 느린 테스트를 찾아 고친다. ② 스레드 상한(4) 상향은 보류한다.
+- 측정: 공식 미리 빌드된 `cargo-nextest` 0.9.151로 잰 결과 882개, 합계 약 5,000 test-초, 4스레드 기준 21.5분이었다. 60초를 넘는 16개가 절반 이상을 차지했다(최장 578초).
+- 원인 1(CPU):
+  - 샘플링해 보니 serde_json·BTreeMap 등 제네릭 코드가 `elsecrew_protocol` 안에서 디버그로 실행되고 있었다.
+  - `Cargo.toml`에 dev/test 프로필 최적화를 추가했다: 외부 의존성 전체 `opt-level=2`, `elsecrew-protocol`·`elsecrew-core` `opt-level=2`. 우리 sidecar 코드는 디버그로 남는다.
+  - 결과(부하 있는 상태): 578→301초, 406→141초, 116→29초.
+- 원인 2(제품 성능):
+  - Codex·Claude 출력 처리에서 이벤트마다 `validate_text_input` → `verify_snapshot_repository`가 git 4개(`fsck --connectivity-only` 포함)를 띄웠다.
+  - 출력이 많은 긴 실행은 Codex 턴 예산 10분에 걸릴 수 있었다. `codex_durable_native_three_thousand_outputs`가 부하 아래에서 600초에 실패한 것이 이 증상이다.
+- 수정(독립 검토 3회):
+  - 시작, 프롬프트 전송, 승인, registration, Codex 성공 판정, Claude 성공 결과는 항상 git을 포함한 전체 검사를 한다.
+  - 출력 스트리밍 세 지점(Codex `ObserveProcess`·default, Claude 출력 주기)만 `validate_text_input_streaming`을 쓴다. 이 함수는 5초 안의 git 결과를 재사용한다.
+  - git 없는 `verify_workspace_binding_for_run`은 매번 수행한다(application gate, 바인딩, Ready 잠금, 디스크 manifest active, 디렉터리, marker). 그래서 작업 공간이 닫혀 manifest가 abandoned가 되면 즉시 실패한다.
+  - 실패하면 캐시를 비운다. 잠금은 git 검사 중에 잡지 않는다.
+  - 검토 지적: 1차 B1(Codex 성공 판정이 캐시를 탐)과 R1(바인딩까지 생략), 3차 C1(Claude 성공이 캐시를 탐)을 모두 반영했다.
+  - 회귀 테스트로 `streaming_workspace_check_skips_only_git_and_still_catches_a_closed_workspace`를 추가했다.
+  - 결과: Codex 3,000 출력 테스트 600초 실패 → 237초 통과(부하 있음). 재부팅 뒤 낮은 우선순위로 재면 Codex 3,000 출력은 419초에서 44초로, Claude 3,000 출력은 159초에서 33초로 줄었다. Claude·Codex·텍스트 후보 관련 41개를 통과했다.
+- 운영: PC가 버벅여 사용자가 재부팅했다. 이후 테스트는 `nice -n 15`로 낮은 우선순위로 돌린다. 전체 테스트(약 20분)는 사용자가 PC를 쓰지 않는 시점에 돌린다.
+- 관찰: `parallel_agent_streams::four_chat_durable_streams_page_twelve_thousand_outputs`는 sidecar 응답 3초 제한이 높은 PC 부하(Teams가 CPU 560%) 아래에서 한 번 실패했다. 단독 실행에서는 47초에 통과했다.
+- 남은 권고:
+  - 캐시 의미론의 `RunReservation` 단위 테스트(5초 안 HEAD 변경 시 streaming은 통과하고 경계는 실패하는지)
+  - Claude 성공 직전 검사가 실패했을 때 진단 checkpoint 이름
+  - 무거운 통합 테스트를 별도 단계로 분리할지 여부(보류)
+
 ### 2026-11-13 · by Claude Opus 5.5 (claude-opus-5-5) — 상태 표시를 알림 종으로 통일·저장된 복구만 남으면 종료 허용
 - 사용자 지적:
   - '진행 중이거나 종료 확인이 필요한 작업' 패널이 여전히 같은 문장을 반복하는 상단 띠였다.

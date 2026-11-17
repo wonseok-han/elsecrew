@@ -12,6 +12,13 @@ pub const PRE_TOOL_CALLBACK: &str = "elsecrew_pre_tool";
 /// the role's boundary: enough to carry on instead of retrying the same call.
 pub const DENIAL_GUIDANCE: &str = "Tool request not allowed: declined by the application user, or outside the permissions or working directory of this role (stay inside it, read only files that exist, keep out of .git, .claude, .codex and .agents). Continue without it.";
 
+/// Request ids are remembered for the whole session so a replayed id is always
+/// refused. Every tool call asks once (PreToolUse hook), and a session has no
+/// time limit, so this bounds memory, not the work: it matches the durable
+/// internal event budget (`ProviderEventBudget::DurableV1`), which a session
+/// reaches first. Raise both together.
+const MAX_SESSION_REQUESTS: usize = 65_536;
+
 #[derive(Default)]
 pub struct Permissions {
     seen: BTreeSet<String>,
@@ -203,7 +210,7 @@ impl Permissions {
             || !valid_id(&tool_name)
             || !request.input.is_object()
             || tool_use_id.as_deref().is_some_and(|id| !valid_id(id))
-            || self.seen.len() >= 1024
+            || self.seen.len() >= MAX_SESSION_REQUESTS
             || !self.seen.insert(wire.request_id.clone())
         {
             return Err(invalid());
@@ -389,6 +396,16 @@ mod tests {
         assert!(!reply.as_str().contains("SECRET"));
         assert!(permissions.deny("a", false).is_err());
         assert!(permissions.deny("b", true).is_ok());
+    }
+    #[test]
+    fn a_long_session_keeps_asking_and_still_refuses_replayed_ids() {
+        let mut permissions = Permissions::default();
+        for index in 0..2_000 {
+            let id = format!("r{index}");
+            permissions.observe(&request(&id)).unwrap();
+            permissions.deny(&id, false).unwrap();
+        }
+        assert!(permissions.observe(&request("r7")).is_err());
     }
     #[test]
     fn cancel_close_and_duplicate_prevent_replies() {
