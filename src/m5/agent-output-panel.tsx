@@ -8,6 +8,7 @@ import type { AgentRunRecordV1 } from "./contracts/agent-adapter-v1.ts";
 import type { RoleDefinitionV3 } from "./contracts/run-recovery-v1.ts";
 import { roleLabel } from "./role-names.ts";
 import { decodeOutputPage, type OutputPage, type OutputPageRequest } from "./contracts/agent-output-pages.ts";
+import { parseWorkActivity, WORK_ACTION_KEYS, WORK_OUTCOME_KEYS } from "./work-history.ts";
 
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -18,9 +19,23 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
+/** One tool use, as a compact line; unreadable rows are left out. */
+const WorkActivityRow = memo(function WorkActivityRow({ text }: { text: string }) {
+  const { t } = useI18n();
+  const activity = parseWorkActivity(text);
+  if (!activity) return null;
+  return <p className="m5-activity-row" data-action={activity.action} data-outcome={activity.outcome}>
+    <span className="m5-activity-mark" aria-hidden="true" />
+    <span className="m5-activity-label">{t(WORK_ACTION_KEYS[activity.action], { tool: activity.tool ?? "" })}</span>
+    {activity.target && <span className="m5-activity-target">{activity.target}</span>}
+    {activity.outcome && <span className="m5-activity-outcome">{t(WORK_OUTCOME_KEYS[activity.outcome])}</span>}
+  </p>;
+});
+
 const LiveOutputRow = memo(function LiveOutputRow({ row, truncatedLabel, role, team }: {
   row: OutputDisplayRow; truncatedLabel: string; role: string; team?: readonly string[];
 }) {
+  if (row.channel === "activity") return <WorkActivityRow text={row.text} />;
   return <article>{row.truncated && <small>{truncatedLabel}</small>}<pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{orchestratorMessage(row.text, role, team)}</pre></article>;
 });
 
@@ -210,7 +225,9 @@ export function AgentOutputPanel({ runs, definitions }: { runs: readonly AgentRu
       {historyState === "failed" && <p role="alert">{t("m5.output.failed")} <button type="button" onClick={() => setHistoryRequest({ ...historyRequest! })}>{t("m5.output.retry")}</button></p>}
       {visibleHistory && <>
         <p>{t("m5.output.range", { first: visibleHistory.request.afterSequence + 1, last: visibleHistory.nextAfterSequence, total: visibleHistory.request.throughSequence })}</p>
-        {visibleHistory.rows.map(row => <article key={row.event.eventId}>
+        {visibleHistory.rows.map(row => row.itemUpdate?.channel === "activity"
+          ? <WorkActivityRow key={row.event.eventId} text={row.event.text} />
+          : <article key={row.event.eventId}>
           <small>{row.outputSequence} · {row.itemUpdate ? t(row.itemUpdate.operation === "append" ? "m5.output.append" : "m5.output.complete") : t("m5.output.message")}</small>
           <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{orchestratorMessage(row.event.text, run.selectedProfile.roleId, team)}</pre>
         </article>)}

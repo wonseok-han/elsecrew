@@ -44,7 +44,9 @@ pub struct Request {
     token: Arc<()>,
 }
 
-/// Paths are private inspection data, never public chat/status metadata.
+/// Paths are inspection data. Only the run's work history shows one, and only
+/// relative to the workspace (`agent_runtime/preparation/activity.rs`); tool
+/// input itself is never public.
 pub enum ToolTarget {
     File { path: String, writes: bool },
     Search { path: String },

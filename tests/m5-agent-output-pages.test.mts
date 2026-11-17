@@ -48,6 +48,15 @@ test("item updates retain append/complete identity and reject unsafe metadata", 
   value.rows[0]!.itemUpdate.operation = "append";
   assert.throws(() => decodeOutputPage(encode(value), query));
   value.rows[0]!.event.kind = "status";
+  value.rows[0]!.itemUpdate = { itemId: "activity_1", operation: "complete", channel: "activity" };
+  assert.deepEqual(decodeOutputPage(encode(value), query), value);
+  value.rows[0]!.itemUpdate.operation = "append";
+  assert.throws(() => decodeOutputPage(encode(value), query), "activity rows are whole");
+  value.rows[0]!.itemUpdate.operation = "complete";
+  value.rows[0]!.event.kind = "final";
+  assert.throws(() => decodeOutputPage(encode(value), query), "activity is never a final answer");
+  value.rows[0]!.event.kind = "status";
+  value.rows[0]!.itemUpdate.channel = "message";
   for (const itemId of ["", "a\u0000b", "가".repeat(43)]) {
     value.rows[0]!.itemUpdate.itemId = itemId;
     assert.throws(() => decodeOutputPage(encode(value), query));

@@ -1895,6 +1895,12 @@ fn text_candidate_cases_with_output(
                         let output = durable_output::read_all(&mut fixture.storage, &run["record"]);
                         assert_eq!(output.last().unwrap()["kind"], "final");
                         assert_eq!(output.last().unwrap()["text"], "hello");
+                        // The declined command leaves its start and refusal in the work history.
+                        let history: Vec<Value> = output.iter().filter(|event| event["kind"] == "status")
+                            .filter_map(|event| serde_json::from_str::<Value>(event["text"].as_str()?).ok())
+                            .filter(|row| row.get("action").is_some()).collect();
+                        assert_eq!(history, vec![json!({"action":"command"}), json!({"action":"command","outcome":"refused"})], "{failure}");
+                        assert!(!output.iter().any(|event| event["text"].as_str().is_some_and(|text| text.contains("echo test"))));
                     } else {
                         assert!(emitted
                             .iter()

@@ -15,7 +15,7 @@ fn quoted(value: &Value) -> String {
 
 #[test]
 fn claude_project_consent_auto_approves_and_still_rejects_outside_files() {
-    claude_native_cases(&[("auto", false), ("auto-outside", false), ("auto-missing", false), ("auto-missing-hook", false), ("auto-read", false), ("auto-read", true), ("auto-read-failure", true)]);
+    claude_native_cases(&[("auto", false), ("auto-outside", false), ("auto-outside-foreign", false), ("auto-missing", false), ("auto-missing-hook", false), ("auto-read", false), ("auto-read", true), ("auto-read-failure", true)]);
 }
 
 /// Real Claude, after an allowed Bash call, runs child processes and writes
@@ -135,7 +135,7 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
 
         let mut approval = json!({"type":"control_request","request_id":"write_once","request":{
             "subtype":"can_use_tool","tool_name":"Write","tool_use_id":"tool_write","input":{"file_path":format!("{cwd}/new.txt"),"content":"hello"}}});
-        if case == "auto-outside" { approval["request"]["input"]["file_path"] = json!("/outside/new.txt"); }
+        if matches!(case, "auto-outside" | "auto-outside-foreign") { approval["request"]["input"]["file_path"] = json!("/outside/new.txt"); }
         // The real incident: a planner reads a file the empty project lacks.
         if case == "auto-missing" {
             approval["request"]["tool_name"] = json!("Read");
@@ -159,9 +159,14 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
         if case == "unknown-queue" {
             result.as_object_mut().unwrap().remove("queued_turn_count");
         }
-        if matches!(case, "auto-outside" | "auto-missing" | "auto-missing-hook" | "unexplained-denial") {
-            // Real Claude lists the tool uses this app refused.
-            result["permission_denials"] = json!([{"tool_name":"Read","tool_use_id":"tool_a","tool_input":{}}]);
+        // Real Claude lists the tool uses that were refused.
+        let denied = |ids: &[&str]| json!(ids.iter().map(|id| json!({"tool_name":"Read","tool_use_id":id,"tool_input":{}})).collect::<Vec<_>>());
+        match case {
+            "auto-outside" | "auto-missing" => result["permission_denials"] = denied(&["tool_write"]),
+            "auto-missing-hook" => result["permission_denials"] = denied(&["tool_read"]),
+            "unexplained-denial" => result["permission_denials"] = denied(&["tool_other"]),
+            "auto-outside-foreign" => result["permission_denials"] = denied(&["tool_write", "tool_other"]),
+            _ => {}
         }
         let mut script = format!("IFS= read -r init || exit 1\nprintf '%s\\n' {}\nIFS= read -r prompt || exit 2\nprintf '%s\\n' {}\n", quoted(&control), quoted(&init));
         if case.starts_with("auto-read") {
@@ -180,7 +185,7 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
         if case == "allow" || case.starts_with("auto") {
             // A request outside the boundary is refused on its own and the run goes on.
             let expected = match case {
-                "auto-outside" | "auto-missing" => r#""behavior":"deny""#,
+                "auto-outside" | "auto-outside-foreign" | "auto-missing" => r#""behavior":"deny""#,
                 "auto-missing-hook" => r#""permissionDecision":"deny""#,
                 _ => r#""behavior":"allow""#,
             };
@@ -302,7 +307,7 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             ended["state"],
             match case {
                 "cancel" => "canceled",
-                "bad-init" | "unknown-queue" | "unexplained-denial" | "auto-read-failure" => "failed",
+                "bad-init" | "unknown-queue" | "unexplained-denial" | "auto-outside-foreign" | "auto-read-failure" => "failed",
                 _ => "succeeded",
             },
             "{case}: {ended:?}"
@@ -363,6 +368,14 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             "{case}"
         );
         assert!(!events.is_empty());
+        if durable && matches!(case, "auto-read" | "auto-read-mutate" | "auto-read-index-lock") {
+            // Each allowed tool use leaves one work-history row, never its input.
+            let history: Vec<Value> = public.iter().filter(|event| event["kind"] == "status")
+                .filter_map(|event| serde_json::from_str::<Value>(event["text"].as_str()?).ok())
+                .filter(|row| row.get("action").is_some()).collect();
+            assert_eq!(history, vec![json!({"action":"command","target":"list fixture"}), json!({"action":"read","target":"index.html"})], "{case}");
+            assert!(!public.iter().any(|event| event["text"].as_str().is_some_and(|text| text.contains("\"ls\""))));
+        }
         if case == "long" {
             assert_eq!(public.len(), 3000);
             assert!(public.iter().all(|event| event["text"] == "hello"));

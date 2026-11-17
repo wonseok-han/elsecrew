@@ -1,6 +1,7 @@
 //! Shared durable preparation, without spawning or granting provider authority.
 use super::*;
 use elsecrew_core::provider::vendor_observation::codex_preflight::ExpectedPermission;
+mod activity;
 #[cfg(target_os = "macos")]
 mod terminal;
 #[allow(dead_code)] // Claude launch admission/owner will call this output bridge.
@@ -821,6 +822,12 @@ impl RunReservation {
                         }
                         TextAction::VerifyWorkspace => return Err(failure()),
                         TextAction::Public(event) => event,
+                        TextAction::Tool(tool) => {
+                            self.validate_text_input_streaming(storage, projects)
+                                .map_err(|_| failure())?;
+                            if let Some(row) = activity::codex(&tool) { self.record_activity(storage, row); }
+                            return on_action(storage, TextAction::Tool(tool));
+                        }
                         action => {
                             self.validate_text_input_streaming(storage, projects)
                                 .map_err(|_| failure())?;

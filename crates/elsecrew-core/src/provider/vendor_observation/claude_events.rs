@@ -35,6 +35,9 @@ pub struct ResultObservation {
     /// None means the provider did not report queue state, not an empty queue.
     pub queued_turn_count: Option<u64>,
     pub permission_denied: bool,
+    /// Tool uses the result lists as denied; None when an entry carries no id,
+    /// so the denial cannot be matched to whoever refused it.
+    pub denied_tool_use_ids: Option<BTreeSet<String>>,
 }
 
 #[derive(Deserialize)]
@@ -159,10 +162,17 @@ impl SessionProjection {
                 | "error_max_structured_output_retries" => ReportedOutcome::Failure,
                 _ => return Err(invalid()),
             };
+            #[derive(Deserialize)]
+            struct Denial { tool_use_id: String }
+            let denied_tool_use_ids = wire.permission_denials.iter()
+                .map(|raw| serde_json::from_str::<Denial>(raw.get()).ok()
+                    .map(|denial| denial.tool_use_id).filter(|id| identifier(id)))
+                .collect::<Option<BTreeSet<_>>>();
             return Ok(Projection::Result(ResultObservation {
                 outcome,
                 queued_turn_count: wire.queued_turn_count,
                 permission_denied: !wire.permission_denials.is_empty(),
+                denied_tool_use_ids,
             }));
         }
         if tag.kind != "assistant" {
@@ -248,6 +258,7 @@ mod tests {
                     outcome: ReportedOutcome::Success,
                     queued_turn_count: None,
                     permission_denied: false,
+                    denied_tool_use_ids: Some(BTreeSet::new()),
                 }
             ),
             _ => panic!("expected result observation"),
@@ -258,6 +269,26 @@ mod tests {
             Projection::Assistant { .. }
         ));
         assert!(parser.project(&observe(&result())).is_err());
+    }
+    #[test]
+    fn result_names_each_denied_tool_use_or_none_when_one_is_unnamed() {
+        let observe_denials = |denials: Value| {
+            let mut value = result();
+            value["permission_denials"] = denials;
+            let mut parser = SessionProjection::new("session-a").unwrap();
+            match parser.project(&observe(&value)).unwrap() {
+                Projection::Result(observation) => observation,
+                _ => panic!("expected result observation"),
+            }
+        };
+        let named = observe_denials(json!([{"tool_name":"Read","tool_use_id":"tool_a","tool_input":{}}]));
+        assert!(named.permission_denied);
+        assert_eq!(named.denied_tool_use_ids, Some(BTreeSet::from(["tool_a".to_string()])));
+        for unnamed in [json!([{"tool_name":"Read"}]), json!([{"tool_use_id":""}]), json!([{"tool_use_id":7}])] {
+            let observation = observe_denials(unnamed);
+            assert!(observation.permission_denied);
+            assert_eq!(observation.denied_tool_use_ids, None);
+        }
     }
     #[test]
     fn result_preserves_failure_attention_and_pending_queue_distinctions() {

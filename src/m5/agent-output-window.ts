@@ -5,6 +5,9 @@ import type { OutputRow, OutputItemUpdate } from "./contracts/agent-output-pages
 
 export const OUTPUT_WINDOW_ROWS = 200;
 export const OUTPUT_WINDOW_BYTES = 4 * 1024 * 1024;
+/** Work-history rows get their own share, so a run of tool uses never pushes
+ * the agent's own messages out of the live window. */
+export const OUTPUT_WINDOW_ACTIVITY_ROWS = 40;
 const ITEM_BYTES = 64 * 1024;
 const encoder = new TextEncoder();
 
@@ -72,6 +75,10 @@ export function reduceOutputWindow(previous: OutputWindow, incoming: readonly Ou
     };
     bytes += next.textBytes - (current?.textBytes ?? 0);
     if (index < 0) rows.push(next); else rows[index] = next;
+    if (next.channel === "activity" && rows.filter(value => value.channel === "activity").length > OUTPUT_WINDOW_ACTIVITY_ROWS) {
+      bytes -= rows.splice(rows.findIndex(value => value.channel === "activity"), 1)[0]!.textBytes;
+      hasEarlier = true;
+    }
     while (rows.length > OUTPUT_WINDOW_ROWS || bytes > OUTPUT_WINDOW_BYTES) {
       bytes -= rows.shift()!.textBytes;
       hasEarlier = true;

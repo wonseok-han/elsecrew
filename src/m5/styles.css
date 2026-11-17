@@ -508,6 +508,15 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-output-scroll:empty { display: none; }
 .m5-output-scroll:focus-visible { outline: 2px solid #91c5ff; outline-offset: 2px; }
 .m5-output-scroll pre { margin: 0; font: inherit; line-height: 1.6; }
+.m5-activity-row { display: flex; align-items: baseline; gap: 6px; min-width: 0; margin: 0; padding: 1px 0; color: var(--m5-muted); font-size: 12px; line-height: 1.5; }
+.m5-activity-mark { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: #8fb3e6; transform: translateY(-1px); }
+.m5-activity-row[data-action="edit"] .m5-activity-mark, .m5-activity-row[data-action="write"] .m5-activity-mark { background: #7cc79a; }
+.m5-activity-row[data-action="command"] .m5-activity-mark { background: var(--m5-action-bg); }
+.m5-activity-row[data-outcome] .m5-activity-mark { background: #e8c06a; }
+.m5-activity-label { flex: 0 0 auto; color: var(--m5-text); }
+.m5-activity-target { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+.m5-activity-outcome { flex: 0 0 auto; color: #e8c06a; }
+.m5-output-scroll > article + .m5-activity-row, .m5-output-scroll > .m5-activity-row + article { margin-top: 8px; }
 .m5-agent-run-history { border-top: 1px solid #3b495b; padding-top: 6px; }
 .m5-agent-run-history > div { max-height: 240px; overflow: auto; }
 .m5-provider-login > div[id$="-connection-details"] > form input { width:min(100%,420px); box-sizing:border-box; padding:10px; margin:8px 8px 8px 0; background:#151a22; color:#e8edf5; border:1px solid #64799f; border-radius:8px; }

@@ -309,6 +309,8 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 새 출력 형식은 schema V11에서 도입된 `run_output_records`에 공개 항목을 순서대로 저장하고 `run_output_heads`에 검증된 요약을 유지한다. 2026-10-27 사용자 승인에 따라 macOS NativeProviders의 일반 시작은 `Storage::open_for_durable_admission`을 사용한다. 기존 원장 검증→취소 가능한 원자 이관→기존/출력 원장 합동 검증 후 쓰기를 허용한다. 실제 모델 실행을 기다리지 않고 첫 앱 시작에서 V10→V11(이후 총괄 지원 V12)로 이관되며, 구버전 앱에서는 이 DB를 열 수 없고 다운그레이드 경로는 없다. 기존 기록을 삭제하지 않는다. 이관 commit 전 취소는 V10으로 롤백하고 commit 뒤 취소/검증 실패는 V11을 남길 수 있지만 입장을 허용하지 않는다. 패키지 반영·실제 계정·G6 성능 검증의 완료 여부는 작업 기록에서 별도로 확인한다.
 
+실행 출력의 항목 채널은 `message`(에이전트 글), `plan`(Codex 계획), `activity`(작업 내역)다(2026-11-17). activity 행은 도구 사용 하나를 나타낸다. 항상 완성된 status 행이며 최종 답이 되지 않는다. 본문은 compact JSON `{action, target?, tool?, outcome?}`이다(`agent_runtime/preparation/activity.rs`, 화면 파서 `src/m5/work-history.ts`). Claude는 앱이 도구 요청을 허용하거나 거절할 때 기록한다. 경로는 작업 공간 기준 상대 경로만 남기고, 명령은 모델이 붙인 한 줄 설명만 남긴다. Codex는 명령·파일 변경의 시작·실패·거절만 기록한다. 도구 입력 원문(명령, 파일 내용)은 공개하지 않는다. 기록은 best effort이고, 실패해도 실행을 멈추지 않는다.
+
 2026-11-10 총괄 직접 응답 연결은 저장 schema V12를 사용한다. V11의 원본 DDL·기록은 바꾸지 않고, 검증된 V11에서 `event_source_index_requires_exact_event`의 답변 작성자 허용 목록에 coordinator/design을 추가하며 metadata를12로 교체한다. 이관은 단일 transaction이며 취소/오류는 롤백한다. 일반 durable admission은 V10→V11→V12 순서로 진행하고 V12의 기존/출력 원장·compaction prefix를 재검증한다. V12는 구버전 앱에서 열 수 없으며 다운그레이드는 제공하지 않는다.
 
 총괄 채팅은 별도 `schemaVersion:2`의 프로젝트 역할 설정/채팅 snapshot을 사용한다. V1은 기존 planning/coding/review 3개 순서를 유지하며, V2는 coordinator/planning/design/coding/review 5개 순서를 검증한다. 새 채팅 생성 시 기존 planning의 provider/model/reasoning을 coordinator/design의 초기값으로 복제하고 revision 충돌을 거부한다. 이전 채팅 snapshot은 수정하지 않는다. 프로젝트 역할 설정에서 총괄 모델을 편집할 수 있다. coordinator/design/planning/review는 읽기 전용이고 coding만 작업 복사본 쓰기를 허용한다.

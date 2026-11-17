@@ -2,6 +2,35 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-17 · by Claude Opus 5.5 (claude-opus-5-5) — 팀 대화창 실시간 작업 내역·거절 뒤 실패로 끝나던 문제
+- 사용자 방향: 멈춘 실행에 대비하는 방법은 경고가 아니라 에이전트가 하는 일을 팀 대화창에 실시간으로 계속 보여 주는 것이다.
+- 조사: 실행 중 공개 출력은 에이전트 글(`message`)과 Codex 계획(`plan`)뿐이었다. 도구 사용은 엔진이 받고도 버렸다(Claude `has_private_blocks`, Codex `TextAction::Tool`).
+- 함께 찾은 결함(`e4eab16a`):
+  - `12c9f165` 뒤 앱이 범위 밖 요청을 거절하면, 실제 Claude는 result의 `permission_denials`에 그 거절을 적는다.
+  - 그런데 성공 조건이 `!permission_denied`여서 실행이 결국 실패로 끝났다. fixture가 항상 빈 목록을 보내 테스트가 놓쳤다.
+  - 수정: 결과에 적힌 거절 tool_use_id가 모두 앱이 거절한 것일 때만 정상 종료로 본다(`ResultObservation.denied_tool_use_ids`, `ClaudeOutputState.denied_by_app`). id가 없거나 다른 출처의 거절이 섞이면 실패를 유지한다.
+  - 사용자가 거절한 경우도 이제 성공으로 끝난다(의도, 검토 M6).
+- 작업 내역 구현:
+  - 출력 채널 `activity`를 추가했다(Rust `OutputItemChannel::Activity`, TS 계약). status이면서 Complete일 때만 유효하다.
+  - `agent_runtime/preparation/activity.rs`가 `{action, target?, tool?, outcome?}` JSON을 만든다.
+    - Claude: 앱이 허용·거절하는 순간에 기록한다. 실제 실행 결과는 반영하지 않는다(M7).
+    - Codex: 명령·파일 변경의 시작·실패·거절을 기록한다.
+  - 경로는 작업 공간 기준 상대 경로만 남긴다. 밖이나 `..`, 숨은 형식 문자가 있으면 뺀다.
+  - 명령은 모델이 붙인 `description` 한 줄(160자)만 남긴다. 도구 입력은 공개하지 않는다는 원칙의 예외이며, 에이전트 글과 같은 민감도다(M1).
+  - 저장은 best effort이고 Legacy 형식은 기록하지 않는다.
+  - 화면(`agent-output-panel.tsx`, `work-history.ts`): 작은 한 줄(색 점·종류·경로·결과)로 그린다. 실시간 창은 activity 행을 40개까지만 두어 에이전트 글이 밀려나지 않게 했다(I1).
+- 독립 검토(1명): 차단 없음.
+  - 반영: I1(창 상한), M1(bidi·형식 문자 거절), M2(TS 길이를 code point로), M5(거절 출처 대조).
+  - 남김:
+    - M3: 행마다 DB 약 0.6KB가 늘고 재검증 비용이 비례해 커진다. G6에서 측정한다. 본문과 같은 run 예산 64MiB를 나눠 쓴다.
+    - M4: 이전 빌드는 `"activity"` 채널을 몰라 이 데이터를 열지 못한다(아래 함정).
+- 검증:
+  - Rust: core `claude` 65, sidecar `activity claude codex` 44, `agent_output erasure durable output` 65.
+  - claude_native·codex durable 테스트에 작업 내역 행 확인을 추가했다(명령 원문이 노출되지 않는지도 확인).
+  - `npm test` 732, `pnpm build` 통과.
+  - headless Chrome으로 행 모양을 그려 확인했다. 실제 앱에서는 아직 확인하지 않았다.
+- 다음 할 일: 앱을 다시 켜서 실제 실행으로 작업 내역 확인, Codex 승인 기록 상한(128), 연속 작업 내역 접기(선택).
+
 ### 2026-11-17 · by Claude Opus 5.5 (claude-opus-5-5) — 실행 10분 제한 제거(사용자 결정)·macOS 접근 권한 검토
 - 사용자 결정: 실행 시간 제한을 없앤다. 긴 개발 작업과 사용자 승인 대기가 10분을 넘으면 실패로 끝났다.
 - 처리:
@@ -35,6 +64,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **작업 내역 채널과 이전 빌드(2026-11-17)**: 실행 출력의 `activity` 채널은 이전 빌드가 모르는 값이다. 작업 내역이 한 줄이라도 저장된 앱 데이터를 이전 빌드로 열면 출력 재검증에서 거절돼 영구 admission 실패가 된다(schema 버전은 같다). 개발 빌드끼리 같은 실제 데이터를 오가지 않는다. 작업 내역은 작업 공간 상대 경로와 모델의 명령 설명만 공개하며 도구 입력 원문은 공개하지 않는다. Claude 실행은 결과에 적힌 거절이 모두 앱이 거절한 tool_use일 때만 정상 종료로 본다.
 - **실행에는 전체 시간 제한이 없다(2026-11-17 사용자 결정)**: Claude 세션(`SessionChannel`)과 Codex 턴(`TextSession`)의 10분 고정 마감을 없앴다. 도구 실행과 사용자 승인 대기도 시간 제한 없이 기다린다. 남은 상한은 연결 준비 시간(Claude 15초, Codex 30초), 사용자 취소, 앱 종료 정리, 요청·이벤트 수와 바이트 예산이다. `provider_model_proxy`의 600초는 제품에서 쓰지 않는 진단 후보라 그대로 두었다. 실행 시간 상한을 다시 넣으려면 사용자 결정이 필요하다.
 - **정책 밖 도구 요청은 그 요청만 거절한다(2026-11-16)**: Claude 도구 요청이 역할의 경계(작업 공간 안·존재하는 파일·`.git` 등 제외·읽기 전용은 쓰기/명령 불가) 밖이면, `deliver_approval`이 사용자 확인 없이 그 요청만 deny하고 실행은 계속된다. 세션·프로세스·역할 불일치만 실행을 끝낸다. 에이전트용 거절 문구는 `claude_approval::DENIAL_GUIDANCE` 하나다.
 - **중단된 정리 작업은 다음 시작에서 이어 간다(2026-11-16)**: materialization의 'attempting'은 arm만 커밋된 상태이고, batch 쓰기와 'pending' 복귀는 한 트랜잭션이다. 그래서 새 엔진의 admission에서는 'pending'으로 되돌린다(`release_interrupted_attempt`). 'failed'만 계속 거부한다. 엔진이 앱 데이터를 열지 못하면 `~/Library/Logs/Elsecrew/last-engine-admission-failure.json`의 `reason`(kind)로 확인한다(멈춘 원인 기록 `last-engine-failure.json`을 덮지 않는다). `Storage::open`(Legacy·옛 스키마 이전 v6/v7)은 여전히 attempting을 거부한다. 자세한 위치는 `ELSECREW_DEBUG_ADMISSION=1`로 엔진을 띄워 복사본에서 재현한다. Rust 실행 기록에 필드를 추가하면 TS의 실행 상태 이벤트 검증기(`protocol-v1.ts`)도 함께 고친다. 빠뜨리면 이벤트 하나가 엔진 연결을 끊는다.

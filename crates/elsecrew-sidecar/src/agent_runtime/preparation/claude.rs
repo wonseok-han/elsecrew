@@ -19,9 +19,10 @@ pub(crate) struct ClaudeOutputState {
     terminal_saved: bool,
     failure: Option<Value>,
     finished: bool,
-    /// This app refused at least one tool request and told the agent to carry
-    /// on, so a result listing permission denials is still a clean finish.
-    denied_by_app: bool,
+    /// Tool uses this app refused while telling the agent to carry on. A result
+    /// listing only these denials is still a clean finish; any other denial
+    /// (another guard, an unknown source) is not.
+    denied_by_app: std::collections::BTreeSet<String>,
 }
 
 /// Owns the reservation, channel and cleanup together across dispatcher polls.
@@ -361,13 +362,16 @@ impl OwnedClaudeRun {
             if let Some(index) = self.approvals.iter().position(|entry| entry.declined || entry.accepted || auto_allowed(entry) || !within(entry)) {
                 let entry = self.approvals.remove(index);
                 let within = within(&entry);
-                let reply = if within && (entry.accepted || auto_allowed(&entry)) {
+                let allow = within && (entry.accepted || auto_allowed(&entry));
+                let reply = if allow {
                     self.allow_tool_once(storage, projects, &entry.request)
                 } else {
-                    self.channel.deny(&mut self.process, &entry.request.request_id, false)
-                        .map(|()| self.output.denied_by_app = true)
+                    self.channel.deny(&mut self.process, &entry.request.request_id, false).map(|()| {
+                        if let Some(id) = &entry.request.tool_use_id { self.output.denied_by_app.insert(id.clone()); }
+                    })
                 };
                 reply?;
+                self.reservation.record_activity(storage, super::activity::claude(&entry.request, &cwd, !allow));
             }
         }
         Ok(())
@@ -582,7 +586,7 @@ impl RunReservation {
             terminal_saved: false,
             failure: None,
             finished: false,
-            denied_by_app: false,
+            denied_by_app: Default::default(),
         })
     }
 
@@ -684,7 +688,8 @@ impl RunReservation {
                         state.completion = Some(
                             if result.outcome == ReportedOutcome::Success
                                 && result.queued_turn_count == Some(0)
-                                && (!result.permission_denied || state.denied_by_app)
+                                && (!result.permission_denied || result.denied_tool_use_ids
+                                    .as_ref().is_some_and(|ids| ids.is_subset(&state.denied_by_app)))
                             {
                                 // Success is a boundary: verify in full (with Git),
                                 // never on the streaming check's recent result.
