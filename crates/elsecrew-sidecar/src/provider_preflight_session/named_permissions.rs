@@ -78,6 +78,19 @@ mod tests {
             &policy,
             "on-request"
         ));
+        // Switched-off built-in tools may be reported, but only as off.
+        let tools = elsecrew_core::provider::vendor_observation::codex_preflight::UNSUPERVISED_TOOL_FEATURES;
+        let mut tools_off = base.clone();
+        for name in tools {
+            tools_off["layers"][0]["config"]["features"][*name] = json!(false);
+            tools_off["config"]["features"][*name] = json!(false);
+        }
+        assert!(matches_configuration_layers(&tools_off, Path::new("/profile"), &expected, &policy, "on-request"));
+        for pointer in ["/layers/0/config/features", "/config/features"] {
+            let mut tool_on = tools_off.clone();
+            tool_on.pointer_mut(pointer).unwrap()["computer_use"] = json!(true);
+            assert!(!matches_configuration_layers(&tool_on, Path::new("/profile"), &expected, &policy, "on-request"), "{pointer}");
+        }
         let mut explicit_null = base.clone();
         explicit_null["layers"][1]["name"]["profile"] = serde_json::Value::Null;
         assert!(matches_configuration_layers(

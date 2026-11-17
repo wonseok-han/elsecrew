@@ -2329,6 +2329,18 @@ fn text_candidate_cases_with_output(
                             "-c",
                             "features.plugins=false",
                             "-c",
+                            "features.browser_use=false",
+                            "-c",
+                            "features.browser_use_external=false",
+                            "-c",
+                            "features.browser_use_full_cdp_access=false",
+                            "-c",
+                            "features.computer_use=false",
+                            "-c",
+                            "features.in_app_browser=false",
+                            "-c",
+                            "features.image_generation=false",
+                            "-c",
                             isolation.as_str(),
                         ]
                     );

@@ -69,6 +69,7 @@ pub(super) fn match_layers(
     struct Empty {}
     let response: Response = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
     if response.layers.len() != 3
+        || !super::unsupervised_tools_off(&input.json()?["config"])
         || response.config.features.hooks
         || response.config.features.apps
         || response.config.features.plugins
@@ -96,6 +97,7 @@ pub(super) fn match_layers(
                 }
                 let mut flags: serde_json::Value =
                     serde_json::from_str(layer.config.get()).map_err(|_| invalid())?;
+                super::strip_unsupervised_tool_flags(&mut flags).map_err(|_| invalid())?;
                 super::super::codex_profile_config::strip_isolation_flag(
                     &mut flags, &effective["config"], &[std::path::Path::new(home)],
                 ).map_err(|_| invalid())?;
@@ -175,6 +177,18 @@ mod tests {
                 }, "/app/profile", ExpectedPermission::ReadOnly).is_err());
             }
         }
+        // A switched-off tool repeated with another value never slips through.
+        let mut tools_off = base.clone();
+        tools_off["layers"][0]["config"]["features"]["computer_use"] = json!(false);
+        let off = BoundedObservation::new(tools_off.to_string().into_bytes()).unwrap();
+        assert!(match_layers(&off, &ExpectedProfile { model: "test-model", reasoning_effort: "medium" },
+            "/app/profile", ExpectedPermission::ReadOnly).is_ok());
+        for duplicate in ["\"computer_use\":true,\"computer_use\":false", "\"computer_use\":false,\"computer_use\":true"] {
+            let raw = tools_off.to_string().replace("\"computer_use\":false", duplicate);
+            let input = BoundedObservation::new(raw.into_bytes()).unwrap();
+            assert!(match_layers(&input, &ExpectedProfile { model: "test-model", reasoning_effort: "medium" },
+                "/app/profile", ExpectedPermission::ReadOnly).is_err(), "{duplicate}");
+        }
         for raw_projects in [
             "\"projects\":{},\"projects\":null,",
             "\"projects\":null,\"projects\":{},",
@@ -187,6 +201,10 @@ mod tests {
         }
         for case in [
             "valid",
+            "tools-off",
+            "tool-on-flag",
+            "tool-on-effective",
+            "tool-null-flag",
             "missing",
             "project",
             "system-hook",
@@ -217,6 +235,14 @@ mod tests {
                 "effective-hooks" => value["config"]["features"]["hooks"] = json!(true),
                 "flag-hooks" => value["layers"][0]["config"]["features"]["hooks"] = json!(true),
                 "missing-hooks" => value["config"]["features"] = json!({}),
+                // Switched-off built-in tools may be reported, but only as off.
+                "tools-off" => for name in crate::provider::vendor_observation::codex_preflight::UNSUPERVISED_TOOL_FEATURES {
+                    value["layers"][0]["config"]["features"][*name] = json!(false);
+                    value["config"]["features"][*name] = json!(false);
+                },
+                "tool-on-flag" => value["layers"][0]["config"]["features"]["computer_use"] = json!(true),
+                "tool-on-effective" => value["config"]["features"]["browser_use"] = json!(true),
+                "tool-null-flag" => value["layers"][0]["config"]["features"]["image_generation"] = json!(null),
                 "null-write" => {
                     value["layers"][0]["config"]["sandbox_workspace_write"] =
                         serde_json::Value::Null
@@ -235,7 +261,7 @@ mod tests {
                     ExpectedPermission::ReadOnly,
                 )
                 .is_ok(),
-                case == "valid",
+                matches!(case, "valid" | "tools-off"),
                 "{case}"
             );
         }

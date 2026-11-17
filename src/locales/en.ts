@@ -543,7 +543,7 @@ export const en: Record<MessageKey, string> = {
   "m5.run.cancelling": "Stopping",
   "m5.run.succeeded": "Succeeded",
   "m5.run.failed": "Failed",
-  "m5.run.help.failedClean": "The task failed, but execution has stopped. Check the recorded failure stage and reason.",
+  "m5.run.help.failedClean": "The task did not finish, but the run stopped safely. Changes made so far are still in the workspace. Send a message to carry on.",
   "m5.run.help.canceledClean": "The run was stopped and its exit was confirmed. The changes made so far are still in the workspace. Check them in the Changes tab, and send a message to carry on.",
   "m5.run.help.succeededClean": "The task completed and execution has stopped. Review changes before applying them to the original project.",
   "m5.run.help.succeededReadOnly": "The task completed and execution has stopped. This role does not change files.",

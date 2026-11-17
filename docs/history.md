@@ -29,7 +29,15 @@
   - 후속 메시지 입력란: 총괄 실행을 준비하는 짧은 순간에 "현재 상태에서는 메시지를 추가할 수 없어요"가 잘못 떴다. 실행 시작·진행 중에는 숨긴다.
   - dev 앱을 다시 띄우면 창이 다른 Space에 열려 Orca 키 입력이 닿지 않는다(`background_unavailable`). 창을 현재 Space로 옮기거나 `--restore-window` 허락이 필요하다.
   - 검증: `npm test` 741, core `codex_events` 37, sidecar orchestration 30 통과.
-- 다음 할 일: 검증 재요청으로 실패한 요청 이름을 확인하고 그 처리를 고친다. 새 빈 폴더로 처음부터 재시험한다(모델 자동 채움 확인). (a)(b)를 정리한다. 실패 이유를 사용자에게 보여 줄 기록을 남길지 검토한다.
+- 후속 2(같은 날): **Codex 검증 실패의 실제 원인**
+  - 세 번째 재현에서 `turn item start unsupported mcp tool`이 나왔다(6분 실행 뒤). 앱 전용 CODEX_HOME에는 MCP 서버가 없다. 그런데 Codex 0.169(ChatGPT.app 번들) 내부 로그(`codex-profile-v1/logs_2.sqlite`의 feedback_tags)를 보면 `browser_use`·`browser_use_external`·`browser_use_full_cdp_access`·`computer_use`·`in_app_browser`·`image_generation` 등이 기본으로 켜져 있었다. 검증 담당이 화면을 확인하려고 내장 도구를 쓰다 거절된 것으로 추정한다(도구 이름은 기록에 없음).
+  - 조치: 모든 Codex 실행 인자에 `-c features.<이름>=false`로 이 6개를 끈다(core `codex_preflight::UNSUPERVISED_TOOL_FEATURES`). 권한을 줄이기만 한다.
+  - **독립 검토(상시 검토자) 차단 지적 B1**: Codex `config/read`의 sessionFlags 레이어를 정확한 형태로 대조하는 검증기 두 곳(`layers.rs` `FlagFeatures` deny_unknown, `named_config.rs` 정확 비교)이 새 키 때문에 시작을 거절한다. 실제 앱에서도 `Codex preflight failed at session flags`로 재현됐다. 가짜 Codex fixture가 인자를 반영하지 않아 단위 테스트로는 잡히지 않았다.
+  - B1 수정: `strip_unsupervised_tool_flags`는 이 6개 키를 값이 정확히 `false`일 때만 지우고 나머지 대조는 그대로 둔다. `unsupervised_tools_off`는 effective features에 이 키가 있으면 `false`여야 한다. 재검토 결과 차단 없음, 신뢰 확대 없음, 빠진 검증기 없음.
+  - 경미(남김): effective와 sessionFlags 양쪽에서 키가 빠지면 통과한다. **새 Codex 버전마다 기본으로 켜진 기능 목록을 다시 점검해야 한다**(feedback_tags의 `feature.*`).
+  - 실패 카드 안내를 "실행은 안전하게 멈췄어요. 변경은 작업 공간에 그대로, 이어서 하려면 메시지"로 바꿨다. 원인을 보여 주지 않는 화면에서 원인을 확인하라고 하지 않는다.
+  - 검증: core codex 124, sidecar preflight/login/permission_probe/text_candidate 73, 중복 키 회귀 테스트를 추가했다.
+- 다음 할 일: 수정한 엔진으로 검증 실행이 끝까지 가는지 실제 확인한다. 새 빈 폴더로 처음부터 재시험한다(모델 자동 채움 확인). (a)(b)를 정리한다. 실패 이유를 사용자에게 보여 줄 기록을 남길지 검토한다.
 
 ### 2026-11-17 · by Claude Opus 5.5 (claude-opus-5-5) — 새 작업 시작 때 "다른 확인이 프로필을 쓰는 중" 오류
 - 사용자 보고: 에이전트가 모두 연결돼 있는데 새 작업을 만들자 "선택한 역할·모델을 지금 실행할 수 없어요"가 떴다. 자세히 보기에는 `requestBlocked: another provider check currently owns this profile; retry after it finishes`가 있었다.

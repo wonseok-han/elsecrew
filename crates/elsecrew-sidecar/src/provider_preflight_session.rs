@@ -491,6 +491,9 @@ pub(crate) fn discovery_arguments(
     ]
     .into_iter()
     .map(std::ffi::OsString::from)
+    // Built-in tools nothing here can watch or approve stay off for every run.
+    .chain(elsecrew_core::provider::vendor_observation::codex_preflight::UNSUPERVISED_TOOL_FEATURES.iter()
+        .flat_map(|name| ["-c".into(), format!("features.{name}=false").into()]))
     .collect();
     if permission == ExpectedPermission::WorkspaceWrite {
         for setting in [
@@ -1702,7 +1705,19 @@ IFS= read -r hold
                 "-c",
                 "features.apps=false",
                 "-c",
-                "features.plugins=false"
+                "features.plugins=false",
+                "-c",
+                "features.browser_use=false",
+                "-c",
+                "features.browser_use_external=false",
+                "-c",
+                "features.browser_use_full_cdp_access=false",
+                "-c",
+                "features.computer_use=false",
+                "-c",
+                "features.in_app_browser=false",
+                "-c",
+                "features.image_generation=false",
             ]
         );
         assert_eq!(args[args.len() - 2], "-c");

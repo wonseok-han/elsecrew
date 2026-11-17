@@ -10,6 +10,42 @@ pub mod exchange;
 mod layers;
 pub mod named_config;
 
+/// Built-in Codex tools that act outside anything Elsecrew can watch or
+/// approve (a browser, the user's own screen, image generation). Every run
+/// switches them off with `-c features.<name>=false`; a reported session flag
+/// may name them only as `false`. Switching them off only takes capabilities away.
+pub const UNSUPERVISED_TOOL_FEATURES: &[&str] = &[
+    "browser_use",
+    "browser_use_external",
+    "browser_use_full_cdp_access",
+    "computer_use",
+    "in_app_browser",
+    "image_generation",
+];
+
+/// Removes the switched-off tool features from a reported session-flag layer,
+/// refusing any that is not exactly `false`, so the remaining layer still
+/// matches its fixed shape. Absent entries are fine (older fixtures, older Codex).
+pub(crate) fn strip_unsupervised_tool_flags(flags: &mut serde_json::Value) -> Result<(), &'static str> {
+    let Some(features) = flags.get_mut("features").and_then(serde_json::Value::as_object_mut) else {
+        return Ok(());
+    };
+    for name in UNSUPERVISED_TOOL_FEATURES {
+        match features.remove(*name) {
+            None | Some(serde_json::Value::Bool(false)) => {}
+            Some(_) => return Err("unsupervised tool flag"),
+        }
+    }
+    Ok(())
+}
+
+/// The effective config must not report a switched-off tool as on.
+pub(crate) fn unsupervised_tools_off(effective: &serde_json::Value) -> bool {
+    UNSUPERVISED_TOOL_FEATURES.iter().all(|name| {
+        effective["features"].get(*name).is_none_or(|value| *value == serde_json::Value::Bool(false))
+    })
+}
+
 /// An explicit requested tuple; never filled from vendor defaults or upgrade suggestions.
 pub struct ExpectedProfile<'a> {
     pub model: &'a str,

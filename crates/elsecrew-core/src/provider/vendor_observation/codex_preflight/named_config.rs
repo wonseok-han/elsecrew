@@ -129,6 +129,7 @@ fn check_configuration_layers(
         }
         let mut layer_config = layer["config"].clone();
         if index == 0 {
+            super::strip_unsupervised_tool_flags(&mut layer_config)?;
             super::super::codex_profile_config::strip_isolation_flag(
                 &mut layer_config, &result["config"], &[Path::new(home)],
             )?;
@@ -170,6 +171,9 @@ fn check_configuration_layers(
         if config["features"][feature] != false {
             return Err("effective extensions");
         }
+    }
+    if !super::unsupervised_tools_off(config) {
+        return Err("effective extensions");
     }
     if !config["sandbox_mode"].is_null() || !config["sandbox_workspace_write"].is_null() {
         return Err("legacy sandbox settings");

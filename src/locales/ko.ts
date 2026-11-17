@@ -542,7 +542,7 @@ export const ko = {
   "m5.run.cancelling": "중단하는 중",
   "m5.run.succeeded": "성공",
   "m5.run.failed": "실패",
-  "m5.run.help.failedClean": "작업을 완료하지 못했지만 실행 종료는 확인됐어요. 기록된 실패 단계와 원인을 확인해 주세요.",
+  "m5.run.help.failedClean": "작업을 끝내지 못했지만 실행은 안전하게 멈췄어요. 지금까지 한 변경은 작업 공간에 그대로 있어요. 이어서 하려면 메시지를 보내 주세요.",
   "m5.run.help.canceledClean": "실행이 중단됐고 종료도 확인됐어요. 지금까지 한 변경은 작업 공간에 그대로 있어요. 변경 탭에서 확인하고, 이어서 하려면 메시지를 보내 주세요.",
   "m5.run.help.succeededClean": "작업이 완료됐고 실행 종료도 확인됐어요. 원본에 적용하기 전에 변경 사항을 검토해 주세요.",
   "m5.run.help.succeededReadOnly": "작업이 완료됐고 실행 종료도 확인됐어요. 이 역할은 파일을 바꾸지 않아요.",
