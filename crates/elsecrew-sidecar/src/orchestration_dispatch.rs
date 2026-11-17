@@ -302,11 +302,15 @@ impl Sidecar {
     fn fence_is_run_bound(&self, name: &str) -> bool {
         let Some(path) = self.storage.path().parent().map(|parent| parent.join(name)) else { return false };
         let Ok(metadata) = std::fs::symlink_metadata(&path) else { return false };
-        metadata.is_file()
-            && metadata.len() <= 16 * 1024
-            && std::fs::read_to_string(&path).is_ok_and(|text| {
-                text.lines().nth(1).is_some_and(|line| line.starts_with("run-binding-v1 "))
-            })
+        if !metadata.is_file() || metadata.len() > crate::provider_login_process::HOLD_MAX_BYTES {
+            return false;
+        }
+        // The header and the binding are the first two lines; a long hold's
+        // process list after them need not be read for this look.
+        use std::io::Read;
+        let mut head = Vec::new();
+        std::fs::File::open(&path).and_then(|file| file.take(4096).read_to_end(&mut head)).is_ok()
+            && String::from_utf8_lossy(&head).lines().nth(1).is_some_and(|line| line.starts_with("run-binding-v1 "))
     }
 
     fn resolve_deleted_recoveries(&mut self, request_id: &str) {
@@ -1260,7 +1264,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     fn an_app_closed_mid_run_reopens_with_the_work_kept_and_the_task_usable() {
       use elsecrew_core::proctree::{ProbeResult, ProcIdentity, ProcTable, SystemProcTable};
-      for case in ["processes ended", "processes left running", "marked by an older version", "the hold lists a last descendant"] {
+      for case in ["processes ended", "processes left running", "marked by an older version", "the hold lists a last descendant", "the hold lists hundreds"] {
         let (root, mut sidecar, chat) = service_named(None, elsecrew_protocol::lifecycle_v1::SQLITE_FILE_V1);
         assert!(start(&mut sidecar, &chat).ok);
         // A run that keeps going until it is stopped.
@@ -1288,6 +1292,15 @@ mod tests {
         // An engine that goes down records the last descendants it finds in
         // the hold alone: its ledger is already closed.
         let mut last_descendant = None;
+        if case == "the hold lists hundreds" {
+            // A long build's hold: hundreds of identities, all long gone.
+            use std::io::Write;
+            let mut hold = std::fs::OpenOptions::new().append(true).open(&fence_path).unwrap();
+            for index in 0..300u32 {
+                writeln!(hold, "{} {}", 3_000_000 + index, 1_700_000_000_000_000i64 + index as i64).unwrap();
+            }
+            hold.sync_all().unwrap();
+        }
         if case == "the hold lists a last descendant" {
             use std::io::Write;
             let child = Command::new("/bin/sleep").arg("60").spawn().unwrap();
@@ -1352,9 +1365,11 @@ mod tests {
         if let Some((mut child, identity)) = last_descendant {
             // Stopped with the rest, and part of the run's record.
             let _ = child.wait();
-            assert!(run["process_identity_internal"].as_array().unwrap().iter()
-                .any(|value| value["pid"] == identity.pid && value["start_us"] == identity.start_us), "{case}");
+            assert!(matches!(SystemProcTable.probe(identity), ProbeResult::Gone), "{case}");
         }
+        // Proven gone: like a confirmed close, the records keep one identity.
+        assert_eq!(run["process_identity_internal"].as_array().unwrap().len(), 1, "{case}");
+        assert_eq!(run["termination"]["trackedProcesses"].as_array().unwrap().len(), 1, "{case}");
         assert!(reopened.storage.blocker_ids().unwrap().is_empty(), "{case}");
         reopened.agent_runtime.validate_persisted_runs(&reopened.storage).unwrap();
         // The hold's proof: every process the ledger lists must be in the

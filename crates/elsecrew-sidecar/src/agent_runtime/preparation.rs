@@ -342,7 +342,7 @@ impl RunReservation {
             projects,
             &self.run_id,
             evidence.confirmed(),
-            evidence.identities(),
+            evidence.recorded(),
             "native startup failed",
         )
         .map_err(|_| failure())?;
@@ -884,7 +884,7 @@ impl RunReservation {
         // Preserve cleanup-before-final and terminal-before-fence-release ordering.
         let cleanup = process.poll_finish();
         if self
-            .persist_process_snapshot(storage, &process.tracked_for_cleanup())
+            .persist_process_snapshot(storage, &process.tracked_for_cleanup(), &process.recorded_for_ledger())
             .is_err()
         {
             process.invalidate_cleanup_evidence();
@@ -1199,7 +1199,7 @@ impl RunReservation {
         process: &mut crate::provider_login_process::LoginProcess<'_>,
     ) -> Result<(), SidecarError> {
         let (identities, observed) = process.observe_for_run();
-        let saved = self.persist_process_snapshot(storage, &identities);
+        let saved = self.persist_process_snapshot(storage, &identities, &process.recorded_for_ledger());
         if saved.is_err() || observed.is_err() {
             process.invalidate_transport();
             return Err(SidecarError::new(
@@ -1210,10 +1210,14 @@ impl RunReservation {
         Ok(())
     }
 
+    /// `owned` is every identity the owner ever saw (the earlier record must
+    /// be among them); `recorded` is what the record keeps now: the root and
+    /// every identity not yet observed gone.
     fn persist_process_snapshot(
         &self,
         storage: &mut Storage,
-        identities: &[ProcIdentity],
+        owned: &[ProcIdentity],
+        recorded: &[ProcIdentity],
     ) -> Result<(), ProjectFailure> {
         let projection = actual_run_projection(storage, &self.run_id)?;
         if !self.matches_current_record(&projection)
@@ -1229,8 +1233,9 @@ impl RunReservation {
             .as_array()
             .ok_or_else(|| ProjectFailure::recovery("run process binding is missing"))?;
         if prior.is_empty()
+            || recorded.is_empty()
             || prior.iter().any(|item| {
-                !identities.iter().any(|identity| {
+                !owned.iter().any(|identity| {
                     item["pid"].as_u64() == Some(identity.pid as u64)
                         && item["start_us"].as_i64() == Some(identity.start_us)
                 })
@@ -1240,7 +1245,7 @@ impl RunReservation {
                 "process owner differs from reserved run",
             ));
         }
-        persist_tracker_snapshot(storage, &self.run_id, identities)
+        persist_tracker_snapshot(storage, &self.run_id, recorded)
     }
 
     /// Keep process ownership with the caller on every failure, including a

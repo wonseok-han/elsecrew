@@ -176,6 +176,8 @@ pub struct TreeTracker {
     /// 재사용했을 때 편입이 막히고, 그 자손은 이후 확인 대상에서도 빠져 살아 있는 채로
     /// `Confirmed`가 난다.
     tracked: BTreeMap<ProcIdentity, TrackedProc>,
+    /// 추적을 시작한 신원. 기록에서 빠지지 않는 기준점이다.
+    root: ProcIdentity,
     /// **실행 중에 한 번이라도 깨진 추적 무결성.** 나중에 정상으로 돌아와도 지우지 않는다 —
     /// 그 순간 놓친 자손이 있었는지 알 수 없으므로 소멸을 주장할 근거가 사라진 것이다.
     integrity_error: Option<(UnconfirmedReason, String)>,
@@ -204,6 +206,7 @@ impl TreeTracker {
         );
         Self {
             tracked,
+            root,
             integrity_error: None,
             signal_errors: Vec::new(),
             termination: None,
@@ -237,6 +240,22 @@ impl TreeTracker {
     /// Returning identities only avoids exposing mutable tracker internals or process metadata.
     pub fn tracked_identities(&self) -> Vec<ProcIdentity> {
         self.identities()
+    }
+
+    /// The identities a durable record must keep: the root, and every other
+    /// identity not yet observed gone. A process observed gone can never run
+    /// again (its identity includes its start time), so dropping it from the
+    /// record loses no safety. The cumulative set stays in memory for this
+    /// tracker's own termination and ownership checks.
+    pub fn recorded_identities(&self) -> Vec<ProcIdentity> {
+        let mut out = vec![self.root];
+        out.extend(
+            self.tracked
+                .values()
+                .filter(|proc| proc.identity != self.root && proc.state != TrackedState::Gone)
+                .map(|proc| proc.identity),
+        );
+        out
     }
 
     /// Add a directly handshaken identity before descendant enumeration begins.
@@ -604,6 +623,41 @@ mod sys {
             Some(entry) => Ok(entry.identity),
             None => Err(format!("process {pid} already gone before it was tracked")),
         }
+    }
+}
+
+/// The process table as seen after the owner of the recorded identities is
+/// gone (a later start, an explicit recovery, a stale sign-in hold). Same as
+/// `SystemProcTable`, except that a recorded process ID now held by a process
+/// with a different start time counts as gone: two live processes never share
+/// an ID, and an ID is handed out again only after its previous process was
+/// reaped. (A running tracker keeps treating that as an integrity failure,
+/// because it may have missed what the ended process left behind; once the
+/// owner is gone there is nothing more to track.)
+#[derive(Default)]
+pub struct SettledProcTable;
+
+impl ProcTable for SettledProcTable {
+    fn list(&self) -> Result<Vec<ProcEntry>, String> {
+        SystemProcTable.list()
+    }
+    fn probe(&self, identity: ProcIdentity) -> ProbeResult {
+        #[cfg(unix)]
+        {
+            match sys::bsdinfo(identity.pid) {
+                Ok(None) => ProbeResult::Gone,
+                Ok(Some(entry)) if entry.identity.start_us == identity.start_us => ProbeResult::Alive(entry),
+                Ok(Some(_)) => ProbeResult::Gone,
+                Err(error) => ProbeResult::Unconfirmable(error),
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            SystemProcTable.probe(identity)
+        }
+    }
+    fn signal(&self, pid: u32, signal: TreeSignal) -> Result<(), String> {
+        SystemProcTable.signal(pid, signal)
     }
 }
 

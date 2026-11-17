@@ -2000,19 +2000,20 @@ fn text_candidate_cases_with_output(
                                     let recovered =
                                         fixture.storage.projection_records("run").unwrap();
                                     // Both recorded processes are gone: the run ended
-                                    // as canceled, with no recovery left for the user.
+                                    // as canceled, with no recovery left for the user,
+                                    // and like a confirmed close its records keep one.
                                     assert_eq!(recovered[0]["state"], "canceled");
                                     assert!(recovered[0]["recovery"].is_null());
                                     assert_eq!(
                                         recovered[0]["process_identity_internal"],
-                                        before[0]["process_identity_internal"]
+                                        json!([before[0]["process_identity_internal"][0]])
                                     );
                                     assert_eq!(
                                         recovered[0]["termination"]["trackedProcesses"]
                                             .as_array()
                                             .unwrap()
                                             .len(),
-                                        2
+                                        1
                                     );
                                     // This candidate path holds an unbound sign-in hold;
                                     // the run-bound release is covered in orchestration_dispatch.
@@ -2049,12 +2050,15 @@ fn text_candidate_cases_with_output(
                     assert!(!process.closure_evidence().unwrap().confirmed());
                     let run = &fixture.storage.projection_records("run").unwrap()[0];
                     assert_eq!(run["state"], "recoveryRequired");
+                    // The injected descendant was stopped and observed gone
+                    // (only its evidence write failed): the record keeps the
+                    // root and whatever was not observed gone.
                     assert_eq!(
                         run["recovery"]["trackedProcesses"]
                             .as_array()
                             .unwrap()
                             .len(),
-                        2
+                        1
                     );
                     assert!(LoginProcess::reserve(&profile).is_err());
                     cleanup_child.as_mut().unwrap().wait().unwrap();
@@ -6680,26 +6684,28 @@ fn a_start_on_data_whose_engine_still_runs_stops_and_settles_nothing() {
     assert_eq!(fixture.storage.projection_record("run", &run_id).unwrap().unwrap()["record"]["state"], "canceled");
 }
 
-/// A recorded process ID that now belongs to something else cannot be proven
-/// gone: nothing is signalled, the run is not settled, the recovery stays.
+/// A recorded process ID now held by a different process (after a reboot,
+/// typically): the recorded process has certainly ended, since two live
+/// processes never share an ID. The run is settled and that other process is
+/// never signalled.
 #[test]
-fn a_recorded_process_that_cannot_be_confirmed_keeps_the_recovery_and_signals_nothing() {
-    use elsecrew_core::proctree::{ProbeResult, ProcTable, SystemProcTable};
+fn a_recorded_process_id_now_held_by_another_process_counts_as_ended_and_is_left_alone() {
     let mut fixture = Fixture::new();
-    let (_chat, run_id, identities) = interrupted_writer_run(&mut fixture, "req_unconfirmable");
-    // This very test process, under a start time that is not its own.
+    let (_chat, run_id, identities) = interrupted_writer_run(&mut fixture, "req_reused_pid");
+    stop_processes(&identities);
+    // This very test process holds the recorded ID, with another start time.
     let mut projection = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
     projection.remove("last_event_sequence");
     projection["process_identity_internal"].as_array_mut().unwrap().push(json!({"pid":std::process::id(),"start_us":1}));
     fixture.storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
-        aggregate_type: "run", aggregate_id: run_id.clone(), operation_id: "op_test_unconfirmable_identity".into(), request_id: None, payload: projection,
+        aggregate_type: "run", aggregate_id: run_id.clone(), operation_id: "op_test_reused_identity".into(), request_id: None, payload: projection,
     }]).unwrap();
     AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+    // Reaching this line means this process was not signalled.
     let run = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
-    assert_eq!(run["record"]["state"], "recoveryRequired");
-    assert_eq!(run["recovery"]["state"], "unresolved");
-    assert!(identities.iter().all(|identity| matches!(SystemProcTable.probe(*identity), ProbeResult::Alive(_))), "nothing was signalled");
-    stop_processes(&identities);
+    assert_eq!(run["record"]["state"], "canceled");
+    assert!(run["recovery"].is_null());
+    AgentRuntime::blocked().validate_persisted_runs(&fixture.storage).unwrap();
 }
 
 /// A workspace lock marked for any other reason is not this run's to clear:
@@ -6766,8 +6772,9 @@ fn a_run_with_more_processes_than_a_record_lists_still_opens_and_settles() {
     let ended = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
     assert_eq!(ended["record"]["state"], "canceled");
     assert!(ended["recovery"].is_null());
-    assert_eq!(ended["termination"]["trackedProcesses"].as_array().unwrap().len(), 256);
-    assert_eq!(ended["process_identity_internal"].as_array().unwrap().len(), 256);
+    // Proven gone: like a confirmed close, the records keep one identity.
+    assert_eq!(ended["termination"]["trackedProcesses"].as_array().unwrap().len(), 1);
+    assert_eq!(ended["process_identity_internal"].as_array().unwrap().len(), 1);
     assert!(fixture.storage.blocker_ids().unwrap().is_empty());
 }
 
@@ -6819,7 +6826,7 @@ fn interrupted_run_is_stopped_with_its_recorded_grandchild_before_it_is_settled(
     let run = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
     assert_eq!(run["record"]["state"], "canceled");
     assert!(run["recovery"].is_null());
-    assert_eq!(run["termination"]["trackedProcesses"].as_array().unwrap().len(), identities.len());
+    assert_eq!(run["termination"]["trackedProcesses"].as_array().unwrap().len(), 1);
     assert!(identities.iter().all(|identity| matches!(SystemProcTable.probe(*identity), ProbeResult::Gone)));
 }
 

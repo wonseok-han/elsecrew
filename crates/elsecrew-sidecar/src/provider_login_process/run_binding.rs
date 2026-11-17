@@ -22,13 +22,13 @@ fn read_bound(
         .open_with(profile.pending_name(), &options)
         .map_err(|_| failure())?;
     let meta = file.metadata().map_err(|_| failure())?;
-    if !meta.is_file() || meta.len() > 16 * 1024 {
+    if !meta.is_file() || meta.len() > super::HOLD_MAX_BYTES {
         return Err(failure());
     }
     lock_exclusive(&file)?;
     let mut bytes = Vec::new();
     (&mut file)
-        .take(16 * 1024 + 1)
+        .take(super::HOLD_MAX_BYTES + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| failure())?;
     if bytes.len() as u64 != meta.len() || !bytes.ends_with(b"\n") || bytes.contains(&b'\r') {
@@ -113,9 +113,11 @@ pub(crate) fn recover_bound_run(
         return Err(failure());
     }
     verify_terminal(&binding, &reservation.recorded)?;
+    // The hold's lock is ours, so its owner is gone: a reused process ID
+    // proves the recorded process ended.
     for identity in &reservation.recorded {
         if !matches!(
-            SystemProcTable.probe(*identity),
+            elsecrew_core::proctree::SettledProcTable.probe(*identity),
             elsecrew_core::proctree::ProbeResult::Gone
         ) {
             return Err(failure());

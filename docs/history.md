@@ -2,6 +2,39 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-17 · by Claude Opus 5.5 (claude-opus-5-5) — 프로세스 256개 한계·재부팅 뒤 pid 재사용 해결
+- 사용자 요청: 직전 엔트리의 다음 할 일 1순위(프로세스 증거 재설계)를 진행한다.
+- 원인:
+  - 한 번이라도 관측한 프로세스 신원을 끝날 때까지 누적했다.
+  - 그래서 짧게 사는 프로세스를 많이 만드는 실행(빌드·설치)은 끝난 프로세스로도 잠금 파일 상한 256개를 채웠다.
+  - 257번째에서 기록이 실패하면 실행이 불확실 종료(복구 필요)로 끝났다.
+  - 실행 기록은 신원이 늘 때마다 누적 전체를 다시 썼다.
+- 처리:
+  - core
+    - `TreeTracker`에 `root`와 `recorded_identities()`(root + Gone으로 관측되지 않은 신원)를 추가했다.
+    - 새 `SettledProcTable`: 같은 pid의 시작 시각이 다르면 Gone으로 판정한다.
+  - 실행 기록·종료 기록에는 recorded만 저장한다.
+    - confirmed 종료는 root 하나만 남는다.
+    - 소유권 검사는 누적 관측과 비교한다(`persist_process_snapshot(owned, recorded)`, `ProcessClosureEvidence::recorded`).
+  - 잠금 파일: 추가 전용을 유지하고 상한을 65,536개·4MiB로 올렸다. 읽는 곳 세 군데를 모두 바꿨고, 빠른 확인(`fence_is_run_bound`)은 앞 4KiB만 읽는다.
+  - 엔진이 사라진 뒤의 판정 네 곳은 `SettledProcTable`을 쓴다: 시작 시 정리, 명시 복구 all_gone, `recover_confirmed_login`, `recover_bound_run`.
+- 테스트:
+  - core 2개(recorded 집합, 재사용 pid 판정).
+  - sidecar
+    - `a_run_that_starts_hundreds_of_processes_still_closes_cleanly`
+    - `claude_run_that_starts_hundreds_of_processes_finishes_and_frees_its_hold`
+    - 둘 다 320개 프로세스를 만들고, 상한 256으로 되돌리면 실패하는 것을 확인했다.
+    - `a_recorded_process_id_now_held_by_another_process_counts_as_ended_and_is_left_alone`: 이전에는 복구 유지, 이제 정리하며 그 프로세스에는 신호를 보내지 않는다.
+- 독립 검토(1명): 차단 없음.
+  - 근거: SettledProcTable 판정이 타당하다(pid는 reap 뒤에만 재사용되고, exec는 시작 시각을 유지한다). recorded만 기록해도 살아 있을 수 있는 프로세스가 빠지는 새 경로는 없고, hold ⊇ ledger도 유지된다.
+  - 반영 I1: 시작 시 정리가 hold 집합 전체(256개 초과 가능)를 종료 기록에 넣어 계약에 걸렸다. 그래서 바로 이 '긴 실행'이 중단되면 매번 복구 필요로 남았다. 소멸을 확인한 뒤에는 정상 종료처럼 hold에 있는 신원 하나만 기록한다. 회귀 테스트로 hold 300개 케이스를 추가했다.
+  - 반영 M3: 이 엔진이 아직 소유한 run은 명시 복구로 풀지 않는다(`has_active_run`).
+  - 남김:
+    - M1: 동시에 살아 있는 프로세스가 256개를 넘은 채 불확실 종료되면 명시 복구(abandon)가 `processesRemain`이다. 평소에는 다음 시작이 풀어 준다.
+    - M2: 프로세스가 끝날 때도 실행 기록 쓰기가 생긴다(쓰기마다 원장 재생). G6에서 측정한다.
+    - M4: barrier 공개 목록에는 상한이 없다(기존과 같음).
+- 검증: core 237 통과. sidecar 전체 832 통과·1 실패 → 실패는 기대값 문제(정리 중 소멸이 관측된 자손이 이제 기록에서 빠짐)로 고친 뒤 해당 테스트 통과. 실제 앱에서 긴 빌드 실행은 아직 확인하지 않았다.
+
 ### 2026-11-17 · by Claude Fable 5.2 (claude-fable-5-2) — 종료는 중단이지 초기화가 아니다: 작업 공간 유지·편집 내용 되살리기
 - 사용자 방향:
   - "강제 종료는 에이전트가 하던 작업이 중간에 중단되고 꺼지는 것이지 초기화가 아니다. 워크트리 자체가 지워지는 것이 아니다."
@@ -174,7 +207,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **프로세스 증거의 한계(2026-11-17 발견, 미해결)**: 실행의 프로세스 신원은 누적 집합으로 기록된다(잠금 파일 append-only·상한 256, 원장은 신원이 늘 때마다 전체를 다시 기록). 한 실행이 256개를 넘게 보면 그 실행은 불확실 종료로 끝난다. 기록은 256으로 제한해 admission 실패는 막았다. 재부팅 뒤 기록된 pid가 다른 프로세스에 쓰이면 probe가 Unconfirmable이라 정리도 abandon도 안 된다. 근본 해결은 생존 기준 증거(소멸 확인된 신원은 내리고, 잠금 파일은 추가/제거 저널)다. 앱 데이터 사본을 엔진으로 열 때는, 살아 있는 이전 엔진이 있으면 정리를 건너뛰는 가드가 있다(`previous_engine_still_runs`).
+- **프로세스 증거는 '살아 있을 수 있는 것'만 기록한다(2026-11-17)**: 실행 기록(DB)은 root와 아직 끝난 것으로 관측되지 않은 신원만 저장한다(`TreeTracker::recorded_identities`, `LoginProcess::recorded_for_ledger`). 끝난 프로세스는 다시 돌 수 없으므로 빼도 안전하다. 로그인 잠금 파일은 추가 전용 그대로이고 상한은 65,536개·4MiB다(`HOLD_MAX_BYTES`). 소유권 검사는 '이전 기록 ⊆ 누적 관측'이다. 엔진이 사라진 뒤의 판정(시작 시 정리·명시 복구·잠금 해제)은 `SettledProcTable`을 쓴다. 같은 pid를 시작 시각이 다른 프로세스가 쓰면 기록된 프로세스는 끝난 것이다(살아 있는 두 프로세스는 pid를 공유하지 않는다). 실행 중인 추적은 계속 이를 무결성 실패로 본다. 앱 데이터 사본을 엔진으로 열 때는 살아 있는 이전 엔진이 있으면 정리를 건너뛴다(`previous_engine_still_runs`).
 - **종료는 중단이지 초기화가 아니다(2026-11-17 사용자 결정)**: 중단된 실행은 다음 시작에서 작업 공간을 버리지 않고 canceled로 끝낸다(`settle_interrupted_run`). 남은 에이전트 프로세스는 기록된 신원으로 직접 끝내고, 소멸 확인과 작업 공간 일치가 증명돼야 한다. 예전 unresolved 복구 기록도 같은 증명이 서면 푼다. abandon(작업 공간 포기)은 증명이 안 되는 경우와 삭제에만 남는다. 편집기는 VS Code처럼 저장하지 않은 내용을 종료 뒤에도 보관했다가 되살린다(`editor-drafts.ts`). 같은 run의 lock을 다시 쓸 때는 새 operation id가 필요하다(같은 id에 다른 내용이면 Conflict).
 - **앱 종료는 막지 않는다(2026-11-17 사용자 결정)**: 종료하면 실행 중인 작업을 멈추고 최대 10초 기다린 뒤 묻지 않고 끈다(`quit-coordinator.ts`). 다음 시작에서 기록된 프로세스가 모두 사라졌고 작업 공간과 기록이 정상인 실행은 자동으로 canceled가 된다(`interrupted_run_upserts`). 불확실한 경우만 사용자 복구로 남긴다. 사용자 복구(abandon)는 채팅을 discarded로 만들므로 자동 정리에 쓰지 않는다.
 - **작업 내역 채널과 이전 빌드(2026-11-17)**: 실행 출력의 `activity` 채널은 이전 빌드가 모르는 값이다. 작업 내역이 한 줄이라도 저장된 앱 데이터를 이전 빌드로 열면 출력 재검증에서 거절돼 영구 admission 실패가 된다(schema 버전은 같다). 개발 빌드끼리 같은 실제 데이터를 오가지 않는다. 작업 내역은 작업 공간 상대 경로와 모델의 명령 설명만 공개하며 도구 입력 원문은 공개하지 않는다. Claude 실행은 결과에 적힌 거절이 모두 앱이 거절한 tool_use일 때만 정상 종료로 본다.

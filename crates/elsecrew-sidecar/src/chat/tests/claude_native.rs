@@ -45,6 +45,13 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
     ]);
 }
 
+/// A run that starts far more short-lived processes than a record may list
+/// (a build or an install) finishes, keeps small records, and frees its hold.
+#[test]
+fn claude_run_that_starts_hundreds_of_processes_finishes_and_frees_its_hold() {
+    claude_native_cases(&[("many-processes", true)]);
+}
+
 #[test]
 fn claude_durable_native_three_thousand_outputs() {
     claude_native_cases(&[("long", true)]);
@@ -191,6 +198,10 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             };
             script.push_str(&format!("printf '%s\\n' {}\nIFS= read -r reply || exit 3\ncase \"$reply\" in *'{expected}'*) ;; *) exit 4 ;; esac\n", quoted(&approval)));
         }
+        if case == "many-processes" {
+            // 8 waves of 40 children, each alive long enough to be observed.
+            script.push_str("i=0; while [ $i -lt 8 ]; do j=0; while [ $j -lt 40 ]; do /bin/sleep 0.4 & j=$((j+1)); done; wait; i=$((i+1)); done\n");
+        }
         if case == "long" {
             let path = f._root.path().join("claude-long-output.jsonl");
             let mut body = String::new();
@@ -312,6 +323,13 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             },
             "{case}: {ended:?}"
         );
+        if case == "many-processes" {
+            // Confirmed close: the records keep the root alone, all proven gone.
+            assert_eq!(ended["termination"]["processesProvenGone"], true);
+            assert_eq!(ended["termination"]["trackedProcesses"].as_array().unwrap().len(), 1);
+            assert_eq!(ended["process_identity_internal"].as_array().unwrap().len(), 1);
+            assert_eq!(ended["barrier"]["trackedProcesses"], ended["termination"]["trackedProcesses"]);
+        }
         if case == "auto-read-failure" {
             assert_eq!(ended["record"]["failure"], json!({"stage":"approvalDelivery","code":"approvalUnavailable"}));
             assert!(!serde_json::to_string(&ended).unwrap().contains("PRIVATE"));
@@ -360,7 +378,7 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             .collect();
         assert_eq!(
             final_text,
-            if matches!(case, "success" | "long" | "organization-guard" | "privacy" | "privacy-with-guard" | "default-effort" | "allow" | "auto" | "auto-outside" | "auto-missing" | "auto-missing-hook" | "auto-read" | "auto-read-mutate" | "auto-read-index-lock") {
+            if matches!(case, "success" | "long" | "many-processes" | "organization-guard" | "privacy" | "privacy-with-guard" | "default-effort" | "allow" | "auto" | "auto-outside" | "auto-missing" | "auto-missing-hook" | "auto-read" | "auto-read-mutate" | "auto-read-index-lock") {
                 vec![json!("hello")]
             } else {
                 vec![]

@@ -20,7 +20,12 @@ use std::time::{Duration, Instant};
 
 #[cfg(test)]
 const PENDING: &str = "codex-login.pending";
-const MAX_TRACKED: usize = 256;
+/// A hold records every process identity its owner ever saw (append-only, so
+/// a crash never loses one). Long runs see many: builds and installs start
+/// thousands of short-lived processes. Bounded for the readers below.
+const MAX_TRACKED: usize = 65_536;
+/// What a hold file may grow to: one "pid start" line per identity.
+pub(crate) const HOLD_MAX_BYTES: u64 = 4 * 1024 * 1024;
 // A future explicit recovery may inspect this evidence, but its presence alone
 // never admits work or releases an existing reservation.
 const LOGIN_TERMINATED: &[u8] = b"login-processes-terminated-locked-v2\n";
@@ -264,13 +269,13 @@ pub(crate) fn recover_confirmed_login(profile: &dyn LoginProfile) -> Result<(), 
         .open_with(profile.pending_name(), &options)
         .map_err(|_| failure())?;
     let meta = file.metadata().map_err(|_| failure())?;
-    if !meta.is_file() || meta.len() > 16 * 1024 {
+    if !meta.is_file() || meta.len() > HOLD_MAX_BYTES {
         return Err(failure());
     }
     lock_exclusive(&file)?;
     let mut bytes = Vec::new();
     (&mut file)
-        .take(16 * 1024 + 1)
+        .take(HOLD_MAX_BYTES + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| failure())?;
     if bytes.len() as u64 != meta.len()
@@ -312,9 +317,11 @@ pub(crate) fn recover_confirmed_login(profile: &dyn LoginProfile) -> Result<(), 
         failed: false,
     };
     reservation.verify()?;
+    // The hold's lock is ours, so its owner is gone: a reused process ID
+    // proves the recorded process ended.
     for identity in &reservation.recorded {
         if !matches!(
-            SystemProcTable.probe(*identity),
+            elsecrew_core::proctree::SettledProcTable.probe(*identity),
             elsecrew_core::proctree::ProbeResult::Gone
         ) {
             return Err(failure());
@@ -344,13 +351,20 @@ fn sync_directory(directory: &Dir) -> Result<(), SidecarError> {
 /// Issued only by explicit finish; callers cannot manufacture a clean receipt.
 pub(crate) struct ProcessClosureEvidence {
     identities: Vec<ProcIdentity>,
+    recorded: Vec<ProcIdentity>,
     termination_confirmed: bool,
     confirmed: bool,
 }
 
 impl ProcessClosureEvidence {
+    /// Every identity the owner ever saw: for ownership checks.
     pub(crate) fn identities(&self) -> &[ProcIdentity] {
         &self.identities
+    }
+    /// What a durable record keeps: the root and every identity not observed
+    /// gone (after a confirmed close, the root alone).
+    pub(crate) fn recorded(&self) -> &[ProcIdentity] {
+        &self.recorded
     }
     pub(crate) fn confirmed(&self) -> bool {
         self.confirmed
@@ -746,6 +760,16 @@ impl<'a> LoginProcess<'a> {
     pub(crate) fn invalidate_transport(&mut self) {
         self.failed = true;
         self.stop_model_proxy();
+    }
+
+    /// What the run ledger keeps between observations: the root and every
+    /// identity not yet observed gone. Every possibly running process stays
+    /// listed; a long run's finished processes do not pile up.
+    pub(crate) fn recorded_for_ledger(&self) -> Vec<ProcIdentity> {
+        self.tracker
+            .as_ref()
+            .map(TreeTracker::recorded_identities)
+            .unwrap_or_default()
     }
 
     pub(crate) fn tracked_for_cleanup(&self) -> Vec<ProcIdentity> {
@@ -1235,7 +1259,10 @@ impl<'a> LoginProcess<'a> {
             // failed receipt or turn a previously uncertain fence into success.
             self.cleanup(table);
             let identities = self.tracked_for_cleanup();
-            self.closure.as_mut().unwrap().identities = identities;
+            let recorded = self.recorded_for_ledger();
+            let closure = self.closure.as_mut().unwrap();
+            closure.identities = identities;
+            closure.recorded = recorded;
             return Err(failure());
         }
         loop {
@@ -1268,6 +1295,7 @@ impl<'a> LoginProcess<'a> {
                 .as_ref()
                 .map(|tracker| tracker.tracked_identities())
                 .unwrap_or_default(),
+            recorded: self.recorded_for_ledger(),
             termination_confirmed: clean,
             confirmed: false,
         });
@@ -2339,6 +2367,50 @@ mod tests {
         LoginProcess::reserve(&binding).unwrap().finish().unwrap();
     }
 
+    /// A long run starts far more short-lived processes than any one record
+    /// may list (a build, an install). Each is recorded in the hold while it
+    /// runs, the run's own record keeps only what is still running, and the
+    /// run still closes with a confirmed end.
+    #[test]
+    fn a_run_that_starts_hundreds_of_processes_still_closes_cleanly() {
+        let temp = tempfile::tempdir().unwrap();
+        let binding = profile(&temp);
+        let mut process = LoginProcess::reserve(&binding).unwrap();
+        // 8 waves of 40 children, each alive long enough to be observed:
+        // 320 over the run, at most about 40 at a time.
+        process
+            .launch(|| {
+                Command::new("/bin/sh")
+                    .args(["-c", "i=0; while [ $i -lt 8 ]; do j=0; while [ $j -lt 40 ]; do /bin/sleep 0.4 & j=$((j+1)); done; wait; i=$((i+1)); done; IFS= read -r hold"])
+                    .env_clear()
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null())
+                    .spawn()
+            })
+            .unwrap();
+        let mut most_recorded = 0;
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            process.tick().unwrap();
+            most_recorded = most_recorded.max(process.recorded_for_ledger().len());
+            if process.tracked_for_cleanup().len() > 300 && process.recorded_for_ledger().len() <= 2 {
+                break;
+            }
+            assert!(Instant::now() < deadline, "the waves did not run");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(process.tracked_for_cleanup().len() > MAX_RECORD_LIST, "more were seen than a record may list");
+        assert!(most_recorded <= 60, "the run's record keeps only what is running ({most_recorded})");
+        process.finish().unwrap();
+        let closure = process.closure_evidence().unwrap();
+        assert!(closure.confirmed());
+        assert!(closure.identities().len() > MAX_RECORD_LIST);
+        assert_eq!(closure.recorded().len(), 1, "after a confirmed close only the root is kept");
+        assert!(!temp.path().join(PENDING).exists());
+    }
+    const MAX_RECORD_LIST: usize = 256;
+
     #[test]
     fn timeout_is_not_success_and_cleanup_is_separate() {
         let temp = tempfile::tempdir().unwrap();
@@ -2424,7 +2496,7 @@ mod tests {
         let binding = profile(&temp);
         let mut process = LoginProcess::reserve(&binding).unwrap();
         process.launch(cat).unwrap();
-        let oversized: Vec<_> = (1..=257)
+        let oversized: Vec<_> = (1..=MAX_TRACKED as u32 + 1)
             .map(|pid| ProcIdentity { pid, start_us: 1 })
             .collect();
         assert!(process.reservation.record(&oversized).is_err());

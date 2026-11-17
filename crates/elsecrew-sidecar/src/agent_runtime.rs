@@ -1797,6 +1797,10 @@ impl AgentRuntime {
     ) -> Result<Value, ProjectFailure> {
         validate_agent_adapter_payload_v1("recoveryResolveRequest", request)
             .map_err(contract_failure)?;
+        // A run this engine still owns (still closing) is not a stopped run.
+        if request["runId"].as_str().is_some_and(|run_id| self.has_active_run(run_id)) {
+            return Err(ProjectFailure::recovery("the run is still owned by this engine"));
+        }
         let before = self.inspect_recovery(storage, &json!({
             "recoveryId":request["recoveryId"],"chatId":request["chatId"],"taskId":request["taskId"],
             "projectId":request["projectId"],"worktreeId":request["worktreeId"],
@@ -1831,7 +1835,8 @@ impl AgentRuntime {
                 pid: private["pid"].as_u64().unwrap_or(0) as u32,
                 start_us: private["start_us"].as_i64().unwrap_or(0),
             };
-            let gone = matches!(SystemProcTable.probe(identity), ProbeResult::Gone);
+            // The run's engine is gone: a reused process ID proves its end.
+            let gone = matches!(elsecrew_core::proctree::SettledProcTable.probe(identity), ProbeResult::Gone);
             public["observedGone"] = Value::Bool(gone);
             all_gone &= gone;
         }
@@ -3466,19 +3471,23 @@ fn interrupted_run_settlement(
     for identity in identities[1..].iter().chain(held.iter().flatten()) {
         tracker.track_identity(*identity);
     }
+    // The owner is gone, so a recorded process ID now held by another
+    // process proves that recorded process ended (after a reboot, typically).
     if !tracker
-        .terminate(&SystemProcTable, &SystemClock::default(), TerminationConfig::default())
+        .terminate(&elsecrew_core::proctree::SettledProcTable, &SystemClock::default(), TerminationConfig::default())
         .confirmed()
     {
         return None;
     }
-    // What the records list, all of it now proven gone: the hold's own set
-    // when there is one (its release compares against exactly that), else the
-    // ledger's, within what a record may list.
-    let identities: Vec<ProcIdentity> = match held {
-        Some(held) if !held.is_empty() => held.into_iter().collect(),
-        _ => identities.into_iter().take(RECORDED_PROCESSES_MAX).collect(),
+    // Everything is proven gone: like a confirmed close, the records keep one
+    // identity. It must be among the hold's (whose release checks that the
+    // ledger's are a part of its own and probes every one of them again).
+    let kept = match &held {
+        Some(held) if !held.is_empty() => identities.iter().find(|identity| held.contains(identity)).copied()
+            .or_else(|| held.iter().next().copied())?,
+        _ => identities[0],
     };
+    let identities = vec![kept];
     let lifted = projects
         .workspace_resume_interrupted(storage, &address, &projection["workspace_manifest"], run_id)
         .ok()?;

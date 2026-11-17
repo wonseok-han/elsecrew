@@ -730,7 +730,7 @@ impl RunReservation {
         let cleanup = process.poll_finish();
         if !state.terminal_saved
             && self
-                .persist_process_snapshot(storage, &process.tracked_for_cleanup())
+                .persist_process_snapshot(storage, &process.tracked_for_cleanup(), &process.recorded_for_ledger())
                 .is_err()
         {
             process.invalidate_cleanup_evidence();
