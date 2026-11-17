@@ -587,7 +587,7 @@ export function isActive(run: RunRecordV1): boolean { return run.state === "prep
 export function isAgentActive(run: AgentRunRecordV1): boolean { return run.state === "preparing" || run.state === "running" || run.state === "cancelling"; }
 /** An identityless recovery has no process evidence that can make abandon safe. */
 export function canAbandonAgentRecovery(recovery: AgentRecoveryRecordV1 | null): boolean { return recovery !== null && recovery.reason !== "processIdentityUnavailable"; }
-export function stateLabel(state: ChatRecordV1["state"]): string { return ({ draft: "초안", preparing: "준비 중", running: "진행 중", waitingForUser: "사용자 확인 대기", reviewReady: "검토 준비", applying: "적용 중", stopping: "중지 중", completed: "완료", needsAttention: "확인 필요", recoveryRequired: "복구 필요", canceled: "취소됨", discarded: "버림" })[state]; }
+export function stateLabel(state: ChatRecordV1["state"]): string { return ({ draft: "초안", preparing: "준비 중", running: "진행 중", waitingForUser: "사용자 확인 대기", reviewReady: "검토 준비", applying: "적용 중", stopping: "중지 중", completed: "완료", needsAttention: "확인 필요", recoveryRequired: "복구 필요", canceled: "중단됨", discarded: "버림" })[state]; }
 
 function matchesChat(event: TeamMessageV1, chat: ChatRecordV1): boolean { return event.chatId === chat.chatId && event.taskId === chat.taskId && event.worktreeId === chat.worktreeId; }
 function matchesChatRecord(left: ChatRecordV1, right: ChatRecordV1): boolean { return left.chatId === right.chatId && left.taskId === right.taskId && left.projectId === right.projectId && left.worktreeId === right.worktreeId && left.workspaceIdentity === right.workspaceIdentity; }

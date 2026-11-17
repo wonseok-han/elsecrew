@@ -27,6 +27,7 @@ import {
   type EditorTab,
   type WorkbenchPanel,
 } from "./editor-state.ts";
+import { createEditorDraftStore } from "./editor-drafts.ts";
 import type { DiffEntryV1 } from "./contracts/diff-v1.ts";
 import type { TreeEntryV1 } from "./contracts/project-v1.ts";
 import type { M5BridgeV6 } from "./contracts/bridge-v6.ts";
@@ -144,9 +145,21 @@ function WorkbenchUnavailable() {
   </main>;
 }
 
+function browserStorage(): Storage | null {
+  try { return typeof localStorage === "undefined" ? null : localStorage; } catch { return null; }
+}
+
 function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const { lang, t } = useI18n();
-  const controller = useMemo(() => new ProjectEditorController(bridge), [bridge]);
+  // Unsaved edits are kept across a restart, like a code editor's hot exit.
+  const controller = useMemo(() => new ProjectEditorController(bridge, { drafts: createEditorDraftStore(browserStorage()) }), [bridge]);
+  useEffect(() => {
+    const keep = () => controller.flushDrafts();
+    const hidden = () => { if (document.visibilityState === "hidden") keep(); };
+    window.addEventListener("pagehide", keep);
+    document.addEventListener("visibilitychange", hidden);
+    return () => { window.removeEventListener("pagehide", keep); document.removeEventListener("visibilitychange", hidden); };
+  }, [controller]);
   const [railExpanded, setRailExpanded] = useState(true);
   const [catalogRevision, setCatalogRevision] = useState(0);
   const [removal, setRemoval] = useState<{ projectId: string; chatId?: string; label: string } | null>(null);

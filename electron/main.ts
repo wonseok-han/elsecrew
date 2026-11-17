@@ -110,6 +110,9 @@ const quitCoordinator = new QuitCoordinatorV1({
         client.closeInput();
         await client.waitForExit(ENGINE_EXIT_WAIT_MS);
       }
+      // What the screen kept for the next start (unsaved editor text, lists)
+      // reaches the disk before the app ends.
+      try { for (const window of BrowserWindow.getAllWindows()) window.webContents.session.flushStorageData(); } catch { /* best effort */ }
       app.quit();
     })();
   },

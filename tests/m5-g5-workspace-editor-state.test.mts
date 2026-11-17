@@ -5,6 +5,7 @@ import { ProjectEditorController, type ChatProjectBridge } from "../src/m5/edito
 import type { ChatWorkspaceRefV1, WorkspaceEventV1 } from "../src/m5/contracts/workspace-addressing-v1.ts";
 import { validateWorkspaceTreeRequestV1, validateWorkspaceWatchTranscriptV1 } from "../src/m5/contracts/workspace-addressing-v1.ts";
 import { sha256FileVersionV1 } from "../src/m5/contracts/file-v1.ts";
+import { createEditorDraftStore, EDITOR_DRAFTS_KEY, EDITOR_DRAFTS_MAX_CHARS, EDITOR_DRAFTS_MAX_WORKSPACES } from "../src/m5/editor-drafts.ts";
 
 const version = sha256FileVersionV1(new TextEncoder().encode("one\n"));
 const a: ChatWorkspaceRefV1 = { chatId: "chat_a", projectId: "project_01", worktreeId: "worktree_a", workspaceIdentity: "workspace_a" };
@@ -148,4 +149,115 @@ test("B tree/watch bind 실패는 A ref와 tabs를 복원하고 이후 B diff/wa
   assert.equal(await controller.bindChat(b), false);
   assert.equal(controller.snapshot().workspace?.chatId, "chat_a"); assert.deepEqual(controller.snapshot().tabs, before.tabs);
   assert.deepEqual(bridge.calls, ["v3.tree:chat_b"]); controller.dispose();
+});
+
+// Unsaved edits across a restart (editor-drafts.ts). The "restart" is a new
+// controller and bridge over the same browser storage.
+function memoryStorage(failWrites = false) {
+  const items = new Map<string, string>();
+  return {
+    items,
+    getItem: (key: string) => items.get(key) ?? null,
+    setItem: (key: string, value: string) => { if (failWrites) throw new Error("QuotaExceededError"); items.set(key, value); },
+    removeItem: (key: string) => { items.delete(key); },
+  };
+}
+async function opened(storage: ReturnType<typeof memoryStorage>, workspace: ChatWorkspaceRefV1 | null = a) {
+  const bridge = new Bridge();
+  const controller = new ProjectEditorController(bridge as unknown as ChatProjectBridge, { drafts: createEditorDraftStore(storage), draftDelayMs: 60_000 });
+  controller.start();
+  await controller.chooseProject();
+  if (workspace) assert.equal(await controller.bindChat(workspace), true);
+  return { bridge, controller };
+}
+
+test("unsaved edits come back after a restart, in the same workspace only, still unsaved", async () => {
+  const storage = memoryStorage();
+  const first = await opened(storage);
+  await first.controller.openFile("src/a.ts");
+  assert.equal(storage.items.size, 0, "an untouched file keeps nothing");
+  first.controller.updateText("src/a.ts", "tw");
+  assert.equal(createEditorDraftStore(storage).load(a)?.tabs[0]?.text, "tw", "the first unsaved change is kept at once");
+  first.controller.updateText("src/a.ts", "two\n");
+  assert.equal(createEditorDraftStore(storage).load(a)?.tabs[0]?.text, "tw", "typing is kept after a pause, not per keystroke");
+  // The window is hidden or closed: the newest text is kept now.
+  first.controller.flushDrafts();
+  assert.equal(createEditorDraftStore(storage).load(a)?.tabs[0]?.text, "two\n");
+  first.controller.dispose();
+
+  const second = await opened(storage, b);
+  assert.deepEqual(second.controller.snapshot().tabs, [], "another task's workspace gets nothing");
+  second.controller.flushDrafts();
+  assert.equal(createEditorDraftStore(storage).load(a)?.tabs.length, 1, "and the kept draft is not lost by opening it");
+  assert.equal(await second.controller.bindChat(a), true);
+  const restored = second.controller.snapshot();
+  assert.deepEqual(restored.tabs.map(tab => [tab.path, tab.text, tab.saveState, tab.baseVersion, tab.mode]), [["src/a.ts", "two\n", "dirty", version, "text"]]);
+  assert.equal(restored.activePath, "src/a.ts");
+  assert.equal(restored.panel, "editor");
+  assert.equal(restored.noticeKey, "m5.editorNotice.draftsRestored");
+  assert.equal(second.controller.canLeaveProject(), false, "restored text is unsaved like any other");
+  // Saving goes through the usual version check and then nothing is kept.
+  second.bridge.calls = [];
+  await second.controller.saveActive();
+  assert.ok(second.bridge.calls.some(call => call.startsWith("v3.commit:chat_a")));
+  assert.equal(second.controller.snapshot().tabs[0]?.saveState, "clean");
+  assert.equal(storage.items.size, 0);
+  second.controller.dispose();
+});
+
+test("a workspace that fails to open keeps its drafts; discarding a task forgets them", async () => {
+  const storage = memoryStorage();
+  createEditorDraftStore(storage).save(b, { activePath: "src/a.ts", tabs: [{ path: "src/a.ts", text: "kept\n", baseVersion: version, byteLength: 4, baseTextLength: 4 }] });
+  const { bridge, controller } = await opened(storage);
+  bridge.failTree = true;
+  assert.equal(await controller.bindChat(b), false);
+  controller.flushDrafts();
+  assert.equal(createEditorDraftStore(storage).load(b)?.tabs[0]?.text, "kept\n");
+  bridge.failTree = false;
+  assert.equal(await controller.bindChat(b), true);
+  assert.equal(controller.snapshot().tabs[0]?.text, "kept\n");
+  // Removing the task from the list discards its unsaved text for good.
+  assert.equal(controller.leaveProjectView(true), true);
+  assert.equal(storage.items.size, 0);
+  controller.dispose();
+});
+
+test("reloading a restored draft from disk forgets it", async () => {
+  const storage = memoryStorage();
+  createEditorDraftStore(storage).save(a, { activePath: "src/a.ts", tabs: [{ path: "src/a.ts", text: "mine\n", baseVersion: version, byteLength: 4 }] });
+  const { controller } = await opened(storage);
+  const tab = controller.snapshot().tabs[0]!;
+  assert.equal(tab.saveState, "dirty");
+  assert.equal(await controller.reloadConfirmedDraft(tab), true);
+  assert.deepEqual(controller.snapshot().tabs.map(item => [item.text, item.saveState]), [["one\n", "clean"]]);
+  assert.equal(storage.items.size, 0);
+  controller.dispose();
+});
+
+test("the draft store is bounded and tolerates unreadable or refusing storage", () => {
+  const storage = memoryStorage();
+  const store = createEditorDraftStore(storage);
+  const ref = (index: number): ChatWorkspaceRefV1 => ({ chatId: `chat_${index}`, projectId: "project_01", worktreeId: `worktree_${index}`, workspaceIdentity: `workspace_${index}` });
+  const tab = (text: string) => ({ path: "src/a.ts", text, baseVersion: version, byteLength: text.length });
+  for (let index = 0; index < EDITOR_DRAFTS_MAX_WORKSPACES + 3; index += 1) store.save(ref(index), { activePath: null, tabs: [tab(`text ${index}`)] });
+  assert.equal(store.load(ref(0)), null, "the oldest tasks give way");
+  assert.equal(store.load(ref(EDITOR_DRAFTS_MAX_WORKSPACES + 2))?.tabs[0]?.text, `text ${EDITOR_DRAFTS_MAX_WORKSPACES + 2}`);
+  assert.equal(JSON.parse(storage.items.get(EDITOR_DRAFTS_KEY)!).entries.length, EDITOR_DRAFTS_MAX_WORKSPACES);
+  // The same task in another workspace copy is not this workspace.
+  assert.equal(store.load({ ...ref(5), workspaceIdentity: "workspace_other" }), null);
+  // A draft too large to keep is left out whole; smaller ones stay.
+  store.save(ref(1), { activePath: null, tabs: [tab("x".repeat(EDITOR_DRAFTS_MAX_CHARS + 1)), tab("small")].map((item, index) => ({ ...item, path: `f${index}` })) });
+  assert.deepEqual(store.load(ref(1))?.tabs.map(item => item.text), ["small"]);
+  store.save(ref(1), null);
+  assert.equal(store.load(ref(1)), null);
+  // Unreadable contents mean nothing was kept, never an error.
+  for (const raw of ["not json", "[]", '{"version":2,"entries":[]}', '{"version":1,"entries":[{"workspace":{"chatId":"../x"},"activePath":null,"tabs":[]}]}']) {
+    storage.items.set(EDITOR_DRAFTS_KEY, raw);
+    assert.equal(store.load(ref(5)), null, raw);
+  }
+  const refusing = createEditorDraftStore(memoryStorage(true));
+  assert.doesNotThrow(() => refusing.save(ref(1), { activePath: null, tabs: [tab("text")] }));
+  assert.equal(refusing.load(ref(1)), null);
+  assert.equal(createEditorDraftStore(null).load(ref(1)), null);
+  assert.doesNotThrow(() => createEditorDraftStore(null).save(ref(1), { activePath: null, tabs: [tab("text")] }));
 });
