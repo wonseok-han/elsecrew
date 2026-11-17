@@ -359,10 +359,18 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
     write_envelope(&mut output, &ready)?;
     sidecar.start_admission(database_path);
 
-    let (sender, receiver) = mpsc::sync_channel(1);
+    // Requests keep arriving (status polls) while a long step such as an
+    // application backup holds the loop. Queue them up to a byte budget: only
+    // a reader that would really have to stop reading (and could then miss a
+    // later stop request) stops an in-flight source copy.
+    let (sender, receiver) = mpsc::sync_channel(INPUT_QUEUE_MESSAGES);
+    let queued_bytes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let reader_queued = queued_bytes.clone();
     let application_cancel = sidecar.application_cancel.clone();
     let input_instance = sidecar.ready.sidecar_instance_id.clone();
     thread::spawn(move || {
+        use std::sync::atomic::Ordering;
+        let queued_bytes = reader_queued;
         let mut input = BufReader::with_capacity(8 * 1024, input);
         loop {
             let message = match read_bounded_jsonl(&mut input) {
@@ -371,10 +379,20 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
                 Err(error) => InputMessage::Error(error),
             };
             let finished = !matches!(message, InputMessage::Line(_));
-            if let InputMessage::Line(line) = &message {
+            let size = if let InputMessage::Line(line) = &message {
                 application_cancel.observe(line, &input_instance);
+                line.len()
             } else {
                 application_cancel.stop();
+                0
+            };
+            if queued_bytes.fetch_add(size, Ordering::AcqRel) + size > INPUT_QUEUE_BYTES {
+                // Over budget: stop any source copy first, then really bound
+                // memory by reading nothing more until the loop catches up.
+                application_cancel.stop();
+                while queued_bytes.load(Ordering::Acquire) > INPUT_QUEUE_BYTES {
+                    thread::sleep(Duration::from_millis(10));
+                }
             }
             let sent = match sender.try_send(message) {
                 Ok(()) => true,
@@ -398,7 +416,10 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
         // 100ms wait after either would add idle latency to every output batch.
         let wait = runtime_poll_interval.saturating_sub(last_runtime_poll.elapsed());
         let line = match receiver.recv_timeout(wait) {
-            Ok(InputMessage::Line(line)) => line,
+            Ok(InputMessage::Line(line)) => {
+                queued_bytes.fetch_sub(line.len(), std::sync::atomic::Ordering::AcqRel);
+                line
+            }
             Ok(InputMessage::Eof) => {
                 if sidecar.safe_to_quit() {
                     return Ok(());
@@ -469,6 +490,13 @@ fn write_responses<W: Write>(
     }
     Ok(())
 }
+
+/// Bounds requests waiting behind a busy loop: enough for minutes of status
+/// polling. Bytes are the real memory bound (the reader waits past it); the
+/// count only caps the channel. A loop blocked for several minutes can still
+/// reach the count and stop an in-flight source copy.
+const INPUT_QUEUE_MESSAGES: usize = 1024;
+const INPUT_QUEUE_BYTES: usize = 8 * 1024 * 1024;
 
 enum InputMessage {
     Line(Vec<u8>),
