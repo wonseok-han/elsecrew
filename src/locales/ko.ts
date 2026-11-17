@@ -649,7 +649,7 @@ export const ko = {
   "m5.chat.codeCopied": "복사했어요.",
   "m5.chat.codeCopyFailed": "복사하지 못했어요. 코드를 직접 선택해 복사해 주세요.",
   "m5.navigation.newChatHelp": "궁금한 점이나 하고 싶은 일을 적어 주세요. 보내면 새 작업을 시작합니다. 설정된 모델의 구독 사용량이 발생할 수 있어요.",
-  "m5.catalog.switchHelp": "프로젝트를 전환하려면 설정을 닫고, 진행 중인 작업과 파일 편집을 정리한 뒤 상단에서 프로젝트를 닫아 주세요.",
+  "m5.catalog.switchHelp": "프로젝트를 전환하려면 설정을 닫고, 진행 중인 작업과 파일 편집을 정리한 뒤 지금 프로젝트 옆 ⋯ 메뉴에서 '프로젝트 화면 닫기'를 눌러 주세요.",
   "m5.roles.label": "프로젝트 역할과 모델 설정",
   "m5.roles.version": "이 프로젝트 전용 설정 · 버전 {revision}",
   "m5.roles.back": "프로젝트로 돌아가기",

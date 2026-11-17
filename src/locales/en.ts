@@ -650,7 +650,7 @@ export const en: Record<MessageKey, string> = {
   "m5.chat.codeCopied": "Copied.",
   "m5.chat.codeCopyFailed": "Could not copy. Select the code and copy it manually.",
   "m5.navigation.newChatHelp": "Ask a question or describe what you want to do. Send to start a new task. Your configured model may use subscription credits.",
-  "m5.catalog.switchHelp": "To switch projects, close settings, finish active work and file edits, then close the project using the toolbar.",
+  "m5.catalog.switchHelp": "To switch projects, close settings, finish active work and file edits, then choose 'Close project view' from the ⋯ menu next to the current project.",
   "m5.roles.label": "Project roles and model settings",
   "m5.roles.version": "Settings for this project · revision {revision}",
   "m5.roles.back": "Back to project",
