@@ -23,20 +23,25 @@ export function runOrder(runs: readonly AgentRunRecordV1[]): Map<string, number>
   return new Map([...runs].sort(chronological).map((run, index) => [run.runId, index + 1]));
 }
 
-/** Whole seconds between start and last update; null when unknown. */
-export function runDurationSeconds(run: Pick<AgentRunRecordV1, "createdAt" | "updatedAt">): number | null {
-  const start = Date.parse(run.createdAt), end = Date.parse(run.updatedAt);
+/** Whole seconds between start and last update; null when unknown. A run
+ * still going counts up to `now` (when given): its last update says nothing
+ * about how long it has been running. */
+export function runDurationSeconds(run: Pick<AgentRunRecordV1, "createdAt" | "updatedAt"> & { state?: string }, now?: number): number | null {
+  const going = now !== undefined && ["preparing", "running", "cancelling"].includes(run.state ?? "");
+  const start = Date.parse(run.createdAt), end = going ? now : Date.parse(run.updatedAt);
   return Number.isFinite(start) && Number.isFinite(end) && end >= start ? Math.round((end - start) / 1000) : null;
 }
 
-/** Display only. A clean exit is not a successful task or permission to apply. */
-export function runOutcomeNotice(run: Pick<AgentRunRecordV1, "state" | "terminationOutcome">) {
+/** Display only. A clean exit is not a successful task or permission to apply.
+ * A read-only role changes no files, so its card never points at changes. */
+export function runOutcomeNotice(run: Pick<AgentRunRecordV1, "state" | "terminationOutcome"> & { selectedProfile?: { permission: string } }) {
   if (run.state === "recoveryRequired" || run.terminationOutcome === "recoveryRequired") return "m5.run.help.recovery" as const;
   if (!["succeeded", "failed", "canceled"].includes(run.state)) return null;
   if (run.terminationOutcome !== "cleanExit") return "m5.run.help.unconfirmed" as const;
   if (run.state === "failed") return "m5.run.help.failedClean" as const;
-  if (run.state === "canceled") return "m5.run.help.canceledClean" as const;
-  return "m5.run.help.succeededClean" as const;
+  const readOnly = run.selectedProfile?.permission === "readOnly";
+  if (run.state === "canceled") return readOnly ? "m5.run.help.canceledReadOnly" as const : "m5.run.help.canceledClean" as const;
+  return readOnly ? "m5.run.help.succeededReadOnly" as const : "m5.run.help.succeededClean" as const;
 }
 
 export interface WorkStatusSummary { total: number; ids: string[]; omitted: number }

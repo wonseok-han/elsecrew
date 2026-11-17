@@ -16,7 +16,7 @@ import { markStartScreenReady } from "./startup-mark.ts";
 import { emptyProjectGuide, parseProjectGuide, projectGuideKey, projectGuideStep, type ProjectGuidePreference } from "./project-guide-state.ts";
 import type { ChatRecordV1 } from "./contracts/run-recovery-v1.ts";
 import { groupRunHistory, runOutcomeNotice, runOrder, runDurationSeconds } from "./work-status.ts";
-import { cachedModels, hasUsableModel, loadModels, modelLabel } from "./model-catalog.ts";
+import { cachedModels, hasUsableModel, loadModels, modelLabel, withRecommendedModels } from "./model-catalog.ts";
 import type { ModelChoicesResult } from "./contracts/model-choices-v1.ts";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type * as Monaco from "monaco-editor/esm/vs/editor/editor.api";
@@ -388,6 +388,23 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       if (chat.activeChat?.chatId !== pendingOpen.chatId) void switchChat(pendingOpen.chatId);
     }
   }, [pendingOpen, chat.projectId, chat.chats]);
+  // Reopening a project picks up the task last open in it, the way an editor
+  // reopens its last file; only once per opening, so closing or deleting a
+  // task never pulls another one in behind the user's back.
+  const resumedProject = useRef<string | null>(null);
+  useEffect(() => {
+    if (chat.activeChat) { try { localStorage.setItem(lastChatKey(chat.activeChat.projectId), chat.activeChat.chatId); } catch { /* optional */ } }
+  }, [chat.activeChat?.chatId]);
+  useEffect(() => {
+    if (!chat.projectId) { resumedProject.current = null; return; }
+    if (!chat.settings || resumedProject.current === chat.projectId || !admissionReady) return;
+    resumedProject.current = chat.projectId;
+    if (chat.activeChat || chat.switching || pendingOpen || !chat.chats.length) return;
+    let remembered: string | null = null;
+    try { remembered = localStorage.getItem(lastChatKey(chat.projectId)); } catch { /* optional */ }
+    const target = chat.chats.find(item => item.chatId === remembered) ?? chat.chats[0];
+    void switchChat(target.chatId);
+  }, [chat.projectId, chat.settings, admissionReady]);
   useEffect(() => startNotificationFeed(bridge as unknown as NotificationFeedBridge, notifications, window.m5Approval, id => {
     // A macOS banner only while the app is in the background.
     if (document.hasFocus() || !osNotificationsEnabled() || typeof Notification === "undefined") return;
@@ -398,9 +415,31 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       banner.onclick = () => { window.focus(); notifications.markRead(item.id); openNotificationRef.current(item); };
     } catch { /* banners are optional */ }
   }), [bridge, notifications]);
+  // A role still without a model starts on its provider's recommendation, so
+  // a first task never needs a trip to the settings screen. Saved like any
+  // settings change; a provider without one recommendation leaves the choice
+  // to the user.
+  const [recommendationMissing, setRecommendationMissing] = useState(false);
+  useEffect(() => setRecommendationMissing(false), [chat.settings?.projectId, chat.settings?.revision]);
+  const fillRecommendedRoles = async (): Promise<boolean> => {
+    const settings = chatController.snapshot().settings;
+    if (!settings) return false;
+    const team = roleSettingsAsV3(settings);
+    if (team.roles.every(role => hasUsableModel(role.runtime, role.modelSelector))) return true;
+    if (!window.m5Models) { setRecommendationMissing(true); return false; }
+    try {
+      const catalogs = new Map<RoleProfileV1["runtime"], Awaited<ReturnType<typeof loadModels>>["models"]>();
+      for (const runtime of new Set(team.roles.map(role => role.runtime))) catalogs.set(runtime, (await loadModels(runtime, input => window.m5Models!.request(input))).models);
+      const filled = withRecommendedModels(team.roles, catalogs);
+      if (!filled) { setRecommendationMissing(true); return false; }
+      await chatController.updateSettings(filled, team.roleDefinitions);
+      return chatController.snapshot().settings?.revision !== settings.revision;
+    } catch { setRecommendationMissing(true); return false; }
+  };
   const createChat = async () => {
     if (!snapshot.project) return;
     controller.setActionBlocked(true, { key: "m5.editorNotice.newChat" });
+    if (!await fillRecommendedRoles()) { controller.setActionBlocked(chatController.isActionBlocked()); return; }
     const created = await chatController.createCoordinatorChat({ projectId: snapshot.project.id }, goal);
     if (created) { setGoal(""); setNewChatOpen(false); await switchChat(created.chatId); if (chatController.snapshot().activeChat?.chatId === created.chatId) await chatController.startAgent("coordinator", lang); }
     else controller.setActionBlocked(chatController.isActionBlocked());
@@ -515,12 +554,12 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         <p>{t("m5.navigation.newChatHelp")}</p>
         {chat.error && <p role="alert" className="m5-error">{t(chat.error.messageKey)}</p>}
         {chat.notice && <p role="status">{formatChatNotice(chat, lang)}</p>}
-        <form className="m5-new-chat-form" onKeyDown={submitChatShortcut} onSubmit={(event) => { event.preventDefault(); if (admissionReady && projectDataReady && goal.trim() && !chat.preparing && !chat.switching && !chat.preparationApiUnavailable && !(snapshot.workspace && !controller.canLeaveProject()) && (chat.chats.length > 0 || setupConfirmed) && unselectedRoles.length === 0) void createChat(); }}>
+        <form className="m5-new-chat-form" onKeyDown={submitChatShortcut} onSubmit={(event) => { event.preventDefault(); if (admissionReady && projectDataReady && goal.trim() && !chat.preparing && !chat.switching && !chat.preparationApiUnavailable && !(snapshot.workspace && !controller.canLeaveProject()) && (chat.chats.length > 0 || setupConfirmed) && !(recommendationMissing && unselectedRoles.length > 0)) void createChat(); }}>
           <input ref={goalInputRef} aria-label={t("m5.navigation.goal")} value={goal} onChange={(event) => setGoal(event.target.value)} placeholder={t("m5.navigation.goalPlaceholder")} disabled={!admissionReady || chat.preparing} />
           <p className="m5-first-chat-note">{t("m5.application.autoBaseline")}</p>
-          <button type="submit" title={t("m5.chat.sendShortcut")} aria-keyshortcuts="Enter Meta+Enter Control+Enter" disabled={!admissionReady || !projectDataReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject()) || (chat.chats.length === 0 && !setupConfirmed) || unselectedRoles.length > 0}>{t("m5.chat.coordinatorSend")}</button>
+          <button type="submit" title={t("m5.chat.sendShortcut")} aria-keyshortcuts="Enter Meta+Enter Control+Enter" disabled={!admissionReady || !projectDataReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject()) || (chat.chats.length === 0 && !setupConfirmed) || (recommendationMissing && unselectedRoles.length > 0)}>{t("m5.chat.coordinatorSend")}</button>
         </form>
-        {unselectedRoles.length > 0 && <p className="m5-team-unselected" role="status">{t("m5.firstChat.unselectedModels", { roles: unselectedRoles.join(", ") })}</p>}
+        {unselectedRoles.length > 0 && <p className="m5-team-unselected" role="status">{t(recommendationMissing ? "m5.firstChat.unselectedModels" : "m5.firstChat.recommendedModels", { roles: unselectedRoles.join(", ") })}</p>}
         {chat.chats.length === 0 ? <section className="m5-first-chat-setup" aria-labelledby="m5-first-chat-setup-heading">
           <h3 id="m5-first-chat-setup-heading">{t("m5.firstChat.setup.title")}</h3>
           <p>{t("m5.firstChat.setup.help")}</p>
@@ -756,6 +795,8 @@ function TreeBranchMore({ root, loading, failed, disabled, depth, onLoad }: { ro
   }, [loading, failed, disabled, onLoad, root]);
   return <div ref={ref} className="m5-tree-branch-more" style={{paddingLeft: 7 + depth * 16}}>{failed ? <button disabled={disabled} onClick={onLoad}>{t("m5.navigation.retry")}</button> : loading ? <span role="status">{t("m5.navigation.loading")}</span> : null}</div>;
 }
+
+const lastChatKey = (projectId: string) => `elsecrew.lastChat.v1.${projectId}`;
 
 function ProjectGuide({ projectId, activeChat, onResume, hasChat, hasOpenFile, disabled, onGoal, onTeam, onConversation, onChanges }: {
   projectId: string; activeChat: ChatRecordV1 | null; onResume: (chatId: string) => void;
@@ -1209,13 +1250,22 @@ function SessionDiagnosticsHelp({ runtime }: { runtime: string }) {
 
 export function AgentRuns({ runs, definitions }: { runs: ReturnType<ChatUiController["snapshot"]>["agentRuns"]; definitions?: readonly RoleDefinitionV3[] }) {
   const { t, lang } = useI18n();
+  // A running card counts its time live; finished ones keep their record.
+  const going = runs.some(run => ["preparing", "running", "cancelling"].includes(run.state));
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!going) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [going]);
   if (runs.length === 0) return null;
   const { current, previous } = groupRunHistory(runs);
   const order = runOrder(runs);
   const clock = new Intl.DateTimeFormat(lang === "ko" ? "ko-KR" : "en-US", { hour: "numeric", minute: "2-digit" });
   const renderRun = (run: typeof runs[number]) => {
       const notice = runOutcomeNotice(run);
-      const seconds = runDurationSeconds(run);
+      const seconds = runDurationSeconds(run, now);
       const started = Date.parse(run.createdAt);
       return <article key={run.runId}>
         <div className="m5-agent-run-heading">

@@ -1,3 +1,200 @@
+### 2026-11-17 · by Claude Opus 5.5 (claude-opus-5-5) — 프로세스 256개 한계·재부팅 뒤 pid 재사용 해결
+- 사용자 요청: 직전 엔트리의 다음 할 일 1순위(프로세스 증거 재설계)를 진행한다.
+- 원인:
+  - 한 번이라도 관측한 프로세스 신원을 끝날 때까지 누적했다.
+  - 그래서 짧게 사는 프로세스를 많이 만드는 실행(빌드·설치)은 끝난 프로세스로도 잠금 파일 상한 256개를 채웠다.
+  - 257번째에서 기록이 실패하면 실행이 불확실 종료(복구 필요)로 끝났다.
+  - 실행 기록은 신원이 늘 때마다 누적 전체를 다시 썼다.
+- 처리:
+  - core
+    - `TreeTracker`에 `root`와 `recorded_identities()`(root + Gone으로 관측되지 않은 신원)를 추가했다.
+    - 새 `SettledProcTable`: 같은 pid의 시작 시각이 다르면 Gone으로 판정한다.
+  - 실행 기록·종료 기록에는 recorded만 저장한다.
+    - confirmed 종료는 root 하나만 남는다.
+    - 소유권 검사는 누적 관측과 비교한다(`persist_process_snapshot(owned, recorded)`, `ProcessClosureEvidence::recorded`).
+  - 잠금 파일: 추가 전용을 유지하고 상한을 65,536개·4MiB로 올렸다. 읽는 곳 세 군데를 모두 바꿨고, 빠른 확인(`fence_is_run_bound`)은 앞 4KiB만 읽는다.
+  - 엔진이 사라진 뒤의 판정 네 곳은 `SettledProcTable`을 쓴다: 시작 시 정리, 명시 복구 all_gone, `recover_confirmed_login`, `recover_bound_run`.
+- 테스트:
+  - core 2개(recorded 집합, 재사용 pid 판정).
+  - sidecar
+    - `a_run_that_starts_hundreds_of_processes_still_closes_cleanly`
+    - `claude_run_that_starts_hundreds_of_processes_finishes_and_frees_its_hold`
+    - 둘 다 320개 프로세스를 만들고, 상한 256으로 되돌리면 실패하는 것을 확인했다.
+    - `a_recorded_process_id_now_held_by_another_process_counts_as_ended_and_is_left_alone`: 이전에는 복구 유지, 이제 정리하며 그 프로세스에는 신호를 보내지 않는다.
+- 독립 검토(1명): 차단 없음.
+  - 근거: SettledProcTable 판정이 타당하다(pid는 reap 뒤에만 재사용되고, exec는 시작 시각을 유지한다). recorded만 기록해도 살아 있을 수 있는 프로세스가 빠지는 새 경로는 없고, hold ⊇ ledger도 유지된다.
+  - 반영 I1: 시작 시 정리가 hold 집합 전체(256개 초과 가능)를 종료 기록에 넣어 계약에 걸렸다. 그래서 바로 이 '긴 실행'이 중단되면 매번 복구 필요로 남았다. 소멸을 확인한 뒤에는 정상 종료처럼 hold에 있는 신원 하나만 기록한다. 회귀 테스트로 hold 300개 케이스를 추가했다.
+  - 반영 M3: 이 엔진이 아직 소유한 run은 명시 복구로 풀지 않는다(`has_active_run`).
+  - 남김:
+    - M1: 동시에 살아 있는 프로세스가 256개를 넘은 채 불확실 종료되면 명시 복구(abandon)가 `processesRemain`이다. 평소에는 다음 시작이 풀어 준다.
+    - M2: 프로세스가 끝날 때도 실행 기록 쓰기가 생긴다(쓰기마다 원장 재생). G6에서 측정한다.
+    - M4: barrier 공개 목록에는 상한이 없다(기존과 같음).
+- 검증: core 237 통과. sidecar 전체 832 통과·1 실패 → 실패는 기대값 문제(정리 중 소멸이 관측된 자손이 이제 기록에서 빠짐)로 고친 뒤 해당 테스트 통과. 실제 앱에서 긴 빌드 실행은 아직 확인하지 않았다.
+
+### 2026-11-17 · by Claude Fable 5.2 (claude-fable-5-2) — 종료는 중단이지 초기화가 아니다: 작업 공간 유지·편집 내용 되살리기
+- 사용자 방향:
+  - "강제 종료는 에이전트가 하던 작업이 중간에 중단되고 꺼지는 것이지 초기화가 아니다. 워크트리 자체가 지워지는 것이 아니다."
+  - "편집기는 VS Code와 비슷한 역할이다."
+- 조사(코드 확인):
+  - 직전 커밋(e446c3a2)의 자동 처리는 작업 공간을 건드리지 않는다. canceled 채팅은 새 메시지(`append_user_message`)와 새 팀 작업(`orchestration::begin`), 원본 반영 검토를 모두 받는다.
+  - '초기화'가 일어나는 곳은 '복구 필요'의 유일한 해소 수단인 abandon(작업 공간 포기, 채팅 discarded)이었다. 그리고 다음 경우는 여전히 그 경로로 갔다.
+    - 에이전트 프로세스가 아직 살아 있는 경우. 엔진이 정리 없이 죽으면 흔하고, 이전에는 앱이 이 프로세스를 끝낼 방법이 없었다(`processesRemain`만 반환).
+    - 종료 기록 저장 중 실패한 경우.
+    - 예전 버전이 남긴 복구 기록.
+- 처리(엔진):
+  - `settle_interrupted_run`(`agent_runtime.rs`): 다시 켤 때 중단된 실행을 작업 공간을 버리지 않고 끝낸다.
+    - 기록된 신원으로 `TreeTracker`를 다시 만들어 남은 프로세스를 끝낸다(TERM 4초, KILL 4초, 자손 포함). Confirmed일 때만 진행한다.
+    - `workspace_resume_interrupted`(`project.rs`): manifest가 그 실행의 것과 같아야 한다(복구 표시만 다를 수 있다). 복구 표시가 있으면 active로 되돌린 뒤 전체 결속을 검증한다. lock은 그 실행 자신의 표시만 허용한다(`WorkspaceLockAdmission::InterruptedRun`).
+    - 기록: run은 canceled/cleanExit에 recovery null, 채팅은 canceled, writer lock은 해제. 실패하면 manifest 표시를 되돌리고 기존 복구 경로로 간다.
+    - 이미 unresolved인 복구 기록(사유가 프로세스 종료 불확실인 것)도 같은 증명이 서면 같은 방식으로 푼다. 신원이 없는 `processIdentityUnavailable`은 풀지 않는다.
+    - 성공하면 채팅에 안내 한 줄을 남긴다("실행이 중간에 멈췄어요. 지금까지 한 작업은 작업 공간에 그대로 있어요…"). 삭제한 작업에는 남기지 않는다.
+  - lock upsert의 operation id는 `interrupted_{run_id}`다. 예전 표시 때 쓴 `op_agent_writer_terminal_{run_id}`를 다시 쓰면 내용이 달라 Conflict가 난다.
+- 처리(편집기, hot exit):
+  - `src/m5/editor-drafts.ts`: 저장하지 않은 탭의 내용을 작업 공간별로 localStorage에 보관한다(최대 8개 작업, 200만 자). 읽지 못하거나 쓰기를 거절당하면 "보관 없음"으로만 처리한다.
+  - `ProjectEditorController`:
+    - 탭이 저장 안 됨/저장됨/닫힘으로 바뀌면 즉시 반영하고, 타이핑은 0.8초 쉬면 반영한다. 창이 숨겨지거나 닫힐 때는 `flushDrafts`로 즉시 반영한다.
+    - 같은 작업 공간을 다시 열면(`bindChat` 성공 뒤) 저장하지 않은 상태 그대로 되살린다. 기준 버전은 원래 것을 유지하므로, 그 사이 디스크가 바뀌었으면 저장할 때 기존 충돌 검사에 걸린다.
+    - 열기에 실패한 작업 공간의 보관분은 지우지 않는다. 목록에서 작업을 제거하면(`leaveProjectView(true)`) 지운다.
+  - Electron: 종료 직전에 `session.flushStorageData()`를 호출한다.
+- 발견:
+  - v1(팀 아님) 채팅은 canceled에서 새 실행을 직접 시작할 수 없다(`G5_RUN_START_CHAT_STATES_V1`). 제품의 팀 채팅(v2/v3)은 `orchestration::begin`이 canceled를 받는다.
+  - 삭제된 프로젝트는 `canonical_path`가 삭제 표지라 결속 검증에서 걸려 기존 흐름(삭제용 abandon)으로 간다. 삭제된 작업(프로젝트는 살아 있음)은 canceled로 끝나고 `worktree_is_quiet`를 통과해 삭제가 진행된다.
+  - pid가 다른 프로세스에 재사용되면 probe가 Unconfirmable이라 풀리지 않는다(기존 한계).
+- 테스트:
+  - 새 테스트(Rust):
+    - `an_app_closed_mid_run_reopens_with_the_work_kept_and_the_task_usable`: 프로세스가 끝난 경우, 남아 있는 경우, 예전 버전이 표시한 경우. 각각 파일 보존, manifest active, 로그인 잠금 해제, 후속 메시지와 새 팀 작업 시작을 확인한다.
+    - `interrupted_writer_run_keeps_its_workspace_and_an_older_recovery_mark_is_lifted`: writer lock 해제와 멱등성.
+    - `interrupted_run_is_stopped_with_its_recorded_grandchild_before_it_is_settled`.
+  - 새 테스트(TS): 되살리기, 다른 작업 공간에는 적용 안 함, 열기 실패 시 보존, 목록 제거 시 삭제, reload 시 삭제, 저장소 한도와 손상 내성.
+  - 기대값 변경: `terminal_failure_cases`, `text_candidate_public_sink…`. `dynamic_grandchild…`와 `startup_backfills_pre_g5c…`는 테스트 hook `SKIP_INTERRUPTED_SETTLEMENT`로 "증명이 안 되는 시작"을 재현해 명시 복구 경로를 계속 검증한다.
+- 독립 검토(1명, 2회): 차단 없음. 중요 지적 3건을 반영했다.
+  - I1(이번 변경이 만든 위험): 같은 컴퓨터에서 앱 데이터 **사본**을 열면, 사본의 원장에 running으로 남은 실행의 pid·시작 시각이 실제 앱의 것과 같아 실제 에이전트를 끝낼 수 있었다.
+    - 처리: `previous_engine_still_runs`. 원장에 마지막으로 등록한 엔진(clean 종료 아님)이 아직 살아 있으면 그 시작에서는 정리와 신호를 하지 않는다.
+    - 살아 있음의 판정: pid가 살아 있고, comm이 `elsecrew`로 시작하고, 프로세스 시작이 등록 시각 이전이다.
+    - 정상 재시작에서 이전 엔진이 아직 정리 중일 수 있으므로 최대 12초 끝나기를 기다린 뒤 판정한다.
+    - 재검토 N1 반영: 최신 등록 하나가 아니라 clean 종료가 아닌 **모든** 엔진 등록을 본다(`unclean_engine_processes`). 사본을 한 번 열면 디버그 엔진이 최신으로 등록돼, 두 번째로 열 때 가드가 풀렸기 때문이다.
+    - 재검토 N2 반영: 프로세스 목록을 읽지 못하면(Windows) 기다리지 않고 바로 "살아 있음"으로 본다. 판정은 정리할 실행을 처음 만났을 때만 한다. 시작이 취소되면 기다리지도 정리하지도 않는다(`recover_unclean_runs_until`).
+  - I2(기존 한계): 로그인 잠금 증명이 "원장의 신원 == 잠금 파일의 신원"을 요구했다. 그런데 내려가는 엔진의 마지막 정리(`LoginProcess::drop`)는 새로 찾은 자손을 잠금 파일에만 적는다(DB는 이미 닫힘). 그래서 빌드처럼 프로세스를 계속 만드는 중에 강제 종료하면 잠금이 풀리지 않을 수 있었다.
+    - 처리 (가): 정리할 때 그 run에 결속된 잠금 파일의 신원을 읽어(`bound_run_identities`) 함께 끝내고, 기록은 잠금 파일의 집합으로 맞춘다.
+    - 처리 (나): 증명은 "원장 ⊆ 잠금 파일"로 완화한다. 잠금 파일의 신원은 해제 직전에 모두 Gone을 확인하므로 불변식은 유지된다.
+  - I3(기존 결함, 테스트로 확인): 한 실행이 본 프로세스가 256개를 넘으면 종료·복구 기록이 계약(≤256)에 걸려 저장되지 않았다. 다음 시작의 `recover_unclean_runs`가 `recoveryInvalid`로 실패해 **매 시작이 admission 실패**가 됐다.
+    - 처리(봉합): 기록에 적는 목록을 256으로 제한한다(`RECORDED_PROCESSES_MAX`, 기존 복구 경로·`terminal.rs`·정리). 정리의 종료 대상에는 상한이 없다.
+    - **남은 근본 문제**: 실행 중 257번째 프로세스에서 잠금 파일 기록이 실패해 그 실행은 불확실 종료(복구 필요)로 끝난다. 다시 켜면 '중단됨'으로 풀리지만, 빌드처럼 프로세스를 많이 만드는 긴 개발 실행은 끝까지 가지 못한다.
+    - 원인은 프로세스 증거가 누적 집합이라는 점이다(잠금 파일 append-only, 원장은 신원이 늘 때마다 전체를 다시 기록해 O(N²)).
+    - 해결 방향(제안, 미착수): 누적이 아니라 생존 기준으로 바꾼다. 소멸을 확인한 신원은 추적·기록에서 내리고, 잠금 파일은 추가/제거 저널로 만든다.
+  - M1 반영: `workspace_resume_interrupted`가 Git 저장소 검증(`verify_snapshot_repository`)까지 한다.
+  - M6 반영: 거절 경로 테스트 4개(살아 있는 이전 엔진, 확인 불가 pid, 다른 사유의 lock 표시, 256 초과).
+  - 남김:
+    - M2: 추적 무결성이 깨졌던 실행도 기록된 신원이 모두 사라지면 푼다(놓친 자손 가능성은 정지 버튼과 같은 한계).
+    - M3: 시작 시 새로 발견해 끝낸 자손은 기록에 남지 않는다.
+    - M4: 남은 프로세스가 죽지 않으면 실행당 최대 8초가 걸리고 시작 중 취소를 보지 않는다.
+    - M7: 안내 문구가 엔진의 한국어 고정 문자열이다(다른 엔진 안내와 같음).
+    - M8: 재부팅 뒤 기록된 pid가 다른 프로세스에 쓰이면 Unconfirmable이라 풀리지 않는다(abandon도 불가). 부팅 직후의 낮은 pid일수록 잘 겹친다.
+- 화면 문구: 실행·채팅 상태 '취소됨'을 '중단됨'으로 바꿨다(en은 Stopped). 중단 안내에 "변경은 작업 공간에 그대로"를 넣고, 복구 안내에 "앱을 껐다 켜 보세요"를 넣었다. 엔진 재시작 안내도 "작업 공간과 파일은 그대로"로 고쳤다.
+- 검증:
+  - sidecar 전체 830 통과(43 ignored). 그 뒤 가드 보완분은 엔진 시작·정리 관련 257개로 다시 확인했다.
+  - `npm test` 736, `pnpm build`, electron 타입 검사 통과.
+  - 실제 앱에서 실행 중 강제 종료 후 재시작, 편집 내용 되살리기는 아직 확인하지 않았다(localStorage 실제 동작 포함).
+- 다음 할 일:
+  - 실제 앱에서 확인(실행 중 종료 → 다시 켜기 → 이어서 메시지, 저장 안 한 편집 되살리기).
+  - **프로세스 증거 재설계**(256개 한계·pid 재사용): 긴 개발 실행을 위해 가장 먼저 필요하다.
+  - 시작 중(프로세스 신원이 아직 없는) 실행의 자동 정리.
+
+### 2026-11-17 · by Claude Opus 5.5 (claude-opus-5-5) — 앱 종료는 막지 않는다·다시 켤 때 끊긴 실행 자동 정리
+- 사용자 결정: 크래시는 최대한 없어야 한다. 작업 중이라고 앱 종료를 막는 것은 말이 안 되며, 종료하면 작업도 중단돼야 한다. 껐다 켜는 데 부담이 없어야 한다.
+- 원인(코드 확인):
+  - `app.prepareQuit`은 실행 취소를 요청만 한다. Electron은 그 몇 초를 기다리지 않았다(로그인·설치만 재시도). 그래서 실행 중이면 곧바로 "아직 안전하게 종료할 수 없어요" 창을 띄우고 종료를 막았다. 저장된 복구 기록만 있어도 "그래도 종료"를 물었다.
+  - 다시 켜면 끊긴 실행이 모두 recoveryRequired(채팅·작업 공간·writer lock 묶임)가 됐다. 사용자 복구(abandon)는 채팅을 discarded로 만든다.
+- 처리:
+  - `electron/quit-coordinator.ts`를 새로 작성했다.
+    - 종료를 누르면 창을 바로 숨기고(`onQuitStarted`), 살아 있는 작업이 멈추기를 최대 10초 기다린다.
+    - 깨끗하면 clean 종료, 아니면 묻지 않고 `uncleanQuit`로 종료한다. 엔진 오류나 15초 무응답도 같다.
+    - 종료를 막는 대화상자 두 개를 제거했다. 업데이트 설치는 clean일 때만 한다.
+  - 엔진: stdin이 닫히면 `LoginProcess` drop이 공급자 프로세스 트리를 정리한다(기존 동작 확인).
+  - 시작 복구 `recover_unclean_runs` → `interrupted_run_upserts`
+    - 기록된 프로세스가 모두 Gone이고, 작업 공간이 run의 manifest 그대로(active, lock 정상)이며, 실행 기록 검증을 통과하면 run을 canceled(cleanExit)로 끝낸다.
+    - 채팅은 canceled, writer lock은 해제, 작업 공간과 결과는 유지한다. 하나라도 불확실하면 기존 recoveryRequired다.
+    - 로그인 잠금은 시작 시 `release_settled_fences`가 이 기록으로 푼다(테스트 확인).
+- 발견:
+  - fake runtime(`ActiveAgentRun`)은 drop 때 프로세스를 정리하지 않는다. 테스트·데모 전용이며, 테스트에서는 직접 종료시킨다.
+  - 종료 기록 저장 단계에서 실패한 '중단 중' 실행은 manifest가 먼저 recoveryRequired로 바뀌어 있어 자동 정리하지 않는다(의도).
+- 테스트:
+  - 새 테스트 `an_app_closed_mid_run_reopens_with_the_run_ended_and_its_sign_in_hold_free`(사라진 경우와 살아 있는 경우).
+  - 기존 7개 테스트의 기대값을 새 동작으로 바꿨다.
+  - Electron 종료 테스트를 다시 썼다(저장 기록만, 엔진 오류, 무응답, 멈추면 clean, 끝내 안 멈추면 uncleanQuit).
+- 독립 검토(1명): 차단 없음.
+  - 근거:
+    - pid 재사용은 `start_us` 불일치로 Unconfirmable이 되어 자동 정리하지 않는다.
+    - 엔진이 정리하지 못해 살아 있는 프로세스는 Alive라 복구로 남는다.
+    - 출력 seal은 terminal upsert에서 자동으로 된다.
+    - 팀 작업은 `pause_after_restart`로 멈추고 다시 실행하지 않는다.
+    - 새 경로의 모든 실패는 None으로 처리되어 기존 경로로 넘어간다. admission 오류 전파는 없다.
+  - 반영 I1: 엔진은 프로세스마다 TERM 4초와 KILL 4초를 기다리며 정리하고, 그동안 DB 잠금을 쥔다. 앱이 먼저 끝나 바로 다시 켜면 admission이 실패할 수 있었다. 앱은 이제 엔진 입력을 닫고(`closeInput`) 엔진이 끝나기를 최대 12초 기다린 뒤 종료한다(창은 이미 숨겨져 있다).
+  - 남김:
+    - M1: 추적되지 않은 분리 자손(setsid 서버 등)은 Gone 판정에 안 잡힌다. 정지 버튼과 같은 한계지만 이제 자동으로 처리된다.
+    - M2: 결과를 받았지만 종료 기록 전에 끊긴 실행도 canceled가 된다.
+    - M3: 시작 중이라 프로세스 기록이 없는 실행은 복구로 남는다.
+    - M4: 종료 중(최대 약 25초) Dock 클릭에 반응하지 않는다.
+    - M5: 업데이트 경로가 안전하지 않다고 판정해도 엔진은 종료 준비 상태로 남는다(기존 동작).
+    - M6: 프로토콜 실패 때 SIGTERM 경로는 drop 정리를 건너뛴다(기존 동작, 다음 시작에서 Alive이면 복구).
+    - 저장하지 않은 편집 내용은 종료 시 묻지 않고 사라진다(기존 동작). 사용자 결정이 필요하다.
+- 검증: sidecar 전체 824 통과(43 ignored), `npm test` 732, `pnpm build`, electron 타입 검사 통과. 실제 앱에서 끄고 켜는 확인은 아직 하지 않았다.
+- 다음 할 일: 실제 앱에서 실행 중 종료 후 다시 켜기 확인, 저장하지 않은 편집 처리(사용자 결정), M3(시작 중 종료).
+
+### 2026-11-17 · by Claude Opus 5.5 (claude-opus-5-5) — 팀 대화창 실시간 작업 내역·거절 뒤 실패로 끝나던 문제
+- 사용자 방향: 멈춘 실행에 대비하는 방법은 경고가 아니라 에이전트가 하는 일을 팀 대화창에 실시간으로 계속 보여 주는 것이다.
+- 조사: 실행 중 공개 출력은 에이전트 글(`message`)과 Codex 계획(`plan`)뿐이었다. 도구 사용은 엔진이 받고도 버렸다(Claude `has_private_blocks`, Codex `TextAction::Tool`).
+- 함께 찾은 결함(`e4eab16a`):
+  - `12c9f165` 뒤 앱이 범위 밖 요청을 거절하면, 실제 Claude는 result의 `permission_denials`에 그 거절을 적는다.
+  - 그런데 성공 조건이 `!permission_denied`여서 실행이 결국 실패로 끝났다. fixture가 항상 빈 목록을 보내 테스트가 놓쳤다.
+  - 수정: 결과에 적힌 거절 tool_use_id가 모두 앱이 거절한 것일 때만 정상 종료로 본다(`ResultObservation.denied_tool_use_ids`, `ClaudeOutputState.denied_by_app`). id가 없거나 다른 출처의 거절이 섞이면 실패를 유지한다.
+  - 사용자가 거절한 경우도 이제 성공으로 끝난다(의도, 검토 M6).
+- 작업 내역 구현:
+  - 출력 채널 `activity`를 추가했다(Rust `OutputItemChannel::Activity`, TS 계약). status이면서 Complete일 때만 유효하다.
+  - `agent_runtime/preparation/activity.rs`가 `{action, target?, tool?, outcome?}` JSON을 만든다.
+    - Claude: 앱이 허용·거절하는 순간에 기록한다. 실제 실행 결과는 반영하지 않는다(M7).
+    - Codex: 명령·파일 변경의 시작·실패·거절을 기록한다.
+  - 경로는 작업 공간 기준 상대 경로만 남긴다. 밖이나 `..`, 숨은 형식 문자가 있으면 뺀다.
+  - 명령은 모델이 붙인 `description` 한 줄(160자)만 남긴다. 도구 입력은 공개하지 않는다는 원칙의 예외이며, 에이전트 글과 같은 민감도다(M1).
+  - 저장은 best effort이고 Legacy 형식은 기록하지 않는다.
+  - 화면(`agent-output-panel.tsx`, `work-history.ts`): 작은 한 줄(색 점·종류·경로·결과)로 그린다. 실시간 창은 activity 행을 40개까지만 두어 에이전트 글이 밀려나지 않게 했다(I1).
+- 독립 검토(1명): 차단 없음.
+  - 반영: I1(창 상한), M1(bidi·형식 문자 거절), M2(TS 길이를 code point로), M5(거절 출처 대조).
+  - 남김:
+    - M3: 행마다 DB 약 0.6KB가 늘고 재검증 비용이 비례해 커진다. G6에서 측정한다. 본문과 같은 run 예산 64MiB를 나눠 쓴다.
+    - M4: 이전 빌드는 `"activity"` 채널을 몰라 이 데이터를 열지 못한다(아래 함정).
+- 검증:
+  - Rust: core `claude` 65, sidecar `activity claude codex` 44, `agent_output erasure durable output` 65.
+  - claude_native·codex durable 테스트에 작업 내역 행 확인을 추가했다(명령 원문이 노출되지 않는지도 확인).
+  - `npm test` 732, `pnpm build` 통과.
+  - headless Chrome으로 행 모양을 그려 확인했다. 실제 앱에서는 아직 확인하지 않았다.
+- 다음 할 일: 앱을 다시 켜서 실제 실행으로 작업 내역 확인, Codex 승인 기록 상한(128), 연속 작업 내역 접기(선택).
+
+### 2026-11-17 · by Claude Opus 5.5 (claude-opus-5-5) — 실행 10분 제한 제거(사용자 결정)·macOS 접근 권한 검토
+- 사용자 결정: 실행 시간 제한을 없앤다. 긴 개발 작업과 사용자 승인 대기가 10분을 넘으면 실패로 끝났다.
+- 처리:
+  - Claude: `SessionChannel.deadline`(10분)과 그 검사를 제거했다. 시작할 때의 15초 연결 확인(`ControlInitialization`)은 유지한다.
+  - Codex: `TURN_BUDGET`(10분)을 제거했다. 준비 단계 30초는 유지한다. 의미에 맞게 `ensure_open`/`ensure_open_at`/`begin_turn`으로 이름을 바꿨다.
+  - Claude 세션당 요청 ID 상한을 1024개에서 65,536개로 올렸다(`MAX_SESSION_REQUESTS`, `claude_approval.rs`).
+    - 모든 도구 호출이 PreToolUse hook으로 한 번씩 묻기 때문에, 시간 제한이 없어지면 1024개가 긴 작업의 실제 상한이 됐다(검토 I1).
+    - 재사용 ID 거절은 그대로다.
+  - `provider_model_proxy`의 600초는 제품에서 쓰지 않는 진단 후보(`#[cfg(test)]` 호출뿐)라 그대로 두었다.
+- 독립 검토(1명): 차단 결함 없음. 사용자 취소, 앱 종료 정리, 프로세스 관찰 실패, 요청·이벤트 예산은 모두 유효하다. 공급자 대기는 모두 poll 방식이라 취소가 반영되지 않는 무한 대기는 없다.
+  - 남김:
+    - I1(Codex): 승인 결정 기록 `MAX_INTENTS=128`(run projection에 영구 저장)이 긴 Codex 실행의 상한이다. 저장 계약을 바꾸는 별도 작업이다.
+    - I2: 응답 없는 공급자에서 자동으로 빠져나오지 못한다. 사용자가 취소할 때까지 실행 fence·로그인 hold·작업 공간이 묶이고, 화면에 '멈춤' 표시도 없다. 후속으로 무진행 경고 표시를 제안한다.
+    - M2: Claude 쪽에 장시간 경과 후 advance를 보이는 테스트는 없다(Codex는 24시간 확인이 있다).
+    - M3: Codex `request_cancel`의 신원 조건.
+  - 재검토(상한 상향·이름 변경): 차단·중요 결함 없음. 상한에 쌓이는 ID 수는 항상 이벤트 수 이하라 DurableV1 내부 이벤트 예산이 먼저 걸린다(도구 호출 약 2만 회). 메모리는 세션당 최대 약 10MiB다. 대기 중 요청은 sidecar 대기 큐 128개 한도가 그대로 막는다. 반영: M1(이벤트 예산과 함께 올리라는 주석). 남김: M2(상한에 닿은 뒤 거절하는 테스트 없음).
+- macOS 접근 권한(사용자 질문, 분석만):
+  - Orca가 손쉬운 사용·화면 기록 권한을 받는 것은 다른 앱 화면을 읽고 조작하는 computer use 때문이다.
+  - Elsecrew 에이전트는 작업 공간 복사본 안의 파일·명령만 다루고, 앱이 도구 요청의 경로·권한을 검사한다. 그래서 이 권한은 지금 필요하지 않다. 받으면 에이전트 자손 프로세스도 그 권한을 함께 쓸 수 있어 작업 공간 경계와 충돌한다(macOS는 권한을 앱 단위로 주며, 자식 프로세스도 그 권한을 쓸 수 있다. 일반 동작 기준이고, 이 앱에서 직접 확인하지는 않았다).
+  - `provider_model_proxy`를 쓰는 Codex `ProxiedOuter` 실행은 `launch_proxied_codex_candidate`(테스트 전용)뿐이다. 제품 실행은 `NamedTools`다.
+  - 현재 패키지 설정(`electron/forge.config.ts`)에 권한 사용 설명(`NS*UsageDescription`)이 없다. 문서·데스크탑·다운로드 폴더의 프로젝트에 대해 macOS가 묻는 동작과 문구는 실제 패키지로 확인하지 않았다(미확인).
+- 문서: 워크로그가 540줄이 되어 11-16 엔트리 전부(236줄)를 `docs/archive/history-2026-11.md` 맨 위로 옮겼다. `architecture.md` 378행의 10분 설명을 고쳤다.
+- 검증: sidecar `provider_claude_session`·`provider_preflight_session` 23개, `claude codex` 41개, core `claude` 64개 통과, 경고 없음.
+- 다음 할 일: 앱을 다시 켜서 긴 실행 확인(실제 모델 사용은 사용자 판단), Codex 승인 기록 상한, 무진행 경고 표시(I2).
+
 ### 2026-11-16 · by Claude Opus 5.5 (claude-opus-5-5) — 정책 밖 도구 요청 하나가 실행 전체를 끝내던 문제
 - 사용자 보고: 기획 실행(Claude Code, 읽기 전용)이 56초 만에 "도구 사용 허용을 전달하는 중 멈췄습니다. `approvalDelivery/boundaryRejected`"로 실패했다. "왜 이리 자주 중단되지"라는 질문이었다.
 - 원인(코드 확인): 프로젝트의 파일·명령 자동 허용이 켜져 있으면 `deliver_approval`이 요청을 `allow_tool_once`로 보낸다. 그런데 경로·권한 검사(`inspect_snapshot_file`, `Admission::tool`)가 다음 경우를 `providerPreflightFailed`로 판정했고, 이것이 `note_failure("approvalDelivery")` → 실행 실패로 이어졌다.

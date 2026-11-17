@@ -18,7 +18,7 @@ import { classifyLoginFailure } from "../src/m5/provider-login-diagnostic.ts";
 import { INSTALL_CHANNEL, validateInstallRequest, validateInstallStatus } from "../src/m5/contracts/provider-install-v1.ts";
 import { APPROVAL_CHANNEL, validateApprovalRequest, validateApprovalResult } from "../src/m5/contracts/approval-v1.ts";
 import { PROJECT_CATALOG_CHANNEL, validateProjectCatalogRequest, validateProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
-import { mkdirSync, realpathSync, statSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, rmSync, statSync, readdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve, sep, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -91,6 +91,20 @@ async function rendererReadyForUpdate(): Promise<boolean> {
 }
 /** Stopping agent processes takes up to about 8 seconds each (terminate, then kill). */
 const ENGINE_EXIT_WAIT_MS = 12_000;
+/** Development only, never in a packaged app: an automated test names the
+ * folder to open in a one-shot file in the development app data folder,
+ * since a native folder picker cannot be driven in the background. Reading
+ * the file consumes it, so every other pick shows the real dialog. */
+function takeDevPickedDirectory(): string | null {
+  if (app.isPackaged) return null;
+  const file = join(app.getPath("userData"), "dev-pick-directory.txt");
+  try {
+    const path = readFileSync(file, "utf8").trim();
+    rmSync(file);
+    return path || null;
+  } catch { return null; }
+}
+
 const quitCoordinator = new QuitCoordinatorV1({
   prepareSidecarQuit: () => {
     if (!sidecar) return Promise.reject(new Error("sidecar was not started"));
@@ -582,14 +596,15 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle(M5_BRIDGE_V2_CHANNELS.projectOpen, async (event) => {
     assertCurrentMainFrame(event);
-    const result = await dialog.showOpenDialog(mainWindow!, { properties: ["openDirectory"] });
+    const picked = takeDevPickedDirectory();
+    const result = picked ? { canceled: false, filePaths: [picked] } : await dialog.showOpenDialog(mainWindow!, { properties: ["openDirectory"] });
     if (result.canceled || result.filePaths.length !== 1) return { outcome: "cancelled" };
     if (!sidecar) throw new Error("sidecar was not started");
     const selected = realpathSync(result.filePaths[0]!);
     if (process.platform === "darwin" && readdirSync(selected).length === 0) {
       const identity = statSync(selected, { bigint: true });
       const ko = app.getLocale().toLowerCase().startsWith("ko");
-      const confirmation = await dialog.showMessageBox(mainWindow!, {
+      const confirmation = picked ? { response: 0 } : await dialog.showMessageBox(mainWindow!, {
         type: "question",
         message: ko ? "이 빈 폴더에서 새 프로젝트를 시작할까요?" : "Start a new project in this empty folder?",
         detail: `${selected}\n\n${ko ? "변경 내용을 비교하고 되돌릴 수 있도록 이 폴더에 로컬 기록(.git)을 만듭니다. 온라인에 업로드하지 않으며, 에이전트는 별도의 작업 복사본에서 작업합니다." : "Create local history (.git) in this folder so changes can be compared and restored. Nothing is uploaded. Agents work in a separate copy."}`,

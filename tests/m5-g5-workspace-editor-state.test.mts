@@ -261,3 +261,29 @@ test("the draft store is bounded and tolerates unreadable or refusing storage", 
   assert.equal(createEditorDraftStore(null).load(ref(1)), null);
   assert.doesNotThrow(() => createEditorDraftStore(null).save(ref(1), { activePath: null, tabs: [tab("text")] }));
 });
+
+test("files an agent writes show up in the change and file lists without a manual refresh", async () => {
+  const bridge = new Bridge();
+  const controller = new ProjectEditorController(bridge as unknown as ChatProjectBridge, { workspaceRefreshDelayMs: 20 });
+  controller.start();
+  await controller.chooseProject();
+  assert.equal(await controller.bindChat(a), true);
+  bridge.calls = [];
+  const changed = (paths: string[]) => bridge.emit({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar", streamId: "watch_a", seq: 1,
+    event: "workspace.changed", payload: { ...a, event: "file.changed", paths, rescanRequired: false } });
+  // A burst of writes is reloaded once, after it settles.
+  changed(["docs/plan.md"]);
+  changed(["docs/plan.md", "index.html"]);
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.deepEqual(bridge.calls.filter(call => call.startsWith("v3.diff:") || call.startsWith("v3.tree:")).sort(), ["v3.diff:chat_a", "v3.tree:chat_a"]);
+  // While actions are blocked the reload waits, then happens once they resume.
+  bridge.calls = [];
+  controller.setActionBlocked(true);
+  changed(["index.html"]);
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.deepEqual(bridge.calls, []);
+  controller.setActionBlocked(false);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(bridge.calls.filter(call => call.startsWith("v3.diff:") || call.startsWith("v3.tree:")).sort(), ["v3.diff:chat_a", "v3.tree:chat_a"]);
+  controller.dispose();
+});

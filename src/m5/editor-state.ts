@@ -121,6 +121,8 @@ export interface ProjectEditorControllerOptions {
   drafts?: EditorDraftStore;
   /** How long typing may pause before the newest text is kept. */
   draftDelayMs?: number;
+  /** How long workspace writes may pause before the lists are reloaded. */
+  workspaceRefreshDelayMs?: number;
 }
 
 export class ProjectEditorController {
@@ -133,6 +135,7 @@ export class ProjectEditorController {
   readonly #snapshotCreationTimeoutMs: number;
   readonly #drafts: EditorDraftStore | null;
   readonly #draftDelayMs: number;
+  readonly #workspaceRefreshDelayMs: number;
   #draftTimer: ReturnType<typeof setTimeout> | null = null;
   /** Whether the open workspace has drafts in the store that came from this
    * view of it. Only those are ever rewritten or forgotten: drafts kept for a
@@ -183,6 +186,7 @@ export class ProjectEditorController {
     this.#snapshotCreationTimeoutMs = timeout;
     this.#drafts = options.drafts ?? null;
     this.#draftDelayMs = options.draftDelayMs ?? 800;
+    this.#workspaceRefreshDelayMs = options.workspaceRefreshDelayMs ?? 500;
   }
 
   start(): void {
@@ -204,6 +208,7 @@ export class ProjectEditorController {
       && ["m5.editorNotice.preparing", "m5.editorNotice.settings", "m5.editorNotice.switching", "m5.editorNotice.protected"].includes(this.#state.noticeKey);
     if (blocked && !this.#actionBlocked) this.#selectionGeneration += 1;
     this.#actionBlocked = blocked;
+    if (!blocked && this.#workspaceRefreshPending) queueMicrotask(() => this.#runWorkspaceRefresh());
     this.#set({ actionBlocked: blocked, ...(clearBlockingNotice ? { notice: null, noticeKey: undefined } : {}), ...(blocked && notice ? typeof notice === "string" ? { notice } : editorNotice(notice.key) : {}) });
   }
 
@@ -214,6 +219,7 @@ export class ProjectEditorController {
 
   dispose(): void {
     this.#storeDrafts();
+    if (this.#workspaceRefreshTimer !== null) { clearTimeout(this.#workspaceRefreshTimer); this.#workspaceRefreshTimer = null; }
     this.#disposed = true;
     this.#controllerGeneration += 1;
     this.#selectionGeneration += 1;
@@ -997,6 +1003,28 @@ export class ProjectEditorController {
       }
     }
     if (event.event === "diff.changed") void this.refreshChanges();
+    // An agent (or anything else) writing in the workspace: the watcher only
+    // reports changed files, so bring the change list and the file list up to
+    // date once a burst of writes has settled.
+    else if (event.event === "file.changed" && event.paths.length) this.#scheduleWorkspaceRefresh();
+  }
+
+  #workspaceRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  #workspaceRefreshPending = false;
+  #scheduleWorkspaceRefresh(): void {
+    if (this.#workspaceRefreshTimer !== null || this.#disposed) return;
+    this.#workspaceRefreshTimer = setTimeout(() => {
+      this.#workspaceRefreshTimer = null;
+      this.#runWorkspaceRefresh();
+    }, this.#workspaceRefreshDelayMs);
+  }
+  #runWorkspaceRefresh(): void {
+    if (this.#disposed) return;
+    // While actions are blocked the refresh waits for them to resume.
+    if (this.#actionBlocked) { this.#workspaceRefreshPending = true; return; }
+    this.#workspaceRefreshPending = false;
+    void this.refreshChanges();
+    void this.loadTree(this.#state.treeParent);
   }
 
   async #checkCleanFileChange(tab: EditorTab): Promise<void> {

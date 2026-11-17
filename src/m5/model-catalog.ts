@@ -47,6 +47,27 @@ export function cachedModels(runtime: Runtime) { return restore(runtime)?.result
 export function hasUsableModel(runtime: Runtime, selector: string, models: readonly { modelSelector: string }[] | undefined = cachedModels(runtime)): boolean {
   return Boolean(selector) && (!models?.length || models.some(model => model.modelSelector === selector));
 }
+type CatalogModel = { modelSelector: string; isDefault?: boolean; reasoningEfforts: readonly string[] };
+/**
+ * Every role without a usable model gets its provider's one recommended model
+ * (Codex at "medium" effort when offered). Null when a provider that such a
+ * role needs has no single recommendation: the user then picks by hand.
+ */
+export function withRecommendedModels<R extends { runtime: Runtime; modelSelector: string; reasoningEffort: string | null }>(
+  roles: readonly R[], catalogs: ReadonlyMap<Runtime, readonly CatalogModel[]>,
+): R[] | null {
+  const filled: R[] = [];
+  for (const role of roles) {
+    const models = catalogs.get(role.runtime);
+    if (models && role.modelSelector && models.some(model => model.modelSelector === role.modelSelector)) { filled.push(role); continue; }
+    const defaults = models?.filter(model => model.isDefault) ?? [];
+    if (defaults.length !== 1) return null;
+    const model = defaults[0];
+    filled.push({ ...role, modelSelector: model.modelSelector,
+      reasoningEffort: role.runtime === "codex" ? (model.reasoningEfforts.includes("medium") ? "medium" : model.reasoningEfforts[0] ?? null) : null });
+  }
+  return filled;
+}
 /** "opus · claude-opus-5-5" when the provider reported what the alias maps to. */
 export function modelLabel(runtime: Runtime, selector: string): string {
   const resolved = restore(runtime)?.result.models.find(model => model.modelSelector === selector)?.resolvedModel;
