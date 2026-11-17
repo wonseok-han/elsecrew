@@ -1466,10 +1466,14 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
 /** A read-only VS Code style comparison: only what changed is marked, side by
  * side (or in one column when narrow or chosen). Falls back to the plain
  * listing if the editor cannot load. */
+/** A new or removed file has nothing to compare against: its text is shown
+ * alone, read-only, instead of next to an empty side. Changed lines are told
+ * apart by color only; the +/- gutter marks rendered as empty boxes here. */
 function MonacoDiff({ path, before, after, sideBySide, wrap, onFailed }: { path: string; before: string; after: string; sideBySide: boolean; wrap: boolean; onFailed: () => void }) {
   const { t } = useI18n();
   const host = useRef<HTMLDivElement | null>(null);
-  const view = useRef<Monaco.editor.IStandaloneDiffEditor | null>(null);
+  const view = useRef<Monaco.editor.IStandaloneDiffEditor | Monaco.editor.IStandaloneCodeEditor | null>(null);
+  const single = before === "" || after === "";
   useEffect(() => {
     let cancelled = false;
     let models: Monaco.editor.ITextModel[] = [];
@@ -1482,15 +1486,23 @@ function MonacoDiff({ path, before, after, sideBySide, wrap, onFailed }: { path:
           "editorGutter.background": "#111315", "editor.lineHighlightBackground": "#191b1e",
           "editor.selectionBackground": "#354352", "editor.inactiveSelectionBackground": "#29323b" },
       });
-      const editor = monaco.editor.createDiffEditor(host.current, {
-        theme: "elsecrew", readOnly: true, originalEditable: false, automaticLayout: true,
-        renderSideBySide: sideBySide, useInlineViewWhenSpaceIsLimited: true, renderSideBySideInlineBreakpoint: 720,
+      const common = {
+        theme: "elsecrew", readOnly: true, automaticLayout: true,
         minimap: { enabled: false }, scrollBeyondLastLine: false, fontSize: 13, lineHeight: 20,
-        wordWrap: wrap ? "on" : "off", diffWordWrap: wrap ? "on" : "off",
-        hideUnchangedRegions: { enabled: true, contextLineCount: 3, minimumLineCount: 6, revealLineCount: 20 },
-        renderOverviewRuler: false, ariaLabel: t("m5.diff.comparison"),
-      });
+        wordWrap: wrap ? "on" as const : "off" as const, renderOverviewRuler: false, ariaLabel: t("m5.diff.comparison"),
+      };
       const language = languageFor(path);
+      if (single) {
+        models = [monaco.editor.createModel(after || before, language)];
+        view.current = monaco.editor.create(host.current, { ...common, model: models[0]!, glyphMargin: false, folding: false });
+        return;
+      }
+      const editor = monaco.editor.createDiffEditor(host.current, {
+        ...common, originalEditable: false,
+        renderSideBySide: sideBySide, useInlineViewWhenSpaceIsLimited: true, renderSideBySideInlineBreakpoint: 720,
+        renderIndicators: false, renderMarginRevertIcon: false, diffWordWrap: wrap ? "on" : "off",
+        hideUnchangedRegions: { enabled: true, contextLineCount: 3, minimumLineCount: 6, revealLineCount: 20 },
+      });
       models = [monaco.editor.createModel(before, language), monaco.editor.createModel(after, language)];
       editor.setModel({ original: models[0]!, modified: models[1]! });
       view.current = editor;
@@ -1500,8 +1512,10 @@ function MonacoDiff({ path, before, after, sideBySide, wrap, onFailed }: { path:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, before, after]);
   useEffect(() => {
-    view.current?.updateOptions({ renderSideBySide: sideBySide, wordWrap: wrap ? "on" : "off", diffWordWrap: wrap ? "on" : "off" });
-  }, [sideBySide, wrap]);
+    const options = { wordWrap: wrap ? "on" as const : "off" as const };
+    if (single) (view.current as Monaco.editor.IStandaloneCodeEditor | null)?.updateOptions(options);
+    else (view.current as Monaco.editor.IStandaloneDiffEditor | null)?.updateOptions({ ...options, renderSideBySide: sideBySide, diffWordWrap: options.wordWrap });
+  }, [sideBySide, wrap, single]);
   return <div ref={host} className="m5-monaco-diff" />;
 }
 
