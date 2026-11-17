@@ -61,6 +61,9 @@ pub(crate) mod preparation;
 mod reap;
 const RECOVERY_RESERVATION_FIELD: &str = "recovery_id_reservation";
 const RECOVERY_INTENT_FIELD: &str = "recovery_resolution_intent";
+/// How many processes a termination or recovery record may list (the
+/// contract's bound, and the bound of a provider hold's own record).
+pub(crate) const RECORDED_PROCESSES_MAX: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProviderMode {
@@ -259,11 +262,32 @@ impl AgentRuntime {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn recover_unclean_runs(
         &self,
         storage: &mut Storage,
         projects: &mut ProjectManager,
     ) -> Result<(), SidecarError> {
+        self.recover_unclean_runs_until(storage, projects, &std::sync::atomic::AtomicBool::new(false))
+    }
+
+    /// `cancelled` is the start being given up (the app is closing): nothing
+    /// more is waited for or stopped, and the caller reports the cancellation.
+    pub(crate) fn recover_unclean_runs_until(
+        &self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), SidecarError> {
+        // Runs this ledger calls unfinished belong to an engine that registered
+        // on it. If such an engine still runs, this is a copy of its app data:
+        // nothing here may stop its processes or settle its runs. Decided once,
+        // and only when a run actually needs it.
+        let mut decided: Option<bool> = None;
+        let mut may_settle = |storage: &Storage| {
+            !cancelled.load(std::sync::atomic::Ordering::Acquire)
+                && *decided.get_or_insert_with(|| !previous_engine_still_runs(storage, cancelled))
+        };
         for projection in storage.projection_records("run")? {
             if projection.get("source_kind").and_then(Value::as_str) != Some(SOURCE_KIND) {
                 continue;
@@ -282,12 +306,26 @@ impl AgentRuntime {
             if projection
                 .get("recovery")
                 .is_some_and(|value| !value.is_null())
-                || !projection
-                    .get("state")
-                    .and_then(Value::as_str)
-                    .is_some_and(|state| {
-                        ["preparing", "running", "cancelling", "recoveryRequired"].contains(&state)
-                    })
+            {
+                // A stop that could not be confirmed earlier is settled the
+                // same way once the proof holds; its workspace is not given up.
+                if projection["recovery"]["state"] == "unresolved"
+                    && !(may_settle(storage) && settle_interrupted_run(storage, projects, &projection))
+                {
+                    // Still unresolved: its workspace stays marked, also when an
+                    // earlier attempt stopped right after lifting the mark.
+                    if let Ok(address) = address_from_chat(&projection["record"]) {
+                        let _ = projects.workspace_restore_recovery_required(&address);
+                    }
+                }
+                continue;
+            }
+            if !projection
+                .get("state")
+                .and_then(Value::as_str)
+                .is_some_and(|state| {
+                    ["preparing", "running", "cancelling", "recoveryRequired"].contains(&state)
+                })
             {
                 continue;
             }
@@ -318,24 +356,25 @@ impl AgentRuntime {
             let profile: AgentResolvedProfileV1 =
                 serde_json::from_value(projection["record"]["selectedProfile"].clone())
                     .map_err(|error| SidecarError::new("recoveryInvalid", error.to_string()))?;
+            // A record lists at most RECORDED_PROCESSES_MAX processes; a run
+            // that saw more keeps them all in its internal identities.
             let tracked = projection["barrier"]["trackedProcesses"]
                 .as_array()
                 .cloned()
                 .unwrap_or_default()
                 .into_iter()
+                .take(RECORDED_PROCESSES_MAX)
                 .map(|mut value| {
                     value["observedGone"] = Value::Bool(false);
                     value
                 })
                 .collect::<Vec<_>>();
-            // The app closed (or stopped) while this run was going. When every
-            // tracked process is proven gone and the workspace is unchanged, the
-            // run simply ended: record it as canceled, like the stop button, and
-            // keep the task usable. Any doubt keeps the explicit recovery below.
-            if let Some(upserts) = interrupted_run_upserts(storage, projects, &projection, &chat_projection, &profile) {
-                if storage.upsert_projection_records_atomic(upserts).is_ok() {
-                    continue;
-                }
+            // The app closed (or the engine stopped) while this run was going:
+            // the work was interrupted, not reset. End the run as canceled, like
+            // the stop button, and keep its task and workspace in use. Any doubt
+            // keeps the explicit recovery below.
+            if may_settle(storage) && settle_interrupted_run(storage, projects, &projection) {
+                continue;
             }
             let run = agent_run_record(
                 run_id,
@@ -3244,41 +3283,241 @@ fn reserved_recovery_id(projection: &Map<String, Value>) -> Result<String, Proje
     Ok(recovery_id.to_string())
 }
 
-/// Records for a run whose processes are all proven gone after an unclean
-/// stop, ending it as canceled with the task left as it was. None whenever
-/// anything is uncertain: no recorded process, one still alive or unknown, a
-/// workspace that is no longer the run's, or a record that does not fit.
+/// Ends a run that stopped without its engine (the app was closed, or the
+/// engine failed) as canceled and keeps its task and workspace in use:
+/// quitting interrupts the work, it never resets it. Agent processes the dead
+/// engine left behind are stopped first, like any canceled run. A stop that
+/// could not be confirmed earlier (an unresolved recovery) is settled the same
+/// way once the proof holds. False whenever anything stays uncertain: no
+/// recorded process, a process tree whose end cannot be confirmed, a workspace
+/// or record that is not exactly the run's. The explicit recovery then remains.
+fn settle_interrupted_run(
+    storage: &mut Storage,
+    projects: &mut ProjectManager,
+    projection: &Map<String, Value>,
+) -> bool {
+    #[cfg(test)]
+    if SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.get()) {
+        return false;
+    }
+    let Some((address, upserts, lifted)) = interrupted_run_settlement(storage, projects, projection)
+    else {
+        return false;
+    };
+    let chat_id = address.chat_id.clone();
+    if storage.upsert_projection_records_atomic(upserts).is_err() {
+        if lifted {
+            let _ = projects.workspace_restore_recovery_required(&address);
+        }
+        return false;
+    }
+    // Tell the person in the task itself (unless they deleted it); a missing
+    // note changes nothing.
+    let deleted = storage.projection_record("project", &address.project_id).ok().flatten().is_some_and(|project| {
+        crate::project::project_deletion::is_deleted(&project)
+            || crate::project::project_deletion::deleted_chat(&project, &chat_id)
+    });
+    if !deleted {
+        let _ = crate::orchestration::notice(storage, &chat_id, INTERRUPTED_RUN_NOTICE);
+    }
+    true
+}
+
+/// The identities recorded in the sign-in hold bound to this run, when that
+/// hold exists, is free (no live owner) and names exactly this run.
+#[cfg(target_os = "macos")]
+fn hold_identities(storage: &Storage, projection: &Map<String, Value>) -> Option<BTreeSet<ProcIdentity>> {
+    let binding = crate::provider_run_binding::RunFenceBinding::from_value(projection.get("provider_run_fence")?).ok()?;
+    match projection["record"]["selectedProfile"]["runtime"].as_str()? {
+        "claude-code" => {
+            let profile = crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage).ok()?;
+            crate::provider_login_process::bound_run_identities(&profile, &binding).ok()
+        }
+        "codex" => {
+            let profile = crate::provider_profile::CodexProfileBinding::from_storage(storage).ok()?;
+            crate::provider_login_process::bound_run_identities(&profile, &binding).ok()
+        }
+        _ => None,
+    }
+}
+#[cfg(not(target_os = "macos"))]
+fn hold_identities(_: &Storage, _: &Map<String, Value>) -> Option<BTreeSet<ProcIdentity>> {
+    None
+}
+
+/// How long a start waits for the previous engine to finish going down. An
+/// engine whose app was closed or killed still stops its agents (TERM, then
+/// KILL: up to about 8 seconds a run) after it has let go of the app data.
+const PREVIOUS_ENGINE_EXIT_WAIT: Duration = Duration::from_millis(if cfg!(test) { 300 } else { 12_000 });
+
+/// Whether an engine that registered on this ledger without a clean shutdown
+/// is still running after the time an engine needs to go down. The app data's
+/// own lock rules a working engine out for the data itself, but not for a
+/// copy of it opened on the same computer: the unfinished runs in a copy
+/// belong to that live engine, and nothing here may touch them. Where the
+/// processes cannot be listed at all, assume one runs (and do not wait).
+fn previous_engine_still_runs(storage: &Storage, cancelled: &std::sync::atomic::AtomicBool) -> bool {
+    let Ok(engines) = storage.unclean_engine_processes() else {
+        return true;
+    };
+    let engines: Vec<(u32, Option<i64>)> = engines
+        .into_iter()
+        .filter(|(pid, _)| *pid != std::process::id())
+        .map(|(pid, registered_at)| {
+            (pid, chrono::DateTime::parse_from_rfc3339(&registered_at).map(|at| at.timestamp_micros()).ok())
+        })
+        .collect();
+    if engines.is_empty() {
+        return false;
+    }
+    let deadline = Instant::now() + PREVIOUS_ENGINE_EXIT_WAIT;
+    loop {
+        let Ok(entries) = SystemProcTable.list() else {
+            return true;
+        };
+        if !entries.iter().any(|entry| engines.iter().any(|(pid, registered_us)| is_that_engine(entry, *pid, *registered_us))) {
+            return false;
+        }
+        if Instant::now() >= deadline || cancelled.load(std::sync::atomic::Ordering::Acquire) {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// A live process is the engine a record names only under that process ID,
+/// with the engine's name, and started no later than the record was written
+/// (a second of slack covers its whole-second timestamp). A process ID reused
+/// by anything else is not it.
+fn is_that_engine(entry: &elsecrew_core::proctree::ProcEntry, pid: u32, registered_us: Option<i64>) -> bool {
+    entry.identity.pid == pid
+        && entry.comm.starts_with("elsecrew")
+        && registered_us.is_none_or(|at| entry.identity.start_us <= at + 1_000_000)
+}
+
+#[cfg(test)]
+mod previous_engine_tests {
+    use super::is_that_engine;
+    use elsecrew_core::proctree::{ProcEntry, ProcIdentity};
+
+    #[test]
+    fn a_reused_process_id_is_not_the_engine_a_record_names() {
+        let registered = 1_800_000_000_000_000i64;
+        let process = |pid, start_us, comm: &str| ProcEntry { identity: ProcIdentity { pid, start_us }, ppid: 1, comm: comm.into() };
+        assert!(is_that_engine(&process(700, registered - 3_000_000, "elsecrew-sideca"), 700, Some(registered)));
+        assert!(is_that_engine(&process(700, registered + 900_000, "elsecrew-sideca"), 700, Some(registered)));
+        // Another process ID, another program, or something started afterwards.
+        assert!(!is_that_engine(&process(701, registered - 3_000_000, "elsecrew-sideca"), 700, Some(registered)));
+        assert!(!is_that_engine(&process(700, registered - 3_000_000, "node"), 700, Some(registered)));
+        assert!(!is_that_engine(&process(700, registered - 3_000_000, "Elsecrew"), 700, Some(registered)));
+        assert!(!is_that_engine(&process(700, registered + 5_000_000, "elsecrew-sideca"), 700, Some(registered)));
+        // An unreadable registration time cannot clear it.
+        assert!(is_that_engine(&process(700, registered + 5_000_000, "elsecrew-sideca"), 700, None));
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Reproduces what an app version before this settlement left behind:
+    /// every interrupted run marked for explicit recovery.
+    pub(crate) static SKIP_INTERRUPTED_SETTLEMENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+const INTERRUPTED_RUN_NOTICE: &str = "실행이 중간에 멈췄어요. 지금까지 한 작업은 작업 공간에 그대로 있어요. 이어서 하려면 메시지를 보내 주세요.";
+
+/// The records of `settle_interrupted_run`, and whether the workspace's
+/// recovery mark was lifted for them (to put back if they cannot be stored).
+fn interrupted_run_settlement(
+    storage: &Storage,
+    projects: &mut ProjectManager,
+    projection: &Map<String, Value>,
+) -> Option<(WorkspaceAddress, Vec<ProjectionUpsert>, bool)> {
+    let run_id = projection["run_id"].as_str()?;
+    // An explicit resolution under way keeps its own order of steps.
+    if projection.get(RECOVERY_INTENT_FIELD).is_some_and(|value| !value.is_null()) {
+        return None;
+    }
+    if projection.get("recovery").is_some_and(|value| !value.is_null() && value["state"] != "unresolved") {
+        return None;
+    }
+    let internal = projection["process_identity_internal"].as_array()?;
+    if internal.is_empty() {
+        return None;
+    }
+    let mut identities = Vec::with_capacity(internal.len());
+    for private in internal {
+        identities.push(ProcIdentity {
+            pid: u32::try_from(private["pid"].as_u64()?).ok()?,
+            start_us: private["start_us"].as_i64()?,
+        });
+    }
+    // The run's sign-in hold keeps its own record of the processes. An engine
+    // that went down adds the last descendants it found there alone (its
+    // ledger was already closed), and it stops recording at its bound.
+    let held = hold_identities(storage, projection);
+    let chat_projection = actual_chat_projection(storage, projection["chat_id"].as_str()?).ok()?;
+    let chat = &chat_projection["record"];
+    let profile: AgentResolvedProfileV1 =
+        serde_json::from_value(projection["record"]["selectedProfile"].clone()).ok()?;
+    let address = address_from_chat(chat).ok()?;
+    // Whatever the dead engine left running is stopped like any canceled run
+    // (TERM, then KILL, descendants included). Only a confirmed end counts.
+    let mut tracker = TreeTracker::new(identities[0]);
+    for identity in identities[1..].iter().chain(held.iter().flatten()) {
+        tracker.track_identity(*identity);
+    }
+    if !tracker
+        .terminate(&SystemProcTable, &SystemClock::default(), TerminationConfig::default())
+        .confirmed()
+    {
+        return None;
+    }
+    // What the records list, all of it now proven gone: the hold's own set
+    // when there is one (its release compares against exactly that), else the
+    // ledger's, within what a record may list.
+    let identities: Vec<ProcIdentity> = match held {
+        Some(held) if !held.is_empty() => held.into_iter().collect(),
+        _ => identities.into_iter().take(RECORDED_PROCESSES_MAX).collect(),
+    };
+    let lifted = projects
+        .workspace_resume_interrupted(storage, &address, &projection["workspace_manifest"], run_id)
+        .ok()?;
+    let upserts = interrupted_run_upserts(storage, projection, &chat_projection, &profile, &address, &identities);
+    if upserts.is_none() && lifted {
+        let _ = projects.workspace_restore_recovery_required(&address);
+    }
+    Some((address, upserts?, lifted))
+}
+
 fn interrupted_run_upserts(
     storage: &Storage,
-    projects: &ProjectManager,
     projection: &Map<String, Value>,
     chat_projection: &Map<String, Value>,
     profile: &AgentResolvedProfileV1,
+    address: &WorkspaceAddress,
+    identities: &[ProcIdentity],
 ) -> Option<Vec<ProjectionUpsert>> {
     let run_id = projection["run_id"].as_str()?;
-    let tracked = projection["barrier"]["trackedProcesses"].as_array()?;
-    let internal = projection["process_identity_internal"].as_array()?;
-    if tracked.is_empty() || tracked.len() != internal.len() {
-        return None;
-    }
-    for private in internal {
-        let identity = ProcIdentity {
-            pid: u32::try_from(private["pid"].as_u64()?).ok()?,
-            start_us: private["start_us"].as_i64()?,
-        };
-        if !matches!(SystemProcTable.probe(identity), ProbeResult::Gone) {
-            return None;
-        }
-    }
-    let tracked: Vec<Value> = tracked.iter().cloned().map(|mut value| {
-        value["observedGone"] = Value::Bool(true);
-        value
-    }).collect();
     let chat = &chat_projection["record"];
-    let address = address_from_chat(chat).ok()?;
-    if projects.verify_workspace(storage, &address).ok()? != projection["workspace_manifest"] {
-        return None;
-    }
+    // Keep each process's recorded public entry; the order follows the identities.
+    let known: Vec<&Value> = [&projection["barrier"]["trackedProcesses"], &projection["recovery"]["trackedProcesses"]]
+        .into_iter()
+        .filter_map(Value::as_array)
+        .flatten()
+        .collect();
+    let tracked: Vec<Value> = identities
+        .iter()
+        .map(|identity| {
+            let start = digest_text(&identity.start_us.to_string());
+            let mut value = known
+                .iter()
+                .find(|value| value["pid"] == identity.pid && value["startIdentityDigest"] == start.as_str())
+                .map(|value| (*value).clone())
+                .unwrap_or_else(|| process_value(*identity, Path::new("/redacted/agent"), true));
+            value["observedGone"] = Value::Bool(true);
+            value
+        })
+        .collect();
     let writer = profile.permission == "workspaceWrite";
     let run = agent_run_record(
         run_id, chat, profile,
@@ -3301,7 +3540,13 @@ fn interrupted_run_upserts(
     updated.insert("state".into(), json!("canceled"));
     updated.insert("termination".into(), termination);
     updated.insert("recovery".into(), Value::Null);
-    updated.get_mut("barrier")?["trackedProcesses"] = Value::Array(tracked);
+    updated.insert(
+        "process_identity_internal".into(),
+        Value::Array(identities.iter().map(|identity| json!({"pid":identity.pid,"start_us":identity.start_us})).collect()),
+    );
+    if let Some(barrier) = updated.get_mut("barrier").filter(|value| value.is_object()) {
+        barrier["trackedProcesses"] = Value::Array(tracked);
+    }
     // The same checks a later start applies to every stored run: a record
     // that would fail them stays an explicit recovery instead.
     if !updated.contains_key("output_format_version") {
@@ -3326,7 +3571,9 @@ fn interrupted_run_upserts(
         },
     ];
     if writer {
-        upserts.push(release_writer_lock(storage, &address, run_id, run_id, false).ok()?);
+        // Never the operation name of the run's own terminal or of an earlier
+        // recovery mark: a reused name with new content is refused.
+        upserts.push(release_writer_lock(storage, address, run_id, &format!("interrupted_{run_id}"), false).ok()?);
     }
     Some(upserts)
 }

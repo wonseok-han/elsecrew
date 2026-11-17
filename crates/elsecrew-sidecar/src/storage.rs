@@ -769,6 +769,26 @@ impl Storage {
         }
     }
 
+    /// Every engine process that registered on this ledger and did not shut
+    /// down cleanly: its process ID and when it registered. All of them, not
+    /// only the latest: a copy of the app data keeps the record of the live
+    /// engine it was copied from however often the copy is opened afterwards.
+    pub(crate) fn unclean_engine_processes(&self) -> Result<Vec<(u32, String)>, SidecarError> {
+        Ok(load_projection(&self.connection)?
+            .app_instances
+            .values()
+            .filter_map(|row| {
+                if !row.get("clean_shutdown_at")?.is_null() {
+                    return None;
+                }
+                Some((
+                    u32::try_from(row.get("pid")?.as_u64()?).ok()?,
+                    row.get("started_at")?.as_str()?.to_string(),
+                ))
+            })
+            .collect())
+    }
+
     pub fn checkpoint(&self) -> Result<(), SidecarError> {
         self.ensure_writes_admitted()?;
         let (busy, _log, _checkpointed): (u32, i64, i64) = self

@@ -159,7 +159,11 @@ fn verify_completion(
     let public = termination["trackedProcesses"]
         .as_array()
         .ok_or_else(failure)?;
-    if internal.is_empty() || internal.len() != recorded.len() || public.len() != internal.len() {
+    // The hold may list more than the ledger: an engine that is going down
+    // records the last descendants it finds in the hold alone, its ledger
+    // already closed. Every identity in the hold is still probed gone before
+    // the hold is released; the ledger's must all be among them.
+    if internal.is_empty() || internal.len() > recorded.len() || public.len() != internal.len() {
         return Err(failure());
     }
     let mut expected = BTreeSet::new();
@@ -178,7 +182,7 @@ fn verify_completion(
             return Err(failure());
         }
     }
-    if &expected != recorded {
+    if !expected.is_subset(recorded) {
         return Err(failure());
     }
     let address = address_from_chat(run)?;

@@ -818,6 +818,10 @@ mod tests {
         assert_eq!(sidecar.storage.projection_record("chat",chat["chatId"].as_str().unwrap()).unwrap(),before);
     }
     fn start(sidecar: &mut Sidecar, chat: &Value) -> ResponseV1 {
+        start_as(sidecar, chat, "req_workflow_start")
+    }
+    /// Each request of one conversation has its own ID, as in the app.
+    fn start_as(sidecar: &mut Sidecar, chat: &Value, request_id: &str) -> ResponseV1 {
         let id = chat["chatId"].as_str().unwrap();
         let capability = sidecar
             .agent_runtime
@@ -830,7 +834,7 @@ mod tests {
             .iter()
             .map(|m| m["messageId"].clone())
             .collect();
-        let request=sidecar.workflow_request("req_workflow_start".into(),"run.startAgent",json!({"chatId":id,"roleId":"coordinator","inputMessageIds":ids,"expectedCapabilityFingerprint":capability["fingerprint"]}));
+        let request=sidecar.workflow_request(request_id.into(),"run.startAgent",json!({"chatId":id,"roleId":"coordinator","inputMessageIds":ids,"expectedCapabilityFingerprint":capability["fingerprint"]}));
         sidecar
             .handle_agent_request(request)
             .unwrap()
@@ -1246,13 +1250,17 @@ mod tests {
         (root, sidecar, chat, run_id, fence_path)
     }
 
-    /// The app was closed (or the engine stopped) while a run held a sign-in
-    /// hold. Its processes end with the engine, so the next start ends the run
-    /// as canceled and frees the hold: nothing is left for the person to fix.
+    /// Quitting interrupts the work; it never resets it. Whether the agent's
+    /// processes already ended with the engine, were left running by an engine
+    /// that died, or an older app version had marked the run for recovery: the
+    /// next start ends the run as canceled, stops what was left running, frees
+    /// the sign-in hold, and the same task goes on in the same workspace with
+    /// every file the agent had written so far.
     #[test]
     #[cfg(target_os = "macos")]
-    fn an_app_closed_mid_run_reopens_with_the_run_ended_and_its_sign_in_hold_free() {
-      for processes_gone in [true, false] {
+    fn an_app_closed_mid_run_reopens_with_the_work_kept_and_the_task_usable() {
+      use elsecrew_core::proctree::{ProbeResult, ProcIdentity, ProcTable, SystemProcTable};
+      for case in ["processes ended", "processes left running", "marked by an older version", "the hold lists a last descendant"] {
         let (root, mut sidecar, chat) = service_named(None, elsecrew_protocol::lifecycle_v1::SQLITE_FILE_V1);
         assert!(start(&mut sidecar, &chat).ok);
         // A run that keeps going until it is stopped.
@@ -1273,16 +1281,40 @@ mod tests {
         };
         let fence_path = bind_claude_hold(&mut sidecar, &run_id);
         assert!(fence_path.is_file());
-        let identities: Vec<_> = sidecar.storage.projection_record("run", &run_id).unwrap().unwrap()["process_identity_internal"]
-            .as_array().unwrap().iter()
-            .map(|value| elsecrew_core::proctree::ProcIdentity { pid: value["pid"].as_u64().unwrap() as u32, start_us: value["start_us"].as_i64().unwrap() })
+        let run = sidecar.storage.projection_record("run", &run_id).unwrap().unwrap();
+        let mut identities: Vec<_> = run["process_identity_internal"].as_array().unwrap().iter()
+            .map(|value| ProcIdentity { pid: value["pid"].as_u64().unwrap() as u32, start_us: value["start_us"].as_i64().unwrap() })
             .collect();
+        // An engine that goes down records the last descendants it finds in
+        // the hold alone: its ledger is already closed.
+        let mut last_descendant = None;
+        if case == "the hold lists a last descendant" {
+            use std::io::Write;
+            let child = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+            let identity = elsecrew_core::proctree::identity_of(child.id()).unwrap();
+            let mut hold = std::fs::OpenOptions::new().append(true).open(&fence_path).unwrap();
+            writeln!(hold, "{} {}", identity.pid, identity.start_us).unwrap();
+            hold.sync_all().unwrap();
+            identities.push(identity);
+            last_descendant = Some((child, identity));
+        }
+        // What the agent had written so far.
+        let workspace = std::path::PathBuf::from(run["worktree_path"].as_str().unwrap());
+        std::fs::write(workspace.join("half-done.txt"), "written before the app closed\n").unwrap();
+        let data = sidecar.storage.path().parent().unwrap().to_path_buf();
+        let manifest = data.join("worktree-manifests-v1").join(format!("{}.json", chat["worktreeId"].as_str().unwrap()));
         let mut ready = sidecar.ready.clone();
         ready.sidecar_instance_id = "closed_mid_run_reopened".into();
         drop(sidecar);
-        use elsecrew_core::proctree::{ProbeResult, ProcTable};
-        let gone = |identity: &elsecrew_core::proctree::ProcIdentity| matches!(elsecrew_core::proctree::SystemProcTable.probe(*identity), ProbeResult::Gone);
-        if processes_gone {
+        let gone = |identity: &ProcIdentity| matches!(SystemProcTable.probe(*identity), ProbeResult::Gone);
+        let binary = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("elsecrew-sidecar");
+        let open = |ready: &ReadyPayloadV1| Sidecar::initialize(
+            root.path().join(elsecrew_protocol::lifecycle_v1::SQLITE_FILE_V1),
+            ready.clone(),
+            AgentRuntime::fake(binary.clone(), FakeScenario::OrchestratorFinal),
+            &AtomicBool::new(false),
+        ).unwrap();
+        if case == "processes ended" {
             // A closing engine ends its provider processes (`LoginProcess` drop).
             // The fake runtime has no such owner, so end them the same way here.
             for identity in &identities {
@@ -1293,31 +1325,75 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(10));
             }
         } else {
+            // The engine died without stopping its agent.
             assert!(!identities.iter().all(gone));
         }
-        let binary = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("elsecrew-sidecar");
-        let reopened = Sidecar::initialize(
-            root.path().join(elsecrew_protocol::lifecycle_v1::SQLITE_FILE_V1),
-            ready,
-            AgentRuntime::fake(binary, FakeScenario::OrchestratorFinal),
-            &AtomicBool::new(false),
-        )
-        .unwrap();
-        let run = reopened.storage.projection_record("run", &run_id).unwrap().unwrap();
-        if processes_gone {
-            assert_eq!(run["record"]["state"], "canceled");
-            assert!(run["recovery"].is_null());
-            assert!(!fence_path.exists(), "the sign-in hold is free again");
-            assert!(reopened.storage.blocker_ids().unwrap().is_empty());
-        } else {
-            // A process that may still be working keeps the explicit recovery.
+        if case == "marked by an older version" {
+            agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(true));
+            let marked = open(&ready);
+            agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(false));
+            let run = marked.storage.projection_record("run", &run_id).unwrap().unwrap();
             assert_eq!(run["record"]["state"], "recoveryRequired");
             assert_eq!(run["recovery"]["state"], "unresolved");
-            assert!(fence_path.exists());
-            for identity in &identities {
-                unsafe { libc::kill(identity.pid as i32, libc::SIGKILL) };
-            }
+            assert_eq!(marked.storage.projection_record("chat", id).unwrap().unwrap()["record"]["state"], "recoveryRequired");
+            let stored: Value = serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
+            assert_eq!(stored["lifecycle"], "recoveryRequired");
+            assert!(fence_path.is_file());
+            ready.sidecar_instance_id = "closed_mid_run_reopened_again".into();
+            drop(marked);
         }
+        let mut reopened = open(&ready);
+        let run = reopened.storage.projection_record("run", &run_id).unwrap().unwrap();
+        assert_eq!(run["record"]["state"], "canceled", "{case}");
+        assert!(run["recovery"].is_null(), "{case}");
+        assert_eq!(run["termination"]["processesProvenGone"], true, "{case}");
+        assert!(identities.iter().all(gone), "what the engine left running is stopped ({case})");
+        assert!(!fence_path.exists(), "the sign-in hold is free again ({case})");
+        if let Some((mut child, identity)) = last_descendant {
+            // Stopped with the rest, and part of the run's record.
+            let _ = child.wait();
+            assert!(run["process_identity_internal"].as_array().unwrap().iter()
+                .any(|value| value["pid"] == identity.pid && value["start_us"] == identity.start_us), "{case}");
+        }
+        assert!(reopened.storage.blocker_ids().unwrap().is_empty(), "{case}");
+        reopened.agent_runtime.validate_persisted_runs(&reopened.storage).unwrap();
+        // The hold's proof: every process the ledger lists must be in the
+        // hold's own record, which may list more (each is probed before release).
+        let binding = crate::provider_run_binding::RunFenceBinding::from_value(&run["provider_run_fence"]).unwrap();
+        let ledger: std::collections::BTreeSet<ProcIdentity> = run["process_identity_internal"].as_array().unwrap().iter()
+            .map(|value| ProcIdentity { pid: value["pid"].as_u64().unwrap() as u32, start_us: value["start_us"].as_i64().unwrap() })
+            .collect();
+        let proof = |recorded: &std::collections::BTreeSet<ProcIdentity>| agent_runtime::verify_resolved_provider_fence(&reopened.storage, &reopened.projects, &binding, recorded);
+        assert!(proof(&ledger).is_ok(), "{case}");
+        let mut more = ledger.clone();
+        more.insert(ProcIdentity { pid: 3_000_000, start_us: 1_700_000_000_000_000 });
+        assert!(proof(&more).is_ok(), "{case}");
+        let mut fewer = ledger.clone();
+        fewer.pop_first();
+        assert!(proof(&fewer).is_err(), "{case}");
+        // Nothing was reset: the workspace, its files and the task are as they were.
+        let stored: Value = serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
+        assert_eq!(stored["lifecycle"], "active", "{case}");
+        assert_eq!(std::fs::read_to_string(workspace.join("half-done.txt")).unwrap(), "written before the app closed\n", "{case}");
+        let stored_chat = reopened.storage.projection_record("chat", id).unwrap().unwrap();
+        assert_eq!(stored_chat["record"]["state"], "canceled", "{case}");
+        let history = reopened.storage.chat_message_history(id).unwrap();
+        assert!(history.iter().any(|message| message["kind"] == "status"
+            && message["text"].as_str().is_some_and(|text| text.contains("작업 공간에 그대로"))), "{case}");
+        // The same task continues in the same workspace with a new message.
+        let request = reopened.workflow_request("req_continue_message".into(), "chat.appendMessage", json!({
+            "projectId":chat["projectId"],"chatId":id,"taskId":chat["taskId"],
+            "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+            "expectedEventSequence":stored_chat["durable_event_sequence"],
+            "clientMessageId":format!("user_{}", "c".repeat(32)),"text":"Carry on from where it stopped.",
+        }));
+        let response = reopened.handle_request(request).unwrap().response.unwrap();
+        assert!(response.ok, "{case}: {:?}", response.error);
+        let response = start_as(&mut reopened, &chat, "req_workflow_continue");
+        assert!(response.ok, "{case}: {:?}", response.error);
+        let next = reopened.storage.projection_record("chat", id).unwrap().unwrap();
+        assert_eq!(next["record"]["state"], "running", "{case}");
+        assert_eq!(next["record"]["worktreeId"], chat["worktreeId"], "{case}");
       }
     }
 

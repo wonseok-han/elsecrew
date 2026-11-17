@@ -4,14 +4,11 @@ use serde_json::{json, Value};
 
 pub(crate) use crate::provider_run_binding::RunFenceBinding;
 
-/// Recovery by proof only, whether the user asks for it or the app retries it
-/// (at start, after a run was settled). The verifier must prove the exact
-/// durable run is terminal before unlink; disappearance of processes alone is
-/// insufficient.
-pub(crate) fn recover_bound_run(
+/// Opens a hold bound to a run and reads what it recorded. Taking its lock
+/// proves no live owner holds it; the lock lasts as long as the reservation.
+fn read_bound(
     profile: &dyn LoginProfile,
-    verify_terminal: impl FnOnce(&RunFenceBinding, &BTreeSet<ProcIdentity>) -> Result<(), SidecarError>,
-) -> Result<(), SidecarError> {
+) -> Result<(RunFenceBinding, Reservation, std::path::PathBuf), SidecarError> {
     use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
     use std::io::Read;
     let home = profile.revalidate()?;
@@ -76,10 +73,6 @@ pub(crate) fn recover_bound_run(
             return Err(failure());
         }
     }
-    // Empty/unlaunched reservations need their live owner; do not infer closure.
-    if recorded.is_empty() {
-        return Err(failure());
-    }
     let reservation = Reservation {
         name: profile.pending_name(),
         directory,
@@ -88,6 +81,37 @@ pub(crate) fn recover_bound_run(
         failed: false,
     };
     reservation.verify()?;
+    Ok((binding, reservation, home))
+}
+
+/// The process identities this exact run's hold recorded, for the owner that
+/// settles the run after its engine is gone: the engine's own last cleanup
+/// can add identities here that never reached the run ledger. Not permission
+/// to release anything; an error only means there is no usable record.
+pub(crate) fn bound_run_identities(
+    profile: &dyn LoginProfile,
+    expected: &RunFenceBinding,
+) -> Result<BTreeSet<ProcIdentity>, SidecarError> {
+    let (binding, reservation, _) = read_bound(profile)?;
+    if &binding != expected {
+        return Err(failure());
+    }
+    Ok(reservation.recorded.clone())
+}
+
+/// Recovery by proof only, whether the user asks for it or the app retries it
+/// (at start, after a run was settled). The verifier must prove the exact
+/// durable run is terminal before unlink; disappearance of processes alone is
+/// insufficient.
+pub(crate) fn recover_bound_run(
+    profile: &dyn LoginProfile,
+    verify_terminal: impl FnOnce(&RunFenceBinding, &BTreeSet<ProcIdentity>) -> Result<(), SidecarError>,
+) -> Result<(), SidecarError> {
+    let (binding, reservation, home) = read_bound(profile)?;
+    // Empty/unlaunched reservations need their live owner; do not infer closure.
+    if reservation.recorded.is_empty() {
+        return Err(failure());
+    }
     verify_terminal(&binding, &reservation.recorded)?;
     for identity in &reservation.recorded {
         if !matches!(

@@ -2406,9 +2406,13 @@ fn text_candidate_cases_with_output(
                     .iter()
                     .all(|item| item["observedGone"] == true));
             }
+            // A start that still cannot prove the uncertain stop changes
+            // nothing. (The reopen further down proves it and settles the run.)
+            crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(failure == "bound-cleanup"));
             AgentRuntime::blocked()
                 .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
                 .unwrap();
+            crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(false));
             assert_eq!(fixture.storage.projection_records("run").unwrap(), runs);
         }
         // Rejection before claiming the protocol leaves cleanup with the caller.
@@ -2483,6 +2487,15 @@ fn text_candidate_cases_with_output(
                 assert_eq!(after[0]["public_events"], before[0]["public_events"]);
                 // Reopening the ledger never silently removes a retained profile fence.
                 assert!(LoginProcess::reserve(&profile).is_err());
+            } else if before[0]["recovery"]["state"] == "unresolved" {
+                // A stop that could not be confirmed is settled at the next
+                // start once every recorded process is proven gone.
+                assert_eq!(after[0]["state"], "canceled", "{failure}");
+                assert!(after[0]["recovery"].is_null(), "{failure}");
+                assert_eq!(after[0]["termination"]["processesProvenGone"], true);
+                assert_eq!(after[0]["public_events"], before[0]["public_events"]);
+                // Its workspace is admitted like any other again.
+                assert!(fixture.projects.verify_workspace(&fixture.storage, &address).is_ok());
             } else {
                 assert_eq!(after, before);
             }
@@ -5140,12 +5153,16 @@ fn startup_backfills_pre_g5c_recovery_ids_without_replacing_public_records() {
         .unwrap();
 
     let mut unresolved_runtime = AgentRuntime::blocked();
+    // A start in which the run's end still cannot be proven: the recovery
+    // stays for the person, with its ID backfilled and its record untouched.
+    crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(true));
     unresolved_runtime
         .recover_unclean_runs(
             &mut unresolved_fixture.storage,
             &mut unresolved_fixture.projects,
         )
         .unwrap();
+    crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(false));
     unresolved_runtime
         .validate_persisted_runs(&unresolved_fixture.storage)
         .unwrap();
@@ -5760,6 +5777,118 @@ fn deferred_cancel_never_reports_completion_after_terminal_persistence_failure()
     terminal_failure_cases(true);
 }
 
+/// Quitting interrupts the work; it never resets it. A writer run that lost
+/// its engine ends as canceled: what it left running is stopped, the writer
+/// lock is free, and the workspace with its half-done files stays in use.
+/// The same holds once an older app version had marked it for recovery.
+#[test]
+fn interrupted_writer_run_keeps_its_workspace_and_an_older_recovery_mark_is_lifted() {
+    use elsecrew_core::proctree::{ProbeResult, ProcIdentity, ProcTable, SystemProcTable};
+    for marked_by_older_version in [false, true] {
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_interrupted_writer_snapshot");
+        let chat = fixture.create_exact_claude_chat(&snapshot, "interrupted writer", "req_interrupted_writer_chat");
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(&fixture, chat_id);
+        // A run that keeps going until it is stopped.
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::CancelClean);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        let started = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "coding".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+                },
+                "req_interrupted_writer",
+            )
+            .unwrap();
+        let run_id = started.result["runId"].as_str().unwrap().to_string();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let run = loop {
+            runtime.poll(&mut fixture.storage, &mut fixture.projects).unwrap();
+            let run = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+            if run["state"] == "running" && run["process_identity_internal"].as_array().is_some_and(|ids| !ids.is_empty()) {
+                break run;
+            }
+            assert!(std::time::Instant::now() < deadline, "run did not start");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        let identities: Vec<_> = run["process_identity_internal"].as_array().unwrap().iter()
+            .map(|value| ProcIdentity { pid: value["pid"].as_u64().unwrap() as u32, start_us: value["start_us"].as_i64().unwrap() })
+            .collect();
+        let gone = |identity: &ProcIdentity| matches!(SystemProcTable.probe(*identity), ProbeResult::Gone);
+        let workspace = std::path::PathBuf::from(run["worktree_path"].as_str().unwrap());
+        fs::write(workspace.join("half-done.txt"), b"written before the app closed").unwrap();
+        let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
+        let manifest_path = fixture._root.path().join("data/worktree-manifests-v1").join(format!("{}.json", chat["worktreeId"].as_str().unwrap()));
+        let lifecycle = |path: &std::path::Path| serde_json::from_slice::<Value>(&fs::read(path).unwrap()).unwrap()["lifecycle"].clone();
+        // The engine goes away without ending the run or stopping its agent.
+        drop(runtime);
+        assert!(!identities.iter().all(gone));
+        if marked_by_older_version {
+            crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(true));
+            AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+            crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(false));
+            let marked = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+            assert_eq!(marked["record"]["state"], "recoveryRequired");
+            assert_eq!(marked["recovery"]["state"], "unresolved");
+            let lock = fixture.storage.projection_record("lock", &lock_id).unwrap().unwrap();
+            assert_eq!(lock["poisoned"], true);
+            assert_eq!(lock["writer_run_id"], run_id);
+            assert_eq!(lifecycle(&manifest_path), "recoveryRequired");
+            assert!(!fixture.storage.blocker_ids().unwrap().is_empty());
+            // An attempt that stopped right after lifting the workspace's mark
+            // (before its records were stored) leaves no half-lifted state: a
+            // start that still cannot settle the run puts the mark back.
+            let mut manifest: Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+            manifest["lifecycle"] = json!("active");
+            fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+            crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(true));
+            AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+            crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(false));
+            assert_eq!(lifecycle(&manifest_path), "recoveryRequired");
+            assert_eq!(fixture.storage.projection_record("run", &run_id).unwrap().unwrap(), marked);
+        }
+        AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+        AgentRuntime::blocked().validate_persisted_runs(&fixture.storage).unwrap();
+        let ended = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+        assert_eq!(ended["record"]["state"], "canceled");
+        assert_eq!(ended["record"]["terminationOutcome"], "cleanExit");
+        assert!(ended["recovery"].is_null());
+        assert_eq!(ended["termination"]["processesProvenGone"], true);
+        assert_eq!(ended["termination"]["writerLockState"], "released");
+        assert!(identities.iter().all(gone), "what the engine left running is stopped");
+        let lock = fixture.storage.projection_record("lock", &lock_id).unwrap().unwrap();
+        assert!(lock["writer_run_id"].is_null());
+        assert_eq!(lock["poisoned"], false);
+        assert_eq!(lock["recovery_required"], false);
+        assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+        // Nothing was reset.
+        assert_eq!(lifecycle(&manifest_path), "active");
+        assert_eq!(fs::read(workspace.join("half-done.txt")).unwrap(), b"written before the app closed");
+        let stored = fixture.storage.projection_record("chat", chat_id).unwrap().unwrap();
+        assert_eq!(stored["record"]["state"], "canceled");
+        // The workspace is admitted like any other again: the task takes a new message.
+        fixture
+            .chats
+            .append_user_message(&mut fixture.storage, &fixture.projects, &json!({
+                "projectId":chat["projectId"],"chatId":chat["chatId"],"taskId":chat["taskId"],
+                "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+                "expectedEventSequence":stored["durable_event_sequence"],
+                "clientMessageId":format!("user_{}", "d".repeat(32)),"text":"Carry on from where it stopped.",
+            }))
+            .unwrap();
+        // A second look changes nothing.
+        let before = fixture.storage.projection_records("run").unwrap();
+        AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+        assert_eq!(fixture.storage.projection_records("run").unwrap(), before);
+    }
+}
+
 fn terminal_failure_cases(cancel: bool) {
     for scenario in [
         FakeScenario::TerminalConstructionFailure,
@@ -5852,24 +5981,15 @@ fn terminal_failure_cases(cancel: bool) {
             .projection_record("lock", &lock_id)
             .unwrap()
             .unwrap();
-        if cancel && matches!(scenario, FakeScenario::TerminalUpsertFailure) {
-            // The stop marked the workspace for recovery before its terminal
-            // record failed to commit: that doubt stays with the user.
-            assert_eq!(recovered["record"]["state"], "recoveryRequired");
-            assert_eq!(recovered["recovery"]["state"], "unresolved");
-            assert_eq!(lock["writer_run_id"], run_id);
-            assert_eq!(lock["poisoned"], true);
-            assert_eq!(lock["recovery_required"], true);
-        } else {
-            // The runtime (and its processes) went away before a terminal
-            // record: at the next start every process is proven gone, so the
-            // run ends as canceled and the workspace is free again.
-            assert_eq!(recovered["record"]["state"], "canceled");
-            assert!(recovered["recovery"].is_null());
-            assert!(lock["writer_run_id"].is_null());
-            assert_eq!(lock["poisoned"], false);
-            assert_eq!(lock["recovery_required"], false);
-        }
+        // The runtime went away before a terminal record (in one case after
+        // the stop had already marked the workspace for recovery): at the next
+        // start every process is proven gone, so the run ends as canceled and
+        // the workspace is in use again.
+        assert_eq!(recovered["record"]["state"], "canceled");
+        assert!(recovered["recovery"].is_null());
+        assert!(lock["writer_run_id"].is_null());
+        assert_eq!(lock["poisoned"], false);
+        assert_eq!(lock["recovery_required"], false);
     }
 }
 
@@ -6413,9 +6533,13 @@ fn dynamic_grandchild_is_durable_and_blocks_recovery_until_every_identity_is_gon
         .unwrap();
     drop(runtime);
     let recovered = AgentRuntime::blocked();
+    // A start in which the run's end cannot be proven leaves the explicit
+    // recovery, which lists the grandchild and waits for every identity.
+    crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(true));
     recovered
         .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
         .unwrap();
+    crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(false));
     let run = fixture
         .storage
         .projection_record("run", &run_id)
@@ -6464,6 +6588,239 @@ fn dynamic_grandchild_is_durable_and_blocks_recovery_until_every_identity_is_gon
             .unwrap()["outcome"],
         "resolvedAbandoned"
     );
+}
+
+/// A writer run that keeps going until stopped, left behind by an engine that
+/// went away without ending it. Returns the run's ID and recorded processes.
+fn interrupted_writer_run(fixture: &mut Fixture, request: &str) -> (Value, String, Vec<elsecrew_core::proctree::ProcIdentity>) {
+    let snapshot = fixture.snapshot(&format!("{request}_snapshot"));
+    let chat = fixture.create_exact_claude_chat(&snapshot, "interrupted writer", &format!("{request}_chat"));
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let message_id = initial_message_id(fixture, chat_id);
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::CancelClean);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let started = runtime
+        .start_agent(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            AgentRunStartRequestV1 {
+                chat_id: chat_id.into(),
+                role_id: "coding".into(),
+                input_message_ids: vec![message_id],
+                expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+            },
+            request,
+        )
+        .unwrap();
+    let run_id = started.result["runId"].as_str().unwrap().to_string();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let identities = loop {
+        runtime.poll(&mut fixture.storage, &mut fixture.projects).unwrap();
+        let run = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+        if run["state"] == "running" && run["process_identity_internal"].as_array().is_some_and(|ids| !ids.is_empty()) {
+            break run["process_identity_internal"].as_array().unwrap().iter()
+                .map(|value| elsecrew_core::proctree::ProcIdentity { pid: value["pid"].as_u64().unwrap() as u32, start_us: value["start_us"].as_i64().unwrap() })
+                .collect::<Vec<_>>();
+        }
+        assert!(std::time::Instant::now() < deadline, "run did not start");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    drop(runtime);
+    (chat, run_id, identities)
+}
+
+fn stop_processes(identities: &[elsecrew_core::proctree::ProcIdentity]) {
+    use elsecrew_core::proctree::{ProbeResult, ProcTable, SystemProcTable};
+    for identity in identities {
+        unsafe { libc::kill(identity.pid as i32, libc::SIGKILL) };
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !identities.iter().all(|identity| matches!(SystemProcTable.probe(*identity), ProbeResult::Gone)) {
+        assert!(std::time::Instant::now() < deadline, "processes outlived the test");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+/// A copy of the app data opened while the real app still runs: the runs it
+/// calls unfinished belong to that live engine. Nothing is stopped or settled.
+#[test]
+fn a_start_on_data_whose_engine_still_runs_stops_and_settles_nothing() {
+    use elsecrew_core::proctree::{ProbeResult, ProcTable, SystemProcTable};
+    let mut fixture = Fixture::new();
+    let (_chat, run_id, identities) = interrupted_writer_run(&mut fixture, "req_live_engine");
+    let alive = |identity: &elsecrew_core::proctree::ProcIdentity| matches!(SystemProcTable.probe(*identity), ProbeResult::Alive(_));
+    // The engine that last registered here is still running (the fake agent
+    // is the same engine binary, so it stands in for it).
+    let engine = SystemProcTable.list().unwrap().into_iter()
+        .find(|entry| identities.contains(&entry.identity) && entry.comm.starts_with("elsecrew"))
+        .expect("the fixture agent is the engine binary");
+    let mut ready: elsecrew_protocol::ReadyPayloadV1 = serde_json::from_value(json!({
+        "protocolVersion": elsecrew_protocol::PROTOCOL_VERSION, "sidecarSchemaVersion": 1, "appSchemaVersion": 1,
+        "pid": engine.identity.pid, "platform": "darwin", "capabilities": [], "sidecarInstanceId": "sidecar_still_running",
+    })).unwrap();
+    fixture.storage.register_app_instance(&ready).unwrap();
+    AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+    assert!(identities.iter().all(alive), "another engine's processes are never stopped");
+    let untouched = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    assert_eq!(untouched["record"]["state"], "recoveryRequired", "and its runs are not settled");
+    assert_eq!(untouched["recovery"]["state"], "unresolved");
+    AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+    assert!(identities.iter().all(alive));
+    // The copy is opened again later: its own earlier opening registered (and
+    // ended) since, but the live engine's record still counts.
+    ready.pid = 4_000_000;
+    ready.sidecar_instance_id = "sidecar_earlier_opening_of_the_copy".into();
+    fixture.storage.register_app_instance(&ready).unwrap();
+    AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+    assert!(identities.iter().all(alive), "a later opening of the copy stops nothing either");
+    assert_eq!(fixture.storage.projection_record("run", &run_id).unwrap().unwrap(), untouched);
+    // Once that engine is gone, its unfinished runs are settled as usual.
+    stop_processes(&identities);
+    AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+    assert_eq!(fixture.storage.projection_record("run", &run_id).unwrap().unwrap()["record"]["state"], "canceled");
+}
+
+/// A recorded process ID that now belongs to something else cannot be proven
+/// gone: nothing is signalled, the run is not settled, the recovery stays.
+#[test]
+fn a_recorded_process_that_cannot_be_confirmed_keeps_the_recovery_and_signals_nothing() {
+    use elsecrew_core::proctree::{ProbeResult, ProcTable, SystemProcTable};
+    let mut fixture = Fixture::new();
+    let (_chat, run_id, identities) = interrupted_writer_run(&mut fixture, "req_unconfirmable");
+    // This very test process, under a start time that is not its own.
+    let mut projection = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    projection.remove("last_event_sequence");
+    projection["process_identity_internal"].as_array_mut().unwrap().push(json!({"pid":std::process::id(),"start_us":1}));
+    fixture.storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+        aggregate_type: "run", aggregate_id: run_id.clone(), operation_id: "op_test_unconfirmable_identity".into(), request_id: None, payload: projection,
+    }]).unwrap();
+    AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+    let run = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    assert_eq!(run["record"]["state"], "recoveryRequired");
+    assert_eq!(run["recovery"]["state"], "unresolved");
+    assert!(identities.iter().all(|identity| matches!(SystemProcTable.probe(*identity), ProbeResult::Alive(_))), "nothing was signalled");
+    stop_processes(&identities);
+}
+
+/// A workspace lock marked for any other reason is not this run's to clear:
+/// the settlement refuses and leaves the workspace's recovery mark in place.
+#[test]
+fn a_lock_marked_for_another_reason_refuses_the_settlement_and_keeps_the_mark() {
+    let mut fixture = Fixture::new();
+    let (chat, run_id, identities) = interrupted_writer_run(&mut fixture, "req_foreign_mark");
+    stop_processes(&identities);
+    crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(true));
+    AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+    crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(false));
+    let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
+    let mut lock = fixture.storage.projection_record("lock", &lock_id).unwrap().unwrap();
+    assert_eq!(lock["evidence"]["phase"], "agentRecoveryRequired");
+    lock.remove("last_event_sequence");
+    lock.insert("evidence".into(), json!({"phase":"sourceApplicationInterrupted","run_id":run_id}));
+    fixture.storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+        aggregate_type: "lock", aggregate_id: lock_id.clone(), operation_id: "op_test_foreign_lock_mark".into(), request_id: None, payload: lock,
+    }]).unwrap();
+    let manifest_path = fixture._root.path().join("data/worktree-manifests-v1").join(format!("{}.json", chat["worktreeId"].as_str().unwrap()));
+    let lifecycle = || serde_json::from_slice::<Value>(&fs::read(&manifest_path).unwrap()).unwrap()["lifecycle"].clone();
+    let before = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+    assert_eq!(fixture.storage.projection_record("run", &run_id).unwrap().unwrap(), before);
+    assert_eq!(lifecycle(), "recoveryRequired");
+    assert_eq!(fixture.storage.projection_record("lock", &lock_id).unwrap().unwrap()["poisoned"], true);
+}
+
+/// A run that saw more processes than a record may list (a long build does)
+/// neither stops the app from opening nor loses its workspace: the records
+/// stay within their bound and the run is settled like any other.
+#[test]
+fn a_run_with_more_processes_than_a_record_lists_still_opens_and_settles() {
+    let mut fixture = Fixture::new();
+    let (_chat, run_id, identities) = interrupted_writer_run(&mut fixture, "req_many_processes");
+    stop_processes(&identities);
+    let mut projection = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    projection.remove("last_event_sequence");
+    let public = projection["barrier"]["trackedProcesses"][0].clone();
+    // Process IDs no system hands out: provably gone, like a build's children.
+    for index in 0..300u64 {
+        let pid = 3_000_000 + index;
+        projection["process_identity_internal"].as_array_mut().unwrap().push(json!({"pid":pid,"start_us":1_700_000_000_000_000i64 + index as i64}));
+        let mut entry = public.clone();
+        entry["pid"] = json!(pid);
+        projection["barrier"]["trackedProcesses"].as_array_mut().unwrap().push(entry);
+    }
+    fixture.storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+        aggregate_type: "run", aggregate_id: run_id.clone(), operation_id: "op_test_many_processes".into(), request_id: None, payload: projection,
+    }]).unwrap();
+    // A start that cannot settle it must still succeed, with a valid recovery.
+    crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(true));
+    AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+    crate::agent_runtime::SKIP_INTERRUPTED_SETTLEMENT.with(|skip| skip.set(false));
+    AgentRuntime::blocked().validate_persisted_runs(&fixture.storage).unwrap();
+    let marked = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    assert_eq!(marked["recovery"]["state"], "unresolved");
+    assert_eq!(marked["recovery"]["trackedProcesses"].as_array().unwrap().len(), 256);
+    assert!(marked["process_identity_internal"].as_array().unwrap().len() > 256);
+    // And a start that can settle it does.
+    AgentRuntime::blocked().recover_unclean_runs(&mut fixture.storage, &mut fixture.projects).unwrap();
+    AgentRuntime::blocked().validate_persisted_runs(&fixture.storage).unwrap();
+    let ended = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    assert_eq!(ended["record"]["state"], "canceled");
+    assert!(ended["recovery"].is_null());
+    assert_eq!(ended["termination"]["trackedProcesses"].as_array().unwrap().len(), 256);
+    assert_eq!(ended["process_identity_internal"].as_array().unwrap().len(), 256);
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+}
+
+/// What a dead engine left running is stopped down to the last recorded
+/// descendant before its run is settled; the durable grandchild identity is
+/// what makes that possible.
+#[test]
+fn interrupted_run_is_stopped_with_its_recorded_grandchild_before_it_is_settled() {
+    use elsecrew_core::proctree::{ProbeResult, ProcIdentity, ProcTable, SystemProcTable};
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_descendant_settled_snapshot");
+    let chat = fixture.create_exact_claude_chat(&snapshot, "settled descendant", "req_descendant_settled_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let message_id = initial_message_id(&fixture, chat_id);
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Descendant);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let started = runtime
+        .start_agent(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            AgentRunStartRequestV1 {
+                chat_id: chat_id.into(),
+                role_id: "coding".into(),
+                input_message_ids: vec![message_id],
+                expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+            },
+            "req_descendant_settled_start",
+        )
+        .unwrap();
+    let run_id = started.result["runId"].as_str().unwrap().to_string();
+    let mut identities = Vec::new();
+    for _ in 0..100 {
+        let _ = runtime.poll(&mut fixture.storage, &mut fixture.projects).unwrap();
+        let projection = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+        identities = projection["process_identity_internal"].as_array().cloned().unwrap_or_default().iter()
+            .map(|value| ProcIdentity { pid: value["pid"].as_u64().unwrap() as u32, start_us: value["start_us"].as_i64().unwrap() })
+            .collect();
+        if identities.len() >= 3 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(identities.len() >= 3, "grandchild identity must be durable");
+    drop(runtime);
+    assert!(identities.iter().any(|identity| matches!(SystemProcTable.probe(*identity), ProbeResult::Alive(_))));
+    AgentRuntime::blocked()
+        .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+        .unwrap();
+    let run = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
+    assert_eq!(run["record"]["state"], "canceled");
+    assert!(run["recovery"].is_null());
+    assert_eq!(run["termination"]["trackedProcesses"].as_array().unwrap().len(), identities.len());
+    assert!(identities.iter().all(|identity| matches!(SystemProcTable.probe(*identity), ProbeResult::Gone)));
 }
 
 mod discard;

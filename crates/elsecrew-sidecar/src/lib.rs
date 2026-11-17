@@ -949,7 +949,8 @@ impl Sidecar {
         admission_not_cancelled(cancellation)?;
         storage.recover_unclean_shutdown()?;
         let g5 = chat::G5Manager::default();
-        agent_runtime.recover_unclean_runs(&mut storage, &mut projects)?;
+        agent_runtime.recover_unclean_runs_until(&mut storage, &mut projects, cancellation)?;
+        admission_not_cancelled(cancellation)?;
         agent_runtime.reconcile_resolved_catalogs(&mut storage, &projects)?;
         g5.recover_unclean_runs(&mut storage, &mut projects)?;
         orchestration::pause_after_restart(&mut storage).map_err(orchestration_dispatch::failure)?;

@@ -29,7 +29,7 @@ const OBSERVE_INTERVAL: Duration = Duration::from_millis(100);
 mod run_binding;
 #[cfg(test)]
 mod approved_legacy_repair;
-pub(crate) use run_binding::recover_bound_run;
+pub(crate) use run_binding::{bound_run_identities, recover_bound_run};
 #[cfg(test)]
 use crate::provider_run_binding::RunFenceBinding;
 
@@ -41,7 +41,10 @@ fn failure() -> SidecarError {
 }
 
 /// The file's existence is the inter-session/restart fence, even if empty or malformed.
-/// Never read an old reservation, repair it or automatically adopt its PIDs.
+/// An old reservation is never repaired, and its PIDs are never adopted as a
+/// live owner's. The one reader is the settlement of the exact run a hold is
+/// bound to, after that run's engine is gone (`bound_run_identities`): it
+/// stops those processes, each only while it still matches its recorded start.
 struct Reservation {
     name: &'static str,
     directory: Dir,

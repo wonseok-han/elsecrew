@@ -363,6 +363,9 @@ struct WatchState {
 enum WorkspaceLockAdmission {
     Ready,
     Cleanup,
+    /// A run that stopped without its engine is being ended: the lock may
+    /// still carry that run's own hold or recovery mark, and nothing else.
+    InterruptedRun(String),
     #[cfg(windows)]
     SaveRecovery(String),
 }
@@ -3480,6 +3483,69 @@ impl ProjectManager {
         Ok(())
     }
 
+    /// Puts the workspace of a run that stopped without its engine back into
+    /// use: an interruption ends the run, it never discards the work. The
+    /// manifest must be exactly the run's own (only its recovery mark may
+    /// differ) and the whole chat binding is verified like any admission,
+    /// except that the lock may still carry this run's hold or mark. Returns
+    /// whether the recovery mark was lifted, so a settlement that then fails
+    /// can put it back with `workspace_restore_recovery_required`.
+    pub(crate) fn workspace_resume_interrupted(
+        &mut self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+        run_manifest: &Value,
+        run_id: &str,
+    ) -> Result<bool, ProjectFailure> {
+        let name = format!("{}.json", address.worktree_id);
+        let mut manifest = read_bounded_json(&self.manifests_dir, &name)?;
+        let marked = match manifest.get("lifecycle").and_then(Value::as_str) {
+            Some("active") => false,
+            Some("recoveryRequired") => true,
+            _ => {
+                return Err(ProjectFailure::recovery(
+                    "interrupted workspace is already terminal",
+                ))
+            }
+        };
+        manifest["lifecycle"] = Value::String("active".to_string());
+        if run_manifest.get("lifecycle").and_then(Value::as_str) != Some("active")
+            || manifest != *run_manifest
+        {
+            return Err(ProjectFailure::manifest(
+                "interrupted workspace differs from its run",
+            ));
+        }
+        if marked {
+            write_json_atomic(&self.manifests_dir, &name, &manifest)?;
+        }
+        let verified = self
+            .validate_workspace_binding_with_lock(
+                storage,
+                address,
+                "active",
+                WorkspaceLockAdmission::InterruptedRun(run_id.to_string()),
+            )
+            .and_then(|active| {
+                // The repository itself, as for any run about to use it.
+                let worktree = self.worktree_capability(&active)?;
+                self.verify_snapshot_repository(&worktree, &active)?;
+                manifest_value(&active, "active")
+            });
+        match verified {
+            Ok(value) if value == *run_manifest => Ok(marked),
+            other => {
+                if marked {
+                    manifest["lifecycle"] = Value::String("recoveryRequired".to_string());
+                    let _ = write_json_atomic(&self.manifests_dir, &name, &manifest);
+                }
+                Err(other.err().unwrap_or_else(|| {
+                    ProjectFailure::manifest("interrupted workspace differs from its run")
+                }))
+            }
+        }
+    }
+
     pub fn workspace_restore_recovery_required(
         &mut self,
         address: &WorkspaceAddress,
@@ -3497,13 +3563,14 @@ impl ProjectManager {
                 ));
             }
         }
-        if !matches!(
-            manifest.get("lifecycle").and_then(Value::as_str),
-            Some("active" | "recoveryRequired")
-        ) {
-            return Err(ProjectFailure::manifest(
-                "unclean recovery workspace is already terminal",
-            ));
+        match manifest.get("lifecycle").and_then(Value::as_str) {
+            Some("recoveryRequired") => return Ok(()),
+            Some("active") => {}
+            _ => {
+                return Err(ProjectFailure::manifest(
+                    "unclean recovery workspace is already terminal",
+                ))
+            }
         }
         manifest["lifecycle"] = Value::String("recoveryRequired".to_string());
         write_json_atomic(&self.manifests_dir, &manifest_name, &manifest)
@@ -4077,6 +4144,20 @@ impl ProjectManager {
                 {
                     return Err(ProjectFailure::recovery(
                         "workspace is locked, poisoned, or recovery-required",
+                    ));
+                }
+            }
+            WorkspaceLockAdmission::InterruptedRun(run_id) => {
+                let marked = lock.get("poisoned").and_then(Value::as_bool) != Some(false)
+                    || lock.get("recovery_required").and_then(Value::as_bool) != Some(false);
+                let own = lock.get("writer_run_id").and_then(Value::as_str) == Some(run_id.as_str())
+                    && lock.get("evidence").is_some_and(|evidence| {
+                        evidence["run_id"] == run_id.as_str()
+                            && matches!(evidence["phase"].as_str(), Some("agentWriterHeld" | "agentRecoveryRequired"))
+                    });
+                if marked && !own {
+                    return Err(ProjectFailure::recovery(
+                        "workspace is marked for another recovery",
                     ));
                 }
             }

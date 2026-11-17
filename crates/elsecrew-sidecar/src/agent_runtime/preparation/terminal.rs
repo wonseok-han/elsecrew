@@ -67,8 +67,13 @@ impl RunReservation {
         } else {
             "recoveryRequired"
         };
+        // A record lists at most 256 processes. Beyond that the end was never
+        // confirmed (the hold stops recording there), so the list is evidence
+        // of what was seen, not a proof: keep the record valid and let the
+        // next start stop and settle the whole recorded set.
         let tracked: Vec<_> = identities
             .iter()
+            .take(super::super::RECORDED_PROCESSES_MAX)
             .map(|identity| process_value(*identity, Path::new("/redacted/agent"), confirmed))
             .collect();
         let termination = json!({
