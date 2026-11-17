@@ -474,21 +474,16 @@ fn reserved_run_identity_is_persisted_before_gate_release_and_storage_failure_bl
             .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
             .unwrap();
         let after = fixture.storage.projection_records("run").unwrap();
-        assert_eq!(
-            after[0]["recovery"]["reason"],
-            if fail_store {
-                "processIdentityUnavailable"
-            } else {
-                "uncleanShutdown"
-            }
-        );
-        assert_eq!(
-            after[0]["recovery"]["trackedProcesses"]
-                .as_array()
-                .unwrap()
-                .is_empty(),
-            fail_store
-        );
+        if fail_store {
+            assert_eq!(after[0]["recovery"]["reason"], "processIdentityUnavailable");
+            assert!(after[0]["recovery"]["trackedProcesses"].as_array().unwrap().is_empty());
+        } else {
+            // Every recorded process is gone: the run simply ended.
+            assert_eq!(after[0]["state"], "canceled");
+            assert!(after[0]["recovery"].is_null());
+            assert_eq!(after[0]["termination"]["processesProvenGone"], true);
+            AgentRuntime::blocked().validate_persisted_runs(&fixture.storage).unwrap();
+        }
         assert!(LoginProcess::reserve(&profile).is_ok());
     }
 }
@@ -1303,9 +1298,10 @@ fn text_candidate_cases_with_output(
                     AgentRuntime::blocked()
                         .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
                         .unwrap();
+                    // The finished process is proven gone: ended as canceled.
                     assert_eq!(
                         fixture.storage.projection_records("run").unwrap()[0]["state"],
-                        "recoveryRequired"
+                        "canceled"
                     );
                     continue;
                 }
@@ -1650,13 +1646,15 @@ fn text_candidate_cases_with_output(
                                         &mut fixture.projects,
                                     )
                                     .unwrap();
+                                // Dropping the runtime ended its processes: the run
+                                // whose terminal record failed ends as canceled.
                                 assert_eq!(
                                     fixture
                                         .storage
                                         .projection_record("run", &identity.run_id)
                                         .unwrap()
                                         .unwrap()["state"],
-                                    "recoveryRequired"
+                                    "canceled"
                                 );
                                 continue 'cases;
                             }
@@ -2001,18 +1999,23 @@ fn text_candidate_cases_with_output(
                                     runtime.validate_persisted_runs(&fixture.storage).unwrap();
                                     let recovered =
                                         fixture.storage.projection_records("run").unwrap();
-                                    assert_eq!(recovered[0]["state"], "recoveryRequired");
+                                    // Both recorded processes are gone: the run ended
+                                    // as canceled, with no recovery left for the user.
+                                    assert_eq!(recovered[0]["state"], "canceled");
+                                    assert!(recovered[0]["recovery"].is_null());
                                     assert_eq!(
                                         recovered[0]["process_identity_internal"],
                                         before[0]["process_identity_internal"]
                                     );
                                     assert_eq!(
-                                        recovered[0]["recovery"]["trackedProcesses"]
+                                        recovered[0]["termination"]["trackedProcesses"]
                                             .as_array()
                                             .unwrap()
                                             .len(),
                                         2
                                     );
+                                    // This candidate path holds an unbound sign-in hold;
+                                    // the run-bound release is covered in orchestration_dispatch.
                                     assert!(LoginProcess::reserve(&profile).is_err());
                                     continue 'cases;
                                 }
@@ -2472,11 +2475,11 @@ fn text_candidate_cases_with_output(
             runtime.validate_persisted_runs(&fixture.storage).unwrap();
             let after = fixture.storage.projection_records("run").unwrap();
             if failure == "bound-terminal" {
-                assert_eq!(after[0]["state"], "recoveryRequired");
-                assert_eq!(
-                    after[0]["recovery"]["recoveryId"],
-                    before[0]["recovery_id_reservation"]
-                );
+                // The finished process is proven gone, so the run whose terminal
+                // record failed ends as canceled at the next start.
+                assert_eq!(after[0]["state"], "canceled");
+                assert!(after[0]["recovery"].is_null());
+                assert_eq!(after[0]["termination"]["processesProvenGone"], true);
                 assert_eq!(after[0]["public_events"], before[0]["public_events"]);
                 // Reopening the ledger never silently removes a retained profile fence.
                 assert!(LoginProcess::reserve(&profile).is_err());
@@ -5843,16 +5846,30 @@ fn terminal_failure_cases(cancel: bool) {
             .projection_record("run", &run_id)
             .unwrap()
             .unwrap();
-        assert_eq!(recovered["record"]["state"], "recoveryRequired");
-        assert_eq!(recovered["recovery"]["state"], "unresolved");
+        AgentRuntime::blocked().validate_persisted_runs(&fixture.storage).unwrap();
         let lock = fixture
             .storage
             .projection_record("lock", &lock_id)
             .unwrap()
             .unwrap();
-        assert_eq!(lock["writer_run_id"], run_id);
-        assert_eq!(lock["poisoned"], true);
-        assert_eq!(lock["recovery_required"], true);
+        if cancel && matches!(scenario, FakeScenario::TerminalUpsertFailure) {
+            // The stop marked the workspace for recovery before its terminal
+            // record failed to commit: that doubt stays with the user.
+            assert_eq!(recovered["record"]["state"], "recoveryRequired");
+            assert_eq!(recovered["recovery"]["state"], "unresolved");
+            assert_eq!(lock["writer_run_id"], run_id);
+            assert_eq!(lock["poisoned"], true);
+            assert_eq!(lock["recovery_required"], true);
+        } else {
+            // The runtime (and its processes) went away before a terminal
+            // record: at the next start every process is proven gone, so the
+            // run ends as canceled and the workspace is free again.
+            assert_eq!(recovered["record"]["state"], "canceled");
+            assert!(recovered["recovery"].is_null());
+            assert!(lock["writer_run_id"].is_null());
+            assert_eq!(lock["poisoned"], false);
+            assert_eq!(lock["recovery_required"], false);
+        }
     }
 }
 

@@ -386,6 +386,12 @@ export class SidecarClientV1 {
     this.#failureListeners.add(listener);
   }
 
+  /** Ends the engine's input. The engine then stops its agent processes and
+   * exits by itself; it never needs a signal for a normal close. */
+  closeInput(): void {
+    try { this.#process?.stdin?.end(); } catch { /* already closed */ }
+  }
+
   /** Resolves true once the engine process has ended, or false after the timeout. */
   waitForExit(timeoutMs: number): Promise<boolean> {
     if (this.#exited) return Promise.resolve(true);

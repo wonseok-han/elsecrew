@@ -328,6 +328,15 @@ impl AgentRuntime {
                     value
                 })
                 .collect::<Vec<_>>();
+            // The app closed (or stopped) while this run was going. When every
+            // tracked process is proven gone and the workspace is unchanged, the
+            // run simply ended: record it as canceled, like the stop button, and
+            // keep the task usable. Any doubt keeps the explicit recovery below.
+            if let Some(upserts) = interrupted_run_upserts(storage, projects, &projection, &chat_projection, &profile) {
+                if storage.upsert_projection_records_atomic(upserts).is_ok() {
+                    continue;
+                }
+            }
             let run = agent_run_record(
                 run_id,
                 &chat,
@@ -3233,6 +3242,93 @@ fn reserved_recovery_id(projection: &Map<String, Value>) -> Result<String, Proje
         ));
     }
     Ok(recovery_id.to_string())
+}
+
+/// Records for a run whose processes are all proven gone after an unclean
+/// stop, ending it as canceled with the task left as it was. None whenever
+/// anything is uncertain: no recorded process, one still alive or unknown, a
+/// workspace that is no longer the run's, or a record that does not fit.
+fn interrupted_run_upserts(
+    storage: &Storage,
+    projects: &ProjectManager,
+    projection: &Map<String, Value>,
+    chat_projection: &Map<String, Value>,
+    profile: &AgentResolvedProfileV1,
+) -> Option<Vec<ProjectionUpsert>> {
+    let run_id = projection["run_id"].as_str()?;
+    let tracked = projection["barrier"]["trackedProcesses"].as_array()?;
+    let internal = projection["process_identity_internal"].as_array()?;
+    if tracked.is_empty() || tracked.len() != internal.len() {
+        return None;
+    }
+    for private in internal {
+        let identity = ProcIdentity {
+            pid: u32::try_from(private["pid"].as_u64()?).ok()?,
+            start_us: private["start_us"].as_i64()?,
+        };
+        if !matches!(SystemProcTable.probe(identity), ProbeResult::Gone) {
+            return None;
+        }
+    }
+    let tracked: Vec<Value> = tracked.iter().cloned().map(|mut value| {
+        value["observedGone"] = Value::Bool(true);
+        value
+    }).collect();
+    let chat = &chat_projection["record"];
+    let address = address_from_chat(chat).ok()?;
+    if projects.verify_workspace(storage, &address).ok()? != projection["workspace_manifest"] {
+        return None;
+    }
+    let writer = profile.permission == "workspaceWrite";
+    let run = agent_run_record(
+        run_id, chat, profile,
+        projection["record"]["capabilityFingerprint"].as_str().unwrap_or_default(),
+        "canceled", Some("cleanExit"),
+        projection["record"]["createdAt"].as_str().unwrap_or_default(),
+    ).ok()?;
+    let termination = json!({
+        "schemaVersion":1,"runId":run_id,"outcome":"cleanExit",
+        "processesProvenGone":true,"poisoned":false,
+        "writerLockState":if writer {"released"} else {"none"},
+        "chatState":"canceled","trackedProcesses":tracked,
+        "evidenceDigest":digest_text("agent-interrupted-unclean-stop-v1"),"observedAt":now()
+    });
+    validate_agent_adapter_payload_v1("terminationTranscript", &termination).ok()?;
+    let canceled_chat = updated_chat(chat, "canceled").ok()?;
+    let mut updated = projection.clone();
+    updated.remove("last_event_sequence");
+    updated.insert("record".into(), run);
+    updated.insert("state".into(), json!("canceled"));
+    updated.insert("termination".into(), termination);
+    updated.insert("recovery".into(), Value::Null);
+    updated.get_mut("barrier")?["trackedProcesses"] = Value::Array(tracked);
+    // The same checks a later start applies to every stored run: a record
+    // that would fail them stays an explicit recovery instead.
+    if !updated.contains_key("output_format_version") {
+        validate_projection_public_budget(&updated).ok()?;
+    }
+    validate_provider_projection(&updated).ok()?;
+    let chat_id = chat["chatId"].as_str()?;
+    let mut upserts = vec![
+        ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: run_id.into(),
+            operation_id: format!("op_agent_interrupted_{run_id}"),
+            request_id: None,
+            payload: updated,
+        },
+        ProjectionUpsert {
+            aggregate_type: "chat",
+            aggregate_id: chat_id.into(),
+            operation_id: format!("op_agent_interrupted_chat_{run_id}"),
+            request_id: None,
+            payload: chat_projection_with_record(chat_projection, &canceled_chat, None).ok()?,
+        },
+    ];
+    if writer {
+        upserts.push(release_writer_lock(storage, &address, run_id, run_id, false).ok()?);
+    }
+    Some(upserts)
 }
 
 fn ensure_recovery_reservation(

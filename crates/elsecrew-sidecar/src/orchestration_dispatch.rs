@@ -1246,6 +1246,81 @@ mod tests {
         (root, sidecar, chat, run_id, fence_path)
     }
 
+    /// The app was closed (or the engine stopped) while a run held a sign-in
+    /// hold. Its processes end with the engine, so the next start ends the run
+    /// as canceled and frees the hold: nothing is left for the person to fix.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn an_app_closed_mid_run_reopens_with_the_run_ended_and_its_sign_in_hold_free() {
+      for processes_gone in [true, false] {
+        let (root, mut sidecar, chat) = service_named(None, elsecrew_protocol::lifecycle_v1::SQLITE_FILE_V1);
+        assert!(start(&mut sidecar, &chat).ok);
+        // A run that keeps going until it is stopped.
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::CancelClean);
+        let id = chat["chatId"].as_str().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let run_id = loop {
+            sidecar.poll_runtime_events().unwrap();
+            let state = sidecar.workflow_state(id).unwrap();
+            if let Some(run_id) = state.run_id.filter(|run_id| sidecar.agent_runtime.has_active_run(run_id)) {
+                let run = sidecar.storage.projection_record("run", &run_id).unwrap().unwrap();
+                if run["process_identity_internal"].as_array().is_some_and(|ids| !ids.is_empty()) {
+                    break run_id;
+                }
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let fence_path = bind_claude_hold(&mut sidecar, &run_id);
+        assert!(fence_path.is_file());
+        let identities: Vec<_> = sidecar.storage.projection_record("run", &run_id).unwrap().unwrap()["process_identity_internal"]
+            .as_array().unwrap().iter()
+            .map(|value| elsecrew_core::proctree::ProcIdentity { pid: value["pid"].as_u64().unwrap() as u32, start_us: value["start_us"].as_i64().unwrap() })
+            .collect();
+        let mut ready = sidecar.ready.clone();
+        ready.sidecar_instance_id = "closed_mid_run_reopened".into();
+        drop(sidecar);
+        use elsecrew_core::proctree::{ProbeResult, ProcTable};
+        let gone = |identity: &elsecrew_core::proctree::ProcIdentity| matches!(elsecrew_core::proctree::SystemProcTable.probe(*identity), ProbeResult::Gone);
+        if processes_gone {
+            // A closing engine ends its provider processes (`LoginProcess` drop).
+            // The fake runtime has no such owner, so end them the same way here.
+            for identity in &identities {
+                unsafe { libc::kill(identity.pid as i32, libc::SIGKILL) };
+            }
+            while !identities.iter().all(gone) {
+                assert!(Instant::now() < deadline, "agent processes outlived the closed engine");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        } else {
+            assert!(!identities.iter().all(gone));
+        }
+        let binary = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("elsecrew-sidecar");
+        let reopened = Sidecar::initialize(
+            root.path().join(elsecrew_protocol::lifecycle_v1::SQLITE_FILE_V1),
+            ready,
+            AgentRuntime::fake(binary, FakeScenario::OrchestratorFinal),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        let run = reopened.storage.projection_record("run", &run_id).unwrap().unwrap();
+        if processes_gone {
+            assert_eq!(run["record"]["state"], "canceled");
+            assert!(run["recovery"].is_null());
+            assert!(!fence_path.exists(), "the sign-in hold is free again");
+            assert!(reopened.storage.blocker_ids().unwrap().is_empty());
+        } else {
+            // A process that may still be working keeps the explicit recovery.
+            assert_eq!(run["record"]["state"], "recoveryRequired");
+            assert_eq!(run["recovery"]["state"], "unresolved");
+            assert!(fence_path.exists());
+            for identity in &identities {
+                unsafe { libc::kill(identity.pid as i32, libc::SIGKILL) };
+            }
+        }
+      }
+    }
+
     #[cfg(target_os = "macos")]
     fn resolve_request(sidecar: &Sidecar, run_id: &str) -> Value {
         let recovery = sidecar.storage.projection_record("run", run_id).unwrap().unwrap()["recovery"].clone();
@@ -1414,7 +1489,7 @@ mod tests {
     }
 
     #[test]
-    fn orchestration_dispatch_reopen_active_durable_run_preserves_recovery_requirement() {
+    fn orchestration_dispatch_reopen_active_durable_run_ends_it_without_relaunch() {
         let (root, mut sidecar, chat) = service();
         let response = start(&mut sidecar, &chat);
         assert!(response.ok);
@@ -1446,10 +1521,11 @@ mod tests {
             .projection_record("run", &run_id)
             .unwrap()
             .unwrap();
-        assert_eq!(run["state"], "recoveryRequired");
-        assert_eq!(run["record"]["state"], "recoveryRequired");
-        assert_eq!(run["recovery"]["state"], "unresolved");
-        assert_eq!(run["recovery"]["poisoned"], true);
+        // The crashed engine's processes are gone: the run ended as canceled
+        // and the paused team work is not relaunched by itself.
+        assert_eq!(run["state"], "canceled");
+        assert_eq!(run["record"]["state"], "canceled");
+        assert!(run["recovery"].is_null());
         reopened.poll_runtime_events().unwrap();
         assert_eq!(reopened.storage.projection_records("run").unwrap().len(), 1);
     }

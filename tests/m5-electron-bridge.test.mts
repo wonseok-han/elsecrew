@@ -1353,43 +1353,66 @@ test("G5 recovery-ready status stays connected for recovery APIs and unsafe quit
 
   const exits: string[] = [];
   const coordinator = new QuitCoordinatorV1({
-    prepareSidecarQuit: async () => ({ safeToQuit: false, blockers: ["recovery_01"] }),
+    prepareSidecarQuit: async () => ({ safeToQuit: false, blockers: ["run:recovery_01"] }),
     failedBeforeReady: () => false,
     allowProcessExit: (kind) => exits.push(kind),
   });
-  assert.deepEqual(await coordinator.prepareQuit(), { safeToQuit: false, blockers: ["recovery_01"] });
+  assert.deepEqual(await coordinator.prepareQuit(), { safeToQuit: false, blockers: ["run:recovery_01"] });
   assert.equal(coordinator.exitAllowed, false);
   assert.deepEqual(exits, []);
 });
 
-test("only stored recovery or a stopped task service lets the user choose to quit without a clean mark", async () => {
+test("quitting is never refused: stored records, a stopped service or a hung one still close the app", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const flush = async () => { for (let index = 0; index < 6; index += 1) await Promise.resolve(); };
-  const run = async (prepare: () => Promise<{ safeToQuit: boolean; blockers: string[] }>, answer: boolean) => {
+  const run = async (prepare: () => Promise<{ safeToQuit: boolean; blockers: string[] }>, advance = 0) => {
     const exits: string[] = [];
-    const asked: string[] = [];
-    const blocked: string[] = [];
+    let started = 0;
+    let calls = 0;
     const coordinator = new QuitCoordinatorV1({
-      prepareSidecarQuit: prepare,
+      prepareSidecarQuit: () => { calls += 1; return prepare(); },
       failedBeforeReady: () => false,
       allowProcessExit: (kind) => exits.push(kind),
-      notifyQuitBlocked: (reason) => { blocked.push(reason); },
-      confirmUncleanQuit: async (reason) => { asked.push(reason); return answer; },
+      onQuitStarted: () => { started += 1; },
     });
     coordinator.handleBeforeQuit();
+    coordinator.handleBeforeQuit();
     await flush();
-    return { exits, asked, blocked, allowed: coordinator.exitAllowed };
+    if (advance) { t.mock.timers.tick(advance); await flush(); }
+    return { exits, started, calls, allowed: coordinator.exitAllowed };
   };
-  // Stored recovery only: the user may quit; a later start recovers.
-  assert.deepEqual(await run(async () => ({ safeToQuit: false, blockers: ["run:agent_run_1", "lock:lock_w"] }), true),
-    { exits: ["uncleanUserConfirmed"], asked: ["storedRecovery"], blocked: [], allowed: true });
-  assert.deepEqual(await run(async () => ({ safeToQuit: false, blockers: ["run:agent_run_1"] }), false),
-    { exits: [], asked: ["storedRecovery"], blocked: [], allowed: false });
-  // Live work still blocks without an offer.
-  assert.deepEqual(await run(async () => ({ safeToQuit: false, blockers: ["run:agent_run_1", "agent_run_2"] }), true),
-    { exits: [], asked: [], blocked: ["recoveryRequired"], allowed: false });
-  // The task service is gone: nothing is left to wait for.
-  assert.deepEqual(await run(async () => { throw new Error("sidecar exited"); }, true),
-    { exits: ["uncleanUserConfirmed"], asked: ["unavailable"], blocked: [], allowed: true });
+  // Stored recovery only: nothing to wait for; the next start shows it again.
+  assert.deepEqual(await run(async () => ({ safeToQuit: false, blockers: ["run:agent_run_1", "lock:lock_w"] })),
+    { exits: ["uncleanQuit"], started: 1, calls: 1, allowed: true });
+  // The task service is gone.
+  assert.deepEqual(await run(async () => { throw new Error("sidecar exited"); }),
+    { exits: ["uncleanQuit"], started: 1, calls: 1, allowed: true });
+  // The task service never answers.
+  assert.deepEqual(await run(() => new Promise(() => {}), 15_000),
+    { exits: ["uncleanQuit"], started: 1, calls: 1, allowed: true });
+});
+
+test("a quit waits for running work to stop, then closes cleanly or anyway", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const tick = async () => { await new Promise<void>((resolve) => setImmediate(resolve)); t.mock.timers.tick(250); };
+  for (const stopsAfter of [3, Infinity]) {
+    const exits: string[] = [];
+    let calls = 0;
+    const coordinator = new QuitCoordinatorV1({
+      prepareSidecarQuit: async () => {
+        calls += 1;
+        const blockers = calls > stopsAfter ? [] : ["agent_run_live", "run:agent_run_live"];
+        return { safeToQuit: blockers.length === 0, blockers };
+      },
+      failedBeforeReady: () => false,
+      allowProcessExit: (kind) => exits.push(kind),
+    });
+    coordinator.handleBeforeQuit();
+    for (let attempt = 0; attempt < 45 && !coordinator.exitAllowed; attempt += 1) await tick();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (stopsAfter === 3) assert.deepEqual([exits, calls], [["clean"], 4]);
+    else assert.deepEqual([exits, calls], [["uncleanQuit"], 41]);
+  }
 });
 
 test("one quit waits for both login workers to confirm cleanup", async (t) => {
@@ -1421,7 +1444,7 @@ test("one quit waits for both login workers to confirm cleanup", async (t) => {
   assert.deepEqual(exits, ["clean"]);
 });
 
-test("persistent login recovery remains blocked after the bounded quit retry budget", async (t) => {
+test("asking whether the app can close never exits on an unclean result", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let calls = 0;
   const exits: string[] = [];
@@ -1443,46 +1466,6 @@ test("persistent login recovery remains blocked after the bounded quit retry bud
   assert.equal(calls, 41);
   assert.equal(coordinator.exitAllowed, false);
   assert.deepEqual(exits, []);
-});
-
-test("unsafe quit reports a fixed reason once while its notification is open", async () => {
-  for (const unavailable of [false, true]) {
-    const notices: string[] = [];
-    const exits: string[] = [];
-    let release!: () => void;
-    let calls = 0;
-    const coordinator = new QuitCoordinatorV1({
-      prepareSidecarQuit: async () => {
-        calls += 1;
-        if (unavailable) throw new Error("private provider stderr");
-        return { safeToQuit: false, blockers: ["recovery_01"] };
-      },
-      failedBeforeReady: () => false,
-      allowProcessExit: kind => { exits.push(kind); },
-      notifyQuitBlocked: reason => {
-        notices.push(reason);
-        return new Promise<void>(resolve => { release = resolve; });
-      },
-    });
-    coordinator.handleBeforeQuit();
-    coordinator.handleBeforeQuit();
-    await new Promise<void>(resolve => setImmediate(resolve));
-    coordinator.handleBeforeQuit();
-    assert.equal(calls, 1);
-    assert.deepEqual(notices, [unavailable ? "unavailable" : "recoveryRequired"]);
-    assert.equal(coordinator.exitAllowed, false);
-    assert.deepEqual(exits, []);
-    release();
-    await new Promise<void>(resolve => setImmediate(resolve));
-    coordinator.handleBeforeQuit();
-    await new Promise<void>(resolve => setImmediate(resolve));
-    assert.equal(calls, 2, "dismissed notification permits an explicit retry");
-    assert.equal(notices.length, unavailable ? 1 : 2,
-      "a disconnected service is reported once, without granting exit");
-    assert.equal(coordinator.exitAllowed, false);
-    assert.deepEqual(exits, []);
-    release();
-  }
 });
 
 test("pre-ready startup failure permits one explicitly unclean app close without re-entering quit", () => {
