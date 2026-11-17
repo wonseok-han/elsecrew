@@ -1084,7 +1084,9 @@ function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, o
 function FollowupComposer({ controller, chat, admissionReady }: { controller: ChatUiController; chat: ReturnType<ChatUiController["snapshot"]>; admissionReady: boolean }) {
   const { t, lang } = useI18n();
   const draft = chat.followups?.[chat.activeChat!.chatId];
-  const allowed = admissionReady && !!chat.activeChat && chat.activeChat.schemaVersion !== 1 && chat.activeChat.state !== "running" && controller.canAppendFollowup() && !chat.agentStartingRoleId && !chat.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state));
+  // Busy is not "unavailable": while a run starts or works the composer just waits.
+  const busy = chat.activeChat?.state === "running" || Boolean(chat.agentStartingRoleId) || chat.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state));
+  const allowed = admissionReady && !!chat.activeChat && chat.activeChat.schemaVersion !== 1 && !busy && controller.canAppendFollowup();
   return <form className="m5-followup" onKeyDown={submitChatShortcut} aria-label={t("m5.chat.followup")} onSubmit={event => { event.preventDefault(); void controller.appendFollowup(admissionReady, true, lang); }}>
     <label htmlFor="m5-followup-text">{t("m5.chat.input")}</label>
     <textarea id="m5-followup-text" value={draft?.text ?? ""} onChange={event => controller.editFollowup(event.target.value)} placeholder={t("m5.chat.placeholder")} rows={3} />
@@ -1097,7 +1099,7 @@ function FollowupComposer({ controller, chat, admissionReady }: { controller: Ch
       {!!chat.activeChat && chat.activeChat.schemaVersion !== 1 && chat.activeChat.state === "running" && window.m5Projects && <button type="button" className="m5-secondary m5-stop-team" onClick={() => void controller.cancelTeamTask(input => window.m5Projects!.request(input))}>{t("m5.chat.stopTeam")}</button>}
       <button type="submit" title={t("m5.chat.sendShortcut")} aria-keyshortcuts="Enter Meta+Enter Control+Enter" disabled={!allowed || draft?.sending || (!draft?.request && !draft?.text.trim())}>{draft?.sending ? t("m5.chat.saving") : draft?.request ? t("m5.chat.retry") : t("m5.chat.add")}</button>
     </div>
-    {!allowed && chat.activeChat?.state !== "running" && <p>{t("m5.chat.unavailable")}</p>}
+    {!allowed && !busy && <p>{t("m5.chat.unavailable")}</p>}
   </form>;
 }
 

@@ -21,7 +21,15 @@
   - (b) 총괄 답변이 메시지와 실행 출력에 두 번 보인다.
   - (c) 개발 HMR에서 번역 파일을 바꾸면 `useI18n must be used within I18nProvider`가 나서 Cmd+R이 필요하다. 개발 환경에서만 생긴다.
 - 기록: history.md가 500줄을 넘었다. 같은 날짜(11-17)의 앞선 엔트리 5개를 아카이브로 옮겼다. 고정 섹션만으로 약 300줄이라 300줄 이하는 맞추지 못했다.
-- 다음 할 일: 개발·검증 실행 결과 관찰, 엔진 지시문 반영 확인(dev 재시작), 새 빈 폴더로 처음부터 재시험(모델 자동 채움 확인), (a)(b) 정리.
+- 후속(같은 날):
+  - 엔진 지시문 반영을 확인했다. dev 재시작 뒤 Codex 검증 담당의 진행 메모가 한국어로 나왔다.
+  - 개발 담당 보고: 첫 버전과 Node 논리 확인 72개는 통과했다. 하지만 격리 환경에서 Chrome(`Failed to create socket directory`)·Firefox(`bootstrap_check_in failed`)·`mktemp`(`Operation not permitted`)가 막혀 브라우저 확인을 하지 못했다. 격리 경계는 바꾸지 않았다(안전 경계 변경은 별도 검토 대상).
+  - **Codex 검증 실행이 두 번 연속 실패했다**(#9 29초, #11 53초, 둘 다 cleanExit). 파일 수정·명령 실행 직후 `turn stream other frame`에서 끝났다. 실패 이유는 실행 기록·DB 어디에도 남지 않는다. 남는 것은 `~/Library/Logs/Elsecrew/last-provider-checkpoints.json`의 단계 이름뿐이다.
+  - 진단 확장(`codex_events/stream.rs` `SERVER_REQUESTS`·`UNHANDLED_NOTIFICATIONS`, TS 계약 `CODEX_SERVER_REQUESTS`·`CODEX_UNHANDLED_NOTIFICATIONS`): Codex 0.169 실행 파일에서 뽑은 고정 목록에 있는 요청·알림 이름만 `turn stream request <이름>` / `turn stream unhandled <이름>`으로 기록한다. 받아들이는 동작은 바꾸지 않았다(모르면 여전히 실패). 알림 이름 목록만 넣었을 때도 여전히 `other frame`이었다. 그래서 원인은 알림이 아니라 Codex가 보내는 요청(승인·권한 요청 등)으로 추정하고, 요청 이름까지 넣었다. 재현은 아직 하지 않았다.
+  - 후속 메시지 입력란: 총괄 실행을 준비하는 짧은 순간에 "현재 상태에서는 메시지를 추가할 수 없어요"가 잘못 떴다. 실행 시작·진행 중에는 숨긴다.
+  - dev 앱을 다시 띄우면 창이 다른 Space에 열려 Orca 키 입력이 닿지 않는다(`background_unavailable`). 창을 현재 Space로 옮기거나 `--restore-window` 허락이 필요하다.
+  - 검증: `npm test` 741, core `codex_events` 37, sidecar orchestration 30 통과.
+- 다음 할 일: 검증 재요청으로 실패한 요청 이름을 확인하고 그 처리를 고친다. 새 빈 폴더로 처음부터 재시험한다(모델 자동 채움 확인). (a)(b)를 정리한다. 실패 이유를 사용자에게 보여 줄 기록을 남길지 검토한다.
 
 ### 2026-11-17 · by Claude Opus 5.5 (claude-opus-5-5) — 새 작업 시작 때 "다른 확인이 프로필을 쓰는 중" 오류
 - 사용자 보고: 에이전트가 모두 연결돼 있는데 새 작업을 만들자 "선택한 역할·모델을 지금 실행할 수 없어요"가 떴다. 자세히 보기에는 `requestBlocked: another provider check currently owns this profile; retry after it finishes`가 있었다.

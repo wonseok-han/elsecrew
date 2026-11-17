@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {classifySessionDiagnostics,validateSessionDiagnostics} from "../src/m5/contracts/session-diagnostics-v1.ts";
+import {CODEX_SERVER_REQUESTS,CODEX_UNHANDLED_NOTIFICATIONS,classifySessionDiagnostics,validateSessionDiagnostics} from "../src/m5/contracts/session-diagnostics-v1.ts";
+import {readFileSync} from "node:fs";
 
 test("session diagnostics expose fixed checkpoint names, never raw provider data", () => {
   const result = classifySessionDiagnostics([
@@ -44,4 +45,15 @@ test("all fixed Rust item-start checkpoints cross the renderer allowlist without
   assert.deepEqual(result.codexCheckpoints, labels);
   assert.deepEqual(validateSessionDiagnostics(result), result);
   assert.deepEqual(classifySessionDiagnostics("native Codex transport failed at turn item start SECRET_TYPE").codexCheckpoints, []);
+});
+
+test("a refused Codex notification is named only from the engine's own list", () => {
+  const source = readFileSync(new URL("../crates/elsecrew-core/src/provider/vendor_observation/codex_events/stream.rs", import.meta.url), "utf8");
+  const engine = [...source.matchAll(/"turn stream unhandled ([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual([...new Set(engine)].sort(), [...CODEX_UNHANDLED_NOTIFICATIONS].sort());
+  // "turn stream request resolved" is the existing label for serverRequest/resolved.
+  const requests = [...source.matchAll(/"turn stream request ([^"]+)"/g)].map(match => match[1]).filter(name => name !== "resolved");
+  assert.deepEqual([...new Set(requests)].sort(), [...CODEX_SERVER_REQUESTS].sort());
+  const named = classifySessionDiagnostics("native Codex transport failed at turn stream unhandled item/fileChange/patchUpdated\nnative Codex transport failed at turn stream unhandled SECRET");
+  assert.deepEqual(named.codexCheckpoints, ["turn stream unhandled item/fileChange/patchUpdated"]);
 });

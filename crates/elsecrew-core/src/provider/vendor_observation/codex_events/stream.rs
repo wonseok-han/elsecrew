@@ -43,6 +43,69 @@ pub enum ToolPhase {
     Declined,
 }
 
+
+const SERVER_REQUESTS: &[&str] = &[
+    "turn stream request item/commandExecution/requestApproval",
+    "turn stream request item/fileChange/requestApproval",
+    "turn stream request item/tool/requestUserInput",
+    "turn stream request mcpServer/elicitation/request",
+    "turn stream request item/permissions/requestApproval",
+    "turn stream request item/tool/call",
+    "turn stream request account/chatgptAuthTokens/refresh",
+    "turn stream request attestation/generate",
+    "turn stream request currentTime/read",
+    "turn stream request applyPatchApproval",
+    "turn stream request execCommandApproval",
+];
+
+const UNHANDLED_NOTIFICATIONS: &[&str] = &[
+    "turn stream unhandled thread/started",
+    "turn stream unhandled thread/readState/changed",
+    "turn stream unhandled thread/archived",
+    "turn stream unhandled thread/deleted",
+    "turn stream unhandled thread/unarchived",
+    "turn stream unhandled thread/closed",
+    "turn stream unhandled thread/reverted",
+    "turn stream unhandled skills/changed",
+    "turn stream unhandled thread/section/changed",
+    "turn stream unhandled thread/attachment/updated",
+    "turn stream unhandled thread/goal/updated",
+    "turn stream unhandled thread/prediction/updated",
+    "turn stream unhandled thread/goal/cleared",
+    "turn stream unhandled thread/queue/changed",
+    "turn stream unhandled project/changed",
+    "turn stream unhandled thread/project/updated",
+    "turn stream unhandled thread/environment/connected",
+    "turn stream unhandled thread/environment/disconnected",
+    "turn stream unhandled item/autoApprovalReview/started",
+    "turn stream unhandled item/autoApprovalReview/completed",
+    "turn stream unhandled autoApprovalReview/strictReviewRequired",
+    "turn stream unhandled rawResponseItem/completed",
+    "turn stream unhandled rawResponse/completed",
+    "turn stream unhandled command/exec/outputDelta",
+    "turn stream unhandled process/outputDelta",
+    "turn stream unhandled process/exited",
+    "turn stream unhandled item/commandExecution/terminalInteraction",
+    "turn stream unhandled item/fileChange/patchUpdated",
+    "turn stream unhandled item/mcpToolCall/progress",
+    "turn stream unhandled mcpServer/oauthLogin/completed",
+    "turn stream unhandled account/gatewayOAuth/changed",
+    "turn stream unhandled remoteControl/status/changed",
+    "turn stream unhandled externalAgentConfig/import/progress",
+    "turn stream unhandled externalAgentConfig/import/completed",
+    "turn stream unhandled fs/changed",
+    "turn stream unhandled modelProvider/authRecoveryStarted",
+    "turn stream unhandled modelProvider/authRecoveryCompleted",
+    "turn stream unhandled fuzzyFileSearch/sessionUpdated",
+    "turn stream unhandled fuzzyFileSearch/sessionCompleted",
+    "turn stream unhandled thread/realtime/started",
+    "turn stream unhandled thread/realtime/closed",
+    "turn stream unhandled thread/realtime/error",
+    "turn stream unhandled windows/worldWritableWarning",
+    "turn stream unhandled windowsSandbox/setupCompleted",
+    "turn stream unhandled account/login/completed",
+];
+
 pub struct ToolEvent {
     pub item_id: String,
     pub kind: ToolKind,
@@ -161,7 +224,13 @@ impl TurnStream {
             Some("account/updated" | "account/rateLimits/updated") => "turn stream account metadata",
             Some("mcpServer/startupStatus/updated" | "mcpServer/event/stream/notification") => "turn stream mcp metadata",
             Some("turn/moderationMetadata") => "turn stream moderation metadata",
-            _ => "turn stream other frame",
+            // Provider requests, and notifications the provider defines but
+            // this stream does not accept: the record names which one, from
+            // these fixed lists only.
+            Some(method) => SERVER_REQUESTS.iter().chain(UNHANDLED_NOTIFICATIONS).copied()
+                .find(|stage| stage.rsplit(' ').next() == Some(method))
+                .unwrap_or("turn stream other frame"),
+            None => "turn stream other frame",
         };
         let result = self.observe_inner(input);
         if result.is_err() {
@@ -171,6 +240,15 @@ impl TurnStream {
     }
 
     pub fn diagnostic_stage(&self) -> &'static str { self.diagnostic_stage }
+
+    /// Every diagnostic stage naming a provider notification this stream does
+    /// not accept (Codex 0.169 app-server vocabulary). Mirrored in
+    /// `src/m5/contracts/session-diagnostics-v1.ts`.
+    pub fn unhandled_notification_stages() -> &'static [&'static str] { UNHANDLED_NOTIFICATIONS }
+
+    /// Every diagnostic stage naming a request the provider can send (Codex
+    /// 0.169 app-server vocabulary), supported or not.
+    pub fn server_request_stages() -> &'static [&'static str] { SERVER_REQUESTS }
 
     /// EOF without a terminal event is never success. Even successful return says
     /// only what the vendor reported; process-tree cleanup remains mandatory.
@@ -789,6 +867,12 @@ mod tests {
         let mut stream = started();
         assert!(matches!(stream.observe(&frame("PRIVATE_TOKEN", json!({}))).unwrap(), Observed::RequiresHandling));
         assert_eq!(stream.diagnostic_stage(), "turn stream other frame");
+        // A notification the provider defines but this stream refuses is named.
+        let mut stream = started();
+        assert!(matches!(stream.observe(&frame("item/fileChange/patchUpdated", json!({}))).unwrap(), Observed::RequiresHandling));
+        assert_eq!(stream.diagnostic_stage(), "turn stream unhandled item/fileChange/patchUpdated");
+        assert!(TurnStream::unhandled_notification_stages().iter().all(|stage| stage.starts_with("turn stream unhandled ")));
+        assert!(TurnStream::server_request_stages().iter().all(|stage| stage.starts_with("turn stream request ")));
         assert!(stream.observe(&frame("item/started", json!({"private":"SECRET"}))).is_err());
         assert_eq!(stream.diagnostic_stage(), "turn item start scope");
         assert!(stream.observe(&turn("turn/completed", "completed")).is_err());
