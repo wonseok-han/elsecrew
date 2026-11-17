@@ -19,6 +19,9 @@ pub(crate) struct ClaudeOutputState {
     terminal_saved: bool,
     failure: Option<Value>,
     finished: bool,
+    /// This app refused at least one tool request and told the agent to carry
+    /// on, so a result listing permission denials is still a clean finish.
+    denied_by_app: bool,
 }
 
 /// Owns the reservation, channel and cleanup together across dispatcher polls.
@@ -362,6 +365,7 @@ impl OwnedClaudeRun {
                     self.allow_tool_once(storage, projects, &entry.request)
                 } else {
                     self.channel.deny(&mut self.process, &entry.request.request_id, false)
+                        .map(|()| self.output.denied_by_app = true)
                 };
                 reply?;
             }
@@ -578,6 +582,7 @@ impl RunReservation {
             terminal_saved: false,
             failure: None,
             finished: false,
+            denied_by_app: false,
         })
     }
 
@@ -679,7 +684,7 @@ impl RunReservation {
                         state.completion = Some(
                             if result.outcome == ReportedOutcome::Success
                                 && result.queued_turn_count == Some(0)
-                                && !result.permission_denied
+                                && (!result.permission_denied || state.denied_by_app)
                             {
                                 // Success is a boundary: verify in full (with Git),
                                 // never on the streaming check's recent result.

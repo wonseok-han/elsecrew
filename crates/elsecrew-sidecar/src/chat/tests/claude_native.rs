@@ -38,6 +38,7 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
         ("cancel", false),
         ("bad-init", false),
         ("unknown-queue", false),
+        ("unexplained-denial", false),
         ("success", true),
         ("cancel", true),
         ("bad-init", true),
@@ -157,6 +158,10 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
         let mut result = json!({"type":"result","uuid":"result","session_id":"s","subtype":"success","is_error":false,"permission_denials":[],"queued_turn_count":0,"result":"hello","errors":[]});
         if case == "unknown-queue" {
             result.as_object_mut().unwrap().remove("queued_turn_count");
+        }
+        if matches!(case, "auto-outside" | "auto-missing" | "auto-missing-hook" | "unexplained-denial") {
+            // Real Claude lists the tool uses this app refused.
+            result["permission_denials"] = json!([{"tool_name":"Read","tool_use_id":"tool_a","tool_input":{}}]);
         }
         let mut script = format!("IFS= read -r init || exit 1\nprintf '%s\\n' {}\nIFS= read -r prompt || exit 2\nprintf '%s\\n' {}\n", quoted(&control), quoted(&init));
         if case.starts_with("auto-read") {
@@ -297,7 +302,7 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             ended["state"],
             match case {
                 "cancel" => "canceled",
-                "bad-init" | "unknown-queue" | "auto-read-failure" => "failed",
+                "bad-init" | "unknown-queue" | "unexplained-denial" | "auto-read-failure" => "failed",
                 _ => "succeeded",
             },
             "{case}: {ended:?}"
