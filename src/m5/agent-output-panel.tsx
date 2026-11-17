@@ -39,8 +39,13 @@ const LiveOutputRow = memo(function LiveOutputRow({ row, truncatedLabel, role, t
   return <article>{row.truncated && <small>{truncatedLabel}</small>}<pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{orchestratorMessage(row.text, role, team)}</pre></article>;
 });
 
-/** One selected run/window at a time; switching never starts or cancels a run. */
-export function AgentOutputPanel({ runs, definitions }: { runs: readonly AgentRunRecordV1[]; definitions?: readonly RoleDefinitionV3[] }) {
+/** One selected run/window at a time; switching never starts or cancels a run.
+ * Text the conversation already shows as that run's message is left out here,
+ * so an answer is read once; tool activity and text still streaming stay. */
+export function AgentOutputPanel({ runs, definitions, posted = [] }: {
+  runs: readonly AgentRunRecordV1[]; definitions?: readonly RoleDefinitionV3[];
+  posted?: readonly { runId: string | null; text: string }[];
+}) {
   const { t } = useI18n();
   const team = useMemo(() => definitions?.map(definition => definition.roleId), [definitions]);
   const [selected, select] = useState<string | null>(null);
@@ -191,6 +196,7 @@ export function AgentOutputPanel({ runs, definitions }: { runs: readonly AgentRu
     }).catch(fail);
     return () => { abort.abort(); clearInterval(timer); reader?.stop(); };
   }, [binding, retry]);
+  const shown = useMemo(() => new Set(posted.filter(message => message.runId === binding?.runId).map(message => message.text.trim())), [posted, binding?.runId]);
   if (!binding) return null;
   const historyActive = historyRequest?.binding.runId === binding.runId;
   const visibleHistory = historyActive && historyPage?.request === historyRequest ? historyPage : null;
@@ -235,7 +241,7 @@ export function AgentOutputPanel({ runs, definitions }: { runs: readonly AgentRu
     </>}
     {!historyActive && view?.binding.runId === binding.runId && <>
       {view.hasEarlier && <p>{t("m5.output.window")}</p>}
-      {view.rows.map(row => <LiveOutputRow key={row.key} row={row} role={run.selectedProfile.roleId} team={team} truncatedLabel={t("m5.output.truncated")} />)}
+      {view.rows.filter(row => row.channel === "activity" || !shown.has(row.text.trim())).map(row => <LiveOutputRow key={row.key} row={row} role={run.selectedProfile.roleId} team={team} truncatedLabel={t("m5.output.truncated")} />)}
     </>}
     </div>
     {!historyActive && newOutput && <button type="button" onClick={showLatest}>{t("m5.chat.newMessages")}</button>}
