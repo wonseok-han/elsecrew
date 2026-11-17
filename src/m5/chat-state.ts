@@ -373,7 +373,8 @@ export class ChatUiController {
     const roleName = chat.roleDefinitions?.find((item) => item.roleId === roleId)?.name;
     this.#set({ agentStartingRoleId: roleId, error: null, ...chatNotice("m5.agentNotice.checking", { roleId, runtime: profile.runtime, roleName }) });
     try {
-      const capability = await bridge.getAgentCapabilities({ runtime: profile.runtime, refresh: true, chatId: chat.chatId, roleId });
+      const capability = await whileProviderBusy(() => bridge.getAgentCapabilities({ runtime: profile.runtime, refresh: true, chatId: chat.chatId, roleId }),
+        () => this.#live(generation) && this.#state.activeChat?.chatId === chat.chatId);
       if (!this.#live(generation) || this.#state.activeChat?.chatId !== chat.chatId) return;
       if (capability.scope && (capability.scope.chatId !== chat.chatId || capability.scope.roleId !== roleId
         || capability.scope.worktreeId !== chat.worktreeId || capability.scope.workspaceIdentity !== chat.workspaceIdentity)) {
@@ -587,6 +588,25 @@ export function isActive(run: RunRecordV1): boolean { return run.state === "prep
 export function isAgentActive(run: AgentRunRecordV1): boolean { return run.state === "preparing" || run.state === "running" || run.state === "cancelling"; }
 /** An identityless recovery has no process evidence that can make abandon safe. */
 export function canAbandonAgentRecovery(recovery: AgentRecoveryRecordV1 | null): boolean { return recovery !== null && recovery.reason !== "processIdentityUnavailable"; }
+/** The provider was only briefly busy with another check (a model list, a
+ * sign-in check): the engine says to retry once it finishes. Asking again is
+ * safe for a capability check, which starts nothing. */
+export function isProviderBusy(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("another provider check currently owns this profile");
+}
+
+export async function whileProviderBusy<T>(ask: () => Promise<T>, stillWanted: () => boolean,
+  { waitMs = 60_000, everyMs = 1_000, sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)) } = {}): Promise<T> {
+  const until = Date.now() + waitMs;
+  for (;;) {
+    try { return await ask(); } catch (error) {
+      if (!isProviderBusy(error) || Date.now() + everyMs > until || !stillWanted()) throw error;
+    }
+    await sleep(everyMs);
+    if (!stillWanted()) throw new Error("provider check is no longer wanted");
+  }
+}
+
 export function stateLabel(state: ChatRecordV1["state"]): string { return ({ draft: "초안", preparing: "준비 중", running: "진행 중", waitingForUser: "사용자 확인 대기", reviewReady: "검토 준비", applying: "적용 중", stopping: "중지 중", completed: "완료", needsAttention: "확인 필요", recoveryRequired: "복구 필요", canceled: "중단됨", discarded: "버림" })[state]; }
 
 function matchesChat(event: TeamMessageV1, chat: ChatRecordV1): boolean { return event.chatId === chat.chatId && event.taskId === chat.taskId && event.worktreeId === chat.worktreeId; }

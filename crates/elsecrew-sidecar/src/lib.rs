@@ -570,6 +570,9 @@ struct Sidecar {
     workflow_outbound: Vec<EventV1>,
     workflow_roots: BTreeMap<String, String>,
     workflow_announcements: Vec<EventV1>,
+    /// A team step whose provider was briefly busy with another check (model
+    /// list, sign-in check): when it was first refused and when to ask again.
+    workflow_busy: BTreeMap<String, (Instant, Instant, u32)>,
 }
 
 struct PendingAgentStart {
@@ -980,6 +983,7 @@ impl Sidecar {
             workflow_outbound: Vec::new(),
             workflow_roots: Default::default(),
             workflow_announcements: Vec::new(),
+            workflow_busy: BTreeMap::new(),
             maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler::default(),
             maintenance_poisoned: false,
         };

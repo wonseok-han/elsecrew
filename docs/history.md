@@ -2,6 +2,19 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-17 · by Claude Opus 5.5 (claude-opus-5-5) — 새 작업 시작 때 "다른 확인이 프로필을 쓰는 중" 오류
+- 사용자 보고: 에이전트가 모두 연결돼 있는데 새 작업을 만들자 "선택한 역할·모델을 지금 실행할 수 없어요"가 떴다. 자세히 보기에는 `requestBlocked: another provider check currently owns this profile; retry after it finishes`가 있었다.
+- 원인(로그·코드 확인):
+  - 실행 전 확인(`agent.getCapabilities`)이 4초쯤 걸린 뒤 `providerBusy`로 거절됐다(`last-transport-progress.json`).
+  - 이 오류는 같은 공급자 잠금을 다른 확인(모델 목록·로그인 확인 등)이 잠시 쥐고 있을 때 나온다. 엔진은 다시 시도하라는 뜻으로 돌려주지만, 화면과 팀 작업은 다시 시도하지 않고 바로 실패 처리했다.
+  - 확인 시점에는 잠금 파일이 남아 있지 않았다. 즉 일시적인 경합이었다.
+  - 무엇이 쥐고 있었는지는 기록이 없어 확정하지 못했다(추정: 새 작업 화면의 모델 목록 조회).
+- 처리:
+  - 화면(`chat-state.ts`의 `whileProviderBusy`): 실행 전 확인이 이 오류면 1초마다 최대 60초 다시 묻는다. 그 동안 '확인 중' 안내를 그대로 둔다. 확인은 아무것도 시작하지 않으므로 다시 물어도 안전하다. 실행 시작(`startAgentRun`)은 다시 시도하지 않는다.
+  - 팀 작업(`orchestration_dispatch.rs`, `Sidecar.workflow_busy`): 다음 담당의 확인이 `providerBusy`면 멈추지 않고 1초 뒤 다시 묻는다. 60초 동안 계속 바쁘면 예전처럼 멈춘다.
+- 작업 방식: 사용자가 띄워 둔 개발 앱을 Orca 화면 조작으로 읽기만 했다(시작 화면, 프로젝트 test-todo). 실제 실행은 사용량이 나가므로 누르지 않았다.
+- 검증: 화면 테스트 2개(`tests/m5-chat-provider-busy.test.mts`), 엔진 테스트 `a_briefly_busy_provider_delays_the_team_step_instead_of_stopping_it`, orchestration 관련 30개, `npm test` 738, `pnpm build` 통과. 실제 앱 재현은 하지 않았다.
+
 ### 2026-11-17 · by Claude Opus 5.5 (claude-opus-5-5) — 프로세스 256개 한계·재부팅 뒤 pid 재사용 해결
 - 사용자 요청: 직전 엔트리의 다음 할 일 1순위(프로세스 증거 재설계)를 진행한다.
 - 원인:

@@ -64,6 +64,11 @@ fn workflow_failure_reason(code: &str) -> &'static str {
         _ => "담당 에이전트의 실행 준비 또는 결과를 확인하지 못했어요. 연결 상태와 역할 설정을 확인해 주세요.",
     }
 }
+/// How long a team step keeps asking a provider that is busy with another
+/// check, and how often.
+const WORKFLOW_BUSY_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+const WORKFLOW_BUSY_RETRY: std::time::Duration = std::time::Duration::from_secs(1);
+
 impl Sidecar {
     pub(super) fn handle_agent_request(
         &mut self,
@@ -439,6 +444,7 @@ impl Sidecar {
         }
         orchestration::save(&mut self.storage, chat, &state).map_err(failure)?;
         self.workflow_chats.remove(chat);
+        self.workflow_busy.remove(chat);
         events.push(orchestration::notice(&mut self.storage,chat,&format!("팀 작업을 멈췄어요. {reason} 이미 실행한 작업은 자동으로 반복하지 않아요.")).map_err(failure)?);
         Ok(())
     }
@@ -452,7 +458,20 @@ impl Sidecar {
             return Ok(false);
         };
         if !response.ok {
-            let reason = workflow_failure_message(response.error.as_ref().map(|e| e.code.as_str()).unwrap_or("unknown"));
+            let code = response.error.as_ref().map(|e| e.code.as_str()).unwrap_or("unknown");
+            // The provider is only briefly busy with another check (a model
+            // list, a sign-in check): ask again shortly instead of stopping
+            // the team, for up to WORKFLOW_BUSY_WAIT.
+            if kind == "capability" && code == "providerBusy" {
+                let now = std::time::Instant::now();
+                let (since, _, attempt) = self.workflow_busy.get(&chat).copied().unwrap_or((now, now, 0));
+                if now.duration_since(since) < WORKFLOW_BUSY_WAIT {
+                    self.workflow_busy.insert(chat.clone(), (since, now + WORKFLOW_BUSY_RETRY, attempt + 1));
+                    return Ok(true);
+                }
+            }
+            self.workflow_busy.remove(&chat);
+            let reason = workflow_failure_message(code);
             self.pause_workflow_reason(&chat, events, &reason)?;
             return Ok(kind != "root");
         }
@@ -484,6 +503,7 @@ impl Sidecar {
             }
         }
         if kind == "capability" {
+            self.workflow_busy.remove(&chat);
             let capability = response.result.as_ref().ok_or_else(|| {
                 SidecarError::new("orchestrationBlocked", "missing capability result")
             })?;
@@ -538,6 +558,7 @@ impl Sidecar {
             let mut state = self.workflow_state(&chat)?;
             if state.status != "running" {
                 self.workflow_chats.remove(&chat);
+                self.workflow_busy.remove(&chat);
                 continue;
             }
             if let Some(run_id) = state.run_id.clone() {
@@ -634,7 +655,13 @@ impl Sidecar {
                 .and_then(|roles| roles.iter().find(|p| p["roleId"] == state.role))
                 .map(|p| p["runtime"].clone())
                 .unwrap_or(Value::Null);
-            let id = format!("cap_{}", state.request_id);
+            // Waiting out a busy provider: ask again only when it is time.
+            let attempt = match self.workflow_busy.get(&chat) {
+                Some((_, retry_at, _)) if std::time::Instant::now() < *retry_at => continue,
+                Some((_, _, attempt)) => *attempt,
+                None => 0,
+            };
+            let id = if attempt == 0 { format!("cap_{}", state.request_id) } else { format!("cap_{}_retry{attempt}", state.request_id) };
             let request = self.workflow_request(
                 id.clone(),
                 "agent.getCapabilities",
@@ -776,6 +803,38 @@ mod tests {
             .result;
         (root, sidecar, chat)
     }
+    /// A provider briefly busy with another check (model list, sign-in
+    /// check) does not stop the team: the step asks again shortly, and only a
+    /// provider that stays busy for the whole wait stops it.
+    #[test]
+    fn a_briefly_busy_provider_delays_the_team_step_instead_of_stopping_it() {
+        let (_root, mut sidecar, chat) = service();
+        let id = chat["chatId"].as_str().unwrap();
+        let input = AgentRunStartRequestV1 {
+            chat_id:id.into(), role_id:"coordinator".into(),
+            input_message_ids:sidecar.storage.chat_message_history(id).unwrap().iter().filter_map(|v|v["messageId"].as_str().map(str::to_owned)).collect(),
+            expected_capability_fingerprint:"sha256:unused".into(),
+        };
+        orchestration::begin(&mut sidecar.storage, &input, "busy-test").unwrap();
+        let busy = |sidecar: &mut Sidecar, request_id: &str| {
+            let request = sidecar.workflow_request(request_id.into(), "agent.getCapabilities", json!({}));
+            sidecar.workflow_requests.insert(request.request_id.clone(), (id.into(), "capability".into()));
+            let response = error_response(&request, "providerBusy", "requestBlocked", "another provider check currently owns this profile; retry after it finishes");
+            let mut events = Vec::new();
+            assert!(sidecar.workflow_response(&response, &mut events).unwrap());
+            events
+        };
+        assert!(busy(&mut sidecar, "busy-cap-1").is_empty());
+        assert_eq!(sidecar.workflow_state(id).unwrap().status, "running", "still waiting for the provider");
+        let (since, retry_at, attempt) = sidecar.workflow_busy[id];
+        assert!(retry_at > since && attempt == 1);
+        // Busy for the whole wait: the team stops with the usual reason.
+        sidecar.workflow_busy.insert(id.into(), (since - WORKFLOW_BUSY_WAIT, retry_at, attempt));
+        assert!(!busy(&mut sidecar, "busy-cap-2").is_empty());
+        assert_eq!(sidecar.workflow_state(id).unwrap().status, "paused");
+        assert!(!sidecar.workflow_busy.contains_key(id));
+    }
+
     #[test]
     fn orchestration_admission_failure_keeps_actionable_reason_without_raw_detail() {
         let (_root, mut sidecar, chat) = service();
