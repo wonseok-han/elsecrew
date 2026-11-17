@@ -1059,7 +1059,7 @@ impl Sidecar {
             )));
         }
         if !self.workflow_chats.is_empty() && (matches!(request.method.as_str(), "file.save" | "workspace.file.save")
-            || (request.method == "project.catalog" && matches!(request.params["action"].as_str(), Some("openApplicationConfirmation" | "startApplication" | "restoreApplication" | "discardChatWorkspace" | "retireApplication" | "cleanupBackup")))) {
+            || (request.method == "project.catalog" && matches!(request.params["action"].as_str(), Some("openApplicationConfirmation" | "startApplication" | "restoreApplication" | "discardChatWorkspace" | "retireApplication" | "cleanupBackup" | "applyChatLatest")))) {
             return Ok(HandledRequest::response(error_response(&request, "orchestrationBusy", "requestBlocked", "finish or stop the team task before changing its workspace or applying to the original")));
         }
         if self.projects.application_running()
@@ -1480,6 +1480,12 @@ impl Sidecar {
                 Some("applicationStatus") => {
                     let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
                     self.projects.application_status(&self.storage,param_string(params,"projectId").map_err(invalid_params)?)
+                }
+                Some("applyChatLatest") => {
+                    // Latest wins (user decision 2026-11-17): the workspace as it
+                    // is now is written over the original, no review step.
+                    let params = require_exact_params(&request.params, &["action", "projectId", "chatId"]).map_err(invalid_params)?;
+                    self.projects.apply_chat_latest(&self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "chatId").map_err(invalid_params)?)
                 }
                 Some("chatApplicationStatus") => {
                     let params = require_exact_params(&request.params, &["action", "projectId", "chatId"]).map_err(invalid_params)?;

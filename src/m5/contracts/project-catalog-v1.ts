@@ -84,6 +84,7 @@ export type ProjectCatalogRequest =
   | { action: "inspectPreparation"; projectId: string }
   | { action: "applicationStatus"; projectId: string }
   | { action: "chatApplicationStatus"; projectId: string; chatId: string }
+  | { action: "applyChatLatest"; projectId: string; chatId: string }
   | { action: "applicationHistory"; projectId: string }
   | { action: "chatApplicationPreview"; projectId: string; chatId: string }
   | { action: "abandonPreparation"; inspection: PreparationInspection };
@@ -122,6 +123,7 @@ export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "applicationHistory"; projectId: string; entries: ApplicationHistoryEntry[] }
   | { schemaVersion: 1; action: "applicationStatus"; status: ApplicationStatus }
   | { schemaVersion: 1; action: "chatApplicationStatus"; chatId: string; status: ApplicationStatus }
+  | { schemaVersion: 1; action: "applyChatLatest"; projectId: string; chatId: string; written: number; removed: number; skipped: string[]; failed: string | null }
   | { schemaVersion: 1; action: "inspectPreparation"; inspection: PreparationInspection | null }
   | { schemaVersion: 1; action: "abandonPreparation"; inspection: PreparationInspection }
   | { schemaVersion: 1; action: "list"; projects: ProjectCatalogEntry[]; nextCursor: string | null }
@@ -256,7 +258,7 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
     keys(request, ["action"]);
   } else if (request.action === "reopen" || request.action === "releaseView" || request.action === "inspectPreparation" || request.action === "applicationStatus" || request.action === "applicationHistory") {
     keys(request, ["action", "projectId"]); id(request.projectId);
-  } else if (request.action === "chatApplicationPreview" || request.action === "chatApplicationStatus") {
+  } else if (request.action === "chatApplicationPreview" || request.action === "chatApplicationStatus" || request.action === "applyChatLatest") {
     keys(request, ["action", "projectId", "chatId"]); id(request.projectId); id(request.chatId);
   } else if (request.action === "abandonPreparation") {
     keys(request, ["action", "inspection"]); validatePreparationInspection(request.inspection);
@@ -442,6 +444,12 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
       seen.add(entry.applicationId);
       if (!["applied", "restored", "abandoned"].includes(String(entry.state)) || !Number.isSafeInteger(entry.total) || (entry.total as number) < 0 || (entry.total as number) > 100000) throw new Error("invalid historical summary");
     }
+  } else if (request.action === "applyChatLatest") {
+    keys(result, ["schemaVersion","action","projectId","chatId","written","removed","skipped","failed"]);
+    if (result.failed !== null && (typeof result.failed !== "string" || !result.failed.length || result.failed.length > 4096)) throw new Error("invalid failed path");
+    if (id(result.projectId) !== request.projectId || id(result.chatId) !== request.chatId) throw new Error("apply target mismatch");
+    for (const count of [result.written, result.removed]) if (!Number.isSafeInteger(count) || (count as number) < 0) throw new Error("invalid apply count");
+    if (!Array.isArray(result.skipped) || result.skipped.length > 100000 || !result.skipped.every(path => typeof path === "string" && path.length > 0 && path.length <= 4096)) throw new Error("invalid skipped paths");
   } else if (request.action === "applicationStatus" || request.action === "chatApplicationStatus") {
     keys(result, request.action === "chatApplicationStatus" ? ["schemaVersion","action","chatId","status"] : ["schemaVersion","action","status"]);
     if (request.action === "chatApplicationStatus" && id(result.chatId) !== request.chatId) throw new Error("application status chat mismatch");

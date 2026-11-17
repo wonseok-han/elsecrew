@@ -10,6 +10,7 @@ pub(crate) const WINDOWS_GIT_EXECUTION_ENABLED: bool = false;
 #[cfg(not(any(unix, windows)))]
 use crate::process_spawn::SpawnGuarded as _;
 mod app_roles;
+mod latest_apply;
 mod app_connections;
 mod empty_project;
 #[cfg(any(windows, test))]

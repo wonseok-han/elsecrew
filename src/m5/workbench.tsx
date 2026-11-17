@@ -41,8 +41,8 @@ import { WorkbenchDock } from "./workbench-dock.tsx";
 import { ProviderLogin, type ConnectionReveal } from "./provider-login.tsx";
 import { ApprovalCard } from "./approval-card.tsx";
 import { ChatWorkspaceDiscard } from "./chat-workspace-discard.tsx";
-import { ChatApplicationPreview } from "./chat-application-preview.tsx";
-import { diffPages, splitDiffPage, DIFF_PAGE_ROWS } from "./diff-view.ts";
+import { ApplyLatest } from "./apply-latest.tsx";
+import { diffPages, diffSides, splitDiffPage, DIFF_PAGE_ROWS } from "./diff-view.ts";
 import { FileSearch } from "./file-search-view.tsx";
 import { requestEditorSave } from "./editor-actions.ts";
 import { languageFor } from "./editor-language.ts";
@@ -688,7 +688,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
             <>
               <button className="m5-refresh" type="button" onClick={() => void controller.refreshChanges()} disabled={!admissionReady || snapshot.diffLoading}>{t("m5.editor.refresh")}</button>
               {snapshot.diffLoading && <p className="m5-empty" role="status">{t("m5.editor.loadingChanges")}</p>}
-              {chat.activeChat && <ChatApplicationPreview key={`${chat.activeChat.chatId}:${chat.activeChat.state}`} openRequest={applyOpenRequest} projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} worktreeId={chat.activeChat.worktreeId} disabled={!admissionReady || chat.switching || chatController.isActionBlocked()} />}
+              {chat.activeChat && <ApplyLatest projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} changeCount={snapshot.diffSummary?.entries.length ?? 0} confirmRequest={applyOpenRequest} disabled={!admissionReady || chat.switching || chatController.isActionBlocked() || chat.activeChat.state === "running" || chat.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state))} />}
               {snapshot.diffSummary && <ChangeFileList key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}`} entries={snapshot.diffSummary.entries} selected={snapshot.diffFile?.path} disabled={!admissionReady || snapshot.actionBlocked} onOpen={path => { void controller.openDiff(path); }} />}
             </>
           ) : <Empty text={t("m5.editor.chooseProject")} />}
@@ -1463,14 +1463,58 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
 
 // Draft/output updates leave the reviewed diff unchanged. Stable callbacks and
 // ordinary shallow comparison skip its rows; context and permission changes still render.
+/** A read-only VS Code style comparison: only what changed is marked, side by
+ * side (or in one column when narrow or chosen). Falls back to the plain
+ * listing if the editor cannot load. */
+function MonacoDiff({ path, before, after, sideBySide, wrap, onFailed }: { path: string; before: string; after: string; sideBySide: boolean; wrap: boolean; onFailed: () => void }) {
+  const { t } = useI18n();
+  const host = useRef<HTMLDivElement | null>(null);
+  const view = useRef<Monaco.editor.IStandaloneDiffEditor | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    let models: Monaco.editor.ITextModel[] = [];
+    void loadMonaco().then(monaco => {
+      if (cancelled || !host.current) return;
+      monaco.editor.defineTheme("elsecrew", {
+        base: "vs-dark", inherit: true, rules: [],
+        colors: { "editor.background": "#111315", "editor.foreground": "#eceeed",
+          "editorLineNumber.foreground": "#697078", "editorLineNumber.activeForeground": "#c3c7cd",
+          "editorGutter.background": "#111315", "editor.lineHighlightBackground": "#191b1e",
+          "editor.selectionBackground": "#354352", "editor.inactiveSelectionBackground": "#29323b" },
+      });
+      const editor = monaco.editor.createDiffEditor(host.current, {
+        theme: "elsecrew", readOnly: true, originalEditable: false, automaticLayout: true,
+        renderSideBySide: sideBySide, useInlineViewWhenSpaceIsLimited: true, renderSideBySideInlineBreakpoint: 720,
+        minimap: { enabled: false }, scrollBeyondLastLine: false, fontSize: 13, lineHeight: 20,
+        wordWrap: wrap ? "on" : "off", diffWordWrap: wrap ? "on" : "off",
+        hideUnchangedRegions: { enabled: true, contextLineCount: 3, minimumLineCount: 6, revealLineCount: 20 },
+        renderOverviewRuler: false, ariaLabel: t("m5.diff.comparison"),
+      });
+      const language = languageFor(path);
+      models = [monaco.editor.createModel(before, language), monaco.editor.createModel(after, language)];
+      editor.setModel({ original: models[0]!, modified: models[1]! });
+      view.current = editor;
+    }).catch(() => { if (!cancelled) onFailed(); });
+    return () => { cancelled = true; view.current?.dispose(); view.current = null; for (const model of models) model.dispose(); };
+    // Rebuilt only when the compared texts change; options update in place.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path, before, after]);
+  useEffect(() => {
+    view.current?.updateOptions({ renderSideBySide: sideBySide, wordWrap: wrap ? "on" : "off", diffWordWrap: wrap ? "on" : "off" });
+  }, [sideBySide, wrap]);
+  return <div ref={host} className="m5-monaco-diff" />;
+}
+
 const DiffDetails = memo(function DiffDetails({ descriptor, text, canOpen, onOpen, canDiscuss, onDiscuss, onReturn }: { onReturn: () => void; descriptor: NonNullable<ReturnType<ProjectEditorController["snapshot"]>["diffFile"]>; text: string; canOpen: boolean; onOpen: (path: string) => void; canDiscuss: boolean; onDiscuss: (path: string, side?: "before" | "after", line?: number) => void }) {
   const { t } = useI18n();
   const indexed = useMemo(() => diffPages(text), [text]);
   // Pages are read as the reader scrolls; rows already shown stay in place.
   const [loaded, setLoaded] = useState(1);
   const [wrapLines, setWrapLines] = useState(true);
-  const [diffMode, setDiffMode] = useState<"inline" | "split">("inline");
-  useEffect(() => setLoaded(1), [descriptor, text]);
+  const [diffMode, setDiffMode] = useState<"inline" | "split">("split");
+  const sides = useMemo(() => descriptor.kind === "binary" ? null : diffSides(text), [descriptor.kind, text]);
+  const [monacoFailed, setMonacoFailed] = useState(false);
+  useEffect(() => { setLoaded(1); setMonacoFailed(false); }, [descriptor, text]);
   const pages = indexed.pageCount;
   const shown = Math.min(loaded, pages);
   const rawRows = useMemo(() => Array.from({ length: shown }, (_, index) => indexed.page(index)).flat(), [indexed, shown]);
@@ -1504,7 +1548,9 @@ const DiffDetails = memo(function DiffDetails({ descriptor, text, canOpen, onOpe
           </div></details>
         </div>
       </header>
-      {descriptor.kind === "binary" ? <Empty text={t("m5.diff.binaryHelp")} /> : !text ? <Empty text={t("m5.diff.empty")} /> : <>
+      {descriptor.kind === "binary" ? <Empty text={t("m5.diff.binaryHelp")} /> : !text ? <Empty text={t("m5.diff.empty")} /> : sides && !monacoFailed
+        ? <MonacoDiff path={descriptor.path} before={sides.before} after={sides.after} sideBySide={diffMode === "split"} wrap={wrapLines} onFailed={() => setMonacoFailed(true)} />
+        : <>
         <div className={`m5-diff-lines${wrapLines ? " m5-diff-lines-wrapped" : ""}${diffMode === "split" ? " m5-diff-split" : ""}`} tabIndex={0} aria-label={t("m5.diff.comparison")}>
           {diffMode === "split" ? <table>
             <colgroup><col className="m5-diff-number-column" /><col /><col className="m5-diff-number-column" /><col /></colgroup>
@@ -1532,6 +1578,7 @@ function ChangeFileList({ entries, selected, disabled, onOpen }: { entries: read
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [loaded, setLoaded] = useState(1);
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const needle = query.trim().toLowerCase();
   const matches = useMemo(() => entries.filter(entry => !needle || entry.path.toLowerCase().includes(needle) || entry.oldPath?.toLowerCase().includes(needle)), [entries, needle]);
   const pageSize = 100;
@@ -1543,19 +1590,40 @@ function ChangeFileList({ entries, selected, disabled, onOpen }: { entries: read
       <p role="status">{t("m5.diff.fileCount", { shown: matches.length, total: entries.length })}</p>
     </section>}
     <div className="m5-change-list">
-      {visible.map(entry => <button key={`${entry.kind}:${entry.path}`} type="button" className="m5-change-row" aria-current={selected === entry.path ? "true" : undefined} title={entry.oldPath ? `${entry.oldPath} → ${entry.path}` : entry.path} onClick={() => onOpen(entry.path)} disabled={disabled}>
-        <ChangeKind entry={entry} />
-        <span className="m5-change-file"><strong>{fileName(entry.path)}</strong>{entry.path.includes("/") && <small>{entry.path.slice(0, entry.path.lastIndexOf("/"))}</small>}</span>
-      </button>)}
+      {changeGroups(visible).map(([folder, files]) => <div key={folder || "."} className="m5-change-group">
+        {folder && <button type="button" className="m5-change-folder" aria-expanded={!collapsed.has(folder)} onClick={() => setCollapsed(old => { const next = new Set(old); if (next.has(folder)) next.delete(folder); else next.add(folder); return next; })}>
+          <span aria-hidden="true">{collapsed.has(folder) ? "▸" : "▾"}</span><span className="m5-change-folder-name">{folder}</span><small>{files.length}</small>
+        </button>}
+        {!collapsed.has(folder) && files.map(entry => <button key={`${entry.kind}:${entry.path}`} type="button" className={`m5-change-row${folder ? " m5-change-nested" : ""}`} aria-current={selected === entry.path ? "true" : undefined} title={entry.oldPath ? `${entry.oldPath} → ${entry.path}` : entry.path} onClick={() => onOpen(entry.path)} disabled={disabled}>
+          <span className={`m5-change-file${entry.kind === "deleted" ? " m5-change-file-deleted" : ""}`}><strong>{fileName(entry.path)}</strong>{entry.oldPath && <small>{t("m5.diff.old", { path: entry.oldPath })}</small>}</span>
+          <ChangeKind entry={entry} />
+        </button>)}
+      </div>)}
       {matches.length === 0 && <Empty text={t(entries.length === 0 ? "m5.editor.noChanges" : "m5.diff.noMatches")} />}
       {visible.length < matches.length && <LoadMore key={visible.length} label={t("m5.diff.fileRange", { last: visible.length, total: matches.length })} onReach={() => setLoaded(loaded + 1)} />}
     </div>
   </>;
 }
 
+/** Files grouped by their folder, the way a source control view lists them:
+ * top-level files first, then folders in name order. */
+function changeGroups(entries: readonly DiffEntryV1[]): [string, DiffEntryV1[]][] {
+  const groups = new Map<string, DiffEntryV1[]>();
+  for (const entry of entries) {
+    const folder = entry.path.includes("/") ? entry.path.slice(0, entry.path.lastIndexOf("/")) : "";
+    groups.set(folder, [...(groups.get(folder) ?? []), entry]);
+  }
+  return [...groups.entries()]
+    .sort(([left], [right]) => (left === "" ? -1 : right === "" ? 1 : left.localeCompare(right)))
+    .map(([folder, files]) => [folder, [...files].sort((a, b) => fileName(a.path).localeCompare(fileName(b.path)))]);
+}
+
+const KIND_LETTER: Record<string, string> = { added: "A", modified: "M", deleted: "D", renamed: "R", binary: "B" };
+
 function ChangeKind({ entry }: { entry: DiffEntryV1 }) {
   const { t } = useI18n();
-  return <span className={`m5-change-kind m5-kind-${entry.kind}`}>{t(`m5.diff.${entry.kind}`)}</span>;
+  const label = t(`m5.diff.${entry.kind}`);
+  return <span className={`m5-change-kind m5-kind-${entry.kind}`} title={label} aria-label={label}>{KIND_LETTER[entry.kind] ?? "?"}</span>;
 }
 
 function fileName(path: string): string {

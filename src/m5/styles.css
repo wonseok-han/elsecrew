@@ -1295,3 +1295,24 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-recovery-item > p, .m5-recovery-item > div > p { margin: 4px 0; }
 .m5-maintenance-group > details { margin-top: 10px; }
 .m5-maintenance-group > details > summary { cursor: pointer; font-size: 13px; }
+
+/* Changes: one-step apply and a source-control style list. */
+.m5-apply-latest { display: grid; gap: 8px; margin: 0 0 10px; padding: 10px 12px; border: 1px solid var(--m5-border); border-radius: 8px; }
+.m5-apply-latest-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.m5-apply-latest-head strong { font-size: 12px; font-weight: 600; }
+.m5-apply-latest-confirm p, .m5-apply-latest-done, .m5-apply-latest-failed p { margin: 0; font-size: 12px; line-height: 1.5; }
+.m5-apply-latest-actions { display: flex; gap: 8px; margin-top: 8px; }
+.m5-apply-latest-failed pre { white-space: pre-wrap; font-size: 11px; }
+.m5-change-group { display: grid; }
+.m5-change-folder { display: flex; align-items: center; gap: 6px; width: 100%; padding: 4px 8px; background: none; border: 0; color: var(--m5-muted); font-size: 12px; text-align: left; cursor: pointer; }
+.m5-change-folder:hover { color: var(--m5-text); }
+.m5-change-folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m5-change-list .m5-change-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.m5-change-list .m5-change-nested { padding-left: 26px; }
+.m5-change-file-deleted strong { text-decoration: line-through; opacity: .75; }
+.m5-change-list .m5-change-kind { flex: none; min-width: 16px; text-align: center; font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; background: none; padding: 0; }
+.m5-change-list .m5-kind-added { color: #73c991; }
+.m5-change-list .m5-kind-modified { color: #e2c08d; }
+.m5-change-list .m5-kind-deleted { color: #f07167; }
+.m5-change-list .m5-kind-renamed { color: #6cb6ff; }
+.m5-monaco-diff { flex: 1; min-height: 320px; height: 100%; }
