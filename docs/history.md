@@ -49,7 +49,17 @@
     - 구성원 보고 뒤 총괄 단계가 없는 경우는 여전히 실패로 막는다.
     - 검증: orchestration 30 통과.
   - 관찰: 총괄이 "작업 폴더의 index.html을 더블클릭"하라고 안내하지만 사용자는 숨겨진 작업 공간에 접근할 수 없다. 원본 반영 흐름을 직접 시험한 뒤 안내 문구나 미리보기를 정한다.
-- 다음 할 일: 검증 완료 → 고칠 점 반영 → 원본 반영까지 실제로 진행한다. 새 빈 폴더로 처음부터 재시험한다(모델 자동 채움 확인). (a)(b)를 정리한다. 실패 이유를 사용자에게 보여 줄 기록을 남길지 검토한다.
+- 후속 4(같은 날):
+  - "계속"으로 팀 작업이 끝까지 완료됐다(검증 19+6+6 판정, 고칠 점 2개 수정·재확인, `reviewReady`). 검증 조각 실행에서는 MCP 실패가 다시 나지 않았고 임시 진단 파일도 비어 있다.
+  - **원본 반영 차단(심각)**:
+    - "반영 전 변경 목록 보기"가 `dirtyConflict: snapshot permission changes outside Git executable mode are unsupported`로 실패했다. Claude Code가 작업 복사본에 만드는 `.claude/.cc-writes`(빈 폴더, 0700) 때문이었다. **Claude 역할이 한 번이라도 돈 작업은 원본 반영이 항상 막힌다.**
+    - 수정: `review.rs` `capture_workspace`가 `.claude/.cc-writes`(하위 포함)를 빼고, 그 때문에만 남은 빈 `.claude`도 뺀다(`without_agent_scratch`).
+    - 독립 검토 I1: 원본이 그 경로의 파일을 추적하면 삭제로 계산된다. 그래서 그 경우에는 반영 검토를 거절한다.
+    - 회귀 테스트 2개(0700 내부 폴더 무시, `.claude/settings.json`은 변경으로 표시, 추적 파일 거절). 테스트 환경의 전역 gitignore가 `.cc-writes`를 무시해서 `add -f`를 썼다.
+  - 화면: 검토 준비 상태의 팀 대화에 "작업 공간 버리기"만 보였다. 이제 그 앞에 결과 확인 안내와 "변경 확인하고 내 폴더에 반영하기" 버튼을 둔다. 누르면 변경 탭으로 가서 반영 영역이 펼쳐진다.
+  - 총괄 지시문: 사용자는 작업 복사본 파일을 열 수 없다. 결과는 앱에서 검토·반영한 뒤 자기 폴더에서 연다고 안내한다.
+  - 검증: project 173, 반영 검토 5, `npm test` 741, tsc 통과.
+- 다음 할 일: 재시작한 앱에서 원본 반영을 끝까지 실제로 해 보고, 원본 폴더의 index.html이 동작하는지 확인한다. 새 빈 폴더로 처음부터 재시험한다(모델 자동 채움 확인). (a)(b)를 정리한다. 실패 이유를 사용자에게 보여 줄 기록을 남길지 검토한다.
 
 ### 2026-11-17 · by Claude Opus 5.5 (claude-opus-5-5) — 새 작업 시작 때 "다른 확인이 프로필을 쓰는 중" 오류
 - 사용자 보고: 에이전트가 모두 연결돼 있는데 새 작업을 만들자 "선택한 역할·모델을 지금 실행할 수 없어요"가 떴다. 자세히 보기에는 `requestBlocked: another provider check currently owns this profile; retry after it finishes`가 있었다.
@@ -71,6 +81,7 @@
 - 위저드 6단계: 에이전트 선택 → 진단 → 설치 → 로그인 → 첫 프로젝트 → 졸업식
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+- **에이전트 CLI 내부 흔적은 원본 반영에서 제외(2026-11-17)**: Claude Code는 작업 복사본에 `.claude/.cc-writes`(0700)를 만든다. 반영 검토(`review.rs` `AGENT_SCRATCH`)는 이 경로를 통째로 빼고, 원본이 그 안의 파일을 추적하면 거절한다. 다른 CLI 폴더를 추가할 때는 CLI만 쓰고 에이전트는 쓸 수 없는 경로인지부터 확인한다. Codex 0.169는 browser/computer use·image generation이 기본으로 켜져 있어 실행 인자로 끈다(`UNSUPERVISED_TOOL_FEATURES`). 새 Codex 버전마다 `codex-profile-v1/logs_2.sqlite`의 feedback_tags `feature.*`를 다시 점검한다.
 - **dev 앱 자동 조작(2026-11-17)**: 폴더 선택 창은 Orca로 뒤에서 조작할 수 없다. 개발 빌드에서는 `~/Library/Application Support/Elsecrew/dev-pick-directory.txt`에 경로를 적으면 다음 '프로젝트 추가'가 그 폴더를 고른다(한 번만, 빈 폴더 확인도 생략, 패키지 앱은 무시). 엔진 watcher는 `file.changed`만 보내고 `diff.changed`는 보내지 않는다. 화면이 목록을 갱신하려면 `file.changed`를 받아야 한다. 번역 파일을 바꾸면 dev HMR이 깨지므로 Cmd+R로 다시 불러온다.
 
 - **프로세스 증거는 '살아 있을 수 있는 것'만 기록한다(2026-11-17)**: 실행 기록(DB)은 root와 아직 끝난 것으로 관측되지 않은 신원만 저장한다(`TreeTracker::recorded_identities`, `LoginProcess::recorded_for_ledger`). 끝난 프로세스는 다시 돌 수 없으므로 빼도 안전하다. 로그인 잠금 파일은 추가 전용 그대로이고 상한은 65,536개·4MiB다(`HOLD_MAX_BYTES`). 소유권 검사는 '이전 기록 ⊆ 누적 관측'이다. 엔진이 사라진 뒤의 판정(시작 시 정리·명시 복구·잠금 해제)은 `SettledProcTable`을 쓴다. 같은 pid를 시작 시각이 다른 프로세스가 쓰면 기록된 프로세스는 끝난 것이다(살아 있는 두 프로세스는 pid를 공유하지 않는다). 실행 중인 추적은 계속 이를 무결성 실패로 본다. 앱 데이터 사본을 엔진으로 열 때는 살아 있는 이전 엔진이 있으면 정리를 건너뛴다(`previous_engine_still_runs`).

@@ -420,6 +420,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   // settings change; a provider without one recommendation leaves the choice
   // to the user.
   const [recommendationMissing, setRecommendationMissing] = useState(false);
+  // "Review and apply" in the conversation opens the apply section in Changes.
+  const [applyOpenRequest, setApplyOpenRequest] = useState(0);
   useEffect(() => setRecommendationMissing(false), [chat.settings?.projectId, chat.settings?.revision]);
   const fillRecommendedRoles = async (): Promise<boolean> => {
     const settings = chatController.snapshot().settings;
@@ -583,7 +585,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         {chat.error && <section className="m5-error" role="alert"><strong>{t(chat.error.messageKey)}</strong><details><summary>{t("m5.feedback.details")}</summary><pre>{chat.error.detail}</pre></details></section>}
       </>} onSave={(roles, roleDefinitions) => chatController.updateSettings(roles, roleDefinitions)} onReload={() => chatController.reloadSettings()} onClose={closeRoleSettings} returnToDraft={returnToNewChat} projectName={snapshot.project?.name ?? chat.settings.projectId} />}
 
-      {snapshot.project && <WorkbenchDock changeCount={snapshot.rescanRequired ? undefined : snapshot.diffSummary?.entries.length} reveal={snapshot.panelRequest} conversation={chat.activeChat ? <div className="m5-conversation"><div className="m5-conversation-scroll"><TeamTimeline onCoordinatorChat={() => { setGoal(chat.activeChat?.goal ?? ""); setNewChatOpen(true); }} controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} />{chat.activeChat.state === "reviewReady" && <ChatWorkspaceDiscard key={chat.activeChat.chatId} chat={chat.activeChat} disabled={!admissionReady || settingsOpen || !controller.canLeaveProject() || !chatController.canLeaveProjectView()} onCompleted={async discarded => {
+      {snapshot.project && <WorkbenchDock changeCount={snapshot.rescanRequired ? undefined : snapshot.diffSummary?.entries.length} reveal={snapshot.panelRequest} conversation={chat.activeChat ? <div className="m5-conversation"><div className="m5-conversation-scroll"><TeamTimeline onCoordinatorChat={() => { setGoal(chat.activeChat?.goal ?? ""); setNewChatOpen(true); }} controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} />{chat.activeChat.state === "reviewReady" && <section className="m5-review-ready" aria-label={t("m5.chat.reviewReadyTitle")}><p>{t("m5.chat.reviewReadyHelp")}</p><button type="button" disabled={!admissionReady} onClick={() => { controller.selectPanel("changes"); void controller.refreshChanges(); setApplyOpenRequest(value => value + 1); }}>{t("m5.chat.reviewAndApply")}</button></section>}{chat.activeChat.state === "reviewReady" && <ChatWorkspaceDiscard key={chat.activeChat.chatId} chat={chat.activeChat} disabled={!admissionReady || settingsOpen || !controller.canLeaveProject() || !chatController.canLeaveProjectView()} onCompleted={async discarded => {
         const request = { action: "releaseView" as const, projectId: discarded.projectId };
         validateProjectCatalogResult(await window.m5Projects!.request(request), request);
         if (!controller.leaveProjectView() || !chatController.clearProjectView()) throw new Error("discarded workspace view could not be released");
@@ -686,7 +688,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
             <>
               <button className="m5-refresh" type="button" onClick={() => void controller.refreshChanges()} disabled={!admissionReady || snapshot.diffLoading}>{t("m5.editor.refresh")}</button>
               {snapshot.diffLoading && <p className="m5-empty" role="status">{t("m5.editor.loadingChanges")}</p>}
-              {chat.activeChat && <ChatApplicationPreview key={`${chat.activeChat.chatId}:${chat.activeChat.state}`} projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} worktreeId={chat.activeChat.worktreeId} disabled={!admissionReady || chat.switching || chatController.isActionBlocked()} />}
+              {chat.activeChat && <ChatApplicationPreview key={`${chat.activeChat.chatId}:${chat.activeChat.state}`} openRequest={applyOpenRequest} projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} worktreeId={chat.activeChat.worktreeId} disabled={!admissionReady || chat.switching || chatController.isActionBlocked()} />}
               {snapshot.diffSummary && <ChangeFileList key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}`} entries={snapshot.diffSummary.entries} selected={snapshot.diffFile?.path} disabled={!admissionReady || snapshot.actionBlocked} onOpen={path => { void controller.openDiff(path); }} />}
             </>
           ) : <Empty text={t("m5.editor.chooseProject")} />}

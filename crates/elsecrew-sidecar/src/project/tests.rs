@@ -2896,6 +2896,18 @@ fn application_review_binds_all_changes_and_rejects_stale_snapshot() {
         "{:?}",
         clean.changed_paths()
     );
+    // Claude Code's private bookkeeping folder (0700, with whatever it keeps
+    // there) is neither a change nor a reason to refuse the review.
+    fs::create_dir_all(active.worktree_path.join(".claude/.cc-writes/inner")).unwrap();
+    fs::write(active.worktree_path.join(".claude/.cc-writes/inner/mark"), b"x").unwrap();
+    fs::set_permissions(active.worktree_path.join(".claude/.cc-writes"), fs::Permissions::from_mode(0o700)).unwrap();
+    let scratch = review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).unwrap();
+    assert!(scratch.changed_paths().is_empty(), "{:?}", scratch.changed_paths());
+    // Anything else in `.claude` is still the project's own content.
+    fs::write(active.worktree_path.join(".claude/settings.json"), b"{}").unwrap();
+    let settings = review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(settings.changed_paths(), vec![".claude", ".claude/settings.json"]);
+    fs::remove_dir_all(active.worktree_path.join(".claude")).unwrap();
     fs::write(active.worktree_path.join("src/edit.txt"), [0, 255, 7]).unwrap();
     fs::set_permissions(
         active.worktree_path.join("src/edit.txt"),
@@ -2960,6 +2972,21 @@ fn application_review_binds_all_changes_and_rejects_stale_snapshot() {
         fs::read(fixture.source.join("src/edit.txt")).unwrap(),
         b"hello"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn application_review_never_reads_a_tracked_agent_bookkeeping_file_as_deleted() {
+    use application::review;
+    let mut fixture = source_index_fixture();
+    fs::create_dir_all(fixture.source.join(".claude/.cc-writes")).unwrap();
+    fs::write(fixture.source.join(".claude/.cc-writes/kept"), b"tracked").unwrap();
+    git_raw(&fixture.source, ["add", "-f", ".claude/.cc-writes/kept"]);
+    git_raw(&fixture.source, ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "tracked bookkeeping"]);
+    fixture.manager.open_project(&mut fixture.storage, fixture.source.to_str().unwrap(), "req_scratch_open").unwrap();
+    fixture.manager.create_worktree_inner(&mut fixture.storage, &fixture.project_id, "req_scratch_snapshot", None, None, SnapshotCreation::ApplicationCandidate).unwrap();
+    assert!(review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).is_err());
+    assert_eq!(fs::read(fixture.source.join(".claude/.cc-writes/kept")).unwrap(), b"tracked");
 }
 
 #[cfg(unix)]

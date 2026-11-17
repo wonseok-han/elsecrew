@@ -532,6 +532,9 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-diff-lines.m5-diff-split .m5-diff-deleted { color: #ffd0d6; }
 
 .m5-chat-discard { margin: 8px 0; }
+.m5-review-ready { margin: 8px 0; display: grid; gap: 8px; border: 1px solid var(--m5-border, rgba(255,255,255,.12)); border-radius: 8px; padding: 10px 12px; }
+.m5-review-ready p { margin: 0; font-size: 12px; line-height: 1.5; }
+.m5-review-ready button { justify-self: start; }
 .m5-discard-dialog { max-width: min(520px, calc(100vw - 48px)); box-sizing: border-box; border: 1px solid #52657d; border-radius: 10px; padding: 24px; background: var(--m5-surface); color: var(--m5-text); overflow-wrap: anywhere; }
 .m5-discard-dialog::backdrop { background: #0009; }
 .m5-discard-dialog label { display: flex; gap: 8px; align-items: flex-start; }
