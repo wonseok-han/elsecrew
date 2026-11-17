@@ -636,6 +636,7 @@ impl Sidecar {
                         "역할 보고서를 파일로 저장하지 못했어요. 보고 내용은 이 대화에 그대로 남아 있어요.").map_err(failure)?);
                 }
                 let notice = match state.status.as_str() {
+                    "completed" if state.limit_reached => "이번 요청에서 쓸 수 있는 팀 실행 횟수를 다 썼어요. 총괄이 맡기려던 다음 일은 아직 시작하지 않았어요. 이어서 하려면 '계속'이라고 보내 주세요.",
                     "completed" => "답변을 마쳤어요.",
                     "canceled" => "팀 작업을 중단했어요.",
                     "paused" => "팀 작업이 멈췄어요. 실행 결과를 확인해 주세요.",
