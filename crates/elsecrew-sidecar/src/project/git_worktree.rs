@@ -199,6 +199,20 @@ impl ProjectManager {
         let _ = self.git_allow_status_at(&source_root, ["branch", "-d", branch], &[0, 1]);
     }
 
+    /// What a new task will not see: changes in the user's folder that are
+    /// not committed (a task starts from the last commit, like a PR from a
+    /// pushed branch). `applies` is false while tasks are still v1 copies.
+    pub(crate) fn source_uncommitted(&self, storage: &Storage, project_id: &str) -> Result<Value, ProjectFailure> {
+        if !self.git_worktrees_enabled {
+            return Ok(json!({"applies":false,"uncommitted":0}));
+        }
+        let project = required_project(storage, project_id)?;
+        let source = self.open_project_source(&project)?;
+        let status = self.git_at(&source._root, ["status", "--porcelain", "-z", "--untracked-files=normal"])?;
+        let count = status.stdout.split(|byte| *byte == 0).filter(|entry| entry.len() > 3).count();
+        Ok(json!({"applies":true,"uncommitted":count}))
+    }
+
     /// Branches and tags of the user's repository with their commits.
     fn source_refs(&self, root: &Dir) -> Result<Vec<String>, ProjectFailure> {
         let output = self.git_at(root, ["for-each-ref", "--format=%(refname) %(objectname)"])?;

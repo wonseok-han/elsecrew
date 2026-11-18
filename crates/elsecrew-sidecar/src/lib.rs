@@ -1350,6 +1350,11 @@ impl Sidecar {
                             .map(|inspection| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"inspectChatDiscard","inspection":inspection}), ..Default::default() })
                     }
                 }
+                Some("inspectSourceChanges") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
+                    self.projects.source_uncommitted(&self.storage, param_string(params, "projectId").map_err(invalid_params)?)
+                        .map(|changes| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"inspectSourceChanges","changes":changes}), ..Default::default() })
+                }
                 Some(action @ ("inspectChatMerge" | "mergeChatWorkspace")) => {
                     let merging = action == "mergeChatWorkspace";
                     // No agent may be writing: no run started, starting or

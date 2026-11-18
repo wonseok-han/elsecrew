@@ -481,6 +481,8 @@ export const ko = {
   "m5.result.title": "팀 작업 완료",
   "m5.result.files": "변경 파일 {count}개",
   "m5.result.inWorkspace": "작업 공간의 변경이에요",
+  "m5.newTask.worktreeNote": "새 작업은 내 폴더의 마지막 커밋에서 작업 브랜치를 만들어 시작해요. 결과는 확인한 뒤 main에 합칠지 정해요.",
+  "m5.newTask.uncommitted": "내 폴더에 아직 커밋하지 않은 변경 {count}개는 이 작업에 포함되지 않아요.",
   "m5.merge.branch": "브랜치 {branch}",
   "m5.merge.ahead": "{base}보다 커밋 {count}개 앞섬",
   "m5.merge.open": "{base}에 합치기",

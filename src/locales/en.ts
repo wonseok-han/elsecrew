@@ -482,6 +482,8 @@ export const en: Record<MessageKey, string> = {
   "m5.result.title": "Team work done",
   "m5.result.files": "{count} changed files",
   "m5.result.inWorkspace": "Changes are in the workspace",
+  "m5.newTask.worktreeNote": "A new task starts on its own branch from the last commit in your folder. You decide whether to merge the result.",
+  "m5.newTask.uncommitted": "{count} uncommitted changes in your folder are not included in this task.",
   "m5.merge.branch": "Branch {branch}",
   "m5.merge.ahead": "{count} commits ahead of {base}",
   "m5.merge.open": "Merge into {base}",

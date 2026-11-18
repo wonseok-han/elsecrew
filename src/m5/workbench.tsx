@@ -241,6 +241,21 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     () => controller.snapshot(),
     () => controller.snapshot(),
   );
+  // A task starts from the last commit (task = PR): say so, and how many
+  // uncommitted changes in the user's folder it will not include.
+  const [sourceChanges, setSourceChanges] = useState<{ applies: boolean; uncommitted: number } | null>(null);
+  const openProjectId = snapshot.project?.id;
+  useEffect(() => {
+    setSourceChanges(null);
+    if (!newChatOpen || !openProjectId || !window.m5Projects) return;
+    let live = true;
+    const request = { action: "inspectSourceChanges" as const, projectId: openProjectId };
+    void window.m5Projects.request(request).then(raw => {
+      const result = validateProjectCatalogResult(raw, request);
+      if (live && result.action === "inspectSourceChanges") setSourceChanges(result.changes);
+    }).catch(() => undefined);
+    return () => { live = false; };
+  }, [newChatOpen, openProjectId]);
   // Settings shows the open project first; a project picked earlier must not
   // linger once another project is opened.
   useEffect(() => { setManagedProject(null); }, [snapshot.project?.id]);
@@ -563,7 +578,9 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         {chat.notice && <p role="status">{formatChatNotice(chat, lang)}</p>}
         <form className="m5-new-chat-form" onKeyDown={submitChatShortcut} onSubmit={(event) => { event.preventDefault(); if (admissionReady && projectDataReady && goal.trim() && !chat.preparing && !chat.switching && !chat.preparationApiUnavailable && !(snapshot.workspace && !controller.canLeaveProject()) && (chat.chats.length > 0 || setupConfirmed) && !(recommendationMissing && unselectedRoles.length > 0)) void createChat(); }}>
           <input ref={goalInputRef} aria-label={t("m5.navigation.goal")} value={goal} onChange={(event) => setGoal(event.target.value)} placeholder={t("m5.navigation.goalPlaceholder")} disabled={!admissionReady || chat.preparing} />
-          <p className="m5-first-chat-note">{t("m5.application.autoBaseline")}</p>
+          <p className="m5-first-chat-note">{sourceChanges?.applies
+            ? <>{t("m5.newTask.worktreeNote")}{sourceChanges.uncommitted > 0 && <> {t("m5.newTask.uncommitted", { count: sourceChanges.uncommitted })}</>}</>
+            : t("m5.application.autoBaseline")}</p>
           <button type="submit" title={t("m5.chat.sendShortcut")} aria-keyshortcuts="Enter Meta+Enter Control+Enter" disabled={!admissionReady || !projectDataReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject()) || (chat.chats.length === 0 && !setupConfirmed) || (recommendationMissing && unselectedRoles.length > 0)}>{t("m5.chat.coordinatorSend")}</button>
         </form>
         {unselectedRoles.length > 0 && <p className="m5-team-unselected" role="status">{t(recommendationMissing ? "m5.firstChat.unselectedModels" : "m5.firstChat.recommendedModels", { roles: unselectedRoles.join(", ") })}</p>}

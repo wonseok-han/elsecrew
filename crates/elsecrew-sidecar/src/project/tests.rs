@@ -6967,3 +6967,17 @@ fn a_conflict_resolved_to_the_tasks_side_still_merges() {
     assert_eq!(merged["outcome"], "merged", "{merged}");
     assert_eq!(fs::read(fixture.source.join("src/edit.txt")).unwrap(), b"task version\n");
 }
+
+/// The new-task note: how many uncommitted changes the task will not see.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_new_task_reports_the_users_uncommitted_changes() {
+    let mut fixture = Fixture::open();
+    assert_eq!(fixture.manager.source_uncommitted(&fixture.storage, &fixture.project_id).unwrap(), json!({"applies":false,"uncommitted":0}));
+    fixture.manager.git_worktrees_enabled = true;
+    let before = fixture.manager.source_uncommitted(&fixture.storage, &fixture.project_id).unwrap()["uncommitted"].as_u64().unwrap();
+    fs::write(fixture.source.join("src/edit.txt"), b"editing").unwrap();
+    fs::write(fixture.source.join("new-note.txt"), b"new").unwrap();
+    let after = fixture.manager.source_uncommitted(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!((after["applies"].as_bool(), after["uncommitted"].as_u64()), (Some(true), Some(before + 2)), "{after}");
+}

@@ -60,6 +60,7 @@ export type ProjectCatalogRequest =
   | { action: "updateAppRoleDefaults"; expectedRevision: number; roles: readonly RoleProfileV1[]; roleDefinitions?: readonly RoleDefinitionV3[] }
   | ({ action: "inspectChatDiscard" } & ChatDiscardAddress)
   | { action: "discardChatWorkspace"; inspection: ChatDiscardInspection; confirmed: true }
+  | { action: "inspectSourceChanges"; projectId: string }
   | ({ action: "inspectChatMerge" } & ChatMergeAddress)
   | ({ action: "mergeChatWorkspace"; expectedHead: string; expectedBase: string; keepConflicts: boolean; confirmed: true } & ChatMergeAddress)
   | { action: "deleteProject"; projectId: string; confirmed: true }
@@ -133,6 +134,7 @@ export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "getAppRoleDefaults" | "updateAppRoleDefaults"; settings: AppRoleDefaults }
   | { schemaVersion: 1; action: "inspectChatDiscard"; inspection: ChatDiscardInspection }
   | { schemaVersion: 1; action: "discardChatWorkspace"; chat: ChatRecordV1 }
+  | { schemaVersion: 1; action: "inspectSourceChanges"; changes: { applies: boolean; uncommitted: number } }
   | { schemaVersion: 1; action: "inspectChatMerge"; merge: ChatMergeState }
   | ({ schemaVersion: 1; action: "mergeChatWorkspace" } & ChatMergeOutcome)
   | { schemaVersion: 1; action: "applicationCapabilities"; enabled: boolean }
@@ -237,6 +239,8 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
   } else if (request.action === "inspectChatDiscard") {
     keys(request, ["action", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"]);
     for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"]) id(request[key]);
+  } else if (request.action === "inspectSourceChanges") {
+    keys(request, ["action", "projectId"]); id(request.projectId);
   } else if (request.action === "inspectChatMerge" || request.action === "mergeChatWorkspace") {
     const merging = request.action === "mergeChatWorkspace";
     keys(request, ["action", "chatId", "projectId", "worktreeId", "workspaceIdentity", ...(merging ? ["expectedHead", "expectedBase", "keepConflicts", "confirmed"] : [])]);
@@ -384,6 +388,10 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
     keys(result, ["schemaVersion", "action", "inspection"]);
     const inspection = validateChatDiscardInspection(result.inspection);
     for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) if (inspection[key] !== request[key]) throw new Error("discard inspection address mismatch");
+  } else if (request.action === "inspectSourceChanges") {
+    keys(result, ["schemaVersion", "action", "changes"]);
+    const changes = object(result.changes); keys(changes, ["applies", "uncommitted"]);
+    if (typeof changes.applies !== "boolean" || !Number.isSafeInteger(changes.uncommitted) || (changes.uncommitted as number) < 0) throw new Error("invalid source changes");
   } else if (request.action === "inspectChatMerge") {
     keys(result, ["schemaVersion", "action", "merge"]);
     validateChatMergeState(result.merge);
