@@ -185,7 +185,10 @@ impl ProjectManager {
         let unsupported = || -> Result<Value, ProjectFailure> {
             Ok(json!({"outcome":"blocked","reason":"unsupportedRepository","merge":before.value(self.uncommitted(&worktree)?)}))
         };
-        if self.content_filters_configured(&source_root)? || self.merge_drivers_configured(&source_root)? {
+        // Both contexts: a worktree may carry its own `config.worktree`.
+        if self.content_filters_configured(&source_root)? || self.merge_drivers_configured(&source_root)?
+            || self.content_filters_configured(&worktree)? || self.merge_drivers_configured(&worktree)?
+        {
             return unsupported();
         }
         if before.base_elsewhere {

@@ -499,7 +499,7 @@ export const en: Record<MessageKey, string> = {
   "m5.merge.blocked.nothingToMerge": "Nothing new to merge into {base}.",
   "m5.merge.blocked.changedSinceReview": "The task or {base} changed after you checked. Press again to merge the latest.",
   "m5.merge.blocked.userChangesOverlap": "It overlaps files you are editing in your folder, so nothing was merged. Commit or undo those edits and try again.",
-  "m5.merge.blocked.baseInOtherWorktree": "The {base} branch is open in another worktree, so nothing was merged. Switch that folder to another branch and try again.",
+  "m5.merge.blocked.baseInOtherWorktree": "Another worktree uses the {base} branch, so nothing was merged. It may be a disconnected folder. Switch it to another branch or remove it, then try again.",
   "m5.merge.blocked.unsupportedRepository": "This repository uses Git extensions (LFS, merge drivers) the app cannot merge safely.",
   "m5.merge.error": "Could not merge. Try again in a moment.",
   "m5.result.view": "View changes",

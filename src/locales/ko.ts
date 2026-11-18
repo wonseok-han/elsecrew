@@ -498,7 +498,7 @@ export const ko = {
   "m5.merge.blocked.nothingToMerge": "{base}에 합칠 새 변경이 없어요.",
   "m5.merge.blocked.changedSinceReview": "확인한 뒤에 작업이나 {base}가 바뀌었어요. 다시 눌러 최신 상태로 합쳐 주세요.",
   "m5.merge.blocked.userChangesOverlap": "내 폴더에서 수정 중인 파일과 겹쳐서 합치지 않았어요. 그 파일을 저장(커밋)하거나 되돌린 뒤 다시 시도해 주세요.",
-  "m5.merge.blocked.baseInOtherWorktree": "{base} 브랜치가 다른 작업 폴더(worktree)에 열려 있어 합치지 않았어요. 그 폴더에서 다른 브랜치로 바꾼 뒤 다시 시도해 주세요.",
+  "m5.merge.blocked.baseInOtherWorktree": "{base} 브랜치를 다른 작업 폴더(worktree)가 쓰고 있어서 합치지 않았어요. 연결이 끊긴 폴더일 수도 있어요. 그 폴더를 다른 브랜치로 바꾸거나 정리한 뒤 다시 시도해 주세요.",
   "m5.merge.blocked.unsupportedRepository": "이 저장소는 Git 확장 기능(LFS, 병합 도구 등)을 써서 앱이 안전하게 합칠 수 없어요.",
   "m5.merge.error": "합치지 못했어요. 잠시 뒤 다시 시도해 주세요.",
   "m5.result.view": "변경 보기",
