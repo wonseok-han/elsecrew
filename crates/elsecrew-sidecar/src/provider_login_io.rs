@@ -63,6 +63,8 @@ pub(crate) enum NativeFrame {
     ),
     Turn(elsecrew_core::provider::vendor_observation::codex_turn::TurnRequest),
     Approval(elsecrew_core::provider::vendor_observation::codex_approval::ApprovalReply),
+    /// The refusal the turn stream prepared for a request this client does not support.
+    Refusal(elsecrew_core::provider::vendor_observation::codex_events::stream::RefusalReply),
     ConfinedAccept(crate::provider_preflight_session::ConfinedAcceptReply),
     #[cfg(all(test, target_os = "macos"))]
     PermissionProbe(crate::provider_permission_probe::ProbeFrame),
@@ -81,6 +83,7 @@ impl NativeFrame {
             Self::Preflight(frame) => frame.as_str().as_bytes(),
             Self::Turn(frame) => frame.as_str().as_bytes(),
             Self::Approval(frame) => frame.as_str().as_bytes(),
+            Self::Refusal(frame) => frame.as_str().as_bytes(),
             Self::ConfinedAccept(frame) => frame.as_bytes(),
             #[cfg(all(test, target_os = "macos"))]
             Self::PermissionProbe(frame) => frame.as_bytes(),

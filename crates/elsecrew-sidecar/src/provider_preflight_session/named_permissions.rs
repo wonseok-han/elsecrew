@@ -85,8 +85,8 @@ mod tests {
             tools_off["layers"][0]["config"]["features"][*name] = json!(false);
             tools_off["config"]["features"][*name] = json!(false);
         }
-        tools_off["layers"][0]["config"]["web_search"] = json!("disabled");
-        tools_off["config"]["web_search"] = json!("disabled");
+        tools_off["layers"][0]["config"]["web_search"] = json!("live");
+        tools_off["config"]["web_search"] = json!("live");
         assert!(matches_configuration_layers(&tools_off, Path::new("/profile"), &expected, &policy, "on-request"));
         for pointer in ["/layers/0/config/features", "/config/features"] {
             let mut tool_on = tools_off.clone();
@@ -94,9 +94,9 @@ mod tests {
             assert!(!matches_configuration_layers(&tool_on, Path::new("/profile"), &expected, &policy, "on-request"), "{pointer}");
         }
         for pointer in ["/layers/0/config", "/config"] {
-            let mut search_on = tools_off.clone();
-            search_on.pointer_mut(pointer).unwrap()["web_search"] = json!("cached");
-            assert!(!matches_configuration_layers(&search_on, Path::new("/profile"), &expected, &policy, "on-request"), "{pointer}");
+            let mut search_other = tools_off.clone();
+            search_other.pointer_mut(pointer).unwrap()["web_search"] = json!("cached");
+            assert!(!matches_configuration_layers(&search_other, Path::new("/profile"), &expected, &policy, "on-request"), "{pointer}");
         }
         let mut explicit_null = base.clone();
         explicit_null["layers"][1]["name"]["profile"] = serde_json::Value::Null;

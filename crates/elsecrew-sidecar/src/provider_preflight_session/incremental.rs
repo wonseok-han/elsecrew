@@ -285,6 +285,8 @@ impl TextSession {
                         }
                         Observed::Tool(tool) => on_action(process, TextAction::Tool(tool))?,
                         Observed::Approval(request) => self.pending.push(*request),
+                        // Answered at once with the prepared refusal; the turn goes on.
+                        Observed::Refused(reply) => self.outgoing.push_back(NativeFrame::Refusal(reply)),
                         Observed::Started | Observed::RequiresHandling => {
                             self.diagnostic_stage = stream.diagnostic_stage();
                             return Err(failure());

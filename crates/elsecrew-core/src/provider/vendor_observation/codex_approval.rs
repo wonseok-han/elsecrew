@@ -156,6 +156,10 @@ impl PendingApproval {
                         | "commandActions"
                         | "proposedExecpolicyAmendment"
                         | "proposedNetworkPolicyAmendments"
+                        // Codex 0.169: the choices it offers (informational) and
+                        // any extra permissions the command asks for.
+                        | "availableDecisions"
+                        | "additionalPermissions"
                 ),
                 "item/fileChange/requestApproval" => key == "grantRoot",
                 _ => false,
@@ -163,8 +167,10 @@ impl PendingApproval {
             if !(common || action)
                 || (matches!(
                     key.as_str(),
-                    "proposedExecpolicyAmendment" | "proposedNetworkPolicyAmendments"
+                    "proposedExecpolicyAmendment" | "proposedNetworkPolicyAmendments" | "additionalPermissions"
                 ) && !value.is_null())
+                || (key == "availableDecisions"
+                    && !(value.is_null() || value.as_array().is_some_and(|choices| choices.len() <= 16)))
             {
                 return Err(invalid());
             }
@@ -269,6 +275,23 @@ mod tests {
             "turn-1",
         )
     }
+    #[test]
+    fn codex_0_169_offered_choices_are_read_but_extra_permissions_are_not() {
+        let mut value = base();
+        value["params"]["availableDecisions"] = json!(["accept", "acceptForSession", "decline", "cancel"]);
+        value["params"]["additionalPermissions"] = Value::Null;
+        assert!(parse(value.clone()).is_ok());
+        value["params"]["availableDecisions"] = Value::Null;
+        assert!(parse(value.clone()).is_ok());
+        value["params"]["availableDecisions"] = json!("accept");
+        assert!(parse(value.clone()).is_err());
+        value["params"]["availableDecisions"] = json!(vec!["decline"; 17]);
+        assert!(parse(value.clone()).is_err());
+        value["params"]["availableDecisions"] = Value::Null;
+        value["params"]["additionalPermissions"] = json!({"network":{"enabled":true}});
+        assert!(parse(value).is_err());
+    }
+
     #[test]
     fn separates_command_stdin_network_and_file_context_without_deciding() {
         for case in ["command", "stdin", "network", "file"] {

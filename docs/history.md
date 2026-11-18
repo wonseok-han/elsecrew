@@ -128,6 +128,16 @@
   - 로컬 Orca 확인(사실): Orca 워크트리는 사용자 저장소의 실제 git worktree다(`~/orca/workspaces/<repo>/<이름>`, 실제 브랜치, 원본 `git worktree list`에 보임). 에이전트는 CLI를 터미널(TUI) 또는 채팅 화면으로 띄우고(`orca agent launch --surface chat|terminal`), 상태는 Claude `settings.json`·Codex `hooks.json`에 설치한 lifecycle hook으로 감지한다. 에이전트 간 협업은 메일함·작업·결정 게이트(`orca orchestration ...`)다. 포트 감지(`orca ports`), 정리 규칙(`workspace cleanup`), 변경 파일 열기(`file diff`, `file open-changed`)가 있다.
   - Orca 벤치마킹 정리: `docs/proposals/m5-orca-benchmark.md`(로컬 Orca 1.4.261 확인 + 공개 저장소 stablyai/orca `c33696ad`·공식 문서 조사). 결정 필요: 사용자 저장소에 실제 브랜치·worktree를 만들지, 기본 권한 모드, fail-closed 완화 범위, 앱 전용 로그인 유지 여부.
   - **사용자 결정(2026-11-18, 벤치마킹 제안 §4)**: (1) 작업 공간은 사용자 저장소의 실제 git worktree·브랜치로 바꾼다(작업마다 브랜치, 단계별 자동 커밋, 반영=브랜치 합치기·충돌 시 작업 쪽 우선). (2) 새 프로젝트 기본 권한은 "전부 허용"(첫 작업 때 한 번 확인, 언제든 변경). (3) 로그인은 앱 전용 로그인을 유지한다. 진행 순서는 제안 §5를 따른다.
+  - **1단계 구현(제안 §3.1의 2·3): 모르는 Codex 이벤트로 실행을 멈추지 않는다, 웹 검색을 켠다**
+    - `codex_events/stream.rs`:
+      - 요청은 먼저 `charge_request`로 예산을 차감한다. 지원하는 승인이면 기존 경로로 간다.
+      - 해석할 수 없는 정상 형태의 요청(`id`·`method`·`params`만)은 `Observed::Refused`로 바로 답한다. 명령·파일 승인은 `decline`, 그 밖에는 JSON-RPC -32601이다. 같은 id는 다시 받지 않는다.
+      - 모르는 item 종류는 시작·완료 짝을 계속 추적하되 Private으로 무시한다. 모르는 알림도 Private이다. 단, `turn/`으로 시작하는 모르는 알림은 턴 종료일 수 있어 실패로 처리한다.
+    - `incremental.rs`는 거절을 `NativeFrame::Refusal`로 즉시 보낸다.
+    - **검증 담당 실패의 진짜 원인**: Codex 0.169 명령 승인 요청에 `availableDecisions`·`additionalPermissions` 필드가 새로 생겼고, 엄격 파서가 이를 거부했다(실행 파일의 `CommandExecutionRequestApprovalParams` 16필드로 확인). `availableDecisions`(null 또는 16개 이하 배열)를 허용한다. `additionalPermissions`는 null만 허용하고, 값이 있으면 거절 경로로 간다.
+    - 웹 검색: `WEB_SEARCH_SETTING = web_search="live"`로 바꿨다. 검사기는 값이 없거나 정확히 "live"일 때만 통과시킨다. 브라우저·computer use 등 6개 기능은 다음 단계(권한 항목)까지 끈 상태로 둔다.
+    - 독립 검토: 권한을 넓히는 결함은 없다. 중요 I1(0.169 승인 요청 모양)과 경미 M1(거절한 id 재사용)·M2(모르는 `turn/` 알림)를 반영했다. M3(-32601에 Codex가 어떻게 반응하는지)은 실제 재시험으로 확인한다.
+    - 검증: core codex 126, sidecar 영향 35 통과.
   - 시험 방법 함정: 사용자가 컴퓨터를 쓰는 중에 `--restore-window`로 창을 앞으로 가져오면 사용자의 키 입력("gi", "rm ")이 입력란에 섞인다. 사용자가 깨어 있을 때는 창을 앞으로 가져오지 않고 `orca computer set-value`로 값을 넣는다(React 상태에도 반영됨을 확인).
 - 다음 할 일: 화면 잠금이 풀리면 실제 앱에서 Monaco 비교·목록·한 번에 반영과 (b) 수정을 확인한다. 새 빈 폴더로 처음부터 재시험한다(모델 자동 채움 확인). (a)를 정리한다. 실패 이유를 사용자에게 보여 줄 기록을 남길지 검토한다.
 

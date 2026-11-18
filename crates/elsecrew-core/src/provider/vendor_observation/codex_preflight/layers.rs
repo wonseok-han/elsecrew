@@ -205,8 +205,8 @@ mod tests {
             "tool-on-flag",
             "tool-on-effective",
             "tool-null-flag",
-            "search-on-flag",
-            "search-on-effective",
+            "search-other-flag",
+            "search-other-effective",
             "search-null-flag",
             "missing",
             "project",
@@ -244,11 +244,11 @@ mod tests {
                         value["layers"][0]["config"]["features"][*name] = json!(false);
                         value["config"]["features"][*name] = json!(false);
                     }
-                    value["layers"][0]["config"]["web_search"] = json!("disabled");
-                    value["config"]["web_search"] = json!("disabled");
+                    value["layers"][0]["config"]["web_search"] = json!("live");
+                    value["config"]["web_search"] = json!("live");
                 }
-                "search-on-flag" => value["layers"][0]["config"]["web_search"] = json!("cached"),
-                "search-on-effective" => value["config"]["web_search"] = json!("live"),
+                "search-other-flag" => value["layers"][0]["config"]["web_search"] = json!("cached"),
+                "search-other-effective" => value["config"]["web_search"] = json!("disabled"),
                 "search-null-flag" => value["layers"][0]["config"]["web_search"] = json!(null),
                 "tool-on-flag" => value["layers"][0]["config"]["features"]["computer_use"] = json!(true),
                 "tool-on-effective" => value["config"]["features"]["browser_use"] = json!(true),
