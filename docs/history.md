@@ -17,6 +17,16 @@
   - worktree 작업은 "브랜치 … · main보다 커밋 N개 앞섬 [main에 합치기]"와, 내 폴더가 바뀌는지 알려 주는 한 줄 확인을 보여 준다.
   - 결과 안내: 합침, 충돌 파일, 막힘 이유. 계약 테스트 `tests/m5-chat-merge-contract.test.mts`.
 - **실제 앱 확인(todo-test-1118b)**: 합치기 한 번으로 사용자 폴더의 `main`이 작업 브랜치 끝(3a0af50)으로 앞당겨졌다. 파일이 들어왔고 상태는 깨끗했다. 사용자 폴더의 앱을 헤드리스 Chrome으로 점검해 10/10 통과했다.
+- 독립 검토(04642e76, 507cbec0): 차단 0, 중요 3, 경미 6. 모두 반영했다.
+  - I1: 저장소 로컬 config에 `merge.*.driver`가 있으면 거절한다(`unsupportedRepository`). 에이전트가 `.gitattributes`로 그 프로그램을 샌드박스 밖 앱 권한으로 실행시킬 수 있었다.
+  - I2: 기준 브랜치가 사용자의 다른 worktree에 체크아웃돼 있으면 거절한다(`baseInOtherWorktree`, 상태 확인에도 표시). `update-ref`가 그 worktree를 엇갈린 상태로 만들 수 있었다.
+  - I3: `merge --abort`가 실패하면 모호 오류로 끝낸다. 작업 공간에 `MERGE_HEAD`가 있으면 단계 커밋과 합치기 모두 거절한다. 충돌 표시가 커밋돼 main에 들어갈 수 있었다.
+  - M1·M5: 앞당기기 직전에 기준 브랜치가 확인한 커밋 그대로인지 다시 본다. ff 실패 이유를 `changedSinceReview`와 `userChangesOverlap`으로 나눈다.
+  - M3: 원본 쓰기 허용 조건(`source_writes_enabled`)을 확인하고, `open_project_source`로 원본 폴더를 다시 검증한다.
+  - M4: 기준 커밋과 작업 head의 `.gitattributes` `filter=`를 다시 확인한다.
+  - M6: 충돌 안내를 "내 폴더와 main은 그대로예요"로 범위를 밝혔다.
+  - 남김(M2): 확인 뒤 편집기에서 저장한 변경도 함께 합쳐진다.
+  - 테스트: 거절 3종 1개 추가. 합치기·worktree 관련 22개와 `npm test` 745개 통과.
 - 아직 안 한 것:
   - 충돌을 팀이 정리하는 흐름. 지금은 파일 목록과 안내만 있다.
   - 합친 뒤 결과 막대의 "변경 파일 N개"가 기준 커밋 대비 그대로 보인다.

@@ -6823,3 +6823,38 @@ fn a_merge_newer_than_the_review_is_refused() {
     assert_eq!((outcome["outcome"].as_str(), outcome["reason"].as_str()), (Some("blocked"), Some("changedSinceReview")));
     assert_eq!(git_text(&fixture.source, ["rev-parse", "HEAD"]), before);
 }
+
+/// Review I1/I2/I3: a merge driver program, the base branch open in another
+/// worktree, or a half-undone merge all refuse before anything moves.
+#[cfg(target_os = "macos")]
+#[test]
+fn merging_refuses_drivers_other_worktrees_and_half_merges() {
+    let mut fixture = Fixture::open();
+    let (address, path) = worktree_chat(&mut fixture, "guards");
+    fs::write(path.join("task.txt"), b"task\n").unwrap();
+    let head = git_text(&fixture.source, ["rev-parse", "HEAD"]);
+
+    git_raw(&fixture.source, ["config", "merge.custom.driver", "touch /tmp/should-not-run %A"]);
+    let outcome = merge_now(&fixture, &address);
+    assert_eq!((outcome["outcome"].as_str(), outcome["reason"].as_str()), (Some("blocked"), Some("unsupportedRepository")), "{outcome}");
+    git_raw(&fixture.source, ["config", "--unset", "merge.custom.driver"]);
+
+    let base = git_text(&fixture.source, ["symbolic-ref", "--short", "HEAD"]).trim().to_owned();
+    git_raw(&fixture.source, ["switch", "-q", "-c", "user-side"]);
+    let other = fixture.source.parent().unwrap().join("user-other-worktree");
+    git_raw(&fixture.source, ["worktree", "add", "-q", other.to_str().unwrap(), &base]);
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    assert_eq!(state["blocked"], "baseInOtherWorktree", "{state}");
+    let outcome = merge_now(&fixture, &address);
+    assert_eq!(outcome["reason"], "baseInOtherWorktree", "{outcome}");
+    git_raw(&fixture.source, ["worktree", "remove", other.to_str().unwrap()]);
+    git_raw(&fixture.source, ["switch", "-q", &base]);
+
+    let head_commit = git_text(&path, ["rev-parse", "HEAD"]);
+    let git_dir = git_text(&path, ["rev-parse", "--git-dir"]);
+    fs::write(PathBuf::from(git_dir.trim()).join("MERGE_HEAD"), head_commit.as_bytes()).unwrap();
+    assert!(fixture.manager.workspace_commit_step(&fixture.storage, &address, "step").is_err());
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    assert!(fixture.manager.workspace_merge(&fixture.storage, &address, state["head"].as_str().unwrap(), state["baseTip"].as_str().unwrap()).is_err());
+    assert_eq!(git_text(&fixture.source, ["rev-parse", "HEAD"]), head);
+}

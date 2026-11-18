@@ -93,6 +93,9 @@ impl ProjectManager {
             return Ok(false);
         }
         let worktree = self.worktree_capability(&active)?;
+        if self.merge_in_progress(&worktree)? {
+            return Err(ProjectFailure::recovery("an earlier merge in the task workspace was not undone"));
+        }
         // A filter added to the repository since the workspace was made would
         // run its program on `add`; refuse instead of recording.
         if self.content_filters_configured(&worktree)? {
@@ -126,7 +129,7 @@ impl ProjectManager {
     /// like in a tracked `.gitattributes`, or the repository's own
     /// `info/attributes`). Checked out without the filter they would be
     /// pointer files, and an agent's edit would commit the real bytes.
-    fn content_filters_requested(&self, root: &Dir, git_dir: &Dir, commit: &str) -> Result<bool, ProjectFailure> {
+    pub(super) fn content_filters_requested(&self, root: &Dir, git_dir: &Dir, commit: &str) -> Result<bool, ProjectFailure> {
         let pattern = r"(^|[[:space:]])filter=";
         let tracked = self.git_allow_status_at(
             root,

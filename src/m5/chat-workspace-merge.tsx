@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.tsx";
 import type { ChatRecordV1 } from "./contracts/run-recovery-v1.ts";
-import { validateProjectCatalogResult, type ChatMergeOutcome, type ChatMergeState } from "./contracts/project-catalog-v1.ts";
+import { validateProjectCatalogResult, type ChatMergeBlockReason, type ChatMergeOutcome, type ChatMergeState } from "./contracts/project-catalog-v1.ts";
 
 type Notice =
   | { kind: "merged" }
   | { kind: "conflict"; count: number; paths: string[] }
-  | { kind: "blocked"; reason: "noBaseBranch" | "changedSinceReview" | "userChangesOverlap" }
+  | { kind: "blocked"; reason: ChatMergeBlockReason }
   | { kind: "error" };
 
 /**

@@ -26,6 +26,9 @@ struct MergeState {
     behind: u64,
     /// The user's folder is on the base branch (moves with the merge).
     base_checked_out: bool,
+    /// Another worktree of the repository has the base branch checked out;
+    /// moving it underneath would leave that checkout inconsistent.
+    base_elsewhere: bool,
 }
 
 impl MergeState {
@@ -34,6 +37,8 @@ impl MergeState {
             Some("noBaseBranch")
         } else if self.base_tip.is_none() {
             Some("baseBranchMissing")
+        } else if self.base_elsewhere {
+            Some("baseInOtherWorktree")
         } else if self.ahead == 0 && !uncommitted {
             Some("nothingToMerge")
         } else {
@@ -87,7 +92,42 @@ impl ProjectManager {
             checked_out.status.success()
                 && trim_output(&checked_out).is_ok_and(|current| current == format!("refs/heads/{base}"))
         });
-        Ok(MergeState { branch: branch.clone(), base_ref: base_ref.clone(), head, base_tip, ahead, behind, base_checked_out })
+        let base_elsewhere = match base_ref {
+            Some(base) => self.base_in_other_worktree(source_root, &active.canonical_git_root, base)?,
+            None => false,
+        };
+        Ok(MergeState { branch: branch.clone(), base_ref: base_ref.clone(), head, base_tip, ahead, behind, base_checked_out, base_elsewhere })
+    }
+
+    /// Whether a worktree other than the user's folder has `base` checked out.
+    fn base_in_other_worktree(&self, source_root: &Dir, root: &Path, base: &str) -> Result<bool, ProjectFailure> {
+        let listed = self.git_at(source_root, ["worktree", "list", "--porcelain", "-z"])?;
+        let root = canonical_protocol_path_without_existing(root)?;
+        let wanted = format!("branch refs/heads/{base}");
+        let mut current: Option<String> = None;
+        for field in listed.stdout.split(|byte| *byte == 0) {
+            let field = String::from_utf8_lossy(field);
+            if let Some(path) = field.strip_prefix("worktree ") {
+                current = Some(path.to_owned());
+            } else if field == wanted && current.as_deref() != Some(root.as_str()) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// A merge left half-way (an abort that failed): nothing may be recorded
+    /// or merged until it is cleared, or conflict marks would be committed.
+    pub(super) fn merge_in_progress(&self, worktree: &Dir) -> Result<bool, ProjectFailure> {
+        let found = self.git_allow_status_at(worktree, ["rev-parse", "-q", "--verify", "MERGE_HEAD"], &[0, 1])?;
+        Ok(found.status.success())
+    }
+
+    /// Merge drivers named in the repository's own config would run their
+    /// programs outside any sandbox during a merge.
+    fn merge_drivers_configured(&self, source_root: &Dir) -> Result<bool, ProjectFailure> {
+        let found = self.git_allow_status_at(source_root, ["config", "--get-regexp", r"^merge\..*\.driver$"], &[0, 1])?;
+        Ok(found.status.code() == Some(0))
     }
 
     fn uncommitted(&self, worktree: &Dir) -> Result<bool, ProjectFailure> {
@@ -118,27 +158,50 @@ impl ProjectManager {
         expected_head: &str,
         expected_base: &str,
     ) -> Result<Value, ProjectFailure> {
+        // It changes the user's folder: the same gate as applying a copy.
+        if !self.source_writes_enabled {
+            return Err(ProjectFailure::recovery("changing the original is not available on this platform"));
+        }
         let active = self.validate_workspace_address(storage, address)?;
         if active.kind == WorkspaceKind::Snapshot {
             return Err(ProjectFailure::manifest("a copy workspace is applied, not merged"));
         }
         let worktree = self.worktree_capability(&active)?;
-        let source_root = open_absolute_directory_capability(&active.canonical_git_root)?;
-        let source_git = open_real_child_dir(&source_root, ".git")?;
+        // The saved folder must still be the root of its own repository.
+        let project = required_project(storage, &address.project_id)?;
+        let source = self.open_project_source(&project)?;
+        let source_root = source._root.try_clone().map_err(|error| {
+            ProjectFailure::recovery(format!("could not retain the original folder: {error}"))
+        })?;
         for lock in ["index.lock", "HEAD.lock", "packed-refs.lock"] {
-            if source_git.symlink_metadata(lock).is_ok() {
+            if source.git_dir.symlink_metadata(lock).is_ok() {
                 return Err(ProjectFailure::dirty("another Git command is working in the original; nothing was merged"));
             }
         }
-        if self.content_filters_configured(&source_root)? {
-            return Err(ProjectFailure::manifest("the repository now uses Git content filters; nothing was merged"));
+        if self.merge_in_progress(&worktree)? {
+            return Err(ProjectFailure::recovery("an earlier merge in the task workspace was not undone"));
         }
         let before = self.merge_state(&source_root, &worktree, &active)?;
+        let unsupported = || -> Result<Value, ProjectFailure> {
+            Ok(json!({"outcome":"blocked","reason":"unsupportedRepository","merge":before.value(self.uncommitted(&worktree)?)}))
+        };
+        if self.content_filters_configured(&source_root)? || self.merge_drivers_configured(&source_root)? {
+            return unsupported();
+        }
+        if before.base_elsewhere {
+            return Ok(json!({"outcome":"blocked","reason":"baseInOtherWorktree","merge":before.value(self.uncommitted(&worktree)?)}));
+        }
         let (Some(base), Some(base_tip)) = (before.base_ref.clone(), before.base_tip.clone()) else {
             return Ok(json!({"outcome":"blocked","reason":"noBaseBranch","merge":before.value(self.uncommitted(&worktree)?)}));
         };
         if before.head != expected_head || base_tip != expected_base {
             return Ok(json!({"outcome":"blocked","reason":"changedSinceReview","merge":before.value(self.uncommitted(&worktree)?)}));
+        }
+        // Files asking for LFS since the task began would land as pointers.
+        if self.content_filters_requested(&source_root, &source.git_dir, &base_tip)?
+            || self.content_filters_requested(&source_root, &source.git_dir, &before.head)?
+        {
+            return unsupported();
         }
         // Leftover edits since the last step are part of what is merged.
         if self.uncommitted(&worktree)? {
@@ -158,7 +221,11 @@ impl ProjectManager {
                     .filter(|path| !path.is_empty())
                     .map(protocol_git_path)
                     .collect::<Result<_, _>>()?;
-                self.git_at(&worktree, ["merge", "--abort"])?;
+                // A failed abort leaves MERGE_HEAD; `merge_in_progress`
+                // then refuses every later step commit and merge.
+                if self.git_allow_status_at(&worktree, ["merge", "--abort"], &[0]).is_err() {
+                    return Err(ProjectFailure::ambiguous("the conflicting merge in the task workspace could not be undone"));
+                }
                 self.verify_worktree_repository(&worktree, &active)?;
                 let after = self.merge_state(&source_root, &worktree, &active)?;
                 return Ok(json!({
@@ -175,13 +242,23 @@ impl ProjectManager {
         let base_ref = format!("refs/heads/{base}");
         let checked_out = self.git_allow_status_at(&source_root, ["symbolic-ref", "-q", "HEAD"], &[0, 1])?;
         let on_base = checked_out.status.success() && trim_output(&checked_out)? == base_ref;
+        let base_now = || -> Result<Option<String>, ProjectFailure> {
+            let found = self.git_allow_status_at(&source_root, ["rev-parse", "--verify", "--quiet", &format!("{base_ref}^{{commit}}")], &[0, 1])?;
+            found.status.success().then(|| trim_output(&found).map(str::to_owned)).transpose()
+        };
         if on_base {
+            // The base must still be what was reviewed (not reset or moved).
+            if base_now()?.as_deref() != Some(base_tip.as_str()) {
+                let after = self.merge_state(&source_root, &worktree, &active)?;
+                return Ok(json!({"outcome":"blocked","reason":"changedSinceReview","merge":after.value(self.uncommitted(&worktree)?)}));
+            }
             // The user's folder follows the branch. Git refuses (and changes
             // nothing) when this would overwrite the user's own edits.
             let moved = self.git_allow_status_at(&source_root, ["merge", "--ff-only", "--no-verify", "-q", &new_head], &[0, 1, 128])?;
             if moved.status.code() != Some(0) {
+                let reason = if base_now()?.as_deref() == Some(base_tip.as_str()) { "userChangesOverlap" } else { "changedSinceReview" };
                 let after = self.merge_state(&source_root, &worktree, &active)?;
-                return Ok(json!({"outcome":"blocked","reason":"userChangesOverlap","merge":after.value(self.uncommitted(&worktree)?)}));
+                return Ok(json!({"outcome":"blocked","reason":reason,"merge":after.value(self.uncommitted(&worktree)?)}));
             }
         } else {
             // Not checked out: one atomic compare-and-swap of the branch.
