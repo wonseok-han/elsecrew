@@ -69,6 +69,12 @@ fn workflow_failure_reason(code: &str) -> &'static str {
 const WORKFLOW_BUSY_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
 const WORKFLOW_BUSY_RETRY: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// The request id of a step's `attempt`-th try: a retried request never
+/// reuses a refused one's id.
+fn attempt_request_id(base: &str, attempt: u32) -> String {
+    if attempt == 0 { base.to_owned() } else { format!("{base}_retry{attempt}") }
+}
+
 impl Sidecar {
     pub(super) fn handle_agent_request(
         &mut self,
@@ -460,9 +466,11 @@ impl Sidecar {
         if !response.ok {
             let code = response.error.as_ref().map(|e| e.code.as_str()).unwrap_or("unknown");
             // The provider is only briefly busy with another check (a model
-            // list, a sign-in check): ask again shortly instead of stopping
-            // the team, for up to WORKFLOW_BUSY_WAIT.
-            if kind == "capability" && code == "providerBusy" {
+            // list, a sign-in check) or with the previous member's cleanup:
+            // ask again shortly instead of stopping the team, for up to
+            // WORKFLOW_BUSY_WAIT. A refused start created no run, so the
+            // step starts over from the capability check.
+            if matches!(kind.as_str(), "capability" | "start") && code == "providerBusy" {
                 let now = std::time::Instant::now();
                 let (since, _, attempt) = self.workflow_busy.get(&chat).copied().unwrap_or((now, now, 0));
                 if now.duration_since(since) < WORKFLOW_BUSY_WAIT {
@@ -474,6 +482,9 @@ impl Sidecar {
             let reason = workflow_failure_message(code);
             self.pause_workflow_reason(&chat, events, &reason)?;
             return Ok(kind != "root");
+        }
+        if kind == "start" {
+            self.workflow_busy.remove(&chat);
         }
         if kind == "root" || kind == "start" {
             let accepted = response.result.as_ref().ok_or_else(|| {
@@ -503,7 +514,8 @@ impl Sidecar {
             }
         }
         if kind == "capability" {
-            self.workflow_busy.remove(&chat);
+            // A busy wait ends only when the start is accepted.
+            let attempt = self.workflow_busy.get(&chat).map_or(0, |(_, _, attempt)| *attempt);
             let capability = response.result.as_ref().ok_or_else(|| {
                 SidecarError::new("orchestrationBlocked", "missing capability result")
             })?;
@@ -518,7 +530,9 @@ impl Sidecar {
                 self.pause_workflow_reason(&chat, events, &workflow_failure_message(capability["blockedReason"].as_str().unwrap_or("unknown")))?;
                 return Ok(true);
             }
-            let request=self.workflow_request(state.request_id.clone(),"run.startAgent",json!({"chatId":chat,"roleId":state.role,"inputMessageIds":state.input_ids,"expectedCapabilityFingerprint":capability["fingerprint"]}));
+            // A retried start uses its own request id; the refused one is never reused.
+            let start_id = attempt_request_id(&state.request_id, attempt);
+            let request=self.workflow_request(start_id.clone(),"run.startAgent",json!({"chatId":chat,"roleId":state.role,"inputMessageIds":state.input_ids,"expectedCapabilityFingerprint":capability["fingerprint"]}));
             self.workflow_requests
                 .insert(request.request_id.clone(), (chat.clone(), "start".into()));
             match self.handle_agent_request_inner(request) {
@@ -529,7 +543,8 @@ impl Sidecar {
                     }
                 }
                 Err(error) => {
-                    self.workflow_requests.remove(&state.request_id);
+                    self.workflow_requests.remove(&start_id);
+                    self.workflow_busy.remove(&chat);
                     self.pause_workflow_reason(&chat, events, &workflow_failure_message(error.kind()))?;
                 }
             }
@@ -662,7 +677,7 @@ impl Sidecar {
                 Some((_, _, attempt)) => *attempt,
                 None => 0,
             };
-            let id = if attempt == 0 { format!("cap_{}", state.request_id) } else { format!("cap_{}_retry{attempt}", state.request_id) };
+            let id = attempt_request_id(&format!("cap_{}", state.request_id), attempt);
             let request = self.workflow_request(
                 id.clone(),
                 "agent.getCapabilities",
@@ -832,6 +847,43 @@ mod tests {
         // Busy for the whole wait: the team stops with the usual reason.
         sidecar.workflow_busy.insert(id.into(), (since - WORKFLOW_BUSY_WAIT, retry_at, attempt));
         assert!(!busy(&mut sidecar, "busy-cap-2").is_empty());
+        assert_eq!(sidecar.workflow_state(id).unwrap().status, "paused");
+        assert!(!sidecar.workflow_busy.contains_key(id));
+    }
+
+    /// The next member's start can meet the previous member's cleanup still
+    /// holding the profile: the step waits and starts over, never reusing the
+    /// refused start's request id.
+    #[test]
+    fn a_busy_start_waits_and_retries_under_a_new_request_id() {
+        let (_root, mut sidecar, chat) = service();
+        let id = chat["chatId"].as_str().unwrap();
+        let input = AgentRunStartRequestV1 {
+            chat_id:id.into(), role_id:"coordinator".into(),
+            input_message_ids:sidecar.storage.chat_message_history(id).unwrap().iter().filter_map(|v|v["messageId"].as_str().map(str::to_owned)).collect(),
+            expected_capability_fingerprint:"sha256:unused".into(),
+        };
+        orchestration::begin(&mut sidecar.storage, &input, "busy-start").unwrap();
+        let request = sidecar.workflow_request("busy-start".into(), "run.startAgent", json!({}));
+        sidecar.workflow_requests.insert(request.request_id.clone(), (id.into(), "start".into()));
+        let response = error_response(&request, "providerBusy", "requestBlocked", "another provider check currently owns this profile; retry after it finishes");
+        let mut events = Vec::new();
+        assert!(sidecar.workflow_response(&response, &mut events).unwrap());
+        assert!(events.is_empty(), "no stop notice while waiting");
+        assert_eq!(sidecar.workflow_state(id).unwrap().status, "running");
+        let (_, _, attempt) = sidecar.workflow_busy[id];
+        assert_eq!(attempt, 1);
+        // Retries are asked under their own ids, never the refused one.
+        assert_eq!(attempt_request_id("step", 0), "step");
+        assert_eq!(attempt_request_id("step", 1), "step_retry1");
+        assert_ne!(attempt_request_id("step", 2), attempt_request_id("step", 1));
+        // Busy for the whole wait: the team stops with the usual reason.
+        let (since, retry_at, attempt) = sidecar.workflow_busy[id];
+        sidecar.workflow_busy.insert(id.into(), (since - WORKFLOW_BUSY_WAIT, retry_at, attempt));
+        let request = sidecar.workflow_request("busy-start_retry1".into(), "run.startAgent", json!({}));
+        sidecar.workflow_requests.insert(request.request_id.clone(), (id.into(), "start".into()));
+        let response = error_response(&request, "providerBusy", "requestBlocked", "still busy");
+        assert!(sidecar.workflow_response(&response, &mut events).unwrap());
         assert_eq!(sidecar.workflow_state(id).unwrap().status, "paused");
         assert!(!sidecar.workflow_busy.contains_key(id));
     }
