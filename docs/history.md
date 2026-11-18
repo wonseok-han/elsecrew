@@ -34,10 +34,16 @@
   - 이로써 이전 I3의 "MERGE_HEAD면 무조건 거절"은 "표시가 남아 있으면 거절"로 바뀌었다. abort에 실패한 경우도 같은 방법으로 풀 수 있다.
   - 발견·수정: 실제 저장소의 서브모듈(gitlink)이 변경 목록에 오면 "diff base is not a blob"으로 변경 탭 전체가 실패했다. 이제 내용 없는 변경으로 보인다. 테스트 도우미의 `add -A`가 fixture의 서브모듈을 지우던 문제도 고쳤다. 단계 커밋과 합치기를 거쳐도 서브모듈이 지워지지 않음을 단언한다.
   - 테스트: 팀 정리 흐름 1개(표시가 남은 동안 커밋·합치기 거절, 정리 중 변경 목록 정상, 정리 뒤 merge 커밋 1개로 합침), 서브모듈 1개. 합치기·worktree·diff 관련 32개, `npm test` 745개, 계약 테스트 통과.
-- 아직 안 한 것: 지금은 파일 목록과 안내만 있다.
+- 팀 지시문(`orchestration.rs`, 2014f408): 두 지시문을 상수(`COORDINATOR_CONTRACT`·`MEMBER_CONTRACT`)로 뺐다. 작업이 worktree(준비 기록 manifest v2)이면 `task_worktree_contract`가 문구를 바꾼다.
+  - "격리된 복사본" → "작업 worktree(사용자 프로젝트의 Git 브랜치, 앱이 단계마다 커밋)".
+  - 저장소를 바꾸는 Git 명령(commit·add·merge·rebase·reset·checkout·switch·branch·stash) 금지. 읽기 명령(status·diff·log·show)은 허용.
+  - 결과 확인 경로: "앱에서 합치기 버튼으로 합친 뒤 내 폴더에서 연다".
+  - 교체가 모두 적용되는지 확인하는 테스트를 추가했다.
+  - 관찰: `a_sign_in_hold_of_a_settled_run_is_freed_when_the_app_starts`가 병렬 실행 중 한 번 실패했다. 단독으로는 3회 모두 통과해 시간 의존 불안정으로 본다(추정).
+- 아직 안 한 것:
   - 합친 뒤 결과 막대의 "변경 파일 N개"가 기준 커밋 대비 그대로 보인다.
-  - v2 버리기(`git worktree remove`와 우리 기록만 정리), 재시작 복구, 보이는 위치와 설정.
-  - 팀 지시문 문구, 커밋하지 않은 변경 안내.
+  - v2 버리기(`git worktree remove`와 우리 기록만 정리), 재시작 복구(abort 실패 상태 해제 포함), 보이는 위치와 설정.
+  - 커밋하지 않은 변경 안내.
   - 독립 검토(합치기는 사용자 폴더를 바꾸는 경계 변경).
 
 ### 2026-11-18 · by Claude Opus 5.5 (claude-opus-5-5) — 작업 공간 전환 2단계(가): 실제 git worktree 작업 공간
