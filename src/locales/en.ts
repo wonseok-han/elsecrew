@@ -510,6 +510,7 @@ export const en: Record<MessageKey, string> = {
   "m5.merge.askTeamMessage": "{count} files overlap with newer changes in {base} and are marked in the workspace: {files}. In each file, combine both changes where the <<<<<<< / ======= / >>>>>>> marks are, remove every mark, then check that it works. Do not run Git commands (merge, commit, add); the app records and merges.",
   "m5.merge.blocked.conflictsUnresolved": "Some files still have overlap marks. Merge again once the team has resolved them.",
   "m5.merge.busy": "An agent is still running. Merge again once it has finished.",
+  "m5.merge.notTeamResolvable": "These overlaps are in files like images or deleted files, so the team cannot resolve them as text. Undo one side and merge again, or discard the task.",
   "m5.merge.error": "Could not merge. Try again in a moment.",
   "m5.result.view": "View changes",
   "m5.result.apply": "Apply to my folder",

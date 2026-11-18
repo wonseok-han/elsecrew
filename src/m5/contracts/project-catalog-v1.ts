@@ -104,7 +104,7 @@ export type ChatMergeState =
       resolving: boolean; unresolved: number; blocked: ChatMergeBlock | null };
 export type ChatMergeOutcome =
   | { outcome: "merged"; merge: ChatMergeState }
-  | { outcome: "conflict"; conflictCount: number; conflicts: string[]; merge: ChatMergeState }
+  | { outcome: "conflict"; teamResolvable: boolean; conflictCount: number; conflicts: string[]; merge: ChatMergeState }
   | { outcome: "resolving"; conflictCount: number; conflicts: string[]; merge: ChatMergeState }
   | { outcome: "blocked"; reason: ChatMergeBlockReason; merge: ChatMergeState };
 const OID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
@@ -399,7 +399,8 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
     if (result.outcome === "merged") keys(result, ["schemaVersion", "action", "outcome", "merge"]);
     else if (result.outcome === "conflict" || result.outcome === "resolving") {
       if (result.outcome === "resolving" && !request.keepConflicts) throw new Error("conflicts were kept without being asked");
-      keys(result, ["schemaVersion", "action", "outcome", "conflictCount", "conflicts", "merge"]);
+      keys(result, ["schemaVersion", "action", "outcome", ...(result.outcome === "conflict" ? ["teamResolvable"] : []), "conflictCount", "conflicts", "merge"]);
+      if (result.outcome === "conflict" && typeof result.teamResolvable !== "boolean") throw new Error("invalid teamResolvable");
       if (!Number.isSafeInteger(result.conflictCount) || !Array.isArray(result.conflicts) || result.conflicts.length > 100
         || (result.conflictCount as number) < result.conflicts.length || result.conflicts.some(path => typeof path !== "string" || !path || path.length > 4096)) throw new Error("invalid merge conflicts");
     } else if (result.outcome === "blocked") {

@@ -29,11 +29,12 @@ test("merge results are a known outcome over a worktree state", () => {
   assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "mergeChatWorkspace", outcome: "resolving", conflictCount: 1, conflicts: ["app.js"], merge: resolving }, merge));
   assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "inspectChatMerge", merge: { ...state, unresolved: 2 } }, inspect));
   validateProjectCatalogResult({ schemaVersion: 1, action: "mergeChatWorkspace", outcome: "merged", merge: { ...state, ahead: 0, blocked: "nothingToMerge" } }, merge);
-  validateProjectCatalogResult({ schemaVersion: 1, action: "mergeChatWorkspace", outcome: "conflict", conflictCount: 1, conflicts: ["app.js"], merge: state }, merge);
+  validateProjectCatalogResult({ schemaVersion: 1, action: "mergeChatWorkspace", outcome: "conflict", teamResolvable: true, conflictCount: 1, conflicts: ["app.js"], merge: state }, merge);
   validateProjectCatalogResult({ schemaVersion: 1, action: "mergeChatWorkspace", outcome: "blocked", reason: "userChangesOverlap", merge: state }, merge);
   for (const bad of [
     { schemaVersion: 1, action: "mergeChatWorkspace", outcome: "done", merge: state },
-    { schemaVersion: 1, action: "mergeChatWorkspace", outcome: "conflict", conflictCount: 0, conflicts: ["a"], merge: state },
+    { schemaVersion: 1, action: "mergeChatWorkspace", outcome: "conflict", teamResolvable: true, conflictCount: 0, conflicts: ["a"], merge: state },
+    { schemaVersion: 1, action: "mergeChatWorkspace", outcome: "conflict", conflictCount: 1, conflicts: ["a"], merge: state },
     { schemaVersion: 1, action: "mergeChatWorkspace", outcome: "merged", merge: { kind: "snapshot" } },
   ]) assert.throws(() => validateProjectCatalogResult(bad, merge));
 });

@@ -6981,3 +6981,34 @@ fn a_new_task_reports_the_users_uncommitted_changes() {
     let after = fixture.manager.source_uncommitted(&fixture.storage, &fixture.project_id).unwrap();
     assert_eq!((after["applies"].as_bool(), after["uncommitted"].as_u64()), (Some(true), Some(before + 2)), "{after}");
 }
+
+/// Review I1/I2: a binary conflict carries no marks, so it is never handed
+/// to the team (it is undone and reported); a different marker size still
+/// counts as marks.
+#[cfg(target_os = "macos")]
+#[test]
+fn only_text_conflicts_with_marks_go_to_the_team() {
+    let mut fixture = Fixture::open();
+    let (address, path) = worktree_chat(&mut fixture, "binary");
+    fs::write(path.join("assets/data.bin"), [0u8, 1, 2, 3]).unwrap();
+    fs::write(fixture.source.join("assets/data.bin"), [0u8, 9, 9, 9]).unwrap();
+    commit_in(&fixture.source, "user binary");
+    let base = git_text(&fixture.source, ["rev-parse", "HEAD"]);
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    let outcome = fixture.manager.workspace_merge(&fixture.storage, &address, state["head"].as_str().unwrap(), state["baseTip"].as_str().unwrap(), true).unwrap();
+    assert_eq!((outcome["outcome"].as_str(), outcome["teamResolvable"].as_bool()), (Some("conflict"), Some(false)), "{outcome}");
+    assert!(git_text(&path, ["status", "--porcelain"]).is_empty());
+    assert_eq!(git_text(&fixture.source, ["rev-parse", "HEAD"]), base);
+
+    let (address, path) = worktree_chat(&mut fixture, "marker_size");
+    fs::write(path.join(".gitattributes"), b"*.txt conflict-marker-size=10\n").unwrap();
+    fs::write(path.join("src/edit.txt"), b"task\n").unwrap();
+    fs::write(fixture.source.join("src/edit.txt"), b"user\n").unwrap();
+    commit_in(&fixture.source, "user text");
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    let outcome = fixture.manager.workspace_merge(&fixture.storage, &address, state["head"].as_str().unwrap(), state["baseTip"].as_str().unwrap(), true).unwrap();
+    assert_eq!(outcome["outcome"], "resolving", "{outcome}");
+    assert!(fs::read_to_string(path.join("src/edit.txt")).unwrap().contains("<<<<<<<<<< "));
+    assert!(!fixture.manager.workspace_commit_step(&fixture.storage, &address, "step").unwrap());
+    assert_eq!(fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap()["unresolved"], 1);
+}

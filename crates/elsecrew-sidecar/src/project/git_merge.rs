@@ -37,9 +37,19 @@ struct MergeState {
     unresolved: u64,
 }
 
-/// A line Git writes around conflicting hunks.
+/// A line Git writes around conflicting hunks, whatever marker size a
+/// `conflict-marker-size` attribute asks for: 7 or more `<` or `>` then a
+/// space or the end, or a line of only 7 or more `=`.
 fn conflict_mark(line: &[u8]) -> bool {
-    line.starts_with(b"<<<<<<< ") || line.starts_with(b">>>>>>> ") || line == b"=======" || line == b"=======\r"
+    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    let run = |mark: u8| line.iter().take_while(|byte| **byte == mark).count();
+    for mark in [b'<', b'>'] {
+        let count = run(mark);
+        if count >= 7 && matches!(line.get(count), None | Some(b' ')) {
+            return true;
+        }
+    }
+    run(b'=') >= 7 && run(b'=') == line.len()
 }
 
 impl MergeState {
@@ -114,6 +124,40 @@ impl ProjectManager {
         let resolving = self.merge_in_progress(worktree)?;
         let unresolved = if resolving { self.unresolved_conflicts(worktree)?.len() as u64 } else { 0 };
         Ok(MergeState { branch: branch.clone(), base_ref: base_ref.clone(), head, base_tip, ahead, behind, base_checked_out, base_elsewhere, resolving, unresolved })
+    }
+
+    /// Whether every conflict is one the team can resolve by editing text:
+    /// both sides changed a regular text file (stages 1, 2 and 3), within the
+    /// file limit, with Git's marks in it. Binary, deleted, linked or too
+    /// large conflicts carry no marks, so "no marks left" would not mean
+    /// resolved: those are undone and reported instead.
+    fn team_resolvable(&self, worktree: &Dir) -> Result<bool, ProjectFailure> {
+        let listed = self.git_at(worktree, ["ls-files", "-u", "-z"])?;
+        let mut stages: std::collections::BTreeMap<Vec<u8>, Vec<(String, u8)>> = Default::default();
+        for entry in listed.stdout.split(|byte| *byte == 0).filter(|entry| !entry.is_empty()) {
+            let tab = entry.iter().position(|byte| *byte == b'\t').ok_or_else(|| ProjectFailure::manifest("unmerged entry has no path"))?;
+            let fields: Vec<&str> = std::str::from_utf8(&entry[..tab]).map_err(|_| ProjectFailure::manifest("unmerged entry is not UTF-8"))?.split(' ').collect();
+            let (Some(mode), Some(stage)) = (fields.first(), fields.get(2).and_then(|stage| stage.parse::<u8>().ok())) else {
+                return Err(ProjectFailure::manifest("unmerged entry is malformed"));
+            };
+            stages.entry(entry[tab + 1..].to_vec()).or_default().push(((*mode).to_owned(), stage));
+        }
+        for (path, entries) in stages {
+            let mut seen: Vec<u8> = entries.iter().map(|(_, stage)| *stage).collect();
+            seen.sort_unstable();
+            if seen != [1, 2, 3] || entries.iter().any(|(mode, _)| mode != "100644" && mode != "100755") {
+                return Ok(false);
+            }
+            let path = protocol_git_path(&path)?;
+            let Ok(file) = open_file_relative(worktree, &path) else { return Ok(false) };
+            let mut bytes = Vec::new();
+            file.take(FILE_MAX_BYTES_V1 + 1).read_to_end(&mut bytes)
+                .map_err(|error| ProjectFailure::manifest(format!("could not read a conflicted file: {error}")))?;
+            if bytes.len() as u64 > FILE_MAX_BYTES_V1 || bytes.contains(&0) || !bytes.split(|byte| *byte == b'\n').any(conflict_mark) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// Conflicted files of a merge in progress that still carry conflict
@@ -272,8 +316,10 @@ impl ProjectManager {
                     .map(protocol_git_path)
                     .collect::<Result<_, _>>()?;
                 // Handed to the team: the marks stay in the worktree and the
-                // step commits finish the merge once they are gone.
-                if keep_conflicts {
+                // step commits finish the merge once they are gone. Only
+                // text conflicts with marks can be handed over.
+                let resolvable = self.team_resolvable(&worktree)?;
+                if keep_conflicts && resolvable {
                     let after = self.merge_state(&source_root, &worktree, &active)?;
                     return Ok(json!({
                         "outcome":"resolving",
@@ -291,6 +337,7 @@ impl ProjectManager {
                 let after = self.merge_state(&source_root, &worktree, &active)?;
                 return Ok(json!({
                     "outcome":"conflict",
+                    "teamResolvable":resolvable,
                     "conflictCount":paths.len(),
                     "conflicts":paths.into_iter().take(CONFLICT_PATHS_MAX).collect::<Vec<_>>(),
                     "merge":after.value(self.uncommitted(&worktree)?),
@@ -334,5 +381,20 @@ impl ProjectManager {
             return Err(ProjectFailure::ambiguous("the base branch did not end at the merged commit"));
         }
         Ok(json!({"outcome":"merged","merge":after.value(self.uncommitted(&worktree)?)}))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::conflict_mark;
+
+    #[test]
+    fn conflict_marks_are_found_at_any_marker_size() {
+        for line in [&b"<<<<<<< HEAD"[..], b">>>>>>> da9c487", b"=======", b"=======\r", b"<<<<<<<<<< HEAD", b"==========", b"<<<<<<<", b">>>>>>>>>"] {
+            assert!(conflict_mark(line), "{}", String::from_utf8_lossy(line));
+        }
+        for line in [&b"<<<<<< six"[..], b"== title ==", b"======= x", b"<<<<<<<x", b"text <<<<<<< HEAD"] {
+            assert!(!conflict_mark(line), "{}", String::from_utf8_lossy(line));
+        }
     }
 }

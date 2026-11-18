@@ -19,13 +19,17 @@ pub(crate) fn verify_allowing_inner_links(root: &Dir) -> Result<(), ProjectFailu
 
 /// Whether a relative link target, read from a directory `depth` levels
 /// below the workspace root, stays inside the workspace.
+/// `..` only at the start: after a name it could pass through a directory
+/// link and leave the workspace even though the text looks inside.
 fn stays_inside(target: &std::path::Path, depth: usize) -> bool {
     let mut level = depth as isize;
+    let mut named = false;
     for component in target.components() {
         match component {
-            std::path::Component::Normal(_) => level += 1,
+            std::path::Component::Normal(_) => { level += 1; named = true; }
             std::path::Component::CurDir => {}
             std::path::Component::ParentDir => {
+                if named { return false; }
                 level -= 1;
                 if level < 0 { return false; }
             }
@@ -153,7 +157,7 @@ mod inner_link_tests {
         let root = Dir::open_ambient_dir(base, cap_std::ambient_authority()).unwrap();
         verify_allowing_inner_links(&root).unwrap();
         assert!(verify(&root).is_err());
-        for (name, target) in [("escape", "../outside"), ("deep-escape", "node_modules/../../outside"), ("absolute", "/etc/hosts")] {
+        for (name, target) in [("escape", "../outside"), ("deep-escape", "node_modules/../../outside"), ("absolute", "/etc/hosts"), ("through-link", "node_modules/../tool")] {
             std::os::unix::fs::symlink(target, base.join(name)).unwrap();
             assert!(verify_allowing_inner_links(&root).is_err(), "{name}");
             std::fs::remove_file(base.join(name)).unwrap();

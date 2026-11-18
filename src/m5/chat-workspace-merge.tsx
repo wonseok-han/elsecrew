@@ -5,7 +5,7 @@ import { validateProjectCatalogResult, type ChatMergeBlockReason, type ChatMerge
 
 type Notice =
   | { kind: "merged" }
-  | { kind: "conflict"; count: number; paths: string[] }
+  | { kind: "conflict"; count: number; paths: string[]; teamResolvable: boolean }
   | { kind: "resolving"; count: number }
   | { kind: "blocked"; reason: ChatMergeBlockReason }
   | { kind: "busy" }
@@ -58,7 +58,7 @@ export function ChatWorkspaceMerge({ chat, disabled, fallback, onMerged, onAskTe
       const outcome = result as unknown as ChatMergeOutcome;
       setState(outcome.merge);
       if (outcome.outcome === "merged") { setNotice({ kind: "merged" }); onMerged(); }
-      else if (outcome.outcome === "conflict") setNotice({ kind: "conflict", count: outcome.conflictCount, paths: outcome.conflicts });
+      else if (outcome.outcome === "conflict") setNotice({ kind: "conflict", count: outcome.conflictCount, paths: outcome.conflicts, teamResolvable: outcome.teamResolvable });
       else if (outcome.outcome === "resolving") {
         // The marks are in the worktree now; the team resolves them.
         setNotice({ kind: "resolving", count: outcome.conflictCount });
@@ -99,7 +99,9 @@ export function ChatWorkspaceMerge({ chat, disabled, fallback, onMerged, onAskTe
     {notice && <span className="m5-merge-notice" role="status">
       {notice.kind === "merged" && t("m5.merge.merged", { base })}
       {notice.kind === "conflict" && <>{t("m5.merge.conflict", { count: notice.count, base })} <code>{notice.paths.slice(0, 5).join(", ")}{notice.count > 5 ? " …" : ""}</code>{" "}
-        <button type="button" className="m5-link-button" disabled={disabled || busy} onClick={() => void askTeam()}>{t("m5.merge.askTeam")}</button></>}
+        {notice.teamResolvable
+          ? <button type="button" className="m5-link-button" disabled={disabled || busy} onClick={() => void askTeam()}>{t("m5.merge.askTeam")}</button>
+          : <small>{t("m5.merge.notTeamResolvable")}</small>}</>}
       {notice.kind === "resolving" && t("m5.merge.askedTeam", { count: notice.count })}
       {notice.kind === "blocked" && t(`m5.merge.blocked.${notice.reason}`, { base })}
       {notice.kind === "busy" && t("m5.merge.busy")}
