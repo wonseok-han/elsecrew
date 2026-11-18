@@ -76,16 +76,20 @@ impl ProjectManager {
                 "snapshot has no proof that export never started",
             ));
         }
-        for (dir, name) in [
-            (&self.worktrees_dir, worktree_id.to_owned()),
-            (&self.manifests_dir, format!("{worktree_id}.json")),
-        ] {
-            match dir.symlink_metadata(name) {
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                _ => {
-                    return Err(ProjectFailure::recovery(
-                        "unexpected activated snapshot artifact",
-                    ))
+        // A task worktree made before the app quit is a leftover of this
+        // preparation, undone on abandonment; anything else is not.
+        if !self.unstarted_task_worktree(worktree_id) {
+            for (dir, name) in [
+                (&self.worktrees_dir, worktree_id.to_owned()),
+                (&self.manifests_dir, format!("{worktree_id}.json")),
+            ] {
+                match dir.symlink_metadata(name) {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    _ => {
+                        return Err(ProjectFailure::recovery(
+                            "unexpected activated snapshot artifact",
+                        ))
+                    }
                 }
             }
         }
@@ -171,6 +175,8 @@ impl ProjectManager {
             hook(storage);
         }
         let mut project = registered_project(storage, project_id)?;
+        let worktree_id = value_string(&project, "worktree_id")?.to_owned();
+        self.remove_unstarted_task_worktree(&project, &worktree_id)?;
         let lock_id = value_string(&project, "lock_id")?.to_owned();
         let mut lock = storage
             .projection_record("lock", &lock_id)?

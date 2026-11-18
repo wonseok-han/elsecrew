@@ -6,6 +6,12 @@
 //! (`fixed_git_command`).
 use super::*;
 
+#[cfg(test)]
+thread_local! {
+    /// Tests: stop right after `git worktree add`, as if the app quit there.
+    pub(super) static STOP_AFTER_WORKTREE_ADD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// Bytes a `.git` link file or `gitdir` back link may take.
 const LINK_MAX_BYTES: u64 = 4096;
 
@@ -226,6 +232,59 @@ impl ProjectManager {
         Ok(json!({"applies":true,"uncommitted":count}))
     }
 
+    /// A task worktree whose creation stopped before it was recorded (the
+    /// app quit after `git worktree add`): its folder has a `.git` link file
+    /// and its manifest, if written, is this task's v2 manifest. A v1 copy
+    /// never has a `.git` file, so its "unexpected artifact" rule stays.
+    pub(super) fn unstarted_task_worktree(&self, worktree_id: &str) -> bool {
+        let folder = match self.worktrees_dir.symlink_metadata(worktree_id) {
+            Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+            Ok(_) => open_real_child_dir(&self.worktrees_dir, worktree_id)
+                .and_then(|dir| dir.symlink_metadata(".git").map_err(|_| ProjectFailure::manifest("no .git")))
+                .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink()),
+        };
+        let manifest = match self.manifests_dir.symlink_metadata(format!("{worktree_id}.json")) {
+            Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+            Ok(_) => read_bounded_json(&self.manifests_dir, &format!("{worktree_id}.json")).is_ok_and(|manifest| {
+                manifest["schemaVersion"] == PROJECT_SCHEMA_VERSION_V2 && manifest["worktreeId"] == worktree_id
+                    && manifest["lifecycle"] == "active"
+            }),
+        };
+        folder && manifest
+    }
+
+    /// Undoes an unstarted task worktree before its preparation is
+    /// abandoned: the worktree (folder and its record) through Git, the task
+    /// branch only while it is still at the base this preparation recorded,
+    /// and the manifest. Any failure keeps the preparation in recovery.
+    pub(super) fn remove_unstarted_task_worktree(&self, project: &Map<String, Value>, worktree_id: &str) -> Result<(), ProjectFailure> {
+        if !self.unstarted_task_worktree(worktree_id) {
+            return Err(ProjectFailure::recovery("unexpected activated snapshot artifact"));
+        }
+        let has_folder = self.worktrees_dir.symlink_metadata(worktree_id).is_ok();
+        let has_manifest = self.manifests_dir.symlink_metadata(format!("{worktree_id}.json")).is_ok();
+        if !has_folder && !has_manifest {
+            return Ok(());
+        }
+        let source = self.open_project_source(project)?;
+        if has_folder {
+            let path = self.worktrees_root.join(worktree_id);
+            self.git_at(&source._root, [OsStr::new("worktree"), OsStr::new("remove"), OsStr::new("--force"), path.as_os_str()])?;
+        }
+        let branch = task_branch(worktree_id);
+        let base = value_string(project, "base_commit")?;
+        let at = self.git_allow_status_at(&source._root, ["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")], &[0, 1])?;
+        if at.status.success() && trim_output(&at)? == base {
+            self.git_allow_status_at(&source._root, ["branch", "-D", branch.as_str()], &[0, 1])?;
+        }
+        if has_manifest {
+            self.manifests_dir.remove_file(format!("{worktree_id}.json")).map_err(|error| {
+                ProjectFailure::recovery(format!("could not remove the unstarted manifest: {error}"))
+            })?;
+        }
+        Ok(())
+    }
+
     /// Branches and tags of the user's repository with their commits.
     fn source_refs(&self, root: &Dir) -> Result<Vec<String>, ProjectFailure> {
         let output = self.git_at(root, ["for-each-ref", "--format=%(refname) %(objectname)"])?;
@@ -403,6 +462,10 @@ impl ProjectManager {
                 path_arg.as_os_str(), OsStr::new(active.base_commit.as_str()),
             ],
         ));
+        #[cfg(test)]
+        if STOP_AFTER_WORKTREE_ADD.with(std::cell::Cell::get) {
+            return Err(ProjectFailure::recovery("injected stop after worktree add"));
+        }
         // Only the task branch may have appeared among the user's refs.
         let mut expected_refs = refs_before;
         expected_refs.push(format!("refs/heads/{branch} {}", active.base_commit));

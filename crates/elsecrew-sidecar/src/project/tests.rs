@@ -7012,3 +7012,25 @@ fn only_text_conflicts_with_marks_go_to_the_team() {
     assert!(!fixture.manager.workspace_commit_step(&fixture.storage, &address, "step").unwrap());
     assert_eq!(fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap()["unresolved"], 1);
 }
+
+/// The app quit right after `git worktree add`, before anything recorded the
+/// task: the preparation can be abandoned, which removes the worktree, its
+/// record and the untouched task branch, and a new task can be made.
+#[cfg(target_os = "macos")]
+#[test]
+fn an_interrupted_worktree_creation_is_undone_on_abandon() {
+    let mut fixture = Fixture::open();
+    fixture.manager.git_worktrees_enabled = true;
+    git_worktree::STOP_AFTER_WORKTREE_ADD.with(|stop| stop.set(true));
+    let error = fixture.manager.prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_interrupted").unwrap_err();
+    git_worktree::STOP_AFTER_WORKTREE_ADD.with(|stop| stop.set(false));
+    assert!(error.detail.contains("injected"), "{}", error.detail);
+    assert!(git_text(&fixture.source, ["branch", "--list", "elsecrew/*"]).contains("elsecrew/task-"));
+    assert_eq!(git_text(&fixture.source, ["worktree", "list"]).lines().count(), 2);
+    let inspection = fixture.manager.inspect_unstarted_snapshot(&fixture.storage, &fixture.project_id).unwrap();
+    fixture.manager.abandon_unstarted_snapshot(&mut fixture.storage, &inspection, "req_abandon_interrupted").unwrap();
+    assert_eq!(git_text(&fixture.source, ["worktree", "list"]).lines().count(), 1);
+    assert_eq!(git_text(&fixture.source, ["branch", "--list", "elsecrew/*"]), "");
+    let manifest = fixture.manager.prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_after_abandon").unwrap().result;
+    assert_eq!(manifest["workspaceKind"], "gitWorktree");
+}
