@@ -36,6 +36,18 @@ fn bounded(text: &str) -> Option<String> {
     })
 }
 
+/// "pattern · folder" for a search: the model's own pattern (never file
+/// contents), and the folder only when it is not the whole workspace.
+fn search_target(input: &str, path: &str, cwd: &Path) -> Option<String> {
+    let pattern = serde_json::from_str::<Value>(input).ok()
+        .and_then(|input| input.get("pattern").and_then(Value::as_str).and_then(bounded));
+    let place = relative(path, cwd).filter(|path| path != ".");
+    match (pattern, place) {
+        (Some(pattern), Some(place)) => bounded(&format!("{pattern} · {place}")),
+        (pattern, place) => pattern.or(place),
+    }
+}
+
 fn row(action: &str, target: Option<String>, tool: Option<&str>, outcome: Option<&str>) -> Value {
     let mut value = json!({"action": action});
     if let Some(target) = target { value["target"] = json!(target); }
@@ -58,8 +70,13 @@ pub(super) fn claude(
             let action = match request.tool_name.as_str() { "Read" => "read", "Write" => "write", _ => "edit" };
             row(action, relative(path, cwd), None, outcome)
         }
-        // The whole workspace needs no label.
-        ToolTarget::Search { path } => row("search", relative(path, cwd).filter(|path| path != "."), None, outcome),
+        // What was looked for (the model's pattern, never file contents) and
+        // where; the whole workspace needs no place. Glob finds file names,
+        // Grep searches inside files.
+        ToolTarget::Search { path } => {
+            let tool = matches!(request.tool_name.as_str(), "Glob" | "Grep").then_some(request.tool_name.as_str());
+            row("search", search_target(request.inspect_input(), path, cwd), tool, outcome)
+        }
         // The model's own one-line summary, never the command text.
         ToolTarget::Shell => {
             let summary = serde_json::from_str::<Value>(request.inspect_input()).ok()
@@ -80,7 +97,26 @@ pub(super) fn codex(tool: &elsecrew_core::provider::vendor_observation::codex_ev
         ToolPhase::Declined => Some("refused"),
         ToolPhase::Output | ToolPhase::Completed => return None,
     };
-    Some(row(action, None, None, outcome))
+    // Which command ran, so a list of commands is readable (user request
+    // 2026-11-18): the first line, without the shell wrapper Codex adds.
+    let command = tool.command.as_deref().map(unwrap_shell).and_then(bounded);
+    Some(row(action, command, None, outcome))
+}
+
+/// `/bin/zsh -lc "sed -n 1,80p app.js"` → `sed -n 1,80p app.js`.
+fn unwrap_shell(command: &str) -> &str {
+    for prefix in ["/bin/zsh -lc ", "/bin/bash -lc ", "/bin/sh -c ", "zsh -lc ", "bash -lc ", "sh -c "] {
+        if let Some(rest) = command.strip_prefix(prefix) {
+            let rest = rest.trim();
+            for quote in ['"', '\''] {
+                if rest.len() >= 2 && rest.starts_with(quote) && rest.ends_with(quote) {
+                    return &rest[1..rest.len() - 1];
+                }
+            }
+            return rest;
+        }
+    }
+    command
 }
 
 impl RunReservation {
@@ -122,13 +158,28 @@ mod tests {
     }
 
     #[test]
+    fn searches_show_what_was_looked_for_and_where() {
+        let cwd = Path::new("/work/copy");
+        assert_eq!(search_target(r#"{"pattern":"**/*.md"}"#, "/work/copy", cwd).as_deref(), Some("**/*.md"));
+        assert_eq!(search_target(r#"{"pattern":"TODO","path":"src"}"#, "/work/copy/src", cwd).as_deref(), Some("TODO · src"));
+        assert_eq!(search_target(r#"{"pattern":"a\nrm -rf /"}"#, "/work/copy", cwd).as_deref(), Some("a"));
+        assert_eq!(search_target(r#"{"pattern":"x"}"#, "/elsewhere", cwd).as_deref(), Some("x"));
+        assert_eq!(search_target("not json", "/work/copy/docs", cwd).as_deref(), Some("docs"));
+    }
+
+    #[test]
     fn codex_rows_mark_start_failure_and_refusal_only() {
         use elsecrew_core::provider::vendor_observation::codex_events::stream::{ToolEvent, ToolKind, ToolPhase};
-        let event = |phase| ToolEvent { item_id: "i".into(), kind: ToolKind::Command, phase };
+        let event = |phase| ToolEvent { item_id: "i".into(), kind: ToolKind::Command, phase, command: None };
         assert_eq!(codex(&event(ToolPhase::Started)), Some(json!({"action":"command"})));
         assert_eq!(codex(&event(ToolPhase::Failed)), Some(json!({"action":"command","outcome":"failed"})));
         assert_eq!(codex(&event(ToolPhase::Declined)), Some(json!({"action":"command","outcome":"refused"})));
         assert_eq!(codex(&event(ToolPhase::Completed)), None);
         assert_eq!(codex(&event(ToolPhase::Output)), None);
+        let started = |command: &str| codex(&ToolEvent { item_id: "i".into(), kind: ToolKind::Command, phase: ToolPhase::Started, command: Some(command.into()) });
+        assert_eq!(started(r#"/bin/zsh -lc "sed -n 1,80p app.js""#), Some(json!({"action":"command","target":"sed -n 1,80p app.js"})));
+        assert_eq!(started("/bin/bash -lc 'node tests/check.js'"), Some(json!({"action":"command","target":"node tests/check.js"})));
+        assert_eq!(started("ls -la"), Some(json!({"action":"command","target":"ls -la"})));
+        assert_eq!(started("echo one\nrm -rf /"), Some(json!({"action":"command","target":"echo one"})));
     }
 }

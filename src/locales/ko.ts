@@ -122,6 +122,8 @@ export const ko = {
   "m5.output.activity.read": "파일 읽기",
   "m5.output.activity.edit": "파일 수정",
   "m5.output.activity.write": "파일 쓰기",
+  "m5.output.activity.searchFiles": "파일 찾기",
+  "m5.output.activity.searchText": "내용 검색",
   "m5.output.activity.search": "찾아보기",
   "m5.output.activity.command": "명령 실행",
   "m5.output.activity.other": "{tool} 사용",

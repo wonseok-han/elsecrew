@@ -123,6 +123,9 @@ pub struct ToolEvent {
     pub item_id: String,
     pub kind: ToolKind,
     pub phase: ToolPhase,
+    /// The command line Codex reported when a command started (validated:
+    /// bounded, no NUL). Shown in the work history; never authority.
+    pub command: Option<String>,
 }
 
 fn tool_kind(kind: &str) -> Option<ToolKind> {
@@ -574,6 +577,7 @@ impl TurnStream {
                         item_id: item.id.clone(),
                         kind,
                         phase: tool_phase(wire.item.get(), frame.method == "item/started")?,
+                        command: None,
                     })
                 })
                 .transpose()?;
@@ -632,6 +636,7 @@ impl TurnStream {
                     _ if !public && !private && tool.is_none() => "turn item start unsupported other",
                     _ => "turn stream item started",
                 };
+                let tool = tool.map(|tool| ToolEvent { command: command.as_ref().map(|(command, _)| command.clone()), ..tool });
                 self.items.insert(
                     item.id,
                     ItemState {
@@ -711,6 +716,7 @@ impl TurnStream {
                 item_id: reference.item_id,
                 kind,
                 phase: ToolPhase::Output,
+                command: None,
             }));
         }
         Ok(match projected {

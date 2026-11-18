@@ -155,6 +155,11 @@
     - 충돌: "그냥 1번만" — 합치기 직전에 내 폴더의 최신 내용을 작업 브랜치로 먼저 가져온다. 충돌은 작업 공간에서 팀이 정리·테스트한 뒤 합친다. 파일 통째 최신 우선은 병렬 작업의 변경을 지우므로 worktree 전환 때 대체한다. 상세는 제안 §3.2.1.
   - **`providerBusy` 멈춤 수정**: 팀 단계는 "점검(capability) → 시작(start)" 순서로 진행된다. 바쁨 재시도(최대 60초, 1초 간격)는 점검에만 있었다. 앞 담당(Claude)이 끝난 직후 같은 프로필을 쓰는 다음 시작이 정리 중인 잠금에 걸리면 팀이 바로 멈췄다(추정 원인. 점검의 `refresh:true` 모델 목록 확인과 겹칠 가능성도 있다). 이제 시작이 `providerBusy`면 같은 대기 규칙으로 점검부터 다시 한다. 다시 보내는 요청은 `attempt_request_id`로 새 id(`…_retryN`)를 쓴다. 대기 상태는 시작이 받아들여질 때만 끝난다. 검증: orchestration 31(새 테스트 `a_busy_start_waits_and_retries_under_a_new_request_id`) 통과.
   - 사용자 질문("실제 실행 취소"와 "작업 중단"의 차이): 위쪽 버튼은 실행 하나 취소(`cancelAgentRun`, 1:1 대화 시절), 아래쪽은 팀 작업 전체 중단(`cancelTeamTask`)이다. 팀 작업에서는 실행 하나만 멈춰도 팀이 멈추므로 결과가 같다. 팀 작업에서는 위쪽 버튼을 숨기고 예전(schemaVersion 1) 대화에만 남겼다.
+  - **실행 출력 작업 기록이 같은 말만 반복되던 문제(사용자 지적: "찾아보기", "명령 실행"만 줄줄이 나옴)**
+    - Claude 검색(Glob/Grep): 대상이 작업 공간 전체면 위치가 비어 "찾아보기"만 보였다. 이제 모델이 쓴 검색어와 폴더를 함께 보여 준다(`search_target`, 예: "TODO · src"). 이름표는 Glob은 "파일 찾기", Grep은 "내용 검색"이다.
+    - Codex 명령: 기록에 종류만 남았다. `ToolEvent.command`(시작 때 Codex가 보고한, 이미 검증된 명령 줄)를 실어 첫 줄을 보여 준다. `/bin/zsh -lc "…"` 같은 셸 감싸기는 벗긴다(`unwrap_shell`).
+    - 예전 방침("명령 문자열을 기록하지 않는다")은 Orca 방향에 따라 바꿨다. 파일 내용은 여전히 싣지 않는다. `codex_durable_native_delivery_and_cancel` 기대값을 고쳤다.
+    - 검증: sidecar native/codex/claude/output 82, activity 4, core codex 126, `npm test` 743 통과.
   - 시험 방법 함정: 사용자가 컴퓨터를 쓰는 중에 `--restore-window`로 창을 앞으로 가져오면 사용자의 키 입력("gi", "rm ")이 입력란에 섞인다. 사용자가 깨어 있을 때는 창을 앞으로 가져오지 않고 `orca computer set-value`로 값을 넣는다(React 상태에도 반영됨을 확인).
 - 다음 할 일: 화면 잠금이 풀리면 실제 앱에서 Monaco 비교·목록·한 번에 반영과 (b) 수정을 확인한다. 새 빈 폴더로 처음부터 재시험한다(모델 자동 채움 확인). (a)를 정리한다. 실패 이유를 사용자에게 보여 줄 기록을 남길지 검토한다.
 

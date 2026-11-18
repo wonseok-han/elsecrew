@@ -123,6 +123,8 @@ export const en: Record<MessageKey, string> = {
   "m5.output.activity.read": "Read file",
   "m5.output.activity.edit": "Edit file",
   "m5.output.activity.write": "Write file",
+  "m5.output.activity.searchFiles": "Find files",
+  "m5.output.activity.searchText": "Search text",
   "m5.output.activity.search": "Search",
   "m5.output.activity.command": "Run command",
   "m5.output.activity.other": "Use {tool}",

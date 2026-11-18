@@ -26,7 +26,9 @@ const WorkActivityRow = memo(function WorkActivityRow({ text }: { text: string }
   if (!activity) return null;
   return <p className="m5-activity-row" data-action={activity.action} data-outcome={activity.outcome}>
     <span className="m5-activity-mark" aria-hidden="true" />
-    <span className="m5-activity-label">{t(WORK_ACTION_KEYS[activity.action], { tool: activity.tool ?? "" })}</span>
+    <span className="m5-activity-label">{t(activity.action === "search" && activity.tool === "Glob" ? "m5.output.activity.searchFiles"
+      : activity.action === "search" && activity.tool === "Grep" ? "m5.output.activity.searchText"
+      : WORK_ACTION_KEYS[activity.action], { tool: activity.tool ?? "" })}</span>
     {activity.target && <span className="m5-activity-target">{activity.target}</span>}
     {activity.outcome && <span className="m5-activity-outcome">{t(WORK_OUTCOME_KEYS[activity.outcome])}</span>}
   </p>;
