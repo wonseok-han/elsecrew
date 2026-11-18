@@ -13,6 +13,7 @@
 | **M5 변경 반영·복원 계약 초안** | [`proposals/m5-change-application.md`](proposals/m5-change-application.md) | 원본 비교·검토 묶음·복원 지점·적용/복구 구현 순서; 아직 제품 동작 아님 |
 | **M5 장시간 단일 실행 출력 계약 초안** | [`proposals/m5-long-running-agent-streams.md`](proposals/m5-long-running-agent-streams.md) | 사용자 승인 방향에 따른 append-only 출력·페이지 조회·재접속·이관·자원 예산과 단계별 구현; 아직 제품 동작 아님 |
 | **M5 채팅 내용 영구 삭제 계약 초안** | [`proposals/m5-chat-erasure.md`](proposals/m5-chat-erasure.md) | 버린 채팅의 본문·출력 삭제 자격·지우는/남기는 범위·원장 일관 재작성·중단 재개·화면 흐름; 아직 제품 동작 아님 |
+| **M5 작업 공간 전환 설계** | [`proposals/m5-real-worktrees.md`](proposals/m5-real-worktrees.md) | 독립 복사본을 실제 git worktree(작업당 브랜치)와 git 없는 폴더의 그림자 git으로 바꾸는 설계·바뀌는 안전 원칙·구현 순서·열린 결정; 아직 제품 동작 아님 |
 | **M5 Orca 벤치마킹** | [`proposals/m5-orca-benchmark.md`](proposals/m5-orca-benchmark.md) | 에이전트 실행·권한·실제 git worktree·변경 관리를 Orca와 비교하고 가져올 점·기존 원칙과 충돌·진행 순서 제안; 아직 제품 동작 아님 |
 | **M5 프로젝트·작업 삭제** | [`proposals/m5-project-deletion.md`](proposals/m5-project-deletion.md) | 목록 삭제를 숨기기 대신 삭제 표시+앱 소유 파일 삭제로, 같은 폴더 재추가는 새 ID로 시작; 원장 행은 남김 |
 
