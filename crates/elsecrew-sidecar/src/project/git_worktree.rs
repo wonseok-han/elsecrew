@@ -208,8 +208,21 @@ impl ProjectManager {
         }
         let project = required_project(storage, project_id)?;
         let source = self.open_project_source(&project)?;
+        // Comparing contents may run a repository's own clean filter; such a
+        // repository cannot make tasks anyway, so it is not asked.
+        if self.content_filters_configured(&source._root)? {
+            return Ok(json!({"applies":true,"uncommitted":0}));
+        }
         let status = self.git_at(&source._root, ["status", "--porcelain", "-z", "--untracked-files=normal"])?;
-        let count = status.stdout.split(|byte| *byte == 0).filter(|entry| entry.len() > 3).count();
+        // `XY path\0`, and renames/copies carry their old path as one more field.
+        let mut fields = status.stdout.split(|byte| *byte == 0).filter(|entry| !entry.is_empty());
+        let mut count = 0;
+        while let Some(entry) = fields.next() {
+            count += 1;
+            if matches!(entry.first(), Some(b'R' | b'C')) || matches!(entry.get(1), Some(b'R' | b'C')) {
+                fields.next();
+            }
+        }
         Ok(json!({"applies":true,"uncommitted":count}))
     }
 

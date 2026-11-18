@@ -39,17 +39,16 @@ struct MergeState {
 
 /// A line Git writes around conflicting hunks, whatever marker size a
 /// `conflict-marker-size` attribute asks for: 7 or more `<` or `>` then a
-/// space or the end, or a line of only 7 or more `=`.
+/// space or the end. The `=======` separator alone is not counted: it is
+/// also a Markdown heading underline, and Git never writes it without the
+/// `<`/`>` lines around it.
 fn conflict_mark(line: &[u8]) -> bool {
     let line = line.strip_suffix(b"\r").unwrap_or(line);
     let run = |mark: u8| line.iter().take_while(|byte| **byte == mark).count();
-    for mark in [b'<', b'>'] {
+    [b'<', b'>'].into_iter().any(|mark| {
         let count = run(mark);
-        if count >= 7 && matches!(line.get(count), None | Some(b' ')) {
-            return true;
-        }
-    }
-    run(b'=') >= 7 && run(b'=') == line.len()
+        count >= 7 && matches!(line.get(count), None | Some(b' '))
+    })
 }
 
 impl MergeState {
@@ -390,10 +389,10 @@ mod tests {
 
     #[test]
     fn conflict_marks_are_found_at_any_marker_size() {
-        for line in [&b"<<<<<<< HEAD"[..], b">>>>>>> da9c487", b"=======", b"=======\r", b"<<<<<<<<<< HEAD", b"==========", b"<<<<<<<", b">>>>>>>>>"] {
+        for line in [&b"<<<<<<< HEAD"[..], b">>>>>>> da9c487", b"<<<<<<<<<< HEAD\r", b"<<<<<<<", b">>>>>>>>>"] {
             assert!(conflict_mark(line), "{}", String::from_utf8_lossy(line));
         }
-        for line in [&b"<<<<<< six"[..], b"== title ==", b"======= x", b"<<<<<<<x", b"text <<<<<<< HEAD"] {
+        for line in [&b"<<<<<< six"[..], b"== title ==", b"=======", b"==========", b"<<<<<<<x", b"text <<<<<<< HEAD"] {
             assert!(!conflict_mark(line), "{}", String::from_utf8_lossy(line));
         }
     }
