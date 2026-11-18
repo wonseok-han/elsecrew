@@ -149,6 +149,10 @@
     - 사용자 지적: 실행 출력의 긴 명령이 카드 밖으로 넘쳤다. 실행 카드·출력에 `min-width:0`을 주고, 대상 글자는 말줄임으로 고쳤다.
     - 확인: 실제 앱에서 목록 줄 수(예: app.js +276), 모두 보기 화면, 말줄임을 캡처로 확인했다. 수정 파일의 비교(빨강/초록 섞임)는 이번 시험에 수정 파일이 없어 아직 보지 못했다.
     - 검증: `npm test` 742 + 새 계약 테스트 1, protocol 70, sidecar project 235 + 줄 수 1 통과.
+  - **사용자 결정(2026-11-18, worktree 설계)**
+    - Orca도 git이 아닌 폴더를 받는다는 사용자 지적을 확인했다. 로컬 `orca worktree list`에서 ObsidianVault 폴더 작업들이 브랜치 없이 같은 경로를 쓴다. → 그냥 폴더 프로젝트(그 자리에서 작업)를 제안했다. 확인은 아직이다.
+    - 브랜치: Orca는 worktree 안에서 브랜치를 바꿀 수 있다(`WorkspaceBranchPicker`, `branch-switch.ts`). Elsecrew는 "작업 하나 = worktree 하나 = 브랜치 하나"로 고정한다(사용자 제기, 추천 수용).
+    - 충돌: "그냥 1번만" — 합치기 직전에 내 폴더의 최신 내용을 작업 브랜치로 먼저 가져온다. 충돌은 작업 공간에서 팀이 정리·테스트한 뒤 합친다. 파일 통째 최신 우선은 병렬 작업의 변경을 지우므로 worktree 전환 때 대체한다. 상세는 제안 §3.2.1.
   - 시험 방법 함정: 사용자가 컴퓨터를 쓰는 중에 `--restore-window`로 창을 앞으로 가져오면 사용자의 키 입력("gi", "rm ")이 입력란에 섞인다. 사용자가 깨어 있을 때는 창을 앞으로 가져오지 않고 `orca computer set-value`로 값을 넣는다(React 상태에도 반영됨을 확인).
 - 다음 할 일: 화면 잠금이 풀리면 실제 앱에서 Monaco 비교·목록·한 번에 반영과 (b) 수정을 확인한다. 새 빈 폴더로 처음부터 재시험한다(모델 자동 채움 확인). (a)를 정리한다. 실패 이유를 사용자에게 보여 줄 기록을 남길지 검토한다.
 
@@ -173,6 +177,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **2026-11-18 worktree·합치기 결정**: 작업 하나 = worktree 하나 = 브랜치 하나(작업 안 브랜치 전환 없음). 합치기 전에 내 폴더 최신을 작업 브랜치로 먼저 가져오고, 충돌은 작업 공간에서 팀이 정리한 뒤 합친다(유일한 방식). 파일 통째 최신 우선은 이 전환 때 대체한다.
 - **2026-11-18 Orca 방향 전환(사용자 결정)**: 에이전트 실행·워크트리·변경 관리는 Orca를 벤치마킹한다(`docs/proposals/m5-orca-benchmark.md`). 작업 공간은 사용자 저장소의 실제 git worktree·브랜치, 기본 권한은 "전부 허용", 로그인은 앱 전용 유지. 허용된 도구(웹 검색 등)는 끄지 않고, 모르는 이벤트로 실행을 멈추지 않는 방향이다. 기존 "감독 못 하는 도구는 끈다"(144f5601, eb05b6af)는 임시 조치였다.
 - **에이전트 CLI 내부 흔적은 원본 반영에서 제외(2026-11-17)**: Claude Code는 작업 복사본에 `.claude/.cc-writes`(0700)를 만든다. 반영 검토(`review.rs` `AGENT_SCRATCH`)는 이 경로를 통째로 빼고, 원본이 그 안의 파일을 추적하면 거절한다. 다른 CLI 폴더를 추가할 때는 CLI만 쓰고 에이전트는 쓸 수 없는 경로인지부터 확인한다. Codex 0.169는 browser/computer use·image generation이 기본으로 켜져 있어 실행 인자로 끈다(`UNSUPERVISED_TOOL_FEATURES`). 새 Codex 버전마다 `codex-profile-v1/logs_2.sqlite`의 feedback_tags `feature.*`를 다시 점검한다.
 - **dev 앱 자동 조작(2026-11-17)**: 폴더 선택 창은 Orca로 뒤에서 조작할 수 없다. 개발 빌드에서는 `~/Library/Application Support/Elsecrew/dev-pick-directory.txt`에 경로를 적으면 다음 '프로젝트 추가'가 그 폴더를 고른다(한 번만, 빈 폴더 확인도 생략, 패키지 앱은 무시). 엔진 watcher는 `file.changed`만 보내고 `diff.changed`는 보내지 않는다. 화면이 목록을 갱신하려면 `file.changed`를 받아야 한다. 번역 파일을 바꾸면 dev HMR이 깨지므로 Cmd+R로 다시 불러온다.
