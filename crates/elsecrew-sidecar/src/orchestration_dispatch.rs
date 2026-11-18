@@ -642,7 +642,8 @@ impl Sidecar {
                 // branch, finished or not; a failed record never stops the team.
                 if finished_role != "coordinator" {
                     let summary = format!("{}: {}", role_report_title(&finished_role, &chat_record),
-                        text.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or("작업 기록"));
+                        // A report's first line is often a Markdown heading.
+                        text.lines().map(|line| line.trim().trim_start_matches('#').trim()).find(|line| !line.is_empty()).unwrap_or("작업 기록"));
                     if let Err(error) = self.commit_team_step(&chat_record, &summary) {
                         eprintln!("team step not recorded on the task branch: {}", error.detail);
                     }
