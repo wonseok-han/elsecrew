@@ -6369,6 +6369,8 @@ fn a_copy_whose_original_changed_meanwhile_is_dropped_and_can_simply_be_retried(
 #[test]
 fn saving_a_file_in_the_original_while_a_task_copy_is_made_is_undone_and_retried() {
     let mut fixture = source_index_fixture();
+    // v1 task copies (still available with ELSECREW_GIT_WORKTREES=0).
+    fixture.manager.git_worktrees_enabled = false;
     fixture.manager.open_project(&mut fixture.storage, fixture.source.to_str().unwrap(), "req_saved_open").unwrap();
     let view = fixture.manager.create_worktree(&mut fixture.storage, &fixture.project_id, "req_saved_view").unwrap().result;
     let edited = fixture.source.join("src/edit.txt");
@@ -6407,6 +6409,8 @@ fn saving_a_file_in_the_original_while_a_task_copy_is_made_is_undone_and_retried
 #[test]
 fn a_new_commit_in_the_original_does_not_stop_new_tasks() {
     let mut fixture = source_index_fixture();
+    // v1 task copies (still available with ELSECREW_GIT_WORKTREES=0).
+    fixture.manager.git_worktrees_enabled = false;
     fixture.manager.open_project(&mut fixture.storage, fixture.source.to_str().unwrap(), "req_commit_open").unwrap();
     let view = fixture.manager.create_worktree(&mut fixture.storage, &fixture.project_id, "req_commit_view").unwrap().result;
     let first = git_text(&fixture.source, ["rev-parse", "HEAD"]);
@@ -6973,6 +6977,7 @@ fn a_conflict_resolved_to_the_tasks_side_still_merges() {
 #[test]
 fn a_new_task_reports_the_users_uncommitted_changes() {
     let mut fixture = Fixture::open();
+    fixture.manager.git_worktrees_enabled = false;
     assert_eq!(fixture.manager.source_uncommitted(&fixture.storage, &fixture.project_id).unwrap(), json!({"applies":false,"uncommitted":0}));
     fixture.manager.git_worktrees_enabled = true;
     let before = fixture.manager.source_uncommitted(&fixture.storage, &fixture.project_id).unwrap()["uncommitted"].as_u64().unwrap();

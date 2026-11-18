@@ -514,9 +514,9 @@ pub struct ProjectManager {
     data_root: PathBuf,
     data_dir: Dir,
     worktrees_root: PathBuf,
-    /// Task workspaces become real Git worktrees (2026-11-18 design). Off
-    /// until merging them back is built; `ELSECREW_GIT_WORKTREES=1` turns it
-    /// on for development.
+    /// Task workspaces are real Git worktrees (2026-11-18 design), on by
+    /// default now that merging, conflict hand-off, cleanup and recovery
+    /// exist. `ELSECREW_GIT_WORKTREES=0` keeps the v1 copies.
     git_worktrees_enabled: bool,
     manifests_root: PathBuf,
     worktrees_dir: Dir,
@@ -1083,7 +1083,8 @@ impl ProjectManager {
             data_root,
             data_dir,
             worktrees_root,
-            git_worktrees_enabled: std::env::var("ELSECREW_GIT_WORKTREES").is_ok_and(|value| value == "1"),
+            git_worktrees_enabled: cfg!(target_os = "macos")
+                && !std::env::var("ELSECREW_GIT_WORKTREES").is_ok_and(|value| value == "0"),
             manifests_root,
             worktrees_dir,
             manifests_dir,
