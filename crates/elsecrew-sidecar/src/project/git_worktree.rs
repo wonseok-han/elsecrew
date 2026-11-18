@@ -93,8 +93,10 @@ impl ProjectManager {
             return Ok(false);
         }
         let worktree = self.worktree_capability(&active)?;
-        if self.merge_in_progress(&worktree)? {
-            return Err(ProjectFailure::recovery("an earlier merge in the task workspace was not undone"));
+        // A base merge the team is resolving is recorded (as the merge)
+        // only once no conflict marks remain; until then nothing is.
+        if self.merge_in_progress(&worktree)? && !self.unresolved_conflicts(&worktree)?.is_empty() {
+            return Ok(false);
         }
         // A filter added to the repository since the workspace was made would
         // run its program on `add`; refuse instead of recording.

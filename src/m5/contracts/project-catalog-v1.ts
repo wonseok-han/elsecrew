@@ -61,7 +61,7 @@ export type ProjectCatalogRequest =
   | ({ action: "inspectChatDiscard" } & ChatDiscardAddress)
   | { action: "discardChatWorkspace"; inspection: ChatDiscardInspection; confirmed: true }
   | ({ action: "inspectChatMerge" } & ChatMergeAddress)
-  | ({ action: "mergeChatWorkspace"; expectedHead: string; expectedBase: string; confirmed: true } & ChatMergeAddress)
+  | ({ action: "mergeChatWorkspace"; expectedHead: string; expectedBase: string; keepConflicts: boolean; confirmed: true } & ChatMergeAddress)
   | { action: "deleteProject"; projectId: string; confirmed: true }
   | { action: "deleteChat"; projectId: string; chatId: string; confirmed: true }
   | { action: "finishDeletions" }
@@ -93,27 +93,31 @@ export type ProjectCatalogRequest =
 export interface ProjectCatalogEntry { projectId: string; canonicalPath: string }
 /** A task worktree's place against its base branch (task = PR). */
 export interface ChatMergeAddress { chatId: string; projectId: string; worktreeId: string; workspaceIdentity: string }
-export type ChatMergeBlock = "noBaseBranch" | "baseBranchMissing" | "baseInOtherWorktree" | "nothingToMerge";
-export type ChatMergeBlockReason = "noBaseBranch" | "changedSinceReview" | "userChangesOverlap" | "baseInOtherWorktree" | "unsupportedRepository";
-const MERGE_BLOCK_REASONS: readonly ChatMergeBlockReason[] = ["noBaseBranch", "changedSinceReview", "userChangesOverlap", "baseInOtherWorktree", "unsupportedRepository"];
+export type ChatMergeBlock = "noBaseBranch" | "baseBranchMissing" | "baseInOtherWorktree" | "conflictsUnresolved" | "nothingToMerge";
+export type ChatMergeBlockReason = "noBaseBranch" | "changedSinceReview" | "userChangesOverlap" | "baseInOtherWorktree" | "unsupportedRepository" | "conflictsUnresolved";
+const MERGE_BLOCK_REASONS: readonly ChatMergeBlockReason[] = ["noBaseBranch", "changedSinceReview", "userChangesOverlap", "baseInOtherWorktree", "unsupportedRepository", "conflictsUnresolved"];
 export type ChatMergeState =
   | { kind: "snapshot" }
-  | { kind: "gitWorktree"; branch: string; baseRef: string | null; head: string; baseTip: string | null; ahead: number; behind: number; uncommitted: boolean; baseCheckedOut: boolean; blocked: ChatMergeBlock | null };
+  | { kind: "gitWorktree"; branch: string; baseRef: string | null; head: string; baseTip: string | null; ahead: number; behind: number; uncommitted: boolean; baseCheckedOut: boolean;
+      /** A base merge handed to the team; `unresolved` files still carry conflict marks. */
+      resolving: boolean; unresolved: number; blocked: ChatMergeBlock | null };
 export type ChatMergeOutcome =
   | { outcome: "merged"; merge: ChatMergeState }
   | { outcome: "conflict"; conflictCount: number; conflicts: string[]; merge: ChatMergeState }
+  | { outcome: "resolving"; conflictCount: number; conflicts: string[]; merge: ChatMergeState }
   | { outcome: "blocked"; reason: ChatMergeBlockReason; merge: ChatMergeState };
 const OID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 function validateChatMergeState(value: unknown): ChatMergeState {
   const state = object(value);
   if (state.kind === "snapshot") { keys(state, ["kind"]); return state as ChatMergeState; }
-  keys(state, ["kind", "branch", "baseRef", "head", "baseTip", "ahead", "behind", "uncommitted", "baseCheckedOut", "blocked"]);
+  keys(state, ["kind", "branch", "baseRef", "head", "baseTip", "ahead", "behind", "uncommitted", "baseCheckedOut", "resolving", "unresolved", "blocked"]);
   if (state.kind !== "gitWorktree" || typeof state.branch !== "string" || !state.branch.startsWith("elsecrew/") || state.branch.length > 200) throw new Error("invalid merge branch");
   if (state.baseRef !== null && (typeof state.baseRef !== "string" || !state.baseRef || state.baseRef.length > 200)) throw new Error("invalid merge base");
   if (typeof state.head !== "string" || !OID.test(state.head) || (state.baseTip !== null && (typeof state.baseTip !== "string" || !OID.test(state.baseTip)))) throw new Error("invalid merge commit");
-  for (const key of ["ahead", "behind"] as const) if (!Number.isSafeInteger(state[key]) || (state[key] as number) < 0) throw new Error("invalid merge count");
+  if (typeof state.resolving !== "boolean" || (!state.resolving && state.unresolved !== 0)) throw new Error("invalid merge resolution");
+  for (const key of ["ahead", "behind", "unresolved"] as const) if (!Number.isSafeInteger(state[key]) || (state[key] as number) < 0) throw new Error("invalid merge count");
   if (typeof state.uncommitted !== "boolean" || typeof state.baseCheckedOut !== "boolean") throw new Error("invalid merge flags");
-  if (state.blocked !== null && !["noBaseBranch", "baseBranchMissing", "baseInOtherWorktree", "nothingToMerge"].includes(String(state.blocked))) throw new Error("invalid merge block");
+  if (state.blocked !== null && !["noBaseBranch", "baseBranchMissing", "baseInOtherWorktree", "conflictsUnresolved", "nothingToMerge"].includes(String(state.blocked))) throw new Error("invalid merge block");
   return state as ChatMergeState;
 }
 export type ProjectCatalogResult =
@@ -235,7 +239,8 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
     for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"]) id(request[key]);
   } else if (request.action === "inspectChatMerge" || request.action === "mergeChatWorkspace") {
     const merging = request.action === "mergeChatWorkspace";
-    keys(request, ["action", "chatId", "projectId", "worktreeId", "workspaceIdentity", ...(merging ? ["expectedHead", "expectedBase", "confirmed"] : [])]);
+    keys(request, ["action", "chatId", "projectId", "worktreeId", "workspaceIdentity", ...(merging ? ["expectedHead", "expectedBase", "keepConflicts", "confirmed"] : [])]);
+    if (merging && typeof request.keepConflicts !== "boolean") throw new Error("invalid keepConflicts");
     for (const key of ["chatId", "projectId", "worktreeId", "workspaceIdentity"]) id(request[key]);
     if (merging && (!OID.test(String(request.expectedHead)) || !OID.test(String(request.expectedBase)))) throw new Error("invalid merge commits");
     if (merging && request.confirmed !== true) throw new Error("merging requires explicit confirmation");
@@ -384,7 +389,8 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
     validateChatMergeState(result.merge);
   } else if (request.action === "mergeChatWorkspace") {
     if (result.outcome === "merged") keys(result, ["schemaVersion", "action", "outcome", "merge"]);
-    else if (result.outcome === "conflict") {
+    else if (result.outcome === "conflict" || result.outcome === "resolving") {
+      if (result.outcome === "resolving" && !request.keepConflicts) throw new Error("conflicts were kept without being asked");
       keys(result, ["schemaVersion", "action", "outcome", "conflictCount", "conflicts", "merge"]);
       if (!Number.isSafeInteger(result.conflictCount) || !Array.isArray(result.conflicts) || result.conflicts.length > 100
         || (result.conflictCount as number) < result.conflicts.length || result.conflicts.some(path => typeof path !== "string" || !path || path.length > 4096)) throw new Error("invalid merge conflicts");

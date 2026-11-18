@@ -2,7 +2,9 @@
 //! §3.3, task = PR). The task branch first takes the base branch's newest
 //! commits inside the task's own worktree; the base branch then only moves
 //! forward. Nothing is ever resolved in the user's folder: a conflict is
-//! undone in the worktree and reported with its files.
+//! undone in the worktree and reported with its files, or, when the user
+//! hands it to the team, left in the worktree with its conflict marks. The
+//! app finishes that merge only once no marks remain.
 use super::*;
 
 /// Files listed for a conflict; the count is always exact.
@@ -29,6 +31,15 @@ struct MergeState {
     /// Another worktree of the repository has the base branch checked out;
     /// moving it underneath would leave that checkout inconsistent.
     base_elsewhere: bool,
+    /// A base merge left for the team to resolve (MERGE_HEAD present).
+    resolving: bool,
+    /// Conflicted files that still carry conflict marks.
+    unresolved: u64,
+}
+
+/// A line Git writes around conflicting hunks.
+fn conflict_mark(line: &[u8]) -> bool {
+    line.starts_with(b"<<<<<<< ") || line.starts_with(b">>>>>>> ") || line == b"=======" || line == b"=======\r"
 }
 
 impl MergeState {
@@ -39,6 +50,8 @@ impl MergeState {
             Some("baseBranchMissing")
         } else if self.base_elsewhere {
             Some("baseInOtherWorktree")
+        } else if self.resolving && self.unresolved > 0 {
+            Some("conflictsUnresolved")
         } else if self.ahead == 0 && !uncommitted {
             Some("nothingToMerge")
         } else {
@@ -54,6 +67,8 @@ impl MergeState {
             "behind":self.behind,
             "uncommitted":uncommitted,
             "baseCheckedOut":self.base_checked_out,
+            "resolving":self.resolving,
+            "unresolved":self.unresolved,
             "blocked":blocked,
         })
     }
@@ -96,7 +111,31 @@ impl ProjectManager {
             Some(base) => self.base_in_other_worktree(source_root, &active.canonical_git_root, base)?,
             None => false,
         };
-        Ok(MergeState { branch: branch.clone(), base_ref: base_ref.clone(), head, base_tip, ahead, behind, base_checked_out, base_elsewhere })
+        let resolving = self.merge_in_progress(worktree)?;
+        let unresolved = if resolving { self.unresolved_conflicts(worktree)?.len() as u64 } else { 0 };
+        Ok(MergeState { branch: branch.clone(), base_ref: base_ref.clone(), head, base_tip, ahead, behind, base_checked_out, base_elsewhere, resolving, unresolved })
+    }
+
+    /// Conflicted files of a merge in progress that still carry conflict
+    /// marks. A file the team deleted counts as resolved.
+    pub(super) fn unresolved_conflicts(&self, worktree: &Dir) -> Result<Vec<String>, ProjectFailure> {
+        let conflicted = self.git_at(worktree, ["diff", "--name-only", "-z", "--diff-filter=U"])?;
+        let mut left = Vec::new();
+        for path in conflicted.stdout.split(|byte| *byte == 0).filter(|path| !path.is_empty()) {
+            let path = protocol_git_path(path)?;
+            let marked = match open_file_relative(worktree, &path) {
+                Ok(file) => {
+                    let mut bytes = Vec::new();
+                    file.take(FILE_MAX_BYTES_V1 + 1).read_to_end(&mut bytes)
+                        .map_err(|error| ProjectFailure::manifest(format!("could not read a conflicted file: {error}")))?;
+                    bytes.len() as u64 > FILE_MAX_BYTES_V1 || bytes.split(|byte| *byte == b'\n').any(conflict_mark)
+                }
+                Err(_) if worktree.symlink_metadata(&path).is_err() => false,
+                Err(_) => true,
+            };
+            if marked { left.push(path); }
+        }
+        Ok(left)
     }
 
     /// Whether a worktree other than the user's folder has `base` checked out.
@@ -157,6 +196,7 @@ impl ProjectManager {
         address: &WorkspaceAddress,
         expected_head: &str,
         expected_base: &str,
+        keep_conflicts: bool,
     ) -> Result<Value, ProjectFailure> {
         // It changes the user's folder: the same gate as applying a copy.
         if !self.source_writes_enabled {
@@ -177,9 +217,6 @@ impl ProjectManager {
             if source.git_dir.symlink_metadata(lock).is_ok() {
                 return Err(ProjectFailure::dirty("another Git command is working in the original; nothing was merged"));
             }
-        }
-        if self.merge_in_progress(&worktree)? {
-            return Err(ProjectFailure::recovery("an earlier merge in the task workspace was not undone"));
         }
         let before = self.merge_state(&source_root, &worktree, &active)?;
         let unsupported = || -> Result<Value, ProjectFailure> {
@@ -206,6 +243,16 @@ impl ProjectManager {
         {
             return unsupported();
         }
+        // A merge the team was resolving: finish it only when no conflict
+        // marks are left; the step commit then records it as a merge.
+        if before.resolving {
+            if before.unresolved > 0 {
+                return Ok(json!({"outcome":"blocked","reason":"conflictsUnresolved","merge":before.value(self.uncommitted(&worktree)?)}));
+            }
+            if !self.workspace_commit_step(storage, address, &format!("{base}과 겹친 부분 정리"))? || self.merge_in_progress(&worktree)? {
+                return Err(ProjectFailure::ambiguous("the resolved merge in the task workspace could not be recorded"));
+            }
+        }
         // Leftover edits since the last step are part of what is merged.
         if self.uncommitted(&worktree)? {
             self.workspace_commit_step(storage, address, "합치기 전 남은 변경")?;
@@ -224,6 +271,17 @@ impl ProjectManager {
                     .filter(|path| !path.is_empty())
                     .map(protocol_git_path)
                     .collect::<Result<_, _>>()?;
+                // Handed to the team: the marks stay in the worktree and the
+                // step commits finish the merge once they are gone.
+                if keep_conflicts {
+                    let after = self.merge_state(&source_root, &worktree, &active)?;
+                    return Ok(json!({
+                        "outcome":"resolving",
+                        "conflictCount":paths.len(),
+                        "conflicts":paths.into_iter().take(CONFLICT_PATHS_MAX).collect::<Vec<_>>(),
+                        "merge":after.value(self.uncommitted(&worktree)?),
+                    }));
+                }
                 // A failed abort leaves MERGE_HEAD; `merge_in_progress`
                 // then refuses every later step commit and merge.
                 if self.git_allow_status_at(&worktree, ["merge", "--abort"], &[0]).is_err() {

@@ -1358,7 +1358,7 @@ impl Sidecar {
                         return Ok(HandledRequest::response(error_response(&request, "requestBlocked", "requestBlocked", "merging requires idle native execution")));
                     }
                     let mut fields = vec!["action", "chatId", "projectId", "worktreeId", "workspaceIdentity"];
-                    if merging { fields.extend(["expectedHead", "expectedBase", "confirmed"]); }
+                    if merging { fields.extend(["expectedHead", "expectedBase", "keepConflicts", "confirmed"]); }
                     let params = require_exact_params(&request.params, &fields).map_err(invalid_params)?;
                     if merging && params["confirmed"] != true { return Err(invalid_params("merging requires explicit confirmation".into())); }
                     let address = project::WorkspaceAddress {
@@ -1373,7 +1373,8 @@ impl Sidecar {
                                 .then_some(value).ok_or_else(|| invalid_params("invalid commit id".into()))
                         });
                         let (head, base) = (oid("expectedHead")?, oid("expectedBase")?);
-                        self.projects.workspace_merge(&self.storage, &address, head, base)
+                        let keep = params["keepConflicts"].as_bool().ok_or_else(|| invalid_params("invalid keepConflicts".into()))?;
+                        self.projects.workspace_merge(&self.storage, &address, head, base, keep)
                             .map(|mut outcome| { outcome["schemaVersion"] = serde_json::json!(1); outcome["action"] = serde_json::json!(action); outcome })
                     } else {
                         self.projects.workspace_merge_inspect(&self.storage, &address)

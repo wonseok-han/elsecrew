@@ -6725,12 +6725,13 @@ fn worktree_chat(fixture: &mut Fixture, name: &str) -> (WorkspaceAddress, PathBu
 #[cfg(target_os = "macos")]
 fn merge_now(fixture: &Fixture, address: &WorkspaceAddress) -> Value {
     let state = fixture.manager.workspace_merge_inspect(&fixture.storage, address).unwrap();
-    fixture.manager.workspace_merge(&fixture.storage, address, state["head"].as_str().unwrap(), state["baseTip"].as_str().unwrap()).unwrap()
+    fixture.manager.workspace_merge(&fixture.storage, address, state["head"].as_str().unwrap(), state["baseTip"].as_str().unwrap(), false).unwrap()
 }
 
 #[cfg(target_os = "macos")]
 fn commit_in(dir: &Path, message: &str) {
-    git_raw(dir, ["add", "-A"]);
+    // Not the fixture's nested `vendor/sub` repository.
+    git_raw(dir, ["add", "-A", "--", ".", ":!vendor"]);
     git_raw(dir, ["-c", "user.name=User", "-c", "user.email=user@example.invalid", "commit", "-q", "-m", message]);
 }
 
@@ -6770,7 +6771,10 @@ fn merging_brings_newer_base_commits_into_the_task_first() {
     assert_eq!(outcome["outcome"], "merged", "{outcome}");
     assert_eq!(fs::read(fixture.source.join("task.txt")).unwrap(), b"task\n");
     assert_eq!(fs::read(fixture.source.join("user.txt")).unwrap(), b"user\n");
-    assert_eq!(git_text(&fixture.source, ["status", "--porcelain"]), "");
+    let status = git_text(&fixture.source, ["status", "--porcelain"]);
+    assert!(!status.contains("task.txt") && !status.contains("user.txt"), "{status}");
+    // The fixture's submodule (no folder in either checkout) is never deleted.
+    assert!(git_text(&fixture.source, ["ls-tree", "HEAD", "vendor/sub"]).contains("160000"));
 }
 
 /// A conflict is undone in the worktree and reported; the user's branch and
@@ -6819,16 +6823,16 @@ fn a_merge_newer_than_the_review_is_refused() {
     fs::write(path.join("late.txt"), b"late\n").unwrap();
     commit_in(&path, "late step");
     let before = git_text(&fixture.source, ["rev-parse", "HEAD"]);
-    let outcome = fixture.manager.workspace_merge(&fixture.storage, &address, state["head"].as_str().unwrap(), state["baseTip"].as_str().unwrap()).unwrap();
+    let outcome = fixture.manager.workspace_merge(&fixture.storage, &address, state["head"].as_str().unwrap(), state["baseTip"].as_str().unwrap(), false).unwrap();
     assert_eq!((outcome["outcome"].as_str(), outcome["reason"].as_str()), (Some("blocked"), Some("changedSinceReview")));
     assert_eq!(git_text(&fixture.source, ["rev-parse", "HEAD"]), before);
 }
 
-/// Review I1/I2/I3: a merge driver program, the base branch open in another
-/// worktree, or a half-undone merge all refuse before anything moves.
+/// Review I1/I2: a merge driver program or the base branch open in another
+/// worktree refuse before anything moves.
 #[cfg(target_os = "macos")]
 #[test]
-fn merging_refuses_drivers_other_worktrees_and_half_merges() {
+fn merging_refuses_drivers_and_other_worktrees() {
     let mut fixture = Fixture::open();
     let (address, path) = worktree_chat(&mut fixture, "guards");
     fs::write(path.join("task.txt"), b"task\n").unwrap();
@@ -6850,11 +6854,56 @@ fn merging_refuses_drivers_other_worktrees_and_half_merges() {
     git_raw(&fixture.source, ["worktree", "remove", other.to_str().unwrap()]);
     git_raw(&fixture.source, ["switch", "-q", &base]);
 
-    let head_commit = git_text(&path, ["rev-parse", "HEAD"]);
-    let git_dir = git_text(&path, ["rev-parse", "--git-dir"]);
-    fs::write(PathBuf::from(git_dir.trim()).join("MERGE_HEAD"), head_commit.as_bytes()).unwrap();
-    assert!(fixture.manager.workspace_commit_step(&fixture.storage, &address, "step").is_err());
-    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
-    assert!(fixture.manager.workspace_merge(&fixture.storage, &address, state["head"].as_str().unwrap(), state["baseTip"].as_str().unwrap()).is_err());
     assert_eq!(git_text(&fixture.source, ["rev-parse", "HEAD"]), head);
+}
+
+/// A conflict handed to the team: the marks stay in the worktree, nothing is
+/// recorded or merged while any remain, and once they are gone the next
+/// merge records the resolution and moves the base forward.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_conflict_left_to_the_team_merges_only_after_the_marks_are_gone() {
+    let mut fixture = Fixture::open();
+    let (address, path) = worktree_chat(&mut fixture, "resolve");
+    fs::write(path.join("src/edit.txt"), b"task version\n").unwrap();
+    fs::write(fixture.source.join("src/edit.txt"), b"user version\n").unwrap();
+    commit_in(&fixture.source, "user edit");
+    let base = git_text(&fixture.source, ["rev-parse", "HEAD"]);
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    let outcome = fixture.manager.workspace_merge(&fixture.storage, &address, state["head"].as_str().unwrap(), state["baseTip"].as_str().unwrap(), true).unwrap();
+    assert_eq!(outcome["outcome"], "resolving", "{outcome}");
+    assert_eq!(outcome["merge"]["blocked"], "conflictsUnresolved");
+    assert!(fs::read_to_string(path.join("src/edit.txt")).unwrap().contains("<<<<<<< "));
+    // The changes list keeps working while the team resolves.
+    let summary = fixture.manager.workspace_diff_summary(&fixture.storage, &address).unwrap();
+    assert!(summary.result["entries"].as_array().unwrap().iter().any(|entry| entry["path"] == "src/edit.txt"), "{}", summary.result);
+    // Marks left: no step commit, no merge, the user's branch stays.
+    assert!(!fixture.manager.workspace_commit_step(&fixture.storage, &address, "step").unwrap());
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    assert_eq!((state["resolving"].as_bool(), state["unresolved"].as_u64()), (Some(true), Some(1)), "{state}");
+    let blocked = merge_now(&fixture, &address);
+    assert_eq!(blocked["reason"], "conflictsUnresolved", "{blocked}");
+    assert_eq!(git_text(&fixture.source, ["rev-parse", "HEAD"]), base);
+    // The team resolves it (keeping both intents); the merge then completes.
+    fs::write(path.join("src/edit.txt"), b"user version\ntask version\n").unwrap();
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    assert!(state["blocked"].is_null(), "{state}");
+    let merged = merge_now(&fixture, &address);
+    assert_eq!(merged["outcome"], "merged", "{merged}");
+    assert_eq!(fs::read(fixture.source.join("src/edit.txt")).unwrap(), b"user version\ntask version\n");
+    assert_eq!(git_text(&fixture.source, ["rev-list", "--count", "--merges", "HEAD"]).trim(), "1");
+}
+
+/// A submodule (gitlink) among the changes is listed, not an error.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_submodule_change_in_a_worktree_is_listed_without_content() {
+    let mut fixture = Fixture::open();
+    let (address, path) = worktree_chat(&mut fixture, "gitlink");
+    git_raw(&fixture.source, ["add", "vendor"]);
+    commit_in(&fixture.source, "user adds a submodule");
+    fs::write(path.join("task.txt"), b"task\n").unwrap();
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    fixture.manager.workspace_merge(&fixture.storage, &address, state["head"].as_str().unwrap(), state["baseTip"].as_str().unwrap(), false).unwrap();
+    assert!(fixture.manager.workspace_diff_summary(&fixture.storage, &address).is_ok());
 }

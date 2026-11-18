@@ -5584,6 +5584,11 @@ impl DiffBaseReader {
         validate_relative_path(path, false)?; // In particular, no newline request injection.
         let header = self.sizes.header(&format!("{}:{path}", self.commit))?;
         let fields = header.trim_end_matches('\n').split(' ').collect::<Vec<_>>();
+        // A real repository may hold submodules (gitlinks): shown as a
+        // change without content, like a binary file.
+        if fields.len() == 3 && fields[1] == "commit" {
+            return Ok(ContentInfo::too_large(0));
+        }
         if fields.len() != 3 || fields[1] != "blob" {
             return Err(ProjectFailure::manifest("diff base is not a blob"));
         }
