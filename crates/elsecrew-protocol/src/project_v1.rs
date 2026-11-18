@@ -236,6 +236,17 @@ fn validate_worktree_manifest(value: &Value) -> Result<(), ProjectContractError>
     })
 }
 
+/// The user's folder a workspace manifest came from: `canonicalGitRoot` in
+/// v1, `canonicalSourceRoot` in v2 (which also names plain folders).
+pub fn manifest_source_root(manifest: &Value) -> Option<&str> {
+    let key = if manifest.get("schemaVersion").and_then(Value::as_u64) == Some(PROJECT_SCHEMA_VERSION_V2) {
+        "canonicalSourceRoot"
+    } else {
+        "canonicalGitRoot"
+    };
+    manifest.get(key).and_then(Value::as_str)
+}
+
 /// A branch name Git accepts and the app can show: no spaces, controls,
 /// `~^:?*[\\`, `..`, `@{`, empty or dot-led parts, or a `.lock` part.
 fn branch_name(value: Option<&Value>, name: &str) -> Result<String, ProjectContractError> {

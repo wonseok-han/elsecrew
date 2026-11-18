@@ -431,7 +431,7 @@ impl RunReservation {
         let profile: AgentResolvedProfileV1 = serde_json::from_value(self.run["selectedProfile"].clone()).map_err(|_| failure())?;
         let manifest = projects.verify_workspace_for_run(storage, &address_from_chat(&self.run).map_err(|_| failure())?).map_err(|_| failure())?;
         let workspace = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
-        let source = Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?);
+        let source = Path::new(elsecrew_protocol::project_v1::manifest_source_root(&manifest).ok_or_else(failure)?);
         let home = process.claude_preflight_home()?;
         let effort = profile.reasoning_effort.as_deref();
         let access = if profile.permission == "workspaceWrite" { ToolAccess::Edit } else { ToolAccess::ReadOnly };
@@ -463,7 +463,7 @@ impl RunReservation {
             "readOnly" => ToolAccess::ReadOnly, "workspaceWrite" => ToolAccess::Edit, _ => return Err(failure()),
         };
         Admission::new(Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?),
-            &process.claude_preflight_home()?, Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?),
+            &process.claude_preflight_home()?, Path::new(elsecrew_protocol::project_v1::manifest_source_root(&manifest).ok_or_else(failure)?),
             &preflight.profile.model_selector, preflight.profile.reasoning_effort.as_deref(), access)
     }
 
@@ -490,7 +490,7 @@ impl RunReservation {
             let requested = crate::provider_claude_session::requested_policy_digest(
                 self.run["selectedProfile"]["modelSelector"].as_str().ok_or_else(failure)?,
                 self.run["selectedProfile"]["reasoningEffort"].as_str(), access,
-                &home, Path::new(workspace), Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?),
+                &home, Path::new(workspace), Path::new(elsecrew_protocol::project_v1::manifest_source_root(&manifest).ok_or_else(failure)?),
             )?;
             if requested != preflight.requested_launch_policy_digest || !preflight.credentials_present
                 || serde_json::to_value(&preflight.profile).map_err(|_| failure())? != self.run["selectedProfile"]
@@ -534,7 +534,7 @@ impl RunReservation {
         let manifest = projects.verify_workspace_for_run(storage, &address).map_err(|_| failure())?;
         let workspace = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
         let home = process.claude_preflight_home()?;
-        let source = Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?);
+        let source = Path::new(elsecrew_protocol::project_v1::manifest_source_root(&manifest).ok_or_else(failure)?);
         if let Some(preflight) = &self.claude_preflight {
             if executable.public_identity(&preflight.executable.cli_version)? != preflight.executable
                 || crate::provider_claude_session::requested_policy_digest(model, effort, access, &home, workspace, source)?

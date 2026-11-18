@@ -231,7 +231,7 @@ impl ProjectManager {
                     )?
                     .as_str(),
                 )
-            || manifest["canonicalGitRoot"] != project["canonical_path"]
+            || elsecrew_protocol::project_v1::manifest_source_root(&manifest) != project["canonical_path"].as_str()
         {
             return Err(denied());
         }

@@ -5,7 +5,7 @@
 ### 2026-11-18 · by Claude Opus 5.5 (claude-opus-5-5) — 작업 공간 전환 2단계(가): 실제 git worktree 작업 공간
 - 범위: `docs/proposals/m5-real-worktrees.md` §5의 2단계 중 첫 묶음이다. **`ELSECREW_GIT_WORKTREES=1`일 때만** 켜진다(합치기(3단계)가 생길 때까지 기본은 꺼짐). 그래서 기본 동작은 바뀌지 않았다.
 - 한 일:
-  - 계약: Rust `worktreeManifest` 검사기와 TS `validateWorktreeManifest`가 v1·v2를 모두 받는다(`schemaVersion`으로 나눔). 이 검사기를 거치는 작업 공간 주소·실행 복구·준비된 작업 공간 계약이 v2를 그대로 받는다. 원본 위치 키는 v1 `canonicalGitRoot`, v2 `canonicalSourceRoot`다(`manifestSourceRoot`).
+  - 계약: Rust `worktreeManifest` 검사기와 TS `validateWorktreeManifest`가 v1·v2를 모두 받는다(`schemaVersion`으로 나눔). 이 검사기를 거치는 작업 공간 주소·실행 복구·준비된 작업 공간 계약이 v2를 그대로 받는다. 원본 위치 키는 v1 `canonicalGitRoot`, v2 `canonicalSourceRoot`이고, 읽을 때는 공용 접근자 `project_v1::manifest_source_root`를 쓴다.
   - DB 다시 열기(`storage/reopen/snapshot/workspace.rs`): v2 준비 기록은 통째로(최대 16KiB) 읽어 공유 계약으로 검사한다. v1은 조각 검사를 그대로 둔다. 원본·작업 폴더 겹침 검사는 두 버전 모두 한다. 저장 스키마 번호는 올리지 않았다(파생 테이블 형태가 같음).
   - `ActiveProject.kind`(`Snapshot` | `GitWorktree{branch, base_ref}`). manifest에서 종류를 읽고(`manifest_kind`), v2는 복사본 표시 파일 대신 `.git` 링크와 원본의 역링크를 맞춰 본다(`verify_worktree_link`). 검증(`verify_worktree_repository`)은 작업 브랜치에 있는지와 기준 커밋을 포함하는지만 본다. 앱 커밋은 허용한다.
   - 만들기(`project/git_worktree.rs` `create_git_worktree`, 새 작업의 `prepare_chat_application_workspace`):
@@ -17,6 +17,14 @@
   - 파일 감시(`watch_job.rs`): worktree의 `.git`은 파일이라 v2에서는 작업 폴더 자체를 붙잡는다.
 - 이번 묶음의 위치 결정: worktree는 우선 앱 데이터 `worktrees-v1/<id>`에 만든다. 저장(rename)·정리·감시가 모두 이 폴더 기준이라 그대로 쓸 수 있기 때문이다. 사용자가 고른 보이는 폴더 `~/elsecrew/workspaces/<프로젝트>/<작업>`과 설정 항목은 다음 묶음(2단계 나)에서 한다.
 - 검증: 새 테스트 2개(작업 브랜치 생성·원본 HEAD/브랜치/상태 불변·수정 중 파일 보존·커밋 뒤에도 변경 목록 유지·브랜치 이탈 거절, filter 저장소 거절과 ref 불변).
+- 실제 앱 첫 시도에서 발견(같은 날 수정): 준비 확인·버리기·정리·실행 준비·Claude 준비 등 12곳이 manifest의 `canonicalGitRoot`를 직접 읽어 v2에서 "snapshot and project canonical roots differ"로 작업 만들기가 실패했다. 모두 `manifest_source_root`로 바꿨다. 키 이름을 v1과 같게 바꾸는 방법도 시도했지만, 실패한 시도가 남긴 v2 준비 기록을 DB 다시 열기 검사가 거절해(`storageSchemaMismatch`) 앱이 열리지 않았다. 사용자 앱 데이터를 고치지 않으려고 이름 변경은 되돌렸다.
+- 독립 검토(상시 검토자, 88777a96): 차단 0, 중요 2, 경미 6.
+  - I1 반영: 실패 되돌리기의 저장소 전체 `worktree prune`을 없앴다. 연결이 끊긴 외장 디스크의 사용자 worktree 기록까지 지울 수 있기 때문이다. 브랜치는 이번 호출이 만든 것(기준 커밋에 그대로 있음)일 때만 지운다.
+  - I2(결정 필요, 사용자 확인 전): 에이전트가 사용자 저장소 `.git` 전체를 읽을 수 있다. 여기에는 `config`의 remote URL 토큰, 다른 브랜치와 stash가 포함된다. v1 사본은 이것들을 일부러 지웠었다. Claude 실행은 `.git` 읽기가 막혀 있어 Git 명령이 안 된다.
+  - M2 반영: 단계 커밋에 `gc.auto=0`, `maintenance.auto=false`를 준다. 커밋 직전에 저장소 로컬 filter 설정을 다시 확인한다.
+  - M3 반영: LFS는 보통 앱이 읽지 않는 전역 설정에 있다. 그래서 기준 커밋의 `.gitattributes`와 `info/attributes`의 `filter=`로도 거절한다(테스트 추가).
+  - M4 반영: 줄바꿈 설정은 덮어쓰지 않는다(저장소 설정을 따름).
+  - 남김: M1(버린 작업의 브랜치와 worktree 기록 정리는 3단계), M5(단계 커밋 실패가 로그에만 남음), M6(샌드박스와 입장 검증이 링크를 따로 확인).
 - 아직 안 한 것: 결과 막대의 브랜치 표시와 "main에 합치기"(화면이 작업 공간 종류를 받는 통로 필요, 3단계에서 함께), v2 버리기의 `git worktree remove`(지금은 폴더 재귀 삭제라 원본에 정리 대상 worktree 기록과 브랜치가 남음), 재시작 때 "worktree 추가함·기록 전" 복구, 보이는 위치·설정, 실제 앱 todo 시험, 독립 검토.
 
 ## 프로젝트 요약 (고정)

@@ -2512,8 +2512,14 @@ fn reconcile_resolved_catalog(
             ));
         }
     }
+    if project.get("canonical_path").and_then(Value::as_str)
+        != elsecrew_protocol::project_v1::manifest_source_root(&manifest)
+    {
+        return Err(ProjectFailure::manifest(
+            "resolved catalog snapshot identity differs",
+        ));
+    }
     for (field, manifest_field) in [
-        ("canonical_path", "canonicalGitRoot"),
         ("base_commit", "baseCommit"),
         ("base_tree", "baseTree"),
         ("object_format", "objectFormat"),

@@ -93,6 +93,11 @@ impl ProjectManager {
             return Ok(false);
         }
         let worktree = self.worktree_capability(&active)?;
+        // A filter added to the repository since the workspace was made would
+        // run its program on `add`; refuse instead of recording.
+        if self.content_filters_configured(&worktree)? {
+            return Err(ProjectFailure::manifest("the repository now uses Git content filters; step not recorded"));
+        }
         self.git_at(&worktree, ["add", "-A"])?;
         let staged = self.git_allow_status_at(&worktree, ["diff", "--cached", "--quiet"], &[0, 1])?;
         if staged.status.code() == Some(0) {
@@ -103,11 +108,45 @@ impl ProjectManager {
             .chars().filter(|c| !c.is_control()).take(200).collect();
         self.git_at(&worktree, [
             "-c", "user.name=Elsecrew", "-c", "user.email=elsecrew@local",
-            "-c", "commit.gpgsign=false", "-c", "core.autocrlf=false",
+            "-c", "commit.gpgsign=false", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
             "commit", "-q", "--no-verify", "-m", line.as_str(),
         ])?;
         self.verify_worktree_repository(&worktree, &active)?;
         Ok(true)
+    }
+
+    /// A content filter program set in the repository's own config (the
+    /// app never reads global or system config).
+    fn content_filters_configured(&self, dir: &Dir) -> Result<bool, ProjectFailure> {
+        let found = self.git_allow_status_at(dir, ["config", "--get-regexp", r"^filter\."], &[0, 1])?;
+        Ok(found.status.code() == Some(0))
+    }
+
+    /// Files at `commit` asking for a content filter (`filter=lfs` and the
+    /// like in a tracked `.gitattributes`, or the repository's own
+    /// `info/attributes`). Checked out without the filter they would be
+    /// pointer files, and an agent's edit would commit the real bytes.
+    fn content_filters_requested(&self, root: &Dir, git_dir: &Dir, commit: &str) -> Result<bool, ProjectFailure> {
+        let pattern = r"(^|[[:space:]])filter=";
+        let tracked = self.git_allow_status_at(
+            root,
+            ["grep", "-q", "-I", "-E", pattern, commit, "--", ":(glob).gitattributes", ":(glob)**/.gitattributes"],
+            &[0, 1],
+        )?;
+        if tracked.status.code() == Some(0) {
+            return Ok(true);
+        }
+        Ok(match git_dir.symlink_metadata("info/attributes") {
+            Ok(metadata) if metadata.is_file() && metadata.len() <= 1024 * 1024 => {
+                let mut text = String::new();
+                open_file_relative(git_dir, "info/attributes")?
+                    .read_to_string(&mut text)
+                    .map_err(|error| ProjectFailure::manifest(format!("could not read info/attributes: {error}")))?;
+                text.split_whitespace().any(|word| word.starts_with("filter="))
+            }
+            Ok(_) => true,
+            Err(_) => false,
+        })
     }
 
     /// Branches and tags of the user's repository with their commits.
@@ -151,8 +190,9 @@ impl ProjectManager {
         }
         // Content filters (Git LFS and the like) would run helper programs
         // while checking out; not supported yet (decision 2026-11-18).
-        let filters = self.git_allow_status_at(&source._root, ["config", "--get-regexp", r"^filter\."], &[0, 1])?;
-        if filters.status.code() == Some(0) {
+        if self.content_filters_configured(&source._root)?
+            || self.content_filters_requested(&source._root, &source.git_dir, &source.base_commit)?
+        {
             return Err(ProjectFailure::manifest(
                 "repositories with Git content filters (such as Git LFS) are not supported yet",
             ));
@@ -256,8 +296,20 @@ impl ProjectManager {
                             [OsStr::new("worktree"), OsStr::new("remove"), OsStr::new("--force"), path_arg.as_os_str()],
                             &[0, 128],
                         );
-                        let _ = self.git_allow_status_at(&source._root, ["branch", "-D", branch.as_str()], &[0, 1]);
-                        let _ = self.git_allow_status_at(&source._root, ["worktree", "prune"], &[0]);
+                        // Only the branch this call made: absent before, and
+                        // still at the base. Never a repository-wide prune
+                        // (it would drop the user's own worktrees on an
+                        // unplugged disk).
+                        let ours = self.git_allow_status_at(
+                            &source._root,
+                            ["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")],
+                            &[0, 1],
+                        ).ok().filter(|output| output.status.success())
+                            .and_then(|output| trim_output(&output).ok().map(|head| head == active.base_commit))
+                            .unwrap_or(false);
+                        if ours {
+                            let _ = self.git_allow_status_at(&source._root, ["branch", "-D", branch.as_str()], &[0, 1]);
+                        }
                         return Err(self.fail_unfinished_copy(
                             storage, &project, &lock_id, &workspace_identity, &worktree_id,
                             None, request_id, error,

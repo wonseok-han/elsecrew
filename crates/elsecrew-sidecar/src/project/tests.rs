@@ -6657,3 +6657,21 @@ fn repositories_with_content_filters_are_refused_before_anything_is_made() {
     assert_eq!(git_text(&fixture.source, ["for-each-ref"]), refs);
     assert!(fixture.storage.blocker_ids().unwrap().is_empty());
 }
+
+/// LFS is usually set up in the user's global config, which the app never
+/// reads; the tracked `.gitattributes` still says which files need it.
+#[cfg(target_os = "macos")]
+#[test]
+fn repositories_asking_for_lfs_in_gitattributes_are_refused() {
+    let mut fixture = Fixture::open();
+    fixture.manager.git_worktrees_enabled = true;
+    fs::write(fixture.source.join(".gitattributes"), b"*.psd filter=lfs diff=lfs merge=lfs -text\n").unwrap();
+    git_raw(&fixture.source, ["add", ".gitattributes"]);
+    git_raw(&fixture.source, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "-m", "lfs"]);
+    let error = fixture
+        .manager
+        .prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_lfs_attributes")
+        .unwrap_err();
+    assert!(error.detail.contains("content filters"), "{}", error.detail);
+    assert_eq!(git_text(&fixture.source, ["branch", "--list", "elsecrew/*"]), "");
+}

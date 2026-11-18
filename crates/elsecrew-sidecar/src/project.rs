@@ -102,6 +102,7 @@ use elsecrew_protocol::project_v1::{
     WORKTREE_HEAD_MODE_V2, TASK_BRANCH_PREFIX_V2,
 };
 use elsecrew_protocol::MAX_TEXT_CHUNK_BYTES;
+use elsecrew_protocol::project_v1::manifest_source_root;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -4127,8 +4128,7 @@ impl ProjectManager {
         }
         let canonical_git_root = PathBuf::from(value_string(&project, "canonical_path")?);
         let kind = manifest_kind(&manifest)?;
-        let root_key = if kind == WorkspaceKind::Snapshot { "canonicalGitRoot" } else { "canonicalSourceRoot" };
-        if manifest.get(root_key).and_then(Value::as_str)
+        if manifest_source_root(&manifest)
             != Some(canonical_protocol_path_without_existing(&canonical_git_root)?.as_str())
         {
             return Err(ProjectFailure::manifest(
@@ -4387,7 +4387,7 @@ impl ProjectManager {
             }
         }
         if project.get("canonical_path").and_then(Value::as_str)
-            != manifest.get("canonicalGitRoot").and_then(Value::as_str)
+            != manifest_source_root(&manifest)
         {
             return Err(ProjectFailure::manifest(
                 "snapshot and project canonical roots differ",
@@ -4434,7 +4434,7 @@ impl ProjectManager {
         }
         let project = required_project(storage, project_id)?;
         if project.get("canonical_path").and_then(Value::as_str)
-            != manifest.get("canonicalGitRoot").and_then(Value::as_str)
+            != manifest_source_root(&manifest)
         {
             return Err(ProjectFailure::manifest(
                 "prepared workspace canonical root differs from its project",

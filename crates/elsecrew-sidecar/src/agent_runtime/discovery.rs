@@ -255,7 +255,7 @@ impl AgentRuntime {
             &preparation.profile.model_selector,
             preparation.profile.reasoning_effort.as_deref(), access,
             Path::new(preparation.manifest["worktreePath"].as_str().ok_or_else(failure)?),
-            Path::new(preparation.manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?), &home,
+            Path::new(elsecrew_protocol::project_v1::manifest_source_root(&preparation.manifest).ok_or_else(failure)?), &home,
         ) { return Err(checkpoint("launch binding")); }
         observed.evidence.executable.revalidate()?;
         let preflight = elsecrew_protocol::agent_adapter_v1::phased_claude::Preflight {
@@ -265,7 +265,7 @@ impl AgentRuntime {
                 &preparation.profile.model_selector,
                 preparation.profile.reasoning_effort.as_deref(), access, &home,
                 Path::new(preparation.manifest["worktreePath"].as_str().ok_or_else(failure)?),
-                Path::new(preparation.manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?),
+                Path::new(elsecrew_protocol::project_v1::manifest_source_root(&preparation.manifest).ok_or_else(failure)?),
             )?,
             resolved_model:observed.evidence.observation.resolved_model()?.into(),
             credentials_present:observed.evidence.credentials_present, observed_at:now(),
@@ -318,7 +318,7 @@ impl AgentRuntime {
         use crate::provider_profile::LoginProfile;
         let binding = crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage)?;
         let workspace = PathBuf::from(manifest["worktreePath"].as_str().ok_or_else(failure)?);
-        let source = PathBuf::from(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?);
+        let source = PathBuf::from(elsecrew_protocol::project_v1::manifest_source_root(&manifest).ok_or_else(failure)?);
         let admission = crate::provider_claude_session::admission::Admission::new(
             &workspace, &binding.revalidate()?, &source, &profile.model_selector,
             profile.reasoning_effort.as_deref(), access,
@@ -379,7 +379,7 @@ impl AgentRuntime {
             if !evidence.is_fresh() || !evidence.observation.matches(&pending.profile.model_selector,
                 pending.profile.reasoning_effort.as_deref(), access,
                 Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?),
-                Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?), &home) {
+                Path::new(elsecrew_protocol::project_v1::manifest_source_root(&manifest).ok_or_else(failure)?), &home) {
                 return Err(failure());
             }
             evidence.executable.revalidate()?;
