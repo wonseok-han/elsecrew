@@ -8,6 +8,7 @@ type Notice =
   | { kind: "conflict"; count: number; paths: string[] }
   | { kind: "resolving"; count: number }
   | { kind: "blocked"; reason: ChatMergeBlockReason }
+  | { kind: "busy" }
   | { kind: "error" };
 
 /**
@@ -65,7 +66,10 @@ export function ChatWorkspaceMerge({ chat, disabled, fallback, onMerged, onAskTe
         onAskTeam(t("m5.merge.askTeamMessage", { base, count: outcome.conflictCount, files: shown }));
       }
       else setNotice({ kind: "blocked", reason: outcome.reason });
-    } catch { setNotice({ kind: "error" }); }
+    } catch (error) {
+      // An agent still running somewhere: wait, not a failure.
+      setNotice(String(error instanceof Error ? error.message : error).includes("requestBlocked") ? { kind: "busy" } : { kind: "error" });
+    }
     finally { setBusy(false); setConfirming(false); }
   }
 
@@ -98,6 +102,7 @@ export function ChatWorkspaceMerge({ chat, disabled, fallback, onMerged, onAskTe
         <button type="button" className="m5-link-button" disabled={disabled || busy} onClick={() => void askTeam()}>{t("m5.merge.askTeam")}</button></>}
       {notice.kind === "resolving" && t("m5.merge.askedTeam", { count: notice.count })}
       {notice.kind === "blocked" && t(`m5.merge.blocked.${notice.reason}`, { base })}
+      {notice.kind === "busy" && t("m5.merge.busy")}
       {notice.kind === "error" && t("m5.merge.error")}
     </span>}
   </span>;

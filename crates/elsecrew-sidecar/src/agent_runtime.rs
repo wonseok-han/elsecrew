@@ -541,6 +541,16 @@ impl AgentRuntime {
         self.active.contains_key(run_id)
     }
 
+    /// Agent runs that can still write to a workspace: started, starting or
+    /// settling. Provider checks (model catalogs, discoveries) are not runs.
+    pub(crate) fn runs_in_flight(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        if !self.native.is_empty() || !self.pending_claude_starts.is_empty() || !self.failed_starts.is_empty() {
+            return true;
+        }
+        !self.active.is_empty()
+    }
+
     pub(crate) fn owned_run_ids(&self) -> Vec<String> {
         let ids = self.active.keys();
         #[cfg(target_os = "macos")]

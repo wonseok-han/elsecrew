@@ -1352,10 +1352,13 @@ impl Sidecar {
                 }
                 Some(action @ ("inspectChatMerge" | "mergeChatWorkspace")) => {
                     let merging = action == "mergeChatWorkspace";
-                    if merging && (!self.workflow_chats.is_empty() || !self.agent_runtime.owned_run_ids().is_empty()
+                    // No agent may be writing: no run started, starting or
+                    // settling, and no team step of any chat. Provider
+                    // checks (model lists, sign-in) do not block a merge.
+                    if merging && (!self.workflow_chats.is_empty() || self.agent_runtime.runs_in_flight()
                         || !self.pending_agent_starts.is_empty() || !self.pending_agent_cancels.is_empty())
                     {
-                        return Ok(HandledRequest::response(error_response(&request, "requestBlocked", "requestBlocked", "merging requires idle native execution")));
+                        return Ok(HandledRequest::response(error_response(&request, "requestBlocked", "requestBlocked", "merging requires no running agent")));
                     }
                     let mut fields = vec!["action", "chatId", "projectId", "worktreeId", "workspaceIdentity"];
                     if merging { fields.extend(["expectedHead", "expectedBase", "keepConflicts", "confirmed"]); }

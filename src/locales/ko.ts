@@ -506,6 +506,7 @@ export const ko = {
   "m5.merge.resolved": "겹친 부분 정리됨",
   "m5.merge.askTeamMessage": "{base}에 새로 들어온 변경과 이 작업이 겹친 파일 {count}개를 작업 공간에 표시해 두었어요: {files}. 각 파일의 <<<<<<< / ======= / >>>>>>> 표시 부분에서 두 변경의 의도를 모두 살려 하나로 정리하고, 표시를 모두 지운 뒤 동작을 확인해 주세요. Git 명령(merge, commit, add)은 쓰지 마세요. 기록과 합치기는 앱이 해요.",
   "m5.merge.blocked.conflictsUnresolved": "아직 겹친 표시가 남은 파일이 있어요. 팀이 정리를 마친 뒤 다시 합쳐 주세요.",
+  "m5.merge.busy": "실행 중인 에이전트가 있어 지금은 합칠 수 없어요. 실행이 끝난 뒤 다시 시도해 주세요.",
   "m5.merge.error": "합치지 못했어요. 잠시 뒤 다시 시도해 주세요.",
   "m5.result.view": "변경 보기",
   "m5.result.apply": "내 폴더에 반영",
