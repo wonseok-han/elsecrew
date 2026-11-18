@@ -1371,3 +1371,13 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-all-changes-file .m5-kind-modified { color: #e2c08d; }
 .m5-all-changes-file .m5-kind-deleted { color: #f07167; }
 .m5-all-changes-file .m5-kind-renamed { color: #6cb6ff; }
+
+/* Team result bar: one line, like Orca's done state (2026-11-18). */
+.m5-result-bar { display: flex; align-items: center; gap: 10px; margin: 10px 0; padding: 8px 12px; border: 1px solid #2c3a2f; border-radius: 8px; background: #141a16; flex-wrap: wrap; }
+.m5-result-mark { flex: none; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; background: #1f3a29; color: #73c991; font-size: 12px; }
+.m5-result-text { flex: 1 1 200px; min-width: 0; display: grid; gap: 1px; }
+.m5-result-text strong { font-size: 13px; font-weight: 600; }
+.m5-result-text small { color: var(--m5-muted); font-size: 12px; display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.m5-result-actions { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+.m5-result-actions > button { padding: 4px 12px; font-size: 12px; min-height: 0; }
+.m5-chat-discard-compact { display: inline; margin: 0; padding: 0; border: 0; background: none; }

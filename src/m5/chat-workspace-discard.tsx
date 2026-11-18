@@ -4,8 +4,10 @@ import type { ChatRecordV1 } from "./contracts/run-recovery-v1.ts";
 import { validateProjectCatalogResult, type ChatDiscardInspection } from "./contracts/project-catalog-v1.ts";
 
 /** The host must prevent unsaved editor loss and clear its view after success. */
-export function ChatWorkspaceDiscard({ chat, disabled, onCompleted }: {
+export function ChatWorkspaceDiscard({ chat, disabled, onCompleted, compact = false }: {
   chat: ChatRecordV1; disabled: boolean; onCompleted: (chat: ChatRecordV1) => Promise<void>;
+  /** A small link inside the result bar instead of a standalone button. */
+  compact?: boolean;
 }) {
   const { t } = useI18n();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -52,8 +54,8 @@ export function ChatWorkspaceDiscard({ chat, disabled, onCompleted }: {
     } catch { if (epoch === generation.current) setError(true); }
     finally { if (epoch === generation.current) { pending.current = false; setBusy(false); } }
   }
-  return <section className="m5-chat-discard">
-    <button type="button" disabled={disabled || busy || chat.state !== "reviewReady"} onClick={() => void inspect()}>{t("m5.discard.open")}</button>
+  return <section className={`m5-chat-discard${compact ? " m5-chat-discard-compact" : ""}`}>
+    <button type="button" className={compact ? "m5-link-button" : undefined} disabled={disabled || busy || chat.state !== "reviewReady"} onClick={() => void inspect()}>{t(compact ? "m5.discard.short" : "m5.discard.open")}</button>
     <dialog ref={dialog} className="m5-discard-dialog" aria-label={t("m5.discard.title")} onCancel={event => { event.preventDefault(); close(); }}>
       <h2>{t("m5.discard.title")}</h2>
       <p><strong>{chat.goal}</strong></p>
