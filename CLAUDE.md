@@ -68,8 +68,8 @@
 - 에이전트: Claude Code + Codex
 - 플랫폼: macOS + Windows
 - UI: 한국어·영어 전환. 표시 이름은 `Elsecrew`(엘스크루). 패키지·앱 식별자·저장 경로도 Elsecrew로 통일. 2026-11-12 사용자 결정으로 새 앱 데이터를 사용하며 기존 앱 데이터는 자동 이전/삭제하지 않음
-- M5 현행 구현: Electron + React/TypeScript + Monaco와 Rust sidecar에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·채팅별 standalone snapshot·편집/diff·명시 반영/복원 흐름을 연결했다. macOS Codex·Claude Code의 앱 전용 로그인·모델 조회·실제 실행 adapter와 설치/업데이트 경로가 있으며 기존 터미널 인증을 자동 재사용하지 않는다. fixture 실행과 실제 공급자 실행은 분리한다. 구현 존재와 실제 계정/플랫폼 검증 완료는 구분하며 최신 증거는 `docs/history.md`에서 확인한다.
-- 제품 방향: 사용자는 총괄과 대화하고 총괄이 직접 답하거나 필요한 팀원에게 위임한다. 기본 총괄·기획·디자인·개발·검증은 초기 템플릿이며 사용자가 역할을 추가·변경할 수 있다(V3 역할, 저장 schema V13). 화면에서는 작업 단위를 '작업', 작업 복사본을 '작업 공간'이라 부른다. 작업은 작업마다 분리된 작업 공간에서 수행하고 원본 반영은 diff 검토 뒤 명시적으로 승인한다.
+- M5 현행 구현: Electron + React/TypeScript + Monaco와 Rust sidecar에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·작업별 작업 공간·편집/diff·합치기 흐름을 연결했다. 2026-11-18부터 macOS의 새 작업은 사용자 저장소의 실제 git worktree(작업 하나 = 브랜치 `elsecrew/task-…` 하나 = PR 하나, `~/elsecrew/workspaces/<프로젝트>/` 아래 보이는 폴더, 설정에서 변경)이며, 앱이 단계마다 커밋하고 사용자가 "main에 합치기"로 합친다(`docs/proposals/m5-real-worktrees.md`). 예전 standalone snapshot 작업과 명시 반영/복원은 기존 작업, LFS 외 미지원 저장소의 대체, `ELSECREW_GIT_WORKTREES=0`에 남는다. macOS Codex·Claude Code의 앱 전용 로그인·모델 조회·실제 실행 adapter와 설치/업데이트 경로가 있으며 기존 터미널 인증을 자동 재사용하지 않는다. fixture 실행과 실제 공급자 실행은 분리한다. 구현 존재와 실제 계정/플랫폼 검증 완료는 구분하며 최신 증거는 `docs/history.md`에서 확인한다.
+- 제품 방향: 사용자는 총괄과 대화하고 총괄이 직접 답하거나 필요한 팀원에게 위임한다. 기본 총괄·기획·디자인·개발·검증은 초기 템플릿이며 사용자가 역할을 추가·변경할 수 있다(V3 역할, 저장 schema V13). 화면에서는 작업 단위를 '작업', 작업 복사본을 '작업 공간'이라 부른다. 작업은 작업마다 분리된 작업 공간(작업 브랜치)에서 수행하고, 사용자 폴더는 변경 검토 뒤 사용자가 합칠 때만 바뀐다. 에이전트는 저장소 `.git`을 읽을 수만 있고 커밋은 앱이 한다.
 - 남은 핵심 작업: Windows 실제 에이전트 실행·안전 검증, G6 성능 검증, Electron 배포 workflow·서명/공증과 출시 후보 검증, 소개 웹사이트(`website/`)를 Elsecrew 기준으로 재개발. 최신 미완료 항목은 `docs/history.md`를 우선한다.
 - 상태: M5 G1~G5 macOS fixture gate `G5_READY`, G5A~G5C 기록은 유지한다. macOS에서 Claude와 Codex의 실제 파일 수정·취소·정상 종료와 실제 팀 작업을 확인했으나 두 공급자의 전체 실행·복구 검증 완료로 보지 않는다. G6 전체 성능(유휴 메모리 예산 512MiB), Windows 안전/패키지 검증, 출시 후보 검증과 서명/배포 결정이 남는다. Windows 실제 에이전트 실행은 비활성이다.
 
