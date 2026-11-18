@@ -26,6 +26,12 @@
   - M4 반영: 줄바꿈 설정은 덮어쓰지 않는다(저장소 설정을 따름).
   - 재검토(b1a1fce8): 반영 확인, 새 차단·중요 없음. 원본 경로를 직접 읽는 곳은 더 없다. 경미 중 `info/attributes`를 읽을 수 없을 때(없음 외 오류)와 로컬 `core.attributesFile` 설정도 거절하도록 바로 고쳤다.
   - 재검토 M4(추정): Codex named 권한 정책(`:root=deny`)과 Claude 설정(원본 경로 `denyRead`)이 원본 `.git` 읽기를 따로 막는다. 그래서 seatbelt만 열어서는 에이전트 안 Git 명령이 안 될 수 있다. I2를 사용자에게 물을 때 함께 적는다.
+  - **I2 사용자 결정: 허용**("일단 허용"). 에이전트가 사용자 저장소 `.git`을 읽을 수 있다. 쓰기(커밋)는 계속 앱만 한다. 세 계층이 같은 판정 함수(core `named_config::linked_source_git`: 작업 폴더 `.git` 파일과 원본 역링크가 서로 가리킬 때만)를 쓴다(재검토 M6 정리).
+    - OS 샌드박스: `SOURCE_GIT` 읽기.
+    - Codex named 권한: 작업 폴더 `.git`은 `read`, `<원본>/.git`은 `read`. 실행 인자(`named_discovery_arguments`)와 보고된 설정 대조(`expected_write_policy`)가 같은 값을 쓴다.
+    - Claude 설정: 작업 폴더 `.git`을 `denyRead`에서 빼고 `allowRead`에 `<원본>/.git`만 넣는다. 원본 폴더 전체 읽기 금지, `.git` 쓰기 금지, 파일 도구(Read/Edit) 금지는 그대로 둔다. `allowRead`를 모르는 옛 Claude 버전에서는 Git 명령만 안 된다(추정).
+    - 테스트: 실제 worktree로 Codex 정책·인자, Claude 설정을 확인했다. 일반 폴더(v1)는 그대로다.
+  - 사용자 확인: "작업 하나 = PR 하나" 모델이 맞다. 1 worktree : 1 브랜치를 유지한다. 커밋하지 않은 내 폴더 변경이 새 작업에 없는 것은 당연하므로 한 줄 안내만 둔다(설계 문서 §1.1).
   - 남김: M1(버린 작업의 브랜치와 worktree 기록 정리는 3단계), M5(단계 커밋 실패가 로그에만 남음), M6(샌드박스와 입장 검증이 링크를 따로 확인).
 - 아직 안 한 것: 결과 막대의 브랜치 표시와 "main에 합치기"(화면이 작업 공간 종류를 받는 통로 필요, 3단계에서 함께), v2 버리기의 `git worktree remove`(지금은 폴더 재귀 삭제라 원본에 정리 대상 worktree 기록과 브랜치가 남음), 재시작 때 "worktree 추가함·기록 전" 복구, 보이는 위치·설정, 실제 앱 todo 시험, 독립 검토.
 

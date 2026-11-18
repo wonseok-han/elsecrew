@@ -3,14 +3,47 @@ use super::{ExpectedPermission, ExpectedProfile};
 use serde_json::{json, Value};
 use std::path::Path;
 
+/// `<repo>/.git` when `workspace` is a linked worktree whose `.git` file and
+/// the repository's back link name each other; otherwise none. One answer
+/// for the OS sandbox, the Codex policy and the Claude settings: agents may
+/// read the repository's Git data (user decision 2026-11-18), never write it.
+pub fn linked_source_git(workspace: &Path) -> Option<std::path::PathBuf> {
+    let link = workspace.join(".git");
+    let metadata = std::fs::symlink_metadata(&link).ok()?;
+    if !metadata.is_file() || metadata.len() > 4096 {
+        return None;
+    }
+    let text = std::fs::read_to_string(&link).ok()?;
+    let record = Path::new(text.strip_prefix("gitdir: ")?.strip_suffix('\n')?);
+    let worktrees = record.parent()?;
+    let git_dir = worktrees.parent()?;
+    if worktrees.file_name()? != "worktrees"
+        || git_dir.file_name()? != ".git"
+        || git_dir.canonicalize().ok()? != git_dir
+        || workspace.starts_with(git_dir.parent()?)
+        || git_dir.to_str()?.contains(['*', '?', '[', ']', '{', '}'])
+    {
+        return None;
+    }
+    let back = std::fs::read_to_string(record.join("gitdir")).ok()?;
+    (Path::new(back.strip_suffix('\n')?) == link).then(|| git_dir.to_owned())
+}
+
 pub fn expected_write_policy(home: &Path, workspace: &Path) -> Value {
-    let (Some(home), Some(workspace)) = (home.to_str(), workspace.to_str()) else {
+    let (Some(home), Some(workspace_text)) = (home.to_str(), workspace.to_str()) else {
         return Value::Null;
     };
-    json!({"filesystem":{
+    let mut policy = json!({"filesystem":{
         ":root":"deny", ":minimal":"read", home:"deny",
-        workspace:{".":"write",".git":"deny",".codex":"deny",".claude":"deny",".agents":"deny"}
-    },"network":{"enabled":false}})
+        workspace_text:{".":"write",".git":"deny",".codex":"deny",".claude":"deny",".agents":"deny"}
+    },"network":{"enabled":false}});
+    // A task worktree: its `.git` link and the repository's Git data are
+    // readable so `git status/diff/log` work; writes stay denied.
+    if let Some(source_git) = linked_source_git(workspace).and_then(|path| path.to_str().map(str::to_owned)) {
+        policy["filesystem"][workspace_text][".git"] = json!("read");
+        policy["filesystem"][source_git] = json!("read");
+    }
+    policy
 }
 
 pub fn matches_write_policy(value: &Value, home: &Path, workspace: &Path) -> bool {

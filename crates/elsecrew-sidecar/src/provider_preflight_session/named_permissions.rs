@@ -44,8 +44,15 @@ pub(crate) fn named_discovery_arguments(
     // JSON string quoting is also TOML basic-string quoting for these validated
     // non-control path strings. Never interpolate raw paths into command syntax.
     let quote = |value: &str| serde_json::to_string(value).expect("string serialization");
+    // Same answer as the expected policy (`linked_source_git`): a task
+    // worktree may read its `.git` link and the repository's Git data.
+    let source_git = elsecrew_core::provider::vendor_observation::codex_preflight::named_config::linked_source_git(cwd);
+    let (git_link, source_rule) = match source_git.as_deref().and_then(Path::to_str) {
+        Some(git) => ("read", format!(",{}=\"read\"", quote(git))),
+        None => ("deny", String::new()),
+    };
     let filesystem = format!(
-        "{{\":root\"=\"deny\",\":minimal\"=\"read\",{}=\"deny\",{}={{\".\"=\"{access}\",\".git\"=\"deny\",\".codex\"=\"deny\",\".claude\"=\"deny\",\".agents\"=\"deny\"}}}}",
+        "{{\":root\"=\"deny\",\":minimal\"=\"read\",{}=\"deny\",{}={{\".\"=\"{access}\",\".git\"=\"{git_link}\",\".codex\"=\"deny\",\".claude\"=\"deny\",\".agents\"=\"deny\"}}{source_rule}}}",
         quote(home_text), quote(path),
     );
     for setting in [
@@ -58,7 +65,7 @@ pub(crate) fn named_discovery_arguments(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -133,6 +140,43 @@ mod tests {
                 "on-request"
             ));
         }
+    }
+
+    /// A real task worktree and its repository, canonical paths.
+    pub(crate) fn real_worktree() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let source = root.join("source");
+        std::fs::create_dir(&source).unwrap();
+        let git = |dir: &Path, args: &[&str]| assert!(std::process::Command::new("/usr/bin/git")
+            .arg("-C").arg(dir).args(args).output().unwrap().status.success());
+        git(&source, &["init", "-q"]);
+        git(&source, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "base"]);
+        let workspace = root.join("work");
+        git(&source, &["worktree", "add", "-q", "-b", "elsecrew/task-test", workspace.to_str().unwrap()]);
+        (temp, source, workspace)
+    }
+
+    #[test]
+    fn a_task_worktree_may_read_the_repository_git_data_and_nothing_else_opens() {
+        let (_temp, source, workspace) = real_worktree();
+        let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium" };
+        let profile = workspace.parent().unwrap().join("profile");
+        let args = named_discovery_arguments(&profile, &workspace, &expected, ExpectedPermission::WorkspaceWrite).unwrap();
+        let policy = args.last().unwrap().to_str().unwrap().to_owned();
+        let source_git = format!("{:?}=\"read\"", source.join(".git").to_str().unwrap());
+        assert!(policy.contains(&source_git), "{policy}");
+        assert!(policy.contains("\".git\"=\"read\""), "{policy}");
+        assert!(!policy.contains("\".git\"=\"write\""));
+        let reported = expected_write_policy(&profile, &workspace);
+        assert_eq!(reported["filesystem"][source.join(".git").to_str().unwrap()], "read");
+        assert_eq!(reported["filesystem"][workspace.to_str().unwrap()][".git"], "read");
+        // A plain folder (v1 copy) keeps `.git` denied and adds nothing.
+        let plain = workspace.parent().unwrap().join("plain");
+        std::fs::create_dir(&plain).unwrap();
+        let args = named_discovery_arguments(&profile, &plain, &expected, ExpectedPermission::WorkspaceWrite).unwrap();
+        let policy = args.last().unwrap().to_str().unwrap();
+        assert!(policy.contains("\".git\"=\"deny\"") && !policy.contains("source"), "{policy}");
     }
 
     #[test]

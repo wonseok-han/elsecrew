@@ -63,6 +63,15 @@ pub(crate) fn scoped_arguments(model: &str, effort: Option<&str>, access: ToolAc
     literal(workspace)?;
     let mut denied = vec![literal(home)?, literal(source)?];
     for name in [".git", ".claude", ".codex", ".agents"] { denied.push(literal(&workspace.join(name))?); }
+    // A task worktree (user decision 2026-11-18): sandboxed commands may read
+    // its `.git` link and the repository's Git data so Git works; writes and
+    // the file tools stay denied. Only the repository's own `.git` reopens.
+    let source_git = elsecrew_core::provider::vendor_observation::codex_preflight::named_config::linked_source_git(workspace)
+        .filter(|git| git.parent() == Some(source));
+    let unreadable: Vec<String> = match &source_git {
+        Some(_) => { let link = literal(&workspace.join(".git"))?; denied.iter().filter(|path| **path != link).cloned().collect() }
+        None => denied.clone(),
+    };
     let mut rules = Vec::new();
     for path in &denied {
         // File permission rules use // for absolute paths; sandbox paths use /.
@@ -74,7 +83,10 @@ pub(crate) fn scoped_arguments(model: &str, effort: Option<&str>, access: ToolAc
     if access == ToolAccess::ReadOnly { rules.push("Edit".into()); }
     let mut settings = shell_settings();
     settings["permissions"]["deny"] = serde_json::json!(rules);
-    settings["sandbox"]["filesystem"]["denyRead"] = serde_json::json!(denied);
+    settings["sandbox"]["filesystem"]["denyRead"] = serde_json::json!(unreadable);
+    if let Some(git) = &source_git {
+        settings["sandbox"]["filesystem"]["allowRead"] = serde_json::json!([literal(git)?]);
+    }
     settings["sandbox"]["filesystem"]["denyWrite"] = serde_json::json!(denied);
     let mut args = arguments(model, effort, access)?;
     let index = args.iter().position(|arg| arg == "--settings").ok_or_else(failure)?;
@@ -653,6 +665,22 @@ mod tests {
         ] {
             assert!(prompt_wire(&text).is_err());
         }
+    }
+
+    #[test]
+    fn a_task_worktree_reopens_only_the_repository_git_data_for_commands() {
+        let (_temp, source, workspace) = crate::provider_preflight_session::named_permissions::tests::real_worktree();
+        let home = workspace.parent().unwrap().join("profile");
+        let args = scoped_arguments("selected-model", Some("medium"), ToolAccess::Edit, &home, &workspace, &source).unwrap();
+        let index = args.iter().position(|arg| arg == "--settings").unwrap();
+        let settings: serde_json::Value = serde_json::from_str(args[index+1].to_str().unwrap()).unwrap();
+        let filesystem = &settings["sandbox"]["filesystem"];
+        let text = |path: &Path| serde_json::json!(path.to_str().unwrap());
+        assert_eq!(filesystem["allowRead"], serde_json::json!([source.join(".git").to_str().unwrap()]));
+        assert!(filesystem["denyRead"].as_array().unwrap().contains(&text(&source)));
+        assert!(!filesystem["denyRead"].as_array().unwrap().contains(&text(&workspace.join(".git"))));
+        assert!(filesystem["denyWrite"].as_array().unwrap().contains(&text(&workspace.join(".git"))));
+        assert!(filesystem["denyWrite"].as_array().unwrap().contains(&text(&source)));
     }
 
     #[test]

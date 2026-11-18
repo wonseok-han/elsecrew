@@ -54,28 +54,7 @@ const SOURCE_GIT_READ: &str = r#"
 (allow file-read* (subpath (param "SOURCE_GIT")))
 "#;
 
-/// `<repo>/.git` when `workspace` is a linked worktree whose `.git` file and
-/// the repository's back link name each other; otherwise none.
-fn linked_source_git(workspace: &Path) -> Option<std::path::PathBuf> {
-    let link = workspace.join(".git");
-    let metadata = std::fs::symlink_metadata(&link).ok()?;
-    if !metadata.is_file() || metadata.len() > 4096 {
-        return None;
-    }
-    let text = std::fs::read_to_string(&link).ok()?;
-    let record = Path::new(text.strip_prefix("gitdir: ")?.strip_suffix('\n')?);
-    let worktrees = record.parent()?;
-    let git_dir = worktrees.parent()?;
-    if worktrees.file_name()? != "worktrees"
-        || git_dir.file_name()? != ".git"
-        || git_dir.canonicalize().ok()? != git_dir
-        || workspace.starts_with(git_dir.parent()?)
-    {
-        return None;
-    }
-    let back = std::fs::read_to_string(record.join("gitdir")).ok()?;
-    (Path::new(back.strip_suffix('\n')?) == link).then(|| git_dir.to_owned())
-}
+use elsecrew_core::provider::vendor_observation::codex_preflight::named_config::linked_source_git;
 
 const MODEL_PROXY: &str = r#"
 (allow network-outbound (remote tcp4 (param "MODEL_PROXY")))
