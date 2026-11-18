@@ -512,6 +512,7 @@ export const en: Record<MessageKey, string> = {
   "m5.merge.busy": "An agent is still running. Merge again once it has finished.",
   "m5.merge.notTeamResolvable": "These overlaps are in files like images or deleted files, so the team cannot resolve them as text. Undo one side and merge again, or discard the task.",
   "m5.merge.error": "Could not merge. Try again in a moment.",
+  "m5.result.merged": "This task is merged into {base}",
   "m5.result.view": "View changes",
   "m5.result.apply": "Apply to my folder",
   "m5.discard.short": "Discard",

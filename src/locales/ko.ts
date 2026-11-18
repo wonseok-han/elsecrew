@@ -511,6 +511,7 @@ export const ko = {
   "m5.merge.busy": "실행 중인 에이전트가 있어 지금은 합칠 수 없어요. 실행이 끝난 뒤 다시 시도해 주세요.",
   "m5.merge.notTeamResolvable": "이 겹침은 그림 같은 파일이나 한쪽에서 지운 파일이라 팀이 글자로 정리할 수 없어요. 한쪽 변경을 되돌린 뒤 다시 합치거나, 작업을 버려 주세요.",
   "m5.merge.error": "합치지 못했어요. 잠시 뒤 다시 시도해 주세요.",
+  "m5.result.merged": "이 작업은 {base}에 합쳐졌어요",
   "m5.result.view": "변경 보기",
   "m5.result.apply": "내 폴더에 반영",
   "m5.discard.short": "버리기",

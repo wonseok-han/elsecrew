@@ -16,12 +16,14 @@ type Notice =
  * merged into its base branch instead of copied into the user's folder. A
  * v1 copy keeps the old apply button (`fallback`).
  */
-export function ChatWorkspaceMerge({ chat, disabled, fallback, onMerged, onAskTeam }: {
+export function ChatWorkspaceMerge({ chat, disabled, fallback, onMerged, onAskTeam, onState }: {
   chat: ChatRecordV1; disabled: boolean; fallback: React.ReactNode;
   /** The user's folder and the changes list moved; the host refreshes them. */
   onMerged: () => void;
   /** Sends the coordinator a follow-up asking the team to resolve conflicts. */
   onAskTeam: (text: string) => void;
+  /** Where the task stands, for the host's summary line. */
+  onState?: (state: ChatMergeState | null) => void;
 }) {
   const { t } = useI18n();
   const [state, setState] = useState<ChatMergeState | null>(null);
@@ -43,6 +45,7 @@ export function ChatWorkspaceMerge({ chat, disabled, fallback, onMerged, onAskTe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chat.chatId, chat.worktreeId, chat.workspaceIdentity]);
   useEffect(() => { void inspect(); return () => { generation.current++; }; }, [inspect]);
+  useEffect(() => { onState?.(state); }, [state, onState]);
 
   if (!state) return null;
   if (state.kind === "snapshot") return <>{fallback}</>;
