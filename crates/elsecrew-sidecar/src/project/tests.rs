@@ -6675,3 +6675,29 @@ fn repositories_asking_for_lfs_in_gitattributes_are_refused() {
     assert!(error.detail.contains("content filters"), "{}", error.detail);
     assert_eq!(git_text(&fixture.source, ["branch", "--list", "elsecrew/*"]), "");
 }
+
+/// The watcher kept dropping a real worktree with "rescan required" (its
+/// dispatcher check was the v1 copy's `.git` folder and index), so the
+/// changes list stayed at 0 in the app.
+#[cfg(target_os = "macos")]
+#[test]
+fn watcher_follows_a_real_worktree_across_app_commits() {
+    let mut fixture = Fixture::open();
+    fixture.manager.git_worktrees_enabled = true;
+    let manifest = fixture
+        .manager
+        .prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_watch_worktree")
+        .unwrap()
+        .result;
+    let path = PathBuf::from(manifest["worktreePath"].as_str().unwrap());
+    fixture.manager.watch_project(&fixture.storage, &fixture.project_id).unwrap();
+    fs::write(path.join("src/edit.txt"), b"changed").unwrap();
+    let events = poll_until_watch_event(&mut fixture);
+    assert!(!events[0].payload["rescanRequired"].as_bool().unwrap(), "{}", events[0].payload);
+    git_raw(&path, ["add", "-A"]);
+    git_raw(&path, ["-c", "user.name=Elsecrew", "-c", "user.email=elsecrew@local", "commit", "-q", "-m", "step"]);
+    fs::write(path.join("new.txt"), b"after commit").unwrap();
+    let events = poll_until_watch_event(&mut fixture);
+    assert!(!events[0].payload["rescanRequired"].as_bool().unwrap(), "{}", events[0].payload);
+    assert!(events[0].payload["paths"].as_array().unwrap().iter().any(|path| path == "new.txt"));
+}

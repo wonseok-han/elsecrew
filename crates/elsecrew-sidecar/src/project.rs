@@ -3099,8 +3099,7 @@ impl ProjectManager {
             }
             #[cfg(any(unix, windows))]
             if !completed.as_ref().expect("completed watcher").matches_capability(&worktree).unwrap_or(false)
-                || self.verify_snapshot_metadata(&worktree, &active).is_err()
-                || self.verify_snapshot_tree(&worktree, &active).is_err() {
+                || self.verify_watched_repository(&worktree, &active).is_err() {
                 if let Some(mut state) = self.watchers.remove(&project_id) {
                     emitted.push(watch_emission(&mut state, emission_project_id, Vec::new(), true));
                 }
@@ -4865,6 +4864,16 @@ impl ProjectManager {
         }
         if background_watch { return Ok(()); }
         self.verify_snapshot_metadata(workspace, active)
+    }
+
+    /// The dispatcher's part of a watcher check after the background
+    /// verifier: a v1 copy's metadata and index, or a worktree's links.
+    fn verify_watched_repository(&self, workspace: &Dir, active: &ActiveProject) -> Result<(), ProjectFailure> {
+        if active.kind != WorkspaceKind::Snapshot {
+            return self.verify_worktree_link(workspace, active);
+        }
+        self.verify_snapshot_metadata(workspace, active)?;
+        self.verify_snapshot_tree(workspace, active)
     }
 
     fn verify_snapshot_metadata(&self, workspace: &Dir, active: &ActiveProject) -> Result<(), ProjectFailure> {
