@@ -289,7 +289,7 @@ impl ProjectManager {
         // A task worktree lives outside the app's data: Git removes it (and
         // its record) and only our own leftovers are forgotten.
         if manifest["schemaVersion"] == PROJECT_SCHEMA_VERSION_V2 {
-            self.remove_task_worktree_folder(&address.worktree_id, &manifest)?;
+            self.remove_task_worktree_folder(&address.worktree_id, &manifest, Some(identity))?;
             checkpoint(3)?;
             project["workspace_cleanup_v1"][chat_id]["state"] = json!("deleted");
             append_object(

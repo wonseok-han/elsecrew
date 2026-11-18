@@ -190,7 +190,9 @@ impl ProjectManager {
         // A task worktree lives in the "작업 공간 폴더", not in the app's data.
         if let Ok(manifest) = read_bounded_json(&self.manifests_dir, &format!("{worktree_id}.json")) {
             if manifest["schemaVersion"] == PROJECT_SCHEMA_VERSION_V2 {
-                self.remove_task_worktree_folder(worktree_id, &manifest)?;
+                validate_project_payload_v1("worktreeManifest", &manifest).map_err(|_| denied("invalid workspace manifest"))?;
+                if manifest["worktreeId"] != worktree_id { return Err(denied("workspace manifest names another workspace")); }
+                self.remove_task_worktree_folder(worktree_id, &manifest, None)?;
                 return remove_plain_file(&self.manifests_dir, &format!("{worktree_id}.json"));
             }
         }

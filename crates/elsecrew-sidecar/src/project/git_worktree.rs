@@ -114,8 +114,13 @@ impl ProjectManager {
     /// `<작업 공간 폴더>/<project>/task-<8 hex>` for a new task, made of
     /// real folders only and never inside the user's project or the app's
     /// own data (nor the other way round).
-    fn new_task_worktree_path(&self, source_root: &Path, worktree_id: &str) -> Result<PathBuf, ProjectFailure> {
+    fn new_task_worktree_path(&self, storage: &Storage, source_root: &Path, worktree_id: &str) -> Result<PathBuf, ProjectFailure> {
         let home = self.workspaces_home()?;
+        // A chosen folder that is gone (an unplugged disk) is not silently
+        // made again; only the default folder is created when missing.
+        if self.workspace_folder()?["custom"] == true && !home.is_dir() {
+            return Err(ProjectFailure::recovery("the chosen workspace folder is missing; choose it again in settings"));
+        }
         let wanted = home.join(project_folder_name(source_root));
         std::fs::create_dir_all(&wanted).map_err(|error| {
             ProjectFailure::recovery(format!("could not make the workspace folder: {error}"))
@@ -128,6 +133,15 @@ impl ProjectManager {
         for (inner, outer) in [(&project_dir, source_root), (&source_root.to_path_buf(), &project_dir), (&project_dir, &self.data_root), (&self.data_root, &project_dir)] {
             if inner.starts_with(outer) {
                 return Err(ProjectFailure::manifest("the workspace folder overlaps the project or the app's data"));
+            }
+        }
+        // Nor any other saved project (a home folder that is itself a
+        // repository, say): the same rule as choosing the folder.
+        for project in storage.projection_records("project")? {
+            if let Some(root) = project.get("canonical_path").and_then(Value::as_str) {
+                if project_dir.starts_with(root) || Path::new(root).starts_with(&project_dir) {
+                    return Err(ProjectFailure::manifest("the workspace folder overlaps a saved project; choose another in settings"));
+                }
             }
         }
         let short: String = worktree_id.trim_start_matches("worktree_").chars().take(8).collect();
@@ -386,8 +400,33 @@ impl ProjectManager {
     /// through Git while the repository is there, which also drops its
     /// record; otherwise by a no-follow erase of the recorded folder. Then
     /// its leftovers in the repository are forgotten.
-    pub(super) fn remove_task_worktree_folder(&self, worktree_id: &str, manifest: &Value) -> Result<(), ProjectFailure> {
+    pub(super) fn remove_task_worktree_folder(&self, worktree_id: &str, manifest: &Value, expected_inode: Option<u64>) -> Result<(), ProjectFailure> {
         let path = self.workspace_path(worktree_id, manifest)?;
+        // Only ever a task worktree folder: named after this task, with a
+        // `.git` link file into the project's own repository, and (cleanup)
+        // the very folder whose identity the cleanup intent recorded. A
+        // damaged record can never point this at a user's folder.
+        let short: String = worktree_id.trim_start_matches("worktree_").chars().take(8).collect();
+        if path.file_name().and_then(|name| name.to_str()) != Some(format!("task-{short}").as_str()) {
+            return Err(ProjectFailure::manifest("not a task worktree folder"));
+        }
+        if std::fs::symlink_metadata(&path).is_ok() {
+            let root = manifest_source_root(manifest).ok_or_else(|| ProjectFailure::manifest("task worktree has no project"))?;
+            let link = std::fs::symlink_metadata(path.join(".git")).ok()
+                .filter(|metadata| metadata.is_file() && !metadata.file_type().is_symlink() && metadata.len() <= LINK_MAX_BYTES)
+                .and_then(|_| std::fs::read_to_string(path.join(".git")).ok());
+            let prefix = format!("gitdir: {}/.git/worktrees/", root.trim_end_matches('/'));
+            if !link.is_some_and(|link| link.starts_with(&prefix)) {
+                return Err(ProjectFailure::manifest("the folder is not this project's task worktree"));
+            }
+            if let Some(inode) = expected_inode {
+                use std::os::unix::fs::MetadataExt as _;
+                let current = std::fs::symlink_metadata(&path).map_err(|_| ProjectFailure::manifest("task worktree folder unavailable"))?;
+                if current.ino() != inode || !current.is_dir() || current.file_type().is_symlink() {
+                    return Err(ProjectFailure::manifest("the task worktree folder changed since cleanup began"));
+                }
+            }
+        }
         if std::fs::symlink_metadata(&path).is_ok() {
             if let Some(root) = manifest_source_root(manifest).and_then(|root| open_absolute_directory_capability(Path::new(root)).ok()) {
                 let _ = self.git_allow_status_at(&root, [OsStr::new("worktree"), OsStr::new("remove"), OsStr::new("--force"), path.as_os_str()], &[0, 128]);
@@ -415,6 +454,20 @@ impl ProjectManager {
         let mut refs: Vec<String> = text.lines().map(str::to_owned).collect();
         refs.sort();
         Ok(refs)
+    }
+
+    /// Whether this project's tasks can be real worktrees: the folder is on a
+    /// branch (there is something to merge into) and the repository uses no
+    /// content filters (LFS) or merge drivers. Otherwise tasks keep the v1
+    /// copy, which needs neither.
+    pub(super) fn task_worktrees_supported(&self, storage: &Storage, project_id: &str) -> Result<bool, ProjectFailure> {
+        let project = required_project(storage, project_id)?;
+        let source = self.open_project_source(&project)?;
+        let on_branch = self.git_allow_status_at(&source._root, ["symbolic-ref", "-q", "HEAD"], &[0, 1])?.status.success();
+        let drivers = self.git_allow_status_at(&source._root, ["config", "--get-regexp", r"^merge\..*\.driver$"], &[0, 1])?.status.code() == Some(0);
+        Ok(on_branch && !drivers
+            && !self.content_filters_configured(&source._root)?
+            && !self.content_filters_requested(&source._root, &source.git_dir, &source.base_commit)?)
     }
 
     /// A task's workspace as a real worktree on a new task branch, made from
@@ -470,7 +523,7 @@ impl ProjectManager {
         let worktree_id = format!("worktree_{}", Uuid::new_v4().simple());
         let workspace_identity = format!("workspace_{}", Uuid::new_v4().simple());
         let branch = task_branch(&worktree_id);
-        let worktree_path = self.new_task_worktree_path(&source.canonical_root, &worktree_id)?;
+        let worktree_path = self.new_task_worktree_path(storage, &source.canonical_root, &worktree_id)?;
         let manifest_path = self.manifests_root.join(format!("{worktree_id}.json"));
         if worktree_path.exists() || manifest_path.exists() {
             return Err(ProjectFailure::recovery("new workspace identity unexpectedly already exists"));

@@ -906,8 +906,10 @@ impl ProjectManager {
     pub(crate) fn prepare_chat_application_workspace(&mut self, storage: &mut Storage, project_id: &str, request_id: &str) -> Result<ProjectAction, ProjectFailure> {
         // A real worktree needs no clean original: it starts from the last
         // commit and the user's uncommitted edits stay in their folder.
+        // Repositories a worktree cannot serve yet (LFS, merge drivers, no
+        // branch to merge into) keep the v1 copy instead of failing.
         #[cfg(target_os = "macos")]
-        if self.git_worktrees_enabled {
+        if self.git_worktrees_enabled && self.task_worktrees_supported(storage, project_id)? {
             return self.create_git_worktree(storage, project_id, request_id);
         }
         #[cfg(any(unix, windows))]
@@ -4345,7 +4347,11 @@ impl ProjectManager {
     ) -> Result<Value, ProjectFailure> {
         self.ensure_no_unfinished_application(storage, &address.project_id)?;
         let active = self.validate_workspace_address_binding(storage, address)?;
-        self.worktree_capability(&active)?;
+        let worktree = self.worktree_capability(&active)?;
+        // Without Git, a task worktree is still the folder linked to it.
+        if active.kind != WorkspaceKind::Snapshot {
+            self.verify_worktree_link(&worktree, &active)?;
+        }
         manifest_value(&active, "active")
     }
 

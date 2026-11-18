@@ -6658,13 +6658,12 @@ fn repositories_with_content_filters_are_refused_before_anything_is_made() {
     fixture.manager.git_worktrees_enabled = true;
     git_raw(&fixture.source, ["config", "filter.lfs.smudge", "git-lfs smudge -- %f"]);
     let refs = git_text(&fixture.source, ["for-each-ref"]);
-    let error = fixture
-        .manager
-        .prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_filtered")
-        .unwrap_err();
-    assert!(error.detail.contains("content filters"), "{}", error.detail);
+    // Review I2 (ad44343b): such a repository keeps the v1 copy instead of
+    // failing; no task branch or worktree ever appears in it.
+    assert!(!fixture.manager.task_worktrees_supported(&fixture.storage, &fixture.project_id).unwrap());
+    let _ = fixture.manager.prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_filtered");
     assert_eq!(git_text(&fixture.source, ["for-each-ref"]), refs);
-    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+    assert_eq!(git_text(&fixture.source, ["worktree", "list"]).lines().count(), 1);
 }
 
 /// LFS is usually set up in the user's global config, which the app never
@@ -6677,10 +6676,10 @@ fn repositories_asking_for_lfs_in_gitattributes_are_refused() {
     fs::write(fixture.source.join(".gitattributes"), b"*.psd filter=lfs diff=lfs merge=lfs -text\n").unwrap();
     git_raw(&fixture.source, ["add", ".gitattributes"]);
     git_raw(&fixture.source, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "-m", "lfs"]);
-    let error = fixture
-        .manager
-        .prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_lfs_attributes")
-        .unwrap_err();
+    // The worktree path refuses it outright; tasks fall back to a v1 copy.
+    git_worktree::STOP_AFTER_WORKTREE_ADD.with(|stop| stop.set(false));
+    assert!(!fixture.manager.task_worktrees_supported(&fixture.storage, &fixture.project_id).unwrap());
+    let error = fixture.manager.create_git_worktree(&mut fixture.storage, &fixture.project_id, "req_lfs_attributes").unwrap_err();
     assert!(error.detail.contains("content filters"), "{}", error.detail);
     assert_eq!(git_text(&fixture.source, ["branch", "--list", "elsecrew/*"]), "");
 }
@@ -7061,7 +7060,18 @@ fn a_visible_task_worktree_saves_and_is_removed() {
     assert_eq!(fs::read(path.join("src/edit.txt")).unwrap(), b"saved");
     assert!(fs::read_dir(&path).unwrap().all(|entry| !entry.unwrap().file_name().to_string_lossy().starts_with(".elsecrew-save-")));
     let manifest = read_bounded_json(&fixture.manager.manifests_dir, &format!("{}.json", address.worktree_id)).unwrap();
-    fixture.manager.remove_task_worktree_folder(&address.worktree_id, &manifest).unwrap();
+    // A damaged record pointing at another folder is refused, never erased.
+    let mut forged = manifest.clone();
+    forged["worktreePath"] = json!(fixture.source.join("src").to_str().unwrap());
+    assert!(fixture.manager.remove_task_worktree_folder(&address.worktree_id, &forged, None).is_err());
+    let short = &address.worktree_id["worktree_".len().."worktree_".len() + 8];
+    let elsewhere = fixture._root.path().canonicalize().unwrap().join("user-docs").join(format!("task-{short}"));
+    fs::create_dir_all(&elsewhere).unwrap();
+    fs::write(elsewhere.join("notes.txt"), b"mine").unwrap();
+    forged["worktreePath"] = json!(elsewhere.to_str().unwrap());
+    assert!(fixture.manager.remove_task_worktree_folder(&address.worktree_id, &forged, None).is_err());
+    assert!(elsewhere.join("notes.txt").exists());
+    fixture.manager.remove_task_worktree_folder(&address.worktree_id, &manifest, None).unwrap();
     assert!(!path.exists());
     assert_eq!(git_text(&fixture.source, ["worktree", "list"]).lines().count(), 1);
 }
