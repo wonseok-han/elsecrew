@@ -1380,4 +1380,12 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-result-text small { color: var(--m5-muted); font-size: 12px; display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .m5-result-actions { display: inline-flex; align-items: center; gap: 8px; flex: none; }
 .m5-result-actions > button { padding: 4px 12px; font-size: 12px; min-height: 0; }
+/* Task = PR: branch line, merge button, inline confirmation and outcome. */
+.m5-merge { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.m5-merge > button, .m5-merge-confirm > button { padding: 4px 12px; font-size: 12px; min-height: 0; }
+.m5-merge-branch { color: var(--m5-muted, inherit); opacity: 0.8; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m5-merge-confirm { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.m5-merge-confirm > small { max-width: 360px; }
+.m5-merge-notice { flex-basis: 100%; font-size: 12px; overflow-wrap: anywhere; }
+.m5-merge-notice code { font-size: 11px; }
 .m5-chat-discard-compact { display: inline; margin: 0; padding: 0; border: 0; background: none; }

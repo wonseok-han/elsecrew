@@ -41,6 +41,7 @@ import { WorkbenchDock } from "./workbench-dock.tsx";
 import { ProviderLogin, type ConnectionReveal } from "./provider-login.tsx";
 import { ApprovalCard } from "./approval-card.tsx";
 import { ChatWorkspaceDiscard } from "./chat-workspace-discard.tsx";
+import { ChatWorkspaceMerge } from "./chat-workspace-merge.tsx";
 import { ApplyLatest } from "./apply-latest.tsx";
 import { diffPages, diffSides, splitDiffPage, DIFF_PAGE_ROWS } from "./diff-view.ts";
 import { FileSearch } from "./file-search-view.tsx";
@@ -592,10 +593,12 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       {snapshot.project && <WorkbenchDock changeCount={snapshot.rescanRequired ? undefined : snapshot.diffSummary?.entries.length} reveal={snapshot.panelRequest} conversation={chat.activeChat ? <div className="m5-conversation"><div className="m5-conversation-scroll"><TeamTimeline onCoordinatorChat={() => { setGoal(chat.activeChat?.goal ?? ""); setNewChatOpen(true); }} controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} />{chat.activeChat.state === "reviewReady" && <section className="m5-result-bar" aria-label={t("m5.result.title")}>
         <span className="m5-result-mark" aria-hidden="true">✓</span>
         <span className="m5-result-text"><strong>{t("m5.result.title")}</strong>
-          <small>{snapshot.diffSummary ? <>{t("m5.result.files", { count: snapshot.diffSummary.entries.length })} <LineCounts entry={snapshot.diffSummary.entries.reduce((sum, entry) => ({ added: sum.added + (entry.added ?? 0), removed: sum.removed + (entry.removed ?? 0) }), { added: 0, removed: 0 })} /> · </> : null}{t("m5.result.notYet")}</small></span>
+          <small>{snapshot.diffSummary ? <>{t("m5.result.files", { count: snapshot.diffSummary.entries.length })} <LineCounts entry={snapshot.diffSummary.entries.reduce((sum, entry) => ({ added: sum.added + (entry.added ?? 0), removed: sum.removed + (entry.removed ?? 0) }), { added: 0, removed: 0 })} /> · </> : null}{t("m5.result.inWorkspace")}</small></span>
         <span className="m5-result-actions">
           <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => { controller.selectPanel("changes"); void controller.refreshChanges(); setAllChanges({ focus: null }); }}>{t("m5.result.view")}</button>
-          <button type="button" disabled={!admissionReady} onClick={() => { controller.selectPanel("changes"); void controller.refreshChanges(); setApplyOpenRequest(value => value + 1); }}>{t("m5.result.apply")}</button>
+          <ChatWorkspaceMerge key={`merge:${chat.activeChat.chatId}`} chat={chat.activeChat} disabled={!admissionReady}
+            onMerged={() => { void controller.refreshChanges(); }}
+            fallback={<button type="button" disabled={!admissionReady} onClick={() => { controller.selectPanel("changes"); void controller.refreshChanges(); setApplyOpenRequest(value => value + 1); }}>{t("m5.result.apply")}</button>} />
           <ChatWorkspaceDiscard key={chat.activeChat.chatId} compact chat={chat.activeChat} disabled={!admissionReady || settingsOpen || !controller.canLeaveProject() || !chatController.canLeaveProjectView()} onCompleted={async discarded => {
         const request = { action: "releaseView" as const, projectId: discarded.projectId };
         validateProjectCatalogResult(await window.m5Projects!.request(request), request);
