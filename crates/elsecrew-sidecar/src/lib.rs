@@ -1350,6 +1350,37 @@ impl Sidecar {
                             .map(|inspection| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"inspectChatDiscard","inspection":inspection}), ..Default::default() })
                     }
                 }
+                Some(action @ ("inspectChatMerge" | "mergeChatWorkspace")) => {
+                    let merging = action == "mergeChatWorkspace";
+                    if merging && (!self.workflow_chats.is_empty() || !self.agent_runtime.owned_run_ids().is_empty()
+                        || !self.pending_agent_starts.is_empty() || !self.pending_agent_cancels.is_empty())
+                    {
+                        return Ok(HandledRequest::response(error_response(&request, "requestBlocked", "requestBlocked", "merging requires idle native execution")));
+                    }
+                    let mut fields = vec!["action", "chatId", "projectId", "worktreeId", "workspaceIdentity"];
+                    if merging { fields.extend(["expectedHead", "expectedBase", "confirmed"]); }
+                    let params = require_exact_params(&request.params, &fields).map_err(invalid_params)?;
+                    if merging && params["confirmed"] != true { return Err(invalid_params("merging requires explicit confirmation".into())); }
+                    let address = project::WorkspaceAddress {
+                        chat_id: param_string(params, "chatId").map_err(invalid_params)?.to_owned(),
+                        project_id: param_string(params, "projectId").map_err(invalid_params)?.to_owned(),
+                        worktree_id: param_string(params, "worktreeId").map_err(invalid_params)?.to_owned(),
+                        workspace_identity: param_string(params, "workspaceIdentity").map_err(invalid_params)?.to_owned(),
+                    };
+                    let result = if merging {
+                        let oid = |key: &str| param_string(params, key).map_err(invalid_params).and_then(|value| {
+                            (matches!(value.len(), 40 | 64) && value.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()))
+                                .then_some(value).ok_or_else(|| invalid_params("invalid commit id".into()))
+                        });
+                        let (head, base) = (oid("expectedHead")?, oid("expectedBase")?);
+                        self.projects.workspace_merge(&self.storage, &address, head, base)
+                            .map(|mut outcome| { outcome["schemaVersion"] = serde_json::json!(1); outcome["action"] = serde_json::json!(action); outcome })
+                    } else {
+                        self.projects.workspace_merge_inspect(&self.storage, &address)
+                            .map(|merge| serde_json::json!({"schemaVersion":1,"action":action,"merge":merge}))
+                    };
+                    result.map(|result| project::ProjectAction { result, ..Default::default() })
+                }
                 Some("applicationCapabilities") => {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
                     Ok(self.projects.application_capabilities())

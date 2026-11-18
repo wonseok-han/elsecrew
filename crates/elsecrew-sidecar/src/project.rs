@@ -14,6 +14,7 @@ mod latest_apply;
 mod app_connections;
 mod empty_project;
 mod git_worktree;
+mod git_merge;
 #[cfg(any(windows, test))]
 mod git_selection;
 #[cfg(any(windows, test))]

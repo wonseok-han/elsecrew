@@ -117,7 +117,7 @@ impl ProjectManager {
 
     /// A content filter program set in the repository's own config (the
     /// app never reads global or system config).
-    fn content_filters_configured(&self, dir: &Dir) -> Result<bool, ProjectFailure> {
+    pub(super) fn content_filters_configured(&self, dir: &Dir) -> Result<bool, ProjectFailure> {
         let found = self.git_allow_status_at(dir, ["config", "--get-regexp", r"^filter\."], &[0, 1])?;
         Ok(found.status.code() == Some(0))
     }
