@@ -160,6 +160,42 @@ impl ProjectManager {
         })
     }
 
+    /// After a task worktree's folder is deleted (discard cleanup, project
+    /// deletion): drop exactly its record in the user's `.git/worktrees`
+    /// (the one whose back link names this folder; never a repository-wide
+    /// prune) and its branch only when Git agrees it is merged
+    /// (`branch -d`). An unmerged task branch stays, like Orca. Best effort:
+    /// the folder is already gone, leftovers are harmless.
+    pub(super) fn forget_task_worktree(&self, manifest: &Value) {
+        if manifest["schemaVersion"] != PROJECT_SCHEMA_VERSION_V2 || manifest["workspaceKind"] != WORKSPACE_KIND_GIT_WORKTREE_V2 {
+            return;
+        }
+        let (Some(root), Some(path), Some(branch)) = (
+            manifest_source_root(manifest), manifest["worktreePath"].as_str(), manifest["branchName"].as_str(),
+        ) else { return };
+        if std::fs::symlink_metadata(path).is_ok() || !branch.starts_with(TASK_BRANCH_PREFIX_V2) {
+            return;
+        }
+        let Ok(source_root) = open_absolute_directory_capability(Path::new(root)) else { return };
+        let Ok(git_dir) = open_real_child_dir(&source_root, ".git") else { return };
+        if let Ok(records) = open_real_child_dir(&git_dir, "worktrees") {
+            let back_link = format!("{}/.git\n", path.trim_end_matches('/'));
+            let names: Vec<String> = records.entries().into_iter().flatten().flatten()
+                .filter_map(|entry| entry.file_name().into_string().ok())
+                .collect();
+            for name in names {
+                let Ok(record) = open_real_child_dir(&records, &name) else { continue };
+                if read_small_file(&record, "gitdir", "worktree back link").ok().as_deref() != Some(back_link.as_str()) {
+                    continue;
+                }
+                if workspace_cleanup::walk(&record, true, 0, &mut 0).is_ok() {
+                    let _ = records.remove_dir(&name);
+                }
+            }
+        }
+        let _ = self.git_allow_status_at(&source_root, ["branch", "-d", branch], &[0, 1]);
+    }
+
     /// Branches and tags of the user's repository with their commits.
     fn source_refs(&self, root: &Dir) -> Result<Vec<String>, ProjectFailure> {
         let output = self.git_at(root, ["for-each-ref", "--format=%(refname) %(objectname)"])?;

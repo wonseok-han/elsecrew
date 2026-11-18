@@ -6907,3 +6907,36 @@ fn a_submodule_change_in_a_worktree_is_listed_without_content() {
     fixture.manager.workspace_merge(&fixture.storage, &address, state["head"].as_str().unwrap(), state["baseTip"].as_str().unwrap(), false).unwrap();
     assert!(fixture.manager.workspace_diff_summary(&fixture.storage, &address).is_ok());
 }
+
+/// Cleanup after a task worktree's folder is gone: only its own record in
+/// the user's repository goes; an unmerged task branch stays, a merged one
+/// is deleted; the user's other worktrees are untouched.
+#[cfg(target_os = "macos")]
+#[test]
+fn forgetting_a_task_worktree_drops_only_its_record_and_merged_branch() {
+    let mut fixture = Fixture::open();
+    let (_kept, kept_path) = worktree_chat(&mut fixture, "unmerged");
+    let (_gone, gone_path) = worktree_chat(&mut fixture, "merged");
+    fs::write(kept_path.join("task.txt"), b"task\n").unwrap();
+    commit_in(&kept_path, "unmerged work");
+    let user_other = fixture.source.parent().unwrap().join("user-own-worktree");
+    git_raw(&fixture.source, ["worktree", "add", "-q", "-b", "user-own", user_other.to_str().unwrap()]);
+    let manifest = |path: &Path| {
+        let id = path.file_name().unwrap().to_str().unwrap();
+        read_bounded_json(&fixture.manager.manifests_dir, &format!("{id}.json")).unwrap()
+    };
+    let (kept_manifest, gone_manifest) = (manifest(&kept_path), manifest(&gone_path));
+    // Still there: nothing happens.
+    fixture.manager.forget_task_worktree(&kept_manifest);
+    assert!(git_text(&fixture.source, ["worktree", "list"]).contains(kept_path.to_str().unwrap()));
+    fs::remove_dir_all(&kept_path).unwrap();
+    fs::remove_dir_all(&gone_path).unwrap();
+    fixture.manager.forget_task_worktree(&kept_manifest);
+    fixture.manager.forget_task_worktree(&gone_manifest);
+    let list = git_text(&fixture.source, ["worktree", "list", "--porcelain"]);
+    assert!(!list.contains(kept_path.to_str().unwrap()) && !list.contains(gone_path.to_str().unwrap()), "{list}");
+    assert!(list.contains(user_other.to_str().unwrap()), "{list}");
+    let branches = git_text(&fixture.source, ["branch", "--list", "elsecrew/*"]);
+    assert!(branches.contains(kept_manifest["branchName"].as_str().unwrap()), "{branches}");
+    assert!(!branches.contains(gone_manifest["branchName"].as_str().unwrap()), "{branches}");
+}

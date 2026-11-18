@@ -492,7 +492,7 @@ export const ko = {
   "m5.merge.merging": "합치는 중…",
   "m5.merge.cancel": "취소",
   "m5.merge.merged": "{base}에 합쳤어요.",
-  "m5.merge.conflict": "{base}에 새로 들어온 변경과 {count}개 파일이 겹쳐요. 내 폴더와 {base}는 그대로예요. 팀에게 겹친 부분을 정리해 달라고 요청한 뒤 다시 합쳐 주세요:",
+  "m5.merge.conflict": "{base}에 새로 들어온 변경과 {count}개 파일이 겹쳐요. 내 폴더와 {base} 브랜치는 그대로예요. 팀에게 겹친 부분을 정리해 달라고 요청한 뒤 다시 합쳐 주세요:",
   "m5.merge.blocked.noBaseBranch": "이 작업을 시작할 때 내 폴더가 브랜치에 있지 않아 합칠 곳을 알 수 없어요.",
   "m5.merge.blocked.baseBranchMissing": "{base} 브랜치를 찾을 수 없어요.",
   "m5.merge.blocked.nothingToMerge": "{base}에 합칠 새 변경이 없어요.",

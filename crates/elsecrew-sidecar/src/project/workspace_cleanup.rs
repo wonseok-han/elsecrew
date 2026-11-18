@@ -321,6 +321,9 @@ impl ProjectManager {
             Err(e) => return Err(io(e)),
         }
         checkpoint(3)?;
+        // A task worktree also leaves a record (and maybe a merged branch)
+        // in the user's repository: only ours is dropped.
+        self.forget_task_worktree(&manifest);
         project["workspace_cleanup_v1"][chat_id]["state"] = json!("deleted");
         append_object(
             storage,

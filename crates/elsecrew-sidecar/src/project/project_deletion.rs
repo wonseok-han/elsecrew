@@ -215,6 +215,9 @@ impl ProjectManager {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(io(error)),
         }
+        if let Ok(manifest) = read_bounded_json(&self.manifests_dir, &format!("{worktree_id}.json")) {
+            self.forget_task_worktree(&manifest);
+        }
         remove_plain_file(&self.manifests_dir, &format!("{worktree_id}.json"))?;
         match self.data_dir.symlink_metadata(BASELINE_DIRECTORY) {
             Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
