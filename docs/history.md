@@ -168,6 +168,12 @@
   - **작업 공간 설계 결정(사용자)**: (1) worktree 위치는 Orca처럼 보이는 폴더 `~/elsecrew/workspaces/<프로젝트>/<작업 이름>`이 기본이고 설정에서 바꿀 수 있다(새 작업부터 적용, 작업마다 경로 기록). 사용자 질문 "앱 데이터 안이면 실제 파일이 안 생기나?"에는 "생긴다, 숨김 위치일 뿐"이라고 답했다. (2) 자동 커밋 작성자는 고정 `Elsecrew`. (3) 에이전트 직접 커밋은 막고 앱이 커밋한다. (4) LFS 등 필터 저장소는 처음엔 미지원으로 안내한다. 설계 문서 §3.2·§8에 반영했다.
   - **작업 공간 전환 1단계(기반) 시작**: 앱이 실행하는 모든 git 명령(`fixed_git_command`)에 환경 변수 설정(`GIT_CONFIG_COUNT=3`)으로 `core.hooksPath=/dev/null`, `core.fsmonitor=false`, `protocol.allow=never`를 건다. 저장소 자체 설정보다 우선하므로 실제 사용자 저장소의 훅·fsmonitor·원격 접속이 앱의 git 호출에서 돌지 않는다. 테스트 `fixed_git_commands_never_run_repository_hooks`를 추가했고, 같은 설정에서 일반 git은 훅을 실행함을 확인해 테스트가 의미 있음을 확인했다. project 테스트 237 통과.
   - 사용자 질문: 빌드 캐시 15G는 Rust에서 정상 범위라고 답했다(테스트·일반 빌드 산출물, 증분 캐시, 자동 정리 없음, `cargo clean`으로 비움). Docker 일괄 삭제 명령은 안내만 하고 실행하지 않았다.
+  - **1단계: 작업 공간 기록 형식 v2 계약**(아직 쓰는 곳 없음, 동작 변화 없음)
+    - Rust `validate_worktree_manifest_v2`(검사기 이름 `worktreeManifestV2`)와 TS `validateWorktreeManifestV2`를 같은 공유 fixture로 맞췄다. fixture는 유효 4, 무효 18개다.
+    - 필드: 종류 `gitWorktree`|`shadowFolder`, `canonicalSourceRoot`, `worktreePath`, `gitDir`, `sourceMutationPolicy` `worktreeRefsOnly`|`inPlace`, `branchName`(`elsecrew/…`, git이 받는 이름), `baseRef`(null 가능), `headMode:"branch"`, lifecycle `active|merged|abandoned|recoveryRequired`.
+    - 규칙: gitWorktree는 원본 밖에 있고 `gitDir`=원본/.git이다. shadowFolder는 작업 폴더=원본이고 `gitDir`은 원본 밖이다.
+    - DB 검사(V14)와 v2 기록 쓰기는 2단계에서 한다.
+    - 검증: protocol 70, TS 계약 7, `npm test` 743 통과.
   - 시험 방법 함정: 사용자가 컴퓨터를 쓰는 중에 `--restore-window`로 창을 앞으로 가져오면 사용자의 키 입력("gi", "rm ")이 입력란에 섞인다. 사용자가 깨어 있을 때는 창을 앞으로 가져오지 않고 `orca computer set-value`로 값을 넣는다(React 상태에도 반영됨을 확인).
 - 다음 할 일: 화면 잠금이 풀리면 실제 앱에서 Monaco 비교·목록·한 번에 반영과 (b) 수정을 확인한다. 새 빈 폴더로 처음부터 재시험한다(모델 자동 채움 확인). (a)를 정리한다. 실패 이유를 사용자에게 보여 줄 기록을 남길지 검토한다.
 

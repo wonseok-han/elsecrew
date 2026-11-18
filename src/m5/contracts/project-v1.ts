@@ -182,6 +182,64 @@ export function validateWorktreeManifestV1(value: unknown): WorktreeManifestV1 {
   return object as unknown as WorktreeManifestV1;
 }
 
+/** Task workspaces after the 2026-11-18 decision (docs/proposals/m5-real-worktrees.md). */
+export const PROJECT_SCHEMA_VERSION_V2 = 2 as const;
+export const TASK_BRANCH_PREFIX_V2 = "elsecrew/" as const;
+export const WORKTREE_LIFECYCLES_V2 = ["active", "merged", "abandoned", "recoveryRequired"] as const;
+export interface WorktreeManifestV2 {
+  schemaVersion: typeof PROJECT_SCHEMA_VERSION_V2;
+  projectId: string; worktreeId: string; workspaceIdentity: string; sourceIdentity: string;
+  workspaceKind: "gitWorktree" | "shadowFolder";
+  canonicalSourceRoot: string; worktreePath: string; gitDir: string;
+  sourceMutationPolicy: "worktreeRefsOnly" | "inPlace";
+  branchName: string; baseRef: string | null;
+  objectFormat: "sha1" | "sha256"; baseCommit: string; baseTree: string;
+  headMode: "branch"; lifecycle: typeof WORKTREE_LIFECYCLES_V2[number];
+}
+
+/** A branch name Git accepts and the app can show. */
+function requireBranchName(value: unknown, name: string): string {
+  if (typeof value !== "string" || !value || Array.from(value).length > 200
+    || /[\u0000-\u001f\u007f\s~^:?*[\\]/u.test(value) || value.includes("..") || value.includes("@{") || value === "@"
+    || value.split("/").some(part => !part || part.startsWith(".") || part.endsWith(".") || part.endsWith(".lock"))) {
+    fail(`${name} is not a usable branch name`);
+  }
+  return value as string;
+}
+
+export function validateWorktreeManifestV2(value: unknown): WorktreeManifestV2 {
+  const object = requireObject(value, "worktree manifest v2");
+  exactKeys(object, [
+    "schemaVersion", "projectId", "worktreeId", "workspaceIdentity", "sourceIdentity",
+    "workspaceKind", "canonicalSourceRoot", "worktreePath", "gitDir",
+    "sourceMutationPolicy", "branchName", "baseRef",
+    "objectFormat", "baseCommit", "baseTree", "headMode", "lifecycle",
+  ]);
+  if (requireSafeUnsigned(object.schemaVersion, "manifest schemaVersion") !== PROJECT_SCHEMA_VERSION_V2) fail("manifest schemaVersion must be 2");
+  for (const field of ["projectId", "worktreeId", "workspaceIdentity", "sourceIdentity"] as const) requireId(object[field], field);
+  const root = requireAbsolutePath(object.canonicalSourceRoot, "canonicalSourceRoot");
+  const worktree = requireAbsolutePath(object.worktreePath, "worktreePath");
+  const gitDir = requireAbsolutePath(object.gitDir, "gitDir");
+  if (object.workspaceKind === "gitWorktree") {
+    if (root === worktree || isAtOrBelow(worktree, root) || isAtOrBelow(root, worktree)) fail("a task worktree must be outside the user's repository folder");
+    if (gitDir !== `${root.replace(/\/+$/, "")}/.git`) fail("a task worktree shares the repository's own .git directory");
+    if (object.sourceMutationPolicy !== "worktreeRefsOnly") fail("a task worktree may change only its worktree record, task branch and objects");
+  } else if (object.workspaceKind === "shadowFolder") {
+    if (worktree !== root) fail("a shadow folder workspace is the user's folder itself");
+    if (gitDir === root || isAtOrBelow(gitDir, root)) fail("shadow Git data never lives inside the user's folder");
+    if (object.sourceMutationPolicy !== "inPlace") fail("a shadow folder workspace edits the folder in place");
+  } else fail("unknown workspace kind");
+  const branch = requireBranchName(object.branchName, "branchName");
+  if (!branch.startsWith(TASK_BRANCH_PREFIX_V2) || branch.length === TASK_BRANCH_PREFIX_V2.length) fail("a task branch is named elsecrew/<task>");
+  if (object.baseRef !== null && requireBranchName(object.baseRef, "baseRef") === branch) fail("a task branch cannot be its own base");
+  if (object.objectFormat !== "sha1" && object.objectFormat !== "sha256") fail("unsupported Git object format");
+  requireGitOid(object.baseCommit, object.objectFormat, "baseCommit");
+  requireGitOid(object.baseTree, object.objectFormat, "baseTree");
+  if (object.headMode !== "branch") fail("a task workspace stays on its branch");
+  if (!WORKTREE_LIFECYCLES_V2.includes(object.lifecycle as never)) fail("unknown workspace lifecycle");
+  return object as unknown as WorktreeManifestV2;
+}
+
 export function validateStandaloneSnapshotInvariantV1(value: unknown): void {
   const object = requireObject(value, "standalone snapshot invariant");
   exactKeys(object, [
