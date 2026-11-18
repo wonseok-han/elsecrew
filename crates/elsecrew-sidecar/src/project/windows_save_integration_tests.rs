@@ -149,6 +149,7 @@ impl Fixture {
         source.write_all(b"replacement").unwrap();
         source.sync_all().unwrap();
         let mut prepared = PreparedTarget {
+            stable_root: None,
             data_root: manager.data_dir.try_clone().unwrap(),
             temp_parent: worktree.try_clone().unwrap(),
             temp_name: SOURCE.into(),

@@ -322,7 +322,12 @@ impl PendingSave {
 }
 
 struct PreparedTarget {
+    /// The held rename root: the app's data root (v1 copy), or the task
+    /// worktree folder itself.
     data_root: Dir,
+    /// For a task worktree: its recorded folder, whose identity must still
+    /// be the held root at the rename boundary. `None` is the data root.
+    stable_root: Option<PathBuf>,
     temp_parent: Dir,
     temp_name: String,
     temp_relative: PathBuf,
@@ -2603,14 +2608,22 @@ impl ProjectManager {
         let file = worktree.open_with(&temp_name, &options).map_err(|error| {
             ProjectFailure::recovery(format!("could not create target save temp file: {error}"))
         })?;
-        let temp_relative = PathBuf::from(WORKTREE_DIRECTORY)
-            .join(&active.worktree_id)
-            .join(&temp_name);
-        let target_relative = PathBuf::from(WORKTREE_DIRECTORY)
-            .join(&active.worktree_id)
-            .join(&pending.relative_path);
+        // A v1 copy renames relative to the stable data root; a task worktree
+        // lives wherever the "작업 공간 폴더" setting put it, possibly on
+        // another volume, so it renames inside its own folder.
+        let stable_root = (active.kind != WorkspaceKind::Snapshot).then(|| active.worktree_path.clone());
+        let (rename_root, temp_relative, target_relative) = if active.kind == WorkspaceKind::Snapshot {
+            (
+                &self.data_dir,
+                PathBuf::from(WORKTREE_DIRECTORY).join(&active.worktree_id).join(&temp_name),
+                PathBuf::from(WORKTREE_DIRECTORY).join(&active.worktree_id).join(&pending.relative_path),
+            )
+        } else {
+            (&worktree, PathBuf::from(&temp_name), PathBuf::from(&pending.relative_path))
+        };
         let mut prepared = PreparedTarget {
-            data_root: self.data_dir.try_clone().map_err(|error| {
+            stable_root,
+            data_root: rename_root.try_clone().map_err(|error| {
                 ProjectFailure::recovery(format!(
                     "could not clone stable data-root capability for save: {error}"
                 ))
@@ -2838,7 +2851,10 @@ impl ProjectManager {
         prepared: &PreparedTarget,
         expected_version: &str,
     ) -> Result<(), ProjectFailure> {
-        self.verify_stable_data_root(&prepared.data_root)?;
+        match &prepared.stable_root {
+            None => self.verify_stable_data_root(&prepared.data_root)?,
+            Some(folder) => verify_stable_task_folder(&prepared.data_root, folder)?,
+        }
         let _ = verify_real_parent_and_file(
             &prepared.data_root,
             &prepared.temp_relative,
@@ -3963,7 +3979,8 @@ impl ProjectManager {
             ));
         }
         let worktree_id = value_string(&record, "worktree_id")?.to_string();
-        let worktree_path = self.worktrees_root.join(&worktree_id);
+        let manifest_name = format!("{worktree_id}.json");
+        let worktree_path = self.workspace_path(&worktree_id, &read_bounded_json(&self.manifests_dir, &manifest_name)?)?;
         if record.get("worktree_path").and_then(Value::as_str)
             != Some(canonical_protocol_path(&worktree_path)?.as_str())
         {
@@ -3971,7 +3988,6 @@ impl ProjectManager {
                 "persisted snapshot path is not the exact managed child",
             ));
         }
-        let manifest_name = format!("{worktree_id}.json");
         let manifest_path = self.manifests_root.join(&manifest_name);
         // The ledger stores protocol spelling, while Windows roots can retain
         // the native verbatim prefix. Compare wire spellings, keep native IO.
@@ -4141,7 +4157,7 @@ impl ProjectManager {
             project_id: address.project_id.clone(),
             canonical_git_root,
             worktree_id: address.worktree_id.clone(),
-            worktree_path: self.worktrees_root.join(&address.worktree_id),
+            worktree_path: self.workspace_path(&address.worktree_id, &manifest)?,
             base_commit: value_string(
                 manifest.as_object().ok_or_else(|| {
                     ProjectFailure::manifest("workspace manifest is not an object")
@@ -4356,9 +4372,13 @@ impl ProjectManager {
         address: &WorkspaceAddress,
     ) -> Result<(), ProjectFailure> {
         self.verify_managed_paths()?;
-        let root = open_real_child_dir(&self.worktrees_dir, &address.worktree_id)?;
         // The kind comes from the stored manifest: no Git runs before the scan.
         let manifest = read_bounded_json(&self.manifests_dir, &format!("{}.json", address.worktree_id))?;
+        let root = if manifest_kind(&manifest)? == WorkspaceKind::Snapshot {
+            open_real_child_dir(&self.worktrees_dir, &address.worktree_id)?
+        } else {
+            open_absolute_directory_capability(&self.workspace_path(&address.worktree_id, &manifest)?)?
+        };
         if manifest_kind(&manifest)? == WorkspaceKind::Snapshot {
             runtime_isolation::verify(&root)?;
         } else {
@@ -4453,7 +4473,7 @@ impl ProjectManager {
             .ok_or_else(|| ProjectFailure::manifest("prepared workspace lock is missing"))?;
         if lock.get("project_id").and_then(Value::as_str) != Some(project_id)
             || lock.get("worktree_path").and_then(Value::as_str)
-                != Some(canonical_protocol_path(&self.worktrees_root.join(worktree_id))?.as_str())
+                != Some(canonical_protocol_path(&self.workspace_path(worktree_id, &manifest)?)?.as_str())
             || lock.get("poisoned").and_then(Value::as_bool) != Some(false)
             || lock.get("recovery_required").and_then(Value::as_bool) != Some(false)
         {
@@ -4468,7 +4488,24 @@ impl ProjectManager {
         write_json_atomic(&self.manifests_dir, &manifest_name, &manifest)
     }
 
+    /// Where a workspace lives: a v1 copy is the managed child named by its
+    /// id; a task worktree is where it was made (the "작업 공간 폴더" setting
+    /// at that time), as its manifest records.
+    fn workspace_path(&self, worktree_id: &str, manifest: &Value) -> Result<PathBuf, ProjectFailure> {
+        if manifest_kind(manifest)? == WorkspaceKind::Snapshot {
+            return Ok(self.worktrees_root.join(worktree_id));
+        }
+        manifest["worktreePath"].as_str().map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .ok_or_else(|| ProjectFailure::manifest("task worktree manifest has no path"))
+    }
+
     fn worktree_capability(&self, active: &ActiveProject) -> Result<Dir, ProjectFailure> {
+        // A task worktree: its recorded folder, reopened without following
+        // links; its `.git` link to the repository is checked by callers.
+        if active.kind != WorkspaceKind::Snapshot {
+            return open_absolute_directory_capability(&active.worktree_path);
+        }
         let expected = self.worktrees_root.join(&active.worktree_id);
         if active.worktree_path != expected {
             return Err(ProjectFailure::manifest(
@@ -6320,6 +6357,24 @@ fn project_identity(project_id: &str, selected: &str, root: &str) -> Value {
         "selectedPath":selected,
         "canonicalGitRoot":root,
     })
+}
+
+/// A task worktree save renames inside the worktree folder it holds: that
+/// folder must still be the recorded one (a real directory, same identity).
+#[cfg(target_os = "macos")]
+fn verify_stable_task_folder(held: &Dir, folder: &Path) -> Result<(), ProjectFailure> {
+    let held_metadata = held.metadata(".").map_err(|error| {
+        ProjectFailure::recovery(format!("could not inspect the held task folder: {error}"))
+    })?;
+    let current = fs::symlink_metadata(folder).map_err(|error| {
+        ProjectFailure::recovery(format!("could not inspect the task folder: {error}"))
+    })?;
+    if !current.is_dir() || current.file_type().is_symlink()
+        || held_metadata.dev() != current.dev() || held_metadata.ino() != current.ino()
+    {
+        return Err(ProjectFailure::recovery("task worktree folder changed during the save"));
+    }
+    Ok(())
 }
 
 /// The kind a stored manifest describes; the rest is compared against

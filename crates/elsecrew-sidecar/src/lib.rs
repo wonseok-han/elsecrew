@@ -1350,6 +1350,23 @@ impl Sidecar {
                             .map(|inspection| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"inspectChatDiscard","inspection":inspection}), ..Default::default() })
                     }
                 }
+                Some(action @ ("getWorkspaceFolder" | "setWorkspaceFolder" | "resetWorkspaceFolder")) => {
+                    let result = match action {
+                        "setWorkspaceFolder" => {
+                            let params = require_exact_params(&request.params, &["action", "path"]).map_err(invalid_params)?;
+                            self.projects.set_workspace_folder(&self.storage, Some(param_string(params, "path").map_err(invalid_params)?))
+                        }
+                        "resetWorkspaceFolder" => {
+                            require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
+                            self.projects.set_workspace_folder(&self.storage, None)
+                        }
+                        _ => {
+                            require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
+                            self.projects.workspace_folder()
+                        }
+                    };
+                    result.map(|folder| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":action,"folder":folder}), ..Default::default() })
+                }
                 Some("inspectSourceChanges") => {
                     let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
                     self.projects.source_uncommitted(&self.storage, param_string(params, "projectId").map_err(invalid_params)?)

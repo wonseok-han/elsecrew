@@ -540,6 +540,17 @@ function registerIpcHandlers(): void {
       return gitPreparation!.request(request, () => assertCurrentMainFrame(event));
     }
     if (!sidecar) throw new Error("sidecar was not started");
+    // The folder for new task worktrees is chosen here, never typed by the page.
+    if (request.action === "setWorkspaceFolder") throw new Error("the workspace folder is chosen with a dialog");
+    if (request.action === "chooseWorkspaceFolder") {
+      const picked = await dialog.showOpenDialog(mainWindow!, { properties: ["openDirectory", "createDirectory"] });
+      assertCurrentMainFrame(event);
+      const next = picked.canceled || picked.filePaths.length !== 1
+        ? { action: "getWorkspaceFolder" as const }
+        : { action: "setWorkspaceFolder" as const, path: realpathSync(picked.filePaths[0]!) };
+      const saved = validateProjectCatalogResult(await sidecar.projectCatalog(next), next);
+      return { ...saved, action: "chooseWorkspaceFolder" };
+    }
     const result = validateProjectCatalogResult(await sidecar.projectCatalog(request), request);
     if (request.action === "setProviderConnection") claudeUsage.invalidate();
     return result;

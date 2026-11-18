@@ -1389,3 +1389,7 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-merge-notice { flex-basis: 100%; font-size: 12px; overflow-wrap: anywhere; }
 .m5-merge-notice code { font-size: 11px; }
 .m5-chat-discard-compact { display: inline; margin: 0; padding: 0; border: 0; background: none; }
+
+/* Settings: where new task worktrees go. */
+.m5-workspace-folder-path code { overflow-wrap: anywhere; font-size: 12px; }
+.m5-workspace-folder-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

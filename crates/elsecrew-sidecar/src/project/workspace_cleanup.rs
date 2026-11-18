@@ -114,11 +114,12 @@ impl ProjectManager {
         let lock = storage
             .projection_record("lock", &format!("lock_{}", address.worktree_id))?
             .ok_or_else(denied)?;
+        let manifest = read_bounded_json(&self.manifests_dir, &format!("{}.json", address.worktree_id))?;
         if lock["lock_id"] != format!("lock_{}", address.worktree_id)
             || lock["worktree_path"].as_str()
                 != Some(
                     canonical_protocol_path_without_existing(
-                        &self.worktrees_root.join(&address.worktree_id),
+                        &self.workspace_path(&address.worktree_id, &manifest)?,
                     )?
                     .as_str(),
                 )
@@ -227,7 +228,7 @@ impl ProjectManager {
             || manifest["worktreePath"].as_str()
                 != Some(
                     canonical_protocol_path_without_existing(
-                        &self.worktrees_root.join(&address.worktree_id),
+                        &self.workspace_path(&address.worktree_id, &manifest)?,
                     )?
                     .as_str(),
                 )
@@ -257,7 +258,11 @@ impl ProjectManager {
             serde_json::from_value::<(u64, u64)>(job["identity"].clone()).map_err(|_| denied())?.1
         } else {
             self.verify_cleanup_copy(storage, &address)?;
-            let root = open_real_child_dir(&self.worktrees_dir, &address.worktree_id)?;
+            let root = if manifest["schemaVersion"] == PROJECT_SCHEMA_VERSION_V2 {
+                open_absolute_directory_capability(&self.workspace_path(&address.worktree_id, &manifest)?)?
+            } else {
+                open_real_child_dir(&self.worktrees_dir, &address.worktree_id)?
+            };
             // Only the inode is recorded: a device number can change when the
             // computer restarts, while the job may resume after that.
             let identity = capability_directory_identity(&root)?.1;
@@ -281,6 +286,25 @@ impl ProjectManager {
         };
         checkpoint(1)?;
         self.finish_workspace_discard(&address);
+        // A task worktree lives outside the app's data: Git removes it (and
+        // its record) and only our own leftovers are forgotten.
+        if manifest["schemaVersion"] == PROJECT_SCHEMA_VERSION_V2 {
+            self.remove_task_worktree_folder(&address.worktree_id, &manifest)?;
+            checkpoint(3)?;
+            project["workspace_cleanup_v1"][chat_id]["state"] = json!("deleted");
+            append_object(
+                storage,
+                "project",
+                &address.project_id,
+                &format!("op_cleanup_done_{request_id}"),
+                request_id,
+                Value::Object(project),
+            )?;
+            return Ok(ProjectAction {
+                result: json!({"schemaVersion":1,"action":"cleanupWorkspace","chatId":chat_id,"deleted":true}),
+                ..Default::default()
+            });
+        }
         match self.worktrees_dir.symlink_metadata(&address.worktree_id) {
             Ok(_) => {
                 let root = open_real_child_dir(&self.worktrees_dir, &address.worktree_id)?;

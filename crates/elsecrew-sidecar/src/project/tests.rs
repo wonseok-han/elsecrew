@@ -6621,6 +6621,11 @@ fn task_workspaces_become_real_worktrees_on_their_own_branch() {
     let branch = manifest["branchName"].as_str().unwrap().to_owned();
     assert!(branch.starts_with("elsecrew/task-"), "{branch}");
     let path = PathBuf::from(manifest["worktreePath"].as_str().unwrap());
+    // Visible like Orca: `<작업 공간 폴더>/<project>/task-<8 hex>`, outside the app's data.
+    let home = fixture.manager.workspaces_home().unwrap();
+    assert!(path.starts_with(home.canonicalize().unwrap().join("source")), "{}", path.display());
+    assert!(path.file_name().unwrap().to_str().unwrap().starts_with("task-"));
+    assert!(!path.starts_with(&fixture.manager.data_root));
     assert_eq!(fs::read(path.join("src/edit.txt")).unwrap(), b"hello");
     assert_eq!(fs::read(path.join("src/delete.txt")).unwrap(), b"delete me\n");
     assert_eq!(git_text(&fixture.source, ["rev-parse", "HEAD"]), head);
@@ -6924,17 +6929,16 @@ fn a_submodule_change_in_a_worktree_is_listed_without_content() {
 #[test]
 fn forgetting_a_task_worktree_drops_only_its_record_and_merged_branch() {
     let mut fixture = Fixture::open();
-    let (_kept, kept_path) = worktree_chat(&mut fixture, "unmerged");
-    let (_gone, gone_path) = worktree_chat(&mut fixture, "merged");
+    let (kept, kept_path) = worktree_chat(&mut fixture, "unmerged");
+    let (gone, gone_path) = worktree_chat(&mut fixture, "merged");
     fs::write(kept_path.join("task.txt"), b"task\n").unwrap();
     commit_in(&kept_path, "unmerged work");
     let user_other = fixture.source.parent().unwrap().join("user-own-worktree");
     git_raw(&fixture.source, ["worktree", "add", "-q", "-b", "user-own", user_other.to_str().unwrap()]);
-    let manifest = |path: &Path| {
-        let id = path.file_name().unwrap().to_str().unwrap();
-        read_bounded_json(&fixture.manager.manifests_dir, &format!("{id}.json")).unwrap()
+    let manifest = |address: &WorkspaceAddress| {
+        read_bounded_json(&fixture.manager.manifests_dir, &format!("{}.json", address.worktree_id)).unwrap()
     };
-    let (kept_manifest, gone_manifest) = (manifest(&kept_path), manifest(&gone_path));
+    let (kept_manifest, gone_manifest) = (manifest(&kept), manifest(&gone));
     // Still there: nothing happens.
     fixture.manager.forget_task_worktree(&kept_manifest);
     assert!(git_text(&fixture.source, ["worktree", "list"]).contains(kept_path.to_str().unwrap()));
@@ -7038,4 +7042,50 @@ fn an_interrupted_worktree_creation_is_undone_on_abandon() {
     assert_eq!(git_text(&fixture.source, ["branch", "--list", "elsecrew/*"]), "");
     let manifest = fixture.manager.prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_after_abandon").unwrap().result;
     assert_eq!(manifest["workspaceKind"], "gitWorktree");
+}
+
+/// A task worktree outside the app's data: the editor's save lands in it
+/// (renamed inside its own folder), and removing it deletes the folder and
+/// its record in the user's repository.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_visible_task_worktree_saves_and_is_removed() {
+    let mut fixture = Fixture::open();
+    let (address, path) = worktree_chat(&mut fixture, "visible");
+    let expected = sha256_file_version_v1(&fs::read(path.join("src/edit.txt")).unwrap());
+    let begin = fixture.manager.workspace_begin_save(&mut fixture.storage, &address, "src/edit.txt", &expected, 5, "utf8").unwrap();
+    let save_id = begin.result["saveId"].as_str().unwrap().to_owned();
+    fixture.manager.append_save_chunk(&save_id, 1, "saved").unwrap();
+    let committed = fixture.manager.commit_save(&mut fixture.storage, &save_id, &expected, 1, 5, "req_visible_save").unwrap();
+    assert_eq!(committed.result["outcome"], "committed", "{}", committed.result);
+    assert_eq!(fs::read(path.join("src/edit.txt")).unwrap(), b"saved");
+    assert!(fs::read_dir(&path).unwrap().all(|entry| !entry.unwrap().file_name().to_string_lossy().starts_with(".elsecrew-save-")));
+    let manifest = read_bounded_json(&fixture.manager.manifests_dir, &format!("{}.json", address.worktree_id)).unwrap();
+    fixture.manager.remove_task_worktree_folder(&address.worktree_id, &manifest).unwrap();
+    assert!(!path.exists());
+    assert_eq!(git_text(&fixture.source, ["worktree", "list"]).lines().count(), 1);
+}
+
+/// "작업 공간 폴더": only a real folder outside projects and app data is
+/// accepted; new tasks go there; the default comes back on reset.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_workspace_folder_setting_places_new_tasks() {
+    let mut fixture = Fixture::open();
+    fixture.manager.git_worktrees_enabled = true;
+    let default = fixture.manager.workspace_folder().unwrap();
+    assert_eq!(default["custom"], false);
+    let chosen = fixture._root.path().canonicalize().unwrap().join("my-workspaces");
+    fs::create_dir(&chosen).unwrap();
+    let link = fixture._root.path().canonicalize().unwrap().join("linked");
+    std::os::unix::fs::symlink(&chosen, &link).unwrap();
+    for bad in [link.clone(), fixture.source.join("src"), fixture.manager.data_root.clone()] {
+        assert!(fixture.manager.set_workspace_folder(&fixture.storage, Some(bad.to_str().unwrap())).is_err(), "{}", bad.display());
+    }
+    let saved = fixture.manager.set_workspace_folder(&fixture.storage, Some(chosen.to_str().unwrap())).unwrap();
+    assert_eq!((saved["custom"].as_bool(), saved["path"].as_str()), (Some(true), chosen.to_str()));
+    let manifest = fixture.manager.prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_custom_folder").unwrap().result;
+    assert!(Path::new(manifest["worktreePath"].as_str().unwrap()).starts_with(chosen.join("source")), "{manifest}");
+    let reset = fixture.manager.set_workspace_folder(&fixture.storage, None).unwrap();
+    assert_eq!((reset["custom"].as_bool(), reset["path"].clone()), (Some(false), default["path"].clone()));
 }

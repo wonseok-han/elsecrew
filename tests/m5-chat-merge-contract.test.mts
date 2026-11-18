@@ -38,3 +38,12 @@ test("merge results are a known outcome over a worktree state", () => {
     { schemaVersion: 1, action: "mergeChatWorkspace", outcome: "merged", merge: { kind: "snapshot" } },
   ]) assert.throws(() => validateProjectCatalogResult(bad, merge));
 });
+
+test("the workspace folder is chosen by a dialog, never typed by the page", () => {
+  for (const action of ["getWorkspaceFolder", "chooseWorkspaceFolder", "resetWorkspaceFolder"] as const) validateProjectCatalogRequest({ action });
+  validateProjectCatalogRequest({ action: "setWorkspaceFolder", path: "/Users/me/elsecrew/workspaces" });
+  assert.throws(() => validateProjectCatalogRequest({ action: "setWorkspaceFolder", path: "relative" } as never));
+  const request = { action: "getWorkspaceFolder" as const };
+  validateProjectCatalogResult({ schemaVersion: 1, action: "getWorkspaceFolder", folder: { path: "/a", custom: false } }, request);
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "getWorkspaceFolder", folder: { path: "a", custom: false } }, request));
+});

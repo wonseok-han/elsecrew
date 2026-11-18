@@ -187,6 +187,13 @@ impl ProjectManager {
     #[cfg(unix)]
     fn remove_worktree_files(&mut self, worktree_id: &str) -> Result<(), ProjectFailure> {
         if !valid_worktree_id(worktree_id) { return Err(denied("invalid workspace identity")); }
+        // A task worktree lives in the "작업 공간 폴더", not in the app's data.
+        if let Ok(manifest) = read_bounded_json(&self.manifests_dir, &format!("{worktree_id}.json")) {
+            if manifest["schemaVersion"] == PROJECT_SCHEMA_VERSION_V2 {
+                self.remove_task_worktree_folder(worktree_id, &manifest)?;
+                return remove_plain_file(&self.manifests_dir, &format!("{worktree_id}.json"));
+            }
+        }
         let quarantine = format!("delete_{worktree_id}");
         match self.worktrees_dir.symlink_metadata(worktree_id) {
             Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
@@ -214,9 +221,6 @@ impl ProjectManager {
             Ok(_) => return Err(denied("workspace is not a plain directory")),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(io(error)),
-        }
-        if let Ok(manifest) = read_bounded_json(&self.manifests_dir, &format!("{worktree_id}.json")) {
-            self.forget_task_worktree(&manifest);
         }
         remove_plain_file(&self.manifests_dir, &format!("{worktree_id}.json"))?;
         match self.data_dir.symlink_metadata(BASELINE_DIRECTORY) {

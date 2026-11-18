@@ -29,6 +29,21 @@ fn read_small_file(dir: &Dir, name: &str, what: &str) -> Result<String, ProjectF
     Ok(text)
 }
 
+/// The setting file for "작업 공간 폴더" (where new task worktrees go).
+const WORKSPACE_FOLDER_FILE: &str = "workspace-folder.json";
+
+/// A folder name for a project: its folder's own name, without characters
+/// a path or a shell would trip over.
+fn project_folder_name(root: &Path) -> String {
+    let name: String = root.file_name().and_then(|name| name.to_str()).unwrap_or("project")
+        .chars()
+        .map(|c| if c.is_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '-' })
+        .take(60)
+        .collect();
+    let name = name.trim_matches(|c| c == '.' || c == '-').to_owned();
+    if name.is_empty() { "project".into() } else { name }
+}
+
 /// `elsecrew/task-<8 hex>`: unique per workspace, valid for Git and for the
 /// manifest contract.
 fn task_branch(worktree_id: &str) -> String {
@@ -37,6 +52,88 @@ fn task_branch(worktree_id: &str) -> String {
 }
 
 impl ProjectManager {
+    /// The "작업 공간 폴더": the saved setting, or `~/elsecrew/workspaces`
+    /// (Orca-like, visible to the user). Tests use a folder next to their
+    /// own app data so they never touch the real home.
+    pub(crate) fn workspaces_home(&self) -> Result<PathBuf, ProjectFailure> {
+        let settings = create_managed_directory(&self.data_root, &self.data_dir, "application-settings-v1")?.1;
+        if let Ok(value) = read_bounded_json(&settings, WORKSPACE_FOLDER_FILE) {
+            if let Some(path) = value["path"].as_str().map(PathBuf::from).filter(|path| path.is_absolute()) {
+                return Ok(path);
+            }
+        }
+        if cfg!(test) {
+            return Ok(self.data_root.parent().unwrap_or(&self.data_root).join("elsecrew-workspaces"));
+        }
+        let home = std::env::var_os("HOME").map(PathBuf::from).filter(|path| path.is_absolute())
+            .ok_or_else(|| ProjectFailure::recovery("the home folder is unknown"))?;
+        Ok(home.join("elsecrew").join("workspaces"))
+    }
+
+    /// The setting as the settings page shows it.
+    pub(crate) fn workspace_folder(&self) -> Result<Value, ProjectFailure> {
+        let settings = create_managed_directory(&self.data_root, &self.data_dir, "application-settings-v1")?.1;
+        let custom = settings.symlink_metadata(WORKSPACE_FOLDER_FILE).is_ok();
+        let path = self.workspaces_home()?;
+        Ok(json!({"path":canonical_protocol_path_without_existing(&path)?,"custom":custom}))
+    }
+
+    /// Saves a new "작업 공간 폴더" (or `None`: back to the default). Only a
+    /// real, existing, writable folder outside the app's data and outside
+    /// every saved project is accepted. Existing tasks stay where they are.
+    pub(crate) fn set_workspace_folder(&self, storage: &Storage, path: Option<&str>) -> Result<Value, ProjectFailure> {
+        let settings = create_managed_directory(&self.data_root, &self.data_dir, "application-settings-v1")?.1;
+        let Some(path) = path else {
+            match settings.remove_file(WORKSPACE_FOLDER_FILE) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(ProjectFailure::recovery(format!("could not reset the workspace folder: {error}"))),
+            }
+            return self.workspace_folder();
+        };
+        let wanted = Path::new(path);
+        let canonical = std::fs::canonicalize(wanted).map_err(|_| ProjectFailure::manifest("the chosen folder is unavailable"))?;
+        let metadata = std::fs::symlink_metadata(&canonical).map_err(|_| ProjectFailure::manifest("the chosen folder is unavailable"))?;
+        if !wanted.is_absolute() || canonical != wanted || !metadata.is_dir() || metadata.permissions().readonly() {
+            return Err(ProjectFailure::manifest("choose a real, writable folder (not a link)"));
+        }
+        if canonical.starts_with(&self.data_root) || self.data_root.starts_with(&canonical) {
+            return Err(ProjectFailure::manifest("the workspace folder cannot overlap the app's own data"));
+        }
+        for project in storage.projection_records("project")? {
+            if let Some(root) = project.get("canonical_path").and_then(Value::as_str) {
+                if canonical.starts_with(root) || Path::new(root).starts_with(&canonical) {
+                    return Err(ProjectFailure::manifest("the workspace folder cannot overlap a saved project"));
+                }
+            }
+        }
+        write_json_atomic(&settings, WORKSPACE_FOLDER_FILE, &json!({"path":canonical_protocol_path(&canonical)?}))?;
+        self.workspace_folder()
+    }
+
+    /// `<작업 공간 폴더>/<project>/task-<8 hex>` for a new task, made of
+    /// real folders only and never inside the user's project or the app's
+    /// own data (nor the other way round).
+    fn new_task_worktree_path(&self, source_root: &Path, worktree_id: &str) -> Result<PathBuf, ProjectFailure> {
+        let home = self.workspaces_home()?;
+        let wanted = home.join(project_folder_name(source_root));
+        std::fs::create_dir_all(&wanted).map_err(|error| {
+            ProjectFailure::recovery(format!("could not make the workspace folder: {error}"))
+        })?;
+        let canonical_home = std::fs::canonicalize(&home).map_err(|error| ProjectFailure::recovery(format!("workspace folder unavailable: {error}")))?;
+        let project_dir = std::fs::canonicalize(&wanted).map_err(|error| ProjectFailure::recovery(format!("workspace folder unavailable: {error}")))?;
+        if project_dir != canonical_home.join(project_folder_name(source_root)) {
+            return Err(ProjectFailure::symlink("the project's workspace folder is a link"));
+        }
+        for (inner, outer) in [(&project_dir, source_root), (&source_root.to_path_buf(), &project_dir), (&project_dir, &self.data_root), (&self.data_root, &project_dir)] {
+            if inner.starts_with(outer) {
+                return Err(ProjectFailure::manifest("the workspace folder overlaps the project or the app's data"));
+            }
+        }
+        let short: String = worktree_id.trim_start_matches("worktree_").chars().take(8).collect();
+        Ok(project_dir.join(format!("task-{short}")))
+    }
+
     /// The worktree's `.git` file names `<root>/.git/worktrees/<name>`, and
     /// that record points back at this very worktree.
     pub(super) fn verify_worktree_link(&self, worktree: &Dir, active: &ActiveProject) -> Result<(), ProjectFailure> {
@@ -236,12 +333,12 @@ impl ProjectManager {
     /// app quit after `git worktree add`): its folder has a `.git` link file
     /// and its manifest, if written, is this task's v2 manifest. A v1 copy
     /// never has a `.git` file, so its "unexpected artifact" rule stays.
-    pub(super) fn unstarted_task_worktree(&self, worktree_id: &str) -> bool {
-        let folder = match self.worktrees_dir.symlink_metadata(worktree_id) {
+    pub(super) fn unstarted_task_worktree(&self, worktree_id: &str, folder: &Path) -> bool {
+        let folder = match std::fs::symlink_metadata(folder) {
             Err(error) => error.kind() == std::io::ErrorKind::NotFound,
-            Ok(_) => open_real_child_dir(&self.worktrees_dir, worktree_id)
-                .and_then(|dir| dir.symlink_metadata(".git").map_err(|_| ProjectFailure::manifest("no .git")))
-                .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink()),
+            Ok(metadata) => metadata.is_dir() && !metadata.file_type().is_symlink()
+                && std::fs::symlink_metadata(folder.join(".git"))
+                    .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink()),
         };
         let manifest = match self.manifests_dir.symlink_metadata(format!("{worktree_id}.json")) {
             Err(error) => error.kind() == std::io::ErrorKind::NotFound,
@@ -258,17 +355,17 @@ impl ProjectManager {
     /// branch only while it is still at the base this preparation recorded,
     /// and the manifest. Any failure keeps the preparation in recovery.
     pub(super) fn remove_unstarted_task_worktree(&self, project: &Map<String, Value>, worktree_id: &str) -> Result<(), ProjectFailure> {
-        if !self.unstarted_task_worktree(worktree_id) {
+        let path = PathBuf::from(value_string(project, "worktree_path")?);
+        if !path.is_absolute() || !self.unstarted_task_worktree(worktree_id, &path) {
             return Err(ProjectFailure::recovery("unexpected activated snapshot artifact"));
         }
-        let has_folder = self.worktrees_dir.symlink_metadata(worktree_id).is_ok();
+        let has_folder = std::fs::symlink_metadata(&path).is_ok();
         let has_manifest = self.manifests_dir.symlink_metadata(format!("{worktree_id}.json")).is_ok();
         if !has_folder && !has_manifest {
             return Ok(());
         }
         let source = self.open_project_source(project)?;
         if has_folder {
-            let path = self.worktrees_root.join(worktree_id);
             self.git_at(&source._root, [OsStr::new("worktree"), OsStr::new("remove"), OsStr::new("--force"), path.as_os_str()])?;
         }
         let branch = task_branch(worktree_id);
@@ -282,6 +379,31 @@ impl ProjectManager {
                 ProjectFailure::recovery(format!("could not remove the unstarted manifest: {error}"))
             })?;
         }
+        Ok(())
+    }
+
+    /// Deletes a task worktree's folder (discard cleanup, project deletion):
+    /// through Git while the repository is there, which also drops its
+    /// record; otherwise by a no-follow erase of the recorded folder. Then
+    /// its leftovers in the repository are forgotten.
+    pub(super) fn remove_task_worktree_folder(&self, worktree_id: &str, manifest: &Value) -> Result<(), ProjectFailure> {
+        let path = self.workspace_path(worktree_id, manifest)?;
+        if std::fs::symlink_metadata(&path).is_ok() {
+            if let Some(root) = manifest_source_root(manifest).and_then(|root| open_absolute_directory_capability(Path::new(root)).ok()) {
+                let _ = self.git_allow_status_at(&root, [OsStr::new("worktree"), OsStr::new("remove"), OsStr::new("--force"), path.as_os_str()], &[0, 128]);
+            }
+        }
+        if std::fs::symlink_metadata(&path).is_ok() {
+            let folder = open_absolute_directory_capability(&path)?;
+            workspace_cleanup::walk(&folder, true, 0, &mut 0)?;
+            let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+                return Err(ProjectFailure::manifest("task worktree path has no parent"));
+            };
+            open_absolute_directory_capability(parent)?.remove_dir(name).map_err(|error| {
+                ProjectFailure::recovery(format!("could not remove the task worktree folder: {error}"))
+            })?;
+        }
+        self.forget_task_worktree(manifest);
         Ok(())
     }
 
@@ -348,7 +470,7 @@ impl ProjectManager {
         let worktree_id = format!("worktree_{}", Uuid::new_v4().simple());
         let workspace_identity = format!("workspace_{}", Uuid::new_v4().simple());
         let branch = task_branch(&worktree_id);
-        let worktree_path = self.worktrees_root.join(&worktree_id);
+        let worktree_path = self.new_task_worktree_path(&source.canonical_root, &worktree_id)?;
         let manifest_path = self.manifests_root.join(format!("{worktree_id}.json"));
         if worktree_path.exists() || manifest_path.exists() {
             return Err(ProjectFailure::recovery("new workspace identity unexpectedly already exists"));
@@ -475,7 +597,7 @@ impl ProjectManager {
                 "the repository's branches changed while the task workspace was made",
             )));
         }
-        let worktree = undo!(open_real_child_dir(&self.worktrees_dir, &worktree_id));
+        let worktree = undo!(self.worktree_capability(&active));
         undo!(self.verify_worktree_repository(&worktree, &active));
         if undo!(available_space(&worktree)) < SNAPSHOT_DISK_RESERVE_BYTES_V1 {
             undo!(Err::<(), _>(ProjectFailure::recovery(

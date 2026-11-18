@@ -61,6 +61,9 @@ export type ProjectCatalogRequest =
   | ({ action: "inspectChatDiscard" } & ChatDiscardAddress)
   | { action: "discardChatWorkspace"; inspection: ChatDiscardInspection; confirmed: true }
   | { action: "inspectSourceChanges"; projectId: string }
+  | { action: "getWorkspaceFolder" } | { action: "chooseWorkspaceFolder" } | { action: "resetWorkspaceFolder" }
+  /** Main process only: the renderer asks with chooseWorkspaceFolder. */
+  | { action: "setWorkspaceFolder"; path: string }
   | ({ action: "inspectChatMerge" } & ChatMergeAddress)
   | ({ action: "mergeChatWorkspace"; expectedHead: string; expectedBase: string; keepConflicts: boolean; confirmed: true } & ChatMergeAddress)
   | { action: "deleteProject"; projectId: string; confirmed: true }
@@ -135,6 +138,7 @@ export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "inspectChatDiscard"; inspection: ChatDiscardInspection }
   | { schemaVersion: 1; action: "discardChatWorkspace"; chat: ChatRecordV1 }
   | { schemaVersion: 1; action: "inspectSourceChanges"; changes: { applies: boolean; uncommitted: number } }
+  | { schemaVersion: 1; action: "getWorkspaceFolder" | "chooseWorkspaceFolder" | "setWorkspaceFolder" | "resetWorkspaceFolder"; folder: { path: string; custom: boolean } }
   | { schemaVersion: 1; action: "inspectChatMerge"; merge: ChatMergeState }
   | ({ schemaVersion: 1; action: "mergeChatWorkspace" } & ChatMergeOutcome)
   | { schemaVersion: 1; action: "applicationCapabilities"; enabled: boolean }
@@ -241,6 +245,11 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
     for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"]) id(request[key]);
   } else if (request.action === "inspectSourceChanges") {
     keys(request, ["action", "projectId"]); id(request.projectId);
+  } else if (request.action === "getWorkspaceFolder" || request.action === "chooseWorkspaceFolder" || request.action === "resetWorkspaceFolder") {
+    keys(request, ["action"]);
+  } else if (request.action === "setWorkspaceFolder") {
+    keys(request, ["action", "path"]);
+    if (typeof request.path !== "string" || !request.path.startsWith("/") || request.path.length > 4096 || /[\u0000-\u001f]/u.test(request.path)) throw new Error("invalid workspace folder");
   } else if (request.action === "inspectChatMerge" || request.action === "mergeChatWorkspace") {
     const merging = request.action === "mergeChatWorkspace";
     keys(request, ["action", "chatId", "projectId", "worktreeId", "workspaceIdentity", ...(merging ? ["expectedHead", "expectedBase", "keepConflicts", "confirmed"] : [])]);
@@ -388,6 +397,10 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
     keys(result, ["schemaVersion", "action", "inspection"]);
     const inspection = validateChatDiscardInspection(result.inspection);
     for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) if (inspection[key] !== request[key]) throw new Error("discard inspection address mismatch");
+  } else if (request.action === "getWorkspaceFolder" || request.action === "chooseWorkspaceFolder" || request.action === "setWorkspaceFolder" || request.action === "resetWorkspaceFolder") {
+    keys(result, ["schemaVersion", "action", "folder"]);
+    const folder = object(result.folder); keys(folder, ["path", "custom"]);
+    if (typeof folder.path !== "string" || !folder.path.startsWith("/") || typeof folder.custom !== "boolean") throw new Error("invalid workspace folder");
   } else if (request.action === "inspectSourceChanges") {
     keys(result, ["schemaVersion", "action", "changes"]);
     const changes = object(result.changes); keys(changes, ["applies", "uncommitted"]);
