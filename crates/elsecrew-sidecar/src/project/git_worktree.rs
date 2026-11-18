@@ -136,6 +136,12 @@ impl ProjectManager {
         if tracked.status.code() == Some(0) {
             return Ok(true);
         }
+        // An attributes file named in the repository's own config could ask
+        // for a filter too; not read, refused (rare in a local config).
+        let extra = self.git_allow_status_at(root, ["config", "--local", "--get", "core.attributesFile"], &[0, 1])?;
+        if extra.status.code() == Some(0) {
+            return Ok(true);
+        }
         Ok(match git_dir.symlink_metadata("info/attributes") {
             Ok(metadata) if metadata.is_file() && metadata.len() <= 1024 * 1024 => {
                 let mut text = String::new();
@@ -145,7 +151,7 @@ impl ProjectManager {
                 text.split_whitespace().any(|word| word.starts_with("filter="))
             }
             Ok(_) => true,
-            Err(_) => false,
+            Err(error) => error.kind() != std::io::ErrorKind::NotFound,
         })
     }
 
