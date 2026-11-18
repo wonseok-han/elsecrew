@@ -47,6 +47,36 @@ const WORKSPACE_WRITE: &str = r#"
     (subpath (string-append (param "WORKSPACE") "/.codex")))
 "#;
 
+/// A task worktree's Git data lives in the user's repository: agents may read
+/// it (`git status`, `git diff`, `git log`) but never write it; the app makes
+/// the commits (docs/proposals/m5-real-worktrees.md §3.2).
+const SOURCE_GIT_READ: &str = r#"
+(allow file-read* (subpath (param "SOURCE_GIT")))
+"#;
+
+/// `<repo>/.git` when `workspace` is a linked worktree whose `.git` file and
+/// the repository's back link name each other; otherwise none.
+fn linked_source_git(workspace: &Path) -> Option<std::path::PathBuf> {
+    let link = workspace.join(".git");
+    let metadata = std::fs::symlink_metadata(&link).ok()?;
+    if !metadata.is_file() || metadata.len() > 4096 {
+        return None;
+    }
+    let text = std::fs::read_to_string(&link).ok()?;
+    let record = Path::new(text.strip_prefix("gitdir: ")?.strip_suffix('\n')?);
+    let worktrees = record.parent()?;
+    let git_dir = worktrees.parent()?;
+    if worktrees.file_name()? != "worktrees"
+        || git_dir.file_name()? != ".git"
+        || git_dir.canonicalize().ok()? != git_dir
+        || workspace.starts_with(git_dir.parent()?)
+    {
+        return None;
+    }
+    let back = std::fs::read_to_string(record.join("gitdir")).ok()?;
+    (Path::new(back.strip_suffix('\n')?) == link).then(|| git_dir.to_owned())
+}
+
 const MODEL_PROXY: &str = r#"
 (allow network-outbound (remote tcp4 (param "MODEL_PROXY")))
 (allow file-read* (literal "/private/etc/ssl/cert.pem"))
@@ -220,7 +250,17 @@ fn command_network(
     if proxy.is_some() {
         policy.push_str(MODEL_PROXY);
     }
+    let source_git = linked_source_git(workspace);
+    if source_git.is_some() {
+        policy.push_str(SOURCE_GIT_READ);
+    }
     let mut sandbox_args = vec![OsString::from("-p"), OsString::from(policy)];
+    if let Some(path) = &source_git {
+        sandbox_args.push(OsString::from("-D"));
+        let mut value = OsString::from("SOURCE_GIT=");
+        value.push(path);
+        sandbox_args.push(value);
+    }
     for (name, path) in [
         ("CLI", executable),
         ("HELPER", helper),

@@ -33,6 +33,7 @@ import {
   validateTreePageV1,
   validateWatchEventV1,
   validateWorktreeManifestV1,
+  validateWorktreeManifest,
   validateWorktreeManifestV2,
   WORKTREE_HEAD_MODE_V1,
   WORKTREE_LIFECYCLES_V1,
@@ -253,7 +254,7 @@ function validate(name: ValidatorName, value: unknown): unknown {
     case "projectIdentity":
       return validateProjectIdentityV1(value);
     case "worktreeManifest":
-      return validateWorktreeManifestV1(value);
+      return validateWorktreeManifest(value);
     case "worktreeManifestV2":
       return validateWorktreeManifestV2(value);
     case "standaloneSnapshotInvariant":

@@ -13,6 +13,7 @@ mod app_roles;
 mod latest_apply;
 mod app_connections;
 mod empty_project;
+mod git_worktree;
 #[cfg(any(windows, test))]
 mod git_selection;
 #[cfg(any(windows, test))]
@@ -97,7 +98,8 @@ use elsecrew_protocol::project_v1::{
     SNAPSHOT_DISK_RESERVE_BYTES_V1, SNAPSHOT_ENTRIES_MAX_V1,
     SNAPSHOT_MATERIALIZED_TOTAL_MAX_BYTES_V1, SNAPSHOT_SINGLE_BLOB_MAX_BYTES_V1,
     SNAPSHOT_TRANSPORT_V1, SOURCE_MUTATION_POLICY_V1, TREE_PAGE_MAX_ENTRIES_V1, WORKSPACE_KIND_V1,
-    WORKTREE_HEAD_MODE_V1,
+    WORKTREE_HEAD_MODE_V1, PROJECT_SCHEMA_VERSION_V2, WORKSPACE_KIND_GIT_WORKTREE_V2,
+    WORKTREE_HEAD_MODE_V2, TASK_BRANCH_PREFIX_V2,
 };
 use elsecrew_protocol::MAX_TEXT_CHUNK_BYTES;
 use serde_json::{json, Map, Value};
@@ -371,8 +373,18 @@ enum WorkspaceLockAdmission {
     SaveRecovery(String),
 }
 
+/// What a task's workspace is (docs/proposals/m5-real-worktrees.md).
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum WorkspaceKind {
+    /// v1: a standalone copy with a detached HEAD at its base.
+    Snapshot,
+    /// v2: a real `git worktree` of the user's repository on its own branch.
+    GitWorktree { branch: String, base_ref: Option<String> },
+}
+
 #[derive(Clone, PartialEq, Eq)]
 struct ActiveProject {
+    kind: WorkspaceKind,
     project_id: String,
     canonical_git_root: PathBuf,
     worktree_id: String,
@@ -500,6 +512,10 @@ pub struct ProjectManager {
     data_root: PathBuf,
     data_dir: Dir,
     worktrees_root: PathBuf,
+    /// Task workspaces become real Git worktrees (2026-11-18 design). Off
+    /// until merging them back is built; `ELSECREW_GIT_WORKTREES=1` turns it
+    /// on for development.
+    git_worktrees_enabled: bool,
     manifests_root: PathBuf,
     worktrees_dir: Dir,
     manifests_dir: Dir,
@@ -881,6 +897,12 @@ impl ProjectManager {
 
     /// A task's own clean-source copy. The project keeps its own copy.
     pub(crate) fn prepare_chat_application_workspace(&mut self, storage: &mut Storage, project_id: &str, request_id: &str) -> Result<ProjectAction, ProjectFailure> {
+        // A real worktree needs no clean original: it starts from the last
+        // commit and the user's uncommitted edits stay in their folder.
+        #[cfg(target_os = "macos")]
+        if self.git_worktrees_enabled {
+            return self.create_git_worktree(storage, project_id, request_id);
+        }
         #[cfg(any(unix, windows))]
         {
             // Reject unsupported/dirty input before reserving a recovery lock.
@@ -1059,6 +1081,7 @@ impl ProjectManager {
             data_root,
             data_dir,
             worktrees_root,
+            git_worktrees_enabled: std::env::var("ELSECREW_GIT_WORKTREES").is_ok_and(|value| value == "1"),
             manifests_root,
             worktrees_dir,
             manifests_dir,
@@ -1584,6 +1607,7 @@ impl ProjectManager {
         drop(held_staging);
 
         let active = ActiveProject {
+            kind: WorkspaceKind::Snapshot,
             project_id: project_id.to_string(),
             canonical_git_root: source.canonical_root,
             worktree_id,
@@ -3966,7 +3990,11 @@ impl ProjectManager {
                 "managed snapshot overlaps the original project",
             ));
         }
+        // The project may still point at a task's workspace (older records,
+        // or a project with no copy of its own); its manifest says which kind.
+        let manifest = read_bounded_json(&self.manifests_dir, &manifest_name)?;
         let active = ActiveProject {
+            kind: manifest_kind(&manifest)?,
             project_id: project_id.to_string(),
             canonical_git_root,
             worktree_id,
@@ -3980,7 +4008,6 @@ impl ProjectManager {
             lock_id: value_string(&record, "lock_id")?.to_string(),
         };
 
-        let manifest = read_bounded_json(&self.manifests_dir, &manifest_name)?;
         if manifest != manifest_value(&active, "active")? {
             return Err(ProjectFailure::manifest(
                 "persisted manifest differs from the canonical snapshot identity",
@@ -4005,6 +4032,10 @@ impl ProjectManager {
         }
 
         let worktree = self.worktree_capability(&active)?;
+        if active.kind != WorkspaceKind::Snapshot {
+            self.verify_worktree_link(&worktree, &active)?;
+            return Ok(active);
+        }
         let marker = read_bounded_json(&open_real_child_dir(&worktree, ".git")?, SNAPSHOT_MARKER)?;
         if marker != snapshot_identity(&active)? {
             return Err(ProjectFailure::manifest(
@@ -4095,7 +4126,9 @@ impl ProjectManager {
             ));
         }
         let canonical_git_root = PathBuf::from(value_string(&project, "canonical_path")?);
-        if manifest.get("canonicalGitRoot").and_then(Value::as_str)
+        let kind = manifest_kind(&manifest)?;
+        let root_key = if kind == WorkspaceKind::Snapshot { "canonicalGitRoot" } else { "canonicalSourceRoot" };
+        if manifest.get(root_key).and_then(Value::as_str)
             != Some(canonical_protocol_path_without_existing(&canonical_git_root)?.as_str())
         {
             return Err(ProjectFailure::manifest(
@@ -4103,6 +4136,7 @@ impl ProjectManager {
             ));
         }
         let active = ActiveProject {
+            kind,
             project_id: address.project_id.clone(),
             canonical_git_root,
             worktree_id: address.worktree_id.clone(),
@@ -4168,6 +4202,10 @@ impl ProjectManager {
             }
         }
         let worktree = self.worktree_capability(&active)?;
+        if active.kind != WorkspaceKind::Snapshot {
+            self.verify_worktree_link(&worktree, &active)?;
+            return Ok(active);
+        }
         let marker = read_bounded_json(&open_real_child_dir(&worktree, ".git")?, SNAPSHOT_MARKER)?;
         if marker != snapshot_identity(&active)? {
             return Err(ProjectFailure::manifest(
@@ -4785,6 +4823,9 @@ impl ProjectManager {
         workspace: &Dir,
         active: &ActiveProject,
     ) -> Result<(), ProjectFailure> {
+        if active.kind != WorkspaceKind::Snapshot {
+            return self.verify_worktree_repository(workspace, active);
+        }
         // Keep the same checks without caching authority across polls. These
         // four read-only commands overlap; each owned child retains its own
         // bounded pipes, deadline and Drop cleanup. This is not an atomic Git
@@ -6259,7 +6300,45 @@ fn project_identity(project_id: &str, selected: &str, root: &str) -> Value {
     })
 }
 
+/// The kind a stored manifest describes; the rest is compared against
+/// `manifest_value` by the caller.
+fn manifest_kind(manifest: &Value) -> Result<WorkspaceKind, ProjectFailure> {
+    match manifest.get("schemaVersion").and_then(Value::as_u64) {
+        Some(PROJECT_SCHEMA_VERSION_V2) if manifest["workspaceKind"] == WORKSPACE_KIND_GIT_WORKTREE_V2 => {
+            Ok(WorkspaceKind::GitWorktree {
+                branch: manifest["branchName"].as_str()
+                    .ok_or_else(|| ProjectFailure::manifest("worktree manifest has no branch"))?.to_owned(),
+                base_ref: manifest["baseRef"].as_str().map(str::to_owned),
+            })
+        }
+        Some(PROJECT_SCHEMA_VERSION_V1) => Ok(WorkspaceKind::Snapshot),
+        _ => Err(ProjectFailure::manifest("unsupported workspace manifest kind")),
+    }
+}
+
 fn manifest_value(active: &ActiveProject, lifecycle: &str) -> Result<Value, ProjectFailure> {
+    if let WorkspaceKind::GitWorktree { branch, base_ref } = &active.kind {
+        let root = canonical_protocol_path_without_existing(&active.canonical_git_root)?;
+        return Ok(json!({
+            "schemaVersion":PROJECT_SCHEMA_VERSION_V2,
+            "projectId":active.project_id,
+            "worktreeId":active.worktree_id,
+            "workspaceIdentity":active.workspace_identity,
+            "sourceIdentity":active.source_identity,
+            "workspaceKind":WORKSPACE_KIND_GIT_WORKTREE_V2,
+            "canonicalSourceRoot":root,
+            "worktreePath":canonical_protocol_path_without_existing(&active.worktree_path)?,
+            "gitDir":format!("{}/.git", root.trim_end_matches('/')),
+            "sourceMutationPolicy":"worktreeRefsOnly",
+            "branchName":branch,
+            "baseRef":base_ref,
+            "objectFormat":active.object_format,
+            "baseCommit":active.base_commit,
+            "baseTree":active.base_tree,
+            "headMode":WORKTREE_HEAD_MODE_V2,
+            "lifecycle":lifecycle,
+        }));
+    }
     Ok(json!({
         "schemaVersion":PROJECT_SCHEMA_VERSION_V1,
         "projectId":active.project_id,

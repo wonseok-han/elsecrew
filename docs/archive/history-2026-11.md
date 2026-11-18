@@ -1,3 +1,191 @@
+### 2026-11-17 · by Claude Opus 5.5 (claude-opus-5-5) — 개발 앱을 직접 조작하며 todo 앱 시험·발견한 화면 문제 수정
+- 사용자 지시: 개발 앱을 직접 조작하며 개발을 이어간다. 빈 폴더 → 프로젝트 추가 → "todo 앱 만들어줘" 요청 → 관찰·수정·재시험을 반복한다. 이 시험 프로젝트들의 실제 유료 실행은 이 지시로 승인됐다. 역할은 "지금 기본값으로 진행"(사용자 선택).
+- 방법: Orca computer use로 dev 앱(`pnpm m5:dev`)을 뒤에서 조작했다.
+  - macOS 폴더 선택 창은 뒤에서 조작할 수 없다. 그래서 **개발 빌드 전용**으로 `userData/dev-pick-directory.txt`에 경로를 적으면 한 번만 그 폴더를 고른 것으로 처리한다(`electron/main.ts` `takeDevPickedDirectory`). 읽으면 지우고, `app.isPackaged`면 무시한다.
+  - 환경 변수 방식은 main에서 `process.env`를 금지하는 보안 테스트에 걸려 파일 방식으로 바꿨다.
+- 시험 진행(todo-test-1117a, `~/Downloads/todo-test-1117a`): 총괄 → 기획(docs/plan.md) → 총괄 질문 3개 → "추천대로" → 디자인(Codex, docs/design.md) → 개발(Claude, app.js·index.html·style.css·tests/) 순으로 정상 진행 중이다.
+- 고친 화면 문제:
+  - 에이전트가 쓴 파일이 변경·파일 목록에 바로 안 보였다. 엔진 watcher는 `file.changed`만 보내고 `diff.changed`는 보내지 않는다. `editor-state.ts`가 `file.changed`를 받으면 0.5초 뒤 한 번 변경 목록과 트리를 다시 읽는다. 작업 중 잠금 동안에는 미뤘다가 풀릴 때 읽는다.
+  - 실행 카드 경과 시간이 멈춰 있었다(카드 17초, 실제 1분 58초). `runDurationSeconds(run, now)`: 진행 중인 실행은 지금 시각까지 센다. `AgentRuns`는 진행 중일 때만 1초마다 갱신한다.
+  - 프로젝트를 다시 열면 이전 작업이 선택되지 않고 빈 화면이 나왔다. 프로젝트별 마지막 작업(`localStorage` `elsecrew.lastChat.v1.<projectId>`, 없으면 목록 첫 작업)을 **열 때 한 번만** 다시 선택한다. 작업을 닫거나 지워도 다른 작업을 끌어오지 않는다.
+  - 새 프로젝트에서 모든 역할이 "모델 미선택"이었다. 설정 화면을 열어야 추천 모델이 채워졌고, 첫 작업 보내기가 막혔다. 이제 보내기를 누르면 모델이 없는 역할에 공급자의 단일 추천 모델을 채워(`withRecommendedModels`, Codex는 medium) 프로젝트 설정으로 저장한 뒤 시작한다. 추천이 하나로 정해지지 않으면 예전처럼 막고 직접 고르라고 안내한다.
+  - 읽기 전용 역할(총괄 등)의 성공 카드에 "원본에 적용하기 전에 변경 사항을 검토해 주세요"가 떴다. 이제 "이 역할은 파일을 바꾸지 않아요"를 보여준다(`runOutcomeNotice`, 중단도 같다).
+- 엔진 지시문(별도 커밋, orchestration 테스트 30 통과): 팀원의 중간 설명이 영어로 나왔다("Headless Chrome won't start…"). 팀원·총괄 지시문(`orchestration.rs`)에 "사용자 대화의 언어로 보고와 작업 중 메모를 쓴다"를 넣었다. dev 앱 재시작 뒤 확인이 필요하다.
+- 검증: `npm test` 740 통과, `pnpm build` 통과. 실제 앱에서 확인: 목록 자동 갱신("변경 (2)"→6), 카드 시간이 하단 표시와 일치, 프로젝트를 다시 열면 진행 중 작업이 자동 선택.
+- 아직 고치지 않은 것:
+  - (a) 실행이 끝난 직후 승인 확인 요청이 `agentApprovalChanged: approval run is no longer current`로 main 로그에 남는다. 동작에는 영향이 없다(추정: 끝나는 순간의 경합).
+  - (b) 총괄 답변이 메시지와 실행 출력에 두 번 보인다.
+  - (c) 개발 HMR에서 번역 파일을 바꾸면 `useI18n must be used within I18nProvider`가 나서 Cmd+R이 필요하다. 개발 환경에서만 생긴다.
+- 기록: history.md가 500줄을 넘었다. 같은 날짜(11-17)의 앞선 엔트리 5개를 아카이브로 옮겼다. 고정 섹션만으로 약 300줄이라 300줄 이하는 맞추지 못했다.
+- 후속(같은 날):
+  - 엔진 지시문 반영을 확인했다. dev 재시작 뒤 Codex 검증 담당의 진행 메모가 한국어로 나왔다.
+  - 개발 담당 보고: 첫 버전과 Node 논리 확인 72개는 통과했다. 하지만 격리 환경에서 Chrome(`Failed to create socket directory`)·Firefox(`bootstrap_check_in failed`)·`mktemp`(`Operation not permitted`)가 막혀 브라우저 확인을 하지 못했다. 격리 경계는 바꾸지 않았다(안전 경계 변경은 별도 검토 대상).
+  - **Codex 검증 실행이 두 번 연속 실패했다**(#9 29초, #11 53초, 둘 다 cleanExit). 파일 수정·명령 실행 직후 `turn stream other frame`에서 끝났다. 실패 이유는 실행 기록·DB 어디에도 남지 않는다. 남는 것은 `~/Library/Logs/Elsecrew/last-provider-checkpoints.json`의 단계 이름뿐이다.
+  - 진단 확장(`codex_events/stream.rs` `SERVER_REQUESTS`·`UNHANDLED_NOTIFICATIONS`, TS 계약 `CODEX_SERVER_REQUESTS`·`CODEX_UNHANDLED_NOTIFICATIONS`): Codex 0.169 실행 파일에서 뽑은 고정 목록에 있는 요청·알림 이름만 `turn stream request <이름>` / `turn stream unhandled <이름>`으로 기록한다. 받아들이는 동작은 바꾸지 않았다(모르면 여전히 실패). 알림 이름 목록만 넣었을 때도 여전히 `other frame`이었다. 그래서 원인은 알림이 아니라 Codex가 보내는 요청(승인·권한 요청 등)으로 추정하고, 요청 이름까지 넣었다. 재현은 아직 하지 않았다.
+  - 후속 메시지 입력란: 총괄 실행을 준비하는 짧은 순간에 "현재 상태에서는 메시지를 추가할 수 없어요"가 잘못 떴다. 실행 시작·진행 중에는 숨긴다.
+  - dev 앱을 다시 띄우면 창이 다른 Space에 열려 Orca 키 입력이 닿지 않는다(`background_unavailable`). 창을 현재 Space로 옮기거나 `--restore-window` 허락이 필요하다.
+  - 검증: `npm test` 741, core `codex_events` 37, sidecar orchestration 30 통과.
+- 후속 2(같은 날): **Codex 검증 실패의 실제 원인**
+  - 세 번째 재현에서 `turn item start unsupported mcp tool`이 나왔다(6분 실행 뒤). 앱 전용 CODEX_HOME에는 MCP 서버가 없다. 그런데 Codex 0.169(ChatGPT.app 번들) 내부 로그(`codex-profile-v1/logs_2.sqlite`의 feedback_tags)를 보면 `browser_use`·`browser_use_external`·`browser_use_full_cdp_access`·`computer_use`·`in_app_browser`·`image_generation` 등이 기본으로 켜져 있었다. 검증 담당이 화면을 확인하려고 내장 도구를 쓰다 거절된 것으로 추정한다(도구 이름은 기록에 없음).
+  - 조치: 모든 Codex 실행 인자에 `-c features.<이름>=false`로 이 6개를 끈다(core `codex_preflight::UNSUPERVISED_TOOL_FEATURES`). 권한을 줄이기만 한다.
+  - **독립 검토(상시 검토자) 차단 지적 B1**: Codex `config/read`의 sessionFlags 레이어를 정확한 형태로 대조하는 검증기 두 곳(`layers.rs` `FlagFeatures` deny_unknown, `named_config.rs` 정확 비교)이 새 키 때문에 시작을 거절한다. 실제 앱에서도 `Codex preflight failed at session flags`로 재현됐다. 가짜 Codex fixture가 인자를 반영하지 않아 단위 테스트로는 잡히지 않았다.
+  - B1 수정: `strip_unsupervised_tool_flags`는 이 6개 키를 값이 정확히 `false`일 때만 지우고 나머지 대조는 그대로 둔다. `unsupervised_tools_off`는 effective features에 이 키가 있으면 `false`여야 한다. 재검토 결과 차단 없음, 신뢰 확대 없음, 빠진 검증기 없음.
+  - 경미(남김): effective와 sessionFlags 양쪽에서 키가 빠지면 통과한다. **새 Codex 버전마다 기본으로 켜진 기능 목록을 다시 점검해야 한다**(feedback_tags의 `feature.*`).
+  - 실패 카드 안내를 "실행은 안전하게 멈췄어요. 변경은 작업 공간에 그대로, 이어서 하려면 메시지"로 바꿨다. 원인을 보여 주지 않는 화면에서 원인을 확인하라고 하지 않는다.
+  - 검증: core codex 124, sidecar preflight/login/permission_probe/text_candidate 73, 중복 키 회귀 테스트를 추가했다.
+- 후속 3(같은 날):
+  - 끄기 플래그를 넣은 뒤에도 #17에서 `unsupported mcp tool`이 한 번 더 나왔다. 그래서 그 6개 기능이 원인이 아니었을 수 있다.
+    - 이후 #18~#27 검증 조각 실행은 모두 성공했다.
+    - 원인 MCP 도구를 찾으려고 **debug 빌드 전용 임시 진단**을 넣었다(`codex_events/stream.rs`, 커밋하지 않음). `$TMPDIR/elsecrew-dev-diagnosis.log`에 server·tool 이름을 식별자 문자로만 남긴다. 원인을 찾으면 지운다.
+    - Codex 0.169는 대화 기록(rollout)을 남기지 않는다. `logs_2.sqlite`에는 도구 이름 `exec`(code-mode host)만 보인다.
+  - **팀 실행 횟수 한도(메시지당 12단계)**:
+    - 검증을 조각으로 나눠 맡기다 단계가 부족한 상태에서 총괄이 또 위임했고, `teamDecisionInvalid`로 멈췄다. 안내도 "연결 상태와 역할 설정을 확인해 주세요"로 엉뚱했다.
+    - 이제 위임할 단계가 부족하면 실패가 아니라 정상 완료(`limit_reached`)로 끝난다. 안내는 "이번 요청에서 쓸 수 있는 팀 실행 횟수를 다 썼어요… '계속'이라고 보내 주세요"다.
+    - 총괄 지시문에 "남은 단계가 2 이하이면 위임하지 말고 정리"를 추가했다.
+    - 구성원 보고 뒤 총괄 단계가 없는 경우는 여전히 실패로 막는다.
+    - 검증: orchestration 30 통과.
+  - 관찰: 총괄이 "작업 폴더의 index.html을 더블클릭"하라고 안내하지만 사용자는 숨겨진 작업 공간에 접근할 수 없다. 원본 반영 흐름을 직접 시험한 뒤 안내 문구나 미리보기를 정한다.
+- 후속 4(같은 날):
+  - "계속"으로 팀 작업이 끝까지 완료됐다(검증 19+6+6 판정, 고칠 점 2개 수정·재확인, `reviewReady`). 검증 조각 실행에서는 MCP 실패가 다시 나지 않았고 임시 진단 파일도 비어 있다.
+  - **원본 반영 차단(심각)**:
+    - "반영 전 변경 목록 보기"가 `dirtyConflict: snapshot permission changes outside Git executable mode are unsupported`로 실패했다. Claude Code가 작업 복사본에 만드는 `.claude/.cc-writes`(빈 폴더, 0700) 때문이었다. **Claude 역할이 한 번이라도 돈 작업은 원본 반영이 항상 막힌다.**
+    - 수정: `review.rs` `capture_workspace`가 `.claude/.cc-writes`(하위 포함)를 빼고, 그 때문에만 남은 빈 `.claude`도 뺀다(`without_agent_scratch`).
+    - 독립 검토 I1: 원본이 그 경로의 파일을 추적하면 삭제로 계산된다. 그래서 그 경우에는 반영 검토를 거절한다.
+    - 회귀 테스트 2개(0700 내부 폴더 무시, `.claude/settings.json`은 변경으로 표시, 추적 파일 거절). 테스트 환경의 전역 gitignore가 `.cc-writes`를 무시해서 `add -f`를 썼다.
+  - 화면: 검토 준비 상태의 팀 대화에 "작업 공간 버리기"만 보였다. 이제 그 앞에 결과 확인 안내와 "변경 확인하고 내 폴더에 반영하기" 버튼을 둔다. 누르면 변경 탭으로 가서 반영 영역이 펼쳐진다.
+  - 총괄 지시문: 사용자는 작업 복사본 파일을 열 수 없다. 결과는 앱에서 검토·반영한 뒤 자기 폴더에서 연다고 안내한다.
+  - 검증: project 173, 반영 검토 5, `npm test` 741, tsc 통과.
+- 후속 5(같은 날): **처음으로 끝까지 성공**
+  - 빈 폴더에서 todo 요청, 팀 개발·검증, 원본 반영, 동작 확인까지 전부 앱으로 끝냈다.
+  - 원본 `~/Downloads/todo-test-1117a`에 13개 항목이 반영됐고, `.claude`는 들어가지 않았다.
+  - 생성된 논리 테스트(`tests/run-logic.sh`, macOS jsc)는 73/73 통과했다. 에이전트 격리 환경에서는 실행할 수 없던 테스트다.
+  - headless Chrome CDP 확인 8/8 통과: 빈 목록 안내, 추가, 공백 거절, 완료 체크, 새로고침 뒤 유지, 삭제.
+  - **반영이 스스로 취소되던 문제**:
+    - 증상: `recoveryRequired: application preparation canceled; backup data preserved`. 원본은 바뀌지 않았다.
+    - 원인: sidecar stdin reader의 `sync_channel(1)`. 백업 준비가 메인 루프를 몇 초 막는 동안 화면의 상태 확인 요청이 2개만 쌓여도 `Full`이 됐고, 그때 `application_cancel.stop()`이 불렸다.
+    - 수정: 대기열을 1024개와 8 MiB 바이트 예산으로 바꿨다. 예산을 넘으면 먼저 stop하고, 대기열이 줄 때까지 reader가 기다린다(독립 검토 I1 반영).
+    - 중지·취소 요청은 enqueue 전에 `observe`로 계속 즉시 본다.
+    - 한계(검토 M1): 메인 루프가 몇 분 막히면 개수 한도에 닿아 같은 증상이 날 수 있다. 근본 해결은 반영 준비를 작업 스레드로 옮기는 것이다.
+  - 검증: sidecar 전체 830 통과(대기열 수정 포함).
+  - **사용자 방향(2026-11-17)**:
+    - 변경 화면 UX가 나쁘고 보기 힘들다.
+    - 반영은 충돌 검사 없이 "작업 공간 최신이 무조건 우선"이어야 한다.
+    - 백업도 필요 없다(Git이 있음).
+    - 커밋 기록 없이 현재 변경만 보여 주고, GitLens처럼 보기 쉽게 한다.
+- 후속 6(같은 날): **변경 화면 재설계와 최신 우선 반영(사용자 결정 반영)**
+  - diff가 읽기 힘들었던 원인: 엔진 `build_bounded_text_diff`가 진짜 diff가 아니었다. 기존 전체를 `-`, 새 전체를 `+`로 냈다.
+    - 화면이 이 텍스트에서 양쪽 원문을 복원한다(`diff-view.ts` `diffSides`, 테스트 포함). 복원한 원문을 Monaco `createDiffEditor`로 보여 준다(`MonacoDiff`: 나란히 비교 기본, 좁으면 한 줄, 바뀌지 않은 구간 접기, 읽기 전용).
+    - 형태가 다르거나 로드에 실패하면 예전 표로 돌아간다.
+  - 변경 목록: 폴더별로 묶고(`changeGroups`) A/M/D/R 글자 배지를 붙였다. 삭제 파일은 취소선으로 보인다.
+  - **반영 = "내 폴더에 반영" 한 번 + 확인 한 번**(`apply-latest.tsx`, project.catalog `applyChatLatest`, `project/latest_apply.rs`).
+    - 작업 공간의 base commit 대비 변경을 원본에 그대로 쓴다. 삭제는 삭제한다.
+    - 충돌 검사, 확인 토큰, 백업은 없다(사용자: Git이 있으니 충분). 확인 문구에 "커밋 안 한 원본 수정은 되돌릴 수 없음"을 적었다.
+    - 안전장치:
+      - 원본을 `open_source_repository`로 다시 열고, 정규화한 실제 경로가 기록과 같아야 한다.
+      - cap-std 루트 핸들로만 쓴다.
+      - 부모 경로에 링크나 파일이 있으면 건너뛴다(루트 안 `cfg -> .git` 같은 링크 경유 차단).
+      - `.git`과 `.claude/.cc-writes`는 쓰지 않는다.
+      - 먼저 전부 검사한 뒤 삭제부터 실행하고, 쓰는 중 실패하면 멈춘 위치와 개수를 보고한다.
+      - 스트리밍 복사, 고정 길이 임시 이름, rename으로 원자적으로 교체한다.
+    - 독립 검토 3회: 처음 I1~I3, 이후 경미만 남음. 경미 일부(파일이 폴더로 바뀌는 경우, 중복 조회)도 반영했다.
+    - 남은 경미 지적: 실패 시 보고가 경로 목록이 아니라 개수다. base blob 읽기 비용, 다른 프로젝트 복구가 막을 때의 문구, 같은 경로에 다른 저장소를 다시 만든 경우는 통과한다.
+  - 기존 5단계 반영 화면(`ChatApplicationPreview`)은 변경 탭에서 뺐다. 코드와 복원 흐름은 남아 있다.
+  - 팀 대화의 검토 준비 버튼 문구는 "변경 보고 내 폴더에 반영하기"다. 누르면 변경 탭으로 가서 확인이 열린다.
+  - 검증: `npm test` 742, tsc, `latest_apply` 단위 테스트 통과. **실제 앱 확인은 아직이다**(Mac 화면 잠김).
+- 후속 7(같은 날): **(b) 같은 답이 두 번 보이던 문제**
+  - 원인: 팀 대화는 실행마다 메시지(`runId` 포함)를 보여 준다. 그 아래 실행 출력 패널(`AgentOutputPanel`)도 같은 실행의 글 줄을 다시 그렸다. 총괄뿐 아니라 모든 역할이 그랬다.
+  - 조치: 출력 패널은 대화에 같은 `runId`·같은 본문으로 이미 올라간 글 줄을 빼고 그린다. 도구 사용 줄과 아직 쓰는 중인 글은 그대로 보인다. "처음부터 보기" 기록 페이지는 원래대로 전부 보여 준다.
+  - 검증: `pnpm build`, `npm test` 742 통과. 실제 앱 확인은 아직이다(화면 잠김).
+- 후속 8(2026-11-18 오전): 화면 잠금이 잠깐 풀렸을 때 실제 앱(todo-test-1117a)에서 확인했다.
+  - 변경 목록: 최상위 파일 뒤에 `docs`(3)·`tests`(4) 폴더 묶음, 파일마다 A 배지가 보인다. 상단에 "변경된 파일 11개 · 내 폴더에 반영"이 보인다.
+  - (b) 수정: 실행 출력 패널에 총괄 답변이 다시 나오지 않고 도구 사용 줄("파일 읽기 docs/review.md")만 남는다.
+  - 비교 화면(Monaco)과 한 번에 반영은 확인 전에 화면이 다시 잠겨 남았다.
+  - 다시 풀린 뒤 확인(같은 날 08:4x):
+    - 함정: 창이 다른 창에 가려지면 Chromium이 다시 그리지 않아 Orca 스크린샷이 옛 화면으로 남는다. 접근성 트리는 갱신된다. 모양을 보려면 `--restore-window`가 필요하다.
+    - 비교 화면: 새 파일인데 왼쪽(빈 이전 내용)이 빨간 빈 줄 하나로 보였다. 줄 번호 옆마다 +/− 표시가 빈 네모로 깨졌다(원인 미확인, 글꼴 정책은 `font-src 'self'`라 막힐 이유는 안 보임).
+      - 수정(`MonacoDiff`): 한쪽이 비면(새 파일·삭제 파일) 비교 대신 그 내용만 읽기 전용 편집기로 보여 준다. 비교일 때는 `renderIndicators:false`로 +/− 표시를 끄고 색으로만 구분한다.
+      - 확인: index.html이 깔끔한 읽기 전용 코드로 보인다. 수정 파일 비교의 네모 제거는 수정 파일이 있는 다음 시험에서 확인한다.
+    - 한 번에 반영: "내 폴더에 반영" → 확인 문구 → "반영하기" → "내 폴더에 반영했어요. 파일 11개를 쓰고 0개를 지웠어요." 원본 11개 파일의 수정 시각이 바뀌었고 내용 해시는 같다. `.elsecrew-*.tmp`는 남지 않았다.
+    - 개발 HMR로 `workbench.tsx`가 바뀌면 열린 프로젝트가 닫히고 시작 화면으로 돌아간다(개발 환경 한정).
+- 후속 9(2026-11-18): 새 빈 폴더(todo-test-1118a) 재시험 시작
+  - 프로젝트 전환 안내가 틀렸다: "상단에서 프로젝트를 닫아 주세요"라고 했지만 닫기는 지금 프로젝트 옆 ⋯ 메뉴의 "프로젝트 화면 닫기"에 있다. ko/en 문구를 실제 위치로 고쳤다.
+    - 함정: 번역 문자열 안에 큰따옴표를 넣으면 TS 문자열이 끊겨 dev 화면 전체가 멈춘다. 작은따옴표를 쓴다.
+  - 첫 작업 창에 "모델을 고르지 않은 역할은 추천 모델로 시작해요: 총괄, 기획, 디자인, 개발, 검증" 안내가 보이고, 보내기로 시작됐다(모델 자동 채움 경로).
+  - **디자인(Codex) 25초 실패 2회 → 원인 `webSearch`**
+    - 오늘 추천 모델 자동 채움으로 디자인 담당이 `gpt-6.2-sol`이 됐다(어제는 `gpt-6.1-sol`). 진행 기록 `turn item start unsupported other`.
+    - 개발 빌드에서만 항목 이름을 남기는 임시 진단으로 `webSearch`(Codex 호스티드 웹 검색, 기본 켜짐)임을 확인했다. 임시 진단은 제거했다.
+    - 조치: 모든 Codex 실행에 `-c web_search="disabled"`(core `codex_preflight::WEB_SEARCH_OFF`, 최상위 설정이며 기능 플래그가 아니다). sessionFlags 검사(`strip_unsupervised_tool_flags`)와 effective 검사(`unsupervised_tools_off`)는 `web_search`가 없거나 정확히 `"disabled"`일 때만 통과시킨다. 진단 단계 `turn item start unsupported web search`(TS 계약도 같이)를 추가했다. 동작은 그대로 fail-closed다.
+    - Codex 0.169 항목 종류 목록(실행 파일 문자열): userMessage, hookPrompt, agentMessage, functionCallOutput, reasoning, commandExecution, fileChange, mcpToolCall, dynamicToolCall, collabAgentToolCall, webSearch, imageView, sleep, imageGeneration, enteredReviewMode, contextCompaction 등. `view_image`·`sleep_tool` 기능은 켜져 있어 `imageView`·`sleep`도 같은 실패를 낼 수 있다(아직 관측 안 됨).
+    - 독립 검토(상시 검토자): 차단·중요 없음. 경미: 다른 검색 기능 플래그(`web_search_request`·`web_search_cached`·`standalone_web_search`)는 내부 로그상 모두 false임을 확인했다. Codex를 올릴 때 effective에서 `web_search`가 빠져도 통과하는 점을 점검한다.
+    - 검증: core codex_preflight+codex_events 68, sidecar provider_preflight_session/codex 17, named_/text_candidate 5, reserved_interactions 1, `npm test` 742 통과.
+  - 앱 재시작 직후 첫 실행이 `providerExecutableChanged`("provider executable could not be verified")로 한 번 막혔고, 다시 보내면 정상이었다. 11-13에 완화한 상위 폴더 stamp 오판이 서명 확인이 느린 첫 실행에서 아직 남은 것으로 추정한다. 이때 화면 문구("연결 상태와 역할 설정을 확인해 주세요")가 실제 원인과 맞지 않는다. 미해결.
+  - 웹 검색 끈 뒤 재시험: 디자인(Codex) 09:18 성공, 개발(Claude) 09:22 성공(앱 파일 4개). 검증(Codex, 읽기 전용)이 09:24 `turn stream request item/commandExecution/requestApproval`에서 실패했다. 읽기 전용 실행에서 명령 승인 요청이 오면 엔진이 받지 못하고 멈추는 것으로 보인다(미확인).
+  - **사용자 방향(2026-11-18)**: "웹 검색을 끄면 의미가 있나? 권한을 다 받아서 에이전트가 자유롭게 개발 가능해야 한다", "Orca 같은 것도 computer use 같은 권한을 다 받고 한다", "에이전트를 쓰는 방식·워크트리·변경 파일 관리는 Orca를 많이 벤치마킹하는 게 맞다". → 웹 검색 권한 구현은 보류하고 Orca 벤치마킹을 먼저 한다. 웹 검색 끄기(eb05b6af)는 실행이 멈추지 않게 하는 임시 조치이며 제품 방향이 아니다.
+  - 로컬 Orca 확인(사실): Orca 워크트리는 사용자 저장소의 실제 git worktree다(`~/orca/workspaces/<repo>/<이름>`, 실제 브랜치, 원본 `git worktree list`에 보임). 에이전트는 CLI를 터미널(TUI) 또는 채팅 화면으로 띄우고(`orca agent launch --surface chat|terminal`), 상태는 Claude `settings.json`·Codex `hooks.json`에 설치한 lifecycle hook으로 감지한다. 에이전트 간 협업은 메일함·작업·결정 게이트(`orca orchestration ...`)다. 포트 감지(`orca ports`), 정리 규칙(`workspace cleanup`), 변경 파일 열기(`file diff`, `file open-changed`)가 있다.
+  - Orca 벤치마킹 정리: `docs/proposals/m5-orca-benchmark.md`(로컬 Orca 1.4.261 확인 + 공개 저장소 stablyai/orca `c33696ad`·공식 문서 조사). 결정 필요: 사용자 저장소에 실제 브랜치·worktree를 만들지, 기본 권한 모드, fail-closed 완화 범위, 앱 전용 로그인 유지 여부.
+  - **사용자 결정(2026-11-18, 벤치마킹 제안 §4)**: (1) 작업 공간은 사용자 저장소의 실제 git worktree·브랜치로 바꾼다(작업마다 브랜치, 단계별 자동 커밋, 반영=브랜치 합치기·충돌 시 작업 쪽 우선). (2) 새 프로젝트 기본 권한은 "전부 허용"(첫 작업 때 한 번 확인, 언제든 변경). (3) 로그인은 앱 전용 로그인을 유지한다. 진행 순서는 제안 §5를 따른다.
+  - **1단계 구현(제안 §3.1의 2·3): 모르는 Codex 이벤트로 실행을 멈추지 않는다, 웹 검색을 켠다**
+    - `codex_events/stream.rs`:
+      - 요청은 먼저 `charge_request`로 예산을 차감한다. 지원하는 승인이면 기존 경로로 간다.
+      - 해석할 수 없는 정상 형태의 요청(`id`·`method`·`params`만)은 `Observed::Refused`로 바로 답한다. 명령·파일 승인은 `decline`, 그 밖에는 JSON-RPC -32601이다. 같은 id는 다시 받지 않는다.
+      - 모르는 item 종류는 시작·완료 짝을 계속 추적하되 Private으로 무시한다. 모르는 알림도 Private이다. 단, `turn/`으로 시작하는 모르는 알림은 턴 종료일 수 있어 실패로 처리한다.
+    - `incremental.rs`는 거절을 `NativeFrame::Refusal`로 즉시 보낸다.
+    - **검증 담당 실패의 진짜 원인**: Codex 0.169 명령 승인 요청에 `availableDecisions`·`additionalPermissions` 필드가 새로 생겼고, 엄격 파서가 이를 거부했다(실행 파일의 `CommandExecutionRequestApprovalParams` 16필드로 확인). `availableDecisions`(null 또는 16개 이하 배열)를 허용한다. `additionalPermissions`는 null만 허용하고, 값이 있으면 거절 경로로 간다.
+    - 웹 검색: `WEB_SEARCH_SETTING = web_search="live"`로 바꿨다. 검사기는 값이 없거나 정확히 "live"일 때만 통과시킨다. 브라우저·computer use 등 6개 기능은 다음 단계(권한 항목)까지 끈 상태로 둔다.
+    - 독립 검토: 권한을 넓히는 결함은 없다. 중요 I1(0.169 승인 요청 모양)과 경미 M1(거절한 id 재사용)·M2(모르는 `turn/` 알림)를 반영했다. M3(-32601에 Codex가 어떻게 반응하는지)은 실제 재시험으로 확인한다.
+    - 검증: core codex 126, sidecar 영향 35 통과.
+  - 재시험 결과(엔진 완화 뒤): 검증(Codex, 읽기 전용)이 처음으로 끝까지 성공했다(09:55, 완료 기준 23개 중 통과 7·실패 0·확인 못 함 16). 개발이 지적 3건을 고쳤다(09:58). 그다음 단계가 `providerBusy`(다음 담당 연결이 아직 사용 중)로 멈췄다. 원인은 미조사.
+  - **변경 탭 Orca식 개편(사용자: "변경 탭 UI는 Orca처럼 볼 수 있게", 중간 화면에 "설마 이 UI로 확정할 건 아니지?")**
+    - 엔진: 변경 항목에 선택 필드 `added`·`removed`(줄 수)를 넣었다. 추적 파일은 `git diff --numstat`, 새 텍스트 파일은 `line_count`, 앱이 찾은 이름 변경은 0/0, 바이너리·모름은 없음이다. Rust 프로토콜과 TS 검사기는 두 값이 함께, 텍스트 항목에만, 안전한 정수일 때만 받는다(테스트 추가).
+    - 목록(`src/m5/changes-view.tsx` `ChangeList`): 파일 이름 · 흐린 폴더 · `+N −M` · 색 상태 글자. 목록/폴더 전환(저장됨), 도구줄에 전체 `+N −M` · 새로 고침 · 모두 보기를 둔다.
+    - "모두 보기"(`AllChanges`): Orca "All Changes"처럼 모든 파일을 한 줄 비교로 위아래로 잇는다.
+      - 머리줄은 경로와 `+N −M`, 마우스를 올리면 "열기"가 보인다.
+      - 새 파일·지운 파일은 모든 줄을 초록·빨강으로 칠한다. 바뀌지 않은 구간은 접는다. 파일마다 따로 스크롤하지 않고 화면 전체를 스크롤한다(`MonacoDiff fit`).
+      - 화면에 들어올 때 하나씩 불러온다(`controller.readDiff`). 목록이 새로 고쳐져도 종류·줄 수가 바뀐 파일만 다시 읽는다. 목록에서 파일을 누르면 그 위치로 이동한다.
+    - 사용자 지적: 실행 출력의 긴 명령이 카드 밖으로 넘쳤다. 실행 카드·출력에 `min-width:0`을 주고, 대상 글자는 말줄임으로 고쳤다.
+    - 확인: 실제 앱에서 목록 줄 수(예: app.js +276), 모두 보기 화면, 말줄임을 캡처로 확인했다. 수정 파일의 비교(빨강/초록 섞임)는 이번 시험에 수정 파일이 없어 아직 보지 못했다.
+    - 검증: `npm test` 742 + 새 계약 테스트 1, protocol 70, sidecar project 235 + 줄 수 1 통과.
+  - **사용자 결정(2026-11-18, worktree 설계)**
+    - Orca도 git이 아닌 폴더를 받는다는 사용자 지적을 확인했다. 로컬 `orca worktree list`에서 ObsidianVault 폴더 작업들이 브랜치 없이 같은 경로를 쓴다. → 그냥 폴더 프로젝트(그 자리에서 작업)를 제안했다. 확인은 아직이다.
+    - 브랜치: Orca는 worktree 안에서 브랜치를 바꿀 수 있다(`WorkspaceBranchPicker`, `branch-switch.ts`). Elsecrew는 "작업 하나 = worktree 하나 = 브랜치 하나"로 고정한다(사용자 제기, 추천 수용).
+    - 충돌: "그냥 1번만" — 합치기 직전에 내 폴더의 최신 내용을 작업 브랜치로 먼저 가져온다. 충돌은 작업 공간에서 팀이 정리·테스트한 뒤 합친다. 파일 통째 최신 우선은 병렬 작업의 변경을 지우므로 worktree 전환 때 대체한다. 상세는 제안 §3.2.1.
+  - **`providerBusy` 멈춤 수정**: 팀 단계는 "점검(capability) → 시작(start)" 순서로 진행된다. 바쁨 재시도(최대 60초, 1초 간격)는 점검에만 있었다. 앞 담당(Claude)이 끝난 직후 같은 프로필을 쓰는 다음 시작이 정리 중인 잠금에 걸리면 팀이 바로 멈췄다(추정 원인. 점검의 `refresh:true` 모델 목록 확인과 겹칠 가능성도 있다). 이제 시작이 `providerBusy`면 같은 대기 규칙으로 점검부터 다시 한다. 다시 보내는 요청은 `attempt_request_id`로 새 id(`…_retryN`)를 쓴다. 대기 상태는 시작이 받아들여질 때만 끝난다. 검증: orchestration 31(새 테스트 `a_busy_start_waits_and_retries_under_a_new_request_id`) 통과.
+  - 사용자 질문("실제 실행 취소"와 "작업 중단"의 차이): 위쪽 버튼은 실행 하나 취소(`cancelAgentRun`, 1:1 대화 시절), 아래쪽은 팀 작업 전체 중단(`cancelTeamTask`)이다. 팀 작업에서는 실행 하나만 멈춰도 팀이 멈추므로 결과가 같다. 팀 작업에서는 위쪽 버튼을 숨기고 예전(schemaVersion 1) 대화에만 남겼다.
+  - **실행 출력 작업 기록이 같은 말만 반복되던 문제(사용자 지적: "찾아보기", "명령 실행"만 줄줄이 나옴)**
+    - Claude 검색(Glob/Grep): 대상이 작업 공간 전체면 위치가 비어 "찾아보기"만 보였다. 이제 모델이 쓴 검색어와 폴더를 함께 보여 준다(`search_target`, 예: "TODO · src"). 이름표는 Glob은 "파일 찾기", Grep은 "내용 검색"이다.
+    - Codex 명령: 기록에 종류만 남았다. `ToolEvent.command`(시작 때 Codex가 보고한, 이미 검증된 명령 줄)를 실어 첫 줄을 보여 준다. `/bin/zsh -lc "…"` 같은 셸 감싸기는 벗긴다(`unwrap_shell`).
+    - 예전 방침("명령 문자열을 기록하지 않는다")은 Orca 방향에 따라 바꿨다. 파일 내용은 여전히 싣지 않는다. `codex_durable_native_delivery_and_cancel` 기대값을 고쳤다.
+    - 검증: sidecar native/codex/claude/output 82, activity 4, core codex 126, `npm test` 743 통과.
+  - **todo-test-1118a 처음부터 끝까지 완료**: 10:44 팀 작업이 "답변을 마쳤어요"로 끝났다(10:31부터 담당이 여러 번 바뀌었고 `providerBusy` 멈춤 없음). 내 폴더 반영은 파일 10개였다. 앱 자체 테스트는 jsc로 10+3+3 통과했다. 헤드리스 Chrome 일반 점검(`scratchpad/cdp/check2.mjs`, 고정 id 없이) 10/10 통과: 빈칸 막기와 안내, 추가(꺾쇠 보존), 남은 개수, 완료, 새로고침 유지, 삭제.
+  - 결과 카드 정리(사용자: "UI도 좀 아닌 거 같다"): 긴 안내 문단, 버튼, 카드 밖 "작업 공간 버리기" → 한 줄 결과 막대(`m5-result-bar`). 내용은 "✓ 팀 작업 완료 · 변경 파일 N개 +N · 아직 작업 공간에만 있어요 [변경 보기][내 폴더에 반영] 버리기"이고, 버리기는 확인 창이 그대로인 작은 링크(`ChatWorkspaceDiscard compact`)다. 지금 복사본 구조에서의 임시 개선이다.
+  - **사용자 지적(방향)**: "worktree에서 브랜치를 만들어 작업했으면 worktree 기준으론 이미 된 것이고, 남은 건 main에 머지할지 말지다." → 동의. worktree 전환 뒤 결과 막대는 "브랜치 · 변경 · [변경 보기][main에 합치기] · 버리기(worktree·브랜치 삭제)"가 된다. 폴더 프로젝트는 합치기가 없다. 화면 개념이 이 구조에 달려 있으므로 **진행 순서를 바꿔 worktree 전환을 권한 모드보다 먼저** 한다.
+  - **작업 공간 전환 설계 문서**: `docs/proposals/m5-real-worktrees.md`. 현재 구조 조사(하위 조사 에이전트)에서 확인한 사실: 작업 공간은 원본에서 `git bundle`로 받아 푼 독립 저장소다. "원본과 무관"이라는 가정이 manifest 고정값(Rust/TS/SQL), 원본 `.git` 다이제스트 전후 비교, snapshot invariant(remote·alternates·ref·원본 경로 0), OS 샌드박스(`.git` 쓰기 금지), 저장 rename 기준 경로에 박혀 있다. 설계 요지: manifest v2(`gitWorktree`/`shadowFolder`, branchName, baseRef), worktree는 앱 데이터에 둠(추천), 앱이 단계마다 자동 커밋, 에이전트는 원본 `.git` 읽기만, 합치기는 작업 쪽 병합 후 대상 브랜치 fast-forward만, 그림자 git은 bare 저장소 + `--work-tree`, v1 작업은 그대로 유지. 열린 결정 4개(위치·커밋 작성자·에이전트 커밋 허용·lfs)는 사용자 확인 대기.
+  - 저장 공간 확인(사용자 질문): 디스크 926Gi 중 503Gi 남음. 이 작업 관련은 약 16.5GB이고, 대부분은 Rust 빌드 산출물 `target/` 15G(debug/deps 9.7G, incremental 4.3G)다. 그 밖에 node_modules 0.5G, 앱 데이터 243M, 시험용 임시 폴더 457M(Orca 소스 사본·헤드리스 Chrome 프로필).
+  - **작업 공간 설계 결정(사용자)**: (1) worktree 위치는 Orca처럼 보이는 폴더 `~/elsecrew/workspaces/<프로젝트>/<작업 이름>`이 기본이고 설정에서 바꿀 수 있다(새 작업부터 적용, 작업마다 경로 기록). 사용자 질문 "앱 데이터 안이면 실제 파일이 안 생기나?"에는 "생긴다, 숨김 위치일 뿐"이라고 답했다. (2) 자동 커밋 작성자는 고정 `Elsecrew`. (3) 에이전트 직접 커밋은 막고 앱이 커밋한다. (4) LFS 등 필터 저장소는 처음엔 미지원으로 안내한다. 설계 문서 §3.2·§8에 반영했다.
+  - **작업 공간 전환 1단계(기반) 시작**: 앱이 실행하는 모든 git 명령(`fixed_git_command`)에 환경 변수 설정(`GIT_CONFIG_COUNT=3`)으로 `core.hooksPath=/dev/null`, `core.fsmonitor=false`, `protocol.allow=never`를 건다. 저장소 자체 설정보다 우선하므로 실제 사용자 저장소의 훅·fsmonitor·원격 접속이 앱의 git 호출에서 돌지 않는다. 테스트 `fixed_git_commands_never_run_repository_hooks`를 추가했고, 같은 설정에서 일반 git은 훅을 실행함을 확인해 테스트가 의미 있음을 확인했다. project 테스트 237 통과.
+  - 사용자 질문: 빌드 캐시 15G는 Rust에서 정상 범위라고 답했다(테스트·일반 빌드 산출물, 증분 캐시, 자동 정리 없음, `cargo clean`으로 비움). Docker 일괄 삭제 명령은 안내만 하고 실행하지 않았다.
+  - **1단계: 작업 공간 기록 형식 v2 계약**(아직 쓰는 곳 없음, 동작 변화 없음)
+    - Rust `validate_worktree_manifest_v2`(검사기 이름 `worktreeManifestV2`)와 TS `validateWorktreeManifestV2`를 같은 공유 fixture로 맞췄다. fixture는 유효 4, 무효 18개다.
+    - 필드: 종류 `gitWorktree`|`shadowFolder`, `canonicalSourceRoot`, `worktreePath`, `gitDir`, `sourceMutationPolicy` `worktreeRefsOnly`|`inPlace`, `branchName`(`elsecrew/…`, git이 받는 이름), `baseRef`(null 가능), `headMode:"branch"`, lifecycle `active|merged|abandoned|recoveryRequired`.
+    - 규칙: gitWorktree는 원본 밖에 있고 `gitDir`=원본/.git이다. shadowFolder는 작업 폴더=원본이고 `gitDir`은 원본 밖이다.
+    - DB 검사(V14)와 v2 기록 쓰기는 2단계에서 한다.
+    - 검증: protocol 70, TS 계약 7, `npm test` 743 통과.
+  - 시험 방법 함정: 사용자가 컴퓨터를 쓰는 중에 `--restore-window`로 창을 앞으로 가져오면 사용자의 키 입력("gi", "rm ")이 입력란에 섞인다. 사용자가 깨어 있을 때는 창을 앞으로 가져오지 않고 `orca computer set-value`로 값을 넣는다(React 상태에도 반영됨을 확인).
+- 다음 할 일: 화면 잠금이 풀리면 실제 앱에서 Monaco 비교·목록·한 번에 반영과 (b) 수정을 확인한다. 새 빈 폴더로 처음부터 재시험한다(모델 자동 채움 확인). (a)를 정리한다. 실패 이유를 사용자에게 보여 줄 기록을 남길지 검토한다.
+
+### 2026-11-17 · by Claude Opus 5.5 (claude-opus-5-5) — 새 작업 시작 때 "다른 확인이 프로필을 쓰는 중" 오류
+- 사용자 보고: 에이전트가 모두 연결돼 있는데 새 작업을 만들자 "선택한 역할·모델을 지금 실행할 수 없어요"가 떴다. 자세히 보기에는 `requestBlocked: another provider check currently owns this profile; retry after it finishes`가 있었다.
+- 원인(로그·코드 확인):
+  - 실행 전 확인(`agent.getCapabilities`)이 4초쯤 걸린 뒤 `providerBusy`로 거절됐다(`last-transport-progress.json`).
+  - 이 오류는 같은 공급자 잠금을 다른 확인(모델 목록·로그인 확인 등)이 잠시 쥐고 있을 때 나온다. 엔진은 다시 시도하라는 뜻으로 돌려주지만, 화면과 팀 작업은 다시 시도하지 않고 바로 실패 처리했다.
+  - 확인 시점에는 잠금 파일이 남아 있지 않았다. 즉 일시적인 경합이었다.
+  - 무엇이 쥐고 있었는지는 기록이 없어 확정하지 못했다(추정: 새 작업 화면의 모델 목록 조회).
+- 처리:
+  - 화면(`chat-state.ts`의 `whileProviderBusy`): 실행 전 확인이 이 오류면 1초마다 최대 60초 다시 묻는다. 그 동안 '확인 중' 안내를 그대로 둔다. 확인은 아무것도 시작하지 않으므로 다시 물어도 안전하다. 실행 시작(`startAgentRun`)은 다시 시도하지 않는다.
+  - 팀 작업(`orchestration_dispatch.rs`, `Sidecar.workflow_busy`): 다음 담당의 확인이 `providerBusy`면 멈추지 않고 1초 뒤 다시 묻는다. 60초 동안 계속 바쁘면 예전처럼 멈춘다.
+- 작업 방식: 사용자가 띄워 둔 개발 앱을 Orca 화면 조작으로 읽기만 했다(시작 화면, 프로젝트 test-todo). 실제 실행은 사용량이 나가므로 누르지 않았다.
+- 검증: 화면 테스트 2개(`tests/m5-chat-provider-busy.test.mts`), 엔진 테스트 `a_briefly_busy_provider_delays_the_team_step_instead_of_stopping_it`, orchestration 관련 30개, `npm test` 738, `pnpm build` 통과. 실제 앱 재현은 하지 않았다.
+
 ### 2026-11-17 · by Claude Opus 5.5 (claude-opus-5-5) — 프로세스 256개 한계·재부팅 뒤 pid 재사용 해결
 - 사용자 요청: 직전 엔트리의 다음 할 일 1순위(프로세스 증거 재설계)를 진행한다.
 - 원인:

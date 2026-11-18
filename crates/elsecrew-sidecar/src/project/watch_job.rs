@@ -29,7 +29,19 @@ pub(super) struct Completed {
 impl Completed {
     pub fn matches_capability(&self, current: &Dir) -> Result<bool, ProjectFailure> {
         same_directory(&self.held_worktree, current).and_then(|same| {
-            Ok(same && same_directory(&self.held_git, &open_real_child_dir(current, ".git")?)?)
+            Ok(same && same_directory(&self.held_git, &git_directory(current, &self.active)?)?)
+        })
+    }
+}
+
+/// A v1 copy's own `.git` folder; a real worktree has a `.git` file, so the
+/// worktree folder itself stands in (its link is checked by the verifier).
+fn git_directory(worktree: &Dir, active: &ActiveProject) -> Result<Dir, ProjectFailure> {
+    if active.kind == WorkspaceKind::Snapshot {
+        open_real_child_dir(worktree, ".git")
+    } else {
+        worktree.try_clone().map_err(|error| {
+            ProjectFailure::recovery(format!("could not clone watcher capability: {error}"))
         })
     }
 }
@@ -90,7 +102,7 @@ impl ProjectManager {
             })
         };
         let held_worktree = clone_dir(&worktree)?;
-        let held_git = open_real_child_dir(&worktree, ".git")?;
+        let held_git = git_directory(&worktree, &active)?;
         let cancel = Arc::new(AtomicBool::new(false));
         // Only copy directory capabilities needed by the existing verifier.
         // No Storage connection, application owner, pending save or watcher is
@@ -110,6 +122,7 @@ impl ProjectManager {
             data_root: self.data_root.clone(),
             data_dir: clone_dir(&self.data_dir)?,
             worktrees_root: self.worktrees_root.clone(),
+            git_worktrees_enabled: self.git_worktrees_enabled,
             manifests_root: self.manifests_root.clone(),
             worktrees_dir: clone_dir(&self.worktrees_dir)?,
             manifests_dir: clone_dir(&self.manifests_dir)?,

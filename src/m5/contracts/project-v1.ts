@@ -240,6 +240,18 @@ export function validateWorktreeManifestV2(value: unknown): WorktreeManifestV2 {
   return object as unknown as WorktreeManifestV2;
 }
 
+/** Either record kind: a v1 copy (still opened and finished) or a v2 task
+ * worktree / shadow folder. Mirrors the Rust "worktreeManifest" validator. */
+export type WorktreeManifest = WorktreeManifestV1 | WorktreeManifestV2;
+export function validateWorktreeManifest(value: unknown): WorktreeManifest {
+  const version = (value as { schemaVersion?: unknown } | null)?.schemaVersion;
+  return version === PROJECT_SCHEMA_VERSION_V2 ? validateWorktreeManifestV2(value) : validateWorktreeManifestV1(value);
+}
+/** The user's folder the workspace came from. */
+export function manifestSourceRoot(manifest: WorktreeManifest): string {
+  return manifest.schemaVersion === PROJECT_SCHEMA_VERSION_V2 ? manifest.canonicalSourceRoot : manifest.canonicalGitRoot;
+}
+
 export function validateStandaloneSnapshotInvariantV1(value: unknown): void {
   const object = requireObject(value, "standalone snapshot invariant");
   exactKeys(object, [

@@ -113,7 +113,13 @@ pub fn validate_project_payload_v1(
 ) -> Result<(), ProjectContractError> {
     match validator {
         "projectIdentity" => validate_project_identity(value),
-        "worktreeManifest" => validate_worktree_manifest(value),
+        // Either record kind: a v1 copy (still opened and finished) or a v2
+        // worktree/shadow folder (2026-11-18 design). Callers that only
+        // handle one kind check `schemaVersion` themselves.
+        "worktreeManifest" => match value.get("schemaVersion").and_then(Value::as_u64) {
+            Some(PROJECT_SCHEMA_VERSION_V2) => validate_worktree_manifest_v2(value),
+            _ => validate_worktree_manifest(value),
+        },
         "worktreeManifestV2" => validate_worktree_manifest_v2(value),
         "standaloneSnapshotInvariant" => validate_standalone_snapshot_invariant(value),
         "sourceMutationTrace" => validate_source_mutation_trace(value),

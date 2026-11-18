@@ -45,13 +45,13 @@ import {
   validateProjectIdentityV1,
   validateTreePageV1,
   validateWatchEventV1,
-  validateWorktreeManifestV1,
+  validateWorktreeManifest,
   type ProjectCloseResultV1,
   type ProjectWatchResultV1,
   type ProjectIdentityV1,
   type TreePageV1,
   type WatchEventV1,
-  type WorktreeManifestV1,
+  type WorktreeManifest,
 } from "../src/m5/contracts/project-v1.ts";
 import {
   sha256FileVersionV1,
@@ -488,7 +488,7 @@ export class SidecarClientV1 {
     return this.#request("project.catalog", validateProjectCatalogRequest(input)) as Promise<ProjectCatalogResult>;
   }
   getProjectTree(input: { projectId: string; parentPath: string; cursor: string | null }): Promise<TreePageV1> { return this.#request("project.getTree", input) as Promise<TreePageV1>; }
-  createProjectWorktree(input: { projectId: string }): Promise<WorktreeManifestV1> { return this.#request("project.createWorktree", input) as Promise<WorktreeManifestV1>; }
+  createProjectWorktree(input: { projectId: string }): Promise<WorktreeManifest> { return this.#request("project.createWorktree", input) as Promise<WorktreeManifest>; }
   closeProject(input: { projectId: string }): Promise<ProjectCloseResultV1> { return this.#request("project.close", input) as Promise<ProjectCloseResultV1>; }
   readFile(input: { projectId: string; path: string }): Promise<FileReadDescriptorV1> { return this.#request("file.read", input) as Promise<FileReadDescriptorV1>; }
   beginFileSave(input: Omit<SaveBeginV1, "saveId" | "chunkBytes">): Promise<{ saveId: string; chunkBytes: SaveBeginV1["chunkBytes"] }> { return this.#request("file.save", input) as Promise<{ saveId: string; chunkBytes: SaveBeginV1["chunkBytes"] }>; }
@@ -937,7 +937,7 @@ export class SidecarClientV1 {
         return value;
       }
       case "project.createWorktree": {
-        const value = validateWorktreeManifestV1(response.result);
+        const value = validateWorktreeManifest(response.result);
         assertResponseField(value, pending.params, "projectId");
         return value;
       }

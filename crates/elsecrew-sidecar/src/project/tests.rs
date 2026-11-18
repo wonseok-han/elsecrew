@@ -6591,3 +6591,69 @@ fn fixed_git_commands_never_run_repository_hooks() {
     ).unwrap();
     assert!(!marker.exists(), "a repository hook ran through the app's Git command");
 }
+
+/// Real worktrees (docs/proposals/m5-real-worktrees.md §3.2): a task gets a
+/// worktree of the user's repository on its own branch; the user's folder,
+/// its branch and its status stay as they were.
+#[cfg(target_os = "macos")]
+#[test]
+fn task_workspaces_become_real_worktrees_on_their_own_branch() {
+    let mut fixture = Fixture::open();
+    fixture.manager.git_worktrees_enabled = true;
+    // An uncommitted edit in the user's folder stays there and is no obstacle.
+    fs::write(fixture.source.join("src/delete.txt"), b"user is editing\n").unwrap();
+    let head = git_text(&fixture.source, ["rev-parse", "HEAD"]);
+    let current = git_text(&fixture.source, ["symbolic-ref", "--short", "HEAD"]);
+    let status = git_text(&fixture.source, ["status", "--porcelain"]);
+    let manifest = fixture
+        .manager
+        .prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_real_worktree")
+        .unwrap()
+        .result;
+    validate_project_payload_v1("worktreeManifest", &manifest).unwrap();
+    assert_eq!((manifest["schemaVersion"].as_u64(), manifest["workspaceKind"].as_str()), (Some(2), Some("gitWorktree")));
+    assert_eq!(manifest["baseRef"], current.trim());
+    assert_eq!(manifest["baseCommit"], head.trim());
+    let branch = manifest["branchName"].as_str().unwrap().to_owned();
+    assert!(branch.starts_with("elsecrew/task-"), "{branch}");
+    let path = PathBuf::from(manifest["worktreePath"].as_str().unwrap());
+    assert_eq!(fs::read(path.join("src/edit.txt")).unwrap(), b"hello");
+    assert_eq!(fs::read(path.join("src/delete.txt")).unwrap(), b"delete me\n");
+    assert_eq!(git_text(&fixture.source, ["rev-parse", "HEAD"]), head);
+    assert_eq!(git_text(&fixture.source, ["symbolic-ref", "--short", "HEAD"]), current);
+    assert_eq!(git_text(&fixture.source, ["status", "--porcelain"]), status);
+    assert_eq!(git_text(&fixture.source, ["rev-parse", &format!("refs/heads/{branch}")]), head);
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+
+    // Edits show against the base, before and after the app commits them.
+    fs::write(path.join("src/edit.txt"), b"one\ntwo\n").unwrap();
+    let changed = |fixture: &mut Fixture| {
+        let summary = fixture.manager.diff_summary(&fixture.storage, &fixture.project_id).unwrap();
+        summary.result["entries"].as_array().unwrap().iter().any(|entry| entry["path"] == "src/edit.txt")
+    };
+    assert!(changed(&mut fixture));
+    git_raw(&path, ["add", "-A"]);
+    git_raw(&path, ["-c", "user.name=Elsecrew", "-c", "user.email=elsecrew@local", "commit", "-q", "-m", "step"]);
+    assert!(changed(&mut fixture));
+    assert_eq!(git_text(&fixture.source, ["rev-parse", "HEAD"]), head);
+
+    // Leaving the task branch is not the task's workspace any more.
+    git_raw(&path, ["checkout", "-q", "--detach"]);
+    assert!(fixture.manager.diff_summary(&fixture.storage, &fixture.project_id).is_err());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn repositories_with_content_filters_are_refused_before_anything_is_made() {
+    let mut fixture = Fixture::open();
+    fixture.manager.git_worktrees_enabled = true;
+    git_raw(&fixture.source, ["config", "filter.lfs.smudge", "git-lfs smudge -- %f"]);
+    let refs = git_text(&fixture.source, ["for-each-ref"]);
+    let error = fixture
+        .manager
+        .prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_filtered")
+        .unwrap_err();
+    assert!(error.detail.contains("content filters"), "{}", error.detail);
+    assert_eq!(git_text(&fixture.source, ["for-each-ref"]), refs);
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+}

@@ -3,8 +3,8 @@ import {
   exactKeys,
   requireObject,
   requireSafeUnsigned,
-  validateWorktreeManifestV1,
-  type WorktreeManifestV1,
+  validateWorktreeManifest,
+  type WorktreeManifest,
 } from "./project-v1.ts";
 import {
   APP_SCHEMA_VERSION,
@@ -191,7 +191,7 @@ export interface PrepareChatWorkspaceRequestV1 { projectId: string; applicationB
 export interface PreparedChatWorkspaceV1 {
   schemaVersion: typeof G5_SCHEMA_VERSION_V1;
   preparationId: string;
-  manifest: WorktreeManifestV1;
+  manifest: WorktreeManifest;
   bindingState: "unbound" | "bound" | "abandoned";
   boundChatId: string | null;
   createdAt: string;
@@ -420,7 +420,7 @@ export function validatePreparedChatWorkspaceV1(value: unknown): PreparedChatWor
   ]);
   schema(object.schemaVersion);
   requireId(object.preparationId, "preparationId");
-  const manifest = validateWorktreeManifestV1(object.manifest);
+  const manifest = validateWorktreeManifest(object.manifest);
   const bindingState = oneOf(object.bindingState, ["unbound", "bound", "abandoned"] as const, "prepared binding state");
   if (bindingState === "bound") requireId(object.boundChatId, "boundChatId");
   else if (object.boundChatId !== null) fail(`${bindingState} preparation cannot have boundChatId`);
@@ -832,7 +832,7 @@ function assertSamePreparedIdentity(
   }
 }
 
-function sameManifestExceptLifecycle(before: WorktreeManifestV1, after: WorktreeManifestV1): boolean {
+function sameManifestExceptLifecycle(before: WorktreeManifest, after: WorktreeManifest): boolean {
   const { lifecycle: _beforeLifecycle, ...beforeIdentity } = before;
   const { lifecycle: _afterLifecycle, ...afterIdentity } = after;
   return sameJson(beforeIdentity, afterIdentity);

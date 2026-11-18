@@ -154,6 +154,18 @@ impl Sidecar {
         ).map(|_| ())
     }
 
+    fn commit_team_step(&mut self, chat_record: &Value, message: &str) -> Result<bool, ProjectFailure> {
+        let field = |key: &str| chat_record[key].as_str().map(str::to_owned)
+            .ok_or_else(|| ProjectFailure::recovery("chat record omitted its workspace identity"));
+        let address = crate::project::WorkspaceAddress {
+            chat_id: field("chatId")?,
+            project_id: field("projectId")?,
+            worktree_id: field("worktreeId")?,
+            workspace_identity: field("workspaceIdentity")?,
+        };
+        self.projects.workspace_commit_step(&self.storage, &address, message)
+    }
+
     pub(super) fn cancel_team_task(
         &mut self,
         request: RequestV1,
@@ -626,6 +638,15 @@ impl Sidecar {
                 };
                 let finished_role = state.role.clone();
                 let finished_instruction = state.instruction.clone();
+                // A real worktree records each member's work on the task
+                // branch, finished or not; a failed record never stops the team.
+                if finished_role != "coordinator" {
+                    let summary = format!("{}: {}", role_report_title(&finished_role, &chat_record),
+                        text.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or("작업 기록"));
+                    if let Err(error) = self.commit_team_step(&chat_record, &summary) {
+                        eprintln!("team step not recorded on the task branch: {}", error.detail);
+                    }
+                }
                 if state.finish(run, text, &chat_record["roleSnapshots"]).is_err() {
                     // Distinguish a stopped/failed member from an unusable report or decision.
                     let code = if run["state"] != "succeeded" { "teamMemberNotSucceeded" }
