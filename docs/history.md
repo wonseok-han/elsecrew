@@ -127,6 +127,7 @@
   - **사용자 방향(2026-11-18)**: "웹 검색을 끄면 의미가 있나? 권한을 다 받아서 에이전트가 자유롭게 개발 가능해야 한다", "Orca 같은 것도 computer use 같은 권한을 다 받고 한다", "에이전트를 쓰는 방식·워크트리·변경 파일 관리는 Orca를 많이 벤치마킹하는 게 맞다". → 웹 검색 권한 구현은 보류하고 Orca 벤치마킹을 먼저 한다. 웹 검색 끄기(eb05b6af)는 실행이 멈추지 않게 하는 임시 조치이며 제품 방향이 아니다.
   - 로컬 Orca 확인(사실): Orca 워크트리는 사용자 저장소의 실제 git worktree다(`~/orca/workspaces/<repo>/<이름>`, 실제 브랜치, 원본 `git worktree list`에 보임). 에이전트는 CLI를 터미널(TUI) 또는 채팅 화면으로 띄우고(`orca agent launch --surface chat|terminal`), 상태는 Claude `settings.json`·Codex `hooks.json`에 설치한 lifecycle hook으로 감지한다. 에이전트 간 협업은 메일함·작업·결정 게이트(`orca orchestration ...`)다. 포트 감지(`orca ports`), 정리 규칙(`workspace cleanup`), 변경 파일 열기(`file diff`, `file open-changed`)가 있다.
   - Orca 벤치마킹 정리: `docs/proposals/m5-orca-benchmark.md`(로컬 Orca 1.4.261 확인 + 공개 저장소 stablyai/orca `c33696ad`·공식 문서 조사). 결정 필요: 사용자 저장소에 실제 브랜치·worktree를 만들지, 기본 권한 모드, fail-closed 완화 범위, 앱 전용 로그인 유지 여부.
+  - **사용자 결정(2026-11-18, 벤치마킹 제안 §4)**: (1) 작업 공간은 사용자 저장소의 실제 git worktree·브랜치로 바꾼다(작업마다 브랜치, 단계별 자동 커밋, 반영=브랜치 합치기·충돌 시 작업 쪽 우선). (2) 새 프로젝트 기본 권한은 "전부 허용"(첫 작업 때 한 번 확인, 언제든 변경). (3) 로그인은 앱 전용 로그인을 유지한다. 진행 순서는 제안 §5를 따른다.
   - 시험 방법 함정: 사용자가 컴퓨터를 쓰는 중에 `--restore-window`로 창을 앞으로 가져오면 사용자의 키 입력("gi", "rm ")이 입력란에 섞인다. 사용자가 깨어 있을 때는 창을 앞으로 가져오지 않고 `orca computer set-value`로 값을 넣는다(React 상태에도 반영됨을 확인).
 - 다음 할 일: 화면 잠금이 풀리면 실제 앱에서 Monaco 비교·목록·한 번에 반영과 (b) 수정을 확인한다. 새 빈 폴더로 처음부터 재시험한다(모델 자동 채움 확인). (a)를 정리한다. 실패 이유를 사용자에게 보여 줄 기록을 남길지 검토한다.
 
@@ -150,6 +151,8 @@
 - 위저드 6단계: 에이전트 선택 → 진단 → 설치 → 로그인 → 첫 프로젝트 → 졸업식
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **2026-11-18 Orca 방향 전환(사용자 결정)**: 에이전트 실행·워크트리·변경 관리는 Orca를 벤치마킹한다(`docs/proposals/m5-orca-benchmark.md`). 작업 공간은 사용자 저장소의 실제 git worktree·브랜치, 기본 권한은 "전부 허용", 로그인은 앱 전용 유지. 허용된 도구(웹 검색 등)는 끄지 않고, 모르는 이벤트로 실행을 멈추지 않는 방향이다. 기존 "감독 못 하는 도구는 끈다"(144f5601, eb05b6af)는 임시 조치였다.
 - **에이전트 CLI 내부 흔적은 원본 반영에서 제외(2026-11-17)**: Claude Code는 작업 복사본에 `.claude/.cc-writes`(0700)를 만든다. 반영 검토(`review.rs` `AGENT_SCRATCH`)는 이 경로를 통째로 빼고, 원본이 그 안의 파일을 추적하면 거절한다. 다른 CLI 폴더를 추가할 때는 CLI만 쓰고 에이전트는 쓸 수 없는 경로인지부터 확인한다. Codex 0.169는 browser/computer use·image generation이 기본으로 켜져 있어 실행 인자로 끈다(`UNSUPERVISED_TOOL_FEATURES`). 새 Codex 버전마다 `codex-profile-v1/logs_2.sqlite`의 feedback_tags `feature.*`를 다시 점검한다.
 - **dev 앱 자동 조작(2026-11-17)**: 폴더 선택 창은 Orca로 뒤에서 조작할 수 없다. 개발 빌드에서는 `~/Library/Application Support/Elsecrew/dev-pick-directory.txt`에 경로를 적으면 다음 '프로젝트 추가'가 그 폴더를 고른다(한 번만, 빈 폴더 확인도 생략, 패키지 앱은 무시). 엔진 watcher는 `file.changed`만 보내고 `diff.changed`는 보내지 않는다. 화면이 목록을 갱신하려면 `file.changed`를 받아야 한다. 번역 파일을 바꾸면 dev HMR이 깨지므로 Cmd+R로 다시 불러온다.
 
