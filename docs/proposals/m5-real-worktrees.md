@@ -38,7 +38,12 @@
 
 ### 3.2 git 저장소 프로젝트: 실제 worktree
 
-- **위치**: 앱 데이터 `m5/worktrees-v2/<worktree_id>`(추천). 지금의 "데이터 루트/ID" 구조라 `worktree_capability`, 저장 rename, 샌드박스 루트 계산을 거의 그대로 쓸 수 있다. "Finder에서 열기 / VS Code에서 열기"로 접근을 제공한다. (Orca처럼 `~/elsecrew/workspaces/...`에 두는 안은 §8 열린 결정)
+- **위치(사용자 결정 2026-11-18)**: Orca처럼 보이는 폴더 `~/elsecrew/workspaces/<프로젝트>/<작업 이름>`이 기본이다. 설정 "작업 공간 폴더"에서 바꿀 수 있다(Orca `workspaceDir`).
+  - 바꾼 위치는 새 작업부터 적용한다. 작업마다 실제 경로를 manifest에 기록한다.
+  - 거절하는 위치: 원본 안, 앱 데이터 안, 다른 작업 폴더 안, 쓸 수 없는 곳.
+  - `worktree_capability`와 `validate_*`의 "데이터 루트/ID 재계산" 전제를 바꾼다. 작업 폴더를 만들 때 연 디렉터리 정체성(dev/ino)을 기록하고, 매번 그 폴더를 다시 열어 대조한다.
+  - 저장 rename은 작업 폴더 FD 기준으로, 샌드박스 루트는 기록된 작업 폴더로 맞춘다.
+  - 기존 작업을 새 위치로 옮기는 기능(`git worktree move`)은 나중 선택지다.
 - **만들기**: 원본에서 `git worktree add -b <branchName> <workTree> <baseCommit>`.
   - 실행 전후로 원본 `.git`의 변화를 측정한다. "허용된 것만 바뀜"을 확인한다. 전후 다이제스트가 같아야 한다는 지금 검사를 대체한다.
   - 실패하면 `git worktree remove --force`, `git branch -D`로 되돌린다. 준비 기록(preparation ledger)에는 "worktree 추가함" 단계를 둔다.
@@ -142,9 +147,9 @@
 - 사용자가 터미널에서 같은 브랜치를 체크아웃하거나 worktree를 지우는 등 밖에서 바꾸는 경우: 검증에서 감지해 "복구 필요"로 보낸다.
 - 그림자 git은 사용자 폴더 전체를 읽으므로 큰 폴더에서 느릴 수 있다. 제외 목록과 한도로 대응한다.
 
-## 8. 열린 결정 (사용자 확인 필요)
+## 8. 결정 (사용자 확인 2026-11-18)
 
-1. worktree 위치: 앱 데이터(추천, 지금 안전 장치 대부분 재사용) vs Orca처럼 홈 아래 보이는 폴더(`~/elsecrew/workspaces/<프로젝트>/<작업>`).
-2. 자동 커밋 작성자: 고정 `Elsecrew`(추천) vs 사용자 git 이름·이메일.
-3. 에이전트가 직접 git 커밋하는 것을 허용할지: 막고 앱이 커밋(추천) vs 허용.
-4. git filter(lfs 등)가 있는 저장소: 지원(필터 실행) vs 처음엔 미지원 안내.
+1. worktree 위치: Orca처럼 보이는 폴더 `~/elsecrew/workspaces/<프로젝트>/<작업 이름>`이 기본이고, 설정에서 바꿀 수 있다(§3.2).
+2. 자동 커밋 작성자: 고정 `Elsecrew`.
+3. 에이전트의 직접 git 커밋: 막고 앱이 커밋한다.
+4. git filter(lfs 등)가 있는 저장소: 처음엔 미지원으로 안내한다.
