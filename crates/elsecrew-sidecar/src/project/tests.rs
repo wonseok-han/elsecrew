@@ -6658,10 +6658,10 @@ fn repositories_with_content_filters_are_refused_before_anything_is_made() {
     fixture.manager.git_worktrees_enabled = true;
     git_raw(&fixture.source, ["config", "filter.lfs.smudge", "git-lfs smudge -- %f"]);
     let refs = git_text(&fixture.source, ["for-each-ref"]);
-    // Review I2 (ad44343b): such a repository keeps the v1 copy instead of
-    // failing; no task branch or worktree ever appears in it.
-    assert!(!fixture.manager.task_worktrees_supported(&fixture.storage, &fixture.project_id).unwrap());
-    let _ = fixture.manager.prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_filtered");
+    // A v1 copy cannot serve it either (raw bytes vs. LFS pointers): a
+    // clear "not supported yet", and no task branch or worktree appears.
+    let error = fixture.manager.prepare_chat_application_workspace(&mut fixture.storage, &fixture.project_id, "req_filtered").unwrap_err();
+    assert!(error.detail.contains("not supported yet"), "{}", error.detail);
     assert_eq!(git_text(&fixture.source, ["for-each-ref"]), refs);
     assert_eq!(git_text(&fixture.source, ["worktree", "list"]).lines().count(), 1);
 }
@@ -6678,7 +6678,7 @@ fn repositories_asking_for_lfs_in_gitattributes_are_refused() {
     git_raw(&fixture.source, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "-m", "lfs"]);
     // The worktree path refuses it outright; tasks fall back to a v1 copy.
     git_worktree::STOP_AFTER_WORKTREE_ADD.with(|stop| stop.set(false));
-    assert!(!fixture.manager.task_worktrees_supported(&fixture.storage, &fixture.project_id).unwrap());
+    assert!(fixture.manager.task_worktrees_supported(&fixture.storage, &fixture.project_id).is_err());
     let error = fixture.manager.create_git_worktree(&mut fixture.storage, &fixture.project_id, "req_lfs_attributes").unwrap_err();
     assert!(error.detail.contains("content filters"), "{}", error.detail);
     assert_eq!(git_text(&fixture.source, ["branch", "--list", "elsecrew/*"]), "");

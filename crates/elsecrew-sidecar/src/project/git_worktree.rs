@@ -417,7 +417,20 @@ impl ProjectManager {
                 .and_then(|_| std::fs::read_to_string(path.join(".git")).ok());
             let prefix = format!("gitdir: {}/.git/worktrees/", root.trim_end_matches('/'));
             if !link.is_some_and(|link| link.starts_with(&prefix)) {
-                return Err(ProjectFailure::manifest("the folder is not this project's task worktree"));
+                // A visible folder the user emptied (or whose `.git` they
+                // removed) is only taken away when nothing is left in it.
+                let empty = std::fs::read_dir(&path).is_ok_and(|mut entries| entries.next().is_none());
+                if empty {
+                    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+                        return Err(ProjectFailure::manifest("task worktree path has no parent"));
+                    };
+                    let _ = open_absolute_directory_capability(parent)?.remove_dir(name);
+                    self.forget_task_worktree(manifest);
+                    return Ok(());
+                }
+                return Err(ProjectFailure::manifest(
+                    "the task folder lost its link to the project; remove the folder yourself or restore its .git file",
+                ));
             }
             if let Some(inode) = expected_inode {
                 use std::os::unix::fs::MetadataExt as _;
@@ -460,14 +473,22 @@ impl ProjectManager {
     /// branch (there is something to merge into) and the repository uses no
     /// content filters (LFS) or merge drivers. Otherwise tasks keep the v1
     /// copy, which needs neither.
+    /// A repository with content filters (Git LFS) cannot be served by a v1
+    /// copy either: its clean check compares raw bytes against the stored
+    /// pointers. Such a project gets a clear "not supported yet" instead.
     pub(super) fn task_worktrees_supported(&self, storage: &Storage, project_id: &str) -> Result<bool, ProjectFailure> {
         let project = required_project(storage, project_id)?;
         let source = self.open_project_source(&project)?;
+        if self.content_filters_configured(&source._root)?
+            || self.content_filters_requested(&source._root, &source.git_dir, &source.base_commit)?
+        {
+            return Err(ProjectFailure::manifest(
+                "repositories that use Git LFS or other content filters are not supported yet",
+            ));
+        }
         let on_branch = self.git_allow_status_at(&source._root, ["symbolic-ref", "-q", "HEAD"], &[0, 1])?.status.success();
         let drivers = self.git_allow_status_at(&source._root, ["config", "--get-regexp", r"^merge\..*\.driver$"], &[0, 1])?.status.code() == Some(0);
-        Ok(on_branch && !drivers
-            && !self.content_filters_configured(&source._root)?
-            && !self.content_filters_requested(&source._root, &source.git_dir, &source.base_commit)?)
+        Ok(on_branch && !drivers)
     }
 
     /// A task's workspace as a real worktree on a new task branch, made from
