@@ -2,6 +2,28 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-18 · by Claude Opus 5.5 (claude-opus-5-5) — 작업 공간 전환 3단계(가): "main에 합치기"
+- 사용자 확인: 작업 하나 = PR 하나. 합치기 전까지 다른 작업의 변경이 안 보이는 것은 정상이다. 1 worktree : 1 브랜치를 유지한다.
+- sidecar(`project/git_merge.rs`, 04642e76): 새 action `inspectChatMerge`와 `mergeChatWorkspace`.
+  - 상태 확인: 브랜치, 기준 브랜치, head, 기준 끝 커밋, 앞섬/뒤처짐 수, 수정 중인 파일, 내 폴더가 기준 브랜치에 있는지, 막힘 이유(`noBaseBranch`, `baseBranchMissing`, `nothingToMerge`)를 돌려준다.
+  - 합치기 순서:
+    1. 남은 변경을 커밋한다.
+    2. 기준 브랜치의 새 커밋을 **worktree 안에서** 작업 브랜치로 가져온다(`merge --no-ff`). 충돌이 나면 `merge --abort`하고 파일 목록을 돌려준다. 사용자 폴더는 바뀌지 않는다.
+    3. 기준 브랜치를 앞으로만 옮긴다. 사용자 폴더가 그 브랜치를 체크아웃 중이면 `merge --ff-only`다. 사용자가 수정 중인 파일과 겹치면 Git이 거절하고 아무것도 바꾸지 않는다(`userChangesOverlap`). 체크아웃 중이 아니면 `update-ref <새> <이전>`(compare-and-swap)이다.
+  - 사용자가 확인한 head와 기준 커밋이 그대로일 때만 합친다(`changedSinceReview`). 실행 중인 작업이 없어야 하고, 명시적 확인이 필요하며, Git 잠금이나 filter가 없어야 한다.
+  - 테스트 5개: 빠른 앞당기기와 수정 중 파일 보존, 기준의 새 커밋 먼저 가져오기, 충돌 시 무변경, 기준을 체크아웃하지 않았을 때 폴더 무변경, 확인 뒤 바뀐 경우 거절.
+- 화면(507cbec0, `chat-workspace-merge.tsx`):
+  - v1 작업은 "내 폴더에 반영"을 그대로 둔다.
+  - worktree 작업은 "브랜치 … · main보다 커밋 N개 앞섬 [main에 합치기]"와, 내 폴더가 바뀌는지 알려 주는 한 줄 확인을 보여 준다.
+  - 결과 안내: 합침, 충돌 파일, 막힘 이유. 계약 테스트 `tests/m5-chat-merge-contract.test.mts`.
+- **실제 앱 확인(todo-test-1118b)**: 합치기 한 번으로 사용자 폴더의 `main`이 작업 브랜치 끝(3a0af50)으로 앞당겨졌다. 파일이 들어왔고 상태는 깨끗했다. 사용자 폴더의 앱을 헤드리스 Chrome으로 점검해 10/10 통과했다.
+- 아직 안 한 것:
+  - 충돌을 팀이 정리하는 흐름. 지금은 파일 목록과 안내만 있다.
+  - 합친 뒤 결과 막대의 "변경 파일 N개"가 기준 커밋 대비 그대로 보인다.
+  - v2 버리기(`git worktree remove`와 우리 기록만 정리), 재시작 복구, 보이는 위치와 설정.
+  - 팀 지시문 문구, 커밋하지 않은 변경 안내.
+  - 독립 검토(합치기는 사용자 폴더를 바꾸는 경계 변경).
+
 ### 2026-11-18 · by Claude Opus 5.5 (claude-opus-5-5) — 작업 공간 전환 2단계(가): 실제 git worktree 작업 공간
 - 범위: `docs/proposals/m5-real-worktrees.md` §5의 2단계 중 첫 묶음이다. **`ELSECREW_GIT_WORKTREES=1`일 때만** 켜진다(합치기(3단계)가 생길 때까지 기본은 꺼짐). 그래서 기본 동작은 바뀌지 않았다.
 - 한 일:
