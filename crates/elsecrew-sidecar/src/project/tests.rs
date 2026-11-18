@@ -6876,6 +6876,9 @@ fn a_conflict_left_to_the_team_merges_only_after_the_marks_are_gone() {
     assert!(fs::read_to_string(path.join("src/edit.txt")).unwrap().contains("<<<<<<< "));
     // The team can still be started on the workspace while it resolves.
     fixture.manager.verify_workspace_for_run(&fixture.storage, &address).unwrap();
+    // The fixture's tracked `src/edit-link -> edit.txt` stays inside.
+    #[cfg(unix)]
+    fixture.manager.verify_runtime_file_isolation(&fixture.storage, &address).unwrap();
     // The changes list keeps working while the team resolves.
     let summary = fixture.manager.workspace_diff_summary(&fixture.storage, &address).unwrap();
     assert!(summary.result["entries"].as_array().unwrap().iter().any(|entry| entry["path"] == "src/edit.txt"), "{}", summary.result);

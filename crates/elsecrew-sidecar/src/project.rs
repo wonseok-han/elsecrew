@@ -4356,7 +4356,13 @@ impl ProjectManager {
     ) -> Result<(), ProjectFailure> {
         self.verify_managed_paths()?;
         let root = open_real_child_dir(&self.worktrees_dir, &address.worktree_id)?;
-        runtime_isolation::verify(&root)?;
+        // The kind comes from the stored manifest: no Git runs before the scan.
+        let manifest = read_bounded_json(&self.manifests_dir, &format!("{}.json", address.worktree_id))?;
+        if manifest_kind(&manifest)? == WorkspaceKind::Snapshot {
+            runtime_isolation::verify(&root)?;
+        } else {
+            runtime_isolation::verify_allowing_inner_links(&root)?;
+        }
         self.validate_workspace_address(storage, address)?;
         Ok(())
     }
