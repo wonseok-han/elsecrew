@@ -2341,6 +2341,8 @@ fn text_candidate_cases_with_output(
                             "-c",
                             "features.image_generation=false",
                             "-c",
+                            "web_search=\"disabled\"",
+                            "-c",
                             isolation.as_str(),
                         ]
                     );

@@ -554,6 +554,7 @@ impl TurnStream {
                     "mcpToolCall" => "turn item start unsupported mcp tool",
                     "collabAgentToolCall" | "collabToolCall" | "subAgentActivity" => "turn item start unsupported collaboration",
                     "hookPrompt" => "turn item start unsupported hook",
+                    "webSearch" => "turn item start unsupported web search",
                     _ if !public && !private && tool.is_none() => "turn item start unsupported other",
                     _ => "turn stream item started",
                 };
@@ -912,6 +913,7 @@ mod tests {
             ("mcpToolCall", "turn item start unsupported mcp tool"),
             ("collabAgentToolCall", "turn item start unsupported collaboration"),
             ("hookPrompt", "turn item start unsupported hook"),
+            ("webSearch", "turn item start unsupported web search"),
             ("SECRET_UNKNOWN_TYPE", "turn item start unsupported other"),
         ] {
             let mut stream = started();

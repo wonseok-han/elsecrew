@@ -205,6 +205,9 @@ mod tests {
             "tool-on-flag",
             "tool-on-effective",
             "tool-null-flag",
+            "search-on-flag",
+            "search-on-effective",
+            "search-null-flag",
             "missing",
             "project",
             "system-hook",
@@ -236,10 +239,17 @@ mod tests {
                 "flag-hooks" => value["layers"][0]["config"]["features"]["hooks"] = json!(true),
                 "missing-hooks" => value["config"]["features"] = json!({}),
                 // Switched-off built-in tools may be reported, but only as off.
-                "tools-off" => for name in crate::provider::vendor_observation::codex_preflight::UNSUPERVISED_TOOL_FEATURES {
-                    value["layers"][0]["config"]["features"][*name] = json!(false);
-                    value["config"]["features"][*name] = json!(false);
-                },
+                "tools-off" => {
+                    for name in crate::provider::vendor_observation::codex_preflight::UNSUPERVISED_TOOL_FEATURES {
+                        value["layers"][0]["config"]["features"][*name] = json!(false);
+                        value["config"]["features"][*name] = json!(false);
+                    }
+                    value["layers"][0]["config"]["web_search"] = json!("disabled");
+                    value["config"]["web_search"] = json!("disabled");
+                }
+                "search-on-flag" => value["layers"][0]["config"]["web_search"] = json!("cached"),
+                "search-on-effective" => value["config"]["web_search"] = json!("live"),
+                "search-null-flag" => value["layers"][0]["config"]["web_search"] = json!(null),
                 "tool-on-flag" => value["layers"][0]["config"]["features"]["computer_use"] = json!(true),
                 "tool-on-effective" => value["config"]["features"]["browser_use"] = json!(true),
                 "tool-null-flag" => value["layers"][0]["config"]["features"]["image_generation"] = json!(null),

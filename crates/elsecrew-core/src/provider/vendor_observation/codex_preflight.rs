@@ -23,10 +23,25 @@ pub const UNSUPERVISED_TOOL_FEATURES: &[&str] = &[
     "image_generation",
 ];
 
-/// Removes the switched-off tool features from a reported session-flag layer,
-/// refusing any that is not exactly `false`, so the remaining layer still
-/// matches its fixed shape. Absent entries are fine (older fixtures, older Codex).
+/// Codex's hosted web search reports `webSearch` items the event stream does
+/// not supervise, so every run passes `web_search="disabled"` (a top-level
+/// setting, not a feature).
+pub const WEB_SEARCH_OFF: &str = "web_search=\"disabled\"";
+
+fn web_search_off(value: Option<&serde_json::Value>) -> bool {
+    value.is_none_or(|value| value.as_str() == Some("disabled"))
+}
+
+/// Removes the switched-off tool features (and the web search mode) from a
+/// reported session-flag layer, refusing any that is not exactly off, so the
+/// remaining layer still matches its fixed shape. Absent entries are fine
+/// (older fixtures, older Codex).
 pub(crate) fn strip_unsupervised_tool_flags(flags: &mut serde_json::Value) -> Result<(), &'static str> {
+    if let Some(flags) = flags.as_object_mut() {
+        if !web_search_off(flags.remove("web_search").as_ref()) {
+            return Err("unsupervised web search");
+        }
+    }
     let Some(features) = flags.get_mut("features").and_then(serde_json::Value::as_object_mut) else {
         return Ok(());
     };
@@ -41,7 +56,7 @@ pub(crate) fn strip_unsupervised_tool_flags(flags: &mut serde_json::Value) -> Re
 
 /// The effective config must not report a switched-off tool as on.
 pub(crate) fn unsupervised_tools_off(effective: &serde_json::Value) -> bool {
-    UNSUPERVISED_TOOL_FEATURES.iter().all(|name| {
+    web_search_off(effective.get("web_search")) && UNSUPERVISED_TOOL_FEATURES.iter().all(|name| {
         effective["features"].get(*name).is_none_or(|value| *value == serde_json::Value::Bool(false))
     })
 }

@@ -494,6 +494,7 @@ pub(crate) fn discovery_arguments(
     // Built-in tools nothing here can watch or approve stay off for every run.
     .chain(elsecrew_core::provider::vendor_observation::codex_preflight::UNSUPERVISED_TOOL_FEATURES.iter()
         .flat_map(|name| ["-c".into(), format!("features.{name}=false").into()]))
+    .chain(["-c".into(), elsecrew_core::provider::vendor_observation::codex_preflight::WEB_SEARCH_OFF.into()])
     .collect();
     if permission == ExpectedPermission::WorkspaceWrite {
         for setting in [
@@ -1718,6 +1719,8 @@ IFS= read -r hold
                 "features.in_app_browser=false",
                 "-c",
                 "features.image_generation=false",
+                "-c",
+                "web_search=\"disabled\"",
             ]
         );
         assert_eq!(args[args.len() - 2], "-c");

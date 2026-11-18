@@ -92,6 +92,7 @@ const codexStages = [
   "turn item start unsupported mcp tool",
   "turn item start unsupported collaboration",
   "turn item start unsupported hook",
+  "turn item start unsupported web search",
   "turn item start unsupported other",
   "turn start state", "turn start envelope", "turn start notification shape", "turn start notification correlation",
   "turn start notification state", "turn start reply shape", "turn start reply correlation", "turn start reply state",

@@ -115,6 +115,14 @@
   - 프로젝트 전환 안내가 틀렸다: "상단에서 프로젝트를 닫아 주세요"라고 했지만 닫기는 지금 프로젝트 옆 ⋯ 메뉴의 "프로젝트 화면 닫기"에 있다. ko/en 문구를 실제 위치로 고쳤다.
     - 함정: 번역 문자열 안에 큰따옴표를 넣으면 TS 문자열이 끊겨 dev 화면 전체가 멈춘다. 작은따옴표를 쓴다.
   - 첫 작업 창에 "모델을 고르지 않은 역할은 추천 모델로 시작해요: 총괄, 기획, 디자인, 개발, 검증" 안내가 보이고, 보내기로 시작됐다(모델 자동 채움 경로).
+  - **디자인(Codex) 25초 실패 2회 → 원인 `webSearch`**
+    - 오늘 추천 모델 자동 채움으로 디자인 담당이 `gpt-6.2-sol`이 됐다(어제는 `gpt-6.1-sol`). 진행 기록 `turn item start unsupported other`.
+    - 개발 빌드에서만 항목 이름을 남기는 임시 진단으로 `webSearch`(Codex 호스티드 웹 검색, 기본 켜짐)임을 확인했다. 임시 진단은 제거했다.
+    - 조치: 모든 Codex 실행에 `-c web_search="disabled"`(core `codex_preflight::WEB_SEARCH_OFF`, 최상위 설정이며 기능 플래그가 아니다). sessionFlags 검사(`strip_unsupervised_tool_flags`)와 effective 검사(`unsupervised_tools_off`)는 `web_search`가 없거나 정확히 `"disabled"`일 때만 통과시킨다. 진단 단계 `turn item start unsupported web search`(TS 계약도 같이)를 추가했다. 동작은 그대로 fail-closed다.
+    - Codex 0.169 항목 종류 목록(실행 파일 문자열): userMessage, hookPrompt, agentMessage, functionCallOutput, reasoning, commandExecution, fileChange, mcpToolCall, dynamicToolCall, collabAgentToolCall, webSearch, imageView, sleep, imageGeneration, enteredReviewMode, contextCompaction 등. `view_image`·`sleep_tool` 기능은 켜져 있어 `imageView`·`sleep`도 같은 실패를 낼 수 있다(아직 관측 안 됨).
+    - 독립 검토(상시 검토자): 차단·중요 없음. 경미: 다른 검색 기능 플래그(`web_search_request`·`web_search_cached`·`standalone_web_search`)는 내부 로그상 모두 false임을 확인했다. Codex를 올릴 때 effective에서 `web_search`가 빠져도 통과하는 점을 점검한다.
+    - 검증: core codex_preflight+codex_events 68, sidecar provider_preflight_session/codex 17, named_/text_candidate 5, reserved_interactions 1, `npm test` 742 통과.
+  - 앱 재시작 직후 첫 실행이 `providerExecutableChanged`("provider executable could not be verified")로 한 번 막혔고, 다시 보내면 정상이었다. 11-13에 완화한 상위 폴더 stamp 오판이 서명 확인이 느린 첫 실행에서 아직 남은 것으로 추정한다. 이때 화면 문구("연결 상태와 역할 설정을 확인해 주세요")가 실제 원인과 맞지 않는다. 미해결.
   - 시험 방법 함정: 사용자가 컴퓨터를 쓰는 중에 `--restore-window`로 창을 앞으로 가져오면 사용자의 키 입력("gi", "rm ")이 입력란에 섞인다. 사용자가 깨어 있을 때는 창을 앞으로 가져오지 않고 `orca computer set-value`로 값을 넣는다(React 상태에도 반영됨을 확인).
 - 다음 할 일: 화면 잠금이 풀리면 실제 앱에서 Monaco 비교·목록·한 번에 반영과 (b) 수정을 확인한다. 새 빈 폴더로 처음부터 재시험한다(모델 자동 채움 확인). (a)를 정리한다. 실패 이유를 사용자에게 보여 줄 기록을 남길지 검토한다.
 
