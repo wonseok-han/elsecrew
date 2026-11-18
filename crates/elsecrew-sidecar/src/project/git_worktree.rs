@@ -95,7 +95,8 @@ impl ProjectManager {
         let worktree = self.worktree_capability(&active)?;
         // A base merge the team is resolving is recorded (as the merge)
         // only once no conflict marks remain; until then nothing is.
-        if self.merge_in_progress(&worktree)? && !self.unresolved_conflicts(&worktree)?.is_empty() {
+        let merging = self.merge_in_progress(&worktree)?;
+        if merging && !self.unresolved_conflicts(&worktree)?.is_empty() {
             return Ok(false);
         }
         // A filter added to the repository since the workspace was made would
@@ -105,7 +106,9 @@ impl ProjectManager {
         }
         self.git_at(&worktree, ["add", "-A"])?;
         let staged = self.git_allow_status_at(&worktree, ["diff", "--cached", "--quiet"], &[0, 1])?;
-        if staged.status.code() == Some(0) {
+        // A resolved merge is recorded even when the team kept exactly the
+        // task's side: the merge commit itself is what joins the base.
+        if staged.status.code() == Some(0) && !merging {
             return Ok(false);
         }
         let line: String = message.lines().map(str::trim).find(|line| !line.is_empty())

@@ -6874,6 +6874,8 @@ fn a_conflict_left_to_the_team_merges_only_after_the_marks_are_gone() {
     assert_eq!(outcome["outcome"], "resolving", "{outcome}");
     assert_eq!(outcome["merge"]["blocked"], "conflictsUnresolved");
     assert!(fs::read_to_string(path.join("src/edit.txt")).unwrap().contains("<<<<<<< "));
+    // The team can still be started on the workspace while it resolves.
+    fixture.manager.verify_workspace_for_run(&fixture.storage, &address).unwrap();
     // The changes list keeps working while the team resolves.
     let summary = fixture.manager.workspace_diff_summary(&fixture.storage, &address).unwrap();
     assert!(summary.result["entries"].as_array().unwrap().iter().any(|entry| entry["path"] == "src/edit.txt"), "{}", summary.result);
@@ -6939,4 +6941,26 @@ fn forgetting_a_task_worktree_drops_only_its_record_and_merged_branch() {
     let branches = git_text(&fixture.source, ["branch", "--list", "elsecrew/*"]);
     assert!(branches.contains(kept_manifest["branchName"].as_str().unwrap()), "{branches}");
     assert!(!branches.contains(gone_manifest["branchName"].as_str().unwrap()), "{branches}");
+}
+
+/// The team may resolve by keeping exactly the task's side: the index then
+/// equals HEAD, and the merge commit must still be recorded and merged.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_conflict_resolved_to_the_tasks_side_still_merges() {
+    let mut fixture = Fixture::open();
+    let (address, path) = worktree_chat(&mut fixture, "keep_task");
+    fs::write(path.join("src/edit.txt"), b"task version\n").unwrap();
+    fs::write(fixture.source.join("src/edit.txt"), b"user version\n").unwrap();
+    commit_in(&fixture.source, "user edit");
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    let outcome = fixture.manager.workspace_merge(&fixture.storage, &address, state["head"].as_str().unwrap(), state["baseTip"].as_str().unwrap(), true).unwrap();
+    assert_eq!(outcome["outcome"], "resolving", "{outcome}");
+    fs::write(path.join("src/edit.txt"), b"task version\n").unwrap();
+    // The member's step commit records the merge even with no content change.
+    assert!(fixture.manager.workspace_commit_step(&fixture.storage, &address, "개발: 정리").unwrap());
+    assert!(!fixture.manager.merge_in_progress(&fixture.manager.worktree_capability(&fixture.manager.validate_workspace_address(&fixture.storage, &address).unwrap()).unwrap()).unwrap());
+    let merged = merge_now(&fixture, &address);
+    assert_eq!(merged["outcome"], "merged", "{merged}");
+    assert_eq!(fs::read(fixture.source.join("src/edit.txt")).unwrap(), b"task version\n");
 }

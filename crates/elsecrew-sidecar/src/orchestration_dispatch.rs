@@ -71,6 +71,22 @@ const WORKFLOW_BUSY_RETRY: std::time::Duration = std::time::Duration::from_secs(
 
 /// The request id of a step's `attempt`-th try: a retried request never
 /// reuses a refused one's id.
+/// Development builds only: why a team step stopped. The app shows just the
+/// code; the detail is what a developer needs. Release builds write nothing.
+fn dev_diagnosis(line: &str) {
+    #[cfg(debug_assertions)]
+    {
+        use std::io::Write as _;
+        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true)
+            .open(std::env::temp_dir().join("elsecrew-dev-diagnosis.log"))
+        {
+            let _ = writeln!(file, "{line}");
+        }
+    }
+    #[cfg(not(debug_assertions))]
+    let _ = line;
+}
+
 fn attempt_request_id(base: &str, attempt: u32) -> String {
     if attempt == 0 { base.to_owned() } else { format!("{base}_retry{attempt}") }
 }
@@ -477,6 +493,9 @@ impl Sidecar {
         };
         if !response.ok {
             let code = response.error.as_ref().map(|e| e.code.as_str()).unwrap_or("unknown");
+            if let Some(error) = &response.error {
+                dev_diagnosis(&format!("team step {kind} failed: {} {}", error.code, error.detail));
+            }
             // The provider is only briefly busy with another check (a model
             // list, a sign-in check) or with the previous member's cleanup:
             // ask again shortly instead of stopping the team, for up to
@@ -555,6 +574,7 @@ impl Sidecar {
                     }
                 }
                 Err(error) => {
+                    dev_diagnosis(&format!("team step start failed: {} {}", error.kind(), error.detail()));
                     self.workflow_requests.remove(&start_id);
                     self.workflow_busy.remove(&chat);
                     self.pause_workflow_reason(&chat, events, &workflow_failure_message(error.kind()))?;
@@ -714,6 +734,7 @@ impl Sidecar {
                     }
                 }
                 Err(error) => {
+                    dev_diagnosis(&format!("team step capability failed: {} {}", error.kind(), error.detail()));
                     self.workflow_requests.remove(&id);
                     self.pause_workflow_reason(&chat, events, &workflow_failure_message(error.kind()))?;
                 }
