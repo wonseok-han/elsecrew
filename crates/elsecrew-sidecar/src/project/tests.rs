@@ -6565,3 +6565,29 @@ fn an_update_of_the_original_can_be_restored_after_a_restart_renumbered_the_volu
     assert_eq!(restored["pendingItem"]["writeJournal"]["phase"], "restored");
     assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
 }
+
+#[cfg(unix)]
+#[test]
+fn fixed_git_commands_never_run_repository_hooks() {
+    // A user repository may configure hooks; commands the app runs in it
+    // (real worktrees, 2026-11-18 design) must not trigger them.
+    let fixture = Fixture::open();
+    let repo = TempDir::new().unwrap();
+    let marker = repo.path().join("hook-ran");
+    for args in [vec!["init", "-q"], vec!["config", "core.hooksPath", ".hooks"]] {
+        assert!(Command::new("/usr/bin/git").args(&args).current_dir(repo.path()).status().unwrap().success());
+    }
+    fs::create_dir(repo.path().join(".hooks")).unwrap();
+    let hook = repo.path().join(".hooks/pre-commit");
+    fs::write(&hook, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+    use std::os::unix::fs::PermissionsExt as _;
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    let dir = Dir::open_ambient_dir(repo.path(), ambient_authority()).unwrap();
+    fixture.manager.git_limited_bytes_at(
+        &dir,
+        ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"],
+        &[0],
+        4096,
+    ).unwrap();
+    assert!(!marker.exists(), "a repository hook ran through the app's Git command");
+}

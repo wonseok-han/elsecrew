@@ -5384,7 +5384,16 @@ impl ProjectManager {
             .env("LC_ALL", "C")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_CONFIG_GLOBAL", null_device())
-            .env("GIT_CONFIG_COUNT", "0")
+            // Command-scope settings outrank the repository's own config: a
+            // user repository (real worktrees, 2026-11-18 design) never runs
+            // its hooks or fsmonitor helper or reaches a remote through us.
+            .env("GIT_CONFIG_COUNT", "3")
+            .env("GIT_CONFIG_KEY_0", "core.hooksPath")
+            .env("GIT_CONFIG_VALUE_0", null_device())
+            .env("GIT_CONFIG_KEY_1", "core.fsmonitor")
+            .env("GIT_CONFIG_VALUE_1", "false")
+            .env("GIT_CONFIG_KEY_2", "protocol.allow")
+            .env("GIT_CONFIG_VALUE_2", "never")
             .env("GIT_OPTIONAL_LOCKS", "0")
             .env("GIT_NO_REPLACE_OBJECTS", "1")
             .env("GIT_NO_LAZY_FETCH", "1")
