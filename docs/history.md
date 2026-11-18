@@ -123,6 +123,10 @@
     - 독립 검토(상시 검토자): 차단·중요 없음. 경미: 다른 검색 기능 플래그(`web_search_request`·`web_search_cached`·`standalone_web_search`)는 내부 로그상 모두 false임을 확인했다. Codex를 올릴 때 effective에서 `web_search`가 빠져도 통과하는 점을 점검한다.
     - 검증: core codex_preflight+codex_events 68, sidecar provider_preflight_session/codex 17, named_/text_candidate 5, reserved_interactions 1, `npm test` 742 통과.
   - 앱 재시작 직후 첫 실행이 `providerExecutableChanged`("provider executable could not be verified")로 한 번 막혔고, 다시 보내면 정상이었다. 11-13에 완화한 상위 폴더 stamp 오판이 서명 확인이 느린 첫 실행에서 아직 남은 것으로 추정한다. 이때 화면 문구("연결 상태와 역할 설정을 확인해 주세요")가 실제 원인과 맞지 않는다. 미해결.
+  - 웹 검색 끈 뒤 재시험: 디자인(Codex) 09:18 성공, 개발(Claude) 09:22 성공(앱 파일 4개). 검증(Codex, 읽기 전용)이 09:24 `turn stream request item/commandExecution/requestApproval`에서 실패했다. 읽기 전용 실행에서 명령 승인 요청이 오면 엔진이 받지 못하고 멈추는 것으로 보인다(미확인).
+  - **사용자 방향(2026-11-18)**: "웹 검색을 끄면 의미가 있나? 권한을 다 받아서 에이전트가 자유롭게 개발 가능해야 한다", "Orca 같은 것도 computer use 같은 권한을 다 받고 한다", "에이전트를 쓰는 방식·워크트리·변경 파일 관리는 Orca를 많이 벤치마킹하는 게 맞다". → 웹 검색 권한 구현은 보류하고 Orca 벤치마킹을 먼저 한다. 웹 검색 끄기(eb05b6af)는 실행이 멈추지 않게 하는 임시 조치이며 제품 방향이 아니다.
+  - 로컬 Orca 확인(사실): Orca 워크트리는 사용자 저장소의 실제 git worktree다(`~/orca/workspaces/<repo>/<이름>`, 실제 브랜치, 원본 `git worktree list`에 보임). 에이전트는 CLI를 터미널(TUI) 또는 채팅 화면으로 띄우고(`orca agent launch --surface chat|terminal`), 상태는 Claude `settings.json`·Codex `hooks.json`에 설치한 lifecycle hook으로 감지한다. 에이전트 간 협업은 메일함·작업·결정 게이트(`orca orchestration ...`)다. 포트 감지(`orca ports`), 정리 규칙(`workspace cleanup`), 변경 파일 열기(`file diff`, `file open-changed`)가 있다.
+  - Orca 벤치마킹 정리: `docs/proposals/m5-orca-benchmark.md`(로컬 Orca 1.4.261 확인 + 공개 저장소 stablyai/orca `c33696ad`·공식 문서 조사). 결정 필요: 사용자 저장소에 실제 브랜치·worktree를 만들지, 기본 권한 모드, fail-closed 완화 범위, 앱 전용 로그인 유지 여부.
   - 시험 방법 함정: 사용자가 컴퓨터를 쓰는 중에 `--restore-window`로 창을 앞으로 가져오면 사용자의 키 입력("gi", "rm ")이 입력란에 섞인다. 사용자가 깨어 있을 때는 창을 앞으로 가져오지 않고 `orca computer set-value`로 값을 넣는다(React 상태에도 반영됨을 확인).
 - 다음 할 일: 화면 잠금이 풀리면 실제 앱에서 Monaco 비교·목록·한 번에 반영과 (b) 수정을 확인한다. 새 빈 폴더로 처음부터 재시험한다(모델 자동 채움 확인). (a)를 정리한다. 실패 이유를 사용자에게 보여 줄 기록을 남길지 검토한다.
 
