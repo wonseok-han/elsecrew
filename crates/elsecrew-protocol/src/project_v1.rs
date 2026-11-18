@@ -1138,6 +1138,20 @@ fn validate_diff_file(value: &Value) -> Result<(), ProjectContractError> {
 fn validate_diff_entry(value: &Value) -> Result<(), ProjectContractError> {
     let object = object(value, "diff entry")?;
     let kind = diff_kind(object.get("kind"))?;
+    // Optional changed line counts: both or neither, never on a binary entry.
+    let mut object = object.clone();
+    match (object.remove("added"), object.remove("removed")) {
+        (None, None) => {}
+        (Some(added), Some(removed)) if kind != "binary" => {
+            for count in [&added, &removed] {
+                if unsigned(Some(count), "diff line count")? > super::MAX_SEQUENCE {
+                    return fail("diff line count must be a non-negative safe integer");
+                }
+            }
+        }
+        _ => return fail("diff line counts must come as a pair on a text entry"),
+    }
+    let object = &object;
     if kind == "renamed" {
         exact_keys(object, &["kind", "path", "oldPath", "binary"])?;
         let old = relative_path(object.get("oldPath"), "rename oldPath", false)?;

@@ -5028,6 +5028,8 @@ impl ProjectManager {
                     old_path: Some(old_path.clone()),
                     base_exists: true,
                     current_exists: true,
+                    // Same content under a new name.
+                    lines: Some((0, 0)),
                 });
             }
         }
@@ -5041,7 +5043,41 @@ impl ProjectManager {
         }
         entries.sort_by(|left, right| left.path.cmp(&right.path));
         base_reader.finish()?;
+        self.attach_line_counts(&worktree, active, &mut entries)?;
         Ok(entries)
+    }
+
+    /// Line counts from Git for tracked changes; a new untracked text file
+    /// counts all its lines as added. Unknown counts stay absent.
+    fn attach_line_counts(
+        &self,
+        worktree: &Dir,
+        active: &ActiveProject,
+        entries: &mut [DiffEntry],
+    ) -> Result<(), ProjectFailure> {
+        let numstat = self.git_limited_bytes_at(
+            worktree,
+            ["diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "--no-textconv",
+                active.base_commit.as_str(), "--"],
+            &[0],
+            DIFF_MAX_BYTES,
+        )?;
+        let mut counts = HashMap::<String, (u64, u64)>::new();
+        for record in numstat.split(|byte| *byte == 0).filter(|record| !record.is_empty()) {
+            let mut parts = record.splitn(3, |byte| *byte == b'\t');
+            let (Some(added), Some(removed), Some(path)) = (parts.next(), parts.next(), parts.next()) else {
+                return Err(ProjectFailure::manifest("Git line counts are malformed"));
+            };
+            let number = |field: &[u8]| std::str::from_utf8(field).ok().and_then(|text| text.parse::<u64>().ok());
+            // Binary files report "-" and get no count.
+            if let (Some(added), Some(removed)) = (number(added), number(removed)) {
+                counts.insert(protocol_git_path(path)?, (added, removed));
+            }
+        }
+        for entry in entries.iter_mut().filter(|entry| entry.lines.is_none() && entry.kind != "binary") {
+            entry.lines = counts.get(&entry.path).copied();
+        }
+        Ok(())
     }
 
     fn classify_diff(
@@ -5069,12 +5105,17 @@ impl ProjectManager {
         };
         let binary = base.as_ref().is_some_and(|value| value.binary)
             || current.as_ref().is_some_and(|value| value.binary);
+        // A new text file is all added lines; tracked changes are counted by Git.
+        let lines = (kind == "added" && !binary && base.is_none())
+            .then(|| current.as_ref().and_then(|value| value.bytes.as_deref()).map(|bytes| (line_count(bytes) as u64, 0)))
+            .flatten();
         Ok(DiffEntry {
             kind: if binary { "binary" } else { kind },
             path,
             old_path: if binary { None } else { old_path },
             base_exists: kind != "added",
             current_exists: kind != "deleted",
+            lines,
         })
     }
 
@@ -5421,6 +5462,9 @@ struct DiffEntry {
     old_path: Option<String>,
     base_exists: bool,
     current_exists: bool,
+    /// Changed line counts for the list (`+added −removed`); absent when unknown
+    /// (binary, too large) so the screen shows no number rather than a wrong one.
+    lines: Option<(u64, u64)>,
 }
 
 // Request-local processes, not a cross-request cache. Each blob is still read
@@ -6087,7 +6131,7 @@ impl ContentInfo {
 
 impl DiffEntry {
     fn summary_value(&self) -> Value {
-        if self.kind == "renamed" {
+        let mut value = if self.kind == "renamed" {
             json!({
                 "kind":self.kind,"path":self.path,"oldPath":self.old_path,"binary":false,
             })
@@ -6095,7 +6139,12 @@ impl DiffEntry {
             json!({
                 "kind":self.kind,"path":self.path,"binary":self.kind == "binary",
             })
+        };
+        if let Some((added, removed)) = self.lines {
+            value["added"] = json!(added);
+            value["removed"] = json!(removed);
         }
+        value
     }
 }
 

@@ -184,6 +184,25 @@ fn materialized_snapshot_refreshes_index_stat_without_hiding_edits() {
 }
 
 #[test]
+fn changed_entries_carry_line_counts_for_text_only() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    // "hello" (one line) becomes three lines; a new file has two; a binary file has none.
+    fs::write(active.worktree_path.join("src/edit.txt"), b"one\ntwo\nthree\n").unwrap();
+    fs::write(active.worktree_path.join("new.txt"), b"a\nb").unwrap();
+    fs::write(active.worktree_path.join("blob.bin"), [0u8, 159, 146, 150]).unwrap();
+    let summary = fixture.manager.diff_summary(&fixture.storage, &fixture.project_id).unwrap();
+    let entries = summary.result["entries"].as_array().unwrap();
+    let find = |path: &str| entries.iter().find(|entry| entry["path"] == path).unwrap().clone();
+    let edit = find("src/edit.txt");
+    assert_eq!((edit["added"].as_u64(), edit["removed"].as_u64()), (Some(3), Some(1)));
+    let new = find("new.txt");
+    assert_eq!((new["added"].as_u64(), new["removed"].as_u64()), (Some(2), Some(0)));
+    let blob = find("blob.bin");
+    assert!(blob.get("added").is_none() && blob.get("removed").is_none(), "{blob}");
+}
+
+#[test]
 fn materialized_sync_batch_drains_full_and_trailing_files() {
     let temporary = TempDir::new().unwrap();
     let root = Dir::open_ambient_dir(temporary.path(), ambient_authority()).unwrap();

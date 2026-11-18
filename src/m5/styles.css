@@ -1316,3 +1316,58 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-change-list .m5-kind-deleted { color: #f07167; }
 .m5-change-list .m5-kind-renamed { color: #6cb6ff; }
 .m5-monaco-diff { flex: 1; min-height: 320px; height: 100%; }
+
+/* Changes panel and all-changes view, Orca-style (2026-11-18). */
+.m5-changes-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px 2px; flex-wrap: wrap; }
+.m5-changes-summary { display: inline-flex; align-items: center; gap: 6px; color: var(--m5-muted); font-size: 12px; }
+.m5-changes-actions { display: inline-flex; align-items: center; gap: 6px; }
+.m5-changes-actions > button, .m5-segmented button { padding: 3px 9px; font-size: 12px; min-height: 0; }
+.m5-changes-actions > button.m5-active { background: #2b3d55; color: #cfe4ff; }
+.m5-segmented { display: inline-flex; border: 1px solid #344152; border-radius: 6px; overflow: hidden; }
+.m5-segmented button { border: 0; border-radius: 0; background: transparent; color: var(--m5-muted); }
+.m5-segmented button[aria-pressed="true"] { background: #2b3d55; color: #e6eef8; }
+.m5-change-list .m5-change-row { gap: 8px; }
+.m5-change-list .m5-change-file { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 7px; overflow: hidden; }
+.m5-change-list .m5-change-file strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m5-change-list .m5-change-file small { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--m5-muted); font-size: 11px; }
+.m5-line-counts { display: inline-flex; gap: 5px; flex: none; font: 500 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.m5-lines-added { color: #73c991; }
+.m5-lines-removed { color: #f07167; }
+.m5-all-changes { display: flex; flex-direction: column; min-height: 0; height: 100%; background: #111315; }
+.m5-all-changes-head { display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-bottom: 1px solid #23292f; font-size: 12px; }
+.m5-all-changes-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 12px; }
+.m5-link-button { border: 0; background: none; padding: 2px 0; min-height: 0; color: var(--m5-muted); font-size: 12px; cursor: pointer; }
+.m5-link-button:hover:not(:disabled) { color: var(--m5-text); }
+.m5-link-button:disabled { opacity: .4; cursor: default; }
+.m5-all-changes-scroll { flex: 1; min-height: 0; overflow: auto; padding-bottom: 40px; }
+.m5-all-changes-file { border-bottom: 1px solid #23292f; }
+.m5-all-changes-file > header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; padding: 0 14px 0 6px; height: 30px; background: #16191d; border-bottom: 1px solid #23292f; }
+.m5-all-changes-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; border: 0; background: none; color: var(--m5-text); text-align: left; padding: 0; min-height: 0; cursor: pointer; font-size: 12px; }
+.m5-all-changes-chevron { width: 14px; flex: none; text-align: center; color: var(--m5-muted); }
+.m5-all-changes-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.m5-all-changes-folder { color: var(--m5-muted); }
+.m5-all-changes-path strong { font-weight: 500; }
+.m5-all-changes-path small { margin-left: 8px; color: var(--m5-muted); }
+.m5-all-changes-open { visibility: hidden; }
+.m5-all-changes-file > header:hover .m5-all-changes-open, .m5-all-changes-open:focus-visible { visibility: visible; }
+.m5-all-changes-body .m5-empty { padding: 12px 16px; margin: 0; }
+.m5-all-changes-raw { margin: 0; padding: 12px; max-height: 500px; overflow: auto; font-size: 12px; }
+.m5-line-added { background: rgba(115, 201, 145, .16); }
+.m5-line-removed { background: rgba(240, 113, 103, .16); }
+.m5-gutter-added { border-left: 3px solid #73c991; }
+.m5-gutter-removed { border-left: 3px solid #f07167; }
+.m5-monaco-diff.m5-monaco-fit { flex: none; min-height: 0; height: 40px; }
+.m5-changes-actions .m5-icon-button { padding: 2px 8px; font-size: 14px; line-height: 1.2; }
+
+/* Long activity targets (commands, paths) stay inside the run card (2026-11-18). */
+.m5-agent-runs, .m5-durable-output, .m5-output-scroll { min-width: 0; max-width: 100%; }
+.m5-output-scroll { overflow-x: hidden; }
+.m5-activity-row { overflow: hidden; }
+.m5-activity-target { flex: 1 1 0; }
+
+/* All-changes view: the status letter sits next to the file name. */
+.m5-all-changes-file .m5-change-kind { flex: none; min-width: 16px; text-align: center; font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.m5-all-changes-file .m5-kind-added { color: #73c991; }
+.m5-all-changes-file .m5-kind-modified { color: #e2c08d; }
+.m5-all-changes-file .m5-kind-deleted { color: #f07167; }
+.m5-all-changes-file .m5-kind-renamed { color: #6cb6ff; }

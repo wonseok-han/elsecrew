@@ -876,6 +876,22 @@ export class ProjectEditorController {
     }
   }
 
+  /** One file's comparison for the all-changes view, without changing what
+   * the editor shows. Null when the project or task changed meanwhile. */
+  async readDiff(path: string): Promise<{ descriptor: DiffFileDescriptorV1; text: string } | null> {
+    const project = this.#state.project;
+    if (!project || this.#actionBlocked) return null;
+    const epoch = this.#projectEpoch;
+    const workspace = this.#state.workspace;
+    const descriptor = workspace ? await this.#workspaceMethods()!.getWorkspaceDiffFile({ ...workspace, path }) : await this.#bridge.getDiffFile({ projectId: project.id, path });
+    if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace)) return null;
+    const text = descriptor.stream
+      ? await this.#awaitStream(descriptor.stream.streamId, descriptor.byteLength, MAX_DIFF_STREAM_BYTES)
+      : "";
+    if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace)) return null;
+    return { descriptor, text };
+  }
+
   selectPanel(panel: WorkbenchPanel): void {
     if (panel === "editor") ++this.#diffGeneration;
     this.#set({ panel });
