@@ -63,7 +63,8 @@ impl ProjectManager {
             }
         }
         if cfg!(test) {
-            return Ok(self.data_root.parent().unwrap_or(&self.data_root).join("elsecrew-workspaces"));
+            // Two missing levels, like `~/elsecrew/workspaces` on a new Mac.
+            return Ok(self.data_root.parent().unwrap_or(&self.data_root).join("elsecrew").join("workspaces"));
         }
         let home = std::env::var_os("HOME").map(PathBuf::from).filter(|path| path.is_absolute())
             .ok_or_else(|| ProjectFailure::recovery("the home folder is unknown"))?;
@@ -72,10 +73,28 @@ impl ProjectManager {
 
     /// The setting as the settings page shows it.
     pub(crate) fn workspace_folder(&self) -> Result<Value, ProjectFailure> {
-        let settings = create_managed_directory(&self.data_root, &self.data_dir, "application-settings-v1")?.1;
-        let custom = settings.symlink_metadata(WORKSPACE_FOLDER_FILE).is_ok();
+        let custom = self.workspace_folder_is_custom()?;
         let path = self.workspaces_home()?;
-        Ok(json!({"path":canonical_protocol_path_without_existing(&path)?,"custom":custom}))
+        // The default folder (and `~/elsecrew`) may not exist yet: resolve
+        // the nearest existing folder and keep the rest of the path as is.
+        let mut existing = path.as_path();
+        let mut rest = Vec::new();
+        let base = loop {
+            match std::fs::canonicalize(existing) {
+                Ok(base) => break base,
+                Err(_) => {
+                    rest.push(existing.file_name().ok_or_else(|| ProjectFailure::manifest("the workspace folder has no existing parent"))?);
+                    existing = existing.parent().ok_or_else(|| ProjectFailure::manifest("the workspace folder has no existing parent"))?;
+                }
+            }
+        };
+        let shown = rest.iter().rev().fold(base, |path, name| path.join(name));
+        Ok(json!({"path":canonical_protocol_path_from_absolute(&shown)?,"custom":custom}))
+    }
+
+    fn workspace_folder_is_custom(&self) -> Result<bool, ProjectFailure> {
+        let settings = create_managed_directory(&self.data_root, &self.data_dir, "application-settings-v1")?.1;
+        Ok(settings.symlink_metadata(WORKSPACE_FOLDER_FILE).is_ok())
     }
 
     /// Saves a new "작업 공간 폴더" (or `None`: back to the default). Only a
@@ -118,7 +137,7 @@ impl ProjectManager {
         let home = self.workspaces_home()?;
         // A chosen folder that is gone (an unplugged disk) is not silently
         // made again; only the default folder is created when missing.
-        if self.workspace_folder()?["custom"] == true && !home.is_dir() {
+        if self.workspace_folder_is_custom()? && !home.is_dir() {
             return Err(ProjectFailure::recovery("the chosen workspace folder is missing; choose it again in settings"));
         }
         let wanted = home.join(project_folder_name(source_root));

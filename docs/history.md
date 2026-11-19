@@ -9,6 +9,8 @@
   - 좁은 대화 패널에서 버튼 묶음(`.m5-result-actions`, `flex: none`)이 오른쪽 밖으로 잘렸다. 줄어들고 줄바꿈하도록 바꿨다.
   - 앱을 다시 열면 합친 작업의 버튼이 비활성 "main에 합치기"로 보였다. 이미 합친 경우(`mergedIntoBase`)는 "main에 합침"으로 보여 준다.
 - 검증: `tsc --noEmit` 통과, `m5-chat-merge-contract`·`m5-g4-contract` 10개 통과. 접근성 트리로 문구 분리를 확인했다. 창이 다른 Space에 있어 화면 캡처가 갱신되지 않아, 버튼 줄바꿈과 "main에 합침" 표시는 눈으로 확인하지 못했다(다음 재시작 때 확인).
+- **발견·수정(새 작업 시작 실패)**: 합친 뒤 같은 프로젝트에서 새 작업을 보내자 "원본에 반영할 준비를 완료하지 못했어요"가 나왔다. 원인은 `manifestMismatch: could not canonicalize managed parent`였다. 기본 작업 공간 폴더 `~/elsecrew/workspaces`와 그 상위 `~/elsecrew`가 아직 없는데, `workspace_folder()`가 폴더를 만들기 전에 상위 폴더 경로부터 확인했다. 테스트 기본 경로는 상위가 늘 있는 한 단계짜리라 이 경우를 잡지 못했다.
+  - 수정: 보여 줄 경로는 있는 가장 가까운 상위 폴더까지만 확인하고 나머지를 붙인다. 새 작업 경로 계산은 설정 파일 유무(`workspace_folder_is_custom`)만 본다. 테스트 기본 경로를 실제와 같이 두 단계(`elsecrew/workspaces`)로 바꿔 기존 worktree 테스트가 이 경우를 지나가게 했다. project 테스트 141개 통과.
 - 운영 메모: Orca 백그라운드 클릭은 첫 번째가 무시되는 경우가 있다(같은 요소를 다시 누르면 된다). 창이 다른 Space에 있으면 키 입력이 막히고 스크린샷이 예전 화면이다.
 - 다음 할 일: 같은 프로젝트에서 새 작은 작업으로 보이는 작업 공간 위치(`~/elsecrew/workspaces/todo-test-1118c/task-…`) 확인, 4단계(git이 아닌 폴더의 shadow-git).
 
