@@ -54,7 +54,43 @@ const SOURCE_GIT_READ: &str = r#"
 (allow file-read* (subpath (param "SOURCE_GIT")))
 "#;
 
-use elsecrew_core::provider::vendor_observation::codex_preflight::named_config::linked_source_git;
+use elsecrew_core::provider::vendor_observation::codex_preflight::named_config::{developer_dir, linked_source_git};
+
+/// Git inside a task worktree: the developer folder's real `git` (no `xcrun`
+/// shim) may be read and run; nothing in it is writable.
+const DEVELOPER_READ: &str = r#"
+(allow file-read* (subpath (param "DEVELOPER_DIR")))
+"#;
+
+/// A task worktree's agents run Git with no user or system config (the
+/// profile home is not readable inside Codex's own sandbox, and the user's
+/// settings are not the agent's), with the developer folder's `git` first on
+/// PATH and named by `DEVELOPER_DIR` for the `/usr/bin/git` shim (a login
+/// shell may put `/usr/bin` first again), and with the same hook/monitor
+/// switches as the app's own Git (found 2026-11-19: `xcrun: invalid active
+/// developer path`). No variable name holds KEY/TOKEN/SECRET, which Codex
+/// may strip from its commands' environment.
+pub(crate) fn task_git_environment(command: &mut Command, workspace: &Path) {
+    if linked_source_git(workspace).is_none() {
+        return;
+    }
+    let mut path = OsString::new();
+    if let Some(developer) = developer_dir() {
+        path.push(developer.join("usr/bin"));
+        path.push(":");
+        command.env("DEVELOPER_DIR", &developer);
+    }
+    path.push("/usr/bin:/bin:/usr/sbin:/sbin");
+    command
+        .env("PATH", path)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env(
+            "GIT_CONFIG_PARAMETERS",
+            "'core.excludesFile=/dev/null' 'core.hooksPath=/dev/null' 'core.fsmonitor=false'",
+        );
+}
 
 const MODEL_PROXY: &str = r#"
 (allow network-outbound (remote tcp4 (param "MODEL_PROXY")))
@@ -171,6 +207,7 @@ pub(crate) fn command_with_model_proxy(
         .env("CODEX_HOME", home)
         .env("TMPDIR", home.join("tmp"))
         .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
+    task_git_environment(&mut command, workspace);
     Ok(ModelProxyCommand {
         command,
         broker,
@@ -230,15 +267,21 @@ fn command_network(
         policy.push_str(MODEL_PROXY);
     }
     let source_git = linked_source_git(workspace);
+    let developer = source_git.as_ref().and_then(|_| developer_dir());
     if source_git.is_some() {
         policy.push_str(SOURCE_GIT_READ);
     }
+    if developer.is_some() {
+        policy.push_str(DEVELOPER_READ);
+    }
     let mut sandbox_args = vec![OsString::from("-p"), OsString::from(policy)];
-    if let Some(path) = &source_git {
-        sandbox_args.push(OsString::from("-D"));
-        let mut value = OsString::from("SOURCE_GIT=");
-        value.push(path);
-        sandbox_args.push(value);
+    for (name, path) in [("SOURCE_GIT", &source_git), ("DEVELOPER_DIR", &developer)] {
+        if let Some(path) = path {
+            sandbox_args.push(OsString::from("-D"));
+            let mut value = OsString::from(format!("{name}="));
+            value.push(path);
+            sandbox_args.push(value);
+        }
     }
     for (name, path) in [
         ("CLI", executable),
@@ -671,5 +714,36 @@ if (printf changed >> "$1") 2>/dev/null; then exit 22; fi
                 b"original"
             );
         }
+    }
+
+    /// Inside the real outer sandbox, a task worktree's agent can run Git
+    /// (status, diff, log) and still cannot write the repository's Git data.
+    #[test]
+    fn git_works_read_only_inside_a_task_worktree_sandbox() {
+        if developer_dir().is_none() {
+            return; // No developer tools on this Mac: nothing to run.
+        }
+        let (_temp, source, workspace) = crate::provider_preflight_session::named_permissions::tests::real_worktree();
+        std::fs::write(workspace.join("note.txt"), b"x").unwrap();
+        let home = workspace.parent().unwrap().join("profile");
+        std::fs::create_dir(&home).unwrap();
+        let script = "cd \"$2\" && git status --short && /bin/zsh -lc 'git log --oneline -1' && /usr/bin/git diff --stat && ! touch \"$1/.git/elsecrew-probe\" 2>/dev/null";
+        let args = [OsString::from("-c"), OsString::from(script), OsString::from("probe"), source.clone().into_os_string(), workspace.clone().into_os_string()];
+        let mut command = command(Path::new("/bin/sh"), Path::new("/bin/sh"), &args, &home, &workspace, WorkspaceAccess::Write).unwrap();
+        command.env("HOME", &home).env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
+        task_git_environment(&mut command, &workspace);
+        command.stderr(std::process::Stdio::piped());
+        // The launch gate waits for its release byte before running anything.
+        let mut child = command.spawn().unwrap();
+        crate::provider_login_gate::release(&mut child).unwrap();
+        let output = child.wait_with_output().unwrap();
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "{:?} {text}\n{}", output.status, String::from_utf8_lossy(&output.stderr));
+        assert!(text.contains("?? note.txt") && text.contains("base"), "{text}");
+        // The `/usr/bin/git` shim (explicit, or first again after a login
+        // shell's path_helper) may warn that it cannot write its cache; the
+        // commands still work. Nothing fails.
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("fatal"), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(!source.join(".git/elsecrew-probe").exists());
     }
 }

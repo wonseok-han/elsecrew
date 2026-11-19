@@ -72,10 +72,16 @@ pub(crate) fn scoped_arguments(model: &str, effort: Option<&str>, access: ToolAc
         Some(_) => { let link = literal(&workspace.join(".git"))?; denied.iter().filter(|path| **path != link).cloned().collect() }
         None => denied.clone(),
     };
+    // Claude Code also applies `Read(...)` deny rules to sandboxed commands,
+    // so the worktree's `.git` link gets no Read rule (its Edit rule and the
+    // sandbox write denial stay); otherwise `git` fails with "error reading
+    // .git" even though the sandbox reopened it (found 2026-11-19).
+    let readable_link = source_git.as_ref().map(|_| literal(&workspace.join(".git"))).transpose()?;
     let mut rules = Vec::new();
     for path in &denied {
         // File permission rules use // for absolute paths; sandbox paths use /.
         for tool in ["Read", "Edit"] {
+            if tool == "Read" && readable_link.as_ref() == Some(path) { continue; }
             rules.push(format!("{tool}(/{path})"));
             rules.push(format!("{tool}(/{path}/**)"));
         }
@@ -681,6 +687,14 @@ mod tests {
         assert!(!filesystem["denyRead"].as_array().unwrap().contains(&text(&workspace.join(".git"))));
         assert!(filesystem["denyWrite"].as_array().unwrap().contains(&text(&workspace.join(".git"))));
         assert!(filesystem["denyWrite"].as_array().unwrap().contains(&text(&source)));
+        // Read deny rules also bind sandboxed commands: none for the link,
+        // while editing it and reading the user's folder stay denied.
+        let rules = settings["permissions"]["deny"].as_array().unwrap();
+        let link = workspace.join(".git");
+        assert!(!rules.contains(&serde_json::json!(format!("Read(/{})", link.display()))), "{rules:?}");
+        assert!(!rules.contains(&serde_json::json!(format!("Read(/{}/**)", link.display()))), "{rules:?}");
+        assert!(rules.contains(&serde_json::json!(format!("Edit(/{})", link.display()))));
+        assert!(rules.contains(&serde_json::json!(format!("Read(/{}/**)", source.display()))));
     }
 
     #[test]

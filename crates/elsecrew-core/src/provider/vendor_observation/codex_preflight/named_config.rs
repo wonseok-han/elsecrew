@@ -29,6 +29,25 @@ pub fn linked_source_git(workspace: &Path) -> Option<std::path::PathBuf> {
     (Path::new(back.strip_suffix('\n')?) == link).then(|| git_dir.to_owned())
 }
 
+/// The active Apple developer folder (`xcode-select`'s link) when it is an
+/// installed folder holding `usr/bin/git`. In a task worktree, Codex runs
+/// that git directly: `/usr/bin/git` is an `xcrun` shim that needs the link,
+/// the developer folder and a per-user cache, none of which the sandbox opens.
+pub fn developer_dir() -> Option<std::path::PathBuf> {
+    let dir = std::fs::canonicalize("/private/var/db/xcode_select_link").ok()?;
+    let text = dir.to_str()?;
+    // Command Line Tools, or an Xcode app's own developer folder only.
+    let xcode = dir.parent().filter(|parent| parent.file_name() == Some("Contents".as_ref()))
+        .and_then(Path::parent)
+        .filter(|app| app.extension() == Some("app".as_ref()) && app.parent() == Some(Path::new("/Applications")))
+        .is_some();
+    let installed = dir == Path::new("/Library/Developer/CommandLineTools") || (xcode && dir.file_name() == Some("Developer".as_ref()));
+    if !installed || text.contains(['*', '?', '[', ']', '{', '}', '"', '\\', '(', ')']) || !dir.join("usr/bin/git").is_file() {
+        return None;
+    }
+    Some(dir)
+}
+
 pub fn expected_write_policy(home: &Path, workspace: &Path) -> Value {
     let (Some(home), Some(workspace_text)) = (home.to_str(), workspace.to_str()) else {
         return Value::Null;
@@ -42,6 +61,9 @@ pub fn expected_write_policy(home: &Path, workspace: &Path) -> Value {
     if let Some(source_git) = linked_source_git(workspace).and_then(|path| path.to_str().map(str::to_owned)) {
         policy["filesystem"][workspace_text][".git"] = json!("read");
         policy["filesystem"][source_git] = json!("read");
+        if let Some(developer) = developer_dir().and_then(|path| path.to_str().map(str::to_owned)) {
+            policy["filesystem"][developer] = json!("read");
+        }
     }
     policy
 }

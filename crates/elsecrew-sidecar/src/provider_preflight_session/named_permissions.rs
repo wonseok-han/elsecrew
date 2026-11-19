@@ -48,7 +48,13 @@ pub(crate) fn named_discovery_arguments(
     // worktree may read its `.git` link and the repository's Git data.
     let source_git = elsecrew_core::provider::vendor_observation::codex_preflight::named_config::linked_source_git(cwd);
     let (git_link, source_rule) = match source_git.as_deref().and_then(Path::to_str) {
-        Some(git) => ("read", format!(",{}=\"read\"", quote(git))),
+        Some(git) => {
+            // Same developer folder as the expected policy (`developer_dir`).
+            let developer = elsecrew_core::provider::vendor_observation::codex_preflight::named_config::developer_dir()
+                .and_then(|path| path.to_str().map(|text| format!(",{}=\"read\"", quote(text))))
+                .unwrap_or_default();
+            ("read", format!(",{}=\"read\"{developer}", quote(git)))
+        }
         None => ("deny", String::new()),
     };
     let filesystem = format!(
@@ -171,6 +177,12 @@ pub(crate) mod tests {
         let reported = expected_write_policy(&profile, &workspace);
         assert_eq!(reported["filesystem"][source.join(".git").to_str().unwrap()], "read");
         assert_eq!(reported["filesystem"][workspace.to_str().unwrap()][".git"], "read");
+        // The developer folder's git is readable on both sides, never writable.
+        if let Some(developer) = elsecrew_core::provider::vendor_observation::codex_preflight::named_config::developer_dir() {
+            let key = developer.to_str().unwrap();
+            assert!(policy.contains(&format!("{key:?}=\"read\"")), "{policy}");
+            assert_eq!(reported["filesystem"][key], "read");
+        }
         // A plain folder (v1 copy) keeps `.git` denied and adds nothing.
         let plain = workspace.parent().unwrap().join("plain");
         std::fs::create_dir(&plain).unwrap();

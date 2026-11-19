@@ -11,6 +11,19 @@
 - 검증: `tsc --noEmit` 통과, `m5-chat-merge-contract`·`m5-g4-contract` 10개 통과. 접근성 트리로 문구 분리를 확인했다. 창이 다른 Space에 있어 화면 캡처가 갱신되지 않아, 버튼 줄바꿈과 "main에 합침" 표시는 눈으로 확인하지 못했다(다음 재시작 때 확인).
 - **발견·수정(새 작업 시작 실패)**: 합친 뒤 같은 프로젝트에서 새 작업을 보내자 "원본에 반영할 준비를 완료하지 못했어요"가 나왔다. 원인은 `manifestMismatch: could not canonicalize managed parent`였다. 기본 작업 공간 폴더 `~/elsecrew/workspaces`와 그 상위 `~/elsecrew`가 아직 없는데, `workspace_folder()`가 폴더를 만들기 전에 상위 폴더 경로부터 확인했다. 테스트 기본 경로는 상위가 늘 있는 한 단계짜리라 이 경우를 잡지 못했다.
   - 수정: 보여 줄 경로는 있는 가장 가까운 상위 폴더까지만 확인하고 나머지를 붙인다. 새 작업 경로 계산은 설정 파일 유무(`workspace_folder_is_custom`)만 본다. 테스트 기본 경로를 실제와 같이 두 단계(`elsecrew/workspaces`)로 바꿔 기존 worktree 테스트가 이 경우를 지나가게 했다. project 테스트 141개 통과.
+- **발견·수정(에이전트 안의 git, 권한 경계)**: 사용자 결정(2026-11-18)대로 에이전트가 작업 공간에서 `git status/diff/log`를 쓸 수 있어야 하는데, 실제로는 두 공급자 모두 실패하고 있었다. 이전 1118c 실행 기록에도 같은 오류가 있다. 앞서 "에이전트 안 git 확인"은 경로가 달랐던 것으로 보이며, 실제 앱 기준으로는 미확인이었다.
+  - Claude Code: `fatal: error reading '<작업 공간>/.git'`. Claude Code는 `permissions.deny`의 `Read(...)` 규칙을 샌드박스 명령의 읽기 제한에도 합친다. 그래서 샌드박스 설정에서 풀어 준 작업 공간 `.git` 링크가 다시 막혔다. 수정: task worktree일 때만 링크의 Read 규칙 2개를 뺀다. Edit 규칙, 쓰기 금지, 사용자 폴더 Read 금지는 그대로다(`provider_claude_session.rs`).
+  - Codex: `xcrun: error: invalid active developer path`. `/usr/bin/git`은 xcrun shim이라 개발자 폴더가 필요한데, Codex 명명 정책이 이를 열지 않았다. 사용자 `~/.gitconfig` 접근 EPERM도 git을 fatal로 끝낸다(sandbox-exec로 재현).
+    - 수정 1: core `developer_dir()`. `xcode_select_link`가 `/Library/Developer/CommandLineTools` 또는 `/Applications/<앱>.app/Contents/Developer`를 가리키고 `usr/bin/git`이 있을 때만 쓴다. task worktree일 때 기대 정책, 명명 정책 인자, 바깥 seatbelt(`DEVELOPER_READ`)에서 그 폴더를 읽기로 연다.
+    - 수정 2: `task_git_environment`가 실제 실행 경로(`CodexCommand::new`)와 시험 경로에 다음을 넣는다. PATH 앞에 `<dev>/usr/bin`, `DEVELOPER_DIR`, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_OPTIONAL_LOCKS=0`, `GIT_CONFIG_PARAMETERS`(excludesFile, hooksPath, fsmonitor 끔). Codex가 지울 수 있는 KEY/TOKEN 이름은 쓰지 않았다.
+  - 남은 것:
+    - `/usr/bin/git`을 직접 부르거나 로그인 셸에서 PATH 순서가 바뀌면 xcrun 캐시 경고 2줄이 나온다. 명령은 성공한다. 끌 수 있는 환경 변수가 없음을 확인했다.
+    - Codex의 `git status`에 `warning: could not open directory '.claude/'`가 나온다. Claude Code가 만든 빈 `.claude/.cc-writes` 때문이며 결과에는 영향이 없다.
+    - 개발자 폴더가 바뀌는 중(Xcode 전환)이면 기대 정책이 어긋나 실행이 거절될 수 있다. 안전한 쪽이다.
+  - 독립 검토(상시 검토자): Claude 쪽은 차단·중요 0, 경미 3이었고 M3(테스트 단언 보강)을 반영했다. Codex 쪽 1차는 차단 0, 중요 2였다. I1(실제 앱 경로에 환경이 빠짐)과 I2(로그인 셸 PATH, KEY 이름 제거)를 반영했다. 경미 M3(fsmonitor·hooks 끔)과 M4(`/Applications` 범위 좁힘)도 반영했다.
+  - 테스트: 새 `git_works_read_only_inside_a_task_worktree_sandbox`는 실제 seatbelt 안에서 status·로그인 셸 log·shim diff가 성공하고 `<repo>/.git` 쓰기가 실패하는지 본다. named 정책에도 단언을 추가했다. core 239개, sidecar 공급자 168개 통과.
+  - **실제 앱 확인(todo-test-1118c, task-bedeb06c)**: 검증 역할(Codex, gpt-6.2-sol)이 `git status --short`, `git diff --stat`, `git log --oneline -3`, `git show`를 모두 종료 코드 0으로 실행했다. 총괄(Claude)이 "Git 오류가 이번에는 나지 않았다"고 정리했다. 수정 전에는 총괄이 이 오류를 "Mac 문제, 터미널에서 `xcode-select --install`"로 안내했다. 비개발자에게는 잘못된 안내였는데, 원인이 사라져 재현되지 않는다.
+- 운영 실수: 새 작업의 "확인 필요" 상태를 대기 스크립트가 종료 조건으로 잡지 못해 약 70분을 그냥 기다렸다. 이제 진행 중·초안이 아니면 끝나는 대기(`waitui2.sh`)를 쓴다.
 - 운영 메모: Orca 백그라운드 클릭은 첫 번째가 무시되는 경우가 있다(같은 요소를 다시 누르면 된다). 창이 다른 Space에 있으면 키 입력이 막히고 스크린샷이 예전 화면이다.
 - 다음 할 일: 같은 프로젝트에서 새 작은 작업으로 보이는 작업 공간 위치(`~/elsecrew/workspaces/todo-test-1118c/task-…`) 확인, 4단계(git이 아닌 폴더의 shadow-git).
 
