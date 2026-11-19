@@ -67,7 +67,7 @@ pub(crate) fn scoped_arguments(model: &str, effort: Option<&str>, access: ToolAc
     // its `.git` link and the repository's Git data so Git works; writes and
     // the file tools stay denied. Only the repository's own `.git` reopens.
     let source_git = elsecrew_core::provider::vendor_observation::codex_preflight::named_config::linked_source_git(workspace)
-        .filter(|git| git.parent() == Some(source));
+        .filter(|git| elsecrew_core::provider::vendor_observation::codex_preflight::named_config::source_git_dir(source).as_deref() == Some(git.as_path()));
     let unreadable: Vec<String> = match &source_git {
         Some(_) => { let link = literal(&workspace.join(".git"))?; denied.iter().filter(|path| **path != link).cloned().collect() }
         None => denied.clone(),

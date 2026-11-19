@@ -624,7 +624,31 @@ function registerIpcHandlers(): void {
       if (confirmation.response !== 0) return { outcome: "cancelled" };
       return sidecar.openProject(selected, `${identity.dev}:${identity.ino}`);
     }
-    return sidecar.openProject(selected);
+    try {
+      return await sidecar.openProject(selected);
+    } catch (error) {
+      // A plain folder with files (user decision 2026-11-19 "링크 파일 방식"):
+      // keep its history in app data, leaving only a small .git file here.
+      const message = error instanceof Error ? error.message : String(error);
+      if (process.platform !== "darwin" || !/not inside a supported Git repository/.test(message)) throw error;
+      const identity = statSync(selected, { bigint: true });
+      const ko = app.getLocale().toLowerCase().startsWith("ko");
+      // Its earlier record is gone or another folder's: say what is lost.
+      const again = /record is missing or belongs to another folder/.test(message);
+      const confirmation = picked ? { response: 0 } : again ? await dialog.showMessageBox(mainWindow!, {
+        type: "warning",
+        message: ko ? "이 폴더의 이전 기록을 찾을 수 없어요" : "This folder's earlier record was not found",
+        detail: `${selected}\n\n${ko ? "기록이 지워졌거나, 다른 폴더를 복사한 폴더일 수 있어요. 새로 기록하면 지금 폴더 상태부터 다시 시작하고, 이 폴더에서 진행 중이던 작업은 이어지지 않아요. 폴더의 파일은 바꾸지 않아요." : "The record was removed, or this folder is a copy of another one. Recording anew starts from the folder as it is now; tasks in progress here will not continue. No file in the folder changes."}`,
+        buttons: ko ? ["새로 기록하고 시작", "취소"] : ["Record anew and start", "Cancel"], defaultId: 1, cancelId: 1,
+      }) : await dialog.showMessageBox(mainWindow!, {
+        type: "question",
+        message: ko ? "이 폴더로 프로젝트를 시작할까요?" : "Start a project with this folder?",
+        detail: `${selected}\n\n${ko ? "변경 내용을 비교하고 되돌릴 수 있도록 지금 폴더 상태를 앱 안에 기록해 둡니다. 폴더에는 이 기록을 가리키는 작은 .git 파일 하나만 생기고, 다른 파일은 바꾸지 않아요. 온라인에 업로드하지 않으며, 에이전트는 별도의 작업 공간에서 작업해요." : "The folder's current state is recorded inside the app so changes can be compared and restored. Only a small .git file pointing to that record is added here; no other file changes. Nothing is uploaded. Agents work in a separate workspace."}`,
+        buttons: ko ? ["프로젝트 시작", "취소"] : ["Start project", "Cancel"], defaultId: 0, cancelId: 1,
+      });
+      if (confirmation.response !== 0) return { outcome: "cancelled" };
+      return sidecar.openProject(selected, undefined, `${identity.dev}:${identity.ino}`);
+    }
   });
   const invoke = <T>(action: (client: SidecarClientV1, input: T) => Promise<unknown>) =>
     async (event: Electron.IpcMainInvokeEvent, input: T) => {

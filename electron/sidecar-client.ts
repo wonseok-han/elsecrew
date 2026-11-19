@@ -489,7 +489,9 @@ export class SidecarClientV1 {
     return this.#request("run.approval", validateApprovalRequest(input)) as Promise<ApprovalResult>;
   }
 
-  openProject(selectedPath: string, emptyFolderIdentity?: string): Promise<ProjectIdentityV1> { return this.#request("project.open", { selectedPath, ...(emptyFolderIdentity ? { emptyFolderIdentity } : {}) }) as Promise<ProjectIdentityV1>; }
+  openProject(selectedPath: string, emptyFolderIdentity?: string, folderRecordIdentity?: string): Promise<ProjectIdentityV1> {
+    return this.#request("project.open", { selectedPath, ...(emptyFolderIdentity ? { emptyFolderIdentity } : folderRecordIdentity ? { folderRecordIdentity } : {}) }) as Promise<ProjectIdentityV1>;
+  }
   projectCatalog(input: ProjectCatalogRequest): Promise<ProjectCatalogResult> {
     const request = validateProjectCatalogRequest(input);
     const send = async (): Promise<ProjectCatalogResult> => {

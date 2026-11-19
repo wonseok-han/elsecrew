@@ -51,7 +51,68 @@ fn task_branch(worktree_id: &str) -> String {
     format!("{TASK_BRANCH_PREFIX_V2}task-{short}")
 }
 
+/// A plain folder's history lives in app data (`shadow-git-v1/<name>.git`,
+/// user decision 2026-11-19 "링크 파일 방식"); the folder holds only a small
+/// `.git` file naming it, made by `initialize_folder_project`.
+pub(crate) const SHADOW_GIT_DIR: &str = "shadow-git-v1";
+
 impl ProjectManager {
+    /// The repository's Git directory for a project folder: its own real
+    /// `.git` folder, or, through a small `.git` link file, a shadow history
+    /// of this app (exactly `<data>/shadow-git-v1/<name>.git`, a real folder).
+    /// Nothing else is followed.
+    pub(crate) fn repository_git_path(&self, root: &Path) -> Result<PathBuf, ProjectFailure> {
+        let link = root.join(".git");
+        let metadata = std::fs::symlink_metadata(&link)
+            .map_err(|error| ProjectFailure::manifest(format!("could not inspect source .git entry: {error}")))?;
+        if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            return Ok(link);
+        }
+        if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > LINK_MAX_BYTES {
+            return Err(ProjectFailure::manifest("source repository must own a real .git directory; linked worktrees are unsupported"));
+        }
+        let text = std::fs::read_to_string(&link)
+            .map_err(|error| ProjectFailure::manifest(format!("could not read source .git link: {error}")))?;
+        let target = text.strip_prefix("gitdir: ").and_then(|rest| rest.strip_suffix('\n')).map(PathBuf::from)
+            .ok_or_else(|| ProjectFailure::manifest("source .git link is malformed"))?;
+        // Ours by shape (checked first: this app data may have no shadow
+        // folder yet, e.g. on another Mac; review N1).
+        let shadow_shaped = target.parent().is_some_and(|parent| parent.file_name() == Some(std::ffi::OsStr::new(SHADOW_GIT_DIR)));
+        let stale = || ProjectFailure::manifest("selected directory is not inside a supported Git repository: its record is missing or belongs to another folder");
+        let shadows = match std::fs::canonicalize(self.data_root.join(SHADOW_GIT_DIR)) {
+            Ok(shadows) => shadows,
+            Err(_) if shadow_shaped => return Err(stale()),
+            Err(_) => return Err(ProjectFailure::manifest("source repository must own a real .git directory; linked worktrees are unsupported")),
+        };
+        let real = std::fs::symlink_metadata(&target).is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink());
+        let named = target.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.ends_with(".git") && !name.starts_with('.'));
+        // Ours, but its history is gone, elsewhere (another Mac's app data),
+        // or another folder's (a copied folder keeps the link): the folder
+        // can be recorded anew (review I2, I3, M6).
+        if !named || target.parent() != Some(shadows.as_path()) {
+            if named && shadow_shaped { return Err(stale()); }
+            return Err(ProjectFailure::manifest("source repository must own a real .git directory; linked worktrees are unsupported"));
+        }
+        if !real || std::fs::canonicalize(&target).ok().as_deref() != Some(target.as_path()) {
+            return Err(stale());
+        }
+        let owner = std::fs::read_to_string(target.join(super::empty_project::SHADOW_OWNER_FILE)).map_err(|_| stale())?;
+        if !super::empty_project::owns(&owner, root) {
+            return Err(stale());
+        }
+        // Still this folder: keep the mark current (a folder re-created in
+        // place and later moved must still be recognised). Best effort.
+        if let Ok(current) = super::empty_project::owner_text(root) {
+            if current != owner {
+                let temporary = target.join(format!(".{}.{}.tmp", super::empty_project::SHADOW_OWNER_FILE, Uuid::new_v4().simple()));
+                if std::fs::write(&temporary, &current).is_ok() {
+                    let _ = std::fs::rename(&temporary, target.join(super::empty_project::SHADOW_OWNER_FILE));
+                }
+            }
+        }
+        Ok(target)
+    }
+
     /// The "작업 공간 폴더": the saved setting, or `~/elsecrew/workspaces`
     /// (Orca-like, visible to the user). Tests use a folder next to their
     /// own app data so they never touch the real home.
@@ -170,15 +231,16 @@ impl ProjectManager {
     /// The worktree's `.git` file names `<root>/.git/worktrees/<name>`, and
     /// that record points back at this very worktree.
     pub(super) fn verify_worktree_link(&self, worktree: &Dir, active: &ActiveProject) -> Result<(), ProjectFailure> {
-        let root = canonical_protocol_path_without_existing(&active.canonical_git_root)?;
+        let repository = self.repository_git_path(&active.canonical_git_root)?;
+        let root = canonical_protocol_path_without_existing(&repository)?;
         let link = read_small_file(worktree, ".git", "worktree Git link")?;
-        let prefix = format!("gitdir: {}/.git/worktrees/", root.trim_end_matches('/'));
+        let prefix = format!("gitdir: {}/worktrees/", root.trim_end_matches('/'));
         let name = link
             .strip_suffix('\n')
             .and_then(|line| line.strip_prefix(&prefix))
             .filter(|name| !name.is_empty() && !name.contains('/') && !name.starts_with('.'))
             .ok_or_else(|| ProjectFailure::manifest("worktree Git link does not name the project's repository"))?;
-        let git_dir = open_absolute_directory_capability(&active.canonical_git_root.join(".git"))?;
+        let git_dir = open_absolute_directory_capability(&repository)?;
         let record = open_real_child_dir(&open_real_child_dir(&git_dir, "worktrees")?, name)?;
         let back = read_small_file(&record, "gitdir", "worktree back link")?;
         let expected = format!(
@@ -316,7 +378,8 @@ impl ProjectManager {
             return;
         }
         let Ok(source_root) = open_absolute_directory_capability(Path::new(root)) else { return };
-        let Ok(git_dir) = open_real_child_dir(&source_root, ".git") else { return };
+        let Ok(repository) = self.repository_git_path(Path::new(root)) else { return };
+        let Ok(git_dir) = open_absolute_directory_capability(&repository) else { return };
         if let Ok(records) = open_real_child_dir(&git_dir, "worktrees") {
             let back_link = format!("{}/.git\n", path.trim_end_matches('/'));
             let names: Vec<String> = records.entries().into_iter().flatten().flatten()
@@ -434,7 +497,10 @@ impl ProjectManager {
             let link = std::fs::symlink_metadata(path.join(".git")).ok()
                 .filter(|metadata| metadata.is_file() && !metadata.file_type().is_symlink() && metadata.len() <= LINK_MAX_BYTES)
                 .and_then(|_| std::fs::read_to_string(path.join(".git")).ok());
-            let prefix = format!("gitdir: {}/.git/worktrees/", root.trim_end_matches('/'));
+            let repository = self.repository_git_path(Path::new(root))
+                .and_then(|path| canonical_protocol_path_without_existing(&path))
+                .unwrap_or_else(|_| format!("{}/.git", root.trim_end_matches('/')));
+            let prefix = format!("gitdir: {}/worktrees/", repository.trim_end_matches('/'));
             if !link.is_some_and(|link| link.starts_with(&prefix)) {
                 // A visible folder the user emptied (or whose `.git` they
                 // removed) is only taken away when nothing is left in it.

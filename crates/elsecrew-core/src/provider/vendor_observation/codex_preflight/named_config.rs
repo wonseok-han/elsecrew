@@ -18,7 +18,8 @@ pub fn linked_source_git(workspace: &Path) -> Option<std::path::PathBuf> {
     let worktrees = record.parent()?;
     let git_dir = worktrees.parent()?;
     if worktrees.file_name()? != "worktrees"
-        || git_dir.file_name()? != ".git"
+        // `<repo>/.git`, or a plain folder's shadow history `<name>.git`.
+        || !git_dir.file_name()?.to_str()?.ends_with(".git")
         || git_dir.canonicalize().ok()? != git_dir
         || workspace.starts_with(git_dir.parent()?)
         || git_dir.to_str()?.contains(['*', '?', '[', ']', '{', '}'])
@@ -46,6 +47,23 @@ pub fn developer_dir() -> Option<std::path::PathBuf> {
         return None;
     }
     Some(dir)
+}
+
+/// The Git directory a project folder uses: its own `.git` folder, or the
+/// directory its small `.git` link file names (a shadow history). Compared
+/// with `linked_source_git` to tie a worktree to its own project.
+pub fn source_git_dir(source: &Path) -> Option<std::path::PathBuf> {
+    let link = source.join(".git");
+    let metadata = std::fs::symlink_metadata(&link).ok()?;
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        return Some(link);
+    }
+    if !metadata.is_file() || metadata.len() > 4096 {
+        return None;
+    }
+    let text = std::fs::read_to_string(&link).ok()?;
+    let target = std::path::PathBuf::from(text.strip_prefix("gitdir: ")?.strip_suffix('\n')?);
+    (target.canonicalize().ok()? == target).then_some(target)
 }
 
 pub fn expected_write_policy(home: &Path, workspace: &Path) -> Value {

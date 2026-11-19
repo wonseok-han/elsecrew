@@ -7114,3 +7114,173 @@ fn permissions_tell_never_asked_from_an_explicit_choice() {
     let again = fixture.manager.automation_settings(&mut fixture.storage, &id, None, "req_perm_get2").unwrap().result;
     assert_eq!((again["recorded"].clone(), again["permissions"].clone()), (json!(true), json!({"files":false,"commands":false})));
 }
+
+/// "링크 파일 방식": a plain folder with files gets its history in app data
+/// and only a `.git` link file; tasks, step commits and merging then work
+/// exactly as for a Git project, and the merge lands in the folder.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_plain_folder_gets_a_shadow_history_and_merges_back() {
+    use std::os::unix::fs::MetadataExt as _;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let folder = root.join("notes");
+    fs::create_dir_all(folder.join("node_modules/pkg")).unwrap();
+    fs::write(folder.join("index.html"), b"<h1>hi</h1>\n").unwrap();
+    fs::write(folder.join("node_modules/pkg/big.js"), b"x").unwrap();
+    fs::write(folder.join(".DS_Store"), b"x").unwrap();
+    let data = root.join("app-data");
+    fs::create_dir_all(&data).unwrap();
+    let database = data.join("elsecrew.sqlite3");
+    let mut storage = Storage::open(&database).unwrap();
+    let mut manager = ProjectManager::new(&database).unwrap();
+    let identity = |path: &Path| { let meta = fs::metadata(path).unwrap(); format!("{}:{}", meta.dev(), meta.ino()) };
+    let text = folder.to_str().unwrap();
+    // The folder's identity must match; app data and Git repositories refuse.
+    assert!(manager.initialize_folder_project(text, "1:1").is_err());
+    assert!(manager.initialize_folder_project(data.to_str().unwrap(), &identity(&data)).is_err());
+    manager.initialize_folder_project(text, &identity(&folder)).unwrap();
+    let link = fs::read_to_string(folder.join(".git")).unwrap();
+    let shadows = data.join("shadow-git-v1");
+    assert!(link.starts_with(&format!("gitdir: {}/", shadows.display())) && link.ends_with(".git\n"), "{link}");
+    let mut names: Vec<_> = fs::read_dir(&folder).unwrap().map(|entry| entry.unwrap().file_name().into_string().unwrap()).collect();
+    names.sort();
+    assert_eq!(names, [".DS_Store", ".git", "index.html", "node_modules"]);
+    assert_eq!(git_text(&folder, ["ls-files"]).trim(), "index.html");
+    assert!(manager.initialize_folder_project(text, &identity(&folder)).is_err(), "never twice");
+    let inner = folder.join("sub");
+    fs::create_dir(&inner).unwrap();
+    fs::write(inner.join("a.txt"), b"a").unwrap();
+    assert!(manager.initialize_folder_project(inner.to_str().unwrap(), &identity(&inner)).is_err(), "inside a repository");
+    fs::remove_dir_all(&inner).unwrap();
+
+    let action = manager.open_project(&mut storage, text, "req_open_plain").unwrap();
+    let project_id = action.result["projectId"].as_str().unwrap().to_string();
+    let mut fixture = Fixture { _root: temp, source: folder.clone(), storage, manager, project_id };
+    let (address, path) = worktree_chat(&mut fixture, "plain");
+    fs::write(path.join("app.js"), b"console.log(1)\n").unwrap();
+    assert!(fixture.manager.workspace_commit_step(&fixture.storage, &address, "개발: 앱").unwrap());
+    let outcome = merge_now(&fixture, &address);
+    assert_eq!(outcome["outcome"], "merged", "{outcome}");
+    assert_eq!(fs::read(folder.join("app.js")).unwrap(), b"console.log(1)\n");
+    assert_eq!(git_text(&folder, ["status", "--porcelain", "--untracked-files=no"]).trim(), "");
+    // Agents of that task may read exactly the shadow history.
+    let git = elsecrew_core::provider::vendor_observation::codex_preflight::named_config::linked_source_git(&path).unwrap();
+    assert!(git.starts_with(&shadows));
+    assert_eq!(elsecrew_core::provider::vendor_observation::codex_preflight::named_config::source_git_dir(&folder), Some(git));
+}
+
+/// Review fixes for plain folders: the limits count the whole folder, other
+/// repositories inside are refused, a copied folder (same link) is told
+/// apart and recorded anew, a link whose history is gone can be recorded
+/// again, and a leftover preparation folder is cleaned.
+#[cfg(target_os = "macos")]
+#[test]
+fn plain_folder_records_are_bounded_owned_and_recoverable() {
+    use std::os::unix::fs::MetadataExt as _;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let data = root.join("app-data");
+    fs::create_dir_all(&data).unwrap();
+    let database = data.join("elsecrew.sqlite3");
+    let mut storage = Storage::open(&database).unwrap();
+    let mut manager = ProjectManager::new(&database).unwrap();
+    let identity = |path: &Path| { let meta = fs::metadata(path).unwrap(); format!("{}:{}", meta.dev(), meta.ino()) };
+    let make = |name: &str| { let folder = root.join(name); fs::create_dir_all(folder.join("sub")).unwrap(); fs::write(folder.join("a.txt"), b"a").unwrap(); fs::write(folder.join("sub/b.txt"), b"b").unwrap(); folder };
+
+    // Limits count every file of the folder (not the preparation folder).
+    let many = make("many");
+    super::empty_project::FOLDER_RECORD_LIMITS.with(|limits| limits.set((1, 1 << 30)));
+    let refused = manager.initialize_folder_project(many.to_str().unwrap(), &identity(&many));
+    super::empty_project::FOLDER_RECORD_LIMITS.with(|limits| limits.set((20_000, 1 << 30)));
+    assert!(refused.unwrap_err().detail.contains("too many files"));
+    assert!(fs::symlink_metadata(many.join(".git")).is_err());
+    assert_eq!(fs::read_dir(&many).unwrap().count(), 2, "nothing left behind");
+    super::empty_project::FOLDER_RECORD_LIMITS.with(|limits| limits.set((20_000, 1)));
+    assert!(manager.initialize_folder_project(many.to_str().unwrap(), &identity(&many)).unwrap_err().detail.contains("too large"));
+    super::empty_project::FOLDER_RECORD_LIMITS.with(|limits| limits.set((20_000, 1 << 30)));
+
+    // Another repository inside is refused.
+    let nested = make("nested");
+    git_raw(&nested.join("sub"), ["init", "-q"]);
+    assert!(manager.initialize_folder_project(nested.to_str().unwrap(), &identity(&nested)).unwrap_err().detail.contains("another Git repository"));
+
+    // A leftover preparation folder (only our link) is cleaned first.
+    let folder = make("todo");
+    fs::create_dir(folder.join(".elsecrew-prepare-old")).unwrap();
+    fs::write(folder.join(".elsecrew-prepare-old/.git"), b"gitdir: /nowhere\n").unwrap();
+    manager.initialize_folder_project(folder.to_str().unwrap(), &identity(&folder)).unwrap();
+    assert!(fs::symlink_metadata(folder.join(".elsecrew-prepare-old")).is_err());
+    assert_eq!(git_text(&folder, ["ls-files"]).split_whitespace().collect::<Vec<_>>(), ["a.txt", "sub/b.txt"]);
+    let original_link = fs::read_to_string(folder.join(".git")).unwrap();
+    assert!(manager.open_project(&mut storage, folder.to_str().unwrap(), "req_open_owned").is_ok());
+
+    // A copy keeps the link but is another folder: told apart, recorded anew.
+    let copy = root.join("todo copy");
+    assert!(Command::new("/bin/cp").args(["-R", folder.to_str().unwrap(), copy.to_str().unwrap()]).status().unwrap().success());
+    let error = manager.open_project(&mut storage, copy.to_str().unwrap(), "req_open_copy").unwrap_err();
+    assert!(error.detail.contains("not inside a supported Git repository"), "{}", error.detail);
+    manager.initialize_folder_project(copy.to_str().unwrap(), &identity(&copy)).unwrap();
+    assert_ne!(fs::read_to_string(copy.join(".git")).unwrap(), original_link);
+    assert!(manager.open_project(&mut storage, copy.to_str().unwrap(), "req_open_copy2").is_ok());
+    assert_eq!(fs::read_to_string(folder.join(".git")).unwrap(), original_link, "the original keeps its history");
+
+    // A link whose history is gone can be recorded again.
+    let target = PathBuf::from(original_link.trim_start_matches("gitdir: ").trim_end());
+    fs::remove_dir_all(&target).unwrap();
+    assert!(manager.open_project(&mut storage, folder.to_str().unwrap(), "req_open_gone").unwrap_err().detail.contains("not inside a supported Git repository"));
+    manager.initialize_folder_project(folder.to_str().unwrap(), &identity(&folder)).unwrap();
+    assert!(manager.open_project(&mut storage, folder.to_str().unwrap(), "req_open_again").is_ok());
+
+    // The same folder re-created in place (new file number, same path:
+    // sync or restore) or moved on the same disk (same number, new path)
+    // keeps its record (review I4).
+    let aside = root.join("todo-aside");
+    fs::rename(&folder, &aside).unwrap();
+    assert!(Command::new("/bin/cp").args(["-R", aside.to_str().unwrap(), folder.to_str().unwrap()]).status().unwrap().success());
+    fs::remove_dir_all(&aside).unwrap();
+    assert!(manager.open_project(&mut storage, folder.to_str().unwrap(), "req_open_recreated").is_ok());
+    let moved = root.join("todo-moved");
+    fs::rename(&folder, &moved).unwrap();
+    assert!(manager.open_project(&mut storage, moved.to_str().unwrap(), "req_open_moved").is_ok());
+
+    // A folder holding only a link whose history is gone is recorded again.
+    let lone = root.join("lone");
+    fs::create_dir(&lone).unwrap();
+    fs::write(lone.join(".git"), format!("gitdir: {}/shadow-git-v1/gone.git\n", data.display())).unwrap();
+    manager.initialize_folder_project(lone.to_str().unwrap(), &identity(&lone)).unwrap();
+    assert!(manager.open_project(&mut storage, lone.to_str().unwrap(), "req_open_lone").is_ok());
+
+    // A real repository's `.git` is never replaced.
+    let real = make("real");
+    git_raw(&real, ["init", "-q"]);
+    assert!(manager.initialize_folder_project(real.to_str().unwrap(), &identity(&real)).is_err());
+    assert!(fs::symlink_metadata(real.join(".git")).unwrap().is_dir());
+}
+
+/// A link into another app data's shadow folder (another Mac, or app data
+/// reset) is "record missing" even before this app data has any shadow
+/// folder, so the user is offered to record the folder anew (review N1).
+#[cfg(target_os = "macos")]
+#[test]
+fn a_plain_folder_from_another_mac_can_be_recorded_anew() {
+    use std::os::unix::fs::MetadataExt as _;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let data = root.join("fresh-app-data");
+    fs::create_dir_all(&data).unwrap();
+    let database = data.join("elsecrew.sqlite3");
+    let mut storage = Storage::open(&database).unwrap();
+    let mut manager = ProjectManager::new(&database).unwrap();
+    let folder = root.join("from-another-mac");
+    fs::create_dir(&folder).unwrap();
+    fs::write(folder.join("index.html"), b"x").unwrap();
+    fs::write(folder.join(".git"), b"gitdir: /Users/someone-else/Library/Application Support/Elsecrew/m5/shadow-git-v1/abc.git\n").unwrap();
+    assert!(fs::symlink_metadata(data.join("shadow-git-v1")).is_err());
+    let error = manager.open_project(&mut storage, folder.to_str().unwrap(), "req_open_foreign").unwrap_err();
+    assert!(error.detail.contains("record is missing or belongs to another folder"), "{}", error.detail);
+    let meta = fs::metadata(&folder).unwrap();
+    manager.initialize_folder_project(folder.to_str().unwrap(), &format!("{}:{}", meta.dev(), meta.ino())).unwrap();
+    assert!(manager.open_project(&mut storage, folder.to_str().unwrap(), "req_open_foreign2").is_ok());
+    assert_eq!(git_text(&folder, ["ls-files"]).trim(), "index.html");
+}

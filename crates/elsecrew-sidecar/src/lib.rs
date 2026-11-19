@@ -1637,11 +1637,16 @@ impl Sidecar {
             },
             "project.open" => {
                 let initializing = request.params.get("emptyFolderIdentity").is_some();
-                let keys: &[&str] = if initializing { &["selectedPath", "emptyFolderIdentity"] } else { &["selectedPath"] };
+                // A plain folder with files gets a shadow history (link file).
+                let recording = request.params.get("folderRecordIdentity").is_some();
+                let keys: &[&str] = if initializing { &["selectedPath", "emptyFolderIdentity"] }
+                    else if recording { &["selectedPath", "folderRecordIdentity"] } else { &["selectedPath"] };
                 let params = require_exact_params(&request.params, keys).map_err(invalid_params)?;
                 let selected = param_string(params, "selectedPath").map_err(invalid_params)?;
                 let prepared = if initializing {
                     self.projects.initialize_empty_project(selected, param_string(params, "emptyFolderIdentity").map_err(invalid_params)?)
+                } else if recording {
+                    self.projects.initialize_folder_project(selected, param_string(params, "folderRecordIdentity").map_err(invalid_params)?)
                 } else { Ok(()) };
                 prepared.and_then(|()| self.projects.open_project(&mut self.storage, selected, &request.request_id))
             }

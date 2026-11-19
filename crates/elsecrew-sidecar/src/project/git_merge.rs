@@ -184,6 +184,11 @@ impl ProjectManager {
     /// Whether a worktree other than the user's folder has `base` checked out.
     fn base_in_other_worktree(&self, source_root: &Dir, root: &Path, base: &str) -> Result<bool, ProjectFailure> {
         let listed = self.git_at(source_root, ["worktree", "list", "--porcelain", "-z"])?;
+        // A plain folder's shadow history lists its main worktree under the
+        // history's own path (no core.worktree): that is the folder itself.
+        let shadow = self.repository_git_path(root).ok()
+            .filter(|path| path != &root.join(".git"))
+            .map(|path| canonical_protocol_path_without_existing(&path)).transpose()?;
         let root = canonical_protocol_path_without_existing(root)?;
         let wanted = format!("branch refs/heads/{base}");
         let mut current: Option<String> = None;
@@ -191,7 +196,7 @@ impl ProjectManager {
             let field = String::from_utf8_lossy(field);
             if let Some(path) = field.strip_prefix("worktree ") {
                 current = Some(path.to_owned());
-            } else if field == wanted && current.as_deref() != Some(root.as_str()) {
+            } else if field == wanted && current.as_deref() != Some(root.as_str()) && current.as_deref() != shadow.as_deref() {
                 return Ok(true);
             }
         }

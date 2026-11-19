@@ -4536,10 +4536,11 @@ impl ProjectManager {
                     let git_dir = open_real_child_dir(&root, ".git")?;
                     break (path.to_path_buf(), root, git_dir);
                 }
+                // A plain folder this app gave a shadow history (link file).
                 Ok(_) => {
-                    return Err(ProjectFailure::manifest(
-                        "source repository must own a real .git directory; linked worktrees are unsupported",
-                    ));
+                    let shadow = self.repository_git_path(path)?;
+                    let git_dir = open_absolute_directory_capability(&shadow)?;
+                    break (path.to_path_buf(), root, git_dir);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     candidate = path.parent();
