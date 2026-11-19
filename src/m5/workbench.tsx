@@ -1,5 +1,5 @@
 import { DiscardedWorkCleanup } from "./discarded-work-cleanup.tsx";
-import { ProjectPermissions } from "./project-permissions.tsx";
+import { ProjectPermissions, type ChosenPermissions, type PermissionDraft } from "./project-permissions.tsx";
 import { submitChatShortcut } from "./chat-submit-shortcut.ts";
 import { ProviderUsage } from "./provider-usage.tsx";
 import { ProjectRecoveryHistory } from "./project-recovery-history-view.tsx";
@@ -218,6 +218,17 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   // The first chat of a project must not start before the user has seen the
   // team (provider/model per role) and the project's access permissions.
   const [setupConfirmed, setSetupConfirmed] = useState(false);
+  const [firstPermissions, setFirstPermissions] = useState<PermissionDraft | null>(null);
+  // Boxes the user set on the first task's setup survive a remount (team edit).
+  const chosenPermissions = useRef(new Map<string, ChosenPermissions>());
+  const reportPermissions = useCallback((draft: PermissionDraft | null) => {
+    if (draft?.touched) chosenPermissions.current.set(draft.projectId, { permissions: draft.permissions, basis: draft.basis });
+    setFirstPermissions(draft);
+  }, []);
+  // Each opening of the new-task dialog reads the saved permissions afresh.
+  const [newChatOpenings, setNewChatOpenings] = useState(0);
+  useEffect(() => { if (newChatOpen) { setNewChatOpenings(count => count + 1); setPermissionsSaveFailed(false); } }, [newChatOpen]);
+  const [permissionsSaveFailed, setPermissionsSaveFailed] = useState(false);
   useEffect(() => { if (newChatOpen) setSetupConfirmed(false); }, [newChatOpen]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appDefaultsOpen, setAppDefaultsOpen] = useState(false);
@@ -464,6 +475,12 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     if (!snapshot.project) return;
     controller.setActionBlocked(true, { key: "m5.editorNotice.newChat" });
     if (!await fillRecommendedRoles()) { controller.setActionBlocked(chatController.isActionBlocked()); return; }
+    // The first task's confirmed setup includes the permissions shown checked.
+    if (chat.chats.length === 0 && setupConfirmed && firstPermissions?.projectId === snapshot.project.id && firstPermissions.needsSave && window.m5Projects) {
+      const request = { action: "setAutomationPermissions" as const, projectId: snapshot.project.id, permissions: firstPermissions.permissions, confirmed: true as const };
+      try { validateProjectCatalogResult(await window.m5Projects.request(request), request); setPermissionsSaveFailed(false); setFirstPermissions(null); chosenPermissions.current.delete(request.projectId); }
+      catch { controller.setActionBlocked(chatController.isActionBlocked()); setPermissionsSaveFailed(true); return; }
+    }
     const created = await chatController.createCoordinatorChat({ projectId: snapshot.project.id }, goal);
     if (created) { setGoal(""); setNewChatOpen(false); await switchChat(created.chatId); if (chatController.snapshot().activeChat?.chatId === created.chatId) await chatController.startAgent("coordinator", lang); }
     else controller.setActionBlocked(chatController.isActionBlocked());
@@ -596,7 +613,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           {chat.settings && <dl className="m5-new-chat-team">{roleSettingsAsV3(chat.settings).roles.map(role => <div key={role.roleId}><dt>{roleLabel(role.roleId, roleSettingsAsV3(chat.settings!).roleDefinitions, t)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{hasUsableModel(role.runtime, role.modelSelector) ? modelLabel(role.runtime, role.modelSelector) : t("m5.roles.unselectedModel")}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl>}
           <button type="button" className="m5-secondary" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching} onClick={() => openRoleSettings(true)}>{t("m5.firstChat.editTeam")}</button>
           <p>{t("m5.firstChat.editTeamHelp")}</p>
-          <ProjectPermissions key={snapshot.project.id} projectId={snapshot.project.id} disabled={!admissionReady || chat.preparing || chat.switching} />
+          <ProjectPermissions key={`${snapshot.project.id}:${newChatOpenings}`} projectId={snapshot.project.id} disabled={!admissionReady || chat.preparing || chat.switching} proposeAll chosen={chosenPermissions.current.get(snapshot.project.id) ?? null} onDraft={reportPermissions} />
+          {permissionsSaveFailed && <p role="alert">{t("m5.permissions.error")}</p>}
           <label className="m5-first-chat-confirm"><input type="checkbox" checked={setupConfirmed} disabled={chat.preparing || chat.switching} onChange={event => setSetupConfirmed(event.target.checked)} /><span>{t("m5.firstChat.setup.confirm")}</span></label>
         </section> : <details className="m5-chat-team-details"><summary>{t("m5.firstChat.team")}</summary>
         {chat.settings && <dl className="m5-new-chat-team">{roleSettingsAsV3(chat.settings).roles.map(role => <div key={role.roleId}><dt>{roleLabel(role.roleId, roleSettingsAsV3(chat.settings!).roleDefinitions, t)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{hasUsableModel(role.runtime, role.modelSelector) ? modelLabel(role.runtime, role.modelSelector) : t("m5.roles.unselectedModel")}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl>}

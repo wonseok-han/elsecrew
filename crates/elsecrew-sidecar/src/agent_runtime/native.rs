@@ -428,8 +428,31 @@ impl AgentRuntime {
         };
         if let Some(active) = self.native.get_mut(&identity.run_id) {
             if let NativeOwner::Claude(owner) = &mut active.owner {
-                if active.stopped || !same_identity(&active.identity, &identity)
-                    || !same_identity(&owner.registration_identity(storage, projects)?, &identity) {
+                // A Claude run that has stopped or finished its output is
+                // still listed for a moment: nothing is waiting there either.
+                let listing = action == "list" && same_identity(&active.identity, &identity);
+                if listing && active.stopped {
+                    return Ok(json!({"identity":raw,"pending":[],"queued":Value::Null}));
+                }
+                if active.stopped || !same_identity(&active.identity, &identity) {
+                    return Err(invalid());
+                }
+                let registered = match owner.registration_identity(storage, projects) {
+                    Ok(registered) => registered,
+                    Err(_error) if listing => {
+                        // Development builds, once per run (the screen asks every 750 ms).
+                        #[cfg(debug_assertions)]
+                        {
+                            static LOGGED: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
+                            if LOGGED.lock().map(|mut seen| seen.get_or_insert_with(Default::default).insert(identity.run_id.clone())).unwrap_or(false) {
+                                crate::orchestration_dispatch::dev_diagnosis(&format!("approval list of a run no longer registered: {}", _error.kind));
+                            }
+                        }
+                        return Ok(json!({"identity":raw,"pending":[],"queued":Value::Null}));
+                    }
+                    Err(error) => return Err(error),
+                };
+                if !same_identity(&registered, &identity) {
                     return Err(invalid());
                 }
                 return owner.approval_request(action, params.get("approvalId").and_then(Value::as_str), &raw);

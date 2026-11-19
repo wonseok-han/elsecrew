@@ -7099,3 +7099,18 @@ fn the_workspace_folder_setting_places_new_tasks() {
     let reset = fixture.manager.set_workspace_folder(&fixture.storage, None).unwrap();
     assert_eq!((reset["custom"].as_bool(), reset["path"].clone()), (Some(false), default["path"].clone()));
 }
+
+/// The first task proposes full access only where no choice was ever saved:
+/// an explicit "both off" is recorded and stays as chosen.
+#[test]
+fn permissions_tell_never_asked_from_an_explicit_choice() {
+    let mut fixture = Fixture::open();
+    let id = fixture.project_id.clone();
+    let first = fixture.manager.automation_settings(&mut fixture.storage, &id, None, "req_perm_get").unwrap().result;
+    assert_eq!((first["recorded"].clone(), first["permissions"].clone()), (json!(false), json!({"files":false,"commands":false})));
+    let off = super::automation_permissions::AutomationPermissions { files: false, commands: false };
+    let saved = fixture.manager.automation_settings(&mut fixture.storage, &id, Some(off), "req_perm_set").unwrap().result;
+    assert_eq!(saved["recorded"], json!(true));
+    let again = fixture.manager.automation_settings(&mut fixture.storage, &id, None, "req_perm_get2").unwrap().result;
+    assert_eq!((again["recorded"].clone(), again["permissions"].clone()), (json!(true), json!({"files":false,"commands":false})));
+}

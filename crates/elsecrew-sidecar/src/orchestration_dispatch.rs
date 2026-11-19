@@ -73,7 +73,7 @@ const WORKFLOW_BUSY_RETRY: std::time::Duration = std::time::Duration::from_secs(
 /// reuses a refused one's id.
 /// Development builds only: why a team step stopped. The app shows just the
 /// code; the detail is what a developer needs. Release builds write nothing.
-fn dev_diagnosis(line: &str) {
+pub(crate) fn dev_diagnosis(line: &str) {
     #[cfg(debug_assertions)]
     {
         use std::io::Write as _;

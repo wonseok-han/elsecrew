@@ -47,7 +47,12 @@ impl ProjectManager {
             "getAutomationPermissions"
         };
         Ok(ProjectAction {
-            result: json!({"schemaVersion":1,"action":action,"projectId":project_id,"permissions":self.automation_permissions(storage,project_id)?}),
+            // `recorded`: the user has saved a choice before (an explicit "both
+            // off" is not the same as never asked; the first task proposes
+            // full access only when nothing was ever recorded).
+            result: json!({"schemaVersion":1,"action":action,"projectId":project_id,
+                "permissions":self.automation_permissions(storage,project_id)?,
+                "recorded":required_project(storage, project_id)?.contains_key("automation_permissions_v1")}),
             ..ProjectAction::default()
         })
     }

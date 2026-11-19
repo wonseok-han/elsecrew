@@ -129,7 +129,7 @@ export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "cleanupWorkspace"; chatId: string; deleted: true }
   | { schemaVersion: 1; action: "chatErasureList"; entries: ChatErasureEntry[] }
   | { schemaVersion: 1; action: "eraseChatContent"; chatId: string; erased: true }
-  | { schemaVersion: 1; action: "getAutomationPermissions" | "setAutomationPermissions"; projectId: string; permissions: AutomationPermissions }
+  | { schemaVersion: 1; action: "getAutomationPermissions" | "setAutomationPermissions"; projectId: string; permissions: AutomationPermissions; recorded: boolean }
   | { schemaVersion: 1; action: "getProviderConnections" | "setProviderConnection"; connections: { codex: boolean; "claude-code": boolean } }
   | { schemaVersion: 1; action: "cancelTeamTask"; chatId: string; triggerMessageId: string; status: "stopping" | "stopped" }
   | { schemaVersion: 1; action: "inspectGitTrust" | "confirmGitTrust"; inspection: GitTrustInspection }
@@ -364,9 +364,10 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
     keys(result,["schemaVersion","action","chatId","erased"]);
     if (result.chatId !== request.chatId || result.erased !== true) throw new Error("erasure receipt mismatch");
   } else if (request.action === "getAutomationPermissions" || request.action === "setAutomationPermissions") {
-    keys(result,["schemaVersion","action","projectId","permissions"]);
+    keys(result,["schemaVersion","action","projectId","permissions","recorded"]);
     const permissions = object(result.permissions); keys(permissions,["files","commands"]);
-    if (result.projectId !== request.projectId || typeof permissions.files !== "boolean" || typeof permissions.commands !== "boolean") throw new Error("invalid automation permissions");
+    if (result.projectId !== request.projectId || typeof permissions.files !== "boolean" || typeof permissions.commands !== "boolean" || typeof result.recorded !== "boolean") throw new Error("invalid automation permissions");
+    if (request.action === "setAutomationPermissions" && result.recorded !== true) throw new Error("automation permission receipt differs");
     if (request.action === "setAutomationPermissions" && (permissions.files !== request.permissions.files || permissions.commands !== request.permissions.commands)) throw new Error("automation permission receipt differs");
   } else if (request.action === "cancelTeamTask") {
     keys(result, ["schemaVersion", "action", "chatId", "triggerMessageId", "status"]);

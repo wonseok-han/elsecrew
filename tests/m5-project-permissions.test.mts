@@ -5,8 +5,15 @@ test("project permission requires explicit complete consent and matching receipt
  const request = {action:"setAutomationPermissions" as const, projectId:"project_a", permissions:{files:true,commands:false},confirmed:true as const};
  assert.deepEqual(validateProjectCatalogRequest(request),request);
  for (const invalid of [{...request,confirmed:false},{...request,permissions:{files:true}},{...request,permissions:{files:true,commands:true,network:true}}]) assert.throws(()=>validateProjectCatalogRequest(invalid));
- const result={schemaVersion:1,action:request.action,projectId:request.projectId,permissions:request.permissions};
+ const result={schemaVersion:1,action:request.action,projectId:request.projectId,permissions:request.permissions,recorded:true};
  assert.deepEqual(validateProjectCatalogResult(result,request),result);
+ // A saved choice is recorded; "never asked" is only a reading's answer.
+ assert.throws(()=>validateProjectCatalogResult({...result,recorded:false},request));
+ const { recorded: _omitted, ...unrecorded } = result;
+ assert.throws(()=>validateProjectCatalogResult(unrecorded,request));
+ const get={action:"getAutomationPermissions" as const,projectId:"project_a"};
+ const fresh={schemaVersion:1,action:get.action,projectId:get.projectId,permissions:{files:false,commands:false},recorded:false};
+ assert.deepEqual(validateProjectCatalogResult(fresh,get),fresh);
  assert.throws(()=>validateProjectCatalogResult({...result,projectId:"project_b"},request));
  assert.throws(()=>validateProjectCatalogResult({...result,permissions:{files:true,commands:true}},request));
 });
