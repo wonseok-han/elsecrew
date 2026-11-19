@@ -2,6 +2,16 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-19 · by Claude Opus 5.5 (claude-opus-5-5) — todo-test-1118c 합치기와 결과 막대 정리
+- **실제 앱 합치기(todo-test-1118c)**: 화면 잠금이 풀린 09:09에 "main에 합치기 → 합치기"로 작업 브랜치 `elsecrew/task-6e6e17af`의 커밋 5개를 합쳤다. 사용자 폴더 `main`이 af6022e → cab7ce7로 앞당겨졌고 상태는 깨끗했다. 사용자 폴더의 앱을 헤드리스 Chrome으로 점검해 9/10이었다(작업 공간 점검과 같다. "공백 입력 안내"는 이 앱의 설계 차이).
+- 발견·수정(결과 막대):
+  - 합친 뒤 "이 작업은 main에 합쳐졌어요"와 "작업 공간의 변경이에요"가 띄어쓰기 없이 붙어 나왔다. 합쳐진 경우에는 첫 문구만 보여 준다.
+  - 좁은 대화 패널에서 버튼 묶음(`.m5-result-actions`, `flex: none`)이 오른쪽 밖으로 잘렸다. 줄어들고 줄바꿈하도록 바꿨다.
+  - 앱을 다시 열면 합친 작업의 버튼이 비활성 "main에 합치기"로 보였다. 이미 합친 경우(`mergedIntoBase`)는 "main에 합침"으로 보여 준다.
+- 검증: `tsc --noEmit` 통과, `m5-chat-merge-contract`·`m5-g4-contract` 10개 통과. 접근성 트리로 문구 분리를 확인했다. 창이 다른 Space에 있어 화면 캡처가 갱신되지 않아, 버튼 줄바꿈과 "main에 합침" 표시는 눈으로 확인하지 못했다(다음 재시작 때 확인).
+- 운영 메모: Orca 백그라운드 클릭은 첫 번째가 무시되는 경우가 있다(같은 요소를 다시 누르면 된다). 창이 다른 Space에 있으면 키 입력이 막히고 스크린샷이 예전 화면이다.
+- 다음 할 일: 같은 프로젝트에서 새 작은 작업으로 보이는 작업 공간 위치(`~/elsecrew/workspaces/todo-test-1118c/task-…`) 확인, 4단계(git이 아닌 폴더의 shadow-git).
+
 ### 2026-11-18 · by Claude Opus 5.5 (claude-opus-5-5) — 작업 공간 전환 3단계(가): "main에 합치기"
 - 사용자 확인: 작업 하나 = PR 하나. 합치기 전까지 다른 작업의 변경이 안 보이는 것은 정상이다. 1 worktree : 1 브랜치를 유지한다.
 - sidecar(`project/git_merge.rs`, 04642e76): 새 action `inspectChatMerge`와 `mergeChatWorkspace`.

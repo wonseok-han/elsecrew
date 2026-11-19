@@ -1378,7 +1378,7 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-result-text { flex: 1 1 200px; min-width: 0; display: grid; gap: 1px; }
 .m5-result-text strong { font-size: 13px; font-weight: 600; }
 .m5-result-text small { color: var(--m5-muted); font-size: 12px; display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-.m5-result-actions { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+.m5-result-actions { display: inline-flex; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
 .m5-result-actions > button { padding: 4px 12px; font-size: 12px; min-height: 0; }
 /* Task = PR: branch line, merge button, inline confirmation and outcome. */
 .m5-merge { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }

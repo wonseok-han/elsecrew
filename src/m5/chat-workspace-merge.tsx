@@ -16,8 +16,10 @@ type Notice =
  * merged into its base branch instead of copied into the user's folder. A
  * v1 copy keeps the old apply button (`fallback`).
  */
-export function ChatWorkspaceMerge({ chat, disabled, fallback, onMerged, onAskTeam, onState }: {
+export function ChatWorkspaceMerge({ chat, disabled, fallback, merged = false, onMerged, onAskTeam, onState }: {
   chat: ChatRecordV1; disabled: boolean; fallback: React.ReactNode;
+  /** The host knows the task's changes are already in the base (after a reload). */
+  merged?: boolean;
   /** The user's folder and the changes list moved; the host refreshes them. */
   onMerged: () => void;
   /** Sends the coordinator a follow-up asking the team to resolve conflicts. */
@@ -97,7 +99,7 @@ export function ChatWorkspaceMerge({ chat, disabled, fallback, onMerged, onAskTe
         </span>
       : <button type="button" disabled={disabled || busy || blocked !== null} title={blocked ? t(`m5.merge.blocked.${blocked}`, { base }) : undefined}
           onClick={() => { setNotice(null); void inspect().then(() => setConfirming(true)); }}>
-          {blocked === "nothingToMerge" && notice?.kind === "merged" ? t("m5.merge.done", { base }) : t("m5.merge.open", { base })}
+          {blocked === "nothingToMerge" && (merged || notice?.kind === "merged") ? t("m5.merge.done", { base }) : t("m5.merge.open", { base })}
         </button>}
     {notice && <span className="m5-merge-notice" role="status">
       {notice.kind === "merged" && t("m5.merge.merged", { base })}
