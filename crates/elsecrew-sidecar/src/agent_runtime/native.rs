@@ -435,6 +435,12 @@ impl AgentRuntime {
                 return owner.approval_request(action, params.get("approvalId").and_then(Value::as_str), &raw);
             }
         }
+        // A run that already ended has nothing waiting. The screen keeps asking
+        // until it learns the run ended (a few 750 ms polls); that is not an
+        // error. Accepting, declining or inspecting an ended run still is.
+        if action == "list" && !self.native.contains_key(&identity.run_id) {
+            return Ok(json!({"identity":raw,"pending":[],"queued":Value::Null}));
+        }
         let queued = if action == "decline" || action == "acceptOnce" {
             let id = params["approvalId"].as_str().ok_or_else(invalid)?;
             if !id.strip_prefix("approval_").is_some_and(|suffix| {

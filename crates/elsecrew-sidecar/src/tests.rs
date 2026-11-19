@@ -336,8 +336,15 @@ fn approval_errors_are_request_scoped_and_do_not_stop_the_session() {
     sidecar.start_admission(&path);
     wait_until_admitted(&mut sidecar);
     let identity = json!({"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01"});
+    // A run that is not (or no longer) live has nothing waiting: not an error.
+    let listed = sidecar
+        .handle_request(request_value(instance, "approval_request", "run.approval", json!({"action":"list","identity":identity})))
+        .unwrap()
+        .response
+        .unwrap();
+    assert!(listed.ok);
+    assert_eq!(listed.result.unwrap()["pending"], json!([]));
     for params in [
-        json!({"action":"list","identity":identity}),
         json!({"action":"accept","identity":identity}),
         json!({"action":"decline","identity":identity,"approvalId":"../x"}),
         json!({"action":"list","identity":identity,"force":true}),

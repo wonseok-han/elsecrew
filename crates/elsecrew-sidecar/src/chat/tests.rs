@@ -7750,3 +7750,21 @@ fn a_project_that_still_points_at_a_stopped_task_copy_opens_and_gets_its_own_cop
     fixture.projects.reopen_project(&mut fixture.storage, &fixture.project_id, "req_legacy_reopen_again").unwrap();
     assert_eq!(fixture.projects.create_worktree(&mut fixture.storage, &fixture.project_id, "req_legacy_view_again").unwrap().result, view);
 }
+
+/// After a run ends the screen keeps polling for a few beats: the listing
+/// says "nothing waiting", while accepting or declining still refuses.
+#[test]
+fn an_ended_run_lists_no_approvals_and_refuses_decisions() {
+    let mut fixture = Fixture::new();
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+    let hex = "0123456789abcdef0123456789abcdef";
+    let identity = json!({"chatId":format!("chat_{hex}"),"taskId":format!("task_{hex}"),"projectId":format!("project_{hex}{hex}"),
+        "worktreeId":format!("worktree_{hex}"),"workspaceIdentity":format!("sha256:{hex}{hex}"),"runId":format!("agent_run_{hex}")});
+    let listing = runtime.approval_request(&mut fixture.storage, &fixture.projects, &json!({"action":"list","identity":identity})).unwrap();
+    assert_eq!(listing["pending"], json!([]));
+    for action in ["acceptOnce", "decline"] {
+        let error = runtime.approval_request(&mut fixture.storage, &fixture.projects,
+            &json!({"action":action,"identity":identity,"approvalId":format!("approval_{hex}")})).unwrap_err();
+        assert_eq!(error.kind, "agentApprovalChanged", "{action}");
+    }
+}

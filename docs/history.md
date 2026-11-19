@@ -32,6 +32,7 @@
   - 헤드리스 Chrome 점검: 편집 기능 8/8 통과, 기존 기능 9/10(공백 입력 안내는 이 앱의 설계 차이).
   - 앱의 "main에 합치기"로 사용자 폴더 main이 f364992로 앞당겨졌다. 상태는 깨끗하고, 사용자 폴더에서도 편집 점검 8/8이었다.
   - 남은 관찰: 에이전트가 "샌드박스가 Chrome 실행을 막아 실제 브라우저로는 열어 보지 못했다"고 보고한다(설계상 제한). 실제 브라우저 확인은 사용자나 앱 쪽 미리보기 기능의 몫으로 남는다.
+- **수정(승인 목록 오류 로그)**: 실행이 끝난 뒤에도 승인 카드는 화면이 종료를 알 때까지 750ms마다 `list`를 묻는다. 그동안 sidecar가 `agentApprovalChanged`를 돌려줘 Electron 로그에 오류가 6번 남았다. 이제 실행 중이 아닌 run의 `list`는 빈 목록을 돌려준다. `acceptOnce`, `decline`, `inspect`는 그대로 거절한다(`agent_runtime/native.rs`). 새 테스트 `an_ended_run_lists_no_approvals_and_refuses_decisions`를 추가했고, `approval_errors_are_request_scoped…`는 목록 성공으로 갱신했다. approval 테스트 13개 통과.
 - 운영 실수: 새 작업의 "확인 필요" 상태를 대기 스크립트가 종료 조건으로 잡지 못해 약 70분을 그냥 기다렸다. 이제 진행 중·초안이 아니면 끝나는 대기(`waitui2.sh`)를 쓴다.
 - 운영 메모: Orca 백그라운드 클릭은 첫 번째가 무시되는 경우가 있다(같은 요소를 다시 누르면 된다). 창이 다른 Space에 있으면 키 입력이 막히고 스크린샷이 예전 화면이다.
 - 다음 할 일: 같은 프로젝트에서 새 작은 작업으로 보이는 작업 공간 위치(`~/elsecrew/workspaces/todo-test-1118c/task-…`) 확인, 4단계(git이 아닌 폴더의 shadow-git).
