@@ -440,6 +440,16 @@ impl SessionChannel {
     }
 }
 
+/// `.git`, `.claude`, `.codex`, `.agents` in any letter case (macOS folders
+/// ignore case, so `.CLAUDE` is `.claude`), and any dot name with non-ASCII
+/// letters, which the file system may fold onto one of them. Not valid UTF-8
+/// is refused too.
+pub(crate) fn protected_name(name: &std::ffi::OsStr) -> bool {
+    let Some(text) = name.to_str() else { return true };
+    (text.starts_with('.') && !text.is_ascii())
+        || [".git", ".claude", ".codex", ".agents"].iter().any(|blocked| text.eq_ignore_ascii_case(blocked))
+}
+
 fn inspect_snapshot_file(
     root: &std::path::Path,
     value: &str,
@@ -461,10 +471,7 @@ fn inspect_snapshot_file(
         let Component::Normal(name) = part else {
             return Err(failure());
         };
-        if matches!(
-            name.to_str(),
-            Some(".git" | ".claude" | ".codex" | ".agents")
-        ) {
+        if protected_name(name) {
             return Err(failure());
         }
         current.push(name);
@@ -477,7 +484,11 @@ fn inspect_snapshot_file(
                     } else {
                         metadata.is_dir()
                     }) => {}
-            Err(error) if last && allow_new && error.kind() == std::io::ErrorKind::NotFound => {}
+            // A new file may also bring new folders (Claude's Write makes
+            // them): every missing name is still a plain, unprotected name
+            // under a real, link-free folder of the workspace (found
+            // 2026-11-19: `docs/plan.md` in an empty project was refused).
+            Err(error) if allow_new && error.kind() == std::io::ErrorKind::NotFound => {}
             _ => return Err(failure()),
         }
     }
@@ -641,16 +652,31 @@ mod tests {
         std::os::unix::fs::symlink("existing", root.join("link")).unwrap();
         assert!(inspect_snapshot_file(&root, "existing", false).is_ok());
         assert!(inspect_snapshot_file(&root, "new", true).is_ok());
+        // A new file in new folders, as Claude's Write makes them.
+        assert!(inspect_snapshot_file(&root, "docs/plan.md", true).is_ok());
+        assert!(inspect_snapshot_file(&root, "a/b/c.txt", true).is_ok());
+        std::fs::create_dir(root.join("dir")).unwrap();
+        std::os::unix::fs::symlink(root.join("dir"), root.join("dirlink")).unwrap();
         for path in [
             "../outside",
             "/outside",
             "link",
             ".git/config",
-            "missing/child",
+            ".Git/config",
+            ".CLAUDE/settings.json",
+            "sub/.GIT/x",
+            "missing/.Codex/config.toml",
+            ".\u{17F}omething",
+            "missing/.git/config",
+            "missing/.claude/settings.json",
+            "dirlink/child",
+            "existing/child",
+            "missing/../escape",
         ] {
-            assert!(inspect_snapshot_file(&root, path, true).is_err());
+            assert!(inspect_snapshot_file(&root, path, true).is_err(), "{path}");
         }
         assert!(inspect_snapshot_file(&root, "missing", false).is_err());
+        assert!(inspect_snapshot_file(&root, "missing/child", false).is_err());
     }
 
     #[test]

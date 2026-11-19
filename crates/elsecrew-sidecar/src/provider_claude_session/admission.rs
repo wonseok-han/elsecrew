@@ -144,9 +144,7 @@ pub(crate) fn tool_policy(
             };
             let relative = full.strip_prefix(workspace).map_err(|_| failure())?;
             if relative.components().any(|part| match part {
-                std::path::Component::Normal(name) => [".git", ".claude", ".codex", ".agents"]
-                    .iter()
-                    .any(|blocked| name == *blocked),
+                std::path::Component::Normal(name) => super::protected_name(name),
                 std::path::Component::CurDir => false,
                 _ => true,
             }) {

@@ -205,6 +205,25 @@ test("advertised native model choices round-trip only scoped display data", asyn
   assert.deepEqual(await pending, result);
 });
 
+test("a busy provider profile is asked again instead of failing the model list", async () => {
+  const { child, client } = createClient();
+  const ready = JSON.parse(g5dAgentReadyLine());
+  ready.payload.capabilities = [...G5D_NATIVE_CAPABILITIES_V1];
+  const starting = client.start(); child.stdout.write(`${JSON.stringify(ready)}\n`); await starting;
+  const pending = client.getModelChoices({ runtime: "codex", refresh: true, chatId: "chat_test", roleId: "planning" });
+  const first = JSON.parse(child.writes.at(-1)!);
+  child.stdout.write(`${JSON.stringify({ protocolVersion: 1, kind: "response", sidecarInstanceId: "sidecar_test_01", requestId: first.requestId, ok: false,
+    error: { code: "providerBusy", kind: "requestBlocked", detail: "another provider check currently owns this profile; retry after it finishes", retryable: true, outcomeUnknown: false } })}\n`);
+  const writes = child.writes.length;
+  for (let i = 0; i < 40 && child.writes.length === writes; i++) await new Promise(resolve => setTimeout(resolve, 100));
+  const second = JSON.parse(child.writes.at(-1)!);
+  assert.equal(second.method, "agent.getModelChoices");
+  assert.notEqual(second.requestId, first.requestId);
+  const result = { schemaVersion: 1, runtime: "codex", scope: { chatId: "chat_test", roleId: "planning", worktreeId: "work_test", workspaceIdentity: "workspace_test" }, models: [{ modelSelector: "test-model", reasoningEfforts: ["medium"] }] };
+  child.stdout.write(responseLine(second.requestId, result));
+  assert.deepEqual(await pending, result);
+});
+
 function g5dStatus(state: "verifying" | "ready" | "failed"): Record<string, unknown> {
   const admission = state === "verifying"
     ? { schemaVersion: 1, state, startedAt: "2026-09-08T04:00:00Z", completedAt: null, error: null }

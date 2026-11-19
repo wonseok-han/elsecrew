@@ -191,6 +191,10 @@ import {
   type StorageStatusV1,
 } from "../src/m5/contracts/storage-lifetime-v1.ts";
 
+/** A busy provider profile is retried this many times, this far apart. */
+const MODEL_BUSY_RETRIES = 5;
+const MODEL_BUSY_WAIT_MS = 1_500;
+
 export const SIDECAR_READY_TIMEOUT_MS = 3_000;
 export const MAX_SIDECAR_STDERR_TAIL_BYTES = 32 * 1024;
 const MAX_FILE_STREAM_BYTES = 5 * 1024 * 1024;
@@ -484,8 +488,15 @@ export class SidecarClientV1 {
 
   openProject(selectedPath: string, emptyFolderIdentity?: string): Promise<ProjectIdentityV1> { return this.#request("project.open", { selectedPath, ...(emptyFolderIdentity ? { emptyFolderIdentity } : {}) }) as Promise<ProjectIdentityV1>; }
   projectCatalog(input: ProjectCatalogRequest): Promise<ProjectCatalogResult> {
-    if (!this.#ready?.capabilities.includes("project.catalog")) return Promise.reject(new Error("project catalog unavailable"));
-    return this.#request("project.catalog", validateProjectCatalogRequest(input)) as Promise<ProjectCatalogResult>;
+    const request = validateProjectCatalogRequest(input);
+    const send = () => {
+      if (!this.#ready?.capabilities.includes("project.catalog")) return Promise.reject(new Error("project catalog unavailable"));
+      return this.#request("project.catalog", request) as Promise<ProjectCatalogResult>;
+    };
+    // The page may ask before the engine finished starting: wait for it
+    // instead of failing (the startup log showed this twice per launch).
+    if (!this.#ready && this.#readyPromise) return this.#readyPromise.catch(() => undefined).then(send);
+    return send();
   }
   getProjectTree(input: { projectId: string; parentPath: string; cursor: string | null }): Promise<TreePageV1> { return this.#request("project.getTree", input) as Promise<TreePageV1>; }
   createProjectWorktree(input: { projectId: string }): Promise<WorktreeManifest> { return this.#request("project.createWorktree", input) as Promise<WorktreeManifest>; }
@@ -586,7 +597,17 @@ export class SidecarClientV1 {
     if (!this.#nativeAdapterNegotiated || !this.#ready?.capabilities.includes("agent.getModelChoices")) {
       throw new Error("native model choices unavailable: capability was not advertised");
     }
-    return this.#request("agent.getModelChoices", validateModelChoicesRequest(input)) as Promise<ModelChoicesResult>;
+    const request = validateModelChoicesRequest(input);
+    // Another provider check (sign-in status, usage) may hold the profile for
+    // a moment at startup: wait and ask again rather than fail the list.
+    for (let attempt = 0; ; attempt++) {
+      try { return await this.#request("agent.getModelChoices", request) as ModelChoicesResult; }
+      catch (error) {
+        const busy = /another provider check currently owns this profile/.test(error instanceof Error ? error.message : String(error));
+        if (!busy || attempt >= MODEL_BUSY_RETRIES) throw error;
+        await new Promise(resolve => setTimeout(resolve, MODEL_BUSY_WAIT_MS));
+      }
+    }
   }
   startAgentRun(input: AgentRunStartRequestV1): Promise<AgentRunAcceptedV1> {
     return this.#requestAgent("run.startAgent", { ...validateAgentRunStartRequestV1(input) }) as Promise<AgentRunAcceptedV1>;
