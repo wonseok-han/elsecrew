@@ -216,6 +216,7 @@ export const en: Record<MessageKey, string> = {
   "m5.editorError.openProject": "Could not open the folder. Check access permissions and select the project folder again.",
   "m5.editorError.workspaceUnavailable": "Cannot open this task's workspace.",
   "m5.editorError.identity": "The selected project does not match the task's workspace.",
+  "m5.editorError.earlierRecord": "This task began before the folder was recorded anew, so it cannot be opened. Please start a new task.",
   "m5.editorError.openWorkspace": "Could not open the task's workspace.",
   "m5.editorError.timeout": "Working-copy preparation took too long and was stopped for safety. Reopen the app to check its state before selecting again.",
   "m5.editorError.unknownPreparation": "Could not verify the working-copy preparation outcome. Reopen the app to check recovery status.",

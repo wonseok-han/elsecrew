@@ -215,6 +215,7 @@ export const ko = {
   "m5.editorError.openProject": "폴더를 열지 못했어요. 접근 권한을 확인한 뒤 프로젝트 폴더를 다시 선택해 주세요.",
   "m5.editorError.workspaceUnavailable": "이 작업의 공간을 열 수 없어요.",
   "m5.editorError.identity": "선택한 프로젝트와 작업 공간이 맞지 않아요.",
+  "m5.editorError.earlierRecord": "이 작업은 폴더 기록을 새로 만들기 전에 시작한 작업이라 열 수 없어요. 새 작업을 시작해 주세요.",
   "m5.editorError.openWorkspace": "작업 공간을 열지 못했어요.",
   "m5.editorError.timeout": "작업 공간 준비가 오래 걸려 안전하게 멈췄어요. 앱을 다시 열어 상태를 확인한 뒤 다시 선택해 주세요.",
   "m5.editorError.unknownPreparation": "작업 공간 준비 결과를 확인할 수 없어요. 앱을 다시 열어 복구 상태를 확인해 주세요.",

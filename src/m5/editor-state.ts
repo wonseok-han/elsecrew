@@ -339,7 +339,10 @@ export class ProjectEditorController {
       if (this.#isCurrent(project.id, epoch) && sameWorkspace(this.#state.workspace, workspace)) {
         this.#projectEpoch += 1;
         // Back in the previous workspace; the drafts kept for this one stay kept.
-        this.#set({ ...previous, actionBlocked: true, ...editorNotice("m5.editorNotice.failedOpen"), error: errorDetail("m5.editorError.openWorkspace", error) });
+        // A task begun before its plain folder was recorded anew belongs to
+        // the earlier record: say so plainly instead of a technical failure.
+        const earlier = /does not name the project's repository|record points at another folder/.test(error instanceof Error ? error.message : String(error));
+        this.#set({ ...previous, actionBlocked: true, ...editorNotice("m5.editorNotice.failedOpen"), error: errorDetail(earlier ? "m5.editorError.earlierRecord" : "m5.editorError.openWorkspace", error) });
       }
       return false;
     }
