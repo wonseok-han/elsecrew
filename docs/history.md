@@ -26,6 +26,12 @@
 - **보이는 위치 작업의 전체 흐름 확인(task-bedeb06c)**: 새 작업이 합친 main(cab7ce7)에서 `~/elsecrew/workspaces/todo-test-1118c/task-bedeb06c`(브랜치 `elsecrew/task-bedeb06c`)로 만들어졌다. README 한 줄 추가가 커밋 2c3b8ef로 기록됐고, 앱의 "main에 합치기"로 사용자 폴더 main이 2c3b8ef로 앞당겨졌다. 상태는 깨끗하고 화면은 "main에 합침"이었다.
   - 경미(관찰): Codex 실행이 끝난 직후 `m5:approval:v1`이 `agentApprovalChanged: approval run is no longer current`를 6번 기록했다. 끝난 실행에 대한 승인 확인 경합으로 보이며 화면 영향은 없었다.
 - 누적 검증(ab6b0640 기준): Rust 전체 통과(core 239, protocol 70, sidecar 865 + 기타 19). `npm test` 746개 통과, `pnpm build` 통과.
+- **수정 후 실제 기능 작업 전체 흐름(todo-test-1118c, task-7d97cd23)**: 목표는 "할 일 더블클릭 편집(Enter 저장, Esc 취소, 빈 내용 거부, 새로고침 후 유지)"이었다.
+  - 11:39~12:14에 팀이 기획(Codex), 디자인, 개발, 검증, 개발 수정까지 마쳤다. Elsecrew 단계 커밋 5개, 8개 파일 +1025/-47줄이다.
+  - 에이전트 안의 git은 Claude와 Codex 모두 `git status --short && git diff --stat`이 성공했다. 출력에는 `.claude/` 경고만 있었다.
+  - 헤드리스 Chrome 점검: 편집 기능 8/8 통과, 기존 기능 9/10(공백 입력 안내는 이 앱의 설계 차이).
+  - 앱의 "main에 합치기"로 사용자 폴더 main이 f364992로 앞당겨졌다. 상태는 깨끗하고, 사용자 폴더에서도 편집 점검 8/8이었다.
+  - 남은 관찰: 에이전트가 "샌드박스가 Chrome 실행을 막아 실제 브라우저로는 열어 보지 못했다"고 보고한다(설계상 제한). 실제 브라우저 확인은 사용자나 앱 쪽 미리보기 기능의 몫으로 남는다.
 - 운영 실수: 새 작업의 "확인 필요" 상태를 대기 스크립트가 종료 조건으로 잡지 못해 약 70분을 그냥 기다렸다. 이제 진행 중·초안이 아니면 끝나는 대기(`waitui2.sh`)를 쓴다.
 - 운영 메모: Orca 백그라운드 클릭은 첫 번째가 무시되는 경우가 있다(같은 요소를 다시 누르면 된다). 창이 다른 Space에 있으면 키 입력이 막히고 스크린샷이 예전 화면이다.
 - 다음 할 일: 같은 프로젝트에서 새 작은 작업으로 보이는 작업 공간 위치(`~/elsecrew/workspaces/todo-test-1118c/task-…`) 확인, 4단계(git이 아닌 폴더의 shadow-git).
