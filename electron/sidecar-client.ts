@@ -194,6 +194,9 @@ import {
 /** A busy provider profile is retried this many times, this far apart. */
 const MODEL_BUSY_RETRIES = 5;
 const MODEL_BUSY_WAIT_MS = 1_500;
+/** Catalog requests wait out the engine's storage check (up to three minutes; a debug build takes over one). */
+const CATALOG_VERIFYING_RETRIES = 360;
+const CATALOG_VERIFYING_WAIT_MS = 500;
 
 export const SIDECAR_READY_TIMEOUT_MS = 3_000;
 export const MAX_SIDECAR_STDERR_TAIL_BYTES = 32 * 1024;
@@ -489,9 +492,18 @@ export class SidecarClientV1 {
   openProject(selectedPath: string, emptyFolderIdentity?: string): Promise<ProjectIdentityV1> { return this.#request("project.open", { selectedPath, ...(emptyFolderIdentity ? { emptyFolderIdentity } : {}) }) as Promise<ProjectIdentityV1>; }
   projectCatalog(input: ProjectCatalogRequest): Promise<ProjectCatalogResult> {
     const request = validateProjectCatalogRequest(input);
-    const send = () => {
-      if (!this.#ready?.capabilities.includes("project.catalog")) return Promise.reject(new Error("project catalog unavailable"));
-      return this.#request("project.catalog", request) as Promise<ProjectCatalogResult>;
+    const send = async (): Promise<ProjectCatalogResult> => {
+      // ...and while the engine still checks its storage (a few seconds at
+      // launch), ask again shortly instead of failing the page's first reads.
+      for (let attempt = 0; ; attempt++) {
+        if (!this.#ready?.capabilities.includes("project.catalog")) throw new Error("project catalog unavailable");
+        try { return await this.#request("project.catalog", request) as ProjectCatalogResult; }
+        catch (error) {
+          const verifying = /storage admission is still verifying/.test(error instanceof Error ? error.message : String(error));
+          if (!verifying || attempt >= CATALOG_VERIFYING_RETRIES) throw error;
+          await new Promise(resolve => setTimeout(resolve, CATALOG_VERIFYING_WAIT_MS));
+        }
+      }
     };
     // The page may ask before the engine finished starting: wait for it
     // instead of failing (the startup log showed this twice per launch).

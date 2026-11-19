@@ -83,6 +83,11 @@
   - 시작 로그 `requestBlocked: another provider check currently owns this profile`: 다른 공급자 확인과 겹친 모델 목록 요청이었다. 하단 Codex 사용량이 "—"로 남았다. 이제 `getModelChoices`가 1.5초 간격으로 최대 5번 다시 묻는다. 테스트를 추가했다.
   - 시작 로그 `Codex preflight failed at provider RPC error response` 1건은 원인 미확인이다(재현 시 조사).
 - 테스트: Rust provider_claude_session 12개, `npm test` 747개, tsc 통과.
+- **시작 로그 정리 2차**: 준비를 기다리게 하자 같은 요청이 `requestBlocked: storage admission is still verifying`으로 실패했다. 개발 빌드에서는 앱을 켠 뒤 저장소 확인에 1분 남짓 걸린다. 그 사이 하단 사용량이 "Codex 연결 안 됨 · Claude 연결 안 됨"으로 잘못 남았다(연결 상태를 읽지 못해서). 이 회귀는 제 첫 수정이 만든 것이다.
+  - `projectCatalog`는 저장소 확인 중이면 0.5초 간격으로 최대 3분 다시 묻는다.
+  - 사용량 표시는 연결 상태를 처음 읽기 전에는 "확인 중…"을 보여 주고, 읽기에 실패하면 3초 뒤 다시 읽는다(최대 40번).
+  - 재시작 확인: 로그 오류 0건. 사용량은 "확인 중…"에서 Claude "5시간 31% 7일 70%", Codex "7일 2%"로 바뀌었다(Codex는 약 45초).
+  - 상시 검토자의 I1 재검토: 차단·중요 없음. 경미(Search 경로의 대소문자 테스트, 무시되는 유니코드 앞머리, 점으로 시작하는 한글 이름 거절)와 다른 장치의 대소문자 기록은 남긴다. Windows의 `.git.`, 8.3 이름, ADS는 Windows 실행을 켜기 전에 따로 다룬다.
 - 운영 실수: 새 작업의 "확인 필요" 상태를 대기 스크립트가 종료 조건으로 잡지 못해 약 70분을 그냥 기다렸다. 이제 진행 중·초안이 아니면 끝나는 대기(`waitui2.sh`)를 쓴다.
 - 운영 메모: Orca 백그라운드 클릭은 첫 번째가 무시되는 경우가 있다(같은 요소를 다시 누르면 된다). 창이 다른 Space에 있으면 키 입력이 막히고 스크린샷이 예전 화면이다.
 - 다음 할 일: 같은 프로젝트에서 새 작은 작업으로 보이는 작업 공간 위치(`~/elsecrew/workspaces/todo-test-1118c/task-…`) 확인, 4단계(git이 아닌 폴더의 shadow-git).
