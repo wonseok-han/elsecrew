@@ -23,6 +23,8 @@
   - 독립 검토(상시 검토자): Claude 쪽은 차단·중요 0, 경미 3이었고 M3(테스트 단언 보강)을 반영했다. Codex 쪽 1차는 차단 0, 중요 2였다. I1(실제 앱 경로에 환경이 빠짐)과 I2(로그인 셸 PATH, KEY 이름 제거)를 반영했다. 경미 M3(fsmonitor·hooks 끔)과 M4(`/Applications` 범위 좁힘)도 반영했다.
   - 테스트: 새 `git_works_read_only_inside_a_task_worktree_sandbox`는 실제 seatbelt 안에서 status·로그인 셸 log·shim diff가 성공하고 `<repo>/.git` 쓰기가 실패하는지 본다. named 정책에도 단언을 추가했다. core 239개, sidecar 공급자 168개 통과.
   - **실제 앱 확인(todo-test-1118c, task-bedeb06c)**: 검증 역할(Codex, gpt-6.2-sol)이 `git status --short`, `git diff --stat`, `git log --oneline -3`, `git show`를 모두 종료 코드 0으로 실행했다. 총괄(Claude)이 "Git 오류가 이번에는 나지 않았다"고 정리했다. 수정 전에는 총괄이 이 오류를 "Mac 문제, 터미널에서 `xcode-select --install`"로 안내했다. 비개발자에게는 잘못된 안내였는데, 원인이 사라져 재현되지 않는다.
+- **보이는 위치 작업의 전체 흐름 확인(task-bedeb06c)**: 새 작업이 합친 main(cab7ce7)에서 `~/elsecrew/workspaces/todo-test-1118c/task-bedeb06c`(브랜치 `elsecrew/task-bedeb06c`)로 만들어졌다. README 한 줄 추가가 커밋 2c3b8ef로 기록됐고, 앱의 "main에 합치기"로 사용자 폴더 main이 2c3b8ef로 앞당겨졌다. 상태는 깨끗하고 화면은 "main에 합침"이었다.
+  - 경미(관찰): Codex 실행이 끝난 직후 `m5:approval:v1`이 `agentApprovalChanged: approval run is no longer current`를 6번 기록했다. 끝난 실행에 대한 승인 확인 경합으로 보이며 화면 영향은 없었다.
 - 운영 실수: 새 작업의 "확인 필요" 상태를 대기 스크립트가 종료 조건으로 잡지 못해 약 70분을 그냥 기다렸다. 이제 진행 중·초안이 아니면 끝나는 대기(`waitui2.sh`)를 쓴다.
 - 운영 메모: Orca 백그라운드 클릭은 첫 번째가 무시되는 경우가 있다(같은 요소를 다시 누르면 된다). 창이 다른 Space에 있으면 키 입력이 막히고 스크린샷이 예전 화면이다.
 - 다음 할 일: 같은 프로젝트에서 새 작은 작업으로 보이는 작업 공간 위치(`~/elsecrew/workspaces/todo-test-1118c/task-…`) 확인, 4단계(git이 아닌 폴더의 shadow-git).
