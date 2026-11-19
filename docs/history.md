@@ -60,6 +60,8 @@
 - **수정(승인 목록, 연장)**: Claude가 맡은 run이 `stopped`이거나 출력이 끝나 등록 확인(`registration_identity`)에 실패하는 동안의 `list`도 빈 목록으로 답한다. 같은 identity일 때만이고, 싼 검사를 먼저 한다. 사유는 개발 빌드의 진단 로그에 run마다 한 번만 남긴다. 로그에 `agentInputChanged: Claude registration binding differs`가 반복되던 증상이다.
 - 테스트: Rust `permissions_tell_never_asked_from_an_explicit_choice` 추가, approval·claude_native 통과. TS 계약 테스트 갱신, `npm test` 746개 통과, tsc 통과.
 - 운영 메모: 개발 앱을 `pnpm m5:dev -- --remote-debugging-port=9351`로 띄우면 CDP로 DOM을 직접 읽고 누를 수 있다(`scratchpad/cdp/eval.mjs`, `waitdom.mjs`). 창이 `hidden`이면 Orca의 접근성 트리와 캡처는 늦게 따라온다.
+- **새 빈 폴더에서 todo 앱 전체(todo-test-1119b, task-f7630962)**: 13:10~13:46에 팀이 기획(Codex), 디자인, 개발, 검증, 개발 수정까지 승인 대기 없이 마쳤다(단계 커밋 5개). 헤드리스 Chrome 점검은 기본 10/10, 안내 2/2였다. DOM으로 "main에 합치기 → 합치기"를 눌렀고, git(13:46:45)과 화면이 같은 초에 "합쳐졌어요"로 바뀌었다. 사용자 폴더 main은 8fb6a5e, 상태는 깨끗하고 같은 점검 12/12다.
+- **발견·수정(보고 언어)**: 같은 시험에서 개발 담당(Claude)이 영어로 보고했다. 팀 대화에 영어가 그대로 보였고, 단계 커밋 메시지도 "개발: The app is built…"가 됐다. 지시문의 "대화의 언어로 쓰라"만으로는 부족했다. 이제 작업 목표에 한글이 있으면 프롬프트에 "Conversation language: Korean …(한국어)" 줄을 넣는다(`orchestration::conversation_language`). 테스트를 추가했고 orchestration 33개 통과.
 - 운영 실수: 새 작업의 "확인 필요" 상태를 대기 스크립트가 종료 조건으로 잡지 못해 약 70분을 그냥 기다렸다. 이제 진행 중·초안이 아니면 끝나는 대기(`waitui2.sh`)를 쓴다.
 - 운영 메모: Orca 백그라운드 클릭은 첫 번째가 무시되는 경우가 있다(같은 요소를 다시 누르면 된다). 창이 다른 Space에 있으면 키 입력이 막히고 스크린샷이 예전 화면이다.
 - 다음 할 일: 같은 프로젝트에서 새 작은 작업으로 보이는 작업 공간 위치(`~/elsecrew/workspaces/todo-test-1118c/task-…`) 확인, 4단계(git이 아닌 폴더의 shadow-git).

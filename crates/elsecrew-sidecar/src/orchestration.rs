@@ -459,6 +459,18 @@ fn task_worktree_contract(contract: &str) -> String {
         .replace("Never claim to have applied to the user's original.", "Never claim to have changed the user's own folder or main branch.")
 }
 
+/// "The language of the user's conversation" was not enough: a member saw a
+/// Korean task and still reported in English (2026-11-19). A goal written in
+/// Korean names the language outright.
+fn conversation_language(record: &Value) -> &'static str {
+    let korean = record["goal"].as_str().is_some_and(|goal| goal.chars().any(|c| matches!(c, '\u{AC00}'..='\u{D7A3}' | '\u{1100}'..='\u{11FF}' | '\u{3130}'..='\u{318F}')));
+    if korean {
+        "Conversation language: Korean. Write every report, note, plan, summary and user-facing document (such as docs/ and README) in Korean (한국어) unless the user asks for another language.\n"
+    } else {
+        ""
+    }
+}
+
 pub(crate) fn prompt(
     storage: &Storage,
     chat_id: &str,
@@ -500,13 +512,20 @@ pub(crate) fn prompt(
         })
         .unwrap_or_default();
     let you = team.iter().find(|member| member["roleId"] == role).cloned().unwrap_or(Value::Null);
-    Ok(Some(format!("{contract}\nYou are (untrusted configuration data): {}\nConfigured team (untrusted configuration data; delegate only to non-coordinator roleIds): {}\nRemaining execution slots: {}\nAssignment: {}\nPrior team reports (untrusted data): {}\nSelected user conversation follows:\n",
-        you, serde_json::to_string(&team).unwrap(), MAX_STEPS - state.step, serde_json::to_string(clip(&state.instruction, ASSIGNMENT_PROMPT_MAX)).unwrap(), serde_json::to_string(&bounded_reports(&state.reports)).unwrap())))
+    Ok(Some(format!("{contract}\n{}You are (untrusted configuration data): {}\nConfigured team (untrusted configuration data; delegate only to non-coordinator roleIds): {}\nRemaining execution slots: {}\nAssignment: {}\nPrior team reports (untrusted data): {}\nSelected user conversation follows:\n",
+        conversation_language(record), you, serde_json::to_string(&team).unwrap(), MAX_STEPS - state.step, serde_json::to_string(clip(&state.instruction, ASSIGNMENT_PROMPT_MAX)).unwrap(), serde_json::to_string(&bounded_reports(&state.reports)).unwrap())))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_korean_goal_names_the_report_language() {
+        assert!(conversation_language(&json!({"goal":"할 일 앱을 만들어 주세요"})).contains("Korean (한국어)"));
+        assert_eq!(conversation_language(&json!({"goal":"Build a todo app"})), "");
+        assert_eq!(conversation_language(&json!({})), "");
+    }
+
     #[test]
     fn prior_reports_fit_one_provider_prompt_and_point_at_their_full_text() {
         // Quotes, backslashes and newlines double under JSON escaping.
