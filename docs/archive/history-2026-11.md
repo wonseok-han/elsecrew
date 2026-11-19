@@ -1,3 +1,135 @@
+### 2026-11-18 · by Claude Opus 5.5 (claude-opus-5-5) — 작업 공간 전환 3단계(가): "main에 합치기"
+- 사용자 확인: 작업 하나 = PR 하나. 합치기 전까지 다른 작업의 변경이 안 보이는 것은 정상이다. 1 worktree : 1 브랜치를 유지한다.
+- sidecar(`project/git_merge.rs`, 04642e76): 새 action `inspectChatMerge`와 `mergeChatWorkspace`.
+  - 상태 확인: 브랜치, 기준 브랜치, head, 기준 끝 커밋, 앞섬/뒤처짐 수, 수정 중인 파일, 내 폴더가 기준 브랜치에 있는지, 막힘 이유(`noBaseBranch`, `baseBranchMissing`, `nothingToMerge`)를 돌려준다.
+  - 합치기 순서:
+    1. 남은 변경을 커밋한다.
+    2. 기준 브랜치의 새 커밋을 **worktree 안에서** 작업 브랜치로 가져온다(`merge --no-ff`). 충돌이 나면 `merge --abort`하고 파일 목록을 돌려준다. 사용자 폴더는 바뀌지 않는다.
+    3. 기준 브랜치를 앞으로만 옮긴다. 사용자 폴더가 그 브랜치를 체크아웃 중이면 `merge --ff-only`다. 사용자가 수정 중인 파일과 겹치면 Git이 거절하고 아무것도 바꾸지 않는다(`userChangesOverlap`). 체크아웃 중이 아니면 `update-ref <새> <이전>`(compare-and-swap)이다.
+  - 사용자가 확인한 head와 기준 커밋이 그대로일 때만 합친다(`changedSinceReview`). 실행 중인 작업이 없어야 하고, 명시적 확인이 필요하며, Git 잠금이나 filter가 없어야 한다.
+  - 테스트 5개: 빠른 앞당기기와 수정 중 파일 보존, 기준의 새 커밋 먼저 가져오기, 충돌 시 무변경, 기준을 체크아웃하지 않았을 때 폴더 무변경, 확인 뒤 바뀐 경우 거절.
+- 화면(507cbec0, `chat-workspace-merge.tsx`):
+  - v1 작업은 "내 폴더에 반영"을 그대로 둔다.
+  - worktree 작업은 "브랜치 … · main보다 커밋 N개 앞섬 [main에 합치기]"와, 내 폴더가 바뀌는지 알려 주는 한 줄 확인을 보여 준다.
+  - 결과 안내: 합침, 충돌 파일, 막힘 이유. 계약 테스트 `tests/m5-chat-merge-contract.test.mts`.
+- **실제 앱 확인(todo-test-1118b)**: 합치기 한 번으로 사용자 폴더의 `main`이 작업 브랜치 끝(3a0af50)으로 앞당겨졌다. 파일이 들어왔고 상태는 깨끗했다. 사용자 폴더의 앱을 헤드리스 Chrome으로 점검해 10/10 통과했다.
+- 독립 검토(04642e76, 507cbec0): 차단 0, 중요 3, 경미 6. 모두 반영했다.
+  - I1: 저장소 로컬 config에 `merge.*.driver`가 있으면 거절한다(`unsupportedRepository`). 에이전트가 `.gitattributes`로 그 프로그램을 샌드박스 밖 앱 권한으로 실행시킬 수 있었다.
+  - I2: 기준 브랜치가 사용자의 다른 worktree에 체크아웃돼 있으면 거절한다(`baseInOtherWorktree`, 상태 확인에도 표시). `update-ref`가 그 worktree를 엇갈린 상태로 만들 수 있었다.
+  - I3: `merge --abort`가 실패하면 모호 오류로 끝낸다. 작업 공간에 `MERGE_HEAD`가 있으면 단계 커밋과 합치기 모두 거절한다. 충돌 표시가 커밋돼 main에 들어갈 수 있었다.
+  - M1·M5: 앞당기기 직전에 기준 브랜치가 확인한 커밋 그대로인지 다시 본다. ff 실패 이유를 `changedSinceReview`와 `userChangesOverlap`으로 나눈다.
+  - M3: 원본 쓰기 허용 조건(`source_writes_enabled`)을 확인하고, `open_project_source`로 원본 폴더를 다시 검증한다.
+  - M4: 기준 커밋과 작업 head의 `.gitattributes` `filter=`를 다시 확인한다.
+  - M6: 충돌 안내를 "내 폴더와 main은 그대로예요"로 범위를 밝혔다.
+  - 남김(M2): 확인 뒤 편집기에서 저장한 변경도 함께 합쳐진다.
+  - 재검토(32067768): 반영 확인, 새 차단·중요 없음. 경미 반영: driver·filter 검사를 작업 worktree 설정(`config.worktree`)에서도 한다. 다른 worktree 안내에 "연결이 끊긴 폴더일 수 있어요"를 넣었다. 남김: abort 실패로 `MERGE_HEAD`가 남은 작업 공간을 풀 동작이 없고 실행 시작도 막지 않는다(재시작 복구 묶음에서 처리).
+  - 테스트: 거절 3종 1개 추가. 합치기·worktree 관련 22개와 `npm test` 745개 통과.
+- **충돌을 팀이 정리하는 흐름**(사용자: "goal대로 알아서"):
+  - 충돌 안내에 [팀에게 정리 맡기기]가 있다. 누르면 `mergeChatWorkspace{keepConflicts:true}`로 main을 worktree 안에서 합치되 충돌 표시를 남기고(`outcome:"resolving"`), 총괄에게 후속 메시지를 보낸다. 메시지 내용은 겹친 파일, 표시를 정리하라는 것, Git 명령을 쓰지 말라는 것이다.
+  - 상태 확인은 `resolving`과 `unresolved`(표시가 남은 파일 수)를 보여 준다. 표시가 남아 있으면 단계 커밋은 기록하지 않고(`Ok(false)`), 합치기는 `conflictsUnresolved`로 막는다. 표시가 모두 사라지면 다음 단계 커밋이나 합치기가 merge 커밋으로 마무리하고 main을 앞당긴다.
+  - 이로써 이전 I3의 "MERGE_HEAD면 무조건 거절"은 "표시가 남아 있으면 거절"로 바뀌었다. abort에 실패한 경우도 같은 방법으로 풀 수 있다.
+  - 발견·수정: 실제 저장소의 서브모듈(gitlink)이 변경 목록에 오면 "diff base is not a blob"으로 변경 탭 전체가 실패했다. 이제 내용 없는 변경으로 보인다. 테스트 도우미의 `add -A`가 fixture의 서브모듈을 지우던 문제도 고쳤다. 단계 커밋과 합치기를 거쳐도 서브모듈이 지워지지 않음을 단언한다.
+  - 테스트: 팀 정리 흐름 1개(표시가 남은 동안 커밋·합치기 거절, 정리 중 변경 목록 정상, 정리 뒤 merge 커밋 1개로 합침), 서브모듈 1개. 합치기·worktree·diff 관련 32개, `npm test` 745개, 계약 테스트 통과.
+- 팀 지시문(`orchestration.rs`, 2014f408): 두 지시문을 상수(`COORDINATOR_CONTRACT`·`MEMBER_CONTRACT`)로 뺐다. 작업이 worktree(준비 기록 manifest v2)이면 `task_worktree_contract`가 문구를 바꾼다.
+  - "격리된 복사본" → "작업 worktree(사용자 프로젝트의 Git 브랜치, 앱이 단계마다 커밋)".
+  - 저장소를 바꾸는 Git 명령(commit·add·merge·rebase·reset·checkout·switch·branch·stash) 금지. 읽기 명령(status·diff·log·show)은 허용.
+  - 결과 확인 경로: "앱에서 합치기 버튼으로 합친 뒤 내 폴더에서 연다".
+  - 교체가 모두 적용되는지 확인하는 테스트를 추가했다.
+  - 관찰: `a_sign_in_hold_of_a_settled_run_is_freed_when_the_app_starts`가 병렬 실행 중 한 번 실패했다. 단독으로는 3회 모두 통과해 시간 의존 불안정으로 본다(추정).
+- **실제 앱 충돌 시험(todo-test-1118b, 16:01~16:33)**: 새 작업("제목을 '오늘의 할 일'로")이 진행되는 동안 시험자가 내 폴더 main에 같은 줄을 "나의 할 일"로 바꿔 커밋했다.
+  - 합치기에서 충돌을 감지했다(`index.html`, main은 그대로).
+  - [팀에게 정리 맡기기]를 누르자 worktree에 충돌 표시가 남았고, 총괄에게 요청이 갔다. 총괄은 "제목은 하나만 쓸 수 있으니 어느 쪽으로 할까요?"라고 사용자에게 물었다(올바른 판단). "1번"이라고 답하자 개발 담당이 표시를 정리했다.
+  - 처음 재개 때 개발 시작이 `agentInputChanged`로 한 번 멈췄다. "계속"으로 재개하자 성공했다. 원인은 잡지 못했다. 다음에 다시 생기면 원인을 남기도록, 개발 빌드에서만 팀 단계 실패 상세를 `$TMPDIR/elsecrew-dev-diagnosis.log`에 쓰게 했다(`dev_diagnosis`).
+  - 발견·수정: 팀이 작업 쪽 내용을 그대로 고르면 index가 HEAD와 같아져, 단계 커밋이 "변경 없음"으로 merge 커밋을 만들지 않았다(`MERGE_HEAD`만 남음). 합치기 진행 중이면 내용 차이가 없어도 merge 커밋을 만든다(테스트 추가).
+  - 관찰:
+    - dev 앱 시작 한 번이 저장소 확인 "준비 중"에서 15분 넘게 멈췄다. sidecar·renderer 모두 대기 상태였다. 다시 시작하자 정상이었다(재현 안 됨, 원인 미상).
+    - 창이 가려져 있으면 화면 갱신(실행 시간 표시 등)이 멈췄다가, 클릭하면 따라잡는다.
+    - 에이전트가 worktree 안에서 `git status`/`git diff`를 실제로 실행했다. `.git` 읽기 허용이 동작한다.
+  - 발견·수정(a846cd6b): 재시작 직후 합치기가 "merging requires idle native execution"으로 막혔다. "실행 중" 판단에 모델 목록 조회와 공급자 확인(`pending_catalogs`, `pending_discoveries`)까지 들어 있었기 때문이다. 이제 쓰기가 가능한 실행(`runs_in_flight`: 시작됨·시작 중·정리 중)과 팀 단계만 본다. 막히면 화면은 "실행이 끝난 뒤 다시"라고 안내한다.
+  - **끝까지 확인**: 다시 띄운 앱에서 "겹친 부분 정리됨 [main에 합치기]" → 합치기를 했다. 내 폴더 main에 merge 커밋 "main과 겹친 부분 정리"(81a5720)가 생겼다. 사용자 커밋과 작업 커밋이 모두 기록에 남았고, 제목은 사용자가 고른 "오늘의 할 일", 상태는 깨끗했다.
+  - 실행 전 파일 검사(`runtime_isolation::verify_allowing_inner_links`): worktree 작업에서는 상대 경로이면서 작업 폴더 안에 머무는 symlink를 허용한다. 추적되는 링크나 `node_modules/.bin/*` 같은 도구가 만든 링크가 여기에 해당한다. 절대 경로·밖으로 나가는 링크, 하드링크, 특수 파일은 계속 거절한다. 종류는 Git을 실행하기 전에 저장된 manifest로 판단한다. v1 복사본은 그대로다. (경계 변경: 다음 독립 검토 대상)
+- 독립 검토(1320dbb9..bd37d605): 차단 0, 중요 2, 경미 5. 반영했다.
+  - I1: 바이너리 충돌과 수정/삭제 충돌은 표시가 없어 "해결됨"으로 오판됐다. 그러면 main의 변경이 조용히 사라질 수 있었다. 이제 팀에게 넘기는 것은 양쪽이 모두 수정한 일반 텍스트 파일(stage 1·2·3, 1MiB 이하, NUL 없음, 표시 있음)일 때만이다(`team_resolvable`). 그 밖의 충돌은 되돌리고, `teamResolvable:false`로 "팀이 글자로 정리할 수 없어요"라고 안내한다(경미 M1·M4 포함).
+  - I2: `conflict-marker-size` 속성으로 표시 길이를 바꾸면 판정을 피할 수 있었다. 이제 길이와 무관하게 판정한다(`<`·`>` 7개 이상 뒤 공백이나 줄 끝, `=`만 7개 이상).
+  - M2: 링크 대상은 맨 앞의 `..`만 허용한다(이름 뒤 `..`는 디렉터리 링크를 거쳐 밖으로 나갈 수 있다).
+  - 남김: M3(실제 내용이 표시처럼 생긴 문서는 계속 미해결로 남음), M5(서브모듈 변경 표시 구분).
+  - 재검토(21aab404): 반영 확인, 새 차단·중요 없음. 경미 반영: `=======` 줄만으로는 표시로 보지 않는다(Markdown 제목 밑줄과 겹침). 미반영 개수에서 이름 바뀐 항목을 두 번 세지 않는다. filter가 설정된 저장소에서는 `git status`를 건너뛴다.
+  - 테스트: 바이너리 충돌 비위임과 되돌림, 표시 크기 10에서도 미해결 판정, 표시 판정 단위 테스트, 링크 경유 탈출 거절. 관련 77개, `npm test` 745개 통과.
+- 재시작 복구: `worktree add` 직후 기록 전에 앱이 끝나면, 지금까지는 작업 폴더가 남아 "unexpected activated snapshot artifact"로 복구(버리기)를 거절해 프로젝트가 "복구 필요"에 갇혔다. 이제 `.git`이 파일인 폴더와 이 작업의 v2 기록을 이 준비의 잔여물로 인정한다(`unstarted_task_worktree`). 버리기는 기록을 바꾸기 전에 `git worktree remove --force`를 하고, 작업 브랜치가 준비 때 기준 커밋에 그대로이면 삭제하며, 기록 파일도 지운다. 하나라도 실패하면 복구 상태를 그대로 둔다. 테스트 전용 중단점(`STOP_AFTER_WORKTREE_ADD`)으로 재현해 확인했다.
+- **2단계(나) 보이는 위치와 설정**: 새 작업의 worktree는 `<작업 공간 폴더>/<프로젝트 이름>/task-<8자>`에 만든다(기본 `~/elsecrew/workspaces`, Orca처럼 사용자에게 보임). 테스트 빌드에서는 임시 데이터 폴더 옆을 쓴다.
+  - 작업 폴더의 근거는 manifest의 `worktreePath`다(`workspace_path`). 링크를 따르지 않고 절대 경로로 다시 연다(`worktree_capability`). `.git` 링크와 역링크 확인은 그대로다. v1은 앱 데이터의 고정 자식 그대로다.
+  - 저장: rename 기준을 작업 폴더 자체로 한다. 다른 볼륨도 가능하다. rename 직전에 붙잡은 폴더가 기록된 폴더(같은 dev/ino, 실제 디렉터리)인지 확인한다(`verify_stable_task_folder`).
+  - 정리·프로젝트 삭제: `git worktree remove --force`로 지운다. 원본이 없으면 링크를 따르지 않고 지운다. 그 뒤 우리 기록만 정리한다(`remove_task_worktree_folder`). 복구 검사는 준비 기록에 적힌 `task-<8자>` 경로를 따른다.
+  - 설정 "작업 공간 폴더"(설정 > 저장 공간): 화면은 `chooseWorkspaceFolder`만 보낸다. 메인이 폴더 선택 창을 띄우고 `setWorkspaceFolder`를 보낸다(화면이 직접 보낸 경로는 거절). sidecar는 실제 폴더이고, 링크가 아니고, 쓸 수 있고, 앱 데이터·저장된 프로젝트와 겹치지 않을 때만 받는다. 바꾼 값은 새 작업부터 적용된다. `resetWorkspaceFolder`로 기본값에 돌아간다.
+  - 테스트: 보이는 위치 생성, 저장과 폴더 삭제, 설정 규칙과 적용. 계약 테스트, 보안·구문 검사(21) 통과.
+- 독립 검토(ad44343b·3b885897·5bfd7827): 차단 0, 중요 2, 경미 6. 반영했다.
+  - I1: 정리와 프로젝트 삭제의 대체 삭제가 manifest 경로를 그대로 믿고 재귀 삭제할 수 있었다. 이제 다음을 모두 만족해야 지운다.
+    - 폴더 이름이 `task-<id 8자>`
+    - 일반 파일 `.git`이 `<원본>/.git/worktrees/`를 가리킴
+    - 정리라면 의도에 기록한 inode와 같음
+    - 프로젝트 삭제는 manifest를 계약 검사하고 id까지 대조함
+    - 테스트: 위조 경로(사용자 폴더, 같은 이름의 다른 폴더)는 거절되고 그대로 남는다.
+  - I2: 기본 켜기 뒤 LFS·merge driver를 쓰거나 브랜치에 있지 않은 저장소는 작업을 시작할 수 없었다. 이제 이런 저장소는 v1 복사본으로 만든다(`task_worktrees_supported`).
+  - M1: Git 검사를 생략하는 실행 확인에도 `.git` 링크를 확인한다.
+  - M2·M3: 새 작업 폴더가 저장된 모든 프로젝트와 겹치지 않는지 확인한다. 기본 폴더도 같다.
+  - M4: 설정한 폴더가 사라졌으면 다시 만들지 않고 "설정에서 다시 고르라"고 알린다.
+  - 남김: M6(사용자가 IDE로 작업 폴더를 열었을 때의 마찰은 실제 시험으로 확인).
+  - 재검토(bb6c1cba): 안전 쪽 수정 확인, 새 차단 없음.
+    - 중요 반영: LFS(content filter) 저장소는 v1 복사본도 깨끗한 원본 검사(바이트와 pointer 비교)에서 엉뚱한 이유로 막힌다. 그래서 대체하지 않고 "아직 지원하지 않는 저장소"로 분명히 거절한다. merge driver 저장소와 브랜치에 있지 않은 저장소만 v1로 대체한다.
+    - 경미 반영: `.git`이 사라진 보이는 작업 폴더는 비어 있으면 지우고, 아니면 "직접 정리하거나 .git을 되살려 달라"는 분명한 오류를 낸다.
+    - 남김: 원장 lock 경로 대조(이름·링크 확인으로 충분히 좁다고 판단), detached 상태의 대체 경로에서 깨끗한 원본이 필요하다는 안내.
+- **기본 켜기 상태 실제 시험(todo-test-1118c, 환경 변수 없음)**: 17:20~17:59에 팀 작업이 끝났다(기획·디자인·개발·검증·개발 2차, 작성자 Elsecrew 단계 커밋 5개, 9개 파일 +1298줄). 새 작업 창에 "마지막 커밋에서 작업 브랜치를 만들어 시작" 안내가 나왔다. 디자인 보고에 "격리된 복사본" 표현이 사라졌다(새 지시문). 작업 폴더의 앱은 헤드리스 Chrome 점검 9/10이었다. "공백 입력 안내 표시"만 실패했는데, 이 앱은 공백을 안내 없이 무시하는 설계라 앱 결함은 아니다. 합치기는 화면 잠금 때문에 기다리는 중이다.
+- 검증(eba4673c 이후 전체): core 239, protocol 70, sidecar 864(무시 43), 기타 16·3 통과.
+- **worktree 방식 기본 켜기**(macOS): 합치기, 충돌 정리, 버리기 정리, 재시작 복구가 생겨 검토도 통과했으므로 새 작업은 기본으로 실제 worktree다. `ELSECREW_GIT_WORKTREES=0`이면 예전 복사본을 쓴다. 예전 복사본 동작을 시험하는 테스트 3개는 v1을 명시했다. 남은 큰 항목은 보이는 위치와 설정, 그림자 git 폴더 프로젝트(4단계)다.
+- 결과 막대: 합친 뒤에는 "변경 파일 N개 · 작업 공간의 변경이에요" 대신 "이 작업은 main에 합쳐졌어요"를 보여 준다(변경이 있고 합칠 것이 없을 때).
+- 파동 마감 검증(5bfd7827 이후): core 239, protocol 70, sidecar 862(무시 43), 기타 16·3, `npm test` 745, `pnpm build` 통과.
+- 새 작업 안내(`inspectSourceChanges`): worktree 방식이면 새 작업 창이 "마지막 커밋에서 작업 브랜치를 만들어 시작"과 "커밋하지 않은 변경 N개는 포함되지 않아요"를 보여 준다(사용자 확인: 작업 = PR).
+- 아직 안 한 것:
+  - 합친 뒤 결과 막대의 "변경 파일 N개"가 기준 커밋 대비 그대로 보인다.
+  - 재시작 복구(abort 실패 상태 해제 포함), 보이는 위치와 설정.
+- v2 정리(`forget_task_worktree`): 버린 작업 정리와 프로젝트 삭제 때, 안전한 폴더 삭제가 끝나 폴더가 없어진 뒤에만 실행한다. 사용자 저장소 `.git/worktrees/` 중 역링크가 이 폴더를 가리키는 기록 하나만 지우고(저장소 전체 prune 없음), 브랜치는 `branch -d`(합쳐진 것만)로 지운다. 합치지 않은 작업 브랜치는 남긴다(Orca 규칙). 테스트: 사용자의 다른 worktree는 보존, 합치지 않은 브랜치 유지, 합쳐진 브랜치 삭제.
+  - 커밋하지 않은 변경 안내.
+  - 독립 검토(합치기는 사용자 폴더를 바꾸는 경계 변경).
+
+### 2026-11-18 · by Claude Opus 5.5 (claude-opus-5-5) — 작업 공간 전환 2단계(가): 실제 git worktree 작업 공간
+- 범위: `docs/proposals/m5-real-worktrees.md` §5의 2단계 중 첫 묶음이다. **`ELSECREW_GIT_WORKTREES=1`일 때만** 켜진다(합치기(3단계)가 생길 때까지 기본은 꺼짐). 그래서 기본 동작은 바뀌지 않았다.
+- 한 일:
+  - 계약: Rust `worktreeManifest` 검사기와 TS `validateWorktreeManifest`가 v1·v2를 모두 받는다(`schemaVersion`으로 나눔). 이 검사기를 거치는 작업 공간 주소·실행 복구·준비된 작업 공간 계약이 v2를 그대로 받는다. 원본 위치 키는 v1 `canonicalGitRoot`, v2 `canonicalSourceRoot`이고, 읽을 때는 공용 접근자 `project_v1::manifest_source_root`를 쓴다.
+  - DB 다시 열기(`storage/reopen/snapshot/workspace.rs`): v2 준비 기록은 통째로(최대 16KiB) 읽어 공유 계약으로 검사한다. v1은 조각 검사를 그대로 둔다. 원본·작업 폴더 겹침 검사는 두 버전 모두 한다. 저장 스키마 번호는 올리지 않았다(파생 테이블 형태가 같음).
+  - `ActiveProject.kind`(`Snapshot` | `GitWorktree{branch, base_ref}`). manifest에서 종류를 읽고(`manifest_kind`), v2는 복사본 표시 파일 대신 `.git` 링크와 원본의 역링크를 맞춰 본다(`verify_worktree_link`). 검증(`verify_worktree_repository`)은 작업 브랜치에 있는지와 기준 커밋을 포함하는지만 본다. 앱 커밋은 허용한다.
+  - 만들기(`project/git_worktree.rs` `create_git_worktree`, 새 작업의 `prepare_chat_application_workspace`):
+    - 원본 HEAD 커밋에서 `git worktree add -b elsecrew/task-<8자> <앱 데이터>/worktrees-v1/<id>`를 실행한다. 원본 폴더가 깨끗할 필요는 없다. 수정 중인 파일은 원본에 그대로 남는다.
+    - 원본의 ref는 작업 브랜치 하나만 늘어야 한다(전후 `for-each-ref` 비교). git 잠금 파일이 있거나 content filter(LFS 등)가 설정된 저장소는 거절한다.
+    - 실패하면 worktree·브랜치를 지우고 준비 기록을 되돌린다.
+  - 단계 커밋(`workspace_commit_step`): 팀원 실행이 끝날 때마다(성공·실패 모두, 총괄 제외) 변경이 있으면 `git add -A`와 `commit --no-verify`를 한다. 작성자는 `Elsecrew <elsecrew@local>`, `commit.gpgsign=false`다. 메시지는 "역할: 보고 첫 줄"이다. 기록이 실패해도 팀은 멈추지 않는다.
+  - 샌드박스(`provider_runtime_sandbox.rs`): 작업 폴더의 `.git` 파일과 원본의 역링크가 서로 가리킬 때만 원본 `.git`을 **읽기 전용**으로 연다(`SOURCE_GIT`). 에이전트의 `git status/diff/log`가 동작하고, 쓰기(커밋)는 계속 막는다.
+  - 파일 감시(`watch_job.rs`): worktree의 `.git`은 파일이라 v2에서는 작업 폴더 자체를 붙잡는다.
+- 이번 묶음의 위치 결정: worktree는 우선 앱 데이터 `worktrees-v1/<id>`에 만든다. 저장(rename)·정리·감시가 모두 이 폴더 기준이라 그대로 쓸 수 있기 때문이다. 사용자가 고른 보이는 폴더 `~/elsecrew/workspaces/<프로젝트>/<작업>`과 설정 항목은 다음 묶음(2단계 나)에서 한다.
+- 검증: 새 테스트 2개(작업 브랜치 생성·원본 HEAD/브랜치/상태 불변·수정 중 파일 보존·커밋 뒤에도 변경 목록 유지·브랜치 이탈 거절, filter 저장소 거절과 ref 불변).
+- 실제 앱 첫 시도에서 발견(같은 날 수정): 준비 확인·버리기·정리·실행 준비·Claude 준비 등 12곳이 manifest의 `canonicalGitRoot`를 직접 읽어 v2에서 "snapshot and project canonical roots differ"로 작업 만들기가 실패했다. 모두 `manifest_source_root`로 바꿨다. 키 이름을 v1과 같게 바꾸는 방법도 시도했지만, 실패한 시도가 남긴 v2 준비 기록을 DB 다시 열기 검사가 거절해(`storageSchemaMismatch`) 앱이 열리지 않았다. 사용자 앱 데이터를 고치지 않으려고 이름 변경은 되돌렸다.
+- 독립 검토(상시 검토자, 88777a96): 차단 0, 중요 2, 경미 6.
+  - I1 반영: 실패 되돌리기의 저장소 전체 `worktree prune`을 없앴다. 연결이 끊긴 외장 디스크의 사용자 worktree 기록까지 지울 수 있기 때문이다. 브랜치는 이번 호출이 만든 것(기준 커밋에 그대로 있음)일 때만 지운다.
+  - I2(결정 필요, 사용자 확인 전): 에이전트가 사용자 저장소 `.git` 전체를 읽을 수 있다. 여기에는 `config`의 remote URL 토큰, 다른 브랜치와 stash가 포함된다. v1 사본은 이것들을 일부러 지웠었다. Claude 실행은 `.git` 읽기가 막혀 있어 Git 명령이 안 된다.
+  - M2 반영: 단계 커밋에 `gc.auto=0`, `maintenance.auto=false`를 준다. 커밋 직전에 저장소 로컬 filter 설정을 다시 확인한다.
+  - M3 반영: LFS는 보통 앱이 읽지 않는 전역 설정에 있다. 그래서 기준 커밋의 `.gitattributes`와 `info/attributes`의 `filter=`로도 거절한다(테스트 추가).
+  - M4 반영: 줄바꿈 설정은 덮어쓰지 않는다(저장소 설정을 따름).
+  - 재검토(b1a1fce8): 반영 확인, 새 차단·중요 없음. 원본 경로를 직접 읽는 곳은 더 없다. 경미 중 `info/attributes`를 읽을 수 없을 때(없음 외 오류)와 로컬 `core.attributesFile` 설정도 거절하도록 바로 고쳤다.
+  - 재검토 M4(추정): Codex named 권한 정책(`:root=deny`)과 Claude 설정(원본 경로 `denyRead`)이 원본 `.git` 읽기를 따로 막는다. 그래서 seatbelt만 열어서는 에이전트 안 Git 명령이 안 될 수 있다. I2를 사용자에게 물을 때 함께 적는다.
+  - **I2 사용자 결정: 허용**("일단 허용"). 에이전트가 사용자 저장소 `.git`을 읽을 수 있다. 쓰기(커밋)는 계속 앱만 한다. 세 계층이 같은 판정 함수(core `named_config::linked_source_git`: 작업 폴더 `.git` 파일과 원본 역링크가 서로 가리킬 때만)를 쓴다(재검토 M6 정리).
+    - OS 샌드박스: `SOURCE_GIT` 읽기.
+    - Codex named 권한: 작업 폴더 `.git`은 `read`, `<원본>/.git`은 `read`. 실행 인자(`named_discovery_arguments`)와 보고된 설정 대조(`expected_write_policy`)가 같은 값을 쓴다.
+    - Claude 설정: 작업 폴더 `.git`을 `denyRead`에서 빼고 `allowRead`에 `<원본>/.git`만 넣는다. 원본 폴더 전체 읽기 금지, `.git` 쓰기 금지, 파일 도구(Read/Edit) 금지는 그대로 둔다. `allowRead`를 모르는 옛 Claude 버전에서는 Git 명령만 안 된다(추정).
+    - 테스트: 실제 worktree로 Codex 정책·인자, Claude 설정을 확인했다. 일반 폴더(v1)는 그대로다.
+  - 사용자 확인: "작업 하나 = PR 하나" 모델이 맞다. 1 worktree : 1 브랜치를 유지한다. 커밋하지 않은 내 폴더 변경이 새 작업에 없는 것은 당연하므로 한 줄 안내만 둔다(설계 문서 §1.1).
+  - **실제 todo 시험 완료(todo-test-1118b, worktree)**: 14:24 시작해 15:01 `reviewReady`로 끝났다. 기획 → 디자인 → 개발 → 검증 → 개발(2차) 순서였다.
+    - 작업 브랜치에 작성자 `Elsecrew`로 단계 커밋 5개가 쌓였다. 사용자 폴더 `main`과 작업 상태는 그대로였다. main 대비 7개 파일, +1311줄이었다.
+    - 헤드리스 Chrome 점검(`scratchpad/cdp/check2.mjs`)은 worktree의 앱에서 10/10 통과했다.
+    - 발견·수정: 결과 막대와 변경 탭이 "변경 0"이었다. 파일 감시의 디스패처 확인(`poll_watchers`)이 v1 전용 `verify_snapshot_metadata`/`verify_snapshot_tree`를 직접 불러, worktree 감시가 매번 "다시 검사 필요"로 꺼졌다. `verify_watched_repository`로 종류별로 나눴다(앱 커밋 뒤에도 따라가는 회귀 테스트 추가).
+    - 발견·수정: 커밋 메시지에 보고서의 `#` 제목 기호가 들어갔다.
+    - 남김: 팀 지시문의 "격리된 복사본" 표현, "커밋하지 마세요" 안내, 결과 막대의 "내 폴더에 반영"(→ main에 합치기)은 3단계 화면 작업에서 한다.
+  - 남김: M1(버린 작업의 브랜치와 worktree 기록 정리는 3단계), M5(단계 커밋 실패가 로그에만 남음), M6(샌드박스와 입장 검증이 링크를 따로 확인).
+- 아직 안 한 것: 결과 막대의 브랜치 표시와 "main에 합치기"(화면이 작업 공간 종류를 받는 통로 필요, 3단계에서 함께), v2 버리기의 `git worktree remove`(지금은 폴더 재귀 삭제라 원본에 정리 대상 worktree 기록과 브랜치가 남음), 재시작 때 "worktree 추가함·기록 전" 복구, 보이는 위치·설정, 실제 앱 todo 시험, 독립 검토.
+
 ### 2026-11-17 · by Claude Opus 5.5 (claude-opus-5-5) — 개발 앱을 직접 조작하며 todo 앱 시험·발견한 화면 문제 수정
 - 사용자 지시: 개발 앱을 직접 조작하며 개발을 이어간다. 빈 폴더 → 프로젝트 추가 → "todo 앱 만들어줘" 요청 → 관찰·수정·재시험을 반복한다. 이 시험 프로젝트들의 실제 유료 실행은 이 지시로 승인됐다. 역할은 "지금 기본값으로 진행"(사용자 선택).
 - 방법: Orca computer use로 dev 앱(`pnpm m5:dev`)을 뒤에서 조작했다.
