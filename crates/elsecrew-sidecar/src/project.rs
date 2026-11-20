@@ -1269,10 +1269,22 @@ impl ProjectManager {
                         "persisted project root differs from the picker-approved root",
                     ));
                 }
-                return Ok(ProjectAction {
-                    result: project_identity(&project_id, &selected_text, &canonical_text),
-                    ..ProjectAction::default()
-                });
+                // The original moved on since this view copy was made (a task
+                // merged into it, or the user's own commit). A copy holding
+                // nothing of the user's is replaced so the project shows the
+                // folder as it is now; one with edits stays as it is.
+                let outdated = active.base_commit != source.base_commit
+                    && self.project_copy_untouched(storage, &existing, &active);
+                // A copy that cannot be closed is simply reused (review M21).
+                if !outdated || self.close_project(storage, &project_id, &format!("{request_id}_outdated")).is_err() {
+                    return Ok(ProjectAction {
+                        result: project_identity(&project_id, &selected_text, &canonical_text),
+                        ..ProjectAction::default()
+                    });
+                }
+                // Nothing of the user's is in it (checked just now): its files
+                // in app data go at once instead of piling up. Best effort.
+                let _ = self.remove_worktree_files(&active.worktree_id);
             }
         }
 
@@ -3316,6 +3328,29 @@ impl ProjectManager {
             }],
             watch_events: Vec::new(),
         })
+    }
+
+    /// A project's own view copy with nothing of the user's in it: no save
+    /// under way, no application in progress, quiet as for a deletion
+    /// (review M22), still at its base (M23), no submodule folder whose
+    /// files Git would not see (M24), and its files exactly its base.
+    fn project_copy_untouched(&self, storage: &Storage, project: &Map<String, Value>, active: &ActiveProject) -> bool {
+        if self.pending_saves.values().any(|save| save.project_id == active.project_id)
+            || project.get("application_intent").is_some_and(|intent| intent["state"] != "abandoned")
+            || self.worktree_is_quiet(storage, &active.worktree_id, &[]).is_err()
+        {
+            return false;
+        }
+        let Ok(copy) = self.worktree_capability(active) else { return false };
+        let at_base = self.git_allow_status_at(&copy, ["rev-parse", "--verify", "HEAD^{commit}"], &[0])
+            .ok()
+            .and_then(|head| trim_output(&head).ok().map(str::to_owned))
+            .is_some_and(|head| head == active.base_commit);
+        let no_gitlinks = self.git_allow_status_at(&copy, ["ls-files", "-s"], &[0])
+            .is_ok_and(|listed| !listed.stdout.split(|byte| *byte == b'\n').any(|line| line.starts_with(b"160000 ")));
+        at_base && no_gitlinks
+            && self.git_allow_status_at(&copy, ["status", "--porcelain", "--untracked-files=all", "--ignored"], &[0])
+                .is_ok_and(|status| status.stdout.is_empty())
     }
 
     pub fn close_project(

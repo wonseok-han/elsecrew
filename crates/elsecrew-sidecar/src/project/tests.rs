@@ -6435,8 +6435,14 @@ fn a_new_commit_in_the_original_does_not_stop_new_tasks() {
     assert_eq!(project["worktree_id"], view["worktreeId"]);
     assert_eq!(project["base_commit"], first.as_str());
     assert!(project["source_baselines"].get(baseline["worktreeId"].as_str().unwrap()).is_some());
+    // Opened again, its untouched view copy follows the original as it is
+    // now; the tasks' baselines stay.
     fixture.manager.reopen_project(&mut fixture.storage, &fixture.project_id, "req_commit_reopen").unwrap();
-    assert_eq!(fixture.manager.create_worktree(&mut fixture.storage, &fixture.project_id, "req_commit_view_again").unwrap().result, view);
+    let again = fixture.manager.create_worktree(&mut fixture.storage, &fixture.project_id, "req_commit_view_again").unwrap().result;
+    assert_ne!(again["worktreeId"], view["worktreeId"]);
+    assert_eq!(again["baseCommit"], second.as_str());
+    let project = required_project(&fixture.storage, &fixture.project_id).unwrap();
+    assert!(project["source_baselines"].get(baseline["worktreeId"].as_str().unwrap()).is_some());
     assert!(fixture.storage.blocker_ids().unwrap().is_empty());
 }
 
@@ -7339,6 +7345,49 @@ fn a_merge_never_overwrites_an_ignored_file_of_the_user() {
     let outcome = merge_now(&fixture, &address);
     assert_eq!((outcome["outcome"].as_str(), outcome["reason"].as_str()), (Some("blocked"), Some("userChangesOverlap")), "{outcome}");
     assert_eq!(fs::read(fixture.source.join(".env")).unwrap(), b"secret\n");
+}
+
+/// After a merge (or the user's own commit) the project, opened again
+/// without a task, shows the folder as it is now: an untouched view copy
+/// is replaced; one with the user's edits is kept as it is.
+#[cfg(target_os = "macos")]
+#[test]
+fn reopening_a_project_shows_the_original_as_it_is_now() {
+    let mut fixture = source_index_fixture();
+    let path = fixture.source.to_str().unwrap().to_owned();
+    fixture.manager.open_project(&mut fixture.storage, &path, "req_reopen_first").unwrap();
+    let first = fixture.create();
+    let commit = |source: &Path, message: &str| {
+        git_raw(source, ["add", "."]);
+        git_raw(source, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "-m", message]);
+    };
+    fs::write(fixture.source.join("src/new.txt"), b"merged\n").unwrap();
+    commit(&fixture.source, "merged task");
+    fixture.manager.open_project(&mut fixture.storage, &path, "req_reopen_now").unwrap();
+    let second = fixture.create();
+    assert_ne!(second.worktree_id, first.worktree_id, "a fresh copy");
+    assert!(!first.worktree_path.exists(), "the old untouched copy is gone");
+    assert_eq!(fs::read(second.worktree_path.join("src/new.txt")).unwrap(), b"merged\n");
+
+    // The user's edit in the view copy is never dropped by a newer original.
+    fs::write(second.worktree_path.join("src/new.txt"), b"mine").unwrap();
+    fs::write(fixture.source.join("src/later.txt"), b"later\n").unwrap();
+    commit(&fixture.source, "later");
+    fixture.manager.open_project(&mut fixture.storage, &path, "req_reopen_kept").unwrap();
+    let third = fixture.create();
+    assert_eq!(third.worktree_id, second.worktree_id, "kept");
+    assert_eq!(fs::read(third.worktree_path.join("src/new.txt")).unwrap(), b"mine");
+
+    // A copy with a submodule folder (files Git would not show) is kept
+    // (review M24).
+    let mut nested = Fixture::open();
+    let nested_path = nested.source.to_str().unwrap().to_owned();
+    assert!(git_text(&nested.source, ["ls-files", "-s"]).lines().any(|line| line.starts_with("160000 ")));
+    let before = nested.create();
+    fs::write(nested.source.join("src/new.txt"), b"merged\n").unwrap();
+    commit_in(&nested.source, "merged task");
+    nested.manager.open_project(&mut nested.storage, &nested_path, "req_reopen_nested").unwrap();
+    assert_eq!(nested.create().worktree_id, before.worktree_id);
 }
 
 /// A task of a plain folder's earlier record (the folder was recorded anew)

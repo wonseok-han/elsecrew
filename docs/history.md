@@ -19,7 +19,13 @@
   - 테스트: 새 `a_task_of_an_earlier_folder_record_can_be_discarded`, `recording_a_folder_anew_retires_only_its_unused_old_history`(I5·M13 포함), `a_plain_folder_merge_records_the_users_own_edits_first`(M17 포함), `a_merge_never_overwrites_an_ignored_file_of_the_user`, M11 단언. 합치기·일반 폴더 관련 Rust 16개, `npm test` 747, tsc 통과.
 - **todo-test-1119g 실제 Chrome 점검(08:31 잠금 해제 뒤, 합친 사용자 폴더의 `index.html`)**: 빈 칸 추가 → "할 일을 입력해 주세요.", 입력 + Enter로 첫 항목, "추가" 버튼으로 둘째 항목, 첫 항목 체크(남은 할 일 2→1), 새로고침 뒤 두 항목과 체크 유지, 삭제 → "할 일을 삭제했어요. 남은 할 일: 1개". 모두 정상이며 화면 캡처로 배치도 확인했다. 개발 앱 로그에는 18:07 이후 새 오류가 없었다(이전 1119f 옛 작업 열기 2건, 번역 HMR 1건뿐). 점검용 Chrome과 개발 앱은 종료했다.
 - 작업 기록이 593줄이라 2026-11-18 엔트리 2개를 `docs/archive/history-2026-11.md` 맨 위로 옮겼다. 고정 섹션만 약 310줄이라 300줄 이하는 고정 섹션을 옮기지 않고는 불가능하다. 옮기기 전에 11-18 결정이 `핵심 결정·발견`에 있는지 확인했고, 빠져 있던 11-19 일반 폴더(그림자 git 링크 파일) 결정을 추가했다.
-- 다음 할 일: 실제 앱에서 1119f 옛 작업 버리기·일반 폴더 합치기 전 기록 확인, 전체 Rust 재실행.
+- **실제 앱 확인(1119f, 8a5e16cf 빌드)**: 예전 기록 작업은 화면에서 열리지 않아 결과 막대의 "버리기"에 닿을 수 없었다. 대신 작업 칩의 ×(작업 삭제)가 사용자 경로다. 삭제를 누르자 작업 폴더 `task-8aaf6776`이 지워지고, 남은 작업이 없는 옛 기록 `81da…`도 정리됐다(M8). 사용자 폴더는 파일·링크(`5e1d…`)·상태 그대로였다. 수정 전에는 이 삭제가 `remove_task_worktree_folder`에서 거절돼 대기로 남았을 경로다. 이후 1119f를 다시 열어도 `manifestMismatch`가 더 나오지 않았다.
+- **발견·수정(프로젝트 보기 사본이 처음 상태로 남음)**: 작업 없이 프로젝트를 다시 열면 파일 목록이 처음 열었을 때(README.md, notes.txt)였다. 합친 app.js 등이 보이지 않았다. `open_verified_source`가 프로젝트 보기 사본(v1 snapshot)을 원본 HEAD와 관계없이 재사용했기 때문이다(git 프로젝트도 같음).
+  - 수정: 원본 HEAD가 사본 기준과 다르고 `project_copy_untouched`(저장 대기·진행 중 반영 없음, `worktree_is_quiet`, 사본 HEAD가 기준 커밋, 서브모듈 없음, `status --untracked-files=all --ignored`가 빔)이면 `close_project` 뒤 새 사본을 만들고 옛 사본 파일은 `remove_worktree_files`로 바로 지운다. 닫기가 실패하면 예전처럼 재사용한다. 사본에 편집이 있으면 그대로 둔다.
+  - 재시작한 앱에서 1119f가 지금 폴더 상태(docs, README.md, app.js, index.html, notes.txt, style.css)로 보였다.
+  - 독립 검토: 차단·중요 0, 경미 5(M21~M25). M21~M24 반영, M25(원본이 바뀐 경우에만 사본 전체 status, 성능만)는 남김.
+  - 테스트: 새 `reopening_a_project_shows_the_original_as_it_is_now`(교체·옛 사본 삭제, 편집 있으면 유지, 서브모듈 있으면 유지). 기존 `a_new_commit_in_the_original_does_not_stop_new_tasks`의 "옛 사본 유지" 단언을 새 동작으로 바꿨다. project::/chat:: 테스트는 이 단언 외 324개 통과(변경 전 실행).
+- 다음 할 일: 실제 앱에서 일반 폴더 합치기 전 기록 확인(1119g 작은 작업), 전체 Rust 재실행.
 
 ### 2026-11-19 · by Claude Opus 5.5 (claude-opus-5-5) — todo-test-1118c 합치기와 결과 막대 정리
 - **실제 앱 합치기(todo-test-1118c)**: 화면 잠금이 풀린 09:09에 "main에 합치기 → 합치기"로 작업 브랜치 `elsecrew/task-6e6e17af`의 커밋 5개를 합쳤다. 사용자 폴더 `main`이 af6022e → cab7ce7로 앞당겨졌고 상태는 깨끗했다. 사용자 폴더의 앱을 헤드리스 Chrome으로 점검해 9/10이었다(작업 공간 점검과 같다. "공백 입력 안내"는 이 앱의 설계 차이).

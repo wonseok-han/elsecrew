@@ -136,7 +136,7 @@ impl ProjectManager {
     /// A workspace may go only when nothing can still write into it: every run
     /// that used it ended with proof its processes are gone, and its lock holds
     /// no writer, poison or recovery.
-    fn worktree_is_quiet(&self, storage: &Storage, worktree_id: &str, chat_ids: &[String]) -> Result<(), ProjectFailure> {
+    pub(super) fn worktree_is_quiet(&self, storage: &Storage, worktree_id: &str, chat_ids: &[String]) -> Result<(), ProjectFailure> {
         if let Some(lock) = storage.projection_record("lock", &format!("lock_{worktree_id}"))? {
             if lock["writer_run_id"] != Value::Null || lock["poisoned"] != false || lock["recovery_required"] != false {
                 return Err(denied("a workspace still has a writer or needs recovery"));
@@ -185,7 +185,7 @@ impl ProjectManager {
     }
 
     #[cfg(unix)]
-    fn remove_worktree_files(&mut self, worktree_id: &str) -> Result<(), ProjectFailure> {
+    pub(super) fn remove_worktree_files(&mut self, worktree_id: &str) -> Result<(), ProjectFailure> {
         if !valid_worktree_id(worktree_id) { return Err(denied("invalid workspace identity")); }
         // A task worktree lives in the "작업 공간 폴더", not in the app's data.
         if let Ok(manifest) = read_bounded_json(&self.manifests_dir, &format!("{worktree_id}.json")) {
@@ -237,7 +237,7 @@ impl ProjectManager {
         Ok(())
     }
     #[cfg(not(unix))]
-    fn remove_worktree_files(&mut self, _: &str) -> Result<(), ProjectFailure> {
+    pub(super) fn remove_worktree_files(&mut self, _: &str) -> Result<(), ProjectFailure> {
         Err(denied("workspace deletion is not available on this platform yet"))
     }
 
