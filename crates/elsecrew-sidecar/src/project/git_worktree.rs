@@ -253,6 +253,119 @@ impl ProjectManager {
         Ok(())
     }
 
+    /// A task of a plain folder's earlier record (the folder was recorded
+    /// anew after its record went missing or stale): its `.git` link names a
+    /// worktree record in another shadow history of this app (never
+    /// `current`), and that record points back at exactly this task folder.
+    /// Only such a folder can be ours without being in the project's own
+    /// repository. It can no longer open or merge, but may be discarded.
+    /// Returns the old history and the record's name.
+    pub(super) fn earlier_record_worktree(&self, task: &Path, current: Option<&Path>) -> Option<(PathBuf, String)> {
+        let link_path = task.join(".git");
+        let link = std::fs::symlink_metadata(&link_path).ok()
+            .filter(|meta| meta.is_file() && !meta.file_type().is_symlink() && meta.len() <= LINK_MAX_BYTES)
+            .and_then(|_| std::fs::read_to_string(&link_path).ok())?;
+        let record = PathBuf::from(link.strip_prefix("gitdir: ")?.strip_suffix('\n')?);
+        let name = record.file_name()?.to_str()?.to_owned();
+        let records = record.parent()?;
+        let history = records.parent()?;
+        let history_name = history.file_name()?.to_str()?;
+        let shadows = std::fs::canonicalize(self.data_root.join(SHADOW_GIT_DIR)).ok()?;
+        if name.starts_with('.')
+            || records.file_name() != Some(OsStr::new("worktrees"))
+            || history.parent() != Some(shadows.as_path())
+            || !history_name.ends_with(".git")
+            || history_name.starts_with('.')
+            || current.is_none_or(|current| current == history)
+            || std::fs::canonicalize(history).ok().as_deref() != Some(history)
+        {
+            return None;
+        }
+        let history_dir = open_absolute_directory_capability(history).ok()?;
+        let record_dir = open_real_child_dir(&open_real_child_dir(&history_dir, "worktrees").ok()?, &name).ok()?;
+        let back = read_small_file(&record_dir, "gitdir", "worktree back link").ok()?;
+        let expected = format!("{}/.git\n", canonical_protocol_path_without_existing(task).ok()?.trim_end_matches('/'));
+        (back == expected).then(|| (history.to_path_buf(), name))
+    }
+
+    /// Discarding (and cleaning up) a task: its worktree checked as always,
+    /// or else a task of the folder's earlier record, which can do nothing
+    /// but be discarded.
+    pub(super) fn verify_repository_for_discard(&self, worktree: &Dir, active: &ActiveProject) -> Result<(), ProjectFailure> {
+        let checked = self.verify_snapshot_repository(worktree, active);
+        if checked.is_err() && self.is_earlier_record_task(active) {
+            return Ok(());
+        }
+        checked
+    }
+
+    /// A plain folder of this app: its `.git` is our small link file into
+    /// its shadow history (a Git project has a real `.git` folder).
+    pub(super) fn is_plain_folder(&self, root: &Path) -> bool {
+        std::fs::symlink_metadata(root.join(".git")).is_ok_and(|meta| meta.is_file() && !meta.file_type().is_symlink())
+            && self.repository_git_path(root).is_ok()
+    }
+
+    /// Whether this task worktree belongs to its folder's earlier record
+    /// (never when the project's own record cannot be found: review M14).
+    pub(super) fn is_earlier_record_task(&self, active: &ActiveProject) -> bool {
+        if !matches!(active.kind, WorkspaceKind::GitWorktree { .. }) {
+            return false;
+        }
+        let current = self.repository_git_path(&active.canonical_git_root).ok()
+            .and_then(|path| std::fs::canonicalize(path).ok());
+        self.earlier_record_worktree(&active.worktree_path, current.as_deref()).is_some()
+    }
+
+    /// Review M8: a shadow history that no folder uses any more (its folder
+    /// was recorded anew) and with no task left is removed. It is kept
+    /// whenever unsure: not exactly one of ours, a task record remains, its
+    /// folder (owner mark) still links to it or cannot be looked at (a disk
+    /// not attached, say). Best effort; never fails the caller.
+    pub(super) fn retire_orphaned_history(&self, history: &Path) {
+        let Ok(shadows) = std::fs::canonicalize(self.data_root.join(SHADOW_GIT_DIR)) else { return };
+        let Some(name) = history.file_name().and_then(|name| name.to_str()) else { return };
+        if history.parent() != Some(shadows.as_path()) || !name.ends_with(".git") || name.starts_with('.') {
+            return;
+        }
+        let Ok(shadows_dir) = open_absolute_directory_capability(&shadows) else { return };
+        let Ok(dir) = open_real_child_dir(&shadows_dir, name) else { return };
+        if let Ok(records) = open_real_child_dir(&dir, "worktrees") {
+            if records.entries().map_or(true, |mut entries| entries.next().is_some()) {
+                return;
+            }
+        }
+        // Without a mark at all (an earlier build's record) any folder
+        // pointing here is recorded anew when opened, so nothing uses it.
+        // With one, it goes only when that very folder (same file number on
+        // the same disk, review I5) now links to another history; a mark that
+        // cannot be read or understood keeps it (review M13).
+        match dir.symlink_metadata(super::empty_project::SHADOW_OWNER_FILE) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return,
+            Ok(_) => {
+                let Ok(owner) = read_small_file(&dir, super::empty_project::SHADOW_OWNER_FILE, "folder mark") else { return };
+                let Some(folder) = owner.lines().find_map(|line| line.strip_prefix("path:")) else { return };
+                if !super::empty_project::same_folder_by_number(&owner, Path::new(folder)) {
+                    return;
+                }
+                let expected = format!("gitdir: {}\n", history.display());
+                match std::fs::read_to_string(Path::new(folder).join(".git")) {
+                    Ok(link) if link != expected => {}
+                    _ => return,
+                }
+            }
+        }
+        let mut count = 0;
+        if workspace_cleanup::walk(&dir, false, 0, &mut count).is_err() {
+            return;
+        }
+        let mut count = 0;
+        if workspace_cleanup::walk(&dir, true, 0, &mut count).is_ok() {
+            let _ = shadows_dir.remove_dir(name);
+        }
+    }
+
     /// Still the task's worktree on the task's branch, grown from its base.
     /// Commits are expected (the app records each step); a moved branch, a
     /// detached HEAD or history that lost the base are not.
@@ -492,16 +605,25 @@ impl ProjectManager {
         if path.file_name().and_then(|name| name.to_str()) != Some(format!("task-{short}").as_str()) {
             return Err(ProjectFailure::manifest("not a task worktree folder"));
         }
+        // A task of the folder's earlier record: its record is in that old
+        // history, not the project's own repository.
+        let mut earlier = None;
         if std::fs::symlink_metadata(&path).is_ok() {
             let root = manifest_source_root(manifest).ok_or_else(|| ProjectFailure::manifest("task worktree has no project"))?;
             let link = std::fs::symlink_metadata(path.join(".git")).ok()
                 .filter(|metadata| metadata.is_file() && !metadata.file_type().is_symlink() && metadata.len() <= LINK_MAX_BYTES)
                 .and_then(|_| std::fs::read_to_string(path.join(".git")).ok());
-            let repository = self.repository_git_path(Path::new(root))
-                .and_then(|path| canonical_protocol_path_without_existing(&path))
+            let current = self.repository_git_path(Path::new(root)).ok();
+            let repository = current.as_deref()
+                .ok_or_else(|| ProjectFailure::manifest("no repository"))
+                .and_then(canonical_protocol_path_without_existing)
                 .unwrap_or_else(|_| format!("{}/.git", root.trim_end_matches('/')));
             let prefix = format!("gitdir: {}/worktrees/", repository.trim_end_matches('/'));
-            if !link.is_some_and(|link| link.starts_with(&prefix)) {
+            if !link.as_deref().is_some_and(|link| link.starts_with(&prefix)) {
+                let current = current.and_then(|path| std::fs::canonicalize(path).ok());
+                earlier = self.earlier_record_worktree(&path, current.as_deref());
+            }
+            if earlier.is_none() && !link.is_some_and(|link| link.starts_with(&prefix)) {
                 // A visible folder the user emptied (or whose `.git` they
                 // removed) is only taken away when nothing is left in it.
                 let empty = std::fs::read_dir(&path).is_ok_and(|mut entries| entries.next().is_none());
@@ -525,7 +647,7 @@ impl ProjectManager {
                 }
             }
         }
-        if std::fs::symlink_metadata(&path).is_ok() {
+        if earlier.is_none() && std::fs::symlink_metadata(&path).is_ok() {
             if let Some(root) = manifest_source_root(manifest).and_then(|root| open_absolute_directory_capability(Path::new(root)).ok()) {
                 let _ = self.git_allow_status_at(&root, [OsStr::new("worktree"), OsStr::new("remove"), OsStr::new("--force"), path.as_os_str()], &[0, 128]);
             }
@@ -539,6 +661,24 @@ impl ProjectManager {
             open_absolute_directory_capability(parent)?.remove_dir(name).map_err(|error| {
                 ProjectFailure::recovery(format!("could not remove the task worktree folder: {error}"))
             })?;
+        }
+        if let Some((history, record)) = earlier {
+            // Its record in the old history pointed at the folder just
+            // removed (checked above); the history goes once nothing uses it.
+            if let Ok(records) = open_absolute_directory_capability(&history).and_then(|dir| open_real_child_dir(&dir, "worktrees")) {
+                if let Ok(dir) = open_real_child_dir(&records, &record) {
+                    if workspace_cleanup::walk(&dir, true, 0, &mut 0).is_ok() {
+                        let _ = records.remove_dir(&record);
+                    }
+                }
+                if records.entries().is_ok_and(|mut entries| entries.next().is_none()) {
+                    if let Ok(dir) = open_absolute_directory_capability(&history) {
+                        let _ = dir.remove_dir("worktrees");
+                    }
+                }
+            }
+            self.retire_orphaned_history(&history);
+            return Ok(());
         }
         self.forget_task_worktree(manifest);
         Ok(())

@@ -17,6 +17,61 @@ const COMMIT_SETTINGS: [&str; 10] = [
     "-c", "commit.gpgsign=false", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
 ];
 
+/// What recording a plain folder's own edits before a merge found.
+enum FolderEdits {
+    Unchanged,
+    Recorded(String),
+    /// More files or bytes than a folder's first record may take.
+    TooLarge,
+    /// Another Git repository appeared inside (refused as in the first
+    /// record: review M17).
+    HasRepository,
+}
+
+impl ProjectManager {
+    fn on_branch(&self, source_root: &Dir, base: &str) -> Result<bool, ProjectFailure> {
+        let checked_out = self.git_allow_status_at(source_root, ["symbolic-ref", "-q", "HEAD"], &[0, 1])?;
+        Ok(checked_out.status.success() && trim_output(&checked_out)? == format!("refs/heads/{base}"))
+    }
+
+    /// Commits everything changed in a plain folder (its excludes apply),
+    /// within the same bounds as the folder's first record.
+    fn record_folder_edits(&self, source_root: &Dir) -> Result<FolderEdits, ProjectFailure> {
+        let status = self.git_at(source_root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"])?;
+        let entries: Vec<&[u8]> = status.stdout.split(|byte| *byte == 0).filter(|entry| entry.len() > 3).collect();
+        if entries.is_empty() {
+            return Ok(FolderEdits::Unchanged);
+        }
+        let (max_files, max_bytes) = super::empty_project::folder_record_limits();
+        if entries.len() > max_files {
+            return Ok(FolderEdits::TooLarge);
+        }
+        let mut bytes = 0u64;
+        for entry in &entries {
+            let relative = std::str::from_utf8(&entry[3..]).map_err(|_| ProjectFailure::manifest("folder has a file name that is not valid text"))?;
+            if relative.ends_with('/') {
+                return Ok(FolderEdits::HasRepository);
+            }
+            if let Ok(meta) = source_root.symlink_metadata(relative) {
+                bytes = bytes.saturating_add(meta.len());
+            }
+            if bytes > max_bytes {
+                return Ok(FolderEdits::TooLarge);
+            }
+        }
+        self.git_at(source_root, ["add", "--all", "--", ":/"])?;
+        // Listed but nothing to record (review M18).
+        if self.git_allow_status_at(source_root, ["diff", "--cached", "--quiet"], &[0, 1])?.status.code() == Some(0) {
+            return Ok(FolderEdits::Unchanged);
+        }
+        let mut args: Vec<&str> = COMMIT_SETTINGS.to_vec();
+        args.extend(["commit", "--quiet", "--no-verify", "-m", "내 폴더에서 바꾼 내용"]);
+        self.git_at(source_root, args)?;
+        let head = self.git_at(source_root, ["rev-parse", "--verify", "HEAD^{commit}"])?;
+        Ok(FolderEdits::Recorded(trim_output(&head)?.to_owned()))
+    }
+}
+
 struct MergeState {
     branch: String,
     base_ref: Option<String>,
@@ -279,11 +334,28 @@ impl ProjectManager {
         if before.base_elsewhere {
             return Ok(json!({"outcome":"blocked","reason":"baseInOtherWorktree","merge":before.value(self.uncommitted(&worktree)?)}));
         }
-        let (Some(base), Some(base_tip)) = (before.base_ref.clone(), before.base_tip.clone()) else {
+        let (Some(base), Some(mut base_tip)) = (before.base_ref.clone(), before.base_tip.clone()) else {
             return Ok(json!({"outcome":"blocked","reason":"noBaseBranch","merge":before.value(self.uncommitted(&worktree)?)}));
         };
         if before.head != expected_head || base_tip != expected_base {
             return Ok(json!({"outcome":"blocked","reason":"changedSinceReview","merge":before.value(self.uncommitted(&worktree)?)}));
+        }
+        // A plain folder: its user cannot commit their own edits, so the app
+        // records them first, in the folder's own history (app data). The
+        // task then takes them in like any newer base commit; an overlap is
+        // a conflict the team can resolve, not a refusal. A Git project's
+        // edits stay the user's own (never committed for them).
+        if self.is_plain_folder(&active.canonical_git_root) && self.on_branch(&source_root, &base)? {
+            match self.record_folder_edits(&source_root)? {
+                FolderEdits::Unchanged => {}
+                FolderEdits::Recorded(head) => base_tip = head,
+                FolderEdits::TooLarge => {
+                    return Ok(json!({"outcome":"blocked","reason":"folderChangesTooLarge","merge":before.value(self.uncommitted(&worktree)?)}));
+                }
+                FolderEdits::HasRepository => {
+                    return Ok(json!({"outcome":"blocked","reason":"folderHasRepository","merge":before.value(self.uncommitted(&worktree)?)}));
+                }
+            }
         }
         // Files asking for LFS since the task began would land as pointers.
         if self.content_filters_requested(&source_root, &source.git_dir, &base_tip)?
@@ -366,7 +438,9 @@ impl ProjectManager {
             }
             // The user's folder follows the branch. Git refuses (and changes
             // nothing) when this would overwrite the user's own edits.
-            let moved = self.git_allow_status_at(&source_root, ["merge", "--ff-only", "--no-verify", "-q", &new_head], &[0, 1, 128])?;
+            // Nor a file Git ignores: by default Git would replace it with
+            // the task's tracked file of that name (review I6).
+            let moved = self.git_allow_status_at(&source_root, ["merge", "--ff-only", "--no-overwrite-ignore", "--no-verify", "-q", &new_head], &[0, 1, 128])?;
             if moved.status.code() != Some(0) {
                 let reason = if base_now()?.as_deref() == Some(base_tip.as_str()) { "userChangesOverlap" } else { "changedSinceReview" };
                 let after = self.merge_state(&source_root, &worktree, &active)?;

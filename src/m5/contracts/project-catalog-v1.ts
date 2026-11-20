@@ -98,8 +98,8 @@ export interface ProjectCatalogEntry { projectId: string; canonicalPath: string 
 /** A task worktree's place against its base branch (task = PR). */
 export interface ChatMergeAddress { chatId: string; projectId: string; worktreeId: string; workspaceIdentity: string }
 export type ChatMergeBlock = "noBaseBranch" | "baseBranchMissing" | "baseInOtherWorktree" | "conflictsUnresolved" | "nothingToMerge";
-export type ChatMergeBlockReason = "noBaseBranch" | "changedSinceReview" | "userChangesOverlap" | "baseInOtherWorktree" | "unsupportedRepository" | "conflictsUnresolved";
-const MERGE_BLOCK_REASONS: readonly ChatMergeBlockReason[] = ["noBaseBranch", "changedSinceReview", "userChangesOverlap", "baseInOtherWorktree", "unsupportedRepository", "conflictsUnresolved"];
+export type ChatMergeBlockReason = "noBaseBranch" | "changedSinceReview" | "userChangesOverlap" | "baseInOtherWorktree" | "unsupportedRepository" | "conflictsUnresolved" | "folderChangesTooLarge" | "folderHasRepository";
+const MERGE_BLOCK_REASONS: readonly ChatMergeBlockReason[] = ["noBaseBranch", "changedSinceReview", "userChangesOverlap", "baseInOtherWorktree", "unsupportedRepository", "conflictsUnresolved", "folderChangesTooLarge", "folderHasRepository"];
 export type ChatMergeState =
   | { kind: "snapshot" }
   | { kind: "gitWorktree"; branch: string; baseRef: string | null; head: string; baseTip: string | null; ahead: number; behind: number; uncommitted: boolean; baseCheckedOut: boolean;

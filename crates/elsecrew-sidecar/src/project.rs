@@ -372,6 +372,9 @@ struct WatchState {
 
 enum WorkspaceLockAdmission {
     Ready,
+    /// Discarding a review-ready task: as `Ready`, and a task of a plain
+    /// folder's earlier record (which can do nothing else) is accepted.
+    Discard,
     Cleanup,
     /// A run that stopped without its engine is being ended: the lock may
     /// still carry that run's own hold or recovery mark, and nothing else.
@@ -4101,6 +4104,7 @@ impl ProjectManager {
         lifecycle: &str,
         admission: WorkspaceLockAdmission,
     ) -> Result<ActiveProject, ProjectFailure> {
+        let earlier_record_allowed = matches!(admission, WorkspaceLockAdmission::Discard | WorkspaceLockAdmission::Cleanup);
         let chat = storage
             .projection_record("chat", &address.chat_id)?
             .ok_or_else(|| ProjectFailure::manifest("chat workspace binding is missing"))?;
@@ -4192,7 +4196,7 @@ impl ProjectManager {
             .projection_record("lock", &active.lock_id)?
             .ok_or_else(|| ProjectFailure::manifest("workspace lock projection is missing"))?;
         match admission {
-            WorkspaceLockAdmission::Ready | WorkspaceLockAdmission::Cleanup => {
+            WorkspaceLockAdmission::Ready | WorkspaceLockAdmission::Discard | WorkspaceLockAdmission::Cleanup => {
                 if lock.get("poisoned").and_then(Value::as_bool) != Some(false)
                     || lock.get("recovery_required").and_then(Value::as_bool) != Some(false)
                 {
@@ -4222,7 +4226,11 @@ impl ProjectManager {
         }
         let worktree = self.worktree_capability(&active)?;
         if active.kind != WorkspaceKind::Snapshot {
-            self.verify_worktree_link(&worktree, &active)?;
+            if let Err(error) = self.verify_worktree_link(&worktree, &active) {
+                if !earlier_record_allowed || !self.is_earlier_record_task(&active) {
+                    return Err(error);
+                }
+            }
             return Ok(active);
         }
         let marker = read_bounded_json(&open_real_child_dir(&worktree, ".git")?, SNAPSHOT_MARKER)?;
@@ -4269,8 +4277,7 @@ impl ProjectManager {
                 ))
             }
         };
-        let active =
-            self.validate_workspace_address_binding_lifecycle(storage, address, lifecycle)?;
+        let active = self.validate_workspace_binding_with_lock(storage, address, lifecycle, WorkspaceLockAdmission::Discard)?;
         let lock = storage
             .projection_record("lock", &active.lock_id)?
             .ok_or_else(|| ProjectFailure::recovery("workspace discard lock missing"))?;
@@ -4285,7 +4292,7 @@ impl ProjectManager {
             ));
         }
         let worktree = self.worktree_capability(&active)?;
-        self.verify_snapshot_repository(&worktree, &active)?;
+        self.verify_repository_for_discard(&worktree, &active)?;
         Ok(manifest)
     }
 

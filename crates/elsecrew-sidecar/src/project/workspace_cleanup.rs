@@ -45,7 +45,7 @@ impl ProjectManager {
             "abandoned",
             WorkspaceLockAdmission::Cleanup,
         )?;
-        self.verify_snapshot_repository(&self.worktree_capability(&active)?, &active)?;
+        self.verify_repository_for_discard(&self.worktree_capability(&active)?, &active)?;
         Ok(())
     }
 

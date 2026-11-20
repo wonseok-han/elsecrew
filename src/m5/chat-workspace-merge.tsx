@@ -32,6 +32,8 @@ export function ChatWorkspaceMerge({ chat, disabled, fallback, merged = false, o
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  /** The state could not be read: say so and offer to look again. */
+  const [unavailable, setUnavailable] = useState(false);
   const generation = useRef(0);
   const address = { chatId: chat.chatId, projectId: chat.projectId, worktreeId: chat.worktreeId, workspaceIdentity: chat.workspaceIdentity };
 
@@ -41,15 +43,23 @@ export function ChatWorkspaceMerge({ chat, disabled, fallback, merged = false, o
     const request = { action: "inspectChatMerge" as const, ...address };
     try {
       const result = validateProjectCatalogResult(await window.m5Projects.request(request), request);
-      if (epoch === generation.current && result.action === "inspectChatMerge") { setState(result.merge); return result.merge; }
-    } catch { if (epoch === generation.current) setState({ kind: "snapshot" }); }
+      if (epoch === generation.current && result.action === "inspectChatMerge") { setUnavailable(false); setState(result.merge); return result.merge; }
+    // A v1 copy answers `snapshot` itself. A task that cannot be inspected
+    // (one of a folder's earlier record, or the engine busy) offers neither
+    // merge nor apply, which would fail; it says so and can look again.
+    } catch { if (epoch === generation.current) { setState(null); setUnavailable(true); } }
     return null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chat.chatId, chat.worktreeId, chat.workspaceIdentity]);
   useEffect(() => { void inspect(); return () => { generation.current++; }; }, [inspect]);
   useEffect(() => { onState?.(state); }, [state, onState]);
 
-  if (!state) return null;
+  if (!state) {
+    return unavailable
+      ? <span className="m5-merge"><small className="m5-merge-notice" role="status">{t("m5.merge.unavailable")}</small>{" "}
+          <button type="button" className="m5-link-button" onClick={() => void inspect()}>{t("m5.merge.inspectAgain")}</button></span>
+      : null;
+  }
   if (state.kind === "snapshot") return <>{fallback}</>;
 
   const base = state.baseRef ?? "main";

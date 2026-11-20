@@ -17,9 +17,12 @@
 > **작업 공간 = 실제 git worktree(2026-11-18, macOS 기본)**: 새 작업은 사용자 저장소의 `git worktree`를 브랜치 `elsecrew/task-<8자>`로 만든다. 위치는 `<작업 공간 폴더>/<프로젝트>/task-<8자>`(기본 `~/elsecrew/workspaces`, 설정 > 저장 공간에서 변경). 기록은 manifest v2(`project_v1` `worktreeManifestV2`)이고 근거는 그 `worktreePath`와 `.git` 링크·역링크다. 앱이 팀원 단계마다 커밋한다(작성자 Elsecrew, 훅·서명·gc 없음). 에이전트는 저장소 `.git`을 읽기만 한다(seatbelt `SOURCE_GIT`, Codex named policy, Claude `allowRead`). "main에 합치기"(`project.catalog` `inspectChatMerge`/`mergeChatWorkspace`, `project/git_merge.rs`)는 다음 순서다: 기준 브랜치 최신을 worktree 안에서 합침 → 충돌은 되돌리거나, 텍스트 충돌이면 표시를 남겨 팀이 정리 → 기준 브랜치를 fast-forward 또는 `update-ref` CAS로 앞으로만 옮김. 정리·삭제는 `git worktree remove`와 우리 기록만 정리한다. LFS(content filter) 저장소는 미지원이고, merge driver·브랜치 없음 저장소는 v1 snapshot으로 대체한다. `ELSECREW_GIT_WORKTREES=0`이면 v1이다. **git이 아닌 폴더(2026-11-19, 링크 파일 방식, macOS)**:
 - 내용이 있는 일반 폴더를 고르면 확인 창을 띄운 뒤 `initialize_folder_project`가 기록을 만든다. 기록은 앱 데이터 `shadow-git-v1/<uuid>.git`에 두고, 폴더에는 그것을 가리키는 `.git` 파일 하나만 넣는다(`RENAME_EXCL`).
 - 첫 기록은 지금 폴더 상태다. `node_modules/`와 `.DS_Store`는 빼고, 파일 2만 개·1GiB 한도를 둔다. 폴더 안에 다른 저장소가 있으면 거절한다.
-- 그림자 안의 `elsecrew-folder`(경로와 ino)로 소유 폴더를 판정한다. 둘 중 하나가 맞으면 같은 폴더이고, 복사본은 다른 폴더다.
+- 그림자 안의 `elsecrew-folder`(경로, ino, 볼륨 UUID)로 소유 폴더를 판정한다. 경로가 같거나, ino가 같고 디스크도 같으면(어느 쪽이든 UUID가 없으면 ino만) 같은 폴더이고, 복사본은 다른 폴더다.
 - 원본 git 위치는 `repository_git_path`로 해석한다. 이후 작업 공간, 단계 커밋, 합치기, 에이전트 읽기는 git 프로젝트와 같다.
-- 기록이 사라졌거나 다른 폴더 것인 링크는 경고 창을 거쳐 새로 기록한다.
+- 합치기 전에 사용자 폴더의 변경을 앱이 "내 폴더에서 바꾼 내용"으로 먼저 기록한다(같은 한도, 안에 생긴 다른 저장소는 `folderHasRepository`로 거절). 그래서 사용자 수정과 겹치면 거절이 아니라 팀이 정리하는 충돌이 된다. git 프로젝트의 사용자 변경은 커밋하지 않는다.
+- 사용자 폴더를 앞으로 옮길 때(`merge --ff-only --no-overwrite-ignore`) git이 무시하는 사용자 파일도 덮어쓰지 않는다(두 종류 프로젝트 모두).
+- 기록이 사라졌거나 다른 폴더 것인 링크는 경고 창을 거쳐 새로 기록한다. 그 전 기록에서 만든 작업은 열 수 없고 버리기만 된다. 링크가 이 앱의 다른 그림자 기록 안 worktree를 가리키고, 그 기록이 정확히 그 작업 폴더를 되가리킬 때만 인정한다(`earlier_record_worktree`, `WorkspaceLockAdmission::Discard`).
+- 쓰이지 않는 그림자 기록은 지운다(`retire_orphaned_history`). 남은 작업 기록이 없고, 소유 표시가 아예 없거나 표시된 그 폴더(같은 ino·디스크)가 다른 기록을 가리킬 때만이다. 표시를 읽지 못하거나 폴더를 확인할 수 없으면 보존한다.
 
 상세 설계는 `docs/proposals/m5-real-worktrees.md`, 경과는 history.
 

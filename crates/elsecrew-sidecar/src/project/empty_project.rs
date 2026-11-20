@@ -140,20 +140,75 @@ pub(crate) fn owner_text(folder: &Path) -> Result<String, ProjectFailure> {
     use std::os::unix::fs::MetadataExt as _;
     let meta = std::fs::metadata(folder).map_err(|error| ProjectFailure::manifest(format!("cannot inspect folder: {error}")))?;
     let path = folder.to_str().ok_or_else(|| ProjectFailure::manifest("folder path is not valid text"))?;
-    Ok(format!("ino:{}\npath:{path}\n", meta.ino()))
+    let disk = volume_uuid(folder).map(|uuid| format!("vol:{uuid}\n")).unwrap_or_default();
+    Ok(format!("ino:{}\npath:{path}\n{disk}", meta.ino()))
 }
 
+/// A file number is only unique on its own disk: a copy on another disk
+/// with the same number is not this folder (review M11). A mark without a
+/// disk (older, or a disk that has no UUID) keeps the number alone.
 pub(crate) fn owns(owner: &str, folder: &Path) -> bool {
     use std::os::unix::fs::MetadataExt as _;
     let mut ino = None;
     let mut path = None;
+    let mut disk = None;
     for line in owner.lines() {
         if let Some(value) = line.strip_prefix("ino:") { ino = value.parse::<u64>().ok(); }
         if let Some(value) = line.strip_prefix("path:") { path = Some(value); }
+        if let Some(value) = line.strip_prefix("vol:") { disk = Some(value); }
     }
     let same_path = path.is_some_and(|path| Path::new(path) == folder);
-    let same_file = ino.is_some() && std::fs::metadata(folder).is_ok_and(|meta| Some(meta.ino()) == ino);
+    let same_disk = || disk.is_none_or(|recorded| volume_uuid(folder).is_none_or(|current| current == recorded));
+    let same_file = ino.is_some() && std::fs::metadata(folder).is_ok_and(|meta| Some(meta.ino()) == ino) && same_disk();
     same_path || same_file
+}
+
+/// The folder now at a path is the very one a mark recorded: the same file
+/// number on the same disk (a disk not known on either side: the number
+/// alone). Without a recorded number it is never assumed.
+pub(crate) fn same_folder_by_number(owner: &str, folder: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+    let ino = owner.lines().find_map(|line| line.strip_prefix("ino:")).and_then(|value| value.parse::<u64>().ok());
+    let disk = owner.lines().find_map(|line| line.strip_prefix("vol:"));
+    let Some(ino) = ino else { return false };
+    std::fs::symlink_metadata(folder).is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink() && meta.ino() == ino)
+        && disk.is_none_or(|recorded| volume_uuid(folder).is_none_or(|current| current == recorded))
+}
+
+/// The UUID of the disk (volume) a folder is on, as 32 hex digits.
+#[cfg(target_os = "macos")]
+pub(crate) fn volume_uuid(folder: &Path) -> Option<String> {
+    use std::os::unix::ffi::OsStrExt as _;
+    #[repr(C)]
+    struct Reply { length: u32, uuid: [u8; 16] }
+    let path = std::ffi::CString::new(folder.as_os_str().as_bytes()).ok()?;
+    // Volume attributes are asked of the volume's own root.
+    let mut stats: libc::statfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statfs(path.as_ptr(), &mut stats) } != 0 {
+        return None;
+    }
+    let mut list: libc::attrlist = unsafe { std::mem::zeroed() };
+    list.bitmapcount = libc::ATTR_BIT_MAP_COUNT;
+    list.volattr = libc::ATTR_VOL_INFO | libc::ATTR_VOL_UUID;
+    let mut reply = Reply { length: 0, uuid: [0; 16] };
+    let status = unsafe {
+        libc::getattrlist(
+            stats.f_mntonname.as_ptr(),
+            (&mut list as *mut libc::attrlist).cast(),
+            (&mut reply as *mut Reply).cast(),
+            std::mem::size_of::<Reply>(),
+            0,
+        )
+    };
+    if status != 0 || (reply.length as usize) < std::mem::size_of::<Reply>() || reply.uuid == [0; 16] {
+        return None;
+    }
+    Some(reply.uuid.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn volume_uuid(_folder: &Path) -> Option<String> {
+    None
 }
 
 #[cfg(test)]
@@ -161,7 +216,7 @@ thread_local! {
     pub(crate) static FOLDER_RECORD_LIMITS: std::cell::Cell<(usize, u64)> =
         const { std::cell::Cell::new((FOLDER_RECORD_MAX_FILES, FOLDER_RECORD_MAX_BYTES)) };
 }
-fn folder_record_limits() -> (usize, u64) {
+pub(super) fn folder_record_limits() -> (usize, u64) {
     #[cfg(test)]
     { FOLDER_RECORD_LIMITS.with(|limits| limits.get()) }
     #[cfg(not(test))]
@@ -216,6 +271,12 @@ impl ProjectManager {
             let stage = open_real_child_dir(&root, &stage_name)?;
             let git_dir_arg = format!("--git-dir={}", shadow.display());
             let work_tree_arg = format!("--work-tree={}", selected.display());
+            // The history the stale link named, if it is one of ours here:
+            // once replaced, it goes when nothing uses it (review M8).
+            let old_history = stale_link
+                .then(|| std::fs::read_to_string(selected.join(".git")).ok())
+                .flatten()
+                .and_then(|text| text.strip_prefix("gitdir: ").and_then(|rest| rest.strip_suffix('\n')).map(PathBuf::from));
             let mut published = false;
             let prepared = (|| -> Result<(), ProjectFailure> {
                 let separate = format!("--separate-git-dir={}", shadow.display());
@@ -279,6 +340,11 @@ impl ProjectManager {
                 // The half-made history is ours, in app data only; once the
                 // link is in the folder the history stays (review M1).
                 let _ = std::fs::remove_dir_all(&shadow);
+            }
+            if published {
+                if let Some(old) = old_history {
+                    self.retire_orphaned_history(&old);
+                }
             }
             prepared
         }

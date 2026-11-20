@@ -7243,6 +7243,16 @@ fn plain_folder_records_are_bounded_owned_and_recoverable() {
     let moved = root.join("todo-moved");
     fs::rename(&folder, &moved).unwrap();
     assert!(manager.open_project(&mut storage, moved.to_str().unwrap(), "req_open_moved").is_ok());
+    // The mark names the folder's disk: the same file number on another disk
+    // is not this folder; an older mark without a disk keeps the number alone
+    // (review M11).
+    let disk = super::empty_project::volume_uuid(&moved).expect("the test disk has a UUID");
+    let owner = super::empty_project::owner_text(&moved).unwrap();
+    assert!(owner.contains(&format!("vol:{disk}\n")), "{owner}");
+    let away = owner.replace(&format!("path:{}", moved.display()), "path:/nowhere");
+    assert!(super::empty_project::owns(&away, &moved));
+    assert!(!super::empty_project::owns(&away.replace(&disk, "00000000000000000000000000000001"), &moved));
+    assert!(super::empty_project::owns(&away.replace(&format!("vol:{disk}\n"), ""), &moved));
 
     // A folder holding only a link whose history is gone is recorded again.
     let lone = root.join("lone");
@@ -7256,6 +7266,185 @@ fn plain_folder_records_are_bounded_owned_and_recoverable() {
     git_raw(&real, ["init", "-q"]);
     assert!(manager.initialize_folder_project(real.to_str().unwrap(), &identity(&real)).is_err());
     assert!(fs::symlink_metadata(real.join(".git")).unwrap().is_dir());
+}
+
+/// A plain folder's user cannot commit: their own edits are recorded by the
+/// app before a merge. Unrelated edits merge straight through and stay; an
+/// edit of the same file is a conflict the team can resolve (the folder is
+/// not changed), never "commit your edits first".
+#[cfg(target_os = "macos")]
+#[test]
+fn a_plain_folder_merge_records_the_users_own_edits_first() {
+    use std::os::unix::fs::MetadataExt as _;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let data = root.join("app-data");
+    fs::create_dir_all(&data).unwrap();
+    let database = data.join("elsecrew.sqlite3");
+    let mut storage = Storage::open(&database).unwrap();
+    let mut manager = ProjectManager::new(&database).unwrap();
+    let folder = root.join("todo");
+    fs::create_dir(&folder).unwrap();
+    fs::write(folder.join("index.html"), b"<h1>one</h1>\n").unwrap();
+    let meta = fs::metadata(&folder).unwrap();
+    manager.initialize_folder_project(folder.to_str().unwrap(), &format!("{}:{}", meta.dev(), meta.ino())).unwrap();
+    let project_id = manager.open_project(&mut storage, folder.to_str().unwrap(), "req_open_edits").unwrap().result["projectId"].as_str().unwrap().to_owned();
+    let mut fixture = Fixture { _root: temp, source: folder.clone(), storage, manager, project_id };
+
+    let (address, path) = worktree_chat(&mut fixture, "apart");
+    fs::write(path.join("app.js"), b"1\n").unwrap();
+    assert!(fixture.manager.workspace_commit_step(&fixture.storage, &address, "개발").unwrap());
+    fs::write(folder.join("memo.txt"), b"mine\n").unwrap();
+    let outcome = merge_now(&fixture, &address);
+    assert_eq!(outcome["outcome"], "merged", "{outcome}");
+    assert_eq!(fs::read(folder.join("memo.txt")).unwrap(), b"mine\n");
+    assert_eq!(fs::read(folder.join("app.js")).unwrap(), b"1\n");
+    assert_eq!(git_text(&folder, ["status", "--porcelain"]), "");
+    assert!(git_text(&folder, ["log", "--format=%s"]).contains("내 폴더에서 바꾼 내용"));
+
+    let (address, path) = worktree_chat(&mut fixture, "same");
+    fs::write(path.join("index.html"), b"<h1>from the task</h1>\n").unwrap();
+    assert!(fixture.manager.workspace_commit_step(&fixture.storage, &address, "개발").unwrap());
+    fs::write(folder.join("index.html"), b"<h1>from me</h1>\n").unwrap();
+    let outcome = merge_now(&fixture, &address);
+    assert_eq!((outcome["outcome"].as_str(), outcome["teamResolvable"].as_bool()), (Some("conflict"), Some(true)), "{outcome}");
+    assert_eq!(fs::read(folder.join("index.html")).unwrap(), b"<h1>from me</h1>\n", "the folder is not changed");
+    assert_eq!(git_text(&folder, ["status", "--porcelain"]), "", "the user's edit is recorded");
+
+    // Another repository appearing inside is named, not a puzzling error
+    // (review M17).
+    let (address, path) = worktree_chat(&mut fixture, "nested");
+    fs::write(path.join("more.js"), b"2\n").unwrap();
+    assert!(fixture.manager.workspace_commit_step(&fixture.storage, &address, "개발").unwrap());
+    fs::create_dir(folder.join("sub")).unwrap();
+    git_raw(&folder.join("sub"), ["init", "-q"]);
+    let outcome = merge_now(&fixture, &address);
+    assert_eq!((outcome["outcome"].as_str(), outcome["reason"].as_str()), (Some("blocked"), Some("folderHasRepository")), "{outcome}");
+    assert!(!folder.join("more.js").exists());
+}
+
+/// Review I6: a merge never replaces a file the user's Git ignores (an
+/// agent could stop ignoring it and add its own): it is refused, unchanged.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_merge_never_overwrites_an_ignored_file_of_the_user() {
+    let mut fixture = Fixture::open();
+    fs::write(fixture.source.join(".gitignore"), b".env\n").unwrap();
+    commit_in(&fixture.source, "ignore env");
+    fs::write(fixture.source.join(".env"), b"secret\n").unwrap();
+    let (address, path) = worktree_chat(&mut fixture, "ignored");
+    fs::write(path.join(".gitignore"), b"").unwrap();
+    fs::write(path.join(".env"), b"from the task\n").unwrap();
+    assert!(fixture.manager.workspace_commit_step(&fixture.storage, &address, "개발").unwrap());
+    let outcome = merge_now(&fixture, &address);
+    assert_eq!((outcome["outcome"].as_str(), outcome["reason"].as_str()), (Some("blocked"), Some("userChangesOverlap")), "{outcome}");
+    assert_eq!(fs::read(fixture.source.join(".env")).unwrap(), b"secret\n");
+}
+
+/// A task of a plain folder's earlier record (the folder was recorded anew)
+/// can no longer open, but it can be discarded: only its own folder goes,
+/// and the old history goes with its last task once no folder uses it
+/// (review M8). A look-alike folder elsewhere is never taken.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_task_of_an_earlier_folder_record_can_be_discarded() {
+    use std::os::unix::fs::MetadataExt as _;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let data = root.join("app-data");
+    fs::create_dir_all(&data).unwrap();
+    let database = data.join("elsecrew.sqlite3");
+    let mut storage = Storage::open(&database).unwrap();
+    let mut manager = ProjectManager::new(&database).unwrap();
+    let folder = root.join("todo");
+    fs::create_dir(&folder).unwrap();
+    fs::write(folder.join("index.html"), b"x").unwrap();
+    let identity = |path: &Path| { let meta = fs::metadata(path).unwrap(); format!("{}:{}", meta.dev(), meta.ino()) };
+    manager.initialize_folder_project(folder.to_str().unwrap(), &identity(&folder)).unwrap();
+    let project_id = manager.open_project(&mut storage, folder.to_str().unwrap(), "req_open_first").unwrap().result["projectId"].as_str().unwrap().to_owned();
+    let mut fixture = Fixture { _root: temp, source: folder.clone(), storage, manager, project_id };
+    let (address, path) = worktree_chat(&mut fixture, "earlier");
+    fs::write(path.join("app.js"), b"1").unwrap();
+    assert!(fixture.manager.workspace_commit_step(&fixture.storage, &address, "개발").unwrap());
+    let old_history = PathBuf::from(fs::read_to_string(folder.join(".git")).unwrap().trim_start_matches("gitdir: ").trim_end());
+    let manifest = read_bounded_json(&fixture.manager.manifests_dir, &format!("{}.json", address.worktree_id)).unwrap();
+
+    // The old record loses its mark (as an earlier build's had none): the
+    // folder is recorded anew; the old history keeps its task.
+    fs::remove_file(old_history.join(super::empty_project::SHADOW_OWNER_FILE)).unwrap();
+    fixture.manager.initialize_folder_project(folder.to_str().unwrap(), &identity(&folder)).unwrap();
+    assert!(old_history.exists(), "a history with a task left is kept");
+    fixture.manager.open_project(&mut fixture.storage, folder.to_str().unwrap(), "req_open_again").unwrap();
+    assert!(fixture.manager.validate_workspace_address(&fixture.storage, &address).is_err(), "cannot open");
+    let active = fixture.manager.validate_workspace_binding_with_lock(&fixture.storage, &address, "active", WorkspaceLockAdmission::Discard).unwrap();
+    let worktree = fixture.manager.worktree_capability(&active).unwrap();
+    assert!(fixture.manager.verify_snapshot_repository(&worktree, &active).is_err(), "cannot work");
+    fixture.manager.verify_repository_for_discard(&worktree, &active).unwrap();
+
+    // A copy of that task folder elsewhere, under the same name, is not it.
+    let short = &address.worktree_id["worktree_".len().."worktree_".len() + 8];
+    let elsewhere = root.join("user-docs").join(format!("task-{short}"));
+    fs::create_dir_all(elsewhere.parent().unwrap()).unwrap();
+    assert!(Command::new("/bin/cp").args(["-R", path.to_str().unwrap(), elsewhere.to_str().unwrap()]).status().unwrap().success());
+    let mut forged = manifest.clone();
+    forged["worktreePath"] = json!(elsewhere.to_str().unwrap());
+    assert!(fixture.manager.remove_task_worktree_folder(&address.worktree_id, &forged, None).is_err());
+    assert!(elsewhere.join("app.js").exists());
+
+    fixture.manager.remove_task_worktree_folder(&address.worktree_id, &manifest, None).unwrap();
+    assert!(!path.exists());
+    assert!(!old_history.exists(), "its last task gone and no folder using it");
+    assert_eq!(fs::read(folder.join("index.html")).unwrap(), b"x");
+    assert!(fixture.manager.open_project(&mut fixture.storage, folder.to_str().unwrap(), "req_open_after").is_ok());
+}
+
+/// Review M8 when a copy is recorded anew: the original's history stays
+/// (its folder still uses it); a folder's own stale history with no task
+/// goes.
+#[cfg(target_os = "macos")]
+#[test]
+fn recording_a_folder_anew_retires_only_its_unused_old_history() {
+    use std::os::unix::fs::MetadataExt as _;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let data = root.join("app-data");
+    fs::create_dir_all(&data).unwrap();
+    let manager = ProjectManager::new(&data.join("elsecrew.sqlite3")).unwrap();
+    let identity = |path: &Path| { let meta = fs::metadata(path).unwrap(); format!("{}:{}", meta.dev(), meta.ino()) };
+    let history = |folder: &Path| PathBuf::from(fs::read_to_string(folder.join(".git")).unwrap().trim_start_matches("gitdir: ").trim_end());
+    let original = root.join("original");
+    fs::create_dir(&original).unwrap();
+    fs::write(original.join("a.txt"), b"a").unwrap();
+    manager.initialize_folder_project(original.to_str().unwrap(), &identity(&original)).unwrap();
+    let kept = history(&original);
+    let copy = root.join("copy");
+    assert!(Command::new("/bin/cp").args(["-R", original.to_str().unwrap(), copy.to_str().unwrap()]).status().unwrap().success());
+    manager.initialize_folder_project(copy.to_str().unwrap(), &identity(&copy)).unwrap();
+    assert!(kept.exists(), "the original still uses its history");
+    // The copy's own history loses its mark: recorded anew, the old one goes.
+    let stale = history(&copy);
+    fs::remove_file(stale.join(super::empty_project::SHADOW_OWNER_FILE)).unwrap();
+    manager.initialize_folder_project(copy.to_str().unwrap(), &identity(&copy)).unwrap();
+    assert!(!stale.exists());
+    assert!(kept.exists() && history(&copy).exists());
+
+    // Review I5: the original moved away and another folder (its own record)
+    // took its old path. That folder is not the marked one (another file
+    // number): the original's history is kept.
+    let moved = root.join("original-moved");
+    fs::rename(&original, &moved).unwrap();
+    fs::create_dir(&original).unwrap();
+    fs::write(original.join("b.txt"), b"b").unwrap();
+    manager.initialize_folder_project(original.to_str().unwrap(), &identity(&original)).unwrap();
+    assert_ne!(history(&original), kept);
+    manager.retire_orphaned_history(&kept);
+    assert!(kept.exists(), "the moved original still uses it");
+    // Review M13: a mark that cannot be read keeps the history.
+    let mark = kept.join(super::empty_project::SHADOW_OWNER_FILE);
+    fs::remove_file(&mark).unwrap();
+    fs::create_dir(&mark).unwrap();
+    manager.retire_orphaned_history(&kept);
+    assert!(kept.exists());
 }
 
 /// A link into another app data's shadow folder (another Mac, or app data
