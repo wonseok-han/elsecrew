@@ -247,15 +247,48 @@ fn existing_reservation_error(directory: &Dir, name: &str) -> SidecarError {
 
 fn lock_exclusive(file: &File) -> Result<(), SidecarError> {
     if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        return Err(failure());
+        // A live owner holds it (a run, a check): busy, not a recovery case;
+        // reporting recovery here left the profile looking fenced and
+        // blocked quitting (review M37).
+        return Err(
+            if std::io::Error::last_os_error().raw_os_error() == Some(libc::EWOULDBLOCK) { busy() } else { failure() },
+        );
     }
     Ok(())
 }
 
 /// Recovery by proof only (asked for by the user or retried by the app).
-/// Legacy/uncertain records remain fenced.
 /// A v2 marker proves the writer held the same exclusive lock until it exited.
+/// An unmarked record is released only by `recover_settled_login`'s proof
+/// (2026-11-20); an empty or malformed one stays fenced.
 pub(crate) fn recover_confirmed_login(profile: &dyn LoginProfile) -> Result<(), SidecarError> {
+    recover_login(profile, true)
+}
+
+/// Whether a hold is there at all: with none there is nothing to recover
+/// (asking to recover then must not leave the profile looking fenced).
+pub(crate) fn has_login_hold(profile: &dyn LoginProfile) -> Result<bool, SidecarError> {
+    profile.revalidate()?;
+    match profile.login_lease_directory()?.symlink_metadata(profile.pending_name()) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Err(failure()),
+    }
+}
+
+/// A sign-in or account check whose engine ended before it could write the
+/// termination marker (the app was closed mid-check, or crashed), bound to no
+/// run. The same proof as for a run's hold (`recover_bound_run`) minus the
+/// run: the hold's lock is ours, so no engine owns it; it recorded at least
+/// one process; every one it recorded has ended. Without this such a hold
+/// fenced the profile for good, and with it every later quit. A child born in
+/// the engine's last observation interval before it died could be missed;
+/// that is the same limit the run's proof has.
+pub(crate) fn recover_settled_login(profile: &dyn LoginProfile) -> Result<(), SidecarError> {
+    recover_login(profile, false)
+}
+
+fn recover_login(profile: &dyn LoginProfile, require_marker: bool) -> Result<(), SidecarError> {
     use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
     use std::io::Read;
     let home = profile.revalidate()?;
@@ -278,14 +311,12 @@ pub(crate) fn recover_confirmed_login(profile: &dyn LoginProfile) -> Result<(), 
         .take(HOLD_MAX_BYTES + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| failure())?;
-    if bytes.len() as u64 != meta.len()
-        || !bytes.ends_with(LOGIN_TERMINATED)
-        || bytes.contains(&b'\r')
-    {
+    let marked = bytes.ends_with(LOGIN_TERMINATED);
+    if bytes.len() as u64 != meta.len() || (require_marker && !marked) || bytes.contains(&b'\r') {
         return Err(failure());
     }
-    let text = std::str::from_utf8(&bytes[..bytes.len() - LOGIN_TERMINATED.len()])
-        .map_err(|_| failure())?;
+    let body = if marked { &bytes[..bytes.len() - LOGIN_TERMINATED.len()] } else { &bytes[..] };
+    let text = std::str::from_utf8(body).map_err(|_| failure())?;
     if !text.ends_with('\n') {
         return Err(failure());
     }
@@ -308,6 +339,11 @@ pub(crate) fn recover_confirmed_login(profile: &dyn LoginProfile) -> Result<(), 
         {
             return Err(failure());
         }
+    }
+    // Without the marker nothing says the owner launched nothing more than
+    // it recorded: an empty unmarked hold stays fenced (as for a run's hold).
+    if !marked && recorded.is_empty() {
+        return Err(failure());
     }
     let reservation = Reservation {
         name: profile.pending_name(),
@@ -745,7 +781,15 @@ impl<'a> LoginProcess<'a> {
                 .as_ref()
                 .ok_or_else(failure)?
                 .tracked_identities();
-            release(child, &identities).map_err(|_| failure())?;
+            // Not released (canceled, or the executable changed, or even a
+            // short write): the trusted gate never starts the provider without
+            // the whole release line, so this is no evidence problem. The
+            // caller's cleanup ends the waiting gate and proves it, or reports
+            // its own uncertainty; a cancel must not read as "recovery needed"
+            // (that blocked every later quit).
+            release(child, &identities).map_err(|_| {
+                SidecarError::new("providerLoginNotStarted", "the provider was not started")
+            })?;
             self.io = Some(LoginIo::attach(child)?);
             self.observe_with(&SystemProcTable, true)
         })();
@@ -1633,6 +1677,24 @@ mod tests {
             .spawn()
     }
 
+    /// Canceled (or refused) before the gate let the provider start: not a
+    /// recovery case. Cleanup ends the waiting process, proves it, and frees
+    /// the profile, so the app can still quit cleanly.
+    #[test]
+    fn a_launch_refused_before_release_is_cleaned_up_without_recovery() {
+        let temp = tempfile::tempdir().unwrap();
+        let binding = profile(&temp);
+        let mut process = LoginProcess::reserve(&binding).unwrap();
+        let error = process
+            .launch_with_barrier(cat, |_| Err(std::io::Error::other("login canceled before release")))
+            .unwrap_err();
+        assert_eq!(error.kind(), "providerLoginNotStarted");
+        process.finish().unwrap();
+        assert!(process.closure_evidence().unwrap().confirmed());
+        assert!(!temp.path().join(PENDING).exists());
+        LoginProcess::reserve(&binding).unwrap().finish().unwrap();
+    }
+
     #[test]
     fn gone_identity_waits_for_reap_without_releasing_fence() {
         struct Gone;
@@ -2237,6 +2299,52 @@ mod tests {
         drop(process);
         recover_confirmed_login(&binding).unwrap();
         assert!(!temp.path().join(PENDING).exists());
+        LoginProcess::reserve(&binding).unwrap().finish().unwrap();
+    }
+
+    /// A check whose engine ended before the termination marker (app closed or
+    /// crashed mid-check): released only when no engine holds it and every
+    /// process it recorded has ended. Live, empty, locked or run-bound holds
+    /// stay fenced.
+    #[test]
+    fn a_hold_left_mid_check_is_released_once_its_processes_have_ended() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let binding = profile(&temp);
+        let path = temp.path().join(PENDING);
+        let write = |text: &str| {
+            std::fs::write(&path, text).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        };
+        let mut live = std::process::Command::new("/bin/sleep").arg("30").spawn().unwrap();
+        let live_identity = elsecrew_core::proctree::identity_of(live.id()).unwrap();
+        let mut ended = std::process::Command::new("/bin/sleep").arg("30").spawn().unwrap();
+        let ended_identity = elsecrew_core::proctree::identity_of(ended.id()).unwrap();
+        ended.kill().unwrap();
+        ended.wait().unwrap();
+        let line = |identity: ProcIdentity| format!("{} {}\n", identity.pid, identity.start_us);
+        let header = "elsecrew provider login pending v1\n";
+
+        write(&format!("{header}{}{}", line(ended_identity), line(live_identity)));
+        assert!(recover_confirmed_login(&binding).is_err(), "no marker");
+        assert!(recover_settled_login(&binding).is_err(), "a recorded process still runs");
+        assert!(path.exists());
+        live.kill().unwrap();
+        live.wait().unwrap();
+
+        write(header);
+        assert!(recover_settled_login(&binding).is_err(), "nothing recorded proves nothing");
+        write(&format!("{header}run-binding-v1 {{}}\n{}", line(ended_identity)));
+        assert!(recover_settled_login(&binding).is_err(), "a run's hold needs the run's proof");
+
+        write(&format!("{header}{}{}", line(ended_identity), line(live_identity)));
+        {
+            let owner = std::fs::File::open(&path).unwrap();
+            assert_eq!(unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&owner), libc::LOCK_EX | libc::LOCK_NB) }, 0);
+            assert!(recover_settled_login(&binding).is_err(), "an engine still owns it");
+        }
+        recover_settled_login(&binding).unwrap();
+        assert!(!path.exists());
         LoginProcess::reserve(&binding).unwrap().finish().unwrap();
     }
 

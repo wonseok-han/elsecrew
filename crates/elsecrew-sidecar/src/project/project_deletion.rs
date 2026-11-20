@@ -234,6 +234,10 @@ impl ProjectManager {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(io(error)),
         }
+        // Its apply receipt only labels the changes panel (review M47).
+        if let Ok(receipts) = open_real_child_dir(&self.data_dir, latest_apply::APPLY_RECEIPTS) {
+            let _ = remove_plain_file(&receipts, &format!("{worktree_id}.json"));
+        }
         Ok(())
     }
     #[cfg(not(unix))]

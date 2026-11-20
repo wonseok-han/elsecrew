@@ -6760,6 +6760,7 @@ fn merging_a_task_moves_the_checked_out_base_forward_and_keeps_user_edits() {
     fs::write(fixture.source.join("src/delete.txt"), b"user is still editing\n").unwrap();
     let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
     assert_eq!((state["kind"].as_str(), state["uncommitted"].as_bool(), state["blocked"].is_null()), (Some("gitWorktree"), Some(true), true), "{state}");
+    assert_eq!(state["mergedBefore"], false, "no task commit yet: {state}");
     let outcome = merge_now(&fixture, &address);
     assert_eq!(outcome["outcome"], "merged", "{outcome}");
     assert_eq!(fs::read(fixture.source.join("src/edit.txt")).unwrap(), b"from the task\n");
@@ -6767,6 +6768,13 @@ fn merging_a_task_moves_the_checked_out_base_forward_and_keeps_user_edits() {
     assert_eq!(git_text(&fixture.source, ["rev-parse", "HEAD"]), git_text(&path, ["rev-parse", "HEAD"]));
     assert_eq!(outcome["merge"]["ahead"], 0);
     assert_eq!(outcome["merge"]["blocked"], "nothingToMerge");
+    // The changes panel's "merged" (user decision 2026-11-20), and "new since"
+    // once the task commits again.
+    assert_eq!(outcome["merge"]["mergedBefore"], true, "{outcome}");
+    fs::write(path.join("src/later.txt"), b"later\n").unwrap();
+    commit_in(&path, "later step");
+    let state = fixture.manager.workspace_merge_inspect(&fixture.storage, &address).unwrap();
+    assert_eq!((state["mergedBefore"].as_bool(), state["ahead"].as_u64()), (Some(true), Some(1)), "{state}");
 }
 
 /// The base moved on meanwhile: its commits come into the task branch first
@@ -7388,6 +7396,51 @@ fn reopening_a_project_shows_the_original_as_it_is_now() {
     commit_in(&nested.source, "merged task");
     nested.manager.open_project(&mut nested.storage, &nested_path, "req_reopen_nested").unwrap();
     assert_eq!(nested.create().worktree_id, before.worktree_id);
+}
+
+/// A copy task's changes panel (user decision 2026-11-20): not applied yet,
+/// applied (kept by the engine's receipt, so the same after a restart), and
+/// changed again since, counting only what differs from what was applied.
+#[cfg(target_os = "macos")]
+#[test]
+fn an_applied_copy_task_says_applied_and_counts_what_changed_since() {
+    let mut fixture = Fixture::open();
+    fixture.manager.git_worktrees_enabled = false;
+    fixture.manager.source_writes_enabled = true;
+    let manifest = fixture.manager.prepare_chat_workspace(&mut fixture.storage, &fixture.project_id, "req_apply_receipt").unwrap().result;
+    let address = WorkspaceAddress {
+        chat_id: "chat_apply".into(),
+        project_id: fixture.project_id.clone(),
+        worktree_id: manifest["worktreeId"].as_str().unwrap().into(),
+        workspace_identity: manifest["workspaceIdentity"].as_str().unwrap().into(),
+    };
+    let payload = json!({"chat_id":address.chat_id,"project_id":address.project_id,"worktree_id":address.worktree_id,"workspace_identity":address.workspace_identity,"state":"draft","durable_event_sequence":0,"last_message":null,"record":{"chatId":address.chat_id,"projectId":address.project_id,"worktreeId":address.worktree_id,"workspaceIdentity":address.workspace_identity,"taskId":"task_apply","state":"draft"}});
+    fixture.storage.upsert_projection_record("chat", &address.chat_id, "op_apply_chat", None, payload.as_object().unwrap().clone()).unwrap();
+    let path = PathBuf::from(manifest["worktreePath"].as_str().unwrap());
+    let project = fixture.project_id.clone();
+    let inspect = |fixture: &Fixture| {
+        let result = fixture.manager.inspect_chat_apply(&fixture.storage, &project, "chat_apply").unwrap().result;
+        (result["applied"].as_bool().unwrap(), result["pending"].as_u64().unwrap(), result["total"].as_u64().unwrap())
+    };
+    fs::write(path.join("src/edit.txt"), b"from the task").unwrap();
+    assert_eq!(inspect(&fixture), (false, 1, 1));
+    let applied = fixture.manager.apply_chat_latest(&fixture.storage, &project, "chat_apply").unwrap().result;
+    assert_eq!(applied["written"], 1, "{applied}");
+    assert_eq!(fs::read(fixture.source.join("src/edit.txt")).unwrap(), b"from the task");
+    assert_eq!(inspect(&fixture), (true, 0, 1));
+    // The workspace changes again: only that counts as new.
+    fs::write(path.join("src/edit.txt"), b"changed again").unwrap();
+    assert_eq!(inspect(&fixture), (true, 1, 1));
+    fs::write(path.join("src/edit.txt"), b"from the task").unwrap();
+    assert_eq!(inspect(&fixture), (true, 0, 1), "back to what was applied");
+    // Review I9: a path the apply skips (a folder of that name in the user's
+    // folder) is never "applied", so the panel keeps offering to apply it.
+    fs::create_dir(fixture.source.join("blocked")).unwrap();
+    fs::write(path.join("blocked"), b"a file named like the user's folder").unwrap();
+    let applied = fixture.manager.apply_chat_latest(&fixture.storage, &project, "chat_apply").unwrap().result;
+    assert_eq!(applied["skipped"], json!(["blocked"]), "{applied}");
+    assert!(fixture.source.join("blocked").is_dir());
+    assert_eq!(inspect(&fixture), (true, 1, 2));
 }
 
 /// A task of a plain folder's earlier record (the folder was recorded anew)

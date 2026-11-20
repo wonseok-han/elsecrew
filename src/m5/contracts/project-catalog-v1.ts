@@ -91,6 +91,7 @@ export type ProjectCatalogRequest =
   | { action: "applicationStatus"; projectId: string }
   | { action: "chatApplicationStatus"; projectId: string; chatId: string }
   | { action: "applyChatLatest"; projectId: string; chatId: string }
+  | { action: "inspectChatApply"; projectId: string; chatId: string }
   | { action: "applicationHistory"; projectId: string }
   | { action: "chatApplicationPreview"; projectId: string; chatId: string }
   | { action: "abandonPreparation"; inspection: PreparationInspection };
@@ -104,7 +105,9 @@ export type ChatMergeState =
   | { kind: "snapshot" }
   | { kind: "gitWorktree"; branch: string; baseRef: string | null; head: string; baseTip: string | null; ahead: number; behind: number; uncommitted: boolean; baseCheckedOut: boolean;
       /** A base merge handed to the team; `unresolved` files still carry conflict marks. */
-      resolving: boolean; unresolved: number; blocked: ChatMergeBlock | null };
+      resolving: boolean; unresolved: number;
+      /** The task's first commit is already in the base: merged before. */
+      mergedBefore: boolean; blocked: ChatMergeBlock | null };
 export type ChatMergeOutcome =
   | { outcome: "merged"; merge: ChatMergeState }
   | { outcome: "conflict"; teamResolvable: boolean; conflictCount: number; conflicts: string[]; merge: ChatMergeState }
@@ -114,13 +117,13 @@ const OID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 function validateChatMergeState(value: unknown): ChatMergeState {
   const state = object(value);
   if (state.kind === "snapshot") { keys(state, ["kind"]); return state as ChatMergeState; }
-  keys(state, ["kind", "branch", "baseRef", "head", "baseTip", "ahead", "behind", "uncommitted", "baseCheckedOut", "resolving", "unresolved", "blocked"]);
+  keys(state, ["kind", "branch", "baseRef", "head", "baseTip", "ahead", "behind", "uncommitted", "baseCheckedOut", "resolving", "unresolved", "mergedBefore", "blocked"]);
   if (state.kind !== "gitWorktree" || typeof state.branch !== "string" || !state.branch.startsWith("elsecrew/") || state.branch.length > 200) throw new Error("invalid merge branch");
   if (state.baseRef !== null && (typeof state.baseRef !== "string" || !state.baseRef || state.baseRef.length > 200)) throw new Error("invalid merge base");
   if (typeof state.head !== "string" || !OID.test(state.head) || (state.baseTip !== null && (typeof state.baseTip !== "string" || !OID.test(state.baseTip)))) throw new Error("invalid merge commit");
   if (typeof state.resolving !== "boolean" || (!state.resolving && state.unresolved !== 0)) throw new Error("invalid merge resolution");
   for (const key of ["ahead", "behind", "unresolved"] as const) if (!Number.isSafeInteger(state[key]) || (state[key] as number) < 0) throw new Error("invalid merge count");
-  if (typeof state.uncommitted !== "boolean" || typeof state.baseCheckedOut !== "boolean") throw new Error("invalid merge flags");
+  if (typeof state.uncommitted !== "boolean" || typeof state.baseCheckedOut !== "boolean" || typeof state.mergedBefore !== "boolean") throw new Error("invalid merge flags");
   if (state.blocked !== null && !["noBaseBranch", "baseBranchMissing", "baseInOtherWorktree", "conflictsUnresolved", "nothingToMerge"].includes(String(state.blocked))) throw new Error("invalid merge block");
   return state as ChatMergeState;
 }
@@ -163,6 +166,9 @@ export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "applicationStatus"; status: ApplicationStatus }
   | { schemaVersion: 1; action: "chatApplicationStatus"; chatId: string; status: ApplicationStatus }
   | { schemaVersion: 1; action: "applyChatLatest"; projectId: string; chatId: string; written: number; removed: number; skipped: string[]; failed: string | null }
+  /** `applied`: a complete apply was recorded; `pending`: changed paths that
+   * differ from what was applied (all of them when never applied). */
+  | { schemaVersion: 1; action: "inspectChatApply"; projectId: string; chatId: string; applied: boolean; pending: number; total: number }
   | { schemaVersion: 1; action: "inspectPreparation"; inspection: PreparationInspection | null }
   | { schemaVersion: 1; action: "abandonPreparation"; inspection: PreparationInspection }
   | { schemaVersion: 1; action: "list"; projects: ProjectCatalogEntry[]; nextCursor: string | null }
@@ -311,7 +317,7 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
     keys(request, ["action"]);
   } else if (request.action === "reopen" || request.action === "releaseView" || request.action === "inspectPreparation" || request.action === "applicationStatus" || request.action === "applicationHistory") {
     keys(request, ["action", "projectId"]); id(request.projectId);
-  } else if (request.action === "chatApplicationPreview" || request.action === "chatApplicationStatus" || request.action === "applyChatLatest") {
+  } else if (request.action === "chatApplicationPreview" || request.action === "chatApplicationStatus" || request.action === "applyChatLatest" || request.action === "inspectChatApply") {
     keys(request, ["action", "projectId", "chatId"]); id(request.projectId); id(request.chatId);
   } else if (request.action === "abandonPreparation") {
     keys(request, ["action", "inspection"]); validatePreparationInspection(request.inspection);
@@ -528,6 +534,12 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
     if (id(result.projectId) !== request.projectId || id(result.chatId) !== request.chatId) throw new Error("apply target mismatch");
     for (const count of [result.written, result.removed]) if (!Number.isSafeInteger(count) || (count as number) < 0) throw new Error("invalid apply count");
     if (!Array.isArray(result.skipped) || result.skipped.length > 100000 || !result.skipped.every(path => typeof path === "string" && path.length > 0 && path.length <= 4096)) throw new Error("invalid skipped paths");
+  } else if (request.action === "inspectChatApply") {
+    keys(result, ["schemaVersion","action","projectId","chatId","applied","pending","total"]);
+    if (id(result.projectId) !== request.projectId || id(result.chatId) !== request.chatId) throw new Error("apply target mismatch");
+    if (typeof result.applied !== "boolean") throw new Error("invalid apply state");
+    for (const count of [result.pending, result.total]) if (!Number.isSafeInteger(count) || (count as number) < 0) throw new Error("invalid apply count");
+    if ((result.pending as number) > (result.total as number)) throw new Error("invalid apply count");
   } else if (request.action === "applicationStatus" || request.action === "chatApplicationStatus") {
     keys(result, request.action === "chatApplicationStatus" ? ["schemaVersion","action","chatId","status"] : ["schemaVersion","action","status"]);
     if (request.action === "chatApplicationStatus" && id(result.chatId) !== request.chatId) throw new Error("application status chat mismatch");

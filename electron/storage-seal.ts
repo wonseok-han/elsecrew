@@ -13,15 +13,17 @@
 //
 // A seal vouches for the file as the app left it, including what the app
 // itself wrote in that session, which no full check has seen (review I7).
-// So the seal also carries when the last full check ran, and once that is
-// more than FULL_CHECK_INTERVAL_MS ago the next start checks in full again.
+// The engine checks a copy in full while the app rests (user decision
+// 2026-11-20) and reports when that state was taken; the seal carries the
+// latest such time. Only if no full check succeeded for FULL_CHECK_INTERVAL_MS
+// (the app was never left resting) does the next start check in full again.
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createReadStream, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 /** `<64 hex sha256 of the file>.<engine context>`, as the engine accepts it. */
 const SEAL_TOKEN = /^([0-9a-f]{64})\.([0-9a-z.+-]{1,64})$/;
-const SEAL_LINE = /^elsecrew-storage-seal v1 (\S+)$/;
+const SEAL_LINE = /^elsecrew-storage-seal v1 (\S+)(?: full=(\d{1,16}))?$/;
 const SEAL_FILE = "storage-seal-v1.json";
 /** How long seals may stand in for the full check before one runs again. */
 export const FULL_CHECK_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -38,12 +40,15 @@ export function validSealToken(token: string): boolean {
 }
 
 /** The engine's seal line: only the last stderr line counts, and only when
- * it is that line exactly (nothing printed after it). */
-export function sealFromStderr(stderr: string): string | null {
+ * it is that line exactly (nothing printed after it). `fullCheckAt`: when the
+ * state its background full check proved was taken, if it ran one. */
+export function sealFromStderr(stderr: string): { token: string; fullCheckAt: number | null } | null {
   const lines = stderr.split("\n").map(line => line.trimEnd()).filter(line => line.length > 0);
   const last = lines.at(-1);
-  const token = last ? SEAL_LINE.exec(last)?.[1] : undefined;
-  return token && validSealToken(token) ? token : null;
+  const match = last ? SEAL_LINE.exec(last) : null;
+  if (!match || !validSealToken(match[1]!)) return null;
+  const fullCheckAt = match[2] === undefined ? null : Number(match[2]);
+  return { token: match[1]!, fullCheckAt: fullCheckAt !== null && Number.isSafeInteger(fullCheckAt) ? fullCheckAt : null };
 }
 
 export async function sha256File(path: string): Promise<string | null> {

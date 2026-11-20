@@ -90,6 +90,9 @@ struct MergeState {
     resolving: bool,
     /// Conflicted files that still carry conflict marks.
     unresolved: u64,
+    /// The task's first commit is already in the base branch: it was merged
+    /// before (so later commits are "new since the merge").
+    merged_before: bool,
 }
 
 /// A line Git writes around conflicting hunks, whatever marker size a
@@ -133,6 +136,7 @@ impl MergeState {
             "baseCheckedOut":self.base_checked_out,
             "resolving":self.resolving,
             "unresolved":self.unresolved,
+            "mergedBefore":self.merged_before,
             "blocked":blocked,
         })
     }
@@ -177,7 +181,22 @@ impl ProjectManager {
         };
         let resolving = self.merge_in_progress(worktree)?;
         let unresolved = if resolving { self.unresolved_conflicts(worktree)?.len() as u64 } else { 0 };
-        Ok(MergeState { branch: branch.clone(), base_ref: base_ref.clone(), head, base_tip, ahead, behind, base_checked_out, base_elsewhere, resolving, unresolved })
+        // Only labels the changes panel: anything Git cannot answer is "not
+        // merged before", never a failed merge check (review M48).
+        let merged_before = base_tip.as_ref().is_some_and(|tip| {
+            let range = format!("{}..HEAD", active.base_commit);
+            let Ok(commits) = self.git_allow_status_at(worktree, ["rev-list", "--first-parent", range.as_str()], &[0, 128]) else {
+                return false;
+            };
+            // No task commit yet is an empty list.
+            let first = commits.status.success().then(|| std::str::from_utf8(&commits.stdout).ok()).flatten()
+                .and_then(|text| text.lines().map(str::trim).filter(|line| !line.is_empty()).last());
+            first.is_some_and(|first| {
+                self.git_allow_status_at(worktree, ["merge-base", "--is-ancestor", first, tip.as_str()], &[0, 1, 128])
+                    .is_ok_and(|output| output.status.success())
+            })
+        });
+        Ok(MergeState { branch: branch.clone(), base_ref: base_ref.clone(), head, base_tip, ahead, behind, base_checked_out, base_elsewhere, resolving, unresolved, merged_before })
     }
 
     /// Whether every conflict is one the team can resolve by editing text:

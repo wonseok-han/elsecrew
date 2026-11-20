@@ -174,6 +174,20 @@ impl Storage {
         digest_file(path).is_some_and(|file| file.digest == expected)
     }
 
+    /// A consistent copy of the database for the background full check: the
+    /// log emptied and the file copied while this connection holds the
+    /// exclusive lock (APFS clones it at once).
+    pub(crate) fn copy_for_background_check(&self, destination: &Path) -> bool {
+        if !self.writes_admitted || !self.connection.is_autocommit() {
+            return false;
+        }
+        let busy: Option<u32> = self
+            .connection
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE);", [], |row| row.get(0))
+            .ok();
+        busy == Some(0) && wal_is_empty(&self.path) && fs::copy(&self.path, destination).is_ok()
+    }
+
     /// Whether this start trusted a clean shutdown's seal.
     pub(crate) fn opened_from_seal(&self) -> bool {
         self.opened_from_seal

@@ -142,8 +142,10 @@ const quitCoordinator = new QuitCoordinatorV1({
         const exited = await client.waitForExit(ENGINE_EXIT_WAIT_MS);
         // A clean exit sealed the database: the next start need not check
         // the whole ledger again (`storage-seal.ts`).
-        const token = exited && client.exitDetail === "0/none" ? client.storageSealToken : null;
-        if (token) await storageSeals().seal(token, join(m5DataDirectory(), "elsecrew.sqlite3"), lastFullCheckAt).catch(() => false);
+        const seal = exited && client.exitDetail === "0/none" ? client.storageSeal : null;
+        // The later of this session's start check and the engine's background check.
+        const fullCheckAt = Math.min(Date.now(), Math.max(lastFullCheckAt, seal?.fullCheckAt ?? 0));
+        if (seal) await storageSeals().seal(seal.token, join(m5DataDirectory(), "elsecrew.sqlite3"), fullCheckAt).catch(() => false);
       }
       // What the screen kept for the next start (unsaved editor text, lists)
       // reaches the disk before the app ends.

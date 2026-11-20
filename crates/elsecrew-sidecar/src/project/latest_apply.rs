@@ -12,6 +12,30 @@
 
 use super::*;
 
+/// What a complete apply left in the user's folder, per task workspace: each
+/// changed path it really wrote or removed, and the content it was given
+/// (null: removed). The changes panel tells "applied", "changed again since",
+/// or "not applied yet" from it, the same after a restart (user decision
+/// 2026-11-20). Paths the apply skipped are not in it, so they keep counting
+/// as not applied (review I9). It says nothing about the folder now: an edit
+/// the user made there afterwards still shows "applied" (review M46).
+pub(super) const APPLY_RECEIPTS: &str = "apply-receipts-v1";
+
+/// The workspace's version of a changed path now: its content hash, or null
+/// when the task removed it. A non-file stays a fixed marker (never written).
+fn desired_version(worktree: &Dir, entry: &DiffEntry) -> Value {
+    if !entry.current_exists {
+        return Value::Null;
+    }
+    match worktree.symlink_metadata(&entry.path) {
+        Ok(meta) if meta.is_file() => match worktree.read(&entry.path) {
+            Ok(bytes) => json!(sha256_file_version_v1(&bytes)),
+            Err(_) => json!("unreadable"),
+        },
+        _ => json!("special"),
+    }
+}
+
 /// Paths an apply never writes: Git's own data and agent CLI bookkeeping.
 fn skipped_path(path: &str) -> bool {
     path.split('/').any(|part| part.eq_ignore_ascii_case(".git"))
@@ -140,10 +164,89 @@ impl ProjectManager {
                 break;
             }
         }
+        // Only a complete apply is remembered; a partial one keeps the
+        // earlier receipt (the panel then still offers to apply). The files
+        // are in the folder either way, so a receipt that cannot be written
+        // does not turn the apply into a failure (review M44).
+        if failed.is_none() {
+            let mut applied = Map::new();
+            for entry in &entries {
+                let left_out = skipped_path(&entry.path)
+                    || skipped.contains(&entry.path)
+                    || entry.old_path.as_ref().is_some_and(|old| skipped_path(old) || skipped.contains(old));
+                if !left_out {
+                    applied.insert(entry.path.clone(), desired_version(&worktree, entry));
+                }
+            }
+            let recorded = match create_managed_directory(&self.data_root, &self.data_dir, APPLY_RECEIPTS) {
+                Ok((_, receipts)) => write_json_atomic(
+                    &receipts,
+                    &format!("{}.json", address.worktree_id),
+                    &json!({"schemaVersion":1,"worktreeId":address.worktree_id,"entries":applied}),
+                )
+                .is_ok(),
+                Err(_) => false,
+            };
+            if !recorded {
+                eprintln!("apply: the apply receipt could not be written");
+            }
+        }
         Ok(ProjectAction {
             result: json!({
                 "schemaVersion":1,"action":"applyChatLatest","projectId":project_id,"chatId":chat_id,
                 "written":written.len(),"removed":removed.len(),"skipped":skipped,"failed":failed,
+            }),
+            ..ProjectAction::default()
+        })
+    }
+
+    /// Where a task's changes stand against the user's folder: applied
+    /// before, and how many changed paths differ from what was applied (the
+    /// workspace changed again since). Reads only.
+    pub(crate) fn inspect_chat_apply(
+        &self,
+        storage: &Storage,
+        project_id: &str,
+        chat_id: &str,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        let chat = storage
+            .projection_record("chat", chat_id)?
+            .ok_or_else(|| ProjectFailure::dirty("apply chat missing"))?;
+        let record = chat
+            .get("record")
+            .and_then(Value::as_object)
+            .ok_or_else(|| ProjectFailure::dirty("apply chat record missing"))?;
+        if record.get("projectId").and_then(Value::as_str) != Some(project_id) {
+            return Err(ProjectFailure::dirty("apply chat belongs to another project"));
+        }
+        let address = WorkspaceAddress {
+            project_id: project_id.to_owned(),
+            chat_id: chat_id.to_owned(),
+            worktree_id: value_string(record, "worktreeId")?.to_owned(),
+            workspace_identity: value_string(record, "workspaceIdentity")?.to_owned(),
+        };
+        let active = self.validate_workspace_address(storage, &address)?;
+        let worktree = self.worktree_capability(&active)?;
+        let entries: Vec<DiffEntry> = self
+            .diff_entries(&active)?
+            .into_iter()
+            .filter(|entry| !skipped_path(&entry.path))
+            .collect();
+        let receipt = open_real_child_dir(&self.data_dir, APPLY_RECEIPTS)
+            .ok()
+            .and_then(|dir| read_bounded_json(&dir, &format!("{}.json", address.worktree_id)).ok())
+            .filter(|value| value["worktreeId"] == address.worktree_id.as_str());
+        let pending = match &receipt {
+            Some(receipt) => entries
+                .iter()
+                .filter(|entry| receipt["entries"].get(&entry.path) != Some(&desired_version(&worktree, entry)))
+                .count(),
+            None => entries.len(),
+        };
+        Ok(ProjectAction {
+            result: json!({
+                "schemaVersion":1,"action":"inspectChatApply","projectId":project_id,"chatId":chat_id,
+                "applied":receipt.is_some(),"pending":pending,"total":entries.len(),
             }),
             ..ProjectAction::default()
         })

@@ -43,7 +43,7 @@ import { ApprovalCard } from "./approval-card.tsx";
 import { ChatWorkspaceDiscard } from "./chat-workspace-discard.tsx";
 import { ChatWorkspaceMerge } from "./chat-workspace-merge.tsx";
 import { WorkspaceFolderSetting } from "./workspace-folder-setting.tsx";
-import { ApplyLatest } from "./apply-latest.tsx";
+import { ApplyLatest, ChangesMergeStatus, mergeStanding, type ChangesStanding } from "./apply-latest.tsx";
 import { diffPages, diffSides, splitDiffPage, DIFF_PAGE_ROWS } from "./diff-view.ts";
 import { FileSearch } from "./file-search-view.tsx";
 import { requestEditorSave } from "./editor-actions.ts";
@@ -215,6 +215,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const newChatButtonRef = useRef<HTMLButtonElement>(null);
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [mergeInfo, setMergeInfo] = useState<ChatMergeState | null>(null);
+  /** A copy task's changes against the user's folder (apply receipt). */
+  const [applyInfo, setApplyInfo] = useState<ChangesStanding | null>(null);
   // The first chat of a project must not start before the user has seen the
   // team (provider/model per role) and the project's access permissions.
   const [setupConfirmed, setSetupConfirmed] = useState(false);
@@ -506,7 +508,15 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   };
 
   // The task's changes are already in its base branch (task = PR, merged).
-  const mergedIntoBase = mergeInfo?.kind === "gitWorktree" && mergeInfo.ahead === 0 && !mergeInfo.uncommitted && !!mergeInfo.baseTip && (snapshot.diffSummary?.entries.length ?? 0) > 0;
+  const mergedIntoBase = mergeStanding(mergeInfo, snapshot.diffSummary?.entries.length ?? 0) === "done";
+  const appliedToFolder = mergeInfo?.kind === "snapshot" && applyInfo === "done";
+  // Applied or merged and nothing new: the list is what this task changed.
+  const changesDone = mergedIntoBase || appliedToFolder;
+  const openResultMerge = () => {
+    const button = document.querySelector<HTMLButtonElement>(".m5-result-bar .m5-merge > button:not(:disabled)");
+    button?.scrollIntoView({ block: "nearest" });
+    button?.click();
+  };
 
   return (
     <main inert={updatePreparing} className={`m5-workbench${preferencesOpen ? " m5-settings-open" : ""}${window.m5Projects ? " m5-with-project-rail" : ""}`} lang={lang} aria-label={t("m5.shell.label")}>
@@ -633,7 +643,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       {snapshot.project && <WorkbenchDock changeCount={snapshot.rescanRequired ? undefined : snapshot.diffSummary?.entries.length} reveal={snapshot.panelRequest} conversation={chat.activeChat ? <div className="m5-conversation"><div className="m5-conversation-scroll"><TeamTimeline onCoordinatorChat={() => { setGoal(chat.activeChat?.goal ?? ""); setNewChatOpen(true); }} controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} />{chat.activeChat.state === "reviewReady" && <section className="m5-result-bar" aria-label={t("m5.result.title")}>
         <span className="m5-result-mark" aria-hidden="true">✓</span>
         <span className="m5-result-text"><strong>{t("m5.result.title")}</strong>
-          <small>{mergedIntoBase && mergeInfo?.kind === "gitWorktree" ? t("m5.result.merged", { base: mergeInfo.baseRef ?? "main" }) : <>{snapshot.diffSummary ? <>{t("m5.result.files", { count: snapshot.diffSummary.entries.length })} <LineCounts entry={snapshot.diffSummary.entries.reduce((sum, entry) => ({ added: sum.added + (entry.added ?? 0), removed: sum.removed + (entry.removed ?? 0) }), { added: 0, removed: 0 })} /> · </> : null}{t("m5.result.inWorkspace")}</>}</small></span>
+          <small>{mergedIntoBase && mergeInfo?.kind === "gitWorktree" ? t("m5.result.merged", { base: mergeInfo.baseRef ?? "main" }) : appliedToFolder ? t("m5.result.applied") : <>{snapshot.diffSummary ? <>{t("m5.result.files", { count: snapshot.diffSummary.entries.length })} <LineCounts entry={snapshot.diffSummary.entries.reduce((sum, entry) => ({ added: sum.added + (entry.added ?? 0), removed: sum.removed + (entry.removed ?? 0) }), { added: 0, removed: 0 })} /> · </> : null}{t("m5.result.inWorkspace")}</>}</small></span>
         <span className="m5-result-actions">
           <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => { controller.selectPanel("changes"); void controller.refreshChanges(); setAllChanges({ focus: null }); }}>{t("m5.result.view")}</button>
           <ChatWorkspaceMerge key={`merge:${chat.activeChat.chatId}`} chat={chat.activeChat} disabled={!admissionReady} merged={mergedIntoBase} onState={setMergeInfo}
@@ -747,7 +757,10 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           {snapshot.project ? (
             <>
               {snapshot.diffLoading && <p className="m5-empty" role="status">{t("m5.editor.loadingChanges")}</p>}
-              {chat.activeChat && <ApplyLatest projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} changeCount={snapshot.diffSummary?.entries.length ?? 0} confirmRequest={applyOpenRequest} disabled={!admissionReady || chat.switching || chatController.isActionBlocked() || chat.activeChat.state === "running" || chat.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state))} />}
+              {/* A task worktree merges (result bar); only a copy task applies. */}
+              {chat.activeChat && mergeInfo?.kind === "gitWorktree" && <ChangesMergeStatus state={mergeInfo} changeCount={snapshot.diffSummary?.entries.length ?? 0} canMerge={chat.activeChat.state === "reviewReady"} onMerge={openResultMerge} />}
+              {chat.activeChat && mergeInfo?.kind === "snapshot" && <ApplyLatest projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} changeCount={snapshot.diffSummary?.entries.length ?? 0} confirmRequest={applyOpenRequest} onStanding={setApplyInfo} disabled={!admissionReady || chat.switching || chatController.isActionBlocked() || chat.activeChat.state === "running" || chat.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state))} />}
+              {snapshot.diffSummary && changesDone && <p className="m5-changes-done-label">{t("m5.changes.doneList")}</p>}
               {snapshot.diffSummary && <ChangeList key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}`} entries={snapshot.diffSummary.entries} selected={allChanges ? allChanges.focus?.path : snapshot.diffFile?.path} disabled={!admissionReady || snapshot.actionBlocked}
                 onRefresh={() => void controller.refreshChanges()} refreshing={snapshot.diffLoading} allOpen={Boolean(allChanges)} onViewAll={() => { if (allChanges) setAllChanges(null); else { setAllChanges({ focus: null }); controller.selectPanel("editor"); } }}
                 onOpen={path => { if (allChanges) setAllChanges({ focus: { path, at: Date.now() } }); else void controller.openDiff(path); }} />}

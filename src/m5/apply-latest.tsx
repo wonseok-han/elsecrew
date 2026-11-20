@@ -1,24 +1,65 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.tsx";
-import { validateProjectCatalogResult } from "./contracts/project-catalog-v1.ts";
+import { validateProjectCatalogResult, type ChatMergeState } from "./contracts/project-catalog-v1.ts";
+
+/** Where a task's changes stand against the user's folder (both kinds of task). */
+export type ChangesStanding = "notYet" | "done" | "changedSince";
+
+export interface ApplyStanding { applied: boolean; pending: number; total: number }
+
+export function applyStanding(state: ApplyStanding | null): ChangesStanding | null {
+  if (!state || state.total === 0) return null;
+  if (!state.applied) return "notYet";
+  return state.pending === 0 ? "done" : "changedSince";
+}
+
+/** A task worktree: merged into its base before, and anything new since. */
+export function mergeStanding(state: ChatMergeState | null, changeCount: number): ChangesStanding | null {
+  if (state?.kind !== "gitWorktree" || !state.baseTip || changeCount === 0) return null;
+  const pending = state.ahead > 0 || state.uncommitted;
+  if (!state.mergedBefore) return "notYet";
+  return pending ? "changedSince" : "done";
+}
 
 /**
  * One button: the task's workspace, as it is now, is written over the user's
  * own folder (latest wins, user decision 2026-11-17). One confirmation names
  * what that means; there is no separate review, token or backup step.
+ *
+ * Three standings (user decision 2026-11-20), kept across restarts by the
+ * engine's apply receipt: not applied yet (apply), applied (no button), and
+ * changed again since (apply again, counting only what changed since).
  */
-export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmRequest = 0, onApplied }: {
+export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmRequest = 0, onApplied, onStanding }: {
   projectId: string; chatId: string; changeCount: number; disabled: boolean;
   /** Bumped by "check changes and apply" elsewhere: opens the confirmation. */
   confirmRequest?: number;
   onApplied?: () => void;
+  onStanding?: (standing: ChangesStanding | null) => void;
 }) {
   const { t } = useI18n();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ written: number; removed: number; skipped: number; failed: string | null } | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
-  useEffect(() => { setConfirming(false); setResult(null); setFailed(null); }, [projectId, chatId]);
+  const [state, setState] = useState<ApplyStanding | null>(null);
+  const generation = useRef(0);
+  const inspect = useCallback(async () => {
+    if (!window.m5Projects) return;
+    const epoch = ++generation.current;
+    const request = { action: "inspectChatApply" as const, projectId, chatId };
+    try {
+      const reply = validateProjectCatalogResult(await window.m5Projects.request(request), request);
+      if (epoch === generation.current && reply.action === "inspectChatApply") {
+        setState({ applied: reply.applied, pending: reply.pending, total: reply.total });
+      }
+    } catch { if (epoch === generation.current) setState(null); }
+  }, [projectId, chatId]);
+  useEffect(() => { setConfirming(false); setResult(null); setFailed(null); setState(null); }, [projectId, chatId]);
+  // The workspace changed (a new step, a save): look again.
+  useEffect(() => { void inspect(); return () => { generation.current++; }; }, [inspect, changeCount]);
+  const standing = applyStanding(state);
+  useEffect(() => { onStanding?.(standing); }, [standing, onStanding]);
   useEffect(() => { if (confirmRequest > 0 && changeCount > 0) setConfirming(true); }, [confirmRequest]);
   const apply = async () => {
     if (!window.m5Projects || busy) return;
@@ -31,14 +72,18 @@ export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmR
         onApplied?.();
       }
       setConfirming(false);
+      void inspect();
     } catch (error) {
       setFailed(error instanceof Error ? error.message : String(error));
     } finally { setBusy(false); }
   };
-  return <section className="m5-apply-latest" aria-label={t("m5.apply.title")}>
+  const done = standing === "done";
+  return <section className={`m5-apply-latest${done ? " m5-apply-latest-applied" : ""}`} aria-label={t("m5.apply.title")}>
     <div className="m5-apply-latest-head">
-      <strong>{t("m5.apply.count", { count: changeCount })}</strong>
-      {!confirming && <button type="button" disabled={disabled || busy || changeCount === 0} onClick={() => { setConfirming(true); setResult(null); setFailed(null); }}>{t("m5.apply.action")}</button>}
+      <strong>{done ? t("m5.apply.applied", { count: state?.total ?? changeCount })
+        : standing === "changedSince" ? t("m5.apply.changedSince", { count: state?.pending ?? 0 })
+        : t("m5.apply.count", { count: changeCount })}</strong>
+      {!confirming && !done && <button type="button" disabled={disabled || busy || changeCount === 0} onClick={() => { setConfirming(true); setResult(null); setFailed(null); }}>{t(standing === "changedSince" ? "m5.apply.again" : "m5.apply.action")}</button>}
     </div>
     {confirming && <div className="m5-apply-latest-confirm" role="alertdialog" aria-label={t("m5.apply.confirmTitle")}>
       <p>{t("m5.apply.confirm")}</p>
@@ -49,5 +94,31 @@ export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmR
     </div>}
     {result && <p role={result.failed ? "alert" : "status"} className="m5-apply-latest-done">{t(result.failed ? "m5.apply.partial" : "m5.apply.done", { written: result.written, removed: result.removed, path: result.failed ?? "" })}{result.skipped ? ` ${t("m5.apply.skipped", { count: result.skipped })}` : ""}</p>}
     {failed && <div role="alert" className="m5-apply-latest-failed"><p>{t("m5.apply.failed")}</p><details><summary>{t("m5.chat.details")}</summary><pre>{failed}</pre></details></div>}
+  </section>;
+}
+
+/**
+ * A task worktree's changes panel says where the task stands against its base
+ * branch, the same three ways; merging itself stays in the result bar (one
+ * place, one confirmation), which this button opens.
+ */
+export function ChangesMergeStatus({ state, changeCount, canMerge, onMerge }: {
+  state: ChatMergeState | null; changeCount: number;
+  /** The result bar's merge is there (the task is ready for review). */
+  canMerge: boolean;
+  onMerge: () => void;
+}) {
+  const { t } = useI18n();
+  const standing = mergeStanding(state, changeCount);
+  if (!standing || state?.kind !== "gitWorktree") return null;
+  const base = state.baseRef ?? "main";
+  const done = standing === "done";
+  return <section className={`m5-apply-latest${done ? " m5-apply-latest-applied" : ""}`} aria-label={t("m5.merge.open", { base })}>
+    <div className="m5-apply-latest-head">
+      <strong>{done ? t("m5.mergeStatus.merged", { base, count: changeCount })
+        : standing === "changedSince" ? t("m5.mergeStatus.newSince", { base })
+        : t("m5.mergeStatus.notYet", { base, count: changeCount })}</strong>
+      {!done && canMerge && <button type="button" onClick={onMerge}>{t(standing === "changedSince" ? "m5.mergeStatus.again" : "m5.merge.open", { base })}</button>}
+    </div>
   </section>;
 }

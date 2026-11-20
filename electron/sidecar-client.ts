@@ -428,7 +428,7 @@ export class SidecarClientV1 {
 
   /** The seal line the engine printed last at a clean exit, if any. The app
    * signs it only after hashing the database itself (`storage-seal.ts`). */
-  get storageSealToken(): string | null {
+  get storageSeal(): { token: string; fullCheckAt: number | null } | null {
     return sealFromStderr(this.#stderrTail.toString("utf8"));
   }
 

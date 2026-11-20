@@ -6231,7 +6231,8 @@ fn fake_agent_cancel_uncertain_poison_survives_and_is_abandon_only() {
     let recover_request = json!({"provider":"claude","action":"recover","attemptId":"bound-fence-repair"});
     let fence_bytes = fs::read(&fence_path).unwrap();
     // A live lock owner and an unresolved run each independently block release.
-    assert_eq!(login.request_with_projects(&fixture.storage, &recover_request, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired");
+    // A live owner is "busy, try again" (review M37, 2026-11-20).
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover_request, &fixture.projects).unwrap()["error"], "providerBusy");
     drop(owner);
     assert_eq!(login.request_with_projects(&fixture.storage, &recover_request, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired");
     assert_eq!(fs::read(&fence_path).unwrap(), fence_bytes);

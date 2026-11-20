@@ -26,7 +26,9 @@ function fixture() {
 
 test("only the engine's last stderr line is a seal, and only in its exact form", () => {
   const token = `${"a".repeat(64)}.0.1.0+s13`;
-  assert.equal(sealFromStderr(`storage admission: clean shutdown seal\nelsecrew-storage-seal v1 ${token}\n`), token);
+  assert.deepEqual(sealFromStderr(`storage admission: clean shutdown seal\nelsecrew-storage-seal v1 ${token}\n`), { token, fullCheckAt: null });
+  assert.deepEqual(sealFromStderr(`elsecrew-storage-seal v1 ${token} full=1795150000000\n`), { token, fullCheckAt: 1795150000000 });
+  assert.equal(sealFromStderr(`elsecrew-storage-seal v1 ${token} full=soon\n`), null);
   assert.equal(sealFromStderr(`elsecrew-storage-seal v1 ${token}\nsomething after\n`), null);
   assert.equal(sealFromStderr(`elsecrew-storage-seal v1 ${"A".repeat(64)}.x\n`), null);
   assert.equal(sealFromStderr(`elsecrew-storage-seal v1 ${"a".repeat(64)}\n`), null);

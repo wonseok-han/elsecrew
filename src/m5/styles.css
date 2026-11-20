@@ -1303,6 +1303,10 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-apply-latest-confirm p, .m5-apply-latest-done, .m5-apply-latest-failed p { margin: 0; font-size: 12px; line-height: 1.5; }
 .m5-apply-latest-actions { display: flex; gap: 8px; margin-top: 8px; }
 .m5-apply-latest-failed pre { white-space: pre-wrap; font-size: 11px; }
+.m5-apply-latest-applied { border-color: transparent; background: var(--m5-surface-2, transparent); }
+.m5-apply-latest-applied strong { color: var(--m5-muted, inherit); }
+.m5-changes-done-label { margin: 0 0 4px; font-size: 11px; color: var(--m5-muted, inherit); }
+.m5-changes-done-label + * { opacity: 0.75; }
 .m5-change-group { display: grid; }
 .m5-change-folder { display: flex; align-items: center; gap: 6px; width: 100%; padding: 4px 8px; background: none; border: 0; color: var(--m5-muted); font-size: 12px; text-align: left; cursor: pointer; }
 .m5-change-folder:hover { color: var(--m5-text); }

@@ -3,6 +3,7 @@
 //! 실제 유료 agent 실행과 원본 적용은 후속 게이트에서 추가한다.
 
 mod agent_runtime;
+mod background_check;
 mod orchestration;
 mod orchestration_dispatch;
 mod application_cancel;
@@ -465,9 +466,14 @@ fn serve_stdio_sealed<R: Read + Send + 'static, W: Write>(
                     // nothing: only then may the app sign it for the next start.
                     let sealed = sidecar.shutdown_seal();
                     drop(sidecar);
-                    if let Some((path, sealed)) = sealed {
+                    if let Some((path, sealed, full_check_ms)) = sealed {
                         if sealed.still_holds(&path) {
-                            eprintln!("{} {}", STORAGE_SEAL_LINE, sealed.digest);
+                            // `full=`: when the state last proven by a full
+                            // check was taken, if the background check did one.
+                            match full_check_ms {
+                                Some(ms) => eprintln!("{} {} full={ms}", STORAGE_SEAL_LINE, sealed.digest),
+                                None => eprintln!("{} {}", STORAGE_SEAL_LINE, sealed.digest),
+                            }
                         }
                     }
                     return Ok(());
@@ -641,6 +647,8 @@ struct Sidecar {
     pending_agent_starts: BTreeMap<String, PendingAgentStart>,
     maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler,
     maintenance_poisoned: bool,
+    /// The full storage check run on a copy while the app rests.
+    background_check: background_check::BackgroundCheck,
     workflow_chats: std::collections::BTreeSet<String>,
     workflow_requests: BTreeMap<String, (String, String)>,
     workflow_outbound: Vec<EventV1>,
@@ -735,13 +743,14 @@ impl SidecarSession {
 
     /// A clean exit's seal of the database, if the engine opened it and
     /// nothing is unsettled. The path is checked again after closing.
-    fn shutdown_seal(&self) -> Option<(std::path::PathBuf, storage::shutdown_seal::SealedFile)> {
+    fn shutdown_seal(&self) -> Option<(std::path::PathBuf, storage::shutdown_seal::SealedFile, Option<u64>)> {
         let AdmissionState::Ready { sidecar, .. } = &self.admission else { return None };
-        if sidecar.maintenance_poisoned {
+        // A damaged ledger found in the background: the next start checks in full.
+        if sidecar.maintenance_poisoned || sidecar.background_check.failed() {
             return None;
         }
         let sealed = sidecar.storage.shutdown_seal()?;
-        Some((sidecar.storage.database_path().to_path_buf(), sealed))
+        Some((sidecar.storage.database_path().to_path_buf(), sealed, sidecar.background_check.last_success_ms()))
     }
 
     fn ready_event(&self) -> Result<EventV1, SidecarError> {
@@ -1057,6 +1066,10 @@ impl Sidecar {
             Storage::open_for_admission(&database_path, cancellation)?
         };
         admission_not_cancelled(cancellation)?;
+        if let Some(data_dir) = database_path.parent() {
+            background_check::clean_leftovers(data_dir);
+        }
+        let from_seal = storage.opened_from_seal();
         let mut projects = ProjectManager::new(&database_path)?;
         admission_not_cancelled(cancellation)?;
         storage.recover_unclean_shutdown()?;
@@ -1095,6 +1108,7 @@ impl Sidecar {
             workflow_busy: BTreeMap::new(),
             maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler::default(),
             maintenance_poisoned: false,
+            background_check: background_check::BackgroundCheck::new(from_seal),
         };
         // A provider sign-in hold left by a run that has since durably ended
         // (for example it was settled just before the app closed) is released
@@ -1624,6 +1638,10 @@ impl Sidecar {
                     // is now is written over the original, no review step.
                     let params = require_exact_params(&request.params, &["action", "projectId", "chatId"]).map_err(invalid_params)?;
                     self.projects.apply_chat_latest(&self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "chatId").map_err(invalid_params)?)
+                }
+                Some("inspectChatApply") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId", "chatId"]).map_err(invalid_params)?;
+                    self.projects.inspect_chat_apply(&self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "chatId").map_err(invalid_params)?)
                 }
                 Some("chatApplicationStatus") => {
                     let params = require_exact_params(&request.params, &["action", "projectId", "chatId"]).map_err(invalid_params)?;
@@ -2808,11 +2826,17 @@ impl Sidecar {
         &mut self,
     ) -> Result<storage_lifetime::scheduler::MaintenanceTickResult, SidecarError> {
         if self.prepared_to_quit {
+            self.background_check.stop();
             return Ok(storage_lifetime::scheduler::MaintenanceTickResult::NoWork);
         }
         if self.maintenance_poisoned {
             return Err(maintenance_poisoned_error());
         }
+        let idle = self.agent_runtime.owned_run_ids().is_empty()
+            && self.workflow_chats.is_empty()
+            && self.pending_agent_starts.is_empty()
+            && self.pending_agent_capabilities.is_empty();
+        self.background_check.tick(&self.storage, idle);
         match self.maintenance_scheduler.tick(&mut self.storage) {
             Ok(result) => Ok(result),
             Err(error) => {

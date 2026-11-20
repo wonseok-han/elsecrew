@@ -4,7 +4,7 @@ import { validateProjectCatalogRequest, validateProjectCatalogResult } from "../
 
 const address = { chatId: "chat_1", projectId: "project_1", worktreeId: "worktree_1", workspaceIdentity: "workspace_1" };
 const head = "a".repeat(40), base = "b".repeat(40);
-const state = { kind: "gitWorktree", branch: "elsecrew/task-1", baseRef: "main", head, baseTip: base, ahead: 2, behind: 0, uncommitted: false, baseCheckedOut: true, resolving: false, unresolved: 0, blocked: null };
+const state = { kind: "gitWorktree", branch: "elsecrew/task-1", baseRef: "main", head, baseTip: base, ahead: 2, behind: 0, uncommitted: false, baseCheckedOut: true, resolving: false, unresolved: 0, mergedBefore: false, blocked: null };
 
 test("merge requests carry the reviewed commits and an explicit confirmation", () => {
   validateProjectCatalogRequest({ action: "inspectChatMerge", ...address });

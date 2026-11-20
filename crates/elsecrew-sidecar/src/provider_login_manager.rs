@@ -60,11 +60,13 @@ impl LoginManager {
         let result = if self.claude {
             crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage).and_then(|profile| {
                 crate::provider_login_process::recover_confirmed_login(&profile)
+                    .or_else(|_| crate::provider_login_process::recover_settled_login(&profile))
                     .or_else(|error| recover_bound(&profile, storage, Some(projects), error))
             })
         } else {
             CodexProfileBinding::from_storage(storage).and_then(|profile| {
                 crate::provider_login_process::recover_confirmed_login(&profile)
+                    .or_else(|_| crate::provider_login_process::recover_settled_login(&profile))
                     .or_else(|error| recover_bound(&profile, storage, Some(projects), error))
             })
         };
@@ -164,12 +166,20 @@ impl LoginManager {
                 let result = if self.claude {
                     crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage)
                         .and_then(|profile| {
+                            if !crate::provider_login_process::has_login_hold(&profile)? {
+                                return Ok(());
+                            }
                             crate::provider_login_process::recover_confirmed_login(&profile)
+                                .or_else(|_| crate::provider_login_process::recover_settled_login(&profile))
                                 .or_else(|error| recover_bound(&profile, storage, projects, error))
                         })
                 } else {
                     CodexProfileBinding::from_storage(storage).and_then(|profile| {
+                        if !crate::provider_login_process::has_login_hold(&profile)? {
+                            return Ok(());
+                        }
                         crate::provider_login_process::recover_confirmed_login(&profile)
+                            .or_else(|_| crate::provider_login_process::recover_settled_login(&profile))
                             .or_else(|error| recover_bound(&profile, storage, projects, error))
                     })
                 };
@@ -941,6 +951,21 @@ mod tests {
         assert_eq!(status["state"], "failed");
         assert_eq!(status["error"], "providerLoginRecoveryRequired");
         assert!(root.join("codex-login.pending").exists());
+    }
+
+    /// Asking to recover with no hold at all is nothing to do: it must not
+    /// leave the profile looking fenced (that also blocked quitting).
+    #[test]
+    fn recovering_with_no_hold_is_idle_and_lets_the_app_quit() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let storage = Storage::open(&root.join("elsecrew.sqlite3")).unwrap();
+        let mut manager = LoginManager::default();
+        let status = manager
+            .request(&storage, &json!({"action":"recover","attemptId":"nothing"}))
+            .unwrap();
+        assert_eq!((status["state"].as_str(), status["error"].is_null()), (Some("idle"), true));
+        assert!(manager.prepare_quit());
     }
 
     #[test]
