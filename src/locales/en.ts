@@ -527,6 +527,7 @@ export const en: Record<MessageKey, string> = {
   "m5.result.applied": "This task is applied to your folder",
   "m5.result.view": "View changes",
   "m5.result.apply": "Apply to my folder",
+  "m5.result.appliedAction": "Applied to my folder",
   "m5.discard.short": "Discard",
   "m5.discard.open": "Discard workspace",
   "m5.discard.title": "Discard this workspace?",

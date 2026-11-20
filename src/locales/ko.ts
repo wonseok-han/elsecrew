@@ -526,6 +526,7 @@ export const ko = {
   "m5.result.applied": "이 작업은 내 폴더에 반영됐어요",
   "m5.result.view": "변경 보기",
   "m5.result.apply": "내 폴더에 반영",
+  "m5.result.appliedAction": "내 폴더에 반영함",
   "m5.discard.short": "버리기",
   "m5.discard.open": "작업 공간 버리기",
   "m5.discard.title": "이 작업 공간을 버릴까요?",

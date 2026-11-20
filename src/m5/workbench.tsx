@@ -649,7 +649,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           <ChatWorkspaceMerge key={`merge:${chat.activeChat.chatId}`} chat={chat.activeChat} disabled={!admissionReady} merged={mergedIntoBase} onState={setMergeInfo}
             onMerged={() => { void controller.refreshChanges(); }}
             onAskTeam={text => { chatController.editFollowup(text); void chatController.appendFollowup(admissionReady, true, lang); }}
-            fallback={<button type="button" disabled={!admissionReady} onClick={() => { controller.selectPanel("changes"); void controller.refreshChanges(); setApplyOpenRequest(value => value + 1); }}>{t("m5.result.apply")}</button>} />
+            fallback={<button type="button" disabled={!admissionReady || appliedToFolder} onClick={() => { controller.selectPanel("changes"); void controller.refreshChanges(); setApplyOpenRequest(value => value + 1); }}>{t(appliedToFolder ? "m5.result.appliedAction" : "m5.result.apply")}</button>} />
           <ChatWorkspaceDiscard key={chat.activeChat.chatId} compact chat={chat.activeChat} disabled={!admissionReady || settingsOpen || !controller.canLeaveProject() || !chatController.canLeaveProjectView()} onCompleted={async discarded => {
         const request = { action: "releaseView" as const, projectId: discarded.projectId };
         validateProjectCatalogResult(await window.m5Projects!.request(request), request);
