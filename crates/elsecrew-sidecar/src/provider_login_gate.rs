@@ -75,7 +75,8 @@ mod tests {
 
     #[test]
     fn vendor_gate_does_not_inherit_unrelated_writable_descriptors() {
-        for minimum in [3, 200, 4096] {
+        // 10 is bash's own first save slot (SHELL_FD_BASE): see the probe below.
+        for minimum in [3, 10, 200, 4096] {
             let temp = tempfile::tempdir().unwrap();
             let path = temp.path().join("original");
             std::fs::write(&path, b"original").unwrap();
@@ -89,8 +90,11 @@ mod tests {
                 Path::new("/bin/sh"),
                 &[
                     OsStr::new("-c"),
+                    // An external printf: for a builtin's redirection bash first
+                    // saves stdout to the lowest free fd >= 10, so a closed fd 10
+                    // would look writable (seen when parallel tests held 3..9).
                     OsStr::new(
-                        "if (printf changed >&\"$1\") 2>/dev/null; then exit 17; fi; printf closed",
+                        "if (/usr/bin/printf changed >&\"$1\") 2>/dev/null; then exit 17; fi; printf closed",
                     ),
                     OsStr::new("fd-probe"),
                     OsStr::new(&number),
