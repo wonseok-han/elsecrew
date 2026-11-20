@@ -500,7 +500,7 @@ impl AgentRuntime {
                         .ok_or_else(|| {
                             SidecarError::new("projectionInvalid", "durable run identity missing")
                         })?;
-                    actual_run_projection(storage, run_id)
+                    validate_actual_run_projection(storage, run_id, projection.clone())
                         .map_err(|error| SidecarError::new("projectionInvalid", error.detail))?;
                 } else {
                     validate_projection_public_budget(&projection)
@@ -3217,6 +3217,22 @@ fn actual_run_projection_and_head(
     let value = storage
         .projection_record("run", run_id)?
         .ok_or_else(|| ProjectFailure::manifest("agent run is missing"))?;
+    validate_actual_run_projection(storage, run_id, value)
+}
+
+/// The checks of `actual_run_projection_and_head` on a run projection the
+/// caller already read (startup reads them all once instead of once per run).
+fn validate_actual_run_projection(
+    storage: &Storage,
+    run_id: &str,
+    value: Map<String, Value>,
+) -> Result<
+    (
+        Map<String, Value>,
+        Option<elsecrew_protocol::agent_adapter_v1::output_pages::OutputHead>,
+    ),
+    ProjectFailure,
+> {
     if value.get("source_kind").and_then(Value::as_str) != Some(SOURCE_KIND) {
         return Err(ProjectFailure::manifest(
             "run is not an actual-agent ledger record",

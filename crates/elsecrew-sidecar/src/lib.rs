@@ -203,6 +203,8 @@ where
         agent_runtime::run_agent_fixture_grandchild();
         return Ok(());
     }
+    // What the app says the last clean shutdown sealed (`storage::shutdown_seal`).
+    let mut storage_seal = None;
     let fixture_runtime = if mode.as_deref() == Some(std::ffi::OsStr::new("--stdio-agent-fixture"))
     {
         let scenario = args.next().ok_or_else(|| {
@@ -274,11 +276,25 @@ where
             scenario,
         ))
     } else {
-        if mode.as_deref() != Some(std::ffi::OsStr::new("--stdio")) || args.next().is_some() {
-            return Err(SidecarError::new(
-                "invalidArguments",
-                "sidecar requires exactly one argument: --stdio",
-            ));
+        let invalid = || SidecarError::new(
+            "invalidArguments",
+            "sidecar requires --stdio, optionally followed by --storage-seal <sha256>",
+        );
+        if mode.as_deref() != Some(std::ffi::OsStr::new("--stdio")) {
+            return Err(invalid());
+        }
+        match args.next() {
+            None => {}
+            Some(flag) if flag == "--storage-seal" => {
+                let seal = args.next().and_then(|value| value.into_string().ok())
+                    .filter(|value| storage::shutdown_seal::valid_seal(value))
+                    .ok_or_else(invalid)?;
+                storage_seal = Some(seal);
+            }
+            Some(_) => return Err(invalid()),
+        }
+        if args.next().is_some() {
+            return Err(invalid());
         }
         None
     };
@@ -312,7 +328,18 @@ where
             new_sidecar_instance_id(),
             runtime,
         ),
-        None => run_stdio(&database_path, stdin, stdout.lock()),
+        None => serve_stdio_sealed(
+            &database_path,
+            stdin,
+            stdout.lock(),
+            new_sidecar_instance_id(),
+            if cfg!(target_os = "macos") {
+                agent_runtime::AgentRuntime::native_candidate()
+            } else {
+                agent_runtime::AgentRuntime::blocked()
+            },
+            storage_seal,
+        ),
     }
 }
 
@@ -346,13 +373,25 @@ fn serve_stdio_with_identity<R: Read + Send + 'static, W: Write>(
 fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
     database_path: &Path,
     input: R,
+    output: W,
+    sidecar_instance_id: String,
+    runtime: agent_runtime::AgentRuntime,
+) -> Result<(), SidecarError> {
+    serve_stdio_sealed(database_path, input, output, sidecar_instance_id, runtime, None)
+}
+
+fn serve_stdio_sealed<R: Read + Send + 'static, W: Write>(
+    database_path: &Path,
+    input: R,
     mut output: W,
     sidecar_instance_id: String,
     runtime: agent_runtime::AgentRuntime,
+    storage_seal: Option<String>,
 ) -> Result<(), SidecarError> {
     g4_platform_gate()?;
     let mut timings = dispatch_timing::DispatchTiming::default();
     let mut sidecar = SidecarSession::new(sidecar_instance_id, runtime);
+    sidecar.storage_seal = storage_seal;
     let ready = EnvelopeV1::Event(sidecar.ready_event()?);
     let mut session = ProtocolSessionV1::default();
     session.observe(&ready).map_err(protocol_error)?;
@@ -422,6 +461,15 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
             }
             Ok(InputMessage::Eof) => {
                 if sidecar.safe_to_quit() {
+                    // Hash under the lock, close, then make sure closing wrote
+                    // nothing: only then may the app sign it for the next start.
+                    let sealed = sidecar.shutdown_seal();
+                    drop(sidecar);
+                    if let Some((path, sealed)) = sealed {
+                        if sealed.still_holds(&path) {
+                            eprintln!("{} {}", STORAGE_SEAL_LINE, sealed.digest);
+                        }
+                    }
                     return Ok(());
                 }
                 return Err(SidecarError::new(
@@ -638,7 +686,13 @@ struct SidecarSession {
     started_at: String,
     admission: AdmissionState,
     safe_to_quit: bool,
+    /// Taken by the admission worker: the app's claim of the last clean
+    /// shutdown's seal, checked against the file there.
+    storage_seal: Option<String>,
 }
+
+/// The one stderr line the app reads at a clean exit to sign the seal.
+const STORAGE_SEAL_LINE: &str = "elsecrew-storage-seal v1";
 
 impl SidecarSession {
     fn new(sidecar_instance_id: String, runtime: agent_runtime::AgentRuntime) -> Self {
@@ -675,7 +729,19 @@ impl SidecarSession {
                 runtime: Some(runtime),
             },
             safe_to_quit: false,
+            storage_seal: None,
         }
+    }
+
+    /// A clean exit's seal of the database, if the engine opened it and
+    /// nothing is unsettled. The path is checked again after closing.
+    fn shutdown_seal(&self) -> Option<(std::path::PathBuf, storage::shutdown_seal::SealedFile)> {
+        let AdmissionState::Ready { sidecar, .. } = &self.admission else { return None };
+        if sidecar.maintenance_poisoned {
+            return None;
+        }
+        let sealed = sidecar.storage.shutdown_seal()?;
+        Some((sidecar.storage.database_path().to_path_buf(), sealed))
     }
 
     fn ready_event(&self) -> Result<EventV1, SidecarError> {
@@ -706,6 +772,7 @@ impl SidecarSession {
             return;
         };
         let runtime = runtime.take().expect("admission runtime starts once");
+        let seal = self.storage_seal.take();
         let database_path = database_path.to_path_buf();
         let ready = self.ready.clone();
         let cancellation = Arc::new(AtomicBool::new(false));
@@ -718,7 +785,7 @@ impl SidecarSession {
                 admission_not_cancelled(&worker_cancellation)?;
                 thread::sleep(Duration::from_millis(1));
             }
-            Sidecar::initialize(database_path, ready, runtime, &worker_cancellation)
+            Sidecar::initialize_with_seal(database_path, ready, runtime, &worker_cancellation, seal.as_deref())
         });
         self.admission = AdmissionState::Verifying(AdmissionWorker {
             cancellation,
@@ -750,6 +817,9 @@ impl SidecarSession {
             .join();
         self.admission = match outcome {
             Ok(Ok(mut sidecar)) => {
+                if sidecar.storage.opened_from_seal() {
+                    eprintln!("storage admission: clean shutdown seal");
+                }
                 sidecar.projects.application_cancel = self.application_cancel.clone();
                 AdmissionState::Ready {
                     completed_at: now_utc(),
@@ -962,16 +1032,27 @@ impl Drop for SidecarSession {
 }
 
 impl Sidecar {
+    #[cfg(test)]
     fn initialize(
         database_path: std::path::PathBuf,
         ready: ReadyPayloadV1,
         agent_runtime: agent_runtime::AgentRuntime,
         cancellation: &AtomicBool,
     ) -> Result<Self, SidecarError> {
+        Self::initialize_with_seal(database_path, ready, agent_runtime, cancellation, None)
+    }
+
+    fn initialize_with_seal(
+        database_path: std::path::PathBuf,
+        ready: ReadyPayloadV1,
+        agent_runtime: agent_runtime::AgentRuntime,
+        cancellation: &AtomicBool,
+        seal: Option<&str>,
+    ) -> Result<Self, SidecarError> {
         // macOS native and explicit long-output fixtures use the same verified
         // migration/admission path. Blocked platforms keep their existing format.
         let mut storage = if agent_runtime.uses_durable_output() {
-            Storage::open_for_durable_admission(&database_path, cancellation)?
+            Storage::open_for_durable_admission_with_seal(&database_path, cancellation, seal)?
         } else {
             Storage::open_for_admission(&database_path, cancellation)?
         };

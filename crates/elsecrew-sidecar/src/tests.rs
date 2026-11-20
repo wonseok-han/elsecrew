@@ -1089,6 +1089,16 @@ fn cli_rejects_missing_or_extra_arguments_before_touching_stdio() {
             OsString::from("database.sqlite3"),
         ],
         vec![OsString::from("sidecar"), OsString::from("--other")],
+        // A clean shutdown's seal: exactly `--storage-seal <hash>.<context>`.
+        vec![OsString::from("sidecar"), OsString::from("--stdio"), OsString::from("--storage-seal")],
+        vec![OsString::from("sidecar"), OsString::from("--stdio"), OsString::from("--storage-seal"), OsString::from("not-a-seal")],
+        vec![
+            OsString::from("sidecar"),
+            OsString::from("--stdio"),
+            OsString::from("--storage-seal"),
+            OsString::from(format!("{}.0.1.0+s13", "a".repeat(64))),
+            OsString::from("extra"),
+        ],
     ] {
         let error = run_cli(args).expect_err("invalid argv");
         assert_eq!(error.kind(), "invalidArguments");

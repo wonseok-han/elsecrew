@@ -239,7 +239,21 @@ fn binary_ready_status_quit_flow_marks_clean_and_exits_zero() {
         .expect("read stderr");
     let status = child.wait().expect("wait sidecar");
     assert_eq!(status.code(), Some(0));
-    assert!(stderr.is_empty());
+    // A clean exit prints only its storage seal: the database file's SHA-256
+    // and the engine context (`storage::shutdown_seal`).
+    let stderr = String::from_utf8(stderr).expect("utf-8 stderr");
+    let token = stderr
+        .strip_prefix("elsecrew-storage-seal v1 ")
+        .and_then(|rest| rest.strip_suffix('\n'))
+        .unwrap_or_else(|| panic!("only the seal line: {stderr:?}"));
+    let (hash, context) = token.split_once('.').expect("hash.context");
+    let bytes = std::fs::read(root.path().join("elsecrew.sqlite3")).expect("read database");
+    let actual: String = <sha2::Sha256 as sha2::Digest>::digest(&bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert_eq!(hash, actual);
+    assert!(context.starts_with(env!("CARGO_PKG_VERSION")), "{context}");
 
     let database = Connection::open(root.path().join("elsecrew.sqlite3"))
         .expect("inspect sidecar database");

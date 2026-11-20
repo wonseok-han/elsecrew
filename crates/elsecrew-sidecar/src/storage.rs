@@ -53,6 +53,7 @@ pub(crate) mod agent_output;
 
 // Selected chat content erasure (docs/proposals/m5-chat-erasure.md).
 pub(crate) mod chat_erasure;
+pub(crate) mod shutdown_seal;
 
 const MIGRATION_V1: &str = include_str!("../../../tests/fixtures/m5/storage-v1/migration.sql");
 const MIGRATION_V2: &str =
@@ -120,6 +121,8 @@ pub struct Storage {
     path: PathBuf,
     writes_admitted: bool,
     maintenance_epoch: u64,
+    /// Admitted on a clean shutdown's seal instead of the full check.
+    opened_from_seal: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -207,6 +210,21 @@ impl Storage {
         path: &Path,
         cancellation: &AtomicBool,
     ) -> Result<Self, SidecarError> {
+        Self::open_for_durable_admission_with_seal(path, cancellation, None)
+    }
+
+    /// `seal`: what the app says the last clean shutdown sealed. Trusted only
+    /// if the file is exactly that (`shutdown_seal`); otherwise the full check.
+    pub(crate) fn open_for_durable_admission_with_seal(
+        path: &Path,
+        cancellation: &AtomicBool,
+        seal: Option<&str>,
+    ) -> Result<Self, SidecarError> {
+        // A log left behind means the file alone is not what was sealed.
+        let seal = seal.filter(|seal| {
+            shutdown_seal::valid_seal(seal)
+                && safe_database_path(path).is_ok_and(|path| shutdown_seal::wal_is_empty(&path))
+        });
         let mut storage = Self::open_inner(path, cancellation, StorageOpenMode::DurableAdmission)?;
         storage.writes_admitted = false;
         ensure_admission_not_cancelled(cancellation)?;
@@ -233,10 +251,17 @@ impl Storage {
         }
         agent_output::schema::migrate_coordinator(&mut storage.connection, &mut || cancellation.load(Ordering::Acquire))?;
         agent_output::schema::migrate_custom_roles(&mut storage.connection, &mut || cancellation.load(Ordering::Acquire))?;
-        agent_output::schema::verify_admission(&mut storage.connection,
-            &mut || cancellation.load(Ordering::Acquire))?;
+        let sealed = seal.is_some_and(|seal| storage.matches_shutdown_seal(seal));
+        if sealed {
+            agent_output::schema::verify_admission_after_seal(&mut storage.connection,
+                &mut || cancellation.load(Ordering::Acquire))?;
+        } else {
+            agent_output::schema::verify_admission(&mut storage.connection,
+                &mut || cancellation.load(Ordering::Acquire))?;
+        }
         ensure_admission_not_cancelled(cancellation)?;
         storage.writes_admitted = true;
+        storage.opened_from_seal = sealed;
         Ok(storage)
     }
 
@@ -250,7 +275,7 @@ impl Storage {
         connection.execute_batch("PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; PRAGMA query_only=ON;")
             .map_err(|_| SidecarError::new("storageReadFailed", "repair snapshot unavailable"))?;
         verify_projection_replay(&connection)?;
-        Ok(Self { connection, path, writes_admitted: false, maintenance_epoch: 0 })
+        Ok(Self { connection, path, writes_admitted: false, maintenance_epoch: 0, opened_from_seal: false })
     }
 
     pub fn open(path: &Path) -> Result<Self, SidecarError> {
@@ -471,6 +496,7 @@ impl Storage {
             connection,
             path,
             writes_admitted: true,
+            opened_from_seal: false,
             maintenance_epoch: 0,
         })
     }
@@ -604,6 +630,7 @@ impl Storage {
             connection,
             path,
             writes_admitted: true,
+            opened_from_seal: false,
             maintenance_epoch: 0,
         })
     }

@@ -264,6 +264,26 @@ pub(in crate::storage) fn verify_admission(
     connection: &mut Connection,
     cancelled: &mut impl FnMut() -> bool,
 ) -> Result<(), SidecarError> {
+    verify_admission_inner(connection, true, cancelled)
+}
+
+/// The database file is byte for byte what the previous clean shutdown
+/// sealed (`storage::shutdown_seal`): the whole-ledger and whole-output
+/// checks are not repeated; the schema check still is. That file includes
+/// what the app itself wrote in that session, which no full check has seen
+/// yet: the app asks for a full check again after a while (`storage-seal.ts`).
+pub(in crate::storage) fn verify_admission_after_seal(
+    connection: &mut Connection,
+    cancelled: &mut impl FnMut() -> bool,
+) -> Result<(), SidecarError> {
+    verify_admission_inner(connection, false, cancelled)
+}
+
+fn verify_admission_inner(
+    connection: &mut Connection,
+    full: bool,
+    cancelled: &mut impl FnMut() -> bool,
+) -> Result<(), SidecarError> {
     use crate::storage::reopen::snapshot::{ReopenMaintenanceSession, ReopenMaintenanceStep};
     if cancelled() || !connection.is_autocommit() {
         return Err(invalid("output admission interrupted"));
@@ -271,7 +291,7 @@ pub(in crate::storage) fn verify_admission(
     let marker: i64 = connection
         .query_row("PRAGMA data_version", [], |row| row.get(0))
         .map_err(sqlite_error)?;
-    {
+    if full {
         let mut existing = ReopenMaintenanceSession::start_for_admission(connection)?;
         loop {
             match existing.step(cancelled)? {
@@ -283,7 +303,7 @@ pub(in crate::storage) fn verify_admission(
             }
         }
     }
-    {
+    if full {
         let mut output = super::verification::AllOutputVerification::start(connection)?;
         while !output.step(cancelled)? {}
     }

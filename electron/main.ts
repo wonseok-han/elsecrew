@@ -12,7 +12,8 @@ import { MODEL_CHOICES_CHANNEL, validateModelChoicesRequest } from "../src/m5/co
 import { DEVICE_REPORT_CHANNEL } from "../src/m5/contracts/device-report-v1.ts";
 import { SESSION_DIAGNOSTICS_CHANNEL, classifySessionDiagnostics } from "../src/m5/contracts/session-diagnostics-v1.ts";
 import { readDeviceReport } from "./device-report.ts";
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, safeStorage, shell } from "electron";
+import { StorageSealStore } from "./storage-seal.ts";
 import { LOGIN_CHANNEL, validateLoginRequest, validateLoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
 import { classifyLoginFailure } from "../src/m5/provider-login-diagnostic.ts";
 import { INSTALL_CHANNEL, validateInstallRequest, validateInstallStatus } from "../src/m5/contracts/provider-install-v1.ts";
@@ -105,6 +106,22 @@ function takeDevPickedDirectory(): string | null {
   } catch { return null; }
 }
 
+/** Quitting never turns back (it is never blocked). From then on the hidden
+ * screen's background checks (a login status poll every half second, say)
+ * would only be refused by the engine, which is preparing to quit, and each
+ * refusal is logged as an error: such requests are left unanswered instead.
+ * This relies on quitting never being cancelled (no `beforeunload` prompt,
+ * no "keep running" path): if one is ever added, reset `quitStarted` there,
+ * or the app would be left with a hidden window and unanswered requests. */
+let quitStarted = false;
+function quietAfterQuit<A extends unknown[], R>(handler: (...args: A) => Promise<R>): (...args: A) => Promise<R> {
+  // A request already on its way when quitting began fails as the engine
+  // stops (`sidecar exited`): that refusal is left unanswered too.
+  return (...args: A) => quitStarted
+    ? new Promise<R>(() => {})
+    : handler(...args).catch(error => quitStarted ? new Promise<R>(() => {}) : Promise.reject(error));
+}
+
 const quitCoordinator = new QuitCoordinatorV1({
   prepareSidecarQuit: () => {
     if (!sidecar) return Promise.reject(new Error("sidecar was not started"));
@@ -122,7 +139,11 @@ const quitCoordinator = new QuitCoordinatorV1({
     void (async () => {
       if (client) {
         client.closeInput();
-        await client.waitForExit(ENGINE_EXIT_WAIT_MS);
+        const exited = await client.waitForExit(ENGINE_EXIT_WAIT_MS);
+        // A clean exit sealed the database: the next start need not check
+        // the whole ledger again (`storage-seal.ts`).
+        const token = exited && client.exitDetail === "0/none" ? client.storageSealToken : null;
+        if (token) await storageSeals().seal(token, join(m5DataDirectory(), "elsecrew.sqlite3"), lastFullCheckAt).catch(() => false);
       }
       // What the screen kept for the next start (unsaved editor text, lists)
       // reaches the disk before the app ends.
@@ -131,6 +152,7 @@ const quitCoordinator = new QuitCoordinatorV1({
     })();
   },
   onQuitStarted: () => {
+    quitStarted = true;
     // Look closed at once; running work stops in the background.
     for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.hide();
   },
@@ -332,10 +354,29 @@ function forwardAgentRunStateChanged(event: AgentRunStateChangedV1, protocolEven
   ));
 }
 
+let storageSealStore: StorageSealStore | undefined;
+/** When the last full storage check ran: this start, unless it began from a
+ * seal (then the seal's). A refused seal makes the engine check in full
+ * anyway, so an older time here only brings the next full check sooner. */
+let lastFullCheckAt = Date.now();
+function storageSeals(): StorageSealStore {
+  storageSealStore ??= new StorageSealStore(app.getPath("userData"), m5DataDirectory(), app.getVersion(), {
+    available: () => safeStorage.isEncryptionAvailable(),
+    encrypt: text => safeStorage.encryptString(text),
+    decrypt: data => safeStorage.decryptString(data),
+  });
+  return storageSealStore;
+}
+
 function startSidecar(): SidecarClientV1 {
   const diagnosticLog = createSessionDiagnosticLog(app.getPath("logs"));
   const transportLog = createSessionDiagnosticLog(app.getPath("logs"), "transport");
-  const client = new SidecarClientV1(sidecarLaunch(m5DataDirectory()), {
+  const launch = sidecarLaunch(m5DataDirectory());
+  // Used once: read and removed here, so a crash after this leaves no seal.
+  const seal = storageSeals().consume();
+  lastFullCheckAt = seal?.fullCheckAt ?? Date.now();
+  if (seal) launch.args = [...launch.args, "--storage-seal", seal.token];
+  const client = new SidecarClientV1(launch, {
     onDiagnosticTail: diagnosticLog.capture,
     onTransportProgress: transportLog.captureTransport,
   });
@@ -472,11 +513,11 @@ function registerIpcHandlers(): void {
     if (args.length !== 0) throw new Error("session diagnostics takes no input");
     return classifySessionDiagnostics(sidecar?.technicalDetail ?? "");
   });
-  ipcMain.handle(INSTALL_CHANNEL, async (event, input: unknown) => {
+  ipcMain.handle(INSTALL_CHANNEL, quietAfterQuit(async (event, input: unknown) => {
     assertCurrentMainFrame(event);
     if (!sidecar) throw new Error("sidecar was not started");
     return validateInstallStatus(await sidecar.install(validateInstallRequest(input)));
-  });
+  }));
   const claudeUsage = createClaudeUsageReader(m5DataDirectory(), net.fetch as typeof fetch, async () => {
     if (!sidecar) return false;
     const attemptId = randomUUID();
@@ -491,7 +532,7 @@ function registerIpcHandlers(): void {
       return status.attemptId === attemptId && status.state === "connected" && status.error === null;
     } catch { return false; }
   });
-  ipcMain.handle(CLAUDE_USAGE_CHANNEL, async (event, ...args: unknown[]) => {
+  ipcMain.handle(CLAUDE_USAGE_CHANNEL, quietAfterQuit(async (event, ...args: unknown[]) => {
     assertCurrentMainFrame(event);
     if (args.length) throw new Error("usage takes no input");
     if (!sidecar) throw new Error("sidecar was not started");
@@ -500,7 +541,7 @@ function registerIpcHandlers(): void {
     const result = await claudeUsage.read();
     const after = await sidecar.projectCatalog({action:"getProviderConnections"});
     return validateClaudeUsageResult(after.action === "getProviderConnections" && after.connections["claude-code"] ? result : {state:"notConnected",usage:null,checkedAt:Date.now()});
-  });
+  }));
   gitPreparation = new GitPreparationClient(sidecarLaunch(m5DataDirectory()));
   const gitSelection = new GitSelectionStore(m5DataDirectory(), process.platform, app.getPath("userData"));
   ipcMain.handle(GIT_SELECTION_CHANNEL, async (event, ...args: unknown[]) => {
@@ -532,7 +573,7 @@ function registerIpcHandlers(): void {
     const request = validateSaveRecoveryRequest(input);
     return validateSaveRecoveryResult(await sidecar.inspectWorkspaceSaveRecovery(request), request);
   });
-  ipcMain.handle(PROJECT_CATALOG_CHANNEL, async (event, input: unknown) => {
+  ipcMain.handle(PROJECT_CATALOG_CHANNEL, quietAfterQuit(async (event, input: unknown) => {
     assertCurrentMainFrame(event);
     const request = validateProjectCatalogRequest(input);
     if (process.platform === "win32" && isGitPreparation(request)) {
@@ -554,15 +595,15 @@ function registerIpcHandlers(): void {
     const result = validateProjectCatalogResult(await sidecar.projectCatalog(request), request);
     if (request.action === "setProviderConnection") claudeUsage.invalidate();
     return result;
-  });
-  ipcMain.handle(APPROVAL_CHANNEL, async (event, input: unknown) => {
+  }));
+  ipcMain.handle(APPROVAL_CHANNEL, quietAfterQuit(async (event, input: unknown) => {
     assertCurrentMainFrame(event);
     if (!sidecar) throw new Error("sidecar was not started");
     const request = validateApprovalRequest(input);
     return validateApprovalResult(await sidecar.approval(request), request);
-  });
+  }));
   let lastClaudeConnectedAttempt: string | null = null;
-  ipcMain.handle(LOGIN_CHANNEL, async (event, input: unknown) => {
+  ipcMain.handle(LOGIN_CHANNEL, quietAfterQuit(async (event, input: unknown) => {
     assertCurrentMainFrame(event);
     if (!sidecar) throw new Error("sidecar was not started");
     const request = validateLoginRequest(input);
@@ -587,7 +628,7 @@ function registerIpcHandlers(): void {
       }
     }
     return { ...result, authUrl: null }; // OAuth URL never reaches renderer or persistent state.
-  });
+  }));
   ipcMain.handle(M5_INTERNAL_CHANNELS_V1.systemGetStatus, async (event) => {
     assertCurrentMainFrame(event);
     return getSystemStatus();
@@ -651,11 +692,11 @@ function registerIpcHandlers(): void {
     }
   });
   const invoke = <T>(action: (client: SidecarClientV1, input: T) => Promise<unknown>) =>
-    async (event: Electron.IpcMainInvokeEvent, input: T) => {
+    quietAfterQuit(async (event: Electron.IpcMainInvokeEvent, input: T) => {
       assertCurrentMainFrame(event);
       if (!sidecar) throw new Error("sidecar was not started");
       return action(sidecar, input);
-    };
+    });
   ipcMain.handle(M5_BRIDGE_V2_CHANNELS.projectGetTree, invoke((client, input: { projectId: string; parentPath: string; cursor: string | null }) => client.getProjectTree(input)));
   ipcMain.handle(M5_BRIDGE_V2_CHANNELS.projectCreateWorktree, invoke((client, input: { projectId: string }) => client.createProjectWorktree(input)));
   ipcMain.handle(M5_BRIDGE_V2_CHANNELS.projectClose, invoke((client, input: { projectId: string }) => client.closeProject(input)));

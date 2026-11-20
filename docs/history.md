@@ -27,155 +27,21 @@
   - 테스트: 새 `reopening_a_project_shows_the_original_as_it_is_now`(교체·옛 사본 삭제, 편집 있으면 유지, 서브모듈 있으면 유지). 기존 `a_new_commit_in_the_original_does_not_stop_new_tasks`의 "옛 사본 유지" 단언을 새 동작으로 바꿨다. project::/chat:: 테스트는 이 단언 외 324개 통과(변경 전 실행).
 - **실제 앱 확인(1119g, 0eca7406 빌드, 일반 폴더 합치기 전 기록)**: 새 작업 "README.md 맨 아래에 한 줄 추가"를 보냈다(09:55~09:58, 검토 준비, 변경 1개 +1). 그 사이 사용자처럼 폴더에서 `memo.txt`에 한 줄을 더하고 README 첫 줄(제목)을 바꿨다. "main에 합치기 → 합치기"에서 앱이 "내 폴더에서 바꾼 내용"(8cc6d25)을 먼저 기록하고, 작업 브랜치로 가져온 뒤(06e7264) main에 합쳤다. README에는 사용자의 첫 줄과 팀의 마지막 줄이 함께 있고, memo 수정도 그대로이며, 상태는 깨끗하다. 화면은 "main에 합쳤어요". 수정 전이면 `userChangesOverlap`으로 거절됐을 경우다. 개발 앱 로그 오류 0건.
 - 누적 검증(0eca7406 + 이 기록): Rust 전체 core 239, protocol 70, sidecar 876(43 무시), 기타 19 모두 통과, 실패 0. `npm test` 747, tsc 통과(8a5e16cf에서, 이후 화면 변경 없음).
-- 다음 할 일: 없음(이번 목표 범위). 남긴 경미: M16, M19, M20, M25(위 기록).
+- 다음 할 일: Codex 로그인 "복구 필요" 고착 조사(아래), 전체 검증 간격 사용자 확인, 반영 화면 3상태 사용자 결정. 남긴 경미: M16, M19, M20, M25, M31, M35.
 - **조사(사용자 보고): 앱 시작 때 "작업 공간을 안전하게 준비하고 있어요"에서 오래 멈춤**. 실제 앱 DB(140MB: operation_receipts 46MB, events 45MB, run_output_records 15MB, ledger_baselines 13MB)를 바이트 복사해 `Storage::open_for_durable_admission`만 재는 임시 진단으로 측정했다: 개발 빌드 68.9초, release 빌드 39.1초. 표본상 시간의 약 98%가 `storage::reopen::snapshot::ReopenMaintenanceSession::step`(ProjectionScan/SourceScan → `reopen::semantic` 바이트 단위 JSON 의미 검사)이다. 즉 시작할 때마다 전체 원장을 다시 검증하며 DB 크기에 비례한다. 쓸수록 느려지는 구조라 개선이 필요하다(후보: 마지막 정상 종료 이후 증분만 검증, 화면 먼저 열고 쓰기만 검증 완료까지 막기, 오래된 기록 압축). 사용자 결정 대기. 측정 코드는 되돌렸고 DB 사본은 지웠다. sidecar는 검증이 끝난 뒤에는 정상(Ready, 유휴)이었다.
+- **시작 검증 개선(사용자 결정에 따른 구현)**:
+  - 1단계(검증 범위 유지): `MessageScan`이 메시지를 도입한 이벤트마다 모든 채팅 이벤트를 하나씩 훑던 O(N²)를, 색인된 이벤트는 쿼리 1번·색인 없는 이벤트만 하나씩으로 바꿨다(무진행 방지 marker에 `indexed_done` 포함). 실제 DB 사본 release 40초 → 11.7초, storage 테스트 300개 통과. SQL 문장 캐시(rusqlite `cache` feature)는 새 의존성(hashlink)이 필요해 하지 않았다(남은 시간의 약 30%가 SQL 재파싱).
+  - 2단계(정상 종료 봉인): `docs/architecture.md` "정상 종료 봉인" 참조. 실제 앱(개발 빌드): 봉인 없는 첫 시작 70초 → 정상 종료 → 두 번째 6.3초·세 번째 6.6초(대부분 개발 도구 시작; 엔진의 봉인 열기 자체는 0.37초, 화면에서 검증 안내가 0.5초 안에 사라짐).
+  - 함께 찾은 것: 시작 때 `validate_persisted_runs`가 실행 기록을 전부 읽어 놓고도 실행마다 `projection_record`로 다시 조회했다(조회 한 번이 projects·chats·runs·locks 전 행 JSON을 파싱; 3.1초). 처음에는 조회를 그 행만 읽게 바꿨으나, "선택 조회도 다른 테이블의 손상을 가리지 않는다"는 기존 계약 테스트(`selected_projection_retains_only_requested_rows_without_skipping_validation`)가 실패해 되돌렸다. 대신 이미 읽은 값을 같은 검사(`validate_actual_run_projection`)에 넘긴다. 봉인 시작이 1.8초(개발 빌드, 화면 기준)가 됐다.
+  - 함께 찾은 것: 시작 때 모델 목록 조회가 끝났는데 그 프로세스의 종료 증거가 한 박자 늦게 서면 곧바로 `agentRecoveryRequired`("model catalog process termination is unconfirmed")로 응답해 오류 로그가 남았다. 5초(`UNCONFIRMED_GRACE`)까지는 응답을 미루고 다시 확인하게 했다.
+  - 함께 찾은 것: 시작 직후(로그인 확인 중) 종료하면 prepareQuit이 10초 안에 safe가 되지 못해 비정상 종료(exit 70)가 되고, 그 10초 동안 숨겨진 화면의 로그인 폴링이 오류 로그 24줄을 남겼다. 종료가 시작되면 엔진으로 가는 IPC가 응답하지 않게 했다(`quietAfterQuit`). 비정상 종료 뒤 다음 시작은 전체 검증(안전한 쪽).
+  - 독립 검토(상시 검토자) 1차: 차단 0, 중요 2(I7 봉인은 "검증 완료 지점"이 아니라 그 세션에서 앱이 쓴 기록까지 포함 → 마지막 전체 검증 뒤 7일이 지나면 전체 검증으로 반영, 간격은 사용자 확인 예정; I8 열기 전 WAL 확인과 열기 사이 경합 → 배타 잠금 뒤 재확인), 경미 5(M26 압축 삭제 권한 행·M27 개발 빌드 문맥 반영, M28~M30은 확인·받아들인 대가). MessageScan·projection 조회 변경은 의미 동등으로 판정.
+  - 테스트: 새 `a_clean_shutdown_seal_skips_the_full_check_only_for_the_same_file`(I8 잠금 뒤 WAL 포함), CLI 인자 거절 확장, `stdio_process`의 정상 종료 테스트가 실제 바이너리의 봉인 줄과 DB 파일 SHA-256 일치를 확인, `tests/m5-storage-seal.test.mts`(서명·1회용·파일 해시 대조·버전/폴더/시각 서명·7일·시계 역행), Electron 보안 테스트 모의 환경 갱신. Rust 전체(봉인·카탈로그 마지막 수정 전) core 239·protocol 70·sidecar 878·stdio 16 통과, 마지막 수정 뒤 영향 그룹 91·stdio 16 통과, `npm test` 750 통과.
+  - 독립 검토 2·3차: 차단·중요 0. 반영: M32(I8 회귀), M33(`quietAfterQuit` 전제 주석). 남김: M31(봉인이 거절된 시작의 전체 검증 시각이 갱신되지 않음, 다음 전체 검증이 일찍 올 뿐), M35(실행 기록 키와 내부 `run_id` 직접 비교 없음, 전체 검증의 재생 비교가 잡음).
+  - 마지막 실제 앱 순환(개발 빌드): 빌드가 바뀐 첫 시작 104초(전체) → 정상 종료 → 2.3초 → 정상 종료 → 2.0초. 남은 로그 오류 두 가지를 더 고쳤다: 시작 때 두 공급자의 모델 목록 동시 요청 중 하나가 "model catalog unavailable"로 거절되던 것을 `providerBusy`(앱이 1.5초 간격 5회 재시도)로, 종료 시작 전에 나간 요청이 엔진 종료로 끊기며 남기던 "sidecar exited"도 `quietAfterQuit`이 흡수.
+  - **발견(미해결)**: 시험 중 시작 직후 강제 종료(비정상 종료)를 거친 뒤 Codex 로그인 상태가 `failed: providerLoginRecoveryRequired`로 남고, 명시 `recover`도 "login process cleanup could not be confirmed"로 실패한다. `codex-login.pending`의 기록 프로세스(pid 46678, 이번 세션 12:12 시작)는 이미 없다. 이 상태에서는 `LoginManager::prepare_quit`이 계속 false라 모든 종료가 비정상(exit 70)이 되고, 봉인이 생기지 않아 매 시작이 전체 검증이 된다. 오늘 아침 첫 실행부터 "model catalog process termination is unconfirmed"가 있었고 사용자 Mac의 ChatGPT 앱(Codex CLI)이 오늘 갱신돼, Codex CLI 쪽 프로세스 동작 변화가 원인일 수 있다(추정, 미확인). 다음 작업으로 조사한다.
+  - 사용자 확인 대기: 전체 검증 간격 7일(매일 쓰면 7일마다 한 번 긴 시작; 대안은 유휴 시간에 뒤에서 전체 검증).
 - **사용자 지적: 반영한 뒤에도 변경 탭이 "변경된 파일 10개 + 내 폴더에 반영"으로 그대로 남아 헷갈림**(v1 작업의 반영 패널 `apply-latest.tsx`; 반영 완료는 한 번 뜨는 안내뿐). 제안: 반영 전/반영 완료(상태로 유지, 버튼 없음, 목록은 "이 작업에서 바꾼 파일"로 흐리게)/반영 뒤 또 고침(새로 바뀐 N개 + 다시 반영) 세 상태로, "main에 합치기" 작업과 같은 규칙. 사용자 결정 대기.
-
-### 2026-11-19 · by Claude Opus 5.5 (claude-opus-5-5) — todo-test-1118c 합치기와 결과 막대 정리
-- **실제 앱 합치기(todo-test-1118c)**: 화면 잠금이 풀린 09:09에 "main에 합치기 → 합치기"로 작업 브랜치 `elsecrew/task-6e6e17af`의 커밋 5개를 합쳤다. 사용자 폴더 `main`이 af6022e → cab7ce7로 앞당겨졌고 상태는 깨끗했다. 사용자 폴더의 앱을 헤드리스 Chrome으로 점검해 9/10이었다(작업 공간 점검과 같다. "공백 입력 안내"는 이 앱의 설계 차이).
-- 발견·수정(결과 막대):
-  - 합친 뒤 "이 작업은 main에 합쳐졌어요"와 "작업 공간의 변경이에요"가 띄어쓰기 없이 붙어 나왔다. 합쳐진 경우에는 첫 문구만 보여 준다.
-  - 좁은 대화 패널에서 버튼 묶음(`.m5-result-actions`, `flex: none`)이 오른쪽 밖으로 잘렸다. 줄어들고 줄바꿈하도록 바꿨다.
-  - 앱을 다시 열면 합친 작업의 버튼이 비활성 "main에 합치기"로 보였다. 이미 합친 경우(`mergedIntoBase`)는 "main에 합침"으로 보여 준다.
-- 검증: `tsc --noEmit` 통과, `m5-chat-merge-contract`·`m5-g4-contract` 10개 통과. 접근성 트리로 문구 분리를 확인했다. 창이 다른 Space에 있어 화면 캡처가 갱신되지 않아, 버튼 줄바꿈과 "main에 합침" 표시는 눈으로 확인하지 못했다(다음 재시작 때 확인).
-- **발견·수정(새 작업 시작 실패)**: 합친 뒤 같은 프로젝트에서 새 작업을 보내자 "원본에 반영할 준비를 완료하지 못했어요"가 나왔다. 원인은 `manifestMismatch: could not canonicalize managed parent`였다. 기본 작업 공간 폴더 `~/elsecrew/workspaces`와 그 상위 `~/elsecrew`가 아직 없는데, `workspace_folder()`가 폴더를 만들기 전에 상위 폴더 경로부터 확인했다. 테스트 기본 경로는 상위가 늘 있는 한 단계짜리라 이 경우를 잡지 못했다.
-  - 수정: 보여 줄 경로는 있는 가장 가까운 상위 폴더까지만 확인하고 나머지를 붙인다. 새 작업 경로 계산은 설정 파일 유무(`workspace_folder_is_custom`)만 본다. 테스트 기본 경로를 실제와 같이 두 단계(`elsecrew/workspaces`)로 바꿔 기존 worktree 테스트가 이 경우를 지나가게 했다. project 테스트 141개 통과.
-- **발견·수정(에이전트 안의 git, 권한 경계)**: 사용자 결정(2026-11-18)대로 에이전트가 작업 공간에서 `git status/diff/log`를 쓸 수 있어야 하는데, 실제로는 두 공급자 모두 실패하고 있었다. 이전 1118c 실행 기록에도 같은 오류가 있다. 앞서 "에이전트 안 git 확인"은 경로가 달랐던 것으로 보이며, 실제 앱 기준으로는 미확인이었다.
-  - Claude Code: `fatal: error reading '<작업 공간>/.git'`. Claude Code는 `permissions.deny`의 `Read(...)` 규칙을 샌드박스 명령의 읽기 제한에도 합친다. 그래서 샌드박스 설정에서 풀어 준 작업 공간 `.git` 링크가 다시 막혔다. 수정: task worktree일 때만 링크의 Read 규칙 2개를 뺀다. Edit 규칙, 쓰기 금지, 사용자 폴더 Read 금지는 그대로다(`provider_claude_session.rs`).
-  - Codex: `xcrun: error: invalid active developer path`. `/usr/bin/git`은 xcrun shim이라 개발자 폴더가 필요한데, Codex 명명 정책이 이를 열지 않았다. 사용자 `~/.gitconfig` 접근 EPERM도 git을 fatal로 끝낸다(sandbox-exec로 재현).
-    - 수정 1: core `developer_dir()`. `xcode_select_link`가 `/Library/Developer/CommandLineTools` 또는 `/Applications/<앱>.app/Contents/Developer`를 가리키고 `usr/bin/git`이 있을 때만 쓴다. task worktree일 때 기대 정책, 명명 정책 인자, 바깥 seatbelt(`DEVELOPER_READ`)에서 그 폴더를 읽기로 연다.
-    - 수정 2: `task_git_environment`가 실제 실행 경로(`CodexCommand::new`)와 시험 경로에 다음을 넣는다. PATH 앞에 `<dev>/usr/bin`, `DEVELOPER_DIR`, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_OPTIONAL_LOCKS=0`, `GIT_CONFIG_PARAMETERS`(excludesFile, hooksPath, fsmonitor 끔). Codex가 지울 수 있는 KEY/TOKEN 이름은 쓰지 않았다.
-  - 남은 것:
-    - `/usr/bin/git`을 직접 부르거나 로그인 셸에서 PATH 순서가 바뀌면 xcrun 캐시 경고 2줄이 나온다. 명령은 성공한다. 끌 수 있는 환경 변수가 없음을 확인했다.
-    - Codex의 `git status`에 `warning: could not open directory '.claude/'`가 나온다. Claude Code가 만든 빈 `.claude/.cc-writes` 때문이며 결과에는 영향이 없다.
-    - 개발자 폴더가 바뀌는 중(Xcode 전환)이면 기대 정책이 어긋나 실행이 거절될 수 있다. 안전한 쪽이다.
-  - 독립 검토(상시 검토자): Claude 쪽은 차단·중요 0, 경미 3이었고 M3(테스트 단언 보강)을 반영했다. Codex 쪽 1차는 차단 0, 중요 2였다. I1(실제 앱 경로에 환경이 빠짐)과 I2(로그인 셸 PATH, KEY 이름 제거)를 반영했다. 경미 M3(fsmonitor·hooks 끔)과 M4(`/Applications` 범위 좁힘)도 반영했다.
-  - 테스트: 새 `git_works_read_only_inside_a_task_worktree_sandbox`는 실제 seatbelt 안에서 status·로그인 셸 log·shim diff가 성공하고 `<repo>/.git` 쓰기가 실패하는지 본다. named 정책에도 단언을 추가했다. core 239개, sidecar 공급자 168개 통과.
-  - **실제 앱 확인(todo-test-1118c, task-bedeb06c)**: 검증 역할(Codex, gpt-6.2-sol)이 `git status --short`, `git diff --stat`, `git log --oneline -3`, `git show`를 모두 종료 코드 0으로 실행했다. 총괄(Claude)이 "Git 오류가 이번에는 나지 않았다"고 정리했다. 수정 전에는 총괄이 이 오류를 "Mac 문제, 터미널에서 `xcode-select --install`"로 안내했다. 비개발자에게는 잘못된 안내였는데, 원인이 사라져 재현되지 않는다.
-- **보이는 위치 작업의 전체 흐름 확인(task-bedeb06c)**: 새 작업이 합친 main(cab7ce7)에서 `~/elsecrew/workspaces/todo-test-1118c/task-bedeb06c`(브랜치 `elsecrew/task-bedeb06c`)로 만들어졌다. README 한 줄 추가가 커밋 2c3b8ef로 기록됐고, 앱의 "main에 합치기"로 사용자 폴더 main이 2c3b8ef로 앞당겨졌다. 상태는 깨끗하고 화면은 "main에 합침"이었다.
-  - 경미(관찰): Codex 실행이 끝난 직후 `m5:approval:v1`이 `agentApprovalChanged: approval run is no longer current`를 6번 기록했다. 끝난 실행에 대한 승인 확인 경합으로 보이며 화면 영향은 없었다.
-- 누적 검증(ab6b0640 기준): Rust 전체 통과(core 239, protocol 70, sidecar 865 + 기타 19). `npm test` 746개 통과, `pnpm build` 통과.
-- **수정 후 실제 기능 작업 전체 흐름(todo-test-1118c, task-7d97cd23)**: 목표는 "할 일 더블클릭 편집(Enter 저장, Esc 취소, 빈 내용 거부, 새로고침 후 유지)"이었다.
-  - 11:39~12:14에 팀이 기획(Codex), 디자인, 개발, 검증, 개발 수정까지 마쳤다. Elsecrew 단계 커밋 5개, 8개 파일 +1025/-47줄이다.
-  - 에이전트 안의 git은 Claude와 Codex 모두 `git status --short && git diff --stat`이 성공했다. 출력에는 `.claude/` 경고만 있었다.
-  - 헤드리스 Chrome 점검: 편집 기능 8/8 통과, 기존 기능 9/10(공백 입력 안내는 이 앱의 설계 차이).
-  - 앱의 "main에 합치기"로 사용자 폴더 main이 f364992로 앞당겨졌다. 상태는 깨끗하고, 사용자 폴더에서도 편집 점검 8/8이었다.
-  - 남은 관찰: 에이전트가 "샌드박스가 Chrome 실행을 막아 실제 브라우저로는 열어 보지 못했다"고 보고한다(설계상 제한). 실제 브라우저 확인은 사용자나 앱 쪽 미리보기 기능의 몫으로 남는다.
-- **수정(승인 목록 오류 로그)**: 실행이 끝난 뒤에도 승인 카드는 화면이 종료를 알 때까지 750ms마다 `list`를 묻는다. 그동안 sidecar가 `agentApprovalChanged`를 돌려줘 Electron 로그에 오류가 6번 남았다. 이제 실행 중이 아닌 run의 `list`는 빈 목록을 돌려준다. `acceptOnce`, `decline`, `inspect`는 그대로 거절한다(`agent_runtime/native.rs`). 새 테스트 `an_ended_run_lists_no_approvals_and_refuses_decisions`를 추가했고, `approval_errors_are_request_scoped…`는 목록 성공으로 갱신했다. approval 테스트 13개 통과.
-- **공백 입력 안내 작업(task-f5e78d6b)**: 기존 점검의 9/10을 앱으로 해결했다. 앱에 "빈 입력이면 '할 일을 입력해 주세요.' 안내, 글자를 입력하면 사라짐"을 맡겼다.
-  - 12:24~12:56에 기획, 디자인, 개발, 검증, 개발 수정까지 마쳤다(단계 커밋 5개, 9개 파일 +627/-26).
-  - 헤드리스 Chrome: 기본 점검 10/10, 편집 점검 8/8, 안내 보임과 사라짐 2/2.
-  - "main에 합치기"로 사용자 폴더 main이 25f54f3로 앞당겨졌고 상태는 깨끗하다.
-  - 화면 확인: 합친 뒤 결과 막대가 "이 작업은 main에 합쳐졌어요", 비활성 "main에 합침", "main에 합쳤어요."로 그려지는 것을 실제 창 캡처로 확인했다. 합치기 전에도 버튼이 줄바꿈되며 패널 안에 들어왔다(8811858c 수정 확인).
-  - 관찰(미확인 추정): git은 12:57:14에 합쳐졌는데, 접근성 트리와 캡처는 12:59:41에야 바뀌었다. 합치기 코드는 짧은 git 명령뿐이다. 창이 가려진 상태에서 Chromium이 화면 갱신을 미룬 것(`backgroundThrottling` 기본값)으로 보인다. 앞에 띄운 창에서 지연이 없는지 확인이 남았다.
-  - **확정(측정)**: 개발 앱을 `--remote-debugging-port`로 띄우고 CDP로 DOM을 250ms마다 직접 읽었다. 작은 작업(task-544fbdd6, README 한 줄 수정, 13:03~13:06)을 합칠 때의 기록은 다음과 같다.
-    - 확인 클릭 13:06:15
-    - DOM "합치는 중…" 13:06:16
-    - git main 이동(reflog) 13:06:16
-    - DOM "이 작업은 main에 합쳐졌어요 · main에 합침 · main에 합쳤어요." 13:06:16
-    - 앱은 1초 안에 반영한다. 앞서 본 2분 반은 Orca가 가려진 창의 접근성 트리와 캡처를 늦게 받은 것이며 앱 결함이 아니다. 이번 창은 `visibilityState=visible`, 포커스 있음이었고 캡처도 합친 상태와 일치했다.
-    - 사용자 폴더 main은 846d6bd이고 상태는 깨끗하다.
-- **발견·수정(첫 작업 권한, 권한 경계)**: 빈 폴더에서 새로 만든 프로젝트(todo-test-1119a)의 첫 작업 창은 파일·명령 권한이 꺼진 채였다. 사용자 결정 "새 프로젝트 기본은 전부 허용, 첫 작업 때 한 번 확인"(m5-orca-benchmark §3.1-1)과 다르다. 그대로 보내자 기획 담당의 첫 도구 사용에서 승인 대기로 멈췄고, 작업은 중단했다.
-  - 저장 원칙("명시 동의만", `automation_permissions.rs`)은 유지한다. 대신 결과에 `recorded`(저장한 적이 있는지)를 추가했다.
-  - 첫 작업 설정 화면(`ProjectPermissions proposeAll`)은 저장 기록이 없는 프로젝트에서만 두 상자를 체크된 초안으로 보여 준다.
-  - 사용자가 "이 팀 구성과 권한으로 시작할게요"를 체크하고 보낼 때 `createChat`이 그 값을 `confirmed:true`로 먼저 저장한다. 기록이 없는 프로젝트에서 둘 다 끄고 보내도 그 선택을 저장한다. 저장에 실패하면 작업을 만들지 않는다.
-  - 창을 열 때마다 저장값을 다시 읽는다. 사용자가 만진 값은 팀 바꾸기 뒤에도 유지하되, 그 사이 저장값이 바뀌었으면 버린다.
-  - 독립 검토 4회:
-    - 1차: 중요 I1(오래된 값이나 다시 읽기가 사용자 선택을 덮음)과 경미 M1~M6
-    - 2차: 중요 R1(팀 바꾸기 뒤 다시 켜짐)과 경미 N1, N2
-    - 3차: 경미 M1(나중에 저장한 값이 우선해야 함)과 M2
-    - 모두 반영했다. 마지막 검토에서 차단·중요는 없었다.
-  - **실제 앱 확인(todo-test-1119b, 새 빈 폴더)**: 첫 작업 창에서 두 상자가 체크된 상태로 보였다. 확인 뒤 보낸 작업에서 기획(Codex)과 디자인 담당이 승인 대기 없이 문서를 쓰고 단계 커밋까지 마쳤다.
-- **수정(승인 목록, 연장)**: Claude가 맡은 run이 `stopped`이거나 출력이 끝나 등록 확인(`registration_identity`)에 실패하는 동안의 `list`도 빈 목록으로 답한다. 같은 identity일 때만이고, 싼 검사를 먼저 한다. 사유는 개발 빌드의 진단 로그에 run마다 한 번만 남긴다. 로그에 `agentInputChanged: Claude registration binding differs`가 반복되던 증상이다.
-- 테스트: Rust `permissions_tell_never_asked_from_an_explicit_choice` 추가, approval·claude_native 통과. TS 계약 테스트 갱신, `npm test` 746개 통과, tsc 통과.
-- 운영 메모: 개발 앱을 `pnpm m5:dev -- --remote-debugging-port=9351`로 띄우면 CDP로 DOM을 직접 읽고 누를 수 있다(`scratchpad/cdp/eval.mjs`, `waitdom.mjs`). 창이 `hidden`이면 Orca의 접근성 트리와 캡처는 늦게 따라온다.
-- **새 빈 폴더에서 todo 앱 전체(todo-test-1119b, task-f7630962)**: 13:10~13:46에 팀이 기획(Codex), 디자인, 개발, 검증, 개발 수정까지 승인 대기 없이 마쳤다(단계 커밋 5개). 헤드리스 Chrome 점검은 기본 10/10, 안내 2/2였다. DOM으로 "main에 합치기 → 합치기"를 눌렀고, git(13:46:45)과 화면이 같은 초에 "합쳐졌어요"로 바뀌었다. 사용자 폴더 main은 8fb6a5e, 상태는 깨끗하고 같은 점검 12/12다.
-- **발견·수정(보고 언어)**: 같은 시험에서 개발 담당(Claude)이 영어로 보고했다. 팀 대화에 영어가 그대로 보였고, 단계 커밋 메시지도 "개발: The app is built…"가 됐다. 지시문의 "대화의 언어로 쓰라"만으로는 부족했다. 이제 작업 목표에 한글이 있으면 프롬프트에 "Conversation language: Korean …(한국어)" 줄을 넣는다(`orchestration::conversation_language`). 테스트를 추가했고 orchestration 33개 통과.
-- **보고 언어 수정 확인(todo-test-1119b, task-aded6dfd)**: 재시작한 앱에서 "목록 위에 '오늘 할 일' 제목" 작업을 맡겼다(13:50~13:54). 단계 커밋 "개발: 할 일 목록 바로 위에 '오늘 할 일' 제목을 넣었습니다…"와 팀 대화가 모두 한국어였고, 영어 문단은 없었다. 헤드리스 Chrome: 제목 보임, 기본 10/10, 안내 2/2. "main에 합치기"로 사용자 폴더 main이 450422f가 됐고 상태는 깨끗하다.
-- **실제 브라우저 확인(todo-test-1119b main 450422f)**: 헤드리스가 아닌 실제 Chrome 창(별도 프로필, `open -g`로 앞에 띄우지 않음)에서 사용자 폴더의 `index.html`을 열고, Orca로 실제 클릭과 키 입력을 보냈다. 모두 통과했다.
-  - 빈 칸으로 "추가" → "할 일을 입력해 주세요." 안내
-  - 글자 입력 → 안내 사라짐
-  - Enter로 "우유 사기" 추가, "추가" 버튼으로 "책 읽기" 추가 → 남은 2개
-  - 첫 항목 체크 → 남은 1개
-  - 새로고침 뒤 목록과 체크 유지
-  - 「우유 사기」 삭제 → 1개
-  - 화면 캡처에서 제목 "할 일 목록", "오늘 할 일", 입력칸, 버튼이 정상으로 보였다.
-- 남은 것: 내용이 있는 git 아닌 폴더 지원(4단계, 그림자 git)은 별도 큰 기능이다. 사용자 폴더를 제자리에서 바꾸는 방식이라 원본 보호 경계가 바뀌므로 독립 검토를 거쳐 따로 진행한다. 빈 폴더에서 새로 시작하는 흐름은 위 시험으로 확인했다. 에이전트가 실제 브라우저를 못 여는 것은 샌드박스 설계 제한이다.
-- **최종 빌드로 처음부터 끝까지(todo-test-1119c, task-10f2de38)**: 빈 폴더 추가 → 첫 작업 창(두 권한이 체크된 상태) → 확인 후 보내기(14:01) → 기획(Codex), 디자인, 개발, 검증, 개발 수정 → "검토 준비"(14:48).
-  - 승인 대기 없음, 영어 보고 없음(팀 대화와 커밋 5개 모두 한국어), 실행 중 새 로그 오류 0건.
-  - 헤드리스 Chrome 12/12. "main에 합치기"로 사용자 폴더 main이 74273dd가 됐고 상태는 깨끗하다.
-  - 실제 Chrome 창(Orca 실제 클릭과 키 입력): 빈 입력 안내와 사라짐, Enter와 버튼 추가, 체크, 새로고침 유지, 삭제 모두 정상. 캡처도 정상이다.
-- **발견·수정(이 실행에서 본 마찰과 시작 로그)**:
-  - Write의 새 중간 폴더: 빈 프로젝트에서 기획 담당의 `docs/plan.md` Write가 PreToolUse 훅에서 거절됐다(`docs`가 아직 없음). 에이전트가 `mkdir` 후 다시 써서 진행은 됐다. 이제 `inspect_snapshot_file`이 Write의 없는 중간 폴더도 허용한다. 각 이름은 여전히 보통 이름이어야 하고, 보호 이름이 아니어야 하며, 이미 있는 앞부분은 링크가 아닌 실제 폴더여야 한다. 같은 실행의 `/tmp` Write 거절은 작업 공간 밖이라 맞다.
-  - 독립 검토 중요 I1(원래 있던 결함): 보호 이름 검사가 대소문자를 구분해 `.CLAUDE/settings.json` 같은 우회가 가능했다. `protected_name()`으로 대소문자를 무시하고, 점으로 시작하면서 ASCII가 아닌 이름도 막는다. 파일 관측과 admission Search 두 곳에 적용했고 거절 테스트를 추가했다. 남은 것: 경로 문자열로 비교하는 다른 장치(Claude `Edit(...)`, sandbox denyWrite, Codex 정책 키, seatbelt)의 대소문자 처리는 미확인이다.
-  - 시작 로그 `project catalog unavailable` 2건: 엔진 준비 전에 온 요청이었다. 이제 `SidecarClient.projectCatalog`가 준비를 기다린다. 요청 검증은 즉시 한다.
-  - 시작 로그 `requestBlocked: another provider check currently owns this profile`: 다른 공급자 확인과 겹친 모델 목록 요청이었다. 하단 Codex 사용량이 "—"로 남았다. 이제 `getModelChoices`가 1.5초 간격으로 최대 5번 다시 묻는다. 테스트를 추가했다.
-  - 시작 로그 `Codex preflight failed at provider RPC error response` 1건은 원인 미확인이다(재현 시 조사).
-- 테스트: Rust provider_claude_session 12개, `npm test` 747개, tsc 통과.
-- **시작 로그 정리 2차**: 준비를 기다리게 하자 같은 요청이 `requestBlocked: storage admission is still verifying`으로 실패했다. 개발 빌드에서는 앱을 켠 뒤 저장소 확인에 1분 남짓 걸린다. 그 사이 하단 사용량이 "Codex 연결 안 됨 · Claude 연결 안 됨"으로 잘못 남았다(연결 상태를 읽지 못해서). 이 회귀는 제 첫 수정이 만든 것이다.
-  - `projectCatalog`는 저장소 확인 중이면 0.5초 간격으로 최대 3분 다시 묻는다.
-  - 사용량 표시는 연결 상태를 처음 읽기 전에는 "확인 중…"을 보여 주고, 읽기에 실패하면 3초 뒤 다시 읽는다(최대 40번).
-  - 재시작 확인: 로그 오류 0건. 사용량은 "확인 중…"에서 Claude "5시간 31% 7일 70%", Codex "7일 2%"로 바뀌었다(Codex는 약 45초).
-  - 상시 검토자의 I1 재검토: 차단·중요 없음. 경미(Search 경로의 대소문자 테스트, 무시되는 유니코드 앞머리, 점으로 시작하는 한글 이름 거절)와 다른 장치의 대소문자 기록은 남긴다. Windows의 `.git.`, 8.3 이름, ADS는 Windows 실행을 켜기 전에 따로 다룬다.
-- **최종 수정 빌드로 처음부터 끝까지(todo-test-1119d, task-7c9c2778)**: 빈 폴더 추가 → 첫 작업 창(두 권한 체크됨) → 보내기(15:05) → 기획, 디자인, 개발, 검증, 개발 수정 → "검토 준비". 앞 실행에서 거절됐던 `docs/plan.md` Write가 이번에는 그대로 성공했다.
-  - 앱 시작부터 끝까지 로그 오류 0건, 승인 대기 0건, 영어 문단 0건. 보고와 단계 커밋 5개 모두 한국어였다.
-  - 헤드리스 Chrome 12/12. "main에 합치기"로 사용자 폴더 main이 7de94a0가 됐고 상태는 깨끗하다.
-  - 실제 Chrome(Orca 실제 클릭과 키 입력): 빈 입력 안내와 사라짐, Enter와 버튼 추가, 체크, 새로고침 유지, 삭제 모두 정상. 캡처도 정상이다.
-  - 남은 마찰 1건: 개발 담당이 테스트 스크립트를 `/tmp`에 Write하려다 거절됐다(작업 공간 밖이라 맞는 거절). 셸의 `$TMPDIR`로 바꿔 진행했다. 팀원 지시문에 "파일 도구는 작업 폴더 안에서만, 임시 파일은 셸로 $TMPDIR에"를 추가했다(orchestration 33개 통과).
-- **Rust 전체 재실행(0160bd0a)**: core 239, protocol 70, sidecar 868, 기타 19 모두 통과.
-- **최종 빌드 전체 흐름(todo-test-1119e, task-422ec46c, 16:15~16:51)**: 빈 폴더 추가 → 첫 작업 창(두 권한 체크) → 보내기 → 기획, 디자인, 개발, 검증, 개발 수정 → "검토 준비".
-  - 앱 로그 오류 0건(시작 포함), 승인 대기 0건, 영어 문단 0건(단계 커밋 5개 모두 한국어), 에이전트 git 오류 0건.
-  - Claude 도구 호출 90번 중 거절은 1번이다. 에이전트가 작업 공간 이름을 빠뜨린 경로(`…/todo-test-1119e/docs/design.md`)로 Grep한 것을 막았고, 에이전트가 곧바로 올바른 경로로 다시 했다. 작업 공간 밖이라 맞는 거절이다. `/tmp` 쓰기 시도는 0건으로, 지시문 추가가 효과를 냈다.
-  - 헤드리스 Chrome 12/12. 점검 스크립트(`check-hint.mjs`)가 `<form>` 없는 앱에서 버튼을 누르지 못하던 문제를 고쳤다. 앱 결함은 아니었다.
-  - "main에 합치기"로 사용자 폴더 main이 b733b04가 됐고 상태는 깨끗하다.
-  - 실제 Chrome(Orca 실제 클릭과 키 입력): 빈 입력 안내와 사라짐, Enter와 버튼 추가, 체크, 새로고침 유지, 삭제 모두 정상. 캡처도 정상이다.
-- **4단계 구현: git이 아닌 폴더(링크 파일 방식, 사용자 결정 2026-11-19)**:
-  - 결정: "링크 파일 방식"을 골랐다. 선택지는 링크 파일 방식, 완전 그림자(제자리 수정), 폴더에 git 만들기, 미룸이었다.
-  - 동작:
-    - 내용이 있는 git 아닌 폴더를 고르면 Electron이 확인 창을 띄운다. 확인하면 `project.open{folderRecordIdentity}`로 `initialize_folder_project`가 앱 데이터 `shadow-git-v1/<uuid>.git`에 기록을 만들고, 지금 폴더 상태를 커밋한다(작성자 Elsecrew, `node_modules/`·`.DS_Store` 제외, 2만 개·1GiB 한도). 폴더에는 `.git` 링크 파일 하나만 `RENAME_EXCL`로 넣는다.
-    - `repository_git_path`가 원본 git 위치를 해석한다(실제 `.git`, 또는 우리 그림자로 가는 링크). `open_source_repository`, worktree 링크와 역링크 확인, 정리, merge가 이를 쓴다.
-    - 에이전트 읽기: core `linked_source_git`이 `*.git`도 받고, Claude 필터는 `source_git_dir(source)`로 비교한다.
-  - 독립 검토 4회:
-    - 1차: 중요 I1(크기 한도가 준비 폴더만 세어 실제로 무력, 재현됨), I2(복사한 폴더가 같은 기록 공유), I3(기록이 사라진 링크는 복구 불가)와 경미 M1~M7.
-    - 2차: 중요 I4(dev:ino 표시는 외장 디스크나 복원에서 같은 폴더를 다른 폴더로 판정).
-    - 3차: 중요 N1(그림자 폴더가 아직 없는 앱 데이터에서 다른 Mac 링크가 확인 창 없이 막힘).
-    - 모두 반영했다:
-      - 사용자 폴더에서 `:/` 경로로 세고 기록한다.
-      - 소유 표시(`elsecrew-folder`, 경로와 ino 중 하나가 맞으면 같은 폴더, 맞으면 갱신)를 둔다.
-      - 기록이 없거나 다른 폴더 것인 링크는 경고 창("진행 중이던 작업은 이어지지 않아요", 기본 취소) 뒤 새로 기록한다. 다른 Mac 링크도 같다.
-      - 게시 뒤에는 그림자를 지우지 않는다.
-      - 남은 준비 폴더를 정리한다.
-      - 폴더 안 저장소는 거절한다.
-      - 링크만 남은 폴더는 다시 기록한다.
-  - 테스트 3개 통과:
-    - `a_plain_folder_gets_a_shadow_history_and_merges_back`(작업 공간, 단계 커밋, 합치기, 에이전트 읽기 경로)
-    - `plain_folder_records_are_bounded_owned_and_recoverable`(한도, 중첩 저장소, 남은 준비 폴더, 복사본, 재생성, 이동, 기록 삭제, 실제 저장소 보호)
-    - `a_plain_folder_from_another_mac_can_be_recorded_anew`
-  - 그 밖에 project·provider 369개 통과.
-  - 실제 앱: README.md와 notes.txt가 있는 todo-test-1119f를 추가했다. `.git` 링크 파일 하나만 생겼고, 첫 기록 "작업 시작 전 폴더 상태"에 두 파일이 들어갔다. 로그 오류는 0건이다. todo 작업이 진행 중이다(수정 전 빌드).
-  - 남은 것:
-    - M8: 다시 기록하면서 생기는 고아 그림자 정리.
-    - M11: 다른 볼륨 사본의 ino 우연 일치(볼륨 UUID 비교).
-    - 비개발자가 폴더를 직접 고치면 합치기가 "수정 중인 파일과 겹침"으로 자주 거절될 수 있어 안내가 필요하다.
-- **4단계 실제 앱 확인(todo-test-1119f, 수정 전 빌드로 시작)**:
-  - 17:28~18:01에 팀이 todo 앱을 만들었다. 로그 오류, 영어, git 오류는 0건이었다.
-  - 거절 1건: 개발 담당이 작업 공간 이름이 빠진 경로에 README를 쓰려다 막혔다. 맞는 거절이다.
-  - 헤드리스 12/12. "main에 합치기"로 일반 폴더에 앱 파일이 들어왔다. `notes.txt`는 그대로이고 상태는 깨끗하다.
-  - 새 빌드로 재시작한 뒤 같은 폴더를 다시 추가했다. 소유 표시 없는 예전 기록을 다시 기록 대상으로 판정해 새 그림자로 바꿨다("작업 시작 전 폴더 상태" 새 커밋).
-  - 발견·수정:
-    - 다시 연 프로젝트가 예전 기록에 묶인 마지막 작업을 열려다 "작업 공간을 열지 못했어요 + 기술 오류"를 보였다. 이제 "이 작업은 폴더 기록을 새로 만들기 전에 시작한 작업이라 열 수 없어요. 새 작업을 시작해 주세요."로 안내한다(`m5.editorError.earlierRecord`).
-    - 같은 실수(작업 공간 이름이 빠진 경로)가 두 번 연속이라, 팀원 지시문에 "작업 폴더는 현재 폴더, 상대 경로 또는 pwd의 정확한 경로를 쓰고 상위나 형제 폴더를 추측하지 말 것"을 넣었다.
-  - 개발 중 현상: 번역 파일을 HMR로 바꾸면 `useI18n must be used within I18nProvider`로 화면이 비었다. 개발 서버에서만 생기며 새로고침으로 돌아온다.
-- **4단계 최종 빌드 전체 흐름(todo-test-1119g, 일반 폴더, 18:07~18:39)**:
-  - README.md와 memo.txt가 있는 폴더를 추가했다. 폴더에는 `.git` 링크 파일 하나만 생겼고, 첫 기록에 두 파일이 들어갔다.
-  - 첫 작업(두 권한 체크) → 기획, 디자인, 개발, 검증, 개발 수정 → "검토 준비".
-  - 새 로그 오류 0건(앞서 1119f의 예전 작업 열기 시도 2건만 있음), 승인 대기 0건, 영어 0건, 에이전트 git 오류 0건.
-  - Claude 도구 호출 68번 중 거절 1번: README 하나를 작업 공간 이름이 빠진 경로로 한 번 쓰려다 막혔고, 바로 올바른 경로로 다시 했다. 다른 파일은 모두 올바른 경로였다. 모델의 일회성 실수이며 앱의 거절은 맞다.
-  - 헤드리스 12/12. "main에 합치기"로 일반 폴더에 앱 파일이 들어왔다. `memo.txt`는 그대로이고 상태는 깨끗하다.
-  - 실제 Chrome 점검은 화면 잠금으로 대기 중이다.
-- 운영 실수: 새 작업의 "확인 필요" 상태를 대기 스크립트가 종료 조건으로 잡지 못해 약 70분을 그냥 기다렸다. 이제 진행 중·초안이 아니면 끝나는 대기(`waitui2.sh`)를 쓴다.
-- 운영 메모: Orca 백그라운드 클릭은 첫 번째가 무시되는 경우가 있다(같은 요소를 다시 누르면 된다). 창이 다른 Space에 있으면 키 입력이 막히고 스크린샷이 예전 화면이다.
-- 다음 할 일: 같은 프로젝트에서 새 작은 작업으로 보이는 작업 공간 위치(`~/elsecrew/workspaces/todo-test-1118c/task-…`) 확인, 4단계(git이 아닌 폴더의 shadow-git).
 
 ## 프로젝트 요약 (고정)
 터미널을 한 번도 안 열어본 비개발자를 **코딩 에이전트(Claude Code·Codex)가 굴러가는 상태까지** 데려다주는 데스크톱 GUI 앱. 현재 배포 경로는 Tauri 2 + React 19이고, M5는 Electron + React/TypeScript + Monaco와 Rust sidecar의 별도 작업대 골격으로 전환 중이다.
@@ -186,6 +52,8 @@
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
 - **셸로 fd가 닫혔는지 검사할 때(2026-11-20)**: `/bin/sh`(bash)는 내장 명령의 리디렉션(`printf … >&N`)을 처리하며 원래 fd를 10번 이상 첫 빈 번호에 보관한다. 그래서 닫힌 10번이 쓰기 가능처럼 보인다. 검사는 외부 명령(`/usr/bin/printf`)으로 한다. 병렬 테스트에서 낮은 번호가 차 있을 때만 드러난다.
+- **projection 조회는 계약상 전체를 검증한다(2026-11-20 확인)**: `Storage::projection_record(종류, id)`는 하나를 찾을 때도 projects·chats·runs·locks 전 행의 JSON을 파싱해, 다른 테이블의 손상도 오류로 낸다(`selected_projection_retains_only_requested_rows_without_skipping_validation`). 그래서 반복 호출은 비싸다. 성능 문제는 호출 쪽에서 한 번 읽은 값을 재사용해 푼다(예: `validate_actual_run_projection`).
+- **2026-11-20 앱 시작 검증 결정(사용자)**: 처음 열 때의 긴 확인은 받아들이지만 두 번째·세 번째 열 때도 오래 걸리면 안 된다. 그래서 (1) 검증 범위를 유지한 채 시작 검증을 빠르게 하고, (2) 정상 종료 때 Keychain 비밀 키로 서명한 "검증 완료 지점"을 남겨 다음 시작에는 서명이 맞으면 그 뒤의 기록만 검증한다(서명 없음·불일치·비정상 종료 뒤에는 전체 검증). 이는 `docs/proposals/m5-storage-reopen-verification.md`의 "이전 프로세스의 검증 결과를 믿지 않는다"를 "서명된 정상 종료 지점은 믿는다"로 바꾸는 사용자 승인이다. Keychain 키까지 가진 공격자는 조작한 DB를 통과시킬 수 있다는 대가를 설명했다. 독립 검토 대상.
 - **2026-11-19 일반 폴더 = 링크 파일 방식(사용자 선택)**: git이 아닌 폴더는 확인 뒤 앱 데이터 `shadow-git-v1/<uuid>.git`에 기록을 만들고, 폴더에는 `.git` 링크 파일 하나만 둔다. 이후 worktree·단계 커밋·합치기·에이전트 git은 git 프로젝트와 같은 코드 경로다(`ProjectManager::repository_git_path`). 기록 소유 표시(`elsecrew-folder`의 ino 또는 경로)로 복사·이동된 폴더를 구분하고, 다른 폴더·다른 Mac의 기록은 경고 뒤 새로 만든다. 상한 20,000파일·1GiB, 안에 다른 저장소가 있으면 거절한다. 게시 뒤에는 그림자 기록을 지우지 않는다. 에이전트 git은 `task_git_environment`(개발자 폴더·전역 설정 끔)가 있어야 동작한다.
 - **2026-11-18 작업 공간 위치·커밋 결정**: worktree는 `~/elsecrew/workspaces/<프로젝트>/<작업 이름>`이 기본이고 설정에서 바꿀 수 있다. 커밋은 앱만 하며 작성자는 `Elsecrew`로 고정한다. LFS 등 필터 저장소는 처음엔 미지원이다. 상세는 `docs/proposals/m5-real-worktrees.md`.
 - **2026-11-18 폴더 프로젝트·파일 탭 결정**: git이 아닌 그냥 폴더도 프로젝트로 받는다(필수). 방식은 원본 바로 수정 + 작업 시작 전 자동 백업이다(사용자 선택). "이 작업 되돌리기"를 제공하고, 같은 폴더의 작업은 한 번에 하나씩 돈다. 반영 단계는 없다. 백업은 그림자 git으로 한다(git dir은 앱 데이터, 작업 폴더는 사용자 폴더, 작업 시작 커밋은 기준점, 단계마다 자동 커밋, 작업마다 브랜치). 그래서 모든 프로젝트가 git 기반 같은 코드 경로를 쓴다(사용자 확인). 파일 탭은 열린 작업의 worktree(폴더 프로젝트는 그 폴더) 파일을 보여 주고, 보고 있는 작업 이름과 git 상태 색을 표시한다(Orca 파일 탐색기와 같음).
@@ -489,4 +357,4 @@
 ---
 지난 워크로그: [11월](archive/history-2026-11.md) · 그 이전(Elsecrew 이름 변경 전) 기록은 2026-11-13에 정리했다. 필요하면 `git log -- docs/archive/`로 찾는다.
 
-2026-11-11~11-18 워크로그(11-17 엔트리 안의 11-18 오전 후속 포함)는 `docs/archive/history-2026-11.md`로 이동했다.
+2026-11-11~11-19 워크로그(11-17 엔트리 안의 11-18 오전 후속 포함)는 `docs/archive/history-2026-11.md`로 이동했다.

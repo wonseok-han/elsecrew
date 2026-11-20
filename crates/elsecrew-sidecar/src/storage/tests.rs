@@ -4749,6 +4749,7 @@ fn populated_v2_storage(path: &Path, state: &str) -> Storage {
         path: path.to_path_buf(),
         writes_admitted: true,
         maintenance_epoch: 0,
+        opened_from_seal: false,
     };
     storage
         .append_event(&event(
@@ -5731,4 +5732,94 @@ fn admission_still_refuses_a_failed_materialization() {
         .query_row("SELECT state FROM lifetime_materialization_job WHERE singleton=1", [], |row| row.get(0))
         .unwrap();
     assert_eq!(state, "failed");
+}
+
+/// User decision 2026-11-20: a clean shutdown's seal lets the next start skip
+/// the full ledger check, but only for exactly the sealed file: a wrong seal,
+/// one changed byte or a log left behind is the full check as before.
+#[test]
+fn a_clean_shutdown_seal_skips_the_full_check_only_for_the_same_file() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("seal.sqlite3");
+    let running = AtomicBool::new(false);
+    let open = |seal: Option<&str>| Storage::open_for_durable_admission_with_seal(&path, &running, seal);
+    {
+        let mut storage = open(None).unwrap();
+        assert!(!storage.opened_from_seal());
+        for sequence in 1..=3 {
+            let id = format!("project_seal_{sequence}");
+            storage
+                .append_event(&event(
+                    &format!("evt_{id}"),
+                    &format!("op_{id}"),
+                    "project",
+                    &id,
+                    1,
+                    json!({"project_id": id, "canonical_path": format!("/fixture/seal/{sequence}")}),
+                    "2026-11-20T01:00:00Z",
+                ))
+                .unwrap();
+        }
+    }
+    let seal_now = || {
+        let storage = open(None).unwrap();
+        let sealed = storage.shutdown_seal().expect("a settled ledger is sealed");
+        drop(storage);
+        assert!(sealed.still_holds(&path), "closing wrote nothing more");
+        sealed.digest
+    };
+    let digest = seal_now();
+    assert!(super::shutdown_seal::valid_seal(&digest));
+
+    // The same file: the full check is skipped, and it can be sealed again.
+    let trusted = open(Some(&digest)).unwrap();
+    assert!(trusted.opened_from_seal());
+    let again = trusted.shutdown_seal().unwrap();
+    drop(trusted);
+    assert!(again.still_holds(&path));
+    assert_eq!(again.digest, digest, "nothing was written, the same bytes");
+
+    // A seal that is not this file's, or another engine version's: the full check.
+    let hash = digest.split_once('.').unwrap().0.to_owned();
+    for other in [format!("{}.0.1.0+s13", "0".repeat(64)), format!("{hash}.9.9.9+s1"), "0".repeat(64)] {
+        let full = open(Some(&other)).unwrap();
+        assert!(!full.opened_from_seal(), "{other}");
+        drop(full);
+    }
+
+    // One byte changed outside the engine: never trusted.
+    let digest = seal_now();
+    {
+        let other = Connection::open(&path).unwrap();
+        other.execute_batch("PRAGMA user_version=7;").unwrap();
+    }
+    if let Ok(storage) = open(Some(&digest)) {
+        assert!(!storage.opened_from_seal());
+    }
+    {
+        let other = Connection::open(&path).unwrap();
+        other.execute_batch("PRAGMA user_version=0;").unwrap();
+    }
+
+    // Review I8: a log appearing after the open-time check is caught under
+    // the exclusive lock too.
+    {
+        let storage = open(None).unwrap();
+        let sealed = storage.shutdown_seal().unwrap();
+        assert!(storage.matches_shutdown_seal(&sealed.digest));
+        let mut wal = path.as_os_str().to_owned();
+        wal.push("-wal");
+        let mut file = fs::OpenOptions::new().append(true).open(PathBuf::from(wal)).unwrap();
+        std::io::Write::write_all(&mut file, b"late").unwrap();
+        assert!(!storage.matches_shutdown_seal(&sealed.digest));
+    }
+
+    // A write-ahead log left behind: the file alone is not the state.
+    let digest = seal_now();
+    let mut wal = path.as_os_str().to_owned();
+    wal.push("-wal");
+    fs::write(PathBuf::from(wal), b"not empty").unwrap();
+    if let Ok(storage) = open(Some(&digest)) {
+        assert!(!storage.opened_from_seal());
+    }
 }

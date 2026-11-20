@@ -12,10 +12,17 @@ enum Worker {
     Codex(crate::provider_preflight_session::discovery_worker::DiscoveryWorker),
     Claude(crate::provider_claude_session::discovery::DiscoveryWorker),
 }
+/// How long a finished query waits for proof that its process is gone.
+const UNCONFIRMED_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
 pub(super) struct PendingCatalog {
     worker: Worker,
     usage: Option<serde_json::Value>,
     cleanup_only: bool,
+    /// When the finished query's process was first found not yet provably
+    /// gone. Its exit and the proof land a moment apart: the answer waits a
+    /// little for the proof instead of failing the request at once.
+    unconfirmed_since: Option<std::time::Instant>,
     completion: Option<(
         Result<Vec<CatalogModel>, SidecarError>,
         Option<crate::provider_login_process::LoginProcess<'static>>,
@@ -59,11 +66,17 @@ impl AgentRuntime {
         request_id: &str,
         runtime: &str,
     ) -> Result<(), SidecarError> {
-        if self.preparing_to_quit
-            || !self.owned_run_ids().is_empty()
-            || self.pending_catalogs.contains_key(request_id)
-        {
+        if self.preparing_to_quit || self.pending_catalogs.contains_key(request_id) {
             return Err(failure());
+        }
+        // Another query (the other provider's list at startup, say) or a run
+        // owns the profile for now: busy, which the app retries shortly,
+        // rather than "unavailable".
+        if !self.owned_run_ids().is_empty() {
+            return Err(SidecarError::new(
+                "providerBusy",
+                "another provider check currently owns this profile; retry after it finishes",
+            ));
         }
         if !matches!(runtime, "codex" | "claude-code") {
             return Err(failure());
@@ -142,6 +155,7 @@ impl AgentRuntime {
                 worker,
                 usage: None,
                 cleanup_only: false,
+                unconfirmed_since: None,
                 completion: None,
                 parent,
                 root,
@@ -248,6 +262,12 @@ impl AgentRuntime {
                         .closure_evidence()
                         .is_some_and(|receipt| receipt.confirmed()));
             if !confirmed {
+                let pending = self.pending_catalogs.get_mut(request_id).unwrap();
+                let since = *pending.unconfirmed_since.get_or_insert_with(std::time::Instant::now);
+                if since.elapsed() < UNCONFIRMED_GRACE {
+                    pending.completion = Some((result, cleanup));
+                    return None;
+                }
                 self.pending_catalogs
                     .get_mut(request_id)
                     .unwrap()
@@ -296,6 +316,7 @@ mod tests {
                     worker: Worker::CompletedFixture,
                 usage: None,
                     cleanup_only: false,
+                unconfirmed_since: None,
                     parent,
                     root,
                     path: path.clone(),
@@ -357,6 +378,8 @@ mod tests {
                 worker: Worker::CompletedFixture,
                 usage: None,
                 cleanup_only: false,
+                // The short wait for the proof has already run out.
+                unconfirmed_since: std::time::Instant::now().checked_sub(UNCONFIRMED_GRACE),
                 parent,
                 root,
                 name: "query".into(),
@@ -371,6 +394,82 @@ mod tests {
         assert!(runtime.owned_run_ids().contains(&"query".into()));
         assert!(path.join("workspace").is_dir());
         assert!(runtime.pending_catalogs["query"].cleanup_only);
+    }
+
+    /// Both lists are asked for at startup: the second waits as busy (the app
+    /// retries it), it is not "unavailable".
+    #[test]
+    fn a_second_catalog_while_one_runs_is_busy_not_unavailable() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        let storage = Storage::open(&base.join("elsecrew.sqlite3")).unwrap();
+        let parent = open_absolute_directory(&base).unwrap();
+        parent.create_dir("first").unwrap();
+        let root = open_absolute_directory(&base.join("first")).unwrap();
+        let mut runtime = AgentRuntime::blocked();
+        runtime.pending_catalogs.insert(
+            "first".into(),
+            PendingCatalog {
+                worker: Worker::CompletedFixture,
+                usage: None,
+                cleanup_only: false,
+                unconfirmed_since: None,
+                parent,
+                root,
+                name: "first".into(),
+                path: base.join("first"),
+                completion: None,
+            },
+        );
+        let error = runtime.begin_model_catalog(&storage, "second", "claude-code").unwrap_err();
+        assert_eq!(error.kind(), "providerBusy");
+        assert!(error.detail().contains("another provider check currently owns this profile"));
+        runtime.preparing_to_quit = true;
+        assert_eq!(runtime.begin_model_catalog(&storage, "third", "codex").unwrap_err().kind(), "agentDiscoveryRejected");
+    }
+
+    /// The query's process exited but the proof that it is gone may come a
+    /// moment later: the answer waits a little for it instead of failing the
+    /// request at once, and only then reports recovery as before.
+    #[test]
+    fn a_finished_catalog_waits_briefly_for_its_termination_proof() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        let storage = Storage::open(&base.join("elsecrew.sqlite3")).unwrap();
+        let binding = crate::provider_profile::CodexProfileBinding::from_storage(&storage).unwrap();
+        let mut process =
+            crate::provider_login_process::LoginProcess::reserve_codex_owned(binding).unwrap();
+        process.inject_uncertain_cleanup_once();
+        let parent = open_absolute_directory(&base).unwrap();
+        parent.create_dir("query").unwrap();
+        let path = base.join("query");
+        let root = open_absolute_directory(&path).unwrap();
+        root.create_dir("workspace").unwrap();
+        root.create_dir("source").unwrap();
+        let mut runtime = AgentRuntime::blocked();
+        runtime.pending_catalogs.insert(
+            "query".into(),
+            PendingCatalog {
+                worker: Worker::CompletedFixture,
+                usage: None,
+                cleanup_only: false,
+                unconfirmed_since: None,
+                parent,
+                root,
+                name: "query".into(),
+                path: path.clone(),
+                completion: Some((Ok(vec![]), Some(process))),
+            },
+        );
+        assert!(runtime.take_model_catalog("query").is_none(), "waits for the proof");
+        assert!(!runtime.pending_catalogs["query"].cleanup_only);
+        assert!(runtime.take_model_catalog("query").is_none(), "still within the wait");
+        // No proof within the wait: the request is answered as before.
+        runtime.pending_catalogs.get_mut("query").unwrap().unconfirmed_since =
+            std::time::Instant::now().checked_sub(UNCONFIRMED_GRACE);
+        assert_eq!(runtime.take_model_catalog("query").unwrap().unwrap_err().kind(), "agentRecoveryRequired");
+        assert!(runtime.pending_catalogs["query"].cleanup_only);
+        assert!(path.join("workspace").is_dir());
     }
 
     #[test]
@@ -394,6 +493,7 @@ mod tests {
                 worker: Worker::CompletedFixture,
                 usage: None,
                 cleanup_only: true,
+                unconfirmed_since: None,
                 parent,
                 root,
                 name: "query".into(),
@@ -441,6 +541,8 @@ mod tests {
                 worker: Worker::CompletedFixture,
                 usage: None,
                 cleanup_only: false,
+                // The short wait for the proof has already run out.
+                unconfirmed_since: std::time::Instant::now().checked_sub(UNCONFIRMED_GRACE),
                 parent,
                 root,
                 name: "query".into(),

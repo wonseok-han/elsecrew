@@ -919,7 +919,7 @@ enum SnapshotProgressMarker {
         i64,
         Option<(&'static str, canonical::ScanPosition, u64)>,
     ),
-    Messages(bool, bool, i64, Option<(i64, String, String, i64)>),
+    Messages(bool, bool, i64, Option<(i64, String, String, i64, bool)>),
     Workspaces(workspace::ProgressMarker),
     Catchup(catchup::ProgressMarker),
 }
@@ -975,6 +975,7 @@ impl SnapshotProgress {
                         outer.message.clone(),
                         outer.chat.clone(),
                         outer.candidate,
+                        outer.indexed_done,
                     )
                 }),
             ),
@@ -997,6 +998,9 @@ struct MessageOuter {
     message: String,
     chat: String,
     candidate: i64,
+    /// The indexed chat events were looked at in one lookup; what is left
+    /// is walking the chat events that have no source index row.
+    indexed_done: bool,
 }
 impl MessageScan {
     fn step(
@@ -1006,10 +1010,41 @@ impl MessageScan {
         usage: &mut ByteUsage,
     ) -> Result<Disposition, SidecarError> {
         if let Some(outer) = self.outer.as_mut() {
+            // The same set of chat events as walking them all one by one, in
+            // two parts: those with a source index row in one lookup (its
+            // introduced id is what the walk read for them), then only those
+            // without one, each read and verified as before. Every chat event
+            // is still read and verified by the outer forward pass. This keeps
+            // the check from growing with (introductions x chat events).
+            if !outer.indexed_done {
+                let found: bool = if self.backward {
+                    connection.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM event_source_index s JOIN events e ON e.rowid=s.event_rowid \
+                         WHERE s.introduced_message_id=?1 AND e.aggregate_type='chat' AND e.aggregate_id=?2)",
+                        params![outer.message, outer.chat], |r| r.get(0))
+                } else {
+                    connection.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM event_source_index s JOIN events e ON e.rowid=s.event_rowid \
+                         WHERE s.introduced_message_id=?1 AND s.event_rowid<>?2 AND e.aggregate_type='chat')",
+                        params![outer.message, outer.rowid], |r| r.get(0))
+                }.map_err(|_| session_error())?;
+                usage.work_units += 1;
+                outer.indexed_done = true;
+                if found {
+                    if !self.backward {
+                        return Err(session_error());
+                    }
+                    self.after = outer.rowid;
+                    self.outer = None;
+                }
+                return Ok(Disposition::Pending);
+            }
             let next:Option<i64>=if self.backward {
-                connection.query_row("SELECT rowid FROM events WHERE aggregate_type='chat' AND aggregate_id=?1 AND rowid>?2 ORDER BY rowid LIMIT 1",params![outer.chat,outer.candidate],|r|r.get(0))
+                connection.query_row("SELECT e.rowid FROM events e WHERE e.aggregate_type='chat' AND e.aggregate_id=?1 AND e.rowid>?2 \
+                    AND NOT EXISTS(SELECT 1 FROM event_source_index s WHERE s.event_rowid=e.rowid) ORDER BY e.rowid LIMIT 1",params![outer.chat,outer.candidate],|r|r.get(0))
             }else{
-                connection.query_row("SELECT rowid FROM events WHERE aggregate_type='chat' AND rowid>?1 ORDER BY rowid LIMIT 1",[outer.candidate],|r|r.get(0))
+                connection.query_row("SELECT e.rowid FROM events e WHERE e.aggregate_type='chat' AND e.rowid>?1 \
+                    AND NOT EXISTS(SELECT 1 FROM event_source_index s WHERE s.event_rowid=e.rowid) ORDER BY e.rowid LIMIT 1",[outer.candidate],|r|r.get(0))
             }.optional().map_err(|_|session_error())?;
             usage.work_units += 1;
             let Some(next) = next else {
@@ -1024,19 +1059,9 @@ impl MessageScan {
             if !self.backward && next == outer.rowid {
                 return Ok(Disposition::Pending);
             }
-            let indexed:Option<bool>=connection.query_row("SELECT introduced_message_id IS ?2 FROM event_source_index WHERE event_rowid=?1",params![next,outer.message],|r|r.get(0)).optional().map_err(|_|session_error())?;
-            usage.work_units += 1;
-            let matches = match indexed {
-                Some(matches) => matches,
-                None => {
-                    let identity =
-                        SourceIdentity::load(connection, RawColumn::EventPayload, next, usage)?;
-                    let (_, introduced) =
-                        verify_live_relation(connection, &identity, cutoff, false, usage)?;
-                    introduced.as_deref() == Some(outer.message.as_str())
-                }
-            };
-            if matches {
+            let identity = SourceIdentity::load(connection, RawColumn::EventPayload, next, usage)?;
+            let (_, introduced) = verify_live_relation(connection, &identity, cutoff, false, usage)?;
+            if introduced.as_deref() == Some(outer.message.as_str()) {
                 if !self.backward {
                     return Err(session_error());
                 }
@@ -1080,6 +1105,7 @@ impl MessageScan {
                         message,
                         chat: String::new(),
                         candidate: 0,
+                        indexed_done: false,
                     });
                 }
                 None => self.after = rowid,
@@ -1125,6 +1151,7 @@ impl MessageScan {
             message,
             chat,
             candidate: 0,
+            indexed_done: false,
         });
         Ok(Disposition::Pending)
     }

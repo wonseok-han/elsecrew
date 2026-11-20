@@ -26,6 +26,13 @@
 
 상세 설계는 `docs/proposals/m5-real-worktrees.md`, 경과는 history.
 
+> **정상 종료 봉인(2026-11-20 사용자 결정, macOS)**: 시작 저장소 검증(`Storage::open_for_durable_admission`)은 원장·출력 전체를 다시 읽어 DB 크기에 비례한다(140MB에서 release 약 12초, 개발 빌드 약 40~70초). 그래서 정상 종료 뒤의 다음 시작은 봉인으로 생략한다.
+> - 종료: stdin EOF && `safe_to_quit`이면 엔진이 WAL을 비우고(`wal_checkpoint(TRUNCATE)`) 배타 잠금을 쥔 채 DB 파일 SHA-256을 계산한다. 연결을 닫은 뒤 파일 신원(크기·mtime·ino)과 빈 WAL이 그대로일 때만 stderr 마지막 줄 `elsecrew-storage-seal v1 <sha256>.<버전+s스키마+b실행파일시각>`을 낸다(`storage/shutdown_seal.rs`). 정리 작업이 중간에 걸렸거나 실패했거나 압축이 진행 중이면 봉인하지 않는다.
+> - 서명: Electron은 엔진이 exit 0으로 끝났을 때만 그 줄을 읽고, DB 파일을 직접 해시해 같을 때만 HMAC-SHA256(safeStorage로 보호한 32바이트 키; 앱 버전·데이터 폴더·마지막 전체 검증 시각 포함)으로 `userData/storage-seal-v1.json`에 쓴다(`electron/storage-seal.ts`).
+> - 시작: 봉인 파일은 읽자마자 지운다(1회용). 서명이 맞고 마지막 전체 검증이 7일 안이면 `--stdio --storage-seal <token>`으로 넘긴다. 엔진은 열기 전·배타 잠금 뒤 모두 WAL이 비었고 파일 해시와 문맥이 같을 때만 ReopenMaintenanceSession·AllOutputVerification을 생략한다(스키마 검사·복구·app-instance 등록은 그대로). 아니면 전체 검증이다.
+> - 대가: 봉인은 그 세션에서 앱이 쓴 기록까지 포함하므로 앱 결함은 다음 전체 검증(최대 7일 뒤, 비정상 종료 뒤, 다른 빌드)에서야 드러난다. 세션 중 SQLite 밖에서 DB 파일을 바꾼 것도 봉인된다(에이전트는 앱 데이터에 쓸 수 없다). Keychain 키에 접근하는 공격자는 조작 DB를 통과시킬 수 있다.
+> - 종료가 시작되면(`onQuitStarted`) 엔진으로 가는 화면 IPC는 응답하지 않는다(`quietAfterQuit`): 숨겨진 화면의 폴링이 "prepared to quit" 거절로 오류 로그를 남기지 않게.
+
 > **2026-11-06 Windows 저장·복구 검증**: [CI42129091905](https://github.com/wonseok-han/hello-agent/actions/runs/42129091905), 공개6e079a9에서 native44개와 직접 복구 호출 차단1개가 통과했다. guard/권한/handle 교체·정리 및4개 seeded snapshot 파일/SQLite 재열기를 포함한다. 사용자 설치 Git의 admission·원본 반영/복원 포트·실제 프로세스 재시작·전체 제품/성능 검증과 활성화 결정은 남아 있다. 아래 native 미검증 표기는 이 진단 범위 밖 시나리오까지 합격했다는 의미로 읽지 않는다.
 
 > **최근 구현·검증 경계**: Windows 저장 복구의 prepared/replaced/rename 직후 receipt 누락/cleanup 완료 후 원장 미완료4개 상태를 실제 파일·SQLite 재열기 fixture로 작성했다. 2026-11-06 Windows CI42129091905에서4개 모두 통과했다. snapshot manifest는 seed하므로 Git admission·프로세스 강제 종료/startup E2E 증거가 아니다. 편집기는 파일 전환 시 단일 Monaco 화면을 유지하고 이전 model을 해제하도록 변경했으며 실제 GUI·메모리 효과는 미측정이다. 최신 남은 실행/선택은 docs/history.md를 따른다.

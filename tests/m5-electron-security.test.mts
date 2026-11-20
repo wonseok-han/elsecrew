@@ -242,6 +242,7 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
       whenReady: () => Promise.resolve(),
       on: () => undefined,
       getPath: () => "/app-data",
+      getVersion: () => "0.0.0-test",
       setName: (name: string) => { assert.equal(name, "Elsecrew"); },
       setPath: (key: string, value: string) => { assert.equal(key, "userData"); assert.equal(value, "/app-data"); },
       isPackaged: false,
@@ -250,6 +251,7 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
     BrowserWindow: Object.assign(FakeWindow, { getAllWindows: () => FakeWindow.windows }),
     dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
     shell: { openExternal: async () => { sidecarCalls.push("openExternal"); } },
+    safeStorage: { isEncryptionAvailable: () => false, encryptString: () => { throw new Error("unexpected encryption"); }, decryptString: () => { throw new Error("unexpected decryption"); } },
     ipcMain: {
       handle: (channel: string, handler: (...args: unknown[]) => Promise<unknown>) => handlers.set(channel, handler),
       on: () => undefined,
@@ -410,6 +412,8 @@ function moduleFor(
   if (specifier.endsWith("device-report-v1.ts")) return deviceReportContract;
   if (specifier.endsWith("session-diagnostics-v1.ts")) return sessionDiagnosticsContract;
   if (specifier === "./device-report.ts") return { readDeviceReport: () => { throw new Error("unexpected device inspection"); } };
+  // The shutdown seal has its own tests (m5-storage-seal): here there is none.
+  if (specifier === "./storage-seal.ts") return { StorageSealStore: class { consume() { return null; } async seal() { return false; } } };
   if (specifier.endsWith("approval-v1.ts")) return approvalContract;
   if (specifier.endsWith("project-catalog-v1.ts")) return catalogContract;
   if (specifier.endsWith("model-choices-v1.ts")) return modelChoicesContract;

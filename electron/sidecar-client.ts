@@ -1,3 +1,4 @@
+import { sealFromStderr } from "./storage-seal.ts";
 import { validateSaveRecoveryResolveRequest, validateSaveRecoveryResolveResult, type SaveRecoveryResolveRequest, type SaveRecoveryResolveResult } from "../src/m5/contracts/save-recovery-v1.ts";
 import { validateSaveRecoveryRequest, validateSaveRecoveryResult, type SaveRecoveryResult } from "../src/m5/contracts/save-recovery-v1.ts";
 import { randomUUID } from "node:crypto";
@@ -423,6 +424,12 @@ export class SidecarClientV1 {
    */
   get technicalDetail(): string {
     return normalizeDiagnostic(this.#stderrTail);
+  }
+
+  /** The seal line the engine printed last at a clean exit, if any. The app
+   * signs it only after hashing the database itself (`storage-seal.ts`). */
+  get storageSealToken(): string | null {
+    return sealFromStderr(this.#stderrTail.toString("utf8"));
   }
 
   onEvent(listener: (event: EventV1) => void): () => void {
