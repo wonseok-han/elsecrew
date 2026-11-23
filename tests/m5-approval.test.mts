@@ -16,6 +16,35 @@ test("inspection is explicit, scoped, bounded and not a list payload", () => {
   for (const point of [0x61c,0x200e,0x200f,0x202a,0x202b,0x202c,0x202d,0x202e,0x2066,0x2067,0x2068,0x2069,0x200d,0xfeff]) assert.equal(visibleApprovalText(String.fromCodePoint(point)), `\\u${point.toString(16).padStart(4,"0")}`);
   assert.equal(visibleApprovalText(String.fromCodePoint(0xe0001)), "\\u{e0001}");
 });
+test("viewing a request that is no longer waiting shows nothing and answers nothing", () => {
+  const request = validateApprovalRequest({action:"inspect",identity,approvalId});
+  const other = `approval_${"b".repeat(32)}`;
+  const gone = validateApprovalResult({identity,pending:[{approvalId:other,kind:"tool"}],queued:null,inspection:null},request);
+  assert.deepEqual(gone,{identity,pending:[{approvalId:other,kind:"tool"}],queued:null,inspection:null});
+  // Sidecar client, main, preload and the screen each check the result again.
+  assert.deepEqual(validateApprovalResult(validateApprovalResult(validateApprovalResult(gone,request),request),request),gone);
+  // Still waiting means its details must be there; a receipt is never part of a view.
+  assert.throws(()=>validateApprovalResult({identity,pending:[{approvalId,kind:"tool"}],queued:null,inspection:null},request));
+  assert.throws(()=>validateApprovalResult({identity,pending:[],queued:approvalId,inspection:null},request));
+  assert.throws(()=>validateApprovalResult({identity,pending:[],queued:null},request));
+  // A list or a decision never carries an inspection, not even null.
+  assert.throws(()=>validateApprovalResult({identity,pending:[],queued:null,inspection:null},validateApprovalRequest({action:"list",identity})));
+});
+test("every approval result passes its own check again unchanged", () => {
+  const inspection = {approvalId,kind:"command",command:"echo",cwd:"/w",reason:null,grantRoot:null,host:null,protocol:null};
+  const cases: [Parameters<typeof validateApprovalRequest>[0], unknown][] = [
+    [{action:"list",identity},{identity,pending:[{approvalId,kind:"command"}],queued:null}],
+    [{action:"inspect",identity,approvalId},{identity,pending:[{approvalId,kind:"command"}],queued:null,inspection}],
+    [{action:"inspect",identity,approvalId},{identity,pending:[],queued:null,inspection:null}],
+    [{action:"decline",identity,approvalId},{identity,pending:[],queued:approvalId}],
+    [{action:"acceptOnce",identity,approvalId},{identity,pending:[],queued:approvalId}],
+  ];
+  for (const [input, response] of cases) {
+    const request = validateApprovalRequest(input);
+    const once = validateApprovalResult(response,request);
+    assert.deepEqual(validateApprovalResult(validateApprovalResult(once,request),request),once);
+  }
+});
 test("approval summaries admit only fixed types and never raw command fields", () => {
   const request = validateApprovalRequest({action:"list",identity});
   for (const kind of ["command","writeStdin","network","fileChange","tool"]) {

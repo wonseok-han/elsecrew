@@ -429,10 +429,11 @@ impl AgentRuntime {
         if let Some(active) = self.native.get_mut(&identity.run_id) {
             if let NativeOwner::Claude(owner) = &mut active.owner {
                 // A Claude run that has stopped or finished its output is
-                // still listed for a moment: nothing is waiting there either.
-                let listing = action == "list" && same_identity(&active.identity, &identity);
+                // still listed for a moment: nothing is waiting there either,
+                // and viewing a request there shows nothing (never an answer).
+                let listing = (action == "list" || action == "inspect") && same_identity(&active.identity, &identity);
                 if listing && active.stopped {
-                    return Ok(json!({"identity":raw,"pending":[],"queued":Value::Null}));
+                    return Ok(nothing_waiting(raw, action));
                 }
                 if active.stopped || !same_identity(&active.identity, &identity) {
                     return Err(invalid());
@@ -448,7 +449,7 @@ impl AgentRuntime {
                                 crate::orchestration_dispatch::dev_diagnosis(&format!("approval list of a run no longer registered: {}", _error.kind));
                             }
                         }
-                        return Ok(json!({"identity":raw,"pending":[],"queued":Value::Null}));
+                        return Ok(nothing_waiting(raw, action));
                     }
                     Err(error) => return Err(error),
                 };
@@ -460,9 +461,10 @@ impl AgentRuntime {
         }
         // A run that already ended has nothing waiting. The screen keeps asking
         // until it learns the run ended (a few 750 ms polls); that is not an
-        // error. Accepting, declining or inspecting an ended run still is.
-        if action == "list" && !self.native.contains_key(&identity.run_id) {
-            return Ok(json!({"identity":raw,"pending":[],"queued":Value::Null}));
+        // error, and viewing a request of it shows nothing. Accepting or
+        // declining for an ended run still refuses.
+        if (action == "list" || action == "inspect") && !self.native.contains_key(&identity.run_id) {
+            return Ok(nothing_waiting(raw, action));
         }
         let queued = if action == "decline" || action == "acceptOnce" {
             let id = params["approvalId"].as_str().ok_or_else(invalid)?;
@@ -493,15 +495,22 @@ impl AgentRuntime {
             &connection,
             &active.owner.pending_approvals(),
         )?;
-        let mut result = json!({"identity":raw,"pending":pending,"queued":queued});
+        let mut result = json!({"identity":raw,"pending":&pending,"queued":queued});
         if action == "inspect" {
             let id = params["approvalId"].as_str().ok_or_else(invalid)?;
-            result["inspection"] = active.approvals.inspect(
-                &identity,
-                &connection,
-                &active.owner.pending_approvals(),
-                id,
-            )?;
+            // A request answered or withdrawn since the screen's last list
+            // has nothing to show (the screen then drops it).
+            let waiting = pending.iter().any(|item| item["approvalId"] == id);
+            result["inspection"] = if waiting {
+                active.approvals.inspect(
+                    &identity,
+                    &connection,
+                    &active.owner.pending_approvals(),
+                    id,
+                )?
+            } else {
+                Value::Null
+            };
         }
         Ok(result)
     }
@@ -702,6 +711,16 @@ impl AgentRuntime {
         }
         Ok(events)
     }
+}
+
+/// "Nothing is waiting" for a listing, or for a view of a request that is
+/// no longer waiting (`inspection` is then null).
+fn nothing_waiting(raw: &Value, action: &str) -> Value {
+    let mut result = json!({"identity":raw,"pending":[],"queued":Value::Null});
+    if action == "inspect" {
+        result["inspection"] = Value::Null;
+    }
+    result
 }
 
 #[cfg(test)]

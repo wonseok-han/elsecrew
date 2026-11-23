@@ -5,7 +5,7 @@ export type ApprovalRequest = { action: "list"; identity: AgentRunCancelRequestV
 export type ApprovalKind = "command" | "writeStdin" | "network" | "fileChange" | "tool";
 export type ApprovalSummary = { approvalId: string; kind: ApprovalKind };
 export type ApprovalInspection = ApprovalSummary & { command: string | null; cwd: string | null; reason: string | null; grantRoot: string | null; host: string | null; protocol: string | null; toolInput?: string };
-export type ApprovalResult = { identity: AgentRunCancelRequestV1; pending: ApprovalSummary[]; queued: string | null; inspection?: ApprovalInspection };
+export type ApprovalResult = { identity: AgentRunCancelRequestV1; pending: ApprovalSummary[]; queued: string | null; inspection?: ApprovalInspection | null };
 export const APPROVAL_LABELS: Record<ApprovalKind, string> = {
   command: "명령 실행", writeStdin: "실행 중인 프로그램에 입력 전달", network: "네트워크 연결", fileChange: "파일 변경", tool: "에이전트 도구 사용",
 };
@@ -40,6 +40,14 @@ export function validateApprovalResult(value: unknown, request: ApprovalRequest)
   const queued = v.queued === null ? null : id(v.queued);
   if (queued !== (request.action === "decline" || request.action === "acceptOnce" ? request.approvalId : null) || (queued !== null && ids.includes(queued))) throw new Error("approval receipt differs");
   if (request.action === "inspect") {
+    // A request answered or withdrawn since the last list has nothing to
+    // show; it must then be gone from the list as well.
+    // The result passes this check again in main, preload and the screen,
+    // so the null stays in it.
+    if (v.inspection === null) {
+      if (ids.includes(request.approvalId)) throw new Error("approval inspection missing");
+      return { identity, pending, queued, inspection: null };
+    }
     const detail = object(v.inspection);
     const keys = "approvalId,command,cwd,grantRoot,host,kind,protocol,reason" + (detail.kind === "tool" ? ",toolInput" : "");
     if (Object.keys(detail).sort().join() !== keys || detail.approvalId !== request.approvalId || !pending.some(item=>item.approvalId === detail.approvalId && item.kind === detail.kind)) throw new Error("approval inspection differs");

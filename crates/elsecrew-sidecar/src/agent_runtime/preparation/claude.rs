@@ -161,7 +161,17 @@ impl OwnedClaudeRun {
         let mut queued = None;
         if action != "list" {
             let id = id.ok_or_else(failure)?;
-            let entry = self.approvals.iter_mut().find(|entry| entry.id == id && !entry.declined && !entry.accepted).ok_or_else(failure)?;
+            let found = self.approvals.iter_mut().find(|entry| entry.id == id && !entry.declined && !entry.accepted);
+            // Claude may withdraw a request (or the screen may look at one
+            // just answered) between the screen's list and its "view" click.
+            // Viewing then shows nothing waiting; it never answers anything.
+            // Accepting or declining a request that is gone still refuses.
+            let Some(entry) = found else {
+                if action != "inspect" { return Err(failure()); }
+                let pending: Vec<_> = self.approvals.iter().filter(|entry| !entry.declined && !entry.accepted)
+                    .map(|entry| json!({"approvalId":entry.id,"kind":"tool"})).collect();
+                return Ok(json!({"identity":identity,"pending":pending,"queued":null,"inspection":null}));
+            };
             match action {
                 "decline" => { entry.declined = true; queued = Some(id); },
                 "acceptOnce" if entry.inspected && self.tool_admission.is_some()

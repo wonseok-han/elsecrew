@@ -304,6 +304,27 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
                             &json!({"action":"acceptOnce","identity":binding,"approvalId":id}),
                         )
                         .unwrap();
+                    // Viewing a request no longer waiting shows nothing and
+                    // answers nothing; answering it again still refuses.
+                    let viewed = runtime
+                        .approval_request(
+                            &mut f.storage,
+                            &f.projects,
+                            &json!({"action":"inspect","identity":binding,"approvalId":id}),
+                        )
+                        .unwrap();
+                    assert_eq!(viewed["inspection"], Value::Null);
+                    assert_eq!(viewed["queued"], Value::Null);
+                    assert!(!viewed["pending"].as_array().unwrap().iter().any(|item| &item["approvalId"] == id));
+                    for action in ["acceptOnce", "decline"] {
+                        assert!(runtime
+                            .approval_request(
+                                &mut f.storage,
+                                &f.projects,
+                                &json!({"action":action,"identity":binding,"approvalId":id})
+                            )
+                            .is_err());
+                    }
                     approved = true;
                 }
             }

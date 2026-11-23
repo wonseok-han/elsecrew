@@ -1817,6 +1817,12 @@ fn text_candidate_cases_with_output(
                                         .unwrap();
                                         assert_eq!(receipt["queued"], id);
                                         assert_eq!(receipt["pending"], json!([]));
+                                        // The screen may still click "view" on it.
+                                        let viewed = runtime.approval_request(&mut fixture.storage, &fixture.projects,
+                                            &json!({"action":"inspect","identity":public_identity,"approvalId":id})).unwrap();
+                                        assert_eq!(viewed["inspection"], Value::Null);
+                                        assert_eq!(viewed["pending"], json!([]));
+                                        assert_eq!(viewed["queued"], Value::Null);
                                     }
                                     assert!(runtime
                                         .decline_native_approval(
@@ -7763,6 +7769,9 @@ fn an_ended_run_lists_no_approvals_and_refuses_decisions() {
         "worktreeId":format!("worktree_{hex}"),"workspaceIdentity":format!("sha256:{hex}{hex}"),"runId":format!("agent_run_{hex}")});
     let listing = runtime.approval_request(&mut fixture.storage, &fixture.projects, &json!({"action":"list","identity":identity})).unwrap();
     assert_eq!(listing["pending"], json!([]));
+    let viewed = runtime.approval_request(&mut fixture.storage, &fixture.projects,
+        &json!({"action":"inspect","identity":identity,"approvalId":format!("approval_{hex}")})).unwrap();
+    assert_eq!(viewed, json!({"identity":identity,"pending":[],"queued":null,"inspection":null}));
     for action in ["acceptOnce", "decline"] {
         let error = runtime.approval_request(&mut fixture.storage, &fixture.projects,
             &json!({"action":action,"identity":identity,"approvalId":format!("approval_{hex}")})).unwrap_err();
