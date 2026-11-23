@@ -1300,6 +1300,8 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-apply-latest { display: grid; gap: 8px; margin: 0 0 10px; padding: 10px 12px; border: 1px solid var(--m5-border); border-radius: 8px; }
 .m5-apply-latest-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .m5-apply-latest-head strong { font-size: 12px; font-weight: 600; }
+/* "다시 반영" broke as "다시 반 / 영" in a narrow panel (2026-11-23): break only between words. */
+.m5-apply-latest-head > button { word-break: keep-all; }
 .m5-apply-latest-confirm p, .m5-apply-latest-done, .m5-apply-latest-failed p { margin: 0; font-size: 12px; line-height: 1.5; }
 .m5-apply-latest-actions { display: flex; gap: 8px; margin-top: 8px; }
 .m5-apply-latest-failed pre { white-space: pre-wrap; font-size: 11px; }
