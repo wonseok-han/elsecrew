@@ -2,6 +2,32 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-23 · by Claude Opus 5.5 (claude-opus-5-5) — 실제 todo 앱 개발 시험(목표 확인), 사본·git 반영 화면 실제 확인, 권한 조회 경합 수정
+Orca 조정자 작업(주인님 전체 실제 시험 승인 2026-11-23). 기준 HEAD fb568f6f. 역할: 기획만 Codex(gpt-6.2-sol·medium), 나머지 Claude Code(default·claude-opus-5-5).
+
+- **진행 목표 "앱을 직접 띄워 쓰면서 테스트용 todo 앱이 문제없이 개발되는 수준": 충족**
+  - 새 일반 폴더 `~/Downloads/todo-test-1123a`(README 한 줄)를 개발 앱(`pnpm m5:dev -- --remote-debugging-port=9351`, CDP로 조작)에 추가했다. 개발용 폴더 선택 훅(`dev-pick-directory.txt`)이 기록 생성 확인을 대신했다.
+  - 역할 설정 저장 → 첫 작업 확인 체크 → 목표 한 문장 전송(09:07). 총괄 → 기획(Codex, `docs/plan.md`) → 디자인(`docs/design.md`) → 개발(`index.html`·`style.css`·`app.js`·README) → 검증(`docs/review.md`, 경미 2건 지적) → 개발(수정) → 총괄 최종 요약. 09:40 "팀 작업 완료", 변경 7개 +1447, 커밋 5개. 사람 개입은 시작 확인뿐이었다.
+  - 합치기 전 변경 탭 "변경된 파일 7개 · 아직 main에 합치지 않았어요" → "main에 합치기 → 합치기" → **"✓ main에 합쳐짐 · 파일 7개" + "이 작업에서 바꾼 파일"**, 결과 막대 "이 작업은 main에 합쳐졌어요"·"main에 합침"(비활성). 사용자 폴더 git 상태 깨끗. 앱 재시작 뒤에도 같은 상태.
+  - **만든 todo 앱은 실제 Chrome에서 동작**(헤드리스, 임시 프로필, CDP 실제 키·마우스 입력, `file://`): 빈 칸 Enter 안내, Enter·추가 버튼 추가(앞뒤 공백 제거), 체크, 남은 개수, 진행 중/완료/전체 필터, 새로고침 뒤 목록·체크 유지, 삭제, 완료 항목 지우기와 비활성, `<b>x</b>` 글자 그대로 — 17개 항목 모두 통과. 사본 작업 반영 뒤에도 같은 17개 통과, 제목 "오늘 할 일"·"완료: N개" 확인.
+- **사본(v1) 작업 3상태 실제 화면 확인(처음)**: `ELSECREW_GIT_WORKTREES=0`으로 다시 띄워 같은 프로젝트에 작은 작업("완료: N개" 표시)을 보냈다.
+  - 반영 전 "변경된 파일 4개" + "내 폴더에 반영" → 확인 → **"✓ 내 폴더에 반영됨 · 파일 4개"**, 결과 막대 "이 작업은 내 폴더에 반영됐어요"·"내 폴더에 반영함".
+  - 같은 작업에 추가 요청(제목 변경) → **"반영 뒤 새로 바뀐 파일 2개" + "다시 반영"**(화면 캡처로 확인) → 다시 반영 → "✓ 내 폴더에 반영됨 · 파일 5개". 일반 모드로 재시작한 뒤에도 반영됨 상태 유지.
+- **발견·수정**
+  - 권한 요청 조회 경합(앱 로그 오류 1건): Claude CLI가 권한 요청을 스스로 취소(`control_cancel_request`)한 직후 "요청 내용 보기"를 누르면 `agentApprovalChanged: Claude approval is no longer live`가 나고 Electron 로그 `Error occurred in handler for 'm5:approval:v1'`와 카드 오류 문구가 잠깐 보였다. 앱이 허용한 것은 아니다(권한 우회 아님). 이제 대기하지 않는 요청(취소·응답됨·멈춘/끝난 실행)의 inspect는 현재 목록과 `inspection: null`을 돌려주고, 허용·거절은 계속 거절한다. 계약은 null을 네 번의 검증(sidecar client·main·preload·화면) 모두에서 유지하고, 목록에 남은 요청의 null은 거절한다(cfc9f941).
+  - 총괄 요약이 "병합(merge) 버튼을 눌러 내 브랜치에 합칩니다"라고 안내했다(화면은 "main에 합치기"). 총괄 지시문에 실제 버튼 이름("Merge into main"/"main에 합치기", "Apply to my folder"/"내 폴더에 반영")과 "화면 그대로 부르고 묻지 않으면 브랜치 얘기를 하지 말 것"을 넣었다(899f6174).
+  - 좁은 변경 패널에서 "다시 반영" 버튼이 "다시 반 / 영"으로 줄바꿈됐다. `word-break: keep-all`(7f0f0eed).
+- **독립 검토(상시 검토자) 2회**: 1차 차단 1(B1: 첫 검증이 `inspection` 키를 빼서 main의 두 번째 검증에서 거절 — 실제 앱에선 오류가 그대로 남았을 것)·중요 0·경미 3(M1 등록 실패 실행의 inspect도 "대기 없음": list와 같고 허용은 거절되므로 회귀 아님 / M2 Codex의 멈춘 실행 inspect는 여전히 오류 / M3 `nowrap`이 긴 브랜치 이름에서 넘칠 수 있음). B1(null 유지 + 연쇄·멱등 테스트), M3(`keep-all`로 변경) 반영. 2차 차단·중요 0.
+- **테스트**: Rust 전체(`cargo test --workspace --locked`, 이번 Rust 수정이 모두 들어간 상태) core 239, protocol 70, sidecar 885(43 무시), stdio 16, 기타 3, 실패 0. 새 단언: 끝난 실행 inspect·decline 뒤 inspect·Claude acceptOnce 뒤 inspect(null, 재허용·거절은 거절), 총괄 지시문 버튼 이름. `npm test` 752 통과(새 `m5-approval` 2개), `pnpm build` 통과.
+- **실제 앱 세션 3회**(개발 빌드): 1회차 로그 오류는 위 권한 조회 1건, 2회차(사본 모드)·3회차(수정 빌드) 0건. 모두 Apple 이벤트 quit으로 정상 종료(exit 0). 점검용 헤드리스 Chrome과 개발 앱은 종료했다.
+- **관찰(미수정)**
+  - 에이전트 실행 샌드박스(`provider_runtime_sandbox.rs`, `deny default`)에서는 Chrome·Firefox·WebKit을 띄울 수 없고(`/Applications` 읽기·로컬 소켓 불가) Homebrew Node도 없다. 그래서 개발·검증 담당이 실제 브라우저로 앱을 열어 보지 못하고 jsc+가짜 DOM으로만 확인했고, 총괄도 "실제 브라우저로는 아무도 열어 보지 못했다"고 정직하게 알렸다. 웹 앱 개발에서 이 한계를 풀지(안전 경계 변경)는 주인님 결정 사항이다.
+  - 개발 중 권한 요청 카드가 사용자가 누르기 전에 나타났다 사라지는 경우가 2번 있었다(Claude CLI의 자체 취소). 비개발자에게는 깜박임으로 보일 수 있다.
+  - 사본 작업이 "반영 뒤 또 바뀜"일 때 결과 막대는 "변경 파일 5개 · 내 폴더에 반영"(작업 전체 기준)이고 변경 탭은 "새로 바뀐 파일 2개 · 다시 반영"이라 표현이 다르다. git 작업도 같은 구조다. 변경 목록에서 반영 뒤 새로 바뀐 파일을 따로 표시하지 않는다.
+  - 단계 커밋 메시지가 담당 보고 첫 문단 전체라 매우 길다(예: 디자인 단계 한 줄이 수백 자).
+  - 이 폴더 프로젝트(그림자 git)에 사본 작업을 반영했으므로 사용자 폴더에 커밋되지 않은 변경 5개가 남아 있다(시험 프로젝트, 정상 동작). 다음 git 작업의 합치기는 11-19 규칙대로 사용자 변경을 먼저 기록한다.
+- **다음 할 일**: M2(Codex 멈춘 실행의 inspect 오류), 위 관찰 중 결과 막대 표현·브라우저 실행 한계 결정, 기존 남은 경미(M16, M19, M20, M25, M31, M35, M39, M40, M42, M43, M45, M46, M49), 남은 핵심 작업(Windows·G6·배포). 로컬 커밋 3개(+기록 커밋)는 push가 필요하다(승인 대상).
+
 ### 2026-11-20 · by Claude Opus 5.5 (claude-opus-5-5) — 사본 작업 3상태 실제 화면 확인, 결과 막대 반영 버튼 정리
 - **실제 앱 확인**(개발 빌드, todo-test-1117a의 사본(v1) 작업, 변경 11개; 승인된 todo 시험 프로젝트)
   - 반영 전 상태가 맞게 나왔다: "변경된 파일 11개"와 "내 폴더에 반영" 버튼.
@@ -138,6 +164,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **에이전트는 실제 브라우저·Node를 실행할 수 없다(2026-11-23 확인)**: 실행 샌드박스(`provider_runtime_sandbox.rs` `POLICY`, `deny default`)는 `/System`·`/usr`·작업 공간·프로필만 읽게 하고 로컬 소켓을 막는다. 그래서 Chrome·Firefox·WebKit(Swift)·Homebrew Node가 모두 실패하고, 에이전트는 macOS `jsc`와 가짜 DOM으로만 웹 앱을 확인한다. 웹 앱 결과의 실제 동작은 사람이(또는 시험자가 별도 Chrome으로) 확인해야 한다. 이 경계를 넓히는 것은 안전 결정이다.
+- **"요청 내용 보기"는 사라진 요청에 오류를 내지 않는다(2026-11-23)**: Claude CLI는 권한 요청을 스스로 취소할 수 있다(`control_cancel_request`). 대기하지 않는 요청의 inspect는 `inspection: null`, 허용·거절은 `agentApprovalChanged`. approval 결과는 sidecar client·main·preload·화면에서 네 번 검증되므로 계약 검증은 자기 출력을 다시 통과해야 한다(멱등).
 - **셸로 fd가 닫혔는지 검사할 때(2026-11-20)**: `/bin/sh`(bash)는 내장 명령의 리디렉션(`printf … >&N`)을 처리하며 원래 fd를 10번 이상 첫 빈 번호에 보관한다. 그래서 닫힌 10번이 쓰기 가능처럼 보인다. 검사는 외부 명령(`/usr/bin/printf`)으로 한다. 병렬 테스트에서 낮은 번호가 차 있을 때만 드러난다.
 - **projection 조회는 계약상 전체를 검증한다(2026-11-20 확인)**: `Storage::projection_record(종류, id)`는 하나를 찾을 때도 projects·chats·runs·locks 전 행의 JSON을 파싱해, 다른 테이블의 손상도 오류로 낸다(`selected_projection_retains_only_requested_rows_without_skipping_validation`). 그래서 반복 호출은 비싸다. 성능 문제는 호출 쪽에서 한 번 읽은 값을 재사용해 푼다(예: `validate_actual_run_projection`).
 - **2026-11-20 앱 시작 검증 결정(사용자)**: 처음 열 때의 긴 확인은 받아들이지만 두 번째·세 번째 열 때도 오래 걸리면 안 된다. 그래서 (1) 검증 범위를 유지한 채 시작 검증을 빠르게 하고, (2) 정상 종료 때 Keychain 비밀 키로 서명한 "검증 완료 지점"을 남겨 다음 시작에는 서명이 맞으면 그 뒤의 기록만 검증한다(서명 없음·불일치·비정상 종료 뒤에는 전체 검증). 이는 `docs/proposals/m5-storage-reopen-verification.md`의 "이전 프로세스의 검증 결과를 믿지 않는다"를 "서명된 정상 종료 지점은 믿는다"로 바꾸는 사용자 승인이다. Keychain 키까지 가진 공격자는 조작한 DB를 통과시킬 수 있다는 대가를 설명했다. 독립 검토 대상.
