@@ -879,6 +879,8 @@ fn recorded_identities_keep_the_root_and_drop_only_what_was_observed_gone() {
     assert_eq!(tracker.recorded_identities(), [root]);
 }
 
+// Process identities are read on unix only (`identity_of` is an error elsewhere).
+#[cfg(unix)]
 #[test]
 fn after_the_owner_is_gone_a_reused_process_id_proves_the_recorded_process_ended() {
     let me = super::identity_of(std::process::id()).unwrap();
