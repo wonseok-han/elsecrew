@@ -357,6 +357,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   // Work again after a merge or apply: what was read before no longer holds.
   // The panels read afresh once the team is done (never a stale "merged").
   const activeWorking = activePhase !== null && phaseIsWorking(activePhase);
+  // Opening a task that is not working settles its old permission notices.
+  useEffect(() => { if (chat.activeChat && activePhase && !activeWorking && activePhase !== "attention") notifications.resolveApprovalsFor(chat.activeChat.chatId); }, [chat.activeChat?.chatId, activePhase, activeWorking]);
   useEffect(() => { if (activeWorking) { setMergeRead(null); setApplyRead(null); } }, [activeWorking, activeChatId]);
   // Known: read for this task (or read before at this version), or unreadable.
   const dispositionKnown = Boolean(activeDisposition) || (mergeRead?.chatId === activeChatId && mergeRead.state === null);

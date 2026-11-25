@@ -181,7 +181,7 @@ test("a permission notification settles once its request goes away (D13)", async
     onAgentRunStateChanged: (listener: (event: any) => void) => { listeners.push(listener); return () => {}; },
     getChat: async () => ({ chat: { chatId: "chat_1", projectId: "project_1", goal: "목표", state: "running" } }),
   };
-  const approvals = { request: async () => ({ pending }) };
+  const approvals: { request: (input?: unknown) => Promise<unknown> } = { request: async () => ({ pending }) };
   const realSetInterval = globalThis.setInterval;
   let tick: (() => void) | null = null;
   (globalThis as any).setInterval = (fn: () => void) => { tick = fn; return 1; };
@@ -198,5 +198,27 @@ test("a permission notification settles once its request goes away (D13)", async
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(center.snapshot()[0]?.resolved, true);
   assert.equal(center.unread(), 0);
+  // A second request whose slow answer arrives after the run ended stays settled.
+  pending = [{ approvalId: "approval_2" }];
+  let answer: (value: unknown) => void = () => {};
+  approvals.request = () => new Promise(resolve => { answer = resolve; });
+  tick!();
+  listeners[0]!({ run: { ...run, state: "succeeded" } });
+  answer({ pending });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.ok(!center.snapshot().some(item => item.id === "approval:approval_2"), "an out-of-date answer adds nothing");
   stop();
+});
+
+test("a task's permission notices settle together once it no longer works", () => {
+  const center = new NotificationCenter(null);
+  for (const id of ["a", "b"]) center.add({ id: `approval:${id}`, kind: "attention", projectId: "p", chatId: "chat_1", goal: "g", text: "", at: "2026-11-25T00:00:00Z" });
+  center.add({ id: "approval:c", kind: "attention", projectId: "p", chatId: "chat_2", goal: "g", text: "", at: "2026-11-25T00:00:00Z" });
+  center.add({ id: "done:run", kind: "done", projectId: "p", chatId: "chat_1", goal: "g", text: "", at: "2026-11-25T00:00:00Z" });
+  center.resolveApprovalsFor("chat_1");
+  const byId = new Map(center.snapshot().map(item => [item.id, item]));
+  assert.equal(byId.get("approval:a")?.resolved, true);
+  assert.equal(byId.get("approval:b")?.resolved, true);
+  assert.equal(byId.get("approval:c")?.resolved, undefined, "another task's request stays");
+  assert.equal(byId.get("done:run")?.resolved, undefined, "only permission requests settle");
 });

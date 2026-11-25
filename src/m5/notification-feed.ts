@@ -52,8 +52,10 @@ export function startNotificationFeed(bridge: NotificationFeedBridge, center: No
     bridge.onAgentRunStateChanged?.(({ run }) => {
       if (run.state === "running") { running.set(run.runId, run); return; }
       running.delete(run.runId);
-      // A run that stopped asks nothing any more.
+      // A run that stopped asks nothing any more; nor does its task once no
+      // other run of it is working (requests seen before a reload included).
       settle(run.runId);
+      if (![...running.values()].some(other => other.chatId === run.chatId)) center.resolveApprovalsFor(run.chatId);
       if (run.state === "failed" || run.state === "recoveryRequired") {
         void chatOf(run.chatId).then(chat => { if (chat) add(`run:${run.runId}`, "stopped", chat); });
       } else if (run.state === "succeeded" && run.selectedProfile.roleId === "coordinator") {
@@ -75,7 +77,8 @@ export function startNotificationFeed(bridge: NotificationFeedBridge, center: No
       const { runId, chatId, taskId, projectId, worktreeId, workspaceIdentity } = identity;
       void approvals.request({ action: "list", identity: { chatId, taskId, projectId, worktreeId, workspaceIdentity, runId } }).then(result => {
         const pending = (result as { pending?: { approvalId: string }[] } | null)?.pending;
-        if (!Array.isArray(pending)) return;
+        // A slow answer that arrives after its run ended is out of date.
+        if (!Array.isArray(pending) || !running.has(runId)) return;
         settle(runId, new Set(pending.map(item => item.approvalId)));
         if (pending.length) openApprovals.set(runId, new Set([...(openApprovals.get(runId) ?? []), ...pending.map(item => item.approvalId)]));
         for (const { approvalId } of pending) {

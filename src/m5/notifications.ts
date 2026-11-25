@@ -91,6 +91,15 @@ export class NotificationCenter {
     this.#changed();
   }
 
+  /** A task's permission requests all ended with its run (or the task is no
+   * longer working): none of them waits for the person any more. */
+  resolveApprovalsFor(chatId: string): void {
+    const open = (item: AppNotification) => item.chatId === chatId && item.id.startsWith("approval:") && !item.resolved;
+    if (!this.#items.some(open)) return;
+    this.#items = this.#items.map(item => open(item) ? { ...item, read: true, resolved: true } : item);
+    this.#changed();
+  }
+
   markRead(id: string): void {
     if (!this.#items.some(item => item.id === id && !item.read)) return;
     this.#items = this.#items.map(item => item.id === id ? { ...item, read: true } : item);
