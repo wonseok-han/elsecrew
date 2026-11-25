@@ -5,6 +5,7 @@ const LONG_CHARS = 480;
 const LONG_LINES = 8;
 const SUMMARY_SENTENCES = 3;
 const SUMMARY_CHARS = 260;
+const SUMMARY_SOURCE_CHARS = 6_000;
 
 export interface MessageSummary {
   /** Fold the message: show `summary` first, the whole report on request. */
@@ -29,7 +30,9 @@ export function messageSummary(text: string): MessageSummary {
   if (!long) return { long: false, summary: "" };
   const picked: string[] = [];
   let length = 0;
-  for (const paragraph of proseText(parseMarkdown(text))) {
+  // Only the start is read for the summary: a long report never parses whole
+  // just to show its first sentences.
+  for (const paragraph of proseText(parseMarkdown(text.slice(0, SUMMARY_SOURCE_CHARS)))) {
     for (const sentence of sentences(paragraph)) {
       if (picked.length >= SUMMARY_SENTENCES || (picked.length > 0 && length + sentence.length > SUMMARY_CHARS)) break;
       picked.push(sentence);

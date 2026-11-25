@@ -52,6 +52,7 @@ export function startNotificationFeed(bridge: NotificationFeedBridge, center: No
     bridge.onAgentRunStateChanged?.(({ run }) => {
       if (run.state === "running") { running.set(run.runId, run); return; }
       running.delete(run.runId);
+      latest.delete(run.runId);
       // A run that stopped asks nothing any more; nor does its task once no
       // other run of it is working (requests seen before a reload included).
       settle(run.runId);
@@ -72,21 +73,31 @@ export function startNotificationFeed(bridge: NotificationFeedBridge, center: No
     }),
   ];
   // Approvals are listed per run; only runs this session saw start are polled.
+  // One list at a time per run (answers can take seconds), and a request is
+  // only announced if it is still waiting in that run's latest list when the
+  // task's details come back.
+  const listing = new Set<string>();
+  const latest = new Map<string, Set<string>>();
+  const stillWaiting = (runId: string, approvalId: string) => running.has(runId) && Boolean(latest.get(runId)?.has(approvalId));
   const timer = approvals ? setInterval(() => {
     for (const identity of running.values()) {
       const { runId, chatId, taskId, projectId, worktreeId, workspaceIdentity } = identity;
+      if (listing.has(runId)) continue;
+      listing.add(runId);
       void approvals.request({ action: "list", identity: { chatId, taskId, projectId, worktreeId, workspaceIdentity, runId } }).then(result => {
         const pending = (result as { pending?: { approvalId: string }[] } | null)?.pending;
         // A slow answer that arrives after its run ended is out of date.
         if (!Array.isArray(pending) || !running.has(runId)) return;
-        settle(runId, new Set(pending.map(item => item.approvalId)));
-        if (pending.length) openApprovals.set(runId, new Set([...(openApprovals.get(runId) ?? []), ...pending.map(item => item.approvalId)]));
-        for (const { approvalId } of pending) {
+        const ids = new Set(pending.map(item => item.approvalId));
+        latest.set(runId, ids);
+        settle(runId, ids);
+        if (pending.length) openApprovals.set(runId, new Set([...(openApprovals.get(runId) ?? []), ...ids]));
+        for (const approvalId of ids) {
           if (seenApprovals.has(approvalId)) continue;
           seenApprovals.add(approvalId);
-          void chatOf(chatId).then(chat => { if (chat) add(`approval:${approvalId}`, "attention", chat); });
+          void chatOf(chatId).then(chat => { if (chat && stillWaiting(runId, approvalId)) add(`approval:${approvalId}`, "attention", chat); });
         }
-      }).catch(() => undefined);
+      }).catch(() => undefined).finally(() => { listing.delete(runId); });
     }
   }, APPROVAL_POLL_MS) : null;
   return () => {

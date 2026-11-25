@@ -1079,4 +1079,10 @@ export const en: Record<MessageKey, string> = {
   "m5.diff.prosePreview": "Preview",
   "m5.diff.proseChanges": "Changed lines",
   "m5.approval.unreadable": "The request could not be read. The agent may be taking it back. Use “View request” to check again.",
+  "m5.task.phase.answered": "Answered",
+  "m5.apply.unreadable": "Could not check whether this task was applied before.",
+  "m5.approval.fullContent": "Show the full request (check it before allowing)",
+  "m5.approval.openFirst": "To allow, first open “Show the full request” and check exactly what will run or change.",
+  "m5.markdown.tooLarge": "This is large, so it is shown as plain text.",
+  "m5.roles.filledNotSaved": "Roles without a model show the recommended one. Save to keep it.",
 };

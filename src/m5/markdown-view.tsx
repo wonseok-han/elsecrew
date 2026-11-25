@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import { useI18n } from "../i18n.tsx";
-import { parseMarkdown, safeLinkTarget, type MarkdownBlock, type MarkdownInline } from "./markdown.ts";
+import { parseMarkdown, safeLinkTarget, tooLargeToDraw, type MarkdownBlock, type MarkdownInline } from "./markdown.ts";
 
 /**
  * Draws parsed Markdown as React elements only (never as markup), so no text
@@ -8,6 +8,9 @@ import { parseMarkdown, safeLinkTarget, type MarkdownBlock, type MarkdownInline 
  * to open the address outside, and the app asks the person first.
  */
 export function MarkdownView({ source, renderCode }: { source: string; renderCode?: (text: string, language: string) => ReactNode }) {
+  const { t } = useI18n();
+  // A very large document is shown as it is: drawing it would hold the screen.
+  if (tooLargeToDraw(source)) return <><p className="m5-md-plain-note">{t("m5.markdown.tooLarge")}</p><pre className="m5-md-plain">{source}</pre></>;
   return <>{parseMarkdown(source).map((block, index) => <Block key={index} block={block} renderCode={renderCode} />)}</>;
 }
 
@@ -61,6 +64,6 @@ function ExternalLink({ href, children }: { href: string; children: ReactNode })
   const { t } = useI18n();
   // No href: nothing in the page can navigate or open a window from it.
   return <a className="m5-md-link" role="link" tabIndex={0} title={t("m5.markdown.openLink", { url: href })}
-    onClick={event => { event.preventDefault(); openExternalLink(href); }}
-    onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); openExternalLink(href); } }}>{children}</a>;
+    onClick={event => { event.preventDefault(); event.stopPropagation(); openExternalLink(href); }}
+    onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); openExternalLink(href); } }}>{children}</a>;
 }

@@ -39,3 +39,19 @@ export function shouldResumeProject(input: {
   if (!remembered || attempted || !ready || projectOpen || busy || !known) return null;
   return known.includes(remembered) ? remembered : null;
 }
+
+/**
+ * Whether the remembered project is still in the saved list, reading page by
+ * page (the list comes 50 at a time). "gone" only after the whole list was
+ * read; a list that could not be read to the end says "unknown" (keep it).
+ */
+export async function findRememberedProject(remembered: string, listPage: (cursor: string | null) => Promise<{ ids: readonly string[]; nextCursor: string | null }>, maxPages = 200): Promise<"found" | "gone" | "unknown"> {
+  let cursor: string | null = null;
+  for (let page = 0; page < maxPages; page++) {
+    const result = await listPage(cursor);
+    if (result.ids.includes(remembered)) return "found";
+    if (result.nextCursor === null) return "gone";
+    cursor = result.nextCursor;
+  }
+  return "unknown";
+}

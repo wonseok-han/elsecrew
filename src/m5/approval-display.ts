@@ -39,3 +39,26 @@ export function withdrawnRequests<T extends { approvalId: string }>(before: read
   const still = new Set(after.map(item => item.approvalId));
   return before.filter(item => !still.has(item.approvalId) && !answered.has(item.approvalId));
 }
+
+/**
+ * Everything the agent asks to run or touch, exactly as the engine reported
+ * it: no shortening, no whitespace changes (only invisible and control
+ * characters are shown as escapes). This is what the person must have opened
+ * before allowing.
+ */
+export function approvalFields(inspection: ApprovalInspection): { field: "command" | "cwd" | "reason" | "toolInput" | "grantRoot" | "host" | "protocol"; text: string }[] {
+  const fields = [
+    ["command", inspection.command], ["toolInput", inspection.toolInput ?? null], ["cwd", inspection.cwd],
+    ["grantRoot", inspection.grantRoot], ["host", inspection.host], ["protocol", inspection.protocol], ["reason", inspection.reason],
+  ] as const;
+  return fields.filter(([, value]) => value !== null).map(([field, value]) => ({ field, text: visibleApprovalText(value!) }));
+}
+
+/**
+ * Allowing a request needs its full content read from the engine for this
+ * exact request and opened by the person on this card. A summary line read
+ * automatically is never enough, and a new request starts unopened.
+ */
+export function canAcceptApproval(input: { approvalId: string; inspectedId: string | null; openedIds: ReadonlySet<string>; sending: boolean; error: boolean }): boolean {
+  return !input.sending && !input.error && input.inspectedId === input.approvalId && input.openedIds.has(input.approvalId);
+}

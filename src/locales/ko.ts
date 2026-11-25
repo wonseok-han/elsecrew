@@ -1077,6 +1077,12 @@ export const ko = {
   "m5.diff.prosePreview": "미리보기",
   "m5.diff.proseChanges": "바뀐 줄 보기",
   "m5.approval.unreadable": "요청 내용을 읽지 못했어요. 에이전트가 요청을 거둬들이는 중일 수 있어요. ‘요청 내용 보기’로 다시 확인할 수 있어요.",
+  "m5.task.phase.answered": "답변 완료",
+  "m5.apply.unreadable": "이 작업을 전에 반영했는지 확인하지 못했어요.",
+  "m5.approval.fullContent": "전체 내용 보기 (허용하기 전에 확인해 주세요)",
+  "m5.approval.openFirst": "허용하려면 먼저 ‘전체 내용 보기’를 펼쳐 실제로 실행되거나 바뀌는 내용을 확인해 주세요.",
+  "m5.markdown.tooLarge": "내용이 커서 서식 없이 원문 그대로 보여 줘요.",
+  "m5.roles.filledNotSaved": "모델을 고르지 않은 역할에 추천 모델을 채워 두었어요. 저장하면 이 설정으로 기억해요.",
 } as const;
 
 export type MessageKey = keyof typeof ko;

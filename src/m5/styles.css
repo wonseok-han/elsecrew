@@ -1430,7 +1430,9 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-result-bar[data-task-phase="changedSince"] { border-color: #4a3f63; background: #19161f; }
 .m5-result-bar[data-task-phase="changedSince"] .m5-result-mark { color: var(--status-review); }
 .m5-result-loading .m5-result-mark, .m5-result-loading .m5-result-text > strong { visibility: hidden; }
-.m5-result-loading .m5-result-actions { visibility: hidden; }
+.m5-result-loading .m5-result-decide { visibility: hidden; }
+.m5-result-decide { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.m5-result-decide > button { padding: 4px 12px; font-size: 12px; min-height: 0; }
 .m5-skeleton-line { display: inline-block; width: 180px; max-width: 100%; height: 10px; border-radius: 5px; vertical-align: middle;
   background: linear-gradient(90deg, var(--m5-raised) 0%, var(--m5-hover) 50%, var(--m5-raised) 100%); background-size: 200% 100%; animation: m5-skeleton 1.2s ease-in-out infinite; }
 @keyframes m5-skeleton { from { background-position: 100% 0; } to { background-position: -100% 0; } }
@@ -1505,3 +1507,8 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-preferences-content .m5-workspace-folder h3 { margin: 0 0 6px; font-size: 14px; }
 .m5-preferences-content .m5-workspace-folder .m5-settings-intro { margin: 0 0 12px; }
 .m5-preferences-content .m5-workspace-folder-path { margin: 0 0 12px; overflow-wrap: anywhere; }
+.m5-approval-verbatim { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; max-height: 320px; overflow: auto; }
+.m5-approval-details[open] > summary { margin-bottom: 6px; }
+.m5-approval-details > summary { cursor: pointer; font-weight: 600; }
+.m5-md-plain { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.m5-md-plain-note { color: var(--m5-muted); font-size: 12px; }

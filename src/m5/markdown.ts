@@ -67,6 +67,16 @@ function splitRow(line: string): string[] {
   return cells;
 }
 
+/** Past this size a document is shown as its original text, not drawn. */
+export const MARKDOWN_DRAW_MAX_CHARS = 120_000;
+export const MARKDOWN_DRAW_MAX_LINES = 4_000;
+export function tooLargeToDraw(source: string): boolean {
+  if (source.length > MARKDOWN_DRAW_MAX_CHARS) return true;
+  let lines = 1;
+  for (let i = source.indexOf("\n"); i >= 0; i = source.indexOf("\n", i + 1)) if (++lines > MARKDOWN_DRAW_MAX_LINES) return true;
+  return false;
+}
+
 export function parseMarkdown(source: string, depth = 0): MarkdownBlock[] {
   const lines = source.replace(/\r\n?/g, "\n").split("\n");
   return parseLines(lines, depth);
@@ -119,7 +129,8 @@ function parseLines(lines: string[], depth: number): MarkdownBlock[] {
           const sameList = following !== undefined && (indentOf(following) > base
             || (LIST_ITEM.exec(following)?.[1]!.length === base && /\d/.test(LIST_ITEM.exec(following)![2]![0]!) === ordered));
           if (!sameList) break;
-          items[items.length - 1]!.push(""); i++; continue;
+          // The whole run of blank lines is read once, never line by line again.
+          items[items.length - 1]!.push(""); i = ahead; continue;
         }
         if (indentOf(current) > base) { items[items.length - 1]!.push(current.slice(Math.min(indentOf(current), base + 2 + (ordered ? 1 : 0)))); i++; continue; }
         if (!startsBlock(current) && items[items.length - 1]![items[items.length - 1]!.length - 1] !== "") { items[items.length - 1]!.push(current.trim()); i++; continue; }
@@ -145,13 +156,15 @@ function parseLines(lines: string[], depth: number): MarkdownBlock[] {
   return blocks;
 }
 
-/** Closing bracket for `[` at `open`, counting nested brackets; -1 if none. */
-function closeBracket(text: string, open: number): number {
+/** Closing bracket for `[` at `open`, counting nested brackets, looking at
+ * most `limit` characters; -1 if none. */
+function closeBracket(text: string, open: number, limit: number): number {
   let level = 0;
-  for (let i = open; i < text.length; i++) {
+  const stop = Math.min(text.length, open + limit);
+  for (let i = open; i < stop; i++) {
     const c = text[i];
     if (c === "\\") { i++; continue; }
-    if (c === "`") { const end = text.indexOf("`", i + 1); if (end > i) { i = end; continue; } }
+    if (c === "`") { let end = i + 1; while (end < stop && text[end] !== "`") end++; if (end < stop) { i = end; continue; } }
     if (c === "[") level++;
     else if (c === "]" && --level === 0) return i;
   }
@@ -176,14 +189,28 @@ function linkDestination(text: string, open: number): { target: string; end: num
   return null;
 }
 
-const BARE_URL = /^https?:\/\/[^\s<>()[\]{}"'`]+/;
+// Sticky (`y`): matched in place at an index, never on a copied tail.
+const BARE_URL = /https?:\/\/[^\s<>()[\]{}"'`]+/y;
+const AUTOLINK = /<((?:https?|mailto):[^\s<>]+)>/iy;
+/** Characters a line's bracket matching may scan in all: past it, `[` is text. */
+const BRACKET_BUDGET = 20_000;
 const ESCAPABLE = /[\\`*_{}[\]()#+\-.!|~<>]/;
 
-export function parseInline(source: string, depth = 0): MarkdownInline[] {
+/**
+ * `links: false` reads a link's own label: text and emphasis only, so one
+ * click never asks to open two addresses.
+ *
+ * Linear in practice: a closing mark that is not there is looked for once per
+ * mark (remembered), and bracket matching shares a budget.
+ */
+export function parseInline(source: string, depth = 0, links = true): MarkdownInline[] {
   const out: MarkdownInline[] = [];
   let buffer = "";
   const flush = () => { if (buffer) { out.push({ kind: "text", text: buffer }); buffer = ""; } };
-  const nested = (text: string) => depth < MAX_DEPTH ? parseInline(text, depth + 1) : [{ kind: "text" as const, text }];
+  const nested = (text: string, inner = links) => depth < MAX_DEPTH ? parseInline(text, depth + 1, inner) : [{ kind: "text" as const, text }];
+  /** From this index on, the mark (key) has no closing mark: do not look again. */
+  const noClose = new Map<string, number>();
+  let bracketBudget = BRACKET_BUDGET;
   let i = 0;
   while (i < source.length) {
     const c = source[i]!;
@@ -192,8 +219,10 @@ export function parseInline(source: string, depth = 0): MarkdownInline[] {
     if (c === "`") {
       let run = 1; while (source[i + run] === "`") run++;
       const fence = "`".repeat(run);
-      let end = source.indexOf(fence, i + run);
+      const known = noClose.get(fence);
+      let end = known !== undefined && i >= known ? -1 : source.indexOf(fence, i + run);
       while (end >= 0 && source[end + run] === "`") end = source.indexOf(fence, end + run + 1);
+      if (end < 0 && (known === undefined || i < known)) noClose.set(fence, i);
       if (end > 0) {
         flush();
         const text = source.slice(i + run, end).replace(/\n/g, " ");
@@ -202,20 +231,22 @@ export function parseInline(source: string, depth = 0): MarkdownInline[] {
       }
       buffer += fence; i += run; continue;
     }
-    if (c === "<") {
-      const auto = /^<((?:https?|mailto):[^\s<>]+)>/i.exec(source.slice(i));
+    if (c === "<" && links) {
+      AUTOLINK.lastIndex = i;
+      const auto = AUTOLINK.exec(source);
       if (auto) { flush(); out.push({ kind: "link", href: safeLinkTarget(auto[1]!), children: [{ kind: "text", text: auto[1]! }] }); i += auto[0].length; continue; }
     }
-    if ((c === "[" || (c === "!" && source[i + 1] === "[")) && depth < MAX_DEPTH) {
+    if ((c === "[" || (c === "!" && source[i + 1] === "[")) && depth < MAX_DEPTH && links && bracketBudget > 0) {
       const open = c === "!" ? i + 1 : i;
-      const close = closeBracket(source, open);
+      const close = closeBracket(source, open, Math.min(bracketBudget, source.length - open));
+      bracketBudget -= close > 0 ? close - open : Math.min(bracketBudget, source.length - open);
       const destination = close > 0 ? linkDestination(source, close + 1) : null;
       if (destination) {
         flush();
         const label = source.slice(open + 1, close);
         // An image shows its description only: a report never makes the app load anything.
-        if (c === "!") out.push(...nested(label));
-        else out.push({ kind: "link", href: safeLinkTarget(destination.target), children: nested(label) });
+        if (c === "!") out.push(...nested(label, false));
+        else out.push({ kind: "link", href: safeLinkTarget(destination.target), children: nested(label, false) });
         i = destination.end; continue;
       }
     }
@@ -229,12 +260,15 @@ export function parseInline(source: string, depth = 0): MarkdownInline[] {
         const marker = c.repeat(size);
         let end = i + run;
         let found = -1;
-        while ((end = source.indexOf(marker, end)) > 0) {
+        const known = noClose.get(marker);
+        if (known !== undefined && i >= known) end = -1;
+        while (end >= 0 && (end = source.indexOf(marker, end)) > 0) {
           const prior = source[end - 1]!;
           const following = source[end + size] ?? " ";
           if (!/\s/.test(prior) && source[end + size] !== c && (c !== "_" || !/[\p{L}\p{N}]/u.test(following))) { found = end; break; }
           end += 1;
         }
+        if (found < 0 && (known === undefined || i < known)) noClose.set(marker, i);
         if (found > i + size) {
           flush();
           const children = nested(source.slice(i + size, found));
@@ -247,8 +281,9 @@ export function parseInline(source: string, depth = 0): MarkdownInline[] {
       }
       buffer += c.repeat(run); i += run; continue;
     }
-    if ((c === "h" || c === "H") && /[^\p{L}\p{N}]|^$/u.test(source[i - 1] ?? "")) {
-      const bare = BARE_URL.exec(source.slice(i));
+    if (links && (c === "h" || c === "H") && /[^\p{L}\p{N}]|^$/u.test(source[i - 1] ?? "")) {
+      BARE_URL.lastIndex = i;
+      const bare = BARE_URL.exec(source);
       if (bare) {
         const url = bare[0].replace(/[.,;:!?]+$/, "");
         flush();

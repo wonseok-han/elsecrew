@@ -16,7 +16,7 @@ type Notice =
  * merged into its base branch instead of copied into the user's folder. A
  * v1 copy keeps the old apply button (`fallback`).
  */
-export function ChatWorkspaceMerge({ chat, disabled, fallback, merged = false, onMerged, onAskTeam, onState }: {
+export function ChatWorkspaceMerge({ chat, disabled, fallback, merged = false, onMerged, onAskTeam, onState, revision = "" }: {
   chat: ChatRecordV1; disabled: boolean; fallback: React.ReactNode;
   /** The host knows the task's changes are already in the base (after a reload). */
   merged?: boolean;
@@ -26,6 +26,8 @@ export function ChatWorkspaceMerge({ chat, disabled, fallback, merged = false, o
   onAskTeam: (text: string) => void;
   /** Where the task stands, for the host's summary line. */
   onState?: (state: ChatMergeState | null) => void;
+  /** Changes whenever the workspace's changes do (a save, a refresh): look again. */
+  revision?: string;
 }) {
   const { t } = useI18n();
   const [state, setState] = useState<ChatMergeState | null>(null);
@@ -51,7 +53,7 @@ export function ChatWorkspaceMerge({ chat, disabled, fallback, merged = false, o
     return null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chat.chatId, chat.worktreeId, chat.workspaceIdentity]);
-  useEffect(() => { void inspect(); return () => { generation.current++; }; }, [inspect]);
+  useEffect(() => { void inspect(); return () => { generation.current++; }; }, [inspect, revision]);
   // Reported once known: null then means the state could not be read.
   useEffect(() => { if (state || unavailable) onState?.(state); }, [state, unavailable, onState]);
 

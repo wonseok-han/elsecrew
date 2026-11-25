@@ -7,9 +7,10 @@ import type { ChatMergeState } from "./contracts/project-catalog-v1.ts";
  * truth for what may be merged, applied or started.
  *
  * draft → running → attention → review → merged | applied | changedSince,
- * plus stopped (canceled) and discarded.
+ * plus answered (the team finished with nothing to merge or apply), stopped
+ * (canceled) and discarded.
  */
-export type TaskPhase = "draft" | "running" | "attention" | "review" | "merged" | "applied" | "changedSince" | "stopped" | "discarded";
+export type TaskPhase = "draft" | "running" | "attention" | "review" | "answered" | "merged" | "applied" | "changedSince" | "stopped" | "discarded";
 
 /** How the task reaches the user's folder: a Git task merges, a copy task applies. */
 export type TaskKind = "git" | "copy";
@@ -39,8 +40,10 @@ export function dispositionFromApply(state: { applied: boolean; pending: number;
 }
 
 const RUNNING: readonly ChatStateV1[] = ["running", "stopping", "applying"];
-const ATTENTION: readonly ChatStateV1[] = ["waitingForUser", "needsAttention", "recoveryRequired"];
-const FINISHED: readonly ChatStateV1[] = ["reviewReady", "completed"];
+// `waitingForUser` is the team's ordinary end without file changes
+// (orchestration.rs: completed and not changed); it is not a question.
+const ATTENTION: readonly ChatStateV1[] = ["needsAttention", "recoveryRequired"];
+const FINISHED: readonly ChatStateV1[] = ["reviewReady", "completed", "waitingForUser"];
 
 /**
  * The single task status. A task that works again after a merge is running,
@@ -56,6 +59,9 @@ export function taskPhase(input: { state: ChatStateV1; disposition?: TaskDisposi
   if (FINISHED.includes(state)) {
     if (disposition?.standing === "done") return disposition.kind === "git" ? "merged" : "applied";
     if (disposition?.standing === "changedSince") return "changedSince";
+    if (disposition?.standing === "notYet") return "review";
+    // Nothing to merge or apply, or an answer whose standing is not read yet.
+    if (disposition?.standing === "none" || state === "waitingForUser") return "answered";
     return "review";
   }
   return "review";
@@ -84,7 +90,7 @@ export function taskPhaseTone(phase: TaskPhase): TaskTone {
     case "running": return "running";
     case "attention": return "attention";
     case "review": case "changedSince": return "review";
-    case "merged": case "applied": return "done";
+    case "merged": case "applied": case "answered": return "done";
     case "stopped": return "danger";
     default: return "neutral";
   }
@@ -114,6 +120,8 @@ export function resultBarView(input: { phase: TaskPhase; kind: TaskKind | null; 
   if (switching) return { phase, loading: true, detailKey: null };
   if (phaseIsWorking(phase) || phase === "stopped" || phase === "discarded") return null;
   if (!known) return { phase, loading: true, detailKey: null };
+  // An answer with nothing to put into the folder offers nothing to do.
+  if (phase === "answered") return null;
   const detailKey = phase === "merged" ? "m5.task.result.merged"
     : phase === "applied" ? "m5.task.result.applied"
     : phase === "changedSince" ? (kind === "copy" ? "m5.task.result.changedSinceApply" : "m5.task.result.changedSinceMerge")
@@ -124,6 +132,7 @@ export function resultBarView(input: { phase: TaskPhase; kind: TaskKind | null; 
 /** The changes panel's one status line. */
 export type ChangesStatus = "working" | "notYet" | "done" | "changedSince" | null;
 export function changesStatus(phase: TaskPhase, changeCount: number): ChangesStatus {
+  if (phase === "answered") return null;
   if (changeCount === 0 && !phaseIsSettled(phase)) return null;
   if (phaseIsWorking(phase)) return "working";
   if (phaseIsSettled(phase)) return "done";
@@ -141,4 +150,22 @@ export function succeededRunNoticeKey(phase: TaskPhase | null) {
   return phase === null || phase === "review" || phase === "changedSince"
     ? "m5.run.help.succeededClean" as const
     : "m5.run.help.succeededSettled" as const;
+}
+
+/**
+ * Whether the open task's standing has been read for the result bar: known,
+ * or a read that failed (the panels then offer to look again). A failed read
+ * never leaves the bar locked on a placeholder.
+ */
+export function standingRead(input: {
+  disposition: TaskDisposition | null;
+  /** This task's merge read; `state: null` means it could not be read. */
+  mergeRead: { state: ChatMergeState | null } | null;
+  /** This task's apply receipt read (copy tasks); `state: null` means it failed. */
+  applyRead: { state: unknown } | null;
+}): boolean {
+  const { disposition, mergeRead, applyRead } = input;
+  if (disposition) return true;
+  if (mergeRead && mergeRead.state === null) return true;
+  return mergeRead?.state?.kind === "snapshot" && applyRead !== null && applyRead.state === null;
 }

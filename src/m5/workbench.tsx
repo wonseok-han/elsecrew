@@ -40,7 +40,7 @@ import { resolveM5Bridge, type SupportedM5Bridge } from "./bridge-boundary.ts";
 import { canAbandonAgentRecovery, ChatUiController } from "./chat-state.ts";
 import { WorkbenchDock } from "./workbench-dock.tsx";
 import { ProviderLogin, type ConnectionReveal } from "./provider-login.tsx";
-import { ApprovalCard } from "./approval-card.tsx";
+import { ApprovalCard, ApprovalWithdrawnNote, type WithdrawnApproval } from "./approval-card.tsx";
 import { ChatWorkspaceDiscard } from "./chat-workspace-discard.tsx";
 import { ChatWorkspaceMerge } from "./chat-workspace-merge.tsx";
 import { WorkspaceFolderSetting } from "./workspace-folder-setting.tsx";
@@ -55,11 +55,11 @@ import { NotificationBell, type BellNoticeTone } from "./notification-bell.tsx";
 import { startNotificationFeed, type NotificationFeedBridge } from "./notification-feed.ts";
 import { NotificationCenter, osNotificationsEnabled, type AppNotification } from "./notifications.ts";
 import { validateProjectCatalogResult, type ChatMergeState } from "./contracts/project-catalog-v1.ts";
-import { dispositionFromApply, dispositionFromMerge, phaseIsSettled, phaseIsWorking, resultBarView, taskPhase, taskPhaseLabelKey, taskPhaseTone, type TaskDisposition, type TaskKind, type TaskPhase } from "./task-status.ts";
+import { dispositionFromApply, dispositionFromMerge, standingRead, phaseIsSettled, phaseIsWorking, resultBarView, taskPhase, taskPhaseLabelKey, taskPhaseTone, type TaskDisposition, type TaskKind, type TaskPhase } from "./task-status.ts";
 import { TaskDispositionStore } from "./task-disposition.ts";
-import { correctSettingsDraft, editSettingsDraft, loadSettingsDraft, settingsDraftDirty } from "./settings-draft.ts";
+import { correctSettingsDraft, editSettingsDraft, loadSettingsDraft, settingsDraftDirty, settingsDraftSavable } from "./settings-draft.ts";
 import { timelineMessages } from "./timeline-messages.ts";
-import { forgetLastProject, recallLastProject, rememberLastProject, shouldResumeProject } from "./last-session.ts";
+import { findRememberedProject, forgetLastProject, recallLastProject, rememberLastProject, shouldResumeProject } from "./last-session.ts";
 import type { ApplyStanding } from "./apply-latest.tsx";
 
 type MonacoApi = typeof Monaco;
@@ -302,10 +302,16 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     setResumingProject(true);
     void (async () => {
       try {
-        const input = { action: "list" as const, cursor: null };
-        const result = validateProjectCatalogResult(await window.m5Projects!.request(input), input);
-        const known = result.action === "list" ? result.projects.map(entry => entry.projectId) : null;
-        if (known && !known.includes(remembered)) { forgetLastProject(browserStorage()); return; }
+        // Every page of the saved list (50 a page) is read before deciding the
+        // project is gone; a list read only in part keeps the memory.
+        const standing = await findRememberedProject(remembered, async cursor => {
+          const input: { action: "list"; cursor: string | null } = { action: "list", cursor };
+          const result = validateProjectCatalogResult(await window.m5Projects!.request(input), input);
+          if (result.action !== "list") throw new Error("unexpected project catalog response");
+          return { ids: result.projects.map(entry => entry.projectId), nextCursor: result.nextCursor };
+        });
+        if (standing !== "found") { if (standing === "gone") forgetLastProject(browserStorage()); return; }
+        const known = [remembered];
         // Opening can be locked for a moment while the screen settles: try a
         // few times, each through the same checks as a click.
         for (let attempt = 0; attempt < 5; attempt++) {
@@ -347,7 +353,14 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     return apply.action === "inspectChatApply" ? dispositionFromApply(apply) : null;
   }, browserStorage()), [chatController]);
   useSyncExternalStore(dispositions.subscribe, () => dispositions.version(), () => dispositions.version());
-  useEffect(() => { if (admissionReady) dispositions.request(chat.chats.filter(item => item.chatId !== chat.activeChat?.chatId)); }, [dispositions, chat.chats, chat.activeChat?.chatId, admissionReady]);
+  // A kept standing is shown, then checked again whenever a project opens:
+  // the folder or the base branch can change without the task's record.
+  useEffect(() => { dispositions.revalidate(); }, [dispositions, chat.projectId]);
+  useEffect(() => { if (admissionReady) dispositions.request(chat.chats.filter(item => item.chatId !== chat.activeChat?.chatId)); }, [dispositions, chat.chats, chat.activeChat?.chatId, admissionReady, chat.projectId]);
+  // The open task's merge and apply standings are read again whenever its
+  // changes are (a save in the workspace, a refresh).
+  const [diffRevision, setDiffRevision] = useState(0);
+  useEffect(() => { setDiffRevision(value => value + 1); }, [snapshot.diffSummary]);
   const activeChatId = chat.activeChat?.chatId ?? null;
   const mergeInfo = mergeRead && mergeRead.chatId === activeChatId ? mergeRead.state : null;
   const applyState = applyRead && applyRead.chatId === activeChatId ? applyRead : null;
@@ -368,7 +381,9 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   useEffect(() => { if (chat.activeChat && activePhase && !activeWorking && activePhase !== "attention") notifications.resolveApprovalsFor(chat.activeChat.chatId); }, [chat.activeChat?.chatId, activePhase, activeWorking]);
   useEffect(() => { if (activeWorking) { setMergeRead(null); setApplyRead(null); } }, [activeWorking, activeChatId]);
   // Known: read for this task (or read before at this version), or unreadable.
-  const dispositionKnown = Boolean(activeDisposition) || (mergeRead?.chatId === activeChatId && mergeRead.state === null);
+  // An unreadable standing counts as known (the panels then offer to look
+  // again) so the result bar never stays locked on a read that failed.
+  const dispositionKnown = standingRead({ disposition: activeDisposition, mergeRead: mergeRead?.chatId === activeChatId ? mergeRead : null, applyRead: applyState });
   const resultView = activePhase ? resultBarView({ phase: activePhase, kind: activeKind, known: dispositionKnown, switching: chat.switching }) : null;
   // The built-in team names no model; a task starts only once every role has one.
   const unselectedRoles = chat.settings ? (() => { const team = roleSettingsAsV3(chat.settings); return team.roles.filter(role => !hasUsableModel(role.runtime, role.modelSelector)).map(role => roleLabel(role.roleId, team.roleDefinitions, t)); })() : [];
@@ -743,9 +758,11 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           <small>{resultView.loading ? <span className="m5-skeleton-line" aria-label={t("m5.task.loading")} />
             : resultView.detailKey === "m5.task.result.review" ? <>{snapshot.diffSummary ? <>{t("m5.result.files", { count: snapshot.diffSummary.entries.length })} <LineCounts entry={snapshot.diffSummary.entries.reduce((sum, entry) => ({ added: sum.added + (entry.added ?? 0), removed: sum.removed + (entry.removed ?? 0) }), { added: 0, removed: 0 })} /> · </> : null}{t(resultView.detailKey)}</>
             : resultView.detailKey ? t(resultView.detailKey, { base: mergeInfo?.kind === "gitWorktree" ? mergeInfo.baseRef ?? "main" : "main", count: activeDisposition?.pending ?? 0 }) : null}</small></span>
-        <span className="m5-result-actions" inert={resultView.loading} aria-hidden={resultView.loading || undefined}>
-          <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => { controller.selectPanel("changes"); void controller.refreshChanges(); setAllChanges({ focus: null }); }}>{t("m5.result.view")}</button>
-          <ChatWorkspaceMerge key={`merge:${chat.activeChat.chatId}`} chat={chat.activeChat} disabled={!admissionReady || resultView.loading} merged={mergedIntoBase} onState={onMergeState}
+        <span className="m5-result-actions" inert={chat.switching} aria-hidden={chat.switching || undefined}>
+          {/* Viewing this task's changes never waits for its standing; deciding does. */}
+          <button type="button" className="m5-secondary" disabled={!admissionReady || chat.switching} onClick={() => { controller.selectPanel("changes"); void controller.refreshChanges(); setAllChanges({ focus: null }); }}>{t("m5.result.view")}</button>
+          <span className="m5-result-decide" inert={resultView.loading} aria-hidden={resultView.loading || undefined}>
+          <ChatWorkspaceMerge key={`merge:${chat.activeChat.chatId}`} chat={chat.activeChat} revision={`${diffRevision}`} disabled={!admissionReady || resultView.loading} merged={mergedIntoBase} onState={onMergeState}
             onMerged={() => { dispositions.forget(chat.activeChat!.chatId); void controller.refreshChanges(); }}
             onAskTeam={text => { chatController.editFollowup(text); void chatController.appendFollowup(admissionReady, true, lang); }}
             fallback={<button type="button" disabled={!admissionReady || appliedToFolder || resultView.loading} onClick={() => { controller.selectPanel("changes"); void controller.refreshChanges(); setApplyOpenRequest(value => value + 1); }}>{t(appliedToFolder ? "m5.result.appliedAction" : activePhase === "changedSince" ? "m5.apply.again" : "m5.result.apply")}</button>} />
@@ -755,6 +772,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         if (!controller.leaveProjectView() || !chatController.clearProjectView()) throw new Error("discarded workspace view could not be released");
         setDiscardedWorkspaceNotice(true);
       }} />
+          </span>
         </span>
       </section>}</div>{chat.activeChat.schemaVersion !== 1 && <FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} />}</div> : <section className="m5-first-chat" aria-label={t("m5.firstChat.title")}>
         <h2>{t("m5.firstChat.title")}</h2><p>{t("m5.firstChat.help")}</p>
@@ -863,7 +881,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
               {/* One status line, read from the task status: while the team works it never says merged or applied. */}
               {chat.activeChat && activePhase && !chat.switching && phaseIsWorking(activePhase) && (snapshot.diffSummary?.entries.length ?? 0) > 0 && <p className="m5-task-changes-working" data-task-phase={activePhase}>{t("m5.task.changes.working", { count: snapshot.diffSummary?.entries.length ?? 0 })}</p>}
               {chat.activeChat && activePhase && !chat.switching && !phaseIsWorking(activePhase) && mergeInfo?.kind === "gitWorktree" && <ChangesMergeStatus state={mergeInfo} phase={activePhase} changeCount={snapshot.diffSummary?.entries.length ?? 0} canMerge={resultView !== null && !resultView.loading} onMerge={openResultMerge} />}
-              {chat.activeChat && activePhase && !chat.switching && !phaseIsWorking(activePhase) && mergeInfo?.kind === "snapshot" && <ApplyLatest projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} changeCount={snapshot.diffSummary?.entries.length ?? 0} confirmRequest={applyOpenRequest} onInspected={onApplyInspected} onApplied={() => dispositions.forget(chat.activeChat!.chatId)} disabled={!admissionReady || chat.switching || chatController.isActionBlocked() || chat.activeChat.state === "running" || chat.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state))} />}
+              {chat.activeChat && activePhase && !chat.switching && !phaseIsWorking(activePhase) && mergeInfo?.kind === "snapshot" && <ApplyLatest revision={`${diffRevision}`} projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} changeCount={snapshot.diffSummary?.entries.length ?? 0} confirmRequest={applyOpenRequest} onInspected={onApplyInspected} onApplied={() => dispositions.forget(chat.activeChat!.chatId)} disabled={!admissionReady || chat.switching || chatController.isActionBlocked() || chat.activeChat.state === "running" || chat.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state))} />}
               {snapshot.diffSummary && changesDone && !chat.switching && <p className="m5-changes-done-label">{t("m5.changes.doneList")}</p>}
               {snapshot.diffSummary && <ChangeList key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}`} entries={snapshot.diffSummary.entries} selected={allChanges ? allChanges.focus?.path : snapshot.diffFile?.path} disabled={!admissionReady || snapshot.actionBlocked}
                 onRefresh={() => void controller.refreshChanges()} refreshing={snapshot.diffLoading} allOpen={Boolean(allChanges)} onViewAll={() => { if (allChanges) setAllChanges(null); else { setAllChanges({ focus: null }); controller.selectPanel("editor"); } }}
@@ -1153,6 +1171,9 @@ function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, o
     return () => { choiceEpoch.current++; };
   }, [selectedRole, selectedRuntime, settings]);
   const dirty = settingsDraftDirty(draft, sameTeam);
+  // The screen's own corrections (a recommended model) are not "unsaved
+  // changes", but they can be kept by saving.
+  const savable = dirty || settingsDraftSavable(draft, sameTeam);
   useEffect(() => {
     const dialog = dialogRef.current;
     dialog?.showModal();
@@ -1194,6 +1215,7 @@ function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, o
     <section className="m5-settings-scope" aria-label={t("m5.roles.scope")}><span>{t(scope === "app" ? "m5.roles.appScope" : "m5.roles.scope")}</span><strong>{projectName}</strong><p>{t(scope === "app" ? "m5.roles.appDefaultsHelp" : "m5.roles.scopeHelp")}</p></section>
     {feedback}
     {dirty && <p role="status">{t("m5.roles.dirty")}</p>}
+    {!dirty && savable && <p className="m5-settings-filled">{t("m5.roles.filledNotSaved")}</p>}
     {discardAction && <section role="alertdialog" aria-label={t("m5.roles.discardLabel")}>
       <p>{t("m5.roles.discardQuestion")}</p>
       <button type="button" onClick={() => setDiscardAction(null)}>{t("m5.roles.keep")}</button>
@@ -1257,7 +1279,7 @@ function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, o
     {!valid && <p role="alert">{t("m5.roles.invalid")} {t("m5.roles.invalidTeam")}</p>}
     </div>
     <footer className="m5-settings-actions">
-    <button type="button" disabled={editing || !valid || !dirty} onClick={() => void run(() => onSave(team.roles, team.roleDefinitions))}>{t(busy ? "m5.roles.busy" : scope === "app" ? "m5.roles.appSave" : "m5.roles.save")}</button>
+    <button type="button" disabled={editing || !valid || !savable} onClick={() => void run(() => onSave(team.roles, team.roleDefinitions))}>{t(busy ? "m5.roles.busy" : scope === "app" ? "m5.roles.appSave" : "m5.roles.save")}</button>
     <button className="m5-secondary" type="button" title={t("m5.roles.reloadHelp")} disabled={editing} onClick={() => dirty ? setDiscardAction("reload") : void run(onReload)}>{t("m5.roles.reload")}</button>
     </footer>
   </>;
@@ -1406,11 +1428,20 @@ function TeamTimeline({ controller, chat, admissionReady, fixtureAvailable, onCo
   }, [historyStart, messageStart]);
   const fixtureActive = Boolean(chat.activeRunId);
   const actualActive = chat.agentRuns.find((run) => run.state === "preparing" || run.state === "running" || run.state === "cancelling") ?? null;
+  // Requests still waiting when their run ended: said here for a moment, since
+  // the run's card goes away with the run.
+  const [withdrawnAtEnd, setWithdrawnAtEnd] = useState<WithdrawnApproval[]>([]);
+  const onWithdrawnAtEnd = useCallback((items: WithdrawnApproval[]) => {
+    setWithdrawnAtEnd(list => [...list, ...items]);
+    const ids = new Set(items.map(item => item.approvalId));
+    window.setTimeout(() => setWithdrawnAtEnd(list => list.filter(item => !ids.has(item.approvalId))), 8000);
+  }, []);
+  useEffect(() => { setWithdrawnAtEnd([]); }, [chat.activeChat?.chatId]);
   const startingActual = chat.agentStartingRoleId !== null;
   const activity = actualActive ? t(`m5.run.${actualActive.state}`) : startingActual ? t("m5.chat.waitingResponse") : chat.activeChat?.state === "running" ? t("m5.chat.teamWorking") : null;
   const blocked = controller.isActionBlocked();
   const identityUnavailable = chat.agentRecovery !== null && !canAbandonAgentRecovery(chat.agentRecovery);
-return <section className="m5-timeline" aria-label={t("m5.chat.title")}><header><div><p className="m5-eyebrow">{t("m5.chat.title")} · {phase ? t(taskPhaseLabelKey(phase, phaseKind)) : t(`m5.chat.state.${chat.activeChat!.state}`)}</p><h2 title={chat.activeChat!.goal}>{chat.activeChat!.goal}</h2></div><div className="m5-run-actions">{fixtureActive && <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => void controller.cancelRun()}>{t("m5.chat.cancelDemo")}</button>}{actualActive && chat.activeChat?.schemaVersion === 1 && <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => void controller.cancelAgentRun(actualActive)}>{t("m5.chat.cancelActual")}</button>}</div></header>{chat.activeChat?.state === "discarded" && !controller.isRecoveryBlocked() && <section className="m5-notice"><p>{t("m5.chat.discardedHelp")}</p></section>}{controller.isRecoveryBlocked() && <section className="m5-error"><strong>{t("m5.chat.recovery")}</strong><p>{identityUnavailable ? t("m5.chat.identityUnavailable") : t("m5.chat.blocked")}</p>{chat.recoveries.filter((item) => item.state === "unresolved").map((item) => <button key={item.recoveryId} type="button" disabled={!admissionReady} onClick={() => void controller.abandonRecovery(item, lang)}>{t("m5.chat.discard")}</button>)}</section>}{chat.agentRecovery && <section className="m5-error">{identityUnavailable ? <><strong>{t("m5.chat.protected")}</strong><p>{t("m5.chat.protectedHelp")}</p></> : <><strong>{t("m5.chat.termination")}</strong><p>{t("m5.chat.terminationHelp")}</p><button type="button" disabled={!admissionReady || chat.agentRecoveryResolving} onClick={() => void controller.abandonAgentRecovery(lang)}>{chat.agentRecoveryResolving ? t("m5.chat.checkingTermination") : t("m5.chat.discardAfterTermination")}</button></>}</section>}{chat.messages.length > 200 && <nav className="m5-diff-pages" aria-label={t("m5.chat.messages")}><button type="button" disabled={messageStart === 0} onClick={() => moveHistory(messageStart - 200)}>{t("m5.chat.older")}</button><span>{t("m5.chat.range", { first: messageStart + 1, last: messageStart + visibleMessages.length, total: chat.messages.length })}</span><button type="button" disabled={messageStart + 200 >= chat.messages.length} onClick={() => moveHistory(messageStart + 200)}>{t("m5.chat.newer")}</button><button type="button" disabled={historyStart === null} onClick={showLatest}>{t("m5.chat.latest")}</button></nav>}<div ref={messagesRef} className="m5-timeline-list" tabIndex={0} aria-label={t("m5.chat.messages")}>{visibleMessages.map((message) => <TeamMessageRow key={message.messageId} message={message} roleLabel={message.roleId ? profileLabel(chat.activeChat!, message.roleId) : ""} messageTime={messageTime} definitions={chat.activeChat!.roleDefinitions} />)}<AgentRuns runs={chat.agentRuns} definitions={chat.activeChat?.roleDefinitions} posted={chat.messages} phase={phase} />{activity && <div className="m5-chat-activity" role="status"><span className="m5-activity-dot" aria-hidden="true"/><strong>{activity}</strong>{actualActive && <span>{roleLabel(actualActive.selectedProfile.roleId, chat.activeChat!.roleDefinitions, t)} · {profileLabel(chat.activeChat!, actualActive.selectedProfile.roleId)}</span>}</div>}{actualActive && admissionReady && !blocked && <ApprovalCard key={actualActive.runId} onPendingChange={onApprovalsWaiting} identity={{chatId:actualActive.chatId,taskId:actualActive.taskId,projectId:actualActive.projectId,worktreeId:actualActive.worktreeId,workspaceIdentity:actualActive.workspaceIdentity,runId:actualActive.runId}} onCancel={() => { if ((chat.activeChat?.schemaVersion ?? 1) !== 1 && window.m5Projects) void controller.cancelTeamTask(input => window.m5Projects!.request(input)); else void controller.cancelAgentRun(actualActive); }} />}</div>{newMessages && <button type="button" className="m5-secondary m5-new-messages" onClick={showLatest}>{t("m5.chat.newMessages")}</button>}<footer className="m5-execution-footer"><div className="m5-demo-controls">{fixtureAvailable && <span>{t("m5.chat.demoHelp")}</span>}{fixtureAvailable && (["planning", "coding", "review"] as const).map((role) => <button key={`demo-${role}`} type="button" disabled={!admissionReady || fixtureActive || Boolean(actualActive) || startingActual || blocked} onClick={() => void controller.startDemo(role)}>{t("m5.chat.demo", { role: t(`m5.roles.${role}`) })}</button>)}</div><div className="m5-actual-controls">{chat.activeChat?.schemaVersion === 1 && <div><p>{t("m5.chat.legacyCoordinator")}</p><button type="button" disabled={!admissionReady || fixtureActive || Boolean(actualActive) || startingActual || blocked} onClick={onCoordinatorChat}>{t("m5.navigation.newChat")}</button></div>}</div></footer></section>;
+return <section className="m5-timeline" aria-label={t("m5.chat.title")}><header><div><p className="m5-eyebrow">{t("m5.chat.title")} · {phase ? t(taskPhaseLabelKey(phase, phaseKind)) : t(`m5.chat.state.${chat.activeChat!.state}`)}</p><h2 title={chat.activeChat!.goal}>{chat.activeChat!.goal}</h2></div><div className="m5-run-actions">{fixtureActive && <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => void controller.cancelRun()}>{t("m5.chat.cancelDemo")}</button>}{actualActive && chat.activeChat?.schemaVersion === 1 && <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => void controller.cancelAgentRun(actualActive)}>{t("m5.chat.cancelActual")}</button>}</div></header>{chat.activeChat?.state === "discarded" && !controller.isRecoveryBlocked() && <section className="m5-notice"><p>{t("m5.chat.discardedHelp")}</p></section>}{controller.isRecoveryBlocked() && <section className="m5-error"><strong>{t("m5.chat.recovery")}</strong><p>{identityUnavailable ? t("m5.chat.identityUnavailable") : t("m5.chat.blocked")}</p>{chat.recoveries.filter((item) => item.state === "unresolved").map((item) => <button key={item.recoveryId} type="button" disabled={!admissionReady} onClick={() => void controller.abandonRecovery(item, lang)}>{t("m5.chat.discard")}</button>)}</section>}{chat.agentRecovery && <section className="m5-error">{identityUnavailable ? <><strong>{t("m5.chat.protected")}</strong><p>{t("m5.chat.protectedHelp")}</p></> : <><strong>{t("m5.chat.termination")}</strong><p>{t("m5.chat.terminationHelp")}</p><button type="button" disabled={!admissionReady || chat.agentRecoveryResolving} onClick={() => void controller.abandonAgentRecovery(lang)}>{chat.agentRecoveryResolving ? t("m5.chat.checkingTermination") : t("m5.chat.discardAfterTermination")}</button></>}</section>}{chat.messages.length > 200 && <nav className="m5-diff-pages" aria-label={t("m5.chat.messages")}><button type="button" disabled={messageStart === 0} onClick={() => moveHistory(messageStart - 200)}>{t("m5.chat.older")}</button><span>{t("m5.chat.range", { first: messageStart + 1, last: messageStart + visibleMessages.length, total: chat.messages.length })}</span><button type="button" disabled={messageStart + 200 >= chat.messages.length} onClick={() => moveHistory(messageStart + 200)}>{t("m5.chat.newer")}</button><button type="button" disabled={historyStart === null} onClick={showLatest}>{t("m5.chat.latest")}</button></nav>}<div ref={messagesRef} className="m5-timeline-list" tabIndex={0} aria-label={t("m5.chat.messages")}>{visibleMessages.map((message) => <TeamMessageRow key={message.messageId} message={message} roleLabel={message.roleId ? profileLabel(chat.activeChat!, message.roleId) : ""} messageTime={messageTime} definitions={chat.activeChat!.roleDefinitions} />)}<AgentRuns runs={chat.agentRuns} definitions={chat.activeChat?.roleDefinitions} posted={chat.messages} phase={phase} />{activity && <div className="m5-chat-activity" role="status"><span className="m5-activity-dot" aria-hidden="true"/><strong>{activity}</strong>{actualActive && <span>{roleLabel(actualActive.selectedProfile.roleId, chat.activeChat!.roleDefinitions, t)} · {profileLabel(chat.activeChat!, actualActive.selectedProfile.roleId)}</span>}</div>}{actualActive && admissionReady && !blocked && <ApprovalCard key={actualActive.runId} onPendingChange={onApprovalsWaiting} onWithdrawn={onWithdrawnAtEnd} identity={{chatId:actualActive.chatId,taskId:actualActive.taskId,projectId:actualActive.projectId,worktreeId:actualActive.worktreeId,workspaceIdentity:actualActive.workspaceIdentity,runId:actualActive.runId}} onCancel={() => { if ((chat.activeChat?.schemaVersion ?? 1) !== 1 && window.m5Projects) void controller.cancelTeamTask(input => window.m5Projects!.request(input)); else void controller.cancelAgentRun(actualActive); }} />}{withdrawnAtEnd.length > 0 && <section className="m5-approval-card m5-approval-ended" aria-label={t("m5.approval.title")}>{withdrawnAtEnd.map(item => <ApprovalWithdrawnNote key={item.approvalId} item={item} />)}</section>}</div>{newMessages && <button type="button" className="m5-secondary m5-new-messages" onClick={showLatest}>{t("m5.chat.newMessages")}</button>}<footer className="m5-execution-footer"><div className="m5-demo-controls">{fixtureAvailable && <span>{t("m5.chat.demoHelp")}</span>}{fixtureAvailable && (["planning", "coding", "review"] as const).map((role) => <button key={`demo-${role}`} type="button" disabled={!admissionReady || fixtureActive || Boolean(actualActive) || startingActual || blocked} onClick={() => void controller.startDemo(role)}>{t("m5.chat.demo", { role: t(`m5.roles.${role}`) })}</button>)}</div><div className="m5-actual-controls">{chat.activeChat?.schemaVersion === 1 && <div><p>{t("m5.chat.legacyCoordinator")}</p><button type="button" disabled={!admissionReady || fixtureActive || Boolean(actualActive) || startingActual || blocked} onClick={onCoordinatorChat}>{t("m5.navigation.newChat")}</button></div>}</div></footer></section>;
 }
 
 function SessionDiagnosticsHelp({ runtime }: { runtime: string }) {

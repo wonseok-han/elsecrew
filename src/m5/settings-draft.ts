@@ -11,6 +11,8 @@
  * the same rule.
  */
 export interface SettingsDraft<T> {
+  /** What is saved now, exactly as loaded. */
+  readonly loaded: T;
   /** What was loaded, plus the screen's own corrections. */
   readonly baseline: T;
   /** What the form shows and saves. */
@@ -18,13 +20,13 @@ export interface SettingsDraft<T> {
 }
 
 export function loadSettingsDraft<T>(loaded: T): SettingsDraft<T> {
-  return { baseline: loaded, current: loaded };
+  return { loaded, baseline: loaded, current: loaded };
 }
 
 /** A change the person made. */
 export function editSettingsDraft<T>(draft: SettingsDraft<T>, edit: (current: T) => T): SettingsDraft<T> {
   const current = edit(draft.current);
-  return current === draft.current ? draft : { baseline: draft.baseline, current };
+  return current === draft.current ? draft : { loaded: draft.loaded, baseline: draft.baseline, current };
 }
 
 /**
@@ -34,10 +36,20 @@ export function editSettingsDraft<T>(draft: SettingsDraft<T>, edit: (current: T)
 export function correctSettingsDraft<T>(draft: SettingsDraft<T>, correct: (value: T) => T): SettingsDraft<T> {
   const baseline = correct(draft.baseline);
   const current = correct(draft.current);
-  return baseline === draft.baseline && current === draft.current ? draft : { baseline, current };
+  return baseline === draft.baseline && current === draft.current ? draft : { loaded: draft.loaded, baseline, current };
 }
 
 /** True only when the person changed something since loading. */
 export function settingsDraftDirty<T>(draft: SettingsDraft<T>, same: (a: T, b: T) => boolean): boolean {
   return !same(draft.baseline, draft.current);
+}
+
+/**
+ * Saving changes what is stored: possible whenever the form differs from what
+ * was loaded, the screen's own corrections included (a recommended model it
+ * filled in can be kept by saving). Leaving without saving only asks when
+ * `settingsDraftDirty` says the person changed something.
+ */
+export function settingsDraftSavable<T>(draft: SettingsDraft<T>, same: (a: T, b: T) => boolean): boolean {
+  return !same(draft.loaded, draft.current);
 }

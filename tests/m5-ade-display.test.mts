@@ -8,10 +8,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { parseInline, parseMarkdown, safeLinkTarget } from "../src/m5/markdown.ts";
 import * as markdown from "../src/m5/markdown.ts";
 import { messageSummary } from "../src/m5/message-summary.ts";
-import { correctSettingsDraft, editSettingsDraft, loadSettingsDraft, settingsDraftDirty } from "../src/m5/settings-draft.ts";
+import { correctSettingsDraft, editSettingsDraft, loadSettingsDraft, settingsDraftDirty, settingsDraftSavable } from "../src/m5/settings-draft.ts";
 import { timelineMessages } from "../src/m5/timeline-messages.ts";
 import { activityLine, collapseRepeats } from "../src/m5/work-history.ts";
-import { forgetLastProject, recallLastProject, rememberLastProject, shouldResumeProject } from "../src/m5/last-session.ts";
+import { findRememberedProject, forgetLastProject, recallLastProject, rememberLastProject, shouldResumeProject } from "../src/m5/last-session.ts";
 import { NotificationCenter } from "../src/m5/notifications.ts";
 import { startNotificationFeed } from "../src/m5/notification-feed.ts";
 import { validateExternalLink } from "../src/m5/contracts/external-link-v1.ts";
@@ -221,4 +221,111 @@ test("a task's permission notices settle together once it no longer works", () =
   assert.equal(byId.get("approval:b")?.resolved, true);
   assert.equal(byId.get("approval:c")?.resolved, undefined, "another task's request stays");
   assert.equal(byId.get("done:run")?.resolved, undefined, "only permission requests settle");
+});
+
+test("unclosed marks and long runs parse in near-linear time (review #2)", () => {
+  const cases = [
+    "*a ".repeat(20_000),                 // emphasis that never closes
+    "`x ".repeat(20_000),                 // code spans that never close
+    "[".repeat(30_000) + "x",             // brackets that never close
+    "**b _c ~~d ".repeat(8_000),
+    "h ".repeat(30_000),                  // many places a bare address could start
+    "<".repeat(30_000),
+  ];
+  for (const source of cases) {
+    const started = performance.now();
+    parseInline(source);
+    assert.ok(performance.now() - started < 1_500, `${source.slice(0, 12)}… took too long`);
+  }
+  // A list with a long run of blank lines is read once.
+  const started = performance.now();
+  parseMarkdown("- a" + "\n".repeat(50_000) + "  b");
+  assert.ok(performance.now() - started < 1_500);
+  // The summary reads only the start of a huge report.
+  const summaryStart = performance.now();
+  messageSummary("첫 문장이에요. 둘째 문장이에요. " + "*x ".repeat(200_000));
+  assert.ok(performance.now() - summaryStart < 500);
+});
+
+test("a very large document is shown as original text, not drawn (review #2)", () => {
+  const html = renderMarkdown("# 제목\n\n" + "- 항목\n".repeat(5_000));
+  assert.ok(html.includes("m5-md-plain") && html.includes("m5.markdown.tooLarge"));
+  assert.ok(!html.includes("<li>"));
+  const small = renderMarkdown("# 제목\n\n- 항목");
+  assert.ok(!small.includes("m5-md-plain") && small.includes("<li>"));
+});
+
+test("a link's own label never holds another link: one click, one address (review #10)", () => {
+  const inline = parseInline("[https://other.example/x](https://docs.example/a) and [see <https://b.example>](https://c.example)");
+  const links = inline.filter(item => item.kind === "link") as Extract<typeof inline[number], { kind: "link" }>[];
+  assert.equal(links.length, 2);
+  for (const link of links) {
+    const nestedLink = JSON.stringify(link.children).includes('"kind":"link"');
+    assert.equal(nestedLink, false, JSON.stringify(link));
+  }
+  assert.equal(links[0]!.href, "https://docs.example/a");
+  const view = readFileSync(new URL("../src/m5/markdown-view.tsx", import.meta.url), "utf8");
+  assert.equal((view.match(/stopPropagation\(\)/g) ?? []).length, 2, "click and Enter stop at the link");
+});
+
+test("a late task read never brings back a request that went away (review #3)", async () => {
+  const center = new NotificationCenter(null);
+  const listeners: ((event: any) => void)[] = [];
+  let chatAnswer: (value: unknown) => void = () => {};
+  const bridge = {
+    onAgentRunStateChanged: (listener: (event: any) => void) => { listeners.push(listener); return () => {}; },
+    getChat: () => new Promise(resolve => { chatAnswer = resolve; }),
+  };
+  let pending = [{ approvalId: "approval_a" }];
+  let lists = 0;
+  const approvals = { request: async () => { lists++; return { pending }; } };
+  const realSetInterval = globalThis.setInterval;
+  let tick: (() => void) | null = null;
+  (globalThis as any).setInterval = (fn: () => void) => { tick = fn; return 1; };
+  const stop = startNotificationFeed(bridge, center, approvals, () => {});
+  (globalThis as any).setInterval = realSetInterval;
+  const run = { runId: "run_1", chatId: "chat_1", taskId: "task_1", projectId: "project_1", worktreeId: "w", workspaceIdentity: "i", state: "running", selectedProfile: { roleId: "review" } };
+  listeners[0]!({ run });
+  tick!();                                           // list → A waits; the task read is slow
+  await new Promise(resolve => setTimeout(resolve, 5));
+  pending = [];
+  tick!();                                           // list → A is gone
+  await new Promise(resolve => setTimeout(resolve, 5));
+  listeners[0]!({ run: { ...run, state: "succeeded" } });
+  chatAnswer({ chat: { chatId: "chat_1", projectId: "project_1", goal: "g", state: "reviewReady" } });
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.ok(!center.snapshot().some(item => item.id === "approval:approval_a"), "the request that went away is not announced");
+  // One list at a time per run: a tick while a list is out asks nothing new.
+  let release: (value: unknown) => void = () => {};
+  approvals.request = () => { lists++; return new Promise(resolve => { release = resolve; }) as Promise<{ pending: { approvalId: string }[] }>; };
+  listeners[0]!({ run });
+  const before = lists;
+  tick!(); tick!(); tick!();
+  assert.equal(lists, before + 1);
+  release({ pending: [] });
+  stop();
+});
+
+test("restart finds a project saved past the first page, and forgets only after reading the whole list (review #9)", async () => {
+  const pages = new Map<string | null, { ids: string[]; nextCursor: string | null }>([
+    [null, { ids: Array.from({ length: 50 }, (_, index) => `project_${index}`), nextCursor: "c1" }],
+    ["c1", { ids: ["project_far"], nextCursor: null }],
+  ]);
+  const list = async (cursor: string | null) => pages.get(cursor)!;
+  assert.equal(await findRememberedProject("project_far", list), "found");
+  assert.equal(await findRememberedProject("project_missing", list), "gone");
+  assert.equal(await findRememberedProject("project_far", list, 1), "unknown", "a list read in part keeps the memory");
+});
+
+test("a recommended model the screen filled in can be saved without counting as unsaved (review #11)", () => {
+  type Team = { model: string };
+  const same = (a: Team, b: Team) => a.model === b.model;
+  let draft = loadSettingsDraft<Team>({ model: "" });
+  draft = correctSettingsDraft(draft, team => team.model ? team : { model: "recommended" });
+  assert.equal(settingsDraftDirty(draft, same), false, "opening and leaving asks nothing");
+  assert.equal(settingsDraftSavable(draft, same), true, "but saving keeps the recommendation");
+  const untouched = loadSettingsDraft<Team>({ model: "opus" });
+  assert.equal(settingsDraftSavable(correctSettingsDraft(untouched, team => team), same), false);
+  const source = readFileSync(new URL("../src/m5/workbench.tsx", import.meta.url), "utf8");
+  assert.ok(source.includes("disabled={editing || !valid || !savable}"));
 });

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  changesStatus, dispositionFromApply, dispositionFromMerge, resultBarView, succeededRunNoticeKey,
+  changesStatus, dispositionFromApply, dispositionFromMerge, resultBarView, standingRead, succeededRunNoticeKey,
   taskGroup, taskPhase, taskPhaseLabelKey, taskPhaseTone, type TaskPhase,
 } from "../src/m5/task-status.ts";
 import { TaskDispositionStore } from "../src/m5/task-disposition.ts";
+import { outcomeOfChatState } from "../src/m5/notifications.ts";
 import { runOutcomeNotice } from "../src/m5/work-status.ts";
 import { ko } from "../src/locales/ko.ts";
 import { en } from "../src/locales/en.ts";
@@ -87,10 +88,10 @@ test("approvals waiting make a running task 'needs you'; other states map once",
   assert.equal(taskPhase({ state: "needsAttention" }), "attention");
   assert.equal(taskPhase({ state: "canceled" }), "stopped");
   assert.equal(taskPhase({ state: "discarded" }), "discarded");
-  assert.equal(taskPhase({ state: "reviewReady", disposition: dispositionFromMerge(git()) }), "review");
+  assert.equal(taskPhase({ state: "reviewReady", disposition: dispositionFromMerge(git()) }), "answered", "nothing to merge is not a review");
   assert.equal(dispositionFromMerge(git())?.standing, "none");
   assert.equal(dispositionFromMerge({ kind: "snapshot" }), null);
-  for (const phase of ["draft", "running", "attention", "review", "merged", "applied", "stopped", "discarded"] as const) {
+  for (const phase of ["draft", "running", "attention", "review", "answered", "merged", "applied", "stopped", "discarded"] as const) {
     assert.ok(ko[taskPhaseLabelKey(phase)] && en[taskPhaseLabelKey(phase)], phase);
   }
 });
@@ -165,4 +166,84 @@ test("a copy task's apply panel shows a placeholder until its receipt is read, n
     const known = renderApplyLatest([false, false, null, null, { applied: true, pending: 1, total: 2 }, false], {}).html;
     assert.ok(known.includes("반영 뒤 새로 바뀐 파일 1개") && known.includes(ko["m5.apply.again"]));
   } finally { (globalThis as any).window = original; }
+});
+
+test("a team's ordinary answer without file changes is 'answered', not 'needs you' or 'waiting for review' (review #6)", () => {
+  // orchestration.rs: completed without changes → waitingForUser; with changes → reviewReady.
+  const answered = taskPhase({ state: "waitingForUser" });
+  assert.equal(answered, "answered");
+  assert.equal(ko[taskPhaseLabelKey(answered)], "답변 완료");
+  assert.equal(taskGroup(answered), "done");
+  assert.equal(resultBarView({ phase: answered, kind: "git", known: true }), null, "nothing to merge or apply: no result bar");
+  assert.equal(changesStatus(answered, 0), null);
+  assert.equal(succeededRunNoticeKey(answered), "m5.run.help.succeededSettled");
+  // `completed` with nothing to put in the folder never says "not in your folder yet".
+  assert.equal(taskPhase({ state: "completed", disposition: { kind: "git", standing: "none" } }), "answered");
+  assert.equal(resultBarView({ phase: "answered", kind: "git", known: true }), null);
+  // An answer after earlier, not yet merged changes still asks for a review.
+  assert.equal(taskPhase({ state: "waitingForUser", disposition: { kind: "git", standing: "notYet" } }), "review");
+  assert.equal(taskPhase({ state: "waitingForUser", disposition: { kind: "copy", standing: "done" } }), "applied");
+  // Unread standing of an answer: a placeholder until read (it may have changes).
+  assert.equal(resultBarView({ phase: "answered", kind: null, known: false })?.loading, true);
+  // The bell calls the same state "done".
+  assert.equal(outcomeOfChatState("waitingForUser"), "done");
+});
+
+test("a failed apply-receipt read never leaves the result bar locked (review #5)", () => {
+  const snapshot = { state: { kind: "snapshot" as const } };
+  assert.equal(standingRead({ disposition: null, mergeRead: snapshot, applyRead: null }), false, "still reading");
+  assert.equal(standingRead({ disposition: null, mergeRead: snapshot, applyRead: { state: null } }), true, "read failed: known, the panel offers to look again");
+  assert.equal(standingRead({ disposition: null, mergeRead: { state: null }, applyRead: null }), true);
+  assert.equal(standingRead({ disposition: { kind: "copy", standing: "notYet" }, mergeRead: null, applyRead: null }), true);
+  const view = resultBarView({ phase: taskPhase({ state: "reviewReady" }), kind: "copy", known: standingRead({ disposition: null, mergeRead: snapshot, applyRead: { state: null } }) });
+  assert.equal(view?.loading, false);
+});
+
+test("kept standings are asked again every session and after a revalidation; late answers are dropped (review #4)", async () => {
+  const saved = new Map<string, string>();
+  const storage = { getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => { saved.set(key, value); } };
+  const task = { chatId: "chat_a", updatedAt: "2026-11-25T01:00:00Z", state: "reviewReady" };
+  const first = new TaskDispositionStore(async () => ({ kind: "git", standing: "done" }), storage);
+  first.request([task]);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(first.get(task)?.standing, "done");
+  // Next session: the kept answer shows, and the task is still asked again
+  // (its folder or base branch can change without its record).
+  let answer: { kind: "git"; standing: "done" | "changedSince" } = { kind: "git", standing: "changedSince" };
+  const asked: string[] = [];
+  const second = new TaskDispositionStore(async chatId => { asked.push(chatId); return answer; }, storage);
+  assert.equal(second.get(task)?.standing, "done");
+  second.request([task]);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.deepEqual(asked, ["chat_a"]);
+  assert.equal(second.get(task)?.standing, "changedSince");
+  // Same session, same version: not asked again until revalidated.
+  second.request([task]);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(asked.length, 1);
+  second.revalidate();
+  answer = { kind: "git", standing: "done" };
+  second.request([task]);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(asked.length, 2);
+  assert.equal(second.get(task)?.standing, "done");
+  // An answer that arrives after a revalidation started is out of date.
+  let release: (value: { kind: "git"; standing: "changedSince" }) => void = () => {};
+  const slow = new TaskDispositionStore(() => new Promise(resolve => { release = resolve; }), null);
+  slow.request([task]);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  slow.revalidate();
+  release({ kind: "git", standing: "changedSince" });
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(slow.get(task), null);
+});
+
+test("the open task's merge and apply standings are read again when its changes are", () => {
+  for (const file of ["../src/m5/chat-workspace-merge.tsx", "../src/m5/apply-latest.tsx"]) {
+    const source = readFileSync(new URL(file, import.meta.url), "utf8");
+    assert.match(source, /useEffect\(\(\) => \{ void inspect\(\); return \(\) => \{ generation\.current\+\+; \}; \}, \[inspect, [^\]]*revision\]\);/, file);
+  }
+  const workbench = readFileSync(new URL("../src/m5/workbench.tsx", import.meta.url), "utf8");
+  assert.ok(workbench.includes("revision={`${diffRevision}`}"));
+  assert.ok(workbench.includes("dispositions.revalidate()"));
 });

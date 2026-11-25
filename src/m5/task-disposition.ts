@@ -6,7 +6,10 @@ import type { TaskDisposition } from "./task-status.ts";
  * only, per viewer; the sidecar answers again whenever a task changes.
  *
  * An entry belongs to one version of the task (`updatedAt`): a task that ran
- * again is looked at afresh, never shown with its old standing.
+ * again is looked at afresh, never shown with its old standing. The task's
+ * record does not change when its folder or the base branch does, so a kept
+ * answer is only shown until it is asked again: once per app session, and
+ * again whenever the list is revalidated (a project opened or refreshed).
  */
 export interface DispositionTask { chatId: string; updatedAt: string; state: string }
 type Entry = { updatedAt: string; disposition: TaskDisposition };
@@ -15,7 +18,7 @@ interface StorageLike { getItem(key: string): string | null; setItem(key: string
 const KEY = "elsecrew.m5.taskDisposition.v1";
 const LIMIT = 300;
 /** Only a finished task has a standing worth asking about. */
-const FINISHED = new Set(["reviewReady", "completed"]);
+const FINISHED = new Set(["reviewReady", "completed", "waitingForUser"]);
 
 function validDisposition(value: unknown): value is TaskDisposition {
   if (!value || typeof value !== "object") return false;
@@ -76,15 +79,22 @@ export class TaskDispositionStore {
     if (this.#entries.delete(chatId)) this.#changed();
   }
 
-  /** Ask the engine, one task at a time, about finished tasks not known yet. */
+  /** Forget which tasks were asked: the next request asks them again. */
+  revalidate(): void { this.#asked.clear(); this.#round++; }
+  #round = 0;
+
+  /** Ask the engine, one task at a time, about finished tasks not asked in
+   * this round (a kept answer shows meanwhile). */
   request(tasks: readonly DispositionTask[]): void {
     for (const task of tasks) {
-      if (!FINISHED.has(task.state) || this.get(task) || this.#asked.get(task.chatId) === task.updatedAt) continue;
+      if (!FINISHED.has(task.state) || this.#asked.get(task.chatId) === task.updatedAt) continue;
       this.#asked.set(task.chatId, task.updatedAt);
       this.#queue = this.#queue.then(async () => {
+        const round = this.#round;
         try {
           const disposition = await this.#inspect(task.chatId);
-          if (disposition && this.#asked.get(task.chatId) === task.updatedAt) this.record(task, disposition);
+          // An answer from before a revalidation or for an older version is out of date.
+          if (disposition && round === this.#round && this.#asked.get(task.chatId) === task.updatedAt) this.record(task, disposition);
         } catch { /* unknown stays "waiting for review" */ }
       });
     }

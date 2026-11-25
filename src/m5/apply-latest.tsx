@@ -31,7 +31,7 @@ export function mergeStanding(state: ChatMergeState | null, changeCount: number)
  * engine's apply receipt: not applied yet (apply), applied (no button), and
  * changed again since (apply again, counting only what changed since).
  */
-export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmRequest = 0, onApplied, onStanding, onInspected }: {
+export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmRequest = 0, onApplied, onStanding, onInspected, revision = "" }: {
   projectId: string; chatId: string; changeCount: number; disabled: boolean;
   /** Bumped by "check changes and apply" elsewhere: opens the confirmation. */
   confirmRequest?: number;
@@ -39,6 +39,8 @@ export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmR
   onStanding?: (standing: ChangesStanding | null) => void;
   /** Each answer of the engine's apply receipt (null: could not read it). */
   onInspected?: (state: ApplyStanding | null) => void;
+  /** Changes whenever the workspace's changes do (a save, a refresh): look again. */
+  revision?: string;
 }) {
   const { t } = useI18n();
   const [confirming, setConfirming] = useState(false);
@@ -65,7 +67,7 @@ export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmR
   }, [projectId, chatId]);
   useEffect(() => { setConfirming(false); setResult(null); setFailed(null); setState(null); setUnreadable(false); }, [projectId, chatId]);
   // The workspace changed (a new step, a save): look again.
-  useEffect(() => { void inspect(); return () => { generation.current++; }; }, [inspect, changeCount]);
+  useEffect(() => { void inspect(); return () => { generation.current++; }; }, [inspect, changeCount, revision]);
   const standing = applyStanding(state);
   useEffect(() => { onStanding?.(standing); }, [standing, onStanding]);
   // A request to confirm waits for the change count: asking refreshes the
@@ -110,6 +112,7 @@ export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmR
       </div>
     </div>}
     {result && <p role={result.failed ? "alert" : "status"} className="m5-apply-latest-done">{t(result.failed ? "m5.apply.partial" : "m5.apply.done", { written: result.written, removed: result.removed, path: result.failed ?? "" })}{result.skipped ? ` ${t("m5.apply.skipped", { count: result.skipped })}` : ""}</p>}
+    {unreadable && !failed && <p role="status" className="m5-apply-latest-unread">{t("m5.apply.unreadable")} <button type="button" className="m5-link-button" onClick={() => void inspect()}>{t("m5.merge.inspectAgain")}</button></p>}
     {failed && <div role="alert" className="m5-apply-latest-failed"><p>{t("m5.apply.failed")}</p><details><summary>{t("m5.chat.details")}</summary><pre>{failed}</pre></details></div>}
   </section>;
 }
