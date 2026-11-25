@@ -46,6 +46,8 @@ export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmR
   const [result, setResult] = useState<{ written: number; removed: number; skipped: number; failed: string | null } | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [state, setState] = useState<ApplyStanding | null>(null);
+  /** The receipt could not be read: show the plain panel rather than wait. */
+  const [unreadable, setUnreadable] = useState(false);
   const generation = useRef(0);
   const onInspectedRef = useRef(onInspected);
   onInspectedRef.current = onInspected;
@@ -57,11 +59,11 @@ export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmR
       const reply = validateProjectCatalogResult(await window.m5Projects.request(request), request);
       if (epoch === generation.current && reply.action === "inspectChatApply") {
         const next = { applied: reply.applied, pending: reply.pending, total: reply.total };
-        setState(next); onInspectedRef.current?.(next);
+        setState(next); setUnreadable(false); onInspectedRef.current?.(next);
       }
-    } catch { if (epoch === generation.current) { setState(null); onInspectedRef.current?.(null); } }
+    } catch { if (epoch === generation.current) { setState(null); setUnreadable(true); onInspectedRef.current?.(null); } }
   }, [projectId, chatId]);
-  useEffect(() => { setConfirming(false); setResult(null); setFailed(null); setState(null); }, [projectId, chatId]);
+  useEffect(() => { setConfirming(false); setResult(null); setFailed(null); setState(null); setUnreadable(false); }, [projectId, chatId]);
   // The workspace changed (a new step, a save): look again.
   useEffect(() => { void inspect(); return () => { generation.current++; }; }, [inspect, changeCount]);
   const standing = applyStanding(state);
@@ -90,6 +92,9 @@ export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmR
     } finally { setBusy(false); }
   };
   const done = standing === "done";
+  // Until the receipt is read, a placeholder: never "not applied yet" and a
+  // button for a task whose standing is not known (seen in the real app).
+  if (!state && !unreadable && !failed && !result && window.m5Projects) return <section className="m5-apply-latest m5-apply-latest-loading" aria-label={t("m5.apply.title")} aria-busy="true"><span className="m5-skeleton-line" /></section>;
   return <section className={`m5-apply-latest${done ? " m5-apply-latest-applied" : ""}`} aria-label={t("m5.apply.title")}>
     <div className="m5-apply-latest-head">
       <strong>{done ? t("m5.apply.applied", { count: state?.total ?? changeCount })

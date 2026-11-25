@@ -118,3 +118,51 @@ test("the task list asks each finished task once per version and forgets a task 
   reopened.forget("chat_a");
   assert.equal(reopened.get(a), null);
 });
+
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
+import { renderToStaticMarkup } from "react-dom/server";
+import * as taskStatus from "../src/m5/task-status.ts";
+import * as catalog from "../src/m5/contracts/project-catalog-v1.ts";
+
+/** Renders ApplyLatest with fixed hook state; effects run in order (once). */
+function renderApplyLatest(states: unknown[], props: Record<string, unknown>) {
+  const require = createRequire(import.meta.url);
+  const compiled = ts.transpileModule(readFileSync(new URL("../src/m5/apply-latest.tsx", import.meta.url), "utf8"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020 },
+  }).outputText;
+  let index = 0;
+  const effects: (() => void)[] = [];
+  const sets: unknown[][] = [];
+  const context: any = { exports: {}, window: { m5Projects: { request: async () => { throw new Error("offline"); } } }, require(name: string) {
+    if (name === "react") return {
+      useState: (initial: unknown) => { const slot = index++; const value = slot < states.length ? states[slot] : initial; sets[slot] = []; return [value, (next: unknown) => sets[slot]!.push(next)]; },
+      useRef: (value: unknown) => ({ current: value }), useCallback: (fn: unknown) => fn,
+      useEffect: (fn: () => void) => { effects.push(fn); },
+    };
+    if (name === "../i18n.tsx") return { useI18n: () => ({ t: (key: string, params: Record<string, unknown> = {}) => (ko as Record<string, string>)[key]!.replace(/\{(\w+)\}/g, (_: string, k: string) => String(params[k])) }) };
+    if (name === "./task-status.ts") return taskStatus;
+    if (name === "./contracts/project-catalog-v1.ts") return catalog;
+    return require(name);
+  } };
+  runInNewContext(compiled, context);
+  const html = renderToStaticMarkup(context.exports.ApplyLatest({ projectId: "project_1", chatId: "chat_1", changeCount: 2, disabled: false, ...props }));
+  return { html, sets };
+}
+
+test("a copy task's apply panel shows a placeholder until its receipt is read, never 'not applied' first", () => {
+  const original = (globalThis as any).window;
+  (globalThis as any).window = { m5Projects: { request: async () => ({}) } };
+  try {
+    // useState order: confirming, busy, result, failed, state, unreadable.
+    const before = renderApplyLatest([false, false, null, null, null, false], {}).html;
+    assert.ok(before.includes("m5-apply-latest-loading"), before);
+    assert.ok(!before.includes("<button"), "no apply button before the standing is known");
+    const unreadable = renderApplyLatest([false, false, null, null, null, true], {}).html;
+    assert.ok(unreadable.includes("<button") && !unreadable.includes("m5-apply-latest-loading"), "an unreadable receipt falls back to the plain panel");
+    const known = renderApplyLatest([false, false, null, null, { applied: true, pending: 1, total: 2 }, false], {}).html;
+    assert.ok(known.includes("반영 뒤 새로 바뀐 파일 1개") && known.includes(ko["m5.apply.again"]));
+  } finally { (globalThis as any).window = original; }
+});
