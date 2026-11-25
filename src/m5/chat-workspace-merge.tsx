@@ -52,7 +52,8 @@ export function ChatWorkspaceMerge({ chat, disabled, fallback, merged = false, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chat.chatId, chat.worktreeId, chat.workspaceIdentity]);
   useEffect(() => { void inspect(); return () => { generation.current++; }; }, [inspect]);
-  useEffect(() => { onState?.(state); }, [state, onState]);
+  // Reported once known: null then means the state could not be read.
+  useEffect(() => { if (state || unavailable) onState?.(state); }, [state, unavailable, onState]);
 
   if (!state) {
     return unavailable
@@ -96,11 +97,14 @@ export function ChatWorkspaceMerge({ chat, disabled, fallback, merged = false, o
 
   const blocked = state.blocked;
   return <span className="m5-merge">
-    <small className="m5-merge-branch" title={state.branch}>
-      {t("m5.merge.branch", { branch: state.branch })}
-      {state.ahead > 0 && <> · {t("m5.merge.ahead", { count: state.ahead, base })}</>}
-      {state.resolving && <> · {state.unresolved > 0 ? t("m5.merge.resolving", { count: state.unresolved }) : t("m5.merge.resolved")}</>}
-    </small>
+    {/* Branches and commits are for those who ask: under "details". */}
+    {state.resolving && <small className="m5-merge-resolving">{state.unresolved > 0 ? t("m5.merge.resolving", { count: state.unresolved }) : t("m5.merge.resolved")}</small>}
+    <details className="m5-merge-more"><summary>{t("m5.feedback.details")}</summary>
+      <small className="m5-merge-branch" title={state.branch}>
+        {t("m5.merge.branch", { branch: state.branch })}
+        {state.ahead > 0 && <> · {t("m5.merge.ahead", { count: state.ahead, base })}</>}
+      </small>
+    </details>
     {confirming
       ? <span className="m5-merge-confirm" role="group" aria-label={t("m5.merge.confirmTitle", { base })}>
           <small>{t(state.baseCheckedOut ? "m5.merge.confirmCheckedOut" : "m5.merge.confirmOther", { base })}</small>

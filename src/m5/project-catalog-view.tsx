@@ -60,6 +60,7 @@ export function ProjectCatalog({ onCloseProject, closeDisabled, onRoles, rolesDi
   const [paged, setPaged] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
+  const [readOnce, setReadOnce] = useState(false);
   const compact = rail && !expanded && !error;
   const generation = useRef(0);
   const inFlight = useRef(false);
@@ -78,10 +79,11 @@ export function ProjectCatalog({ onCloseProject, closeDisabled, onRoles, rolesDi
       if (result.action !== "list") throw new Error("unexpected project catalog response");
       setEntries(result.projects); setNext(result.nextCursor);
     }).catch(() => { if (!cancelled && epoch === generation.current) setError(true); })
-      .finally(() => { if (!cancelled && epoch === generation.current) setBusy(false); });
+      .finally(() => { if (!cancelled && epoch === generation.current) { setBusy(false); setReadOnce(true); } });
     return () => { cancelled = true; };
   }, [rail, home, management, ready, service, currentId, disabled, refreshKey]);
-  useEffect(() => { if (!busy && !error) onHasProjects?.(entries.length > 0); }, [entries, busy, error, onHasProjects]);
+  // Said only once the list was read: an empty list before reading is not "no projects".
+  useEffect(() => { if (readOnce && !busy && !error) onHasProjects?.(entries.length > 0); else if (readOnce && error) onHasProjects?.(false); }, [readOnce, entries, busy, error, onHasProjects]);
   if (!service) return null;
   const load = async (cursor: string | null) => {
     if (disabled || inFlight.current) return;

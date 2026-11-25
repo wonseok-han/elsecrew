@@ -101,12 +101,12 @@ export function NotificationBell({ center, onOpen, notice = null, errors = [], p
       {problem}
       {items.length === 0 ? <p className="m5-notification-empty">{t("m5.notifications.empty")}</p> : <ul>
         {items.map(item => <li key={item.id}>
-          <button type="button" className={`m5-notification-item m5-notification-${item.kind}${item.read ? "" : " m5-notification-unread"}`} onClick={() => {
+          <button type="button" className={`m5-notification-item m5-notification-${item.kind}${item.read ? "" : " m5-notification-unread"}${item.resolved ? " m5-notification-resolved" : ""}`} onClick={() => {
             center.markRead(item.id);
             if (details.current) details.current.open = false;
             onOpen(item);
           }}>
-            <span className="m5-notification-kind">{t(`m5.notifications.kind.${item.kind}`)}</span>
+            <span className="m5-notification-kind">{t(`m5.notifications.kind.${item.kind}`)}{item.resolved && <> · {t("m5.notifications.resolved")}</>}</span>
             <strong dir="auto">{item.goal}</strong>
             {item.text && <span className="m5-notification-text" dir="auto">{item.text}</span>}
             <time dateTime={item.at}>{relativeTime(item.at, lang, now)}</time>

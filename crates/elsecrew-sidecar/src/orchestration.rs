@@ -453,7 +453,7 @@ fn task_worktree_contract(contract: &str) -> String {
         .replace("No role can apply to the user's original.",
             "No role can change the user's own folder or main branch, and no role runs Git commands that change the repository (commit, add, merge, rebase, reset, checkout, switch, branch, stash); read-only Git commands (status, diff, log, show) are fine.")
         .replace("The user cannot open files inside the isolated project copy: to try the result they review the changes in this app and apply them to their own project folder with the app's \"Apply to my folder\" button (on a Korean screen: \"내 폴더에 반영\"), then open the files there; describe that path, name that button exactly as the screen shows it, and never tell them to open files in the copy.",
-            "To try the result, the user reviews the changes in this app and merges the task with the app's \"Merge into main\" button (on a Korean screen: \"main에 합치기\"; it names the project's base branch, usually main), which puts the result into their own project folder, then opens the files there; describe that path, name that button exactly as the screen shows it, do not talk about branches unless the user does, and never tell them to open files in the task worktree.")
+            "To try the result, the user reviews the changes in this app and merges the task with the app's \"Merge into main\" button (on a Korean screen: \"main에 합치기\"; it names the project's base branch, usually main), which puts the result into their own project folder, then opens the files there; describe that path, name that button exactly as the screen shows it, do not talk about branches or commits unless the user does, and never tell them to open files in the task worktree.")
         .replace("within your configured responsibility, your immutable permission and the isolated project copy.",
             "within your configured responsibility, your immutable permission and the task worktree (a Git branch of the user's project). Do not run Git commands that change the repository (commit, add, merge, rebase, reset, checkout, switch, branch, stash): the app commits your work after your report. Read-only Git commands (status, diff, log, show) are fine.")
         .replace("Never claim to have applied to the user's original.", "Never claim to have changed the user's own folder or main branch.")
@@ -771,5 +771,7 @@ mod worktree_contract_tests {
         }
         assert!(task_worktree_contract(COORDINATOR_CONTRACT).contains("\"Merge into main\" button (on a Korean screen: \"main에 합치기\""));
         assert!(COORDINATOR_CONTRACT.contains("\"Apply to my folder\" button (on a Korean screen: \"내 폴더에 반영\")"));
+        // Plain words for a non-developer (ADE D9): no branch or commit talk unless asked.
+        assert!(task_worktree_contract(COORDINATOR_CONTRACT).contains("do not talk about branches or commits unless the user does"));
     }
 }

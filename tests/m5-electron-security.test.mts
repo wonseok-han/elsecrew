@@ -43,6 +43,24 @@ test("login opens a validated browser URL only in main and never on cancel", asy
   assert.deepEqual(harness.sidecarCalls, ["projectCatalog"]);
 });
 
+test("a report link opens outside only after a native confirmation in main, never for unsafe addresses or foreign frames", async () => {
+  const harness = await loadMain();
+  const handler = harness.handlers.get(externalLinkContract.EXTERNAL_LINK_CHANNEL);
+  assert.ok(handler);
+  await assertRejectedWithoutSidecar(handler, {sender: {}, senderFrame: {}}, harness);
+  for (const unsafe of ["javascript:alert(1)", "data:text/html,<b>x</b>", "file:///etc/passwd", "https://user:pw@example.com/", "/relative", "https://exa mple.com", 42, "https://example.com/" + "a".repeat(3000)]) {
+    await assert.rejects(handler(harness.currentEvent(), unsafe));
+  }
+  assert.deepEqual(harness.sidecarCalls, []);
+  externalLinkAnswer.value = 1;
+  assert.equal(JSON.stringify(await handler(harness.currentEvent(), "https://example.com/docs")), JSON.stringify({ opened: false }));
+  assert.deepEqual(harness.sidecarCalls, ["confirm:https://example.com/docs"]);
+  externalLinkAnswer.value = 0;
+  assert.equal(JSON.stringify(await handler(harness.currentEvent(), "https://example.com/docs")), JSON.stringify({ opened: true }));
+  assert.deepEqual(harness.sidecarCalls, ["confirm:https://example.com/docs", "confirm:https://example.com/docs", "openExternal"]);
+  externalLinkAnswer.value = 1;
+});
+
 test("approval IPC rejects foreign frames and cannot grant acceptance", async () => {
   const harness = await loadMain();
   const handler = harness.handlers.get(approvalContract.APPROVAL_CHANNEL);
@@ -243,13 +261,14 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
       on: () => undefined,
       getPath: () => "/app-data",
       getVersion: () => "0.0.0-test",
+      getLocale: () => "ko-KR",
       setName: (name: string) => { assert.equal(name, "Elsecrew"); },
       setPath: (key: string, value: string) => { assert.equal(key, "userData"); assert.equal(value, "/app-data"); },
       isPackaged: false,
       quit: () => undefined,
     },
     BrowserWindow: Object.assign(FakeWindow, { getAllWindows: () => FakeWindow.windows }),
-    dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
+    dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }), showMessageBox: async (_window: unknown, options: { detail?: string }) => { sidecarCalls.push(`confirm:${options.detail ?? ""}`); return { response: externalLinkAnswer.value }; } },
     shell: { openExternal: async () => { sidecarCalls.push("openExternal"); } },
     safeStorage: { isEncryptionAvailable: () => false, encryptString: () => { throw new Error("unexpected encryption"); }, decryptString: () => { throw new Error("unexpected decryption"); } },
     ipcMain: {
@@ -415,6 +434,7 @@ function moduleFor(
   // The shutdown seal has its own tests (m5-storage-seal): here there is none.
   if (specifier === "./storage-seal.ts") return { StorageSealStore: class { consume() { return null; } async seal() { return false; } } };
   if (specifier.endsWith("approval-v1.ts")) return approvalContract;
+  if (specifier.endsWith("external-link-v1.ts")) return externalLinkContract;
   if (specifier.endsWith("project-catalog-v1.ts")) return catalogContract;
   if (specifier.endsWith("model-choices-v1.ts")) return modelChoicesContract;
   if (specifier === "node:fs") {
@@ -440,6 +460,9 @@ function moduleFor(
 }
 import * as loginContract from "../src/m5/contracts/provider-login-v1.ts";
 import * as approvalContract from "../src/m5/contracts/approval-v1.ts";
+import * as externalLinkContract from "../src/m5/contracts/external-link-v1.ts";
+/** What the native "open this address?" confirmation answers (0 = open). */
+const externalLinkAnswer = { value: 1 };
 import * as catalogContract from "../src/m5/contracts/project-catalog-v1.ts";
 import * as installContract from "../src/m5/contracts/provider-install-v1.ts";
 

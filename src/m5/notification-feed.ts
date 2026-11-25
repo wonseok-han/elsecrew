@@ -25,6 +25,14 @@ const APPROVAL_POLL_MS = 2000;
 export function startNotificationFeed(bridge: NotificationFeedBridge, center: NotificationCenter, approvals: ApprovalBridge | undefined, onAdded: (id: string) => void): () => void {
   const running = new Map<string, RunIdentity>();
   const seenApprovals = new Set<string>();
+  /** Requests still open per run, so the bell settles them once they go away. */
+  const openApprovals = new Map<string, Set<string>>();
+  const settle = (runId: string, still: ReadonlySet<string> = new Set()) => {
+    const open = openApprovals.get(runId);
+    if (!open) return;
+    for (const approvalId of [...open]) if (!still.has(approvalId)) { open.delete(approvalId); center.resolve(`approval:${approvalId}`); }
+    if (!open.size) openApprovals.delete(runId);
+  };
   let disposed = false;
   const chatOf = async (chatId: string): Promise<ChatDetail["chat"] | null> => {
     try {
@@ -44,6 +52,8 @@ export function startNotificationFeed(bridge: NotificationFeedBridge, center: No
     bridge.onAgentRunStateChanged?.(({ run }) => {
       if (run.state === "running") { running.set(run.runId, run); return; }
       running.delete(run.runId);
+      // A run that stopped asks nothing any more.
+      settle(run.runId);
       if (run.state === "failed" || run.state === "recoveryRequired") {
         void chatOf(run.chatId).then(chat => { if (chat) add(`run:${run.runId}`, "stopped", chat); });
       } else if (run.state === "succeeded" && run.selectedProfile.roleId === "coordinator") {
@@ -64,7 +74,10 @@ export function startNotificationFeed(bridge: NotificationFeedBridge, center: No
     for (const identity of running.values()) {
       const { runId, chatId, taskId, projectId, worktreeId, workspaceIdentity } = identity;
       void approvals.request({ action: "list", identity: { chatId, taskId, projectId, worktreeId, workspaceIdentity, runId } }).then(result => {
-        const pending = (result as { pending?: { approvalId: string }[] } | null)?.pending ?? [];
+        const pending = (result as { pending?: { approvalId: string }[] } | null)?.pending;
+        if (!Array.isArray(pending)) return;
+        settle(runId, new Set(pending.map(item => item.approvalId)));
+        if (pending.length) openApprovals.set(runId, new Set([...(openApprovals.get(runId) ?? []), ...pending.map(item => item.approvalId)]));
         for (const { approvalId } of pending) {
           if (seenApprovals.has(approvalId)) continue;
           seenApprovals.add(approvalId);

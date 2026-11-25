@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.tsx";
 import { validateProjectCatalogResult, type ChatMergeState } from "./contracts/project-catalog-v1.ts";
+import { changesStatus, type TaskPhase } from "./task-status.ts";
 
 /** Where a task's changes stand against the user's folder (both kinds of task). */
 export type ChangesStanding = "notYet" | "done" | "changedSince";
@@ -30,12 +31,14 @@ export function mergeStanding(state: ChatMergeState | null, changeCount: number)
  * engine's apply receipt: not applied yet (apply), applied (no button), and
  * changed again since (apply again, counting only what changed since).
  */
-export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmRequest = 0, onApplied, onStanding }: {
+export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmRequest = 0, onApplied, onStanding, onInspected }: {
   projectId: string; chatId: string; changeCount: number; disabled: boolean;
   /** Bumped by "check changes and apply" elsewhere: opens the confirmation. */
   confirmRequest?: number;
   onApplied?: () => void;
   onStanding?: (standing: ChangesStanding | null) => void;
+  /** Each answer of the engine's apply receipt (null: could not read it). */
+  onInspected?: (state: ApplyStanding | null) => void;
 }) {
   const { t } = useI18n();
   const [confirming, setConfirming] = useState(false);
@@ -44,6 +47,8 @@ export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmR
   const [failed, setFailed] = useState<string | null>(null);
   const [state, setState] = useState<ApplyStanding | null>(null);
   const generation = useRef(0);
+  const onInspectedRef = useRef(onInspected);
+  onInspectedRef.current = onInspected;
   const inspect = useCallback(async () => {
     if (!window.m5Projects) return;
     const epoch = ++generation.current;
@@ -51,9 +56,10 @@ export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmR
     try {
       const reply = validateProjectCatalogResult(await window.m5Projects.request(request), request);
       if (epoch === generation.current && reply.action === "inspectChatApply") {
-        setState({ applied: reply.applied, pending: reply.pending, total: reply.total });
+        const next = { applied: reply.applied, pending: reply.pending, total: reply.total };
+        setState(next); onInspectedRef.current?.(next);
       }
-    } catch { if (epoch === generation.current) setState(null); }
+    } catch { if (epoch === generation.current) { setState(null); onInspectedRef.current?.(null); } }
   }, [projectId, chatId]);
   useEffect(() => { setConfirming(false); setResult(null); setFailed(null); setState(null); }, [projectId, chatId]);
   // The workspace changed (a new step, a save): look again.
@@ -102,23 +108,25 @@ export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmR
  * branch, the same three ways; merging itself stays in the result bar (one
  * place, one confirmation), which this button opens.
  */
-export function ChangesMergeStatus({ state, changeCount, canMerge, onMerge }: {
+export function ChangesMergeStatus({ state, changeCount, canMerge, onMerge, phase }: {
   state: ChatMergeState | null; changeCount: number;
   /** The result bar's merge is there (the task is ready for review). */
   canMerge: boolean;
   onMerge: () => void;
+  /** The task's single status (task-status.ts); the line never says more than it. */
+  phase: TaskPhase;
 }) {
   const { t } = useI18n();
-  const standing = mergeStanding(state, changeCount);
-  if (!standing || state?.kind !== "gitWorktree") return null;
+  const status = changesStatus(phase, changeCount);
+  if (!status || status === "working" || state?.kind !== "gitWorktree") return null;
   const base = state.baseRef ?? "main";
-  const done = standing === "done";
+  const done = status === "done";
   return <section className={`m5-apply-latest${done ? " m5-apply-latest-applied" : ""}`} aria-label={t("m5.merge.open", { base })}>
     <div className="m5-apply-latest-head">
       <strong>{done ? t("m5.mergeStatus.merged", { base, count: changeCount })
-        : standing === "changedSince" ? t("m5.mergeStatus.newSince", { base })
+        : status === "changedSince" ? t("m5.mergeStatus.newSince", { base })
         : t("m5.mergeStatus.notYet", { base, count: changeCount })}</strong>
-      {!done && canMerge && <button type="button" onClick={onMerge}>{t(standing === "changedSince" ? "m5.mergeStatus.again" : "m5.merge.open", { base })}</button>}
+      {!done && canMerge && <button type="button" onClick={onMerge}>{t(status === "changedSince" ? "m5.mergeStatus.again" : "m5.merge.open", { base })}</button>}
     </div>
   </section>;
 }

@@ -14,6 +14,8 @@ export interface AppNotification {
   text: string;
   at: string;
   read: boolean;
+  /** The request it was about went away (answered or taken back by the agent). */
+  resolved?: boolean;
 }
 
 const KEY = "elsecrew.m5.notifications.v1";
@@ -39,7 +41,8 @@ function valid(item: unknown): item is AppNotification {
   if (!item || typeof item !== "object") return false;
   const value = item as Record<string, unknown>;
   return ["id", "projectId", "chatId", "goal", "text", "at"].every(key => typeof value[key] === "string")
-    && ["done", "attention", "stopped"].includes(value.kind as string) && typeof value.read === "boolean";
+    && ["done", "attention", "stopped"].includes(value.kind as string) && typeof value.read === "boolean"
+    && (value.resolved === undefined || typeof value.resolved === "boolean");
 }
 
 export class NotificationCenter {
@@ -78,6 +81,13 @@ export class NotificationCenter {
     const kept = this.#items.filter(item => item.projectId !== projectId || (chatId !== undefined && item.chatId !== chatId));
     if (kept.length === this.#items.length) return;
     this.#items = kept;
+    this.#changed();
+  }
+
+  /** The thing to check is gone: keep the line, read and marked as settled. */
+  resolve(id: string): void {
+    if (!this.#items.some(item => item.id === id && !item.resolved)) return;
+    this.#items = this.#items.map(item => item.id === id ? { ...item, read: true, resolved: true } : item);
     this.#changed();
   }
 
