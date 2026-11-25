@@ -64,6 +64,10 @@ Orca 조정자 작업 두 건이다. 기준 HEAD는 01d85814이고, 브랜치는
   - `npm test` 759 통과(새 `m5-dev-sign-sidecar` 7개), `pnpm build` 통과.
   - 설치 CLI를 쓰는 `installed_codex_*` 테스트는 별도 승인이 필요해서 실행하지 않았다.
   - Rust 전체 workspace는 다시 돌리지 않았다. 변경 범위가 Codex 관찰 모듈과 preflight 세션뿐이었다.
+- **PR #2 CI(첫 PR CI)**
+  - 첫 실행에서 Windows 하네스가 기존 결함 1건으로 실패했다. 11-17 6d7238e9가 추가한 `proctree::tests::after_the_owner_is_gone_a_reused_process_id_proves_the_recorded_process_ended`이다.
+  - 원인: `identity_of`는 unix에만 있는데, 이 테스트에 `#[cfg(unix)]`가 빠져 있었다. 그때까지 feature/ade에 CI가 돌지 않아 드러나지 않았다.
+  - 수정(6aa3032d) 뒤 macOS·Windows·website·GitGuardian이 모두 통과했다.
 - **미검증**: 수정 뒤 실제 Codex 작업 실행은 하지 않았다(유료 실행). 이 경로는 스레드 시작 단계가 포함된다.
 - **작업 기록**: 롤오버로 11-20 엔트리 3개를 `docs/archive/history-2026-11.md` 맨 위로 옮겼다.
 - **다음 할 일**
