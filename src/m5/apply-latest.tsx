@@ -66,7 +66,13 @@ export function ApplyLatest({ projectId, chatId, changeCount, disabled, confirmR
   useEffect(() => { void inspect(); return () => { generation.current++; }; }, [inspect, changeCount]);
   const standing = applyStanding(state);
   useEffect(() => { onStanding?.(standing); }, [standing, onStanding]);
-  useEffect(() => { if (confirmRequest > 0 && changeCount > 0) setConfirming(true); }, [confirmRequest]);
+  // A request to confirm waits for the change count: asking refreshes the
+  // changes list, which reads as zero for a moment (seen in the real app).
+  // Only requests made while this task is shown (never one left from another task).
+  const handledRequest = useRef(confirmRequest);
+  useEffect(() => {
+    if (confirmRequest > handledRequest.current && changeCount > 0) { handledRequest.current = confirmRequest; setConfirming(true); }
+  }, [confirmRequest, changeCount]);
   const apply = async () => {
     if (!window.m5Projects || busy) return;
     setBusy(true); setFailed(null); setResult(null);

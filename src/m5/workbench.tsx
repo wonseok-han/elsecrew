@@ -305,11 +305,18 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         const input = { action: "list" as const, cursor: null };
         const result = validateProjectCatalogResult(await window.m5Projects!.request(input), input);
         const known = result.action === "list" ? result.projects.map(entry => entry.projectId) : null;
-        const current = controller.snapshot();
-        const target = shouldResumeProject({ remembered, attempted: false, ready: admissionReadyRef.current, projectOpen: Boolean(current.project), busy: current.actionBlocked || current.selectionBlocked, known });
-        if (!target) { if (known && !known.includes(remembered)) forgetLastProject(browserStorage()); return; }
-        await controller.reopenProject(target, request => window.m5Projects!.request(request));
-        if (controller.snapshot().error?.messageKey === "m5.editorError.reopenProject") forgetLastProject(browserStorage());
+        if (known && !known.includes(remembered)) { forgetLastProject(browserStorage()); return; }
+        // Opening can be locked for a moment while the screen settles: try a
+        // few times, each through the same checks as a click.
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const current = controller.snapshot();
+          const target = shouldResumeProject({ remembered, attempted: false, ready: admissionReadyRef.current, projectOpen: Boolean(current.project), busy: current.actionBlocked || current.selectionBlocked, known });
+          if (target) await controller.reopenProject(target, request => window.m5Projects!.request(request));
+          const after = controller.snapshot();
+          if (after.project) return;
+          if (after.error?.messageKey === "m5.editorError.reopenProject") { forgetLastProject(browserStorage()); return; }
+          await new Promise(resolve => window.setTimeout(resolve, 1000));
+        }
       } catch { /* the home screen stays; nothing was opened */ }
       finally { setResumingProject(false); }
     })();
