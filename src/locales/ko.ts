@@ -1076,6 +1076,7 @@ export const ko = {
   "m5.start.resuming": "지난번에 열었던 프로젝트를 다시 여는 중이에요…",
   "m5.diff.prosePreview": "미리보기",
   "m5.diff.proseChanges": "바뀐 줄 보기",
+  "m5.approval.unreadable": "요청 내용을 읽지 못했어요. 에이전트가 요청을 거둬들이는 중일 수 있어요. ‘요청 내용 보기’로 다시 확인할 수 있어요.",
 } as const;
 
 export type MessageKey = keyof typeof ko;

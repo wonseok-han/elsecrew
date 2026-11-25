@@ -18,9 +18,9 @@ const compiled = ts.transpileModule(readFileSync(new URL("../src/m5/approval-car
 test("approval translations preserve warnings, raw detail and inspected acceptance controls", () => {
   for (const dictionary of [ko, en]) {
     let index = 0;
-    // useState order: pending, error, sending, queued, inspection, withdrawn.
+    // useState order: pending, error, sending, queued, inspection, withdrawn, unreadable.
     const states = [[{approvalId:"approval_test",kind:"command"}], true, true, true,
-      {approvalId:"approval_test",kind:"command",command:"echo PRIVATE <tag>",cwd:"/snapshot",reason:"run the tests",grantRoot:null,host:null,protocol:null}, []];
+      {approvalId:"approval_test",kind:"command",command:"echo PRIVATE <tag>",cwd:"/snapshot",reason:"run the tests",grantRoot:null,host:null,protocol:null}, [], new Set()];
     const context: any = { exports: {}, require(name: string) {
       if (name === "react") return { useEffect() {}, useRef: (value: unknown) => ({current:value}), useState: () => [states[index++], () => {}] };
       if (name === "../i18n.tsx") return { useI18n: () => ({ t(key: keyof typeof ko, params: Record<string, unknown> = {}) {
@@ -52,7 +52,7 @@ test("approval translations preserve warnings, raw detail and inspected acceptan
 test("a request the agent took back is said briefly instead of vanishing", () => {
   for (const dictionary of [ko, en]) {
     let index = 0;
-    const states = [[], false, false, false, null, [{approvalId:"approval_gone",kind:"tool",summary:"npm test"}]];
+    const states = [[], false, false, false, null, [{approvalId:"approval_gone",kind:"tool",summary:"npm test"}], new Set()];
     const context: any = { exports: {}, require(name: string) {
       if (name === "react") return { useEffect() {}, useRef: (value: unknown) => ({current:value}), useState: () => [states[index++], () => {}] };
       if (name === "../i18n.tsx") return { useI18n: () => ({ t(key: keyof typeof ko) { return dictionary[key]; } }) };
@@ -66,6 +66,23 @@ test("a request the agent took back is said briefly instead of vanishing", () =>
     assert.ok(html.includes("npm test"));
     assert.equal((html.match(/<button/g) ?? []).length, 0, "nothing to answer once the request is gone");
   }
+});
+
+test("a request that cannot be read says so instead of loading forever", () => {
+  let index = 0;
+  const states = [[{approvalId:"approval_x",kind:"tool"}], false, false, false, null, [], new Set(["approval_x"])];
+  const context: any = { exports: {}, require(name: string) {
+    if (name === "react") return { useEffect() {}, useRef: (value: unknown) => ({current:value}), useState: () => [states[index++], () => {}] };
+    if (name === "../i18n.tsx") return { useI18n: () => ({ t(key: keyof typeof ko) { return ko[key]; } }) };
+    if (name === "./contracts/approval-v1.ts") return contract;
+    if (name === "./approval-display.ts") return display;
+    return require(name);
+  } };
+  runInNewContext(compiled, context);
+  const html = renderToStaticMarkup(context.exports.ApprovalCard({identity:{runId:"run_test"},onCancel() {}}));
+  assert.ok(html.includes(renderToStaticMarkup(ko["m5.approval.unreadable"])));
+  assert.ok(!html.includes(ko["m5.approval.reading"]));
+  assert.ok(!html.includes(renderToStaticMarkup(ko["m5.approval.acceptOnce"])), "nothing to accept without its content");
 });
 
 test("withdrawn requests are those that left without an answer, and the headline reads the request", () => {

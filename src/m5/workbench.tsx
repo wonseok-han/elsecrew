@@ -290,11 +290,15 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   // Restart picks up where the person left off (F13): the open project is
   // remembered, and reopened once at start through the normal engine checks.
   useEffect(() => { if (snapshot.project) rememberLastProject(browserStorage(), snapshot.project.id); }, [snapshot.project?.id]);
+  // Waits while opening is locked (work still finishing, a selection in
+  // progress) and tries once it is free: the same lock a click would meet.
+  const resumeBlocked = snapshot.actionBlocked || snapshot.selectionBlocked;
   useEffect(() => {
     if (resumeTried.current || !admissionReady || snapshot.project || !window.m5Projects) return;
-    resumeTried.current = true;
     const remembered = recallLastProject(browserStorage());
-    if (!remembered) return;
+    if (!remembered) { resumeTried.current = true; return; }
+    if (resumeBlocked) return;
+    resumeTried.current = true;
     setResumingProject(true);
     void (async () => {
       try {
@@ -309,7 +313,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       } catch { /* the home screen stays; nothing was opened */ }
       finally { setResumingProject(false); }
     })();
-  }, [admissionReady, snapshot.project?.id, controller]);
+  }, [admissionReady, snapshot.project?.id, resumeBlocked, controller]);
   // Settings shows the open project first; a project picked earlier must not
   // linger once another project is opened.
   useEffect(() => { setManagedProject(null); }, [snapshot.project?.id]);

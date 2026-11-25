@@ -1078,4 +1078,5 @@ export const en: Record<MessageKey, string> = {
   "m5.start.resuming": "Reopening the project you had open last time…",
   "m5.diff.prosePreview": "Preview",
   "m5.diff.proseChanges": "Changed lines",
+  "m5.approval.unreadable": "The request could not be read. The agent may be taking it back. Use “View request” to check again.",
 };

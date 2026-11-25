@@ -18,7 +18,9 @@ export function ApprovalCard({ identity, onCancel, onPendingChange }: { identity
   /** Requests the agent took back before anyone answered: said briefly, then folded. */
   const [withdrawn, setWithdrawn] = useState<{ approvalId: string; kind: ApprovalSummary["kind"]; summary: string | null }[]>([]);
   const decided = useRef(new Set<string>());
-  const autoInspected = useRef(new Set<string>());
+  /** Reads tried per request: a failed read is tried again a few times, then said. */
+  const autoInspected = useRef(new Map<string, number>());
+  const [unreadable, setUnreadable] = useState<ReadonlySet<string>>(() => new Set());
   const lastPending = useRef<ApprovalSummary[]>([]);
   const lastInspection = useRef<ApprovalInspection | null>(null);
   lastInspection.current = inspection;
@@ -31,7 +33,7 @@ export function ApprovalCard({ identity, onCancel, onPendingChange }: { identity
     epoch.current++;
     busy.current = false;
     setPending([]); setError(false); setSending(false); setQueued(false); setInspection(null); setWithdrawn([]);
-    decided.current = new Set(); autoInspected.current = new Set(); lastPending.current = [];
+    decided.current = new Set(); autoInspected.current = new Map(); lastPending.current = []; setUnreadable(new Set());
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     const bridge = window.m5Approval;
@@ -94,8 +96,12 @@ export function ApprovalCard({ identity, onCancel, onPendingChange }: { identity
   // The card's first line says what is asked: read each request as it comes.
   useEffect(() => {
     const first = pending[0];
-    if (!first || error || sending || inspection || autoInspected.current.has(first.approvalId)) return;
-    autoInspected.current.add(first.approvalId);
+    if (!first || sending || inspection) return;
+    const tries = autoInspected.current.get(first.approvalId) ?? 0;
+    if (tries >= 3) { setUnreadable(current => current.has(first.approvalId) ? current : new Set(current).add(first.approvalId)); return; }
+    // After a failed read the list comes back on the next poll; try again then.
+    if (error) return;
+    autoInspected.current.set(first.approvalId, tries + 1);
     void inspect(first.approvalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending, error, sending, inspection]);
@@ -121,7 +127,7 @@ export function ApprovalCard({ identity, onCancel, onPendingChange }: { identity
       const headline = shown ? approvalHeadline(shown) : null;
       return <div key={request.approvalId} className="m5-approval-request">
         <p className="m5-approval-line"><span className="m5-approval-kind">{t(`m5.approval.kind.${request.kind}`)}</span>
-          {headline ? <code className="m5-approval-target" dir="auto">{headline.target}</code> : <span className="m5-approval-reading">{t("m5.approval.reading")}</span>}</p>
+          {headline ? <code className="m5-approval-target" dir="auto">{headline.target}</code> : <span className="m5-approval-reading">{t(unreadable.has(request.approvalId) ? "m5.approval.unreadable" : "m5.approval.reading")}</span>}</p>
         {headline?.reason && <p className="m5-approval-why" dir="auto">{t("m5.approval.why", { reason: headline.reason })}</p>}
         {shown && <p className="m5-approval-accept-note">{t("m5.approval.acceptWarning")}</p>}
         <div className="m5-approval-actions">
