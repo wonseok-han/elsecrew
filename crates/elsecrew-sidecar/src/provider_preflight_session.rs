@@ -645,8 +645,12 @@ fn check_claimed(
                 process.send_preflight_observed(request, remaining, cancel, &mut |process| {
                     on_action(process, TextAction::ObserveProcess)
                 })?;
-                // Exactly one reply and one thread/started, in either order.
-                for _ in 0..2 {
+                // One reply and one thread/started, in either order, plus at
+                // most one late account note (the exchange allows it once).
+                for _ in 0..3 {
+                    if flow.state() != PreflightState::ThreadStarting {
+                        break;
+                    }
                     let remaining = remaining_preflight_budget(budget, started.elapsed(), flow.diagnostic_stage())?;
                     let response =
                         process.receive_preflight_observed(remaining, cancel, &mut |process| {
@@ -1769,6 +1773,7 @@ IFS= read -r hold
             "claimed-process",
             "thread",
             "thread-before",
+            "thread-routed",
             "wrong-thread",
             "turn-success",
             "turn-wrong-id",
@@ -1855,6 +1860,10 @@ printf received > "$7"
 if test "$6" = thread-before; then
   printf '%s\n' '{"method":"thread/started","params":{"thread":{"id":"thread-test"}}}'
   printf '%s\n' "$5"
+elif test "$6" = thread-routed; then
+  printf '%s\n' "$5"
+  printf '%s\n' '{"method":"account/updated","emittedAtMs":2,"params":{"authMode":"chatgpt","planType":"pro","reason":"workspaceRoutingReady"}}'
+  printf '%s\n' '{"method":"thread/started","params":{"thread":{"id":"thread-test"}}}'
 else
   printf '%s\n' "$5"
   printf '%s\n' '{"method":"thread/started","params":{"thread":{"id":"thread-test"}}}'
@@ -2094,6 +2103,7 @@ IFS= read -r hold
                 case,
                 "thread"
                     | "thread-before"
+                    | "thread-routed"
                     | "wrong-thread"
                     | "config-only-thread"
                     | "requirements"
@@ -2106,12 +2116,12 @@ IFS= read -r hold
             let result = observe_with_budget(&mut process, &mut flow, &cancel, budget, thread_cwd);
             assert_eq!(
                 result.is_ok(),
-                matches!(case, "success" | "thread" | "thread-before" | "config-only"),
+                matches!(case, "success" | "thread" | "thread-before" | "thread-routed" | "config-only"),
                 "{case}"
             );
             assert_eq!(
                 flow.state(),
-                if matches!(case, "success" | "thread" | "thread-before" | "config-only") {
+                if matches!(case, "success" | "thread" | "thread-before" | "thread-routed" | "config-only") {
                     PreflightState::Closed
                 } else {
                     PreflightState::Failed

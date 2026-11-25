@@ -265,6 +265,9 @@ fn validate_update(input: &BoundedObservation) -> Result<(), ProviderError> {
     struct Params {
         auth_mode: Box<RawValue>,
         plan_type: Box<RawValue>,
+        // Codex 0.171+: why the account was re-announced.
+        #[serde(default)]
+        reason: Option<Box<RawValue>>,
     }
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -279,10 +282,15 @@ fn validate_update(input: &BoundedObservation) -> Result<(), ProviderError> {
         serde_json::from_str(notice.params.auth_mode.get()).map_err(|_| error())?;
     let plan: Option<String> =
         serde_json::from_str(notice.params.plan_type.get()).map_err(|_| error())?;
+    let reason: Option<String> = match &notice.params.reason {
+        Some(raw) => serde_json::from_str(raw.get()).map_err(|_| error())?,
+        None => None,
+    };
     if notice.method != "account/updated"
         || notice.emitted_at_ms > 9_007_199_254_740_991
         || !matches!(mode.as_deref(), None | Some("chatgpt"))
         || plan.is_some_and(|plan| plan.len() > 128 || plan.chars().any(char::is_control))
+        || !matches!(reason.as_deref(), None | Some("workspaceRoutingReady" | "unknown"))
     {
         return Err(error());
     }
@@ -380,6 +388,32 @@ mod tests {
             flow.accept(&obs(ACCOUNT)).unwrap(),
             LoginAction::CredentialsObserved
         ));
+    }
+
+    #[test]
+    fn codex_0_171_update_reason_is_accepted_only_for_known_values() {
+        for (reason, ok) in [
+            ("null", true),
+            ("\"workspaceRoutingReady\"", true),
+            ("\"unknown\"", true),
+            ("\"PRIVATE\"", false),
+            ("1", false),
+        ] {
+            let (mut flow, _) = LoginConnection::begin("/app/profile").unwrap();
+            flow.accept(&obs(INIT)).unwrap();
+            flow.start_login().unwrap();
+            flow.accept(&obs(START)).unwrap();
+            let update = format!(
+                r#"{{"method":"account/updated","emittedAtMs":1,"params":{{"authMode":"chatgpt","planType":"pro","reason":{reason}}}}}"#
+            );
+            let accepted = flow.accept(&obs(&update));
+            if ok {
+                assert!(matches!(accepted.unwrap(), LoginAction::AccountUpdated));
+            } else {
+                let Err(error) = accepted else { panic!("accepted an unknown reason") };
+                assert!(!error.to_string().contains("PRIVATE"));
+            }
+        }
     }
 
     #[test]
