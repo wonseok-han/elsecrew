@@ -857,7 +857,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
               {chat.activeChat && activePhase && !chat.switching && phaseIsWorking(activePhase) && (snapshot.diffSummary?.entries.length ?? 0) > 0 && <p className="m5-task-changes-working" data-task-phase={activePhase}>{t("m5.task.changes.working", { count: snapshot.diffSummary?.entries.length ?? 0 })}</p>}
               {chat.activeChat && activePhase && !chat.switching && !phaseIsWorking(activePhase) && mergeInfo?.kind === "gitWorktree" && <ChangesMergeStatus state={mergeInfo} phase={activePhase} changeCount={snapshot.diffSummary?.entries.length ?? 0} canMerge={resultView !== null && !resultView.loading} onMerge={openResultMerge} />}
               {chat.activeChat && activePhase && !chat.switching && !phaseIsWorking(activePhase) && mergeInfo?.kind === "snapshot" && <ApplyLatest projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} changeCount={snapshot.diffSummary?.entries.length ?? 0} confirmRequest={applyOpenRequest} onInspected={onApplyInspected} onApplied={() => dispositions.forget(chat.activeChat!.chatId)} disabled={!admissionReady || chat.switching || chatController.isActionBlocked() || chat.activeChat.state === "running" || chat.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state))} />}
-              {snapshot.diffSummary && changesDone && <p className="m5-changes-done-label">{t("m5.changes.doneList")}</p>}
+              {snapshot.diffSummary && changesDone && !chat.switching && <p className="m5-changes-done-label">{t("m5.changes.doneList")}</p>}
               {snapshot.diffSummary && <ChangeList key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}`} entries={snapshot.diffSummary.entries} selected={allChanges ? allChanges.focus?.path : snapshot.diffFile?.path} disabled={!admissionReady || snapshot.actionBlocked}
                 onRefresh={() => void controller.refreshChanges()} refreshing={snapshot.diffLoading} allOpen={Boolean(allChanges)} onViewAll={() => { if (allChanges) setAllChanges(null); else { setAllChanges({ focus: null }); controller.selectPanel("editor"); } }}
                 onOpen={path => { if (allChanges) setAllChanges({ focus: { path, at: Date.now() } }); else void controller.openDiff(path); }} />}
@@ -1806,7 +1806,7 @@ const DiffDetails = memo(function DiffDetails({ descriptor, text, canOpen, onOpe
 });
 
 /** Documents shown drawn and in a proportional font by default. */
-export function isProsePath(path: string): boolean {
+function isProsePath(path: string): boolean {
   return /\.(?:md|markdown|mdx)$/i.test(path);
 }
 

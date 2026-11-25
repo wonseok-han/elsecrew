@@ -1429,7 +1429,7 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-result-bar[data-task-phase="merged"], .m5-result-bar[data-task-phase="applied"] { border-color: #2c3a2f; }
 .m5-result-bar[data-task-phase="changedSince"] { border-color: #4a3f63; background: #19161f; }
 .m5-result-bar[data-task-phase="changedSince"] .m5-result-mark { color: var(--status-review); }
-.m5-result-loading .m5-result-mark { visibility: hidden; }
+.m5-result-loading .m5-result-mark, .m5-result-loading .m5-result-text > strong { visibility: hidden; }
 .m5-result-loading .m5-result-actions { visibility: hidden; }
 .m5-skeleton-line { display: inline-block; width: 180px; max-width: 100%; height: 10px; border-radius: 5px; vertical-align: middle;
   background: linear-gradient(90deg, var(--m5-raised) 0%, var(--m5-hover) 50%, var(--m5-raised) 100%); background-size: 200% 100%; animation: m5-skeleton 1.2s ease-in-out infinite; }

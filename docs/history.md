@@ -110,6 +110,15 @@ Orca 조정자 작업(주인님 전체 실제 시험 승인 2026-11-23). 기준 
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **작업 상태는 하나만 읽는다(2026-11-25, ADE 1차-가)**: 작업 목록·결과 막대·변경 패널·실행 카드·대화 머리말은 `src/m5/task-status.ts`의 `taskPhase`(초안 → 진행 → 확인 필요 → 검토 대기 → 합침 / 반영 / 반영·합친 뒤 또 바뀜 / 중단 / 버림)만 읽는다. 새 표시를 만들 때 `chat.state`나 merge/apply 값을 직접 해석하지 않는다.
+  - merge/apply 읽은 값은 작업 ID로 꼬리표를 달고, 팀이 일하는 동안 비운다. 예전 결함("진행 중인데 main에 합쳐짐")은 화면 전역 `mergeInfo`가 이전 작업 값을 들고 있던 탓이었다.
+  - 열려 있지 않은 작업의 합침/반영은 `task-disposition.ts`가 작업 버전(`updatedAt`)별로 한 번 묻고 뷰어별 localStorage에 둔다. 다시 실행된 작업은 새로 묻는다.
+  - 상태 색 CSS 변수 이름은 `--status-running/attention/review/done/danger`(1차-나 토큰과 공유).
+- **설정의 "저장하지 않은 변경" 규칙(2026-11-25)**: `src/m5/settings-draft.ts`. 화면이 스스로 하는 보정(추천 모델 채우기 등)은 불러온 값에도 같이 적용해 미저장으로 세지 않는다. 사람이 누른 "추천 모델 채우기"는 편집이다. 역할 편집 재작성은 이 함수를 그대로 쓴다.
+- **보고 렌더러 안전 규칙(2026-11-25)**: `src/m5/markdown.ts`는 HTML을 해석하지 않고, React 요소로만 그린다. 링크는 자격 증명 없는 http(s)/mailto만, `href` 없이 그리며 누르면 main(`m5:external-link:v1`)이 주소를 다시 검사하고 네이티브 확인 창을 띄운 뒤에만 연다. 이미지는 설명 글자만 보인다.
+- **권한 요청 화면과 sidecar 지연(2026-11-25 실측)**: 검증 단계 실행 중 approval `list` 7초, `getChat` 10초가 걸렸다. Claude CLI는 권한 요청을 3초 안에 스스로 거둬들이므로, 카드가 내용을 읽기 전에 요청이 사라진다(진단 보고서의 "누르기 전에 사라짐"의 원인). 화면은 이제 "거둬들였어요"로 남기고 알림도 해소하지만, sidecar 응답 지연 자체는 미조사다.
+- **개발 앱 시험 함정(2026-11-25)**: `workbench.tsx`에서 컴포넌트가 아닌 것을 export하면 Fast Refresh가 깨져 저장할 때마다 화면 전체가 다시 로딩된다. 실행 중에 다시 로딩되면 팀 작업은 sidecar에서 계속되고, 그 실행이 끝날 때까지 프로젝트 열기가 잠긴다. 셸에서 `cd`는 scm_breeze 때문에 실패해도 다음 명령이 실행된다 — 시험 폴더를 만들 때 `cd` 대신 절대경로와 `git -C`를 쓴다(이번에 시험용 `git init`·커밋이 작업 브랜치에 잘못 들어가 고쳤다).
+
 - **Codex CLI가 바뀌면 사전 확인이 먼저 깨진다(2026-11-25)**: ChatGPT.app 업데이트가 내장 codex-cli를 바꾼다. 앱의 사전 확인(`codex_preflight/exchange.rs`, `named_config.rs`, `codex_login/connection.rs`)은 응답을 엄격하게 비교한다(`deny_unknown_fields`, null 기본값 목록). 그래서 새 필드 하나만 생겨도 "연결을 확인하지 못했어요"(`providerLoginFailed`)가 난다.
   - 진단 순서:
     1. 앱 로그의 `Codex preflight failed at <단계>`로 실패 단계를 찾는다.
