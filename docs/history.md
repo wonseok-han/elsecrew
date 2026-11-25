@@ -2,6 +2,80 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-25 · by Claude Opus 5.5 (claude-opus-5-5) — ADE 고도화 전 진단, 개발 빌드 사이드카 고정 서명, Codex 0.171 연결 실패 수정
+Orca 조정자 작업 두 건이다. 기준 HEAD는 01d85814이고, 브랜치는 주인님 결정(파생 브랜치 + PR로 feature/ade)에 따라 `ade/dev-signing-codex`다.
+
+- **ADE 고도화 전 진단(코드 변경 없음)**
+  - 산출물(저장소 밖):
+    - 보고서: `~/Documents/elsecrew-ade-diagnosis-2026-11-25/REPORT.md`
+    - 스크린샷 49장: 같은 폴더의 `screenshots/`
+    - 디자인 방향 목업 3개: `mockups/` — A 작업 관제실, B 작업 보드, C 결과 캔버스(HTML+PNG)
+  - 개발 앱을 CDP로 조작해 다음 흐름을 따라갔다.
+    - 첫 실행: 임시 `--user-data-dir` 프로필
+    - 프로젝트 추가·전환
+    - todo-test-1123a 짧은 실제 작업 1회: 13분, 총괄 → 개발 → 검증, 권한 요청 2회
+    - 합치기, 재시작, 라이트 모드·좁은 창
+  - 총평: 에이전트는 일을 해내지만 화면이 "편집기에 채팅을 붙인 것"이다.
+  - 주요 발견:
+    - 빈 편집기가 화면 중앙을 차지하고, 대화는 높이 419px(1280×768 기준) 칸에 마크다운 원문으로 쌓인다.
+    - **상태 오표시**: 진행 중인 작업의 변경 탭에 "✓ main에 합쳐짐"이 나온다. 합친 작업도 작업 목록에서는 "검토 준비"로 나온다. 역할 설정을 열기만 해도 "저장하지 않은 변경"이 뜬다.
+    - 프로젝트 전환에 '화면 닫기'가 필요하다.
+    - 다음 기능이 없다: 계획 편집, 진행 중 지시 추가, 부분 수락, 앱 안 결과 미리보기, 전역 단축키, 라이트 테마, 재시작 때 마지막 작업 복원.
+  - 로드맵(1~3차)과 방향 선택은 주인님 결정 대기다. 진단으로 생긴 앱 데이터 변경은 정상 사용분뿐이다: todo-test-1123a에 "오늘 날짜 표시" 작업을 합쳤다.
+- **개발 빌드 사이드카 고정 서명**(82115e1c)
+  - 변경: `m5:dev`가 `cargo build` 직후 `scripts/m5-dev-sign-sidecar.mjs`를 실행한다. 이 스크립트는 `target/debug/elsecrew-sidecar`를 로그인 키체인의 자체 서명 인증서 "Elsecrew Dev"와 고정 식별자 `com.wonseokhan.elsecrew.sidecar`로 서명한다.
+  - 동작 세부:
+    - 이미 같은 인증서로 서명돼 있으면 다시 서명하지 않는다.
+    - 인증서가 없거나 서명이 실패하면 경고만 낸다(120초 타임아웃). 개발 앱 시작은 막지 않는다.
+    - 패키징(`m5-stage-sidecar.mjs`의 release 빌드)은 바뀌지 않는다.
+  - 검증:
+    - 지정 요구사항: `identifier "com.wonseokhan.elsecrew.sidecar" and certificate leaf = H"18764b2f…"`.
+    - 세 번 다시 링크했다. 서명 전 ad-hoc cdhash는 매번 달랐고, 서명 후 지정 요구사항은 세 번 모두 같았다. `codesign --verify --strict` 통과.
+    - 첫 `codesign`은 개인 키 접근 허용 창을 띄웠다. 주인님이 '항상 허용'을 눌렀다.
+  - 남은 허용 창:
+    - 서명된 사이드카가 만료된 Claude 토큰을 처음 갱신할 때 `Claude Code-credentials-…` 항목에 대해 한 번 뜬다. 앱 시작·"연결 상태 다시 확인"의 Claude 확인(`provider_claude_login.rs` → `refresh_if_expired`)에서 생긴다.
+    - '항상 허용' 한 번이면 이후 다시 빌드해도 묻지 않는다. 읽기는 원래부터 `/usr/bin/security`로 한다.
+  - Electron.app은 다시 서명하지 않는다. `Elsecrew Safe Storage`는 개발용 Electron.app의 ad-hoc cdhash에 묶여 있지만, 다시 묻는 경우는 드물다.
+    - 공식 zip(`~/Library/Caches/electron/…/electron-v43.4.0-darwin-arm64.zip`)의 실행 파일과 node_modules의 실행 파일이 바이트까지 같다(cdhash `74cc2c91…`). 그래서 같은 버전으로 다시 설치하면 다시 묻지 않고, Electron 버전을 올릴 때만 한 번 묻는다.
+    - 다시 서명하면 지금 한 번 더 묻는다. 또 `pnpm install`이 원본을 다시 풀 때마다 서명이 사라져, 서명한 상태와 안 한 상태가 번갈아 생긴다.
+- **Codex 연결 실패 원인과 수정**(b921d23a, fcbbb223)
+  - 원인: CLI 변경이다. 계정 문제도, 기존 앱 버그도 아니다.
+    - ChatGPT.app이 11-23 11:22에 업데이트되며 내장 codex-cli가 0.171.0-alpha.13이 됐다(마지막 성공 실행은 같은 날 09:07).
+    - 그 뒤 앱의 사전 확인이 연달아 두 군데에서 실패했다.
+  - 첫째 실패 `account notification phase or envelope`:
+    - `account/updated` params에 `reason`(null | "unknown" | "workspaceRoutingReady")이 생겼는데, `deny_unknown_fields`가 이를 거절했다. 생성 스키마 `AccountUpdatedNotification`으로 확인했다.
+    - 수정: 사전 확인과 로그인 흐름이 이 세 값만 받는다. 초기 알림과 routing-ready 알림을 각각 한 번씩 허용하고, routing-ready는 스레드 시작 중에도 받는다(사이드카는 그 구간에서 최대 3프레임을 읽는다).
+  - 둘째 실패 `effective filesystem or network policy`:
+    - 원인: `config/read`가 network에 `"transparent_tcp": null`을 새로 직렬화했다. 인증 없이 임시 CODEX_HOME에 같은 `-c` 설정을 주고 재현했다.
+    - 수정: 이 null을 다른 기본값처럼 지운다. 실제 값이 들어 있으면 계속 불일치로 본다.
+  - 실제 앱에서 "이 앱에 Codex 로그인이 연결됐어요"를 확인했다. 상태 표시줄은 Codex "7일 0%"였고, 앱 로그 오류는 0건이었다(`screenshots/49-codex-connected-after-fix.png`).
+- **독립 검토(상시 검토자) 2회**
+  - 1차: 차단 0, 중요 1, 경미 4.
+    - I1: 사이드카가 스레드 시작 뒤 프레임을 정확히 2개만 읽어, 늦게 오는 routing 알림이 core 허용과 무관하게 실패했다.
+    - M2: ObservationsMatched 허용이 쓰이지 않았다.
+    - M3: "unknown" 단독 수락 테스트가 없었다.
+    - M5: 서명 스크립트에 타임아웃이 없었고, 다른 인증서로 서명된 경우의 테스트가 없었다.
+  - 1차 지적 중 I1, M2, M3, M5를 반영했다. M4(로그인 흐름 알림 반복 횟수 제한 없음, 기존 동작)는 그대로 뒀다.
+  - 2차: 차단·중요 0. 경미 1(초기 알림과 routing 알림이 둘 다 늦으면 3프레임 상한에서 fail-closed)은 주석으로 명시했다.
+  - 검토자 판단: `transparent_tcp`를 null 기본값으로 보는 것은 타당하다. 이 값은 관리형 SOCKS5 프록시가 켜져야만 의미가 있고, 기대 정책은 `network.enabled:false`이기 때문이다.
+- **테스트**
+  - core `vendor_observation::codex` 111 통과. 새 테스트: reason 수락·1회 제한·스레드 시작 중 수락, `transparent_tcp` null 수락·값 거부·모르는 null 거부, 로그인 reason.
+  - sidecar `--lib provider_` 171 통과(36 무시). preflight fixture에 `thread-routed` 사례를 추가했다.
+  - `npm test` 759 통과(새 `m5-dev-sign-sidecar` 7개), `pnpm build` 통과.
+  - 설치 CLI를 쓰는 `installed_codex_*` 테스트는 별도 승인이 필요해서 실행하지 않았다.
+  - Rust 전체 workspace는 다시 돌리지 않았다. 변경 범위가 Codex 관찰 모듈과 preflight 세션뿐이었다.
+- **PR #2 CI(첫 PR CI)**
+  - 첫 실행에서 Windows 하네스가 기존 결함 1건으로 실패했다. 11-17 6d7238e9가 추가한 `proctree::tests::after_the_owner_is_gone_a_reused_process_id_proves_the_recorded_process_ended`이다.
+  - 원인: `identity_of`는 unix에만 있는데, 이 테스트에 `#[cfg(unix)]`가 빠져 있었다. 그때까지 feature/ade에 CI가 돌지 않아 드러나지 않았다.
+  - 수정(6aa3032d) 뒤 macOS·Windows·website·GitGuardian이 모두 통과했다.
+- **미검증**: 수정 뒤 실제 Codex 작업 실행은 하지 않았다(유료 실행). 이 경로는 스레드 시작 단계가 포함된다.
+- **작업 기록**: 롤오버로 11-20 엔트리 3개를 `docs/archive/history-2026-11.md` 맨 위로 옮겼다.
+- **다음 할 일**
+  - PR(`ade/dev-signing-codex` → feature/ade)의 CI와 리뷰 대응
+  - 진단 보고서의 방향·로드맵 결정
+  - 진단에서 찾은 상태 오표시 결함 수정: 진행 중 "main에 합쳐짐", 작업 목록 "검토 준비", 설정의 거짓 미저장
+  - 11-23 엔트리의 남은 항목
+
 ### 2026-11-23 · by Claude Opus 5.5 (claude-opus-5-5) — 실제 todo 앱 개발 시험(목표 확인), 사본·git 반영 화면 실제 확인, 권한 조회 경합 수정
 Orca 조정자 작업(주인님 전체 실제 시험 승인 2026-11-23). 기준 HEAD fb568f6f. 역할: 기획만 Codex(gpt-6.2-sol·medium), 나머지 Claude Code(default·claude-opus-5-5).
 
@@ -28,134 +102,6 @@ Orca 조정자 작업(주인님 전체 실제 시험 승인 2026-11-23). 기준 
   - 이 폴더 프로젝트(그림자 git)에 사본 작업을 반영했으므로 사용자 폴더에 커밋되지 않은 변경 5개가 남아 있다(시험 프로젝트, 정상 동작). 다음 git 작업의 합치기는 11-19 규칙대로 사용자 변경을 먼저 기록한다.
 - **다음 할 일**: M2(Codex 멈춘 실행의 inspect 오류), 위 관찰 중 결과 막대 표현·브라우저 실행 한계 결정, 기존 남은 경미(M16, M19, M20, M25, M31, M35, M39, M40, M42, M43, M45, M46, M49), 남은 핵심 작업(Windows·G6·배포). 로컬 커밋 3개(+기록 커밋)는 push가 필요하다(승인 대상).
 
-### 2026-11-20 · by Claude Opus 5.5 (claude-opus-5-5) — 사본 작업 3상태 실제 화면 확인, 결과 막대 반영 버튼 정리
-- **실제 앱 확인**(개발 빌드, todo-test-1117a의 사본(v1) 작업, 변경 11개; 승인된 todo 시험 프로젝트)
-  - 반영 전 상태가 맞게 나왔다: "변경된 파일 11개"와 "내 폴더에 반영" 버튼.
-    - 이 폴더에는 영수증 도입 전에 반영한 파일이 untracked로 이미 있었다. 영수증이 없으므로 "아직 반영 안 함"으로 보이는 것이 맞다.
-  - 확인 → "반영하기"를 누르자 "✓ 내 폴더에 반영됨 · 파일 11개"와 "이 작업에서 바꾼 파일"이 나오고 버튼이 사라졌다. 결과 막대는 "이 작업은 내 폴더에 반영됐어요"였다.
-  - 폴더 내용은 같은 바이트였다(`app.js` 해시 동일, git 상태도 같은 untracked 6개).
-  - 앱을 정상 종료하고 다시 열어도 같은 상태였다(영수증 유지).
-  - "반영 뒤 또 바뀜" 상태는 작업 공간을 바꿔야 해서 실제 화면에서는 보지 않았다. Rust 테스트로만 확인했다.
-- **발견·수정**: 사본 작업을 반영한 뒤에도 결과 막대의 "내 폴더에 반영" 버튼이 눌리는 상태로 남아 있었다.
-  - git 작업은 합친 뒤 "main에 합침"이 비활성인데, 사본 작업만 달랐다.
-  - 이제 반영됨 상태이면 "내 폴더에 반영함"으로 바뀌고 비활성이 된다(`m5.result.appliedAction` ko/en).
-  - 실제 앱에서 재시작 뒤 비활성 버튼을 확인했다.
-- **개발 서버에서만 생기는 현상**: 번역 파일을 고치면 Vite가 i18n 모듈만 교체한다. 그러면 `useI18n must be used within I18nProvider`가 나며 화면이 빈다. 배포 빌드에는 없으며, 앱을 다시 띄우면 정상이다.
-- **검증**: `pnpm build` 통과, `npm test` 750 통과. 세 번 실행한 앱 로그에서 위 개발 서버 현상 외 오류는 0건이었다. 종료는 모두 exit 0.
-- **다음 할 일**: 남긴 경미 항목은 바로 아래 엔트리 그대로다. todo 앱 개발을 막는 항목은 없다.
-
-### 2026-11-20 · by Claude Opus 5.5 (claude-opus-5-5) — Codex 로그인 고착 수정, 반영 화면 3상태, 쉬는 동안 전체 검사
-사용자 지시: "3번문제부터. 그리고 2번 문제의 반영화면3상태는 제안대로하고, 검사는 앱이 쉬는동안 뒤에서 하는 방향." 기준 HEAD는 f918b58b이다.
-
-- **Codex 로그인 "복구 필요" 고착 수정**
-  - 원인: 확인 도중 앱이 꺼지거나 엔진이 죽으면 보류 파일(`codex-login.pending`)에 종료 표시가 남지 않는다. 그런데 복구 경로는 종료 표시를 요구했고, 실행에 묶인 보류만 따로 풀 수 있었다. 그래서 보류가 영구히 남고, 이후 종료도 매번 막혔다.
-  - 수정:
-    - `recover_settled_login`을 추가했다. 보류의 잠금을 앱이 얻었고, 기록된 프로세스가 하나 이상이며, 모두 끝났음이 확인될 때만 푼다. 실행에 묶인 보류는 이전처럼 `recover_bound`만 푼다.
-    - 보류가 없을 때의 `recover`는 할 일이 없는 것으로 본다(`has_login_hold`).
-    - 시작 전 해제가 거절되면 `providerLoginNotStarted`로 정리한다.
-    - 잠금이 다른 쪽에 있으면 `providerBusy`를 낸다(M37).
-  - 실제 데이터 확인: `recover` → `check`가 "연결됨"이 됐다. 확인 중 종료 시험(codex는 500/1500/3000ms, claude는 1500ms 시점)은 모두 1.2~1.7초에 exit 0으로 끝났고 보류가 남지 않았다.
-  - 독립 검토: 별도 회차에서 반영했다. 남은 경미는 M39, M40이다.
-- **반영 화면 3상태(제안대로)**
-  - 사본(v1) 작업
-    - 완전한 반영이 끝나면 `apply-receipts-v1/<worktreeId>.json`에 실제로 쓰거나 지운 경로와 그 내용 해시(지운 경로는 null)를 기록한다.
-    - `inspectChatApply`가 이 기록으로 {applied, pending, total}을 계산한다.
-    - 화면은 세 상태 중 하나를 보여 준다.
-      - 반영 전: "내 폴더에 반영"
-      - 반영됨: "✓ 내 폴더에 반영됨 · 파일 N개", 버튼 없음, 목록은 "이 작업에서 바꾼 파일"로 흐리게
-      - 반영 뒤 또 바뀜: "반영 뒤 새로 바뀐 파일 N개" + "다시 반영"
-    - 결과 막대에는 "이 작업은 내 폴더에 반영됐어요"를 보여 준다.
-  - git 작업
-    - `mergedBefore`(작업의 첫 first-parent 커밋이 기준 브랜치 tip의 조상인지)와 `ahead`·미커밋 여부로 같은 세 상태를 만든다.
-    - 합치기 자체는 결과 막대에 하나만 둔다. 변경 탭 버튼은 그것을 연다.
-- **쉬는 동안 전체 검사**
-  - 동작: `docs/architecture.md`의 "정상 종료 봉인" 절, `background_check.rs`.
-  - 봉인으로 시작한 세션은 60초 뒤, 전체 검사로 시작한 세션은 6시간 뒤에 처음 검사한다. 성공하면 6시간마다 다시 하고, 실패하면 10분 뒤 한 번 더 한다.
-  - 검사가 통과하면 봉인 줄 끝에 ` full=<ms>`를 붙이고, Electron은 그 시각을 봉인의 마지막 전체 검증 시각으로 쓴다.
-  - 실패가 남아 있는 동안에는 봉인하지 않는다.
-  - 7일 기준은 앱을 쉬게 둔 적이 없을 때의 대체 기준으로만 남는다.
-- **독립 검토(상시 검토자) 2회**
-  - 1차 결과: 차단 0, 중요 1, 경미 7.
-    - I9(중요): 영수증이 건너뛴 경로까지 "반영됨"으로 기록해, 반영되지 않은 파일이 있어도 "✓ 반영됨"이 될 수 있었다.
-    - 경미 M41~M47.
-  - 반영: I9, M41(실패 뒤 재시도, 성공하면 실패 표시 해제), M44(영수증 기록 실패를 반영 실패로 보고하지 않음), M47(읽기에서 폴더를 만들지 않음, 작업 삭제 때 영수증도 지움).
-  - 2차 결과: 차단·중요 0, 경미 2. 그중 M48(`mergedBefore` 계산 실패가 합치기 상태 확인 전체를 실패시킴)을 반영했다.
-  - 남김:
-    - M42: APFS가 아닌 볼륨에서는 복사 비용이 든다.
-    - M43: 손상을 세션 중에 화면으로 알리지 않는다.
-    - M45: 반영한 파일의 해시를 쓴 뒤 다시 읽는다. 경합은 없다.
-    - M46: "반영됨"은 사용자 폴더의 현재 상태를 보지 않는다. 주석으로 남겼다.
-    - M49: 링크·특수 파일이 있는 작업은 계속 "새로 바뀐 파일 n개"로 보인다. 안전한 쪽이며, 나중에 "반영할 수 없는 파일"로 따로 보여 준다.
-- **스스로 찾은 결함**: 작업 커밋이 없을 때 `rev-list` 출력이 비는데, 이를 `trim_output`이 오류로 처리해 합치기 상태 확인 전체가 실패했다. 병합 테스트 10개가 실패해 드러났다. 고쳤고, 단언을 추가했다(합치기 전 false, 합친 뒤 true, 새 커밋 뒤 true에 ahead 1).
-- **테스트**
-  - Rust 전체(`cargo test --workspace`): core 239, protocol 70, sidecar 885(43 무시), 기타 19, 실패 0.
-    - 이 실행은 M48 직전 코드다. M48 뒤에는 병합 관련 20개를 다시 돌려 통과했다.
-    - 기대값 하나를 바꿨다: chat 테스트에서 "잠금을 쥔 살아 있는 소유자"의 오류가 `providerBusy`가 됐다(M37). 실행에 묶인 보류는 여전히 풀리지 않는다.
-  - 새 테스트:
-    - `a_resting_app_checks_a_copy_in_full_and_leaves_no_copy`
-    - `a_failed_check_stops_sealing_until_a_later_one_passes`
-    - 영수증 테스트 `an_applied_copy_task_says_applied_and_counts_what_changed_since`(I9 포함)
-    - 로그인 테스트 3개
-    - `m5-storage-seal`의 `full=` 파싱
-  - 프런트: `npm test` 750, `pnpm build` 통과.
-- **실제 앱 확인(개발 빌드, 15:13~15:22)**
-  - todo-test-1119g의 합친 작업
-    - 변경 탭: "✓ main에 합쳐짐 · 파일 2개", "이 작업에서 바꾼 파일", 버튼 없음
-    - 결과 막대: "이 작업은 main에 합쳐졌어요", "main에 합침" 비활성
-  - 시작과 종료 흐름
-    - 봉인 없는 시작(전체 검사)에서 정상 종료하자 봉인 시각이 15:13:08(시작 검사 시각)이었다.
-    - 봉인으로 다시 시작하자 66초 뒤 `background-check-v1/`에 복사본이 생겼다. 검사는 약 2분 40초 뒤 끝났고(개발 빌드, 낮은 우선순위), 복사본이 지워졌으며, 엔진 CPU는 0%로 돌아갔다.
-    - 그 뒤 정상 종료하자 봉인 시각이 15:18:42(복사 시각)로 바뀌었다.
-    - 세 번째 시작은 4.6초 걸렸다(빌드 도구 준비 뒤 3.0초). 봉인을 사용했고 시각도 이어졌다.
-    - 세 번의 실행 모두 로그 오류 0건, 종료는 모두 1~2초에 exit 0이었다.
-  - 사본 작업의 3상태는 실제 앱에서 보지 못했다. Rust 테스트로만 확인했다.
-- **관찰(경미, 미수정)**: 일반 폴더 합치기에서 사용자 변경을 먼저 기록해 작업 브랜치로 가져오므로, 사용자가 바꾼 `memo.txt`도 "이 작업에서 바꾼 파일"에 보인다.
-- **다음 할 일**
-  - 사본(v1) 작업 3상태 실제 화면 확인(기회가 될 때)
-  - 남긴 경미: M16, M19, M20, M25, M31, M35, M39, M40, M42, M43, M45, M46, M49
-  - 남은 핵심 작업(Windows·G6·배포)
-
-### 2026-11-20 · by Claude Opus 5.5 (claude-opus-5-5) — 4단계 뒤 Rust 전체 재검증과 작업 기록 롤오버
-- Rust 전체(`cargo test --workspace`, 4단계 일반 폴더 기록 이후 HEAD b983f020): core 239, protocol 70 통과. sidecar lib는 870 통과·1 실패·43 무시였다.
-  - 실패한 `provider_login_gate::tests::vendor_gate_does_not_inherit_unrelated_writable_descriptors`는 **테스트 결함이었다(제품 정상)**. 로그인 관련 테스트를 15번 반복해 1번 재현했다: `minimum=3, fd=10, 종료 코드 17`. 다른 테스트가 3~9번을 쥐고 있어 복제 번호가 10이 됐고, 검사 셸(`/bin/sh` = bash)이 내장 `printf`의 리디렉션을 위해 stdout을 10번 이상 첫 빈 번호에 보관하므로, 게이트가 닫은 10번이 쓰기 가능처럼 보였다. 셸에서 직접 확인했다(닫힌 9·11은 닫힘, 10만 쓰기 가능; 외부 `/usr/bin/printf`는 모두 닫힘, 실제로 열린 10은 쓰기 가능). 게이트 자체는 `exec N>&-`만 쓰고 내장 명령 리디렉션이 없어 영향이 없다.
-  - 수정: 검사를 외부 `/usr/bin/printf`로 바꾸고 `minimum`에 10을 넣어 이 경우를 매번 검사한다. 수정 뒤 같은 반복 15번 모두 통과. 참고로 수정 전 sidecar lib 전체를 병렬 4로 2번 더 돌렸을 때는 둘 다 871 통과로 재현되지 않았다.
-- 개발 앱 로그의 `manifestMismatch: worktree Git link does not name the project's repository` 2건: 시작할 때 todo-test-1119f의 마지막 작업을 자동으로 다시 열다 난 것이다. 그 작업은 소유 표시가 없던 개발 중 빌드의 첫 기록(`81da…`)에서 만들어졌고, 새 빌드가 그 기록을 다시 기록 대상으로 판정해 새 기록(`5e1d…`)을 만들었다. 그래서 옛 작업의 링크가 프로젝트의 현재 기록을 가리키지 않는다. 화면은 `m5.editorError.earlierRecord` 안내를 보여 준다. 출시 빌드는 처음부터 소유 표시를 쓰므로, 같은 프로젝트가 DB에 남은 채 기록만 사라지거나 조작되지 않는 한 생기지 않는다. 사용자 앱 데이터는 직접 고치지 않으므로 그 작업은 그대로 두었다.
-  - 알게 된 점: 이런 작업은 열기뿐 아니라 버리기도 거절된다(`remove_task_worktree_folder`가 현재 기록의 링크만 받고, 버리기 전 검증도 같다). 실제로 생길 수 있는 경로가 생기면 "앱의 그림자 기록이 이 폴더를 되가리키는 경우"만 지울 수 있게 하는 것을 독립 검토와 함께 검토한다.
-- **후속(같은 날): 남은 항목 처리**. 위 판단을 바꿔 열려 있던 것을 모두 닫기로 했다.
-  - 예전 기록의 작업 버리기: `earlier_record_worktree`(링크가 정확히 `<앱 데이터>/shadow-git-v1/<x>.git/worktrees/<이름>`, x는 현재 기록이 아니고 canonical, 그 기록의 `gitdir`이 정확히 이 작업 폴더). 새 `WorkspaceLockAdmission::Discard`와 기존 `Cleanup`에서만 링크 검사 실패를 이 조건으로 허용한다. 열기·실행·합치기는 그대로 막힌다. 지울 때 옛 기록의 worktree 항목도 지운다. 현재 기록을 못 찾으면 판정하지 않는다(M14).
-  - M8 `retire_orphaned_history`: 남은 작업 기록이 없고, 소유 표시가 아예 없거나(NotFound만) 표시된 그 폴더(같은 ino·디스크)가 다른 기록을 가리킬 때만 지운다. 그 밖(표시 읽기 실패, `path:` 없음, 폴더 없음·다른 폴더)은 보존. 옛 작업을 버린 뒤, 그리고 폴더를 새로 기록한 직후 옛 기록에 부른다.
-  - M11: 소유 표시에 `vol:<볼륨 UUID>`(statfs 마운트 지점에 `getattrlist ATTR_VOL_UUID`). ino가 같아도 디스크가 다르면 다른 폴더. 어느 쪽이든 UUID가 없으면 예전처럼 ino만 본다. 열 때 표시가 갱신된다.
-  - 일반 폴더 합치기 안내: 비개발자는 커밋할 수 없어 "수정 중인 파일과 겹침" 거절에서 나올 방법이 없었다. 이제 일반 폴더는 합치기 직전에 사용자 변경을 앱이 "내 폴더에서 바꾼 내용"으로 기록하고(첫 기록과 같은 한도, 넘으면 `folderChangesTooLarge`, 안에 다른 저장소가 생기면 `folderHasRepository`), 그 다음 기존 흐름대로 작업 브랜치로 가져온다. 같은 파일을 고쳤으면 팀이 정리하는 충돌이 된다. git 프로젝트는 그대로(사용자 커밋을 대신하지 않음).
-  - 검토에서 나온 기존 결함(I6): 사용자 폴더를 앞으로 옮기는 `merge --ff-only`가 git이 무시하는 사용자 파일(.env 등)을 작업의 같은 이름 파일로 말없이 덮어쓸 수 있었다(셸에서 재현: 플래그 없이 exit 0·내용 바뀜). `--no-overwrite-ignore`를 넣어 거절(`userChangesOverlap`, 문구에 무시 파일 언급)하게 했다.
-  - 화면: 합치기 상태 확인이 실패하면 v1 "내 폴더에 반영"으로 대체하지 않고 "이 작업의 합치기 상태를 확인하지 못했어요." + "다시 확인"을 보여 준다(M15).
-  - 독립 검토(상시 검토자) 2회: 1차 차단 0·중요 1(I5: 옮긴 원본 경로에 다른 폴더가 생기면 기록을 지울 수 있음)·경미 4(M13~M16), 2차 차단 0·중요 1(I6)·경미 4(M17~M20). I5, I6, M13~M15, M17, M18을 반영했다. 남김: M16(옛 작업 브랜치가 남음, 기록이 보존될 때만), M19(첫 시도가 막히면 다음 시도가 한 번 더 `changedSinceReview`), M20(사용자가 폴더에 둔 새 파일도 기록에 들어가 팀이 읽을 수 있음; 이 프로젝트 범위 안).
-  - 테스트: 새 `a_task_of_an_earlier_folder_record_can_be_discarded`, `recording_a_folder_anew_retires_only_its_unused_old_history`(I5·M13 포함), `a_plain_folder_merge_records_the_users_own_edits_first`(M17 포함), `a_merge_never_overwrites_an_ignored_file_of_the_user`, M11 단언. 합치기·일반 폴더 관련 Rust 16개, `npm test` 747, tsc 통과.
-- **todo-test-1119g 실제 Chrome 점검(08:31 잠금 해제 뒤, 합친 사용자 폴더의 `index.html`)**: 빈 칸 추가 → "할 일을 입력해 주세요.", 입력 + Enter로 첫 항목, "추가" 버튼으로 둘째 항목, 첫 항목 체크(남은 할 일 2→1), 새로고침 뒤 두 항목과 체크 유지, 삭제 → "할 일을 삭제했어요. 남은 할 일: 1개". 모두 정상이며 화면 캡처로 배치도 확인했다. 개발 앱 로그에는 18:07 이후 새 오류가 없었다(이전 1119f 옛 작업 열기 2건, 번역 HMR 1건뿐). 점검용 Chrome과 개발 앱은 종료했다.
-- 작업 기록이 593줄이라 2026-11-18 엔트리 2개를 `docs/archive/history-2026-11.md` 맨 위로 옮겼다. 고정 섹션만 약 310줄이라 300줄 이하는 고정 섹션을 옮기지 않고는 불가능하다. 옮기기 전에 11-18 결정이 `핵심 결정·발견`에 있는지 확인했고, 빠져 있던 11-19 일반 폴더(그림자 git 링크 파일) 결정을 추가했다.
-- **실제 앱 확인(1119f, 8a5e16cf 빌드)**: 예전 기록 작업은 화면에서 열리지 않아 결과 막대의 "버리기"에 닿을 수 없었다. 대신 작업 칩의 ×(작업 삭제)가 사용자 경로다. 삭제를 누르자 작업 폴더 `task-8aaf6776`이 지워지고, 남은 작업이 없는 옛 기록 `81da…`도 정리됐다(M8). 사용자 폴더는 파일·링크(`5e1d…`)·상태 그대로였다. 수정 전에는 이 삭제가 `remove_task_worktree_folder`에서 거절돼 대기로 남았을 경로다. 이후 1119f를 다시 열어도 `manifestMismatch`가 더 나오지 않았다.
-- **발견·수정(프로젝트 보기 사본이 처음 상태로 남음)**: 작업 없이 프로젝트를 다시 열면 파일 목록이 처음 열었을 때(README.md, notes.txt)였다. 합친 app.js 등이 보이지 않았다. `open_verified_source`가 프로젝트 보기 사본(v1 snapshot)을 원본 HEAD와 관계없이 재사용했기 때문이다(git 프로젝트도 같음).
-  - 수정: 원본 HEAD가 사본 기준과 다르고 `project_copy_untouched`(저장 대기·진행 중 반영 없음, `worktree_is_quiet`, 사본 HEAD가 기준 커밋, 서브모듈 없음, `status --untracked-files=all --ignored`가 빔)이면 `close_project` 뒤 새 사본을 만들고 옛 사본 파일은 `remove_worktree_files`로 바로 지운다. 닫기가 실패하면 예전처럼 재사용한다. 사본에 편집이 있으면 그대로 둔다.
-  - 재시작한 앱에서 1119f가 지금 폴더 상태(docs, README.md, app.js, index.html, notes.txt, style.css)로 보였다.
-  - 독립 검토: 차단·중요 0, 경미 5(M21~M25). M21~M24 반영, M25(원본이 바뀐 경우에만 사본 전체 status, 성능만)는 남김.
-  - 테스트: 새 `reopening_a_project_shows_the_original_as_it_is_now`(교체·옛 사본 삭제, 편집 있으면 유지, 서브모듈 있으면 유지). 기존 `a_new_commit_in_the_original_does_not_stop_new_tasks`의 "옛 사본 유지" 단언을 새 동작으로 바꿨다. project::/chat:: 테스트는 이 단언 외 324개 통과(변경 전 실행).
-- **실제 앱 확인(1119g, 0eca7406 빌드, 일반 폴더 합치기 전 기록)**: 새 작업 "README.md 맨 아래에 한 줄 추가"를 보냈다(09:55~09:58, 검토 준비, 변경 1개 +1). 그 사이 사용자처럼 폴더에서 `memo.txt`에 한 줄을 더하고 README 첫 줄(제목)을 바꿨다. "main에 합치기 → 합치기"에서 앱이 "내 폴더에서 바꾼 내용"(8cc6d25)을 먼저 기록하고, 작업 브랜치로 가져온 뒤(06e7264) main에 합쳤다. README에는 사용자의 첫 줄과 팀의 마지막 줄이 함께 있고, memo 수정도 그대로이며, 상태는 깨끗하다. 화면은 "main에 합쳤어요". 수정 전이면 `userChangesOverlap`으로 거절됐을 경우다. 개발 앱 로그 오류 0건.
-- 누적 검증(0eca7406 + 이 기록): Rust 전체 core 239, protocol 70, sidecar 876(43 무시), 기타 19 모두 통과, 실패 0. `npm test` 747, tsc 통과(8a5e16cf에서, 이후 화면 변경 없음).
-- 다음 할 일: Codex 로그인 "복구 필요" 고착 조사(아래), 전체 검증 간격 사용자 확인, 반영 화면 3상태 사용자 결정. 남긴 경미: M16, M19, M20, M25, M31, M35.
-- **조사(사용자 보고): 앱 시작 때 "작업 공간을 안전하게 준비하고 있어요"에서 오래 멈춤**. 실제 앱 DB(140MB: operation_receipts 46MB, events 45MB, run_output_records 15MB, ledger_baselines 13MB)를 바이트 복사해 `Storage::open_for_durable_admission`만 재는 임시 진단으로 측정했다: 개발 빌드 68.9초, release 빌드 39.1초. 표본상 시간의 약 98%가 `storage::reopen::snapshot::ReopenMaintenanceSession::step`(ProjectionScan/SourceScan → `reopen::semantic` 바이트 단위 JSON 의미 검사)이다. 즉 시작할 때마다 전체 원장을 다시 검증하며 DB 크기에 비례한다. 쓸수록 느려지는 구조라 개선이 필요하다(후보: 마지막 정상 종료 이후 증분만 검증, 화면 먼저 열고 쓰기만 검증 완료까지 막기, 오래된 기록 압축). 사용자 결정 대기. 측정 코드는 되돌렸고 DB 사본은 지웠다. sidecar는 검증이 끝난 뒤에는 정상(Ready, 유휴)이었다.
-- **시작 검증 개선(사용자 결정에 따른 구현)**:
-  - 1단계(검증 범위 유지): `MessageScan`이 메시지를 도입한 이벤트마다 모든 채팅 이벤트를 하나씩 훑던 O(N²)를, 색인된 이벤트는 쿼리 1번·색인 없는 이벤트만 하나씩으로 바꿨다(무진행 방지 marker에 `indexed_done` 포함). 실제 DB 사본 release 40초 → 11.7초, storage 테스트 300개 통과. SQL 문장 캐시(rusqlite `cache` feature)는 새 의존성(hashlink)이 필요해 하지 않았다(남은 시간의 약 30%가 SQL 재파싱).
-  - 2단계(정상 종료 봉인): `docs/architecture.md` "정상 종료 봉인" 참조. 실제 앱(개발 빌드): 봉인 없는 첫 시작 70초 → 정상 종료 → 두 번째 6.3초·세 번째 6.6초(대부분 개발 도구 시작; 엔진의 봉인 열기 자체는 0.37초, 화면에서 검증 안내가 0.5초 안에 사라짐).
-  - 함께 찾은 것: 시작 때 `validate_persisted_runs`가 실행 기록을 전부 읽어 놓고도 실행마다 `projection_record`로 다시 조회했다(조회 한 번이 projects·chats·runs·locks 전 행 JSON을 파싱; 3.1초). 처음에는 조회를 그 행만 읽게 바꿨으나, "선택 조회도 다른 테이블의 손상을 가리지 않는다"는 기존 계약 테스트(`selected_projection_retains_only_requested_rows_without_skipping_validation`)가 실패해 되돌렸다. 대신 이미 읽은 값을 같은 검사(`validate_actual_run_projection`)에 넘긴다. 봉인 시작이 1.8초(개발 빌드, 화면 기준)가 됐다.
-  - 함께 찾은 것: 시작 때 모델 목록 조회가 끝났는데 그 프로세스의 종료 증거가 한 박자 늦게 서면 곧바로 `agentRecoveryRequired`("model catalog process termination is unconfirmed")로 응답해 오류 로그가 남았다. 5초(`UNCONFIRMED_GRACE`)까지는 응답을 미루고 다시 확인하게 했다.
-  - 함께 찾은 것: 시작 직후(로그인 확인 중) 종료하면 prepareQuit이 10초 안에 safe가 되지 못해 비정상 종료(exit 70)가 되고, 그 10초 동안 숨겨진 화면의 로그인 폴링이 오류 로그 24줄을 남겼다. 종료가 시작되면 엔진으로 가는 IPC가 응답하지 않게 했다(`quietAfterQuit`). 비정상 종료 뒤 다음 시작은 전체 검증(안전한 쪽).
-  - 독립 검토(상시 검토자) 1차: 차단 0, 중요 2(I7 봉인은 "검증 완료 지점"이 아니라 그 세션에서 앱이 쓴 기록까지 포함 → 마지막 전체 검증 뒤 7일이 지나면 전체 검증으로 반영, 간격은 사용자 확인 예정; I8 열기 전 WAL 확인과 열기 사이 경합 → 배타 잠금 뒤 재확인), 경미 5(M26 압축 삭제 권한 행·M27 개발 빌드 문맥 반영, M28~M30은 확인·받아들인 대가). MessageScan·projection 조회 변경은 의미 동등으로 판정.
-  - 테스트: 새 `a_clean_shutdown_seal_skips_the_full_check_only_for_the_same_file`(I8 잠금 뒤 WAL 포함), CLI 인자 거절 확장, `stdio_process`의 정상 종료 테스트가 실제 바이너리의 봉인 줄과 DB 파일 SHA-256 일치를 확인, `tests/m5-storage-seal.test.mts`(서명·1회용·파일 해시 대조·버전/폴더/시각 서명·7일·시계 역행), Electron 보안 테스트 모의 환경 갱신. Rust 전체(봉인·카탈로그 마지막 수정 전) core 239·protocol 70·sidecar 878·stdio 16 통과, 마지막 수정 뒤 영향 그룹 91·stdio 16 통과, `npm test` 750 통과.
-  - 독립 검토 2·3차: 차단·중요 0. 반영: M32(I8 회귀), M33(`quietAfterQuit` 전제 주석). 남김: M31(봉인이 거절된 시작의 전체 검증 시각이 갱신되지 않음, 다음 전체 검증이 일찍 올 뿐), M35(실행 기록 키와 내부 `run_id` 직접 비교 없음, 전체 검증의 재생 비교가 잡음).
-  - 마지막 실제 앱 순환(개발 빌드): 빌드가 바뀐 첫 시작 104초(전체) → 정상 종료 → 2.3초 → 정상 종료 → 2.0초. 남은 로그 오류 두 가지를 더 고쳤다: 시작 때 두 공급자의 모델 목록 동시 요청 중 하나가 "model catalog unavailable"로 거절되던 것을 `providerBusy`(앱이 1.5초 간격 5회 재시도)로, 종료 시작 전에 나간 요청이 엔진 종료로 끊기며 남기던 "sidecar exited"도 `quietAfterQuit`이 흡수.
-  - **발견(미해결)**: 시험 중 시작 직후 강제 종료(비정상 종료)를 거친 뒤 Codex 로그인 상태가 `failed: providerLoginRecoveryRequired`로 남고, 명시 `recover`도 "login process cleanup could not be confirmed"로 실패한다. `codex-login.pending`의 기록 프로세스(pid 46678, 이번 세션 12:12 시작)는 이미 없다. 이 상태에서는 `LoginManager::prepare_quit`이 계속 false라 모든 종료가 비정상(exit 70)이 되고, 봉인이 생기지 않아 매 시작이 전체 검증이 된다. 오늘 아침 첫 실행부터 "model catalog process termination is unconfirmed"가 있었고 사용자 Mac의 ChatGPT 앱(Codex CLI)이 오늘 갱신돼, Codex CLI 쪽 프로세스 동작 변화가 원인일 수 있다(추정, 미확인). 다음 작업으로 조사한다.
-  - 사용자 확인 대기: 전체 검증 간격 7일(매일 쓰면 7일마다 한 번 긴 시작; 대안은 유휴 시간에 뒤에서 전체 검증).
-- **사용자 지적: 반영한 뒤에도 변경 탭이 "변경된 파일 10개 + 내 폴더에 반영"으로 그대로 남아 헷갈림**(v1 작업의 반영 패널 `apply-latest.tsx`; 반영 완료는 한 번 뜨는 안내뿐). 제안: 반영 전/반영 완료(상태로 유지, 버튼 없음, 목록은 "이 작업에서 바꾼 파일"로 흐리게)/반영 뒤 또 고침(새로 바뀐 N개 + 다시 반영) 세 상태로, "main에 합치기" 작업과 같은 규칙. 사용자 결정 대기.
-
 ## 프로젝트 요약 (고정)
 터미널을 한 번도 안 열어본 비개발자를 **코딩 에이전트(Claude Code·Codex)가 굴러가는 상태까지** 데려다주는 데스크톱 GUI 앱. 현재 배포 경로는 Tauri 2 + React 19이고, M5는 Electron + React/TypeScript + Monaco와 Rust sidecar의 별도 작업대 골격으로 전환 중이다.
 - 기획 원본: `~/Library/CloudStorage/OneDrive-개인/ObsidianVault/오픈소스/아이디어/후보/에이전트-스타터.md`
@@ -164,6 +110,16 @@ Orca 조정자 작업(주인님 전체 실제 시험 승인 2026-11-23). 기준 
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **Codex CLI가 바뀌면 사전 확인이 먼저 깨진다(2026-11-25)**: ChatGPT.app 업데이트가 내장 codex-cli를 바꾼다. 앱의 사전 확인(`codex_preflight/exchange.rs`, `named_config.rs`, `codex_login/connection.rs`)은 응답을 엄격하게 비교한다(`deny_unknown_fields`, null 기본값 목록). 그래서 새 필드 하나만 생겨도 "연결을 확인하지 못했어요"(`providerLoginFailed`)가 난다.
+  - 진단 순서:
+    1. 앱 로그의 `Codex preflight failed at <단계>`로 실패 단계를 찾는다.
+    2. `codex app-server generate-ts --out <임시>`로 스키마를 본다.
+    3. 실제 직렬화는 인증 없이 임시 CODEX_HOME + 같은 `-c` 설정으로 `config/read`를 호출해 확인한다.
+  - 실제 자격 증명 복사본으로는 재현하지 않는다(refresh token 회전 위험).
+- **개발 빌드 서명과 키체인(2026-11-25)**: `m5:dev`는 디버그 사이드카를 로컬 "Elsecrew Dev" 인증서로 서명한다(지정 요구사항 = 식별자 + 인증서라 다시 빌드해도 같다).
+  - 인증서가 없으면 경고만 내고 ad-hoc으로 진행한다. 그 경우 토큰 갱신 때마다 키체인이 다시 묻는다.
+  - 개발용 Electron.app은 다시 서명하지 않는다. ad-hoc cdhash가 Electron 버전마다 결정적이라, `Elsecrew Safe Storage`는 버전을 올릴 때만 다시 묻는다.
+  - Keychain 항목은 지우지 않는다.
 - **에이전트는 실제 브라우저·Node를 실행할 수 없다(2026-11-23 확인)**: 실행 샌드박스(`provider_runtime_sandbox.rs` `POLICY`, `deny default`)는 `/System`·`/usr`·작업 공간·프로필만 읽게 하고 로컬 소켓을 막는다. 그래서 Chrome·Firefox·WebKit(Swift)·Homebrew Node가 모두 실패하고, 에이전트는 macOS `jsc`와 가짜 DOM으로만 웹 앱을 확인한다. 웹 앱 결과의 실제 동작은 사람이(또는 시험자가 별도 Chrome으로) 확인해야 한다. 이 경계를 넓히는 것은 안전 결정이다.
 - **"요청 내용 보기"는 사라진 요청에 오류를 내지 않는다(2026-11-23)**: Claude CLI는 권한 요청을 스스로 취소할 수 있다(`control_cancel_request`). 대기하지 않는 요청의 inspect는 `inspection: null`, 허용·거절은 `agentApprovalChanged`. approval 결과는 sidecar client·main·preload·화면에서 네 번 검증되므로 계약 검증은 자기 출력을 다시 통과해야 한다(멱등).
 - **셸로 fd가 닫혔는지 검사할 때(2026-11-20)**: `/bin/sh`(bash)는 내장 명령의 리디렉션(`printf … >&N`)을 처리하며 원래 fd를 10번 이상 첫 빈 번호에 보관한다. 그래서 닫힌 10번이 쓰기 가능처럼 보인다. 검사는 외부 명령(`/usr/bin/printf`)으로 한다. 병렬 테스트에서 낮은 번호가 차 있을 때만 드러난다.
@@ -473,4 +429,4 @@ Orca 조정자 작업(주인님 전체 실제 시험 승인 2026-11-23). 기준 
 ---
 지난 워크로그: [11월](archive/history-2026-11.md) · 그 이전(Elsecrew 이름 변경 전) 기록은 2026-11-13에 정리했다. 필요하면 `git log -- docs/archive/`로 찾는다.
 
-2026-11-11~11-19 워크로그(11-17 엔트리 안의 11-18 오전 후속 포함)는 `docs/archive/history-2026-11.md`로 이동했다.
+2026-11-11~11-20 워크로그(11-17 엔트리 안의 11-18 오전 후속 포함)는 `docs/archive/history-2026-11.md`로 이동했다.

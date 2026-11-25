@@ -92,7 +92,8 @@ pub fn matches_write_policy(value: &Value, home: &Path, workspace: &Path) -> boo
 
 fn matches_policy(value: &Value, expected: &Value) -> bool {
     let mut normalized = value.clone();
-    // Observed 0.159.2 serializer defaults, not an arbitrary null-field bypass.
+    // Observed serializer defaults (0.159.2; `transparent_tcp` since 0.171),
+    // not an arbitrary null-field bypass.
     for (object, keys) in [
         ("", &["description", "extends", "workspace_roots"][..]),
         ("filesystem", &["glob_scan_max_depth"][..]),
@@ -110,6 +111,7 @@ fn matches_policy(value: &Value, expected: &Value) -> bool {
                 "mode",
                 "proxy_url",
                 "socks_url",
+                "transparent_tcp",
                 "unix_sockets",
             ][..],
         ),
@@ -283,4 +285,37 @@ pub(super) fn match_configuration(
         return Err("effective filesystem or network policy");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The 0.171 serializer reports the named policy with these explicit
+    /// nulls (seen from `config/read`), including the new `transparent_tcp`.
+    #[test]
+    fn codex_0_171_null_defaults_still_match_and_set_values_do_not() {
+        let home = Path::new("/managed/profile");
+        let workspace = Path::new("/managed/workspace");
+        let mut observed = expected_write_policy(home, workspace);
+        for key in ["description", "extends", "workspace_roots"] {
+            observed[key] = Value::Null;
+        }
+        observed["filesystem"]["glob_scan_max_depth"] = Value::Null;
+        for key in [
+            "proxy_url", "enable_socks5", "transparent_tcp", "socks_url", "enable_socks5_udp",
+            "allow_upstream_proxy", "dangerously_allow_non_loopback_proxy",
+            "dangerously_allow_all_unix_sockets", "mode", "domains", "unix_sockets",
+            "allow_local_binding", "mitm",
+        ] {
+            observed["network"][key] = Value::Null;
+        }
+        assert!(matches_write_policy(&observed, home, workspace));
+        let mut enabled = observed.clone();
+        enabled["network"]["transparent_tcp"] = json!(true);
+        assert!(!matches_write_policy(&enabled, home, workspace));
+        let mut unknown = observed.clone();
+        unknown["network"]["not_a_known_default"] = Value::Null;
+        assert!(!matches_write_policy(&unknown, home, workspace));
+    }
 }
