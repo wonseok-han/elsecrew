@@ -645,8 +645,10 @@ fn check_claimed(
                 process.send_preflight_observed(request, remaining, cancel, &mut |process| {
                     on_action(process, TextAction::ObserveProcess)
                 })?;
-                // One reply and one thread/started, in either order, plus at
-                // most one late account note (the exchange allows it once).
+                // One reply and one thread/started, in either order, plus one
+                // late account note (in practice the routing-ready one; the
+                // initial note arrives during the checks). If both notes were
+                // late this stops short and fails closed.
                 for _ in 0..3 {
                     if flow.state() != PreflightState::ThreadStarting {
                         break;
