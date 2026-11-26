@@ -24,6 +24,7 @@
   - 네이티브 시나리오 PASS(실제 sidecar, 임시 폴더·앱 데이터, 공급자 미연결). 캡처 `~/Documents/elsecrew-ade-screens-u2-u4-2026-11-26/review-fix/native/`, 스모크 캡처 `review-fix/smoke/{dark,light}`.
   - 개발 앱은 띄우지 않았다(네이티브 시나리오가 실제 앱 흐름을 대신함). 프로세스 종료는 각 스크립트가 스스로 끝냈다.
 - **feature/ade 병합(PR #13 9918bc22)**: 반영 커밋 810ebcb8 뒤 PR이 충돌(DIRTY)해 CI가 돌지 않았다. `origin/feature/ade`를 병합했다. 기록 충돌은 기저 쪽 `history.md`·아카이브를 그대로 두고 이 PR의 두 엔트리와 핵심 결정만 더한 뒤, 500줄을 넘어 머지된 PR #10·#13 엔트리를 아카이브 맨 위로 옮겼다(아카이브를 먼저 읽고 씀). `pnpm m5:check:history` 기저 대비 453 유지·2 추가·누락 0. 병합 뒤 `npm test` 947/947, build, 렌더러 스모크 다크·라이트(27화면 실패 0), 미리보기 UI 스모크 다크·라이트 각 2회, 네이티브 시나리오 PASS.
+- **CI**: 45d7fb28에서 macOS·Windows·website·GitGuardian 모두 통과, PR #12 `CLEAN/MERGEABLE`. 차단(B1) 재확인은 조정자가 받는다.
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 화면 통일 U2(홈·처음 시작·전환·삭제·폴더 확인)·U3(새 작업 창)·U4(설정) (`orca/ade-screens-u2-u4`, 기준 feature/ade 7378332a)
 설계: `docs/proposals/m5-ade-screens-plan.md` 4.1과 시안 01~07·10·11·14(원본 `~/Documents/elsecrew-ade-screens-design-2026-11-26/`). 조정자 결정: Q1 홈 카드는 마지막으로 연 때만(요약 조회 없음), Q4 알림 설정 분리(종류별 끄기·해결된 알림 정리), Q5 홈 왼쪽 레일 제거, Q6 전환은 닫기+열기 한 동작, Q7 빈 폴더 확인을 앱 안으로(업데이트는 U8), Q8 '이 프로젝트'는 설정 목록의 묶음, Q9 첫 작업의 별도 확인 체크 유지(보내기가 동의를 대신하지 않음, 모양만 바꿈). 현행 설명은 architecture "홈·처음 시작·설정(U2~U4)".
