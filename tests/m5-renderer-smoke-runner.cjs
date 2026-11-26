@@ -212,7 +212,12 @@ app.whenReady().then(async () => {
     if (document.getElementById('codex-connection-details').hidden) throw new Error('status polling collapsed explicit settings');
     codexButton('연결 상태 다시 확인').click();
     await ${waitFor("window.m5SmokeLoginRequests.filter(r=>r.action==='recover').length === 1 && !document.querySelector('[aria-label=\"연결 상태 다시 확인\"]').disabled", "verified recovery fails closed")};
-    if (!codexButton('Codex 로그인').disabled || codexButton('연결 잠금 복구')) throw new Error('failed recovery bypass or exposed internal action');
+    if ((codexButton('Codex 로그인') && !codexButton('Codex 로그인').disabled) || codexButton('연결 잠금 복구')) throw new Error('failed recovery bypass or exposed internal action');
+    // ADE U5: the failure is an F11 guide — what happened, one thing to do now, help details folded.
+    const loginGuide = document.querySelector('[data-testid=login-guide-codex]');
+    if (!loginGuide?.textContent.includes('Codex 로그인 정리를 기다리고 있어요') || loginGuide.querySelectorAll('.m5-btn-primary').length !== 1 || loginGuide.querySelector('details')?.open) throw new Error('login failure must be a guide with one main action and folded help details');
+    if (loginGuide.querySelector('.m5-recover-what').textContent.includes('providerLoginRecoveryRequired')) throw new Error('the raw error key belongs only in the help details');
+    ${capture("28-agents-login-guide")}
     await new Promise(resolve => setTimeout(resolve, 650));
     if (window.m5SmokeLoginRequests.filter(r=>r.action==='recover').length !== 1) throw new Error('recovery automatically retried');
     codexButton('연결 상태 다시 확인').click();
@@ -1053,14 +1058,40 @@ app.whenReady().then(async () => {
   }
   // This part starts on the home screen: the open project would come back by itself after the reload (last session).
   await window.webContents.executeJavaScript("localStorage.removeItem('elsecrew.m5.lastProject.v1')");
+  // ADE U6: notifications from two projects, one task with two open requests and three settled ones.
+  await window.webContents.executeJavaScript(`(() => {
+    const now = Date.now(), at = minutes => new Date(now - minutes * 60000).toISOString();
+    const line = (id, kind, projectId, chatId, goal, text, minutes, resolved) => ({ id, kind, projectId, chatId, goal, text, at: at(minutes), read: Boolean(resolved), ...(resolved ? { resolved: true, resolvedAt: at(1) } : {}) });
+    const goal = '메뉴 페이지에 오늘의 빵 세 가지를 추가해 줘';
+    localStorage.setItem('elsecrew.m5.notifications.v1', JSON.stringify([
+      line('approval:a', 'attention', 'smoke_project', 'smoke_chat', goal, '검증 담당이 명령 실행 허락을 기다려요', 3),
+      line('approval:b', 'attention', 'smoke_project', 'smoke_chat', goal, '개발 담당이 파일 쓰기 허락을 기다려요', 5),
+      line('approval:c', 'attention', 'smoke_project', 'smoke_chat', goal, '허락 요청', 30, true),
+      line('approval:d', 'attention', 'smoke_project', 'smoke_chat', goal, '허락 요청', 40, true),
+      line('approval:e', 'attention', 'smoke_project', 'smoke_chat', goal, '허락 요청', 50, true),
+      line('done:e1', 'done', 'earlier_project', 'earlier_chat', '할 일 목록 맨 아래에 오늘 날짜 넣기', '팀이 일을 마쳤어요', 12),
+    ]));
+  })()`);
   await window.loadURL("m5smoke://m5/index.html");
   await window.webContents.executeJavaScript(`(async () => {
-    await ${waitFor("[...document.querySelectorAll('[aria-label=\"Codex 연결\"] button')].some(button => button.textContent === '연결' && !button.disabled)", "connection preference fixture after reload")};
-    [...document.querySelectorAll('[aria-label="Codex 연결"] button')].find(button => button.textContent === '연결').click();
+    await ${waitFor("[...document.querySelectorAll('[aria-label=\"Codex 연결\"] button')].some(button => button.textContent === '연결하기' && !button.disabled)", "connection preference fixture after reload")};
+    [...document.querySelectorAll('[aria-label="Codex 연결"] button')].find(button => button.textContent === '연결하기').click();
     await ${waitFor("document.querySelector('[aria-label=\"Codex 연결\"]')?.textContent.includes('로그인이 연결됐어요')", "saved login after reconnect")};
     if (document.querySelector('.m5-provider-selection form')) throw new Error('saved agent choice was lost');
     if (!document.querySelector('[aria-label="Claude Code 연결"]')) throw new Error('added agent lost after reload');
     await ${waitFor("document.querySelector('.m5-home:not([hidden]) .m5-project-overflow')", "project removal on home")};
+    // ADE U6 (D10): the badge counts only what waits for the person; the panel opens on it, grouped by project and task.
+    const bell = document.querySelector('.m5-notification-bell');
+    if (bell.querySelector('.m5-notification-count:not(.m5-notification-alert)')?.textContent !== '2') throw new Error('bell badge must count only open requests');
+    bell.querySelector('summary').click();
+    await ${waitFor("document.querySelector('.m5-notification-tabs button[aria-pressed=true]')?.textContent.startsWith('확인 필요')", "panel opens on what needs you")};
+    if (bell.querySelectorAll('.m5-notification-item').length !== 2 || bell.querySelectorAll('.m5-notification-goal').length !== 1) throw new Error('attention tab: two open lines under one task goal');
+    [...bell.querySelectorAll('.m5-notification-tabs button')].find(button => button.textContent === '전체').click();
+    await ${waitFor("[...document.querySelectorAll('.m5-notification-project h4 > span')].map(h => h.textContent).join('|') === 'smoke|earlier'", "projects named in the panel")};
+    if (bell.querySelectorAll('.m5-notification-goal').length !== 2 || bell.querySelector('.m5-notification-settled')?.open !== false || !bell.querySelector('.m5-notification-settled summary').textContent.includes('3')) throw new Error('all tab: one goal per task, settled lines folded');
+    if (bell.textContent.split('메뉴 페이지에 오늘의 빵').length !== 2) throw new Error('a task goal is said once');
+    ${capture("30-notifications")}
+    bell.open = false;
     const earlierRow = () => [...document.querySelectorAll('.m5-home li[data-path]')].find(item => item.dataset.path === '/work/earlier');
     const catalogRequest = window.m5Projects.request;
     let removed = false;

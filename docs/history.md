@@ -2,6 +2,25 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 화면 통일 U5(에이전트 연결·F11 안내)·U6(알림 패널) (`orca/ade-screens-u5-u8`, 기준 feature/ade e7965d97)
+설계 DESIGN 4.1 U5·U6, 목업 08·12. 범위가 커서 U5+U6(이 PR)과 U7+U8(다음 PR)로 나눈다. 현행 설명은 architecture "에이전트 연결·알림 패널".
+
+- **U5**: `login-guide.ts`(실패 7종 → 어조·주 행동·대안), `recovery-guide.tsx`(F11 공용 틀, U7에서도 씀), 연결 카드(배지·'연결하기/연결 끊기'·'연결 상태 다시 확인'·실패 시 안내), 설치 동의를 확인 대화상자로(첫 초점 취소·주 행동 하나), 역할 바꾸기 바로가기(팀 역할 화면 열기).
+  - 옛 `.m5-provider-login`·`.m5-connection-heading`·`.m5-provider-install button` 규칙(주 행동 색을 덮던 것)을 지우고 U5 구역을 새로 썼다.
+- **U6**: `notification-groups.ts`(`needsAttention`·`attentionCount`·`groupNotifications`), 패널에 '확인 필요/전체' 탭·프로젝트 이름·작업 묶음·해결된 줄 접기, 종 배지는 확인 요청만 셈.
+- **시험**
+  - 새 `tests/m5-ade-screens-u5-u6.test.mts`(10)
+    - 실패 7종 매핑과 다시 로그인 금지 종류, 원문 키는 접힌 정보에만, 버튼 문구 규칙
+    - 설치 동의(첫 초점·주 행동, 안내는 준비만), 역할 바꾸기
+    - 배지 셈, 묶음·접기·최신순, 패널 구조, ko/en 키
+  - 렌더러 스모크 캡처·대비 지점 3곳 추가(28 로그인 안내, 29 설치 동의, 30 알림 패널 → 30곳). 알림은 다시 불러오기 전에 `localStorage`로 두 프로젝트 6줄을 넣어 배지 2·탭·묶음·접기를 확인한다.
+- **검증**
+  - `npm test` 957/957, `pnpm build`, `pnpm m5:test:editor` 69/69
+  - 렌더 대비 다크·라이트 각 30화면 1208개 실패 0
+  - 미리보기 UI 스모크 다크·라이트 각 2회 연속 PASS
+  - 캡처 `~/Documents/elsecrew-ade-screens-u5-u8-2026-11-26/u5-u6/`(actual, compare)
+- **다음**: U7(오류·복구·확인·빈 상태 문구와 금지어 검사)·U8(죽은 CSS, electron 색 2곳, 업데이트 배너)을 이 PR 뒤 다음 PR로 한다.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #12 독립 검토(차단 1·중요 6·경미 4) 전부 반영 (`orca/ade-screens-u2-u4`)
 검토 `~/Documents/elsecrew-ade-screens-u2-u4-2026-11-26/REVIEW-pr12.md`(대상 23365fad). 재현 시험은 `tests/m5-ade-screens-u2-u4.test.mts`(21개), 보안 하네스, 렌더러 스모크, 새 네이티브 시나리오(`ELSECREW_SMOKE_PROJECTS=1`)에 나눠 넣었다.
 

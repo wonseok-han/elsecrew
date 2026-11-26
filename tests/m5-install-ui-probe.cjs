@@ -65,6 +65,9 @@ async function probeInstallConsent() {
     button('Claude Code 설치 내용 확인').click();
     await wait(() => panel.querySelector('.m5-install-confirmation')?.open && panel.querySelectorAll('.m5-install-paths li').length === 5);
     if (!panel.querySelector('#m5-install-confirm-title').textContent.includes('Claude Code') || starts) throw new Error('wrong confirmation provider or automatic start');
+    // ADE U5: the consent is a confirm dialog — Cancel takes the first focus, Start is the one main action.
+    if (document.activeElement?.textContent !== '취소' || !confirm().classList.contains('m5-btn-primary') || panel.querySelectorAll('.m5-install-confirmation .m5-btn-primary').length !== 1) throw new Error('install consent needs Cancel first and one main action');
+    if (!window.m5SmokeInstallMeasured) { window.m5SmokeInstallMeasured = true; await window.m5SmokeMeasure?.('29-install-consent', { focus: false }); await window.m5SmokeCapture?.('29-install-consent'); }
     confirm().click(); confirm().click();
     await wait(() => panel.querySelector('[role=alert]'));
     if (panel.querySelector('#m5-install-details').hidden) throw new Error('uncertain installation hidden');
