@@ -129,8 +129,8 @@ test("opening settings and closing them is not an unsaved change; the person's e
 });
 
 test("the role editor uses the shared draft rule, not its own comparison", () => {
-  const source = workbenchSource();
-  const editor = source.slice(source.indexOf("function RoleSettings("), source.indexOf("function FollowupComposer("));
+  const source = readFileSync(new URL("../src/m5/role-settings.tsx", import.meta.url), "utf8");
+  const editor = source.slice(source.indexOf("function RoleSettings("));
   assert.ok(editor.includes("settingsDraftDirty(draft, sameTeam)"));
   assert.ok(editor.includes("correctTeam(old =>"), "model defaults are corrections");
   assert.ok(!editor.includes("!sameTeam(team, initial)"));
