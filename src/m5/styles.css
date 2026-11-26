@@ -1666,4 +1666,18 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-sheet-head h2 { margin: 0; font-size: var(--text-l); white-space: nowrap; }
 .m5-sheet-spacer { flex: 1; }
 .m5-sheet-dirty { margin-left: 6px; color: var(--status-attention); }
-.m5-review-sheet > .m5-editor { flex: 1 1 0; min-height: 0; border: 0; border-radius: 0; }
+.m5-sheet-sub { color: var(--text-tertiary); font-size: var(--text-s); white-space: nowrap; }
+.m5-seg { display: inline-flex; flex: none; border: 1px solid var(--line-default); border-radius: var(--radius-s); overflow: hidden; }
+.m5-seg > button { padding: 3px 10px; border: 0; border-radius: 0; background: transparent; color: var(--text-secondary); font-size: var(--text-s); white-space: nowrap; word-break: keep-all; }
+.m5-seg > button[aria-pressed="true"] { background: var(--bg-selected); color: var(--text-primary); }
+.m5-seg > button:disabled { opacity: .45; }
+.m5-sheet-body { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1 1 0; min-height: 0; }
+.m5-sheet-body.m5-sheet-with-files { grid-template-columns: 220px minmax(0, 1fr); }
+.m5-sheet-files { display: flex; flex-direction: column; gap: 1px; min-height: 0; overflow: auto; padding: var(--space-2); background: var(--bg-pane); border-right: 1px solid var(--line-subtle); }
+.m5-sheet-file { display: flex; align-items: center; gap: var(--space-2); width: 100%; padding: 6px var(--space-2); border: 0; border-radius: var(--radius-s); background: transparent; color: var(--text-secondary); font-size: var(--text-s); text-align: left; }
+.m5-sheet-file:hover { background: var(--bg-hover); color: var(--text-primary); }
+.m5-sheet-file[aria-current="true"] { background: var(--bg-selected); color: var(--text-primary); }
+.m5-sheet-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m5-sheet-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.m5-sheet-main > .m5-editor { flex: 1 1 0; min-height: 0; border: 0; border-radius: 0; }
+@media (max-width: 1099px) { .m5-sheet-body.m5-sheet-with-files { grid-template-columns: minmax(0, 1fr); } .m5-sheet-files { display: none; } }

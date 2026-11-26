@@ -29,6 +29,7 @@ import { StorageAdmissionPoller, type AdmissionView } from "./admission-state.ts
 import { resolveM5Bridge, type SupportedM5Bridge } from "./bridge-boundary.ts";
 import { ChatUiController } from "./chat-state.ts";
 import { TaskLayout } from "./task-layout.tsx";
+import { ReviewSheet } from "./review-sheet.tsx";
 import { ProjectSwitcher } from "./project-switcher.tsx";
 import { bandSizes, bandUsesDrawer, clampRightWidth, layoutBand, panelRequestTarget, parseRightWidth, RIGHT_WIDTH_KEY, type LayoutBand, type RightTab, type SheetMode } from "./task-layout-model.ts";
 import { ProviderLogin, type ConnectionReveal } from "./provider-login.tsx";
@@ -642,6 +643,10 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const sheetMode: SheetMode = allChanges || snapshot.diffVisible ? "changes" : "editor";
   const closeSheet = () => { setSheetOpen(false); setAllChanges(null); };
+  const selectSheetMode = (mode: SheetMode) => {
+    if (mode === "editor") { setAllChanges(null); controller.selectPanel("editor"); return; }
+    if (!allChanges && !snapshot.diffVisible) setAllChanges({ focus: null });
+  };
   const selectRightTab = (tab: RightTab) => setRightTab(tab);
   const dirtyTabs = snapshot.tabs.filter(tab => tab.saveState !== "clean").length;
   // "View all changes" opens the sheet; another task or project closes it.
@@ -895,12 +900,10 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         </aside>
           </> },
         ]}
-        sheet={<>
-          <header className="m5-sheet-head">
-            <h2>{t(sheetMode === "changes" ? "m5.sheet.changes" : "m5.sheet.editor")}</h2>
-            <span className="m5-sheet-spacer" />
-            <button type="button" className="m5-secondary m5-sheet-close" data-testid="sheet-close" onClick={closeSheet}>{t("m5.sheet.close")}{dirtyTabs > 0 && <span className="m5-sheet-dirty" aria-label={t("m5.editor.dirty")}>●</span>}</button>
-          </header>
+        sheet={<ReviewSheet mode={sheetMode} onMode={selectSheetMode} entries={snapshot.diffSummary?.entries ?? null}
+          selectedPath={allChanges ? allChanges.focus?.path ?? null : snapshot.diffVisible ? snapshot.diffFile?.path ?? null : null}
+          onSelectFile={path => { if (allChanges) setAllChanges({ focus: { path, at: Date.now() } }); else void controller.openDiff(path); }}
+          dirty={dirtyTabs} onClose={closeSheet}>
         <section className="m5-panel m5-editor" aria-label={t("m5.editor.title")}>
           <div hidden={snapshot.tabs.length === 0 || snapshot.diffVisible || Boolean(allChanges)} className="m5-tab-list" role="tablist" aria-label={t("m5.editor.tabs")}>
             {snapshot.tabs.map((tab) => (
@@ -957,7 +960,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
                 canDiscuss={admissionReady && !snapshot.actionBlocked && Boolean(snapshot.workspace) && chatController.canAppendFollowup() && !chat.followups?.[chat.activeChat?.chatId ?? ""]?.request}
                 onDiscuss={discussDiff} />}
         </section>
-        </>} />}
+        </ReviewSheet>} />}
       <footer className="m5-app-statusbar" aria-label={t("m5.usage.title")}><ProviderUsage disabled={!admissionReady}/></footer>
     </main>
   );

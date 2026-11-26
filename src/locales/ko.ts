@@ -1104,6 +1104,9 @@ export const ko = {
   "m5.sheet.changes": "바뀐 내용",
   "m5.sheet.editor": "편집기",
   "m5.sheet.close": "닫기 (Esc)",
+  "m5.sheet.mode": "보기 방식",
+  "m5.sheet.files": "바뀐 파일",
+  "m5.sheet.unsaved": "저장하지 않은 파일 {count}개",
 } as const;
 
 export type MessageKey = keyof typeof ko;

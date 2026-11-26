@@ -1106,4 +1106,7 @@ export const en: Record<MessageKey, string> = {
   "m5.sheet.changes": "Changes",
   "m5.sheet.editor": "Editor",
   "m5.sheet.close": "Close (Esc)",
+  "m5.sheet.mode": "View",
+  "m5.sheet.files": "Changed files",
+  "m5.sheet.unsaved": "{count} unsaved files",
 };
