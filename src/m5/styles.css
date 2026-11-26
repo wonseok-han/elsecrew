@@ -2144,3 +2144,4 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-activity-code, .m5-output-scroll .m5-activity-code { max-height: 16em; margin: 0; padding: var(--space-1) var(--space-2); overflow: auto; border-radius: var(--radius-s); background: var(--bg-sunken); color: var(--text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--text-xs); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; unicode-bidi: plaintext; }
 .m5-activity-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .m5-activity-row[data-action="delete"] .m5-activity-mark { background: var(--status-danger); }
+.m5-activity-hidden { flex: 0 0 auto; color: var(--text-tertiary); }

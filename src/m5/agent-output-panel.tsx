@@ -36,6 +36,7 @@ const WorkActivityRow = memo(function WorkActivityRow({ activity, count = 1, onO
     <span className="m5-activity-mark" aria-hidden="true" />
     <span className="m5-activity-label">{t(line.label, { tool: activity.tool ?? "" })}</span>
     {line.target && <span className="m5-activity-target" dir="auto" title={line.target}>{line.target}</span>}
+    {activity.argsHidden && <span className="m5-activity-hidden">{t("m5.output.activity.argsHidden")}</span>}
     {count > 1 && <span className="m5-activity-count">{t("m5.output.activity.repeat", { count })}</span>}
     {line.file && lines && <span className="m5-activity-lines">{lines}</span>}
     {activity.outcome && <span className="m5-activity-outcome">{t(WORK_OUTCOME_KEYS[activity.outcome])}</span>}

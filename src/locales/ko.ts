@@ -131,6 +131,7 @@ export const ko = {
   "m5.output.activity.refused": "허용 안 됨",
   "m5.output.activity.failed": "실패",
   "m5.output.activity.stopped": "중단됨",
+  "m5.output.activity.argsHidden": "(인수 가림)",
   "m5.output.activity.delete": "파일 삭제",
   "m5.output.activity.webFetch": "웹 페이지 보기",
   "m5.output.activity.webSearch": "웹 검색",

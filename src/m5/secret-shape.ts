@@ -259,3 +259,180 @@ export function maskSecrets(text: string): string {
   }
   return out;
 }
+
+/* ---------------------------------------------------------------------------
+ * A command line, fail-closed (review PR #11 B2, second round). The same
+ * algorithm as `redact_command` in
+ * crates/elsecrew-sidecar/src/agent_runtime/preparation/command_redact.rs:
+ * keep the program name, subcommands of a few multi-command tools, short
+ * flag names, paths inside the workspace, a short allowlist of plain words,
+ * small numbers, `$NAME` and shell operators; a URL keeps scheme and host;
+ * every other argument becomes ••••. A line that cannot be read safely keeps
+ * only its program name, with `argsHidden`.
+ * ------------------------------------------------------------------------- */
+export interface RedactedCommand { text: string; argsHidden: boolean }
+
+const LONGEST = 2000;
+const WITH_SUBCOMMANDS = new Set(["git", "npm", "pnpm", "yarn", "npx", "gh", "cargo", "docker", "kubectl", "go", "pip", "pip3", "brew", "bun", "deno", "make", "rustup", "uv", "poetry", "pnpx"]);
+const PLAIN_WORDS = new Set(["origin", "main", "master", "HEAD", "dev", "develop", "all", "true", "false", "yes", "no", "none", "on", "off", "install", "test", "build", "run", "start", "status", "diff", "log", "show", "add", "list", "help", "version", "/dev/null"]);
+const VALUE_FLAGS = new Set(["-H", "-u", "-U", "-p", "-b", "-d", "-F", "-E", "--header", "--proxy-header", "--user", "--proxy-user", "--password", "--pass", "--passwd", "--passphrase", "--token", "--key", "--secret", "--auth", "--oauth2-bearer", "--bearer", "--cookie", "--data", "--data-raw", "--data-binary", "--data-urlencode", "--form", "--api-key", "--access-token", "--cert", "--private-key", "--client-secret"]);
+
+const isWhite = (c: string) => c === " " || c === "\t";
+const isOperator = (c: string) => c === "|" || c === "&" || c === ";" || c === "<" || c === ">";
+const isDigit = (c: string) => c >= "0" && c <= "9";
+const allOf = (text: string, ok: RegExp) => text.length > 0 && ok.test(text);
+interface Token { text: string; quoted: boolean; op: boolean }
+
+function lex(line: string): Token[] | null {
+  const chars = Array.from(line);
+  const tokens: Token[] = [];
+  let word = "";
+  let quoted = false;
+  let quote: string | null = null;
+  let index = 0;
+  const flush = () => { if (word || quoted) tokens.push({ text: word, quoted, op: false }); word = ""; quoted = false; };
+  while (index < chars.length) {
+    const c = chars[index]!;
+    const next = chars[index + 1];
+    if (quote) {
+      if (c === quote) quote = null;
+      else if (quote === '"' && (c === "\\" || c === "`" || (c === "$" && (next === "(" || next === "{")))) return null;
+      word += c;
+      index++;
+      continue;
+    }
+    if (c === "'" || c === '"') { quote = c; quoted = true; word += c; index++; continue; }
+    if ("\\`(){}".includes(c)) return null;
+    if (c === "$" && (next === "(" || next === "{")) return null;
+    if (isWhite(c)) { flush(); index++; continue; }
+    if (isOperator(c)) {
+      if (c === "<" && next === "<") return null;
+      let op = "";
+      if (!quoted && word && Array.from(word).every(isDigit)) { op = word; word = ""; } else flush();
+      while (index < chars.length && isOperator(chars[index]!)) { op += chars[index]; index++; }
+      if (op.endsWith("&") && op.includes(">")) while (index < chars.length && isDigit(chars[index]!)) { op += chars[index]; index++; }
+      tokens.push({ text: op, quoted: false, op: true });
+      continue;
+    }
+    word += c;
+    index++;
+  }
+  if (quote) return null;
+  flush();
+  return tokens;
+}
+
+function assignment(word: string): string | null {
+  const equals = word.indexOf("=");
+  if (equals < 0) return null;
+  const name = word.slice(0, equals);
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : null;
+}
+
+function program(word: string): boolean {
+  if (Array.from(word).length > 60 || word.startsWith("-") || word.endsWith("/")) return false;
+  return word.split("/").every((part, index) => (index === 0 && part === "" && word.startsWith("/")) || allOf(part, /^[A-Za-z0-9._+-]+$/));
+}
+
+function keylike(part: string): boolean {
+  return Array.from(part).length >= 20 && /[A-Z]/.test(part) && /[a-z]/.test(part) && /[0-9]/.test(part);
+}
+
+function workspacePath(word: string): boolean {
+  if (word === ".") return true;
+  let body = word.startsWith("./") ? word.slice(2) : word;
+  if (body.endsWith("/")) body = body.slice(0, -1);
+  if (Array.from(word).length > 120 || !body || word.startsWith("/") || word.startsWith("~") || word.startsWith("-")) return false;
+  const parts = body.split("/");
+  const last = parts[parts.length - 1]!;
+  const dot = last.lastIndexOf(".");
+  const extension = dot > 0 && last.length - dot - 1 >= 1 && last.length - dot - 1 <= 8 && /^[A-Za-z0-9]+$/.test(last.slice(dot + 1));
+  return (parts.length > 1 || extension || word.endsWith("/"))
+    && parts.every(part => allOf(part, /^[A-Za-z0-9._@+-]+$/) && part !== ".." && Array.from(part).length <= 64 && !keylike(part));
+}
+
+function url(word: string): string | null {
+  const at = word.indexOf("://");
+  if (at < 0) return null;
+  const scheme = word.slice(0, at);
+  const rest = word.slice(at + 3);
+  if (!allOf(scheme, /^[A-Za-z0-9+.-]+$/)) return null;
+  const found = rest.search(/[/?#]/);
+  const end = found < 0 ? rest.length : found;
+  const authority = rest.slice(0, end);
+  const host = authority.slice(authority.lastIndexOf("@") + 1);
+  if (!allOf(host, /^[A-Za-z0-9.:-]+$/)) return null;
+  return `${scheme}://${host}${rest.length > host.length ? `/${MASK}` : ""}`;
+}
+
+const shortFlag = (word: string) => word.length >= 2 && word.length <= 5 && /^-[A-Za-z]+$/.test(word);
+const longFlag = (name: string) => name.length > 2 && name.length <= 32 && /^--[a-z0-9][a-z0-9-]*$/.test(name);
+const valueFlag = (flag: string) => VALUE_FLAGS.has(flag) || secretName(flag);
+
+function firstProgram(line: string): string {
+  const word = line.split(/[ \t\n\r|&;<>]+/).filter(Boolean).find(part => assignment(part) === null);
+  return word && program(word) ? word : "";
+}
+
+export function redactCommand(input: string): RedactedCommand {
+  const line = input.replace(/^[ \t\n\r]+|[ \t\n\r]+$/g, "");
+  const hidden = (): RedactedCommand => ({ text: firstProgram(line), argsHidden: true });
+  if (!line) return { text: "", argsHidden: false };
+  if (Array.from(line).length > LONGEST || line.includes("\n") || line.includes("\r")) return hidden();
+  const tokens = lex(line);
+  if (!tokens) return hidden();
+  const out: string[] = [];
+  let expectProgram = true;
+  let redirect = false;
+  let secretNext = false;
+  let subcommands = 0;
+  for (const token of tokens) {
+    const word = token.text;
+    if (token.op) {
+      out.push(word);
+      if (["|", "||", "&&", ";", "&", "|&", ";;"].includes(word)) { expectProgram = true; secretNext = false; subcommands = 0; }
+      else if ((word.includes("<") || word.includes(">")) && !isDigit(word[word.length - 1]!)) redirect = true;
+      continue;
+    }
+    const wasSecret: boolean = secretNext, wasRedirect: boolean = redirect, wasProgram: boolean = expectProgram;
+    let shown: string;
+    if (token.quoted) {
+      const equals = word.indexOf("=");
+      const name = equals >= 0 && !/['"]/.test(word.slice(0, equals)) ? word.slice(0, equals) : null;
+      if (name !== null && expectProgram && assignment(word) !== null) shown = `${name}=${MASK}`;
+      else if (name !== null && !expectProgram && longFlag(name)) shown = `${name}=${MASK}`;
+      else { expectProgram = false; shown = MASK; }
+    } else if (redirect) {
+      shown = workspacePath(word) || PLAIN_WORDS.has(word) ? word : MASK;
+    } else if (secretNext) {
+      shown = MASK;
+    } else if (expectProgram) {
+      const name = assignment(word);
+      if (name !== null) shown = `${name}=${MASK}`;
+      else if (program(word)) {
+        subcommands = WITH_SUBCOMMANDS.has(word.slice(word.lastIndexOf("/") + 1)) ? 2 : 0;
+        expectProgram = false;
+        shown = word;
+      } else { expectProgram = false; shown = MASK; }
+    } else if (word.startsWith("-")) {
+      const equals = word.indexOf("=");
+      if (word === "--") shown = word;
+      else if (equals >= 0) shown = longFlag(word.slice(0, equals)) ? `${word.slice(0, equals)}=${MASK}` : MASK;
+      else if (longFlag(word) || shortFlag(word)) shown = word;
+      else if (word.length > 2 && /[A-Za-z]/.test(word[1]!)) shown = word.slice(0, 2) + MASK;
+      else shown = MASK;
+    } else {
+      const asUrl = url(word);
+      if (asUrl !== null) shown = asUrl;
+      else if (subcommands > 0 && /^[a-z:-]+$/.test(word) && word.length <= 24) { subcommands--; shown = word; }
+      else if (workspacePath(word) || PLAIN_WORDS.has(word) || /^[0-9]{1,4}$/.test(word)
+        || (word.length <= 40 && /^\$[A-Za-z_][A-Za-z0-9_]*$/.test(word))) shown = word;
+      else shown = MASK;
+    }
+    // A value flag (shown as itself) guards exactly the one word after it.
+    secretNext = !token.quoted && !wasSecret && !wasRedirect && !wasProgram && (longFlag(word) || shortFlag(word)) && valueFlag(word);
+    redirect = false;
+    out.push(shown);
+  }
+  return { text: out.join(" "), argsHidden: false };
+}

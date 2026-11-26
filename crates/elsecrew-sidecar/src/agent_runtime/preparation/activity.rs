@@ -12,6 +12,7 @@
 //! Ids are the app's own (`c3`, `t7`), never the provider's. Nothing a tool
 //! printed or read is stored: no command output, no file contents
 //! (review PR #11 B3). A row that cannot be stored never stops the run.
+use super::command_redact::redact_command;
 use super::secret_mask::mask_secrets;
 use super::*;
 use elsecrew_protocol::agent_adapter_v1::output_pages::{
@@ -134,8 +135,11 @@ pub(super) fn sanitize(value: &Value) -> Option<Value> {
             "outcome" => field.as_str().filter(|outcome| OUTCOMES.contains(outcome)).map(|outcome| json!(outcome)),
             "phase" => (field.as_str() == Some("done")).then(|| json!("done")),
             "id" => field.as_str().filter(|id| id_shape(id)).map(|id| json!(id)),
+            "target" if action == "command" => field.as_str().and_then(stored_command).as_deref().and_then(bounded).map(|text| json!(text)),
             "target" | "tool" | "cwd" => field.as_str().and_then(bounded).map(|text| json!(text)),
-            "command" => field.as_str().and_then(|text| block(text, BLOCK_MAX_CHARS)).map(|text| json!(text)),
+            // A command line is redacted again here, whatever built the row.
+            "command" => field.as_str().and_then(stored_command).map(|text| json!(text)),
+            "argsHidden" => (field.as_bool() == Some(true)).then(|| json!(true)),
             "note" => field.as_str().and_then(|text| block(text, NOTE_MAX_CHARS)).map(|text| json!(text)),
             "exit" => field.as_i64().map(|code| json!(code)),
             "ms" | "added" | "removed" => field.as_u64().map(|number| json!(number)),
@@ -149,11 +153,18 @@ pub(super) fn sanitize(value: &Value) -> Option<Value> {
 /// A command as a row: the first line as the target, the whole command and
 /// where it ran for the detail (masked as a whole first).
 fn command_row(command: &str, cwd: Option<String>) -> Value {
-    let masked = mask_secrets(&neutralise(command, true));
-    let mut value = row("command", bounded(&masked), None, None);
-    if let Some(command) = block(command, BLOCK_MAX_CHARS) { value["command"] = json!(command); }
+    let redacted = redact_command(&neutralise(command, true));
+    let mut value = row("command", bounded(&redacted.text), None, None);
+    if let Some(command) = block(&redacted.text, BLOCK_MAX_CHARS) { value["command"] = json!(command); }
+    if redacted.args_hidden { value["argsHidden"] = json!(true); }
     if let Some(cwd) = cwd { value["cwd"] = json!(cwd); }
     value
+}
+
+/// A stored command line: fail-closed redaction (`command_redact`), then the
+/// masking and length rules of any block.
+fn stored_command(text: &str) -> Option<String> {
+    block(&redact_command(&neutralise(text, true)).text, BLOCK_MAX_CHARS)
 }
 
 /// "pattern · folder" for a search: the model's own pattern (never file
@@ -493,6 +504,29 @@ mod tests {
         }
     }
 
+    /// Fail-closed command lines (review PR #11 B2, round 2): the shared
+    /// cases give the same result as the screen, redacting twice changes
+    /// nothing, and no synthetic secret (every one says "fake") survives, in
+    /// the command cases nor in any line of the masking table.
+    #[test]
+    fn commands_are_redacted_fail_closed_like_the_screen() {
+        let expand = |text: &str| text.replace("{colon}", ":").replace("{dot}", ".");
+        let cases = cases();
+        for case in cases["command"].as_array().unwrap() {
+            let text = expand(case["text"].as_str().unwrap());
+            let redacted = redact_command(&text);
+            assert_eq!(redacted.text, case["shown"].as_str().unwrap(), "{text:?}");
+            assert_eq!(redacted.args_hidden, case["argsHidden"].as_bool().unwrap(), "{text:?}");
+            assert_eq!(redact_command(&redacted.text).text, redacted.text, "redacting twice: {text:?}");
+            assert!(!redacted.text.to_lowercase().contains("fake"), "{text:?} => {}", redacted.text);
+        }
+        for case in cases["mask"].as_array().unwrap() {
+            let text = expand(case["text"].as_str().unwrap());
+            let stored = stored_command(&text).unwrap_or_default();
+            assert!(!stored.to_lowercase().contains("fake") && !stored.contains("AKIAIOSFODNN7"), "{text:?} => {stored}");
+        }
+    }
+
     #[test]
     fn every_stored_field_is_sanitized() {
         let key = format!("ghp_{}", "FAKEexample0".repeat(2));
@@ -503,7 +537,8 @@ mod tests {
         let text = stored.to_string();
         assert!(!text.contains("FAKEexample0FAKE"), "{text}");
         assert!(!text.contains("never stored") && !text.contains("extra"), "{text}");
-        assert_eq!(stored["command"], "TOKEN=•••• echo\nghp_••••");
+        // Several lines cannot be read safely: only the program name is kept.
+        assert_eq!(stored["command"], "echo");
         assert_eq!(sanitize(&json!({"action":"command","id":"toolu_01ABC/../x"})).unwrap().get("id"), None, "provider-shaped ids are not keys");
         assert_eq!(sanitize(&json!({"action":"move"})), None);
         assert_eq!(sanitize(&json!({"action":"read","outcome":"maybe","phase":"later"})).unwrap(), json!({"action":"read"}));
@@ -542,7 +577,8 @@ mod tests {
             cwd: Some("/work/copy".into()), exit_code: Some(0), duration_ms: Some(1200), ..Default::default()
         }), cwd);
         assert_eq!(done, vec![json!({"action":"command","target":"npm test","command":"npm test","cwd":".","id":"c1","exit":0,"ms":1200,"phase":"done"})]);
-        assert_eq!(started(&mut tools, "echo one\nrm -rf /")[0]["command"], "echo one\nrm -rf /");
+        let lines = started(&mut tools, "echo one\nrm -rf /");
+        assert_eq!((lines[0]["command"].clone(), lines[0]["argsHidden"].clone()), (json!("echo"), json!(true)));
         let token = format!("GITHUB_TOKEN=ghp_{} gh pr list", "FAKEexample0".repeat(2));
         assert_eq!(started(&mut tools, &token)[0]["target"], "GITHUB_TOKEN=•••• gh pr list");
         assert_eq!(codex(&mut tools, &event(ToolKind::Command, ToolPhase::Output, None, ToolDetail::default()), cwd), Vec::<Value>::new());
@@ -552,9 +588,9 @@ mod tests {
         let read = codex(&mut tools, &event(ToolKind::Command, ToolPhase::Started, Some("/bin/zsh -lc 'sed -n 1,80p src/app.js'"), ToolDetail {
             cwd: Some("/work/copy".into()), actions: vec![CommandAction { kind: "read".into(), path: Some("/work/copy/src/app.js".into()), query: None }], ..Default::default()
         }), cwd);
-        assert_eq!(read, vec![json!({"action":"read","target":"src/app.js","command":"sed -n 1,80p src/app.js","cwd":".","id":"c1"})]);
+        assert_eq!(read, vec![json!({"action":"read","target":"src/app.js","command":"sed -n •••• src/app.js","cwd":".","id":"c1"})]);
         let end = codex(&mut tools, &event(ToolKind::Command, ToolPhase::Failed, None, ToolDetail { exit_code: Some(1), ..Default::default() }), cwd);
-        assert_eq!(end, vec![json!({"action":"read","target":"src/app.js","command":"sed -n 1,80p src/app.js","cwd":".","id":"c1","exit":1,"outcome":"failed","phase":"done"})]);
+        assert_eq!(end, vec![json!({"action":"read","target":"src/app.js","command":"sed -n •••• src/app.js","cwd":".","id":"c1","exit":1,"outcome":"failed","phase":"done"})]);
         let declined = codex(&mut CodexTools::default(), &event(ToolKind::Command, ToolPhase::Declined, None, ToolDetail::default()), cwd);
         assert_eq!(declined, vec![json!({"action":"command","id":"c1","outcome":"refused","phase":"done"})]);
     }

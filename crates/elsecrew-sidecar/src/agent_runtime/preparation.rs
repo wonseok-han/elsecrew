@@ -2,6 +2,7 @@
 use super::*;
 use elsecrew_core::provider::vendor_observation::codex_preflight::ExpectedPermission;
 mod activity;
+mod command_redact;
 mod secret_mask;
 #[cfg(target_os = "macos")]
 mod terminal;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { maskSecrets, SECRET_MASK } from "../src/m5/secret-shape.ts";
+import { maskSecrets, redactCommand, SECRET_MASK } from "../src/m5/secret-shape.ts";
 import { activityDetail, activityItems, activityLine, BLOCK_MAX, displayLine, durationParts, LINE_MAX, openableFile, parseWorkActivity } from "../src/m5/work-history.ts";
 
 const char = (code: number) => String.fromCharCode(code);
@@ -38,11 +38,11 @@ test("control, separator and direction marks are neutralised; lines and blocks a
   assert.equal(parseWorkActivity(JSON.stringify({ action: "read", target: `file${char(0x202e)}txt.exe` }))!.target, `file${REPLACED}txt.exe`);
   assert.equal(parseWorkActivity(JSON.stringify({ action: "read", target: "a\nb" }))!.target, `a${REPLACED}b`);
   assert.equal(parseWorkActivity(JSON.stringify({ action: "read", target: `a${char(0x2028)}b${char(0x2029)}c` }))!.target, `a${REPLACED}b${REPLACED}c`);
-  assert.equal(parseWorkActivity(JSON.stringify({ action: "command", target: "x", command: `echo ${char(0x1b)}[31mred${char(7)}\nnext\r\nlast\tend\rlone` }))!.command, `echo ${REPLACED}[31mred${REPLACED}\nnext\nlast\tend${REPLACED}lone`);
-  const longLine = parseWorkActivity(JSON.stringify({ action: "command", target: "x".repeat(400) }))!.target!;
+  assert.equal(parseWorkActivity(JSON.stringify({ action: "command", note: `echo ${char(0x1b)}[31mred${char(7)}\nnext\r\nlast\tend\rlone` }))!.note, `echo ${REPLACED}[31mred${REPLACED}\nnext\nlast\tend${REPLACED}lone`);
+  const longLine = parseWorkActivity(JSON.stringify({ action: "read", target: "x".repeat(400) }))!.target!;
   assert.equal(Array.from(longLine).length, LINE_MAX + 1);
   assert.ok(longLine.endsWith("…"));
-  const longBlock = parseWorkActivity(JSON.stringify({ action: "command", command: "y".repeat(9000) }))!.command!;
+  const longBlock = parseWorkActivity(JSON.stringify({ action: "other", target: "x", note: "y".repeat(9000) }))!.note!;
   assert.equal(Array.from(longBlock).length, BLOCK_MAX + 1);
 });
 
@@ -62,8 +62,9 @@ test("secrets are masked with the same rules as the engine (shared cases, review
   }
   for (const { text, shown } of cases.line) assert.equal(displayLine(text), shown, JSON.stringify(text));
   // A row stored by an older build, unmasked, is masked when shown.
+  // A command row stored by an older build, unmasked, is redacted fail-closed when shown.
   const old = parseWorkActivity(JSON.stringify({ action: "command", target: "curl -H 'Authorization: Bearer fakeexampletoken01' https://api.example.com" }))!;
-  assert.equal(old.target, `curl -H 'Authorization: ${SECRET_MASK} ${SECRET_MASK}' https://api.example.com`);
+  assert.equal(old.target, `curl -H ${SECRET_MASK} https://api.example.com`);
   // Masked before the cut: a key at the line's end leaves nothing (review B2).
   assert.ok(!displayLine(`${"p".repeat(150)} ${FAKE_OPENAI}`).includes("FAKE"));
   assert.ok(!parseWorkActivity(JSON.stringify({ action: "command", target: `${"q".repeat(152)} GITHUB_TOKEN=${FAKE_GITHUB}` }))!.target!.includes("FAKE"));
@@ -126,4 +127,32 @@ test("each closing row is used once, by its own first row; same-file changes rea
   // A closing row whose first row left the window still shows.
   const alone = activityItems([{ text: JSON.stringify({ action: "command", target: "ls", id: "c5", phase: "done", exit: 0 }) }], row => row.text);
   assert.equal(alone.length, 1);
+});
+
+test("command lines are redacted fail-closed, like the engine (review PR #11 B2, round 2)", () => {
+  const cases = JSON.parse(readFileSync(new URL("./fixtures/m5/secret-mask-cases.json", import.meta.url), "utf8")) as {
+    mask: { text: string }[]; command: { text: string; shown: string; argsHidden: boolean }[];
+  };
+  const expand = (text: string) => text.replaceAll("{colon}", ":").replaceAll("{dot}", ".");
+  assert.ok(cases.command.length >= 40);
+  for (const { text: stored, shown, argsHidden } of cases.command) {
+    const text = expand(stored);
+    const redacted = redactCommand(text);
+    assert.deepEqual(redacted, { text: shown, argsHidden }, JSON.stringify(text));
+    assert.equal(redactCommand(shown).text, shown, `redacting twice: ${JSON.stringify(text)}`);
+    // Every synthetic secret says "fake"; none is left.
+    assert.ok(!/fake/i.test(shown), `${JSON.stringify(text)} => ${shown}`);
+  }
+  // The whole masking table, read as command lines, leaves nothing either.
+  for (const { text } of cases.mask) {
+    const shown = redactCommand(expand(text)).text;
+    assert.ok(!/fake/i.test(shown) && !shown.includes("AKIAIOSFODNN7"), `${JSON.stringify(text)} => ${shown}`);
+  }
+  // What stays readable, and an unreadable line keeps only its program.
+  assert.deepEqual(redactCommand("git status --short"), { text: "git status --short", argsHidden: false });
+  assert.deepEqual(redactCommand("cat <<EOF > notes.txt"), { text: "cat", argsHidden: true });
+  // A row: the stored command and target are redacted again, and "arguments hidden" is kept.
+  const row = parseWorkActivity(JSON.stringify({ action: "command", target: "echo", command: "echo", argsHidden: true }))!;
+  assert.deepEqual([row.target, row.command, row.argsHidden], ["echo", "echo", true]);
+  assert.equal(parseWorkActivity(JSON.stringify({ action: "command", argsHidden: false })), null);
 });

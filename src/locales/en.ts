@@ -132,6 +132,7 @@ export const en: Record<MessageKey, string> = {
   "m5.output.activity.refused": "not allowed",
   "m5.output.activity.failed": "failed",
   "m5.output.activity.stopped": "stopped",
+  "m5.output.activity.argsHidden": "(arguments hidden)",
   "m5.output.activity.delete": "Delete file",
   "m5.output.activity.webFetch": "Open web page",
   "m5.output.activity.webSearch": "Search the web",

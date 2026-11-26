@@ -10,7 +10,7 @@
  * and direction marks are neutralised, secret shapes are masked again with
  * the same rules (rows from older builds were stored unmasked), and every
  * field has a length cap. Anything unexpected is not shown as history. */
-import { maskSecrets } from "./secret-shape.ts";
+import { maskSecrets, redactCommand } from "./secret-shape.ts";
 
 export type WorkAction = "read" | "edit" | "write" | "delete" | "search" | "command" | "other";
 export type WorkOutcome = "refused" | "failed" | "stopped";
@@ -31,6 +31,8 @@ export interface WorkActivity {
   ms?: number;
   added?: number;
   removed?: number;
+  /** The command could not be read safely; only its program name is kept. */
+  argsHidden?: boolean;
 }
 
 const ACTIONS: readonly string[] = ["read", "edit", "write", "delete", "search", "command", "other"];
@@ -38,7 +40,7 @@ const OUTCOMES: readonly string[] = ["refused", "failed", "stopped"];
 const LINE_FIELDS = ["target", "tool", "cwd"] as const;
 const BLOCK_FIELDS = ["command", "note"] as const;
 const NUMBER_FIELDS = ["exit", "ms", "added", "removed"] as const;
-const KEYS: readonly string[] = ["action", "outcome", "phase", "id", ...LINE_FIELDS, ...BLOCK_FIELDS, ...NUMBER_FIELDS];
+const KEYS: readonly string[] = ["action", "outcome", "phase", "id", "argsHidden", ...LINE_FIELDS, ...BLOCK_FIELDS, ...NUMBER_FIELDS];
 /** The engine's keys are short and plain; anything else is not a key. */
 const ID_SHAPE = /^[A-Za-z0-9_:-]{1,64}$/;
 /** Characters (code points) shown. The engine writes at most 161 for a
@@ -90,11 +92,17 @@ export function parseWorkActivity(text: string): WorkActivity | null {
   if (row.outcome) out.outcome = row.outcome as WorkOutcome;
   if (row.phase) out.phase = "done";
   if (typeof row.id === "string") out.id = row.id;
+  if ("argsHidden" in row) { if (row.argsHidden !== true) return null; out.argsHidden = true; }
   for (const key of [...LINE_FIELDS, ...BLOCK_FIELDS]) {
     if (!(key in row)) continue;
     const field = row[key];
     if (typeof field !== "string" || !field.trim() || field.length > FIELD_LIMIT) return null;
-    out[key] = shown(field, (BLOCK_FIELDS as readonly string[]).includes(key));
+    // A command line (and a command row's target) is redacted fail-closed
+    // again, so rows from older builds show no more than new ones.
+    const command = key === "command" || (key === "target" && row.action === "command");
+    const value = command ? redactCommand(neutralise(field, true)).text : field;
+    if (command && !value.trim()) continue;
+    out[key] = shown(value, (BLOCK_FIELDS as readonly string[]).includes(key));
   }
   for (const key of NUMBER_FIELDS) {
     if (!(key in row)) continue;
