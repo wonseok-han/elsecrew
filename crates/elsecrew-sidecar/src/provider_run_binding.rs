@@ -162,8 +162,20 @@ mod tests {
         assert_eq!(receipt.to_value(), value);
         assert!(receipt.validate("other-run", "codex").is_err());
         assert!(receipt.validate("run-bound", "claude-code").is_err());
+        // Schema 2 names the run's own hold file (ADE multi-project P5).
+        let mut leased = value.clone();
+        leased["schemaVersion"] = json!(2);
+        assert!(RunFenceBinding::from_value(&leased).is_err(), "schema 2 needs its hold's name");
+        leased["lease"] = json!("codex-run-0123456789abcdef0123456789abcdef.pending");
+        let leased_receipt = RunFenceBinding::from_value(&leased).unwrap();
+        leased_receipt.validate("run-bound", "codex").unwrap();
+        assert_eq!(leased_receipt.lease_name(), "codex-run-0123456789abcdef0123456789abcdef.pending");
+        assert_eq!(receipt.lease_name(), "codex-login.pending");
+        for lease in ["claude-run-0123456789abcdef0123456789abcdef.pending", "codex-run-../x.pending", "codex-login.pending", "codex-run-0123.pending"] {
+            leased["lease"] = json!(lease);
+            assert!(RunFenceBinding::from_value(&leased).unwrap().validate("run-bound", "codex").is_err(), "{lease}");
+        }
         for (field, replacement) in [
-            ("schemaVersion", json!(2)),
             ("runId", json!("")),
             ("provider", json!("unknown")),
             ("nonce", json!("00000000-0000-0000-0000-000000000000")),

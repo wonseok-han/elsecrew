@@ -425,6 +425,13 @@ export class ChatUiController {
       if (accepted.runId.length === 0) throw new Error("empty accepted agent run identity");
     } catch (error) {
       if (this.#live(generation) && this.#state.activeChat?.chatId === chat.chatId) {
+        // Over the agent's run limit the engine puts the team in line instead
+        // (ADE multi-project P3′): not a failure; it starts on its own.
+        if (/waits its turn/.test(error instanceof Error ? error.message : String(error))) {
+          this.#set({ ...chatNotice("m5.chatNotice.waitingTurn") });
+          void this.#hydrateChat(chat, generation).catch(() => undefined);
+          return;
+        }
         this.#set({ notice: null });
         this.#error("m5.chatError.run", error);
       }

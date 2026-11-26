@@ -663,13 +663,22 @@ impl<'a> LoginProcess<'a> {
     /// Sign-in, sign-out, account checks and installs: the provider's one
     /// exclusive hold.
     pub(crate) fn reserve(profile: &'a dyn LoginProfile) -> Result<Self, SidecarError> {
-        Self::reserve_profile(ProfileOwner::Borrowed(profile))
+        Self::reserve_profile_as(ProfileOwner::Borrowed(profile), HoldKind::Exclusive)
+    }
+
+    /// Reading the sign-in state beside runs: a run hold of its own.
+    pub(crate) fn reserve_shared(profile: &'a dyn LoginProfile) -> Result<Self, SidecarError> {
+        Self::reserve_profile_as(ProfileOwner::Borrowed(profile), HoldKind::Shared)
     }
 
     fn reserve_profile(profile: ProfileOwner<'a>) -> Result<Self, SidecarError> {
         // Owned profiles are runs, model lists and capability checks: a run
         // hold of their own (ADE multi-project P5).
         let kind = if matches!(profile, ProfileOwner::Borrowed(_)) { HoldKind::Exclusive } else { HoldKind::Shared };
+        Self::reserve_profile_as(profile, kind)
+    }
+
+    fn reserve_profile_as(profile: ProfileOwner<'a>, kind: HoldKind) -> Result<Self, SidecarError> {
         let reservation = Reservation::create(profile.as_ref(), kind)?;
         Ok(Self {
             connection_id: uuid::Uuid::new_v4(),
@@ -1652,6 +1661,13 @@ mod tests {
         assert!(leftovers.is_empty(), "{leftovers:?}");
     }
 
+    /// The one run hold in the folder (an owned reservation's own file).
+    fn run_hold(temp: &tempfile::TempDir) -> Option<std::path::PathBuf> {
+        let names = run_hold_names(&Dir::open_ambient_dir(temp.path(), cap_std::ambient_authority()).unwrap(), "codex").unwrap();
+        assert!(names.len() <= 1, "{names:?}");
+        names.first().map(|name| temp.path().join(name))
+    }
+
     fn profile(temp: &tempfile::TempDir) -> CodexProfileBinding {
         let path = temp
             .path()
@@ -1660,6 +1676,64 @@ mod tests {
             .join("elsecrew.sqlite3");
         let storage = crate::Storage::open(&path).unwrap();
         CodexProfileBinding::from_storage(&storage).unwrap()
+    }
+
+    /// ADE multi-project P5: runs of one provider each hold their own file and
+    /// go on side by side; signing in (and the engine's own renewal) holds
+    /// the profile alone. Each kind steps back, leaving nothing, when it
+    /// meets the other.
+    #[test]
+    fn run_holds_go_side_by_side_and_signing_in_holds_the_profile_alone() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut first = LoginProcess::reserve_codex_owned(profile(&temp)).unwrap();
+        let mut second = LoginProcess::reserve_codex_owned(profile(&temp)).unwrap();
+        let borrowed = profile(&temp);
+        let mut reading = LoginProcess::reserve_shared(&borrowed).unwrap();
+        let directory = Dir::open_ambient_dir(temp.path(), cap_std::ambient_authority()).unwrap();
+        assert_eq!(run_hold_names(&directory, "codex").unwrap().len(), 3);
+        // Sign-in and renewal wait while any run holds the profile, and leave nothing behind.
+        assert_eq!(LoginProcess::reserve(&profile(&temp)).err().unwrap().kind(), "providerBusy");
+        assert!(with_credentials_reserved::<()>(&profile(&temp), || panic!("must not enter")).is_err());
+        assert!(!temp.path().join(PENDING).exists());
+        first.finish().unwrap();
+        second.finish().unwrap();
+        reading.finish().unwrap();
+        assert!(run_hold_names(&directory, "codex").unwrap().is_empty());
+        // Signing in now: runs wait, and their step-back leaves no hold.
+        let signer = profile(&temp);
+        let mut signing_in = LoginProcess::reserve(&signer).unwrap();
+        assert_eq!(LoginProcess::reserve_codex_owned(profile(&temp)).err().unwrap().kind(), "providerBusy");
+        assert!(run_hold_names(&directory, "codex").unwrap().is_empty());
+        signing_in.finish().unwrap();
+        // A sign-in hold left by a crash (no owner) is recovery evidence for a run too.
+        std::fs::write(temp.path().join(PENDING), b"elsecrew provider login pending v1\n").unwrap();
+        assert_eq!(LoginProcess::reserve_codex_owned(profile(&temp)).err().unwrap().kind(), "providerLoginRecoveryRequired");
+        assert!(run_hold_names(&directory, "codex").unwrap().is_empty());
+        // The other provider's holds are its own.
+        std::fs::remove_file(temp.path().join(PENDING)).unwrap();
+        std::fs::write(temp.path().join("claude-run-0123456789abcdef0123456789abcdef.pending"), b"x").unwrap();
+        LoginProcess::reserve(&profile(&temp)).unwrap().finish().unwrap();
+    }
+
+    /// A run's hold receipt names its own file (schema 2), and that file is
+    /// read back by name, not by the provider's one sign-in name.
+    #[test]
+    fn a_run_hold_receipt_names_its_own_file_and_is_read_back_by_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut process = LoginProcess::reserve_codex_owned(profile(&temp)).unwrap();
+        process.retain_fence_before_launch("run-bound").unwrap();
+        let binding = process.bind_run_fence("run-bound").unwrap();
+        assert_eq!(binding.to_value()["schemaVersion"], 2);
+        let own = identity_of(std::process::id()).unwrap();
+        process.reservation.record(&[own]).unwrap();
+        // While its owner lives, the hold is busy to readers.
+        assert_eq!(bound_run_identities(&profile(&temp), &binding).err().unwrap().kind(), "providerBusy");
+        process.finish().unwrap();
+        drop(process);
+        assert_eq!(bound_run_identities(&profile(&temp), &binding).unwrap(), BTreeSet::from([own]));
+        // Recovery by its own name; a sign-in name never reaches it.
+        assert!(recover_bound_run(&profile(&temp), PENDING, |_, _| Ok(())).is_err());
+        assert!(run_hold(&temp).is_some());
     }
 
     #[test]
@@ -1671,7 +1745,9 @@ mod tests {
         binding.validate("run-bound", "codex").unwrap();
         assert!(binding.validate("other-run", "codex").is_err());
         assert!(binding.validate("run-bound", "claude-code").is_err());
-        let bytes = std::fs::read(temp.path().join(PENDING)).unwrap();
+        let hold = run_hold(&temp).unwrap();
+        assert_eq!(binding.lease_name(), hold.file_name().unwrap().to_str().unwrap());
+        let bytes = std::fs::read(&hold).unwrap();
         let text = std::str::from_utf8(&bytes).unwrap();
         let line = text.lines().nth(1).unwrap().strip_prefix("run-binding-v1 ").unwrap();
         let value = serde_json::from_str(line).unwrap();
@@ -1682,7 +1758,7 @@ mod tests {
         process.finish().unwrap();
         drop(process);
         assert!(recover_confirmed_login(&profile(&temp)).is_err());
-        assert_eq!(std::fs::read(temp.path().join(PENDING)).unwrap(), bytes);
+        assert_eq!(std::fs::read(&hold).unwrap(), bytes);
     }
 
     #[test]
@@ -1741,9 +1817,10 @@ mod tests {
         let mut process = LoginProcess::reserve_codex_owned(profile(&temp)).unwrap();
         process.retain_fence_before_launch("run-bound").unwrap();
         process.bind_run_fence("run-bound").unwrap();
-        let bytes = std::fs::read(temp.path().join(PENDING)).unwrap();
+        let hold = run_hold(&temp).unwrap();
+        let bytes = std::fs::read(&hold).unwrap();
         assert!(process.bind_run_fence("run-bound").is_err());
-        assert_eq!(std::fs::read(temp.path().join(PENDING)).unwrap(), bytes);
+        assert_eq!(std::fs::read(&hold).unwrap(), bytes);
         assert!(process.release_after_run_terminal().is_err());
     }
 
@@ -1757,10 +1834,13 @@ mod tests {
         assert!(process.retain_fence_before_launch("other-run").is_err());
         process.finish().unwrap();
         assert!(process.closure_evidence().unwrap().confirmed());
-        assert!(LoginProcess::reserve_codex_owned(profile(&temp)).is_err());
+        // The run's hold stays until its terminal release: sign-in waits.
+        assert!(run_hold(&temp).is_some());
+        assert_eq!(LoginProcess::reserve(&profile(&temp)).err().unwrap().kind(), "providerBusy");
         process.release_after_run_terminal().unwrap();
         assert!(!process.matches_startup_run("run-startup"));
-        LoginProcess::reserve_codex_owned(profile(&temp)).unwrap().finish().unwrap();
+        assert!(run_hold(&temp).is_none());
+        LoginProcess::reserve(&profile(&temp)).unwrap().finish().unwrap();
     }
 
     // Owned toy process only; no provider, user auth, browser, project or paid model.
@@ -2097,7 +2177,9 @@ mod tests {
             assert!(process.codex_preflight_home().is_err());
             process.launch(cat).unwrap();
             process.retain_fence_until_terminal().unwrap();
-            assert!(LoginProcess::reserve_claude_owned(binding(&temp)).is_err());
+            // Another run goes on beside it; sign-in waits for it.
+            LoginProcess::reserve_claude_owned(binding(&temp)).unwrap().finish().unwrap();
+            assert!(LoginProcess::reserve(&binding(&temp)).is_err());
             if replace {
                 std::fs::rename(&home, home.with_file_name("retained-claude-profile")).unwrap();
                 let _replacement = binding(&temp);
@@ -2106,13 +2188,13 @@ mod tests {
             let cleanup = process.finish();
             if !replace {
                 assert!(cleanup.is_ok());
-                assert!(LoginProcess::reserve_claude_owned(binding(&temp)).is_err());
+                assert!(LoginProcess::reserve(&binding(&temp)).is_err());
                 process.release_after_run_terminal().unwrap();
-                assert!(LoginProcess::reserve_claude_owned(binding(&temp)).is_ok());
+                assert!(LoginProcess::reserve(&binding(&temp)).is_ok());
             } else {
                 assert!(cleanup.is_err());
                 assert!(process.release_after_run_terminal().is_err());
-                assert!(LoginProcess::reserve_claude_owned(binding(&temp)).is_err());
+                assert!(LoginProcess::reserve(&binding(&temp)).is_err());
             }
         }
     }
@@ -2151,7 +2233,7 @@ mod tests {
                 elsecrew_core::proctree::ProbeResult::Gone
             ));
             assert_eq!(
-                temp.path().join(PENDING).exists(),
+                run_hold(&temp).is_some(),
                 case != "finish",
                 "{case}"
             );

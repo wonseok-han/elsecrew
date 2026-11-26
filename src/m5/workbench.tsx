@@ -46,7 +46,7 @@ import { ApplyLatest, ChangesMergeStatus } from "./apply-latest.tsx";
 import { FileSearch } from "./file-search-view.tsx";
 import { ProjectCatalog, type CatalogListState } from "./project-catalog-view.tsx";
 import { WorkStatusPanel } from "./work-status-view.tsx";
-import { NotificationBell, type BellNoticeTone } from "./notification-bell.tsx";
+import { NotificationBell, useProjectNames, type BellNoticeTone } from "./notification-bell.tsx";
 import { startNotificationFeed, type NotificationFeedBridge } from "./notification-feed.ts";
 import { NotificationCenter, osNotificationsEnabled, type AppNotification, NOTIFICATION_PREFERENCES_CHANGED, PRUNE_INTERVAL_MS } from "./notifications.ts";
 import { validateProjectCatalogResult, type ProjectCatalogEntry } from "./contracts/project-catalog-v1.ts";
@@ -63,6 +63,9 @@ import { UpdateBanner } from "./update-banner.tsx";
 import { fileName, isProsePath } from "./editor-paths.ts";
 import { FollowupComposer, TeamTimeline } from "./task-story.tsx";
 import { followProjectActivity, listedWorking, otherProjectsActivity, projectActivity, ProjectActivityTracker } from "./project-activity.ts";
+import { TaskInbox } from "./task-inbox.tsx";
+import { workingByProject } from "./task-inbox-model.ts";
+import type { TaskInboxItem } from "./contracts/project-catalog-v1.ts";
 
 /** A merge or apply standing read with no answer by then counts as failed. */
 const STANDING_READ_TIMEOUT_MS = 20_000;
@@ -595,6 +598,31 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     activity.reconcileProject(chat.projectId, chat.chats.filter(item => listedWorking(item.state)).map(item => item.chatId));
   }, [activity, chat.projectId, chat.settings?.projectId, chat.chats]);
   const activityOf = (projectId: string) => projectActivity(activity, notificationItems, projectId);
+  // Every project's tasks from the engine (ADE multi-project P4): the inbox,
+  // and the project badges, including runs started before a reload.
+  const [inboxItems, setInboxItems] = useState<TaskInboxItem[]>([]);
+  useEffect(() => {
+    if (!admissionReady || !window.m5Projects) return;
+    let live = true;
+    let queued: number | null = null;
+    const read = () => {
+      const input = { action: "taskInbox" as const };
+      void window.m5Projects!.request(input).then(raw => {
+        const result = validateProjectCatalogResult(raw, input);
+        if (!live || result.action !== "taskInbox") return;
+        setInboxItems(result.items);
+        activity.reconcileFromEngine(workingByProject(result.items));
+      }).catch(() => undefined);
+    };
+    // Run notices come in bursts: read once shortly after.
+    const soon = () => { if (queued === null) queued = window.setTimeout(() => { queued = null; read(); }, 800); };
+    read();
+    const timer = window.setInterval(read, 10_000);
+    const notices = bridge as unknown as Parameters<typeof followProjectActivity>[0];
+    const stops = [notices.onAgentRunStateChanged?.(soon), notices.onChatEvent?.(soon)];
+    return () => { live = false; window.clearInterval(timer); if (queued !== null) window.clearTimeout(queued); for (const stop of stops) stop?.(); };
+  }, [admissionReady, activity, bridge]);
+  const inboxNames = useProjectNames(inboxItems.length > 0, [...new Set(inboxItems.map(item => item.projectId))]);
   // The engine says whether any task of any project works; run notices and
   // a short poll keep it current. An unreadable answer counts as working.
   useEffect(() => {
@@ -963,6 +991,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       </nav>}
       {/* Everything about what is happening lives with the bell: progress and
           errors under it, anything that still needs attention inside it. */}
+      <TaskInbox items={inboxItems} names={inboxNames} onOpen={item => { void openNotification({ id: `inbox:${item.chatId}`, kind: "attention", projectId: item.projectId, chatId: item.chatId, goal: item.goal, text: "", at: item.updatedAt } as AppNotification); }} />
       <NotificationBell center={notifications} onOpen={openNotification} hasProblem={workAttention}
         problem={<WorkStatusPanel bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])} liveRunIds={liveRunIds} onAttention={setWorkAttention} />}
         errors={[openBlocked ? { title: t("m5.notifications.cannotOpen"), key: `open-blocked:${openBlocked}`, body: <p>{openBlocked}</p> } : null, snapshot.error ? { title: t(snapshot.error.messageKey), key: `snapshot:${snapshot.error.messageKey}:${snapshot.error.technicalDetail ?? ""}`, body: <>

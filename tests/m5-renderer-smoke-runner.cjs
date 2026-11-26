@@ -1217,6 +1217,22 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-switcher-projects li')", "switcher list")};
     await ${waitFor("[...document.querySelectorAll('.m5-switcher-projects li')].some(item => item.dataset.path === '/work/earlier' && item.querySelector('.m5-badge-running'))", "other project working badge")};
     ${capture("25-switcher")}
+    // ADE multi-project P4: every project's tasks in one place.
+    window.m5SmokeInbox = [
+      {projectId: "earlier_project", chatId: "chat_earlier", goal: "로그인 화면 다듬기", state: "needsAttention", updatedAt: new Date().toISOString(), waiting: false, working: false},
+      {projectId: "smoke_project", chatId: "chat_smoke_run", goal: "할 일 목록에 마감일 넣기", state: "running", updatedAt: new Date().toISOString(), waiting: false, working: true},
+      {projectId: "earlier_project", chatId: "chat_earlier_wait", goal: "검색 결과 정렬", state: "running", updatedAt: new Date().toISOString(), waiting: true, working: false},
+      {projectId: "smoke_project", chatId: "chat_smoke_done", goal: "README 정리", state: "reviewReady", updatedAt: new Date().toISOString(), waiting: false, working: false},
+    ];
+    // A run notice makes the screen read the inbox again shortly.
+    window.m5SmokeOtherProjectWorking('succeeded');
+    await ${waitFor("document.querySelector('[data-testid=task-inbox] .m5-notification-count')", "inbox count")};
+    document.querySelector('[data-testid=task-inbox]').open = true;
+    await ${waitFor("document.querySelectorAll('[data-testid=task-inbox] .m5-inbox-item').length === 4", "inbox items")};
+    if (!document.querySelector('[data-testid=task-inbox]').innerText.includes('차례를 기다리는 중')) throw new Error('inbox waiting line missing');
+    ${capture("35-task-inbox")}
+    document.querySelector('[data-testid=task-inbox]').open = false;
+    window.m5SmokeInbox = [];
     if (document.querySelector('.m5-switcher-projects').innerText.includes('/work/')) throw new Error('switcher shows folder paths');
     document.querySelector('[data-testid=project-switcher]').open = false;
     // (5) Settings: notifications (kinds and tidying) and this project in groups.

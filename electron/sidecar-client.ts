@@ -312,6 +312,10 @@ export class SidecarClientV1 {
   readonly #workspaceSaves = new Map<string, WorkspaceSaveSessionV1>();
   readonly #preparedWorkspaces = new Map<string, PreparedWorkspaceSessionV1>();
   readonly #teamRoots = new Map<string, { context: AgentChatContextV1; count: number }>();
+  /** Coordinator starts the engine took but put in line (`providerCapacity`,
+   * ADE multi-project P3′), by chat: their run, announced later as its own
+   * root, is the one the person asked for. */
+  readonly #queuedRoots = new Map<string, AgentChatContextV1>();
   readonly #agentChatContexts = new Map<string, AgentChatContextV1>();
   readonly #activeAgentRuns = new Map<string, AgentRunBindingV1>();
   readonly #seenAgentRuns = new Map<string, SeenAgentRunV1>();
@@ -918,6 +922,19 @@ export class SidecarClientV1 {
       if (envelope.event === "agent.teamRunAccepted") {
         if (!this.#agentAdapterNegotiated) throw new Error("team run requires agent negotiation");
         const notice = strictObject(envelope.payload, ["rootRunId", "accepted"], "team run announcement");
+        // A coordinator that waited its turn starts as its own root, only for
+        // the chat whose start the engine put in line (ADE multi-project P3′).
+        const queued = typeof envelope.chatId === "string" ? this.#queuedRoots.get(envelope.chatId) : undefined;
+        if (queued && notice.rootRunId === envelope.runId && !this.#teamRoots.has(String(notice.rootRunId))) {
+          const value = validateAgentRunAcceptedV1(notice.accepted);
+          if (value.roleId !== "coordinator") throw new Error("a waiting team's first run must be its coordinator");
+          validateAgentRunAcceptedAgainstContextV1(value, { ...queued, roleId: value.roleId, capabilityFingerprint: value.capabilityFingerprint });
+          if (value.chatId !== envelope.chatId || value.taskId !== envelope.taskId || value.runId !== envelope.runId) throw new Error("team run envelope identity mismatch");
+          this.#registerAcceptedAgentRun(value);
+          this.#teamRoots.set(value.runId, { context: queued, count: 0 });
+          this.#queuedRoots.delete(envelope.chatId as string);
+          return;
+        }
         const root = typeof notice.rootRunId === "string" ? this.#teamRoots.get(notice.rootRunId) : undefined;
         if (!root || root.count >= 11) throw new Error("team run lacks an authorized root or exceeds its call budget");
         const value = validateAgentRunAcceptedV1(notice.accepted);
@@ -1005,6 +1022,11 @@ export class SidecarClientV1 {
     if (!response.ok) {
       this.#pending.delete(response.requestId);
       this.#discardWorkspaceSave(pending);
+      if (pending.method === "run.startAgent" && response.error?.code === "providerCapacity") {
+        const request = validateAgentRunStartRequestV1(pending.params);
+        const chat = this.#agentChatContexts.get(request.chatId);
+        if (chat && request.roleId === "coordinator") this.#queuedRoots.set(request.chatId, chat);
+      }
       pending.reject(new Error(`${response.error?.kind ?? "sidecarError"}: ${response.error?.detail ?? "unknown error"}`));
       return;
     }
@@ -1378,6 +1400,7 @@ export class SidecarClientV1 {
     this.#preparedWorkspaces.clear();
     this.#agentChatContexts.clear();
     this.#teamRoots.clear();
+    this.#queuedRoots.clear();
     this.#activeAgentRuns.clear();
     this.#seenAgentRuns.clear();
     this.#agentEventIds.clear();

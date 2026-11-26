@@ -15,7 +15,23 @@ export type StageCell =
   /** Between runs: the coordinator reads the result and picks who goes next. */
   | { kind: "between" }
   /** The dashed last cell while a run works: "next · the coordinator decides". */
-  | { kind: "next" };
+  | { kind: "next" }
+  /** No run yet or between runs, the provider busy with other tasks: the
+   * team waits its turn (ADE multi-project P3′). */
+  | { kind: "waiting" };
+
+/** How the engine's "waiting its turn" status line begins (keep
+ * `TURN_WAIT_NOTICE` in orchestration_dispatch.rs the same). */
+export const TURN_WAIT_PREFIX = "차례를 기다리는 중이에요";
+
+/** The team waits its turn: no run of it works, and the newest status line
+ * since its last run began says so. */
+export function waitingTurn(messages: readonly { kind: string; text: string; createdAt: string }[], runs: readonly Pick<AgentRunRecordV1, "state" | "createdAt">[]): boolean {
+  if (runs.some(run => LIVE.includes(run.state))) return false;
+  const lastRun = Math.max(Number.NEGATIVE_INFINITY, ...runs.map(run => Date.parse(run.createdAt)).filter(Number.isFinite));
+  const status = [...messages].reverse().find(message => message.kind === "status");
+  return Boolean(status && status.text.startsWith(TURN_WAIT_PREFIX) && !(Date.parse(status.createdAt) < lastRun));
+}
 
 const LIVE: readonly string[] = ["preparing", "running", "cancelling"];
 
@@ -33,7 +49,7 @@ export function runStageStatus(run: Pick<AgentRunRecordV1, "state" | "terminatio
  * work goes without a sentence (F1). At most `max` cells show; older runs
  * fold into `hidden` ("+N").
  */
-export function stageCells(runs: readonly AgentRunRecordV1[], input: { working: boolean; now: number; max?: number }): { hidden: number; cells: StageCell[] } {
+export function stageCells(runs: readonly AgentRunRecordV1[], input: { working: boolean; now: number; max?: number; waiting?: boolean }): { hidden: number; cells: StageCell[] } {
   const max = Math.max(2, input.max ?? 5);
   const ordered = [...runs].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.runId.localeCompare(b.runId));
   const runCells: StageCell[] = ordered.map(run => ({ kind: "run", runId: run.runId, roleId: run.selectedProfile.roleId, status: runStageStatus(run), seconds: runDurationSeconds(run, input.now) }));
@@ -41,6 +57,7 @@ export function stageCells(runs: readonly AgentRunRecordV1[], input: { working: 
   if (input.working) {
     const live = ordered.some(run => LIVE.includes(run.state));
     if (live) trailing.push({ kind: "next" });
+    else if (input.waiting) trailing.push({ kind: "waiting" });
     else trailing.push({ kind: ordered.length === 0 ? "planning" : "between" });
   }
   const room = max - trailing.length;
@@ -50,7 +67,7 @@ export function stageCells(runs: readonly AgentRunRecordV1[], input: { working: 
 
 /** The one sentence the bar announces (aria-live) for what happens now. */
 export function stageNow(cells: readonly StageCell[]): StageCell | null {
-  return cells.find(cell => (cell.kind === "run" && cell.status === "now") || cell.kind === "planning" || cell.kind === "between") ?? null;
+  return cells.find(cell => (cell.kind === "run" && cell.status === "now") || cell.kind === "planning" || cell.kind === "between" || cell.kind === "waiting") ?? null;
 }
 
 /**

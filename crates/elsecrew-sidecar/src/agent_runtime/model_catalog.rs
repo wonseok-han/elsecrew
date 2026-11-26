@@ -415,9 +415,8 @@ mod tests {
                 completion: None,
             },
         );
-        let error = runtime.begin_model_catalog(&storage, "second", "claude-code").unwrap_err();
-        assert_eq!(error.kind(), "providerBusy");
-        assert!(error.detail().contains("another provider check currently owns this profile"));
+        // A list goes on beside another check or a run (ADE multi-project P5).
+        runtime.begin_model_catalog(&storage, "second", "claude-code").unwrap();
         runtime.preparing_to_quit = true;
         assert_eq!(runtime.begin_model_catalog(&storage, "third", "codex").unwrap_err().kind(), "agentDiscoveryRejected");
     }

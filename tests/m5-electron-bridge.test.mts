@@ -2406,3 +2406,41 @@ test("the preview is on by default on macOS only, off with ELSECREW_PREVIEW=0, a
   assert.match(main, /window\.webContents\.on\("will-attach-webview", \(event\) => event\.preventDefault\(\)\)/);
   assert.equal(readFileSync("src/m5/index.html", "utf8").includes("elsecrew-preview"), false, "the app CSP is not widened");
 });
+
+// ADE multi-project P3′: a coordinator start the engine put in line
+// (`providerCapacity`) is accepted later as its own root, only for that chat
+// and only as its coordinator; any other self-rooted announcement still fails.
+test("a coordinator start put in line is accepted later as its own root, and nothing else is", async () => {
+  for (const invalid of [null, "otherChat", "notCoordinator", "notQueued"] as const) {
+    const { client, child } = createClient();
+    const starting = client.start(); child.stdout.write(`${g5aReadyLine()}\n`); await starting;
+    await hydrateActualAgentRun(client, child);
+    const fp = measuredCapability().fingerprint;
+    if (invalid !== "notQueued") {
+      const start = client.startAgentRun({ chatId: "chat_01", roleId: "coordinator", inputMessageIds: ["message_01"], expectedCapabilityFingerprint: fp });
+      const req = JSON.parse(child.writes.at(-1)!);
+      child.stdout.write(`${JSON.stringify({ protocolVersion: 1, kind: "response", sidecarInstanceId: "sidecar_test_01", requestId: req.requestId, ok: false,
+        error: { code: "providerCapacity", kind: "requestBlocked", detail: "the team waits its turn; it starts when a run of this provider ends", retryable: false } })}\n`);
+      await assert.rejects(start, /waits its turn/);
+    }
+    const accepted = acceptedAgentRun(fp, { runId: "agent_run_queued_root", roleId: invalid === "notCoordinator" ? "coding" : "coordinator" });
+    child.stdout.write(JSON.stringify({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01",
+      streamId: `team_accept_queued_${invalid}`, seq: 1, event: "agent.teamRunAccepted",
+      chatId: invalid === "otherChat" ? "chat_02" : "chat_01", taskId: "task_01", runId: accepted.runId,
+      payload: { rootRunId: accepted.runId, accepted } }) + "\n");
+    if (invalid === null) {
+      // Its events are known, and a team member can follow it as the root.
+      child.stdout.write(agentPublicEventLine(agentPublicEvent(fp, { runId: "agent_run_queued_root", roleId: "coordinator" }), "queued_root_stream"));
+      const worker = acceptedAgentRun(fp, { runId: "agent_run_queued_worker", roleId: "coding" });
+      child.stdout.write(JSON.stringify({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01",
+        streamId: "team_accept_queued_worker", seq: 1, event: "agent.teamRunAccepted", chatId: "chat_01", taskId: "task_01", runId: worker.runId,
+        payload: { rootRunId: "agent_run_queued_root", accepted: worker } }) + "\n");
+      await new Promise(resolve => setTimeout(resolve, 10));
+      assert.equal(client.failure, undefined);
+      assert.equal(child.terminations, 0);
+    } else {
+      await new Promise(resolve => setTimeout(resolve, 10));
+      assert.equal(child.terminations, 1, invalid);
+    }
+  }
+});

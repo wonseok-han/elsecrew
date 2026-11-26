@@ -68,6 +68,9 @@ fn workflow_failure_reason(code: &str) -> &'static str {
 /// check, and how often.
 const WORKFLOW_BUSY_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
 const WORKFLOW_BUSY_RETRY: std::time::Duration = std::time::Duration::from_secs(1);
+/// The start of the status line a team waiting its turn leaves (the screen
+/// reads it to say "waiting its turn"; keep `TURN_WAIT_PREFIX` in task-story-model.ts).
+pub(crate) const TURN_WAIT_NOTICE: &str = "차례를 기다리는 중이에요";
 
 /// The request id of a step's `attempt`-th try: a retried request never
 /// reuses a refused one's id.
@@ -105,6 +108,21 @@ impl Sidecar {
             match orchestration::begin(&mut self.storage, &input, &request.request_id) {
                 Ok(true) => {
                     self.workflow_chats.insert(input.chat_id.clone());
+                    // Its provider already runs as many as allowed: the team is
+                    // on, its coordinator waits its turn and starts from the
+                    // team's own loop (ADE multi-project P3′).
+                    if let Some(runtime) = self.start_runtime(&request).filter(|runtime| self.run_capacity_full(runtime)) {
+                        let mut events = Vec::new();
+                        self.workflow_waiting.insert(input.chat_id.clone());
+                        let name = if runtime == "claude-code" { "Claude" } else { "Codex" };
+                        let limit = self.projects.run_limit(&runtime);
+                        events.push(orchestration::notice(&mut self.storage, &input.chat_id,
+                            &format!("{TURN_WAIT_NOTICE}. 다른 작업들이 {name}를 쓰고 있어요(동시에 {limit}개까지). 자리가 나면 시작해요.")).map_err(failure)?);
+                        let now = std::time::Instant::now();
+                        self.workflow_busy.insert(input.chat_id.clone(), (now, now + WORKFLOW_BUSY_RETRY * 2, 0));
+                        return Ok(HandledRequest { response: Some(error_response(&request, "providerCapacity", "requestBlocked",
+                            "the team waits its turn; it starts when a run of this provider ends")), events: self.g5_events(events) });
+                    }
                     self.workflow_requests
                         .insert(request.request_id.clone(), (input.chat_id, "root".into()));
                 }
@@ -264,6 +282,7 @@ impl Sidecar {
                 payload,
             )?;
             self.workflow_chats.remove(chat_id);
+            self.workflow_waiting.remove(chat_id);
             let event = orchestration::notice(
                 &mut self.storage,
                 chat_id,
@@ -411,6 +430,7 @@ impl Sidecar {
                 first_error.get_or_insert(error);
             }
             self.workflow_chats.remove(&id);
+            self.workflow_waiting.remove(&id);
         }
         first_error.map_or(Ok(()), Err)
     }
@@ -485,6 +505,7 @@ impl Sidecar {
         orchestration::save(&mut self.storage, chat, &state).map_err(failure)?;
         self.workflow_chats.remove(chat);
         self.workflow_busy.remove(chat);
+        self.workflow_waiting.remove(chat);
         events.push(orchestration::notice(&mut self.storage,chat,&format!("팀 작업을 멈췄어요. {reason} 이미 실행한 작업은 자동으로 반복하지 않아요.")).map_err(failure)?);
         Ok(())
     }
@@ -507,6 +528,14 @@ impl Sidecar {
             // ask again shortly instead of stopping the team, for up to
             // WORKFLOW_BUSY_WAIT. A refused start created no run, so the
             // step starts over from the capability check.
+            // As many runs of this provider as allowed already work: wait for
+            // a turn, without a time limit, until the team is stopped (P3′).
+            if kind == "start" && code == "providerCapacity" {
+                let now = std::time::Instant::now();
+                let (since, _, attempt) = self.workflow_busy.get(&chat).copied().unwrap_or((now, now, 0));
+                self.workflow_busy.insert(chat.clone(), (since, now + WORKFLOW_BUSY_RETRY * 2, attempt + 1));
+                return Ok(true);
+            }
             if matches!(kind.as_str(), "capability" | "start") && code == "providerBusy" {
                 let now = std::time::Instant::now();
                 let (since, _, attempt) = self.workflow_busy.get(&chat).copied().unwrap_or((now, now, 0));
@@ -522,16 +551,36 @@ impl Sidecar {
         }
         if kind == "start" {
             self.workflow_busy.remove(&chat);
+            self.workflow_waiting.remove(&chat);
         }
         if kind == "root" || kind == "start" {
             let accepted = response.result.as_ref().ok_or_else(|| {
                 SidecarError::new("orchestrationBlocked", "missing accepted team run")
             })?;
-            if kind == "root" {
+            // A team that waited its turn from the start (P3′) gets its root
+            // from the loop: its first run is that root.
+            let first_of_waiting = kind == "start" && !self.workflow_roots.contains_key(&chat);
+            if kind == "root" || first_of_waiting {
                 let run_id = accepted["runId"].as_str().ok_or_else(|| {
                     SidecarError::new("orchestrationBlocked", "missing root run id")
                 })?;
                 self.workflow_roots.insert(chat.clone(), run_id.into());
+                // The app learns of it as its own root: the start it asked for
+                // was put in line (`providerCapacity`) and is this run.
+                if first_of_waiting {
+                    self.workflow_announcements.push(EventV1 {
+                        protocol_version: PROTOCOL_VERSION,
+                        kind: "event".into(),
+                        sidecar_instance_id: self.ready.sidecar_instance_id.clone(),
+                        stream_id: format!("team_accept_{}", Uuid::new_v4().simple()),
+                        seq: 1,
+                        event: "agent.teamRunAccepted".into(),
+                        chat_id: Some(chat.clone()),
+                        task_id: accepted["taskId"].as_str().map(str::to_owned),
+                        run_id: Some(run_id.to_owned()),
+                        payload: json!({"rootRunId":run_id,"accepted":accepted}),
+                    });
+                }
             } else {
                 let root = self.workflow_roots.get(&chat).ok_or_else(|| {
                     SidecarError::new("orchestrationBlocked", "missing authorized team root")
@@ -612,6 +661,7 @@ impl Sidecar {
             if state.status != "running" {
                 self.workflow_chats.remove(&chat);
                 self.workflow_busy.remove(&chat);
+                self.workflow_waiting.remove(&chat);
                 continue;
             }
             if let Some(run_id) = state.run_id.clone() {
@@ -725,6 +775,22 @@ impl Sidecar {
                 Some((_, _, attempt)) => *attempt,
                 None => 0,
             };
+            // Its provider already runs as many as allowed: the step waits its
+            // turn — no check is started, nothing stops (ADE multi-project P3′).
+            if let Some(runtime) = runtime.as_str() {
+                if self.run_capacity_full(runtime) {
+                    if self.workflow_waiting.insert(chat.clone()) {
+                        let name = if runtime == "claude-code" { "Claude" } else { "Codex" };
+                        let limit = self.projects.run_limit(runtime);
+                        events.push(orchestration::notice(&mut self.storage, &chat,
+                            &format!("{TURN_WAIT_NOTICE}. 다른 작업들이 {name}를 쓰고 있어요(동시에 {limit}개까지). 자리가 나면 이어서 해요.")).map_err(failure)?);
+                    }
+                    let now = std::time::Instant::now();
+                    let (since, _, attempt) = self.workflow_busy.get(&chat).copied().unwrap_or((now, now, 0));
+                    self.workflow_busy.insert(chat.clone(), (since, now + WORKFLOW_BUSY_RETRY * 2, attempt));
+                    continue;
+                }
+            }
             let id = attempt_request_id(&format!("cap_{}", state.request_id), attempt);
             let request = self.workflow_request(
                 id.clone(),
@@ -2238,6 +2304,88 @@ mod tests {
         let prepared = sidecar.g5.prepare_chat_workspace_with_baseline(&mut sidecar.storage, &mut sidecar.projects, &project_id, "req_inside", true);
         assert!(prepared.is_err_and(|error| error.detail.contains("overlaps another task's workspace")));
         assert!(listing(&inside).is_empty(), "no project or task folder made");
+    }
+
+    /// ADE multi-project P3′: with one Claude run allowed, a second team does
+    /// not stop. It says once that it waits its turn, starts no check while
+    /// the first works, never runs beside it, and goes on when the first ends.
+    #[test]
+    fn a_team_over_the_run_limit_waits_its_turn_instead_of_stopping() {
+        let (root, mut sidecar, _) = service();
+        let (chat_a, _) = another_task(&mut sidecar, &root.path().join("source"), "first");
+        let (chat_b, _) = another_task(&mut sidecar, &root.path().join("other"), "second");
+        sidecar.projects.set_run_limit("claude-code", 1).unwrap();
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::BusyReader);
+        let (a, b) = (chat_a["chatId"].as_str().unwrap().to_owned(), chat_b["chatId"].as_str().unwrap().to_owned());
+        let first = start_as(&mut sidecar, &chat_a, "req_first");
+        assert!(first.ok, "{first:?}");
+        // The second team is on, its coordinator waiting: not an error to stop it.
+        let waiting = start_as(&mut sidecar, &chat_b, "req_second");
+        assert_eq!(waiting.error.as_ref().map(|e| e.code.as_str()), Some("providerCapacity"), "{waiting:?}");
+        assert_eq!(sidecar.workflow_state(&b).unwrap().status, "running");
+        let notices = |sidecar: &Sidecar, chat: &str| sidecar.storage.chat_message_history(chat).unwrap().iter()
+            .filter(|m| m["text"].as_str().is_some_and(|t| t.starts_with(TURN_WAIT_NOTICE))).count();
+        assert_eq!(notices(&sidecar, &b), 1);
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let mut b_started_after_a = false;
+        let mut b_root_announced = false;
+        loop {
+            let (_, events) = sidecar.poll_runtime_events().unwrap();
+            for event in events {
+                if event.event == "agent.teamRunAccepted" && event.chat_id.as_deref() == Some(b.as_str()) && event.payload["rootRunId"].as_str() == event.run_id.as_deref() {
+                    assert_eq!(event.payload["accepted"]["roleId"], "coordinator");
+                    b_root_announced = true;
+                }
+            }
+            assert!(sidecar.live_runs_of("claude-code") <= 1, "never beside the first");
+            let runs = sidecar.storage.projection_records("run").unwrap();
+            let live = |chat: &str| runs.iter().any(|run| run["record"]["chatId"] == chat && ["preparing", "running", "cancelling"].contains(&run["record"]["state"].as_str().unwrap_or("")));
+            let started = |chat: &str| runs.iter().any(|run| run["record"]["chatId"] == chat);
+            if started(&b) {
+                assert!(!live(&a), "B started while A still ran");
+                b_started_after_a = true;
+            }
+            let (sa, sb) = (sidecar.workflow_state(&a).unwrap().status, sidecar.workflow_state(&b).unwrap().status);
+            if !started(&b) {
+                assert_eq!(sb, "running", "B stopped while it waited");
+            }
+            if sa != "running" && sb != "running" { break; }
+            assert!(Instant::now() < deadline, "{sa} {sb}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(b_started_after_a, "B's coordinator ran after A's");
+        assert!(b_root_announced, "the waiting team's first run is announced as its own root");
+        assert_eq!(notices(&sidecar, &b), 1, "told once");
+        assert_eq!(notices(&sidecar, &a), 0);
+    }
+
+    /// ADE multi-project P4: one list of every project's tasks that work,
+    /// wait or are ready for review; a deleted task is not in it.
+    #[test]
+    fn the_task_inbox_lists_every_projects_working_and_ready_tasks() {
+        let (root, mut sidecar, _) = service();
+        let (ready, _) = another_task(&mut sidecar, &root.path().join("source"), "ready");
+        let (working, _) = another_task(&mut sidecar, &root.path().join("other"), "working");
+        let (gone, _) = another_task(&mut sidecar, &root.path().join("other"), "gone");
+        run_team_to_review(&mut sidecar, &ready, "req_inbox_ready");
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::BusyReader);
+        assert!(start_as(&mut sidecar, &working, "req_inbox_working").ok);
+        run_team_to_review(&mut sidecar, &gone, "req_inbox_gone");
+        let deleted = ask(&mut sidecar, "req_inbox_delete", "project.catalog", json!({"action":"deleteChat","projectId":gone["projectId"],"chatId":gone["chatId"],"confirmed":true}));
+        assert!(deleted.ok, "{deleted:?}");
+        let inbox = ask(&mut sidecar, "req_inbox", "project.catalog", json!({"action":"taskInbox"}));
+        assert!(inbox.ok, "{inbox:?}");
+        let items = inbox.result.as_ref().unwrap()["items"].as_array().unwrap().clone();
+        let find = |chat: &Value| items.iter().find(|item| item["chatId"] == chat["chatId"]).cloned();
+        let ready_item = find(&ready).expect("the ready task is listed");
+        assert_eq!((ready_item["state"].as_str(), ready_item["working"].as_bool()), (Some("reviewReady"), Some(false)));
+        let working_item = find(&working).expect("the working task is listed");
+        assert_eq!(working_item["working"], true);
+        assert_ne!(working_item["projectId"], ready_item["projectId"], "two projects in one list");
+        assert!(find(&gone).is_none(), "a deleted task is not listed");
+        for item in &items {
+            assert_eq!(item.as_object().unwrap().keys().cloned().collect::<Vec<_>>(), ["chatId","goal","projectId","state","updatedAt","waiting","working"].map(String::from).to_vec());
+        }
     }
 
     /// A workspace folder inside the project itself (`~/elsecrew` as the

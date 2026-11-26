@@ -681,6 +681,9 @@ struct Sidecar {
     /// A team step whose provider was briefly busy with another check (model
     /// list, sign-in check): when it was first refused and when to ask again.
     workflow_busy: BTreeMap<String, (Instant, Instant, u32)>,
+    /// Team steps waiting their turn: their provider already runs as many as
+    /// allowed (ADE multi-project P3′). Told once per wait.
+    workflow_waiting: std::collections::BTreeSet<String>,
 }
 
 struct PendingAgentStart {
@@ -1131,6 +1134,7 @@ impl Sidecar {
             workflow_roots: Default::default(),
             workflow_announcements: Vec::new(),
             workflow_busy: BTreeMap::new(),
+            workflow_waiting: std::collections::BTreeSet::new(),
             maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler::default(),
             maintenance_poisoned: false,
             background_check: background_check::BackgroundCheck::new(from_seal),
@@ -1328,6 +1332,7 @@ impl Sidecar {
                     self.projects.stop_watchers();
                     orchestration::pause_after_restart(&mut self.storage).map_err(orchestration_dispatch::failure)?;
                     self.workflow_chats.clear();
+                    self.workflow_waiting.clear();
                     self.prepared_to_quit = true;
                 }
                 self.agent_runtime
@@ -1728,6 +1733,21 @@ impl Sidecar {
                         }
                     }
                     deleted
+                }
+                Some("taskInbox") => {
+                    // Every project's tasks at work, waiting for the person or a
+                    // review (ADE multi-project P4); `waiting`: in line for a run.
+                    require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
+                    let busy = self.busy_chats();
+                    self.g5.task_inbox(&self.storage).map(|items| {
+                        let items: Vec<Value> = items.into_iter().map(|mut item| {
+                            let chat = item["chatId"].as_str().unwrap_or_default().to_owned();
+                            item["waiting"] = serde_json::json!(self.workflow_waiting.contains(&chat));
+                            item["working"] = serde_json::json!(busy.contains(&chat) && !matches!(busy, work_scope::BusyChats::Unknown));
+                            item
+                        }).collect();
+                        project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"taskInbox","items":items}), ..Default::default() }
+                    })
                 }
                 Some("workStatus") => {
                     // Any task of any project at work: a run, a start or stop on
@@ -2542,6 +2562,7 @@ impl Sidecar {
                 self.agent_runtime.request_cancel(&identity)?;
                 orchestration::stop(&mut self.storage, &identity.chat_id, &identity.run_id).map_err(|e| ProjectFailure::manifest(e.detail))?;
                 self.workflow_chats.remove(&identity.chat_id);
+                self.workflow_waiting.remove(&identity.chat_id);
                 Ok(identity)
             })();
             return match queued {

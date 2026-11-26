@@ -43,6 +43,23 @@ export type AutomationPermissions = { files: boolean; commands: boolean };
 export interface WorkspaceCleanupEntry { chatId: string; projectId: string; title: string; eligible: boolean; pending: boolean }
 /** docs/proposals/m5-chat-erasure.md: erased chats are omitted; preview is a bounded goal excerpt. */
 export interface ChatErasureEntry { chatId: string; projectId: string; preview: string; eligible: boolean; state: "none" | "pending" | "redacted" }
+/** How many runs of each agent may work at once (ADE multi-project P3′). */
+export const RUN_LIMIT_MAX = 6;
+export interface RunLimits { codex: number; "claude-code": number }
+function runLimit(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > RUN_LIMIT_MAX) throw new Error("invalid run limit");
+  return value as number;
+}
+
+/** A task of any project that works or waits (ADE multi-project P4). */
+export const TASK_INBOX_STATES = ["preparing", "running", "stopping", "applying", "waitingForUser", "needsAttention", "recoveryRequired", "reviewReady"] as const;
+export interface TaskInboxItem {
+  projectId: string; chatId: string; goal: string;
+  state: (typeof TASK_INBOX_STATES)[number]; updatedAt: string;
+  /** In line for a run of its agent. */ waiting: boolean;
+  /** A run, a start or stop, or a team step is in flight. */ working: boolean;
+}
+
 export type ProjectCatalogRequest =
   | { action: "workspaceCleanupList" }
   | { action: "cleanupWorkspace"; chatId: string; confirmed: true }
@@ -70,6 +87,9 @@ export type ProjectCatalogRequest =
   | { action: "deleteChat"; projectId: string; chatId: string; confirmed: true }
   | { action: "finishDeletions" }
   | { action: "workStatus" }
+  | { action: "taskInbox" }
+  | { action: "getRunLimits" }
+  | { action: "setRunLimit"; runtime: "codex" | "claude-code"; limit: number }
   | { action: "list"; cursor: string | null } | { action: "reopen"; projectId: string } | { action: "releaseView"; projectId: string }
   | { action: "applicationCapabilities" }
   | { action: "inspectApplicationRetirement"; projectId: string; applicationId: string }
@@ -177,6 +197,8 @@ export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "deleteChat"; projectId: string; chatId: string; projectClosed: boolean }
   | { schemaVersion: 1; action: "finishDeletions"; pending: number }
   | { schemaVersion: 1; action: "workStatus"; working: boolean }
+  | { schemaVersion: 1; action: "taskInbox"; items: TaskInboxItem[] }
+  | { schemaVersion: 1; action: "getRunLimits" | "setRunLimit"; limits: RunLimits }
   | { schemaVersion: 1; action: "releaseView"; projectId: string }
   | { schemaVersion: 1; action: "reopen"; project: ProjectIdentityV1 };
 
@@ -315,8 +337,12 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
   } else if (request.action === "deleteChat") {
     keys(request, ["action", "projectId", "chatId", "confirmed"]); id(request.projectId); id(request.chatId);
     if (request.confirmed !== true) throw new Error("deletion requires confirmation");
-  } else if (request.action === "finishDeletions" || request.action === "workStatus") {
+  } else if (request.action === "finishDeletions" || request.action === "workStatus" || request.action === "taskInbox" || request.action === "getRunLimits") {
     keys(request, ["action"]);
+  } else if (request.action === "setRunLimit") {
+    keys(request, ["action", "runtime", "limit"]);
+    if (request.runtime !== "codex" && request.runtime !== "claude-code") throw new Error("invalid run limit agent");
+    runLimit(request.limit);
   } else if (request.action === "reopen" || request.action === "releaseView" || request.action === "inspectPreparation" || request.action === "applicationStatus" || request.action === "applicationHistory") {
     keys(request, ["action", "projectId"]); id(request.projectId);
   } else if (request.action === "chatApplicationPreview" || request.action === "chatApplicationStatus" || request.action === "applyChatLatest" || request.action === "inspectChatApply") {
@@ -569,6 +595,21 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   } else if (request.action === "deleteChat") {
     keys(result, ["schemaVersion", "action", "projectId", "chatId", "projectClosed"]);
     if (id(result.projectId) !== request.projectId || id(result.chatId) !== request.chatId || typeof result.projectClosed !== "boolean") throw new Error("deletion identity mismatch");
+  } else if (request.action === "getRunLimits" || request.action === "setRunLimit") {
+    keys(result, ["schemaVersion", "action", "limits"]);
+    const limits = result.limits as Record<string, unknown>;
+    if (!limits || typeof limits !== "object") throw new Error("invalid run limits");
+    keys(limits, ["codex", "claude-code"]); runLimit(limits.codex); runLimit(limits["claude-code"]);
+    if (request.action === "setRunLimit" && limits[request.runtime] !== request.limit) throw new Error("run limit not saved");
+  } else if (request.action === "taskInbox") {
+    keys(result, ["schemaVersion", "action", "items"]);
+    if (!Array.isArray(result.items) || result.items.length > 200) throw new Error("invalid task inbox");
+    for (const item of result.items as Record<string, unknown>[]) {
+      keys(item, ["projectId", "chatId", "goal", "state", "updatedAt", "waiting", "working"]);
+      id(item.projectId); id(item.chatId);
+      if (typeof item.goal !== "string" || item.goal.length > 4000 || typeof item.state !== "string" || !TASK_INBOX_STATES.includes(item.state as TaskInboxItem["state"])
+        || typeof item.updatedAt !== "string" || item.updatedAt.length > 64 || typeof item.waiting !== "boolean" || typeof item.working !== "boolean") throw new Error("invalid task inbox item");
+    }
   } else if (request.action === "workStatus") {
     keys(result, ["schemaVersion", "action", "working"]);
     if (typeof result.working !== "boolean") throw new Error("invalid work status");

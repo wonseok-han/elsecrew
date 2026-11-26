@@ -62,12 +62,19 @@ pub(crate) fn run(
         publish("canceled", None, None);
         return Ok(());
     }
+    // The engine renews the sign-in itself only while no run of Claude works
+    // (ADE multi-project P5): a working Claude Code renews it under its own
+    // lock (`.oauth_refresh.lock`), which this renewal does not take. A run's
+    // hold makes the exclusive hold busy, and the renewal is then left to it.
     let refreshed = crate::provider_claude_refresh::refresh_if_expired(profile, cancel);
     if cancel.load(Ordering::Acquire) {
         publish("canceled", None, None);
         return Ok(());
     }
-    refreshed?;
+    match refreshed {
+        Err(error) if error.kind() == "providerBusy" && !crate::provider_login_process::profile_run_holds(profile)?.is_empty() => {}
+        other => other?,
+    }
     let (bytes, exit) = command(profile, &executable, cancel, true, publish)?;
     if cancel.load(Ordering::Acquire) {
         publish("canceled", None, None);
@@ -200,7 +207,9 @@ fn command_with_code(
     if !user_home.is_absolute() || user_home == home {
         return Err(failure());
     }
-    let mut process = LoginProcess::reserve(profile)?;
+    // Reading the sign-in state (`auth status`) goes on beside runs, as runs
+    // do (ADE multi-project P5); signing in holds the profile alone.
+    let mut process = if check { LoginProcess::reserve_shared(profile)? } else { LoginProcess::reserve(profile)? };
     let result = (|| {
         process.launch_with_barrier(
             || {

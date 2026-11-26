@@ -672,6 +672,36 @@ impl G5Manager {
         })
     }
 
+    /// Every project's tasks that work, wait for the person or wait for a
+    /// review, newest change first (ADE multi-project P4). The same tasks a
+    /// project's own list shows: deleted, erased and hidden ones never.
+    pub(crate) fn task_inbox(&self, storage: &Storage) -> Result<Vec<Value>, ProjectFailure> {
+        const SHOWN: [&str; 8] = ["preparing", "running", "stopping", "applying", "waitingForUser", "needsAttention", "recoveryRequired", "reviewReady"];
+        let projects: std::collections::BTreeMap<String, Map<String, Value>> = storage.projection_records("project")?
+            .into_iter()
+            .filter(|project| !crate::project::project_deletion::is_deleted(project))
+            .filter_map(|project| Some((project.get("project_id")?.as_str()?.to_owned(), project)))
+            .collect();
+        let mut items: Vec<Value> = storage.projection_records("chat")?
+            .into_iter()
+            .filter_map(|record| {
+                let project = projects.get(record.get("project_id")?.as_str()?)?;
+                let chat_id = record.get("chat_id")?.as_str()?;
+                let hidden = project.get("catalog_hidden_chats").and_then(Value::as_array).is_some_and(|ids| ids.iter().any(|id| id == chat_id));
+                if hidden || crate::project::chat_erasure::erasure_recorded(project, &Value::String(chat_id.to_owned()))
+                    || crate::project::project_deletion::deleted_chat(project, chat_id) { return None; }
+                let chat = record.get("record")?;
+                SHOWN.contains(&chat["state"].as_str()?).then(|| json!({
+                    "projectId": chat["projectId"], "chatId": chat["chatId"], "goal": chat["goal"],
+                    "state": chat["state"], "updatedAt": chat["updatedAt"],
+                }))
+            })
+            .collect();
+        items.sort_by(|left, right| right["updatedAt"].as_str().cmp(&left["updatedAt"].as_str()).then_with(|| left["chatId"].as_str().cmp(&right["chatId"].as_str())));
+        items.truncate(200);
+        Ok(items)
+    }
+
     pub fn list_chats(
         &self,
         storage: &Storage,

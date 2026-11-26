@@ -14,7 +14,7 @@ import { timelineMessages } from "./timeline-messages.ts";
 import { StageBar } from "./stage-bar.tsx";
 import { teamWorking } from "./task-view-model.ts";
 import { MemberCard, StoryMessageCard, UserBubble } from "./member-card.tsx";
-import { storyItems } from "./task-story-model.ts";
+import { storyItems, waitingTurn } from "./task-story-model.ts";
 import { createPortal } from "react-dom";
 import { roleSettingsAsV3 } from "./contracts/run-recovery-v1.ts";
 
@@ -173,7 +173,7 @@ export function TeamTimeline({ controller, chat, admissionReady, onCoordinatorCh
   return <section className="m5-timeline m5-story" aria-label={t("m5.chat.title")}>
     <TaskHeader chat={chat.activeChat!} phase={phase} phaseKind={phaseKind} working={working} actions={<div className="m5-run-actions">{fixtureActive && <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => void controller.cancelRun()}>{t("m5.chat.cancelDemo")}</button>}{actualActive && chat.activeChat?.schemaVersion === 1 && <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => void controller.cancelAgentRun(actualActive)}>{t("m5.chat.cancelActual")}</button>}</div>} />
     {chat.activeChat?.state === "discarded" && !controller.isRecoveryBlocked() && <section className="m5-notice"><p>{t("m5.chat.discardedHelp")}</p></section>}{controller.isRecoveryBlocked() && <section className="m5-error"><strong>{t("m5.chat.recovery")}</strong><p>{identityUnavailable ? t("m5.chat.identityUnavailable") : t("m5.chat.blocked")}</p>{chat.recoveries.filter((item) => item.state === "unresolved").map((item) => <button key={item.recoveryId} type="button" disabled={!admissionReady} onClick={() => void controller.abandonRecovery(item, lang)}>{t("m5.chat.discard")}</button>)}</section>}{chat.agentRecovery && <section className="m5-error">{identityUnavailable ? <><strong>{t("m5.chat.protected")}</strong><p>{t("m5.chat.protectedHelp")}</p></> : <><strong>{t("m5.chat.termination")}</strong><p>{t("m5.chat.terminationHelp")}</p><button type="button" disabled={!admissionReady || chat.agentRecoveryResolving} onClick={() => void controller.abandonAgentRecovery(lang)}>{chat.agentRecoveryResolving ? t("m5.chat.checkingTermination") : t("m5.chat.discardAfterTermination")}</button></>}</section>}
-    <StageBar runs={chat.agentRuns} working={working} definitions={chat.activeChat!.roleDefinitions} onReveal={revealStage} />
+    <StageBar runs={chat.agentRuns} working={working} waiting={working && waitingTurn(chat.messages, chat.agentRuns)} definitions={chat.activeChat!.roleDefinitions} onReveal={revealStage} />
     {chat.messages.length > 200 && <nav className="m5-diff-pages" aria-label={t("m5.chat.messages")}><button type="button" disabled={messageStart === 0} onClick={() => moveHistory(messageStart - 200)}>{t("m5.chat.older")}</button><span>{t("m5.chat.range", { first: messageStart + 1, last: messageStart + visibleMessages.length, total: chat.messages.length })}</span><button type="button" disabled={messageStart + 200 >= chat.messages.length} onClick={() => moveHistory(messageStart + 200)}>{t("m5.chat.newer")}</button><button type="button" disabled={historyStart === null} onClick={showLatest}>{t("m5.chat.latest")}</button></nav>}
     <div ref={messagesRef} className="m5-timeline-list m5-story-flow" tabIndex={0} aria-label={t("m5.chat.messages")}>
       {items.map(item => item.kind === "run"
