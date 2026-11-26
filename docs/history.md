@@ -2,6 +2,26 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 미리보기 화면(P3)·I5 완결·기본 활성화 (`orca/ade-preview-ui`, 기준 feature/ade 8493496e)
+PR #6은 머지됐다(8493496e). 재확인(`REVIEW-pr6-2.md`)에서 B1 해결, I5 부분 해결(STUN/TURN 개별 관측·권한의 명시적 거절 부족)이라 이번에 완결하고, 화면·기본 활성화를 붙였다.
+
+- **I5 완결**: WebRTC를 전송마다 따로 시도한다(STUN v4/v6, TURN udp v4/v6, TURN tcp, TURN tls, 바깥 STUN 이름). 전송마다 수집기가 따로 있고, 판정은 "후보 0 + 수집 완료 또는 서버 오류"다. 기한 내 무응답은 `unobserved`로 따로 남기며 불합격이다.
+  - 양성 대조: 같은 코드를 제한 없는 앱 기본 세션 창에서 대조 수집기로 돌려 IPv4 전송 4개가 모두 닿는 것(STUN 6·TURN udp 12·tcp 1·tls 2건)과, net log에 그 TCP 연결이 보이는 것을 요구한다.
+  - IPv6 전송은 이 컴퓨터에 라우팅 가능한 IPv6가 없어 대조가 닿지 않는다. 그래서 "관측 불가"로 기록하고 합격으로 치지 않는다(IPv6 있는 기기에서는 대조 도달이 필수).
+  - 권한: 호출 직전 사용자 활성화·포커스를 기록하고, 명시적 거절만 합격으로 친다. 명시적 거절은 main 권한 처리기의 거절 수가 그 호출 동안 늘었거나, 페이지의 Permissions-Policy 판정(`allowsFeature`)이 false인 경우다.
+  - 커밋 725674ab에서 git·사본 두 모드 모두 PASS(모드당 검사 60개).
+- **P3 미리보기 탭**(`src/m5/preview-tab.tsx`, 규칙은 `preview-tab-model.ts`): bounds 동기화, 넓게/좁게(390px), 다시 불러오기, 실행이 끝나면 "새 결과" 띠, 빈 상태("화면으로 볼 결과가 없어요"), 실패·멈춤·폴더 정리됨 상태가 있다. 파일 탭과 편집기 시트의 '미리보기로 열기'(시트를 닫고 미리보기 탭으로)도 붙였다.
+  - **T8**: 앱의 틀("미리보기 — 팀이 만든 결과"·"읽기 전용"·"인터넷 차단")은 무대 밖에 있고, 뷰 사각형은 무대 안쪽으로 반올림한다.
+  - **T16**: 레이아웃의 명시 목록에 더해, 무대 위 25점에서 페이지 최상단 요소를 묻는다. 무대가 아니면 즉시 숨기고 미리 찍어 둔 정지 이미지를 보인다. 덮개가 전환으로 사라질 수 있어, 덮인 동안 0.25초마다 다시 본다.
+  - 발견: 무대의 둥근 모서리 1px 점이 부모 요소로 잡혀 늘 덮였다고 판정됐다. 표본은 8px 안쪽에서 찍는다.
+- **멈춘 페이지**: 뷰를 숨기면 Chromium이 멈춤 감시를 멈추고 'responsive'를 보내 숨김↔표시가 번갈아 바뀌었다. main이 'unresponsive'에서 바로 닫고(설계 2.3), 탭은 "멈췄어요 · 다시 열기"를 보인다.
+- **기본 활성화**: `ELSECREW_PREVIEW=0`일 때만 끈다. `scripts/m5-preview-default-check.mjs`로 개발 빌드와 패키지 앱(`pnpm m5:package`)이 같음을 확인했다(기본: 상태 켜짐 + 브라우저 명령줄에 `--blink-settings=dnsPrefetchingEnabled=false`, `=0`: 꺼짐·스위치 없음).
+  - 메인 앱 영향: 렌더러 마운트 스모크 68개 통과, 실제 앱 미리보기 UI 스모크 통과.
+  - 기존 `m5-project-ui-smoke.cjs`는 공급자 선택 단계에서 멈춘다. 미리보기를 켠 것과 끈 것이 같은 지점에서 멈추므로 미리보기와 무관한 기존 문제(레이아웃 변경 뒤 스모크 미갱신 추정)다.
+- **실제 앱 확인**(`scripts/m5-preview-ui-smoke.cjs`, `pnpm m5:test:preview-ui`, g6-release 연결): todo 결과물을 실제 클릭·키 입력으로 조작했다. 넓게(503px)와 좁게(390px)에서 추가·완료가 됐다. 알림 패널·새 작업 대화상자·다른 탭·닫힌 서랍에서 뷰가 숨고 정지 이미지가 깔렸다가 돌아왔다. 무대에 닿지 않는 메뉴는 뷰를 숨기지 않았다. 검사 14개 PASS, 캡처 `~/Documents/elsecrew-ade-preview-ui-2026-11-26/`.
+- **검증**: `npm test` 853/853, `pnpm build`, 렌더러 마운트 스모크, 격리 프로브(두 모드), UI 스모크, 기본값 확인(개발·패키지) 통과. Rust 변경 없음.
+- **다음**: Codex 검토 대응. `m5-project-ui-smoke.cjs` 공급자 선택 단계 수정은 별도 작업이다. Windows·IPv6 기기에서 프로브를 다시 돌린다.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #6 독립 보안 검토(차단 1·중요 5·경미 2) 전부 반영
 검토서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr6.md`(대상 b7eabc64). 같은 브랜치 `orca/ade-preview-backend`에서 한 번에 고쳤다.
 
@@ -84,7 +104,7 @@ PR #5 보고에 남긴 `tests/m5-renderer-mount-smoke.mts` 실패를 고쳤다. 
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **결과 미리보기의 DNS 미리 찾기(2026-11-26)**: Electron 43에서 `<link rel=dns-prefetch>`는 CSP·`webRequest`·고정 프록시를 모두 거치지 않고 실제 DNS 질의를 보낸다. 미리보기가 켜지면 `--blink-settings=dnsPrefetchingEnabled=false`(앱 전체)를 유지할 것. 확인은 `pnpm m5:test:preview-isolation`의 net log 판정이며 Electron을 올릴 때 다시 돌린다. 미리보기 토큰은 renderer에 주지 않고, 작업 공간 주소는 sidecar가 채팅 바인딩에서 꺼낸다(renderer 값 불사용).
+- **결과 미리보기의 DNS 미리 찾기(2026-11-26)**: Electron 43에서 `<link rel=dns-prefetch>`는 CSP·`webRequest`·고정 프록시를 모두 거치지 않고 실제 DNS 질의를 보낸다. 미리보기가 켜지면(기본값, `ELSECREW_PREVIEW=0`으로 끔) `--blink-settings=dnsPrefetchingEnabled=false`(앱 전체)를 유지할 것. 미리보기 뷰는 앱 페이지 위에 그려지므로, 미리보기 영역을 덮는 새 화면 요소는 `previewObscured` 목록에 넣거나 적어도 무대 위에 실제로 그려져야(탭의 점 검사) 뷰가 숨는다. `pointer-events: none`인 덮개는 점 검사에 잡히지 않는다. 확인은 `pnpm m5:test:preview-isolation`의 net log 판정이며 Electron을 올릴 때 다시 돌린다. 미리보기 토큰은 renderer에 주지 않고, 작업 공간 주소는 sidecar가 채팅 바인딩에서 꺼낸다(renderer 값 불사용).
 
 - **작업 레이아웃의 규칙은 순수 함수에 있다(2026-11-26, ADE 1차-나)**: 창 폭 구간·오른쪽 폭·편집기 요청 해석·기본 탭·미리보기 겹침은 `task-layout-model.ts`, 목록 묶음은 `task-list-model.ts`, 단계 칸·카드 결합은 `task-story-model.ts`, 역할 색은 `role-colors.ts`. 화면 컴포넌트는 그 값을 그리기만 한다. 합치기·반영·버리기 버튼은 결과 상자(`result-box.tsx`) 한 곳에만 둔다 — 다른 곳은 "결과 상자에서 넣기" 링크로 가리킨다.
   - 측정 함정: CDP `Emulation.setDeviceMetricsOverride`로 폭을 바꾸면 CSS는 즉시 바뀌지만, 창이 가려져 있으면 프레임이 없어 `resize`·`matchMedia` 처리기가 다음 캡처 때 돈다. 재기 전에 `Page.captureScreenshot`으로 프레임을 한두 번 그리게 한다.
