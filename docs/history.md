@@ -37,11 +37,16 @@
     - chat-state "the project view can be left while the open task's team works…"
     - editor "leaving a project keeps the open task's unsaved text…", "text that cannot be kept holds the project…"
   - 렌더러 스모크 지점 33(접힌 단계)·34(펼친 단계)을 더하고, 25(전환 팝오버)에 다른 프로젝트 '작업 중' 배지와 상태 점 검사를 더했다.
+  - 네이티브 스모크 `pnpm m5:smoke:multiproject`(`scripts/m5-multiproject-ui-run.mjs` → `m5-multiproject-ui-smoke.cjs`): 실제 sidecar, 임시 앱 데이터, fixture `cancel-clean`(30초 동안 일함).
+    - A 작업의 에이전트가 일하는 중에 한 번에 B로 바꿨다. A 줄에 '작업 중', 전환 단추에 점이 보였다.
+    - B도 실행을 시작했고, 엔진 기록에서 두 실행이 동시에 `running`이었다.
+    - A로 돌아오니 그 작업이 진행 중 그대로 보였다. 검사 18개 PASS.
+    - 함정: fixture 엔진의 저장소는 첫 역할 구성(총괄·V3 역할 없음)이라 새 작업 창과 팀 진행은 여기서 못 돈다. 작업·실행은 bridge로 만들고, 팀 진행은 sidecar 경합 시험이 다룬다.
 - **검증**
   - `cargo test -p elsecrew-sidecar`: 924 통과, 실패 2. 두 실패는 같은 작업 버리기 거절의 오류 설명 문구가 바뀌어서였고, 문구에 기존 표현("idle native execution")을 남겨 고친 뒤 두 시험만 다시 돌려 통과했다.
   - `npm test` 988 → 새 시험 포함 통과, `pnpm build`.
   - `pnpm m5:test:editor` 69/69(다크·라이트, 렌더 대비 라이트 1479곳 실패 0).
-  - 캡처는 `~/Documents/elsecrew-ade-multiproject-2026-11-26/pr-a/`에 있다.
+  - 캡처는 `~/Documents/elsecrew-ade-multiproject-2026-11-26/pr-a/`에 있다(렌더러 `dark/`, 네이티브 `native/`).
 - **남은 것(PR-B)**
   - P5 공급자 병렬 실행: 실행별 잠금 파일, 로그인·설치만 배타, 실행 중 sidecar Claude 갱신 생략.
   - P3′ 상한과 '차례 기다리는 중', P4 전체 수신함(다시 불러오기 전에 시작된 다른 프로젝트 실행도 잡기).

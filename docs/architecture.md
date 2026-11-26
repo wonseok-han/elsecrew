@@ -659,6 +659,7 @@ Keychain 호출은 모두 30초 제한이 있는 자식 프로세스(코어 덤�
   - 사본을 사용자 폴더에 넣는 쓰기(`openApplicationConfirmation`·`startApplication`·`restoreApplication`·`retireApplication`·`cleanupBackup`·`applyChatLatest`)는 예전처럼 **어느 팀이든 일하면** 거절하고, `application_running` 쓰기 슬롯도 전역이다.
   - 어느 작업에도 묶을 수 없는 일(정리 중인 공급자 확인 `discovery_cleanup`, 작업 이름이 이상한 확인 요청)이 있으면 모든 작업을 바쁜 것으로 본다(예전 전역 규칙으로 돌아감). 설정 화면의 모델 목록(작업 없음)은 아무것도 막지 않는다.
   - 거절 코드는 예전과 같다(저장·반영 `orchestrationBusy`, 합치기·버리기 `requestBlocked`, 정리·삭제 `invalidParams`).
+- **네이티브 시험**: `pnpm m5:smoke:multiproject`가 실제 sidecar(fixture `cancel-clean`)로 다음을 확인한다. A에서 에이전트가 일하는 중에 B로 한 번에 바꾸고 배지를 본다. B도 실행해 두 실행이 동시에 `running`인지 본다. A로 돌아와 그 작업이 그대로인지 본다. fixture 엔진 저장소는 첫 역할 구성이라 팀 진행은 sidecar 경합 시험이 맡는다.
   - 경합 시험(`orchestration_dispatch.rs`): `other_tasks_save_merge_and_discard_while_a_team_writes_its_own_workspace`(A의 fake 개발자가 작업 공간에 3초 동안 200번 쓰는 동안, 같은 저장소의 작업 C와 다른 프로젝트의 작업 B를 실제로 합치고 버리기 확인·저장 시작을 하며 A 자신의 것은 거절, B의 사본 반영은 거절. 끝난 뒤 두 저장소 `git fsck`·깨끗한 상태, 각 합치기는 자기 파일만, A 파일은 마지막 회차), `work_in_flight_without_a_task_blocks_every_task`, `a_save_to_a_project_view_waits_only_for_that_projects_tasks`.
 
 ### 에이전트 연결·알림 패널 (ADE 화면 통일 U5·U6, 2026-11-26)
