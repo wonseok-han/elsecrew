@@ -16,8 +16,10 @@ const compiled = ts.transpileModule(readFileSync(new URL("../src/m5/approval-car
 }).outputText;
 
 /** Renders the card with fixed hook state.
- * useState order: pending, error, sending, queued, inspections, opened, unreadable. */
-function renderCard(dictionary: typeof ko, states: unknown[]): string {
+ * useState order: pending, error, sending, queued, inspections, review, unreadable.
+ * A Set in the review place is the requests whose details are open now. */
+function renderCard(dictionary: typeof ko, given: unknown[]): string {
+  const states = given.map((value, place) => place === 5 && value instanceof Set ? { ...display.EMPTY_REVIEW, open: value } : value);
   let index = 0;
   const context: any = { exports: {}, require(name: string) {
     if (name === "react") return { useEffect() {}, useRef: (value: unknown) => ({ current: value }), useState: (initial: unknown) => [index < states.length ? states[index++] : (typeof initial === "function" ? (initial as () => unknown)() : initial), () => {}] };

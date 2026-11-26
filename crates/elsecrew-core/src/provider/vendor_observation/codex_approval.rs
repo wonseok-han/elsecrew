@@ -50,6 +50,11 @@ pub struct PendingApproval {
     pub command_actions: Option<serde_json::Value>,
     pub started_at_ms: u64,
     pub action: Action,
+    /// Asked in a thread that started with `untrusted` (the project's command
+    /// permission was off when the run started). Such a command request is
+    /// never approved by the app on its own, even if the permission is turned
+    /// on during the run (PR #19 re-review 2).
+    pub thread_untrusted: bool,
 }
 
 /// Explicit choices only: never session-wide or policy-amending approval.
@@ -103,10 +108,23 @@ fn id(value: &str) -> bool {
 impl PendingApproval {
     /// Expected IDs must come from the same live owner, never this request.
     /// Parsing is deliberately independent of public-chat event projection.
+    /// An `on-request` thread: a proposed trust rule is unsupported, as before.
     pub fn parse(
         input: &BoundedObservation,
         thread: &str,
         turn: &str,
+    ) -> Result<Self, ProviderError> {
+        Self::parse_in_thread(input, thread, turn, false)
+    }
+
+    /// `untrusted`: the thread started with Codex's `untrusted` policy, whose
+    /// command requests carry a proposed trust rule. Only there is the rule
+    /// read (never adopted); anywhere else a request with one is refused.
+    pub fn parse_in_thread(
+        input: &BoundedObservation,
+        thread: &str,
+        turn: &str,
+        untrusted: bool,
     ) -> Result<Self, ProviderError> {
         if !id(thread) || !id(turn) {
             return Err(invalid());
@@ -172,7 +190,7 @@ impl PendingApproval {
             let small_rule = |value: &serde_json::Value| value.as_array().is_some_and(|words| words.len() <= 64
                 && words.iter().all(|word| word.as_str().is_some_and(|word| word.len() <= 16 * 1024)));
             if !(common || action)
-                || (key == "proposedExecpolicyAmendment" && !value.is_null() && !small_rule(value))
+                || (key == "proposedExecpolicyAmendment" && !value.is_null() && !(untrusted && small_rule(value)))
                 || (matches!(key.as_str(), "proposedNetworkPolicyAmendments" | "additionalPermissions") && !value.is_null())
                 || (key == "availableDecisions"
                     && !(value.is_null() || value.as_array().is_some_and(|choices| choices.len() <= 16)))
@@ -262,6 +280,7 @@ impl PendingApproval {
             command_actions: params.get("commandActions").cloned(),
             started_at_ms: scope.started_at_ms,
             action,
+            thread_untrusted: untrusted,
         })
     }
 }
@@ -406,14 +425,17 @@ mod tests {
     fn a_proposed_trust_rule_is_read_but_never_adopted() {
         let mut value = base();
         value["params"]["proposedExecpolicyAmendment"] = json!(["touch", "codex-probe.txt"]);
-        let request = PendingApproval::parse(&BoundedObservation::new(value.to_string().into_bytes()).unwrap(), "thread-1", "turn-1").unwrap();
+        // An on-request thread refuses it as before (PR #19 re-review 2).
+        assert!(PendingApproval::parse(&BoundedObservation::new(value.to_string().into_bytes()).unwrap(), "thread-1", "turn-1").is_err());
+        let request = PendingApproval::parse_in_thread(&BoundedObservation::new(value.to_string().into_bytes()).unwrap(), "thread-1", "turn-1", true).unwrap();
+        assert!(request.thread_untrusted);
         assert!(matches!(request.action, Action::Command { .. }));
         let reply = ApprovalReply::new(&request.request_id, Decision::Decline).unwrap();
         assert!(!reply.as_str().contains("Amendment") && !reply.as_str().contains("amendment"));
         for bad in [json!("touch"), json!([1]), json!(vec!["w"; 65]), json!(["x".repeat(16 * 1024 + 1)])] {
             let mut value = base();
             value["params"]["proposedExecpolicyAmendment"] = bad;
-            assert!(PendingApproval::parse(&BoundedObservation::new(value.to_string().into_bytes()).unwrap(), "thread-1", "turn-1").is_err());
+            assert!(PendingApproval::parse_in_thread(&BoundedObservation::new(value.to_string().into_bytes()).unwrap(), "thread-1", "turn-1", true).is_err());
         }
     }
 

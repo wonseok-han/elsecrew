@@ -295,7 +295,8 @@ impl PreflightExchange {
         text: &str,
     ) -> Result<crate::provider::vendor_observation::codex_turn::TurnStart, ProviderError> {
         let thread = self.matched_thread_id().ok_or_else(invalid)?;
-        crate::provider::vendor_observation::codex_turn::TurnStart::new(thread, text)
+        Ok(crate::provider::vendor_observation::codex_turn::TurnStart::new(thread, text)?
+            .in_untrusted_thread(self.approval == super::CodexApprovalPolicy::Untrusted))
     }
 
     /// Split initialized and its following request into individual JSONL frames.

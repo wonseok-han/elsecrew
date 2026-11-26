@@ -131,3 +131,49 @@ test("one-time acceptance has exact identity and a consumed-request receipt", ()
   assert.throws(()=>validateApprovalResult({identity,pending:[{approvalId,kind:"tool"}],queued:approvalId},request));
   assert.throws(()=>validateApprovalRequest({action:"acceptOnce",identity,approvalId,toolInput:"replacement"}));
 });
+
+test("PR #19 re-review B1: allowing needs the details open now, every page received and checked; closing starts over", async () => {
+  const d = await import("../src/m5/approval-display.ts");
+  const id = approvalId;
+  const paged = {approvalId:id,kind:"tool" as const,command:null,cwd:null,reason:"Write",grantRoot:null,host:null,protocol:null,
+    toolInput:"{",toolInputBytes:300_000,toolInputSha256:"a".repeat(64),toolInputPage:0,toolInputPages:5};
+  const allows = (review: import("../src/m5/approval-display.ts").ApprovalReview, inspection = paged as never) =>
+    d.reviewAllows({ approvalId: id, inspection, review, sending: false, error: false });
+  // The reviewer's reproduction: open, close while pages load, the load completes.
+  let review = d.reviewOpened(d.EMPTY_REVIEW, id);
+  const generation = d.reviewGeneration(review, id);
+  review = d.reviewProgress(review, id, generation, 2);
+  assert.equal(allows(review), false, "not every page yet");
+  review = d.reviewReset(review, id); // closed during the load
+  review = d.reviewLoaded(review, id, generation, "{...}"); // the old load lands late
+  assert.equal(review.full.has(id), false, "a load of an earlier review is dropped");
+  assert.equal(allows(review), false, "closed: cannot allow");
+  // Opened again: a fresh load is needed, and only then may it be allowed.
+  review = d.reviewOpened(review, id);
+  assert.equal(allows(review), false);
+  review = d.reviewLoaded(review, id, d.reviewGeneration(review, id), "{...}");
+  assert.equal(allows(review), true, "open now, all pages, checked");
+  // Closing after it loaded takes the permission away again.
+  review = d.reviewReset(review, id);
+  assert.equal(allows(review), false);
+  // Loaded while closed (opened, closed, then a load of the same generation): ignored.
+  let other = d.reviewOpened(d.EMPTY_REVIEW, id);
+  const g = d.reviewGeneration(other, id);
+  other = { ...other, open: new Set() };
+  assert.equal(d.reviewLoaded(other, id, g, "{...}").full.has(id), false);
+  // A failed check never allows; reopening may try again.
+  let failed = d.reviewOpened(d.EMPTY_REVIEW, id);
+  failed = d.reviewProgress(failed, id, d.reviewGeneration(failed, id), "failed");
+  assert.equal(allows(failed), false);
+  failed = d.reviewReset(failed, id);
+  failed = d.reviewOpened(failed, id);
+  assert.equal(failed.progress.has(id), false, "reopening clears a failure so the load runs again");
+  // A small request read whole: open now is enough; closed is not.
+  const whole = {approvalId:id,kind:"tool" as const,command:null,cwd:null,reason:"Bash",grantRoot:null,host:null,protocol:null,toolInput:"{}"};
+  assert.equal(allows(d.reviewOpened(d.EMPTY_REVIEW, id), whole as never), true);
+  assert.equal(allows(d.reviewReset(d.reviewOpened(d.EMPTY_REVIEW, id), id), whole as never), false);
+  // Busy or in error: never.
+  assert.equal(d.reviewAllows({ approvalId: id, inspection: whole as never, review: d.reviewOpened(d.EMPTY_REVIEW, id), sending: true, error: false }), false);
+  // Requests no longer waiting are forgotten.
+  assert.equal(d.reviewRetain(d.reviewOpened(d.EMPTY_REVIEW, id), new Set()).open.size, 0);
+});

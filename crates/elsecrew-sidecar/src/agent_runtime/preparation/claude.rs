@@ -350,9 +350,9 @@ impl OwnedClaudeRun {
         // Once the run has ended no request can be answered: let them go now,
         // with their large-input budget, whether or not the end is recorded
         // yet (PR #19 review I2).
-        if self.output.completion.is_some() || self.output.finished { self.approvals.clear(); }
+        release_unanswerable(&mut self.approvals, self.output.completion.is_some() || self.output.finished);
         let approvals = &mut self.approvals;
-        self.reservation.advance_claude_output(
+        let result = self.reservation.advance_claude_output(
             storage,
             projects,
             &mut self.process,
@@ -375,7 +375,12 @@ impl OwnedClaudeRun {
                     event => handle(process, channel, event),
                 }
             },
-        )
+        );
+        // The same poll may have seen the end. Release right away: if reading
+        // the end then fails the owner is kept, and no later poll would get
+        // here again to release them (PR #19 re-review 2).
+        release_unanswerable(&mut self.approvals, self.output.completion.is_some() || self.output.finished);
+        result
     }
 
     fn deliver_approval(&mut self, storage: &mut Storage, projects: &ProjectManager) -> Result<(), SidecarError> {
@@ -970,5 +975,42 @@ mod tool_inspection_tests {
         }
         assert!(tool_inspection("approval_2", &large, count).is_none());
         assert_eq!(joined, original, "the pages join to exactly the input");
+    }
+}
+
+/// Once a run has ended no request of it can be answered: let them go, and
+/// with them their large-input budget, whether or not the end was recorded.
+fn release_unanswerable(approvals: &mut Vec<ClaudePending>, ended: bool) {
+    if ended { approvals.clear(); }
+}
+
+#[cfg(test)]
+mod release_tests {
+    use super::*;
+    use elsecrew_core::provider::vendor_observation::claude_approval::{large_tool_inputs_held, Observation, Permissions};
+
+    /// PR #19 re-review 2: requests still waiting when the run ends (even if
+    /// reading its end fails and the owner is kept) give back their budget.
+    #[test]
+    fn requests_of_an_ended_run_give_back_their_budget() {
+        let _held = crate::provider_login_io::LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let before = large_tool_inputs_held();
+        let frame = format!("{{\"type\":\"control_request\",\"request_id\":\"r\",\"request\":{{\"subtype\":\"can_use_tool\",\"tool_name\":\"Write\",\"input\":{{\"file_path\":\"a.txt\",\"content\":\"{}\"}},\"tool_use_id\":\"t\"}}}}\n", "x".repeat(300_000));
+        let observed = elsecrew_core::provider::oversized_line::reduce_oversized_line(frame.as_bytes(), elsecrew_core::provider::oversized_line::OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        let Observation::Requested(request) = Permissions::default().observe(&observed).unwrap() else { panic!("expected a request") };
+        let mut approvals = vec![ClaudePending { id: "approval_1".into(), request, declined: false, inspected: false, pages_read: 0, accepted: false }];
+        assert!(large_tool_inputs_held() >= before + 300_000);
+        release_unanswerable(&mut approvals, false);
+        assert_eq!(approvals.len(), 1, "still running: kept");
+        release_unanswerable(&mut approvals, true);
+        assert!(approvals.is_empty());
+        assert_eq!(large_tool_inputs_held(), before, "ended: budget back");
+        // An owner dropped with requests still queued (the connection let go):
+        // dropping the queue gives the budget back too.
+        let Observation::Requested(request) = Permissions::default().observe(&observed).unwrap() else { panic!("expected a request") };
+        let approvals = vec![ClaudePending { id: "approval_2".into(), request, declined: false, inspected: false, pages_read: 0, accepted: false }];
+        assert!(large_tool_inputs_held() >= before + 300_000);
+        drop(approvals);
+        assert_eq!(large_tool_inputs_held(), before, "dropped: budget back");
     }
 }

@@ -70,6 +70,72 @@ export function canAcceptApproval(input: { approvalId: string; inspectedId: stri
   return !input.sending && !input.error && input.fullyRead && input.inspectedId === input.approvalId && input.openedIds.has(input.approvalId);
 }
 
+/**
+ * What the person has reviewed of each waiting request on this card (PR #19
+ * re-review B1). Allowing needs, at the moment of the click: the request's
+ * details open right now, and for a large tool input every page received and
+ * checked (size and SHA-256). Closing the details, a changed request or a new
+ * read starts that request's review over; a load that finishes after that is
+ * dropped (its generation no longer matches).
+ */
+export interface ApprovalReview {
+  readonly open: ReadonlySet<string>;
+  readonly full: ReadonlyMap<string, string>;
+  readonly progress: ReadonlyMap<string, number | "failed">;
+  readonly generation: ReadonlyMap<string, number>;
+}
+
+export const EMPTY_REVIEW: ApprovalReview = { open: new Set(), full: new Map(), progress: new Map(), generation: new Map() };
+
+function without<K, V>(map: ReadonlyMap<K, V>, key: K): ReadonlyMap<K, V> {
+  if (!map.has(key)) return map;
+  const next = new Map(map); next.delete(key); return next;
+}
+
+/** The current generation of a request's review: a load carries it and only
+ * lands if it still matches. */
+export function reviewGeneration(review: ApprovalReview, id: string): number { return review.generation.get(id) ?? 0; }
+
+/** The details were opened. A failed load may be tried again. */
+export function reviewOpened(review: ApprovalReview, id: string): ApprovalReview {
+  const progress = review.progress.get(id) === "failed" ? without(review.progress, id) : review.progress;
+  return review.open.has(id) && progress === review.progress ? review : { ...review, open: new Set(review.open).add(id), progress };
+}
+
+/** The details were closed, the request changed, or it was read again: its
+ * review starts over and any load still running for it is dropped. */
+export function reviewReset(review: ApprovalReview, id: string): ApprovalReview {
+  const open = new Set(review.open); open.delete(id);
+  return { open, full: without(review.full, id), progress: without(review.progress, id), generation: new Map(review.generation).set(id, reviewGeneration(review, id) + 1) };
+}
+
+/** Pages read so far (or a failed check) for the load of this generation. */
+export function reviewProgress(review: ApprovalReview, id: string, generation: number, value: number | "failed"): ApprovalReview {
+  if (generation !== reviewGeneration(review, id) || !review.open.has(id)) return review;
+  return { ...review, progress: new Map(review.progress).set(id, value) };
+}
+
+/** Every page received and checked: it counts only if this load is still the
+ * current one and the details are still open. */
+export function reviewLoaded(review: ApprovalReview, id: string, generation: number, text: string): ApprovalReview {
+  if (generation !== reviewGeneration(review, id) || !review.open.has(id)) return review;
+  return { ...review, full: new Map(review.full).set(id, text), progress: without(review.progress, id) };
+}
+
+/** Forget requests no longer waiting. */
+export function reviewRetain(review: ApprovalReview, still: ReadonlySet<string>): ApprovalReview {
+  const keep = <V>(map: ReadonlyMap<string, V>) => [...map.keys()].every(id => still.has(id)) ? map : new Map([...map].filter(([id]) => still.has(id)));
+  const open = [...review.open].every(id => still.has(id)) ? review.open : new Set([...review.open].filter(id => still.has(id)));
+  return { open, full: keep(review.full), progress: keep(review.progress), generation: keep(review.generation) };
+}
+
+/** The one check the allow button and its click both use. */
+export function reviewAllows(input: { approvalId: string; inspection: ApprovalInspection | null; review: ApprovalReview; sending: boolean; error: boolean }): boolean {
+  const paged = input.inspection?.toolInputPages !== undefined;
+  return canAcceptApproval({ approvalId: input.approvalId, inspectedId: input.inspection?.approvalId ?? null, openedIds: input.review.open,
+    sending: input.sending, error: input.error, fullyRead: !paged || input.review.full.has(input.approvalId) });
+}
+
 /** The target of a large tool input from its first page (a JSON object's
  * start): the first file path, command or path field, or null. */
 export function pagedTarget(firstPage: string): string | null {
