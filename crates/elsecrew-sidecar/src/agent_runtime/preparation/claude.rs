@@ -55,7 +55,11 @@ struct ClaudePending {
     id: String,
     request: elsecrew_core::provider::vendor_observation::claude_approval::Request,
     declined: bool,
+    /// Every page of the input has been read for the card (PR #19 review B1):
+    /// a large input can only be allowed once the person could see all of it.
     inspected: bool,
+    /// How many pages, from the first, the card has read.
+    pages_read: usize,
     accepted: bool,
 }
 
@@ -164,7 +168,7 @@ impl OwnedClaudeRun {
     pub(crate) fn polling_finished(&self) -> bool {
         self.output.finished
     }
-    pub(crate) fn approval_request(&mut self, action: &str, id: Option<&str>, identity: &Value) -> Result<Value, SidecarError> {
+    pub(crate) fn approval_request(&mut self, action: &str, id: Option<&str>, page: Option<usize>, identity: &Value) -> Result<Value, SidecarError> {
         let failure = || SidecarError::new("agentApprovalChanged", "Claude approval is no longer live");
         self.approvals.retain(|entry| self.channel.is_permission_pending(&entry.request.request_id));
         let mut inspection = None;
@@ -189,7 +193,15 @@ impl OwnedClaudeRun {
                     && self.output.initialized && !self.output.finished => {
                     entry.accepted = true; queued = Some(id);
                 },
-                "inspect" => { entry.inspected = true; inspection = Some(tool_inspection(&id, &entry.request)); },
+                "inspect" => {
+                    let page = page.unwrap_or(0);
+                    let view = tool_inspection(id, &entry.request, page).ok_or_else(failure)?;
+                    // Pages are read in order from the first; a page may be read again.
+                    if page > entry.pages_read { return Err(failure()); }
+                    if page == entry.pages_read { entry.pages_read += 1; }
+                    entry.inspected = entry.pages_read >= tool_input_pages(entry.request.inspect_input()).len();
+                    inspection = Some(view);
+                },
                 _ => return Err(failure()),
             }
         }
@@ -335,6 +347,10 @@ impl OwnedClaudeRun {
                 self.cancel.store(true, std::sync::atomic::Ordering::Release);
             }
         }
+        // Once the run has ended no request can be answered: let them go now,
+        // with their large-input budget, whether or not the end is recorded
+        // yet (PR #19 review I2).
+        if self.output.completion.is_some() || self.output.finished { self.approvals.clear(); }
         let approvals = &mut self.approvals;
         self.reservation.advance_claude_output(
             storage,
@@ -351,7 +367,7 @@ impl OwnedClaudeRun {
                         if approvals.len() >= 128 || approvals.iter().any(|entry| entry.request.request_id == request.request_id) {
                             return Err(SidecarError::new("agentApprovalChanged", "Claude approval queue is invalid"));
                         }
-                        approvals.push(ClaudePending {id:format!("approval_{}", Uuid::new_v4().simple()),request,declined:false,inspected:false,accepted:false});
+                        approvals.push(ClaudePending {id:format!("approval_{}", Uuid::new_v4().simple()),request,declined:false,inspected:false,pages_read:0,accepted:false});
                         Ok(())
                     },
                     Event::Permission(Observation::Cancelled) => { approvals.retain(|entry| channel.is_permission_pending(&entry.request.request_id)); Ok(()) },
@@ -860,30 +876,46 @@ impl ClaudeOutputState {
 }
 
 /// Largest tool input an approval card receives whole. The renderer contract
-/// takes at most 128 KiB; past this the card gets the original in part.
+/// takes at most 128 KiB; past this the card reads it in pages.
 const TOOL_INSPECTION_WHOLE_MAX_BYTES: usize = 96 * 1024;
-/// How much of each long string the partial view keeps.
-const TOOL_INSPECTION_STRING_KEEP_BYTES: usize = 2 * 1024;
+/// One page of a large tool input, cut at a UTF-8 character boundary.
+const TOOL_INSPECTION_PAGE_BYTES: usize = 64 * 1024;
 
-/// The approval card's view of one Claude tool request. A large input (a file
-/// written whole) is shown in part, with its full size and the SHA-256 of the
-/// exact input the allow reply will echo, so what the person approves is the
-/// original even when only its beginning is on screen (2026-11-26 big Write).
-fn tool_inspection(id: &str, request: &elsecrew_core::provider::vendor_observation::claude_approval::Request) -> Value {
+/// Where each page of `input` starts and ends. One page for an input the card
+/// takes whole; the pages joined are exactly `input`.
+fn tool_input_pages(input: &str) -> Vec<(usize, usize)> {
+    if input.len() <= TOOL_INSPECTION_WHOLE_MAX_BYTES {
+        return vec![(0, input.len())];
+    }
+    let mut pages = Vec::new();
+    let mut start = 0;
+    while start < input.len() {
+        let mut end = (start + TOOL_INSPECTION_PAGE_BYTES).min(input.len());
+        while !input.is_char_boundary(end) { end -= 1; }
+        pages.push((start, end));
+        start = end;
+    }
+    pages
+}
+
+/// The approval card's view of one page of a Claude tool request. A large
+/// input (a file written whole) comes in pages, each with the input's full
+/// size, its SHA-256 and the page count; the card joins every page and checks
+/// both before the person can allow it. The text is the exact input the allow
+/// reply echoes, a JSON object (2026-11-26 big Write, PR #19 review B1).
+fn tool_inspection(id: &str, request: &elsecrew_core::provider::vendor_observation::claude_approval::Request, page: usize) -> Option<Value> {
     let input = request.inspect_input();
+    let pages = tool_input_pages(input);
+    let (start, end) = *pages.get(page)?;
     let mut inspection = json!({"approvalId":id,"kind":"tool","command":null,"cwd":null,"reason":request.tool_name,
-        "grantRoot":null,"host":null,"protocol":null,"toolInput":input});
-    if input.len() > TOOL_INSPECTION_WHOLE_MAX_BYTES {
-        let mut preview = request.inspect_preview(TOOL_INSPECTION_STRING_KEEP_BYTES);
-        if preview.len() > TOOL_INSPECTION_WHOLE_MAX_BYTES {
-            // Many keys or long arrays: an empty view rather than a cut one.
-            preview = String::new();
-        }
-        inspection["toolInput"] = json!(preview);
+        "grantRoot":null,"host":null,"protocol":null,"toolInput":&input[start..end]});
+    if pages.len() > 1 {
         inspection["toolInputBytes"] = json!(input.len());
         inspection["toolInputSha256"] = json!(format!("{:x}", Sha256::digest(input.as_bytes())));
+        inspection["toolInputPage"] = json!(page);
+        inspection["toolInputPages"] = json!(pages.len());
     }
-    inspection
+    Some(inspection)
 }
 
 #[cfg(test)]
@@ -908,26 +940,35 @@ mod tool_inspection_tests {
         }
     }
 
-    /// 2026-11-26 big Write: the card gets a small input whole, and a large
-    /// one in part with the size and SHA-256 of the exact input the allow
-    /// reply echoes; the view stays under the renderer's 128 KiB bound.
+    /// PR #19 review B1: a small input comes whole on one page; a large one in
+    /// pages that join to exactly the input the allow reply echoes, each page
+    /// under the renderer's bound, with the input's size and SHA-256. Multi-byte
+    /// text is never split inside a character.
     #[test]
-    fn a_large_tool_input_is_shown_in_part_with_its_size_and_hash() {
+    fn a_large_tool_input_is_read_in_pages_that_join_to_the_exact_input() {
+        let _held = crate::provider_login_io::LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let small = request("hello");
-        let view = tool_inspection("approval_1", &small);
+        let view = tool_inspection("approval_1", &small, 0).unwrap();
         assert_eq!(view["toolInput"], json!(small.inspect_input()));
-        assert!(view.get("toolInputBytes").is_none() && view.get("toolInputSha256").is_none());
+        assert!(view.get("toolInputBytes").is_none() && view.get("toolInputPages").is_none());
+        assert!(tool_inspection("approval_1", &small, 1).is_none());
 
-        let content = "line of a large file\n".repeat(15_000);
+        let content = "한글과 English 줄\n".repeat(15_000);
         let large = request(&content);
-        let view = tool_inspection("approval_2", &large);
         let original = large.inspect_input();
-        assert_eq!(view["toolInputBytes"], json!(original.len()));
-        assert_eq!(view["toolInputSha256"], json!(format!("{:x}", Sha256::digest(original.as_bytes()))));
-        let shown = view["toolInput"].as_str().unwrap();
-        assert!(shown.len() <= TOOL_INSPECTION_WHOLE_MAX_BYTES);
-        let shown: Value = serde_json::from_str(shown).unwrap();
-        assert_eq!(shown["file_path"], "big.txt");
-        assert!(content.starts_with(shown["content"].as_str().unwrap().split('…').next().unwrap()));
+        let count = tool_input_pages(original).len();
+        assert!(count > 1);
+        let mut joined = String::new();
+        for page in 0..count {
+            let view = tool_inspection("approval_2", &large, page).unwrap();
+            assert_eq!(view["toolInputBytes"], json!(original.len()));
+            assert_eq!(view["toolInputSha256"], json!(format!("{:x}", Sha256::digest(original.as_bytes()))));
+            assert_eq!((view["toolInputPage"].as_u64(), view["toolInputPages"].as_u64()), (Some(page as u64), Some(count as u64)));
+            let text = view["toolInput"].as_str().unwrap();
+            assert!(text.len() <= TOOL_INSPECTION_PAGE_BYTES);
+            joined.push_str(text);
+        }
+        assert!(tool_inspection("approval_2", &large, count).is_none());
+        assert_eq!(joined, original, "the pages join to exactly the input");
     }
 }

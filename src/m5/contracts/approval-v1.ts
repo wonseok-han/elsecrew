@@ -1,16 +1,25 @@
 import { validateAgentRunCancelRequestV1, type AgentRunCancelRequestV1 } from "./agent-adapter-v1.ts";
 
 export const APPROVAL_CHANNEL = "m5:approval:v1";
-export type ApprovalRequest = { action: "list"; identity: AgentRunCancelRequestV1 } | { action: "decline" | "inspect" | "acceptOnce"; identity: AgentRunCancelRequestV1; approvalId: string };
+export type ApprovalRequest = { action: "list"; identity: AgentRunCancelRequestV1 } | { action: "decline" | "inspect" | "acceptOnce"; identity: AgentRunCancelRequestV1; approvalId: string }
+  /** One page of a large Claude tool input (PR #19 review B1). */
+  | { action: "inspect"; identity: AgentRunCancelRequestV1; approvalId: string; page: number };
 export type ApprovalKind = "command" | "writeStdin" | "network" | "fileChange" | "tool";
 export type ApprovalSummary = { approvalId: string; kind: ApprovalKind };
 /**
- * `toolInputBytes`/`toolInputSha256` are present only when the tool input was
- * too large to send whole: `toolInput` then shows the original in part (long
- * strings cut and marked), and the size and SHA-256 name the exact input the
- * allow reply echoes (2026-11-26 big Write).
+ * `toolInputBytes`/`toolInputSha256`/`toolInputPage`/`toolInputPages` are
+ * present only when the tool input is too large to send whole: `toolInput` is
+ * then one page of the exact input (a JSON object's text), and every page
+ * joined, checked against the size and SHA-256, is the input the allow reply
+ * echoes. The card lets the person allow only after reading all of it
+ * (2026-11-26 big Write, PR #19 review B1).
  */
-export type ApprovalInspection = ApprovalSummary & { command: string | null; cwd: string | null; reason: string | null; grantRoot: string | null; host: string | null; protocol: string | null; toolInput?: string; toolInputBytes?: number; toolInputSha256?: string };
+export type ApprovalInspection = ApprovalSummary & { command: string | null; cwd: string | null; reason: string | null; grantRoot: string | null; host: string | null; protocol: string | null; toolInput?: string;
+  toolInputBytes?: number; toolInputSha256?: string; toolInputPage?: number; toolInputPages?: number };
+/** Largest page of a large tool input (agent_runtime/preparation/claude.rs). */
+export const TOOL_INPUT_PAGE_MAX_BYTES = 64 * 1024;
+/** Most pages one tool input can have (4 MiB in 64 KiB pages, with room for character boundaries). */
+export const TOOL_INPUT_PAGES_MAX = 4096;
 /** Largest tool input the engine keeps for approval (claude_approval::LARGE_TOOL_INPUT_MAX_BYTES). */
 export const LARGE_TOOL_INPUT_MAX_BYTES = 4 * 1024 * 1024;
 export type ApprovalResult = { identity: AgentRunCancelRequestV1; pending: ApprovalSummary[]; queued: string | null; inspection?: ApprovalInspection | null };
@@ -30,6 +39,8 @@ export function validateApprovalRequest(value: unknown): ApprovalRequest {
   const identity = validateAgentRunCancelRequestV1(v.identity);
   if (v.action === "list" && Object.keys(v).sort().join() === "action,identity") return { action: "list", identity };
   if ((v.action === "decline" || v.action === "inspect" || v.action === "acceptOnce") && Object.keys(v).sort().join() === "action,approvalId,identity") return { action: v.action, identity, approvalId: id(v.approvalId) };
+  if (v.action === "inspect" && Object.keys(v).sort().join() === "action,approvalId,identity,page"
+    && typeof v.page === "number" && Number.isSafeInteger(v.page) && v.page >= 0 && v.page < TOOL_INPUT_PAGES_MAX) return { action: "inspect", identity, approvalId: id(v.approvalId), page: v.page };
   throw new Error("invalid approval action");
 }
 export function validateApprovalResult(value: unknown, request: ApprovalRequest): ApprovalResult {
@@ -57,13 +68,18 @@ export function validateApprovalResult(value: unknown, request: ApprovalRequest)
       return { identity, pending, queued, inspection: null };
     }
     const detail = object(v.inspection);
-    const partial = detail.kind === "tool" && "toolInputBytes" in detail;
-    const keys = "approvalId,command,cwd,grantRoot,host,kind,protocol,reason" + (detail.kind === "tool" ? ",toolInput" : "") + (partial ? ",toolInputBytes,toolInputSha256" : "");
+    const partial = detail.kind === "tool" && "toolInputPages" in detail;
+    const keys = "approvalId,command,cwd,grantRoot,host,kind,protocol,reason" + (detail.kind === "tool" ? ",toolInput" : "") + (partial ? ",toolInputBytes,toolInputPage,toolInputPages,toolInputSha256" : "");
     if (Object.keys(detail).sort().join() !== keys || detail.approvalId !== request.approvalId || !pending.some(item=>item.approvalId === detail.approvalId && item.kind === detail.kind)) throw new Error("approval inspection differs");
     if (detail.kind === "tool" && (typeof detail.toolInput !== "string" || new TextEncoder().encode(detail.toolInput).length > 128 * 1024)) throw new Error("invalid tool inspection input");
-    if (partial && (typeof detail.toolInputBytes !== "number" || !Number.isSafeInteger(detail.toolInputBytes)
-      || detail.toolInputBytes <= new TextEncoder().encode(detail.toolInput as string).length || detail.toolInputBytes > LARGE_TOOL_INPUT_MAX_BYTES
-      || typeof detail.toolInputSha256 !== "string" || !/^[0-9a-f]{64}$/.test(detail.toolInputSha256))) throw new Error("invalid partial tool inspection");
+    const page = "page" in request ? request.page : 0;
+    if (partial ? (typeof detail.toolInputBytes !== "number" || !Number.isSafeInteger(detail.toolInputBytes)
+      || detail.toolInputBytes <= TOOL_INPUT_PAGE_MAX_BYTES || detail.toolInputBytes > LARGE_TOOL_INPUT_MAX_BYTES
+      || new TextEncoder().encode(detail.toolInput as string).length > TOOL_INPUT_PAGE_MAX_BYTES
+      || typeof detail.toolInputSha256 !== "string" || !/^[0-9a-f]{64}$/.test(detail.toolInputSha256)
+      || typeof detail.toolInputPages !== "number" || !Number.isSafeInteger(detail.toolInputPages) || detail.toolInputPages < 2 || detail.toolInputPages > TOOL_INPUT_PAGES_MAX
+      || detail.toolInputPage !== page || detail.toolInputPage >= detail.toolInputPages)
+      : page !== 0) throw new Error("invalid paged tool inspection");
     const limits = {command:65536,cwd:16384,reason:16384,grantRoot:16384,host:1024,protocol:64};
     for (const [key, maximum] of Object.entries(limits)) {
       const text = detail[key];

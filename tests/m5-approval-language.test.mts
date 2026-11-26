@@ -76,10 +76,13 @@ test("allowing needs the full request opened on the card: summary alone is not e
       assert.ok(acceptButton(locked, dictionary)?.includes("disabled"));
     }
   }
-  assert.equal(display.canAcceptApproval({ approvalId: "a", inspectedId: "a", openedIds: new Set(["a"]), sending: false, error: false }), true);
-  assert.equal(display.canAcceptApproval({ approvalId: "a", inspectedId: "a", openedIds: new Set(), sending: false, error: false }), false);
-  assert.equal(display.canAcceptApproval({ approvalId: "b", inspectedId: "a", openedIds: new Set(["a", "b"]), sending: false, error: false }), false);
-  assert.equal(display.canAcceptApproval({ approvalId: "a", inspectedId: null, openedIds: new Set(["a"]), sending: false, error: false }), false);
+  assert.equal(display.canAcceptApproval({ approvalId: "a", inspectedId: "a", openedIds: new Set(["a"]), sending: false, error: false, fullyRead: true }), true);
+  assert.equal(display.canAcceptApproval({ approvalId: "a", inspectedId: "a", openedIds: new Set(), sending: false, error: false, fullyRead: true }), false);
+  assert.equal(display.canAcceptApproval({ approvalId: "b", inspectedId: "a", openedIds: new Set(["a", "b"]), sending: false, error: false, fullyRead: true }), false);
+  assert.equal(display.canAcceptApproval({ approvalId: "a", inspectedId: null, openedIds: new Set(["a"]), sending: false, error: false, fullyRead: true }), false);
+  // PR #19 review B1: a large input read in pages is never allowed before
+  // every page was read and checked, even with its details open.
+  assert.equal(display.canAcceptApproval({ approvalId: "a", inspectedId: "a", openedIds: new Set(["a"]), sending: false, error: false, fullyRead: false }), false);
 });
 
 test("every waiting request shows its own summary, and an error keeps the list (review #7, #8)", () => {

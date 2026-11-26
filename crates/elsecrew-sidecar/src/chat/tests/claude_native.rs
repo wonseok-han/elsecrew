@@ -66,6 +66,17 @@ fn claude_run_that_starts_hundreds_of_processes_finishes_and_frees_its_hold() {
     claude_native_cases(&[("many-processes", true)]);
 }
 
+/// 2026-11-26 big Write, PR #19 review B1/I1/I2: a 300 KB Write request
+/// waiting for the person. It is read in pages and can be allowed only after
+/// every page; its large-input budget comes back on every path: allowed and
+/// written, declined, left unanswered when the run ends, or allowed but the
+/// provider stopped reading.
+#[test]
+fn claude_large_tool_input_is_read_whole_before_allowing_and_its_budget_always_returns() {
+    let _slots = crate::provider_login_io::LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    claude_native_cases(&[("big-allow", false), ("big-decline", false), ("big-end", false), ("big-send-fail", false)]);
+}
+
 #[test]
 fn claude_durable_native_three_thousand_outputs() {
     claude_native_cases(&[("long", true)]);
@@ -213,6 +224,21 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
                 }
             }
         }
+        if case.starts_with("big-") {
+            let content = "A".repeat(300_000);
+            let expected = json!({"type":"control_response","response":{"subtype":"success","request_id":"write_big",
+                "response":{"behavior":"allow","updatedInput":{"content":content,"file_path":format!("{cwd}/big.txt")}}}}).to_string();
+            let expected_sha = format!("{:x}", sha2::Sha256::digest(expected.as_bytes()));
+            script.push_str(&format!(
+                "printf '{{\"type\":\"control_request\",\"request_id\":\"write_big\",\"request\":{{\"subtype\":\"can_use_tool\",\"tool_name\":\"Write\",\"tool_use_id\":\"tool_big\",\"input\":{{\"file_path\":\"{cwd}/big.txt\",\"content\":\"'; head -c 300000 /dev/zero | tr '\\0' A; printf '\"}}}}}}\\n'\n"));
+            match case {
+                "big-allow" => script.push_str(&format!("IFS= read -r reply || exit 3\n[ \"$(printf '%s' \"$reply\" | /usr/bin/shasum -a 256 | /usr/bin/cut -d' ' -f1)\" = '{expected_sha}' ] || exit 4\n")),
+                "big-decline" => script.push_str("IFS= read -r reply || exit 3\ncase \"$reply\" in *'\"behavior\":\"deny\"'*) ;; *) exit 4 ;; esac\n"),
+                // The provider stops reading its input: the allow reply cannot be written.
+                "big-send-fail" => script.push_str("exec 0<&-\n/bin/sleep 2\n"),
+                _ => {}
+            }
+        }
         if case == "auto-read-index-lock" {
             // A concurrent provider `git status` briefly owns the index lock while
             // the next approval is validated.
@@ -303,6 +329,45 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
                 runtime.request_cancel(&identity).unwrap();
                 canceled = true;
             }
+            if current["state"] == "running" && matches!(case, "big-allow" | "big-decline" | "big-send-fail") && !approved {
+                let binding = json!({"chatId":identity.chat_id,"taskId":identity.task_id,"projectId":identity.project_id,
+                    "worktreeId":identity.worktree_id,"workspaceIdentity":identity.workspace_identity,"runId":identity.run_id});
+                let list = runtime.approval_request(&mut f.storage, &f.projects, &json!({"action":"list","identity":binding})).unwrap();
+                if let Some(first) = list["pending"].as_array().unwrap().first() {
+                    let id = first["approvalId"].clone();
+                    assert!(elsecrew_core::provider::vendor_observation::claude_approval::large_tool_inputs_held() >= 300_000, "the waiting input is counted");
+                    if case == "big-decline" {
+                        runtime.approval_request(&mut f.storage, &f.projects, &json!({"action":"decline","identity":binding,"approvalId":id})).unwrap();
+                    } else {
+                        let first_page = runtime.approval_request(&mut f.storage, &f.projects,
+                            &json!({"action":"inspect","identity":binding,"approvalId":id})).unwrap()["inspection"].clone();
+                        let pages = first_page["toolInputPages"].as_u64().unwrap();
+                        assert!(pages > 1);
+                        // Out of order, or allowing before the last page, refuses.
+                        assert!(runtime.approval_request(&mut f.storage, &f.projects,
+                            &json!({"action":"inspect","identity":binding,"approvalId":id,"page":2})).is_err());
+                        assert!(runtime.approval_request(&mut f.storage, &f.projects,
+                            &json!({"action":"acceptOnce","identity":binding,"approvalId":id})).is_err());
+                        let mut joined = first_page["toolInput"].as_str().unwrap().to_string();
+                        for page in 1..pages {
+                            assert!(runtime.approval_request(&mut f.storage, &f.projects,
+                                &json!({"action":"acceptOnce","identity":binding,"approvalId":id})).is_err(), "page {page} not read yet");
+                            let view = runtime.approval_request(&mut f.storage, &f.projects,
+                                &json!({"action":"inspect","identity":binding,"approvalId":id,"page":page})).unwrap()["inspection"].clone();
+                            assert_eq!(view["toolInputSha256"], first_page["toolInputSha256"]);
+                            joined.push_str(view["toolInput"].as_str().unwrap());
+                        }
+                        // What the person read is exactly what is allowed: same size and SHA-256.
+                        assert_eq!(json!(joined.len()), first_page["toolInputBytes"]);
+                        assert_eq!(json!(format!("{:x}", sha2::Sha256::digest(joined.as_bytes()))), first_page["toolInputSha256"]);
+                        let input: Value = serde_json::from_str(&joined).unwrap();
+                        assert_eq!(input["content"].as_str().map(str::len), Some(300_000));
+                        runtime.approval_request(&mut f.storage, &f.projects,
+                            &json!({"action":"acceptOnce","identity":binding,"approvalId":id})).unwrap();
+                    }
+                    approved = true;
+                }
+            }
             if current["state"] == "running" && case == "allow" && !approved {
                 let binding = json!({"chatId":identity.chat_id,"taskId":identity.task_id,"projectId":identity.project_id,
                     "worktreeId":identity.worktree_id,"workspaceIdentity":identity.workspace_identity,"runId":identity.run_id});
@@ -371,7 +436,7 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             ended["state"],
             match case {
                 "cancel" => "canceled",
-                "bad-init" | "unknown-queue" | "unexplained-denial" | "auto-outside-foreign" | "auto-read-failure" => "failed",
+                "bad-init" | "unknown-queue" | "unexplained-denial" | "auto-outside-foreign" | "auto-read-failure" | "big-send-fail" => "failed",
                 _ => "succeeded",
             },
             "{case}: {ended:?}"
@@ -410,7 +475,11 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
                 .unwrap(),
             "{case}"
         );
-        assert_eq!(approved, case == "allow");
+        assert_eq!(approved, matches!(case, "allow" | "big-allow" | "big-decline" | "big-send-fail"));
+        if case.starts_with("big-") {
+            // Written, declined, unanswered at the end, or a failed write: all returned.
+            assert_eq!(elsecrew_core::provider::vendor_observation::claude_approval::large_tool_inputs_held(), 0, "{case}: budget returned");
+        }
         let public = if durable {
             assert!(ended.get("public_events").is_none());
             assert!(!events.iter().any(|event| event.event == "agent.publicEvent"));
@@ -431,7 +500,7 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
             .collect();
         assert_eq!(
             final_text,
-            if matches!(case, "success" | "long" | "many-processes" | "organization-guard" | "privacy" | "privacy-with-guard" | "default-effort" | "allow" | "auto" | "auto-outside" | "auto-missing" | "auto-missing-hook" | "auto-read" | "auto-read-mutate" | "auto-read-index-lock") {
+            if matches!(case, "success" | "long" | "many-processes" | "organization-guard" | "privacy" | "privacy-with-guard" | "default-effort" | "allow" | "auto" | "auto-outside" | "auto-missing" | "auto-missing-hook" | "auto-read" | "auto-read-mutate" | "auto-read-index-lock" | "big-allow" | "big-decline" | "big-end") {
                 vec![json!("hello")]
             } else {
                 vec![]

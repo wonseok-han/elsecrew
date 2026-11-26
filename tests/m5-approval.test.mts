@@ -64,28 +64,54 @@ test("Claude tool input is bounded and only available in explicit inspection", (
   }
   assert.throws(()=>validateApprovalResult({...response,pending:[{approvalId,kind:"tool",toolInput:inspection.toolInput}]},request));
 });
-test("a large Claude tool input arrives in part, with its full size and SHA-256 (2026-11-26 big Write)", () => {
-  const request = validateApprovalRequest({action:"inspect",identity,approvalId});
+test("a large Claude tool input arrives in pages, each naming its full size, SHA-256 and place (PR #19 review B1)", () => {
   const sha = "a".repeat(64);
-  const preview = JSON.stringify({file_path:"big.txt",content:"x".repeat(2048) + "…[298000 more bytes]"});
-  const inspection = {approvalId,kind:"tool",command:null,cwd:null,reason:"Write",grantRoot:null,host:null,protocol:null,toolInput:preview,toolInputBytes:300_100,toolInputSha256:sha};
-  const response = {identity,pending:[{approvalId,kind:"tool"}],queued:null,inspection};
-  const checked = validateApprovalResult(response,request).inspection;
-  assert.equal(checked?.toolInputBytes, 300_100);
-  assert.equal(checked?.toolInputSha256, sha);
-  // Idempotent: the same result passes again in main, preload and the screen.
-  assert.deepEqual(validateApprovalResult(validateApprovalResult(response,request),request).inspection, checked);
+  const pageOf = (page: number) => ({approvalId,kind:"tool",command:null,cwd:null,reason:"Write",grantRoot:null,host:null,protocol:null,
+    toolInput:`page ${page}`,toolInputBytes:300_100,toolInputSha256:sha,toolInputPage:page,toolInputPages:5});
+  for (const page of [0, 3]) {
+    const request = page === 0 ? validateApprovalRequest({action:"inspect",identity,approvalId}) : validateApprovalRequest({action:"inspect",identity,approvalId,page});
+    const response = {identity,pending:[{approvalId,kind:"tool"}],queued:null,inspection:pageOf(page)};
+    const checked = validateApprovalResult(response,request).inspection;
+    assert.equal(checked?.toolInputPage, page);
+    // Idempotent: the same result passes again in main, preload and the screen.
+    assert.deepEqual(validateApprovalResult(validateApprovalResult(response,request),request).inspection, checked);
+  }
+  const request = validateApprovalRequest({action:"inspect",identity,approvalId,page:2});
+  const response = {identity,pending:[{approvalId,kind:"tool"}],queued:null,inspection:pageOf(2)};
   for (const changed of [
-    {toolInputBytes:undefined}, {toolInputSha256:undefined}, {toolInputSha256:"A".repeat(64)}, {toolInputSha256:"a".repeat(63)},
-    {toolInputBytes:10}, {toolInputBytes:4 * 1024 * 1024 + 1}, {toolInputBytes:1.5}, {toolInputBytes:"300100"},
+    {toolInputPage:1}, {toolInputPage:5}, {toolInputPages:1}, {toolInputPages:4097}, {toolInputBytes:10}, {toolInputBytes:4 * 1024 * 1024 + 1},
+    {toolInputSha256:"A".repeat(64)}, {toolInputSha256:undefined}, {toolInputPages:undefined}, {toolInput:"x".repeat(64 * 1024 + 1)},
   ]) {
-    const broken = {...inspection, ...changed} as Record<string, unknown>;
+    const broken = {...pageOf(2), ...changed} as Record<string, unknown>;
     for (const [key, value] of Object.entries(changed)) if (value === undefined) delete broken[key];
     assert.throws(()=>validateApprovalResult({...response,inspection:broken},request), JSON.stringify(changed));
   }
-  // Only a tool request may carry them.
-  const command = {approvalId,kind:"command",command:"ls",cwd:"/w",reason:null,grantRoot:null,host:null,protocol:null,toolInputBytes:300_100,toolInputSha256:sha};
-  assert.throws(()=>validateApprovalResult({identity,pending:[{approvalId,kind:"command"}],queued:null,inspection:command},request));
+  // A page request must get a paged answer; pages are only for tool requests.
+  const whole = {approvalId,kind:"tool",command:null,cwd:null,reason:"Write",grantRoot:null,host:null,protocol:null,toolInput:"{}"};
+  assert.throws(()=>validateApprovalResult({...response,inspection:whole},request));
+  for (const page of [-1, 1.5, 4096, "1"]) assert.throws(()=>validateApprovalRequest({action:"inspect",identity,approvalId,page}));
+  assert.throws(()=>validateApprovalRequest({action:"acceptOnce",identity,approvalId,page:0}));
+  const command = {approvalId,kind:"command",command:"ls",cwd:"/w",reason:null,grantRoot:null,host:null,protocol:null,toolInputBytes:300_100,toolInputSha256:sha,toolInputPage:0,toolInputPages:5};
+  assert.throws(()=>validateApprovalResult({identity,pending:[{approvalId,kind:"command"}],queued:null,inspection:command},validateApprovalRequest({action:"inspect",identity,approvalId})));
+});
+test("the card's full content is the pages joined, checked against the engine's size and SHA-256 (PR #19 review B1)", async () => {
+  const { assembleToolInput, pagedTarget } = await import("../src/m5/approval-display.ts");
+  const { createHash } = await import("node:crypto");
+  const full = JSON.stringify({ file_path: "big.txt", content: "한글 줄\n".repeat(20_000) });
+  const bytes = Buffer.byteLength(full);
+  const sha = createHash("sha256").update(full).digest("hex");
+  // Pages cut at character boundaries, as the engine does.
+  const pages: string[] = [];
+  for (let start = 0; start < full.length; start += 30_000) pages.push(full.slice(start, start + 30_000));
+  const inspection = { toolInputBytes: bytes, toolInputSha256: sha, toolInputPages: pages.length };
+  assert.equal(await assembleToolInput(pages, inspection), full, "what is shown is exactly what is allowed");
+  await assert.rejects(assembleToolInput(pages.slice(0, -1), inspection), /missing/);
+  await assert.rejects(assembleToolInput([...pages.slice(0, -1), pages.at(-1)!.replace("줄", "줄")], { ...inspection, toolInputSha256: "b".repeat(64) }), /hash/);
+  const swapped = [...pages]; [swapped[0], swapped[1]] = [swapped[1], swapped[0]];
+  await assert.rejects(assembleToolInput(swapped, inspection), /hash/);
+  await assert.rejects(assembleToolInput([...pages.slice(0, -1), pages.at(-1) + "x"], inspection), /size/);
+  assert.equal(pagedTarget(pages[0]), "big.txt");
+  assert.equal(pagedTarget('{"content":"x'), null);
 });
 test("approval contract only admits exact list/decline and binds the receipt", () => {
   const request = validateApprovalRequest({action:"decline",identity,approvalId});

@@ -77,6 +77,10 @@ struct LargeLineLimits {
     wait: Duration,
 }
 
+/// Longest a queued frame may go without any byte written while the
+/// provider's input is full. Past it the connection fails (PR #19 review I1).
+const SEND_STALL_MAX: Duration = Duration::from_secs(30);
+
 const LARGE_LINE_LIMITS: LargeLineLimits = LargeLineLimits {
     hold: Duration::from_secs(30),
     stall: Duration::from_secs(10),
@@ -129,6 +133,13 @@ pub(crate) struct LoginIo {
     code_sent: bool,
     failed: bool,
     outgoing: Option<(Vec<u8>, usize)>,
+    /// The large-input budget an allow reply carries, kept until the reply is
+    /// written, fails or the connection is dropped (PR #19 review I1).
+    outgoing_hold: Option<elsecrew_core::provider::vendor_observation::claude_approval::LargeInputHold>,
+    /// When the queued frame last moved; a provider that stops reading must
+    /// not keep the run and its buffer forever.
+    outgoing_progress: Instant,
+    send_stall: Duration,
     /// Set once the connection carries an agent session (see `admit_session_lines`).
     session_lines: Option<OversizedLinePolicy>,
     /// How much of `pending` is already known to hold no newline, so a long
@@ -243,8 +254,15 @@ impl LoginIo {
         Ok(OutputChunk::Pending)
     }
 
-    pub(crate) fn queue_native(&mut self, frame: NativeFrame) -> Result<(), SidecarError> {
-        self.queue_bytes(frame.bytes())
+    pub(crate) fn queue_native(&mut self, mut frame: NativeFrame) -> Result<(), SidecarError> {
+        let hold = match &mut frame {
+            #[cfg(target_os = "macos")]
+            NativeFrame::ClaudeAllow(reply) => reply.take_hold(),
+            _ => None,
+        };
+        self.queue_bytes(frame.bytes())?;
+        self.outgoing_hold = hold;
+        Ok(())
     }
 
     /// An agent session (not a login or preflight exchange) may send lines over
@@ -303,6 +321,7 @@ impl LoginIo {
             return Err(failure());
         }
         self.outgoing = Some((bytes.to_vec(), 0));
+        self.outgoing_progress = Instant::now();
         Ok(())
     }
 
@@ -327,23 +346,34 @@ impl LoginIo {
                 Ok(count) => {
                     *written += count;
                     self.sent += count;
+                    self.outgoing_progress = Instant::now();
                 }
                 Err(error)
                     if matches!(
                         error.kind(),
                         std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
-                    ) => {}
+                    ) =>
+                {
+                    // The provider stopped reading: give up on this reply
+                    // rather than hold the run and its buffer (review I1).
+                    if self.outgoing_progress.elapsed() > self.send_stall {
+                        eprintln!("provider session reply refused: the provider stopped reading");
+                        return Err(failure());
+                    }
+                }
                 Err(_) => return Err(failure()),
             }
             let complete = *written == bytes.len();
             if complete {
                 self.outgoing = None;
+                self.outgoing_hold = None;
             }
             Ok(complete)
         })();
         if result.is_err() {
             self.failed = true;
             self.outgoing = None;
+            self.outgoing_hold = None;
         }
         result
     }
@@ -397,6 +427,9 @@ impl LoginIo {
             code_sent: false,
             failed: false,
             outgoing: None,
+            outgoing_hold: None,
+            outgoing_progress: Instant::now(),
+            send_stall: SEND_STALL_MAX,
             session_lines: None,
             scanned: 0,
             large_line: None,
@@ -1091,6 +1124,72 @@ mod tests {
         let mut io = LoginIo::attach(&mut child.0).unwrap();
         io.admit_session_lines(OversizedLinePolicy::ClaudeStreamJson).unwrap();
         assert!(io.queue_bytes(&over).is_err(), "still bounded");
+    }
+
+    /// A large-input budget as an allow reply carries it: a 200 KB Write
+    /// request allowed through the public session parser.
+    fn reply_hold() -> elsecrew_core::provider::vendor_observation::claude_approval::LargeInputHold {
+        use elsecrew_core::provider::vendor_observation::{claude_approval::Observation, claude_init::ExpectedInit, claude_session::{Event, Session}};
+        let mut session = Session::new(&ExpectedInit { cwd: "/snapshot", model: "model", permission_mode: "default", tools: &["Write"] });
+        let init = b"{\"type\":\"system\",\"subtype\":\"init\",\"uuid\":\"init\",\"session_id\":\"s\",\"cwd\":\"/snapshot\",\"model\":\"model\",\"permissionMode\":\"default\",\"tools\":[\"Write\"],\"mcp_servers\":[],\"skills\":[],\"plugins\":[]}\n";
+        session.observe(&BoundedObservation::new(init.to_vec()).unwrap()).unwrap();
+        let frame = format!("{{\"type\":\"control_request\",\"request_id\":\"w\",\"request\":{{\"subtype\":\"can_use_tool\",\"tool_name\":\"Write\",\"input\":{{\"file_path\":\"a.txt\",\"content\":\"{}\"}},\"tool_use_id\":\"t\"}}}}\n", "y".repeat(200_000));
+        let observed = reduce_oversized_line(frame.as_bytes(), OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        let Event::Permission(Observation::Requested(request)) = session.observe(&observed).unwrap() else { panic!("expected a request") };
+        let mut reply = session.allow_once(&request).unwrap();
+        drop(request);
+        reply.take_hold().expect("a large reply carries its hold")
+    }
+
+    /// PR #19 review I1: an allow reply keeps its large-input budget while it
+    /// is written; the budget returns when the write completes, when the
+    /// provider stops reading past the send deadline (the connection fails),
+    /// and when the connection is dropped.
+    #[test]
+    fn an_allow_reply_keeps_its_budget_until_written_and_a_stalled_write_fails() {
+        use elsecrew_core::provider::vendor_observation::claude_approval::large_tool_inputs_held;
+        let _slots = LARGE_LINE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let cancel = AtomicBool::new(false);
+        let base = large_tool_inputs_held();
+        let mut frame = vec![b'z'; 300_000];
+        frame.push(b'\n');
+        // Written whole: returned.
+        let mut child = fixture(Some("exec /bin/cat >/dev/null"));
+        let mut io = LoginIo::attach(&mut child.0).unwrap();
+        io.admit_session_lines(OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        io.queue_bytes(&frame).unwrap();
+        io.outgoing_hold = Some(reply_hold());
+        assert!(large_tool_inputs_held() > base);
+        while !io.flush_native(&cancel, &mut || Ok(())).unwrap() {}
+        assert_eq!(large_tool_inputs_held(), base, "written: returned");
+        // The provider stops reading: past the send deadline the connection fails.
+        let mut child = fixture(Some("exec /bin/sleep 30"));
+        let mut io = LoginIo::attach(&mut child.0).unwrap();
+        io.admit_session_lines(OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        io.send_stall = Duration::from_millis(300);
+        io.queue_bytes(&frame).unwrap();
+        io.outgoing_hold = Some(reply_hold());
+        let started = Instant::now();
+        let failed = loop {
+            assert!(started.elapsed() < Duration::from_secs(5), "a stalled write never gave up");
+            match io.flush_native(&cancel, &mut || Ok(())) {
+                Ok(true) => panic!("a provider that reads nothing took the whole reply"),
+                Ok(false) => std::thread::sleep(Duration::from_millis(5)),
+                Err(_) => break started.elapsed(),
+            }
+        };
+        assert!(failed >= Duration::from_millis(300));
+        assert!(io.failed && io.outgoing.is_none());
+        assert_eq!(large_tool_inputs_held(), base, "stalled: returned");
+        // Dropped mid-write: returned.
+        let mut child = fixture(Some("exec /bin/sleep 30"));
+        let mut io = LoginIo::attach(&mut child.0).unwrap();
+        io.admit_session_lines(OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        io.queue_bytes(&frame).unwrap();
+        io.outgoing_hold = Some(reply_hold());
+        let _ = io.flush_native(&cancel, &mut || Ok(()));
+        drop(io);
+        assert_eq!(large_tool_inputs_held(), base, "dropped: returned");
     }
 
     #[test]

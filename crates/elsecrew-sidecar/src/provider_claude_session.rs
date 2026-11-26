@@ -231,6 +231,8 @@ pub(crate) struct PermissionAllow {
 impl PermissionAllow {
     pub(crate) fn connection(&self) -> uuid::Uuid { self.connection }
     pub(crate) fn as_str(&self) -> &str { self.reply.as_str() }
+    /// The large-input budget of the echoed input; the transport keeps it until written.
+    pub(crate) fn take_hold(&mut self) -> Option<elsecrew_core::provider::vendor_observation::claude_approval::LargeInputHold> { self.reply.take_hold() }
 }
 
 impl PermissionDenial {

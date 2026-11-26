@@ -37,9 +37,12 @@ static LARGE_TOOL_INPUTS_HELD: AtomicUsize = AtomicUsize::new(0);
 /// What the agent reads when a request was too large to keep for approval.
 pub const LARGE_INPUT_GUIDANCE: &str = "Tool request not allowed: its input is too large for this application to review (over 4 MiB, or too many large requests at once). Write the file in smaller parts, for example create it with a first part and append the rest with edits, then continue.";
 
-/// Bytes of one large tool input counted against `LARGE_TOOL_INPUTS_HELD_MAX_BYTES`;
-/// returned when the request is answered, withdrawn or dropped.
-struct LargeInputHold(usize);
+/// Bytes of one large tool input counted against `LARGE_TOOL_INPUTS_HELD_MAX_BYTES`.
+/// It stays counted from the request through its allow reply until that reply
+/// is written or dropped (PR #19 review I1); returned when dropped, whatever
+/// the path: answered, declined, withdrawn, the session or run ended, or a
+/// write that failed. A new engine process starts with nothing held.
+pub struct LargeInputHold(usize);
 impl LargeInputHold {
     fn reserve(bytes: usize) -> Option<Self> {
         let mut held = LARGE_TOOL_INPUTS_HELD.load(Ordering::Acquire);
@@ -61,8 +64,8 @@ impl Drop for LargeInputHold {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn large_tool_inputs_held() -> usize {
+/// Bytes of large tool inputs (and their allow replies) held in this process.
+pub fn large_tool_inputs_held() -> usize {
     LARGE_TOOL_INPUTS_HELD.load(Ordering::Acquire)
 }
 
@@ -97,7 +100,8 @@ pub struct Request {
     token: Arc<()>,
     /// The input was too large to keep: it can only be refused.
     withheld: bool,
-    _hold: Option<LargeInputHold>,
+    /// Moved into the allow reply, so the bytes stay counted while it is sent.
+    hold: std::sync::Mutex<Option<LargeInputHold>>,
 }
 
 /// Paths are inspection data. Only the run's work history shows one, and only
@@ -121,28 +125,6 @@ impl Request {
     /// only be refused (with `LARGE_INPUT_GUIDANCE`).
     pub fn withheld(&self) -> bool {
         self.withheld
-    }
-    /// For an input too large to show whole on an approval card: the original
-    /// with each string over `keep` bytes cut to its first `keep` bytes and
-    /// marked. A view only; the allow reply always echoes the original.
-    pub fn inspect_preview(&self, keep: usize) -> String {
-        fn cut(value: &mut Value, keep: usize) {
-            match value {
-                Value::String(text) if text.len() > keep => {
-                    let mut end = keep;
-                    while !text.is_char_boundary(end) { end -= 1; }
-                    let hidden = text.len() - end;
-                    text.truncate(end);
-                    text.push_str(&format!("…[{hidden} more bytes]"));
-                }
-                Value::Array(values) => values.iter_mut().for_each(|value| cut(value, keep)),
-                Value::Object(fields) => fields.values_mut().for_each(|value| cut(value, keep)),
-                _ => {}
-            }
-        }
-        let Ok(mut value) = serde_json::from_str::<Value>(&self.tool_input) else { return String::new() };
-        cut(&mut value, keep);
-        value.to_string()
     }
 }
 fn tool_target(tool: &str, input: &Value, cwd: &str) -> Result<ToolTarget, ProviderError> {
@@ -187,9 +169,12 @@ impl Denial {
 }
 
 /// A single response to the exact inspected request, not a persistent permission.
-pub struct AllowOnce(String);
+pub struct AllowOnce(String, Option<LargeInputHold>);
 impl AllowOnce {
     pub fn as_str(&self) -> &str { &self.0 }
+    /// The budget the echoed input is counted against, for the transport to
+    /// keep until the reply is written (or dropped with the connection).
+    pub fn take_hold(&mut self) -> Option<LargeInputHold> { self.1.take() }
 }
 
 fn invalid() -> ProviderError {
@@ -326,7 +311,7 @@ impl Permissions {
             tool_input,
             token,
             withheld,
-            _hold: hold,
+            hold: std::sync::Mutex::new(hold),
         };
         Ok(if hook {
             Observation::ToolCheck(request)
@@ -377,7 +362,8 @@ impl Permissions {
         }}));
         if frame.len() > LARGE_TOOL_REPLY_MAX_BYTES { return Err(invalid()); }
         self.pending.remove(&request.request_id);
-        Ok(AllowOnce(frame))
+        let hold = request.hold.lock().ok().and_then(|mut hold| hold.take());
+        Ok(AllowOnce(frame, hold))
     }
 
     pub fn close(&mut self) {
@@ -433,17 +419,20 @@ mod tests {
             assert!(!request.withheld());
             assert_eq!(serde_json::from_str::<Value>(request.inspect_input()).unwrap()["content"], json!(content));
             assert!(large_tool_inputs_held() >= before + content.len());
-            // The card's partial view is the original cut, never a rewrite.
-            let preview: Value = serde_json::from_str(&request.inspect_preview(2048)).unwrap();
-            let shown = preview["content"].as_str().unwrap();
-            assert!(content.starts_with(&shown[..2048]) && shown.ends_with("more bytes]"));
-            assert_eq!(preview["file_path"], "big.txt");
-            let reply = permissions.allow_once(&request).unwrap();
+            let mut reply = permissions.allow_once(&request).unwrap();
             let wire: Value = serde_json::from_str(reply.as_str()).unwrap();
             let echoed = if hook { &wire["response"]["response"]["hookSpecificOutput"]["updatedInput"] } else { &wire["response"]["response"]["updatedInput"] };
             assert_eq!(echoed["content"].as_str(), Some(content.as_str()), "hook {hook}");
+            // The reply echoes exactly the text the card pages through.
+            assert!(reply.as_str().contains(request.inspect_input()));
+            // The budget moves with the reply: still counted while it is sent.
             drop(request);
-            assert_eq!(large_tool_inputs_held(), before, "answering returns the budget");
+            assert!(large_tool_inputs_held() >= before + content.len(), "counted until the reply is written");
+            let hold = reply.take_hold().expect("a large reply carries its hold");
+            drop(reply);
+            assert!(large_tool_inputs_held() >= before + content.len());
+            drop(hold);
+            assert_eq!(large_tool_inputs_held(), before, "writing (or dropping) the reply returns the budget");
         }
     }
 

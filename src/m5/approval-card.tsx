@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentRunCancelRequestV1 } from "./contracts/agent-adapter-v1.ts";
 import { validateApprovalResult, type ApprovalInspection, type ApprovalSummary } from "./contracts/approval-v1.ts";
-import { approvalFields, approvalHeadline, canAcceptApproval, withdrawnRequests } from "./approval-display.ts";
+import { approvalFields, approvalHeadline, assembleToolInput, canAcceptApproval, withdrawnRequests } from "./approval-display.ts";
 
 import { useI18n } from "../i18n.tsx";
 
@@ -46,6 +46,11 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
   /** Requests whose content could not be read after a few tries. */
   const [unreadable, setUnreadable] = useState<ReadonlySet<string>>(() => new Set());
+  /** Large tool inputs read in full, every page joined and checked against
+   * the engine's size and SHA-256 (PR #19 review B1). */
+  const [fullInputs, setFullInputs] = useState<ReadonlyMap<string, string>>(() => new Map());
+  /** Pages read so far of a large input being loaded, or a failed check. */
+  const [fullProgress, setFullProgress] = useState<ReadonlyMap<string, number | "failed">>(() => new Map());
   /** Requests the engine confirmed as answered (allowed or declined). */
   const decided = useRef(new Set<string>());
   /** Requests being answered right now (not yet confirmed). */
@@ -69,6 +74,8 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
     const still = new Set(next.map(item => item.approvalId));
     setInspections(current => [...current.keys()].every(id => still.has(id)) ? current : new Map([...current].filter(([id]) => still.has(id))));
     setOpened(current => [...current].every(id => still.has(id)) ? current : new Set([...current].filter(id => still.has(id))));
+    setFullInputs(current => [...current.keys()].every(id => still.has(id)) ? current : new Map([...current].filter(([id]) => still.has(id))));
+    setFullProgress(current => [...current.keys()].every(id => still.has(id)) ? current : new Map([...current].filter(([id]) => still.has(id))));
     if (!gone.length) return;
     withdrawnCallback.current?.(gone.map(item => ({ chatId: identity.chatId, approvalId: item.approvalId, kind: item.kind, summary: inspectionsRef.current.has(item.approvalId) ? approvalHeadline(inspectionsRef.current.get(item.approvalId)!).target : null })));
   };
@@ -78,6 +85,7 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
     epoch.current++;
     busy.current = false;
     setPending([]); setError(false); setSending(false); setQueued(false); setInspections(new Map()); setOpened(new Set()); setUnreadable(new Set());
+    setFullInputs(new Map()); setFullProgress(new Map());
     decided.current = new Set(); deciding.current = new Set(); tries.current = new Map(); pendingRef.current = [];
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
@@ -110,7 +118,8 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
 
   async function decide(approvalId: string, action: "decline" | "acceptOnce") {
     if (busy.current || !window.m5Approval) return;
-    if (action === "acceptOnce" && !canAcceptApproval({ approvalId, inspectedId: inspections.get(approvalId)?.approvalId ?? null, openedIds: opened, sending, error })) return;
+    if (action === "acceptOnce" && !canAcceptApproval({ approvalId, inspectedId: inspections.get(approvalId)?.approvalId ?? null, openedIds: opened, sending, error,
+      fullyRead: inspections.get(approvalId)?.toolInputPages === undefined || fullInputs.has(approvalId) })) return;
     busy.current = true;
     deciding.current.add(approvalId);
     const asked = pendingRef.current.find(item => item.approvalId === approvalId);
@@ -155,6 +164,37 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
     }
   }
 
+  /** Read every page of a large tool input, in order, then join and check it
+   * against the engine's size and SHA-256. Only a checked whole is shown as
+   * the full content and lets the person allow (PR #19 review B1). */
+  async function loadFull(approvalId: string) {
+    const first = inspections.get(approvalId);
+    if (!first?.toolInputPages || fullInputs.has(approvalId) || fullProgress.has(approvalId) || busy.current || !window.m5Approval) return;
+    busy.current = true;
+    const revision = ++epoch.current;
+    setSending(true);
+    const pages = [first.toolInput ?? ""];
+    setFullProgress(current => new Map(current).set(approvalId, 1));
+    try {
+      for (let page = 1; page < first.toolInputPages; page++) {
+        const request = { action: "inspect" as const, identity, approvalId, page };
+        const result = validateApprovalResult(await window.m5Approval.request(request), request);
+        if (!live.current || revision !== epoch.current) return;
+        const view = result.inspection;
+        // Withdrawn meanwhile, or a page that names another input: stop.
+        if (!view || view.toolInputSha256 !== first.toolInputSha256 || view.toolInputBytes !== first.toolInputBytes || view.toolInputPages !== first.toolInputPages) throw new Error("tool input changed");
+        pages.push(view.toolInput ?? "");
+        setFullProgress(current => new Map(current).set(approvalId, page + 1));
+      }
+      const text = await assembleToolInput(pages, first);
+      if (live.current && revision === epoch.current) setFullInputs(current => new Map(current).set(approvalId, text));
+    } catch {
+      if (live.current && revision === epoch.current) setFullProgress(current => new Map(current).set(approvalId, "failed"));
+    } finally {
+      if (live.current && revision === epoch.current) { busy.current = false; setSending(false); }
+    }
+  }
+
   // Read each waiting request in turn, a few tries each, then say it could not.
   useEffect(() => {
     if (sending || error) return;
@@ -177,19 +217,27 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
     {pending.map(request => {
       const shown = inspections.get(request.approvalId) ?? null;
       const headline = shown ? approvalHeadline(shown) : null;
-      const accept = canAcceptApproval({ approvalId: request.approvalId, inspectedId: shown?.approvalId ?? null, openedIds: opened, sending, error });
+      const paged = shown?.toolInputPages !== undefined;
+      const full = fullInputs.get(request.approvalId);
+      const progress = fullProgress.get(request.approvalId);
+      const accept = canAcceptApproval({ approvalId: request.approvalId, inspectedId: shown?.approvalId ?? null, openedIds: opened, sending, error, fullyRead: !paged || full !== undefined });
       return <div key={request.approvalId} className="m5-approval-request" data-approval-id={request.approvalId}>
         <p className="m5-approval-line"><span className="m5-approval-kind">{t(`m5.approval.kind.${request.kind}`)}</span>
           {headline ? <code className="m5-approval-target" dir="auto">{headline.target}</code>
             : <span className="m5-approval-reading">{t(unreadable.has(request.approvalId) ? "m5.approval.unreadable" : "m5.approval.reading")}</span>}</p>
         {headline?.reason && <p className="m5-approval-why" dir="auto">{t("m5.approval.why", { reason: headline.reason })}</p>}
         {shown && <details key={`full:${request.approvalId}`} className="m5-approval-details" aria-label={t("m5.approval.details")}
-          onToggle={event => { if (event.currentTarget.open) setOpened(current => current.has(request.approvalId) ? current : new Set(current).add(request.approvalId)); }}>
+          onToggle={event => { if (event.currentTarget.open) { setOpened(current => current.has(request.approvalId) ? current : new Set(current).add(request.approvalId)); if (paged) void loadFull(request.approvalId); } }}>
           <summary>{t("m5.approval.fullContent")}</summary>
           <p>{t("m5.approval.warning")}</p>
-          {shown.toolInputBytes !== undefined && <p className="m5-approval-partial">{t("m5.approval.partial", { size: formatApprovalBytes(shown.toolInputBytes), sha256: shown.toolInputSha256 ?? "" })}</p>}
-          <dl>{approvalFields(shown).map(item => <div key={item.field}><dt>{t(FIELD_KEYS[item.field])}</dt><dd><pre className="m5-approval-verbatim">{item.text}</pre></dd></div>)}</dl>
+          {paged && <p className="m5-approval-partial" role="status">{full !== undefined
+            ? t("m5.approval.fullChecked", { size: formatApprovalBytes(shown.toolInputBytes ?? 0), sha256: shown.toolInputSha256 ?? "" })
+            : progress === "failed" ? t("m5.approval.fullFailed")
+            : t("m5.approval.fullLoading", { read: String(typeof progress === "number" ? progress : 0), pages: String(shown.toolInputPages) })}</p>}
+          <dl>{approvalFields(paged ? (full !== undefined ? { ...shown, toolInput: full } : { ...shown, toolInput: undefined }) : shown)
+            .map(item => <div key={item.field}><dt>{t(FIELD_KEYS[item.field])}</dt><dd><pre className="m5-approval-verbatim">{item.text}</pre></dd></div>)}</dl>
         </details>}
+        {paged && full === undefined && <p className="m5-approval-partial">{t("m5.approval.large", { size: formatApprovalBytes(shown.toolInputBytes ?? 0) })}</p>}
         {shown && <p className="m5-approval-accept-note">{t(opened.has(request.approvalId) ? "m5.approval.acceptWarning" : "m5.approval.openFirst")}</p>}
         <div className="m5-approval-actions">
           {shown && <button type="button" disabled={!accept} onClick={() => void decide(request.approvalId, "acceptOnce")}>{t("m5.approval.acceptOnce")}</button>}
