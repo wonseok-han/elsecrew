@@ -2,6 +2,22 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 렌더러 마운트 스모크 복구와 CI 연결 (`orca/ade-smoke-fix`, 기준 feature/ade 12961d04)
+PR #5 보고에 남긴 `tests/m5-renderer-mount-smoke.mts` 실패를 고쳤다. 테스트 하네스 파일만 바꿨다(제품 코드 변경 없음).
+
+- **원인**: 11-17 '마지막 작업 자동 재개' 뒤로 프로젝트를 열면 작업 공간이 열리는데, 가짜 bridge(`tests/m5-renderer-smoke-preload.cjs`)는 작업 공간 파일 API를 `unexpected`로 두었다. 그 앞뒤로 화면이 바뀐 기대값이 여럿 쌓여 있었다(아무도 끝까지 돌리지 않음).
+- **가짜 bridge**: `readWorkspaceFile`·`beginWorkspaceFileSave`·`appendWorkspaceFileSaveChunk`·`commitWorkspaceFileSave`·`getWorkspaceDiffSummary`·`getWorkspaceDiffFile`·`closeWorkspace`를 프로젝트 방식과 같은 내용으로 구현했다(`workspace.blob.chunk` 이벤트, 작업 공간 주소 포함). 저장 완료는 `commitFileSave`로 위임해 러너의 저장 횟수 감시가 그대로 동작한다. 파일·비교 내용은 공용 함수(`smokeFileText`, `smokeDiffText`)로 묶었다.
+- **러너 기대값**(`tests/m5-renderer-smoke-runner.cjs`):
+  - 파일 검색은 '파일' 탭 범위로 좁혔다(변경 탭에도 같은 클래스 검색 칸이 있음).
+  - 역할 설정 '다시 불러옴' 알림은 설정이 열린 동안 설정 안에 나온다(1차-가 D4⑥).
+  - 편집기는 검토 시트 안이라 편집기 탭으로 시트를 다시 열고, 변경 줄은 시트를 닫고 누른다(시트가 열리면 뒤가 inert).
+  - 넓은 시트의 비교는 나란히 보기가 기본이라 200줄 페이지가 199행이다.
+  - 사라진 사본 반영 검토 패널(`.m5-chat-review`, 11-17 한 번에 반영으로 교체) 시험 단계를 뺐다.
+  - 메시지는 말풍선·이야기 카드(`.m5-story-flow …`)로, 단계 사이 안내는 단계 막대 '지금' 칸으로, 실행 세부는 '기록' 탭으로, 프로젝트 이름은 프로젝트 선택 버튼으로 읽는다.
+  - 재진입 때 안내는 '이전 첫 작업 이어가기' 대신 바로 '진행 확인'이다(자동 재개).
+- **결과**: `node --test tests/m5-renderer-mount-smoke.mts` 2/2 통과, `pnpm m5:test:editor` 68 통과, `tests/m5-project-permissions-ui.mts` 통과, `npm test` 812 통과.
+- **CI 연결 판단**: 이 스모크는 이미 하네스 g4-project-editor와 g6 누적 게이트(`m5:test:editor`)에 있지만 CI는 baseline만 돌려 깨진 채 지나갔다. CI `test (macos-latest)`에 `node node_modules/electron/install.js && pnpm m5:test:editor` 단계를 붙였다(pnpm이 electron postinstall을 막으므로 바이너리를 직접 받음). Windows는 창 없는 Electron 시험이 흔들릴 위험이 있어 붙이지 않았다. 첫 CI에서 러너의 시스템 언어(영어) 때문에 한국어 기대값과 어긋나 실패했고, 러너가 `app.commandLine.appendSwitch("lang", "ko")`로 한국어를 고정한다(`ko-KR`은 Chromium이 받지 않아 영어로 떨어짐 — 로컬에서 `en-US`로 바꿔 CI와 같은 지점 실패를 재현해 확인). 두 번째 CI에서는 러너 화면이 작아 창이 1100px 아래로 줄어 서랍 모드가 됐다. 창을 `useContentSize`·`enableLargerThanScreen`으로 만들고 크기 바꾸기를 `setContentSize`로 해 내용 크기를 고정했다.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #5 독립 검토(차단 0, 중요 5, 경미 4) 반영
 검토서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr5.md`(대상 e3d0adff). 판단은 새 순수 함수 `src/m5/task-view-model.ts`에 두고, 지적마다 리뷰 재현을 `tests/m5-pr5-review.test.mts`로 막았다.
 
