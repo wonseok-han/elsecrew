@@ -2,7 +2,7 @@ import { orchestratorMessage } from "./orchestrator-message.ts";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { AgentOutputReader, type AgentOutputSource } from "./agent-output-reader.ts";
-import { reduceOutputWindow, type OutputDisplayRow, type OutputWindow } from "./agent-output-window.ts";
+import { reduceOutputWindow, startingSentence, type OutputDisplayRow, type OutputWindow } from "./agent-output-window.ts";
 import { resolveM5Bridge } from "./bridge-boundary.ts";
 import type { AgentRunRecordV1 } from "./contracts/agent-adapter-v1.ts";
 import type { RoleDefinitionV3 } from "./contracts/run-recovery-v1.ts";
@@ -80,6 +80,8 @@ export function AgentOutputPanel({ runs, definitions, posted = [] }: {
   const [historyPage, setHistoryPage] = useState<OutputPage | null>(null);
   const [historyState, setHistoryState] = useState<"loading" | "ready" | "failed">("ready");
   const outputRef = useRef<HTMLDivElement>(null);
+  /** Runs whose own activity has been shown once: they never "start" again (a retry empties the view). */
+  const activeSeen = useRef(new Set<string>());
   const followLatest = useRef(true);
   const revealLatest = useRef(false);
   const followConversation = useRef(false);
@@ -214,13 +216,23 @@ export function AgentOutputPanel({ runs, definitions, posted = [] }: {
   }, [binding, retry]);
   const shown = useMemo(() => new Set(posted.filter(message => message.runId === binding?.runId).map(message => message.text.trim())), [posted, binding?.runId]);
   if (!binding) return null;
+  // A member just started: until its first activity arrives (often 10–20 s
+  // while the agent starts and reads its task), say what it is doing rather
+  // than "loading" (ADE 1차 완료 기준 2: never 10 s without a sentence).
+  const rows = view?.binding.runId === binding.runId ? view.rows : null;
+  if (rows?.some(row => row.channel === "activity")) activeSeen.current.add(binding.runId);
+  // Not while the output failed to load (its own message says so), nor for a
+  // run that already showed what it did (PR #13 review M2).
+  const starting = state !== "failed" && !activeSeen.current.has(binding.runId) && startingSentence(run!.state, rows);
   const historyActive = historyRequest?.binding.runId === binding.runId;
   const visibleHistory = historyActive && historyPage?.request === historyRequest ? historyPage : null;
   return <section className="m5-durable-output" data-run-id={run!.runId} aria-label={t("m5.output.title")}>
     <label className="m5-output-heading"><span>{t("m5.output.title")}</span> {orderedRuns.length > 1 && <select aria-label={t("m5.output.title")} value={run!.runId} onChange={event => select(event.target.value)}>
       {orderedRuns.map(value => <option key={value.runId} value={value.runId}>{/* Coordinator marked by ID; a name is isolated so it cannot reorder the line (review PR #8 I1). */}{isLeadRole(value.selectedProfile.roleId) ? "★ " : ""}{`\u2068${roleLabel(value.selectedProfile.roleId, definitions, t)}\u2069`} · {value.selectedProfile.runtime === "codex" ? "Codex" : "Claude Code"} · {new Date(value.createdAt).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</option>)}
     </select>}</label>
-    {state === "loading" && <p role="status">{t("m5.output.loading")}</p>}
+    {state === "loading" && !starting && <p role="status">{t("m5.output.loading")}</p>}
+    {starting && !historyActive && <p className="m5-activity-row m5-activity-start" data-action="start" role="status">
+      <span className="m5-activity-mark" aria-hidden="true" /><span className="m5-activity-label">{t("m5.output.starting")}</span></p>}
     {state === "legacy" && <p>{t("m5.output.legacy")}</p>}
     {state === "failed" && <p role="alert">{t("m5.output.failed")} <button onClick={() => setRetry(value => value + 1)}>{t("m5.output.retry")}</button></p>}
     {view?.binding.runId === binding.runId && (view.hasEarlier || historyActive) && <nav aria-label={t("m5.output.history")}>

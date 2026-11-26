@@ -195,6 +195,9 @@ export class PreviewLayoutLoop {
     this.#holdTimer = null;
     const releases = this.#releases.splice(0);
     const queued = this.#queued.splice(0);
+    // Hidden until the page reports the change laid out (`settled`), never
+    // on a timer: a change that ends with nothing to move must say so by
+    // calling `settled` itself (PR #13 review I1).
     if (queued.length > 0 && !this.#disposed && !this.#closed) this.#shifting = true;
     for (const release of releases) release();
     for (const change of queued) change();

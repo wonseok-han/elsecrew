@@ -16,10 +16,12 @@ export function DiscardedWorkCleanup({ disabled }: { disabled: boolean }) {
   const onFilesBusy = useCallback((busy: boolean) => setFilesBusy(busy), []);
   const onContentBusy = useCallback((busy: boolean) => setContentBusy(busy), []);
   const busy = filesBusy || contentBusy;
-  return <section className="m5-cleanup-settings" aria-busy={busy}>
-    <h3>{t("m5.discardedWork.title")}</h3><p className="m5-settings-intro">{t("m5.discardedWork.help")}</p>
-    <button type="button" disabled={disabled || busy} onClick={() => setLoadKey(key => key + 1)}>{t(busy ? "m5.discardedWork.busy" : "m5.discardedWork.inspect")}</button>
-    <WorkspaceCleanup disabled={disabled} loadKey={loadKey} onBusy={onFilesBusy} />
-    <ChatErasure disabled={disabled} loadKey={loadKey} onBusy={onContentBusy} />
+  return <section className="m5-setting m5-preferences-row m5-cleanup-settings" aria-busy={busy} aria-labelledby="m5-discarded-work-title">
+    <span className="m5-setting-text"><strong id="m5-discarded-work-title">{t("m5.discardedWork.title")}</strong><small>{t("m5.discardedWork.help")}</small></span>
+    <span className="m5-setting-control"><button type="button" className="m5-secondary" disabled={disabled || busy} onClick={() => setLoadKey(key => key + 1)}>{t(busy ? "m5.discardedWork.busy" : "m5.discardedWork.inspect")}</button></span>
+    <div className="m5-setting-detail">
+      <WorkspaceCleanup disabled={disabled} loadKey={loadKey} onBusy={onFilesBusy} />
+      <ChatErasure disabled={disabled} loadKey={loadKey} onBusy={onContentBusy} />
+    </div>
   </section>;
 }

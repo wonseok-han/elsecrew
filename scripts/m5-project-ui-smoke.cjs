@@ -9,6 +9,8 @@ const discardFlow = process.env.ELSECREW_SMOKE_DISCARD === '1';
 const measureMemory = process.env.ELSECREW_SMOKE_MEMORY === '1';
 const idleOnly = process.env.ELSECREW_SMOKE_IDLE_ONLY === '1';
 const nativeInput = process.env.ELSECREW_SMOKE_NATIVE_INPUT === '1';
+// Home, first run, switching, adding, deleting and the first task's yes against the real sidecar (ADE U2·U3, PR #12 review).
+const projectsFlow = process.env.ELSECREW_SMOKE_PROJECTS === '1';
 if (idleOnly && !measureMemory) throw new Error('Idle-only diagnostic requires memory mode');
 const largeFile = process.env.ELSECREW_SMOKE_LARGE_FILE === '1';
 const largeTree = process.env.ELSECREW_SMOKE_LARGE_TREE === '1';
@@ -106,7 +108,25 @@ if (largeFile) {
 }
 for (const args of [['init','-q','--template='],['add','.'],['-c','core.hooksPath=/dev/null','-c','user.name=Smoke','-c','user.email=smoke@example.invalid','commit','-qm','fixture']]) execFileSync('/usr/bin/git', args, {cwd:source, env:{...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_COUNT:'0'}});
 app.setPath('userData', path.join(root,'userdata'));
-dialog.showOpenDialog = async () => ({canceled:false,filePaths:[source]});
+// Folders the next pickers return, in order (null = the person cancels); then the default project.
+const pickQueue = [];
+dialog.showOpenDialog = async () => {
+  const next = pickQueue.length ? pickQueue.shift() : source;
+  return next === null ? {canceled:true,filePaths:[]} : {canceled:false,filePaths:[next]};
+};
+// main's own yes/no for a folder that becomes a project (PR #12 review B1): recorded, answered by the scenario.
+const messageBoxes = [];
+let messageBoxAnswer = 1;
+dialog.showMessageBox = async (_window, options) => { messageBoxes.push({message:options.message,detail:options.detail,buttons:options.buttons,cancelId:options.cancelId}); return {response:messageBoxAnswer,checkboxChecked:false}; };
+let secondSource, emptySource;
+if (projectsFlow) {
+  secondSource = path.join(root, 'shop');
+  fs.mkdirSync(secondSource);
+  fs.writeFileSync(path.join(secondSource, 'index.html'), '<h1>shop</h1>\n');
+  for (const args of [['init','-q','--template='],['add','.'],['-c','core.hooksPath=/dev/null','-c','user.name=Smoke','-c','user.email=smoke@example.invalid','commit','-qm','fixture']]) execFileSync('/usr/bin/git', args, {cwd:secondSource});
+  emptySource = path.join(root, 'empty');
+  fs.mkdirSync(emptySource);
+}
 let finished = false;
 const timer = setTimeout(() => finish(new Error('flow timeout')), nativeInput ? 180000 : largeTree ? 300000 : measureMemory ? 160000 : 90000);
 function finish(error, details) {
@@ -207,6 +227,92 @@ app.on('browser-window-created', (_event, window) => {
         await wait(`!document.querySelector('.m5-settings-dialog')`);
       }
       await run(require('./m5-smoke-complete-team.cjs'));
+      if (projectsFlow) {
+        const shots = {};
+        const shot = async name => { await new Promise(r => setTimeout(r, 400)); await run(`new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))`); shots[name] = path.join(root, name + '.png'); fs.writeFileSync(shots[name], (await window.webContents.capturePage()).toPNG()); };
+        const permissions = async () => run(`(async()=>{const list=await window.m5Projects.request({action:'list',cursor:null});const p=list.projects.find(e=>e.canonicalPath.endsWith('/project'));return p?await window.m5Projects.request({action:'getAutomationPermissions',projectId:p.projectId}):null;})()`);
+        const startButton = `Array.from(document.querySelectorAll('.m5-first-run button')).find(b=>b.textContent==='프로젝트 선택')`;
+        await shot('01-first-run');
+        // B1: an empty folder is asked about in main's own box. "Cancel" opens nothing and writes nothing.
+        pickQueue.push(emptySource); messageBoxAnswer = 1;
+        await run(`${startButton}.click()`);
+        const boxDeadline = performance.now() + 10000;
+        while (messageBoxes.length === 0 && performance.now() < boxDeadline) await new Promise(r => setTimeout(r, 50));
+        if (messageBoxes.length !== 1 || !messageBoxes[0].detail.includes(fs.realpathSync(emptySource))) throw new Error('empty folder was not confirmed in main');
+        await wait(`${startButton}&&!${startButton}.disabled`);
+        if (fs.readdirSync(emptySource).length !== 0) throw new Error('a declined empty folder was written');
+        if (await run(`Boolean(document.querySelector('[data-testid=task-layout]'))`)) throw new Error('a declined folder opened');
+        // A cancelled picker leaves the first run as it was.
+        pickQueue.push(null);
+        await run(`${startButton}.click()`);
+        await wait(`${startButton}&&!${startButton}.disabled&&Boolean(document.querySelector('[data-testid=first-run]'))`);
+        // First project, then the home it leads.
+        await run(`${startButton}.click()`);
+        await wait(`Boolean(document.querySelector('[data-testid=task-layout]'))&&!document.querySelector('.m5-new-chat-button').disabled`, 20000);
+        await clickText('프로젝트 화면 닫기');
+        await wait(`Boolean(document.querySelector('.m5-home:not([hidden]) .m5-home-hero'))&&!document.querySelector('[data-testid=task-layout]')`);
+        // Add a second project from the home.
+        pickQueue.push(secondSource);
+        await run(`document.querySelector('.m5-home .m5-project-add').click()`);
+        await wait(`Boolean(document.querySelector('[data-testid=task-layout]'))&&document.querySelector('.m5-switcher-projects li.m5-project-open')?.dataset.path?.endsWith('/shop')`, 20000);
+        // The switcher with no task open: Add works, and a cancelled picker keeps the open project.
+        await run(`document.querySelector('[data-testid=project-switcher]').open=true`);
+        await wait(`document.querySelector('.m5-switcher-projects li:not(.m5-project-open) .m5-project-row')`);
+        if (await run(`document.querySelector('.m5-switcher-footer button').disabled`)) throw new Error('switcher add off with nothing open');
+        if (await run(`document.querySelector('.m5-switcher-projects').innerText.includes(${JSON.stringify(root)})`)) throw new Error('switcher shows folder paths');
+        await shot('03-switcher');
+        pickQueue.push(null);
+        await run(`document.querySelector('.m5-switcher-footer button').click()`);
+        await new Promise(r => setTimeout(r, 700));
+        if (!await run(`Boolean(document.querySelector('[data-testid=task-layout]'))&&document.querySelector('.m5-switcher-projects li.m5-project-open')?.dataset.path?.endsWith('/shop')`)) throw new Error('a cancelled add left the open project');
+        // Switch in one step.
+        await run(`document.querySelector('[data-testid=project-switcher]').open=true`);
+        await run(`document.querySelector('.m5-switcher-projects li:not(.m5-project-open) .m5-project-row').click()`);
+        await wait(`Boolean(document.querySelector('[data-testid=task-layout]'))&&document.querySelector('.m5-switcher-projects li.m5-project-open')?.dataset.path?.endsWith('/project')`, 20000);
+        // The home, both projects; delete asks with the whole folder (PR #12 review I5), Cancel first and keeps it.
+        await clickText('프로젝트 화면 닫기');
+        await wait(`document.querySelectorAll('.m5-home:not([hidden]) li[data-path]').length===2`);
+        if (!await run(`document.querySelector('.m5-home-hero').dataset.path.endsWith('/project')`)) throw new Error('the most recently opened project does not lead');
+        await shot('04-home');
+        await run(`Array.from(document.querySelectorAll('.m5-home li')).find(li=>li.dataset.path.endsWith('/shop')).querySelector('.m5-project-context-popup .m5-danger').click()`);
+        await wait(`document.querySelector('.m5-confirm-dialog[open] [data-testid=remove-target] code')`);
+        if (await run(`document.querySelector('[data-testid=remove-target] code').textContent`) !== fs.realpathSync(secondSource)) throw new Error('delete confirmation does not show the whole folder');
+        if (await run(`document.activeElement?.textContent`) !== '취소') throw new Error('delete confirmation must focus Cancel');
+        await shot('05-delete');
+        await run(`document.activeElement.click()`);
+        await wait(`!document.querySelector('.m5-confirm-dialog[open]')`);
+        if (!fs.existsSync(path.join(secondSource, 'index.html'))) throw new Error('cancelled delete touched the folder');
+        // Continue the first project; its first task stores nothing before the separate yes (Q9, PR #12 review I1).
+        await run(`document.querySelector('.m5-home .m5-home-continue').click()`);
+        await wait(`Boolean(document.querySelector('[data-testid=task-layout]'))&&!document.querySelector('.m5-new-chat-button').disabled`, 20000);
+        await run(`document.querySelector('.m5-new-chat-button').click()`);
+        await wait(`document.querySelector('.m5-new-chat-dialog')?.matches(':modal')`);
+        await fill('.m5-new-task-goal input', 'Improve hello');
+        await wait(`document.querySelector('.m5-first-chat-confirm input')&&!document.querySelector('.m5-first-chat-confirm input').disabled`);
+        if (await run(`Boolean(document.querySelector('.m5-new-chat-dialog .m5-permission-save'))`)) throw new Error('first task window has its own permission save');
+        if ((await permissions()).recorded) throw new Error('permissions recorded before the first yes');
+        await run(`document.querySelector('.m5-first-chat-confirm input').click()`);
+        await wait(`!document.querySelector('.m5-new-chat-dialog [type=submit]').disabled`);
+        // Changing a shown permission after the yes asks again.
+        await run(`document.querySelectorAll('.m5-new-chat-dialog .m5-permission-options input')[1].click()`);
+        await wait(`!document.querySelector('.m5-first-chat-confirm input').checked&&document.querySelector('.m5-new-chat-dialog [type=submit]').disabled`);
+        if ((await permissions()).recorded) throw new Error('changing a permission stored it');
+        await run(`document.querySelector('.m5-first-chat-confirm input').click()`);
+        await wait(`!document.querySelector('.m5-new-chat-dialog [type=submit]').disabled`);
+        await shot('06-first-task');
+        await run(`document.querySelector('.m5-new-chat-dialog [type=submit]').click()`);
+        await wait(`!document.querySelector('.m5-new-chat-dialog')?.open`, 20000);
+        const stored = await permissions();
+        if (!stored.recorded || stored.permissions.files !== true || stored.permissions.commands !== false) throw new Error('first task did not store the shown permissions: ' + JSON.stringify(stored));
+        // With a task open, Add in the switcher is off and says why (PR #12 review I2).
+        await run(`document.querySelector('[data-testid=project-switcher]').open=true`);
+        await wait(`document.querySelector('.m5-switcher-footer button')`);
+        const addState = await run(`({disabled:document.querySelector('.m5-switcher-footer button').disabled,reason:document.querySelector('.m5-switch-blocked')?.textContent??null})`);
+        if (!addState.disabled || !addState.reason) throw new Error('switcher add with a task open: ' + JSON.stringify(addState));
+        await shot('07-switcher-task-open');
+        finish(null, {scenario:'projects', messageBoxes, addState, shots});
+        return;
+      }
       const snapshotStarted = performance.now();
       await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='프로젝트 선택').click()`);
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent.includes('hello.txt'))`, largeTree ? 65000 : 15000);
@@ -281,61 +387,36 @@ app.on('browser-window-created', (_event, window) => {
         })()`);
         console.log(JSON.stringify({stage:'NATIVE_LARGE_FILE',...largeFileReport}));
       }
-      await run(`(()=>{ const d=document.querySelector('.m5-provider-selection'); if(d?.open)d.querySelector('summary').click(); })()`);
-      await wait(`document.querySelector('.m5-provider-selection')?.open===false`);
-      if(await run(`document.querySelector('.m5-layout-settings')?.open!==false`)) throw new Error('layout settings not initially collapsed');
-      await wait(`document.querySelectorAll('.m5-team-preview > div').length===3`);
+      // The agents' selection lives in settings (since 2026-11-12) and the team shows as chips in the new-task window (ADE U3).
       await run(`document.querySelector('.m5-goal-examples button').click()`);
-      await wait(`document.querySelector('.m5-new-chat-form > input').value.length>0&&Array.from(document.querySelectorAll('.m5-goal-examples button')).every(b=>b.disabled)`);
+      await wait(`document.querySelector('.m5-new-task-goal input').value.length>0&&Array.from(document.querySelectorAll('.m5-goal-examples button')).every(b=>b.disabled)`);
       if (await run(`document.querySelectorAll('.m5-chat-chip').length!==0`)) throw new Error('goal example created a chat');
       await wait(`document.querySelector('.m5-new-chat-dialog')?.matches(':modal')`);
-      const exampleGoal = await run(`document.querySelector('.m5-new-chat-form > input').value`);
+      const exampleGoal = await run(`document.querySelector('.m5-new-task-goal input').value`);
       await run(`document.querySelector('.m5-new-chat-dialog header button').click()`);
       await wait(`!document.querySelector('.m5-new-chat-dialog')?.open`);
       await run(`document.querySelector('.m5-new-chat-button').click()`);
       await wait(`document.querySelector('.m5-new-chat-dialog')?.matches(':modal')`);
-      if (await run(`document.querySelector('.m5-new-chat-form > input').value!==${JSON.stringify(exampleGoal)}`)) throw new Error('closing new chat lost goal draft');
-      await fill('.m5-new-chat-form > input', '');
+      if (await run(`document.querySelector('.m5-new-task-goal input').value!==${JSON.stringify(exampleGoal)}`)) throw new Error('closing new chat lost goal draft');
+      await fill('.m5-new-task-goal input', '');
       await run(`document.querySelector('.m5-new-chat-dialog header button').click()`);
       await wait(`!document.querySelector('.m5-new-chat-dialog')?.open`);
-      await clickText('역할과 모델');
+      // Team roles from the switcher menu (the PR #8 editor; its draft rules have their own tests). Closing returns
+      // focus to a control on the page, not to the document (PR #12 review minor 1).
+      await run(`document.querySelector('[data-testid=project-switcher]').open=true`);
+      await wait(`document.querySelector('.m5-switcher-projects li.m5-project-open')`);
+      await run(`document.querySelector('.m5-switcher-projects li.m5-project-open .m5-project-context-popup button:not(.m5-project-manage):not(.m5-danger)').click();document.querySelector('[data-testid=project-switcher]').open=false`);
       await wait(`document.querySelector('.m5-settings-dialog')?.matches(':modal')`);
-      const originalModel = await run(`document.querySelector('.m5-role-card input').value`);
-      if (discardFlow && originalModel !== 'fixture-default') throw new Error('new project did not inherit app defaults');
-      const modelInput = '.m5-role-card input';
-      await fill(modelInput, 'ui-smoke-unsaved');
-      window.show(); window.focus(); window.webContents.focus();
-      window.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});
-      window.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});
-      await wait(`Boolean(document.querySelector('.m5-settings-dialog [role=alertdialog]'))`);
-      await clickText('설정 계속 편집', '.m5-settings-dialog');
-      await wait(`!document.querySelector('.m5-settings-dialog [role=alertdialog]')`);
-      if (await run(`document.querySelector('.m5-role-card input').value!=='ui-smoke-unsaved'`)) throw new Error('Escape lost settings draft');
-      await clickText('작업대로 돌아가기', '.m5-settings-dialog');
-      await clickText('설정 변경 버리고 닫기', '.m5-settings-dialog');
+      await clickText('프로젝트로 돌아가기', '.m5-settings-dialog');
       await wait(`!document.querySelector('.m5-settings-dialog')`);
-      await wait(`document.activeElement?.textContent==='역할과 모델'`);
-      await clickText('역할과 모델');
-      await wait(`document.querySelector('.m5-settings-dialog')?.matches(':modal')`);
-      if (await run(`document.querySelector('.m5-role-card input').value!==${JSON.stringify(originalModel)}`)) throw new Error('discarded role draft persisted');
-      await fill(modelInput, 'ui-smoke-saved');
-      await clickText('새 작업 설정 저장', '.m5-settings-dialog');
-      await wait(`!Array.from(document.querySelectorAll('.m5-settings-dialog [role=status]')).some(e=>e.textContent==='저장하지 않은 설정 변경이 있어요.')&&!Array.from(document.querySelectorAll('.m5-settings-dialog button')).some(b=>b.textContent==='처리 중…')`);
-      await clickText('작업대로 돌아가기', '.m5-settings-dialog');
-      await wait(`!document.querySelector('.m5-settings-dialog')`);
-      await clickText('역할과 모델');
-      await wait(`document.querySelector('.m5-settings-dialog')?.matches(':modal')`);
-      if (await run(`document.querySelector('.m5-role-card input').value!=='ui-smoke-saved'`)) throw new Error('saved role model not preserved');
-      await fill(modelInput, originalModel);
-      await clickText('새 작업 설정 저장', '.m5-settings-dialog');
-      await wait(`!Array.from(document.querySelectorAll('.m5-settings-dialog [role=status]')).some(e=>e.textContent==='저장하지 않은 설정 변경이 있어요.')&&!Array.from(document.querySelectorAll('.m5-settings-dialog button')).some(b=>b.textContent==='처리 중…')`);
-      await clickText('작업대로 돌아가기', '.m5-settings-dialog');
-      await wait(`!document.querySelector('.m5-settings-dialog')`);
+      await wait(`document.activeElement&&document.activeElement!==document.body&&document.activeElement.matches('button, summary')`);
       console.log(JSON.stringify({stage:'START_AND_SETTINGS',root}));
       await run(`document.querySelector('.m5-new-chat-button').click()`);
       await wait(`document.querySelector('.m5-new-chat-dialog')?.matches(':modal')`);
       await run(`(()=>{const e=document.querySelector('.m5-new-chat-form input:not([type=checkbox])');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,'Improve hello');e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
-      await run(`document.querySelector('.m5-new-chat-form input[type=checkbox]').click()`);
+      // The first task's separate yes (Q9) opens once its permissions are read; the permission switches are other boxes.
+      await wait(`document.querySelector('.m5-first-chat-confirm input')&&!document.querySelector('.m5-first-chat-confirm input').disabled`);
+      await run(`document.querySelector('.m5-first-chat-confirm input').click()`);
       await wait(`!document.querySelector('.m5-new-chat-form button[type=submit]').disabled`);
       await run(`document.querySelector('.m5-new-chat-form button[type=submit]').click()`);
       await wait(`document.querySelector('.m5-timeline h2')?.textContent==='Improve hello'`, largeTree ? 65000 : 15000);
@@ -440,8 +521,9 @@ app.on('browser-window-created', (_event, window) => {
         console.log(JSON.stringify({stage:'APPLIED',root}));
         if (process.env.ELSECREW_SMOKE_RELOAD === '1') {
           await new Promise(resolve => { window.webContents.once('did-finish-load', resolve); window.webContents.reload(); });
-          await wait(`document.querySelector('.m5-project-rail .m5-project-catalog-list li > button')&&!document.querySelector('.m5-project-rail .m5-project-catalog-list li > button').disabled`);
-          await run(`document.querySelector('.m5-project-catalog-list li > button').click()`);
+          // The home (ADE U2): the most recent project leads with its continue button.
+          await wait(`document.querySelector('.m5-home:not([hidden]) .m5-home-continue')&&!document.querySelector('.m5-home .m5-home-continue').disabled`);
+          await run(`document.querySelector('.m5-home .m5-home-continue').click()`);
           await wait(`Array.from(document.querySelectorAll('.m5-chat-chip')).some(b=>b.querySelector('.m5-chat-goal')?.textContent==='Improve hello')`);
           await run(`Array.from(document.querySelectorAll('.m5-chat-chip')).find(b=>b.querySelector('.m5-chat-goal')?.textContent==='Improve hello').click()`);
         }
@@ -487,7 +569,8 @@ app.on('browser-window-created', (_event, window) => {
         await sampleMemory();
         memoryPhase = 'closing';
         await clickText('프로젝트 화면 닫기');
-        await wait(`Boolean(document.querySelector('.m5-guided-start'))&&!document.querySelector('[data-testid=task-layout]')`);
+        // A saved project now leads to the home cards, not the first run (ADE U2).
+        await wait(`Boolean(document.querySelector('.m5-home:not([hidden]) .m5-home-hero'))&&!document.querySelector('[data-testid=task-layout]')`);
         console.log(JSON.stringify({stage:'MEMORY_CLOSE_WAIT',root,waitMs:60000}));
         const closedAt = performance.now();
         await new Promise(resolve => setTimeout(resolve, 60000));
