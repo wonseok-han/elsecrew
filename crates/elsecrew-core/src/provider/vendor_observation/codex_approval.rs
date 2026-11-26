@@ -164,11 +164,16 @@ impl PendingApproval {
                 "item/fileChange/requestApproval" => key == "grantRoot",
                 _ => false,
             };
+            // A proposed rule to trust this command from now on (Codex asks
+            // with one when the run's policy is `untrusted`, 2026-11-27) is
+            // only information: the app answers `accept` (this once) or
+            // `decline`, never the reply that would adopt it. It must still be
+            // a small list of words. Other grants stay unsupported.
+            let small_rule = |value: &serde_json::Value| value.as_array().is_some_and(|words| words.len() <= 64
+                && words.iter().all(|word| word.as_str().is_some_and(|word| word.len() <= 16 * 1024)));
             if !(common || action)
-                || (matches!(
-                    key.as_str(),
-                    "proposedExecpolicyAmendment" | "proposedNetworkPolicyAmendments" | "additionalPermissions"
-                ) && !value.is_null())
+                || (key == "proposedExecpolicyAmendment" && !value.is_null() && !small_rule(value))
+                || (matches!(key.as_str(), "proposedNetworkPolicyAmendments" | "additionalPermissions") && !value.is_null())
                 || (key == "availableDecisions"
                     && !(value.is_null() || value.as_array().is_some_and(|choices| choices.len() <= 16)))
             {
@@ -386,13 +391,32 @@ mod tests {
                 "extra-permission" => {
                     value["params"]["additionalPermissions"] = json!({"network":true})
                 }
-                "policy" => value["params"]["proposedExecpolicyAmendment"] = json!(["sh"]),
+                "policy" => value["params"]["proposedExecpolicyAmendment"] = json!({"rule":"sh"}),
                 _ => {}
             }
             let error = parse(value).err().unwrap();
             assert!(!error.to_string().contains("PRIVATE"));
         }
     }
+    /// 2026-11-27: with the run's policy `untrusted`, Codex proposes a rule
+    /// to trust the command from now on. The request is still read (and
+    /// shown to the person); the proposal is never adopted (the app answers
+    /// accept or decline only). A malformed or oversized proposal still fails.
+    #[test]
+    fn a_proposed_trust_rule_is_read_but_never_adopted() {
+        let mut value = base();
+        value["params"]["proposedExecpolicyAmendment"] = json!(["touch", "codex-probe.txt"]);
+        let request = PendingApproval::parse(&BoundedObservation::new(value.to_string().into_bytes()).unwrap(), "thread-1", "turn-1").unwrap();
+        assert!(matches!(request.action, Action::Command { .. }));
+        let reply = ApprovalReply::new(&request.request_id, Decision::Decline).unwrap();
+        assert!(!reply.as_str().contains("Amendment") && !reply.as_str().contains("amendment"));
+        for bad in [json!("touch"), json!([1]), json!(vec!["w"; 65]), json!(["x".repeat(16 * 1024 + 1)])] {
+            let mut value = base();
+            value["params"]["proposedExecpolicyAmendment"] = bad;
+            assert!(PendingApproval::parse(&BoundedObservation::new(value.to_string().into_bytes()).unwrap(), "thread-1", "turn-1").is_err());
+        }
+    }
+
     #[test]
     fn duplicate_scope_or_action_fields_are_rejected() {
         for key in ["threadId", "command", "kind"] {

@@ -69,12 +69,17 @@ pub struct ExpectedProfile<'a> {
     pub approval: CodexApprovalPolicy,
 }
 
-/// Codex's `approval_policy` for one run. With the project's command
+/// Codex's approval policy for one run's thread. With the project's command
 /// permission on, Codex runs commands inside its sandbox and asks only to go
 /// past it (`on-request`, the app approving within the workspace on its own).
 /// With it off, Codex asks before every command it does not know to be a safe
 /// read (`untrusted`), as Claude asks before every Bash command; the person
 /// answers each (2026-11-27 user decision).
+///
+/// Codex 0.171 refuses `approval_policy = "untrusted"` as a process setting
+/// ("no longer supported") but takes it on `thread/start` and reports it back.
+/// So the process keeps `on-request` and only the thread carries the policy;
+/// the thread's reported policy is what is checked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodexApprovalPolicy {
     OnRequest,
@@ -386,7 +391,7 @@ fn match_config(
     if config.model != profile.model
         || config.model_reasoning_effort != profile.reasoning_effort
         || config.model_provider != "openai"
-        || config.approval_policy != profile.approval.as_str()
+        || config.approval_policy != "on-request"
         || config.sandbox_mode != permission.sandbox_mode()
     {
         return Err(invalid());
@@ -532,11 +537,12 @@ mod tests {
         assert!(match_read_only_thread(&input(&untrusted), &asks, cwd).is_ok());
         assert!(match_read_only_thread(&input(&thread()), &asks, cwd).is_err(), "on-request reported for an untrusted run");
         assert!(match_read_only_thread(&input(&untrusted), &profile(), cwd).is_err(), "untrusted reported for an on-request run");
-        let mut config = config();
-        config["config"]["approval_policy"] = json!("untrusted");
-        assert!(match_read_only_config(&input(&config), &asks).is_ok());
-        assert!(match_read_only_config(&input(&config), &profile()).is_err());
-        assert!(match_read_only_config(&input(&self::tests::config()), &asks).is_err());
+        // The process setting stays on-request for both (Codex 0.171 refuses
+        // `untrusted` there); only the thread carries the policy.
+        assert!(match_read_only_config(&input(&config()), &asks).is_ok());
+        let mut untrusted_process = config();
+        untrusted_process["config"]["approval_policy"] = json!("untrusted");
+        assert!(match_read_only_config(&input(&untrusted_process), &asks).is_err());
     }
 
     #[test]

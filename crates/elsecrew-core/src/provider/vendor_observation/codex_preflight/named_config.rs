@@ -153,7 +153,7 @@ fn check_configuration_layers(
     approval: &str,
 ) -> Result<(), &'static str> {
     use serde_json::json;
-    if !matches!(approval, "never" | "on-request" | "untrusted") {
+    if !matches!(approval, "never" | "on-request") {
         return Err("approval expectation");
     }
     let flags = json!({
@@ -277,7 +277,8 @@ pub(super) fn match_configuration(
             }
         }
     }
-    check_configuration_layers(&result, home, expected, &policy, expected.approval.as_str())?;
+    // The process setting stays on-request; the thread carries the run's policy.
+    check_configuration_layers(&result, home, expected, &policy, "on-request")?;
     if !matches_policy(
         &result["config"]["permissions"]["elsecrew-snapshot"],
         &policy,

@@ -187,10 +187,12 @@ mod named_observation_tests {
     #[test]
     fn codex_launch_and_observation_follow_the_approval_policy() {
         use elsecrew_core::provider::vendor_observation::codex_preflight::{CodexApprovalPolicy, ExpectedProfile};
-        for (approval, flag) in [(CodexApprovalPolicy::OnRequest, "approval_policy=\"on-request\""), (CodexApprovalPolicy::Untrusted, "approval_policy=\"untrusted\"")] {
+        // Codex 0.171 refuses `approval_policy = "untrusted"` as a process
+        // setting, so the flags stay on-request; the thread carries the policy.
+        for approval in [CodexApprovalPolicy::OnRequest, CodexApprovalPolicy::Untrusted] {
             let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium", approval };
             let args = discovery_arguments(std::path::Path::new("/managed/profile"), &expected, ExpectedPermission::WorkspaceWrite).unwrap();
-            assert!(args.iter().any(|arg| arg == flag), "{flag}");
+            assert!(args.iter().any(|arg| arg == "approval_policy=\"on-request\""));
             assert_eq!(args.iter().filter(|arg| arg.to_string_lossy().starts_with("approval_policy=")).count(), 1);
         }
         let asks = ExpectedProfile { model: "test-model", reasoning_effort: "medium", approval: CodexApprovalPolicy::Untrusted };
@@ -492,7 +494,6 @@ pub(crate) fn discovery_arguments(
     let model = format!("model=\"{}\"", expected.model);
     let effort = format!("model_reasoning_effort=\"{}\"", expected.reasoning_effort);
     let sandbox = format!("sandbox_mode=\"{}\"", permission.sandbox_mode());
-    let approval = format!("approval_policy=\"{}\"", expected.approval.as_str());
     let mut args: Vec<std::ffi::OsString> = [
         "app-server",
         "--listen",
@@ -504,7 +505,8 @@ pub(crate) fn discovery_arguments(
         "-c",
         "model_provider=\"openai\"",
         "-c",
-        &approval,
+        // Codex 0.171 refuses `untrusted` here; the thread carries the run's policy.
+        "approval_policy=\"on-request\"",
         "-c",
         &sandbox,
         "-c",
