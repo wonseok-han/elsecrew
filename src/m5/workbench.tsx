@@ -30,7 +30,9 @@ import { resolveM5Bridge, type SupportedM5Bridge } from "./bridge-boundary.ts";
 import { ChatUiController } from "./chat-state.ts";
 import { TaskLayout } from "./task-layout.tsx";
 import { approvalCovered, changesLine, MENU_SELECTOR, resultBoxMode, revealResults, teamWorking } from "./task-view-model.ts";
-import { ChangesStandingLine, ChangesStatusLine, PreviewPlaceholder, ResultBox } from "./result-box.tsx";
+import { ChangesStandingLine, ChangesStatusLine, ResultBox } from "./result-box.tsx";
+import { PreviewTab, type PreviewEntryRequest } from "./preview-tab.tsx";
+import { isPreviewablePage } from "./preview-tab-model.ts";
 import { HistoryTab } from "./history-tab.tsx";
 import { TaskList, type TaskListItem } from "./task-list.tsx";
 import { ReviewSheet } from "./review-sheet.tsx";
@@ -712,6 +714,17 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     }, 80);
   };
   revealStoryRef.current = revealStory;
+  // A page named in the files tab, and a key that changes when a run of the
+  // task ends (the preview then offers "새 결과 · 다시 불러오기").
+  const [previewEntry, setPreviewEntry] = useState<PreviewEntryRequest | null>(null);
+  /** "미리보기로 열기" (files tab, or the editor sheet over it): the sheet closes, the preview tab shows that page. */
+  const openInPreview = (path: string) => {
+    setPreviewEntry(value => ({ path, nonce: (value?.nonce ?? 0) + 1 }));
+    setSheetOpen(false); setAllChanges(null);
+    setRightTab("preview");
+    showResults();
+  };
+  const previewResultKey = `${chat.activeChat?.chatId ?? ""}:${chat.agentRuns.filter(run => !["preparing", "running", "cancelling"].includes(run.state)).length}`;
   const previewCovered = previewObscured({ sheetOpen, drawerUsed: bandUsesDrawer(layoutBandNow), drawerOpen, dialogOpen: newChatOpen || Boolean(removal) || preferencesOpen || settingsOpen, popoverOpen: false, rightTab });
 
   // A task opens on the results tab its state is about (PLAN 1.5); once per task.
@@ -969,7 +982,9 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         </span>}
           extra={<>{chat.activeChat && activePhase && !chat.switching && !phaseIsWorking(activePhase) && view.kind === "copy" && <ApplyLatest revision={`${diffRevision}`} projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} changeCount={snapshot.diffSummary?.entries.length ?? 0} onApplied={() => { dispositions.forget(chat.activeChat!.chatId); setStandingNonce(value => value + 1); }} disabled={!admissionReady || chat.switching || chatController.isActionBlocked() || chat.activeChat.state === "running" || chat.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state))} />}</>} />}
         tabs={[
-          { id: "preview", label: t("m5.layout.tab.preview"), content: <PreviewPlaceholder onChanges={() => setRightTab("changes")} /> },
+          { id: "preview", label: t("m5.layout.tab.preview"), content: <PreviewTab projectId={chat.activeChat?.projectId ?? null} chatId={chat.switching ? null : chat.activeChat?.chatId ?? null}
+            active={rightTab === "preview" && !(bandUsesDrawer(layoutBandNow) ? !drawerOpen : rightCollapsed)} covered={previewCovered} resultKey={previewResultKey}
+            entryRequest={previewEntry} onChanges={() => setRightTab("changes")} /> },
           { id: "changes", label: t("m5.layout.tab.changes"), count: snapshot.rescanRequired ? undefined : snapshot.diffSummary?.entries.length, content: <>
         <aside className="m5-panel m5-changes" aria-label={t("m5.editor.changes")}>
           {snapshot.project ? (
@@ -993,6 +1008,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           {snapshot.project ? (
             <>
               <label className="m5-hidden-files"><input type="checkbox" checked={showHiddenFiles} onChange={event => setShowHiddenFiles(event.target.checked)} />{t("m5.files.showHidden")}</label>
+              {chat.activeChat && snapshot.workspace && isPreviewablePage(snapshot.activePath) && <button type="button" className="m5-secondary m5-preview-open-file" data-testid="preview-open-file"
+                onClick={() => openInPreview(snapshot.activePath!)}>{t("m5.preview.openFile")}</button>}
               <FileSearch showHidden={showHiddenFiles} key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}`} disabled={!admissionReady || snapshot.actionBlocked} search={(query, signal) => controller.searchFiles(query, signal)} open={path => { void controller.openFile(path); }} />
               {snapshot.treeParent && <nav className="m5-breadcrumbs" aria-label={t("m5.navigation.folder")}>
                 <button className="m5-root" type="button" title={snapshot.project.root} disabled={!admissionReady || snapshot.actionBlocked || snapshot.treeLoading} onClick={() => void controller.loadTree("")}>{snapshot.project.name}</button>
@@ -1037,6 +1054,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           <div hidden={!activeTab || snapshot.diffVisible || Boolean(allChanges)} className="m5-editor-head">
             {snapshot.diffVisible && <button type="button" className="m5-secondary" onClick={() => controller.selectPanel("editor")}>{t("m5.editor.title")}</button>}
             <span title={snapshot.diffVisible ? snapshot.diffFile?.path : activeTab?.path}>{(snapshot.diffVisible ? snapshot.diffFile?.path : activeTab?.path) ?? t("m5.editor.select")}</span>
+            {!snapshot.diffVisible && chat.activeChat && snapshot.workspace && isPreviewablePage(activeTab?.path) && <button type="button" className="m5-secondary" data-testid="sheet-preview-open-file" onClick={() => openInPreview(activeTab!.path)}>{t("m5.preview.openFile")}</button>}
             {!snapshot.diffVisible && activeTab && snapshot.diffSummary?.entries.some(entry => entry.path === activeTab.path) && <button type="button" className="m5-secondary" disabled={!admissionReady || snapshot.actionBlocked} onClick={() => void controller.openDiff(activeTab.path)}>{t("m5.diff.viewSaved")}</button>}
             {!snapshot.diffVisible && activeTab?.mode === "text" && (activeTab.saveState === "dirty" || activeTab.saveState === "conflicted") && <button type="button" className="m5-secondary" disabled={!admissionReady || snapshot.actionBlocked || reloadingDraft} onClick={() => setReloadDraft(activeTab)}>{t("m5.editor.reload")}</button>}
             {!snapshot.diffVisible && activeTab?.mode === "text" && (

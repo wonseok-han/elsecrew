@@ -95,14 +95,14 @@ async function rendererReadyForUpdate(): Promise<boolean> {
     catch { finish(false); }
   });
 }
-/** Result preview (ADE 1차-나 F12): off unless the app starts with
- * `ELSECREW_PREVIEW=1`, until its independent review closes (plan 2.5). */
+/** Result preview (ADE 1차-나 F12): on by default; `ELSECREW_PREVIEW=0`
+ * turns it off (electron/preview-flag.ts). */
 const PREVIEW_FLAGS = previewFlags(app.isPackaged);
 const PREVIEW_ENABLED = PREVIEW_FLAGS.enabled;
 // T3 (plan 2.4): `<link rel=dns-prefetch>` resolves host names outside the
 // proxy, webRequest and CSP (seen in the isolation probe's net log). Blink's
-// DNS prefetching is off for every page of the app while the preview exists;
-// the app's own page is local and never needs it.
+// DNS prefetching is off for every page of the app while the preview is on
+// (the default); the app's own page is local and never needs it.
 // A `--blink-settings` given at launch (development, diagnosis) is kept: the
 // switch holds one value, so this setting is added to it, not put in its place.
 if (PREVIEW_ENABLED) {

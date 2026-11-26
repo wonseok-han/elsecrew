@@ -161,6 +161,11 @@ export class PreviewManagerV1 {
   get enabled(): boolean { return this.#options.enabled; }
   /** The live view's page, for the isolation probe only (never IPC). */
   get currentWebContents(): WebContents | undefined { return this.#current?.view?.webContents; }
+  /** Where the live view is and whether it is shown, for the UI smoke only (never IPC). */
+  get currentLayout(): { state: PreviewStateV1; bounds: { x: number; y: number; width: number; height: number } } | undefined {
+    const view = this.#current?.view;
+    return view && this.#current ? { state: this.#current.state, bounds: view.getBounds() } : undefined;
+  }
 
   async request(request: PreviewIpcRequestV1): Promise<PreviewIpcResultV1> {
     if (request.action === "status") return { action: "status", enabled: this.#options.enabled && !this.#quitting && !this.#suspended };
@@ -406,8 +411,12 @@ export class PreviewManagerV1 {
     // A page never keeps itself open (beforeunload).
     contents.on("will-prevent-unload", (event) => event.preventDefault());
     contents.on("render-process-gone", () => this.#close(instance, "crashed"));
-    contents.on("unresponsive", () => this.#emit({ previewId: instance.previewId, kind: "unresponsive" }));
-    contents.on("responsive", () => this.#emit({ previewId: instance.previewId, kind: "responsive" }));
+    // A page that stops answering is closed at once (plan 2.3): hiding it
+    // would only stop Chromium watching it, and it would come back hung.
+    contents.on("unresponsive", () => {
+      this.#emit({ previewId: instance.previewId, kind: "unresponsive" });
+      this.#close(instance, "crashed");
+    });
     contents.on("did-finish-load", () => {
       if (instance.state === "closed") return;
       instance.state = "hidden";

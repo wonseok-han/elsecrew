@@ -29,7 +29,7 @@ import { createServer, connect } from "node:net";
 import { createSocket } from "node:dgram";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, copyFileSync, readdirSync } from "node:fs";
-import { tmpdir, homedir } from "node:os";
+import { tmpdir, homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { builtinModules } from "node:module";
@@ -49,6 +49,8 @@ for (const required of [".vite/build/main.cjs", ".vite/build/preload.cjs", ".vit
 mkdirSync(outDirectory, { recursive: true });
 const head = execFileSync("/usr/bin/git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim();
 const dirty = execFileSync("/usr/bin/git", ["status", "--porcelain", "--untracked-files=no"], { cwd: repoRoot, encoding: "utf8" }).trim() !== "";
+// A routable (not loopback, not link-local) IPv6 address on this machine.
+const routableIpv6 = Object.values(networkInterfaces()).flat().some(entry => entry && entry.family === "IPv6" && !entry.internal && !/^fe80:/i.test(entry.address));
 const results = [];
 for (const mode of modes) results.push(await runMode(mode));
 const status = results.every(result => result.status === "PASS") ? "PASS" : "FAIL";
@@ -88,6 +90,34 @@ async function runMode(mode) {
   udp6.on("message", () => { collectors.udp6.count++; });
   await new Promise(done => udp4.bind(0, "127.0.0.1", done));
   await new Promise(done => udp6.bind(0, "::1", done));
+  // WebRTC, one collector per transport for the page and another for the
+  // unrestricted control page (review I5: each transport observed alone).
+  const TRANSPORTS = [
+    { name: "stunUdp4", kind: "udp4", url: port => `stun:127.0.0.1:${port}` },
+    { name: "stunUdp6", kind: "udp6", url: port => `stun:[::1]:${port}` },
+    { name: "turnUdp4", kind: "udp4", url: port => `turn:127.0.0.1:${port}?transport=udp`, relay: true },
+    { name: "turnUdp6", kind: "udp6", url: port => `turn:[::1]:${port}?transport=udp`, relay: true },
+    { name: "turnTcp4", kind: "tcp4", url: port => `turn:127.0.0.1:${port}?transport=tcp`, relay: true },
+    { name: "turnsTcp4", kind: "tcp4", url: port => `turns:127.0.0.1:${port}?transport=tcp`, relay: true },
+  ];
+  const openCollector = async (kind) => {
+    const record = { count: 0 };
+    if (kind.startsWith("tcp")) {
+      const server = createServer(socket => { record.count++; socket.on("error", () => undefined); socket.destroy(); });
+      await new Promise(done => server.listen(0, kind === "tcp6" ? "::1" : "127.0.0.1", done));
+      return { record, port: server.address().port, close: () => server.close() };
+    }
+    const socket = createSocket(kind);
+    socket.on("message", () => { record.count++; });
+    await new Promise(done => socket.bind(0, kind === "udp6" ? "::1" : "127.0.0.1", done));
+    return { record, port: socket.address().port, close: () => socket.close() };
+  };
+  const webrtc = {};
+  for (const transport of TRANSPORTS) webrtc[transport.name] = { page: await openCollector(transport.kind), control: await openCollector(transport.kind), transport };
+  const server = (transport, port) => ({ urls: transport.url(port), ...(transport.relay ? { username: "probe", credential: "probe" } : {}) });
+  const pageServers = Object.fromEntries(TRANSPORTS.map(transport => [transport.name, server(transport, webrtc[transport.name].page.port)]));
+  pageServers.stunOutside = { urls: `stun:${marker}-stun.example.com:3478` };
+  const controlServers = Object.fromEntries(TRANSPORTS.map(transport => [transport.name, server(transport, webrtc[transport.name].control.port)]));
   const discardClosed = () => new Promise(done => {
     const socket = connect(9, "127.0.0.1");
     socket.once("connect", () => { socket.destroy(); done(false); });
@@ -106,6 +136,8 @@ async function runMode(mode) {
     PROBE_UDP6_PORT: String(udp6.address().port),
     PROBE_MARKER: marker,
     PROBE_CONTROL_HOST: controlHost,
+    PROBE_WEBRTC: JSON.stringify(pageServers),
+    PROBE_WEBRTC_CONTROL: JSON.stringify(controlServers),
   };
   if (mode === "snapshot") env.ELSECREW_GIT_WORKTREES = "0";
   else delete env.ELSECREW_GIT_WORKTREES;
@@ -118,7 +150,7 @@ async function runMode(mode) {
   child.stdout.on("data", chunk => { output += chunk; process.stdout.write(chunk); });
   child.stderr.on("data", chunk => { output += chunk; });
   const exitCode = await new Promise(done => {
-    const timer = setTimeout(() => { child.kill("SIGTERM"); done("timeout"); }, 300_000);
+    const timer = setTimeout(() => { child.kill("SIGTERM"); done("timeout"); }, 600_000);
     child.once("exit", code => { clearTimeout(timer); done(code); });
   });
   await new Promise(done => setTimeout(done, 500));
@@ -134,9 +166,12 @@ async function runMode(mode) {
   const controlCounted = ["tcp4", "tcp6", "udp4", "udp6"].every(name => collectors[name].count - fromPage[name].count === 1);
   const discardClosedAfter = await discardClosed();
   tcp4.close(); tcp6.close(); udp4.close(); udp6.close();
+  const webrtcCounts = Object.fromEntries(Object.entries(webrtc).map(([name, pair]) => [name, { page: pair.page.record.count, control: pair.control.record.count }]));
+  for (const pair of Object.values(webrtc)) { pair.page.close(); pair.control.close(); }
 
   const app = JSON.parse(readFileSync(join(root, "app-result.json"), "utf8"));
-  const net = analyzeNetLog(join(root, "netlog.json"), marker, controlHost);
+  const controlPorts = new Set(Object.values(webrtc).map(pair => String(pair.control.port)));
+  const net = analyzeNetLog(join(root, "netlog.json"), marker, controlHost, controlPorts);
   const defaultTaskFolder = join(homedir(), "elsecrew", "workspaces");
   const leakedToHome = existsSync(defaultTaskFolder) && readdirSync(defaultTaskFolder).some(name => name === "project");
 
@@ -144,11 +179,24 @@ async function runMode(mode) {
   const has = (bag, name) => Boolean(bag?.[name]) && typeof bag[name].ok === "boolean";
   const refused = (bag, name) => has(bag, name) && bag[name].ok === false;
   const NETWORK = ["fetchLoopback", "fetchLoopback6", "fetchNoCors", "fetchExternal", "xhr", "image", "imageExternal", "websocket", "websocket6", "eventSource", "script", "stylesheet", "font", "dynamicImport"];
-  const ATTEMPTED = ["beacon", "cssImport", "audio", "hints", "iframeExternal", "worker", "formPost", "webrtc"];
+  const ATTEMPTED = ["beacon", "cssImport", "audio", "hints", "iframeExternal", "worker", "formPost", "webrtcTransports"];
   const layers = [["CSP + webRequest + proxy", leak], ["webRequest + proxy (CSP bypassed)", app.layerWebRequest], ["proxy alone (CSP bypassed, no webRequest)", app.layerProxy]];
   const permissions = app.permissions ?? {};
-  // A refusal that only says "no user gesture" or "not focused" proves nothing.
-  const boundaryRefusal = (name) => refused(permissions, name) && !/gesture|activation|not focused|focus/i.test(permissions[name].error);
+  // An explicit refusal (review I5): the call had a user activation and focus
+  // right before it, and either main's permission handler refused it (its
+  // count rose during the call) or the response's Permissions-Policy did.
+  const called = (name) => permissions[name]?.before?.active === true && permissions[name]?.before?.focused === true;
+  const boundaryRefusal = (name) => called(name) && refused(permissions, name)
+    && (permissions[name].deniedDelta >= 1 || permissions[name].before.policyAllows === false || /permissions policy/i.test(permissions[name].error));
+  const deniedAnswer = (name) => called(name) && permissions[name].ok === true && permissions[name].value === "denied"
+    && (permissions[name].deniedDelta >= 1 || permissions[name].before.policyAllows === false);
+  // One transport: no candidate, and the agent either finished gathering or
+  // the server reported an error. Silence until the deadline is "unobserved".
+  const transportBlocked = (result) => Boolean(result) && result.candidates.length === 0 && (result.gathering === "complete" || result.errors.length > 0);
+  const transportNames = [...TRANSPORTS.map(transport => transport.name), "stunOutside"];
+  const unobserved = layers.flatMap(([label, bag]) => transportNames
+    .filter(name => { const result = bag?.webrtcTransports?.value?.[name]; return result && result.gathering === "timeout" && result.errors.length === 0; })
+    .map(name => `${label}: ${name}`));
   const PERMISSIONS = ["camera", "microphone", "displayMedia", "geolocation", "clipboardRead", "hid", "usb", "serial", "midi", "fullscreen"];
   const placeOk = (app.chats?.kinds ?? []).length === 2 && app.chats.kinds.every(kind => mode === "git"
     ? kind.manifest === "gitWorktree" && kind.place === "insideTaskFolder"
@@ -166,10 +214,21 @@ async function runMode(mode) {
       `T1 every network attempt has a result and failed — ${label}`,
       NETWORK.every(name => refused(bag, name)) && ATTEMPTED.every(name => has(bag, name)) && /^error/.test(bag?.worker?.value ?? ""),
     ])),
-    ...Object.fromEntries(layers.map(([label, bag]) => [
-      `T2 WebRTC (STUN v4/v6, TURN udp/tcp/tls) gathered no candidate — ${label}`,
-      bag?.webrtc?.ok === true && Array.isArray(bag.webrtc.value) && bag.webrtc.value.length === 0,
+    // T2, per transport (review I5).
+    // IPv6 needs a routable IPv6 address on this machine; without one the
+    // control cannot reach [::1] either and the IPv6 transports are recorded
+    // as not observable here (never silently passed as observed).
+    "control: each WebRTC transport reached its own collector from an unrestricted page": TRANSPORTS.every(transport =>
+      webrtcCounts[transport.name].control >= 1 || (transport.kind.endsWith("6") && !routableIpv6)),
+    "control: the net log shows the control page's WebRTC TCP connections": net.controlConnects.length >= 2,
+    ...Object.fromEntries(TRANSPORTS.map(transport => [
+      `T2 ${transport.name}: nothing reached its collector from the preview`, webrtcCounts[transport.name].page === 0,
     ])),
+    ...Object.fromEntries(layers.map(([label, bag]) => [
+      `T2 every transport (${transportNames.join(", ")}) ended with no candidate — ${label}`,
+      bag?.webrtcTransports?.ok === true && transportNames.every(name => transportBlocked(bag.webrtcTransports.value?.[name])),
+    ])),
+    "T2 no transport left unobserved (gathering neither ended nor errored by the deadline)": unobserved.length === 0,
     "T1 webRequest alone cancelled the page's requests (main counter)": (app.layerWebRequestBlocked ?? 0) >= NETWORK.length,
     "T1 no outside answer reached the preview": app.diagnostics?.unexpectedResponses === 0,
     "T1 net log: no connection attempt to anything but the dead proxy": net.connects.length === 0,
@@ -186,13 +245,13 @@ async function runMode(mode) {
     "T7 the download was cancelled in main": (app.diagnostics?.blockedDownloads ?? 0) >= 1 && has(leak, "download"),
     "T7 the workspace is byte-for-byte unchanged": app.workspaceUnchanged === true,
     // T9
-    "T9 window.open and _blank under a user gesture opened nothing": permissions.windowOpen?.value === "null" && has(permissions, "targetBlank") && app.newWebContents === 0 && (app.pageNavigationsBlocked ?? 0) >= 2,
+    "T9 window.open and _blank under a user gesture opened nothing": called("windowOpen") && permissions.windowOpen?.value === "null" && has(permissions, "targetBlank") && app.newWebContents === 0 && (app.pageNavigationsBlocked ?? 0) >= 2,
     "T9 three top-level navigations were each refused and the page stayed": app.urlAfterNavigation?.same === true && app.urlAfterNavigation?.origin === true && (app.topNavigationsBlocked ?? 0) >= 3,
     "T9 frames (meta refresh, src change) never reached their outside target": has(leak, "frameRefresh") && has(leak, "frameNavigate")
       && leak.frameRefresh.value !== "/refresh" && leak.frameNavigate.value !== "/framenav" && fromPage.tcp4.count === 0,
     // T10
-    "T10 every permission refused by the boundary under a user gesture on a focused view": PERMISSIONS.every(boundaryRefusal)
-      && permissions.notification?.value === "denied" && permissions.permissionGeolocation?.value === "denied" && permissions.permissionCamera?.value === "denied",
+    ...Object.fromEntries(PERMISSIONS.map(name => [`T10 ${name}: explicitly refused (activation and focus before the call; handler or policy refusal)`, boundaryRefusal(name)])),
+    ...Object.fromEntries(["notification", "permissionGeolocation", "permissionCamera"].map(name => [`T10 ${name}: answered "denied" by the handler`, deniedAnswer(name)])),
     // T11
     "T11 a hung page leaves the app responsive (<250 ms) and closing ends its process": app.hangAppLatencyMs < 250 && app.hangClosed === "closed" && app.hangProcessEnded === true,
     // T12
@@ -223,7 +282,7 @@ async function runMode(mode) {
     durationMs: Date.now() - startedAt, head, dirtySources: dirty,
     electron: JSON.parse(readFileSync(join(repoRoot, "node_modules", "electron", "package.json"), "utf8")).version,
     scope: `macOS development build, synthetic project, ${mode} task workspaces, no provider; the page used no outside network`,
-    checks, collectors: { fromPage, afterControl: collectors },
+    checks, collectors: { fromPage, afterControl: collectors, webrtc: webrtcCounts }, unobserved, routableIpv6,
     netLog: net, app: { ...app, leak }, exitCode, root,
   }, null, 2));
   if (modeStatus !== "PASS") console.error(output.split("\n").filter(line => /error|Error|panic/.test(line)).slice(-20).join("\n"));
@@ -236,8 +295,8 @@ async function runMode(mode) {
  * (tasks 4/9 only) sends nothing. A connection counts by its real address:
  * anything but the dead proxy 127.0.0.1:9. A log that does not parse as
  * written is incomplete, and incomplete fails. */
-function analyzeNetLog(file, needle, control) {
-  const empty = { complete: false, lookups: ["net log missing"], connects: ["net log missing"], localOnly: [], reachability: [], controlLookups: 0, proxyAttempts: 0, markerRequests: 0, events: 0 };
+function analyzeNetLog(file, needle, control, controlPorts = new Set()) {
+  const empty = { complete: false, lookups: ["net log missing"], connects: ["net log missing"], localOnly: [], reachability: [], controlLookups: 0, controlConnects: [], proxyAttempts: 0, markerRequests: 0, events: 0 };
   if (!existsSync(file)) return empty;
   let log;
   try { log = JSON.parse(readFileSync(file, "utf8")); } catch { return { ...empty, lookups: ["net log incomplete"], connects: ["net log incomplete"] }; }
@@ -254,6 +313,7 @@ function analyzeNetLog(file, needle, control) {
   const connects = new Set();
   const pending = new Map();
   let controlLookups = 0;
+  const controlConnects = new Set();
   // Network lookups of any other name, and the DNS servers contacted: the
   // servers may only serve the probe's own control lookup.
   const otherLookups = new Set();
@@ -285,6 +345,8 @@ function analyzeNetLog(file, needle, control) {
     if (/CONNECT_ATTEMPT|^TCP_CONNECT$|^UDP_CONNECT$/.test(name) && typeof event.params?.address === "string") {
       const address = event.params.address;
       if (address === "127.0.0.1:9") { proxyAttempts++; continue; }
+      // The unrestricted control page's own WebRTC connections.
+      if (controlPorts.has(address.replace(/^.*:/, ""))) { controlConnects.add(`${name} ${address}`); continue; }
       // A DNS server: judged below by which lookups needed one.
       if (name === "UDP_CONNECT" && /:53$/.test(address)) { resolverConnects.add(address); continue; }
       const label = `${name} ${address}`;
@@ -295,7 +357,7 @@ function analyzeNetLog(file, needle, control) {
   if (probeConnect) connects.add(probeConnect);
   if (resolverConnects.size && (otherLookups.size || lookups.size || !controlLookups)) for (const address of resolverConnects) connects.add(`UDP_CONNECT ${address} (DNS server, not only for the control lookup)`);
   return {
-    otherLookups: [...otherLookups], resolverConnects: [...resolverConnects],
+    otherLookups: [...otherLookups], resolverConnects: [...resolverConnects], controlConnects: [...controlConnects],
     complete: true, lookups: [...lookups], connects: [...connects], localOnly: [...localOnly], reachability: [...reachability],
     controlLookups, proxyAttempts, markerRequests, events: log.events?.length ?? 0,
   };

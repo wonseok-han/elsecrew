@@ -1872,3 +1872,27 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-layout-right .m5-result-box.m5-result-attention { border-color: color-mix(in srgb, var(--status-attention) 40%, var(--line-default)); }
 .m5-role-lead { flex: none; color: var(--role-1); font-size: var(--text-xs); line-height: 1; }
 .m5-pinned-slot .m5-approval-card:focus-visible, .m5-pinned-slot .m5-approval-card:focus { outline: 2px solid var(--status-attention); outline-offset: 2px; }
+
+/* --- Result preview tab (ADE 1차-나 P3) ---------------------------------
+ * The page the team made is an isolated view main draws over the stage.
+ * The frame above the stage is the app's own and never under the view (T8). */
+.m5-preview { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; gap: var(--space-2, 8px); padding: var(--space-2, 8px); }
+.m5-preview-frame { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2, 8px); padding: 6px 8px; border: 1px solid var(--line-default); border-radius: var(--radius-m, 8px); background: var(--bg-raised); }
+.m5-preview-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.m5-preview-badges strong { font-size: var(--text-sm, 13px); color: var(--text-primary); }
+.m5-preview-badge { padding: 1px 8px; border: 1px solid var(--line-strong); border-radius: 999px; font-size: var(--text-xs, 12px); color: var(--text-secondary); }
+.m5-preview-controls { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.m5-preview-entry { max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs, 12px); color: var(--text-tertiary); }
+.m5-preview-viewport { display: inline-flex; border: 1px solid var(--line-default); border-radius: var(--radius-s, 6px); overflow: hidden; }
+.m5-preview-viewport button { border: 0; border-radius: 0; background: transparent; color: var(--text-secondary); padding: 4px 10px; }
+.m5-preview-viewport button[aria-pressed="true"] { background: var(--bg-selected); color: var(--text-primary); }
+.m5-preview-band { margin: 0; padding: 6px 10px; border-radius: var(--radius-s, 6px); background: var(--bg-sunken); color: var(--text-secondary); font-size: var(--text-sm, 13px); }
+.m5-preview-stage { position: relative; flex: 1 1 0; min-height: 160px; border: 1px dashed var(--line-default); border-radius: var(--radius-s, 6px); background: var(--bg-sunken); overflow: hidden; }
+.m5-preview-still { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: top center; opacity: 0.85; }
+.m5-preview-stage[data-viewport="narrow"] .m5-preview-still { object-fit: contain; }
+.m5-preview-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-2, 8px); padding: var(--space-4, 16px); text-align: center; color: var(--text-secondary); }
+.m5-preview-state strong { color: var(--text-primary); }
+.m5-preview-state p { margin: 0; max-width: 32em; }
+.m5-preview-actions { display: flex; gap: var(--space-2, 8px); }
+.m5-preview-note { margin: 0; font-size: var(--text-xs, 12px); color: var(--text-tertiary); }
+.m5-preview-open-file { margin: 4px 0; }

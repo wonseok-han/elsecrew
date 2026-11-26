@@ -580,18 +580,19 @@ test("update readiness rejects unsolicited, stale and foreign replies", async ()
   await assert.rejects(handler(harness.currentEvent(), undefined, true));
 });
 
-test("result preview IPC is off by default, answers only the main frame, and never takes a workspace, token or URL", async () => {
+test("result preview IPC is on by default, off with ELSECREW_PREVIEW=0, answers only the main frame, and never takes a workspace, token or URL", async () => {
   const open = { action: "open", projectId: "project_1", chatId: "chat_1", entry: null, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide" };
-  const off = await loadMain();
-  assert.deepEqual(off.privilegedSchemes.map(entry => entry.scheme), ["app"], "no preview scheme without the flag");
-  assert.deepEqual(off.switches, [], "no Chromium switch without the flag");
+  const off = await loadMain(undefined, false, { ELSECREW_PREVIEW: "0" });
+  assert.deepEqual(off.privilegedSchemes.map(entry => entry.scheme), ["app"], "no preview scheme when turned off");
+  assert.deepEqual(off.switches, [], "no Chromium switch when turned off");
   const offHandler = off.handlers.get(previewContract.PREVIEW_CHANNEL_V1);
   assert.ok(offHandler);
   assert.equal(JSON.stringify(await offHandler(off.currentEvent(), { action: "status" })), JSON.stringify({ action: "status", enabled: false }));
   await assert.rejects(offHandler(off.currentEvent(), open), /not enabled/);
   assert.deepEqual(off.sidecarCalls, []);
 
-  const on = await loadMain(undefined, false, { ELSECREW_PREVIEW: "1" });
+  // The default (no setting) is on.
+  const on = await loadMain();
   // T3: DNS prefetching (outside proxy, webRequest and CSP) is off app-wide.
   assert.deepEqual(on.switches, ["blink-settings=dnsPrefetchingEnabled=false"]);
   // Privileges only; the default session never gets a preview handler (T14).

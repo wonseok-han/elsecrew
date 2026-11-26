@@ -10,7 +10,7 @@ const { app, BrowserWindow, dialog, session } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { leakPage, FILES } = require('./m5-preview-pages.cjs');
+const { leakPage, controlPage, FILES } = require('./m5-preview-pages.cjs');
 
 const root = process.env.PROBE_ROOT;
 const httpPort = Number(process.env.PROBE_HTTP_PORT);
@@ -20,7 +20,9 @@ const udp6Port = Number(process.env.PROBE_UDP6_PORT);
 const marker = process.env.PROBE_MARKER;
 const controlHost = process.env.PROBE_CONTROL_HOST;
 const workspaceKind = process.env.PROBE_WORKSPACE;
-if (!root || !httpPort || !udpPort || !tcp6Port || !udp6Port || !marker || !controlHost || !['git', 'snapshot'].includes(workspaceKind) || process.env.ELSECREW_PREVIEW !== '1') throw new Error('probe environment is incomplete');
+const webrtcPage = JSON.parse(process.env.PROBE_WEBRTC || 'null');
+const webrtcControl = JSON.parse(process.env.PROBE_WEBRTC_CONTROL || 'null');
+if (!root || !httpPort || !udpPort || !tcp6Port || !udp6Port || !marker || !controlHost || !['git', 'snapshot'].includes(workspaceKind) || !webrtcPage || !webrtcControl || process.env.ELSECREW_PREVIEW !== '1') throw new Error('probe environment is incomplete');
 const repoRoot = path.resolve(__dirname, '..');
 const source = path.join(root, 'project');
 const result = { steps: [], errors: [] };
@@ -39,7 +41,7 @@ dialog.showOpenDialog = async (...args) => {
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let finished = false;
-const deadline = setTimeout(() => finish(new Error('probe timeout')), 240_000);
+const deadline = setTimeout(() => finish(new Error('probe timeout')), 480_000);
 
 function finish(error) {
   if (finished) return;
@@ -143,7 +145,7 @@ async function run(window) {
   const write = (directory, files) => { for (const [name, text] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(directory, name)), { recursive: true }); fs.writeFileSync(path.join(directory, name), text); } };
   fs.writeFileSync(path.join(root, 'outside.txt'), 'outside secret\n');
   for (const chat of Object.values(chats)) {
-    write(chat.worktreePath, { ...FILES, 'refresh.html': FILES['refresh.html'].replace('REFRESH_TARGET', `http://127.0.0.1:${httpPort}/refresh`), 'leak.html': leakPage({ httpPort, udpPort, tcp6Port, udp6Port, marker }), 'a/.secret/x.js': 'fixture-only' });
+    write(chat.worktreePath, { ...FILES, 'refresh.html': FILES['refresh.html'].replace('REFRESH_TARGET', `http://127.0.0.1:${httpPort}/refresh`), 'leak.html': leakPage({ httpPort, udpPort, tcp6Port, udp6Port, marker, webrtc: webrtcPage }), 'a/.secret/x.js': 'fixture-only' });
     fs.symlinkSync(path.join(root, 'outside.txt'), path.join(chat.worktreePath, 'link.txt'));
   }
   const hashBefore = treeHash(chats.a.worktreePath);
@@ -196,7 +198,11 @@ async function run(window) {
   await sleep(200);
   result.permissions = {};
   for (const name of await contents.executeJavaScript('window.PERMISSION_NAMES')) {
-    result.permissions[name] = await contents.executeJavaScript(`window.runPermission(${JSON.stringify(name)})`, true);
+    // Main's own count of refusals around this one call: the explicit denial.
+    const denied = manager.diagnostics.deniedPermissions;
+    const answer = await contents.executeJavaScript(`window.runPermission(${JSON.stringify(name)})`, true);
+    await sleep(100);
+    result.permissions[name] = { ...answer, deniedDelta: manager.diagnostics.deniedPermissions - denied };
   }
   result.newWebContents = webContents.getAllWebContents().length - contentsBefore;
   result.pageNavigationsBlocked = manager.diagnostics.blockedNavigations - navigationsBefore;
@@ -290,6 +296,14 @@ async function run(window) {
     ? fs.readdirSync(path.join(root, 'userdata', 'Partitions')).filter(name => /preview/i.test(name)) : [];
   result.status = await page('window.m5Preview.status()');
   void partitionsB;
+  // WebRTC positive control: the same per-transport code in an unrestricted
+  // page of the app's own session, against control collectors: every
+  // transport must reach its collector there, so silence in the preview is
+  // the boundary at work, not a probe that never sends.
+  const control = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true } });
+  await control.loadURL(`data:text/html;base64,${Buffer.from(controlPage(webrtcControl)).toString('base64')}`);
+  result.webrtcControl = await control.webContents.executeJavaScript('window.runControl()');
+  control.destroy();
   // Net log positive control: a host lookup the log must show, made by the
   // app's own default session (never the preview's).
   result.controlLookup = await session.defaultSession.resolveHost

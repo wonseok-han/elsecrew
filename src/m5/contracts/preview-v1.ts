@@ -349,8 +349,8 @@ export function validatePreviewEventV1(value: unknown): PreviewEventV1 {
   return { previewId: previewId(object.previewId), kind: object.kind as Exclude<PreviewEventV1["kind"], "closed"> } as PreviewEventV1;
 }
 
-/** `window.m5Preview` (preload). Main refuses everything but `status` unless
- * the app started with `ELSECREW_PREVIEW=1`. */
+/** `window.m5Preview` (preload). On by default; with `ELSECREW_PREVIEW=0`
+ * main refuses everything but `status`. */
 export interface M5PreviewBridgeV1 {
   status(): Promise<{ enabled: boolean }>;
   open(input: { projectId: string; chatId: string; entry: string | null; bounds: PreviewBoundsV1; viewport: PreviewViewportV1 }): Promise<Extract<PreviewIpcResultV1, { action: "open" }>>;

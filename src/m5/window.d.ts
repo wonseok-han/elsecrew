@@ -15,6 +15,8 @@ declare global {
     readonly m5Login?: { request(input: import("./contracts/provider-login-v1.ts").LoginRequest): Promise<import("./contracts/provider-login-v1.ts").LoginStatus> };
     /** Opens a checked web address outside the app after a native confirmation. */
     readonly m5ExternalLink?: { open(url: string): Promise<{ opened: boolean }> };
+    /** Result preview (ADE 1차-나 F12). On by default; with `ELSECREW_PREVIEW=0` main answers only `status`. */
+    readonly m5Preview?: import("./contracts/preview-v1.ts").M5PreviewBridgeV1;
     readonly m5: Readonly<M5BridgeV8>;
   }
 }

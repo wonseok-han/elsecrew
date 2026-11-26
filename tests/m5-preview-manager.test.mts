@@ -301,7 +301,8 @@ test("replacing, closing and crashing drop the token and clear the partition (T1
   const firstId = first.result.action === "open" && first.result.outcome === "opened" ? first.result.previewId : "";
   assert.equal((await h.manager.request({ action: "reload", previewId: firstId })).action, "reload");
   assert.deepEqual(first.view.webContents.calls.filter(call => call === "reload"), []);
-  second.view.webContents.listeners.get("render-process-gone")!({}, { reason: "crashed" });
+  second.view.webContents.listeners.get("unresponsive")!();
+  assert.equal(h.events.at(-2)?.kind, "unresponsive");
   assert.equal(second.view.webContents.destroyed, true);
   assert.equal(h.children.length, 0);
   assert.equal((h.events.at(-1) as { reason: string }).reason, "crashed");

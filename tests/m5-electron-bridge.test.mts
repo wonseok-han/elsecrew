@@ -2277,14 +2277,17 @@ test("result preview: an optional pair after installation, validated answers, ne
   assert.equal(old.child.writes.length, writes);
 });
 
-test("the preview flag reads exactly two names and keeps developer tools out of packaged apps", async () => {
+test("the preview is on by default, off with ELSECREW_PREVIEW=0, and keeps developer tools out of packaged apps", async () => {
   const { previewFlagsFromEnvironment } = await import("../electron/preview-flag.ts");
-  assert.deepEqual(previewFlagsFromEnvironment({}, false), { enabled: false, devTools: false });
-  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "true" }, false), { enabled: false, devTools: false });
+  // On by default; only "0" turns it off. Developer tools stay opt-in and never packaged.
+  assert.deepEqual(previewFlagsFromEnvironment({}, false), { enabled: true, devTools: false });
+  assert.deepEqual(previewFlagsFromEnvironment({}, true), { enabled: true, devTools: false });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "0" }, false), { enabled: false, devTools: false });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "0" }, true), { enabled: false, devTools: false });
   assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "1" }, false), { enabled: true, devTools: false });
-  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "1", ELSECREW_PREVIEW_DEVTOOLS: "1" }, false), { enabled: true, devTools: true });
-  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "1", ELSECREW_PREVIEW_DEVTOOLS: "1" }, true), { enabled: true, devTools: false });
-  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW_DEVTOOLS: "1" }, false), { enabled: false, devTools: false });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW_DEVTOOLS: "1" }, false), { enabled: true, devTools: true });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW_DEVTOOLS: "1" }, true), { enabled: true, devTools: false });
+  assert.deepEqual(previewFlagsFromEnvironment({ ELSECREW_PREVIEW: "0", ELSECREW_PREVIEW_DEVTOOLS: "1" }, false), { enabled: false, devTools: false });
   const flagSource = source("electron/preview-flag.ts");
   assert.deepEqual([...flagSource.matchAll(/ELSECREW_[A-Z_]+/g)].map(match => match[0]).filter((name, index, all) => all.indexOf(name) === index), ["ELSECREW_PREVIEW", "ELSECREW_PREVIEW_DEVTOOLS"]);
   // The preview view never gets a preload; the app window's isolation is unchanged.
