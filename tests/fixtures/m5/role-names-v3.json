@@ -1,0 +1,396 @@
+{
+ "description": "Name rules for saving V3 role settings (custom roles R4). Rust run_recovery_v1 and TS run-recovery-v1 read this same table. Stored records are read without these rules.",
+ "formatRanges": [
+  [
+   173,
+   173
+  ],
+  [
+   1536,
+   1541
+  ],
+  [
+   1564,
+   1564
+  ],
+  [
+   1757,
+   1757
+  ],
+  [
+   1807,
+   1807
+  ],
+  [
+   2192,
+   2193
+  ],
+  [
+   2274,
+   2274
+  ],
+  [
+   6158,
+   6158
+  ],
+  [
+   8203,
+   8207
+  ],
+  [
+   8234,
+   8238
+  ],
+  [
+   8288,
+   8292
+  ],
+  [
+   8294,
+   8303
+  ],
+  [
+   65279,
+   65279
+  ],
+  [
+   65529,
+   65531
+  ],
+  [
+   69821,
+   69821
+  ],
+  [
+   69837,
+   69837
+  ],
+  [
+   78896,
+   78911
+  ],
+  [
+   113824,
+   113827
+  ],
+  [
+   119155,
+   119162
+  ],
+  [
+   917505,
+   917505
+  ],
+  [
+   917536,
+   917631
+  ]
+ ],
+ "cases": [
+  {
+   "note": "plain team",
+   "names": [
+    "총괄",
+    "기획",
+    "디자인"
+   ],
+   "problems": [
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "note": "a member named like the coordinator",
+   "names": [
+    "총괄",
+    "총괄"
+   ],
+   "problems": [
+    null,
+    "coordinatorName"
+   ]
+  },
+  {
+   "note": "a member named like a renamed coordinator",
+   "names": [
+    "리드",
+    "리드"
+   ],
+   "problems": [
+    null,
+    "coordinatorName"
+   ]
+  },
+  {
+   "note": "the default coordinator names stay reserved after a rename",
+   "names": [
+    "리드",
+    "총괄",
+    "Coordinator",
+    " co ordinator "
+   ],
+   "problems": [
+    null,
+    "coordinatorName",
+    "coordinatorName",
+    "coordinatorName"
+   ]
+  },
+  {
+   "note": "case and spaces are ignored for the coordinator",
+   "names": [
+    "Lead",
+    "lead"
+   ],
+   "problems": [
+    null,
+    "coordinatorName"
+   ]
+  },
+  {
+   "note": "duplicates ignore spaces",
+   "names": [
+    "총괄",
+    "검증",
+    "검 증"
+   ],
+   "problems": [
+    null,
+    "duplicate",
+    "duplicate"
+   ]
+  },
+  {
+   "note": "duplicates ignore case",
+   "names": [
+    "총괄",
+    "QA",
+    "qa",
+    "Qa"
+   ],
+   "problems": [
+    null,
+    "duplicate",
+    "duplicate",
+    "duplicate"
+   ]
+  },
+  {
+   "note": "direction override",
+   "names": [
+    "총괄",
+    "검‮증"
+   ],
+   "problems": [
+    null,
+    "format"
+   ]
+  },
+  {
+   "note": "zero width space",
+   "names": [
+    "총괄",
+    "a​b"
+   ],
+   "problems": [
+    null,
+    "format"
+   ]
+  },
+  {
+   "note": "isolate in the coordinator name",
+   "names": [
+    "총⁦괄",
+    "기획"
+   ],
+   "problems": [
+    "format",
+    null
+   ]
+  },
+  {
+   "note": "byte order mark",
+   "names": [
+    "총괄",
+    "﻿QA"
+   ],
+   "problems": [
+    null,
+    "format"
+   ]
+  },
+  {
+   "note": "soft hyphen",
+   "names": [
+    "총괄",
+    "re­view"
+   ],
+   "problems": [
+    null,
+    "format"
+   ]
+  },
+  {
+   "note": "tag characters (astral)",
+   "names": [
+    "총괄",
+    "QA󠁁"
+   ],
+   "problems": [
+    null,
+    "format"
+   ]
+  },
+  {
+   "note": "joiner in an emoji sequence is a format character too",
+   "names": [
+    "총괄",
+    "👨‍💻"
+   ],
+   "problems": [
+    null,
+    "format"
+   ]
+  },
+  {
+   "note": "emoji and variation selectors are fine",
+   "names": [
+    "총괄",
+    "❤️ 팀"
+   ],
+   "problems": [
+    null,
+    null
+   ]
+  },
+  {
+   "note": "format wins over duplicate",
+   "names": [
+    "총괄",
+    "QA",
+    "Q​A"
+   ],
+   "problems": [
+    null,
+    null,
+    "format"
+   ]
+  },
+  {
+   "note": "review PR #8 I1: an untouched starting role is shown translated, so 'Planning' meets '기획'",
+   "roleIds": [
+    "coordinator",
+    "planning",
+    "member-a7k2q9"
+   ],
+   "names": [
+    "총괄",
+    "기획",
+    "Planning"
+   ],
+   "problems": [
+    null,
+    "duplicate",
+    "duplicate"
+   ]
+  },
+  {
+   "note": "a renamed starting role is shown as stored",
+   "roleIds": [
+    "coordinator",
+    "planning",
+    "member-a7k2q9"
+   ],
+   "names": [
+    "총괄",
+    "리서치",
+    "Planning"
+   ],
+   "problems": [
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "note": "the English label of another starting role",
+   "roleIds": [
+    "coordinator",
+    "coding",
+    "member-a7k2q9"
+   ],
+   "names": [
+    "총괄",
+    "개발",
+    "development"
+   ],
+   "problems": [
+    null,
+    "duplicate",
+    "duplicate"
+   ]
+  },
+  {
+   "note": "canonically equal spellings (NFD Hangul) are the same name",
+   "names": [
+    "총괄",
+    "기획",
+    "기획"
+   ],
+   "problems": [
+    null,
+    "duplicate",
+    "duplicate"
+   ]
+  },
+  {
+   "note": "an NFD coordinator name is still the coordinator",
+   "names": [
+    "총괄",
+    "총괄"
+   ],
+   "problems": [
+    null,
+    "coordinatorName"
+   ]
+  }
+ ],
+ "legacyLabels": [
+  [
+   "coordinator",
+   [
+    "총괄",
+    "Coordinator"
+   ]
+  ],
+  [
+   "planning",
+   [
+    "기획",
+    "Planning"
+   ]
+  ],
+  [
+   "design",
+   [
+    "디자인",
+    "Design"
+   ]
+  ],
+  [
+   "coding",
+   [
+    "개발",
+    "Development"
+   ]
+  ],
+  [
+   "review",
+   [
+    "검증",
+    "Verification"
+   ]
+  ]
+ ]
+}

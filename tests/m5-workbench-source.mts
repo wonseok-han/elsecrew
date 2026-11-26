@@ -17,6 +17,7 @@ const WORKBENCH_FILES = [
   "review-sheet.tsx",
   "history-tab.tsx",
   "project-switcher.tsx",
+  "role-settings.tsx",
 ];
 
 export function workbenchSource(): string {

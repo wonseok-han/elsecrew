@@ -491,3 +491,34 @@ fn saved_v3_settings_may_leave_a_model_unselected_but_chats_may_not() {
     let legacy = serde_json::json!({"schemaVersion":1,"projectId":"p","revision":1,"roles":[unselected("planning","readOnly"),unselected("coding","workspaceWrite"),unselected("review","readOnly")],"updatedAt":at});
     assert!(validate_g5_payload_v1("projectRoleSettings", &legacy).is_err());
 }
+
+#[test]
+fn saved_role_names_follow_the_shared_table_and_stored_ones_still_open() {
+    let table: Value = serde_json::from_str(include_str!("../../../../tests/fixtures/m5/role-names-v3.json")).unwrap();
+    let ranges: Vec<(u32, u32)> = table["formatRanges"].as_array().unwrap().iter()
+        .map(|pair| (pair[0].as_u64().unwrap() as u32, pair[1].as_u64().unwrap() as u32)).collect();
+    assert_eq!(ranges, G5_FORMAT_CHAR_RANGES_V3, "Rust and TS share one format-character table");
+    let labels: Vec<(String, Vec<String>)> = serde_json::from_value(table["legacyLabels"].clone()).unwrap();
+    assert_eq!(labels.len(), G5_LEGACY_ROLE_LABELS_V3.len());
+    for ((id, shown), (rust_id, rust_shown)) in labels.iter().zip(G5_LEGACY_ROLE_LABELS_V3) {
+        assert_eq!((id.as_str(), shown.iter().map(String::as_str).collect::<Vec<_>>()), (*rust_id, rust_shown.to_vec()));
+    }
+    for case in table["cases"].as_array().unwrap() {
+        let names: Vec<&str> = case["names"].as_array().unwrap().iter().map(|name| name.as_str().unwrap()).collect();
+        let expected: Vec<Option<&str>> = case["problems"].as_array().unwrap().iter().map(Value::as_str).collect();
+        let ids: Vec<String> = match case["roleIds"].as_array() {
+            Some(ids) => ids.iter().map(|id| id.as_str().unwrap().to_owned()).collect(),
+            None => (0..names.len()).map(|index| if index == 0 { "coordinator".into() } else { format!("member-{index}") }).collect(),
+        };
+        let named: Vec<(&str, &str)> = ids.iter().map(String::as_str).zip(names.iter().copied()).collect();
+        assert_eq!(role_name_problems_v3(&named), expected, "{}", case["note"]);
+        let profile = |id: &str| serde_json::json!({"roleId":id,"runtime":"claude-code","modelSelector":"opus","reasoningEffort":null,"permission":"readOnly"});
+        let roles: Vec<Value> = ids.iter().map(|id| profile(id)).collect();
+        let definitions: Vec<Value> = ids.iter().zip(&names).map(|(id, name)| serde_json::json!({"roleId":id,"name":name,"responsibility":""})).collect();
+        let update = serde_json::json!({"projectId":"p","expectedRevision":1,"roles":roles,"roleDefinitions":definitions});
+        assert_eq!(validate_g5_payload_v1("projectRoleSettingsUpdate", &update).is_ok(), expected.iter().all(Option::is_none), "{}", case["note"]);
+        // A stored record with the same names still reads (only Cc is refused there).
+        let stored = serde_json::json!({"schemaVersion":3,"projectId":"p","revision":1,"roles":roles,"roleDefinitions":definitions,"updatedAt":"2026-11-26T00:00:00Z"});
+        assert!(validate_g5_payload_v1("projectRoleSettings", &stored).is_ok(), "{}", case["note"]);
+    }
+}

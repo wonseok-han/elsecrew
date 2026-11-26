@@ -93,6 +93,12 @@ impl ProjectManager {
         roles: Value,
         role_definitions: Option<Value>,
     ) -> Result<Value, ProjectFailure> {
+        if let Some(definitions) = &role_definitions {
+            // The same saving rules as a project's team (names included, R4).
+            let request = json!({"projectId":"app_defaults","expectedRevision":expected_revision,"roles":roles,"roleDefinitions":definitions});
+            elsecrew_protocol::run_recovery_v1::validate_g5_payload_v1("projectRoleSettingsUpdate", &request)
+                .map_err(|error| ProjectFailure::manifest(format!("invalid role settings: {error}")))?;
+        }
         let version = crate::chat::role_schema_version(&roles, role_definitions.is_some());
         crate::chat::require_role_schema_storage(storage, version)?;
         let current = self.app_role_defaults(storage.custom_roles_enabled()?)?;

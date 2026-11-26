@@ -34,3 +34,26 @@ export function orchestratorDelegation(text: string, role: string | null, team: 
   } catch { /* Incomplete/plain text remains ordinary message content. */ }
   return null;
 }
+
+/**
+ * A well-formed delegation to someone outside this chat's team (a display
+ * name, an invented role, the coordinator itself). The sidecar asks the
+ * coordinator once more instead of running it (`misdirected_delegation`), so
+ * the screen says that rather than showing the raw decision. Returns the
+ * chosen role as text (untrusted, shortened), or null.
+ */
+export function orchestratorMisdirected(text: string, role: string | null, team: readonly string[] = LEGACY_TEAM): string | null {
+  if (role !== "coordinator") return null;
+  try {
+    const item = JSON.parse(text);
+    if (item && typeof item === "object" && !Array.isArray(item)
+        && Object.keys(item).sort().join() === "action,instruction,role,summary"
+        && item.action === "delegate" && typeof item.role === "string" && item.role.trim()
+        && !isWorkerRole(item.role, team)
+        && typeof item.summary === "string" && item.summary.trim()
+        && typeof item.instruction === "string" && item.instruction.trim()) {
+      return Array.from(item.role.trim() as string).slice(0, 32).join("");
+    }
+  } catch { /* Incomplete/plain text remains ordinary message content. */ }
+  return null;
+}
