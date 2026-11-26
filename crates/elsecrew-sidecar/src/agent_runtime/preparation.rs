@@ -77,6 +77,8 @@ pub(crate) struct RunTextState {
         >,
     >,
     run_id: String,
+    /// The workspace folder, so work history rows name files relative to it.
+    cwd: std::path::PathBuf,
     finished: bool,
 }
 
@@ -743,10 +745,12 @@ impl RunReservation {
         if !process.retains_run_fence() {
             process.retain_fence_until_terminal()?;
         }
+        let cwd = workspace.cwd().to_path_buf();
         let transport = crate::provider_preflight_session::BoundTextSession::begin(
             process, flow, &workspace, text, output_budget,
         )?;
         Ok(RunTextState {
+            cwd,
             transport,
             pending_answer: None,
             pending_item: None,
@@ -788,6 +792,7 @@ impl RunReservation {
         }
         state.finished = true;
         if state.completion.is_none() {
+            let state_cwd = state.cwd.clone();
             let outcome = state.transport.advance(
                 process,
                 cancel,
@@ -825,7 +830,7 @@ impl RunReservation {
                         TextAction::Tool(tool) => {
                             self.validate_text_input_streaming(storage, projects)
                                 .map_err(|_| failure())?;
-                            if let Some(row) = activity::codex(&tool) { self.record_activity(storage, row); }
+                            for row in activity::codex(&tool, &state_cwd) { self.record_activity(storage, row); }
                             return on_action(storage, TextAction::Tool(tool));
                         }
                         action => {

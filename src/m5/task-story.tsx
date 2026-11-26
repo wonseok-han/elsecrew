@@ -39,7 +39,7 @@ export function FollowupComposer({ controller, chat, admissionReady }: { control
 }
 
 
-export function TeamTimeline({ controller, chat, admissionReady, onCoordinatorChat, phase = null, phaseKind = null, onApprovalsWaiting, pinnedSlot = null }: { pinnedSlot?: HTMLElement | null; onCoordinatorChat: () => void; controller: ChatUiController; chat: ReturnType<ChatUiController["snapshot"]>; admissionReady: boolean; fixtureAvailable: boolean; phase?: TaskPhase | null; phaseKind?: TaskKind | null; onApprovalsWaiting?: (count: number) => void }) {
+export function TeamTimeline({ controller, chat, admissionReady, onCoordinatorChat, phase = null, phaseKind = null, onApprovalsWaiting, pinnedSlot = null, onOpenFile }: { onOpenFile?: (path: string) => void; pinnedSlot?: HTMLElement | null; onCoordinatorChat: () => void; controller: ChatUiController; chat: ReturnType<ChatUiController["snapshot"]>; admissionReady: boolean; fixtureAvailable: boolean; phase?: TaskPhase | null; phaseKind?: TaskKind | null; onApprovalsWaiting?: (count: number) => void }) {
   const { lang, t } = useI18n();
   const messageTime = useMemo(() => new Intl.DateTimeFormat(lang, { hour: "2-digit", minute: "2-digit" }), [lang]);
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -156,7 +156,7 @@ export function TeamTimeline({ controller, chat, admissionReady, onCoordinatorCh
     {chat.messages.length > 200 && <nav className="m5-diff-pages" aria-label={t("m5.chat.messages")}><button type="button" disabled={messageStart === 0} onClick={() => moveHistory(messageStart - 200)}>{t("m5.chat.older")}</button><span>{t("m5.chat.range", { first: messageStart + 1, last: messageStart + visibleMessages.length, total: chat.messages.length })}</span><button type="button" disabled={messageStart + 200 >= chat.messages.length} onClick={() => moveHistory(messageStart + 200)}>{t("m5.chat.newer")}</button><button type="button" disabled={historyStart === null} onClick={showLatest}>{t("m5.chat.latest")}</button></nav>}
     <div ref={messagesRef} className="m5-timeline-list m5-story-flow" tabIndex={0} aria-label={t("m5.chat.messages")}>
       {items.map(item => item.kind === "run"
-        ? <MemberCard key={item.key} run={item.run} reports={item.reports} definitions={chat.activeChat!.roleDefinitions} teamRoleIds={teamRoleIds} phase={phase} clock={messageTime} />
+        ? <MemberCard key={item.key} run={item.run} reports={item.reports} definitions={chat.activeChat!.roleDefinitions} teamRoleIds={teamRoleIds} phase={phase} clock={messageTime} onOpenFile={onOpenFile} />
         : item.kind === "user" ? <UserBubble key={item.key} message={item.message} clock={messageTime} />
         : <StoryMessageCard key={item.key} message={item.message} definitions={chat.activeChat!.roleDefinitions} clock={messageTime} />)}
       {phase === "review" && !working && <p className="m5-story-next">{t("m5.story.reviewHint")}</p>}

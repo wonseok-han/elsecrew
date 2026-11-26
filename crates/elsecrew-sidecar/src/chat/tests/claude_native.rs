@@ -408,12 +408,16 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
         );
         assert!(!events.is_empty());
         if durable && matches!(case, "auto-read" | "auto-read-mutate" | "auto-read-index-lock") {
-            // Each allowed tool use leaves one work-history row, never its input.
+            // Each allowed tool use leaves a work-history row: the command line
+            // itself (masked) with the model's summary as a note (2026-11-26),
+            // a file by its workspace path; never file contents.
             let history: Vec<Value> = public.iter().filter(|event| event["kind"] == "status")
                 .filter_map(|event| serde_json::from_str::<Value>(event["text"].as_str()?).ok())
                 .filter(|row| row.get("action").is_some()).collect();
-            assert_eq!(history, vec![json!({"action":"command","target":"list fixture"}), json!({"action":"read","target":"index.html"})], "{case}");
-            assert!(!public.iter().any(|event| event["text"].as_str().is_some_and(|text| text.contains("\"ls\""))));
+            assert_eq!(history, vec![
+                json!({"action":"command","target":"ls","command":"ls","note":"list fixture","id":"tool_bash"}),
+                json!({"action":"read","target":"index.html","id":"tool_write"}),
+            ], "{case}");
         }
         if case == "long" {
             assert_eq!(public.len(), 3000);

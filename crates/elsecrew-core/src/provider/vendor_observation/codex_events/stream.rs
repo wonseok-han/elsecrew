@@ -126,6 +126,103 @@ pub struct ToolEvent {
     /// The command line Codex reported when a command started (validated:
     /// bounded, no NUL). Shown in the work history; never authority.
     pub command: Option<String>,
+    /// What the work history shows about the tool use (where it ran, how it
+    /// ended, which files changed). Read leniently and bounded: a missing or
+    /// odd field only leaves the detail out, never fails the turn.
+    pub detail: ToolDetail,
+}
+
+/// Display-only facts about one command or file change; never authority.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ToolDetail {
+    pub cwd: Option<String>,
+    /// Codex's own reading of the command: (kind, path, query) for read,
+    /// listFiles and search. Empty when it is unknown or several things.
+    pub actions: Vec<CommandAction>,
+    pub exit_code: Option<i64>,
+    pub duration_ms: Option<u64>,
+    /// The first lines of the command's output.
+    pub output: Option<String>,
+    pub changes: Vec<FileChange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandAction {
+    pub kind: String,
+    pub path: Option<String>,
+    pub query: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileChange {
+    pub path: String,
+    /// add, delete or update.
+    pub kind: String,
+    pub added: u64,
+    pub removed: u64,
+}
+
+const DETAIL_TEXT_MAX: usize = 4 * 1024;
+const DETAIL_OUTPUT_LINES: usize = 40;
+const DETAIL_ITEMS_MAX: usize = 64;
+
+fn detail_text(value: Option<&serde_json::Value>) -> Option<String> {
+    let text = value?.as_str()?;
+    (!text.is_empty() && text.len() <= DETAIL_TEXT_MAX && !text.contains('\0')).then(|| text.to_string())
+}
+
+/// The first lines of a command's output, cut on a character boundary.
+fn output_head(text: &str) -> Option<String> {
+    if text.is_empty() { return None; }
+    let end = text.match_indices('\n').nth(DETAIL_OUTPUT_LINES - 1).map_or(text.len(), |(index, _)| index);
+    let mut head = &text[..end];
+    if head.len() > DETAIL_TEXT_MAX {
+        let mut cut = DETAIL_TEXT_MAX;
+        while !head.is_char_boundary(cut) { cut -= 1; }
+        head = &head[..cut];
+    }
+    let head = head.replace('\0', "");
+    Some(if head.len() < text.len() { format!("{head}\n…") } else { head })
+}
+
+/// Added and removed lines of one patch. An added file's diff is its
+/// content, a deleted file's is what it held, an update is a unified diff.
+fn diff_counts(kind: &str, diff: &str) -> (u64, u64) {
+    let lines = diff.lines().count() as u64;
+    match kind {
+        "add" if !diff.starts_with("@@") && !diff.starts_with("---") => (lines, 0),
+        "delete" if !diff.starts_with("@@") && !diff.starts_with("---") => (0, lines),
+        _ => diff.lines().fold((0, 0), |(added, removed), line| {
+            if line.starts_with("+++") || line.starts_with("---") { (added, removed) }
+            else if line.starts_with('+') { (added + 1, removed) }
+            else if line.starts_with('-') { (added, removed + 1) }
+            else { (added, removed) }
+        }),
+    }
+}
+
+fn tool_detail(raw: &str) -> ToolDetail {
+    let Ok(item) = serde_json::from_str::<serde_json::Value>(raw) else { return ToolDetail::default() };
+    let actions = item.get("commandActions").and_then(|v| v.as_array()).map(|actions| actions.iter().take(DETAIL_ITEMS_MAX)
+        .filter_map(|action| Some(CommandAction {
+            kind: detail_text(action.get("type"))?,
+            path: detail_text(action.get("path")),
+            query: detail_text(action.get("query")),
+        })).collect()).unwrap_or_default();
+    let changes = item.get("changes").and_then(|v| v.as_array()).map(|changes| changes.iter().take(DETAIL_ITEMS_MAX)
+        .filter_map(|change| {
+            let kind = detail_text(change.get("kind").and_then(|kind| kind.get("type")))?;
+            let (added, removed) = change.get("diff").and_then(|v| v.as_str()).map_or((0, 0), |diff| diff_counts(&kind, diff));
+            Some(FileChange { path: detail_text(change.get("path"))?, kind, added, removed })
+        }).collect()).unwrap_or_default();
+    ToolDetail {
+        cwd: detail_text(item.get("cwd")),
+        actions,
+        exit_code: item.get("exitCode").and_then(|v| v.as_i64()),
+        duration_ms: item.get("durationMs").and_then(|v| v.as_u64()),
+        output: item.get("aggregatedOutput").and_then(|v| v.as_str()).and_then(output_head),
+        changes,
+    }
 }
 
 fn tool_kind(kind: &str) -> Option<ToolKind> {
@@ -578,6 +675,7 @@ impl TurnStream {
                         kind,
                         phase: tool_phase(wire.item.get(), frame.method == "item/started")?,
                         command: None,
+                        detail: tool_detail(wire.item.get()),
                     })
                 })
                 .transpose()?;
@@ -679,9 +777,11 @@ impl TurnStream {
                 }
             }
             existing.completed = true;
+            // The work history's closing row names the command again.
+            let command = existing.command.as_ref().map(|(command, _)| command.clone());
             return Ok(match projected {
                 Projection::Completed { .. } => Observed::Public(projected),
-                _ if tool.is_some() => Observed::Tool(tool.unwrap()),
+                _ if tool.is_some() => Observed::Tool(ToolEvent { command, ..tool.unwrap() }),
                 _ => Observed::Private,
             });
         }
@@ -717,6 +817,7 @@ impl TurnStream {
                 kind,
                 phase: ToolPhase::Output,
                 command: None,
+                detail: ToolDetail::default(),
             }));
         }
         Ok(match projected {
@@ -756,6 +857,37 @@ mod tests {
             method,
             json!({"threadId":"t","turnId":"r","item":{"id":"i","type":kind,"text":"public","command":"echo test","cwd":"/snapshot","status":if method == "item/started" {"inProgress"} else {"completed"}}}),
         )
+    }
+    #[test]
+    fn tool_details_are_read_leniently_and_bounded() {
+        let detail = tool_detail(&json!({"id":"i","type":"commandExecution","command":"x","cwd":"/w","status":"completed",
+            "commandActions":[{"type":"read","command":"cat a","name":"a","path":"/w/a"}],"exitCode":2,"durationMs":40,
+            "aggregatedOutput":(0..100).map(|n| n.to_string()).collect::<Vec<_>>().join("\n")}).to_string());
+        assert_eq!(detail.cwd.as_deref(), Some("/w"));
+        assert_eq!(detail.actions, vec![CommandAction { kind: "read".into(), path: Some("/w/a".into()), query: None }]);
+        assert_eq!((detail.exit_code, detail.duration_ms), (Some(2), Some(40)));
+        let output = detail.output.unwrap();
+        assert_eq!(output.lines().count(), DETAIL_OUTPUT_LINES + 1);
+        assert!(output.ends_with('…'));
+        let change = tool_detail(&json!({"id":"i","type":"fileChange","status":"completed","changes":[
+            {"path":"/w/a.ts","kind":{"type":"update","move_path":null},"diff":"@@ -1,2 +1,3 @@\n a\n-b\n+c\n+d"},
+            {"path":"/w/new.md","kind":{"type":"add"},"diff":"one\ntwo"},
+            {"path":"/w/old.md","kind":{"type":"delete"},"diff":"x"},
+            {"path":42,"kind":{"type":"add"},"diff":""}
+        ]}).to_string());
+        assert_eq!(change.changes.iter().map(|c| (c.path.as_str(), c.kind.as_str(), c.added, c.removed)).collect::<Vec<_>>(),
+            vec![("/w/a.ts", "update", 2, 1), ("/w/new.md", "add", 2, 0), ("/w/old.md", "delete", 0, 1)]);
+        assert_eq!(tool_detail("not json"), ToolDetail::default());
+        assert_eq!(tool_detail(&json!({"cwd":42,"exitCode":"0","changes":"x"}).to_string()), ToolDetail::default());
+    }
+    #[test]
+    fn completed_commands_name_the_command_again() {
+        let mut stream = started();
+        stream.observe(&item("item/started", "commandExecution")).unwrap();
+        match stream.observe(&item("item/completed", "commandExecution")).unwrap() {
+            Observed::Tool(tool) => assert_eq!(tool.command.as_deref(), Some("echo test")),
+            _ => panic!("expected a tool event"),
+        }
     }
     fn delta() -> BoundedObservation {
         frame(

@@ -725,6 +725,13 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     setRightTab("preview");
     showResults();
   };
+  /** A file line in a member's live activity: its change in the review sheet (the "변경 보기" path). */
+  const openActivityFile = (path: string) => {
+    if (!admissionReady || chat.switching) return;
+    controller.selectPanel("changes");
+    void controller.refreshChanges();
+    setAllChanges({ focus: { path, at: Date.now() } });
+  };
   const previewResultKey = `${chat.activeChat?.chatId ?? ""}:${chat.agentRuns.filter(run => !["preparing", "running", "cancelling"].includes(run.state)).length}`;
   const previewCovered = previewObscured({ sheetOpen, drawerUsed: bandUsesDrawer(layoutBandNow), drawerOpen, dialogOpen: newChatOpen || Boolean(removal) || preferencesOpen || settingsOpen, popoverOpen: false, rightTab });
 
@@ -965,7 +972,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
               {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats || removing} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? t("m5.navigation.loadingChats") : t("m5.navigation.moreChats")}</button>}
             </div>} />
         </>}
-        story={chat.activeChat ? <div className="m5-conversation"><div className="m5-conversation-scroll"><TeamTimeline onCoordinatorChat={() => { setGoal(chat.activeChat?.goal ?? ""); setNewChatOpen(true); }} controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} phase={activePhase} phaseKind={activeKind} onApprovalsWaiting={onApprovalsWaiting} pinnedSlot={pinnedSlot} /></div><div className="m5-pinned-slot" data-testid="pinned-approval" ref={setPinnedSlot} />{chat.activeChat.schemaVersion !== 1 && <FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} />}</div> : <section className="m5-first-chat" aria-label={t("m5.firstChat.title")}>
+        story={chat.activeChat ? <div className="m5-conversation"><div className="m5-conversation-scroll"><TeamTimeline onCoordinatorChat={() => { setGoal(chat.activeChat?.goal ?? ""); setNewChatOpen(true); }} controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} phase={activePhase} phaseKind={activeKind} onApprovalsWaiting={onApprovalsWaiting} pinnedSlot={pinnedSlot} onOpenFile={openActivityFile} /></div><div className="m5-pinned-slot" data-testid="pinned-approval" ref={setPinnedSlot} />{chat.activeChat.schemaVersion !== 1 && <FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} />}</div> : <section className="m5-first-chat" aria-label={t("m5.firstChat.title")}>
         <h2>{t("m5.firstChat.title")}</h2><p>{t("m5.firstChat.help")}</p>
         <button type="button" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching} onClick={() => setNewChatOpen(true)}>{t("m5.navigation.newChat")}</button>
         <div className="m5-goal-examples">{(["explain", "plan", "readme"] as const).map(example => <button key={example} type="button" className="m5-secondary" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching || goal.trim().length > 0} onClick={() => { setGoal(t(`m5.firstChat.${example}`)); setNewChatOpen(true); }}>

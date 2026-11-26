@@ -2,6 +2,21 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 팀원 카드 '실행 출력'을 자세히: 동사 · 대상, 펼친 내용, 비밀 가림 (`orca/ade-activity-detail`, 기준 feature/ade 613dafde)
+주인님 피드백(스크린샷): 기획 카드의 실행 출력이 "명령 실행, 명령 실행, 파일 수정…"처럼 동사만 보였다. 1차-가 D6 설계("동사 + 대상")대로 고쳤다.
+
+- **원인(둘 다)**
+  - Claude: 엔진이 명령 원문 대신 모델의 한 줄 설명만 `target`에 저장했고, 화면(`activityLine`)은 명령의 target을 줄에서 빼 접힌 칸에 숨겼다(D6 당시 결정). 도구 결과(`user` 프레임의 tool_result)는 `RequiresHandling`으로 버려 종료 코드·출력이 없었다.
+  - Codex: 명령 첫 줄은 저장했지만 같은 화면 규칙으로 숨겨졌다. 파일 변경은 `ToolEvent`에 경로가 없어 대상 없이 "파일 수정"만 남았다. 완료 이벤트의 exitCode·durationMs·aggregatedOutput·changes는 파서가 읽지 않았다.
+- **바뀐 것**: 엔진이 대상과 끝난 결과를 남기고(같은 `id`의 끝 줄), 화면이 "동사 · 대상" 한 줄과 펼친 내용(설명·전체 명령·실행 위치·종료 코드·걸린 시간·바뀐 줄·출력 앞부분)을 보인다. 작업 공간 안 파일 줄은 누르면 검토 시트에서 그 파일의 변경을 연다. 같은 파일 연속 수정은 "N번"으로 묶는다. 형식은 architecture "실행 출력" 절, 결정·함정은 핵심 결정 "작업 내역 채널" 항목.
+- **안전**: 비밀 모양 가림(엔진 저장 전 + 화면 그리기 전, 같은 규칙·공용 사례 26개), 제어·방향 문자 무력화(�), 줄 160자·블록 4,000자·출력 40줄 상한, 텍스트로만 렌더, 작업 공간 밖 경로는 `~/…`. 파일 내용은 저장하지 않는다.
+- **검증**
+  - `npm test` 902/902, `pnpm build`, `git diff --check`.
+  - Rust: `cargo test -p elsecrew-core --lib` 245 통과. `cargo test -p elsecrew-sidecar` 전체 1회: 915 통과·3 실패 → 3개는 예전 줄 모양을 기대한 테스트라 새 규칙으로 고쳤고 해당 묶음(`activity`·`claude_native`·`codex_durable`) 14개 통과. 이후 변경은 영향 묶음만 재실행했다(다른 워커가 sidecar 테스트 대기 중이라 전체 재실행은 생략).
+  - 실제 이벤트: 기본 프로필은 다른 워커 앱(ade-preview-backend)이 쓰고 있어 앱 안 실제 실행 대신, 앱 밖에서 Claude Code 2.1.328(`claude -p --output-format stream-json`, haiku)과 Codex app-server 0.167.2로 같은 짧은 작업(ls·읽기·검색·수정·새 파일·npm test·토큰 섞인 명령·실패 명령)을 실제 실행해 프레임을 기록했다. 이를 실제 Rust 파서·줄 생성기로 재생(`replay_recorded_frames`, `--ignored` 개발 도구)하고, 실제 `MemberCard`를 가짜 브리지로 그려 캡처했다(`scripts/m5-activity-detail-ui.mjs`). 변경 전 캡처는 feature/ade 원래 화면 코드로 그렸고 줄은 예전 엔진 규칙으로 만든 것이다.
+  - 캡처: `~/Documents/elsecrew-ade-activity-detail-2026-11-26/`(before-cards-1·2, after-cards-1·2, after-detail-1·2, replay.json). 토큰은 엔진에서 이미 `GITHUB_TOKEN=••••`로 저장됐고 화면 HTML에 원문이 없음을 확인했다.
+- **남은 것**: 앱 안 실제 실행(로그인된 프로필)으로 카드 확인은 기본 프로필이 비면 다시 한다. Codex의 webSearch 항목과 Claude의 WebFetch는 앱이 지금 표시하지 않거나 거절하므로 '웹 · 도메인' 줄은 Claude WebFetch 요청(거절 표시)에서만 보인다. Claude 명령의 실행 위치는 남기지 않는다.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #9 재확인(B1·I1 부분 해결) 마지막 라운드 (`orca/ade-preview-ui`)
 재확인 `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr9-2.md` 결과 I2·I3은 해결, B1·I1은 부분 해결이었다. 핵심 요구는 "네이티브 뷰가 숨겨진 것이 확인된 뒤에만 좌표를 바꾸거나 덮개를 보인다"였다. 이번 라운드로 둘 다 닫고 **macOS 기본 켜짐을 유지**한다. 코드는 89459c38이다.
 
@@ -126,7 +141,11 @@ PR #6은 머지됐다(8493496e). 재확인(`REVIEW-pr6-2.md`)에서 B1 해결, I
 - **프로세스 증거는 '살아 있을 수 있는 것'만 기록한다(2026-11-17)**: 실행 기록(DB)은 root와 아직 끝난 것으로 관측되지 않은 신원만 저장한다(`TreeTracker::recorded_identities`, `LoginProcess::recorded_for_ledger`). 끝난 프로세스는 다시 돌 수 없으므로 빼도 안전하다. 로그인 잠금 파일은 추가 전용 그대로이고 상한은 65,536개·4MiB다(`HOLD_MAX_BYTES`). 소유권 검사는 '이전 기록 ⊆ 누적 관측'이다. 엔진이 사라진 뒤의 판정(시작 시 정리·명시 복구·잠금 해제)은 `SettledProcTable`을 쓴다. 같은 pid를 시작 시각이 다른 프로세스가 쓰면 기록된 프로세스는 끝난 것이다(살아 있는 두 프로세스는 pid를 공유하지 않는다). 실행 중인 추적은 계속 이를 무결성 실패로 본다. 앱 데이터 사본을 엔진으로 열 때는 살아 있는 이전 엔진이 있으면 정리를 건너뛴다(`previous_engine_still_runs`).
 - **종료는 중단이지 초기화가 아니다(2026-11-17 사용자 결정)**: 중단된 실행은 다음 시작에서 작업 공간을 버리지 않고 canceled로 끝낸다(`settle_interrupted_run`). 남은 에이전트 프로세스는 기록된 신원으로 직접 끝내고, 소멸 확인과 작업 공간 일치가 증명돼야 한다. 예전 unresolved 복구 기록도 같은 증명이 서면 푼다. abandon(작업 공간 포기)은 증명이 안 되는 경우와 삭제에만 남는다. 편집기는 VS Code처럼 저장하지 않은 내용을 종료 뒤에도 보관했다가 되살린다(`editor-drafts.ts`). 같은 run의 lock을 다시 쓸 때는 새 operation id가 필요하다(같은 id에 다른 내용이면 Conflict).
 - **앱 종료는 막지 않는다(2026-11-17 사용자 결정)**: 종료하면 실행 중인 작업을 멈추고 최대 10초 기다린 뒤 묻지 않고 끈다(`quit-coordinator.ts`). 다음 시작에서 기록된 프로세스가 모두 사라졌고 작업 공간과 기록이 정상인 실행은 자동으로 canceled가 된다(`interrupted_run_upserts`). 불확실한 경우만 사용자 복구로 남긴다. 사용자 복구(abandon)는 채팅을 discarded로 만들므로 자동 정리에 쓰지 않는다.
-- **작업 내역 채널과 이전 빌드(2026-11-17)**: 실행 출력의 `activity` 채널은 이전 빌드가 모르는 값이다. 작업 내역이 한 줄이라도 저장된 앱 데이터를 이전 빌드로 열면 출력 재검증에서 거절돼 영구 admission 실패가 된다(schema 버전은 같다). 개발 빌드끼리 같은 실제 데이터를 오가지 않는다. 작업 내역은 작업 공간 상대 경로와 모델의 명령 설명만 공개하며 도구 입력 원문은 공개하지 않는다. Claude 실행은 결과에 적힌 거절이 모두 앱이 거절한 tool_use일 때만 정상 종료로 본다.
+- **작업 내역 채널과 이전 빌드(2026-11-17)**: 실행 출력의 `activity` 채널은 이전 빌드가 모르는 값이다. 작업 내역이 한 줄이라도 저장된 앱 데이터를 이전 빌드로 열면 출력 재검증에서 거절돼 영구 admission 실패가 된다(schema 버전은 같다). 개발 빌드끼리 같은 실제 데이터를 오가지 않는다. Claude 실행은 결과에 적힌 거절이 모두 앱이 거절한 tool_use일 때만 정상 종료로 본다.
+  - **2026-11-26 변경(주인님 피드백)**: 작업 내역은 이제 명령 줄 자체(비밀 모양 가림)·실행 위치·종료 코드·걸린 시간·바뀐 줄 수·명령 출력 앞부분을 남긴다. "도구 입력 원문은 공개하지 않는다"는 옛 규칙은 명령에 한해 폐지됐다. 파일 내용(Read 결과·diff 본문)은 여전히 저장하지 않는다. 형식·규칙은 architecture "실행 출력" 절.
+  - 비밀 가림 규칙은 Rust(`activity.rs` `mask_secrets`)와 TS(`secret-shape.ts` `maskSecrets`) 두 곳이다. 규칙을 바꾸면 둘 다 고치고 `tests/fixtures/m5/secret-mask-cases.json`에 사례를 넣는다(양쪽 테스트가 같은 결과를 요구). 가린 결과는 다시 가려도 같아야 한다(개인 키 블록은 `PRIVATE KEY ••••`로 바꿔 BEGIN 줄이 남지 않게 함).
+  - 함정: Claude CLI의 `tool_use_result`는 성공한 Bash면 `{stdout, stderr}` 객체지만 실패하면 `"Error: Exit code N\n…"` 문자열이다. Write로 새 파일을 만들면 structuredPatch가 빈 배열이고 `type:"create"`·`content`로 줄 수를 센다. Codex는 `item/completed`에 command를 다시 싣지만 sidecar 상태는 시작 때 값을 쓴다.
+  - 함정: activity 행은 append할 수 없다(`complete`만). 끝난 결과는 같은 `id`의 두 번째 행으로 쓰고 화면이 합친다.
 - **실행에는 전체 시간 제한이 없다(2026-11-17 사용자 결정)**: Claude 세션(`SessionChannel`)과 Codex 턴(`TextSession`)의 10분 고정 마감을 없앴다. 도구 실행과 사용자 승인 대기도 시간 제한 없이 기다린다. 남은 상한은 연결 준비 시간(Claude 15초, Codex 30초), 사용자 취소, 앱 종료 정리, 요청·이벤트 수와 바이트 예산이다. `provider_model_proxy`의 600초는 제품에서 쓰지 않는 진단 후보라 그대로 두었다. 실행 시간 상한을 다시 넣으려면 사용자 결정이 필요하다.
 - **정책 밖 도구 요청은 그 요청만 거절한다(2026-11-16)**: Claude 도구 요청이 역할의 경계(작업 공간 안·존재하는 파일·`.git` 등 제외·읽기 전용은 쓰기/명령 불가) 밖이면, `deliver_approval`이 사용자 확인 없이 그 요청만 deny하고 실행은 계속된다. 세션·프로세스·역할 불일치만 실행을 끝낸다. 에이전트용 거절 문구는 `claude_approval::DENIAL_GUIDANCE` 하나다.
 - **중단된 정리 작업은 다음 시작에서 이어 간다(2026-11-16)**: materialization의 'attempting'은 arm만 커밋된 상태이고, batch 쓰기와 'pending' 복귀는 한 트랜잭션이다. 그래서 새 엔진의 admission에서는 'pending'으로 되돌린다(`release_interrupted_attempt`). 'failed'만 계속 거부한다. 엔진이 앱 데이터를 열지 못하면 `~/Library/Logs/Elsecrew/last-engine-admission-failure.json`의 `reason`(kind)로 확인한다(멈춘 원인 기록 `last-engine-failure.json`을 덮지 않는다). `Storage::open`(Legacy·옛 스키마 이전 v6/v7)은 여전히 attempting을 거부한다. 자세한 위치는 `ELSECREW_DEBUG_ADMISSION=1`로 엔진을 띄워 복사본에서 재현한다. Rust 실행 기록에 필드를 추가하면 TS의 실행 상태 이벤트 검증기(`protocol-v1.ts`)도 함께 고친다. 빠뜨리면 이벤트 하나가 엔진 연결을 끊는다.
