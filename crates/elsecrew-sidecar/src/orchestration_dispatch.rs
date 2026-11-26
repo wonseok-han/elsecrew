@@ -1931,6 +1931,9 @@ mod tests {
         }
         assert!(!prompt.contains("planning|design|coding|review"));
         assert!(!prompt.contains("Only coding can edit"));
+        // After the team data and the conversation, the prompt ends by restating the contract (R4).
+        let full = crate::agent_runtime::resolve_prompt(&sidecar.storage, id, &ids, "coordinator").unwrap();
+        assert!(full.ends_with(orchestration::CLOSING_REMINDER.as_bytes()));
     }
     #[test]
     fn orchestration_v3_rejects_delegation_to_a_role_outside_the_snapshot() {
@@ -1945,6 +1948,10 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(sidecar.workflow_state(id).unwrap().status, "paused");
-        assert_eq!(sidecar.storage.projection_records("run").unwrap().len(), 1, "no worker was started");
+        // Asked once more with the team's roleIds (R4); the second miss stops the team.
+        let runs = sidecar.storage.projection_records("run").unwrap();
+        assert_eq!(runs.len(), 2, "the coordinator ran twice");
+        assert!(runs.iter().all(|run| run["record"]["selectedProfile"]["roleId"] == "coordinator"), "no worker was started");
+        assert_eq!(sidecar.storage.projection_record("chat", id).unwrap().unwrap()["record"]["state"], "needsAttention");
     }
 }

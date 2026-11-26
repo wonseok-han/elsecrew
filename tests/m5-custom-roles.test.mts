@@ -8,7 +8,7 @@ import {
 } from "../src/m5/contracts/run-recovery-v1.ts";
 import { validateProjectCatalogRequest, validateProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
 import { roleLabel } from "../src/m5/role-names.ts";
-import { addWorker, canRemoveWorker, isValidTeamDraft, nextWorkerId, removeWorker, sameTeam, teamDraftFrom, updateDefinition, updateProfile } from "../src/m5/team-draft.ts";
+import { addWorker, canRemoveWorker, isValidTeamDraft, removeWorker, sameTeam, teamDraftFrom, updateDefinition, updateProfile } from "../src/m5/team-draft.ts";
 import { ko } from "../src/locales/ko.ts";
 import { en } from "../src/locales/en.ts";
 
@@ -85,14 +85,13 @@ test("team drafts add and remove workers but keep the coordinator and at least o
   draft = teamDraftFrom({ roles: [profile("coordinator"), profile("planning")], roleDefinitions: [{ roleId: "coordinator", name: "총괄", responsibility: "" }, { roleId: "planning", name: "기획", responsibility: "" }] });
   assert.ok(!canRemoveWorker(draft, "planning"));
   assert.ok(!canRemoveWorker(draft, "coordinator"));
-  assert.equal(nextWorkerId(draft), "member-1");
-  const added = addWorker(draft, "New role 2");
+  assert.match(addWorker(draft, "New role 2").roles[2].roleId, /^member-[a-z0-9]{6}$/);
+  const added = addWorker(draft, "New role 2", "member-1");
   assert.equal(added.roles[2].roleId, "member-1");
-  assert.equal(added.roles[2].permission, "workspaceWrite", "new members may write in the isolated copy by default");
+  assert.equal(added.roles[2].permission, "readOnly", "a blank member starts read-only (Q4)");
   assert.ok(isValidTeamDraft(added));
   assert.ok(!sameTeam(added, draft));
-  assert.equal(updateProfile(added, "member-1", { permission: "readOnly" }).roles[2].permission, "readOnly");
-  const writer = added;
+  const writer = updateProfile(added, "member-1", { permission: "workspaceWrite" });
   assert.equal(writer.roles[2].permission, "workspaceWrite");
   assert.equal(updateProfile(writer, "coordinator", { permission: "workspaceWrite" }).roles[0].permission, "readOnly");
   assert.ok(!isValidTeamDraft(updateDefinition(writer, "member-1", { name: " " })));

@@ -22,6 +22,56 @@ pub const G5_DEFAULT_ROLE_DEFINITIONS_V3: &[(&str, &str, &str)] = &[
     ("coding", "개발", "기획과 디자인의 완료 기준에 맞춰 작은 단위로 구현합니다. 기존 구조·스타일·라이브러리를 따르고, 새 라이브러리는 꼭 필요할 때만 이유와 함께 추가합니다. 빌드·테스트·실행을 직접 해 보고 결과를 확인합니다. 새로 만드는 프로젝트라면 실행 방법을 README에 적습니다. 비밀번호나 키 같은 비밀 값은 코드에 넣지 않습니다. 보고에는 바꾼 파일, 실행한 명령과 결과, 남은 문제를 적습니다."),
     ("review", "검증", "완료 기준을 하나씩 직접 실행해 보고 통과·실패로 판정합니다. 실패는 재현 순서, 기대한 결과, 실제 결과를 적습니다. 빈 입력, 데이터 유실, 오류 처리, 보안 문제도 찾습니다. 테스트를 추가하거나 실행할 수는 있지만 제품 코드는 고치지 않고 개발에게 맡길 수정 사항으로 보고합니다. 직접 확인하지 못한 항목은 '확인 못 함'으로 분명히 표시합니다. 판정 결과는 docs/review.md 문서로 남깁니다."),
 ];
+/// Unicode format characters (general category Cf). Saved role names cannot
+/// contain them so a name cannot pose as another (custom roles R4). Must equal
+/// TS `G5_FORMAT_CHAR_RANGES_V3`; both read tests/fixtures/m5/role-names-v3.json.
+pub const G5_FORMAT_CHAR_RANGES_V3: &[(u32, u32)] = &[
+    (0xad, 0xad), (0x600, 0x605), (0x61c, 0x61c), (0x6dd, 0x6dd), (0x70f, 0x70f), (0x890, 0x891), (0x8e2, 0x8e2),
+    (0x180e, 0x180e), (0x200b, 0x200f), (0x202a, 0x202e), (0x2060, 0x2064), (0x2066, 0x206f), (0xfeff, 0xfeff),
+    (0xfff9, 0xfffb), (0x110bd, 0x110bd), (0x110cd, 0x110cd), (0x13430, 0x1343f), (0x1bca0, 0x1bca3),
+    (0x1d173, 0x1d17a), (0xe0001, 0xe0001), (0xe0020, 0xe007f),
+];
+/// Names a member may never take, whatever the coordinator is called now.
+pub const G5_COORDINATOR_NAME_KEYS_V3: &[&str] = &["총괄", "coordinator"];
+
+pub fn has_format_character(text: &str) -> bool {
+    text.chars().any(|c| {
+        let code = c as u32;
+        G5_FORMAT_CHAR_RANGES_V3.iter().any(|(low, high)| code >= *low && code <= *high)
+    })
+}
+
+/// Comparison key: whitespace removed, then lowercased (TS `roleNameKey`).
+pub fn role_name_key(name: &str) -> String {
+    name.chars().filter(|c| !c.is_whitespace()).collect::<String>().to_lowercase()
+}
+
+/// Problems a saved name would have, one per role (None = fine): "format",
+/// "coordinatorName" or "duplicate". Applied when settings are saved, never
+/// when a stored record is read, so an older name still opens.
+pub fn role_name_problems_v3(names: &[&str]) -> Vec<Option<&'static str>> {
+    let keys: Vec<String> = names.iter().map(|name| role_name_key(name)).collect();
+    names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            if has_format_character(name) {
+                return Some("format");
+            }
+            if index == 0 {
+                return None;
+            }
+            if keys[index] == keys[0] || G5_COORDINATOR_NAME_KEYS_V3.contains(&keys[index].as_str()) {
+                return Some("coordinatorName");
+            }
+            let duplicate = keys.iter().enumerate().any(|(other, key)| {
+                other != index && other != 0 && *key == keys[index] && !has_format_character(names[other])
+            });
+            duplicate.then_some("duplicate")
+        })
+        .collect()
+}
+
 pub const G5_RUNTIMES_V1: &[&str] = &["codex", "claude-code"];
 pub const G5_PERMISSIONS_V1: &[&str] = &["readOnly", "workspaceWrite"];
 pub const G5_CHAT_STATES_V1: &[&str] = &[
@@ -416,7 +466,16 @@ fn validate_project_role_settings_update(value: &Value) -> Result<(), G5Contract
     id(object.get("projectId"), "projectId")?;
     positive(object.get("expectedRevision"), "expectedRevision")?;
     if object.contains_key("roleDefinitions") {
-        validate_role_set_v3(object, "roles", true)
+        validate_role_set_v3(object, "roles", true)?;
+        // Saving only: stored records keep opening (see role_name_problems_v3).
+        let names: Vec<&str> = array(object.get("roleDefinitions"), "roleDefinitions", G5_ROLES_MAX_V3)?
+            .iter()
+            .map(|definition| definition["name"].as_str().unwrap_or_default())
+            .collect();
+        if role_name_problems_v3(&names).iter().any(Option::is_some) {
+            return fail("role names must be plain, unique and distinct from the coordinator");
+        }
+        Ok(())
     } else {
         validate_role_set(object.get("roles"), "roles")
     }

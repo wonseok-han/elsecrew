@@ -34,6 +34,52 @@ export const G5_DEFAULT_ROLE_DEFINITIONS_V3: readonly RoleDefinitionV3[] = [
   { roleId: "coding", name: "개발", responsibility: "기획과 디자인의 완료 기준에 맞춰 작은 단위로 구현합니다. 기존 구조·스타일·라이브러리를 따르고, 새 라이브러리는 꼭 필요할 때만 이유와 함께 추가합니다. 빌드·테스트·실행을 직접 해 보고 결과를 확인합니다. 새로 만드는 프로젝트라면 실행 방법을 README에 적습니다. 비밀번호나 키 같은 비밀 값은 코드에 넣지 않습니다. 보고에는 바꾼 파일, 실행한 명령과 결과, 남은 문제를 적습니다." },
   { roleId: "review", name: "검증", responsibility: "완료 기준을 하나씩 직접 실행해 보고 통과·실패로 판정합니다. 실패는 재현 순서, 기대한 결과, 실제 결과를 적습니다. 빈 입력, 데이터 유실, 오류 처리, 보안 문제도 찾습니다. 테스트를 추가하거나 실행할 수는 있지만 제품 코드는 고치지 않고 개발에게 맡길 수정 사항으로 보고합니다. 직접 확인하지 못한 항목은 '확인 못 함'으로 분명히 표시합니다. 판정 결과는 docs/review.md 문서로 남깁니다." },
 ];
+/**
+ * Unicode format characters (general category Cf: direction overrides and
+ * isolates, zero-width characters, the byte order mark …). Saved role names
+ * cannot contain them, so a name cannot pose as another (custom roles R4).
+ * Must equal Rust `G5_FORMAT_CHAR_RANGES_V3`; both read
+ * tests/fixtures/m5/role-names-v3.json in their tests.
+ */
+export const G5_FORMAT_CHAR_RANGES_V3: readonly (readonly [number, number])[] = [
+  [0xad, 0xad], [0x600, 0x605], [0x61c, 0x61c], [0x6dd, 0x6dd], [0x70f, 0x70f], [0x890, 0x891], [0x8e2, 0x8e2],
+  [0x180e, 0x180e], [0x200b, 0x200f], [0x202a, 0x202e], [0x2060, 0x2064], [0x2066, 0x206f], [0xfeff, 0xfeff],
+  [0xfff9, 0xfffb], [0x110bd, 0x110bd], [0x110cd, 0x110cd], [0x13430, 0x1343f], [0x1bca0, 0x1bca3],
+  [0x1d173, 0x1d17a], [0xe0001, 0xe0001], [0xe0020, 0xe007f],
+];
+/** Names a member may never take, whatever the coordinator is called now (compared by `roleNameKey`). */
+export const G5_COORDINATOR_NAME_KEYS_V3: readonly string[] = ["총괄", "coordinator"];
+export type RoleNameProblemV3 = "format" | "coordinatorName" | "duplicate";
+
+export function hasFormatCharacter(text: string): boolean {
+  for (const char of text) {
+    const code = char.codePointAt(0)!;
+    if (G5_FORMAT_CHAR_RANGES_V3.some(([low, high]) => code >= low && code <= high)) return true;
+  }
+  return false;
+}
+
+/** Comparison key: every White_Space character removed, then lowercased (Rust: `char::is_whitespace`, `to_lowercase`). */
+export function roleNameKey(name: string): string {
+  return name.replace(/\p{White_Space}/gu, "").toLowerCase();
+}
+
+/**
+ * Problems a saved name would have, one per role in order (null = fine).
+ * Applied when settings are saved, never when a stored record is read, so an
+ * older name that breaks a rule still opens and the screen asks to rename it.
+ */
+export function roleNameProblemsV3(names: readonly string[]): readonly (RoleNameProblemV3 | null)[] {
+  const keys = names.map(roleNameKey);
+  const coordinator = new Set([keys[0], ...G5_COORDINATOR_NAME_KEYS_V3]);
+  return names.map((name, index) => {
+    if (hasFormatCharacter(name)) return "format";
+    if (index === 0) return null;
+    if (coordinator.has(keys[index])) return "coordinatorName";
+    const duplicate = keys.some((key, other) => other !== index && other !== 0 && key === keys[index] && !hasFormatCharacter(names[other]));
+    return duplicate ? "duplicate" : null;
+  });
+}
 export const G5_RUNTIMES_V1 = ["codex", "claude-code"] as const;
 export const G5_PERMISSIONS_V1 = ["readOnly", "workspaceWrite"] as const;
 export const G5_CHAT_STATES_V1 = [
@@ -399,8 +445,11 @@ export function validateProjectRoleSettingsUpdateRequestV1(value: unknown): Proj
   exactKeys(object, ["projectId", "expectedRevision", "roles", ...(v3 ? ["roleDefinitions"] : [])]);
   requireId(object.projectId, "projectId");
   positiveSequence(object.expectedRevision, "expectedRevision");
-  if (v3) validateRoleSetV3(object.roles, object.roleDefinitions, "roles", true);
-  else validateRoleSet(object.roles, "roles");
+  if (v3) {
+    validateRoleSetV3(object.roles, object.roleDefinitions, "roles", true);
+    // Saving only: stored records keep opening (see roleNameProblemsV3).
+    if (roleNameProblemsV3((object.roleDefinitions as readonly RoleDefinitionV3[]).map(definition => definition.name)).some(Boolean)) fail("role names must be plain, unique and distinct from the coordinator");
+  } else validateRoleSet(object.roles, "roles");
   return object as unknown as ProjectRoleSettingsUpdateRequestV1;
 }
 

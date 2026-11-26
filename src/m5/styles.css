@@ -1872,3 +1872,92 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-layout-right .m5-result-box.m5-result-attention { border-color: color-mix(in srgb, var(--status-attention) 40%, var(--line-default)); }
 .m5-role-lead { flex: none; color: var(--role-1); font-size: var(--text-xs); line-height: 1; }
 .m5-pinned-slot .m5-approval-card:focus-visible, .m5-pinned-slot .m5-approval-card:focus { outline: 2px solid var(--status-attention); outline-offset: 2px; }
+
+/* Team roles editor (custom roles R1): vertical list + editor, semantic tokens only. */
+.m5-settings-dialog { width: min(1180px, calc(100vw - 32px)); height: min(820px, calc(100vh - 32px)); }
+.m5-team-intro { margin: 0 0 var(--space-3); color: var(--text-secondary); font-size: var(--text-m); line-height: 1.6; }
+.m5-team-running { margin: var(--space-3) 0 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-m); background: var(--status-running-bg); color: var(--status-running-text); font-size: var(--text-s); }
+.m5-team-editor { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); gap: var(--space-4); align-items: start; margin: var(--space-4) 0; }
+.m5-team-pane { position: relative; display: grid; gap: var(--space-2); min-width: 0; padding: var(--space-3); border: 1px solid var(--line-default); border-radius: var(--radius-l); background: var(--bg-pane); }
+.m5-team-head { display: flex; justify-content: space-between; gap: var(--space-2); margin: 0 0 var(--space-1); color: var(--text-tertiary); font-size: var(--text-xs); }
+.m5-team-head span:last-child { flex: none; font-variant-numeric: tabular-nums; }
+.m5-team-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.m5-team-row { position: relative; display: flex; align-items: center; gap: var(--space-1); min-width: 0; padding: 2px var(--space-1); border: 1px solid transparent; border-radius: var(--radius-m); }
+.m5-team-row[data-selected="true"] { border-color: var(--line-strong); background: var(--bg-selected); }
+.m5-team-row[data-dragging="true"] { opacity: .45; }
+.m5-team-handle { flex: none; width: 18px; color: var(--text-tertiary); font-size: var(--text-xs); text-align: center; cursor: grab; user-select: none; }
+.m5-team-row:first-child .m5-team-handle { cursor: default; }
+.m5-team-select { flex: 1 1 auto; display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: var(--space-2); border: 0; background: transparent; text-align: left; font-weight: 400; }
+.m5-team-select:hover:not(:disabled) { background: var(--bg-hover); }
+.m5-team-select .m5-role-icon { width: 26px; height: 26px; font-size: var(--text-s); }
+.m5-team-row-text { display: grid; gap: 2px; min-width: 0; }
+.m5-team-row-text strong { overflow: hidden; color: var(--text-primary); font-size: var(--text-m); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.m5-team-row-text small { overflow: hidden; color: var(--text-tertiary); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+.m5-team-row-text small.m5-role-model-warning { color: var(--status-attention-text); }
+.m5-team-badge { flex: none; padding: 1px var(--space-2); border: 1px solid var(--line-default); border-radius: 999px; color: var(--text-secondary); font-size: var(--text-xs); font-weight: 500; white-space: nowrap; }
+.m5-team-badge[data-permission="workspaceWrite"] { border-color: color-mix(in srgb, var(--status-done) 45%, transparent); color: var(--status-done-text); }
+.m5-team-problem { flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--status-danger-bg); color: var(--status-danger-text); font-size: var(--text-xs); font-weight: 700; }
+.m5-team-more { flex: none; padding: var(--space-1) var(--space-2); border: 0; background: transparent; color: var(--text-secondary); font-size: var(--text-l); line-height: 1; }
+.m5-team-more:hover:not(:disabled), .m5-team-more[aria-expanded="true"] { background: var(--bg-hover); color: var(--text-primary); }
+/* The insertion line sits in the gap above a row; it shows on hover and while dragging. */
+.m5-team-insert { position: absolute; left: 22px; right: var(--space-1); top: -6px; z-index: 1; height: 10px; padding: 0; border: 0; background: transparent; opacity: 0; }
+.m5-team-insert::before { content: ""; position: absolute; left: 10px; right: 0; top: 4px; height: 2px; border-radius: 1px; background: var(--status-running); }
+.m5-team-insert span { position: absolute; left: -2px; top: -3px; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--status-running); color: var(--bg-app); font-size: var(--text-s); font-weight: 700; line-height: 1; }
+.m5-team-insert:hover:not(:disabled), .m5-team-insert:focus-visible, .m5-team-insert[data-drop="true"] { opacity: 1; background: transparent; }
+.m5-team-insert:disabled:not([data-drop="true"]) { display: none; }
+.m5-team-end { position: relative; height: 8px; }
+.m5-team-end .m5-team-insert { top: -4px; }
+.m5-team-foot { position: relative; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--line-subtle); }
+.m5-team-foot small { color: var(--text-tertiary); font-size: var(--text-xs); }
+.m5-team-pane .m5-role-team-tools { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.m5-team-pane .m5-role-team-tools button { padding: var(--space-1) var(--space-2); font-size: var(--text-xs); }
+/* Menus float over the list; they never push rows around. */
+.m5-team-menu { position: absolute; z-index: 5; right: 0; top: calc(100% + 2px); display: grid; gap: 1px; min-width: 220px; max-width: 320px; max-height: 420px; overflow: auto; padding: var(--space-1); border: 1px solid var(--line-strong); border-radius: var(--radius-m); background: var(--bg-raised); box-shadow: 0 12px 32px #0008; }
+.m5-team-foot .m5-team-menu { left: 0; right: auto; top: auto; bottom: calc(100% + 4px); }
+.m5-team-menu button { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); width: 100%; padding: var(--space-2); border: 0; background: transparent; color: var(--text-primary); text-align: left; font-size: var(--text-s); font-weight: 400; }
+.m5-team-menu button:hover:not(:disabled), .m5-team-menu button:focus-visible { background: var(--bg-hover); outline: none; }
+.m5-team-menu button.m5-danger { border: 0; background: transparent; color: var(--status-danger-text) !important; }
+.m5-team-menu kbd { color: var(--text-tertiary); font-family: inherit; font-size: var(--text-xs); }
+.m5-team-add-menu { min-width: 300px; }
+.m5-team-add-menu button { display: grid; justify-content: stretch; gap: 2px; }
+.m5-team-add-menu strong { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); font-weight: 600; }
+.m5-team-add-menu small { color: var(--text-tertiary); font-size: var(--text-xs); }
+.m5-team-menu-group { margin: var(--space-2) var(--space-2) 2px; color: var(--text-tertiary); font-size: var(--text-xs); }
+.m5-team-menu-note { margin: var(--space-1) var(--space-2); color: var(--status-attention-text); font-size: var(--text-xs); }
+/* The editor on the right. */
+.m5-role-editor { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3) var(--space-4); min-width: 0; padding: var(--space-4); border: 1px solid var(--line-default); border-radius: var(--radius-l); background: var(--bg-pane); }
+.m5-role-editor > header { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.m5-role-editor > header .m5-role-icon { width: 28px; height: 28px; font-size: var(--text-m); }
+.m5-role-editor > header h3 { margin: 0; overflow-wrap: anywhere; font-size: var(--text-l); }
+.m5-role-editor > header small, .m5-role-editor > header details { color: var(--text-tertiary); font-size: var(--text-xs); }
+.m5-role-editor > header code { margin-left: var(--space-1); color: var(--text-secondary); }
+.m5-role-editor label { display: grid; gap: var(--space-1); min-width: 0; color: var(--text-secondary); font-size: var(--text-s); }
+.m5-role-editor input:not([type="radio"]), .m5-role-editor select, .m5-role-editor textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-m); background: var(--bg-sunken); color: var(--text-primary); font: inherit; }
+.m5-role-editor textarea { resize: vertical; line-height: 1.6; }
+.m5-role-editor .m5-role-field-wide { grid-column: 1 / -1; }
+.m5-role-editor p { margin: 0; }
+.m5-role-text-meta { display: flex; justify-content: space-between; gap: var(--space-3); color: var(--text-tertiary); font-size: var(--text-xs); }
+.m5-role-text-meta small:last-child { flex: none; font-variant-numeric: tabular-nums; }
+.m5-role-editor small { color: var(--text-tertiary); font-size: var(--text-xs); line-height: 1.5; }
+.m5-role-editor .m5-error { padding: var(--space-2) var(--space-3); border-radius: var(--radius-m); background: var(--status-danger-bg); color: var(--status-danger-text); font-size: var(--text-s); }
+.m5-role-warning { padding: var(--space-2) var(--space-3); border-radius: var(--radius-m); background: var(--status-attention-bg); color: var(--status-attention-text); font-size: var(--text-s); }
+.m5-role-permissions { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); margin: 0; padding: 0; border: 0; }
+.m5-role-permissions legend { margin-bottom: var(--space-1); padding: 0; color: var(--text-secondary); font-size: var(--text-s); }
+.m5-role-permissions label { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--line-default); border-radius: var(--radius-m); cursor: pointer; }
+.m5-role-permissions label[data-checked="true"] { border-color: color-mix(in srgb, var(--status-done) 60%, transparent); background: var(--status-done-bg); }
+.m5-role-permissions label span { display: grid; gap: 2px; }
+.m5-role-permissions strong { color: var(--text-primary); font-weight: 600; }
+.m5-role-permission-fixed { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); color: var(--text-secondary); font-size: var(--text-s); }
+.m5-role-permission-note { padding-top: var(--space-2); border-top: 1px solid var(--line-subtle); color: var(--text-tertiary); font-size: var(--text-xs); }
+.m5-role-editor details summary { cursor: pointer; color: var(--text-tertiary); font-size: var(--text-xs); }
+.m5-role-editor details > label { margin-top: var(--space-2); }
+.m5-role-reset { justify-self: start; }
+.m5-team-warnings { margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3) var(--space-2) var(--space-6); border-radius: var(--radius-m); background: var(--status-attention-bg); color: var(--status-attention-text); font-size: var(--text-s); }
+.m5-team-actions { justify-content: flex-end; }
+.m5-team-actions .m5-team-unsaved { flex: 1 1 200px; margin: 0; color: var(--status-attention-text); font-size: var(--text-s); }
+.m5-team-actions > button:first-child { background: var(--bg-raised); color: var(--text-primary); }
+.m5-team-actions .m5-team-save { border-color: transparent; background: var(--action-bg); color: var(--action-text); }
+.m5-team-actions .m5-team-save:hover:not(:disabled) { background: var(--action-bg-hover); }
+/* App defaults inside the settings page: same editor, one column when narrow. */
+.m5-settings-inline .m5-team-intro { display: none; }
+@media (max-width: 1100px) { .m5-team-editor { grid-template-columns: minmax(0, 1fr); } .m5-role-editor { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

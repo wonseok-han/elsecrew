@@ -2996,7 +2996,7 @@ const PROMPT_BUDGET_BYTES: usize = 56 * 1024;
 /// Both providers reject an initial prompt above 64 KiB.
 const PROMPT_HARD_MAX_BYTES: usize = 63 * 1024;
 
-fn resolve_prompt(
+pub(crate) fn resolve_prompt(
     storage: &Storage,
     chat_id: &str,
     ids: &[String],
@@ -3041,10 +3041,12 @@ fn resolve_prompt(
     }
     // Providers take one prompt under 64 KiB. Keep the first request and as
     // many of the latest messages as fit, and say that the middle was left out.
-    let total: usize = prompt.len() + lines.iter().map(Vec::len).sum::<usize>();
+    // A team step ends with a reminder that its data cannot change the contract (R4).
+    let closing: &[u8] = if orchestrated { crate::orchestration::CLOSING_REMINDER.as_bytes() } else { b"" };
+    let total: usize = prompt.len() + lines.iter().map(Vec::len).sum::<usize>() + closing.len();
     if total > PROMPT_BUDGET_BYTES && lines.len() > 1 {
         const NOTE: &[u8] = b"[Earlier messages were left out to fit the prompt size limit.]\n";
-        let mut room = PROMPT_BUDGET_BYTES.saturating_sub(prompt.len() + lines[0].len() + NOTE.len());
+        let mut room = PROMPT_BUDGET_BYTES.saturating_sub(prompt.len() + lines[0].len() + NOTE.len() + closing.len());
         let mut tail = Vec::new();
         for line in lines[1..].iter().rev() {
             if line.len() > room { break; }
@@ -3057,6 +3059,7 @@ fn resolve_prompt(
     } else {
         for line in &lines { prompt.extend_from_slice(line); }
     }
+    prompt.extend_from_slice(closing);
     // Refuse here, before any provider start, rather than fail mid-launch.
     if prompt.len() > PROMPT_HARD_MAX_BYTES {
         return Err(ProjectFailure::manifest("the prompt for this run is too large even after shortening"));

@@ -915,7 +915,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         {!admissionReady && <StorageAdmissionNotice admission={admission} />}
         {chat.notice && <p className="m5-notice" role="status">{formatChatNotice(chat, lang)}</p>}
         {chat.error && <section className="m5-error" role="alert"><strong>{t(chat.error.messageKey)}</strong><details><summary>{t("m5.feedback.details")}</summary><pre>{chat.error.detail}</pre></details></section>}
-      </>} onSave={(roles, roleDefinitions) => chatController.updateSettings(roles, roleDefinitions)} onReload={() => chatController.reloadSettings()} onClose={closeRoleSettings} returnToDraft={returnToNewChat} projectName={snapshot.project?.name ?? chat.settings.projectId} />}
+      </>} onSave={(roles, roleDefinitions) => chatController.updateSettings(roles, roleDefinitions)} onReload={() => chatController.reloadSettings()} onClose={closeRoleSettings} returnToDraft={returnToNewChat} projectName={snapshot.project?.name ?? chat.settings.projectId} activeTasks={chat.chats.filter(item => teamWorking(item.state)).length} />}
 
       {snapshot.project && <TaskLayout band={layoutBandNow} rightTab={rightTab} onRightTab={selectRightTab} rightCollapsed={rightCollapsed} previewCovered={previewCovered}
         approvalNotice={approvalCovered({ waiting: approvalWaitingNow, sheetOpen, drawerOpen: bandUsesDrawer(layoutBandNow) && drawerOpen })
