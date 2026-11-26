@@ -2,6 +2,29 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #9 재확인(B1·I1 부분 해결) 마지막 라운드 (`orca/ade-preview-ui`)
+재확인 `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr9-2.md` 결과 I2·I3은 해결, B1·I1은 부분 해결이었다. 핵심 요구는 "네이티브 뷰가 숨겨진 것이 확인된 뒤에만 좌표를 바꾸거나 덮개를 보인다"였다. 이번 라운드로 둘 다 닫고 **macOS 기본 켜짐을 유지**한다. 코드는 89459c38이다.
+
+- **main이 먼저 숨김**: 창 `will-resize`·`resize`·전체 화면 전환에서 `geometryChanged()`가 바로 숨기고 위치를 잊는다. 보기 메뉴의 확대·축소는 기본 role 대신 직접 만든 항목(`electron/zoom-menu.ts`)이라, 숨김이 확대보다 먼저다. 계약에 측정 시점의 페이지 크기(`page`)를 넣어, 크기·배율 변화 전의 측정은 쓰지 않는다(`pageSizeMatches`). 보이는 뷰가 자리를 옮기면 숨김→이동→표시 순서다.
+- **렌더러 순서는 `src/m5/preview-layout-loop.ts`**: 숨김은 대기열을 건너뛰어 바로 보낸다. 표시는 앞선 응답을 모두 기다린다. 받아들여진 배치만 사실로 치고, 3초 무응답은 실패로 보고 다시 보낸다. 숨겨진 동안에는 측정이 바뀌어도 더 보내지 않는다. 붙잡은 덮개는 main 숨김 확인 뒤 **모두 함께** 놓는다. 1.5초 무응답이면 떼어 내고(close), 그 응답 뒤에만 놓은 다음 탭이 다시 연다.
+- **덮개**: 붙잡힌 요소는 본문과 `::backdrop`을 함께 숨기고(`opacity 0`, backdrop-filter 없음) `inert`로 포커스·입력을 막는다. 놓을 때 포커스를 돌려준다. '새 결과'·차단 안내 띠는 숨김 확인 뒤에만 나타나고, 배치가 끝난 뒤(`settled`) 새 자리로 다시 보인다.
+- **발견(재조사 방지)**
+  - 덮개 두 개(종 버튼과 그 안 패널)를 하나씩 놓으며 그때마다 가림을 판정하면, 아직 `inert`인 쪽이 hit test에 잡히지 않는다. 그래서 뷰가 보였다 숨었다를 수십 ms 간격으로 반복했다. 모두 놓은 뒤 한 번만 판정해야 한다.
+  - 닫힌 서랍에서는 무대 측정이 '없음'과 실제 값을 오간다. 숨김 상태에서도 좌표가 바뀔 때마다 숨김을 다시 보내면 요청이 폭주한다(4분에 1,600개 → 수정 뒤 89개).
+  - 떼어 낼 때 main의 `closed{requested}` 알림이 close 응답보다 먼저 온다. 그래서 현재 미리보기의 `requested` 닫힘은 다시 열기로 처리한다.
+  - 격리 프로브는 페이지 크기를 요청마다 새로 재야 하고, 권한 호출 전에 창 포커스를 다시 가져와야 한다(이 컴퓨터는 다른 작업과 같이 써서 다른 앱이 앞에 올 수 있다).
+- **검증**
+  - 단위·빌드: `npm test` 897/897, 보안 묶음(`m5:test:security`) 93/93, `pnpm build`, 렌더러 마운트 스모크 68 통과.
+  - 실제 앱 UI 스모크: 검사 34개 PASS(커밋 89459c38). 응답을 일부러 900ms 늦추거나(적용 전·후) 끊은 상태에서 확인했다.
+    - 대화상자·backdrop·검토 시트가 숨김 응답 전까지 보이지 않고 입력을 받지 않았다.
+    - 띠는 숨김 응답 뒤에 생겼고, 뷰는 새 무대 위치로 돌아왔다.
+    - 창 크기를 바꾸자 main이 즉시 숨겼다.
+    - 무응답이면 떼어 냈고, 닫기 응답 뒤에만 덮개를 보였다.
+  - 격리 프로브: 두 모드 모두 관측 70/70 PASS, 관측 불가 16(IPv6), dirty 없음.
+  - 기본값 확인: 개발·패키지 모두 PASS.
+  - 증거는 `~/Documents/elsecrew-ade-preview-ui-2026-11-26/pr9-review2/`(`isolation/` 포함)에 있다.
+- **남은 과제**: 라우팅 가능한 IPv6가 있는 기기에서 IPv6 WebRTC 차단 관측, 패키지 앱 안의 격리 프로브, Windows 실행·검증(기본 꺼짐 유지).
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #9 독립 검토(차단 1·중요 5·경미 3) 전부 반영 (`orca/ade-preview-ui`)
 검토 `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr9.md`(대상 e5819e0e). B1·I1을 해결해 **macOS 기본 켜짐은 유지**하고, 확인하지 않은 Windows·Linux는 기본으로 껐다.
 
@@ -51,7 +74,7 @@ PR #6은 머지됐다(8493496e). 재확인(`REVIEW-pr6-2.md`)에서 B1 해결, I
   - 함정: 프로젝트 설정을 저장하면 `RoleSettings`가 revision 키로 다시 마운트돼 컴포넌트 안 상태(안내 문구 등)가 사라진다. 저장 뒤에도 보여야 할 안내는 작업대(`workbench.tsx`)가 들고 있어야 한다.
   - 함정: sidecar 통합 시험(`orchestration_dispatch`)의 fake 에이전트는 `target/debug/elsecrew-sidecar` 실행 파일을 띄운다. `cargo test --lib`만 돌리면 "fake agent control launcher failed: No such file"로 15개가 실패하니 `cargo build -p elsecrew-sidecar`를 먼저 한다.
 
-- **결과 미리보기의 DNS 미리 찾기(2026-11-26)**: Electron 43에서 `<link rel=dns-prefetch>`는 CSP·`webRequest`·고정 프록시를 모두 거치지 않고 실제 DNS 질의를 보낸다. 미리보기가 켜지면(macOS 기본값, Windows·Linux는 `ELSECREW_PREVIEW=1`일 때만, `=0`으로 끔) `--blink-settings=dnsPrefetchingEnabled=false`(앱 전체)를 유지할 것. 미리보기 뷰는 앱 페이지 위에 그려지므로, 미리보기 영역을 덮는 새 화면 요소는 `previewObscured` 목록에 넣거나 DOM 변화로 나타나야 한다(탭이 그리기 전에 붙잡고 뷰를 숨긴 뒤 보임, PR #9 I1). CSS `:hover`만으로 뜨는 덮개와 `pointer-events: none`인 덮개는 감지되지 않는다. 앱 확대·축소에서 좌표는 main이 `getZoomFactor()`로 바꾸고, 렌더러 측정의 `devicePixelRatio`가 맞지 않으면 숨긴다. 확인은 `pnpm m5:test:preview-isolation`의 net log 판정이며 Electron을 올릴 때 다시 돌린다. 미리보기 토큰은 renderer에 주지 않고, 작업 공간 주소는 sidecar가 채팅 바인딩에서 꺼낸다(renderer 값 불사용).
+- **결과 미리보기의 DNS 미리 찾기(2026-11-26)**: Electron 43에서 `<link rel=dns-prefetch>`는 CSP·`webRequest`·고정 프록시를 모두 거치지 않고 실제 DNS 질의를 보낸다. 미리보기가 켜지면(macOS 기본값, Windows·Linux는 `ELSECREW_PREVIEW=1`일 때만, `=0`으로 끔) `--blink-settings=dnsPrefetchingEnabled=false`(앱 전체)를 유지할 것. 미리보기 뷰는 앱 페이지 위에 그려지므로, 미리보기 영역을 덮는 새 화면 요소는 `previewObscured` 목록에 넣거나 DOM 변화로 나타나야 한다(탭이 그리기 전에 붙잡고 뷰를 숨긴 뒤 보임, PR #9 I1). CSS `:hover`만으로 뜨는 덮개와 `pointer-events: none`인 덮개는 감지되지 않는다. 앱 확대·축소에서 좌표는 main이 `getZoomFactor()`로 바꾸고, 렌더러 측정의 `devicePixelRatio`·페이지 크기가 맞지 않으면 숨긴다. 창 크기·확대를 바꾸는 새 경로는 반드시 그 전에 `previewManager.geometryChanged()`를 부를 것(보기 메뉴 확대는 `electron/zoom-menu.ts`). 숨김·표시 순서는 `src/m5/preview-layout-loop.ts` 한 곳에서만 정한다. 확인은 `pnpm m5:test:preview-isolation`의 net log 판정이며 Electron을 올릴 때 다시 돌린다. 미리보기 토큰은 renderer에 주지 않고, 작업 공간 주소는 sidecar가 채팅 바인딩에서 꺼낸다(renderer 값 불사용).
 
 - **작업 레이아웃의 규칙은 순수 함수에 있다(2026-11-26, ADE 1차-나)**: 창 폭 구간·오른쪽 폭·편집기 요청 해석·기본 탭·미리보기 겹침은 `task-layout-model.ts`, 목록 묶음은 `task-list-model.ts`, 단계 칸·카드 결합은 `task-story-model.ts`, 역할 색은 `role-colors.ts`. 화면 컴포넌트는 그 값을 그리기만 한다. 합치기·반영·버리기 버튼은 결과 상자(`result-box.tsx`) 한 곳에만 둔다 — 다른 곳은 "결과 상자에서 넣기" 링크로 가리킨다.
   - 측정 함정: CDP `Emulation.setDeviceMetricsOverride`로 폭을 바꾸면 CSS는 즉시 바뀌지만, 창이 가려져 있으면 프레임이 없어 `resize`·`matchMedia` 처리기가 다음 캡처 때 돈다. 재기 전에 `Page.captureScreenshot`으로 프레임을 한두 번 그리게 한다.
