@@ -34,53 +34,6 @@
 - **함정(재조사 방지)**: 측정기에서 다리로 `readWorkspaceFile`을 직접 부르면 스트림을 화면이 소비하지 않아도 main이 정리하지만(수정 후), 수정 전에는 그 자체가 재시작을 일으킨다. 파일 열기는 화면 트리 클릭으로 잰다. 트리는 가상화돼 보이지 않는 행이 DOM에 없고, Monaco는 공백을 NBSP로 그린다. fake 실행은 60초면 끝난다. 저장소는 EXCLUSIVE라 다른 연결이 쓸 수 없다. 대기 루프에 `pgrep -f '...rustc'`를 쓰면 자기 명령줄과 일치해 영원히 기다린다(`pgrep -x`).
 - **PR**: https://github.com/wonseok-han/elsecrew/pull/15 (`--base feature/ade`). CI(run 45809641599) macOS·Windows·website·GitGuardian 모두 통과.
 - **남은 일**: 실제 Claude 권한 요청으로 D3(카드가 '불러오는 중…' 뒤 2~4초에 사라짐)가 줄었는지 확인(실계정 필요, fake 공급자에는 승인 큐가 없어 승인 경로 처리 시간은 0으로 나옴). 파일 읽기의 git 확인 재사용 검토. Codex 검토 대응.
-
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #12 독립 검토(차단 1·중요 6·경미 4) 전부 반영 (`orca/ade-screens-u2-u4`)
-검토 `~/Documents/elsecrew-ade-screens-u2-u4-2026-11-26/REVIEW-pr12.md`(대상 23365fad). 재현 시험은 `tests/m5-ade-screens-u2-u4.test.mts`(21개), 보안 하네스, 렌더러 스모크, 새 네이티브 시나리오(`ELSECREW_SMOKE_PROJECTS=1`)에 나눠 넣었다.
-
-- **B1 (차단) 폴더 확인**: 앱 안 확인 창(IPC `m5:folder-confirm:*`, preload `m5FolderConfirm`, 화면 창, 문구 키)을 모두 지우고 `electron/main.ts`·`preload.ts`·`window.d.ts`를 기저(7378332a)로 되돌렸다. 빈 폴더·일반 폴더·기록 없음은 다시 main의 `dialog.showMessageBox`로 묻는다. 결정 Q7은 이 경계 때문에 양보한다.
-  - 시험: 보안 하네스 "a folder that becomes a project is confirmed in main's own box; the page has no way to answer it"(답할 채널 없음, 취소 시 미오픈·페이지로 보낸 것 없음, 시작 시 main이 고른 폴더만 열림). 단위 "PR #12 B1". 네이티브 시나리오에서 빈 폴더 → main 확인 1회·취소 시 폴더 비어 있음.
-  - I4(확인 창 수명)는 이 창이 없어져 함께 해소됐다.
-- **I1 Q9 권한 선저장**: 첫 작업 창(`proposeAll`)에서 권한 저장 버튼을 없애고 허용의 의미(`m5.permissions.boundary`)를 보이게 했다. `createChat`은 확인 전에는 팀·권한을 아무것도 저장하지 않고(`firstSetupAgreed`), 보이는 권한이 바뀌면 체크가 풀리며, 권한을 읽기 전에는 체크가 꺼져 있다. 첫 작업 도움말을 "확인 체크를 하고 보내야 이 권한이 저장돼요"로 바꿨다.
-  - 시험: 단위 "PR #12 I1", 네이티브 시나리오(확인 전·권한 변경 뒤 `recorded:false`, 보낸 뒤 보인 값 저장).
-- **I2 전환 메뉴 추가**: 작업이 열려 있거나 저장하지 않은 편집이 있으면 '프로젝트 추가'를 끄고 이유(`m5.switch.addTaskOpen`/`unsaved`)를 보인다. 프로젝트가 열리지 않으면(전환 실패 포함) 홈·처음 시작 위에 이유와 '원본 폴더 다시 선택'을 보인다(`home-error`).
-  - 시험: 단위 "PR #12 I2", 네이티브 시나리오(작업 없음 → 추가 켜짐·취소 시 화면 유지, 작업 열림 → 꺼짐+이유).
-- **I3 목록 실패**: `onHasProjects` → `onListState`(projects/empty/failed). 실패면 홈의 오류·다시 확인(보조 버튼)을 보이고 처음 시작을 띄우지 않는다. 시험: 단위 "PR #12 I3", 렌더러 스모크 22 `home-catalog-error`.
-- **I5 삭제 대상**: 프로젝트 삭제 확인에 '이 프로젝트의 폴더'와 전체 경로를 본문으로 보인다(제목 `title` 제거). 시험: 단위 "PR #12 I5", 렌더러 스모크 21(경로·첫 초점 취소), 네이티브 시나리오 05.
-- **I6 네이티브 스모크**: `m5-project-ui-smoke.cjs`의 새 작업 입력(`.m5-new-task-goal input`), 첫 작업 확인 체크, 재로딩 분기(홈 '이어서 하기'), 메모리 분기(닫은 뒤 홈 카드), 팀 역할(전환 메뉴, PR #8 편집기) 선택자를 고쳤다. 새 `ELSECREW_SMOKE_PROJECTS=1` 시나리오로 추가·전환·삭제·확인 취소·첫 작업을 실제 sidecar에서 확인했다(PASS).
-  - 기본 흐름은 첫 작업 뒤 옛 diff·반영 단계(`.m5-chat-review` '작업 사본 diff 열기' 등, L1 이전 화면)에서 여전히 멈춘다. 이 PR 이전부터의 문제라 별도 작업으로 남긴다(11-26 아카이브 기록과 같음).
-- **경미**: 1) 설정·팀 역할 창을 닫으면 연 컨트롤로 초점 복귀(`focusReturn`/`focusBack`, 쓰이지 않던 `settingsButtonRef` 제거). 2) '저장'·'바꾸기'로 줄이고 접근성 이름에 대상(`m5.permissions.saveNamed` 등), 홈 '이어서 하기'·⋯ 메뉴 이름에 프로젝트 이름, 권한 '저장하면 다음 작업부터', 영어 첫 화면 제목. 3) 홈·전환은 최대 10쪽을 읽고 최근 순 정렬(중복 ID 제거). 4) 알림 정리를 실행 중 한 시간마다·설정 변경 때도 수행. 시험: 단위 "PR #12 minor 1~4", 렌더러 스모크(홈 페이지 합침), 네이티브 시나리오(팀 역할 닫은 뒤 초점).
-- **검증**
-  - `npm test` 941/941, `pnpm build` 통과, `pnpm m5:test:editor` 69/69(마운트 스모크 다크·라이트).
-  - 렌더 대비 다크·라이트 각 27화면 1095개 실패 0(폴더 확인 지점 → 목록 실패 지점으로 교체).
-  - 미리보기 UI 스모크 다크 2회·라이트 2회 연속 PASS.
-  - 네이티브 시나리오 PASS(실제 sidecar, 임시 폴더·앱 데이터, 공급자 미연결). 캡처 `~/Documents/elsecrew-ade-screens-u2-u4-2026-11-26/review-fix/native/`, 스모크 캡처 `review-fix/smoke/{dark,light}`.
-  - 개발 앱은 띄우지 않았다(네이티브 시나리오가 실제 앱 흐름을 대신함). 프로세스 종료는 각 스크립트가 스스로 끝냈다.
-- **feature/ade 병합(PR #13 9918bc22)**: 반영 커밋 810ebcb8 뒤 PR이 충돌(DIRTY)해 CI가 돌지 않았다. `origin/feature/ade`를 병합했다. 기록 충돌은 기저 쪽 `history.md`·아카이브를 그대로 두고 이 PR의 두 엔트리와 핵심 결정만 더한 뒤, 500줄을 넘어 머지된 PR #10·#13 엔트리를 아카이브 맨 위로 옮겼다(아카이브를 먼저 읽고 씀). `pnpm m5:check:history` 기저 대비 453 유지·2 추가·누락 0. 병합 뒤 `npm test` 947/947, build, 렌더러 스모크 다크·라이트(27화면 실패 0), 미리보기 UI 스모크 다크·라이트 각 2회, 네이티브 시나리오 PASS.
-- **CI**: 45d7fb28에서 macOS·Windows·website·GitGuardian 모두 통과, PR #12 `CLEAN/MERGEABLE`. 차단(B1) 재확인은 조정자가 받는다.
-
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 화면 통일 U2(홈·처음 시작·전환·삭제·폴더 확인)·U3(새 작업 창)·U4(설정) (`orca/ade-screens-u2-u4`, 기준 feature/ade 7378332a)
-설계: `docs/proposals/m5-ade-screens-plan.md` 4.1과 시안 01~07·10·11·14(원본 `~/Documents/elsecrew-ade-screens-design-2026-11-26/`). 조정자 결정: Q1 홈 카드는 마지막으로 연 때만(요약 조회 없음), Q4 알림 설정 분리(종류별 끄기·해결된 알림 정리), Q5 홈 왼쪽 레일 제거, Q6 전환은 닫기+열기 한 동작, Q7 빈 폴더 확인을 앱 안으로(업데이트는 U8), Q8 '이 프로젝트'는 설정 목록의 묶음, Q9 첫 작업의 별도 확인 체크 유지(보내기가 동의를 대신하지 않음, 모양만 바꿈). 현행 설명은 architecture "홈·처음 시작·설정(U2~U4)".
-
-- **U2**: 홈은 레일 없는 한 열(최근 프로젝트 카드 + '이어서 하기' 하나 + 나머지 카드, 경로는 글자로 안 보임). 처음 시작 3단계 체크리스트(`first-run.tsx`, 지금 단계 버튼만 강조, 에이전트 연결 상태를 1단계 안에). 전환 팝오버는 열린 때와 막힌 이유를 보이고 한 번에 전환. 삭제 확인은 지워지는 것/남는 것 두 목록 + 첫 초점 취소. 폴더 확인 3종은 main `showMessageBox` → 앱 안 확인 창(IPC `m5:folder-confirm:ask/answer`, 일회용 번호·main frame만·페이지는 경로를 못 보냄·새 확인/10분 무응답은 '아니오').
-- **U3**: 새 작업 창을 머리/본문/바닥으로 나눴다. 목표 → 시작 지점 → 팀 칩('바꾸기') → (첫 작업이면) 팀·권한 확인과 별도 확인 체크 → 바닥 비용 안내·취소·보내기. 1280×800(스모크 1280×768)에서 스크롤 없이 확인 체크와 보내기가 보인다.
-- **U4**: 설정 목록을 '앱 전체'/'이 프로젝트' 묶음으로. 하위 화면은 `settings-ui.tsx`(`SettingsGroup`·`Setting`·`ExpandableSetting`·`Switch`)만 쓴다. 일반(언어·밝기·업데이트), 알림(OS 알림·종류 3개·정리), 저장공간(폴더·버린 작업 정리·백업 사용량 막대), 프로젝트 설정(폴더 위치 접힘·작업 권한 스위치·팀·문제 해결 접힘·지우기). `role-settings.tsx` 내부는 그대로.
-- **시험·도구**
-  - 새 `tests/m5-ade-screens-u2-u4.test.mts`(13): 알림 종류 끄기·설정 읽기 방어·해결 후 하루 정리, 최근 연 순서·몇 분 전·이름/글자 표시, 처음 시작 단계, 레일 없음·경로 비표시·한 번 전환, 폴더 확인이 앱 안(네이티브 상자 없음), Q9 별도 확인 유지, 설정이 묶음/줄로만, 버튼 문구 규칙, ko/en 키 일치.
-  - 보안 하네스: 폴더 확인 IPC(다른 프레임·틀린 번호·불리언 아님·폴더 인자·추가 인자 거절, 번호 1회용, 새 확인/시간 초과는 '아니오', main이 고른 폴더만 열기).
-  - 렌더러 스모크에 캡처·대비 지점 6곳 추가(22 폴더 확인, 23 처음 시작, 24 첫 작업 창, 25 전환, 26 알림 설정, 27 프로젝트 설정 → 27곳). 가짜 bridge에 `m5FolderConfirm`·`m5SmokeOpenCancel`·`m5SmokeNoChats`를 더했다. 처음 시작의 강조 버튼 1개, 첫 작업의 보내기 비활성·화면 안 위치, 전환 목록에 경로 없음, 설정 화면 구성도 검사한다.
-  - 낡은 `tests/m5-ui-capture.cjs`(첫 화면 기대값이 낡아 멈춤)를 지우고 `pnpm m5:capture`(`scripts/m5-ui-capture.mjs`, 렌더러 스모크를 다크·라이트로 돌려 캡처 + 렌더 대비)로 대신했다.
-- **검증**
-  - `npm test` 933/933, `pnpm build` 통과. `pnpm m5:test:editor` 69/69(마운트 스모크 다크·라이트).
-  - 렌더 대비: 다크·라이트 각 27화면 1105개 검사, 실패 0.
-  - 미리보기 UI 스모크(실제 앱, 새 `.vite/build`): 다크 2회·라이트 2회 연속 PASS.
-  - 실제 개발 앱(임시 프로필 profile3, 포트 9398): 처음 시작 → 프로젝트 두 개 → 홈 → 전환(my-bakery-site → family-budget 한 동작) → 새 작업 첫 창 → 설정 각 화면을 다크로 확인. 앱 안 폴더 확인은 개발용 폴더 지정이 자동 승인이라 실제 앱에서는 띄우지 못했고, 보안 하네스·스모크로 확인했다.
-  - 캡처: `~/Documents/elsecrew-ade-screens-u2-u4-2026-11-26/`(actual/{dark,light} 27장씩, compare/ 시안 대 실제 9화면×2테마).
-  - PR #12(https://github.com/wonseok-han/elsecrew/pull/12, base feature/ade): ee802788 CI macOS·Windows·website·GitGuardian 모두 통과.
-- **기존 시험 고침**: 파일 끝 빈 줄(`m5-pr5-review`), 정의 안 된 `--leading-body`(`m5-style-tokens`). 렌더러 스모크의 옛 선택자(레일, `li span` 경로, 설정 목록 순서, 저장공간 버튼 위치)를 새 구조에 맞췄다.
-- **주의**: 미리보기 스모크 전에 개발 앱을 닫으면서 `pkill -f "electron-forge start"`를 썼다. 같은 컴퓨터의 다른 워커가 그 순간 `electron-forge start`를 돌리고 있었다면 함께 닫혔을 수 있다(확인 불가). 다음부터는 자기 프로필 경로로만 종료한다.
-- **다음 할 일(U5~U8 전)**: 홈 카드의 상태 배지·작업 요약(시안의 '확인 필요 1' 등)은 Q1에 따라 넣지 않았다. 필요하면 엔진에 프로젝트별 요약 조회를 새로 만들어야 한다. 홈 검색칸·전환 팝오버의 '이 프로젝트 설정' 줄도 아직 없다. 알림 정리는 앱 시작 때만 돈다.
-
 ## 프로젝트 요약 (고정)
 터미널을 한 번도 안 열어본 비개발자를 **코딩 에이전트(Claude Code·Codex)가 굴러가는 상태까지** 데려다주는 데스크톱 GUI 앱. 현재 배포 경로는 Tauri 2 + React 19이고, M5는 Electron + React/TypeScript + Monaco와 Rust sidecar의 별도 작업대 골격으로 전환 중이다.
 - 기획 원본: `~/Library/CloudStorage/OneDrive-개인/ObsidianVault/오픈소스/아이디어/후보/에이전트-스타터.md`
@@ -165,7 +118,15 @@
 - **프로세스 증거는 '살아 있을 수 있는 것'만 기록한다(2026-11-17)**: 실행 기록(DB)은 root와 아직 끝난 것으로 관측되지 않은 신원만 저장한다(`TreeTracker::recorded_identities`, `LoginProcess::recorded_for_ledger`). 끝난 프로세스는 다시 돌 수 없으므로 빼도 안전하다. 로그인 잠금 파일은 추가 전용 그대로이고 상한은 65,536개·4MiB다(`HOLD_MAX_BYTES`). 소유권 검사는 '이전 기록 ⊆ 누적 관측'이다. 엔진이 사라진 뒤의 판정(시작 시 정리·명시 복구·잠금 해제)은 `SettledProcTable`을 쓴다. 같은 pid를 시작 시각이 다른 프로세스가 쓰면 기록된 프로세스는 끝난 것이다(살아 있는 두 프로세스는 pid를 공유하지 않는다). 실행 중인 추적은 계속 이를 무결성 실패로 본다. 앱 데이터 사본을 엔진으로 열 때는 살아 있는 이전 엔진이 있으면 정리를 건너뛴다(`previous_engine_still_runs`).
 - **종료는 중단이지 초기화가 아니다(2026-11-17 사용자 결정)**: 중단된 실행은 다음 시작에서 작업 공간을 버리지 않고 canceled로 끝낸다(`settle_interrupted_run`). 남은 에이전트 프로세스는 기록된 신원으로 직접 끝내고, 소멸 확인과 작업 공간 일치가 증명돼야 한다. 예전 unresolved 복구 기록도 같은 증명이 서면 푼다. abandon(작업 공간 포기)은 증명이 안 되는 경우와 삭제에만 남는다. 편집기는 VS Code처럼 저장하지 않은 내용을 종료 뒤에도 보관했다가 되살린다(`editor-drafts.ts`). 같은 run의 lock을 다시 쓸 때는 새 operation id가 필요하다(같은 id에 다른 내용이면 Conflict).
 - **앱 종료는 막지 않는다(2026-11-17 사용자 결정)**: 종료하면 실행 중인 작업을 멈추고 최대 10초 기다린 뒤 묻지 않고 끈다(`quit-coordinator.ts`). 다음 시작에서 기록된 프로세스가 모두 사라졌고 작업 공간과 기록이 정상인 실행은 자동으로 canceled가 된다(`interrupted_run_upserts`). 불확실한 경우만 사용자 복구로 남긴다. 사용자 복구(abandon)는 채팅을 discarded로 만들므로 자동 정리에 쓰지 않는다.
-- **작업 내역 채널과 이전 빌드(2026-11-17)**: 실행 출력의 `activity` 채널은 이전 빌드가 모르는 값이다. 작업 내역이 한 줄이라도 저장된 앱 데이터를 이전 빌드로 열면 출력 재검증에서 거절돼 영구 admission 실패가 된다(schema 버전은 같다). 개발 빌드끼리 같은 실제 데이터를 오가지 않는다. 작업 내역은 작업 공간 상대 경로와 모델의 명령 설명만 공개하며 도구 입력 원문은 공개하지 않는다. Claude 실행은 결과에 적힌 거절이 모두 앱이 거절한 tool_use일 때만 정상 종료로 본다.
+- **작업 내역 채널과 이전 빌드(2026-11-17)**: 실행 출력의 `activity` 채널은 이전 빌드가 모르는 값이다. 작업 내역이 한 줄이라도 저장된 앱 데이터를 이전 빌드로 열면 출력 재검증에서 거절돼 영구 admission 실패가 된다(schema 버전은 같다). 개발 빌드끼리 같은 실제 데이터를 오가지 않는다. Claude 실행은 결과에 적힌 거절이 모두 앱이 거절한 tool_use일 때만 정상 종료로 본다.
+  - **2026-11-26 변경(주인님 피드백, PR #11 검토 반영)**: 작업 내역은 명령 줄 자체(비밀 가림)·실행 위치·종료 코드(공급자가 밝힌 경우만)·걸린 시간·바뀐 줄 수를 남긴다. "도구 입력 원문은 공개하지 않는다"는 옛 규칙은 명령에 한해 폐지됐다. **명령 출력·도구 결과·파일 내용은 저장하지 않는다**(이름 없는 값은 가릴 수 없음). 형식·규칙은 architecture "실행 출력" 절.
+  - 저장은 `record_activity`의 `sanitize` 한 곳만 거친다. 새 필드를 더하면 `sanitize`의 허용 목록과 화면 `KEYS`에 같이 넣는다(빠지면 조용히 버려진다). id는 앱 키(`c1`, `t1`)만 쓴다.
+  - **명령 행은 요약만(2026-11-26 검토 3차)**: 명령 줄의 글자는 저장하지 않는다. 프로그램 이름(첫 토큰 규칙), 도구별 고정 목록의 하위 명령 하나, 가린 단어 수만 남긴다(Rust `summarize_command` ↔ TS `summarizeCommand`, 공용 `summary` 사례). 2차의 "허용 토큰만 남기기"도 짧은 붙임값·PIN·경로·호스트 모양 비밀이 남아 폐기했다. 보이는 정보를 늘리려면 고정 목록에 단어를 더하는 쪽으로만 바꾼다. 파일 경로는 명령 줄에서 뽑지 않는다.
+  - 비밀 가림 규칙은 Rust `secret_mask.rs`와 TS `secret-shape.ts` `maskSecrets` 두 곳이다(이제 산문용). 규칙을 바꾸면 둘 다 고치고 `tests/fixtures/m5/secret-mask-cases.json`에 사례를 넣는다(양쪽이 같은 결과를 요구, 다시 가려도 같아야 함). 가림은 언제나 자르기보다 먼저다.
+  - 함정: 저장소에 GitGuardian PR 검사가 있다. 테스트의 가짜 비밀은 처음부터 `FAKE`/`example`이 들어간 명백한 합성값으로 쓴다(`PGPASSWORD=s3cret`, `--password hunter2`, jwt.io 예시 JWT는 걸렸다). `curl -u 사용자:비밀번호`, JWT, `--token=값`·`--secret 값` 모양은 값이 가짜여도 형태로 걸리므로 공용 사례처럼 `{colon}`/`{dot}`/`{eq}`/`{sp}`(줄바꿈은 `{nl}`) 자리표시로 저장하고 시험에서 푼다. 이후 커밋으로 지워도 PR의 앞 커밋이 계속 걸리므로 커밋을 다시 만들어야 한다.
+  - 함정: Write 도구는 내용 속 `\uXXXX`를 실제 문자로 바꿔 쓴다. 정규식·문자열에 보이지 않는 문자(U+2028은 JS 정규식 리터럴을 깨뜨림)가 들어가므로, TS 소스에 이스케이프가 필요하면 파이썬 등으로 `\` + `u…`를 이어 붙여 쓰거나 `String.fromCharCode`를 쓴다. Rust의 `\u{…}`는 영향 없다.
+  - 함정: Claude CLI의 `tool_use_result`는 성공한 Bash면 `{stdout, stderr, interrupted}` 객체지만 실패하면 `"Error: Exit code N\n…"` 문자열이다. 성공에는 종료 코드가 없다. Write로 새 파일을 만들면 structuredPatch가 빈 배열이고 `type:"create"`·`content`로 줄 수를 센다.
+  - 함정: activity 행은 append할 수 없다(`complete`만). 끝난 결과는 같은 `id`의 두 번째 행으로 쓰고 화면이 합친다.
 - **실행에는 전체 시간 제한이 없다(2026-11-17 사용자 결정)**: Claude 세션(`SessionChannel`)과 Codex 턴(`TextSession`)의 10분 고정 마감을 없앴다. 도구 실행과 사용자 승인 대기도 시간 제한 없이 기다린다. 남은 상한은 연결 준비 시간(Claude 15초, Codex 30초), 사용자 취소, 앱 종료 정리, 요청·이벤트 수와 바이트 예산이다. `provider_model_proxy`의 600초는 제품에서 쓰지 않는 진단 후보라 그대로 두었다. 실행 시간 상한을 다시 넣으려면 사용자 결정이 필요하다.
 - **정책 밖 도구 요청은 그 요청만 거절한다(2026-11-16)**: Claude 도구 요청이 역할의 경계(작업 공간 안·존재하는 파일·`.git` 등 제외·읽기 전용은 쓰기/명령 불가) 밖이면, `deliver_approval`이 사용자 확인 없이 그 요청만 deny하고 실행은 계속된다. 세션·프로세스·역할 불일치만 실행을 끝낸다. 에이전트용 거절 문구는 `claude_approval::DENIAL_GUIDANCE` 하나다.
 - **중단된 정리 작업은 다음 시작에서 이어 간다(2026-11-16)**: materialization의 'attempting'은 arm만 커밋된 상태이고, batch 쓰기와 'pending' 복귀는 한 트랜잭션이다. 그래서 새 엔진의 admission에서는 'pending'으로 되돌린다(`release_interrupted_attempt`). 'failed'만 계속 거부한다. 엔진이 앱 데이터를 열지 못하면 `~/Library/Logs/Elsecrew/last-engine-admission-failure.json`의 `reason`(kind)로 확인한다(멈춘 원인 기록 `last-engine-failure.json`을 덮지 않는다). `Storage::open`(Legacy·옛 스키마 이전 v6/v7)은 여전히 attempting을 거부한다. 자세한 위치는 `ELSECREW_DEBUG_ADMISSION=1`로 엔진을 띄워 복사본에서 재현한다. Rust 실행 기록에 필드를 추가하면 TS의 실행 상태 이벤트 검증기(`protocol-v1.ts`)도 함께 고친다. 빠뜨리면 이벤트 하나가 엔진 연결을 끊는다.
@@ -468,3 +429,5 @@
 2026-11-26 워크로그 중 `feature/ade`에 머지된 PR #9(미리보기 화면·검토 반영 두 라운드) 엔트리는 같은 날 세 번째 롤오버로 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(머지된 PR 단위).
 
 2026-11-26 워크로그 중 `feature/ade`에 머지된 PR #10(토큰·화면 밝기, 검토 반영 포함)·#13(ADE 1차 통합 검증 V, 검토 반영 포함) 엔트리는 같은 날 네 번째 롤오버로 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(머지된 PR 단위).
+
+2026-11-26 워크로그 중 `feature/ade`에 머지된 PR #11(활동 줄 자세히)·#12(화면 통일 U2~U4) 엔트리는 같은 날 롤오버로 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(머지된 PR 단위).

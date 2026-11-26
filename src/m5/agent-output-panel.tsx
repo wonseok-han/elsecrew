@@ -9,7 +9,7 @@ import type { RoleDefinitionV3 } from "./contracts/run-recovery-v1.ts";
 import { isLeadRole } from "./role-colors.ts";
 import { roleLabel } from "./role-names.ts";
 import { decodeOutputPage, type OutputPage, type OutputPageRequest } from "./contracts/agent-output-pages.ts";
-import { activityLine, collapseRepeats, parseWorkActivity, WORK_OUTCOME_KEYS } from "./work-history.ts";
+import { activityDetail, activityItems, activityLine, durationParts, openableFile, WORK_OUTCOME_KEYS, type WorkActivity } from "./work-history.ts";
 
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -20,24 +20,48 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-/** One tool use, as a compact line: a Korean verb and the place it worked
- * on. The agent's own words about a command fold under the line. Unreadable
- * rows are left out. */
-const WorkActivityRow = memo(function WorkActivityRow({ text, count = 1 }: { text: string; count?: number }) {
+/** One tool use, as a compact line: a Korean verb and what it worked on
+ * (D6). A command folds open to the whole command, where it ran, how it
+ * ended, how long it took and the start of its output; a changed file
+ * inside the workspace opens its change in the review sheet. Every string
+ * is drawn as plain text (React escapes it; never markdown or HTML) after
+ * work-history.ts neutralised, masked and capped it. */
+const WorkActivityRow = memo(function WorkActivityRow({ activity, count = 1, onOpenFile, changedFiles }: { activity: WorkActivity; count?: number; onOpenFile?: (path: string) => void; changedFiles?: ReadonlySet<string> | null }) {
   const { t } = useI18n();
-  const activity = parseWorkActivity(text);
-  if (!activity) return null;
   const line = activityLine(activity);
+  const detail = activityDetail(activity);
+  const lines = activity.added !== undefined || activity.removed !== undefined
+    ? t("m5.output.activity.lines", { added: activity.added ?? 0, removed: activity.removed ?? 0 }) : null;
   const head = <>
     <span className="m5-activity-mark" aria-hidden="true" />
     <span className="m5-activity-label">{t(line.label, { tool: activity.tool ?? "" })}</span>
-    {line.target && <span className="m5-activity-target">{line.target}</span>}
+    {line.target && <span className="m5-activity-target" dir="auto" title={line.target}>{line.target}</span>}
+    {line.hidden > 0 && <span className="m5-activity-hidden">{t("m5.output.activity.hiddenArgs", { count: line.hidden })}</span>}
     {count > 1 && <span className="m5-activity-count">{t("m5.output.activity.repeat", { count })}</span>}
+    {line.file && lines && <span className="m5-activity-lines">{lines}</span>}
     {activity.outcome && <span className="m5-activity-outcome">{t(WORK_OUTCOME_KEYS[activity.outcome])}</span>}
   </>;
-  return line.original
-    ? <details className="m5-activity-row m5-activity-folded" data-action={activity.action} data-outcome={activity.outcome}><summary>{head}</summary><p className="m5-activity-original" dir="auto">{line.original}</p></details>
-    : <p className="m5-activity-row" data-action={activity.action} data-outcome={activity.outcome}>{head}</p>;
+  const data = { "data-action": activity.action, "data-outcome": activity.outcome, "data-testid": "activity-row" };
+  // A file it changed, and the task's change list has it: the line itself
+  // opens that change (the sheet's path, PR #5). Anything else has no button.
+  const file = openableFile(line.file, changedFiles);
+  if (file && onOpenFile) {
+    return <button type="button" className="m5-activity-row m5-activity-file" {...data} title={t("m5.output.activity.openChange")} onClick={() => onOpenFile(file)}>{head}</button>;
+  }
+  if (!detail || line.file) return <p className="m5-activity-row" {...data}>{head}</p>;
+  const duration = detail.ms === null ? null : durationParts(detail.ms);
+  return <details className="m5-activity-row m5-activity-folded" {...data}>
+    <summary>{head}</summary>
+    <div className="m5-activity-detail">
+      <dl>
+        {detail.note && <><dt>{t("m5.output.activity.detail.note")}</dt><dd dir="auto">{detail.note}</dd></>}
+        {detail.cwd && <><dt>{t("m5.output.activity.detail.cwd")}</dt>{detail.cwd === "." ? <dd>{t("m5.output.activity.workspace")}</dd> : <dd className="m5-activity-mono" dir="ltr">{detail.cwd}</dd>}</>}
+        {detail.exit !== null && <><dt>{t("m5.output.activity.detail.exit")}</dt><dd>{t(detail.exit === 0 ? "m5.output.activity.exitOk" : "m5.output.activity.exitFail", { code: detail.exit })}</dd></>}
+        {duration && <><dt>{t("m5.output.activity.detail.time")}</dt><dd>{t(duration.key, duration.values)}</dd></>}
+        {lines && <><dt>{t("m5.output.activity.detail.lines")}</dt><dd>{lines}</dd></>}
+      </dl>
+    </div>
+  </details>;
 });
 
 /** The agent thinking aloud between tool uses: one line, the rest folded. */
@@ -48,19 +72,22 @@ function OutputNote({ text }: { text: string }) {
   return <details className="m5-output-note"><summary dir="auto">{short}</summary><pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{text}</pre></details>;
 }
 
-const LiveOutputRow = memo(function LiveOutputRow({ row, truncatedLabel, role, team, count }: {
-  row: OutputDisplayRow; truncatedLabel: string; role: string; team?: readonly string[]; count: number;
+const LiveOutputRow = memo(function LiveOutputRow({ row, truncatedLabel, role, team }: {
+  row: OutputDisplayRow; truncatedLabel: string; role: string; team?: readonly string[];
 }) {
-  if (row.channel === "activity") return <WorkActivityRow text={row.text} count={count} />;
   return <article>{row.truncated && <small>{truncatedLabel}</small>}<OutputNote text={orchestratorMessage(row.text, role, team)} /></article>;
 });
 
 /** One selected run/window at a time; switching never starts or cancels a run.
  * Text the conversation already shows as that run's message is left out here,
  * so an answer is read once; tool activity and text still streaming stay. */
-export function AgentOutputPanel({ runs, definitions, posted = [] }: {
+export function AgentOutputPanel({ runs, definitions, posted = [], onOpenFile, changedFiles }: {
   runs: readonly AgentRunRecordV1[]; definitions?: readonly RoleDefinitionV3[];
   posted?: readonly { runId: string | null; text: string }[];
+  /** Opens a changed file's change in the review sheet; without it file lines are plain. */
+  onOpenFile?: (path: string) => void;
+  /** The task's current change list (the review sheet's paths). */
+  changedFiles?: ReadonlySet<string> | null;
 }) {
   const { t } = useI18n();
   const team = useMemo(() => definitions?.map(definition => definition.roleId), [definitions]);
@@ -259,8 +286,8 @@ export function AgentOutputPanel({ runs, definitions, posted = [] }: {
       {historyState === "failed" && <p role="alert">{t("m5.output.failed")} <button type="button" onClick={() => setHistoryRequest({ ...historyRequest! })}>{t("m5.output.retry")}</button></p>}
       {visibleHistory && <>
         <p>{t("m5.output.range", { first: visibleHistory.request.afterSequence + 1, last: visibleHistory.nextAfterSequence, total: visibleHistory.request.throughSequence })}</p>
-        {visibleHistory.rows.map(row => row.itemUpdate?.channel === "activity"
-          ? <WorkActivityRow key={row.event.eventId} text={row.event.text} />
+        {activityItems(visibleHistory.rows, row => row.itemUpdate?.channel === "activity" ? row.event.text : null).map(({ row, activity, count }) => activity
+          ? <WorkActivityRow key={row.event.eventId} activity={activity} count={count} onOpenFile={onOpenFile} changedFiles={changedFiles} />
           : <article key={row.event.eventId}>
           <small>{row.outputSequence} · {row.itemUpdate ? t(row.itemUpdate.operation === "append" ? "m5.output.append" : "m5.output.complete") : t("m5.output.message")}</small>
           <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{orchestratorMessage(row.event.text, run.selectedProfile.roleId, team)}</pre>
@@ -269,8 +296,10 @@ export function AgentOutputPanel({ runs, definitions, posted = [] }: {
     </>}
     {!historyActive && view?.binding.runId === binding.runId && <>
       {view.hasEarlier && <p>{t("m5.output.window")}</p>}
-      {collapseRepeats(view.rows.filter(row => row.channel === "activity" || !shown.has(row.text.trim())), (a, b) => a.channel === "activity" && b.channel === "activity" && a.text === b.text)
-        .map(({ row, count }) => <LiveOutputRow key={row.key} row={row} count={count} role={run.selectedProfile.roleId} team={team} truncatedLabel={t("m5.output.truncated")} />)}
+      {activityItems(view.rows.filter(row => row.channel === "activity" || !shown.has(row.text.trim())), row => row.channel === "activity" ? row.text : null)
+        .map(({ row, activity, count }) => activity
+          ? <WorkActivityRow key={row.key} activity={activity} count={count} onOpenFile={onOpenFile} changedFiles={changedFiles} />
+          : <LiveOutputRow key={row.key} row={row} role={run.selectedProfile.roleId} team={team} truncatedLabel={t("m5.output.truncated")} />)}
     </>}
     </div>
     {!historyActive && newOutput && <button type="button" onClick={showLatest}>{t("m5.chat.newMessages")}</button>}

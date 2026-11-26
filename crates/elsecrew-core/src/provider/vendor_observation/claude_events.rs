@@ -18,7 +18,58 @@ pub enum Projection {
         has_private_blocks: bool,
     },
     Result(ResultObservation),
+    /// How the main thread's tool uses ended, for the work history only.
+    /// Read leniently: an odd frame is `RequiresHandling`, never a failure.
+    ToolResults(Vec<ToolResult>),
     RequiresHandling,
+}
+
+/// Display-only facts about one finished tool use; never authority. What the
+/// tool printed or read is not kept (review PR #11 B3).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ToolResult {
+    pub tool_use_id: String,
+    /// None when the result does not say (missing or not a boolean).
+    pub is_error: Option<bool>,
+    /// The tool was stopped before it finished.
+    pub interrupted: bool,
+    /// The exit code a failed command reported ("Exit code N").
+    pub exit_code: Option<i64>,
+    /// Lines added and removed by a file edit (structured patch).
+    pub lines: Option<(u64, u64)>,
+}
+
+fn tool_results(frame: &serde_json::Value) -> Option<Vec<ToolResult>> {
+    if !frame.get("parent_tool_use_id")?.is_null() { return None; }
+    let blocks = frame.get("message")?.get("content")?.as_array()?;
+    // Claude adds what the tool returned in its own shape next to the message;
+    // it is about the (single) tool use the frame answers.
+    let extra = frame.get("tool_use_result").filter(|_| blocks.len() == 1);
+    let lines = extra.and_then(|extra| extra.get("structuredPatch")).and_then(|v| v.as_array()).map(|hunks| {
+        hunks.iter().filter_map(|hunk| hunk.get("lines")?.as_array()).flatten().filter_map(|line| line.as_str())
+            .fold((0, 0), |(added, removed), line| if line.starts_with('+') { (added + 1, removed) } else if line.starts_with('-') { (added, removed + 1) } else { (added, removed) })
+    }).filter(|counts| *counts != (0, 0)).or_else(|| {
+        // A new file written whole has no hunks: every line is added.
+        let extra = extra?;
+        if extra.get("type")?.as_str()? != "create" { return None; }
+        Some((extra.get("content")?.as_str()?.lines().count() as u64, 0))
+    });
+    let interrupted = extra.and_then(|extra| extra.get("interrupted")).and_then(|v| v.as_bool()).unwrap_or(false);
+    let results: Vec<ToolResult> = blocks.iter().filter(|block| block.get("type").and_then(|v| v.as_str()) == Some("tool_result")).filter_map(|block| {
+        let tool_use_id = block.get("tool_use_id")?.as_str()?;
+        if !identifier(tool_use_id) { return None; }
+        // Claude leaves `is_error` out of a clean result; anything but a
+        // boolean is unknown (review PR #11 I3).
+        let is_error = match block.get("is_error") { None => Some(false), Some(value) => value.as_bool() };
+        let first = match block.get("content") {
+            Some(serde_json::Value::String(text)) => text.lines().next().unwrap_or(""),
+            Some(serde_json::Value::Array(parts)) => parts.first().and_then(|part| part.get("text")?.as_str()).and_then(|text| text.lines().next()).unwrap_or(""),
+            _ => "",
+        };
+        let exit_code = (is_error == Some(true)).then(|| first.strip_prefix("Exit code ")?.trim().parse().ok()).flatten();
+        Some(ToolResult { tool_use_id: tool_use_id.into(), is_error, interrupted, exit_code, lines })
+    }).collect();
+    (!results.is_empty()).then_some(results)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -174,6 +225,14 @@ impl SessionProjection {
                 permission_denied: !wire.permission_denials.is_empty(),
                 denied_tool_use_ids,
             }));
+        }
+        if tag.kind == "user" {
+            // Bound to this session and each frame once, like the assistant
+            // and result frames (review PR #11 I3); otherwise unhandled.
+            let frame = input.json().ok();
+            let bound = frame.as_ref().is_some_and(|frame| frame.get("session_id").and_then(|v| v.as_str()) == Some(self.session_id.as_str()))
+                && frame.as_ref().and_then(|frame| frame.get("uuid")?.as_str().map(String::from)).is_some_and(|uuid| identifier(&uuid) && self.seen.insert(uuid));
+            return Ok(frame.filter(|_| bound).and_then(|frame| tool_results(&frame)).map_or(Projection::RequiresHandling, Projection::ToolResults));
         }
         if tag.kind != "assistant" {
             return Ok(Projection::RequiresHandling);
@@ -367,6 +426,62 @@ mod tests {
             {"type":"text","text":"공개 답변"},
             {"type":"tool_use","input":{"token":"SECRET"}}
         ]}})
+    }
+    #[test]
+    fn tool_results_say_how_main_thread_tools_ended_for_display_only() {
+        let mut parser = SessionProjection::new("session-a").unwrap();
+        let user = |uuid: &str, content: Value, extra: Value| json!({"type":"user","uuid":uuid,"session_id":"session-a","parent_tool_use_id":null,
+            "message":{"role":"user","content":content},"tool_use_result":extra});
+        let bash = user("u1", json!([{"type":"tool_result","tool_use_id":"toolu_1","is_error":true,"content":"Exit code 3\nFAKE output line"}]),
+            json!({"stdout":"","stderr":"FAKE output line","interrupted":false}));
+        match parser.project(&observe(&bash)).unwrap() {
+            Projection::ToolResults(results) => assert_eq!(results, vec![ToolResult { tool_use_id: "toolu_1".into(), is_error: Some(true), interrupted: false, exit_code: Some(3), lines: None }]),
+            _ => panic!("expected tool results"),
+        }
+        // Nothing the tool printed is kept (B3).
+        assert!(!format!("{:?}", tool_results(&bash)).contains("FAKE output"));
+        let failed_text = user("u4", json!([{"type":"tool_result","tool_use_id":"toolu_4","is_error":true,"content":"Exit code 1\nls: missing"}]), json!("Error: Exit code 1\nls: missing"));
+        match parser.project(&observe(&failed_text)).unwrap() {
+            Projection::ToolResults(results) => assert_eq!(results[0].exit_code, Some(1)),
+            _ => panic!("expected tool results"),
+        }
+        let edit = user("u2", json!([{"type":"tool_result","tool_use_id":"toolu_2","content":[{"type":"text","text":"ok"}]}]),
+            json!({"filePath":"/w/a.ts","structuredPatch":[{"oldStart":1,"oldLines":2,"newStart":1,"newLines":3,"lines":[" a","-b","+c","+d"]}]}));
+        match parser.project(&observe(&edit)).unwrap() {
+            Projection::ToolResults(results) => assert_eq!((results[0].is_error, results[0].lines), (Some(false), Some((2, 1)))),
+            _ => panic!("expected tool results"),
+        }
+        let create = user("u3", json!([{"type":"tool_result","tool_use_id":"toolu_3","content":"done"}]),
+            json!({"type":"create","filePath":"/w/n.md","content":"1\n2\n3","structuredPatch":[]}));
+        match parser.project(&observe(&create)).unwrap() {
+            Projection::ToolResults(results) => assert_eq!(results[0].lines, Some((3, 0)), "a new file: every line added"),
+            _ => panic!("expected tool results"),
+        }
+        // Stopped, or an error flag that is not a boolean: said as such (I3).
+        let stopped = user("u5", json!([{"type":"tool_result","tool_use_id":"toolu_5","is_error":false,"content":"x"}]), json!({"stdout":"","interrupted":true}));
+        match parser.project(&observe(&stopped)).unwrap() {
+            Projection::ToolResults(results) => assert!(results[0].interrupted),
+            _ => panic!("expected tool results"),
+        }
+        let odd = user("u6", json!([{"type":"tool_result","tool_use_id":"toolu_6","is_error":"no","content":"x"}]), json!(null));
+        match parser.project(&observe(&odd)).unwrap() {
+            Projection::ToolResults(results) => assert_eq!(results[0].is_error, None),
+            _ => panic!("expected tool results"),
+        }
+        // Another session, a repeated frame, subagent results, odd frames and
+        // plain user echoes stay unhandled and never fail.
+        let mut foreign = user("u7", json!([{"type":"tool_result","tool_use_id":"toolu_1","content":"x"}]), json!(null));
+        foreign["session_id"] = json!("session-b");
+        for frame in [
+            foreign,
+            bash.clone(),
+            json!({"type":"user","uuid":"u8","session_id":"session-a","parent_tool_use_id":"toolu_9","message":{"content":[{"type":"tool_result","tool_use_id":"x","content":"a"}]}}),
+            json!({"type":"user","uuid":"u9","session_id":"session-a","message":"text"}),
+            json!({"type":"user","uuid":"u10","session_id":"session-a","parent_tool_use_id":null,"message":{"content":[{"type":"text","text":"hi"}]}}),
+            json!({"type":"user","parent_tool_use_id":null,"message":{"content":[{"type":"tool_result","tool_use_id":"x","content":"a"}]}}),
+        ] {
+            assert!(matches!(parser.project(&observe(&frame)).unwrap(), Projection::RequiresHandling), "{frame}");
+        }
     }
     fn observe(value: &Value) -> BoundedObservation {
         BoundedObservation::new(value.to_string().into_bytes()).unwrap()
