@@ -402,10 +402,10 @@ button:hover:not(:disabled) { background: var(--bg-hover); }
 button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 button:disabled { cursor: not-allowed; opacity: .52; }
 /* 주 행동 — 예전 이름은 별칭 */
-.m5-btn-primary, .m5-new-chat-button, .m5-start-action > button, .m5-workbench button[type="submit"] { background: var(--action-bg); color: var(--action-text); border-color: transparent; }
-:is(.m5-btn-primary, .m5-new-chat-button, .m5-start-action > button, .m5-workbench button[type="submit"]):hover:not(:disabled) { background: var(--action-bg-hover); }
+.m5-btn-primary, .m5-new-chat-button, .m5-workbench button[type="submit"] { background: var(--action-bg); color: var(--action-text); border-color: transparent; }
+:is(.m5-btn-primary, .m5-new-chat-button, .m5-workbench button[type="submit"]):hover:not(:disabled) { background: var(--action-bg-hover); }
 /* 비활성 주 행동: 탁한 강조색(강조색 + 반투명) 대신 회색 면 */
-:is(.m5-btn-primary, .m5-new-chat-button, .m5-start-action > button, .m5-workbench button[type="submit"], .m5-settings-actions > button:first-child, .m5-team-actions .m5-team-save):disabled { background: var(--bg-hover); color: var(--text-disabled); border-color: transparent; opacity: 1; }
+:is(.m5-btn-primary, .m5-new-chat-button, .m5-workbench button[type="submit"], .m5-settings-actions > button:first-child, .m5-team-actions .m5-team-save):disabled { background: var(--bg-hover); color: var(--text-disabled); border-color: transparent; opacity: 1; }
 /* 보조 — 예전 이름은 별칭 */
 .m5-btn-secondary, .m5-secondary, .m5-refresh { background: var(--bg-raised); color: var(--text-primary); border-color: var(--line-strong); }
 :is(.m5-btn-secondary, .m5-secondary, .m5-refresh):hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
@@ -2126,6 +2126,206 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
    키보드 초점은 토큰 색 링으로 보인다(PR #10 검토 I4, 렌더된 대비 검사가 확인). */
 .m5-workbench :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="hidden"]), textarea, select) { border-color: var(--line-input); }
 .m5-workbench :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="hidden"]), textarea, select):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+/* ===== 화면 통일 U2~U4: 홈·첫 실행·전환·확인 대화상자·새 작업 창·설정 (2026-11-26) =====
+   설계: docs/proposals/m5-ade-screens-plan.md 목업 01~07·10·11·14. 의미 토큰과 공용 컴포넌트만 쓴다.
+   예전 구역(홈 레일·설정 카드·새 작업 창)의 규칙은 이 구역이 뒤에서 덮는다. */
+
+/* 홈: 작업 화면과 같은 상단 막대와 상태줄, 가운데 한 열 */
+.m5-workbench.m5-home-mode { padding: 0 0 var(--statusbar-h); overflow: auto; background: var(--bg-app); }
+.m5-workbench.m5-home-mode > .m5-topbar { flex-direction: row; align-items: center; justify-content: space-between; height: var(--topbar-h); min-height: 0; margin: 0; padding: 0 var(--space-2) 0 var(--space-4); gap: var(--space-3); border-bottom: 1px solid var(--line-subtle); background: var(--bg-app); }
+.m5-workbench.m5-home-mode > .m5-topbar .m5-toolbar-actions { flex: none; flex-wrap: nowrap; gap: 2px; }
+.m5-workbench.m5-home-mode > .m5-app-statusbar { height: var(--statusbar-h); padding: 0 var(--space-3); background: var(--bg-app); border-top-color: var(--line-subtle); }
+.m5-workbench.m5-home-mode > :is(.m5-home, .m5-home-error, .m5-first-run, .m5-start-pending, .m5-notice, .m5-error, .m5-admission, .m5-rescan) { box-sizing: border-box; width: min(880px, calc(100% - 2 * var(--space-5))); margin-left: auto; margin-right: auto; }
+.m5-workbench.m5-home-mode > .m5-home[hidden] { display: none; }
+.m5-workbench .m5-home { padding: var(--space-6) 0 var(--space-7); }
+.m5-workbench.m5-home-mode > .m5-home-error { margin-top: var(--space-5); justify-content: space-between; align-items: center; }
+.m5-workbench .m5-home-error p, .m5-workbench .m5-home-error details { margin: var(--space-1) 0 0; font-size: var(--text-s); }
+
+/* 프로젝트 표식: 한 글자, 역할색 면(대비 4.5:1은 --role-tint로 맞춘 값) */
+.m5-workbench .m5-project-monogram { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border: 0; border-radius: var(--radius-s); font-size: var(--text-s); font-style: normal; font-weight: var(--weight-bold); color: var(--role-color, var(--text-secondary)); background: color-mix(in srgb, var(--role-color, var(--text-tertiary)) var(--role-tint), var(--bg-raised)); }
+.m5-workbench .m5-project-monogram-large { width: 40px; height: 40px; border-radius: var(--radius-m); font-size: var(--text-l); }
+
+/* 홈 목록: 가장 최근 프로젝트가 큰 카드(이어서 하기), 나머지는 두 열 카드. 경로는 보이지 않는다 */
+.m5-workbench .m5-home-projects { margin: 0; }
+.m5-workbench .m5-home-projects-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); margin: 0 0 var(--space-4); }
+.m5-workbench .m5-home-projects-heading h1 { margin: 0; font-size: var(--text-2xl); font-weight: var(--weight-bold); letter-spacing: -.02em; }
+.m5-workbench .m5-home-projects-heading p { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: var(--text-m); }
+.m5-workbench .m5-home-projects .m5-project-catalog-list { position: static; width: auto; max-height: none; overflow: visible; padding: 0; border: 0; background: transparent; box-shadow: none; }
+.m5-workbench .m5-home-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
+.m5-workbench .m5-home-cards > li { position: relative; display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-l); background: var(--bg-pane); }
+.m5-workbench .m5-home-cards > li.m5-home-hero { grid-column: 1 / -1; padding: var(--space-4) var(--space-4) var(--space-4) var(--space-5); background: var(--bg-raised); box-shadow: 0 0 0 1px var(--line-subtle), var(--shadow-1); }
+.m5-workbench .m5-project-row { display: flex; align-items: center; gap: var(--space-3); flex: 1 1 auto; min-width: 0; padding: var(--space-2); border: 0; border-radius: var(--radius-m); background: transparent; color: var(--text-primary); text-align: left; font-weight: var(--weight-regular); }
+.m5-workbench .m5-project-row:hover:not(:disabled) { background: var(--bg-hover); }
+.m5-workbench .m5-project-row:disabled { opacity: 1; cursor: default; }
+.m5-workbench .m5-project-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.m5-workbench .m5-project-row-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-l); font-weight: var(--weight-bold); }
+.m5-workbench .m5-project-row-text small { color: var(--text-secondary); font-size: var(--text-s); }
+.m5-workbench .m5-home-hero .m5-project-row-text strong { font-size: var(--text-xl); }
+.m5-workbench .m5-home-continue { flex: none; height: var(--control-h-l); padding: 0 var(--space-5); font-size: var(--text-l); }
+.m5-workbench .m5-home-projects .m5-project-add { display: inline-flex; align-items: center; gap: 6px; }
+.m5-workbench .m5-project-add svg, .m5-workbench .m5-project-context-popup svg { width: 16px; height: 16px; flex: none; }
+.m5-workbench .m5-project-catalog .m5-project-pagination { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
+
+/* 전환 팝오버: 같은 행 모양, 지금 열린 프로젝트 표시, 바꿀 수 없을 때 이유 한 줄 */
+.m5-workbench .m5-project-switcher-panel > .m5-switcher-projects { padding: var(--space-2); }
+.m5-workbench .m5-switcher-projects .m5-project-catalog-list { position: static; width: auto; max-height: min(420px, 60vh); overflow: auto; padding: 0; border: 0; background: transparent; box-shadow: none; }
+.m5-workbench .m5-switcher-projects ul { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.m5-workbench .m5-switcher-projects li { display: flex; align-items: center; gap: 2px; margin: 0; }
+.m5-workbench .m5-switcher-projects li.m5-project-open > .m5-project-row { background: var(--bg-selected); }
+.m5-workbench .m5-switcher-projects .m5-project-row-text strong { font-size: var(--text-m); }
+.m5-workbench .m5-switch-blocked { margin: var(--space-2) var(--space-2) 0; }
+.m5-workbench .m5-switcher-footer { margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--line-subtle); }
+.m5-workbench .m5-switcher-footer .m5-project-add { width: 100%; justify-content: flex-start; display: inline-flex; align-items: center; gap: var(--space-2); border-color: transparent; background: transparent; }
+
+/* 첫 실행 체크리스트 */
+.m5-workbench .m5-first-run { padding: var(--space-6) 0 var(--space-7); border: 0; background: transparent; }
+.m5-workbench .m5-first-run .m5-start-heading h1 { margin: var(--space-1) 0 var(--space-2); font-size: var(--text-2xl); font-weight: var(--weight-bold); line-height: 1.35; letter-spacing: -.02em; }
+.m5-workbench .m5-first-run .m5-start-heading p { max-width: 640px; }
+.m5-workbench .m5-first-run .m5-steps { display: block; margin: var(--space-5) 0 var(--space-3); padding: 0 var(--space-5); }
+.m5-workbench .m5-first-run .m5-steps > li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: start; gap: var(--space-3); padding: var(--space-4) 0; }
+.m5-workbench .m5-step-mark { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; border: 1.5px solid var(--line-input); color: var(--text-secondary); font-size: var(--text-s); font-weight: var(--weight-bold); }
+.m5-workbench .m5-step-current .m5-step-mark { border-color: var(--text-primary); color: var(--text-primary); }
+.m5-workbench .m5-step-done .m5-step-mark { border-color: var(--status-done); background: var(--status-done-bg); color: var(--status-done-text); }
+.m5-workbench .m5-step-body h3 { margin: 2px 0 4px; font-size: var(--text-l); font-weight: var(--weight-bold); }
+.m5-workbench .m5-step-body p { margin: 0; color: var(--text-secondary); font-size: var(--text-m); line-height: 1.6; }
+.m5-workbench .m5-step-later .m5-step-body h3 { color: var(--text-secondary); }
+.m5-workbench .m5-step-lock { color: var(--text-secondary); font-size: var(--text-s); white-space: nowrap; }
+.m5-workbench .m5-first-run .m5-start-action { padding: 0; border: 0; }
+.m5-workbench .m5-start-agents { display: flex; flex-direction: column; gap: 2px; margin: var(--space-3) 0 0; padding: var(--space-1) var(--space-2); list-style: none; border-radius: var(--radius-m); background: var(--bg-sunken); }
+.m5-workbench .m5-start-agents li { display: grid; grid-template-columns: 120px auto 1fr; align-items: center; gap: var(--space-3); min-height: 44px; }
+.m5-workbench .m5-start-agents li > button { justify-self: end; }
+
+/* 설정 틀: 왼쪽 탐색은 '앱 전체'와 '이 프로젝트' 두 묶음, 오른쪽은 설정 묶음과 행 */
+.m5-workbench .m5-app-settings > header { background: var(--bg-app); }
+.m5-workbench .m5-app-settings .m5-settings-return { color: var(--text-secondary); background: transparent; }
+.m5-workbench .m5-preferences-layout > nav { background: var(--bg-pane); }
+.m5-workbench .m5-preferences-layout > nav .m5-group-label { margin: var(--space-3) var(--space-2) var(--space-1); }
+.m5-workbench .m5-preferences-layout > nav .m5-group-label:first-child { margin-top: 0; }
+.m5-workbench .m5-preferences-layout > nav button { border: 1px solid transparent; background: transparent; color: var(--text-secondary); }
+.m5-workbench .m5-preferences-layout > nav button[aria-current] { border-color: transparent; background: var(--bg-selected); color: var(--text-primary); }
+.m5-workbench .m5-preferences-content { background: var(--bg-app); }
+.m5-workbench .m5-group-label { margin: var(--space-5) var(--space-1) var(--space-2); font-size: var(--text-xs); font-weight: var(--weight-bold); letter-spacing: .02em; color: var(--text-secondary); }
+.m5-workbench .m5-preferences-content > section > .m5-group-label:first-of-type { margin-top: var(--space-4); }
+.m5-workbench .m5-settings-group.m5-group { padding: 0; border: 0; border-radius: var(--radius-l); background: var(--bg-raised); box-shadow: 0 0 0 1px var(--line-subtle); }
+.m5-workbench .m5-preferences-content > section > h3 + .m5-settings-group, .m5-workbench .m5-preferences-content > section > .m5-settings-intro + .m5-settings-group { margin-top: var(--space-4); }
+.m5-workbench .m5-settings-group + .m5-settings-group, .m5-workbench .m5-settings-group + .m5-group-label + .m5-settings-group { margin-top: var(--space-3); }
+.m5-workbench .m5-group > .m5-setting, .m5-workbench .m5-group .m5-setting { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); min-height: 56px; margin: 0; padding: var(--space-3) var(--space-4); border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.m5-workbench .m5-group > .m5-setting + .m5-setting { border-top: 1px solid var(--line-subtle); }
+.m5-workbench .m5-setting-text { display: flex; flex: 1 1 280px; flex-direction: column; gap: 2px; min-width: 0; }
+.m5-workbench .m5-setting-text strong { font-size: var(--text-m); font-weight: var(--weight-medium); color: var(--text-primary); }
+.m5-workbench .m5-setting-text small { max-width: 520px; margin: 0; color: var(--text-secondary); font-size: var(--text-s); line-height: 1.5; }
+.m5-workbench .m5-setting-control { display: flex; flex: none; align-items: center; gap: var(--space-2); margin-left: auto; }
+.m5-workbench .m5-setting-detail { flex: 1 0 100%; min-width: 0; }
+.m5-workbench .m5-setting-detail:empty { display: none; }
+.m5-workbench .m5-setting-detail > p { margin: 0; color: var(--text-secondary); font-size: var(--text-s); }
+.m5-workbench .m5-setting-expand > summary { display: flex; align-items: center; gap: var(--space-4); width: 100%; list-style: none; cursor: pointer; }
+.m5-workbench .m5-setting-expand > summary::-webkit-details-marker { display: none; }
+.m5-workbench .m5-setting-open { margin-left: auto; color: var(--text-secondary); font-size: var(--text-s); white-space: nowrap; }
+.m5-workbench .m5-setting-expand[open] .m5-setting-open { visibility: hidden; }
+.m5-workbench .m5-setting-expand > .m5-setting-detail { padding-top: var(--space-3); }
+.m5-workbench .m5-workspace-folder-path code { overflow-wrap: anywhere; color: var(--text-primary); }
+.m5-workbench .m5-storage-content { margin-top: var(--space-2); padding: var(--space-3) 0 0; border-top: 1px solid var(--line-subtle); }
+.m5-workbench .m5-meter { height: 6px; margin: 0 0 var(--space-2); border-radius: var(--radius-pill); background: var(--bg-hover); overflow: hidden; }
+.m5-workbench .m5-meter > i { display: block; height: 100%; border-radius: inherit; background: var(--status-running); }
+.m5-workbench .m5-project-location { margin: 0 var(--space-1) var(--space-2); color: var(--text-secondary); font-size: var(--text-s); }
+.m5-workbench .m5-project-location > summary { cursor: pointer; }
+.m5-workbench .m5-project-location code { display: block; margin-top: var(--space-1); overflow-wrap: anywhere; color: var(--text-primary); }
+.m5-workbench .m5-project-list-back { margin: 0 0 var(--space-2); }
+.m5-workbench .m5-permission-save { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-3); }
+.m5-workbench .m5-permission-save > span { flex: 1; margin: 0; }
+.m5-workbench .m5-project-permissions > .m5-settings-intro { margin: var(--space-2) var(--space-1) 0; }
+.m5-workbench .m5-management-projects ul.m5-group { margin: 0; padding: var(--space-1); list-style: none; }
+.m5-workbench .m5-management-projects ul.m5-group li { margin: 0; }
+
+/* 켜고 끄는 설정: 네이티브 체크박스를 스위치 모양으로(키보드·검사는 그대로) */
+.m5-workbench input.m5-switch { appearance: none; -webkit-appearance: none; position: relative; flex: none; width: 34px; height: 20px; margin: 0; border: 1px solid var(--line-input); border-radius: var(--radius-pill); background: var(--bg-sunken); cursor: pointer; transition: background-color 120ms; }
+.m5-workbench input.m5-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-secondary); transition: transform 120ms; }
+.m5-workbench input.m5-switch:checked { border-color: var(--status-running); background: var(--status-running); }
+.m5-workbench input.m5-switch:checked::after { background: var(--bg-raised); transform: translateX(14px); }
+.m5-workbench input.m5-switch:disabled { opacity: .5; cursor: not-allowed; }
+.m5-workbench input.m5-switch:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* 확인 대화상자(삭제·폴더): 무엇을 · 지워지는 것과 남는 것 · 첫 초점은 취소 */
+.m5-workbench dialog.m5-confirm-dialog { width: min(520px, calc(100vw - 48px)); padding: var(--space-5); border: 0; border-radius: var(--radius-l); background: var(--bg-raised); color: var(--text-primary); box-shadow: 0 0 0 1px var(--line-subtle), var(--shadow-2); }
+.m5-workbench dialog.m5-confirm-dialog::backdrop { background: var(--bg-scrim); }
+.m5-workbench dialog.m5-confirm-dialog > h2 { margin: 0 0 var(--space-4); font-size: var(--text-xl); line-height: 1.35; }
+.m5-workbench .m5-remove-lists { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+.m5-workbench .m5-remove-lists > section { padding: var(--space-3); border-radius: var(--radius-m); }
+.m5-workbench .m5-remove-gone { background: var(--status-danger-bg); }
+.m5-workbench .m5-remove-kept { background: var(--bg-sunken); }
+.m5-workbench .m5-remove-lists h3 { margin: 0 0 var(--space-1); font-size: var(--text-s); }
+.m5-workbench .m5-remove-gone h3 { color: var(--status-danger-text); }
+.m5-workbench .m5-remove-kept h3 { color: var(--status-done-text); }
+.m5-workbench .m5-remove-lists ul { margin: 0; padding-left: 18px; font-size: var(--text-s); line-height: 1.6; }
+.m5-workbench dialog.m5-confirm-dialog > .m5-settings-intro { margin: var(--space-3) 0 0; color: var(--text-secondary); font-size: var(--text-s); line-height: 1.6; }
+.m5-workbench .m5-remove-target { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: var(--space-3); border-radius: var(--radius-m); background: var(--bg-sunken); }
+.m5-workbench .m5-remove-target code { overflow-wrap: anywhere; color: var(--text-secondary); font-size: var(--text-s); }
+.m5-workbench dialog.m5-confirm-dialog .m5-dialog-actions { margin-top: var(--space-5); }
+
+/* 새 작업 창: 머리 · 본문(목표·시작 지점·팀·첫 작업 권한) · 아래 버튼 줄. 1280×800에서 스크롤 없이 보내기가 보인다 */
+.m5-workbench dialog.m5-new-chat-dialog { display: none; width: min(700px, calc(100vw - 48px)); max-height: calc(100vh - 48px); padding: 0; overflow: hidden; border: 0; border-radius: var(--radius-l); background: var(--bg-raised); color: var(--text-primary); box-shadow: 0 0 0 1px var(--line-subtle), var(--shadow-2); }
+.m5-workbench dialog.m5-new-chat-dialog[open] { display: flex; flex-direction: column; }
+.m5-workbench dialog.m5-new-chat-dialog > header { flex: none; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); padding: var(--space-5) var(--space-5) var(--space-2); }
+.m5-workbench dialog.m5-new-chat-dialog > header h2 { margin: 2px 0 0; font-size: var(--text-xl); }
+.m5-workbench .m5-dialog-close { width: var(--control-h); height: var(--control-h); padding: 0; border: 0; font-size: 18px; line-height: 1; }
+.m5-workbench dialog.m5-new-chat-dialog .m5-new-chat-form { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; gap: 0; }
+.m5-workbench .m5-dialog-body { display: flex; flex-direction: column; gap: var(--space-4); flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--space-2) var(--space-5) var(--space-4); }
+.m5-workbench .m5-new-task-goal { display: flex; flex-direction: column; gap: 6px; margin: 0; font-size: var(--text-m); font-weight: var(--weight-medium); color: var(--text-primary); }
+.m5-workbench dialog.m5-new-chat-dialog .m5-new-task-goal input { width: 100%; box-sizing: border-box; min-height: var(--control-h-l); padding: var(--space-2) var(--space-3); border-radius: var(--radius-s); background: var(--bg-input); color: var(--text-primary); font-size: var(--text-l); }
+.m5-workbench .m5-new-task-start { padding: var(--space-3); border-radius: var(--radius-m); background: var(--bg-sunken); }
+.m5-workbench .m5-new-task-start > strong { display: block; font-size: var(--text-s); }
+.m5-workbench .m5-new-task-start p { margin: 4px 0 0; color: var(--text-secondary); font-size: var(--text-s); line-height: 1.6; }
+.m5-workbench .m5-new-task-start details { margin-top: 4px; color: var(--text-secondary); font-size: var(--text-s); }
+.m5-workbench .m5-new-task-team-head { display: flex; align-items: baseline; gap: var(--space-2); }
+.m5-workbench .m5-new-task-team-head strong { font-size: var(--text-m); }
+.m5-workbench .m5-new-task-team-head .m5-settings-intro { flex: 1; font-size: var(--text-s); color: var(--text-secondary); }
+.m5-workbench .m5-new-task-team-head .m5-btn-quiet { padding: 4px 8px; }
+.m5-workbench ul.m5-new-chat-team { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-2) 0 0; padding: 0; border: 0; background: transparent; list-style: none; }
+.m5-workbench .m5-new-chat-team .m5-role-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 2px 10px 2px 4px; border-radius: var(--radius-pill); background: var(--bg-sunken); font-size: var(--text-s); }
+.m5-workbench .m5-role-chip-mark { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; font-size: 10px; font-weight: var(--weight-bold); color: var(--role-color); background: color-mix(in srgb, var(--role-color) var(--role-tint), var(--bg-sunken)); }
+.m5-workbench .m5-new-chat-team .m5-role-chip small { margin: 0; color: var(--text-secondary); font-size: var(--text-xs); }
+.m5-workbench dialog.m5-new-chat-dialog .m5-first-chat-setup { margin: 0; padding: var(--space-4); border: 0; border-radius: var(--radius-l); background: var(--bg-pane); }
+.m5-workbench dialog.m5-new-chat-dialog .m5-first-chat-setup > h3 { margin: 0 0 4px; font-size: var(--text-m); }
+.m5-workbench dialog.m5-new-chat-dialog .m5-first-chat-setup .m5-project-permissions { margin: var(--space-3) 0 0; }
+.m5-workbench dialog.m5-new-chat-dialog .m5-first-chat-setup .m5-group-label { margin-top: 0; }
+.m5-workbench dialog.m5-new-chat-dialog .m5-first-chat-confirm { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-3) 0 0; padding: var(--space-3); border-radius: var(--radius-m); background: var(--bg-raised); box-shadow: 0 0 0 1px var(--line-subtle); font-weight: var(--weight-medium); }
+.m5-workbench dialog.m5-new-chat-dialog .m5-first-chat-confirm input { width: 16px; height: 16px; margin: 0; accent-color: var(--status-running); }
+.m5-workbench .m5-dialog-footer { flex: none; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-5); background: var(--bg-pane); }
+.m5-workbench .m5-dialog-footer > .m5-settings-intro { flex: 1; margin: 0; color: var(--text-secondary); font-size: var(--text-s); }
+.m5-workbench .m5-dialog-footer > button[type="submit"] { min-width: 88px; }
+.m5-workbench dialog.m5-new-chat-dialog .m5-team-unselected { margin: 0; border: 0; }
+.m5-workbench .m5-first-run > .m5-settings-intro { margin: 0 var(--space-1); color: var(--text-secondary); font-size: var(--text-s); }
+/* In the new-task window the permission rows are compact: the confirm sits in view with Send. */
+.m5-workbench dialog.m5-new-chat-dialog .m5-project-permissions { margin: var(--space-3) 0 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.m5-workbench dialog.m5-new-chat-dialog .m5-project-permissions .m5-setting { min-height: 40px; padding: var(--space-2) var(--space-3); }
+.m5-workbench dialog.m5-new-chat-dialog .m5-permission-boundary { margin: var(--space-2) 0 0; color: var(--text-secondary); font-size: var(--text-s); line-height: 1.5; }
+.m5-workbench dialog.m5-new-chat-dialog .m5-first-chat-setup > p.m5-settings-intro { margin: 0; color: var(--text-secondary); font-size: var(--text-s); line-height: 1.5; }
+.m5-workbench .m5-dialog-body > .m5-team-unselected { padding: var(--space-2) var(--space-3); font-size: var(--text-s); line-height: 1.5; }
+.m5-workbench .m5-project-permissions { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.m5-workbench dialog.m5-new-chat-dialog { width: min(780px, calc(100vw - 48px)); max-height: calc(100vh - 32px); }
+.m5-workbench dialog.m5-new-chat-dialog > header { padding-top: var(--space-4); }
+.m5-workbench dialog.m5-new-chat-dialog .m5-dialog-body { gap: var(--space-3); }
+.m5-workbench dialog.m5-new-chat-dialog .m5-first-chat-setup { padding: var(--space-3) var(--space-4); }
+/* Row separators read on the raised face in both themes. */
+.m5-workbench .m5-group > .m5-setting + .m5-setting { border-top: 1px solid var(--line-default); }
+.m5-workbench .m5-preferences-layout > nav button:not([aria-current]):focus:not(:focus-visible) { background: transparent; }
+.m5-workbench details.m5-troubleshooting.m5-setting { margin: 0; border: 0; border-radius: 0; background: transparent; }
+.m5-workbench details.m5-troubleshooting.m5-setting > summary { padding: 0; border: 0; font-size: inherit; font-weight: inherit; }
+.m5-workbench details.m5-troubleshooting.m5-setting > :not(summary) { margin: 0; }
+.m5-workbench .m5-switcher-footer .m5-project-add, .m5-workbench .m5-home-projects .m5-project-add { width: auto; min-height: var(--control-h); margin: 0; font-size: var(--text-m); }
+/* The old list rules (grid buttons, small path spans, an absolute menu) do not reach the new rows. */
+.m5-workbench .m5-project-catalog-list li > button.m5-project-row { display: flex; flex: 1 1 auto; width: auto; padding: var(--space-2); gap: var(--space-3); }
+.m5-workbench .m5-project-catalog-list li > button.m5-home-continue { display: inline-flex; align-items: center; flex: none; width: auto; }
+.m5-workbench .m5-project-catalog-list li .m5-project-row-text { font-size: inherit; color: inherit; overflow-wrap: normal; }
+.m5-workbench .m5-project-catalog-list li .m5-project-row-text small { font-size: var(--text-s); }
+.m5-workbench :is(.m5-home-cards, .m5-switcher-projects, .m5-management-projects) .m5-project-overflow { position: static; flex: none; }
+.m5-workbench .m5-home-cards > li { border-bottom: 0; }
+.m5-workbench .m5-home-projects li { padding-top: var(--space-2); padding-bottom: var(--space-2); }
+.m5-workbench .m5-home-cards > li.m5-home-hero { padding: var(--space-4) var(--space-4) var(--space-4) var(--space-4); }
+.m5-workbench .m5-project-catalog-list li > button.m5-home-continue { border-color: transparent; background: var(--action-bg); color: var(--action-text); }
+.m5-workbench .m5-project-catalog-list li > button.m5-home-continue:hover:not(:disabled) { background: var(--action-bg-hover); }
+.m5-workbench .m5-project-catalog .m5-project-add { border: 1px solid var(--line-strong); background: var(--bg-raised); color: var(--text-primary); }
 
 /* ===== Work history detail (2026-11-26): a member's live activity lines name
    what they worked on, fold open to the command's detail, and a changed file

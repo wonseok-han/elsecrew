@@ -1,3 +1,108 @@
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #13 검토(차단 1·중요 2·경미 2) 반영 (`orca/ade-v-check`)
+검토 `~/Documents/elsecrew-ade-v-2026-11-26/REVIEW-pr13.md`(대상 4fa7db56) 반영. 사용량 한도로 멈췄다가 19:10 이후 이어서 마쳤다.
+
+- **B1(아카이브 유실)**
+  - 원인: 롤오버 스크립트가 아카이브를 쓰기 모드로 먼저 열고 나서 읽었다. 그래서 파일이 비워졌고 11월 엔트리 446개가 사라졌다(검토는 11-02~26 제목 74개로 셈).
+  - 복구: `feature/ade` 7378332a의 아카이브 원문 그대로 되살리고, 그 위에 PR #9 엔트리 3개를 얹었다.
+  - 검사 추가: `scripts/m5-history-entries.mjs`(`pnpm m5:check:history`). 기준의 모든 `### YYYY-MM-DD` 엔트리가 원문 그대로 history.md나 archive에 있는지 본다. 결과는 기준 451 → 현재 451 보존, 새 엔트리 2이다. 옛 PR 머리(`--tree 4fa7db56`)에는 446 유실을 보고한다.
+  - CLAUDE.md·AGENTS.md 롤오버 규칙에 이 검사와 "읽은 뒤 쓴다"를 넣었다.
+  - 날짜 경계와 고정 섹션 분량(366줄)이 충돌하는 문제는 문서 관리 합의가 필요해 남긴다.
+- **I1(표시 순서)**: 0.5초 타이머(`settleLimitMs`)를 없앴다. 띠 변경은 `PreviewBands`(preview-tab-model)를 거친다. 숨김 응답 뒤에 띠를 바꾸고, 페이지 배치 보고(`rendered`) 뒤에만 다시 보인다. 결과가 화면과 같으면 그 자리에서 `settled`를 알린다.
+- **I2(새 결과 알림)**: 띠를 넣을지 뺄지는 화면값이 아니라 목표값(`target`)으로 정한다. 그래서 다시 불러오는 동안 띠를 내리라는 변경이 대기 중이어도 새 결과 신호가 사라지지 않는다.
+- **M1**: 보고서의 스모크 집계를 바로잡았다. `ui-smoke/`는 병합본 1회차 34/35로 덮어쓰인 결과였다.
+- **M2**: 출력 조회 실패 중이거나 이미 활동을 보인 실행에는 시작 문장을 내지 않는다.
+- **기준 6 판정 정정**: 정상 흐름은 충족이다. 오류·예외 경로(합치기 차단·충돌·다른 브랜치 안내, 설정 도움말)에는 '브랜치'·'(커밋)'이 남아 미충족이다.
+- **시험**
+  - `tests/m5-preview-layout-loop.test.mts`: "a band the page lays out late keeps the view hidden until it is laid out — no timer shows it at the old place", "a new result while taking the band down for a reload keeps the band", "a band change that would change nothing hides nothing"
+  - `tests/m5-preview-tab.test.mts`: 구조 검사, 타이머 없음
+  - `tests/m5-ade-v-check.test.mts`: M2
+  - UI 스모크: "I1 the view is never shown between the hide and the band laid out", "I2 a new result while the band goes for a reload keeps the band, and the view returns". 응답 900ms 지연 상태에서 시험했다. 실행 종료 신호만 띠 모델에 직접 넣었다.
+- **검증**: `npm test` 925/925, `pnpm build`, 렌더러 마운트 스모크 69, UI 스모크 37/37(`~/Documents/elsecrew-ade-v-2026-11-26/ui-smoke-pr13-review/`), 기록 엔트리 검사 통과.
+- **다음**: 노예 재검토·머지. 기준 6의 오류 경로 문구, 롤오버 날짜 경계 규칙 합의, D1~D3는 별도로 진행한다.
+
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — ADE 1차 통합 검증(V): 완료 기준 6개 실제 todo 측정 (`orca/ade-v-check`, 기준 feature/ade 613dafde)
+진단 보고서 4장의 1차 완료 기준을 실제 앱으로 측정했다. 대상은 개발 앱·기본 프로필이다. 임시 프로필에는 공급자 로그인이 없어 실제 실행이 안 되므로 노예 승인 (A)로 기본 프로필을 썼다. 시나리오는 실제 유료 todo 실행 두 가지다. git 모드는 `todo-test-1126g`, 사본 모드는 `todo-test-1126c`(`ELSECREW_GIT_WORKTREES=0`)이고, 역할은 기획 Codex·나머지 Claude Code다. 보고서는 `~/Documents/elsecrew-ade-v-2026-11-26/REPORT.md`(캡처 207개, 1초 표본·분석·앱 로그 `data/`)에 있다.
+
+- **판정(613dafde 기준)**
+  - 충족 4: 1 폭 50.0%·640×699(경계), 3 다섯 상태 네 곳 일치, 4 마크다운 원문 0, 5 미리보기 넓게 623·좁게 390 실제 입력.
+  - 미충족 2: 2 매 실행 시작 11~31초 문장 공백, 6 반영 확인 문구의 "커밋".
+  - 둘 다 이 브랜치에서 고쳤다. 기준 2는 수정 뒤 짧은 실제 실행에서 공백 0이었다.
+- **함께 확인**
+  - 사용자 정의 역할 '접근성 점검'에 총괄이 위임했고, 확인 뒤 팀을 되돌렸다.
+  - 재시작 3번 모두 마지막 프로젝트·작업이 복원됐다.
+  - 권한 카드 29번이 모두 2~4초 만에 에이전트 쪽에서 거둬졌고, 그동안 '이번만 허용'은 한 번도 켜지지 않았다.
+- **고친 것(8cba9ad3)**
+  - 실행 시작 문장: `startingSentence`, "받은 일을 읽고 시작하는 중이에요".
+  - 미리보기 '다시 불러오기'(띠 없음) 뒤 뷰가 영원히 숨는 결함: PR #9 배치 순서. 변화 없는 띠는 숨김 순서를 타지 않고, `settleLimitMs` 0.5초 뒤 다시 놓는다.
+  - 반영 확인 문구에서 "커밋" 제거.
+- **남긴 큰 결함**
+  - D1: main sidecar 클라이언트의 동시 스트림 16개 한도를 넘으면 늦게 온 `blob.chunk`가 `protocolInvalid`가 되어 엔진이 재시작되고, 실행 중인 에이전트가 '중단됨'이 된다(사본 세션 로그).
+  - D2: 에이전트가 55KB PNG를 읽으면 Claude stream-json 한 줄(약 148KB)이 관측 한도 128KiB를 넘어 `sessionChannel/unknown`으로 실행이 멈춘다.
+  - D3: 권한 카드 깜박임.
+- **실수 기록**: 프로젝트 ID 조회 필드를 잘못 써(`path` → 실제 `canonicalPath`) 기존 `todo-test-1118a`의 팀 배정을 바꿨다. 1분 안에 원래 값으로 되돌렸다(설정 버전 2→4, 내용 동일, 브리지 사용·DB 직접 수정 없음).
+- **검증**: `npm test` 900/900, `pnpm build`, 렌더러 마운트 스모크 68, 실제 앱 미리보기 UI 스모크 35/35(새 검사: 띠 없이 다시 불러오기).
+- **다음**: D1(스트림 한도와 프로토콜 오류 처리)·D2(큰 도구 결과 줄 처리)를 따로 설계한다. 권한 카드 깜박임(D3)과 기준 3 주의(누른 직후 잠깐 섞이는 문구, git 작업의 '내 폴더에 넣기' 상위 표현)를 정리한다.
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #10 독립 검토(차단 0·중요 4·경미 3) 전부 반영 (`orca/ade-theme-tokens`)
+검토 `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr10.md`(대상 db5009d6). 재현 시험은 `tests/m5-pr10-review.test.mts`(13개)에 모았다.
+
+- **I1 화면 밝기 기록**: main 기록이 기준이고 렌더러 사본은 첫 페인트용이다(`theme.ts` `createThemeController`, IPC `m5:appearance:get` 추가). 사본 없음·손상·저장소 예외 → main 기록, main 기록 없음 + 올바른 사본 → 사본으로 복구, 손상 사본은 보내지 않음, 기록 응답 전 사용자 선택 유지. `appearance.json`은 `.tmp`+fsync+rename, 실패하면 이전 기록 유지·`saved: false` → 설정에 "기억하지 못했어요"(`m5.preferences.themeSaveFailed`).
+- **I2 시스템 변경**: `nativeTheme.on("updated")`가 열린 창 배경을 다시 칠한다. 렌더러는 `prefers-color-scheme` 변경으로 CSS·Monaco를 바꾼다(시험: 컨트롤러 시스템 전환, 보안 하네스 `updated` 이벤트).
+- **I3 구분 버튼**: 트랙 `--bg-track`(라이트 회색)과 선택 칸 `--selected-edge` 안쪽 테두리(두 테마 3:1 이상), `overflow: hidden` 제거, `.m5-segmented/.m5-seg/.m5-preview-viewport` 버튼 초점 링을 안쪽(`-2px`)에 그림.
+- **I4 실제 조합 대비**
+  - 대비 검사기에 컴포넌트 조합 표(색 혼합 계산 포함)를 더하고 반올림 전 값으로 비교한다(다크·라이트 각 159개).
+  - 새 렌더 측정기 `tests/m5-rendered-contrast-probe.cjs`가 렌더러 스모크 21곳에서 실제 DOM을 잰다(글자·입력 경계·비활성 강조색·구분 버튼 선택/초점). 마운트 스모크는 다크·라이트 두 번 돈다.
+  - 측정이 찾아 고친 것: 입력칸 경계(`--line-strong` 1.5~2:1 → 입력 규칙 14곳을 원본에서 `--line-input`으로 + 전역 규칙, 라이트 `--p-gray-500` #7f858c), 선택 행의 역할 아이콘(`--role-tint` 10%, 라이트 역할색 진하게, 다크 role-7), 위험 호버 필터 → `--danger-bg-hover`, 첫 실행 현재 단계 글자 `--text-primary`, 입력 키보드 초점 링.
+  - 첫 CI(06fc5943) macOS 라이트 렌더러 스모크가 Claude 연결 코드 입력칸 경계 1.62:1을 잡았다. 로컬 실행에서는 그 시점에 보이지 않던 칸이었다. 구체도가 더 높은 옛 규칙이 전역 입력 경계를 이겨서였다. 입력 규칙을 원본에서 고치고, 입력·textarea·select 규칙의 테두리 색을 `--line-input`으로만 쓰게 막는 정적 시험을 더했다.
+- **경미**
+  - 미리보기 UI 스모크 I1 판정: 지연된 close 응답 시각 대신 실제 `removeChildView` 시각을 기준으로 바꿨다.
+  - 채운 빨강은 확인 버튼 4곳(`m5-btn-danger-solid`)에만 둔다. 역할 메뉴 '삭제'는 투명 유지.
+  - 밝기 도움말을 '운영체제 설정'으로 바꿨다.
+- **검증**
+  - `npm test` 919/919, `pnpm build` 통과.
+  - `pnpm m5:test:editor` 69/69 두 번 연속(렌더러 마운트 스모크 다크·라이트, 렌더 대비 실패 0).
+  - 대비 검사 다크·라이트 각 159/159.
+  - 미리보기 UI 스모크: 다크 PASS 2회 연속, 라이트 PASS 2회 연속. I1은 분리 후 약 400ms 뒤 해제.
+  - 캡처·로그: `~/Documents/elsecrew-ade-theme-tokens-2026-11-26/pr10-review/`.
+  - CI: 06fc5943은 macOS 라이트 스모크 실패(위 입력칸). 45c3ae4a에서 macOS·Windows·website·GitGuardian 모두 통과.
+  - 운영체제 밝기 자체를 바꿔 보는 실제 앱 확인은 하지 않았다(다른 작업자와 함께 쓰는 컴퓨터라 시스템 설정을 바꾸지 않음). 단위·하네스 시험으로 막았다.
+
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 화면 통일 U0(토큰·화면 밝기)·U1(공용 컴포넌트 층) (`orca/ade-theme-tokens`, 기준 feature/ade 613dafde)
+설계: `docs/proposals/m5-ade-screens-plan.md`(원본 `~/Documents/elsecrew-ade-screens-design-2026-11-26/`) 2장·4.1. 결정(조정자 위임): 테마 기본값 시스템, 강조색 코랄 유지(라이트 `#b4482d`), 주인님 규칙 "버튼은 동작만"을 설계 2.1의 10번으로 추가. 현행 설명은 architecture "색·간격 토큰과 화면 밝기".
+
+- **U0 토큰**
+  - `styles.css` `:root`를 설계 토큰으로 바꿨다(다크 값 4개 보정: 보조·3차 글자, 선택 면, 중립 점, 편집기 줄 번호).
+  - 새 토큰: 입력 면·선, 비활성 글자, 초점·링크, 막·그림자, 편집기, 간격 7·pill·2xl·굵기·높이.
+  - `:root[data-theme="light"]` 블록을 넣었다.
+  - 블록 밖 hex 228줄을 매핑기로 의미 토큰에 옮겼다(색 계열·속성 규칙 + 문맥 예외 27개, 결과 표는 PR 본문). `rgba()` 7개도 정리해, 블록 밖 hex·rgb는 **0**이다.
+  - 없던 토큰 `--m5-accent`·`--m5-surface-2`, PR #9의 `--text-sm`을 정의된 이름으로 바꿨다.
+- **화면 밝기**
+  - 설정 › 일반에 '화면 밝기'(시스템/라이트/다크)를 넣었다. `src/m5/theme.ts`가 `localStorage`·`prefers-color-scheme`로 `<html data-theme>`을 정한다.
+  - main은 IPC `m5:appearance:set`(현재 main frame, 세 값만)으로 `nativeTheme.themeSource`·창 배경색을 따르고 `appearance.json`에 기억한다(`electron/appearance.ts`).
+  - Monaco는 토큰에서 색을 읽어 선택이 바뀌면 다시 정의한다(`editor-surface.tsx`의 hex 8개 제거).
+- **U1 컴포넌트**
+  - 공용 컴포넌트 구역을 넣었다(버튼 위계·배지·배너·카드·설정 묶음·빈 상태·단계·복구 안내). 예전 클래스는 별칭이다.
+  - 비활성 주 행동은 회색 면(지금까지는 강조색 52% 투명).
+  - 토스트는 색 띠(`inset 3px`)와 물든 배경을 없애고 아이콘에만 상태 색을 쓴다.
+  - 배너는 테두리를 없앴다. 실행 상태 칩은 배지 모양이고, 구분 버튼은 들어간 트랙 + 올라온 선택이며, 확인 대화상자 안 위험 버튼은 채운 빨강이다.
+  - 버튼 문구 규칙: 설정 에이전트 구역의 로그인 버튼을 '로그인'으로 줄이고, 접근성 이름에는 'Codex 로그인'을 남겼다(`m5.login.startNamed`).
+- **시험·도구**
+  - `scripts/m5-contrast-check.mjs`(다크·라이트 각 95쌍)와 `tests/m5-style-tokens.test.mts`(대비, 블록 밖 색 0, 정의되지 않은 토큰 0, 화면 코드 색 리터럴 0, 테마 해석, Monaco 색)를 넣었다.
+  - 보안 시험에 테마 IPC(다른 프레임·잘못된 값·인자 수 거절, themeSource·배경색)를 넣었다.
+  - 렌더러 스모크 러너에 선택적 캡처(`M5_SMOKE_CAPTURE_DIR`, 22지점)와 테마(`M5_SMOKE_THEME`)를 넣었다. 메뉴 면 색 검사는 옛 hex 대신 "불투명·작업대와 다른 면"으로 바꿨다.
+  - 미리보기 UI 스모크는 `PREVIEW_UI_THEME`으로 `appearance.json`을 미리 쓴다.
+- **검증**
+  - `npm test` 904/904, `pnpm build` 통과. 대비 검사 다크·라이트 각 95쌍 통과.
+  - 렌더러 스모크: `pnpm m5:test:editor` 68/68, 캡처 실행으로 다크·라이트 모두 통과(각 캡처 21장).
+  - 미리보기 UI 스모크(실제 앱): 다크 PASS, 라이트 PASS 2회. 라이트 첫 회는 I1(무응답 떼어 내기) 시간 검사 1개가 실패했고, 같은 코드로 두 번 다시 돌려 통과했다. 시간 흔들림으로 판단하지만 원인은 확인하지 않았다.
+  - 실제 개발 앱(임시 프로필, 포트 9397): 설정에서 라이트→다크→시스템→라이트가 즉시 바뀌었다. `prefers-color-scheme`이 main 선택을 따랐고 `appearance.json`이 기록됐다.
+  - 캡처: `~/Documents/elsecrew-ade-theme-tokens-2026-11-26/`(before-dark, after-dark, after-light, preview-ui-*, live).
+- **발견(재조사 방지)**
+  - 첫 실행에 렌더러가 기본값 '시스템'을 main에 보내면, main이 기억한 '라이트'를 덮어 미리보기 스모크가 다크로 떴다. 렌더러에 저장된 선택이 있을 때만 알린다.
+  - `tests/m5-ui-capture.cjs`는 첫 화면 기대값(`.m5-provider-selection`)이 낡아 시작부터 멈춘다. 전후 비교에는 렌더러 스모크 캡처를 썼다.
+  - 시험 몇 개는 소스를 vm에서 돌리며 import 이름을 직접 넣는다. 새 import를 쓰면 `m5-bootstrap-lifecycle`(`startTheme`), `m5-monaco-options`(`defineElsecrewTheme`)처럼 그 시험의 context에 넣어야 한다.
+- **PR**: https://github.com/wonseok-han/elsecrew/pull/10 (`--base feature/ade`). CI(236e43f3~6de534d4) macOS·Windows·website·GitGuardian 모두 통과. 본문 전후 캡처는 f8f7f180에 올렸다가 6de534d4에서 지웠다(공개 저장소의 커밋 고정 주소).
+- **다음**: Codex 검토(조정자), U2(홈·첫 실행·프로젝트 전환)~U4. 설계 6장 열린 질문 Q1·Q4~Q9.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #9 재확인(B1·I1 부분 해결) 마지막 라운드 (`orca/ade-preview-ui`)
 재확인 `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr9-2.md` 결과 I2·I3은 해결, B1·I1은 부분 해결이었다. 핵심 요구는 "네이티브 뷰가 숨겨진 것이 확인된 뒤에만 좌표를 바꾸거나 덮개를 보인다"였다. 이번 라운드로 둘 다 닫고 **macOS 기본 켜짐을 유지**한다. 코드는 89459c38이다.
 
