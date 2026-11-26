@@ -1530,6 +1530,36 @@ test("G4 file streams correlate descriptors, chunks, hashes, and project watcher
   assert.equal(watched.length, 1, "unsubscribe must remove the exact event wrapper");
 });
 
+test("task-workspace file reads settle their streams: many opened files never exhaust the active-stream bound", async () => {
+  const { child, client } = createClient();
+  const started = client.start();
+  child.stdout.write(`${readyLine()}\n`);
+  await started;
+  const ref = { chatId: "chat_01", projectId: "project_01", worktreeId: "worktree_01", workspaceIdentity: "workspace_01" };
+  const seen: unknown[] = [];
+  const unwatch = client.onWorkspaceEvent(event => seen.push(event));
+  // More than the 16 streams that may be open at once.
+  for (let index = 0; index < 40; index += 1) {
+    const read = client.readWorkspaceFile({ ...ref, path: "src/App.tsx" });
+    const request = JSON.parse(child.writes.at(-1) ?? "{}") as { requestId: string; method: string };
+    assert.equal(request.method, "workspace.file.read");
+    child.stdout.write(`${JSON.stringify({
+      protocolVersion: 1, kind: "response", sidecarInstanceId: "sidecar_test_01", requestId: request.requestId, ok: true,
+      result: { ...ref, path: "src/App.tsx", classification: "utf8", byteLength: 5,
+        version: "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        stream: { streamId: `workspace_read_${index}`, chunkBytes: 262144 } },
+    })}\n`);
+    await read;
+    child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: `workspace_read_${index}`, seq: 1, event: "workspace.blob.chunk", payload: { ...ref, text: "hello" } }));
+    assert.equal(client.failure, undefined, `read ${index}`);
+  }
+  assert.equal(seen.length, 40, "the renderer still receives every chunk");
+  unwatch();
+  // A chunk for a stream that already completed is still refused.
+  child.stdout.write(eventLine({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "workspace_read_0", seq: 2, event: "workspace.blob.chunk", payload: { ...ref, text: "x" } }));
+  assert.match(String(client.failure?.message), /unknown or completed stream/);
+});
+
 test("G4 rejects unknown, oversized, and hash-mismatched blob streams without retry", async () => {
   const unknown = createClient();
   const unknownStart = unknown.client.start();

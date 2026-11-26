@@ -843,7 +843,10 @@ export class SidecarClientV1 {
         this.#resolveReady = undefined;
         this.#rejectReady = undefined;
       }
-      if (envelope.event === "blob.chunk") this.#acceptChunk(envelope);
+      // Task-workspace reads and diffs register their streams too: their
+      // chunks must settle them, or after 16 opened files the next read
+      // exceeded the active-stream bound and failed the engine (2026-11-26).
+      if (envelope.event === "blob.chunk" || envelope.event === "workspace.blob.chunk") this.#acceptChunk(envelope);
       if (["file.changed", "file.conflict", "diff.changed"].includes(envelope.event)) {
         const watch = validateWatchEventV1(envelope.payload);
         for (const listener of this.#projectListeners) listener(watch, envelope);
