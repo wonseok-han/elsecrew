@@ -231,6 +231,16 @@ const appUpdateApi = Object.freeze({
 });
 contextBridge.exposeInMainWorld("m5AppUpdate", appUpdateApi);
 
+// Screen brightness choice (system / light / dark); main follows it for native parts.
+const M5_APPEARANCE_CHANNEL = "m5:appearance:set";
+contextBridge.exposeInMainWorld("m5Appearance", Object.freeze({
+  set: async (theme: unknown) => {
+    if (theme !== "system" && theme !== "light" && theme !== "dark") throw new Error("invalid appearance");
+    const result: unknown = await ipcRenderer.invoke(M5_APPEARANCE_CHANNEL, theme);
+    return { dark: typeof result === "object" && result !== null && (result as { dark?: unknown }).dark === true };
+  },
+}));
+
 contextBridge.exposeInMainWorld("m5ClaudeUsage", Object.freeze({
   read: async () => validateClaudeUsageResult(await ipcRenderer.invoke(M5_CLAUDE_USAGE_CHANNEL)),
 }));

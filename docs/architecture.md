@@ -549,11 +549,46 @@ Keychain 호출은 모두 30초 제한이 있는 자식 프로세스(코어 덤�
 - **IPC**: `m5:preview:v1`(요청 `status|open|layout|reload|hide|close`)은 기존 `assertCurrentMainFrame`을 거친다. 결과 알림은 `m5:preview:v1:event`(`loaded|loadFailed|blockedNavigation|unresponsive|responsive|closed{reason}`, reason에 `reloaded` 포함). preload `window.m5Preview`가 계약 검증을 양쪽에서 한다. 플래그는 `electron/preview-flag.ts`만 읽는다(`main.ts`는 환경 변수를 읽지 않음).
 - **검증**: Rust 경로 표·링크·바꿔치기·크기 시험, TS 정책/매니저/탭/보안 하네스 시험, 실제 Electron 격리 프로브 `pnpm m5:test:preview-isolation`(git·사본 두 모드, WebRTC 전송별·권한별 명시적 거절, 양성 대조 포함), 실제 앱 화면 스모크 `pnpm m5:test:preview-ui`(`scripts/m5-preview-ui-run.mjs`가 띄움), 기본값 확인 `scripts/m5-preview-default-check.mjs`(개발·패키지, 기본·0·1)다. 두 프로브는 g6-release 게이트에 있다. 프로브 판정은 **관측된 검사만으로** 내고, 대조가 닿지 않은 전송(이 기기의 IPv6 WebRTC 4개 전송 × 4종)은 '관측 불가'로 이유와 함께 따로 센다(검토 I2). 권한은 그 호출 동안 그 미리보기에 대해 main이 같은 권한을 거절했거나 Permissions-Policy가 거절해야 통과이고, 시간 초과만 남으면 관측 불가다(검토 I3). 격리 프로브·화면 스모크는 macOS 전용이며 다른 플랫폼에서 종료 코드 2(미실행, 하네스에서 NOT_READY)로 끝난다. 이 세 검사는 CI에서 돌리지 않는다(실제 창·포커스 필요, `ci.yml` 주석). 화면 스모크는 main 응답을 일부러 늦추거나(900ms, 적용 전·후) 끊어 순서를 확인한다(대화상자와 backdrop, 검토 시트, 띠, 창 크기, 무응답 시 떼어 내기). **남은 과제**: 라우팅 가능한 IPv6가 있는 기기에서 IPv6 WebRTC 차단 관측, 패키지 앱 안의 격리 프로브, Windows 실행.
 
-### 색·간격 토큰 2단 구조 (ADE 1차-나 L0, 2026-11-26)
+### 색·간격 토큰과 화면 밝기 (ADE 1차-나 L0 → 화면 통일 U0·U1, 2026-11-26)
 
-- `src/m5/styles.css` 맨 위 `:root`가 단일 출처다. 1단 원시 팔레트 `--p-*`(테마마다 바뀌는 값), 2단 의미 토큰(면 `--bg-app/pane/raised/sunken/hover/selected`, 선 `--line-subtle/default/strong`, 글자 `--text-primary/secondary/tertiary`, 강조 `--action-bg/-bg-hover/-text`, 상태 `--status-{running,attention,review,done,danger}` + `-text`·`-bg`, `--status-neutral`, `--diff-add/remove`, 역할 색 `--role-1~8`), 간격 `--space-1~6`(4/8/12/16/24/32), 모서리 `--radius-s/m/l`, 글자 크기 `--text-xs~xl`, 레이아웃 치수 `--topbar-h/--statusbar-h/--left-w/--right-w/--center-max`(창 폭 구간마다 바뀜).
-- 예전 `--m5-*` 이름은 의미 토큰의 별칭으로 남아 기존 화면 값이 그대로다. 상태 색 이름은 1차-가 `taskPhaseTone`과 같다.
-- 규칙: 1차-나가 새로 쓰거나 다시 쓰는 구역은 의미 토큰만 쓴다(hex·원시 `--p-*` 직접 사용 금지, 리뷰 규칙). 값은 다크만 있고, 라이트 테마·테마 선택(2차)은 `:root[data-theme="light"]` 주석 자리에 1단 값만 다시 정의한다.
+- **단일 출처**: `src/m5/styles.css` 맨 위의 두 블록이다.
+  - 다크 `:root`와 라이트 `:root[data-theme="light"]`. 라이트 블록은 1단 원시 팔레트 `--p-*`(와 역할 색)만 다시 정의한다.
+  - 2단 의미 토큰
+    - 면: `--bg-app/pane/raised/sunken/hover/selected/input/scrim`
+    - 선: `--line-subtle/default/strong/input`
+    - 글자: `--text-primary/secondary/tertiary/disabled`
+    - 강조·초점·링크: `--action-bg/-bg-hover/-text`, `--focus-ring`, `--link`
+    - 상태: `--status-{running,attention,review,done,danger}` + `-text`·`-bg`, `--status-neutral`
+    - 그 밖: `--diff-add/remove`, 편집기 `--editor-line-number(-active)/--editor-selection(-inactive)`, 그림자 `--shadow-color/--shadow-1/--shadow-2`, 역할 색 `--role-1~8`
+  - 테마와 무관한 값: 간격 `--space-1~7`, 모서리 `--radius-s/m/l/pill`, 글자 `--text-xs~2xl`·`--weight-*`, 높이 `--control-h(-l)`, 레이아웃 치수.
+- **hex는 두 블록 안에만 있다.**
+  - 블록 밖 규칙의 hex·`rgb()`는 0개다. U0에서 옛 구역 hex 228줄을 색 계열·속성에 따라 의미 토큰으로 옮겼다.
+  - 화면 코드(`src/m5/*.ts(x)`)에도 색 리터럴이 없다.
+  - 모든 `var(--x)`는 정의돼 있다. 없던 `--m5-accent`·`--m5-surface-2`, PR #9의 `--text-sm`은 정리했다.
+  - 예전 `--m5-*` 이름은 의미 토큰의 별칭으로 남아 있다(새 코드에서는 쓰지 않는다).
+  - 이 규칙은 `tests/m5-style-tokens.test.mts`가 확인한다.
+- **대비**: `scripts/m5-contrast-check.mjs`가 두 블록을 읽어 다크·라이트 각 95쌍을 검사한다.
+  - 기준은 글자 4.5:1, 비텍스트(주 행동 면·입력 테두리·상태 점·초점 링·바뀐 줄) 3:1이다.
+  - `npm test`에서 실행된다. 토큰 값을 바꾸면 이 검사가 먼저 깨진다.
+- **화면 밝기**(설정 › 일반 '화면 밝기', 시스템/라이트/다크, 기본 시스템)
+  - `src/m5/theme.ts`
+    - 선택은 이 페이지의 `localStorage`(`elsecrew.theme.v1`)에 둔다.
+    - `bootstrap.tsx`가 첫 렌더 전에 `startTheme()`로 `<html data-theme>`을 붙이고, 시스템 변경(`prefers-color-scheme`)을 따른다.
+    - 저장된 선택이 있을 때만 main에 알린다. 없으면 main이 기억한 값이 시스템 신호를 이미 정하고 있기 때문이다.
+  - main(`electron/appearance.ts`, IPC `m5:appearance:set`, preload `window.m5Appearance.set`)
+    - 현재 main frame만, 세 값 중 하나만 받는다.
+    - 받은 값으로 `nativeTheme.themeSource`와 창 배경색을 바꾸고 `userData/appearance.json`에 기억한다.
+    - 다음 실행에는 그 값으로 첫 프레임 배경을 칠한다.
+  - main의 `themeSource`가 렌더러의 `prefers-color-scheme`을 정하므로, '라이트'를 고르면 미리보기 안의 사용자 페이지도 라이트 매체로 보인다.
+  - Monaco는 같은 토큰에서 색을 읽어(`currentMonacoTheme`, 기본 `vs`/`vs-dark`) 선택이 바뀌면 다시 정의한다.
+- **공용 컴포넌트 층(U1)**: `styles.css`의 "공용 컴포넌트" 구역에 있다.
+  - 새 클래스: `.m5-btn-primary/secondary/quiet/danger/danger-solid`, `.m5-badge(-상태)`, `.m5-banner(-상태)`, `.m5-card`, `.m5-group > .m5-setting`, `.m5-empty-state`, `.m5-steps`, `.m5-recover`.
+  - 예전 클래스는 같은 규칙의 별칭이다. 기본 `button`은 보조이고, `.m5-new-chat-button`·`.m5-start-action > button`·작업대 `submit`은 주 행동이며, `.m5-secondary`·`.m5-refresh`도 별칭으로 묶었다.
+  - 비활성 주 행동은 강조색 대신 `--bg-hover` 면에 `--text-disabled` 글자로 둔다.
+  - 확인 대화상자 안의 `.m5-danger`만 채운 빨강이다.
+  - 토스트는 색 띠·물든 배경 없이 한 면이고, 상태 색은 아이콘에만 쓴다.
+  - 배너(`.m5-notice/.m5-admission/.m5-error/.m5-rescan`)는 테두리 없이 상태 면만 쓴다. 실행 상태 칩은 배지 모양이다.
+- 설계와 남은 화면 묶음(U2~U8)은 `docs/proposals/m5-ade-screens-plan.md`에 있다.
 
 ### 작업 레이아웃 (ADE 1차-나 L1~L6, 2026-11-26)
 

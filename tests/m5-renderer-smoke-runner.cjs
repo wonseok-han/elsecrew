@@ -1,6 +1,6 @@
 const { probeRecoveryHistory } = require("./m5-recovery-history-ui-probe.cjs");
 const recoveryHistoryFixture = JSON.parse(require("node:fs").readFileSync(require("node:path").resolve(__dirname, "fixtures/m5/agent-adapter-v1/g5c-identityless-recovery-cases.json"), "utf8")).valid.find(item => item.name === "identityless-recovery-chat-detail").value;
-const { app, BrowserWindow, net, protocol, session } = require("electron");
+const { app, BrowserWindow, ipcMain, net, protocol, session } = require("electron");
 const { resolve, sep } = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { mkdtempSync, writeFileSync } = require("node:fs");
@@ -17,6 +17,11 @@ app.setPath("userData", userData);
 
 const rendererDirectory = resolve(process.env.M5_RENDERER_DIR || "");
 const preload = resolve(__dirname, "m5-renderer-smoke-preload.cjs");
+// Optional screen captures for before/after comparison (ADE screen unification U0·U1):
+// M5_SMOKE_CAPTURE_DIR=<dir> writes a PNG at each ${capture(...)} point; M5_SMOKE_THEME=light|dark
+// starts the app with that brightness choice. Without the variables the smoke is unchanged.
+const captureDirectory = process.env.M5_SMOKE_CAPTURE_DIR ? resolve(process.env.M5_SMOKE_CAPTURE_DIR) : "";
+const capture = name => captureDirectory ? `await window.m5SmokeCapture(${JSON.stringify(name)});` : "";
 
 protocol.registerSchemesAsPrivileged([{ scheme: "m5smoke", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 
@@ -50,6 +55,13 @@ app.whenReady().then(async () => {
   });
   // CI screens can be smaller than the layout's 1280×768: keep the size exact.
   const window = new BrowserWindow({ width: 1280, height: 768, useContentSize: true, enableLargerThanScreen: true, show: false, webPreferences: { preload, partition: "m5-renderer-smoke", contextIsolation: false, sandbox: false, nodeIntegration: false } });
+  if (captureDirectory) {
+    require("node:fs").mkdirSync(captureDirectory, { recursive: true });
+    ipcMain.handle("m5-smoke-capture", async (_event, name) => {
+      await new Promise(done => setTimeout(done, 250));
+      writeFileSync(resolve(captureDirectory, `${String(name).replace(/[^a-z0-9-]/gi, "")}.png`), (await window.webContents.capturePage()).toPNG());
+    });
+  }
   window.webContents.on("console-message", (event) => process.stderr.write(`renderer: ${event.message}\n`));
   window.webContents.on("render-process-gone", (_event, details) => fail(new Error(`renderer exited: ${details.reason}`)));
   await window.loadURL("m5smoke://m5/index.html");
@@ -88,6 +100,7 @@ app.whenReady().then(async () => {
     document.querySelector('.m5-usage-trigger').click();
     document.querySelector('.m5-open-preferences').click();
     await ${waitFor("!document.querySelector('.m5-app-settings').hidden", "settings dialog visible")};
+    ${capture("00-settings-general")}
     if (document.querySelector('.m5-app-settings').tagName !== 'SECTION' || getComputedStyle(document.querySelector('.m5-toolbar')).display !== 'none') throw new Error('settings is not a full page');
     const settingsPage = document.querySelector('.m5-app-settings');
     if (getComputedStyle(settingsPage).backgroundColor !== getComputedStyle(document.querySelector('.m5-workbench')).backgroundColor) throw new Error('settings theme differs from workbench');
@@ -105,6 +118,7 @@ app.whenReady().then(async () => {
     await ${waitFor("!document.querySelector('.m5-storage-settings > button').disabled", "storage ready")};
     document.querySelector('.m5-storage-settings > button').click();
     await ${waitFor("document.querySelector('.m5-storage-consent')", "storage controls")};
+    ${capture("01-settings-storage")}
     const budget = document.querySelector('.m5-storage-limit').getBoundingClientRect();
     const consent = document.querySelector('.m5-storage-consent').getBoundingClientRect();
     const saveBudget = document.querySelector('.m5-storage-actions');
@@ -188,6 +202,7 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"Codex 연결\"]').textContent.includes('이 앱에 Codex 로그인이 연결됐어요')", "automatic saved-login restoration")};
     if (document.getElementById('codex-connection-details').hidden) throw new Error('settings connection controls must stay visible');
     await ${waitFor("!document.getElementById('codex-connection-details').hidden", "connection settings expanded")};
+    ${capture("02-settings-agents-expanded")}
     await new Promise(resolve => setTimeout(resolve, 600));
     if (document.getElementById('codex-connection-details').hidden) throw new Error('status polling collapsed explicit settings');
     codexButton('연결 상태 다시 확인').click();
@@ -200,14 +215,14 @@ app.whenReady().then(async () => {
     if (window.m5SmokeLoginRequests.filter(r=>r.action==='recover').length !== 2 || window.m5SmokeLoginRequests.some(r=>r.provider==='codex' && r.action==='start')) throw new Error('recovery retried or started OAuth');
     // Connecting an agent that is not signed in starts its login right away;
     // the login button only remains for a later retry.
-    await ${waitFor("[...document.querySelectorAll('button')].some(b => (b.textContent === 'Claude Code 로그인' || b.textContent === '로그인 취소') && !b.disabled)", "Claude login started or offered")};
-    [...document.querySelectorAll('button')].find(b => b.textContent === 'Claude Code 로그인' && !b.disabled)?.click();
+    await ${waitFor("[...document.querySelectorAll('button')].some(b => (b.getAttribute('aria-label') === 'Claude Code 로그인' || b.textContent === '로그인 취소') && !b.disabled)", "Claude login started or offered")};
+    [...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Claude Code 로그인' && !b.disabled)?.click();
     await ${waitFor("[...document.querySelectorAll('button')].some(b => b.textContent === '로그인 취소' && !b.disabled)", "login waiting and cancellation")};
     [...document.querySelectorAll('button')].find(b => b.textContent === '로그인 취소').click();
     await ${waitFor("document.querySelector('[aria-label=\"Claude Code 연결\"]').textContent.includes('로그인을 취소했어요')", "canceled Claude login feedback")};
     if (!document.querySelector('[aria-label="Codex 연결"]').textContent.includes('이 앱에 Codex 로그인이 연결됐어요')) throw new Error("Claude cancellation changed Codex status");
-    await ${waitFor("[...document.querySelectorAll('button')].some(b => b.textContent === 'Claude Code 로그인' && !b.disabled)", "retry Claude login")};
-    [...document.querySelectorAll('button')].find(b => b.textContent === 'Claude Code 로그인').click();
+    await ${waitFor("[...document.querySelectorAll('button')].some(b => b.getAttribute('aria-label') === 'Claude Code 로그인' && !b.disabled)", "retry Claude login")};
+    [...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Claude Code 로그인').click();
     await ${waitFor("document.querySelector('#claude-connection-code')", "connection code input")};
     const usageReadsBeforeLogin = window.m5SmokeClaudeUsageReads;
     const codeInput = document.querySelector('#claude-connection-code');
@@ -243,6 +258,7 @@ app.whenReady().then(async () => {
     if (!projectButton) throw new Error("renderer smoke lost its enabled accessible project-selection control after it was observed");
     // Saved projects are now a persistent rail, not a toolbar popover.
     await ${waitFor("document.querySelector('.m5-project-catalog-list li button') && !document.querySelector('.m5-project-catalog-list li button').disabled", "saved project catalog loaded")};
+    ${capture("03-home-catalog")}
     if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/earlier') throw new Error('catalog first page missing');
     document.querySelector('.m5-app-settings > header button').click();
     await ${waitFor("document.querySelector('.m5-app-settings').hidden", "settings page closed")};
@@ -265,12 +281,13 @@ app.whenReady().then(async () => {
     rail.querySelector('.m5-project-overflow > summary').click();
     const overflow = rail.querySelector('.m5-project-overflow');
     await ${waitFor("document.querySelector('.m5-project-context-popup:popover-open')", "top-layer project menu")};
+    ${capture("04-project-menu")}
     const menuSurface = overflow.querySelector('div');
     const menuBounds = menuSurface.getBoundingClientRect();
     const menuAnchor = overflow.querySelector('summary').getBoundingClientRect();
     if (menuBounds.left < menuAnchor.right || Math.abs(menuBounds.top - menuAnchor.top) > 1) throw new Error('project context must open beside its trigger');
     if (menuBounds.left < 0 || menuBounds.right > innerWidth || menuBounds.bottom > innerHeight || document.elementFromPoint(menuBounds.right - 12, menuBounds.top + 12)?.closest('.m5-project-context-popup') !== menuSurface) throw new Error('project menu clipped by sidebar');
-    if (menuSurface.getBoundingClientRect().width < 200 || getComputedStyle(menuSurface).backgroundColor !== 'rgb(48, 52, 59)' || !menuSurface.querySelector('button svg')) throw new Error('context menu needs an opaque distinct surface and icons');
+    if (menuSurface.getBoundingClientRect().width < 200 || !getComputedStyle(menuSurface).backgroundColor.startsWith('rgb(') || getComputedStyle(menuSurface).backgroundColor === getComputedStyle(document.querySelector('.m5-workbench')).backgroundColor || !menuSurface.querySelector('button svg')) throw new Error('context menu needs an opaque distinct surface and icons');
     if (getComputedStyle(rail).userSelect !== 'none') throw new Error('app chrome text is selectable');
     overflow.querySelector('div').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
     if (!overflow.open) throw new Error('inside menu pointer closed popup');
@@ -284,6 +301,7 @@ app.whenReady().then(async () => {
     if (document.querySelector('.m5-troubleshooting').open) throw new Error('troubleshooting should start folded');
     document.querySelector('.m5-troubleshooting > summary').click();
     await ${waitFor("document.querySelector('.m5-maintenance-group')?.getClientRects().length > 0", "troubleshooting expanded")};
+    ${capture("05-settings-project-troubleshoot")}
     await (${probeRecoveryHistory.toString()})(${JSON.stringify(recoveryHistoryFixture)});
     const recoveryButton = text => [...document.querySelectorAll('[aria-label="프로젝트 시작 실패 복구"] button')].find(b => b.textContent === text);
     // The page checks for an interrupted start by itself.
@@ -315,6 +333,7 @@ app.whenReady().then(async () => {
     document.querySelector('.m5-project-catalog-list li button').click();
     // The file tree lives in the results panel's Files tab (1차-나 layout).
     await ${waitFor("document.querySelector('[data-testid=right-tab-files]')", "task layout")};
+    ${capture("06-task-layout")}
     document.querySelector('[data-testid=right-tab-files]').click();
     await ${waitFor("document.querySelector('.m5-file-row')", "project tree")};
     if (document.querySelector('.m5-project-menu') || document.querySelector('.m5-workbench > .m5-project-permissions')) throw new Error('project controls clutter the header');
@@ -339,6 +358,7 @@ app.whenReady().then(async () => {
     document.querySelector('.m5-workspace-cleanup > .m5-danger').click();
     if (window.m5CleanupCalls.length) throw new Error('cleanup ran before final consent');
     await ${waitFor("document.querySelector('.m5-workspace-cleanup .m5-cleanup-confirm .m5-danger')", "cleanup confirmation")};
+    ${capture("07-cleanup-confirmation")}
     document.querySelector('.m5-workspace-cleanup .m5-cleanup-confirm .m5-danger').click();
     await ${waitFor("window.m5CleanupCalls.length === 1 && document.querySelectorAll('.m5-workspace-cleanup input').length === 1", "selected cleanup receipt")};
     ${process.env.M5_PERMISSIONS_ONLY === "1" ? "return {permissionsVerified:true};" : ""}
@@ -414,6 +434,7 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('[data-testid=right-panel-files] .m5-file-search input')?.getAttribute('aria-label') === '파일 이름 또는 경로 찾기'", "Korean search restored")};
     document.querySelector('.m5-search-results button').click();
     await ${waitFor("!document.querySelector('[data-testid=review-sheet]').hidden && document.querySelector('.monaco-editor') && Object.hasOwn(globalThis, 'MonacoEnvironment') && typeof globalThis.MonacoEnvironment.getWorker === 'function'", "Monaco mount and reveal")};
+    ${capture("08-editor-sheet-monaco")}
     await ${waitFor("document.querySelector('.m5-project-guide')?.open === false", "guide collapses when file work starts")};
     document.querySelector('.m5-project-guide summary').click();
     await ${waitFor("document.querySelector('.m5-project-guide')?.open === true", "guide can be reopened during work")};
@@ -427,6 +448,7 @@ app.whenReady().then(async () => {
     document.querySelector('.m5-project-guide summary').click();
     [...document.querySelectorAll('button')].find(button => ['이 프로젝트의 팀 역할 바꾸기', '팀 역할'].includes(button.textContent) && !button.disabled).click();
     await ${waitFor("document.querySelectorAll('.m5-team-row').length === 5", "role settings")};
+    ${capture("09-role-settings")}
     const modelField = document.querySelector('#m5-role-editor details input');
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(modelField,'draft-model');
     modelField.dispatchEvent(new Event('input',{bubbles:true}));
@@ -458,6 +480,7 @@ app.whenReady().then(async () => {
     if (!document.querySelector('[data-testid=layout-left]') || !document.querySelector('[data-testid=layout-center]') || !document.querySelector('[data-testid=layout-right]')) throw new Error('three task areas missing');
     document.querySelector('[data-testid=right-tab-changes]').click();
     await ${waitFor("!document.querySelector('[data-testid=right-panel-changes]').hidden", "changes tab")};
+    ${capture("10-changes-tab")}
     document.querySelector('[data-testid=right-tab-files]').click();
     await ${waitFor("!document.querySelector('[data-testid=right-panel-files]').hidden", "files tab")};
     const separator = document.querySelector('.m5-layout-resize');
@@ -474,6 +497,7 @@ app.whenReady().then(async () => {
     if (menu.open) throw new Error('project menu Escape failed');
     document.querySelector('.m5-usage-trigger').click();
     await ${waitFor("document.querySelector('.m5-app-statusbar').textContent.includes('Codex') && document.querySelector('.m5-app-statusbar').textContent.includes('31%') && document.querySelector('.m5-app-statusbar').textContent.includes('Claude') && document.querySelector('.m5-app-statusbar').textContent.includes('27%')", "both connected usage windows")};
+    ${capture("11-usage-statusbar")}
     document.querySelector('.m5-usage-trigger').click();
     return { workerCreated: true, dockVerified: true, text: document.body.textContent };
   })()`;
@@ -522,6 +546,7 @@ app.whenReady().then(async () => {
   window.setContentSize(760, 640);
   await window.webContents.executeJavaScript(`(async () => {
     await ${waitFor("document.querySelector('[data-testid=task-layout]').dataset.band === 'compact'", "narrow layout band")};
+    ${capture("12-narrow-band")}
     if (document.querySelector('[data-testid=review-sheet]').hidden) throw new Error('narrow window closed the review sheet');
     if (globalThis.narrowEditor !== document.querySelector('.monaco-editor') || !document.querySelector('[aria-label="저장되지 않은 변경"]')) throw new Error('responsive layout lost draft or editor');
     if (localStorage.getItem('elsecrew.m5.layout.rightWidth.v1') !== globalThis.wideLayout) throw new Error('narrow layout overwrote the results width');
@@ -641,6 +666,7 @@ app.whenReady().then(async () => {
     if (!document.querySelector('[data-testid=review-sheet]').hidden) document.querySelector('[data-testid=sheet-close]').click();
     document.querySelector('[data-testid=right-panel-changes] .m5-change-row').click();
     await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length === (document.querySelector('.m5-diff-split') ? 199 : 200)", "bounded diff page")};
+    ${capture("13-diff-sheet")}
     if (!document.querySelector('[data-testid=review-sheet] .m5-diff-details') || document.querySelector('[data-testid=review-sheet]').hidden) throw new Error('diff did not open in the review sheet');
     if (!document.querySelector('.m5-editor-surface').hidden || document.querySelector('.monaco-editor') !== preservedEditor) throw new Error('review disposed the existing editor');
     document.querySelector('.m5-diff-options').open = true;
@@ -705,6 +731,7 @@ app.whenReady().then(async () => {
     const input = document.querySelector('#m5-followup-text');
     if (!document.querySelector('[data-testid=review-sheet]').hidden) document.querySelector('[data-testid=sheet-close]').click();
     await ${waitFor("document.querySelector('[data-testid=review-sheet]').hidden", "conversation visible for geometry")};
+    ${capture("14-conversation")}
     const conversation = document.querySelector('.m5-conversation');
     const savedConversationStyle = conversation.getAttribute('style');
     try {
@@ -762,6 +789,7 @@ app.whenReady().then(async () => {
     goalInput.dispatchEvent(new Event('input', { bubbles: true }));
     document.querySelector('.m5-new-chat-button').click();
     await ${waitFor("document.querySelector('.m5-new-chat-dialog').open", "new chat draft dialog")};
+    ${capture("15-new-task-dialog")}
     [...document.querySelectorAll('.m5-new-chat-dialog button')].find(button => button.textContent === '이 프로젝트의 팀 역할 바꾸기').click();
     await ${waitFor("document.querySelector('.m5-settings-dialog')?.open && !document.querySelector('.m5-new-chat-dialog').open", "draft to project settings without overlapping modals")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '작성 중인 새 작업으로 돌아가기').click();
@@ -799,6 +827,7 @@ app.whenReady().then(async () => {
     if (JSON.stringify(previousMessages) !== JSON.stringify([...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].map(node => node.textContent))) throw new Error('language change translated user messages');
     document.querySelector('.m5-followup button[type=submit]').click();
     await ${waitFor("[...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].some(node => node.textContent === '설명을 추가해 주세요.') && document.querySelector('#m5-followup-text').value === ''", "persisted follow-up visible and input cleared")};
+    ${capture("16-team-conversation")}
     await ${waitFor("window.m5SmokeShortStarts.length === 1", "followup sends coordinator without role selection")};
     if ([...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].filter(node => node.textContent === '설명을 추가해 주세요.').length !== 1) throw new Error('duplicate follow-up message');
     languageSelect.value = 'ko';
@@ -916,6 +945,7 @@ app.whenReady().then(async () => {
     window.confirm = originalConfirm;
     window.m5SmokeTeamMessages();
     await ${waitFor("[...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].some(node => node.textContent === '확인한 내용을 정리해 드릴게요.')", "orchestrator synthesized answer")};
+    ${capture("17-orchestrator-answer")}
     if (document.querySelector('.m5-timeline-list').textContent.includes('"action":"delegate"')) throw new Error('raw orchestration decision leaked into normal conversation');
     if (![...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].some(node => node.textContent === '개발 담당과 구조를 확인할게요.')) throw new Error('delegation summary missing');
     window.m5SmokeVisualChatState('running');
@@ -931,6 +961,7 @@ app.whenReady().then(async () => {
     // Run details live in the results panel's History tab (1차-나 L5).
     document.querySelector('[data-testid=right-tab-history]').click();
     await ${waitFor("document.querySelector('[data-testid=right-panel-history] .m5-agent-runs details')", "failed Claude run details")};
+    ${capture("18-failed-run-details")}
     document.querySelector('.m5-agent-runs details summary').click();
     const diagnosticButton = () => [...document.querySelectorAll('.m5-agent-runs button')].find(button => button.textContent === '이번 앱 세션의 연결 진단 보기');
     await ${waitFor("diagnosticButton()", "session diagnostic action")};
@@ -957,6 +988,7 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelectorAll('.m5-chat-chip').length === 4", "four chats listed")};
     document.querySelector('.m5-chat-chip').click();
     await ${waitFor("document.querySelector('#m5-followup-text')", "parallel chat selected")};
+    ${capture("19-parallel-chats")}
     globalThis.parallelPaintReport = await (${measureMessagePaint.toString()})({
       emit: () => window.m5SmokeEmitParallelRound()[0].text,
       visible: () => [...document.querySelectorAll('.m5-story-flow :is(.m5-user-bubble, .m5-story-message, .m5-member-report) p')].map(node => node.textContent),
@@ -995,6 +1027,7 @@ app.whenReady().then(async () => {
     const removalEditor = document.querySelector('.monaco-editor');
     document.querySelector('.m5-chat-remove').click();
     await ${waitFor("document.querySelector('#m5-remove-title')?.closest('dialog').open", "removal confirmation")};
+    ${capture("20-task-removal-confirmation")}
     document.querySelector('#m5-remove-title ~ .m5-dialog-actions .m5-danger').click();
     await ${waitFor("document.querySelector('#m5-remove-title ~ [role=alert]')", "removal failure stays in project")};
     if (document.querySelector('#m5-followup-text') !== preservedConversation || document.querySelector('.m5-switcher-name')?.textContent !== 'smoke') throw new Error('rejected removal navigated away');
@@ -1038,6 +1071,7 @@ app.whenReady().then(async () => {
     document.querySelector('.m5-project-rail .m5-project-overflow summary').click();
     [...document.querySelectorAll('.m5-project-rail .m5-project-overflow button')].find(button => button.textContent === '삭제').click();
     await ${waitFor("document.querySelector('#m5-remove-title')?.closest('dialog').open", "remove project confirmation")};
+    ${capture("21-project-removal-confirmation")}
     const dialog = document.querySelector('#m5-remove-title').closest('dialog');
     if (parseFloat(getComputedStyle(dialog.querySelector('.m5-dialog-actions')).gap) < 8) throw new Error('removal buttons need spacing');
     [...dialog.querySelectorAll('button')].find(button => button.textContent === '취소').click();

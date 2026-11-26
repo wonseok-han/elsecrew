@@ -1,3 +1,7 @@
+// Optional before/after captures (see m5-renderer-smoke-runner.cjs): only with the variables set.
+const smokeEnv = typeof process === "undefined" ? {} : process.env;
+if (smokeEnv.M5_SMOKE_CAPTURE_DIR) window.m5SmokeCapture = name => require("electron").ipcRenderer.invoke("m5-smoke-capture", name);
+if (smokeEnv.M5_SMOKE_THEME) { try { localStorage.setItem("elsecrew.theme.v1", smokeEnv.M5_SMOKE_THEME); } catch {} }
 window.m5SmokeClaudeUsageReads = 0;
 window.m5ClaudeUsage={read:async()=>{window.m5SmokeClaudeUsageReads++;return ({state:"available",usage:{windows:[{id:"primary",usedPercent:12,windowMinutes:300,resetsAt:null},{id:"secondary",usedPercent:27,windowMinutes:10080,resetsAt:null}]},checkedAt:Date.now()});}};
 let smokeConnections = {codex:false,"claude-code":false};

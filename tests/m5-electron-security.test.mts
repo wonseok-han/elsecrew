@@ -218,6 +218,7 @@ interface MainHarness {
   privilegedSchemes: { scheme: string; privileges: Record<string, unknown> }[];
   partitions: string[];
   switches: string[];
+  nativeTheme: { themeSource: string; shouldUseDarkColors: boolean };
   currentEvent(): { sender: FakeWindow["webContents"]; senderFrame: { url: string } };
 }
 
@@ -256,6 +257,11 @@ class FakeWindow {
     return this.destroyed;
   }
 
+  readonly backgrounds: string[] = [];
+  setBackgroundColor(color: string) {
+    this.backgrounds.push(color);
+  }
+
   getContentSize() {
     return [1280, 800];
   }
@@ -282,7 +288,9 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
   const partitions: string[] = [];
   const switches: string[] = [];
   const files = new Set([resolve("/app/.vite/renderer/main_window/index.html")]);
+  const nativeTheme = { themeSource: "system", shouldUseDarkColors: true };
   const electron = {
+    nativeTheme,
     app: {
       whenReady: () => Promise.resolve(),
       on: () => undefined,
@@ -416,6 +424,7 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
     privilegedSchemes,
     partitions,
     switches,
+    nativeTheme,
     currentEvent: () => ({ sender: window.webContents, senderFrame: window.webContents.mainFrame }),
   };
 }
@@ -505,10 +514,12 @@ function moduleFor(
   }
   if (specifier === "./event-credit.ts") return { EventCreditV1: fakes.FakeEventCredit };
   if (specifier === "./quit-coordinator.ts") return { QuitCoordinatorV1: fakes.FakeQuitCoordinator };
+  if (specifier === "./appearance.ts") return appearanceModule;
   if (specifier === "./sidecar-client.ts") return { SIDECAR_READY_TIMEOUT_MS: 3_000, SidecarClientV1: fakes.FakeSidecar };
   throw new Error(`unexpected main.ts runtime import: ${specifier}`);
 }
 import * as loginContract from "../src/m5/contracts/provider-login-v1.ts";
+import * as appearanceModule from "../electron/appearance.ts";
 import * as approvalContract from "../src/m5/contracts/approval-v1.ts";
 import * as externalLinkContract from "../src/m5/contracts/external-link-v1.ts";
 /** What the fake quit coordinator answers to a quit preparation. */
@@ -584,6 +595,27 @@ test("app update UI IPC rejects foreign frames and renderer-supplied arguments",
   assert.ok(handler);
   await assertRejectedWithoutSidecar(handler, {sender:{},senderFrame:{}}, harness);
   await assert.rejects(handler(harness.currentEvent(), { url: "https://untrusted.example" }));
+  assert.deepEqual(harness.sidecarCalls, []);
+});
+
+test("appearance IPC answers only the main frame, takes one of three choices and follows it natively", async () => {
+  const harness = await loadMain();
+  const handler = harness.handlers.get(appearanceModule.APPEARANCE_CHANNEL)!;
+  assert.ok(handler);
+  assert.deepEqual(harness.window.options && (harness.window.options as { backgroundColor?: string }).backgroundColor, appearanceModule.WINDOW_BACKGROUND.dark);
+  await assert.rejects(handler({ sender: {}, senderFrame: {} }, "light"));
+  await assert.rejects(handler(harness.currentEvent(), "sepia"));
+  await assert.rejects(handler(harness.currentEvent(), { theme: "light" }));
+  await assert.rejects(handler(harness.currentEvent(), "light", "extra"));
+  await assert.rejects(handler(harness.currentEvent()));
+  assert.equal(harness.nativeTheme.themeSource, "system");
+  assert.deepEqual(JSON.parse(JSON.stringify(await handler(harness.currentEvent(), "light"))), { dark: true });
+  assert.equal(harness.nativeTheme.themeSource, "light");
+  assert.equal(harness.window.backgrounds.at(-1), appearanceModule.WINDOW_BACKGROUND.dark);
+  harness.nativeTheme.shouldUseDarkColors = false;
+  await handler(harness.currentEvent(), "system");
+  assert.equal(harness.nativeTheme.themeSource, "system");
+  assert.equal(harness.window.backgrounds.at(-1), appearanceModule.WINDOW_BACKGROUND.light);
   assert.deepEqual(harness.sidecarCalls, []);
 });
 

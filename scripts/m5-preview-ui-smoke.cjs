@@ -40,6 +40,11 @@ for (const args of [['init', '-q', '--template='], ['add', '.'], ['-c', 'core.ho
 }
 if (process.env.ELSECREW_GIT_WORKTREES !== '0') throw new Error('run with ELSECREW_GIT_WORKTREES=0 (snapshot workspaces inside the isolated app data)');
 app.setPath('userData', path.join(root, 'userdata'));
+// PREVIEW_UI_THEME=light|dark starts the app with that brightness choice (main reads appearance.json).
+if (process.env.PREVIEW_UI_THEME) {
+  fs.mkdirSync(path.join(root, 'userdata'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'userdata', 'appearance.json'), JSON.stringify({ theme: process.env.PREVIEW_UI_THEME }));
+}
 dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [source] });
 
 const result = { steps: [], checks: {}, captures: [], errors: [] };

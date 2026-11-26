@@ -310,7 +310,7 @@ function ProviderConnection({ disabled, provider, alwaysExpanded = false, onAtte
       {codeError && <p role="alert">{t("m5.login.code.invalid")}</p>}
     </form>}
     {waiting ? (status.state === "waiting" || status.state === "verifying" ? <button disabled={disabled||busy||!status.attemptId} onClick={()=>void request({action:"cancel",attemptId:status.attemptId!})}>{t("m5.login.cancel")}</button> : null)
-      : <button disabled={disabled||busy||recoveryRequired||profileCompatibilityRequired||status.state==="connected"||status.state==="unsupported"||!window.m5Login} onClick={()=>void request({action:"start",attemptId:crypto.randomUUID()})}>{t(status.state==="connected"?"m5.login.connected":"m5.login.start", { name })}</button>}
+      : <button disabled={disabled||busy||recoveryRequired||profileCompatibilityRequired||status.state==="connected"||status.state==="unsupported"||!window.m5Login} aria-label={status.state==="connected"?undefined:t("m5.login.startNamed", { name })} onClick={()=>void request({action:"start",attemptId:crypto.randomUUID()})}>{t(status.state==="connected"?"m5.login.connected":"m5.login.start")}</button>}
     {recoveryRequired && <div className="m5-notice"><p>{t("m5.login.recovery.help")}</p><details><summary>{t("m5.login.detail")}</summary><code>{diagnostic ?? status.error}</code></details></div>}
     {(error||status.state==="failed") && !(recoveryRequired && status.error==="providerLoginRecoveryRequired") && <div role="alert"><p>{loginErrorMessage(provider,status.error,lang)}</p><details><summary>{t("m5.login.detail")}</summary><code>{diagnostic ?? status.error ?? "providerLoginUnavailable"}</code></details></div>}
     </div>

@@ -2,6 +2,42 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 화면 통일 U0(토큰·화면 밝기)·U1(공용 컴포넌트 층) (`orca/ade-theme-tokens`, 기준 feature/ade 613dafde)
+설계: `docs/proposals/m5-ade-screens-plan.md`(원본 `~/Documents/elsecrew-ade-screens-design-2026-11-26/`) 2장·4.1. 결정(조정자 위임): 테마 기본값 시스템, 강조색 코랄 유지(라이트 `#b4482d`), 주인님 규칙 "버튼은 동작만"을 설계 2.1의 10번으로 추가. 현행 설명은 architecture "색·간격 토큰과 화면 밝기".
+
+- **U0 토큰**
+  - `styles.css` `:root`를 설계 토큰으로 바꿨다(다크 값 4개 보정: 보조·3차 글자, 선택 면, 중립 점, 편집기 줄 번호).
+  - 새 토큰: 입력 면·선, 비활성 글자, 초점·링크, 막·그림자, 편집기, 간격 7·pill·2xl·굵기·높이.
+  - `:root[data-theme="light"]` 블록을 넣었다.
+  - 블록 밖 hex 228줄을 매핑기로 의미 토큰에 옮겼다(색 계열·속성 규칙 + 문맥 예외 27개, 결과 표는 PR 본문). `rgba()` 7개도 정리해, 블록 밖 hex·rgb는 **0**이다.
+  - 없던 토큰 `--m5-accent`·`--m5-surface-2`, PR #9의 `--text-sm`을 정의된 이름으로 바꿨다.
+- **화면 밝기**
+  - 설정 › 일반에 '화면 밝기'(시스템/라이트/다크)를 넣었다. `src/m5/theme.ts`가 `localStorage`·`prefers-color-scheme`로 `<html data-theme>`을 정한다.
+  - main은 IPC `m5:appearance:set`(현재 main frame, 세 값만)으로 `nativeTheme.themeSource`·창 배경색을 따르고 `appearance.json`에 기억한다(`electron/appearance.ts`).
+  - Monaco는 토큰에서 색을 읽어 선택이 바뀌면 다시 정의한다(`editor-surface.tsx`의 hex 8개 제거).
+- **U1 컴포넌트**
+  - 공용 컴포넌트 구역을 넣었다(버튼 위계·배지·배너·카드·설정 묶음·빈 상태·단계·복구 안내). 예전 클래스는 별칭이다.
+  - 비활성 주 행동은 회색 면(지금까지는 강조색 52% 투명).
+  - 토스트는 색 띠(`inset 3px`)와 물든 배경을 없애고 아이콘에만 상태 색을 쓴다.
+  - 배너는 테두리를 없앴다. 실행 상태 칩은 배지 모양이고, 구분 버튼은 들어간 트랙 + 올라온 선택이며, 확인 대화상자 안 위험 버튼은 채운 빨강이다.
+  - 버튼 문구 규칙: 설정 에이전트 구역의 로그인 버튼을 '로그인'으로 줄이고, 접근성 이름에는 'Codex 로그인'을 남겼다(`m5.login.startNamed`).
+- **시험·도구**
+  - `scripts/m5-contrast-check.mjs`(다크·라이트 각 95쌍)와 `tests/m5-style-tokens.test.mts`(대비, 블록 밖 색 0, 정의되지 않은 토큰 0, 화면 코드 색 리터럴 0, 테마 해석, Monaco 색)를 넣었다.
+  - 보안 시험에 테마 IPC(다른 프레임·잘못된 값·인자 수 거절, themeSource·배경색)를 넣었다.
+  - 렌더러 스모크 러너에 선택적 캡처(`M5_SMOKE_CAPTURE_DIR`, 22지점)와 테마(`M5_SMOKE_THEME`)를 넣었다. 메뉴 면 색 검사는 옛 hex 대신 "불투명·작업대와 다른 면"으로 바꿨다.
+  - 미리보기 UI 스모크는 `PREVIEW_UI_THEME`으로 `appearance.json`을 미리 쓴다.
+- **검증**
+  - `npm test` 904/904, `pnpm build` 통과. 대비 검사 다크·라이트 각 95쌍 통과.
+  - 렌더러 스모크: `pnpm m5:test:editor` 68/68, 캡처 실행으로 다크·라이트 모두 통과(각 캡처 21장).
+  - 미리보기 UI 스모크(실제 앱): 다크 PASS, 라이트 PASS 2회. 라이트 첫 회는 I1(무응답 떼어 내기) 시간 검사 1개가 실패했고, 같은 코드로 두 번 다시 돌려 통과했다. 시간 흔들림으로 판단하지만 원인은 확인하지 않았다.
+  - 실제 개발 앱(임시 프로필, 포트 9397): 설정에서 라이트→다크→시스템→라이트가 즉시 바뀌었다. `prefers-color-scheme`이 main 선택을 따랐고 `appearance.json`이 기록됐다.
+  - 캡처: `~/Documents/elsecrew-ade-theme-tokens-2026-11-26/`(before-dark, after-dark, after-light, preview-ui-*, live).
+- **발견(재조사 방지)**
+  - 첫 실행에 렌더러가 기본값 '시스템'을 main에 보내면, main이 기억한 '라이트'를 덮어 미리보기 스모크가 다크로 떴다. 렌더러에 저장된 선택이 있을 때만 알린다.
+  - `tests/m5-ui-capture.cjs`는 첫 화면 기대값(`.m5-provider-selection`)이 낡아 시작부터 멈춘다. 전후 비교에는 렌더러 스모크 캡처를 썼다.
+  - 시험 몇 개는 소스를 vm에서 돌리며 import 이름을 직접 넣는다. 새 import를 쓰면 `m5-bootstrap-lifecycle`(`startTheme`), `m5-monaco-options`(`defineElsecrewTheme`)처럼 그 시험의 context에 넣어야 한다.
+- **다음**: Codex 검토(조정자), U2(홈·첫 실행·프로젝트 전환)~U4. 설계 6장 열린 질문 Q1·Q4~Q9.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #9 재확인(B1·I1 부분 해결) 마지막 라운드 (`orca/ade-preview-ui`)
 재확인 `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr9-2.md` 결과 I2·I3은 해결, B1·I1은 부분 해결이었다. 핵심 요구는 "네이티브 뷰가 숨겨진 것이 확인된 뒤에만 좌표를 바꾸거나 덮개를 보인다"였다. 이번 라운드로 둘 다 닫고 **macOS 기본 켜짐을 유지**한다. 코드는 89459c38이다.
 
@@ -67,6 +103,9 @@ PR #6은 머지됐다(8493496e). 재확인(`REVIEW-pr6-2.md`)에서 B1 해결, I
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **색은 토큰 블록 두 곳에만(2026-11-26, 화면 통일 U0·U1)**: `styles.css`의 다크 `:root`와 라이트 `:root[data-theme="light"]` 밖에는 hex·`rgb()`를 쓰지 않는다. 화면 코드에도 색 리터럴을 쓰지 않는다(Monaco는 `theme.ts`가 토큰에서 읽음). `tests/m5-style-tokens.test.mts`가 대비(다크·라이트 각 95쌍)·블록 밖 색 0·정의되지 않은 토큰 0을 막는다. 라이트 값은 1단 `--p-*`만 바꾼다. 새 화면은 공용 컴포넌트 클래스(`.m5-btn-*`·`.m5-badge`·`.m5-banner`·`.m5-card`·`.m5-group`·`.m5-empty-state`·`.m5-steps`·`.m5-recover`)를 쓴다.
+  - 화면 밝기의 출처는 렌더러 `localStorage`(`elsecrew.theme.v1`)다. main은 받은 값을 `nativeTheme.themeSource`로 따르고 `userData/appearance.json`에 기억해 다음 실행 첫 프레임에 쓴다. 렌더러에 저장값이 없으면 main에 보내지 않는다(기억된 값을 덮지 않음).
+  - 앱 문구 규칙(주인님, 2026-11-26): 버튼은 동작만 말한다. 행·카드·제목이 보여 주는 대상을 반복하지 않고('Codex 연결하기' → '연결하기'), 대상은 접근성 이름에 남긴다. 설계 `docs/proposals/m5-ade-screens-plan.md` 2.1의 10번.
 - **팀 역할 편집의 규칙(2026-11-26, custom roles R0·R1·R2·R4)**: 화면 `role-settings.tsx`, 순수 함수 `team-draft.ts`(insert/move/duplicate/restore/teamChanges/uniqueRoleName/newMemberId), 템플릿 `role-templates.ts`(TS에만). 현행 설명은 architecture "팀 역할 편집".
   - 목록 순서는 보기 순서다. 실행 순서는 총괄이 정한다(Q1). 새 팀원 ID는 무작위 `member-xxxxxx`이고 지운 기본 역할은 원래 ID로 되살린다.
   - 이름 규칙(서식 문자 Cf·총괄 이름·중복)은 **저장 요청에만** 적용하고 저장된 기록 읽기에는 적용하지 않는다. 이름은 화면에 보이는 대로 비교한다(NFC, 시드 이름 그대로인 기본 역할의 번역 이름 포함). 번역 이름을 바꾸면 `G5_LEGACY_ROLE_LABELS_V3`(Rust·TS)와 공용 표도 바꾼다. Rust·TS가 `tests/fixtures/m5/role-names-v3.json` 한 표를 함께 읽는다. 새 규칙을 더할 때 이 표에 줄을 넣는다.

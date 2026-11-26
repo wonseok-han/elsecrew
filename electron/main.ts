@@ -13,7 +13,8 @@ import { MODEL_CHOICES_CHANNEL, validateModelChoicesRequest } from "../src/m5/co
 import { DEVICE_REPORT_CHANNEL } from "../src/m5/contracts/device-report-v1.ts";
 import { SESSION_DIAGNOSTICS_CHANNEL, classifySessionDiagnostics } from "../src/m5/contracts/session-diagnostics-v1.ts";
 import { readDeviceReport } from "./device-report.ts";
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, safeStorage, screen, session, shell, WebContentsView } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, protocol, safeStorage, screen, session, shell, WebContentsView } from "electron";
+import { APPEARANCE_CHANNEL, isThemePreference, readThemePreference, windowBackground, writeThemePreference } from "./appearance.ts";
 import { PREVIEW_CHANNEL_V1, PREVIEW_EVENT_CHANNEL_V1, validatePreviewIpcRequestV1 } from "../src/m5/contracts/preview-v1.ts";
 import { previewFlags } from "./preview-flag.ts";
 import { PreviewManagerV1 } from "./preview-manager.ts";
@@ -550,6 +551,17 @@ function registerIpcHandlers(): void {
     if (extra.length || typeof nonce !== "string" || typeof ready !== "boolean" || nonce !== updateReadiness?.nonce) throw new Error("invalid update readiness reply");
     updateReadiness.finish(ready);
   });
+  // Screen brightness (system / light / dark): the page sends its choice; main
+  // follows it for native parts (dialogs, the window background) and keeps it
+  // for the next launch. Only the main frame of this app, one fixed value.
+  ipcMain.handle(APPEARANCE_CHANNEL, async (event, ...args: unknown[]) => {
+    assertCurrentMainFrame(event);
+    if (args.length !== 1 || !isThemePreference(args[0])) throw new Error("invalid appearance");
+    if (nativeTheme.themeSource !== args[0]) nativeTheme.themeSource = args[0];
+    mainWindow?.setBackgroundColor(windowBackground(nativeTheme.shouldUseDarkColors));
+    writeThemePreference(app.getPath("userData"), args[0]);
+    return { dark: nativeTheme.shouldUseDarkColors };
+  });
   ipcMain.handle("m5:app-update:open", async (event, ...args: unknown[]) => {
     assertCurrentMainFrame(event);
     if (args.length !== 0) throw new Error("app update takes no input");
@@ -814,6 +826,8 @@ async function createMainWindow() {
   const window = new BrowserWindow({
     width: 1280,
     height: 800,
+    // The saved brightness choice paints the first frame before the page loads.
+    backgroundColor: windowBackground(nativeTheme.shouldUseDarkColors),
     minWidth: 640,
     minHeight: 640,
     webPreferences: {
@@ -896,6 +910,7 @@ function setPageZoomFactor(factor: number): void {
 const existingUserData = app.getPath("userData");
 app.setName("Elsecrew");
 app.setPath("userData", existingUserData);
+nativeTheme.themeSource = readThemePreference(existingUserData);
 
 app.whenReady().then(async () => {
   await protocol.handle(APP_SCHEME, serveAppAsset);
