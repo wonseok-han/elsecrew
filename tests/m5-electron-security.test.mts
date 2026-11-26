@@ -557,18 +557,21 @@ const quitAnswer = { value: { blockers: [] as string[], safeToQuit: true } };
 const folderPick: { path: string | null } = { path: null };
 /** Build-then-preview: the real runner, this computer's parts faked. */
 const fakePreviewBuild = {
-  plan: { refusal: null, workspacePath: "/Users/me/elsecrew/workspaces/app/task-1", packageManager: "npm", lockfile: true, buildScript: "vite build", outputDir: "dist", needsInstall: false } as Record<string, unknown>,
+  plan: { refusal: null, workspacePath: "/Users/me/elsecrew/workspaces/app/task-1", packageManager: "npm", lockfile: true, buildScript: "vite build",
+    buildHooks: [], dependencies: ["react", "vite"], dependencyCount: 2, yarnBerry: false, outputDir: "dist", needsInstall: false, fingerprint: "a".repeat(64) } as Record<string, unknown>,
   spawns: [] as { program: string; args: string[]; cwd: unknown; env: Record<string, string>; detached: unknown }[],
   kills: [] as [number, string][],
   children: [] as (EventEmitter & { stdout: EventEmitter & { setEncoding(): void }; stderr: EventEmitter & { setEncoding(): void }; pid: number })[],
-  create: (options: { enabled: boolean; sidecar(): never; ask(box: unknown): Promise<number>; korean(): boolean; log(label: string): void }) => new PreviewBuildManagerV1({
+  create: (options: { enabled: boolean; sidecar(): never; ask(box: unknown): Promise<number>; korean(): boolean; log(label: string): void; hiddenFolders(): string[] }) => new PreviewBuildManagerV1({
     enabled: options.enabled, sidecar: options.sidecar,
     confirm: async consent => (await options.ask(previewBuildConsentBox(consent, options.korean()))) === 1,
-    findTools: () => ({ program: "/opt/homebrew/bin/npm", pathDirs: ["/opt/homebrew/bin", "/usr/bin", "/bin"] }),
+    findTools: () => ({ program: "/opt/homebrew/bin/npm", pathDirs: ["/opt/homebrew/bin", "/usr/bin", "/bin"], identity: "npm" }),
     isWorkspaceFolder: () => true,
+    confine: (_step, _workspace, program, args) => ({ program: "/usr/bin/sandbox-exec", args: ["-p", "(profile)", program, ...args] }),
+    killProcess: () => undefined, processes: () => [], isAlive: () => false, saveRunning: () => undefined, loadRunning: () => [], outputWritten: () => true,
     spawn: (program, args, spawnOptions) => {
       fakePreviewBuild.spawns.push({ program, args, cwd: spawnOptions.cwd, env: spawnOptions.env as Record<string, string>, detached: spawnOptions.detached });
-      const stream = () => Object.assign(new EventEmitter(), { setEncoding() {} });
+      const stream = () => Object.assign(new EventEmitter(), { setEncoding() {}, destroy() {} });
       const child = Object.assign(new EventEmitter(), { stdout: stream(), stderr: stream(), pid: 4242 + fakePreviewBuild.children.length });
       fakePreviewBuild.children.push(child);
       return child as never;
@@ -1010,6 +1013,11 @@ test("build-then-preview: a build runs only after main's own box, in the folder 
   const harness = await loadMain();
   const handler = harness.handlers.get(previewContract.PREVIEW_BUILD_CHANNEL_V1)!;
   assert.ok(handler, "the build channel is registered");
+  // macOS only (its sandbox and process checks): elsewhere nothing runs (review minor 1).
+  if (process.platform !== "darwin") {
+    await assert.rejects(handler(harness.currentEvent(), { action: "plan", projectId: "project_1", chatId: "chat_1" }), /not enabled/);
+    return;
+  }
   const answer = externalLinkAnswer.value;
   const start = { action: "start", projectId: "project_1", chatId: "chat_1", step: "build" };
   const boxes = () => harness.sidecarCalls.filter(call => call.startsWith("confirm:"));
@@ -1026,7 +1034,7 @@ test("build-then-preview: a build runs only after main's own box, in the folder 
     assert.ok(!harness.sidecarCalls.some(call => call.startsWith("previewBuildPlan:")));
     // The plan the page sees has the commands, never the folder.
     const plan = await handler(harness.currentEvent(), { action: "plan", projectId: "project_1", chatId: "chat_1" }) as { plan: Record<string, unknown> };
-    assert.deepEqual(plan.plan, { refusal: null, installCommand: "npm ci --no-audit --no-fund", buildCommand: "npm run build", needsInstall: false, outputDir: "dist" });
+    assert.deepEqual(plan.plan, { refusal: null, installCommand: "npm ci --ignore-scripts --no-audit --no-fund", buildCommand: "npm run build", needsInstall: false, outputDir: "dist" });
     assert.ok(!JSON.stringify(plan).includes("/Users/me"));
     // "취소" in main's box: nothing runs.
     externalLinkAnswer.value = 0;
@@ -1039,7 +1047,7 @@ test("build-then-preview: a build runs only after main's own box, in the folder 
     assert.equal((await handler(harness.currentEvent(), start) as { outcome: string }).outcome, "started");
     assert.equal(fakePreviewBuild.spawns.length, 1);
     const spawned = fakePreviewBuild.spawns[0]!;
-    assert.deepEqual([spawned.program, spawned.args, spawned.cwd, spawned.detached], ["/opt/homebrew/bin/npm", ["run", "build"], "/Users/me/elsecrew/workspaces/app/task-1", process.platform !== "win32"]);
+    assert.deepEqual([spawned.program, spawned.args, spawned.cwd, spawned.detached], ["/usr/bin/sandbox-exec", ["-p", "(profile)", "/opt/homebrew/bin/npm", "run", "build"], "/Users/me/elsecrew/workspaces/app/task-1", true]);
     assert.deepEqual(Object.keys(spawned.env).filter(name => /KEY|TOKEN|ELSECREW/.test(name)), []);
     assert.equal(spawned.env.HOME, "/Users/me");
     // One job per task: a second start while it runs is busy, without a box.
@@ -1057,6 +1065,7 @@ test("build-then-preview: a build runs only after main's own box, in the folder 
     harness.window.webContents.listeners.get("render-process-gone")!();
     assert.deepEqual(fakePreviewBuild.kills, [[child.pid, "SIGTERM"]]);
     child.emit("close", null);
+    await new Promise(resolve => setTimeout(resolve, 400));
     const ended = await handler(harness.currentEvent(), { action: "status", projectId: "project_1", chatId: "chat_1", cursor: 0 }) as { job: { state: string } };
     assert.equal(ended.job.state, "cancelled");
     // Packages missing: building is refused (the page offers installing), without a box.

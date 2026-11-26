@@ -21,11 +21,13 @@ const TOKEN = "a".repeat(32);
 test("fixed commands per package manager: a lockfile is followed, never rewritten", () => {
   assert.deepEqual(previewBuildArgs("npm", "build", true), ["run", "build"]);
   assert.deepEqual(previewBuildArgs("pnpm", "build", false), ["run", "build"]);
-  assert.deepEqual(previewBuildArgs("npm", "install", true), ["ci", "--no-audit", "--no-fund"]);
-  assert.deepEqual(previewBuildArgs("npm", "install", false), ["install", "--no-package-lock", "--no-audit", "--no-fund"]);
-  assert.deepEqual(previewBuildArgs("pnpm", "install", true), ["install", "--frozen-lockfile"]);
-  assert.deepEqual(previewBuildArgs("pnpm", "install", false), ["install", "--lockfile=false"]);
-  assert.deepEqual(previewBuildArgs("yarn", "install", true), ["install", "--frozen-lockfile"]);
+  // Installing never runs the packages' install scripts (PR #22 review B1·B2).
+  assert.deepEqual(previewBuildArgs("npm", "install", true), ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]);
+  assert.deepEqual(previewBuildArgs("npm", "install", false), ["install", "--ignore-scripts", "--no-package-lock", "--no-audit", "--no-fund"]);
+  assert.deepEqual(previewBuildArgs("pnpm", "install", true), ["install", "--frozen-lockfile", "--ignore-scripts"]);
+  assert.deepEqual(previewBuildArgs("pnpm", "install", false), ["install", "--lockfile=false", "--ignore-scripts"]);
+  assert.deepEqual(previewBuildArgs("yarn", "install", true), ["install", "--frozen-lockfile", "--ignore-scripts"]);
+  assert.deepEqual(previewBuildArgs("yarn", "install", true, true), ["install", "--immutable", "--mode=skip-build"]);
   assert.equal(previewBuildCommandLine("npm", "build", true), "npm run build");
 });
 
@@ -55,7 +57,8 @@ test("log lines: colours and progress frames off, secrets masked, bounded", () =
   assert.equal(previewBuildLine("50%\r75%\r100% done"), "100% done");
   const masked = previewBuildLine("TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123 and sk-ant-api03-abcdefghijklmnopqrstuvwxyz");
   assert.ok(!masked.includes("abcdefghijklmnopqrstuvwxyz"), masked);
-  assert.equal(previewBuildLine("x".repeat(5000)).length, 2000);
+  // Too long to keep whole: hidden, never cut (a key could straddle the cut).
+  assert.equal(previewBuildLine("x ".repeat(2500)), "(가림)");
   const split = new PreviewLineSplitter();
   assert.deepEqual(split.push("a\nb"), ["a"]);
   assert.deepEqual(split.push("c\n"), ["bc"]);
@@ -66,13 +69,20 @@ test("log lines: colours and progress frames off, secrets masked, bounded", () =
 });
 
 test("main's consent box shows the exact command, program and folder; the network for installing", () => {
-  const consent = { step: "install" as const, command: "npm ci --no-audit --no-fund", program: "/opt/homebrew/bin/npm", folder: "/Users/me/elsecrew/workspaces/app/t1", buildScript: null };
+  const consent = { step: "install" as const, command: "npm ci --ignore-scripts --no-audit --no-fund", program: "/opt/homebrew/bin/npm", folder: "/Users/me/elsecrew/workspaces/app/t1",
+    buildScript: null, hooks: [], dependencies: ["react", "vite"], dependencyCount: 12, changed: false };
   const ko = previewBuildConsentBox(consent, true);
   assert.match(ko.message, /인터넷/);
-  for (const shown of ["실행할 명령: npm ci --no-audit --no-fund", "프로그램: /opt/homebrew/bin/npm", "위치: /Users/me/elsecrew/workspaces/app/t1"]) assert.ok(ko.detail.includes(shown), shown);
+  for (const shown of ["실행할 명령: npm ci --ignore-scripts --no-audit --no-fund", "프로그램: /opt/homebrew/bin/npm", "위치: /Users/me/elsecrew/workspaces/app/t1",
+    "꾸러미 12개: react, vite 외 10개", "설치 스크립트는 실행하지 않아요", "그 밖의 내 파일은 읽을 수 있어요"]) assert.ok(ko.detail.includes(shown), shown);
   assert.deepEqual(ko.buttons, ["취소", "설치"]);
-  const build = previewBuildConsentBox({ ...consent, step: "build", command: "npm run build", buildScript: "vite build" }, false);
-  assert.ok(build.detail.includes("Build script: vite build") && build.detail.includes("outside the preview's protection"));
+  // PR #22 review B2: no claim that the output stays inside; what the sandbox allows is said plainly.
+  const build = previewBuildConsentBox({ ...consent, step: "build", command: "npm run build", buildScript: "vite build", hooks: [{ name: "postbuild", script: "node copy.js" }] }, false);
+  assert.ok(build.detail.includes("Build script: vite build") && build.detail.includes("Also runs: postbuild — node copy.js"));
+  assert.ok(build.detail.includes("cannot use the internet") && build.detail.includes("It can read your other files"));
+  assert.ok(!/stays inside/.test(build.detail));
+  assert.ok(!previewBuildConsentBox({ ...consent, step: "build" }, true).detail.includes("결과는 작업 공간 안에만"));
+  assert.match(previewBuildConsentBox({ ...consent, changed: true }, true).message, /^내용이 바뀌어 다시 확인해요/);
   assert.deepEqual(build.buttons, ["Cancel", "Build"]);
 });
 
@@ -93,13 +103,16 @@ test("a build output's paths and a single-page app's routes", () => {
 test("the sidecar's plan and the IPC are strict: the page names no folder or command", () => {
   assert.deepEqual([...PREVIEW_METHODS_V1], ["preview.resolve", "preview.readAsset", "preview.buildPlan"]);
   const request = { projectId: "p", chatId: "c" };
-  const plan = { chatId: "c", projectId: "p", worktreeId: "w", workspaceIdentity: "i", refusal: null, workspacePath: "/Users/me/ws", packageManager: "npm", lockfile: true, buildScript: "vite build", outputDir: "dist", needsInstall: false };
+  const plan = { chatId: "c", projectId: "p", worktreeId: "w", workspaceIdentity: "i", refusal: null, workspacePath: "/Users/me/ws", packageManager: "npm", lockfile: true, buildScript: "vite build",
+    buildHooks: [{ name: "prebuild", script: "x" }], dependencies: ["react"], dependencyCount: 1, yarnBerry: false, outputDir: "dist", needsInstall: false, fingerprint: "f".repeat(64) };
   assert.equal(validatePreviewBuildPlanResultV1(plan, request).outputDir, "dist");
   for (const bad of [
     { ...plan, chatId: "other" }, { ...plan, workspacePath: "relative" }, { ...plan, outputDir: "../out" }, { ...plan, outputDir: ".git" },
     { ...plan, outputDir: "src" }, { ...plan, packageManager: "bun" }, { ...plan, refusal: "noPackage" }, { ...plan, extra: 1 }, { ...plan, refusal: "nope" },
+    { ...plan, fingerprint: "short" }, { ...plan, buildHooks: [{ name: "preinstall", script: "x" }] }, { ...plan, dependencyCount: 0 },
   ]) assert.throws(() => validatePreviewBuildPlanResultV1(bad, request), JSON.stringify(bad));
-  const refused = { ...plan, refusal: "outputNotIgnored", workspacePath: null, packageManager: null, lockfile: false, buildScript: null, outputDir: null, needsInstall: false };
+  const refused = { ...plan, refusal: "outputNotIgnored", workspacePath: null, packageManager: null, lockfile: false, buildScript: null, outputDir: null, needsInstall: false,
+    buildHooks: null, dependencies: null, dependencyCount: null, fingerprint: null };
   assert.equal(validatePreviewBuildPlanResultV1(refused, request).refusal, "outputNotIgnored");
   assert.ok(isPreviewOutputDirV1("out/web") && !isPreviewOutputDirV1("node_modules/x") && !isPreviewOutputDirV1("a/../b"));
 
@@ -108,7 +121,7 @@ test("the sidecar's plan and the IPC are strict: the page names no folder or com
     { action: "start", projectId: "p", chatId: "c", step: "dev" }, { action: "start", projectId: "p", chatId: "c", step: "build", cwd: "/" },
     { action: "start", projectId: "p", chatId: "c", step: "build", command: "rm" }, { action: "status", projectId: "p", chatId: "c", cursor: -1 }, { action: "run" },
   ]) assert.throws(() => validatePreviewBuildIpcRequestV1(bad), JSON.stringify(bad));
-  const job = { step: "build", state: "running", cursor: 2, lines: ["a", "b"], exitCode: null, outputReady: false, startedAt: 1, endedAt: null };
+  const job = { step: "build", state: "running", cursor: 2, lines: ["a", "b"], exitCode: null, outputReady: false, startedAt: 1, endedAt: null, leftovers: 0 };
   const status = { action: "status", projectId: "p", chatId: "c", cursor: 0 } as const;
   assert.equal(validatePreviewBuildIpcResultV1({ action: "status", job }, status).action, "status");
   assert.throws(() => validatePreviewBuildIpcResultV1({ action: "status", job: { ...job, lines: Array(PREVIEW_BUILD_LOG_MAX_LINES_V1 + 1).fill("x") } }, status));
@@ -133,39 +146,63 @@ function runner(overrides: Partial<PreviewBuildOptionsV1> = {}, planOverrides: P
   const logs: Record<string, string> = {};
   const confirms: unknown[] = [];
   let answer = true;
-  let plan: PreviewBuildPlanResultV1 = { chatId: "c1", projectId: "p", worktreeId: "w", workspaceIdentity: "i1", refusal: null, workspacePath: "/ws/one", packageManager: "npm", lockfile: true, buildScript: "vite build", outputDir: "dist", needsInstall: false, ...planOverrides };
+  let plan: PreviewBuildPlanResultV1 = { chatId: "c1", projectId: "p", worktreeId: "w", workspaceIdentity: "i1", refusal: null, workspacePath: "/ws/one", packageManager: "npm", lockfile: true,
+    buildScript: "vite build", buildHooks: [], dependencies: ["react", "vite"], dependencyCount: 2, yarnBerry: false, outputDir: "dist", needsInstall: false, fingerprint: "a".repeat(64), ...planOverrides };
+  let tools = { program: "/bin/npm", pathDirs: ["/bin"], identity: "npm-1" };
+  /** Processes "alive" now, by pid → start time (the fake process table). */
+  const table = new Map<number, { ppid: number; pgid: number; started: string }>();
+  const killed: [number, string][] = [];
+  const running: unknown[] = [];
+  let written = true;
   const manager = new PreviewBuildManagerV1({
     enabled: true,
     sidecar: () => ({ previewBuildPlan: async ({ chatId }) => ({ ...plan, chatId }) }),
-    confirm: async (consent) => { confirms.push(consent); return answer; },
-    findTools: () => ({ program: "/bin/npm", pathDirs: ["/bin"] }),
+    confirm: async (consent) => { confirms.push(consent); return typeof answer === "function" ? (answer as () => Promise<boolean>)() : answer; },
+    findTools: () => tools,
     isWorkspaceFolder: () => true,
+    confine: (_step, _workspace, program, args) => ({ program: "/usr/bin/sandbox-exec", args: ["-p", "(profile)", program, ...args] }),
+    killProcess: (pid, started, signal) => { if (table.get(pid)?.started === started) { killed.push([pid, signal]); if (started !== "immortal") table.delete(pid); } },
+    processes: () => [...table].map(([pid, entry]) => ({ pid, ...entry })),
+    isAlive: (pid, started) => table.get(pid)?.started === started,
+    saveRunning: (records) => { running.push(records); },
+    loadRunning: () => [],
+    outputWritten: () => written,
     spawn: (program, args, options) => {
       spawns.push({ program, args, cwd: options.cwd });
-      const stream = () => Object.assign(new EventEmitter(), { setEncoding() {} });
+      const stream = () => Object.assign(new EventEmitter(), { setEncoding() {}, destroy() {} });
       const child = Object.assign(new EventEmitter(), { stdout: stream(), stderr: stream(), pid: 100 + children.length }) as FakeChild;
+      table.set(child.pid, { ppid: 1, pgid: child.pid, started: `t${child.pid}` });
+      // The leader's end: it leaves the table, then Node reports exit and close.
+      const emit = child.emit.bind(child);
+      child.emit = ((event: string, ...rest: unknown[]) => { if (event === "close") { table.delete(child.pid); emit("exit", rest[0]); } return emit(event, ...rest); }) as typeof child.emit;
       children.push(child);
       return child as never;
     },
-    killGroup: (pid, signal) => { kills.push([pid, signal]); },
+    killGroup: (pid, signal) => { kills.push([pid, signal]); for (const [other, entry] of table) if (entry.pgid === pid && signal === "SIGKILL" && entry.started !== "immortal") table.delete(other); },
     environment: { HOME: "/Users/me" },
     writeLog: (name, text) => { logs[name] = text; },
     log: () => undefined,
-    timeoutMs: { install: 60, build: 40 },
+    timeoutMs: { install: 5_000, build: 5_000 },
     killGraceMs: 20,
+    pipeGraceMs: 20,
+    trackMs: 5,
     ...overrides,
   });
   const ask = (action: "start" | "cancel" | "status" | "plan", chatId = "c1", extra: Record<string, unknown> = {}) =>
     manager.request({ action, projectId: "p", chatId, ...extra } as never) as Promise<{ outcome?: string; job: PreviewBuildJobViewV1; plan?: unknown }>;
   return {
-    manager, spawns, children, kills, logs, confirms, ask,
-    setAnswer(value: boolean) { answer = value; },
+    manager, spawns, children, kills, logs, confirms, ask, table, killed, running,
+    setAnswer(value: boolean | (() => Promise<boolean>)) { answer = value as boolean; },
     setPlan(next: Partial<PreviewBuildPlanResultV1>) { plan = { ...plan, ...next }; },
+    setTools(next: Partial<typeof tools>) { tools = { ...tools, ...next }; },
+    setWritten(value: boolean) { written = value; },
   };
 }
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-test("a build runs once agreed, keeps a masked log, and its output opens in the preview", async () => {
+const settle = () => wait(360);
+
+test("a build runs once agreed, in its sandbox, keeps a masked log, and its output opens in the preview", async () => {
   const r = runner();
   r.setAnswer(false);
   assert.equal((await r.ask("start", "c1", { step: "build" })).outcome, "declined");
@@ -173,14 +210,17 @@ test("a build runs once agreed, keeps a masked log, and its output opens in the 
   r.setAnswer(true);
   const started = await r.ask("start", "c1", { step: "build" });
   assert.equal(started.outcome, "started");
-  assert.deepEqual(r.spawns, [{ program: "/bin/npm", args: ["run", "build"], cwd: "/ws/one" }]);
+  // The first line (the command) comes with the answer (review minor 2).
+  assert.deepEqual(started.job.lines, ["$ npm run build"]);
+  assert.deepEqual(r.spawns, [{ program: "/usr/bin/sandbox-exec", args: ["-p", "(profile)", "/bin/npm", "run", "build"], cwd: "/ws/one" }]);
   assert.equal(r.manager.buildOutput("p", "c1"), null, "nothing to show while it runs");
   const child = r.children[0]!;
   child.stdout.emit("data", "vite v6\nsecret=hunter2hunter2\n");
   child.stderr.emit("data", "warn");
-  const status = await r.ask("status", "c1", { cursor: 0 });
-  assert.deepEqual(status.job.lines, ["$ npm run build", "vite v6", "secret=••••"]);
+  const status = await r.ask("status", "c1", { cursor: started.job.cursor });
+  assert.deepEqual(status.job.lines, ["vite v6", "secret=••••"]);
   child.emit("close", 0);
+  await settle();
   const done = await r.ask("status", "c1", { cursor: status.job.cursor });
   assert.deepEqual(done.job.lines, ["warn"]);
   assert.equal(done.job.state, "succeeded");
@@ -193,11 +233,32 @@ test("a build runs once agreed, keeps a masked log, and its output opens in the 
   // A failed build shows no output.
   await r.ask("start", "c1", { step: "build" });
   r.children[1]!.emit("close", 1);
+  await settle();
   assert.equal((await r.ask("status", "c1", { cursor: 0 })).job.state, "failed");
   assert.equal(r.manager.buildOutput("p", "c1"), null);
 });
 
-test("one job per task, two over all; building waits for the packages", async () => {
+test("PR #22 review I2·I1: a build counts only if it wrote a new page and nothing Git would record", async () => {
+  const r = runner();
+  r.setWritten(false);
+  await r.ask("start", "c1", { step: "build" });
+  r.children[0]!.emit("close", 0);
+  await settle();
+  const stale = await r.ask("status", "c1", { cursor: 0 });
+  assert.equal(stale.job.state, "failed");
+  assert.ok(stale.job.lines.some(line => line.includes("dist/index.html")));
+  assert.equal(r.manager.buildOutput("p", "c1"), null);
+  r.setWritten(true);
+  await r.ask("start", "c1", { step: "build" });
+  // The build wrote a file a `!negation` rule brings back into the task.
+  r.setPlan({ refusal: "outputNotIgnored", workspacePath: null, packageManager: null, buildScript: null, buildHooks: null, dependencies: null, dependencyCount: null, outputDir: null, needsInstall: false, lockfile: false, fingerprint: null });
+  r.children[1]!.emit("close", 0);
+  await settle();
+  assert.equal((await r.ask("status", "c1", { cursor: 0 })).job.state, "failed");
+  assert.equal(r.manager.buildOutput("p", "c1"), null);
+});
+
+test("one job per task, two over all; building waits for the packages; installing runs no install scripts", async () => {
   const r = runner();
   assert.equal((await r.ask("start", "c1", { step: "build" })).outcome, "started");
   assert.equal((await r.ask("start", "c1", { step: "install" })).outcome, "busy");
@@ -205,44 +266,130 @@ test("one job per task, two over all; building waits for the packages", async ()
   assert.equal((await r.ask("start", "c3", { step: "build" })).outcome, "busy");
   assert.equal(r.confirms.length, 2, "busy never asks");
   r.children[0]!.emit("close", 0);
+  await settle();
   r.setPlan({ needsInstall: true });
   assert.equal((await r.ask("start", "c3", { step: "build" })).outcome, "refused");
   assert.equal((await r.ask("start", "c3", { step: "install" })).outcome, "started");
-  assert.deepEqual(r.spawns.at(-1)!.args, ["ci", "--no-audit", "--no-fund"]);
+  assert.deepEqual(r.spawns.at(-1)!.args.slice(2), ["/bin/npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"]);
   r.children[1]!.emit("close", 0);
-  r.setPlan({ refusal: "outputNotIgnored", workspacePath: null, packageManager: null, buildScript: null, outputDir: null, needsInstall: false, lockfile: false });
+  await settle();
+  r.setPlan({ refusal: "outputNotIgnored", workspacePath: null, packageManager: null, buildScript: null, buildHooks: null, dependencies: null, dependencyCount: null, outputDir: null, needsInstall: false, lockfile: false, fingerprint: null });
   assert.equal((await r.ask("start", "c4", { step: "build" })).outcome, "refused");
   const plan = await r.ask("plan", "c4");
   assert.deepEqual(plan.plan, { refusal: "outputNotIgnored", installCommand: null, buildCommand: null, needsInstall: false, outputDir: null });
 });
 
-test("stopping, the time limit and quitting end the build's own group", async () => {
+test("PR #22 review B1: a yes runs only what it was given; anything changed is asked again, never run on the old yes", async () => {
+  // The lockfile (fingerprint) changes while the box is open; the second box says so; "취소" runs nothing.
+  const r = runner();
+  const answers: (() => boolean)[] = [() => { r.setPlan({ fingerprint: "b".repeat(64) }); return true; }, () => false];
+  r.setAnswer(async () => answers.shift()!());
+  assert.equal((await r.ask("start", "c1", { step: "build" })).outcome, "changed");
+  assert.equal(r.spawns.length, 0);
+  assert.deepEqual(r.confirms.map(consent => (consent as { changed: boolean }).changed), [false, true]);
+  // The program changes (another npm at the same path): asked again; agreeing to what is now there runs it.
+  const t = runner();
+  const more: (() => boolean)[] = [() => { t.setTools({ identity: "npm-2" }); return true; }, () => true];
+  t.setAnswer(async () => more.shift()!());
+  assert.equal((await t.ask("start", "c1", { step: "build" })).outcome, "started");
+  assert.equal(t.confirms.length, 2);
+  // Another folder at the same path (workspace identity) or a path change is a change too.
+  const f = runner();
+  const third: (() => boolean)[] = [() => { f.setPlan({ workspacePath: "/ws/other" }); return true; }, () => false];
+  f.setAnswer(async () => third.shift()!());
+  assert.equal((await f.ask("start", "c1", { step: "build" })).outcome, "changed");
+  assert.equal(f.spawns.length, 0);
+  // Changing every time: at most three boxes, then nothing runs.
+  const g = runner();
+  let n = 0;
+  g.setAnswer(async () => { g.setPlan({ fingerprint: String(++n).padStart(64, "0") }); return true; });
+  assert.equal((await g.ask("start", "c1", { step: "build" })).outcome, "changed");
+  assert.equal(g.confirms.length, 3);
+  assert.equal(g.spawns.length, 0);
+  // What the box says: the command, the scripts npm runs with it, the packages.
+  const h = runner({}, { buildHooks: [{ name: "prebuild", script: "node gen.js" }] });
+  await h.ask("start", "c1", { step: "build" });
+  assert.deepEqual((h.confirms[0] as { hooks: unknown }).hooks, [{ name: "prebuild", script: "node gen.js" }]);
+});
+
+test("PR #22 review B3: a start waiting for the box is called off by cancel, a page reload or quit preparation", async () => {
+  for (const callOff of ["cancel", "stopAll", "suspend", "shutdown"] as const) {
+    const r = runner();
+    let release!: (value: boolean) => void;
+    r.setAnswer(() => new Promise<boolean>(resolve => { release = resolve; }));
+    const asked = r.ask("start", "c1", { step: "build" });
+    await wait(5);
+    if (callOff === "cancel") await r.ask("cancel", "c1");
+    else r.manager[callOff]();
+    release(true);
+    const result = await asked.catch(error => ({ outcome: String(error) }));
+    assert.ok(result.outcome === "cancelled" || /quits/.test(String(result.outcome)), `${callOff}: ${result.outcome}`);
+    assert.equal(r.spawns.length, 0, `${callOff}: nothing ran`);
+  }
+  const r = runner();
+  r.manager.suspend();
+  assert.equal((await r.ask("start", "c1", { step: "build" })).outcome, "refused");
+  r.manager.resume();
+  assert.equal((await r.ask("start", "c1", { step: "build" })).outcome, "started");
+});
+
+test("PR #22 review B3: stopping ends the group, the time limit and quitting too, and every descendant seen, also one that left the group", async () => {
   const r = runner();
   await r.ask("start", "c1", { step: "build" });
+  // A child in the group and a grandchild that made its own session.
+  r.table.set(500, { ppid: 100, pgid: 100, started: "t500" });
+  r.table.set(501, { ppid: 500, pgid: 501, started: "t501" });
+  await wait(20);
+  assert.deepEqual(r.manager.seenProcesses("p", "c1").sort(), [100, 500, 501]);
   await r.ask("cancel", "c1");
-  assert.deepEqual(r.kills, [[100, "SIGTERM"]]);
-  await wait(40);
-  assert.deepEqual(r.kills, [[100, "SIGTERM"], [100, "SIGKILL"]], "a build that ignores the request is killed after the grace");
+  assert.deepEqual(r.kills[0], [100, "SIGTERM"]);
+  assert.ok(r.killed.some(([pid, signal]) => pid === 501 && signal === "SIGTERM"), "the one outside the group is signalled by id");
   r.children[0]!.emit("close", null);
-  assert.equal((await r.ask("status", "c1", { cursor: 0 })).job.state, "cancelled");
+  await settle();
+  const stopped = await r.ask("status", "c1", { cursor: 0 });
+  assert.equal(stopped.job.state, "cancelled");
+  assert.equal(stopped.job.leftovers, 0);
+  assert.ok(!r.table.has(500) && !r.table.has(501));
 
-  r.kills.length = 0;
-  await r.ask("start", "c2", { step: "build" });
+  // A build over its time that never answers is killed after the grace, and is not "running" for ever.
+  const slow = runner({ timeoutMs: { install: 60, build: 40 } });
+  await slow.ask("start", "c2", { step: "build" });
   await wait(60);
-  assert.deepEqual(r.kills[0], [101, "SIGTERM"]);
-  r.children[1]!.emit("close", null);
-  assert.equal((await r.ask("status", "c2", { cursor: 0 })).job.state, "timedOut");
+  assert.deepEqual(slow.kills[0], [100, "SIGTERM"]);
+  await wait(1_200);
+  assert.equal((await slow.ask("status", "c2", { cursor: 0 })).job.state, "timedOut");
 
   r.kills.length = 0;
   await r.ask("start", "c3", { step: "build" });
-  r.manager.stopAll();
-  assert.deepEqual(r.kills, [[102, "SIGTERM"]]);
-  r.children[2]!.emit("close", null);
-  await r.ask("start", "c4", { step: "build" });
-  r.kills.length = 0;
   r.manager.shutdown();
-  assert.deepEqual(r.kills, [[103, "SIGKILL"]]);
-  await assert.rejects(r.ask("status", "c4", { cursor: 0 }), /quits/);
+  assert.deepEqual(r.kills, [[101, "SIGKILL"]]);
+  await assert.rejects(r.ask("status", "c3", { cursor: 0 }), /quits/);
+});
+
+test("PR #22 review B3: what does not end is told, blocks the task, and the next app start ends it if it is still the same process", async () => {
+  const r = runner();
+  await r.ask("start", "c1", { step: "build" });
+  // Survives every signal (the fake's "immortal" start time).
+  r.table.set(600, { ppid: 100, pgid: 600, started: "immortal" });
+  await wait(20);
+  r.children[0]!.emit("close", 0);
+  await settle();
+  const ended = await r.ask("status", "c1", { cursor: 0 });
+  assert.equal(ended.job.leftovers, 1);
+  assert.ok(ended.job.lines.some(line => line.includes("끝나지 않은 프로그램 1개")));
+  assert.equal((await r.ask("start", "c1", { step: "build" })).outcome, "leftovers");
+  assert.ok(JSON.stringify(r.running.at(-1)).includes("immortal"), "kept on disk for the next start");
+  // Once it is gone, the task can build again.
+  r.table.delete(600);
+  assert.equal((await r.ask("start", "c1", { step: "build" })).outcome, "started");
+
+  // The next start: recorded processes still the same are ended; a reused id is not touched.
+  const next = runner({ loadRunning: () => [{ leader: 100, processes: [{ pid: 700, started: "t700" }, { pid: 701, started: "old" }] }] });
+  next.table.set(700, { ppid: 1, pgid: 700, started: "t700" });
+  next.table.set(701, { ppid: 1, pgid: 701, started: "someone-else" });
+  assert.equal(next.manager.recoverLeftovers(), 1);
+  assert.deepEqual(next.killed, [[700, "SIGKILL"]]);
+  assert.ok(next.table.has(701));
 });
 
 test("the log keeps the newest lines and a cursor that never goes back", async () => {
@@ -282,4 +429,122 @@ test("the tab's build bar and its words", () => {
   assert.equal(previewBuildFinished(job("running"), job("failed")), "ended");
   assert.equal(previewBuildFinished(job("succeeded"), job("succeeded", "build", true)), null);
   assert.equal(appendBuildLines(Array(PREVIEW_BUILD_LOG_MAX_LINES_V1).fill("a"), ["b"]).at(-1), "b");
+});
+
+// ---------------------------------------------------------------------------
+// PR #22 review B4: secrets spread over lines, through a real process.
+
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync, existsSync, rmSync, realpathSync } from "node:fs";
+import { tmpdir, homedir } from "node:os";
+import { join } from "node:path";
+import { spawn as realSpawn, spawnSync } from "node:child_process";
+import { PreviewLogMasker, previewBuildSandboxProfile } from "../electron/preview-build-policy.ts";
+
+/** Synthetic secrets only (as in tests/fixtures/m5/secret-mask-cases.json). */
+const FAKE = {
+  pem: ["-----BEGIN RSA PRIVATE KEY-----", "FAKEEXAMPLEKEYBODYLINEONE0123456789abcdefABCDEF", "FAKEEXAMPLEKEYBODYLINETWO", "-----END RSA PRIVATE KEY-----"],
+  jsonKey: ['{', '  "type": "service_account",', '  "private_key": "-----BEGIN PRIVATE KEY-----\\nFAKEJSONKEYBODY\\n-----END PRIVATE KEY-----\\n",', '  "client_email": "fake@example.invalid"', '}'],
+  token: "GITHUB_TOKEN=ghp_FAKEexampleTOKEN0123456789abcd",
+  blob: "FAKEunnamedKEYmaterial0123456789ABCDEFghijklmnopQRSTUV",
+};
+const FRAGMENTS = ["FAKEEXAMPLEKEYBODYLINEONE", "FAKEEXAMPLEKEYBODYLINETWO", "FAKEJSONKEYBODY", "FAKEexampleTOKEN", "FAKEunnamedKEYmaterial"];
+
+test("PR #22 review B4: a PEM block and nameless key material are hidden whole, line by line, as the shared PR #11 case", () => {
+  const shared = JSON.parse(readFileSync(new URL("./fixtures/m5/secret-mask-cases.json", import.meta.url), "utf8")) as { mask: { text: string }[] };
+  const pemCase = shared.mask.find(entry => entry.text.includes("BEGIN RSA PRIVATE KEY"))!;
+  const masker = new PreviewLogMasker();
+  const out = pemCase.text.split("\n").map(line => masker.line(line));
+  assert.ok(!out.join("\n").includes("FAKEEXAMPLEKEYBODY"), out.join("\n"));
+  assert.equal(out.at(-1), "after", "the block ends at its END line");
+  const lines = new PreviewLogMasker();
+  const all = [...FAKE.pem, ...FAKE.jsonKey, FAKE.token, FAKE.blob, "✓ built in 215ms", "dist/assets/index-DAjp-lVP.js 143.61 kB", "/Users/me/elsecrew/workspaces/todo-vite/task-a33340ee/src/App.jsx:3:1"].map(line => lines.line(line));
+  for (const fragment of FRAGMENTS) assert.ok(!all.join("\n").includes(fragment), fragment);
+  // Ordinary build output and paths stay readable.
+  assert.ok(all.includes("✓ built in 215ms") && all.includes("dist/assets/index-DAjp-lVP.js 143.61 kB"));
+  assert.ok(all.some(line => line.endsWith("src/App.jsx:3:1")));
+  // A secret straddling chunks and a line too long to keep.
+  const split = new PreviewLineSplitter();
+  const masked = new PreviewLogMasker();
+  const got = [...split.push("token=ghp_FAKEexample"), ...split.push("TOKEN0123456789abcd\n"), ...split.push("y".repeat(70_000)), ...split.push("tail-of-long\nnext\n")].map(line => masked.line(line));
+  assert.ok(!got.join("\n").includes("FAKEexampleTOKEN") && !got.join("\n").includes("tail-of-long"));
+  assert.deepEqual(got.slice(1), ["(가림)", "next"]);
+});
+
+test("PR #22 review B4: what a real build prints reaches neither the page nor the disk with a secret in it", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "elsecrew-build-log-"));
+  try {
+    const script = join(dir, "print.js");
+    const text = [...FAKE.pem, ...FAKE.jsonKey, FAKE.token, FAKE.blob, "plain output"].join("\n");
+    // Printed in small pieces on both streams, as a real tool might.
+    writeFileSync(script, `const t = ${JSON.stringify(text)}; for (let i = 0; i < t.length; i += 7) { (i % 2 ? process.stderr : process.stdout).write(t.slice(i, i + 7)); } process.stdout.write("\\n");`);
+    const logs = join(dir, "logs");
+    const plan = { chatId: "c1", projectId: "p", worktreeId: "w", workspaceIdentity: "i1", refusal: null, workspacePath: dir, packageManager: "npm" as const, lockfile: true,
+      buildScript: "x", buildHooks: [], dependencies: [], dependencyCount: 0, yarnBerry: false, outputDir: "dist", needsInstall: false, fingerprint: "a".repeat(64) };
+    const manager = new PreviewBuildManagerV1({
+      enabled: true, sidecar: () => ({ previewBuildPlan: async () => plan }), confirm: async () => true,
+      findTools: () => ({ program: process.execPath, pathDirs: [], identity: "node" }), isWorkspaceFolder: () => true,
+      // The real program, not npm: node printing the secrets.
+      confine: () => ({ program: process.execPath, args: [script] }),
+      spawn: (program, args, options) => realSpawn(program, args, { ...options, detached: false }),
+      killGroup: () => undefined, killProcess: () => undefined, processes: () => [], isAlive: () => false,
+      saveRunning: () => undefined, loadRunning: () => [], outputWritten: () => false,
+      environment: {}, writeLog: (name, body) => { spawnSync(process.execPath, ["-e", "require('fs').mkdirSync(process.argv[1],{recursive:true})", logs]); writeFileSync(join(logs, name), body); },
+      log: () => undefined, pipeGraceMs: 200,
+    });
+    const started = await manager.request({ action: "start", projectId: "p", chatId: "c1", step: "build" }) as { outcome: string };
+    assert.equal(started.outcome, "started");
+    let job: { state: string; lines: string[] } = { state: "running", lines: [] };
+    for (let i = 0; i < 100 && job.state === "running"; i++) {
+      await wait(50);
+      job = (await manager.request({ action: "status", projectId: "p", chatId: "c1", cursor: 0 }) as { job: typeof job }).job;
+    }
+    assert.notEqual(job.state, "running");
+    const shown = job.lines.join("\n");
+    const disk = readdirSync(logs).map(name => readFileSync(join(logs, name))).reduce((all, bytes) => Buffer.concat([all, bytes]), Buffer.alloc(0));
+    assert.ok(disk.length > 0, "a log was written");
+    for (const fragment of FRAGMENTS) {
+      assert.ok(!shown.includes(fragment), `page: ${fragment}`);
+      assert.equal(disk.indexOf(Buffer.from(fragment)), -1, `disk: ${fragment}`);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---------------------------------------------------------------------------
+// PR #22 review B2: the sandbox.
+
+test("PR #22 review B2: the sandbox profile writes only inside, hides the app's data and keys, and cuts the network for building", () => {
+  const places = { workspace: "/Users/me/elsecrew/workspaces/app/t1", home: "/Users/me", tempRoot: "/private/var/folders/ab/cd", hidden: ["/Users/me/Library/Application Support/Elsecrew"] };
+  const build = previewBuildSandboxProfile("build", places);
+  assert.match(build, /\(deny file-write\*\)/);
+  assert.ok(build.includes('(subpath "/Users/me/elsecrew/workspaces/app/t1")') && build.includes('(subpath "/Users/me/.npm")'));
+  assert.ok(build.includes('(deny file-read* file-write* (subpath "/Users/me/Library/Application Support/Elsecrew")') && build.includes('(subpath "/Users/me/.ssh")'));
+  assert.match(build, /\(deny network\*\)/);
+  assert.doesNotMatch(previewBuildSandboxProfile("install", places), /deny network/);
+  for (const bad of ['/a"b', "/a\\b", "relative", "/a\nb"]) assert.throws(() => previewBuildSandboxProfile("build", { ...places, workspace: bad }));
+});
+
+test("PR #22 review B2: under the real sandbox a build cannot write outside, read the app's data or reach the network (macOS)", { skip: process.platform !== "darwin" || !existsSync("/usr/bin/sandbox-exec") }, () => {
+  const root = realpathSync(mkdtempSync(join(homedir(), ".elsecrew-sbx-test-")));
+  try {
+    const workspace = join(root, "ws");
+    const app = join(root, "app-data");
+    spawnSync("/bin/mkdir", ["-p", workspace, app]);
+    writeFileSync(join(app, "secret.txt"), "app secret");
+    const profile = previewBuildSandboxProfile("build", { workspace, home: realpathSync(homedir()), tempRoot: realpathSync(join(tmpdir(), "..")), hidden: [app] });
+    const script = `
+      const fs = require("fs"); const out = {};
+      const tryIt = (name, run) => { try { run(); out[name] = "ok"; } catch (e) { out[name] = e.code || String(e); } };
+      tryIt("inside", () => fs.writeFileSync(${JSON.stringify(join(workspace, "in.txt"))}, "x"));
+      tryIt("outside", () => fs.writeFileSync(${JSON.stringify(join(root, "out.txt"))}, "x"));
+      tryIt("readApp", () => fs.readFileSync(${JSON.stringify(join(app, "secret.txt"))}));
+      require("net").connect(80, "1.1.1.1").on("error", e => { out.net = e.code; console.log(JSON.stringify(out)); }).on("connect", () => { out.net = "ok"; console.log(JSON.stringify(out)); process.exit(0); });
+      setTimeout(() => { out.net ??= "timeout"; console.log(JSON.stringify(out)); process.exit(0); }, 3000);`;
+    const run = spawnSync("/usr/bin/sandbox-exec", ["-p", profile, process.execPath, "-e", script], { cwd: workspace, encoding: "utf8" });
+    const out = JSON.parse(run.stdout.trim().split("\n").at(-1)!) as Record<string, string>;
+    assert.equal(out.inside, "ok");
+    assert.equal(out.outside, "EPERM");
+    assert.equal(out.readApp, "EPERM");
+    assert.notEqual(out.net, "ok");
+    assert.ok(!existsSync(join(root, "out.txt")));
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

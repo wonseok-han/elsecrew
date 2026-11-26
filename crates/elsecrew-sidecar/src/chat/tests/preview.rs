@@ -354,6 +354,27 @@ fn build_plan_reads_the_task_package_and_requires_ignored_output() {
     let plan = build_plan(&mut fixture, &opened);
     assert_eq!((plan["needsInstall"].clone(), plan["lockfile"].clone()), (json!(false), json!(true)));
 
+    // PR #22 review B1: the fingerprint stands for every input of the run.
+    let fingerprint = plan["fingerprint"].as_str().unwrap().to_string();
+    assert_eq!(fingerprint.len(), 64);
+    assert_eq!(build_plan(&mut fixture, &opened)["fingerprint"], json!(fingerprint), "stable while nothing changes");
+    for (file, text) in [(".npmrc", "script-shell=/bin/zsh\n"), ("package-lock.json", "{\"x\":1}"), ("vite.config.ts", "export default { build: { outDir: 'web' } } // changed")] {
+        let before = build_plan(&mut fixture, &opened)["fingerprint"].clone();
+        fs::write(root.join(file), text).unwrap();
+        assert_ne!(build_plan(&mut fixture, &opened)["fingerprint"], before, "{file} changes the fingerprint");
+    }
+    // PR #22 review I1: a rule that brings a file under the output back is
+    // found by what `git add -A` would really take.
+    fs::create_dir_all(root.join("web")).unwrap();
+    fs::write(root.join("web/keep.js"), "x").unwrap();
+    fs::write(root.join(".gitignore"), "node_modules\nweb/*\n!web/keep.js\n").unwrap();
+    assert_eq!(build_plan(&mut fixture, &opened)["refusal"], json!("outputNotIgnored"));
+    fs::write(root.join(".gitignore"), "node_modules/package.json\nweb/\n").unwrap();
+    fs::write(root.join("node_modules/other.js"), "x").unwrap();
+    assert_eq!(build_plan(&mut fixture, &opened)["refusal"], json!("dependenciesNotIgnored"), "only one file of node_modules ignored");
+    fs::write(root.join(".gitignore"), "node_modules\nweb/\n").unwrap();
+    assert_eq!(build_plan(&mut fixture, &opened)["refusal"], Value::Null);
+
     // A package.json that is a link out of the workspace is not read.
     let outside = fixture._root.path().join("outside-package.json");
     fs::write(&outside, r#"{"scripts":{"build":"evil"}}"#).unwrap();

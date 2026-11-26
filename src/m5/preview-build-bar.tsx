@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.tsx";
 import type { M5PreviewBuildBridgeV1, PreviewBuildJobViewV1, PreviewBuildPlanViewV1, PreviewBuildStepV1 } from "./contracts/preview-v1.ts";
 import type { MessageKey } from "../locales/ko";
-import { appendBuildLines, previewBuildBar, previewBuildFinished, previewBuildStatus, type PreviewBuildNote, type PreviewBuildStatus } from "./preview-build-model.ts";
+import { appendBuildLines, previewBuildBar, previewBuildFinished, previewBuildStatus, type PreviewBuildNote, type PreviewBuildStartNote, type PreviewBuildStatus } from "./preview-build-model.ts";
 
 const NOTE_KEYS: Record<PreviewBuildNote, MessageKey> = {
   notIgnored: "m5.previewBuild.note.notIgnored", toolMissing: "m5.previewBuild.note.toolMissing", unsupported: "m5.previewBuild.note.unsupported",
@@ -17,6 +17,7 @@ const STATUS_KEYS: Record<PreviewBuildStatus, MessageKey> = {
   installed: "m5.previewBuild.status.installed", installFailed: "m5.previewBuild.status.installFailed", built: "m5.previewBuild.status.built",
   buildFailed: "m5.previewBuild.status.buildFailed", cancelled: "m5.previewBuild.status.cancelled", timedOut: "m5.previewBuild.status.timedOut",
   declined: "m5.previewBuild.status.declined", busy: "m5.previewBuild.status.busy", refused: "m5.previewBuild.status.refused",
+  changed: "m5.previewBuild.status.changed", cancelledStart: "m5.previewBuild.status.cancelledStart", leftovers: "m5.previewBuild.status.leftovers",
 };
 
 const POLL_MS = 500;
@@ -40,7 +41,7 @@ export function PreviewBuildBar({ projectId, chatId, active, teamWorking, showin
   const [job, setJob] = useState<PreviewBuildJobViewV1 | null>(null);
   const [lines, setLines] = useState<string[]>([]);
   const [logOpen, setLogOpen] = useState(false);
-  const [start, setStart] = useState<"declined" | "busy" | "refused" | null>(null);
+  const [start, setStart] = useState<PreviewBuildStartNote | null>(null);
   const [asking, setAsking] = useState(false);
   const [planKey, setPlanKey] = useState(0);
   const cursor = useRef(0);
@@ -68,7 +69,9 @@ export function PreviewBuildBar({ projectId, chatId, active, teamWorking, showin
     }, () => undefined);
     return () => {
       live = false;
-      if (jobRef.current?.state === "running") void bridge.cancel({ projectId, chatId }).catch(() => undefined);
+      // Always (PR #22 review B3): a start still waiting for main's box is
+      // called off too, not only a job the tab already saw running.
+      void bridge.cancel({ projectId, chatId }).catch(() => undefined);
     };
   }, [bridge, projectId, chatId]);
 
@@ -119,8 +122,9 @@ export function PreviewBuildBar({ projectId, chatId, active, teamWorking, showin
     setAsking(true);
     bridge.start({ projectId, chatId, step }).then(result => {
       if (result.outcome === "started") {
+        // The answer carries the job's first lines (its command line).
         cursor.current = result.job.cursor;
-        setLines([]);
+        setLines(result.job.lines);
         setJob(result.job);
         setLogOpen(true);
       } else {

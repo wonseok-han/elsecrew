@@ -239,25 +239,39 @@ async function run() {
     const pkg = JSON.parse(fs.readFileSync(packageFile, 'utf8'));
     pkg.scripts.build = 'node slow-build.mjs && vite build';
     fs.writeFileSync(packageFile, JSON.stringify(pkg, null, 2) + '\n');
-    fs.writeFileSync(path.join(task.worktreePath, 'slow-build.mjs'), "import { spawn } from 'node:child_process';\nconsole.log('slow build: token=ghp_abcdefghijklmnopqrstuvwxyz0123 waits');\nspawn(process.execPath, ['-e', 'setTimeout(() => {}, 120000)'], { stdio: 'ignore' });\nsetTimeout(() => {}, 120000);\n");
+    // It also tries to write outside the workspace (the sandbox refuses), and
+    // starts one child in its group and one that makes its own session (setsid).
+    fs.writeFileSync(path.join(task.worktreePath, 'slow-build.mjs'), [
+      "import { spawn } from 'node:child_process';",
+      "import fs from 'node:fs'; import os from 'node:os';",
+      "let outside = 'written'; try { fs.writeFileSync(os.homedir() + '/.elsecrew-sandbox-probe', 'x'); } catch (e) { outside = e.code; }",
+      "console.log('slow build: outside write ' + outside + ' token=ghp_abcdefghijklmnopqrstuvwxyz0123 waits');",
+      "spawn(process.execPath, ['-e', 'setTimeout(() => {}, 120000)'], { stdio: 'ignore' });",
+      "spawn(process.execPath, ['-e', 'setTimeout(() => {}, 120000)'], { stdio: 'ignore', detached: true }).unref();",
+      "setTimeout(() => {}, 120000);",
+    ].join('\n') + '\n');
     await page(`(() => { const t = document.querySelector('[data-testid=preview-build-log-toggle]'); if (t.getAttribute('aria-expanded') !== 'true') t.click(); })()`);
     await page(`document.querySelector('[data-testid=preview-build-start]').click()`);
     await waitFor(() => page(`Boolean(document.querySelector('[data-testid=preview-build-running]'))`), 20_000, 'rebuild running');
     await sleep(2500);
     const pids = mainModule.previewBuildManager.runningPids;
+    const seen = mainModule.previewBuildManager.seenProcesses(projectId, task.chatId);
     noteProcesses('rebuild');
     await capture('6-building-log');
     await page(`document.querySelector('[data-testid=preview-build-cancel]').click()`);
     await waitFor(() => page(`document.querySelector('[data-testid=preview-build]')?.dataset.state === 'cancelled'`), 20_000, 'cancelled');
     await sleep(500);
-    const alive = pids.filter(pid => { try { process.kill(pid, 0); return true; } catch { return false; } });
+    await sleep(3500);
+    const alive = seen.filter(pid => { try { process.kill(pid, 0); return true; } catch { return false; } });
+    const sessionLeaver = (result.processes.at(-1).sessions ?? []);
     const group = pids.length ? cp.spawnSync('/bin/ps', ['-A', '-o', 'pid=,pgid=,command='], { encoding: 'utf8' }).stdout.split('\n').filter(line => line.trim().split(/\s+/)[1] === String(pids[0])) : [];
     const groupBefore = result.processes.at(-1).group;
-    check('stopping ends the build and every process of its group', pids.length === 1 && groupBefore.length >= 3 && alive.length === 0 && group.length === 0, { pids, groupBefore, alive, group });
+    check('stopping ends the build, its group and the child that left its session', pids.length === 1 && groupBefore.length >= 3 && seen.length >= 5 && alive.length === 0 && group.length === 0, { pids, seen, groupBefore, alive, group, sessionLeaver });
     await capture('7-cancelled');
     const logText = await page(`document.querySelector('[data-testid=preview-build-log]')?.innerText ?? ''`);
     result.logTail = logText.split('\n').slice(-20);
-    check('a key the build printed is masked in the log', logText.includes('slow build: token=') && !logText.includes('abcdefghijklmnopqrstuvwxyz0123'), { tail: result.logTail.slice(-6) });
+    check('a key the build printed is masked in the log', logText.includes('slow build: outside write') && !logText.includes('abcdefghijklmnopqrstuvwxyz0123'), { tail: result.logTail.slice(-6) });
+    check('the sandbox kept the build from writing outside the workspace', logText.includes('outside write EPERM') && !fs.existsSync(path.join(os.homedir(), '.elsecrew-sandbox-probe')), { tail: result.logTail.slice(-6) });
     const logFiles = fs.readdirSync(path.join(mainModule.m5DataDirectory(), 'preview-builds')).filter(name => /^[0-9a-f]{32}\.log$/.test(name));
     check('the masked log is kept in the app data folder', logFiles.length >= 1, { logFiles });
     await renderBoxes();

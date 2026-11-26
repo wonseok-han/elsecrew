@@ -139,7 +139,8 @@ const previewManager = new PreviewManagerV1({
  * on Windows yet: its process tree and tool lookup are not checked. The
  * program lookup, environment and process group live in preview-build-host.ts. */
 const previewBuildManager = createPreviewBuildManager({
-  enabled: PREVIEW_ENABLED && process.platform !== "win32",
+  // macOS only: its sandbox, process tree and tool lookup are what was checked.
+  enabled: PREVIEW_ENABLED && process.platform === "darwin",
   sidecar: () => sidecar,
   ask: async (box) => {
     const window = mainWindow;
@@ -148,6 +149,7 @@ const previewBuildManager = createPreviewBuildManager({
   },
   korean: () => app.getLocale().toLowerCase().startsWith("ko"),
   dataDirectory: () => m5DataDirectory(),
+  hiddenFolders: () => [m5DataDirectory(), app.getPath("userData")],
   log: (label) => console.info(`m5: ${label}`),
 });
 /** Stopping agent processes takes up to about 8 seconds each (terminate, then kill). */
@@ -560,13 +562,13 @@ async function prepareQuit(): Promise<PrepareQuitResultV1> {
   // through `before-quit`) closes the preview and stops its reads first; a
   // preparation called off lets it open again (PR #6 review I4).
   previewManager.suspend();
-  previewBuildManager.stopAll();
+  previewBuildManager.suspend();
   await gitPreparation?.close();
   try {
     const result = await quitCoordinator.prepareQuit();
-    if (!result.safeToQuit) { gitPreparation?.reopen(); previewManager.resume(); }
+    if (!result.safeToQuit) { gitPreparation?.reopen(); previewManager.resume(); previewBuildManager.resume(); }
     return result;
-  } catch (error) { gitPreparation?.reopen(); previewManager.resume(); throw error; }
+  } catch (error) { gitPreparation?.reopen(); previewManager.resume(); previewBuildManager.resume(); throw error; }
 }
 
 function registerIpcHandlers(): void {
@@ -630,6 +632,8 @@ function registerIpcHandlers(): void {
   }));
   // Build-then-preview: the page names a chat and a step; main asks the
   // sidecar for the plan and the person in its own box (preview-build.ts).
+  // Processes a build left when the app last ended without stopping them.
+  if (previewBuildManager) { try { previewBuildManager.recoverLeftovers(); } catch { /* best effort */ } }
   ipcMain.handle(PREVIEW_BUILD_CHANNEL_V1, quietAfterQuit(async (event, ...args: unknown[]) => {
     assertCurrentMainFrame(event);
     if (args.length !== 1) throw new Error("preview build takes one request");

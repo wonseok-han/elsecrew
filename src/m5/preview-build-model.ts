@@ -3,12 +3,14 @@
  * bar says and allows. Pure; tested in `tests/m5-preview-build.test.mts`.
  * Main decides and runs (electron/preview-build.ts); the tab only asks.
  */
-import { PREVIEW_BUILD_LOG_MAX_LINES_V1, type PreviewBuildJobViewV1, type PreviewBuildPlanViewV1, type PreviewBuildStepV1 } from "./contracts/preview-v1.ts";
+import { PREVIEW_BUILD_LOG_MAX_LINES_V1, type PreviewBuildJobViewV1, type PreviewBuildPlanViewV1, type PreviewBuildStartOutcomeV1, type PreviewBuildStepV1 } from "./contracts/preview-v1.ts";
 
 export type PreviewBuildNote = "notIgnored" | "toolMissing" | "unsupported";
 export type PreviewBuildStatus =
   | "installed" | "installFailed" | "built" | "buildFailed" | "cancelled" | "timedOut"
-  | "declined" | "busy" | "refused";
+  | "declined" | "busy" | "refused" | "changed" | "cancelledStart" | "leftovers";
+/** A start main did not take (`started` is not a status). */
+export type PreviewBuildStartNote = Exclude<PreviewBuildStartOutcomeV1, "started">;
 
 export type PreviewBuildBarView =
   /** Not a package with a build (or no answer): the bar is not shown. */
@@ -37,8 +39,10 @@ export function previewBuildBar(plan: PreviewBuildPlanViewV1 | null, job: Previe
 }
 
 /** The line under the bar after a job ended or a start was not taken. */
-export function previewBuildStatus(job: PreviewBuildJobViewV1 | null, start: "declined" | "busy" | "refused" | null): PreviewBuildStatus | null {
-  if (start) return start;
+export function previewBuildStatus(job: PreviewBuildJobViewV1 | null, start: PreviewBuildStartNote | null): PreviewBuildStatus | null {
+  if (start) return start === "cancelled" ? "cancelledStart" : start;
+  // Processes that did not end outrank how the job ended (PR #22 review B3).
+  if (job && job.leftovers > 0 && job.state !== "running") return "leftovers";
   if (!job || job.state === "idle" || job.state === "running") return null;
   if (job.state === "cancelled") return "cancelled";
   if (job.state === "timedOut") return "timedOut";

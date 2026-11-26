@@ -412,8 +412,17 @@ export interface PreviewBuildPlanResultV1 extends PreviewWorkspaceRefV1 {
   packageManager: PreviewPackageManagerV1 | null;
   lockfile: boolean;
   buildScript: string | null;
+  /** `prebuild`/`postbuild`: npm runs them with `build` (shown in the consent box). */
+  buildHooks: { name: string; script: string }[] | null;
+  /** Declared package names (first 40) and how many there are. */
+  dependencies: string[] | null;
+  dependencyCount: number | null;
+  yarnBerry: boolean;
   outputDir: string | null;
   needsInstall: boolean;
+  /** SHA-256 over the folder and every input file (PR #22 review B1): main
+   * runs only while it is the one the person agreed to. */
+  fingerprint: string | null;
 }
 
 /** The sidecar's output folder rule (`safe_output_dir`): plain segments inside the workspace. */
@@ -431,17 +440,30 @@ export function validatePreviewBuildPlanRequestV1(value: unknown): PreviewBuildP
 
 export function validatePreviewBuildPlanResultV1(value: unknown, request: PreviewBuildPlanRequestV1): PreviewBuildPlanResultV1 {
   const object = requireObject(value, "preview build plan");
-  exactKeys(object, ["chatId", "projectId", "worktreeId", "workspaceIdentity", "refusal", "workspacePath", "packageManager", "lockfile", "buildScript", "outputDir", "needsInstall"]);
+  exactKeys(object, ["chatId", "projectId", "worktreeId", "workspaceIdentity", "refusal", "workspacePath", "packageManager", "lockfile", "buildScript", "buildHooks", "dependencies", "dependencyCount", "yarnBerry", "outputDir", "needsInstall", "fingerprint"]);
   if (object.chatId !== request.chatId || object.projectId !== request.projectId) fail("preview build plan answered another chat");
   const ref = { chatId: request.chatId, projectId: request.projectId, worktreeId: id(object.worktreeId, "worktreeId"), workspaceIdentity: id(object.workspaceIdentity, "workspaceIdentity") };
-  if (typeof object.lockfile !== "boolean" || typeof object.needsInstall !== "boolean") fail("preview build flags are invalid");
+  if (typeof object.lockfile !== "boolean" || typeof object.needsInstall !== "boolean" || typeof object.yarnBerry !== "boolean") fail("preview build flags are invalid");
   if (object.refusal !== null) {
     if (typeof object.refusal !== "string" || !(PREVIEW_BUILD_REFUSALS_V1 as readonly string[]).includes(object.refusal)) fail("preview build refusal is invalid");
-    if (object.workspacePath !== null || object.packageManager !== null || object.buildScript !== null || object.outputDir !== null || object.lockfile || object.needsInstall) {
+    if (object.workspacePath !== null || object.packageManager !== null || object.buildScript !== null || object.outputDir !== null || object.lockfile || object.needsInstall
+      || object.buildHooks !== null || object.dependencies !== null || object.dependencyCount !== null || object.yarnBerry || object.fingerprint !== null) {
       fail("a refused build plan carries no plan");
     }
-    return { ...ref, refusal: object.refusal as PreviewBuildRefusalV1, workspacePath: null, packageManager: null, lockfile: false, buildScript: null, outputDir: null, needsInstall: false };
+    return { ...ref, refusal: object.refusal as PreviewBuildRefusalV1, workspacePath: null, packageManager: null, lockfile: false, buildScript: null,
+      buildHooks: null, dependencies: null, dependencyCount: null, yarnBerry: false, outputDir: null, needsInstall: false, fingerprint: null };
   }
+  const hooks = object.buildHooks;
+  if (!Array.isArray(hooks) || hooks.length > 2 || hooks.some(hook => {
+    const entry = requireObject(hook, "build hook");
+    exactKeys(entry, ["name", "script"]);
+    return (entry.name !== "prebuild" && entry.name !== "postbuild") || typeof entry.script !== "string" || entry.script.length > 1200;
+  })) fail("buildHooks is invalid");
+  const dependencies = object.dependencies;
+  if (!Array.isArray(dependencies) || dependencies.length > 40 || dependencies.some(name => typeof name !== "string" || name.length === 0 || name.length > 214 || /[\u0000-\u001f\u007f]/u.test(name))) fail("dependencies are invalid");
+  const count = object.dependencyCount;
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < dependencies.length) fail("dependencyCount is invalid");
+  if (typeof object.fingerprint !== "string" || !/^[0-9a-f]{64}$/.test(object.fingerprint)) fail("fingerprint is invalid");
   const path = object.workspacePath;
   if (typeof path !== "string" || !path.startsWith("/") && !/^[A-Za-z]:\\/.test(path) || path.length > 4096 || /[\u0000-\u001f\u007f]/u.test(path)) fail("workspacePath is invalid");
   if (object.packageManager !== "npm" && object.packageManager !== "pnpm" && object.packageManager !== "yarn") fail("packageManager is invalid");
@@ -450,7 +472,9 @@ export function validatePreviewBuildPlanResultV1(value: unknown, request: Previe
   if (typeof object.outputDir !== "string" || !isPreviewOutputDirV1(object.outputDir)) fail("outputDir is invalid");
   return {
     ...ref, refusal: null, workspacePath: path as string, packageManager: object.packageManager as PreviewPackageManagerV1,
-    lockfile: object.lockfile as boolean, buildScript: script as string, outputDir: object.outputDir as string, needsInstall: object.needsInstall as boolean,
+    lockfile: object.lockfile as boolean, buildScript: script as string, buildHooks: hooks as { name: string; script: string }[],
+    dependencies: dependencies as string[], dependencyCount: count as number, yarnBerry: object.yarnBerry as boolean,
+    outputDir: object.outputDir as string, needsInstall: object.needsInstall as boolean, fingerprint: object.fingerprint as string,
   };
 }
 
@@ -494,11 +518,20 @@ export interface PreviewBuildJobViewV1 {
   outputReady: boolean;
   startedAt: number | null;
   endedAt: number | null;
+  /** Processes of the job (or that it started) not seen to end after it
+   * was stopped (PR #22 review B3). While any lives, this task cannot build. */
+  leftovers: number;
 }
+
+/** `changed`: what the person agreed to changed before it ran (nothing ran;
+ * main asked again and that was not agreed either). `cancelled`: stopped while
+ * the box was open. `leftovers`: an earlier job's processes still live. */
+export type PreviewBuildStartOutcomeV1 = "started" | "declined" | "busy" | "refused" | "changed" | "cancelled" | "leftovers";
+export const PREVIEW_BUILD_START_OUTCOMES_V1: readonly PreviewBuildStartOutcomeV1[] = ["started", "declined", "busy", "refused", "changed", "cancelled", "leftovers"];
 
 export type PreviewBuildIpcResultV1 =
   | { action: "plan"; plan: PreviewBuildPlanViewV1; job: PreviewBuildJobViewV1 }
-  | { action: "start"; outcome: "started" | "declined" | "busy" | "refused"; job: PreviewBuildJobViewV1 }
+  | { action: "start"; outcome: PreviewBuildStartOutcomeV1; job: PreviewBuildJobViewV1 }
   | { action: "cancel" | "status"; job: PreviewBuildJobViewV1 };
 
 function step(value: unknown): PreviewBuildStepV1 {
@@ -540,7 +573,8 @@ function command(value: unknown, field: string): string | null {
 
 export function validatePreviewBuildJobViewV1(value: unknown): PreviewBuildJobViewV1 {
   const object = requireObject(value, "preview build job");
-  exactKeys(object, ["step", "state", "cursor", "lines", "exitCode", "outputReady", "startedAt", "endedAt"]);
+  exactKeys(object, ["step", "state", "cursor", "lines", "exitCode", "outputReady", "startedAt", "endedAt", "leftovers"]);
+  if (typeof object.leftovers !== "number" || !Number.isSafeInteger(object.leftovers) || object.leftovers < 0) fail("leftovers is invalid");
   if (object.step !== null) step(object.step);
   if (typeof object.state !== "string" || !BUILD_STATES.has(object.state as PreviewBuildStateV1)) fail("build state is invalid");
   if (typeof object.cursor !== "number" || !Number.isSafeInteger(object.cursor) || object.cursor < 0) fail("cursor is invalid");
@@ -551,7 +585,7 @@ export function validatePreviewBuildJobViewV1(value: unknown): PreviewBuildJobVi
   return {
     step: object.step as PreviewBuildStepV1 | null, state: object.state as PreviewBuildStateV1, cursor: object.cursor as number,
     lines: object.lines as string[], exitCode: object.exitCode as number | null, outputReady: object.outputReady as boolean,
-    startedAt: nullableTime(object.startedAt, "startedAt"), endedAt: nullableTime(object.endedAt, "endedAt"),
+    startedAt: nullableTime(object.startedAt, "startedAt"), endedAt: nullableTime(object.endedAt, "endedAt"), leftovers: object.leftovers as number,
   };
 }
 
@@ -574,8 +608,8 @@ export function validatePreviewBuildIpcResultV1(value: unknown, request: Preview
     }
     case "start":
       exactKeys(object, ["action", "outcome", "job"]);
-      if (!["started", "declined", "busy", "refused"].includes(object.outcome as string)) fail("start outcome is invalid");
-      return { action: "start", outcome: object.outcome as "started", job: validatePreviewBuildJobViewV1(object.job) };
+      if (!(PREVIEW_BUILD_START_OUTCOMES_V1 as readonly unknown[]).includes(object.outcome)) fail("start outcome is invalid");
+      return { action: "start", outcome: object.outcome as PreviewBuildStartOutcomeV1, job: validatePreviewBuildJobViewV1(object.job) };
     default:
       exactKeys(object, ["action", "job"]);
       return { action: request.action, job: validatePreviewBuildJobViewV1(object.job) };

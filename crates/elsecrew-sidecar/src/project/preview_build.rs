@@ -28,6 +28,21 @@ const BUILD_CONFIG_MAX_BYTES: u64 = 64 * 1024;
 /// The build script is shown in the consent box; longer is cut.
 const BUILD_SCRIPT_SHOWN_CHARS: usize = 300;
 const VITE_CONFIGS: &[&str] = &["vite.config.ts", "vite.config.js", "vite.config.mjs", "vite.config.mts", "vite.config.cjs", "vite.config.cts"];
+/// What the person agrees to run is fixed by these files (PR #22 review B1):
+/// the package, its lockfiles, the package managers' own settings and hooks,
+/// and the build tool's config. Their bytes (or absence) go into the plan's
+/// fingerprint; main runs only when the fingerprint it showed is still the
+/// fingerprint right before starting.
+const FINGERPRINT_FILES: &[&str] = &[
+    "package.json", "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock",
+    ".npmrc", ".yarnrc", ".yarnrc.yml", "pnpm-workspace.yaml", ".pnpmfile.cjs",
+    "vite.config.ts", "vite.config.js", "vite.config.mjs", "vite.config.mts", "vite.config.cjs", "vite.config.cts",
+];
+/// A lockfile can be large; hashing stops being reasonable past this.
+const FINGERPRINT_FILE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+/// Shown in the consent box: the scripts npm runs around `build`.
+const BUILD_HOOKS: &[&str] = &["prebuild", "postbuild"];
+const DEPENDENCIES_SHOWN: usize = 40;
 
 /// What a workspace's `package.json` says about building it.
 #[derive(Debug, PartialEq, Eq)]
@@ -36,6 +51,12 @@ pub(crate) struct BuildFacts {
     pub lockfile: bool,
     pub build_script: String,
     pub output_dir: String,
+    /// `prebuild`/`postbuild` scripts npm runs with `build`.
+    pub hooks: Vec<(String, String)>,
+    /// Declared package names (dependencies and devDependencies), sorted.
+    pub dependencies: Vec<String>,
+    /// Yarn 2+ (its install takes other flags).
+    pub yarn_berry: bool,
 }
 
 /// The facts, or why this workspace cannot be built here. `exists` answers
@@ -87,7 +108,19 @@ pub(crate) fn build_facts(
         None if depends_on("react-scripts") => "build".to_string(),
         None => "dist".to_string(),
     };
-    Ok(BuildFacts { manager, lockfile, build_script: script, output_dir })
+    let hooks = BUILD_HOOKS.iter().filter_map(|name| {
+        package.get("scripts").and_then(|scripts| scripts.get(*name)).and_then(Value::as_str)
+            .map(|script| ((*name).to_string(), script.trim().to_string()))
+    }).collect();
+    let mut dependencies: Vec<String> = ["dependencies", "devDependencies"].iter()
+        .filter_map(|field| package.get(*field).and_then(Value::as_object))
+        .flat_map(|deps| deps.keys().cloned())
+        .collect();
+    dependencies.sort();
+    dependencies.dedup();
+    let yarn_berry = manager == "yarn"
+        && (exists(".yarnrc.yml") || declared.strip_prefix("yarn@").is_some_and(|version| !version.starts_with('1')));
+    Ok(BuildFacts { manager, lockfile, build_script: script, output_dir, hooks, dependencies, yarn_berry })
 }
 
 /// `--outDir x`, `--outDir=x` in a script line.
@@ -150,6 +183,42 @@ fn read_small_file(root: &Dir, path: &str, limit: u64) -> Result<Option<Vec<u8>>
     Ok(Some(bytes))
 }
 
+/// The SHA-256 of a regular file read through the verified handle, streamed;
+/// `None` when it is absent (or a link: links are not followed and count as absent).
+fn file_digest(root: &Dir, path: &str) -> Result<Option<String>, &'static str> {
+    let Ok((parent, name)) = open_parent_capability(root, path) else { return Ok(None) };
+    let Ok(file) = open_real_file_at(&parent, &name) else { return Ok(None) };
+    let mut file = file;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 64 * 1024];
+    let mut total = 0u64;
+    loop {
+        let read = file.read(&mut buffer).map_err(|_| "invalidPackage")?;
+        if read == 0 { break; }
+        total += read as u64;
+        if total > FINGERPRINT_FILE_MAX_BYTES { return Err("invalidPackage"); }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(Some(format!("{:x}", hasher.finalize())))
+}
+
+/// One value for everything the consent box stands for: the workspace
+/// folder (its path and identity) and each input file's bytes or absence.
+pub(crate) fn plan_fingerprint(path: &str, identity: &str, files: &[(&str, Option<String>)]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"elsecrew-preview-build-plan-v1\0");
+    hasher.update(path.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(identity.as_bytes());
+    for (name, digest) in files {
+        hasher.update(b"\0");
+        hasher.update(name.as_bytes());
+        hasher.update(b"=");
+        hasher.update(digest.as_deref().unwrap_or("absent").as_bytes());
+    }
+    format!("{:x}", hasher.finalize())
+}
+
 impl ProjectManager {
     pub fn preview_build_plan(
         &mut self,
@@ -161,19 +230,25 @@ impl ProjectManager {
         let (active, root) = self.validate_workspace_binding_with_lock_handle(
             storage, &address, "active", WorkspaceLockAdmission::Ready,
         )?;
-        let answer = |refusal: Option<&str>, plan: Option<(&str, &BuildFacts, bool)>| ProjectAction {
+        let shown = |text: &str| text.chars().take(BUILD_SCRIPT_SHOWN_CHARS).collect::<String>();
+        let answer = |refusal: Option<&str>, plan: Option<(&str, &BuildFacts, bool, &str)>| ProjectAction {
             result: json!({
                 "chatId": address.chat_id,
                 "projectId": address.project_id,
                 "worktreeId": address.worktree_id,
                 "workspaceIdentity": address.workspace_identity,
                 "refusal": refusal,
-                "workspacePath": plan.map(|(path, _, _)| path),
-                "packageManager": plan.map(|(_, facts, _)| facts.manager),
-                "lockfile": plan.is_some_and(|(_, facts, _)| facts.lockfile),
-                "buildScript": plan.map(|(_, facts, _)| facts.build_script.chars().take(BUILD_SCRIPT_SHOWN_CHARS).collect::<String>()),
-                "outputDir": plan.map(|(_, facts, _)| facts.output_dir.as_str()),
-                "needsInstall": plan.is_some_and(|(_, _, needs)| needs),
+                "workspacePath": plan.map(|(path, _, _, _)| path),
+                "packageManager": plan.map(|(_, facts, _, _)| facts.manager),
+                "lockfile": plan.is_some_and(|(_, facts, _, _)| facts.lockfile),
+                "buildScript": plan.map(|(_, facts, _, _)| shown(&facts.build_script)),
+                "buildHooks": plan.map(|(_, facts, _, _)| facts.hooks.iter().map(|(name, script)| json!({"name": name, "script": shown(script)})).collect::<Vec<_>>()),
+                "dependencies": plan.map(|(_, facts, _, _)| facts.dependencies.iter().take(DEPENDENCIES_SHOWN).cloned().collect::<Vec<_>>()),
+                "dependencyCount": plan.map(|(_, facts, _, _)| facts.dependencies.len()),
+                "yarnBerry": plan.is_some_and(|(_, facts, _, _)| facts.yarn_berry),
+                "outputDir": plan.map(|(_, facts, _, _)| facts.output_dir.as_str()),
+                "needsInstall": plan.is_some_and(|(_, _, needs, _)| needs),
+                "fingerprint": plan.map(|(_, _, _, fingerprint)| fingerprint),
             }),
             ..ProjectAction::default()
         };
@@ -200,22 +275,54 @@ impl ProjectManager {
         };
         // The app records each step with `git add -A`: what the build and the
         // installation write must be ignored, or they would join the task.
+        // The folders themselves (PR #22 review I1: two sample files were not
+        // enough), then what is really there now: any file under them that
+        // `git add -A` would take (a `!negation` rule, say) refuses as well.
+        // Main asks again after every job, so a build that wrote such files
+        // never counts as done.
         let ignored = |probe: &str| -> Result<bool, ProjectFailure> {
             let output = self.git_allow_status_at(&root, ["check-ignore", "-q", "--", probe], &[0, 1])?;
             Ok(output.status.code() == Some(0))
         };
-        if !ignored("node_modules/package.json")? {
+        let output_dir = facts.output_dir.clone();
+        if !ignored("node_modules/")? || !ignored("node_modules/package.json")? || self.git_would_record(&root, "node_modules")? {
             return Ok(answer(Some("dependenciesNotIgnored"), None));
         }
-        if !ignored(&format!("{}/index.html", facts.output_dir))? {
+        if !ignored(&format!("{output_dir}/"))? || !ignored(&format!("{output_dir}/index.html"))? || !ignored(&format!("{output_dir}/assets/index.js"))?
+            || self.git_would_record(&root, &output_dir)? {
             return Ok(answer(Some("outputNotIgnored"), None));
         }
         let Some(path) = active.worktree_path.to_str() else {
             return Ok(answer(Some("unsupportedWorkspace"), None));
         };
+        let mut digests = Vec::with_capacity(FINGERPRINT_FILES.len());
+        for name in FINGERPRINT_FILES {
+            match file_digest(&root, name) {
+                Ok(digest) => digests.push((*name, digest)),
+                Err(refusal) => return Ok(answer(Some(refusal), None)),
+            }
+        }
+        let identity = format!("{:?}", root_identity_for_plan(&root)?);
+        let fingerprint = plan_fingerprint(path, &identity, &digests);
         let needs_install = open_real_child_dir(&root, "node_modules").is_err();
-        Ok(answer(None, Some((path, &facts, needs_install))))
+        Ok(answer(None, Some((path, &facts, needs_install, &fingerprint))))
     }
+}
+
+impl ProjectManager {
+    /// Whether `git add -A` would record anything under `folder` now.
+    fn git_would_record(&self, root: &Dir, folder: &str) -> Result<bool, ProjectFailure> {
+        let output = self.git_at(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", folder])?;
+        Ok(!output.stdout.is_empty())
+    }
+}
+
+#[cfg(unix)]
+fn root_identity_for_plan(root: &Dir) -> Result<(u64, u64), ProjectFailure> { capability_directory_identity(root) }
+#[cfg(not(unix))]
+fn root_identity_for_plan(root: &Dir) -> Result<String, ProjectFailure> {
+    let _ = root;
+    Err(ProjectFailure::recovery("build preview is unavailable on this platform"))
 }
 
 #[cfg(test)]
@@ -229,9 +336,17 @@ mod tests {
 
     #[test]
     fn a_vite_app_builds_with_its_own_manager_into_dist() {
-        let package = json!({"scripts": {"build": "tsc -b && vite build"}, "devDependencies": {"vite": "^6"}});
+        let package = json!({"scripts": {"build": "tsc -b && vite build", "prebuild": "node gen.js", "dev": "vite"},
+            "dependencies": {"react": "18"}, "devDependencies": {"vite": "^6", "react": "18"}});
         assert_eq!(facts(package.clone(), &["package-lock.json"], None).unwrap(),
-            BuildFacts { manager: "npm", lockfile: true, build_script: "tsc -b && vite build".into(), output_dir: "dist".into() });
+            BuildFacts { manager: "npm", lockfile: true, build_script: "tsc -b && vite build".into(), output_dir: "dist".into(),
+                hooks: vec![("prebuild".into(), "node gen.js".into())], dependencies: vec!["react".into(), "vite".into()], yarn_berry: false });
+        // Yarn 2+ (its own settings file, or the declared version).
+        assert!(facts(package.clone(), &["yarn.lock", ".yarnrc.yml"], None).unwrap().yarn_berry);
+        let mut berry = package.clone();
+        berry["packageManager"] = json!("yarn@4.1.0");
+        assert!(facts(berry, &[], None).unwrap().yarn_berry);
+        assert!(!facts(package.clone(), &["yarn.lock"], None).unwrap().yarn_berry);
         assert_eq!(facts(package.clone(), &["pnpm-lock.yaml"], None).unwrap().manager, "pnpm");
         assert_eq!(facts(package.clone(), &["yarn.lock"], None).unwrap().manager, "yarn");
         let none = facts(package.clone(), &[], None).unwrap();
@@ -265,5 +380,16 @@ mod tests {
         }
         assert_eq!(safe_output_dir("./dist/"), Some("dist".into()));
         assert_eq!(safe_output_dir("out/web"), Some("out/web".into()));
+    }
+
+    #[test]
+    fn the_fingerprint_changes_with_any_input_or_the_folder() {
+        let files = |lock: Option<&str>| vec![("package.json", Some("a".to_string())), ("package-lock.json", lock.map(str::to_string))];
+        let base = plan_fingerprint("/w/t1", "(1, 2)", &files(Some("b")));
+        assert_eq!(base, plan_fingerprint("/w/t1", "(1, 2)", &files(Some("b"))));
+        assert_ne!(base, plan_fingerprint("/w/t1", "(1, 2)", &files(Some("c"))), "a changed lockfile");
+        assert_ne!(base, plan_fingerprint("/w/t1", "(1, 2)", &files(None)), "a removed lockfile");
+        assert_ne!(base, plan_fingerprint("/w/t1", "(1, 3)", &files(Some("b"))), "another folder at the same path");
+        assert_ne!(base, plan_fingerprint("/w/t2", "(1, 2)", &files(Some("b"))), "another path");
     }
 }
