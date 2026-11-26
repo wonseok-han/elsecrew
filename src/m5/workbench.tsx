@@ -981,7 +981,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           onSwitchRoles={snapshot.project && !projectDataReady ? undefined : () => navigatePreferences(() => { if (snapshot.project) { setPreferencesOpen(false); openRoleSettings(); } else { setPreferencesSection("roles"); setAppDefaultsOpen(true); } })} />
       </AppSettings>
       <StorageAdmissionNotice admission={admission} />
-      <UpdateBanner teamWorking={!chatController.canLeaveProjectView()} />
+      <UpdateBanner teamWorking={!chatController.canLeaveProjectView()} onReveal={() => navigatePreferences(() => { setPreferencesSection("general"); setPreferencesOpen(true); })} />
       {engineRestarted && <section className="m5-admission" role="status"><strong>{t("m5.admission.restarted")}</strong><p>{t("m5.admission.restartedHelp")}</p><button type="button" className="m5-secondary" onClick={() => window.location.reload()}>{t("m5.admission.refresh")}</button></section>}
       {/* Home and first run: why opening a project stopped (a switch whose target could not open lands here, PR #12 review I2). */}
       {!snapshot.project && snapshot.error && !resumingProject && <section className="m5-banner m5-banner-danger m5-home-error" role="alert" data-testid="home-error"><div><strong>{t(snapshot.error.messageKey)}</strong>

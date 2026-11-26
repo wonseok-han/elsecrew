@@ -2,6 +2,31 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #16 독립 검토(병합 차단 1·중요 4·경미 3) 반영과 새 #14 위로 맞춤 (`orca/ade-screens-u7-u8`)
+검토 `~/Documents/elsecrew-ade-screens-u5-u8-2026-11-26/REVIEW-pr16.md`(대상 f06a9e8b). PR #14(검토 반영본, 42e59ad7)를 이 브랜치에 병합했다.
+- U5·U6 엔트리는 #14의 원문 그대로 남겼다. 앞서 이 브랜치에서 그 엔트리에 덧붙였던 PR 링크는 #14 쪽 엔트리로 옮겨졌다.
+- 작업 화면의 `story` 줄은 PR #11의 새 속성과 U7 빈 상태를 합쳤다.
+
+- **B1 병합 충돌**: #14가 feature/ade(PR #11·#13)를 병합해 충돌을 풀었고, 이 브랜치는 그 #14를 병합했다.
+- **I1 하네스**: 업데이트 시험이 main의 실제 다시 시작 콜백을 쓴다. 가짜 종료 조정자는 실제처럼 안전 결과에서 깨끗한 종료를 허락한다.
+  - 시험: 보안 하네스 "update restart: main's yes, then the screen's readiness and the quit preparation decide; only a clean result installs"
+    - 기본 대화상자에서 '다시 시작' 뒤에 화면 준비 거절·무응답(시간 초과)·안전 종료 불가이면 설치하지 않는다.
+    - 준비됨 + 안전이면 설치한다.
+    - 요청하지 않은 준비 답은 거절한다.
+  - 신뢰 경계는 architecture에 따로 적었다. 기본 동의는 위조할 수 없고, 화면 준비의 참·거짓은 화면 콜백이 준다.
+- **I2 반복 실패**: main이 알리는 모든 상태에서 닫힘을 푼다. 확인을 요청할 때도 푼다.
+  - 시험: 단위 "PR #16 I2", 렌더러 스모크(실패 → 닫기 → 확인 중 → 실패 → '다시 확인' 다시 보임).
+- **I3 문구 검사 범위**: en 사전, `src`·`electron` 모든 TS/TSX 코드 글자, 하위 폴더, 따옴표 종류를 넓혔다. 기록 탭 원문 실패 코드를 '자세히'로 옮겼고, 팀에게 보내는 메시지와 en의 recovery point·snapshot 문구를 바꿨다.
+  - 시험: 단위 "U7: no on-screen string uses developer words…", "details-only strings … (any quote, any folder)".
+- **I4 Q7 진입점**: 메뉴의 확인·받기는 앱 안 배너로, 쓸 수 없는 실행은 설정 › 일반으로 보낸다. 설정의 확인은 `request("check")`다. 배너에 확인 중·최신 버전을 더했다. 기본 대화상자는 다시 시작 확인만 남았다.
+  - 시험: 단위 "PR #16 I4".
+- **경미**
+  - M1: 작업 버리기 검사 중에도 취소·Esc로 나갈 수 있고, 검사가 끝나면 취소에 초점을 되돌린다. 시험 "PR #16 M1".
+  - M2: CSS 검사가 '클래스가 코드에 있는지'만 본다는 한계를 시험 주석에 적었다. 렌더러 스모크에 빈 프로젝트 틀·주 행동·예시 줄·작업 목록 안내의 computed style 비교를 더했다.
+  - M3: hex 검사를 `src`·`electron` 모든 TS/TSX의 문자열 안 어디든, 그리고 JSX 글자의 6·8자리 hex까지 넓혔다. 예외 셋은 그대로다.
+  - PR #11이 남긴 `m5-activity-original`·`m5-activity-code`는 쓰이지 않는다. 실행 출력 작업자 영역이라 지우지 않고, 시험 예외에 이유와 함께 적었다.
+- **검증**: `npm test` 982/982, build, 렌더러 스모크 다크·라이트(32화면 1265개 실패 0).
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 화면 통일 U7(문구·F11·빈 상태·확인)·U8(죽은 CSS·색·업데이트 배너) (`orca/ade-screens-u7-u8`, PR #14 위)
 설계 DESIGN 4.1 U7·U8, 목업 13·15·16. PR #14(U5·U6) 위에 쌓았다. 현행 설명은 architecture "오류·빈 상태·업데이트 배너와 정리".
 

@@ -1102,6 +1102,15 @@ app.whenReady().then(async () => {
     await ${waitFor("window.m5SmokeUpdateRequests.join() === 'restart'", "restart asked of main")};
     window.m5SmokeSetUpdateState('unavailable');
     await ${waitFor("!document.querySelector('[data-testid=update-banner]')", "banner follows main's state")};
+    // PR #16 review I2: a closed failure banner shows again when a later check fails again.
+    window.m5SmokeSetUpdateState('error');
+    await ${waitFor("document.querySelector('[data-testid=update-banner]')", "update failure banner")};
+    document.querySelector('.m5-update-banner-close').click();
+    await ${waitFor("!document.querySelector('[data-testid=update-banner]')", "failure banner closed")};
+    window.m5SmokeSetUpdateState('checking');
+    window.m5SmokeSetUpdateState('error');
+    await ${waitFor("[...document.querySelectorAll('[data-testid=update-banner] button')].some(button => button.textContent === '다시 확인')", "a new failure shows again with its retry")};
+    window.m5SmokeSetUpdateState('unavailable');
     const earlierRow = () => [...document.querySelectorAll('.m5-home li[data-path]')].find(item => item.dataset.path === '/work/earlier');
     const catalogRequest = window.m5Projects.request;
     let removed = false;
@@ -1158,6 +1167,13 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-first-chat.m5-empty-state') && document.querySelector('.m5-task-list-empty')", "empty project")};
     if (document.querySelectorAll('.m5-first-chat .m5-btn-primary').length !== 1 || !document.querySelector('.m5-first-chat .m5-empty-mark')) throw new Error('an empty state has its mark and one main action');
     ${capture("31-empty-project")}
+    // PR #16 review M2: the kept rules still style the live screen (computed, not just named in code).
+    const tokenColor = name => { const probe = document.createElement('i'); probe.style.color = 'var(' + name + ')'; document.body.append(probe); const value = getComputedStyle(probe).color; probe.remove(); return value; };
+    const firstChat = getComputedStyle(document.querySelector('.m5-first-chat'));
+    if (firstChat.display !== 'flex' || firstChat.flexDirection !== 'column') throw new Error('the empty project frame lost its layout');
+    if (getComputedStyle(document.querySelector('.m5-first-chat-write')).backgroundColor !== tokenColor('--action-bg')) throw new Error('the empty project main action lost its color');
+    if (getComputedStyle(document.querySelector('.m5-goal-examples button')).backgroundColor !== tokenColor('--bg-raised')) throw new Error('example rows lost their face');
+    if (getComputedStyle(document.querySelector('.m5-task-list-empty')).textAlign !== 'center') throw new Error('the empty task list note lost its layout');
     document.querySelector('.m5-new-task').click();
     await ${waitFor("document.querySelector('.m5-new-chat-dialog')?.open && document.querySelector('.m5-first-chat-confirm')", "first-task window")};
     const firstGoal = document.querySelector('.m5-new-chat-form input');

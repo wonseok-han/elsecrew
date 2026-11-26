@@ -50,6 +50,7 @@ export function AppSettings({ hasProject, projectName, open, section, onSection,
   const dialog = useRef<HTMLElement>(null);
   const [updateError, setUpdateError] = useState(false);
   const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateUnavailableHere, setUpdateUnavailableHere] = useState(false);
   const theme = useTheme();
   useEffect(() => {
     if (open) dialog.current?.focus();
@@ -82,9 +83,14 @@ export function AppSettings({ hasProject, projectName, open, section, onSection,
             <Setting title={t("m5.preferences.updates")} help={appVersion ? t("m5.preferences.currentVersion", { version: appVersion }) : t("m5.preferences.updateHelp")}
               control={<button type="button" className="m5-secondary" disabled={!window.m5AppUpdate || updateBusy} onClick={async () => {
                 setUpdateError(false); setUpdateBusy(true);
-                try { await window.m5AppUpdate?.open(); } catch { setUpdateError(true); } finally { setUpdateBusy(false); }
+                // In the app (PR #16 review I4): main starts the check and the banner follows it; no native box.
+                try {
+                  const api = window.m5AppUpdate;
+                  if (api?.request) setUpdateUnavailableHere((await api.request("check")) === "unavailable");
+                  else await api?.open();
+                } catch { setUpdateError(true); } finally { setUpdateBusy(false); }
               }}>{t("m5.preferences.checkUpdate")}</button>}>
-              {!window.m5AppUpdate && <p role="status">{t("m5.preferences.updateUnavailable")}</p>}
+              {(!window.m5AppUpdate || updateUnavailableHere) && <p role="status">{t("m5.preferences.updateUnavailable")}</p>}
               {updateError && <p role="alert">{t("m5.preferences.updateError")}</p>}
             </Setting>
           </SettingsGroup>

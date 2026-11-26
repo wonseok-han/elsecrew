@@ -17,6 +17,8 @@ declare global {
       /** main's update state (ADE U8); the banner follows it. */
       state?(): Promise<AppUpdateState>;
       onState?(listener: (state: AppUpdateState) => void): () => void;
+      /** The app menu asked to show the update in the app. */
+      onReveal?(listener: () => void): () => void;
       /** Ask main to check, or to restart into a downloaded update (main confirms in its own box). */
       request?(action: "check" | "restart"): Promise<AppUpdateState>;
     };

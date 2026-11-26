@@ -16,7 +16,13 @@ export interface AppUpdateHandle {
   restart(): Promise<void>;
 }
 
-export function installAppUpdateMenu(restart: (install: () => void) => Promise<boolean>, changed: (state: UpdateState) => void = () => undefined): AppUpdateHandle {
+/**
+ * The menu item stays (Q7) but answers in the app: a check starts at once and
+ * its progress shows on the in-app banner; an unavailable build opens the
+ * app's settings (`reveal`). Only the restart into a downloaded update keeps
+ * main's own native confirmation (PR #16 review I4).
+ */
+export function installAppUpdateMenu(restart: (install: () => void) => Promise<boolean>, changed: (state: UpdateState) => void = () => undefined, reveal: () => void = () => undefined): AppUpdateHandle {
   const ko = app.getLocale().toLowerCase().startsWith("ko");
   const labels: Record<UpdateState, string> = {
     unavailable: ko ? "앱 업데이트 배포 준비 중" : "App updates are not configured",
@@ -50,19 +56,16 @@ export function installAppUpdateMenu(restart: (install: () => void) => Promise<b
       busy = true; refresh();
       try {
         if (controller.state === "unavailable") {
-          await dialog.showMessageBox({ type: "info", message: ko ? "이 실행에서는 앱 업데이트를 쓸 수 없어요." : "App updates are not available in this build.",
-            detail: ko ? `현재 버전: ${app.getVersion()}\n배포된 Elsecrew(macOS·Windows)에서만 새 버전을 받아 교체해요. 에이전트 업데이트와는 별도 기능이에요.`
-              : `Current version: ${app.getVersion()}\nOnly released Elsecrew builds for macOS and Windows download and install new versions. App updates are separate from agent updates.` });
+          reveal();
         } else if (controller.state === "ready") {
           const answer = await dialog.showMessageBox({ type: "question", message: ko ? "업데이트를 적용하고 다시 시작할까요?" : "Install the update and restart?",
             detail: ko ? "편집 중인 내용을 먼저 저장하세요. 진행 중인 작업이 안전하게 멈추는 것을 확인할 수 없으면 다시 시작하지 않아요." : "Save your edits first. The app does not restart unless running work can be confirmed to stop safely.",
             buttons: ko ? ["취소", "다시 시작"] : ["Cancel", "Restart"], defaultId: 0, cancelId: 0 });
           if (answer.response === 1) await controller.restart();
         } else {
-          const answer = await dialog.showMessageBox({ type: "question", message: ko ? "새 앱 버전을 확인하고 다운로드할까요?" : "Check for and download a new app version?",
-            detail: ko ? "새 버전이 있으면 다운로드해요. 바로 재시작하지는 않아요." : "An available update will be downloaded. The app will not restart immediately.",
-            buttons: ko ? ["취소", "확인 및 다운로드"] : ["Cancel", "Check and download"], defaultId: 0, cancelId: 0 });
-          if (answer.response === 1) controller.check();
+          // Checking and downloading change nothing on this computer until a restart, which main still confirms.
+          controller.check();
+          reveal();
         }
       } finally { busy = false; refresh(); }
     },

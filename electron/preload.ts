@@ -217,6 +217,7 @@ const M5_UPDATE_READINESS_REPLY = "m5:app-update:readiness-reply";
 const M5_APP_UPDATE_STATE = "m5:app-update:state";
 const M5_APP_UPDATE_REQUEST = "m5:app-update:request";
 const M5_APP_UPDATE_CHANGED = "m5:app-update:changed";
+const M5_APP_UPDATE_REVEAL = "m5:app-update:reveal";
 const APP_UPDATE_STATES = ["unavailable", "idle", "current", "checking", "downloading", "ready", "restarting", "error"] as const;
 type AppUpdateState = typeof APP_UPDATE_STATES[number];
 const asUpdateState = (value: unknown): AppUpdateState => (APP_UPDATE_STATES as readonly unknown[]).includes(value) ? value as AppUpdateState : "unavailable";
@@ -228,6 +229,12 @@ const appUpdateApi = Object.freeze({
     const handler = (_event: Electron.IpcRendererEvent, state: unknown) => listener(asUpdateState(state));
     ipcRenderer.on(M5_APP_UPDATE_CHANGED, handler);
     return () => { ipcRenderer.removeListener(M5_APP_UPDATE_CHANGED, handler); };
+  },
+  /** The app menu asked to show the update in the app (settings › general). */
+  onReveal: (listener: () => void) => {
+    const handler = () => listener();
+    ipcRenderer.on(M5_APP_UPDATE_REVEAL, handler);
+    return () => { ipcRenderer.removeListener(M5_APP_UPDATE_REVEAL, handler); };
   },
   request: async (action: unknown): Promise<AppUpdateState> => {
     if (action !== "check" && action !== "restart") throw new Error("invalid app update request");

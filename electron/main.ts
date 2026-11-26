@@ -987,7 +987,8 @@ app.whenReady().then(async () => {
       pendingUpdateInstall = undefined;
       if (!safe && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("m5:app-update:resume");
     }
-  }, state => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("m5:app-update:changed", state); });
+  }, state => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("m5:app-update:changed", state); },
+  () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("m5:app-update:reveal"); });
   await createMainWindow();
   sidecar ??= startSidecar();
 

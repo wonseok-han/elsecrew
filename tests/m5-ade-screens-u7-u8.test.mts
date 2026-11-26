@@ -20,30 +20,38 @@ const FORBIDDEN = /커밋|브랜치|복구점|식별자|준비 기록|워크트�
  */
 const DETAILS_ONLY = ["m5.merge.branch", "m5.merge.ahead", "m5.newTask.worktreeDetail"] as const;
 
-test("U7: no on-screen Korean string uses developer words outside the details (rule 4)", () => {
-  const offenders = Object.entries(ko).filter(([key, value]) => FORBIDDEN.test(value) && !(DETAILS_ONLY as readonly string[]).includes(key)).map(([key, value]) => `${key}: ${value}`);
-  assert.deepEqual(offenders, []);
-  // Native boxes main shows are screen strings too.
-  for (const file of readdirSync("electron").filter(name => name.endsWith(".ts"))) {
-    assert.doesNotMatch(readFileSync(join("electron", file), "utf8"), /커밋|브랜치|복구점|식별자|준비 기록/, file);
+/** Every TS/TSX file under a folder, its comments removed. */
+function codeFiles(dir: string): { path: string; text: string }[] {
+  const found: { path: string; text: string }[] = [];
+  const walk = (at: string) => { for (const name of readdirSync(at)) { const path = join(at, name); if (statSync(path).isDirectory()) walk(path); else if (/\.tsx?$/.test(name)) found.push({ path, text: readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1") }); } };
+  walk(dir);
+  return found;
+}
+const FORBIDDEN_EN = /\bcommits?\b|\bbranch(es)?\b|worktree|snapshot|recovery point|identifier/i;
+
+test("U7: no on-screen string uses developer words outside the details (rule 4) — both languages, code text and main's boxes", () => {
+  const allowed = (key: string) => (DETAILS_ONLY as readonly string[]).includes(key);
+  assert.deepEqual(Object.entries(ko).filter(([key, value]) => FORBIDDEN.test(value) && !allowed(key)).map(([key]) => key), []);
+  // English too (PR #16 review I3), and the app's message to the team that the person also sees.
+  assert.deepEqual(Object.entries(en).filter(([key, value]) => FORBIDDEN_EN.test(value) && !allowed(key)).map(([key]) => key), []);
+  // Korean words written straight into screen code (JSX text, strings) and every main/preload file, folders included.
+  const hangul = (text: string) => [...text.matchAll(/[^\n]*(커밋|브랜치|복구점|식별자|준비 기록|워크트리|스냅샷)[^\n]*/g)].map(match => match[0].trim().slice(0, 80));
+  for (const { path, text } of [...codeFiles("src"), ...codeFiles("electron")].filter(file => !file.path.includes("locales"))) assert.deepEqual(hangul(text), [], path);
+  // A raw failure code is help information: folded in the run details, not beside the sentence.
+  const story = source("task-story.tsx");
+  assert.ok(story.indexOf("{run.failure.stage}/{run.failure.code}") > story.indexOf("<details><summary>{t(\"m5.run.details\")}</summary>"), "the failure code sits in the details");
+});
+
+test("U7: details-only strings are used only inside details (any quote, any folder)", () => {
+  const files = codeFiles("src/m5").filter(file => file.path.endsWith(".tsx"));
+  for (const key of DETAILS_ONLY) {
+    const uses: string[] = [];
+    for (const { text } of files) for (const match of text.matchAll(new RegExp(`["'\`]${key.replace(/\./g, "\\.")}["'\`]`, "g"))) uses.push(text.slice(0, match.index));
+    assert.ok(uses.length > 0, `${key} is used`);
+    for (const before of uses) assert.ok(before.lastIndexOf("<details") > before.lastIndexOf("</details>"), `${key} sits inside a <details>`);
   }
 });
 
-test("U7: details-only strings are used only inside details", () => {
-  const files = readdirSync("src/m5").filter(name => /\.tsx$/.test(name)).map(name => source(name));
-  for (const key of DETAILS_ONLY) {
-    const uses = files.flatMap(text => {
-      const found: string[] = [];
-      for (let at = text.indexOf(`"${key}"`); at >= 0; at = text.indexOf(`"${key}"`, at + 1)) found.push(text.slice(0, at));
-      return found;
-    });
-    assert.ok(uses.length > 0, `${key} is used`);
-    for (const before of uses) {
-      const open = before.lastIndexOf("<details"), close = before.lastIndexOf("</details>");
-      assert.ok(open > close, `${key} sits inside a <details>`);
-    }
-  }
-});
 
 test("U7: the stuck-work status in the bell is the F11 guide, its run list only in the help details", () => {
   const status = source("work-status-view.tsx");
@@ -73,17 +81,24 @@ test("U8: every class the stylesheet styles is used by the app (no dead rules)",
   const classes = new Set([...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/\.(m5-[a-zA-Z0-9_-]+)/g)].map(match => match[1]));
   const dynamic = [...code.matchAll(/(m5-[a-zA-Z0-9-]*-)\$\{/g)].map(match => match[1]);
   // The shared component layer (DESIGN 2.3) is styled ahead of use; markdown headings are built by level.
-  const api = new Set(["m5-btn-secondary", "m5-refresh", "m5-badge-review", "m5-badge-danger", "m5-banner-running", "m5-banner-done", "m5-md-h1", "m5-md-h2", "m5-message", "m5-agent-output"]);
+  const api = new Set(["m5-btn-secondary", "m5-refresh", "m5-badge-review", "m5-badge-danger", "m5-banner-running", "m5-banner-done", "m5-md-h1", "m5-md-h2", "m5-message", "m5-agent-output",
+    // Left by the work-history detail (PR #11) in the run output area another worker is changing now; they tidy it there.
+    "m5-activity-original", "m5-activity-code"]);
+  // This checks that each styled class still appears in the code, not that every rule's whole selector matches a live
+  // screen (PR #16 review M2): the renderer smoke compares computed styles of the main components for that.
   const dead = [...classes].filter(name => !api.has(name) && !new RegExp(`(?<![\\w-])${name}(?![\\w-])`).test(code) && !dynamic.some(prefix => name.startsWith(prefix)));
   assert.deepEqual(dead, []);
 });
 
-test("U8: no color literal in screen code; main's two native colors are the tokens' values", () => {
-  for (const name of readdirSync("src/m5").filter(file => /\.tsx?$/.test(file))) assert.doesNotMatch(source(name), /["'`]#[0-9a-f]{3,8}["'`]/i, name);
-  const literals = readdirSync("electron").filter(name => name.endsWith(".ts"))
-    .flatMap(name => [...readFileSync(join("electron", name), "utf8").matchAll(/["'`](#[0-9a-f]{3,8})["'`]/gi)].map(match => `${name}:${match[1].toLowerCase()}`));
+test("U8: no color literal in any TS/TSX of src and electron; main's native colors are the tokens' values (PR #16 review M3)", () => {
+  const literals: string[] = [];
+  for (const { path, text } of [...codeFiles("src"), ...codeFiles("electron")]) {
+    // Inside any string (not only a whole one), and six- or eight-digit hex anywhere else (JSX text).
+    for (const match of text.matchAll(/(["'`])((?:(?!\1)[^\n\\]|\\.)*?)\1/g)) for (const hex of match[2].matchAll(/#[0-9a-f]{3}(?:[0-9a-f]{3})?(?:[0-9a-f]{2})?(?![0-9a-z_-])/gi)) literals.push(`${path}:${hex[0].toLowerCase()}`);
+    for (const hex of text.replace(/(["'`])(?:(?!\1)[^\n\\]|\\.)*?\1/g, "").matchAll(/#[0-9a-f]{6}(?:[0-9a-f]{2})?\b/gi)) literals.push(`${path}:${hex[0].toLowerCase()}`);
+  }
   // The window background before the page paints (it cannot read CSS), and a preview page's default white.
-  assert.deepEqual(literals.sort(), ["appearance.ts:#111315", "appearance.ts:#f3f3f1", "preview-manager.ts:#ffffff"].sort());
+  assert.deepEqual(literals.sort(), ["electron/appearance.ts:#111315", "electron/appearance.ts:#f3f3f1", "electron/preview-manager.ts:#ffffff"].sort());
   const dark = css.slice(css.indexOf(":root {"), css.indexOf("\n}", css.indexOf(":root {")));
   const light = css.slice(css.indexOf(':root[data-theme="light"] {'));
   assert.match(dark, /--p-gray-950: #111315;/);
@@ -95,7 +110,7 @@ test("U8: the app update is an in-app banner that follows main; the page only as
   assert.equal(updateBannerKind("ready"), "ready");
   assert.equal(updateBannerKind("downloading"), "downloading");
   assert.equal(updateBannerKind("error"), "error");
-  for (const state of ["unavailable", "idle", "current", "checking"] as const) assert.equal(updateBannerKind(state), null);
+  for (const state of ["unavailable", "idle"] as const) assert.equal(updateBannerKind(state), null);
   const banner = source("update-banner.tsx");
   assert.match(banner, /api\.request!\(action\)/);
   assert.doesNotMatch(banner, /quitAndInstall|onRestartCheck/);
@@ -111,4 +126,29 @@ test("U7·U8: ko and en carry the same new keys", () => {
   const prefixes = ["m5.update.", "m5.history.", "m5.firstChat.", "m5.taskList.", "m5.editor.noChanges", "m5.diff.noMatches"];
   const pick = (dict: Record<string, string>) => Object.keys(dict).filter(key => prefixes.some(prefix => key.startsWith(prefix))).sort();
   assert.deepEqual(pick(ko), pick(en));
+});
+
+test("PR #16 I2: closing the banner hides only what shows now; a later state (a new failure) shows again", () => {
+  const banner = source("update-banner.tsx");
+  assert.match(banner, /useEffect\(\(\) => \{ setDismissed\(false\); \}, \[state\]\);/);
+  assert.match(banner, /setBusy\(true\); setDismissed\(false\);/);
+  assert.match(banner, /api\.onState\(value => \{ setState\(value\); setDismissed\(false\); \}\)/, "even a repeated state from main shows again");
+  assert.doesNotMatch(banner, /dismissed === state/);
+});
+
+test("PR #16 I4: the menu and the settings check answer in the app; only the restart keeps main's native box", () => {
+  const menu = readFileSync("electron/app-update-menu.ts", "utf8");
+  assert.equal((menu.match(/dialog\.showMessageBox\(/g) ?? []).length, 1, "one native box: the restart confirmation");
+  assert.match(menu, /controller\.check\(\);\n\s*reveal\(\);/);
+  assert.match(source("app-settings.tsx"), /api\.request\("check"\)/);
+  assert.equal(updateBannerKind("checking"), "checking");
+  assert.equal(updateBannerKind("current"), "current");
+  assert.match(readFileSync("electron/preload.ts", "utf8"), /onReveal: \(listener: \(\) => void\) =>/);
+});
+
+test("PR #16 M1: the discard dialog can be left while it inspects, and focus comes back to Cancel afterwards", () => {
+  const discard = source("chat-workspace-discard.tsx");
+  assert.match(discard, /if \(pending\.current && !inspecting\.current\) return;/);
+  assert.match(discard, /data-first-focus disabled=\{busy && inspection !== null\}/);
+  assert.match(discard, /element\.querySelector<HTMLButtonElement>\("\[data-first-focus\]"\)\?\.focus\(\);\n  \}, \[busy\]\);/);
 });
