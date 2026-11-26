@@ -2,6 +2,11 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — history 롤오버 기준 변경 (`orca/ade-stability`, 조정자 지시)
+- **결정(사용자 결정, 조정자 전달)**: 롤오버 줄 수는 **워크로그 엔트리 부분만** 센다(고정 섹션·머리말·아카이브 포인터 제외). 엔트리 부분이 500줄을 넘으면 **날짜와 상관없이 가장 오래된 엔트리부터** `docs/archive/`로 옮겨 300줄 이하로 줄인다. 같은 날짜가 나뉘어도 되지만 엔트리 하나는 쪼개지 않는다. 옮긴 뒤 `pnpm m5:check:history`는 반드시 통과해야 한다. `CLAUDE.md`·`AGENTS.md`(같은 내용)·`docs/README.md`에 반영했다.
+- **현재 상태**: 파일 전체 550줄 중 엔트리 부분은 152줄이라 새 기준으로는 롤오버 대상이 아니다. 앞 엔트리의 "롤오버 보류"는 이 결정으로 해소됐다. 고정 섹션만 약 400줄로 큰 것은 별개 문제다(정리는 이번 범위 밖).
+- **검증**: `pnpm m5:check:history`(기준 origin/feature/ade) 통과, `CLAUDE.md`·`AGENTS.md` 동일 확인.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 실행 안정성 D1 보강·D2 큰 줄 (`orca/ade-stability`, 기준 feature/ade 8c036abd)
 근거: 1차 통합 검증 보고서 `~/Documents/elsecrew-ade-v-2026-11-26/REPORT.md`의 D1·D2.
 
