@@ -39,7 +39,7 @@ window.m5Projects = { request: async (input) => {
       if(input.confirmed !== true) throw new Error("missing consent");
       window.m5SmokePermissions[input.projectId] = {...input.permissions};
     }
-    return {schemaVersion:1,action:input.action,projectId:input.projectId,permissions:window.m5SmokePermissions[input.projectId] || {files:false,commands:false}};
+    return {schemaVersion:1,action:input.action,projectId:input.projectId,permissions:window.m5SmokePermissions[input.projectId] || {files:false,commands:false},recorded:Boolean(window.m5SmokePermissions[input.projectId])};
   }
 
   if(input.action === "getProviderConnections" || input.action === "setProviderConnection") {
@@ -181,9 +181,27 @@ window.m5SmokeEnableParallelChats = () => {
 };
 // The tree has no root button at the top level any more; an overflowing watch
 // is the real path that offers a full reload ("다시 확인").
+function smokeTreePage(parentPath, cursor) {
+    if (window.m5SmokeLongTree && parentPath === "") {
+      window.m5SmokeTreeReads = (window.m5SmokeTreeReads ?? 0) + 1;
+      return { projectId: "smoke_project", parentPath, entries: Array.from({length: cursor ? 1 : 500}, (_, i) => {
+        const name = `file-${String((cursor ? 500 : 0) + i).padStart(4, "0")}.ts`;
+        return {path:name,name,kind:"file"};
+      }), nextCursor: cursor ? null : "next-tree" };
+    }
+    return {
+      projectId: "smoke_project",
+      parentPath,
+      entries: parentPath === "src/nested" ? [{path:"src/nested/child.ts",name:"child.ts",kind:"file"}] : parentPath === "src" ? [{path:"src/nested",name:"nested",kind:"directory"}, ...["example.ts", "sample.rs", "sample.py", "sample.json"].map(name => ({ path: `src/${name}`, name, kind: "file" }))] : [...(window.m5SmokeHiddenTree ? [{path:".git",name:".git",kind:"directory"}] : []), { path: "src", name: "src", kind: "directory" }],
+      nextCursor: null,
+    };
+}
 const projectListeners = new Set();
 window.m5SmokeRescan = () => {
   for (const listener of projectListeners) listener({ projectId: "smoke_project", event: "file.changed", paths: [], rescanRequired: true });
+  // The resumed task's workspace watches too (opening a project resumes its last task).
+  for (const listener of workspaceListeners) listener({ protocolVersion: 1, kind: "event", sidecarInstanceId: "smoke", streamId: "smoke_watch", seq: 1, event: "workspace.changed",
+    payload: { chatId: smokeChat.chatId, projectId: smokeChat.projectId, worktreeId: smokeChat.worktreeId, workspaceIdentity: smokeChat.workspaceIdentity, event: "file.changed", paths: [], rescanRequired: true } });
 };
 window.m5SmokeEmitParallelRound = () => {
   if (!parallelPaint) throw new Error("parallel paint fixture not enabled");
@@ -272,19 +290,7 @@ window.m5 = {
   }),
   getProjectTree: async ({ parentPath = "", cursor = null }) => {
     if (!snapshotCreated) throw new Error("renderer requested the tree before creating its standalone snapshot");
-    if (window.m5SmokeLongTree && parentPath === "") {
-      window.m5SmokeTreeReads = (window.m5SmokeTreeReads ?? 0) + 1;
-      return { projectId: "smoke_project", parentPath, entries: Array.from({length: cursor ? 1 : 500}, (_, i) => {
-        const name = `file-${String((cursor ? 500 : 0) + i).padStart(4, "0")}.ts`;
-        return {path:name,name,kind:"file"};
-      }), nextCursor: cursor ? null : "next-tree" };
-    }
-    return {
-      projectId: "smoke_project",
-      parentPath,
-      entries: parentPath === "src/nested" ? [{path:"src/nested/child.ts",name:"child.ts",kind:"file"}] : parentPath === "src" ? [{path:"src/nested",name:"nested",kind:"directory"}, ...["example.ts", "sample.rs", "sample.py", "sample.json"].map(name => ({ path: `src/${name}`, name, kind: "file" }))] : [...(window.m5SmokeHiddenTree ? [{path:".git",name:".git",kind:"directory"}] : []), { path: "src", name: "src", kind: "directory" }],
-      nextCursor: null,
-    };
+    return smokeTreePage(parentPath, cursor);
   },
   createProjectWorktree: async ({ projectId }) => {
     if (projectId !== "smoke_project") throw new Error("renderer supplied an unexpected project ID");
@@ -347,7 +353,12 @@ window.m5 = {
     return { projectId: "smoke_project", path: "src/example.ts", kind: "modified", oldPath: null, baseVersion: "sha256:" + "a".repeat(64), worktreeVersion: "sha256:" + "b".repeat(64), byteLength: text.length, stream: { streamId: "smoke_diff", chunkBytes: 262144 } };
   },
   onProjectEvent: (listener) => unsubscribe(projectListeners, listener),
-  getWorkspaceTree: async (input) => ({ ...input, entries: [], nextCursor: null }),
+  // Opening the project resumes its last task (2026-11-17), so the tree the
+  // screen shows first is that task's workspace: the same smoke files.
+  getWorkspaceTree: async (input) => {
+    const page = smokeTreePage(input.parentPath ?? "", input.cursor ?? null);
+    return { ...input, entries: page.entries, nextCursor: page.nextCursor };
+  },
   closeWorkspace: unexpected("closeWorkspace"),
   readWorkspaceFile: unexpected("readWorkspaceFile"),
   beginWorkspaceFileSave: unexpected("beginWorkspaceFileSave"),

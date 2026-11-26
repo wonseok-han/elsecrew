@@ -153,7 +153,7 @@ app.on('browser-window-created', (_event, window) => {
     };
     const clickText = (label, scope = 'body') => run(`Array.from(document.querySelectorAll(${JSON.stringify(scope + ' button')})).find(b=>b.textContent===${JSON.stringify(label)}&&!b.disabled)?.click()`);
     const fill = (selector, value) => run(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e||e.disabled)throw new Error('input unavailable');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(value)});e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
-    const showPanel = title => run(`(()=>{ const tab=Array.from(document.querySelectorAll('.m5-dock-group-tabs button')).find(b=>b.textContent===${JSON.stringify(title)}&&b.getClientRects().length); if(tab)tab.click(); })()`);
+    const showPanel = title => run(`(()=>{ const id={'변경':'right-tab-changes','파일':'right-tab-files'}[${JSON.stringify(title)}]; const tab=id&&document.querySelector('[data-testid='+id+']'); if(tab)tab.click(); })()`);
     const wait = async (predicate, timeoutMs = 15000) => {
       const deadline = performance.now() + timeoutMs;
       while(performance.now() < deadline) { if(await run(predicate)) return; await new Promise(r=>setTimeout(r,100)); }
@@ -195,7 +195,7 @@ app.on('browser-window-created', (_event, window) => {
         }
         memoryPhase = 'loaded';
       }
-      if (!await run(`Boolean(document.querySelector('.m5-guided-start'))&&!document.querySelector('.m5-dock-tree')`)) throw new Error('initial guided start missing or empty dock exposed');
+      if (!await run(`Boolean(document.querySelector('.m5-guided-start'))&&!document.querySelector('[data-testid=task-layout]')`)) throw new Error('initial guided start missing or empty dock exposed');
       if (discardFlow) {
         await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='앱 기본 역할·모델').click()`);
         await wait(`document.querySelector('.m5-settings-dialog')?.matches(':modal')`);
@@ -349,7 +349,7 @@ app.on('browser-window-created', (_event, window) => {
         await run(`document.querySelector('.m5-discard-dialog input').click()`);
         await wait(`!document.querySelector('.m5-discard-actions button:last-child').disabled`);
         await run(`document.querySelector('.m5-discard-actions button:last-child').click()`);
-        await wait(`Boolean(document.querySelector('.m5-guided-start'))&&!document.querySelector('.m5-dock-tree')`);
+        await wait(`Boolean(document.querySelector('.m5-guided-start'))&&!document.querySelector('[data-testid=task-layout]')`);
         const detail = await run(`window.m5.getChat({chatId:${JSON.stringify(identity.chatId)},afterEventSequence:0,cursor:null,limit:50})`);
         if (detail.chat.state !== 'discarded' || detail.messages.length === 0) throw new Error('discard did not preserve terminal chat history');
         if (fs.readFileSync(path.join(source,'hello.txt'),'utf8') !== 'original\n') throw new Error('discard changed original project');
@@ -401,7 +401,7 @@ app.on('browser-window-created', (_event, window) => {
       await wait(`document.querySelector('.m5-changes')?.textContent.includes('hello.txt') || document.body.innerText.includes('변경 (1)')`);
       await showPanel('팀 대화');
       await run(`Array.from(document.querySelectorAll('.m5-chat-review button')).find(b=>b.textContent==='작업 사본 diff 열기').click()`);
-      await wait(`Array.from(document.querySelectorAll('.m5-dock-group-tab')).some(b=>b.textContent.includes('변경')&&b.getAttribute('aria-selected')==='true') || Boolean(document.querySelector('.m5-changes')?.getBoundingClientRect().height)`);
+      await wait(`document.querySelector('[data-testid=right-tab-changes]')?.getAttribute('aria-selected')==='true' || Boolean(document.querySelector('.m5-changes')?.getBoundingClientRect().height)`);
       // Review opens a fresh summary; the previous rows are intentionally
       // cleared until that request resolves. Panel visibility is not readiness.
       await wait(`Array.from(document.querySelectorAll('.m5-change-row')).some(b=>b.title==='hello.txt'&&!b.disabled)`);
@@ -487,7 +487,7 @@ app.on('browser-window-created', (_event, window) => {
         await sampleMemory();
         memoryPhase = 'closing';
         await clickText('프로젝트 화면 닫기');
-        await wait(`Boolean(document.querySelector('.m5-guided-start'))&&!document.querySelector('.m5-dock-tree')`);
+        await wait(`Boolean(document.querySelector('.m5-guided-start'))&&!document.querySelector('[data-testid=task-layout]')`);
         console.log(JSON.stringify({stage:'MEMORY_CLOSE_WAIT',root,waitMs:60000}));
         const closedAt = performance.now();
         await new Promise(resolve => setTimeout(resolve, 60000));

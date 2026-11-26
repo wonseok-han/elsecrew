@@ -21,7 +21,7 @@ module.exports = async function diffFollowupProbe() {
   button.click();
   await wait(() => composer().value === 'Keep this draft\n\n검토할 변경 파일: hello.txt\n'
     && composer().getBoundingClientRect().height > 0);
-  const changes = [...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.firstChild?.textContent === '변경');
+  const changes = document.querySelector('[data-testid=right-tab-changes]');
   if (!changes) throw new Error('Changes tab missing');
   changes.click();
   await wait(() => document.querySelector('.m5-diff-line-reference')?.getBoundingClientRect().height > 0);

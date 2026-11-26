@@ -9,7 +9,7 @@ import { en } from "../src/locales/en.ts";
 
 // Execute the actual component's effects, without exporting a product test API
 // or loading browser-only Monaco in Node. Chromium mounting is tested separately.
-const source = ts.createSourceFile("workbench.tsx", readFileSync(new URL("../src/m5/workbench.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const source = ts.createSourceFile("workbench.tsx", readFileSync(new URL("../src/m5/editor-surface.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const component = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "MonacoEditor")!;
 const compiled = ts.transpileModule(`${component.getText(source)}\nglobalThis.Component = MonacoEditor;`, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },

@@ -13,6 +13,7 @@ import * as contract from "../src/m5/contracts/approval-v1.ts";
 import * as display from "../src/m5/approval-display.ts";
 import { ko } from "../src/locales/ko.ts";
 import type { ChatMergeState } from "../src/m5/contracts/project-catalog-v1.ts";
+import { workbenchSource } from "./m5-workbench-source.mts";
 
 const require = createRequire(import.meta.url);
 const git = (over: Partial<Extract<ChatMergeState, { kind: "gitWorktree" }>> = {}): ChatMergeState => ({
@@ -70,7 +71,7 @@ test("N3: an answer from before the team restarted, a switch or a newer read is 
   assert.equal(failStandingRead(current, { ...task, generation: 4 }, 5), current);
   // In the workbench, every way out of the reading effect moves the generation
   // on, and the panels' own reads never write the standing.
-  const source = readFileSync(new URL("../src/m5/workbench.tsx", import.meta.url), "utf8");
+  const source = workbenchSource();
   const effect = source.slice(source.indexOf("// Reading the open task's standing runs on its own"), source.indexOf("const dispositionKnown = standingRead"));
   assert.ok(effect.includes("const leave = () => { standingGeneration.current++; };"));
   assert.equal((effect.match(/return leave;/g) ?? []).length, 2, "both the early and the reading branch invalidate on leave");
