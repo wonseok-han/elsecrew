@@ -23,6 +23,8 @@
 - **실제 앱(기본 프로필, 로그인된 앱)**: 다른 워커가 기본 프로필을 쓰지 않음을 ps로 확인하고 개발 앱을 원격 디버깅으로 띄웠다. todo-test-1126g에 새 작업("작업 내역 표시 확인용…")을 보내 기획(Codex)·개발(Claude)이 실제로 실행했다. 기획 카드에 명령 줄·실행 위치·종료 코드 0·걸린 시간, 개발 기록에 명령 줄·설명·걸린 시간(성공이라 종료 코드 없음)이 보였다. 실제 DB(`run_output_records`)를 읽기 전용으로 열어 해당 행에 출력이 없고 id가 `c1`·`t1`·`t2`임을 확인했다. 앱은 제가 띄운 PID만 종료했다. 이 작업(검토 대기, main 미반영)은 시험용으로 남아 있다.
 - **충돌**: `src/m5/styles.css`(양쪽 끝 구역 유지, feature/ade 먼저), `docs/history.md`(양쪽 엔트리 유지).
 - **롤오버**: 이 파일이 500줄을 넘었지만 워크로그가 모두 2026-11-26 엔트리라 날짜 경계로 자를 수 없고 고정 섹션만 약 370줄이다. 다음 날짜 엔트리가 생기면 11-26 엔트리를 `docs/archive/history-2026-11.md`로 옮긴다.
+- **GitGuardian 재발과 처리**: 평문 합성값으로 바꾼 공용 사례 중 `curl -u 사용자:비밀번호` 형태 3건과 가짜 JWT 1건이 값에 FAKE가 있어도 형태로 탐지됐다. 이 사례는 표에 `{colon}`·`{dot}` 자리표시로 저장하고 두 언어 시험이 풀어서 쓴다. 해당 커밋(bb0c4de5)과 뒤 커밋을 같은 내용에 세 파일만 바꿔 다시 만들고(fb5483e6·359c8d44·56d8f173) 최신 feature/ade(9918bc22)를 병합해 강제 푸시했다(36ab2ebf). 대시보드에는 버려진 커밋의 사건이 남는다.
+- **CI(36ab2ebf)**: GitGuardian·test(macos-latest)·test(windows-latest)·website 모두 통과, MERGEABLE/CLEAN. 병합 뒤 `npm test` 930/930, `pnpm build`, `m5:check:history` 유실 0. 새 feature/ade에는 Rust 변경이 없어 sidecar 전체 919 결과를 그대로 쓴다.
 - **남은 것**: 노예의 차단 3건 재확인, 머지.
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 팀원 카드 '실행 출력'을 자세히: 동사 · 대상, 펼친 내용, 비밀 가림 (`orca/ade-activity-detail`, 기준 feature/ade 613dafde)
@@ -228,7 +230,7 @@
   - **2026-11-26 변경(주인님 피드백, PR #11 검토 반영)**: 작업 내역은 명령 줄 자체(비밀 가림)·실행 위치·종료 코드(공급자가 밝힌 경우만)·걸린 시간·바뀐 줄 수를 남긴다. "도구 입력 원문은 공개하지 않는다"는 옛 규칙은 명령에 한해 폐지됐다. **명령 출력·도구 결과·파일 내용은 저장하지 않는다**(이름 없는 값은 가릴 수 없음). 형식·규칙은 architecture "실행 출력" 절.
   - 저장은 `record_activity`의 `sanitize` 한 곳만 거친다. 새 필드를 더하면 `sanitize`의 허용 목록과 화면 `KEYS`에 같이 넣는다(빠지면 조용히 버려진다). id는 앱 키(`c1`, `t1`)만 쓴다.
   - 비밀 가림 규칙은 Rust `secret_mask.rs`와 TS `secret-shape.ts` `maskSecrets` 두 곳이다. 규칙을 바꾸면 둘 다 고치고 `tests/fixtures/m5/secret-mask-cases.json`에 사례를 넣는다(양쪽이 같은 결과를 요구, 다시 가려도 같아야 함). 가림은 언제나 자르기보다 먼저다.
-  - 함정: 저장소에 GitGuardian PR 검사가 있다. 테스트의 가짜 비밀은 처음부터 `FAKE`/`example`이 들어간 명백한 합성값으로 쓴다(`PGPASSWORD=s3cret`, `--password hunter2`, jwt.io 예시 JWT는 걸렸다). 이후 커밋으로 지워도 PR의 앞 커밋이 계속 걸린다.
+  - 함정: 저장소에 GitGuardian PR 검사가 있다. 테스트의 가짜 비밀은 처음부터 `FAKE`/`example`이 들어간 명백한 합성값으로 쓴다(`PGPASSWORD=s3cret`, `--password hunter2`, jwt.io 예시 JWT는 걸렸다). `curl -u 사용자:비밀번호`와 JWT 모양은 값이 가짜여도 형태로 걸리므로 공용 사례처럼 `{colon}`/`{dot}` 자리표시로 저장하고 시험에서 푼다. 이후 커밋으로 지워도 PR의 앞 커밋이 계속 걸리므로 커밋을 다시 만들어야 한다.
   - 함정: Write 도구는 내용 속 `\uXXXX`를 실제 문자로 바꿔 쓴다. 정규식·문자열에 보이지 않는 문자(U+2028은 JS 정규식 리터럴을 깨뜨림)가 들어가므로, TS 소스에 이스케이프가 필요하면 파이썬 등으로 `\` + `u…`를 이어 붙여 쓰거나 `String.fromCharCode`를 쓴다. Rust의 `\u{…}`는 영향 없다.
   - 함정: Claude CLI의 `tool_use_result`는 성공한 Bash면 `{stdout, stderr, interrupted}` 객체지만 실패하면 `"Error: Exit code N\n…"` 문자열이다. 성공에는 종료 코드가 없다. Write로 새 파일을 만들면 structuredPatch가 빈 배열이고 `type:"create"`·`content`로 줄 수를 센다.
   - 함정: activity 행은 append할 수 없다(`complete`만). 끝난 결과는 같은 `id`의 두 번째 행으로 쓰고 화면이 합친다.
