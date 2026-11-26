@@ -20,7 +20,11 @@ PR #18 머지(68503092) 뒤 WIP(afaaa370)를 그 위로 옮겨 이어 갔다. �
   - 토큰 갱신 충돌: 관찰하지 못했다. 다만 시험 동안 토큰 만료가 오지 않아 갱신 경쟁 자체가 일어났는지는 확인하지 못했다.
   - 미해결 1건: 수정 전 4개 혼합 시험(Codex 1~1000)에서 Codex 하나가 60초에 실패했고 원인 기록을 남기지 못했다. 이후 같은 조건 재현에서는 실패가 없었다(Codex 1~1000은 10분 넘게 걸려 시험 시간 초과, 1~300은 약 290초).
 - **겹침**: PR #17(큰 줄 처리)은 rebase에서 충돌 없음. PR #19(ade-stability, 승인 경로·Codex 권한)와 같은 파일: `agent_runtime.rs`, `agent_runtime/discovery.rs`, `agent_runtime/native.rs`, `provider_claude_session.rs`, `provider_preflight_session.rs`, `provider_profile.rs`, `docs/history.md`, `src/locales/{ko,en}.ts`, `src/m5/styles.css`.
-- **검증**: `npm test` 1012/1012, 렌더러 스모크 69/69(7e65e4a7 기준, 이후 렌더러 변경 없음), sidecar 전체(아래 결과), 네이티브 스모크.
+- **검증**
+  - `cargo test -p elsecrew-sidecar`: 단위 945 통과. 통합 `stdio_process` 2건(`parallel_agent_streams` 4개 동시 fixture 실행)이 새 기본 상한 3에 걸려 실패했다. 시험이 상한을 4로 정하고 시작하게 고친 뒤 16건 통과.
+  - `npm test` 1012/1012, `pnpm build`, `pnpm m5:capture`(다크·라이트 36화면, 대비 실패 0, `36-run-limits` 캡처 추가).
+  - 네이티브 스모크 `m5:smoke:multiproject` PASS(25·재시작 10 확인).
+  - 캡처: `~/Documents/elsecrew-ade-multiproject-2026-11-26/pr-b/{smoke/{light,dark},native,real,real-codex}`.
 - **다음 할 일**: 실행 시작을 엔진 처리 스레드 밖으로 옮기기(지금은 시작마다 13~18초 동안 다른 요청도 기다림). Codex 혼합 실패 1건 재현 시 원인 확인. Windows는 실행 경로가 비활성이라 미검증.
 
 ### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #18 3차 확인(B1 두 점) 반영 (`orca/ade-multiproject-a`)
