@@ -40,8 +40,14 @@ export function readNotificationPreferences(storage: StorageLike | null = safeSt
   } catch { return DEFAULT_NOTIFICATION_PREFERENCES; }
 }
 
+/** Said on the window when the person changes these preferences, so tidying applies at once (PR #12 review minor 4). */
+export const NOTIFICATION_PREFERENCES_CHANGED = "m5-notification-preferences-changed";
+/** How often settled lines are looked at while the app stays open. */
+export const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+
 export function saveNotificationPreferences(preferences: NotificationPreferences, storage: StorageLike | null = safeStorage()): void {
   try { storage?.setItem(PREFS_KEY, JSON.stringify(preferences)); } catch { /* per-viewer preference only */ }
+  if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") window.dispatchEvent(new Event(NOTIFICATION_PREFERENCES_CHANGED));
 }
 const LIMIT = 50;
 

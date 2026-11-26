@@ -70,16 +70,18 @@ export function ProjectPermissions({ projectId, disabled, proposeAll = false, ch
   const needsSave = Boolean(dirty) || (proposeAll && saved !== null && !recorded);
   useEffect(() => { onDraft?.(saved ? { projectId, permissions: draft, needsSave, touched: touched.current, basis: { permissions: saved, recorded } } : null); }, [saved, recorded, draft, needsSave, onDraft, projectId]);
   useEffect(() => () => onDraft?.(null), [onDraft]);
-  // Settings rows with switches (ADE U4). In the new-task window the save stays
-  // secondary: sending is that window's one action.
+  // Settings rows with switches (ADE U4).
   return <section className="m5-project-permissions" aria-busy={busy} aria-labelledby={`m5-permissions-${projectId}`}>
     <h4 className="m5-group-label" id={`m5-permissions-${projectId}`}>{t("m5.permissions.title")}</h4>
     <div className="m5-group m5-settings-group m5-permission-options">
       <label className="m5-setting m5-preferences-row"><span className="m5-setting-text"><strong>{t("m5.permissions.files")}</strong></span><span className="m5-setting-control"><input type="checkbox" role="switch" className="m5-switch" checked={draft.files} disabled={disabled || busy || !saved} onChange={e => { const files = e.target.checked; touched.current = true; setDraft(current => ({ ...current, files })); }} /></span></label>
       <label className="m5-setting m5-preferences-row"><span className="m5-setting-text"><strong>{t("m5.permissions.commands")}</strong></span><span className="m5-setting-control"><input type="checkbox" role="switch" className="m5-switch" checked={draft.commands} disabled={disabled || busy || !saved} onChange={e => { const commands = e.target.checked; touched.current = true; setDraft(current => ({ ...current, commands })); }} /></span></label>
     </div>
+    {/* The first task's window (proposeAll) has no save of its own: the boxes are stored only
+        with its separate yes and Send (Q9, PR #12 review I1). What allowing means stays in view. */}
+    {proposeAll ? <p className="m5-settings-intro m5-permission-boundary">{t("m5.permissions.boundary")}</p> : <>
     <p className="m5-settings-intro">{t("m5.permissions.scope")} {t("m5.permissions.boundary")}</p>
-    <div className="m5-permission-save"><span className="m5-settings-intro">{dirty ? t("m5.permissions.pending") : ""}</span><button type="button" className={proposeAll ? "m5-secondary" : "m5-btn-primary"} disabled={disabled || busy || !dirty} onClick={() => void save()}>{t("m5.permissions.save")}</button></div>
+    <div className="m5-permission-save"><span className="m5-settings-intro">{dirty ? t("m5.permissions.pending") : ""}</span><button type="button" className="m5-btn-primary" disabled={disabled || busy || !dirty} aria-label={t("m5.permissions.saveNamed")} onClick={() => void save()}>{t("m5.permissions.save")}</button></div></>}
     {error && <p role="alert">{t("m5.permissions.error")}</p>}
   </section>;
 }

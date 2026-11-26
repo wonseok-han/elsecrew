@@ -8,16 +8,6 @@ if (typeof require === "function") {
   window.m5SmokeMeasureOnly = measureRenderedContrast;
   window.m5SmokeMeasure = async (screen, options) => require("electron").ipcRenderer.invoke("m5-smoke-contrast", await measureRenderedContrast(screen, options));
 }
-// Folder confirmations (ADE U2, Q7): main's ask, played by the smoke; answers are recorded.
-{
-  let folderListener = null;
-  window.m5SmokeFolderAnswers = [];
-  window.m5FolderConfirm = {
-    onAsk: listener => { folderListener = listener; return () => { if (folderListener === listener) folderListener = null; }; },
-    answer: async (nonce, yes) => { window.m5SmokeFolderAnswers.push({ nonce, yes }); },
-  };
-  window.m5SmokeAskFolder = kind => folderListener?.({ nonce: "smoke-nonce-" + kind, kind, name: "new-shop", path: "/work/new-shop" });
-}
 window.m5SmokeClaudeUsageReads = 0;
 window.m5ClaudeUsage={read:async()=>{window.m5SmokeClaudeUsageReads++;return ({state:"available",usage:{windows:[{id:"primary",usedPercent:12,windowMinutes:300,resetsAt:null},{id:"secondary",usedPercent:27,windowMinutes:10080,resetsAt:null}]},checkedAt:Date.now()});}};
 let smokeConnections = {codex:false,"claude-code":false};
@@ -85,11 +75,13 @@ window.m5Projects = { request: async (input) => {
   }
   if (input.action === "finishDeletions") return {schemaVersion: 1, action: input.action, pending: 0};
   if (input.action === "releaseView" && input.projectId === "smoke_project") return {schemaVersion: 1, action: "releaseView", projectId: input.projectId};
+  // ADE U2 smoke (PR #12 review I3): the list cannot be read.
+  if (input.action === "list" && window.m5SmokeCatalogFail) throw new Error("smoke: catalog unavailable");
   if (input.action === "list" && window.m5SmokeCatalogEmpty) return {schemaVersion:1, action:"list", projects:[], nextCursor:null};
   if (input.action === "list") return input.cursor === null
     // After pagination is checked, the first page also lists the open project so
     // its rail ⋯ menu (where closing lives) is reachable while the rail is locked.
-    ? {schemaVersion: 1, action: "list", projects: [{projectId: "earlier_project", canonicalPath: "/work/earlier"}, ...(window.m5SmokeCatalogListsCurrent ? [{projectId: "smoke_project", canonicalPath: "/work/smoke"}] : [])], nextCursor: window.m5SmokeCatalogListsCurrent ? "smoke_project" : "earlier_project"}
+    ? {schemaVersion: 1, action: "list", projects: [{projectId: "earlier_project", canonicalPath: "/work/earlier"}, ...(window.m5SmokeCatalogListsCurrent ? [{projectId: "smoke_project", canonicalPath: "/work/smoke"}] : [])], nextCursor: window.m5SmokeCatalogListsCurrent ? null : "earlier_project"}
     : {schemaVersion: 1, action: "list", projects: [{projectId: "smoke_project", canonicalPath: "/work/smoke"}], nextCursor: null};
   if (input.action !== "reopen" || input.projectId !== "smoke_project") throw new Error("unexpected catalog selection");
   return {schemaVersion: 1, action: "reopen", project: {schemaVersion: 1, projectId: "smoke_project", selectedPath: "/work/smoke", canonicalGitRoot: "/work/smoke"}};

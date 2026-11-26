@@ -11,11 +11,6 @@ declare global {
       /** `saved` is false when main could not remember the choice for the next launch. */
       set(theme: import("./theme.ts").ThemePreference): Promise<{ dark: boolean; saved: boolean }>;
     };
-    /** Starting a project in a folder that needs a yes (empty folder, first record, lost record): asked in the app's own dialog. */
-    readonly m5FolderConfirm?: {
-      onAsk(listener: (ask: { nonce: string; kind: "emptyFolder" | "plainFolder" | "recordMissing"; name: string; path: string }) => void): () => void;
-      answer(nonce: string, yes: boolean): Promise<void>;
-    };
     readonly m5AppUpdate?: { open(): Promise<void>; onRestartCheck(check: () => boolean, resume: () => void): () => void };
     readonly m5GitSelection?: { request(action: import("./contracts/git-selection-v1.ts").GitSelectionAction): Promise<import("./contracts/git-selection-v1.ts").GitSelection> };
     readonly m5SaveRecovery?: { resolve(input: import("./contracts/save-recovery-v1.ts").SaveRecoveryResolveRequest): Promise<import("./contracts/save-recovery-v1.ts").SaveRecoveryResolveResult>; inspect(input: import("./contracts/workspace-addressing-v1.ts").ChatWorkspaceRefV1): Promise<import("./contracts/save-recovery-v1.ts").SaveRecoveryResult> };

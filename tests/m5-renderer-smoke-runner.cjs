@@ -317,11 +317,11 @@ app.whenReady().then(async () => {
     if (document.querySelector('[aria-label="실패한 준비 종료 확인"]')) throw new Error('completed preparation confirmation retained');
     globalThis.cleanupConsentReport = await (${probeCleanupConsent.toString()})();
     document.querySelector('.m5-app-settings > header button').click();
-    [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '다음 목록').click();
-    await ${waitFor("document.querySelector('.m5-project-catalog-list li')?.dataset.path === '/work/smoke'", "next catalog page")};
-    if (document.querySelector('.m5-project-catalog-list li').dataset.path !== '/work/smoke') throw new Error('catalog path missing');
+    // The home reads the engine's further pages itself, so a recent project on a later page still leads (PR #12 review minor 3).
+    await ${waitFor("[...document.querySelectorAll('.m5-home .m5-project-catalog-list li')].some(item => item.dataset.path === '/work/smoke')", "later catalog page on the home")};
+    if (document.querySelector('.m5-home .m5-project-pagination')) throw new Error('home pages a short list');
     window.m5SmokeCatalogListsCurrent = true;
-    document.querySelector('.m5-project-catalog-list li button').click();
+    [...document.querySelectorAll('.m5-home .m5-project-catalog-list li')].find(item => item.dataset.path === '/work/smoke').querySelector('button').click();
     // The file tree lives in the results panel's Files tab (1차-나 layout).
     await ${waitFor("document.querySelector('[data-testid=right-tab-files]')", "task layout")};
     ${capture("06-task-layout")}
@@ -1061,37 +1061,43 @@ app.whenReady().then(async () => {
     if (document.querySelector('.m5-provider-selection form')) throw new Error('saved agent choice was lost');
     if (!document.querySelector('[aria-label="Claude Code 연결"]')) throw new Error('added agent lost after reload');
     await ${waitFor("document.querySelector('.m5-home:not([hidden]) .m5-project-overflow')", "project removal on home")};
+    const earlierRow = () => [...document.querySelectorAll('.m5-home li[data-path]')].find(item => item.dataset.path === '/work/earlier');
     const catalogRequest = window.m5Projects.request;
     let removed = false;
     window.m5Projects.request = async input => {
       if (input.action === 'deleteProject') { if (input.projectId !== 'earlier_project' || input.confirmed !== true) throw new Error('wrong deletion target'); removed = true; window.m5SmokeCatalogEmpty = true; return {schemaVersion:1, action:input.action, projectId:input.projectId}; }
       return catalogRequest(input);
     };
-    document.querySelector('.m5-home .m5-project-overflow summary').click();
-    [...document.querySelectorAll('.m5-home .m5-project-overflow button')].find(button => button.textContent === '삭제').click();
+    // The home now lists every page, most recent first: pick the earlier project by its folder.
+    earlierRow().querySelector('.m5-project-overflow summary').click();
+    [...earlierRow().querySelectorAll('.m5-project-overflow button')].find(button => button.textContent === '삭제').click();
     await ${waitFor("document.querySelector('#m5-remove-title')?.closest('dialog').open", "remove project confirmation")};
     ${capture("21-project-removal-confirmation")}
+    if (document.querySelector('[data-testid=remove-target] code')?.textContent !== '/work/earlier') throw new Error('project removal must show the whole folder (PR #12 review I5)');
+    if (document.activeElement?.textContent !== '취소') throw new Error('project removal must focus Cancel first');
     const dialog = document.querySelector('#m5-remove-title').closest('dialog');
     if (parseFloat(getComputedStyle(dialog.querySelector('.m5-dialog-actions')).gap) < 8) throw new Error('removal buttons need spacing');
     [...dialog.querySelectorAll('button')].find(button => button.textContent === '취소').click();
     if (removed) throw new Error('cancelled project removal mutated catalog');
-    document.querySelector('.m5-home .m5-project-overflow summary').click();
-    [...document.querySelectorAll('.m5-home .m5-project-overflow button')].find(button => button.textContent === '삭제').click();
+    // The home now lists every page, most recent first: pick the earlier project by its folder.
+    earlierRow().querySelector('.m5-project-overflow summary').click();
+    [...earlierRow().querySelectorAll('.m5-project-overflow button')].find(button => button.textContent === '삭제').click();
     await ${waitFor("document.querySelector('#m5-remove-title')?.closest('dialog').open", "reopen removal confirmation")};
     [...dialog.querySelectorAll('button')].find(button => button.textContent === '삭제').click();
     await ${waitFor("!document.querySelector('.m5-home .m5-project-overflow')", "project removed from catalog")};
     if (!removed) throw new Error('project removal not persisted');
 
     // ADE U2·U3·U4 screens, each measured for rendered contrast in this run's theme.
-    // (1) A folder that needs a yes is asked in the app's own dialog (Q7); the first focus is Cancel.
-    window.m5SmokeAskFolder("emptyFolder");
-    await ${waitFor("document.querySelector('[data-testid=folder-confirm]')?.open", "folder confirmation in the app")};
-    ${capture("22-folder-confirm")}
-    if (document.activeElement?.textContent !== '취소') throw new Error('folder confirmation must focus Cancel first');
-    if (!document.querySelector('[data-testid=folder-confirm]').textContent.includes('/work/new-shop')) throw new Error('folder confirmation must name the folder');
-    document.activeElement.click();
-    await ${waitFor("!document.querySelector('[data-testid=folder-confirm]').open && window.m5SmokeFolderAnswers.length === 1", "folder confirmation answered")};
-    if (window.m5SmokeFolderAnswers[0].yes !== false || window.m5SmokeFolderAnswers[0].nonce !== 'smoke-nonce-emptyFolder') throw new Error('cancel must answer no with the same number');
+    // (1) A list that cannot be read keeps the home with its error and retry; it is not the first run (PR #12 review I3).
+    window.m5SmokeCatalogEmpty = false; window.m5SmokeCatalogFail = true; window.m5SmokeOpenCancel = true;
+    document.querySelector('.m5-home .m5-project-add').click();
+    await ${waitFor("document.querySelector('.m5-home:not([hidden]) .m5-project-catalog-list [role=alert]')", "catalog read failure on the home")};
+    ${capture("22-home-catalog-error")}
+    if (document.querySelector('[data-testid=first-run]')) throw new Error('a failed list read shows the first run');
+    window.m5SmokeCatalogFail = false; window.m5SmokeCatalogEmpty = true;
+    [...document.querySelectorAll('.m5-home .m5-project-pagination button')].find(button => !button.disabled).click();
+    // Read again: the list is empty now (the earlier project was deleted above), so the first run follows.
+    await ${waitFor("document.querySelector('[data-testid=first-run]') && !document.querySelector('.m5-home .m5-project-catalog-list [role=alert]')", "catalog read again")};
     // (2) No saved project: the first-run checklist, one action-colored button (the step to do now).
     window.m5SmokeCatalogEmpty = true; window.m5SmokeOpenCancel = true;
     document.querySelector('.m5-home .m5-project-add').click();

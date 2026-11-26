@@ -65,14 +65,22 @@ export function ProjectMark({ name, large = false }: { name: string; large?: boo
  * step (Q6); `management` — the list in settings. Paths are not shown; they
  * are the row's tooltip and `data-path`.
  */
-export function ProjectCatalog({ onCloseProject, closeDisabled, onRoles, rolesDisabled, controller, disabled, currentId, ready = true, home = false, switcher = false, management = false, onManage, onRemove, removeDisabled, refreshKey = 0, onHasProjects, onAdd, onSwitch, switchBlockedReason, openedAt = {} }: {
+export type CatalogListState = "projects" | "empty" | "failed";
+/** Pages the home and the switcher read before ordering by recency (50 projects each). */
+const RECENCY_PAGES = 10;
+
+export function ProjectCatalog({ onCloseProject, closeDisabled, onRoles, rolesDisabled, controller, disabled, currentId, ready = true, home = false, switcher = false, management = false, onManage, onRemove, removeDisabled, refreshKey = 0, onListState, onAdd, onSwitch, switchBlockedReason, addBlockedReason, openedAt = {} }: {
   onCloseProject?: () => void; closeDisabled?: boolean; onRoles?: () => void; rolesDisabled?: boolean;
   onRemove?: (entry: ProjectCatalogEntry) => void; removeDisabled?: boolean; refreshKey?: number;
-  onManage?: (entry: ProjectCatalogEntry) => void; controller: ProjectEditorController; disabled: boolean; currentId?: string; ready?: boolean; home?: boolean; switcher?: boolean; management?: boolean; onHasProjects?: (value: boolean) => void; onAdd?: () => Promise<void>;
+  onManage?: (entry: ProjectCatalogEntry) => void; controller: ProjectEditorController; disabled: boolean; currentId?: string; ready?: boolean; home?: boolean; switcher?: boolean; management?: boolean;
+  /** What the first read found: projects, none (the first run), or a failure (the home keeps its retry, PR #12 review I3). */
+  onListState?: (state: CatalogListState) => void; onAdd?: () => Promise<void>;
   /** switcher: open another project (the open one is closed first). */
   onSwitch?: (entry: ProjectCatalogEntry) => void;
   /** switcher: why switching is not possible now, or null. */
   switchBlockedReason?: string | null;
+  /** switcher: why a folder cannot be added from here now (an open task, unsaved edits), or null (PR #12 review I2). */
+  addBlockedReason?: string | null;
   openedAt?: OpenedAt;
 }) {
   const { t, lang } = useI18n();
@@ -92,18 +100,27 @@ export function ProjectCatalog({ onCloseProject, closeDisabled, onRoles, rolesDi
     const epoch = ++generation.current;
     let cancelled = false;
     setBusy(true); setError(false);
-    const input = { action: "list" as const, cursor: null };
-    void service.request(input).then(raw => {
-      if (cancelled || epoch !== generation.current) return;
-      const result = validateProjectCatalogResult(raw, input);
-      if (result.action !== "list") throw new Error("unexpected project catalog response");
-      setEntries(result.projects); setNext(result.nextCursor); setPaged(false);
-    }).catch(() => { if (!cancelled && epoch === generation.current) setError(true); })
+    void (async () => {
+      // The engine pages by project id; the home and the switcher order by when each was opened here,
+      // so they read several pages first and the most recent project leads wherever it is (PR #12 review minor 3).
+      let cursor: string | null = null;
+      const projects: ProjectCatalogEntry[] = [];
+      for (let page = 0; page < (home || switcher ? RECENCY_PAGES : 1); page++) {
+        const input = { action: "list" as const, cursor };
+        const result = validateProjectCatalogResult(await service.request(input), input);
+        if (cancelled || epoch !== generation.current) return;
+        if (result.action !== "list") throw new Error("unexpected project catalog response");
+        for (const project of result.projects) if (!projects.some(seen => seen.projectId === project.projectId)) projects.push(project);
+        cursor = result.nextCursor;
+        if (!cursor) break;
+      }
+      setEntries(projects); setNext(cursor); setPaged(false);
+    })().catch(() => { if (!cancelled && epoch === generation.current) setError(true); })
       .finally(() => { if (!cancelled && epoch === generation.current) { setBusy(false); setReadOnce(true); } });
     return () => { cancelled = true; };
   }, [ready, service, currentId, disabled, refreshKey]);
   // Said only once the list was read: an empty list before reading is not "no projects".
-  useEffect(() => { if (readOnce && !busy && !error) onHasProjects?.(entries.length > 0); else if (readOnce && error) onHasProjects?.(false); }, [readOnce, entries, busy, error, onHasProjects]);
+  useEffect(() => { if (readOnce && !busy) onListState?.(error ? "failed" : entries.length > 0 ? "projects" : "empty"); }, [readOnce, entries, busy, error, onListState]);
   if (!service) return null;
   const load = async (cursor: string | null) => {
     if (disabled || inFlight.current) return;
@@ -126,7 +143,7 @@ export function ProjectCatalog({ onCloseProject, closeDisabled, onRoles, rolesDi
     finally { inFlight.current = false; setBusy(false); }
   };
   const closeMenu = (event: { currentTarget: Element }) => event.currentTarget.closest("details")?.removeAttribute("open");
-  const menu = (entry: ProjectCatalogEntry, name: string) => <ProjectMenu label={t("m5.catalog.manage")}>
+  const menu = (entry: ProjectCatalogEntry, name: string) => <ProjectMenu label={t("m5.catalog.manageNamed", { name })}>
     <p className="m5-context-heading" title={entry.canonicalPath}>{name}</p>
     <button type="button" className="m5-project-manage" disabled={!ready || busy} onClick={event => { closeMenu(event); onManage?.(entry); }} title={t("m5.catalog.manage")}><Icon path={icon.manage} />{t("m5.preferences.project")}</button>
     {entry.projectId === currentId && onRoles && <button type="button" disabled={rolesDisabled || busy} onClick={event => { closeMenu(event); onRoles(); }}><Icon path={icon.roles} />{t("m5.shell.roles")}</button>}
@@ -139,7 +156,7 @@ export function ProjectCatalog({ onCloseProject, closeDisabled, onRoles, rolesDi
     const ago = openedAgo(openedAt[entry.projectId], lang);
     return ago ? t("m5.home.openedAgo", { when: ago }) : t("m5.home.notOpenedHere");
   };
-  const add = <button type="button" className="m5-secondary m5-project-add" disabled={disabled || busy} onClick={() => void (onAdd ? onAdd() : controller.chooseProject())}><Icon path={icon.add} />{t("m5.catalog.add")}</button>;
+  const add = <button type="button" className="m5-secondary m5-project-add" disabled={disabled || busy || Boolean(addBlockedReason)} onClick={() => void (onAdd ? onAdd() : controller.chooseProject())}><Icon path={icon.add} />{t("m5.catalog.add")}</button>;
   return <section className={`m5-project-catalog${management ? " m5-management-projects" : ""}${home ? " m5-home-projects" : ""}${switcher ? " m5-switcher-projects" : ""}`} aria-label={t("m5.catalog.title")}>
     {management && <p className="m5-settings-intro">{t("m5.preferences.chooseProject")}</p>}
     {home && <header className="m5-home-projects-heading"><div><h1>{t("m5.home.title")}</h1><p>{t("m5.home.subtitle")}</p></div>{add}</header>}
@@ -157,12 +174,12 @@ export function ProjectCatalog({ onCloseProject, closeDisabled, onRoles, rolesDi
               <ProjectMark name={name} large={home} />
               <span className="m5-project-row-text"><strong>{name}</strong><small className={current ? "m5-project-current" : undefined}>{sub(entry)}</small></span>
             </button>
-            {hero && <button type="button" className="m5-btn-primary m5-home-continue" disabled={disabled || busy} onClick={open}>{t("m5.home.continueAction")}</button>}
+            {hero && <button type="button" className="m5-btn-primary m5-home-continue" aria-label={t("m5.home.continueNamed", { name })} disabled={disabled || busy} onClick={open}>{t("m5.home.continueAction")}</button>}
             {!management && menu(entry, name)}
           </li>;
         })}</ul>}
-      {switcher && switchBlockedReason && <p className="m5-settings-intro m5-switch-blocked" role="status">{switchBlockedReason}</p>}
-      {(next || paged || error) && <div className="m5-project-pagination">{(paged || error) && <button type="button" className="m5-btn-quiet" title={t("m5.catalog.first")} aria-label={t("m5.catalog.first")} disabled={disabled || busy} onClick={() => void load(null)}>{t("m5.catalog.first")}</button>}
+      {switcher && (switchBlockedReason || addBlockedReason) && <p className="m5-settings-intro m5-switch-blocked" role="status">{switchBlockedReason ?? addBlockedReason}</p>}
+      {(next || paged || error) && <div className="m5-project-pagination">{(paged || error) && <button type="button" className={error ? "m5-secondary" : "m5-btn-quiet"} title={t("m5.catalog.first")} aria-label={t("m5.catalog.first")} disabled={disabled || busy} onClick={() => void load(null)}>{t("m5.catalog.first")}</button>}
         {next && <button type="button" className="m5-btn-quiet" disabled={disabled || busy || error} onClick={() => void load(next)}>{t("m5.catalog.next")}</button>}</div>}
       {switcher && <div className="m5-switcher-footer">{add}</div>}
     </div>

@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { DEFAULT_NOTIFICATION_PREFERENCES, NotificationCenter, readNotificationPreferences, RESOLVED_KEEP_MS, saveNotificationPreferences, type NotificationPreferences } from "../src/m5/notifications.ts";
+import { DEFAULT_NOTIFICATION_PREFERENCES, NOTIFICATION_PREFERENCES_CHANGED, NotificationCenter, PRUNE_INTERVAL_MS, readNotificationPreferences, RESOLVED_KEEP_MS, saveNotificationPreferences, type NotificationPreferences } from "../src/m5/notifications.ts";
 import { byRecency, openedAgo, projectMark, projectName, readProjectOpenedAt, recordProjectOpened } from "../src/m5/project-recency.ts";
 import { firstRunStep } from "../src/m5/first-run-step.ts";
 import { ko } from "../src/locales/ko.ts";
@@ -115,27 +115,22 @@ test("Q5·Q6: the home has no left rail; paths are not printed, only kept for ho
   assert.match(workbench, /const switchProject = /);
 });
 
-test("Q7: the folder confirmations are the app's own dialog; main no longer opens a native box for them", () => {
+test("PR #12 B1: a folder becomes a project only after main's own box; the page cannot answer for it", () => {
   const main = readFileSync("electron/main.ts", "utf8");
   const open = main.slice(main.indexOf("M5_BRIDGE_V2_CHANNELS.projectOpen, async"), main.indexOf("const invoke = <T>"));
-  assert.doesNotMatch(open, /showMessageBox/);
-  assert.equal(open.match(/askFolderConfirm\(/g)?.length, 2);
-  for (const kind of ["emptyFolder", "plainFolder", "recordMissing"]) {
-    for (const part of ["title", "body", "confirm"]) {
-      assert.ok(ko[`m5.folderConfirm.${kind}.${part}` as keyof typeof ko], `ko ${kind}.${part}`);
-      assert.ok(en[`m5.folderConfirm.${kind}.${part}` as keyof typeof en], `en ${kind}.${part}`);
-    }
-  }
-  const preload = readFileSync("electron/preload.ts", "utf8");
-  assert.match(preload, /exposeInMainWorld\("m5FolderConfirm"/);
-  assert.doesNotMatch(preload.slice(preload.indexOf("const folderConfirmApi"), preload.indexOf('exposeInMainWorld("m5FolderConfirm"')), /path\s*:\s*unknown|answer: async \([^)]*path/, "the page answers without a folder");
+  // Empty folder, plain folder and lost record each go through dialog.showMessageBox in main.
+  assert.equal(open.match(/dialog\.showMessageBox\(/g)?.length, 3);
+  assert.doesNotMatch(main, /folder-confirm|askFolderConfirm/);
+  assert.doesNotMatch(readFileSync("electron/preload.ts", "utf8"), /m5FolderConfirm|folder-confirm/);
+  assert.doesNotMatch(source("workbench.tsx"), /m5FolderConfirm|folder-confirm/);
+  assert.equal(Object.keys(ko).some(key => key.startsWith("m5.folderConfirm.")), false);
 });
 
 test("Q9: a project's first task still needs its own yes before Send; Send never stands in for it", () => {
   const workbench = source("workbench.tsx");
   assert.match(workbench, /className="m5-first-chat-confirm"><input type="checkbox" checked=\{setupConfirmed\}/);
   const send = workbench.slice(workbench.indexOf('<button type="submit" title={t("m5.chat.sendShortcut")}'));
-  assert.match(send.slice(0, 800), /\(chat\.chats\.length === 0 && !setupConfirmed\)/);
+  assert.match(send.slice(0, 800), /\(chat\.chats\.length === 0 && !firstSetupAgreed\)/);
 });
 
 test("U4: settings pages are built from groups and setting rows only", () => {
@@ -160,7 +155,78 @@ test("rule: a button says only the action, never the name already on its row", (
 });
 
 test("ko and en carry the same new keys", () => {
-  const prefixes = ["m5.home.", "m5.start.", "m5.switch.", "m5.remove.", "m5.folderConfirm.", "m5.newTask.", "m5.notifications.settings.", "m5.preferences."];
+  const prefixes = ["m5.home.", "m5.start.", "m5.switch.", "m5.remove.", "m5.newTask.", "m5.notifications.settings.", "m5.preferences."];
   const pick = (dict: Record<string, string>) => Object.keys(dict).filter(key => prefixes.some(prefix => key.startsWith(prefix))).sort();
   assert.deepEqual(pick(ko), pick(en));
+});
+
+test("PR #12 I1: the first task's window saves nothing before its separate yes, and a changed permission asks again", () => {
+  const permissions = source("project-permissions.tsx");
+  // proposeAll (the first task) draws the meaning of allowing, not a save of its own.
+  assert.match(permissions, /\{proposeAll \? <p className="m5-settings-intro m5-permission-boundary">/);
+  const workbench = source("workbench.tsx");
+  const create = workbench.slice(workbench.indexOf("const createChat = async () => {"), workbench.indexOf("const activeTab ="));
+  // The yes is checked before anything (team or permissions) is stored.
+  const guard = create.indexOf("if (chat.chats.length === 0 && !firstSetupAgreed) return;");
+  assert.ok(guard > 0 && guard < create.indexOf("fillRecommendedRoles") && guard < create.indexOf("setAutomationPermissions"));
+  assert.match(workbench, /const firstSetupAgreed = setupConfirmed && firstPermissions !== null && firstPermissions\.projectId === snapshot\.project\?\.id;/);
+  assert.match(workbench, /useEffect\(\(\) => \{ setSetupConfirmed\(false\); \}, \[firstPermissions\?\.projectId, firstPermissions\?\.permissions\.files, firstPermissions\?\.permissions\.commands\]\);/);
+  assert.doesNotMatch(source("styles.css"), /m5-new-chat-dialog[^{]*(m5-permission-save|m5-project-permissions > \.m5-settings-intro)[^{]*\{[^}]*display:\s*none/);
+});
+
+test("PR #12 I2: Add in the switcher is off with its reason while a task is open or edits are unsaved; a failed open says why on the home", () => {
+  const workbench = source("workbench.tsx");
+  assert.match(workbench, /const addBlockedReason = [^;]*snapshot\.workspace \? t\("m5\.switch\.addTaskOpen"\) : !controller\.canLeaveProject\(\) \? t\("m5\.switch\.unsaved"\)/);
+  assert.match(source("project-catalog-view.tsx"), /disabled=\{disabled \|\| busy \|\| Boolean\(addBlockedReason\)\}/);
+  assert.match(workbench, /\{!snapshot\.project && snapshot\.error && !resumingProject && <section className="m5-banner m5-banner-danger m5-home-error" role="alert"/);
+});
+
+test("PR #12 I3: a list that cannot be read is not 'no projects'; the home keeps its error and retry", () => {
+  assert.match(source("project-catalog-view.tsx"), /onListState\?\.\(error \? "failed" : entries\.length > 0 \? "projects" : "empty"\)/);
+  assert.match(source("workbench.tsx"), /setHasSavedProjects\(state !== "empty"\)/);
+});
+
+test("PR #12 I5: the delete confirmation reads the whole folder, not only its name", () => {
+  assert.match(source("workbench.tsx"), /removal\?\.path && !removal\.chatId && <p className="m5-remove-target" data-testid="remove-target"><span>\{t\("m5\.remove\.folder"\)\}<\/span><code>\{removal\.path\}<\/code>/);
+  assert.doesNotMatch(source("workbench.tsx"), /<h2 id="m5-remove-title" title=/);
+});
+
+test("PR #12 minor 1: settings and the team roles window give focus back to what opened them", () => {
+  const workbench = source("workbench.tsx");
+  assert.match(workbench, /useLayoutEffect\(\(\) => \{ if \(preferencesOpen\) rememberFocus\(\); \}, \[preferencesOpen\]\);/);
+  assert.match(workbench, /if \(!preferencesOpen && !settingsOpen && !newChatOpen && !removal && focusReturn\.current\) focusBack\(\);/);
+  assert.doesNotMatch(workbench, /settingsButtonRef/);
+});
+
+test("PR #12 minor 2: buttons say the action; the screen reader name carries the target", () => {
+  assert.equal(ko["m5.permissions.save"], "저장");
+  assert.equal(ko["m5.workspaceFolder.choose"], "바꾸기");
+  for (const dict of [ko, en]) {
+    assert.match(dict["m5.home.continueNamed"], /\{name\}/);
+    assert.match(dict["m5.catalog.manageNamed"], /\{name\}/);
+    assert.ok(dict["m5.permissions.saveNamed"] && dict["m5.workspaceFolder.chooseNamed"]);
+  }
+  const catalog = source("project-catalog-view.tsx");
+  assert.match(catalog, /aria-label=\{t\("m5\.home\.continueNamed", \{ name \}\)\}/);
+  assert.match(catalog, /<ProjectMenu label=\{t\("m5\.catalog\.manageNamed", \{ name \}\)\}>/);
+});
+
+test("PR #12 minor 3: the home and the switcher read the engine's further pages before ordering by recency", () => {
+  const catalog = source("project-catalog-view.tsx");
+  assert.match(catalog, /const RECENCY_PAGES = 10;/);
+  assert.match(catalog, /page < \(home \|\| switcher \? RECENCY_PAGES : 1\)/);
+});
+
+test("PR #12 minor 4: settled notifications are tidied while the app runs and when the setting changes", () => {
+  const previous = (globalThis as { window?: unknown }).window;
+  const events: string[] = [];
+  (globalThis as { window?: unknown }).window = { dispatchEvent: (event: Event) => { events.push(event.type); return true; } };
+  try {
+    saveNotificationPreferences(DEFAULT_NOTIFICATION_PREFERENCES, memory());
+    assert.deepEqual(events, [NOTIFICATION_PREFERENCES_CHANGED]);
+  } finally { (globalThis as { window?: unknown }).window = previous; }
+  const workbench = source("workbench.tsx");
+  assert.match(workbench, /window\.addEventListener\(NOTIFICATION_PREFERENCES_CHANGED, prune\)/);
+  assert.match(workbench, /window\.setInterval\(prune, PRUNE_INTERVAL_MS\)/);
+  assert.ok(PRUNE_INTERVAL_MS <= RESOLVED_KEEP_MS);
 });

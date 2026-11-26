@@ -30,7 +30,7 @@ export function WorkspaceFolderSetting({ disabled }: { disabled: boolean }) {
     </span>
     <span className="m5-setting-control m5-workspace-folder-actions">
       {folder?.custom && <button type="button" className="m5-btn-quiet" disabled={disabled || busy} onClick={() => void send("resetWorkspaceFolder")}>{t("m5.workspaceFolder.reset")}</button>}
-      <button type="button" className="m5-secondary" disabled={disabled || busy} onClick={() => void send("chooseWorkspaceFolder")}>{t("m5.workspaceFolder.choose")}</button>
+      <button type="button" className="m5-secondary" disabled={disabled || busy} aria-label={t("m5.workspaceFolder.chooseNamed")} onClick={() => void send("chooseWorkspaceFolder")}>{t("m5.workspaceFolder.choose")}</button>
     </span>
     {error && <div className="m5-setting-detail"><p role="alert">{t("m5.workspaceFolder.error")}</p></div>}
   </section>;

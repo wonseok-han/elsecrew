@@ -15,7 +15,7 @@ import { markStartScreenReady } from "./startup-mark.ts";
 import { emptyProjectGuide, parseProjectGuide, projectGuideKey, projectGuideStep, type ProjectGuidePreference } from "./project-guide-state.ts";
 import type { ChatRecordV1 } from "./contracts/run-recovery-v1.ts";
 import { hasUsableModel, loadModels, modelLabel, withRecommendedModels } from "./model-catalog.ts";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { roleColorIndex, roleInitial } from "./role-colors.ts";
 import { I18nProvider, useI18n } from "../i18n";
 import { ProjectEditorController, type EditorTab } from "./editor-state.ts";
@@ -44,11 +44,11 @@ import { ChatWorkspaceMerge } from "./chat-workspace-merge.tsx";
 import { WorkspaceFolderSetting } from "./workspace-folder-setting.tsx";
 import { ApplyLatest, ChangesMergeStatus } from "./apply-latest.tsx";
 import { FileSearch } from "./file-search-view.tsx";
-import { ProjectCatalog } from "./project-catalog-view.tsx";
+import { ProjectCatalog, type CatalogListState } from "./project-catalog-view.tsx";
 import { WorkStatusPanel } from "./work-status-view.tsx";
 import { NotificationBell, type BellNoticeTone } from "./notification-bell.tsx";
 import { startNotificationFeed, type NotificationFeedBridge } from "./notification-feed.ts";
-import { NotificationCenter, osNotificationsEnabled, type AppNotification } from "./notifications.ts";
+import { NotificationCenter, osNotificationsEnabled, type AppNotification, NOTIFICATION_PREFERENCES_CHANGED, PRUNE_INTERVAL_MS } from "./notifications.ts";
 import { validateProjectCatalogResult, type ProjectCatalogEntry } from "./contracts/project-catalog-v1.ts";
 import { FirstRunChecklist } from "./first-run.tsx";
 import { projectName, readProjectOpenedAt, recordProjectOpened } from "./project-recency.ts";
@@ -136,16 +136,6 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     return () => { window.removeEventListener("pagehide", keep); document.removeEventListener("visibilitychange", hidden); };
   }, [controller]);
   const [openedAt, setOpenedAt] = useState(() => readProjectOpenedAt(browserStorage()));
-  /** A folder that needs a yes before it becomes a project (asked by main, ADE U2 Q7). */
-  const [folderAsk, setFolderAsk] = useState<{ nonce: string; kind: "emptyFolder" | "plainFolder" | "recordMissing"; name: string; path: string } | null>(null);
-  const folderDialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => window.m5FolderConfirm?.onAsk(ask => setFolderAsk(ask)), []);
-  useEffect(() => { if (folderAsk) { if (!folderDialog.current?.open) folderDialog.current?.showModal(); } else folderDialog.current?.close(); }, [folderAsk]);
-  const answerFolder = (yes: boolean) => {
-    const ask = folderAsk;
-    setFolderAsk(null);
-    if (ask) void window.m5FolderConfirm?.answer(ask.nonce, yes).catch(() => undefined);
-  };
   const [catalogRevision, setCatalogRevision] = useState(0);
   const [removal, setRemoval] = useState<{ projectId: string; chatId?: string; label: string; path?: string } | null>(null);
   const [removing, setRemoving] = useState(false);
@@ -196,6 +186,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   // Unknown until the saved project list has been read: no first-run guide
   // flashes before it (D3⑤).
   const [hasSavedProjects, setHasSavedProjects] = useState<boolean | null>(null);
+  // A list that could not be read is not "no projects": the home stays, with its error and retry (PR #12 review I3).
+  const catalogListState = useCallback((state: CatalogListState) => setHasSavedProjects(state !== "empty"), []);
   /** Reopening the project open when the app last closed (last-session.ts). */
   const [resumingProject, setResumingProject] = useState(false);
   const resumeTried = useRef(false);
@@ -223,6 +215,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   useEffect(() => { if (newChatOpen) { setNewChatOpenings(count => count + 1); setPermissionsSaveFailed(false); } }, [newChatOpen]);
   const [permissionsSaveFailed, setPermissionsSaveFailed] = useState(false);
   useEffect(() => { if (newChatOpen) setSetupConfirmed(false); }, [newChatOpen]);
+  // The yes is for the permissions shown: a change (by the person or a reload) asks again (PR #12 review I1).
+  useEffect(() => { setSetupConfirmed(false); }, [firstPermissions?.projectId, firstPermissions?.permissions.files, firstPermissions?.permissions.commands]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appDefaultsOpen, setAppDefaultsOpen] = useState(false);
   // What "앱 기본값으로도 저장" saved; the role screen remounts after saving, so the workbench keeps it.
@@ -234,11 +228,25 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   // Work that still holds the app (shown inside the bell, marked on it).
   const [workAttention, setWorkAttention] = useState(false);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- reads focus at the open commit only
+  useLayoutEffect(() => { if (preferencesOpen) rememberFocus(); }, [preferencesOpen]);
   const [preferencesSection, setPreferencesSection] = useState<SettingsSection>("general");
   const [connectionReveal, setConnectionReveal] = useState<ConnectionReveal>();
   const [discardedWorkspaceNotice, setDiscardedWorkspaceNotice] = useState(false);
   const [returnToNewChat, setReturnToNewChat] = useState(false);
-  const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  /** The control that opened settings or the team roles window; focus returns there on close (PR #12 review minor 1). */
+  const focusReturn = useRef<HTMLElement | null>(null);
+  const rememberFocus = () => {
+    const active = document.activeElement;
+    if (!focusReturn.current && active instanceof HTMLElement && active !== document.body && !active.closest(".m5-app-settings, dialog")) focusReturn.current = active;
+  };
+  /** Back to the opener when it can still take focus (a closed menu's item cannot), else the settings button. */
+  const focusBack = () => {
+    const target = focusReturn.current;
+    focusReturn.current = null;
+    const usable = target?.isConnected && !target.closest("[hidden], [inert], details:not([open]) > :not(summary)") && !(target as HTMLButtonElement).disabled;
+    (usable ? target : document.querySelector<HTMLElement>(".m5-open-preferences"))?.focus();
+  };
   const restoreSettingsFocus = useRef(false);
   const [leavingProject, setLeavingProject] = useState(false);
   const [leaveError, setLeaveError] = useState(false);
@@ -442,9 +450,12 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     // is enabled again. A frame callback from the click can beat that commit.
     if (!settingsOpen && !newChatOpen && restoreSettingsFocus.current) {
       restoreSettingsFocus.current = false;
-      settingsButtonRef.current?.focus();
+      focusBack();
     }
   }, [settingsOpen, newChatOpen]);
+  // Settings closed on its own (not into the team roles window or a delete confirmation): focus goes back to its opener.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- on the close commit only
+  useEffect(() => { if (!preferencesOpen && !settingsOpen && !newChatOpen && !removal && focusReturn.current) focusBack(); }, [preferencesOpen]);
   useEffect(() => { setNewChatOpen(false); setReturnToNewChat(false); setGoal(""); }, [snapshot.project?.id]);
   useEffect(() => {
     const dialog = newChatDialogRef.current;
@@ -545,6 +556,13 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   };
   // Notifications: a per-viewer list of finished, waiting and stopped tasks.
   const notifications = useMemo(() => new NotificationCenter(), []);
+  // Settled lines are tidied while the app stays open and as soon as the setting is turned on (PR #12 review minor 4).
+  useEffect(() => {
+    const prune = () => notifications.prune();
+    window.addEventListener(NOTIFICATION_PREFERENCES_CHANGED, prune);
+    const timer = window.setInterval(prune, PRUNE_INTERVAL_MS);
+    return () => { window.removeEventListener(NOTIFICATION_PREFERENCES_CHANGED, prune); window.clearInterval(timer); };
+  }, [notifications]);
   const [pendingOpen, setPendingOpen] = useState<{ projectId: string; chatId: string } | null>(null);
   const revealStoryRef = useRef<() => void>(() => {});
   const openNotification = (item: AppNotification) => {
@@ -617,12 +635,16 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       return chatController.snapshot().settings?.revision !== settings.revision;
     } catch { setRecommendationMissing(true); return false; }
   };
+  /** The first task's separate yes, for the permissions now shown (Q9). */
+  const firstSetupAgreed = setupConfirmed && firstPermissions !== null && firstPermissions.projectId === snapshot.project?.id;
   const createChat = async () => {
     if (!snapshot.project) return;
+    // Nothing (team or permissions) is stored before the first task's yes: its window has no save of its own (PR #12 review I1).
+    if (chat.chats.length === 0 && !firstSetupAgreed) return;
     controller.setActionBlocked(true, { key: "m5.editorNotice.newChat" });
     if (!await fillRecommendedRoles()) { controller.setActionBlocked(chatController.isActionBlocked()); return; }
     // The first task's confirmed setup includes the permissions shown checked.
-    if (chat.chats.length === 0 && setupConfirmed && firstPermissions?.projectId === snapshot.project.id && firstPermissions.needsSave && window.m5Projects) {
+    if (chat.chats.length === 0 && firstPermissions?.projectId === snapshot.project.id && firstPermissions.needsSave && window.m5Projects) {
       const request = { action: "setAutomationPermissions" as const, projectId: snapshot.project.id, permissions: firstPermissions.permissions, confirmed: true as const };
       try { validateProjectCatalogResult(await window.m5Projects.request(request), request); setPermissionsSaveFailed(false); setFirstPermissions(null); chosenPermissions.current.delete(request.projectId); }
       catch { controller.setActionBlocked(chatController.isActionBlocked()); setPermissionsSaveFailed(true); return; }
@@ -640,6 +662,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     setAppDefaultsOutcome(null);
     setReturnToNewChat(fromNewChat);
     restoreSettingsFocus.current = false;
+    rememberFocus();
     setNewChatOpen(false);
     controller.setActionBlocked(true);
     setSettingsOpen(true);
@@ -833,12 +856,16 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   // The project list folds into the switcher over the task list (1차-나); the
   // home screen has its own list, so there is one list on each screen (D4⑤).
   const switchBlockedReason = !admissionReady || leavingProject ? null : !chatController.canLeaveProjectView() ? t("m5.switch.teamWorking") : !controller.canLeaveProject() ? t("m5.switch.unsaved") : null;
-  const projectSwitcherList = <ProjectCatalog switcher onCloseProject={() => void leaveProject()} closeDisabled={!admissionReady || settingsOpen || leavingProject || leaveError || !controller.canLeaveProject() || !chatController.canLeaveProjectView()} onRoles={() => openRoleSettings()} rolesDisabled={!admissionReady || settingsOpen || !projectDataReady || chat.preparing || chat.switching} onAdd={addProject} refreshKey={catalogRevision} removeDisabled={!canRemove} onRemove={projectRemoval} onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || snapshot.selectionBlocked || leavingProject} onSwitch={entry => void switchProject(entry)} switchBlockedReason={switchBlockedReason} openedAt={openedAt} />;
+  // Adding a folder keeps the open project until a folder is picked, so it waits for an open task or unsaved edits (PR #12 review I2).
+  const addBlockedReason = !admissionReady || leavingProject ? null : snapshot.workspace ? t("m5.switch.addTaskOpen") : !controller.canLeaveProject() ? t("m5.switch.unsaved") : null;
+  const projectSwitcherList = <ProjectCatalog switcher onCloseProject={() => void leaveProject()} closeDisabled={!admissionReady || settingsOpen || leavingProject || leaveError || !controller.canLeaveProject() || !chatController.canLeaveProjectView()} onRoles={() => openRoleSettings()} rolesDisabled={!admissionReady || settingsOpen || !projectDataReady || chat.preparing || chat.switching} onAdd={addProject} refreshKey={catalogRevision} removeDisabled={!canRemove} onRemove={projectRemoval} onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || snapshot.selectionBlocked || leavingProject} onSwitch={entry => void switchProject(entry)} switchBlockedReason={switchBlockedReason} addBlockedReason={addBlockedReason} openedAt={openedAt} />;
 
   return (
     <main inert={updatePreparing} className={`m5-workbench${preferencesOpen ? " m5-settings-open" : ""}${snapshot.project ? " m5-task-mode" : " m5-home-mode"}`} lang={lang} aria-label={t("m5.shell.label")}>
       <dialog ref={removalDialog} className="m5-discard-dialog m5-confirm-dialog" aria-labelledby="m5-remove-title" onCancel={event => { event.preventDefault(); if (!removing) setRemoval(null); }}>
-        <h2 id="m5-remove-title" title={removal?.path}>{removal ? t(removal.chatId ? "m5.remove.chatTitle" : "m5.remove.projectTitle", { name: removal.label }) : t("m5.catalog.remove")}</h2>
+        <h2 id="m5-remove-title">{removal ? t(removal.chatId ? "m5.remove.chatTitle" : "m5.remove.projectTitle", { name: removal.label }) : t("m5.catalog.remove")}</h2>
+        {/* Two projects can share a folder name: the whole folder is read here (PR #12 review I5). */}
+        {removal?.path && !removal.chatId && <p className="m5-remove-target" data-testid="remove-target"><span>{t("m5.remove.folder")}</span><code>{removal.path}</code></p>}
         <div className="m5-remove-lists">
           <section className="m5-remove-gone"><h3>{t("m5.remove.goneTitle")}</h3><ul>{(removal?.chatId ? ["m5.remove.chatGone1", "m5.remove.chatGone2"] as const : ["m5.remove.projectGone1", "m5.remove.projectGone2", "m5.remove.projectGone3"] as const).map(key => <li key={key}>{t(key)}</li>)}</ul></section>
           <section className="m5-remove-kept"><h3>{t("m5.remove.keptTitle")}</h3><ul>{(["m5.remove.kept1", "m5.remove.kept2"] as const).map(key => <li key={key}>{t(key)}</li>)}</ul></section>
@@ -847,13 +874,6 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         {removalError && <p role="alert">{t("m5.catalog.removeError")}</p>}
         <div className="m5-dialog-actions"><button type="button" autoFocus disabled={removing} onClick={() => setRemoval(null)}>{t("m5.editor.cancel")}</button>
         <button type="button" className="m5-danger m5-btn-danger-solid" disabled={!canRemove} onClick={() => removal && void deleteTarget(removal)}>{t("m5.catalog.remove")}</button></div>
-      </dialog>
-      <dialog ref={folderDialog} className="m5-confirm-dialog m5-folder-confirm" aria-labelledby="m5-folder-confirm-title" data-testid="folder-confirm" onCancel={event => { event.preventDefault(); answerFolder(false); }}>
-        <h2 id="m5-folder-confirm-title">{folderAsk ? t(`m5.folderConfirm.${folderAsk.kind}.title`) : ""}</h2>
-        {folderAsk && <p className="m5-folder-confirm-name"><strong>{folderAsk.name}</strong><code>{folderAsk.path}</code></p>}
-        {folderAsk && <p className="m5-settings-intro">{t(`m5.folderConfirm.${folderAsk.kind}.body`)}</p>}
-        <div className="m5-dialog-actions"><button type="button" autoFocus onClick={() => answerFolder(false)}>{t("m5.editor.cancel")}</button>
-        <button type="button" className={folderAsk?.kind === "recordMissing" ? "m5-secondary" : "m5-btn-primary"} onClick={() => answerFolder(true)}>{folderAsk ? t(`m5.folderConfirm.${folderAsk.kind}.confirm`) : ""}</button></div>
       </dialog>
       <header className={`m5-toolbar m5-topbar${snapshot.project ? " m5-toolbar-project" : ""}`} data-testid="top-bar">
         {snapshot.project ? <div className="m5-topbar-path">
@@ -935,8 +955,12 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       </AppSettings>
       <StorageAdmissionNotice admission={admission} />
       {engineRestarted && <section className="m5-admission" role="status"><strong>{t("m5.admission.restarted")}</strong><p>{t("m5.admission.restartedHelp")}</p><button type="button" className="m5-secondary" onClick={() => window.location.reload()}>{t("m5.admission.refresh")}</button></section>}
+      {/* Home and first run: why opening a project stopped (a switch whose target could not open lands here, PR #12 review I2). */}
+      {!snapshot.project && snapshot.error && !resumingProject && <section className="m5-banner m5-banner-danger m5-home-error" role="alert" data-testid="home-error"><div><strong>{t(snapshot.error.messageKey)}</strong>
+        {snapshot.error.technicalDetail && <details><summary>{t("m5.feedback.details")}</summary><pre>{snapshot.error.technicalDetail}</pre></details>}</div>
+        {snapshot.error.messageKey === "m5.editorError.reopenProject" && <button type="button" className="m5-secondary" disabled={settingsOpen || !admissionReady || snapshot.selectionBlocked} onClick={() => void addProject()}>{t("m5.editor.reselectOriginal")}</button>}</section>}
       {!snapshot.project && <div className="m5-home" hidden={hasSavedProjects !== true || resumingProject}>
-        <ProjectCatalog home refreshKey={catalogRevision} onAdd={addProject} onHasProjects={setHasSavedProjects} openedAt={openedAt} removeDisabled={!canRemove} onRemove={projectRemoval} onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} ready={admissionReady} controller={controller}
+        <ProjectCatalog home refreshKey={catalogRevision} onAdd={addProject} onListState={catalogListState} openedAt={openedAt} removeDisabled={!canRemove} onRemove={projectRemoval} onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} ready={admissionReady} controller={controller}
           disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked} />
       </div>}
       {!snapshot.project && (hasSavedProjects === null || resumingProject) && <section className="m5-start-pending" role="status" aria-busy="true"><span className="m5-skeleton-line" />{resumingProject && <p>{t("m5.start.resuming")}</p>}</section>}
@@ -959,7 +983,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         <dialog ref={newChatDialogRef} className="m5-new-chat-dialog" aria-labelledby="m5-new-chat-heading" onCancel={event => { event.preventDefault(); if (!chat.preparing && !chat.switching) setNewChatOpen(false); }} onClose={() => { if (!settingsOpen) { controller.revealChatList(); requestAnimationFrame(() => newChatButtonRef.current?.focus()); } }}>
         {/* ADE U3: goal → where it starts → the team → (first task) what the team may do; one action, Send, at the bottom. */}
         <header><div><p className="m5-eyebrow">{snapshot.project.name}</p><h2 id="m5-new-chat-heading">{t("m5.navigation.newChat")}</h2></div><button type="button" className="m5-btn-quiet m5-dialog-close" aria-label={t("m5.editor.cancel")} title={t("m5.editor.cancel")} disabled={chat.preparing || chat.switching} onClick={() => setNewChatOpen(false)}>×</button></header>
-        <form className="m5-new-chat-form" onKeyDown={submitChatShortcut} onSubmit={(event) => { event.preventDefault(); if (admissionReady && projectDataReady && goal.trim() && !chat.preparing && !chat.switching && !chat.preparationApiUnavailable && !(snapshot.workspace && !controller.canLeaveProject()) && (chat.chats.length > 0 || setupConfirmed) && !(recommendationMissing && unselectedRoles.length > 0)) void createChat(); }}>
+        <form className="m5-new-chat-form" onKeyDown={submitChatShortcut} onSubmit={(event) => { event.preventDefault(); if (admissionReady && projectDataReady && goal.trim() && !chat.preparing && !chat.switching && !chat.preparationApiUnavailable && !(snapshot.workspace && !controller.canLeaveProject()) && (chat.chats.length > 0 || firstSetupAgreed) && !(recommendationMissing && unselectedRoles.length > 0)) void createChat(); }}>
           <div className="m5-dialog-body">
             <label className="m5-new-task-goal"><span>{t("m5.newTask.goalLabel")}</span>
               <input ref={goalInputRef} aria-label={t("m5.navigation.goal")} value={goal} onChange={(event) => setGoal(event.target.value)} placeholder={t("m5.navigation.goalPlaceholder")} disabled={!admissionReady || chat.preparing} /></label>
@@ -987,13 +1011,13 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
               <ProjectPermissions key={`${snapshot.project.id}:${newChatOpenings}`} projectId={snapshot.project.id} disabled={!admissionReady || chat.preparing || chat.switching} proposeAll chosen={chosenPermissions.current.get(snapshot.project.id) ?? null} onDraft={reportPermissions} />
               {permissionsSaveFailed && <p role="alert">{t("m5.permissions.error")}</p>}
               {/* Q9: starting the first task needs this separate yes; Send does not stand in for it. */}
-              <label className="m5-first-chat-confirm"><input type="checkbox" checked={setupConfirmed} disabled={chat.preparing || chat.switching} onChange={event => setSetupConfirmed(event.target.checked)} /><span>{t("m5.firstChat.setup.confirm")}</span></label>
+              <label className="m5-first-chat-confirm"><input type="checkbox" checked={setupConfirmed} disabled={chat.preparing || chat.switching || firstPermissions?.projectId !== snapshot.project.id} onChange={event => setSetupConfirmed(event.target.checked)} /><span>{t("m5.firstChat.setup.confirm")}</span></label>
             </section>}
           </div>
           <footer className="m5-dialog-footer">
             <span className="m5-settings-intro">{t("m5.newTask.costNote")}</span>
             <button type="button" className="m5-btn-quiet" disabled={chat.preparing || chat.switching} onClick={() => setNewChatOpen(false)}>{t("m5.editor.cancel")}</button>
-            <button type="submit" title={t("m5.chat.sendShortcut")} aria-keyshortcuts="Enter Meta+Enter Control+Enter" disabled={!admissionReady || !projectDataReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject()) || (chat.chats.length === 0 && !setupConfirmed) || (recommendationMissing && unselectedRoles.length > 0)}>{t("m5.chat.coordinatorSend")}</button>
+            <button type="submit" title={t("m5.chat.sendShortcut")} aria-keyshortcuts="Enter Meta+Enter Control+Enter" disabled={!admissionReady || !projectDataReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject()) || (chat.chats.length === 0 && !firstSetupAgreed) || (recommendationMissing && unselectedRoles.length > 0)}>{t("m5.chat.coordinatorSend")}</button>
           </footer>
         </form>
         </dialog>

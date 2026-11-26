@@ -2,6 +2,28 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #12 독립 검토(차단 1·중요 6·경미 4) 전부 반영 (`orca/ade-screens-u2-u4`)
+검토 `~/Documents/elsecrew-ade-screens-u2-u4-2026-11-26/REVIEW-pr12.md`(대상 23365fad). 재현 시험은 `tests/m5-ade-screens-u2-u4.test.mts`(21개), 보안 하네스, 렌더러 스모크, 새 네이티브 시나리오(`ELSECREW_SMOKE_PROJECTS=1`)에 나눠 넣었다.
+
+- **B1 (차단) 폴더 확인**: 앱 안 확인 창(IPC `m5:folder-confirm:*`, preload `m5FolderConfirm`, 화면 창, 문구 키)을 모두 지우고 `electron/main.ts`·`preload.ts`·`window.d.ts`를 기저(7378332a)로 되돌렸다. 빈 폴더·일반 폴더·기록 없음은 다시 main의 `dialog.showMessageBox`로 묻는다. 결정 Q7은 이 경계 때문에 양보한다.
+  - 시험: 보안 하네스 "a folder that becomes a project is confirmed in main's own box; the page has no way to answer it"(답할 채널 없음, 취소 시 미오픈·페이지로 보낸 것 없음, 시작 시 main이 고른 폴더만 열림). 단위 "PR #12 B1". 네이티브 시나리오에서 빈 폴더 → main 확인 1회·취소 시 폴더 비어 있음.
+  - I4(확인 창 수명)는 이 창이 없어져 함께 해소됐다.
+- **I1 Q9 권한 선저장**: 첫 작업 창(`proposeAll`)에서 권한 저장 버튼을 없애고 허용의 의미(`m5.permissions.boundary`)를 보이게 했다. `createChat`은 확인 전에는 팀·권한을 아무것도 저장하지 않고(`firstSetupAgreed`), 보이는 권한이 바뀌면 체크가 풀리며, 권한을 읽기 전에는 체크가 꺼져 있다. 첫 작업 도움말을 "확인 체크를 하고 보내야 이 권한이 저장돼요"로 바꿨다.
+  - 시험: 단위 "PR #12 I1", 네이티브 시나리오(확인 전·권한 변경 뒤 `recorded:false`, 보낸 뒤 보인 값 저장).
+- **I2 전환 메뉴 추가**: 작업이 열려 있거나 저장하지 않은 편집이 있으면 '프로젝트 추가'를 끄고 이유(`m5.switch.addTaskOpen`/`unsaved`)를 보인다. 프로젝트가 열리지 않으면(전환 실패 포함) 홈·처음 시작 위에 이유와 '원본 폴더 다시 선택'을 보인다(`home-error`).
+  - 시험: 단위 "PR #12 I2", 네이티브 시나리오(작업 없음 → 추가 켜짐·취소 시 화면 유지, 작업 열림 → 꺼짐+이유).
+- **I3 목록 실패**: `onHasProjects` → `onListState`(projects/empty/failed). 실패면 홈의 오류·다시 확인(보조 버튼)을 보이고 처음 시작을 띄우지 않는다. 시험: 단위 "PR #12 I3", 렌더러 스모크 22 `home-catalog-error`.
+- **I5 삭제 대상**: 프로젝트 삭제 확인에 '이 프로젝트의 폴더'와 전체 경로를 본문으로 보인다(제목 `title` 제거). 시험: 단위 "PR #12 I5", 렌더러 스모크 21(경로·첫 초점 취소), 네이티브 시나리오 05.
+- **I6 네이티브 스모크**: `m5-project-ui-smoke.cjs`의 새 작업 입력(`.m5-new-task-goal input`), 첫 작업 확인 체크, 재로딩 분기(홈 '이어서 하기'), 메모리 분기(닫은 뒤 홈 카드), 팀 역할(전환 메뉴, PR #8 편집기) 선택자를 고쳤다. 새 `ELSECREW_SMOKE_PROJECTS=1` 시나리오로 추가·전환·삭제·확인 취소·첫 작업을 실제 sidecar에서 확인했다(PASS).
+  - 기본 흐름은 첫 작업 뒤 옛 diff·반영 단계(`.m5-chat-review` '작업 사본 diff 열기' 등, L1 이전 화면)에서 여전히 멈춘다. 이 PR 이전부터의 문제라 별도 작업으로 남긴다(11-26 아카이브 기록과 같음).
+- **경미**: 1) 설정·팀 역할 창을 닫으면 연 컨트롤로 초점 복귀(`focusReturn`/`focusBack`, 쓰이지 않던 `settingsButtonRef` 제거). 2) '저장'·'바꾸기'로 줄이고 접근성 이름에 대상(`m5.permissions.saveNamed` 등), 홈 '이어서 하기'·⋯ 메뉴 이름에 프로젝트 이름, 권한 '저장하면 다음 작업부터', 영어 첫 화면 제목. 3) 홈·전환은 최대 10쪽을 읽고 최근 순 정렬(중복 ID 제거). 4) 알림 정리를 실행 중 한 시간마다·설정 변경 때도 수행. 시험: 단위 "PR #12 minor 1~4", 렌더러 스모크(홈 페이지 합침), 네이티브 시나리오(팀 역할 닫은 뒤 초점).
+- **검증**
+  - `npm test` 941/941, `pnpm build` 통과, `pnpm m5:test:editor` 69/69(마운트 스모크 다크·라이트).
+  - 렌더 대비 다크·라이트 각 27화면 1095개 실패 0(폴더 확인 지점 → 목록 실패 지점으로 교체).
+  - 미리보기 UI 스모크 다크 2회·라이트 2회 연속 PASS.
+  - 네이티브 시나리오 PASS(실제 sidecar, 임시 폴더·앱 데이터, 공급자 미연결). 캡처 `~/Documents/elsecrew-ade-screens-u2-u4-2026-11-26/review-fix/native/`, 스모크 캡처 `review-fix/smoke/{dark,light}`.
+  - 개발 앱은 띄우지 않았다(네이티브 시나리오가 실제 앱 흐름을 대신함). 프로세스 종료는 각 스크립트가 스스로 끝냈다.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 화면 통일 U2(홈·처음 시작·전환·삭제·폴더 확인)·U3(새 작업 창)·U4(설정) (`orca/ade-screens-u2-u4`, 기준 feature/ade 7378332a)
 설계: `docs/proposals/m5-ade-screens-plan.md` 4.1과 시안 01~07·10·11·14(원본 `~/Documents/elsecrew-ade-screens-design-2026-11-26/`). 조정자 결정: Q1 홈 카드는 마지막으로 연 때만(요약 조회 없음), Q4 알림 설정 분리(종류별 끄기·해결된 알림 정리), Q5 홈 왼쪽 레일 제거, Q6 전환은 닫기+열기 한 동작, Q7 빈 폴더 확인을 앱 안으로(업데이트는 U8), Q8 '이 프로젝트'는 설정 목록의 묶음, Q9 첫 작업의 별도 확인 체크 유지(보내기가 동의를 대신하지 않음, 모양만 바꿈). 현행 설명은 architecture "홈·처음 시작·설정(U2~U4)".
 
@@ -38,8 +60,10 @@
   - 대비는 토큰 쌍만으로 부족하다(검토 I4): 컴포넌트 조합(`scripts/m5-contrast-check.mjs` 조합 표)과 렌더된 DOM(`tests/m5-rendered-contrast-probe.cjs`, 렌더러 스모크 다크·라이트)을 함께 본다. 새 화면·컴포넌트를 넣으면 렌더러 스모크 캡처 지점에서 자동으로 측정되므로, 그 화면이 스모크 경로에 없으면 캡처 지점을 추가한다. `color-mix`·필터로 만든 면은 조합 표에 넣는다(필터 대신 토큰 권장).
   - 앱 문구 규칙(주인님, 2026-11-26): 버튼은 동작만 말한다. 행·카드·제목이 보여 주는 대상을 반복하지 않고('Codex 연결하기' → '연결하기'), 대상은 접근성 이름에 남긴다. 설계 `docs/proposals/m5-ade-screens-plan.md` 2.1의 10번.
 - **홈·처음 시작·설정의 규칙(2026-11-26, 화면 통일 U2~U4)**: 현행 설명은 architecture "홈·처음 시작·설정(U2~U4)".
-  - 폴더 확인(빈 폴더·일반 폴더·기록 없음)은 앱 안 확인 창이다. main이 일회용 번호와 함께 묻고 페이지는 (번호, 예/아니오)만 답한다. 폴더를 페이지가 정하게 만들지 않는다. 개발용 `dev-pick-directory.txt`는 확인 없이 진행하므로 실제 앱에서 이 창을 보려면 개발용 지정 없이 폴더를 골라야 한다.
-  - 프로젝트를 연 시각은 `localStorage` `elsecrew.m5.projectOpenedAt.v1`(편의 기록), 알림 설정은 `elsecrew.m5.notifications.prefs.v1`이다. 꺼진 알림 종류는 저장도 배너도 안 한다. 해결된 알림은 해결 후 하루 지나면 앱 시작 때 지운다.
+  - **폴더 확인(빈 폴더·일반 폴더·기록 없음)은 main의 네이티브 대화상자로 남긴다**(PR #12 검토 B1). 앱 화면 안으로 옮기면 메인 렌더러의 응답이 곧 되돌릴 수 없는 쓰기(`.git` 초기화·앱 내 기록)의 허가가 되어, 실제 사용자 확인의 근거가 없다. 디자인 일관성보다 이 경계가 우선이다. 앱 안 모양으로 바꾸려면 렌더러가 결과를 위조할 수 없는 main 소유 경로와 그 증명 시험이 먼저 필요하다.
+  - 첫 작업의 권한은 확인 체크 후 보낼 때만 저장한다. 첫 작업 창에 별도 저장 버튼을 두지 않는다(PR #12 검토 I1).
+  - `scripts/m5-project-ui-smoke.cjs`의 기본 흐름은 첫 작업 뒤 단계(옛 diff·반영 버튼)가 L1 레이아웃 이전 화면 기준이라 멈춘다(이 PR 이전부터). 프로젝트·첫 작업 회귀는 `ELSECREW_SMOKE_PROJECTS=1` 시나리오로 본다.
+  - 프로젝트를 연 시각은 `localStorage` `elsecrew.m5.projectOpenedAt.v1`(편의 기록), 알림 설정은 `elsecrew.m5.notifications.prefs.v1`이다. 꺼진 알림 종류는 저장도 배너도 안 한다. 해결된 알림은 해결 후 하루 지난 것을 앱 시작 때·한 시간마다·설정을 바꿀 때 지운다.
   - 첫 작업의 별도 확인 체크(Q9)는 유지한다. 보내기 버튼이 동의를 대신하게 바꾸지 않는다(`tests/m5-ade-screens-u2-u4.test.mts`가 막음).
   - 화면 캡처는 `pnpm m5:capture`(렌더러 스모크 캡처 지점 = 렌더 대비 측정 지점). 새 화면을 만들면 스모크에 캡처 지점을 더한다.
 - **팀 역할 편집의 규칙(2026-11-26, custom roles R0·R1·R2·R4)**: 화면 `role-settings.tsx`, 순수 함수 `team-draft.ts`(insert/move/duplicate/restore/teamChanges/uniqueRoleName/newMemberId), 템플릿 `role-templates.ts`(TS에만). 현행 설명은 architecture "팀 역할 편집".

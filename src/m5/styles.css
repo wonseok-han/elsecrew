@@ -2136,9 +2136,11 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-workbench.m5-home-mode > .m5-topbar { flex-direction: row; align-items: center; justify-content: space-between; height: var(--topbar-h); min-height: 0; margin: 0; padding: 0 var(--space-2) 0 var(--space-4); gap: var(--space-3); border-bottom: 1px solid var(--line-subtle); background: var(--bg-app); }
 .m5-workbench.m5-home-mode > .m5-topbar .m5-toolbar-actions { flex: none; flex-wrap: nowrap; gap: 2px; }
 .m5-workbench.m5-home-mode > .m5-app-statusbar { height: var(--statusbar-h); padding: 0 var(--space-3); background: var(--bg-app); border-top-color: var(--line-subtle); }
-.m5-workbench.m5-home-mode > :is(.m5-home, .m5-first-run, .m5-start-pending, .m5-notice, .m5-error, .m5-admission, .m5-rescan) { box-sizing: border-box; width: min(880px, calc(100% - 2 * var(--space-5))); margin-left: auto; margin-right: auto; }
+.m5-workbench.m5-home-mode > :is(.m5-home, .m5-home-error, .m5-first-run, .m5-start-pending, .m5-notice, .m5-error, .m5-admission, .m5-rescan) { box-sizing: border-box; width: min(880px, calc(100% - 2 * var(--space-5))); margin-left: auto; margin-right: auto; }
 .m5-workbench.m5-home-mode > .m5-home[hidden] { display: none; }
 .m5-workbench .m5-home { padding: var(--space-6) 0 var(--space-7); }
+.m5-workbench.m5-home-mode > .m5-home-error { margin-top: var(--space-5); justify-content: space-between; align-items: center; }
+.m5-workbench .m5-home-error p, .m5-workbench .m5-home-error details { margin: var(--space-1) 0 0; font-size: var(--text-s); }
 
 /* 프로젝트 표식: 한 글자, 역할색 면(대비 4.5:1은 --role-tint로 맞춘 값) */
 .m5-workbench .m5-project-monogram { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border: 0; border-radius: var(--radius-s); font-size: var(--text-s); font-style: normal; font-weight: var(--weight-bold); color: var(--role-color, var(--text-secondary)); background: color-mix(in srgb, var(--role-color, var(--text-tertiary)) var(--role-tint), var(--bg-raised)); }
@@ -2257,8 +2259,8 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-workbench .m5-remove-kept h3 { color: var(--status-done-text); }
 .m5-workbench .m5-remove-lists ul { margin: 0; padding-left: 18px; font-size: var(--text-s); line-height: 1.6; }
 .m5-workbench dialog.m5-confirm-dialog > .m5-settings-intro { margin: var(--space-3) 0 0; color: var(--text-secondary); font-size: var(--text-s); line-height: 1.6; }
-.m5-workbench .m5-folder-confirm-name { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: var(--space-3); border-radius: var(--radius-m); background: var(--bg-sunken); }
-.m5-workbench .m5-folder-confirm-name code { overflow-wrap: anywhere; color: var(--text-secondary); font-size: var(--text-s); }
+.m5-workbench .m5-remove-target { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: var(--space-3); border-radius: var(--radius-m); background: var(--bg-sunken); }
+.m5-workbench .m5-remove-target code { overflow-wrap: anywhere; color: var(--text-secondary); font-size: var(--text-s); }
 .m5-workbench dialog.m5-confirm-dialog .m5-dialog-actions { margin-top: var(--space-5); }
 
 /* 새 작업 창: 머리 · 본문(목표·시작 지점·팀·첫 작업 권한) · 아래 버튼 줄. 1280×800에서 스크롤 없이 보내기가 보인다 */
@@ -2297,8 +2299,7 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 /* In the new-task window the permission rows are compact: the confirm sits in view with Send. */
 .m5-workbench dialog.m5-new-chat-dialog .m5-project-permissions { margin: var(--space-3) 0 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
 .m5-workbench dialog.m5-new-chat-dialog .m5-project-permissions .m5-setting { min-height: 40px; padding: var(--space-2) var(--space-3); }
-.m5-workbench dialog.m5-new-chat-dialog .m5-project-permissions > .m5-settings-intro { display: none; }
-.m5-workbench dialog.m5-new-chat-dialog .m5-permission-save:has(> button:disabled) { display: none; }
+.m5-workbench dialog.m5-new-chat-dialog .m5-permission-boundary { margin: var(--space-2) 0 0; color: var(--text-secondary); font-size: var(--text-s); line-height: 1.5; }
 .m5-workbench dialog.m5-new-chat-dialog .m5-first-chat-setup > p.m5-settings-intro { margin: 0; color: var(--text-secondary); font-size: var(--text-s); line-height: 1.5; }
 .m5-workbench .m5-dialog-body > .m5-team-unselected { padding: var(--space-2) var(--space-3); font-size: var(--text-s); line-height: 1.5; }
 .m5-workbench .m5-project-permissions { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
@@ -2306,7 +2307,6 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-workbench dialog.m5-new-chat-dialog > header { padding-top: var(--space-4); }
 .m5-workbench dialog.m5-new-chat-dialog .m5-dialog-body { gap: var(--space-3); }
 .m5-workbench dialog.m5-new-chat-dialog .m5-first-chat-setup { padding: var(--space-3) var(--space-4); }
-.m5-workbench dialog.m5-new-chat-dialog .m5-first-chat-setup > p.m5-settings-intro { display: none; }
 /* Row separators read on the raised face in both themes. */
 .m5-workbench .m5-group > .m5-setting + .m5-setting { border-top: 1px solid var(--line-default); }
 .m5-workbench .m5-preferences-layout > nav button:not([aria-current]):focus:not(:focus-visible) { background: transparent; }

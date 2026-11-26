@@ -795,50 +795,26 @@ test("the View menu's zoom and a window resize hide the preview before anything 
   assert.equal(zoomMenuModel.zoomLevelAfter(2.5, 0), 0);
 });
 
-test("folder confirmation is asked in the app with a one-time number; only the main frame answers, never with a folder (ADE U2, Q7)", async () => {
+test("a folder that becomes a project is confirmed in main's own box; the page has no way to answer it (PR #12 review B1)", async () => {
   const harness = await loadMain();
   folderPick.path = "/Users/me/new-shop";
-  heldTimers.length = 0;
+  const answer = externalLinkAnswer.value;
   try {
     const open = harness.handlers.get(M5_BRIDGE_V2_CHANNELS.projectOpen)!;
-    const answer = harness.handlers.get("m5:folder-confirm:answer")!;
-    assert.ok(answer, "an answer channel exists");
-    const sent = (harness.window.webContents as unknown as { sent: [string, { nonce: string; kind: string; name: string; path: string }][] }).sent;
-    // No native box: the page is asked, and nothing opens until it says yes.
-    const first = open(harness.currentEvent());
-    await new Promise(done => setImmediate(done));
-    assert.equal(sent.length, 1);
-    const [channel, ask] = sent[0]!;
-    assert.equal(channel, "m5:folder-confirm:ask");
-    assert.deepEqual({ kind: ask.kind, name: ask.name, path: ask.path }, { kind: "emptyFolder", name: "new-shop", path: "/Users/me/new-shop" });
-    assert.ok(!harness.sidecarCalls.some(call => call.startsWith("confirm:") || call.startsWith("openProject")));
-    // A foreign frame, a wrong number, a non-boolean, a folder and extra arguments are all refused.
-    await assert.rejects(answer({ sender: {}, senderFrame: {} }, ask.nonce, true));
-    await assert.rejects(answer(harness.currentEvent(), "guessed", true));
-    await assert.rejects(answer(harness.currentEvent(), ask.nonce, "yes"));
-    await assert.rejects(answer(harness.currentEvent(), ask.nonce, true, "/etc"));
-    await assert.rejects(answer(harness.currentEvent(), { nonce: ask.nonce, path: "/etc" }, true));
+    // No channel lets the renderer say yes for main.
+    assert.equal([...harness.handlers.keys()].some(channel => /folder-confirm/.test(channel)), false);
+    // "Cancel" in main's box: nothing opens and nothing is sent to the page.
+    externalLinkAnswer.value = 1;
+    assert.equal((await open(harness.currentEvent()) as { outcome: string }).outcome, "cancelled");
+    assert.ok(harness.sidecarCalls.some(call => call.startsWith("confirm:/Users/me/new-shop")), "the box names the folder");
     assert.ok(!harness.sidecarCalls.some(call => call.startsWith("openProject")));
-    await answer(harness.currentEvent(), ask.nonce, true);
-    assert.equal((await first as { outcome: string }).outcome, "opened");
-    assert.ok(harness.sidecarCalls.includes("openProject:/Users/me/new-shop"), "the folder main picked is opened, not one the page named");
-    // The number is used once.
-    await assert.rejects(answer(harness.currentEvent(), ask.nonce, true));
-    // No answers "no"; a newer ask ends the older one as "no"; time running out is "no".
-    const declined = open(harness.currentEvent());
-    await new Promise(done => setImmediate(done));
-    await answer(harness.currentEvent(), sent[1]![1].nonce, false);
-    assert.equal((await declined as { outcome: string }).outcome, "cancelled");
-    const older = open(harness.currentEvent());
-    await new Promise(done => setImmediate(done));
-    const newer = open(harness.currentEvent());
-    await new Promise(done => setImmediate(done));
-    assert.equal((await older as { outcome: string }).outcome, "cancelled");
-    await assert.rejects(answer(harness.currentEvent(), sent[2]![1].nonce, true), "the older number no longer answers");
-    heldTimers.at(-1)!();
-    assert.equal((await newer as { outcome: string }).outcome, "cancelled");
-    assert.equal(harness.sidecarCalls.filter(call => call.startsWith("openProject")).length, 1);
+    assert.deepEqual((harness.window.webContents as unknown as { sent: unknown[] }).sent, []);
+    // "Start" in main's box: the folder main picked opens.
+    externalLinkAnswer.value = 0;
+    assert.equal((await open(harness.currentEvent()) as { outcome: string }).outcome, "opened");
+    assert.ok(harness.sidecarCalls.includes("openProject:/Users/me/new-shop"));
   } finally {
     folderPick.path = null;
+    externalLinkAnswer.value = answer;
   }
 });
