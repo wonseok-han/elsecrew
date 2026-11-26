@@ -13,6 +13,7 @@
 - **경미 2**: 시작 응답에 첫 줄(명령)을 담아 화면 기록에서 빠지지 않는다.
 - **2단계 위협 표**: T-D1 잔여(서버 중계), T-D5(리더 먼저 종료), T-D16 루프백 호출자 검증, T-D17 동의 입력 변경, T-D18 서버의 밖 읽기·쓰기·앱 데이터, T-D19 연결 뒤 포트 주인 변경, 검토 지점 6·7.
 - **검증**: `npm test` 1038/1038, `pnpm build`, `cargo test --workspace` core 267·protocol 75·sidecar 968·통합 16 실패 0. 실제 앱 합성(`node scripts/m5-preview-build-run.mjs --build`, sandbox 안 실제 `npm install`·`vite build`) PASS 11/11, 캡처 `~/Documents/elsecrew-ade-preview-build-2026-11-27/review-synthetic/`. 유료 실제 팀 재실행은 하지 않았다(바뀐 것은 실행 경계라 합성 실제 앱으로 확인).
+- **CI**: 6d0389fc에서 Windows만 실패 — 보안 하네스의 main은 가짜 `process.platform: "darwin"`으로 돌아 빌드가 켜지는데 시험이 기계 플랫폼으로 꺼짐을 기대했다. 고친 뒤(baf5e18a) macOS·Windows·website·GitGuardian 모두 통과. 실수로 들어간 실험 파일 `p.sb`는 ad8c9c62에서 지웠다.
 
 ### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — 결과 미리보기 확장 1단계: 빌드해서 보기, 2단계 개발 서버 설계 (`orca/ade-preview-build`, 기준 main 760e1e66)
 주인님 질문(2026-11-26, 아이템 #40): index.html 정적 미리보기만 되는데 React처럼 서버 개념이 필요한 결과물은? 1단계(빌드 뒤 정적 미리보기) 구현과 2단계(관리되는 개발 서버) 설계. 현행 설명은 architecture "결과 미리보기 → 빌드해서 보기", 2·3단계는 `docs/proposals/m5-preview-dev-server.md`(제안).
