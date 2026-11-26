@@ -2234,6 +2234,39 @@ mod tests {
         assert!(listing(&inside).is_empty(), "no project or task folder made");
     }
 
+    /// A workspace folder inside the project itself (`~/elsecrew` as the
+    /// project, `~/elsecrew/workspaces` as the folder): the new task is
+    /// refused before its project folder is made there (PR #18 review B1,
+    /// 3rd round). The same for the app's data and another saved project.
+    #[test]
+    fn a_task_folder_inside_the_project_itself_is_refused_before_anything_is_made() {
+        let (root, mut sidecar, _) = service();
+        let source = root.path().join("source");
+        let project_id = sidecar.storage.projection_records("project").unwrap().into_iter()
+            .find(|p| p["canonical_path"].as_str().is_some_and(|path| path.ends_with("/source"))).unwrap()["project_id"].as_str().unwrap().to_owned();
+        let settings = sidecar.storage.path().parent().unwrap().join("application-settings-v1");
+        std::fs::create_dir_all(&settings).unwrap();
+        let listing = |dir: &std::path::Path| std::fs::read_dir(dir).unwrap().count();
+        for (label, home) in [("project", source.join("workspaces")), ("app data", sidecar.storage.path().parent().unwrap().join("tasks-here"))] {
+            std::fs::create_dir_all(&home).unwrap();
+            std::fs::write(settings.join("workspace-folder.json"), json!({"path":std::fs::canonicalize(&home).unwrap().to_str().unwrap()}).to_string()).unwrap();
+            let prepared = sidecar.g5.prepare_chat_workspace_with_baseline(&mut sidecar.storage, &mut sidecar.projects, &project_id, &format!("req_inside_{}", label.replace(' ', "_")), true);
+            assert!(prepared.is_err_and(|error| error.detail.contains("overlaps the project or the app's data")), "{label}");
+            assert_eq!(listing(&home), 0, "{label}: nothing made");
+        }
+        // Another saved project holding the folder (made with the default folder).
+        // (Here the app's data folder holds every test folder too, so either rule answers.)
+        std::fs::remove_file(settings.join("workspace-folder.json")).unwrap();
+        let (other_chat, _) = another_task(&mut sidecar, &root.path().join("other"), "other");
+        let _ = other_chat;
+        let home = root.path().join("other").join("tasks");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(settings.join("workspace-folder.json"), json!({"path":std::fs::canonicalize(&home).unwrap().to_str().unwrap()}).to_string()).unwrap();
+        let prepared = sidecar.g5.prepare_chat_workspace_with_baseline(&mut sidecar.storage, &mut sidecar.projects, &project_id, "req_inside_other", true);
+        assert!(prepared.as_ref().is_err_and(|error| error.detail.contains("overlaps")), "{:?}", prepared.as_ref().map(|_| ()).map_err(|e| e.detail.clone()));
+        assert_eq!(listing(&home), 0, "another project: nothing made");
+    }
+
     /// A repository whose .git folder shares another's objects and refs
     /// (`commondir`) is not a repository of its own; names differing only in
     /// case are one folder on macOS (PR #18 re-review B1).

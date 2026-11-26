@@ -2,6 +2,17 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #18 3차 확인(B1 두 점) 반영 (`orca/ade-multiproject-a`)
+3차 확인 `~/Documents/elsecrew-ade-multiproject-2026-11-26/REVIEW-pr18-3.md`(대상 6859a030). B2는 해결로 확인됐다.
+
+- **원본 겹침도 첫 쓰기 전에**: 새 작업 폴더를 만들기 전의 `refuse_new_task_folder`가 기존 작업 공간뿐 아니라 그 프로젝트 자신·앱 데이터·다른 저장된 프로젝트와의 겹침도 본다. 이전에는 `~/elsecrew` 프로젝트에 `~/elsecrew/workspaces`를 쓰면 `workspaces/elsecrew`를 만든 뒤 거절했다.
+  - 시험: `a_task_folder_inside_the_project_itself_is_refused_before_anything_is_made`(프로젝트 안, 앱 데이터 안, 다른 프로젝트 안 → 거절되고 폴더에 아무것도 없음)
+- **Windows 경로 비교**: 경로를 구성 요소로 비교하는 순수 함수 `path_key_components`로 바꿨다. 구분자, `\\?\`·UNC 접두사, 드라이브 문자, 대소문자를 처리한다. 기록된 작업 공간 경로를 풀 수 없을 때는 폴더가 없는 경우만 기록 그대로 비교하고, 그 밖의 오류는 거절한다.
+  - 시험(모든 플랫폼에서 돎): `windows_paths_compare_by_components_case_prefix_and_separator`, `unix_paths_compare_by_components`
+- **검증**
+  - `cargo test -p elsecrew-sidecar`: 941 통과, 1 실패(`a_sign_in_hold_survives_a_device_renumbering_only_with_the_same_inodes`). 이 시험은 단독으로 3회 연속 통과했고, 직전 전체 실행(939)에서도 통과했다. 이번 변경은 로그인 잠금 코드를 건드리지 않아 병렬 실행 중 간헐 실패로 본다. 원인은 확인하지 않았다.
+  - 관련 시험 10개 통과.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #18 재확인(B1·B2 부분 해결) 반영 (`orca/ade-multiproject-a`)
 재확인 `~/Documents/elsecrew-ade-multiproject-2026-11-26/REVIEW-pr18-2.md`(대상 13081fd3).
 

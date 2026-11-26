@@ -219,7 +219,7 @@ impl ProjectManager {
         let short: String = worktree_id.trim_start_matches("worktree_").chars().take(8).collect();
         // Nothing is made before the new folder is known not to meet another
         // task's workspace (PR #18 re-review B1).
-        self.refuse_new_task_folder(storage, &wanted, &wanted.join(format!("task-{short}")))?;
+        self.refuse_new_task_folder(storage, source_root, &wanted, &wanted.join(format!("task-{short}")))?;
         std::fs::create_dir_all(&wanted).map_err(|error| {
             ProjectFailure::recovery(format!("could not make the workspace folder: {error}"))
         })?;
@@ -228,23 +228,9 @@ impl ProjectManager {
         if project_dir != canonical_home.join(project_folder_name(source_root)) {
             return Err(ProjectFailure::symlink("the project's workspace folder is a link"));
         }
-        for (inner, outer) in [(&project_dir, source_root), (&source_root.to_path_buf(), &project_dir), (&project_dir, &self.data_root), (&self.data_root, &project_dir)] {
-            if inner.starts_with(outer) {
-                return Err(ProjectFailure::manifest("the workspace folder overlaps the project or the app's data"));
-            }
-        }
-        // Nor any other saved project (a home folder that is itself a
-        // repository, say): the same rule as choosing the folder.
-        for project in storage.projection_records("project")? {
-            if let Some(root) = project.get("canonical_path").and_then(Value::as_str) {
-                if project_dir.starts_with(root) || Path::new(root).starts_with(&project_dir) {
-                    return Err(ProjectFailure::manifest("the workspace folder overlaps a saved project; choose another in settings"));
-                }
-            }
-        }
         let task_dir = project_dir.join(format!("task-{short}"));
         // Again on the real folders now made (PR #18 review B1).
-        self.refuse_new_task_folder(storage, &project_dir, &task_dir)?;
+        self.refuse_new_task_folder(storage, source_root, &project_dir, &task_dir)?;
         Ok(task_dir)
     }
 
