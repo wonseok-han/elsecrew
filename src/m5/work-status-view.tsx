@@ -1,4 +1,5 @@
 import { useI18n } from "../i18n.tsx";
+import { RecoveryGuide } from "./recovery-guide.tsx";
 import { useEffect, useRef, useState } from "react";
 import type { SupportedM5Bridge } from "./bridge-boundary.ts";
 import type { M5BridgeV6 } from "./contracts/bridge-v6.ts";
@@ -42,14 +43,13 @@ export function WorkStatusPanel({ bridge, ready, refreshKey, onAttention, liveRu
   const attention = ready && bridge.version >= 6 && (summary !== null || failed);
   useEffect(() => { onAttention(attention); }, [attention, onAttention]);
   if (!attention) return null;
-  return <section className="m5-bell-problem" aria-label={t("m5.work.title")} aria-busy={busy}>
-    <strong>{failed ? t("m5.work.failed") : t("m5.work.active")}</strong>
-    <p>{failed ? t("m5.work.error") : t("m5.work.help")}</p>
-    {summary && <details><summary>{t("m5.work.details", { count: summary.total })}{failed ? t("m5.work.stale") : ""}</summary>
-      <p>{t("m5.work.safety")}</p>
-      <ul>{summary.ids.map((id, index) => <li key={index}><code>{id}</code></li>)}</ul>
-      {summary.omitted > 0 && <p>{t("m5.work.omitted", { count: summary.omitted })}</p>}
-    </details>}
-    <button type="button" className="m5-secondary" disabled={busy} onClick={() => setRefresh(value => value + 1)}>{busy ? t("m5.work.busy") : t("m5.work.refresh")}</button>
-  </section>;
+  // F3 (ADE U7): the same F11 guide as other failures — what is going on, one
+  // thing to do now, and the run list only inside the help details.
+  const details = summary ? [t("m5.work.details", { count: summary.total }) + (failed ? t("m5.work.stale") : ""), t("m5.work.safety"), ...summary.ids,
+    ...(summary.omitted > 0 ? [t("m5.work.omitted", { count: summary.omitted })] : [])].join("\n") : null;
+  return <RecoveryGuide tone="attention" live={false} className="m5-bell-problem" label={t("m5.work.title")} busy={busy}
+    title={failed ? t("m5.work.failed") : t("m5.work.active")}
+    what={failed ? t("m5.work.error") : t("m5.work.help")}
+    primary={{ label: busy ? t("m5.work.busy") : t("m5.work.refresh"), onClick: () => setRefresh(value => value + 1), disabled: busy }}
+    details={details} />;
 }

@@ -214,8 +214,25 @@ contextBridge.exposeInMainWorld("m5GitSelection", Object.freeze({
 const M5_APP_UPDATE_CHANNEL = "m5:app-update:open";
 const M5_UPDATE_READINESS = "m5:app-update:readiness";
 const M5_UPDATE_READINESS_REPLY = "m5:app-update:readiness-reply";
+const M5_APP_UPDATE_STATE = "m5:app-update:state";
+const M5_APP_UPDATE_REQUEST = "m5:app-update:request";
+const M5_APP_UPDATE_CHANGED = "m5:app-update:changed";
+const APP_UPDATE_STATES = ["unavailable", "idle", "current", "checking", "downloading", "ready", "restarting", "error"] as const;
+type AppUpdateState = typeof APP_UPDATE_STATES[number];
+const asUpdateState = (value: unknown): AppUpdateState => (APP_UPDATE_STATES as readonly unknown[]).includes(value) ? value as AppUpdateState : "unavailable";
 const appUpdateApi = Object.freeze({
   open: () => ipcRenderer.invoke(M5_APP_UPDATE_CHANNEL),
+  // The in-app banner (ADE U8): main's state, and requests main decides on.
+  state: async (): Promise<AppUpdateState> => asUpdateState(await ipcRenderer.invoke(M5_APP_UPDATE_STATE)),
+  onState: (listener: (state: AppUpdateState) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: unknown) => listener(asUpdateState(state));
+    ipcRenderer.on(M5_APP_UPDATE_CHANGED, handler);
+    return () => { ipcRenderer.removeListener(M5_APP_UPDATE_CHANGED, handler); };
+  },
+  request: async (action: unknown): Promise<AppUpdateState> => {
+    if (action !== "check" && action !== "restart") throw new Error("invalid app update request");
+    return asUpdateState(await ipcRenderer.invoke(M5_APP_UPDATE_REQUEST, action));
+  },
   onRestartCheck: (check: () => boolean, resume: () => void) => {
     const listener = (_event: Electron.IpcRendererEvent, nonce: unknown) => {
       if (typeof nonce !== "string") return;

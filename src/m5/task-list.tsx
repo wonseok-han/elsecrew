@@ -98,6 +98,7 @@ export function TaskList({ items, disabled, removeDisabled, onOpen, onRemove, ra
   const toggle = (group: TaskGroup) => setFoldChoice(current => new Map(current).set(group, !isFoldedGroup(group)));
   const shownGroups = rail && railOpen ? groups.filter(entry => entry.group === railOpen) : groups;
   const list = <div className="m5-task-groups" data-testid="task-groups">
+    {!rail && groups.length === 0 && <p className="m5-task-list-empty">{t("m5.taskList.empty")}</p>}
     {shownGroups.map(({ group, rows }) => {
       const isFolded = rail ? false : isFoldedGroup(group);
       return <section key={group} className="m5-task-group" data-group={group} aria-label={t(`m5.taskList.group.${group}`)}>

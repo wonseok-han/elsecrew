@@ -58,6 +58,8 @@ import { TaskDispositionStore } from "./task-disposition.ts";
 import { failStandingRead, finishStandingRead, standingView, startStandingRead, type StandingRead } from "./standing-read.ts";
 import { findRememberedProject, forgetLastProject, recallLastProject, rememberLastProject, shouldResumeProject } from "./last-session.ts";
 import { DiffDetails, EditorContent, Empty, MonacoDiff, VirtualFileList } from "./editor-surface.tsx";
+import { EmptyState } from "./empty-state.tsx";
+import { UpdateBanner } from "./update-banner.tsx";
 import { fileName, isProsePath } from "./editor-paths.ts";
 import { FollowupComposer, TeamTimeline } from "./task-story.tsx";
 
@@ -956,6 +958,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           onSwitchRoles={() => navigatePreferences(() => { if (snapshot.project && projectDataReady) { setPreferencesOpen(false); openRoleSettings(); } else { setPreferencesSection("roles"); setAppDefaultsOpen(true); } })} />
       </AppSettings>
       <StorageAdmissionNotice admission={admission} />
+      <UpdateBanner teamWorking={!chatController.canLeaveProjectView()} />
       {engineRestarted && <section className="m5-admission" role="status"><strong>{t("m5.admission.restarted")}</strong><p>{t("m5.admission.restartedHelp")}</p><button type="button" className="m5-secondary" onClick={() => window.location.reload()}>{t("m5.admission.refresh")}</button></section>}
       {/* Home and first run: why opening a project stopped (a switch whose target could not open lands here, PR #12 review I2). */}
       {!snapshot.project && snapshot.error && !resumingProject && <section className="m5-banner m5-banner-danger m5-home-error" role="alert" data-testid="home-error"><div><strong>{t(snapshot.error.messageKey)}</strong>
@@ -1052,14 +1055,14 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
               {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats || removing} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? t("m5.navigation.loadingChats") : t("m5.navigation.moreChats")}</button>}
             </div>} />
         </>}
-        story={chat.activeChat ? <div className="m5-conversation"><div className="m5-conversation-scroll"><TeamTimeline onCoordinatorChat={() => { setGoal(chat.activeChat?.goal ?? ""); setNewChatOpen(true); }} controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} phase={activePhase} phaseKind={activeKind} onApprovalsWaiting={onApprovalsWaiting} pinnedSlot={pinnedSlot} /></div><div className="m5-pinned-slot" data-testid="pinned-approval" ref={setPinnedSlot} />{chat.activeChat.schemaVersion !== 1 && <FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} />}</div> : <section className="m5-first-chat" aria-label={t("m5.firstChat.title")}>
-        <h2>{t("m5.firstChat.title")}</h2><p>{t("m5.firstChat.help")}</p>
-        <button type="button" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching} onClick={() => setNewChatOpen(true)}>{t("m5.navigation.newChat")}</button>
+        story={chat.activeChat ? <div className="m5-conversation"><div className="m5-conversation-scroll"><TeamTimeline onCoordinatorChat={() => { setGoal(chat.activeChat?.goal ?? ""); setNewChatOpen(true); }} controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} phase={activePhase} phaseKind={activeKind} onApprovalsWaiting={onApprovalsWaiting} pinnedSlot={pinnedSlot} /></div><div className="m5-pinned-slot" data-testid="pinned-approval" ref={setPinnedSlot} />{chat.activeChat.schemaVersion !== 1 && <FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} />}</div> : <EmptyState className="m5-first-chat" label={t("m5.firstChat.title")} headingLevel={2} icon="spark" title={t("m5.firstChat.title")} help={t("m5.firstChat.help")}
+        action={<button type="button" className="m5-btn-primary m5-first-chat-write" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching} onClick={() => setNewChatOpen(true)}>{t("m5.firstChat.write")}<kbd aria-hidden="true">⌘N</kbd></button>}>
+        <p className="m5-first-chat-note m5-goal-examples-title">{t("m5.firstChat.exampleHelp")}</p>
         <div className="m5-goal-examples">{(["explain", "plan", "readme"] as const).map(example => <button key={example} type="button" className="m5-secondary" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching || goal.trim().length > 0} onClick={() => { setGoal(t(`m5.firstChat.${example}`)); setNewChatOpen(true); }}>
-          {t(`m5.firstChat.${example}`)}
-        </button>)}</div><p className="m5-first-chat-note">{t("m5.firstChat.exampleHelp")}</p>
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>{t(`m5.firstChat.${example}`)}
+        </button>)}</div>
         {chat.settings && <details className="m5-chat-team-details"><summary>{t("m5.firstChat.team")}</summary><dl className="m5-team-preview">{roleSettingsAsV3(chat.settings).roles.map(role => <div key={role.roleId}><dt>{roleLabel(role.roleId, roleSettingsAsV3(chat.settings!).roleDefinitions, t)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{hasUsableModel(role.runtime, role.modelSelector) ? modelLabel(role.runtime, role.modelSelector) : t("m5.roles.unselectedModel")}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl><p className="m5-first-chat-note">{t("m5.firstChat.teamHelp")}</p></details>}
-      </section>}
+      </EmptyState>}
         resultBox={chat.activeChat && <ResultBox view={resultView} mode={resultBoxMode({ phase: activePhase, working: activeTeamWorking, switching: chat.switching, hasView: resultView !== null })}
           detail={resultView && <>{resultView.loading ? <span className="m5-skeleton-line" aria-label={t("m5.task.loading")} />
             : resultView.detailKey === "m5.task.result.review" ? <>{snapshot.diffSummary ? <>{t("m5.result.files", { count: snapshot.diffSummary.entries.length })} <LineCounts entry={snapshot.diffSummary.entries.reduce((sum, entry) => ({ added: sum.added + (entry.added ?? 0), removed: sum.removed + (entry.removed ?? 0) }), { added: 0, removed: 0 })} /> · </> : null}{t(resultView.detailKey)}</>

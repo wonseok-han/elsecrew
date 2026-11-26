@@ -6,7 +6,17 @@ import { platformKey, UPDATE_FEED_URL } from "./update-manifest.ts";
 // Updates come from the project's own signed release manifest (no paid code
 // signing). Only packaged builds on supported platforms use the channel.
 
-export function installAppUpdateMenu(restart: (install: () => void) => Promise<boolean>): void {
+/** What main exposes to the in-app banner (ADE U8, Q7): the state it owns, a
+ * check it may start, and the restart it alone confirms and performs. */
+export interface AppUpdateHandle {
+  state(): UpdateState;
+  /** Starts a check (and download) when the controller allows it; nothing else. */
+  check(): void;
+  /** Restarts into the downloaded update; only after main's own confirmation (caller). */
+  restart(): Promise<void>;
+}
+
+export function installAppUpdateMenu(restart: (install: () => void) => Promise<boolean>, changed: (state: UpdateState) => void = () => undefined): AppUpdateHandle {
   const ko = app.getLocale().toLowerCase().startsWith("ko");
   const labels: Record<UpdateState, string> = {
     unavailable: ko ? "앱 업데이트 배포 준비 중" : "App updates are not configured",
@@ -27,6 +37,7 @@ export function installAppUpdateMenu(restart: (install: () => void) => Promise<b
       item.label = labels[controller.state];
       item.enabled = !busy && !["checking", "downloading", "restarting"].includes(controller.state);
     }
+    changed(controller.state);
   }
   const menu = Menu.getApplicationMenu() ?? Menu.buildFromTemplate([
     ...(process.platform === "darwin" ? [{ role: "appMenu" as const }] : []),
@@ -44,8 +55,8 @@ export function installAppUpdateMenu(restart: (install: () => void) => Promise<b
               : `Current version: ${app.getVersion()}\nOnly released Elsecrew builds for macOS and Windows download and install new versions. App updates are separate from agent updates.` });
         } else if (controller.state === "ready") {
           const answer = await dialog.showMessageBox({ type: "question", message: ko ? "업데이트를 적용하고 다시 시작할까요?" : "Install the update and restart?",
-            detail: ko ? "편집 중인 내용을 먼저 저장하세요. 진행 중인 작업의 안전한 종료를 확인할 수 없으면 재시작하지 않아요." : "Save your edits first. Restart is blocked if safe task shutdown cannot be confirmed.",
-            buttons: ko ? ["취소", "저장했어요 — 재시작"] : ["Cancel", "Edits saved — restart"], defaultId: 0, cancelId: 0 });
+            detail: ko ? "편집 중인 내용을 먼저 저장하세요. 진행 중인 작업이 안전하게 멈추는 것을 확인할 수 없으면 다시 시작하지 않아요." : "Save your edits first. The app does not restart unless running work can be confirmed to stop safely.",
+            buttons: ko ? ["취소", "다시 시작"] : ["Cancel", "Restart"], defaultId: 0, cancelId: 0 });
           if (answer.response === 1) await controller.restart();
         } else {
           const answer = await dialog.showMessageBox({ type: "question", message: ko ? "새 앱 버전을 확인하고 다운로드할까요?" : "Check for and download a new app version?",
@@ -62,4 +73,5 @@ export function installAppUpdateMenu(restart: (install: () => void) => Promise<b
   const updatable = app.isPackaged && platformKey(process.platform, process.arch) !== null;
   controller.configure(UPDATE_FEED_URL, updatable);
   if (updatable) removeStaleUpdates();
+  return { state: () => controller.state, check: () => controller.check(), restart: () => controller.restart() };
 }

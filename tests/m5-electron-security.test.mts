@@ -451,7 +451,7 @@ function moduleFor(
   },
 ) {
   if (specifier === "electron") return fakes.electron;
-  if (specifier === "./app-update-menu.ts") return { installAppUpdateMenu() {} };
+  if (specifier === "./app-update-menu.ts") return { installAppUpdateMenu: (_restart: unknown, changed: (state: string) => void) => { fakeUpdate.changed = changed; return fakeUpdate.handle; } };
   if (specifier === "./zoom-menu.ts") return { installZoomGuardedMenu: (zoom: (step: -1 | 0 | 1) => void) => { installedZoom.current = zoom; }, zoomLevelAfter: zoomMenuModel.zoomLevelAfter };
   // Usage reads touch the app keychain and network; the security harness only
   // needs the reader to exist and must fail loudly if a handler reaches it.
@@ -539,6 +539,11 @@ const quitAnswer = { value: { blockers: [] as string[], safeToQuit: true } };
 const folderPick: { path: string | null } = { path: null };
 /** Timers main.ts set, held so a test can run them. */
 const heldTimers: (() => void)[] = [];
+/** main's app update handle, played by the harness (ADE U8): its state and what main asked of it. */
+const fakeUpdate = {
+  state: "unavailable", calls: [] as string[], changed: null as ((state: string) => void) | null,
+  handle: { state: () => fakeUpdate.state, check: () => { fakeUpdate.calls.push("check"); }, restart: async () => { fakeUpdate.calls.push("restart"); } },
+};
 /** What the native "open this address?" confirmation answers (0 = open). */
 const externalLinkAnswer = { value: 1 };
 import * as catalogContract from "../src/m5/contracts/project-catalog-v1.ts";
@@ -816,5 +821,49 @@ test("a folder that becomes a project is confirmed in main's own box; the page h
   } finally {
     folderPick.path = null;
     externalLinkAnswer.value = answer;
+  }
+});
+
+test("in-app update banner: the page reads main's state and asks; only main's own box can restart (ADE U8, Q7)", async () => {
+  const harness = await loadMain();
+  const state = harness.handlers.get("m5:app-update:state")!;
+  const request = harness.handlers.get("m5:app-update:request")!;
+  assert.ok(state && request);
+  const answer = externalLinkAnswer.value;
+  fakeUpdate.calls.length = 0;
+  try {
+    fakeUpdate.state = "ready";
+    // Only the main frame, no input to read the state; one fixed request word to ask.
+    await assert.rejects(state({ sender: {}, senderFrame: {} }));
+    await assert.rejects(state(harness.currentEvent(), "x"));
+    assert.equal(await state(harness.currentEvent()), "ready");
+    for (const bad of [[], ["install"], ["restart", true], [{ action: "restart" }], ["quitAndInstall"]]) {
+      await assert.rejects(request(harness.currentEvent(), ...bad), JSON.stringify(bad));
+    }
+    await assert.rejects(request({ sender: {}, senderFrame: {} }, "restart"));
+    assert.deepEqual(fakeUpdate.calls, []);
+    // A restart request alone does nothing: main asks in its own box; "Cancel" keeps the app running.
+    externalLinkAnswer.value = 0;
+    assert.equal(await request(harness.currentEvent(), "restart"), "ready");
+    assert.ok(harness.sidecarCalls.some(call => call.startsWith("confirm:")), "main asked in its own box");
+    assert.deepEqual(fakeUpdate.calls, []);
+    externalLinkAnswer.value = 1;
+    await request(harness.currentEvent(), "restart");
+    assert.deepEqual(fakeUpdate.calls, ["restart"]);
+    // No downloaded update: nothing to restart into, and no box.
+    fakeUpdate.state = "idle";
+    const boxes = harness.sidecarCalls.filter(call => call.startsWith("confirm:")).length;
+    await assert.rejects(request(harness.currentEvent(), "restart"));
+    assert.equal(harness.sidecarCalls.filter(call => call.startsWith("confirm:")).length, boxes);
+    // A check only starts a check (the controller decides whether it may).
+    await request(harness.currentEvent(), "check");
+    assert.deepEqual(fakeUpdate.calls, ["restart", "check"]);
+    // State changes reach the page.
+    fakeUpdate.changed?.("downloading");
+    const sent = (harness.window.webContents as unknown as { sent: [string, unknown][] }).sent;
+    assert.deepEqual(sent.at(-1), ["m5:app-update:changed", "downloading"]);
+  } finally {
+    externalLinkAnswer.value = answer;
+    fakeUpdate.state = "unavailable";
   }
 });
