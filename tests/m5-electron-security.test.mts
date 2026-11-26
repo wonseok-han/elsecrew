@@ -1013,11 +1013,7 @@ test("build-then-preview: a build runs only after main's own box, in the folder 
   const harness = await loadMain();
   const handler = harness.handlers.get(previewContract.PREVIEW_BUILD_CHANNEL_V1)!;
   assert.ok(handler, "the build channel is registered");
-  // macOS only (its sandbox and process checks): elsewhere nothing runs (review minor 1).
-  if (process.platform !== "darwin") {
-    await assert.rejects(handler(harness.currentEvent(), { action: "plan", projectId: "project_1", chatId: "chat_1" }), /not enabled/);
-    return;
-  }
+  // The harness's main runs as macOS (its fake `process.platform`), whatever the machine.
   const answer = externalLinkAnswer.value;
   const start = { action: "start", projectId: "project_1", chatId: "chat_1", step: "build" };
   const boxes = () => harness.sidecarCalls.filter(call => call.startsWith("confirm:"));
@@ -1047,7 +1043,7 @@ test("build-then-preview: a build runs only after main's own box, in the folder 
     assert.equal((await handler(harness.currentEvent(), start) as { outcome: string }).outcome, "started");
     assert.equal(fakePreviewBuild.spawns.length, 1);
     const spawned = fakePreviewBuild.spawns[0]!;
-    assert.deepEqual([spawned.program, spawned.args, spawned.cwd, spawned.detached], ["/usr/bin/sandbox-exec", ["-p", "(profile)", "/opt/homebrew/bin/npm", "run", "build"], "/Users/me/elsecrew/workspaces/app/task-1", true]);
+    assert.deepEqual([spawned.program, spawned.args, spawned.cwd, spawned.detached], ["/usr/bin/sandbox-exec", ["-p", "(profile)", "/opt/homebrew/bin/npm", "run", "build"], "/Users/me/elsecrew/workspaces/app/task-1", process.platform !== "win32"]);
     assert.deepEqual(Object.keys(spawned.env).filter(name => /KEY|TOKEN|ELSECREW/.test(name)), []);
     assert.equal(spawned.env.HOME, "/Users/me");
     // One job per task: a second start while it runs is busy, without a box.
