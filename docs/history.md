@@ -21,6 +21,7 @@ Orca 조정자 작업. 기준은 feature/ade 907eeba4, 브랜치 `orca/ade-keych
   - 실제 `Claude Code-credentials-f97f5bae`는 읽기(ACL) 외에 건드리지 않았다(mdat 20261126005712Z 그대로). 기존 partition의 `cdhash:dd3f…`는 남아 있지만 해롭지 않다.
   - 실수 기록: 개발 앱 확인 때 `pnpm m5:dev -- -- …`의 `--`가 하나 많아 `--user-data-dir`·디버깅 포트가 적용되지 않았고, 개발 기본 프로필(`~/Library/Application Support/Elsecrew`)로 떴다. 다른 개발 앱 인스턴스는 없었고, 시작 화면 뒤 SIGTERM으로 정상 종료해 봉인이 다시 기록됐다(정상 사용분). 다음부터는 `pnpm m5:dev -- --user-data-dir=…` 형태로 쓴다.
 - **테스트**: `cargo test -p elsecrew-sidecar` 통과(lib 887, 무시 44 / 통합 16, 무시 1). 새 테스트 2개와 수동 probe 1개(`#[ignore]`) 포함. `npm test` 752 통과(지운 서명 스크립트 테스트 7개만큼 줄었다), `pnpm build` 통과, `git diff --check` 통과. Rust workspace 전체는 다시 돌리지 않았다(변경은 macOS 전용 `provider_claude_refresh` 하나).
+- **PR #4 CI**: macOS·Windows 하네스, website, GitGuardian 모두 통과. 단 CI 하네스는 sidecar crate 테스트를 돌리지 않아 새 Keychain 테스트의 증거는 위 로컬 실행뿐이다.
 - **미검증**: 실제 만료 토큰 갱신(새 쓰기 경로로 실제 Claude 항목 갱신)은 만료 시점에만 일어나 이번에 돌리지 않았다. 같은 함수를 로그인 키체인 더미 항목으로 확인했다.
 - **다음 할 일**
   - 이 PR의 CI·독립 검토 대응
