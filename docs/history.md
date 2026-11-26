@@ -2,6 +2,17 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — ADE 1차-나 결과 미리보기 백엔드(P1·P2·P4 안전 시험), `ELSECREW_PREVIEW=1` 뒤
+브랜치 `orca/ade-preview-backend`(기준 `feature/ade` d221832f). 설계 `docs/proposals/m5-ade-layout-plan.md` 2장·3.2 P1/P2/P4. 결정(위임 채택): 격리 세션 안 JS 허용, 저장 데이터는 열려 있는 동안만(메모리 partition), 대상은 작업 공간 정적 파일만. 화면(P3)·`workbench.tsx`·`styles.css`는 건드리지 않았다(레이아웃 워커와 병행).
+
+- **P1 sidecar**: `preview.resolve`(project+chat만 받고 채팅 영속 바인딩에서 주소를 꺼냄, 진입 후보 순서)·`preview.readAsset`(링크 비추종 핸들 탐색, 점 조각·인코딩·확장자 거절, 512KiB base64 조각, 없음/거절/초과는 `outcome`). `provider.install` 뒤 선택 접미 능력. 계약 Rust/TS 동일 표.
+- **P2 main**: `PreviewManagerV1`(WebContentsView 1개, 토큰별 메모리 partition, 첫 로드 전 세션 설정: 권한 전부 거절·webRequest·무효 프록시(루프백 포함)·WebRTC 정책·다운로드 취소), GET/HEAD 전용 핸들러와 고정 헤더, 탐색·창 제한, 수명(교체·30초 숨김·충돌·작업 공간 소멸·창 닫힘·종료 시작), IPC `m5:preview:v1`, preload `window.m5Preview`. 상세는 `docs/architecture.md` "결과 미리보기 백엔드".
+- **발견(T3 실제 누출)**: `<link rel=dns-prefetch>`는 CSP·webRequest·프록시를 모두 우회해 실제 DNS 질의를 보냈다(net log `DNS_TRANSACTION_QUERY`). 플래그가 켜지면 `--blink-settings=dnsPrefetchingEnabled=false`를 앱 전체에 붙여 막았고, 수정 뒤 프로브에서 고유 호스트 조회 0건. 프록시가 거절된 뒤 Chromium이 하는 캐시·hosts 전용 조회(task 4/9)와 IPv6 도달성 UDP connect(패킷 없음)는 누출이 아니라 판정에서 분리 기록했다.
+- **P4 프로브** `scripts/m5-preview-isolation-probe.mjs`(`pnpm m5:test:preview-isolation`, g6-release에 연결): 격리 앱 데이터·사본 작업 공간(`ELSECREW_GIT_WORKTREES=0`)·공급자 없음·원격 디버깅 포트 없음. 로컬 HTTP/WS/UDP 수집기 0건, net log, 페이지 자체 보고로 판정. CSP를 CDP로 우회한 상태(webRequest만)와 webRequest까지 뗀 상태(프록시만)에서도 다시 시도해 각 계층이 혼자 막는 것을 확인. 결과 **PASS**(T1·T2·T3·T4·T5·T6·T7·T9·T10·T11·T12·T13·T14·T15, todo 넓게/좁게 390px). T8·T16·T17은 화면(P3) 몫.
+- **G6 진단(1회, 개발 빌드, Electron 프로세스만·sidecar 제외)**: 유휴 413MiB(4개) → todo 미리보기 열림 508MiB(+렌더러 92MiB) → 닫은 뒤 387MiB(4개). 유휴에는 추가 프로세스가 없다. partition 객체는 앱 종료까지 남는다(내용은 지움).
+- **검증**: Rust 워크스페이스 — core 242·protocol 74(preview 4)·sidecar lib 886+(preview 6, 전체 실행에서 나머지 8 포함 통과)·stdio 통합 16 통과. 첫 전체 실행에서 Rust 상태 파서(`lifecycle_g5d_v1::parse_followup_status`)가 미리보기 접미 쌍을 몰라 4개 실패 → 추가 후 통과. `npm test` 840/840, `pnpm build` 통과. 미리보기 단위: 정책 11·매니저 13·보안 하네스 1(IPC 보낸 쪽 위조·플래그 꺼짐·스위치)·브리지 2. 격리 프로브 PASS.
+- **다음**: Codex 독립 검토(조정자 진행), 검토 차단·중요 0 뒤 기본 활성화 결정, P3 화면(레이아웃 머지 후; API는 `M5PreviewBridgeV1`), 패키지 빌드에서 프로브 재확인, Electron 올릴 때 T2·T3 프로브 재실행.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #4 독립 검토(차단 0·중요 4·경미 2) 전부 반영
 검토 문서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr4.md`(검토 HEAD d677a1e3). 같은 브랜치 `orca/ade-keychain-fix`에서 한 번에 고쳤다. 바뀐 곳은 `provider_claude_refresh.rs`, 호출부 `provider_claude_login.rs`, `Cargo.toml`, `docs/architecture.md`다.
 
@@ -127,6 +138,8 @@ Orca 조정자 작업. 기준은 feature/ade 907eeba4, 브랜치 `orca/ade-keych
 - 위저드 6단계: 에이전트 선택 → 진단 → 설치 → 로그인 → 첫 프로젝트 → 졸업식
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **결과 미리보기의 DNS 미리 찾기(2026-11-26)**: Electron 43에서 `<link rel=dns-prefetch>`는 CSP·`webRequest`·고정 프록시를 모두 거치지 않고 실제 DNS 질의를 보낸다. 미리보기가 켜지면 `--blink-settings=dnsPrefetchingEnabled=false`(앱 전체)를 유지할 것. 확인은 `pnpm m5:test:preview-isolation`의 net log 판정이며 Electron을 올릴 때 다시 돌린다. 미리보기 토큰은 renderer에 주지 않고, 작업 공간 주소는 sidecar가 채팅 바인딩에서 꺼낸다(renderer 값 불사용).
 
 - **ADE 1차-나가 지켜야 할 1차-가 규칙(2026-11-26)**: 판단 로직은 `task-status.ts`(목록 묶음 `taskGroup`, 결과 막대 `resultBarView`, 변경 줄 `changesStatus`, `standingRead`)·`settings-draft.ts`·`markdown*.ts`·`approval-display.ts`·`merge-confirmation.ts`·`last-session.ts`에 있고 `workbench.tsx`는 값만 연결한다. 위치를 옮길 때도 지킬 것:
   - 열린 작업의 합침·반영 상태 읽기는 결과 막대와 별개로 작업대가 한다(작업·변경 목록·"다시 확인"마다). 막대가 숨어도(답변 완료) 읽기는 계속돼야 한다.

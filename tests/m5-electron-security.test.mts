@@ -13,6 +13,10 @@ import * as deviceReportContract from "../src/m5/contracts/device-report-v1.ts";
 import * as sessionDiagnosticsContract from "../src/m5/contracts/session-diagnostics-v1.ts";
 import * as loginDiagnostic from "../src/m5/provider-login-diagnostic.ts";
 import * as usageContract from "../src/m5/contracts/provider-usage-v1.ts";
+import * as previewContract from "../src/m5/contracts/preview-v1.ts";
+import * as previewPolicy from "../electron/preview-policy.ts";
+import * as previewManagerModule from "../electron/preview-manager.ts";
+import * as previewFlag from "../electron/preview-flag.ts";
 import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS, M5_BRIDGE_V7_CHANNELS, M5_BRIDGE_V8_CHANNELS } from "../electron/ipc-channels.ts";
 
 const require = createRequire(import.meta.url);
@@ -208,6 +212,9 @@ interface MainHarness {
   protocolHandlers: Map<string, (request: { url: string }) => Promise<Response>>;
   sidecarCalls: string[];
   window: FakeWindow;
+  privilegedSchemes: { scheme: string; privileges: Record<string, unknown> }[];
+  partitions: string[];
+  switches: string[];
   currentEvent(): { sender: FakeWindow["webContents"]; senderFrame: { url: string } };
 }
 
@@ -240,13 +247,17 @@ class FakeWindow {
     return this.destroyed;
   }
 
+  getContentSize() {
+    return [1280, 800];
+  }
+
   async loadURL(url: string) {
     this.webContents.mainFrame.url = url;
     this.initialStatus = await FakeWindow.duringLoad?.(this);
   }
 }
 
-async function loadMain(devServerUrl: string | undefined = undefined, requestDuringLoad = false): Promise<MainHarness> {
+async function loadMain(devServerUrl: string | undefined = undefined, requestDuringLoad = false, env: Record<string, string> = {}): Promise<MainHarness> {
   FakeWindow.windows = [];
   const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
   FakeWindow.duringLoad = requestDuringLoad ? async (window) => handlers.get(M5_INTERNAL_CHANNELS_V1.systemGetStatus)!({sender: window.webContents, senderFrame: window.webContents.mainFrame}) : undefined;
@@ -254,6 +265,9 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
   const netFetches: string[] = [];
   const sidecarCalls: string[] = [];
   const providerConnections: Record<"claude-code" | "codex", boolean> = {"claude-code": true, codex: true};
+  const privilegedSchemes: { scheme: string; privileges: Record<string, unknown> }[] = [];
+  const partitions: string[] = [];
+  const switches: string[] = [];
   const files = new Set([resolve("/app/.vite/renderer/main_window/index.html")]);
   const electron = {
     app: {
@@ -265,6 +279,7 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
       setName: (name: string) => { assert.equal(name, "Elsecrew"); },
       setPath: (key: string, value: string) => { assert.equal(key, "userData"); assert.equal(value, "/app-data"); },
       isPackaged: false,
+      commandLine: { appendSwitch: (name: string, value?: string) => { switches.push(value === undefined ? name : `${name}=${value}`); } },
       quit: () => undefined,
     },
     BrowserWindow: Object.assign(FakeWindow, { getAllWindows: () => FakeWindow.windows }),
@@ -279,8 +294,12 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
       netFetches.push(url);
       return new Response("local", { status: 200 });
     } },
+    // A preview opening in this harness stops at the fake session: the
+    // manager has its own tests (m5-preview-manager).
+    session: { fromPartition: (partition: string) => { partitions.push(partition); throw new Error("unexpected preview session in main security harness"); } },
+    WebContentsView: class { constructor() { throw new Error("unexpected preview view in main security harness"); } },
     protocol: {
-      registerSchemesAsPrivileged: () => undefined,
+      registerSchemesAsPrivileged: (schemes: { scheme: string; privileges: Record<string, unknown> }[]) => { privilegedSchemes.push(...schemes); },
       handle: async (scheme: string, handler: (request: { url: string }) => Promise<Response>) => protocolHandlers.set(scheme, handler),
     },
   };
@@ -324,6 +343,10 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
       sidecarCalls.push("getSystemStatus");
       return { state: "ready" };
     }
+    async previewResolve(input: { projectId: string; chatId: string; entry: string | null }) {
+      sidecarCalls.push(`previewResolve:${JSON.stringify(input)}`);
+      return { ...input, worktreeId: "worktree_1", workspaceIdentity: "workspace_1", entry: null, refusal: null };
+    }
     async getProjectTree() {
       sidecarCalls.push("getProjectTree");
       return { tree: true };
@@ -354,7 +377,7 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
     module,
     exports: module.exports,
     process: { platform: "darwin", resourcesPath: "/resources", execPath: "node" },
-    require: (specifier: string) => moduleFor(specifier, { electron, files, FakeSidecar, FakeEventCredit, FakeQuitCoordinator }),
+    require: (specifier: string) => moduleFor(specifier, { electron, files, FakeSidecar, FakeEventCredit, FakeQuitCoordinator, env }),
   });
   const source = readFileSync(resolve(root, "electron/main.ts"), "utf8");
   const compiled = typescript.transpileModule(source, {
@@ -373,6 +396,9 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
     sidecarCalls,
     providerConnections,
     window,
+    privilegedSchemes,
+    partitions,
+    switches,
     currentEvent: () => ({ sender: window.webContents, senderFrame: window.webContents.mainFrame }),
   };
 }
@@ -385,6 +411,7 @@ function moduleFor(
     FakeSidecar: new (...args: unknown[]) => unknown;
     FakeEventCredit: new (...args: unknown[]) => unknown;
     FakeQuitCoordinator: new (...args: unknown[]) => unknown;
+    env: Record<string, string>;
   },
 ) {
   if (specifier === "electron") return fakes.electron;
@@ -398,6 +425,10 @@ function moduleFor(
     }),
   };
   if (specifier.endsWith("provider-usage-v1.ts")) return usageContract;
+  if (specifier.endsWith("preview-v1.ts")) return previewContract;
+  if (specifier === "./preview-policy.ts") return previewPolicy;
+  if (specifier === "./preview-manager.ts") return previewManagerModule;
+  if (specifier === "./preview-flag.ts") return { previewFlags: (packaged: boolean) => previewFlag.previewFlagsFromEnvironment(fakes.env, packaged) };
   if (specifier.endsWith("git-selection-v1.ts")) return gitSelectionContract;
   if (specifier === "./git-selection.ts") return {
     GitSelectionStore: class {
@@ -542,4 +573,60 @@ test("update readiness rejects unsolicited, stale and foreign replies", async ()
   await assert.rejects(handler({sender:{},senderFrame:{}}, "fake", true));
   await assert.rejects(handler(harness.currentEvent(), "stale", true));
   await assert.rejects(handler(harness.currentEvent(), undefined, true));
+});
+
+test("result preview IPC is off by default, answers only the main frame, and never takes a workspace, token or URL", async () => {
+  const open = { action: "open", projectId: "project_1", chatId: "chat_1", entry: null, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide" };
+  const off = await loadMain();
+  assert.deepEqual(off.privilegedSchemes.map(entry => entry.scheme), ["app"], "no preview scheme without the flag");
+  assert.deepEqual(off.switches, [], "no Chromium switch without the flag");
+  const offHandler = off.handlers.get(previewContract.PREVIEW_CHANNEL_V1);
+  assert.ok(offHandler);
+  assert.equal(JSON.stringify(await offHandler(off.currentEvent(), { action: "status" })), JSON.stringify({ action: "status", enabled: false }));
+  await assert.rejects(offHandler(off.currentEvent(), open), /not enabled/);
+  assert.deepEqual(off.sidecarCalls, []);
+
+  const on = await loadMain(undefined, false, { ELSECREW_PREVIEW: "1" });
+  // T3: DNS prefetching (outside proxy, webRequest and CSP) is off app-wide.
+  assert.deepEqual(on.switches, ["blink-settings=dnsPrefetchingEnabled=false"]);
+  // Privileges only; the default session never gets a preview handler (T14).
+  const registered = on.privilegedSchemes.find(entry => entry.scheme === "elsecrew-preview");
+  assert.equal(JSON.stringify(registered?.privileges), JSON.stringify({ standard: true, secure: true, supportFetchAPI: true, corsEnabled: false, allowServiceWorkers: false, bypassCSP: false, stream: false, codeCache: false }));
+  assert.deepEqual([...on.protocolHandlers.keys()], ["app"]);
+  const handler = on.handlers.get(previewContract.PREVIEW_CHANNEL_V1)!;
+  assert.equal(JSON.stringify(await handler(on.currentEvent(), { action: "status" })), JSON.stringify({ action: "status", enabled: true }));
+
+  // T6: another page (a preview's own webContents), a subframe, or an
+  // unknown origin is refused before anything reaches the sidecar.
+  const previewPage = { mainFrame: { url: `elsecrew-preview://${"a".repeat(32)}/index.html` } };
+  for (const event of [
+    { sender: previewPage, senderFrame: previewPage.mainFrame },
+    { sender: on.window.webContents, senderFrame: { url: "app://m5/index.html" } },
+    { sender: {}, senderFrame: {} },
+  ]) {
+    await assert.rejects(handler(event, open));
+    await assert.rejects(handler(event, { action: "status" }));
+  }
+  assert.deepEqual(on.sidecarCalls, []);
+  // The renderer names a project and a chat only: never a workspace address,
+  // a token, a URL, or a path that is not a page inside the workspace.
+  for (const bad of [
+    { ...open, worktreeId: "worktree_1" }, { ...open, workspaceIdentity: "workspace_1" }, { ...open, url: "elsecrew-preview://x/" },
+    { ...open, token: "a".repeat(32) }, { ...open, entry: "../index.html" }, { ...open, entry: ".git/index.html" }, { ...open, entry: "app.js" },
+    { ...open, entry: "/etc/index.html" }, { ...open, bounds: { x: 0, y: 0, width: Number.NaN, height: 10 } }, { ...open, viewport: "tall" },
+  ]) await assert.rejects(handler(on.currentEvent(), bad));
+  await assert.rejects(handler(on.currentEvent(), open, "extra"));
+  // Bounds outside the window are refused in main too.
+  await assert.rejects(handler(on.currentEvent(), { ...open, bounds: { x: 1200, y: 0, width: 500, height: 600 } }), /outside the window/);
+  await assert.rejects(handler(on.currentEvent(), { ...open, bounds: { x: 0, y: 0, width: 100, height: 600 } }), /too small/);
+  assert.deepEqual(on.sidecarCalls, []);
+  // A task with no page yet: nothing is created.
+  assert.equal(JSON.stringify(await handler(on.currentEvent(), open)), JSON.stringify({ action: "open", outcome: "empty", reason: "noEntry" }));
+  assert.deepEqual(on.sidecarCalls, [`previewResolve:${JSON.stringify({ projectId: "project_1", chatId: "chat_1", entry: null })}`]);
+  assert.deepEqual(on.partitions, []);
+  // The app window still never navigates to a preview origin (T14).
+  const navigate = on.window.webContents.listeners.get("will-navigate")!;
+  const event = preventedEvent();
+  navigate(event, `elsecrew-preview://${"a".repeat(32)}/index.html`);
+  assert.equal(event.prevented, true);
 });

@@ -1,0 +1,369 @@
+// Result preview manager with fake Electron objects (plan 2.6 P2: session
+// setup order, protocol handler, lifecycle, quit-while-opening race).
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { PreviewManagerV1, type PreviewManagerOptionsV1 } from "../electron/preview-manager.ts";
+import type { PreviewEventV1, PreviewReadAssetRequestV1, PreviewResolveRequestV1 } from "../src/m5/contracts/preview-v1.ts";
+
+type Listener = (...args: any[]) => unknown;
+
+class FakeSession {
+  readonly partition: string;
+  readonly calls: string[] = [];
+  readonly listeners = new Map<string, Listener>();
+  permissionRequest?: Listener; permissionCheck?: Listener; devicePermission?: Listener; displayMedia?: Listener;
+  beforeRequest?: Listener; headersReceived?: Listener;
+  proxy: unknown;
+  userAgent = "Mozilla/5.0 AppleWebKit/537.36 elsecrew/0.1.2 Chrome/140.0.0.0 Electron/43.4.0 Safari/537.36";
+  handler?: (request: Request) => Promise<Response>;
+  readonly log: string[];
+  constructor(partition: string, log: string[]) { this.partition = partition; this.log = log; }
+  setPermissionRequestHandler(handler: Listener) { this.permissionRequest = handler; this.log.push("permissions"); }
+  setPermissionCheckHandler(handler: Listener) { this.permissionCheck = handler; }
+  setDevicePermissionHandler(handler: Listener) { this.devicePermission = handler; }
+  setDisplayMediaRequestHandler(handler: Listener) { this.displayMedia = handler; }
+  setBluetoothPairingHandler() { throw new Error("unsupported on this platform"); }
+  on(event: string, listener: Listener) { this.listeners.set(event, listener); }
+  webRequest = {
+    onBeforeRequest: (filter: { urls: string[] }, listener: Listener) => { assert.deepEqual(filter.urls, ["<all_urls>"]); this.beforeRequest = listener; this.log.push("webRequest"); },
+    onHeadersReceived: (_filter: unknown, listener: Listener) => { this.headersReceived = listener; },
+  };
+  setSpellCheckerEnabled(enabled: boolean) { assert.equal(enabled, false); }
+  getUserAgent() { return this.userAgent; }
+  setUserAgent(value: string) { this.userAgent = value; }
+  async setProxy(config: unknown) { this.proxy = config; this.log.push("proxy"); }
+  protocol = {
+    handle: (scheme: string, handler: (request: Request) => Promise<Response>) => { assert.equal(scheme, "elsecrew-preview"); this.handler = handler; this.log.push("protocol"); },
+    unhandle: (scheme: string) => { assert.equal(scheme, "elsecrew-preview"); this.handler = undefined; this.calls.push("unhandle"); },
+  };
+  async clearStorageData() { this.calls.push("clearStorageData"); }
+  async clearCache() { this.calls.push("clearCache"); }
+  async closeAllConnections() { this.calls.push("closeAllConnections"); }
+}
+
+class FakeContents {
+  readonly listeners = new Map<string, Listener>();
+  openHandler?: () => { action: string };
+  destroyed = false;
+  url = "";
+  webRtcPolicy = "";
+  calls: string[] = [];
+  readonly log: string[];
+  constructor(log: string[]) { this.log = log; }
+  on(event: string, listener: Listener) { this.listeners.set(event, listener); }
+  setWindowOpenHandler(handler: () => { action: string }) { this.openHandler = handler; }
+  setWebRTCIPHandlingPolicy(policy: string) { this.webRtcPolicy = policy; }
+  async loadURL(url: string) { this.url = url; this.log.push("load"); }
+  isDestroyed() { return this.destroyed; }
+  close() { this.destroyed = true; this.calls.push("close"); }
+  reloadIgnoringCache() { this.calls.push("reload"); }
+  closeDevTools() { this.calls.push("closeDevTools"); }
+  async capturePage() { return { isEmpty: () => false, toJPEG: (quality: number) => { assert.equal(quality, 70); return Buffer.from("jpeg"); } }; }
+}
+
+class FakeView {
+  readonly webContents: FakeContents;
+  bounds: unknown; visible: boolean | undefined; background = "";
+  readonly webPreferences: Record<string, unknown>;
+  constructor(webPreferences: Record<string, unknown>, log: string[]) { this.webPreferences = webPreferences; this.webContents = new FakeContents(log); log.push("view"); }
+  setBounds(bounds: unknown) { this.bounds = bounds; }
+  setVisible(visible: boolean) { this.visible = visible; }
+  setBackgroundColor(color: string) { this.background = color; }
+}
+
+function harness(overrides: Partial<PreviewManagerOptionsV1> = {}, files: Record<string, Buffer> = { "index.html": Buffer.from("<p>hi</p>") }) {
+  const log: string[] = [];
+  const sessions: FakeSession[] = [];
+  const views: FakeView[] = [];
+  const events: PreviewEventV1[] = [];
+  const reads: PreviewReadAssetRequestV1[] = [];
+  const resolves: PreviewResolveRequestV1[] = [];
+  const children: FakeView[] = [];
+  const window = {
+    destroyed: false,
+    isDestroyed() { return this.destroyed; },
+    getContentSize: () => [1280, 800],
+    contentView: {
+      addChildView: (view: FakeView) => { children.push(view); log.push("attach"); },
+      removeChildView: (view: FakeView) => { children.splice(children.indexOf(view), 1); },
+    },
+  };
+  let resolveGate: Promise<void> = Promise.resolve();
+  const sidecar = {
+    previewResolve: async (input: PreviewResolveRequestV1) => {
+      resolves.push(input);
+      await resolveGate;
+      return { ...input, worktreeId: "worktree_1", workspaceIdentity: "workspace_1", entry: "index.html" as string | null, refusal: null };
+    },
+    previewReadAsset: async (input: PreviewReadAssetRequestV1) => {
+      reads.push(input);
+      const file = files[input.path];
+      if (!file) return { ...input, outcome: "notFound" as const, byteLength: null, version: null, bytesBase64: null };
+      const chunk = file.subarray(input.offset, input.offset + 512 * 1024);
+      return { ...input, outcome: "ok" as const, byteLength: file.length, version: `sha256:${"a".repeat(64)}` as const, bytesBase64: chunk.toString("base64") };
+    },
+  };
+  const manager = new PreviewManagerV1({
+    enabled: true,
+    devTools: false,
+    fromPartition: (partition) => { const session = new FakeSession(partition, log); sessions.push(session); log.push("session"); return session as never; },
+    createView: (webPreferences) => { const view = new FakeView(webPreferences as Record<string, unknown>, log); views.push(view); return view as never; },
+    window: () => window as never,
+    sidecar: () => sidecar,
+    send: (event) => { events.push(event); },
+    log: () => undefined,
+    ...overrides,
+  });
+  return {
+    manager, log, sessions, views, events, reads, resolves, children, window, sidecar,
+    gate(promise: Promise<void>) { resolveGate = promise; },
+    open: (entry: string | null = null) => manager.request({ action: "open", projectId: "project_1", chatId: "chat_1", entry, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide" }),
+  };
+}
+
+async function opened(h: ReturnType<typeof harness>) {
+  const result = await h.open();
+  assert.equal(result.action, "open");
+  assert.ok(result.action === "open" && result.outcome === "opened");
+  return { result, session: h.sessions.at(-1)!, view: h.views.at(-1)!, token: h.sessions.at(-1)!.partition.slice("preview-".length) };
+}
+
+test("a preview session is fully configured before its view exists or loads", async () => {
+  const h = harness();
+  const { result, session, view, token } = await opened(h);
+  assert.deepEqual(h.log, ["session", "permissions", "webRequest", "proxy", "protocol", "view", "attach", "load"]);
+  assert.match(session.partition, /^preview-[0-9a-f]{32}$/);
+  assert.equal(result.action === "open" && result.outcome === "opened" && result.previewId.includes(token), false, "the renderer never gets the token");
+  assert.deepEqual(h.resolves, [{ projectId: "project_1", chatId: "chat_1", entry: null }]);
+  assert.equal(view.webContents.url, `elsecrew-preview://${token}/index.html`);
+  // No preload, sandboxed, isolated, no Node, no webview, no devtools.
+  const prefs = view.webPreferences;
+  assert.equal(prefs.session, session);
+  assert.equal("preload" in prefs, false);
+  for (const [key, value] of Object.entries({ sandbox: true, contextIsolation: true, nodeIntegration: false, nodeIntegrationInSubFrames: false, webSecurity: true, allowRunningInsecureContent: false, webviewTag: false, devTools: false, spellcheck: false, navigateOnDragDrop: false, safeDialogs: true, autoplayPolicy: "document-user-activation-required", backgroundThrottling: true })) {
+    assert.equal(prefs[key], value, key);
+  }
+  assert.equal(view.webContents.webRtcPolicy, "disable_non_proxied_udp");
+  assert.deepEqual(session.proxy, { mode: "fixed_servers", proxyRules: "127.0.0.1:9", proxyBypassRules: "<-loopback>" });
+  assert.equal(session.userAgent, "Mozilla/5.0 AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36");
+  assert.deepEqual(view.bounds, { x: 700, y: 60, width: 500, height: 600 });
+});
+
+test("every permission, device and screen request is refused; downloads are cancelled (T7·T10)", async () => {
+  const h = harness();
+  const { session } = await opened(h);
+  let granted: unknown;
+  session.permissionRequest!({}, "media", (value: boolean) => { granted = value; });
+  assert.equal(granted, false);
+  for (const permission of ["geolocation", "notifications", "clipboard-read", "fullscreen", "fileSystem", "hid", "serial", "usb", "midiSysex"]) {
+    assert.equal(session.permissionCheck!({}, permission), false, permission);
+  }
+  assert.equal(session.devicePermission!({ deviceType: "hid" }), false);
+  let streams: unknown;
+  session.displayMedia!({}, (value: unknown) => { streams = value; });
+  assert.deepEqual(streams, {});
+  for (const event of ["select-hid-device", "select-usb-device"]) {
+    let prevented = false; let chosen: unknown = "unset";
+    session.listeners.get(event)!({ preventDefault: () => { prevented = true; } }, {}, (id?: string) => { chosen = id; });
+    assert.equal(prevented, true); assert.equal(chosen, undefined);
+  }
+  let port: unknown;
+  session.listeners.get("select-serial-port")!({ preventDefault() {} }, [], {}, (id: string) => { port = id; });
+  assert.equal(port, "");
+  let downloadPrevented = false;
+  session.listeners.get("will-download")!({ preventDefault: () => { downloadPrevented = true; } });
+  assert.equal(downloadPrevented, true);
+  assert.equal(h.manager.diagnostics.blockedDownloads, 1);
+});
+
+test("webRequest cancels everything but the preview's own origin (T1)", async () => {
+  const h = harness();
+  const { session, token } = await opened(h);
+  const decide = (url: string) => { let cancel: unknown; session.beforeRequest!({ url }, (value: { cancel: boolean }) => { cancel = value.cancel; }); return cancel; };
+  assert.equal(decide(`elsecrew-preview://${token}/a.js`), false);
+  assert.equal(decide("data:image/png;base64,AA=="), false);
+  for (const url of ["https://example.com/x", "http://127.0.0.1:9/", "ws://127.0.0.1:1/", "file:///etc/hosts", "app://m5/index.html", `elsecrew-preview://${"f".repeat(32)}/a.js`]) {
+    assert.equal(decide(url), true, url);
+  }
+  assert.equal(h.manager.diagnostics.blockedRequests, 6);
+});
+
+test("the protocol handler serves GET/HEAD only, with fixed headers, from this workspace (T4·T7·T15)", async () => {
+  const big = Buffer.alloc(1_300_000, 7);
+  const h = harness({}, { "index.html": Buffer.from("<p>hi</p>"), "big.js": big, "logo.png": Buffer.from([0, 1, 2]) });
+  const { session, token } = await opened(h);
+  const serve = (url: string, method = "GET") => session.handler!(new Request(url, { method }));
+  const page = await serve(`elsecrew-preview://${token}/`);
+  assert.equal(page.status, 200);
+  assert.equal(await page.text(), "<p>hi</p>");
+  assert.equal(page.headers.get("content-type"), "text/html; charset=utf-8");
+  assert.equal(page.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(page.headers.get("cache-control"), "no-store");
+  assert.match(page.headers.get("content-security-policy")!, /connect-src 'self'/);
+  assert.deepEqual(h.reads.at(-1), { chatId: "chat_1", projectId: "project_1", worktreeId: "worktree_1", workspaceIdentity: "workspace_1", path: "index.html", offset: 0 });
+  // Chunks are joined in order.
+  const script = await serve(`elsecrew-preview://${token}/big.js`);
+  assert.deepEqual(Buffer.from(await script.arrayBuffer()), big);
+  assert.deepEqual(h.reads.filter(read => read.path === "big.js").map(read => read.offset), [0, 524288, 1048576]);
+  const head = await serve(`elsecrew-preview://${token}/logo.png`, "HEAD");
+  assert.equal(head.status, 200);
+  assert.equal(head.headers.get("content-type"), "image/png");
+  for (const method of ["POST", "PUT", "DELETE", "PATCH"]) {
+    const refused = await serve(`elsecrew-preview://${token}/index.html`, method);
+    assert.equal(refused.status, 405, method);
+    assert.equal(refused.headers.get("allow"), "GET, HEAD");
+  }
+  const readsBefore = h.reads.length;
+  for (const url of [
+    `elsecrew-preview://${"f".repeat(32)}/index.html`, `elsecrew-preview://${token}/.env`, `elsecrew-preview://${token}/.git/HEAD`,
+    `elsecrew-preview://${token}/a%2f..%2f..%2fx.txt`, `elsecrew-preview://${token}/key.pem`,
+  ]) assert.equal((await serve(url)).status, 404, url);
+  // `%2e%2e` is a dot segment to the URL parser itself: it folds inside the
+  // origin's root before the handler sees it, never above it.
+  assert.equal(new Request(`elsecrew-preview://${token}/%2e%2e/%2e%2e/index.html`).url, `elsecrew-preview://${token}/index.html`);
+  assert.equal(h.reads.length, readsBefore, "refused paths never reach the sidecar");
+  assert.equal((await serve(`elsecrew-preview://${token}/missing.html`)).status, 404);
+});
+
+test("a workspace that went away closes the preview; a file changing mid-read is retried by the page", async () => {
+  const h = harness();
+  const { session, token, result } = await opened(h);
+  const previewId = result.action === "open" && result.outcome === "opened" ? result.previewId : "";
+  const handler = session.handler!;
+  let version = 0;
+  h.sidecar.previewReadAsset = async (input) => ({ ...input, outcome: "ok", byteLength: 600 * 1024, version: `sha256:${String(version++ % 10).repeat(64)}` as `sha256:${string}`, bytesBase64: Buffer.alloc(input.offset === 0 ? 512 * 1024 : 88 * 1024).toString("base64") });
+  assert.equal((await session.handler!(new Request(`elsecrew-preview://${token}/index.html`))).status, 503);
+  h.sidecar.previewReadAsset = async () => { throw new Error("recoveryRequired: chat workspace snapshot is not active"); };
+  assert.equal((await session.handler!(new Request(`elsecrew-preview://${token}/index.html`))).status, 503);
+  assert.deepEqual(h.events.at(-1), { previewId, kind: "closed", reason: "workspaceUnavailable" });
+  assert.equal(session.handler, undefined, "the scheme is unhandled on that session");
+  assert.equal((await handler(new Request(`elsecrew-preview://${token}/index.html`))).status, 404, "a closed token serves nothing");
+});
+
+test("one token serves at most 2,000 requests", async () => {
+  const h = harness();
+  const { session, token } = await opened(h);
+  for (let index = 0; index < 2000; index++) assert.equal((await session.handler!(new Request(`elsecrew-preview://${token}/index.html`))).status, 200);
+  assert.equal((await session.handler!(new Request(`elsecrew-preview://${token}/index.html`))).status, 404);
+  assert.equal(h.events.at(-1)?.kind, "closed");
+  assert.equal((h.events.at(-1) as { reason: string }).reason, "limit");
+});
+
+test("navigation and new windows stay inside; the screen hears about it once (T9)", async () => {
+  const h = harness();
+  const { view, token } = await opened(h);
+  const contents = view.webContents;
+  assert.deepEqual(contents.openHandler!(), { action: "deny" });
+  for (const [event, url, isMainFrame] of [["will-navigate", "https://example.com/", true], ["will-redirect", "http://127.0.0.1:1/", true], ["will-frame-navigate", "https://example.com/frame", false]] as const) {
+    let prevented = false;
+    contents.listeners.get(event)!({ url, isMainFrame, preventDefault: () => { prevented = true; } });
+    assert.equal(prevented, true, event);
+  }
+  let inside = false;
+  contents.listeners.get("will-navigate")!({ url: `elsecrew-preview://${token}/b.html`, isMainFrame: true, preventDefault: () => { inside = true; } });
+  assert.equal(inside, false);
+  let blank = false;
+  contents.listeners.get("will-frame-navigate")!({ url: "about:blank", isMainFrame: false, preventDefault: () => { blank = true; } });
+  assert.equal(blank, false);
+  assert.equal(h.events.filter(event => event.kind === "blockedNavigation").length, 1);
+  let webview = false;
+  contents.listeners.get("will-attach-webview")!({ preventDefault: () => { webview = true; } });
+  assert.equal(webview, true);
+  let unload = false;
+  contents.listeners.get("will-prevent-unload")!({ preventDefault: () => { unload = true; } });
+  assert.equal(unload, true);
+});
+
+test("replacing, closing and crashing drop the token and clear the partition (T12)", async () => {
+  const h = harness();
+  const first = await opened(h);
+  const second = await opened(h);
+  assert.notEqual(first.session.partition, second.session.partition);
+  assert.deepEqual(first.session.calls.sort(), ["clearCache", "clearStorageData", "closeAllConnections", "unhandle"].sort());
+  assert.equal(first.view.webContents.destroyed, true);
+  assert.equal(h.children.length, 1);
+  assert.equal(h.events.find(event => event.kind === "closed")?.previewId, first.result.action === "open" && first.result.outcome === "opened" ? first.result.previewId : "");
+  // A stale previewId is no longer the open one.
+  const firstId = first.result.action === "open" && first.result.outcome === "opened" ? first.result.previewId : "";
+  assert.equal((await h.manager.request({ action: "reload", previewId: firstId })).action, "reload");
+  assert.deepEqual(first.view.webContents.calls.filter(call => call === "reload"), []);
+  second.view.webContents.listeners.get("render-process-gone")!({}, { reason: "crashed" });
+  assert.equal(second.view.webContents.destroyed, true);
+  assert.equal(h.children.length, 0);
+  assert.equal((h.events.at(-1) as { reason: string }).reason, "crashed");
+  assert.equal(h.manager.currentWebContents, undefined);
+});
+
+test("quitting while the sidecar is still resolving creates nothing (종료 중 열기 경합)", async () => {
+  const h = harness();
+  let release!: () => void;
+  h.gate(new Promise<void>(resolve => { release = resolve; }));
+  const pending = h.open();
+  await Promise.resolve();
+  h.manager.shutdown();
+  release();
+  await assert.rejects(pending, /superseded/);
+  assert.deepEqual(h.sessions, []);
+  assert.deepEqual(h.views, []);
+  await assert.rejects(h.open(), /quits/);
+  assert.equal(JSON.stringify(await h.manager.request({ action: "status" })), JSON.stringify({ action: "status", enabled: false }));
+});
+
+test("a newer open wins over one still resolving", async () => {
+  const h = harness();
+  let release!: () => void;
+  h.gate(new Promise<void>(resolve => { release = resolve; }));
+  const older = h.open();
+  h.gate(Promise.resolve());
+  const newer = h.open();
+  release();
+  await assert.rejects(older, /superseded/);
+  assert.equal((await newer).action, "open");
+  assert.equal(h.views.length, 1);
+});
+
+test("quitting closes an open preview at once", async () => {
+  const h = harness();
+  const { view, session } = await opened(h);
+  h.manager.shutdown();
+  assert.equal(view.webContents.destroyed, true);
+  assert.ok(session.calls.includes("clearStorageData"));
+  assert.equal((h.events.at(-1) as { reason: string }).reason, "quitting");
+});
+
+test("hidden tabs close after the idle wait; layout shows, obscures with a still image, and narrows", async () => {
+  const h = harness({ idleCloseMs: 20 });
+  const { view, result } = await opened(h);
+  const previewId = result.action === "open" && result.outcome === "opened" ? result.previewId : "";
+  view.webContents.listeners.get("did-finish-load")!();
+  assert.equal(view.visible, true);
+  const shown = await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "narrow", obscured: false });
+  assert.equal(shown.action === "layout" && shown.state, "shown");
+  assert.deepEqual(view.bounds, { x: 755, y: 60, width: 390, height: 600 });
+  const covered = await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "narrow", obscured: true });
+  assert.equal(covered.action === "layout" && covered.snapshot, `data:image/jpeg;base64,${Buffer.from("jpeg").toString("base64")}`);
+  assert.equal(view.visible, false);
+  await assert.rejects(h.manager.request({ action: "layout", previewId, bounds: { x: 1200, y: 0, width: 500, height: 600 }, viewport: "wide", obscured: false }));
+  h.manager.setWindowHidden(true);
+  await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: false });
+  assert.equal(view.visible, false, "a minimized window keeps it hidden");
+  h.manager.setWindowHidden(false);
+  assert.equal(view.visible, true);
+  await h.manager.request({ action: "hide", previewId });
+  assert.equal(view.visible, false);
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(view.webContents.destroyed, true);
+  assert.equal((h.events.at(-1) as { reason: string }).reason, "idle");
+});
+
+test("a task with no page creates nothing; the flag off refuses everything but status", async () => {
+  const h = harness();
+  h.sidecar.previewResolve = async (input) => ({ ...input, worktreeId: "w", workspaceIdentity: "i", entry: null, refusal: null });
+  assert.deepEqual(await h.open(), { action: "open", outcome: "empty", reason: "noEntry" });
+  assert.deepEqual(h.sessions, []);
+  const off = harness({ enabled: false });
+  assert.equal(JSON.stringify(await off.manager.request({ action: "status" })), JSON.stringify({ action: "status", enabled: false }));
+  await assert.rejects(off.open(), /not enabled/);
+  assert.deepEqual(off.resolves, []);
+});

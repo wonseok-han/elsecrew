@@ -64,6 +64,8 @@ export const METHODS_V1 = [
   "recovery.markResolved",
   "recovery.resolveAgent",
   "storage.status",
+  "preview.resolve",
+  "preview.readAsset",
 ] as const;
 
 export const EVENTS_V1 = [
