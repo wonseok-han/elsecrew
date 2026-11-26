@@ -27,6 +27,24 @@
   - G7(원본 반영 미리보기)은 사본 방식 작업에만 남은 화면이라 문구만 검사 대상이다.
 - **PR**: #16(https://github.com/wonseok-han/elsecrew/pull/16, base feature/ade, #14 위). 0e3b8af9 CI macOS·Windows·website·GitGuardian 통과. #14를 먼저 머지해야 diff가 U7·U8만 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #14 독립 검토(차단 1·중요 4·경미 3) 반영과 feature/ade 병합 (`orca/ade-screens-u5-u8`)
+검토 `~/Documents/elsecrew-ade-screens-u5-u8-2026-11-26/REVIEW-pr14.md`(대상 dfad3793). 먼저 `origin/feature/ade`(PR #11·#13 포함)를 병합했다. history.md·styles.css 끝에 덧붙인 충돌이라 양쪽을 모두 남겼고, `m5:check:history`에서 누락 0이다.
+
+- **B1 (차단) 설치 동의**: main의 설치 IPC가 `start`를 받으면 다음 순서로 처리한다.
+  - sidecar에서 동의를 기다리는 plan을 직접 읽어, 공급자·planId가 맞지 않으면 거절한다.
+  - main의 기본 대화상자에 쓰기 위치를 적어 묻는다. '설치·업데이트'일 때만 시작을 보내고, 취소하면 plan이 그대로 기다린다.
+  - 시험: 보안 하네스 "installing starts only after main's own box: a page with a valid plan cannot give consent".
+- **I1 재로그인 오안내**: 요청 오류(전송·차단·거절·응답 이상)는 `unreachable`(다시 확인만)로 묶는다. 카드는 `null` 대신 고정 진단 코드를 넘긴다. 일반 실패는 두 에이전트 모두 다시 확인이 주 행동이고, 다시 로그인은 대안이다. 시험: 단위 "PR #14 I1", U5 매핑 시험 갱신.
+- **I2 배지**: 새 실행이 시작되면 그 작업의 이전 질문을 해결로 바꾼다. 50줄로 줄일 때 열린 요청은 남긴다(최대 200). 시간이 잘못된 저장 줄은 복원하지 않는다. 시험: 단위 "PR #14 I2"(실제 피드 함수로 질문 → 60줄 추가 → 새 실행).
+- **I3 이름 조회**: 쪽마다 반영하고, 필요한 이름을 다 찾으면 멈춘다(Map). 시험: "PR #14 I3·minor 1".
+- **I4 이동**: 다른 프로젝트 알림은 전환과 같은 한 동작으로 연다. 막히면 이유를 오류 안내로 보이고, 열리지 않으면 대기를 지운다. 읽음은 실제로 열렸을 때만 한다. 시험: "PR #14 I4".
+- **경미**
+  - 1) 저장 데이터 방어: Map, 잘못된 시각, 이름 `<bdi>`와 80자 상한.
+  - 2) 바로가기 문구를 '팀 역할 열기'로 바꾸고 읽기용 이름에 대상을 넣었다. 프로젝트 팀을 읽기 전에는 내놓지 않는다.
+  - 3) 안내의 확인 버튼을 카드의 '연결 상태 다시 확인'과 같은 것으로 하고, 안내가 보이는 동안 카드 버튼을 숨긴다. 본문 없는 알림은 종류를 한 번만 보인다.
+  - 시험: "PR #14 minor 2·3".
+- **검증**: `npm test` 969/969, build, 렌더러 스모크 다크·라이트(30화면 실패 0).
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 화면 통일 U5(에이전트 연결·F11 안내)·U6(알림 패널) (`orca/ade-screens-u5-u8`, 기준 feature/ade e7965d97)
 설계 DESIGN 4.1 U5·U6, 목업 08·12. 범위가 커서 U5+U6(이 PR)과 U7+U8(다음 PR)로 나눈다. 현행 설명은 architecture "에이전트 연결·알림 패널".
 
@@ -44,8 +62,69 @@
   - 렌더 대비 다크·라이트 각 30화면 1208개 실패 0
   - 미리보기 UI 스모크 다크·라이트 각 2회 연속 PASS
   - 캡처 `~/Documents/elsecrew-ade-screens-u5-u8-2026-11-26/u5-u6/`(actual, compare)
-- **PR**: #14(https://github.com/wonseok-han/elsecrew/pull/14, base feature/ade). dfad3793 CI macOS·Windows·website·GitGuardian 통과.
-- **다음**: U7·U8은 PR #16(이 PR 위)으로 이어 했다.
+- **다음**: U7(오류·복구·확인·빈 상태 문구와 금지어 검사)·U8(죽은 CSS, electron 색 2곳, 업데이트 배너)을 이 PR 뒤 다음 PR로 한다.
+
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #11 재확인 3차 B2: 명령 행은 요약만 저장 (`orca/ade-activity-detail`)
+재확인 `~/Documents/elsecrew-ade-activity-detail-2026-11-26/REVIEW-pr11-3.md`: 허용 토큰 방식에서도 짧은 붙임값(`-pabc`), `--pin` 뒤 숫자, 리디렉션 뒤 비밀번호, 파일·호스트·스킴 모양 비밀, 하위 명령 자리의 임의 단어가 남았고, 따옴표 안 공백이 있는 대입으로 시작하는 여러 줄 명령에서 비밀 일부를 프로그램으로 골랐다. 지시(조정자): 저장할 명령 정보를 프로그램 이름·고정 하위 명령·가린 인수 수로 좁힌다.
+
+- **바뀐 것**: 명령 행 필드가 `program`·`subcommand`·`hiddenArgs`로 바뀌었다(`command`·명령 행 `target`·`argsHidden`은 더 저장하지 않음). 규칙은 architecture "명령 행은 요약만 저장한다". 여러 줄·대입 시작·경로 실행·애매한 따옴표나 이스케이프는 아무것도 남기지 않는다. Codex `commandActions`로 만들던 읽기·검색 줄을 없앴다(경로는 파일 이벤트에서만). 화면: "명령 실행 · npm test", "명령 실행 · git diff (인수 2개 가림)", "명령 실행". 예전 행의 줄은 화면에서 같은 요약으로 바꾼다. 펼친 내용의 '전체 명령' 칸을 없앴다.
+- **증명**: 공용 `summary` 82개 = 2차까지의 명령 사례 43 + 3차 반례 12 + 추가 합성 27. Rust `commands_keep_only_a_summary_like_the_screen`와 TS `a command keeps only its program, one listed subcommand and a hidden count…`가 같은 요약을 내고, 저장 행·화면 결과에 "fake" 잔존 0, 기존 `mask` 표 전체도 잔존 0. `every_stored_field_is_sanitized`가 줄 글자 필드 폐기와 program·subcommand 재검사를 확인한다.
+- **저장 시험(SQLite 바이트)**: Claude auto-read에 `summary` 82개 전부를 실제 승인·저장 경로로 보내, 각 행이 기대 요약과 같고(`claude_project_consent_auto_approves_and_still_rejects_outside_files`) DB·WAL 바이트에 합성 비밀 57종이 없음을 확인했다(`assert_store_lacks`). Codex `codex_durable_native_delivery_and_cancel`도 새 모양으로 통과.
+- **검증**: `npm test` 953/953, `pnpm build`, Rust 영향 묶음 16개, `cargo test -p elsecrew-sidecar` 전체 920 통과·0 실패. GitGuardian이 새 합성 사례 `--token=…`·`--secret …` 2건을 형태로 탐지해 `{eq}`·`{sp}` 자리표시로 바꾸고 해당 커밋(9bcf7e32→3e863aaa)을 고쳐 강제 푸시했다.
+- **남은 것**: 노예의 시험 표 확인, 머지.
+
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #11 재확인 B2: 명령 줄 가림을 fail-closed로 (`orca/ade-activity-detail`)
+재확인 `~/Documents/elsecrew-ade-activity-detail-2026-11-26/REVIEW-pr11-2.md`: B1·B3 해결, B2 차단 유지. 인라인 `--header='Authorization: …'`, 따옴표 curl 비밀번호, 붙여 쓴 `-U`, `--oauth2-bearer`, 콜론 없는 `-u` 토큰, 따옴표+평문 이어 쓴 대입, 짧은 bearer·토큰 사용자 이름, 대문자만인 긴 Base64가 남았다. 지시(조정자): 패턴 추가 대신 의심스러우면 가린다.
+
+- **바뀐 것**: 명령 줄 전용 `command_redact.rs` `redact_command` ↔ `secret-shape.ts` `redactCommand`. 허용한 토큰(프로그램, 일부 도구의 하위 명령, 짧은 플래그, 작업 공간 경로, 허용 단어, 작은 숫자, `$이름`, 연산자, URL 스킴·호스트)만 남기고 나머지 인수는 모두 `••••`. 해석이 애매하면(따옴표 짝, 이스케이프, heredoc, 명령 치환, 괄호, 여러 줄, 2,000자 초과) 프로그램 이름만 + `argsHidden`(화면 "(인수 가림)"). 엔진의 `command_row`와 저장 직전 `sanitize`(명령과 명령 줄 target), 화면 파서가 모두 적용한다. 설명·검색어 같은 산문은 기존 패턴 가림을 유지한다.
+- **증명**: 공용 표에 `command` 43개(리뷰 반례 전부 + 일상 명령 + 애매한 줄)를 추가했다. Rust `commands_are_redacted_fail_closed_like_the_screen`와 TS `command lines are redacted fail-closed, like the engine`이 같은 결과·재적용 불변·"fake" 문자열 잔존 0을 확인하고, 기존 `mask` 표 전체를 명령 줄로 넣어도 잔존 0임을 확인한다.
+- **저장 시험**: Claude auto-read 계열에 인라인 Authorization 헤더와 따옴표 curl 비밀번호를 더해, `assert_store_lacks`로 SQLite 파일(DB·WAL) 바이트에 원문이 없음을 다시 확인했다(`claude_project_consent_auto_approves_and_still_rejects_outside_files`, `claude_auto_read_after_real_bash_side_effects`). Codex `codex_durable_native_delivery_and_cancel`도 통과.
+- **대가**: `sed -n 1,80p src/app.js`는 `sed -n •••• src/app.js`, `rg TODO src`는 `rg •••• ••••`처럼 보인다. 재생 캡처를 갱신했다.
+- **검증**: `npm test` 931/931(feature/ade e7965d97 병합 뒤 953/953), `pnpm build`, Rust 영향 묶음 16개, `cargo test -p elsecrew-sidecar` 전체 920 통과·0 실패(942473f3, 병합으로 Rust 변경 없음). CI(35a39da2): GitGuardian(탐지 0)·test macOS·Windows·website 통과, MERGEABLE/CLEAN.
+- **병합**: feature/ade e7965d97(PR #12). `styles.css`는 양쪽 끝 구역 유지, `history.md`는 diff 정렬이 엉켜 feature/ade 파일에 이 브랜치의 엔트리 3개와 핵심 결정 항목을 다시 얹었다(`m5-history-entries` 양쪽 기준 유실 0).
+- **남은 것**: 노예의 B2 재확인, 머지.
+
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #11 독립 검토(차단 3·중요 4·경미 3) 전부 반영, feature/ade 병합 (`orca/ade-activity-detail`)
+검토 `~/Documents/elsecrew-ade-activity-detail-2026-11-26/REVIEW-pr11.md`(대상 0c413fab). 원칙: 가림은 저장 전, 실제 저장소를 읽어 검증, 출력은 저장하지 않음.
+
+| 지적 | 처리 | 시험 |
+| --- | --- | --- |
+| B1 경로·호스트·ID 원문 저장 | 모든 행이 `record_activity`의 `sanitize`(아는 필드만, 무력화→가림→자르기)를 거친다. 작업 공간 밖 경로는 마지막 두 부분만. 공급자 ID 대신 앱 키(`c1`, `t1`) | `every_stored_field_is_sanitized`, `paths_stay_inside_the_workspace_or_say_little_outside`, 저장 시험 아래 |
+| B2 가림 우회·자른 뒤 가림 | 가림을 `secret_mask.rs`로 옮기고 Rust·TS 같은 알고리즘으로 넓혔다(-u/--user/-U, mysql -p, URL 쿼리·퍼센트 인코딩, 토큰 사용자 이름, 소문자 bearer, `-`로 시작하는 값, 이스케이프·여러 줄 따옴표, `; & \| , ?` 뒤 대입, 이름 없는 긴 덩어리, 보이지 않는 문자 뒤 이름). 가림은 언제나 자르기 전 | `secrets_are_masked_like_the_screen_does`(공용 `mask` 49·`line` 8), `searches_show_what_was_looked_for_and_where`, TS `secrets are masked with the same rules as the engine…` |
+| B3 출력이 파일 내용 복제 | 명령 출력·도구 결과 본문을 파싱·저장하지 않는다(코어 `ToolDetail.output`·`ToolResult.output` 제거, 화면 출력 칸 제거) | `tool_details_are_read_leniently_and_bounded`, `tool_results_say_how_main_thread_tools_ended_for_display_only`, 저장 시험 |
+| I1 표시 경로를 파일 키로 | 작업의 현재 변경 목록에 그 경로가 정확히 있을 때만 버튼(`openableFile`, 작업대가 diffSummary 경로 집합 전달). 거절·실패 줄은 버튼 없음 | TS `a line opens a file only when the task's change list has that exact path` |
+| I2 완료 줄 중복 소비 | 끝 줄은 id·동사·대상이 같은 첫 시작 줄에 한 번만 붙는다. 앱 키라 공급자 ID 충돌 없음 | TS `each closing row is used once…` |
+| I3 Claude 결과 세션 미결속·0 꾸밈 | `user` 프레임은 세션 ID 일치·UUID 한 번만. `is_error`가 불리언이 아니면 끝 줄 없음, `interrupted`면 "중단됨"(stopped), 종료 코드는 "Exit code N"일 때만 | `tool_results_say_how…`, `claude_done_rows_keep_the_start_and_add_only_what_is_known` |
+| I4 Codex 끝 줄이 시작 정보 잃음 | 시작 줄을 `CodexTools`에 보관하고 끝 줄을 그것으로 만든다. 파일은 경로로 맞추고 끝에만 있는 파일은 새 줄 | `codex_commands_show_the_command_and_how_it_ended`, `codex_file_changes_name_each_file_and_keep_their_place` |
+| M1 공백·줄 구분 차이 | U+2028/2029 무력화, 외톨이 CR도 같게, 두 가림기 모두 ASCII 공백만. 표시 파이프라인(`display_line` ↔ `displayLine`)도 공용 `line` 사례 | 위 공용 사례, `lines_are_masked_then_cut_with_marks_neutralised` |
+| M2 묶음·diff 줄 수 | write→edit도 한 줄로 묶음. diff는 hunk 안의 `+++`/`---` 내용 줄도 센다 | TS `each closing row…`, `tool_details_are_read_leniently_and_bounded` |
+| M3 시험 비밀 출처 | 공용 사례를 hex 대신 평문 합성값(`FAKE`/`example`, AWS 문서 예시 키)으로 | GitGuardian(푸시 후 확인) |
+
+- **저장 경로 시험(실제 SQLite 파일 읽기)**: `assert_store_lacks`가 저장소 폴더의 모든 파일(DB·WAL)을 바이트로 읽는다. Codex `codex_durable_native_delivery_and_cancel`(가짜 토큰 명령 + `aggregatedOutput` 표식), Claude `claude_project_consent_auto_approves_and_still_rejects_outside_files`·`claude_auto_read_after_real_bash_side_effects`(auto-read 계열: 토큰 든 명령·설명·tool_result 출력). 저장 행은 가린 값·앱 키만이고 원문·출력·공급자 ID가 없다.
+- **검증**: `npm test` 924/924(병합 뒤), `pnpm build`, `cargo test -p elsecrew-core --lib` 245, `cargo test -p elsecrew-sidecar` 전체 919 통과·0 실패(병합 뒤 e49230df).
+- **실제 앱(기본 프로필, 로그인된 앱)**: 다른 워커가 기본 프로필을 쓰지 않음을 ps로 확인하고 개발 앱을 원격 디버깅으로 띄웠다. todo-test-1126g에 새 작업("작업 내역 표시 확인용…")을 보내 기획(Codex)·개발(Claude)이 실제로 실행했다. 기획 카드에 명령 줄·실행 위치·종료 코드 0·걸린 시간, 개발 기록에 명령 줄·설명·걸린 시간(성공이라 종료 코드 없음)이 보였다. 실제 DB(`run_output_records`)를 읽기 전용으로 열어 해당 행에 출력이 없고 id가 `c1`·`t1`·`t2`임을 확인했다. 앱은 제가 띄운 PID만 종료했다. 이 작업(검토 대기, main 미반영)은 시험용으로 남아 있다.
+- **충돌**: `src/m5/styles.css`(양쪽 끝 구역 유지, feature/ade 먼저), `docs/history.md`(양쪽 엔트리 유지).
+- **롤오버**: 이 파일이 500줄을 넘었지만 워크로그가 모두 2026-11-26 엔트리라 날짜 경계로 자를 수 없고 고정 섹션만 약 370줄이다. 다음 날짜 엔트리가 생기면 11-26 엔트리를 `docs/archive/history-2026-11.md`로 옮긴다.
+- **GitGuardian 재발과 처리**: 평문 합성값으로 바꾼 공용 사례 중 `curl -u 사용자:비밀번호` 형태 3건과 가짜 JWT 1건이 값에 FAKE가 있어도 형태로 탐지됐다. 이 사례는 표에 `{colon}`·`{dot}` 자리표시로 저장하고 두 언어 시험이 풀어서 쓴다. 해당 커밋(bb0c4de5)과 뒤 커밋을 같은 내용에 세 파일만 바꿔 다시 만들고(fb5483e6·359c8d44·56d8f173) 최신 feature/ade(9918bc22)를 병합해 강제 푸시했다(36ab2ebf). 대시보드에는 버려진 커밋의 사건이 남는다.
+- **CI(36ab2ebf)**: GitGuardian·test(macos-latest)·test(windows-latest)·website 모두 통과, MERGEABLE/CLEAN. 병합 뒤 `npm test` 930/930, `pnpm build`, `m5:check:history` 유실 0. 새 feature/ade에는 Rust 변경이 없어 sidecar 전체 919 결과를 그대로 쓴다.
+- **남은 것**: 노예의 차단 3건 재확인, 머지.
+
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 팀원 카드 '실행 출력'을 자세히: 동사 · 대상, 펼친 내용, 비밀 가림 (`orca/ade-activity-detail`, 기준 feature/ade 613dafde)
+주인님 피드백(스크린샷): 기획 카드의 실행 출력이 "명령 실행, 명령 실행, 파일 수정…"처럼 동사만 보였다. 1차-가 D6 설계("동사 + 대상")대로 고쳤다.
+
+- **원인(둘 다)**
+  - Claude: 엔진이 명령 원문 대신 모델의 한 줄 설명만 `target`에 저장했고, 화면(`activityLine`)은 명령의 target을 줄에서 빼 접힌 칸에 숨겼다(D6 당시 결정). 도구 결과(`user` 프레임의 tool_result)는 `RequiresHandling`으로 버려 종료 코드·출력이 없었다.
+  - Codex: 명령 첫 줄은 저장했지만 같은 화면 규칙으로 숨겨졌다. 파일 변경은 `ToolEvent`에 경로가 없어 대상 없이 "파일 수정"만 남았다. 완료 이벤트의 exitCode·durationMs·aggregatedOutput·changes는 파서가 읽지 않았다.
+- **바뀐 것**: 엔진이 대상과 끝난 결과를 남기고(같은 `id`의 끝 줄), 화면이 "동사 · 대상" 한 줄과 펼친 내용(설명·전체 명령·실행 위치·종료 코드·걸린 시간·바뀐 줄·출력 앞부분)을 보인다. 작업 공간 안 파일 줄은 누르면 검토 시트에서 그 파일의 변경을 연다. 같은 파일 연속 수정은 "N번"으로 묶는다. 형식은 architecture "실행 출력" 절, 결정·함정은 핵심 결정 "작업 내역 채널" 항목.
+- **안전**: 비밀 모양 가림(엔진 저장 전 + 화면 그리기 전, 같은 규칙·공용 사례 26개), 제어·방향 문자 무력화(�), 줄 160자·블록 4,000자·출력 40줄 상한, 텍스트로만 렌더, 작업 공간 밖 경로는 `~/…`. 파일 내용은 저장하지 않는다.
+- **검증**
+  - `npm test` 902/902, `pnpm build`, `git diff --check`.
+  - Rust: `cargo test -p elsecrew-core --lib` 245 통과. `cargo test -p elsecrew-sidecar` 전체 1회: 915 통과·3 실패 → 3개는 예전 줄 모양을 기대한 테스트라 새 규칙으로 고쳤고 해당 묶음(`activity`·`claude_native`·`codex_durable`) 14개 통과. 이후 변경은 영향 묶음만 재실행했다(다른 워커가 sidecar 테스트 대기 중이라 전체 재실행은 생략).
+  - 실제 이벤트: 기본 프로필은 다른 워커 앱(ade-preview-backend)이 쓰고 있어 앱 안 실제 실행 대신, 앱 밖에서 Claude Code 2.1.328(`claude -p --output-format stream-json`, haiku)과 Codex app-server 0.167.2로 같은 짧은 작업(ls·읽기·검색·수정·새 파일·npm test·토큰 섞인 명령·실패 명령)을 실제 실행해 프레임을 기록했다. 이를 실제 Rust 파서·줄 생성기로 재생(`replay_recorded_frames`, `--ignored` 개발 도구)하고, 실제 `MemberCard`를 가짜 브리지로 그려 캡처했다(`scripts/m5-activity-detail-ui.mjs`). 변경 전 캡처는 feature/ade 원래 화면 코드로 그렸고 줄은 예전 엔진 규칙으로 만든 것이다.
+  - 캡처: `~/Documents/elsecrew-ade-activity-detail-2026-11-26/`(before-cards-1·2, after-cards-1·2, after-detail-1·2, replay.json). 토큰은 엔진에서 이미 `GITHUB_TOKEN=••••`로 저장됐고 화면 HTML에 원문이 없음을 확인했다.
+- **PR**: https://github.com/wonseok-han/elsecrew/pull/11 (`--base feature/ade`). GitGuardian이 첫 푸시에서 고정 파일의 가짜 비밀값 4개(일반 비밀번호·CLI 비밀·jwt.io 예시 JWT)를 잡아, 비밀처럼 보이는 입력을 `textHex`로 바꾸고 제 브랜치 커밋을 다시 만들어 강제 푸시했다. 검사는 통과했고, 대시보드에는 버려진 커밋 475059bf의 사건 4건(가짜 값)이 남아 있다.
+- **남은 것**: 앱 안 실제 실행(로그인된 프로필)으로 카드 확인은 기본 프로필이 비면 다시 한다. Codex의 webSearch 항목과 Claude의 WebFetch는 앱이 지금 표시하지 않거나 거절하므로 '웹 · 도메인' 줄은 Claude WebFetch 요청(거절 표시)에서만 보인다. Claude 명령의 실행 위치는 남기지 않는다.
+
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #12 독립 검토(차단 1·중요 6·경미 4) 전부 반영 (`orca/ade-screens-u2-u4`)
 검토 `~/Documents/elsecrew-ade-screens-u2-u4-2026-11-26/REVIEW-pr12.md`(대상 23365fad). 재현 시험은 `tests/m5-ade-screens-u2-u4.test.mts`(21개), 보안 하네스, 렌더러 스모크, 새 네이티브 시나리오(`ELSECREW_SMOKE_PROJECTS=1`)에 나눠 넣었다.
@@ -112,6 +191,7 @@
   - 대비는 토큰 쌍만으로 부족하다(검토 I4): 컴포넌트 조합(`scripts/m5-contrast-check.mjs` 조합 표)과 렌더된 DOM(`tests/m5-rendered-contrast-probe.cjs`, 렌더러 스모크 다크·라이트)을 함께 본다. 새 화면·컴포넌트를 넣으면 렌더러 스모크 캡처 지점에서 자동으로 측정되므로, 그 화면이 스모크 경로에 없으면 캡처 지점을 추가한다. `color-mix`·필터로 만든 면은 조합 표에 넣는다(필터 대신 토큰 권장).
   - 앱 문구 규칙(주인님, 2026-11-26): 버튼은 동작만 말한다. 행·카드·제목이 보여 주는 대상을 반복하지 않고('Codex 연결하기' → '연결하기'), 대상은 접근성 이름에 남긴다. 설계 `docs/proposals/m5-ade-screens-plan.md` 2.1의 10번.
 - **홈·처음 시작·설정의 규칙(2026-11-26, 화면 통일 U2~U4)**: 현행 설명은 architecture "홈·처음 시작·설정(U2~U4)".
+  - **되돌리기 어려운 쓰기의 동의는 main이 직접 받는다**: 폴더 기록(PR #12), 에이전트 설치(PR #14 B1), 업데이트 재시작(PR #16)은 화면의 요청만으로 실행하지 않고 main의 기본 대화상자에서 '예'일 때만 실행한다. 화면 안 확인 창은 검토 단계일 뿐이다.
   - **폴더 확인(빈 폴더·일반 폴더·기록 없음)은 main의 네이티브 대화상자로 남긴다**(PR #12 검토 B1). 앱 화면 안으로 옮기면 메인 렌더러의 응답이 곧 되돌릴 수 없는 쓰기(`.git` 초기화·앱 내 기록)의 허가가 되어, 실제 사용자 확인의 근거가 없다. 디자인 일관성보다 이 경계가 우선이다. 앱 안 모양으로 바꾸려면 렌더러가 결과를 위조할 수 없는 main 소유 경로와 그 증명 시험이 먼저 필요하다.
   - 첫 작업의 권한은 확인 체크 후 보낼 때만 저장한다. 첫 작업 창에 별도 저장 버튼을 두지 않는다(PR #12 검토 I1).
   - `scripts/m5-project-ui-smoke.cjs`의 기본 흐름은 첫 작업 뒤 단계(옛 diff·반영 버튼)가 L1 레이아웃 이전 화면 기준이라 멈춘다(이 PR 이전부터). 프로젝트·첫 작업 회귀는 `ELSECREW_SMOKE_PROJECTS=1` 시나리오로 본다.
@@ -177,7 +257,15 @@
 - **프로세스 증거는 '살아 있을 수 있는 것'만 기록한다(2026-11-17)**: 실행 기록(DB)은 root와 아직 끝난 것으로 관측되지 않은 신원만 저장한다(`TreeTracker::recorded_identities`, `LoginProcess::recorded_for_ledger`). 끝난 프로세스는 다시 돌 수 없으므로 빼도 안전하다. 로그인 잠금 파일은 추가 전용 그대로이고 상한은 65,536개·4MiB다(`HOLD_MAX_BYTES`). 소유권 검사는 '이전 기록 ⊆ 누적 관측'이다. 엔진이 사라진 뒤의 판정(시작 시 정리·명시 복구·잠금 해제)은 `SettledProcTable`을 쓴다. 같은 pid를 시작 시각이 다른 프로세스가 쓰면 기록된 프로세스는 끝난 것이다(살아 있는 두 프로세스는 pid를 공유하지 않는다). 실행 중인 추적은 계속 이를 무결성 실패로 본다. 앱 데이터 사본을 엔진으로 열 때는 살아 있는 이전 엔진이 있으면 정리를 건너뛴다(`previous_engine_still_runs`).
 - **종료는 중단이지 초기화가 아니다(2026-11-17 사용자 결정)**: 중단된 실행은 다음 시작에서 작업 공간을 버리지 않고 canceled로 끝낸다(`settle_interrupted_run`). 남은 에이전트 프로세스는 기록된 신원으로 직접 끝내고, 소멸 확인과 작업 공간 일치가 증명돼야 한다. 예전 unresolved 복구 기록도 같은 증명이 서면 푼다. abandon(작업 공간 포기)은 증명이 안 되는 경우와 삭제에만 남는다. 편집기는 VS Code처럼 저장하지 않은 내용을 종료 뒤에도 보관했다가 되살린다(`editor-drafts.ts`). 같은 run의 lock을 다시 쓸 때는 새 operation id가 필요하다(같은 id에 다른 내용이면 Conflict).
 - **앱 종료는 막지 않는다(2026-11-17 사용자 결정)**: 종료하면 실행 중인 작업을 멈추고 최대 10초 기다린 뒤 묻지 않고 끈다(`quit-coordinator.ts`). 다음 시작에서 기록된 프로세스가 모두 사라졌고 작업 공간과 기록이 정상인 실행은 자동으로 canceled가 된다(`interrupted_run_upserts`). 불확실한 경우만 사용자 복구로 남긴다. 사용자 복구(abandon)는 채팅을 discarded로 만들므로 자동 정리에 쓰지 않는다.
-- **작업 내역 채널과 이전 빌드(2026-11-17)**: 실행 출력의 `activity` 채널은 이전 빌드가 모르는 값이다. 작업 내역이 한 줄이라도 저장된 앱 데이터를 이전 빌드로 열면 출력 재검증에서 거절돼 영구 admission 실패가 된다(schema 버전은 같다). 개발 빌드끼리 같은 실제 데이터를 오가지 않는다. 작업 내역은 작업 공간 상대 경로와 모델의 명령 설명만 공개하며 도구 입력 원문은 공개하지 않는다. Claude 실행은 결과에 적힌 거절이 모두 앱이 거절한 tool_use일 때만 정상 종료로 본다.
+- **작업 내역 채널과 이전 빌드(2026-11-17)**: 실행 출력의 `activity` 채널은 이전 빌드가 모르는 값이다. 작업 내역이 한 줄이라도 저장된 앱 데이터를 이전 빌드로 열면 출력 재검증에서 거절돼 영구 admission 실패가 된다(schema 버전은 같다). 개발 빌드끼리 같은 실제 데이터를 오가지 않는다. Claude 실행은 결과에 적힌 거절이 모두 앱이 거절한 tool_use일 때만 정상 종료로 본다.
+  - **2026-11-26 변경(주인님 피드백, PR #11 검토 반영)**: 작업 내역은 명령 줄 자체(비밀 가림)·실행 위치·종료 코드(공급자가 밝힌 경우만)·걸린 시간·바뀐 줄 수를 남긴다. "도구 입력 원문은 공개하지 않는다"는 옛 규칙은 명령에 한해 폐지됐다. **명령 출력·도구 결과·파일 내용은 저장하지 않는다**(이름 없는 값은 가릴 수 없음). 형식·규칙은 architecture "실행 출력" 절.
+  - 저장은 `record_activity`의 `sanitize` 한 곳만 거친다. 새 필드를 더하면 `sanitize`의 허용 목록과 화면 `KEYS`에 같이 넣는다(빠지면 조용히 버려진다). id는 앱 키(`c1`, `t1`)만 쓴다.
+  - **명령 행은 요약만(2026-11-26 검토 3차)**: 명령 줄의 글자는 저장하지 않는다. 프로그램 이름(첫 토큰 규칙), 도구별 고정 목록의 하위 명령 하나, 가린 단어 수만 남긴다(Rust `summarize_command` ↔ TS `summarizeCommand`, 공용 `summary` 사례). 2차의 "허용 토큰만 남기기"도 짧은 붙임값·PIN·경로·호스트 모양 비밀이 남아 폐기했다. 보이는 정보를 늘리려면 고정 목록에 단어를 더하는 쪽으로만 바꾼다. 파일 경로는 명령 줄에서 뽑지 않는다.
+  - 비밀 가림 규칙은 Rust `secret_mask.rs`와 TS `secret-shape.ts` `maskSecrets` 두 곳이다(이제 산문용). 규칙을 바꾸면 둘 다 고치고 `tests/fixtures/m5/secret-mask-cases.json`에 사례를 넣는다(양쪽이 같은 결과를 요구, 다시 가려도 같아야 함). 가림은 언제나 자르기보다 먼저다.
+  - 함정: 저장소에 GitGuardian PR 검사가 있다. 테스트의 가짜 비밀은 처음부터 `FAKE`/`example`이 들어간 명백한 합성값으로 쓴다(`PGPASSWORD=s3cret`, `--password hunter2`, jwt.io 예시 JWT는 걸렸다). `curl -u 사용자:비밀번호`, JWT, `--token=값`·`--secret 값` 모양은 값이 가짜여도 형태로 걸리므로 공용 사례처럼 `{colon}`/`{dot}`/`{eq}`/`{sp}`(줄바꿈은 `{nl}`) 자리표시로 저장하고 시험에서 푼다. 이후 커밋으로 지워도 PR의 앞 커밋이 계속 걸리므로 커밋을 다시 만들어야 한다.
+  - 함정: Write 도구는 내용 속 `\uXXXX`를 실제 문자로 바꿔 쓴다. 정규식·문자열에 보이지 않는 문자(U+2028은 JS 정규식 리터럴을 깨뜨림)가 들어가므로, TS 소스에 이스케이프가 필요하면 파이썬 등으로 `\` + `u…`를 이어 붙여 쓰거나 `String.fromCharCode`를 쓴다. Rust의 `\u{…}`는 영향 없다.
+  - 함정: Claude CLI의 `tool_use_result`는 성공한 Bash면 `{stdout, stderr, interrupted}` 객체지만 실패하면 `"Error: Exit code N\n…"` 문자열이다. 성공에는 종료 코드가 없다. Write로 새 파일을 만들면 structuredPatch가 빈 배열이고 `type:"create"`·`content`로 줄 수를 센다.
+  - 함정: activity 행은 append할 수 없다(`complete`만). 끝난 결과는 같은 `id`의 두 번째 행으로 쓰고 화면이 합친다.
 - **실행에는 전체 시간 제한이 없다(2026-11-17 사용자 결정)**: Claude 세션(`SessionChannel`)과 Codex 턴(`TextSession`)의 10분 고정 마감을 없앴다. 도구 실행과 사용자 승인 대기도 시간 제한 없이 기다린다. 남은 상한은 연결 준비 시간(Claude 15초, Codex 30초), 사용자 취소, 앱 종료 정리, 요청·이벤트 수와 바이트 예산이다. `provider_model_proxy`의 600초는 제품에서 쓰지 않는 진단 후보라 그대로 두었다. 실행 시간 상한을 다시 넣으려면 사용자 결정이 필요하다.
 - **정책 밖 도구 요청은 그 요청만 거절한다(2026-11-16)**: Claude 도구 요청이 역할의 경계(작업 공간 안·존재하는 파일·`.git` 등 제외·읽기 전용은 쓰기/명령 불가) 밖이면, `deliver_approval`이 사용자 확인 없이 그 요청만 deny하고 실행은 계속된다. 세션·프로세스·역할 불일치만 실행을 끝낸다. 에이전트용 거절 문구는 `claude_approval::DENIAL_GUIDANCE` 하나다.
 - **중단된 정리 작업은 다음 시작에서 이어 간다(2026-11-16)**: materialization의 'attempting'은 arm만 커밋된 상태이고, batch 쓰기와 'pending' 복귀는 한 트랜잭션이다. 그래서 새 엔진의 admission에서는 'pending'으로 되돌린다(`release_interrupted_attempt`). 'failed'만 계속 거부한다. 엔진이 앱 데이터를 열지 못하면 `~/Library/Logs/Elsecrew/last-engine-admission-failure.json`의 `reason`(kind)로 확인한다(멈춘 원인 기록 `last-engine-failure.json`을 덮지 않는다). `Storage::open`(Legacy·옛 스키마 이전 v6/v7)은 여전히 attempting을 거부한다. 자세한 위치는 `ELSECREW_DEBUG_ADMISSION=1`로 엔진을 띄워 복사본에서 재현한다. Rust 실행 기록에 필드를 추가하면 TS의 실행 상태 이벤트 검증기(`protocol-v1.ts`)도 함께 고친다. 빠뜨리면 이벤트 하나가 엔진 연결을 끊는다.

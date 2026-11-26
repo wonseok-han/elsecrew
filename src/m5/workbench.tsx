@@ -567,16 +567,27 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   }, [notifications]);
   const [pendingOpen, setPendingOpen] = useState<{ projectId: string; chatId: string } | null>(null);
   const revealStoryRef = useRef<() => void>(() => {});
-  const openNotification = (item: AppNotification) => {
+  /** Why a notification of another project could not be opened (PR #14 review I4). */
+  const [openBlocked, setOpenBlocked] = useState<string | null>(null);
+  /** Opens the task a notification is about; resolves whether it got there (the bell marks it read only then). */
+  const openNotification = async (item: AppNotification): Promise<boolean> => {
+    setOpenBlocked(null);
     if (controller.snapshot().project?.id === item.projectId) {
       // The open task: close what covers its story and go to the request (review #1).
       if (chat.activeChat?.chatId !== item.chatId) void switchChat(item.chatId);
       else revealStoryRef.current();
-      return;
+      return true;
     }
-    if (!window.m5Projects) return;
+    if (!window.m5Projects) return false;
+    // Another project: the same one-step switch as the switcher, which closes this one first.
+    if (controller.snapshot().project && switchBlockedReason) { setOpenBlocked(switchBlockedReason); return false; }
     setPendingOpen({ projectId: item.projectId, chatId: item.chatId });
-    void controller.reopenProject(item.projectId, input => window.m5Projects!.request(input));
+    if (controller.snapshot().project) await switchProject({ projectId: item.projectId, canonicalPath: "" });
+    else await controller.reopenProject(item.projectId, input => window.m5Projects!.request(input));
+    if (controller.snapshot().project?.id === item.projectId) return true;
+    // It did not open: nothing waits to jump there later.
+    setPendingOpen(null);
+    return false;
   };
   const openNotificationRef = useRef(openNotification);
   openNotificationRef.current = openNotification;
@@ -778,6 +789,17 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     setRightTab("preview");
     showResults();
   };
+  /** Paths in the open task's change list: a member's activity line opens
+   * only one of these, by the sheet's own key (review I1). */
+  const activityChangedFiles = useMemo(() => snapshot.workspace?.chatId === chat.activeChat?.chatId && snapshot.diffSummary
+    ? new Set(snapshot.diffSummary.entries.map(entry => entry.path)) : null, [snapshot.workspace?.chatId, chat.activeChat?.chatId, snapshot.diffSummary]);
+  /** A file line in a member's live activity: its change in the review sheet (the "변경 보기" path). */
+  const openActivityFile = (path: string) => {
+    if (!admissionReady || chat.switching || !activityChangedFiles?.has(path)) return;
+    controller.selectPanel("changes");
+    void controller.refreshChanges();
+    setAllChanges({ focus: { path, at: Date.now() } });
+  };
   const previewResultKey = `${chat.activeChat?.chatId ?? ""}:${chat.agentRuns.filter(run => !["preparing", "running", "cancelling"].includes(run.state)).length}`;
   const previewCovered = previewObscured({ sheetOpen, drawerUsed: bandUsesDrawer(layoutBandNow), drawerOpen, dialogOpen: newChatOpen || Boolean(removal) || preferencesOpen || settingsOpen, popoverOpen: false, rightTab });
 
@@ -894,7 +916,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           errors under it, anything that still needs attention inside it. */}
       <NotificationBell center={notifications} onOpen={openNotification} hasProblem={workAttention}
         problem={<WorkStatusPanel bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])} liveRunIds={liveRunIds} onAttention={setWorkAttention} />}
-        errors={[snapshot.error ? { title: t(snapshot.error.messageKey), key: `snapshot:${snapshot.error.messageKey}:${snapshot.error.technicalDetail ?? ""}`, body: <>
+        errors={[openBlocked ? { title: t("m5.notifications.cannotOpen"), key: `open-blocked:${openBlocked}`, body: <p>{openBlocked}</p> } : null, snapshot.error ? { title: t(snapshot.error.messageKey), key: `snapshot:${snapshot.error.messageKey}:${snapshot.error.technicalDetail ?? ""}`, body: <>
           {snapshot.error.messageKey === "m5.editorError.reopenProject" && <button type="button" className="m5-secondary" disabled={settingsOpen || !admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} onClick={() => void addProject()}>{t("m5.editor.reselectOriginal")}</button>}
           <details><summary>{t("m5.feedback.details")}</summary><pre>{snapshot.error.technicalDetail}</pre></details></> }
           : null, chat.error ? { title: t(chat.error.messageKey), key: `chat:${chat.error.messageKey}:${chat.error.detail ?? ""}`, body: <>
@@ -955,7 +977,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         disabled={!admissionReady || !window.m5Projects} onRoles={() => setAppDefaultsOpen(true)}>
         <ProviderLogin settingsPage disabled={!admissionReady} returning={hasSavedProjects === true} reveal={connectionReveal}
           // A failing agent: move its roles to another one in the open project team, or in the app defaults (ADE U5).
-          onSwitchRoles={() => navigatePreferences(() => { if (snapshot.project && projectDataReady) { setPreferencesOpen(false); openRoleSettings(); } else { setPreferencesSection("roles"); setAppDefaultsOpen(true); } })} />
+          // While the open project's team is still loading the shortcut is not offered, so it never lands in the app defaults by mistake (minor 2).
+          onSwitchRoles={snapshot.project && !projectDataReady ? undefined : () => navigatePreferences(() => { if (snapshot.project) { setPreferencesOpen(false); openRoleSettings(); } else { setPreferencesSection("roles"); setAppDefaultsOpen(true); } })} />
       </AppSettings>
       <StorageAdmissionNotice admission={admission} />
       <UpdateBanner teamWorking={!chatController.canLeaveProjectView()} />
@@ -1055,7 +1078,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
               {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats || removing} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? t("m5.navigation.loadingChats") : t("m5.navigation.moreChats")}</button>}
             </div>} />
         </>}
-        story={chat.activeChat ? <div className="m5-conversation"><div className="m5-conversation-scroll"><TeamTimeline onCoordinatorChat={() => { setGoal(chat.activeChat?.goal ?? ""); setNewChatOpen(true); }} controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} phase={activePhase} phaseKind={activeKind} onApprovalsWaiting={onApprovalsWaiting} pinnedSlot={pinnedSlot} /></div><div className="m5-pinned-slot" data-testid="pinned-approval" ref={setPinnedSlot} />{chat.activeChat.schemaVersion !== 1 && <FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} />}</div> : <EmptyState className="m5-first-chat" label={t("m5.firstChat.title")} headingLevel={2} icon="spark" title={t("m5.firstChat.title")} help={t("m5.firstChat.help")}
+        story={chat.activeChat ? <div className="m5-conversation"><div className="m5-conversation-scroll"><TeamTimeline onCoordinatorChat={() => { setGoal(chat.activeChat?.goal ?? ""); setNewChatOpen(true); }} controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} phase={activePhase} phaseKind={activeKind} onApprovalsWaiting={onApprovalsWaiting} pinnedSlot={pinnedSlot} onOpenFile={openActivityFile} changedFiles={activityChangedFiles} /></div><div className="m5-pinned-slot" data-testid="pinned-approval" ref={setPinnedSlot} />{chat.activeChat.schemaVersion !== 1 && <FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} />}</div> : <EmptyState className="m5-first-chat" label={t("m5.firstChat.title")} headingLevel={2} icon="spark" title={t("m5.firstChat.title")} help={t("m5.firstChat.help")}
         action={<button type="button" className="m5-btn-primary m5-first-chat-write" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching} onClick={() => setNewChatOpen(true)}>{t("m5.firstChat.write")}<kbd aria-hidden="true">⌘N</kbd></button>}>
         <p className="m5-first-chat-note m5-goal-examples-title">{t("m5.firstChat.exampleHelp")}</p>
         <div className="m5-goal-examples">{(["explain", "plan", "readme"] as const).map(example => <button key={example} type="button" className="m5-secondary" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching || goal.trim().length > 0} onClick={() => { setGoal(t(`m5.firstChat.${example}`)); setNewChatOpen(true); }}>

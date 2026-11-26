@@ -383,6 +383,11 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
       return { tree: true };
     }
     failRendererDisconnected() {}
+    async install(input: { action: string }) {
+      sidecarCalls.push(`install:${input.action}`);
+      if (input.action === "start") return { state: "starting", operationId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", provider: installAwaiting.plan.provider, plan: null, error: null, cancelRequested: false };
+      return installAwaiting;
+    }
     async openProject(path: string) { sidecarCalls.push(`openProject:${path}`); return { outcome: "opened" }; }
   }
   class FakeEventCredit {
@@ -544,6 +549,10 @@ const fakeUpdate = {
   state: "unavailable", calls: [] as string[], changed: null as ((state: string) => void) | null,
   handle: { state: () => fakeUpdate.state, check: () => { fakeUpdate.calls.push("check"); }, restart: async () => { fakeUpdate.calls.push("restart"); } },
 };
+/** The installation that awaits consent, as the sidecar reports it (PR #14 review B1). */
+const installAwaiting = { state: "awaitingConsent", operationId: null, provider: "codex", error: null, cancelRequested: false,
+  plan: { planId: "11111111-2222-4333-8444-555555555555", provider: "codex", action: "installOrUpdate", expiresInSeconds: 180,
+    writeDirectories: ["/Users/me/.local/bin", "/Users/me/.codex/packages/standalone"], replacesExistingCommands: true, shellSettingsWritable: false, startsLogin: false } };
 /** What the native "open this address?" confirmation answers (0 = open). */
 const externalLinkAnswer = { value: 1 };
 import * as catalogContract from "../src/m5/contracts/project-catalog-v1.ts";
@@ -866,4 +875,34 @@ test("in-app update banner: the page reads main's state and asks; only main's ow
     externalLinkAnswer.value = answer;
     fakeUpdate.state = "unavailable";
   }
+});
+
+test("installing starts only after main's own box: a page with a valid plan cannot give consent (PR #14 review B1)", async () => {
+  const harness = await loadMain();
+  const handler = harness.handlers.get(installContract.INSTALL_CHANNEL)!;
+  const answer = externalLinkAnswer.value;
+  const start = { action: "start", provider: "codex", planId: installAwaiting.plan.planId };
+  try {
+    // "Cancel" in main's box: nothing starts, the plan still waits.
+    externalLinkAnswer.value = 0;
+    assert.equal((await handler(harness.currentEvent(), start) as { state: string }).state, "awaitingConsent");
+    assert.ok(harness.sidecarCalls.some(call => call.startsWith("confirm:") && call.includes("/Users/me/.codex/packages/standalone")), "main names the folders itself");
+    assert.ok(!harness.sidecarCalls.includes("install:start"));
+    // A plan that is not the one awaiting consent, or another agent, is refused without a box.
+    const boxes = () => harness.sidecarCalls.filter(call => call.startsWith("confirm:")).length;
+    const before = boxes();
+    await assert.rejects(handler(harness.currentEvent(), { ...start, planId: "99999999-2222-4333-8444-555555555555" }));
+    await assert.rejects(handler(harness.currentEvent(), { ...start, provider: "claude" }));
+    assert.equal(boxes(), before);
+    assert.ok(!harness.sidecarCalls.includes("install:start"));
+    // Only "Install or update" in main's box starts it.
+    externalLinkAnswer.value = 1;
+    assert.equal((await handler(harness.currentEvent(), start) as { state: string }).state, "starting");
+    assert.equal(harness.sidecarCalls.filter(call => call === "install:start").length, 1);
+    // Preparing and reading need no box.
+    const boxesNow = boxes();
+    await handler(harness.currentEvent(), { action: "prepare", provider: "claude" });
+    await handler(harness.currentEvent(), { action: "status" });
+    assert.equal(boxes(), boxesNow);
+  } finally { externalLinkAnswer.value = answer; }
 });

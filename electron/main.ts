@@ -615,7 +615,24 @@ function registerIpcHandlers(): void {
   ipcMain.handle(INSTALL_CHANNEL, quietAfterQuit(async (event, input: unknown) => {
     assertCurrentMainFrame(event);
     if (!sidecar) throw new Error("sidecar was not started");
-    return validateInstallStatus(await sidecar.install(validateInstallRequest(input)));
+    const request = validateInstallRequest(input);
+    // Installing writes outside the app (PR #14 review B1). A page request is
+    // not the person's consent: main reads the plan that awaits consent and
+    // asks in its own native box; only "Install" there starts it. The page
+    // can neither name the folders nor answer this box.
+    if (request.action === "start") {
+      const current = validateInstallStatus(await sidecar.install({ action: "status" }));
+      const plan = current.state === "awaitingConsent" ? current.plan : null;
+      if (!plan || plan.planId !== request.planId || plan.provider !== request.provider) throw new Error("installation plan is not awaiting consent");
+      const ko = app.getLocale().toLowerCase().startsWith("ko");
+      const name = plan.provider === "codex" ? "Codex" : "Claude Code";
+      const answer = await dialog.showMessageBox(mainWindow!, { type: "question",
+        message: ko ? `${name}을(를) 설치·업데이트할까요?` : `Install or update ${name}?`,
+        detail: `${ko ? "공식 배포 경로로 설치하고, 아래 폴더의 기존 명령이 바뀔 수 있어요. 셸 설정 파일은 바꾸지 않아요." : "It installs from the official source; the existing commands in these folders may change. Shell settings files are not changed."}\n\n${plan.writeDirectories.join("\n")}`,
+        buttons: ko ? ["취소", "설치·업데이트"] : ["Cancel", "Install or update"], defaultId: 0, cancelId: 0 });
+      if (answer.response !== 1) return current;
+    }
+    return validateInstallStatus(await sidecar.install(request));
   }));
   const claudeUsage = createClaudeUsageReader(m5DataDirectory(), net.fetch as typeof fetch, async () => {
     if (!sidecar) return false;

@@ -14,10 +14,11 @@ const source = (name: string) => readFileSync(`src/m5/${name}`, "utf8");
 const ERRORS: Record<string, string | null> = {
   recovery: "providerLoginRecoveryRequired", busy: "providerBusy", changed: "providerExecutableChanged", missing: "providerExecutableMissing",
   profile: "providerProfileUnavailable", profileCompatibility: "providerProfileIsolationRequired", failed: "providerLoginFailed",
+  unreachable: "providerLoginTransportUnavailable",
 };
 
 test("U5: every login failure kind is a guide with one main action, its title and alternatives", () => {
-  assert.equal(LOGIN_GUIDE_KINDS.length, 7);
+  assert.equal(LOGIN_GUIDE_KINDS.length, 8);
   for (const kind of LOGIN_GUIDE_KINDS) {
     assert.equal(loginGuideKind(ERRORS[kind]), kind);
     for (const provider of ["codex", "claude"] as const) {
@@ -34,7 +35,7 @@ test("U5: every login failure kind is a guide with one main action, its title an
 });
 
 test("U5: a new sign-in is never the main action where it could hide the real problem", () => {
-  for (const kind of ["recovery", "busy", "changed", "missing", "profile", "profileCompatibility"] as const) {
+  for (const kind of ["recovery", "busy", "changed", "missing", "profile", "profileCompatibility", "unreachable"] as const) {
     for (const provider of ["codex", "claude"] as const) {
       const guide = loginGuide(provider, ERRORS[kind]);
       assert.notEqual(guide.primary, "retryLogin", `${provider} ${kind}`);
@@ -42,8 +43,11 @@ test("U5: a new sign-in is never the main action where it could hide the real pr
     }
   }
   assert.equal(loginGuide("codex", ERRORS.missing).primary, "install");
-  assert.equal(loginGuide("claude", ERRORS.failed).primary, "retryLogin", "an expired Claude code needs a new sign-in");
-  assert.equal(loginGuide("codex", ERRORS.failed).primary, "check", "a saved Codex login is checked first");
+  // A general failure is not proof of an expired code: both agents check first, a new sign-in is the alternative (PR #14 review I1).
+  for (const provider of ["codex", "claude"] as const) {
+    assert.equal(loginGuide(provider, ERRORS.failed).primary, "check");
+    assert.ok(loginGuide(provider, ERRORS.failed).alternatives.includes("retryLogin"));
+  }
   // The cautious text stays the guide's "what happened" (provider-login tests hold its wording).
   assert.match(loginErrorMessage("codex", ERRORS.profileCompatibility), /삭제하지 말고/);
 });
@@ -62,7 +66,7 @@ test("U5: the connection card says the failure as a guide; the raw key only in t
 test("U5: connect buttons say only the action; the agent's name goes to the screen reader label", () => {
   for (const [key, value] of [["m5.connection.connect", "연결하기"], ["m5.connection.disconnect", "연결 끊기"], ["m5.login.start", "로그인"]] as const) assert.equal(ko[key], value);
   for (const dict of [ko, en]) {
-    for (const key of ["m5.connection.connect", "m5.connection.disconnect", "m5.login.guide.action.retryLogin", "m5.login.guide.action.check", "m5.login.guide.action.install"] as const) {
+    for (const key of ["m5.connection.connect", "m5.connection.disconnect", "m5.login.guide.action.retryLogin", "m5.login.guide.action.install", "m5.login.guide.action.switchRoles"] as const) {
       assert.doesNotMatch(dict[key], /Codex|Claude/, key);
     }
     assert.match(dict["m5.connection.connectNamed"], /\{name\}/);
@@ -83,7 +87,7 @@ test("U5: the install consent is a confirm dialog: Cancel takes the first focus,
 
 test("U5: a failing agent offers moving its roles to another agent", () => {
   assert.match(source("provider-login.tsx"), /case "switchRoles": return onSwitchRoles \?/);
-  assert.match(source("workbench.tsx"), /onSwitchRoles=\{\(\) => navigatePreferences\(/);
+  assert.match(source("workbench.tsx"), /onSwitchRoles=\{snapshot\.project && !projectDataReady \? undefined : \(\) => navigatePreferences\(/);
 });
 
 const item = (id: string, kind: AppNotification["kind"], projectId: string, chatId: string, minutes: number, resolved = false): AppNotification => ({
@@ -129,4 +133,75 @@ test("U5·U6: ko and en carry the same new keys", () => {
   const prefixes = ["m5.login.guide.", "m5.login.badge.", "m5.guide.", "m5.connection.", "m5.notifications."];
   const pick = (dict: Record<string, string>) => Object.keys(dict).filter(key => prefixes.some(prefix => key.startsWith(prefix))).sort();
   assert.deepEqual(pick(ko), pick(en));
+});
+
+test("PR #14 I1: a request that never reached the agent is 'unreachable' and never asks for a new sign-in", () => {
+  for (const code of ["providerLoginCapabilityUnavailable", "providerLoginRequestRejected", "providerLoginRequestBlocked", "providerLoginResponseInvalid", "providerLoginTransportUnavailable", "providerLoginTransportFailed"]) {
+    for (const provider of ["codex", "claude"] as const) {
+      const guide = loginGuide(provider, code);
+      assert.equal(guide.kind, "unreachable", code);
+      assert.equal(guide.primary, "check");
+      assert.ok(!guide.alternatives.includes("retryLogin"), code);
+    }
+  }
+  // The card hands the fixed diagnostic code of a failed request to the guide, not null.
+  assert.match(source("provider-login.tsx"), /loginGuide\(provider, error \? diagnostic \?\? "providerLoginTransportUnavailable" : status\.error\)/);
+});
+
+test("PR #14 I2: an answered question stops counting, and keeping the newest lines never drops an open request", async () => {
+  const { NotificationCenter } = await import("../src/m5/notifications.ts");
+  const { startNotificationFeed } = await import("../src/m5/notification-feed.ts");
+  const store = new Map<string, string>();
+  const center = new NotificationCenter({ getItem: key => store.get(key) ?? null, setItem: (key, value) => { store.set(key, value); } });
+  const listeners: Record<string, (event: unknown) => void> = {};
+  const stop = startNotificationFeed({
+    onAgentRunStateChanged: listener => { listeners.run = listener as (event: unknown) => void; return () => undefined; },
+    onAgentPublicEvent: listener => { listeners.public = listener as (event: unknown) => void; return () => undefined; },
+    getChat: async () => ({ chat: { chatId: "c", projectId: "p", goal: "g", state: "waitingForUser" } }),
+  }, center, undefined, () => undefined);
+  listeners.public({ eventId: "q1", chatId: "c", kind: "question", text: "어떤 색이 좋을까요?" });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(attentionCount(center.snapshot()), 1);
+  // Many newer lines do not push the open question out.
+  for (let index = 0; index < 60; index++) center.add({ id: `done:${index}`, kind: "done", projectId: "p", chatId: "c", goal: "g", text: "", at: new Date().toISOString() });
+  assert.equal(attentionCount(center.snapshot()), 1);
+  assert.ok(center.snapshot().length <= 51);
+  // The person answered: the task runs again, and the question is settled.
+  listeners.run({ run: { runId: "r2", chatId: "c", taskId: "t", projectId: "p", worktreeId: "w", workspaceIdentity: "i", state: "running", selectedProfile: { roleId: "coordinator" } } });
+  assert.equal(attentionCount(center.snapshot()), 0);
+  assert.equal(center.snapshot().find(item => item.id === "question:q1")?.resolved, true);
+  stop();
+});
+
+test("PR #14 I3·minor 1: names are kept page by page, reading stops once all are named, and stored data cannot break the panel", async () => {
+  const bell = source("notification-bell.tsx");
+  assert.match(bell, /for \(let page = 0; page < 20 && needed\.size; page\+\+\)/);
+  assert.match(bell, /setNames\(current => new Map\(\[\.\.\.current, \.\.\.found\]\)\)/, "each page's names are kept as they come");
+  assert.match(bell, /names\.get\(project\.projectId\)/, "a Map: no inherited property can be read as a name");
+  assert.match(bell, /if \(!Number\.isFinite\(Date\.parse\(at\)\)\) return "";/);
+  assert.match(bell, /<bdi>\{name\}<\/bdi>/);
+  const { NotificationCenter } = await import("../src/m5/notifications.ts");
+  const bad = { id: "x", kind: "done", projectId: "constructor", chatId: "c", goal: "g", text: "", at: "not a time", read: false };
+  const center = new NotificationCenter({ getItem: () => JSON.stringify([bad, { ...bad, id: "y", at: "2026-11-26T00:00:00Z" }]), setItem: () => undefined });
+  assert.deepEqual(center.snapshot().map(item => item.id), ["y"], "a damaged time is not restored");
+});
+
+test("PR #14 I4: a notification is read only once its task opened; a blocked switch says why and leaves nothing pending", () => {
+  const bell = source("notification-bell.tsx");
+  assert.match(bell, /if \(await onOpen\(item\) !== false\) center\.markRead\(item\.id\);/);
+  const workbench = source("workbench.tsx");
+  const open = workbench.slice(workbench.indexOf("const openNotification = async"), workbench.indexOf("const openNotificationRef"));
+  assert.match(open, /if \(controller\.snapshot\(\)\.project && switchBlockedReason\) \{ setOpenBlocked\(switchBlockedReason\); return false; \}/);
+  assert.match(open, /await switchProject\(/, "the same one-step switch as the switcher");
+  assert.match(open, /setPendingOpen\(null\);\n    return false;/);
+});
+
+test("PR #14 minor 2·3: the roles shortcut says where it goes and waits for the project; the guide's check is the card's one", () => {
+  assert.equal(ko["m5.login.guide.action.switchRoles"], "팀 역할 열기");
+  for (const dict of [ko, en]) assert.ok(dict["m5.login.guide.action.switchRolesNamed"].includes(dict["m5.login.guide.action.switchRoles"]), "the read name holds the visible words");
+  assert.match(source("workbench.tsx"), /onSwitchRoles=\{snapshot\.project && !projectDataReady \? undefined :/);
+  const login = source("provider-login.tsx");
+  assert.match(login, /\{!guide && <button type="button" className="m5-connection-check"/);
+  assert.match(login, /case "check": return \{ label: t\("m5\.login\.check"\)/);
+  assert.match(source("notification-bell.tsx"), /\{item\.text && <><span className="m5-notification-kind">/, "an empty line shows its kind once");
 });

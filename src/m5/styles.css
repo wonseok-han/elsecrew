@@ -2086,3 +2086,23 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-update-banner-actions { display: flex; flex: none; align-items: center; gap: var(--space-2); }
 .m5-update-banner-actions > button { margin: 0; }
 .m5-update-banner-close { width: 28px; padding: 4px; }
+
+
+/* ===== Work history detail (2026-11-26): a member's live activity lines name
+   what they worked on, fold open to the command's detail, and a changed file
+   opens its change. Semantic tokens only; this block stays at the end. ===== */
+.m5-activity-folded > summary { cursor: pointer; }
+.m5-activity-folded > summary:hover .m5-activity-label,
+.m5-activity-file:hover .m5-activity-label { color: var(--text-primary); text-decoration: underline; text-underline-offset: 2px; }
+.m5-activity-folded[open] > summary .m5-activity-target { white-space: nowrap; }
+.m5-activity-file { display: flex; width: 100%; min-width: 0; margin: 0; padding: 1px 0; border: 0; border-radius: var(--radius-s); background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-xs); line-height: 1.5; text-align: start; cursor: pointer; }
+.m5-activity-file:focus-visible, .m5-activity-folded > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.m5-activity-lines { flex: 0 0 auto; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.m5-activity-detail { display: grid; gap: var(--space-1); margin: var(--space-1) 0 var(--space-2) var(--space-3); padding: var(--space-2) var(--space-3); border-left: 2px solid var(--line-subtle); color: var(--text-secondary); font-size: var(--text-xs); }
+.m5-activity-detail dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px var(--space-3); margin: 0; }
+.m5-activity-detail dt { color: var(--text-tertiary); }
+.m5-activity-detail dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--text-primary); }
+.m5-activity-code, .m5-output-scroll .m5-activity-code { max-height: 16em; margin: 0; padding: var(--space-1) var(--space-2); overflow: auto; border-radius: var(--radius-s); background: var(--bg-sunken); color: var(--text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--text-xs); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; unicode-bidi: plaintext; }
+.m5-activity-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.m5-activity-row[data-action="delete"] .m5-activity-mark { background: var(--status-danger); }
+.m5-activity-hidden { flex: 0 0 auto; color: var(--text-tertiary); }

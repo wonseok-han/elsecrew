@@ -333,7 +333,18 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 새 출력 형식은 schema V11에서 도입된 `run_output_records`에 공개 항목을 순서대로 저장하고 `run_output_heads`에 검증된 요약을 유지한다. 2026-10-27 사용자 승인에 따라 macOS NativeProviders의 일반 시작은 `Storage::open_for_durable_admission`을 사용한다. 기존 원장 검증→취소 가능한 원자 이관→기존/출력 원장 합동 검증 후 쓰기를 허용한다. 실제 모델 실행을 기다리지 않고 첫 앱 시작에서 V10→V11(이후 총괄 지원 V12)로 이관되며, 구버전 앱에서는 이 DB를 열 수 없고 다운그레이드 경로는 없다. 기존 기록을 삭제하지 않는다. 이관 commit 전 취소는 V10으로 롤백하고 commit 뒤 취소/검증 실패는 V11을 남길 수 있지만 입장을 허용하지 않는다. 패키지 반영·실제 계정·G6 성능 검증의 완료 여부는 작업 기록에서 별도로 확인한다.
 
-실행 출력의 항목 채널은 `message`(에이전트 글), `plan`(Codex 계획), `activity`(작업 내역)다(2026-11-17). activity 행은 도구 사용 하나를 나타낸다. 항상 완성된 status 행이며 최종 답이 되지 않는다. 본문은 compact JSON `{action, target?, tool?, outcome?}`이다(`agent_runtime/preparation/activity.rs`, 화면 파서 `src/m5/work-history.ts`). Claude는 앱이 도구 요청을 허용하거나 거절할 때 기록한다. 경로는 작업 공간 기준 상대 경로만 남기고, 명령은 모델이 붙인 한 줄 설명만 남긴다. Codex는 명령·파일 변경의 시작·실패·거절만 기록한다. 도구 입력 원문(명령, 파일 내용)은 공개하지 않는다. 기록은 best effort이고, 실패해도 실행을 멈추지 않는다.
+실행 출력의 항목 채널은 `message`(에이전트 글), `plan`(Codex 계획), `activity`(작업 내역)다(2026-11-17). activity 행은 도구 사용 하나를 나타낸다. 항상 완성된 status 행이며 최종 답이 되지 않는다. 본문은 compact JSON이다(`agent_runtime/preparation/activity.rs`, 화면 파서 `src/m5/work-history.ts`). 기록은 best effort이고, 실패해도 실행을 멈추지 않는다.
+
+- **줄 내용(2026-11-26, PR #11 검토 반영)**: `{action, target?, tool?, outcome?, id?, phase?, command?, cwd?, note?, exit?, ms?, added?, removed?}`. `action`은 read·edit·write·delete·search·command·other, `outcome`은 refused·failed·stopped. 화면 한 줄은 "동사 · 대상"이다. 대상은 명령의 첫 줄, 파일의 작업 공간 상대 경로, 검색어 · 범위, 웹 페이지의 도메인이다. 작업 공간 밖 경로는 마지막 두 부분만 남긴다(홈 아래 `~/…/a/b`, 그 밖 `…/a/b`).
+- **저장 전 정리(한 곳)**: 모든 행은 `record_activity`의 `sanitize`를 거쳐서만 저장된다. 아는 필드만 남기고, 문자열은 제어·방향 문자 무력화 → 비밀 가림 → 길이 자르기 순서다(가림이 자르기보다 먼저). `id`는 앱이 붙인 키(Codex `c1`·`c1:0`, Claude `t1`)이고 공급자 도구 ID는 저장하지 않는다.
+- **시작 줄과 끝 줄**: 도구 사용이 끝나면 같은 `id`에 `phase:"done"`인 줄을 하나 더 쓴다(종료 코드는 공급자가 밝힌 경우에만, 걸린 시간, 바뀐 줄 수). activity 행은 append할 수 없어 따로 쓰고, 화면(`activityItems`)이 끝 줄을 id·동사·대상이 같은 첫 시작 줄 자리에 한 번만 보인다. 같은 파일을 이어서 쓰거나 고치면 한 줄로 묶어 "N번"과 합친 줄 수를 보인다.
+- **출력은 저장하지 않는다**: 명령 출력·도구 결과 본문·파일 내용은 파싱도 저장도 하지 않는다(이름 없는 값은 가림으로 걸러 낼 수 없어서, 검토 B3).
+- **Claude**: 시작 줄은 앱이 도구 요청을 허용·거절할 때 쓴다. 명령은 명령 줄 자체와 모델의 한 줄 설명(`note`)을 남긴다. 끝 줄은 이 세션의 `user` 프레임(세션 ID 일치·UUID 한 번만)의 `tool_result`에서 만든다(`claude_events::Projection::ToolResults`, 화면 전용). `is_error`가 불리언이 아니면 끝 줄을 쓰지 않고, `interrupted`면 "중단됨", "Exit code N"이 있을 때만 종료 코드를 남긴다. 걸린 시간은 허용부터 결과까지 sidecar 시계다. 실행 위치는 알 수 없어(셸 안 `cd`) 남기지 않는다.
+- **Codex**: `ToolEvent.detail`(cwd·commandActions·exitCode·durationMs·fileChange의 경로와 diff 줄 수)을 관대하게 읽는다. 시작 줄을 `CodexTools`에 보관했다가 끝 줄을 그것으로 만든다. 그래서 끝 프레임에 commandActions·changes가 빠지거나 순서가 바뀌어도 동사·대상·파일이 유지된다(파일은 경로로 맞춤). commandActions가 하나뿐인 read·search·(경로 있는) listFiles이면 그 동사로 보인다.
+- **명령 행은 요약만 저장한다(검토 3차 B2)**: 명령 행에는 명령 줄의 글자를 하나도 저장하지 않는다. `command_redact.rs` `summarize_command`(엔진) ↔ `secret-shape.ts` `summarizeCommand`(화면)가 남기는 것은 세 가지다. `program`: 첫 줄의 첫 토큰이 `^[A-Za-z0-9._+-]{1,32}$`이고, 대입·경로 실행이 아니며, 키 모양(12자 이상에 대문자와 숫자가 섞임)이 아닐 때만. `subcommand`: 도구별 고정 목록(git status/diff/log/add/commit…, npm·pnpm·yarn·bun run/test/install/build…, cargo build/test/check…, go, gh, docker, `python -m` + 정해진 모듈)에 있을 때만 하나. `hiddenArgs`: 그 밖의 단어 수(숫자·경로·호스트·플래그와 값 모두 셈만 한다). 여러 줄, 대입으로 시작, 따옴표 짝·백슬래시·백틱·`$(`·`${`·heredoc·따옴표 밖 괄호, 2,000자 초과면 아무것도 남기지 않는다(화면 "명령 실행"만). `sanitize`는 명령 행의 `target`·`command`를 버리고 `program`·`subcommand`를 다시 검사한다. 화면은 "명령 실행 · npm test", "명령 실행 · git diff (인수 2개 가림)"처럼 보이고, 예전 빌드 행의 줄도 같은 요약으로 바꿔 보인다. Codex의 `commandActions`(줄을 해석한 읽기·검색 경로)는 쓰지 않는다. 파일 경로는 파일 이벤트(Claude Read/Edit/Write, Codex fileChange)의 구조화된 경로에서만 보인다. 공용 사례 `summary` 82개(리뷰 1~3차 반례 + 합성 27개).
+- **산문 가림**: 명령 줄이 아닌 글(설명 `note`, 검색어, 경로, 웹 검색어)은 `secret_mask.rs`(엔진)와 `secret-shape.ts` `maskSecrets`(화면)의 패턴 가림을 쓴다. 공용 사례 `mask`·`line`. 다루는 것: 알려진 키 모양, 비밀 이름 설정값, Authorization 헤더, Bearer/Basic, URL 비밀번호, `-u`·`-p` 값, 따옴표 값, 긴 덩어리, 개인 키 블록.
+- **화면**: 텍스트로만 그린다(마크다운·HTML 해석 없음). 예전 빌드가 저장한 줄도 그리기 전에 같은 규칙으로 다시 가린다. 파일 줄은 작업의 현재 변경 목록에 그 경로가 정확히 있을 때만 버튼이 되고, 누르면 검토 시트에서 그 파일의 변경을 연다(`openableFile`, PR #5 시트 경로).
+- **저장 시험**: `chat::tests`의 Codex(`codex_durable_native_delivery_and_cancel`)·Claude(`claude_project_consent_auto_approves_and_still_rejects_outside_files`의 auto-read 등)가 가짜 토큰·설명·출력을 넣고, 실행 뒤 저장소 파일(SQLite 본 파일·WAL)을 바이트로 읽어 원문이 없음을 확인한다(`assert_store_lacks`).
 
 2026-11-10 총괄 직접 응답 연결은 저장 schema V12를 사용한다. V11의 원본 DDL·기록은 바꾸지 않고, 검증된 V11에서 `event_source_index_requires_exact_event`의 답변 작성자 허용 목록에 coordinator/design을 추가하며 metadata를12로 교체한다. 이관은 단일 transaction이며 취소/오류는 롤백한다. 일반 durable admission은 V10→V11→V12 순서로 진행하고 V12의 기존/출력 원장·compaction prefix를 재검증한다. V12는 구버전 앱에서 열 수 없으며 다운그레이드는 제공하지 않는다.
 
@@ -634,18 +645,25 @@ Keychain 호출은 모두 30초 제한이 있는 자식 프로세스(코어 덤�
 - **실패 안내 틀(F11)**: `recovery-guide.tsx` `RecoveryGuide`가 무슨 일(`m5.guide.what`) → 지금 할 수 있는 일(주 행동 하나 + 대안) → 도움 요청용 정보(접힘, 복사)를 그린다. 공용 `.m5-recover` 모양을 쓴다. 원문 오류 키·식별자는 '도움 요청용 정보' 안에만 둔다.
 - **로그인 실패 7종**(`login-guide.ts` `loginGuide`): 정리 대기(recovery)·잠시 대기(busy)·프로그램 바뀜(changed)·프로그램 없음(missing)·저장된 로그인 못 엶(profile)·설정 호환 문제(profileCompatibility)·그 밖의 실패(failed)마다 어조, 주 행동, 대안이 정해져 있다.
   - 주 행동과 대안은 다시 확인, 다시 로그인, 설치·업데이트 확인, 다른 에이전트로 역할 바꾸기 중에서 고른다.
-  - 새 로그인이 진짜 문제를 가릴 수 있는 종류(failed를 뺀 6종)는 다시 로그인을 내놓지 않는다.
-  - Claude의 일반 실패만 다시 로그인이 주 행동이다(만료된 코드). 무슨 일 문장은 `provider-login-message.ts`의 조심 문구를 그대로 쓴다.
+  - 새 로그인이 진짜 문제를 가릴 수 있는 종류는 다시 로그인을 내놓지 않는다. 앱이 연결 확인에 닿지 못한 요청 오류는 `unreachable`로 따로 묶는다(카드는 고정 진단 코드를 안내에 넘김, PR #14 검토 I1).
+  - 일반 실패(failed)는 원인이 코드 만료만이 아니므로 두 에이전트 모두 다시 확인이 주 행동이고, 다시 로그인은 대안이다. 무슨 일 문장은 `provider-login-message.ts`의 조심 문구를 그대로 쓴다.
 - **연결 카드**(설정 › 에이전트 설치·연결, 목업 08): 이름 + 상태 배지(연결됨·확인 필요·확인 중·로그인 필요·연결 안 됨) + 오른쪽 '연결하기/연결 끊기'.
   - 버튼 줄: '연결 상태 다시 확인', 설치·업데이트. 실패하면 F11 안내가 로그인 버튼 자리를 대신한다.
   - 버튼은 동작만 쓰고, 대상은 접근성 이름에 둔다(`m5.connection.connectNamed` 등).
-- **설치 동의**: `InstallConfirmation`은 공용 확인 대화상자다. 첫 초점은 취소이고, 주 행동은 '설치·업데이트' 하나다.
-  - 안내의 '설치·업데이트 확인'은 `INSTALL_PREPARE` 이벤트로 설치 내용 준비(prepare)만 요청한다. 시작은 이 대화상자에서만 한다.
+- **설치 동의**: 앱 안 `InstallConfirmation`(공용 확인 대화상자, 첫 초점 취소)은 무엇이 어디에 설치되는지 보여 주는 검토 단계다.
+  - **실제 동의는 main의 기본 대화상자에서만 받는다**(PR #14 검토 B1).
+    - 화면의 `start` 요청이 오면 main이 sidecar에서 동의를 기다리는 plan을 직접 읽어 공급자·planId가 맞는지 본다.
+    - 그 쓰기 위치를 main이 대화상자에 적고, '설치·업데이트'일 때만 sidecar에 시작을 보낸다.
+    - 화면은 폴더를 정할 수도, 이 대화상자에 답할 수도 없다. 폴더 확인(PR #12)·다시 시작(PR #16)과 같은 원칙이다.
+  - 안내의 '설치·업데이트 확인'은 `INSTALL_PREPARE` 이벤트로 준비(prepare)만 요청한다.
 - **역할 바꾸기 바로가기**: 실패 안내의 '담당 역할을 {다른 에이전트}로 바꾸기'를 누르면 팀 역할 화면이 열린다. 열린 프로젝트가 있으면 그 프로젝트의 팀, 없으면 설정 › 팀 역할(앱 기본값)이다. 자동으로 바꾸지는 않는다(모델을 골라야 하므로).
 - **알림 패널**(목업 12, `notification-bell.tsx` + 순수 함수 `notification-groups.ts`)
   - 탭은 '확인 필요'(해결되지 않은 확인 요청)와 '전체'다. 열 때 확인할 일이 있으면 '확인 필요' 탭이 먼저 열린다.
   - 프로젝트(이름은 패널을 열 때 카탈로그에서 읽고, 글자 표시를 붙임) → 작업(목표는 한 번) → 줄 순서로 묶는다. 해결된 줄은 '해결된 항목 N개'로 접는다.
   - 종 배지는 해결되지 않은 확인 요청만 센다. 끝남·멈춤 알림은 안에서 굵게만 보인다.
+  - 같은 작업의 새 실행이 시작되면(사람이 답함) 그 전에 온 질문은 해결로 바뀐다(`resolveQuestionsFor`). 50줄로 줄일 때도 열린 확인 요청은 지우지 않는다(최대 200, PR #14 검토 I2).
+  - 이름은 패널을 열 때 카탈로그를 쪽마다 읽어 바로 반영하고, 필요한 프로젝트를 다 찾으면 멈춘다(Map, I3).
+  - 다른 프로젝트의 알림은 전환과 같은 한 동작으로 연다. 막히면 이유를 보이고, 실제로 열렸을 때만 읽음이 된다(I4).
 
 ### 오류·빈 상태·업데이트 배너와 정리 (ADE 화면 통일 U7·U8, 2026-11-26)
 

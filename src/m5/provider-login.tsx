@@ -299,13 +299,15 @@ function ProviderConnection({ disabled, provider, alwaysExpanded = false, onAtte
   const other = provider === "codex" ? "Claude Code" : "Codex";
   const guideAction = (action: LoginGuideAction): GuideAction | null => {
     switch (action) {
-      case "check": return { label: t("m5.login.guide.action.check"), onClick: check, disabled: checkDisabled };
+      // The same action as the card's check button, under the same name; the card hides its own while a guide shows (minor 3).
+      case "check": return { label: t("m5.login.check"), ariaLabel: t("m5.login.check"), onClick: check, disabled: checkDisabled };
       case "retryLogin": return { label: t("m5.login.guide.action.retryLogin"), ariaLabel: t("m5.login.guide.action.retryLoginNamed", { name }), onClick: () => void request({action:"start",attemptId:crypto.randomUUID()}), disabled: loginDisabled };
       case "install": return window.m5Install ? { label: t("m5.login.guide.action.install"), ariaLabel: t("m5.login.guide.action.installNamed", { name }), onClick: () => window.dispatchEvent(new CustomEvent(INSTALL_PREPARE, { detail: provider })), disabled } : null;
-      case "switchRoles": return onSwitchRoles ? { label: t("m5.login.guide.action.switchRoles", { other }), onClick: () => onSwitchRoles(provider) } : null;
+      // It opens the team roles, where the person moves roles to another agent and picks its model (minor 2).
+      case "switchRoles": return onSwitchRoles ? { label: t("m5.login.guide.action.switchRoles"), ariaLabel: t("m5.login.guide.action.switchRolesNamed", { other }), onClick: () => onSwitchRoles(provider) } : null;
     }
   };
-  const guide = appConnected === true && failed ? loginGuide(provider, error ? null : status.error) : null;
+  const guide = appConnected === true && failed ? loginGuide(provider, error ? diagnostic ?? "providerLoginTransportUnavailable" : status.error) : null;
   return <section className="m5-provider-login m5-card" aria-label={t("m5.login.section", { name })} data-provider={provider}>
     <header className="m5-connection-heading">
       <strong>{name}</strong><span className={`m5-badge ${badge.tone}`.trim()}>{badge.text}</span>
@@ -317,8 +319,8 @@ function ProviderConnection({ disabled, provider, alwaysExpanded = false, onAtte
     {!alwaysExpanded && <small className="m5-connection-help">{t("m5.login.separate")}</small>}
     {connectionError && <div className="m5-connection-error m5-banner m5-banner-danger" role="alert"><span>{t(appConnected === null ? "m5.connection.loadFailed" : "m5.connection.failed")}</span>{appConnected === null && <button type="button" className="m5-secondary" onClick={() => window.dispatchEvent(new Event(CONNECTIONS_CHANGED))}>{t("m5.device.refresh")}</button>}</div>}
     <div className="m5-connection-actions">
-      <button type="button" className="m5-connection-check" aria-label={t("m5.login.check")} disabled={checkDisabled} onClick={check}>
-        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2 5" /></svg>{t("m5.login.check")}</button>
+      {!guide && <button type="button" className="m5-connection-check" aria-label={t("m5.login.check")} disabled={checkDisabled} onClick={check}>
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2 5" /></svg>{t("m5.login.check")}</button>}
       {alwaysExpanded && <div className="m5-installation-slot" id={`${provider}-installation-slot`}/>}
     </div>
     {appConnected === false && !alwaysExpanded && <small>{t("m5.connection.retained")}</small>}
@@ -343,7 +345,7 @@ function ProviderConnection({ disabled, provider, alwaysExpanded = false, onAtte
       : status.state !== "connected" && !guide && <button className="m5-btn-primary" disabled={loginDisabled} aria-label={t("m5.login.startNamed", { name })} onClick={()=>void request({action:"start",attemptId:crypto.randomUUID()})}>{t("m5.login.start")}</button>}
     {guide && <RecoveryGuide tone={guide.tone} testId={`login-guide-${provider}`} className="m5-login-guide"
       title={t(`m5.login.guide.title.${guide.kind}`, { name })}
-      what={guide.kind === "recovery" ? t("m5.login.recovery.help") : loginErrorMessage(provider, error ? null : status.error, lang)}
+      what={guide.kind === "recovery" ? t("m5.login.recovery.help") : guide.kind === "unreachable" ? t("m5.login.error.unreachable") : loginErrorMessage(provider, error ? null : status.error, lang)}
       primary={guideAction(guide.primary)}
       alternatives={guide.alternatives.map(guideAction).filter((action): action is GuideAction => action !== null)}
       details={diagnostic ?? status.error ?? "providerLoginUnavailable"} />}

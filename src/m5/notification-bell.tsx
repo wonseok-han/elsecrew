@@ -6,32 +6,44 @@ import { ProjectMark } from "./project-catalog-view.tsx";
 import { projectName } from "./project-recency.ts";
 import { validateProjectCatalogResult } from "./contracts/project-catalog-v1.ts";
 
-/** Project names for the panel's groups, read from the saved list when the panel opens (ADE U6). */
-function useProjectNames(open: boolean, ids: readonly string[]): Readonly<Record<string, string>> {
-  const [names, setNames] = useState<Record<string, string>>({});
-  const missing = ids.filter(id => !(id in names)).join(",");
+/** Longest project name the panel shows; longer ones end with an ellipsis. */
+const NAME_LIMIT = 80;
+/**
+ * Project names for the panel's groups, read from the saved list when the
+ * panel opens (ADE U6). Each page's names are kept as they come, and reading
+ * stops once every needed project is named (PR #14 review I3). A Map, so an
+ * id like "constructor" never reads an inherited property (minor 1).
+ */
+function useProjectNames(open: boolean, ids: readonly string[]): ReadonlyMap<string, string> {
+  const [names, setNames] = useState<ReadonlyMap<string, string>>(new Map());
+  const missing = ids.filter(id => !names.has(id));
+  const missingKey = missing.join(",");
   useEffect(() => {
-    if (!open || !missing || !window.m5Projects) return;
+    if (!open || !missing.length || !window.m5Projects) return;
     let alive = true;
+    const needed = new Set(missing);
     void (async () => {
-      const found: Record<string, string> = {};
       let cursor: string | null = null;
-      for (let page = 0; page < 10; page++) {
+      for (let page = 0; page < 20 && needed.size; page++) {
         const input = { action: "list" as const, cursor };
         const result = validateProjectCatalogResult(await window.m5Projects!.request(input), input);
-        if (result.action !== "list") break;
-        for (const entry of result.projects) found[entry.projectId] = projectName(entry.canonicalPath, entry.projectId);
+        if (result.action !== "list" || !alive) break;
+        const found = result.projects.map(entry => [entry.projectId, projectName(entry.canonicalPath, entry.projectId)] as const);
+        for (const [id] of found) needed.delete(id);
+        setNames(current => new Map([...current, ...found]));
         cursor = result.nextCursor;
         if (!cursor) break;
       }
-      if (alive) setNames(current => ({ ...current, ...found }));
     })().catch(() => undefined);
     return () => { alive = false; };
-  }, [open, missing]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the missing list is keyed by its text
+  }, [open, missingKey]);
   return names;
 }
 
 function relativeTime(at: string, lang: string, now: number): string {
+  // A damaged saved time says nothing rather than throwing (PR #14 review minor 1).
+  if (!Number.isFinite(Date.parse(at))) return "";
   const seconds = Math.round((Date.parse(at) - now) / 1000);
   const format = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
   const abs = Math.abs(seconds);
@@ -96,7 +108,9 @@ function NoticeToast({ notice }: { notice: BellNotice }) {
 
 /** The bell: newest first, an unread count, and a click that opens the task. */
 export function NotificationBell({ center, onOpen, notice = null, errors = [], problem, hasProblem = false }: {
-  center: NotificationCenter; onOpen: (item: AppNotification) => void;
+  center: NotificationCenter;
+  /** Opens the item's task; a false answer means it could not (the line then stays unread). */
+  onOpen: (item: AppNotification) => void | boolean | Promise<boolean>;
   notice?: BellNotice | null; errors?: readonly BellError[];
   /** Something that still needs attention (e.g. a stopped run); shown first in the panel. */
   problem?: ReactNode; hasProblem?: boolean;
@@ -125,16 +139,16 @@ export function NotificationBell({ center, onOpen, notice = null, errors = [], p
     hadProblem.current = hasProblem;
   }, [hasProblem]);
   const shownNotice: BellNotice | null = notice ?? (hasProblem && problemNotice > 0 ? { text: t("m5.notifications.problemNotice"), tone: "warning" } : null);
-  const openItem = (item: AppNotification) => {
-    center.markRead(item.id);
+  const openItem = async (item: AppNotification) => {
     if (details.current) details.current.open = false;
-    onOpen(item);
+    // Read only once its task actually opened (PR #14 review I4).
+    if (await onOpen(item) !== false) center.markRead(item.id);
   };
   const line = (item: AppNotification) => <li key={item.id}>
-    <button type="button" className={`m5-notification-item m5-notification-${item.kind}${item.read ? "" : " m5-notification-unread"}${item.resolved ? " m5-notification-resolved" : ""}`} onClick={() => openItem(item)}>
+    <button type="button" className={`m5-notification-item m5-notification-${item.kind}${item.read ? "" : " m5-notification-unread"}${item.resolved ? " m5-notification-resolved" : ""}`} onClick={() => void openItem(item)}>
       <span className="m5-notification-dot" aria-hidden="true" />
       <span className="m5-notification-line" dir="auto">{item.text || t(`m5.notifications.kind.${item.kind}`)}</span>
-      <span className="m5-notification-meta"><span className="m5-notification-kind">{t(`m5.notifications.kind.${item.kind}`)}</span> · <time dateTime={item.at}>{relativeTime(item.at, lang, now)}</time>{item.resolved && <> · {t("m5.notifications.resolved")}</>}</span>
+      <span className="m5-notification-meta">{item.text && <><span className="m5-notification-kind">{t(`m5.notifications.kind.${item.kind}`)}</span> · </>}<time dateTime={item.at}>{relativeTime(item.at, lang, now)}</time>{item.resolved && <> · {t("m5.notifications.resolved")}</>}</span>
     </button>
   </li>;
   return <div className="m5-bell-area"><details ref={details} className="m5-notification-bell" onToggle={event => {
@@ -157,9 +171,10 @@ export function NotificationBell({ center, onOpen, notice = null, errors = [], p
       {problem}
       {groups.length === 0 ? <div className="m5-empty-state m5-notification-empty"><h3>{t(tab === "attention" ? "m5.notifications.emptyAttention" : "m5.notifications.empty")}</h3><p>{t(tab === "attention" ? "m5.notifications.emptyAttentionHelp" : "m5.notifications.emptyHelp")}</p></div>
         : groups.map(project => {
-          const name = names[project.projectId] ?? t("m5.notifications.unknownProject");
+          const known = names.get(project.projectId);
+          const name = known ? known.length > NAME_LIMIT ? `${known.slice(0, NAME_LIMIT)}…` : known : t("m5.notifications.unknownProject");
           return <section key={project.projectId} className="m5-notification-project" aria-label={name}>
-            <h4><ProjectMark name={name} /><span>{name}</span></h4>
+            <h4><ProjectMark name={name} /><span><bdi>{name}</bdi></span></h4>
             {project.tasks.map(task => <div key={task.chatId} className="m5-notification-task">
               <p className="m5-notification-goal" dir="auto">{task.goal}</p>
               {task.open.length > 0 && <ul>{task.open.map(line)}</ul>}
