@@ -22,7 +22,7 @@
     "m5:smoke:project-ui": "electron scripts/m5-project-ui-smoke.cjs",
     "m5:smoke:packaged-ui": "node --experimental-strip-types scripts/m5-packaged-ui-smoke.mjs",
     "m5:test:electron": "node --test --experimental-strip-types tests/m5-electron*.test.mts && pnpm run m5:package:smoke",
-    "m5:test:security": "node --test --experimental-strip-types tests/m5-electron-security.test.mts tests/m5-renderer-csp.test.mts tests/m5-electron-scaffold.test.mts tests/m5-sidecar-staging.test.mts tests/m5-preview-policy.test.mts tests/m5-preview-manager.test.mts tests/m5-preview-tab.test.mts && node --experimental-strip-types --check electron/main.ts",
+    "m5:test:security": "node --test --experimental-strip-types tests/m5-electron-security.test.mts tests/m5-renderer-csp.test.mts tests/m5-electron-scaffold.test.mts tests/m5-sidecar-staging.test.mts tests/m5-preview-policy.test.mts tests/m5-preview-manager.test.mts tests/m5-preview-tab.test.mts tests/m5-preview-layout-loop.test.mts && node --experimental-strip-types --check electron/main.ts",
     "m5:test:preview-isolation": "cargo build -p elsecrew-sidecar --locked && node scripts/m5-preview-isolation-probe.mjs --build",
     "m5:test:preview-ui": "node scripts/m5-preview-ui-run.mjs",
     "m5:test:package": "node --test --experimental-strip-types tests/m5-g6-package-gate.test.mts tests/m5-package-metrics.test.mts tests/m5-sidecar-staging.test.mts && node scripts/m5-g6-package-gate.mjs",

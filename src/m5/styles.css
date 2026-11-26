@@ -1894,8 +1894,9 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-preview-state strong { color: var(--text-primary); }
 .m5-preview-state p { margin: 0; max-width: 32em; }
 .m5-preview-actions { display: flex; gap: var(--space-2, 8px); }
-/* An app element waiting for main to hide the view first (PR #9 review I1). Opacity, not visibility: focus stays where it was. */
+/* An app element waiting for main to hide the view first (PR #9 review I1): invisible with its modal backdrop; the tab also makes it inert (no focus, no input) and gives focus back after. */
 [data-preview-wait] { opacity: 0 !important; }
+[data-preview-wait]::backdrop { opacity: 0 !important; background: transparent !important; backdrop-filter: none !important; }
 .m5-preview-note { margin: 0; font-size: var(--text-xs, 12px); color: var(--text-tertiary); }
 .m5-preview-open-file { margin: 4px 0; }
 

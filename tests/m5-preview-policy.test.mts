@@ -27,6 +27,7 @@ import {
   previewEntryUrl,
   previewPartition,
   previewResponseHeaders,
+  pageSizeMatches,
   pixelRatioMatches,
   previewViewRect,
   windowBounds,
@@ -184,6 +185,13 @@ test("bounds: the page's CSS pixels times the zoom, rounded inwards, cut to the 
   assert.equal(pixelRatioMatches(2.5, 1.5, 2), false);
   assert.equal(pixelRatioMatches(1, 1, 2), false, "measured on a standard display, now on a Retina one");
   assert.equal(pixelRatioMatches(Number.NaN, 1, 1), false);
+  // …nor one taken at another window size (PR #9 re-review B1).
+  assert.equal(pageSizeMatches({ width: 1280, height: 800 }, 1, content), true);
+  assert.equal(pageSizeMatches({ width: 853, height: 533 }, 1.5, content), true, "innerWidth rounds down at a fractional zoom");
+  assert.equal(pageSizeMatches({ width: 1600, height: 1000 }, 0.8, content), true);
+  assert.equal(pageSizeMatches({ width: 1280, height: 800 }, 1.25, content), false, "measured before zooming in");
+  assert.equal(pageSizeMatches({ width: 1100, height: 800 }, 1, content), false, "measured before the window grew");
+  assert.equal(pageSizeMatches({ width: Number.NaN, height: 800 }, 1, content), false);
   const bounds = { x: 700, y: 60, width: 500, height: 600 };
   assert.deepEqual(previewViewRect(bounds, "wide"), bounds);
   assert.deepEqual(previewViewRect(bounds, "narrow"), { x: 755, y: 60, width: 390, height: 600 });
@@ -229,17 +237,21 @@ test("sidecar contract: requests are exact, answers must echo them and match the
 });
 
 test("renderer contract: exact actions and answers", () => {
-  const open = { action: "open", projectId: "p", chatId: "c", entry: null, bounds: { x: 1, y: 2, width: 300, height: 300 }, viewport: "narrow", pixelRatio: 2 } as const;
+  const open = { action: "open", projectId: "p", chatId: "c", entry: null, bounds: { x: 1, y: 2, width: 300, height: 300 }, viewport: "narrow", pixelRatio: 2, page: { width: 1280, height: 800 } } as const;
   assert.deepEqual(validatePreviewIpcRequestV1(open), open);
   // The page's devicePixelRatio comes with every measurement (PR #9 review B1).
   const { pixelRatio: _ratio, ...unmeasured } = open;
   assert.throws(() => validatePreviewIpcRequestV1(unmeasured), /unexpected fields/);
   for (const bad of [0, -1, 0.1, 17, Number.NaN, Number.POSITIVE_INFINITY, "2"]) assert.throws(() => validatePreviewIpcRequestV1({ ...open, pixelRatio: bad }), /pixelRatio/, String(bad));
+  // …and the page's own size, so main can refuse a measurement from before a resize.
+  const { page: _page, ...sizeless } = open;
+  assert.throws(() => validatePreviewIpcRequestV1(sizeless), /unexpected fields/);
+  for (const bad of [{ width: 0, height: 800 }, { width: 1280 }, { width: 1280, height: 800, x: 1 }, { width: "1280", height: 800 }, { width: 1280, height: Number.NaN }]) assert.throws(() => validatePreviewIpcRequestV1({ ...open, page: bad }), JSON.stringify(bad));
   assert.throws(() => validatePreviewIpcRequestV1({ ...open, action: "navigate" }));
   assert.throws(() => validatePreviewIpcRequestV1({ action: "close", previewId: "a".repeat(32) }));
   const previewId = `pv_${"b".repeat(32)}`;
-  const layout = validatePreviewIpcRequestV1({ action: "layout", previewId, bounds: open.bounds, viewport: "wide", obscured: true, pixelRatio: 1.25 });
-  assert.throws(() => validatePreviewIpcRequestV1({ action: "layout", previewId, bounds: open.bounds, viewport: "wide", obscured: true }));
+  const layout = validatePreviewIpcRequestV1({ action: "layout", previewId, bounds: open.bounds, viewport: "wide", obscured: true, pixelRatio: 1.25, page: { width: 1024, height: 640 } });
+  assert.throws(() => validatePreviewIpcRequestV1({ action: "layout", previewId, bounds: open.bounds, viewport: "wide", obscured: true, pixelRatio: 1.25 }));
   assert.equal(validatePreviewIpcResultV1({ action: "layout", previewId, state: "hidden", snapshot: "data:image/jpeg;base64,AAAA" }, layout).state, "hidden");
   assert.throws(() => validatePreviewIpcResultV1({ action: "layout", previewId, state: "hidden", snapshot: "https://x/y.png" }, layout));
   const opened = validatePreviewIpcRequestV1(open);

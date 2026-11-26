@@ -2,6 +2,7 @@ import { createClaudeUsageReader } from "./claude-usage.ts";
 import { CLAUDE_USAGE_CHANNEL, validateClaudeUsageResult } from "../src/m5/contracts/provider-usage-v1.ts";
 import { randomUUID } from "node:crypto";
 import { installAppUpdateMenu } from "./app-update-menu.ts";
+import { installZoomGuardedMenu, zoomLevelAfter, type ZoomStep } from "./zoom-menu.ts";
 import { GitPreparationClient, isGitPreparation, WINDOWS_GIT_PREPARATION_ENABLED } from "./git-preparation.ts";
 import { GitSelectionStore } from "./git-selection.ts";
 import { GIT_SELECTION_CHANNEL, validateGitSelectionAction, validateGitSelection } from "../src/m5/contracts/git-selection-v1.ts";
@@ -855,6 +856,12 @@ async function createMainWindow() {
     }
   });
   window.webContents.on("render-process-gone", () => previewManager.pageReplaced());
+  // A window about to change size hides the preview first; it shows again
+  // only where the page measures after the change (PR #9 re-review B1).
+  window.on("will-resize", () => previewManager.geometryChanged());
+  window.on("resize", () => previewManager.geometryChanged());
+  window.on("enter-full-screen", () => previewManager.geometryChanged());
+  window.on("leave-full-screen", () => previewManager.geometryChanged());
   // A minimized or hidden window hides the preview view drawn over it.
   window.on("minimize", () => previewManager.setWindowHidden(true));
   window.on("hide", () => previewManager.setWindowHidden(true));
@@ -869,6 +876,22 @@ async function createMainWindow() {
   }
 }
 
+/** The View menu's zoom: the preview is hidden before the page's zoom
+ * changes (PR #9 re-review B1). */
+function zoomPage(step: ZoomStep): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  previewManager.geometryChanged();
+  const contents = mainWindow.webContents;
+  contents.setZoomLevel(zoomLevelAfter(contents.getZoomLevel(), step));
+}
+
+/** The same order for a given factor (the preview UI smoke's zoom levels). */
+function setPageZoomFactor(factor: number): void {
+  if (!mainWindow || mainWindow.isDestroyed() || !Number.isFinite(factor) || factor <= 0) return;
+  previewManager.geometryChanged();
+  mainWindow.webContents.setZoomFactor(factor);
+}
+
 // Fresh Elsecrew profile: do not import the retired application data.
 const existingUserData = app.getPath("userData");
 app.setName("Elsecrew");
@@ -877,6 +900,7 @@ app.setPath("userData", existingUserData);
 app.whenReady().then(async () => {
   await protocol.handle(APP_SCHEME, serveAppAsset);
   registerIpcHandlers();
+  installZoomGuardedMenu(zoomPage);
   installAppUpdateMenu(async (install) => {
     if (!await rendererReadyForUpdate()) {
       const ko = app.getLocale().toLowerCase().startsWith("ko");
@@ -921,7 +945,9 @@ export {
   assertCurrentMainFrame,
   m5DataDirectory,
   previewManager,
+  setPageZoomFactor,
   sidecarLaunch,
+  zoomPage,
 };
 import { M5_BRIDGE_V7_CHANNELS } from "./ipc-channels.ts";
 import { M5_BRIDGE_V8_CHANNELS } from "./ipc-channels.ts";

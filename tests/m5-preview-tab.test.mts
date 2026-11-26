@@ -82,24 +82,28 @@ test("a cover over only the stage's edge or between the points is found by its r
   assert.equal(intersection(stage, { left: 0, top: 0, width: 100, height: 100 }), null, "touching corners share nothing");
 });
 
-test("the view is hidden first, then the cover is shown (PR #9 review I1)", () => {
+test("the view is hidden first, then the cover is shown (PR #9 review I1, re-review)", () => {
   const source = readFileSync("src/m5/preview-tab.tsx", "utf8");
-  // New or changed app elements over the stage are held invisible before the page paints…
+  // New or changed app elements over the stage are held before the page paints…
   assert.match(source, /new MutationObserver\(records => \{/);
-  assert.match(source, /node\.setAttribute\(PREVIEW_WAIT_ATTRIBUTE, ""\)/);
-  assert.match(source, /causes\.current\.holding = true;/);
-  // …and let go only once main accepted a hidden layout.
-  assert.match(source, /if \(!waiting\.size \|\| sending\.current \|\| !lastLayout\.current\?\.obscured\) return;/);
-  // Main never answering closes the preview instead of hiding the app's own screen for good.
-  assert.match(source, /HOLD_LIMIT_MS/);
-  // Only an accepted layout is remembered (review B1): a failed one is sent again.
-  assert.match(source, /lastLayout\.current = next;\n\s+if \(next\.obscured && !wasObscured/);
-  assert.match(source, /retry = window\.setTimeout\(sync, 250\)/);
-  // Resizing or zooming hides at once; every measurement carries the page's devicePixelRatio.
-  assert.match(source, /causes\.current\.resizing = true;\n\s+sync\(\);/);
-  assert.equal((source.match(/pixelRatio: window\.devicePixelRatio/g) ?? []).length, 2);
+  // …invisible AND out of reach: no focus, no input (inert), focus given back after.
+  assert.match(source, /element\.setAttribute\(PREVIEW_WAIT_ATTRIBUTE, ""\);\n\s+if \(!wasInert\) element\.setAttribute\("inert", ""\);\n\s+loop\.hold\(/);
+  assert.match(source, /focused\.focus\(\)/);
+  // The order itself (hide first, hides never queued, let go only on main's answer,
+  // detach at the limit) is PreviewLayoutLoop's: tests/m5-preview-layout-loop.test.mts.
+  assert.match(source, /new PreviewLayoutLoop\(\{/);
+  assert.match(source, /close: \(\) => bridge\.close\(\{ previewId \}\)/);
+  // Bands that move the stage appear only once the view is hidden (re-review B1).
+  for (const change of ["setNotice(true)", "setNotice(false)", "setNewResult(true)", "setNewResult(false)"]) assert.ok(source.includes(`shift(() => ${change})`), change);
+  assert.match(source, /useLayoutEffect\(\(\) => \{ loopRef\.current\?\.settled\(\); \}, \[newResult, notice\]\);/);
+  // Something in the tab that moved the stage is held the same way.
+  assert.match(source, /if \(own\?\.contains\(node\)\) \{\n\s+if \(moved\) \{ holdElement\(node\);/);
+  // Every measurement carries the page's devicePixelRatio and size.
+  assert.match(source, /pixelRatio: window\.devicePixelRatio, page: \{ width: window\.innerWidth, height: window\.innerHeight \}/);
+  assert.match(source, /return \{ bounds: rect \? previewBounds\(rect, page\) : null, pixelRatio: window\.devicePixelRatio, page \};/);
   const css = readFileSync("src/m5/styles.css", "utf8");
   assert.ok(css.includes(`[${PREVIEW_WAIT_ATTRIBUTE}] { opacity: 0 !important; }`));
+  assert.ok(css.includes(`[${PREVIEW_WAIT_ATTRIBUTE}]::backdrop { opacity: 0 !important; background: transparent !important; backdrop-filter: none !important; }`), "the modal backdrop too");
 });
 
 test("closed and empty states say what happened; files offer only pages", () => {

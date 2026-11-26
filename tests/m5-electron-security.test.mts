@@ -17,6 +17,9 @@ import * as previewContract from "../src/m5/contracts/preview-v1.ts";
 import * as previewPolicy from "../electron/preview-policy.ts";
 import * as previewManagerModule from "../electron/preview-manager.ts";
 import * as previewFlag from "../electron/preview-flag.ts";
+import * as zoomMenuModel from "../electron/zoom-menu-model.ts";
+/** The View menu's zoom callback main.ts installed (the real menu needs Electron). */
+const installedZoom: { current: ((step: -1 | 0 | 1) => void) | null } = { current: null };
 import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS, M5_BRIDGE_V7_CHANNELS, M5_BRIDGE_V8_CHANNELS } from "../electron/ipc-channels.ts";
 
 const require = createRequire(import.meta.url);
@@ -233,6 +236,11 @@ class FakeWindow {
     send: () => undefined,
     setWindowOpenHandler: (handler: () => { action: string }) => { this.openHandler = handler; },
     getZoomFactor: () => 1,
+    zoomLevel: 0,
+    zoomCalls: [] as string[],
+    getZoomLevel: () => this.webContents.zoomLevel,
+    setZoomLevel: (level: number) => { this.webContents.zoomLevel = level; this.webContents.zoomCalls.push(`setZoomLevel:${level}`); },
+    setZoomFactor: (factor: number) => { this.webContents.zoomCalls.push(`setZoomFactor:${factor}`); },
   };
 
   constructor(options: unknown) {
@@ -425,6 +433,7 @@ function moduleFor(
 ) {
   if (specifier === "electron") return fakes.electron;
   if (specifier === "./app-update-menu.ts") return { installAppUpdateMenu() {} };
+  if (specifier === "./zoom-menu.ts") return { installZoomGuardedMenu: (zoom: (step: -1 | 0 | 1) => void) => { installedZoom.current = zoom; }, zoomLevelAfter: zoomMenuModel.zoomLevelAfter };
   // Usage reads touch the app keychain and network; the security harness only
   // needs the reader to exist and must fail loudly if a handler reaches it.
   if (specifier === "./claude-usage.ts") return {
@@ -588,7 +597,7 @@ test("update readiness rejects unsolicited, stale and foreign replies", async ()
 });
 
 test("result preview IPC is on by default on macOS, off with ELSECREW_PREVIEW=0 and elsewhere, answers only the main frame, and never takes a workspace, token or URL", async () => {
-  const open = { action: "open", projectId: "project_1", chatId: "chat_1", entry: null, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", pixelRatio: 1 };
+  const open = { action: "open", projectId: "project_1", chatId: "chat_1", entry: null, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", pixelRatio: 1, page: { width: 1280, height: 800 } };
   // Windows is not checked yet (PR #9 review I2·I5): off unless asked for.
   const windows = await loadMain(undefined, false, { TEST_PLATFORM: "win32" });
   assert.deepEqual(windows.switches, []);
@@ -640,6 +649,7 @@ test("result preview IPC is on by default on macOS, off with ELSECREW_PREVIEW=0 
   await assert.rejects(handler(on.currentEvent(), { ...open, bounds: { x: 1200, y: 0, width: 500, height: 600 } }), /not on screen/);
   await assert.rejects(handler(on.currentEvent(), { ...open, bounds: { x: 0, y: 0, width: 100, height: 600 } }), /too small|not on screen/);
   await assert.rejects(handler(on.currentEvent(), { ...open, pixelRatio: 2 }), /not on screen/);
+  await assert.rejects(handler(on.currentEvent(), { ...open, page: { width: 1100, height: 800 } }), /not on screen/, "a measurement from another window size");
   assert.deepEqual(on.sidecarCalls, []);
   // A task with no page yet: nothing is created.
   assert.equal(JSON.stringify(await handler(on.currentEvent(), open)), JSON.stringify({ action: "open", outcome: "empty", reason: "noEntry" }));
@@ -676,4 +686,40 @@ test("a launch blink-settings value is kept; quit preparation closes the preview
   const navigation = merged.window.webContents.listeners.get("did-start-navigation");
   assert.ok(navigation);
   assert.ok(merged.window.webContents.listeners.get("render-process-gone"));
+});
+
+test("the View menu's zoom and a window resize hide the preview before anything moves (PR #9 re-review B1)", async () => {
+  const order: string[] = [];
+  const original = previewManagerModule.PreviewManagerV1.prototype.geometryChanged;
+  previewManagerModule.PreviewManagerV1.prototype.geometryChanged = function geometryChanged(this: InstanceType<typeof previewManagerModule.PreviewManagerV1>) { order.push("hide"); return original.call(this); };
+  try {
+    const on = await loadMain();
+    assert.ok(installedZoom.current, "main installs the guarded View menu");
+    const contents = on.window.webContents as unknown as { zoomCalls: string[] };
+    contents.zoomCalls.length = 0;
+    const record = contents.zoomCalls.push.bind(contents.zoomCalls);
+    contents.zoomCalls.push = (...items: string[]) => { order.push(...items); return record(...items); };
+    installedZoom.current!(1);
+    installedZoom.current!(1);
+    installedZoom.current!(0);
+    assert.deepEqual(order, ["hide", "setZoomLevel:0.5", "hide", "setZoomLevel:1", "hide", "setZoomLevel:0"]);
+    // The window tells main before and as it resizes, and around full screen.
+    for (const event of ["will-resize", "resize", "enter-full-screen", "leave-full-screen"]) {
+      order.length = 0;
+      on.window.listeners.get(event)!();
+      assert.deepEqual(order, ["hide"], event);
+    }
+  } finally {
+    previewManagerModule.PreviewManagerV1.prototype.geometryChanged = original;
+  }
+  // The menu's zoom items are the only zoom path, each through the callback.
+  const steps: number[] = [];
+  const view = zoomMenuModel.viewMenuTemplate(true, step => { steps.push(step); });
+  const items = view.submenu as { role?: string; accelerator?: string; click?: () => void }[];
+  assert.equal(items.some(item => /zoom/i.test(item.role ?? "")), false, "no built-in zoom role");
+  for (const item of items.filter(entry => entry.accelerator)) item.click!();
+  assert.deepEqual(steps, [0, 1, 1, -1]);
+  assert.equal(zoomMenuModel.zoomLevelAfter(9, 1), 9);
+  assert.equal(zoomMenuModel.zoomLevelAfter(-8, -1), -8);
+  assert.equal(zoomMenuModel.zoomLevelAfter(2.5, 0), 0);
 });

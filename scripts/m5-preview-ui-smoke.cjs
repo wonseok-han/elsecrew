@@ -80,6 +80,20 @@ app.on('browser-window-created', (_event, window) => {
 async function run(window) {
   const main = require(path.join(repoRoot, '.vite/build/main.cjs'));
   const manager = main.previewManager;
+  // Every request main gets from the tab, for the failure report.
+  const traffic = [];
+  const recorded = manager.request.bind(manager);
+  manager.request = async (request) => {
+    const entry = { at: Date.now(), action: request.action, obscured: request.obscured, bounds: request.bounds && [request.bounds.x, request.bounds.y, request.bounds.width, request.bounds.height].map(Math.round).join(',') };
+    traffic.push(entry);
+    if (traffic.length > 20000) traffic.shift();
+    try { const answer = await recorded(request); entry.answered = Date.now() - entry.at; entry.state = answer.state; return answer; }
+    catch (error) { entry.error = String(error.message || error).slice(0, 80); throw error; }
+  };
+  result.traffic = traffic;
+  // The app page's own warnings and errors, for the failure report.
+  result.console = [];
+  window.webContents.on('console-message', (event) => { if ((event.level === 'error' || event.level === 'warning') && result.console.length < 200) result.console.push(`${event.level}: ${String(event.message).slice(0, 300)}`); });
   const page = code => window.webContents.executeJavaScript(code);
   const waitFor = async (predicate, ms = 20_000, label = 'condition') => {
     const end = Date.now() + ms;
@@ -127,7 +141,7 @@ async function run(window) {
   await openTask('할 일 앱 만들기');
   await page(`document.querySelector('[data-testid=right-tab-preview]').click()`);
   await waitFor(() => page(`document.querySelector('[data-testid=preview-tab]')?.dataset.phase === 'open'`), 30_000, 'preview open');
-  const view = await waitFor(() => manager.currentWebContents, 10_000, 'view');
+  let view = await waitFor(() => manager.currentWebContents, 10_000, 'view');
   await waitFor(() => !view.isLoading() && view.getURL().startsWith('elsecrew-preview://'), 15_000, 'view load');
   await waitFor(() => manager.currentLayout?.state === 'shown', 10_000, 'view shown');
   step('previewOpen');
@@ -174,6 +188,7 @@ async function run(window) {
   await page(`(() => { window.__holds = []; new MutationObserver(records => { for (const r of records) window.__holds.push({ at: Date.now(), held: r.target.hasAttribute('data-preview-wait'), what: String(r.target.className || r.target.tagName).slice(0, 60) }); }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-preview-wait'] }); })()`);
   const ordering = async (since) => {
     const holds = (await page('window.__holds')).filter(entry => entry.at >= since);
+    result.holdLog = (result.holdLog || []).concat(holds).slice(-200);
     const hides = manager.visibility.filter(entry => entry.at >= since);
     const heldAt = holds.find(entry => entry.held)?.at;
     const releasedAt = holds.find(entry => !entry.held)?.at;
@@ -256,12 +271,158 @@ async function run(window) {
   await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'wide window').catch(() => undefined);
   step('covers');
 
+  // PR #9 re-review B1·I1: main's answers held back on purpose. The cover
+  // (dialog with its ::backdrop, the review sheet) shows and takes input only
+  // after main answered the hide; a band that moves the stage appears only
+  // after it; with no answer at all the preview is detached first.
+  {
+    const original = manager.request.bind(manager);
+    const delays = { before: 0, after: 0, hang: false, close: 0 };
+    let hideAnsweredAt = 0;
+    let closeAnsweredAt = 0;
+    manager.request = async (request) => {
+      const hide = request.action === 'layout' && request.obscured;
+      // No hide is answered (nor applied) until the tab detaches the preview.
+      if (hide && delays.hang) return new Promise(() => undefined);
+      if (request.action === 'close') delays.hang = false;
+      if (hide && delays.before) await sleep(delays.before);
+      const answer = await original(request);
+      if (hide && delays.after) await sleep(delays.after);
+      if (hide) hideAnsweredAt = Date.now();
+      if (request.action === 'close') { if (delays.close) await sleep(delays.close); closeAnsweredAt = Date.now(); }
+      return answer;
+    };
+    const look = selector => page(`(() => {
+      const element = document.querySelector(${JSON.stringify(selector)});
+      if (!element) return null;
+      const style = getComputedStyle(element);
+      const backdrop = element instanceof HTMLDialogElement ? getComputedStyle(element, '::backdrop') : null;
+      const field = element.querySelector('textarea, input, button');
+      let typed = false;
+      if (field && element.hasAttribute('data-preview-wait')) { field.focus(); typed = document.activeElement === field; }
+      return { held: element.hasAttribute('data-preview-wait'), inert: element.inert === true, opacity: style.opacity, backdrop: backdrop ? backdrop.opacity : null,
+        focusInside: element.contains(document.activeElement) && document.activeElement !== element, typed, at: Date.now() };
+    })()`);
+    // While held: invisible (also the backdrop), inert, no focus or typing inside.
+    const sealed = sample => sample && sample.held && sample.inert && sample.opacity === '0' && (sample.backdrop === null || sample.backdrop === '0') && !sample.focusInside && !sample.typed;
+    const watch = async (selector, ms) => {
+      const samples = [];
+      const end = Date.now() + ms;
+      while (Date.now() < end) { const sample = await look(selector); samples.push({ ...sample, view: manager.currentLayout?.state }); await sleep(60); }
+      return samples;
+    };
+
+    // (1) The hide is applied at once but its answer comes 900 ms late.
+    await sleep(700);
+    let since = Date.now();
+    delays.after = 900;
+    await page(`document.querySelector('.m5-new-chat-button').click()`);
+    let samples = await watch('.m5-new-chat-dialog', 650);
+    const releasedLate = await waitFor(() => look('.m5-new-chat-dialog').then(sample => sample && !sample.held && sample), 5_000, 'dialog shown after the answer').catch(() => null);
+    let order = await ordering(since);
+    check('I1 a dialog (and its backdrop) stays invisible and inert until main answers the hide (answer 900 ms late)',
+      samples.length > 3 && samples.every(sealed) && releasedLate && releasedLate.opacity !== '0' && releasedLate.focusInside && order.releasedAt >= hideAnsweredAt - 5 && order.hiddenFirst,
+      { samples: samples.slice(0, 3), releasedLate, order, hideAnsweredAt });
+    await page(`document.querySelector('.m5-new-chat-dialog header button').click()`);
+    await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'shown after dialog (1)');
+    delays.after = 0;
+
+    // (2) Main itself is 900 ms late hiding: the view is still drawn, so the dialog must not be.
+    await sleep(700);
+    since = Date.now();
+    delays.before = 900;
+    await page(`document.querySelector('.m5-new-chat-button').click()`);
+    samples = await watch('.m5-new-chat-dialog', 650);
+    const whileShown = samples.filter(sample => sample.view === 'shown');
+    await waitFor(() => look('.m5-new-chat-dialog').then(sample => sample && !sample.held), 5_000, 'dialog shown after main hid');
+    order = await ordering(since);
+    check('I1 while main is slow to hide, the view stays drawn and the dialog never shows over it (hide 900 ms late)',
+      whileShown.length > 2 && whileShown.every(sealed) && order.hiddenFirst, { whileShown: whileShown.length, order });
+    await page(`document.querySelector('.m5-new-chat-dialog header button').click()`);
+    await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'shown after dialog (2)');
+    delays.before = 0;
+
+    // (3) The review sheet, answer 900 ms late. A task still being drafted
+    // offers no "변경 보기" while the preview tab is shown, so the sheet is
+    // shown the way the layout shows it: its \`hidden\` attribute goes away.
+    await sleep(700);
+    since = Date.now();
+    delays.after = 900;
+    const opener = await page(`(() => { const sheet = document.querySelector('[data-testid=review-sheet]'); if (!sheet || !sheet.hidden) return false; sheet.hidden = false; return true; })()`);
+    samples = opener ? await watch('[data-testid=review-sheet]', 650) : [];
+    const sheetOpen = opener && await waitFor(() => look('[data-testid=review-sheet]').then(sample => sample && !sample.held && sample.opacity !== '0'), 5_000, 'sheet shown after the answer').then(() => true, () => false);
+    order = await ordering(since);
+    check('I1 the review sheet stays invisible and inert until main answers the hide (answer 900 ms late)',
+      opener && samples.length > 3 && samples.every(sealed) && sheetOpen && order.releasedAt >= hideAnsweredAt - 5, { opener, samples: samples.slice(0, 2), sheetOpen, order, hideAnsweredAt });
+    if (opener) await page(`document.querySelector('[data-testid=review-sheet]').hidden = true`);
+    await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'shown after sheet');
+    delays.after = 0;
+
+    // (4) A band in the tab ("링크를 막았어요") pushes the stage down: it
+    // appears only after main answered the hide, and the view comes back at
+    // the stage's new place.
+    await sleep(700);
+    await page(`(() => { window.__band = null; new MutationObserver(() => { if (!window.__band && document.querySelector('[data-testid=preview-blocked]')) window.__band = Date.now(); }).observe(document.body, { subtree: true, childList: true }); })()`);
+    const stageBefore = await page(`document.querySelector('[data-testid=preview-stage]').getBoundingClientRect().top`);
+    since = Date.now();
+    delays.after = 900;
+    const live = manager.currentWebContents;
+    await live.executeJavaScript(`location.href = 'https://example.com/elsewhere'`).catch(() => undefined);
+    const bandAt = await waitFor(() => page('window.__band'), 5_000, 'band shown').catch(() => null);
+    const hiddenAt = manager.visibility.filter(entry => entry.at >= since && !entry.visible).map(entry => entry.at)[0];
+    const back = await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'shown under the band').then(() => true, () => false);
+    const stageAfter = await page(`document.querySelector('[data-testid=preview-stage]').getBoundingClientRect().top`);
+    const placed = manager.currentLayout?.bounds;
+    check('B1 a band that pushes the stage appears only after main answered the hide; the view returns at the new place',
+      bandAt !== null && hiddenAt !== undefined && hiddenAt <= bandAt && bandAt >= hideAnsweredAt - 5 && back && stageAfter > stageBefore && placed && Math.abs(placed.y - Math.ceil(stageAfter)) <= 1,
+      { bandAt, hiddenAt, hideAnsweredAt, stageBefore, stageAfter, placed });
+    delays.after = 0;
+    // The band leaves after a while; the view is hidden first again.
+    await waitFor(() => page(`!document.querySelector('[data-testid=preview-blocked]')`), 10_000, 'band gone');
+    await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'shown after the band');
+
+    // (5) A window resize: main hides before anything moves, before the page says a word.
+    await sleep(500);
+    window.setSize(1600, 920);
+    const hiddenAtResize = manager.currentLayout?.state === 'hidden';
+    const backAfterResize = await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'shown after resize').then(() => true, () => false);
+    const stageNow = await page(`(() => { const r = document.querySelector('[data-testid=preview-stage]').getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom }; })()`);
+    const boundsNow = manager.currentLayout?.bounds;
+    const insideNow = boundsNow && boundsNow.x >= stageNow.left - 0.01 && boundsNow.y >= stageNow.top - 0.01 && boundsNow.x + boundsNow.width <= stageNow.right + 0.01 && boundsNow.y + boundsNow.height <= stageNow.bottom + 0.01;
+    check('B1 a window resize hides the view in main at once; it returns inside the new stage', hiddenAtResize && backAfterResize && insideNow, { hiddenAtResize, backAfterResize, stageNow, boundsNow });
+    window.setSize(1680, 945);
+    await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'shown at the old size');
+
+    // (6) The hide is never answered: at the limit the preview is detached,
+    // and the dialog shows only once main has answered that close (400 ms late).
+    await sleep(700);
+    since = Date.now();
+    delays.hang = true;
+    delays.close = 400;
+    closeAnsweredAt = 0;
+    await page(`document.querySelector('.m5-new-chat-button').click()`);
+    samples = await watch('.m5-new-chat-dialog', 1300);
+    const released = await waitFor(() => look('.m5-new-chat-dialog').then(sample => sample && !sample.held && sample), 6_000, 'dialog after detach').catch(() => null);
+    order = await ordering(since);
+    check('I1 with no answer the preview is detached and the dialog shows only after main answered the close',
+      samples.every(sealed) && released && closeAnsweredAt > 0 && released.at >= closeAnsweredAt && order.releasedAt >= closeAnsweredAt - 5 && order.releasedAt - since >= 1500,
+      { released, closeAnsweredAt, order, since });
+    delays.hang = false;
+    delays.close = 0;
+    await page(`document.querySelector('.m5-new-chat-dialog header button').click()`);
+    manager.request = original;
+    // The tab opens the preview again by itself.
+    await waitFor(() => manager.currentLayout?.state === 'shown', 15_000, 'reopened after detach');
+    view = manager.currentWebContents;
+  }
+  step('delayedAnswers');
+
   // B1: zoomed in and out (the View menu's zoom), the view stays inside the
   // stage and off the frame; a dialog still hides it, also when the zoom
   // changes while the dialog is open.
   const measure = () => page(`(() => { const r = e => { const b = document.querySelector(e).getBoundingClientRect(); return { left: b.left, top: b.top, width: b.width, height: b.height }; }; return { stage: r('[data-testid=preview-stage]'), frame: r('[data-testid=preview-frame]'), ratio: devicePixelRatio }; })()`);
   for (const zoom of [1.25, 1.5, 0.8, 0.67]) {
-    window.webContents.setZoomFactor(zoom);
+    main.setPageZoomFactor(zoom);
     await sleep(400);
     const shown = await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, `zoom ${zoom} shown`).then(() => true, () => false);
     await sleep(400);
@@ -282,14 +443,14 @@ async function run(window) {
   }
   // Zoomed out while a dialog is open: the view stays hidden (main used to
   // refuse the measurement and keep the view as it was).
-  window.webContents.setZoomFactor(1);
+  main.setPageZoomFactor(1);
   await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'zoom 100 shown');
   await page(`document.querySelector('.m5-new-chat-button').click()`);
   await waitFor(() => manager.currentLayout?.state === 'hidden', 3_000, 'dialog at 100%');
-  window.webContents.setZoomFactor(0.5);
+  main.setPageZoomFactor(0.5);
   await sleep(1200);
   const hiddenWhileZoomed = manager.currentLayout?.state === 'hidden' && !manager.visibility.slice(-3).some(entry => entry.visible && entry.at > Date.now() - 1100);
-  window.webContents.setZoomFactor(1);
+  main.setPageZoomFactor(1);
   await sleep(400);
   await page(`document.querySelector('.m5-new-chat-dialog header button').click()`);
   const backAt100 = await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'back at 100%').then(() => true, () => false);

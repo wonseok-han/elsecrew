@@ -17,7 +17,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.tsx";
 import type { M5PreviewBridgeV1, PreviewCloseReasonV1, PreviewEmptyReasonV1, PreviewViewportV1 } from "./contracts/preview-v1.ts";
-import { closedView, coveredAtPoints, coveredByRect, emptyView, overlaps, PREVIEW_WAIT_ATTRIBUTE, previewBounds, sameLayout, samplePoints, type LayoutState, type Rect } from "./preview-tab-model.ts";
+import { closedView, coveredAtPoints, coveredByRect, emptyView, overlaps, PREVIEW_WAIT_ATTRIBUTE, previewBounds, sameLayout, samplePoints, type Rect } from "./preview-tab-model.ts";
+import { PREVIEW_HOLD_LIMIT_MS, PreviewLayoutLoop, type LoopMeasure } from "./preview-layout-loop.ts";
 
 type Phase =
   | { kind: "idle" }
@@ -30,9 +31,6 @@ type Phase =
 
 export interface PreviewEntryRequest { path: string; nonce: number }
 
-/** How long app elements may wait for main to hide the view before the
- * preview is closed instead (an answer that never comes). */
-const HOLD_LIMIT_MS = 1500;
 /** A window being resized or zoomed: the view stays hidden until it settles. */
 const SETTLE_MS = 150;
 /** Elements watched by their rectangle (notification panels, toasts, popovers). */
@@ -70,17 +68,17 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
   const previewId = phase.kind === "open" ? phase.previewId : null;
   const previewRef = useRef<string | null>(null);
   previewRef.current = previewId;
-  /** The last layout main ACCEPTED (PR #9 review B1): a failed one is sent again. */
-  const lastLayout = useRef<LayoutState | null>(null);
-  /** A layout on its way to main: until it answers, the view may be shown. */
-  const sending = useRef(false);
+  /** The live preview's layout order (hide, place, show), or null. */
+  const loopRef = useRef<PreviewLayoutLoop | null>(null);
+  /** A change that moves the stage (a band) happens only once the view is hidden. */
+  const shift = (change: () => void) => { const loop = loopRef.current; if (loop) loop.afterHidden(change); else change(); };
   const hidden = useRef(false);
   const entry = useRef<string | null>(null);
   const shownResultKey = useRef(resultKey);
   const [overlay, setOverlay] = useState(false);
   /** Everything that decides "hidden", read at once by the layout loop
    * (never a render later): a hide must not wait. */
-  const causes = useRef({ covered, active, overlay: false, resizing: false, holding: false });
+  const causes = useRef({ covered, active, overlay: false, resizing: false });
   causes.current.covered = covered;
   causes.current.active = active;
   const viewportNow = useRef(viewport);
@@ -127,10 +125,8 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
     const generation = ++openGeneration.current;
     setPhase({ kind: "opening" });
     setStill(null);
-    lastLayout.current = null;
-    sending.current = false;
     hidden.current = false;
-    bridge.open({ projectId, chatId, entry: entry.current, bounds, viewport, pixelRatio: window.devicePixelRatio }).then(result => {
+    bridge.open({ projectId, chatId, entry: entry.current, bounds, viewport, pixelRatio: window.devicePixelRatio, page: { width: window.innerWidth, height: window.innerHeight } }).then(result => {
       if (generation !== openGeneration.current) {
         if (result.outcome === "opened") void bridge.close({ previewId: result.previewId }).catch(() => undefined);
         return;
@@ -152,7 +148,7 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
     return bridge.onEvent(event => {
       if (event.previewId !== previewRef.current) return;
       if (event.kind === "loaded") setPhase(current => current.kind === "open" ? { ...current, loaded: true } : current);
-      else if (event.kind === "blockedNavigation") setNotice(true);
+      else if (event.kind === "blockedNavigation") shift(() => setNotice(true));
       // The entry page did not load: say so and offer to open it again
       // (the preview itself is closed by leaving the "open" phase).
       else if (event.kind === "loadFailed") { setStill(null); setPhase({ kind: "failed" }); }
@@ -164,6 +160,10 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
     const view = closedView(reason);
     setStill(null);
     setPhase(view ? { kind: "closed", view } : { kind: "idle" });
+    // Closed on request while still the current one: only the layout order
+    // does that, detaching a preview whose hide main did not answer in time
+    // (re-review I1). It opens again, hidden until nothing covers the stage.
+    if (reason === "requested") setOpenRequest(value => value + 1);
   };
 
   // The app began to quit and may yet stay (an update whose preparation
@@ -187,7 +187,7 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
 
   useEffect(() => {
     if (!notice) return;
-    const timer = window.setTimeout(() => setNotice(false), 6000);
+    const timer = window.setTimeout(() => shift(() => setNotice(false)), 6000);
     return () => window.clearTimeout(timer);
   }, [notice]);
 
@@ -195,24 +195,20 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
   useEffect(() => {
     if (resultKey === shownResultKey.current) return;
     shownResultKey.current = resultKey;
-    if (phase.kind === "open") setNewResult(true);
+    if (phase.kind === "open") shift(() => setNewResult(true));
   }, [resultKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The view on the stage: where it goes, and hidden whenever anything of
-  // the app covers the stage (T8, T16).
+  // the app covers the stage (T8, T16). The order of hiding, placing and
+  // showing is `PreviewLayoutLoop`'s (PR #9 re-review B1·I1).
   useEffect(() => {
     if (!previewId || !bridge || !stage.current) return;
     let live = true;
-    let syncFrame = 0;
     let checkFrame = 0;
     let recheck = 0;
-    let retry = 0;
     let settle = 0;
-    let holdTimer = 0;
     /** App elements that appeared or changed and may lie over the stage. */
     const watched = new Set<Element>();
-    /** App elements held invisible until main confirms the view hidden. */
-    const waiting = new Set<Element>();
     /** Where the stage was last seen: when it vanishes (another tab), what
      * takes its place is still held until the view is hidden. */
     let lastRect: Rect | null = null;
@@ -229,60 +225,24 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
       return node instanceof Node && element !== null && (element.contains(node) || node.contains(element));
     };
     const topAt = (x: number, y: number) => document.elementFromPoint(x, y);
-    const obscuredNow = () => {
-      const now = causes.current;
-      return now.covered || now.overlay || !now.active || now.resizing || now.holding;
+    const measure = (): LoopMeasure => {
+      const rect = stageRect();
+      const page = { width: window.innerWidth, height: window.innerHeight };
+      return { bounds: rect ? previewBounds(rect, page) : null, pixelRatio: window.devicePixelRatio, page };
     };
-
-    // Sends what the view should be, one request at a time. Only an accepted
-    // layout is remembered, so a refused or failed one is sent again
-    // (review B1). The answer to each request runs this again at once: a
-    // hide that came up meanwhile never waits for a frame.
-    const sync = () => {
-      syncFrame = 0;
-      if (!live) return;
-      const element = stage.current;
-      if (!element) return;
-      const measured = previewBounds(element.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight });
-      const bounds = measured ?? lastLayout.current?.bounds ?? null;
-      // Not placed yet and nowhere to place it: main keeps it hidden.
-      if (!bounds) return;
-      const next: LayoutState = { bounds, viewport: viewportNow.current, obscured: obscuredNow() || !measured };
-      if (sameLayout(lastLayout.current, next)) { release(); return; }
-      if (sending.current) return;
-      sending.current = true;
-      const wasObscured = lastLayout.current?.obscured ?? true;
-      bridge.layout({ previewId, ...next, pixelRatio: window.devicePixelRatio }).then(result => {
-        sending.current = false;
-        if (!live || previewRef.current !== previewId) return;
-        if (result.state === "closed") return;
-        lastLayout.current = next;
-        if (next.obscured && !wasObscured && result.snapshot) setStill(result.snapshot);
-        if (!next.obscured) setStill(null);
-        sync();
-      }, () => {
-        sending.current = false;
-        if (!live) return;
-        window.clearTimeout(retry);
-        retry = window.setTimeout(sync, 250);
-      });
-    };
-    const scheduleSync = () => { if (!syncFrame) syncFrame = requestAnimationFrame(sync); };
-    syncNow.current = sync;
-
-    // Held elements are let go only once main has confirmed the view hidden.
-    const release = () => {
-      if (!waiting.size || sending.current || !lastLayout.current?.obscured) return;
-      unhold();
-      check();
-    };
-    const unhold = () => {
-      for (const element of waiting) element.removeAttribute(PREVIEW_WAIT_ATTRIBUTE);
-      waiting.clear();
-      window.clearTimeout(holdTimer);
-      holdTimer = 0;
-      causes.current.holding = false;
-    };
+    const loop = new PreviewLayoutLoop({
+      measure,
+      viewport: () => viewportNow.current,
+      obscured: () => { const now = causes.current; return now.covered || now.overlay || !now.active || now.resizing; },
+      send: layout => bridge.layout({ previewId, ...layout }).then(result => ({ closed: result.state === "closed", snapshot: result.snapshot })),
+      close: () => bridge.close({ previewId }),
+      still: image => { if (live) setStill(image); },
+      // The covers let go are in sight now: the points see them before the view may show.
+      released: () => { if (live) check(); },
+      holdLimitMs: PREVIEW_HOLD_LIMIT_MS,
+    });
+    loopRef.current = loop;
+    syncNow.current = () => loop.sync();
 
     // What is on top of the stage, asked of the page: a grid of points, and
     // the rectangle of every app element seen appearing or changing.
@@ -302,7 +262,7 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
       }
       causes.current.overlay = on;
       setOverlay(on);
-      sync();
+      loop.sync();
       window.clearTimeout(recheck);
       // Something on its way (a transition, an animation): look every frame.
       // A cover may also leave by a transition with no change in the page to
@@ -312,9 +272,22 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
     };
     const scheduleCheck = () => { if (!checkFrame) checkFrame = requestAnimationFrame(check); };
 
-    // Runs before the page paints (review I1). A new or changed app element
-    // over the stage is held invisible, main hides the view, and only then
-    // is it shown — the view never draws over it, not even for a frame.
+    // Held: invisible (with its ::backdrop), out of reach of focus and input
+    // (`inert`), until main has confirmed the view hidden (review I1). Then
+    // the points see it at once, before the loop may show the view again.
+    const holdElement = (element: Element) => {
+      if (element.hasAttribute(PREVIEW_WAIT_ATTRIBUTE)) return;
+      const active = document.activeElement;
+      const focused = active instanceof HTMLElement && element.contains(active) ? active : null;
+      const wasInert = element.hasAttribute("inert");
+      element.setAttribute(PREVIEW_WAIT_ATTRIBUTE, "");
+      if (!wasInert) element.setAttribute("inert", "");
+      loop.hold(() => {
+        element.removeAttribute(PREVIEW_WAIT_ATTRIBUTE);
+        if (!wasInert) { element.removeAttribute("inert"); ownInert.add(element); }
+        if (focused?.isConnected && (document.activeElement === null || document.activeElement === document.body)) focused.focus();
+      });
+    };
     const holds = (element: Element, rect: Rect) => {
       if (element instanceof HTMLDialogElement && element.matches(":modal")) return true;
       if (overlaps(element.getBoundingClientRect(), rect)) return true;
@@ -325,46 +298,60 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
     };
     /** Drawn out of the flow, so it may move over the stage later (a panel sliding in). */
     const floats = (element: Element) => /^(?:fixed|absolute|sticky)$/.test(getComputedStyle(element).position);
+    /** The stage is no longer where main last placed the view. */
+    const stageMoved = () => {
+      const shown = loop.accepted;
+      const now = measure().bounds;
+      return shown !== null && !shown.obscured && (now === null || !sameLayout(shown, { ...shown, bounds: now }));
+    };
+    // Runs before the page paints (review I1). A new or changed app element
+    // over the stage is held, main hides the view, and only then is it
+    // shown — the view never draws over it, not even for a frame. When the
+    // stage itself moved (something in the tab pushed it, re-review B1),
+    // what changed in the tab is held the same way and the view is placed
+    // again only after it was hidden.
+    /** Elements whose `inert` the tab itself just took away again: that change is not a new cover. */
+    const ownInert = new WeakSet<Element>();
     const observer = new MutationObserver(records => {
       if (!live) return;
+      records = records.filter(record => {
+        if (record.type !== "attributes" || record.attributeName !== "inert" || !ownInert.has(record.target as Element)) return true;
+        ownInert.delete(record.target as Element);
+        return false;
+      });
       const rect = stageRect() ?? lastRect;
       const own = section.current;
-      const mayBeShown = sending.current || (lastLayout.current !== null && !lastLayout.current.obscured);
+      const mayBeShown = loop.mayBeShown;
+      const moved = mayBeShown && stageMoved();
       const seen = new Set<Element>();
-      let held = false;
+      let movedHeld = false;
       for (const record of records) {
         const targets = record.type === "childList" ? [...record.addedNodes] : [record.target];
         for (const node of targets) {
-          if (!(node instanceof Element) || seen.has(node)) continue;
+          if (!(node instanceof Element) || seen.has(node) || node.hasAttribute(PREVIEW_WAIT_ATTRIBUTE)) continue;
           seen.add(node);
-          // The tab's own parts, and what holds the stage, never cover it.
-          if (own?.contains(node) || node.contains(stage.current)) continue;
+          if (stage.current?.contains(node) || node.contains(stage.current)) continue;
+          if (own?.contains(node)) {
+            if (moved) { holdElement(node); movedHeld = true; }
+            continue;
+          }
           const over = rect !== null && holds(node, rect);
           if (watched.size < MAX_WATCHED && (over || floats(node))) watched.add(node);
-          if (!mayBeShown || !over) continue;
-          node.setAttribute(PREVIEW_WAIT_ATTRIBUTE, "");
-          waiting.add(node);
-          held = true;
+          if (mayBeShown && over) holdElement(node);
         }
       }
-      if (held) {
-        causes.current.holding = true;
-        if (!holdTimer) holdTimer = window.setTimeout(() => {
-          // Main never confirmed: close the preview rather than keep the app's own screen hidden.
-          void bridge.close({ previewId }).catch(() => undefined);
-          unhold();
-        }, HOLD_LIMIT_MS);
-        sync();
-      }
+      // Moved by something outside the tab (the panel's width): hidden until it settles.
+      if (moved && !movedHeld) onResize();
       scheduleCheck();
     });
     observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["open", "hidden", "class", "style", "aria-expanded", "inert"] });
 
-    // Resized or zoomed (a zoom changes devicePixelRatio): hidden at once,
-    // placed again when it settles (review B1).
+    // Resized or zoomed (a zoom changes devicePixelRatio): main has already
+    // hidden the view (it hears of the change first); hidden here too until
+    // it settles, then placed by a fresh measurement (review B1).
     const onResize = () => {
       causes.current.resizing = true;
-      sync();
+      loop.sync();
       window.clearTimeout(settle);
       settle = window.setTimeout(() => { causes.current.resizing = false; scheduleCheck(); }, SETTLE_MS);
     };
@@ -376,8 +363,9 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
       ratio.addEventListener("change", onRatio);
     };
     watchRatio();
-    const onScroll = () => { scheduleSync(); scheduleCheck(); };
-    const resize = new ResizeObserver(() => sync());
+    const onScroll = () => { if (stageMoved()) onResize(); scheduleCheck(); };
+    // A stage that changed size or place (after layout, before paint): hidden first.
+    const resize = new ResizeObserver(() => { if (stageMoved()) onResize(); else loop.sync(); });
     resize.observe(stage.current);
     window.addEventListener("resize", onResize);
     document.addEventListener("scroll", onScroll, true);
@@ -391,10 +379,11 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
       window.removeEventListener("resize", onResize);
       document.removeEventListener("scroll", onScroll, true);
       for (const name of ["toggle", "transitionend", "animationend", "transitionstart"]) document.removeEventListener(name, scheduleCheck, true);
-      if (syncFrame) cancelAnimationFrame(syncFrame);
       if (checkFrame) cancelAnimationFrame(checkFrame);
-      for (const timer of [recheck, retry, settle]) window.clearTimeout(timer);
-      unhold();
+      for (const timer of [recheck, settle]) window.clearTimeout(timer);
+      // Anything still held is let go only once main has detached the preview.
+      loop.dispose();
+      if (loopRef.current === loop) loopRef.current = null;
       causes.current.overlay = false;
       causes.current.resizing = false;
       syncNow.current = () => undefined;
@@ -404,6 +393,8 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
 
   // An explicit cover, another tab or width: told to main before the page paints.
   useLayoutEffect(() => { syncNow.current(); }, [covered, active, viewport]);
+  // A band that moved the stage is laid out: place the view again.
+  useLayoutEffect(() => { loopRef.current?.settled(); }, [newResult, notice]);
 
   // Another tab: hidden now and closed after a while by main.
   useEffect(() => {
@@ -413,7 +404,7 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
   }, [active, previewId, bridge]);
 
   const reload = () => {
-    setNewResult(false);
+    shift(() => setNewResult(false));
     if (previewId && bridge) void bridge.reload({ previewId }).catch(() => undefined);
   };
   const reopen = () => {

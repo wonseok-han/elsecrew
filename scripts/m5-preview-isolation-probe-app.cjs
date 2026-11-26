@@ -98,6 +98,10 @@ app.on('browser-window-created', (_event, window) => {
 async function run(window) {
   const main = require(path.join(repoRoot, '.vite/build/main.cjs'));
   const manager = main.previewManager;
+  // When main hears the window change size (it hides the view until the next layout).
+  result.geometry = [];
+  const geometryChanged = manager.geometryChanged.bind(manager);
+  manager.geometryChanged = () => { if (result.geometry.length < 100) result.geometry.push({ at: Date.now(), size: window.getContentSize(), step: result.steps ? result.steps.at(-1) : null }); geometryChanged(); };
   const page = code => window.webContents.executeJavaScript(code);
   const waitFor = async (predicate, ms = 30_000, label = 'condition') => {
     const end = Date.now() + ms;
@@ -150,11 +154,14 @@ async function run(window) {
   }
   const hashBefore = treeHash(chats.a.worktreePath);
   const bounds = await page(`(() => ({ x: Math.round(innerWidth * 0.45), y: 60, width: Math.round(innerWidth * 0.5), height: innerHeight - 100 }))()`);
-  const pixelRatio = await page('window.devicePixelRatio');
+  // The page's ratio and own size, measured at each request: main uses a
+  // measurement only at the window's current size and zoom (PR #9 re-review B1).
+  const measureNow = () => page('({ pixelRatio: devicePixelRatio, page: { width: innerWidth, height: innerHeight } })');
+  const layoutOf = async (previewId, viewport, obscured) => page(`window.m5Preview.layout(${JSON.stringify({ previewId, bounds, viewport, obscured, ...(await measureNow()) })})`);
   const open = async (chat, entry, viewport = 'wide') => {
-    const opened = await page(`window.m5Preview.open(${JSON.stringify({ projectId, chatId: chat.chatId, entry, bounds, viewport, pixelRatio })})`);
+    const opened = await page(`window.m5Preview.open(${JSON.stringify({ projectId, chatId: chat.chatId, entry, bounds, viewport, ...(await measureNow()) })})`);
     // Main keeps a new view hidden until the page places it (PR #9 review I1).
-    if (opened && opened.outcome === 'opened') await page(`window.m5Preview.layout(${JSON.stringify({ previewId: opened.previewId, bounds, viewport, obscured: false, pixelRatio })})`);
+    if (opened && opened.outcome === 'opened') await layoutOf(opened.previewId, viewport, false);
     return opened;
   };
   const loaded = async () => {
@@ -201,10 +208,31 @@ async function run(window) {
   result.leak = await contents.executeJavaScript('window.runProbe()');
   // T10 and T9 again with a user gesture on a focused view: one call each,
   // so every attempt has its own activation.
+  // Placed again with a fresh measurement (the window may have changed size
+  // since, which hides the view in main): a hidden view cannot take focus.
+  const placed = await layoutOf(previewA, 'wide', false);
+  result.placedForPermissions = { state: placed.state, layout: manager.currentLayout };
+  // The window in front (another app may be): a page only has focus in the active window.
+  app.focus({ steal: true });
+  window.focus();
+  await sleep(300);
   contents.focus();
   await sleep(200);
   result.permissions = {};
+  // Another app may take the front while the probe runs (this machine is
+  // shared): each call first makes sure the page really has focus.
+  const focusPage = async () => {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      if (await contents.executeJavaScript('document.hasFocus()')) return true;
+      app.focus({ steal: true });
+      window.focus();
+      contents.focus();
+      await sleep(300);
+    }
+    return false;
+  };
   for (const name of await contents.executeJavaScript('window.PERMISSION_NAMES')) {
+    await focusPage();
     // Main's own refusals during this one call, each with its kind and
     // permission (PR #9 review I3): the probe matches them to the call.
     const last = manager.denials.at(-1);
@@ -275,15 +303,16 @@ async function run(window) {
   result.todoEntry = openedTodo.entry;
   await todo.executeJavaScript(`(() => { const input = document.getElementById('text'); input.value = '미리보기 확인'; document.querySelector('button').click(); input.value = '좁은 화면'; document.querySelector('button').click(); document.querySelector('li').click(); return document.getElementById('count').textContent; })()`).then(text => { result.todoCount = text; });
   result.todoStorage = await todo.executeJavaScript('localStorage.getItem("todos")');
-  await page(`window.m5Preview.layout(${JSON.stringify({ previewId: openedTodo.previewId, bounds, viewport: 'wide', obscured: false, pixelRatio })})`);
+  await layoutOf(openedTodo.previewId, 'wide', false);
   await sleep(400);
   // A window capture holds only the app page; the view is captured on its own.
   await saveCapture(todo, 'todo-wide-view.png');
-  await page(`window.m5Preview.layout(${JSON.stringify({ previewId: openedTodo.previewId, bounds, viewport: 'narrow', obscured: false, pixelRatio })})`);
+  await layoutOf(openedTodo.previewId, 'narrow', false);
   await sleep(400);
   await saveCapture(todo, 'todo-narrow-view.png');
   result.todoNarrowWidth = await todo.executeJavaScript('innerWidth');
-  const obscured = await page(`window.m5Preview.layout(${JSON.stringify({ previewId: openedTodo.previewId, bounds, viewport: 'narrow', obscured: true, pixelRatio })})`);
+  result.refusedMeasurements = manager.refusedMeasurements.slice(-10);
+  const obscured = await layoutOf(openedTodo.previewId, 'narrow', true);
   result.obscured = { state: obscured.state, snapshot: typeof obscured.snapshot === 'string' && obscured.snapshot.startsWith('data:image/jpeg;base64,') };
   step('todo');
 

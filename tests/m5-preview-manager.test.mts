@@ -133,7 +133,7 @@ function harness(overrides: Partial<PreviewManagerOptionsV1> = {}, files: Record
     manager, log, sessions, views, events, reads, resolves, children, window, sidecar, zoom,
     gate(promise: Promise<void>) { resolveGate = promise; },
     gateReads(promise: Promise<void>) { readGate = promise; },
-    open: (entry: string | null = null) => manager.request({ action: "open", projectId: "project_1", chatId: "chat_1", entry, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", pixelRatio: 1 }),
+    open: (entry: string | null = null) => manager.request({ action: "open", projectId: "project_1", chatId: "chat_1", entry, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", pixelRatio: 1, page: { width: 1280, height: 800 } }),
   };
 }
 
@@ -356,21 +356,21 @@ test("hidden tabs close after the idle wait; layout shows, obscures with a still
   const previewId = result.action === "open" && result.outcome === "opened" ? result.previewId : "";
   view.webContents.listeners.get("did-finish-load")!();
   assert.notEqual(view.visible, true, "hidden until the page's first layout (review I1)");
-  const shown = await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "narrow", obscured: false, pixelRatio: 1 });
+  const shown = await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "narrow", obscured: false, pixelRatio: 1, page: { width: 1280, height: 800 } });
   assert.equal(view.visible, true);
   assert.equal(shown.action === "layout" && shown.state, "shown");
   assert.deepEqual(view.bounds, { x: 755, y: 60, width: 390, height: 600 });
   // The still image is taken ahead of time while shown.
   await new Promise(resolve => setTimeout(resolve, 30));
-  const covered = await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "narrow", obscured: true, pixelRatio: 1 });
+  const covered = await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "narrow", obscured: true, pixelRatio: 1, page: { width: 1280, height: 800 } });
   assert.equal(covered.action === "layout" && covered.snapshot, `data:image/jpeg;base64,${Buffer.from("jpeg").toString("base64")}`);
   assert.equal(view.visible, false);
   // A stage that does not fit hides the view; it is never an error (review B1).
-  const outside = await h.manager.request({ action: "layout", previewId, bounds: { x: 1200, y: 0, width: 500, height: 600 }, viewport: "wide", obscured: false, pixelRatio: 1 });
+  const outside = await h.manager.request({ action: "layout", previewId, bounds: { x: 1200, y: 0, width: 500, height: 600 }, viewport: "wide", obscured: false, pixelRatio: 1, page: { width: 1280, height: 800 } });
   assert.equal(outside.action, "layout");
   assert.equal(view.visible, false);
   h.manager.setWindowHidden(true);
-  await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: false, pixelRatio: 1 });
+  await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: false, pixelRatio: 1, page: { width: 1280, height: 800 } });
   assert.equal(view.visible, false, "a minimized window keeps it hidden");
   h.manager.setWindowHidden(false);
   assert.equal(view.visible, true);
@@ -400,12 +400,12 @@ test("covering hides at once even while a capture hangs; a late capture is throw
   view.webContents.captureGate = new Promise<void>(resolve => { release = resolve; });
   view.webContents.listeners.get("did-finish-load")!();
   const bounds = { x: 700, y: 60, width: 500, height: 600 };
-  await h.manager.request({ action: "layout", previewId, bounds, viewport: "wide", obscured: false, pixelRatio: 1 });
+  await h.manager.request({ action: "layout", previewId, bounds, viewport: "wide", obscured: false, pixelRatio: 1, page: { width: 1280, height: 800 } });
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.ok(view.webContents.captures >= 1, "a capture is in flight");
   // The cover answers without waiting for that capture, and the view is hidden already.
   const covered = await Promise.race([
-    h.manager.request({ action: "layout", previewId, bounds, viewport: "wide", obscured: true, pixelRatio: 1 }),
+    h.manager.request({ action: "layout", previewId, bounds, viewport: "wide", obscured: true, pixelRatio: 1, page: { width: 1280, height: 800 } }),
     new Promise(resolve => setTimeout(() => resolve("waited"), 50)),
   ]);
   assert.notEqual(covered, "waited");
@@ -522,7 +522,7 @@ test("bounds are measured again after the sidecar and session answer; the view w
   const view = h.views[0]!;
   assert.notEqual(view.visible, true);
   view.webContents.listeners.get("did-finish-load")!();
-  await h.manager.request({ action: "layout", previewId: result.previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: false, pixelRatio: 1 });
+  await h.manager.request({ action: "layout", previewId: result.previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: false, pixelRatio: 1, page: { width: 900, height: 800 } });
   // Cut to the smaller window, never past it.
   assert.deepEqual(view.bounds, { x: 700, y: 60, width: 200, height: 600 });
   assert.equal(view.visible, true);
@@ -532,13 +532,15 @@ test("zoom: the page's CSS pixels become window pixels, rounded inwards; a stale
   const h = harness();
   h.zoom.factor = 1.25;
   h.zoom.scale = 2;
-  const result = await h.manager.request({ action: "open", projectId: "project_1", chatId: "chat_1", entry: null, bounds: { x: 700.4, y: 60, width: 400, height: 500 }, viewport: "wide", pixelRatio: 2.5 });
+  const result = await h.manager.request({ action: "open", projectId: "project_1", chatId: "chat_1", entry: null, bounds: { x: 700.4, y: 60, width: 400, height: 500 }, viewport: "wide", pixelRatio: 2.5, page: { width: 1024, height: 640 } });
   assert.ok(result.action === "open" && result.outcome === "opened");
   const previewId = result.previewId;
   const view = h.views[0]!;
   view.webContents.listeners.get("did-finish-load")!();
-  const layout = (css: { x: number; y: number; width: number; height: number }, pixelRatio: number, obscured = false) =>
-    h.manager.request({ action: "layout", previewId, bounds: css, viewport: "wide", obscured, pixelRatio });
+  // The page's own size at each zoom (innerWidth × zoom is the window's 1280×800).
+  const pageAt = (zoom: number) => ({ width: Math.floor(1280 / zoom), height: Math.floor(800 / zoom) });
+  const layout = (css: { x: number; y: number; width: number; height: number }, pixelRatio: number, obscured = false, page = pageAt(pixelRatio / 2)) =>
+    h.manager.request({ action: "layout", previewId, bounds: css, viewport: "wide", obscured, pixelRatio, page });
   await layout({ x: 700.4, y: 60, width: 400, height: 500 }, 2.5);
   // 700.4 × 1.25 = 875.5 → 876; (700.4 + 400) × 1.25 = 1375.5 → cut at the window's 1280.
   assert.deepEqual(view.bounds, { x: 876, y: 75, width: 404, height: 625 });
@@ -546,6 +548,9 @@ test("zoom: the page's CSS pixels become window pixels, rounded inwards; a stale
   // Zoomed in to 150 % while the page still reports 125 %: hidden, not misplaced.
   h.zoom.factor = 1.5;
   await layout({ x: 700.4, y: 60, width: 400, height: 500 }, 2.5);
+  assert.equal(view.visible, false);
+  // The right ratio but the page's size from before the zoom: still not used.
+  await layout({ x: 500, y: 40, width: 300, height: 400 }, 3, false, pageAt(1.25));
   assert.equal(view.visible, false);
   // The page's fresh measurement at 150 %.
   await layout({ x: 500, y: 40, width: 300, height: 400 }, 3);
@@ -556,11 +561,55 @@ test("zoom: the page's CSS pixels become window pixels, rounded inwards; a stale
   await layout({ x: 1300, y: 60, width: 400, height: 500 }, 1.6);
   assert.deepEqual(view.bounds, { x: 1040, y: 48, width: 240, height: 400 });
   // Covered with a measurement that fits nothing (and a stale ratio): hidden anyway.
-  await layout({ x: 5000, y: 5000, width: 400, height: 500 }, 9, true);
+  await layout({ x: 5000, y: 5000, width: 400, height: 500 }, 9, true, pageAt(0.8));
   assert.equal(view.visible, false);
   // Uncovered but still unplaceable: stays hidden.
   await layout({ x: 5000, y: 5000, width: 400, height: 500 }, 1.6);
   assert.equal(view.visible, false);
+});
+
+test("a resize or zoom hides the view before it happens; only a measurement taken after it shows the view again (PR #9 re-review B1)", async () => {
+  const h = harness();
+  const { view, result } = await opened(h);
+  const previewId = result.action === "open" && result.outcome === "opened" ? result.previewId : "";
+  view.webContents.listeners.get("did-finish-load")!();
+  const layout = (page: { width: number; height: number }, bounds = { x: 700, y: 60, width: 500, height: 600 }) =>
+    h.manager.request({ action: "layout", previewId, bounds, viewport: "wide", obscured: false, pixelRatio: 1, page });
+  await layout({ width: 1280, height: 800 });
+  assert.equal(view.visible, true);
+  // Main hears of the resize first: hidden at once, with no layout from the page yet.
+  h.manager.geometryChanged();
+  assert.equal(view.visible, false);
+  h.window.size = [1100, 800];
+  // A measurement the page took before the resize arrives late: not used.
+  await layout({ width: 1280, height: 800 });
+  assert.equal(view.visible, false);
+  // The page's measurement after the resize: placed, then shown.
+  await layout({ width: 1100, height: 800 }, { x: 600, y: 60, width: 480, height: 600 });
+  assert.deepEqual(view.bounds, { x: 600, y: 60, width: 480, height: 600 });
+  assert.equal(view.visible, true);
+  assert.equal(h.manager.visibility.filter(entry => entry.previewId === previewId).map(entry => entry.visible).join(","), "true,false,true");
+});
+
+test("a shown view that changes place is hidden first, moved, then shown — never moved in sight (PR #9 re-review B1)", async () => {
+  const h = harness();
+  const { view, result } = await opened(h);
+  const previewId = result.action === "open" && result.outcome === "opened" ? result.previewId : "";
+  view.webContents.listeners.get("did-finish-load")!();
+  const page = { width: 1280, height: 800 };
+  await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: false, pixelRatio: 1, page });
+  const order: string[] = [];
+  const setVisible = view.setVisible.bind(view);
+  const setBounds = view.setBounds.bind(view);
+  view.setVisible = (visible: boolean) => { order.push(`visible:${visible}`); setVisible(visible); };
+  view.setBounds = (bounds: unknown) => { order.push("bounds"); setBounds(bounds); };
+  // A band pushed the stage down by 40px.
+  await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 100, width: 500, height: 560 }, viewport: "wide", obscured: false, pixelRatio: 1, page });
+  assert.deepEqual(order, ["visible:false", "bounds", "visible:true"]);
+  // The same place again: nothing moves, nothing flickers.
+  order.length = 0;
+  await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 100, width: 500, height: 560 }, viewport: "wide", obscured: false, pixelRatio: 1, page });
+  assert.deepEqual(order, ["visible:true"]);
 });
 
 test("hiding always wins: a cover hides the view before its measurement is even looked at (PR #9 review B1)", async () => {
@@ -568,7 +617,7 @@ test("hiding always wins: a cover hides the view before its measurement is even 
   const { view, result } = await opened(h);
   const previewId = result.action === "open" && result.outcome === "opened" ? result.previewId : "";
   view.webContents.listeners.get("did-finish-load")!();
-  await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: false, pixelRatio: 1 });
+  await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: false, pixelRatio: 1, page: { width: 1280, height: 800 } });
   assert.equal(view.visible, true);
   const order: string[] = [];
   const setVisible = view.setVisible.bind(view);
@@ -576,7 +625,7 @@ test("hiding always wins: a cover hides the view before its measurement is even 
   view.setVisible = (visible: boolean) => { order.push(`visible:${visible}`); setVisible(visible); };
   view.setBounds = (bounds: unknown) => { order.push("bounds"); setBounds(bounds); };
   h.zoom.factor = 0.5;
-  const covered = await h.manager.request({ action: "layout", previewId, bounds: { x: 2000, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: true, pixelRatio: 1 });
+  const covered = await h.manager.request({ action: "layout", previewId, bounds: { x: 2000, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: true, pixelRatio: 1, page: { width: 1280, height: 800 } });
   assert.equal(covered.action, "layout");
   assert.equal(order[0], "visible:false", "hidden first");
   assert.equal(view.visible, false);
@@ -590,9 +639,9 @@ test("a new view stays hidden until the page's first layout, also when a cover c
   view.webContents.listeners.get("did-finish-load")!();
   assert.notEqual(view.visible, true, "loading done is not a reason to show");
   // The page's first layout says a dialog opened meanwhile.
-  await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: true, pixelRatio: 1 });
+  await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: true, pixelRatio: 1, page: { width: 1280, height: 800 } });
   assert.equal(view.visible, false);
-  await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: false, pixelRatio: 1 });
+  await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide", obscured: false, pixelRatio: 1, page: { width: 1280, height: 800 } });
   assert.equal(view.visible, true);
   // A window un-minimized before any layout of a newer preview does not show it either.
   const next = await opened(h);

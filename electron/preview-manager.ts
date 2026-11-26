@@ -27,6 +27,7 @@ import {
   PREVIEW_TOKEN_MAX_BYTES_V1,
   PREVIEW_TOKEN_MAX_REQUESTS_V1,
   type PreviewBoundsV1,
+  type PreviewPageSizeV1,
   type PreviewCloseReasonV1,
   type PreviewEventV1,
   type PreviewIpcRequestV1,
@@ -53,6 +54,7 @@ import {
   previewPartition,
   previewResponseHeaders,
   previewViewRect,
+  pageSizeMatches,
   pixelRatioMatches,
   windowBounds,
 } from "./preview-policy.ts";
@@ -116,6 +118,8 @@ interface PreviewInstance {
   confirmed: boolean;
   /** Whether the view is on screen now (the last `#apply`). */
   visible: boolean;
+  /** Where the view was last put (window coordinates). */
+  rect: PreviewBoundsV1 | null;
   /** The screen asked to hide it (another tab); it closes after a while. */
   hidden: boolean;
   requests: number;
@@ -166,6 +170,8 @@ export class PreviewManagerV1 {
   #windowHidden = false;
   /** What was refused, by whom and which permission: for the isolation probe (never IPC). */
   readonly denials: PreviewDenialV1[] = [];
+  /** Measurements main did not use (stale zoom or size, off screen): for the probes (never IPC). */
+  readonly refusedMeasurements: { at: number; css: PreviewBoundsV1; pixelRatio: number; page: PreviewPageSizeV1; zoom: number; scale: number; content: { width: number; height: number } }[] = [];
   /** When each view was shown or hidden: for the UI smoke's ordering checks (never IPC). */
   readonly visibility: { previewId: string; visible: boolean; at: number }[] = [];
   readonly diagnostics: PreviewDiagnosticsV1 = {
@@ -248,6 +254,20 @@ export class PreviewManagerV1 {
     if (this.#current) this.#close(this.#current, "reloaded");
   }
 
+  /**
+   * The window is about to change size, or the page its zoom (PR #9
+   * re-review B1). Called by main BEFORE the change: the view is hidden at
+   * once and forgets where it was, so it shows again only at a place the
+   * page measures after the change (`#measure` refuses older measurements).
+   */
+  geometryChanged(): void {
+    const instance = this.#current;
+    if (!instance) return;
+    instance.bounds = null;
+    instance.layoutGeneration++;
+    this.#apply(instance);
+  }
+
   /** The main window was minimized or hidden (or shown again). */
   setWindowHidden(hidden: boolean): void {
     this.#windowHidden = hidden;
@@ -264,17 +284,24 @@ export class PreviewManagerV1 {
   }
 
   /** The page's measurement in window coordinates, or null when it is not
-   * usable now (stale zoom, too small, outside the window). */
-  #measure(window: BrowserWindow, css: PreviewBoundsV1, pixelRatio: number): PreviewBoundsV1 | null {
+   * usable now (taken at another zoom or window size, too small, outside the
+   * window). */
+  #measure(window: BrowserWindow, css: PreviewBoundsV1, pixelRatio: number, page: PreviewPageSizeV1): PreviewBoundsV1 | null {
     const zoom = this.#options.zoomFactor();
-    if (!pixelRatioMatches(pixelRatio, zoom, this.#options.displayScale())) return null;
-    return windowBounds(css, zoom, this.#contentSize(window));
+    const content = this.#contentSize(window);
+    const scale = this.#options.displayScale();
+    const placed = pixelRatioMatches(pixelRatio, zoom, scale) && pageSizeMatches(page, zoom, content) ? windowBounds(css, zoom, content) : null;
+    if (!placed) {
+      this.refusedMeasurements.push({ at: Date.now(), css, pixelRatio, page, zoom, scale, content });
+      if (this.refusedMeasurements.length > 50) this.refusedMeasurements.shift();
+    }
+    return placed;
   }
 
   async #open(request: Extract<PreviewIpcRequestV1, { action: "open" }>): Promise<PreviewIpcResultV1> {
     const window = this.#options.window();
     if (!window || window.isDestroyed()) throw new Error("preview needs the main window");
-    const bounds = this.#measure(window, request.bounds, request.pixelRatio);
+    const bounds = this.#measure(window, request.bounds, request.pixelRatio, request.page);
     if (!bounds) throw new Error("preview stage is not on screen at the current zoom");
     const generation = ++this.#generation;
     if (this.#current) this.#close(this.#current, "replaced");
@@ -291,7 +318,7 @@ export class PreviewManagerV1 {
       ref: { chatId: resolved.chatId, projectId: resolved.projectId, worktreeId: resolved.worktreeId, workspaceIdentity: resolved.workspaceIdentity },
       handle: resolved.previewHandle,
       session, view: undefined, state: "loading", bounds, viewport: request.viewport,
-      obscured: false, confirmed: false, visible: false, hidden: false, requests: 0, bytes: 0, reserved: 0, reading: 0, waiting: [],
+      obscured: false, confirmed: false, visible: false, rect: null, hidden: false, requests: 0, bytes: 0, reserved: 0, reading: 0, waiting: [],
       layoutGeneration: 0, lastSnapshot: null, snapshotTimer: undefined,
       blockedNoticeSent: false, logged: new Set(), idleTimer: undefined,
     };
@@ -307,7 +334,7 @@ export class PreviewManagerV1 {
     // The window may have changed size or zoom while the sidecar and session
     // answered; the view is made hidden either way and shows only after the
     // page's next layout.
-    instance.bounds = this.#measure(target, request.bounds, request.pixelRatio);
+    instance.bounds = this.#measure(target, request.bounds, request.pixelRatio, request.page);
     const view = this.#options.createView(previewWebPreferences(session, this.#options.devTools));
     instance.view = view;
     this.#configureContents(instance, view.webContents);
@@ -342,7 +369,7 @@ export class PreviewManagerV1 {
     if (request.obscured) this.#apply(instance);
     // A measurement that does not fit (stale zoom, outside the window) hides
     // the view until a good one arrives; it is never an error.
-    instance.bounds = this.#measure(window, request.bounds, request.pixelRatio);
+    instance.bounds = this.#measure(window, request.bounds, request.pixelRatio, request.page);
     instance.viewport = request.viewport;
     // Shown again: no longer idle.
     instance.hidden = false;
@@ -380,9 +407,12 @@ export class PreviewManagerV1 {
     const view = instance.view;
     if (!view || instance.state === "closed") return;
     const visible = instance.confirmed && instance.bounds !== null && !instance.obscured && !instance.hidden && !this.#windowHidden;
-    // Hide before moving; move before showing.
-    if (!visible) view.setVisible(false);
-    if (instance.bounds) view.setBounds(previewViewRect(instance.bounds, instance.viewport));
+    const rect = instance.bounds ? previewViewRect(instance.bounds, instance.viewport) : null;
+    const moves = rect !== null && (instance.rect === null || rect.x !== instance.rect.x || rect.y !== instance.rect.y || rect.width !== instance.rect.width || rect.height !== instance.rect.height);
+    // Hidden before it moves, moved before it shows (PR #9 re-review B1):
+    // a shown view that changes place is hidden first, never moved in sight.
+    if (!visible || (moves && instance.visible)) view.setVisible(false);
+    if (rect && moves) { view.setBounds(rect); instance.rect = rect; }
     if (visible) view.setVisible(true);
     if (instance.state !== "loading") instance.state = visible ? "shown" : "hidden";
     if (visible !== instance.visible) {

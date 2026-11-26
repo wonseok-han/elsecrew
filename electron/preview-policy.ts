@@ -189,6 +189,18 @@ export function pixelRatioMatches(pixelRatio: number, zoom: number, displayScale
   return Number.isFinite(pixelRatio) && Math.abs(pixelRatio - zoom * displayScale) <= 0.02;
 }
 
+/**
+ * Whether the page measured at the window's current size (PR #9 re-review
+ * B1): its own size (CSS pixels) at the current zoom is the window's content
+ * size, give or take one CSS pixel of rounding. A measurement from before a
+ * resize or a zoom change is not used.
+ */
+export function pageSizeMatches(page: { width: number; height: number }, zoom: number, content: { width: number; height: number }): boolean {
+  if (!Number.isFinite(zoom) || zoom <= 0 || !Number.isFinite(page.width) || !Number.isFinite(page.height)) return false;
+  const slack = zoom + 1;
+  return Math.abs(page.width * zoom - content.width) <= slack && Math.abs(page.height * zoom - content.height) <= slack;
+}
+
 /** Where the view goes inside the placeholder: all of it, or a phone-wide
  * (390px) column in its middle. */
 export function previewViewRect(bounds: PreviewBoundsV1, viewport: PreviewViewportV1): PreviewBoundsV1 {
