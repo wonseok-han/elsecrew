@@ -12,6 +12,7 @@
 - **검증**
   - `cargo test -p elsecrew-sidecar`: 941 통과, 1 실패(`a_sign_in_hold_survives_a_device_renumbering_only_with_the_same_inodes`). 이 시험은 단독으로 3회 연속 통과했고, 직전 전체 실행(939)에서도 통과했다. 이번 변경은 로그인 잠금 코드를 건드리지 않아 병렬 실행 중 간헐 실패로 본다. 원인은 확인하지 않았다.
   - 관련 시험 10개 통과.
+  - CI(041d91ef) macOS·Windows·website·GitGuardian 통과. Windows 기준선 하네스 기록에서 `path_key::tests` 두 시험이 통과한 것을 확인했다.
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #18 재확인(B1·B2 부분 해결) 반영 (`orca/ade-multiproject-a`)
 재확인 `~/Documents/elsecrew-ade-multiproject-2026-11-26/REVIEW-pr18-2.md`(대상 13081fd3).
