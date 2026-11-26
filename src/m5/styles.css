@@ -217,9 +217,6 @@ button, input, textarea, select {
 .m5-install-provider-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 10px; margin-top: 16px; }
 .m5-install-provider-actions > button { min-height: 42px; text-align: left; }
 .m5-provider-install p { margin: 10px 0; }
-.m5-provider-install button { background: var(--m5-control-bg); color: var(--m5-control-text); border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 12px; }
-.m5-provider-install button:hover:not(:disabled) { background: var(--m5-control-hover); }
-.m5-provider-install button:disabled { opacity: .5; cursor: not-allowed; }
 .m5-provider-install form { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-strong); }
 .m5-provider-install label { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0; }
 .m5-provider-install input[type="checkbox"] { flex: 0 0 auto; margin-top: 3px; }
@@ -685,7 +682,6 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-role-model-help { grid-column: 2 / -1; }
 .m5-settings-dialog .m5-role-card > strong { font-size: 15px; }
 .m5-settings-dialog .m5-role-card small { color: var(--m5-muted); line-height: 1.5; }
-.m5-provider-login { display:flex; flex-wrap:wrap; align-items:center; gap:16px; margin:8px 20px; padding:16px; border:1px solid var(--line-strong); border-radius:12px; background:var(--bg-raised); color:var(--text-primary); }
 .m5-provider-selection { margin:8px 20px; padding:16px; border:1px solid var(--line-strong); border-radius:12px; background:var(--bg-raised); color:var(--text-primary); }
 .m5-provider-selection > summary { cursor:pointer; }
 .m5-provider-selection > summary strong { margin-right:16px; }
@@ -701,14 +697,6 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-provider-selection input { accent-color:var(--focus-ring); width:18px; height:18px; }
 .m5-provider-selection button { color:var(--text-primary); background:var(--bg-raised); border:1px solid var(--line-strong); border-radius:8px; padding:9px 14px; }
 .m5-provider-selection button:disabled { opacity:.5; cursor:default; }
-.m5-provider-login > div:first-child { flex:1; }
-.m5-provider-login > div[id$="-connection-details"]:not([hidden]) { display:flex; flex-wrap:wrap; align-items:center; gap:12px; flex-basis:100%; }
-.m5-provider-login p { margin:6px 0; }
-.m5-provider-login small { color:var(--text-secondary); }
-.m5-provider-login button { color:var(--text-primary); background:var(--bg-raised); border:1px solid var(--line-strong); border-radius:8px; padding:9px 14px; }
-.m5-provider-login button:disabled { opacity:.5; }
-.m5-provider-login form { flex-basis:100%; }
-.m5-provider-login > div[id$="-connection-details"] > form label { display:block; font-weight:600; }
 .m5-agent-runs article { display: grid; gap: 6px; min-width: 0; padding: 8px 0; }
 .m5-agent-run-heading { display: flex; flex-wrap: wrap; gap: 4px; overflow-wrap: anywhere; }
 .m5-agent-run-heading { align-items: center; gap: 6px; }
@@ -743,7 +731,6 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-output-scroll > article + .m5-activity-row, .m5-output-scroll > .m5-activity-row + article { margin-top: 8px; }
 .m5-agent-run-history { border-top: 1px solid var(--line-strong); padding-top: 6px; }
 .m5-agent-run-history > div { max-height: 240px; overflow: auto; }
-.m5-provider-login > div[id$="-connection-details"] > form input { width:min(100%,420px); box-sizing:border-box; padding:10px; margin:8px 8px 8px 0; background:var(--bg-pane); color:var(--text-primary); border:1px solid var(--line-input); border-radius:8px; }
 
 /* Split comparison retains the same bounded page and source line references. */
 .m5-diff-mode { display: flex; gap: 4px; margin: 8px 0; }
@@ -1008,10 +995,8 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-preferences-row select { flex: none; min-width: 142px; max-width: 230px; padding: 6px 10px; border: 1px solid var(--line-input); border-radius: 6px; color: var(--m5-text); background: var(--m5-raised); }
 .m5-app-settings button:not([hidden]) { font-size: 12px; }
 .m5-preferences-content button { padding: 7px 11px; border-radius: 6px; }
-.m5-preferences-content .m5-provider-install, .m5-preferences-content .m5-provider-login { margin: 12px 0; padding: 16px; border-color: var(--m5-border-strong); border-radius: 10px; background: var(--m5-surface); color: var(--m5-text); }
-.m5-preferences-content .m5-provider-login button, .m5-preferences-content .m5-provider-install button { background: var(--m5-raised); color: var(--m5-text); border-color: var(--m5-border-strong); }
-.m5-preferences-content .m5-provider-login small, .m5-preferences-content .m5-provider-install details { color: var(--m5-muted); }
-.m5-preferences-content .m5-provider-login > div[id$="-connection-details"] > form input { background: var(--m5-bg); color: var(--m5-text); border-color: var(--line-input); }
+.m5-preferences-content .m5-provider-install { margin: 12px 0; padding: 16px; border-color: var(--m5-border-strong); border-radius: 10px; background: var(--m5-surface); color: var(--m5-text); }
+.m5-preferences-content .m5-provider-install details { color: var(--m5-muted); }
 .m5-settings-inline { margin: 16px 0 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
 .m5-settings-inline > header { justify-content: flex-end; margin-bottom: 12px; }
 .m5-settings-inline > header > div, .m5-settings-inline .m5-settings-scope { display: none; }
@@ -1172,12 +1157,9 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-management-projects li > button { padding: 16px; border: 1px solid var(--m5-border); border-radius: 8px; background: var(--m5-surface); }
 .m5-management-projects li > button:hover { background: var(--m5-raised); border-color: var(--m5-border-strong); }
 .m5-preferences-content .m5-agent-management { outline: none; }
-.m5-preferences-content #m5-agent-management-content > div { border: 1px solid var(--m5-border); border-radius: 10px; background: var(--m5-surface); padding: 16px; margin: 18px 0; }
-.m5-preferences-content .m5-device-check, .m5-preferences-content .m5-provider-selection, .m5-preferences-content .m5-provider-install, .m5-preferences-content .m5-provider-login { border: 0; background: transparent; padding: 0; margin: 0; box-shadow: none; }
-.m5-preferences-content .m5-provider-selection, .m5-preferences-content .m5-provider-login + .m5-provider-login { border-top: 1px solid var(--m5-border); padding-top: 18px; margin-top: 18px; }
+.m5-preferences-content .m5-device-check, .m5-preferences-content .m5-provider-selection, .m5-preferences-content .m5-provider-install { border: 0; background: transparent; padding: 0; margin: 0; box-shadow: none; }
+.m5-preferences-content .m5-provider-selection { border-top: 1px solid var(--m5-border); padding-top: 18px; margin-top: 18px; }
 .m5-preferences-content h4 { margin: 0 0 12px; font-size: 13px; }
-.m5-preferences-content .m5-provider-login { display: block; }
-.m5-preferences-content .m5-provider-login > div[id] { margin-top: 12px; }
 .m5-project-catalog-list li:has(.m5-project-overflow[open]) { z-index: 30; }
 .m5-project-overflow[open] { z-index: 31; }
 .m5-project-overflow > div { background: var(--m5-raised); border-color: var(--m5-border-strong); box-shadow: 0 10px 28px var(--shadow-color); }
@@ -1352,15 +1334,6 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 
 .m5-workbench > .m5-project-rail { padding-bottom: 4px; }
 
-.m5-preferences-content .m5-provider-login { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px 20px; border-radius: 0; }
-.m5-connection-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
-.m5-connection-heading p { font-size: 12px; color: var(--m5-muted); }
-.m5-provider-login .m5-connection-toggle { grid-column: 2; grid-row: 1; min-width: 72px; margin: 0; padding: 6px 12px; }
-.m5-provider-login > small, .m5-provider-login > div[id], .m5-provider-login > .m5-connection-error { grid-column: 1 / -1; }
-.m5-provider-login .m5-connection-help { display: block; line-height: 1.6; }
-.m5-provider-login .m5-connection-error { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 4px 0 0; padding: 10px 12px; border-radius: 6px; background: var(--m5-raised); font-size: 12px; line-height: 1.6; }
-.m5-provider-login .m5-connection-error button { flex: 0 0 28px; width: 28px; min-height: 28px; height: 28px; margin: 0; padding: 0; }
-
 .m5-provider-install .m5-install-header-actions { flex-wrap: nowrap; gap: 8px; }
 .m5-provider-install .m5-install-refresh { display: grid; place-items: center; width: 28px; height: 28px; min-height: 28px; padding: 4px; margin: 0; border: 0; }
 .m5-install-refresh svg { width: 16px; height: 16px; }
@@ -1375,7 +1348,6 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-installation-slot { grid-column: 1 / -1; }
 .m5-preferences-content .m5-installation-slot .m5-provider-install { padding: 12px; margin: 4px 0 0; border: 1px solid var(--m5-border); border-radius: 6px; }
 .m5-provider-install-inline { display: flex; gap: 10px; align-items: center; }
-.m5-provider-login .m5-provider-install-inline button { margin: 0; padding: 5px 10px; min-height: 28px; font-size: 12px; }
 .m5-install-paths ul { margin: 8px 0; padding-left: 20px; font-size: 12px; }
 
 .m5-preferences-content #m5-agent-management-content > div:empty { display: none; }
@@ -1391,8 +1363,6 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-install-confirmation h3 { margin: 0 0 14px; font-size: 15px; }
 .m5-provider-install .m5-install-confirmation form { border: 0; margin: 0; padding: 0; font-size: 12px; line-height: 1.7; }
 .m5-install-confirmation .m5-install-actions { justify-content: flex-end; }
-
-.m5-connection-heading .m5-icon-button { width: 28px; height: 28px; min-height: 28px; padding: 0; display: inline-grid; place-items: center; }
 
 .m5-project-permissions { margin: 24px 0; }
 .m5-project-permissions .m5-permission-options { padding: 0 16px; }
@@ -1497,19 +1467,6 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-notification-count { position: absolute; top: 2px; right: 1px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--m5-action-bg); color: var(--m5-action-text); font-size: 10px; line-height: 16px; font-weight: 600; text-align: center; }
 .m5-notification-panel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 40; width: min(380px, calc(100vw - 32px)); max-height: min(70vh, 520px); overflow: auto; border: 1px solid var(--m5-border-strong); border-radius: 12px; background: var(--m5-surface); box-shadow: 0 16px 48px var(--shadow-color); }
 .m5-notification-panel > header { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--m5-border); background: var(--m5-surface); }
-.m5-notification-panel h3 { margin: 0; font-size: 14px; }
-.m5-notification-panel ul { margin: 0; padding: 6px; list-style: none; }
-.m5-notification-empty { margin: 0; padding: 24px 16px; color: var(--m5-muted); font-size: 12px; text-align: center; }
-.m5-notification-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; width: 100%; padding: 10px 12px; border: 0; border-radius: 8px; background: transparent; color: var(--m5-text); text-align: left; cursor: pointer; }
-.m5-notification-item:hover { background: var(--m5-raised); }
-.m5-notification-kind { grid-column: 1; font-size: 11px; font-weight: 600; color: var(--m5-muted); }
-.m5-notification-item time { grid-column: 2; grid-row: 1; font-size: 11px; color: var(--m5-muted); }
-.m5-notification-item strong { grid-column: 1 / -1; font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.m5-notification-text { grid-column: 1 / -1; font-size: 12px; line-height: 1.5; color: var(--m5-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.m5-notification-unread .m5-notification-kind::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 3px; background: var(--m5-action-bg); vertical-align: 1px; }
-.m5-notification-done .m5-notification-kind { color: var(--status-done-text); }
-.m5-notification-attention .m5-notification-kind { color: var(--status-attention-text); }
-.m5-notification-stopped .m5-notification-kind { color: var(--status-danger-text); }
 .m5-status-notice > summary .m5-status-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 360px; }
 .m5-recovery-check { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .m5-recovery-check > p { margin: 0; color: var(--m5-muted); }
@@ -1717,7 +1674,6 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-approval-actions { display: flex; flex-wrap: wrap; }
 .m5-approval-withdrawn { margin: 8px 0 0; color: var(--m5-muted); font-size: 12px; }
 .m5-approval-help > summary { cursor: pointer; font-size: 12px; color: var(--m5-muted); }
-.m5-notification-resolved { opacity: 0.6; }
 
 /* Storage settings: the folder section is a card like its neighbours. */
 .m5-preferences-content .m5-workspace-folder { padding: 20px; border: 1px solid var(--m5-border-strong); border-radius: 12px; background: var(--m5-surface); margin-bottom: 24px; }
@@ -2326,6 +2282,81 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-workbench .m5-project-catalog-list li > button.m5-home-continue { border-color: transparent; background: var(--action-bg); color: var(--action-text); }
 .m5-workbench .m5-project-catalog-list li > button.m5-home-continue:hover:not(:disabled) { background: var(--action-bg-hover); }
 .m5-workbench .m5-project-catalog .m5-project-add { border: 1px solid var(--line-strong); background: var(--bg-raised); color: var(--text-primary); }
+
+/* ===== 화면 통일 U5: 에이전트 연결 카드와 실패 안내(F11), 2026-11-26 =====
+   설계 DESIGN 4.1 U5, 목업 08. 카드마다 이름·상태 배지·연결 토글, 한 줄의 동작, 실패는 F11 안내. */
+.m5-workbench .m5-preferences-content .m5-provider-login { display: block; margin: 0 0 var(--space-3); padding: var(--space-4); }
+.m5-workbench .m5-connection-heading { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.m5-workbench .m5-connection-heading > strong { font-size: var(--text-l); }
+.m5-workbench .m5-connection-heading > small { color: var(--text-secondary); font-size: var(--text-xs); }
+.m5-workbench .m5-connection-heading > .m5-connection-toggle { margin-left: auto; }
+.m5-workbench .m5-connection-state { margin: var(--space-1) 0 var(--space-3); color: var(--text-secondary); font-size: var(--text-s); line-height: 1.5; }
+.m5-workbench .m5-connection-help { display: block; margin: 0 0 var(--space-3); color: var(--text-secondary); font-size: var(--text-s); line-height: 1.6; }
+.m5-workbench .m5-connection-error { justify-content: space-between; align-items: center; margin: 0 0 var(--space-3); font-size: var(--text-s); }
+.m5-workbench .m5-connection-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.m5-workbench .m5-connection-check { display: inline-flex; align-items: center; gap: 6px; }
+.m5-workbench .m5-connection-check svg { width: 14px; height: 14px; }
+.m5-workbench .m5-installation-slot { display: contents; }
+.m5-workbench .m5-installation-slot > .m5-provider-install { flex-basis: 100%; margin: var(--space-2) 0 0; padding: var(--space-3); border: 0; border-radius: var(--radius-m); background: var(--bg-sunken); }
+.m5-workbench .m5-provider-install-inline { display: flex; align-items: center; gap: var(--space-2); }
+.m5-workbench .m5-provider-install-inline > button { margin: 0; }
+.m5-workbench .m5-connection-details:not([hidden]) { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); margin-top: var(--space-3); }
+.m5-workbench .m5-connection-details > form { align-self: stretch; }
+.m5-workbench .m5-connection-details > form label { display: block; font-weight: var(--weight-bold); }
+.m5-workbench .m5-connection-details > form p { margin: var(--space-1) 0; color: var(--text-secondary); font-size: var(--text-s); }
+.m5-workbench .m5-connection-details > form input { width: min(100%, 420px); box-sizing: border-box; margin: var(--space-2) var(--space-2) var(--space-2) 0; padding: 9px 10px; border: 1px solid var(--line-input); border-radius: var(--radius-m); background: var(--bg-sunken); color: var(--text-primary); }
+.m5-workbench .m5-connection-details > .m5-login-guide { align-self: stretch; }
+.m5-workbench .m5-login-account-help { color: var(--text-secondary); font-size: var(--text-s); line-height: 1.6; }
+.m5-workbench .m5-login-account-help summary { cursor: pointer; }
+.m5-workbench .m5-login-account-help p { margin: var(--space-2) 0 0; }
+
+/* F11 안내 본문(머리는 공용 .m5-recover) */
+.m5-recover > header > div { min-width: 0; }
+.m5-recover > header h4 { margin: 0; font-size: var(--text-m); line-height: 1.4; }
+.m5-recover > header p { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: var(--text-s); line-height: 1.5; }
+.m5-recover-icon { flex: none; width: 20px; height: 20px; margin-top: 1px; color: var(--status-danger-text); }
+.m5-recover-attention .m5-recover-icon { color: var(--status-attention-text); }
+.m5-recover-body { padding: var(--space-4); }
+.m5-recover-label { margin: 0 0 var(--space-1); color: var(--text-secondary); font-size: var(--text-xs); font-weight: var(--weight-bold); }
+.m5-recover-what { margin: 0 0 var(--space-4); line-height: 1.6; }
+.m5-recover-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0 0 var(--space-3); }
+.m5-recover-actions > button { margin: 0; }
+.m5-recover-details > summary { color: var(--text-secondary); font-size: var(--text-s); cursor: pointer; }
+.m5-recover-details > pre { margin: var(--space-2) 0; padding: var(--space-3); border-radius: var(--radius-m); background: var(--bg-sunken); color: var(--text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--text-xs); white-space: pre-wrap; overflow-wrap: anywhere; }
+.m5-workbench .m5-preferences-content #m5-agent-management-content > div:not([hidden]) { margin: var(--space-4) 0 0; }
+.m5-workbench .m5-preferences-content #m5-agent-management-content > div > .m5-settings-intro { margin: 0 0 var(--space-4); color: var(--text-secondary); font-size: var(--text-s); line-height: 1.6; }
+
+/* ===== 화면 통일 U6: 알림 패널(D10), 2026-11-26 =====
+   설계 DESIGN 4.1 U6, 목업 12. 확인 필요/전체, 프로젝트 → 작업(목표 한 번) → 줄, 해결된 줄은 접음. 배지는 확인 필요만. */
+.m5-workbench .m5-notification-count:not(.m5-notification-alert) { background: var(--status-attention); color: var(--action-text); }
+.m5-workbench .m5-notification-panel { width: min(420px, calc(100vw - 32px)); max-height: min(75vh, 600px); padding-bottom: var(--space-2); border: 0; border-radius: var(--radius-l); background: var(--bg-raised); box-shadow: 0 0 0 1px var(--line-subtle), var(--shadow-2); }
+.m5-workbench .m5-notification-panel > header { padding: var(--space-4) var(--space-4) var(--space-2); border: 0; background: var(--bg-raised); z-index: 1; }
+.m5-workbench .m5-notification-panel > header h3 { margin: 0; font-size: var(--text-l); }
+.m5-workbench .m5-notification-tabs { display: flex; gap: var(--space-4); margin: 0 0 var(--space-1); padding: 0 var(--space-4); border-bottom: 1px solid var(--line-default); }
+.m5-workbench .m5-notification-tabs > button { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: var(--space-2) 0; border: 0; border-radius: 0; background: transparent; color: var(--text-secondary); font-weight: var(--weight-medium); box-shadow: inset 0 -2px 0 transparent; }
+.m5-workbench .m5-notification-tabs > button:hover:not(:disabled) { background: transparent; color: var(--text-primary); }
+.m5-workbench .m5-notification-tabs > button[aria-pressed="true"] { color: var(--text-primary); box-shadow: inset 0 -2px 0 var(--text-primary); }
+.m5-workbench .m5-notification-tab-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: var(--radius-pill); background: var(--status-attention); color: var(--action-text); font-size: var(--text-xs); font-weight: var(--weight-bold); }
+.m5-workbench .m5-notification-project { padding: var(--space-3) var(--space-3) 0; }
+.m5-workbench .m5-notification-project > h4 { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-2); padding: 0 var(--space-1); font-size: var(--text-m); }
+.m5-workbench .m5-notification-task { margin: 0 0 var(--space-2); padding: var(--space-2); border-radius: var(--radius-m); background: var(--bg-sunken); }
+.m5-workbench .m5-notification-goal { margin: 0 0 var(--space-1); padding: 0 var(--space-2); overflow: hidden; color: var(--text-secondary); font-size: var(--text-s); text-overflow: ellipsis; white-space: nowrap; }
+.m5-workbench .m5-notification-task ul { margin: 0; padding: 0; list-style: none; }
+.m5-workbench .m5-notification-item { display: grid; grid-template-columns: 8px minmax(0, 1fr); column-gap: var(--space-2); row-gap: 2px; width: 100%; margin: 0; padding: var(--space-2); border: 0; border-radius: var(--radius-m); background: transparent; color: var(--text-primary); font-weight: var(--weight-regular); text-align: left; }
+.m5-workbench .m5-notification-item:hover:not(:disabled) { background: var(--bg-hover); }
+.m5-workbench .m5-notification-dot { grid-row: 1; align-self: center; width: 7px; height: 7px; border-radius: 50%; background: var(--status-neutral); }
+.m5-workbench .m5-notification-attention .m5-notification-dot { background: var(--status-attention); }
+.m5-workbench .m5-notification-done .m5-notification-dot { background: var(--status-done); }
+.m5-workbench .m5-notification-stopped .m5-notification-dot { background: var(--status-danger); }
+.m5-workbench .m5-notification-resolved .m5-notification-dot { background: var(--status-neutral); }
+.m5-workbench .m5-notification-line { grid-column: 2; display: -webkit-box; overflow: hidden; font-size: var(--text-m); line-height: 1.45; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.m5-workbench .m5-notification-unread .m5-notification-line { font-weight: var(--weight-bold); }
+.m5-workbench .m5-notification-resolved .m5-notification-line { color: var(--text-secondary); }
+.m5-workbench .m5-notification-meta { grid-column: 2; color: var(--text-secondary); font-size: var(--text-xs); }
+.m5-workbench .m5-notification-settled > summary { padding: var(--space-2); color: var(--text-secondary); font-size: var(--text-s); cursor: pointer; }
+.m5-workbench .m5-notification-empty { padding: var(--space-6) var(--space-4); }
+.m5-workbench .m5-notification-empty h3 { font-size: var(--text-m); }
+.m5-workbench .m5-notification-empty p { margin: 0; font-size: var(--text-s); line-height: 1.6; }
 
 /* ===== Work history detail (2026-11-26): a member's live activity lines name
    what they worked on, fold open to the command's detail, and a changed file

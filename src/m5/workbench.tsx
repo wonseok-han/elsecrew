@@ -565,16 +565,27 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   }, [notifications]);
   const [pendingOpen, setPendingOpen] = useState<{ projectId: string; chatId: string } | null>(null);
   const revealStoryRef = useRef<() => void>(() => {});
-  const openNotification = (item: AppNotification) => {
+  /** Why a notification of another project could not be opened (PR #14 review I4). */
+  const [openBlocked, setOpenBlocked] = useState<string | null>(null);
+  /** Opens the task a notification is about; resolves whether it got there (the bell marks it read only then). */
+  const openNotification = async (item: AppNotification): Promise<boolean> => {
+    setOpenBlocked(null);
     if (controller.snapshot().project?.id === item.projectId) {
       // The open task: close what covers its story and go to the request (review #1).
       if (chat.activeChat?.chatId !== item.chatId) void switchChat(item.chatId);
       else revealStoryRef.current();
-      return;
+      return true;
     }
-    if (!window.m5Projects) return;
+    if (!window.m5Projects) return false;
+    // Another project: the same one-step switch as the switcher, which closes this one first.
+    if (controller.snapshot().project && switchBlockedReason) { setOpenBlocked(switchBlockedReason); return false; }
     setPendingOpen({ projectId: item.projectId, chatId: item.chatId });
-    void controller.reopenProject(item.projectId, input => window.m5Projects!.request(input));
+    if (controller.snapshot().project) await switchProject({ projectId: item.projectId, canonicalPath: "" });
+    else await controller.reopenProject(item.projectId, input => window.m5Projects!.request(input));
+    if (controller.snapshot().project?.id === item.projectId) return true;
+    // It did not open: nothing waits to jump there later.
+    setPendingOpen(null);
+    return false;
   };
   const openNotificationRef = useRef(openNotification);
   openNotificationRef.current = openNotification;
@@ -903,7 +914,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           errors under it, anything that still needs attention inside it. */}
       <NotificationBell center={notifications} onOpen={openNotification} hasProblem={workAttention}
         problem={<WorkStatusPanel bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])} liveRunIds={liveRunIds} onAttention={setWorkAttention} />}
-        errors={[snapshot.error ? { title: t(snapshot.error.messageKey), key: `snapshot:${snapshot.error.messageKey}:${snapshot.error.technicalDetail ?? ""}`, body: <>
+        errors={[openBlocked ? { title: t("m5.notifications.cannotOpen"), key: `open-blocked:${openBlocked}`, body: <p>{openBlocked}</p> } : null, snapshot.error ? { title: t(snapshot.error.messageKey), key: `snapshot:${snapshot.error.messageKey}:${snapshot.error.technicalDetail ?? ""}`, body: <>
           {snapshot.error.messageKey === "m5.editorError.reopenProject" && <button type="button" className="m5-secondary" disabled={settingsOpen || !admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} onClick={() => void addProject()}>{t("m5.editor.reselectOriginal")}</button>}
           <details><summary>{t("m5.feedback.details")}</summary><pre>{snapshot.error.technicalDetail}</pre></details></> }
           : null, chat.error ? { title: t(chat.error.messageKey), key: `chat:${chat.error.messageKey}:${chat.error.detail ?? ""}`, body: <>
@@ -962,7 +973,10 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         setPreferencesSection(section); setAppDefaultsOpen(section === "roles"); }); }} onClose={() => navigatePreferences(() => { setPreferencesOpen(false); setPreferencesSection("general"); setAppDefaultsOpen(false); setManagedProject(null); })}
         rolesEditor={appDefaultsOpen && <AppRoleDefaultsEditor activeChat={chat.activeChat} navigationGuard={roleNavigation} disabled={!admissionReady} onClose={() => { setAppDefaultsOpen(false); setPreferencesSection("general"); }} />}
         disabled={!admissionReady || !window.m5Projects} onRoles={() => setAppDefaultsOpen(true)}>
-        <ProviderLogin settingsPage disabled={!admissionReady} returning={hasSavedProjects === true} reveal={connectionReveal} />
+        <ProviderLogin settingsPage disabled={!admissionReady} returning={hasSavedProjects === true} reveal={connectionReveal}
+          // A failing agent: move its roles to another one in the open project team, or in the app defaults (ADE U5).
+          // While the open project's team is still loading the shortcut is not offered, so it never lands in the app defaults by mistake (minor 2).
+          onSwitchRoles={snapshot.project && !projectDataReady ? undefined : () => navigatePreferences(() => { if (snapshot.project) { setPreferencesOpen(false); openRoleSettings(); } else { setPreferencesSection("roles"); setAppDefaultsOpen(true); } })} />
       </AppSettings>
       <StorageAdmissionNotice admission={admission} />
       {engineRestarted && <section className="m5-admission" role="status"><strong>{t("m5.admission.restarted")}</strong><p>{t("m5.admission.restartedHelp")}</p><button type="button" className="m5-secondary" onClick={() => window.location.reload()}>{t("m5.admission.refresh")}</button></section>}

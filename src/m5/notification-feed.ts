@@ -50,7 +50,12 @@ export function startNotificationFeed(bridge: NotificationFeedBridge, center: No
   };
   const unsubscribers = [
     bridge.onAgentRunStateChanged?.(({ run }) => {
-      if (run.state === "running") { running.set(run.runId, run); return; }
+      if (run.state === "running") {
+        // The task works again: whatever it asked before has been answered.
+        if (!running.has(run.runId)) center.resolveQuestionsFor(run.chatId);
+        running.set(run.runId, run);
+        return;
+      }
       running.delete(run.runId);
       latest.delete(run.runId);
       // A run that stopped asks nothing any more; nor does its task once no

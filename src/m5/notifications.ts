@@ -50,6 +50,15 @@ export function saveNotificationPreferences(preferences: NotificationPreferences
   if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") window.dispatchEvent(new Event(NOTIFICATION_PREFERENCES_CHANGED));
 }
 const LIMIT = 50;
+/** Open requests are never trimmed for room (PR #14 review I2); this bounds a runaway list of them. */
+const OPEN_LIMIT = 200;
+const isOpenRequest = (item: AppNotification) => item.kind === "attention" && !item.resolved;
+/** Newest first; open requests stay, the rest fills what LIMIT leaves. */
+function trimmed(items: readonly AppNotification[]): AppNotification[] {
+  const open = new Set(items.filter(isOpenRequest).slice(0, OPEN_LIMIT));
+  let room = Math.max(0, LIMIT - open.size);
+  return items.filter(item => open.has(item) || (!isOpenRequest(item) && room-- > 0));
+}
 
 /** Chat states that mean the team finished its turn and the user can read the result. */
 const DONE_STATES = new Set(["waitingForUser", "completed", "reviewReady"]);
@@ -70,6 +79,7 @@ function valid(item: unknown): item is AppNotification {
   if (!item || typeof item !== "object") return false;
   const value = item as Record<string, unknown>;
   return ["id", "projectId", "chatId", "goal", "text", "at"].every(key => typeof value[key] === "string")
+    && Number.isFinite(Date.parse(value.at as string))
     && ["done", "attention", "stopped"].includes(value.kind as string) && typeof value.read === "boolean"
     && (value.resolved === undefined || typeof value.resolved === "boolean")
     && (value.resolvedAt === undefined || typeof value.resolvedAt === "string");
@@ -90,7 +100,7 @@ export class NotificationCenter {
     let restored: AppNotification[] = [];
     try {
       const parsed: unknown = JSON.parse(storage?.getItem(KEY) ?? "[]");
-      if (Array.isArray(parsed)) restored = parsed.filter(valid).slice(0, LIMIT);
+      if (Array.isArray(parsed)) restored = trimmed(parsed.filter(valid));
     } catch { restored = []; }
     this.#items = restored;
     this.prune();
@@ -119,7 +129,7 @@ export class NotificationCenter {
     if (this.#items.some(existing => existing.id === item.id)) return false;
     // A kind the person turned off is not kept (nor shown as a banner).
     if (!this.#preferences().kinds[item.kind]) return false;
-    this.#items = [{ ...item, read: false }, ...this.#items].slice(0, LIMIT);
+    this.#items = trimmed([{ ...item, read: false }, ...this.#items]);
     this.#changed();
     return true;
   }
@@ -144,6 +154,15 @@ export class NotificationCenter {
    * longer working): none of them waits for the person any more. */
   resolveApprovalsFor(chatId: string): void {
     const open = (item: AppNotification) => item.chatId === chatId && item.id.startsWith("approval:") && !item.resolved;
+    if (!this.#items.some(open)) return;
+    const at = new Date(this.#now()).toISOString();
+    this.#items = this.#items.map(item => open(item) ? { ...item, read: true, resolved: true, resolvedAt: at } : item);
+    this.#changed();
+  }
+
+  /** A new run of the task started: the person answered the questions it asked before (PR #14 review I2). */
+  resolveQuestionsFor(chatId: string, before: string = new Date(this.#now()).toISOString()): void {
+    const open = (item: AppNotification) => item.chatId === chatId && item.id.startsWith("question:") && !item.resolved && Date.parse(item.at) <= Date.parse(before);
     if (!this.#items.some(open)) return;
     const at = new Date(this.#now()).toISOString();
     this.#items = this.#items.map(item => open(item) ? { ...item, read: true, resolved: true, resolvedAt: at } : item);
