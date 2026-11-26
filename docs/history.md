@@ -2,6 +2,26 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #18 재확인(B1·B2 부분 해결) 반영 (`orca/ade-multiproject-a`)
+재확인 `~/Documents/elsecrew-ade-multiproject-2026-11-26/REVIEW-pr18-2.md`(대상 13081fd3).
+
+- **B1**
+  - 겹침 검사를 모든 초기화보다 앞으로 옮겼다. `project.open`은 빈 폴더 Git 기록이나 일반 폴더 링크를 만들기 전에 `refuse_workspace_overlap`을 한다. 새 작업 폴더는 `create_dir_all` 전에 `refuse_new_task_folder`를 한다.
+  - 선택 폴더는 실제 경로로 풀리지 않으면 거절한다. 비교는 구성 요소 단위이고, macOS에서는 대소문자를 무시한다.
+  - `.git/commondir`가 있는 저장소는 등록에서 거절한다. 쓰기 범위의 git 폴더는 `commondir`을 따라간다.
+  - 시험
+    - `nothing_is_written_before_an_overlapping_folder_is_refused`(빈 폴더·일반 폴더·작업 공간 안을 가리키는 옛 작업 공간 폴더 설정 → 폴더에 아무것도 생기지 않음)
+    - `a_shared_common_git_folder_is_refused_and_case_does_not_split_a_folder`
+  - 실행 중 링크·디렉터리 신원이 바뀌는 경합(같은 사용자가 의도적으로 바꾸는 경우)은 기존 위협 모형처럼 보장 범위 밖이다. 저장·합치기의 하위 경로는 링크를 따라가지 않는 열기·핸들 검사를 그대로 쓴다.
+- **B2**: 저장을 전부 아니면 무변경으로 바꿨다. 새 초안이 통째로 들어가지 않으면 다른 작업의 초안도, 이 작업 공간의 이전 초안(여러 파일)도 그대로다.
+  - 시험
+    - "a save over the bound leaves this workspace's earlier drafts of several files whole"
+    - 속성 시험 "property: whatever the order, a draft store only ever changes by a whole save or a forget"(무작위 40판 × 80단계: 저장·잊기·떠나기·한도 초과·쓰기 거절)
+    - 보관소 한도 시험 갱신
+- **검증**
+  - `cargo test -p elsecrew-sidecar` 단위 939, 통합 16 통과.
+  - `npm test` 1008/1008, build, 렌더러 스모크 69/69.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #18 독립 검토(차단 2·중요 3·경미 1) 반영 (`orca/ade-multiproject-a`)
 검토 `~/Documents/elsecrew-ade-multiproject-2026-11-26/REVIEW-pr18.md`(대상 82284ace). PR-B(`orca/ade-multiproject-b`, 로컬 WIP 커밋)는 이 수정이 머지될 때까지 멈췄다.
 
@@ -270,7 +290,8 @@
 - **여러 프로젝트 동시 작업의 경계(2026-11-26, multi-project PR-A)**
   - 화면은 한 프로젝트만 보여 주고 실행은 sidecar에서 계속된다. 프로젝트를 떠나도 실행을 멈추지 않는다(`canLeaveProjectView`는 오는 중인 요청만, 팀이 일하는지는 `isTeamWorking`).
   - 쓰기 차단은 실제 쓰기 경로 단위다(`work_scope.rs` `write_refusal` + `project/write_scope.rs`, PR #18 검토 B1). 작업 ID가 아니라 경로로 본다. 같은 저장소 git 폴더이거나 폴더가 서로 안에 있으면 같은 잠금이고, 경로를 못 구하면 fail closed다. 근거는 두 가지다. 에이전트는 자기 작업 공간에만 쓰고, 앱의 git 쓰기는 단일 dispatcher 스레드에서 차례로 일어난다. 그래서 git 쓰기를 dispatcher 밖(작업자 스레드)으로 옮기면 이 근거가 깨지니 이 차단을 다시 봐야 한다. 사본을 사용자 폴더에 넣는 동작만 전역이다. 작업에 묶을 수 없는 진행 중인 일은 전역 차단으로 돌아간다. 작업 공간과 겹치는 프로젝트·작업 공간 폴더는 등록에서 거절한다.
-  - 초안 보관소(`editor-drafts.ts`)는 이미 보관한 것을 지우지 않는다(PR #18 검토 B2). 새 초안이 못 들어가면 그 초안을 보관하지 않고 알린다. 예전의 "오래된 작업부터 지움" 규칙으로 되돌리지 않는다.
+  - 초안 보관소(`editor-drafts.ts`)는 이미 보관한 것을 지우지 않는다(PR #18 검토 B2·재확인). 저장은 전부 아니면 무변경이고, 속성 시험이 이를 지킨다. 새 초안이 못 들어가면 그 초안을 보관하지 않고 알린다. 예전의 "오래된 작업부터 지움" 규칙으로 되돌리지 않는다.
+  - 폴더 겹침 검사는 그 폴더에 무엇이든 쓰기 전 첫 단계다(빈 폴더·일반 폴더 초기화, 새 작업 폴더). `.git/commondir` 저장소는 등록하지 않는다.
   - 공급자 동시 실행(PR-B): CLI는 같은 설정 폴더의 프로세스끼리 토큰 갱신을 스스로 잠근다(Claude 2.1.328 `.oauth_refresh.lock`, Codex 0.167.2 `auth.lock`, 문자열 근거). sidecar가 직접 하는 Claude 갱신은 그 잠금을 잡지 않으므로, 실행이 살아 있을 때는 하지 않아야 한다.
 - **실제 앱 시험의 함정(2026-11-26, ADE V)**
   - 앱 전용 로그인은 프로필 안에 있다(Codex `…/m5/codex-profile-v1/auth.json`, Claude는 설정 폴더 경로 해시로 구분된 Keychain 항목). 그래서 임시 `--user-data-dir`로는 실제 실행이 안 된다.

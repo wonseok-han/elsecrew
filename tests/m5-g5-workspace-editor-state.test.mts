@@ -251,9 +251,9 @@ test("the draft store is bounded and tolerates unreadable or refusing storage", 
   assert.equal(store.load(ref(3))?.tabs[0]?.text, "text 3 again");
   // The same task in another workspace copy is not this workspace.
   assert.equal(store.load({ ...ref(5), workspaceIdentity: "workspace_other" }), null);
-  // A draft too large to keep is left out whole; smaller ones stay; the save says so.
+  // Drafts too large to keep change nothing, not even this workspace's earlier draft (PR #18 re-review B2).
   assert.equal(store.save(ref(1), { activePath: null, tabs: [tab("x".repeat(EDITOR_DRAFTS_MAX_CHARS + 1)), tab("small")].map((item, index) => ({ ...item, path: `f${index}` })) }), false);
-  assert.deepEqual(store.load(ref(1))?.tabs.map(item => item.text), ["small"]);
+  assert.deepEqual(store.load(ref(1))?.tabs.map(item => item.text), ["text 1"]);
   assert.equal(store.save(ref(1), null), true);
   assert.equal(store.load(ref(1)), null);
   // Unreadable contents mean nothing was kept, never an error, and are never written over.
@@ -398,4 +398,66 @@ test("leaving keeps another task's earlier draft; when the store is full the vie
   assert.equal(createEditorDraftStore(storage).load(a)?.tabs[0]?.text, "A's edit\n");
   for (let index = 0; index < EDITOR_DRAFTS_MAX_WORKSPACES - 1; index++) assert.ok(createEditorDraftStore(storage).load(filler(index)), `filler ${index}`);
   controller.dispose();
+});
+
+// PR #18 re-review B2: a workspace's own earlier drafts (several files) are
+// never cut down by a save that does not fit.
+test("a save over the bound leaves this workspace's earlier drafts of several files whole", () => {
+  const storage = memoryStorage();
+  const store = createEditorDraftStore(storage);
+  const tab = (path: string, text: string) => ({ path, text, baseVersion: version, byteLength: text.length });
+  assert.equal(store.save(a, { activePath: "one.ts", tabs: [tab("one.ts", "first file\n"), tab("two.ts", "second file\n")] }), true);
+  const before = storage.items.get(EDITOR_DRAFTS_KEY);
+  // The same two files grown past the bound (together), and one alone past it.
+  const half = "z".repeat(EDITOR_DRAFTS_MAX_CHARS / 2 + 1);
+  assert.equal(store.save(a, { activePath: "one.ts", tabs: [tab("one.ts", half), tab("two.ts", half)] }), false);
+  assert.equal(storage.items.get(EDITOR_DRAFTS_KEY), before, "nothing changed");
+  assert.equal(store.save(a, { activePath: "one.ts", tabs: [tab("one.ts", "z".repeat(EDITOR_DRAFTS_MAX_CHARS + 1))] }), false);
+  assert.deepEqual(store.load(a)?.tabs.map(item => [item.path, item.text]), [["one.ts", "first file\n"], ["two.ts", "second file\n"]]);
+});
+
+// The store's rule as a property (PR #18 re-review B2): over random orders of
+// saves, forgets, leaves, bound overruns and refused writes, nothing kept is
+// ever lost or cut down. A save either takes exactly what it was given or
+// changes nothing at all.
+test("property: whatever the order, a draft store only ever changes by a whole save or a forget", () => {
+  let seed = 20261126;
+  const random = () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const pick = <T,>(items: readonly T[]) => items[Math.floor(random() * items.length)]!;
+  const workspaces = Array.from({ length: 12 }, (_, index): ChatWorkspaceRefV1 => ({ chatId: `chat_${index % 9}`, projectId: "project_01", worktreeId: `worktree_${index}`, workspaceIdentity: `workspace_${index}` }));
+  const key = (ref: ChatWorkspaceRefV1) => `${ref.chatId}/${ref.worktreeId}/${ref.workspaceIdentity}`;
+  const sizes = [1, 10, 500, 40_000, 300_000, 700_000, 1_100_000];
+  for (let round = 0; round < 40; round++) {
+    const backing = memoryStorage();
+    let refuse = false;
+    const storage = { getItem: (k: string) => backing.getItem(k), setItem: (k: string, v: string) => { if (refuse) throw new Error("QuotaExceededError"); backing.setItem(k, v); }, removeItem: (k: string) => { if (refuse) throw new Error("refused"); backing.removeItem(k); } };
+    const store = createEditorDraftStore(storage);
+    const model = new Map<string, { workspace: ChatWorkspaceRefV1; texts: [string, string][] }>();
+    for (let step = 0; step < 80; step++) {
+      const before = backing.items.get(EDITOR_DRAFTS_KEY);
+      const workspace = pick(workspaces);
+      const roll = random();
+      if (roll < 0.1) { refuse = !refuse; continue; }
+      if (roll < 0.25) {
+        // Forget (a tab saved or closed, a task deleted).
+        const done = store.save(workspace, null);
+        if (done) model.delete(key(workspace)); else assert.equal(backing.items.get(EDITOR_DRAFTS_KEY), before, "a refused forget changes nothing");
+      } else {
+        // Save, or a leave that keeps the view's drafts (the same call).
+        const count = 1 + Math.floor(random() * 3);
+        const texts: [string, string][] = Array.from({ length: count }, (_, index) => [`f${index}.ts`, `${round}:${step}:${index}:` + "t".repeat(pick(sizes))]);
+        const done = store.save(workspace, { activePath: null, tabs: texts.map(([path, text]) => ({ path, text, baseVersion: version, byteLength: text.length })) });
+        if (done) model.set(key(workspace), { workspace, texts });
+        else assert.equal(backing.items.get(EDITOR_DRAFTS_KEY), before, `round ${round} step ${step}: a save that did not fit or was refused changed the store`);
+      }
+      // Everything kept is exactly what was last kept; nothing else is there.
+      for (const ref of workspaces) {
+        const expected = model.get(key(ref));
+        const loaded = store.load(ref);
+        assert.deepEqual(loaded ? loaded.tabs.map(tab => [tab.path, tab.text]) : null, expected ? expected.texts : null, `round ${round} step ${step} ${key(ref)}`);
+      }
+      const total = [...model.values()].reduce((sum, item) => sum + item.texts.reduce((n, [, text]) => n + text.length, 0), 0);
+      assert.ok(model.size <= EDITOR_DRAFTS_MAX_WORKSPACES && total <= EDITOR_DRAFTS_MAX_CHARS);
+    }
+  }
 });

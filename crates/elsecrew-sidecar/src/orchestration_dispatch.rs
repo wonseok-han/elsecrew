@@ -2198,6 +2198,61 @@ mod tests {
         assert!(chosen.is_err_and(|error| error.detail.contains("inside a task's workspace")));
     }
 
+    /// Nothing is written to a folder that meets a task's workspace before
+    /// that is refused: an empty folder gets no Git record, a plain folder no
+    /// link file, and a new task's folders are not made (PR #18 re-review B1).
+    #[test]
+    fn nothing_is_written_before_an_overlapping_folder_is_refused() {
+        let (root, mut sidecar, _) = service();
+        let (_, path_a) = another_task(&mut sidecar, &root.path().join("source"), "writer");
+        let listing = |dir: &std::path::Path| { let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name()).collect(); names.sort(); names };
+        // An empty folder inside A's workspace, opened with the empty-folder yes.
+        let empty = path_a.join("empty");
+        std::fs::create_dir(&empty).unwrap();
+        let response = ask(&mut sidecar, "req_open_empty", "project.open", json!({"selectedPath":empty.to_str().unwrap(),"emptyFolderIdentity":"synthetic"}));
+        assert!(!response.ok, "{response:?}");
+        assert!(response.error.as_ref().unwrap().detail.contains("overlaps a task's workspace"), "{response:?}");
+        assert!(listing(&empty).is_empty(), "nothing written to the empty folder");
+        // A plain folder with files, opened with the record yes.
+        let plain = path_a.join("plain");
+        std::fs::create_dir(&plain).unwrap();
+        std::fs::write(plain.join("notes.txt"), "n\n").unwrap();
+        let response = ask(&mut sidecar, "req_open_plain", "project.open", json!({"selectedPath":plain.to_str().unwrap(),"folderRecordIdentity":"synthetic"}));
+        assert!(!response.ok && response.error.as_ref().unwrap().detail.contains("overlaps a task's workspace"), "{response:?}");
+        assert_eq!(listing(&plain), vec![std::ffi::OsString::from("notes.txt")], "no .git link written");
+        // A workspace folder saved inside A's workspace (an older setting):
+        // a new task there is refused before any folder is made.
+        let inside = path_a.join("tasks-here");
+        std::fs::create_dir(&inside).unwrap();
+        let settings = sidecar.storage.path().parent().unwrap().join("application-settings-v1");
+        std::fs::create_dir_all(&settings).unwrap();
+        std::fs::write(settings.join("workspace-folder.json"), json!({"path":inside.to_str().unwrap()}).to_string()).unwrap();
+        let project_id = sidecar.storage.projection_records("project").unwrap().into_iter()
+            .find(|p| p["canonical_path"].as_str().is_some_and(|path| path.ends_with("/source"))).unwrap()["project_id"].as_str().unwrap().to_owned();
+        let prepared = sidecar.g5.prepare_chat_workspace_with_baseline(&mut sidecar.storage, &mut sidecar.projects, &project_id, "req_inside", true);
+        assert!(prepared.is_err_and(|error| error.detail.contains("overlaps another task's workspace")));
+        assert!(listing(&inside).is_empty(), "no project or task folder made");
+    }
+
+    /// A repository whose .git folder shares another's objects and refs
+    /// (`commondir`) is not a repository of its own; names differing only in
+    /// case are one folder on macOS (PR #18 re-review B1).
+    #[test]
+    fn a_shared_common_git_folder_is_refused_and_case_does_not_split_a_folder() {
+        let (root, mut sidecar, _) = service();
+        let sharing = root.path().join("sharing");
+        std::fs::create_dir(&sharing).unwrap();
+        std::fs::write(sharing.join("x.txt"), "x\n").unwrap();
+        assert!(Command::new("/usr/bin/git").args(["init", "-q"]).current_dir(&sharing).status().unwrap().success());
+        std::fs::write(sharing.join(".git/commondir"), format!("{}\n", root.path().join("source/.git").display())).unwrap();
+        let opened = sidecar.projects.open_project(&mut sidecar.storage, sharing.to_str().unwrap(), "req_open_sharing");
+        assert!(opened.as_ref().is_err_and(|error| error.detail.contains("commondir")), "{:?}", opened.map(|a| a.result).map_err(|e| e.detail));
+        if cfg!(target_os = "macos") {
+            assert!(crate::project::write_scope_path_within(std::path::Path::new("/Users/Someone/Work/a"), std::path::Path::new("/users/someone/work")));
+        }
+        assert!(!crate::project::write_scope_path_within(std::path::Path::new("/work/ab"), std::path::Path::new("/work/a")), "whole components only");
+    }
+
     /// Write scopes meet on one Git folder or on folders inside one another.
     #[test]
     fn write_scopes_meet_on_a_shared_repository_or_nested_folders() {

@@ -66,6 +66,12 @@ impl ProjectManager {
         let metadata = std::fs::symlink_metadata(&link)
             .map_err(|error| ProjectFailure::manifest(format!("could not inspect source .git entry: {error}")))?;
         if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            // A .git folder whose `commondir` names another repository shares
+            // that repository's objects and refs: not a repository of its own
+            // (PR #18 re-review B1).
+            if std::fs::symlink_metadata(link.join("commondir")).is_ok() {
+                return Err(ProjectFailure::manifest("source repository must own a real .git directory; one that shares another repository's (commondir) is unsupported"));
+            }
             return Ok(link);
         }
         if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > LINK_MAX_BYTES {
@@ -191,7 +197,7 @@ impl ProjectManager {
         // in a folder another task's agent writes (PR #18 review B1). Holding
         // existing workspaces is the normal case (the default folder).
         for workspace in self.recorded_workspace_folders(storage)? {
-            if canonical.starts_with(&workspace) {
+            if super::write_scope::path_within(&canonical, &workspace) {
                 return Err(ProjectFailure::manifest("the workspace folder is inside a task's workspace"));
             }
         }
@@ -210,6 +216,10 @@ impl ProjectManager {
             return Err(ProjectFailure::recovery("the chosen workspace folder is missing; choose it again in settings"));
         }
         let wanted = home.join(project_folder_name(source_root));
+        let short: String = worktree_id.trim_start_matches("worktree_").chars().take(8).collect();
+        // Nothing is made before the new folder is known not to meet another
+        // task's workspace (PR #18 re-review B1).
+        self.refuse_new_task_folder(storage, &wanted, &wanted.join(format!("task-{short}")))?;
         std::fs::create_dir_all(&wanted).map_err(|error| {
             ProjectFailure::recovery(format!("could not make the workspace folder: {error}"))
         })?;
@@ -232,14 +242,9 @@ impl ProjectManager {
                 }
             }
         }
-        let short: String = worktree_id.trim_start_matches("worktree_").chars().take(8).collect();
         let task_dir = project_dir.join(format!("task-{short}"));
-        // Never inside, at or around another task's workspace (PR #18 review B1).
-        for workspace in self.recorded_workspace_folders(storage)? {
-            if project_dir.starts_with(&workspace) || task_dir.starts_with(&workspace) || workspace.starts_with(&task_dir) {
-                return Err(ProjectFailure::manifest("the new task's folder overlaps another task's workspace"));
-            }
-        }
+        // Again on the real folders now made (PR #18 review B1).
+        self.refuse_new_task_folder(storage, &project_dir, &task_dir)?;
         Ok(task_dir)
     }
 

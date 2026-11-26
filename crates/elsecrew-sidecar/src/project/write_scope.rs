@@ -16,13 +16,45 @@ pub(crate) struct WriteScope {
 impl WriteScope {
     /// Whether two scopes can write the same files or the same repository.
     pub(crate) fn meets(&self, other: &WriteScope) -> bool {
-        self.git == other.git
-            || self.folders.iter().any(|mine| other.folders.iter().any(|theirs| mine.starts_with(theirs) || theirs.starts_with(mine)))
+        same_path(&self.git, &other.git)
+            || self.folders.iter().any(|mine| other.folders.iter().any(|theirs| path_within(mine, theirs) || path_within(theirs, mine)))
     }
+}
+
+/// A path compared the way the disk names it: macOS volumes are usually case
+/// insensitive, so there two names differing only in case are one folder
+/// (compared in lowercase there: refusing more, never less).
+fn compare_key(path: &Path) -> String {
+    let text = path.to_string_lossy().into_owned();
+    if cfg!(target_os = "macos") { text.to_lowercase() } else { text }
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    compare_key(left) == compare_key(right)
+}
+
+/// `inner` is `outer` or inside it, by whole path components.
+pub(crate) fn path_within(inner: &Path, outer: &Path) -> bool {
+    let (inner, outer) = (compare_key(inner), compare_key(outer));
+    let outer = outer.trim_end_matches('/');
+    inner == outer || inner.starts_with(&format!("{outer}/"))
 }
 
 fn real(path: &Path) -> Result<PathBuf, ProjectFailure> {
     std::fs::canonicalize(path).map_err(|error| ProjectFailure::manifest(format!("write scope path unavailable: {error}")))
+}
+
+/// The folder Git keeps a repository's objects and refs in: the Git folder,
+/// or the one its `commondir` names (PR #18 re-review B1).
+fn common_git(git: &Path) -> Result<PathBuf, ProjectFailure> {
+    match std::fs::read_to_string(git.join("commondir")) {
+        Ok(text) => {
+            let named = PathBuf::from(text.trim_end_matches('\n'));
+            real(&if named.is_absolute() { named } else { git.join(named) })
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => real(git),
+        Err(_) => Err(ProjectFailure::manifest("the repository's common Git folder cannot be read")),
+    }
 }
 
 impl ProjectManager {
@@ -32,7 +64,7 @@ impl ProjectManager {
         let source = real(&active.canonical_git_root)?;
         Ok(WriteScope {
             folders: vec![real(&active.worktree_path)?, source.clone()],
-            git: real(&self.repository_git_path(&source)?)?,
+            git: common_git(&real(&self.repository_git_path(&source)?)?)?,
         })
     }
 
@@ -42,7 +74,7 @@ impl ProjectManager {
             .project_catalog_path(project_id)?
             .ok_or_else(|| ProjectFailure::manifest("saved project was not found"))?;
         let source = real(Path::new(&path))?;
-        Ok(WriteScope { folders: vec![source.clone()], git: real(&self.repository_git_path(&source)?)? })
+        Ok(WriteScope { folders: vec![source.clone()], git: common_git(&real(&self.repository_git_path(&source)?)?)? })
     }
 
     /// Every task workspace on record (active or not): a new project, a new
@@ -60,11 +92,39 @@ impl ProjectManager {
     }
 
     /// Refuses a folder that lies inside, or holds, a recorded task workspace.
+    /// The folder must resolve: one that cannot is refused (fail closed).
     pub(crate) fn refuse_workspace_overlap(&self, storage: &Storage, folder: &Path, what: &str) -> Result<(), ProjectFailure> {
-        let folder = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
+        let folder = std::fs::canonicalize(folder).map_err(|_| ProjectFailure::manifest(format!("{what} cannot be resolved")))?;
         for workspace in self.recorded_workspace_folders(storage)? {
-            if folder.starts_with(&workspace) || workspace.starts_with(&folder) {
+            if path_within(&folder, &workspace) || path_within(&workspace, &folder) {
                 return Err(ProjectFailure::manifest(format!("{what} overlaps a task's workspace")));
+            }
+        }
+        Ok(())
+    }
+
+    /// A new task's folder (and its project folder under the workspace
+    /// folder) may not be inside, at or around another task's workspace.
+    /// Asked before the folders are made, on the deepest part that exists.
+    pub(crate) fn refuse_new_task_folder(&self, storage: &Storage, project_dir: &Path, task_dir: &Path) -> Result<(), ProjectFailure> {
+        let resolve = |path: &Path| -> PathBuf {
+            // The existing part resolved, the rest appended as named.
+            let mut existing = path.to_path_buf();
+            let mut rest = Vec::new();
+            while std::fs::symlink_metadata(&existing).is_err() {
+                match (existing.file_name().map(|name| name.to_os_string()), existing.parent().map(Path::to_path_buf)) {
+                    (Some(name), Some(parent)) => { rest.push(name); existing = parent; }
+                    _ => break,
+                }
+            }
+            let mut resolved = std::fs::canonicalize(&existing).unwrap_or(existing);
+            for name in rest.into_iter().rev() { resolved.push(name); }
+            resolved
+        };
+        let (project_dir, task_dir) = (resolve(project_dir), resolve(task_dir));
+        for workspace in self.recorded_workspace_folders(storage)? {
+            if path_within(&project_dir, &workspace) || path_within(&task_dir, &workspace) || path_within(&workspace, &task_dir) {
+                return Err(ProjectFailure::manifest("the new task's folder overlaps another task's workspace"));
             }
         }
         Ok(())

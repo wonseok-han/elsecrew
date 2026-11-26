@@ -17,6 +17,8 @@ mod latest_apply;
 mod app_connections;
 mod write_scope;
 pub(crate) use write_scope::WriteScope;
+#[cfg(test)]
+pub(crate) use write_scope::path_within as write_scope_path_within;
 mod empty_project;
 mod git_worktree;
 mod git_merge;
@@ -4608,6 +4610,12 @@ impl ProjectManager {
             match root.symlink_metadata(".git") {
                 Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
                     let git_dir = open_real_child_dir(&root, ".git")?;
+                    // Its objects and refs live in another repository's Git
+                    // folder (`commondir`): not a repository of its own, and
+                    // two projects would share one (PR #18 re-review B1).
+                    if git_dir.symlink_metadata("commondir").is_ok() {
+                        return Err(ProjectFailure::manifest("source repository must own a real .git directory; one that shares another repository's (commondir) is unsupported"));
+                    }
                     break (path.to_path_buf(), root, git_dir);
                 }
                 // A plain folder this app gave a shadow history (link file).

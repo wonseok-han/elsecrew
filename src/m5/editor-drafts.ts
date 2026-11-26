@@ -7,8 +7,8 @@
  * What is kept stays kept (PR #18 review B2): a save never drops another
  * workspace's drafts to make room, never rewrites an entry it cannot read
  * (an older or damaged one stays as it was), and when storage refuses a
- * write nothing already kept is removed. A draft that does not fit is simply
- * not kept, and `save` says so. */
+ * write nothing already kept is removed. A save is all or nothing: drafts
+ * that do not fit leave the store exactly as it was, and `save` says so. */
 import type { FileVersionV1 } from "./contracts/file-v1.ts";
 import type { ChatWorkspaceRefV1 } from "./contracts/workspace-addressing-v1.ts";
 
@@ -127,20 +127,19 @@ export function createEditorDraftStore(storage: KeyValue | null): EditorDraftSto
       // including another workspace of the same task.
       const others = stored.entries.filter(item => !same(item.workspace, workspace));
       const entries = [...others];
-      let whole = true;
       if (drafts?.tabs.length) {
-        // No room: nothing kept is given up for it. Tabs that do not fit
-        // what is left are not kept, whole; the rest is.
+        // All or nothing (PR #18 re-review B2): the new drafts go in whole,
+        // or nothing changes — not other tasks' drafts, not this workspace's
+        // earlier ones. No room is no write.
         if (others.length + stored.unread.length + 1 > EDITOR_DRAFTS_MAX_WORKSPACES) return false;
         const rawChars = stored.unread.reduce<number>((sum, item) => sum + (JSON.stringify(item)?.length ?? 0), 0);
-        let room = EDITOR_DRAFTS_MAX_CHARS - others.reduce((sum, item) => sum + chars(item), 0) - rawChars;
-        const tabs = drafts.tabs.filter(tab => { if (tab.text.length > room) return false; room -= tab.text.length; return true; });
-        whole = tabs.length === drafts.tabs.length;
-        if (tabs.length) entries.unshift({ workspace: { chatId: workspace.chatId, projectId: workspace.projectId, worktreeId: workspace.worktreeId, workspaceIdentity: workspace.workspaceIdentity },
-          activePath: drafts.activePath, tabs });
+        const room = EDITOR_DRAFTS_MAX_CHARS - others.reduce((sum, item) => sum + chars(item), 0) - rawChars;
+        if (drafts.tabs.reduce((sum, tab) => sum + tab.text.length, 0) > room) return false;
+        entries.unshift({ workspace: { chatId: workspace.chatId, projectId: workspace.projectId, worktreeId: workspace.worktreeId, workspaceIdentity: workspace.workspaceIdentity },
+          activePath: drafts.activePath, tabs: drafts.tabs });
       } else if (others.length === stored.entries.length) return true;
       // Storage refused: what was kept stays as it was.
-      return writeAll(entries, stored.unread) && whole;
+      return writeAll(entries, stored.unread);
     },
   };
 }

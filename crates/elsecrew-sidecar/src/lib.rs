@@ -1771,11 +1771,17 @@ impl Sidecar {
                     else if recording { &["selectedPath", "folderRecordIdentity"] } else { &["selectedPath"] };
                 let params = require_exact_params(&request.params, keys).map_err(invalid_params)?;
                 let selected = param_string(params, "selectedPath").map_err(invalid_params)?;
-                let prepared = if initializing {
-                    self.projects.initialize_empty_project(selected, param_string(params, "emptyFolderIdentity").map_err(invalid_params)?)
-                } else if recording {
-                    self.projects.initialize_folder_project(selected, param_string(params, "folderRecordIdentity").map_err(invalid_params)?)
-                } else { Ok(()) };
+                // First, before anything is written to the folder (a new Git
+                // record for an empty or plain folder): it may not meet a
+                // task's workspace (PR #18 re-review B1).
+                let empty_identity = if initializing { Some(param_string(params, "emptyFolderIdentity").map_err(invalid_params)?) } else { None };
+                let record_identity = if recording { Some(param_string(params, "folderRecordIdentity").map_err(invalid_params)?) } else { None };
+                let prepared = self.projects.refuse_workspace_overlap(&self.storage, std::path::Path::new(selected), "the project folder")
+                    .and_then(|()| match (empty_identity, record_identity) {
+                        (Some(identity), _) => self.projects.initialize_empty_project(selected, identity),
+                        (_, Some(identity)) => self.projects.initialize_folder_project(selected, identity),
+                        _ => Ok(()),
+                    });
                 prepared.and_then(|()| self.projects.open_project(&mut self.storage, selected, &request.request_id))
             }
             "project.getTree" => {
