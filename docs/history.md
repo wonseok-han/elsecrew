@@ -2,110 +2,51 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #13 검토(차단 1·중요 2·경미 2) 반영 (`orca/ade-v-check`)
-검토 `~/Documents/elsecrew-ade-v-2026-11-26/REVIEW-pr13.md`(대상 4fa7db56) 반영. 사용량 한도로 멈췄다가 19:10 이후 이어서 마쳤다.
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #12 독립 검토(차단 1·중요 6·경미 4) 전부 반영 (`orca/ade-screens-u2-u4`)
+검토 `~/Documents/elsecrew-ade-screens-u2-u4-2026-11-26/REVIEW-pr12.md`(대상 23365fad). 재현 시험은 `tests/m5-ade-screens-u2-u4.test.mts`(21개), 보안 하네스, 렌더러 스모크, 새 네이티브 시나리오(`ELSECREW_SMOKE_PROJECTS=1`)에 나눠 넣었다.
 
-- **B1(아카이브 유실)**
-  - 원인: 롤오버 스크립트가 아카이브를 쓰기 모드로 먼저 열고 나서 읽었다. 그래서 파일이 비워졌고 11월 엔트리 446개가 사라졌다(검토는 11-02~26 제목 74개로 셈).
-  - 복구: `feature/ade` 7378332a의 아카이브 원문 그대로 되살리고, 그 위에 PR #9 엔트리 3개를 얹었다.
-  - 검사 추가: `scripts/m5-history-entries.mjs`(`pnpm m5:check:history`). 기준의 모든 `### YYYY-MM-DD` 엔트리가 원문 그대로 history.md나 archive에 있는지 본다. 결과는 기준 451 → 현재 451 보존, 새 엔트리 2이다. 옛 PR 머리(`--tree 4fa7db56`)에는 446 유실을 보고한다.
-  - CLAUDE.md·AGENTS.md 롤오버 규칙에 이 검사와 "읽은 뒤 쓴다"를 넣었다.
-  - 날짜 경계와 고정 섹션 분량(366줄)이 충돌하는 문제는 문서 관리 합의가 필요해 남긴다.
-- **I1(표시 순서)**: 0.5초 타이머(`settleLimitMs`)를 없앴다. 띠 변경은 `PreviewBands`(preview-tab-model)를 거친다. 숨김 응답 뒤에 띠를 바꾸고, 페이지 배치 보고(`rendered`) 뒤에만 다시 보인다. 결과가 화면과 같으면 그 자리에서 `settled`를 알린다.
-- **I2(새 결과 알림)**: 띠를 넣을지 뺄지는 화면값이 아니라 목표값(`target`)으로 정한다. 그래서 다시 불러오는 동안 띠를 내리라는 변경이 대기 중이어도 새 결과 신호가 사라지지 않는다.
-- **M1**: 보고서의 스모크 집계를 바로잡았다. `ui-smoke/`는 병합본 1회차 34/35로 덮어쓰인 결과였다.
-- **M2**: 출력 조회 실패 중이거나 이미 활동을 보인 실행에는 시작 문장을 내지 않는다.
-- **기준 6 판정 정정**: 정상 흐름은 충족이다. 오류·예외 경로(합치기 차단·충돌·다른 브랜치 안내, 설정 도움말)에는 '브랜치'·'(커밋)'이 남아 미충족이다.
-- **시험**
-  - `tests/m5-preview-layout-loop.test.mts`: "a band the page lays out late keeps the view hidden until it is laid out — no timer shows it at the old place", "a new result while taking the band down for a reload keeps the band", "a band change that would change nothing hides nothing"
-  - `tests/m5-preview-tab.test.mts`: 구조 검사, 타이머 없음
-  - `tests/m5-ade-v-check.test.mts`: M2
-  - UI 스모크: "I1 the view is never shown between the hide and the band laid out", "I2 a new result while the band goes for a reload keeps the band, and the view returns". 응답 900ms 지연 상태에서 시험했다. 실행 종료 신호만 띠 모델에 직접 넣었다.
-- **검증**: `npm test` 925/925, `pnpm build`, 렌더러 마운트 스모크 69, UI 스모크 37/37(`~/Documents/elsecrew-ade-v-2026-11-26/ui-smoke-pr13-review/`), 기록 엔트리 검사 통과.
-- **다음**: 노예 재검토·머지. 기준 6의 오류 경로 문구, 롤오버 날짜 경계 규칙 합의, D1~D3는 별도로 진행한다.
-
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — ADE 1차 통합 검증(V): 완료 기준 6개 실제 todo 측정 (`orca/ade-v-check`, 기준 feature/ade 613dafde)
-진단 보고서 4장의 1차 완료 기준을 실제 앱으로 측정했다. 대상은 개발 앱·기본 프로필이다. 임시 프로필에는 공급자 로그인이 없어 실제 실행이 안 되므로 노예 승인 (A)로 기본 프로필을 썼다. 시나리오는 실제 유료 todo 실행 두 가지다. git 모드는 `todo-test-1126g`, 사본 모드는 `todo-test-1126c`(`ELSECREW_GIT_WORKTREES=0`)이고, 역할은 기획 Codex·나머지 Claude Code다. 보고서는 `~/Documents/elsecrew-ade-v-2026-11-26/REPORT.md`(캡처 207개, 1초 표본·분석·앱 로그 `data/`)에 있다.
-
-- **판정(613dafde 기준)**
-  - 충족 4: 1 폭 50.0%·640×699(경계), 3 다섯 상태 네 곳 일치, 4 마크다운 원문 0, 5 미리보기 넓게 623·좁게 390 실제 입력.
-  - 미충족 2: 2 매 실행 시작 11~31초 문장 공백, 6 반영 확인 문구의 "커밋".
-  - 둘 다 이 브랜치에서 고쳤다. 기준 2는 수정 뒤 짧은 실제 실행에서 공백 0이었다.
-- **함께 확인**
-  - 사용자 정의 역할 '접근성 점검'에 총괄이 위임했고, 확인 뒤 팀을 되돌렸다.
-  - 재시작 3번 모두 마지막 프로젝트·작업이 복원됐다.
-  - 권한 카드 29번이 모두 2~4초 만에 에이전트 쪽에서 거둬졌고, 그동안 '이번만 허용'은 한 번도 켜지지 않았다.
-- **고친 것(8cba9ad3)**
-  - 실행 시작 문장: `startingSentence`, "받은 일을 읽고 시작하는 중이에요".
-  - 미리보기 '다시 불러오기'(띠 없음) 뒤 뷰가 영원히 숨는 결함: PR #9 배치 순서. 변화 없는 띠는 숨김 순서를 타지 않고, `settleLimitMs` 0.5초 뒤 다시 놓는다.
-  - 반영 확인 문구에서 "커밋" 제거.
-- **남긴 큰 결함**
-  - D1: main sidecar 클라이언트의 동시 스트림 16개 한도를 넘으면 늦게 온 `blob.chunk`가 `protocolInvalid`가 되어 엔진이 재시작되고, 실행 중인 에이전트가 '중단됨'이 된다(사본 세션 로그).
-  - D2: 에이전트가 55KB PNG를 읽으면 Claude stream-json 한 줄(약 148KB)이 관측 한도 128KiB를 넘어 `sessionChannel/unknown`으로 실행이 멈춘다.
-  - D3: 권한 카드 깜박임.
-- **실수 기록**: 프로젝트 ID 조회 필드를 잘못 써(`path` → 실제 `canonicalPath`) 기존 `todo-test-1118a`의 팀 배정을 바꿨다. 1분 안에 원래 값으로 되돌렸다(설정 버전 2→4, 내용 동일, 브리지 사용·DB 직접 수정 없음).
-- **검증**: `npm test` 900/900, `pnpm build`, 렌더러 마운트 스모크 68, 실제 앱 미리보기 UI 스모크 35/35(새 검사: 띠 없이 다시 불러오기).
-- **다음**: D1(스트림 한도와 프로토콜 오류 처리)·D2(큰 도구 결과 줄 처리)를 따로 설계한다. 권한 카드 깜박임(D3)과 기준 3 주의(누른 직후 잠깐 섞이는 문구, git 작업의 '내 폴더에 넣기' 상위 표현)를 정리한다.
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #10 독립 검토(차단 0·중요 4·경미 3) 전부 반영 (`orca/ade-theme-tokens`)
-검토 `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr10.md`(대상 db5009d6). 재현 시험은 `tests/m5-pr10-review.test.mts`(13개)에 모았다.
-
-- **I1 화면 밝기 기록**: main 기록이 기준이고 렌더러 사본은 첫 페인트용이다(`theme.ts` `createThemeController`, IPC `m5:appearance:get` 추가). 사본 없음·손상·저장소 예외 → main 기록, main 기록 없음 + 올바른 사본 → 사본으로 복구, 손상 사본은 보내지 않음, 기록 응답 전 사용자 선택 유지. `appearance.json`은 `.tmp`+fsync+rename, 실패하면 이전 기록 유지·`saved: false` → 설정에 "기억하지 못했어요"(`m5.preferences.themeSaveFailed`).
-- **I2 시스템 변경**: `nativeTheme.on("updated")`가 열린 창 배경을 다시 칠한다. 렌더러는 `prefers-color-scheme` 변경으로 CSS·Monaco를 바꾼다(시험: 컨트롤러 시스템 전환, 보안 하네스 `updated` 이벤트).
-- **I3 구분 버튼**: 트랙 `--bg-track`(라이트 회색)과 선택 칸 `--selected-edge` 안쪽 테두리(두 테마 3:1 이상), `overflow: hidden` 제거, `.m5-segmented/.m5-seg/.m5-preview-viewport` 버튼 초점 링을 안쪽(`-2px`)에 그림.
-- **I4 실제 조합 대비**
-  - 대비 검사기에 컴포넌트 조합 표(색 혼합 계산 포함)를 더하고 반올림 전 값으로 비교한다(다크·라이트 각 159개).
-  - 새 렌더 측정기 `tests/m5-rendered-contrast-probe.cjs`가 렌더러 스모크 21곳에서 실제 DOM을 잰다(글자·입력 경계·비활성 강조색·구분 버튼 선택/초점). 마운트 스모크는 다크·라이트 두 번 돈다.
-  - 측정이 찾아 고친 것: 입력칸 경계(`--line-strong` 1.5~2:1 → 입력 규칙 14곳을 원본에서 `--line-input`으로 + 전역 규칙, 라이트 `--p-gray-500` #7f858c), 선택 행의 역할 아이콘(`--role-tint` 10%, 라이트 역할색 진하게, 다크 role-7), 위험 호버 필터 → `--danger-bg-hover`, 첫 실행 현재 단계 글자 `--text-primary`, 입력 키보드 초점 링.
-  - 첫 CI(06fc5943) macOS 라이트 렌더러 스모크가 Claude 연결 코드 입력칸 경계 1.62:1을 잡았다. 로컬 실행에서는 그 시점에 보이지 않던 칸이었다. 구체도가 더 높은 옛 규칙이 전역 입력 경계를 이겨서였다. 입력 규칙을 원본에서 고치고, 입력·textarea·select 규칙의 테두리 색을 `--line-input`으로만 쓰게 막는 정적 시험을 더했다.
-- **경미**
-  - 미리보기 UI 스모크 I1 판정: 지연된 close 응답 시각 대신 실제 `removeChildView` 시각을 기준으로 바꿨다.
-  - 채운 빨강은 확인 버튼 4곳(`m5-btn-danger-solid`)에만 둔다. 역할 메뉴 '삭제'는 투명 유지.
-  - 밝기 도움말을 '운영체제 설정'으로 바꿨다.
+- **B1 (차단) 폴더 확인**: 앱 안 확인 창(IPC `m5:folder-confirm:*`, preload `m5FolderConfirm`, 화면 창, 문구 키)을 모두 지우고 `electron/main.ts`·`preload.ts`·`window.d.ts`를 기저(7378332a)로 되돌렸다. 빈 폴더·일반 폴더·기록 없음은 다시 main의 `dialog.showMessageBox`로 묻는다. 결정 Q7은 이 경계 때문에 양보한다.
+  - 시험: 보안 하네스 "a folder that becomes a project is confirmed in main's own box; the page has no way to answer it"(답할 채널 없음, 취소 시 미오픈·페이지로 보낸 것 없음, 시작 시 main이 고른 폴더만 열림). 단위 "PR #12 B1". 네이티브 시나리오에서 빈 폴더 → main 확인 1회·취소 시 폴더 비어 있음.
+  - I4(확인 창 수명)는 이 창이 없어져 함께 해소됐다.
+- **I1 Q9 권한 선저장**: 첫 작업 창(`proposeAll`)에서 권한 저장 버튼을 없애고 허용의 의미(`m5.permissions.boundary`)를 보이게 했다. `createChat`은 확인 전에는 팀·권한을 아무것도 저장하지 않고(`firstSetupAgreed`), 보이는 권한이 바뀌면 체크가 풀리며, 권한을 읽기 전에는 체크가 꺼져 있다. 첫 작업 도움말을 "확인 체크를 하고 보내야 이 권한이 저장돼요"로 바꿨다.
+  - 시험: 단위 "PR #12 I1", 네이티브 시나리오(확인 전·권한 변경 뒤 `recorded:false`, 보낸 뒤 보인 값 저장).
+- **I2 전환 메뉴 추가**: 작업이 열려 있거나 저장하지 않은 편집이 있으면 '프로젝트 추가'를 끄고 이유(`m5.switch.addTaskOpen`/`unsaved`)를 보인다. 프로젝트가 열리지 않으면(전환 실패 포함) 홈·처음 시작 위에 이유와 '원본 폴더 다시 선택'을 보인다(`home-error`).
+  - 시험: 단위 "PR #12 I2", 네이티브 시나리오(작업 없음 → 추가 켜짐·취소 시 화면 유지, 작업 열림 → 꺼짐+이유).
+- **I3 목록 실패**: `onHasProjects` → `onListState`(projects/empty/failed). 실패면 홈의 오류·다시 확인(보조 버튼)을 보이고 처음 시작을 띄우지 않는다. 시험: 단위 "PR #12 I3", 렌더러 스모크 22 `home-catalog-error`.
+- **I5 삭제 대상**: 프로젝트 삭제 확인에 '이 프로젝트의 폴더'와 전체 경로를 본문으로 보인다(제목 `title` 제거). 시험: 단위 "PR #12 I5", 렌더러 스모크 21(경로·첫 초점 취소), 네이티브 시나리오 05.
+- **I6 네이티브 스모크**: `m5-project-ui-smoke.cjs`의 새 작업 입력(`.m5-new-task-goal input`), 첫 작업 확인 체크, 재로딩 분기(홈 '이어서 하기'), 메모리 분기(닫은 뒤 홈 카드), 팀 역할(전환 메뉴, PR #8 편집기) 선택자를 고쳤다. 새 `ELSECREW_SMOKE_PROJECTS=1` 시나리오로 추가·전환·삭제·확인 취소·첫 작업을 실제 sidecar에서 확인했다(PASS).
+  - 기본 흐름은 첫 작업 뒤 옛 diff·반영 단계(`.m5-chat-review` '작업 사본 diff 열기' 등, L1 이전 화면)에서 여전히 멈춘다. 이 PR 이전부터의 문제라 별도 작업으로 남긴다(11-26 아카이브 기록과 같음).
+- **경미**: 1) 설정·팀 역할 창을 닫으면 연 컨트롤로 초점 복귀(`focusReturn`/`focusBack`, 쓰이지 않던 `settingsButtonRef` 제거). 2) '저장'·'바꾸기'로 줄이고 접근성 이름에 대상(`m5.permissions.saveNamed` 등), 홈 '이어서 하기'·⋯ 메뉴 이름에 프로젝트 이름, 권한 '저장하면 다음 작업부터', 영어 첫 화면 제목. 3) 홈·전환은 최대 10쪽을 읽고 최근 순 정렬(중복 ID 제거). 4) 알림 정리를 실행 중 한 시간마다·설정 변경 때도 수행. 시험: 단위 "PR #12 minor 1~4", 렌더러 스모크(홈 페이지 합침), 네이티브 시나리오(팀 역할 닫은 뒤 초점).
 - **검증**
-  - `npm test` 919/919, `pnpm build` 통과.
-  - `pnpm m5:test:editor` 69/69 두 번 연속(렌더러 마운트 스모크 다크·라이트, 렌더 대비 실패 0).
-  - 대비 검사 다크·라이트 각 159/159.
-  - 미리보기 UI 스모크: 다크 PASS 2회 연속, 라이트 PASS 2회 연속. I1은 분리 후 약 400ms 뒤 해제.
-  - 캡처·로그: `~/Documents/elsecrew-ade-theme-tokens-2026-11-26/pr10-review/`.
-  - CI: 06fc5943은 macOS 라이트 스모크 실패(위 입력칸). 45c3ae4a에서 macOS·Windows·website·GitGuardian 모두 통과.
-  - 운영체제 밝기 자체를 바꿔 보는 실제 앱 확인은 하지 않았다(다른 작업자와 함께 쓰는 컴퓨터라 시스템 설정을 바꾸지 않음). 단위·하네스 시험으로 막았다.
+  - `npm test` 941/941, `pnpm build` 통과, `pnpm m5:test:editor` 69/69(마운트 스모크 다크·라이트).
+  - 렌더 대비 다크·라이트 각 27화면 1095개 실패 0(폴더 확인 지점 → 목록 실패 지점으로 교체).
+  - 미리보기 UI 스모크 다크 2회·라이트 2회 연속 PASS.
+  - 네이티브 시나리오 PASS(실제 sidecar, 임시 폴더·앱 데이터, 공급자 미연결). 캡처 `~/Documents/elsecrew-ade-screens-u2-u4-2026-11-26/review-fix/native/`, 스모크 캡처 `review-fix/smoke/{dark,light}`.
+  - 개발 앱은 띄우지 않았다(네이티브 시나리오가 실제 앱 흐름을 대신함). 프로세스 종료는 각 스크립트가 스스로 끝냈다.
+- **feature/ade 병합(PR #13 9918bc22)**: 반영 커밋 810ebcb8 뒤 PR이 충돌(DIRTY)해 CI가 돌지 않았다. `origin/feature/ade`를 병합했다. 기록 충돌은 기저 쪽 `history.md`·아카이브를 그대로 두고 이 PR의 두 엔트리와 핵심 결정만 더한 뒤, 500줄을 넘어 머지된 PR #10·#13 엔트리를 아카이브 맨 위로 옮겼다(아카이브를 먼저 읽고 씀). `pnpm m5:check:history` 기저 대비 453 유지·2 추가·누락 0. 병합 뒤 `npm test` 947/947, build, 렌더러 스모크 다크·라이트(27화면 실패 0), 미리보기 UI 스모크 다크·라이트 각 2회, 네이티브 시나리오 PASS.
+- **CI**: 45d7fb28에서 macOS·Windows·website·GitGuardian 모두 통과, PR #12 `CLEAN/MERGEABLE`. 차단(B1) 재확인은 조정자가 받는다.
 
-### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 화면 통일 U0(토큰·화면 밝기)·U1(공용 컴포넌트 층) (`orca/ade-theme-tokens`, 기준 feature/ade 613dafde)
-설계: `docs/proposals/m5-ade-screens-plan.md`(원본 `~/Documents/elsecrew-ade-screens-design-2026-11-26/`) 2장·4.1. 결정(조정자 위임): 테마 기본값 시스템, 강조색 코랄 유지(라이트 `#b4482d`), 주인님 규칙 "버튼은 동작만"을 설계 2.1의 10번으로 추가. 현행 설명은 architecture "색·간격 토큰과 화면 밝기".
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 화면 통일 U2(홈·처음 시작·전환·삭제·폴더 확인)·U3(새 작업 창)·U4(설정) (`orca/ade-screens-u2-u4`, 기준 feature/ade 7378332a)
+설계: `docs/proposals/m5-ade-screens-plan.md` 4.1과 시안 01~07·10·11·14(원본 `~/Documents/elsecrew-ade-screens-design-2026-11-26/`). 조정자 결정: Q1 홈 카드는 마지막으로 연 때만(요약 조회 없음), Q4 알림 설정 분리(종류별 끄기·해결된 알림 정리), Q5 홈 왼쪽 레일 제거, Q6 전환은 닫기+열기 한 동작, Q7 빈 폴더 확인을 앱 안으로(업데이트는 U8), Q8 '이 프로젝트'는 설정 목록의 묶음, Q9 첫 작업의 별도 확인 체크 유지(보내기가 동의를 대신하지 않음, 모양만 바꿈). 현행 설명은 architecture "홈·처음 시작·설정(U2~U4)".
 
-- **U0 토큰**
-  - `styles.css` `:root`를 설계 토큰으로 바꿨다(다크 값 4개 보정: 보조·3차 글자, 선택 면, 중립 점, 편집기 줄 번호).
-  - 새 토큰: 입력 면·선, 비활성 글자, 초점·링크, 막·그림자, 편집기, 간격 7·pill·2xl·굵기·높이.
-  - `:root[data-theme="light"]` 블록을 넣었다.
-  - 블록 밖 hex 228줄을 매핑기로 의미 토큰에 옮겼다(색 계열·속성 규칙 + 문맥 예외 27개, 결과 표는 PR 본문). `rgba()` 7개도 정리해, 블록 밖 hex·rgb는 **0**이다.
-  - 없던 토큰 `--m5-accent`·`--m5-surface-2`, PR #9의 `--text-sm`을 정의된 이름으로 바꿨다.
-- **화면 밝기**
-  - 설정 › 일반에 '화면 밝기'(시스템/라이트/다크)를 넣었다. `src/m5/theme.ts`가 `localStorage`·`prefers-color-scheme`로 `<html data-theme>`을 정한다.
-  - main은 IPC `m5:appearance:set`(현재 main frame, 세 값만)으로 `nativeTheme.themeSource`·창 배경색을 따르고 `appearance.json`에 기억한다(`electron/appearance.ts`).
-  - Monaco는 토큰에서 색을 읽어 선택이 바뀌면 다시 정의한다(`editor-surface.tsx`의 hex 8개 제거).
-- **U1 컴포넌트**
-  - 공용 컴포넌트 구역을 넣었다(버튼 위계·배지·배너·카드·설정 묶음·빈 상태·단계·복구 안내). 예전 클래스는 별칭이다.
-  - 비활성 주 행동은 회색 면(지금까지는 강조색 52% 투명).
-  - 토스트는 색 띠(`inset 3px`)와 물든 배경을 없애고 아이콘에만 상태 색을 쓴다.
-  - 배너는 테두리를 없앴다. 실행 상태 칩은 배지 모양이고, 구분 버튼은 들어간 트랙 + 올라온 선택이며, 확인 대화상자 안 위험 버튼은 채운 빨강이다.
-  - 버튼 문구 규칙: 설정 에이전트 구역의 로그인 버튼을 '로그인'으로 줄이고, 접근성 이름에는 'Codex 로그인'을 남겼다(`m5.login.startNamed`).
+- **U2**: 홈은 레일 없는 한 열(최근 프로젝트 카드 + '이어서 하기' 하나 + 나머지 카드, 경로는 글자로 안 보임). 처음 시작 3단계 체크리스트(`first-run.tsx`, 지금 단계 버튼만 강조, 에이전트 연결 상태를 1단계 안에). 전환 팝오버는 열린 때와 막힌 이유를 보이고 한 번에 전환. 삭제 확인은 지워지는 것/남는 것 두 목록 + 첫 초점 취소. 폴더 확인 3종은 main `showMessageBox` → 앱 안 확인 창(IPC `m5:folder-confirm:ask/answer`, 일회용 번호·main frame만·페이지는 경로를 못 보냄·새 확인/10분 무응답은 '아니오').
+- **U3**: 새 작업 창을 머리/본문/바닥으로 나눴다. 목표 → 시작 지점 → 팀 칩('바꾸기') → (첫 작업이면) 팀·권한 확인과 별도 확인 체크 → 바닥 비용 안내·취소·보내기. 1280×800(스모크 1280×768)에서 스크롤 없이 확인 체크와 보내기가 보인다.
+- **U4**: 설정 목록을 '앱 전체'/'이 프로젝트' 묶음으로. 하위 화면은 `settings-ui.tsx`(`SettingsGroup`·`Setting`·`ExpandableSetting`·`Switch`)만 쓴다. 일반(언어·밝기·업데이트), 알림(OS 알림·종류 3개·정리), 저장공간(폴더·버린 작업 정리·백업 사용량 막대), 프로젝트 설정(폴더 위치 접힘·작업 권한 스위치·팀·문제 해결 접힘·지우기). `role-settings.tsx` 내부는 그대로.
 - **시험·도구**
-  - `scripts/m5-contrast-check.mjs`(다크·라이트 각 95쌍)와 `tests/m5-style-tokens.test.mts`(대비, 블록 밖 색 0, 정의되지 않은 토큰 0, 화면 코드 색 리터럴 0, 테마 해석, Monaco 색)를 넣었다.
-  - 보안 시험에 테마 IPC(다른 프레임·잘못된 값·인자 수 거절, themeSource·배경색)를 넣었다.
-  - 렌더러 스모크 러너에 선택적 캡처(`M5_SMOKE_CAPTURE_DIR`, 22지점)와 테마(`M5_SMOKE_THEME`)를 넣었다. 메뉴 면 색 검사는 옛 hex 대신 "불투명·작업대와 다른 면"으로 바꿨다.
-  - 미리보기 UI 스모크는 `PREVIEW_UI_THEME`으로 `appearance.json`을 미리 쓴다.
+  - 새 `tests/m5-ade-screens-u2-u4.test.mts`(13): 알림 종류 끄기·설정 읽기 방어·해결 후 하루 정리, 최근 연 순서·몇 분 전·이름/글자 표시, 처음 시작 단계, 레일 없음·경로 비표시·한 번 전환, 폴더 확인이 앱 안(네이티브 상자 없음), Q9 별도 확인 유지, 설정이 묶음/줄로만, 버튼 문구 규칙, ko/en 키 일치.
+  - 보안 하네스: 폴더 확인 IPC(다른 프레임·틀린 번호·불리언 아님·폴더 인자·추가 인자 거절, 번호 1회용, 새 확인/시간 초과는 '아니오', main이 고른 폴더만 열기).
+  - 렌더러 스모크에 캡처·대비 지점 6곳 추가(22 폴더 확인, 23 처음 시작, 24 첫 작업 창, 25 전환, 26 알림 설정, 27 프로젝트 설정 → 27곳). 가짜 bridge에 `m5FolderConfirm`·`m5SmokeOpenCancel`·`m5SmokeNoChats`를 더했다. 처음 시작의 강조 버튼 1개, 첫 작업의 보내기 비활성·화면 안 위치, 전환 목록에 경로 없음, 설정 화면 구성도 검사한다.
+  - 낡은 `tests/m5-ui-capture.cjs`(첫 화면 기대값이 낡아 멈춤)를 지우고 `pnpm m5:capture`(`scripts/m5-ui-capture.mjs`, 렌더러 스모크를 다크·라이트로 돌려 캡처 + 렌더 대비)로 대신했다.
 - **검증**
-  - `npm test` 904/904, `pnpm build` 통과. 대비 검사 다크·라이트 각 95쌍 통과.
-  - 렌더러 스모크: `pnpm m5:test:editor` 68/68, 캡처 실행으로 다크·라이트 모두 통과(각 캡처 21장).
-  - 미리보기 UI 스모크(실제 앱): 다크 PASS, 라이트 PASS 2회. 라이트 첫 회는 I1(무응답 떼어 내기) 시간 검사 1개가 실패했고, 같은 코드로 두 번 다시 돌려 통과했다. 시간 흔들림으로 판단하지만 원인은 확인하지 않았다.
-  - 실제 개발 앱(임시 프로필, 포트 9397): 설정에서 라이트→다크→시스템→라이트가 즉시 바뀌었다. `prefers-color-scheme`이 main 선택을 따랐고 `appearance.json`이 기록됐다.
-  - 캡처: `~/Documents/elsecrew-ade-theme-tokens-2026-11-26/`(before-dark, after-dark, after-light, preview-ui-*, live).
-- **발견(재조사 방지)**
-  - 첫 실행에 렌더러가 기본값 '시스템'을 main에 보내면, main이 기억한 '라이트'를 덮어 미리보기 스모크가 다크로 떴다. 렌더러에 저장된 선택이 있을 때만 알린다.
-  - `tests/m5-ui-capture.cjs`는 첫 화면 기대값(`.m5-provider-selection`)이 낡아 시작부터 멈춘다. 전후 비교에는 렌더러 스모크 캡처를 썼다.
-  - 시험 몇 개는 소스를 vm에서 돌리며 import 이름을 직접 넣는다. 새 import를 쓰면 `m5-bootstrap-lifecycle`(`startTheme`), `m5-monaco-options`(`defineElsecrewTheme`)처럼 그 시험의 context에 넣어야 한다.
-- **PR**: https://github.com/wonseok-han/elsecrew/pull/10 (`--base feature/ade`). CI(236e43f3~6de534d4) macOS·Windows·website·GitGuardian 모두 통과. 본문 전후 캡처는 f8f7f180에 올렸다가 6de534d4에서 지웠다(공개 저장소의 커밋 고정 주소).
-- **다음**: Codex 검토(조정자), U2(홈·첫 실행·프로젝트 전환)~U4. 설계 6장 열린 질문 Q1·Q4~Q9.
+  - `npm test` 933/933, `pnpm build` 통과. `pnpm m5:test:editor` 69/69(마운트 스모크 다크·라이트).
+  - 렌더 대비: 다크·라이트 각 27화면 1105개 검사, 실패 0.
+  - 미리보기 UI 스모크(실제 앱, 새 `.vite/build`): 다크 2회·라이트 2회 연속 PASS.
+  - 실제 개발 앱(임시 프로필 profile3, 포트 9398): 처음 시작 → 프로젝트 두 개 → 홈 → 전환(my-bakery-site → family-budget 한 동작) → 새 작업 첫 창 → 설정 각 화면을 다크로 확인. 앱 안 폴더 확인은 개발용 폴더 지정이 자동 승인이라 실제 앱에서는 띄우지 못했고, 보안 하네스·스모크로 확인했다.
+  - 캡처: `~/Documents/elsecrew-ade-screens-u2-u4-2026-11-26/`(actual/{dark,light} 27장씩, compare/ 시안 대 실제 9화면×2테마).
+  - PR #12(https://github.com/wonseok-han/elsecrew/pull/12, base feature/ade): ee802788 CI macOS·Windows·website·GitGuardian 모두 통과.
+- **기존 시험 고침**: 파일 끝 빈 줄(`m5-pr5-review`), 정의 안 된 `--leading-body`(`m5-style-tokens`). 렌더러 스모크의 옛 선택자(레일, `li span` 경로, 설정 목록 순서, 저장공간 버튼 위치)를 새 구조에 맞췄다.
+- **주의**: 미리보기 스모크 전에 개발 앱을 닫으면서 `pkill -f "electron-forge start"`를 썼다. 같은 컴퓨터의 다른 워커가 그 순간 `electron-forge start`를 돌리고 있었다면 함께 닫혔을 수 있다(확인 불가). 다음부터는 자기 프로필 경로로만 종료한다.
+- **다음 할 일(U5~U8 전)**: 홈 카드의 상태 배지·작업 요약(시안의 '확인 필요 1' 등)은 Q1에 따라 넣지 않았다. 필요하면 엔진에 프로젝트별 요약 조회를 새로 만들어야 한다. 홈 검색칸·전환 팝오버의 '이 프로젝트 설정' 줄도 아직 없다. 알림 정리는 앱 시작 때만 돈다.
 
 ## 프로젝트 요약 (고정)
 터미널을 한 번도 안 열어본 비개발자를 **코딩 에이전트(Claude Code·Codex)가 굴러가는 상태까지** 데려다주는 데스크톱 GUI 앱. 현재 배포 경로는 Tauri 2 + React 19이고, M5는 Electron + React/TypeScript + Monaco와 Rust sidecar의 별도 작업대 골격으로 전환 중이다.
@@ -125,6 +66,13 @@
   - 화면 밝기 기록의 기준은 main의 `userData/appearance.json`이다(PR #10 검토 I1로 바꿈). 렌더러 `localStorage`(`elsecrew.theme.v1`)는 첫 페인트용 사본이다. 렌더러는 시작 때 `m5Appearance.get()`으로 기록을 받아 따르고, main에 읽을 수 있는 기록이 없을 때만 올바른 사본으로 복구한다(손상 사본은 보내지 않음). 기록은 `.tmp` + rename으로 바꾸며 실패는 `saved: false`로 화면에 알린다. 시스템 밝기 변경은 `nativeTheme.updated`가 창 배경을, `prefers-color-scheme`이 CSS·Monaco를 바꾼다.
   - 대비는 토큰 쌍만으로 부족하다(검토 I4): 컴포넌트 조합(`scripts/m5-contrast-check.mjs` 조합 표)과 렌더된 DOM(`tests/m5-rendered-contrast-probe.cjs`, 렌더러 스모크 다크·라이트)을 함께 본다. 새 화면·컴포넌트를 넣으면 렌더러 스모크 캡처 지점에서 자동으로 측정되므로, 그 화면이 스모크 경로에 없으면 캡처 지점을 추가한다. `color-mix`·필터로 만든 면은 조합 표에 넣는다(필터 대신 토큰 권장).
   - 앱 문구 규칙(주인님, 2026-11-26): 버튼은 동작만 말한다. 행·카드·제목이 보여 주는 대상을 반복하지 않고('Codex 연결하기' → '연결하기'), 대상은 접근성 이름에 남긴다. 설계 `docs/proposals/m5-ade-screens-plan.md` 2.1의 10번.
+- **홈·처음 시작·설정의 규칙(2026-11-26, 화면 통일 U2~U4)**: 현행 설명은 architecture "홈·처음 시작·설정(U2~U4)".
+  - **폴더 확인(빈 폴더·일반 폴더·기록 없음)은 main의 네이티브 대화상자로 남긴다**(PR #12 검토 B1). 앱 화면 안으로 옮기면 메인 렌더러의 응답이 곧 되돌릴 수 없는 쓰기(`.git` 초기화·앱 내 기록)의 허가가 되어, 실제 사용자 확인의 근거가 없다. 디자인 일관성보다 이 경계가 우선이다. 앱 안 모양으로 바꾸려면 렌더러가 결과를 위조할 수 없는 main 소유 경로와 그 증명 시험이 먼저 필요하다.
+  - 첫 작업의 권한은 확인 체크 후 보낼 때만 저장한다. 첫 작업 창에 별도 저장 버튼을 두지 않는다(PR #12 검토 I1).
+  - `scripts/m5-project-ui-smoke.cjs`의 기본 흐름은 첫 작업 뒤 단계(옛 diff·반영 버튼)가 L1 레이아웃 이전 화면 기준이라 멈춘다(이 PR 이전부터). 프로젝트·첫 작업 회귀는 `ELSECREW_SMOKE_PROJECTS=1` 시나리오로 본다.
+  - 프로젝트를 연 시각은 `localStorage` `elsecrew.m5.projectOpenedAt.v1`(편의 기록), 알림 설정은 `elsecrew.m5.notifications.prefs.v1`이다. 꺼진 알림 종류는 저장도 배너도 안 한다. 해결된 알림은 해결 후 하루 지난 것을 앱 시작 때·한 시간마다·설정을 바꿀 때 지운다.
+  - 첫 작업의 별도 확인 체크(Q9)는 유지한다. 보내기 버튼이 동의를 대신하게 바꾸지 않는다(`tests/m5-ade-screens-u2-u4.test.mts`가 막음).
+  - 화면 캡처는 `pnpm m5:capture`(렌더러 스모크 캡처 지점 = 렌더 대비 측정 지점). 새 화면을 만들면 스모크에 캡처 지점을 더한다.
 - **팀 역할 편집의 규칙(2026-11-26, custom roles R0·R1·R2·R4)**: 화면 `role-settings.tsx`, 순수 함수 `team-draft.ts`(insert/move/duplicate/restore/teamChanges/uniqueRoleName/newMemberId), 템플릿 `role-templates.ts`(TS에만). 현행 설명은 architecture "팀 역할 편집".
   - 목록 순서는 보기 순서다. 실행 순서는 총괄이 정한다(Q1). 새 팀원 ID는 무작위 `member-xxxxxx`이고 지운 기본 역할은 원래 ID로 되살린다.
   - 이름 규칙(서식 문자 Cf·총괄 이름·중복)은 **저장 요청에만** 적용하고 저장된 기록 읽기에는 적용하지 않는다. 이름은 화면에 보이는 대로 비교한다(NFC, 시드 이름 그대로인 기본 역할의 번역 이름 포함). 번역 이름을 바꾸면 `G5_LEGACY_ROLE_LABELS_V3`(Rust·TS)와 공용 표도 바꾼다. Rust·TS가 `tests/fixtures/m5/role-names-v3.json` 한 표를 함께 읽는다. 새 규칙을 더할 때 이 표에 줄을 넣는다.
@@ -485,3 +433,5 @@
 2026-11-26 워크로그 중 `feature/ade`에 머지된 PR #5(레이아웃)·#6(미리보기 백엔드)·#7(스모크 복구)·#8(팀 역할) 엔트리는 같은 날 두 번째 롤오버로 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(머지된 PR 단위).
 
 2026-11-26 워크로그 중 `feature/ade`에 머지된 PR #9(미리보기 화면·검토 반영 두 라운드) 엔트리는 같은 날 세 번째 롤오버로 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(머지된 PR 단위).
+
+2026-11-26 워크로그 중 `feature/ade`에 머지된 PR #10(토큰·화면 밝기, 검토 반영 포함)·#13(ADE 1차 통합 검증 V, 검토 반영 포함) 엔트리는 같은 날 네 번째 롤오버로 `docs/archive/history-2026-11.md` 맨 위로 옮겼다(머지된 PR 단위).

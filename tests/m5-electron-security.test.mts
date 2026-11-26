@@ -234,7 +234,8 @@ class FakeWindow {
     listeners: new Map<string, (...args: unknown[]) => void>(),
     mainFrame: { url: "" },
     on: (event: string, listener: (...args: unknown[]) => void) => this.webContents.listeners.set(event, listener),
-    send: () => undefined,
+    sent: [] as [string, unknown][],
+    send: (channel: string, payload: unknown) => { this.webContents.sent.push([channel, payload]); },
     setWindowOpenHandler: (handler: () => { action: string }) => { this.openHandler = handler; },
     getZoomFactor: () => 1,
     zoomLevel: 0,
@@ -313,7 +314,7 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
     },
     BrowserWindow: Object.assign(FakeWindow, { getAllWindows: () => FakeWindow.windows }),
     screen: { getDisplayMatching: () => ({ scaleFactor: 1 }) },
-    dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }), showMessageBox: async (_window: unknown, options: { detail?: string }) => { sidecarCalls.push(`confirm:${options.detail ?? ""}`); return { response: externalLinkAnswer.value }; } },
+    dialog: { showOpenDialog: async () => folderPick.path ? { canceled: false, filePaths: [folderPick.path] } : { canceled: true, filePaths: [] }, showMessageBox: async (_window: unknown, options: { detail?: string }) => { sidecarCalls.push(`confirm:${options.detail ?? ""}`); return { response: externalLinkAnswer.value }; } },
     shell: { openExternal: async () => { sidecarCalls.push("openExternal"); } },
     safeStorage: { isEncryptionAvailable: () => false, encryptString: () => { throw new Error("unexpected encryption"); }, decryptString: () => { throw new Error("unexpected decryption"); } },
     ipcMain: {
@@ -382,6 +383,7 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
       return { tree: true };
     }
     failRendererDisconnected() {}
+    async openProject(path: string) { sidecarCalls.push(`openProject:${path}`); return { outcome: "opened" }; }
   }
   class FakeEventCredit {
     outstanding = 0;
@@ -407,6 +409,9 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
     module,
     exports: module.exports,
     process: { platform: "darwin", resourcesPath: "/resources", execPath: "node" },
+    // Timers are held, not run: a test fires them (the folder confirmation's time limit).
+    setTimeout: (callback: () => void) => { heldTimers.push(callback); return heldTimers.length; },
+    clearTimeout: () => undefined,
     require: (specifier: string) => moduleFor(specifier, { electron, files, FakeSidecar, FakeEventCredit, FakeQuitCoordinator, env }),
   });
   const source = readFileSync(resolve(root, "electron/main.ts"), "utf8");
@@ -505,8 +510,9 @@ function moduleFor(
     return {
       mkdirSync: () => undefined,
       realpathSync: Object.assign((path: string) => path, { native: (path: string) => path }),
-      readdirSync: () => { throw new Error("unexpected directory listing in main security harness"); },
+      readdirSync: (path: string) => { if (path === folderPick.path) return []; throw new Error("unexpected directory listing in main security harness"); },
       statSync: (path: string) => {
+        if (path === folderPick.path) return { dev: 1n, ino: 2n };
         if (!fakes.files.has(path)) throw new Error("missing test asset");
         return { isFile: () => true };
       },
@@ -529,6 +535,10 @@ import * as approvalContract from "../src/m5/contracts/approval-v1.ts";
 import * as externalLinkContract from "../src/m5/contracts/external-link-v1.ts";
 /** What the fake quit coordinator answers to a quit preparation. */
 const quitAnswer = { value: { blockers: [] as string[], safeToQuit: true } };
+/** The folder the fake open dialog picks (an empty one, on macOS), or none. */
+const folderPick: { path: string | null } = { path: null };
+/** Timers main.ts set, held so a test can run them. */
+const heldTimers: (() => void)[] = [];
 /** What the native "open this address?" confirmation answers (0 = open). */
 const externalLinkAnswer = { value: 1 };
 import * as catalogContract from "../src/m5/contracts/project-catalog-v1.ts";
@@ -783,4 +793,28 @@ test("the View menu's zoom and a window resize hide the preview before anything 
   assert.equal(zoomMenuModel.zoomLevelAfter(9, 1), 9);
   assert.equal(zoomMenuModel.zoomLevelAfter(-8, -1), -8);
   assert.equal(zoomMenuModel.zoomLevelAfter(2.5, 0), 0);
+});
+
+test("a folder that becomes a project is confirmed in main's own box; the page has no way to answer it (PR #12 review B1)", async () => {
+  const harness = await loadMain();
+  folderPick.path = "/Users/me/new-shop";
+  const answer = externalLinkAnswer.value;
+  try {
+    const open = harness.handlers.get(M5_BRIDGE_V2_CHANNELS.projectOpen)!;
+    // No channel lets the renderer say yes for main.
+    assert.equal([...harness.handlers.keys()].some(channel => /folder-confirm/.test(channel)), false);
+    // "Cancel" in main's box: nothing opens and nothing is sent to the page.
+    externalLinkAnswer.value = 1;
+    assert.equal((await open(harness.currentEvent()) as { outcome: string }).outcome, "cancelled");
+    assert.ok(harness.sidecarCalls.some(call => call.startsWith("confirm:/Users/me/new-shop")), "the box names the folder");
+    assert.ok(!harness.sidecarCalls.some(call => call.startsWith("openProject")));
+    assert.deepEqual((harness.window.webContents as unknown as { sent: unknown[] }).sent, []);
+    // "Start" in main's box: the folder main picked opens.
+    externalLinkAnswer.value = 0;
+    assert.equal((await open(harness.currentEvent()) as { outcome: string }).outcome, "opened");
+    assert.ok(harness.sidecarCalls.includes("openProject:/Users/me/new-shop"));
+  } finally {
+    folderPick.path = null;
+    externalLinkAnswer.value = answer;
+  }
 });

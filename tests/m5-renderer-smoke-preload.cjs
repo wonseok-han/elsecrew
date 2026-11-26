@@ -75,11 +75,13 @@ window.m5Projects = { request: async (input) => {
   }
   if (input.action === "finishDeletions") return {schemaVersion: 1, action: input.action, pending: 0};
   if (input.action === "releaseView" && input.projectId === "smoke_project") return {schemaVersion: 1, action: "releaseView", projectId: input.projectId};
+  // ADE U2 smoke (PR #12 review I3): the list cannot be read.
+  if (input.action === "list" && window.m5SmokeCatalogFail) throw new Error("smoke: catalog unavailable");
   if (input.action === "list" && window.m5SmokeCatalogEmpty) return {schemaVersion:1, action:"list", projects:[], nextCursor:null};
   if (input.action === "list") return input.cursor === null
     // After pagination is checked, the first page also lists the open project so
     // its rail ⋯ menu (where closing lives) is reachable while the rail is locked.
-    ? {schemaVersion: 1, action: "list", projects: [{projectId: "earlier_project", canonicalPath: "/work/earlier"}, ...(window.m5SmokeCatalogListsCurrent ? [{projectId: "smoke_project", canonicalPath: "/work/smoke"}] : [])], nextCursor: window.m5SmokeCatalogListsCurrent ? "smoke_project" : "earlier_project"}
+    ? {schemaVersion: 1, action: "list", projects: [{projectId: "earlier_project", canonicalPath: "/work/earlier"}, ...(window.m5SmokeCatalogListsCurrent ? [{projectId: "smoke_project", canonicalPath: "/work/smoke"}] : [])], nextCursor: window.m5SmokeCatalogListsCurrent ? null : "earlier_project"}
     : {schemaVersion: 1, action: "list", projects: [{projectId: "smoke_project", canonicalPath: "/work/smoke"}], nextCursor: null};
   if (input.action !== "reopen" || input.projectId !== "smoke_project") throw new Error("unexpected catalog selection");
   return {schemaVersion: 1, action: "reopen", project: {schemaVersion: 1, projectId: "smoke_project", selectedPath: "/work/smoke", canonicalGitRoot: "/work/smoke"}};
@@ -306,7 +308,8 @@ window.m5 = {
   getStorageStatus: unexpected("getStorageStatus"),
   prepareQuit: async () => ({ safeToQuit: true, blockers: [] }),
   onSidecarEvent: (listener) => unsubscribe(listeners, listener),
-  openProject: async () => ({
+  // ADE U2·U3 smoke: a cancelled folder pick, and a project with no task yet (first-task window).
+  openProject: async () => window.m5SmokeOpenCancel ? null : ({
     schemaVersion: 1,
     projectId: "smoke_project",
     selectedPath: "/work/smoke",
@@ -420,7 +423,7 @@ window.m5 = {
   }),
   updateProjectRoleSettings: unexpected("updateProjectRoleSettings"),
   createChat: unexpected("createChat"),
-  listChats: async ({ projectId }) => ({ projectId, items: parallelPaint ? parallelPaint.chats : [smokeChat], nextCursor: null }),
+  listChats: async ({ projectId }) => ({ projectId, items: window.m5SmokeNoChats ? [] : parallelPaint ? parallelPaint.chats : [smokeChat], nextCursor: null }),
   getChat: async (request) => {
     if (historyReadFailures > 0) { historyReadFailures--; throw new Error("synthetic history read failure"); }
     return parallelPaint ? parallelPaint.detail(request) : ({ chat: smokeChat, afterEventSequence: request.afterEventSequence, messages: smokeMessages.filter(message => message.eventSequence > request.afterEventSequence), runs: [], agentRuns:diagnosticRun ? [diagnosticRun] : [], agentRecovery:null, nextEventSequence: null });
