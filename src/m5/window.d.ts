@@ -1,5 +1,6 @@
 import type { M5BridgeV8 } from "./contracts/bridge-v8.ts";
 
+type AppUpdateState = "unavailable" | "idle" | "current" | "checking" | "downloading" | "ready" | "restarting" | "error";
 declare global {
   /** Injected by the renderer Vite config; absent in unit tests. */
   const __ELSECREW_VERSION__: string;
@@ -11,7 +12,16 @@ declare global {
       /** `saved` is false when main could not remember the choice for the next launch. */
       set(theme: import("./theme.ts").ThemePreference): Promise<{ dark: boolean; saved: boolean }>;
     };
-    readonly m5AppUpdate?: { open(): Promise<void>; onRestartCheck(check: () => boolean, resume: () => void): () => void };
+    readonly m5AppUpdate?: {
+      open(): Promise<void>; onRestartCheck(check: () => boolean, resume: () => void): () => void;
+      /** main's update state (ADE U8); the banner follows it. */
+      state?(): Promise<AppUpdateState>;
+      onState?(listener: (state: AppUpdateState) => void): () => void;
+      /** The app menu asked to show the update in the app. */
+      onReveal?(listener: () => void): () => void;
+      /** Ask main to check, or to restart into a downloaded update (main confirms in its own box). */
+      request?(action: "check" | "restart"): Promise<AppUpdateState>;
+    };
     readonly m5GitSelection?: { request(action: import("./contracts/git-selection-v1.ts").GitSelectionAction): Promise<import("./contracts/git-selection-v1.ts").GitSelection> };
     readonly m5SaveRecovery?: { resolve(input: import("./contracts/save-recovery-v1.ts").SaveRecoveryResolveRequest): Promise<import("./contracts/save-recovery-v1.ts").SaveRecoveryResolveResult>; inspect(input: import("./contracts/workspace-addressing-v1.ts").ChatWorkspaceRefV1): Promise<import("./contracts/save-recovery-v1.ts").SaveRecoveryResult> };
     readonly m5Diagnostics?: { inspect(): Promise<import("./contracts/session-diagnostics-v1.ts").SessionDiagnostics> };

@@ -19,25 +19,34 @@ export function ChatWorkspaceDiscard({ chat, disabled, onCompleted, compact = fa
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState(false);
   useEffect(() => () => { generation.current++; }, []);
+  // Cancel works while the read-only inspection runs (PR #16 review M1); only the discard itself cannot be left midway.
+  const inspecting = useRef(false);
   function close() {
-    if (pending.current) return;
+    if (pending.current && !inspecting.current) return;
+    if (inspecting.current) { inspecting.current = false; pending.current = false; setBusy(false); }
     generation.current++;
     dialog.current?.close();
     setInspection(null); setConfirmed(false); setError(false);
   }
   async function inspect() {
     if (disabled || pending.current || chat.state !== "reviewReady" || !window.m5Projects) return;
-    if (!dialog.current?.open) dialog.current?.showModal();
+    if (!dialog.current?.open) dialog.current?.showModal(); dialog.current?.querySelector<HTMLButtonElement>("[data-first-focus]")?.focus();
     const epoch = ++generation.current;
-    pending.current = true; setBusy(true); setError(false); setConfirmed(false); setInspection(null);
+    pending.current = true; inspecting.current = true; setBusy(true); setError(false); setConfirmed(false); setInspection(null);
     const request = { action: "inspectChatDiscard" as const, chatId: chat.chatId, taskId: chat.taskId,
       projectId: chat.projectId, worktreeId: chat.worktreeId, workspaceIdentity: chat.workspaceIdentity };
     try {
       const result = validateProjectCatalogResult(await window.m5Projects.request(request), request);
       if (epoch === generation.current && result.action === "inspectChatDiscard") setInspection(result.inspection);
     } catch { if (epoch === generation.current) setError(true); }
-    finally { if (epoch === generation.current) { pending.current = false; setBusy(false); } }
+    finally { if (epoch === generation.current) { pending.current = false; inspecting.current = false; setBusy(false); } }
   }
+  // Once the inspection ends, focus is back on Cancel if it left the dialog.
+  useEffect(() => {
+    const element = dialog.current;
+    if (busy || !element?.open) return;
+    if (!element.contains(document.activeElement) || document.activeElement === document.body) element.querySelector<HTMLButtonElement>("[data-first-focus]")?.focus();
+  }, [busy]);
   async function discard() {
     if (disabled || pending.current || !confirmed || !inspection || !window.m5Projects) return;
     const epoch = generation.current;
@@ -56,15 +65,15 @@ export function ChatWorkspaceDiscard({ chat, disabled, onCompleted, compact = fa
   }
   return <section className={`m5-chat-discard${compact ? " m5-chat-discard-compact" : ""}`}>
     <button type="button" className={compact ? "m5-link-button" : undefined} disabled={disabled || busy || chat.state !== "reviewReady"} onClick={() => void inspect()}>{t(compact ? "m5.discard.short" : "m5.discard.open")}</button>
-    <dialog ref={dialog} className="m5-discard-dialog" aria-label={t("m5.discard.title")} onCancel={event => { event.preventDefault(); close(); }}>
+    <dialog ref={dialog} className="m5-discard-dialog m5-confirm-dialog" aria-label={t("m5.discard.title")} onCancel={event => { event.preventDefault(); close(); }}>
       <h2>{t("m5.discard.title")}</h2>
       <p><strong>{chat.goal}</strong></p>
       <p>{t("m5.discard.explanation")}</p>
       {busy && <p role="status">{t("m5.discard.busy")}</p>}
       {error && <p role="alert">{t("m5.discard.error")}</p>}
       {inspection && <label><input type="checkbox" checked={confirmed} disabled={busy || disabled} onChange={event => setConfirmed(event.target.checked)} />{t("m5.discard.consent")}</label>}
-      <div className="m5-discard-actions">
-        <button type="button" disabled={busy} onClick={close}>{t("m5.discard.cancel")}</button>
+      <div className="m5-discard-actions m5-dialog-actions">
+        <button type="button" data-first-focus disabled={busy && inspection !== null} onClick={close}>{t("m5.discard.cancel")}</button>
         {!inspection && error && <button type="button" disabled={busy || disabled} onClick={() => void inspect()}>{t("m5.discard.retry")}</button>}
         {inspection && <button type="button" className="m5-btn-danger-solid" disabled={busy || disabled || !confirmed} onClick={() => void discard()}>{t(error ? "m5.discard.retry" : "m5.discard.open")}</button>}
       </div>

@@ -2,6 +2,57 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #16 독립 검토(병합 차단 1·중요 4·경미 3) 반영과 새 #14 위로 맞춤 (`orca/ade-screens-u7-u8`)
+검토 `~/Documents/elsecrew-ade-screens-u5-u8-2026-11-26/REVIEW-pr16.md`(대상 f06a9e8b). PR #14(검토 반영본, 42e59ad7)를 이 브랜치에 병합했다.
+- U5·U6 엔트리는 #14의 원문 그대로 남겼다. 앞서 이 브랜치에서 그 엔트리에 덧붙였던 PR 링크는 #14 쪽 엔트리로 옮겨졌다.
+- 작업 화면의 `story` 줄은 PR #11의 새 속성과 U7 빈 상태를 합쳤다.
+
+- **B1 병합 충돌**: #14가 feature/ade(PR #11·#13)를 병합해 충돌을 풀었고, 이 브랜치는 그 #14를 병합했다.
+- **I1 하네스**: 업데이트 시험이 main의 실제 다시 시작 콜백을 쓴다. 가짜 종료 조정자는 실제처럼 안전 결과에서 깨끗한 종료를 허락한다.
+  - 시험: 보안 하네스 "update restart: main's yes, then the screen's readiness and the quit preparation decide; only a clean result installs"
+    - 기본 대화상자에서 '다시 시작' 뒤에 화면 준비 거절·무응답(시간 초과)·안전 종료 불가이면 설치하지 않는다.
+    - 준비됨 + 안전이면 설치한다.
+    - 요청하지 않은 준비 답은 거절한다.
+  - 신뢰 경계는 architecture에 따로 적었다. 기본 동의는 위조할 수 없고, 화면 준비의 참·거짓은 화면 콜백이 준다.
+- **I2 반복 실패**: main이 알리는 모든 상태에서 닫힘을 푼다. 확인을 요청할 때도 푼다.
+  - 시험: 단위 "PR #16 I2", 렌더러 스모크(실패 → 닫기 → 확인 중 → 실패 → '다시 확인' 다시 보임).
+- **I3 문구 검사 범위**: en 사전, `src`·`electron` 모든 TS/TSX 코드 글자, 하위 폴더, 따옴표 종류를 넓혔다. 기록 탭 원문 실패 코드를 '자세히'로 옮겼고, 팀에게 보내는 메시지와 en의 recovery point·snapshot 문구를 바꿨다.
+  - 시험: 단위 "U7: no on-screen string uses developer words…", "details-only strings … (any quote, any folder)".
+- **I4 Q7 진입점**: 메뉴의 확인·받기는 앱 안 배너로, 쓸 수 없는 실행은 설정 › 일반으로 보낸다. 설정의 확인은 `request("check")`다. 배너에 확인 중·최신 버전을 더했다. 기본 대화상자는 다시 시작 확인만 남았다.
+  - 시험: 단위 "PR #16 I4".
+- **경미**
+  - M1: 작업 버리기 검사 중에도 취소·Esc로 나갈 수 있고, 검사가 끝나면 취소에 초점을 되돌린다. 시험 "PR #16 M1".
+  - M2: CSS 검사가 '클래스가 코드에 있는지'만 본다는 한계를 시험 주석에 적었다. 렌더러 스모크에 빈 프로젝트 틀·주 행동·예시 줄·작업 목록 안내의 computed style 비교를 더했다.
+  - M3: hex 검사를 `src`·`electron` 모든 TS/TSX의 문자열 안 어디든, 그리고 JSX 글자의 6·8자리 hex까지 넓혔다. 예외 셋은 그대로다.
+  - PR #11이 남긴 `m5-activity-original`·`m5-activity-code`는 쓰이지 않는다. 실행 출력 작업자 영역이라 지우지 않고, 시험 예외에 이유와 함께 적었다.
+- **검증**: `npm test` 982/982, build, 렌더러 스모크 다크·라이트(32화면 1265개 실패 0).
+- **병합·CI**: feature/ade에 PR #15가 들어와 #14(71369834)와 #16 모두 다시 병합했다(누락 0). 병합 뒤 `npm test`는 #14 975, #16 988 모두 통과했다. 렌더러 스모크 두 테마, 미리보기 스모크 각 2회도 PASS다. #14 CI는 macOS·Windows·website·GitGuardian 모두 통과했다. #16 Windows CI에서 새 hex 시험이 경로 구분자(`electron\\appearance.ts`) 때문에 실패해, 경로를 `/`로 맞췄다.
+
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 화면 통일 U7(문구·F11·빈 상태·확인)·U8(죽은 CSS·색·업데이트 배너) (`orca/ade-screens-u7-u8`, PR #14 위)
+설계 DESIGN 4.1 U7·U8, 목업 13·15·16. PR #14(U5·U6) 위에 쌓았다. 현행 설명은 architecture "오류·빈 상태·업데이트 배너와 정리".
+
+- **U7**
+  - 금지어 시험(`tests/m5-ade-screens-u7-u8.test.mts`): ko 문자열과 main 기본 대화상자에 커밋·브랜치·복구점·식별자·준비 기록·worktree·스냅샷이 0건이다. '자세히' 전용 키 3개는 `<details>` 안에서만 쓰이는지 확인한다.
+  - 1차 통합 검증 기준 6에 남아 있던 합치기 차단·충돌·다른 상태 안내와 작업 폴더 도움말의 '브랜치'·'(커밋)'을 없앴다. 준비 기록·복구점·저장 식별자 문구도 바꿨다(스모크·정리 프로브 문구 함께 갱신).
+  - F3(종 안 작업 상태)를 `RecoveryGuide`로 바꿨다. 빈 상태 공용 틀 `EmptyState`를 만들어 빈 프로젝트 가운데·변경 없음·검색 결과 없음·기록·작업 목록에 썼다. 작업 버리기를 공용 확인 대화상자로 맞췄다(첫 초점 취소).
+- **U8**
+  - 죽은 CSS 규칙 약 270개를 지웠다(약 30KB). 지운 뒤 다크·라이트 렌더러 스모크 캡처를 지우기 전과 픽셀 비교했고, 의도한 문구·빈 상태·F3 변화 말고 차이는 없었다.
+  - electron 색 hex는 창 배경 둘(토큰 값과 같은지 시험)과 미리보기 흰색만 남았다.
+  - 업데이트 배너
+    - main이 상태를 갖고 IPC `m5:app-update:state/changed/request`로 알린다.
+    - 화면은 check·restart 요청만 보낸다. restart는 main의 기본 대화상자 확인과 기존 안전 종료 확인을 거친다.
+    - 보안 하네스가 지키는 것: 다른 프레임·잘못된 요청은 거절, 확인에서 취소하면 다시 시작 없음, 받은 업데이트가 없으면 대화상자도 없음, 상태 변화가 화면에 전달됨.
+  - 메뉴의 '저장했어요 — 재시작' 문구를 '다시 시작'으로 바꿨다.
+- **시험·검증**
+  - 새 `tests/m5-ade-screens-u7-u8.test.mts`(8)과 보안 하네스 1개를 더했다.
+  - 렌더러 스모크 지점 31 빈 프로젝트, 32 업데이트 배너를 더해 32곳이다.
+  - `npm test` 966/966, build 통과. 렌더 대비 다크·라이트 각 32화면 실패 0.
+  - 미리보기 UI 스모크 다크·라이트 각 2회.
+- **남은 것**
+  - B5·F5·F6 배너는 이미 상태 토큰 면이라 구조는 그대로 두었다.
+  - G7(원본 반영 미리보기)은 사본 방식 작업에만 남은 화면이라 문구만 검사 대상이다.
+- **PR**: #16(https://github.com/wonseok-han/elsecrew/pull/16, base feature/ade, #14 위). 0e3b8af9 CI macOS·Windows·website·GitGuardian 통과. #14를 먼저 머지해야 diff가 U7·U8만 남는다.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #14 독립 검토(차단 1·중요 4·경미 3) 반영과 feature/ade 병합 (`orca/ade-screens-u5-u8`)
 검토 `~/Documents/elsecrew-ade-screens-u5-u8-2026-11-26/REVIEW-pr14.md`(대상 dfad3793). 먼저 `origin/feature/ade`(PR #11·#13 포함)를 병합했다. history.md·styles.css 끝에 덧붙인 충돌이라 양쪽을 모두 남겼고, `m5:check:history`에서 누락 0이다.
 

@@ -314,7 +314,7 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
     },
     BrowserWindow: Object.assign(FakeWindow, { getAllWindows: () => FakeWindow.windows }),
     screen: { getDisplayMatching: () => ({ scaleFactor: 1 }) },
-    dialog: { showOpenDialog: async () => folderPick.path ? { canceled: false, filePaths: [folderPick.path] } : { canceled: true, filePaths: [] }, showMessageBox: async (_window: unknown, options: { detail?: string }) => { sidecarCalls.push(`confirm:${options.detail ?? ""}`); return { response: externalLinkAnswer.value }; } },
+    dialog: { showOpenDialog: async () => folderPick.path ? { canceled: false, filePaths: [folderPick.path] } : { canceled: true, filePaths: [] }, showMessageBox: async (first: unknown, second?: { detail?: string }) => { const options = (second ?? first) as { detail?: string }; sidecarCalls.push(`confirm:${options.detail ?? ""}`); return { response: externalLinkAnswer.value }; } },
     shell: { openExternal: async () => { sidecarCalls.push("openExternal"); } },
     safeStorage: { isEncryptionAvailable: () => false, encryptString: () => { throw new Error("unexpected encryption"); }, decryptString: () => { throw new Error("unexpected decryption"); } },
     ipcMain: {
@@ -399,8 +399,12 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
   }
   class FakeQuitCoordinator {
     exitAllowed = false;
-    constructor(_options: unknown) {}
-    prepareQuit() { return Promise.resolve(quitAnswer.value); }
+    readonly #options: { allowProcessExit?: (kind: string) => void };
+    constructor(options: unknown) { this.#options = options as { allowProcessExit?: (kind: string) => void }; }
+    prepareQuit() {
+      if (quitExit.simulate && quitAnswer.value.safeToQuit) this.#options.allowProcessExit?.("clean");
+      return Promise.resolve(quitAnswer.value);
+    }
     handleBeforeQuit() {}
   }
   const module = { exports: {} };
@@ -456,7 +460,7 @@ function moduleFor(
   },
 ) {
   if (specifier === "electron") return fakes.electron;
-  if (specifier === "./app-update-menu.ts") return { installAppUpdateMenu() {} };
+  if (specifier === "./app-update-menu.ts") return { installAppUpdateMenu: (restart: (install: () => void) => Promise<boolean>, changed: (state: string) => void, reveal?: () => void) => { fakeUpdate.restartCallback = restart; fakeUpdate.changed = changed; fakeUpdate.reveal = reveal ?? null; return fakeUpdate.handle; } };
   if (specifier === "./zoom-menu.ts") return { installZoomGuardedMenu: (zoom: (step: -1 | 0 | 1) => void) => { installedZoom.current = zoom; }, zoomLevelAfter: zoomMenuModel.zoomLevelAfter };
   // Usage reads touch the app keychain and network; the security harness only
   // needs the reader to exist and must fail loudly if a handler reaches it.
@@ -544,6 +548,20 @@ const quitAnswer = { value: { blockers: [] as string[], safeToQuit: true } };
 const folderPick: { path: string | null } = { path: null };
 /** Timers main.ts set, held so a test can run them. */
 const heldTimers: (() => void)[] = [];
+/** main's app update handle, played by the harness (ADE U8): its state and what main asked of it. */
+const fakeUpdate = {
+  state: "unavailable", calls: [] as string[], changed: null as ((state: string) => void) | null, reveal: null as (() => void) | null,
+  /** main's real restart callback (screen readiness, then the quit preparation); the harness's controller calls it like the real one. */
+  restartCallback: null as ((install: () => void) => Promise<boolean>) | null,
+  handle: { state: () => fakeUpdate.state, check: () => { fakeUpdate.calls.push("check"); },
+    restart: async () => {
+      fakeUpdate.calls.push("restart");
+      const safe = await fakeUpdate.restartCallback?.(() => { fakeUpdate.calls.push("install"); });
+      fakeUpdate.calls.push(safe ? "safe" : "blocked");
+    } },
+};
+/** The fake quit coordinator allows a clean exit on a safe result, as the real one does (only for the update test). */
+const quitExit = { simulate: false };
 /** The installation that awaits consent, as the sidecar reports it (PR #14 review B1). */
 const installAwaiting = { state: "awaitingConsent", operationId: null, provider: "codex", error: null, cancelRequested: false,
   plan: { planId: "11111111-2222-4333-8444-555555555555", provider: "codex", action: "installOrUpdate", expiresInSeconds: 180,
@@ -828,6 +846,54 @@ test("a folder that becomes a project is confirmed in main's own box; the page h
   }
 });
 
+test("in-app update banner: the page reads main's state and asks; only main's own box can restart (ADE U8, Q7)", async () => {
+  const harness = await loadMain();
+  const state = harness.handlers.get("m5:app-update:state")!;
+  const request = harness.handlers.get("m5:app-update:request")!;
+  assert.ok(state && request);
+  const answer = externalLinkAnswer.value;
+  fakeUpdate.calls.length = 0;
+  try {
+    fakeUpdate.state = "ready";
+    // Only the main frame, no input to read the state; one fixed request word to ask.
+    await assert.rejects(state({ sender: {}, senderFrame: {} }));
+    await assert.rejects(state(harness.currentEvent(), "x"));
+    assert.equal(await state(harness.currentEvent()), "ready");
+    for (const bad of [[], ["install"], ["restart", true], [{ action: "restart" }], ["quitAndInstall"]]) {
+      await assert.rejects(request(harness.currentEvent(), ...bad), JSON.stringify(bad));
+    }
+    await assert.rejects(request({ sender: {}, senderFrame: {} }, "restart"));
+    assert.deepEqual(fakeUpdate.calls, []);
+    // A restart request alone does nothing: main asks in its own box; "Cancel" keeps the app running.
+    externalLinkAnswer.value = 0;
+    assert.equal(await request(harness.currentEvent(), "restart"), "ready");
+    assert.ok(harness.sidecarCalls.some(call => call.startsWith("confirm:")), "main asked in its own box");
+    assert.deepEqual(fakeUpdate.calls, []);
+    externalLinkAnswer.value = 1;
+    heldTimers.length = 0;
+    const restarting = request(harness.currentEvent(), "restart");
+    for (let tries = 0; tries < 50 && !heldTimers.length; tries++) await new Promise(resolve => setImmediate(resolve));
+    heldTimers.at(-1)!(); // the screen never answers its readiness: not ready, nothing installs
+    await restarting;
+    assert.deepEqual(fakeUpdate.calls, ["restart", "blocked"]);
+    // No downloaded update: nothing to restart into, and no box.
+    fakeUpdate.state = "idle";
+    const boxes = harness.sidecarCalls.filter(call => call.startsWith("confirm:")).length;
+    await assert.rejects(request(harness.currentEvent(), "restart"));
+    assert.equal(harness.sidecarCalls.filter(call => call.startsWith("confirm:")).length, boxes);
+    // A check only starts a check (the controller decides whether it may).
+    await request(harness.currentEvent(), "check");
+    assert.deepEqual(fakeUpdate.calls, ["restart", "blocked", "check"]);
+    // State changes reach the page.
+    fakeUpdate.changed?.("downloading");
+    const sent = (harness.window.webContents as unknown as { sent: [string, unknown][] }).sent;
+    assert.deepEqual(sent.at(-1), ["m5:app-update:changed", "downloading"]);
+  } finally {
+    externalLinkAnswer.value = answer;
+    fakeUpdate.state = "unavailable";
+  }
+});
+
 test("installing starts only after main's own box: a page with a valid plan cannot give consent (PR #14 review B1)", async () => {
   const harness = await loadMain();
   const handler = harness.handlers.get(installContract.INSTALL_CHANNEL)!;
@@ -856,4 +922,53 @@ test("installing starts only after main's own box: a page with a valid plan cann
     await handler(harness.currentEvent(), { action: "status" });
     assert.equal(boxes(), boxesNow);
   } finally { externalLinkAnswer.value = answer; }
+});
+
+test("update restart: main's yes, then the screen's readiness and the quit preparation decide; only a clean result installs (PR #16 review I1)", async () => {
+  const harness = await loadMain();
+  const request = harness.handlers.get("m5:app-update:request")!;
+  const reply = harness.handlers.get("m5:app-update:readiness-reply")!;
+  const sent = (harness.window.webContents as unknown as { sent: [string, unknown][] }).sent;
+  const answer = externalLinkAnswer.value;
+  const quit = quitAnswer.value;
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  const readinessAsk = async () => {
+    for (let tries = 0; tries < 50; tries++) {
+      const ask = [...sent].reverse().find(([channel]) => channel === "m5:app-update:readiness");
+      if (ask && !answered.has(ask[1] as string)) { answered.add(ask[1] as string); return ask[1] as string; }
+      await settle();
+    }
+    throw new Error("main never asked the screen");
+  };
+  const answered = new Set<string>();
+  const run = async (screenReady: boolean | "silent", safe: boolean) => {
+    fakeUpdate.calls.length = 0;
+    quitAnswer.value = { blockers: safe ? [] : ["running work"], safeToQuit: safe };
+    heldTimers.length = 0;
+    const pending = request(harness.currentEvent(), "restart");
+    const nonce = await readinessAsk();
+    if (screenReady === "silent") heldTimers.at(-1)!(); // no answer within its time: counts as not ready
+    else await reply(harness.currentEvent(), nonce, screenReady);
+    await pending;
+    return [...fakeUpdate.calls];
+  };
+  try {
+    fakeUpdate.state = "ready";
+    externalLinkAnswer.value = 1;
+    quitExit.simulate = true;
+    // The screen has unsaved edits, or never answers: nothing installs.
+    assert.deepEqual(await run(false, true), ["restart", "blocked"]);
+    assert.deepEqual(await run("silent", true), ["restart", "blocked"]);
+    // The screen is ready but work cannot stop safely: nothing installs.
+    assert.deepEqual(await run(true, false), ["restart", "blocked"]);
+    // Ready and safe: the quit preparation allows a clean exit, which installs.
+    assert.deepEqual(await run(true, true), ["restart", "install", "safe"]);
+    // A readiness answer for a request main did not make is refused.
+    await assert.rejects(reply(harness.currentEvent(), "not-asked", true));
+  } finally {
+    externalLinkAnswer.value = answer;
+    quitAnswer.value = quit;
+    quitExit.simulate = false;
+    fakeUpdate.state = "unavailable";
+  }
 });

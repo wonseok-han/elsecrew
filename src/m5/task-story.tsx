@@ -218,8 +218,10 @@ export function AgentRuns({ runs, definitions, posted, phase = null }: { runs: R
         <span className="m5-run-meta">{run.selectedProfile.runtime === "codex" ? "Codex" : "Claude Code"} · {modelLabel(run.selectedProfile.runtime, run.selectedProfile.modelSelector)}{run.selectedProfile.reasoningEffort ? ` · ${run.selectedProfile.reasoningEffort}` : ""}</span>
         </div>
         {notice && <p>{t(notice)}</p>}
-        {run.failure && <p role="alert">{t(`m5.run.failure.${run.failure.stage}`)} <code>{run.failure.stage}/{run.failure.code}</code></p>}
+        {/* The raw failure code is help information, folded with the other run details (PR #16 review I3). */}
+        {run.failure && <p role="alert">{t(`m5.run.failure.${run.failure.stage}`)}</p>}
         <details><summary>{t("m5.run.details")}</summary>
+          {run.failure && <p><code>{run.failure.stage}/{run.failure.code}</code></p>}
           <p>{t("m5.chat.runId", { id: run.runId })}</p>
           <p>{t(`m5.run.exit.${run.terminationOutcome ?? "unknown"}`)}</p>
           {(run.state === "failed" || run.state === "recoveryRequired") && <SessionDiagnosticsHelp runtime={run.selectedProfile.runtime} />}

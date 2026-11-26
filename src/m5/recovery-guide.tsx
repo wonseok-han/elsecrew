@@ -13,7 +13,7 @@ export interface GuideAction {
   ariaLabel?: string;
 }
 
-export function RecoveryGuide({ tone = "danger", title, summary, what, primary, alternatives = [], details, children, className = "", testId, live = true }: {
+export function RecoveryGuide({ tone = "danger", title, summary, what, primary, alternatives = [], details, children, className = "", testId, live = true, label, busy }: {
   tone?: "danger" | "attention";
   title: ReactNode;
   /** One reassuring line under the title (what did not happen). */
@@ -28,11 +28,14 @@ export function RecoveryGuide({ tone = "danger", title, summary, what, primary, 
   testId?: string;
   /** Announce it (role=alert); off for a guide that is part of a page the person opened. */
   live?: boolean;
+  /** A name for the whole guide (its region), when the title alone is not enough. */
+  label?: string;
+  busy?: boolean;
 }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const hasActions = Boolean(primary) || alternatives.length > 0;
-  return <section className={`m5-recover m5-recover-${tone} ${className}`.trim()} role={live ? "alert" : undefined} data-testid={testId}>
+  return <section className={`m5-recover m5-recover-${tone} ${className}`.trim()} role={live ? "alert" : undefined} aria-label={label} aria-busy={busy || undefined} data-testid={testId}>
     <header>
       <svg className="m5-recover-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 4l9 16H3L12 4zM12 10v4.5M12 17.5v.01" /></svg>
       <div><h4>{title}</h4>{summary && <p>{summary}</p>}</div>

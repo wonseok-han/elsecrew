@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { EmptyState } from "./empty-state.tsx";
 import { useI18n } from "../i18n.tsx";
 import type { DiffEntryV1, DiffFileDescriptorV1 } from "./contracts/diff-v1.ts";
 import { diffSides } from "./diff-view.ts";
@@ -88,7 +89,7 @@ export function ChangeList({ entries, selected, disabled, onOpen, onViewAll, all
   const refresh = <button type="button" className="m5-icon-button" title={t("m5.editor.refresh")} aria-label={t("m5.editor.refresh")} disabled={disabled || refreshing} onClick={onRefresh}>↻</button>;
   if (entries.length === 0) return <>
     <div className="m5-changes-toolbar"><span /><div className="m5-changes-actions">{refresh}</div></div>
-    <p className="m5-empty">{t("m5.editor.noChanges")}</p>
+    <EmptyState icon="file" title={t("m5.editor.noChanges")} help={t("m5.editor.noChangesHelp")} />
   </>;
   return <>
     <div className="m5-changes-toolbar">
@@ -116,7 +117,7 @@ export function ChangeList({ entries, selected, disabled, onOpen, onViewAll, all
           </button>}
           {!collapsed.has(folder) && files.map(entry => row(entry, Boolean(folder)))}
         </div>)}
-      {matches.length === 0 && <p className="m5-empty">{t("m5.diff.noMatches")}</p>}
+      {matches.length === 0 && <EmptyState icon="search" title={t("m5.diff.noMatches")} help={t("m5.diff.noMatchesHelp")} />}
       {visible.length < matches.length && <button type="button" className="m5-secondary" onClick={() => setShown(shown + PAGE)}>{t("m5.diff.fileRange", { last: visible.length, total: matches.length })}</button>}
     </div>
   </>;
