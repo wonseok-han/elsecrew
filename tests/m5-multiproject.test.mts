@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { stageCells } from "../src/m5/task-story-model.ts";
-import { BETWEEN_STEPS_MS, otherProjectsActivity, projectActivity, ProjectActivityTracker } from "../src/m5/project-activity.ts";
+import { BETWEEN_STEPS_MS, listedWorking, otherProjectsActivity, projectActivity, ProjectActivityTracker } from "../src/m5/project-activity.ts";
 import type { AgentRunRecordV1 } from "../src/m5/contracts/agent-adapter-v1.ts";
 import type { AppNotification } from "../src/m5/notifications.ts";
 import { ko } from "../src/locales/ko.ts";
@@ -83,6 +83,11 @@ test("a project is working while one of its runs is live, for a short wait betwe
   tracker.reconcileProject("project_b", []);
   assert.equal(tracker.working("project_b"), false, "read again: nothing at work");
   tracker.dispose();
+  // A draft that never started is not at work in the list (unlike the task view's own "working").
+  assert.equal(listedWorking("draft"), false);
+  for (const state of ["preparing", "running", "stopping", "applying"]) assert.equal(listedWorking(state), true, state);
+  for (const state of ["reviewReady", "needsAttention", "canceled", null]) assert.equal(listedWorking(state), false, String(state));
+  assert.match(source("workbench.tsx"), /chat\.chats\.filter\(item => listedWorking\(item\.state\)\)/);
 });
 
 test("the project list counts each project's open requests and the switcher marks other projects", () => {

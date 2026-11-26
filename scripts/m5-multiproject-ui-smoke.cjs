@@ -135,6 +135,8 @@ app.on('browser-window-created', (_event, window) => {
       await run(`document.querySelector('[data-testid=project-switcher]').open=true`);
       await wait(`Boolean(document.querySelector('.m5-switcher-projects li[data-path$="/alpha"] .m5-badge-running'))`, 'alpha shows working');
       await wait(`Boolean(document.querySelector('[data-testid=project-switcher] .m5-switcher-others'))`, 'switcher marks another project');
+      if (await run(`Boolean(document.querySelector('.m5-switcher-projects li[data-path$="/beta"] .m5-badge-running'))`)) throw new Error('beta shows working before its agent started');
+      checks.push('beta not working before its start');
       await shot('02-beta-alpha-working');
       await run(`document.querySelector('[data-testid=project-switcher]').open=false`);
       // 3. B works too: two teams at once.

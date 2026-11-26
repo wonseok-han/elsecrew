@@ -16,6 +16,12 @@ export interface ProjectActivityBridge {
 export interface ProjectActivity { working: boolean; attention: number }
 
 const LIVE = new Set(["preparing", "running", "cancelling"]);
+/** A task in a project's list that is at work. Unlike the task view, a draft
+ * that never started is not: it would show "working" until it is opened. */
+const LISTED_WORKING = new Set(["preparing", "running", "stopping", "applying"]);
+export function listedWorking(state: string | null | undefined): boolean {
+  return state !== null && state !== undefined && LISTED_WORKING.has(state);
+}
 /** Between two team steps no run is live; the next one starts within seconds. */
 export const BETWEEN_STEPS_MS = 20_000;
 

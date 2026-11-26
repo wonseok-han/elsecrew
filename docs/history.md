@@ -40,7 +40,8 @@
   - 네이티브 스모크 `pnpm m5:smoke:multiproject`(`scripts/m5-multiproject-ui-run.mjs` → `m5-multiproject-ui-smoke.cjs`): 실제 sidecar, 임시 앱 데이터, fixture `cancel-clean`(30초 동안 일함).
     - A 작업의 에이전트가 일하는 중에 한 번에 B로 바꿨다. A 줄에 '작업 중', 전환 단추에 점이 보였다.
     - B도 실행을 시작했고, 엔진 기록에서 두 실행이 동시에 `running`이었다.
-    - A로 돌아오니 그 작업이 진행 중 그대로 보였다. 검사 18개 PASS.
+    - A로 돌아오니 그 작업이 진행 중 그대로 보였다. 검사 19개 PASS.
+    - 이 시험이 찾아 고친 것: 작업 화면의 '일하는 중'(`teamWorking`)은 막 만든 초안(draft)도 포함한다. 그래서 시작하지 않은 B 작업이 배지에서 '작업 중'으로 보였다. 목록 배지는 `listedWorking`(preparing·running·stopping·applying)을 쓴다.
     - 함정: fixture 엔진의 저장소는 첫 역할 구성(총괄·V3 역할 없음)이라 새 작업 창과 팀 진행은 여기서 못 돈다. 작업·실행은 bridge로 만들고, 팀 진행은 sidecar 경합 시험이 다룬다.
 - **검증**
   - `cargo test -p elsecrew-sidecar`: 924 통과, 실패 2. 두 실패는 같은 작업 버리기 거절의 오류 설명 문구가 바뀌어서였고, 문구에 기존 표현("idle native execution")을 남겨 고친 뒤 두 시험만 다시 돌려 통과했다.

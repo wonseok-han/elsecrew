@@ -62,7 +62,7 @@ import { EmptyState } from "./empty-state.tsx";
 import { UpdateBanner } from "./update-banner.tsx";
 import { fileName, isProsePath } from "./editor-paths.ts";
 import { FollowupComposer, TeamTimeline } from "./task-story.tsx";
-import { followProjectActivity, otherProjectsActivity, projectActivity, ProjectActivityTracker } from "./project-activity.ts";
+import { followProjectActivity, listedWorking, otherProjectsActivity, projectActivity, ProjectActivityTracker } from "./project-activity.ts";
 
 /** A merge or apply standing read with no answer by then counts as failed. */
 const STANDING_READ_TIMEOUT_MS = 20_000;
@@ -580,7 +580,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const notificationItems = useSyncExternalStore(notifications.subscribe, () => notifications.snapshot(), () => notifications.snapshot());
   useEffect(() => {
     if (!chat.projectId || chat.settings?.projectId !== chat.projectId) return;
-    activity.reconcileProject(chat.projectId, chat.chats.filter(item => teamWorking(item.state)).map(item => item.chatId));
+    activity.reconcileProject(chat.projectId, chat.chats.filter(item => listedWorking(item.state)).map(item => item.chatId));
   }, [activity, chat.projectId, chat.settings?.projectId, chat.chats]);
   const activityOf = (projectId: string) => projectActivity(activity, notificationItems, projectId);
   const [pendingOpen, setPendingOpen] = useState<{ projectId: string; chatId: string } | null>(null);
