@@ -20,10 +20,10 @@ const FORBIDDEN = /커밋|브랜치|복구점|식별자|준비 기록|워크트�
  */
 const DETAILS_ONLY = ["m5.merge.branch", "m5.merge.ahead", "m5.newTask.worktreeDetail"] as const;
 
-/** Every TS/TSX file under a folder, its comments removed. */
+/** Every TS/TSX file under a folder, its comments removed; paths with "/" on every system (Windows CI). */
 function codeFiles(dir: string): { path: string; text: string }[] {
   const found: { path: string; text: string }[] = [];
-  const walk = (at: string) => { for (const name of readdirSync(at)) { const path = join(at, name); if (statSync(path).isDirectory()) walk(path); else if (/\.tsx?$/.test(name)) found.push({ path, text: readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1") }); } };
+  const walk = (at: string) => { for (const name of readdirSync(at)) { const path = join(at, name); if (statSync(path).isDirectory()) walk(path); else if (/\.tsx?$/.test(name)) found.push({ path: path.split("\\").join("/"), text: readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1") }); } };
   walk(dir);
   return found;
 }

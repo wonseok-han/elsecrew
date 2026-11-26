@@ -26,6 +26,7 @@
   - M3: hex 검사를 `src`·`electron` 모든 TS/TSX의 문자열 안 어디든, 그리고 JSX 글자의 6·8자리 hex까지 넓혔다. 예외 셋은 그대로다.
   - PR #11이 남긴 `m5-activity-original`·`m5-activity-code`는 쓰이지 않는다. 실행 출력 작업자 영역이라 지우지 않고, 시험 예외에 이유와 함께 적었다.
 - **검증**: `npm test` 982/982, build, 렌더러 스모크 다크·라이트(32화면 1265개 실패 0).
+- **병합·CI**: feature/ade에 PR #15가 들어와 #14(71369834)와 #16 모두 다시 병합했다(누락 0). 병합 뒤 `npm test`는 #14 975, #16 988 모두 통과했다. 렌더러 스모크 두 테마, 미리보기 스모크 각 2회도 PASS다. #14 CI는 macOS·Windows·website·GitGuardian 모두 통과했다. #16 Windows CI에서 새 hex 시험이 경로 구분자(`electron\\appearance.ts`) 때문에 실패해, 경로를 `/`로 맞췄다.
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 화면 통일 U7(문구·F11·빈 상태·확인)·U8(죽은 CSS·색·업데이트 배너) (`orca/ade-screens-u7-u8`, PR #14 위)
 설계 DESIGN 4.1 U7·U8, 목업 13·15·16. PR #14(U5·U6) 위에 쌓았다. 현행 설명은 architecture "오류·빈 상태·업데이트 배너와 정리".
