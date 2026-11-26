@@ -2237,16 +2237,18 @@ test("result preview: an optional pair after installation, validated answers, ne
   const sent = JSON.parse(child.writes.at(-1)!);
   assert.equal(sent.method, "preview.resolve");
   assert.deepEqual(sent.params, { projectId: "project_1", chatId: "chat_1", entry: null });
-  const resolved = { chatId: "chat_1", projectId: "project_1", worktreeId: "worktree_1", workspaceIdentity: "workspace_1", entry: "index.html", refusal: null };
+  const resolved = { chatId: "chat_1", projectId: "project_1", worktreeId: "worktree_1", workspaceIdentity: "workspace_1", previewHandle: "ph_cccccccccccccccccccccccccccccccc", entry: "index.html", refusal: null };
   child.stdout.write(responseLine(sent.requestId, resolved));
   assert.deepEqual(await resolving, resolved);
-  const read = { chatId: "chat_1", projectId: "project_1", worktreeId: "worktree_1", workspaceIdentity: "workspace_1", path: "index.html", offset: 0 };
+  const read = { chatId: "chat_1", projectId: "project_1", worktreeId: "worktree_1", workspaceIdentity: "workspace_1", previewHandle: "ph_cccccccccccccccccccccccccccccccc", path: "index.html", offset: 0 };
   const reading = client.previewReadAsset(read);
   const readSent = JSON.parse(child.writes.at(-1)!);
   assert.equal(readSent.method, "preview.readAsset");
-  const body = { ...read, outcome: "ok", byteLength: 2, version: `sha256:${"a".repeat(64)}`, bytesBase64: Buffer.from("hi").toString("base64") };
+  const { previewHandle: _handle, ...echo } = read;
+  const body = { ...echo, outcome: "ok", byteLength: 2, version: `sha256:${"a".repeat(64)}`, bytesBase64: Buffer.from("hi").toString("base64") };
   child.stdout.write(responseLine(readSent.requestId, body));
-  assert.deepEqual(await reading, body);
+  assert.deepEqual(await reading, { ...body, previewHandle: read.previewHandle });
+  assert.deepEqual(readSent.params, read);
   // An answer for another workspace ends the connection (strict validation).
   const wrong = client.previewReadAsset(read);
   const wrongSent = JSON.parse(child.writes.at(-1)!);

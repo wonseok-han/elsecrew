@@ -175,11 +175,16 @@ export function validatePreviewBounds(bounds: PreviewBoundsV1, content: { width:
   if (rounded.x + rounded.width > content.width + 1 || rounded.y + rounded.height > content.height + 1) {
     throw new Error("preview bounds are outside the window");
   }
-  return {
+  const clamped = {
     ...rounded,
     width: Math.min(rounded.width, content.width - rounded.x),
     height: Math.min(rounded.height, content.height - rounded.y),
   };
+  // The rectangle actually applied keeps the minimum too (review minor 2).
+  if (clamped.width < PREVIEW_MIN_SIZE_V1 || clamped.height < PREVIEW_MIN_SIZE_V1) {
+    throw new Error("preview bounds are outside the window or too small");
+  }
+  return clamped;
 }
 
 /** Where the view goes inside the placeholder: all of it, or a phone-wide

@@ -1,7 +1,10 @@
 // Electron side of the result preview isolation probe. Started only by
-// `scripts/m5-preview-isolation-probe.mjs`, with isolated app data, snapshot
-// workspaces inside it (ELSECREW_GIT_WORKTREES=0), no provider and no remote
-// debugging port. Writes `app-result.json`; the launcher judges.
+// `scripts/m5-preview-isolation-probe.mjs`, with isolated app data, no
+// provider and no remote debugging port. PROBE_WORKSPACE picks the task
+// workspace kind: `snapshot` (copies inside the app data,
+// ELSECREW_GIT_WORKTREES=0) or `git` (real Git worktrees in a task folder
+// chosen inside the probe's temporary folder). Writes `app-result.json`;
+// the launcher judges.
 'use strict';
 const { app, BrowserWindow, dialog, session } = require('electron');
 const fs = require('node:fs');
@@ -12,8 +15,12 @@ const { leakPage, FILES } = require('./m5-preview-pages.cjs');
 const root = process.env.PROBE_ROOT;
 const httpPort = Number(process.env.PROBE_HTTP_PORT);
 const udpPort = Number(process.env.PROBE_UDP_PORT);
+const tcp6Port = Number(process.env.PROBE_TCP6_PORT);
+const udp6Port = Number(process.env.PROBE_UDP6_PORT);
 const marker = process.env.PROBE_MARKER;
-if (!root || !httpPort || !udpPort || !marker || process.env.ELSECREW_PREVIEW !== '1') throw new Error('probe environment is incomplete');
+const controlHost = process.env.PROBE_CONTROL_HOST;
+const workspaceKind = process.env.PROBE_WORKSPACE;
+if (!root || !httpPort || !udpPort || !tcp6Port || !udp6Port || !marker || !controlHost || !['git', 'snapshot'].includes(workspaceKind) || process.env.ELSECREW_PREVIEW !== '1') throw new Error('probe environment is incomplete');
 const repoRoot = path.resolve(__dirname, '..');
 const source = path.join(root, 'project');
 const result = { steps: [], errors: [] };
@@ -22,7 +29,13 @@ const step = (name, value) => { result.steps.push(name); if (value !== undefined
 app.commandLine.appendSwitch('log-net-log', path.join(root, 'netlog.json'));
 app.commandLine.appendSwitch('net-log-capture-mode', 'Everything');
 app.setPath('userData', path.join(root, 'userdata'));
-dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [source] });
+const taskFolder = path.join(root, 'task-workspaces');
+fs.mkdirSync(taskFolder, { recursive: true });
+// The task folder picker (it may create folders) and the project picker.
+dialog.showOpenDialog = async (...args) => {
+  const options = args.find(arg => arg && typeof arg === 'object' && Array.isArray(arg.properties));
+  return { canceled: false, filePaths: [options?.properties.includes('createDirectory') ? taskFolder : source] };
+};
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let finished = false;
@@ -64,6 +77,15 @@ function memory() {
     types: metrics.map(metric => `${metric.type}${metric.serviceName ? `:${metric.serviceName}` : ''}:${Math.round((metric.memory?.workingSetSize ?? 0) / 1024)}MiB`) };
 }
 
+/** Screenshots are evidence, not checks: a compositor hiccup is retried and
+ * then recorded, never a probe failure. */
+async function saveCapture(contents, name) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try { fs.writeFileSync(path.join(root, name), (await contents.capturePage()).toPNG()); return; }
+    catch (error) { (result.captureErrors ??= []).push(`${name}: ${String(error.message || error).slice(0, 60)}`); await sleep(500); }
+  }
+}
+
 let started = false;
 app.on('browser-window-created', (_event, window) => {
   if (started) return;
@@ -92,6 +114,10 @@ async function run(window) {
   }, 60_000, 'engine ready');
   step('engineReady');
   await page(require('./m5-smoke-complete-team.cjs'));
+  if (workspaceKind === 'git') {
+    const chosen = await page(`window.m5Projects.request({ action: 'chooseWorkspaceFolder' })`);
+    result.taskFolder = chosen.path ?? chosen.folder ?? null;
+  }
   const project = await page('window.m5.openProject()');
   const projectId = project.projectId;
   const chats = {};
@@ -99,20 +125,25 @@ async function run(window) {
     chats[name] = await page(`(async () => {
       const projectId = ${JSON.stringify(projectId)};
       const settings = await window.m5.getProjectRoleSettings({ projectId });
-      const prepared = await window.m5.prepareChatWorkspace({ projectId });
+      const prepared = await window.m5.prepareChatWorkspace(${workspaceKind === 'git' ? '{ projectId, applicationBaseline: true }' : '{ projectId }'});
       const manifest = prepared.manifest;
       const chat = await window.m5.createChat({ preparationId: prepared.preparationId, projectId, worktreeId: manifest.worktreeId, workspaceIdentity: manifest.workspaceIdentity, goal: 'preview probe ${name}', expectedSettingsRevision: settings.revision });
-      return { chatId: chat.chatId, worktreePath: manifest.worktreePath };
+      return { chatId: chat.chatId, worktreePath: manifest.worktreePath, workspaceKind: manifest.workspaceKind ?? null };
     })()`);
   }
   const appData = fs.realpathSync(path.join(root, 'userdata'));
-  step('chats', { kinds: Object.values(chats).map(chat => path.relative(appData, fs.realpathSync(chat.worktreePath)).startsWith('..') ? 'outsideAppData' : 'insideAppData') });
+  const tasks = fs.realpathSync(taskFolder);
+  const inside = (base, target) => !path.relative(base, fs.realpathSync(target)).startsWith('..');
+  step('chats', { kinds: Object.values(chats).map(chat => ({
+    manifest: chat.workspaceKind,
+    place: inside(appData, chat.worktreePath) ? 'insideAppData' : inside(tasks, chat.worktreePath) ? 'insideTaskFolder' : 'elsewhere',
+  })) });
 
   // What a team would leave in the workspaces.
   const write = (directory, files) => { for (const [name, text] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(directory, name)), { recursive: true }); fs.writeFileSync(path.join(directory, name), text); } };
   fs.writeFileSync(path.join(root, 'outside.txt'), 'outside secret\n');
   for (const chat of Object.values(chats)) {
-    write(chat.worktreePath, { ...FILES, 'refresh.html': FILES['refresh.html'].replace('REFRESH_TARGET', `http://127.0.0.1:${httpPort}/refresh`), 'leak.html': leakPage({ httpPort, udpPort, marker }), 'a/.secret/x.js': 'secret' });
+    write(chat.worktreePath, { ...FILES, 'refresh.html': FILES['refresh.html'].replace('REFRESH_TARGET', `http://127.0.0.1:${httpPort}/refresh`), 'leak.html': leakPage({ httpPort, udpPort, tcp6Port, udp6Port, marker }), 'a/.secret/x.js': 'fixture-only' });
     fs.symlinkSync(path.join(root, 'outside.txt'), path.join(chat.worktreePath, 'link.txt'));
   }
   const hashBefore = treeHash(chats.a.worktreePath);
@@ -155,11 +186,25 @@ async function run(window) {
   result.tokensDiffer = tokenA !== tokenB;
   result.previewIdHasToken = JSON.stringify(openedA).includes(tokenA);
   result.bClosedAfterReplace = bContents.isDestroyed();
+  const { webContents } = require('electron');
+  const contentsBefore = webContents.getAllWebContents().length;
+  const navigationsBefore = manager.diagnostics.blockedNavigations;
   result.leak = await contents.executeJavaScript('window.runProbe()');
+  // T10 and T9 again with a user gesture on a focused view: one call each,
+  // so every attempt has its own activation.
+  contents.focus();
+  await sleep(200);
+  result.permissions = {};
+  for (const name of await contents.executeJavaScript('window.PERMISSION_NAMES')) {
+    result.permissions[name] = await contents.executeJavaScript(`window.runPermission(${JSON.stringify(name)})`, true);
+  }
+  result.newWebContents = webContents.getAllWebContents().length - contentsBefore;
+  result.pageNavigationsBlocked = manager.diagnostics.blockedNavigations - navigationsBefore;
   // T15: chat B's token from chat A's page, after B was replaced.
   result.crossToken = await contents.executeJavaScript(`fetch('elsecrew-preview://${tokenB}/b.txt').then(r => 'status ' + r.status, e => 'error ' + e.name)`);
   // T9: top-level navigation attempts leave the page where it was.
   const before = contents.getURL();
+  const topBlockedBefore = manager.diagnostics.blockedNavigations;
   await contents.executeJavaScript(`location.href = 'http://127.0.0.1:${httpPort}/navigate'`).catch(() => undefined);
   await sleep(800);
   await contents.executeJavaScript(`location.replace('https://${marker}-nav.example.com/')`).catch(() => undefined);
@@ -167,6 +212,7 @@ async function run(window) {
   await contents.executeJavaScript(`location.href = 'elsecrew-preview://${tokenB}/b.html'`).catch(() => undefined);
   await sleep(800);
   result.urlAfterNavigation = { same: contents.getURL() === before, origin: new URL(contents.getURL()).hostname === tokenA };
+  result.topNavigationsBlocked = manager.diagnostics.blockedNavigations - topBlockedBefore;
   step('leakPage');
 
   // Each network layer alone (T1·T2·T3): CSP bypassed through the debugger
@@ -213,10 +259,10 @@ async function run(window) {
   await page(`window.m5Preview.layout(${JSON.stringify({ previewId: openedTodo.previewId, bounds, viewport: 'wide', obscured: false })})`);
   await sleep(400);
   // A window capture holds only the app page; the view is captured on its own.
-  fs.writeFileSync(path.join(root, 'todo-wide-view.png'), (await todo.capturePage()).toPNG());
+  await saveCapture(todo, 'todo-wide-view.png');
   await page(`window.m5Preview.layout(${JSON.stringify({ previewId: openedTodo.previewId, bounds, viewport: 'narrow', obscured: false })})`);
   await sleep(400);
-  fs.writeFileSync(path.join(root, 'todo-narrow-view.png'), (await todo.capturePage()).toPNG());
+  await saveCapture(todo, 'todo-narrow-view.png');
   result.todoNarrowWidth = await todo.executeJavaScript('innerWidth');
   const obscured = await page(`window.m5Preview.layout(${JSON.stringify({ previewId: openedTodo.previewId, bounds, viewport: 'narrow', obscured: true })})`);
   result.obscured = { state: obscured.state, snapshot: typeof obscured.snapshot === 'string' && obscured.snapshot.startsWith('data:image/jpeg;base64,') };
@@ -244,6 +290,11 @@ async function run(window) {
     ? fs.readdirSync(path.join(root, 'userdata', 'Partitions')).filter(name => /preview/i.test(name)) : [];
   result.status = await page('window.m5Preview.status()');
   void partitionsB;
+  // Net log positive control: a host lookup the log must show, made by the
+  // app's own default session (never the preview's).
+  result.controlLookup = await session.defaultSession.resolveHost
+    ? await session.defaultSession.resolveHost(controlHost).then(() => 'resolved', error => `error ${String(error.message).slice(0, 60)}`)
+    : await session.defaultSession.fetch(`http://${controlHost}/`).then(() => 'fetched', error => `error ${String(error.message).slice(0, 60)}`);
   step('done');
 }
 

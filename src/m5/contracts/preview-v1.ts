@@ -100,6 +100,11 @@ function id(value: unknown, field: string): string {
   if (typeof value !== "string" || value.length === 0 || value.length > 512 || /[\u0000-\u001f\u007f]/u.test(value)) fail(`${field} is invalid`);
   return value as string;
 }
+const PREVIEW_HANDLE = /^ph_[0-9a-f]{32}$/;
+function previewHandle(value: unknown): string {
+  if (typeof value !== "string" || !PREVIEW_HANDLE.test(value)) fail("previewHandle is invalid");
+  return value as string;
+}
 function entryPath(value: unknown, field: string): string | null {
   if (value === null) return null;
   if (typeof value !== "string" || !isPreviewEntryV1(value)) fail(`${field} must be a preview page path or null`);
@@ -116,10 +121,12 @@ export interface PreviewResolveRequestV1 { projectId: string; chatId: string; en
 export interface PreviewWorkspaceRefV1 { chatId: string; projectId: string; worktreeId: string; workspaceIdentity: string }
 export type PreviewEntryRefusalV1 = PreviewPathRefusalV1 | "notPage" | "notFound";
 export interface PreviewResolveResultV1 extends PreviewWorkspaceRefV1 {
+  /** The sidecar's record of the workspace root it verified; every read names it. */
+  previewHandle: string;
   entry: string | null;
   refusal: PreviewEntryRefusalV1 | null;
 }
-export interface PreviewReadAssetRequestV1 extends PreviewWorkspaceRefV1 { path: string; offset: number }
+export interface PreviewReadAssetRequestV1 extends PreviewWorkspaceRefV1 { previewHandle: string; path: string; offset: number }
 export type PreviewAssetOutcomeV1 = "ok" | "notFound" | "refused" | "tooLarge";
 export interface PreviewReadAssetResultV1 extends PreviewWorkspaceRefV1 {
   path: string;
@@ -142,7 +149,7 @@ export function validatePreviewResolveRequestV1(value: unknown): PreviewResolveR
 
 export function validatePreviewResolveResultV1(value: unknown, request: PreviewResolveRequestV1): PreviewResolveResultV1 {
   const object = requireObject(value, "preview resolve result");
-  exactKeys(object, ["chatId", "projectId", "worktreeId", "workspaceIdentity", "entry", "refusal"]);
+  exactKeys(object, ["chatId", "projectId", "worktreeId", "workspaceIdentity", "previewHandle", "entry", "refusal"]);
   if (object.chatId !== request.chatId || object.projectId !== request.projectId) fail("preview resolve answered another chat");
   const entry = object.entry === null ? null : entryPath(object.entry, "entry");
   if (request.entry !== null && entry !== null && entry !== request.entry) fail("preview resolve changed the named entry");
@@ -153,13 +160,13 @@ export function validatePreviewResolveResultV1(value: unknown, request: PreviewR
   return {
     chatId: request.chatId, projectId: request.projectId,
     worktreeId: id(object.worktreeId, "worktreeId"), workspaceIdentity: id(object.workspaceIdentity, "workspaceIdentity"),
-    entry, refusal: refusal as PreviewEntryRefusalV1 | null,
+    previewHandle: previewHandle(object.previewHandle), entry, refusal: refusal as PreviewEntryRefusalV1 | null,
   };
 }
 
 export function validatePreviewReadAssetRequestV1(value: unknown): PreviewReadAssetRequestV1 {
   const object = requireObject(value, "preview read request");
-  exactKeys(object, ["chatId", "projectId", "worktreeId", "workspaceIdentity", "path", "offset"]);
+  exactKeys(object, ["chatId", "projectId", "worktreeId", "workspaceIdentity", "previewHandle", "path", "offset"]);
   const offset = object.offset;
   if (typeof offset !== "number" || !Number.isSafeInteger(offset) || offset < 0 || offset >= PREVIEW_ASSET_MAX_BYTES_V1) {
     fail("preview read offset is invalid");
@@ -167,7 +174,7 @@ export function validatePreviewReadAssetRequestV1(value: unknown): PreviewReadAs
   return {
     chatId: id(object.chatId, "chatId"), projectId: id(object.projectId, "projectId"),
     worktreeId: id(object.worktreeId, "worktreeId"), workspaceIdentity: id(object.workspaceIdentity, "workspaceIdentity"),
-    path: assetPath(object.path), offset: offset as number,
+    previewHandle: previewHandle(object.previewHandle), path: assetPath(object.path), offset: offset as number,
   };
 }
 
@@ -243,7 +250,7 @@ export type PreviewEventV1 =
   | { previewId: string; kind: "unresponsive" }
   | { previewId: string; kind: "responsive" }
   | { previewId: string; kind: "closed"; reason: PreviewCloseReasonV1 };
-export type PreviewCloseReasonV1 = "requested" | "idle" | "replaced" | "crashed" | "limit" | "workspaceUnavailable" | "quitting" | "windowClosed";
+export type PreviewCloseReasonV1 = "requested" | "idle" | "replaced" | "crashed" | "limit" | "workspaceUnavailable" | "quitting" | "windowClosed" | "reloaded";
 
 const PREVIEW_ID = /^pv_[0-9a-f]{32}$/;
 function previewId(value: unknown): string {
@@ -329,7 +336,7 @@ export function validatePreviewIpcResultV1(value: unknown, request: PreviewIpcRe
 }
 
 const EVENT_KINDS = new Set(["loaded", "loadFailed", "blockedNavigation", "unresponsive", "responsive", "closed"]);
-const CLOSE_REASONS = new Set<PreviewCloseReasonV1>(["requested", "idle", "replaced", "crashed", "limit", "workspaceUnavailable", "quitting", "windowClosed"]);
+const CLOSE_REASONS = new Set<PreviewCloseReasonV1>(["requested", "idle", "replaced", "crashed", "limit", "workspaceUnavailable", "quitting", "windowClosed", "reloaded"]);
 export function validatePreviewEventV1(value: unknown): PreviewEventV1 {
   const object = requireObject(value, "preview event");
   if (typeof object.kind !== "string" || !EVENT_KINDS.has(object.kind)) fail("preview event kind is invalid");

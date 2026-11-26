@@ -2,6 +2,20 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #6 독립 보안 검토(차단 1·중요 5·경미 2) 전부 반영
+검토서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr6.md`(대상 b7eabc64). 같은 브랜치 `orca/ade-preview-backend`에서 한 번에 고쳤다.
+
+- **B1(차단) 검증 핸들과 읽기 핸들 불일치**: 결속 검사가 검증한 작업 공간 디렉터리 핸들을 돌려주게 했다(`validate_workspace_binding_with_lock_handle`). `preview.resolve`는 그 핸들로 git 검사·진입 파일 찾기를 하고 루트 신원(dev·inode)을 `previewHandle` 아래 기록한다. `preview.readAsset`은 매번 새 핸들로 결속 검사를 하고, 신원이 기록과 같을 때만 그 핸들로 읽는다. 시험: `reads_go_through_the_verified_handle_even_when_the_folder_is_swapped_mid_request`, `resolve_looks_up_the_entry_through_the_verified_handle`. 둘 다 검증과 읽기 사이에 Git 링크/사본 표식까지 복사한 실제 디렉터리로 루트를 바꿔치며, git worktree·사본 두 종류로 돈다. 발견: 기존 chat Fixture는 설정과 무관하게 사본만 만든다(git worktree는 `application_baseline=true` 경로). 이번 시험은 두 종류를 모두 만든다.
+- **I1 실제 읽기 한도**: 5MiB 초과로 알려진 파일은 읽지 않고, 읽는 중 커지는 파일도 한도+1바이트까지만 읽는다(`read_preview_file`, 시험 `bounded_reads_stop_at_the_limit_whatever_the_file_claims`). 파일은 한 번 읽고 해시하며, 나머지 조각은 그 내용에서 준다(전역 1개, 마지막 조각 뒤 버림). 시험 `read_asset_is_bounded_and_reads_a_file_once`.
+- **I2 병렬 읽기**: 토큰마다 sidecar 읽기 4개·대기 64개(넘치면 503), 파일당 15초 기한(504, 자리는 sidecar 응답까지 유지)을 둔다. 64MiB는 조각을 묻기 전에 예약하고, 거절된 요청도 2,000개 한도에 센다. 닫으면 대기 요청은 sidecar에 가지 않는다. 매니저 시험 4개.
+- **I3 가림 순서**: `layout`은 await 없이 바로 숨기고, 정지 이미지는 보이는 동안 미리 찍어 둔 것을 준다. 더 새 요청이나 숨김 뒤에 끝난 캡처, 1초를 넘긴 캡처는 버린다. 시험 "covering hides at once even while a capture hangs…".
+- **I4 수명**: 앱 화면 새로고침·렌더러 종료(`did-start-navigation`/`render-process-gone`) 때 `pageReplaced()`로 닫고, 진행 중인 열기도 폐기한다. `prepareQuit`(업데이트 설치 포함)는 `suspend()`로 닫고 읽기를 멈추며, 준비가 취소되면 `resume()`한다. 닫힘 사유에 `reloaded`를 추가했다. 보안 하네스와 매니저 시험으로 확인했다.
+- **I5 프로브**: 시도마다 결과가 있어야 하고 반드시 실패해야 한다. 양성 대조 세 가지를 둔다: 수집기(TCP/UDP×IPv4/IPv6)가 프로브의 접촉을 1건씩 셀 것, net log가 손대지 않은 완전한 로그일 것, 그 로그에 대조 DNS 조회와 페이지의 무효 프록시 시도가 보일 것. DNS 서버 연결은 대조 조회 외 네트워크 조회가 0일 때만 대조 몫이다. WebRTC는 STUN v6·TURN udp/tcp/tls를 추가했고, 세 계층 모두 후보 0이어야 한다. 권한과 창 열기는 포커스된 뷰에서 사용자 활성화로 시도하며, 활성화 없음·포커스 없음으로 거절된 것은 합격이 아니다. T9는 새 webContents 0개와 차단 증가분으로 판정한다. **git worktree 모드**를 추가해 기본 두 모드로 돌린다. 미리보기 뷰는 `disableBlinkFeatures: FileSystemAccess`로 파일 선택기 자체를 없앴다(T7).
+- **경미**: 실행 때 준 `--blink-settings` 값에 덧붙인다. bounds는 가장자리를 자른 뒤에도 최소 120을 확인하고, 열기 중 기다린 뒤에도 현재 창 크기로 다시 확인한다.
+- **Keychain 사후 확인(PR #4)**: 머지본 cd5f502d로 더미 항목 probe를 돌렸다. cdhash가 다른 두 빌드 모두 창 없이 갱신됐고 partition은 `apple-tool:`로 유지됐다. 더미 항목은 삭제했다(노예 확인).
+- **검증**: VERIFY_LINE
+- **다음**: 노예가 B1·I5를 짧게 재확인한 뒤 머지. 남은 경계: Windows·패키지 실행에서의 프로브, P3 화면(T8·T16), 사용자 파일 선택·끌어놓기 범위.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — ADE 1차-나 결과 미리보기 백엔드(P1·P2·P4 안전 시험), `ELSECREW_PREVIEW=1` 뒤
 브랜치 `orca/ade-preview-backend`(기준 `feature/ade` d221832f). 설계 `docs/proposals/m5-ade-layout-plan.md` 2장·3.2 P1/P2/P4. 결정(위임 채택): 격리 세션 안 JS 허용, 저장 데이터는 열려 있는 동안만(메모리 partition), 대상은 작업 공간 정적 파일만. 화면(P3)·`workbench.tsx`·`styles.css`는 건드리지 않았다(레이아웃 워커와 병행).
 

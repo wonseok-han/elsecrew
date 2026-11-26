@@ -103,7 +103,12 @@ const PREVIEW_ENABLED = PREVIEW_FLAGS.enabled;
 // proxy, webRequest and CSP (seen in the isolation probe's net log). Blink's
 // DNS prefetching is off for every page of the app while the preview exists;
 // the app's own page is local and never needs it.
-if (PREVIEW_ENABLED) app.commandLine.appendSwitch("blink-settings", "dnsPrefetchingEnabled=false");
+// A `--blink-settings` given at launch (development, diagnosis) is kept: the
+// switch holds one value, so this setting is added to it, not put in its place.
+if (PREVIEW_ENABLED) {
+  const existing = app.commandLine.getSwitchValue("blink-settings");
+  app.commandLine.appendSwitch("blink-settings", existing ? `${existing},dnsPrefetchingEnabled=false` : "dnsPrefetchingEnabled=false");
+}
 const previewManager = new PreviewManagerV1({
   enabled: PREVIEW_ENABLED,
   devTools: PREVIEW_FLAGS.devTools,
@@ -521,12 +526,16 @@ function writeAdmissionFailure(client: SidecarClientV1): void {
 }
 
 async function prepareQuit(): Promise<PrepareQuitResultV1> {
+  // Every quit preparation (an update install included, which does not pass
+  // through `before-quit`) closes the preview and stops its reads first; a
+  // preparation called off lets it open again (PR #6 review I4).
+  previewManager.suspend();
   await gitPreparation?.close();
   try {
     const result = await quitCoordinator.prepareQuit();
-    if (!result.safeToQuit) gitPreparation?.reopen();
+    if (!result.safeToQuit) { gitPreparation?.reopen(); previewManager.resume(); }
     return result;
-  } catch (error) { gitPreparation?.reopen(); throw error; }
+  } catch (error) { gitPreparation?.reopen(); previewManager.resume(); throw error; }
 }
 
 function registerIpcHandlers(): void {
@@ -834,8 +843,13 @@ async function createMainWindow() {
   // deliveries in between and start the credit afresh. The page reads its
   // state anew, so what was not delivered meanwhile is not lost.
   window.webContents.on("did-start-navigation", (details: { isMainFrame?: boolean; isSameDocument?: boolean }) => {
-    if (details?.isMainFrame && !details.isSameDocument) eventCredit.pause();
+    if (details?.isMainFrame && !details.isSameDocument) {
+      eventCredit.pause();
+      // The new page never learns the old preview: close it and any open on its way.
+      previewManager.pageReplaced();
+    }
   });
+  window.webContents.on("render-process-gone", () => previewManager.pageReplaced());
   // A minimized or hidden window hides the preview view drawn over it.
   window.on("minimize", () => previewManager.setWindowHidden(true));
   window.on("hide", () => previewManager.setWindowHidden(true));

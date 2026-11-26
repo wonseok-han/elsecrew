@@ -1884,7 +1884,7 @@ impl Sidecar {
             "preview.readAsset" => {
                 let params = require_exact_params(
                     &request.params,
-                    &["chatId", "projectId", "worktreeId", "workspaceIdentity", "path", "offset"],
+                    &["chatId", "projectId", "worktreeId", "workspaceIdentity", "previewHandle", "path", "offset"],
                 )
                 .map_err(invalid_params)?;
                 let address = workspace_address(params).map_err(invalid_params)?;
@@ -1895,6 +1895,7 @@ impl Sidecar {
                 self.projects
                     .preview_read_asset(
                         &self.storage,
+                        param_string(params, "previewHandle").map_err(invalid_params)?,
                         &address,
                         param_string(params, "path").map_err(invalid_params)?,
                         offset,

@@ -3,11 +3,14 @@
 // think of and reports what happened; nothing here is shipped with the app.
 'use strict';
 
-function leakPage({ httpPort, udpPort, marker }) {
+function leakPage({ httpPort, udpPort, tcp6Port, udp6Port, marker }) {
   const script = String.raw`
 const H = "http://127.0.0.1:${httpPort}";
+const H6 = "http://[::1]:${tcp6Port}";
 const WS = "ws://127.0.0.1:${httpPort}";
+const TCP = ${httpPort};
 const UDP = ${udpPort};
+const UDP6 = ${udp6Port};
 const MARK = "${marker}";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const within = (promise, ms = 4000) => Promise.race([promise, sleep(ms).then(() => { throw new Error("timeout"); })]);
@@ -42,6 +45,8 @@ window.runProbe = async () => {
 };
 async function network() {
   await attempt("fetchLoopback", () => fetch(H + "/fetch?s=secret").then(r => r.status));
+  await attempt("fetchLoopback6", () => fetch(H6 + "/fetch6").then(r => r.status));
+  await attempt("websocket6", () => new Promise((resolve, reject) => { const w = new WebSocket("ws://[::1]:${tcp6Port}/ws6"); w.onopen = () => resolve("open"); w.onerror = () => reject(new Error("ws error")); }));
   await attempt("fetchNoCors", () => fetch(H + "/nocors", { mode: "no-cors" }).then(r => r.type));
   await attempt("fetchExternal", () => fetch("https://" + MARK + "-fetch.example.com/").then(r => r.status));
   await attempt("xhr", () => new Promise((resolve, reject) => { const x = new XMLHttpRequest(); x.open("GET", H + "/xhr"); x.onload = () => resolve(x.status); x.onerror = () => reject(new Error("xhr error")); x.send(); }));
@@ -75,9 +80,13 @@ async function network() {
     const input = document.createElement("input"); input.name = "s"; input.value = "secret"; form.append(input); document.body.append(form);
     form.submit(); await sleep(1000); return "submitted";
   });
-  // T2: WebRTC to a local STUN collector and an outside one.
+  // T2: WebRTC to local STUN (IPv4 and IPv6) and TURN (UDP, TCP, TLS)
+  // collectors and an outside STUN host.
   await attempt("webrtc", async () => {
-    const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:127.0.0.1:" + UDP }, { urls: "stun:" + MARK + "-stun.example.com:3478" }] });
+    const pc = new RTCPeerConnection({ iceServers: [
+      { urls: ["stun:127.0.0.1:" + UDP, "stun:[::1]:" + UDP6, "stun:" + MARK + "-stun.example.com:3478"] },
+      { urls: ["turn:127.0.0.1:" + UDP + "?transport=udp", "turn:127.0.0.1:" + TCP + "?transport=tcp", "turns:127.0.0.1:" + TCP + "?transport=tcp", "turn:[::1]:" + UDP6 + "?transport=udp"], username: "probe", credential: "probe" },
+    ] });
     const candidates = [];
     pc.onicecandidate = event => { if (event.candidate) candidates.push(event.candidate.type || "unknown"); };
     pc.createDataChannel("x");
@@ -92,32 +101,16 @@ async function rest() {
   out.bridges = Object.fromEntries(["m5", "m5Preview", "m5Projects", "m5Login", "require", "process", "ipcRenderer", "electron", "module", "Buffer"].map(name => [name, typeof window[name]]));
   // T7: no way to write.
   for (const method of ["POST", "PUT", "DELETE", "PATCH"]) await attempt("method" + method, () => fetch("leak.html", { method, body: method === "DELETE" ? undefined : "x" }).then(r => r.status));
-  await attempt("saveFilePicker", () => window.showSaveFilePicker ? window.showSaveFilePicker() : Promise.reject(new Error("unavailable")));
-  await attempt("directoryPicker", () => window.showDirectoryPicker ? window.showDirectoryPicker() : Promise.reject(new Error("unavailable")));
+  out.filePickers = ["showSaveFilePicker", "showOpenFilePicker", "showDirectoryPicker"].map(name => typeof window[name]);
   await attempt("download", async () => { const a = document.createElement("a"); a.href = "data.txt"; a.download = "data.txt"; document.body.append(a); a.click(); await sleep(800); return "clicked"; });
   // T4·T5 through the origin.
   out.paths = {};
   for (const path of [".env", ".git/HEAD", ".git/config", "a/.secret/x.js", "secret.pem", "link.txt", "../outside.txt", "%2e%2e/outside.txt", "a%2f..%2f..%2foutside.txt", "data.txt"]) {
     try { const response = await fetch(path); out.paths[path] = response.status; } catch (error) { out.paths[path] = describe(error); }
   }
-  // T10: every permission.
-  await attempt("camera", () => navigator.mediaDevices.getUserMedia({ video: true }).then(() => "granted"));
-  await attempt("microphone", () => navigator.mediaDevices.getUserMedia({ audio: true }).then(() => "granted"));
-  await attempt("displayMedia", () => navigator.mediaDevices.getDisplayMedia({ video: true }).then(() => "granted"));
-  await attempt("geolocation", () => new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(() => resolve("granted"), error => reject(new Error("geolocation " + error.code)))));
-  await attempt("notification", () => Notification.requestPermission());
-  await attempt("clipboardRead", () => navigator.clipboard.readText().then(() => "read"));
-  await attempt("hid", () => navigator.hid ? navigator.hid.requestDevice({ filters: [] }).then(devices => "devices " + devices.length) : Promise.reject(new Error("unavailable")));
-  await attempt("usb", () => navigator.usb ? navigator.usb.requestDevice({ filters: [] }).then(() => "granted") : Promise.reject(new Error("unavailable")));
-  await attempt("serial", () => navigator.serial ? navigator.serial.requestPort().then(() => "granted") : Promise.reject(new Error("unavailable")));
-  await attempt("midi", () => navigator.requestMIDIAccess({ sysex: true }).then(() => "granted"));
-  await attempt("fullscreen", () => document.documentElement.requestFullscreen().then(() => "granted"));
-  await attempt("permissionGeolocation", () => navigator.permissions.query({ name: "geolocation" }).then(status => status.state));
   // T13
   await attempt("serviceWorker", () => navigator.serviceWorker ? navigator.serviceWorker.register("sw.js").then(() => "registered") : Promise.reject(new Error("unavailable")));
-  // T9
-  await attempt("windowOpen", () => window.open(H + "/open") === null ? "null" : "opened");
-  await attempt("targetBlank", async () => { const a = document.createElement("a"); a.href = H + "/blank"; a.target = "_blank"; document.body.append(a); a.click(); await sleep(500); return "clicked"; });
+  // T9 (windows are tried again with a user gesture, see runPermission)
   await attempt("frameRefresh", async () => {
     const frame = document.createElement("iframe"); frame.src = "refresh.html"; document.body.append(frame);
     await sleep(2000); return frame.contentWindow.location.pathname;
@@ -133,6 +126,37 @@ async function rest() {
   localStorage.setItem("probe-key", "leak-page");
   out.location = location.href;
 }
+// T10 and T9 with a user gesture: the probe calls each one through
+// executeJavaScript(…, userGesture) after focusing the view, so a refusal
+// comes from the permission handlers, not from a missing activation.
+const PERMISSIONS = {
+  camera: () => navigator.mediaDevices.getUserMedia({ video: true }).then(() => "granted"),
+  microphone: () => navigator.mediaDevices.getUserMedia({ audio: true }).then(() => "granted"),
+  displayMedia: () => navigator.mediaDevices.getDisplayMedia({ video: true }).then(() => "granted"),
+  geolocation: () => new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(() => resolve("granted"), error => reject(new Error("geolocation code " + error.code)))),
+  notification: () => Notification.requestPermission(),
+  clipboardRead: () => navigator.clipboard.readText().then(() => "read"),
+  hid: () => navigator.hid ? navigator.hid.requestDevice({ filters: [] }).then(devices => devices.length ? "granted" : "none") : Promise.reject(new Error("api absent")),
+  usb: () => navigator.usb ? navigator.usb.requestDevice({ filters: [] }).then(() => "granted") : Promise.reject(new Error("api absent")),
+  serial: () => navigator.serial ? navigator.serial.requestPort().then(() => "granted") : Promise.reject(new Error("api absent")),
+  midi: () => navigator.requestMIDIAccess({ sysex: true }).then(() => "granted"),
+  // A denied request may stay pending: what counts is that the page never became full screen.
+  fullscreen: async () => {
+    let reason = "pending";
+    try { await within(document.documentElement.requestFullscreen(), 2000); reason = "resolved"; } catch (error) { reason = describe(error); }
+    if (document.fullscreenElement) return "granted";
+    throw new Error("fullscreen refused (" + reason + ")");
+  },
+  permissionGeolocation: () => navigator.permissions.query({ name: "geolocation" }).then(status => status.state),
+  permissionCamera: () => navigator.permissions.query({ name: "camera" }).then(status => status.state),
+  windowOpen: () => window.open(H + "/open") === null ? "null" : "opened",
+  targetBlank: async () => { const a = document.createElement("a"); a.href = H + "/blank"; a.target = "_blank"; document.body.append(a); a.click(); await sleep(500); return "clicked"; },
+};
+window.PERMISSION_NAMES = Object.keys(PERMISSIONS);
+window.runPermission = async (name) => {
+  try { return { ok: true, value: await within(Promise.resolve().then(PERMISSIONS[name])), activation: navigator.userActivation?.isActive ?? null }; }
+  catch (error) { return { ok: false, error: describe(error), focused: document.hasFocus() }; }
+};
 `;
   return `<!doctype html><html><head><meta charset="utf-8"><title>leak</title></head><body><p id="status">ready</p><script>${script}</script></body></html>`;
 }

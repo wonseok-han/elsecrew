@@ -23,6 +23,7 @@
  */
 import type { BrowserWindow, Session, WebContents, WebContentsView, WebPreferences } from "electron";
 import {
+  PREVIEW_ASSET_CHUNK_BYTES_V1,
   PREVIEW_TOKEN_MAX_BYTES_V1,
   PREVIEW_TOKEN_MAX_REQUESTS_V1,
   type PreviewBoundsV1,
@@ -57,6 +58,18 @@ import {
 
 export const PREVIEW_IDLE_CLOSE_MS = 30_000;
 export const PREVIEW_SNAPSHOT_MAX_CHARS = 8 * 1024 * 1024;
+/** Files of one preview read from the sidecar at once, and waiting behind
+ * them (PR #6 review I2): the shared sidecar queue never holds more than
+ * this many preview reads, so stopping, saving and quitting stay prompt. */
+export const PREVIEW_MAX_CONCURRENT_READS = 4;
+export const PREVIEW_MAX_QUEUED_READS = 64;
+/** One file's read, all chunks; the page gets 504 after it. */
+export const PREVIEW_READ_DEADLINE_MS = 15_000;
+/** The still image shown while the app covers the preview is taken ahead
+ * of time (review I3): after loading, after each shown layout and after
+ * input, never while a cover is waiting. */
+export const PREVIEW_SNAPSHOT_DELAY_MS = 400;
+export const PREVIEW_SNAPSHOT_TIMEOUT_MS = 1_000;
 
 export interface PreviewSidecarV1 {
   previewResolve(input: PreviewResolveRequestV1): Promise<PreviewResolveResultV1>;
@@ -75,6 +88,9 @@ export interface PreviewManagerOptionsV1 {
   /** Fixed labels only: never a path, URL or page content. */
   log(label: string): void;
   idleCloseMs?: number;
+  /** Tests only shorten these. */
+  readDeadlineMs?: number;
+  snapshotDelayMs?: number;
 }
 
 interface PreviewInstance {
@@ -82,6 +98,8 @@ interface PreviewInstance {
   readonly token: string;
   readonly entry: string;
   readonly ref: PreviewWorkspaceRefV1;
+  /** The sidecar's record of the verified workspace root (review B1). */
+  readonly handle: string;
   readonly session: Session;
   view: WebContentsView | undefined;
   state: PreviewStateV1;
@@ -92,6 +110,16 @@ interface PreviewInstance {
   hidden: boolean;
   requests: number;
   bytes: number;
+  /** Bytes of chunks asked for and not answered yet. */
+  reserved: number;
+  /** Files being read now, and requests waiting for a free read. */
+  reading: number;
+  waiting: Array<() => void>;
+  /** Bumped by every layout or hide: a capture finishing after a newer
+   * request is thrown away. */
+  layoutGeneration: number;
+  lastSnapshot: string | null;
+  snapshotTimer: ReturnType<typeof setTimeout> | undefined;
   blockedNoticeSent: boolean;
   /** Labels already logged for this preview: each once, not per request. */
   logged: Set<string>;
@@ -118,6 +146,8 @@ export class PreviewManagerV1 {
    * across a newer request (or quitting) is abandoned. */
   #generation = 0;
   #quitting = false;
+  /** Quit preparation in progress (an update, say): may be resumed. */
+  #suspended = false;
   #windowHidden = false;
   readonly diagnostics: PreviewDiagnosticsV1 = {
     opened: 0, closed: 0, blockedRequests: 0, blockedNavigations: 0, blockedDownloads: 0,
@@ -133,9 +163,9 @@ export class PreviewManagerV1 {
   get currentWebContents(): WebContents | undefined { return this.#current?.view?.webContents; }
 
   async request(request: PreviewIpcRequestV1): Promise<PreviewIpcResultV1> {
-    if (request.action === "status") return { action: "status", enabled: this.#options.enabled && !this.#quitting };
+    if (request.action === "status") return { action: "status", enabled: this.#options.enabled && !this.#quitting && !this.#suspended };
     if (!this.#options.enabled) throw new Error("preview is not enabled");
-    if (this.#quitting) throw new Error("preview is closed while the app quits");
+    if (this.#quitting || this.#suspended) throw new Error("preview is closed while the app quits");
     switch (request.action) {
       case "open": return this.#open(request);
       case "layout": return this.#layout(request);
@@ -148,6 +178,7 @@ export class PreviewManagerV1 {
         const instance = this.#find(request.previewId);
         if (instance) {
           instance.hidden = true;
+          instance.layoutGeneration++;
           this.#apply(instance);
           clearTimeout(instance.idleTimer);
           instance.idleTimer = setTimeout(() => this.#close(instance, "idle"), this.#options.idleCloseMs ?? PREVIEW_IDLE_CLOSE_MS);
@@ -169,9 +200,28 @@ export class PreviewManagerV1 {
     if (this.#current) this.#close(this.#current, "quitting");
   }
 
+  /** Quit preparation that may still be called off (an update): close now,
+   * refuse opens and reads until `resume` (review I4). */
+  suspend(): void {
+    this.#suspended = true;
+    this.#generation++;
+    if (this.#current) this.#close(this.#current, "quitting");
+  }
+
+  resume(): void {
+    if (!this.#quitting) this.#suspended = false;
+  }
+
   windowClosed(): void {
     this.#generation++;
     if (this.#current) this.#close(this.#current, "windowClosed");
+  }
+
+  /** The app page reloaded or its process ended: the page that knew the
+   * preview is gone, so is the preview and any open still on its way. */
+  pageReplaced(): void {
+    this.#generation++;
+    if (this.#current) this.#close(this.#current, "reloaded");
   }
 
   /** The main window was minimized or hidden (or shown again). */
@@ -206,8 +256,11 @@ export class PreviewManagerV1 {
     const instance: PreviewInstance = {
       previewId: newPreviewId(), token, entry: resolved.entry,
       ref: { chatId: resolved.chatId, projectId: resolved.projectId, worktreeId: resolved.worktreeId, workspaceIdentity: resolved.workspaceIdentity },
+      handle: resolved.previewHandle,
       session, view: undefined, state: "loading", bounds, viewport: request.viewport,
-      obscured: false, hidden: false, requests: 0, bytes: 0, blockedNoticeSent: false, logged: new Set(), idleTimer: undefined,
+      obscured: false, hidden: false, requests: 0, bytes: 0, reserved: 0, reading: 0, waiting: [],
+      layoutGeneration: 0, lastSnapshot: null, snapshotTimer: undefined,
+      blockedNoticeSent: false, logged: new Set(), idleTimer: undefined,
     };
     try {
       await this.#configureSession(instance);
@@ -218,6 +271,9 @@ export class PreviewManagerV1 {
     }
     const target = this.#options.window();
     if (!target || target.isDestroyed()) { this.#dispose(instance); throw new Error("preview needs the main window"); }
+    // The window may have changed size while the sidecar and session answered.
+    try { instance.bounds = validatePreviewBounds(request.bounds, this.#contentSize(target)); }
+    catch (error) { this.#dispose(instance); throw error; }
     const view = this.#options.createView(previewWebPreferences(session, this.#options.devTools));
     instance.view = view;
     this.#configureContents(instance, view.webContents);
@@ -233,35 +289,51 @@ export class PreviewManagerV1 {
   }
 
   #assertCurrent(generation: number): void {
-    if (this.#quitting || generation !== this.#generation) throw new Error("preview open was superseded");
+    if (this.#quitting || this.#suspended || generation !== this.#generation) throw new Error("preview open was superseded");
   }
 
+  /** Applied at once, never after an await (review I3): a cover hides the
+   * view before this returns, with the still image taken earlier. */
   async #layout(request: Extract<PreviewIpcRequestV1, { action: "layout" }>): Promise<PreviewIpcResultV1> {
     const instance = this.#find(request.previewId);
     const window = this.#options.window();
     if (!instance || !window || window.isDestroyed()) return { action: "layout", previewId: request.previewId, state: "closed", snapshot: null };
-    instance.bounds = validatePreviewBounds(request.bounds, this.#contentSize(window));
+    const bounds = validatePreviewBounds(request.bounds, this.#contentSize(window));
+    instance.layoutGeneration++;
+    const snapshot = request.obscured && !instance.obscured ? instance.lastSnapshot : null;
+    instance.bounds = bounds;
     instance.viewport = request.viewport;
-    let snapshot: string | null = null;
-    if (request.obscured && !instance.obscured) snapshot = await this.#snapshot(instance);
     instance.obscured = request.obscured;
     // Shown again: no longer idle.
     instance.hidden = false;
     clearTimeout(instance.idleTimer);
     instance.idleTimer = undefined;
     this.#apply(instance);
+    this.#scheduleSnapshot(instance);
     return { action: "layout", previewId: instance.previewId, state: instance.state, snapshot };
   }
 
-  async #snapshot(instance: PreviewInstance): Promise<string | null> {
-    const view = instance.view;
-    if (!view || view.webContents.isDestroyed() || instance.state !== "shown") return null;
-    try {
-      const image = await view.webContents.capturePage();
-      if (image.isEmpty()) return null;
-      const url = `data:image/jpeg;base64,${image.toJPEG(70).toString("base64")}`;
-      return url.length <= PREVIEW_SNAPSHOT_MAX_CHARS ? url : null;
-    } catch { return null; }
+  /** Takes the still image a little after the view settles while shown. A
+   * capture that ends after a newer layout, a hide, a cover or a close, or
+   * that takes too long, is thrown away. */
+  #scheduleSnapshot(instance: PreviewInstance): void {
+    clearTimeout(instance.snapshotTimer);
+    instance.snapshotTimer = undefined;
+    if (instance.state !== "shown") return;
+    const generation = instance.layoutGeneration;
+    instance.snapshotTimer = setTimeout(() => {
+      instance.snapshotTimer = undefined;
+      const view = instance.view;
+      if (!view || view.webContents.isDestroyed() || instance.state !== "shown" || generation !== instance.layoutGeneration) return;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), PREVIEW_SNAPSHOT_TIMEOUT_MS); });
+      void Promise.race([view.webContents.capturePage(), timeout]).then((image) => {
+        clearTimeout(timer);
+        if (!image || image.isEmpty() || instance.state !== "shown" || generation !== instance.layoutGeneration) return;
+        const url = `data:image/jpeg;base64,${image.toJPEG(70).toString("base64")}`;
+        if (url.length <= PREVIEW_SNAPSHOT_MAX_CHARS) instance.lastSnapshot = url;
+      }, () => clearTimeout(timer));
+    }, this.#options.snapshotDelayMs ?? PREVIEW_SNAPSHOT_DELAY_MS);
   }
 
   #apply(instance: PreviewInstance): void {
@@ -340,8 +412,11 @@ export class PreviewManagerV1 {
       if (instance.state === "closed") return;
       instance.state = "hidden";
       this.#apply(instance);
+      this.#scheduleSnapshot(instance);
       this.#emit({ previewId: instance.previewId, kind: "loaded" });
     });
+    // What the person did in the page shows in the next still image.
+    contents.on("input-event", () => { if (!instance.snapshotTimer) this.#scheduleSnapshot(instance); });
     contents.on("did-fail-load", (_event, code, _description, _url, isMainFrame) => {
       // -3: aborted by a newer navigation (a reload, say).
       if (!isMainFrame || code === -3 || instance.state === "closed") return;
@@ -353,39 +428,87 @@ export class PreviewManagerV1 {
 
   async #serve(instance: PreviewInstance, request: Request): Promise<Response> {
     const notFound = () => { this.diagnostics.notFound++; return new Response(null, { status: 404, headers: previewResponseHeaders(null) }); };
+    const status = (code: number) => new Response(null, { status: code, headers: previewResponseHeaders(null) });
     if (instance.state === "closed") return notFound();
+    // Every request counts, refused ones too (review I2).
+    if (++instance.requests > PREVIEW_TOKEN_MAX_REQUESTS_V1) {
+      this.#close(instance, "limit");
+      return notFound();
+    }
     if (!PREVIEW_ALLOWED_METHODS.includes(request.method)) {
       this.diagnostics.refusedMethods++;
       return new Response(null, { status: 405, headers: { ...previewResponseHeaders(null), Allow: PREVIEW_ALLOWED_METHODS.join(", ") } });
     }
     const decision = parsePreviewRequestUrl(request.url, instance.token, instance.entry);
     if (!decision.ok) return notFound();
-    if (++instance.requests > PREVIEW_TOKEN_MAX_REQUESTS_V1) {
-      this.#close(instance, "limit");
-      return notFound();
+    if (this.#suspended) return status(503);
+    // At most a few files at once; the rest wait, and a full queue is busy.
+    if (instance.reading >= PREVIEW_MAX_CONCURRENT_READS) {
+      if (instance.waiting.length >= PREVIEW_MAX_QUEUED_READS) return status(503);
+      await new Promise<void>(resolve => instance.waiting.push(resolve));
+      if (isClosed(instance) || this.#suspended) return notFound();
     }
+    instance.reading++;
+    // The read slot is given back when the last sidecar call settles, not
+    // when the page gets its answer: a timed-out call still occupies it.
+    let lastCall: Promise<unknown> = Promise.resolve();
+    try {
+      return await this.#readFile(instance, request, decision.path, (call) => { lastCall = call; }, notFound, status);
+    } finally {
+      void lastCall.catch(() => undefined).finally(() => {
+        instance.reading--;
+        instance.waiting.shift()?.();
+      });
+    }
+  }
+
+  async #readFile(
+    instance: PreviewInstance, request: Request, path: string,
+    track: (call: Promise<unknown>) => void, notFound: () => Response, status: (code: number) => Response,
+  ): Promise<Response> {
+    const deadline = Date.now() + (this.#options.readDeadlineMs ?? PREVIEW_READ_DEADLINE_MS);
     const chunks: Buffer[] = [];
     let offset = 0;
     let length: number | null = null;
     let version: string | null = null;
     do {
       const sidecar = this.#options.sidecar();
-      if (!sidecar || isClosed(instance)) return notFound();
-      let answer: PreviewReadAssetResultV1;
+      if (!sidecar || isClosed(instance) || this.#suspended) return notFound();
+      // The byte budget is checked before asking, not after the answer.
+      if (instance.bytes + instance.reserved + PREVIEW_ASSET_CHUNK_BYTES_V1 > PREVIEW_TOKEN_MAX_BYTES_V1) {
+        this.#close(instance, "limit");
+        return notFound();
+      }
+      const left = deadline - Date.now();
+      if (left <= 0) return status(504);
+      instance.reserved += PREVIEW_ASSET_CHUNK_BYTES_V1;
+      const call = sidecar.previewReadAsset({ ...instance.ref, previewHandle: instance.handle, path, offset });
+      track(call);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let answer: PreviewReadAssetResultV1 | "timeout" | undefined;
       try {
-        answer = await sidecar.previewReadAsset({ ...instance.ref, path: decision.path, offset });
+        answer = await Promise.race([call, new Promise<"timeout">(resolve => { timer = setTimeout(() => resolve("timeout"), left); })]);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         // The workspace itself is gone (discarded, cleaned after a merge,
-        // marked for recovery): this preview cannot continue.
+        // marked for recovery, swapped for another folder): this preview
+        // cannot continue.
         if (/^(?:recoveryRequired|manifestMismatch|symlinkEscape):/.test(message)) this.#close(instance, "workspaceUnavailable");
-        return new Response(null, { status: 503, headers: previewResponseHeaders(null) });
+        return status(503);
+      } finally {
+        clearTimeout(timer);
+        // Answered (or failed): the reservation ends now. Timed out: it ends
+        // when the sidecar finally answers.
+        const unreserve = () => { instance.reserved -= PREVIEW_ASSET_CHUNK_BYTES_V1; };
+        if (answer === "timeout") void call.catch(() => undefined).finally(unreserve);
+        else unreserve();
       }
+      if (answer === "timeout") return status(504);
       if (isClosed(instance) || answer.outcome !== "ok") return notFound();
       if (length === null) { length = answer.byteLength; version = answer.version; }
       else if (answer.byteLength !== length || answer.version !== version) {
         // Changed while being read: the page asks again (a reload).
-        return new Response(null, { status: 503, headers: previewResponseHeaders(null) });
+        return status(503);
       }
       const bytes = Buffer.from(answer.bytesBase64 ?? "", "base64");
       instance.bytes += bytes.byteLength;
@@ -399,7 +522,7 @@ export class PreviewManagerV1 {
     } while (offset < (length ?? 0));
     if (isClosed(instance)) return notFound();
     const body = request.method === "HEAD" ? null : Buffer.concat(chunks);
-    return new Response(body, { status: 200, headers: previewResponseHeaders(decision.path) });
+    return new Response(body, { status: 200, headers: previewResponseHeaders(path) });
   }
 
   #note(instance: PreviewInstance, label: string): void {
@@ -425,6 +548,11 @@ export class PreviewManagerV1 {
     instance.state = "closed";
     clearTimeout(instance.idleTimer);
     instance.idleTimer = undefined;
+    clearTimeout(instance.snapshotTimer);
+    instance.snapshotTimer = undefined;
+    instance.lastSnapshot = null;
+    // Requests still waiting for a read never reach the sidecar.
+    for (const release of instance.waiting.splice(0)) release();
     const view = instance.view;
     instance.view = undefined;
     if (view) {
@@ -465,5 +593,8 @@ export function previewWebPreferences(session: Session, devTools: boolean): WebP
     enableWebSQL: false,
     plugins: false,
     experimentalFeatures: false,
+    // No file pickers at all (T7): the page has no way to ask for a file
+    // to write, whatever the permission handlers would answer.
+    disableBlinkFeatures: "FileSystemAccess,FileSystemAccessLocal",
   };
 }

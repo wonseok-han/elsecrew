@@ -279,7 +279,10 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
       setName: (name: string) => { assert.equal(name, "Elsecrew"); },
       setPath: (key: string, value: string) => { assert.equal(key, "userData"); assert.equal(value, "/app-data"); },
       isPackaged: false,
-      commandLine: { appendSwitch: (name: string, value?: string) => { switches.push(value === undefined ? name : `${name}=${value}`); } },
+      commandLine: {
+        appendSwitch: (name: string, value?: string) => { switches.push(value === undefined ? name : `${name}=${value}`); },
+        getSwitchValue: (name: string) => name === "blink-settings" ? (env.LAUNCH_BLINK_SETTINGS ?? "") : "",
+      },
       quit: () => undefined,
     },
     BrowserWindow: Object.assign(FakeWindow, { getAllWindows: () => FakeWindow.windows }),
@@ -345,7 +348,7 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
     }
     async previewResolve(input: { projectId: string; chatId: string; entry: string | null }) {
       sidecarCalls.push(`previewResolve:${JSON.stringify(input)}`);
-      return { ...input, worktreeId: "worktree_1", workspaceIdentity: "workspace_1", entry: null, refusal: null };
+      return { ...input, worktreeId: "worktree_1", workspaceIdentity: "workspace_1", previewHandle: "ph_cccccccccccccccccccccccccccccccc", entry: null, refusal: null };
     }
     async getProjectTree() {
       sidecarCalls.push("getProjectTree");
@@ -363,7 +366,7 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
   class FakeQuitCoordinator {
     exitAllowed = false;
     constructor(_options: unknown) {}
-    prepareQuit() { return Promise.resolve({ blockers: [], safeToQuit: true }); }
+    prepareQuit() { return Promise.resolve(quitAnswer.value); }
     handleBeforeQuit() {}
   }
   const module = { exports: {} };
@@ -492,6 +495,8 @@ function moduleFor(
 import * as loginContract from "../src/m5/contracts/provider-login-v1.ts";
 import * as approvalContract from "../src/m5/contracts/approval-v1.ts";
 import * as externalLinkContract from "../src/m5/contracts/external-link-v1.ts";
+/** What the fake quit coordinator answers to a quit preparation. */
+const quitAnswer = { value: { blockers: [] as string[], safeToQuit: true } };
 /** What the native "open this address?" confirmation answers (0 = open). */
 const externalLinkAnswer = { value: 1 };
 import * as catalogContract from "../src/m5/contracts/project-catalog-v1.ts";
@@ -629,4 +634,30 @@ test("result preview IPC is off by default, answers only the main frame, and nev
   const event = preventedEvent();
   navigate(event, `elsecrew-preview://${"a".repeat(32)}/index.html`);
   assert.equal(event.prevented, true);
+});
+
+test("a launch blink-settings value is kept; quit preparation closes the preview and a called-off one reopens it (review I4)", async () => {
+  const merged = await loadMain(undefined, false, { ELSECREW_PREVIEW: "1", LAUNCH_BLINK_SETTINGS: "hideScrollbars" });
+  assert.deepEqual(merged.switches, ["blink-settings=hideScrollbars,dnsPrefetchingEnabled=false"]);
+  const handler = merged.handlers.get(previewContract.PREVIEW_CHANNEL_V1)!;
+  const prepare = merged.handlers.get(M5_INTERNAL_CHANNELS_V1.appPrepareQuit)!;
+  const status = async () => JSON.parse(JSON.stringify(await handler(merged.currentEvent(), { action: "status" }))).enabled;
+  assert.equal(await status(), true);
+  // An update's quit preparation that is called off: the preview may open again.
+  quitAnswer.value = { blockers: ["unsaved"], safeToQuit: false };
+  try {
+    await prepare(merged.currentEvent());
+    assert.equal(await status(), true);
+    // Quitting for real: refused from then on.
+    quitAnswer.value = { blockers: [], safeToQuit: true };
+    await prepare(merged.currentEvent());
+    assert.equal(await status(), false);
+  } finally {
+    quitAnswer.value = { blockers: [], safeToQuit: true };
+  }
+  // The app page starting a new document closes the preview (manager tests
+  // cover what closing does); the listener is wired on the main window.
+  const navigation = merged.window.webContents.listeners.get("did-start-navigation");
+  assert.ok(navigation);
+  assert.ok(merged.window.webContents.listeners.get("render-process-gone"));
 });

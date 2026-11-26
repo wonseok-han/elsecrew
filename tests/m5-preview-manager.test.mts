@@ -59,7 +59,14 @@ class FakeContents {
   close() { this.destroyed = true; this.calls.push("close"); }
   reloadIgnoringCache() { this.calls.push("reload"); }
   closeDevTools() { this.calls.push("closeDevTools"); }
-  async capturePage() { return { isEmpty: () => false, toJPEG: (quality: number) => { assert.equal(quality, 70); return Buffer.from("jpeg"); } }; }
+  /** Set to hold captures until released. */
+  captureGate: Promise<void> | undefined;
+  captures = 0;
+  async capturePage() {
+    this.captures++;
+    if (this.captureGate) await this.captureGate;
+    return { isEmpty: () => false, toJPEG: (quality: number) => { assert.equal(quality, 70); return Buffer.from("jpeg"); } };
+  }
 }
 
 class FakeView {
@@ -82,22 +89,25 @@ function harness(overrides: Partial<PreviewManagerOptionsV1> = {}, files: Record
   const children: FakeView[] = [];
   const window = {
     destroyed: false,
+    size: [1280, 800],
     isDestroyed() { return this.destroyed; },
-    getContentSize: () => [1280, 800],
+    getContentSize() { return this.size; },
     contentView: {
       addChildView: (view: FakeView) => { children.push(view); log.push("attach"); },
       removeChildView: (view: FakeView) => { children.splice(children.indexOf(view), 1); },
     },
   };
   let resolveGate: Promise<void> = Promise.resolve();
+  let readGate: Promise<void> = Promise.resolve();
   const sidecar = {
     previewResolve: async (input: PreviewResolveRequestV1) => {
       resolves.push(input);
       await resolveGate;
-      return { ...input, worktreeId: "worktree_1", workspaceIdentity: "workspace_1", entry: "index.html" as string | null, refusal: null };
+      return { ...input, worktreeId: "worktree_1", workspaceIdentity: "workspace_1", previewHandle: "ph_dddddddddddddddddddddddddddddddd", entry: "index.html" as string | null, refusal: null };
     },
     previewReadAsset: async (input: PreviewReadAssetRequestV1) => {
       reads.push(input);
+      await readGate;
       const file = files[input.path];
       if (!file) return { ...input, outcome: "notFound" as const, byteLength: null, version: null, bytesBase64: null };
       const chunk = file.subarray(input.offset, input.offset + 512 * 1024);
@@ -118,6 +128,7 @@ function harness(overrides: Partial<PreviewManagerOptionsV1> = {}, files: Record
   return {
     manager, log, sessions, views, events, reads, resolves, children, window, sidecar,
     gate(promise: Promise<void>) { resolveGate = promise; },
+    gateReads(promise: Promise<void>) { readGate = promise; },
     open: (entry: string | null = null) => manager.request({ action: "open", projectId: "project_1", chatId: "chat_1", entry, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "wide" }),
   };
 }
@@ -144,6 +155,7 @@ test("a preview session is fully configured before its view exists or loads", as
   for (const [key, value] of Object.entries({ sandbox: true, contextIsolation: true, nodeIntegration: false, nodeIntegrationInSubFrames: false, webSecurity: true, allowRunningInsecureContent: false, webviewTag: false, devTools: false, spellcheck: false, navigateOnDragDrop: false, safeDialogs: true, autoplayPolicy: "document-user-activation-required", backgroundThrottling: true })) {
     assert.equal(prefs[key], value, key);
   }
+  assert.equal(prefs.disableBlinkFeatures, "FileSystemAccess,FileSystemAccessLocal");
   assert.equal(view.webContents.webRtcPolicy, "disable_non_proxied_udp");
   assert.deepEqual(session.proxy, { mode: "fixed_servers", proxyRules: "127.0.0.1:9", proxyBypassRules: "<-loopback>" });
   assert.equal(session.userAgent, "Mozilla/5.0 AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36");
@@ -201,7 +213,8 @@ test("the protocol handler serves GET/HEAD only, with fixed headers, from this w
   assert.equal(page.headers.get("x-content-type-options"), "nosniff");
   assert.equal(page.headers.get("cache-control"), "no-store");
   assert.match(page.headers.get("content-security-policy")!, /connect-src 'self'/);
-  assert.deepEqual(h.reads.at(-1), { chatId: "chat_1", projectId: "project_1", worktreeId: "worktree_1", workspaceIdentity: "workspace_1", path: "index.html", offset: 0 });
+  // Every read names the sidecar's record of the verified root (review B1).
+  assert.deepEqual(h.reads.at(-1), { chatId: "chat_1", projectId: "project_1", worktreeId: "worktree_1", workspaceIdentity: "workspace_1", previewHandle: "ph_dddddddddddddddddddddddddddddddd", path: "index.html", offset: 0 });
   // Chunks are joined in order.
   const script = await serve(`elsecrew-preview://${token}/big.js`);
   assert.deepEqual(Buffer.from(await script.arrayBuffer()), big);
@@ -333,7 +346,7 @@ test("quitting closes an open preview at once", async () => {
 });
 
 test("hidden tabs close after the idle wait; layout shows, obscures with a still image, and narrows", async () => {
-  const h = harness({ idleCloseMs: 20 });
+  const h = harness({ idleCloseMs: 20, snapshotDelayMs: 5 });
   const { view, result } = await opened(h);
   const previewId = result.action === "open" && result.outcome === "opened" ? result.previewId : "";
   view.webContents.listeners.get("did-finish-load")!();
@@ -341,6 +354,8 @@ test("hidden tabs close after the idle wait; layout shows, obscures with a still
   const shown = await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "narrow", obscured: false });
   assert.equal(shown.action === "layout" && shown.state, "shown");
   assert.deepEqual(view.bounds, { x: 755, y: 60, width: 390, height: 600 });
+  // The still image is taken ahead of time while shown.
+  await new Promise(resolve => setTimeout(resolve, 30));
   const covered = await h.manager.request({ action: "layout", previewId, bounds: { x: 700, y: 60, width: 500, height: 600 }, viewport: "narrow", obscured: true });
   assert.equal(covered.action === "layout" && covered.snapshot, `data:image/jpeg;base64,${Buffer.from("jpeg").toString("base64")}`);
   assert.equal(view.visible, false);
@@ -366,4 +381,134 @@ test("a task with no page creates nothing; the flag off refuses everything but s
   assert.equal(JSON.stringify(await off.manager.request({ action: "status" })), JSON.stringify({ action: "status", enabled: false }));
   await assert.rejects(off.open(), /not enabled/);
   assert.deepEqual(off.resolves, []);
+});
+
+test("covering hides at once even while a capture hangs; a late capture is thrown away (review I3)", async () => {
+  const h = harness({ idleCloseMs: 30, snapshotDelayMs: 5 });
+  const { view, result } = await opened(h);
+  const previewId = result.action === "open" && result.outcome === "opened" ? result.previewId : "";
+  let release!: () => void;
+  view.webContents.captureGate = new Promise<void>(resolve => { release = resolve; });
+  view.webContents.listeners.get("did-finish-load")!();
+  const bounds = { x: 700, y: 60, width: 500, height: 600 };
+  await h.manager.request({ action: "layout", previewId, bounds, viewport: "wide", obscured: false });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.ok(view.webContents.captures >= 1, "a capture is in flight");
+  // The cover answers without waiting for that capture, and the view is hidden already.
+  const covered = await Promise.race([
+    h.manager.request({ action: "layout", previewId, bounds, viewport: "wide", obscured: true }),
+    new Promise(resolve => setTimeout(() => resolve("waited"), 50)),
+  ]);
+  assert.notEqual(covered, "waited");
+  assert.equal(view.visible, false);
+  assert.equal((covered as { snapshot: string | null }).snapshot, null, "nothing taken yet: no stale image");
+  // Another tab while the capture still hangs: it stays hidden and still closes when idle.
+  await h.manager.request({ action: "hide", previewId });
+  release();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(view.visible, false, "the late capture changed nothing");
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(view.webContents.destroyed, true);
+  assert.equal((h.events.at(-1) as { reason: string }).reason, "idle");
+});
+
+test("parallel reads: at most four reach the sidecar, a full queue is busy, closing drops the waiting ones (review I2)", async () => {
+  const h = harness({}, { "index.html": Buffer.from("<p>hi</p>"), "a.js": Buffer.from("a") });
+  const { session, token, result } = await opened(h);
+  const previewId = result.action === "open" && result.outcome === "opened" ? result.previewId : "";
+  let release!: () => void;
+  h.gateReads(new Promise<void>(resolve => { release = resolve; }));
+  const pending = Array.from({ length: 4 + 64 }, () => session.handler!(new Request(`elsecrew-preview://${token}/a.js`)));
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(h.reads.length, 4, "only four sidecar reads at once");
+  // The queue is full: one more is answered busy without waiting.
+  assert.equal((await session.handler!(new Request(`elsecrew-preview://${token}/a.js`))).status, 503);
+  await h.manager.request({ action: "close", previewId });
+  release();
+  const statuses = (await Promise.all(pending)).map(response => response.status);
+  assert.ok(statuses.every(status => status === 404), JSON.stringify([...new Set(statuses)]));
+  assert.equal(h.reads.length, 4, "the waiting requests never reached the sidecar");
+});
+
+test("a read past its deadline answers 504 and keeps its slot until the sidecar answers (review I2)", async () => {
+  const h = harness({ readDeadlineMs: 20 }, { "index.html": Buffer.from("<p>hi</p>"), "a.js": Buffer.from("a") });
+  const { session, token } = await opened(h);
+  let release!: () => void;
+  h.gateReads(new Promise<void>(resolve => { release = resolve; }));
+  const slow = Array.from({ length: 4 }, () => session.handler!(new Request(`elsecrew-preview://${token}/a.js`)));
+  assert.deepEqual((await Promise.all(slow)).map(response => response.status), [504, 504, 504, 504]);
+  // Four calls are still in the sidecar: the next request waits for a slot.
+  const next = session.handler!(new Request(`elsecrew-preview://${token}/a.js`));
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(h.reads.length, 4);
+  h.gateReads(Promise.resolve());
+  release();
+  assert.equal((await next).status, 200);
+  assert.equal(h.reads.length, 5);
+});
+
+test("the byte budget is checked before asking the sidecar (review I2)", async () => {
+  const big = Buffer.alloc(5 * 1024 * 1024, 1);
+  const h = harness({}, { "index.html": Buffer.from("<p>hi</p>"), "big.js": big });
+  const { session, token } = await opened(h);
+  let status = 200;
+  for (let index = 0; index < 13 && status === 200; index++) {
+    status = (await session.handler!(new Request(`elsecrew-preview://${token}/big.js`))).status;
+  }
+  assert.equal(status, 404);
+  // 64 MiB is 128 chunks: no 129th chunk was ever asked for.
+  assert.equal(h.reads.length, 128);
+  assert.equal((h.events.at(-1) as { reason: string }).reason, "limit");
+});
+
+test("refused requests count toward the request limit too (review I2)", async () => {
+  const h = harness();
+  const { session, token } = await opened(h);
+  for (let index = 0; index < 2000; index++) {
+    assert.equal((await session.handler!(new Request(`elsecrew-preview://${token}/index.html`, { method: "POST" }))).status, 405);
+  }
+  assert.equal((await session.handler!(new Request(`elsecrew-preview://${token}/index.html`))).status, 404);
+  assert.equal(h.reads.length, 0);
+  assert.equal((h.events.at(-1) as { reason: string }).reason, "limit");
+});
+
+test("quit preparation suspends and closes; a called-off one resumes; a replaced page closes and cancels an open on its way (review I4)", async () => {
+  const h = harness();
+  const { view, session, token } = await opened(h);
+  const handler = session.handler!;
+  h.manager.suspend();
+  assert.equal(view.webContents.destroyed, true);
+  assert.equal((h.events.at(-1) as { reason: string }).reason, "quitting");
+  assert.equal((await handler(new Request(`elsecrew-preview://${token}/index.html`))).status, 404);
+  await assert.rejects(h.open(), /quits/);
+  assert.equal(JSON.stringify(await h.manager.request({ action: "status" })), JSON.stringify({ action: "status", enabled: false }));
+  h.manager.resume();
+  const reopened = await opened(h);
+  // The app page reloads while an open waits for the sidecar.
+  let release!: () => void;
+  h.gate(new Promise<void>(resolve => { release = resolve; }));
+  const pendingOpen = h.open();
+  await Promise.resolve();
+  h.manager.pageReplaced();
+  release();
+  await assert.rejects(pendingOpen, /superseded/);
+  assert.equal(reopened.view.webContents.destroyed, true);
+  assert.equal(h.views.length, 2, "the open on its way created no view");
+  // After shutdown, resume never reopens.
+  h.manager.shutdown();
+  h.manager.resume();
+  await assert.rejects(h.open(), /quits/);
+});
+
+test("bounds are checked again after the sidecar and session answer (review minor)", async () => {
+  const h = harness();
+  let release!: () => void;
+  h.gate(new Promise<void>(resolve => { release = resolve; }));
+  const pending = h.open();
+  await Promise.resolve();
+  h.window.size = [900, 800];
+  release();
+  await assert.rejects(pending, /outside the window/);
+  assert.equal(h.views.length, 0);
+  assert.equal(h.sessions[0]?.calls.includes("clearStorageData"), true);
 });

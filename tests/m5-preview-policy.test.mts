@@ -158,6 +158,8 @@ test("bounds are finite, inside the window, at least 120×120; narrow is a cente
   const content = { width: 1280, height: 800 };
   assert.deepEqual(validatePreviewBounds({ x: 700.4, y: 60.6, width: 579.6, height: 700 }, content), { x: 700, y: 61, width: 580, height: 700 });
   assert.deepEqual(validatePreviewBounds({ x: 700, y: 0, width: 581, height: 800 }, content), { x: 700, y: 0, width: 580, height: 800 });
+  // The one-pixel edge allowance never yields a rectangle under the minimum.
+  assert.throws(() => validatePreviewBounds({ x: 1161, y: 0, width: 120, height: 300 }, content), /too small/);
   for (const bad of [
     { x: -1, y: 0, width: 300, height: 300 }, { x: 0, y: 0, width: 119, height: 300 }, { x: 0, y: 0, width: 300, height: 100 },
     { x: 1000, y: 0, width: 300, height: 300 }, { x: 0, y: 600, width: 300, height: 300 }, { x: Number.NaN, y: 0, width: 300, height: 300 },
@@ -174,7 +176,8 @@ test("sidecar contract: requests are exact, answers must echo them and match the
   assert.throws(() => validatePreviewResolveRequestV1({ projectId: "p", chatId: "c", entry: "x.js" }));
   assert.throws(() => validatePreviewResolveRequestV1({ projectId: "p", chatId: "c", entry: null, worktreeId: "w" }));
   const resolveRequest = validatePreviewResolveRequestV1({ projectId: "p", chatId: "c", entry: null });
-  const resolved = { chatId: "c", projectId: "p", worktreeId: "w", workspaceIdentity: "i", entry: "index.html", refusal: null };
+  const resolved = { chatId: "c", projectId: "p", worktreeId: "w", workspaceIdentity: "i", previewHandle: "ph_cccccccccccccccccccccccccccccccc", entry: "index.html", refusal: null };
+  assert.throws(() => validatePreviewResolveResultV1({ ...resolved, previewHandle: "x" }, resolveRequest));
   assert.deepEqual(validatePreviewResolveResultV1(resolved, resolveRequest), resolved);
   assert.throws(() => validatePreviewResolveResultV1({ ...resolved, chatId: "other" }, resolveRequest));
   assert.throws(() => validatePreviewResolveResultV1({ ...resolved, entry: "../x.html" }, resolveRequest));
@@ -183,18 +186,21 @@ test("sidecar contract: requests are exact, answers must echo them and match the
   assert.throws(() => validatePreviewResolveResultV1({ ...resolved, entry: "index.html" }, named));
   assert.equal(validatePreviewResolveResultV1({ ...resolved, entry: null, refusal: "notFound" }, named).refusal, "notFound");
 
-  const read = validatePreviewReadAssetRequestV1({ chatId: "c", projectId: "p", worktreeId: "w", workspaceIdentity: "i", path: "a.js", offset: 0 });
+  const read = validatePreviewReadAssetRequestV1({ chatId: "c", projectId: "p", worktreeId: "w", workspaceIdentity: "i", previewHandle: "ph_cccccccccccccccccccccccccccccccc", path: "a.js", offset: 0 });
+  assert.throws(() => validatePreviewReadAssetRequestV1({ ...read, previewHandle: undefined }));
   assert.throws(() => validatePreviewReadAssetRequestV1({ ...read, offset: -1 }));
   assert.throws(() => validatePreviewReadAssetRequestV1({ ...read, offset: 5 * 1024 * 1024 }));
   const version = `sha256:${"a".repeat(64)}`;
-  const ok = { ...read, outcome: "ok", byteLength: 3, version, bytesBase64: Buffer.from("abc").toString("base64") };
+  // The sidecar echoes the address and path, not the handle.
+  const { previewHandle: _handle, ...echo } = read;
+  const ok = { ...echo, outcome: "ok", byteLength: 3, version, bytesBase64: Buffer.from("abc").toString("base64") };
   assert.equal(validatePreviewReadAssetResultV1(ok, read).bytesBase64, "YWJj");
   assert.throws(() => validatePreviewReadAssetResultV1({ ...ok, bytesBase64: Buffer.from("ab").toString("base64") }, read));
   assert.throws(() => validatePreviewReadAssetResultV1({ ...ok, path: "b.js" }, read));
   assert.throws(() => validatePreviewReadAssetResultV1({ ...ok, workspaceIdentity: "j" }, read));
   assert.throws(() => validatePreviewReadAssetResultV1({ ...ok, byteLength: 6 * 1024 * 1024 }, read));
   assert.throws(() => validatePreviewReadAssetResultV1({ ...ok, outcome: "notFound" }, read));
-  const missing = { ...read, outcome: "notFound", byteLength: null, version: null, bytesBase64: null };
+  const missing = { ...echo, outcome: "notFound", byteLength: null, version: null, bytesBase64: null };
   assert.equal(validatePreviewReadAssetResultV1(missing, read).outcome, "notFound");
   const big = 600 * 1024;
   const first = { ...ok, byteLength: big, bytesBase64: Buffer.alloc(512 * 1024).toString("base64") };
