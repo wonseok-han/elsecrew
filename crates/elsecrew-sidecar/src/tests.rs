@@ -1140,6 +1140,7 @@ fn review_discard_dispatcher_rejects_deferred_native_start_and_cancel() {
                     reservation: None,
                     process: None,
                     result: None,
+                    rediscoveries: 0,
                 },
             );
         } else {

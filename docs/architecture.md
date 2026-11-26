@@ -659,7 +659,7 @@ Keychain 호출은 모두 30초 제한이 있는 자식 프로세스(코어 덤�
     - 9번째 작업이나 크기 한도를 넘는 초안은 보관하지 않고 `save`가 false를 돌려준다. 편집기는 '보관할 공간이 없어요' 안내를 한 번 보인다.
     - 이 불변식은 속성 시험(무작위 순서의 저장·잊기·떠나기·한도 초과·쓰기 거절)이 지킨다.
 - **알림과 배지**: 알림 피드는 앱 전체의 실행을 본다(`notification-feed.ts`, 이번 세션에서 시작을 본 실행의 승인 요청을 2초마다 조회). `project-activity.ts` `ProjectActivityTracker`가 실행 상태 알림으로 프로젝트별 '작업 중'을 셈한다(실행이 살아 있거나, 끝난 뒤 20초는 총괄이 다음 담당을 고르는 중으로 봄, 프로젝트를 열 때 그 목록에서 실제로 일하는 작업으로 맞춤: `listedWorking`, 시작하지 않은 초안은 제외). 전환 팝오버·홈의 프로젝트 줄에 '확인 필요 N'·'작업 중' 배지, 전환 단추에 다른 프로젝트의 상태 점(확인 필요가 우선)을 단다. 다른 프로젝트의 알림을 누르면 전환과 같은 한 동작으로 그 작업을 연다(PR #14 I4).
-  - 한계: 앱을 다시 불러오기 전에 시작된 다른 프로젝트의 실행은 그 프로젝트를 한 번 열기 전까지 배지·승인 조회에 잡히지 않는다(PR-B 수신함에서 엔진 조회로 해결 예정).
+  - 한계였던 것: 앱을 다시 불러오기 전에 시작된 다른 프로젝트의 실행은 그 프로젝트를 한 번 열기 전까지 배지에 잡히지 않았다. PR-B의 수신함 엔진 조회로 배지는 해결했다(아래). 승인 조회는 여전히 이번 세션에서 시작을 본 실행만 2초마다 본다.
 - **쓰기 차단은 실제 쓰기 경로 단위**(`crates/elsecrew-sidecar/src/work_scope.rs` `write_refusal`, `project/write_scope.rs` `WriteScope`): 에이전트는 자기 작업 공간에만 쓰고(Codex 실행 샌드박스, Claude 앱 도구 허가), 앱의 git 쓰기(단계 커밋·합치기·버리기)는 모두 단일 dispatcher 스레드에서 차례로 일어난다. 작업 ID가 아니라 쓰는 경로로 판단한다(PR #18 검토 B1).
   - 작업의 쓰기 범위는 실제 경로(링크 해석)로 구한 작업 공간·프로젝트 폴더·저장소 git 폴더다. 두 범위는 git 폴더가 같거나 폴더가 서로 안에 있으면 만난다. 그래서 **같은 저장소의 작업끼리는 한 잠금**이고, 다른 폴더의 다른 저장소는 따로 간다. 경로를 구할 수 없으면 모든 것과 만난다(fail closed).
   - `workspace.file.save`·`mergeChatWorkspace`·`inspectChatDiscard`/`discardChatWorkspace`·`cleanupWorkspace`·`eraseChatContent`는 그 작업 자신이나, 범위가 만나는 작업이 일할 때 거절한다. `file.save`(작업 없이 연 프로젝트 화면)는 프로젝트 폴더 범위로 본다. 이어지는 조각·확정 요청은 `saveId`로 시작한 저장의 대상을 찾는다.
@@ -688,6 +688,27 @@ Keychain 호출은 모두 30초 제한이 있는 자식 프로세스(코어 덤�
 - **업데이트 다시 시작**은 화면에 열린 프로젝트뿐 아니라 **모든 프로젝트**의 작업을 기다린다(PR #18 검토 I3). 엔진의 `project.catalog` `workStatus`(바쁜 작업이 하나라도 있는지)를 5초마다와 실행 알림 때 읽는다. 읽지 못하면 일하는 중으로 본다.
 - **승인 알림**: 승인 요청의 작업을 처음 읽지 못하면, 그 요청이 아직 기다리는 동안 다음 목록에서 다시 읽는다. 질문 알림은 몇 번 다시 읽는다(PR #18 검토 I2).
 - **단계 막대 → 지난 페이지**: 펼친 단계의 카드가 지금 대화 페이지에 없으면 그 페이지를 연 뒤 카드로 간다(PR #18 검토 M1).
+
+### 한 에이전트의 여러 실행·차례 기다리기·전체 작업 수신함 (ADE multi-project PR-B, 2026-11-27)
+
+- **실행별 잠금(P5)**(`provider_login_process.rs` `HoldKind`): 같은 로그인으로 한 에이전트의 실행 여러 개가 나란히 돈다.
+  - 로그인·로그아웃·설치와 엔진 자신의 Claude 로그인 갱신은 공급자마다 하나인 배타 잠금 `<provider>-login.pending`을 쥔다.
+  - 실행·모델 목록·작업 확인·연결 상태 확인은 각자 `<provider>-run-<32 hex>.pending`을 쥔다. 같은 종류끼리는 서로 막지 않는다.
+  - 두 종류는 먼저 자기 잠금을 만든 뒤 다른 종류를 찾는다. 찾으면 자기 것을 거두고 busy로 답한다. 둘이 동시에 만나면 둘 다 물러난다. 둘 다 진행하는 일은 없다.
+  - 토큰 갱신은 공급자 프로그램끼리 조정한다(Claude Code `.oauth_refresh.lock`, Codex `auth.lock`). 실행 잠금이 있는 동안 엔진은 Claude 로그인을 스스로 갱신하지 않고 상태만 읽는다(`provider_claude_login.rs`).
+  - 실행 영수증 `RunFenceBinding` schema 2는 자기 잠금 이름(`lease`)을 담는다. schema 1은 예전 공용 잠금을 가리킨다. 복구(`recover_run_holds`, `release_settled_fences`)는 실행 잠금도 다룬다. 사용자의 연결 확인·복구는 살아 있는 실행의 잠금을 건너뛰고 진행하며 그 잠금은 건드리지 않는다. 실행 잠금이 하나라도 있으면 설치는 막힌다(`blocks_installation`).
+  - 같은 Claude 프로필의 `tmp/`에는 다른 실행의 `srt-mux-<pid>-<n>.sock`이 생긴다. 프로필 검사(`claude_runtime_files.rs`)는 그 프로필의 Claude 실행 잠금에 기록된, 지금 살아 있는 프로세스의 소켓만 받아들인다(`verify_claude_home_files`, 실행 전 검사·도구 허가 경로 포함). 기록에 없거나 끝난 프로세스의 소켓은 여전히 거절한다.
+- **시작은 아직 한 번에 하나**: 실행 시작은 엔진의 단일 처리 스레드에서 일어나고 하나에 13~18초 걸린다(2026-11-27 실측, Claude 13초·Codex 17초). 그동안 다른 요청도 기다린다.
+  - 그 사이 다른 시작이 받아 둔 확인 결과(유효 30초)가 25초를 넘으면 그 시작은 확인을 다시 한다(최대 2번, `drop_stale_start_discovery`).
+  - Claude 초기화 응답 기한(15초)은 엔진이 1초 넘게 다른 일을 하던 시간만큼 늦춘다(모두 합쳐 120초까지, `ControlInitialization` `stalled`). 이 보정이 없으면 두 번째 Claude 실행이 `response deadline`으로 실패했다.
+  - 시작을 처리 스레드 밖으로 옮기는 일은 후속 과제다.
+- **실행 상한(P3′)**(`project/app_run_limits.rs`): 공급자마다 동시에 살아 있는 실행 수. 기본 3, 설정 › 동시 실행에서 1~6(`getRunLimits`/`setRunLimit`, `run-limit-settings.tsx`).
+  - 기본값 근거(2026-11-26 실측): Claude Code 세션 180~360MB, Codex 세션 약 220MB + 도우미 35MB. 3개씩이면 앱 자신(약 440MB) 옆에 최대 약 1.8GB가 더해지고, 16GB Mac이 감당한다. 구독 사용량 한도도 기본값을 올리지 않는 이유다.
+  - 팀 단계가 상한을 넘으면 멈추지 않고 차례를 기다린다(채팅에 '차례를 기다리는 중이에요' 한 번, 단계 막대 '차례 기다리는 중'). 사용자가 시작한 총괄이 상한을 넘으면 `providerCapacity`로 답하고 그 팀을 대기열에 넣는다. 대기열의 첫 총괄 실행은 나중에 `agent.teamRunAccepted`로 알리고, Electron 클라이언트는 대기열에 넣은 작업의 것만 받아들인다(`#queuedRoots`).
+- **전체 작업 수신함(P4)**: 엔진 조회 `taskInbox`(`chat.rs` `task_inbox`)가 모든 프로젝트에서 일하는 중·확인이 필요한·검토할 작업을 최근 변경 순으로 준다. 위쪽 막대의 수신함(`task-inbox.tsx`, 규칙은 `task-inbox-model.ts`)이 이를 세 묶음으로 보이고, 누르면 필요하면 프로젝트를 바꿔 그 작업을 연다. 프로젝트 배지도 이 목록으로 맞춘다(`project-activity.ts` `reconcileFromEngine`). 그래서 앱을 다시 불러오기 전에 시작된 다른 프로젝트의 실행도 잡힌다(PR-A의 한계 해결).
+- **시험**:
+  - sidecar: `a_team_over_the_run_limit_waits_its_turn_instead_of_stopping`, `the_task_inbox_lists_every_projects_working_and_ready_tasks`, 실행 잠금 시험(`provider_login_process.rs`), `another_live_runs_mux_is_admitted_only_while_its_hold_records_it`, `owned_toy_control_exchange_handles_reply_cancel_and_deadline_without_prompt`(`stalled`·`overstalled`).
+  - 실제 계정: `scripts/m5-multiproject-real-run.cjs`(Electron으로 실행, 개발 앱 데이터 사용)가 두 프로젝트에서 Claude 2개·Codex 2개를 동시에 시작해 끝까지 돌린다. 도중과 끝난 뒤 Claude 로그인 확인과 모델 목록을 함께 부르고, 같은 에이전트 두 실행이 실제로 겹쳤는지 실행 기록의 시각으로 본다.
 
 ### 에이전트 연결·알림 패널 (ADE 화면 통일 U5·U6, 2026-11-26)
 

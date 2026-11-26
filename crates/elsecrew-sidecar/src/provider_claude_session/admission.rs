@@ -44,7 +44,8 @@ impl Admission {
     }
 
     fn revalidate(&self) -> Result<(), SidecarError> {
-        verify_runtime_files(&self.home)?;
+        // Other live runs of this profile may have their sockets here (P5).
+        crate::provider_profile::verify_claude_home_files(&self.home)?;
         self.revalidate_bound_inputs()
     }
 

@@ -2,6 +2,27 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — ADE multi-project PR-B: 한 에이전트의 여러 실행·차례 기다리기·전체 수신함 (`orca/ade-multiproject-b`)
+PR #18 머지(68503092) 뒤 WIP(afaaa370)를 그 위로 옮겨 이어 갔다. 설계 요약은 `docs/architecture.md` "한 에이전트의 여러 실행·차례 기다리기·전체 작업 수신함".
+
+- **P5 실행별 잠금**: 로그인·설치·엔진의 Claude 로그인 갱신만 배타 잠금(`<provider>-login.pending`), 실행·모델 목록·확인은 각자 `<provider>-run-<id>.pending`. 실행 중에는 엔진이 Claude 토큰을 직접 갱신하지 않는다. 영수증 schema 2(`lease`).
+- **P3′ 실행 상한**: 공급자마다 기본 3, 설정에서 1~6. 넘으면 팀 단계는 '차례를 기다리는 중', 사용자가 시작한 총괄은 대기열(`providerCapacity` → 나중에 `agent.teamRunAccepted`).
+- **P4 전체 작업 수신함**: 엔진 조회 `taskInbox`, 위쪽 막대 수신함, 프로젝트 배지도 엔진 목록으로 맞춤.
+- **실제 동시 실행에서 찾아 고친 것 3가지**(첫 시험에서는 같은 공급자의 두 번째 실행이 모두 실패했다)
+  - Claude: 같은 프로필 `tmp/`에 다른 실행의 `srt-mux-<pid>-<n>.sock`이 있으면 프로필 검사가 거절했다. 그 프로필의 Claude 실행 잠금에 기록된 살아 있는 프로세스의 소켓만 받아들이게 했다(`verify_claude_home_files`, 시험 `another_live_runs_mux_is_admitted_only_while_its_hold_records_it`).
+  - Codex·Claude: 시작은 엔진 단일 스레드에서 하나에 13~18초 걸리고, 그 사이 다른 시작의 확인 결과(유효 30초)가 낡았다. 25초를 넘으면 확인을 다시 한다(최대 2번, `drop_stale_start_discovery`).
+  - Claude: 초기화 응답 기한 15초가 다른 시작이 엔진을 잡은 시간까지 셌다(`response deadline`). 1초 넘는 틈은 기한을 그만큼 늦춘다(합계 120초까지, 시험 `stalled`·`overstalled`).
+  - 그 밖에: 프로필 항목이 목록과 확인 사이에 사라지면(다른 실행이 지움) 건너뛴다(Claude·Codex 프로필 검사).
+- **7e65e4a7에서 놓친 시험 9건**: 실행 잠금을 예전 `claude-login.pending` 이름으로 찾던 복구·삭제·재시작 시험 8건을 영수증의 실제 잠금 이름(`lease_name()`)으로 고쳤다. `fake_agent_cancel_uncertain_poison_survives_and_is_abandon_only`는 "살아 있는 실행 잠금이 있으면 복구는 busy"를 기대했다. P5에서는 복구가 살아 있는 실행 잠금을 건너뛰고 진행한다(`recover_run_holds`). 시험은 응답에 오류가 없고 잠금 내용이 그대로인지 본다. 끝난 뒤 미해결 실행이면 `providerLoginRecoveryRequired`인 것은 그대로다.
+- **실제 시험**(`scripts/m5-multiproject-real-run.cjs`, 개발 앱 데이터, 실행 전 ps로 다른 Elsecrew 앱 없음 확인, 시험 프로젝트는 끝에 삭제, 자기 PID 외 종료 없음)
+  - 최종(`~/Documents/elsecrew-ade-multiproject-2026-11-26/pr-b/real/real-run.json`): Claude 2개(1~1000) + Codex 2개(1~300) 동시 시작 → 4개 모두 성공, 폴링 최고 동시 4, Claude 두 실행 51초·Codex 두 실행 303초 겹침. 4개가 도는 중에 Claude 로그인 확인 `connected`, 두 공급자 모델 목록 5·10개. 끝난 뒤 두 연결 유지, Claude 확인 `connected`.
+  - Codex만(`pr-b/real-codex`): 두 실행 274초 겹침, 둘 다 성공.
+  - 토큰 갱신 충돌: 관찰하지 못했다. 다만 시험 동안 토큰 만료가 오지 않아 갱신 경쟁 자체가 일어났는지는 확인하지 못했다.
+  - 미해결 1건: 수정 전 4개 혼합 시험(Codex 1~1000)에서 Codex 하나가 60초에 실패했고 원인 기록을 남기지 못했다. 이후 같은 조건 재현에서는 실패가 없었다(Codex 1~1000은 10분 넘게 걸려 시험 시간 초과, 1~300은 약 290초).
+- **겹침**: PR #17(큰 줄 처리)은 rebase에서 충돌 없음. PR #19(ade-stability, 승인 경로·Codex 권한)와 같은 파일: `agent_runtime.rs`, `agent_runtime/discovery.rs`, `agent_runtime/native.rs`, `provider_claude_session.rs`, `provider_preflight_session.rs`, `provider_profile.rs`, `docs/history.md`, `src/locales/{ko,en}.ts`, `src/m5/styles.css`.
+- **검증**: `npm test` 1012/1012, 렌더러 스모크 69/69(7e65e4a7 기준, 이후 렌더러 변경 없음), sidecar 전체(아래 결과), 네이티브 스모크.
+- **다음 할 일**: 실행 시작을 엔진 처리 스레드 밖으로 옮기기(지금은 시작마다 13~18초 동안 다른 요청도 기다림). Codex 혼합 실패 1건 재현 시 원인 확인. Windows는 실행 경로가 비활성이라 미검증.
+
 ### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #18 3차 확인(B1 두 점) 반영 (`orca/ade-multiproject-a`)
 3차 확인 `~/Documents/elsecrew-ade-multiproject-2026-11-26/REVIEW-pr18-3.md`(대상 6859a030). B2는 해결로 확인됐다.
 
@@ -306,6 +327,9 @@
   - 초안 보관소(`editor-drafts.ts`)는 이미 보관한 것을 지우지 않는다(PR #18 검토 B2·재확인). 저장은 전부 아니면 무변경이고, 속성 시험이 이를 지킨다. 새 초안이 못 들어가면 그 초안을 보관하지 않고 알린다. 예전의 "오래된 작업부터 지움" 규칙으로 되돌리지 않는다.
   - 폴더 겹침 검사는 그 폴더에 무엇이든 쓰기 전 첫 단계다(빈 폴더·일반 폴더 초기화, 새 작업 폴더). `.git/commondir` 저장소는 등록하지 않는다.
   - 공급자 동시 실행(PR-B): CLI는 같은 설정 폴더의 프로세스끼리 토큰 갱신을 스스로 잠근다(Claude 2.1.328 `.oauth_refresh.lock`, Codex 0.167.2 `auth.lock`, 문자열 근거). sidecar가 직접 하는 Claude 갱신은 그 잠금을 잡지 않으므로, 실행이 살아 있을 때는 하지 않아야 한다.
+  - PR-B(2026-11-27): 잠금은 두 종류다. 배타 `<provider>-login.pending`(로그인·설치·엔진의 Claude 갱신)과 실행마다의 `<provider>-run-<id>.pending`(실행·모델 목록·확인). 아래 "공급자 fence 경합(2026-11-12)"의 "모두 같은 잠금 공유"는 이제 배타 쪽에만 해당한다.
+  - 같은 프로필을 여러 실행이 쓰면 생기는 것: Claude 프로필 `tmp/`의 다른 실행 소켓(실행 잠금에 기록된 살아 있는 프로세스 것만 인정), 목록과 확인 사이에 사라지는 프로필 항목(건너뜀).
+  - 실행 시작은 엔진 단일 스레드에서 하나에 13~18초 걸린다(실측). 그 시간 동안의 시간 제한은 엔진이 막힌 시간을 빼고 세야 한다(확인 결과 25초 넘으면 다시 확인, Claude 초기화 기한은 1초 넘는 틈만큼 늦춤). Codex는 긴 답이 매우 느리다(1~300 단어 약 290초).
 - **실제 앱 시험의 함정(2026-11-26, ADE V)**
   - 앱 전용 로그인은 프로필 안에 있다(Codex `…/m5/codex-profile-v1/auth.json`, Claude는 설정 폴더 경로 해시로 구분된 Keychain 항목). 그래서 임시 `--user-data-dir`로는 실제 실행이 안 된다.
   - 개발 앱 창이 다른 창에 완전히 가려지면 macOS Electron이 `hide`를 보내 미리보기가 숨고, rAF도 멈춘다. CDP 측정 중 "뷰가 안 보임"은 이것부터 의심한다(창을 앞으로 가져오면 다시 보인다).

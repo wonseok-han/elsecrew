@@ -1393,7 +1393,7 @@ mod tests {
         let mut owner = crate::provider_login_process::LoginProcess::reserve_claude_owned(profile).unwrap();
         owner.retain_fence_before_launch(run_id).unwrap();
         let binding = owner.bind_run_fence(run_id).unwrap();
-        let fence_path = sidecar.storage.path().parent().unwrap().join("claude-login.pending");
+        let fence_path = sidecar.storage.path().parent().unwrap().join(binding.lease_name());
         let mut projection = sidecar.storage.projection_record("run", run_id).unwrap().unwrap();
         let mut fence = std::fs::OpenOptions::new().append(true).open(&fence_path).unwrap();
         for process in projection["process_identity_internal"].as_array().unwrap() {

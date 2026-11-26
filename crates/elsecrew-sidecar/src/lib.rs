@@ -694,6 +694,9 @@ struct PendingAgentStart {
     #[cfg(target_os = "macos")]
     process: Option<provider_login_process::LoginProcess<'static>>,
     result: Option<Result<chat::G5Action, SidecarError>>,
+    /// How many times this start discovered again because its discovery
+    /// waited too long for the engine (ADE multi-project P5).
+    rediscoveries: u8,
 }
 
 struct AdmissionWorker {
@@ -2789,7 +2792,7 @@ impl Sidecar {
             .map_err(|_| SidecarError::new("invalidParams", "invalid start request"))?;
         let runtime = self.agent_runtime.begin_scoped_start(&self.storage, &self.projects, &input, &request.request_id)?;
         self.pending_agent_starts.insert(request.request_id.clone(), PendingAgentStart {
-            runtime, request, input, reservation: None, process: None, result: None,
+            runtime, request, input, reservation: None, process: None, result: None, rediscoveries: 0,
         });
         Ok(HandledRequest { response: None, events: Vec::new() })
     }
@@ -2811,6 +2814,17 @@ impl Sidecar {
         let ids: Vec<_> = self.pending_agent_starts.keys().cloned().collect();
         for id in ids {
             let mut pending = self.pending_agent_starts.remove(&id).unwrap();
+            if pending.result.is_none() && pending.rediscoveries < 2
+                && self.agent_runtime.drop_stale_start_discovery(&id)
+            {
+                // Beside other runs of the agent a finished discovery can wait
+                // for the engine longer than a start may use it: discover again.
+                pending.rediscoveries += 1;
+                match self.agent_runtime.begin_scoped_start(&self.storage, &self.projects, &pending.input, &id) {
+                    Ok(_) => { self.pending_agent_starts.insert(id, pending); continue; }
+                    Err(error) => pending.result = Some(Err(error)),
+                }
+            }
             if pending.result.is_none() {
                 if pending.runtime == "claude-code" {
                     let Some(observed) = self.agent_runtime.take_claude_discovery(&self.storage, &self.projects, &id) else {

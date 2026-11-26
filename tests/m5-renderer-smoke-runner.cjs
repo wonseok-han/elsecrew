@@ -208,6 +208,12 @@ app.whenReady().then(async () => {
     if (document.getElementById('codex-connection-details').hidden) throw new Error('settings connection controls must stay visible');
     await ${waitFor("!document.getElementById('codex-connection-details').hidden", "connection settings expanded")};
     ${capture("02-settings-agents-expanded")}
+    // ADE multi-project P3′: how many runs of each agent may work at once (1–6, default 3).
+    await ${waitFor("document.querySelector('[data-testid=run-limit-codex]') && !document.querySelector('[data-testid=run-limit-codex]').disabled", "run limits loaded")};
+    if (document.querySelector('[data-testid=run-limit-codex]').value !== '3' || document.querySelector('[data-testid=run-limit-codex]').options.length !== 6) throw new Error('run limits must offer 1 to 6 with the default 3');
+    document.querySelector('[data-testid=run-limits]').scrollIntoView({ block: 'center' });
+    ${capture("36-run-limits")}
+    document.querySelector('.m5-preferences-layout > nav button').scrollIntoView({ block: 'start' });
     await new Promise(resolve => setTimeout(resolve, 600));
     if (document.getElementById('codex-connection-details').hidden) throw new Error('status polling collapsed explicit settings');
     codexButton('연결 상태 다시 확인').click();

@@ -20,7 +20,7 @@ mod runtime_files;
 #[cfg(target_os = "macos")]
 mod claude_runtime_files;
 #[cfg(target_os = "macos")]
-pub(crate) use claude_runtime_files::verify_claude_runtime_files;
+pub(crate) use claude_runtime_files::{verify_claude_home_files, verify_claude_runtime_files};
 #[cfg(target_os = "macos")]
 pub(crate) use runtime_files::verify_codex_runtime_files;
 
@@ -115,7 +115,13 @@ fn profile_directory(app_data: &Dir, create_missing: bool) -> Result<Dir, Sideca
             if matches!(name, "agents.md" | "claude.md" | "settings.local.json" | ".mcp.json") {
                 return Err(failure());
             }
-            let meta = profile.symlink_metadata(&file_name).map_err(|_| failure())?;
+            // Another run's Codex may remove a file of its own between the
+            // listing and this look (ADE multi-project P5): gone is no threat.
+            let meta = match profile.symlink_metadata(&file_name) {
+                Ok(meta) => meta,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(_) => return Err(failure()),
+            };
             let requires_directory = matches!(name, "skills" | "tmp" | ".tmp" | "plugins");
             let requires_file = matches!(name, "installation_id" | "models_cache.json")
                 || name.ends_with(".sqlite") || name.ends_with(".sqlite-wal") || name.ends_with(".sqlite-shm");
