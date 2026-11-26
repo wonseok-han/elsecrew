@@ -19,6 +19,7 @@
 - **최신 feature/ade(e7965d97, PR #12·#13) 병합 뒤**: `npm test` 948/948, `pnpm build`, `pnpm m5:test:latency` PASS(작업 21·실행 40 시드, 조건별 10회: 파일 열기 p95 쉬는 중 143·실행 중 67·봉인 시작 198·뒤 검사 중 69ms, 승인 목록 p95 27ms, getChat p95 ≤86ms, 재시작 0).
 - **위험 경계(독립 검토 대상)**: projection 기억은 저장소 검증 경계다(전 행 비교 유지로 손상 검출 동일). 승인 보기의 Git 재사용은 권한 경계다(보기만, 답은 전체 검사). fake 모드 봉인 인자는 디버그·QA 빌드의 fixture 경로뿐.
 - **함정(재조사 방지)**: 측정기에서 다리로 `readWorkspaceFile`을 직접 부르면 스트림을 화면이 소비하지 않아도 main이 정리하지만(수정 후), 수정 전에는 그 자체가 재시작을 일으킨다. 파일 열기는 화면 트리 클릭으로 잰다. 트리는 가상화돼 보이지 않는 행이 DOM에 없고, Monaco는 공백을 NBSP로 그린다. fake 실행은 60초면 끝난다. 저장소는 EXCLUSIVE라 다른 연결이 쓸 수 없다. 대기 루프에 `pgrep -f '...rustc'`를 쓰면 자기 명령줄과 일치해 영원히 기다린다(`pgrep -x`).
+- **PR**: https://github.com/wonseok-han/elsecrew/pull/15 (`--base feature/ade`).
 - **남은 일**: 실제 Claude 권한 요청으로 D3(카드가 '불러오는 중…' 뒤 2~4초에 사라짐)가 줄었는지 확인(실계정 필요, fake 공급자에는 승인 큐가 없어 승인 경로 처리 시간은 0으로 나옴). 파일 읽기의 git 확인 재사용 검토. Codex 검토 대응.
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #12 독립 검토(차단 1·중요 6·경미 4) 전부 반영 (`orca/ade-screens-u2-u4`)
