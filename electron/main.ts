@@ -18,6 +18,7 @@ import { LOGIN_CHANNEL, validateLoginRequest, validateLoginStatus } from "../src
 import { classifyLoginFailure } from "../src/m5/provider-login-diagnostic.ts";
 import { INSTALL_CHANNEL, validateInstallRequest, validateInstallStatus } from "../src/m5/contracts/provider-install-v1.ts";
 import { APPROVAL_CHANNEL, validateApprovalRequest, validateApprovalResult } from "../src/m5/contracts/approval-v1.ts";
+import { EXTERNAL_LINK_CHANNEL, validateExternalLink } from "../src/m5/contracts/external-link-v1.ts";
 import { PROJECT_CATALOG_CHANNEL, validateProjectCatalogRequest, validateProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
 import { mkdirSync, readFileSync, realpathSync, rmSync, statSync, readdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve, sep, win32 } from "node:path";
@@ -597,6 +598,22 @@ function registerIpcHandlers(): void {
     const result = validateProjectCatalogResult(await sidecar.projectCatalog(request), request);
     if (request.action === "setProviderConnection") claudeUsage.invalidate();
     return result;
+  }));
+  // A link in a team report: checked again here, shown in full in a native
+  // confirmation (the page cannot answer it), and only then opened outside.
+  ipcMain.handle(EXTERNAL_LINK_CHANNEL, quietAfterQuit(async (event, input: unknown) => {
+    assertCurrentMainFrame(event);
+    const url = validateExternalLink(input);
+    if (!url || !mainWindow) throw new Error("invalid external link");
+    const ko = app.getLocale().toLowerCase().startsWith("ko");
+    const confirmation = await dialog.showMessageBox(mainWindow, {
+      type: "question", buttons: ko ? ["열기", "취소"] : ["Open", "Cancel"], defaultId: 1, cancelId: 1, noLink: true,
+      message: ko ? "이 주소를 브라우저에서 열까요?" : "Open this address in your browser?",
+      detail: url,
+    });
+    if (confirmation.response !== 0) return { opened: false };
+    await shell.openExternal(url);
+    return { opened: true };
   }));
   ipcMain.handle(APPROVAL_CHANNEL, quietAfterQuit(async (event, input: unknown) => {
     assertCurrentMainFrame(event);

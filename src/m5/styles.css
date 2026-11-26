@@ -1399,3 +1399,116 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 /* Settings: where new task worktrees go. */
 .m5-workspace-folder-path code { overflow-wrap: anywhere; font-size: 12px; }
 .m5-workspace-folder-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* ===== ADE 1차-가: 믿을 수 있는 표시 =====
+   One task status (task-status.ts) drives these colours; 1차-나 folds them
+   into its semantic tokens. Status colour names are shared with it. */
+:root {
+  --status-running: #5aa7ff;
+  --status-attention: #f4b453;
+  --status-review: #c9a7ff;
+  --status-done: #5fc48a;
+  --status-danger: #ef7a6f;
+  --status-neutral: #6f7d8e;
+}
+
+/* Task list: one label per status. */
+.m5-chat-status.m5-chat-status-running, .m5-chat-chip.selected .m5-chat-status.m5-chat-status-running { color: #91c5ff; }
+.m5-chat-status.m5-chat-status-attention, .m5-chat-chip.selected .m5-chat-status.m5-chat-status-attention { color: #ffd28c; }
+.m5-chat-status.m5-chat-status-review, .m5-chat-chip.selected .m5-chat-status.m5-chat-status-review { color: #d9c4ff; }
+.m5-chat-status.m5-chat-status-done, .m5-chat-chip.selected .m5-chat-status.m5-chat-status-done { color: #9fdcb7; }
+.m5-chat-status.m5-chat-status-danger, .m5-chat-chip.selected .m5-chat-status.m5-chat-status-danger { color: #f3a49b; }
+.m5-chat-status.m5-chat-status-running::before { background: var(--status-running); animation: m5-chat-dot 1.4s ease-in-out infinite; }
+.m5-chat-status.m5-chat-status-attention::before { background: var(--status-attention); }
+.m5-chat-status.m5-chat-status-review::before { background: var(--status-review); }
+.m5-chat-status.m5-chat-status-done::before { background: var(--status-done); }
+.m5-chat-status.m5-chat-status-danger::before { background: var(--status-danger); }
+.m5-chat-status.m5-chat-status-neutral::before { background: var(--status-neutral); }
+
+/* Result bar: settled work is calm; a placeholder while its status is read. */
+.m5-result-bar[data-task-phase="merged"], .m5-result-bar[data-task-phase="applied"] { border-color: #2c3a2f; }
+.m5-result-bar[data-task-phase="changedSince"] { border-color: #4a3f63; background: #19161f; }
+.m5-result-bar[data-task-phase="changedSince"] .m5-result-mark { color: var(--status-review); }
+.m5-result-loading .m5-result-mark, .m5-result-loading .m5-result-text > strong { visibility: hidden; }
+.m5-result-loading .m5-result-decide { visibility: hidden; }
+.m5-result-decide { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.m5-result-decide > button { padding: 4px 12px; font-size: 12px; min-height: 0; }
+.m5-skeleton-line { display: inline-block; width: 180px; max-width: 100%; height: 10px; border-radius: 5px; vertical-align: middle;
+  background: linear-gradient(90deg, var(--m5-raised) 0%, var(--m5-hover) 50%, var(--m5-raised) 100%); background-size: 200% 100%; animation: m5-skeleton 1.2s ease-in-out infinite; }
+@keyframes m5-skeleton { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) { .m5-skeleton-line { animation: none; } }
+.m5-start-pending { display: grid; gap: 12px; align-content: start; padding: 32px; }
+.m5-start-pending .m5-skeleton-line { width: 240px; height: 14px; }
+.m5-start-pending p { margin: 0; color: var(--m5-muted); }
+.m5-task-changes-working { margin: 8px 12px; padding: 8px 10px; border-left: 3px solid var(--status-running); border-radius: 4px; background: var(--m5-surface); color: var(--m5-muted); font-size: 12px; line-height: 1.5; }
+
+/* Details for those who ask: branch, commits, run IDs. */
+.m5-merge-more, .m5-message-details, .m5-first-chat-detail { font-size: 11px; color: var(--m5-muted); }
+.m5-merge-more > summary, .m5-message-details > summary, .m5-first-chat-detail > summary { cursor: pointer; list-style: none; }
+.m5-merge-more > summary::-webkit-details-marker, .m5-message-details > summary::-webkit-details-marker { display: none; }
+.m5-merge-more[open] .m5-merge-branch { display: block; max-width: 320px; white-space: normal; overflow-wrap: anywhere; }
+.m5-message-details { margin-top: 4px; }
+.m5-first-chat-detail p { margin: 4px 0 0; }
+.m5-merge-resolving { color: var(--status-attention); }
+
+/* Markdown in messages: drawn, never raw marks. */
+.m5-md { line-height: 1.65; overflow-wrap: anywhere; }
+.m5-md > :first-child { margin-top: 0; }
+.m5-md > :last-child { margin-bottom: 0; }
+.m5-md p { margin: 0 0 8px; }
+.m5-md .m5-md-heading { margin: 14px 0 6px; font-size: 13px; font-weight: 700; color: var(--m5-text); }
+.m5-md .m5-md-h1, .m5-md .m5-md-h2 { font-size: 14px; }
+.m5-md .m5-md-list { margin: 4px 0 8px; padding-left: 20px; }
+.m5-md .m5-md-list li { margin: 2px 0; }
+.m5-md .m5-md-list li > p { margin: 0; }
+.m5-md .m5-md-quote { margin: 6px 0; padding: 2px 0 2px 12px; border-left: 3px solid var(--m5-border-strong); color: var(--m5-muted); }
+.m5-md .m5-md-rule { border: 0; border-top: 1px solid var(--m5-border); margin: 12px 0; }
+.m5-md .m5-md-inline-code { padding: 1px 5px; border-radius: 4px; background: var(--m5-raised); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.m5-md .m5-md-link { color: #91c5ff; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.m5-md .m5-md-link:focus-visible { outline: 2px solid #91c5ff; outline-offset: 2px; border-radius: 2px; }
+.m5-md .m5-md-table { max-width: 100%; overflow-x: auto; margin: 6px 0 10px; }
+.m5-md .m5-md-table table { border-collapse: collapse; font-size: 12px; }
+.m5-md .m5-md-table th, .m5-md .m5-md-table td { padding: 4px 8px; border: 1px solid var(--m5-border); vertical-align: top; }
+.m5-md .m5-md-table th { background: var(--m5-raised); font-weight: 600; }
+.m5-md .m5-md-code { margin: 6px 0; padding: 10px; overflow: auto; border-radius: 6px; background: var(--m5-bg); font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.m5-message-fold .m5-message-summary { margin: 0; line-height: 1.65; }
+.m5-message-fold .m5-message-more { margin-top: 4px; color: #91c5ff; }
+
+/* Activity lines: Korean verb + place; the agent's own words fold. */
+.m5-activity-folded > summary { display: flex; align-items: baseline; gap: 6px; min-width: 0; cursor: pointer; list-style: none; }
+.m5-activity-folded > summary::-webkit-details-marker { display: none; }
+.m5-activity-folded { display: block; }
+.m5-activity-original { margin: 2px 0 4px 12px; color: var(--m5-muted); font-size: 11.5px; overflow-wrap: anywhere; }
+.m5-activity-count { color: var(--m5-muted); font-size: 11px; }
+.m5-output-note { margin: 0; color: var(--m5-muted); font-size: 12px; line-height: 1.5; }
+.m5-output-note > summary { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Documents (.md) in changes: drawn and in a proportional font. */
+.m5-prose-toggle { display: inline-flex; gap: 4px; margin: 8px 12px 0; }
+.m5-prose-toggle button { padding: 3px 10px; font-size: 12px; }
+.m5-prose-toggle button[aria-pressed="true"] { background: var(--m5-hover); }
+.m5-prose-preview { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 16px 20px; font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif; font-size: 14px; }
+
+/* Permission card: what is asked, first. */
+.m5-approval-request { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--m5-border); }
+.m5-approval-line { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; margin: 0; }
+.m5-approval-kind { font-weight: 600; color: var(--status-attention); }
+.m5-approval-target { min-width: 0; overflow-wrap: anywhere; padding: 1px 6px; border-radius: 4px; background: var(--m5-bg); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.m5-approval-reading { color: var(--m5-muted); }
+.m5-approval-why { margin: 4px 0 0; color: var(--m5-muted); }
+.m5-approval-accept-note { margin: 6px 0 0; font-size: 12px; color: var(--m5-muted); }
+.m5-approval-actions { display: flex; flex-wrap: wrap; }
+.m5-approval-withdrawn { margin: 8px 0 0; color: var(--m5-muted); font-size: 12px; }
+.m5-approval-help > summary { cursor: pointer; font-size: 12px; color: var(--m5-muted); }
+.m5-notification-resolved { opacity: 0.6; }
+
+/* Storage settings: the folder section is a card like its neighbours. */
+.m5-preferences-content .m5-workspace-folder { padding: 20px; border: 1px solid var(--m5-border-strong); border-radius: 12px; background: var(--m5-surface); margin-bottom: 24px; }
+.m5-preferences-content .m5-workspace-folder h3 { margin: 0 0 6px; font-size: 14px; }
+.m5-preferences-content .m5-workspace-folder .m5-settings-intro { margin: 0 0 12px; }
+.m5-preferences-content .m5-workspace-folder-path { margin: 0 0 12px; overflow-wrap: anywhere; }
+.m5-approval-verbatim { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; max-height: 320px; overflow: auto; }
+.m5-approval-details[open] > summary { margin-bottom: 6px; }
+.m5-approval-details > summary { cursor: pointer; font-weight: 600; }
+.m5-md-plain { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.m5-md-plain-note { color: var(--m5-muted); font-size: 12px; }
