@@ -39,6 +39,7 @@ export const ko = {
   "m5.permissions.scope": "이 프로젝트의 작업 공간에서 허용할 범위를 한 번 정하세요. 연결된 에이전트와 팀 작업에 적용되며 언제든 변경할 수 있어요.",
   "m5.permissions.files": "파일 읽기·검색·생성·편집 허용",
   "m5.permissions.commands": "작업 공간에서 개발·빌드·테스트 명령 실행 허용",
+  "m5.permissions.commandsMeaning": "켜면 작업 공간 안의 명령은 묻지 않고 실행해요. 끄면 Claude와 Codex 모두 명령을 실행하기 전에 매번 물어봐요(Codex는 파일 목록 보기 같은 안전한 읽기 명령은 묻지 않을 수 있어요). 바꾼 설정은 그다음에 시작하는 담당부터 적용돼요.",
   "m5.permissions.boundary": "허용 범위에서는 반복 확인 없이 진행해요. 기존 파일 보호와 실행 제한은 유지하며, 원본 반영·범위 밖 요청은 별도로 확인해요.",
   "m5.permissions.save": "저장",
   "m5.permissions.saveNamed": "작업 권한 저장",

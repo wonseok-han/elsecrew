@@ -65,6 +65,33 @@ pub(crate) fn unsupervised_tools_off(effective: &serde_json::Value) -> bool {
 pub struct ExpectedProfile<'a> {
     pub model: &'a str,
     pub reasoning_effort: &'a str,
+    /// When Codex asks before running a command (2026-11-27 user decision).
+    pub approval: CodexApprovalPolicy,
+}
+
+/// Codex's `approval_policy` for one run. With the project's command
+/// permission on, Codex runs commands inside its sandbox and asks only to go
+/// past it (`on-request`, the app approving within the workspace on its own).
+/// With it off, Codex asks before every command it does not know to be a safe
+/// read (`untrusted`), as Claude asks before every Bash command; the person
+/// answers each (2026-11-27 user decision).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodexApprovalPolicy {
+    OnRequest,
+    Untrusted,
+}
+
+impl CodexApprovalPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OnRequest => "on-request",
+            Self::Untrusted => "untrusted",
+        }
+    }
+    /// The policy for a run from the project's command permission.
+    pub fn for_commands_allowed(allowed: bool) -> Self {
+        if allowed { Self::OnRequest } else { Self::Untrusted }
+    }
 }
 
 /// Requested wire policy only; never OS or provider admission authority.
@@ -317,7 +344,7 @@ fn match_thread_policy(
         || response.reasoning_effort != profile.reasoning_effort
         || response.model_provider != "openai"
         || response.cwd != expected
-        || response.approval_policy != "on-request"
+        || response.approval_policy != profile.approval.as_str()
         || response.approvals_reviewer != "user"
         || !response.instruction_sources.is_empty()
         || !sandbox_matches
@@ -359,7 +386,7 @@ fn match_config(
     if config.model != profile.model
         || config.model_reasoning_effort != profile.reasoning_effort
         || config.model_provider != "openai"
-        || config.approval_policy != "on-request"
+        || config.approval_policy != profile.approval.as_str()
         || config.sandbox_mode != permission.sandbox_mode()
     {
         return Err(invalid());
@@ -489,6 +516,29 @@ mod tests {
         json!({"thread":{"id":"thread-test"},"model":"test-model","modelProvider":"openai","cwd":test_path!("/managed/snapshot"),"instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"reasoningEffort":"medium"})
     }
 
+    /// 2026-11-27 user decision: with the project's command permission off,
+    /// Codex runs with `untrusted` (asks before every command that is not a
+    /// known safe read); on, it keeps `on-request`. The thread and the
+    /// effective configuration must report exactly the requested policy.
+    #[test]
+    fn the_requested_approval_policy_must_be_the_one_reported() {
+        assert_eq!(CodexApprovalPolicy::for_commands_allowed(true), CodexApprovalPolicy::OnRequest);
+        assert_eq!(CodexApprovalPolicy::for_commands_allowed(false), CodexApprovalPolicy::Untrusted);
+        assert_eq!(CodexApprovalPolicy::Untrusted.as_str(), "untrusted");
+        let cwd = std::path::Path::new(test_path!("/managed/snapshot"));
+        let asks = ExpectedProfile { approval: CodexApprovalPolicy::Untrusted, ..profile() };
+        let mut untrusted = thread();
+        untrusted["approvalPolicy"] = json!("untrusted");
+        assert!(match_read_only_thread(&input(&untrusted), &asks, cwd).is_ok());
+        assert!(match_read_only_thread(&input(&thread()), &asks, cwd).is_err(), "on-request reported for an untrusted run");
+        assert!(match_read_only_thread(&input(&untrusted), &profile(), cwd).is_err(), "untrusted reported for an on-request run");
+        let mut config = config();
+        config["config"]["approval_policy"] = json!("untrusted");
+        assert!(match_read_only_config(&input(&config), &asks).is_ok());
+        assert!(match_read_only_config(&input(&config), &profile()).is_err());
+        assert!(match_read_only_config(&input(&self::tests::config()), &asks).is_err());
+    }
+
     #[test]
     fn named_thread_requires_selected_profile_and_exact_runtime_root() {
         let cwd = std::path::Path::new(test_path!("/managed/snapshot"));
@@ -588,6 +638,7 @@ mod tests {
         ExpectedProfile {
             model: "test-model",
             reasoning_effort: "medium",
+            approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
         }
     }
     fn config() -> Value {
@@ -618,6 +669,7 @@ mod tests {
         let missing = ExpectedProfile {
             model: "obsolete-model",
             reasoning_effort: "medium",
+            approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
         };
         assert!(match_model_catalog(&input(&catalog()), &missing).is_err());
 
@@ -712,6 +764,7 @@ mod tests {
         let bad = ExpectedProfile {
             model: "",
             reasoning_effort: "medium",
+            approval: crate::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
         };
         assert!(match_read_only_config(&input(&config()), &bad).is_err());
         assert!(match_model_catalog(&input(&catalog()), &bad).is_err());

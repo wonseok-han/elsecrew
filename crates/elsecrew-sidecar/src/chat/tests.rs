@@ -1091,6 +1091,7 @@ fn text_candidate_cases_with_output(
             &ExpectedProfile {
                 model: "test-model",
                 reasoning_effort: "medium",
+                approval: elsecrew_core::provider::vendor_observation::codex_preflight::CodexApprovalPolicy::OnRequest,
             },
             home.to_str().unwrap(),
         )

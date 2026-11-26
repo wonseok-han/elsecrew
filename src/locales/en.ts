@@ -40,6 +40,7 @@ export const en: Record<MessageKey, string> = {
   "m5.permissions.scope": "Choose once for this project’s workspaces. Applies to connected agents and team tasks; change it at any time.",
   "m5.permissions.files": "Allow file reading, search, creation and editing",
   "m5.permissions.commands": "Allow development, build and test commands in workspaces",
+  "m5.permissions.commandsMeaning": "On: commands inside the workspace run without asking. Off: Claude and Codex both ask before running each command (Codex may not ask for safe reads such as listing files). A change applies to the next team member who starts.",
   "m5.permissions.boundary": "Allowed work proceeds without repeated prompts. File protections and execution restrictions remain; applying to the original and out-of-scope requests require separate confirmation.",
   "m5.permissions.save": "Save",
   "m5.permissions.saveNamed": "Save work permissions",

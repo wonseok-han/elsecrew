@@ -5760,6 +5760,32 @@ fn unsupported_platform_cannot_select_native_provider_mode() {
     assert!(runtime.owned_run_ids().is_empty());
 }
 
+#[cfg(test)]
+mod project_auto_approval_tests {
+    use super::project_auto_approval;
+    use crate::project::automation_permissions::AutomationPermissions;
+    use elsecrew_core::provider::vendor_observation::codex_approval::PendingApproval;
+    use elsecrew_core::provider::BoundedObservation;
+
+    fn command_request(cwd: &str) -> PendingApproval {
+        let frame = serde_json::json!({"id":7,"method":"item/commandExecution/requestApproval","params":{"threadId":"t","turnId":"r",
+            "itemId":"i","startedAtMs":1,"kind":"command","environmentId":null,"command":"touch a.txt","cwd":cwd}});
+        PendingApproval::parse(&BoundedObservation::new(frame.to_string().into_bytes()).unwrap(), "t", "r").unwrap()
+    }
+
+    /// 2026-11-27: with the command permission off a Codex command request
+    /// goes to the person (the card); on, one inside the workspace is
+    /// approved by the app as before.
+    #[test]
+    fn a_codex_command_asks_the_person_when_commands_are_off() {
+        let workspace = "/managed/snapshot";
+        let request = command_request(workspace);
+        assert!(!project_auto_approval(AutomationPermissions { files: true, commands: false }, &request, workspace));
+        assert!(project_auto_approval(AutomationPermissions { files: true, commands: true }, &request, workspace));
+        assert!(!project_auto_approval(AutomationPermissions { files: true, commands: true }, &command_request("/elsewhere"), workspace));
+    }
+}
+
 // Only the existing workspace scope is eligible. Network or wider grants stay interactive.
 fn project_auto_approval(consent: crate::project::automation_permissions::AutomationPermissions, request: &elsecrew_core::provider::vendor_observation::codex_approval::PendingApproval, workspace: &str) -> bool {
     use elsecrew_core::provider::vendor_observation::codex_approval::Action;
