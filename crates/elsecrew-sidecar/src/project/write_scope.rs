@@ -21,28 +21,8 @@ impl WriteScope {
     }
 }
 
-/// A path as components to compare (PR #18 review B1, 3rd round). Pure, so
-/// the Windows rules are tested on every platform. Separators are unified,
-/// empty and `.` parts dropped, and case folded where the disk ignores it
-/// (macOS and Windows volumes usually do: refusing more, never less). On
-/// Windows, `\\?\` and `\\?\UNC\` prefixes are removed, so a drive letter or
-/// a UNC server and share lead the components the same way in every spelling.
-pub(crate) fn path_key_components(text: &str, windows: bool, fold_case: bool) -> Vec<String> {
-    let mut text = text.to_owned();
-    if windows {
-        text = text.replace('/', "\\");
-        if let Some(rest) = text.strip_prefix(r"\\?\UNC\") { text = format!(r"\\{rest}"); }
-        else if let Some(rest) = text.strip_prefix(r"\\?\") { text = rest.to_owned(); }
-        else if let Some(rest) = text.strip_prefix(r"\\.\") { text = rest.to_owned(); }
-    }
-    let separator = if windows { '\\' } else { '/' };
-    let mut parts = vec![if windows && text.starts_with(r"\\") { "unc".to_owned() } else if text.starts_with(separator) { "root".to_owned() } else { "relative".to_owned() }];
-    for part in text.split(separator) {
-        if part.is_empty() || part == "." { continue; }
-        parts.push(if fold_case { part.to_lowercase() } else { part.to_owned() });
-    }
-    parts
-}
+/// Paths compare by parts (`elsecrew_core::path_key`, tested on every CI platform).
+use elsecrew_core::path_key::{components_within, path_key_components};
 
 fn components(path: &Path) -> Vec<String> {
     path_key_components(&path.to_string_lossy(), cfg!(windows), cfg!(any(windows, target_os = "macos")))
@@ -54,8 +34,7 @@ fn same_path(left: &Path, right: &Path) -> bool {
 
 /// `inner` is `outer` or inside it, by whole path components.
 pub(crate) fn path_within(inner: &Path, outer: &Path) -> bool {
-    let (inner, outer) = (components(inner), components(outer));
-    inner.len() >= outer.len() && inner[..outer.len()] == outer[..]
+    components_within(&components(inner), &components(outer))
 }
 
 fn real(path: &Path) -> Result<PathBuf, ProjectFailure> {
@@ -168,38 +147,3 @@ impl ProjectManager {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn within(inner: &str, outer: &str, windows: bool) -> bool {
-        let fold = true;
-        let (inner, outer) = (path_key_components(inner, windows, fold), path_key_components(outer, windows, fold));
-        inner.len() >= outer.len() && inner[..outer.len()] == outer[..]
-    }
-
-    /// Windows paths by components (PR #18 review B1, 3rd round): any case,
-    /// either separator, `\\?\` and UNC spellings, drive letters.
-    #[test]
-    fn windows_paths_compare_by_components_case_prefix_and_separator() {
-        assert!(within(r"C:\Users\A\work\task-1", r"c:/users/a/WORK", true));
-        assert!(within(r"\\?\C:\Users\A\work", r"C:\Users\A", true));
-        assert!(within(r"C:\Users\A\work", r"\\?\c:\users\a\", true));
-        assert!(within(r"\\?\UNC\srv\share\x\y", r"\\srv\share\x", true));
-        assert!(within(r"\\srv\share\x", r"\\?\UNC\SRV\Share", true));
-        assert!(within(r"C:\work\.\a", r"C:\work\a", true));
-        assert!(!within(r"C:\work\ab", r"C:\work\a", true), "whole components only");
-        assert!(!within(r"D:\work", r"C:\work", true), "another drive");
-        assert!(!within(r"\\srv\share2\x", r"\\srv\share", true));
-        assert!(!within(r"C:\work", r"\\srv\share\work", true), "a drive is not a share");
-        assert!(!within(r"C:\work", r"C:\work\a", true), "the outer is not inside the inner");
-    }
-
-    #[test]
-    fn unix_paths_compare_by_components() {
-        assert!(within("/Users/Someone/Work/a", "/users/someone/work", false));
-        assert!(within("/work/a/", "/work/a", false));
-        assert!(!within("/work/ab", "/work/a", false));
-        assert!(!within("work/a", "/work", false), "relative is not under a root");
-    }
-}

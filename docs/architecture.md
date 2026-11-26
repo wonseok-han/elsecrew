@@ -668,7 +668,7 @@ Keychain 호출은 모두 30초 제한이 있는 자식 프로세스(코어 덤�
     - `project.open`은 빈 폴더 Git 기록·일반 폴더 링크 파일을 만들기 전에 `refuse_workspace_overlap`을 한다.
     - 새 작업 폴더는 `create_dir_all` 전에 `refuse_new_task_folder`(존재하는 가장 깊은 부분을 풀어 비교)를 한다. 기존 작업 공간뿐 아니라 그 프로젝트 자신, 앱 데이터, 다른 저장된 프로젝트와의 겹침도 여기서 먼저 본다(3차).
     - 선택 폴더는 반드시 실제 경로로 풀려야 한다.
-  - 경로 비교는 구성 요소 단위의 순수 함수다(`path_key_components`). macOS·Windows에서는 대소문자를 무시한다(더 많이 거절하는 쪽). Windows에서는 `/`와 `\`, `\\?\`·`\\?\UNC\` 접두사, 드라이브 문자, UNC 서버·공유를 같게 다룬다. 기록된 작업 공간 경로를 풀 수 없으면, 폴더가 없어진 경우만 기록된 그대로 비교하고 그 밖의 오류는 거절한다.
+  - 경로 비교는 구성 요소 단위의 순수 함수다(`elsecrew-core` `path_key::path_key_components`, CI의 두 플랫폼에서 시험). macOS·Windows에서는 대소문자를 무시한다(더 많이 거절하는 쪽). Windows에서는 `/`와 `\`, `\\?\`·`\\?\UNC\` 접두사, 드라이브 문자, UNC 서버·공유를 같게 다룬다. 기록된 작업 공간 경로를 풀 수 없으면, 폴더가 없어진 경우만 기록된 그대로 비교하고 그 밖의 오류는 거절한다.
   - `.git` 안에 `commondir`이 있는 저장소(다른 저장소의 objects·refs를 공유)는 등록하지 않는다(`open_source_repository`, `repository_git_path`). 쓰기 범위의 git 폴더는 `commondir`을 따라간 공용 폴더다.
   - 사본을 사용자 폴더에 넣는 쓰기(`openApplicationConfirmation`·`startApplication`·`restoreApplication`·`retireApplication`·`cleanupBackup`·`applyChatLatest`)는 예전처럼 **어느 팀이든 일하면** 거절하고, `application_running` 쓰기 슬롯도 전역이다.
   - 어느 작업에도 묶을 수 없는 일(정리 중인 공급자 확인 `discovery_cleanup`, 작업 이름이 이상한 확인 요청)이 있으면 모든 작업을 바쁜 것으로 본다(예전 전역 규칙으로 돌아감). 설정 화면의 모델 목록(작업 없음)은 아무것도 막지 않는다.

@@ -8,7 +8,7 @@
 - **원본 겹침도 첫 쓰기 전에**: 새 작업 폴더를 만들기 전의 `refuse_new_task_folder`가 기존 작업 공간뿐 아니라 그 프로젝트 자신·앱 데이터·다른 저장된 프로젝트와의 겹침도 본다. 이전에는 `~/elsecrew` 프로젝트에 `~/elsecrew/workspaces`를 쓰면 `workspaces/elsecrew`를 만든 뒤 거절했다.
   - 시험: `a_task_folder_inside_the_project_itself_is_refused_before_anything_is_made`(프로젝트 안, 앱 데이터 안, 다른 프로젝트 안 → 거절되고 폴더에 아무것도 없음)
 - **Windows 경로 비교**: 경로를 구성 요소로 비교하는 순수 함수 `path_key_components`로 바꿨다. 구분자, `\\?\`·UNC 접두사, 드라이브 문자, 대소문자를 처리한다. 기록된 작업 공간 경로를 풀 수 없을 때는 폴더가 없는 경우만 기록 그대로 비교하고, 그 밖의 오류는 거절한다.
-  - 시험(모든 플랫폼에서 돎): `windows_paths_compare_by_components_case_prefix_and_separator`, `unix_paths_compare_by_components`
+  - 시험: `elsecrew-core` `path_key::tests::windows_paths_compare_by_components_case_prefix_and_separator`, `unix_paths_compare_by_components`. 함수를 `elsecrew-core::path_key`로 옮겨 macOS·Windows CI의 기준선 하네스(`cargo test -p elsecrew-core`)에서 돈다. sidecar CI는 sidecar 시험을 돌리지 않는다.
 - **검증**
   - `cargo test -p elsecrew-sidecar`: 941 통과, 1 실패(`a_sign_in_hold_survives_a_device_renumbering_only_with_the_same_inodes`). 이 시험은 단독으로 3회 연속 통과했고, 직전 전체 실행(939)에서도 통과했다. 이번 변경은 로그인 잠금 코드를 건드리지 않아 병렬 실행 중 간헐 실패로 본다. 원인은 확인하지 않았다.
   - 관련 시험 10개 통과.
