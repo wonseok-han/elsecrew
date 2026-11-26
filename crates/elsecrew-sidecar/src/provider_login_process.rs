@@ -50,8 +50,55 @@ fn failure() -> SidecarError {
 /// live owner's. The one reader is the settlement of the exact run a hold is
 /// bound to, after that run's engine is gone (`bound_run_identities`): it
 /// stops those processes, each only while it still matches its recorded start.
+/// What a hold is for (ADE multi-project P5). Sign-in, sign-out, install and
+/// the engine's own credential renewal rewrite the profile: they hold the
+/// provider's one exclusive hold (`<provider>-login.pending`). Runs, model
+/// lists and capability checks only launch the provider's program, which
+/// renews its own sign-in under its own lock (Claude Code
+/// `.oauth_refresh.lock`, Codex `auth.lock`): each holds its own
+/// `<provider>-run-<id>.pending`, so they go on side by side. Each kind
+/// publishes its hold first and then looks for the other kind; finding one,
+/// it takes its own back and answers busy. Two that meet both step back,
+/// never both go on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HoldKind {
+    Exclusive,
+    Shared,
+}
+
+/// The provider prefix of a sign-in profile's holds (`codex` / `claude`).
+/// Other profiles (the installer's) have one hold and no run holds.
+fn hold_prefix(profile: &dyn LoginProfile) -> Option<&'static str> {
+    profile.pending_name().strip_suffix("-login.pending")
+}
+
+/// This sign-in profile's run holds now (none for other profiles).
+pub(crate) fn profile_run_holds(profile: &dyn LoginProfile) -> Result<Vec<String>, SidecarError> {
+    profile.revalidate()?;
+    match hold_prefix(profile) {
+        Some(prefix) => run_hold_names(&profile.login_lease_directory()?, prefix),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// The run holds of this provider now in the directory. A name that looks
+/// like one but cannot be read as a plain entry still counts (fail closed).
+pub(crate) fn run_hold_names(directory: &Dir, prefix: &str) -> Result<Vec<String>, SidecarError> {
+    let mut names = Vec::new();
+    for entry in directory.entries().map_err(|_| failure())? {
+        let entry = entry.map_err(|_| failure())?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if name.starts_with(&format!("{prefix}-run-")) && name.ends_with(".pending") {
+            names.push(name.to_owned());
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
 struct Reservation {
-    name: &'static str,
+    name: String,
     directory: Dir,
     file: File,
     recorded: BTreeSet<ProcIdentity>,
@@ -59,9 +106,41 @@ struct Reservation {
 }
 
 impl Reservation {
-    fn create(profile: &dyn LoginProfile) -> Result<Self, SidecarError> {
+    fn create(profile: &dyn LoginProfile, kind: HoldKind) -> Result<Self, SidecarError> {
+        let Some(prefix) = hold_prefix(profile) else {
+            return if kind == HoldKind::Exclusive { Self::publish(profile, kind) } else { Err(failure()) };
+        };
+        let reservation = Self::publish(profile, kind)?;
+        // The other kind of hold, published before ours: step back.
+        let conflict = match kind {
+            HoldKind::Exclusive => match run_hold_names(&reservation.directory, prefix) {
+                Ok(names) if names.is_empty() => None,
+                Ok(_) => Some(busy()),
+                Err(error) => Some(error),
+            },
+            HoldKind::Shared => match reservation.directory.symlink_metadata(profile.pending_name()) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Ok(_) => Some(existing_reservation_error(&reservation.directory, profile.pending_name())),
+                Err(_) => Some(failure()),
+            },
+        };
+        match conflict {
+            None => Ok(reservation),
+            Some(error) => {
+                // Ours recorded nothing yet: taking it back leaves no evidence behind.
+                reservation.release().map_err(|_| failure())?;
+                Err(error)
+            }
+        }
+    }
+
+    fn publish(profile: &dyn LoginProfile, kind: HoldKind) -> Result<Self, SidecarError> {
         let directory = profile.login_lease_directory()?;
-        let name = profile.pending_name();
+        let name = match kind {
+            HoldKind::Exclusive => profile.pending_name().to_owned(),
+            HoldKind::Shared => format!("{}-run-{}.pending", hold_prefix(profile).ok_or_else(failure)?, uuid::Uuid::new_v4().simple()),
+        };
+        let name = name.as_str();
         // Publish the fence atomically: the pending name only ever refers to an
         // inode that is already exclusively locked and carries its header, so a
         // concurrent probe can never mistake a half-created fence for an orphan.
@@ -94,7 +173,7 @@ impl Reservation {
         directory.remove_file(&staging).map_err(|_| failure())?;
         sync_directory(&directory)?;
         Ok(Self {
-            name: profile.pending_name(),
+            name: name.to_owned(),
             directory,
             file,
             recorded: BTreeSet::new(),
@@ -106,7 +185,7 @@ impl Reservation {
         let held = self.file.metadata().map_err(|_| failure())?;
         let current = self
             .directory
-            .symlink_metadata(self.name)
+            .symlink_metadata(&self.name)
             .map_err(|_| failure())?;
         if !current.is_file()
             || held.dev() != current.dev()
@@ -177,7 +256,7 @@ impl Reservation {
         // POSIX unlink is name-based, not an atomic unlink-if-inode operation.
         // This detects prior substitution, not a hostile same-UID race after verify.
         self.directory
-            .remove_file(self.name)
+            .remove_file(&self.name)
             .map_err(|_| failure())?;
         sync_directory(&self.directory)
     }
@@ -190,7 +269,7 @@ pub(crate) fn with_credentials_reserved<T>(
     work: impl FnOnce() -> Result<T, SidecarError>,
 ) -> Result<T, SidecarError> {
     profile.revalidate()?;
-    let mut reservation = Reservation::create(profile)?;
+    let mut reservation = Reservation::create(profile, HoldKind::Exclusive)?;
     let result = work();
     profile.revalidate()?;
     reservation.record_login_termination()?;
@@ -346,7 +425,7 @@ fn recover_login(profile: &dyn LoginProfile, require_marker: bool) -> Result<(),
         return Err(failure());
     }
     let reservation = Reservation {
-        name: profile.pending_name(),
+        name: profile.pending_name().to_owned(),
         directory,
         file,
         recorded,
@@ -581,12 +660,17 @@ impl<'a> LoginProcess<'a> {
         self.profile.as_ref().revalidate()
     }
 
+    /// Sign-in, sign-out, account checks and installs: the provider's one
+    /// exclusive hold.
     pub(crate) fn reserve(profile: &'a dyn LoginProfile) -> Result<Self, SidecarError> {
         Self::reserve_profile(ProfileOwner::Borrowed(profile))
     }
 
     fn reserve_profile(profile: ProfileOwner<'a>) -> Result<Self, SidecarError> {
-        let reservation = Reservation::create(profile.as_ref())?;
+        // Owned profiles are runs, model lists and capability checks: a run
+        // hold of their own (ADE multi-project P5).
+        let kind = if matches!(profile, ProfileOwner::Borrowed(_)) { HoldKind::Exclusive } else { HoldKind::Shared };
+        let reservation = Reservation::create(profile.as_ref(), kind)?;
         Ok(Self {
             connection_id: uuid::Uuid::new_v4(),
             profile,
@@ -1641,7 +1725,7 @@ mod tests {
                 std::fs::rename(&path, &held).unwrap();
                 symlink(&held, &path).unwrap();
             }
-            let result = recover_bound_run(&binding_profile, |observed, identities| {
+            let result = recover_bound_run(&binding_profile, &binding.lease_name(), |observed, identities| {
                 if observed != &binding || identities != &BTreeSet::from([own]) { return Err(failure()); }
                 Ok(())
             });

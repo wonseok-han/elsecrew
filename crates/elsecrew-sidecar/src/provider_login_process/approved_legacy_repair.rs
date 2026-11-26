@@ -65,7 +65,7 @@ fn repair(commit: bool) -> Result<(), SidecarError> {
         return Err(failure());
     }
     let mut reservation = Reservation {
-        name: PENDING,
+        name: PENDING.to_owned(),
         directory,
         file,
         recorded,

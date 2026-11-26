@@ -69,15 +69,9 @@ impl AgentRuntime {
         if self.preparing_to_quit || self.pending_catalogs.contains_key(request_id) {
             return Err(failure());
         }
-        // Another query (the other provider's list at startup, say) or a run
-        // owns the profile for now: busy, which the app retries shortly,
-        // rather than "unavailable".
-        if !self.owned_run_ids().is_empty() {
-            return Err(SidecarError::new(
-                "providerBusy",
-                "another provider check currently owns this profile; retry after it finishes",
-            ));
-        }
+        // A list goes on beside runs and other checks (ADE multi-project P5:
+        // each holds its own run hold); only sign-in or install, holding the
+        // provider's exclusive hold, makes it busy, which the app retries.
         if !matches!(runtime, "codex" | "claude-code") {
             return Err(failure());
         }

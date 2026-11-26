@@ -322,7 +322,13 @@ impl Sidecar {
     #[cfg(target_os = "macos")]
     pub(super) fn release_settled_fences(&mut self) {
         for name in ["claude-login.pending", "codex-login.pending"] {
-            if !self.fence_is_run_bound(name) { continue; }
+            // A run's own hold (ADE multi-project P5) is always bound to its run.
+            let prefix = name.trim_end_matches("-login.pending");
+            let run_holds = self.storage.path().parent()
+                .and_then(|parent| crate::provider_profile::open_absolute_directory(parent).ok())
+                .and_then(|directory| crate::provider_login_process::run_hold_names(&directory, prefix).ok())
+                .is_some_and(|names| !names.is_empty());
+            if !run_holds && !self.fence_is_run_bound(name) { continue; }
             if name.starts_with("claude") {
                 self.claude_login.release_bound_fence(&self.storage, &self.projects);
             } else {

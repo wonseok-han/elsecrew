@@ -8,6 +8,7 @@ pub(crate) use crate::provider_run_binding::RunFenceBinding;
 /// proves no live owner holds it; the lock lasts as long as the reservation.
 fn read_bound(
     profile: &dyn LoginProfile,
+    name: &str,
 ) -> Result<(RunFenceBinding, Reservation, std::path::PathBuf), SidecarError> {
     use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
     use std::io::Read;
@@ -19,7 +20,7 @@ fn read_bound(
         .follow(FollowSymlinks::No)
         .custom_flags(libc::O_NONBLOCK);
     let mut file = directory
-        .open_with(profile.pending_name(), &options)
+        .open_with(name, &options)
         .map_err(|_| failure())?;
     let meta = file.metadata().map_err(|_| failure())?;
     if !meta.is_file() || meta.len() > super::HOLD_MAX_BYTES {
@@ -53,6 +54,10 @@ fn read_bound(
         _ => return Err(failure()),
     };
     binding.validate(binding.run_id(), runtime)?;
+    // The receipt names the very file it was read from.
+    if binding.lease_name() != name {
+        return Err(failure());
+    }
     let dir_meta = directory.dir_metadata().map_err(|_| failure())?;
     if !binding.matches_file(meta.dev(), meta.ino(), dir_meta.dev(), dir_meta.ino()) {
         return Err(failure());
@@ -74,7 +79,7 @@ fn read_bound(
         }
     }
     let reservation = Reservation {
-        name: profile.pending_name(),
+        name: name.to_owned(),
         directory,
         file,
         recorded,
@@ -92,7 +97,7 @@ pub(crate) fn bound_run_identities(
     profile: &dyn LoginProfile,
     expected: &RunFenceBinding,
 ) -> Result<BTreeSet<ProcIdentity>, SidecarError> {
-    let (binding, reservation, _) = read_bound(profile)?;
+    let (binding, reservation, _) = read_bound(profile, &expected.lease_name())?;
     if &binding != expected {
         return Err(failure());
     }
@@ -105,9 +110,10 @@ pub(crate) fn bound_run_identities(
 /// insufficient.
 pub(crate) fn recover_bound_run(
     profile: &dyn LoginProfile,
+    name: &str,
     verify_terminal: impl FnOnce(&RunFenceBinding, &BTreeSet<ProcIdentity>) -> Result<(), SidecarError>,
 ) -> Result<(), SidecarError> {
-    let (binding, reservation, home) = read_bound(profile)?;
+    let (binding, reservation, home) = read_bound(profile, name)?;
     // Empty/unlaunched reservations need their live owner; do not infer closure.
     if reservation.recorded.is_empty() {
         return Err(failure());
@@ -154,17 +160,23 @@ impl LoginProcess<'_> {
             if file.len() != b"elsecrew provider login pending v1\n".len() as u64 {
                 return Err(failure());
             }
-            let provider = match self.reservation.name {
+            let provider = match self.profile.as_ref().pending_name() {
                 "codex-login.pending" => "codex",
                 "claude-login.pending" => "claude-code",
                 _ => return Err(failure()),
             };
-            let receipt = RunFenceBinding::from_value(&json!({
+            // A run's own hold (schema 2); the provider's shared one is schema 1.
+            let mut value = json!({
                 "schemaVersion": 1, "runId": run_id,
                 "nonce": self.connection_id.to_string(), "provider": provider,
                 "device": file.dev(), "inode": file.ino(),
                 "directoryDevice": directory.dev(), "directoryInode": directory.ino(),
-            }))?;
+            });
+            if self.reservation.name != self.profile.as_ref().pending_name() {
+                value["schemaVersion"] = json!(2);
+                value["lease"] = json!(self.reservation.name);
+            }
+            let receipt = RunFenceBinding::from_value(&value)?;
             receipt.validate(run_id, provider)?;
             let encoded = serde_json::to_string(&receipt.to_value()).map_err(|_| failure())?;
             writeln!(self.reservation.file, "run-binding-v1 {encoded}").map_err(|_| failure())?;

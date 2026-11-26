@@ -1571,6 +1571,18 @@ impl Sidecar {
                     };
                     connections.map(|connections| project::ProjectAction {result:serde_json::json!({"schemaVersion":1,"action":action,"connections":connections}),..Default::default()})
                 }
+                Some(action @ ("getRunLimits" | "setRunLimit")) => {
+                    // How many runs of a provider may work at once (ADE multi-project P3′).
+                    let limits = if action == "setRunLimit" {
+                        let params = require_exact_params(&request.params, &["action", "runtime", "limit"]).map_err(invalid_params)?;
+                        let limit = params["limit"].as_u64().ok_or_else(|| invalid_params("invalid run limit".into()))?;
+                        self.projects.set_run_limit(param_string(params, "runtime").map_err(invalid_params)?, limit)
+                    } else {
+                        require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
+                        self.projects.run_limits()
+                    };
+                    limits.map(|limits| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":action,"limits":limits}), ..Default::default() })
+                }
                 Some("getAppRoleDefaults") => {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
                     self.storage.custom_roles_enabled().map_err(|error| ProjectFailure::manifest(error.detail)).and_then(|custom| self.projects.app_role_defaults(custom)).map(|settings| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"getAppRoleDefaults","settings":settings}), ..Default::default() })
@@ -2439,9 +2451,33 @@ impl Sidecar {
         Ok(())
     }
 
+    /// The provider a start request's role runs on, from its task's team.
+    fn start_runtime(&self, request: &RequestV1) -> Option<String> {
+        let chat = self.storage.projection_record("chat", request.params["chatId"].as_str()?).ok()??;
+        chat["record"]["roleSnapshots"].as_array()?.iter().find(|role| role["roleId"] == request.params["roleId"])?["runtime"].as_str().map(str::to_owned)
+    }
+
+    /// Runs of a provider started, starting or settling now.
+    pub(crate) fn live_runs_of(&self, runtime: &str) -> usize {
+        self.agent_runtime.live_runs_of(runtime) + self.pending_agent_starts.values().filter(|start| start.runtime == runtime).count()
+    }
+
+    /// A start beyond the provider's limit waits its turn (ADE multi-project P3′).
+    pub(crate) fn run_capacity_full(&self, runtime: &str) -> bool {
+        self.live_runs_of(runtime) >= self.projects.run_limit(runtime)
+    }
+
     fn handle_agent_request_inner(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
         use elsecrew_protocol::agent_adapter_v1::AgentRunStartRequestV1;
         self.require_provider_connection(&request)?;
+        if request.method == "run.startAgent" {
+            if let Some(runtime) = self.start_runtime(&request) {
+                if self.run_capacity_full(&runtime) {
+                    return Ok(HandledRequest::response(error_response(&request, "providerCapacity", "requestBlocked",
+                        "as many runs of this provider as allowed are working; this one waits its turn")));
+                }
+            }
+        }
         if request.method == "agent.getModelChoices" {
             if !self.agent_runtime.uses_native_providers() || !matches!(request.params["runtime"].as_str(), Some("codex" | "claude-code")) {
                 return Err(SidecarError::new("agentDiscoveryRejected", "model choices require a native provider context"));

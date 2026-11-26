@@ -567,6 +567,20 @@ impl AgentRuntime {
         Some(chats)
     }
 
+    /// Runs of one provider started, starting or settling (ADE multi-project P3′).
+    pub(crate) fn live_runs_of(&self, runtime: &str) -> usize {
+        #[allow(unused_mut)]
+        let mut count = self.active.values().filter(|run| run.profile.runtime == runtime).count();
+        #[cfg(target_os = "macos")]
+        {
+            count += self.native.values().filter(|run| run.runtime() == runtime).count();
+            if runtime == "claude-code" {
+                count += self.pending_claude_starts.len();
+            }
+        }
+        count
+    }
+
     pub(crate) fn owned_run_ids(&self) -> Vec<String> {
         let ids = self.active.keys();
         #[cfg(target_os = "macos")]

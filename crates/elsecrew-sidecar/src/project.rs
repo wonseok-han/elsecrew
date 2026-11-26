@@ -19,6 +19,7 @@ mod write_scope;
 pub(crate) use write_scope::WriteScope;
 #[cfg(test)]
 pub(crate) use write_scope::path_within as write_scope_path_within;
+mod app_run_limits;
 mod empty_project;
 mod git_worktree;
 mod git_merge;
