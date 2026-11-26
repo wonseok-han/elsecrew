@@ -33,9 +33,21 @@ impl NativeRun {
         projects: &ProjectManager,
         identity: &RunIdentity,
     ) -> Result<&mut super::approval::ApprovalQueue, SidecarError> {
+        self.live_approvals_with(storage, projects, identity, false)
+    }
+
+    /// `viewing`: listing or looking at what waits (owners'
+    /// `registration_identity_with`); answering checks in full.
+    fn live_approvals_with(
+        &mut self,
+        storage: &Storage,
+        projects: &ProjectManager,
+        identity: &RunIdentity,
+        viewing: bool,
+    ) -> Result<&mut super::approval::ApprovalQueue, SidecarError> {
         if self.stopped
             || identity_value(&self.identity) != identity_value(identity)
-            || identity_value(&self.owner.registration_identity(storage, projects)?)
+            || identity_value(&self.owner.registration_identity_with(storage, projects, viewing)?)
                 != identity_value(identity)
         {
             return Err(SidecarError::new(
@@ -438,7 +450,10 @@ impl AgentRuntime {
                 if active.stopped || !same_identity(&active.identity, &identity) {
                     return Err(invalid());
                 }
-                let registered = match owner.registration_identity(storage, projects) {
+                // Viewing may reuse a Git check of the last few seconds (the
+                // screen asks every 750 ms; a slow answer let Claude withdraw
+                // a request before it showed). Answering checks in full.
+                let registered = match owner.registration_identity_with(storage, projects, listing) {
                     Ok(registered) => registered,
                     Err(_error) if listing => {
                         // Development builds, once per run (the screen asks every 750 ms).
@@ -488,7 +503,7 @@ impl AgentRuntime {
         let active = self.native.get_mut(&identity.run_id).ok_or_else(|| {
             SidecarError::new("agentApprovalChanged", "approval run is no longer current")
         })?;
-        active.live_approvals(storage, projects, &identity)?;
+        active.live_approvals_with(storage, projects, &identity, queued.is_none())?;
         let connection = format!("{}:{}", active.stream_id, active.owner.connection_id());
         let pending = active.approvals.summaries(
             &identity,

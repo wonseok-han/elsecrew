@@ -202,11 +202,20 @@ impl OwnedClaudeRun {
     pub(crate) fn connection_id(&self) -> Uuid { self.process.connection_id() }
 
     pub(crate) fn registration_identity(&self, storage: &Storage, projects: &ProjectManager) -> Result<RunIdentity, SidecarError> {
+        self.registration_identity_with(storage, projects, false)
+    }
+
+    /// `viewing`: see the Codex owner's `registration_identity_with`.
+    pub(crate) fn registration_identity_with(&self, storage: &Storage, projects: &ProjectManager, viewing: bool) -> Result<RunIdentity, SidecarError> {
         let failure = || SidecarError::new("agentInputChanged", "Claude registration binding differs");
         if self.output.finished || self.output.connection != self.process.connection_id()
             || self.output.run_id != self.reservation.run_id
             || !self.process.matches_startup_run(&self.reservation.run_id) { return Err(failure()); }
-        self.reservation.validate_text_input(storage, projects).map_err(|_| failure())?;
+        if viewing {
+            self.reservation.validate_text_input_streaming(storage, projects).map_err(|_| failure())?;
+        } else {
+            self.reservation.validate_text_input(storage, projects).map_err(|_| failure())?;
+        }
         let run = &self.reservation.run;
         let field = |name| run.get(name).and_then(Value::as_str).map(str::to_owned).ok_or_else(failure);
         Ok(RunIdentity {

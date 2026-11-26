@@ -8,6 +8,7 @@ mod orchestration;
 mod orchestration_dispatch;
 mod application_cancel;
 mod dispatch_timing;
+mod latency_log;
 mod chat;
 mod project;
 #[cfg(windows)]
@@ -214,6 +215,17 @@ where
                 "stdio agent fixture scenario is required",
             )
         })?;
+        // The app adds a clean shutdown's seal on the next start; fixture runs
+        // take it too, so a probe can start the fake agent from a seal.
+        match args.next() {
+            None => {}
+            Some(flag) if flag == "--storage-seal" => {
+                storage_seal = Some(args.next().and_then(|value| value.into_string().ok())
+                    .filter(|value| storage::shutdown_seal::valid_seal(value))
+                    .ok_or_else(|| SidecarError::new("invalidArguments", "stdio agent fixture seal is invalid"))?);
+            }
+            Some(_) => return Err(SidecarError::new("invalidArguments", "stdio agent fixture has extra arguments")),
+        }
         if args.next().is_some() {
             return Err(SidecarError::new(
                 "invalidArguments",
@@ -229,6 +241,8 @@ where
             "long-stream" => agent_runtime::FakeScenario::LongStream,
             #[cfg(any(debug_assertions, feature = "qa-output-fixtures"))]
             "paced-long-stream" => agent_runtime::FakeScenario::PacedLongStream,
+            #[cfg(any(debug_assertions, feature = "qa-output-fixtures"))]
+            "paced-long-stream-read-only" => agent_runtime::FakeScenario::PacedLongStreamReadOnly,
             "final-delayed" => agent_runtime::FakeScenario::FinalDelayed,
             "cancel-clean" => agent_runtime::FakeScenario::CancelClean,
             "cancel-uncertain" => agent_runtime::FakeScenario::CancelUncertain,
@@ -322,12 +336,13 @@ where
     let stdin = io::stdin();
     let stdout = io::stdout();
     match fixture_runtime {
-        Some(runtime) => serve_stdio_with_identity_and_runtime(
+        Some(runtime) => serve_stdio_sealed(
             &database_path,
             stdin,
             stdout.lock(),
             new_sidecar_instance_id(),
             runtime,
+            storage_seal,
         ),
         None => serve_stdio_sealed(
             &database_path,
@@ -391,6 +406,7 @@ fn serve_stdio_sealed<R: Read + Send + 'static, W: Write>(
 ) -> Result<(), SidecarError> {
     g4_platform_gate()?;
     let mut timings = dispatch_timing::DispatchTiming::default();
+    let mut latency = latency_log::LatencyLog::from_env();
     let mut sidecar = SidecarSession::new(sidecar_instance_id, runtime);
     sidecar.storage_seal = storage_seal;
     let ready = EnvelopeV1::Event(sidecar.ready_event()?);
@@ -414,12 +430,12 @@ fn serve_stdio_sealed<R: Read + Send + 'static, W: Write>(
         let mut input = BufReader::with_capacity(8 * 1024, input);
         loop {
             let message = match read_bounded_jsonl(&mut input) {
-                Ok(Some(line)) => InputMessage::Line(line),
+                Ok(Some(line)) => InputMessage::Line(line, Instant::now()),
                 Ok(None) => InputMessage::Eof,
                 Err(error) => InputMessage::Error(error),
             };
-            let finished = !matches!(message, InputMessage::Line(_));
-            let size = if let InputMessage::Line(line) = &message {
+            let finished = !matches!(message, InputMessage::Line(..));
+            let size = if let InputMessage::Line(line, _) = &message {
                 application_cancel.observe(line, &input_instance);
                 line.len()
             } else {
@@ -455,10 +471,10 @@ fn serve_stdio_sealed<R: Read + Send + 'static, W: Write>(
         // Requests and polling work consume the same interval. Starting a fresh
         // 100ms wait after either would add idle latency to every output batch.
         let wait = runtime_poll_interval.saturating_sub(last_runtime_poll.elapsed());
-        let line = match receiver.recv_timeout(wait) {
-            Ok(InputMessage::Line(line)) => {
+        let (line, received) = match receiver.recv_timeout(wait) {
+            Ok(InputMessage::Line(line, received)) => {
                 queued_bytes.fetch_sub(line.len(), std::sync::atomic::Ordering::AcqRel);
-                line
+                (line, received)
             }
             Ok(InputMessage::Eof) => {
                 if sidecar.safe_to_quit() {
@@ -487,12 +503,12 @@ fn serve_stdio_sealed<R: Read + Send + 'static, W: Write>(
             Err(RecvTimeoutError::Timeout) => {
                 last_runtime_poll = Instant::now();
                 sidecar.poll_admission();
-                let mut events = timings.measure("watch", || sidecar.poll_watch_events());
-                let (responses, runtime_events) = timings.measure("runtime", || sidecar.poll_runtime_events())?;
+                let mut events = latency.measure("watch", || timings.measure("watch", || sidecar.poll_watch_events()));
+                let (responses, runtime_events) = latency.measure("runtime", || timings.measure("runtime", || sidecar.poll_runtime_events()))?;
                 write_responses(&mut session, &mut output, responses)?;
                 events.extend(runtime_events);
                 write_events(&mut session, &mut output, events)?;
-                timings.measure("maintenance", || sidecar.maintenance_tick())?;
+                latency.measure("maintenance", || timings.measure("maintenance", || sidecar.maintenance_tick()))?;
                 continue;
             }
             Err(RecvTimeoutError::Disconnected) => {
@@ -514,7 +530,13 @@ fn serve_stdio_sealed<R: Read + Send + 'static, W: Write>(
                 "sidecar stdin accepts request envelopes only",
             ));
         };
+        let started = Instant::now();
+        // Only the protocol's name for the method, never anything the request carried.
+        let method = latency.enabled().then(|| latency_log::known_method(&request.method));
         let handled = timings.measure("request", || sidecar.handle_request(request))?;
+        if let Some(method) = method {
+            latency.request(method, received, started, Instant::now());
+        }
         if sidecar.safe_to_quit() { timings.emit(); }
         write_responses(&mut session, &mut output, handled.response)?;
         write_events(&mut session, &mut output, handled.events)?;
@@ -522,13 +544,13 @@ fn serve_stdio_sealed<R: Read + Send + 'static, W: Write>(
         // recv_timeout from expiring. Preserve response-before-event ordering.
         if !sidecar.safe_to_quit() && last_runtime_poll.elapsed() >= runtime_poll_interval {
             last_runtime_poll = Instant::now();
-            let mut events = timings.measure("watch", || sidecar.poll_watch_events());
-            let (responses, runtime_events) = timings.measure("runtime", || sidecar.poll_runtime_events())?;
+            let mut events = latency.measure("watch", || timings.measure("watch", || sidecar.poll_watch_events()));
+            let (responses, runtime_events) = latency.measure("runtime", || timings.measure("runtime", || sidecar.poll_runtime_events()))?;
             write_responses(&mut session, &mut output, responses)?;
             events.extend(runtime_events);
             write_events(&mut session, &mut output, events)?;
         }
-        timings.measure("maintenance", || sidecar.maintenance_tick())?;
+        latency.measure("maintenance", || timings.measure("maintenance", || sidecar.maintenance_tick()))?;
     }
 }
 
@@ -553,7 +575,8 @@ const INPUT_QUEUE_MESSAGES: usize = 1024;
 const INPUT_QUEUE_BYTES: usize = 8 * 1024 * 1024;
 
 enum InputMessage {
-    Line(Vec<u8>),
+    /// A request line and when the reader took it off stdin.
+    Line(Vec<u8>, Instant),
     Eof,
     Error(SidecarError),
 }
