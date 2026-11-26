@@ -128,3 +128,45 @@ export function sameLayout(a: LayoutState | null, b: LayoutState): boolean {
   return a !== null && a.viewport === b.viewport && a.obscured === b.obscured
     && a.bounds.x === b.bounds.x && a.bounds.y === b.bounds.y && a.bounds.width === b.bounds.width && a.bounds.height === b.bounds.height;
 }
+
+/** The two bands of the tab that push the stage down when they appear. */
+export interface PreviewBandState { newResult: boolean; notice: boolean }
+
+/**
+ * When the tab's bands change (PR #9 review I1, PR #13 review I1·I2).
+ * A band appears or goes only once the view is hidden (`queue`), and the
+ * view is placed again only after the page laid the change out
+ * (`rendered` → `settled`), never on a timer. A change that ends with the
+ * bands as they already are on screen (nothing asked, or shown and taken
+ * back while waiting) moves nothing and says so at once. Every decision
+ * reads the target — what the bands will be once the queued changes run —
+ * so a band asked while another change waits is never dropped.
+ */
+export class PreviewBands {
+  /** As laid out on screen now. */
+  shown: PreviewBandState = { newResult: false, notice: false };
+  /** As they will be once every queued change has run. */
+  target: PreviewBandState = { newResult: false, notice: false };
+  #effects: { queue(apply: () => void): void; render(next: PreviewBandState): void; settled(): void };
+
+  constructor(effects: { queue(apply: () => void): void; render(next: PreviewBandState): void; settled(): void }) { this.#effects = effects; }
+
+  set(which: keyof PreviewBandState, value: boolean): void {
+    if (this.target[which] === value) return;
+    this.target = { ...this.target, [which]: value };
+    this.#effects.queue(() => {
+      const next = this.target;
+      if (next.newResult === this.shown.newResult && next.notice === this.shown.notice) { this.#effects.settled(); return; }
+      this.#effects.render(next);
+    });
+  }
+
+  /** The page laid the bands out (its layout effect). */
+  rendered(bands: PreviewBandState): void {
+    this.shown = { ...bands };
+    this.#effects.settled();
+  }
+
+  /** Another task: its bands start over (the page resets them itself). */
+  reset(): void { this.target = { newResult: false, notice: false }; }
+}

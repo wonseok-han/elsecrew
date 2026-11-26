@@ -186,6 +186,13 @@ async function run(window) {
   await capture(window, view, manager, 'preview-narrow');
   await page(`document.querySelector('[data-testid=preview-wide]').click()`);
   await waitFor(() => manager.currentLayout?.bounds.width > 390, 5_000, 'wide again');
+  // "다시 불러오기" with no band on screen changes nothing in the tab: the
+  // view must come back, not wait for a layout that never comes (ADE V check).
+  await sleep(700);
+  await page(`document.querySelector('[data-testid=preview-reload]').click()`);
+  const backAfterReload = await waitFor(() => manager.currentLayout?.state === 'shown', 3_000, 'shown after reload').then(() => true, () => false);
+  await sleep(1200);
+  check('reload with no band on screen leaves the view shown', backAfterReload && manager.currentLayout?.state === 'shown', { state: manager.currentLayout?.state });
   step('wideNarrow');
 
   // PR #9 review I1: what the page held invisible (data-preview-wait) and
@@ -378,13 +385,53 @@ async function run(window) {
     const back = await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'shown under the band').then(() => true, () => false);
     const stageAfter = await page(`document.querySelector('[data-testid=preview-stage]').getBoundingClientRect().top`);
     const placed = manager.currentLayout?.bounds;
+    // Never shown between the hide and the band laid out (PR #13 review I1).
+    const shownMeanwhile = manager.visibility.filter(entry => entry.visible && hiddenAt !== undefined && entry.at > hiddenAt && bandAt !== null && entry.at < bandAt);
     check('B1 a band that pushes the stage appears only after main answered the hide; the view returns at the new place',
       bandAt !== null && hiddenAt !== undefined && hiddenAt <= bandAt && bandAt >= hideAnsweredAt - 5 && back && stageAfter > stageBefore && placed && Math.abs(placed.y - Math.ceil(stageAfter)) <= 1,
       { bandAt, hiddenAt, hideAnsweredAt, stageBefore, stageAfter, placed });
+    check('I1 the view is never shown between the hide and the band laid out (PR #13 review I1)', bandAt !== null && shownMeanwhile.length === 0, { shownMeanwhile });
     delays.after = 0;
     // The band leaves after a while; the view is hidden first again.
     await waitFor(() => page(`!document.querySelector('[data-testid=preview-blocked]')`), 10_000, 'band gone');
     await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'shown after the band');
+
+    // (4b) PR #13 review I2: a new result arrives while "다시 불러오기" is
+    // taking the "새 결과" band down and main is 900 ms late to hide: the band
+    // stays. A smoke task has no team run to end, so only the "a run ended"
+    // signal is given to the tab's band model directly; the reload button,
+    // the hide and the layout order are the app's own.
+    {
+      const found = await page(`(() => {
+        const el = document.querySelector('[data-testid=preview-tab]');
+        const key = Object.keys(el).find(k => k.startsWith('__reactFiber'));
+        for (let f = el[key]; f; f = f.return) for (let h = f.memoizedState; h && typeof h === 'object' && 'next' in h; h = h.next) {
+          const v = h.memoizedState;
+          if (v && typeof v === 'object' && 'current' in v && v.current && typeof v.current.set === 'function' && 'target' in v.current && 'shown' in v.current) { window.__bands = v.current; return true; }
+        }
+        return false;
+      })()`);
+      await page(`window.__bands.set('newResult', true)`);
+      const bandUp = await waitFor(() => page(`Boolean(document.querySelector('[data-testid=preview-new-result]'))`), 5_000, 'new result band').then(() => true, () => false);
+      await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'shown under the new result band');
+      await sleep(600);
+      await page(`(() => { window.__bandGone = null; new MutationObserver(records => { for (const r of records) for (const n of r.removedNodes) if (n.nodeType === 1 && (n.matches?.('[data-testid=preview-new-result]') || n.querySelector?.('[data-testid=preview-new-result]'))) window.__bandGone ??= Date.now(); }).observe(document.body, { subtree: true, childList: true }); })()`);
+      since = Date.now();
+      delays.after = 900;
+      await page(`document.querySelector('[data-testid=preview-reload]').click()`);
+      await sleep(250);
+      await page(`window.__bands.set('newResult', true)`);
+      await sleep(1600);
+      const back = await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'shown after reload with a new result').then(() => true, () => false);
+      const after = await page(`({ band: Boolean(document.querySelector('[data-testid=preview-new-result]')), gone: window.__bandGone, target: window.__bands.target, shown: window.__bands.shown })`);
+      check('I2 a new result while the band goes for a reload keeps the band, and the view returns (PR #13 review I2)',
+        found && bandUp && back && after.band && after.gone === null && after.target.newResult === true, { found, bandUp, back, after, hideAnsweredAt, since });
+      delays.after = 0;
+      // Taken down for real; the view comes back.
+      await page(`document.querySelector('[data-testid=preview-reload]').click()`);
+      await waitFor(() => page(`!document.querySelector('[data-testid=preview-new-result]')`), 5_000, 'new result band gone');
+      await waitFor(() => manager.currentLayout?.state === 'shown', 5_000, 'shown after the new result band');
+    }
 
     // (5) A window resize: main hides before anything moves, before the page says a word.
     await sleep(500);
