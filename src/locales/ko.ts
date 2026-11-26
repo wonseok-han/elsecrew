@@ -1107,6 +1107,21 @@ export const ko = {
   "m5.sheet.mode": "보기 방식",
   "m5.sheet.files": "바뀐 파일",
   "m5.sheet.unsaved": "저장하지 않은 파일 {count}개",
+  "m5.taskList.group.attention": "확인이 필요해요",
+  "m5.taskList.group.working": "지금 일하는 중",
+  "m5.taskList.group.review": "검토 기다림",
+  "m5.taskList.group.done": "끝남",
+  "m5.taskList.waitingApproval": "{role} · 허락을 기다려요",
+  "m5.taskList.files": "파일 {count}개 바뀜",
+  "m5.taskList.menu": "{goal} 작업 메뉴",
+  "m5.taskList.menuShort": "작업 메뉴",
+  "m5.taskList.newShortcut": "새 작업 (⌘N)",
+  "m5.when.now": "방금",
+  "m5.when.minutes": "{n}분 전",
+  "m5.when.hours": "{n}시간 전",
+  "m5.when.yesterday": "어제",
+  "m5.when.forSeconds": "{n}초째",
+  "m5.when.forMinutes": "{n}분째",
 } as const;
 
 export type MessageKey = keyof typeof ko;

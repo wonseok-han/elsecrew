@@ -29,6 +29,7 @@ import { StorageAdmissionPoller, type AdmissionView } from "./admission-state.ts
 import { resolveM5Bridge, type SupportedM5Bridge } from "./bridge-boundary.ts";
 import { ChatUiController } from "./chat-state.ts";
 import { TaskLayout } from "./task-layout.tsx";
+import { TaskList, type TaskListItem } from "./task-list.tsx";
 import { ReviewSheet } from "./review-sheet.tsx";
 import { ProjectSwitcher } from "./project-switcher.tsx";
 import { bandSizes, bandUsesDrawer, clampRightWidth, layoutBand, panelRequestTarget, parseRightWidth, RIGHT_WIDTH_KEY, type LayoutBand, type RightTab, type SheetMode } from "./task-layout-model.ts";
@@ -136,7 +137,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   useEffect(() => { if (removal) removalDialog.current?.showModal(); else removalDialog.current?.close(); }, [removal]);
 
   useEffect(() => {
-    const menus = () => document.querySelectorAll<HTMLDetailsElement>(".m5-project-menu, .m5-project-guide, .m5-project-overflow, .m5-diff-options, .m5-notifications, .m5-project-switcher");
+    const menus = () => document.querySelectorAll<HTMLDetailsElement>(".m5-project-menu, .m5-project-guide, .m5-project-overflow, .m5-diff-options, .m5-notifications, .m5-project-switcher, .m5-task-menu");
     const outside = (event: PointerEvent) => menus().forEach(menu => { if (!menu.contains(event.target as Node)) menu.open = false; });
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape") menus().forEach(menu => { if (menu.open) { menu.open = false; menu.querySelector<HTMLElement>("summary")?.focus(); } }); };
     document.addEventListener("pointerdown", outside, true);
@@ -670,6 +671,28 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       : "[data-testid='layout-left'] [aria-current='true'], [data-testid='layout-left'] .m5-new-chat-button")?.focus());
   }, [snapshot.panelRequest]);
 
+  // The task list's rows: the same task status the open task's panels read (task-status.ts).
+  const activeRun = chat.agentRuns.find(run => ["preparing", "running", "cancelling"].includes(run.state)) ?? null;
+  const taskListItems: TaskListItem[] = chat.chats.map(item => {
+    const selected = chat.activeChat?.chatId === item.chatId;
+    const phase = selected && activePhase ? activePhase : taskPhase({ state: item.state, disposition: dispositions.get(item) });
+    const kind = selected ? activeKind : dispositions.get(item)?.kind ?? null;
+    const state = `${taskPhaseTone(phase)} m5-task-phase-${phase}`;
+    const changed = chat.refreshNeededChatIds.includes(item.chatId);
+    // A finished task whose standing could not be read again says so
+    // instead of keeping an old "merged" or "applied" (review #4).
+    const readFailed = !selected && dispositions.failed(item);
+    const status = changed ? t("m5.navigation.newState") : readFailed ? t("m5.task.readFailed") : t(taskPhaseLabelKey(phase, kind));
+    const role = activeRun && selected ? roleLabel(activeRun.selectedProfile.roleId, chat.activeChat?.roleDefinitions, t) : null;
+    return {
+      chatId: item.chatId, goal: item.goal, phase, readFailed, updatedAt: item.updatedAt, selected, status,
+      statusClass: changed ? "m5-chat-update" : readFailed ? "m5-chat-status m5-chat-status-neutral" : `m5-chat-status m5-chat-status-${state}`,
+      statusPhase: readFailed ? "readFailed" : phase,
+      detail: !changed && role && phase === "attention" ? { kind: "approval" as const, role } : !changed && role && activeRun && (phase === "running" || phase === "draft") ? { kind: "working" as const, role, startedAt: activeRun.createdAt } : undefined,
+      fileCount: selected && (phase === "review" || phase === "changedSince") ? snapshot.diffSummary?.entries.length : undefined,
+    };
+  });
+
   const preferencesButton = <button type="button" className="m5-secondary m5-open-preferences" disabled={settingsOpen || newChatOpen || appDefaultsOpen} onClick={() => setPreferencesOpen(true)} title={t("m5.preferences.title")} aria-label={t("m5.preferences.title")}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"><path d="m10 3-.6 2.4-2 .9L5 5.6 3 9l1.8 1.7v2.6L3 15l2 3.4 2.4-.7 2 .9L10 21h4l.6-2.4 2-.9 2.4.7 2-3.4-1.8-1.7v-2.6L21 9l-2-3.4-2.4.7-2-.9L14 3Z"/><circle cx="12" cy="12" r="3"/></svg><span>{t("m5.preferences.title")}</span></button>;
   // The project list: a rail on the home screen, folded into the project
   // switcher at the top of the task list once a project is open (1차-나).
@@ -809,28 +832,18 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         drawerOpen={drawerOpen} onDrawerOpenChange={setDrawerOpen} rightWidth={rightWidth} onRightWidth={setRightWidthPreference}
         sheetOpen={sheetOpen} onSheetClose={closeSheet} sheetLabel={t(sheetMode === "changes" ? "m5.sheet.changes" : "m5.sheet.editor")}
         list={<>
-          <ProjectSwitcher key={snapshot.project.id} name={snapshot.project.name} root={snapshot.project.root}>{projectRail}</ProjectSwitcher>
-          <section className="m5-chat-navigation" aria-label={t("m5.navigation.chats")}>
-        <div className="m5-chat-list">{chat.chats.map(item => {
-          const selected = chat.activeChat?.chatId === item.chatId;
-          // The same task status the open task's panels read (task-status.ts).
-          const phase = selected && activePhase ? activePhase : taskPhase({ state: item.state, disposition: dispositions.get(item) });
-          const kind = selected ? activeKind : dispositions.get(item)?.kind ?? null;
-          const state = `${taskPhaseTone(phase)} m5-task-phase-${phase}`;
-          const changed = chat.refreshNeededChatIds.includes(item.chatId);
-          // A finished task whose standing could not be read again says so
-          // instead of keeping an old "merged" or "applied" (review #4).
-          const readFailed = !selected && dispositions.failed(item);
-          const status = changed ? t("m5.navigation.newState") : readFailed ? t("m5.task.readFailed") : t(taskPhaseLabelKey(phase, kind));
-          return <div className="m5-chat-list-row" key={item.chatId}><button type="button" disabled={!admissionReady || settingsOpen || chat.switching} aria-current={selected ? "true" : undefined} title={`${item.goal} · ${status}`} className={selected ? "m5-chat-chip selected" : "m5-chat-chip"} onClick={() => void switchChat(item.chatId)}>
-            <span className="m5-chat-goal">{item.goal}</span><span data-task-phase={readFailed ? "readFailed" : phase} className={changed ? "m5-chat-update" : readFailed ? "m5-chat-status m5-chat-status-neutral" : `m5-chat-status m5-chat-status-${state}`}>{status}</span>
-          </button><button type="button" className="m5-chat-remove" title={t("m5.catalog.remove")} aria-label={t("m5.catalog.removeChat", { goal: item.goal })} disabled={!canRemove} onClick={() => { setRemovalError(false); setRemoval({ projectId: item.projectId, chatId: item.chatId, label: item.goal }); }}>×</button></div>;
-        })}</div>
-        {removalError && !removal && <p role="alert">{t("m5.catalog.removeError")}</p>}
-        {chat.chats.length > 0 && <button type="button" className="m5-link-button m5-task-recheck" disabled={!admissionReady || chat.switching} onClick={recheckStandings}>{t("m5.task.recheck")}</button>}
-        {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats || removing} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? t("m5.navigation.loadingChats") : t("m5.navigation.moreChats")}</button>}
-        <button ref={newChatButtonRef} type="button" className="m5-new-chat-button" disabled={!admissionReady || !projectDataReady || settingsOpen || chat.preparing || chat.switching} onClick={() => setNewChatOpen(true)}>{t("m5.navigation.newChat")}</button>
-      </section>
+          <TaskList rail={bandUsesDrawer(layoutBandNow)} items={taskListItems} disabled={!admissionReady || settingsOpen || chat.switching} removeDisabled={!canRemove}
+            onOpen={chatId => void switchChat(chatId)}
+            onRemove={chatId => { const item = chat.chats.find(entry => entry.chatId === chatId); if (item) { setRemovalError(false); setRemoval({ projectId: item.projectId, chatId: item.chatId, label: item.goal }); } }}
+            header={<>
+              <ProjectSwitcher key={snapshot.project.id} name={snapshot.project.name} root={snapshot.project.root}>{projectRail}</ProjectSwitcher>
+              <button ref={newChatButtonRef} type="button" className="m5-new-chat-button m5-new-task" title={t("m5.taskList.newShortcut")} disabled={!admissionReady || !projectDataReady || settingsOpen || chat.preparing || chat.switching} onClick={() => setNewChatOpen(true)}><span aria-hidden="true">＋</span><span className="m5-new-task-label">{t("m5.navigation.newChat")}</span></button>
+            </>}
+            footer={<div className="m5-task-list-footer">
+              {removalError && !removal && <p role="alert">{t("m5.catalog.removeError")}</p>}
+              {chat.chats.length > 0 && <button type="button" className="m5-link-button m5-task-recheck" disabled={!admissionReady || chat.switching} onClick={recheckStandings}>{t("m5.task.recheck")}</button>}
+              {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats || removing} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? t("m5.navigation.loadingChats") : t("m5.navigation.moreChats")}</button>}
+            </div>} />
         </>}
         story={chat.activeChat ? <div className="m5-conversation"><div className="m5-conversation-scroll"><TeamTimeline onCoordinatorChat={() => { setGoal(chat.activeChat?.goal ?? ""); setNewChatOpen(true); }} controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} phase={activePhase} phaseKind={activeKind} onApprovalsWaiting={onApprovalsWaiting} />{resultView && <section className={`m5-result-bar${resultView.loading ? " m5-result-loading" : ""}`} data-task-phase={resultView.loading ? "loading" : resultView.phase} aria-label={t("m5.result.title")} aria-busy={resultView.loading}>
         <span className="m5-result-mark" aria-hidden="true">✓</span>
