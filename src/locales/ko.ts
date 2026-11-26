@@ -1090,6 +1090,20 @@ export const ko = {
   "m5.markdown.truncated": "내용이 많아 앞부분만 서식을 입혔어요. 나머지는 원문 그대로예요.",
   "m5.message.noSummary": "요약할 문장이 없는 긴 보고예요. ‘자세히’에서 전체를 볼 수 있어요.",
   "m5.approval.answerFailed": "실행이 끝나 이 요청에 대한 답을 전하지 못했어요",
+  "m5.layout.list": "작업 목록",
+  "m5.layout.story": "작업 진행",
+  "m5.layout.results": "결과",
+  "m5.layout.resize": "결과 패널 너비 조절",
+  "m5.layout.ready": "새 결과가 있어요",
+  "m5.layout.closeDrawer": "결과 닫기",
+  "m5.layout.tab.preview": "미리보기",
+  "m5.layout.tab.changes": "변경",
+  "m5.layout.tab.files": "파일",
+  "m5.layout.tab.history": "기록",
+  "m5.layout.switchProject": "프로젝트 바꾸기 — 지금 {name}",
+  "m5.sheet.changes": "바뀐 내용",
+  "m5.sheet.editor": "편집기",
+  "m5.sheet.close": "닫기 (Esc)",
 } as const;
 
 export type MessageKey = keyof typeof ko;

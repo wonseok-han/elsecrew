@@ -28,7 +28,9 @@ import { roleLabel } from "./role-names.ts";
 import { StorageAdmissionPoller, type AdmissionView } from "./admission-state.ts";
 import { resolveM5Bridge, type SupportedM5Bridge } from "./bridge-boundary.ts";
 import { ChatUiController } from "./chat-state.ts";
-import { WorkbenchDock } from "./workbench-dock.tsx";
+import { TaskLayout } from "./task-layout.tsx";
+import { ProjectSwitcher } from "./project-switcher.tsx";
+import { bandSizes, bandUsesDrawer, clampRightWidth, layoutBand, panelRequestTarget, parseRightWidth, RIGHT_WIDTH_KEY, type LayoutBand, type RightTab, type SheetMode } from "./task-layout-model.ts";
 import { ProviderLogin, type ConnectionReveal } from "./provider-login.tsx";
 import { ChatWorkspaceDiscard } from "./chat-workspace-discard.tsx";
 import { ChatWorkspaceMerge } from "./chat-workspace-merge.tsx";
@@ -46,7 +48,7 @@ import { TaskDispositionStore } from "./task-disposition.ts";
 import { failStandingRead, finishStandingRead, standingView, startStandingRead, type StandingRead } from "./standing-read.ts";
 import { correctSettingsDraft, editSettingsDraft, loadSettingsDraft, settingsDraftDirty, settingsDraftSavable } from "./settings-draft.ts";
 import { findRememberedProject, forgetLastProject, recallLastProject, rememberLastProject, shouldResumeProject } from "./last-session.ts";
-import { DiffDetails, EditorContent, Empty, MonacoDiff, PanelTitle, VirtualFileList } from "./editor-surface.tsx";
+import { DiffDetails, EditorContent, Empty, MonacoDiff, VirtualFileList } from "./editor-surface.tsx";
 import { fileName, isProsePath } from "./editor-paths.ts";
 import { FollowupComposer, TeamTimeline } from "./task-story.tsx";
 
@@ -133,7 +135,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   useEffect(() => { if (removal) removalDialog.current?.showModal(); else removalDialog.current?.close(); }, [removal]);
 
   useEffect(() => {
-    const menus = () => document.querySelectorAll<HTMLDetailsElement>(".m5-project-menu, .m5-project-guide, .m5-project-overflow, .m5-diff-options, .m5-notifications");
+    const menus = () => document.querySelectorAll<HTMLDetailsElement>(".m5-project-menu, .m5-project-guide, .m5-project-overflow, .m5-diff-options, .m5-notifications, .m5-project-switcher");
     const outside = (event: PointerEvent) => menus().forEach(menu => { if (!menu.contains(event.target as Node)) menu.open = false; });
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape") menus().forEach(menu => { if (menu.open) { menu.open = false; menu.querySelector<HTMLElement>("summary")?.focus(); } }); };
     document.addEventListener("pointerdown", outside, true);
@@ -624,9 +626,53 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     button?.click();
   };
 
+  // ===== Task layout (ADE 1차-나): list · story · results, and a wide review sheet =====
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const update = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+  const layoutBandNow: LayoutBand = layoutBand(viewportWidth);
+  const [rightTab, setRightTab] = useState<RightTab>("changes");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  useEffect(() => { if (!bandUsesDrawer(layoutBandNow)) setDrawerOpen(false); }, [layoutBandNow]);
+  const [rightWidthPreference, setRightWidthPreference] = useState<number | null>(() => { try { return parseRightWidth(localStorage.getItem(RIGHT_WIDTH_KEY)); } catch { return null; } });
+  const rightWidth = clampRightWidth(rightWidthPreference ?? bandSizes(layoutBandNow).right, viewportWidth);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const sheetMode: SheetMode = allChanges || snapshot.diffVisible ? "changes" : "editor";
+  const closeSheet = () => { setSheetOpen(false); setAllChanges(null); };
+  const selectRightTab = (tab: RightTab) => setRightTab(tab);
+  const dirtyTabs = snapshot.tabs.filter(tab => tab.saveState !== "clean").length;
+  // "View all changes" opens the sheet; another task or project closes it.
+  useEffect(() => { if (allChanges) setSheetOpen(true); }, [allChanges]);
+  useEffect(() => { setSheetOpen(false); }, [snapshot.project?.id, snapshot.workspace?.workspaceIdentity]);
+  // The editor controller still asks for "files" | "editor" | "changes" (and
+  // the conversation or task list); the layout reads those requests here.
+  useEffect(() => {
+    const request = snapshot.panelRequest;
+    if (!request) return;
+    const target = panelRequestTarget(request.panel, controller.snapshot().diffVisible);
+    if (target.kind === "sheet") { setSheetOpen(true); return; }
+    if (target.kind === "tab") {
+      setRightTab(target.tab);
+      if (bandUsesDrawer(layoutBand(window.innerWidth))) setDrawerOpen(true);
+      return;
+    }
+    setSheetOpen(false); setAllChanges(null); setDrawerOpen(false);
+    requestAnimationFrame(() => document.querySelector<HTMLElement>(target.kind === "story"
+      ? "[data-testid='layout-center'] #m5-followup-text, [data-testid='layout-center'] .m5-timeline-list"
+      : "[data-testid='layout-left'] [aria-current='true'], [data-testid='layout-left'] .m5-new-chat-button")?.focus());
+  }, [snapshot.panelRequest]);
+
+  const preferencesButton = <button type="button" className="m5-secondary m5-open-preferences" disabled={settingsOpen || newChatOpen || appDefaultsOpen} onClick={() => setPreferencesOpen(true)} title={t("m5.preferences.title")} aria-label={t("m5.preferences.title")}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"><path d="m10 3-.6 2.4-2 .9L5 5.6 3 9l1.8 1.7v2.6L3 15l2 3.4 2.4-.7 2 .9L10 21h4l.6-2.4 2-.9 2.4.7 2-3.4-1.8-1.7v-2.6L21 9l-2-3.4-2.4.7-2-.9L14 3Z"/><circle cx="12" cy="12" r="3"/></svg><span>{t("m5.preferences.title")}</span></button>;
+  // The project list: a rail on the home screen, folded into the project
+  // switcher at the top of the task list once a project is open (1차-나).
+  const projectRail = <ProjectCatalog onCloseProject={() => void leaveProject()} closeDisabled={!admissionReady || settingsOpen || leavingProject || leaveError || !controller.canLeaveProject() || !chatController.canLeaveProjectView()} onRoles={() => openRoleSettings()} rolesDisabled={!admissionReady || settingsOpen || !projectDataReady || chat.preparing || chat.switching} rail onAdd={addProject} railExpanded={snapshot.project ? true : railExpanded} onRailExpandedChange={setRailExpanded} refreshKey={catalogRevision} removeDisabled={!canRemove} onRemove={entry => { setRemovalError(false); setRemoval({ projectId: entry.projectId, label: entry.canonicalPath }); }} settingsAction={snapshot.project ? undefined : preferencesButton} onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} onHasProjects={setHasSavedProjects} ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />;
+
   return (
-    <main inert={updatePreparing} className={`m5-workbench${preferencesOpen ? " m5-settings-open" : ""}${window.m5Projects ? " m5-with-project-rail" : ""}`} lang={lang} aria-label={t("m5.shell.label")}>
-      <ProjectCatalog onCloseProject={() => void leaveProject()} closeDisabled={!admissionReady || settingsOpen || leavingProject || leaveError || !controller.canLeaveProject() || !chatController.canLeaveProjectView()} onRoles={() => openRoleSettings()} rolesDisabled={!admissionReady || settingsOpen || !projectDataReady || chat.preparing || chat.switching} rail onAdd={addProject} railExpanded={railExpanded} onRailExpandedChange={setRailExpanded} refreshKey={catalogRevision} removeDisabled={!canRemove} onRemove={entry => { setRemovalError(false); setRemoval({ projectId: entry.projectId, label: entry.canonicalPath }); }} settingsAction={<button type="button" className="m5-secondary m5-open-preferences" disabled={settingsOpen || newChatOpen || appDefaultsOpen} onClick={() => setPreferencesOpen(true)} title={t("m5.preferences.title")} aria-label={t("m5.preferences.title")}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"><path d="m10 3-.6 2.4-2 .9L5 5.6 3 9l1.8 1.7v2.6L3 15l2 3.4 2.4-.7 2 .9L10 21h4l.6-2.4 2-.9 2.4.7 2-3.4-1.8-1.7v-2.6L21 9l-2-3.4-2.4.7-2-.9L14 3Z"/><circle cx="12" cy="12" r="3"/></svg><span>{t("m5.preferences.title")}</span></button>} onManage={entry => { setManagedProject(entry); setPreferencesSection("project"); setPreferencesOpen(true); }} onHasProjects={setHasSavedProjects} ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
+    <main inert={updatePreparing} className={`m5-workbench${preferencesOpen ? " m5-settings-open" : ""}${snapshot.project ? " m5-task-mode" : window.m5Projects ? " m5-with-project-rail" : ""}`} lang={lang} aria-label={t("m5.shell.label")}>
+      {!snapshot.project && projectRail}
       <dialog ref={removalDialog} className="m5-discard-dialog" aria-labelledby="m5-remove-title" onCancel={event => { event.preventDefault(); if (!removing) setRemoval(null); }}>
         <h2 id="m5-remove-title">{t("m5.catalog.remove")}</h2>
         <p>{removal?.label}</p><p>{t(removal?.chatId ? "m5.catalog.removeChatHelp" : "m5.catalog.removeHelp")}</p>
@@ -634,16 +680,19 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         <div className="m5-dialog-actions"><button type="button" disabled={removing} onClick={() => setRemoval(null)}>{t("m5.editor.cancel")}</button>
         <button type="button" className="m5-danger" disabled={!canRemove} onClick={() => removal && void deleteTarget(removal)}>{t("m5.catalog.remove")}</button></div>
       </dialog>
-      {!railExpanded && <button type="button" className="m5-sidebar-reopen" onClick={() => setRailExpanded(true)} aria-label={t("m5.catalog.expand")} title={t("m5.catalog.expand")} aria-expanded={false}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>}
-      <header className={`m5-toolbar${snapshot.project ? " m5-toolbar-project" : ""}`}>
-        <div>
+      {!snapshot.project && !railExpanded && <button type="button" className="m5-sidebar-reopen" onClick={() => setRailExpanded(true)} aria-label={t("m5.catalog.expand")} title={t("m5.catalog.expand")} aria-expanded={false}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>}
+      <header className={`m5-toolbar${snapshot.project ? " m5-toolbar-project m5-topbar" : ""}`} data-testid="top-bar">
+        {snapshot.project ? <div className="m5-topbar-path">
+          <span className="m5-topbar-brand">Elsecrew</span>
+          <h1 className="m5-topbar-crumb" title={chat.activeChat ? `${snapshot.project.name} › ${chat.activeChat.goal}` : snapshot.project.name}><span>{snapshot.project.name}</span>{chat.activeChat && !chat.switching && <><span aria-hidden="true"> › </span><b>{chat.activeChat.goal}</b></>}</h1>
+        </div> : <div>
           <div className="m5-toolbar-title">
 
-          <h1>{snapshot.project?.name ?? t(hasSavedProjects !== false ? "m5.home.welcome" : "m5.shell.start")}</h1></div>
+          <h1>{t(hasSavedProjects !== false ? "m5.home.welcome" : "m5.shell.start")}</h1></div>
           <p className="m5-subtitle">
-            {t(snapshot.project ? "m5.shell.active" : "m5.shell.intro")}
+            {t("m5.shell.intro")}
           </p>
-        </div>
+        </div>}
         <div className="m5-toolbar-actions">
       {/* Everything about what is happening lives with the bell: progress and
           errors under it, anything that still needs attention inside it. */}
@@ -672,7 +721,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         onGoal={() => setNewChatOpen(true)} onTeam={() => openRoleSettings()}
         onConversation={() => controller.revealConversation()}
         onChanges={() => { controller.selectPanel("changes"); void controller.refreshChanges(); }} />}
-
+      {snapshot.project && preferencesButton}
         </div>
       </header>
 
@@ -751,7 +800,34 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         {chat.error && <section className="m5-error" role="alert"><strong>{t(chat.error.messageKey)}</strong><details><summary>{t("m5.feedback.details")}</summary><pre>{chat.error.detail}</pre></details></section>}
       </>} onSave={(roles, roleDefinitions) => chatController.updateSettings(roles, roleDefinitions)} onReload={() => chatController.reloadSettings()} onClose={closeRoleSettings} returnToDraft={returnToNewChat} projectName={snapshot.project?.name ?? chat.settings.projectId} />}
 
-      {snapshot.project && <WorkbenchDock changeCount={snapshot.rescanRequired ? undefined : snapshot.diffSummary?.entries.length} reveal={snapshot.panelRequest} conversation={chat.activeChat ? <div className="m5-conversation"><div className="m5-conversation-scroll"><TeamTimeline onCoordinatorChat={() => { setGoal(chat.activeChat?.goal ?? ""); setNewChatOpen(true); }} controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} phase={activePhase} phaseKind={activeKind} onApprovalsWaiting={onApprovalsWaiting} />{resultView && <section className={`m5-result-bar${resultView.loading ? " m5-result-loading" : ""}`} data-task-phase={resultView.loading ? "loading" : resultView.phase} aria-label={t("m5.result.title")} aria-busy={resultView.loading}>
+      {snapshot.project && <TaskLayout band={layoutBandNow} rightTab={rightTab} onRightTab={selectRightTab}
+        drawerOpen={drawerOpen} onDrawerOpenChange={setDrawerOpen} rightWidth={rightWidth} onRightWidth={setRightWidthPreference}
+        sheetOpen={sheetOpen} onSheetClose={closeSheet} sheetLabel={t(sheetMode === "changes" ? "m5.sheet.changes" : "m5.sheet.editor")}
+        list={<>
+          <ProjectSwitcher key={snapshot.project.id} name={snapshot.project.name} root={snapshot.project.root}>{projectRail}</ProjectSwitcher>
+          <section className="m5-chat-navigation" aria-label={t("m5.navigation.chats")}>
+        <div className="m5-chat-list">{chat.chats.map(item => {
+          const selected = chat.activeChat?.chatId === item.chatId;
+          // The same task status the open task's panels read (task-status.ts).
+          const phase = selected && activePhase ? activePhase : taskPhase({ state: item.state, disposition: dispositions.get(item) });
+          const kind = selected ? activeKind : dispositions.get(item)?.kind ?? null;
+          const state = `${taskPhaseTone(phase)} m5-task-phase-${phase}`;
+          const changed = chat.refreshNeededChatIds.includes(item.chatId);
+          // A finished task whose standing could not be read again says so
+          // instead of keeping an old "merged" or "applied" (review #4).
+          const readFailed = !selected && dispositions.failed(item);
+          const status = changed ? t("m5.navigation.newState") : readFailed ? t("m5.task.readFailed") : t(taskPhaseLabelKey(phase, kind));
+          return <div className="m5-chat-list-row" key={item.chatId}><button type="button" disabled={!admissionReady || settingsOpen || chat.switching} aria-current={selected ? "true" : undefined} title={`${item.goal} · ${status}`} className={selected ? "m5-chat-chip selected" : "m5-chat-chip"} onClick={() => void switchChat(item.chatId)}>
+            <span className="m5-chat-goal">{item.goal}</span><span data-task-phase={readFailed ? "readFailed" : phase} className={changed ? "m5-chat-update" : readFailed ? "m5-chat-status m5-chat-status-neutral" : `m5-chat-status m5-chat-status-${state}`}>{status}</span>
+          </button><button type="button" className="m5-chat-remove" title={t("m5.catalog.remove")} aria-label={t("m5.catalog.removeChat", { goal: item.goal })} disabled={!canRemove} onClick={() => { setRemovalError(false); setRemoval({ projectId: item.projectId, chatId: item.chatId, label: item.goal }); }}>×</button></div>;
+        })}</div>
+        {removalError && !removal && <p role="alert">{t("m5.catalog.removeError")}</p>}
+        {chat.chats.length > 0 && <button type="button" className="m5-link-button m5-task-recheck" disabled={!admissionReady || chat.switching} onClick={recheckStandings}>{t("m5.task.recheck")}</button>}
+        {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats || removing} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? t("m5.navigation.loadingChats") : t("m5.navigation.moreChats")}</button>}
+        <button ref={newChatButtonRef} type="button" className="m5-new-chat-button" disabled={!admissionReady || !projectDataReady || settingsOpen || chat.preparing || chat.switching} onClick={() => setNewChatOpen(true)}>{t("m5.navigation.newChat")}</button>
+      </section>
+        </>}
+        story={chat.activeChat ? <div className="m5-conversation"><div className="m5-conversation-scroll"><TeamTimeline onCoordinatorChat={() => { setGoal(chat.activeChat?.goal ?? ""); setNewChatOpen(true); }} controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} phase={activePhase} phaseKind={activeKind} onApprovalsWaiting={onApprovalsWaiting} />{resultView && <section className={`m5-result-bar${resultView.loading ? " m5-result-loading" : ""}`} data-task-phase={resultView.loading ? "loading" : resultView.phase} aria-label={t("m5.result.title")} aria-busy={resultView.loading}>
         <span className="m5-result-mark" aria-hidden="true">✓</span>
         <span className="m5-result-text"><strong>{t("m5.result.title")}</strong>
           {/* Until the task's own standing is read, a placeholder: never a value or button of the task shown before. */}
@@ -782,27 +858,27 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           {t(`m5.firstChat.${example}`)}
         </button>)}</div><p className="m5-first-chat-note">{t("m5.firstChat.exampleHelp")}</p>
         {chat.settings && <details className="m5-chat-team-details"><summary>{t("m5.firstChat.team")}</summary><dl className="m5-team-preview">{roleSettingsAsV3(chat.settings).roles.map(role => <div key={role.roleId}><dt>{roleLabel(role.roleId, roleSettingsAsV3(chat.settings!).roleDefinitions, t)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{hasUsableModel(role.runtime, role.modelSelector) ? modelLabel(role.runtime, role.modelSelector) : t("m5.roles.unselectedModel")}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl><p className="m5-first-chat-note">{t("m5.firstChat.teamHelp")}</p></details>}
-      </section>} chats={<section className="m5-chat-navigation" aria-label={t("m5.navigation.chats")}>
-        <div className="m5-chat-list">{chat.chats.map(item => {
-          const selected = chat.activeChat?.chatId === item.chatId;
-          // The same task status the open task's panels read (task-status.ts).
-          const phase = selected && activePhase ? activePhase : taskPhase({ state: item.state, disposition: dispositions.get(item) });
-          const kind = selected ? activeKind : dispositions.get(item)?.kind ?? null;
-          const state = `${taskPhaseTone(phase)} m5-task-phase-${phase}`;
-          const changed = chat.refreshNeededChatIds.includes(item.chatId);
-          // A finished task whose standing could not be read again says so
-          // instead of keeping an old "merged" or "applied" (review #4).
-          const readFailed = !selected && dispositions.failed(item);
-          const status = changed ? t("m5.navigation.newState") : readFailed ? t("m5.task.readFailed") : t(taskPhaseLabelKey(phase, kind));
-          return <div className="m5-chat-list-row" key={item.chatId}><button type="button" disabled={!admissionReady || settingsOpen || chat.switching} aria-current={selected ? "true" : undefined} title={`${item.goal} · ${status}`} className={selected ? "m5-chat-chip selected" : "m5-chat-chip"} onClick={() => void switchChat(item.chatId)}>
-            <span className="m5-chat-goal">{item.goal}</span><span data-task-phase={readFailed ? "readFailed" : phase} className={changed ? "m5-chat-update" : readFailed ? "m5-chat-status m5-chat-status-neutral" : `m5-chat-status m5-chat-status-${state}`}>{status}</span>
-          </button><button type="button" className="m5-chat-remove" title={t("m5.catalog.remove")} aria-label={t("m5.catalog.removeChat", { goal: item.goal })} disabled={!canRemove} onClick={() => { setRemovalError(false); setRemoval({ projectId: item.projectId, chatId: item.chatId, label: item.goal }); }}>×</button></div>;
-        })}</div>
-        {removalError && !removal && <p role="alert">{t("m5.catalog.removeError")}</p>}
-        {chat.chats.length > 0 && <button type="button" className="m5-link-button m5-task-recheck" disabled={!admissionReady || chat.switching} onClick={recheckStandings}>{t("m5.task.recheck")}</button>}
-        {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats || removing} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? t("m5.navigation.loadingChats") : t("m5.navigation.moreChats")}</button>}
-        <button ref={newChatButtonRef} type="button" className="m5-new-chat-button" disabled={!admissionReady || !projectDataReady || settingsOpen || chat.preparing || chat.switching} onClick={() => setNewChatOpen(true)}>{t("m5.navigation.newChat")}</button>
-      </section>}>
+      </section>}
+        tabs={[
+          { id: "changes", label: t("m5.layout.tab.changes"), count: snapshot.rescanRequired ? undefined : snapshot.diffSummary?.entries.length, content: <>
+        <aside className="m5-panel m5-changes" aria-label={t("m5.editor.changes")}>
+          {snapshot.project ? (
+            <>
+              {snapshot.diffLoading && <p className="m5-empty" role="status">{t("m5.editor.loadingChanges")}</p>}
+              {/* A task worktree merges (result bar); only a copy task applies. */}
+              {/* One status line, read from the task status: while the team works it never says merged or applied. */}
+              {chat.activeChat && activePhase && !chat.switching && phaseIsWorking(activePhase) && (snapshot.diffSummary?.entries.length ?? 0) > 0 && <p className="m5-task-changes-working" data-task-phase={activePhase}>{t("m5.task.changes.working", { count: snapshot.diffSummary?.entries.length ?? 0 })}</p>}
+              {chat.activeChat && activePhase && !chat.switching && !phaseIsWorking(activePhase) && view.kind === "git" && <ChangesMergeStatus state={mergeInfo} phase={activePhase} changeCount={snapshot.diffSummary?.entries.length ?? 0} canMerge={resultView !== null && !resultView.loading} onMerge={openResultMerge} />}
+              {chat.activeChat && activePhase && !chat.switching && !phaseIsWorking(activePhase) && view.kind === "copy" && <ApplyLatest revision={`${diffRevision}`} projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} changeCount={snapshot.diffSummary?.entries.length ?? 0} confirmRequest={applyOpenRequest} onApplied={() => { dispositions.forget(chat.activeChat!.chatId); setStandingNonce(value => value + 1); }} disabled={!admissionReady || chat.switching || chatController.isActionBlocked() || chat.activeChat.state === "running" || chat.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state))} />}
+              {snapshot.diffSummary && changesDone && !chat.switching && <p className="m5-changes-done-label">{t("m5.changes.doneList")}</p>}
+              {snapshot.diffSummary && <ChangeList key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}`} entries={snapshot.diffSummary.entries} selected={allChanges ? allChanges.focus?.path : snapshot.diffFile?.path} disabled={!admissionReady || snapshot.actionBlocked}
+                onRefresh={() => { recheckStandings(); void controller.refreshChanges(); }} refreshing={snapshot.diffLoading} allOpen={Boolean(allChanges)} onViewAll={() => { if (allChanges) setAllChanges(null); else { setAllChanges({ focus: null }); controller.selectPanel("editor"); } }}
+                onOpen={path => { if (allChanges) setAllChanges({ focus: { path, at: Date.now() } }); else void controller.openDiff(path); }} />}
+            </>
+          ) : <Empty text={t("m5.editor.chooseProject")} />}
+        </aside>
+          </> },
+          { id: "files", label: t("m5.layout.tab.files"), content: <>
         <aside className="m5-panel m5-files" aria-label={t("m5.navigation.files")}>
           {snapshot.project ? (
             <>
@@ -817,7 +893,14 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
             </>
           ) : <Empty text={t("m5.navigation.empty")} />}
         </aside>
-
+          </> },
+        ]}
+        sheet={<>
+          <header className="m5-sheet-head">
+            <h2>{t(sheetMode === "changes" ? "m5.sheet.changes" : "m5.sheet.editor")}</h2>
+            <span className="m5-sheet-spacer" />
+            <button type="button" className="m5-secondary m5-sheet-close" data-testid="sheet-close" onClick={closeSheet}>{t("m5.sheet.close")}{dirtyTabs > 0 && <span className="m5-sheet-dirty" aria-label={t("m5.editor.dirty")}>●</span>}</button>
+          </header>
         <section className="m5-panel m5-editor" aria-label={t("m5.editor.title")}>
           <div hidden={snapshot.tabs.length === 0 || snapshot.diffVisible || Boolean(allChanges)} className="m5-tab-list" role="tablist" aria-label={t("m5.editor.tabs")}>
             {snapshot.tabs.map((tab) => (
@@ -874,27 +957,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
                 canDiscuss={admissionReady && !snapshot.actionBlocked && Boolean(snapshot.workspace) && chatController.canAppendFollowup() && !chat.followups?.[chat.activeChat?.chatId ?? ""]?.request}
                 onDiscuss={discussDiff} />}
         </section>
-
-        <aside className="m5-panel m5-changes" aria-label={t("m5.editor.changes")}>
-          <PanelTitle active={snapshot.panel === "changes"} panel="changes" onSelect={controller.selectPanel.bind(controller)}>
-            {t("m5.editor.changes")} {snapshot.diffSummary ? `(${snapshot.diffSummary.entries.length})` : ""}
-          </PanelTitle>
-          {snapshot.project ? (
-            <>
-              {snapshot.diffLoading && <p className="m5-empty" role="status">{t("m5.editor.loadingChanges")}</p>}
-              {/* A task worktree merges (result bar); only a copy task applies. */}
-              {/* One status line, read from the task status: while the team works it never says merged or applied. */}
-              {chat.activeChat && activePhase && !chat.switching && phaseIsWorking(activePhase) && (snapshot.diffSummary?.entries.length ?? 0) > 0 && <p className="m5-task-changes-working" data-task-phase={activePhase}>{t("m5.task.changes.working", { count: snapshot.diffSummary?.entries.length ?? 0 })}</p>}
-              {chat.activeChat && activePhase && !chat.switching && !phaseIsWorking(activePhase) && view.kind === "git" && <ChangesMergeStatus state={mergeInfo} phase={activePhase} changeCount={snapshot.diffSummary?.entries.length ?? 0} canMerge={resultView !== null && !resultView.loading} onMerge={openResultMerge} />}
-              {chat.activeChat && activePhase && !chat.switching && !phaseIsWorking(activePhase) && view.kind === "copy" && <ApplyLatest revision={`${diffRevision}`} projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} changeCount={snapshot.diffSummary?.entries.length ?? 0} confirmRequest={applyOpenRequest} onApplied={() => { dispositions.forget(chat.activeChat!.chatId); setStandingNonce(value => value + 1); }} disabled={!admissionReady || chat.switching || chatController.isActionBlocked() || chat.activeChat.state === "running" || chat.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state))} />}
-              {snapshot.diffSummary && changesDone && !chat.switching && <p className="m5-changes-done-label">{t("m5.changes.doneList")}</p>}
-              {snapshot.diffSummary && <ChangeList key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}`} entries={snapshot.diffSummary.entries} selected={allChanges ? allChanges.focus?.path : snapshot.diffFile?.path} disabled={!admissionReady || snapshot.actionBlocked}
-                onRefresh={() => { recheckStandings(); void controller.refreshChanges(); }} refreshing={snapshot.diffLoading} allOpen={Boolean(allChanges)} onViewAll={() => { if (allChanges) setAllChanges(null); else { setAllChanges({ focus: null }); controller.selectPanel("editor"); } }}
-                onOpen={path => { if (allChanges) setAllChanges({ focus: { path, at: Date.now() } }); else void controller.openDiff(path); }} />}
-            </>
-          ) : <Empty text={t("m5.editor.chooseProject")} />}
-        </aside>
-      </WorkbenchDock>}
+        </>} />}
       <footer className="m5-app-statusbar" aria-label={t("m5.usage.title")}><ProviderUsage disabled={!admissionReady}/></footer>
     </main>
   );

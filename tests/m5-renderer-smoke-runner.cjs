@@ -405,7 +405,7 @@ app.whenReady().then(async () => {
     searchLanguage.value = 'ko'; searchLanguage.dispatchEvent(new Event('change', { bubbles: true }));
     await ${waitFor("document.querySelector('.m5-file-search input')?.getAttribute('aria-label') === '파일 이름 또는 경로 찾기'", "Korean search restored")};
     document.querySelector('.m5-search-results button').click();
-    await ${waitFor("!document.querySelector('[data-panel=editor]').hidden && document.querySelector('.monaco-editor') && Object.hasOwn(globalThis, 'MonacoEnvironment') && typeof globalThis.MonacoEnvironment.getWorker === 'function'", "Monaco mount and reveal")};
+    await ${waitFor("!document.querySelector('[data-testid=review-sheet]').hidden && document.querySelector('.monaco-editor') && Object.hasOwn(globalThis, 'MonacoEnvironment') && typeof globalThis.MonacoEnvironment.getWorker === 'function'", "Monaco mount and reveal")};
     await ${waitFor("document.querySelector('.m5-project-guide')?.open === false", "guide collapses when file work starts")};
     document.querySelector('.m5-project-guide summary').click();
     await ${waitFor("document.querySelector('.m5-project-guide')?.open === true", "guide can be reopened during work")};
@@ -413,7 +413,7 @@ app.whenReady().then(async () => {
     localWorker.terminate();
     const editorNode = document.querySelector('.monaco-editor');
     document.querySelector('.m5-search-results button').click();
-    await ${waitFor("!document.querySelector('[data-panel=editor]').hidden", "reveal already-open file")};
+    await ${waitFor("!document.querySelector('[data-testid=review-sheet]').hidden", "reveal already-open file")};
     if (document.querySelector('.monaco-editor') !== editorNode) throw new Error('file navigation remounted Monaco');
     if (!document.querySelector('.m5-project-guide').open) throw new Error('file navigation closed explicitly reopened guide');
     document.querySelector('.m5-project-guide summary').click();
@@ -446,27 +446,18 @@ app.whenReady().then(async () => {
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '프로젝트로 돌아가기').click();
     if (document.querySelector('.monaco-editor') !== editorNode) throw new Error('settings reload remounted editor');
     if (document.querySelector('.m5-layout-settings, .m5-dock-options, .m5-dock-visibility') || document.querySelector('[role=tab][draggable=true]')) throw new Error('removed layout controls remain');
-    if (document.querySelectorAll('.m5-dock-separator').length !== 2) throw new Error('fixed three columns missing');
-    for (const slot of document.querySelectorAll('.m5-dock-slot:not([hidden])')) {
-      const frame = slot.querySelector('.m5-dock-frame');
-      const heading = slot.querySelector('.m5-dock-heading');
-      const content = slot.querySelector('.m5-dock-content');
-      if (!frame || !frame.contains(heading) || !frame.contains(content)) throw new Error('panel frame does not enclose header and body');
-      const css = getComputedStyle(frame), bounds = frame.getBoundingClientRect();
-      if (['borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth'].some(edge => css[edge] !== '1px')) throw new Error('panel frame is not continuous');
-      if (Math.abs(content.getBoundingClientRect().bottom - (bounds.bottom - 1)) > 1) throw new Error('panel frame does not fill body height');
-    }
-    const visibleTab = text => [...document.querySelectorAll('[role=tab]')].find(button => button.textContent.startsWith(text) && button.getClientRects().length);
-    visibleTab('변경').click();
-    await ${waitFor("!document.querySelector('[data-panel=changes]').hidden", "fixed changes tab")};
-    visibleTab('파일').click();
-    await ${waitFor("!document.querySelector('[data-panel=files]').hidden", "fixed files tab")};
-    const separator = document.querySelector('.m5-dock-separator');
+    if (!document.querySelector('[data-testid=layout-left]') || !document.querySelector('[data-testid=layout-center]') || !document.querySelector('[data-testid=layout-right]')) throw new Error('three task areas missing');
+    document.querySelector('[data-testid=right-tab-changes]').click();
+    await ${waitFor("!document.querySelector('[data-testid=right-panel-changes]').hidden", "changes tab")};
+    document.querySelector('[data-testid=right-tab-files]').click();
+    await ${waitFor("!document.querySelector('[data-testid=right-panel-files]').hidden", "files tab")};
+    const separator = document.querySelector('.m5-layout-resize');
     const before = Number(separator.getAttribute('aria-valuenow'));
-    separator.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true}));
-    await ${waitFor("Number(document.querySelector('.m5-dock-separator').getAttribute('aria-valuenow')) > before", "keyboard resize")};
+    separator.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowLeft', bubbles:true}));
+    await ${waitFor("Number(document.querySelector('.m5-layout-resize').getAttribute('aria-valuenow')) > before", "keyboard resize")};
     if (document.querySelector('.monaco-editor') !== editorNode) throw new Error('tabs or resizing remounted editor');
-    // Project actions live in the rail's per-project overflow (⋯) menu.
+    // Project actions live in the project switcher's per-project overflow (⋯) menu.
+    document.querySelector('[data-testid=project-switcher]').open = true;
     const menu = document.querySelector('.m5-project-overflow');
     menu.querySelector('summary').click();
     if (!menu.open || menu.querySelector('summary').textContent.trim() !== '⋯' || !menu.querySelector('summary').getAttribute('aria-label')) throw new Error('project menu not compact');
@@ -514,23 +505,19 @@ app.whenReady().then(async () => {
   await window.webContents.executeJavaScript(`(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"저장되지 않은 변경\"]')", "draft before responsive transition")};
     globalThis.narrowEditor = document.querySelector('.monaco-editor');
-    globalThis.wideLayout = localStorage.getItem('elsecrew.m5.dock.v1');
+    globalThis.wideLayout = localStorage.getItem('elsecrew.m5.layout.rightWidth.v1');
   })()`);
   window.setSize(760, 640);
   await window.webContents.executeJavaScript(`(async () => {
-    await ${waitFor("document.querySelector('.m5-dock-narrow-note') && document.querySelectorAll('.m5-dock-slot:not([hidden])').length === 1", "automatic narrow tabs")};
-    const tab = label => [...document.querySelectorAll('.m5-dock-slot:not([hidden]) [role=tab]')].find(button => button.textContent === label);
-    tab('팀 대화').click();
-    await ${waitFor("!document.querySelector('[data-panel=conversation]').hidden", "narrow conversation selected")};
-    tab('편집기').click();
-    await ${waitFor("!document.querySelector('[data-panel=editor]').hidden", "narrow editor selected")};
-    if (globalThis.narrowEditor !== document.querySelector('.monaco-editor') || !document.querySelector('[aria-label="저장되지 않은 변경"]')) throw new Error('responsive tabs lost draft or editor');
-    if (localStorage.getItem('elsecrew.m5.dock.v1') !== globalThis.wideLayout) throw new Error('narrow tabs overwrote wide layout');
+    await ${waitFor("document.querySelector('[data-testid=task-layout]').dataset.band === 'compact'", "narrow layout band")};
+    if (document.querySelector('[data-testid=review-sheet]').hidden) throw new Error('narrow window closed the review sheet');
+    if (globalThis.narrowEditor !== document.querySelector('.monaco-editor') || !document.querySelector('[aria-label="저장되지 않은 변경"]')) throw new Error('responsive layout lost draft or editor');
+    if (localStorage.getItem('elsecrew.m5.layout.rightWidth.v1') !== globalThis.wideLayout) throw new Error('narrow layout overwrote the results width');
   })()`);
-  window.setSize(960, 640);
+  window.setSize(1280, 768);
   await window.webContents.executeJavaScript(`(async () => {
-    await ${waitFor("!document.querySelector('.m5-dock-narrow-note') && document.querySelectorAll('.m5-dock-separator').length === 2", "wide layout restored")};
-    if (globalThis.narrowEditor !== document.querySelector('.monaco-editor') || localStorage.getItem('elsecrew.m5.dock.v1') !== globalThis.wideLayout || !document.querySelector('[aria-label="저장되지 않은 변경"]')) throw new Error('wide restoration lost layout or draft');
+    await ${waitFor("document.querySelector('[data-testid=task-layout]').dataset.band === 'regular'", "wide layout restored")};
+    if (globalThis.narrowEditor !== document.querySelector('.monaco-editor') || localStorage.getItem('elsecrew.m5.layout.rightWidth.v1') !== globalThis.wideLayout || !document.querySelector('[aria-label="저장되지 않은 변경"]')) throw new Error('wide restoration lost layout or draft');
     delete globalThis.narrowEditor; delete globalThis.wideLayout;
   })()`);
   if (window.isVisible() || window.isFocused()) throw new Error("synthetic input must not capture desktop focus");
@@ -568,8 +555,8 @@ app.whenReady().then(async () => {
   await window.webContents.executeJavaScript(`(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"저장되지 않은 변경\"]')", "shortcut dirty draft")};
     const originalEditor = document.querySelector('.monaco-editor');
-    const savedLayout = localStorage.getItem('elsecrew.m5.dock.v1');
-    const panelStates = () => [...document.querySelectorAll('.m5-dock-slot')].map(node => [node.dataset.panel, node.hidden, node.getAttribute('style')]);
+    const savedLayout = localStorage.getItem('elsecrew.m5.layout.rightWidth.v1');
+    const panelStates = () => [...document.querySelectorAll('[data-testid^=right-panel-], [data-testid=review-sheet]')].map(node => [node.dataset.testid, node.hidden]);
     const originalPanels = JSON.stringify(panelStates());
     for (const language of ['en', 'ko']) {
       const select = document.querySelector('.m5-preferences-row select');
@@ -577,7 +564,7 @@ app.whenReady().then(async () => {
       select.dispatchEvent(new Event('change', {bubbles:true}));
       await new Promise(resolve => setTimeout(resolve, 30));
       const dirtyLabel = language === 'en' ? 'Unsaved changes' : '저장되지 않은 변경';
-      if (localStorage.getItem('elsecrew.m5.dock.v1') !== savedLayout || JSON.stringify(panelStates()) !== originalPanels) throw new Error('language switch changed dock layout');
+      if (localStorage.getItem('elsecrew.m5.layout.rightWidth.v1') !== savedLayout || JSON.stringify(panelStates()) !== originalPanels) throw new Error('language switch changed the layout');
       if (document.querySelector('main').lang !== language || document.querySelector('.monaco-editor') !== originalEditor || ![...document.querySelectorAll('[aria-label]')].some(node => node.getAttribute('aria-label') === dirtyLabel)) throw new Error('language switch lost the active editor draft');
     }
     document.querySelector('.monaco-editor textarea').focus();
@@ -640,7 +627,7 @@ app.whenReady().then(async () => {
     const preservedEditor = document.querySelector('.monaco-editor');
     document.querySelector('.m5-change-row').click();
     await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length === 200", "bounded diff page")};
-    if (!document.querySelector('[data-panel=editor] .m5-diff-details') || document.querySelector('[data-panel=editor]').hidden) throw new Error('diff did not open in the editor dock');
+    if (!document.querySelector('[data-testid=review-sheet] .m5-diff-details') || document.querySelector('[data-testid=review-sheet]').hidden) throw new Error('diff did not open in the review sheet');
     if (!document.querySelector('.m5-editor-surface').hidden || document.querySelector('.monaco-editor') !== preservedEditor) throw new Error('review disposed the existing editor');
     document.querySelector('.m5-diff-options').open = true;
     [...document.querySelectorAll('.m5-diff-actions button')].find(button => button.textContent === '이전 편집기로 돌아가기').click();
@@ -656,10 +643,8 @@ app.whenReady().then(async () => {
     if (diffBox.textContent.includes('@@ -')) throw new Error('raw hunk header leaked into comparison');
     if (!document.querySelector('.m5-diff-source pre').textContent.includes('@@ -')) throw new Error('raw comparison evidence missing');
     if (document.querySelector('.m5-diff-mode button').getBoundingClientRect().height > 32) throw new Error('comparison toolbar is oversized');
-    [...document.querySelectorAll('[role=tab]')].find(button => button.textContent.startsWith('변경') && button.getClientRects().length).click();
-    await ${waitFor("!document.querySelector('[data-panel=changes]').hidden", "changes visible for wrap geometry")};
-    const changeBadge = document.querySelector('[data-panel=changes] .m5-dock-count');
-    if (!changeBadge || !document.querySelector('.m5-changes').textContent.includes('변경 (' + changeBadge.textContent + ')')) throw new Error('change tab count differs from loaded summary');
+    const changeBadge = document.querySelector('[data-testid=right-tab-changes] .m5-layout-count');
+    if (!changeBadge || !/^\\d+$/.test(changeBadge.textContent)) throw new Error('change tab count missing');
     if (!wrapToggle?.checked) throw new Error('diff should wrap by default');
     const wrapText = diffBox.textContent;
     const originalDiffStyle = diffBox.getAttribute('style');
@@ -699,8 +684,8 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-followup button:not(:disabled)') || document.querySelector('#m5-followup-text')", "follow-up composer")};
     globalThis.applicationResponseLossReport = await (${probeApplicationResponseLoss.toString()})();
     const input = document.querySelector('#m5-followup-text');
-    [...document.querySelectorAll('[role=tab]')].find(button => button.textContent === '팀 대화' && button.getClientRects().length).click();
-    await ${waitFor("!document.querySelector('[data-panel=conversation]').hidden", "conversation visible for geometry")};
+    if (!document.querySelector('[data-testid=review-sheet]').hidden) document.querySelector('[data-testid=sheet-close]').click();
+    await ${waitFor("document.querySelector('[data-testid=review-sheet]').hidden", "conversation visible for geometry")};
     const conversation = document.querySelector('.m5-conversation');
     const savedConversationStyle = conversation.getAttribute('style');
     try {

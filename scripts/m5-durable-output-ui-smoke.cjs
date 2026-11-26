@@ -278,7 +278,7 @@ app.on('browser-window-created', (_event, window) => {
           const workspace = fs.realpathSync(path.join(workspaceRoot, chat.worktreeId));
           assert.ok(workspace.startsWith(workspaceRoot + path.sep));
           report.fileRetention.diffFixture = require('../tests/m5-native-diff-fixture.cjs').change(workspace);
-          await run("[...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent.trim() === '변경')?.click()");
+          await run("document.querySelector('[data-testid=right-tab-changes]')?.click()");
           await wait("!![...document.querySelectorAll('.m5-changes button')].find(b => b.textContent === '변경 새로 고침' && !b.disabled)");
           await run("[...document.querySelectorAll('.m5-changes button')].find(b => b.textContent === '변경 새로 고침').click()");
           await wait("document.querySelector('.m5-changes')?.textContent.includes('변경 (500)')");
@@ -314,7 +314,7 @@ app.on('browser-window-created', (_event, window) => {
             await wait("!!document.querySelector('.monaco-editor textarea') && !!document.querySelector('.m5-editor-tab-name')", 30000);
             if (retentionWithOutputDiff) {
               // Reopen the same stored result; do not start another fixture run.
-              await run("[...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent.trim() === '변경')?.click()");
+              await run("document.querySelector('[data-testid=right-tab-changes]')?.click()");
               await wait("!![...document.querySelectorAll('.m5-changes button')].find(b => b.textContent === '변경 새로 고침' && !b.disabled)");
               await run("[...document.querySelectorAll('.m5-changes button')].find(b => b.textContent === '변경 새로 고침').click()");
               await wait("document.querySelector('.m5-changes')?.textContent.includes('변경 (500)')");
@@ -423,7 +423,7 @@ app.on('browser-window-created', (_event, window) => {
         if (combined && index === 0) {
           await wait("document.querySelector('.m5-durable-output')?.dataset.runId === outputSmokeRuns[0].runId && document.querySelector('.m5-timeline h2')?.textContent === 'Output stream 0'");
         } else {
-        if (combined) await run("[...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent.trim() === '작업').click()");
+        if (combined) await run("document.querySelector('[data-testid=layout-left]').scrollIntoView()");
         await run(`[...document.querySelectorAll('.m5-chat-chip')].find(b => b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}').click()`);
         await wait(`document.querySelector('.m5-durable-output')?.dataset.runId === outputSmokeRuns[${index}].runId &&
           [...document.querySelectorAll('.m5-chat-chip')].some(b => b.getAttribute('aria-current') === 'true' && !b.disabled && b.querySelector('.m5-chat-goal')?.textContent === 'Output stream ${index}')`);

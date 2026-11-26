@@ -1599,3 +1599,71 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-approval-details > summary { cursor: pointer; font-weight: 600; }
 .m5-md-plain { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .m5-md-plain-note { color: var(--m5-muted); font-size: 12px; }
+
+/* ===== ADE 1차-나: 작업 레이아웃 (task-layout.tsx) =====
+   Semantic tokens only in this section (see the token block at the top).
+   Layout: top bar · [task list | task story | results] · status bar, and a
+   wide review sheet over the story and results. */
+.m5-workbench.m5-task-mode { padding: 0 0 var(--statusbar-h); overflow: hidden; background: var(--bg-app); }
+.m5-workbench.m5-task-mode > .m5-app-statusbar { height: var(--statusbar-h); padding: 0 var(--space-3); background: var(--bg-app); border-top-color: var(--line-subtle); }
+.m5-workbench.m5-task-mode > .m5-app-statusbar .m5-usage-trigger { min-height: 22px; }
+.m5-workbench.m5-task-mode > .m5-task-layout { flex: 1 1 0; min-height: 0; }
+.m5-workbench.m5-task-mode > .m5-notice, .m5-workbench.m5-task-mode > .m5-error, .m5-workbench.m5-task-mode > .m5-admission, .m5-workbench.m5-task-mode > .m5-rescan { margin: var(--space-2) var(--space-4); }
+
+/* Top bar: Elsecrew · project › task ··· bell · help · settings */
+.m5-workbench.m5-task-mode > .m5-topbar { flex-direction: row; align-items: center; height: var(--topbar-h); min-height: 0; margin: 0; padding: 0 var(--space-2) 0 var(--space-4); gap: var(--space-3); border-bottom: 1px solid var(--line-subtle); background: var(--bg-app); }
+.m5-topbar-path { display: flex; align-items: baseline; gap: var(--space-3); flex: 1 1 auto; min-width: 0; }
+.m5-topbar-brand { flex: none; font-weight: 700; font-size: var(--text-m); letter-spacing: -.01em; color: var(--text-primary); }
+.m5-workbench .m5-topbar-crumb { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-s); font-weight: 400; letter-spacing: 0; color: var(--text-secondary); }
+.m5-topbar-crumb b { color: var(--text-primary); font-weight: 600; }
+.m5-workbench.m5-task-mode > .m5-topbar .m5-toolbar-actions { flex: none; flex-wrap: nowrap; gap: 2px; }
+.m5-topbar .m5-toolbar-actions > details > summary > span, .m5-topbar .m5-open-preferences > span { display: none; }
+.m5-topbar .m5-open-preferences { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid transparent; border-radius: var(--radius-s); background: transparent; color: var(--text-secondary); }
+.m5-topbar .m5-open-preferences:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+.m5-topbar .m5-open-preferences svg { width: 17px; height: 17px; }
+
+/* Three areas */
+.m5-task-layout { position: relative; display: grid; grid-template-columns: var(--left-w) minmax(0, 1fr) var(--right-w); min-width: 0; background: var(--bg-app); }
+.m5-layout-left { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg-pane); border-right: 1px solid var(--line-subtle); }
+.m5-layout-center { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg-app); }
+.m5-layout-right { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-pane); border-left: 1px solid var(--line-subtle); }
+.m5-layout-right[hidden] { display: none; }
+.m5-task-layout .m5-panel { border: 0; border-radius: 0; background: transparent; }
+
+/* Project switcher (the old rail folds into its popover) */
+.m5-project-switcher { position: relative; margin: var(--space-3) var(--space-3) var(--space-2); }
+.m5-project-switcher > summary { display: flex; align-items: center; gap: var(--space-2); padding: 6px var(--space-2); border: 1px solid var(--line-default); border-radius: var(--radius-m); background: var(--bg-raised); list-style: none; cursor: pointer; }
+.m5-project-switcher > summary::-webkit-details-marker { display: none; }
+.m5-project-switcher > summary:hover { background: var(--bg-hover); }
+.m5-project-switcher > summary:focus-visible { outline: 2px solid var(--status-running); outline-offset: 2px; }
+.m5-switcher-avatar { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-s); background: var(--bg-selected); border: 1px solid var(--line-strong); color: var(--text-primary); font-weight: 700; font-size: var(--text-s); }
+.m5-switcher-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text-primary); }
+.m5-switcher-caret { flex: none; color: var(--text-tertiary); font-size: var(--text-xs); }
+.m5-project-switcher-panel { position: absolute; z-index: 60; top: calc(100% + var(--space-1)); left: 0; width: max(100%, 280px); max-height: min(70vh, 560px); overflow: auto; box-sizing: border-box; border: 1px solid var(--line-strong); border-radius: var(--radius-l); background: var(--bg-pane); box-shadow: 0 16px 40px #0009; }
+.m5-project-switcher-panel > .m5-project-rail { position: static; width: auto; inset: auto; border: 0; background: transparent; padding: var(--space-3) var(--space-2); overflow: visible; }
+.m5-project-switcher-panel > .m5-project-rail > .m5-rail-brand, .m5-project-switcher-panel > .m5-project-rail > .m5-rail-bookmark, .m5-project-switcher-panel > .m5-project-rail > .m5-rail-footer:empty { display: none; }
+
+/* Results: tabs, panels, result box */
+.m5-layout-resize { position: absolute; z-index: 3; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; touch-action: none; }
+.m5-layout-resize:hover, .m5-layout-resize:focus-visible { outline: none; background: linear-gradient(to right, transparent 3px, var(--status-running) 3px, var(--status-running) 5px, transparent 5px); }
+.m5-layout-tabs { display: flex; flex: none; align-items: flex-end; gap: 2px; padding: var(--space-2) var(--space-3) 0; border-bottom: 1px solid var(--line-subtle); min-width: 0; overflow-x: auto; }
+.m5-layout-tabs > [role="tab"] { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 7px 10px 9px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--text-secondary); font-size: var(--text-s); font-weight: 500; white-space: nowrap; word-break: keep-all; cursor: pointer; }
+.m5-layout-tabs > [role="tab"]:hover { color: var(--text-primary); }
+.m5-layout-tabs > [role="tab"][aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--text-primary); }
+.m5-layout-tabs > [role="tab"]:focus-visible { outline: 2px solid var(--status-running); outline-offset: -2px; }
+.m5-layout-count { color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.m5-layout-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--status-review); }
+.m5-layout-drawer-close { margin-left: auto; align-self: center; width: 28px; height: 28px; padding: 0; border: 0; background: transparent; color: var(--text-secondary); font-size: var(--text-l); }
+.m5-layout-tabpanel { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; overflow: auto; }
+.m5-layout-tabpanel[hidden] { display: none; }
+.m5-layout-tabpanel > .m5-panel { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.m5-layout-tabpanel > .m5-files { display: flex; flex-direction: column; overflow: hidden; }
+
+/* Wide review sheet: covers the story and results; the task list stays. */
+.m5-review-sheet { position: absolute; z-index: 20; top: 0; right: 0; bottom: 0; left: var(--left-w); display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-app); border-left: 1px solid var(--line-default); box-shadow: -18px 0 40px #0008; }
+.m5-review-sheet[hidden] { display: none; }
+.m5-sheet-head { display: flex; flex: none; align-items: center; gap: var(--space-3); min-height: 44px; padding: var(--space-1) var(--space-4); border-bottom: 1px solid var(--line-subtle); }
+.m5-sheet-head h2 { margin: 0; font-size: var(--text-l); white-space: nowrap; }
+.m5-sheet-spacer { flex: 1; }
+.m5-sheet-dirty { margin-left: 6px; color: var(--status-attention); }
+.m5-review-sheet > .m5-editor { flex: 1 1 0; min-height: 0; border: 0; border-radius: 0; }

@@ -172,13 +172,13 @@ app.whenReady().then(async () => {
       let start = performance.now(); button('프로젝트 선택').click();
       await wait(() => document.querySelectorAll('.m5-file-row').length === 120);
       // The previous trial ends in Changes; expose Files before scrolling it.
-      [...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent === '파일' && b.getClientRects().length)?.click();
+      document.querySelector('[data-testid=right-tab-files]')?.click();
       await paint();
       result.treeRootMs = performance.now() - start;
       result.treeDomNodes = document.querySelector('.m5-file-list').querySelectorAll('*').length;
-      // The default dock now groups Files and Changes. A hidden list reaching
+      // The results panel groups Files and Changes as tabs. A hidden list reaching
       // the right row count is not evidence that the user has seen it paint.
-      [...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent.startsWith('변경') && b.getClientRects().length)?.click();
+      document.querySelector('[data-testid=right-tab-changes]')?.click();
       await wait(() => document.querySelector('.m5-change-row')?.getClientRects().length > 0);
       await wait(() => document.querySelectorAll('.m5-change-row').length === 100); await paint();
       result.diffSummaryMs = performance.now() - start;
@@ -193,7 +193,7 @@ app.whenReady().then(async () => {
       if (changeRows.length !== 500 || changeRows.some((row, index) => row.title !== 'file-' + index + '.txt')) throw new Error('incomplete change list');
       if (document.querySelector('.m5-change-list .m5-load-more')) throw new Error('change list still offers more');
       // Verify the bounded DOM still exposes the end of the same 500-entry page.
-      [...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent === '파일' && b.getClientRects().length)?.click();
+      document.querySelector('[data-testid=right-tab-files]')?.click();
       await wait(() => document.querySelector('.m5-file-row')?.getClientRects().length > 0);
       const treeList = document.querySelector('.m5-file-list');
       treeList.scrollTop = treeList.scrollHeight;
