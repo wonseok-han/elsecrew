@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { maskSecrets, redactCommand, SECRET_MASK } from "../src/m5/secret-shape.ts";
+import { maskSecrets, SECRET_MASK, summarizeCommand } from "../src/m5/secret-shape.ts";
 import { activityDetail, activityItems, activityLine, BLOCK_MAX, displayLine, durationParts, LINE_MAX, openableFile, parseWorkActivity } from "../src/m5/work-history.ts";
 
 const char = (code: number) => String.fromCharCode(code);
@@ -64,16 +64,16 @@ test("secrets are masked with the same rules as the engine (shared cases, review
   // A row stored by an older build, unmasked, is masked when shown.
   // A command row stored by an older build, unmasked, is redacted fail-closed when shown.
   const old = parseWorkActivity(JSON.stringify({ action: "command", target: "curl -H 'Authorization: Bearer fakeexampletoken01' https://api.example.com" }))!;
-  assert.equal(old.target, `curl -H ${SECRET_MASK} https://api.example.com`);
+  assert.deepEqual(old, { action: "command", program: "curl", hiddenArgs: 3 });
   // Masked before the cut: a key at the line's end leaves nothing (review B2).
   assert.ok(!displayLine(`${"p".repeat(150)} ${FAKE_OPENAI}`).includes("FAKE"));
-  assert.ok(!parseWorkActivity(JSON.stringify({ action: "command", target: `${"q".repeat(152)} GITHUB_TOKEN=${FAKE_GITHUB}` }))!.target!.includes("FAKE"));
+  assert.ok(!JSON.stringify(parseWorkActivity(JSON.stringify({ action: "command", target: `${"q".repeat(152)} GITHUB_TOKEN=${FAKE_GITHUB}` }))).includes("FAKE"));
 });
 
 test("a line names what was worked on; a command folds open to its detail, without output", () => {
-  const command = parseWorkActivity(JSON.stringify({ action: "command", target: "npm test", command: "npm test", cwd: ".", exit: 1, ms: 1500, outcome: "failed", phase: "done", id: "c1" }))!;
-  assert.deepEqual(activityLine(command), { label: "m5.output.activity.command", target: "npm test", file: null });
-  assert.deepEqual(activityDetail(command), { command: "npm test", cwd: ".", note: null, exit: 1, ms: 1500, lines: null });
+  const command = parseWorkActivity(JSON.stringify({ action: "command", program: "npm", subcommand: "test", cwd: ".", exit: 1, ms: 1500, outcome: "failed", phase: "done", id: "c1" }))!;
+  assert.deepEqual(activityLine(command), { label: "m5.output.activity.command", target: "npm test", file: null, hidden: 0 });
+  assert.deepEqual(activityDetail(command), { cwd: ".", note: null, exit: 1, ms: 1500, lines: null });
   assert.equal(activityDetail({ action: "command", target: "ls", command: "ls" }), null);
   assert.equal(activityDetail({ action: "read", target: "src/app.ts" }), null);
   const edit = parseWorkActivity(JSON.stringify({ action: "edit", target: "src/app.ts", added: 3, removed: 1, phase: "done", id: "c2:0" }))!;
@@ -100,10 +100,10 @@ test("a line opens a file only when the task's change list has that exact path (
 
 test("each closing row is used once, by its own first row; same-file changes read as one line (review I2, M2)", () => {
   const rows = [
-    { key: "1", text: JSON.stringify({ action: "command", target: "npm test", command: "npm test", id: "c1" }) },
+    { key: "1", text: JSON.stringify({ action: "command", program: "npm", subcommand: "test", id: "c1" }) },
     { key: "2", text: null as string | null },
     { key: "3", text: JSON.stringify({ action: "write", target: "src/app.ts", id: "c2:0" }) },
-    { key: "4", text: JSON.stringify({ action: "command", target: "npm test", command: "npm test", id: "c1", phase: "done", exit: 0, ms: 900 }) },
+    { key: "4", text: JSON.stringify({ action: "command", program: "npm", subcommand: "test", id: "c1", phase: "done", exit: 0, ms: 900 }) },
     { key: "5", text: JSON.stringify({ action: "write", target: "src/app.ts", id: "c2:0", phase: "done", added: 2, removed: 0 }) },
     { key: "6", text: JSON.stringify({ action: "edit", target: "src/app.ts", id: "c3:0", phase: "done", added: 5, removed: 1 }) },
     { key: "7", text: JSON.stringify({ action: "edit", target: "src/other.ts", id: "c4:0" }) },
@@ -125,34 +125,35 @@ test("each closing row is used once, by its own first row; same-file changes rea
   ], row => row.text);
   assert.deepEqual(clash.map(item => [item.activity?.target, item.activity?.added]), [["a.ts", undefined], ["b.ts", 2]]);
   // A closing row whose first row left the window still shows.
-  const alone = activityItems([{ text: JSON.stringify({ action: "command", target: "ls", id: "c5", phase: "done", exit: 0 }) }], row => row.text);
+  const alone = activityItems([{ text: JSON.stringify({ action: "command", program: "ls", hiddenArgs: 1, id: "c5", phase: "done", exit: 0 }) }], row => row.text);
   assert.equal(alone.length, 1);
 });
 
-test("command lines are redacted fail-closed, like the engine (review PR #11 B2, round 2)", () => {
+test("a command keeps only its program, one listed subcommand and a hidden count, like the engine (review PR #11 B2, round 3)", () => {
   const cases = JSON.parse(readFileSync(new URL("./fixtures/m5/secret-mask-cases.json", import.meta.url), "utf8")) as {
-    mask: { text: string }[]; command: { text: string; shown: string; argsHidden: boolean }[];
+    mask: { text: string }[]; summary: { text: string; program: string | null; subcommand: string | null; hidden: number }[];
   };
-  const expand = (text: string) => text.replaceAll("{colon}", ":").replaceAll("{dot}", ".");
-  assert.ok(cases.command.length >= 40);
-  for (const { text: stored, shown, argsHidden } of cases.command) {
+  const expand = (text: string) => text.replaceAll("{colon}", ":").replaceAll("{dot}", ".").replaceAll("{nl}", "\n").replaceAll("{eq}", "=").replaceAll("{sp}", " ");
+  assert.ok(cases.summary.length >= 80);
+  for (const { text: stored, program, subcommand, hidden } of cases.summary) {
     const text = expand(stored);
-    const redacted = redactCommand(text);
-    assert.deepEqual(redacted, { text: shown, argsHidden }, JSON.stringify(text));
-    assert.equal(redactCommand(shown).text, shown, `redacting twice: ${JSON.stringify(text)}`);
-    // Every synthetic secret says "fake"; none is left.
+    assert.deepEqual(summarizeCommand(text), { program, subcommand, hidden }, JSON.stringify(text));
+    // What a row keeps, and what the screen shows of it: no synthetic secret (each says "fake").
+    const row = parseWorkActivity(JSON.stringify({ action: "command", command: text }))!;
+    const shown = JSON.stringify(row);
     assert.ok(!/fake/i.test(shown), `${JSON.stringify(text)} => ${shown}`);
   }
-  // The whole masking table, read as command lines, leaves nothing either.
+  // The whole masking table, read as command lines, keeps nothing either.
   for (const { text } of cases.mask) {
-    const shown = redactCommand(expand(text)).text;
-    assert.ok(!/fake/i.test(shown) && !shown.includes("AKIAIOSFODNN7"), `${JSON.stringify(text)} => ${shown}`);
+    const summary = summarizeCommand(expand(text));
+    assert.ok(!/fake/i.test(`${summary.program ?? ""} ${summary.subcommand ?? ""}`) && !JSON.stringify(summary).includes("AKIAIOSFODNN7"), JSON.stringify(text));
   }
-  // What stays readable, and an unreadable line keeps only its program.
-  assert.deepEqual(redactCommand("git status --short"), { text: "git status --short", argsHidden: false });
-  assert.deepEqual(redactCommand("cat <<EOF > notes.txt"), { text: "cat", argsHidden: true });
-  // A row: the stored command and target are redacted again, and "arguments hidden" is kept.
-  const row = parseWorkActivity(JSON.stringify({ action: "command", target: "echo", command: "echo", argsHidden: true }))!;
-  assert.deepEqual([row.target, row.command, row.argsHidden], ["echo", "echo", true]);
-  assert.equal(parseWorkActivity(JSON.stringify({ action: "command", argsHidden: false })), null);
+  // The screen reads: "npm test", "git diff" + 2 hidden, or only that a command ran.
+  assert.deepEqual(activityLine(parseWorkActivity(JSON.stringify({ action: "command", program: "git", subcommand: "diff", hiddenArgs: 2 }))!), { label: "m5.output.activity.command", target: "git diff", file: null, hidden: 2 });
+  assert.deepEqual(activityLine(parseWorkActivity(JSON.stringify({ action: "command" }))!), { label: "m5.output.activity.command", target: null, file: null, hidden: 0 });
+  // A row's program and subcommand are checked again; a line in any field is not shown.
+  assert.equal(parseWorkActivity(JSON.stringify({ action: "command", program: "/bin/ls" })), null);
+  assert.equal(parseWorkActivity(JSON.stringify({ action: "command", program: "npm", subcommand: "fakescript" })), null);
+  assert.equal(parseWorkActivity(JSON.stringify({ action: "read", target: "a.md", program: "npm" })), null);
+  assert.deepEqual(parseWorkActivity(JSON.stringify({ action: "command", program: "npm", subcommand: "test", target: "npm test --token fakevalue" })), { action: "command", program: "npm", subcommand: "test" });
 });

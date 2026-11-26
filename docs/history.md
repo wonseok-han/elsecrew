@@ -2,6 +2,15 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #11 재확인 3차 B2: 명령 행은 요약만 저장 (`orca/ade-activity-detail`)
+재확인 `~/Documents/elsecrew-ade-activity-detail-2026-11-26/REVIEW-pr11-3.md`: 허용 토큰 방식에서도 짧은 붙임값(`-pabc`), `--pin` 뒤 숫자, 리디렉션 뒤 비밀번호, 파일·호스트·스킴 모양 비밀, 하위 명령 자리의 임의 단어가 남았고, 따옴표 안 공백이 있는 대입으로 시작하는 여러 줄 명령에서 비밀 일부를 프로그램으로 골랐다. 지시(조정자): 저장할 명령 정보를 프로그램 이름·고정 하위 명령·가린 인수 수로 좁힌다.
+
+- **바뀐 것**: 명령 행 필드가 `program`·`subcommand`·`hiddenArgs`로 바뀌었다(`command`·명령 행 `target`·`argsHidden`은 더 저장하지 않음). 규칙은 architecture "명령 행은 요약만 저장한다". 여러 줄·대입 시작·경로 실행·애매한 따옴표나 이스케이프는 아무것도 남기지 않는다. Codex `commandActions`로 만들던 읽기·검색 줄을 없앴다(경로는 파일 이벤트에서만). 화면: "명령 실행 · npm test", "명령 실행 · git diff (인수 2개 가림)", "명령 실행". 예전 행의 줄은 화면에서 같은 요약으로 바꾼다. 펼친 내용의 '전체 명령' 칸을 없앴다.
+- **증명**: 공용 `summary` 82개 = 2차까지의 명령 사례 43 + 3차 반례 12 + 추가 합성 27. Rust `commands_keep_only_a_summary_like_the_screen`와 TS `a command keeps only its program, one listed subcommand and a hidden count…`가 같은 요약을 내고, 저장 행·화면 결과에 "fake" 잔존 0, 기존 `mask` 표 전체도 잔존 0. `every_stored_field_is_sanitized`가 줄 글자 필드 폐기와 program·subcommand 재검사를 확인한다.
+- **저장 시험(SQLite 바이트)**: Claude auto-read에 `summary` 82개 전부를 실제 승인·저장 경로로 보내, 각 행이 기대 요약과 같고(`claude_project_consent_auto_approves_and_still_rejects_outside_files`) DB·WAL 바이트에 합성 비밀 57종이 없음을 확인했다(`assert_store_lacks`). Codex `codex_durable_native_delivery_and_cancel`도 새 모양으로 통과.
+- **검증**: `npm test` 953/953, `pnpm build`, Rust 영향 묶음 16개. sidecar 전체는 다음 줄.
+- **남은 것**: 노예의 시험 표 확인, 머지.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #11 재확인 B2: 명령 줄 가림을 fail-closed로 (`orca/ade-activity-detail`)
 재확인 `~/Documents/elsecrew-ade-activity-detail-2026-11-26/REVIEW-pr11-2.md`: B1·B3 해결, B2 차단 유지. 인라인 `--header='Authorization: …'`, 따옴표 curl 비밀번호, 붙여 쓴 `-U`, `--oauth2-bearer`, 콜론 없는 `-u` 토큰, 따옴표+평문 이어 쓴 대입, 짧은 bearer·토큰 사용자 이름, 대문자만인 긴 Base64가 남았다. 지시(조정자): 패턴 추가 대신 의심스러우면 가린다.
 
@@ -188,9 +197,9 @@
 - **작업 내역 채널과 이전 빌드(2026-11-17)**: 실행 출력의 `activity` 채널은 이전 빌드가 모르는 값이다. 작업 내역이 한 줄이라도 저장된 앱 데이터를 이전 빌드로 열면 출력 재검증에서 거절돼 영구 admission 실패가 된다(schema 버전은 같다). 개발 빌드끼리 같은 실제 데이터를 오가지 않는다. Claude 실행은 결과에 적힌 거절이 모두 앱이 거절한 tool_use일 때만 정상 종료로 본다.
   - **2026-11-26 변경(주인님 피드백, PR #11 검토 반영)**: 작업 내역은 명령 줄 자체(비밀 가림)·실행 위치·종료 코드(공급자가 밝힌 경우만)·걸린 시간·바뀐 줄 수를 남긴다. "도구 입력 원문은 공개하지 않는다"는 옛 규칙은 명령에 한해 폐지됐다. **명령 출력·도구 결과·파일 내용은 저장하지 않는다**(이름 없는 값은 가릴 수 없음). 형식·규칙은 architecture "실행 출력" 절.
   - 저장은 `record_activity`의 `sanitize` 한 곳만 거친다. 새 필드를 더하면 `sanitize`의 허용 목록과 화면 `KEYS`에 같이 넣는다(빠지면 조용히 버려진다). id는 앱 키(`c1`, `t1`)만 쓴다.
-  - **명령 줄은 fail-closed(2026-11-26 검토 2차)**: 명령 줄은 패턴으로 비밀을 찾지 않고 허용한 토큰만 남긴다(Rust `command_redact.rs` ↔ TS `redactCommand`, 공용 `command` 사례). 패턴을 더해 막으려 하지 말고 허용 목록을 넓히는 쪽으로만 바꾼다. 화면 정보가 줄어드는 대가는 조정자 지시로 수용됐다.
+  - **명령 행은 요약만(2026-11-26 검토 3차)**: 명령 줄의 글자는 저장하지 않는다. 프로그램 이름(첫 토큰 규칙), 도구별 고정 목록의 하위 명령 하나, 가린 단어 수만 남긴다(Rust `summarize_command` ↔ TS `summarizeCommand`, 공용 `summary` 사례). 2차의 "허용 토큰만 남기기"도 짧은 붙임값·PIN·경로·호스트 모양 비밀이 남아 폐기했다. 보이는 정보를 늘리려면 고정 목록에 단어를 더하는 쪽으로만 바꾼다. 파일 경로는 명령 줄에서 뽑지 않는다.
   - 비밀 가림 규칙은 Rust `secret_mask.rs`와 TS `secret-shape.ts` `maskSecrets` 두 곳이다(이제 산문용). 규칙을 바꾸면 둘 다 고치고 `tests/fixtures/m5/secret-mask-cases.json`에 사례를 넣는다(양쪽이 같은 결과를 요구, 다시 가려도 같아야 함). 가림은 언제나 자르기보다 먼저다.
-  - 함정: 저장소에 GitGuardian PR 검사가 있다. 테스트의 가짜 비밀은 처음부터 `FAKE`/`example`이 들어간 명백한 합성값으로 쓴다(`PGPASSWORD=s3cret`, `--password hunter2`, jwt.io 예시 JWT는 걸렸다). `curl -u 사용자:비밀번호`와 JWT 모양은 값이 가짜여도 형태로 걸리므로 공용 사례처럼 `{colon}`/`{dot}` 자리표시로 저장하고 시험에서 푼다. 이후 커밋으로 지워도 PR의 앞 커밋이 계속 걸리므로 커밋을 다시 만들어야 한다.
+  - 함정: 저장소에 GitGuardian PR 검사가 있다. 테스트의 가짜 비밀은 처음부터 `FAKE`/`example`이 들어간 명백한 합성값으로 쓴다(`PGPASSWORD=s3cret`, `--password hunter2`, jwt.io 예시 JWT는 걸렸다). `curl -u 사용자:비밀번호`, JWT, `--token=값`·`--secret 값` 모양은 값이 가짜여도 형태로 걸리므로 공용 사례처럼 `{colon}`/`{dot}`/`{eq}`/`{sp}`(줄바꿈은 `{nl}`) 자리표시로 저장하고 시험에서 푼다. 이후 커밋으로 지워도 PR의 앞 커밋이 계속 걸리므로 커밋을 다시 만들어야 한다.
   - 함정: Write 도구는 내용 속 `\uXXXX`를 실제 문자로 바꿔 쓴다. 정규식·문자열에 보이지 않는 문자(U+2028은 JS 정규식 리터럴을 깨뜨림)가 들어가므로, TS 소스에 이스케이프가 필요하면 파이썬 등으로 `\` + `u…`를 이어 붙여 쓰거나 `String.fromCharCode`를 쓴다. Rust의 `\u{…}`는 영향 없다.
   - 함정: Claude CLI의 `tool_use_result`는 성공한 Bash면 `{stdout, stderr, interrupted}` 객체지만 실패하면 `"Error: Exit code N\n…"` 문자열이다. 성공에는 종료 코드가 없다. Write로 새 파일을 만들면 structuredPatch가 빈 배열이고 `type:"create"`·`content`로 줄 수를 센다.
   - 함정: activity 행은 append할 수 없다(`complete`만). 끝난 결과는 같은 `id`의 두 번째 행으로 쓰고 화면이 합친다.

@@ -198,7 +198,6 @@ fn project_application_fence_blocks_other_chat_runs_before_reservation() {
 /// A command carrying a synthetic token (it says FAKE): the work history must
 /// store it masked, never as written (review PR #11 B1/B2).
 const FAKE_TOKEN_COMMAND: &str = "GITHUB_TOKEN=ghp_FAKEexample0FAKEexample0FAKEexample0 echo test";
-const FAKE_TOKEN_COMMAND_MASKED: &str = "GITHUB_TOKEN=•••• echo test";
 
 /// Reads every file of the app's store as bytes (the database and its
 /// write-ahead log included) and fails if any `needle` is in it: what the
@@ -1937,8 +1936,9 @@ fn text_candidate_cases_with_output(
                             .filter_map(|event| serde_json::from_str::<Value>(event["text"].as_str()?).ok())
                             .filter(|row| row.get("action").is_some()).collect();
                         assert_eq!(history, vec![
-                            json!({"action":"command","target":FAKE_TOKEN_COMMAND_MASKED,"command":FAKE_TOKEN_COMMAND_MASKED,"cwd":".","id":"c1"}),
-                            json!({"action":"command","target":FAKE_TOKEN_COMMAND_MASKED,"command":FAKE_TOKEN_COMMAND_MASKED,"cwd":".","id":"c1","outcome":"refused","phase":"done"}),
+                            // It starts with an assignment: only that a command ran (round 3).
+                            json!({"action":"command","cwd":".","id":"c1"}),
+                            json!({"action":"command","cwd":".","id":"c1","outcome":"refused","phase":"done"}),
                         ], "{failure}");
                         // Read back from the files themselves: neither the token nor
                         // the output is anywhere in the store.

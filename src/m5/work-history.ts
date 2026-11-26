@@ -10,7 +10,7 @@
  * and direction marks are neutralised, secret shapes are masked again with
  * the same rules (rows from older builds were stored unmasked), and every
  * field has a length cap. Anything unexpected is not shown as history. */
-import { maskSecrets, redactCommand } from "./secret-shape.ts";
+import { allowedSubcommand, maskSecrets, programName, summarizeCommand } from "./secret-shape.ts";
 
 export type WorkAction = "read" | "edit" | "write" | "delete" | "search" | "command" | "other";
 export type WorkOutcome = "refused" | "failed" | "stopped";
@@ -22,8 +22,12 @@ export interface WorkActivity {
   /** The app's own key linking a tool use's first row with its closing row. */
   id?: string;
   phase?: "done";
-  /** The whole command line (masked by the engine), and where it ran. */
-  command?: string;
+  /** A command row keeps no text of its line: the program name, one listed
+   * subcommand and how many other words were hidden (review PR #11 round 3). */
+  program?: string;
+  subcommand?: string;
+  hiddenArgs?: number;
+  /** Where a command ran (a structured field of the event). */
   cwd?: string;
   /** The agent's own one-line summary of a command. */
   note?: string;
@@ -31,16 +35,15 @@ export interface WorkActivity {
   ms?: number;
   added?: number;
   removed?: number;
-  /** The command could not be read safely; only its program name is kept. */
-  argsHidden?: boolean;
 }
 
 const ACTIONS: readonly string[] = ["read", "edit", "write", "delete", "search", "command", "other"];
 const OUTCOMES: readonly string[] = ["refused", "failed", "stopped"];
 const LINE_FIELDS = ["target", "tool", "cwd"] as const;
-const BLOCK_FIELDS = ["command", "note"] as const;
+const BLOCK_FIELDS = ["note"] as const;
 const NUMBER_FIELDS = ["exit", "ms", "added", "removed"] as const;
-const KEYS: readonly string[] = ["action", "outcome", "phase", "id", "argsHidden", ...LINE_FIELDS, ...BLOCK_FIELDS, ...NUMBER_FIELDS];
+/** `command` and `argsHidden` are read only from rows of earlier builds. */
+const KEYS: readonly string[] = ["action", "outcome", "phase", "id", "program", "subcommand", "hiddenArgs", "command", "argsHidden", ...LINE_FIELDS, ...BLOCK_FIELDS, ...NUMBER_FIELDS];
 /** The engine's keys are short and plain; anything else is not a key. */
 const ID_SHAPE = /^[A-Za-z0-9_:-]{1,64}$/;
 /** Characters (code points) shown. The engine writes at most 161 for a
@@ -92,17 +95,35 @@ export function parseWorkActivity(text: string): WorkActivity | null {
   if (row.outcome) out.outcome = row.outcome as WorkOutcome;
   if (row.phase) out.phase = "done";
   if (typeof row.id === "string") out.id = row.id;
-  if ("argsHidden" in row) { if (row.argsHidden !== true) return null; out.argsHidden = true; }
-  for (const key of [...LINE_FIELDS, ...BLOCK_FIELDS]) {
+  for (const key of [...LINE_FIELDS, ...BLOCK_FIELDS, "command"] as const) {
     if (!(key in row)) continue;
     const field = row[key];
     if (typeof field !== "string" || !field.trim() || field.length > FIELD_LIMIT) return null;
-    // A command line (and a command row's target) is redacted fail-closed
-    // again, so rows from older builds show no more than new ones.
-    const command = key === "command" || (key === "target" && row.action === "command");
-    const value = command ? redactCommand(neutralise(field, true)).text : field;
-    if (command && !value.trim()) continue;
-    out[key] = shown(value, (BLOCK_FIELDS as readonly string[]).includes(key));
+    // A command row shows no text of its line (target or command, of any build).
+    if (key === "command" || (key === "target" && row.action === "command")) continue;
+    out[key] = shown(field, (BLOCK_FIELDS as readonly string[]).includes(key));
+  }
+  if (row.action === "command") {
+    if ("program" in row) {
+      // A row of this build: the program and subcommand are checked again.
+      if (typeof row.program !== "string" || !programName(row.program)) return null;
+      out.program = row.program;
+      if ("subcommand" in row) {
+        if (typeof row.subcommand !== "string" || !allowedSubcommand(row.program, row.subcommand)) return null;
+        out.subcommand = row.subcommand;
+      }
+    } else {
+      // A row of an earlier build kept the line: summarized the same way.
+      const line = typeof row.command === "string" ? row.command : typeof row.target === "string" ? row.target : "";
+      const summary = summarizeCommand(line);
+      if (summary.program) out.program = summary.program;
+      if (summary.subcommand) out.subcommand = summary.subcommand;
+      if (summary.hidden > 0) out.hiddenArgs = summary.hidden;
+    }
+  } else if ("program" in row || "subcommand" in row) return null;
+  if ("hiddenArgs" in row) {
+    if (row.action !== "command" || typeof row.hiddenArgs !== "number" || !Number.isSafeInteger(row.hiddenArgs) || row.hiddenArgs < 0) return null;
+    if (row.hiddenArgs > 0) out.hiddenArgs = row.hiddenArgs;
   }
   for (const key of NUMBER_FIELDS) {
     if (!(key in row)) continue;
@@ -138,15 +159,18 @@ type LineLabel = typeof WORK_ACTION_KEYS[WorkAction] | "m5.output.activity.searc
  * file only when it changed something and nothing went wrong; whether it can
  * be opened is up to the task's real change list (`openableFile`).
  */
-export function activityLine(activity: WorkActivity): { label: LineLabel; target: string | null; file: string | null } {
+export function activityLine(activity: WorkActivity): { label: LineLabel; target: string | null; file: string | null; hidden: number } {
   const label: LineLabel = activity.action === "search" && activity.tool === "Glob" ? "m5.output.activity.searchFiles"
     : activity.action === "search" && activity.tool === "Grep" ? "m5.output.activity.searchText"
     : activity.action === "other" && activity.tool === "WebFetch" ? "m5.output.activity.webFetch"
     : activity.action === "other" && activity.tool === "WebSearch" ? "m5.output.activity.webSearch"
     : WORK_ACTION_KEYS[activity.action];
-  const target = activity.target ?? null;
+  // A command: "npm test", "git diff" and how many words were hidden.
+  const target = activity.action === "command"
+    ? (activity.program ? [activity.program, activity.subcommand].filter(Boolean).join(" ") : null)
+    : activity.target ?? null;
   const changes = activity.action === "edit" || activity.action === "write" || activity.action === "delete";
-  return { label, target, file: changes && !activity.outcome ? target : null };
+  return { label, target, file: changes && !activity.outcome ? target : null, hidden: activity.action === "command" ? activity.hiddenArgs ?? 0 : 0 };
 }
 
 /**
@@ -161,19 +185,16 @@ export function openableFile(file: string | null, changed: ReadonlySet<string> |
 
 /** What the folded detail of a line holds; null when there is nothing more to show. */
 export function activityDetail(activity: WorkActivity): {
-  command: string | null; cwd: string | null; note: string | null; exit: number | null;
+  cwd: string | null; note: string | null; exit: number | null;
   ms: number | null; lines: { added: number; removed: number } | null;
 } | null {
   const detail = {
-    command: activity.command ?? null,
     cwd: activity.cwd ?? null,
     note: activity.note ?? null,
     exit: activity.exit ?? null,
     ms: activity.ms ?? null,
     lines: activity.added !== undefined || activity.removed !== undefined ? { added: activity.added ?? 0, removed: activity.removed ?? 0 } : null,
   };
-  // A command whose whole line is already the target, and nothing else, adds nothing folded.
-  if (detail.command === activity.target && Object.entries(detail).every(([key, value]) => key === "command" || value === null)) return null;
   return Object.values(detail).some(value => value !== null) ? detail : null;
 }
 

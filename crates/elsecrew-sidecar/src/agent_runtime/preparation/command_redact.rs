@@ -1,35 +1,64 @@
-//! A command line as the work history may store it, fail-closed (review PR #11
-//! B2, second round): instead of looking for secrets, it keeps only what is
-//! known to be harmless and hides every other argument.
+//! What the work history keeps of a command line (review PR #11 B2, third
+//! round): no text of the line at all, only
+//! 1. the program name: the first word of the line, when it matches
+//!    `^[A-Za-z0-9._+-]{1,32}$` and is neither an assignment (`X=…`) nor a
+//!    path (`./x`, `/bin/x` hold `/` and do not match);
+//! 2. one subcommand, only from a fixed list per tool (`git diff`,
+//!    `npm test`, `cargo check`, `python -m pytest`);
+//! 3. how many other words the line has (`hiddenArgs`): every argument,
+//!    number, path, host, flag and flag value is counted, never kept.
 //!
-//! Kept: the program name, the subcommands of a few multi-command tools
-//! (`git status`, `npm run build`), short flag names, paths inside the
-//! workspace, a short allowlist of plain words, small numbers, `$NAME`
-//! references and the shell operators between commands. A URL keeps only its
-//! scheme and host. Everything else becomes ••••: quoted strings, `=` values,
-//! environment assignments, the value after a header/auth/password flag,
-//! attached short-flag values, long or unknown tokens.
+//! A line that is several lines long, starts with an assignment, has an
+//! unmatched quote, a backslash, backticks, `$(`/`${`, a heredoc or
+//! parentheses/braces outside quotes, or is very long keeps nothing: the row
+//! only says a command ran. File paths never come from a command line; they
+//! are shown only from the structured path of a file event.
 //!
-//! When the line cannot be read safely (an unmatched quote, a backslash,
-//! backticks, `$(`/`${`, a heredoc, parentheses or braces outside quotes,
-//! several lines, or very long) only the program name is kept and the row
-//! says the arguments are hidden.
-//!
-//! The screen runs the same algorithm (`redactCommand`, src/m5/secret-shape.ts)
-//! on every stored command, and both run tests/fixtures/m5/secret-mask-cases.json.
-use super::secret_mask::MASK;
+//! The screen runs the same algorithm (`summarizeCommand`,
+//! src/m5/secret-shape.ts) on stored rows of older builds, and both run the
+//! `summary` cases of tests/fixtures/m5/secret-mask-cases.json.
 
-pub(super) struct Redacted {
-    pub(super) text: String,
-    /// The line could not be read safely; only the program name is kept.
-    pub(super) args_hidden: bool,
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct CommandSummary {
+    pub(super) program: Option<String>,
+    pub(super) subcommand: Option<String>,
+    pub(super) hidden: usize,
 }
 
 const LONGEST: usize = 2000;
-const WITH_SUBCOMMANDS: &[&str] = &["git", "npm", "pnpm", "yarn", "npx", "gh", "cargo", "docker", "kubectl", "go", "pip", "pip3", "brew", "bun", "deno", "make", "rustup", "uv", "poetry", "pnpx"];
-const PLAIN_WORDS: &[&str] = &["origin", "main", "master", "HEAD", "dev", "develop", "all", "true", "false", "yes", "no", "none", "on", "off", "install", "test", "build", "run", "start", "status", "diff", "log", "show", "add", "list", "help", "version", "/dev/null"];
-/// Flags whose next argument is a credential or request content.
-const VALUE_FLAGS: &[&str] = &["-H", "-u", "-U", "-p", "-b", "-d", "-F", "-E", "--header", "--proxy-header", "--user", "--proxy-user", "--password", "--pass", "--passwd", "--passphrase", "--token", "--key", "--secret", "--auth", "--oauth2-bearer", "--bearer", "--cookie", "--data", "--data-raw", "--data-binary", "--data-urlencode", "--form", "--api-key", "--access-token", "--cert", "--private-key", "--client-secret"];
+
+/// The subcommands kept for each tool; anything else after the program is counted.
+fn subcommands(program: &str) -> &'static [&'static str] {
+    match program {
+        "git" => &["status", "diff", "log", "show", "add", "commit", "branch", "checkout", "switch", "fetch", "pull", "push", "restore", "stash", "merge", "rebase", "init"],
+        "npm" | "pnpm" | "yarn" | "bun" => &["run", "test", "install", "build", "ci", "start", "add", "exec", "lint"],
+        "cargo" => &["build", "test", "check", "run", "fmt", "clippy"],
+        "go" => &["build", "test", "run", "vet", "mod"],
+        "gh" => &["pr", "issue", "repo", "run", "auth", "workflow"],
+        "docker" => &["build", "run", "ps", "compose", "images", "logs"],
+        _ => &[],
+    }
+}
+
+/// Modules kept after `python -m`.
+const PYTHON_MODULES: &[&str] = &["pytest", "unittest", "venv", "pip", "http.server", "json.tool", "mypy", "black", "ruff", "flake8"];
+
+/// A subcommand of `program` from its fixed list, as stored.
+pub(super) fn allowed_subcommand(program: &str, subcommand: &str) -> bool {
+    if matches!(program, "python" | "python3") {
+        return subcommand.strip_prefix("-m ").is_some_and(|module| PYTHON_MODULES.contains(&module));
+    }
+    subcommands(program).contains(&subcommand)
+}
+
+/// A program name as stored: the pattern, not dots only, not a flag, and not
+/// shaped like a key (long, mixing upper case and digits).
+pub(super) fn program_name(word: &str) -> bool {
+    let length = word.chars().count();
+    (1..=32).contains(&length) && word.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-'))
+        && !word.starts_with('-') && !word.chars().all(|c| c == '.')
+        && !(length >= 12 && word.chars().any(|c| c.is_ascii_uppercase()) && word.chars().any(|c| c.is_ascii_digit()))
+}
 
 fn white(c: char) -> bool { c == ' ' || c == '\t' }
 fn operator(c: char) -> bool { matches!(c, '|' | '&' | ';' | '<' | '>') }
@@ -64,11 +93,9 @@ fn lex(line: &str) -> Option<Vec<Token>> {
         if white(c) { flush(&mut tokens, &mut word, &mut quoted); index += 1; continue; }
         if operator(c) {
             if c == '<' && next == Some('<') { return None; }
-            // A file descriptor right before the operator belongs to it (`2>`).
-            let mut op = if !quoted && !word.is_empty() && word.chars().all(|d| d.is_ascii_digit()) { std::mem::take(&mut word) } else { flush(&mut tokens, &mut word, &mut quoted); String::new() };
+            flush(&mut tokens, &mut word, &mut quoted);
+            let mut op = String::new();
             while index < chars.len() && operator(chars[index]) { op.push(chars[index]); index += 1; }
-            // `>&1`, `2>&1`: the descriptor it points at.
-            if op.ends_with('&') && op.contains('>') { while index < chars.len() && chars[index].is_ascii_digit() { op.push(chars[index]); index += 1; } }
             tokens.push(Token { text: op, quoted: false, op: true });
             continue;
         }
@@ -80,132 +107,25 @@ fn lex(line: &str) -> Option<Vec<Token>> {
     Some(tokens)
 }
 
-fn ascii_all(text: &str, ok: impl Fn(char) -> bool) -> bool { !text.is_empty() && text.chars().all(ok) }
-fn name_char(c: char) -> bool { c.is_ascii_alphanumeric() || c == '_' }
-fn path_char(c: char) -> bool { c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '@' | '+') }
-
 /// `NAME=` at the start of a word (an environment assignment).
-fn assignment(word: &str) -> Option<&str> {
-    let (name, _) = word.split_once('=')?;
-    (name.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_') && ascii_all(name, name_char)).then_some(name)
+fn assignment(word: &str) -> bool {
+    word.split_once('=').is_some_and(|(name, _)| name.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
 }
 
-/// A program name: a plain word or a plain path to one.
-fn program(word: &str) -> bool {
-    word.chars().count() <= 60 && !word.starts_with('-') && !word.ends_with('/')
-        && word.split('/').enumerate().all(|(index, part)| (index == 0 && part.is_empty() && word.starts_with('/')) || ascii_all(part, |c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '+')))
-}
-
-/// A segment that could be a key rather than a name: long and mixing cases and digits.
-fn keylike(part: &str) -> bool {
-    part.chars().count() >= 20 && part.chars().any(|c| c.is_ascii_uppercase()) && part.chars().any(|c| c.is_ascii_lowercase()) && part.chars().any(|c| c.is_ascii_digit())
-}
-
-/// A path inside the workspace: relative, plain parts, no `..`, and either
-/// a folder separator or a file extension.
-fn workspace_path(word: &str) -> bool {
-    if word == "." { return true; }
-    let body = word.strip_prefix("./").unwrap_or(word);
-    let body = body.strip_suffix('/').unwrap_or(body);
-    if word.chars().count() > 120 || body.is_empty() || word.starts_with('/') || word.starts_with('~') || word.starts_with('-') { return false; }
-    let parts: Vec<&str> = body.split('/').collect();
-    let extension = parts.last().and_then(|last| last.rsplit_once('.')).is_some_and(|(stem, ext)| !stem.is_empty() && (1..=8).contains(&ext.len()) && ascii_all(ext, |c| c.is_ascii_alphanumeric()));
-    (parts.len() > 1 || extension || word.ends_with('/'))
-        && parts.iter().all(|part| ascii_all(part, path_char) && *part != ".." && part.chars().count() <= 64 && !keylike(part))
-}
-
-/// Scheme and host only (`https://api.example.com/••••`).
-fn url(word: &str) -> Option<String> {
-    let (scheme, rest) = word.split_once("://")?;
-    if !ascii_all(scheme, |c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-')) { return None; }
-    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-    let host = rest[..end].rsplit('@').next().unwrap_or("");
-    if !ascii_all(host, |c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':')) { return None; }
-    Some(format!("{scheme}://{host}{}", if rest.len() > host.len() { format!("/{MASK}") } else { String::new() }))
-}
-
-fn short_flag(word: &str) -> bool {
-    word.len() >= 2 && word.len() <= 5 && word.starts_with('-') && ascii_all(&word[1..], |c| c.is_ascii_alphabetic())
-}
-
-fn long_flag(name: &str) -> bool {
-    name.len() > 2 && name.len() <= 32 && name.starts_with("--")
-        && ascii_all(&name[2..], |c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') && !name[2..].starts_with('-')
-}
-
-fn value_flag(flag: &str) -> bool {
-    VALUE_FLAGS.contains(&flag) || super::secret_mask::secret_name(flag)
-}
-
-/// The program name of an unreadable line, if it has a plain one.
-fn first_program(line: &str) -> Option<String> {
-    line.split(|c: char| white(c) || operator(c) || c == '\n' || c == '\r').filter(|word| !word.is_empty())
-        .find(|word| assignment(word).is_none())
-        .filter(|word| program(word)).map(String::from)
-}
-
-pub(super) fn redact_command(line: &str) -> Redacted {
+pub(super) fn summarize_command(line: &str) -> CommandSummary {
     let line = line.trim_matches(|c: char| white(c) || c == '\n' || c == '\r');
-    let hidden = || Redacted { text: first_program(line).unwrap_or_default(), args_hidden: true };
-    if line.is_empty() { return Redacted { text: String::new(), args_hidden: false }; }
-    if line.chars().count() > LONGEST || line.contains(['\n', '\r']) { return hidden(); }
-    let Some(tokens) = lex(line) else { return hidden() };
-    let mut out: Vec<String> = Vec::new();
-    let mut expect_program = true;
-    let mut redirect = false;
-    let mut secret_next = false;
-    let mut subcommands = 0;
-    for token in tokens {
-        let word = token.text.as_str();
-        if token.op {
-            out.push(word.into());
-            if matches!(word, "|" | "||" | "&&" | ";" | "&" | "|&" | ";;") { expect_program = true; secret_next = false; subcommands = 0; }
-            else if word.contains(['<', '>']) && !word.ends_with(|c: char| c.is_ascii_digit()) { redirect = true; }
-            continue;
-        }
-        let (was_secret, was_redirect, was_program) = (secret_next, redirect, expect_program);
-        let shown = if token.quoted {
-            // Quoted text is never read: a flag or name before `=` may stay.
-            let before = word.split_once('=').map(|(name, _)| name).filter(|name| !name.contains(['\'', '"']));
-            match before {
-                Some(name) if expect_program && assignment(word).is_some() => format!("{name}={MASK}"),
-                Some(name) if !expect_program && long_flag(name) => format!("{name}={MASK}"),
-                _ => { expect_program = false; MASK.into() }
-            }
-        } else if redirect {
-            if workspace_path(word) || PLAIN_WORDS.contains(&word) { word.into() } else { MASK.into() }
-        } else if secret_next {
-            MASK.into()
-        } else if expect_program {
-            if let Some(name) = assignment(word) { format!("{name}={MASK}") }
-            else if program(word) {
-                subcommands = if WITH_SUBCOMMANDS.contains(&word.rsplit('/').next().unwrap_or(word)) { 2 } else { 0 };
-                expect_program = false;
-                word.into()
-            } else { expect_program = false; MASK.into() }
-        } else if word.starts_with('-') {
-            if word == "--" { word.into() }
-            else if let Some((name, _)) = word.split_once('=') { if long_flag(name) { format!("{name}={MASK}") } else { MASK.into() } }
-            else if long_flag(word) || short_flag(word) { word.into() }
-            else if word.len() > 2 && word.chars().nth(1).is_some_and(|c| c.is_ascii_alphabetic()) { format!("{}{MASK}", &word[..2]) }
-            else { MASK.into() }
-        } else if let Some(shown) = url(word) {
-            shown
-        } else if subcommands > 0 && ascii_all(word, |c| c.is_ascii_lowercase() || matches!(c, ':' | '-')) && word.len() <= 24 {
-            subcommands -= 1;
-            word.into()
-        } else if workspace_path(word) || PLAIN_WORDS.contains(&word)
-            || (word.len() <= 4 && ascii_all(word, |c| c.is_ascii_digit()))
-            || (word.starts_with('$') && word.len() <= 40 && word[1..].chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_') && ascii_all(&word[1..], name_char)) {
-            word.into()
-        } else {
-            MASK.into()
-        };
-        // A value flag (shown as itself) guards exactly the one word after it.
-        secret_next = !token.quoted && !was_secret && !was_redirect && !was_program
-            && (long_flag(word) || short_flag(word)) && value_flag(word);
-        redirect = false;
-        out.push(shown);
-    }
-    Redacted { text: out.join(" "), args_hidden: false }
+    if line.is_empty() || line.chars().count() > LONGEST || line.contains(['\n', '\r']) { return CommandSummary::default(); }
+    let Some(tokens) = lex(line) else { return CommandSummary::default() };
+    let Some(first) = tokens.first() else { return CommandSummary::default() };
+    if first.op || first.quoted || assignment(&first.text) || !program_name(&first.text) { return CommandSummary::default(); }
+    let program = first.text.clone();
+    let plain = |index: usize| tokens.get(index).filter(|token| !token.op && !token.quoted).map(|token| token.text.as_str());
+    let subcommand = match (plain(1), plain(2)) {
+        (Some("-m"), Some(module)) if allowed_subcommand(&program, &format!("-m {module}")) => Some(format!("-m {module}")),
+        (Some(word), _) if allowed_subcommand(&program, word) => Some(word.to_string()),
+        _ => None,
+    };
+    let used = 1 + subcommand.as_deref().map_or(0, |sub| sub.split(' ').count());
+    CommandSummary { program: Some(program), subcommand, hidden: tokens.len() - used }
 }

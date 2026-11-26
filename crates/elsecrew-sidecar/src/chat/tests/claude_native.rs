@@ -9,6 +9,20 @@ use elsecrew_protocol::agent_adapter_v1::{
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// The shared command cases (every review counterexample and 27 more), as
+/// the lines a provider would send; placeholders put back.
+fn summary_cases() -> Vec<(String, Value)> {
+    let cases: Value = serde_json::from_str(include_str!("../../../../../tests/fixtures/m5/secret-mask-cases.json")).unwrap();
+    cases["summary"].as_array().unwrap().iter().map(|case| {
+        let text = case["text"].as_str().unwrap().replace("{colon}", ":").replace("{dot}", ".").replace("{nl}", "\n").replace("{eq}", "=").replace("{sp}", " ");
+        let mut row = json!({"action":"command"});
+        if let Some(program) = case["program"].as_str() { row["program"] = json!(program); }
+        if let Some(subcommand) = case["subcommand"].as_str() { row["subcommand"] = json!(subcommand); }
+        if case["hidden"].as_u64().unwrap() > 0 { row["hiddenArgs"] = case["hidden"].clone(); }
+        (text, row)
+    }).collect()
+}
+
 fn quoted(value: &Value) -> String {
     format!("'{}'", value.to_string().replace('\'', "'\\''"))
 }
@@ -190,6 +204,14 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
                 "message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool_bash","is_error":false,"content":"FAKE-OUTPUT-MARKER printed"}]},
                 "tool_use_result":{"stdout":"FAKE-OUTPUT-MARKER printed","stderr":"","interrupted":false}});
             script.push_str(&format!("printf '%s\\n' {}\nIFS= read -r reply || exit 3\ncase \"$reply\" in *'\"behavior\":\"allow\"'*) ;; *) exit 4 ;; esac\nprintf '%s\\n' {}\n", quoted(&bash), quoted(&printed)));
+            // Every shared command case through the real approval and storage path.
+            if case == "auto-read" && durable {
+                for (index, (text, _)) in summary_cases().iter().enumerate() {
+                    let request = json!({"type":"control_request","request_id":format!("case_{index}"),"request":{
+                        "subtype":"can_use_tool","tool_name":"Bash","tool_use_id":format!("tool_case_{index}"),"input":{"command":text,"description":"synthetic case"}}});
+                    script.push_str(&format!("printf '%s\\n' {}\nIFS= read -r reply || exit 3\ncase \"$reply\" in *'\"behavior\":\"allow\"'*) ;; *) exit 4 ;; esac\n", quoted(&request)));
+                }
+            }
         }
         if case == "auto-read-index-lock" {
             // A concurrent provider `git status` briefly owns the index lock while
@@ -427,13 +449,31 @@ fn claude_native_cases(cases: &[(&str, bool)]) {
                 .filter(|row| row.get("action").is_some()).collect();
             assert!(history[1]["ms"].is_u64(), "{case}");
             history[1].as_object_mut().unwrap().remove("ms");
-            let shown = "GITHUB_TOKEN=•••• gh auth status && curl --header=•••• -u •••• https://api.example.com";
-            let command = json!({"action":"command","target":shown,"command":shown,"note":"check login with token=••••","id":"t1"});
+            // The line starts with an assignment: only that a command ran
+            // (review PR #11 B2, round 3), with the model's own summary.
+            let command = json!({"action":"command","note":"check login with token=••••","id":"t1"});
             let mut ended = command.clone();
             ended["phase"] = json!("done");
-            assert_eq!(history, vec![command, ended, json!({"action":"read","target":"index.html","id":"t2"})], "{case}");
-            // Read back from the store's files: no secret, no output, no provider id in a row.
-            super::assert_store_lacks(f._root.path(), &["FAKEexample0FAKEexample0", "FAKEexampleNoteSecret", "FAKE-OUTPUT-MARKER", "FAKEexampleInlineHeader", "FAKE example pass"]);
+            assert_eq!(history[..2], [command, ended], "{case}");
+            let cases = if case == "auto-read" { summary_cases() } else { Vec::new() };
+            // Each shared case stored as its summary only, in order, with the app's ids.
+            for (index, (text, expected)) in cases.iter().enumerate() {
+                let mut expected = expected.clone();
+                expected["note"] = json!("synthetic case");
+                expected["id"] = json!(format!("t{}", index + 2));
+                assert_eq!(history[2 + index], expected, "{case}: {text:?}");
+            }
+            assert_eq!(history[2 + cases.len()..], [json!({"action":"read","target":"index.html","id":format!("t{}", cases.len() + 2)})], "{case}");
+            // Read back from the store's files: no secret, no output, no line text.
+            let mut needles: Vec<String> = ["FAKEexample0FAKEexample0", "FAKEexampleNoteSecret", "FAKE-OUTPUT-MARKER", "FAKEexampleInlineHeader", "FAKE example pass"].map(String::from).to_vec();
+            for (text, _) in &cases {
+                needles.extend(text.split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')))
+                    .filter(|word| word.len() >= 5 && word.to_lowercase().contains("fake")).map(String::from));
+            }
+            needles.sort();
+            needles.dedup();
+            assert!(cases.is_empty() || needles.len() >= 50, "{} needles", needles.len());
+            super::assert_store_lacks(f._root.path(), &needles.iter().map(String::as_str).collect::<Vec<_>>());
             assert!(!public.iter().any(|event| event["text"].as_str().is_some_and(|text| text.contains("tool_bash") || text.contains("tool_write"))));
         }
         if case == "long" {

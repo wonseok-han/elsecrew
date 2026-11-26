@@ -36,7 +36,7 @@ const WorkActivityRow = memo(function WorkActivityRow({ activity, count = 1, onO
     <span className="m5-activity-mark" aria-hidden="true" />
     <span className="m5-activity-label">{t(line.label, { tool: activity.tool ?? "" })}</span>
     {line.target && <span className="m5-activity-target" dir="auto" title={line.target}>{line.target}</span>}
-    {activity.argsHidden && <span className="m5-activity-hidden">{t("m5.output.activity.argsHidden")}</span>}
+    {line.hidden > 0 && <span className="m5-activity-hidden">{t("m5.output.activity.hiddenArgs", { count: line.hidden })}</span>}
     {count > 1 && <span className="m5-activity-count">{t("m5.output.activity.repeat", { count })}</span>}
     {line.file && lines && <span className="m5-activity-lines">{lines}</span>}
     {activity.outcome && <span className="m5-activity-outcome">{t(WORK_OUTCOME_KEYS[activity.outcome])}</span>}
@@ -55,7 +55,6 @@ const WorkActivityRow = memo(function WorkActivityRow({ activity, count = 1, onO
     <div className="m5-activity-detail">
       <dl>
         {detail.note && <><dt>{t("m5.output.activity.detail.note")}</dt><dd dir="auto">{detail.note}</dd></>}
-        {detail.command && <><dt>{t("m5.output.activity.detail.command")}</dt><dd><pre className="m5-activity-code" dir="ltr">{detail.command}</pre></dd></>}
         {detail.cwd && <><dt>{t("m5.output.activity.detail.cwd")}</dt>{detail.cwd === "." ? <dd>{t("m5.output.activity.workspace")}</dd> : <dd className="m5-activity-mono" dir="ltr">{detail.cwd}</dd>}</>}
         {detail.exit !== null && <><dt>{t("m5.output.activity.detail.exit")}</dt><dd>{t(detail.exit === 0 ? "m5.output.activity.exitOk" : "m5.output.activity.exitFail", { code: detail.exit })}</dd></>}
         {duration && <><dt>{t("m5.output.activity.detail.time")}</dt><dd>{t(duration.key, duration.values)}</dd></>}
