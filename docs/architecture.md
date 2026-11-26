@@ -567,25 +567,36 @@ Keychain 호출은 모두 30초 제한이 있는 자식 프로세스(코어 덤�
   - 모든 `var(--x)`는 정의돼 있다. 없던 `--m5-accent`·`--m5-surface-2`, PR #9의 `--text-sm`은 정리했다.
   - 예전 `--m5-*` 이름은 의미 토큰의 별칭으로 남아 있다(새 코드에서는 쓰지 않는다).
   - 이 규칙은 `tests/m5-style-tokens.test.mts`가 확인한다.
-- **대비**: `scripts/m5-contrast-check.mjs`가 두 블록을 읽어 다크·라이트 각 95쌍을 검사한다.
-  - 기준은 글자 4.5:1, 비텍스트(주 행동 면·입력 테두리·상태 점·초점 링·바뀐 줄) 3:1이다.
-  - `npm test`에서 실행된다. 토큰 값을 바꾸면 이 검사가 먼저 깨진다.
+- **대비**: 두 층으로 확인한다(PR #10 검토 I4).
+  - 토큰·조합: `scripts/m5-contrast-check.mjs`가 두 블록을 읽어 다크·라이트 각 159개를 검사한다(글자 4.5:1, 비텍스트 3:1).
+    - 토큰 쌍과 함께, 컴포넌트가 실제로 그리는 조합을 본다: 주 행동·위험 확인의 호버, 구분 버튼의 선택 테두리와 초점 링, 첫 실행 현재 단계, 입력 경계(앱 바탕 포함), `color-mix`로 섞은 역할 아이콘 면(선택·호버 면 포함).
+    - 반올림하지 않은 값으로 비교한다. `npm test`에서 실행되며, 토큰 값을 바꾸면 이 검사가 먼저 깨진다.
+  - 렌더된 화면: `tests/m5-rendered-contrast-probe.cjs`가 렌더러 스모크의 캡처 지점 21곳마다 실제 DOM을 잰다.
+    - 보이는 모든 글자의 색과 조상 면을 합성한 배경(불투명도·`brightness` 반영, 유한한 애니메이션·전환이 끝난 뒤), 입력 경계 3:1, 비활성 버튼의 강조색, 구분 버튼 선택 칸의 테두리, 구분 버튼 초점 링이 잘리지 않는지.
+    - `tests/m5-renderer-mount-smoke.mts`가 다크·라이트로 한 번씩 돌린다. 러너는 먼저 일부러 나쁜 조합을 붙여 측정기가 네 종류를 모두 잡는지 확인한다.
 - **화면 밝기**(설정 › 일반 '화면 밝기', 시스템/라이트/다크, 기본 시스템)
-  - `src/m5/theme.ts`
-    - 선택은 이 페이지의 `localStorage`(`elsecrew.theme.v1`)에 둔다.
-    - `bootstrap.tsx`가 첫 렌더 전에 `startTheme()`로 `<html data-theme>`을 붙이고, 시스템 변경(`prefers-color-scheme`)을 따른다.
-    - 저장된 선택이 있을 때만 main에 알린다. 없으면 main이 기억한 값이 시스템 신호를 이미 정하고 있기 때문이다.
-  - main(`electron/appearance.ts`, IPC `m5:appearance:set`, preload `window.m5Appearance.set`)
-    - 현재 main frame만, 세 값 중 하나만 받는다.
-    - 받은 값으로 `nativeTheme.themeSource`와 창 배경색을 바꾸고 `userData/appearance.json`에 기억한다.
-    - 다음 실행에는 그 값으로 첫 프레임 배경을 칠한다.
+  - **기록의 기준은 main이다**(PR #10 검토 I1). `userData/appearance.json`이 기준이고, 페이지의 `localStorage`(`elsecrew.theme.v1`)는 main이 답하기 전 첫 페인트용 사본이다.
+  - `src/m5/theme.ts`(`createThemeController`)
+    - `bootstrap.tsx`가 첫 렌더 전에 사본으로 `<html data-theme>`을 붙이고, `m5Appearance.get()`으로 main의 기록을 받는다.
+    - 기록이 있으면 그 값을 쓰고 사본도 고친다. main에 읽을 수 있는 기록이 없고 사본이 올바르면 사본으로 main을 복구한다. 손상된 사본은 보내지 않는다.
+    - 사용자가 그 사이 고른 값은 늦게 온 기록이 덮지 않는다.
+    - 시스템 변경(`prefers-color-scheme`)을 따라 다시 칠하고 구독자(Monaco)에 알린다.
+  - main(`electron/appearance.ts`, IPC `m5:appearance:get`·`m5:appearance:set`, preload `window.m5Appearance`)
+    - 현재 main frame만 받고, set은 세 값 중 하나만 받는다.
+    - 받은 값으로 `nativeTheme.themeSource`와 창 배경색을 바꾼다.
+    - 기록은 같은 폴더의 `.tmp`에 쓰고 fsync한 뒤 rename으로 바꾼다. 실패하면 이전 기록이 그대로 남고, 응답 `saved: false`로 화면에 "기억하지 못했어요"를 보인다.
+    - `nativeTheme`의 `updated`에서 열린 창의 배경을 다시 칠한다. 시스템 밝기가 바뀌면 CSS·Monaco·창 배경이 함께 바뀐다(검토 I2).
+    - 다음 실행에는 기록으로 `themeSource`와 첫 프레임 배경을 정한다.
   - main의 `themeSource`가 렌더러의 `prefers-color-scheme`을 정하므로, '라이트'를 고르면 미리보기 안의 사용자 페이지도 라이트 매체로 보인다.
   - Monaco는 같은 토큰에서 색을 읽어(`currentMonacoTheme`, 기본 `vs`/`vs-dark`) 선택이 바뀌면 다시 정의한다.
 - **공용 컴포넌트 층(U1)**: `styles.css`의 "공용 컴포넌트" 구역에 있다.
   - 새 클래스: `.m5-btn-primary/secondary/quiet/danger/danger-solid`, `.m5-badge(-상태)`, `.m5-banner(-상태)`, `.m5-card`, `.m5-group > .m5-setting`, `.m5-empty-state`, `.m5-steps`, `.m5-recover`.
   - 예전 클래스는 같은 규칙의 별칭이다. 기본 `button`은 보조이고, `.m5-new-chat-button`·`.m5-start-action > button`·작업대 `submit`은 주 행동이며, `.m5-secondary`·`.m5-refresh`도 별칭으로 묶었다.
   - 비활성 주 행동은 강조색 대신 `--bg-hover` 면에 `--text-disabled` 글자로 둔다.
-  - 확인 대화상자 안의 `.m5-danger`만 채운 빨강이다.
+  - 채운 빨강은 `.m5-btn-danger-solid`를 붙인 확인 버튼에만 쓴다(프로젝트·작업 삭제, 작업 기록 지우기, 작업 공간 정리, 작업 버리기). 호버 면은 필터가 아니라 `--danger-bg-hover`다. 역할 메뉴의 '삭제'처럼 초안에 적용하는 메뉴 항목은 해당하지 않는다(검토 경미 2).
+  - 구분 버튼(`.m5-segmented`·`.m5-seg`·`.m5-preview-viewport`): 선택 칸은 `--selected-edge` 1px 안쪽 테두리로 트랙(`--bg-track`)과 구분한다. 키보드 초점 링은 안쪽(`outline-offset: -2px`)에 그려 감싼 요소에 잘리지 않는다(검토 I3).
+  - 입력칸 경계는 `--line-input`(3:1)이고 키보드 초점은 `--focus-ring` 링이다.
+  - 역할 아이콘 면은 역할색을 `--role-tint`(두 테마 10%)만큼 섞는다. 라이트 역할색은 그 위 대비 4.5:1에 맞춰 조금 진하다.
   - 토스트는 색 띠·물든 배경 없이 한 면이고, 상태 색은 아이콘에만 쓴다.
   - 배너(`.m5-notice/.m5-admission/.m5-error/.m5-rescan`)는 테두리 없이 상태 면만 쓴다. 실행 상태 칩은 배지 모양이다.
 - 설계와 남은 화면 묶음(U2~U8)은 `docs/proposals/m5-ade-screens-plan.md`에 있다.

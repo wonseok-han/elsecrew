@@ -5,7 +5,12 @@ declare global {
   const __ELSECREW_VERSION__: string;
   interface Window {
     /** Screen brightness choice; main follows it for the window background and native dialogs. */
-    readonly m5Appearance?: { set(theme: import("./theme.ts").ThemePreference): Promise<{ dark: boolean }> };
+    readonly m5Appearance?: {
+      /** main's remembered choice; `saved` is false when it has none it can read. */
+      get(): Promise<{ theme: import("./theme.ts").ThemePreference; saved: boolean; dark: boolean }>;
+      /** `saved` is false when main could not remember the choice for the next launch. */
+      set(theme: import("./theme.ts").ThemePreference): Promise<{ dark: boolean; saved: boolean }>;
+    };
     readonly m5AppUpdate?: { open(): Promise<void>; onRestartCheck(check: () => boolean, resume: () => void): () => void };
     readonly m5GitSelection?: { request(action: import("./contracts/git-selection-v1.ts").GitSelectionAction): Promise<import("./contracts/git-selection-v1.ts").GitSelection> };
     readonly m5SaveRecovery?: { resolve(input: import("./contracts/save-recovery-v1.ts").SaveRecoveryResolveRequest): Promise<import("./contracts/save-recovery-v1.ts").SaveRecoveryResolveResult>; inspect(input: import("./contracts/workspace-addressing-v1.ts").ChatWorkspaceRefV1): Promise<import("./contracts/save-recovery-v1.ts").SaveRecoveryResult> };

@@ -45,6 +45,7 @@ export function AppSettings({ hasProject, open, section, onSection, onClose, res
             <div className="m5-preferences-row"><span><strong id="m5-theme-label">{t("m5.preferences.theme")}</strong><small>{t("m5.preferences.themeHelp")}</small></span>
               <div className="m5-segmented" role="group" aria-labelledby="m5-theme-label" data-testid="theme-choice">{THEME_PREFERENCES.map(choice =>
                 <button key={choice} type="button" aria-pressed={theme.preference === choice} onClick={() => setThemePreference(choice)}>{t(`m5.preferences.theme.${choice}`)}</button>)}</div></div>
+            {theme.saveFailed && <p className="m5-settings-intro" role="status" data-testid="theme-save-failed">{t("m5.preferences.themeSaveFailed")}</p>}
             <label className="m5-preferences-row"><span><strong>{t("m5.notifications.osBanner")}</strong><small>{t("m5.notifications.osBannerHelp")}</small></span><input type="checkbox" checked={osBanners} onChange={event => { setOsBanners(event.target.checked); setOsNotificationsEnabled(event.target.checked); }} /></label>
             <div className="m5-preferences-row"><span><strong>{t("m5.preferences.updates")}</strong><small>{appVersion ? t("m5.preferences.currentVersion", { version: appVersion }) : t("m5.preferences.updateHelp")}</small></span>
               <button type="button" className="m5-secondary" disabled={!window.m5AppUpdate || updateBusy} onClick={async () => {

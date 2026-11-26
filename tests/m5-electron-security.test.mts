@@ -218,7 +218,7 @@ interface MainHarness {
   privilegedSchemes: { scheme: string; privileges: Record<string, unknown> }[];
   partitions: string[];
   switches: string[];
-  nativeTheme: { themeSource: string; shouldUseDarkColors: boolean };
+  nativeTheme: { themeSource: string; shouldUseDarkColors: boolean; emit(event: string): void };
   currentEvent(): { sender: FakeWindow["webContents"]; senderFrame: { url: string } };
 }
 
@@ -288,7 +288,12 @@ async function loadMain(devServerUrl: string | undefined = undefined, requestDur
   const partitions: string[] = [];
   const switches: string[] = [];
   const files = new Set([resolve("/app/.vite/renderer/main_window/index.html")]);
-  const nativeTheme = { themeSource: "system", shouldUseDarkColors: true };
+  const themeListeners = new Map<string, (() => void)[]>();
+  const nativeTheme = {
+    themeSource: "system", shouldUseDarkColors: true,
+    on: (event: string, listener: () => void) => { themeListeners.set(event, [...(themeListeners.get(event) ?? []), listener]); },
+    emit: (event: string) => { for (const listener of themeListeners.get(event) ?? []) listener(); },
+  };
   const electron = {
     nativeTheme,
     app: {
@@ -609,7 +614,8 @@ test("appearance IPC answers only the main frame, takes one of three choices and
   await assert.rejects(handler(harness.currentEvent(), "light", "extra"));
   await assert.rejects(handler(harness.currentEvent()));
   assert.equal(harness.nativeTheme.themeSource, "system");
-  assert.deepEqual(JSON.parse(JSON.stringify(await handler(harness.currentEvent(), "light"))), { dark: true });
+  // The harness's app data is not writable: the answer says the choice was not remembered (PR #10 review I1).
+  assert.deepEqual(JSON.parse(JSON.stringify(await handler(harness.currentEvent(), "light"))), { dark: true, saved: false });
   assert.equal(harness.nativeTheme.themeSource, "light");
   assert.equal(harness.window.backgrounds.at(-1), appearanceModule.WINDOW_BACKGROUND.dark);
   harness.nativeTheme.shouldUseDarkColors = false;
@@ -617,6 +623,29 @@ test("appearance IPC answers only the main frame, takes one of three choices and
   assert.equal(harness.nativeTheme.themeSource, "system");
   assert.equal(harness.window.backgrounds.at(-1), appearanceModule.WINDOW_BACKGROUND.light);
   assert.deepEqual(harness.sidecarCalls, []);
+});
+
+test("appearance record IPC answers only the main frame, takes nothing, and reports main's record (PR #10 review I1)", async () => {
+  const harness = await loadMain();
+  const handler = harness.handlers.get(appearanceModule.APPEARANCE_GET_CHANNEL)!;
+  assert.ok(handler);
+  await assert.rejects(handler({ sender: {}, senderFrame: {} }));
+  await assert.rejects(handler(harness.currentEvent(), "dark"));
+  // No readable record in the harness's app data: system, not saved.
+  assert.deepEqual(JSON.parse(JSON.stringify(await handler(harness.currentEvent()))), { theme: "system", saved: false, dark: true });
+  assert.deepEqual(harness.sidecarCalls, []);
+});
+
+test("a system brightness change repaints the open window's background (PR #10 review I2)", async () => {
+  const harness = await loadMain();
+  const before = harness.window.backgrounds.length;
+  harness.nativeTheme.shouldUseDarkColors = false;
+  harness.nativeTheme.emit("updated");
+  assert.equal(harness.window.backgrounds.length, before + 1);
+  assert.equal(harness.window.backgrounds.at(-1), appearanceModule.WINDOW_BACKGROUND.light);
+  harness.nativeTheme.shouldUseDarkColors = true;
+  harness.nativeTheme.emit("updated");
+  assert.equal(harness.window.backgrounds.at(-1), appearanceModule.WINDOW_BACKGROUND.dark);
 });
 
 test("update readiness rejects unsolicited, stale and foreign replies", async () => {

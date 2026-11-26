@@ -14,7 +14,7 @@ import { DEVICE_REPORT_CHANNEL } from "../src/m5/contracts/device-report-v1.ts";
 import { SESSION_DIAGNOSTICS_CHANNEL, classifySessionDiagnostics } from "../src/m5/contracts/session-diagnostics-v1.ts";
 import { readDeviceReport } from "./device-report.ts";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, protocol, safeStorage, screen, session, shell, WebContentsView } from "electron";
-import { APPEARANCE_CHANNEL, isThemePreference, readThemePreference, windowBackground, writeThemePreference } from "./appearance.ts";
+import { APPEARANCE_CHANNEL, APPEARANCE_GET_CHANNEL, isThemePreference, readThemePreference, windowBackground, writeThemePreference, type ThemePreference } from "./appearance.ts";
 import { PREVIEW_CHANNEL_V1, PREVIEW_EVENT_CHANNEL_V1, validatePreviewIpcRequestV1 } from "../src/m5/contracts/preview-v1.ts";
 import { previewFlags } from "./preview-flag.ts";
 import { PreviewManagerV1 } from "./preview-manager.ts";
@@ -551,16 +551,24 @@ function registerIpcHandlers(): void {
     if (extra.length || typeof nonce !== "string" || typeof ready !== "boolean" || nonce !== updateReadiness?.nonce) throw new Error("invalid update readiness reply");
     updateReadiness.finish(ready);
   });
-  // Screen brightness (system / light / dark): the page sends its choice; main
-  // follows it for native parts (dialogs, the window background) and keeps it
-  // for the next launch. Only the main frame of this app, one fixed value.
+  // Screen brightness (system / light / dark). main's record is the one the
+  // settings screen starts from (PR #10 review I1); the page sends a new
+  // choice, main follows it for native parts (dialogs, the window background)
+  // and remembers it for the next launch. Only the main frame of this app,
+  // one fixed value; the answer says whether it was remembered.
+  ipcMain.handle(APPEARANCE_GET_CHANNEL, async (event, ...args: unknown[]) => {
+    assertCurrentMainFrame(event);
+    if (args.length !== 0) throw new Error("appearance takes no input");
+    return { theme: rememberedTheme ?? "system", saved: rememberedTheme !== null, dark: nativeTheme.shouldUseDarkColors };
+  });
   ipcMain.handle(APPEARANCE_CHANNEL, async (event, ...args: unknown[]) => {
     assertCurrentMainFrame(event);
     if (args.length !== 1 || !isThemePreference(args[0])) throw new Error("invalid appearance");
     if (nativeTheme.themeSource !== args[0]) nativeTheme.themeSource = args[0];
-    mainWindow?.setBackgroundColor(windowBackground(nativeTheme.shouldUseDarkColors));
-    writeThemePreference(app.getPath("userData"), args[0]);
-    return { dark: nativeTheme.shouldUseDarkColors };
+    followNativeTheme();
+    const saved = writeThemePreference(app.getPath("userData"), args[0]);
+    if (saved) rememberedTheme = args[0];
+    return { dark: nativeTheme.shouldUseDarkColors, saved };
   });
   ipcMain.handle("m5:app-update:open", async (event, ...args: unknown[]) => {
     assertCurrentMainFrame(event);
@@ -910,7 +918,15 @@ function setPageZoomFactor(factor: number): void {
 const existingUserData = app.getPath("userData");
 app.setName("Elsecrew");
 app.setPath("userData", existingUserData);
-nativeTheme.themeSource = readThemePreference(existingUserData);
+// The remembered brightness; null when there is no readable record.
+const startingTheme = readThemePreference(existingUserData);
+let rememberedTheme: ThemePreference | null = startingTheme.saved ? startingTheme.theme : null;
+nativeTheme.themeSource = startingTheme.theme;
+/** The window background follows the theme in use, also when the system changes it (review I2). */
+function followNativeTheme(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setBackgroundColor(windowBackground(nativeTheme.shouldUseDarkColors));
+}
+nativeTheme.on("updated", followNativeTheme);
 
 app.whenReady().then(async () => {
   await protocol.handle(APP_SCHEME, serveAppAsset);

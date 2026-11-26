@@ -2,6 +2,28 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #10 독립 검토(차단 0·중요 4·경미 3) 전부 반영 (`orca/ade-theme-tokens`)
+검토 `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr10.md`(대상 db5009d6). 재현 시험은 `tests/m5-pr10-review.test.mts`(12개)에 모았다.
+
+- **I1 화면 밝기 기록**: main 기록이 기준이고 렌더러 사본은 첫 페인트용이다(`theme.ts` `createThemeController`, IPC `m5:appearance:get` 추가). 사본 없음·손상·저장소 예외 → main 기록, main 기록 없음 + 올바른 사본 → 사본으로 복구, 손상 사본은 보내지 않음, 기록 응답 전 사용자 선택 유지. `appearance.json`은 `.tmp`+fsync+rename, 실패하면 이전 기록 유지·`saved: false` → 설정에 "기억하지 못했어요"(`m5.preferences.themeSaveFailed`).
+- **I2 시스템 변경**: `nativeTheme.on("updated")`가 열린 창 배경을 다시 칠한다. 렌더러는 `prefers-color-scheme` 변경으로 CSS·Monaco를 바꾼다(시험: 컨트롤러 시스템 전환, 보안 하네스 `updated` 이벤트).
+- **I3 구분 버튼**: 트랙 `--bg-track`(라이트 회색)과 선택 칸 `--selected-edge` 안쪽 테두리(두 테마 3:1 이상), `overflow: hidden` 제거, `.m5-segmented/.m5-seg/.m5-preview-viewport` 버튼 초점 링을 안쪽(`-2px`)에 그림.
+- **I4 실제 조합 대비**
+  - 대비 검사기에 컴포넌트 조합 표(색 혼합 계산 포함)를 더하고 반올림 전 값으로 비교한다(다크·라이트 각 159개).
+  - 새 렌더 측정기 `tests/m5-rendered-contrast-probe.cjs`가 렌더러 스모크 21곳에서 실제 DOM을 잰다(글자·입력 경계·비활성 강조색·구분 버튼 선택/초점). 마운트 스모크는 다크·라이트 두 번 돈다.
+  - 측정이 찾아 고친 것: 입력칸 7종의 경계(`--line-strong` 1.5~2:1 → 전역 `--line-input`, 라이트 `--p-gray-500` #7f858c), 선택 행의 역할 아이콘(`--role-tint` 10%, 라이트 역할색 진하게, 다크 role-7), 위험 호버 필터 → `--danger-bg-hover`, 첫 실행 현재 단계 글자 `--text-primary`, 입력 키보드 초점 링.
+- **경미**
+  - 미리보기 UI 스모크 I1 판정: 지연된 close 응답 시각 대신 실제 `removeChildView` 시각을 기준으로 바꿨다.
+  - 채운 빨강은 확인 버튼 4곳(`m5-btn-danger-solid`)에만 둔다. 역할 메뉴 '삭제'는 투명 유지.
+  - 밝기 도움말을 '운영체제 설정'으로 바꿨다.
+- **검증**
+  - `npm test` 918/918, `pnpm build` 통과.
+  - `pnpm m5:test:editor` 69/69(렌더러 마운트 스모크 다크·라이트, 렌더 대비 실패 0 / 916측정 ×2).
+  - 대비 검사 다크·라이트 각 159/159.
+  - 미리보기 UI 스모크: 다크 PASS 2회 연속, 라이트 PASS 2회 연속. I1은 분리 후 약 400ms 뒤 해제.
+  - 캡처·로그: `~/Documents/elsecrew-ade-theme-tokens-2026-11-26/pr10-review/`.
+  - 운영체제 밝기 자체를 바꿔 보는 실제 앱 확인은 하지 않았다(다른 작업자와 함께 쓰는 컴퓨터라 시스템 설정을 바꾸지 않음). 단위·하네스 시험으로 막았다.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 화면 통일 U0(토큰·화면 밝기)·U1(공용 컴포넌트 층) (`orca/ade-theme-tokens`, 기준 feature/ade 613dafde)
 설계: `docs/proposals/m5-ade-screens-plan.md`(원본 `~/Documents/elsecrew-ade-screens-design-2026-11-26/`) 2장·4.1. 결정(조정자 위임): 테마 기본값 시스템, 강조색 코랄 유지(라이트 `#b4482d`), 주인님 규칙 "버튼은 동작만"을 설계 2.1의 10번으로 추가. 현행 설명은 architecture "색·간격 토큰과 화면 밝기".
 
@@ -105,7 +127,8 @@ PR #6은 머지됐다(8493496e). 재확인(`REVIEW-pr6-2.md`)에서 B1 해결, I
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
 - **색은 토큰 블록 두 곳에만(2026-11-26, 화면 통일 U0·U1)**: `styles.css`의 다크 `:root`와 라이트 `:root[data-theme="light"]` 밖에는 hex·`rgb()`를 쓰지 않는다. 화면 코드에도 색 리터럴을 쓰지 않는다(Monaco는 `theme.ts`가 토큰에서 읽음). `tests/m5-style-tokens.test.mts`가 대비(다크·라이트 각 95쌍)·블록 밖 색 0·정의되지 않은 토큰 0을 막는다. 라이트 값은 1단 `--p-*`만 바꾼다. 새 화면은 공용 컴포넌트 클래스(`.m5-btn-*`·`.m5-badge`·`.m5-banner`·`.m5-card`·`.m5-group`·`.m5-empty-state`·`.m5-steps`·`.m5-recover`)를 쓴다.
-  - 화면 밝기의 출처는 렌더러 `localStorage`(`elsecrew.theme.v1`)다. main은 받은 값을 `nativeTheme.themeSource`로 따르고 `userData/appearance.json`에 기억해 다음 실행 첫 프레임에 쓴다. 렌더러에 저장값이 없으면 main에 보내지 않는다(기억된 값을 덮지 않음).
+  - 화면 밝기 기록의 기준은 main의 `userData/appearance.json`이다(PR #10 검토 I1로 바꿈). 렌더러 `localStorage`(`elsecrew.theme.v1`)는 첫 페인트용 사본이다. 렌더러는 시작 때 `m5Appearance.get()`으로 기록을 받아 따르고, main에 읽을 수 있는 기록이 없을 때만 올바른 사본으로 복구한다(손상 사본은 보내지 않음). 기록은 `.tmp` + rename으로 바꾸며 실패는 `saved: false`로 화면에 알린다. 시스템 밝기 변경은 `nativeTheme.updated`가 창 배경을, `prefers-color-scheme`이 CSS·Monaco를 바꾼다.
+  - 대비는 토큰 쌍만으로 부족하다(검토 I4): 컴포넌트 조합(`scripts/m5-contrast-check.mjs` 조합 표)과 렌더된 DOM(`tests/m5-rendered-contrast-probe.cjs`, 렌더러 스모크 다크·라이트)을 함께 본다. 새 화면·컴포넌트를 넣으면 렌더러 스모크 캡처 지점에서 자동으로 측정되므로, 그 화면이 스모크 경로에 없으면 캡처 지점을 추가한다. `color-mix`·필터로 만든 면은 조합 표에 넣는다(필터 대신 토큰 권장).
   - 앱 문구 규칙(주인님, 2026-11-26): 버튼은 동작만 말한다. 행·카드·제목이 보여 주는 대상을 반복하지 않고('Codex 연결하기' → '연결하기'), 대상은 접근성 이름에 남긴다. 설계 `docs/proposals/m5-ade-screens-plan.md` 2.1의 10번.
 - **팀 역할 편집의 규칙(2026-11-26, custom roles R0·R1·R2·R4)**: 화면 `role-settings.tsx`, 순수 함수 `team-draft.ts`(insert/move/duplicate/restore/teamChanges/uniqueRoleName/newMemberId), 템플릿 `role-templates.ts`(TS에만). 현행 설명은 architecture "팀 역할 편집".
   - 목록 순서는 보기 순서다. 실행 순서는 총괄이 정한다(Q1). 새 팀원 ID는 무작위 `member-xxxxxx`이고 지운 기본 역할은 원래 ID로 되살린다.

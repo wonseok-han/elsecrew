@@ -231,13 +231,22 @@ const appUpdateApi = Object.freeze({
 });
 contextBridge.exposeInMainWorld("m5AppUpdate", appUpdateApi);
 
-// Screen brightness choice (system / light / dark); main follows it for native parts.
+// Screen brightness choice (system / light / dark). main keeps the record the
+// settings screen starts from and follows the choice for native parts.
 const M5_APPEARANCE_CHANNEL = "m5:appearance:set";
+const M5_APPEARANCE_GET_CHANNEL = "m5:appearance:get";
+const isTheme = (value: unknown): value is "system" | "light" | "dark" => value === "system" || value === "light" || value === "dark";
+const field = (value: unknown, name: string): unknown => typeof value === "object" && value !== null ? (value as Record<string, unknown>)[name] : undefined;
 contextBridge.exposeInMainWorld("m5Appearance", Object.freeze({
+  get: async () => {
+    const result: unknown = await ipcRenderer.invoke(M5_APPEARANCE_GET_CHANNEL);
+    const theme = field(result, "theme");
+    return { theme: isTheme(theme) ? theme : "system", saved: field(result, "saved") === true && isTheme(theme), dark: field(result, "dark") === true };
+  },
   set: async (theme: unknown) => {
-    if (theme !== "system" && theme !== "light" && theme !== "dark") throw new Error("invalid appearance");
+    if (!isTheme(theme)) throw new Error("invalid appearance");
     const result: unknown = await ipcRenderer.invoke(M5_APPEARANCE_CHANNEL, theme);
-    return { dark: typeof result === "object" && result !== null && (result as { dark?: unknown }).dark === true };
+    return { dark: field(result, "dark") === true, saved: field(result, "saved") === true };
   },
 }));
 

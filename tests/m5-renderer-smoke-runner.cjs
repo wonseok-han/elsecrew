@@ -21,7 +21,10 @@ const preload = resolve(__dirname, "m5-renderer-smoke-preload.cjs");
 // M5_SMOKE_CAPTURE_DIR=<dir> writes a PNG at each ${capture(...)} point; M5_SMOKE_THEME=light|dark
 // starts the app with that brightness choice. Without the variables the smoke is unchanged.
 const captureDirectory = process.env.M5_SMOKE_CAPTURE_DIR ? resolve(process.env.M5_SMOKE_CAPTURE_DIR) : "";
-const capture = name => captureDirectory ? `await window.m5SmokeCapture(${JSON.stringify(name)});` : "";
+// Every capture point also measures the rendered contrast (PR #10 review I4); the
+// theme comes from M5_SMOKE_THEME (the mount smoke runs dark and light).
+const capture = name => `await window.m5SmokeMeasure(${JSON.stringify(name)}, { focus: ${name === "00-settings-general"} });` + (captureDirectory ? `await window.m5SmokeCapture(${JSON.stringify(name)});` : "");
+const contrastResults = [];
 
 protocol.registerSchemesAsPrivileged([{ scheme: "m5smoke", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 
@@ -55,6 +58,7 @@ app.whenReady().then(async () => {
   });
   // CI screens can be smaller than the layout's 1280×768: keep the size exact.
   const window = new BrowserWindow({ width: 1280, height: 768, useContentSize: true, enableLargerThanScreen: true, show: false, webPreferences: { preload, partition: "m5-renderer-smoke", contextIsolation: false, sandbox: false, nodeIntegration: false } });
+  ipcMain.handle("m5-smoke-contrast", (_event, result) => { contrastResults.push(result); });
   if (captureDirectory) {
     require("node:fs").mkdirSync(captureDirectory, { recursive: true });
     ipcMain.handle("m5-smoke-capture", async (_event, name) => {
@@ -1085,6 +1089,25 @@ app.whenReady().then(async () => {
 
   })()`);
   if (window.isVisible() || window.isFocused()) throw new Error("renderer smoke captured desktop focus");
+  // The probe itself must see what it is for: known-bad combinations are caught.
+  const probeSanity = await window.webContents.executeJavaScript(`(async () => {
+    const box = document.createElement("div");
+    box.style.cssText = "position:fixed;inset:20px auto auto 20px;z-index:99;padding:8px;background:var(--bg-app)";
+    box.innerHTML = '<p style="color:#777;background:#888">low contrast</p>'
+      + '<button class="m5-btn-primary" disabled style="background:var(--action-bg);opacity:1">disabled primary</button>'
+      + '<div class="m5-segmented"><button type="button" aria-pressed="true" style="box-shadow:none">chosen</button></div>'
+      + '<input style="border:1px solid var(--bg-app);background:var(--bg-app)">';
+    document.body.append(box);
+    try { return (await window.m5SmokeMeasureOnly("probe-sanity")).failures.map(failure => failure.kind); } finally { box.remove(); }
+  })()`);
+  for (const kind of ["text", "disabled-action", "segmented-chosen-edge", "input-edge"]) if (!probeSanity.includes(kind)) throw new Error(`rendered contrast probe missed ${kind}: ${JSON.stringify(probeSanity)}`);
+  // Rendered contrast across every capture point, in this run's theme.
+  const contrastFailures = contrastResults.flatMap(result => result.failures);
+  const contrastReport = { theme: process.env.M5_SMOKE_THEME || "system", screens: contrastResults.length, checked: contrastResults.reduce((sum, result) => sum + result.checked, 0), failures: contrastFailures.length };
+  if (captureDirectory) writeFileSync(resolve(captureDirectory, "rendered-contrast.json"), JSON.stringify({ ...contrastReport, details: contrastResults }, null, 1));
+  process.stdout.write(JSON.stringify({ renderedContrast: contrastReport }) + "\n");
+  if (contrastResults.length < 20) throw new Error(`rendered contrast measured only ${contrastResults.length} screens`);
+  if (contrastFailures.length) throw new Error(`rendered contrast below the minimum: ${JSON.stringify(contrastFailures.slice(0, 25))}`);
   window.webContents.debugger.detach();
   await window.close();
   app.exit(0);

@@ -2,6 +2,12 @@
 const smokeEnv = typeof process === "undefined" ? {} : process.env;
 if (smokeEnv.M5_SMOKE_CAPTURE_DIR) window.m5SmokeCapture = name => require("electron").ipcRenderer.invoke("m5-smoke-capture", name);
 if (smokeEnv.M5_SMOKE_THEME) { try { localStorage.setItem("elsecrew.theme.v1", smokeEnv.M5_SMOKE_THEME); } catch {} }
+// Rendered contrast at each capture point (PR #10 review I4); main keeps the results across page loads.
+if (typeof require === "function") {
+  const { measureRenderedContrast } = require("./m5-rendered-contrast-probe.cjs");
+  window.m5SmokeMeasureOnly = measureRenderedContrast;
+  window.m5SmokeMeasure = async (screen, options) => require("electron").ipcRenderer.invoke("m5-smoke-contrast", await measureRenderedContrast(screen, options));
+}
 window.m5SmokeClaudeUsageReads = 0;
 window.m5ClaudeUsage={read:async()=>{window.m5SmokeClaudeUsageReads++;return ({state:"available",usage:{windows:[{id:"primary",usedPercent:12,windowMinutes:300,resetsAt:null},{id:"secondary",usedPercent:27,windowMinutes:10080,resetsAt:null}]},checkedAt:Date.now()});}};
 let smokeConnections = {codex:false,"claude-code":false};
