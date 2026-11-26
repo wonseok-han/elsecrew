@@ -9,7 +9,8 @@
 - **증명**: 공용 표에 `command` 43개(리뷰 반례 전부 + 일상 명령 + 애매한 줄)를 추가했다. Rust `commands_are_redacted_fail_closed_like_the_screen`와 TS `command lines are redacted fail-closed, like the engine`이 같은 결과·재적용 불변·"fake" 문자열 잔존 0을 확인하고, 기존 `mask` 표 전체를 명령 줄로 넣어도 잔존 0임을 확인한다.
 - **저장 시험**: Claude auto-read 계열에 인라인 Authorization 헤더와 따옴표 curl 비밀번호를 더해, `assert_store_lacks`로 SQLite 파일(DB·WAL) 바이트에 원문이 없음을 다시 확인했다(`claude_project_consent_auto_approves_and_still_rejects_outside_files`, `claude_auto_read_after_real_bash_side_effects`). Codex `codex_durable_native_delivery_and_cancel`도 통과.
 - **대가**: `sed -n 1,80p src/app.js`는 `sed -n •••• src/app.js`, `rg TODO src`는 `rg •••• ••••`처럼 보인다. 재생 캡처를 갱신했다.
-- **검증**: `npm test` 931/931, `pnpm build`, Rust 영향 묶음 16개 통과. sidecar 전체 결과는 다음 줄.
+- **검증**: `npm test` 931/931(feature/ade e7965d97 병합 뒤 953/953), `pnpm build`, Rust 영향 묶음 16개, `cargo test -p elsecrew-sidecar` 전체 920 통과·0 실패(942473f3, 병합으로 Rust 변경 없음). CI(35a39da2): GitGuardian(탐지 0)·test macOS·Windows·website 통과, MERGEABLE/CLEAN.
+- **병합**: feature/ade e7965d97(PR #12). `styles.css`는 양쪽 끝 구역 유지, `history.md`는 diff 정렬이 엉켜 feature/ade 파일에 이 브랜치의 엔트리 3개와 핵심 결정 항목을 다시 얹었다(`m5-history-entries` 양쪽 기준 유실 0).
 - **남은 것**: 노예의 B2 재확인, 머지.
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #11 독립 검토(차단 3·중요 4·경미 3) 전부 반영, feature/ade 병합 (`orca/ade-activity-detail`)
