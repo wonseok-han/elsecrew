@@ -72,6 +72,9 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
   const loopRef = useRef<PreviewLayoutLoop | null>(null);
   /** A change that moves the stage (a band) happens only once the view is hidden. */
   const shift = (change: () => void) => { const loop = loopRef.current; if (loop) loop.afterHidden(change); else change(); };
+  // The bands as they are now: a change that would not change them moves
+  // nothing, so the view is not hidden for it (ADE V check, 2026-11-26).
+  const bands = useRef({ newResult: false, notice: false });
   const hidden = useRef(false);
   const entry = useRef<string | null>(null);
   const shownResultKey = useRef(resultKey);
@@ -148,7 +151,7 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
     return bridge.onEvent(event => {
       if (event.previewId !== previewRef.current) return;
       if (event.kind === "loaded") setPhase(current => current.kind === "open" ? { ...current, loaded: true } : current);
-      else if (event.kind === "blockedNavigation") shift(() => setNotice(true));
+      else if (event.kind === "blockedNavigation") { if (!bands.current.notice) shift(() => setNotice(true)); }
       // The entry page did not load: say so and offer to open it again
       // (the preview itself is closed by leaving the "open" phase).
       else if (event.kind === "loadFailed") { setStill(null); setPhase({ kind: "failed" }); }
@@ -187,7 +190,7 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
 
   useEffect(() => {
     if (!notice) return;
-    const timer = window.setTimeout(() => shift(() => setNotice(false)), 6000);
+    const timer = window.setTimeout(() => { if (bands.current.notice) shift(() => setNotice(false)); }, 6000);
     return () => window.clearTimeout(timer);
   }, [notice]);
 
@@ -195,7 +198,7 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
   useEffect(() => {
     if (resultKey === shownResultKey.current) return;
     shownResultKey.current = resultKey;
-    if (phase.kind === "open") shift(() => setNewResult(true));
+    if (phase.kind === "open" && !bands.current.newResult) shift(() => setNewResult(true));
   }, [resultKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The view on the stage: where it goes, and hidden whenever anything of
@@ -394,7 +397,7 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
   // An explicit cover, another tab or width: told to main before the page paints.
   useLayoutEffect(() => { syncNow.current(); }, [covered, active, viewport]);
   // A band that moved the stage is laid out: place the view again.
-  useLayoutEffect(() => { loopRef.current?.settled(); }, [newResult, notice]);
+  useLayoutEffect(() => { bands.current = { newResult, notice }; loopRef.current?.settled(); }, [newResult, notice]);
 
   // Another tab: hidden now and closed after a while by main.
   useEffect(() => {
@@ -404,7 +407,7 @@ export function PreviewTab({ projectId, chatId, active, covered, resultKey, entr
   }, [active, previewId, bridge]);
 
   const reload = () => {
-    shift(() => setNewResult(false));
+    if (bands.current.newResult) shift(() => setNewResult(false));
     if (previewId && bridge) void bridge.reload({ previewId }).catch(() => undefined);
   };
   const reopen = () => {

@@ -235,3 +235,31 @@ test("while hidden, a stage measured on and off sends nothing more; the next sho
   assert.equal(h.sent.length, count + 1);
   assert.deepEqual(h.sent.at(-1)!.layout.bounds, { x: 568, y: 185, width: 424, height: 458 });
 });
+
+test("a queued change that changes nothing on screen does not keep the view hidden for good (ADE V check, 2026-11-26)", async () => {
+  const h = harness();
+  await shown(h);
+  // "다시 불러오기" with no band shown: the change runs, but the page never re-renders.
+  h.loop.afterHidden(() => undefined);
+  h.sent.at(-1)!.resolve();
+  await h.settle();
+  const before = h.sent.length;
+  assert.ok(h.sent.slice(before).every(sent => sent.layout.obscured), "still waiting for the page");
+  assert.equal(h.loop.holding, true);
+  // No `settled` from the page: the limit places the view again.
+  h.fire(500);
+  await h.settle();
+  assert.equal(h.loop.holding, false);
+  assert.equal(h.sent.at(-1)!.layout.obscured, false, "shown again");
+  // `settled` from the page first clears the limit: nothing more happens at the limit.
+  h.sent.at(-1)!.resolve();
+  await h.settle();
+  h.loop.afterHidden(() => { h.state.bounds = { x: 900, y: 190, width: 500, height: 560 }; });
+  h.sent.at(-1)!.resolve();
+  await h.settle();
+  h.loop.settled();
+  const count = h.sent.length;
+  h.fire(500);
+  await h.settle();
+  assert.equal(h.sent.length, count, "the cleared limit sends nothing");
+});

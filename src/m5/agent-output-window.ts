@@ -87,3 +87,10 @@ export function reduceOutputWindow(previous: OutputWindow, incoming: readonly Ou
   }
   return { binding: previous.binding, cursor, rows, hasEarlier };
 }
+
+/** Whether a member's card says "it is starting": the run is under way and
+ * nothing it does has been shown yet. */
+export function startingSentence(state: string, rows: readonly { channel?: string }[] | null): boolean {
+  if (state !== "preparing" && state !== "running") return false;
+  return !rows || !rows.some(row => row.channel === "activity");
+}

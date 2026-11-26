@@ -95,7 +95,10 @@ test("the view is hidden first, then the cover is shown (PR #9 review I1, re-rev
   assert.match(source, /close: \(\) => bridge\.close\(\{ previewId \}\)/);
   // Bands that move the stage appear only once the view is hidden (re-review B1).
   for (const change of ["setNotice(true)", "setNotice(false)", "setNewResult(true)", "setNewResult(false)"]) assert.ok(source.includes(`shift(() => ${change})`), change);
-  assert.match(source, /useLayoutEffect\(\(\) => \{ loopRef\.current\?\.settled\(\); \}, \[newResult, notice\]\);/);
+  assert.match(source, /useLayoutEffect\(\(\) => \{ bands\.current = \{ newResult, notice \}; loopRef\.current\?\.settled\(\); \}, \[newResult, notice\]\);/);
+  // A band change that would change nothing hides nothing (ADE V check, 2026-11-26).
+  assert.match(source, /if \(bands\.current\.newResult\) shift\(\(\) => setNewResult\(false\)\)/);
+  assert.match(source, /!bands\.current\.notice\) shift\(\(\) => setNotice\(true\)\)/);
   // Something in the tab that moved the stage is held the same way.
   assert.match(source, /if \(own\?\.contains\(node\)\) \{\n\s+if \(moved\) \{ holdElement\(node\);/);
   // Every measurement carries the page's devicePixelRatio and size.

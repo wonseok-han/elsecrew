@@ -181,6 +181,13 @@ async function run(window) {
   await capture(window, view, manager, 'preview-narrow');
   await page(`document.querySelector('[data-testid=preview-wide]').click()`);
   await waitFor(() => manager.currentLayout?.bounds.width > 390, 5_000, 'wide again');
+  // "다시 불러오기" with no band on screen changes nothing in the tab: the
+  // view must come back, not wait for a layout that never comes (ADE V check).
+  await sleep(700);
+  await page(`document.querySelector('[data-testid=preview-reload]').click()`);
+  const backAfterReload = await waitFor(() => manager.currentLayout?.state === 'shown', 3_000, 'shown after reload').then(() => true, () => false);
+  await sleep(1200);
+  check('reload with no band on screen leaves the view shown', backAfterReload && manager.currentLayout?.state === 'shown', { state: manager.currentLayout?.state });
   step('wideNarrow');
 
   // PR #9 review I1: what the page held invisible (data-preview-wait) and

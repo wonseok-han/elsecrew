@@ -43,6 +43,9 @@ export interface PreviewLayoutLoopOptions {
    * stage before the view may be shown. */
   released?(): void;
   holdLimitMs?: number;
+  /** A queued change that never reports its layout (it changed nothing on
+   * screen, say) still lets the view be placed again after this long. */
+  settleLimitMs?: number;
   retryMs?: number;
   /** A request main never answers counts as failed after this long and is sent again. */
   answerLimitMs?: number;
@@ -52,6 +55,7 @@ export interface PreviewLayoutLoopOptions {
 
 export const PREVIEW_HOLD_LIMIT_MS = 1500;
 export const PREVIEW_ANSWER_LIMIT_MS = 3000;
+export const PREVIEW_SETTLE_LIMIT_MS = 500;
 
 export class PreviewLayoutLoop {
   /** The newest layout main accepted. */
@@ -67,6 +71,7 @@ export class PreviewLayoutLoop {
   /** A queued change ran; hidden until the page says it is laid out (`settled`). */
   #shifting = false;
   #holdTimer: unknown = null;
+  #settleTimer: unknown = null;
   #retryTimer: unknown = null;
   #detaching = false;
   #closed = false;
@@ -102,6 +107,8 @@ export class PreviewLayoutLoop {
 
   /** The page has laid out the queued changes: place the view again. */
   settled(): void {
+    this.#clear(this.#settleTimer);
+    this.#settleTimer = null;
     if (!this.#shifting) return;
     this.#shifting = false;
     this.sync();
@@ -139,6 +146,7 @@ export class PreviewLayoutLoop {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#clear(this.#retryTimer);
+    this.#clear(this.#settleTimer);
     if (this.#releases.length === 0 && this.#queued.length === 0) { this.#finish(); return; }
     if (this.#closed) { this.#finish(); return; }
     void this.#options.close().then(() => this.#finish(), () => this.#finish());
@@ -195,7 +203,14 @@ export class PreviewLayoutLoop {
     this.#holdTimer = null;
     const releases = this.#releases.splice(0);
     const queued = this.#queued.splice(0);
-    if (queued.length > 0 && !this.#disposed && !this.#closed) this.#shifting = true;
+    if (queued.length > 0 && !this.#disposed && !this.#closed) {
+      this.#shifting = true;
+      // The page normally says so (`settled`); a change that changed nothing
+      // never re-renders, and must not keep the view hidden for good
+      // (ADE V check, 2026-11-26: "다시 불러오기" with no band shown).
+      this.#clear(this.#settleTimer);
+      this.#settleTimer = this.#set(() => { this.#settleTimer = null; this.settled(); }, this.#options.settleLimitMs ?? PREVIEW_SETTLE_LIMIT_MS);
+    }
     for (const release of releases) release();
     for (const change of queued) change();
     // Only once ALL of them are back: one held element must not be judged
