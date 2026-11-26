@@ -74,7 +74,7 @@ bridge.getAgentOutputPage=async request=>{const rows=outputOf(request.binding.ru
 window.m5=bridge;
 window.opened=[];
 const clock=new Intl.DateTimeFormat('ko-KR',{hour:'2-digit',minute:'2-digit'});
-createRoot(document.getElementById('root')).render(<I18nProvider>{records.map(({run})=><MemberCard key={run.runId} run={run} reports={[]} teamRoleIds={null} phase={null} clock={clock} onOpenFile={path=>window.opened.push(path)} />)}</I18nProvider>);
+createRoot(document.getElementById('root')).render(<I18nProvider>{records.map(({run})=><MemberCard key={run.runId} run={run} reports={[]} teamRoleIds={null} phase={null} clock={clock} onOpenFile={path=>window.opened.push(path)} changedFiles={new Set(["NOTES.md","app.js"])} />)}</I18nProvider>);
 `);
 await build({ configFile: false, root: fixture, base: './', plugins: [react()], logLevel: 'error', build: { outDir: path.join(root, 'dist'), emptyOutDir: true } });
 const runner = path.join(root, 'runner.cjs');
