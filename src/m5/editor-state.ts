@@ -797,10 +797,38 @@ export class ProjectEditorController {
     }
   }
 
+  /**
+   * The view can be left with its unsaved text kept for its task (ADE
+   * multi-project P1): every unsaved tab is plain edited text of a task's
+   * workspace, kept the way an app that closes keeps it, and given back when
+   * the task opens again. A tab still saving or in conflict stays.
+   */
+  canLeaveKeepingDrafts(): boolean {
+    if (this.canLeaveProject()) return true;
+    return Boolean(this.#drafts && this.#state.workspace)
+      && this.#state.tabs.every(tab => tab.saveState === "clean" || (tab.saveState === "dirty" && tab.mode === "text"));
+  }
+
+  /** Whether the store now holds exactly this view's unsaved text. */
+  #draftsKept(): boolean {
+    const workspace = this.#state.workspace;
+    if (!this.#drafts || !workspace) return false;
+    this.#storeDrafts();
+    let kept: ReturnType<EditorDraftStore["load"]> = null;
+    try { kept = this.#drafts.load(workspace); } catch { return false; }
+    const unsaved = this.#state.tabs.filter(tab => tab.saveState !== "clean");
+    return unsaved.every(tab => kept?.tabs.some(draft => draft.path === tab.path && draft.text === tab.text));
+  }
+
   /** Leave the view without abandoning the durable snapshot or its chat. */
   /** `discardDrafts` closes even with unsaved edits or pending work (list removal). */
-  leaveProjectView(discardDrafts = false): boolean {
-    if (this.#disposed || (!discardDrafts && (this.#actionBlocked || this.#snapshotCreation || this.#snapshotCreationBlocked || !this.canLeaveProject()))) return false;
+  /** `keepDrafts` leaves with unsaved text kept for its task, once the store has it. */
+  leaveProjectView(discardDrafts = false, keepDrafts = false): boolean {
+    if (this.#disposed) return false;
+    if (!discardDrafts) {
+      if (this.#actionBlocked || this.#snapshotCreation || this.#snapshotCreationBlocked) return false;
+      if (!this.canLeaveProject() && !(keepDrafts && this.canLeaveKeepingDrafts() && this.#draftsKept())) return false;
+    }
     const left = this.#state.workspace;
     this.#selectionGeneration++;
     this.#projectEpoch++;

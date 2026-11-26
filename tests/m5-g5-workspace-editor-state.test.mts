@@ -287,3 +287,48 @@ test("files an agent writes show up in the change and file lists without a manua
   assert.deepEqual(bridge.calls.filter(call => call.startsWith("v3.diff:") || call.startsWith("v3.tree:")).sort(), ["v3.diff:chat_a", "v3.tree:chat_a"]);
   controller.dispose();
 });
+
+// ADE multi-project P1: switching projects keeps a task's unsaved text for it.
+test("leaving a project keeps the open task's unsaved text and gives it back when the task opens again", async () => {
+  const storage = memoryStorage();
+  const { controller } = await opened(storage);
+  await controller.openFile("src/a.ts");
+  controller.updateText("src/a.ts", "edited while the team works\n");
+  assert.equal(controller.canLeaveProject(), false);
+  assert.equal(controller.canLeaveKeepingDrafts(), true);
+  assert.equal(controller.leaveProjectView(), false, "plain leaving still refuses unsaved text");
+  assert.equal(controller.leaveProjectView(false, true), true);
+  assert.equal(controller.snapshot().project, null);
+  assert.equal(createEditorDraftStore(storage).load(a)?.tabs[0]?.text, "edited while the team works\n");
+  await controller.chooseProject();
+  assert.equal(await controller.bindChat(a), true);
+  assert.deepEqual(controller.snapshot().tabs.map(tab => [tab.path, tab.text, tab.saveState]), [["src/a.ts", "edited while the team works\n", "dirty"]]);
+  controller.dispose();
+});
+
+test("text that cannot be kept holds the project: a store that refuses, a save on its way", async () => {
+  const refusing = memoryStorage(true);
+  const first = await opened(refusing);
+  await first.controller.openFile("src/a.ts");
+  first.controller.updateText("src/a.ts", "not kept\n");
+  assert.equal(first.controller.canLeaveKeepingDrafts(), true, "it looks keepable");
+  assert.equal(first.controller.leaveProjectView(false, true), false, "but the store did not take it, so the view stays");
+  assert.equal(first.controller.snapshot().tabs[0]?.text, "not kept\n");
+  first.controller.dispose();
+
+  const saving = await opened(memoryStorage());
+  await saving.controller.openFile("src/a.ts");
+  saving.controller.updateText("src/a.ts", "saving\n");
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const commit = saving.bridge.commitWorkspaceFileSave.bind(saving.bridge);
+  saving.bridge.commitWorkspaceFileSave = async (input: Parameters<typeof commit>[0]) => { await held; return commit(input); };
+  const pending = saving.controller.saveActive();
+  for (let turn = 0; turn < 20 && saving.controller.snapshot().tabs[0]?.saveState !== "saving"; turn++) await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(saving.controller.snapshot().tabs[0]?.saveState, "saving");
+  assert.equal(saving.controller.canLeaveKeepingDrafts(), false);
+  assert.equal(saving.controller.leaveProjectView(false, true), false);
+  release();
+  await pending;
+  saving.controller.dispose();
+});

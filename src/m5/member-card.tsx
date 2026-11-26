@@ -58,7 +58,7 @@ export const MemberCard = memo(function MemberCard({ run, reports, definitions, 
   const started = Date.parse(run.createdAt);
   const notice = reports.length === 0 ? runOutcomeNotice(run, phase) : null;
   const gone = teamRoleIds !== null && !teamRoleIds.has(roleId);
-  return <article className={`m5-member-card m5-member-${status}`} data-run-id={run.runId} data-role-id={roleId} data-testid="member-card" aria-label={name}>
+  return <article tabIndex={-1} className={`m5-member-card m5-member-${status}`} data-run-id={run.runId} data-role-id={roleId} data-testid="member-card" aria-label={name}>
     <header className="m5-member-head">
       <RoleIcon roleId={roleId} name={name} />
       <strong className="m5-member-name" title={name}><bdi>{name}</bdi></strong>

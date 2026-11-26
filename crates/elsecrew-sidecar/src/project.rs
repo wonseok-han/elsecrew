@@ -695,6 +695,11 @@ impl ProjectManager {
         #[cfg(not(any(target_os = "macos", windows)))]
         { let _ = (storage, project, application_id, fingerprint, request); Err(ProjectFailure::recovery("restoration unavailable on this platform")) }
     }
+    /// The project and task a save in progress writes to.
+    pub(crate) fn pending_save_target(&self, save_id: &str) -> Option<(String, Option<String>)> {
+        self.pending_saves.get(save_id).map(|save| (save.project_id.clone(), save.chat_id.clone()))
+    }
+
     pub(crate) fn application_running(&self) -> bool {
         #[cfg(any(target_os = "macos", windows))]
         { self.application_job.is_some() }

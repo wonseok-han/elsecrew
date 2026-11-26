@@ -61,6 +61,7 @@ mod provider_run_binding;
 mod storage;
 #[allow(dead_code)] // D1A keeps status internal until the later wire-activation wave.
 mod storage_lifetime;
+mod work_scope;
 
 use chrono::{SecondsFormat, Utc};
 use elsecrew_core as _;
@@ -1177,9 +1178,14 @@ impl Sidecar {
                 "installation and provider work cannot overlap; check status or request cancellation",
             )));
         }
-        if !self.workflow_chats.is_empty() && (matches!(request.method.as_str(), "file.save" | "workspace.file.save")
-            || (request.method == "project.catalog" && matches!(request.params["action"].as_str(), Some("openApplicationConfirmation" | "startApplication" | "restoreApplication" | "discardChatWorkspace" | "retireApplication" | "cleanupBackup" | "applyChatLatest")))) {
-            return Ok(HandledRequest::response(error_response(&request, "orchestrationBusy", "requestBlocked", "finish or stop the team task before changing its workspace or applying to the original")));
+        // A save, merge, discard, cleanup or erasure waits only for its own
+        // task; applying a copy to the user's folder waits for every team
+        // (work_scope.rs, ADE multi-project P2′).
+        if let Some((code, detail)) = self.write_refusal(&request) {
+            if code == "invalidParams" {
+                return Err(invalid_params(detail.into()));
+            }
+            return Ok(HandledRequest::response(error_response(&request, code, "requestBlocked", detail)));
         }
         if self.projects.application_running()
             && !matches!(request.method.as_str(), "system.status" | "app.prepareQuit")
@@ -1395,7 +1401,8 @@ impl Sidecar {
                 }
                 Some("cleanupWorkspace") => {
                     let params = require_exact_params(&request.params, &["action", "chatId", "confirmed"]).map_err(invalid_params)?;
-                    if params["confirmed"] != true || self.g5.cleanup_blocked() || !self.workflow_chats.is_empty() || !self.agent_runtime.owned_run_ids().is_empty() || !self.pending_agent_starts.is_empty() || !self.pending_agent_cancels.is_empty() {
+                    // The task itself must be idle: checked by `write_refusal`.
+                    if params["confirmed"] != true || self.g5.cleanup_blocked() {
                         return Err(invalid_params("cleanup requires explicit confirmation and idle execution".into()));
                     }
                     self.projects.cleanup_workspace(&mut self.storage, param_string(params,"chatId").map_err(invalid_params)?, &request.request_id)
@@ -1407,7 +1414,8 @@ impl Sidecar {
                 Some("eraseChatContent") => {
                     // Same explicit-confirmation and idle gate as copy cleanup (docs/proposals/m5-chat-erasure.md).
                     let params = require_exact_params(&request.params, &["action", "chatId", "confirmed"]).map_err(invalid_params)?;
-                    if params["confirmed"] != true || self.g5.cleanup_blocked() || !self.workflow_chats.is_empty() || !self.agent_runtime.owned_run_ids().is_empty() || !self.pending_agent_starts.is_empty() || !self.pending_agent_cancels.is_empty() {
+                    // The task itself must be idle: checked by `write_refusal`.
+                    if params["confirmed"] != true || self.g5.cleanup_blocked() {
                         return Err(invalid_params("chat erasure requires explicit confirmation and idle execution".into()));
                     }
                     self.projects.erase_chat_content(&mut self.storage, param_string(params,"chatId").map_err(invalid_params)?, &request.request_id)
@@ -1437,12 +1445,7 @@ impl Sidecar {
                     self.projects.open_application_confirmation(&mut self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "chatId").map_err(invalid_params)?, param_string(params, "fingerprint").map_err(invalid_params)?, &request.request_id)
                 }
                 Some("inspectChatDiscard" | "discardChatWorkspace") => {
-                    if !self.workflow_chats.is_empty() || !self.agent_runtime.owned_run_ids().is_empty()
-                        || !self.pending_agent_starts.is_empty()
-                        || !self.pending_agent_cancels.is_empty()
-                    {
-                        return Ok(HandledRequest::response(error_response(&request, "requestBlocked", "requestBlocked", "workspace discard requires idle native execution")));
-                    }
+                    // This task's agents must be idle: checked by `write_refusal`.
                     let committing = request.params["action"] == "discardChatWorkspace";
                     let fields = ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"];
                     let params = if committing {
@@ -1493,14 +1496,9 @@ impl Sidecar {
                 }
                 Some(action @ ("inspectChatMerge" | "mergeChatWorkspace")) => {
                     let merging = action == "mergeChatWorkspace";
-                    // No agent may be writing: no run started, starting or
-                    // settling, and no team step of any chat. Provider
-                    // checks (model lists, sign-in) do not block a merge.
-                    if merging && (!self.workflow_chats.is_empty() || self.agent_runtime.runs_in_flight()
-                        || !self.pending_agent_starts.is_empty() || !self.pending_agent_cancels.is_empty())
-                    {
-                        return Ok(HandledRequest::response(error_response(&request, "requestBlocked", "requestBlocked", "merging requires no running agent")));
-                    }
+                    // No agent of this task may be writing (`write_refusal`).
+                    // Other tasks write only their own workspaces, and the
+                    // app's Git writes all run on this dispatcher thread.
                     let mut fields = vec!["action", "chatId", "projectId", "worktreeId", "workspaceIdentity"];
                     if merging { fields.extend(["expectedHead", "expectedBase", "keepConflicts", "confirmed"]); }
                     let params = require_exact_params(&request.params, &fields).map_err(invalid_params)?;

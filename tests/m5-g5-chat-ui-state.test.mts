@@ -534,3 +534,31 @@ test("a workflow notice ahead of a provider final message hydrates the durable g
     assert.equal(f.controller.snapshot().error, null);
   } finally { f.controller.dispose(); }
 });
+
+// ADE multi-project P1: a working team is no reason to keep the project open.
+test("the project view can be left while the open task's team works; only a request on its way holds it", async () => {
+  const bridge = new FakeBridge();
+  const running = { schemaVersion: 1, runId: "run_live", chatId: "chat_a", taskId: "task_chat_a", projectId: "project_a", worktreeId: "worktree_chat_a", workspaceIdentity: "workspace_chat_a", scenario: "planning", state: "running", createdAt: "2026-08-26T00:00:01Z", updatedAt: "2026-08-26T00:00:01Z" };
+  bridge.chats = [{ ...chat("chat_a"), state: "running" }, chat("chat_b")];
+  bridge.getChat = async ({ chatId }: { chatId: string }) => ({ chat: bridge.chats.find(item => item.chatId === chatId)!, afterEventSequence: 0, messages: [], runs: chatId === "chat_a" ? [running] : [], nextEventSequence: null }) as never;
+  const controller = new ChatUiController(bridge as unknown as M5BridgeV3);
+  controller.start();
+  try {
+    await controller.openProject("project_a");
+    await controller.prepareSwitch("chat_a", true);
+    await controller.commitPrepared("chat_a", true);
+    assert.equal(controller.snapshot().runs.length, 1, "the fixture run is shown");
+    assert.equal(controller.isTeamWorking(), true);
+    assert.equal(controller.canLeaveProjectView(), true, "a running team does not hold the view");
+    assert.equal(controller.beginLeavingProjectView(), true);
+    controller.finishLeavingProjectView();
+    assert.equal(controller.clearProjectView(), true);
+    assert.equal(controller.snapshot().projectId, null);
+    assert.equal(controller.isTeamWorking(), false, "the left task is no longer this view's");
+    // Back again: the task shows its run from the saved history.
+    await controller.openProject("project_a");
+    await controller.prepareSwitch("chat_a", true);
+    await controller.commitPrepared("chat_a", true);
+    assert.equal(controller.snapshot().runs[0]?.state, "running");
+  } finally { controller.dispose(); }
+});

@@ -186,6 +186,24 @@ window.m5SmokeVisualRunning = () => {
     state:'running',stage:'implementing',terminationOutcome:null,createdAt:smokeChat.createdAt,updatedAt:smokeChat.updatedAt};
   for (const listener of agentRunStateListeners) listener({run:diagnosticRun});
 };
+// ADE multi-project: a task with many finished stages (the stage bar folds
+// them into "+N"), and a team at work in another project (badges).
+let stageRuns = [];
+window.m5SmokeManyStages = count => {
+  const roles = ['coordinator', 'planning', 'coordinator', 'coding', 'coordinator', 'review', 'coordinator', 'coding', 'coordinator', 'review'];
+  const start = Date.parse(smokeChat.createdAt);
+  stageRuns = Array.from({ length: count }, (_, index) => ({schemaVersion:1,runId:`smoke_stage_${index}`,chatId:smokeChat.chatId,taskId:smokeChat.taskId,
+    projectId:smokeChat.projectId,worktreeId:smokeChat.worktreeId,workspaceIdentity:smokeChat.workspaceIdentity,
+    selectedProfile:{...smokeChat.roleSnapshots[0], roleId: roles[index % roles.length]},source:'actualAgent',capabilityFingerprint:`sha256:${'0'.repeat(64)}`,
+    state:'succeeded',stage:'implementing',terminationOutcome:'cleanExit',createdAt:new Date(start + index * 90_000).toISOString(),updatedAt:new Date(start + index * 90_000 + 45_000).toISOString()}));
+  for (const listener of agentRunStateListeners) listener({run: stageRuns.at(-1) ?? diagnosticRun});
+};
+window.m5SmokeClearStages = () => { stageRuns = []; };
+window.m5SmokeOtherProjectWorking = state => {
+  for (const listener of agentRunStateListeners) listener({run:{schemaVersion:1,runId:'smoke_other_project_run',chatId:'chat_earlier',taskId:'task_earlier',
+    projectId:'earlier_project',worktreeId:'worktree_earlier',workspaceIdentity:'workspace_earlier',selectedProfile:smokeChat.roleSnapshots[3],
+    source:'actualAgent',capabilityFingerprint:`sha256:${'0'.repeat(64)}`,state,stage:'implementing',terminationOutcome:null,createdAt:smokeChat.createdAt,updatedAt:smokeChat.updatedAt}});
+};
 // Visual-only state transition; no process or provider request is performed.
 window.m5SmokeVisualChatState = state => {
   if (!['draft', 'running', 'reviewReady', 'recoveryRequired'].includes(state)) throw new Error('unexpected visual state');
@@ -438,7 +456,7 @@ window.m5 = {
   listChats: async ({ projectId }) => ({ projectId, items: window.m5SmokeNoChats ? [] : parallelPaint ? parallelPaint.chats : [smokeChat], nextCursor: null }),
   getChat: async (request) => {
     if (historyReadFailures > 0) { historyReadFailures--; throw new Error("synthetic history read failure"); }
-    return parallelPaint ? parallelPaint.detail(request) : ({ chat: smokeChat, afterEventSequence: request.afterEventSequence, messages: smokeMessages.filter(message => message.eventSequence > request.afterEventSequence), runs: [], agentRuns:diagnosticRun ? [diagnosticRun] : [], agentRecovery:null, nextEventSequence: null });
+    return parallelPaint ? parallelPaint.detail(request) : ({ chat: smokeChat, afterEventSequence: request.afterEventSequence, messages: smokeMessages.filter(message => message.eventSequence > request.afterEventSequence), runs: [], agentRuns:[...stageRuns, ...(diagnosticRun ? [diagnosticRun] : [])], agentRecovery:null, nextEventSequence: null });
   },
   startFixtureRun: unexpected("startFixtureRun"),
   cancelRun: unexpected("cancelRun"),
