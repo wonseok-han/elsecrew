@@ -120,7 +120,10 @@ export class TaskDispositionStore {
     }
   }
 
-  #markFailed(task: DispositionTask): void {
+  /** The open task's own latest read failed: the list shows it as failed too. */
+  reportFailed(task: Pick<DispositionTask, "chatId" | "updatedAt">): void { this.#markFailed(task); }
+
+  #markFailed(task: Pick<DispositionTask, "chatId" | "updatedAt">): void {
     if (this.#failed.get(task.chatId) === task.updatedAt) return;
     this.#failed.set(task.chatId, task.updatedAt);
     this.#version++;

@@ -62,3 +62,9 @@ export function approvalFields(inspection: ApprovalInspection): { field: "comman
 export function canAcceptApproval(input: { approvalId: string; inspectedId: string | null; openedIds: ReadonlySet<string>; sending: boolean; error: boolean }): boolean {
   return !input.sending && !input.error && input.inspectedId === input.approvalId && input.openedIds.has(input.approvalId);
 }
+
+/** Notices about requests of this conversation only: a late notice from a
+ * task left behind never shows in another one. */
+export function noticesForChat<T extends { chatId: string }>(items: readonly T[], chatId: string | null): T[] {
+  return chatId === null ? [] : items.filter(item => item.chatId === chatId);
+}

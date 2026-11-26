@@ -140,12 +140,12 @@ test("#8: an answer still on its way when the run ends is said by the conversati
     return require(name);
   } };
   runInNewContext(compiled, context);
-  const failed = renderToStaticMarkup(context.exports.ApprovalWithdrawnNote({ item: { approvalId: "approval_a", kind: "command", summary: "npm test", answerFailed: true } }));
+  const failed = renderToStaticMarkup(context.exports.ApprovalWithdrawnNote({ item: { chatId: "chat_a", approvalId: "approval_a", kind: "command", summary: "npm test", answerFailed: true } }));
   assert.ok(failed.includes(renderToStaticMarkup(ko["m5.approval.answerFailed"])));
   assert.ok(!failed.includes(ko["m5.approval.withdrawn"]), "told apart from a request taken back");
   const source = readFileSync(new URL("../src/m5/approval-card.tsx", import.meta.url), "utf8");
   const decide = source.slice(source.indexOf("async function decide("), source.indexOf("async function inspect("));
-  assert.match(decide, /else if \(!live\.current && asked\) withdrawnCallback\.current\?\.\(\[\{ approvalId, kind: asked\.kind, summary: shown \? approvalHeadline\(shown\)\.target : null, answerFailed: true \}\]\);/);
+  assert.match(decide, /else if \(!live\.current && asked\) withdrawnCallback\.current\?\.\(\[\{ chatId: identity\.chatId, approvalId, kind: asked\.kind, summary: shown \? approvalHeadline\(shown\)\.target : null, answerFailed: true \}\]\);/);
   // On unmount, answers still on their way are left to that path (not counted twice).
   assert.ok(source.includes("!decided.current.has(item.approvalId) && !deciding.current.has(item.approvalId)"));
 });

@@ -19,14 +19,22 @@ export interface StandingRead {
   updatedAt: string;
   generation: number;
   status: "reading" | "known" | "failed";
+  /** What kind of task this is, once known. A task never changes kind, so
+   * this survives later reads and failures of the same task: the panels it
+   * decides (merge or apply) never come and go while the task is re-read. */
+  kind: "git" | "copy" | null;
   merge: ChatMergeState | null;
   apply: { applied: boolean; pending: number; total: number } | null;
 }
 
 /** A read starts: earlier values of the same task version show meanwhile. */
 export function startStandingRead(previous: StandingRead | null, task: { chatId: string; updatedAt: string }, generation: number): StandingRead {
-  const same = previous && previous.chatId === task.chatId && previous.updatedAt === task.updatedAt && previous.status === "known";
-  return { chatId: task.chatId, updatedAt: task.updatedAt, generation, status: "reading", merge: same ? previous.merge : null, apply: same ? previous.apply : null };
+  const sameTask = previous !== null && previous.chatId === task.chatId;
+  // Reads in a row keep what the last one showed (a read still out included),
+  // never a failure's empty values.
+  const same = sameTask && previous.updatedAt === task.updatedAt && previous.status !== "failed";
+  return { chatId: task.chatId, updatedAt: task.updatedAt, generation, status: "reading", kind: sameTask ? previous.kind : null,
+    merge: same ? previous.merge : null, apply: same ? previous.apply : null };
 }
 
 /** True when an answer still belongs to the current read. */
@@ -38,22 +46,24 @@ function current(read: StandingRead | null, answer: { chatId: string; updatedAt:
 /** An answer arrived; taken only if it is the current read's. */
 export function finishStandingRead(read: StandingRead | null, answer: { chatId: string; updatedAt: string; generation: number; merge: ChatMergeState; apply: StandingRead["apply"] }, latestGeneration: number): StandingRead | null {
   if (!current(read, answer, latestGeneration)) return read;
-  return { ...read, status: "known", merge: answer.merge, apply: answer.apply };
+  return { ...read, status: "known", kind: answer.merge.kind === "snapshot" ? "copy" : "git", merge: answer.merge, apply: answer.apply };
 }
 
 /** The read failed or got no answer in time: earlier values are not shown. */
-export function failStandingRead(read: StandingRead | null, answer: { chatId: string; updatedAt: string; generation: number }, latestGeneration: number): StandingRead | null {
+export function failStandingRead(read: StandingRead | null, answer: { chatId: string; updatedAt: string; generation: number; kind?: StandingRead["kind"] }, latestGeneration: number): StandingRead | null {
   if (!current(read, answer, latestGeneration)) return read;
-  return { ...read, status: "failed", merge: null, apply: null };
+  // Only the apply receipt failed: the kind read just before still counts.
+  return { ...read, status: "failed", kind: answer.kind ?? read.kind, merge: null, apply: null };
 }
 
 /** What the screen may use for this task right now. */
 export function standingView(read: StandingRead | null, task: { chatId: string; updatedAt: string } | null): {
-  disposition: TaskDisposition | null; failed: boolean; reading: boolean; merge: ChatMergeState | null; apply: StandingRead["apply"];
+  disposition: TaskDisposition | null; failed: boolean; reading: boolean; kind: StandingRead["kind"]; merge: ChatMergeState | null; apply: StandingRead["apply"];
 } {
-  if (!read || !task || read.chatId !== task.chatId || read.updatedAt !== task.updatedAt) return { disposition: null, failed: false, reading: false, merge: null, apply: null };
-  if (read.status === "failed") return { disposition: null, failed: true, reading: false, merge: null, apply: null };
+  const kind = read && task && read.chatId === task.chatId ? read.kind : null;
+  if (!read || !task || read.chatId !== task.chatId || read.updatedAt !== task.updatedAt) return { disposition: null, failed: false, reading: false, kind, merge: null, apply: null };
+  if (read.status === "failed") return { disposition: null, failed: true, reading: false, kind, merge: null, apply: null };
   const disposition = read.merge?.kind === "gitWorktree" ? dispositionFromMerge(read.merge)
     : read.merge?.kind === "snapshot" && read.apply ? dispositionFromApply(read.apply) : null;
-  return { disposition, failed: false, reading: read.status === "reading", merge: read.merge, apply: read.apply };
+  return { disposition, failed: false, reading: read.status === "reading", kind, merge: read.merge, apply: read.apply };
 }

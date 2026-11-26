@@ -108,8 +108,33 @@ export function parseMarkdownWithLimits(source: string, depth = 0): { blocks: Ma
   budget = { nodes: MARKDOWN_MAX_NODES, scan: SCAN_BUDGET, truncated: false };
   try {
     const blocks = parseLines(source.split(LINE_BREAK), depth);
+    // The allowance is a promise about what is drawn: if the finished tree
+    // still holds more (each run-out leaves one plain piece behind), the
+    // document is shown as original text instead.
+    if (countMarkdownNodes(blocks) > MARKDOWN_MAX_NODES) return { blocks: [restAsText(source.split(LINE_BREAK), 0)], truncated: true };
     return { blocks, truncated: budget.truncated };
   } finally { budget = outer; }
+}
+
+/** The allowance is used up (one more element would go past it). */
+function budgetSpent(): boolean {
+  if (!budget || budget.nodes > 0) return false;
+  budget.truncated = true;
+  return true;
+}
+
+/** Every element of a parsed document: blocks, list items, table cells and inline pieces. */
+export function countMarkdownNodes(blocks: readonly MarkdownBlock[]): number {
+  const inline = (items: readonly MarkdownInline[]): number => items.reduce((sum, item) => sum + 1 + ("children" in item ? inline(item.children) : 0), 0);
+  let total = 0;
+  for (const block of blocks) {
+    total += 1;
+    if (block.kind === "heading" || block.kind === "paragraph") total += inline(block.children);
+    else if (block.kind === "quote") total += countMarkdownNodes(block.children);
+    else if (block.kind === "list") for (const item of block.items) total += 1 + countMarkdownNodes(item);
+    else if (block.kind === "table") for (const row of [block.header, ...block.rows]) for (const cell of row) total += 1 + inline(cell);
+  }
+  return total;
 }
 
 /** What is left after the allowance runs out, as one plain paragraph. */
@@ -177,6 +202,7 @@ function parseLines(lines: string[], depth: number): MarkdownBlock[] {
       continue;
     }
     if (line.includes("|") && i + 1 < lines.length && TABLE_RULE.test(lines[i + 1]!) && lines[i + 1]!.includes("-")) {
+      const tableStart = i;
       const header = splitRow(line);
       // Not enough allowance for the header: the whole table, and what
       // follows, stays as original text (review #2: header cells count too).
@@ -185,12 +211,17 @@ function parseLines(lines: string[], depth: number): MarkdownBlock[] {
       i += 2;
       const rows: MarkdownInline[][][] = [];
       const headerCells = header.map(cell => parseInline(cell, depth));
+      // The cells' own inline pieces count too: a header whose contents use
+      // up the allowance sends the whole table to original text.
+      if (budgetSpent()) { blocks.push(restAsText(lines, tableStart)); break; }
       let stopped = false;
       while (i < lines.length && !blank(lines[i]!) && lines[i]!.includes("|")) {
         const cells = splitRow(lines[i]!);
         // Every cell counts: a wide or long table stops at the allowance.
         if (!spend(cells.length)) { stopped = true; break; }
-        rows.push(cells.map(cell => parseInline(cell, depth)));
+        const row = cells.map(cell => parseInline(cell, depth));
+        if (budgetSpent()) { stopped = true; break; }
+        rows.push(row);
         i++;
       }
       blocks.push({ kind: "table", align, header: headerCells, rows });
@@ -303,6 +334,9 @@ export function parseInline(source: string, depth = 0, links = true): MarkdownIn
       const looked = close > 0 && source[close + 1] === "(" ? linkDestination(source, close + 1, Math.max(0, Math.min(scan.scan, source.length - close - 1))) : { found: null, scanned: 0 };
       scan.scan -= looked.scanned;
       const destination = looked.found;
+      // The budget ran out while reading this very link: say formatting stopped,
+      // even when no other bracket follows (review N5).
+      if (scan.scan <= 0 && budget && (close < 0 || !destination)) budget.truncated = true;
       if (destination) {
         flush();
         const label = source.slice(open + 1, close);

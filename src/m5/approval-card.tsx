@@ -7,6 +7,8 @@ import { useI18n } from "../i18n.tsx";
 
 /** A request the agent took back before anyone answered it. */
 export interface WithdrawnApproval {
+  /** The task (conversation) the request belonged to: shown only there. */
+  chatId: string;
   approvalId: string; kind: ApprovalSummary["kind"]; summary: string | null;
   /** The person answered, but the run ended before the answer was taken. */
   answerFailed?: boolean;
@@ -68,7 +70,7 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
     setInspections(current => [...current.keys()].every(id => still.has(id)) ? current : new Map([...current].filter(([id]) => still.has(id))));
     setOpened(current => [...current].every(id => still.has(id)) ? current : new Set([...current].filter(id => still.has(id))));
     if (!gone.length) return;
-    withdrawnCallback.current?.(gone.map(item => ({ approvalId: item.approvalId, kind: item.kind, summary: inspectionsRef.current.has(item.approvalId) ? approvalHeadline(inspectionsRef.current.get(item.approvalId)!).target : null })));
+    withdrawnCallback.current?.(gone.map(item => ({ chatId: identity.chatId, approvalId: item.approvalId, kind: item.kind, summary: inspectionsRef.current.has(item.approvalId) ? approvalHeadline(inspectionsRef.current.get(item.approvalId)!).target : null })));
   };
 
   useEffect(() => {
@@ -100,7 +102,7 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
       disposed = true; live.current = false; epoch.current++; clearTimeout(timer);
       // The run ended with requests still waiting: the agent no longer asks them.
       const left = pendingRef.current.filter(item => !decided.current.has(item.approvalId) && !deciding.current.has(item.approvalId));
-      if (left.length) withdrawnCallback.current?.(left.map(item => ({ approvalId: item.approvalId, kind: item.kind, summary: inspectionsRef.current.has(item.approvalId) ? approvalHeadline(inspectionsRef.current.get(item.approvalId)!).target : null })));
+      if (left.length) withdrawnCallback.current?.(left.map(item => ({ chatId: identity.chatId, approvalId: item.approvalId, kind: item.kind, summary: inspectionsRef.current.has(item.approvalId) ? approvalHeadline(inspectionsRef.current.get(item.approvalId)!).target : null })));
     };
     // The complete immutable identity is the lifecycle key, not object allocation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -125,7 +127,7 @@ export function ApprovalCard({ identity, onCancel, onPendingChange, onWithdrawn 
       if (live.current && revision === epoch.current) setError(true);
       // The run ended while this answer was on its way, and it was not
       // taken: the conversation says so, apart from a request taken back.
-      else if (!live.current && asked) withdrawnCallback.current?.([{ approvalId, kind: asked.kind, summary: shown ? approvalHeadline(shown).target : null, answerFailed: true }]);
+      else if (!live.current && asked) withdrawnCallback.current?.([{ chatId: identity.chatId, approvalId, kind: asked.kind, summary: shown ? approvalHeadline(shown).target : null, answerFailed: true }]);
     } finally {
       deciding.current.delete(approvalId);
       if (live.current && revision === epoch.current) { busy.current = false; setSending(false); }

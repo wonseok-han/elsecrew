@@ -103,7 +103,7 @@ test("a request the agent took back is said briefly, by the conversation (it out
       return require(name);
     } };
     runInNewContext(compiled, context);
-    const html = renderToStaticMarkup(context.exports.ApprovalWithdrawnNote({ item: { approvalId: "approval_gone", kind: "tool", summary: "npm test" } }));
+    const html = renderToStaticMarkup(context.exports.ApprovalWithdrawnNote({ item: { chatId: "chat_1", approvalId: "approval_gone", kind: "tool", summary: "npm test" } }));
     assert.ok(html.includes(renderToStaticMarkup(dictionary["m5.approval.withdrawn"])));
     assert.ok(html.includes("npm test"));
     assert.ok(!html.includes("<button"), "nothing to answer once the request is gone");
