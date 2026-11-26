@@ -45,7 +45,7 @@ app.whenReady().then(async () => {
     if (asset !== rendererDirectory && !asset.startsWith(`${rendererDirectory}${sep}`)) return new Response("not found", { status: 404 });
     return net.fetch(pathToFileURL(asset).toString());
   });
-  const window = new BrowserWindow({ width: 960, height: 640, show: false, webPreferences: { preload, partition: "m5-renderer-smoke", contextIsolation: false, sandbox: false, nodeIntegration: false } });
+  const window = new BrowserWindow({ width: 1280, height: 768, show: false, webPreferences: { preload, partition: "m5-renderer-smoke", contextIsolation: false, sandbox: false, nodeIntegration: false } });
   window.webContents.on("console-message", (event) => process.stderr.write(`renderer: ${event.message}\n`));
   window.webContents.on("render-process-gone", (_event, details) => fail(new Error(`renderer exited: ${details.reason}`)));
   await window.loadURL("m5smoke://m5/index.html");
@@ -135,9 +135,10 @@ app.whenReady().then(async () => {
     document.querySelectorAll('.m5-preferences-layout nav button')[1].click();
     await ${waitFor("document.querySelectorAll('.m5-role-card:not([hidden]) select')[1]?.value === 'new-default'", "initial defaults use provider recommendation")};
     document.querySelectorAll('.m5-preferences-layout nav button')[0].click();
-    await ${waitFor("document.querySelector('.m5-settings [role=alertdialog]')", "default suggestion remains an unsaved edit")};
-    [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '설정 변경 버리고 닫기').click();
-    await ${waitFor("!document.querySelector('.m5-settings-inline')", "discard suggested defaults")};
+    // A default the screen suggests is not an unsaved edit (1차-가 D12,
+    // settings-draft.ts): leaving asks nothing.
+    await ${waitFor("!document.querySelector('.m5-settings-inline')", "a suggested default leaves without asking")};
+    if (document.querySelector('.m5-settings [role=alertdialog]')) throw new Error('a suggested default was counted as an unsaved edit');
     window.m5SmokeDefaultsRevision = 2;
     document.querySelector('.m5-app-settings > header button').click();
     await ${waitFor("document.querySelector('.m5-app-settings').hidden", "leave failed settings")};
@@ -308,6 +309,9 @@ app.whenReady().then(async () => {
     if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/smoke') throw new Error('catalog path missing');
     window.m5SmokeCatalogListsCurrent = true;
     document.querySelector('.m5-project-catalog-list li button').click();
+    // The file tree lives in the results panel's Files tab (1차-나 layout).
+    await ${waitFor("document.querySelector('[data-testid=right-tab-files]')", "task layout")};
+    document.querySelector('[data-testid=right-tab-files]').click();
     await ${waitFor("document.querySelector('.m5-file-row')", "project tree")};
     if (document.querySelector('.m5-project-menu') || document.querySelector('.m5-workbench > .m5-project-permissions')) throw new Error('project controls clutter the header');
     // The rail reloads after opening a project; manage the open project once listed.
@@ -368,7 +372,7 @@ app.whenReady().then(async () => {
     await ${waitFor("[...document.querySelectorAll('.m5-file-row')].some(row => row.title === 'src/nested/child.ts')", "reopen preserves child expansion")};
     await reloadTree();
     await ${waitFor("document.querySelector('.m5-file-row .m5-tree-name')?.textContent === 'src' && !document.querySelector('.m5-breadcrumbs [aria-current]')", "root breadcrumb")};
-    [...document.querySelectorAll('[role=tab]')].find(tab => tab.getAttribute('aria-label') === '파일' && tab.getClientRects().length > 0).click();
+    document.querySelector('[data-testid=right-tab-files]').click();
     await ${waitFor("document.querySelector('.m5-virtual-file-list').clientHeight > 0", "file pane visible for scrolling")};
     const filePane = document.querySelector('.m5-files');
     const fileViewport = document.querySelector('.m5-virtual-file-list');

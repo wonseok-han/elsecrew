@@ -1124,4 +1124,11 @@ export const en: Record<MessageKey, string> = {
   "m5.history.empty": "No team member has run yet.",
   "m5.history.dev": "For development",
   "m5.layout.openResults": "Open results",
+  "m5.resultBox.attention": "Something needs a check first",
+  "m5.resultBox.attentionHelp": "Look at the note in the middle first. Then you can put the work into your folder here.",
+  "m5.task.changes.attention": "Something needs a check, so this cannot go in yet · {count} files changed",
+  "m5.layout.approvalWaiting": "The team is waiting for your permission",
+  "m5.layout.approvalShow": "See the request",
+  "m5.card.lead": "Coordinator (leads the team)",
+  "m5.sheet.allFiles": "All files",
 };

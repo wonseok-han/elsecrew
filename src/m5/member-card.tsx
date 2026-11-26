@@ -5,7 +5,7 @@ import type { RoleDefinitionV3 } from "./contracts/run-recovery-v1.ts";
 import { AgentOutputPanel } from "./agent-output-panel.tsx";
 import { OrchestrationMessageBody } from "./orchestration-message-body.tsx";
 import { roleLabel } from "./role-names.ts";
-import { roleColorIndex, roleInitial } from "./role-colors.ts";
+import { isLeadRole, roleColorIndex, roleInitial } from "./role-colors.ts";
 import { runStageStatus } from "./task-story-model.ts";
 import type { TaskPhase } from "./task-status.ts";
 import { runDurationSeconds, runOutcomeNotice } from "./work-status.ts";
@@ -14,7 +14,12 @@ interface CardMessage { messageId: string; kind: string; roleId: string | null; 
 
 /** The role's icon: its first letter on its colour (same everywhere, R5). */
 export function RoleIcon({ roleId, name }: { roleId: string; name: string }) {
-  return <span className="m5-role-icon" data-role-color={roleColorIndex(roleId)} aria-hidden="true">{roleInitial(name)}</span>;
+  const { t } = useI18n();
+  return <>
+    <span className="m5-role-icon" data-role-color={roleColorIndex(roleId)} aria-hidden="true">{roleInitial(name)}</span>
+    {/* The lead mark comes from the role ID, so a member named like the coordinator still reads apart (review m1). */}
+    {isLeadRole(roleId) && <span className="m5-role-lead" title={t("m5.card.lead")} aria-label={t("m5.card.lead")}>★</span>}
+  </>;
 }
 
 /**
@@ -52,7 +57,7 @@ export const MemberCard = memo(function MemberCard({ run, reports, definitions, 
   return <article className={`m5-member-card m5-member-${status}`} data-run-id={run.runId} data-role-id={roleId} data-testid="member-card" aria-label={name}>
     <header className="m5-member-head">
       <RoleIcon roleId={roleId} name={name} />
-      <strong className="m5-member-name" title={name}>{name}</strong>
+      <strong className="m5-member-name" title={name}><bdi>{name}</bdi></strong>
       {live ? <span className="m5-pill m5-pill-running">{t("m5.card.now")}</span>
         : <span className={`m5-member-state m5-member-state-${status}`}>{t(`m5.stage.status.${status}`)}{duration ? ` · ${duration}` : ""}</span>}
       {live && duration && <span className="m5-member-state">{duration}</span>}
@@ -75,7 +80,7 @@ export const StoryMessageCard = memo(function StoryMessageCard({ message, defini
   return <article className={`m5-member-card m5-story-message m5-message-${message.kind}`} data-run-id={message.runId ?? undefined}>
     <header className="m5-member-head">
       {message.roleId ? <RoleIcon roleId={message.roleId} name={name} /> : null}
-      <strong className="m5-member-name">{name}</strong>
+      <strong className="m5-member-name"><bdi>{name}</bdi></strong>
       <time className="m5-member-time" dateTime={message.createdAt}>{clock.format(new Date(message.createdAt))}</time>
     </header>
     <OrchestrationMessageBody text={message.text} role={message.roleId} definitions={definitions} fold={message.kind === "role"} />

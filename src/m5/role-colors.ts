@@ -20,9 +20,17 @@ function hash(text: string): number {
   return value;
 }
 
-/** 1 … 8; the same role ID always gives the same colour. */
+/**
+ * 1 … 8; the same role ID always gives the same colour. Colour 1 belongs to
+ * the coordinator alone: a role the person named never gets it (review m1).
+ */
 export function roleColorIndex(roleId: string): number {
-  return TEMPLATE_COLORS.get(roleId) ?? (hash(roleId) % ROLE_COLOR_COUNT) + 1;
+  return TEMPLATE_COLORS.get(roleId) ?? (hash(roleId) % (ROLE_COLOR_COUNT - 1)) + 2;
+}
+
+/** The coordinator is marked by the system, never by its (editable) name. */
+export function isLeadRole(roleId: string): boolean {
+  return roleId === "coordinator";
 }
 
 /** The icon letter: the first character of the shown name (never markup). */

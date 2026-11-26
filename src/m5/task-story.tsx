@@ -12,6 +12,7 @@ import { noticesForChat } from "./approval-display.ts";
 import { taskPhaseLabelKey, taskPhaseTone, type TaskKind, type TaskPhase } from "./task-status.ts";
 import { timelineMessages } from "./timeline-messages.ts";
 import { StageBar } from "./stage-bar.tsx";
+import { teamWorking } from "./task-view-model.ts";
 import { MemberCard, StoryMessageCard, UserBubble } from "./member-card.tsx";
 import { storyItems } from "./task-story-model.ts";
 import { createPortal } from "react-dom";
@@ -146,7 +147,8 @@ export function TeamTimeline({ controller, chat, admissionReady, onCoordinatorCh
   const firstShown = messageStart > 0 ? Date.parse(visibleMessages[0]?.createdAt ?? "") : Number.NEGATIVE_INFINITY;
   const items = storyItems(visibleMessages, chat.agentRuns.filter(run => !(Date.parse(run.createdAt) < firstShown)));
   const teamRoleIds = chat.settings ? new Set(roleSettingsAsV3(chat.settings).roles.map(role => role.roleId)) : null;
-  const working = phase === "draft" || phase === "running" || phase === "attention" || chat.activeChat?.state === "running" || chat.activeChat?.state === "preparing" || startingActual;
+  // The team really works (review #3): a task stopped for a check is not "working".
+  const working = teamWorking(chat.activeChat?.state, startingActual);
   return <section className="m5-timeline m5-story" aria-label={t("m5.chat.title")}>
     <TaskHeader chat={chat.activeChat!} phase={phase} phaseKind={phaseKind} working={working} actions={<div className="m5-run-actions">{fixtureActive && <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => void controller.cancelRun()}>{t("m5.chat.cancelDemo")}</button>}{actualActive && chat.activeChat?.schemaVersion === 1 && <button type="button" className="m5-secondary" disabled={!admissionReady} onClick={() => void controller.cancelAgentRun(actualActive)}>{t("m5.chat.cancelActual")}</button>}</div>} />
     {chat.activeChat?.state === "discarded" && !controller.isRecoveryBlocked() && <section className="m5-notice"><p>{t("m5.chat.discardedHelp")}</p></section>}{controller.isRecoveryBlocked() && <section className="m5-error"><strong>{t("m5.chat.recovery")}</strong><p>{identityUnavailable ? t("m5.chat.identityUnavailable") : t("m5.chat.blocked")}</p>{chat.recoveries.filter((item) => item.state === "unresolved").map((item) => <button key={item.recoveryId} type="button" disabled={!admissionReady} onClick={() => void controller.abandonRecovery(item, lang)}>{t("m5.chat.discard")}</button>)}</section>}{chat.agentRecovery && <section className="m5-error">{identityUnavailable ? <><strong>{t("m5.chat.protected")}</strong><p>{t("m5.chat.protectedHelp")}</p></> : <><strong>{t("m5.chat.termination")}</strong><p>{t("m5.chat.terminationHelp")}</p><button type="button" disabled={!admissionReady || chat.agentRecoveryResolving} onClick={() => void controller.abandonAgentRecovery(lang)}>{chat.agentRecoveryResolving ? t("m5.chat.checkingTermination") : t("m5.chat.discardAfterTermination")}</button></>}</section>}

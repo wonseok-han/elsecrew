@@ -32,6 +32,11 @@ export function ReviewSheet({ mode, onMode, entries, selectedPath, onSelectFile,
         <button type="button" aria-pressed={mode === "changes"} data-testid="sheet-mode-changes" disabled={count === 0 && mode !== "changes"} onClick={() => onMode("changes")}>{t("m5.sheet.changes")}</button>
         <button type="button" aria-pressed={mode === "editor"} data-testid="sheet-mode-editor" onClick={() => onMode("editor")}>{t("m5.sheet.editor")}</button>
       </span>
+      {/* Below 1100px the file list folds away; this picker keeps moving between files (review m3). */}
+      {mode === "changes" && count > 0 && <select className="m5-sheet-file-select" data-testid="sheet-file-select" aria-label={t("m5.sheet.files")} value={selectedPath ?? ""} onChange={event => { if (event.target.value) onSelectFile(event.target.value); }}>
+        {!selectedPath && <option value="">{t("m5.sheet.allFiles")}</option>}
+        {entries!.map(entry => <option key={entry.path} value={entry.path}>{entry.path}</option>)}
+      </select>}
       <span className="m5-sheet-spacer" />
       <button type="button" className="m5-secondary m5-sheet-close" data-testid="sheet-close" onClick={onClose}>
         {t("m5.sheet.close")}{dirty > 0 && <span className="m5-sheet-dirty" title={t("m5.sheet.unsaved", { count: dirty })} aria-label={t("m5.sheet.unsaved", { count: dirty })}>●</span>}

@@ -29,7 +29,8 @@ import { StorageAdmissionPoller, type AdmissionView } from "./admission-state.ts
 import { resolveM5Bridge, type SupportedM5Bridge } from "./bridge-boundary.ts";
 import { ChatUiController } from "./chat-state.ts";
 import { TaskLayout } from "./task-layout.tsx";
-import { ChangesStandingLine, PreviewPlaceholder, ResultBox } from "./result-box.tsx";
+import { approvalCovered, changesLine, MENU_SELECTOR, resultBoxMode, revealResults, teamWorking } from "./task-view-model.ts";
+import { ChangesStandingLine, ChangesStatusLine, PreviewPlaceholder, ResultBox } from "./result-box.tsx";
 import { HistoryTab } from "./history-tab.tsx";
 import { TaskList, type TaskListItem } from "./task-list.tsx";
 import { ReviewSheet } from "./review-sheet.tsx";
@@ -139,9 +140,10 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   useEffect(() => { if (removal) removalDialog.current?.showModal(); else removalDialog.current?.close(); }, [removal]);
 
   useEffect(() => {
-    const menus = () => document.querySelectorAll<HTMLDetailsElement>(".m5-project-menu, .m5-project-guide, .m5-project-overflow, .m5-diff-options, .m5-notifications, .m5-project-switcher, .m5-task-menu");
+    const menus = () => document.querySelectorAll<HTMLDetailsElement>(MENU_SELECTOR);
     const outside = (event: PointerEvent) => menus().forEach(menu => { if (!menu.contains(event.target as Node)) menu.open = false; });
-    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") menus().forEach(menu => { if (menu.open) { menu.open = false; menu.querySelector<HTMLElement>("summary")?.focus(); } }); };
+    // Closing a menu uses up the Escape: the sheet or drawer under it stays (review #5).
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") menus().forEach(menu => { if (menu.open) { menu.open = false; event.preventDefault(); menu.querySelector<HTMLElement>("summary")?.focus(); } }); };
     document.addEventListener("pointerdown", outside, true);
     document.addEventListener("keydown", escape);
     return () => { document.removeEventListener("pointerdown", outside, true); document.removeEventListener("keydown", escape); };
@@ -514,9 +516,12 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   // Notifications: a per-viewer list of finished, waiting and stopped tasks.
   const notifications = useMemo(() => new NotificationCenter(), []);
   const [pendingOpen, setPendingOpen] = useState<{ projectId: string; chatId: string } | null>(null);
+  const revealStoryRef = useRef<() => void>(() => {});
   const openNotification = (item: AppNotification) => {
     if (controller.snapshot().project?.id === item.projectId) {
+      // The open task: close what covers its story and go to the request (review #1).
       if (chat.activeChat?.chatId !== item.chatId) void switchChat(item.chatId);
+      else revealStoryRef.current();
       return;
     }
     if (!window.m5Projects) return;
@@ -623,7 +628,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const changesDone = activePhase !== null && phaseIsSettled(activePhase);
   // The result box is the one place that merges or applies; elsewhere only points there.
   const focusResultBox = () => {
-    if (bandUsesDrawer(layoutBand(window.innerWidth))) setDrawerOpen(true);
+    setSheetOpen(false); setAllChanges(null);
+    showResults();
     requestAnimationFrame(() => {
       const box = document.querySelector<HTMLElement>("[data-testid=result-box]");
       const target = box?.querySelector<HTMLButtonElement>(".m5-merge > button:not(:disabled), .m5-apply-latest button:not(:disabled)") ?? box;
@@ -648,6 +654,10 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const layoutBandNow: LayoutBand = layoutBand(viewportWidth);
   const [rightTab, setRightTab] = useState<RightTab>("changes");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // ⌘\ hides the results panel in wide windows.
+  const [rightCollapsed, setRightCollapsed] = useState(false);
+  /** Open what holds the results (panel or drawer) before showing a tab or the result box (review #2). */
+  const showResults = () => { const next = revealResults(bandUsesDrawer(layoutBand(window.innerWidth))); setRightCollapsed(next.rightCollapsed); if (next.drawerOpen) setDrawerOpen(true); };
   useEffect(() => { if (!bandUsesDrawer(layoutBandNow)) setDrawerOpen(false); }, [layoutBandNow]);
   const [rightWidthPreference, setRightWidthPreference] = useState<number | null>(() => { try { return parseRightWidth(localStorage.getItem(RIGHT_WIDTH_KEY)); } catch { return null; } });
   const rightWidth = clampRightWidth(rightWidthPreference ?? bandSizes(layoutBandNow).right, viewportWidth);
@@ -663,7 +673,6 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const selectRightTab = (tab: RightTab) => setRightTab(tab);
   // Keyboard (PLAN 1.6): ⌘1 list · ⌘2 composer · ⌘3 results · ⌘\ results open/closed · ⌘N new task.
   // Esc closes the sheet or drawer (task-layout.tsx).
-  const [rightCollapsed, setRightCollapsed] = useState(false);
   const shortcutState = useRef({ open: false, drawer: false, newTask: () => {} });
   shortcutState.current = {
     open: Boolean(snapshot.project) && !preferencesOpen && !settingsOpen && !newChatOpen,
@@ -686,6 +695,18 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
   // What covers the preview area (for the isolated preview view, P3); one place.
+  // The open task's state words (review #3, #4): the team really working, and
+  // the changes tab's line, which claims nothing while the standing is unread.
+  const activeTeamWorking = teamWorking(chat.activeChat?.state, chat.agentStartingRoleId !== null);
+  const changesLineNow = chat.activeChat && activePhase ? changesLine({ phase: activePhase, working: activeTeamWorking, kind: activeKind, known: activeDisposition !== null, failed: activeReadFailed, changeCount: snapshot.diffSummary?.entries.length ?? 0 }) : null;
+  const changesLineSettled = changesLineNow === null || changesLineNow === "notYet" || changesLineNow === "done" || changesLineNow === "changedSince";
+  const approvalWaitingNow = Boolean(activeChatId && approvalsWaiting?.chatId === activeChatId && approvalsWaiting.count > 0);
+  /** Close what covers the story and go to the waiting request (or the composer) (review #1). */
+  const revealStory = () => {
+    setSheetOpen(false); setAllChanges(null); setDrawerOpen(false);
+    window.setTimeout(() => document.querySelector<HTMLElement>("[data-testid=pinned-approval] button:not(:disabled), [data-testid=layout-center] #m5-followup-text")?.focus(), 80);
+  };
+  revealStoryRef.current = revealStory;
   const previewCovered = previewObscured({ sheetOpen, drawerUsed: bandUsesDrawer(layoutBandNow), drawerOpen, dialogOpen: newChatOpen || Boolean(removal) || preferencesOpen || settingsOpen, popoverOpen: false, rightTab });
 
   // A task opens on the results tab its state is about (PLAN 1.5); once per task.
@@ -718,7 +739,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     if (target.kind === "sheet") { setSheetOpen(true); return; }
     if (target.kind === "tab") {
       setRightTab(target.tab);
-      if (bandUsesDrawer(layoutBand(window.innerWidth))) setDrawerOpen(true);
+      showResults();
       return;
     }
     setSheetOpen(false); setAllChanges(null); setDrawerOpen(false);
@@ -737,7 +758,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     const changed = chat.refreshNeededChatIds.includes(item.chatId);
     // A finished task whose standing could not be read again says so
     // instead of keeping an old "merged" or "applied" (review #4).
-    const readFailed = !selected && dispositions.failed(item);
+    // The open task's latest read counts too (review #4).
+    const readFailed = selected ? activeReadFailed : dispositions.failed(item);
     const status = changed ? t("m5.navigation.newState") : readFailed ? t("m5.task.readFailed") : t(taskPhaseLabelKey(phase, kind));
     const role = activeRun && selected ? roleLabel(activeRun.selectedProfile.roleId, chat.activeChat?.roleDefinitions, t) : null;
     return {
@@ -811,6 +833,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         disabled={!admissionReady || !projectDataReady || settingsOpen || snapshot.actionBlocked || chat.preparing || chat.switching}
         onGoal={() => setNewChatOpen(true)} onTeam={() => openRoleSettings()}
         onConversation={() => controller.revealConversation()}
+        onDecision={() => focusResultBox()}
         onChanges={() => { controller.selectPanel("changes"); void controller.refreshChanges(); }} />}
       {snapshot.project && preferencesButton}
         </div>
@@ -892,6 +915,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       </>} onSave={(roles, roleDefinitions) => chatController.updateSettings(roles, roleDefinitions)} onReload={() => chatController.reloadSettings()} onClose={closeRoleSettings} returnToDraft={returnToNewChat} projectName={snapshot.project?.name ?? chat.settings.projectId} />}
 
       {snapshot.project && <TaskLayout band={layoutBandNow} rightTab={rightTab} onRightTab={selectRightTab} rightCollapsed={rightCollapsed} previewCovered={previewCovered}
+        approvalNotice={approvalCovered({ waiting: approvalWaitingNow, sheetOpen, drawerOpen: bandUsesDrawer(layoutBandNow) && drawerOpen })
+          ? <div className="m5-approval-covered" role="alert" data-testid="approval-covered"><strong>{t("m5.layout.approvalWaiting")}</strong><button type="button" onClick={revealStory}>{t("m5.layout.approvalShow")}</button></div> : null}
         drawerOpen={drawerOpen} onDrawerOpenChange={setDrawerOpen} rightWidth={rightWidth} onRightWidth={setRightWidthPreference}
         sheetOpen={sheetOpen} onSheetClose={closeSheet} sheetLabel={t(sheetMode === "changes" ? "m5.sheet.changes" : "m5.sheet.editor")}
         list={<>
@@ -916,7 +941,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         </button>)}</div><p className="m5-first-chat-note">{t("m5.firstChat.exampleHelp")}</p>
         {chat.settings && <details className="m5-chat-team-details"><summary>{t("m5.firstChat.team")}</summary><dl className="m5-team-preview">{roleSettingsAsV3(chat.settings).roles.map(role => <div key={role.roleId}><dt>{roleLabel(role.roleId, roleSettingsAsV3(chat.settings!).roleDefinitions, t)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{hasUsableModel(role.runtime, role.modelSelector) ? modelLabel(role.runtime, role.modelSelector) : t("m5.roles.unselectedModel")}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl><p className="m5-first-chat-note">{t("m5.firstChat.teamHelp")}</p></details>}
       </section>}
-        resultBox={chat.activeChat && <ResultBox view={resultView} waiting={!chat.switching && (activePhase === "running" || activePhase === "attention")}
+        resultBox={chat.activeChat && <ResultBox view={resultView} mode={resultBoxMode({ phase: activePhase, working: activeTeamWorking, switching: chat.switching, hasView: resultView !== null })}
           detail={resultView && <>{resultView.loading ? <span className="m5-skeleton-line" aria-label={t("m5.task.loading")} />
             : resultView.detailKey === "m5.task.result.review" ? <>{snapshot.diffSummary ? <>{t("m5.result.files", { count: snapshot.diffSummary.entries.length })} <LineCounts entry={snapshot.diffSummary.entries.reduce((sum, entry) => ({ added: sum.added + (entry.added ?? 0), removed: sum.removed + (entry.removed ?? 0) }), { added: 0, removed: 0 })} /> · </> : null}{t(resultView.detailKey)}</>
             : resultView.failed ? <>{t("m5.task.result.readFailed")} <button type="button" className="m5-link-button" disabled={!admissionReady} onClick={() => setStandingNonce(value => value + 1)}>{t("m5.merge.inspectAgain")}</button></>
@@ -947,9 +972,9 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
               {snapshot.diffLoading && <p className="m5-empty" role="status">{t("m5.editor.loadingChanges")}</p>}
               {/* A task worktree merges (result bar); only a copy task applies. */}
               {/* One status line, read from the task status: while the team works it never says merged or applied. */}
-              {chat.activeChat && activePhase && !chat.switching && phaseIsWorking(activePhase) && (snapshot.diffSummary?.entries.length ?? 0) > 0 && <p className="m5-task-changes-working" data-task-phase={activePhase}>{t("m5.task.changes.working", { count: snapshot.diffSummary?.entries.length ?? 0 })}</p>}
-              {chat.activeChat && activePhase && !chat.switching && !phaseIsWorking(activePhase) && view.kind === "git" && <ChangesMergeStatus state={mergeInfo} phase={activePhase} changeCount={snapshot.diffSummary?.entries.length ?? 0} canMerge={resultView !== null && !resultView.loading} onMerge={focusResultBox} />}
-              {chat.activeChat && activePhase && !chat.switching && !phaseIsWorking(activePhase) && view.kind === "copy" && <ChangesStandingLine phase={activePhase} changeCount={snapshot.diffSummary?.entries.length ?? 0} pending={activeDisposition?.pending ?? 0} onGoToResult={focusResultBox} />}
+              {chat.activeChat && activePhase && !chat.switching && changesLineNow && !changesLineSettled && <ChangesStatusLine line={changesLineNow} count={snapshot.diffSummary?.entries.length ?? 0} phase={activePhase} onRetry={() => setStandingNonce(value => value + 1)} retryDisabled={!admissionReady} />}
+              {chat.activeChat && activePhase && !chat.switching && changesLineSettled && !phaseIsWorking(activePhase) && view.kind === "git" && <ChangesMergeStatus state={mergeInfo} phase={activePhase} changeCount={snapshot.diffSummary?.entries.length ?? 0} canMerge={resultView !== null && !resultView.loading} onMerge={focusResultBox} />}
+              {chat.activeChat && activePhase && !chat.switching && changesLineSettled && !phaseIsWorking(activePhase) && view.kind === "copy" && <ChangesStandingLine line={changesLineNow} pending={activeDisposition?.pending ?? 0} onGoToResult={focusResultBox} />}
               {snapshot.diffSummary && changesDone && !chat.switching && <p className="m5-changes-done-label">{t("m5.changes.doneList")}</p>}
               {snapshot.diffSummary && <ChangeList key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}`} entries={snapshot.diffSummary.entries} selected={allChanges ? allChanges.focus?.path : snapshot.diffFile?.path} disabled={!admissionReady || snapshot.actionBlocked}
                 onRefresh={() => { recheckStandings(); void controller.refreshChanges(); }} refreshing={snapshot.diffLoading} allOpen={Boolean(allChanges)} onViewAll={() => { if (allChanges) setAllChanges(null); else { setAllChanges({ focus: null }); controller.selectPanel("editor"); } }}
@@ -1045,9 +1070,11 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
 
 const lastChatKey = (projectId: string) => `elsecrew.lastChat.v1.${projectId}`;
 
-function ProjectGuide({ projectId, activeChat, onResume, hasChat, hasOpenFile, disabled, onGoal, onTeam, onConversation, onChanges }: {
+function ProjectGuide({ projectId, activeChat, onResume, hasChat, hasOpenFile, disabled, onGoal, onTeam, onConversation, onDecision, onChanges }: {
   projectId: string; activeChat: ChatRecordV1 | null; onResume: (chatId: string) => void;
-  hasChat: boolean; hasOpenFile: boolean; disabled: boolean; onGoal: () => void; onTeam: () => void; onConversation: () => void; onChanges: () => void;
+  hasChat: boolean; hasOpenFile: boolean; disabled: boolean; onGoal: () => void; onTeam: () => void; onConversation: () => void;
+  /** Merging and applying live in the result box only (1차-나): the guide's "apply or recover" opens it. */
+  onDecision: () => void; onChanges: () => void;
 }) {
   const { t } = useI18n();
   const [preference, setPreference] = useState(() => { try { return parseProjectGuide(localStorage.getItem(projectGuideKey(projectId))); } catch { return emptyProjectGuide(); } });
@@ -1079,14 +1106,14 @@ function ProjectGuide({ projectId, activeChat, onResume, hasChat, hasOpenFile, d
       {step === "resume" && <button type="button" disabled={disabled} onClick={() => preference.chatId && onResume(preference.chatId)}>{t("m5.guide.resume")}</button>}
       {step === "resume" && <button type="button" className="m5-secondary" disabled={disabled} onClick={() => savePreference({ ...emptyProjectGuide(), chatId: activeChat?.chatId ?? null, teamReviewed: Boolean(activeChat) })}>{t("m5.guide.reset")}</button>}
       {(step === "observe" || step === "attention" || step === "recovery") && <button type="button" disabled={disabled} onClick={onConversation}>{t("m5.guide.openConversation")}</button>}
-      {step === "review" && <><button type="button" disabled={disabled} onClick={onChanges}>{t("m5.guide.openChanges")}</button><button type="button" disabled={disabled} onClick={onConversation}>{t("m5.guide.openDecision")}</button></>}
+      {step === "review" && <><button type="button" disabled={disabled} onClick={onChanges}>{t("m5.guide.openChanges")}</button><button type="button" disabled={disabled} onClick={onDecision}>{t("m5.guide.openDecision")}</button></>}
       <button type="button" className="m5-secondary" onClick={() => { if (savePreference({ ...preference, dismissed: true })) setOpen(false); }}>{t("m5.guide.later")}</button>
       {saveFailed && <p role="status">{t("m5.guide.saveFailed")}</p>}
     </section>
     <details><summary>{t("m5.guide.allSteps")}</summary><ol>
       <li><h3>{t("m5.guide.goal")}</h3><p>{t("m5.guide.goalHelp")}</p><button type="button" disabled={disabled} onClick={onGoal}>{t("m5.navigation.newChat")}</button><button type="button" className="m5-secondary" disabled={disabled} onClick={onTeam}>{t("m5.firstChat.editTeam")}</button></li>
       <li><h3>{t("m5.guide.observe")}</h3><p>{t("m5.guide.observeHelp")}</p><button type="button" className="m5-secondary" disabled={disabled || !hasChat} onClick={onConversation}>{t("m5.guide.openConversation")}</button></li>
-      <li><h3>{t("m5.guide.review")}</h3><p>{t("m5.guide.reviewHelp")}</p><button type="button" className="m5-secondary" disabled={disabled || !hasChat} onClick={onChanges}>{t("m5.guide.openChanges")}</button><button type="button" className="m5-secondary" disabled={disabled || !hasChat} onClick={onConversation}>{t("m5.guide.openDecision")}</button></li>
+      <li><h3>{t("m5.guide.review")}</h3><p>{t("m5.guide.reviewHelp")}</p><button type="button" className="m5-secondary" disabled={disabled || !hasChat} onClick={onChanges}>{t("m5.guide.openChanges")}</button><button type="button" className="m5-secondary" disabled={disabled || !hasChat} onClick={onDecision}>{t("m5.guide.openDecision")}</button></li>
     </ol></details><p>{t("m5.guide.safety")}</p></div>
   </details>;
 }
@@ -1336,5 +1363,3 @@ function RoleSettings({ navigationGuard, settings, disabled, feedback, onSave, o
     ? <section className="m5-settings m5-settings-inline" aria-label={t("m5.roles.label")}>{content}</section>
     : <dialog ref={dialogRef} className="m5-settings m5-settings-dialog" aria-label={t("m5.roles.label")} onCancel={event => { event.preventDefault(); requestClose(); }}>{content}</dialog>;
 }
-
-

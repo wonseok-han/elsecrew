@@ -3,7 +3,7 @@ import { useI18n } from "../i18n.tsx";
 import type { AgentRunRecordV1 } from "./contracts/agent-adapter-v1.ts";
 import type { RoleDefinitionV3 } from "./contracts/run-recovery-v1.ts";
 import { roleLabel } from "./role-names.ts";
-import { roleColorIndex } from "./role-colors.ts";
+import { isLeadRole, roleColorIndex } from "./role-colors.ts";
 import { stageCells, stageNow, type StageCell } from "./task-story-model.ts";
 
 /**
@@ -47,7 +47,7 @@ export function StageBar({ runs, working, definitions }: { runs: readonly AgentR
       const status = cell.kind === "run" ? cell.status : cell.kind === "next" ? "next" : "now";
       const color = cell.kind === "run" ? roleColorIndex(cell.roleId) : cell.kind === "next" ? null : roleColorIndex("coordinator");
       return <div key={cell.kind === "run" ? cell.runId : `${cell.kind}-${index}`} role="listitem" className={`m5-stage m5-stage-${status}`} data-stage={cell.kind} aria-current={status === "now" ? "step" : undefined}>
-        <span className="m5-stage-title">{color !== null && <span className="m5-role-dot" data-role-color={color} aria-hidden="true" />}<span className="m5-stage-name" title={title(cell)}>{title(cell)}</span></span>
+        <span className="m5-stage-title">{color !== null && <span className="m5-role-dot" data-role-color={color} aria-hidden="true" />}<span className="m5-stage-name" title={title(cell)}><bdi>{title(cell)}</bdi></span>{cell.kind !== "next" && isLeadRole(cell.kind === "run" ? cell.roleId : "coordinator") && <span className="m5-role-lead" aria-label={t("m5.card.lead")}>★</span>}</span>
         <span className="m5-stage-meta">{meta(cell)}</span>
       </div>;
     })}

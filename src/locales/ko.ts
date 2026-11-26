@@ -1122,6 +1122,13 @@ export const ko = {
   "m5.history.empty": "아직 실행한 팀원이 없어요.",
   "m5.history.dev": "개발용",
   "m5.layout.openResults": "결과 열기",
+  "m5.resultBox.attention": "확인이 필요한 일이 먼저예요",
+  "m5.resultBox.attentionHelp": "가운데의 안내를 먼저 확인해 주세요. 그 뒤에 여기서 내 폴더에 넣을 수 있어요.",
+  "m5.task.changes.attention": "확인이 필요한 일이 있어 아직 넣을 수 없어요 · 파일 {count}개 바뀜",
+  "m5.layout.approvalWaiting": "팀이 허락을 기다리고 있어요",
+  "m5.layout.approvalShow": "허락 요청 보기",
+  "m5.card.lead": "총괄(팀을 이끄는 역할)",
+  "m5.sheet.allFiles": "모든 파일",
 } as const;
 
 export type MessageKey = keyof typeof ko;

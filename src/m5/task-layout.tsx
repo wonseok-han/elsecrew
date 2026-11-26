@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, type CSSProperties, type ReactNode } from "react";
 import { useI18n } from "../i18n.tsx";
+import { escapeTarget, MENU_SELECTOR } from "./task-view-model.ts";
 import { bandUsesDrawer, clampRightWidth, keyedRightWidth, rovingIndex, RIGHT_WIDTH_KEY, type LayoutBand, type RightTab } from "./task-layout-model.ts";
 
 export interface RightTabSpec {
@@ -19,12 +20,14 @@ export interface RightTabSpec {
  * drawer. Every panel stays mounted and is only hidden, so Monaco and
  * unsaved drafts survive tab changes and the sheet closing.
  */
-export function TaskLayout({ band, rightCollapsed = false, previewCovered = true, list, story, tabs, rightTab, onRightTab, resultBox, sheet, sheetOpen, sheetLabel, onSheetClose, drawerOpen, onDrawerOpenChange, rightWidth, onRightWidth }: {
+export function TaskLayout({ band, rightCollapsed = false, previewCovered = true, approvalNotice = null, list, story, tabs, rightTab, onRightTab, resultBox, sheet, sheetOpen, sheetLabel, onSheetClose, drawerOpen, onDrawerOpenChange, rightWidth, onRightWidth }: {
   band: LayoutBand;
   /** ⌘\\ hides the results panel in wide windows. */
   rightCollapsed?: boolean;
   /** Something covers the preview area (task-layout-model previewObscured); read by the preview view (P3). */
   previewCovered?: boolean;
+  /** A permission request waits while the sheet or drawer covers its card (review #1): shown on top of both. */
+  approvalNotice?: ReactNode;
   list: ReactNode;
   story: ReactNode;
   tabs: readonly RightTabSpec[];
@@ -44,16 +47,22 @@ export function TaskLayout({ band, rightCollapsed = false, previewCovered = true
   const id = useId();
   const drawer = bandUsesDrawer(band);
   const sheetRef = useRef<HTMLElement>(null);
+  const drawerRef = useRef<HTMLElement>(null);
   const opener = useRef<HTMLElement | null>(null);
-  // Opening the sheet moves focus into it; closing gives focus back to what
-  // opened it (PLAN 1.6).
+  const drawerOpener = useRef<HTMLElement | null>(null);
+  const drawerActive = drawer && drawerOpen;
+  const activeElement = () => document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
+  // Opening the sheet moves focus into it — the picked file first, else the
+  // first file, else the open editor tab — and closing gives focus back to
+  // what opened it (PLAN 1.6, review #5).
   useEffect(() => {
     if (sheetOpen) {
-      if (!opener.current) opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      if (!opener.current) opener.current = activeElement();
       requestAnimationFrame(() => {
         const root = sheetRef.current;
         if (!root || root.contains(document.activeElement)) return;
-        root.querySelector<HTMLElement>("[data-sheet-focus], button:not(:disabled), [tabindex='0']")?.focus();
+        const pick = (selector: string) => [...root.querySelectorAll<HTMLElement>(selector)].find(node => node.getClientRects().length > 0 && !(node as HTMLButtonElement).disabled);
+        (pick("[data-sheet-focus]") ?? pick(".m5-sheet-file") ?? pick(".m5-editor-tab [role=tab][aria-selected=true]") ?? pick("button, select, [tabindex='0']"))?.focus();
       });
     } else if (opener.current) {
       const back = opener.current;
@@ -61,26 +70,45 @@ export function TaskLayout({ band, rightCollapsed = false, previewCovered = true
       if (back.isConnected) back.focus();
     }
   }, [sheetOpen]);
-  // Escape closes the sheet (or the drawer) wherever focus is, unless
-  // something inside took it first: Monaco's suggestions and find prevent
-  // it, and an open dialog or menu closes on its own.
+  // The drawer does the same: focus its open tab, then back to its opener.
+  useEffect(() => {
+    if (drawerActive) {
+      if (!drawerOpener.current) drawerOpener.current = activeElement();
+      requestAnimationFrame(() => {
+        const root = drawerRef.current;
+        if (!root || root.contains(document.activeElement)) return;
+        root.querySelector<HTMLElement>("[role=tab][aria-selected=true]")?.focus();
+      });
+    } else if (drawerOpener.current) {
+      const back = drawerOpener.current;
+      drawerOpener.current = null;
+      if (back.isConnected && !sheetOpen) back.focus();
+    }
+  }, [drawerActive]);
+  // One Escape closes the innermost thing only (review #5): an open menu or
+  // dialog first (its own handler closes it), then the sheet, then the
+  // drawer. Monaco's suggestions and find mark the key handled.
   const closeSheet = useRef(onSheetClose);
   closeSheet.current = onSheetClose;
   const closeDrawer = useRef(() => onDrawerOpenChange(false));
   closeDrawer.current = () => onDrawerOpenChange(false);
   useEffect(() => {
-    if (!sheetOpen && !(drawer && drawerOpen)) return;
+    if (!sheetOpen && !drawerActive) return;
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      const target = event.target instanceof Element ? event.target : null;
-      if (target?.closest("dialog[open], details[open], [popover]")) return;
-      if (document.querySelector("dialog[open]")) return;
+      if (event.key !== "Escape") return;
+      const target = escapeTarget({
+        handled: event.defaultPrevented,
+        menuOpen: [...document.querySelectorAll<HTMLDetailsElement>(MENU_SELECTOR)].some(menu => menu.open) || Boolean(document.querySelector("[popover]:popover-open, .m5-task-rail-popover")),
+        dialogOpen: Boolean(document.querySelector("dialog[open]")),
+        sheetOpen, drawerOpen: drawerActive,
+      });
+      if (target !== "sheet" && target !== "drawer") return;
       event.preventDefault();
-      if (sheetOpen) closeSheet.current(); else closeDrawer.current();
+      if (target === "sheet") closeSheet.current(); else closeDrawer.current();
     };
     document.addEventListener("keydown", escape);
     return () => document.removeEventListener("keydown", escape);
-  }, [sheetOpen, drawer, drawerOpen]);
+  }, [sheetOpen, drawerActive]);
   const tabIndex = Math.max(0, tabs.findIndex(tab => tab.id === rightTab));
   const resizing = useRef<{ x: number; width: number } | null>(null);
   const saveWidth = (width: number) => { try { localStorage.setItem(RIGHT_WIDTH_KEY, String(width)); } catch { /* optional */ } };
@@ -90,7 +118,8 @@ export function TaskLayout({ band, rightCollapsed = false, previewCovered = true
     <nav className="m5-layout-left" data-testid="layout-left" aria-label={t("m5.layout.list")}>{list}</nav>
     <section className="m5-layout-center" data-testid="layout-center" aria-label={t("m5.layout.story")} inert={sheetOpen || (drawer && drawerOpen) || undefined}>{story}</section>
     {drawer && drawerOpen && <div className="m5-layout-scrim" aria-hidden="true" onClick={() => onDrawerOpenChange(false)} />}
-    <aside className="m5-layout-right" data-testid="layout-right" aria-label={t("m5.layout.results")} hidden={rightHidden} inert={sheetOpen || undefined}>
+    <aside ref={drawerRef} className="m5-layout-right" data-testid="layout-right" aria-label={t("m5.layout.results")} hidden={rightHidden} inert={sheetOpen || undefined}>
+      {drawerActive && approvalNotice}
       {!drawer && <div className="m5-layout-resize" role="separator" tabIndex={0} aria-orientation="vertical" aria-label={t("m5.layout.resize")} aria-valuenow={rightWidth} aria-valuemin={320}
         onPointerDown={event => { if (event.button !== 0) return; resizing.current = { x: event.clientX, width: rightWidth }; event.currentTarget.setPointerCapture(event.pointerId); event.preventDefault(); }}
         onPointerMove={event => { const start = resizing.current; if (start) onRightWidth(clampRightWidth(start.width + start.x - event.clientX, window.innerWidth)); }}
@@ -115,6 +144,6 @@ export function TaskLayout({ band, rightCollapsed = false, previewCovered = true
       {tabs.map(tab => <div key={tab.id} className="m5-layout-tabpanel" role="tabpanel" id={`${id}-panel-${tab.id}`} aria-labelledby={`${id}-tab-${tab.id}`} data-testid={`right-panel-${tab.id}`} hidden={tab.id !== rightTab}>{tab.content}</div>)}
       {resultBox}
     </aside>
-    <section ref={sheetRef} className="m5-review-sheet" data-testid="review-sheet" aria-label={sheetLabel} hidden={!sheetOpen}>{sheet}</section>
+    <section ref={sheetRef} className="m5-review-sheet" data-testid="review-sheet" aria-label={sheetLabel} hidden={!sheetOpen}>{sheetOpen && approvalNotice}{sheet}</section>
   </div>;
 }
