@@ -13,7 +13,7 @@
 - **I5 프로브**: 시도마다 결과가 있어야 하고 반드시 실패해야 한다. 양성 대조 세 가지를 둔다: 수집기(TCP/UDP×IPv4/IPv6)가 프로브의 접촉을 1건씩 셀 것, net log가 손대지 않은 완전한 로그일 것, 그 로그에 대조 DNS 조회와 페이지의 무효 프록시 시도가 보일 것. DNS 서버 연결은 대조 조회 외 네트워크 조회가 0일 때만 대조 몫이다. WebRTC는 STUN v6·TURN udp/tcp/tls를 추가했고, 세 계층 모두 후보 0이어야 한다. 권한과 창 열기는 포커스된 뷰에서 사용자 활성화로 시도하며, 활성화 없음·포커스 없음으로 거절된 것은 합격이 아니다. T9는 새 webContents 0개와 차단 증가분으로 판정한다. **git worktree 모드**를 추가해 기본 두 모드로 돌린다. 미리보기 뷰는 `disableBlinkFeatures: FileSystemAccess`로 파일 선택기 자체를 없앴다(T7).
 - **경미**: 실행 때 준 `--blink-settings` 값에 덧붙인다. bounds는 가장자리를 자른 뒤에도 최소 120을 확인하고, 열기 중 기다린 뒤에도 현재 창 크기로 다시 확인한다.
 - **Keychain 사후 확인(PR #4)**: 머지본 cd5f502d로 더미 항목 probe를 돌렸다. cdhash가 다른 두 빌드 모두 창 없이 갱신됐고 partition은 `apple-tool:`로 유지됐다. 더미 항목은 삭제했다(노예 확인).
-- **검증**: VERIFY_LINE
+- **검증**: Rust 워크스페이스 전체(core 242·protocol 74·sidecar lib 914·stdio 16) 통과, `npm test` 841/841, `pnpm build` 통과. 커밋 ea7b57e0(소스 깨끗함)에서 격리 프로브 git worktree·사본 두 모드 모두 PASS(모드당 검사 39개, net log 1,742 이벤트, 페이지발 수집기 접촉 0·대조 접촉 각 1, 무효 프록시 시도 52, webRequest 단독 차단 20).
 - **다음**: 노예가 B1·I5를 짧게 재확인한 뒤 머지. 남은 경계: Windows·패키지 실행에서의 프로브, P3 화면(T8·T16), 사용자 파일 선택·끌어놓기 범위.
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — ADE 1차-나 결과 미리보기 백엔드(P1·P2·P4 안전 시험), `ELSECREW_PREVIEW=1` 뒤
