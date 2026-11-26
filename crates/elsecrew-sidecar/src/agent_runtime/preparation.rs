@@ -274,6 +274,10 @@ impl OwnedTextRun {
 
 #[cfg(target_os = "macos")]
 impl RunReservation {
+    pub(crate) fn chat_id(&self) -> &str {
+        &self.request.chat_id
+    }
+
     pub(super) fn bind_provider_fence(
         &self,
         storage: &mut Storage,

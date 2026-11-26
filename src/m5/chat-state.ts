@@ -173,12 +173,24 @@ export class ChatUiController {
     } catch (error) { if (this.#live(generation)) this.#error("m5.chatError.project", error); }
   }
 
+  /**
+   * The view can be left: nothing this screen asked for is still on its way
+   * (a start, a stop, a message being sent, a switch, a recovery choice).
+   * A team that works is not a reason to stay (ADE multi-project P1): its
+   * runs go on in the engine and the task shows them again, from the saved
+   * history, when it is opened again.
+   */
   canLeaveProjectView(): boolean {
     return !this.#disposed && !this.#state.preparing && !this.#state.switching
-      && !this.isRecoveryBlocked() && !this.#state.agentStartingRoleId && !this.#state.activeRunId
-      && !this.#state.runs.some(isActive)
-      && !this.#state.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state))
+      && !this.isRecoveryBlocked() && !this.#state.agentStartingRoleId && this.#state.activeRunId !== "starting"
       && !Object.values(this.#state.followups ?? {}).some(draft => draft.sending);
+  }
+
+  /** A run of the open task is starting, working or stopping. */
+  isTeamWorking(): boolean {
+    return Boolean(this.#state.agentStartingRoleId) || Boolean(this.#state.activeRunId)
+      || this.#state.runs.some(isActive)
+      || this.#state.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state));
   }
 
   /** `force` closes the view even while runs are still stopping (list removal). */

@@ -90,6 +90,10 @@ pub(crate) enum FakeScenario {
     OrchestratorDelegatePlanning,
     #[cfg_attr(not(test), allow(dead_code))]
     OrchestratorPlanner,
+    /// Keeps writing one file in its workspace for about three seconds (ADE
+    /// multi-project P2′: other tasks' writes go on meanwhile).
+    #[cfg_attr(not(test), allow(dead_code))]
+    BusyWriter,
     #[cfg_attr(not(test), allow(dead_code))]
     NoOutput,
     #[cfg_attr(not(test), allow(dead_code))]
@@ -544,14 +548,23 @@ impl AgentRuntime {
         self.active.contains_key(run_id)
     }
 
-    /// Agent runs that can still write to a workspace: started, starting or
-    /// settling. Provider checks (model catalogs, discoveries) are not runs.
-    pub(crate) fn runs_in_flight(&self) -> bool {
+    /// The tasks whose workspace a run started, starting or settling may
+    /// still write (ADE multi-project P2′). `None` when something in flight
+    /// cannot be tied to a task — a failed provider check still being cleaned
+    /// up — and every task then counts as busy.
+    pub(crate) fn run_chats(&self) -> Option<BTreeSet<String>> {
+        #[allow(unused_mut)]
+        let mut chats: BTreeSet<String> = self.active.values().map(|run| run.identity.chat_id.clone()).collect();
         #[cfg(target_os = "macos")]
-        if !self.native.is_empty() || !self.pending_claude_starts.is_empty() || !self.failed_starts.is_empty() {
-            return true;
+        {
+            if !self.discovery_cleanup.is_empty() {
+                return None;
+            }
+            chats.extend(self.native.values().map(|run| run.identity.chat_id.clone()));
+            chats.extend(self.pending_claude_starts.values().map(|start| start.chat_id().to_owned()));
+            chats.extend(self.failed_starts.values().map(|failed| failed.chat_id().to_owned()));
         }
-        !self.active.is_empty()
+        Some(chats)
     }
 
     pub(crate) fn owned_run_ids(&self) -> Vec<String> {
@@ -4634,6 +4647,7 @@ fn scenario_name(value: FakeScenario) -> &'static str {
         FakeScenario::OrchestratorWorker => "orchestrator-worker",
         FakeScenario::OrchestratorDelegatePlanning => "orchestrator-delegate-planning",
         FakeScenario::OrchestratorPlanner => "orchestrator-planner",
+        FakeScenario::BusyWriter => "busy-writer",
         FakeScenario::NoOutput => "no-output",
         FakeScenario::FinalDelayed => "final-delayed",
         FakeScenario::CancelClean => "cancel-clean",
@@ -4740,6 +4754,7 @@ pub(crate) fn run_agent_fixture_launcher(scenario: &str) -> Result<(), SidecarEr
         "orchestrator-worker",
         "orchestrator-delegate-planning",
         "orchestrator-planner",
+        "busy-writer",
         "no-output",
         "final-delayed",
         "cancel-clean",
@@ -4873,6 +4888,15 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
         return Ok(());
     }
     match scenario {
+        "busy-writer" => {
+            for round in 1..=200 {
+                std::fs::write(cwd.join("busy.txt"), format!("round {round}\n"))
+                    .map_err(|error| SidecarError::new("fixtureFailure", error.to_string()))?;
+                thread::sleep(Duration::from_millis(15));
+            }
+            println!("{}", json!({"type":"final","text":"Wrote busy.txt 200 times."}));
+            println!("{}", json!({"type":"terminal","outcome":"succeeded"}));
+        }
         "orchestrator-worker" => {
             std::fs::write(cwd.join("hello.txt"), b"updated by the isolated fixture worker\n")
                 .map_err(|error| SidecarError::new("fixtureFailure", error.to_string()))?;

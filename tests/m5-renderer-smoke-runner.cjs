@@ -964,6 +964,27 @@ app.whenReady().then(async () => {
     document.querySelector('[data-testid=right-tab-history]').click();
     await ${waitFor("document.querySelector('[data-testid=right-panel-history] .m5-agent-runs details')", "failed Claude run details")};
     ${capture("18-failed-run-details")}
+    // ADE multi-project: every stage of a long task. Folded, "+N" counts the
+    // earlier stages; opened, they sit in one row that scrolls sideways and
+    // ends on the newest; a stage takes the story to its member's card.
+    window.m5SmokeManyStages(9);
+    await ${waitFor("document.querySelector('[data-testid=stage-bar] .m5-stage-more[aria-expanded=false]')", "folded earlier stages")};
+    { const more = document.querySelector('[data-testid=stage-bar] .m5-stage-more').textContent.trim(); const shown = document.querySelectorAll('[data-testid=stage-bar] [data-stage=run]').length; if (more !== '+' + (10 - shown)) throw new Error('folded stage count ' + more + ' with ' + shown + ' shown'); }
+    ${capture("33-stage-bar-folded")}
+    document.querySelector('[data-testid=stage-bar] .m5-stage-more').click();
+    await ${waitFor("document.querySelector('[data-testid=stage-bar].m5-stage-bar-all')", "every stage shown")};
+    await ${waitFor("document.querySelectorAll('[data-testid=stage-bar] [data-stage=run]').length === 10", "all ten runs as stages")};
+    {
+      const row = document.querySelector('[data-testid=stage-bar] .m5-stage-row');
+      if (getComputedStyle(row).overflowX !== 'auto') throw new Error('stage row does not scroll sideways');
+      if (row.scrollWidth > row.clientWidth && row.scrollLeft + row.clientWidth < row.scrollWidth - 2) throw new Error('opened stage row does not end on the newest stage');
+      if (document.querySelector('[data-testid=stage-bar]').getBoundingClientRect().height > 90) throw new Error('opened stage bar grew into a tall block');
+    }
+    ${capture("34-stage-bar-all")}
+    document.querySelector('[data-testid=stage-bar] .m5-stage-jump').click();
+    document.querySelector('[data-testid=stage-bar] .m5-stage-fold').click();
+    await ${waitFor("!document.querySelector('[data-testid=stage-bar].m5-stage-bar-all') && document.querySelector('[data-testid=stage-bar] .m5-stage-more[aria-expanded=false]')", "stages folded again")};
+    window.m5SmokeClearStages();
     document.querySelector('.m5-agent-runs details summary').click();
     const diagnosticButton = () => [...document.querySelectorAll('.m5-agent-runs button')].find(button => button.textContent === '이번 앱 세션의 연결 진단 보기');
     await ${waitFor("diagnosticButton()", "session diagnostic action")};
@@ -1189,8 +1210,12 @@ app.whenReady().then(async () => {
     document.querySelector('.m5-new-chat-dialog header button').click();
     await ${waitFor("!document.querySelector('.m5-new-chat-dialog').open", "first-task window closed")};
     // (4) The switcher: other projects with when they were opened, adding one at the bottom.
+    // ADE multi-project: a team at work in another project shows on the switcher and its row.
+    window.m5SmokeOtherProjectWorking('running');
+    await ${waitFor("document.querySelector('[data-testid=project-switcher] .m5-switcher-others-running')", "other project working mark")};
     document.querySelector('[data-testid=project-switcher]').open = true;
     await ${waitFor("document.querySelector('.m5-switcher-projects li')", "switcher list")};
+    await ${waitFor("[...document.querySelectorAll('.m5-switcher-projects li')].some(item => item.dataset.path === '/work/earlier' && item.querySelector('.m5-badge-running'))", "other project working badge")};
     ${capture("25-switcher")}
     if (document.querySelector('.m5-switcher-projects').innerText.includes('/work/')) throw new Error('switcher shows folder paths');
     document.querySelector('[data-testid=project-switcher]').open = false;

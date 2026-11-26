@@ -14,6 +14,12 @@ pub(super) struct FailedStart {
     persisted: bool,
 }
 
+impl FailedStart {
+    pub(super) fn chat_id(&self) -> &str {
+        self.reservation.chat_id()
+    }
+}
+
 pub(super) struct NativeRun {
     owner: NativeOwner,
     pub(super) identity: RunIdentity,

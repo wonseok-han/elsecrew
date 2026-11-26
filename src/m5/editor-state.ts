@@ -141,6 +141,7 @@ export class ProjectEditorController {
    * view of it. Only those are ever rewritten or forgotten: drafts kept for a
    * workspace that is still being opened (or failed to open) stay untouched. */
   #draftsLive = false;
+  #draftsNotKeptSaid = false;
   #pendingStreamBytes = 0;
   #pendingOverflowUntil = 0;
   #unsubscribers: (() => void)[] = [];
@@ -379,11 +380,17 @@ export class ProjectEditorController {
     if (!tabs.length && !this.#draftsLive) return;
     this.#draftsLive = tabs.length > 0;
     try {
-      this.#drafts.save(workspace, tabs.length ? {
+      const kept = this.#drafts.save(workspace, tabs.length ? {
         activePath: this.#state.activePath,
         tabs: tabs.map(tab => ({ path: tab.path, text: tab.text, baseVersion: tab.baseVersion, byteLength: tab.byteLength,
           ...(tab.baseTextLength === undefined ? {} : { baseTextLength: tab.baseTextLength }) })),
       } : null);
+      // Not kept (no room, or storage refused): said once, then again after a
+      // keep worked. Kept drafts of other tasks are never given up for it.
+      if (!kept && tabs.length && !this.#draftsNotKeptSaid) {
+        this.#draftsNotKeptSaid = true;
+        queueMicrotask(() => { if (!this.#disposed) this.#setNotice("m5.editorNotice.draftsNotKept"); });
+      } else if (kept) this.#draftsNotKeptSaid = false;
     } catch { /* Keeping a draft is best effort; editing goes on. */ }
   }
 
@@ -797,10 +804,45 @@ export class ProjectEditorController {
     }
   }
 
+  /**
+   * The view can be left with its unsaved text kept for its task (ADE
+   * multi-project P1): every unsaved tab is plain edited text of a task's
+   * workspace, kept the way an app that closes keeps it, and given back when
+   * the task opens again. A tab still saving or in conflict stays.
+   */
+  canLeaveKeepingDrafts(): boolean {
+    if (this.canLeaveProject()) return true;
+    return Boolean(this.#drafts && this.#state.workspace)
+      && this.#state.tabs.every(tab => tab.saveState === "clean" || (tab.saveState === "dirty" && tab.mode === "text"));
+  }
+
+  /** Before the view lets go of anything (its file watch, PR #18 review I1):
+   * true when it can be left, its unsaved text now kept for its task. */
+  prepareLeaveKeepingDrafts(): boolean {
+    if (this.canLeaveProject()) return true;
+    return this.canLeaveKeepingDrafts() && this.#draftsKept();
+  }
+
+  /** Whether the store now holds exactly this view's unsaved text. */
+  #draftsKept(): boolean {
+    const workspace = this.#state.workspace;
+    if (!this.#drafts || !workspace) return false;
+    this.#storeDrafts();
+    let kept: ReturnType<EditorDraftStore["load"]> = null;
+    try { kept = this.#drafts.load(workspace); } catch { return false; }
+    const unsaved = this.#state.tabs.filter(tab => tab.saveState !== "clean");
+    return unsaved.every(tab => kept?.tabs.some(draft => draft.path === tab.path && draft.text === tab.text));
+  }
+
   /** Leave the view without abandoning the durable snapshot or its chat. */
   /** `discardDrafts` closes even with unsaved edits or pending work (list removal). */
-  leaveProjectView(discardDrafts = false): boolean {
-    if (this.#disposed || (!discardDrafts && (this.#actionBlocked || this.#snapshotCreation || this.#snapshotCreationBlocked || !this.canLeaveProject()))) return false;
+  /** `keepDrafts` leaves with unsaved text kept for its task, once the store has it. */
+  leaveProjectView(discardDrafts = false, keepDrafts = false): boolean {
+    if (this.#disposed) return false;
+    if (!discardDrafts) {
+      if (this.#actionBlocked || this.#snapshotCreation || this.#snapshotCreationBlocked) return false;
+      if (!this.canLeaveProject() && !(keepDrafts && this.canLeaveKeepingDrafts() && this.#draftsKept())) return false;
+    }
     const left = this.#state.workspace;
     this.#selectionGeneration++;
     this.#projectEpoch++;

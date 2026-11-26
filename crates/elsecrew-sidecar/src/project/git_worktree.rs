@@ -66,6 +66,12 @@ impl ProjectManager {
         let metadata = std::fs::symlink_metadata(&link)
             .map_err(|error| ProjectFailure::manifest(format!("could not inspect source .git entry: {error}")))?;
         if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            // A .git folder whose `commondir` names another repository shares
+            // that repository's objects and refs: not a repository of its own
+            // (PR #18 re-review B1).
+            if std::fs::symlink_metadata(link.join("commondir")).is_ok() {
+                return Err(ProjectFailure::manifest("source repository must own a real .git directory; one that shares another repository's (commondir) is unsupported"));
+            }
             return Ok(link);
         }
         if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > LINK_MAX_BYTES {
@@ -187,6 +193,14 @@ impl ProjectManager {
                 }
             }
         }
+        // Nor inside an existing task's workspace: a new task there would sit
+        // in a folder another task's agent writes (PR #18 review B1). Holding
+        // existing workspaces is the normal case (the default folder).
+        for workspace in self.recorded_workspace_folders(storage)? {
+            if super::write_scope::path_within(&canonical, &workspace) {
+                return Err(ProjectFailure::manifest("the workspace folder is inside a task's workspace"));
+            }
+        }
         write_json_atomic(&settings, WORKSPACE_FOLDER_FILE, &json!({"path":canonical_protocol_path(&canonical)?}))?;
         self.workspace_folder()
     }
@@ -202,6 +216,10 @@ impl ProjectManager {
             return Err(ProjectFailure::recovery("the chosen workspace folder is missing; choose it again in settings"));
         }
         let wanted = home.join(project_folder_name(source_root));
+        let short: String = worktree_id.trim_start_matches("worktree_").chars().take(8).collect();
+        // Nothing is made before the new folder is known not to meet another
+        // task's workspace (PR #18 re-review B1).
+        self.refuse_new_task_folder(storage, source_root, &wanted, &wanted.join(format!("task-{short}")))?;
         std::fs::create_dir_all(&wanted).map_err(|error| {
             ProjectFailure::recovery(format!("could not make the workspace folder: {error}"))
         })?;
@@ -210,22 +228,10 @@ impl ProjectManager {
         if project_dir != canonical_home.join(project_folder_name(source_root)) {
             return Err(ProjectFailure::symlink("the project's workspace folder is a link"));
         }
-        for (inner, outer) in [(&project_dir, source_root), (&source_root.to_path_buf(), &project_dir), (&project_dir, &self.data_root), (&self.data_root, &project_dir)] {
-            if inner.starts_with(outer) {
-                return Err(ProjectFailure::manifest("the workspace folder overlaps the project or the app's data"));
-            }
-        }
-        // Nor any other saved project (a home folder that is itself a
-        // repository, say): the same rule as choosing the folder.
-        for project in storage.projection_records("project")? {
-            if let Some(root) = project.get("canonical_path").and_then(Value::as_str) {
-                if project_dir.starts_with(root) || Path::new(root).starts_with(&project_dir) {
-                    return Err(ProjectFailure::manifest("the workspace folder overlaps a saved project; choose another in settings"));
-                }
-            }
-        }
-        let short: String = worktree_id.trim_start_matches("worktree_").chars().take(8).collect();
-        Ok(project_dir.join(format!("task-{short}")))
+        let task_dir = project_dir.join(format!("task-{short}"));
+        // Again on the real folders now made (PR #18 review B1).
+        self.refuse_new_task_folder(storage, source_root, &project_dir, &task_dir)?;
+        Ok(task_dir)
     }
 
     /// The worktree's `.git` file names `<root>/.git/worktrees/<name>`, and

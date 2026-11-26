@@ -18,6 +18,10 @@ pub(crate) struct PendingClaudeStart {
 }
 
 impl PendingClaudeStart {
+    pub(crate) fn chat_id(&self) -> &str {
+        &self.identity.chat_id
+    }
+
     pub(crate) fn cancel(&self) {
         self.cancel.store(true, Ordering::Release);
     }

@@ -1954,4 +1954,398 @@ mod tests {
         assert!(runs.iter().all(|run| run["record"]["selectedProfile"]["roleId"] == "coordinator"), "no worker was started");
         assert_eq!(sidecar.storage.projection_record("chat", id).unwrap().unwrap()["record"]["state"], "needsAttention");
     }
+
+    // ADE multi-project P2′: a save, merge or discard waits only for its own
+    // task, while copying into the user's own folder still waits for every team.
+
+    /// Another task: in the project of `source` (opened, with a team, when new).
+    fn another_task(sidecar: &mut Sidecar, source: &std::path::Path, label: &str) -> (Value, std::path::PathBuf) {
+        if !source.exists() {
+            std::fs::create_dir(source).unwrap();
+            std::fs::write(source.join("hello.txt"), "original\n").unwrap();
+            for args in [vec!["init", "-q"], vec!["add", "."], vec!["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "Initial"]] {
+                assert!(Command::new("/usr/bin/git").args(args).current_dir(source).status().unwrap().success());
+            }
+        }
+        let before = sidecar.storage.projection_records("project").unwrap().len();
+        let project = sidecar.projects.open_project(&mut sidecar.storage, source.to_str().unwrap(), &format!("req_open_{label}")).unwrap().result;
+        let project_id = project["projectId"].as_str().unwrap().to_owned();
+        if sidecar.storage.projection_records("project").unwrap().len() > before {
+            sidecar.g5.default_role_settings(&mut sidecar.storage, &sidecar.projects, &project_id, &format!("req_defaults_{label}")).unwrap();
+            let roles: Vec<_> = ["coordinator", "planning", "design", "coding", "review"].iter().map(|role| json!({"roleId":role,"runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":if *role=="coding"{"workspaceWrite"}else{"readOnly"}})).collect();
+            sidecar.g5.update_role_settings(&mut sidecar.storage, &project_id, 1, json!(roles), None, &format!("req_roles_{label}")).unwrap();
+        }
+        // A Git worktree of its own, as the app makes for a new task.
+        let snapshot = sidecar.g5.prepare_chat_workspace_with_baseline(&mut sidecar.storage, &mut sidecar.projects, &project_id, &format!("req_snapshot_{label}"), true).unwrap().result;
+        assert!(std::path::Path::new(snapshot["manifest"]["worktreePath"].as_str().unwrap()).join(".git").is_file(), "{snapshot}");
+        let chat = sidecar.g5.create_chat(&mut sidecar.storage, &sidecar.projects, snapshot["preparationId"].as_str().unwrap(), &project_id,
+            snapshot["manifest"]["worktreeId"].as_str().unwrap(), snapshot["manifest"]["workspaceIdentity"].as_str().unwrap(),
+            &format!("Task {label}"), 2, &format!("req_chat_{label}")).unwrap().result;
+        (chat, std::path::PathBuf::from(snapshot["manifest"]["worktreePath"].as_str().unwrap()))
+    }
+
+    /// Runs a task's team with fake members until its work is ready for review.
+    fn run_team_to_review(sidecar: &mut Sidecar, chat: &Value, request_id: &str) {
+        let id = chat["chatId"].as_str().unwrap().to_owned();
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::OrchestratorDelegate);
+        assert!(start_as(sidecar, chat, request_id).ok);
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::OrchestratorWorker);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            sidecar.poll_runtime_events().unwrap();
+            let state = sidecar.workflow_state(&id).unwrap();
+            if state.role == "coding" && state.run_id.is_some() {
+                sidecar.agent_runtime.set_fake_scenario(FakeScenario::OrchestratorFinal);
+            }
+            if state.status != "running" { break; }
+            assert!(Instant::now() < deadline, "{state:?}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(sidecar.storage.projection_record("chat", &id).unwrap().unwrap()["record"]["state"], "reviewReady");
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::OrchestratorDelegate);
+    }
+
+    fn address_of(chat: &Value) -> Value {
+        json!({"chatId":chat["chatId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"]})
+    }
+
+    fn ask(sidecar: &mut Sidecar, id: &str, method: &str, params: Value) -> ResponseV1 {
+        let request = sidecar.workflow_request(id.into(), method, params);
+        match sidecar.handle_request(request) {
+            Ok(handled) => handled.response.unwrap(),
+            Err(error) => panic!("{id}: {} {}", error.kind(), error.detail()),
+        }
+    }
+
+    fn ask_catalog(sidecar: &mut Sidecar, id: &str, action: &str, chat: &Value, extra: Value) -> ResponseV1 {
+        let mut params = address_of(chat);
+        params["action"] = json!(action);
+        for (key, value) in extra.as_object().unwrap() { params[key] = value.clone(); }
+        ask(sidecar, id, "project.catalog", params)
+    }
+
+    fn refused_with(response: &ResponseV1) -> Option<&str> {
+        (!response.ok).then(|| response.error.as_ref().map(|error| error.code.as_str()).unwrap_or(""))
+    }
+
+    fn merge(sidecar: &mut Sidecar, id: &str, chat: &Value) -> ResponseV1 {
+        let inspected = ask_catalog(sidecar, &format!("{id}_inspect"), "inspectChatMerge", chat, json!({}));
+        assert!(inspected.ok, "{inspected:?}");
+        let state = inspected.result.unwrap()["merge"].clone();
+        ask_catalog(sidecar, id, "mergeChatWorkspace", chat, json!({"expectedHead":state["head"],"expectedBase":state["baseTip"],"keepConflicts":false,"confirmed":true}))
+    }
+
+    fn git_out(dir: &std::path::Path, args: &[&str]) -> String {
+        let output = Command::new("/usr/bin/git").args(args).current_dir(dir).output().unwrap();
+        assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+        String::from_utf8(output.stdout).unwrap()
+    }
+
+    /// While task A's agent keeps writing its workspace, task B of another
+    /// repository is saved, merged into its base and looked at for
+    /// discarding. Task A's own merge, discard and save wait, and so does
+    /// task C of A's repository (one repository, one lock: PR #18 review B1);
+    /// copying B into its folder waits for every team. The writer is still
+    /// running when B's merge finishes, and afterwards both repositories are
+    /// intact, each merge carried only its own files and A's file holds the
+    /// writer's last round.
+    #[test]
+    fn other_tasks_save_merge_and_discard_while_a_team_writes_its_own_workspace() {
+        let (root, mut sidecar, _) = service();
+        let source = root.path().join("source");
+        let (chat_a, _) = another_task(&mut sidecar, &source, "writer");
+        let (chat_c, path_c) = another_task(&mut sidecar, &source, "same_repo");
+        let other = root.path().join("other");
+        let (chat_b, path_b) = another_task(&mut sidecar, &other, "other_project");
+        let (chat_d, path_d) = another_task(&mut sidecar, &other, "other_discard");
+        assert_eq!(chat_c["projectId"], chat_a["projectId"]);
+        assert_ne!(chat_b["projectId"], chat_a["projectId"]);
+        std::fs::write(path_c.join("from_c.txt"), "task C\n").unwrap();
+        std::fs::write(path_b.join("from_b.txt"), "task B\n").unwrap();
+
+        // D's work is ready for review (only such a task can be discarded).
+        run_team_to_review(&mut sidecar, &chat_d, "req_team_d");
+        let a = chat_a["chatId"].as_str().unwrap().to_owned();
+        assert!(start(&mut sidecar, &chat_a).ok);
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::BusyWriter);
+        // Wait until A's developer is writing.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let (writer, path_a) = loop {
+            sidecar.poll_runtime_events().unwrap();
+            let state = sidecar.workflow_state(&a).unwrap();
+            if let (true, Some(run)) = (state.role == "coding", state.run_id.clone()) {
+                let projection = sidecar.storage.projection_record("run", &run).unwrap().unwrap();
+                let path = std::path::PathBuf::from(projection["worktree_path"].as_str().unwrap());
+                if sidecar.agent_runtime.has_active_run(&run) && path.join("busy.txt").exists() {
+                    break (run, path);
+                }
+            }
+            assert!(Instant::now() < deadline, "{state:?}");
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::OrchestratorFinal);
+        let round = || std::fs::read_to_string(path_a.join("busy.txt")).unwrap_or_default().trim().trim_start_matches("round ").parse::<u32>().unwrap_or(0);
+        let first_round = round();
+
+        // A's own writes wait.
+        assert_eq!(refused_with(&merge(&mut sidecar, "req_merge_a", &chat_a)), Some("requestBlocked"));
+        assert_eq!(refused_with(&ask_catalog(&mut sidecar, "req_inspect_discard_a", "inspectChatDiscard", &chat_a, json!({"taskId":chat_a["taskId"]}))), Some("requestBlocked"));
+        let mut save_a = address_of(&chat_a);
+        for (key, value) in [("path", json!("hello.txt")), ("expectedVersion", json!("sha256:unused")), ("totalBytes", json!(1)), ("encoding", json!("utf-8"))] { save_a[key] = value; }
+        assert_eq!(refused_with(&ask(&mut sidecar, "req_save_a", "workspace.file.save", save_a)), Some("orchestrationBusy"));
+
+        // A's repository is A's: task C waits too.
+        assert_eq!(refused_with(&merge(&mut sidecar, "req_merge_c_busy", &chat_c)), Some("requestBlocked"));
+        let mut save_c = address_of(&chat_c);
+        for (key, value) in [("path", json!("hello.txt")), ("expectedVersion", json!("sha256:unused")), ("totalBytes", json!(1)), ("encoding", json!("utf-8"))] { save_c[key] = value; }
+        assert_eq!(refused_with(&ask(&mut sidecar, "req_save_c_busy", "workspace.file.save", save_c)), Some("orchestrationBusy"));
+        // Another repository goes on.
+        let merged_b = merge(&mut sidecar, "req_merge_b", &chat_b);
+        assert!(merged_b.ok, "{merged_b:?}");
+        assert_eq!(merged_b.result.as_ref().unwrap()["outcome"], "merged", "{merged_b:?}");
+        // Another repository's task is discarded for real.
+        let looked = ask_catalog(&mut sidecar, "req_inspect_discard_d", "inspectChatDiscard", &chat_d, json!({"taskId":chat_d["taskId"]}));
+        assert!(looked.ok, "{looked:?}");
+        let inspection = looked.result.as_ref().unwrap()["inspection"].clone();
+        let discarded = ask(&mut sidecar, "req_discard_d", "project.catalog", json!({"action":"discardChatWorkspace","inspection":inspection,"confirmed":true}));
+        assert!(discarded.ok, "{discarded:?}");
+        // And another's file is saved for real: begin, chunk, commit.
+        let before = std::fs::read(path_b.join("hello.txt")).unwrap();
+        let version = format!("sha256:{:x}", <sha2::Sha256 as sha2::Digest>::digest(&before));
+        let text = "saved while A works\n";
+        let mut begin = address_of(&chat_b);
+        for (key, value) in [("path", json!("hello.txt")), ("expectedVersion", json!(version)), ("totalBytes", json!(text.len())), ("encoding", json!("utf8"))] { begin[key] = value; }
+        let begun = ask(&mut sidecar, "req_save_b", "workspace.file.save", begin);
+        assert!(begun.ok, "{begun:?}");
+        let save_id = begun.result.as_ref().unwrap()["saveId"].clone();
+        let mut chunk = address_of(&chat_b);
+        for (key, value) in [("saveId", save_id.clone()), ("seq", json!(1)), ("text", json!(text))] { chunk[key] = value; }
+        let chunked = ask(&mut sidecar, "req_save_b_chunk", "workspace.file.save", chunk);
+        assert!(chunked.ok, "{chunked:?}");
+        let mut commit = address_of(&chat_b);
+        for (key, value) in [("saveId", save_id), ("expectedVersion", json!(version)), ("lastSeq", json!(1)), ("totalBytes", json!(text.len()))] { commit[key] = value; }
+        let committed = ask(&mut sidecar, "req_save_b_commit", "workspace.file.save", commit);
+        assert!(committed.ok, "{committed:?}");
+        assert_eq!(std::fs::read_to_string(path_b.join("hello.txt")).unwrap(), text);
+        // Copying into the user's own folder still waits for every team.
+        let applied = ask(&mut sidecar, "req_apply_b", "project.catalog", json!({"action":"applyChatLatest","chatId":chat_b["chatId"],"projectId":chat_b["projectId"]}));
+        assert_eq!(refused_with(&applied), Some("orchestrationBusy"), "{applied:?}");
+        // Everything above overlapped A's writer: it wrote on in between.
+        let last_round = round();
+        assert!(first_round > 0 && last_round > first_round && last_round < 200, "writer rounds {first_round} → {last_round}");
+        assert!(sidecar.agent_runtime.has_active_run(&writer), "the writer finished before the other tasks were done");
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while sidecar.workflow_state(&a).unwrap().status == "running" {
+            sidecar.poll_runtime_events().unwrap();
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(std::fs::read_to_string(path_a.join("busy.txt")).unwrap(), "round 200\n");
+        // A idle, C of the same repository merges now.
+        assert!(!source.join("from_c.txt").exists());
+        let merged_c = merge(&mut sidecar, "req_merge_c", &chat_c);
+        assert!(merged_c.ok, "{merged_c:?}");
+        assert_eq!(merged_c.result.as_ref().unwrap()["outcome"], "merged", "{merged_c:?}");
+        // Each merge carried its own task's file, and only that.
+        assert_eq!(std::fs::read_to_string(source.join("from_c.txt")).unwrap(), "task C\n");
+        assert_eq!(std::fs::read_to_string(other.join("from_b.txt")).unwrap(), "task B\n");
+        assert_eq!(sidecar.storage.projection_record("chat", chat_d["chatId"].as_str().unwrap()).unwrap().unwrap()["record"]["state"], "discarded");
+        let _ = &path_d;
+        for dir in [&source, &other] {
+            assert!(!dir.join("busy.txt").exists());
+            assert_eq!(std::fs::read_to_string(dir.join("hello.txt")).unwrap(), "original\n");
+            git_out(dir, &["fsck", "--no-progress", "--no-dangling"]);
+            assert_eq!(git_out(dir, &["status", "--porcelain"]), "");
+        }
+        assert!(!git_out(&source, &["log", "--format=%s", "-n", "5"]).is_empty());
+        // A, now idle, may merge.
+        let merged_a = merge(&mut sidecar, "req_merge_a_after", &chat_a);
+        assert!(merged_a.ok, "{merged_a:?}");
+        assert_eq!(std::fs::read_to_string(source.join("busy.txt")).unwrap(), "round 200\n");
+        git_out(&source, &["fsck", "--no-progress", "--no-dangling"]);
+    }
+
+    /// A project folder inside a task's workspace, or holding one, is refused
+    /// (also through a link), and so is a workspace folder inside a task's
+    /// workspace: a merge or a new task there would write where another
+    /// task's agent writes (PR #18 review B1).
+    #[test]
+    fn a_project_or_workspace_folder_overlapping_a_tasks_workspace_is_refused() {
+        let (root, mut sidecar, _) = service();
+        let (_, path_a) = another_task(&mut sidecar, &root.path().join("source"), "writer");
+        // A repository made inside A's workspace.
+        let nested = path_a.join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        std::fs::write(nested.join("x.txt"), "x\n").unwrap();
+        for args in [vec!["init", "-q"], vec!["add", "."], vec!["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "Initial"]] {
+            assert!(Command::new("/usr/bin/git").args(args).current_dir(&nested).status().unwrap().success());
+        }
+        let opened = sidecar.projects.open_project(&mut sidecar.storage, nested.to_str().unwrap(), "req_open_nested");
+        assert!(opened.as_ref().is_err_and(|error| error.detail.contains("overlaps a task's workspace")), "{:?}", opened.map(|action| action.result));
+        // The same folder through a link elsewhere.
+        let link = root.path().join("link-to-nested");
+        std::os::unix::fs::symlink(&nested, &link).unwrap();
+        assert!(sidecar.projects.open_project(&mut sidecar.storage, link.to_str().unwrap(), "req_open_link").is_err());
+        // A folder holding A's workspace.
+        let holder = path_a.parent().unwrap();
+        let around = sidecar.projects.refuse_workspace_overlap(&sidecar.storage, holder, "the project folder");
+        assert!(around.is_err());
+        // A workspace folder inside A's workspace.
+        let inner = path_a.join("inner");
+        std::fs::create_dir(&inner).unwrap();
+        let chosen = sidecar.projects.set_workspace_folder(&sidecar.storage, Some(inner.to_str().unwrap()));
+        assert!(chosen.is_err_and(|error| error.detail.contains("inside a task's workspace")));
+    }
+
+    /// Nothing is written to a folder that meets a task's workspace before
+    /// that is refused: an empty folder gets no Git record, a plain folder no
+    /// link file, and a new task's folders are not made (PR #18 re-review B1).
+    #[test]
+    fn nothing_is_written_before_an_overlapping_folder_is_refused() {
+        let (root, mut sidecar, _) = service();
+        let (_, path_a) = another_task(&mut sidecar, &root.path().join("source"), "writer");
+        let listing = |dir: &std::path::Path| { let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name()).collect(); names.sort(); names };
+        // An empty folder inside A's workspace, opened with the empty-folder yes.
+        let empty = path_a.join("empty");
+        std::fs::create_dir(&empty).unwrap();
+        let response = ask(&mut sidecar, "req_open_empty", "project.open", json!({"selectedPath":empty.to_str().unwrap(),"emptyFolderIdentity":"synthetic"}));
+        assert!(!response.ok, "{response:?}");
+        assert!(response.error.as_ref().unwrap().detail.contains("overlaps a task's workspace"), "{response:?}");
+        assert!(listing(&empty).is_empty(), "nothing written to the empty folder");
+        // A plain folder with files, opened with the record yes.
+        let plain = path_a.join("plain");
+        std::fs::create_dir(&plain).unwrap();
+        std::fs::write(plain.join("notes.txt"), "n\n").unwrap();
+        let response = ask(&mut sidecar, "req_open_plain", "project.open", json!({"selectedPath":plain.to_str().unwrap(),"folderRecordIdentity":"synthetic"}));
+        assert!(!response.ok && response.error.as_ref().unwrap().detail.contains("overlaps a task's workspace"), "{response:?}");
+        assert_eq!(listing(&plain), vec![std::ffi::OsString::from("notes.txt")], "no .git link written");
+        // A workspace folder saved inside A's workspace (an older setting):
+        // a new task there is refused before any folder is made.
+        let inside = path_a.join("tasks-here");
+        std::fs::create_dir(&inside).unwrap();
+        let settings = sidecar.storage.path().parent().unwrap().join("application-settings-v1");
+        std::fs::create_dir_all(&settings).unwrap();
+        std::fs::write(settings.join("workspace-folder.json"), json!({"path":inside.to_str().unwrap()}).to_string()).unwrap();
+        let project_id = sidecar.storage.projection_records("project").unwrap().into_iter()
+            .find(|p| p["canonical_path"].as_str().is_some_and(|path| path.ends_with("/source"))).unwrap()["project_id"].as_str().unwrap().to_owned();
+        let prepared = sidecar.g5.prepare_chat_workspace_with_baseline(&mut sidecar.storage, &mut sidecar.projects, &project_id, "req_inside", true);
+        assert!(prepared.is_err_and(|error| error.detail.contains("overlaps another task's workspace")));
+        assert!(listing(&inside).is_empty(), "no project or task folder made");
+    }
+
+    /// A workspace folder inside the project itself (`~/elsecrew` as the
+    /// project, `~/elsecrew/workspaces` as the folder): the new task is
+    /// refused before its project folder is made there (PR #18 review B1,
+    /// 3rd round). The same for the app's data and another saved project.
+    #[test]
+    fn a_task_folder_inside_the_project_itself_is_refused_before_anything_is_made() {
+        let (root, mut sidecar, _) = service();
+        let source = root.path().join("source");
+        let project_id = sidecar.storage.projection_records("project").unwrap().into_iter()
+            .find(|p| p["canonical_path"].as_str().is_some_and(|path| path.ends_with("/source"))).unwrap()["project_id"].as_str().unwrap().to_owned();
+        let settings = sidecar.storage.path().parent().unwrap().join("application-settings-v1");
+        std::fs::create_dir_all(&settings).unwrap();
+        let listing = |dir: &std::path::Path| std::fs::read_dir(dir).unwrap().count();
+        for (label, home) in [("project", source.join("workspaces")), ("app data", sidecar.storage.path().parent().unwrap().join("tasks-here"))] {
+            std::fs::create_dir_all(&home).unwrap();
+            std::fs::write(settings.join("workspace-folder.json"), json!({"path":std::fs::canonicalize(&home).unwrap().to_str().unwrap()}).to_string()).unwrap();
+            let prepared = sidecar.g5.prepare_chat_workspace_with_baseline(&mut sidecar.storage, &mut sidecar.projects, &project_id, &format!("req_inside_{}", label.replace(' ', "_")), true);
+            assert!(prepared.is_err_and(|error| error.detail.contains("overlaps the project or the app's data")), "{label}");
+            assert_eq!(listing(&home), 0, "{label}: nothing made");
+        }
+        // Another saved project holding the folder (made with the default folder).
+        // (Here the app's data folder holds every test folder too, so either rule answers.)
+        std::fs::remove_file(settings.join("workspace-folder.json")).unwrap();
+        let (other_chat, _) = another_task(&mut sidecar, &root.path().join("other"), "other");
+        let _ = other_chat;
+        let home = root.path().join("other").join("tasks");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(settings.join("workspace-folder.json"), json!({"path":std::fs::canonicalize(&home).unwrap().to_str().unwrap()}).to_string()).unwrap();
+        let prepared = sidecar.g5.prepare_chat_workspace_with_baseline(&mut sidecar.storage, &mut sidecar.projects, &project_id, "req_inside_other", true);
+        assert!(prepared.as_ref().is_err_and(|error| error.detail.contains("overlaps")), "{:?}", prepared.as_ref().map(|_| ()).map_err(|e| e.detail.clone()));
+        assert_eq!(listing(&home), 0, "another project: nothing made");
+    }
+
+    /// A repository whose .git folder shares another's objects and refs
+    /// (`commondir`) is not a repository of its own; names differing only in
+    /// case are one folder on macOS (PR #18 re-review B1).
+    #[test]
+    fn a_shared_common_git_folder_is_refused_and_case_does_not_split_a_folder() {
+        let (root, mut sidecar, _) = service();
+        let sharing = root.path().join("sharing");
+        std::fs::create_dir(&sharing).unwrap();
+        std::fs::write(sharing.join("x.txt"), "x\n").unwrap();
+        assert!(Command::new("/usr/bin/git").args(["init", "-q"]).current_dir(&sharing).status().unwrap().success());
+        std::fs::write(sharing.join(".git/commondir"), format!("{}\n", root.path().join("source/.git").display())).unwrap();
+        let opened = sidecar.projects.open_project(&mut sidecar.storage, sharing.to_str().unwrap(), "req_open_sharing");
+        assert!(opened.as_ref().is_err_and(|error| error.detail.contains("commondir")), "{:?}", opened.map(|a| a.result).map_err(|e| e.detail));
+        if cfg!(target_os = "macos") {
+            assert!(crate::project::write_scope_path_within(std::path::Path::new("/Users/Someone/Work/a"), std::path::Path::new("/users/someone/work")));
+        }
+        assert!(!crate::project::write_scope_path_within(std::path::Path::new("/work/ab"), std::path::Path::new("/work/a")), "whole components only");
+    }
+
+    /// Write scopes meet on one Git folder or on folders inside one another.
+    #[test]
+    fn write_scopes_meet_on_a_shared_repository_or_nested_folders() {
+        let (root, mut sidecar, _) = service();
+        let (chat_a, _) = another_task(&mut sidecar, &root.path().join("source"), "a");
+        let (chat_c, _) = another_task(&mut sidecar, &root.path().join("source"), "c");
+        let (chat_b, _) = another_task(&mut sidecar, &root.path().join("other"), "b");
+        let scope = |chat: &Value| {
+            let address = project::WorkspaceAddress { chat_id: chat["chatId"].as_str().unwrap().into(), project_id: chat["projectId"].as_str().unwrap().into(),
+                worktree_id: chat["worktreeId"].as_str().unwrap().into(), workspace_identity: chat["workspaceIdentity"].as_str().unwrap().into() };
+            sidecar.projects.task_write_scope(&sidecar.storage, &address).unwrap()
+        };
+        let (a, c, b) = (scope(&chat_a), scope(&chat_c), scope(&chat_b));
+        assert!(a.meets(&c), "one repository, one lock");
+        assert!(!a.meets(&b), "separate repositories in separate folders");
+        assert!(a.meets(&a));
+        let view = sidecar.projects.project_write_scope(&sidecar.storage, chat_a["projectId"].as_str().unwrap()).unwrap();
+        assert!(view.meets(&a) && !view.meets(&b));
+    }
+
+    /// Something in flight that names no task makes every task busy, as the
+    /// earlier app-wide rule did; so does a busy task whose paths cannot be
+    /// read.
+    #[test]
+    fn work_in_flight_without_a_task_blocks_every_task() {
+        let (root, mut sidecar, chat_a) = service();
+        let (chat_b, path_b) = another_task(&mut sidecar, &root.path().join("other"), "other_project");
+        std::fs::write(path_b.join("from_b.txt"), "task B\n").unwrap();
+        let odd = sidecar.workflow_request("req_unattributed".into(), "agent.getCapabilities", json!({"runtime":"claude-code","refresh":true,"chatId":7}));
+        sidecar.pending_agent_capabilities.insert("req_unattributed".into(), odd);
+        assert_eq!(sidecar.busy_chats(), crate::work_scope::BusyChats::Unknown);
+        assert_eq!(refused_with(&merge(&mut sidecar, "req_merge_b", &chat_b)), Some("requestBlocked"));
+        assert_eq!(refused_with(&ask_catalog(&mut sidecar, "req_discard_a", "inspectChatDiscard", &chat_a, json!({"taskId":chat_a["taskId"]}))), Some("requestBlocked"));
+        sidecar.pending_agent_capabilities.clear();
+        // A busy task without a readable record meets everything.
+        sidecar.workflow_chats.insert("chat_gone".into());
+        assert_eq!(refused_with(&merge(&mut sidecar, "req_merge_b_unknown", &chat_b)), Some("requestBlocked"));
+        sidecar.workflow_chats.clear();
+        // A settings model list (no task) blocks nothing.
+        let list = sidecar.workflow_request("req_model_list".into(), "agent.getModelChoices", json!({"runtime":"claude-code","refresh":true,"chatId":null,"roleId":null}));
+        sidecar.pending_agent_capabilities.insert("req_model_list".into(), list);
+        assert!(sidecar.busy_chats().is_empty());
+        let merged = merge(&mut sidecar, "req_merge_b_after", &chat_b);
+        assert!(merged.ok, "{merged:?}");
+    }
+
+    /// A project's own view: a save waits while a task of that project works,
+    /// and a later step of that save is tied to it by its save ID.
+    #[test]
+    fn a_save_to_a_project_view_waits_only_for_that_projects_tasks() {
+        let (root, mut sidecar, chat_a) = service();
+        let (chat_b, _) = another_task(&mut sidecar, &root.path().join("other"), "other_project");
+        sidecar.workflow_chats.insert(chat_a["chatId"].as_str().unwrap().into());
+        let save = |project: &Value| json!({"projectId":project,"path":"hello.txt","expectedVersion":"sha256:unused","totalBytes":1,"encoding":"utf-8"});
+        assert_eq!(refused_with(&ask(&mut sidecar, "req_view_a", "file.save", save(&chat_a["projectId"]))), Some("orchestrationBusy"));
+        let other = ask(&mut sidecar, "req_view_b", "file.save", save(&chat_b["projectId"]));
+        assert_ne!(refused_with(&other), Some("orchestrationBusy"), "{other:?}");
+        // An unknown save ID is left to the save's own check.
+        let unknown = ask(&mut sidecar, "req_chunk_unknown", "file.save", json!({"saveId":"save_unknown","seq":1,"text":"x"}));
+        assert_ne!(refused_with(&unknown), Some("orchestrationBusy"), "{unknown:?}");
+        sidecar.workflow_chats.clear();
+    }
 }
