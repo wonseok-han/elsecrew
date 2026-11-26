@@ -15,6 +15,7 @@
   - Rust: `cargo test -p elsecrew-core --lib` 245 통과. `cargo test -p elsecrew-sidecar` 전체 1회: 915 통과·3 실패 → 3개는 예전 줄 모양을 기대한 테스트라 새 규칙으로 고쳤고 해당 묶음(`activity`·`claude_native`·`codex_durable`) 14개 통과. 이후 변경은 영향 묶음만 재실행했다(다른 워커가 sidecar 테스트 대기 중이라 전체 재실행은 생략).
   - 실제 이벤트: 기본 프로필은 다른 워커 앱(ade-preview-backend)이 쓰고 있어 앱 안 실제 실행 대신, 앱 밖에서 Claude Code 2.1.328(`claude -p --output-format stream-json`, haiku)과 Codex app-server 0.167.2로 같은 짧은 작업(ls·읽기·검색·수정·새 파일·npm test·토큰 섞인 명령·실패 명령)을 실제 실행해 프레임을 기록했다. 이를 실제 Rust 파서·줄 생성기로 재생(`replay_recorded_frames`, `--ignored` 개발 도구)하고, 실제 `MemberCard`를 가짜 브리지로 그려 캡처했다(`scripts/m5-activity-detail-ui.mjs`). 변경 전 캡처는 feature/ade 원래 화면 코드로 그렸고 줄은 예전 엔진 규칙으로 만든 것이다.
   - 캡처: `~/Documents/elsecrew-ade-activity-detail-2026-11-26/`(before-cards-1·2, after-cards-1·2, after-detail-1·2, replay.json). 토큰은 엔진에서 이미 `GITHUB_TOKEN=••••`로 저장됐고 화면 HTML에 원문이 없음을 확인했다.
+- **PR**: https://github.com/wonseok-han/elsecrew/pull/11 (`--base feature/ade`). GitGuardian이 첫 푸시에서 고정 파일의 가짜 비밀값 4개(일반 비밀번호·CLI 비밀·jwt.io 예시 JWT)를 잡아, 비밀처럼 보이는 입력을 `textHex`로 바꾸고 제 브랜치 커밋을 다시 만들어 강제 푸시했다. 검사는 통과했고, 대시보드에는 버려진 커밋 475059bf의 사건 4건(가짜 값)이 남아 있다.
 - **남은 것**: 앱 안 실제 실행(로그인된 프로필)으로 카드 확인은 기본 프로필이 비면 다시 한다. Codex의 webSearch 항목과 Claude의 WebFetch는 앱이 지금 표시하지 않거나 거절하므로 '웹 · 도메인' 줄은 Claude WebFetch 요청(거절 표시)에서만 보인다. Claude 명령의 실행 위치는 남기지 않는다.
 
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #9 재확인(B1·I1 부분 해결) 마지막 라운드 (`orca/ade-preview-ui`)
@@ -143,6 +144,7 @@ PR #6은 머지됐다(8493496e). 재확인(`REVIEW-pr6-2.md`)에서 B1 해결, I
 - **앱 종료는 막지 않는다(2026-11-17 사용자 결정)**: 종료하면 실행 중인 작업을 멈추고 최대 10초 기다린 뒤 묻지 않고 끈다(`quit-coordinator.ts`). 다음 시작에서 기록된 프로세스가 모두 사라졌고 작업 공간과 기록이 정상인 실행은 자동으로 canceled가 된다(`interrupted_run_upserts`). 불확실한 경우만 사용자 복구로 남긴다. 사용자 복구(abandon)는 채팅을 discarded로 만들므로 자동 정리에 쓰지 않는다.
 - **작업 내역 채널과 이전 빌드(2026-11-17)**: 실행 출력의 `activity` 채널은 이전 빌드가 모르는 값이다. 작업 내역이 한 줄이라도 저장된 앱 데이터를 이전 빌드로 열면 출력 재검증에서 거절돼 영구 admission 실패가 된다(schema 버전은 같다). 개발 빌드끼리 같은 실제 데이터를 오가지 않는다. Claude 실행은 결과에 적힌 거절이 모두 앱이 거절한 tool_use일 때만 정상 종료로 본다.
   - **2026-11-26 변경(주인님 피드백)**: 작업 내역은 이제 명령 줄 자체(비밀 모양 가림)·실행 위치·종료 코드·걸린 시간·바뀐 줄 수·명령 출력 앞부분을 남긴다. "도구 입력 원문은 공개하지 않는다"는 옛 규칙은 명령에 한해 폐지됐다. 파일 내용(Read 결과·diff 본문)은 여전히 저장하지 않는다. 형식·규칙은 architecture "실행 출력" 절.
+  - 함정: 저장소에 GitGuardian PR 검사가 있다. 테스트에 비밀처럼 보이는 가짜 값(`PGPASSWORD=…`, `--password …`, 예시 JWT 등)을 그대로 넣으면 실패하고, 이후 커밋으로 지워도 PR의 앞 커밋이 계속 걸린다. 공용 사례처럼 16진수로 넣거나 처음부터 피한다.
   - 비밀 가림 규칙은 Rust(`activity.rs` `mask_secrets`)와 TS(`secret-shape.ts` `maskSecrets`) 두 곳이다. 규칙을 바꾸면 둘 다 고치고 `tests/fixtures/m5/secret-mask-cases.json`에 사례를 넣는다(양쪽 테스트가 같은 결과를 요구). 가린 결과는 다시 가려도 같아야 한다(개인 키 블록은 `PRIVATE KEY ••••`로 바꿔 BEGIN 줄이 남지 않게 함).
   - 함정: Claude CLI의 `tool_use_result`는 성공한 Bash면 `{stdout, stderr}` 객체지만 실패하면 `"Error: Exit code N\n…"` 문자열이다. Write로 새 파일을 만들면 structuredPatch가 빈 배열이고 `type:"create"`·`content`로 줄 수를 센다. Codex는 `item/completed`에 command를 다시 싣지만 sidecar 상태는 시작 때 값을 쓴다.
   - 함정: activity 행은 append할 수 없다(`complete`만). 끝난 결과는 같은 `id`의 두 번째 행으로 쓰고 화면이 합친다.
