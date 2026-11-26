@@ -2,6 +2,22 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — 실행 안정성 D1 보강·D2 큰 줄 (`orca/ade-stability`, 기준 feature/ade 8c036abd)
+근거: 1차 통합 검증 보고서 `~/Documents/elsecrew-ade-v-2026-11-26/REPORT.md`의 D1·D2.
+
+- **D1 원인(재확인)**: `#registerStream`의 한도 초과 throw가 stdout 처리(`#onEnvelope`) 안에서 나서 그대로 `protocolInvalid` → 엔진 재시작이 됐다. 한도를 채운 누수(`workspace.blob.chunk` 미정리)는 PR #15가 고쳤지만, 그 뒤에도 동시 17개면 여전히 엔진 실패였다(새 시험 4개 중 3개가 #15 머지본에서 실패 확인).
+- **D1 보강**: 한도 초과는 `SidecarStreamCapacityError`로 그 요청만 실패시킨다. 거부한 스트림은 크기·청크 수만 기억해 남은 청크를 조용히 버리고 화면에도 보내지 않는다(최대 64개). 알 수 없는·중복·크기 초과·완료 뒤 청크는 계속 프로토콜 위반이다. 빈 스트림은 자리를 차지하지 않는다. 대기열은 쓰지 않았다: sidecar는 응답 직후 청크를 같은 순서로 보내므로 정상이면 스트림이 동시에 쌓이지 않고, 자리가 새는 경우 대기열은 영원히 멈출 수 있다. 시험 `tests/m5-sidecar-stream-capacity.test.mts`(4개).
+- **D2 원인**: Claude·Codex 세션 출력은 모두 `LoginIo::poll_inner`를 거친다. 한 줄 128KiB 초과뿐 아니라 **연결당 누적 수신 1MiB(`PROVIDER_OBSERVATION_TOTAL_MAX_BYTES`) 초과도 실패**시켰다. 줄 한도만 고치면 큰 이미지 7장쯤에서 다시 끊긴다. 보내는 쪽 누적(승인 응답·후속 입력) 1MiB도 같은 문제다. Codex 경로도 같은 한도다(큰 명령 출력·`turn/diff/updated`·fileChange diff).
+- **D2 수정**: 세션이 묶인 뒤(Claude 세션 채널 생성, Codex 스레드 일치 후 턴)만 `admit_session_lines`로 세션 모드를 켠다. 한 줄을 8MiB까지 읽고(`PROVIDER_SESSION_LINE_RAW_MAX_BYTES`), 128KiB를 넘으면 `elsecrew_core::provider::oversized_line`이 긴 문자열(4KiB 초과)을 앞 256바이트 + 생략 표시로 줄여 관측한다. 중복 키 검사는 줄이기 전에 한다. 세션 모드에서는 64KiB씩 읽고 줄바꿈 탐색 위치를 기억한다(긴 줄 반복 스캔 방지).
+  - 줄이는 것: Claude 도구 결과(`user`)와 무시되는 프레임, assistant의 비공개 블록(공개 text는 그대로). Codex는 id 없는 알림만(delta·agentMessage/plan text 제외).
+  - **절대 줄이지 않는 것**: `control_request`·`control_cancel_request`·`control_response`·`result`·`system/init`, Codex의 모든 요청·응답. 허용 응답이 입력을 `updatedInput`으로 그대로 되돌려 보내므로 줄이면 사용자 파일이 잘린 내용으로 써진다(데이터 손상 경계). 이런 줄은 지금처럼 한도 초과 시 실패한다.
+  - 작업 기록이 읽는 값은 보존한다: 새 파일 줄 수(`tool_use_result.content` → 같은 줄 수의 빈 줄), Codex fileChange의 추가/삭제 줄 수(`diff_counts`가 같은 값을 내는 짧은 diff), 종료 코드 앞부분.
+  - **안전 경계 변경(검토 대상)**: 세션 모드의 연결 누적 한도(받기·보내기)를 1MiB → 256MiB(DurableV1 세션 예산과 같음)로 올렸다. 바이트 수를 셀 뿐이며 메모리에 동시에 드는 것은 한 줄(최대 8MiB)이다. 세션 파서의 자체 예산은 그대로다. 로그인·사전 점검 교환은 엄격한 128KiB/1MiB를 유지한다.
+- **재현 시험**: core `provider::oversized_line::tests`(7, 148KB 이미지·공개 text 보존·권한 요청 거부·중복 키·Codex·작업 기록 수 보존·이미지 10장 세션), sidecar `provider_login_io` 실제 파이프(이미지 줄 10개 + 누적 1MiB 초과 통과, 세션 모드 없으면 실패, 권한 요청 거부, 9MB 무종단 줄 거부), `provider_claude_session::tests::a_session_keeps_going_after_reading_ten_large_images`(가짜 Claude 프로세스 → 세션 채널, 수정 없는 대조 시험은 실패).
+- **검증**: `cargo test -p elsecrew-core` 252, protocol 75, `-p elsecrew-sidecar` lib 928·stdio_process 16(실패 0), `npm test` 963/963, `pnpm build`.
+- **함정**: scm_breeze 환경에서 `cd <폴더> && ...`의 `cd`가 조용히 실패해 뒤 명령이 현재 워크트리에서 돈다. 시험 폴더용 `git add -A && git commit`이 이 워크트리 변경을 엉뚱한 커밋으로 묶은 일이 있었다(곧바로 `reset --soft`로 되돌림, 손실 없음). 다른 폴더 작업은 `git -C <절대경로>`와 절대경로만 쓴다.
+- **남은 일**: 실제 앱에서 큰 이미지 읽기 확인(아래 갱신), Codex 검토 대응. 큰 Write의 권한 요청(입력 128KiB 초과)은 여전히 세션을 끊는다 — 허용 응답 프레임 자체도 128KiB 한도라 별도 설계가 필요하다.
+
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #15 독립 검토(차단 1·중요 3·경미 2) 반영 (`orca/ade-latency`)
 검토서 `~/Documents/elsecrew-ade-v-2026-11-26/REVIEW-pr15.md`(대상 60e4e0d1). 무결성(projection 손상 검출·승인 전체 재검사·D1 정리)은 유지 판정.
 
@@ -46,8 +62,8 @@
   - 앱 전용 로그인은 프로필 안에 있다(Codex `…/m5/codex-profile-v1/auth.json`, Claude는 설정 폴더 경로 해시로 구분된 Keychain 항목). 그래서 임시 `--user-data-dir`로는 실제 실행이 안 된다.
   - 개발 앱 창이 다른 창에 완전히 가려지면 macOS Electron이 `hide`를 보내 미리보기가 숨고, rAF도 멈춘다. CDP 측정 중 "뷰가 안 보임"은 이것부터 의심한다(창을 앞으로 가져오면 다시 보인다).
   - main 디버거(`--inspect=<port>`)에서는 `require.cache[".../.vite/build/main.cjs"].exports.previewManager`로 미리보기 상태(`currentLayout`·`visibility`·`refusedMeasurements`)를 읽을 수 있다.
-  - 큰 도구 결과(이미지)가 Claude 출력 한 줄 128KiB를 넘으면 실행이 멈춘다(D2).
-  - 동시 스트림 16개를 넘으면 엔진이 재시작된다(D1).
+  - 큰 도구 결과(이미지)가 Claude 출력 한 줄 128KiB를 넘으면 실행이 멈췄다(D2). 이제 세션 모드에서 8MiB까지 읽고 줄여 관측한다. 권한 요청 줄은 줄이지 않는다(허용 응답이 입력을 되돌려 보냄).
+  - 동시 스트림 16개를 넘으면 엔진이 재시작됐다(D1). 누수는 PR #15, 한도 초과를 그 요청만의 실패로 바꾼 것은 ade-stability.
 
 - **색은 토큰 블록 두 곳에만(2026-11-26, 화면 통일 U0·U1)**: `styles.css`의 다크 `:root`와 라이트 `:root[data-theme="light"]` 밖에는 hex·`rgb()`를 쓰지 않는다. 화면 코드에도 색 리터럴을 쓰지 않는다(Monaco는 `theme.ts`가 토큰에서 읽음). `tests/m5-style-tokens.test.mts`가 대비(다크·라이트 각 95쌍)·블록 밖 색 0·정의되지 않은 토큰 0을 막는다. 라이트 값은 1단 `--p-*`만 바꾼다. 새 화면은 공용 컴포넌트 클래스(`.m5-btn-*`·`.m5-badge`·`.m5-banner`·`.m5-card`·`.m5-group`·`.m5-empty-state`·`.m5-steps`·`.m5-recover`)를 쓴다.
   - 화면 밝기 기록의 기준은 main의 `userData/appearance.json`이다(PR #10 검토 I1로 바꿈). 렌더러 `localStorage`(`elsecrew.theme.v1`)는 첫 페인트용 사본이다. 렌더러는 시작 때 `m5Appearance.get()`으로 기록을 받아 따르고, main에 읽을 수 있는 기록이 없을 때만 올바른 사본으로 복구한다(손상 사본은 보내지 않음). 기록은 `.tmp` + rename으로 바꾸며 실패는 `saved: false`로 화면에 알린다. 시스템 밝기 변경은 `nativeTheme.updated`가 창 배경을, `prefers-color-scheme`이 CSS·Monaco를 바꾼다.
