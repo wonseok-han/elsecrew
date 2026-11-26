@@ -1,7 +1,7 @@
 import { sealFromStderr } from "./storage-seal.ts";
 import { validateSaveRecoveryResolveRequest, validateSaveRecoveryResolveResult, type SaveRecoveryResolveRequest, type SaveRecoveryResolveResult } from "../src/m5/contracts/save-recovery-v1.ts";
 import { validateSaveRecoveryRequest, validateSaveRecoveryResult, type SaveRecoveryResult } from "../src/m5/contracts/save-recovery-v1.ts";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID, type Hash } from "node:crypto";
 import { validateAgentRunBindingV1 } from "../src/m5/contracts/agent-adapter-v1.ts";
 import { validateDecodedOutputPage, validateOutputHead, validateOutputPageRequest, type OutputHead, type OutputPage, type OutputPageRequest } from "../src/m5/contracts/agent-output-pages.ts";
 import { validateModelChoicesRequest, validateModelChoicesResult, type ModelChoicesRequest, type ModelChoicesResult } from "../src/m5/contracts/model-choices-v1.ts";
@@ -205,6 +205,7 @@ export const MAX_SIDECAR_STDERR_TAIL_BYTES = 32 * 1024;
 const MAX_FILE_STREAM_BYTES = 5 * 1024 * 1024;
 const MAX_DIFF_STREAM_BYTES = 10 * 1024 * 1024;
 const MAX_ACTIVE_STREAMS = 16;
+const chunkEncoder = new TextEncoder();
 const MAX_ACTIVE_STREAM_BYTES = 160 * 1024 * 1024;
 const MAX_STREAM_EVENTS = 256;
 
@@ -254,7 +255,10 @@ interface AgentChatContextV1 extends Omit<AgentRunContextV1, "roleId" | "capabil
 interface TextStreamV1 {
   byteLength: number;
   expectedVersion: FileVersionV1 | null;
-  text: string;
+  /** Bytes and digest so far, advanced one chunk at a time: a many-chunk file
+   * or diff is never encoded again from its start (PR #15 review I3). */
+  received: number;
+  digest: Hash;
   events: number;
 }
 
@@ -843,7 +847,10 @@ export class SidecarClientV1 {
         this.#resolveReady = undefined;
         this.#rejectReady = undefined;
       }
-      if (envelope.event === "blob.chunk") this.#acceptChunk(envelope);
+      // Task-workspace reads and diffs register their streams too: their
+      // chunks must settle them, or after 16 opened files the next read
+      // exceeded the active-stream bound and failed the engine (2026-11-26).
+      if (envelope.event === "blob.chunk" || envelope.event === "workspace.blob.chunk") this.#acceptChunk(envelope);
       if (["file.changed", "file.conflict", "diff.changed"].includes(envelope.event)) {
         const watch = validateWatchEventV1(envelope.payload);
         for (const listener of this.#projectListeners) listener(watch, envelope);
@@ -1269,7 +1276,8 @@ export class SidecarClientV1 {
     this.#streams.set(stream.streamId, {
       byteLength,
       expectedVersion,
-      text: "",
+      received: 0,
+      digest: createHash("sha256"),
       events: 0,
     });
     this.#streamBytes += byteLength;
@@ -1281,11 +1289,13 @@ export class SidecarClientV1 {
     const text = event.payload.text;
     if (typeof text !== "string") throw new Error("blob.chunk text is invalid");
     if (++stream.events > MAX_STREAM_EVENTS) throw new Error("blob.chunk exceeds 256 events per stream");
-    stream.text += text;
-    const bytes = new TextEncoder().encode(stream.text);
-    if (bytes.byteLength > stream.byteLength) throw new Error("blob.chunk exceeds declared stream size");
-    if (bytes.byteLength === stream.byteLength) {
-      if (stream.expectedVersion && sha256FileVersionV1(bytes) !== stream.expectedVersion) throw new Error("blob.chunk hash does not match declared version");
+    // Chunks are whole UTF-8 text, so their bytes concatenate to the stream's.
+    const bytes = chunkEncoder.encode(text);
+    stream.received += bytes.byteLength;
+    if (stream.received > stream.byteLength) throw new Error("blob.chunk exceeds declared stream size");
+    stream.digest.update(bytes);
+    if (stream.received === stream.byteLength) {
+      if (stream.expectedVersion && `sha256:${stream.digest.digest("hex")}` !== stream.expectedVersion) throw new Error("blob.chunk hash does not match declared version");
       this.#streams.delete(event.streamId);
       this.#streamBytes -= stream.byteLength;
     }

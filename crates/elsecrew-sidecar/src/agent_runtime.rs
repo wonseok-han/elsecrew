@@ -142,6 +142,9 @@ pub(crate) enum FakeScenario {
     #[cfg_attr(not(test), allow(dead_code))]
     LongStream,
     PacedLongStream,
+    /// The paced stream with a read-only handshake: a team lead (coordinator)
+    /// run for latency probes (scripts/m5-latency-probe.cjs).
+    PacedLongStreamReadOnly,
     ProviderTerminalFailed,
     ProviderTerminalRecoveryRequired,
 }
@@ -580,7 +583,7 @@ impl AgentRuntime {
             || (self.provider == ProviderMode::FakeExact
                 && matches!(
                     self.scenario,
-                    FakeScenario::LongStream | FakeScenario::PacedLongStream | FakeScenario::OrchestratorDelegate | FakeScenario::OrchestratorDelegateCustom | FakeScenario::OrchestratorFinal
+                    FakeScenario::LongStream | FakeScenario::PacedLongStream | FakeScenario::PacedLongStreamReadOnly | FakeScenario::OrchestratorDelegate | FakeScenario::OrchestratorDelegateCustom | FakeScenario::OrchestratorFinal
                 ))
     }
 
@@ -4668,6 +4671,7 @@ fn scenario_name(value: FakeScenario) -> &'static str {
         FakeScenario::PublicAggregatePlusOne => "public-aggregate-plus-one",
         FakeScenario::LongStream => "long-stream",
         FakeScenario::PacedLongStream => "paced-long-stream",
+        FakeScenario::PacedLongStreamReadOnly => "paced-long-stream-read-only",
         FakeScenario::ProviderTerminalFailed => "provider-terminal-failed",
         FakeScenario::ProviderTerminalRecoveryRequired => "provider-terminal-recovery-required",
     }
@@ -4759,6 +4763,7 @@ pub(crate) fn run_agent_fixture_launcher(scenario: &str) -> Result<(), SidecarEr
         "public-aggregate-plus-one",
         "long-stream",
         "paced-long-stream",
+        "paced-long-stream-read-only",
         "provider-terminal-failed",
         "provider-terminal-recovery-required",
     ]
@@ -4851,7 +4856,7 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
         "handshake-version-mismatch" => handshake["claude_code_version"] = json!("2.1.242"),
         "handshake-model-mismatch" => handshake["model"] = json!("claude-unknown"),
         "handshake-cwd-mismatch" => handshake["cwd"] = json!("/not/managed"),
-        "clean-read-only" | "orchestrator-delegate" | "orchestrator-delegate-custom" | "orchestrator-final" | "orchestrator-delegate-planning" | "orchestrator-planner" | "handshake-permission-mismatch" => handshake["permissionMode"] = json!("readOnly"),
+        "clean-read-only" | "paced-long-stream-read-only" | "orchestrator-delegate" | "orchestrator-delegate-custom" | "orchestrator-final" | "orchestrator-delegate-planning" | "orchestrator-planner" | "handshake-permission-mismatch" => handshake["permissionMode"] = json!("readOnly"),
         "handshake-tools-mismatch" => handshake["tools"] = json!(["Read"]),
         "handshake-mcp-mismatch" => handshake["mcp_servers"] = json!(["unsafe"]),
         "handshake-plugins-mismatch" => handshake["plugins"] = json!(["unsafe"]),
@@ -4916,8 +4921,8 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
             }
             println!("{{\"type\":\"terminal\",\"outcome\":\"succeeded\"}}")
         }
-        "long-stream" | "paced-long-stream" => {
-            let paced = scenario == "paced-long-stream";
+        "long-stream" | "paced-long-stream" | "paced-long-stream-read-only" => {
+            let paced = scenario != "long-stream";
             let started = std::time::Instant::now();
             for sequence in 1..=3000 {
                 let text = if paced {

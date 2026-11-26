@@ -537,6 +537,7 @@ fn seed_pending(path: &Path, phase: &str, after: u32) {
         writes_admitted: true,
         maintenance_epoch: 0,
         opened_from_seal: false,
+        projection_memo: Default::default(),
     };
     let (baseline_id, baseline_digest) = insert_baseline(&storage.connection, 1000);
     if phase == "freezeOperations" {
@@ -617,6 +618,7 @@ fn seed_chat_pending(path: &Path, phase: &str, after: u32) {
         writes_admitted: true,
         maintenance_epoch: 0,
         opened_from_seal: false,
+        projection_memo: Default::default(),
     };
     let (baseline_id, baseline_digest) =
         insert_baseline_for(&storage.connection, "chat", CHAT_ID, 1000);
@@ -897,6 +899,7 @@ fn append_after_plan_cutoff(path: &Path) {
         writes_admitted: true,
         maintenance_epoch: 0,
         opened_from_seal: false,
+        projection_memo: Default::default(),
     };
     assert_eq!(
         storage
@@ -1359,6 +1362,7 @@ fn product_admission_accepts_two_succeeded_v9_plans_as_one_bounded_chain() {
         writes_admitted: true,
         maintenance_epoch: 0,
         opened_from_seal: false,
+        projection_memo: Default::default(),
     };
     let (baseline_1000, digest_1000) = insert_baseline(&storage.connection, 1000);
     let (baseline_2000, digest_2000) = insert_baseline(&storage.connection, 2000);
@@ -1705,6 +1709,7 @@ fn product_admission_migrates_exact_v9_to_v10_and_preserves_terminal_evidence() 
         writes_admitted: true,
         maintenance_epoch: 0,
         opened_from_seal: false,
+        projection_memo: Default::default(),
     };
     configure_connection(&storage.connection).unwrap();
     let (baseline_id, baseline_digest) = insert_baseline(&storage.connection, 1000);

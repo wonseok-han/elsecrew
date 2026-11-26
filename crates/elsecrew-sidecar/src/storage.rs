@@ -123,6 +123,31 @@ pub struct Storage {
     maintenance_epoch: u64,
     /// Admitted on a clean shutdown's seal instead of the full check.
     opened_from_seal: bool,
+    /// Projection rows already parsed, by their stored bytes.
+    projection_memo: ProjectionMemo,
+}
+
+/// Parsed projection rows remembered by their stored bytes (latency work
+/// 2026-11-26). A record lookup has to validate every row of every projection
+/// table so that a damaged row anywhere fails it; parsing all of them on each
+/// of the many lookups a request or a 100 ms loop pass makes kept the engine
+/// busy for seconds with a few hundred runs. Every lookup still reads every
+/// row and compares its bytes and sequence with the remembered ones; only a
+/// row that differs is parsed again. A row is accepted exactly when parsing it
+/// would accept it, so the result equals the full parse; nothing is trusted
+/// across a change the comparison would not see.
+#[derive(Default)]
+pub(crate) struct ProjectionMemo {
+    tables: std::cell::RefCell<BTreeMap<&'static str, BTreeMap<String, MemoRow>>>,
+    /// Rows parsed so far (tests check that unchanged rows are not parsed again).
+    #[cfg(test)]
+    parsed: std::cell::Cell<usize>,
+}
+
+struct MemoRow {
+    source: Box<str>,
+    sequence: u64,
+    value: Map<String, Value>,
 }
 
 #[derive(Clone, Copy)]
@@ -275,7 +300,7 @@ impl Storage {
         connection.execute_batch("PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; PRAGMA query_only=ON;")
             .map_err(|_| SidecarError::new("storageReadFailed", "repair snapshot unavailable"))?;
         verify_projection_replay(&connection)?;
-        Ok(Self { connection, path, writes_admitted: false, maintenance_epoch: 0, opened_from_seal: false })
+        Ok(Self { connection, path, writes_admitted: false, maintenance_epoch: 0, opened_from_seal: false, projection_memo: ProjectionMemo::default() })
     }
 
     pub fn open(path: &Path) -> Result<Self, SidecarError> {
@@ -498,6 +523,7 @@ impl Storage {
             writes_admitted: true,
             opened_from_seal: false,
             maintenance_epoch: 0,
+            projection_memo: ProjectionMemo::default(),
         })
     }
 
@@ -632,6 +658,7 @@ impl Storage {
             writes_admitted: true,
             opened_from_seal: false,
             maintenance_epoch: 0,
+            projection_memo: ProjectionMemo::default(),
         })
     }
 
@@ -715,7 +742,7 @@ impl Storage {
     pub fn recover_unclean_shutdown(&mut self) -> Result<(), SidecarError> {
         self.ensure_writes_admitted()?;
         let previous = latest_app_instance(&self.connection)?;
-        let projection = load_projection(&self.connection)?;
+        let projection = load_projection_memo(&self.connection, &self.projection_memo, None)?;
         let input = RecoveryInputV1 {
             previous_app_instance: previous.clone(),
             // Durable actual runs must be recovered by AgentRuntime, which
@@ -734,7 +761,7 @@ impl Storage {
         };
         let recovery_timestamp = required_string(&previous, "heartbeat_at")?.to_string();
         let previous_id = required_string(&previous, "sidecar_instance_id")?;
-        let current = load_projection(&self.connection)?;
+        let current = load_projection_memo(&self.connection, &self.projection_memo, None)?;
         let mut events = Vec::new();
 
         for record in recovered.runs {
@@ -801,7 +828,7 @@ impl Storage {
     /// only the latest: a copy of the app data keeps the record of the live
     /// engine it was copied from however often the copy is opened afterwards.
     pub(crate) fn unclean_engine_processes(&self) -> Result<Vec<(u32, String)>, SidecarError> {
-        Ok(load_projection(&self.connection)?
+        Ok(load_projection_memo(&self.connection, &self.projection_memo, None)?
             .app_instances
             .values()
             .filter_map(|row| {
@@ -838,7 +865,7 @@ impl Storage {
         sidecar_instance_id: &str,
     ) -> Result<(), SidecarError> {
         self.ensure_writes_admitted()?;
-        let projection = load_projection(&self.connection)?;
+        let projection = load_projection_memo(&self.connection, &self.projection_memo, None)?;
         let current = projection
             .app_instances
             .get(sidecar_instance_id)
@@ -890,7 +917,7 @@ impl Storage {
     }
 
     pub fn blocker_ids(&self) -> Result<Vec<String>, SidecarError> {
-        let projection = load_projection(&self.connection)?;
+        let projection = load_projection_memo(&self.connection, &self.projection_memo, None)?;
         // A deleted task or project keeps its ledger records, but its leftover
         // recovery no longer holds up quitting or other projects. Live runs
         // still count until they end. Re-adding the folder starts a fresh
@@ -942,8 +969,9 @@ impl Storage {
         aggregate_type: &str,
         aggregate_id: &str,
     ) -> Result<Option<Map<String, Value>>, SidecarError> {
-        let projection = load_projection_selected(
+        let projection = load_projection_memo(
             &self.connection,
+            &self.projection_memo,
             Some((aggregate_type, Some(aggregate_id))),
         )?;
         let table = match aggregate_type {
@@ -965,7 +993,7 @@ impl Storage {
         &self,
         aggregate_type: &str,
     ) -> Result<Vec<Map<String, Value>>, SidecarError> {
-        let projection = load_projection_selected(&self.connection, Some((aggregate_type, None)))?;
+        let projection = load_projection_memo(&self.connection, &self.projection_memo, Some((aggregate_type, None)))?;
         let table = match aggregate_type {
             "project" => &projection.projects,
             "chat" => &projection.chats,
@@ -1149,7 +1177,7 @@ impl Storage {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sqlite_error)?;
         verify_append_runtime_state(&transaction)?;
-        let current = load_projection(&transaction)?;
+        let current = load_projection_memo(&transaction, &self.projection_memo, None)?;
         if current.chats.get(chat_id) != Some(expected) {
             return Ok(false);
         }
@@ -4746,6 +4774,23 @@ fn load_projection_selected(
     connection: &Connection,
     selection: Option<(&str, Option<&str>)>,
 ) -> Result<ProjectionStateV1, SidecarError> {
+    load_projection_with(connection, None, selection)
+}
+
+/// `load_projection_selected` reusing the rows `memo` already parsed.
+fn load_projection_memo(
+    connection: &Connection,
+    memo: &ProjectionMemo,
+    selection: Option<(&str, Option<&str>)>,
+) -> Result<ProjectionStateV1, SidecarError> {
+    load_projection_with(connection, Some(memo), selection)
+}
+
+fn load_projection_with(
+    connection: &Connection,
+    memo: Option<&ProjectionMemo>,
+    selection: Option<(&str, Option<&str>)>,
+) -> Result<ProjectionStateV1, SidecarError> {
     let mut projection = ProjectionStateV1::default();
     let mut statement = connection
         .prepare(
@@ -4794,13 +4839,67 @@ fn load_projection_selected(
         ("run", "runs", "run_id", &mut projection.runs),
         ("lock", "locks", "lock_id", &mut projection.locks),
     ] {
-        load_json_projection(connection, table, column, target, |id| {
+        let retain = |id: &str| {
             selection.is_none_or(|(selected_kind, selected_id)| {
                 selected_kind == kind && selected_id.is_none_or(|selected| selected == id)
             })
-        })?;
+        };
+        match memo {
+            Some(memo) => load_json_projection_memo(connection, memo, table, column, target, retain)?,
+            None => load_json_projection(connection, table, column, target, retain)?,
+        }
     }
     Ok(projection)
+}
+
+/// `load_json_projection` that parses only rows whose bytes or sequence differ
+/// from what `memo` holds for the table. Every row is still read and compared.
+fn load_json_projection_memo(
+    connection: &Connection,
+    memo: &ProjectionMemo,
+    table: &'static str,
+    id_column: &str,
+    target: &mut std::collections::BTreeMap<String, Map<String, Value>>,
+    retain: impl Fn(&str) -> bool,
+) -> Result<(), SidecarError> {
+    let sql = format!("SELECT {id_column}, projection_json, last_event_sequence FROM {table};");
+    let mut statement = connection.prepare(&sql).map_err(sqlite_error)?;
+    let mut rows = statement.query([]).map_err(sqlite_error)?;
+    let mut tables = memo.tables.borrow_mut();
+    // Taken out while scanning: a failed scan leaves this table remembering
+    // nothing, and rows that are gone are not kept.
+    let mut known = std::mem::take(tables.entry(table).or_default());
+    let mut fresh = BTreeMap::new();
+    while let Some(row) = rows.next().map_err(sqlite_error)? {
+        let id: String = row.get(0).map_err(sqlite_error)?;
+        let source = row.get_ref(1).map_err(sqlite_error)?.as_str()
+            .map_err(|error| SidecarError::new("databaseFailure", format!("{table}.{id} projection_json: {error}")))?;
+        let sequence = row_u64(row, 2).map_err(sqlite_error)?;
+        let remembered = known
+            .remove(&id)
+            .filter(|row| row.sequence == sequence && *row.source == *source);
+        let entry = match remembered {
+            Some(row) => row,
+            None => {
+                #[cfg(test)]
+                memo.parsed.set(memo.parsed.get() + 1);
+                let mut value: Map<String, Value> = serde_json::from_str(source).map_err(|error| {
+                    SidecarError::new(
+                        "projectionInvalid",
+                        format!("{table}.{id} projection_json is invalid: {error}"),
+                    )
+                })?;
+                value.insert("last_event_sequence".to_string(), Value::from(sequence));
+                MemoRow { source: source.into(), sequence, value }
+            }
+        };
+        if retain(&id) {
+            target.insert(id.clone(), entry.value.clone());
+        }
+        fresh.insert(id, entry);
+    }
+    tables.insert(table, fresh);
+    Ok(())
 }
 
 fn load_json_projection(

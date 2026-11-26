@@ -149,6 +149,18 @@ impl OwnedTextRun {
         storage: &Storage,
         projects: &ProjectManager,
     ) -> Result<RunIdentity, SidecarError> {
+        self.registration_identity_with(storage, projects, false)
+    }
+
+    /// `viewing`: for showing what waits (an approval list or a look at one),
+    /// which may reuse a Git check of the last few seconds like each streamed
+    /// event does. Answering a request always checks in full.
+    pub(super) fn registration_identity_with(
+        &self,
+        storage: &Storage,
+        projects: &ProjectManager,
+        viewing: bool,
+    ) -> Result<RunIdentity, SidecarError> {
         if self.state.finished
             || self.state.run_id != self.reservation.run_id
             || !self.state.transport.matches_process(&self.process)
@@ -158,9 +170,12 @@ impl OwnedTextRun {
                 "native owner differs",
             ));
         }
-        self.reservation
-            .validate_text_input(storage, projects)
-            .map_err(|_| SidecarError::new("agentInputChanged", "native reservation differs"))?;
+        let checked = if viewing {
+            self.reservation.validate_text_input_streaming(storage, projects)
+        } else {
+            self.reservation.validate_text_input(storage, projects)
+        };
+        checked.map_err(|_| SidecarError::new("agentInputChanged", "native reservation differs"))?;
         let run = &self.reservation.run;
         Ok(RunIdentity {
             chat_id: self.reservation.request.chat_id.clone(),
