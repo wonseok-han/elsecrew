@@ -14,7 +14,7 @@ const NAME_LIMIT = 80;
  * stops once every needed project is named (PR #14 review I3). A Map, so an
  * id like "constructor" never reads an inherited property (minor 1).
  */
-function useProjectNames(open: boolean, ids: readonly string[]): ReadonlyMap<string, string> {
+export function useProjectNames(open: boolean, ids: readonly string[]): ReadonlyMap<string, string> {
   const [names, setNames] = useState<ReadonlyMap<string, string>>(new Map());
   const missing = ids.filter(id => !names.has(id));
   const missingKey = missing.join(",");

@@ -69,15 +69,9 @@ impl AgentRuntime {
         if self.preparing_to_quit || self.pending_catalogs.contains_key(request_id) {
             return Err(failure());
         }
-        // Another query (the other provider's list at startup, say) or a run
-        // owns the profile for now: busy, which the app retries shortly,
-        // rather than "unavailable".
-        if !self.owned_run_ids().is_empty() {
-            return Err(SidecarError::new(
-                "providerBusy",
-                "another provider check currently owns this profile; retry after it finishes",
-            ));
-        }
+        // A list goes on beside runs and other checks (ADE multi-project P5:
+        // each holds its own run hold); only sign-in or install, holding the
+        // provider's exclusive hold, makes it busy, which the app retries.
         if !matches!(runtime, "codex" | "claude-code") {
             return Err(failure());
         }
@@ -421,9 +415,8 @@ mod tests {
                 completion: None,
             },
         );
-        let error = runtime.begin_model_catalog(&storage, "second", "claude-code").unwrap_err();
-        assert_eq!(error.kind(), "providerBusy");
-        assert!(error.detail().contains("another provider check currently owns this profile"));
+        // A list goes on beside another check or a run (ADE multi-project P5).
+        runtime.begin_model_catalog(&storage, "second", "claude-code").unwrap();
         runtime.preparing_to_quit = true;
         assert_eq!(runtime.begin_model_catalog(&storage, "third", "codex").unwrap_err().kind(), "agentDiscoveryRejected");
     }

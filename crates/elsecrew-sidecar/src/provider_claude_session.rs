@@ -161,7 +161,15 @@ pub(crate) struct ControlInitialization {
     deadline: Instant,
     flushed: bool,
     failed: bool,
+    /// The last tick, and the engine's stalls so far: see `advance_inner`.
+    ticked: Option<Instant>,
+    stalled: Duration,
 }
+
+/// A gap between ticks longer than this is the engine's, not Claude's.
+const TICK_GAP: Duration = Duration::from_secs(1);
+/// How far the engine's stalls may move the deadline in all.
+const STALL_ALLOWANCE: Duration = Duration::from_secs(120);
 
 /// Digest of what the app requests, not evidence of effective managed settings.
 pub(crate) fn requested_policy_digest(model: &str, effort: Option<&str>, access: ToolAccess,
@@ -569,6 +577,8 @@ impl ControlInitialization {
             deadline: Instant::now() + Duration::from_secs(15),
             flushed: false,
             failed: false,
+            ticked: None,
+            stalled: Duration::ZERO,
         })
     }
 
@@ -601,7 +611,18 @@ impl ControlInitialization {
         if cancel.load(Ordering::Acquire) {
             return Err(initialization_failure("cancellation"));
         }
-        if Instant::now() >= self.deadline {
+        // Runs of one agent start side by side (ADE multi-project P5): another
+        // run's start can hold the engine's one thread for seconds, and that
+        // time is not Claude's to answer in. A gap between ticks moves the
+        // deadline by itself, within a bounded allowance.
+        let now = Instant::now();
+        if let Some(gap) = self.ticked.map(|ticked| now.saturating_duration_since(ticked)).filter(|gap| *gap > TICK_GAP) {
+            let moved = gap.min(STALL_ALLOWANCE.saturating_sub(self.stalled));
+            self.stalled += moved;
+            self.deadline += moved;
+        }
+        self.ticked = Some(now);
+        if now >= self.deadline {
             return Err(initialization_failure("response deadline"));
         }
         if !self.flushed {
@@ -635,7 +656,7 @@ mod tests {
                 "models":[{"value":"opus","resolvedModel":"claude-opus-test","supportsEffort":true,"supportedEffortLevels":["high"]}]}
         }});
         exchange.accept_response(&elsecrew_core::provider::BoundedObservation::new(response.to_string().into_bytes()).unwrap()).unwrap();
-        let initialization = ControlInitialization {exchange,connection:uuid::Uuid::new_v4(),deadline:Instant::now()+Duration::from_secs(15),flushed:true,failed:false};
+        let initialization = ControlInitialization {exchange,connection:uuid::Uuid::new_v4(),deadline:Instant::now()+Duration::from_secs(15),flushed:true,failed:false,ticked:None,stalled:Duration::ZERO};
         let expected = elsecrew_core::provider::vendor_observation::claude_init::ExpectedInit {
             cwd:"/snapshot",model:"opus",permission_mode:"default",tools:expected_tools(ToolAccess::ReadOnly),
         };
@@ -797,7 +818,10 @@ mod tests {
 
     #[test]
     fn owned_toy_control_exchange_handles_reply_cancel_and_deadline_without_prompt() {
-        for case in ["ready", "mismatch", "cancel", "deadline"] {
+        // "stalled": the engine was busy elsewhere past the deadline (another
+        // run's start, P5); that time is not Claude's. "overstalled": the
+        // engine's stalls already used the whole allowance.
+        for case in ["ready", "mismatch", "cancel", "deadline", "stalled", "overstalled"] {
             let temp = tempfile::tempdir().unwrap();
             let root = temp.path().canonicalize().unwrap();
             let storage = Storage::open(&root.join("elsecrew.sqlite3")).unwrap();
@@ -833,6 +857,11 @@ mod tests {
             if case == "deadline" {
                 session.deadline = Instant::now();
             }
+            if case == "stalled" || case == "overstalled" {
+                session.ticked = Some(Instant::now() - Duration::from_secs(20));
+                session.deadline = Instant::now() - Duration::from_secs(1);
+                if case == "overstalled" { session.stalled = STALL_ALLOWANCE; }
+            }
             let observed = loop {
                 match session.advance(&mut process, &cancel, &mut |_| Ok(())) {
                     Ok(false) => std::thread::sleep(Duration::from_millis(2)),
@@ -842,7 +871,7 @@ mod tests {
             let cleanup = process.finish();
             assert!(cleanup.is_ok());
             assert!(process.closure_evidence().is_some_and(|e| e.confirmed()));
-            assert_eq!(observed.is_ok(), case == "ready");
+            assert_eq!(observed.is_ok(), case == "ready" || case == "stalled", "{case}");
             assert!(session
                 .advance(&mut process, &cancel, &mut |_| Ok(()))
                 .is_err());

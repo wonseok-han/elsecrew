@@ -672,6 +672,37 @@ impl G5Manager {
         })
     }
 
+    /// Every project's tasks that work, wait for the person or wait for a
+    /// review, newest change first (ADE multi-project P4). The same tasks a
+    /// project's own list shows: deleted, erased and hidden ones never. All of
+    /// them: the caller orders and shortens the list it shows
+    /// (`order_task_inbox`) and counts the work from all (PR #20 review I4).
+    pub(crate) fn task_inbox(&self, storage: &Storage) -> Result<Vec<Value>, ProjectFailure> {
+        const SHOWN: [&str; 8] = ["preparing", "running", "stopping", "applying", "waitingForUser", "needsAttention", "recoveryRequired", "reviewReady"];
+        let projects: std::collections::BTreeMap<String, Map<String, Value>> = storage.projection_records("project")?
+            .into_iter()
+            .filter(|project| !crate::project::project_deletion::is_deleted(project))
+            .filter_map(|project| Some((project.get("project_id")?.as_str()?.to_owned(), project)))
+            .collect();
+        let mut items: Vec<Value> = storage.projection_records("chat")?
+            .into_iter()
+            .filter_map(|record| {
+                let project = projects.get(record.get("project_id")?.as_str()?)?;
+                let chat_id = record.get("chat_id")?.as_str()?;
+                let hidden = project.get("catalog_hidden_chats").and_then(Value::as_array).is_some_and(|ids| ids.iter().any(|id| id == chat_id));
+                if hidden || crate::project::chat_erasure::erasure_recorded(project, &Value::String(chat_id.to_owned()))
+                    || crate::project::project_deletion::deleted_chat(project, chat_id) { return None; }
+                let chat = record.get("record")?;
+                SHOWN.contains(&chat["state"].as_str()?).then(|| json!({
+                    "projectId": chat["projectId"], "chatId": chat["chatId"], "goal": chat["goal"],
+                    "state": chat["state"], "updatedAt": chat["updatedAt"],
+                }))
+            })
+            .collect();
+        items.sort_by(|left, right| right["updatedAt"].as_str().cmp(&left["updatedAt"].as_str()).then_with(|| left["chatId"].as_str().cmp(&right["chatId"].as_str())));
+        Ok(items)
+    }
+
     pub fn list_chats(
         &self,
         storage: &Storage,
@@ -2152,3 +2183,46 @@ fn now() -> String {
 mod tests;
 #[cfg(test)]
 mod test_binary;
+
+/// How many tasks the inbox shows at most.
+pub(crate) const TASK_INBOX_SHOWN: usize = 200;
+/// How many tasks at work the inbox answer names for the badges at most.
+pub(crate) const TASK_INBOX_WORKING_MAX: usize = 1000;
+
+/// Whether an inbox item is the person's to look at or still at work, not
+/// only ready for review (the renderer's `inboxGroup` "attention"/"working").
+pub(crate) fn inbox_item_active(item: &Value) -> bool {
+    item["state"] != "reviewReady" || item["working"] == true || item["waiting"] == true
+}
+
+/// The inbox as shown (PR #20 review I4): what waits for the person and what
+/// works come before what is ready for review, so many recent reviews never
+/// push them out; newest first within each; at most `TASK_INBOX_SHOWN`.
+pub(crate) fn order_task_inbox(mut items: Vec<Value>) -> Vec<Value> {
+    items.sort_by(|left, right| inbox_item_active(right).cmp(&inbox_item_active(left))
+        .then_with(|| right["updatedAt"].as_str().cmp(&left["updatedAt"].as_str()))
+        .then_with(|| left["chatId"].as_str().cmp(&right["chatId"].as_str())));
+    items.truncate(TASK_INBOX_SHOWN);
+    items
+}
+
+#[cfg(test)]
+mod task_inbox_order_tests {
+    use super::*;
+
+    /// PR #20 review I4: 250 recent reviews never push out an older task
+    /// that waits for the person or one that works.
+    #[test]
+    fn work_and_questions_come_before_many_recent_reviews() {
+        let item = |chat: String, state: &str, at: String, working: bool| json!({"chatId":chat,"projectId":"p","goal":"g","state":state,"updatedAt":at,"waiting":false,"working":working});
+        let mut items: Vec<Value> = (0..250).map(|n| item(format!("review_{n:03}"), "reviewReady", format!("2026-11-27T10:{:02}:{:02}Z", n / 60, n % 60), false)).collect();
+        items.push(item("asks".into(), "needsAttention", "2026-11-01T00:00:00Z".into(), false));
+        items.push(item("works".into(), "reviewReady", "2026-11-01T00:00:01Z".into(), true));
+        items.push(item("runs".into(), "running", "2026-11-01T00:00:02Z".into(), true));
+        let shown = order_task_inbox(items);
+        assert_eq!(shown.len(), TASK_INBOX_SHOWN);
+        let ids: Vec<_> = shown.iter().map(|item| item["chatId"].as_str().unwrap()).collect();
+        assert_eq!(&ids[..3], ["runs", "works", "asks"]);
+        assert_eq!(ids[3], "review_249", "then the newest reviews");
+    }
+}

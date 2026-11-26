@@ -3,6 +3,7 @@ import { useI18n } from "../i18n";
 import { osNotificationsEnabled, readNotificationPreferences, saveNotificationPreferences, setOsNotificationsEnabled, type NotificationKind, type NotificationPreferences } from "./notifications.ts";
 import { setThemePreference, THEME_PREFERENCES, useTheme } from "./theme.ts";
 import { Setting, SettingsGroup, Switch } from "./settings-ui.tsx";
+import { RunLimitSettings } from "./run-limit-settings.tsx";
 const appVersion = typeof __ELSECREW_VERSION__ === "string" ? __ELSECREW_VERSION__ : "";
 export type SettingsSection = "general" | "notifications" | "roles" | "agents" | "storage" | "project";
 /** App-wide pages, then this project (ADE U4, DESIGN Q8: the project page sits in the navigation). */
@@ -99,7 +100,7 @@ export function AppSettings({ hasProject, projectName, open, section, onSection,
           <NotificationSettings /></section>
         <section hidden={section !== "roles"}><h3>{t("m5.preferences.roles")}</h3><p className="m5-settings-intro">{t("m5.roles.appDefaultsHelp")}</p>
           {rolesEditor}</section>
-        <section hidden={section !== "agents"}><h3>{t("m5.preferences.agents")}</h3>{children}</section>
+        <section hidden={section !== "agents"}><h3>{t("m5.preferences.agents")}</h3>{children}<RunLimitSettings open={open && section === "agents"} /></section>
         <section hidden={section !== "storage"}><h3>{t("m5.preferences.storage")}</h3><p className="m5-settings-intro">{t("m5.preferences.storageIntro")}</p>{storage}</section>
         <section hidden={section !== "project"}><h3>{section === "project" && hasProject && projectName ? projectName : t("m5.preferences.project")}</h3>{project}</section>
       </div>

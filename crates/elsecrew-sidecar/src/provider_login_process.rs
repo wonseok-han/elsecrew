@@ -30,11 +30,89 @@ pub(crate) const HOLD_MAX_BYTES: u64 = 4 * 1024 * 1024;
 // never admits work or releases an existing reservation.
 const LOGIN_TERMINATED: &[u8] = b"login-processes-terminated-locked-v2\n";
 const OBSERVE_INTERVAL: Duration = Duration::from_millis(100);
+/// A hold line naming the provider's own session (PR #20 re-review B2).
+const SESSION_PREFIX: &str = "session ";
+
+/// The live processes of a session, or `None` when the process list cannot
+/// be read (then nothing may be taken as ended).
+fn session_members(sid: u32) -> Option<Vec<libc::pid_t>> {
+    let sid = libc::pid_t::try_from(sid).ok()?;
+    let mut pids: Vec<libc::pid_t> = Vec::new();
+    for _ in 0..4 {
+        let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
+        if count <= 0 { return None; }
+        pids.resize(count as usize + 256, 0);
+        let bytes = libc::c_int::try_from(pids.len() * std::mem::size_of::<libc::pid_t>()).ok()?;
+        let listed = unsafe { libc::proc_listallpids(pids.as_mut_ptr().cast(), bytes) };
+        if listed <= 0 { return None; }
+        if (listed as usize) < pids.len() {
+            pids.truncate(listed as usize);
+            let mut members = Vec::new();
+            for &pid in &pids {
+                if pid <= 0 { continue; }
+                let session = unsafe { libc::getsid(pid) };
+                if session == sid {
+                    members.push(pid);
+                } else if session < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH) {
+                    return None;
+                }
+            }
+            return Some(members);
+        }
+    }
+    None
+}
+
+/// Whether every process of these sessions (each recorded process's own
+/// pid as a session too: one that left with `setsid` and was seen) has
+/// ended. Unknown counts as not ended.
+fn sessions_ended(sessions: &BTreeSet<ProcIdentity>, recorded: &BTreeSet<ProcIdentity>) -> bool {
+    sessions.iter().chain(recorded).all(|identity| session_members(identity.pid).is_some_and(|members| members.is_empty()))
+}
+
+/// The cleanup's last step: ends what is left of the provider's session
+/// (children the tracker never saw). `Some(true)`: nothing left;
+/// `Some(false)`: some were signalled, look again; `None`: unknown.
+fn reap_session(sid: u32) -> Option<bool> {
+    let members = session_members(sid)?;
+    for pid in &members {
+        // Still in that session right before the signal (a live member's PID
+        // is not reused).
+        if unsafe { libc::getsid(*pid) } == sid as libc::pid_t {
+            unsafe { libc::kill(*pid, libc::SIGKILL) };
+        }
+    }
+    Some(members.is_empty())
+}
+
+/// The identity and session lines after a hold's header (and binding).
+fn parse_hold_lines<'l>(lines: impl Iterator<Item = &'l str>) -> Result<(BTreeSet<ProcIdentity>, BTreeSet<ProcIdentity>), SidecarError> {
+    let mut recorded = BTreeSet::new();
+    let mut sessions = BTreeSet::new();
+    for line in lines {
+        let (session, rest) = match line.strip_prefix(SESSION_PREFIX) { Some(rest) => (true, rest), None => (false, line) };
+        let (pid, start) = rest.split_once(' ').ok_or_else(failure)?;
+        let identity = ProcIdentity {
+            pid: pid.parse().map_err(|_| failure())?,
+            start_us: start.parse().map_err(|_| failure())?,
+        };
+        if identity.pid <= 1 || identity.start_us <= 0 || rest != format!("{} {}", identity.pid, identity.start_us) {
+            return Err(failure());
+        }
+        if session {
+            // A session is registered right after its root's record.
+            if !recorded.contains(&identity) || !sessions.insert(identity) { return Err(failure()); }
+        } else if !recorded.insert(identity) || recorded.len() > MAX_TRACKED {
+            return Err(failure());
+        }
+    }
+    Ok((recorded, sessions))
+}
 
 mod run_binding;
 #[cfg(test)]
 mod approved_legacy_repair;
-pub(crate) use run_binding::{bound_run_identities, recover_bound_run};
+pub(crate) use run_binding::{bound_run_identities, recover_bound_run, recover_unbound_run};
 #[cfg(test)]
 use crate::provider_run_binding::RunFenceBinding;
 
@@ -50,18 +128,100 @@ fn failure() -> SidecarError {
 /// live owner's. The one reader is the settlement of the exact run a hold is
 /// bound to, after that run's engine is gone (`bound_run_identities`): it
 /// stops those processes, each only while it still matches its recorded start.
+/// What a hold is for (ADE multi-project P5). Sign-in, sign-out, install and
+/// the engine's own credential renewal rewrite the profile: they hold the
+/// provider's one exclusive hold (`<provider>-login.pending`). Runs, model
+/// lists and capability checks only launch the provider's program, which
+/// renews its own sign-in under its own lock (Claude Code
+/// `.oauth_refresh.lock`, Codex `auth.lock`): each holds its own
+/// `<provider>-run-<id>.pending`, so they go on side by side. Each kind
+/// publishes its hold first and then looks for the other kind; finding one,
+/// it takes its own back and answers busy. Two that meet both step back,
+/// never both go on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HoldKind {
+    Exclusive,
+    Shared,
+}
+
+/// The provider prefix of a sign-in profile's holds (`codex` / `claude`).
+/// Other profiles (the installer's) have one hold and no run holds.
+fn hold_prefix(profile: &dyn LoginProfile) -> Option<&'static str> {
+    profile.pending_name().strip_suffix("-login.pending")
+}
+
+/// This sign-in profile's run holds now (none for other profiles).
+pub(crate) fn profile_run_holds(profile: &dyn LoginProfile) -> Result<Vec<String>, SidecarError> {
+    profile.revalidate()?;
+    match hold_prefix(profile) {
+        Some(prefix) => run_hold_names(&profile.login_lease_directory()?, prefix),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// The run holds of this provider now in the directory. A name that looks
+/// like one but cannot be read as a plain entry still counts (fail closed).
+pub(crate) fn run_hold_names(directory: &Dir, prefix: &str) -> Result<Vec<String>, SidecarError> {
+    let mut names = Vec::new();
+    for entry in directory.entries().map_err(|_| failure())? {
+        let entry = entry.map_err(|_| failure())?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if name.starts_with(&format!("{prefix}-run-")) && name.ends_with(".pending") {
+            names.push(name.to_owned());
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
 struct Reservation {
-    name: &'static str,
+    name: String,
     directory: Dir,
     file: File,
     recorded: BTreeSet<ProcIdentity>,
+    /// The provider's own session (its gate's root), registered before the
+    /// provider runs: every process it starts is in it unless it leaves.
+    sessions: BTreeSet<ProcIdentity>,
     failed: bool,
 }
 
 impl Reservation {
-    fn create(profile: &dyn LoginProfile) -> Result<Self, SidecarError> {
+    fn create(profile: &dyn LoginProfile, kind: HoldKind) -> Result<Self, SidecarError> {
+        let Some(prefix) = hold_prefix(profile) else {
+            return if kind == HoldKind::Exclusive { Self::publish(profile, kind) } else { Err(failure()) };
+        };
+        let reservation = Self::publish(profile, kind)?;
+        // The other kind of hold, published before ours: step back.
+        let conflict = match kind {
+            HoldKind::Exclusive => match run_hold_names(&reservation.directory, prefix) {
+                Ok(names) if names.is_empty() => None,
+                Ok(_) => Some(busy()),
+                Err(error) => Some(error),
+            },
+            HoldKind::Shared => match reservation.directory.symlink_metadata(profile.pending_name()) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Ok(_) => Some(existing_reservation_error(&reservation.directory, profile.pending_name())),
+                Err(_) => Some(failure()),
+            },
+        };
+        match conflict {
+            None => Ok(reservation),
+            Some(error) => {
+                // Ours recorded nothing yet: taking it back leaves no evidence behind.
+                reservation.release().map_err(|_| failure())?;
+                Err(error)
+            }
+        }
+    }
+
+    fn publish(profile: &dyn LoginProfile, kind: HoldKind) -> Result<Self, SidecarError> {
         let directory = profile.login_lease_directory()?;
-        let name = profile.pending_name();
+        let name = match kind {
+            HoldKind::Exclusive => profile.pending_name().to_owned(),
+            HoldKind::Shared => format!("{}-run-{}.pending", hold_prefix(profile).ok_or_else(failure)?, uuid::Uuid::new_v4().simple()),
+        };
+        let name = name.as_str();
         // Publish the fence atomically: the pending name only ever refers to an
         // inode that is already exclusively locked and carries its header, so a
         // concurrent probe can never mistake a half-created fence for an orphan.
@@ -81,7 +241,13 @@ impl Reservation {
             let _ = directory.remove_file(&staging);
             return Err(error);
         }
-        if let Err(error) = directory.hard_link(&staging, &directory, name) {
+        #[cfg(test)]
+        kill_test_pause("staged");
+        // One atomic step from the staging name to the hold's name, never
+        // replacing one (PR #20 re-review B2): an engine killed at any point
+        // leaves either an unpublished staging file (cleaned by recovery) or
+        // the published hold alone, never two names for it.
+        if let Err(error) = rename_exclusive(&directory, &staging, name) {
             let _ = directory.remove_file(&staging);
             return Err(if error.kind() == std::io::ErrorKind::AlreadyExists {
                 existing_reservation_error(&directory, name)
@@ -89,15 +255,15 @@ impl Reservation {
                 failure()
             });
         }
-        // If the staging name cannot be removed the fence keeps nlink 2, every
-        // later verify fails, and dropping this owner leaves recovery evidence.
-        directory.remove_file(&staging).map_err(|_| failure())?;
+        #[cfg(test)]
+        kill_test_pause("published");
         sync_directory(&directory)?;
         Ok(Self {
-            name: profile.pending_name(),
+            name: name.to_owned(),
             directory,
             file,
             recorded: BTreeSet::new(),
+            sessions: BTreeSet::new(),
             failed: false,
         })
     }
@@ -106,7 +272,7 @@ impl Reservation {
         let held = self.file.metadata().map_err(|_| failure())?;
         let current = self
             .directory
-            .symlink_metadata(self.name)
+            .symlink_metadata(&self.name)
             .map_err(|_| failure())?;
         if !current.is_file()
             || held.dev() != current.dev()
@@ -151,6 +317,25 @@ impl Reservation {
         Ok(())
     }
 
+    /// Registers the provider's own session before it runs (`session <pid>
+    /// <start>`; the root's identity is recorded just before).
+    fn record_session(&mut self, root: ProcIdentity) -> Result<(), SidecarError> {
+        let result = (|| {
+            if self.failed || !self.recorded.contains(&root) {
+                return Err(failure());
+            }
+            self.verify()?;
+            writeln!(self.file, "{SESSION_PREFIX}{} {}", root.pid, root.start_us).map_err(|_| failure())?;
+            self.file.sync_all().map_err(|_| failure())?;
+            self.sessions.insert(root);
+            Ok(())
+        })();
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
     fn record_login_termination(&mut self) -> Result<(), SidecarError> {
         let result = (|| {
             if self.failed {
@@ -177,7 +362,7 @@ impl Reservation {
         // POSIX unlink is name-based, not an atomic unlink-if-inode operation.
         // This detects prior substitution, not a hostile same-UID race after verify.
         self.directory
-            .remove_file(self.name)
+            .remove_file(&self.name)
             .map_err(|_| failure())?;
         sync_directory(&self.directory)
     }
@@ -190,7 +375,7 @@ pub(crate) fn with_credentials_reserved<T>(
     work: impl FnOnce() -> Result<T, SidecarError>,
 ) -> Result<T, SidecarError> {
     profile.revalidate()?;
-    let mut reservation = Reservation::create(profile)?;
+    let mut reservation = Reservation::create(profile, HoldKind::Exclusive)?;
     let result = work();
     profile.revalidate()?;
     reservation.record_login_termination()?;
@@ -324,32 +509,22 @@ fn recover_login(profile: &dyn LoginProfile, require_marker: bool) -> Result<(),
     if lines.next() != Some("elsecrew provider login pending v1") {
         return Err(failure());
     }
-    let mut recorded = BTreeSet::new();
-    for line in lines {
-        let (pid, start) = line.split_once(' ').ok_or_else(failure)?;
-        let identity = ProcIdentity {
-            pid: pid.parse().map_err(|_| failure())?,
-            start_us: start.parse().map_err(|_| failure())?,
-        };
-        if identity.pid <= 1
-            || identity.start_us <= 0
-            || line != format!("{} {}", identity.pid, identity.start_us)
-            || !recorded.insert(identity)
-            || recorded.len() > MAX_TRACKED
-        {
-            return Err(failure());
-        }
-    }
+    let (recorded, sessions) = parse_hold_lines(lines)?;
     // Without the marker nothing says the owner launched nothing more than
     // it recorded: an empty unmarked hold stays fenced (as for a run's hold).
     if !marked && recorded.is_empty() {
         return Err(failure());
     }
+    // The provider's session, where registered: every process in it ended.
+    if !sessions_ended(&sessions, if sessions.is_empty() { &sessions } else { &recorded }) {
+        return Err(failure());
+    }
     let reservation = Reservation {
-        name: profile.pending_name(),
+        name: profile.pending_name().to_owned(),
         directory,
         file,
         recorded,
+        sessions,
         failed: false,
     };
     reservation.verify()?;
@@ -373,6 +548,73 @@ fn recover_login(profile: &dyn LoginProfile, require_marker: bool) -> Result<(),
     }
     // Same inode remains exclusively locked through validated unlink and sync.
     reservation.release()
+}
+
+/// `renameat` that fails if the target exists (macOS `RENAME_EXCL`).
+fn rename_exclusive(directory: &Dir, from: &str, to: &str) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd;
+    let from = std::ffi::CString::new(from).map_err(std::io::Error::other)?;
+    let to = std::ffi::CString::new(to).map_err(std::io::Error::other)?;
+    let fd = directory.as_raw_fd();
+    if unsafe { libc::renameatx_np(fd, from.as_ptr(), fd, to.as_ptr(), libc::RENAME_EXCL) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// What a publish cut short can leave (PR #20 re-review B2): a staging file
+/// never published, or (from the earlier link-then-unlink publish) a hold
+/// with its staging name still linked, nlink 2, which every check refuses.
+/// Each is touched only with its lock ours (no live publisher): an
+/// unpublished one is removed; a second name of a published hold is
+/// removed when it is the very same file, leaving the hold for recovery.
+pub(crate) fn clean_publish_leftovers(profile: &dyn LoginProfile) -> Result<(), SidecarError> {
+    use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+    profile.revalidate()?;
+    let directory = profile.login_lease_directory()?;
+    let mut changed = false;
+    for entry in directory.entries().map_err(|_| failure())? {
+        let entry = entry.map_err(|_| failure())?;
+        let staging = entry.file_name();
+        let Some(staging) = staging.to_str() else { continue };
+        // `.<hold>.<uuid>.staging`, `<hold>` a `.pending` name.
+        let Some(hold) = staging.strip_prefix('.').and_then(|rest| rest.strip_suffix(".staging"))
+            .and_then(|rest| rest.rsplit_once('.')).filter(|(hold, id)| hold.ends_with(".pending")
+                && id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit())).map(|(hold, _)| hold.to_owned())
+        else { continue };
+        let mut options = OpenOptions::new();
+        options.read(true).follow(FollowSymlinks::No).custom_flags(libc::O_NONBLOCK);
+        let Ok(file) = directory.open_with(staging, &options) else { continue };
+        let Ok(meta) = file.metadata() else { continue };
+        if !meta.is_file() || meta.uid() != unsafe { libc::geteuid() } { continue; }
+        // A live publisher holds it: not a leftover.
+        if lock_exclusive(&file).is_err() { continue; }
+        match meta.nlink() {
+            1 => {}
+            2 => {
+                let Ok(published) = directory.symlink_metadata(&hold) else { continue };
+                if published.dev() != meta.dev() || published.ino() != meta.ino() { continue; }
+            }
+            _ => continue,
+        }
+        directory.remove_file(staging).map_err(|_| failure())?;
+        changed = true;
+    }
+    if changed {
+        sync_directory(&directory)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+/// SIGKILL boundary tests: the engine they run stops here and waits.
+fn kill_test_pause(point: &str) {
+    if std::env::var("ELSECREW_KILL_TEST_POINT").as_deref() == Ok(point) {
+        if let Ok(ready) = std::env::var("ELSECREW_KILL_TEST_READY") {
+            let _ = std::fs::write(ready, point);
+        }
+        loop { std::thread::sleep(Duration::from_secs(1)); }
+    }
 }
 
 fn sync_directory(directory: &Dir) -> Result<(), SidecarError> {
@@ -581,12 +823,26 @@ impl<'a> LoginProcess<'a> {
         self.profile.as_ref().revalidate()
     }
 
+    /// Sign-in, sign-out, account checks and installs: the provider's one
+    /// exclusive hold.
     pub(crate) fn reserve(profile: &'a dyn LoginProfile) -> Result<Self, SidecarError> {
-        Self::reserve_profile(ProfileOwner::Borrowed(profile))
+        Self::reserve_profile_as(ProfileOwner::Borrowed(profile), HoldKind::Exclusive)
+    }
+
+    /// Reading the sign-in state beside runs: a run hold of its own.
+    pub(crate) fn reserve_shared(profile: &'a dyn LoginProfile) -> Result<Self, SidecarError> {
+        Self::reserve_profile_as(ProfileOwner::Borrowed(profile), HoldKind::Shared)
     }
 
     fn reserve_profile(profile: ProfileOwner<'a>) -> Result<Self, SidecarError> {
-        let reservation = Reservation::create(profile.as_ref())?;
+        // Owned profiles are runs, model lists and capability checks: a run
+        // hold of their own (ADE multi-project P5).
+        let kind = if matches!(profile, ProfileOwner::Borrowed(_)) { HoldKind::Exclusive } else { HoldKind::Shared };
+        Self::reserve_profile_as(profile, kind)
+    }
+
+    fn reserve_profile_as(profile: ProfileOwner<'a>, kind: HoldKind) -> Result<Self, SidecarError> {
+        let reservation = Reservation::create(profile.as_ref(), kind)?;
         Ok(Self {
             connection_id: uuid::Uuid::new_v4(),
             profile,
@@ -768,6 +1024,12 @@ impl<'a> LoginProcess<'a> {
             let root = identity_of(child.id()).map_err(|_| failure())?;
             self.tracker = Some(TreeTracker::new(root));
             self.reservation.record(&[root])?;
+            // The gate made its own session: register it before the provider
+            // runs, so every child it starts is accounted for from the start
+            // (PR #20 re-review B2).
+            if unsafe { libc::getsid(root.pid as libc::pid_t) } == root.pid as libc::pid_t {
+                self.reservation.record_session(root)?;
+            }
             self.observe_with(&SystemProcTable, true)?;
             self.profile.as_ref().revalidate()?;
             self.reservation.verify()?;
@@ -1415,8 +1677,15 @@ impl<'a> LoginProcess<'a> {
         if !report.confirmed() || self.evidence_failed {
             return Some(false);
         }
+        let within = started.elapsed() < Duration::from_millis(config.term_grace_ms + config.kill_grace_ms);
         match reaped {
-            Ok(Some(_)) => Some(true),
+            // The tracked tree is gone; what the tracker never saw of the
+            // provider's session must be gone too (PR #20 re-review B2).
+            Ok(Some(_)) => match self.reservation.sessions.first().map(|root| reap_session(root.pid)) {
+                None | Some(Some(true)) => Some(true),
+                Some(Some(false)) if within => None,
+                _ => Some(false),
+            },
             // macOS can report the identity Gone before waitpid exposes status.
             // Keep the fence and listener, sharing the original cleanup deadline.
             Ok(None)
@@ -1454,11 +1723,14 @@ impl<'a> LoginProcess<'a> {
             if !report.confirmed() || !saved || self.evidence_failed {
                 return false;
             }
+            let within = started.elapsed() < Duration::from_millis(config.term_grace_ms + config.kill_grace_ms);
             match reaped {
-                Ok(Some(_)) => return true,
-                Ok(None)
-                    if started.elapsed()
-                        < Duration::from_millis(config.term_grace_ms + config.kill_grace_ms) => {}
+                Ok(Some(_)) => match self.reservation.sessions.first().map(|root| reap_session(root.pid)) {
+                    None | Some(Some(true)) => return true,
+                    Some(Some(false)) if within => {}
+                    _ => return false,
+                },
+                Ok(None) if within => {}
                 Ok(None) | Err(_) => return false,
             }
             std::thread::sleep(OBSERVE_INTERVAL);
@@ -1568,6 +1840,13 @@ mod tests {
         assert!(leftovers.is_empty(), "{leftovers:?}");
     }
 
+    /// The one run hold in the folder (an owned reservation's own file).
+    fn run_hold(temp: &tempfile::TempDir) -> Option<std::path::PathBuf> {
+        let names = run_hold_names(&Dir::open_ambient_dir(temp.path(), cap_std::ambient_authority()).unwrap(), "codex").unwrap();
+        assert!(names.len() <= 1, "{names:?}");
+        names.first().map(|name| temp.path().join(name))
+    }
+
     fn profile(temp: &tempfile::TempDir) -> CodexProfileBinding {
         let path = temp
             .path()
@@ -1576,6 +1855,268 @@ mod tests {
             .join("elsecrew.sqlite3");
         let storage = crate::Storage::open(&path).unwrap();
         CodexProfileBinding::from_storage(&storage).unwrap()
+    }
+
+    /// ADE multi-project P5: runs of one provider each hold their own file and
+    /// go on side by side; signing in (and the engine's own renewal) holds
+    /// the profile alone. Each kind steps back, leaving nothing, when it
+    /// meets the other.
+    #[test]
+    fn run_holds_go_side_by_side_and_signing_in_holds_the_profile_alone() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut first = LoginProcess::reserve_codex_owned(profile(&temp)).unwrap();
+        let mut second = LoginProcess::reserve_codex_owned(profile(&temp)).unwrap();
+        let borrowed = profile(&temp);
+        let mut reading = LoginProcess::reserve_shared(&borrowed).unwrap();
+        let directory = Dir::open_ambient_dir(temp.path(), cap_std::ambient_authority()).unwrap();
+        assert_eq!(run_hold_names(&directory, "codex").unwrap().len(), 3);
+        // Sign-in and renewal wait while any run holds the profile, and leave nothing behind.
+        assert_eq!(LoginProcess::reserve(&profile(&temp)).err().unwrap().kind(), "providerBusy");
+        assert!(with_credentials_reserved::<()>(&profile(&temp), || panic!("must not enter")).is_err());
+        assert!(!temp.path().join(PENDING).exists());
+        first.finish().unwrap();
+        second.finish().unwrap();
+        reading.finish().unwrap();
+        assert!(run_hold_names(&directory, "codex").unwrap().is_empty());
+        // Signing in now: runs wait, and their step-back leaves no hold.
+        let signer = profile(&temp);
+        let mut signing_in = LoginProcess::reserve(&signer).unwrap();
+        assert_eq!(LoginProcess::reserve_codex_owned(profile(&temp)).err().unwrap().kind(), "providerBusy");
+        assert!(run_hold_names(&directory, "codex").unwrap().is_empty());
+        signing_in.finish().unwrap();
+        // A sign-in hold left by a crash (no owner) is recovery evidence for a run too.
+        std::fs::write(temp.path().join(PENDING), b"elsecrew provider login pending v1\n").unwrap();
+        assert_eq!(LoginProcess::reserve_codex_owned(profile(&temp)).err().unwrap().kind(), "providerLoginRecoveryRequired");
+        assert!(run_hold_names(&directory, "codex").unwrap().is_empty());
+        // The other provider's holds are its own.
+        std::fs::remove_file(temp.path().join(PENDING)).unwrap();
+        std::fs::write(temp.path().join("claude-run-0123456789abcdef0123456789abcdef.pending"), b"x").unwrap();
+        LoginProcess::reserve(&profile(&temp)).unwrap().finish().unwrap();
+    }
+
+    /// The engine the SIGKILL boundary tests run and kill (this test binary
+    /// again): it holds a run hold in `ELSECREW_KILL_TEST_DIR` and stops at
+    /// `ELSECREW_KILL_TEST_POINT`, telling `ELSECREW_KILL_TEST_READY`.
+    #[test]
+    #[ignore = "an engine for the SIGKILL boundary tests; they start and kill it"]
+    fn kill_test_engine() {
+        let Ok(point) = std::env::var("ELSECREW_KILL_TEST_POINT") else { return };
+        let dir = std::path::PathBuf::from(std::env::var("ELSECREW_KILL_TEST_DIR").unwrap());
+        let storage = crate::Storage::open(&dir.join("elsecrew.sqlite3")).unwrap();
+        let binding = CodexProfileBinding::from_storage(&storage).unwrap();
+        // "staged" / "published": the publish itself stops (kill_test_pause).
+        let mut process = LoginProcess::reserve_codex_owned(binding).unwrap();
+        // "launched-<delay>": the provider starts a child after <delay> s and
+        // ends; the engine stops right after the launch, before it looks again.
+        let delay = point.strip_prefix("launched-").unwrap();
+        let script = format!("exec >/dev/null 2>&1; /bin/sleep {delay}; /bin/sleep 300 & echo $! > \"$1\"; exit 0");
+        let pid_file = dir.join("grandchild.pid");
+        process.launch_gated_command(std::path::Path::new("/bin/sh"),
+            &["-c".as_ref(), script.as_ref(), "provider".as_ref(), pid_file.as_os_str()], &dir).unwrap();
+        std::fs::write(std::env::var("ELSECREW_KILL_TEST_READY").unwrap(), "launched").unwrap();
+        loop { std::thread::sleep(Duration::from_secs(1)); }
+    }
+
+    /// Starts the engine, waits until it stops at `point`, and SIGKILLs it
+    /// (its own child only).
+    fn kill_engine_at(temp: &tempfile::TempDir, point: &str) {
+        let dir = temp.path().canonicalize().unwrap();
+        let ready = dir.join("engine.ready");
+        let mut engine = Command::new(std::env::current_exe().unwrap())
+            .args(["provider_login_process::tests::kill_test_engine", "--exact", "--ignored", "--nocapture", "--test-threads=1"])
+            .env("ELSECREW_KILL_TEST_POINT", point)
+            .env("ELSECREW_KILL_TEST_DIR", &dir)
+            .env("ELSECREW_KILL_TEST_READY", &ready)
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+            .spawn().unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        while !ready.exists() {
+            assert!(engine.try_wait().unwrap().is_none(), "the engine ended before {point}");
+            assert!(std::time::Instant::now() < deadline, "the engine never reached {point}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        engine.kill().unwrap(); // SIGKILL
+        engine.wait().unwrap();
+        std::fs::remove_file(ready).unwrap();
+    }
+
+    fn entries(temp: &tempfile::TempDir) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(temp.path()).unwrap().filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+            .filter(|name| name.contains("-run-") || name.contains("-login.pending")).collect();
+        names.sort();
+        names
+    }
+
+    /// PR #20 re-review B2: an engine SIGKILLed while publishing its hold
+    /// leaves either an unpublished staging file (nothing blocked; recovery
+    /// removes it) or the published hold alone (one name; recovered by its
+    /// own proof), never a hold that cannot be recovered.
+    #[test]
+    fn an_engine_killed_while_publishing_leaves_a_recoverable_state() {
+        for point in ["staged", "published"] {
+            let temp = tempfile::tempdir().unwrap();
+            let _ = profile(&temp);
+            kill_engine_at(&temp, point);
+            let directory = Dir::open_ambient_dir(temp.path(), cap_std::ambient_authority()).unwrap();
+            let left = entries(&temp);
+            assert_eq!(left.len(), 1, "{point}: {left:?}");
+            let storage = crate::Storage::open(&temp.path().canonicalize().unwrap().join("elsecrew.sqlite3")).unwrap();
+            let binding = CodexProfileBinding::from_storage(&storage).unwrap();
+            if point == "staged" {
+                assert!(left[0].starts_with(".codex-run-") && left[0].ends_with(".staging"), "{left:?}");
+                // Not published: signing in is not blocked.
+                LoginProcess::reserve(&binding).unwrap().finish().unwrap();
+            } else {
+                assert!(left[0].starts_with("codex-run-") && left[0].ends_with(".pending"), "{left:?}");
+                assert_eq!(std::os::unix::fs::MetadataExt::nlink(&std::fs::metadata(temp.path().join(&left[0])).unwrap()), 1, "one name");
+                assert_eq!(LoginProcess::reserve(&binding).err().unwrap().kind(), "providerBusy");
+            }
+            // The recovery path (start of the app, the user's recover).
+            clean_publish_leftovers(&binding).unwrap();
+            crate::provider_login_manager::recover_run_holds(&binding, &storage, None).unwrap();
+            assert!(entries(&temp).is_empty(), "{point}: {:?}", entries(&temp));
+            assert!(run_hold_names(&directory, "codex").unwrap().is_empty());
+            LoginProcess::reserve(&binding).unwrap().finish().unwrap();
+        }
+    }
+
+    /// PR #20 re-review B2: an engine SIGKILLed right after it launched the
+    /// provider. The provider then starts a child the engine never sees (at
+    /// once, or a second later) and ends itself. The hold is not let go
+    /// while that child lives (it is in the provider's session, registered
+    /// before the provider ran), and is once it ends.
+    #[test]
+    fn an_engine_killed_after_the_launch_never_lets_a_hold_go_while_a_child_lives() {
+        for delay in ["0", "1"] {
+            let temp = tempfile::tempdir().unwrap();
+            let _ = profile(&temp);
+            kill_engine_at(&temp, &format!("launched-{delay}"));
+            let hold = run_hold(&temp).unwrap();
+            let text = std::fs::read_to_string(&hold).unwrap();
+            let root_line = text.lines().nth(1).unwrap().to_owned();
+            assert!(text.lines().any(|line| line == format!("session {root_line}")), "{delay}: the session was registered before the provider ran: {text}");
+            let (pid, start) = root_line.split_once(' ').unwrap();
+            let root = ProcIdentity { pid: pid.parse().unwrap(), start_us: start.parse().unwrap() };
+            // The provider ends; its child lives on.
+            let pid_file = temp.path().canonicalize().unwrap().join("grandchild.pid");
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            while !pid_file.exists() || !matches!(elsecrew_core::proctree::SettledProcTable.probe(root), ProbeResult::Gone) {
+                assert!(std::time::Instant::now() < deadline, "{delay}");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let child: libc::pid_t = std::fs::read_to_string(&pid_file).unwrap().trim().parse().unwrap();
+            assert_eq!(unsafe { libc::getsid(child) }, root.pid as libc::pid_t, "{delay}: the child is in the provider's session");
+            let storage = crate::Storage::open(&temp.path().canonicalize().unwrap().join("elsecrew.sqlite3")).unwrap();
+            let binding = CodexProfileBinding::from_storage(&storage).unwrap();
+            clean_publish_leftovers(&binding).unwrap();
+            let _ = crate::provider_login_manager::recover_run_holds(&binding, &storage, None);
+            assert!(hold.exists(), "{delay}: let go while the provider's child lives");
+            assert_eq!(LoginProcess::reserve(&binding).err().unwrap().kind(), "providerBusy");
+            // The child ends (the test's own descendant): now the hold goes.
+            unsafe { libc::kill(child, libc::SIGKILL) };
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while unsafe { libc::getsid(child) } == root.pid as libc::pid_t {
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            crate::provider_login_manager::recover_run_holds(&binding, &storage, None).unwrap();
+            assert!(!hold.exists(), "{delay}: recovered once the whole tree ended");
+            LoginProcess::reserve(&binding).unwrap().finish().unwrap();
+        }
+    }
+
+    /// A hold left with a second name by the earlier link-then-unlink publish
+    /// (nlink 2): recovery removes the staging name, then recovers the hold.
+    #[test]
+    fn a_hold_left_with_two_names_by_an_earlier_publish_is_recovered() {
+        let temp = tempfile::tempdir().unwrap();
+        let _ = profile(&temp);
+        let name = format!("codex-run-{}.pending", "c".repeat(32));
+        let hold = temp.path().join(&name);
+        std::fs::write(&hold, "elsecrew provider login pending v1\n").unwrap();
+        std::fs::set_permissions(&hold, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+        let staging = temp.path().join(format!(".{name}.{}.staging", "d".repeat(32)));
+        std::fs::hard_link(&hold, &staging).unwrap();
+        let storage = crate::Storage::open(&temp.path().canonicalize().unwrap().join("elsecrew.sqlite3")).unwrap();
+        let binding = CodexProfileBinding::from_storage(&storage).unwrap();
+        assert!(recover_unbound_run(&binding, &name).is_err(), "two names: refused as before");
+        clean_publish_leftovers(&binding).unwrap();
+        assert!(!staging.exists());
+        assert_eq!(std::os::unix::fs::MetadataExt::nlink(&std::fs::metadata(&hold).unwrap()), 1);
+        crate::provider_login_manager::recover_run_holds(&binding, &storage, None).unwrap();
+        assert!(!hold.exists());
+    }
+
+    /// PR #20 review B2: a model list's or a check's hold (a run hold bound
+    /// to no run) whose engine died is recovered by its own proof: its lock
+    /// is free and what it recorded has ended, or it recorded nothing (the
+    /// gate never starts the provider before its record). A live owner's
+    /// hold is busy; a run's bound hold is left to the run's own proof.
+    #[test]
+    fn a_checks_or_model_lists_hold_left_by_a_crash_is_recovered_by_its_own_proof() {
+        let temp = tempfile::tempdir().unwrap();
+        let directory = Dir::open_ambient_dir(temp.path(), cap_std::ambient_authority()).unwrap();
+        let names = || run_hold_names(&directory, "codex").unwrap();
+        // A model list (an owned run hold) that launched its program, which
+        // ended; the engine died before its cleanup (dropped, not finished).
+        let mut listing = LoginProcess::reserve_codex_owned(profile(&temp)).unwrap();
+        listing.launch_gated_command(std::path::Path::new("/bin/sh"), &["-c".as_ref(), "exit 0".as_ref()], temp.path()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while listing.exit_status().unwrap().is_none() {
+            listing.tick().unwrap();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let listed = names();
+        drop(listing);
+        assert_eq!(names(), listed, "a dropped owner leaves its hold");
+        // A check (a shared hold) whose engine died before it launched anything.
+        let borrowed = profile(&temp);
+        drop(LoginProcess::reserve_shared(&borrowed).unwrap());
+        let crashed = names();
+        assert_eq!(crashed.len(), 2);
+        // Signing in is blocked by them until they are recovered.
+        assert_eq!(LoginProcess::reserve(&profile(&temp)).err().unwrap().kind(), "providerBusy");
+        // A live owner's hold is busy and stays; a bound run's is not ours to settle.
+        let live = LoginProcess::reserve_codex_owned(profile(&temp)).unwrap();
+        let live_name = names().into_iter().find(|name| !crashed.contains(name)).unwrap();
+        let mut bound = LoginProcess::reserve_codex_owned(profile(&temp)).unwrap();
+        bound.retain_fence_before_launch("run-bound").unwrap();
+        let binding = bound.bind_run_fence("run-bound").unwrap();
+        bound.finish().unwrap();
+        drop(bound);
+        for name in &crashed {
+            assert!(matches!(recover_unbound_run(&profile(&temp), name), Ok(true)), "{name}: recovered");
+        }
+        assert_eq!(recover_unbound_run(&profile(&temp), &live_name).err().unwrap().kind(), "providerBusy");
+        assert!(matches!(recover_unbound_run(&profile(&temp), &binding.lease_name()), Ok(false)));
+        let mut left = names();
+        left.sort();
+        let mut expected = vec![live_name, binding.lease_name()];
+        expected.sort();
+        assert_eq!(left, expected, "the live owner's and the bound run's stay");
+        drop(live);
+    }
+
+    /// A run's hold receipt names its own file (schema 2), and that file is
+    /// read back by name, not by the provider's one sign-in name.
+    #[test]
+    fn a_run_hold_receipt_names_its_own_file_and_is_read_back_by_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut process = LoginProcess::reserve_codex_owned(profile(&temp)).unwrap();
+        process.retain_fence_before_launch("run-bound").unwrap();
+        let binding = process.bind_run_fence("run-bound").unwrap();
+        assert_eq!(binding.to_value()["schemaVersion"], 2);
+        let own = identity_of(std::process::id()).unwrap();
+        process.reservation.record(&[own]).unwrap();
+        // While its owner lives, the hold is busy to readers.
+        assert_eq!(bound_run_identities(&profile(&temp), &binding).err().unwrap().kind(), "providerBusy");
+        process.finish().unwrap();
+        drop(process);
+        assert_eq!(bound_run_identities(&profile(&temp), &binding).unwrap(), BTreeSet::from([own]));
+        // Recovery by its own name; a sign-in name never reaches it.
+        assert!(recover_bound_run(&profile(&temp), PENDING, |_, _| Ok(())).is_err());
+        assert!(run_hold(&temp).is_some());
     }
 
     #[test]
@@ -1587,7 +2128,9 @@ mod tests {
         binding.validate("run-bound", "codex").unwrap();
         assert!(binding.validate("other-run", "codex").is_err());
         assert!(binding.validate("run-bound", "claude-code").is_err());
-        let bytes = std::fs::read(temp.path().join(PENDING)).unwrap();
+        let hold = run_hold(&temp).unwrap();
+        assert_eq!(binding.lease_name(), hold.file_name().unwrap().to_str().unwrap());
+        let bytes = std::fs::read(&hold).unwrap();
         let text = std::str::from_utf8(&bytes).unwrap();
         let line = text.lines().nth(1).unwrap().strip_prefix("run-binding-v1 ").unwrap();
         let value = serde_json::from_str(line).unwrap();
@@ -1598,7 +2141,7 @@ mod tests {
         process.finish().unwrap();
         drop(process);
         assert!(recover_confirmed_login(&profile(&temp)).is_err());
-        assert_eq!(std::fs::read(temp.path().join(PENDING)).unwrap(), bytes);
+        assert_eq!(std::fs::read(&hold).unwrap(), bytes);
     }
 
     #[test]
@@ -1641,7 +2184,7 @@ mod tests {
                 std::fs::rename(&path, &held).unwrap();
                 symlink(&held, &path).unwrap();
             }
-            let result = recover_bound_run(&binding_profile, |observed, identities| {
+            let result = recover_bound_run(&binding_profile, &binding.lease_name(), |observed, identities| {
                 if observed != &binding || identities != &BTreeSet::from([own]) { return Err(failure()); }
                 Ok(())
             });
@@ -1657,9 +2200,10 @@ mod tests {
         let mut process = LoginProcess::reserve_codex_owned(profile(&temp)).unwrap();
         process.retain_fence_before_launch("run-bound").unwrap();
         process.bind_run_fence("run-bound").unwrap();
-        let bytes = std::fs::read(temp.path().join(PENDING)).unwrap();
+        let hold = run_hold(&temp).unwrap();
+        let bytes = std::fs::read(&hold).unwrap();
         assert!(process.bind_run_fence("run-bound").is_err());
-        assert_eq!(std::fs::read(temp.path().join(PENDING)).unwrap(), bytes);
+        assert_eq!(std::fs::read(&hold).unwrap(), bytes);
         assert!(process.release_after_run_terminal().is_err());
     }
 
@@ -1673,10 +2217,13 @@ mod tests {
         assert!(process.retain_fence_before_launch("other-run").is_err());
         process.finish().unwrap();
         assert!(process.closure_evidence().unwrap().confirmed());
-        assert!(LoginProcess::reserve_codex_owned(profile(&temp)).is_err());
+        // The run's hold stays until its terminal release: sign-in waits.
+        assert!(run_hold(&temp).is_some());
+        assert_eq!(LoginProcess::reserve(&profile(&temp)).err().unwrap().kind(), "providerBusy");
         process.release_after_run_terminal().unwrap();
         assert!(!process.matches_startup_run("run-startup"));
-        LoginProcess::reserve_codex_owned(profile(&temp)).unwrap().finish().unwrap();
+        assert!(run_hold(&temp).is_none());
+        LoginProcess::reserve(&profile(&temp)).unwrap().finish().unwrap();
     }
 
     // Owned toy process only; no provider, user auth, browser, project or paid model.
@@ -2013,7 +2560,9 @@ mod tests {
             assert!(process.codex_preflight_home().is_err());
             process.launch(cat).unwrap();
             process.retain_fence_until_terminal().unwrap();
-            assert!(LoginProcess::reserve_claude_owned(binding(&temp)).is_err());
+            // Another run goes on beside it; sign-in waits for it.
+            LoginProcess::reserve_claude_owned(binding(&temp)).unwrap().finish().unwrap();
+            assert!(LoginProcess::reserve(&binding(&temp)).is_err());
             if replace {
                 std::fs::rename(&home, home.with_file_name("retained-claude-profile")).unwrap();
                 let _replacement = binding(&temp);
@@ -2022,13 +2571,13 @@ mod tests {
             let cleanup = process.finish();
             if !replace {
                 assert!(cleanup.is_ok());
-                assert!(LoginProcess::reserve_claude_owned(binding(&temp)).is_err());
+                assert!(LoginProcess::reserve(&binding(&temp)).is_err());
                 process.release_after_run_terminal().unwrap();
-                assert!(LoginProcess::reserve_claude_owned(binding(&temp)).is_ok());
+                assert!(LoginProcess::reserve(&binding(&temp)).is_ok());
             } else {
                 assert!(cleanup.is_err());
                 assert!(process.release_after_run_terminal().is_err());
-                assert!(LoginProcess::reserve_claude_owned(binding(&temp)).is_err());
+                assert!(LoginProcess::reserve(&binding(&temp)).is_err());
             }
         }
     }
@@ -2067,7 +2616,7 @@ mod tests {
                 elsecrew_core::proctree::ProbeResult::Gone
             ));
             assert_eq!(
-                temp.path().join(PENDING).exists(),
+                run_hold(&temp).is_some(),
                 case != "finish",
                 "{case}"
             );

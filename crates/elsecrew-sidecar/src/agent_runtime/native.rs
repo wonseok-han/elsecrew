@@ -33,6 +33,13 @@ pub(super) struct NativeRun {
 }
 
 impl NativeRun {
+    pub(super) fn runtime(&self) -> &'static str {
+        match self.owner {
+            NativeOwner::Codex(_) => "codex",
+            NativeOwner::Claude(_) => "claude-code",
+        }
+    }
+
     fn live_approvals(
         &mut self,
         storage: &Storage,

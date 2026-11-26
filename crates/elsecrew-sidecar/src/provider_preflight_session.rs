@@ -126,6 +126,9 @@ fn codex_version_arguments(home: &std::path::Path) -> std::io::Result<Vec<std::f
         "-c".into(), "features.plugins=false".into(), "--version".into()])
 }
 
+/// How old a discovery may be when a start takes it (its validity is 30 s).
+pub(crate) const START_MARGIN: Duration = Duration::from_secs(25);
+
 /// A bounded, selected-profile observation, not a global provider capability.
 /// Constructed only after the named exchange and confirmed cleanup succeed.
 /// It contains no account response, credentials, or arbitrary vendor payload.
@@ -157,6 +160,13 @@ impl NamedProfileObservation {
                 .into()],
             },
         )
+    }
+
+    /// Whether a start may still use this observation (ADE multi-project P5):
+    /// beside other runs of the agent a finished discovery can wait for the
+    /// engine longer than it stays valid. Leaves room for the start itself.
+    pub(crate) fn fresh_for_start(&self) -> bool {
+        self.observed_at.elapsed() <= START_MARGIN
     }
 
     /// Discovery is short-lived and bound to the exact inputs. A fresh start

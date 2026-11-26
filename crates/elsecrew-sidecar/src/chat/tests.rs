@@ -6260,7 +6260,7 @@ fn fake_agent_cancel_uncertain_poison_survives_and_is_abandon_only() {
     let mut owner = crate::provider_login_process::LoginProcess::reserve_claude_owned(profile).unwrap();
     owner.retain_fence_before_launch(&run_id).unwrap();
     let binding = owner.bind_run_fence(&run_id).unwrap();
-    let fence_path = fixture.storage.path().parent().unwrap().join("claude-login.pending");
+    let fence_path = fixture.storage.path().parent().unwrap().join(binding.lease_name());
     let mut projection = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
     {
         use std::io::Write;
@@ -6280,8 +6280,11 @@ fn fake_agent_cancel_uncertain_poison_survives_and_is_abandon_only() {
     let recover_request = json!({"provider":"claude","action":"recover","attemptId":"bound-fence-repair"});
     let fence_bytes = fs::read(&fence_path).unwrap();
     // A live lock owner and an unresolved run each independently block release.
-    // A live owner is "busy, try again" (review M37, 2026-11-20).
-    assert_eq!(login.request_with_projects(&fixture.storage, &recover_request, &fixture.projects).unwrap()["error"], "providerBusy");
+    // A live run's own hold is left alone and the check goes on: runs of one
+    // agent go on side by side (ADE multi-project P5; before, a live owner was
+    // "busy, try again", review M37). The hold stays exactly as it was.
+    assert_eq!(login.request_with_projects(&fixture.storage, &recover_request, &fixture.projects).unwrap()["error"], Value::Null);
+    assert_eq!(fs::read(&fence_path).unwrap(), fence_bytes);
     drop(owner);
     assert_eq!(login.request_with_projects(&fixture.storage, &recover_request, &fixture.projects).unwrap()["error"], "providerLoginRecoveryRequired");
     assert_eq!(fs::read(&fence_path).unwrap(), fence_bytes);
@@ -7556,7 +7559,7 @@ impl StoppedRunWithHold {
         let mut owner = crate::provider_login_process::LoginProcess::reserve_claude_owned(profile).unwrap();
         owner.retain_fence_before_launch(&run_id).unwrap();
         let binding = owner.bind_run_fence(&run_id).unwrap();
-        let fence_path = fixture.storage.path().parent().unwrap().join("claude-login.pending");
+        let fence_path = fixture.storage.path().parent().unwrap().join(binding.lease_name());
         let mut projection = fixture.storage.projection_record("run", &run_id).unwrap().unwrap();
         {
             use std::io::Write;
@@ -7741,7 +7744,7 @@ fn a_sign_in_hold_left_by_a_run_that_ended_on_its_own_is_released() {
     let mut owner = crate::provider_login_process::LoginProcess::reserve_claude_owned(profile).unwrap();
     owner.retain_fence_before_launch(&run_id).unwrap();
     let binding = owner.bind_run_fence(&run_id).unwrap();
-    let fence_path = fixture.storage.path().parent().unwrap().join("claude-login.pending");
+    let fence_path = fixture.storage.path().parent().unwrap().join(binding.lease_name());
     {
         use std::io::Write;
         let mut fence = fs::OpenOptions::new().append(true).open(&fence_path).unwrap();

@@ -19,6 +19,19 @@ pub(crate) struct RunFenceBinding {
     inode: u64,
     directory_device: u64,
     directory_inode: u64,
+    /// The hold file of this run (schema 2, ADE multi-project P5): each run
+    /// has its own, so runs of one provider go on side by side. Schema 1
+    /// receipts name the provider's one shared hold (`<provider>-login.pending`).
+    lease: Option<String>,
+}
+
+/// The hold file name of one run of a provider (`codex` / `claude`): a
+/// lowercase UUID without dashes keeps it unique and plain.
+pub(crate) fn is_run_lease_name(name: &str, prefix: &str) -> bool {
+    name.strip_prefix(prefix)
+        .and_then(|rest| rest.strip_prefix("-run-"))
+        .and_then(|rest| rest.strip_suffix(".pending"))
+        .is_some_and(|id| id.len() == 32 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
 }
 
 impl RunFenceBinding {
@@ -45,21 +58,23 @@ impl RunFenceBinding {
         &self.run_id
     }
 
+    /// The hold file this receipt names.
+    pub(crate) fn lease_name(&self) -> String {
+        match &self.lease {
+            Some(lease) => lease.clone(),
+            None if self.provider == "claude-code" => "claude-login.pending".into(),
+            None => "codex-login.pending".into(),
+        }
+    }
+
     pub(crate) fn from_value(value: &Value) -> Result<Self, SidecarError> {
-        let object = crate::require_exact_params(
-            value,
-            &[
-                "schemaVersion",
-                "runId",
-                "nonce",
-                "provider",
-                "device",
-                "inode",
-                "directoryDevice",
-                "directoryInode",
-            ],
-        )
-        .map_err(|_| failure())?;
+        const V1: [&str; 8] = ["schemaVersion", "runId", "nonce", "provider", "device", "inode", "directoryDevice", "directoryInode"];
+        let leased = value.get("schemaVersion").and_then(Value::as_u64) == Some(2);
+        let mut keys = V1.to_vec();
+        if leased {
+            keys.push("lease");
+        }
+        let object = crate::require_exact_params(value, &keys).map_err(|_| failure())?;
         Ok(Self {
             schema_version: u32::try_from(object["schemaVersion"].as_u64().ok_or_else(failure)?)
                 .map_err(|_| failure())?,
@@ -70,17 +85,27 @@ impl RunFenceBinding {
             inode: object["inode"].as_u64().ok_or_else(failure)?,
             directory_device: object["directoryDevice"].as_u64().ok_or_else(failure)?,
             directory_inode: object["directoryInode"].as_u64().ok_or_else(failure)?,
+            lease: if leased { Some(object["lease"].as_str().ok_or_else(failure)?.into()) } else { None },
         })
     }
 
     pub(crate) fn to_value(&self) -> Value {
-        json!({"schemaVersion":self.schema_version,"runId":self.run_id,"nonce":self.nonce,
+        let mut value = json!({"schemaVersion":self.schema_version,"runId":self.run_id,"nonce":self.nonce,
             "provider":self.provider,"device":self.device,"inode":self.inode,
-            "directoryDevice":self.directory_device,"directoryInode":self.directory_inode})
+            "directoryDevice":self.directory_device,"directoryInode":self.directory_inode});
+        if let Some(lease) = &self.lease {
+            value["lease"] = json!(lease);
+        }
+        value
     }
 
     pub(crate) fn validate(&self, run_id: &str, runtime: &str) -> Result<(), SidecarError> {
-        if self.schema_version != 1
+        let lease_ok = match (self.schema_version, &self.lease) {
+            (1, None) => true,
+            (2, Some(lease)) => is_run_lease_name(lease, if runtime == "claude-code" { "claude" } else { "codex" }),
+            _ => false,
+        };
+        if !lease_ok
             || self.run_id != run_id
             || run_id.is_empty()
             || run_id.len() > 128
@@ -137,8 +162,20 @@ mod tests {
         assert_eq!(receipt.to_value(), value);
         assert!(receipt.validate("other-run", "codex").is_err());
         assert!(receipt.validate("run-bound", "claude-code").is_err());
+        // Schema 2 names the run's own hold file (ADE multi-project P5).
+        let mut leased = value.clone();
+        leased["schemaVersion"] = json!(2);
+        assert!(RunFenceBinding::from_value(&leased).is_err(), "schema 2 needs its hold's name");
+        leased["lease"] = json!("codex-run-0123456789abcdef0123456789abcdef.pending");
+        let leased_receipt = RunFenceBinding::from_value(&leased).unwrap();
+        leased_receipt.validate("run-bound", "codex").unwrap();
+        assert_eq!(leased_receipt.lease_name(), "codex-run-0123456789abcdef0123456789abcdef.pending");
+        assert_eq!(receipt.lease_name(), "codex-login.pending");
+        for lease in ["claude-run-0123456789abcdef0123456789abcdef.pending", "codex-run-../x.pending", "codex-login.pending", "codex-run-0123.pending"] {
+            leased["lease"] = json!(lease);
+            assert!(RunFenceBinding::from_value(&leased).unwrap().validate("run-bound", "codex").is_err(), "{lease}");
+        }
         for (field, replacement) in [
-            ("schemaVersion", json!(2)),
             ("runId", json!("")),
             ("provider", json!("unknown")),
             ("nonce", json!("00000000-0000-0000-0000-000000000000")),

@@ -17,7 +17,7 @@ import { stageCells, stageNow, type StageCell } from "./task-story-model.ts";
  * opens every stage of the task in one row that scrolls sideways, ending on
  * the newest; a finished stage then takes the story to that member's card.
  */
-export function StageBar({ runs, working, definitions, onReveal }: { runs: readonly AgentRunRecordV1[]; working: boolean; definitions?: readonly RoleDefinitionV3[]; onReveal?: (runId: string) => void }) {
+export function StageBar({ runs, working, waiting = false, definitions, onReveal }: { runs: readonly AgentRunRecordV1[]; working: boolean; waiting?: boolean; definitions?: readonly RoleDefinitionV3[]; onReveal?: (runId: string) => void }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -32,7 +32,7 @@ export function StageBar({ runs, working, definitions, onReveal }: { runs: reado
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [live]);
-  const { hidden, cells } = stageCells(runs, { working, now, max: expanded ? Number.POSITIVE_INFINITY : undefined });
+  const { hidden, cells } = stageCells(runs, { working, now, waiting, max: expanded ? Number.POSITIVE_INFINITY : undefined });
   const count = cells.length;
   // Opened, or a stage added while open: the newest stage is in view.
   useLayoutEffect(() => {
@@ -46,6 +46,7 @@ export function StageBar({ runs, working, definitions, onReveal }: { runs: reado
     switch (cell.kind) {
       case "planning": return t("m5.stage.planning");
       case "between": return t("m5.stage.between");
+      case "waiting": return t("m5.stage.waiting");
       case "next": return t("m5.stage.nextHelp");
       case "run": {
         const time = duration(cell.seconds);

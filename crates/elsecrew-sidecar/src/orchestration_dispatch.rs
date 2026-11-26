@@ -68,6 +68,9 @@ fn workflow_failure_reason(code: &str) -> &'static str {
 /// check, and how often.
 const WORKFLOW_BUSY_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
 const WORKFLOW_BUSY_RETRY: std::time::Duration = std::time::Duration::from_secs(1);
+/// The start of the status line a team waiting its turn leaves (the screen
+/// reads it to say "waiting its turn"; keep `TURN_WAIT_PREFIX` in task-story-model.ts).
+pub(crate) const TURN_WAIT_NOTICE: &str = "차례를 기다리는 중이에요";
 
 /// The request id of a step's `attempt`-th try: a retried request never
 /// reuses a refused one's id.
@@ -105,6 +108,27 @@ impl Sidecar {
             match orchestration::begin(&mut self.storage, &input, &request.request_id) {
                 Ok(true) => {
                     self.workflow_chats.insert(input.chat_id.clone());
+                    // A new team of the task: an earlier team's root is not
+                    // this team's (PR #20 review B3).
+                    self.workflow_roots.remove(&input.chat_id);
+                    self.workflow_queued_roots.remove(&input.chat_id);
+                    // Its provider already runs as many as allowed, or another
+                    // task waits for it from earlier: the team is on, its
+                    // coordinator waits its turn and starts from the team's
+                    // own loop (ADE multi-project P3′, review I2).
+                    if let Some(runtime) = self.start_runtime(&request).filter(|runtime| self.must_wait_turn(&input.chat_id, runtime)) {
+                        let mut events = Vec::new();
+                        self.wait_turn(&input.chat_id, &runtime);
+                        self.workflow_queued_roots.insert(input.chat_id.clone());
+                        let name = if runtime == "claude-code" { "Claude" } else { "Codex" };
+                        let limit = self.projects.run_limit(&runtime);
+                        events.push(orchestration::notice(&mut self.storage, &input.chat_id,
+                            &format!("{TURN_WAIT_NOTICE}. 다른 작업들이 {name}를 쓰고 있어요(동시에 {limit}개까지). 자리가 나면 시작해요.")).map_err(failure)?);
+                        let now = std::time::Instant::now();
+                        self.workflow_busy.insert(input.chat_id.clone(), (None, now + WORKFLOW_BUSY_RETRY * 2, 0));
+                        return Ok(HandledRequest { response: Some(error_response(&request, "providerCapacity", "requestBlocked",
+                            "the team waits its turn; it starts when a run of this provider ends")), events: self.g5_events(events) });
+                    }
                     self.workflow_requests
                         .insert(request.request_id.clone(), (input.chat_id, "root".into()));
                 }
@@ -264,6 +288,8 @@ impl Sidecar {
                 payload,
             )?;
             self.workflow_chats.remove(chat_id);
+            self.workflow_waiting.remove(chat_id);
+            self.workflow_queued_roots.remove(chat_id);
             let event = orchestration::notice(
                 &mut self.storage,
                 chat_id,
@@ -322,7 +348,18 @@ impl Sidecar {
     #[cfg(target_os = "macos")]
     pub(super) fn release_settled_fences(&mut self) {
         for name in ["claude-login.pending", "codex-login.pending"] {
-            if !self.fence_is_run_bound(name) { continue; }
+            // A run's own hold (ADE multi-project P5) is always bound to its run.
+            let prefix = name.trim_end_matches("-login.pending");
+            let directory = self.storage.path().parent()
+                .and_then(|parent| crate::provider_profile::open_absolute_directory(parent).ok());
+            let run_holds = directory.as_ref()
+                .and_then(|directory| crate::provider_login_process::run_hold_names(directory, prefix).ok())
+                .is_some_and(|names| !names.is_empty());
+            // A publish cut short leaves a staging name behind (PR #20 re-review B2).
+            let leftovers = directory.as_ref().and_then(|directory| directory.entries().ok()).is_some_and(|entries| entries.flatten()
+                .any(|entry| entry.file_name().to_str().is_some_and(|name| name.starts_with(&format!(".{prefix}-")) && name.ends_with(".staging"))));
+            let run_holds = run_holds || leftovers;
+            if !run_holds && !self.fence_is_run_bound(name) { continue; }
             if name.starts_with("claude") {
                 self.claude_login.release_bound_fence(&self.storage, &self.projects);
             } else {
@@ -405,6 +442,8 @@ impl Sidecar {
                 first_error.get_or_insert(error);
             }
             self.workflow_chats.remove(&id);
+            self.workflow_waiting.remove(&id);
+            self.workflow_queued_roots.remove(&id);
         }
         first_error.map_or(Ok(()), Err)
     }
@@ -479,6 +518,8 @@ impl Sidecar {
         orchestration::save(&mut self.storage, chat, &state).map_err(failure)?;
         self.workflow_chats.remove(chat);
         self.workflow_busy.remove(chat);
+        self.workflow_waiting.remove(chat);
+        self.workflow_queued_roots.remove(chat);
         events.push(orchestration::notice(&mut self.storage,chat,&format!("팀 작업을 멈췄어요. {reason} 이미 실행한 작업은 자동으로 반복하지 않아요.")).map_err(failure)?);
         Ok(())
     }
@@ -501,11 +542,22 @@ impl Sidecar {
             // ask again shortly instead of stopping the team, for up to
             // WORKFLOW_BUSY_WAIT. A refused start created no run, so the
             // step starts over from the capability check.
+            // As many runs of this provider as allowed already work: wait for
+            // a turn, without a time limit, until the team is stopped (P3′).
+            // Waiting for a slot is not a provider error: it does not count
+            // toward the busy wait (PR #20 review I2).
+            if kind == "start" && code == "providerCapacity" {
+                let now = std::time::Instant::now();
+                let attempt = self.workflow_busy.get(&chat).map_or(0, |(_, _, attempt)| *attempt);
+                self.workflow_busy.insert(chat.clone(), (None, now + WORKFLOW_BUSY_RETRY * 2, attempt + 1));
+                return Ok(true);
+            }
             if matches!(kind.as_str(), "capability" | "start") && code == "providerBusy" {
                 let now = std::time::Instant::now();
-                let (since, _, attempt) = self.workflow_busy.get(&chat).copied().unwrap_or((now, now, 0));
+                let (since, _, attempt) = self.workflow_busy.get(&chat).copied().unwrap_or((None, now, 0));
+                let since = since.unwrap_or(now);
                 if now.duration_since(since) < WORKFLOW_BUSY_WAIT {
-                    self.workflow_busy.insert(chat.clone(), (since, now + WORKFLOW_BUSY_RETRY, attempt + 1));
+                    self.workflow_busy.insert(chat.clone(), (Some(since), now + WORKFLOW_BUSY_RETRY, attempt + 1));
                     return Ok(true);
                 }
             }
@@ -514,18 +566,40 @@ impl Sidecar {
             self.pause_workflow_reason(&chat, events, &reason)?;
             return Ok(kind != "root");
         }
+        // A team put in line at its very start: its first accepted run is
+        // its own root, whatever an earlier team of the task had (B3).
+        let first_of_waiting = kind == "start" && self.workflow_queued_roots.remove(&chat);
         if kind == "start" {
             self.workflow_busy.remove(&chat);
+            self.workflow_waiting.remove(&chat);
         }
         if kind == "root" || kind == "start" {
             let accepted = response.result.as_ref().ok_or_else(|| {
                 SidecarError::new("orchestrationBlocked", "missing accepted team run")
             })?;
-            if kind == "root" {
+            // A team that waited its turn from the start (P3′) gets its root
+            // from the loop: its first run is that root.
+            if kind == "root" || first_of_waiting {
                 let run_id = accepted["runId"].as_str().ok_or_else(|| {
                     SidecarError::new("orchestrationBlocked", "missing root run id")
                 })?;
                 self.workflow_roots.insert(chat.clone(), run_id.into());
+                // The app learns of it as its own root: the start it asked for
+                // was put in line (`providerCapacity`) and is this run.
+                if first_of_waiting {
+                    self.workflow_announcements.push(EventV1 {
+                        protocol_version: PROTOCOL_VERSION,
+                        kind: "event".into(),
+                        sidecar_instance_id: self.ready.sidecar_instance_id.clone(),
+                        stream_id: format!("team_accept_{}", Uuid::new_v4().simple()),
+                        seq: 1,
+                        event: "agent.teamRunAccepted".into(),
+                        chat_id: Some(chat.clone()),
+                        task_id: accepted["taskId"].as_str().map(str::to_owned),
+                        run_id: Some(run_id.to_owned()),
+                        payload: json!({"rootRunId":run_id,"accepted":accepted}),
+                    });
+                }
             } else {
                 let root = self.workflow_roots.get(&chat).ok_or_else(|| {
                     SidecarError::new("orchestrationBlocked", "missing authorized team root")
@@ -606,6 +680,8 @@ impl Sidecar {
             if state.status != "running" {
                 self.workflow_chats.remove(&chat);
                 self.workflow_busy.remove(&chat);
+                self.workflow_waiting.remove(&chat);
+                self.workflow_queued_roots.remove(&chat);
                 continue;
             }
             if let Some(run_id) = state.run_id.clone() {
@@ -719,6 +795,32 @@ impl Sidecar {
                 Some((_, _, attempt)) => *attempt,
                 None => 0,
             };
+            // An installation in progress: no check or start until it ends,
+            // and the team does not stop (PR #20 review B1).
+            #[cfg(target_os = "macos")]
+            if self.install.blocks_provider_launch(&self.storage) {
+                let now = std::time::Instant::now();
+                let (since, _, attempt) = self.workflow_busy.get(&chat).copied().unwrap_or((None, now, 0));
+                self.workflow_busy.insert(chat.clone(), (since, now + WORKFLOW_BUSY_RETRY * 2, attempt));
+                continue;
+            }
+            // Its provider already runs as many as allowed, or another task
+            // waits for it from earlier: the step waits its turn — no check is
+            // started, nothing stops (ADE multi-project P3′, review I2).
+            if let Some(runtime) = runtime.as_str() {
+                if self.must_wait_turn(&chat, runtime) {
+                    if self.wait_turn(&chat, runtime) {
+                        let name = if runtime == "claude-code" { "Claude" } else { "Codex" };
+                        let limit = self.projects.run_limit(runtime);
+                        events.push(orchestration::notice(&mut self.storage, &chat,
+                            &format!("{TURN_WAIT_NOTICE}. 다른 작업들이 {name}를 쓰고 있어요(동시에 {limit}개까지). 자리가 나면 이어서 해요.")).map_err(failure)?);
+                    }
+                    let now = std::time::Instant::now();
+                    let attempt = self.workflow_busy.get(&chat).map_or(0, |(_, _, attempt)| *attempt);
+                    self.workflow_busy.insert(chat.clone(), (None, now + WORKFLOW_BUSY_RETRY * 2, attempt));
+                    continue;
+                }
+            }
             let id = attempt_request_id(&format!("cap_{}", state.request_id), attempt);
             let request = self.workflow_request(
                 id.clone(),
@@ -886,9 +988,9 @@ mod tests {
         assert!(busy(&mut sidecar, "busy-cap-1").is_empty());
         assert_eq!(sidecar.workflow_state(id).unwrap().status, "running", "still waiting for the provider");
         let (since, retry_at, attempt) = sidecar.workflow_busy[id];
-        assert!(retry_at > since && attempt == 1);
+        assert!(since.is_some_and(|since| retry_at > since) && attempt == 1);
         // Busy for the whole wait: the team stops with the usual reason.
-        sidecar.workflow_busy.insert(id.into(), (since - WORKFLOW_BUSY_WAIT, retry_at, attempt));
+        sidecar.workflow_busy.insert(id.into(), (since.map(|since| since - WORKFLOW_BUSY_WAIT), retry_at, attempt));
         assert!(!busy(&mut sidecar, "busy-cap-2").is_empty());
         assert_eq!(sidecar.workflow_state(id).unwrap().status, "paused");
         assert!(!sidecar.workflow_busy.contains_key(id));
@@ -922,7 +1024,7 @@ mod tests {
         assert_ne!(attempt_request_id("step", 2), attempt_request_id("step", 1));
         // Busy for the whole wait: the team stops with the usual reason.
         let (since, retry_at, attempt) = sidecar.workflow_busy[id];
-        sidecar.workflow_busy.insert(id.into(), (since - WORKFLOW_BUSY_WAIT, retry_at, attempt));
+        sidecar.workflow_busy.insert(id.into(), (since.map(|since| since - WORKFLOW_BUSY_WAIT), retry_at, attempt));
         let request = sidecar.workflow_request("busy-start_retry1".into(), "run.startAgent", json!({}));
         sidecar.workflow_requests.insert(request.request_id.clone(), (id.into(), "start".into()));
         let response = error_response(&request, "providerBusy", "requestBlocked", "still busy");
@@ -1321,7 +1423,7 @@ mod tests {
         let mut owner = crate::provider_login_process::LoginProcess::reserve_claude_owned(profile).unwrap();
         owner.retain_fence_before_launch(run_id).unwrap();
         let binding = owner.bind_run_fence(run_id).unwrap();
-        let fence_path = sidecar.storage.path().parent().unwrap().join("claude-login.pending");
+        let fence_path = sidecar.storage.path().parent().unwrap().join(binding.lease_name());
         let mut projection = sidecar.storage.projection_record("run", run_id).unwrap().unwrap();
         let mut fence = std::fs::OpenOptions::new().append(true).open(&fence_path).unwrap();
         for process in projection["process_identity_internal"].as_array().unwrap() {
@@ -2232,6 +2334,316 @@ mod tests {
         let prepared = sidecar.g5.prepare_chat_workspace_with_baseline(&mut sidecar.storage, &mut sidecar.projects, &project_id, "req_inside", true);
         assert!(prepared.is_err_and(|error| error.detail.contains("overlaps another task's workspace")));
         assert!(listing(&inside).is_empty(), "no project or task folder made");
+    }
+
+    /// ADE multi-project P3′: with one Claude run allowed, a second team does
+    /// not stop. It says once that it waits its turn, starts no check while
+    /// the first works, never runs beside it, and goes on when the first ends.
+    #[test]
+    fn a_team_over_the_run_limit_waits_its_turn_instead_of_stopping() {
+        let (root, mut sidecar, _) = service();
+        let (chat_a, _) = another_task(&mut sidecar, &root.path().join("source"), "first");
+        let (chat_b, _) = another_task(&mut sidecar, &root.path().join("other"), "second");
+        sidecar.projects.set_run_limit("claude-code", 1).unwrap();
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::BusyReader);
+        let (a, b) = (chat_a["chatId"].as_str().unwrap().to_owned(), chat_b["chatId"].as_str().unwrap().to_owned());
+        let first = start_as(&mut sidecar, &chat_a, "req_first");
+        assert!(first.ok, "{first:?}");
+        // The second team is on, its coordinator waiting: not an error to stop it.
+        let waiting = start_as(&mut sidecar, &chat_b, "req_second");
+        assert_eq!(waiting.error.as_ref().map(|e| e.code.as_str()), Some("providerCapacity"), "{waiting:?}");
+        assert_eq!(sidecar.workflow_state(&b).unwrap().status, "running");
+        let notices = |sidecar: &Sidecar, chat: &str| sidecar.storage.chat_message_history(chat).unwrap().iter()
+            .filter(|m| m["text"].as_str().is_some_and(|t| t.starts_with(TURN_WAIT_NOTICE))).count();
+        assert_eq!(notices(&sidecar, &b), 1);
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let mut b_started_after_a = false;
+        let mut b_root_announced = false;
+        loop {
+            let (_, events) = sidecar.poll_runtime_events().unwrap();
+            for event in events {
+                if event.event == "agent.teamRunAccepted" && event.chat_id.as_deref() == Some(b.as_str()) && event.payload["rootRunId"].as_str() == event.run_id.as_deref() {
+                    assert_eq!(event.payload["accepted"]["roleId"], "coordinator");
+                    b_root_announced = true;
+                }
+            }
+            assert!(sidecar.live_runs_of("claude-code") <= 1, "never beside the first");
+            let runs = sidecar.storage.projection_records("run").unwrap();
+            let live = |chat: &str| runs.iter().any(|run| run["record"]["chatId"] == chat && ["preparing", "running", "cancelling"].contains(&run["record"]["state"].as_str().unwrap_or("")));
+            let started = |chat: &str| runs.iter().any(|run| run["record"]["chatId"] == chat);
+            if started(&b) {
+                assert!(!live(&a), "B started while A still ran");
+                b_started_after_a = true;
+            }
+            let (sa, sb) = (sidecar.workflow_state(&a).unwrap().status, sidecar.workflow_state(&b).unwrap().status);
+            if !started(&b) {
+                assert_eq!(sb, "running", "B stopped while it waited");
+            }
+            if sa != "running" && sb != "running" { break; }
+            assert!(Instant::now() < deadline, "{sa} {sb}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(b_started_after_a, "B's coordinator ran after A's");
+        assert!(b_root_announced, "the waiting team's first run is announced as its own root");
+        assert_eq!(notices(&sidecar, &b), 1, "told once");
+        assert_eq!(notices(&sidecar, &a), 0);
+    }
+
+    /// Lets every queued team ask now (their next poll), keeping their place.
+    fn ask_now(sidecar: &mut Sidecar) {
+        let now = Instant::now();
+        for (_, retry_at, _) in sidecar.workflow_busy.values_mut() { *retry_at = now; }
+    }
+
+    /// Sends a follow-up message to a task, as the app does.
+    fn follow_up(sidecar: &mut Sidecar, chat: &Value, label: char, text: &str) {
+        let id = chat["chatId"].as_str().unwrap();
+        let stored = sidecar.storage.projection_record("chat", id).unwrap().unwrap();
+        let request = sidecar.workflow_request(format!("req_follow_{label}"), "chat.appendMessage", json!({
+            "projectId":chat["projectId"],"chatId":id,"taskId":chat["taskId"],
+            "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+            "expectedEventSequence":stored["durable_event_sequence"],
+            "clientMessageId":format!("user_{}", label.to_string().repeat(32)),"text":text,
+        }));
+        let response = sidecar.handle_request(request).unwrap().response.unwrap();
+        assert!(response.ok, "{:?}", response.error);
+    }
+
+    fn has_run(sidecar: &Sidecar, chat: &str) -> bool {
+        sidecar.storage.projection_records("run").unwrap().iter().any(|run| run["record"]["chatId"] == chat)
+    }
+
+    /// PR #20 review B1: an installation never starts while a team waits its
+    /// turn (or a busy provider) with no run of its own yet, and a waiting
+    /// team never resumes into an installation: it waits, does not stop, and
+    /// goes on once the installation ends.
+    #[test]
+    fn an_installation_and_a_waiting_team_never_overlap() {
+        let (root, mut sidecar, _) = service();
+        let (chat_a, _) = another_task(&mut sidecar, &root.path().join("source"), "first");
+        let (chat_b, _) = another_task(&mut sidecar, &root.path().join("other"), "second");
+        sidecar.projects.set_run_limit("claude-code", 1).unwrap();
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::BusyReader);
+        let (a, b) = (chat_a["chatId"].as_str().unwrap().to_owned(), chat_b["chatId"].as_str().unwrap().to_owned());
+        assert!(start_as(&mut sidecar, &chat_a, "req_install_first").ok);
+        let waiting = start_as(&mut sidecar, &chat_b, "req_install_second");
+        assert_eq!(waiting.error.as_ref().map(|e| e.code.as_str()), Some("providerCapacity"));
+        // B asks again only much later: A ends, nothing of B runs yet.
+        sidecar.workflow_busy.get_mut(&b).unwrap().1 = Instant::now() + Duration::from_secs(3600);
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while sidecar.workflow_state(&a).unwrap().status == "running" {
+            sidecar.poll_runtime_events().unwrap();
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(sidecar.live_runs_of("claude-code"), 0);
+        assert!(!has_run(&sidecar, &b));
+        for action in ["prepare", "start", "recover"] {
+            let request = sidecar.workflow_request(format!("req_install_{action}"), "provider.install", json!({"action":action}));
+            assert!(sidecar.installation_conflicts(&request), "{action}: an installation would start beside a waiting team");
+        }
+        // An installation in progress: B asks now but neither checks nor
+        // starts, and does not stop.
+        sidecar.install.busy_for_test = true;
+        ask_now(&mut sidecar);
+        let until = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < until {
+            sidecar.poll_runtime_events().unwrap();
+            assert!(!has_run(&sidecar, &b), "B started into an installation");
+            assert!(sidecar.pending_agent_capabilities.is_empty() && sidecar.pending_agent_starts.is_empty(), "B checked or started during an installation");
+            assert_eq!(sidecar.workflow_state(&b).unwrap().status, "running", "B stopped");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // The team loop's own requests are held too, not only the app's.
+        let capability = sidecar.workflow_request("req_inner_cap".into(), "agent.getCapabilities", json!({"runtime":"claude-code","refresh":true}));
+        let held = sidecar.handle_agent_request_inner(capability).unwrap().response.unwrap();
+        assert_eq!(held.error.as_ref().map(|e| e.code.as_str()), Some("providerBusy"));
+        // The installation ends: B goes on to the end.
+        sidecar.install.busy_for_test = false;
+        ask_now(&mut sidecar);
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while sidecar.workflow_state(&b).unwrap().status == "running" {
+            sidecar.poll_runtime_events().unwrap();
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(has_run(&sidecar, &b));
+    }
+
+    /// PR #20 review B3: a later team of the same task that waits its turn
+    /// starts as its own root, twice in a row, never as a member of an
+    /// earlier team (whose root's budget the app counts and would refuse).
+    #[test]
+    fn follow_up_teams_of_one_task_that_wait_their_turn_each_get_their_own_root() {
+        let (root, mut sidecar, _) = service();
+        let (chat_x, _) = another_task(&mut sidecar, &root.path().join("source"), "task");
+        let (chat_y, _) = another_task(&mut sidecar, &root.path().join("other"), "busy");
+        let x = chat_x["chatId"].as_str().unwrap().to_owned();
+        let first = {
+            sidecar.agent_runtime.set_fake_scenario(FakeScenario::BusyReader);
+            let response = start_as(&mut sidecar, &chat_x, "req_root_first");
+            assert!(response.ok, "{response:?}");
+            response.result.unwrap()["runId"].as_str().unwrap().to_owned()
+        };
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while sidecar.workflow_state(&x).unwrap().status == "running" {
+            sidecar.poll_runtime_events().unwrap();
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        sidecar.projects.set_run_limit("claude-code", 1).unwrap();
+        let mut roots = vec![first];
+        for (round, label) in [(1, 'd'), (2, 'e')] {
+            // Another task holds the one slot; X's next team waits in line.
+            let y = chat_y["chatId"].as_str().unwrap().to_owned();
+            if round > 1 { follow_up(&mut sidecar, &chat_y, 'f', "Once more."); }
+            assert!(start_as(&mut sidecar, &chat_y, &format!("req_root_busy_{round}")).ok);
+            follow_up(&mut sidecar, &chat_x, label, "And one more thing.");
+            let waiting = start_as(&mut sidecar, &chat_x, &format!("req_root_next_{round}"));
+            assert_eq!(waiting.error.as_ref().map(|e| e.code.as_str()), Some("providerCapacity"), "round {round}");
+            let deadline = Instant::now() + Duration::from_secs(60);
+            let mut announced = None;
+            loop {
+                let (_, events) = sidecar.poll_runtime_events().unwrap();
+                for event in events {
+                    if event.event == "agent.teamRunAccepted" && event.chat_id.as_deref() == Some(x.as_str()) {
+                        assert_eq!(event.payload["rootRunId"].as_str(), event.run_id.as_deref(), "round {round}: its own root, not an earlier team's");
+                        assert_eq!(event.payload["accepted"]["roleId"], "coordinator");
+                        announced.get_or_insert(event.run_id.clone().unwrap());
+                    }
+                }
+                let done = |chat: &str| sidecar.workflow_state(chat).unwrap().status != "running";
+                if done(&x) && done(&y) { break; }
+                assert!(Instant::now() < deadline, "round {round}");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let announced = announced.unwrap_or_else(|| panic!("round {round}: the waiting team's root was announced"));
+            assert!(!roots.contains(&announced), "round {round}: a new run id");
+            roots.push(announced);
+        }
+        assert!(sidecar.workflow_queued_roots.is_empty());
+    }
+
+    /// PR #20 review I2: a freed slot goes to the task that waited first; a
+    /// later team or a new start never takes it ahead. Waiting for a slot is
+    /// not a provider error: a team that waited long still waits out a busy
+    /// provider in full.
+    #[test]
+    fn a_freed_slot_goes_to_the_earliest_waiting_task() {
+        let (root, mut sidecar, _) = service();
+        let chats: Vec<Value> = ["a", "b", "c", "d"].iter().enumerate()
+            .map(|(n, label)| another_task(&mut sidecar, &root.path().join(if n % 2 == 0 { "source" } else { "other" }), label).0).collect();
+        let ids: Vec<String> = chats.iter().map(|chat| chat["chatId"].as_str().unwrap().to_owned()).collect();
+        sidecar.projects.set_run_limit("claude-code", 1).unwrap();
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::BusyReader);
+        assert!(start_as(&mut sidecar, &chats[0], "req_line_a").ok);
+        // C asks first, then B: C is first in line.
+        for (n, label) in [(2, "c"), (1, "b")] {
+            let waiting = start_as(&mut sidecar, &chats[n], &format!("req_line_{label}"));
+            assert_eq!(waiting.error.as_ref().map(|e| e.code.as_str()), Some("providerCapacity"), "{label}");
+            sidecar.workflow_busy.get_mut(&ids[n]).unwrap().1 = Instant::now() + Duration::from_secs(3600);
+        }
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while sidecar.workflow_state(&ids[0]).unwrap().status == "running" {
+            sidecar.poll_runtime_events().unwrap();
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // The slot is free, but C and B wait from before: a new start waits too.
+        assert!(!sidecar.run_capacity_full("claude-code"));
+        let late = start_as(&mut sidecar, &chats[3], "req_line_d");
+        assert_eq!(late.error.as_ref().map(|e| e.code.as_str()), Some("providerCapacity"), "D went ahead of the line");
+        // Waiting is not a provider error: B, waiting long, is still owed the full busy wait.
+        assert!(sidecar.workflow_busy[&ids[1]].0.is_none());
+        // Everyone asks now: they start in the order they came, one at a time.
+        ask_now(&mut sidecar);
+        let mut order = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(120);
+        loop {
+            sidecar.poll_runtime_events().unwrap();
+            for (n, id) in ids.iter().enumerate() {
+                if n > 0 && !order.contains(&n) && has_run(&sidecar, id) { order.push(n); }
+            }
+            assert!(sidecar.live_runs_of("claude-code") <= 1);
+            if ids.iter().all(|id| sidecar.workflow_state(id).unwrap().status != "running") { break; }
+            assert!(Instant::now() < deadline, "{order:?}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(order, [2, 1, 3], "C, then B, then D");
+    }
+
+    /// PR #20 review B2: the hold of a model list, a capability or sign-in
+    /// check, or a run that never got bound, left by an engine that died,
+    /// is freed when the app starts again, by its own proof (its lock is
+    /// free and everything it recorded has ended); one whose recorded
+    /// process lives stays.
+    #[test]
+    fn a_crashed_checks_hold_is_freed_when_the_app_starts() {
+        let (_root, mut sidecar, _) = service_named(None, elsecrew_protocol::lifecycle_v1::SQLITE_FILE_V1);
+        let data = sidecar.storage.path().parent().unwrap().to_path_buf();
+        let ended = {
+            let mut child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+            let identity = elsecrew_core::proctree::identity_of(child.id()).unwrap();
+            child.kill().unwrap();
+            child.wait().unwrap();
+            identity
+        };
+        let live = elsecrew_core::proctree::identity_of(std::process::id()).unwrap();
+        let header = "elsecrew provider login pending v1\n";
+        let hold = |provider: &str, n: char, body: String| {
+            let path = data.join(format!("{provider}-run-{}.pending", n.to_string().repeat(32)));
+            std::fs::write(&path, format!("{header}{body}")).unwrap();
+            std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+            path
+        };
+        let freed = [
+            hold("codex", 'a', String::new()),                                          // died before it launched anything
+            // A model list whose provider (its own session, registered before it ran) ended.
+            hold("codex", 'b', format!("{0} {1}\nsession {0} {1}\n", ended.pid, ended.start_us)),
+            hold("claude", 'c', format!("{} {}\nlogin-processes-terminated-locked-v2\n", ended.pid, ended.start_us)), // a check that ended cleanly
+        ];
+        let kept = [
+            hold("claude", 'd', format!("{0} {1}\nsession {0} {1}\n", live.pid, live.start_us)), // its process still lives
+            // Something ran, but no session was registered and no marker says
+            // the owner proved its end: fail closed (PR #20 re-review B2).
+            hold("codex", 'e', format!("{} {}\n", ended.pid, ended.start_us)),
+        ];
+        sidecar.release_settled_fences();
+        for path in &freed { assert!(!path.exists(), "{path:?} stayed"); }
+        for path in &kept { assert!(path.exists(), "{path:?} was let go"); }
+        std::fs::remove_file(&kept[1]).unwrap();
+        // With the Codex holds gone, signing in to Codex is possible again.
+        let profile = crate::provider_profile::CodexProfileBinding::from_storage(&sidecar.storage).unwrap();
+        crate::provider_login_process::LoginProcess::reserve(&profile).unwrap().finish().unwrap();
+    }
+
+    /// ADE multi-project P4: one list of every project's tasks that work,
+    /// wait or are ready for review; a deleted task is not in it.
+    #[test]
+    fn the_task_inbox_lists_every_projects_working_and_ready_tasks() {
+        let (root, mut sidecar, _) = service();
+        let (ready, _) = another_task(&mut sidecar, &root.path().join("source"), "ready");
+        let (working, _) = another_task(&mut sidecar, &root.path().join("other"), "working");
+        let (gone, _) = another_task(&mut sidecar, &root.path().join("other"), "gone");
+        run_team_to_review(&mut sidecar, &ready, "req_inbox_ready");
+        sidecar.agent_runtime.set_fake_scenario(FakeScenario::BusyReader);
+        assert!(start_as(&mut sidecar, &working, "req_inbox_working").ok);
+        run_team_to_review(&mut sidecar, &gone, "req_inbox_gone");
+        let deleted = ask(&mut sidecar, "req_inbox_delete", "project.catalog", json!({"action":"deleteChat","projectId":gone["projectId"],"chatId":gone["chatId"],"confirmed":true}));
+        assert!(deleted.ok, "{deleted:?}");
+        let inbox = ask(&mut sidecar, "req_inbox", "project.catalog", json!({"action":"taskInbox"}));
+        assert!(inbox.ok, "{inbox:?}");
+        let items = inbox.result.as_ref().unwrap()["items"].as_array().unwrap().clone();
+        let find = |chat: &Value| items.iter().find(|item| item["chatId"] == chat["chatId"]).cloned();
+        let ready_item = find(&ready).expect("the ready task is listed");
+        assert_eq!((ready_item["state"].as_str(), ready_item["working"].as_bool()), (Some("reviewReady"), Some(false)));
+        let working_item = find(&working).expect("the working task is listed");
+        assert_eq!(working_item["working"], true);
+        assert_ne!(working_item["projectId"], ready_item["projectId"], "two projects in one list");
+        assert!(find(&gone).is_none(), "a deleted task is not listed");
+        for item in &items {
+            assert_eq!(item.as_object().unwrap().keys().cloned().collect::<Vec<_>>(), ["chatId","goal","projectId","state","updatedAt","waiting","working"].map(String::from).to_vec());
+        }
     }
 
     /// A workspace folder inside the project itself (`~/elsecrew` as the

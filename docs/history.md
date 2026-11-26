@@ -2,6 +2,62 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #20 재검토 B2 두 경로 반영 (`orca/ade-multiproject-b`)
+재검토 `~/Documents/elsecrew-ade-multiproject-2026-11-26/REVIEW-pr20-2.md`(대상 0d7fe46b). B1·B3은 해소로 확인됐다.
+
+- **기록되지 않은 자식**: 관문이 공급자를 자기 세션(`setsid`)으로 띄우고, 엔진은 뿌리를 기록한 직후·공급자 실행 전에 `session <pid> <start>`를 잠금에 등록한다. 회수는 기록된 프로세스가 모두 끝나고 그 세션(과 기록된 각 번호의 세션)에 살아 있는 구성원이 없을 때만 한다(`sessions_ended`; 프로세스 목록을 못 읽으면 끝나지 않은 것으로 봄). 무언가 실행됐는데 세션 등록도 종료 표시도 없으면 회수하지 않는다(fail-closed). 정상 정리도 세션에 남은 프로세스를 끝내고 세션이 빌 때만 깨끗한 종료로 본다(`reap_session`). 묶인 실행·로그인 잠금 복구도 세션이 등록돼 있으면 같은 확인을 더한다.
+  - 남는 한계: 세션을 떠난(`setsid`) 자손이 엔진이 보기 전에 생겨 부모보다 오래 살면 macOS에서 찾을 수 없다(커널 지원 없이 불가). 엔진이 본 자손은 그 번호의 세션까지 본다.
+- **게시 중단**: 게시를 임시 이름 → `renameatx_np(RENAME_EXCL)` 한 번으로 바꿨다. 예전 방식이 남긴 링크 두 개·임시 파일은 `clean_publish_leftovers`가 파일 잠금을 잡은 뒤 같은 파일임을 확인하고 임시 이름만 지운다(앱 시작·연결 확인 복구).
+- **SIGKILL 경계 시험**(시험 바이너리를 엔진으로 다시 띄워 정한 지점에서 멈춘 뒤 SIGKILL, 자기 자식만 종료)
+  - `an_engine_killed_while_publishing_leaves_a_recoverable_state`: 임시 파일 단계(아무것도 막지 않음, 정리됨)와 게시 직후(이름 하나, nlink 1, 회수됨).
+  - `an_engine_killed_after_the_launch_never_lets_a_hold_go_while_a_child_lives`: 실행 직후 엔진 종료, 공급자가 엔진이 못 본 자식을 즉시/1초 뒤 만들고 끝남 → 자식이 살아 있는 동안 회수 안 됨·로그인 busy, 자식이 끝나면 회수.
+  - `a_hold_left_with_two_names_by_an_earlier_publish_is_recovered`: 예전 방식의 링크 두 개 정리 후 회수.
+  - `a_crashed_checks_hold_is_freed_when_the_app_starts` 갱신: 세션 등록된 잠금은 회수, 세션 없이 프로세스만 기록된 잠금은 남음.
+- **검증**: `cargo test --workspace` core 267·protocol 75·sidecar 964·통합 16 실패 0, `npm test` 1016/1016, `git diff --check`.
+- **실제 동시 실행 재시험**(`pr-b/real-review2`, 세션 변경 뒤): Claude 2 + Codex 2 모두 성공, 최고 동시 4, Claude 56초·Codex 305초 겹침, 도중·뒤 Claude 확인 `connected`, 끝난 뒤 남은 잠금 없음.
+
+### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #20 검토(차단 3·중요 4) 반영 (`orca/ade-multiproject-b`)
+검토 `~/Documents/elsecrew-ade-multiproject-2026-11-26/REVIEW-pr20.md`(대상 5bcc7859).
+
+- **B1 설치와 대기 팀**: 설치 시작 검사에 '진행 중인 팀'(`workflow_chats`, 단계 사이·차례·바쁨 대기 포함)을 넣었다. 팀 루프가 직접 보내는 확인·시작도 설치 중이면 `providerBusy`로 막고(`handle_agent_request_inner`), 루프는 설치 중에 확인을 보내지 않고 멈추지 않은 채 기다린다(`poll_workflows`). 시험 `an_installation_and_a_waiting_team_never_overlap`.
+- **B2 실행에 묶이지 않은 실행 잠금의 복구**: `recover_unbound_run`. 근거는 게시 때부터 있다. 공급자 프로그램은 잠금에 뿌리 프로세스가 기록된 뒤에만 관문에서 풀려나고, 엔진이 죽으면 관문은 파이프가 닫혀 그냥 끝난다. 파일 잠금을 잡을 수 있고(주인 없음) 기록이 비었거나 기록된 프로세스가 모두 끝났으면 회수한다(종료 표시는 있어도 된다). 묶인 잠금도 기록이 비었으면 같은 근거로 회수한다. 앱 시작(`release_settled_fences`)과 연결 확인 복구(`recover`)에서 돈다. 시험 `a_checks_or_model_lists_hold_left_by_a_crash_is_recovered_by_its_own_proof`(실제 예약: 모델 목록형·확인형을 비정상 종료), `a_crashed_checks_hold_is_freed_when_the_app_starts`(Codex·Claude, 빈 잠금·끝난 프로세스·종료 표시, 살아 있는 프로세스는 남음).
+- **B3 같은 작업의 후속 팀**: 새 팀이 시작되면 이전 팀의 루트를 지우고, 대기열에 넣은 시작은 `workflow_queued_roots`로 짝지어 첫 실행을 새 루트로 알린다. 실행 ID는 실행마다 새 UUID라 재사용되지 않는다. 문제는 ID 재사용이 아니라 이전 팀의 루트를 빌려 쓴 것이었다. 시험 `follow_up_teams_of_one_task_that_wait_their_turn_each_get_their_own_root`(같은 작업 후속 팀 두 번이 대기열을 거침), Node `later queued teams of one task each start as a new root; a spent root stays refused`.
+- **I1 형제 소켓**: 잠금을 지금 살아 있는 엔진이 쥐고 있어야 하고(우리가 잡을 수 있으면 거절), 프로그램을 아는 경로에서는 같은 서명된 Claude 프로그램이어야 한다(`proc_pidpath`). 시험 `another_live_runs_mux_is_admitted_only_while_its_engine_holds_its_hold`.
+- **I2 대기 순서**: 공급자별 도착 순서 대기열. 앞에 기다리는 작업이 있으면 새 시작·나중 단계도 줄을 선다. 자리 대기는 `providerBusy` 60초 시계를 쓰지 않는다. 시험 `a_freed_slot_goes_to_the_earliest_waiting_task`(C·B·D 순서, 자리가 비어도 D는 줄 섬, B의 바쁨 시계 비어 있음).
+- **I3 Codex 계정 확인**: 실행 잠금(`reserve_shared`)을 쓴다. 시험 `an_account_check_and_runs_go_side_by_side_and_signing_in_waits`.
+- **I4 수신함**: 목록은 확인 필요·진행 중을 검토 대기보다 앞에(`order_task_inbox`), 배지는 자르기 전 전체에서 센 `workingTasks`로. 시험 `work_and_questions_come_before_many_recent_reviews`, Node 수신함 두 시험 갱신.
+- **경미**: `task-inbox-model.ts` 끝 빈 줄 제거.
+- **검증**: `cargo test --workspace` core 267·protocol 75·sidecar 961·통합 16 실패 0, `npm test` 1016/1016, `pnpm build`, `git diff --check`, 네이티브 스모크 PASS(25·재시작 10, `pr-b/native-review`).
+  - 실제 동시 실행 재시험(`pr-b/real-review/real-run.json`, ps로 다른 Elsecrew 앱 없음 확인, 시험 프로젝트 삭제, 자기 PID만): Claude 2 + Codex 2 모두 성공, 최고 동시 4, Claude 54초·Codex 304초 겹침, 도중·뒤 Claude 확인 `connected`, 모델 목록 5·10.
+  - 렌더러 스모크 다크·라이트 36화면 대비 실패 0(`pr-b/smoke-review`). CI(04656952) macOS·Windows·website·GitGuardian 통과.
+  - 함정: 수신함 결과 계약이 바뀌면 Electron 메인 번들(`.vite/build/main.cjs`)도 다시 빌드해야 한다. 예전 번들은 `workingTasks`를 모르는 필드로 거절했다(`invalid project catalog fields`). `pnpm build`는 렌더러만 빌드하므로 `m5:smoke:multiproject`(`--build`)로 메인·프리로드를 함께 빌드했다.
+
+### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — ADE multi-project PR-B: 한 에이전트의 여러 실행·차례 기다리기·전체 수신함 (`orca/ade-multiproject-b`)
+PR #18 머지(68503092) 뒤 WIP(afaaa370)를 그 위로 옮겨 이어 갔다. 설계 요약은 `docs/architecture.md` "한 에이전트의 여러 실행·차례 기다리기·전체 작업 수신함".
+
+- **P5 실행별 잠금**: 로그인·설치·엔진의 Claude 로그인 갱신만 배타 잠금(`<provider>-login.pending`), 실행·모델 목록·확인은 각자 `<provider>-run-<id>.pending`. 실행 중에는 엔진이 Claude 토큰을 직접 갱신하지 않는다. 영수증 schema 2(`lease`).
+- **P3′ 실행 상한**: 공급자마다 기본 3, 설정에서 1~6. 넘으면 팀 단계는 '차례를 기다리는 중', 사용자가 시작한 총괄은 대기열(`providerCapacity` → 나중에 `agent.teamRunAccepted`).
+- **P4 전체 작업 수신함**: 엔진 조회 `taskInbox`, 위쪽 막대 수신함, 프로젝트 배지도 엔진 목록으로 맞춤.
+- **실제 동시 실행에서 찾아 고친 것 3가지**(첫 시험에서는 같은 공급자의 두 번째 실행이 모두 실패했다)
+  - Claude: 같은 프로필 `tmp/`에 다른 실행의 `srt-mux-<pid>-<n>.sock`이 있으면 프로필 검사가 거절했다. 그 프로필의 Claude 실행 잠금에 기록된 살아 있는 프로세스의 소켓만 받아들이게 했다(`verify_claude_home_files`, 시험 `another_live_runs_mux_is_admitted_only_while_its_hold_records_it`).
+  - Codex·Claude: 시작은 엔진 단일 스레드에서 하나에 13~18초 걸리고, 그 사이 다른 시작의 확인 결과(유효 30초)가 낡았다. 25초를 넘으면 확인을 다시 한다(최대 2번, `drop_stale_start_discovery`).
+  - Claude: 초기화 응답 기한 15초가 다른 시작이 엔진을 잡은 시간까지 셌다(`response deadline`). 1초 넘는 틈은 기한을 그만큼 늦춘다(합계 120초까지, 시험 `stalled`·`overstalled`).
+  - 그 밖에: 프로필 항목이 목록과 확인 사이에 사라지면(다른 실행이 지움) 건너뛴다(Claude·Codex 프로필 검사).
+- **7e65e4a7에서 놓친 시험 9건**: 실행 잠금을 예전 `claude-login.pending` 이름으로 찾던 복구·삭제·재시작 시험 8건을 영수증의 실제 잠금 이름(`lease_name()`)으로 고쳤다. `fake_agent_cancel_uncertain_poison_survives_and_is_abandon_only`는 "살아 있는 실행 잠금이 있으면 복구는 busy"를 기대했다. P5에서는 복구가 살아 있는 실행 잠금을 건너뛰고 진행한다(`recover_run_holds`). 시험은 응답에 오류가 없고 잠금 내용이 그대로인지 본다. 끝난 뒤 미해결 실행이면 `providerLoginRecoveryRequired`인 것은 그대로다.
+- **실제 시험**(`scripts/m5-multiproject-real-run.cjs`, 개발 앱 데이터, 실행 전 ps로 다른 Elsecrew 앱 없음 확인, 시험 프로젝트는 끝에 삭제, 자기 PID 외 종료 없음)
+  - 최종(`~/Documents/elsecrew-ade-multiproject-2026-11-26/pr-b/real/real-run.json`): Claude 2개(1~1000) + Codex 2개(1~300) 동시 시작 → 4개 모두 성공, 폴링 최고 동시 4, Claude 두 실행 51초·Codex 두 실행 303초 겹침. 4개가 도는 중에 Claude 로그인 확인 `connected`, 두 공급자 모델 목록 5·10개. 끝난 뒤 두 연결 유지, Claude 확인 `connected`.
+  - Codex만(`pr-b/real-codex`): 두 실행 274초 겹침, 둘 다 성공.
+  - 토큰 갱신 충돌: 관찰하지 못했다. 다만 시험 동안 토큰 만료가 오지 않아 갱신 경쟁 자체가 일어났는지는 확인하지 못했다.
+  - 미해결 1건: 수정 전 4개 혼합 시험(Codex 1~1000)에서 Codex 하나가 60초에 실패했고 원인 기록을 남기지 못했다. 이후 같은 조건 재현에서는 실패가 없었다(Codex 1~1000은 10분 넘게 걸려 시험 시간 초과, 1~300은 약 290초).
+- **겹침**: PR #17(큰 줄 처리)은 rebase에서 충돌 없음. PR #19(ade-stability, 승인 경로·Codex 권한)와 같은 파일: `agent_runtime.rs`, `agent_runtime/discovery.rs`, `agent_runtime/native.rs`, `provider_claude_session.rs`, `provider_preflight_session.rs`, `provider_profile.rs`, `docs/history.md`, `src/locales/{ko,en}.ts`, `src/m5/styles.css`.
+- **검증**
+  - `cargo test -p elsecrew-sidecar`: 단위 945 통과. 통합 `stdio_process` 2건(`parallel_agent_streams` 4개 동시 fixture 실행)이 새 기본 상한 3에 걸려 실패했다. 시험이 상한을 4로 정하고 시작하게 고친 뒤 16건 통과.
+  - `npm test` 1012/1012, `pnpm build`, `pnpm m5:capture`(다크·라이트 36화면, 대비 실패 0, `36-run-limits` 캡처 추가).
+  - 네이티브 스모크 `m5:smoke:multiproject` PASS(25·재시작 10 확인).
+  - 캡처: `~/Documents/elsecrew-ade-multiproject-2026-11-26/pr-b/{smoke/{light,dark},native,real,real-codex}`.
+  - PR #20 열 때 `feature/ade`에 PR #19가 머지돼 충돌(`docs/history.md`만)이 났다. `feature/ade`를 병합(03e98c91)하고 다시 확인했다. `cargo test --workspace` core 267·protocol 75·sidecar 954·통합 16 실패 0, `npm test` 1015/1015, `m5:check:history` 통과. CI(03e98c91) macOS·Windows·website·GitGuardian 통과.
+- **다음 할 일**: 실행 시작을 엔진 처리 스레드 밖으로 옮기기(지금은 시작마다 13~18초 동안 다른 요청도 기다림). Codex 혼합 실패 1건 재현 시 원인 확인. Windows는 실행 경로가 비활성이라 미검증.
+
 ### 2026-11-27 · by Claude Opus 5.5 (claude-opus-5-5) — PR #19 재검토(B1 미해소·중요 3) 마지막 라운드 (`orca/ade-d3-bigwrite`)
 재검토 `~/Documents/elsecrew-ade-stability-2026-11-26/REVIEW-pr19-2.md`(대상 37f9372d).
 
@@ -363,6 +419,9 @@
   - 초안 보관소(`editor-drafts.ts`)는 이미 보관한 것을 지우지 않는다(PR #18 검토 B2·재확인). 저장은 전부 아니면 무변경이고, 속성 시험이 이를 지킨다. 새 초안이 못 들어가면 그 초안을 보관하지 않고 알린다. 예전의 "오래된 작업부터 지움" 규칙으로 되돌리지 않는다.
   - 폴더 겹침 검사는 그 폴더에 무엇이든 쓰기 전 첫 단계다(빈 폴더·일반 폴더 초기화, 새 작업 폴더). `.git/commondir` 저장소는 등록하지 않는다.
   - 공급자 동시 실행(PR-B): CLI는 같은 설정 폴더의 프로세스끼리 토큰 갱신을 스스로 잠근다(Claude 2.1.328 `.oauth_refresh.lock`, Codex 0.167.2 `auth.lock`, 문자열 근거). sidecar가 직접 하는 Claude 갱신은 그 잠금을 잡지 않으므로, 실행이 살아 있을 때는 하지 않아야 한다.
+  - PR-B(2026-11-27): 잠금은 두 종류다. 배타 `<provider>-login.pending`(로그인·설치·엔진의 Claude 갱신)과 실행마다의 `<provider>-run-<id>.pending`(실행·모델 목록·확인). 아래 "공급자 fence 경합(2026-11-12)"의 "모두 같은 잠금 공유"는 이제 배타 쪽에만 해당한다.
+  - 같은 프로필을 여러 실행이 쓰면 생기는 것: Claude 프로필 `tmp/`의 다른 실행 소켓(실행 잠금에 기록된 살아 있는 프로세스 것만 인정), 목록과 확인 사이에 사라지는 프로필 항목(건너뜀).
+  - 실행 시작은 엔진 단일 스레드에서 하나에 13~18초 걸린다(실측). 그 시간 동안의 시간 제한은 엔진이 막힌 시간을 빼고 세야 한다(확인 결과 25초 넘으면 다시 확인, Claude 초기화 기한은 1초 넘는 틈만큼 늦춤). Codex는 긴 답이 매우 느리다(1~300 단어 약 290초).
 - **실제 앱 시험의 함정(2026-11-26, ADE V)**
   - 앱 전용 로그인은 프로필 안에 있다(Codex `…/m5/codex-profile-v1/auth.json`, Claude는 설정 폴더 경로 해시로 구분된 Keychain 항목). 그래서 임시 `--user-data-dir`로는 실제 실행이 안 된다.
   - 개발 앱 창이 다른 창에 완전히 가려지면 macOS Electron이 `hide`를 보내 미리보기가 숨고, rAF도 멈춘다. CDP 측정 중 "뷰가 안 보임"은 이것부터 의심한다(창을 앞으로 가져오면 다시 보인다).

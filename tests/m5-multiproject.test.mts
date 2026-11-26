@@ -156,3 +156,62 @@ test("the switch keeps drafts before it lets go; the update waits for every proj
   assert.match(source("task-story.tsx"), /onReveal=\{revealStage\}/);
   for (const dict of [ko, en]) for (const key of ["m5.switch.notKept", "m5.editorNotice.draftsNotKept"]) assert.ok(dict[key as keyof typeof dict], key);
 });
+
+// ADE multi-project PR-B (P3′·P4).
+test("the inbox groups every project's tasks: to check, working (or waiting its turn), ready for review", async () => {
+  const { groupInbox, inboxGroup, workingByProject } = await import("../src/m5/task-inbox-model.ts");
+  const item = (chatId: string, projectId: string, state: string, extra: Record<string, boolean> = {}) => ({ chatId, projectId, goal: chatId, state, updatedAt: "2026-11-27T00:00:00Z", waiting: false, working: false, ...extra }) as never;
+  assert.equal(inboxGroup(item("a", "p", "needsAttention")), "attention");
+  assert.equal(inboxGroup(item("a", "p", "recoveryRequired")), "attention");
+  assert.equal(inboxGroup(item("a", "p", "running")), "working");
+  assert.equal(inboxGroup(item("a", "p", "reviewReady")), "review");
+  assert.equal(inboxGroup(item("a", "p", "reviewReady", { waiting: true })), "working", "a follow-up waiting its turn works");
+  const items = [item("a", "p1", "running"), item("b", "p1", "reviewReady"), item("c", "p2", "running", { waiting: true }), item("d", "p2", "needsAttention")];
+  const groups = groupInbox(items);
+  assert.deepEqual([groups.attention.length, groups.working.length, groups.review.length], [1, 2, 1]);
+  // Badges come from the engine's full list of work (PR #20 review I4): a
+  // task at work that the shortened list does not show still counts.
+  const working = [{ projectId: "p1", chatId: "a" }, { projectId: "p2", chatId: "c" }, { projectId: "p4", chatId: "not-in-the-list" }];
+  assert.deepEqual([...workingByProject(working)], [["p1", ["a"]], ["p2", ["c"]], ["p4", ["not-in-the-list"]]]);
+  // The engine's list replaces the project lists' guesses for badges.
+  const tracker = new ProjectActivityTracker(() => now);
+  tracker.reconcileProject("p3", ["stale"]);
+  tracker.reconcileFromEngine(workingByProject(working));
+  assert.deepEqual(tracker.workingProjects().sort(), ["p1", "p2", "p4"]);
+  tracker.dispose();
+  assert.match(source("workbench.tsx"), /reconcileFromEngine\(workingByProject\(result\.workingTasks\)\)/, "badges never read the shortened list");
+});
+
+test("the inbox answer is checked: exact fields, known states, at most 200", async () => {
+  const { validateProjectCatalogResult } = await import("../src/m5/contracts/project-catalog-v1.ts");
+  const input = { action: "taskInbox" as const };
+  const good = { projectId: "project_1", chatId: "chat_1", goal: "goal", state: "running", updatedAt: "2026-11-27T00:00:00Z", waiting: false, working: true };
+  const work = [{ projectId: "project_1", chatId: "chat_1" }];
+  assert.equal((validateProjectCatalogResult({ schemaVersion: 1, action: "taskInbox", items: [good], workingTasks: work }, input) as { items: unknown[] }).items.length, 1);
+  for (const bad of [{ ...good, state: "draft" }, { ...good, extra: 1 }, { ...good, working: "yes" }, { ...good, chatId: "../x" }]) {
+    assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "taskInbox", items: [bad], workingTasks: work }, input), JSON.stringify(bad));
+  }
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "taskInbox", items: Array(201).fill(good), workingTasks: work }, input));
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "taskInbox", items: [good] }, input), "the work list is required");
+  for (const bad of [[{ projectId: "project_1" }], [{ projectId: "project_1", chatId: "../x" }], Array(1001).fill(work[0])]) {
+    assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "taskInbox", items: [good], workingTasks: bad }, input));
+  }
+});
+
+test("a team over its agent's limit shows 'waiting its turn', not a failure", async () => {
+  const { stageCells: cells, waitingTurn, TURN_WAIT_PREFIX } = await import("../src/m5/task-story-model.ts");
+  const status = (text: string, at: number) => ({ kind: "status", text, createdAt: new Date(now + at * 1000).toISOString() });
+  const done = run("r1", "coordinator", "succeeded", 0);
+  assert.equal(waitingTurn([status(`${TURN_WAIT_PREFIX}. 다른 작업들이 Claude를 쓰고 있어요.`, 700)], [done]), true);
+  assert.equal(waitingTurn([status(`${TURN_WAIT_PREFIX}.`, -900)], [done]), false, "an older wait than the last run");
+  assert.equal(waitingTurn([status(`${TURN_WAIT_PREFIX}.`, 700)], [run("r2", "coding", "running", 0)]), false, "a run works");
+  assert.equal(waitingTurn([status("팀 작업을 이어가고 있어요.", 700)], [done]), false);
+  assert.equal(cells([done], { working: true, now, waiting: true }).cells.at(-1)?.kind, "waiting");
+  assert.equal(cells([], { working: true, now, waiting: true }).cells.at(-1)?.kind, "waiting");
+  // The engine's notice and the screen's prefix are one sentence.
+  const engine = readFileSync(new URL("../crates/elsecrew-sidecar/src/orchestration_dispatch.rs", import.meta.url), "utf8");
+  assert.ok(engine.includes(`pub(crate) const TURN_WAIT_NOTICE: &str = "${TURN_WAIT_PREFIX}";`));
+  assert.match(source("chat-state.ts"), /\/waits its turn\/\.test\(/);
+  assert.match(source("task-story.tsx"), /waiting=\{working && waitingTurn\(chat\.messages, chat\.agentRuns\)\}/);
+  for (const dict of [ko, en]) for (const key of ["m5.stage.waiting", "m5.chatNotice.waitingTurn", "m5.inbox.title", "m5.inbox.waiting"]) assert.ok(dict[key as keyof typeof dict], key);
+});

@@ -71,6 +71,14 @@ export class ProjectActivityTracker {
     if (this.#listed.delete(chatId)) this.#emit();
   }
 
+  /** The engine's list of every project's tasks at work (the task inbox):
+   * it replaces what the project lists said, for every project. */
+  reconcileFromEngine(working: ReadonlyMap<string, readonly string[]>): void {
+    this.#listed.clear();
+    for (const [projectId, chats] of working) for (const chatId of chats) this.#listed.set(chatId, projectId);
+    this.#emit();
+  }
+
   /** A project's own list, just read: these of its tasks are at work. */
   reconcileProject(projectId: string, workingChatIds: readonly string[]): void {
     const working = new Set(workingChatIds);

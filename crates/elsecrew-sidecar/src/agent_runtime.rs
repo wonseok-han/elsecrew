@@ -94,6 +94,10 @@ pub(crate) enum FakeScenario {
     /// multi-project P2′: other tasks' writes go on meanwhile).
     #[cfg_attr(not(test), allow(dead_code))]
     BusyWriter,
+    /// A read-only member (a coordinator) that works for about three seconds
+    /// (ADE multi-project P3′: another team waits its turn meanwhile).
+    #[cfg_attr(not(test), allow(dead_code))]
+    BusyReader,
     #[cfg_attr(not(test), allow(dead_code))]
     NoOutput,
     #[cfg_attr(not(test), allow(dead_code))]
@@ -565,6 +569,20 @@ impl AgentRuntime {
             chats.extend(self.failed_starts.values().map(|failed| failed.chat_id().to_owned()));
         }
         Some(chats)
+    }
+
+    /// Runs of one provider started, starting or settling (ADE multi-project P3′).
+    pub(crate) fn live_runs_of(&self, runtime: &str) -> usize {
+        #[allow(unused_mut)]
+        let mut count = self.active.values().filter(|run| run.profile.runtime == runtime).count();
+        #[cfg(target_os = "macos")]
+        {
+            count += self.native.values().filter(|run| run.runtime() == runtime).count();
+            if runtime == "claude-code" {
+                count += self.pending_claude_starts.len();
+            }
+        }
+        count
     }
 
     pub(crate) fn owned_run_ids(&self) -> Vec<String> {
@@ -4648,6 +4666,7 @@ fn scenario_name(value: FakeScenario) -> &'static str {
         FakeScenario::OrchestratorDelegatePlanning => "orchestrator-delegate-planning",
         FakeScenario::OrchestratorPlanner => "orchestrator-planner",
         FakeScenario::BusyWriter => "busy-writer",
+        FakeScenario::BusyReader => "busy-reader",
         FakeScenario::NoOutput => "no-output",
         FakeScenario::FinalDelayed => "final-delayed",
         FakeScenario::CancelClean => "cancel-clean",
@@ -4755,6 +4774,7 @@ pub(crate) fn run_agent_fixture_launcher(scenario: &str) -> Result<(), SidecarEr
         "orchestrator-delegate-planning",
         "orchestrator-planner",
         "busy-writer",
+        "busy-reader",
         "no-output",
         "final-delayed",
         "cancel-clean",
@@ -4871,7 +4891,7 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
         "handshake-version-mismatch" => handshake["claude_code_version"] = json!("2.1.242"),
         "handshake-model-mismatch" => handshake["model"] = json!("claude-unknown"),
         "handshake-cwd-mismatch" => handshake["cwd"] = json!("/not/managed"),
-        "clean-read-only" | "paced-long-stream-read-only" | "orchestrator-delegate" | "orchestrator-delegate-custom" | "orchestrator-final" | "orchestrator-delegate-planning" | "orchestrator-planner" | "handshake-permission-mismatch" => handshake["permissionMode"] = json!("readOnly"),
+        "clean-read-only" | "busy-reader" | "paced-long-stream-read-only" | "orchestrator-delegate" | "orchestrator-delegate-custom" | "orchestrator-final" | "orchestrator-delegate-planning" | "orchestrator-planner" | "handshake-permission-mismatch" => handshake["permissionMode"] = json!("readOnly"),
         "handshake-tools-mismatch" => handshake["tools"] = json!(["Read"]),
         "handshake-mcp-mismatch" => handshake["mcp_servers"] = json!(["unsafe"]),
         "handshake-plugins-mismatch" => handshake["plugins"] = json!(["unsafe"]),
@@ -4888,6 +4908,11 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
         return Ok(());
     }
     match scenario {
+        "busy-reader" => {
+            thread::sleep(Duration::from_millis(3000));
+            println!("{}", json!({"type":"final","text":"Read for a while."}));
+            println!("{}", json!({"type":"terminal","outcome":"succeeded"}));
+        }
         "busy-writer" => {
             for round in 1..=200 {
                 std::fs::write(cwd.join("busy.txt"), format!("round {round}\n"))
