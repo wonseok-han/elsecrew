@@ -6,6 +6,7 @@ import { TaskDispositionStore } from "../src/m5/task-disposition.ts";
 import { countMarkdownNodes, MARKDOWN_MAX_NODES, parseMarkdownWithLimits, tooLargeToDraw } from "../src/m5/markdown.ts";
 import { noticesForChat } from "../src/m5/approval-display.ts";
 import { taskPhase } from "../src/m5/task-status.ts";
+import { workbenchSource } from "./m5-workbench-source.mts";
 
 const task = { chatId: "chat_copy", updatedAt: "2026-11-26T03:00:00Z" };
 const receipt = { applied: false, pending: 2, total: 2 };
@@ -32,7 +33,7 @@ test("copy task: two reads in a row (apply pressed, changes reloaded) never drop
   const firstEver = failStandingRead(startStandingRead(null, task, 9), { ...task, generation: 9, kind: "copy" }, 9);
   assert.equal(standingView(firstEver, task).kind, "copy");
   // The apply panel is mounted on the kind, not on a read that is in flight.
-  const workbench = readFileSync(new URL("../src/m5/workbench.tsx", import.meta.url), "utf8");
+  const workbench = workbenchSource();
   assert.ok(workbench.includes('!phaseIsWorking(activePhase) && view.kind === "copy" && <ApplyLatest'));
   assert.ok(workbench.includes('!phaseIsWorking(activePhase) && view.kind === "git" && <ChangesMergeStatus'));
   assert.ok(workbench.includes("kind: readKind"), "a read whose apply part failed passes the kind it learnt");
@@ -54,7 +55,7 @@ test("#4: the open task's failed read reaches the list, and switching away never
   assert.deepEqual(asked, ["chat_merged"]);
   // ...and the row says "check failed", not the older "merged".
   assert.equal(store.failed(listed), true);
-  const workbench = readFileSync(new URL("../src/m5/workbench.tsx", import.meta.url), "utf8");
+  const workbench = workbenchSource();
   assert.ok(workbench.includes("if (chat.activeChat && view.failed) dispositions.reportFailed(chat.activeChat);"));
   assert.ok(workbench.includes('readFailed ? t("m5.task.readFailed")'));
   // Checking again clears it once a read succeeds.
@@ -106,7 +107,7 @@ test("a late 'answer not taken' from a task left behind never shows in another c
   // Every notice the card sends names its own task, and the conversation filters on it.
   const card = readFileSync(new URL("../src/m5/approval-card.tsx", import.meta.url), "utf8");
   assert.equal((card.match(/chatId: identity\.chatId/g) ?? []).length, 3);
-  const workbench = readFileSync(new URL("../src/m5/workbench.tsx", import.meta.url), "utf8");
+  const workbench = workbenchSource();
   assert.ok(workbench.includes("const mine = noticesForChat(items, timelineChat.current);"));
   assert.ok(workbench.includes("noticesForChat(withdrawnAtEnd, chat.activeChat?.chatId ?? null).map(item =>"));
 });

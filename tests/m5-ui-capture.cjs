@@ -102,13 +102,13 @@ app.whenReady().then(async () => {
   await wait("document.querySelector('.monaco-editor .view-lines')?.textContent.length > 0");
   await capture(window, 'product-editor');
 
-  await window.webContents.executeJavaScript("[...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent.startsWith('변경') && b.getClientRects().length).click()");
+  await window.webContents.executeJavaScript("document.querySelector('[data-testid=right-tab-changes]').click()");
   await wait("document.querySelector('.m5-change-row')?.getClientRects().length");
   await window.webContents.executeJavaScript("document.querySelector('.m5-change-row').click()");
   await wait("document.querySelector('.m5-diff-details')");
   await wait("document.querySelector('.m5-project-guide')?.open === false");
   await capture(window, 'product-active-diff');
-  await window.webContents.executeJavaScript("[...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent === '작업' && b.getClientRects().length).click()");
+  await window.webContents.executeJavaScript("document.querySelector('[data-testid=layout-left]').scrollIntoView()");
   await window.webContents.executeJavaScript("document.querySelector('.m5-chat-chip').click()");
   await wait("document.querySelector('.m5-timeline') && !document.querySelector('.m5-refresh').disabled");
   await wait("document.querySelector('.m5-project-guide')?.open === false");
@@ -133,12 +133,12 @@ app.whenReady().then(async () => {
   })()`);
   await wait("document.querySelector('main').lang === 'en'");
   window.setContentSize(960, 640);
-  await wait("document.querySelector('.m5-dock').getBoundingClientRect().height > 200");
+  await wait("document.querySelector('[data-testid=task-layout]').getBoundingClientRect().height > 200");
   await window.webContents.executeJavaScript(`(() => {
     if (document.documentElement.scrollWidth > innerWidth) throw new Error('English workbench overflows horizontally');
     const toggle = document.querySelector('.m5-management-toggle');
     if (!toggle.getClientRects().length) throw new Error('connection access missing');
-    for (const tabs of document.querySelectorAll('.m5-dock-group-tabs')) {
+    for (const tabs of document.querySelectorAll('.m5-layout-tabs')) {
       if (!tabs.getClientRects().length) continue;
       const bounds = tabs.getBoundingClientRect();
       for (const button of tabs.querySelectorAll('button')) {

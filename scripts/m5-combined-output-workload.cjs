@@ -48,7 +48,7 @@ async function mount(run, userData, chat) {
   const {probeLargeProject} = await import('./m5-packaged-large-project-probe.mjs');
   const {probeLargeDiff} = await import('./m5-packaged-diff-probe.mjs');
   await run(`(() => {
-    const tab = [...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => ['파일','Files'].includes(b.textContent.trim()));
+    const tab = document.querySelector('[data-testid=right-tab-files]');
     if (tab) tab.click();
   })()`);
   const readyBy = Date.now() + 65000;

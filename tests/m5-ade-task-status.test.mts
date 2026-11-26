@@ -128,6 +128,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import * as taskStatus from "../src/m5/task-status.ts";
 import * as catalog from "../src/m5/contracts/project-catalog-v1.ts";
 import * as confirmation from "../src/m5/merge-confirmation.ts";
+import { workbenchSource } from "./m5-workbench-source.mts";
 
 /** Renders ApplyLatest with fixed hook state; effects run in order (once). */
 function renderApplyLatest(states: unknown[], props: Record<string, unknown>) {
@@ -207,7 +208,7 @@ test("a failed standing read never leaves the result bar locked, nor hides behin
 });
 
 test("the open task's standing is read apart from the result bar, and again when its changes change (N2)", () => {
-  const source = readFileSync(new URL("../src/m5/workbench.tsx", import.meta.url), "utf8");
+  const source = workbenchSource();
   const reader = source.slice(source.indexOf("// Reading the open task's standing runs on its own"), source.indexOf("const dispositionKnown = standingRead"));
   assert.ok(reader.includes("inspectChatMerge") && reader.includes("inspectChatApply"), "reads both standings itself");
   assert.match(reader, /\[chat\.activeChat\?\.chatId, chat\.activeChat\?\.updatedAt, activeWorking, chat\.switching, admissionReady, diffRevision, standingNonce\]/, "re-reads on task, its version, changes or 'look again'");
@@ -259,7 +260,7 @@ test("the open task's merge and apply standings are read again when its changes 
     const source = readFileSync(new URL(file, import.meta.url), "utf8");
     assert.match(source, /useEffect\(\(\) => \{ void inspect\(\); return \(\) => \{ generation\.current\+\+; \}; \}, \[inspect, [^\]]*revision\]\);/, file);
   }
-  const workbench = readFileSync(new URL("../src/m5/workbench.tsx", import.meta.url), "utf8");
+  const workbench = workbenchSource();
   assert.ok(workbench.includes("revision={`${diffRevision}`}"));
   assert.ok(workbench.includes("dispositions.revalidate()"));
 });
@@ -324,7 +325,7 @@ test("a finished task whose re-check fails or never answers shows 'check failed'
   later.request([task]);
   await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(later.failed(task), false);
-  const source = readFileSync(new URL("../src/m5/workbench.tsx", import.meta.url), "utf8");
+  const source = workbenchSource();
   assert.ok(source.includes('readFailed ? t("m5.task.readFailed")'), "the list says so");
   assert.ok(source.includes("onClick={recheckStandings}"), "a check-again button in the list");
   assert.ok(source.includes("onRefresh={() => { recheckStandings();"), "refreshing the changes checks the list again");

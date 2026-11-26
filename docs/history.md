@@ -2,6 +2,39 @@
 
 최신 macOS visible combined 측정(2026-11-10, HEAD1ebf8383)은 유휴441.58MiB만400MiB 기준을 초과했다. 최대746.36MiB·잔류증분33.34MiB·입력29.7ms·main/renderer long-task35.653/55ms는 이번 단회에서 기준 이내다. 진단 FAIL이며 전체G6/10회 반복 통과는 아니다. 시험 앱/임시 프로젝트는 정리했다. 유휴 예산은 사용자 승인으로512MiB로 변경했으며 과거 FAIL은 보존한다. Windows 후보076e23a0 추가CI 승인·실제 재검증 및 최종 통합·출시 검증이 남는다.
 
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #5 독립 검토(차단 0, 중요 5, 경미 4) 반영
+검토서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr5.md`(대상 e3d0adff). 판단은 새 순수 함수 `src/m5/task-view-model.ts`에 두고, 지적마다 리뷰 재현을 `tests/m5-pr5-review.test.mts`로 막았다.
+
+- **#1 권한 카드 접근**: 시트·서랍이 열린 동안 대기 요청이 있으면(`approvalCovered`) 둘 위에 "팀이 허락을 기다리고 있어요 · 허락 요청 보기"가 뜬다. 누르면 시트·서랍을 닫고 **카드 자체**에 초점을 둔다(첫 버튼이 '실행 취소'라 버튼에 두지 않음). 열린 작업의 권한 알림도 같은 동작.
+- **#2 결과 상자 경로**: 도움말 '반영·복구 안내 보기'는 `focusResultBox`(시트 닫기 + 패널/서랍 열기 `revealResults`)로 간다. 변경·파일 요청도 ⌘\로 숨긴 패널을 먼저 연다.
+- **#3 복구 대기**: "팀이 일하는 중"은 phase가 아니라 채팅 상태(`teamWorking`: draft·preparing·running·stopping·applying)로 읽는다. 복구·확인 필요 작업은 단계 막대에 '다음 담당을 정하는 중'이 없고, 결과 상자는 "확인이 필요한 일이 먼저예요"(`resultBoxMode` attention), 변경 탭은 "확인이 필요한 일이 있어 아직 넣을 수 없어요".
+- **#4 읽기 실패**: 변경 탭 줄(`changesLine`)은 읽는 중엔 자리표시, 실패면 결과 상자와 같은 "확인하지 못했어요 · 다시 확인". 선택된 목록 줄도 `activeReadFailed`를 따른다.
+- **#5 Esc·초점**: Esc 한 번은 가장 안쪽만 닫는다(`escapeTarget`; 메뉴를 닫은 처리기가 `preventDefault`). 서랍은 열 때 연 버튼을 기억해 열린 탭에 초점, 닫으면 돌려준다. 시트 첫 초점은 고른 파일 → 첫 파일 → 열린 편집기 탭 순.
+- **경미**: 사용자 역할은 총괄 색(1번)을 받지 않고(해시 2~8), 총괄은 역할 ID로 ★ 표식, 이름은 `<bdi>`/FSI 격리. 레일 점마다 자기 묶음만 열고 aria-expanded·초점·Esc·바깥 클릭 처리. 좁은 시트에도 파일 선택 상자. 파일 끝 빈 줄 제거(`git diff --check origin/feature/ade` 통과).
+- **실제 앱 확인**(개발 앱 9377, 캡처 `~/Documents/elsecrew-ade-layout-2026-11-26/review-pr5/`):
+  - #5: 키 입력만으로 변경 줄 Enter → 시트(초점: 시트의 그 파일) → 비교 옵션 Enter → Esc 1회 메뉴만 닫힘·시트 유지 → Esc 2회 시트 닫힘·초점 변경 줄 복귀. 1024px 상단 '변경' 토글 Enter → 서랍(초점: 변경 탭) → Esc → 닫힘·초점 토글 복귀(`k0~k5`, `keyboard.json`).
+  - #1: 권한 요청을 띄우려고 todo-test-1125a의 '명령 실행 허용'을 잠시 끄고 검증 담당에게 `pwd`(1회차는 `ls`)를 시켰다. 시트를 연 채 요청이 오자 시트 위 안내 → 누르면 시트 닫힘·카드에 초점, 1024px 서랍에서도 같음(`a1~a4`, `approval.json`). 두 요청 모두 거절했고 권한은 원래대로(파일·명령 허용) 되돌렸다. 시험 작업 2건(답변 완료)이 목록에 남는다. 앞선 시도(`open -a Safari`)는 샌드박스가 승인 요청 없이 막아 카드가 뜨지 않았다.
+  - 함정: 개발 앱 실행 중 `workbench.tsx`를 고치면 전체 재로딩으로 홈 화면이 되고, 실행이 끝난 뒤에야 프로젝트를 다시 열 수 있었다(11-25 기록과 같음).
+- **렌더러 스모크**: 낡은 기대값을 고쳤다 — 추천 기본 모델은 미저장 변경이 아님(D12), 스모크 창 1280×768, 파일 탭 열기, 가짜 bridge의 권한 응답 `recorded`, 자동 재개된 작업의 작업 공간 트리·rescan. 그래도 "Monaco mount and reveal"에서 멈춘다: 11-17 자동 재개 이후 열리는 것이 작업 공간인데 가짜 bridge가 작업 공간 파일 읽기·저장·비교(`readWorkspaceFile` 등)를 `unexpected`로 둔다("파일을 열지 못했어요"). 기준 커밋 d221832f에 같은 가짜 bridge 수정만 얹어도 같은 단계·같은 문구로 멈춰 레이아웃과 무관한 기존 결함으로 판단했다. 남은 시나리오(~600줄)를 작업 공간 방식으로 옮기는 것은 별도 작업.
+- **테스트**: `npm test` 819 통과(새 6개), `pnpm build` 통과. Rust 변경 없음. `feature/ade`(PR #4 Keychain 수정, cd5f502d)를 병합해 충돌(이 파일)을 풀었고, 병합 뒤 `npm test` 812(PR #4가 서명 스크립트 시험을 지움)·`pnpm build` 통과.
+- **history 롤오버**: 병합 뒤 507줄이지만 워크로그가 모두 11-26 같은 날짜라 날짜 경계로 옮길 엔트리가 없고(오늘 것을 통째로 옮기지 않음), 고정 섹션만 약 350줄이다. 다음 날짜 엔트리가 생길 때 11-26 묶음을 아카이브로 옮긴다.
+
+### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — ADE 1차-나 레이아웃 L0~L6 구현과 실제 앱 측정 (`orca/ade-layout`, 기준 feature/ade d221832f)
+설계: `docs/proposals/m5-ade-layout-plan.md`(A 뼈대 + 오른쪽 첫 탭 C + 왼쪽 B, 편집기·diff는 넓은 검토 시트, 합치기·반영은 결과 상자 한 곳, 단계 막대는 실제 실행 순서, L6 포함, 토큰 2단+다크). 현재 구조는 `docs/architecture.md` "작업 레이아웃"·"색·간격 토큰" 절. 묶음마다 로컬 커밋(8b33dbd1 L0 → b35dd315 L1 기계적 이동 → a4dfed9c L1 → c689f5b0 L2 → b26cddcd L3 → 7a43243b L4a → 824f191b L4b+R5 → 46632c89 L5 → 080a2af5 L6 → 9d894a74 측정 중 수정).
+
+- **한 일**: 토큰 2단 구조(`--m5-*`는 별칭, 화면 변화 0). dock 삭제 → `TaskLayout` 3영역 + 시트, `panelRequestTarget`로 편집기 요청 해석(컨트롤러 불변). 시트(바뀐 내용/편집기, 파일 목록, Esc·초점 복귀·`inert`, 미저장 ●). 상태 묶음 목록(`task-list-model.ts`, 1차-가 `taskGroup`). 머리말·단계 막대(`stageCells`: 일하는 동안 지금 칸·"다음 · 총괄이 정해요"·실행 사이 "결과를 읽고 다음 담당을 정하는 중"). 팀원 카드(`storyItems`: 실행 + 같은 runId 보고 = 카드 하나), 확인 요청 입력칸 위 고정(portal), 역할 색·이름 통일(R5 `role-colors.ts`, 팀에 없는 역할 표시). 오른쪽 탭 4개(미리보기는 자리만)·결과 상자(합치기·반영·버리기 유일 위치, `ApplyLatest`는 1차-가 방식대로 계속 마운트)·기록 탭(실행 세부·출력·개발용 fixture). 1100 미만 레일·서랍·상단 토글, 820 미만 92% 서랍, 단축키 ⌘1/2/3/\\/N.
+- **1차-가 규칙 유지**: 판단은 `task-status.ts`·`standing-read.ts` 등 그대로 읽기만 했다. 1차-가 규칙을 지키는 소스 검사는 `tests/m5-workbench-source.mts`로 작업대의 나뉜 파일(workbench·task-story·editor-surface·task-list·member-card·result-box …)을 함께 읽게 바꿨다(검사 내용은 그대로).
+- **실제 앱 측정**(개발 앱 `--remote-debugging-port=9377`, CDP 뷰포트 에뮬레이션, todo-test-1125a): 캡처·JSON `~/Documents/elsecrew-ade-layout-2026-11-26/screenshots/`.
+  - 1280×768: 가운데 열 640×699px(폭 50%), 이야기 스크롤 634px(`width-1280`, `state-*`). 1680: 896×876. 960·1024는 레일+서랍으로 가운데 904·968px.
+  - 10초 무설명 구간: 실제 작업 1건(README 한 줄, 총괄→개발→총괄, Claude Code, 188초 + 감시 시작 전 약 30초)을 1초마다 기록 — 일하는 동안 '지금' 칸이 비어 있던 최장 0초(`run-monitor.json`). 개발 끝 → 다음 총괄 실행이 목록에 나타나기까지 약 55초를 "결과를 읽고 다음 담당을 정하는 중"이 채웠다(sidecar 쪽 지연은 미조사, 11-25 approval/getChat 지연과 같은 계열로 추정).
+  - 상태 일치 5상태: 진행 중(목록 running·머리말 running·결과 상자 "끝나면 여기서 넣을 수 있어요"), 검토 대기·합침·반영함·합친 뒤 또 바뀜에서 목록·머리말·결과 상자·변경 탭 줄이 모두 같은 상태(`state-*.json`). 합친 뒤 또 바뀜은 합친 작업의 작업 공간 README에 한 줄을 넣고 저장해 만들었고, 측정 뒤 그 파일을 마지막 기록으로 되돌려 "합침"으로 돌아온 것을 확인했다(Monaco 실행 취소는 CDP 키로 안 먹어 작업 공간 파일만 `git checkout -- README.md`).
+  - 마크다운 원문: 이야기 영역 보고·메시지에서 제목·굵게·표·코드 울타리·인용·링크 원문 0건(모든 측정).
+  - 글자 세로 깨짐: 960·1024·1100·1280·1680·640에서 0건, 가로 넘침 없음(`width-*.json`). 처음 측정에서 960의 레일에 전체 목록이 그려져 "작업 상태 다시 확인"이 세로로 깨진 것은 측정 도구가 가려진 창에서 프레임을 그리지 않아 resize가 늦게 온 탓이었다. 앱은 CSS와 같은 media query로도 구간을 갱신하게 했다(9d894a74).
+  - 측정 중 고친 결함: 머리말·카드 머리에 옛 `.m5-timeline header` 규칙이 먹어 목표가 상태 옆으로 붙던 것(`run-running.png`는 수정 전 캡처), 작업이 끝나도 오른쪽이 '파일'에 머물던 것.
+  - 시험 데이터: 새 작업 "README.md 맨 아래에 '마지막 점검…'"은 검토 대기로 남겨 두었다. 합치기는 시험 폴더의 기존 미기록 변경(PR #3 사본 반영 시험이 남긴 README 한 줄)과 겹쳐 제품이 막았고, 그 폴더는 건드리지 않았다.
+- **테스트**: `npm test` 813 통과(새 `m5-task-layout`·`m5-task-story` 시험 포함, 옛 `m5-dock-layout` 삭제), `pnpm build` 통과. Rust 변경 없음(cargo는 개발 sidecar 빌드만). `tests/m5-renderer-mount-smoke.mts`는 기준선(d221832f)과 같은 지점("default suggestion remains an unsaved edit", 역할 설정)에서 실패 — 1차-가 D12로 자동 추천 모델을 미저장으로 세지 않게 된 뒤 낡은 기대값이며 이번 범위(RoleSettings 불변) 밖이다. 그 뒤의 레이아웃 검사는 새 `data-testid`로 바꿔 두었지만 실행으로 확인하지 못했다.
+- **남은 것**: 실제 권한 요청이 이번 실행에서 나오지 않아 입력칸 위 고정 확인 카드는 실제 화면으로 못 봤다(코드상 portal). 실행별 바뀐 파일 칩은 renderer에 실행별 파일 목록이 없어 넣지 않았다(2차 F4와 함께 sidecar 계약). 미리보기 탭은 자리만(P3, `data-preview-covered`로 겹침 상태 노출). 렌더러 스모크의 역할 설정 기대값 갱신(역할 편집 R0~R2 작업에서). Codex 검토 반영.
+- **PR**: https://github.com/wonseok-han/elsecrew/pull/5 (`--base feature/ade`). CI(b6948350) macOS·Windows·website·GitGuardian 모두 통과.
 ### 2026-11-26 · by Claude Opus 5.5 (claude-opus-5-5) — PR #4 독립 검토(차단 0·중요 4·경미 2) 전부 반영
 검토 문서: `~/Documents/elsecrew-ade-phase1a-2026-11-25/REVIEW-pr4.md`(검토 HEAD d677a1e3). 같은 브랜치 `orca/ade-keychain-fix`에서 한 번에 고쳤다. 바뀐 곳은 `provider_claude_refresh.rs`, 호출부 `provider_claude_login.rs`, `Cargo.toml`, `docs/architecture.md`다.
 
@@ -128,6 +161,9 @@ Orca 조정자 작업. 기준은 feature/ade 907eeba4, 브랜치 `orca/ade-keych
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/elsecrew-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **작업 레이아웃의 규칙은 순수 함수에 있다(2026-11-26, ADE 1차-나)**: 창 폭 구간·오른쪽 폭·편집기 요청 해석·기본 탭·미리보기 겹침은 `task-layout-model.ts`, 목록 묶음은 `task-list-model.ts`, 단계 칸·카드 결합은 `task-story-model.ts`, 역할 색은 `role-colors.ts`. 화면 컴포넌트는 그 값을 그리기만 한다. 합치기·반영·버리기 버튼은 결과 상자(`result-box.tsx`) 한 곳에만 둔다 — 다른 곳은 "결과 상자에서 넣기" 링크로 가리킨다.
+  - 측정 함정: CDP `Emulation.setDeviceMetricsOverride`로 폭을 바꾸면 CSS는 즉시 바뀌지만, 창이 가려져 있으면 프레임이 없어 `resize`·`matchMedia` 처리기가 다음 캡처 때 돈다. 재기 전에 `Page.captureScreenshot`으로 프레임을 한두 번 그리게 한다.
+  - 소스 문자열 검사는 `tests/m5-workbench-source.mts`(작업대의 나뉜 파일 목록)를 읽는다. 블록을 새 파일로 옮기면 그 목록에 파일을 더한다.
 - **ADE 1차-나가 지켜야 할 1차-가 규칙(2026-11-26)**: 판단 로직은 `task-status.ts`(목록 묶음 `taskGroup`, 결과 막대 `resultBarView`, 변경 줄 `changesStatus`, `standingRead`)·`settings-draft.ts`·`markdown*.ts`·`approval-display.ts`·`merge-confirmation.ts`·`last-session.ts`에 있고 `workbench.tsx`는 값만 연결한다. 위치를 옮길 때도 지킬 것:
   - 열린 작업의 합침·반영 상태 읽기는 결과 막대와 별개로 작업대가 한다(작업·변경 목록·"다시 확인"마다). 막대가 숨어도(답변 완료) 읽기는 계속돼야 한다.
   - 합치기 확인은 연 순간의 head·base tip을 고정해 그대로 보내고, 이후 읽기에서 바뀌면 확인을 닫는다. 사본 반영 확인도 열린 동안 반영 내역이 바뀌면 닫는다. 반영 확인 요청은 파일 수가 돌아올 때까지 기다린다.

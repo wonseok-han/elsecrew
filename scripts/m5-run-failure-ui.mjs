@@ -16,7 +16,7 @@ fs.writeFileSync(path.join(fixture,'index.html'), '<div id="root"></div><script 
 fs.writeFileSync(path.join(fixture,'entry.tsx'), `
 import React from 'react'; import {createRoot} from 'react-dom/client';
 import {I18nProvider} from '${repo}/src/i18n.tsx';
-import {AgentRuns} from '${repo}/src/m5/workbench.tsx';
+import {AgentRuns} from '${repo}/src/m5/task-story.tsx';
 import '${repo}/src/m5/styles.css';
 localStorage.setItem('elsecrew.lang','ko');
 const run={schemaVersion:1,runId:'agent_run_fixture',chatId:'chat_fixture',taskId:'task_fixture',projectId:'project_fixture',worktreeId:'worktree_fixture',workspaceIdentity:'workspace_fixture',source:'actualAgent',state:'failed',stage:'implementing',terminationOutcome:'cleanExit',createdAt:'2026-11-12T03:15:00Z',updatedAt:'2026-11-12T03:15:20Z',selectedProfile:{roleId:'coding',runtime:'claude-code',modelSelector:'fixture',permission:'workspaceWrite',reasoningEffort:null},capabilityFingerprint:'sha256:'+'a'.repeat(64),failure:{stage:'approvalDelivery',code:'approvalUnavailable'}};
