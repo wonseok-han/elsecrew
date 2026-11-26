@@ -847,6 +847,81 @@ mod tests {
         }
     }
 
+    /// D2 (2026-11-26): a fake Claude reads ten large images (each tool result
+    /// a ~148 KB stream-json line) and then answers. The session must keep
+    /// going; before the fix the first such line ended it (`sessionChannel`).
+    fn large_image_session(admit: bool) -> (Result<Vec<&'static str>, SidecarError>, bool) {
+        use elsecrew_core::provider::vendor_observation::claude_events::Projection;
+        use elsecrew_core::provider::vendor_observation::claude_session::Event;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let storage = Storage::open(&root.join("elsecrew.sqlite3")).unwrap();
+        let profile = ClaudeProfileBinding::from_storage(&storage).unwrap();
+        let home = profile.revalidate().unwrap();
+        let mut process = LoginProcess::reserve_claude_owned(profile).unwrap();
+        let id = format!("init_{}", process.connection_id().simple());
+        let init = serde_json::json!({"type":"control_response","response":{"subtype":"success","request_id":id,"response":{}}});
+        let reported = serde_json::json!({"type":"system","subtype":"init","uuid":"init","session_id":"s","cwd":"/snapshot","model":"model","permissionMode":"default","tools":["Read"],"mcp_servers":[],"skills":[],"plugins":[]});
+        let answer = serde_json::json!({"type":"assistant","uuid":"a1","session_id":"s","parent_tool_use_id":null,
+            "message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"I looked at the screenshots."}]}});
+        let script = format!(
+            "IFS= read -r first || exit 1\nprintf '%s\\n' '{init}' '{reported}'\n\
+             i=0; while [ $i -lt 10 ]; do \
+               printf '{{\"type\":\"user\",\"uuid\":\"u%s\",\"session_id\":\"s\",\"parent_tool_use_id\":null,\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_%s\",\"content\":[{{\"type\":\"image\",\"source\":{{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"' $i $i; \
+               head -c 151552 /dev/zero | tr '\\0' A; printf '\"}}}}]}}]}}}}\\n'; i=$((i+1)); done\n\
+             printf '%s\\n' '{answer}'\nIFS= read -r last\n"
+        );
+        process.launch_gated_command(Path::new("/bin/sh"), &["-c".as_ref(), script.as_ref()], &home).unwrap();
+        let cancel = AtomicBool::new(false);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let result = (|| -> Result<Vec<&'static str>, SidecarError> {
+            let mut session = ControlInitialization::start(&mut process, &cancel)?;
+            while !session.advance(&mut process, &cancel, &mut |_| Ok(()))? {
+                if Instant::now() >= deadline { return Err(failure()); }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let mut channel = session.into_session_channel(
+                &elsecrew_core::provider::vendor_observation::claude_init::ExpectedInit {
+                    cwd: "/snapshot", model: "model", permission_mode: "default", tools: &["Read"],
+                },
+            )?;
+            if admit {
+                process.admit_session_lines(elsecrew_core::provider::oversized_line::OversizedLinePolicy::ClaudeStreamJson)?;
+            }
+            let mut seen = Vec::new();
+            while seen.len() < 12 {
+                if Instant::now() >= deadline { return Err(failure()); }
+                match channel.advance(&mut process, &cancel, &mut |_| Ok(()))? {
+                    Some(Event::Initialized { .. }) => seen.push("init"),
+                    Some(Event::Output(Projection::ToolResults(_))) => seen.push("tool result"),
+                    Some(Event::Output(Projection::Assistant { .. })) => seen.push("answer"),
+                    Some(_) => seen.push("other"),
+                    None => std::thread::sleep(Duration::from_millis(2)),
+                }
+            }
+            Ok(seen)
+        })();
+        let cleanup = process.finish();
+        (result, cleanup.is_ok() && process.closure_evidence().is_some_and(|e| e.confirmed()))
+    }
+
+    #[test]
+    fn a_session_keeps_going_after_reading_ten_large_images() {
+        let (seen, cleaned) = large_image_session(true);
+        let mut expected = vec!["init"];
+        expected.extend(["tool result"; 10]);
+        expected.push("answer");
+        assert_eq!(seen.unwrap(), expected);
+        assert!(cleaned);
+    }
+
+    #[test]
+    fn without_session_lines_the_first_large_image_ends_the_session() {
+        let (seen, cleaned) = large_image_session(false);
+        assert!(seen.is_err(), "the strict line bound still applies outside a session");
+        assert!(cleaned);
+    }
+
     #[test]
     fn permission_denial_round_trips_through_owned_transport() {
         use elsecrew_core::provider::vendor_observation::claude_approval::Observation;

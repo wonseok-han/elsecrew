@@ -121,6 +121,9 @@ impl ClaudeStart {
             let output_budget = output_budget_from_projection(&projection)?;
             self.channel = Some(self.initialization.take().ok_or_else(failure)?
                 .into_profile_channel(&expected, effort)?.with_output_budget(output_budget)?);
+            // The handshake is done: a tool result over the line bound (a large
+            // image) is shortened, not fatal (2026-11-26 D2).
+            running.admit_session_lines(elsecrew_core::provider::oversized_line::OversizedLinePolicy::ClaudeStreamJson)?;
             stage = "owner preparation";
             let mut owner = OwnedClaudeRun::take_prepared(storage, projects, reservation, process, &mut self.channel)?;
             // After this point every failure must restore ownership, not drop it.

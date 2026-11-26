@@ -3,6 +3,10 @@
 //! This is not a spawn API or authorization to send arbitrary provider methods.
 use crate::SidecarError;
 use elsecrew_core::provider::vendor_observation::codex_login::LoginRequest;
+use elsecrew_core::provider::oversized_line::{
+    reduce_oversized_line, OversizedLinePolicy, PROVIDER_SESSION_LINE_RAW_MAX_BYTES,
+    PROVIDER_SESSION_STREAM_MAX_BYTES,
+};
 use elsecrew_core::provider::{
     BoundedObservation, PROVIDER_OBSERVATION_LINE_MAX_BYTES, PROVIDER_OBSERVATION_TOTAL_MAX_BYTES,
 };
@@ -45,6 +49,11 @@ pub(crate) struct LoginIo {
     code_sent: bool,
     failed: bool,
     outgoing: Option<(Vec<u8>, usize)>,
+    /// Set once the connection carries an agent session (see `admit_session_lines`).
+    session_lines: Option<OversizedLinePolicy>,
+    /// How much of `pending` is already known to hold no newline, so a long
+    /// line is scanned once rather than again on every read.
+    scanned: usize,
 }
 
 /// Only requests already admitted by the corresponding protocol state machine.
@@ -153,6 +162,24 @@ impl LoginIo {
         self.queue_bytes(frame.bytes())
     }
 
+    /// An agent session (not a login or preflight exchange) may send lines over
+    /// the observation line bound when the agent reads a large image or file
+    /// (2026-11-26 D2). From here on, such a line is read up to
+    /// `PROVIDER_SESSION_LINE_RAW_MAX_BYTES` and shortened by `policy` before it
+    /// is observed; frames that must be read exactly still fail when oversized.
+    /// The connection totals rise to the session budget. One-way: never reset.
+    pub(crate) fn admit_session_lines(&mut self, policy: OversizedLinePolicy) -> Result<(), SidecarError> {
+        if self.failed || self.session_lines.is_some_and(|current| current != policy) {
+            return Err(failure());
+        }
+        self.session_lines = Some(policy);
+        Ok(())
+    }
+
+    fn stream_limit(&self) -> usize {
+        if self.session_lines.is_some() { PROVIDER_SESSION_STREAM_MAX_BYTES } else { PROVIDER_OBSERVATION_TOTAL_MAX_BYTES }
+    }
+
     fn queue_bytes(&mut self, bytes: &[u8]) -> Result<(), SidecarError> {
         if self.failed
             || self.outgoing.is_some()
@@ -160,7 +187,7 @@ impl LoginIo {
             || bytes.len() > PROVIDER_OBSERVATION_LINE_MAX_BYTES
             || bytes.last() != Some(&b'\n')
             || bytes[..bytes.len() - 1].contains(&b'\n')
-            || self.sent + bytes.len() > PROVIDER_OBSERVATION_TOTAL_MAX_BYTES
+            || self.sent + bytes.len() > self.stream_limit()
         {
             self.failed = true;
             self.outgoing = None;
@@ -261,6 +288,8 @@ impl LoginIo {
             code_sent: false,
             failed: false,
             outgoing: None,
+            session_lines: None,
+            scanned: 0,
         })
     }
 
@@ -419,6 +448,7 @@ impl LoginIo {
         if result.is_err() {
             self.failed = true;
             self.pending.clear();
+            self.scanned = 0;
         }
         result
     }
@@ -451,6 +481,7 @@ impl LoginIo {
         if result.is_err() {
             self.failed = true;
             self.pending.clear();
+            self.scanned = 0;
         }
         result
     }
@@ -471,24 +502,40 @@ impl LoginIo {
             if cancel.load(Ordering::Acquire) {
                 return Err(failure());
             }
-            if let Some(end) = self.pending.iter().position(|byte| *byte == b'\n') {
-                if end == 0 || end > PROVIDER_OBSERVATION_LINE_MAX_BYTES {
+            let line_limit = if self.session_lines.is_some() {
+                PROVIDER_SESSION_LINE_RAW_MAX_BYTES
+            } else {
+                PROVIDER_OBSERVATION_LINE_MAX_BYTES
+            };
+            let found = self.pending[self.scanned..].iter().position(|byte| *byte == b'\n');
+            if let Some(offset) = found {
+                let end = self.scanned + offset;
+                self.scanned = 0;
+                if end == 0 || end > line_limit {
                     return Err(failure());
                 }
                 let bytes: Vec<u8> = self.pending.drain(..=end).collect();
+                if end > PROVIDER_OBSERVATION_LINE_MAX_BYTES {
+                    let policy = self.session_lines.ok_or_else(failure)?;
+                    return reduce_oversized_line(&bytes, policy).map(Some).map_err(|_| failure());
+                }
                 return BoundedObservation::new(bytes)
                     .map(Some)
                     .map_err(|_| failure());
             }
-            if self.pending.len() > PROVIDER_OBSERVATION_LINE_MAX_BYTES {
+            self.scanned = self.pending.len();
+            if self.pending.len() > line_limit {
                 return Err(failure());
             }
-            let mut chunk = [0u8; 4096];
-            match self.output.read(&mut chunk) {
+            // A session reads larger pieces so a multi-megabyte line arrives in
+            // a few polls; other exchanges keep the small read.
+            let mut chunk = [0u8; 64 * 1024];
+            let size = if self.session_lines.is_some() { chunk.len() } else { 4096 };
+            match self.output.read(&mut chunk[..size]) {
                 Ok(0) => return Err(failure()), // including partial-frame EOF
                 Ok(count) => {
                     self.received += count;
-                    if self.received > PROVIDER_OBSERVATION_TOTAL_MAX_BYTES {
+                    if self.received > self.stream_limit() {
                         return Err(failure());
                     }
                     self.pending.extend_from_slice(&chunk[..count]);
@@ -680,6 +727,66 @@ mod tests {
                 &mut || Ok(())
             )
             .is_err());
+    }
+
+    /// D2 (2026-11-26): ten image tool results of ~148 KB each, as Claude
+    /// prints them after reading a 55 KB PNG, then an ordinary line.
+    fn large_image_lines_script(lines: usize) -> String {
+        format!(
+            "i=0; while [ $i -lt {lines} ]; do \
+               printf '{{\"type\":\"user\",\"uuid\":\"u%s\",\"message\":{{\"content\":[{{\"type\":\"image\",\"source\":{{\"data\":\"' $i; \
+               head -c 151552 /dev/zero | tr '\\0' A; printf '\"}}}}]}}}}\\n'; i=$((i+1)); done; \
+             printf '{{\"type\":\"user\",\"uuid\":\"last\"}}\\n'; read hold"
+        )
+    }
+
+    #[test]
+    fn a_session_reads_many_large_image_lines_and_keeps_going() {
+        let cancel = AtomicBool::new(false);
+        let mut child = fixture(Some(&large_image_lines_script(10)));
+        let mut io = LoginIo::attach(&mut child.0).unwrap();
+        io.admit_session_lines(OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        let mut projection = elsecrew_core::provider::vendor_observation::claude_events::SessionProjection::new("s").unwrap();
+        for index in 0..10 {
+            let frame = io.receive(Duration::from_secs(5), &cancel).unwrap();
+            assert!(frame.byte_len() < 2048, "line {index} was shortened to {} bytes", frame.byte_len());
+            // Still a well-formed frame the session parser accepts and ignores.
+            assert!(projection.project(&frame).is_ok(), "line {index}");
+        }
+        let last = io.receive(Duration::from_secs(5), &cancel).unwrap();
+        assert_eq!(last.byte_len(), b"{\"type\":\"user\",\"uuid\":\"last\"}\n".len());
+        assert!(io.received > PROVIDER_OBSERVATION_TOTAL_MAX_BYTES, "past the old 1 MiB connection total");
+        assert!(!io.failed);
+    }
+
+    #[test]
+    fn without_session_mode_a_large_image_line_still_fails() {
+        let cancel = AtomicBool::new(false);
+        let mut child = fixture(Some(&large_image_lines_script(1)));
+        let mut io = LoginIo::attach(&mut child.0).unwrap();
+        assert!(io.receive(Duration::from_secs(5), &cancel).is_err());
+        assert!(io.failed);
+    }
+
+    #[test]
+    fn a_session_still_fails_on_an_oversized_permission_request_or_runaway_line() {
+        let cancel = AtomicBool::new(false);
+        let script = "printf '{\"type\":\"control_request\",\"request_id\":\"r\",\"request\":{\"input\":{\"content\":\"'; \
+            head -c 200000 /dev/zero | tr '\\0' x; printf '\"}}}\\n'; read hold";
+        let mut child = fixture(Some(script));
+        let mut io = LoginIo::attach(&mut child.0).unwrap();
+        io.admit_session_lines(OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        assert!(io.receive(Duration::from_secs(5), &cancel).is_err(), "a permission request is never shortened");
+        // An unterminated line past the session raw bound fails instead of growing.
+        let mut io = LoginIo::attach(&mut fixture(Some("head -c 9000000 /dev/zero | tr '\\0' x; read hold")).0).unwrap();
+        io.admit_session_lines(OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        assert!(io.receive(Duration::from_secs(10), &cancel).is_err());
+        assert!(io.pending.is_empty());
+        // The mode cannot be switched to another vendor's policy.
+        let mut child = fixture(None);
+        let mut io = LoginIo::attach(&mut child.0).unwrap();
+        io.admit_session_lines(OversizedLinePolicy::ClaudeStreamJson).unwrap();
+        assert!(io.admit_session_lines(OversizedLinePolicy::CodexAppServer).is_err());
     }
 
     #[test]

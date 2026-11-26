@@ -222,6 +222,11 @@ impl TextSession {
                         let mut turn = flow.into_text_turn(&self.text)
                             .and_then(|turn| turn.with_output_budget(self.output_budget))
                             .map_err(|_| failure())?;
+                        // The thread is matched: a notification over the line bound
+                        // (a large command output or image) is shortened (2026-11-26 D2).
+                        process.admit_session_lines(
+                            elsecrew_core::provider::oversized_line::OversizedLinePolicy::CodexAppServer,
+                        )?;
                         self.outgoing.push_back(NativeFrame::Turn(
                             turn.take_frame().map_err(|_| failure())?,
                         ));

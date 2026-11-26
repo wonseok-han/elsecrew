@@ -171,7 +171,7 @@ fn detail_text(value: Option<&serde_json::Value>) -> Option<String> {
 
 /// Added and removed lines of one patch. An added file's diff is its
 /// content, a deleted file's is what it held, an update is a unified diff.
-fn diff_counts(kind: &str, diff: &str) -> (u64, u64) {
+pub(crate) fn diff_counts(kind: &str, diff: &str) -> (u64, u64) {
     let unified = diff.starts_with("@@") || diff.starts_with("---") || diff.starts_with("diff ");
     let lines = diff.lines().count() as u64;
     match kind {
