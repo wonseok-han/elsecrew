@@ -779,7 +779,6 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
 .m5-review-pagination { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 11px; }
 .m5-review-pagination p { flex: 1 1 100%; margin: 0; }
 
-
 /* Settings shares the workbench's surface, border and typography tokens. */
 .m5-settings-open > :not(.m5-app-settings):not(.m5-app-statusbar) { display: none !important; }
 .m5-workbench.m5-settings-open { padding: 0 0 28px; }
@@ -961,7 +960,6 @@ button { font-weight: 500; transition: background-color 120ms, border-color 120m
   max-height: calc(100vh - 16px); overflow: auto;
 }
 /* A collapsed sidebar leaves only its reopen control, never a miniature list. */
- 
 
 /* Shared editor and comparison chrome: compact controls, uninterrupted code surface. */
 .m5-editor, .m5-editor-surface { background: var(--m5-bg); }
